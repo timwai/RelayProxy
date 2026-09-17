@@ -1,0 +1,48 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/dist/
+/relay-server
+/relay-agent
+/relay-server.exe
+/relay-agent.exe
+
+# Generated Windows PE resources (rebuilt by scripts/gen-brand.*)
+**/resource_windows.syso
+**/resource_windows.syso.bak
+*.syso
+
+# Test artifacts
+*.test
+*.out
+
+# Databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+relayproxy.db
+
+# Certificates and keys
+*.crt
+*.key
+*.pem
+
+# Logs
+*.log
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local agent/task metadata
+.superpowers/
+.workbuddy/
+.smoke/

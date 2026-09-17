@@ -1,0 +1,42 @@
+name: RelayProxyMac
+options:
+  deploymentTarget:
+    macOS: "13.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
+targets:
+  RelayProxyMacHost:
+    type: application
+    platform: macOS
+    sources: [RelayProxyMacHost]
+    info:
+      path: RelayProxyMacHost/Info.plist
+    entitlements:
+      path: RelayProxyMacHost/RelayProxyMacHost.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.relayproxy.agent.extension-manager
+        CODE_SIGN_STYLE: Manual
+    dependencies:
+      - target: RelayProxyNetworkExtension
+        embed: true
+        codeSign: true
+      - sdk: NetworkExtension.framework
+      - sdk: SystemExtensions.framework
+  RelayProxyNetworkExtension:
+    type: system-extension
+    platform: macOS
+    sources: [RelayProxyNetworkExtension]
+    info:
+      path: RelayProxyNetworkExtension/Info.plist
+    entitlements:
+      path: RelayProxyNetworkExtension/RelayProxyNetworkExtension.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.relayproxy.agent.network-extension
+        CODE_SIGN_STYLE: Manual
+    dependencies:
+      - sdk: NetworkExtension.framework
+      - sdk: Network.framework

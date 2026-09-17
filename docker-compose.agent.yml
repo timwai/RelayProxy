@@ -1,0 +1,41 @@
+services:
+  relay-agent:
+    # The image only supplies CA certificates and iptables/nft compatibility
+    # tools. The Agent program and YAML remain on the host mounts below.
+    build:
+      context: ./docker/agent
+      dockerfile: Dockerfile
+    image: relayproxy-agent-runtime:bookworm
+    container_name: relay-agent
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    pid: host
+    stop_grace_period: 15s
+
+    # NFQUEUE/firewall management and marked raw-packet reinjection.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+    # Pairing writes the device ID/token back to /data/relay-agent.yaml.
+    # Keep the container user able to write the host bind mount.
+    user: "0:0"
+
+    volumes:
+      # Mount directories instead of a single config file. Pairing saves the
+      # YAML through a temporary file followed by an atomic rename.
+      - ./bin:/opt/relayproxy/bin:ro
+      - ./config:/data:rw
+
+    # xtables takes its process lock under /run.
+    tmpfs:
+      - /run:size=4m,mode=0755
+
+    # Common arguments stay in the entrypoint; `docker compose run ...` can
+    # append one-time pairing arguments without dropping --config.
+    entrypoint:
+      - /opt/relayproxy/bin/relay-agent
+      - --no-gui
+      - --config
+      - /data/relay-agent.yaml

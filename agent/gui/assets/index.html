@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RelayProxy 代理客户端</title>
+  <!-- Inlined into a <script> tag at window creation so the app is fully offline. -->
+  <script src="tailwind.js"></script>
+  <script>
+    // The Play build defaults to darkMode:'media', which ties every `dark:`
+    // utility to the OS setting and leaves the in-app theme toggle inert.
+    tailwind.config = { darkMode: 'class' };
+  </script>
+  <style>
+    :root { --ease: cubic-bezier(0.2, 0, 0, 1); }
+    body {
+      font-family: 'Segoe UI Variable Text', 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Microsoft YaHei UI', sans-serif;
+      user-select: none;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      font-size: 13px;
+    }
+    #log-console, #log-console * { user-select: text; -webkit-user-select: text; cursor: text; }
+    .mono {
+      font-family: 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
+      font-variant-ligatures: none;
+    }
+
+    /* Scoped transitions: a global `* { transition }` repaints the whole
+       document on every theme toggle and visibly stutters in WebView2. */
+    button, input, select, .nav-item, .card, .toggle-track {
+      transition: background-color .15s var(--ease), border-color .15s var(--ease),
+                  color .15s var(--ease), opacity .15s var(--ease);
+    }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(140,140,140,.28); border-radius: 9999px;
+      border: 2px solid transparent; background-clip: content-box;
+    }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(140,140,140,.5); background-clip: content-box; }
+
+    input:focus, select:focus { outline: none; }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid #10b981; outline-offset: 1px;
+    }
+
+    /* Single icon scale for the whole app: one stroke weight, one grid. */
+    .icon { width: 16px; height: 16px; stroke-width: 1.6; flex-shrink: 0; }
+    .icon-sm { width: 14px; height: 14px; stroke-width: 1.7; flex-shrink: 0; }
+    .icon-lg { width: 18px; height: 18px; stroke-width: 1.5; flex-shrink: 0; }
+
+    @keyframes live-ring {
+      0%   { box-shadow: 0 0 0 0 rgba(16,185,129,.55); }
+      70%  { box-shadow: 0 0 0 5px rgba(16,185,129,0); }
+      100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+    }
+    .live-dot { animation: live-ring 2.4s var(--ease) infinite; }
+
+    .nav-item:hover { background: rgb(226 232 240 / .7); }
+    .dark .nav-item:hover { background: rgb(30 41 59 / .6); }
+    .nav-item[aria-selected="true"] {
+      background: rgb(236 253 245);
+      color: rgb(4 120 87);
+      box-shadow: inset 2px 0 0 rgb(16 185 129);
+    }
+    .nav-item[aria-selected="true"]:hover { background: rgb(209 250 229); }
+    .dark .nav-item[aria-selected="true"] {
+      background: rgb(6 78 59 / .35);
+      color: rgb(110 231 183);
+      box-shadow: inset 2px 0 0 rgb(52 211 153);
+    }
+    .dark .nav-item[aria-selected="true"]:hover { background: rgb(6 78 59 / .5); }
+
+    .btn-primary { background: #059669; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #047857; }
+    .btn-primary:active:not(:disabled) { background: #065f46; }
+    .btn-primary:disabled { background: rgb(226 232 240); color: rgb(148 163 184); cursor: default; }
+    .dark .btn-primary:disabled { background: rgb(51 65 85); color: rgb(100 116 139); }
+
+    .toggle-track { background: rgb(203 213 225); }
+    .dark .toggle-track { background: rgb(51 65 85); }
+    .peer:checked ~ .toggle-track { background: #059669; }
+    .toggle-knob { transition: transform .18s var(--ease); }
+    .peer:checked ~ .toggle-track .toggle-knob { transform: translateX(16px); }
+    .peer:disabled ~ .toggle-track { opacity: .5; }
+
+    /* Panel visibility is owned here rather than by the `hidden` utility, so a
+       pane that needs display:flex does not depend on Tailwind's utility order. */
+    .tab-pane { display: none; }
+    .tab-pane:not(.hidden) { display: block; }
+    .tab-pane.tab-flex:not(.hidden) { display: flex; }
+
+    .config-page-heading { display:flex;justify-content:space-between;align-items:center;gap:16px;padding:3px 0 2px; }
+    .config-page-heading h1 { font-size:19px;font-weight:650;letter-spacing:-.4px; }
+    .config-eyebrow { font-size:9px;letter-spacing:2px;color:#8c9aaa;margin-bottom:5px;font-weight:600; }
+    .config-pill { font-size:10px;border:1px solid #dce7e4;color:#508779;background:#f3faf7;padding:4px 9px;border-radius:6px;white-space:nowrap; }
+    .dark .config-pill { background:#13352d;color:#93baae;border-color:#24473d; }
+    .config-card { padding:21px;border:1px solid #e0e6ec;background:#fff;border-radius:11px; }
+    .dark .config-card { border-color:#293342;background:#17202ddd; }
+    .config-section-title { display:flex;gap:12px;align-items:center;margin-bottom:18px; }
+    .config-section-title>span { display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:#ecf6f1;color:#479681;font:12px Consolas,monospace; }
+    .dark .config-section-title>span { background:#163b31;color:#7cc2aa; }
+    .config-section-title h2 { font-size:13px;font-weight:600; }
+    .config-section-title p { font-size:11px;color:#8a96a8;margin-top:3px; }
+    .config-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;margin-bottom:14px; }
+    .config-field { margin-bottom:14px; }
+    .config-grid .config-field { margin-bottom:0; }
+    .config-field label { display:block;font-size:12px;font-weight:550;color:#536478;margin-bottom:7px; }
+    .dark .config-field label { color:#acbbc9; }
+    .config-field input,.config-field select,.config-field textarea,.config-inline input { width:100%;font-size:12px;padding:9px 10px;border:1px solid #cfd9e2;border-radius:6px;background:#f9fbfc;color:inherit; }
+    .dark .config-field input,.dark .config-field select,.dark .config-field textarea,.dark .config-inline input { background:#101722;border-color:#344052; }
+    .config-field textarea { resize:vertical; }
+    .config-field small { display:block;font-size:10px;line-height:1.65;color:#8b98a7;margin-top:6px; }
+    .config-help { font-size:11px;color:#8594a5;line-height:1.7;margin-top:6px; }
+    .dark .config-help { color:#8396aa; }
+    .config-info { padding:10px 14px;border:1px solid #d7e8e7;border-radius:7px;background:#ecf7f4;color:#568778;font-size:11px;line-height:1.7; }
+    .dark .config-info { background:#102e28;border-color:#21443a;color:#8ab7a7; }
+    .config-advanced summary { cursor:pointer;font-size:12px;font-weight:550;color:#65778c;user-select:none; }
+    .dark .config-advanced summary { color:#a6b6c7; }
+    .config-advanced summary>span { float:right;font-size:10px;font-weight:400;color:#91a0b0;margin-left:14px; }
+    .config-advanced[open]>summary { margin-bottom:17px; }
+    .config-card>.config-advanced { border-top:1px solid #e5ebf1;margin-top:19px;padding-top:16px; }
+    .dark .config-card>.config-advanced { border-color:#2c3643; }
+    .config-inline,.config-actions,.config-actions>div,.config-preset-row { display:flex;gap:10px;align-items:center;flex-wrap:wrap; }
+    .config-inline input { flex:1;min-width:180px; }
+    .config-actions { justify-content:space-between;padding:3px 0;gap:14px; }
+    .config-small,.config-secondary { border-radius:6px;padding:8px 12px;font-size:12px;font-weight:550;white-space:nowrap; }
+    .config-secondary { border:1px solid #d5dee7;color:#64778b;background:#ffffff60; }
+    .config-secondary:hover { background:#e9eff5; }
+    .dark .config-secondary { background:#1d283766;border-color:#344254;color:#a7b9ca; }
+    .dark .config-secondary:hover { background:#2d3a4c; }
+    .config-secondary:disabled { opacity:.4;cursor:default; }
+    .config-address { display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:7px;background:#eef6f4;margin-top:4px;flex-wrap:wrap; }
+    .dark .config-address { background:#122b27; }
+    .config-address>span { font-size:10px;color:#759388; }
+    .config-address code { flex:1;font-size:11px;color:#309077;overflow-wrap:anywhere;user-select:text; }
+    .dark .config-address code { color:#7bc5ac; }
+    .config-address button { padding:3px 8px;font-size:10px; }
+    .config-check { display:flex;gap:8px;align-items:center;font-size:12px; }
+    .config-card input[type=checkbox],.config-check input[type=checkbox] { accent-color:#059669;width:16px;height:16px;flex-shrink:0; }
+    .config-switch-line { display:flex;justify-content:space-between;align-items:center;margin-bottom:20px; }
+    .config-switch-line strong { font-size:13px;font-weight:600; }
+    .config-switch-line small { display:block;color:#8798a9;font-size:11px;margin-top:4px; }
+    .config-permissions { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px; }
+    .config-permissions label { display:flex;align-items:center;gap:10px;padding:14px 10px;border:1px solid #e1e8ee;border-radius:8px; }
+    .dark .config-permissions label { border-color:#2f3d4d; }
+    .config-permissions strong { display:block;font-size:12px;font-weight:550; }
+    .config-permissions small { display:block;font-size:10px;color:#8b9bad;margin-top:3px; }
+    .config-preset-row { padding:2px 0 1px;font-size:11px;color:#8295a5; }
+    .config-preset-row button { padding:5px 10px;font-size:11px; }
+    .config-preset-row small { flex:1;font-size:10px; }
+    .config-text-button { font-size:11px;color:#139777; }
+    .config-inline-action { float:right;margin-top:-24px; }
+    .draft-bar { flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;font-size:11px;background:#e7f6ef;border-bottom:1px solid #c5e6d8;color:#37765d; }
+    .dark .draft-bar { background:#102d24;border-color:#234c3b;color:#9ac8b0; }
+    .draft-bar>div { display:flex;gap:8px; }
+    .draft-bar button { padding:5px 9px;font-size:10px; }
+    .config-form-error { padding:10px 24px;color:#ba4f58;background:#fff0f2;border-bottom:1px solid #f0ced3;font-size:12px;flex-shrink:0; }
+    .dark .config-form-error { color:#ec949a;background:#381d27;border-color:#533039; }
+    .nav-item[data-dirty=true]:after { content:"";width:5px;height:5px;border-radius:50%;background:#dca749;margin-left:auto; }
+    input:disabled,select:disabled,textarea:disabled { opacity:.5;cursor:not-allowed; }
+    [aria-invalid=true] { border-color:#d7626f!important; }
+    .tab-pane { min-height:0;flex:1; }
+    @media(max-width:850px) { .config-permissions { grid-template-columns:1fr; }.config-permissions small { display:inline;margin-left:8px; }.config-grid{gap:14px;}.config-card{padding:17px;}.config-actions{align-items:flex-start;}.config-actions>div{gap:7px;}.config-page-heading h1{font-size:17px;} }
+    @media(max-width:650px) { nav.w-\[196px\] { width:156px; }.config-grid{grid-template-columns:1fr;}.config-advanced summary>span{float:none;display:block;margin:4px 0 0;}.config-page-heading{align-items:flex-start;flex-direction:column;}.draft-bar{padding:8px 12px;flex-wrap:wrap;}.config-inline-action{float:none;margin:0 0 6px;}.tab-pane{padding-left:16px;padding-right:16px;} }
+    @media(prefers-reduced-motion:reduce) { .live-dot{animation:none;} }
+  </style>
+</head>
+<body class="bg-slate-100 dark:bg-[#0d1117] text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">
+
+  <!-- Unified icon sprite. Every icon in the app comes from here: one 24x24 grid,
+       one stroke weight, currentColor so it follows the theme. -->
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+    <defs>
+      <g id="i-gauge" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 14l4.5-4.5"/><circle cx="12" cy="14" r="1.2" fill="currentColor" stroke="none"/>
+        <path d="M4 19a9 9 0 1116 0"/>
+      </g>
+      <g id="i-plug" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 01-6 6 6 6 0 01-6-6z"/><path d="M12 17v4"/>
+      </g>
+      <g id="i-globe" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M3 12h18"/>
+        <path d="M12 3c2.4 2.4 3.6 5.4 3.6 9s-1.2 6.6-3.6 9c-2.4-2.4-3.6-5.4-3.6-9S9.6 5.4 12 3z"/>
+      </g>
+      <g id="i-shield" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3l8 3v6c0 4.4-3.2 8.3-8 9.3-4.8-1-8-4.9-8-9.3V6z"/>
+        <path d="M9 12l2 2 4-4"/>
+      </g>
+      <g id="i-link" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 13a4 4 0 005.7 0l2.3-2.3a4 4 0 00-5.7-5.7l-1 1"/>
+        <path d="M14 11a4 4 0 00-5.7 0L6 13.3a4 4 0 005.7 5.7l1-1"/>
+      </g>
+      <g id="i-terminal" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>
+      </g>
+      <g id="i-settings" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M12 2.6v3M12 18.4v3M21.4 12h-3M5.6 12h-3M18.6 5.4l-2.1 2.1M7.5 16.5l-2.1 2.1M18.6 18.6l-2.1-2.1M7.5 7.5L5.4 5.4"/>
+      </g>
+      <g id="i-copy" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="12" height="12" rx="2"/>
+        <path d="M5 15H4a1 1 0 01-1-1V4a1 1 0 011-1h10a1 1 0 011 1v1"/>
+      </g>
+      <g id="i-refresh" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 11a8 8 0 10-2.3 6.3M20 5v6h-6"/>
+      </g>
+      <g id="i-check" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 12l5 5L20 6"/>
+      </g>
+      <g id="i-alert" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 4l9 16H3z"/><path d="M12 10v4"/><circle cx="12" cy="17.4" r=".9" fill="currentColor" stroke="none"/>
+      </g>
+      <g id="i-bolt" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13 2L4 14h7l-1 8 9-12h-7z"/>
+      </g>
+      <g id="i-clock" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>
+      </g>
+      <g id="i-stream" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 17l4-4 3 3 5-5 3 3 3-3"/><path d="M3 7h4M3 12h2"/>
+      </g>
+      <g id="i-server" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/>
+        <path d="M7 7.5h.01M7 16.5h.01"/>
+      </g>
+      <g id="i-folder" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+      </g>
+      <g id="i-power" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 3v8"/><path d="M7.5 6.5a7 7 0 109 0"/>
+      </g>
+      <g id="i-key" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="8" cy="15" r="3.2"/><path d="M10.4 12.8L19 4.2M16.5 6.8l2 2M14 9.2l2 2"/>
+      </g>
+      <g id="i-eye" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="2.6"/>
+      </g>
+      <g id="i-trash" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7h16M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2M6 7l1 13a1 1 0 001 1h8a1 1 0 001-1l1-13"/>
+      </g>
+    </defs>
+  </svg>
+
+  <div class="flex-1 flex min-h-0">
+
+    <!-- Sidebar -->
+    <nav class="w-[196px] bg-white/60 dark:bg-[#131a26]/70 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0">
+      <div class="flex items-center gap-2.5 px-3 py-3 border-b border-slate-200 dark:border-slate-800">
+        <img src="icon.png" alt="RelayProxy" class="w-8 h-8 shrink-0" draggable="false">
+        <div class="min-w-0">
+          <div class="text-[13px] font-semibold text-slate-900 dark:text-white leading-tight">RelayProxy</div>
+          <div class="mono text-[11px] text-emerald-600 dark:text-emerald-400 leading-tight" id="brand-version">v-</div>
+        </div>
+      </div>
+
+      <div class="flex-1 p-2 space-y-0.5">
+        <button onclick="switchTab('home')" id="tab-btn-home" aria-selected="true"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-gauge"/></svg><span>运行概览</span>
+        </button>
+        <button onclick="switchTab('connection')" id="tab-btn-connection" aria-selected="false" class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg><span>连接与身份</span>
+        </button>
+        <button onclick="switchTab('proxy')" id="tab-btn-proxy" aria-selected="false"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>本地代理</span>
+        </button>
+        <button onclick="switchTab('routing')" id="tab-btn-routing" aria-selected="false"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>路由分流</span>
+        </button>
+        <button onclick="openConnections()" id="open-connections" class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400" title="在独立窗口查看实时连接">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>实时连接 ↗</span>
+        </button>
+        <button onclick="switchTab('exit')" id="tab-btn-exit" aria-selected="false"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-globe"/></svg><span>选择出口</span>
+        </button>
+        <button onclick="switchTab('share')" id="tab-btn-share" aria-selected="false"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-shield"/></svg><span>出口共享</span>
+        </button>
+        <button onclick="switchTab('pair')" id="tab-btn-pair" aria-selected="false"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg><span>服务端审批</span>
+        </button>
+        <button onclick="switchTab('logs')" id="tab-btn-logs" aria-selected="false"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-terminal"/></svg><span>运行日志</span>
+        </button>
+        <button onclick="switchTab('settings')" id="tab-btn-settings" aria-selected="false"
+                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-settings"/></svg><span>程序设置</span>
+        </button>
+      </div>
+
+      <div class="m-2 space-y-2">
+        <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[12px] text-slate-500 dark:text-slate-400">中继隧道</span>
+            <span id="side-tunnel" class="flex items-center gap-1.5 text-[12px] font-medium text-slate-500 dark:text-slate-400">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>未连接
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-[12px] text-slate-500 dark:text-slate-400">往返延时</span>
+            <span id="side-latency" class="mono text-[12px] text-slate-500 dark:text-slate-400">-- ms</span>
+          </div>
+        </div>
+        <button onclick="toggleTheme()" class="w-full px-3 py-1.5 rounded-md text-[12px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-800/60 flex items-center justify-center gap-1.5">
+          <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-bolt"/></svg>
+          <span id="theme-btn-label">浅色界面</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- Workspace -->
+    <main class="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
+
+      <div id="config-state" role="status" class="hidden shrink-0 px-6 py-2 text-[12px] bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 border-b border-amber-300 dark:border-amber-500/30"></div>
+
+      <div id="draft-bar" class="draft-bar hidden" role="status"><span id="draft-summary"></span><div><button onclick="discardAllChanges()" class="config-secondary">放弃全部修改</button><button data-config-write disabled onclick="saveAllChanges()" class="btn-primary config-small">保存全部</button></div></div>
+      <div id="config-form-error" class="config-form-error hidden" role="alert"></div>
+
+      <!-- ============ 概览仪表盘 ============ -->
+      <section id="tab-pane-home" class="tab-pane h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">概览仪表盘</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">中继隧道与本地代理的运行状态。</p>
+          </div>
+          <div class="text-right shrink-0">
+            <div class="text-[12px] text-slate-500 dark:text-slate-400">本机设备</div>
+            <div class="flex items-center gap-1.5 mt-0.5 justify-end">
+              <span id="home-device-id" class="mono text-[13px] font-semibold text-slate-800 dark:text-slate-100">等待连接</span>
+              <button onclick="copyText($('home-device-id').textContent,'设备 ID')" title="复制设备 ID"
+                      class="p-1 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-200/70 dark:hover:bg-slate-700/60">
+                <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-copy"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div id="unpaired-banner" class="hidden flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30">
+          <svg class="icon-lg text-amber-500" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
+          <div class="min-w-0 flex-1">
+            <div class="text-[13px] font-medium text-amber-700 dark:text-amber-300">等待服务端审批</div>
+            <div id="approval-help" class="text-[12px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">客户端会自动提交安装身份，请管理员在服务端控制台批准。</div>
+          </div>
+          <button onclick="switchTab('connection')" class="btn-primary px-3 py-1.5 rounded-md text-[12px] font-semibold shrink-0">配置连接</button>
+        </div>
+
+        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+            <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
+              <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-bolt"/></svg><span>中继隧道</span>
+            </div>
+            <div id="home-tunnel" class="text-[16px] font-semibold mt-1.5 text-slate-400 dark:text-slate-500">未连接</div>
+            <div id="home-transport" class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">传输：-</div>
+          </div>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+            <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
+              <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-clock"/></svg><span>往返延时</span>
+            </div>
+            <div id="home-latency" class="mono text-[16px] font-semibold mt-1.5 text-slate-400 dark:text-slate-500">-- ms</div>
+            <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">心跳往返耗时</div>
+          </div>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+            <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
+              <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-globe"/></svg><span>当前出口节点</span>
+            </div>
+            <div id="home-exit" class="mono text-[14px] font-semibold mt-1.5 text-slate-800 dark:text-slate-100 truncate">未指定</div>
+            <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">流量经该节点转发</div>
+          </div>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+            <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
+              <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>活跃转发流</span>
+            </div>
+            <div id="home-streams" class="text-[16px] font-semibold mt-1.5 text-slate-800 dark:text-slate-100">0</div>
+            <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">正在转发的连接数</div>
+          </div>
+        </div>
+
+        <div>
+          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">本地代理监听</h2>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">SOCKS5</span>
+                <span id="home-socks5" class="mono text-[13px] text-slate-700 dark:text-slate-200 truncate">--</span>
+              </div>
+              <span id="home-socks5-state" class="text-[12px] font-medium text-slate-500 dark:text-slate-400 shrink-0">已停止</span>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-400">HTTP</span>
+                <span id="home-http" class="mono text-[13px] text-slate-700 dark:text-slate-200 truncate">--</span>
+              </div>
+              <span id="home-http-state" class="text-[12px] font-medium text-slate-500 dark:text-slate-400 shrink-0">已停止</span>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-400">Divert</span>
+                <span id="home-tun" class="mono text-[13px] text-slate-700 dark:text-slate-200 truncate">--</span>
+              </div>
+              <span id="home-tun-state" class="text-[12px] font-medium text-slate-500 dark:text-slate-400 shrink-0">已停止</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="rdp-panel">
+          <div class="flex items-center justify-between gap-3 mb-2">
+            <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200">远程桌面（RDP）</h2>
+            <button id="rdp-disconnect" onclick="disconnectRDP()" class="config-secondary hidden">断开</button>
+          </div>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+            <div id="rdp-connection" class="text-[12px] text-slate-500 dark:text-slate-400 mb-2">服务端批准后，这里会显示可连接的目标设备。</div>
+            <div id="rdp-targets" class="space-y-2"></div>
+          </div>
+        </div>
+
+        <div>
+          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">快速开始</h2>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5 space-y-1.5">
+            <div class="text-[12px] text-slate-500 dark:text-slate-400">设置浏览器或终端代理到上面的地址即可开始使用：</div>
+            <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 select-text">curl -x socks5h://<span id="quick-socks5">127.0.0.1:1080</span> https://ipinfo.io</div>
+            <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 select-text">curl -x http://<span id="quick-http">127.0.0.1:8080</span> https://ipinfo.io</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="tab-pane-connection" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div class="config-page-heading"><div><p class="config-eyebrow">CONNECTION</p><h1>连接与身份</h1><p class="config-help">只需填写服务器地址；安装身份会自动生成并安全保存在本机。</p></div><span class="config-pill">连接设置需重启</span></div>
+        <div class="config-card">
+          <div class="config-section-title"><span>01</span><div><h2>服务器与设备</h2><p>服务器填写主机名或 IP；端口在下方单独设置。</p></div></div>
+          <div class="config-grid">
+            <div class="config-field"><label for="cfg-server">中继服务器</label><input id="cfg-server" class="mono" autocomplete="off" placeholder="relay.example.com 或 192.168.1.10"></div>
+            <div class="config-field"><label for="cfg-device-name">本机名称</label><input id="cfg-device-name" autocomplete="off" placeholder="如：办公室电脑"></div>
+          </div>
+          <div class="config-grid">
+            <div class="config-field"><label for="cfg-transport">传输方式</label><select id="cfg-transport"><option value="auto">自动 · 优先 QUIC，失败回退 TLS</option><option value="quic_only">仅 QUIC · 使用 UDP 通道</option><option value="tcp_only">仅 TCP · 适合 UDP 受限网络</option></select></div>
+          </div>
+          <p id="connection-role-hint" class="config-help"></p>
+        </div>
+        <div class="config-card">
+          <div class="config-section-title"><span>02</span><div><h2>连接端口</h2><p>默认 TCP 与 QUIC 均使用 443；通常无需修改。</p></div></div>
+          <div class="config-grid">
+            <div class="config-field"><label for="cfg-quic-port">QUIC 端口 / UDP</label><input id="cfg-quic-port" class="mono" type="number" min="1" max="65535" inputmode="numeric"></div>
+            <div class="config-field"><label for="cfg-tcp-port">TCP 端口</label><input id="cfg-tcp-port" class="mono" type="number" min="1" max="65535" inputmode="numeric"></div>
+          </div>
+          <details class="config-advanced"><summary>隧道加密 <span>高级设置</span></summary><label class="config-check"><input id="cfg-tls-on" type="checkbox"><span>使用 TLS 加密隧道</span></label><p id="connection-tls-hint" class="config-help">独立于管理 HTTP / HTTPS。RDP UDP 需要 TLS + QUIC，且服务端 UDP 端口必须可达。</p></details>
+        </div>
+        <div class="config-actions"><span id="connection-runtime" class="config-help mono"></span><div><button data-config-write disabled onclick="saveServer()" class="btn-primary config-small">保存连接设置</button></div></div>
+      </section>
+
+      <!-- ============ 本地代理服务 ============ -->
+      <section id="tab-pane-proxy" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div>
+          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">本地代理服务</h1>
+          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">设置供浏览器或应用使用的代理地址。修改开关、监听地址和端口后需重启。</p>
+        </div>
+
+        <div class="config-preset-row"><span>监听范围</span><button data-config-write disabled class="config-secondary" onclick="setProxyScope('local')">仅本机</button><button data-config-write disabled class="config-secondary" onclick="setProxyScope('lan')">允许局域网设备</button><small id="proxy-scope-hint"></small></div>
+        <div id="proxy-role-hint" class="config-info hidden"></div>
+        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
+          <div class="p-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <svg class="icon text-emerald-600 dark:text-emerald-400" viewBox="0 0 24 24"><use href="#i-plug"/></svg>
+                <span class="text-[13px] font-semibold text-slate-800 dark:text-slate-100">SOCKS5</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="cfg-socks-on" class="sr-only peer">
+                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
+              </label>
+            </div>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400">支持 TCP CONNECT；使用 socks5h 由出口解析域名。当前不提供 UDP ASSOCIATE。</p>
+            <div class="flex items-end gap-2.5">
+              <div class="w-[150px]">
+                <label for="cfg-socks-listen" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">监听地址</label>
+                <input id="cfg-socks-listen" type="text" class="mono w-full text-[13px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+              </div>
+              <div class="w-[110px]">
+                <label for="cfg-socks-port" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">端口</label>
+                <input id="cfg-socks-port" type="number" min="1" max="65535" inputmode="numeric" class="mono w-full text-[13px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+              </div>
+              <button onclick="copyProxyURL('socks5')" title="复制当前运行的 SOCKS5 代理 URL" class="h-[38px] px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-1.5 text-[12px]">
+                <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-copy"/></svg>复制
+              </button>
+            </div>
+            <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 select-text">curl -x socks5h://<span id="proxy-socks-cmd">127.0.0.1:1080</span> https://ipinfo.io</div>
+          </div>
+
+          <div class="p-4 space-y-3">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <svg class="icon text-sky-600 dark:text-sky-400" viewBox="0 0 24 24"><use href="#i-server"/></svg>
+                <span class="text-[13px] font-semibold text-slate-800 dark:text-slate-100">HTTP 代理</span>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="cfg-http-on" class="sr-only peer">
+                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
+              </label>
+            </div>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400">支持标准 HTTP 代理与 HTTPS CONNECT 隧道。</p>
+            <div class="flex items-end gap-2.5">
+              <div class="w-[150px]">
+                <label for="cfg-http-listen" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">监听地址</label>
+                <input id="cfg-http-listen" type="text" class="mono w-full text-[13px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+              </div>
+              <div class="w-[110px]">
+                <label for="cfg-http-port" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">端口</label>
+                <input id="cfg-http-port" type="number" min="1" max="65535" inputmode="numeric" class="mono w-full text-[13px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+              </div>
+              <button onclick="copyProxyURL('http')" title="复制当前运行的 HTTP 代理 URL" class="h-[38px] px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-1.5 text-[12px]">
+                <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-copy"/></svg>复制
+              </button>
+            </div>
+            <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 select-text">curl -x http://<span id="proxy-http-cmd">127.0.0.1:8080</span> https://ipinfo.io</div>
+          </div>
+
+          <details class="p-4 config-advanced"><summary>系统透明代理 <span id="network-capability-status">正在检查运行条件</span></summary>
+            <label class="config-check"><input type="checkbox" id="cfg-tun-on" disabled><span>启用系统透明代理</span></label>
+            <p id="network-availability" class="config-help"></p><p class="config-help">保存后需重启客户端；进程规则用于新连接。Windows 客户端已内嵌驱动，开启透明代理需管理员权限。</p>
+          </details>
+        </div>
+
+        <div class="flex items-center justify-between gap-3">
+          <span class="text-[12px] text-slate-500 dark:text-slate-400">监听地址与端口在客户端启动时绑定。</span>
+          <button data-config-write disabled onclick="saveProxy()" class="btn-primary px-4 py-2 rounded-md text-[13px] font-semibold">保存代理设置</button>
+        </div>
+            </section>
+
+      <!-- ============ 路由分流规则 ============ -->
+      <section id="tab-pane-routing" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">组合路由规则</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">透明代理、SOCKS5 与 HTTP 共用；第一条命中规则决定动作，新连接生效。</p>
+          </div>
+          <button data-config-write disabled onclick="saveRouting()" class="btn-primary px-4 py-2 rounded-md text-[13px] font-semibold">保存并应用规则</button>
+        </div>
+
+        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
+          <div class="flex items-center gap-6">
+            <div class="flex items-center gap-3">
+              <span class="text-[13px] font-medium text-slate-700 dark:text-slate-200">路由模式</span>
+              <select id="cfg-routing-mode" class="text-[13px] px-3 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+                <option value="rule">按规则分流</option>
+                <option value="global_proxy">全局代理 (全部走隧道)</option>
+                <option value="direct">全局直连 (不走隧道)</option>
+              </select>
+            </div>
+            <div class="flex items-center gap-3">
+              <span class="text-[13px] font-medium text-slate-700 dark:text-slate-200">默认兜底动作</span>
+              <select id="cfg-routing-default" class="text-[13px] px-3 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+                <option value="PROXY">PROXY (走代理)</option>
+                <option value="DIRECT">DIRECT (本地直连)</option>
+                <option value="REJECT">REJECT (阻断连接)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="border-t border-slate-200 dark:border-slate-700/60 pt-4">
+            <div class="flex justify-between items-center mb-3">
+              <h2 class="text-[13px] font-semibold text-slate-800 dark:text-slate-100">匹配规则 · 从上到下执行</h2>
+              <button data-config-write disabled onclick="addRuleRow()" class="px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-[12px] flex items-center gap-1.5">
+                + 添加规则
+              </button>
+            </div>
+            
+            <p class="config-help mb-2">同一栏多个值任选其一，不同栏同时满足；逗号分隔，留空或 * 表示任意。进程可填名称或完整路径，目标可填域名、IPv4/IPv6 或 CIDR 网段。</p>
+            <p class="config-help mb-3">进程名、域名和 IP 均支持前后通配：* 匹配任意长度，? 匹配单个字符。例如 chrome*、*example*、192.168.*、*.1、2001:db8:*。</p>
+            <div class="overflow-x-auto rounded border border-slate-200 dark:border-slate-700/60">
+              <table class="w-full text-left border-collapse" id="routing-rules-table">
+                <thead>
+                  <tr class="bg-slate-50 dark:bg-slate-800/80 text-[12px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60">
+                    <th class="font-medium p-2">启用 / 名称</th>
+                    <th class="font-medium p-2">进程</th>
+                    <th class="font-medium p-2">域名 / IP</th>
+                    <th class="font-medium p-2">目标端口</th>
+                    <th class="font-medium p-2">协议</th>
+                    <th class="font-medium p-2">动作 / 出口</th>
+                    <th class="font-medium p-2 w-16 text-center">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="routing-rules-body" class="divide-y divide-slate-100 dark:divide-slate-800 text-[13px]">
+                  <!-- Rules injected by JS -->
+                </tbody>
+              </table>
+            </div>
+            <p id="routing-mode-hint" class="config-help"></p><p class="text-[12px] text-slate-500 dark:text-slate-400 mt-2">“UDP 必须使用原生数据报”仅影响 PROXY UDP；勾选后会拒绝 TLS 隧道和不支持数据报的旧出口，不回退到可靠流传输。</p>
+          </div>
+        </div>
+        <details id="network-advanced" class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 config-advanced"><summary>透明代理排除进程</summary>
+          <label for="cfg-network-excludes" class="block text-[12px] mb-2 mt-3">始终直连的进程（每行一个；优先于上方规则）</label>
+          <textarea id="cfg-network-excludes" rows="2" class="mono w-full text-[12px] p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded" placeholder="可选，如 updater.exe"></textarea>
+          <p class="config-help">本程序及中继连接自动直连。点击“保存并应用规则”同时保存此列表。</p>
+        </details>
+        <p class="config-help">透明代理通过捕获的 DNS 应答关联域名；加密 DNS、缓存命中和共享 IP 可能只能识别 IP。没有可靠关联时，域名条件不会命中。SOCKS5/HTTP 使用应用请求的域名；本机进程可识别时参与进程匹配。</p>
+      </section>
+
+      <!-- ============ 出口节点选择 ============ -->
+      <section id="tab-pane-exit" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div>
+          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">出口节点选择</h1>
+          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">指定流量的中继出口。留空时，仅在有一个已授权在线出口时自动选择。</p>
+        </div>
+
+        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-3">
+          <div>
+            <label for="cfg-exit-id" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">出口设备 ID</label>
+            <div class="flex items-center gap-2.5">
+              <input id="cfg-exit-id" type="text" placeholder="dev_xxxxxxxx（留空则不指定）" autocomplete="off"
+                     class="mono flex-1 text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+              <button data-config-write disabled onclick="applyExit()" class="btn-primary px-4 py-2 rounded-md text-[13px] font-semibold shrink-0">应用切换</button>
+            </div>
+          </div>
+          <div class="flex items-center justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/60">
+            <span class="text-[12px] text-slate-500 dark:text-slate-400">当前生效出口</span>
+            <span id="exit-current" class="mono text-[13px] font-semibold text-slate-800 dark:text-slate-100">未指定</span>
+          </div>
+        </div>
+
+        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4">
+          <div class="flex items-start gap-2.5">
+            <svg class="icon-lg text-slate-400 mt-0.5" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
+            <div class="text-[12px] text-slate-500 dark:text-slate-400 leading-relaxed">
+              出口设备 ID 可在服务端管理后台的设备列表中查看。
+              切换出口会立即生效并写入配置文件，无需重启客户端。
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 本机出口共享 ============ -->
+      <section id="tab-pane-share" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div class="config-page-heading"><div><p class="config-eyebrow">EXIT SHARING</p><h1>出口共享</h1><p class="config-help">让已授权设备通过本机网络访问目标。</p></div><span class="config-pill">保存后重启生效</span></div>
+        <div id="share-role-hint" class="config-info"></div>
+        <div class="config-card">
+          <label class="config-switch-line"><span><strong>启用本机出口</strong><small>接收来自中继的转发请求</small></span><input id="cfg-exit-on" type="checkbox"></label>
+          <div class="config-permissions">
+            <label><input id="cfg-exit-internet" type="checkbox"><span><strong>互联网</strong><small>公网网站和服务</small></span></label>
+            <label><input id="cfg-exit-private" type="checkbox"><span><strong>私有网络</strong><small>本机所在局域网</small></span></label>
+            <label><input id="cfg-exit-loopback" type="checkbox"><span><strong>回环地址</strong><small>本机的本地服务</small></span></label>
+          </div>
+          <p class="config-help">请求需同时满足这里的本地权限与服务端访问规则。</p>
+          <details class="config-advanced"><summary>域名与 IP 访问规则 <span>高级设置</span></summary>
+            <div class="config-field"><label for="cfg-acl-mode">匹配模式</label><select id="cfg-acl-mode"><option value="">不附加域名 / IP 筛选</option><option value="allow">允许列表 · 仅允许匹配的目标</option><option value="deny">拒绝列表 · 阻止匹配的目标</option></select></div>
+            <div class="config-grid">
+              <div class="config-field"><label for="cfg-acl-domains">域名，每行一条</label><textarea id="cfg-acl-domains" rows="5" class="mono" placeholder="*.example.com&#10;.internal.example&#10;example.org"></textarea><small>支持精确域名、.后缀、* 和 ? 通配符。</small></div>
+              <div class="config-field"><label for="cfg-acl-cidrs">IP / CIDR，每行一条</label><textarea id="cfg-acl-cidrs" rows="5" class="mono" placeholder="192.168.1.0/24&#10;10.0.0.10&#10;10.0.0.20-10.0.0.30"></textarea><small>支持单 IP、CIDR 和起止 IP 范围。</small></div>
+            </div><p id="share-acl-hint" class="config-help"></p>
+          </details>
+        </div>
+        <div class="config-actions"><span class="config-help">角色调整请前往「连接与身份」。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary config-small">保存出口设置</button></div>
+      </section>
+
+      <!-- ============ 服务端审批 ============ -->
+      <section id="tab-pane-pair" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div>
+          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">服务端审批</h1>
+          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">无需配对码或设备令牌。客户端连接后自动提交申请，由服务端管理员审批。</p>
+        </div>
+
+        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
+          <div>
+            <div class="text-[12px] text-slate-500 dark:text-slate-400">当前设备</div>
+            <div class="flex items-center gap-2 mt-1">
+              <span id="pair-current-id" class="mono text-[15px] font-semibold text-slate-800 dark:text-slate-100">等待连接</span>
+              <button onclick="copyText($('pair-current-id').textContent,'设备 ID')" class="p-1 rounded text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-slate-200/70 dark:hover:bg-slate-700/60">
+                <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-copy"/></svg>
+              </button>
+            </div>
+            <div id="pair-approval-state" class="text-[12px] text-slate-500 dark:text-slate-400 mt-1.5">正在连接服务器并提交身份申请…</div>
+          </div>
+
+          <div class="pt-3 border-t border-slate-200 dark:border-slate-700/60 text-[12px] text-slate-500 dark:text-slate-400 space-y-2">
+            <p>1. 在「连接与身份」填写服务器地址并保存。</p>
+            <p>2. 客户端会自动重连并提交本机公钥指纹。</p>
+            <p>3. 管理员在服务端控制台批准后，客户端自动上线。</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 运行日志 ============ -->
+      <section id="tab-pane-logs" class="tab-pane tab-flex hidden h-full flex-col px-6 py-4">
+        <div class="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">实时运行日志</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">中继连接、代理转发与出口处理日志。</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button onclick="copyAllLogs()" class="h-8 px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-1.5 text-[12px]">
+              <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-copy"/></svg>复制
+            </button>
+            <button onclick="clearLogs()" class="h-8 px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-1.5 text-[12px]">
+              <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-trash"/></svg>清空
+            </button>
+          </div>
+        </div>
+        <div id="log-console" class="flex-1 min-h-0 overflow-y-auto rounded-lg bg-[#060a12] border border-slate-800 p-3 mono text-[12px] leading-[1.65] text-slate-300">
+          <div class="text-slate-500">正在载入日志…</div>
+        </div>
+      </section>
+
+      <!-- ============ 系统设置 ============ -->
+      <section id="tab-pane-settings" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div>
+          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">程序设置</h1>
+          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">界面外观、启动行为与配置文件。连接参数在「连接与身份」中设置。</p>
+        </div>
+
+        <div>
+          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">界面与启动</h2>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">浅色界面</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">在深色与浅色主题之间切换，立即生效</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="cfg-theme-light" onchange="onToggleTheme(this)" class="sr-only peer">
+                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
+              </label>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">开机自动启动</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">登录后自动启动到托盘；透明代理模式需先以管理员身份设置一次</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="cfg-autostart" onchange="onToggleAutostart(this)" class="sr-only peer">
+                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
+              </label>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">关闭窗口时最小化到托盘</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">关闭后点 X 将直接退出客户端</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="cfg-min-tray" onchange="onToggleMinTray(this)" class="sr-only peer">
+                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
+              </label>
+            </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">启动时直接进入托盘</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">下次启动不弹出主界面</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="cfg-start-min" onchange="onToggleStartMin(this)" class="sr-only peer">
+                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">配置文件</h2>
+          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-2.5">
+            <div class="mono text-[12px] text-slate-600 dark:text-slate-300 break-all select-text" id="cfg-path">-</div>
+            <div class="flex items-center gap-2">
+              <button onclick="openConfigDir()" class="h-8 px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-1.5 text-[12px]">
+                <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-folder"/></svg>打开所在目录
+              </button>
+              <button onclick="refreshAll()" class="h-8 px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-1.5 text-[12px]">
+                <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-refresh"/></svg>刷新表单
+              </button>
+              <button onclick="reloadConfig()" class="h-8 px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 text-[12px]">重新读取并应用</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="restart-card" class="card bg-white dark:bg-slate-800/50 border border-amber-300 dark:border-amber-500/40 rounded-lg p-4">
+          <div class="text-[13px] font-medium text-amber-600 dark:text-amber-400">重启客户端</div>
+          <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-1">重新启动 RelayProxy 并重新连接服务端；未保存的表单修改不会保留。</div>
+          <button id="restart-button" onclick="doRestart()" class="mt-3 px-4 py-2 rounded-md text-[13px] font-semibold bg-amber-500 text-white hover:bg-amber-600 flex items-center gap-1.5">
+            <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-refresh"/></svg>重启 RelayProxy
+          </button>
+        </div>
+
+        <div class="card bg-white dark:bg-slate-800/50 border border-rose-300 dark:border-rose-500/40 rounded-lg p-4">
+          <div class="text-[13px] font-medium text-rose-600 dark:text-rose-400">退出客户端</div>
+          <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-1">停止本地代理、断开中继隧道并关闭客户端。</div>
+          <button onclick="doQuit()" class="mt-3 px-4 py-2 rounded-md text-[13px] font-semibold bg-rose-600 text-white hover:bg-rose-700 flex items-center gap-1.5">
+            <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-power"/></svg>退出 RelayProxy
+          </button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- toast -->
+  <div id="toast" class="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 opacity-0 transition-all duration-200">
+    <div class="px-4 py-2 rounded-lg bg-slate-900/92 dark:bg-slate-700/95 text-white text-[12px] shadow-lg max-w-[520px]" id="toast-msg"></div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {} };
+    var earlyLogs = [];
+
+    function $(id) { return document.getElementById(id); }
+    window.$ = $;
+    function hasFn(name) { return typeof window[name] === 'function'; }
+    function networkReady(caps) {
+      return !!(caps && !caps.unavailable_reason && caps.tcp && caps.udp && caps.ipv6 && caps.process_identity && caps.original_destination && caps.reply_injection && caps.loop_bypass);
+    }
+    var groupFields = {
+      connection: ['cfg-server','cfg-device-name','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport'],
+      proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on'],
+      routing: ['cfg-routing-mode','cfg-routing-default'],
+      network: ['cfg-network-excludes'],
+      share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
+      exit: ['cfg-exit-id'],
+      preferences: ['cfg-min-tray','cfg-start-min','cfg-theme-light']
+    };
+    var groupNames = {connection:'连接与身份',proxy:'本地代理',routing:'路由分流',network:'透明排除',share:'出口共享',exit:'选择出口',preferences:'程序设置'};
+    function snapshotGroup(group) {
+      var result = { fields: {} };
+      groupFields[group].forEach(function (id) { var el = $(id); if (el) result.fields[id] = { value: String(el.value == null ? '' : el.value), checked: !!el.checked }; });
+      if (group === 'routing') result.rules = JSON.parse(JSON.stringify(routingRules));
+      return result;
+    }
+    function groupDirty(group) { return !!state.baseline[group] && JSON.stringify(snapshotGroup(group)) !== JSON.stringify(state.baseline[group]); }
+    function dirtyGroups() { return Object.keys(groupFields).filter(function (group) { return groupDirty(group); }); }
+    function restoreDraft(group, draft) {
+      Object.keys(draft.fields).forEach(function (id) { $(id).value = draft.fields[id].value; $(id).checked = draft.fields[id].checked; });
+      if (group === 'routing') renderRoutingRules(draft.rules);
+    }
+    function markDrafts() {
+      var groups = dirtyGroups(false);
+      $('draft-bar').classList.toggle('hidden', groups.length === 0);
+      $('draft-summary').textContent = groups.length ? '未保存：' + groups.map(function (group) { return groupNames[group]; }).join('、') : '';
+      ['connection','proxy','routing','share','exit','settings'].forEach(function (tab) {
+        var button = $('tab-btn-' + tab);
+        if (button) button.dataset.dirty = String(groups.some(function (g) { return g === tab || (tab === 'routing' && g === 'network') || (tab === 'settings' && g === 'preferences'); }));
+      });
+      updateFieldDependencies();
+    }
+    window.markDrafts = markDrafts;
+    function formError(message) {
+      $('config-form-error').textContent = message || '';
+      $('config-form-error').classList.toggle('hidden', !message);
+    }
+    function setConfigReady(ready) {
+      state.loaded = ready;
+      document.querySelectorAll('[data-config-write]').forEach(function (el) { el.disabled = !state.loaded || state.saving; });
+      document.querySelectorAll('input[id^="cfg-"], select[id^="cfg-"], textarea[id^="cfg-"], #routing-rules-body input, #routing-rules-body select, #network-rules-body input, #network-rules-body select').forEach(function (el) { el.disabled = !state.loaded || state.saving; });
+      updateFieldDependencies();
+    }
+    function updateFieldDependencies() {
+      if (!state.cfg) return;
+      var locked = !state.loaded || state.saving, tls = $('cfg-tls-on').checked;
+      var isClient = true, isExit = false;
+      ['cfg-socks-on','cfg-http-on'].forEach(function (id) { $(id).disabled = locked || !isClient; });
+      ['listen','port'].forEach(function (suffix) {
+        $('cfg-socks-' + suffix).disabled = locked || !isClient || !$('cfg-socks-on').checked;
+        $('cfg-http-' + suffix).disabled = locked || !isClient || !$('cfg-http-on').checked;
+      });
+      var caps = state.cfg.networkCapabilities || {};
+      $('cfg-tun-on').disabled = locked || !isClient || (!networkReady(caps) && !$('cfg-tun-on').checked);
+      $('cfg-exit-on').disabled = locked || !isExit;
+      ['cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'].forEach(function (id) { $(id).disabled = locked || !isExit || !$('cfg-exit-on').checked; });
+      $('cfg-quic-port').disabled = locked || !tls || $('cfg-transport').value === 'tcp_only';
+      $('cfg-tcp-port').disabled = locked || (tls && $('cfg-transport').value === 'quic_only');
+      $('cfg-routing-default').disabled = locked || $('cfg-routing-mode').value !== 'rule';
+      $('connection-tls-hint').textContent = tls ? '隧道使用 TLS 加密并验证系统信任链；RDP UDP 还要求服务端 QUIC 的 UDP 端口可达。' : '隧道将使用明文 TCP，QUIC 和 RDP UDP 不可用。';
+      $('connection-role-hint').textContent = '本机默认申请代理客户端能力；最终能力由服务端管理员审批。';
+      $('share-role-hint').textContent = isExit ? '当前编辑角色具备出口能力；下方权限决定本机允许转发的目标范围。' : '当前为客户端角色。要共享本机网络，请先在「连接与身份」选择出口或双向角色。';
+      $('proxy-role-hint').classList.toggle('hidden', isClient);
+      $('proxy-role-hint').textContent = '当前为纯出口角色，本地代理设置会保留，暂不提供 SOCKS5 / HTTP 入口。';
+      $('proxy-scope-hint').textContent = $('cfg-socks-listen').value === '0.0.0.0' || $('cfg-http-listen').value === '0.0.0.0' ? '所有网卡可访问；本地代理不提供密码认证。' : '监听本机地址时，其他设备无法访问这些端口。';
+      var aclMode = $('cfg-acl-mode').value;
+      $('share-acl-hint').textContent = aclMode === 'allow' ? '允许列表为空时拒绝所有目标。命中列表仍需满足上方网络权限。' : aclMode === 'deny' ? '命中列表的目标会被拒绝，其余目标仍需满足上方网络权限。' : '列表暂不参与筛选，内容会保留；互联网、私网和回环开关仍有效。';
+      var routeMode = $('cfg-routing-mode').value;
+      $('routing-mode-hint').textContent = routeMode === 'rule' ? '第一条启用且匹配的规则生效；未命中时使用默认动作。' : '当前为' + (routeMode === 'direct' ? '全局直连' : '全局代理') + '，下方规则保留，切回「按规则分流」后使用。';
+    }
+    function configNotice(message) {
+      $('config-state').textContent = message || '';
+      $('config-state').classList.toggle('hidden', !message);
+    }
+
+    // Bindings are registered by Go right before the page is loaded, but a slow
+    // first paint can still race them; every bridge call goes through this guard
+    // so a missing binding degrades into a message instead of a thrown error.
+    async function call(name) {
+      if (!hasFn(name)) { return null; }
+      var args = Array.prototype.slice.call(arguments, 1);
+      try {
+        return await window[name].apply(null, args);
+      } catch (err) {
+        toast('调用失败：' + err);
+        return null;
+      }
+    }
+
+    /* ---------- toast ---------- */
+    var toastTimer = null;
+    function toast(msg) {
+      $('toast-msg').textContent = msg;
+      var el = $('toast');
+      el.classList.remove('opacity-0');
+      el.classList.add('opacity-100');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () {
+        el.classList.remove('opacity-100');
+        el.classList.add('opacity-0');
+      }, 2800);
+    }
+
+    /* ---------- theme ---------- */
+    function applyTheme(dark, persist) {
+      if (persist && !state.loaded) { toast('请先载入有效配置'); return; }
+      document.documentElement.classList.toggle('dark', dark);
+      var btnLabel = $('theme-btn-label');
+      if (btnLabel) { btnLabel.textContent = dark ? '浅色界面' : '深色界面'; }
+      var toggle = $('cfg-theme-light');
+      if (toggle) { toggle.checked = !dark; }
+      if (persist) {
+        save({ gui: { theme: dark ? 'dark' : 'light' } }, '主题已保存').then(function (ok) {
+          if (!ok && state.cfg) { applyTheme(state.cfg.theme !== 'light', false); }
+        });
+      }
+    }
+    function toggleTheme() { applyTheme(!document.documentElement.classList.contains('dark'), true); }
+    function onToggleTheme(el) { applyTheme(!el.checked, true); }
+    window.applyTheme = applyTheme;
+    window.toggleTheme = toggleTheme;
+    window.onToggleTheme = onToggleTheme;
+
+    /* ---------- navigation ---------- */
+    function switchTab(id) {
+      state.tab = id;
+      document.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.add('hidden'); });
+      document.querySelectorAll('.nav-item').forEach(function (b) { b.setAttribute('aria-selected', 'false'); });
+      var btn = $('tab-btn-' + id), pane = $('tab-pane-' + id);
+      if (!btn || !pane) { return; }
+      btn.setAttribute('aria-selected', 'true');
+      pane.classList.remove('hidden');
+      if (id === 'logs') { refreshLogs(); }
+    }
+    window.switchTab = switchTab;
+
+    /* ---------- helpers ---------- */
+    function addrOf(hostId, portId) {
+      var h = $(hostId).value.trim() || '127.0.0.1';
+      var p = $(portId).value.trim() || '';
+      return hostPort(h, p);
+    }
+    function hostPort(host, port) {
+      if (host.indexOf(':') >= 0 && host[0] !== '[') { host = '[' + host + ']'; }
+      return host + (port ? ':' + port : '');
+    }
+    async function copyText(text, label) {
+      if (!text || text === '-') { return; }
+      try {
+        if (hasFn('goCopyClipboard')) { await window.goCopyClipboard(text); }
+        else if (typeof navigator !== 'undefined' && navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); }
+        else {
+          var input = document.createElement('textarea'); input.value = text;
+          input.style.cssText = 'position:fixed;opacity:0;width:1px;height:1px';
+          document.body.appendChild(input); input.select();
+          var copied = document.execCommand('copy'); input.remove();
+          if (!copied) throw new Error('clipboard unavailable');
+        }
+        toast('已复制' + (label ? '：' + label : ''));
+      } catch (err) { toast('复制失败，请手动选择文字复制'); }
+    }
+    function localConnectHost(host) { return host === '0.0.0.0' || !host ? '127.0.0.1' : host === '::' ? '::1' : host; }
+    window.copyProxyURL = function (kind) {
+      if (!state.cfg) return;
+      var running = state.cfg.runtime || {}, leg = running[kind] || state.cfg[kind] || {};
+      if (leg.enabled === false) { toast('该本地代理当前未启用'); return; }
+      copyText((kind === 'socks5' ? 'socks5h://' : 'http://') + hostPort(localConnectHost(leg.listen), leg.port), '当前运行的代理 URL');
+    };
+    window.addrOf = addrOf;
+    window.copyText = copyText;
+
+    /* ---------- status rendering ---------- */
+    function renderStatus(st) {
+      state.status = st;
+
+      var up = !!st.connected;
+      var side = $('side-tunnel');
+      if (up) {
+        side.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 live-dot"></span>已连接';
+        side.className = 'flex items-center gap-1.5 text-[12px] font-medium text-emerald-600 dark:text-emerald-400';
+      } else {
+        side.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>未连接';
+        side.className = 'flex items-center gap-1.5 text-[12px] font-medium text-slate-500 dark:text-slate-400';
+      }
+      $('side-latency').textContent = up && st.latency > 0 ? st.latency + ' ms' : '-- ms';
+
+      $('home-tunnel').textContent = up ? '已连接' : '未连接';
+      $('home-tunnel').className = 'text-[16px] font-semibold mt-1.5 ' +
+        (up ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500');
+      $('home-transport').textContent = '传输：' + (st.transport ? st.transport.toUpperCase() : '未知');
+      $('home-latency').textContent = up && st.latency > 0 ? st.latency + ' ms' : '-- ms';
+      $('home-latency').className = 'mono text-[16px] font-semibold mt-1.5 ' +
+        (up ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500');
+      $('home-exit').textContent = st.selectedExit || '未指定';
+      $('exit-current').textContent = st.selectedExit || '未指定';
+      $('home-streams').textContent = st.activeStreams || 0;
+
+      var devId = st.deviceId || '';
+      var approval = st.approvalState || (up ? 'approved' : 'connecting');
+      $('home-device-id').textContent = devId || (approval === 'pending' ? '待审批' : approval === 'rejected' ? '已拒绝' : approval === 'revoked' ? '已撤销' : '正在连接');
+      $('pair-current-id').textContent = $('home-device-id').textContent;
+      $('pair-approval-state').textContent = approval === 'approved' ? '服务端已批准，设备可以正常连接。' : approval === 'pending' ? '申请已提交，请等待服务端管理员批准。' : approval === 'rejected' ? '服务端已拒绝此安装身份。' : approval === 'revoked' ? '服务端已撤销此设备授权。' : '正在连接服务器并提交身份申请…';
+      $('approval-help').textContent = $('pair-approval-state').textContent;
+      $('unpaired-banner').classList.toggle('hidden', approval === 'approved');
+
+      markLeg('socks5', st.socks5Running);
+      markLeg('http', st.httpRunning);
+      markLeg('tun', st.divertRunning);
+      $('home-tun').textContent = st.divertRunning ? '按进程代理 TCP / UDP' : '未运行';
+      renderRDP(st);
+    }
+
+    function htmlEscape(value) {
+      return String(value == null ? '' : value).replace(/[&<>"']/g, function (ch) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch];
+      });
+    }
+
+    function renderRDP(st) {
+      var targets = Array.isArray(st.rdpTargets) ? st.rdpTargets : [];
+      var list = $('rdp-targets'), note = $('rdp-connection'), disconnect = $('rdp-disconnect');
+      if (!list || !note || !disconnect) return;
+      if (st.rdpListenAddr) {
+        var pathNames = { udp_p2p: 'UDP P2P', relay: 'QUIC Datagram Relay', disabled: 'Disabled' };
+        if (st.rdpUdpEnabled) {
+          var udpState = st.rdpUdpActive ? 'UDP 已启用' : 'UDP 已监听，等待 mstsc';
+          var udpPath = pathNames[st.rdpPathUdp] || '路径待确认';
+          note.textContent = '已监听 ' + st.rdpListenAddr + '（TCP + ' + udpState + ' · ' + udpPath + '）';
+        } else {
+          note.textContent = '已监听 ' + st.rdpListenAddr + '（仅 TCP）' + (st.rdpUdpReason ? '：' + st.rdpUdpReason : '：当前传输不支持 RDP UDP');
+        }
+        disconnect.classList.remove('hidden');
+      } else {
+        note.textContent = targets.length ? '选择一个目标，客户端会在本机回环地址启动 mstsc 入口。' : '服务端批准后，这里会显示可连接的目标设备。';
+        disconnect.classList.add('hidden');
+      }
+      list.innerHTML = targets.length ? targets.map(function (target) {
+        var active = st.rdpTargetId === target.deviceId;
+        return '<div class="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700/60">' +
+          '<div class="min-w-0"><div class="text-[12px] font-medium text-slate-800 dark:text-slate-100 truncate">' + htmlEscape(target.name || target.deviceId) + '</div>' +
+          '<div class="mono text-[10px] text-slate-400 truncate">' + htmlEscape(target.deviceId) + ' · ' + (target.online ? '在线' : '离线') + '</div></div>' +
+          '<button class="btn-primary px-2.5 py-1 rounded text-[11px] font-semibold shrink-0" ' + (active ? 'disabled' : '') + ' onclick="connectRDP(\'' + htmlEscape(target.deviceId).replace(/'/g, "\\'") + '\')">' + (active ? '已连接' : (target.online ? '连接' : '尝试连接')) + '</button></div>';
+      }).join('') : '';
+    }
+
+    async function connectRDP(targetID) {
+      var raw = await call('goConnectRDP', targetID, true);
+      if (!raw) return;
+      try {
+        var result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (result && result.ok === false) throw new Error(result.message || 'RDP 连接失败');
+        toast('RDP 已启动，正在打开远程桌面');
+      } catch (err) { toast(err.message || 'RDP 连接失败'); }
+    }
+    async function disconnectRDP() {
+      await call('goDisconnectRDP');
+      toast('RDP 已断开');
+    }
+    window.connectRDP = connectRDP;
+    window.disconnectRDP = disconnectRDP;
+
+    function markLeg(kind, running) {
+      var el = $('home-' + kind + '-state');
+      if (!el) { return; }
+      el.textContent = running ? '运行中' : '已停止';
+      el.className = 'text-[12px] font-medium shrink-0 ' +
+        (running ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400');
+    }
+    window.onGoStatus = function (st) { if (st) { renderStatus(st); } };
+
+    /* ---------- config rendering ---------- */
+    function renderConfig(cfg) {
+      if (!cfg || cfg.configError) { throw new Error((cfg && cfg.configError) || '配置为空'); }
+      if (!cfg.routing || !Array.isArray(cfg.routing.rules)) { throw new Error('未收到完整路由配置'); }
+      state.cfg = cfg;
+
+      $('brand-version').textContent = 'v' + (cfg.version || '-');
+      $('cfg-path').textContent = cfg.configPath || '-';
+
+      $('cfg-server').value = cfg.serverAddress || '';
+      $('cfg-device-name').value = cfg.deviceName || '';
+      $('cfg-tls-on').checked = cfg.tlsEnabled !== false;
+      $('cfg-quic-port').value = cfg.quicPort || '';
+      $('cfg-tcp-port').value = cfg.tcpPort || '';
+      $('cfg-transport').value = cfg.transport || 'auto';
+
+      var socks = cfg.socks5 || {}, http = cfg.http || {};
+      $('cfg-socks-on').checked = socks.enabled !== false;
+      $('cfg-socks-listen').value = socks.listen || '127.0.0.1';
+      $('cfg-socks-port').value = socks.port || 1080;
+      $('cfg-http-on').checked = http.enabled !== false;
+      $('cfg-http-listen').value = http.listen || '127.0.0.1';
+      $('cfg-http-port').value = http.port || 8080;
+
+      $('cfg-tun-on').checked = cfg.networkMode === 'divert';
+      var caps = cfg.networkCapabilities || {};
+      var ready = networkReady(caps);
+      $('network-capability-status').textContent = ready ? '可启用 · TCP / UDP / IPv6' : '暂不可启用';
+      $('network-availability').textContent = caps.unavailable_reason || (ready ? '运行条件已满足。本机、组播与链路本地流量保持直连；启用前已建立的 TCP 连接沿用原路径。' : '当前平台尚不具备完整拦截能力，可使用 SOCKS5 / HTTP 入口。');
+      $('cfg-tun-on').disabled = !ready && !($('cfg-tun-on').checked);
+      var running = cfg.runtime || {};
+      $('home-tun').textContent = state.status && state.status.divertRunning ? '按进程代理 TCP / UDP' : (cfg.networkMode === 'divert' ? '已配置，等待运行' : '未启用');
+
+      $('cfg-routing-mode').value = cfg.routing.mode;
+      $('cfg-routing-default').value = cfg.routing.default_action;
+      renderRoutingRules(cfg.routing.rules);
+      var network = cfg.network || {};
+      $('cfg-network-excludes').value = (network.exclude_processes || []).join('\n');
+
+      var activeSocks = running.socks5 || socks, activeHTTP = running.http || http;
+      var socksAddr = hostPort(activeSocks.listen || '127.0.0.1', activeSocks.port || 1080);
+      var httpAddr = hostPort(activeHTTP.listen || '127.0.0.1', activeHTTP.port || 8080);
+      $('home-socks5').textContent = socksAddr;
+      $('home-http').textContent = httpAddr;
+      $('quick-socks5').textContent = hostPort(localConnectHost(activeSocks.listen), activeSocks.port || 1080);
+      $('quick-http').textContent = hostPort(localConnectHost(activeHTTP.listen), activeHTTP.port || 8080);
+      $('proxy-socks-cmd').textContent = $('quick-socks5').textContent;
+      $('proxy-http-cmd').textContent = $('quick-http').textContent;
+      $('connection-runtime').textContent = '运行配置：' + (running.serverAddress || cfg.serverAddress || '—') + ' · ' + (running.transport || cfg.transport || 'auto');
+
+      $('cfg-exit-id').value = cfg.defaultExitId || '';
+      $('cfg-exit-on').checked = cfg.exitEnabled !== false;
+      $('cfg-exit-internet').checked = !!cfg.allowInternet;
+      $('cfg-exit-private').checked = !!cfg.allowPrivateNetwork;
+      $('cfg-exit-loopback').checked = !!cfg.allowLoopback;
+      $('cfg-acl-mode').value = cfg.accessMode || '';
+      $('cfg-acl-domains').value = (cfg.accessDomains || []).join('\n');
+      $('cfg-acl-cidrs').value = (cfg.accessCidrs || []).join('\n');
+      $('cfg-autostart').checked = !!cfg.isAutostart;
+      $('cfg-min-tray').checked = cfg.minimizeToTray !== false;
+      $('cfg-start-min').checked = !!cfg.startMinimized;
+
+      var dark = (cfg.theme || 'dark') !== 'light';
+      applyTheme(dark, false);
+      var notices = [];
+      if (cfg.restartRequired) { notices.push('以下设置尚未生效，需重启客户端：' + (cfg.restartFields || []).join('、')); }
+      if (cfg.reloadPending) { notices.push('文件中的规则尚未应用，请点击「重新读取并应用」。'); }
+      configNotice(notices.join(' '));
+      setConfigReady(true);
+      Object.keys(groupFields).forEach(function (group) { state.baseline[group] = snapshotGroup(group); });
+      markDrafts();
+    }
+
+    async function loadConfig(options) {
+      options = options || {};
+      var keep = {};
+      if (!options.discard) dirtyGroups().forEach(function (group) {
+        if ((options.savedGroups || []).indexOf(group) < 0) keep[group] = snapshotGroup(group);
+      });
+      setConfigReady(false);
+      var raw = await call('goGetConfig');
+      try {
+        if (!raw) throw new Error('配置接口尚未就绪');
+        var cfg = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (options.expectedRevision && cfg.revision !== options.expectedRevision && Object.keys(keep).length) {
+          throw new Error('保存后配置又被其他操作修改。草稿已保留，请复制需要的内容，再放弃修改并刷新。');
+        }
+        renderConfig(cfg);
+        Object.keys(keep).forEach(function (group) { restoreDraft(group, keep[group]); });
+        markDrafts();
+        return true;
+      } catch (err) {
+        setConfigReady(false);
+        configNotice('配置读取失败，保存已禁用：' + err.message);
+        return false;
+      }
+    }
+
+    /* ---------- saving ---------- */
+    function mutationResult(raw) {
+      // Accept the previous bridge's string protocol as well as structured results.
+      if (raw === 'ok') { return { ok: true }; }
+      if (typeof raw === 'string' && raw.indexOf('saved-restart|') === 0) {
+        return { ok: true, restartRequired: true, message: raw.slice(14) };
+      }
+      if (raw && typeof raw === 'object') { return raw; }
+      try { return JSON.parse(raw); } catch (err) { return { ok: false, message: raw || '没有收到保存结果' }; }
+    }
+    function payloadGroups(payload) {
+      var groups = [];
+      if (payload.server || (payload.device && payload.device.name !== undefined)) groups.push('connection');
+      if (payload.proxy) groups.push(Object.keys(payload.proxy).every(function (key) { return key === 'defaultExitId'; }) ? 'exit' : 'proxy');
+      if (payload.exit) groups.push('share');
+      if (payload.routing) groups.push('routing');
+      if (payload.network && Object.keys(payload.network).some(function (key) { return key !== 'mode'; })) groups.push('network');
+      if (payload.gui) groups.push('preferences');
+      return groups;
+    }
+    async function save(payload, okMsg, groups) {
+      if (!state.loaded || !state.cfg) { toast('请先载入有效配置'); return false; }
+      if (state.saving) return false;
+      state.saving = true;
+      formError('');
+      setConfigReady(true);
+      payload.revision = state.cfg.revision;
+      try {
+        var res = mutationResult(await call('goSaveConfig', JSON.stringify(payload)));
+        if (!res || !res.ok) { var msg = (res && res.message) || '保存失败'; formError(msg); toast(msg); return false; }
+        var loaded = await loadConfig({ savedGroups: groups || payloadGroups(payload), expectedRevision: res.revision });
+        toast(res.restartRequired ? (res.message || '已保存，部分设置需重启客户端') : (okMsg || res.message || '已保存'));
+        return loaded;
+      } finally {
+        state.saving = false;
+        setConfigReady(state.loaded);
+        markDrafts();
+      }
+    }
+    window.saveSettings = save;
+    function splitLines(v) { return (v || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean); }
+    function fieldError(id, message) {
+      var el = $(id); el.setAttribute('aria-invalid', 'true');
+      var parent = el.parentElement;
+      while (parent) { if (parent.tagName === 'DETAILS') parent.open = true; parent = parent.parentElement; }
+      if (el.focus) el.focus();
+      throw new Error(message);
+    }
+    function portValue(id, label) {
+      var raw = String($(id).value).trim(), n = Number(raw);
+      if (!/^\d+$/.test(raw) || !Number.isInteger(n) || n < 1 || n > 65535) fieldError(id, label + '必须是 1–65535 的整数');
+      return n;
+    }
+    function hostValue(id, label) {
+      var host = $(id).value.trim().replace(/^\[([^\]]+)\]$/, '$1');
+      if (!host || /[\s/\\]/.test(host) || (host.indexOf(':') >= 0 && host.split(':').length < 3)) fieldError(id, label + '请填写主机名或 IP，协议和端口请分开填写');
+      return host;
+    }
+    function collectGroup(group) {
+      switch (group) {
+      case 'connection':
+        if (!$('cfg-tls-on').checked && $('cfg-transport').value === 'quic_only') fieldError('cfg-transport', 'QUIC 需要开启隧道 TLS');
+        return { server: { address: hostValue('cfg-server', '服务器'), quicPort: portValue('cfg-quic-port','QUIC 端口'), tcpPort: portValue('cfg-tcp-port','TCP 端口'), tlsEnabled: $('cfg-tls-on').checked }, device: { name: $('cfg-device-name').value.trim() }, transport: $('cfg-tls-on').checked ? $('cfg-transport').value : 'tcp_only' };
+      case 'proxy':
+        return { proxy: { socks5Enabled: $('cfg-socks-on').checked, socks5Listen: hostValue('cfg-socks-listen','SOCKS5 地址'), socks5Port: portValue('cfg-socks-port','SOCKS5 端口'), httpEnabled: $('cfg-http-on').checked, httpListen: hostValue('cfg-http-listen','HTTP 地址'), httpPort: portValue('cfg-http-port','HTTP 端口') }, network: { mode: $('cfg-tun-on').checked ? 'divert' : '' } };
+      case 'share':
+        return { exit: { enabled: $('cfg-exit-on').checked, allowInternet: $('cfg-exit-internet').checked, allowPrivateNetwork: $('cfg-exit-private').checked, allowLoopback: $('cfg-exit-loopback').checked, access: { mode: $('cfg-acl-mode').value, domains: splitLines($('cfg-acl-domains').value), cidrs: splitLines($('cfg-acl-cidrs').value) } } };
+      case 'routing':
+        return { routing: { mode: $('cfg-routing-mode').value, default_action: $('cfg-routing-default').value, rules: routingRules } };
+      case 'network':
+        return { network: { excludeProcesses: splitRuleList($('cfg-network-excludes').value) } };
+      case 'exit': return { proxy: { defaultExitId: $('cfg-exit-id').value.trim() } };
+      case 'preferences':
+        return { gui: { theme: $('cfg-theme-light').checked ? 'light' : 'dark', minimizeToTray: $('cfg-min-tray').checked, startMinimized: $('cfg-start-min').checked } };
+      default: return {};
+      }
+    }
+    async function saveGroup(group, message) {
+      try { return await save(collectGroup(group), message, [group]); }
+      catch (err) { formError(err.message); toast(err.message); return false; }
+    }
+    function saveProxy() { return saveGroup('proxy','代理设置已保存'); }
+    function saveShare() { return saveGroup('share','出口设置已保存'); }
+    function saveServer() { return saveGroup('connection','连接设置已保存'); }
+    async function applyExit() { if (await saveGroup('exit','出口选择已应用')) refreshStatus(); }
+    window.saveProxy = saveProxy; window.saveShare = saveShare; window.saveServer = saveServer; window.applyExit = applyExit;
+    window.saveAllChanges = async function () {
+      var groups = dirtyGroups(), payload = {};
+      if (!groups.length) { toast('没有未保存的配置'); return false; }
+      try {
+        groups.forEach(function (group) {
+          var part = collectGroup(group);
+          Object.keys(part).forEach(function (key) { payload[key] = typeof part[key] === 'object' && !Array.isArray(part[key]) ? Object.assign(payload[key] || {}, part[key]) : part[key]; });
+        });
+        return await save(payload, '所有修改已保存', groups);
+      } catch (err) { formError(err.message); toast(err.message); return false; }
+    };
+    window.discardAllChanges = async function () {
+      if (state.saving) return;
+      if (dirtyGroups().length && !confirm('放弃所有未保存的配置并重新读取配置？')) return;
+      formError('');
+      await loadConfig({ discard: true });
+    };
+    window.setProxyScope = function (scope) {
+      if (!state.loaded || state.saving) return;
+      $('cfg-socks-listen').value = $('cfg-http-listen').value = scope === 'lan' ? '0.0.0.0' : '127.0.0.1';
+      markDrafts(); toast('监听范围已填入，保存后重启生效');
+    };
+    /* ---------- settings toggles ---------- */
+    function onToggleAutostart(el) {
+      var enabled = el.checked;
+      el.disabled = true;
+      call('goSetAutostart', enabled).then(function (raw) {
+        var out = JSON.parse(raw || '{}');
+        if (!out.ok) { el.checked = !enabled; toast(out.message || '设置开机自启失败'); return; }
+        toast(enabled ? '已开启开机自启' : '已关闭开机自启');
+      }).catch(function (err) {
+        el.checked = !enabled;
+        toast('设置开机自启失败：' + (err.message || err));
+      }).finally(function () { el.disabled = false; });
+    }
+    function onToggleMinTray(el) {
+      save({ gui: { minimizeToTray: el.checked } }, el.checked ? '关闭窗口将最小化到托盘' : '关闭窗口将退出客户端').then(function (ok) {
+        if (!ok && state.cfg) { el.checked = state.cfg.minimizeToTray !== false; markDrafts(); }
+      });
+    }
+    function onToggleStartMin(el) {
+      save({ gui: { startMinimized: el.checked } }, el.checked ? '下次启动将直接进入托盘' : '下次启动将显示主界面').then(function (ok) {
+        if (!ok && state.cfg) { el.checked = !!state.cfg.startMinimized; markDrafts(); }
+      });
+    }
+    function openConfigDir() { call('goOpenConfigDir'); }
+    async function doRestart() {
+      var dirty = dirtyGroups(true).length;
+      var message = (dirty ? '还有未保存的输入，重启不会保存。' : '') + '确定重启 RelayProxy 客户端吗？当前连接将暂时中断。';
+      if (!confirm(message)) { return; }
+      var button = $('restart-button');
+      if (button) { button.disabled = true; }
+      try {
+        var res = mutationResult(await call('goRestart'));
+        if (!res || !res.ok) {
+          toast((res && res.message) || '重启客户端失败');
+          if (button) { button.disabled = false; }
+        }
+      } catch (err) {
+        toast('重启客户端失败：' + (err.message || err));
+        if (button) { button.disabled = false; }
+      }
+    }
+    function doQuit() {
+      if (!confirm((dirtyGroups(true).length ? '还有未保存的输入。' : '') + '确定退出 RelayProxy 客户端吗？本地代理将立即中断。')) { return; }
+      call('goQuit');
+    }
+    window.onToggleAutostart = onToggleAutostart;
+    window.onToggleMinTray = onToggleMinTray;
+    window.onToggleStartMin = onToggleStartMin;
+    window.openConfigDir = openConfigDir;
+    window.doRestart = doRestart;
+    window.doQuit = doQuit;
+
+    // Called from the tray menu when login-startup settings change.
+    window.syncAutostart = function (enabled) { $('cfg-autostart').checked = !!enabled; };
+
+    /* ---------- logs ---------- */
+    function logTone(line) {
+      if (/error|failed|失败|rejected|invalid|fatal|refused|超时|timeout/i.test(line)) { return 'text-rose-400'; }
+      if (/warn|警告|retry|reconnect|重连/i.test(line)) { return 'text-amber-300'; }
+      if (line.indexOf('[Pair]') >= 0) { return 'text-teal-300'; }
+      if (line.indexOf('[GUI]') >= 0) { return 'text-violet-300'; }
+      if (line.indexOf('[Agent]') >= 0) { return 'text-sky-400'; }
+      if (line.indexOf('[Exit]') >= 0) { return 'text-emerald-400'; }
+      if (line.indexOf('[WebUI]') >= 0) { return 'text-slate-400'; }
+      return 'text-slate-300';
+    }
+
+    function appendLogLine(entry) {
+      var text = typeof entry === 'string' ? entry : (entry && entry.message) || '';
+      var stamp = (entry && entry.timestamp) || '';
+      text = String(text).replace(/\s+$/, '');
+      if (!text) { return; }
+
+      var el = $('log-console');
+      if (!el) { earlyLogs.push(entry); return; }
+
+      if (el.dataset.placeholder === '1') { el.innerHTML = ''; el.dataset.placeholder = '0'; }
+      // Only auto-scroll when the user is already at the tail, so scrolling back
+      // to read an error is not yanked away by the next incoming line.
+      var atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      while (el.children.length > 2000) { el.removeChild(el.firstChild); }
+
+      var row = document.createElement('div');
+      row.className = 'break-all ' + logTone(text);
+      if (stamp) {
+        var ts = document.createElement('span');
+        ts.className = 'text-slate-600';
+        ts.textContent = stamp + '  ';
+        row.appendChild(ts);
+      }
+      row.appendChild(document.createTextNode(text));
+      el.appendChild(row);
+      if (atBottom) { el.scrollTop = el.scrollHeight; }
+      state.lastLogCount++;
+    }
+
+    window.onGoLog = appendLogLine;
+
+    async function refreshLogs() {
+      var raw = await call('goGetLogs');
+      if (!raw) { return; }
+      var logs = [];
+      try { logs = JSON.parse(raw) || []; } catch (err) { return; }
+      if (!Array.isArray(logs)) { return; }
+      if (logs.length === state.lastLogCount) { return; }
+
+      var el = $('log-console');
+      el.innerHTML = '';
+      el.dataset.placeholder = '0';
+      if (logs.length === 0) {
+        el.innerHTML = '<div class="text-slate-500">暂无运行日志</div>';
+        el.dataset.placeholder = '1';
+      } else {
+        logs.forEach(appendLogLine);
+        el.scrollTop = el.scrollHeight;
+      }
+      state.lastLogCount = logs.length;
+    }
+
+    function copyAllLogs() {
+      copyText($('log-console').innerText, '全部日志');
+    }
+    async function clearLogs() {
+      await call('goClearLogs');
+      state.lastLogCount = -1;
+      var el = $('log-console');
+      el.innerHTML = '<div class="text-slate-500">日志已清空</div>';
+      el.dataset.placeholder = '1';
+      toast('日志已清空');
+    }
+    window.copyAllLogs = copyAllLogs;
+    window.clearLogs = clearLogs;
+
+    /* ---------- polling ---------- */
+    async function refreshStatus() {
+      var raw = await call('goGetStatus');
+      if (!raw) { return; }
+      try { renderStatus(JSON.parse(raw)); } catch (err) { /* ignore */ }
+    }
+    async function refreshAll() {
+      if (state.saving) return;
+      if (dirtyGroups(true).length) { await refreshStatus(); toast('运行状态已刷新，未保存输入已保留。需要重读文件时请先放弃修改。'); return; }
+      var loaded = await loadConfig();
+      await refreshStatus();
+      if (loaded) { toast('已刷新表单；运行规则未改变'); }
+    }
+    window.refreshAll = refreshAll;
+    async function reloadConfig() {
+      if (state.saving) { return; }
+      if (dirtyGroups(true).length && !confirm('重新读取并应用文件将放弃未保存的输入，继续？')) return;
+      state.saving = true;
+      setConfigReady(state.loaded);
+      try {
+        var res = mutationResult(await call('goReloadConfig'));
+        toast((res && res.message) || '重新应用失败');
+        if (res && res.ok) { await loadConfig({ discard: true }); await refreshStatus(); }
+      } finally {
+        state.saving = false;
+        setConfigReady(state.loaded);
+      }
+    }
+    window.reloadConfig = reloadConfig;
+
+    /* ---------- boot ---------- */
+    document.addEventListener('DOMContentLoaded', function () {
+      var el = $('log-console');
+      if (el) { el.dataset.placeholder = '1'; }
+
+      applyTheme(document.documentElement.classList.contains('dark'), false);
+      setConfigReady(false);
+      document.addEventListener('input', function (event) {
+        if (!state.loaded || state.saving) return;
+        if (event.target && event.target.removeAttribute) event.target.removeAttribute('aria-invalid');
+        markDrafts();
+      });
+      document.addEventListener('change', function (event) {
+        if (event.target && event.target.id === 'cfg-tls-on' && !$('cfg-tls-on').checked) $('cfg-transport').value = 'tcp_only';
+        markDrafts();
+      });
+      document.addEventListener('keydown', function (event) {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); window.saveAllChanges(); }
+      });
+      if (window.addEventListener) window.addEventListener('beforeunload', function (event) {
+        if (dirtyGroups(true).length || state.saving) { event.preventDefault(); event.returnValue = ''; }
+      });
+      loadConfig();
+      refreshStatus();
+      refreshLogs();
+
+      // The browser management page shares this HTML with the native Windows
+      // window, but it has no process-replacement binding. Keep the restart
+      // action visible only where the native launcher is available.
+      if (!hasFn('goRestart') && $('restart-card')) { $('restart-card').classList.add('hidden'); }
+
+      // Go pushes status every 1.5s; these polls cover the window's first paint.
+      setInterval(refreshStatus, 3000);
+      setInterval(function () {
+        // Only poll while the log tab is actually on screen; Go pushes log
+        // lines into window.onGoLog, so polling a hidden pane is wasted work.
+        if (!$('tab-pane-logs').classList.contains('hidden')) { refreshLogs(); }
+      }, 2000);
+    });
+  })();
+  </script>
+  <script src="routing.js"></script>
+</body>
+</html>

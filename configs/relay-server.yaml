@@ -1,0 +1,49 @@
+server:
+  tls_enabled: true   # Agent 隧道 TLS 开关；QUIC 需要开启
+  quic:
+    listen: ":20000"
+  tls:
+    listen: ":20000"
+  admin:
+    listen: ":20001"
+    tls_enabled: false  # 管理页独立使用 HTTP，可直接通过 http://IP:8443 访问
+  cert_file: "cert/server.crt"
+  key_file: "cert/server.key"
+
+# V1 uses SQLite only (WAL + busy_timeout enabled in OpenDB).
+database:
+  driver: "sqlite"
+  dsn: "relayproxy.db"
+
+tunnel:
+  heartbeat_sec: 15
+  max_connections_per_device: 1024
+  max_connections: 2048
+
+# RDP P2P/rendezvous 与公网兼容入口。公网入口默认关闭；开启前请配置
+# 可路由的 rendezvous_advertise，并在管理页面按目标设备分配固定端口。
+rdp:
+  lease_sec: 60
+  rendezvous_listen: ""       # 例如 :3478；留空则关闭 UDP 反射探测
+  rendezvous_advertise: ""    # 例如 relay.example.com:3478
+  ingress:
+    enabled: false
+    listen: "0.0.0.0:0"       # 端口由管理页面的 allocation 固定分配
+    port_start: 20100
+    port_end: 20200
+    source_cidrs: []
+    rate_limit_per_minute: 120
+
+# 中央目标权限与出口本地策略取交集。
+# 公司内网/VPN 出口需在两处显式允许 private_network。
+relay_acl:
+  allow_internet: true
+  allow_private_network: false
+  allow_loopback: false
+  access:
+    mode: ""
+    domains: []
+    cidrs: []
+
+logging:
+  level: "info"

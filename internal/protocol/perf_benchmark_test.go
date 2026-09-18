@@ -45,7 +45,6 @@ func BenchmarkReadJSONSmall(b *testing.B) {
 	}
 }
 
-
 func BenchmarkWriteStreamHeader(b *testing.B) {
 	header := &StreamHeader{
 		Magic: MagicHeader, Version: CurrentVersion, Type: FrameTypeOpenTCP,

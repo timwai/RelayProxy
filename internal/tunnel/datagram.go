@@ -266,6 +266,7 @@ func (m *datagramMux) reapLoop() {
 	defer m.wg.Done()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	conns := make([]*UDPDatagramConn, 0, maxDatagramAssociations)
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -273,8 +274,8 @@ func (m *datagramMux) reapLoop() {
 		case <-m.done:
 			return
 		case now := <-ticker.C:
+			conns = conns[:0]
 			m.mu.RLock()
-			conns := make([]*UDPDatagramConn, 0, len(m.channels))
 			for _, channel := range m.channels {
 				if channel.reaper != nil {
 					conns = append(conns, channel.reaper)

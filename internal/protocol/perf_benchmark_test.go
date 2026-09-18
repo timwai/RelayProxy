@@ -25,7 +25,6 @@ func BenchmarkReadStreamHeader(b *testing.B) {
 	}
 }
 
-
 func BenchmarkReadStreamHeaderInto(b *testing.B) {
 	var wire bytes.Buffer
 	if err := WriteStreamHeader(&wire, &StreamHeader{

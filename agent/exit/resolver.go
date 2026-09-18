@@ -58,7 +58,10 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 	entry, ok := c.entries[key]
 	c.mu.RUnlock()
 	if ok && now.Before(entry.expiresAt) {
-		return cloneIPs(entry.ips), nil
+		// Cache entries are immutable after publication. Callers in this package
+		// treat the returned addresses as read-only, so a cache hit allocates
+		// neither a slice nor per-IP backing bytes.
+		return entry.ips, nil
 	}
 
 	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
@@ -68,7 +71,7 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 	if len(ips) == 0 {
 		return nil, nil
 	}
-	ips = cloneIPs(ips)
+ips = cloneIPs(ips)
 
 	c.mu.Lock()
 	if len(c.entries) >= c.maxEntries {
@@ -84,14 +87,14 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 			}
 		}
 	}
-	c.entries[key] = dnsCacheEntry{ips: cloneIPs(ips), expiresAt: now.Add(c.ttl)}
+	c.entries[key] = dnsCacheEntry{ips: ips, expiresAt: now.Add(c.ttl)}
 	c.mu.Unlock()
 	return ips, nil
 }
 
 func interleaveIPFamilies(ips []net.IP) []net.IP {
 	if len(ips) < 2 {
-		return cloneIPs(ips)
+		return ips
 	}
 	v4 := make([]net.IP, 0, len(ips))
 	v6 := make([]net.IP, 0, len(ips))

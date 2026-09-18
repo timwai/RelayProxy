@@ -669,7 +669,7 @@ func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelSt
 			if err != nil {
 				return
 			}
-			if err := dst.Send(ctx, frame); err != nil {
+			if err := dst.Forward(ctx, frame); err != nil {
 				return
 			}
 			n := len(frame) - protocol.UDPFragmentHeaderSize

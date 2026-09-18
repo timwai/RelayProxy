@@ -8,6 +8,15 @@ import (
 	"time"
 )
 
+const (
+	pipeBufferSize        = 32 * 1024
+	pipeTransferBatchSize = 256 * 1024
+)
+
+var pipeBufferPool = sync.Pool{
+	New: func() any { return new([pipeBufferSize]byte) },
+}
+
 // DeadlineStream is the common subset of net.Conn and TunnelStream.
 type DeadlineStream interface {
 	io.ReadWriteCloser
@@ -51,8 +60,20 @@ func Pipe(ctx context.Context, left, right DeadlineStream, idle time.Duration, t
 	}
 	refresh()
 	copyOne := func(dst, src DeadlineStream, upward bool) int64 {
+		bufp := pipeBufferPool.Get().(*[pipeBufferSize]byte)
+		defer pipeBufferPool.Put(bufp)
+		buf := bufp[:]
+
 		var total int64
-		buf := make([]byte, 32*1024)
+		pendingTransfer := 0
+		flushTransfer := func() {
+			if pendingTransfer > 0 && transferred != nil {
+				transferred(upward, pendingTransfer)
+				pendingTransfer = 0
+			}
+		}
+		defer flushTransfer()
+
 		for {
 			n, er := src.Read(buf)
 			if n > 0 {
@@ -60,7 +81,10 @@ func Pipe(ctx context.Context, left, right DeadlineStream, idle time.Duration, t
 				nw, ew := dst.Write(buf[:n])
 				total += int64(nw)
 				if nw > 0 && transferred != nil {
-					transferred(upward, nw)
+					pendingTransfer += nw
+					if pendingTransfer >= pipeTransferBatchSize {
+						flushTransfer()
+					}
 				}
 				if ew != nil || nw != n {
 					stop()

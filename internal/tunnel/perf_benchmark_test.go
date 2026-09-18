@@ -41,7 +41,6 @@ func BenchmarkPipe1MiB(b *testing.B) {
 	}
 }
 
-
 func BenchmarkPipe1MiBIdleTimeout(b *testing.B) {
 	payload := bytes.Repeat([]byte{0x5a}, 1<<20)
 	b.SetBytes(int64(len(payload)))

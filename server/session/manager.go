@@ -44,13 +44,15 @@ type Manager struct {
 	mu              sync.RWMutex
 	sessions        map[string]*DeviceSession
 	exits           map[string]*DeviceSession
+	exitsByOwner    map[string]map[string]*DeviceSession
 	authorizationMu sync.Mutex
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		sessions: make(map[string]*DeviceSession),
-		exits:    make(map[string]*DeviceSession),
+		sessions:     make(map[string]*DeviceSession),
+		exits:        make(map[string]*DeviceSession),
+		exitsByOwner: make(map[string]map[string]*DeviceSession),
 	}
 }
 
@@ -68,15 +70,45 @@ func (m *Manager) register(sess *DeviceSession) tunnel.TunnelSession {
 	var oldTunnel tunnel.TunnelSession
 	if old, exists := m.sessions[sess.DeviceID]; exists {
 		oldTunnel = old.Tunnel
-		delete(m.exits, old.DeviceID)
+		m.unindexExitLocked(old)
 	}
 	sess.TouchHeartbeat()
 	m.sessions[sess.DeviceID] = sess
-	if sess.IsExit() {
-		m.exits[sess.DeviceID] = sess
-	}
+	m.indexExitLocked(sess)
 	m.mu.Unlock()
 	return oldTunnel
+}
+
+func (m *Manager) indexExitLocked(sess *DeviceSession) {
+	if sess == nil || !sess.IsExit() {
+		return
+	}
+	m.exits[sess.DeviceID] = sess
+	if sess.OwnerUserID == "" {
+		return
+	}
+	bucket := m.exitsByOwner[sess.OwnerUserID]
+	if bucket == nil {
+		bucket = make(map[string]*DeviceSession)
+		m.exitsByOwner[sess.OwnerUserID] = bucket
+	}
+	bucket[sess.DeviceID] = sess
+}
+
+func (m *Manager) unindexExitLocked(sess *DeviceSession) {
+	if sess == nil {
+		return
+	}
+	delete(m.exits, sess.DeviceID)
+	if sess.OwnerUserID == "" {
+		return
+	}
+	if bucket := m.exitsByOwner[sess.OwnerUserID]; bucket != nil {
+		delete(bucket, sess.DeviceID)
+		if len(bucket) == 0 {
+			delete(m.exitsByOwner, sess.OwnerUserID)
+		}
+	}
 }
 
 // removeLocked removes only the currently indexed generation.
@@ -84,7 +116,7 @@ func (m *Manager) removeLocked(deviceID string) *DeviceSession {
 	sess := m.sessions[deviceID]
 	if sess != nil {
 		delete(m.sessions, deviceID)
-		delete(m.exits, deviceID)
+		m.unindexExitLocked(sess)
 	}
 	return sess
 }
@@ -218,11 +250,17 @@ func (m *Manager) GetExitsForOwner(ownerUserID string) []*DeviceSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	res := make([]*DeviceSession, 0, len(m.exits))
-	for _, s := range m.exits {
-		if ownerUserID == "" || s.OwnerUserID == ownerUserID {
+	if ownerUserID == "" {
+		res := make([]*DeviceSession, 0, len(m.exits))
+		for _, s := range m.exits {
 			res = append(res, s)
 		}
+		return res
+	}
+	bucket := m.exitsByOwner[ownerUserID]
+	res := make([]*DeviceSession, 0, len(bucket))
+	for _, s := range bucket {
+		res = append(res, s)
 	}
 	return res
 }
@@ -235,6 +273,7 @@ func (m *Manager) CloseAll() {
 	}
 	m.sessions = make(map[string]*DeviceSession)
 	m.exits = make(map[string]*DeviceSession)
+	m.exitsByOwner = make(map[string]map[string]*DeviceSession)
 	m.mu.Unlock()
 
 	for _, t := range toClose {

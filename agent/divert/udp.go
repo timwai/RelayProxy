@@ -18,7 +18,8 @@ const maxUDPPayload = 65507
 
 // UDPResponder must inject a reply from key.Destination to key.Source. Writing
 // back from a local redirect listener is insufficient. It must honor ctx and
-// return promptly when the association/server closes. Payload is caller-owned.
+// return promptly when the association/server closes. Payload remains owned by
+// the caller and is valid only until the responder returns.
 type UDPResponder func(ctx context.Context, key FlowKey, payload []byte) error
 
 type udpAssociation struct {
@@ -112,17 +113,18 @@ func (s *Server) ForwardUDP(ctx context.Context, route *ClassifiedFlow, payload 
 	if a.ctx.Err() != nil {
 		return ErrAssociationClosed
 	}
-	if err := s.writeUDP(ctx, pc, route, payload); err != nil {
+	now := time.Now()
+	if err := s.writeUDP(ctx, pc, route, payload, now); err != nil {
 		route.traffic.Finish("failed", err)
 		s.removeUDPAssociation(a)
 		return err
 	}
-	a.touch(time.Now())
+	a.touch(now)
 	return nil
 }
 
-func (s *Server) writeUDP(ctx context.Context, pc net.PacketConn, route *ClassifiedFlow, payload []byte) error {
-	deadline := time.Now().Add(s.opts.UDPWriteTimeout)
+func (s *Server) writeUDP(ctx context.Context, pc net.PacketConn, route *ClassifiedFlow, payload []byte, now time.Time) error {
+	deadline := now.Add(s.opts.UDPWriteTimeout)
 	if requested, ok := ctx.Deadline(); ok && requested.Before(deadline) {
 		deadline = requested
 	}
@@ -207,13 +209,16 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 		n, _, err := pc.ReadFrom(buf)
 		a.route.traffic.AddDownload(n)
 		if err != nil {
-			if timeout, ok := err.(net.Error); ok && timeout.Timeout() && !a.expired(time.Now()) {
-				readDeadline = time.Now().Add(s.opts.UDPIdleTimeout)
-				if err := pc.SetReadDeadline(readDeadline); err != nil {
-					return
+			if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+				now := time.Now()
+				if !a.expired(now) {
+					readDeadline = now.Add(s.opts.UDPIdleTimeout)
+					if err := pc.SetReadDeadline(readDeadline); err != nil {
+						return
+					}
+					nextDeadlineRefresh = now.Add(time.Second)
+					continue
 				}
-				nextDeadlineRefresh = time.Now().Add(time.Second)
-				continue
 			}
 			return
 		}

@@ -287,8 +287,23 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			return 0, nil, os.ErrDeadlineExceeded
 		case <-changed:
 			continue
-		case <-c.channel.framesReady:
-			continue
+		case queued := <-c.channel.frames:
+			c.channel.mux.budget.releaseQueue(queued.bytes)
+			select {
+			case <-c.done:
+				return 0, nil, net.ErrClosed
+			case <-c.channel.done:
+				return 0, nil, net.ErrClosed
+			case <-c.channel.mux.ctx.Done():
+				return 0, nil, net.ErrClosed
+			default:
+			}
+			n, complete := c.assemble(queued.frame, p)
+			if !complete {
+				continue
+			}
+			c.touch()
+			return n, c.remote, nil
 		}
 	}
 }

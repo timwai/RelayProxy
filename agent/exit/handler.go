@@ -51,13 +51,13 @@ func (h *Handler) HandleStream(ctx context.Context, stream tunnel.TunnelStream) 
 	stopCancel := tunnel.InterruptOnCancel(ctx, stream)
 	defer stopCancel()
 	_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
-	var header protocol.StreamHeader
-	if err := protocol.ReadStreamHeaderInto(stream, &header); err != nil {
+	header, err := protocol.ReadStreamHeader(stream)
+	if err != nil {
 		log.Printf("[ExitHandler] Failed to read stream header: %v", err)
 		_ = stream.Close()
 		return
 	}
-	h.HandleStreamWithHeader(ctx, stream, &header)
+	h.HandleStreamWithHeader(ctx, stream, header)
 }
 
 // HandleStreamWithHeader handles a stream after a caller has already consumed

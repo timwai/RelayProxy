@@ -12,6 +12,7 @@ import (
 type DeviceSession struct {
 	DeviceID      string
 	DeviceName    string
+	OwnerUserID   string   // authenticated ownership snapshot; invalidated by authorization changes
 	Mode          string   // "CLIENT", "EXIT", "BOTH"
 	Capabilities  []string // authenticated transport/protocol features
 	Grants        []string // server-approved product capabilities
@@ -42,12 +43,14 @@ func (s *DeviceSession) TouchHeartbeat() {
 type Manager struct {
 	mu              sync.RWMutex
 	sessions        map[string]*DeviceSession
+	exits           map[string]*DeviceSession
 	authorizationMu sync.Mutex
 }
 
 func NewManager() *Manager {
 	return &Manager{
 		sessions: make(map[string]*DeviceSession),
+		exits:    make(map[string]*DeviceSession),
 	}
 }
 
@@ -65,11 +68,25 @@ func (m *Manager) register(sess *DeviceSession) tunnel.TunnelSession {
 	var oldTunnel tunnel.TunnelSession
 	if old, exists := m.sessions[sess.DeviceID]; exists {
 		oldTunnel = old.Tunnel
+		delete(m.exits, old.DeviceID)
 	}
 	sess.TouchHeartbeat()
 	m.sessions[sess.DeviceID] = sess
+	if sess.IsExit() {
+		m.exits[sess.DeviceID] = sess
+	}
 	m.mu.Unlock()
 	return oldTunnel
+}
+
+// removeLocked removes only the currently indexed generation.
+func (m *Manager) removeLocked(deviceID string) *DeviceSession {
+	sess := m.sessions[deviceID]
+	if sess != nil {
+		delete(m.sessions, deviceID)
+		delete(m.exits, deviceID)
+	}
+	return sess
 }
 
 // RegisterAuthenticated rechecks server approval under the same gate used by
@@ -98,14 +115,11 @@ func (m *Manager) ChangeDeviceAuthorization(deviceID string, revoke bool, change
 	}
 	var toClose tunnel.TunnelSession
 	if revoke {
-		// Remove the session while holding the authorization gate so a
-		// concurrent authenticated registration cannot publish a session after
-		// the approval mutation. The potentially blocking tunnel close happens
-		// after the gate is released.
+		// Authorization/ownership/grant changes invalidate the whole snapshot.
+		// A new tunnel must authenticate again before its data-plane state is used.
 		m.mu.Lock()
-		if sess, exists := m.sessions[deviceID]; exists {
+		if sess := m.removeLocked(deviceID); sess != nil {
 			toClose = sess.Tunnel
-			delete(m.sessions, deviceID)
 		}
 		m.mu.Unlock()
 	}
@@ -124,9 +138,10 @@ func (m *Manager) UnregisterSession(sess *DeviceSession) bool {
 	var toClose tunnel.TunnelSession
 	removed := false
 	if current, exists := m.sessions[sess.DeviceID]; exists && current == sess {
-		toClose = sess.Tunnel
-		delete(m.sessions, sess.DeviceID)
-		removed = true
+		if removedSession := m.removeLocked(sess.DeviceID); removedSession != nil {
+			toClose = removedSession.Tunnel
+			removed = true
+		}
 	}
 	m.mu.Unlock()
 	if toClose != nil {
@@ -138,9 +153,8 @@ func (m *Manager) UnregisterSession(sess *DeviceSession) bool {
 func (m *Manager) Unregister(deviceID string) {
 	m.mu.Lock()
 	var toClose tunnel.TunnelSession
-	if sess, exists := m.sessions[deviceID]; exists {
+	if sess := m.removeLocked(deviceID); sess != nil {
 		toClose = sess.Tunnel
-		delete(m.sessions, deviceID)
 	}
 	m.mu.Unlock()
 	if toClose != nil {
@@ -156,7 +170,7 @@ func (m *Manager) ReapStaleSessions(timeout time.Duration) {
 	for id, sess := range m.sessions {
 		if sess.LastHeartbeat.Load() < threshold {
 			toClose = append(toClose, sess.Tunnel)
-			delete(m.sessions, id)
+			m.removeLocked(id)
 		}
 	}
 	m.mu.Unlock()
@@ -191,9 +205,22 @@ func (m *Manager) GetExits() []*DeviceSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	res := make([]*DeviceSession, 0)
-	for _, s := range m.sessions {
-		if s.IsExit() {
+	res := make([]*DeviceSession, 0, len(m.exits))
+	for _, s := range m.exits {
+		res = append(res, s)
+	}
+	return res
+}
+
+// GetExitsForOwner avoids scanning non-exit sessions and lets the data plane
+// use the ownership snapshot populated during authentication.
+func (m *Manager) GetExitsForOwner(ownerUserID string) []*DeviceSession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	res := make([]*DeviceSession, 0, len(m.exits))
+	for _, s := range m.exits {
+		if ownerUserID == "" || s.OwnerUserID == ownerUserID {
 			res = append(res, s)
 		}
 	}
@@ -207,6 +234,7 @@ func (m *Manager) CloseAll() {
 		toClose = append(toClose, s.Tunnel)
 	}
 	m.sessions = make(map[string]*DeviceSession)
+	m.exits = make(map[string]*DeviceSession)
 	m.mu.Unlock()
 
 	for _, t := range toClose {

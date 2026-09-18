@@ -84,11 +84,11 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 
 	// 2. Write StreamHeader
 	header := &protocol.StreamHeader{
-		Magic:          protocol.MagicHeader,
-		Version:        protocol.CurrentVersion,
-		Type:           protocol.FrameTypeOpenTCP,
-		RequestID:      reqID,
-		ExitDeviceID:   exitNodeID,
+		Magic:        protocol.MagicHeader,
+		Version:      protocol.CurrentVersion,
+		Type:         protocol.FrameTypeOpenTCP,
+		RequestID:    reqID,
+		ExitDeviceID: exitNodeID,
 	}
 	if err := protocol.WriteStreamHeader(stream, header); err != nil {
 		stream.Close()
@@ -196,11 +196,11 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 	reqID := d.nextRequestID()
 
 	header := &protocol.StreamHeader{
-		Magic:          protocol.MagicHeader,
-		Version:        protocol.CurrentVersion,
-		Type:           protocol.FrameTypeOpenUDP,
-		RequestID:      reqID,
-		ExitDeviceID:   exitNodeID,
+		Magic:        protocol.MagicHeader,
+		Version:      protocol.CurrentVersion,
+		Type:         protocol.FrameTypeOpenUDP,
+		RequestID:    reqID,
+		ExitDeviceID: exitNodeID,
 	}
 	if err := protocol.WriteStreamHeader(stream, header); err != nil {
 		stream.Close()

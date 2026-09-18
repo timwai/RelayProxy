@@ -422,15 +422,25 @@ func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
 }
 
 func (c *DatagramChannel) takeFrame() ([]byte, bool, error) {
-	c.mux.mu.RLock()
-	defer c.mux.mu.RUnlock()
-	if c.closed || c.mux.closed || c.mux.ctx.Err() != nil {
+	select {
+	case <-c.done:
 		return nil, false, net.ErrClosed
+	case <-c.mux.ctx.Done():
+		return nil, false, net.ErrClosed
+	default:
 	}
+
 	select {
 	case f := <-c.frames:
 		c.mux.budget.releaseQueue(f.bytes)
-		return f.frame, true, nil
+		select {
+		case <-c.done:
+			return nil, false, net.ErrClosed
+		case <-c.mux.ctx.Done():
+			return nil, false, net.ErrClosed
+		default:
+			return f.frame, true, nil
+		}
 	default:
 		return nil, false, nil
 	}

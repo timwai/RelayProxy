@@ -98,6 +98,10 @@ type TLSSession struct {
 // stream window.
 func DefaultYAMUXConfig() *yamux.Config {
 	config := yamux.DefaultConfig()
+	// Match the Relay's default per-device stream ceiling. yamux assumes a
+	// symmetric backlog and blocks outgoing SYNs when this queue fills; keeping
+	// the library default (256) would impose an unintended lower burst limit.
+	config.AcceptBacklog = yamuxAcceptBacklog
 	config.MaxStreamWindowSize = 16 << 20
 	config.StreamOpenTimeout = 15 * time.Second
 	config.StreamCloseTimeout = 30 * time.Second

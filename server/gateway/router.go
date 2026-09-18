@@ -224,15 +224,15 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	// (auto-select already filtered by auth; explicit ID still needs the check)
 	authorized, authErr := r.authorizeExit(clientSession, exitSession)
 	if authErr != nil || !authorized {
-			log.Printf("[StreamRouter] Unauthorized access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
-			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
-				RequestID:    req.RequestID,
-				Success:      false,
-				ErrorCode:    protocol.ErrCodeACLDenied,
-				ErrorMessage: "Client is not authorized to access this exit node",
-			})
-			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
-			return
+		log.Printf("[StreamRouter] Unauthorized access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+			RequestID:    req.RequestID,
+			Success:      false,
+			ErrorCode:    protocol.ErrCodeACLDenied,
+			ErrorMessage: "Client is not authorized to access this exit node",
+		})
+		r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
+		return
 	}
 
 	// Bind the Relay's own policy, replacing any policy supplied by the client.
@@ -413,15 +413,15 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 
 	authorized, authErr := r.authorizeExit(clientSession, exitSession)
 	if authErr != nil || !authorized {
-			log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
-			_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
-				RequestID:    req.RequestID,
-				Success:      false,
-				ErrorCode:    protocol.ErrCodeACLDenied,
-				ErrorMessage: "Client is not authorized to access this exit node",
-			})
-			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
-			return
+		log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+			RequestID:    req.RequestID,
+			Success:      false,
+			ErrorCode:    protocol.ErrCodeACLDenied,
+			ErrorMessage: "Client is not authorized to access this exit node",
+		})
+		r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
+		return
 	}
 
 	// A client cannot weaken or replace the Relay's destination restrictions.

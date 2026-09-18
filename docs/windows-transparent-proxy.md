@@ -6,6 +6,8 @@ Windows x64 客户端通过 WinDivert 截获新建 TCP 连接和 UDP 数据报�
 
 Windows x64 的 `relay-agent-gui.exe` 和 `relay-agent.exe` 已内嵌官方 WinDivert 2.2.2，单独分发一个 EXE 即可。构建脚本也会生成 `dist/RelayProxy-agent-windows-amd64.zip`，附带示例配置、可选外置运行库、许可证和 SHA256 校验清单。
 
+> Windows ARM64 产物不包含 x64 WinDivert，因此不支持系统透明代理，但仍可使用 Agent、SOCKS5/HTTP 和本地 Web 管理页。ARM64 桌面窗口还需要安装匹配的 Microsoft Edge WebView2 Runtime；缺失时程序会提示并回退到 Web 管理页。
+
 1. 将 `relay-agent-gui.exe` 放在固定位置。无需手动下载或携带 WinDivert DLL/驱动目录。
 2. 以管理员身份运行 `relay-agent-gui.exe`，完成服务器与出口配置。
 3. 在“本地代理服务 → 系统透明代理”中启用并保存，退出后仍以管理员身份启动。命令行对应 `network.mode: divert`。

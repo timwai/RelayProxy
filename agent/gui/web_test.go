@@ -94,6 +94,9 @@ func TestWebConfigMutationAndQuit(t *testing.T) {
 
 	configResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configResponse, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/config", nil))
+	if bytes.Contains(configResponse.Body.Bytes(), []byte(":null")) {
+		t.Fatalf("normalized GUI configuration contains null defaults: %s", configResponse.Body.String())
+	}
 	var state map[string]any
 	if err := json.Unmarshal(configResponse.Body.Bytes(), &state); err != nil {
 		t.Fatal(err)

@@ -503,9 +503,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		go func() {
 			defer g.wg.Done()
 			defer admittedStreams.Add(-1)
-			if g.router == nil || (!containsCapability(deviceSession.Grants, protocol.CapabilityProxyClient) &&
-				!containsCapability(deviceSession.Grants, protocol.CapabilityRDPClient) &&
-				!containsCapability(deviceSession.Grants, protocol.CapabilityRDPHost)) {
+			if g.router == nil {
 				_ = stream.Close()
 				return
 			}

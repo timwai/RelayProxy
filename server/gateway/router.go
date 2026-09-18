@@ -160,6 +160,14 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 		log.Printf("[StreamRouter] Failed to read OpenTCPRequest: %v", err)
 		return
 	}
+	if !containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) {
+		log.Printf("[StreamRouter] Device %s opened a TCP proxy stream without proxy.client capability", clientSession.DeviceID)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+			RequestID: req.RequestID, ErrorCode: protocol.ErrCodeAccessDenied,
+			ErrorMessage: "Device is not approved for proxy client access",
+		})
+		return
+	}
 
 	now := time.Now()
 	baseAudit := func(result, errCode, resolvedIP string) *repository.ConnectionAudit {
@@ -265,11 +273,19 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	// 5. Send StreamHeader and OpenTCPRequest to Exit Node
 	if err := protocol.WriteStreamHeader(exitStream, header); err != nil {
 		log.Printf("[StreamRouter] Failed to write header to exit stream: %v", err)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+			RequestID: req.RequestID, ErrorCode: protocol.ErrCodeStreamOpenFailed,
+			ErrorMessage: "Exit node closed the stream before receiving the request",
+		})
 		r.emitAudit(baseAudit("STREAM_OPEN_FAILED", protocol.ErrCodeStreamOpenFailed, ""))
 		return
 	}
 	if err := protocol.WriteJSON(exitStream, req); err != nil {
 		log.Printf("[StreamRouter] Failed to write req to exit stream: %v", err)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+			RequestID: req.RequestID, ErrorCode: protocol.ErrCodeStreamOpenFailed,
+			ErrorMessage: "Exit node closed the stream before receiving the request",
+		})
 		r.emitAudit(baseAudit("STREAM_OPEN_FAILED", protocol.ErrCodeStreamOpenFailed, ""))
 		return
 	}
@@ -332,6 +348,14 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	var req protocol.OpenUDPRequest
 	if err := protocol.ReadJSON(clientStream, &req); err != nil {
 		log.Printf("[StreamRouter] Failed to read OpenUDPRequest: %v", err)
+		return
+	}
+	if !containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) {
+		log.Printf("[StreamRouter] Device %s opened a UDP proxy stream without proxy.client capability", clientSession.DeviceID)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+			RequestID: req.RequestID, ErrorCode: protocol.ErrCodeAccessDenied,
+			ErrorMessage: "Device is not approved for proxy client access",
+		})
 		return
 	}
 	if req.Mode != "" && req.Mode != protocol.UDPModeStream && req.Mode != protocol.UDPModeDatagram {
@@ -469,11 +493,19 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	header.Type = protocol.FrameTypeOpenUDP
 	if err := protocol.WriteStreamHeader(exitStream, header); err != nil {
 		log.Printf("[StreamRouter] Failed to write UDP header to exit stream: %v", err)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+			RequestID: req.RequestID, ErrorCode: protocol.ErrCodeStreamOpenFailed,
+			ErrorMessage: "Exit node closed the stream before receiving the request",
+		})
 		r.emitAudit(baseAudit("STREAM_OPEN_FAILED", protocol.ErrCodeStreamOpenFailed, ""))
 		return
 	}
 	if err := protocol.WriteJSON(exitStream, req); err != nil {
 		log.Printf("[StreamRouter] Failed to write UDP req to exit stream: %v", err)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+			RequestID: req.RequestID, ErrorCode: protocol.ErrCodeStreamOpenFailed,
+			ErrorMessage: "Exit node closed the stream before receiving the request",
+		})
 		r.emitAudit(baseAudit("STREAM_OPEN_FAILED", protocol.ErrCodeStreamOpenFailed, ""))
 		return
 	}

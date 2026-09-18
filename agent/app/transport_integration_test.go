@@ -94,6 +94,40 @@ func waitAgentReady(t *testing.T, agent *Agent) {
 	}
 }
 
+func TestStatusUsesApprovedCapabilitiesWithoutReducingFutureRequests(t *testing.T) {
+	agent, err := NewAgent(AgentConfig{Mode: "BOTH"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer agent.Close()
+
+	agent.mu.Lock()
+	agent.approvedMode = modeForApprovedCapabilities([]string{protocol.CapabilityProxyClient})
+	agent.mu.Unlock()
+	if got := agent.Status().Mode; got != "CLIENT" {
+		t.Fatalf("status mode = %q, want server-approved CLIENT", got)
+	}
+	if got := agent.Config().Mode; got != "BOTH" {
+		t.Fatalf("requested mode was reduced to %q; reconnect must continue declaring supported capabilities", got)
+	}
+
+	for _, tc := range []struct {
+		name string
+		caps []string
+		want string
+	}{
+		{"both", []string{protocol.CapabilityProxyClient, protocol.CapabilityProxyExit}, "BOTH"},
+		{"exit", []string{protocol.CapabilityProxyExit}, "EXIT"},
+		{"none", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := modeForApprovedCapabilities(tc.caps); got != tc.want {
+				t.Fatalf("mode = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRelayTransportMatrix(t *testing.T) {
 	for _, clientMode := range []string{"quic_only", "tcp_only"} {
 		for _, exitMode := range []string{"quic_only", "tcp_only"} {

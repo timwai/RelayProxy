@@ -13,6 +13,7 @@
 # Generated Windows PE resources (rebuilt by scripts/gen-brand.*)
 **/resource_windows.syso
 **/resource_windows.syso.bak
+**/resource_windows_*.syso.bak
 *.syso
 
 # Test artifacts

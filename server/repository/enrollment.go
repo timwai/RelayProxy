@@ -95,10 +95,23 @@ func (db *DB) ObserveDeviceIdentity(observation DeviceIdentityObservation) (*Dev
 			if err != nil {
 				return nil, err
 			}
+			// Capability declarations describe what this Agent instance can
+			// actually serve now. Keep them fresh after enrollment so an upgraded
+			// Agent can request additional administrator-approved roles, while a
+			// locally disabled role is not advertised as available merely because
+			// it was approved in the past.
+			if _, err := tx.Exec(`UPDATE devices SET name = ?, platform = ?, arch = ?,
+				client_version = ?, requested_capabilities = ?, updated_at = ?
+				WHERE id = ? AND approval_state = ?`,
+				fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
+				observation.ClientVersion, requested, now, deviceID.String, EnrollmentApproved); err != nil {
+				return nil, err
+			}
+			effective := filterApprovedCapabilities(approved, observation.RequestedCapabilities)
 			if err := tx.Commit(); err != nil {
 				return nil, err
 			}
-			return &DeviceAuthorization{State: state, DeviceID: deviceID.String, ApprovedCapabilities: approved}, nil
+			return &DeviceAuthorization{State: state, DeviceID: deviceID.String, ApprovedCapabilities: effective}, nil
 		case EnrollmentRejected, EnrollmentRevoked:
 			if err := tx.Commit(); err != nil {
 				return nil, err

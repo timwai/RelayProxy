@@ -13,8 +13,17 @@ if ! command -v goversioninfo >/dev/null 2>&1; then
   export PATH="$(go env GOPATH)/bin:$PATH"
 fi
 
-echo "[3/3] Embed Windows icons into resource_windows.syso"
-( cd "$ROOT/cmd/relay-server" && goversioninfo -64 -o resource_windows.syso versioninfo.json )
-( cd "$ROOT/cmd/relay-agent" && goversioninfo -64 -o resource_windows.syso versioninfo.json )
+echo "[3/3] Embed Windows icons into architecture-specific resources"
+generate_windows_resources() {
+  local package_dir="$1"
+  (
+    cd "$package_dir"
+    rm -f resource_windows.syso
+    goversioninfo -64 -arm=false -o resource_windows_amd64.syso versioninfo.json
+    goversioninfo -64 -arm=true -o resource_windows_arm64.syso versioninfo.json
+  )
+}
+generate_windows_resources "$ROOT/cmd/relay-server"
+generate_windows_resources "$ROOT/cmd/relay-agent"
 
 echo "Brand assets ready."

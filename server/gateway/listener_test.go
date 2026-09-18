@@ -188,6 +188,41 @@ func TestApprovedIdentityRegistersBeforeAcceptance(t *testing.T) {
 	}
 }
 
+func TestProxyStreamWithoutClientCapabilityReturnsAccessDenied(t *testing.T) {
+	gateway := testGateway(t, time.Second, nil, func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+		return DeviceAuthorization{
+			State: "approved", DeviceID: "exit-only",
+			ApprovedCapabilities: []string{protocol.CapabilityProxyExit},
+		}, nil
+	})
+	identity, _ := deviceidentity.Generate()
+	sess := dialTestGateway(t, gateway)
+	control := openTestStream(t, sess)
+	writeControlHeader(t, control)
+	if accepted := authenticateTestDevice(t, control, identity); !accepted.Success {
+		t.Fatalf("unexpected approval failure: %+v", accepted)
+	}
+
+	stream := openTestStream(t, sess)
+	_ = stream.SetDeadline(time.Now().Add(time.Second))
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion,
+		Type: protocol.FrameTypeOpenTCP, RequestID: "req-denied", ExitDeviceID: "exit-only",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteJSON(stream, protocol.OpenTCPRequest{RequestID: "req-denied", Host: "example.com", Port: 443}); err != nil {
+		t.Fatal(err)
+	}
+	var response protocol.OpenTCPResponse
+	if err := protocol.ReadJSON(stream, &response); err != nil {
+		t.Fatalf("capability rejection was returned as a transport error: %v", err)
+	}
+	if response.Success || response.ErrorCode != protocol.ErrCodeAccessDenied {
+		t.Fatalf("unexpected capability rejection: %+v", response)
+	}
+}
+
 func TestCloseReclaimsUnauthenticatedTransports(t *testing.T) {
 	gateway := testGateway(t, time.Minute, nil)
 	conn, err := net.Dial("tcp", gateway.TCPAddr().String())

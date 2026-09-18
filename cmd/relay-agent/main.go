@@ -145,6 +145,14 @@ func main() {
 	if err := config.NormalizeAgentConfig(cfgFile); err != nil {
 		log.Fatalf("[Config] Invalid startup configuration: %v", err)
 	}
+	networkMode := cfgFile.Network.Mode
+	if runtime.GOOS == "windows" && runtime.GOARCH != "amd64" && networkMode == "divert" {
+		// WinDivert currently ships only x64 binaries. Keep the ARM64 Agent
+		// usable with SOCKS5/HTTP instead of exiting before the UI can explain
+		// why transparent interception is unavailable.
+		log.Printf("[Agent] network.mode=divert is unavailable on Windows %s; starting with SOCKS5/HTTP only", runtime.GOARCH)
+		networkMode = ""
+	}
 
 	identityPath := filepath.Join(filepath.Dir(*configPath), "device-identity.json")
 	deviceIdentity, err := deviceidentity.LoadOrCreate(identityPath)
@@ -187,7 +195,7 @@ func main() {
 		AccessMode:      cfgFile.Exit.Access.Mode,
 		AccessDomains:   cfgFile.Exit.Access.Domains,
 		AccessCIDRs:     cfgFile.Exit.Access.CIDRs,
-		NetworkMode:     cfgFile.Network.Mode,
+		NetworkMode:     networkMode,
 		DivertConfig:    cfgFile.DivertConfig(),
 		Routing:         cfgFile.Routing,
 		InsecureTLS:     *insecureFlag,
@@ -264,7 +272,12 @@ func main() {
 		case errors.Is(err, gui.ErrUnsupported):
 			log.Println("[Agent] Falling back to headless mode.")
 		default:
-			log.Fatalf("[Agent] Desktop UI failed: %v", err)
+			fallbackURL := ""
+			if webServer != nil {
+				fallbackURL = "http://" + webServer.Addr() + "/"
+			}
+			gui.ShowStartupError(err, fallbackURL)
+			log.Printf("[Agent] Desktop UI failed: %v; continuing in headless mode", err)
 		}
 	}
 

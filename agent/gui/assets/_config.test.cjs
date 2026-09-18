@@ -51,7 +51,7 @@ function fixture(options = {}) {
       querySelectorAll(selector) { return selector === '[data-config-write]' ? buttons : []; },
       createElement: element, createTextNode(text) { return text; } },
     goGetConfig: async () => { loads++; return JSON.stringify(cfg); },
-    goGetStatus: async () => JSON.stringify({ connected: false }),
+    goGetStatus: async () => JSON.stringify(options.status || { connected: false }),
     goSaveConfig: async raw => {
       const payload = JSON.parse(raw);
       saves.push(payload);
@@ -123,6 +123,17 @@ test('failed or incomplete configuration loads cannot save defaults', async () =
   assert.equal(f.saves.length, 0);
   assert.ok(f.buttons.every(button => button.disabled));
   assert.match(f.get('config-state').textContent, /invalid YAML/);
+});
+
+test('client-only server grant does not lock local exit sharing configuration', async () => {
+  const f = fixture({ status: { connected: true, mode: 'CLIENT' } });
+  await f.context.refreshAll();
+  assert.equal(f.get('cfg-exit-on').disabled, false);
+  assert.equal(f.get('cfg-exit-internet').disabled, false);
+  assert.match(f.get('share-role-hint').textContent, /仅授权客户端能力/);
+  assert.match(f.get('share-role-hint').textContent, /服务端/);
+  assert.equal(await f.context.saveShare(), true);
+  assert.equal(f.saves[0].exit.enabled, true);
 });
 
 test('running endpoints remain separate from saved settings and pending restart', async () => {

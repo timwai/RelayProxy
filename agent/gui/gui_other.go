@@ -8,6 +8,9 @@ import (
 	"relayproxy/agent/bridge"
 )
 
+// ShowStartupError is only meaningful for the Windows desktop build.
+func ShowStartupError(_ error, _ string) {}
+
 // Run reports that the desktop window is unavailable. The agent itself keeps
 // working headlessly on these platforms; only the window and tray are Windows-only.
 func Run(b *bridge.UIBridge, opts Options) error {

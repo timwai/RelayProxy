@@ -97,7 +97,9 @@ func TestRelayBindsTargetPolicyAndRejectsLegacyExit(t *testing.T) {
 				}
 				done := make(chan struct{})
 				go func() {
-					router.HandleClientStream(context.Background(), &policyTestStream{left}, &session.DeviceSession{DeviceID: "client"})
+					router.HandleClientStream(context.Background(), &policyTestStream{left}, &session.DeviceSession{
+						DeviceID: "client", Grants: []string{protocol.CapabilityProxyClient},
+					})
 					close(done)
 				}()
 				if err := protocol.WriteStreamHeader(right, &protocol.StreamHeader{Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: kind, ExitDeviceID: "exit"}); err != nil {

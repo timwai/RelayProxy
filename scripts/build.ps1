@@ -6,12 +6,14 @@
 .DESCRIPTION
   产出：
     - Linux 服务端 amd64 / arm64  (relay-server，内嵌 Admin Web UI)
-    - Windows 客户端 amd64        (relay-agent-gui.exe 桌面窗口 + relay-agent.exe CLI)
-    - Windows 服务端 amd64        (relay-server.exe，Console 子系统，含 Admin UI)
+    - Windows 客户端 amd64 / arm64 (relay-agent-gui.exe 桌面窗口 + relay-agent.exe CLI)
+    - Windows 服务端 amd64 / arm64 (relay-server.exe，Console 子系统，含 Admin UI)
 
   说明：Windows 客户端为原生 WebView2 桌面窗口（含系统托盘），
   relay-agent-gui.exe 使用 -H=windowsgui 子系统，双击不会弹出控制台窗口；
   relay-agent.exe 保留 Console 子系统供 CLI / 脚本调用，带参数时会自动保持无窗口。
+  Windows arm64 产物可运行 Agent / Server，但系统透明代理目前仍只支持 amd64。
+  Windows ARM64 桌面窗口需要 ARM64 WebView2 Runtime；缺失时会提示并继续提供本地 Web 管理页。
   管理界面通过 Linux 服务端的 Admin HTTPS 控制台访问，或直接使用桌面窗口。
 
 .EXAMPLE
@@ -67,7 +69,11 @@ try {
     # .syso is Windows-only; hide it while cross-compiling Linux binaries
     $sysoFiles = @(
         (Join-Path $Root "cmd\relay-server\resource_windows.syso"),
-        (Join-Path $Root "cmd\relay-agent\resource_windows.syso")
+        (Join-Path $Root "cmd\relay-agent\resource_windows.syso"),
+        (Join-Path $Root "cmd\relay-server\resource_windows_amd64.syso"),
+        (Join-Path $Root "cmd\relay-server\resource_windows_arm64.syso"),
+        (Join-Path $Root "cmd\relay-agent\resource_windows_amd64.syso"),
+        (Join-Path $Root "cmd\relay-agent\resource_windows_arm64.syso")
     )
     function Hide-Syso {
         foreach ($f in $sysoFiles) {
@@ -159,11 +165,26 @@ try {
         -Package "./cmd/relay-server" `
         -Output (Join-Path $OutDir "windows-amd64/relay-server.exe")
 
+    Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
+        -Package "./cmd/relay-agent" `
+        -Output (Join-Path $OutDir "windows-arm64/relay-agent-gui.exe") `
+        -ExtraLdFlags "-H=windowsgui"
+
+    Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
+        -Package "./cmd/relay-agent" `
+        -Output (Join-Path $OutDir "windows-arm64/relay-agent.exe")
+
+    Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
+        -Package "./cmd/relay-server" `
+        -Output (Join-Path $OutDir "windows-arm64/relay-server.exe")
+
     # Copy brand icon into Windows package for shortcuts / installers
-    $brandOut = Join-Path $OutDir "windows-amd64/brand"
-    New-Item -ItemType Directory -Path $brandOut -Force | Out-Null
-    Copy-Item (Join-Path $Root "assets\brand\icon.ico") $brandOut -Force
-    Copy-Item (Join-Path $Root "assets\brand\logo.png") $brandOut -Force
+    foreach ($t in @("windows-amd64", "windows-arm64")) {
+        $brandOut = Join-Path $OutDir "$t/brand"
+        New-Item -ItemType Directory -Path $brandOut -Force | Out-Null
+        Copy-Item (Join-Path $Root "assets\brand\icon.ico") $brandOut -Force
+        Copy-Item (Join-Path $Root "assets\brand\logo.png") $brandOut -Force
+    }
     foreach ($t in @("linux-amd64", "linux-arm64")) {
         $lb = Join-Path $OutDir "$t/brand"
         New-Item -ItemType Directory -Path $lb -Force | Out-Null
@@ -178,7 +199,7 @@ try {
     }
 
     # --- Package configs ---
-    foreach ($target in @("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64")) {
+    foreach ($target in @("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64")) {
         $cfgDir = Join-Path $OutDir "$target/configs"
         New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
         Copy-Item (Join-Path $Root "configs/relay-server.yaml") $cfgDir -Force
@@ -186,6 +207,7 @@ try {
     }
 
     Copy-Item (Join-Path $Root "docs/windows-transparent-proxy.md") (Join-Path $OutDir "windows-amd64/README.md") -Force
+    Copy-Item (Join-Path $Root "docs/windows-transparent-proxy.md") (Join-Path $OutDir "windows-arm64/README.md") -Force
     Copy-Item (Join-Path $Root "docs/linux-transparent-proxy.md") (Join-Path $OutDir "linux-amd64/README.md") -Force
     Copy-Item (Join-Path $Root "docs/linux-transparent-proxy.md") (Join-Path $OutDir "linux-arm64/README.md") -Force
     Copy-Item (Join-Path $Root "agent/divert/macos/README.md") (Join-Path $OutDir "darwin-amd64/README.md") -Force
@@ -231,6 +253,9 @@ try {
   windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
   windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
   windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
+  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端（不含 x64 WinDivert）
+  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
+  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
   */configs/*.yaml                  示例配置
   SHA256SUMS.txt
 

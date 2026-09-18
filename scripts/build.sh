@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # RelayProxy 跨平台发布编译脚本
-# 产出：Linux 服务端/Agent、macOS Agent、Windows 客户端（含图标）
+# 产出：Linux 服务端/Agent、macOS Agent、Windows amd64/arm64 客户端与服务端（含图标）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,14 +30,23 @@ go run ./scripts/fetch-windivert.go \
 
 SYSO_SERVER="$ROOT/cmd/relay-server/resource_windows.syso"
 SYSO_AGENT="$ROOT/cmd/relay-agent/resource_windows.syso"
+SYSO_SERVER_AMD64="$ROOT/cmd/relay-server/resource_windows_amd64.syso"
+SYSO_SERVER_ARM64="$ROOT/cmd/relay-server/resource_windows_arm64.syso"
+SYSO_AGENT_AMD64="$ROOT/cmd/relay-agent/resource_windows_amd64.syso"
+SYSO_AGENT_ARM64="$ROOT/cmd/relay-agent/resource_windows_arm64.syso"
+SYSO_FILES=(
+  "$SYSO_SERVER" "$SYSO_AGENT"
+  "$SYSO_SERVER_AMD64" "$SYSO_SERVER_ARM64"
+  "$SYSO_AGENT_AMD64" "$SYSO_AGENT_ARM64"
+)
 
 hide_syso() {
-  for f in "$SYSO_SERVER" "$SYSO_AGENT"; do
+  for f in "${SYSO_FILES[@]}"; do
     [[ -f "$f" ]] && mv "$f" "${f}.bak"
   done
 }
 show_syso() {
-  for f in "$SYSO_SERVER" "$SYSO_AGENT"; do
+  for f in "${SYSO_FILES[@]}"; do
     [[ -f "${f}.bak" ]] && mv "${f}.bak" "$f"
   done
 }
@@ -71,20 +80,26 @@ trap - EXIT
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent-gui.exe" "-H=windowsgui"
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent.exe"
 build_one windows amd64 ./cmd/relay-server "$OUT_DIR/windows-amd64/relay-server.exe"
+# WinDivert is x64-only; ARM64 binaries still support the non-divert modes.
+build_one windows arm64 ./cmd/relay-agent "$OUT_DIR/windows-arm64/relay-agent-gui.exe" "-H=windowsgui"
+build_one windows arm64 ./cmd/relay-agent "$OUT_DIR/windows-arm64/relay-agent.exe"
+build_one windows arm64 ./cmd/relay-server "$OUT_DIR/windows-arm64/relay-server.exe"
 
 # Configs + brand files
-for t in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
+for t in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64; do
   mkdir -p "$OUT_DIR/$t/configs" "$OUT_DIR/$t/brand"
   cp "$ROOT/configs/relay-server.yaml" "$OUT_DIR/$t/configs/"
   cp "$ROOT/configs/relay-agent.yaml" "$OUT_DIR/$t/configs/"
   cp "$ROOT/assets/brand/logo.png" "$OUT_DIR/$t/brand/"
 done
 cp "$ROOT/assets/brand/icon.ico" "$OUT_DIR/windows-amd64/brand/"
+cp "$ROOT/assets/brand/icon.ico" "$OUT_DIR/windows-arm64/brand/"
 cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/linux-amd64/brand/icon.png"
 cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/linux-arm64/brand/icon.png"
 cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/darwin-amd64/brand/icon.png"
 cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/darwin-arm64/brand/icon.png"
 cp "$ROOT/docs/windows-transparent-proxy.md" "$OUT_DIR/windows-amd64/README.md"
+cp "$ROOT/docs/windows-transparent-proxy.md" "$OUT_DIR/windows-arm64/README.md"
 cp "$ROOT/docs/linux-transparent-proxy.md" "$OUT_DIR/linux-amd64/README.md"
 cp "$ROOT/docs/linux-transparent-proxy.md" "$OUT_DIR/linux-arm64/README.md"
 cp "$ROOT/agent/divert/macos/README.md" "$OUT_DIR/darwin-amd64/README.md"

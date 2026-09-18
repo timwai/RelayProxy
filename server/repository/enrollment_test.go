@@ -44,6 +44,73 @@ func TestNewDatabaseGenerationAndEnrollmentApproval(t *testing.T) {
 	}
 }
 
+func TestApprovedIdentityRefreshesRequestedCapabilitiesAndScopesSessionGrants(t *testing.T) {
+	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "refresh-capabilities.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	admin := &User{Username: "admin", PasswordHash: "hash", Role: "admin", Status: "active"}
+	if err := db.CreateUser(admin); err != nil {
+		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "refresh-fingerprint", InstallationID: "refresh-install", PublicKey: []byte("refresh-key"),
+		DeviceName: "before-upgrade", Platform: "windows", Arch: "amd64", ClientVersion: "1.0.0",
+		RequestedCapabilities: []string{"proxy.client"},
+	}
+	pending, err := db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := db.ApproveEnrollment(pending.RequestID, admin.ID, []string{"proxy.client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observation.DeviceName = "after-upgrade"
+	observation.ClientVersion = "2.0.0"
+	observation.RequestedCapabilities = []string{"proxy.client", "proxy.exit"}
+	decision, err := db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decision.ApprovedCapabilities) != 1 || decision.ApprovedCapabilities[0] != "proxy.client" {
+		t.Fatalf("unapproved capability leaked into session grants: %+v", decision.ApprovedCapabilities)
+	}
+	var requestedRaw, approvedRaw, name, version string
+	if err := db.QueryRow(`SELECT requested_capabilities, approved_capabilities, name, client_version FROM devices WHERE id = ?`, device.ID).
+		Scan(&requestedRaw, &approvedRaw, &name, &version); err != nil {
+		t.Fatal(err)
+	}
+	requested, err := decodeCapabilities(requestedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := decodeCapabilities(approvedRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requested) != 2 || requested[0] != "proxy.client" || requested[1] != "proxy.exit" {
+		t.Fatalf("requested capabilities were not refreshed: %+v", requested)
+	}
+	if len(approved) != 1 || approved[0] != "proxy.client" || name != "after-upgrade" || version != "2.0.0" {
+		t.Fatalf("unexpected persisted device state: approved=%+v name=%q version=%q", approved, name, version)
+	}
+	if _, err := db.UpdateDeviceCapabilities(device.ID, admin.ID, []string{"proxy.client", "proxy.exit"}); err != nil {
+		t.Fatalf("administrator could not approve newly declared exit capability: %v", err)
+	}
+
+	observation.RequestedCapabilities = []string{"proxy.client"}
+	decision, err = db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decision.ApprovedCapabilities) != 1 || decision.ApprovedCapabilities[0] != "proxy.client" {
+		t.Fatalf("locally disabled exit remained in effective session grants: %+v", decision.ApprovedCapabilities)
+	}
+}
+
 func TestRDPApprovalCreatesOwnerScopedTargetGrant(t *testing.T) {
 	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "rdp.db"))
 	if err != nil {

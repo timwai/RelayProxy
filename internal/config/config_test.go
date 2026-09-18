@@ -28,6 +28,57 @@ func TestApplyAgentDefaultsPreservesExplicitRoutingMode(t *testing.T) {
 	}
 }
 
+func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
+	agent := &AgentConfigFile{}
+	if err := NormalizeAgentConfig(agent); err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]*bool{
+		"server TLS": agent.Server.TLSEnabled, "SOCKS5": agent.Proxy.SOCKS5.Enabled,
+		"HTTP": agent.Proxy.HTTP.Enabled, "RDP": agent.RDP.Enabled,
+		"exit": agent.Exit.Enabled, "GUI": agent.GUI.Enabled,
+		"minimize to tray": agent.GUI.MinimizeToTray, "web": agent.Web.Enabled,
+	} {
+		if value == nil || !*value {
+			t.Errorf("%s default = %v, want concrete true", name, value)
+		}
+	}
+	if agent.Exit.Access.Domains == nil || agent.Exit.Access.CIDRs == nil {
+		t.Fatal("agent access-list defaults must be concrete empty lists")
+	}
+
+	agentPath := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := SaveAgentConfig(agentPath, agent); err != nil {
+		t.Fatal(err)
+	}
+	agentYAML, err := os.ReadFile(agentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(agentYAML, []byte("null")) {
+		t.Fatalf("agent defaults persisted as null:\n%s", agentYAML)
+	}
+
+	server := &ServerConfig{}
+	if err := NormalizeServerConfig(server); err != nil {
+		t.Fatal(err)
+	}
+	if server.Server.TLSEnabled == nil || !*server.Server.TLSEnabled || server.RDP.Ingress.Enabled == nil || *server.RDP.Ingress.Enabled {
+		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled)
+	}
+	serverPath := filepath.Join(t.TempDir(), "server.yaml")
+	if err := SaveServerConfig(serverPath, server); err != nil {
+		t.Fatal(err)
+	}
+	serverYAML, err := os.ReadFile(serverPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(serverYAML, []byte("null")) {
+		t.Fatalf("server defaults persisted as null:\n%s", serverYAML)
+	}
+}
+
 func TestRoutingEmptyListSurvivesPersistence(t *testing.T) {
 	for _, action := range []routing.Action{routing.ActionReject, routing.ActionDirect} {
 		t.Run(string(action), func(t *testing.T) {

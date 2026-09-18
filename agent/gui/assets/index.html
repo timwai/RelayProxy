@@ -656,7 +656,7 @@
             </div><p id="share-acl-hint" class="config-help"></p>
           </details>
         </div>
-        <div class="config-actions"><span class="config-help">角色调整请前往「连接与身份」。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary config-small">保存出口设置</button></div>
+        <div class="config-actions"><span class="config-help">本机开关决定是否申请并承载出口能力；最终权限仍由服务端管理员批准。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary config-small">保存出口设置</button></div>
       </section>
 
       <!-- ============ 服务端审批 ============ -->
@@ -859,24 +859,26 @@
     function updateFieldDependencies() {
       if (!state.cfg) return;
       var locked = !state.loaded || state.saving, tls = $('cfg-tls-on').checked;
-      var isClient = true, isExit = false;
-      ['cfg-socks-on','cfg-http-on'].forEach(function (id) { $(id).disabled = locked || !isClient; });
+      var approvedMode = state.status && state.status.connected ? (state.status.mode || '') : '';
+      var clientApproved = approvedMode === 'CLIENT' || approvedMode === 'BOTH';
+      var exitApproved = approvedMode === 'EXIT' || approvedMode === 'BOTH';
+      ['cfg-socks-on','cfg-http-on'].forEach(function (id) { $(id).disabled = locked; });
       ['listen','port'].forEach(function (suffix) {
-        $('cfg-socks-' + suffix).disabled = locked || !isClient || !$('cfg-socks-on').checked;
-        $('cfg-http-' + suffix).disabled = locked || !isClient || !$('cfg-http-on').checked;
+        $('cfg-socks-' + suffix).disabled = locked || !$('cfg-socks-on').checked;
+        $('cfg-http-' + suffix).disabled = locked || !$('cfg-http-on').checked;
       });
       var caps = state.cfg.networkCapabilities || {};
-      $('cfg-tun-on').disabled = locked || !isClient || (!networkReady(caps) && !$('cfg-tun-on').checked);
-      $('cfg-exit-on').disabled = locked || !isExit;
-      ['cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'].forEach(function (id) { $(id).disabled = locked || !isExit || !$('cfg-exit-on').checked; });
+      $('cfg-tun-on').disabled = locked || (!networkReady(caps) && !$('cfg-tun-on').checked);
+      $('cfg-exit-on').disabled = locked;
+      ['cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'].forEach(function (id) { $(id).disabled = locked || !$('cfg-exit-on').checked; });
       $('cfg-quic-port').disabled = locked || !tls || $('cfg-transport').value === 'tcp_only';
       $('cfg-tcp-port').disabled = locked || (tls && $('cfg-transport').value === 'quic_only');
       $('cfg-routing-default').disabled = locked || $('cfg-routing-mode').value !== 'rule';
       $('connection-tls-hint').textContent = tls ? '隧道使用 TLS 加密并验证系统信任链；RDP UDP 还要求服务端 QUIC 的 UDP 端口可达。' : '隧道将使用明文 TCP，QUIC 和 RDP UDP 不可用。';
-      $('connection-role-hint').textContent = '本机默认申请代理客户端能力；最终能力由服务端管理员审批。';
-      $('share-role-hint').textContent = isExit ? '当前编辑角色具备出口能力；下方权限决定本机允许转发的目标范围。' : '当前为客户端角色。要共享本机网络，请先在「连接与身份」选择出口或双向角色。';
-      $('proxy-role-hint').classList.toggle('hidden', isClient);
-      $('proxy-role-hint').textContent = '当前为纯出口角色，本地代理设置会保留，暂不提供 SOCKS5 / HTTP 入口。';
+      $('connection-role-hint').textContent = approvedMode ? '服务端当前授权：' + (approvedMode === 'BOTH' ? '客户端 + 出口' : approvedMode === 'EXIT' ? '出口节点' : '客户端') + '。能力调整由服务端管理员审批。' : '尚未取得服务端授权；本机会声明所启用的能力，最终由服务端管理员审批。';
+      $('share-role-hint').textContent = exitApproved ? '服务端已授权出口能力；下方本机权限决定允许转发的目标范围。' : approvedMode === 'CLIENT' ? '服务端当前仅授权客户端能力。仍可配置并启用本机出口，保存后重启客户端，并请管理员在服务端为此设备开启出口能力。' : '可预先配置本机出口；保存后重启客户端，并由服务端管理员批准出口能力后生效。';
+      $('proxy-role-hint').classList.toggle('hidden', !approvedMode || clientApproved);
+      $('proxy-role-hint').textContent = '服务端当前仅授权出口能力。本地代理设置会保留，但代理流量需要管理员同时批准客户端能力。';
       $('proxy-scope-hint').textContent = $('cfg-socks-listen').value === '0.0.0.0' || $('cfg-http-listen').value === '0.0.0.0' ? '所有网卡可访问；本地代理不提供密码认证。' : '监听本机地址时，其他设备无法访问这些端口。';
       var aclMode = $('cfg-acl-mode').value;
       $('share-acl-hint').textContent = aclMode === 'allow' ? '允许列表为空时拒绝所有目标。命中列表仍需满足上方网络权限。' : aclMode === 'deny' ? '命中列表的目标会被拒绝，其余目标仍需满足上方网络权限。' : '列表暂不参与筛选，内容会保留；互联网、私网和回环开关仍有效。';
@@ -1023,6 +1025,7 @@
       markLeg('tun', st.divertRunning);
       $('home-tun').textContent = st.divertRunning ? '按进程代理 TCP / UDP' : '未运行';
       renderRDP(st);
+      updateFieldDependencies();
     }
 
     function htmlEscape(value) {

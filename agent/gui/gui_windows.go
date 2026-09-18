@@ -20,6 +20,7 @@ import (
 	"unsafe"
 
 	"github.com/jchv/go-webview2"
+	"github.com/jchv/go-webview2/webviewloader"
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
@@ -108,6 +109,10 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	activeApp.Store(a)
 	defer activeApp.Store(nil)
 
+	if err := checkWebView2Runtime(); err != nil {
+		return err
+	}
+
 	// WebView2 needs a writable profile directory. Without an explicit one it
 	// tries the process working directory, which is C:\Windows\system32 when the
 	// agent is started from the login-autostart Run key — and that fails with
@@ -193,6 +198,38 @@ func Run(b *bridge.UIBridge, opts Options) error {
 		log.Printf("[GUI] 停止代理时出错: %v", err)
 	}
 	return nil
+}
+
+// checkWebView2Runtime prevents go-webview2 from terminating the GUI process
+// through log.Fatal when the architecture-specific Evergreen runtime is absent
+// or cannot be loaded. This is especially important for Windows ARM64, where
+// an x64 runtime/loader cannot be used by an ARM64 process.
+func checkWebView2Runtime() error {
+	version, err := webviewloader.GetInstalledVersion()
+	if err != nil {
+		return fmt.Errorf("无法加载 Windows %s WebView2 Loader: %w", runtime.GOARCH, err)
+	}
+	if strings.TrimSpace(version) == "" {
+		return fmt.Errorf("未检测到 Windows %s WebView2 Runtime，请安装对应架构的 Microsoft Edge WebView2 Runtime", runtime.GOARCH)
+	}
+	return nil
+}
+
+// ShowStartupError makes GUI-subsystem failures visible when the executable is
+// launched from Explorer, where stdout/stderr are not attached to a console.
+func ShowStartupError(err error, fallbackURL string) {
+	if err == nil {
+		return
+	}
+	message := "RelayProxy 桌面界面无法启动。\n\n原因：" + err.Error()
+	if fallbackURL != "" {
+		message += "\n\nAgent 仍会继续运行，请在浏览器打开：\n" + fallbackURL
+	}
+	text, textErr := windows.UTF16PtrFromString(message)
+	title, titleErr := windows.UTF16PtrFromString("RelayProxy")
+	if textErr == nil && titleErr == nil {
+		win.MessageBox(0, text, title, win.MB_OK|win.MB_ICONERROR)
+	}
 }
 
 // RequestQuit terminates the active native UI event loop. It is used by the

@@ -18,19 +18,22 @@ if (-not $gvi) {
     $env:Path = "$(go env GOPATH)\bin;$env:Path"
 }
 
-Write-Host "[3/3] Embed Windows icons into resource_windows.syso"
-Push-Location (Join-Path $Root "cmd\relay-server")
-try {
-    goversioninfo -64 -o resource_windows.syso versioninfo.json
-    if ($LASTEXITCODE -ne 0) { throw "goversioninfo server failed" }
-} finally { Pop-Location }
+Write-Host "[3/3] Embed Windows icons into architecture-specific resources"
+function New-WindowsResources {
+    param([string]$PackageDir)
 
-Push-Location (Join-Path $Root "cmd\relay-agent")
-try {
-    goversioninfo -64 -o resource_windows.syso versioninfo.json
-    if ($LASTEXITCODE -ne 0) { throw "goversioninfo agent failed" }
-} finally { Pop-Location }
+    Push-Location $PackageDir
+    try {
+        Remove-Item resource_windows.syso -Force -ErrorAction SilentlyContinue
+        goversioninfo -64 -arm=false -o resource_windows_amd64.syso versioninfo.json
+        if ($LASTEXITCODE -ne 0) { throw "goversioninfo amd64 failed: $PackageDir" }
+        goversioninfo -64 -arm=true -o resource_windows_arm64.syso versioninfo.json
+        if ($LASTEXITCODE -ne 0) { throw "goversioninfo arm64 failed: $PackageDir" }
+    } finally { Pop-Location }
+}
+New-WindowsResources (Join-Path $Root "cmd\relay-server")
+New-WindowsResources (Join-Path $Root "cmd\relay-agent")
 
 Write-Host "Brand assets ready." -ForegroundColor Green
-Get-ChildItem assets\brand, server\web\favicon.ico, server\web\img, cmd\relay-server\resource_windows.syso, cmd\relay-agent\resource_windows.syso |
+Get-ChildItem assets\brand, server\web\favicon.ico, server\web\img, cmd\relay-server\resource_windows_*.syso, cmd\relay-agent\resource_windows_*.syso |
     Format-Table Name, Length -AutoSize

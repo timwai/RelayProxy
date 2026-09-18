@@ -167,6 +167,9 @@ func parseServerConfig(data []byte) (*ServerConfig, error) {
 }
 
 func applyServerDefaults(cfg *ServerConfig) {
+	if cfg.Server.TLSEnabled == nil {
+		cfg.Server.TLSEnabled = BoolPtr(true)
+	}
 	if cfg.Server.QUIC.Listen == "" {
 		cfg.Server.QUIC.Listen = ":443"
 	}
@@ -208,6 +211,21 @@ func applyServerDefaults(cfg *ServerConfig) {
 	}
 	if cfg.RDP.Ingress.RateLimitPerMin == 0 {
 		cfg.RDP.Ingress.RateLimitPerMin = 120
+	}
+	if cfg.RDP.Ingress.Enabled == nil {
+		cfg.RDP.Ingress.Enabled = BoolPtr(false)
+	}
+	if cfg.RelayACL == nil {
+		cfg.RelayACL = &RelayACLConfig{}
+	}
+	if cfg.RelayACL.AllowInternet == nil {
+		cfg.RelayACL.AllowInternet = BoolPtr(true)
+	}
+	if cfg.RelayACL.Access.Domains == nil {
+		cfg.RelayACL.Access.Domains = []string{}
+	}
+	if cfg.RelayACL.Access.CIDRs == nil {
+		cfg.RelayACL.Access.CIDRs = []string{}
 	}
 }
 
@@ -321,8 +339,32 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	if cfg.Web.Port == 0 {
 		cfg.Web.Port = 9090
 	}
+	// Materialize every effective boolean default. Keeping these fields nil made
+	// the runtime behave as enabled while a later full save serialized them as
+	// YAML null, leaving the generated configuration ambiguous to operators and
+	// other tooling.
+	for _, field := range []**bool{
+		&cfg.Server.TLSEnabled,
+		&cfg.Proxy.SOCKS5.Enabled,
+		&cfg.Proxy.HTTP.Enabled,
+		&cfg.RDP.Enabled,
+		&cfg.Exit.Enabled,
+		&cfg.GUI.Enabled,
+		&cfg.GUI.MinimizeToTray,
+		&cfg.Web.Enabled,
+	} {
+		if *field == nil {
+			*field = BoolPtr(true)
+		}
+	}
 	if cfg.Network.ExcludeProcesses == nil {
 		cfg.Network.ExcludeProcesses = []string{"relayproxy", "relayproxy.exe", "RelayProxy.exe"}
+	}
+	if cfg.Exit.Access.Domains == nil {
+		cfg.Exit.Access.Domains = []string{}
+	}
+	if cfg.Exit.Access.CIDRs == nil {
+		cfg.Exit.Access.CIDRs = []string{}
 	}
 
 	// Only a completely omitted routing configuration receives the sample
@@ -340,10 +382,6 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 		cfg.Routing.Rules = []routing.Rule{}
 	}
 
-	// nil *bool means "enabled by default"
-	_ = cfg.GUI.Enabled
-	_ = cfg.GUI.MinimizeToTray
-	_ = cfg.Web.Enabled
 }
 
 // IsGUIEnabled reports whether the desktop window should be launched.

@@ -225,6 +225,7 @@ type Agent struct {
 	latencyMs     atomic.Int64
 	handshakeOK   atomic.Bool
 	approvalState atomic.Pointer[string]
+	approvedMode  string
 	rdpTargets    []rdp.Target
 	rdpConnection *rdp.Connection
 	rdpP2P        *rdpp2p.Manager
@@ -383,6 +384,7 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	epoch := a.epoch
 	a.handshakeOK.Store(false)
 	a.readySession = nil
+	a.approvedMode = ""
 	oldControl := a.ctrlStream
 	oldRDP := a.rdpConnection
 	oldP2P := a.rdpP2P
@@ -426,6 +428,7 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 		if a.epoch == epoch && a.readySession == sess {
 			a.readySession = nil
 			a.ctrlStream = nil
+			a.approvedMode = ""
 			a.handshakeOK.Store(false)
 		}
 		a.mu.Unlock()
@@ -519,6 +522,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		return errors.New("session superseded during authentication")
 	}
 	a.cfg.DeviceID = accepted.DeviceID
+	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
 	a.rdpTargets = make([]rdp.Target, 0, len(accepted.RDPTargets))
 	for _, target := range accepted.RDPTargets {
 		a.rdpTargets = append(a.rdpTargets, rdp.Target{DeviceID: target.DeviceID, Name: target.Name, Online: target.Online})
@@ -786,7 +790,7 @@ func (a *Agent) SelectExit(exitID string) {
 func (a *Agent) Status() AgentStatus {
 	a.mu.RLock()
 	st := AgentStatus{
-		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName, Mode: a.cfg.Mode,
+		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName, Mode: a.approvedMode,
 		SOCKS5Running: a.started && a.socksServer != nil,
 		HTTPRunning:   a.started && a.httpServer != nil,
 		ExitRunning:   a.started && a.exitHandler != nil,
@@ -861,6 +865,21 @@ func (a *Agent) Status() AgentStatus {
 		st.ActiveStreams += handler.ActiveStreams()
 	}
 	return st
+}
+
+func modeForApprovedCapabilities(capabilities []string) string {
+	client := slices.Contains(capabilities, protocol.CapabilityProxyClient)
+	exit := slices.Contains(capabilities, protocol.CapabilityProxyExit)
+	switch {
+	case client && exit:
+		return "BOTH"
+	case exit:
+		return "EXIT"
+	case client:
+		return "CLIENT"
+	default:
+		return ""
+	}
 }
 
 // RDPTargets returns the server-approved target list received during the last

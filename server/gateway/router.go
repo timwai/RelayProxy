@@ -27,7 +27,6 @@ type StreamRouter struct {
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
 	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
-	ownerLookup       func(deviceID string) (string, error)
 	onAudit           func(audit *repository.ConnectionAudit)
 }
 
@@ -59,26 +58,9 @@ func NewStreamRouter(
 	}
 }
 
-// SetOwnerLookup optionally fills audit.UserID from device ownership.
-func (r *StreamRouter) SetOwnerLookup(fn func(deviceID string) (string, error)) {
-	r.ownerLookup = fn
-}
-
 func (r *StreamRouter) emitAudit(a *repository.ConnectionAudit) {
 	if r.onAudit == nil || a == nil {
 		return
-	}
-	if a.UserID == "" && a.ClientDeviceID != "" {
-		if sess, ok := r.sessions.Get(a.ClientDeviceID); ok {
-			a.UserID = sess.OwnerUserID
-		}
-	}
-	// Compatibility fallback for audits that don't originate from a currently
-	// authenticated session. Normal proxy traffic never reaches this DB lookup.
-	if a.UserID == "" && r.ownerLookup != nil && a.ClientDeviceID != "" {
-		if uid, err := r.ownerLookup(a.ClientDeviceID); err == nil {
-			a.UserID = uid
-		}
 	}
 	r.onAudit(a)
 }
@@ -184,6 +166,7 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	now := time.Now()
 	baseAudit := func(result, errCode, resolvedIP string) *repository.ConnectionAudit {
 		return &repository.ConnectionAudit{
+			UserID:         clientSession.OwnerUserID,
 			ClientDeviceID: clientSession.DeviceID,
 			ExitDeviceID:   header.ExitDeviceID,
 			Protocol:       "tcp",
@@ -340,6 +323,7 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	}
 	exitSession.ActiveStreams.Add(-1)
 	r.emitAudit(&repository.ConnectionAudit{
+		UserID:         clientSession.OwnerUserID,
 		ClientDeviceID: clientSession.DeviceID,
 		ExitDeviceID:   exitDeviceID,
 		Protocol:       "tcp",
@@ -376,6 +360,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	now := time.Now()
 	baseAudit := func(result, errCode, resolvedIP string) *repository.ConnectionAudit {
 		return &repository.ConnectionAudit{
+			UserID:         clientSession.OwnerUserID,
 			ClientDeviceID: clientSession.DeviceID,
 			ExitDeviceID:   header.ExitDeviceID,
 			Protocol:       "udp",
@@ -585,6 +570,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	}
 	exitSession.ActiveStreams.Add(-1)
 	r.emitAudit(&repository.ConnectionAudit{
+		UserID:         clientSession.OwnerUserID,
 		ClientDeviceID: clientSession.DeviceID,
 		ExitDeviceID:   exitDeviceID,
 		Protocol:       "udp",

@@ -154,7 +154,7 @@ func main() {
 				return gateway.DeviceAuthorization{}, err
 			}
 			authorized := gateway.DeviceAuthorization{State: decision.State, DeviceID: decision.DeviceID,
-				ApprovedCapabilities: decision.ApprovedCapabilities}
+				OwnerUserID: decision.OwnerUserID, ApprovedCapabilities: decision.ApprovedCapabilities}
 			if decision.State == repository.EnrollmentApproved && decision.DeviceID != "" {
 				targets, listErr := db.ListRDPTargetsForController(decision.DeviceID)
 				if listErr != nil {

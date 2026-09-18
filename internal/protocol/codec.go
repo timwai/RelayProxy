@@ -1,9 +1,9 @@
 package protocol
 
 import (
-	"errors"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 )

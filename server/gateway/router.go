@@ -92,26 +92,36 @@ func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDev
 		return exitSession, nil
 	}
 
-	exits := r.sessions.GetExits()
 	if client != nil && client.OwnerUserID != "" {
-		exits = r.sessions.GetExitsForOwner(client.OwnerUserID)
+		candidate, count := r.sessions.UniqueExitForOwner(client.OwnerUserID)
+		switch count {
+		case 0:
+			return nil, errNoExitOnline
+		case 1:
+			return candidate, nil
+		default:
+			return nil, errMultipleExits
+		}
 	}
-	var candidates []*session.DeviceSession
+
+	exits := r.sessions.GetExits()
+	var candidate *session.DeviceSession
+	count := 0
 	for _, e := range exits {
 		ok, err := r.authorizeExit(client, e)
 		if err != nil || !ok {
 			continue
 		}
-		candidates = append(candidates, e)
+		candidate = e
+		count++
+		if count > 1 {
+			return nil, errMultipleExits
+		}
 	}
-	switch len(candidates) {
-	case 0:
+	if count == 0 {
 		return nil, errNoExitOnline
-	case 1:
-		return candidates[0], nil
-	default:
-		return nil, errMultipleExits
 	}
+	return candidate, nil
 }
 
 // HandleClientStream processes a new stream opened by a Client

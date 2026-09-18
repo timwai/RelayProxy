@@ -265,6 +265,27 @@ func (m *Manager) GetExitsForOwner(ownerUserID string) []*DeviceSession {
 	return res
 }
 
+// UniqueExitForOwner is the allocation-free fast path used by auto-routing.
+// The count lets callers distinguish no exit, exactly one, and ambiguity.
+func (m *Manager) UniqueExitForOwner(ownerUserID string) (*DeviceSession, int) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var bucket map[string]*DeviceSession
+	if ownerUserID == "" {
+		bucket = m.exits
+	} else {
+		bucket = m.exitsByOwner[ownerUserID]
+	}
+	if len(bucket) != 1 {
+		return nil, len(bucket)
+	}
+	for _, sess := range bucket {
+		return sess, 1
+	}
+	return nil, 0
+}
+
 func (m *Manager) CloseAll() {
 	m.mu.Lock()
 	toClose := make([]tunnel.TunnelSession, 0, len(m.sessions))

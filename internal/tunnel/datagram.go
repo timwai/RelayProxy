@@ -122,12 +122,11 @@ func newDatagramMux(s *QUICSession) *datagramMux {
 // DatagramChannel carries bounded fragments for one association on one session
 // generation. Relays forward these fragments without reassembly.
 type DatagramChannel struct {
-	ID          uint64
-	mux         *datagramMux
-	frames      chan receivedDatagram
-	framesReady chan struct{}
-	done        chan struct{}
-	closeOnce   sync.Once
+	ID        uint64
+	mux       *datagramMux
+	frames    chan receivedDatagram
+	done      chan struct{}
+	closeOnce sync.Once
 	closed      bool // guarded by mux.mu
 	onClose     func()
 	reaper      *UDPDatagramConn // guarded by mux.mu
@@ -168,7 +167,7 @@ func (m *datagramMux) openChannel(id uint64) (*DatagramChannel, error) {
 	if !m.budget.reserveAssociation() {
 		return nil, ErrDatagramLimit
 	}
-	c := &DatagramChannel{ID: id, mux: m, frames: make(chan receivedDatagram, datagramQueueSize), framesReady: make(chan struct{}, 1), done: make(chan struct{})}
+	c := &DatagramChannel{ID: id, mux: m, frames: make(chan receivedDatagram, datagramQueueSize), done: make(chan struct{})}
 	m.channels[id] = c
 	return c, nil
 }
@@ -203,10 +202,6 @@ func (m *datagramMux) deliver(packet []byte) {
 	queued := receivedDatagram{frame: frame, bytes: len(packet)}
 	select {
 	case c.frames <- queued:
-		select {
-		case c.framesReady <- struct{}{}:
-		default:
-		}
 	default:
 		// Prefer the newest RDP frame when a burst outruns the consumer. Keeping
 		// old fragments in front of fresh ones creates visible animation latency
@@ -219,10 +214,6 @@ func (m *datagramMux) deliver(packet []byte) {
 		}
 		select {
 		case c.frames <- queued:
-			select {
-			case c.framesReady <- struct{}{}:
-			default:
-			}
 		default:
 			m.budget.releaseQueue(len(packet))
 			m.budget.queueDrops.Add(1)

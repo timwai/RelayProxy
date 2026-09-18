@@ -191,7 +191,6 @@ func TestTLSOpenStreamRespectsCancelledContext(t *testing.T) {
 	}
 }
 
-
 func TestDefaultYAMUXConfigMatchesRelayStreamCapacity(t *testing.T) {
 	cfg := DefaultYAMUXConfig()
 	if cfg.AcceptBacklog != yamuxAcceptBacklog {

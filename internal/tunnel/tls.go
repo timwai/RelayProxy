@@ -90,6 +90,7 @@ type TLSSession struct {
 	conn     net.Conn
 	session  *yamux.Session
 	openGate chan struct{}
+	closed   atomic.Bool
 }
 
 // DefaultYAMUXConfig keeps stream setup responsive and permits enough
@@ -174,6 +175,9 @@ func ServerTLS(tlsConn net.Conn, yamuxConfig *yamux.Config) (*TLSSession, error)
 }
 
 func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
+	if s.closed.Load() {
+		return nil, net.ErrClosed
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -189,6 +193,10 @@ func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	if err := ctx.Err(); err != nil {
 		<-s.openGate
 		return nil, err
+	}
+	if s.closed.Load() {
+		<-s.openGate
+		return nil, net.ErrClosed
 	}
 	select {
 	case <-s.Done():
@@ -254,6 +262,9 @@ func (s *TLSSession) LocalAddr() net.Addr {
 }
 
 func (s *TLSSession) Close() error {
+	if s.closed.Swap(true) {
+		return nil
+	}
 	_ = s.session.Close()
 	err := s.conn.Close()
 	// Drain the full semaphore capacity. Once the yamux session is closed,

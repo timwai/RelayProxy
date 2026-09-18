@@ -156,9 +156,6 @@ func main() {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
 	router.SetRDPControlHandler(coordinator.HandleControl)
-	router.SetOwnerLookup(func(deviceID string) (string, error) {
-		return db.GetDeviceOwnerUserID(deviceID)
-	})
 
 	// 5. Start Tunnel Gateway (QUIC + TLS; QUIC requires TLS)
 	quicAddr := cfg.Server.QUIC.Listen

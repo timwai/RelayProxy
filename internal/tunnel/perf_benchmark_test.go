@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/yamux"
 )
@@ -21,6 +22,37 @@ func BenchmarkPipe1MiB(b *testing.B) {
 		done := make(chan struct{})
 		go func() {
 			Pipe(context.Background(), left, right, 0, nil)
+			close(done)
+		}()
+		writeDone := make(chan error, 1)
+		go func() {
+			_, err := leftPeer.Write(payload)
+			_ = leftPeer.Close()
+			writeDone <- err
+		}()
+		if _, err := io.Copy(io.Discard, rightPeer); err != nil {
+			b.Fatal(err)
+		}
+		_ = rightPeer.Close()
+		if err := <-writeDone; err != nil {
+			b.Fatal(err)
+		}
+		<-done
+	}
+}
+
+
+func BenchmarkPipe1MiBIdleTimeout(b *testing.B) {
+	payload := bytes.Repeat([]byte{0x5a}, 1<<20)
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		left, leftPeer := net.Pipe()
+		right, rightPeer := net.Pipe()
+		done := make(chan struct{})
+		go func() {
+			Pipe(context.Background(), left, right, 5*time.Minute, nil)
 			close(done)
 		}()
 		writeDone := make(chan error, 1)

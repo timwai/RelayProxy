@@ -40,6 +40,7 @@ type UDPDatagramConn struct {
 	lastActivityNanos           atomic.Int64
 	deadlineChanged             chan struct{}
 	readMu, writeMu             sync.Mutex
+	readTimer                    *time.Timer
 	assemblyMu                  sync.Mutex
 	pending                     map[uint32]*pendingUDP
 	packetID                    atomic.Uint32
@@ -187,12 +188,25 @@ func (c *UDPDatagramConn) assemble(frame, dst []byte) (int, bool) {
 	return n, true
 }
 
-func deadlineTimer(deadline time.Time) (<-chan time.Time, func()) {
-	if deadline.IsZero() {
-		return nil, func() {}
+func (c *UDPDatagramConn) resetReadTimer(deadline time.Time) <-chan time.Time {
+	if c.readTimer != nil {
+		if !c.readTimer.Stop() {
+			select {
+			case <-c.readTimer.C:
+			default:
+			}
+		}
 	}
-	t := time.NewTimer(max(0, time.Until(deadline)))
-	return t.C, func() { t.Stop() }
+	if deadline.IsZero() {
+		return nil
+	}
+	d := max(time.Duration(0), time.Until(deadline))
+	if c.readTimer == nil {
+		c.readTimer = time.NewTimer(d)
+	} else {
+		c.readTimer.Reset(d)
+	}
+	return c.readTimer.C
 }
 
 func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
@@ -222,25 +236,19 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			c.touch()
 			return n, c.remote, nil
 		}
-		timeout, stop := deadlineTimer(deadline)
+		timeout := c.resetReadTimer(deadline)
 		select {
 		case <-c.done:
-			stop()
 			return 0, nil, net.ErrClosed
 		case <-c.channel.done:
-			stop()
 			return 0, nil, net.ErrClosed
 		case <-c.channel.mux.ctx.Done():
-			stop()
 			return 0, nil, net.ErrClosed
 		case <-timeout:
-			stop()
 			return 0, nil, os.ErrDeadlineExceeded
 		case <-changed:
-			stop()
 			continue
 		case <-c.channel.framesReady:
-			stop()
 			continue
 		}
 	}

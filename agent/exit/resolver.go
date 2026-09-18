@@ -71,7 +71,7 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 	if len(ips) == 0 {
 		return nil, nil
 	}
-ips = cloneIPs(ips)
+	ips = cloneIPs(ips)
 
 	c.mu.Lock()
 	if len(c.entries) >= c.maxEntries {

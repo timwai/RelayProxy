@@ -37,6 +37,7 @@ type UDPDatagramConn struct {
 	once                        sync.Once
 	mu                          sync.Mutex
 	readDeadline, writeDeadline time.Time
+	writeDeadlineNanos          atomic.Int64
 	lastActivityNanos           atomic.Int64
 	deadlineChanged             chan struct{}
 	readMu, writeMu             sync.Mutex
@@ -143,6 +144,16 @@ func (c *UDPDatagramConn) assemble(frame, dst []byte) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
+	if f.Count == 1 {
+		select {
+		case <-c.done:
+			return 0, false
+		case <-c.channel.done:
+			return 0, false
+		default:
+			return copy(dst, f.Payload), true
+		}
+	}
 	c.assemblyMu.Lock()
 	defer c.assemblyMu.Unlock()
 	select {
@@ -151,9 +162,6 @@ func (c *UDPDatagramConn) assemble(frame, dst []byte) (int, bool) {
 	case <-c.channel.done:
 		return 0, false
 	default:
-	}
-	if f.Count == 1 {
-		return copy(dst, f.Payload), true
 	}
 	p := c.pending[f.PacketID]
 	if p == nil {
@@ -255,30 +263,26 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 }
 
 func (c *UDPDatagramConn) send(frame []byte) error {
-	c.mu.Lock()
-	deadline := c.writeDeadline
-	c.mu.Unlock()
+	deadlineNanos := c.writeDeadlineNanos.Load()
 	select {
 	case <-c.done:
 		return net.ErrClosed
 	default:
 	}
-	if !deadline.IsZero() && !time.Now().Before(deadline) {
+	if deadlineNanos != 0 && time.Now().UnixNano() >= deadlineNanos {
 		return os.ErrDeadlineExceeded
 	}
 	return c.channel.sendFrame(frame)
 }
 
 func (c *UDPDatagramConn) sendFragment(packetID uint32, total uint16, index, count uint8, payload []byte) error {
-	c.mu.Lock()
-	deadline := c.writeDeadline
-	c.mu.Unlock()
+	deadlineNanos := c.writeDeadlineNanos.Load()
 	select {
 	case <-c.done:
 		return net.ErrClosed
 	default:
 	}
-	if !deadline.IsZero() && !time.Now().Before(deadline) {
+	if deadlineNanos != 0 && time.Now().UnixNano() >= deadlineNanos {
 		return os.ErrDeadlineExceeded
 	}
 	return c.channel.sendFragment(packetID, total, index, count, payload)
@@ -323,6 +327,11 @@ func (c *UDPDatagramConn) SetDeadline(t time.Time) error {
 	}
 	c.readDeadline = t
 	c.writeDeadline = t
+	if t.IsZero() {
+		c.writeDeadlineNanos.Store(0)
+	} else {
+		c.writeDeadlineNanos.Store(t.UnixNano())
+	}
 	close(c.deadlineChanged)
 	c.deadlineChanged = make(chan struct{})
 	return nil
@@ -349,6 +358,11 @@ func (c *UDPDatagramConn) SetWriteDeadline(t time.Time) error {
 	default:
 	}
 	c.writeDeadline = t
+	if t.IsZero() {
+		c.writeDeadlineNanos.Store(0)
+	} else {
+		c.writeDeadlineNanos.Store(t.UnixNano())
+	}
 	close(c.deadlineChanged)
 	c.deadlineChanged = make(chan struct{})
 	return nil

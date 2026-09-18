@@ -29,7 +29,7 @@ func TestInterleaveIPFamiliesPreservesPreferredFamily(t *testing.T) {
 func TestDNSCacheHitReturnsIndependentIPs(t *testing.T) {
 	cache := newDNSCache(time.Minute, 4)
 	cache.entries["example.test"] = dnsCacheEntry{
-		ips: []net.IP{net.ParseIP("192.0.2.10")},
+		ips:       []net.IP{net.ParseIP("192.0.2.10")},
 		expiresAt: time.Now().Add(time.Minute),
 	}
 	first, err := cache.lookup(context.Background(), "EXAMPLE.TEST.")
@@ -49,7 +49,7 @@ func TestDNSCacheHitReturnsIndependentIPs(t *testing.T) {
 func BenchmarkDNSCacheHit(b *testing.B) {
 	cache := newDNSCache(time.Minute, 4)
 	cache.entries["example.test"] = dnsCacheEntry{
-		ips: []net.IP{net.ParseIP("192.0.2.10"), net.ParseIP("2001:db8::10")},
+		ips:       []net.IP{net.ParseIP("192.0.2.10"), net.ParseIP("2001:db8::10")},
 		expiresAt: time.Now().Add(time.Hour),
 	}
 	ctx := context.Background()

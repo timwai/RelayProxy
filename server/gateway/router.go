@@ -133,8 +133,8 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	_ = clientStream.SetDeadline(handshakeDeadline)
 
 	// 1. Read StreamHeader
-	header, err := protocol.ReadStreamHeader(clientStream)
-	if err != nil {
+	var header protocol.StreamHeader
+	if err := protocol.ReadStreamHeaderInto(clientStream, &header); err != nil {
 		log.Printf("[StreamRouter] Failed to read StreamHeader from device %s: %v", clientSession.DeviceID, err)
 		return
 	}
@@ -142,13 +142,13 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 
 	switch header.Type {
 	case protocol.FrameTypeOpenTCP:
-		r.handleOpenTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
+		r.handleOpenTCP(ctx, &header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenUDP:
-		r.handleOpenUDP(ctx, header, clientStream, clientSession, handshakeDeadline)
+		r.handleOpenUDP(ctx, &header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenRDP:
-		r.handleOpenRDPTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
+		r.handleOpenRDPTCP(ctx, &header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenRDPUDP:
-		r.handleOpenRDPUDP(ctx, header, clientStream, clientSession, handshakeDeadline)
+		r.handleOpenRDPUDP(ctx, &header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeRDPControl:
 		if r.rdpControlHandler != nil && (containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) || containsCapability(clientSession.Grants, protocol.CapabilityRDPHost)) {
 			r.rdpControlHandler(ctx, clientStream, clientSession)

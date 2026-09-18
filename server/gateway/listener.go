@@ -48,7 +48,6 @@ type DeviceAuthorization struct {
 	RDPTargets           []protocol.RDPTarget
 }
 
-
 const deviceRejectionDrainTimeout = time.Second
 
 // writeDeviceRejection half-closes the control stream after the framed

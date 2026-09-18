@@ -20,6 +20,10 @@ import (
 
 const udpIdleTimeout = 60 * time.Second
 
+var udpPipeBufferPool = sync.Pool{
+	New: func() any { return make([]byte, protocol.MaxUDPDatagramPayload+1) },
+}
+
 type HandlerConfig struct {
 	ACLChecker     *acl.Checker
 	ConnectTimeout time.Duration
@@ -388,9 +392,10 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPC
 	go func() {
 		defer wg.Done()
 		defer stop()
-		buf := make([]byte, protocol.MaxUDPDatagramPayload)
+		buf := udpPipeBufferPool.Get().([]byte)
+		defer udpPipeBufferPool.Put(buf)
 		for {
-			n, _, err := pc.ReadFrom(buf)
+			n, _, err := pc.ReadFrom(buf[:protocol.MaxUDPDatagramPayload])
 			if err != nil {
 				return
 			}
@@ -406,7 +411,8 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPC
 		defer stop()
 		// Read one extra byte so an oversized IPv6 datagram is rejected rather
 		// than forwarded as a silently truncated packet.
-		buf := make([]byte, protocol.MaxUDPDatagramPayload+1)
+		buf := udpPipeBufferPool.Get().([]byte)
+		defer udpPipeBufferPool.Put(buf)
 		for {
 			n, err := conn.Read(buf)
 			if err != nil {

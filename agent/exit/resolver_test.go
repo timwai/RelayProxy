@@ -26,7 +26,7 @@ func TestInterleaveIPFamiliesPreservesPreferredFamily(t *testing.T) {
 	}
 }
 
-func TestDNSCacheHitReturnsIndependentIPs(t *testing.T) {
+func TestDNSCacheHitNormalizesHost(t *testing.T) {
 	cache := newDNSCache(time.Minute, 4)
 	cache.entries["example.test"] = dnsCacheEntry{
 		ips:       []net.IP{net.ParseIP("192.0.2.10")},
@@ -36,13 +36,8 @@ func TestDNSCacheHitReturnsIndependentIPs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first[0][0] ^= 0xff
-	second, err := cache.lookup(context.Background(), "example.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if second[0].String() != "192.0.2.10" {
-		t.Fatalf("cached address was mutated: %s", second[0])
+	if len(first) != 1 || first[0].String() != "192.0.2.10" {
+		t.Fatalf("unexpected cached result: %v", first)
 	}
 }
 

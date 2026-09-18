@@ -367,30 +367,18 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 }
 
 func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPConn) {
-	var wg sync.WaitGroup
-	wg.Add(2)
 	var once sync.Once
 	stop := func() { once.Do(func() { _ = pc.Close(); _ = conn.Close() }) }
 	defer stop()
 	stopCancel := context.AfterFunc(ctx, stop)
 	defer stopCancel()
-	var nextDeadlineRefresh atomic.Int64
-	touch := func() {
-		now := time.Now()
-		nowNanos := now.UnixNano()
-		next := nextDeadlineRefresh.Load()
-		if next != 0 && nowNanos < next {
-			return
-		}
-		if !nextDeadlineRefresh.CompareAndSwap(next, now.Add(time.Second).UnixNano()) {
-			return
-		}
-		_ = conn.SetDeadline(now.Add(udpIdleTimeout))
-	}
-	touch()
+
+	var activitySeq atomic.Uint64
+	finished := make(chan struct{}, 2)
+	_ = conn.SetDeadline(time.Now().Add(udpIdleTimeout))
 
 	go func() {
-		defer wg.Done()
+		defer func() { finished <- struct{}{} }()
 		defer stop()
 		buf := udpPipeBufferPool.Get().([]byte)
 		defer udpPipeBufferPool.Put(buf)
@@ -399,7 +387,7 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPC
 			if err != nil {
 				return
 			}
-			touch()
+			activitySeq.Add(1)
 			if _, err := conn.Write(buf[:n]); err != nil {
 				return
 			}
@@ -407,7 +395,7 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPC
 	}()
 
 	go func() {
-		defer wg.Done()
+		defer func() { finished <- struct{}{} }()
 		defer stop()
 		// Read one extra byte so an oversized IPv6 datagram is rejected rather
 		// than forwarded as a silently truncated packet.
@@ -421,14 +409,30 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPC
 			if n > protocol.MaxUDPDatagramPayload {
 				continue
 			}
-			touch()
+			activitySeq.Add(1)
 			if _, err := pc.WriteTo(buf[:n], nil); err != nil {
 				return
 			}
 		}
 	}()
 
-	wg.Wait()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	lastSeq := activitySeq.Load()
+	for completed := 0; completed < 2; {
+		select {
+		case <-ctx.Done():
+			stop()
+		case <-finished:
+			completed++
+		case now := <-ticker.C:
+			seq := activitySeq.Load()
+			if seq != lastSeq {
+				lastSeq = seq
+				_ = conn.SetDeadline(now.Add(udpIdleTimeout))
+			}
+		}
+	}
 }
 
 func isConnRefused(err error) bool {

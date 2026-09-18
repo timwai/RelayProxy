@@ -27,6 +27,7 @@ type HandlerConfig struct {
 
 type Handler struct {
 	cfg           HandlerConfig
+	resolver      *dnsCache
 	activeStreams atomic.Int64
 }
 
@@ -34,7 +35,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
-	return &Handler{cfg: cfg}
+	return &Handler{cfg: cfg, resolver: newDNSCache(defaultDNSCacheTTL, defaultDNSCacheEntries)}
 }
 
 func (h *Handler) ActiveStreams() int64 {
@@ -123,9 +124,10 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 				return
 			}
 		}
+		ips = []net.IP{targetIP}
 	} else {
 		var err error
-		ips, err = net.DefaultResolver.LookupIP(dialCtx, "ip", req.Host)
+		ips, err = h.resolver.lookup(dialCtx, req.Host)
 		if err != nil {
 			log.Printf("[ExitHandler] DNS resolution failed for %s: %v", req.Host, err)
 			_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
@@ -163,29 +165,7 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		}
 	}
 
-	var targetConn net.Conn
-	var lastErr error
-
-	if targetIP != nil {
-		targetAddr := net.JoinHostPort(targetIP.String(), strconv.Itoa(int(req.Port)))
-		dialer := net.Dialer{
-			Timeout:   timeout,
-			KeepAlive: 30 * time.Second,
-		}
-		targetConn, lastErr = dialer.DialContext(dialCtx, "tcp", targetAddr)
-	} else {
-		for _, ip := range ips {
-			targetAddr := net.JoinHostPort(ip.String(), strconv.Itoa(int(req.Port)))
-			dialer := net.Dialer{
-				Timeout:   timeout,
-				KeepAlive: 30 * time.Second,
-			}
-			targetConn, lastErr = dialer.DialContext(dialCtx, "tcp", targetAddr)
-			if lastErr == nil {
-				break
-			}
-		}
-	}
+	targetConn, lastErr := dialTCPIPs(dialCtx, ips, req.Port)
 
 	if targetConn == nil {
 		log.Printf("[ExitHandler] Dial to %s failed: %v", req.Host, lastErr)
@@ -202,6 +182,7 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		return
 	}
 	defer targetConn.Close()
+	tunnel.TuneTCPConn(targetConn)
 
 	resp := protocol.OpenTCPResponse{
 		RequestID: req.RequestID,
@@ -280,7 +261,7 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 		}
 		dialHost = targetIP.String()
 	} else {
-		ips, err := net.DefaultResolver.LookupIP(dialCtx, "ip", req.Host)
+		ips, err := h.resolver.lookup(dialCtx, req.Host)
 		if err != nil || len(ips) == 0 {
 			msg := "no IP addresses found for host: " + req.Host
 			if err != nil {

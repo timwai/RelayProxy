@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"errors"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -60,20 +61,36 @@ func WriteStreamHeader(w io.Writer, h *StreamHeader) error {
 
 // ReadStreamHeader reads and decodes the StreamHeader from r
 func ReadStreamHeader(r io.Reader) (*StreamHeader, error) {
+	header := new(StreamHeader)
+	if err := ReadStreamHeaderInto(r, header); err != nil {
+		return nil, err
+	}
+	return header, nil
+}
+
+// ReadStreamHeaderInto decodes a stream header into caller-owned storage.
+// Hot paths can keep the header on their goroutine stack instead of allocating
+// a separate result object for every logical connection.
+func ReadStreamHeaderInto(r io.Reader, header *StreamHeader) error {
+	if header == nil {
+		return errors.New("nil StreamHeader destination")
+	}
+	*header = StreamHeader{}
+
 	// Read fixed 4-byte prefix: Magic (2), Version (1), Type (1).
 	var fixedBuf [4]byte
 	if _, err := io.ReadFull(r, fixedBuf[:]); err != nil {
-		return nil, err
+		return err
 	}
 
 	magic := binary.BigEndian.Uint16(fixedBuf[0:2])
 	if magic != MagicHeader {
-		return nil, fmt.Errorf("invalid magic header: 0x%04x, expected 0x%04x", magic, MagicHeader)
+		return fmt.Errorf("invalid magic header: 0x%04x, expected 0x%04x", magic, MagicHeader)
 	}
 
 	version := fixedBuf[2]
 	if version != CurrentVersion {
-		return nil, fmt.Errorf("unsupported protocol version: %d, expected %d", version, CurrentVersion)
+		return fmt.Errorf("unsupported protocol version: %d, expected %d", version, CurrentVersion)
 	}
 
 	frameType := FrameType(fixedBuf[3])
@@ -99,27 +116,24 @@ func ReadStreamHeader(r io.Reader) (*StreamHeader, error) {
 
 	reqID, err := readString()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read RequestID: %w", err)
+		return fmt.Errorf("failed to read RequestID: %w", err)
 	}
-
 	clientID, err := readString()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read ClientDeviceID: %w", err)
+		return fmt.Errorf("failed to read ClientDeviceID: %w", err)
 	}
-
 	exitID, err := readString()
 	if err != nil {
-		return nil, fmt.Errorf("failed to read ExitDeviceID: %w", err)
+		return fmt.Errorf("failed to read ExitDeviceID: %w", err)
 	}
 
-	return &StreamHeader{
-		Magic:          magic,
-		Version:        version,
-		Type:           frameType,
-		RequestID:      reqID,
-		ClientDeviceID: clientID,
-		ExitDeviceID:   exitID,
-	}, nil
+	header.Magic = magic
+	header.Version = version
+	header.Type = frameType
+	header.RequestID = reqID
+	header.ClientDeviceID = clientID
+	header.ExitDeviceID = exitID
+	return nil
 }
 
 // WriteJSON writes a uint32 length-prefixed JSON encoded payload to w atomically

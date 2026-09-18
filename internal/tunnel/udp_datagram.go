@@ -36,7 +36,7 @@ type UDPDatagramConn struct {
 	done                        chan struct{}
 	once                        sync.Once
 	mu                          sync.Mutex
-	readDeadline, writeDeadline time.Time
+	readDeadlineNanos           atomic.Int64
 	writeDeadlineNanos          atomic.Int64
 	lastActivityNanos           atomic.Int64
 	activitySeq                 atomic.Uint64
@@ -236,17 +236,17 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	c.readMu.Lock()
 	defer c.readMu.Unlock()
 	for {
-		c.mu.Lock()
-		deadline, changed := c.readDeadline, c.deadlineChanged
-		c.mu.Unlock()
 		select {
 		case <-c.done:
 			return 0, nil, net.ErrClosed
 		default:
 		}
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
+
+		deadlineNanos := c.readDeadlineNanos.Load()
+		if deadlineNanos != 0 && time.Now().UnixNano() >= deadlineNanos {
 			return 0, nil, os.ErrDeadlineExceeded
 		}
+
 		frame, available, err := c.channel.takeFrame()
 		if err != nil {
 			return 0, nil, err
@@ -258,6 +258,22 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			}
 			c.touch()
 			return n, c.remote, nil
+		}
+
+		// Only synchronize with deadlineChanged when the queue is empty and the
+		// read is about to block. This preserves SetReadDeadline wakeups while
+		// keeping the packet-ready path lock-free.
+		c.mu.Lock()
+		deadlineNanos = c.readDeadlineNanos.Load()
+		changed := c.deadlineChanged
+		c.mu.Unlock()
+
+		var deadline time.Time
+		if deadlineNanos != 0 {
+			if time.Now().UnixNano() >= deadlineNanos {
+				return 0, nil, os.ErrDeadlineExceeded
+			}
+			deadline = time.Unix(0, deadlineNanos)
 		}
 		timeout := c.resetReadTimer(deadline)
 		select {
@@ -340,12 +356,13 @@ func (c *UDPDatagramConn) SetDeadline(t time.Time) error {
 		return net.ErrClosed
 	default:
 	}
-	c.readDeadline = t
-	c.writeDeadline = t
 	if t.IsZero() {
+		c.readDeadlineNanos.Store(0)
 		c.writeDeadlineNanos.Store(0)
 	} else {
-		c.writeDeadlineNanos.Store(t.UnixNano())
+		deadlineNanos := t.UnixNano()
+		c.readDeadlineNanos.Store(deadlineNanos)
+		c.writeDeadlineNanos.Store(deadlineNanos)
 	}
 	close(c.deadlineChanged)
 	c.deadlineChanged = make(chan struct{})
@@ -359,7 +376,11 @@ func (c *UDPDatagramConn) SetReadDeadline(t time.Time) error {
 		return net.ErrClosed
 	default:
 	}
-	c.readDeadline = t
+	if t.IsZero() {
+		c.readDeadlineNanos.Store(0)
+	} else {
+		c.readDeadlineNanos.Store(t.UnixNano())
+	}
 	close(c.deadlineChanged)
 	c.deadlineChanged = make(chan struct{})
 	return nil
@@ -372,7 +393,6 @@ func (c *UDPDatagramConn) SetWriteDeadline(t time.Time) error {
 		return net.ErrClosed
 	default:
 	}
-	c.writeDeadline = t
 	if t.IsZero() {
 		c.writeDeadlineNanos.Store(0)
 	} else {

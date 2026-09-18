@@ -590,8 +590,8 @@ func (g *Gateway) acceptControlStream(sess tunnel.TunnelSession, deadline time.T
 			return nil, err
 		}
 
-		var header protocol.StreamHeader
-		if err := protocol.ReadStreamHeaderInto(stream, &header); err != nil {
+		header, err := protocol.ReadStreamHeader(stream)
+		if err != nil {
 			log.Printf("[Gateway] Discarding stream with invalid header from %s: %v", sess.RemoteAddr(), err)
 			_ = stream.Close()
 			continue

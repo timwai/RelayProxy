@@ -68,6 +68,13 @@ func (r *StreamRouter) emitAudit(a *repository.ConnectionAudit) {
 	if r.onAudit == nil || a == nil {
 		return
 	}
+	if a.UserID == "" && a.ClientDeviceID != "" {
+		if sess, ok := r.sessions.Get(a.ClientDeviceID); ok {
+			a.UserID = sess.OwnerUserID
+		}
+	}
+	// Compatibility fallback for audits that don't originate from a currently
+	// authenticated session. Normal proxy traffic never reaches this DB lookup.
 	if a.UserID == "" && r.ownerLookup != nil && a.ClientDeviceID != "" {
 		if uid, err := r.ownerLookup(a.ClientDeviceID); err == nil {
 			a.UserID = uid
@@ -76,9 +83,25 @@ func (r *StreamRouter) emitAudit(a *repository.ConnectionAudit) {
 	r.onAudit(a)
 }
 
+func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool, error) {
+	if client == nil || exit == nil {
+		return false, nil
+	}
+	// Ownership is loaded as part of the authenticated session snapshot.
+	// Authorization changes invalidate that session, so matching owners can be
+	// checked without SQLite on every data stream.
+	if client.OwnerUserID != "" && exit.OwnerUserID != "" {
+		return client.OwnerUserID == exit.OwnerUserID, nil
+	}
+	if r.authChecker != nil {
+		return r.authChecker(client.DeviceID, exit.DeviceID)
+	}
+	return true, nil
+}
+
 // resolveExitSession returns an online exit session.
 // Empty exitDeviceID triggers auto-select when exactly one authorized exit is online (P3-1).
-func (r *StreamRouter) resolveExitSession(clientDeviceID, exitDeviceID string) (*session.DeviceSession, error) {
+func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDeviceID string) (*session.DeviceSession, error) {
 	if exitDeviceID != "" {
 		exitSession, exists := r.sessions.Get(exitDeviceID)
 		if !exists || !exitSession.IsExit() {
@@ -88,13 +111,14 @@ func (r *StreamRouter) resolveExitSession(clientDeviceID, exitDeviceID string) (
 	}
 
 	exits := r.sessions.GetExits()
+	if client != nil && client.OwnerUserID != "" {
+		exits = r.sessions.GetExitsForOwner(client.OwnerUserID)
+	}
 	var candidates []*session.DeviceSession
 	for _, e := range exits {
-		if r.authChecker != nil {
-			ok, err := r.authChecker(clientDeviceID, e.DeviceID)
-			if err != nil || !ok {
-				continue
-			}
+		ok, err := r.authorizeExit(client, e)
+		if err != nil || !ok {
+			continue
 		}
 		candidates = append(candidates, e)
 	}
@@ -102,7 +126,7 @@ func (r *StreamRouter) resolveExitSession(clientDeviceID, exitDeviceID string) (
 	case 0:
 		return nil, errNoExitOnline
 	case 1:
-		log.Printf("[StreamRouter] Auto-selected unique exit %s for client %s", candidates[0].DeviceID, clientDeviceID)
+		log.Printf("[StreamRouter] Auto-selected unique exit %s for client %s", candidates[0].DeviceID, client.DeviceID)
 		return candidates[0], nil
 	default:
 		return nil, errMultipleExits
@@ -111,17 +135,6 @@ func (r *StreamRouter) resolveExitSession(clientDeviceID, exitDeviceID string) (
 
 // HandleClientStream processes a new stream opened by a Client
 func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	if clientSession.Tunnel != nil {
-		go func() {
-			select {
-			case <-clientSession.Tunnel.Done():
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
-	}
 	defer clientStream.Close()
 	stopCancel := tunnel.InterruptOnCancel(ctx, clientStream)
 	defer stopCancel()
@@ -187,7 +200,7 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 
 	// 1. Resolve exit: explicit ID, or auto-pick when exactly one authorized exit is online (P3-1)
 	exitDeviceID := header.ExitDeviceID
-	exitSession, resolveErr := r.resolveExitSession(clientSession.DeviceID, exitDeviceID)
+	exitSession, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
 	if resolveErr != nil {
 		code := protocol.ErrCodeExitOffline
 		msg := resolveErr.Error()
@@ -209,9 +222,8 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 
 	// 2. Validate Client -> Exit authorization (P0-2)
 	// (auto-select already filtered by auth; explicit ID still needs the check)
-	if r.authChecker != nil {
-		authorized, err := r.authChecker(clientSession.DeviceID, exitDeviceID)
-		if err != nil || !authorized {
+	authorized, authErr := r.authorizeExit(clientSession, exitSession)
+	if authErr != nil || !authorized {
 			log.Printf("[StreamRouter] Unauthorized access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
 			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
 				RequestID:    req.RequestID,
@@ -221,7 +233,6 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 			})
 			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
 			return
-		}
 	}
 
 	// Bind the Relay's own policy, replacing any policy supplied by the client.
@@ -380,7 +391,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	}
 
 	exitDeviceID := header.ExitDeviceID
-	exitSession, resolveErr := r.resolveExitSession(clientSession.DeviceID, exitDeviceID)
+	exitSession, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
 	if resolveErr != nil {
 		code := protocol.ErrCodeExitOffline
 		msg := resolveErr.Error()
@@ -400,9 +411,8 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	exitDeviceID = exitSession.DeviceID
 	header.ExitDeviceID = exitDeviceID
 
-	if r.authChecker != nil {
-		authorized, err := r.authChecker(clientSession.DeviceID, exitDeviceID)
-		if err != nil || !authorized {
+	authorized, authErr = r.authorizeExit(clientSession, exitSession)
+	if authErr != nil || !authorized {
 			log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
 			_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
 				RequestID:    req.RequestID,
@@ -412,7 +422,6 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 			})
 			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
 			return
-		}
 	}
 
 	// A client cannot weaken or replace the Relay's destination restrictions.

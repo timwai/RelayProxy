@@ -40,7 +40,7 @@ type UDPDatagramConn struct {
 	lastActivityNanos           atomic.Int64
 	deadlineChanged             chan struct{}
 	readMu, writeMu             sync.Mutex
-	readTimer                    *time.Timer
+	readTimer                   *time.Timer
 	assemblyMu                  sync.Mutex
 	pending                     map[uint32]*pendingUDP
 	packetID                    atomic.Uint32

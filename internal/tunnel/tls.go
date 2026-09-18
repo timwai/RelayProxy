@@ -83,6 +83,8 @@ func (s *YAMUXStreamAdapter) CloseWrite() error {
 	return s.Stream.Close()
 }
 
+const maxConcurrentYAMUXOpens = 16
+
 // TLSSession implements TunnelSession using TLS + yamux multiplexer
 type TLSSession struct {
 	conn     net.Conn
@@ -108,7 +110,7 @@ func NewTLSSession(conn net.Conn, session *yamux.Session) *TLSSession {
 	return &TLSSession{
 		conn:     conn,
 		session:  session,
-		openGate: make(chan struct{}, 1),
+		openGate: make(chan struct{}, maxConcurrentYAMUXOpens),
 	}
 }
 
@@ -254,8 +256,16 @@ func (s *TLSSession) LocalAddr() net.Addr {
 func (s *TLSSession) Close() error {
 	_ = s.session.Close()
 	err := s.conn.Close()
-	s.openGate <- struct{}{}
-	<-s.openGate
+	// Drain the full semaphore capacity. Once the yamux session is closed,
+	// new OpenStream callers fail quickly, so acquiring every slot forms a
+	// barrier for all in-flight OpenStream workers without serializing normal
+	// stream creation to a single worker.
+	for i := 0; i < cap(s.openGate); i++ {
+		s.openGate <- struct{}{}
+	}
+	for i := 0; i < cap(s.openGate); i++ {
+		<-s.openGate
+	}
 	return err
 }
 

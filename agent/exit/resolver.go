@@ -197,7 +197,7 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 		conn net.Conn
 		err  error
 	}
-	results := make(chan dialResult, len(ordered))
+	results := make(chan dialResult)
 	var won atomic.Bool
 
 	startDial := func(ip net.IP) {
@@ -207,15 +207,25 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 			addr := net.JoinHostPort(candidate.String(), strconv.Itoa(int(port)))
 			conn, err := dialer.DialContext(raceCtx, "tcp", addr)
 			if err != nil {
-				results <- dialResult{err: err}
+				select {
+				case results <- dialResult{err: err}:
+				case <-raceCtx.Done():
+				}
 				return
 			}
 			if raceCtx.Err() != nil || !won.CompareAndSwap(false, true) {
 				_ = conn.Close()
-				results <- dialResult{err: context.Canceled}
+				select {
+				case results <- dialResult{err: context.Canceled}:
+				case <-raceCtx.Done():
+				}
 				return
 			}
-			results <- dialResult{conn: conn}
+			select {
+			case results <- dialResult{conn: conn}:
+			case <-raceCtx.Done():
+				_ = conn.Close()
+			}
 		}()
 	}
 

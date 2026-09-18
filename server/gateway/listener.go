@@ -43,6 +43,7 @@ type GatewayConfig struct {
 type DeviceAuthorization struct {
 	State                string
 	DeviceID             string
+	OwnerUserID          string
 	ApprovedCapabilities []string
 	RDPTargets           []protocol.RDPTarget
 }
@@ -313,7 +314,19 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	defer g.untrack(sess)
 	sessionCtx, cancelSession := context.WithCancel(g.ctx)
-	defer cancelSession()
+	sessionWatcherDone := make(chan struct{})
+	go func() {
+		defer close(sessionWatcherDone)
+		select {
+		case <-sess.Done():
+			cancelSession()
+		case <-sessionCtx.Done():
+		}
+	}()
+	defer func() {
+		cancelSession()
+		<-sessionWatcherDone
+	}()
 	handshakeDeadline := time.Now().Add(g.cfg.HandshakeTimeout)
 
 	// 1. Accept control stream identified by FrameTypeControl (not arrival order)
@@ -427,6 +440,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	deviceSession := &session.DeviceSession{
 		DeviceID:      authorization.DeviceID,
 		DeviceName:    hello.DeviceName,
+		OwnerUserID:   authorization.OwnerUserID,
 		Mode:          modeForCapabilities(authorization.ApprovedCapabilities),
 		Capabilities:  hello.TransportCapabilities,
 		Grants:        authorization.ApprovedCapabilities,

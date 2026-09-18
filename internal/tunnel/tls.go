@@ -83,7 +83,10 @@ func (s *YAMUXStreamAdapter) CloseWrite() error {
 	return s.Stream.Close()
 }
 
-const maxConcurrentYAMUXOpens = 16
+const (
+	maxConcurrentYAMUXOpens = 16
+	yamuxAcceptBacklog       = 1024
+)
 
 // TLSSession implements TunnelSession using TLS + yamux multiplexer
 type TLSSession struct {
@@ -185,8 +188,9 @@ func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// yamux has no cancellable OpenStream. Permit only one underlying open
-	// worker, so cancelled callers cannot accumulate unbounded goroutines.
+	// yamux has no cancellable OpenStream. Bound concurrent underlying opens
+	// so cancelled callers cannot accumulate unbounded goroutines while still
+	// allowing browser-style connection bursts to establish in parallel.
 	select {
 	case s.openGate <- struct{}{}:
 	case <-ctx.Done():

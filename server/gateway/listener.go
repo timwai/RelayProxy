@@ -48,6 +48,28 @@ type DeviceAuthorization struct {
 	RDPTargets           []protocol.RDPTarget
 }
 
+
+const deviceRejectionDrainTimeout = time.Second
+
+// writeDeviceRejection half-closes the control stream after the framed
+// rejection is fully queued, then gives the peer a short bounded window to
+// observe it and finish its in-flight write before the enclosing session is
+// torn down. This avoids turning a protocol-level rejection into an occasional
+// transport-level "session shutdown" race.
+func writeDeviceRejection(stream tunnel.TunnelStream, response protocol.DeviceAccepted) {
+	if stream == nil {
+		return
+	}
+	_ = stream.SetWriteDeadline(time.Now().Add(deviceRejectionDrainTimeout))
+	if err := protocol.WriteJSON(stream, response); err != nil {
+		return
+	}
+	_ = stream.CloseWrite()
+	_ = stream.SetReadDeadline(time.Now().Add(deviceRejectionDrainTimeout))
+	var one [1]byte
+	_, _ = stream.Read(one[:])
+}
+
 type Gateway struct {
 	cfg          GatewayConfig
 	sessions     *session.Manager
@@ -341,28 +363,28 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	var hello protocol.DeviceHello
 	if err := protocol.ReadJSON(ctrlStream, &hello); err != nil {
 		log.Printf("[Gateway] Failed to read DeviceHello from %s: %v", sess.RemoteAddr(), err)
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "invalid device hello",
 		})
 		return
 	}
 	if hello.ProtocolVersion != protocol.DeviceProtocolVersion {
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeProtocolMismatch, ErrorMessage: "unsupported device protocol version",
 		})
 		return
 	}
 	if hello.InstallationID == "" || len(hello.PublicKey) != ed25519.PublicKeySize || len(hello.ClientNonce) != 32 {
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "incomplete device identity",
 		})
 		return
 	}
 	if g.cfg.ServerInstanceID == "" || g.cfg.AuthorizeDevice == nil {
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeInternalError, ErrorMessage: "device authentication is not configured",
 		})
@@ -384,7 +406,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	if err := protocol.ReadJSON(ctrlStream, &proof); err != nil || proof.ChallengeID != challenge.ChallengeID ||
 		time.Now().Unix() > challenge.ExpiresAt || len(proof.Signature) != ed25519.SignatureSize ||
 		!ed25519.Verify(ed25519.PublicKey(hello.PublicKey), protocol.DeviceAuthPayload(hello, challenge), proof.Signature) {
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeAuthFailed, ErrorMessage: "device signature verification failed",
 		})
@@ -395,7 +417,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	authorization, err := g.cfg.AuthorizeDevice(fingerprint, hello)
 	if err != nil {
 		log.Printf("[Gateway] Failed to resolve device approval for %s: %v", fingerprint, err)
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeInternalError, ErrorMessage: "failed to resolve device approval",
 		})
@@ -408,7 +430,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		} else if authorization.State == "revoked" {
 			errorCode, message = protocol.ErrCodeDeviceRevoked, "device access was revoked"
 		}
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: authorization.State, ServerTime: time.Now().Unix(), RetryAfterSec: retry,
 			ErrorCode: errorCode, ErrorMessage: message,
 		})
@@ -460,7 +482,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	})
 	g.mu.Unlock()
 	if !registered {
-		_ = protocol.WriteJSON(ctrlStream, protocol.DeviceAccepted{
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "revoked", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeDeviceRevoked, ErrorMessage: "device approval was revoked during handshake",
 		})

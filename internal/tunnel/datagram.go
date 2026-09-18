@@ -127,9 +127,9 @@ type DatagramChannel struct {
 	frames    chan receivedDatagram
 	done      chan struct{}
 	closeOnce sync.Once
-	closed      bool // guarded by mux.mu
-	onClose     func()
-	reaper      *UDPDatagramConn // guarded by mux.mu
+	closed    bool // guarded by mux.mu
+	onClose   func()
+	reaper    *UDPDatagramConn // guarded by mux.mu
 }
 
 func OpenDatagramChannel(sess TunnelSession, id uint64) (*DatagramChannel, error) {

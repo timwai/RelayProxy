@@ -411,7 +411,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	exitDeviceID = exitSession.DeviceID
 	header.ExitDeviceID = exitDeviceID
 
-	authorized, authErr = r.authorizeExit(clientSession, exitSession)
+	authorized, authErr := r.authorizeExit(clientSession, exitSession)
 	if authErr != nil || !authorized {
 			log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
 			_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{

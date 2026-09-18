@@ -126,7 +126,6 @@ func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDev
 	case 0:
 		return nil, errNoExitOnline
 	case 1:
-		log.Printf("[StreamRouter] Auto-selected unique exit %s for client %s", candidates[0].DeviceID, client.DeviceID)
 		return candidates[0], nil
 	default:
 		return nil, errMultipleExits

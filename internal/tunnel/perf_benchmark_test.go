@@ -115,3 +115,51 @@ func BenchmarkYAMUXOpenStreamParallel(b *testing.B) {
 		}
 	})
 }
+
+
+func BenchmarkYAMUXOpenStreamCancelableParallel(b *testing.B) {
+	clientConn, serverConn := net.Pipe()
+	clientMux, err := yamux.Client(clientConn, DefaultYAMUXConfig())
+	if err != nil {
+		b.Fatal(err)
+	}
+	serverMux, err := yamux.Server(serverConn, DefaultYAMUXConfig())
+	if err != nil {
+		b.Fatal(err)
+	}
+	client := NewTLSSession(clientConn, clientMux)
+	server := NewTLSSession(serverConn, serverMux)
+	acceptCtx, acceptCancel := context.WithCancel(context.Background())
+	openCtx, openCancel := context.WithCancel(context.Background())
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		for {
+			stream, err := server.AcceptStream(acceptCtx)
+			if err != nil {
+				return
+			}
+			_ = stream.Close()
+		}
+	}()
+	b.Cleanup(func() {
+		openCancel()
+		acceptCancel()
+		_ = client.Close()
+		_ = server.Close()
+		<-acceptDone
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			stream, err := client.OpenStream(openCtx)
+			if err != nil {
+				b.Error(err)
+				return
+			}
+			_ = stream.Close()
+		}
+	})
+}

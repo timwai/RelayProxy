@@ -654,14 +654,11 @@ func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelSt
 	go monitor(s1)
 	go monitor(s2)
 	var up, down int64
-	var activity atomic.Int64
-	activity.Store(time.Now().UnixNano())
+	var activitySeq atomic.Uint64
 	const datagramStatsBatch = 64 * 1024
-	const activityRefreshInterval = 250 * time.Millisecond
 	forward := func(dst, src *tunnel.DatagramChannel, upward bool, total *int64) {
 		defer complete()
 		pendingStats := 0
-		lastActivityRefresh := time.Time{}
 		defer func() {
 			if pendingStats > 0 {
 				recordTransfer(c1, c2, upward, pendingStats)
@@ -682,17 +679,15 @@ func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelSt
 				recordTransfer(c1, c2, upward, pendingStats)
 				pendingStats = 0
 			}
-			now := time.Now()
-			if lastActivityRefresh.IsZero() || now.Sub(lastActivityRefresh) >= activityRefreshInterval {
-				activity.Store(now.UnixNano())
-				lastActivityRefresh = now
-			}
+			activitySeq.Add(1)
 		}
 	}
 	go forward(d2, d1, true, &up)
 	go forward(d1, d2, false, &down)
 	var idleTicker *time.Ticker
 	var idleTick <-chan time.Time
+	lastActivity := time.Now()
+	lastActivitySeq := activitySeq.Load()
 	if idleTimeout > 0 {
 		idleTicker = time.NewTicker(min(time.Second, idleTimeout))
 		idleTick = idleTicker.C
@@ -706,8 +701,19 @@ wait:
 		case <-finished:
 			break wait
 		case now := <-idleTick:
-			if now.Sub(time.Unix(0, activity.Load())) >= idleTimeout {
-				break wait
+			seq := activitySeq.Load()
+			if seq != lastActivitySeq {
+				lastActivitySeq = seq
+				lastActivity = now
+				continue
+			}
+			if now.Sub(lastActivity) >= idleTimeout {
+				// Avoid closing on activity that raced with this tick.
+				if activitySeq.Load() == seq {
+					break wait
+				}
+				lastActivitySeq = activitySeq.Load()
+				lastActivity = now
 			}
 		}
 	}

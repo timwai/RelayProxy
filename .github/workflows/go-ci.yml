@@ -41,6 +41,10 @@ jobs:
       - name: Race core data path
         run: go test -race ./internal/tunnel ./server/session ./server/gateway ./agent/exit -count=1
       - name: Benchmark smoke
-        run: go test ./internal/tunnel ./server/gateway ./agent/exit -run '^
- -bench 'Benchmark(Pipe1MiB|YAMUXOpenStreamParallel|AuthorizeExitSessionSnapshot|DNSCacheHit|InterleaveIPFamilies)
- -benchmem -benchtime=100ms -count=1
+        run: |
+          go test ./internal/tunnel ./server/gateway ./agent/exit \
+            -run=NoUnitTestsInBenchmarkSmoke \
+            -bench=Benchmark \
+            -benchmem \
+            -benchtime=100ms \
+            -count=1

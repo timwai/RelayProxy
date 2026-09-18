@@ -85,7 +85,7 @@ func (s *YAMUXStreamAdapter) CloseWrite() error {
 
 const (
 	maxConcurrentYAMUXOpens = 16
-	yamuxAcceptBacklog       = 1024
+	yamuxAcceptBacklog      = 1024
 )
 
 // TLSSession implements TunnelSession using TLS + yamux multiplexer

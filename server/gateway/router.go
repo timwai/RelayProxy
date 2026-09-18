@@ -324,12 +324,13 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	startTime := time.Now()
 	clientSession.ActiveStreams.Add(1)
 	exitSession.ActiveStreams.Add(1)
-	clientSession.ActiveExitID.Store(&exitDeviceID)
+	activeExitID := &exitSession.DeviceID
+	clientSession.ActiveExitID.Store(activeExitID)
 
 	bytesUp, bytesDown := r.pipeStreams(ctx, clientStream, exitStream, clientSession, exitSession)
 
 	if clientSession.ActiveStreams.Add(-1) <= 0 {
-		clientSession.ActiveExitID.CompareAndSwap(&exitDeviceID, nil)
+		clientSession.ActiveExitID.CompareAndSwap(activeExitID, nil)
 	}
 	exitSession.ActiveStreams.Add(-1)
 	r.emitAudit(&repository.ConnectionAudit{
@@ -566,7 +567,8 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	startTime := time.Now()
 	clientSession.ActiveStreams.Add(1)
 	exitSession.ActiveStreams.Add(1)
-	clientSession.ActiveExitID.Store(&exitDeviceID)
+	activeExitID := &exitSession.DeviceID
+	clientSession.ActiveExitID.Store(activeExitID)
 
 	var bytesUp, bytesDown int64
 	if clientDatagrams != nil {
@@ -576,7 +578,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	}
 
 	if clientSession.ActiveStreams.Add(-1) <= 0 {
-		clientSession.ActiveExitID.CompareAndSwap(&exitDeviceID, nil)
+		clientSession.ActiveExitID.CompareAndSwap(activeExitID, nil)
 	}
 	exitSession.ActiveStreams.Add(-1)
 	r.emitAudit(&repository.ConnectionAudit{

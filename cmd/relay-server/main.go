@@ -309,7 +309,6 @@ func main() {
 	fmt.Println("Bye!")
 }
 
-
 func sqliteDSNIsMemory(dsn string) bool {
 	value := strings.ToLower(strings.TrimSpace(dsn))
 	return value == ":memory:" || strings.Contains(value, "file::memory:") || strings.Contains(value, "mode=memory")

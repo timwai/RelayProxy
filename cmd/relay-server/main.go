@@ -29,6 +29,7 @@ import (
 func main() {
 	configPath := flag.String("config", "configs/relay-server.yaml", "Path to configuration file")
 	flag.Parse()
+	startOptionalPprof()
 
 	log.Println("==================================================")
 	log.Println("      RelayProxy Server v1.0.0 Starting...        ")

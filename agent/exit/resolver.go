@@ -22,9 +22,17 @@ type dnsCacheEntry struct {
 	expiresAt time.Time
 }
 
+type dnsLookup struct {
+	done chan struct{}
+	ips  []net.IP
+	err  error
+}
+
 type dnsCache struct {
 	mu         sync.RWMutex
 	entries    map[string]dnsCacheEntry
+	inflight   map[string]*dnsLookup
+	lookupIP   func(context.Context, string, string) ([]net.IP, error)
 	ttl        time.Duration
 	maxEntries int
 }
@@ -36,7 +44,13 @@ func newDNSCache(ttl time.Duration, maxEntries int) *dnsCache {
 	if maxEntries <= 0 {
 		maxEntries = defaultDNSCacheEntries
 	}
-	return &dnsCache{entries: make(map[string]dnsCacheEntry), ttl: ttl, maxEntries: maxEntries}
+	return &dnsCache{
+		entries:    make(map[string]dnsCacheEntry),
+		inflight:   make(map[string]*dnsLookup),
+		lookupIP:   net.DefaultResolver.LookupIP,
+		ttl:        ttl,
+		maxEntries: maxEntries,
+	}
 }
 
 func cloneIPs(src []net.IP) []net.IP {
@@ -54,8 +68,10 @@ func dnsCacheKey(host string) string {
 func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 	key := dnsCacheKey(host)
 	now := time.Now()
+
 	c.mu.RLock()
 	entry, ok := c.entries[key]
+	flight := c.inflight[key]
 	c.mu.RUnlock()
 	if ok && now.Before(entry.expiresAt) {
 		// Cache entries are immutable after publication. Callers in this package
@@ -63,33 +79,66 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 		// neither a slice nor per-IP backing bytes.
 		return entry.ips, nil
 	}
+	if flight != nil {
+		select {
+		case <-flight.done:
+			return flight.ips, flight.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 
-	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
-	if err != nil {
-		return nil, err
+	// Register one lookup per normalized hostname. Browser connection bursts
+	// often create many simultaneous streams to the same host; coalescing a
+	// cache miss prevents all of them from entering the resolver concurrently.
+	c.mu.Lock()
+	now = time.Now()
+	if entry, ok = c.entries[key]; ok && now.Before(entry.expiresAt) {
+		c.mu.Unlock()
+		return entry.ips, nil
 	}
-	if len(ips) == 0 {
-		return nil, nil
+	if flight = c.inflight[key]; flight != nil {
+		c.mu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.ips, flight.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 	}
-	ips = cloneIPs(ips)
+	flight = &dnsLookup{done: make(chan struct{})}
+	c.inflight[key] = flight
+	c.mu.Unlock()
+
+	ips, err := c.lookupIP(ctx, "ip", host)
+	if err == nil && len(ips) > 0 {
+		ips = cloneIPs(ips)
+	}
 
 	c.mu.Lock()
-	if len(c.entries) >= c.maxEntries {
-		for k, candidate := range c.entries {
-			if !now.Before(candidate.expiresAt) {
-				delete(c.entries, k)
-			}
-		}
+	if err == nil && len(ips) > 0 {
+		now = time.Now()
 		if len(c.entries) >= c.maxEntries {
-			for k := range c.entries {
-				delete(c.entries, k)
-				break
+			for k, candidate := range c.entries {
+				if !now.Before(candidate.expiresAt) {
+					delete(c.entries, k)
+				}
+			}
+			if len(c.entries) >= c.maxEntries {
+				for k := range c.entries {
+					delete(c.entries, k)
+					break
+				}
 			}
 		}
+		c.entries[key] = dnsCacheEntry{ips: ips, expiresAt: now.Add(c.ttl)}
 	}
-	c.entries[key] = dnsCacheEntry{ips: ips, expiresAt: now.Add(c.ttl)}
+	flight.ips, flight.err = ips, err
+	delete(c.inflight, key)
+	close(flight.done)
 	c.mu.Unlock()
-	return ips, nil
+
+	return ips, err
 }
 
 func interleaveIPFamilies(ips []net.IP) []net.IP {

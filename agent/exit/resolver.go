@@ -145,35 +145,35 @@ func interleaveIPFamilies(ips []net.IP) []net.IP {
 	if len(ips) < 2 {
 		return ips
 	}
-	v4 := make([]net.IP, 0, len(ips))
-	v6 := make([]net.IP, 0, len(ips))
-	preferV6 := ips[0].To4() == nil
-	for _, ip := range ips {
-		if ip.To4() != nil {
-			v4 = append(v4, ip)
-		} else {
-			v6 = append(v6, ip)
-		}
-	}
 	ordered := make([]net.IP, 0, len(ips))
-	for len(v4) > 0 || len(v6) > 0 {
-		if preferV6 {
-			if len(v6) > 0 {
-				ordered = append(ordered, v6[0])
-				v6 = v6[1:]
+	preferV6 := ips[0].To4() == nil
+	v4Index, v6Index := 0, 0
+
+	nextFamily := func(wantV4 bool, index *int) net.IP {
+		for *index < len(ips) {
+			ip := ips[*index]
+			*index = *index + 1
+			if (ip.To4() != nil) == wantV4 {
+				return ip
 			}
-			if len(v4) > 0 {
-				ordered = append(ordered, v4[0])
-				v4 = v4[1:]
+		}
+		return nil
+	}
+
+	for len(ordered) < len(ips) {
+		if preferV6 {
+			if ip := nextFamily(false, &v6Index); ip != nil {
+				ordered = append(ordered, ip)
+			}
+			if ip := nextFamily(true, &v4Index); ip != nil {
+				ordered = append(ordered, ip)
 			}
 		} else {
-			if len(v4) > 0 {
-				ordered = append(ordered, v4[0])
-				v4 = v4[1:]
+			if ip := nextFamily(true, &v4Index); ip != nil {
+				ordered = append(ordered, ip)
 			}
-			if len(v6) > 0 {
-				ordered = append(ordered, v6[0])
-				v6 = v6[1:]
+			if ip := nextFamily(false, &v6Index); ip != nil {
+				ordered = append(ordered, ip)
 			}
 		}
 	}

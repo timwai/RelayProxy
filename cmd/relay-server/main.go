@@ -105,9 +105,34 @@ func main() {
 	}
 	go func() {
 		defer close(auditDone)
-		for a := range auditCh {
-			if err := db.InsertConnectionAudit(a); err != nil {
-				logAuditRateLimited(&lastAuditErrorLog, "[Audit] Failed to log connection: %v", err)
+		const batchSize = 100
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		batch := make([]*repository.ConnectionAudit, 0, batchSize)
+		flush := func() {
+			if len(batch) == 0 {
+				return
+			}
+			if err := db.InsertConnectionAudits(batch); err != nil {
+				logAuditRateLimited(&lastAuditErrorLog, "[Audit] Failed to log connection batch: %v", err)
+			}
+			batch = batch[:0]
+		}
+		for {
+			select {
+			case a, ok := <-auditCh:
+				if !ok {
+					flush()
+					return
+				}
+				if a != nil {
+					batch = append(batch, a)
+				}
+				if len(batch) >= batchSize {
+					flush()
+				}
+			case <-ticker.C:
+				flush()
 			}
 		}
 	}()

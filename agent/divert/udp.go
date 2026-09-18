@@ -226,7 +226,7 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 			}
 			nextDeadlineRefresh = now.Add(time.Second)
 		}
-		if err := a.respond(a.ctx, a.route.key, append([]byte(nil), buf[:n]...)); err != nil {
+		if err := a.respond(a.ctx, a.route.key, buf[:n]); err != nil {
 			return
 		}
 	}

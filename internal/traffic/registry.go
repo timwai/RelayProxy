@@ -109,13 +109,13 @@ type Registry struct {
 }
 
 type Record struct {
-	registry              *Registry
-	connection            Connection
-	meter                 meter
-	upload, download      atomic.Uint64
+	registry               *Registry
+	connection             Connection
+	meter                  meter
+	upload, download       atomic.Uint64
 	pendingUp, pendingDown atomic.Uint64
-	finished              bool
-	listed                bool
+	finished               bool
+	listed                 bool
 }
 
 func NewRegistry(maxActive, maxRecent int) *Registry {

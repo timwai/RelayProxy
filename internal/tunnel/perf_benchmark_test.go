@@ -116,7 +116,6 @@ func BenchmarkYAMUXOpenStreamParallel(b *testing.B) {
 	})
 }
 
-
 func BenchmarkYAMUXOpenStreamCancelableParallel(b *testing.B) {
 	clientConn, serverConn := net.Pipe()
 	clientMux, err := yamux.Client(clientConn, DefaultYAMUXConfig())

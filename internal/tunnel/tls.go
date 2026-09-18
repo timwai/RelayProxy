@@ -188,9 +188,10 @@ func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// yamux has no cancellable OpenStream. Bound concurrent underlying opens
-	// so cancelled callers cannot accumulate unbounded goroutines while still
-	// allowing browser-style connection bursts to establish in parallel.
+
+	// yamux has no cancellable OpenStream. Bound concurrent underlying opens so
+	// cancelled callers cannot accumulate unbounded workers while browser-style
+	// connection bursts can still establish in parallel.
 	select {
 	case s.openGate <- struct{}{}:
 	case <-ctx.Done():
@@ -198,19 +199,37 @@ func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	case <-s.Done():
 		return nil, net.ErrClosed
 	}
+
+	releaseGate := func() { <-s.openGate }
 	if err := ctx.Err(); err != nil {
-		<-s.openGate
+		releaseGate()
 		return nil, err
 	}
 	if s.closed.Load() {
-		<-s.openGate
+		releaseGate()
 		return nil, net.ErrClosed
 	}
 	select {
 	case <-s.Done():
-		<-s.openGate
+		releaseGate()
 		return nil, net.ErrClosed
 	default:
+	}
+
+	// Background/TODO contexts cannot be cancelled by the caller. Avoid a
+	// wrapper goroutine and result channel on this common internal fast path.
+	// The gate still bounds yamux opens and Close waits for all occupied slots.
+	if ctx.Done() == nil {
+		stream, err := s.session.OpenStream()
+		releaseGate()
+		if err != nil {
+			return nil, err
+		}
+		if s.closed.Load() {
+			_ = (&YAMUXStreamAdapter{Stream: stream}).Close()
+			return nil, net.ErrClosed
+		}
+		return &YAMUXStreamAdapter{Stream: stream}, nil
 	}
 
 	type result struct {
@@ -219,7 +238,7 @@ func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	}
 	ch := make(chan result)
 	go func() {
-		defer func() { <-s.openGate }()
+		defer releaseGate()
 		stream, err := s.session.OpenStream()
 		select {
 		case ch <- result{stream: stream, err: err}:

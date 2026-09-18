@@ -658,11 +658,20 @@ func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelSt
 	monitor := func(s tunnel.TunnelStream) { defer complete(); var b [1]byte; _, _ = s.Read(b[:]) }
 	go monitor(s1)
 	go monitor(s2)
-	var up, down atomic.Int64
+	var up, down int64
 	var activity atomic.Int64
 	activity.Store(time.Now().UnixNano())
-	forward := func(dst, src *tunnel.DatagramChannel, upward bool) {
+	const datagramStatsBatch = 64 * 1024
+	const activityRefreshInterval = 250 * time.Millisecond
+	forward := func(dst, src *tunnel.DatagramChannel, upward bool, total *int64) {
 		defer complete()
+		pendingStats := 0
+		lastActivityRefresh := time.Time{}
+		defer func() {
+			if pendingStats > 0 {
+				recordTransfer(c1, c2, upward, pendingStats)
+			}
+		}()
 		for {
 			frame, err := src.Receive(ctx)
 			if err != nil {
@@ -672,17 +681,21 @@ func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelSt
 				return
 			}
 			n := len(frame) - protocol.UDPFragmentHeaderSize
-			if upward {
-				up.Add(int64(n))
-			} else {
-				down.Add(int64(n))
+			*total += int64(n)
+			pendingStats += n
+			if pendingStats >= datagramStatsBatch {
+				recordTransfer(c1, c2, upward, pendingStats)
+				pendingStats = 0
 			}
-			recordTransfer(c1, c2, upward, n)
-			activity.Store(time.Now().UnixNano())
+			now := time.Now()
+			if lastActivityRefresh.IsZero() || now.Sub(lastActivityRefresh) >= activityRefreshInterval {
+				activity.Store(now.UnixNano())
+				lastActivityRefresh = now
+			}
 		}
 	}
-	go forward(d2, d1, true)
-	go forward(d1, d2, false)
+	go forward(d2, d1, true, &up)
+	go forward(d1, d2, false, &down)
 	var idleTicker *time.Ticker
 	var idleTick <-chan time.Time
 	if idleTimeout > 0 {
@@ -705,5 +718,5 @@ wait:
 	}
 	stop()
 	wg.Wait()
-	return up.Load(), down.Load()
+	return up, down
 }

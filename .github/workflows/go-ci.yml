@@ -42,7 +42,7 @@ jobs:
         run: go test -race ./internal/tunnel ./server/session ./server/gateway ./agent/exit -count=1
       - name: Benchmark smoke
         run: |
-          go test ./internal/tunnel ./internal/protocol ./server/gateway ./agent/exit \
+          go test ./internal/tunnel ./internal/protocol ./server/gateway ./agent/exit ./agent/client \
             -run=NoUnitTestsInBenchmarkSmoke \
             -bench=Benchmark \
             -benchmem \

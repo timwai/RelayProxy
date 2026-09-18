@@ -41,20 +41,26 @@ func Pipe(ctx context.Context, left, right DeadlineStream, idle time.Duration, t
 			refreshInterval = idle
 		}
 	}
+	useCoarseClock := idle >= time.Second
 	refresh := func() {
 		if idle <= 0 {
 			return
 		}
-		now := time.Now()
-		nowNanos := now.UnixNano()
+		var nowNanos int64
+		if useCoarseClock {
+			nowNanos = coarseTimeNanos()
+		} else {
+			nowNanos = time.Now().UnixNano()
+		}
 		next := nextRefresh.Load()
 		if next != 0 && nowNanos < next {
 			return
 		}
-		if !nextRefresh.CompareAndSwap(next, now.Add(refreshInterval).UnixNano()) {
+		if !nextRefresh.CompareAndSwap(next, nowNanos+refreshInterval.Nanoseconds()) {
 			return
 		}
-		d := now.Add(idle)
+		// Only the infrequent actual deadline refresh needs a precise clock.
+		d := time.Now().Add(idle)
 		_ = left.SetDeadline(d)
 		_ = right.SetDeadline(d)
 	}

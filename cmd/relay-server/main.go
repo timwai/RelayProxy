@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -62,6 +63,22 @@ func main() {
 	}
 	defer db.Close()
 	log.Println("[DB] SQLite connected with the server-approval schema.")
+
+	// Keep audit batches on their own single-connection SQLite handle. WAL
+	// allows reads on the primary handle to continue while an audit transaction
+	// commits, without weakening the per-handle PRAGMA guarantees in OpenDB.
+	auditDB := db
+	if !sqliteDSNIsMemory(cfg.Database.DSN) {
+		separateAuditDB, auditErr := repository.OpenDB(cfg.Database.Driver, cfg.Database.DSN)
+		if auditErr != nil {
+			log.Printf("[Audit] Dedicated SQLite handle unavailable, sharing primary DB: %v", auditErr)
+		} else {
+			auditDB = separateAuditDB
+			defer separateAuditDB.Close()
+			log.Println("[Audit] Dedicated SQLite WAL handle enabled.")
+		}
+	}
+
 	serverInstanceID, err := db.ServerInstanceID()
 	if err != nil {
 		log.Fatalf("[DB] Failed to load server instance identity: %v", err)
@@ -114,7 +131,7 @@ func main() {
 			if len(batch) == 0 {
 				return
 			}
-			if err := db.InsertConnectionAudits(batch); err != nil {
+			if err := auditDB.InsertConnectionAudits(batch); err != nil {
 				logAuditRateLimited(&lastAuditErrorLog, "[Audit] Failed to log connection batch: %v", err)
 			}
 			batch = batch[:0]
@@ -290,4 +307,10 @@ func main() {
 
 	log.Println("[Server] RelayProxy Server stopped.")
 	fmt.Println("Bye!")
+}
+
+
+func sqliteDSNIsMemory(dsn string) bool {
+	value := strings.ToLower(strings.TrimSpace(dsn))
+	return value == ":memory:" || strings.Contains(value, "file::memory:") || strings.Contains(value, "mode=memory")
 }

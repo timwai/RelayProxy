@@ -182,6 +182,8 @@ func interleaveIPFamilies(ips []net.IP) []net.IP {
 
 // dialTCPIPs races already-resolved and ACL-approved IPs. It never resolves a
 // hostname internally, so the socket cannot escape the checked destination set.
+// Candidates are started incrementally instead of allocating one goroutine and
+// timer per DNS answer up front.
 func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error) {
 	ordered := interleaveIPFamilies(ips)
 	if len(ordered) == 0 {
@@ -190,67 +192,100 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 
 	raceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	winner := make(chan net.Conn, 1)
-	errs := make(chan error, len(ordered))
-	done := make(chan struct{})
-	var wg sync.WaitGroup
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	results := make(chan dialResult, len(ordered))
 	var won atomic.Bool
 
-	for i, ip := range ordered {
-		wg.Add(1)
-		go func(index int, candidate net.IP) {
-			defer wg.Done()
-			if index > 0 {
-				timer := time.NewTimer(time.Duration(index) * happyEyeballsDelay)
-				select {
-				case <-raceCtx.Done():
-					if !timer.Stop() {
-						<-timer.C
-					}
-					return
-				case <-timer.C:
-				}
-			}
-
+	startDial := func(ip net.IP) {
+		candidate := append(net.IP(nil), ip...)
+		go func() {
 			dialer := net.Dialer{KeepAlive: 30 * time.Second}
 			addr := net.JoinHostPort(candidate.String(), strconv.Itoa(int(port)))
 			conn, err := dialer.DialContext(raceCtx, "tcp", addr)
 			if err != nil {
-				errs <- err
+				results <- dialResult{err: err}
 				return
 			}
-			if won.CompareAndSwap(false, true) {
-				winner <- conn
-				cancel()
+			if raceCtx.Err() != nil || !won.CompareAndSwap(false, true) {
+				_ = conn.Close()
+				results <- dialResult{err: context.Canceled}
 				return
 			}
-			_ = conn.Close()
-		}(i, append(net.IP(nil), ip...))
+			results <- dialResult{conn: conn}
+		}()
 	}
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
 
-	select {
-	case conn := <-winner:
-		return conn, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-done:
-		var collected []error
-		for {
-			select {
-			case err := <-errs:
-				if err != nil {
-					collected = append(collected, err)
+	next := 0
+	active := 0
+	startNext := func() {
+		startDial(ordered[next])
+		next++
+		active++
+	}
+	startNext()
+
+	timer := time.NewTimer(happyEyeballsDelay)
+	defer timer.Stop()
+	timerArmed := next < len(ordered)
+	if !timerArmed {
+		if !timer.Stop() {
+			<-timer.C
+		}
+	}
+
+	var collected []error
+	for active > 0 {
+		var timerC <-chan time.Time
+		if timerArmed {
+			timerC = timer.C
+		}
+		select {
+		case <-ctx.Done():
+			won.Store(true)
+			cancel()
+			return nil, ctx.Err()
+		case result := <-results:
+			active--
+			if result.conn != nil {
+				cancel()
+				return result.conn, nil
+			}
+			if result.err != nil && !errors.Is(result.err, context.Canceled) {
+				collected = append(collected, result.err)
+			}
+			if active == 0 && next < len(ordered) {
+				if timerArmed && !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
 				}
-			default:
-				if len(collected) == 0 {
-					return nil, errors.New("all dial attempts failed")
+				startNext()
+				if next < len(ordered) {
+					timer.Reset(happyEyeballsDelay)
+					timerArmed = true
+				} else {
+					timerArmed = false
 				}
-				return nil, errors.Join(collected...)
+			}
+		case <-timerC:
+			timerArmed = false
+			if next < len(ordered) {
+				startNext()
+				if next < len(ordered) {
+					timer.Reset(happyEyeballsDelay)
+					timerArmed = true
+				}
 			}
 		}
 	}
+
+	if len(collected) == 0 {
+		return nil, errors.New("all dial attempts failed")
+	}
+	return nil, errors.Join(collected...)
 }

@@ -17,6 +17,12 @@ import (
 	"relayproxy/internal/proxy"
 )
 
+const proxyCopyBufferSize = 32 * 1024
+
+var proxyCopyBufferPool = sync.Pool{
+	New: func() any { return new([proxyCopyBufferSize]byte) },
+}
+
 const (
 	Version5 = 0x05
 
@@ -365,9 +371,9 @@ func (s *Server) sendReply(conn net.Conn, rep byte, bndAddr string, bndPort uint
 	} else {
 		resp = append(resp, net.IPv4zero...)
 	}
-	portBytes := make([]byte, 2)
-	binary.BigEndian.PutUint16(portBytes, bndPort)
-	resp = append(resp, portBytes...)
+	var portBytes [2]byte
+	binary.BigEndian.PutUint16(portBytes[:], bndPort)
+	resp = append(resp, portBytes[:]...)
 
 	_, err := conn.Write(resp)
 	return err
@@ -379,8 +385,9 @@ func (s *Server) pipe(c1, c2 net.Conn) {
 
 	copyOne := func(dst, src net.Conn) {
 		defer wg.Done()
-		buf := make([]byte, 32*1024)
-		_, _ = io.CopyBuffer(dst, src, buf)
+		bufp := proxyCopyBufferPool.Get().(*[proxyCopyBufferSize]byte)
+		_, _ = io.CopyBuffer(dst, src, bufp[:])
+		proxyCopyBufferPool.Put(bufp)
 
 		// Attempt half-close if supported
 		if tc, ok := dst.(*net.TCPConn); ok {

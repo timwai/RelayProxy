@@ -390,6 +390,17 @@ func (c *DatagramChannel) Forward(ctx context.Context, frame []byte) error {
 }
 
 func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
+	// Preserve close-first semantics without taking mux.mu on every packet.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.done:
+		return nil, net.ErrClosed
+	case <-c.mux.ctx.Done():
+		return nil, net.ErrClosed
+	default:
+	}
+
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -399,7 +410,14 @@ func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
 		return nil, net.ErrClosed
 	case f := <-c.frames:
 		c.mux.budget.releaseQueue(f.bytes)
-		return f.frame, nil
+		select {
+		case <-c.done:
+			return nil, net.ErrClosed
+		case <-c.mux.ctx.Done():
+			return nil, net.ErrClosed
+		default:
+			return f.frame, nil
+		}
 	}
 }
 

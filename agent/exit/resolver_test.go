@@ -70,7 +70,6 @@ func BenchmarkInterleaveIPFamilies(b *testing.B) {
 	}
 }
 
-
 func TestDNSCacheCoalescesConcurrentMisses(t *testing.T) {
 	cache := newDNSCache(time.Minute, 4)
 	var calls atomic.Int64
@@ -119,8 +118,4 @@ func TestDNSCacheCoalescesConcurrentMisses(t *testing.T) {
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("resolver called %d times, want 1", got)
 	}
-}
-
-func TestDefaultYAMUXBacklogCoveredInTunnelPackage(t *testing.T) {
-	// Kept as a marker so resolver tests remain independent of tunnel internals.
 }

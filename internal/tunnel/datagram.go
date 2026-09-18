@@ -378,24 +378,28 @@ func (c *DatagramChannel) Send(ctx context.Context, frame []byte) error {
 	}
 	return c.sendFrame(frame)
 }
+
+// Forward queues a fragment that was returned by DatagramChannel.Receive.
+// Receive only exposes frames that were already validated by the source mux,
+// so relay-to-relay forwarding can skip a redundant DecodeUDPFragment pass.
+func (c *DatagramChannel) Forward(ctx context.Context, frame []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.enqueueFrame(frame)
+}
+
 func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		frame, available, err := c.takeFrame()
-		if err != nil || available {
-			return frame, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-c.done:
-			return nil, net.ErrClosed
-		case <-c.mux.ctx.Done():
-			return nil, net.ErrClosed
-		case <-c.framesReady:
-		}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.done:
+		return nil, net.ErrClosed
+	case <-c.mux.ctx.Done():
+		return nil, net.ErrClosed
+	case f := <-c.frames:
+		c.mux.budget.releaseQueue(f.bytes)
+		return f.frame, nil
 	}
 }
 

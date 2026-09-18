@@ -29,24 +29,24 @@ type pendingUDP struct {
 // UDPDatagramConn carries unreliable datagrams while retaining a reliable
 // stream solely as the authenticated association's lifetime signal.
 type UDPDatagramConn struct {
-	channel                     *DatagramChannel
-	stream                      TunnelStream
-	remote                      net.Addr
-	idleTimeout                 time.Duration
-	done                        chan struct{}
-	once                        sync.Once
-	mu                          sync.Mutex
-	readDeadlineNanos           atomic.Int64
-	writeDeadlineNanos          atomic.Int64
-	lastActivityNanos           atomic.Int64
-	activitySeq                 atomic.Uint64
-	reapedActivitySeq           uint64
-	deadlineChanged             chan struct{}
-	readMu, writeMu             sync.Mutex
-	readTimer                   *time.Timer
-	assemblyMu                  sync.Mutex
-	pending                     map[uint32]*pendingUDP
-	packetID                    atomic.Uint32
+	channel            *DatagramChannel
+	stream             TunnelStream
+	remote             net.Addr
+	idleTimeout        time.Duration
+	done               chan struct{}
+	once               sync.Once
+	mu                 sync.Mutex
+	readDeadlineNanos  atomic.Int64
+	writeDeadlineNanos atomic.Int64
+	lastActivityNanos  atomic.Int64
+	activitySeq        atomic.Uint64
+	reapedActivitySeq  uint64
+	deadlineChanged    chan struct{}
+	readMu, writeMu    sync.Mutex
+	readTimer          *time.Timer
+	assemblyMu         sync.Mutex
+	pending            map[uint32]*pendingUDP
+	packetID           atomic.Uint32
 }
 
 func NewUDPDatagramConn(channel *DatagramChannel, stream TunnelStream, remote net.Addr) *UDPDatagramConn {

@@ -39,6 +39,8 @@ type UDPDatagramConn struct {
 	readDeadline, writeDeadline time.Time
 	writeDeadlineNanos          atomic.Int64
 	lastActivityNanos           atomic.Int64
+	activitySeq                 atomic.Uint64
+	reapedActivitySeq           uint64
 	deadlineChanged             chan struct{}
 	readMu, writeMu             sync.Mutex
 	readTimer                   *time.Timer
@@ -120,12 +122,25 @@ func (c *UDPDatagramConn) reap(now time.Time) {
 		}
 	}
 	c.assemblyMu.Unlock()
+
+	seq := c.activitySeq.Load()
+	if seq != c.reapedActivitySeq {
+		c.reapedActivitySeq = seq
+		c.lastActivityNanos.Store(now.UnixNano())
+	}
 	if c.idleTimeout > 0 && now.Sub(time.Unix(0, c.lastActivityNanos.Load())) >= c.idleTimeout {
+		// One final sequence check prevents a close racing with a packet that
+		// arrived after this reaper tick sampled activity.
+		if latest := c.activitySeq.Load(); latest != c.reapedActivitySeq {
+			c.reapedActivitySeq = latest
+			c.lastActivityNanos.Store(now.UnixNano())
+			return
+		}
 		_ = c.Close()
 	}
 }
 
-func (c *UDPDatagramConn) touch() { c.lastActivityNanos.Store(time.Now().UnixNano()) }
+func (c *UDPDatagramConn) touch() { c.activitySeq.Add(1) }
 func (c *UDPDatagramConn) dropLocked(id uint32, p *pendingUDP) {
 	delete(c.pending, id)
 	c.channel.mux.releaseReassembly(p.bytes)

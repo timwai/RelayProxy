@@ -1,0 +1,56 @@
+name: UI CI
+
+on:
+  push:
+    branches:
+      - "feature/unified-ui-*"
+  pull_request:
+    paths:
+      - "agent/gui/**"
+      - "cmd/relay-agent/**"
+      - "server/web/**"
+      - "server/api/**"
+      - "internal/webui/**"
+      - "internal/config/**"
+      - ".github/workflows/ui-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          files="$(git diff --name-only origin/main...HEAD -- '*.go')"
+          if [ -n "$files" ]; then
+            bad="$(gofmt -l $files)"
+            if [ -n "$bad" ]; then
+              gofmt -d $bad
+              exit 1
+            fi
+          fi
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -count=1
+
+  desktop-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Test desktop packages
+        run: go test ./agent/gui ./cmd/relay-agent -count=1

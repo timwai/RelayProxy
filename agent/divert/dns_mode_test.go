@@ -16,10 +16,10 @@ func dnsTestFlow(sourcePort uint16, protocol Protocol) Flow {
 
 func TestDNSRoutingModes(t *testing.T) {
 	tests := []struct {
-		name    string
-		mode    string
-		ready   bool
-		want    Action
+		name     string
+		mode     string
+		ready    bool
+		want     Action
 		wantRule string
 	}{
 		{name: "direct", mode: DNSModeDirect, ready: true, want: ActionDirect, wantRule: "dns-direct"},
@@ -31,9 +31,9 @@ func TestDNSRoutingModes(t *testing.T) {
 	for index, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server := newTestServer(t, Options{
-				Config: Config{DNSMode: tc.mode, DefaultAction: ActionDirect},
+				Config:     Config{DNSMode: tc.mode, DefaultAction: ActionDirect},
 				ProxyReady: func() bool { return tc.ready },
-				Traffic: traffic.NewRegistry(0, 0),
+				Traffic:    traffic.NewRegistry(0, 0),
 			})
 			route, err := server.ClassifyFlow(dnsTestFlow(uint16(53000+index), ProtoUDP))
 			if err != nil {
@@ -48,9 +48,9 @@ func TestDNSRoutingModes(t *testing.T) {
 
 func TestWFPAutoDNSKeepsProxyUserspaceRouteDuringBootstrap(t *testing.T) {
 	server := newTestServer(t, Options{
-		Config: Config{DNSMode: DNSModeAuto, DefaultAction: ActionDirect},
+		Config:     Config{DNSMode: DNSModeAuto, DefaultAction: ActionDirect},
 		ProxyReady: func() bool { return false },
-		Traffic: traffic.NewRegistry(0, 0),
+		Traffic:    traffic.NewRegistry(0, 0),
 	})
 	route, err := server.classifyFlow(dnsTestFlow(54000, ProtoUDP), true)
 	if err != nil {

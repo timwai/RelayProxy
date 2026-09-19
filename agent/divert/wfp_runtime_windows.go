@@ -21,10 +21,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const (
-	wfpAutoInstallEnv = "RELAYPROXY_WFP_AUTO_INSTALL"
-	wfpPackageMaxFile = 32 << 20
-)
+const wfpPackageMaxFile = 32 << 20
 
 var bundledWFPFiles = sync.OnceValues(func() (map[string][]byte, error) {
 	return parseEmbeddedWFPPackage(embeddedWFPArchive)
@@ -113,52 +110,62 @@ func validateEmbeddedWFPMachine(image []byte) error {
 	return nil
 }
 
-func wfpAutoInstallDisabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(wfpAutoInstallEnv))) {
-	case "0", "false", "off", "no":
-		return true
-	default:
-		return false
-	}
+// WFPDriverStatus describes the bundled Windows WFP driver's readiness without
+// changing driver or filtering state.
+type WFPDriverStatus struct {
+	Ready            bool   `json:"ready"`
+	Current          bool   `json:"current"`
+	PackageAvailable bool   `json:"package_available"`
+	Elevated         bool   `json:"elevated"`
+	Architecture     string `json:"architecture"`
+	Reason           string `json:"reason,omitempty"`
+	PackageError     string `json:"package_error,omitempty"`
 }
 
-// ensureEmbeddedWFPInstalled is called only when transparent interception is
-// actually starting. Capability/readiness probes remain side-effect free.
-func ensureEmbeddedWFPInstalled() error {
-	readyErr := wfpPlatformReadiness()
-	if wfpAutoInstallDisabled() {
-		return readyErr
+// WindowsWFPDriverStatus is side-effect free. It is used by the native Windows
+// GUI to decide how to present the explicit driver-install action.
+func WindowsWFPDriverStatus() WFPDriverStatus {
+	status := WFPDriverStatus{
+		Elevated:     windows.GetCurrentProcessToken().IsElevated(),
+		Architecture: runtime.GOARCH,
 	}
-
 	files, packageErr := bundledWFPFiles()
-	if readyErr == nil {
-		if packageErr != nil {
-			// A developer build may intentionally have only the placeholder.
-			// A compatible already-installed driver is still safe to use.
-			return nil
+	if packageErr == nil {
+		status.PackageAvailable = true
+		if current, err := installedWFPMatches(files["RelayProxyWfp.sys"]); err == nil {
+			status.Current = current
 		}
-		current, err := installedWFPMatches(files["RelayProxyWfp.sys"])
-		if err != nil {
-			// Do not replace a working driver just because its backing file
-			// cannot be inspected.
-			return nil
-		}
-		if current {
-			return nil
-		}
+	} else {
+		status.PackageError = packageErr.Error()
+	}
+	if err := wfpPlatformReadiness(); err != nil {
+		status.Reason = err.Error()
+	} else {
+		status.Ready = true
+	}
+	return status
+}
+
+// InstallWFPDriver installs or updates the WFP package embedded in the current
+// Windows executable. It is intentionally never called from transparent-proxy
+// startup; installation only happens after an explicit user action.
+func InstallWFPDriver() error {
+	files, packageErr := bundledWFPFiles()
+	if packageErr != nil {
+		return fmt.Errorf("客户端没有可安装的 WFP 驱动包: %w", packageErr)
 	}
 
-	if !windows.GetCurrentProcessToken().IsElevated() {
-		if readyErr != nil {
-			return readyErr
+	readyErr := wfpPlatformReadiness()
+	if readyErr == nil {
+		current, err := installedWFPMatches(files["RelayProxyWfp.sys"])
+		if err != nil || current {
+			// Do not disturb a working driver if its backing file cannot be
+			// inspected, and avoid needless reinstall when the version matches.
+			return nil
 		}
-		return errors.New("RelayProxyWfp 驱动需要更新，请以管理员身份启动客户端")
 	}
-	if packageErr != nil {
-		if readyErr != nil {
-			return fmt.Errorf("WFP 驱动不可用，且客户端没有有效的内嵌驱动包: %w", packageErr)
-		}
-		return nil
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		return errors.New("安装 RelayProxyWfp 驱动需要管理员权限")
 	}
 	if err := installEmbeddedWFPPackage(files); err != nil {
 		return err
@@ -213,7 +220,7 @@ func installEmbeddedWFPPackage(files map[string][]byte) error {
 	time.Sleep(300 * time.Millisecond)
 
 	if output, err := runWFPSystemTool("pnputil.exe", "/add-driver", inf, "/install"); err != nil {
-		return fmt.Errorf("自动安装 RelayProxyWfp 驱动失败 (pnputil): %w\n%s", err, output)
+		return fmt.Errorf("安装 RelayProxyWfp 驱动失败 (pnputil): %w\n%s", err, output)
 	}
 
 	// Primitive-driver packages normally create the service through pnputil.
@@ -253,7 +260,7 @@ func installEmbeddedWFPPackage(files map[string][]byte) error {
 	if lastErr != nil {
 		details = append(details, lastErr)
 	}
-	return fmt.Errorf("自动安装 RelayProxyWfp 后驱动未就绪: %w", errors.Join(details...))
+	return fmt.Errorf("安装 RelayProxyWfp 后驱动未就绪: %w", errors.Join(details...))
 }
 
 func runWFPSystemTool(name string, args ...string) (string, error) {

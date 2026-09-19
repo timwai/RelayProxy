@@ -89,8 +89,9 @@ type queuedDatagram struct {
 }
 
 type receivedDatagram struct {
-	frame []byte
-	bytes int // Includes the retained association envelope's backing bytes.
+	frame    []byte
+	fragment protocol.UDPFragment
+	bytes    int // Includes the retained association envelope's backing bytes.
 }
 
 type datagramMux struct {
@@ -189,7 +190,8 @@ func (m *datagramMux) deliver(packet []byte) {
 		return
 	}
 	frame := packet[datagramEnvelopeSize:]
-	if _, err := protocol.DecodeUDPFragment(frame); err != nil {
+	fragment, err := protocol.DecodeUDPFragment(frame)
+	if err != nil {
 		return
 	}
 	id := binary.BigEndian.Uint64(packet[3:11])
@@ -199,7 +201,7 @@ func (m *datagramMux) deliver(packet []byte) {
 	if m.closed || c == nil || c.closed || !m.budget.reserveQueue(len(packet)) {
 		return
 	}
-	queued := receivedDatagram{frame: frame, bytes: len(packet)}
+	queued := receivedDatagram{frame: frame, fragment: fragment, bytes: len(packet)}
 	select {
 	case c.frames <- queued:
 	default:
@@ -318,19 +320,24 @@ func (c *DatagramChannel) enqueueFrame(frame []byte) error {
 }
 
 func (c *DatagramChannel) enqueueFrameParts(frameSize int, fill func([]byte)) error {
-	c.mux.mu.RLock()
-	defer c.mux.mu.RUnlock()
-	if c.closed || c.mux.closed || c.mux.ctx.Err() != nil {
-		return net.ErrClosed
-	}
 	n := datagramEnvelopeSize + frameSize
 	if !c.mux.budget.reserveQueue(n) {
 		return nil // UDP overload is loss, not a switch to reliable transport.
 	}
+	// Packet allocation and payload copy do not need the association map lock.
+	// Close is serialized only around the actual queue transaction below.
 	b := acquireDatagramPacket(n)
 	b[0], b[1], b[2] = 'R', 'U', 1
 	binary.BigEndian.PutUint64(b[3:11], c.ID)
 	fill(b[datagramEnvelopeSize:])
+
+	c.mux.mu.RLock()
+	defer c.mux.mu.RUnlock()
+	if c.closed || c.mux.closed || c.mux.ctx.Err() != nil {
+		c.mux.budget.releaseQueue(n)
+		releaseDatagramPacket(b)
+		return net.ErrClosed
+	}
 	select {
 	case c.mux.send <- queuedDatagram{channel: c, packet: b}:
 		select {
@@ -412,12 +419,12 @@ func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
 	}
 }
 
-func (c *DatagramChannel) takeFrame() ([]byte, bool, error) {
+func (c *DatagramChannel) takeDatagram() (receivedDatagram, bool, error) {
 	select {
 	case <-c.done:
-		return nil, false, net.ErrClosed
+		return receivedDatagram{}, false, net.ErrClosed
 	case <-c.mux.ctx.Done():
-		return nil, false, net.ErrClosed
+		return receivedDatagram{}, false, net.ErrClosed
 	default:
 	}
 
@@ -426,15 +433,20 @@ func (c *DatagramChannel) takeFrame() ([]byte, bool, error) {
 		c.mux.budget.releaseQueue(f.bytes)
 		select {
 		case <-c.done:
-			return nil, false, net.ErrClosed
+			return receivedDatagram{}, false, net.ErrClosed
 		case <-c.mux.ctx.Done():
-			return nil, false, net.ErrClosed
+			return receivedDatagram{}, false, net.ErrClosed
 		default:
-			return f.frame, true, nil
+			return f, true, nil
 		}
 	default:
-		return nil, false, nil
+		return receivedDatagram{}, false, nil
 	}
+}
+
+func (c *DatagramChannel) takeFrame() ([]byte, bool, error) {
+	f, ok, err := c.takeDatagram()
+	return f.frame, ok, err
 }
 func (c *DatagramChannel) Close() error {
 	c.closeOnce.Do(func() {

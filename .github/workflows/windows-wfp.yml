@@ -3,7 +3,7 @@ name: Windows WFP CI
 on:
   push:
     branches:
-      - feature/windows-wfp
+      - main
     paths:
       - 'agent/divert/**'
       - 'agent/app/**'
@@ -37,7 +37,7 @@ permissions:
 
 jobs:
   go-windows:
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -110,7 +110,7 @@ jobs:
           }
 
   driver:
-    runs-on: windows-2022
+    runs-on: windows-2025-vs2026
     timeout-minutes: 30
     strategy:
       fail-fast: false

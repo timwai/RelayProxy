@@ -43,13 +43,18 @@ func TestWFPEventRoundTripLayout(t *testing.T) {
 	}
 }
 
-func TestWFPVersionRequiresSystemIdentity(t *testing.T) {
+func TestWFPVersionRequiresCurrentFeatures(t *testing.T) {
+	requiredWithoutDNS := wfpFeatureTCP | wfpFeatureUDP | wfpFeatureIPv6 | wfpFeatureSystemIdentity
 	data := make([]byte, 16)
 	binary.LittleEndian.PutUint32(data[0:4], wfpABIVersion)
 	binary.LittleEndian.PutUint32(data[4:8], 16)
-	binary.LittleEndian.PutUint64(data[8:16], wfpFeatureTCP|wfpFeatureUDP|wfpFeatureIPv6)
+	binary.LittleEndian.PutUint64(data[8:16], requiredWithoutDNS)
 	if _, err := decodeWFPVersion(data); err == nil {
-		t.Fatal("driver without system identity support was accepted")
+		t.Fatal("driver without DNS control support was accepted")
+	}
+	binary.LittleEndian.PutUint64(data[8:16], requiredWithoutDNS|wfpFeatureDNSControl)
+	if _, err := decodeWFPVersion(data); err != nil {
+		t.Fatalf("current driver feature set was rejected: %v", err)
 	}
 }
 
@@ -63,17 +68,19 @@ func TestWFPRedirectContextRejectsZeroRequest(t *testing.T) {
 }
 
 func TestWFPDecisionFlagsLayout(t *testing.T) {
-	data, err := encodeWFPDecisionFlags(99, ActionProxy, wfpDecisionFlagDNSAuto)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := binary.LittleEndian.Uint64(data[8:16]); got != 99 {
-		t.Fatalf("request id=%d", got)
-	}
-	if got := binary.LittleEndian.Uint32(data[16:20]); got != wfpActionProxy {
-		t.Fatalf("action=%d", got)
-	}
-	if got := binary.LittleEndian.Uint32(data[20:24]); got != wfpDecisionFlagDNSAuto {
-		t.Fatalf("flags=%x", got)
+	for _, flags := range []uint32{wfpDecisionFlagDNSAuto, wfpDecisionFlagDNSBootstrapProxy} {
+		data, err := encodeWFPDecisionFlags(99, ActionProxy, flags)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := binary.LittleEndian.Uint64(data[8:16]); got != 99 {
+			t.Fatalf("request id=%d", got)
+		}
+		if got := binary.LittleEndian.Uint32(data[16:20]); got != wfpActionProxy {
+			t.Fatalf("action=%d", got)
+		}
+		if got := binary.LittleEndian.Uint32(data[20:24]); got != flags {
+			t.Fatalf("flags=%x want=%x", got, flags)
+		}
 	}
 }

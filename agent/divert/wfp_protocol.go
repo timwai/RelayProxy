@@ -42,7 +42,10 @@ const (
 	wfpActionReject
 )
 
-const wfpDecisionFlagDNSAuto uint32 = 1 << 0
+const (
+	wfpDecisionFlagDNSAuto           uint32 = 1 << 0
+	wfpDecisionFlagDNSBootstrapProxy uint32 = 1 << 1
+)
 
 type wfpVersion struct {
 	ABI      uint32

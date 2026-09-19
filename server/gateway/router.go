@@ -24,6 +24,7 @@ var (
 type StreamRouter struct {
 	sessions          *session.Manager
 	aclChecker        *acl.Checker
+	relayPolicy       *acl.Policy
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
 	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
@@ -50,12 +51,17 @@ func NewStreamRouter(
 	authChecker func(clientDeviceID, exitDeviceID string) (bool, error),
 	onAudit func(audit *repository.ConnectionAudit),
 ) *StreamRouter {
-	return &StreamRouter{
+	router := &StreamRouter{
 		sessions:    sessions,
 		aclChecker:  aclChecker,
 		authChecker: authChecker,
 		onAudit:     onAudit,
 	}
+	if aclChecker != nil {
+		policy := aclChecker.Policy()
+		router.relayPolicy = &policy
+	}
+	return router
 }
 
 func (r *StreamRouter) emitAudit(a *repository.ConnectionAudit) {
@@ -636,8 +642,7 @@ func (r *StreamRouter) targetPolicy(ctx context.Context, exit *session.DeviceSes
 	if !hasCapability(exit, protocol.CapabilityTargetACL) {
 		return nil, errors.New("exit does not support required target ACL enforcement")
 	}
-	policy := r.aclChecker.Policy()
-	return &policy, nil
+	return r.relayPolicy, nil
 }
 
 // Native forwarding changes only the session-scoped association envelope.

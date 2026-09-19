@@ -69,20 +69,30 @@ func packageAgent(directory, destination, arch string) error {
 			"windivert/LICENSE", "windivert/README", "windivert/VERSION", "windivert/SOURCE.txt",
 		)
 	}
-	for _, name := range []string{
-		"wfp/RelayProxyWfp.sys", "wfp/RelayProxyWfp.inf",
+	wfpFiles := []string{
+		"wfp/RelayProxyWfp.sys", "wfp/RelayProxyWfp.inf", "wfp/RelayProxyWfp.cat",
 		"install-wfp.ps1", "uninstall-wfp.ps1",
-	} {
+	}
+	wfpPresent := false
+	for _, name := range wfpFiles {
 		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err == nil {
-			files = append(files, name)
+			wfpPresent = true
+			break
 		} else if !os.IsNotExist(err) {
 			return err
 		}
 	}
-	if _, err := os.Stat(filepath.Join(directory, "wfp", "RelayProxyWfp.cat")); err == nil {
-		files = append(files, "wfp/RelayProxyWfp.cat")
-	} else if !os.IsNotExist(err) {
-		return err
+	if wfpPresent {
+		for _, name := range wfpFiles {
+			info, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name)))
+			if err != nil {
+				return fmt.Errorf("incomplete WFP driver package: %s: %w", name, err)
+			}
+			if !info.Mode().IsRegular() || info.Size() == 0 {
+				return fmt.Errorf("invalid WFP driver package file: %s", name)
+			}
+			files = append(files, name)
+		}
 	}
 	for _, name := range []string{"brand/icon.ico", "brand/logo.png", "README.md"} {
 		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err == nil {

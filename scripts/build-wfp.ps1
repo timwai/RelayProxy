@@ -47,7 +47,7 @@ function Find-MSBuild {
             Select-Object -First 1
         if ($path) { return $path }
     }
-    throw "MSBuild.exe not found. Install Visual Studio 2022 Build Tools with C++ and WDK support."
+    throw "MSBuild.exe not found. Install Visual Studio 2026 with Desktop development with C++ and the Windows Driver Kit component."
 }
 
 function Build-One {

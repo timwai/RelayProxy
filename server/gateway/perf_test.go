@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"relayproxy/internal/acl"
-
 	"relayproxy/internal/protocol"
 	"relayproxy/server/session"
 )
@@ -52,7 +51,6 @@ func BenchmarkAuthorizeExitSessionSnapshot(b *testing.B) {
 		}
 	}
 }
-
 
 func BenchmarkTargetPolicyCachedSnapshot(b *testing.B) {
 	checker, err := acl.NewChecker(acl.Policy{

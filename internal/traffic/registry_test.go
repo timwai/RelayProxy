@@ -119,7 +119,6 @@ func TestConnectionCountsPartialIOAndPreservesHalfClose(t *testing.T) {
 	}
 }
 
-
 func TestRegistryRecentRingKeepsNewestConnections(t *testing.T) {
 	r := NewRegistry(1, 3)
 	for i := 0; i < 8; i++ {

@@ -35,6 +35,7 @@ typedef struct _RP_FLOW {
     RP_FLOW_KEY Key;
     UINT64 RequestId;
     UINT64 AssociationId;
+    UINT64 ControllerGeneration;
     UINT32 Action;
     UINT32 DecisionFlags;
     HANDLE CompletionContext;
@@ -67,6 +68,7 @@ typedef struct _RP_DRIVER_STATE {
     LIST_ENTRY Events;
     ULONG EventCount;
     volatile LONG64 NextId;
+    UINT64 ControllerGeneration;
 
     BOOLEAN ControllerActive;
     BOOLEAN ControllerFailingOpen;
@@ -124,7 +126,9 @@ BOOLEAN RpControllerHealthy(VOID);
 NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config);
 VOID RpControllerCleanup(_In_opt_ PFILE_OBJECT FileObject);
 BOOLEAN RpIsControllerFile(_In_opt_ PFILE_OBJECT FileObject);
-VOID RpHeartbeat(VOID);
+NTSTATUS RpHeartbeat(_In_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid);
+UINT64 RpCurrentControllerGeneration(VOID);
+BOOLEAN RpControllerOwnsFlow(_In_ PFILE_OBJECT FileObject, _In_ const RP_FLOW* Flow);
 
 RP_FLOW* RpFindFlowByRequestId(_In_ UINT64 RequestId);
 RP_FLOW* RpFindFlowByAssociationId(_In_ UINT64 AssociationId);
@@ -138,14 +142,14 @@ UINT64 RpNextId(VOID);
 
 NTSTATUS RpQueueFlowEvent(_In_ const RP_FLOW* Flow, _In_opt_ const FWP_BYTE_BLOB* ProcessPath, _In_ ULONG Flags);
 NTSTATUS RpQueueDatagramEvent(_In_ UINT32 Kind, _In_ const RP_FLOW* Flow, _In_ ULONG Flags, _In_reads_bytes_opt_(PayloadLength) const UCHAR* Payload, _In_ ULONG PayloadLength);
-NTSTATUS RpReadEvent(_Out_writes_bytes_(OutputLength) VOID* Output, _In_ ULONG OutputLength, _Out_ ULONG_PTR* BytesWritten);
-NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision);
-NTSTATUS RpSetProxyReady(_In_ const RP_WFP_PROXY_READY* Ready);
+NTSTATUS RpReadEvent(_In_ PFILE_OBJECT FileObject, _Out_writes_bytes_(OutputLength) VOID* Output, _In_ ULONG OutputLength, _Out_ ULONG_PTR* BytesWritten);
+NTSTATUS RpApplyDecision(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_DECISION* Decision);
+NTSTATUS RpSetProxyReady(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_PROXY_READY* Ready);
 
 NTSTATUS RpWfpStart(_In_ PDEVICE_OBJECT DeviceObject);
 VOID RpWfpStop(VOID);
 
-NTSTATUS RpInjectUdp(_In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLength);
+NTSTATUS RpInjectUdp(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLength);
 NTSTATUS RpCapturePendingUdp(
     _Inout_ RP_FLOW* Flow,
     _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ntddk.h>
-#include <fwpsk.h>
-#include <fwpmk.h>
 #include <ndis.h>
+#include <fwpmk.h>
+#include <fwpsk.h>
 #include <ntstrsafe.h>
 #include <ws2def.h>
 #include <ws2ipdef.h>

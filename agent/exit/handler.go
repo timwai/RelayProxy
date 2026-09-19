@@ -30,12 +30,12 @@ type HandlerConfig struct {
 }
 
 type Handler struct {
-	cfg               HandlerConfig
-	resolver          *dnsCache
-	activeStreams     atomic.Int64
-	relayACLMu        sync.Mutex
-	relayACLCacheKey  string
-	relayACLCache     *acl.Checker
+	cfg              HandlerConfig
+	resolver         *dnsCache
+	activeStreams    atomic.Int64
+	relayACLMu       sync.Mutex
+	relayACLCacheKey string
+	relayACLCache    *acl.Checker
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {

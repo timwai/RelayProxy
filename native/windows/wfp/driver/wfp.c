@@ -601,7 +601,8 @@ static VOID NTAPI RpFlowEstablishedClassify(
         (UINT64)(ULONG_PTR)flow);
     if (!NT_SUCCESS(status)) {
         InterlockedExchange(&flow->FlowAssociated, 0);
-        RpDereferenceFlow(flow);
+        RpDereferenceFlow(flow); /* failed association reference */
+        RpRemoveFlow(flow, TRUE);
     }
     RpDereferenceFlow(flow);
 }

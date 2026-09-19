@@ -111,6 +111,7 @@
     });
   }
   function setSettingsSubtab(name) {
+    const keepTabFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest('#secondary-tabs');
     settingsSubtab = validSettingsSubtabs.has(name) ? name : 'admin';
     try { localStorage.setItem(settingsSubtabKey, settingsSubtab); } catch (_) {}
     if (location.hash !== '#settings/' + settingsSubtab) {
@@ -118,6 +119,10 @@
     }
     applySettingsSubtab();
     renderSectionTabs('settings');
+    if (keepTabFocus) {
+      const active = document.querySelector('#secondary-tabs [role="tab"][aria-selected="true"]');
+      if (active) active.focus({preventScroll:true});
+    }
   }
   function renderSectionTabs(page) {
     const host = $('secondary-tabs');

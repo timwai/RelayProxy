@@ -13,6 +13,7 @@ on:
       - "internal/webui/**"
       - "internal/config/**"
       - ".github/workflows/ui-ci.yml"
+      - "scripts/build.sh"
 
 permissions:
   contents: read
@@ -38,6 +39,8 @@ jobs:
               exit 1
             fi
           fi
+      - name: Check release script syntax
+        run: bash -n scripts/build.sh
       - name: Vet
         run: go vet ./...
       - name: Test

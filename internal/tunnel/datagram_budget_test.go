@@ -282,7 +282,6 @@ func TestQUICDisconnectReleasesNativeBudgets(t *testing.T) {
 	}
 }
 
-
 func TestDatagramRelayPacketReusesBackingBuffer(t *testing.T) {
 	frame := budgetFrames(t, 7, []byte("relay-payload"))[0]
 	budget := &datagramBudget{associationLimit: 2, queueLimit: 1 << 16, reassemblyLimit: 1 << 16}

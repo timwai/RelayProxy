@@ -335,6 +335,12 @@ static VOID NTAPI RpAuthClassify(
     }
     RtlZeroMemory(flow, sizeof(*flow));
     flow->Key = key;
+    flow->ControllerGeneration = RpCurrentControllerGeneration();
+    if (flow->ControllerGeneration == 0) {
+        ExFreePoolWithTag(flow, RP_TAG_FLOW);
+        ClassifyOut->actionType = FWP_ACTION_PERMIT;
+        return;
+    }
     flow->RequestId = RpNextId();
     flow->AssociationId = key.Protocol == RP_IPPROTO_UDP ? flow->RequestId : 0;
     flow->CompartmentId = compartmentId;

@@ -36,6 +36,9 @@ if (-not $OutDir) {
 
 $ldflags = "-s -w -X main.Version=$Version"
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$wfpEmbedAsset = $null
+$wfpEmbedOriginal = $null
+$wfpEmbedTouched = $false
 
 Write-Host "=================================================="
 Write-Host " RelayProxy Build  v$Version"
@@ -79,7 +82,6 @@ try {
 
     $wfpEmbedAsset = Join-Path $Root "agent\divert\wfp\RelayProxyWfp.zip"
     $wfpEmbedOriginal = [System.IO.File]::ReadAllBytes($wfpEmbedAsset)
-    $wfpEmbedTouched = $false
 
     function Set-WFPEmbedPayload {
         param([ValidateSet("amd64", "arm64")][string]$Architecture)
@@ -349,9 +351,11 @@ try {
 "@
 }
 finally {
-    if ($wfpEmbedTouched -and $null -ne $wfpEmbedOriginal) {
+    if ($wfpEmbedTouched -and $wfpEmbedAsset -and $null -ne $wfpEmbedOriginal) {
         [System.IO.File]::WriteAllBytes($wfpEmbedAsset, $wfpEmbedOriginal)
     }
-    Remove-Item ($wfpEmbedAsset + ".tmp.zip") -Force -ErrorAction SilentlyContinue
+    if ($wfpEmbedAsset) {
+        Remove-Item ($wfpEmbedAsset + ".tmp.zip") -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
 }

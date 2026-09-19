@@ -308,6 +308,84 @@ func (s *Server) classifyFlow(input Flow, forceAutoDNSProxy bool) (*ClassifiedFl
 	return route, nil
 }
 
+// RenewUDPAssociation recreates userspace state for an existing trusted OS
+// flow without rematching policy. WFP flow lifetime can outlive a relay tunnel
+// session, so a closed tunnel PacketConn must not permanently strand the
+// Windows UDP endpoint after reconnect.
+func (s *Server) RenewUDPAssociation(previous *ClassifiedFlow) (*ClassifiedFlow, error) {
+	if previous == nil || previous.owner != s || previous.key.Protocol != ProtoUDP ||
+		previous.decision.Action != ActionProxy {
+		return nil, errors.New("divert: invalid UDP classification renewal")
+	}
+
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, ErrClosed
+	}
+	if current := s.udp[previous.key]; current != nil && current != previous.udp {
+		route := current.route
+		s.mu.Unlock()
+		return route, nil
+	}
+	if current := s.udp[previous.key]; current == previous.udp {
+		delete(s.udp, previous.key)
+	}
+	if len(s.udp) >= s.opts.MaxUDPAssociations {
+		expired := s.pruneUDPLocked(time.Now())
+		s.mu.Unlock()
+		for _, association := range expired {
+			association.close()
+		}
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return nil, ErrClosed
+		}
+	}
+	if len(s.udp) >= s.opts.MaxUDPAssociations {
+		s.mu.Unlock()
+		return nil, ErrFlowCapacity
+	}
+
+	route := &ClassifiedFlow{
+		owner: s,
+		key: previous.key,
+		flow: previous.flow,
+		decision: previous.decision,
+	}
+	exitID := route.decision.ExitID
+	route.traffic = s.opts.Traffic.Start(traffic.Metadata{
+		ProcessID: route.flow.ProcessID,
+		Process: route.flow.Process,
+		Source: route.key.Source.String(),
+		Host: route.flow.Host,
+		DomainSource: route.flow.DomainSource,
+		IP: route.flow.IP,
+		Port: route.flow.Port,
+		Protocol: string(route.flow.Protocol),
+		Entry: "transparent",
+		Action: string(route.decision.Action),
+		Rule: route.decision.Rule,
+		ExitID: exitID,
+		Accounting: "stream",
+	})
+	ctx, cancel := context.WithCancel(s.ctx)
+	association := &udpAssociation{
+		server: s,
+		route: route,
+		ctx: ctx,
+		cancel: cancel,
+		ready: make(chan struct{}),
+	}
+	association.touch(time.Now())
+	route.udp = association
+	s.udp[route.key] = association
+	s.startUDPSweeperLocked()
+	s.mu.Unlock()
+	return route, nil
+}
+
 // ForwardTCP consumes a previously classified PROXY flow and owns downstream.
 // It never rematches policy or turns a DIRECT decision into a new intercepted dial.
 func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstream net.Conn) error {

@@ -169,6 +169,14 @@ type wfpUDPJob struct {
 	route *ClassifiedFlow
 }
 
+func wfpDNSProxyBootstrap(protocol Protocol, port uint16, mode DNSMode, proxyReady, proxyEverReady bool) bool {
+	return port == 53 &&
+		(protocol == ProtoUDP || protocol == ProtoTCP) &&
+		mode == DNSModeProxy &&
+		!proxyReady &&
+		!proxyEverReady
+}
+
 type wfpInterceptor struct {
 	server    *Server
 	device    *wfpDevice
@@ -391,10 +399,13 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 	dnsUDP := dnsPort53 && event.Protocol == ProtoUDP
 	dnsMode := i.server.engine.Config().DNSMode
 	dnsAutoUDP := dnsUDP && dnsMode == DNSModeAuto
-	dnsProxyBootstrap := dnsPort53 &&
-		dnsMode == DNSModeProxy &&
-		!i.server.proxyReady() &&
-		!i.proxyEverReady.Load()
+	dnsProxyBootstrap := wfpDNSProxyBootstrap(
+		event.Protocol,
+		event.Destination.Port(),
+		dnsMode,
+		i.server.proxyReady(),
+		i.proxyEverReady.Load(),
+	)
 	if dnsProxyBootstrap && event.Protocol == ProtoTCP {
 		// DNS can fall back to TCP after a truncated UDP response. A TCP flow
 		// that began during initial bootstrap may finish DIRECT; after the first

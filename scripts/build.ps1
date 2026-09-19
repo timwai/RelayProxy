@@ -23,7 +23,8 @@
 param(
     [string]$OutDir = "",
     [string]$Version = "1.0.0",
-    [switch]$SkipWFP
+    [switch]$SkipWFP,
+    [string]$WFPCertificateThumbprint = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -64,8 +65,15 @@ try {
     $wfpStage = Join-Path $OutDir ".wfp"
     if (-not $SkipWFP) {
         Write-Host "[prep] Build native WFP drivers for x64 + ARM64"
-        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\build-wfp.ps1") `
-            -Platform all -Configuration Release -OutDir $wfpStage
+        $wfpScript = Join-Path $Root "scripts\build-wfp.ps1"
+        if ([string]::IsNullOrWhiteSpace($WFPCertificateThumbprint)) {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $wfpScript `
+                -Platform all -Configuration Release -OutDir $wfpStage
+        } else {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $wfpScript `
+                -Platform all -Configuration Release -OutDir $wfpStage `
+                -CertificateThumbprint $WFPCertificateThumbprint
+        }
         if ($LASTEXITCODE -ne 0) { throw "WFP driver build failed" }
     }
 

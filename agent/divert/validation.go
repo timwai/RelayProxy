@@ -35,6 +35,15 @@ func validatedConfig(cfg Config) (Config, error) {
 	if cfg.Mode != "" && cfg.Mode != "divert" {
 		return Config{}, fmt.Errorf("network.mode: unsupported value %q (use divert or empty)", cfg.Mode)
 	}
+	cfg.DNSMode = strings.ToLower(strings.TrimSpace(cfg.DNSMode))
+	if cfg.DNSMode == "" {
+		cfg.DNSMode = DNSModeRule
+	}
+	switch cfg.DNSMode {
+	case DNSModeRule, DNSModeAuto, DNSModeDirect, DNSModeProxy:
+	default:
+		return Config{}, fmt.Errorf("network.dns_mode: unsupported value %q (use rule, auto, direct or proxy)", cfg.DNSMode)
+	}
 	var err error
 	if cfg.DefaultAction, err = normalizeAction(cfg.DefaultAction, ActionProxy); err != nil {
 		return Config{}, fmt.Errorf("network.default_action: %w", err)

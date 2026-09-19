@@ -228,14 +228,23 @@ function Build-One {
         $inf2cat = Find-Tool "Inf2Cat.exe"
         if ($inf2cat) {
             Write-Host "[WFP] Inf2Cat tool: $inf2cat" -ForegroundColor DarkGray
-            # Inf2Cat has no generic 10_ARM64 identifier. ARM64 client targets
-            # must use version-specific identifiers. Keep x64 aligned to the
-            # same supported Windows 10/11 generations.
-            $os = if ($TargetPlatform -eq "x64") {
-                "10_VB_X64,10_CO_X64,10_NI_X64,10_GE_X64,10_25H2_X64"
-            } else {
-                "10_VB_ARM64,10_CO_ARM64,10_NI_ARM64,10_GE_ARM64,10_25H2_ARM64"
+
+            # Inf2Cat has no generic 10_ARM64 token. Discover the identifiers
+            # supported by this exact WDK instead of hard-coding a list that can
+            # drift between kit releases.
+            $helpText = (& $inf2cat /? 2>&1 | Out-String).ToUpperInvariant()
+            $suffix = if ($TargetPlatform -eq "x64") { "X64" } else { "ARM64" }
+            $matches = [regex]::Matches($helpText, "\b10_(?:[A-Z0-9]+_)?$suffix\b")
+            $osTargets = @(
+                $matches |
+                    ForEach-Object { $_.Value } |
+                    Sort-Object -Unique
+            )
+            if ($osTargets.Count -eq 0) {
+                throw "Inf2Cat did not advertise any Windows client $suffix identifiers."
             }
+
+            $os = $osTargets -join ","
             Write-Host "[WFP] Inf2Cat OS targets: $os" -ForegroundColor DarkGray
             & $inf2cat /driver:$package /os:$os /uselocaltime
             if ($LASTEXITCODE -ne 0) {

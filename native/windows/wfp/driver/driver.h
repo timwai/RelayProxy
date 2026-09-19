@@ -35,6 +35,7 @@ typedef struct _RP_FLOW {
     UINT64 RequestId;
     UINT64 AssociationId;
     UINT32 Action;
+    UINT32 DecisionFlags;
     HANDLE CompletionContext;
     UINT32 CompartmentId;
     UINT32 InterfaceIndex;
@@ -59,6 +60,7 @@ typedef struct _RP_DRIVER_STATE {
     volatile LONG64 NextId;
 
     BOOLEAN ControllerActive;
+    BOOLEAN ProxyReady;
     ULONG ControllerPid;
     PFILE_OBJECT ControllerFileObject;
     USHORT TcpPortV4;
@@ -124,6 +126,7 @@ NTSTATUS RpQueueFlowEvent(_In_ const RP_FLOW* Flow, _In_opt_ const FWP_BYTE_BLOB
 NTSTATUS RpQueueDatagramEvent(_In_ UINT32 Kind, _In_ const RP_FLOW* Flow, _In_ ULONG Flags, _In_reads_bytes_opt_(PayloadLength) const UCHAR* Payload, _In_ ULONG PayloadLength);
 NTSTATUS RpReadEvent(_Out_writes_bytes_(OutputLength) VOID* Output, _In_ ULONG OutputLength, _Out_ ULONG_PTR* BytesWritten);
 NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision);
+NTSTATUS RpSetProxyReady(_In_ const RP_WFP_PROXY_READY* Ready);
 
 NTSTATUS RpWfpStart(_In_ PDEVICE_OBJECT DeviceObject);
 VOID RpWfpStop(VOID);

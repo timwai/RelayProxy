@@ -5,6 +5,237 @@ typedef struct _RP_UDP_INJECTION_CONTEXT {
     PMDL Mdl;
 } RP_UDP_INJECTION_CONTEXT;
 
+typedef struct _RP_UDP_REPLAY_CONTEXT {
+    UCHAR RemoteAddress[16];
+    UCHAR* ControlData;
+    ULONG ControlDataLength;
+} RP_UDP_REPLAY_CONTEXT;
+
+static VOID NTAPI RpUdpReplayComplete(
+    _Inout_ VOID* Context,
+    _Inout_ NET_BUFFER_LIST* NetBufferList,
+    _In_ BOOLEAN DispatchLevel)
+{
+    RP_UDP_REPLAY_CONTEXT* replay = (RP_UDP_REPLAY_CONTEXT*)Context;
+    UNREFERENCED_PARAMETER(DispatchLevel);
+
+    if (NetBufferList != NULL) {
+        FwpsFreeCloneNetBufferList(NetBufferList, 0);
+    }
+    if (replay != NULL) {
+        if (replay->ControlData != NULL) {
+            ExFreePoolWithTag(replay->ControlData, RP_TAG_REPLAY);
+        }
+        ExFreePoolWithTag(replay, RP_TAG_REPLAY);
+    }
+}
+
+NTSTATUS RpCapturePendingUdp(
+    _Inout_ RP_FLOW* Flow,
+    _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,
+    _In_ NET_BUFFER_LIST* NetBufferList)
+{
+    UCHAR* controlData = NULL;
+    ULONG controlDataLength = 0;
+    KIRQL oldIrql;
+
+    if (Flow == NULL || Metadata == NULL || NetBufferList == NULL ||
+        Flow->Key.Protocol != IPPROTO_UDP) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    if (!FWPS_IS_METADATA_FIELD_PRESENT(
+            Metadata,
+            FWPS_METADATA_FIELD_TRANSPORT_ENDPOINT_HANDLE)) {
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    if (FWPS_IS_METADATA_FIELD_PRESENT(
+            Metadata,
+            FWPS_METADATA_FIELD_TRANSPORT_CONTROL_DATA) &&
+        Metadata->controlData != NULL &&
+        Metadata->controlDataLength != 0) {
+        controlDataLength = Metadata->controlDataLength;
+        if (controlDataLength > 64u * 1024u) {
+            return STATUS_INVALID_BUFFER_SIZE;
+        }
+        controlData = (UCHAR*)ExAllocatePool2(
+            POOL_FLAG_NON_PAGED,
+            controlDataLength,
+            RP_TAG_REPLAY);
+        if (controlData == NULL) {
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+        RtlCopyMemory(controlData, Metadata->controlData, controlDataLength);
+    }
+
+    FwpsReferenceNetBufferList(NetBufferList, TRUE);
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (Flow->Removed || Flow->PendingUdpNbl != NULL) {
+        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+        FwpsDereferenceNetBufferList(NetBufferList, TRUE);
+        if (controlData != NULL) {
+            ExFreePoolWithTag(controlData, RP_TAG_REPLAY);
+        }
+        return STATUS_INVALID_DEVICE_STATE;
+    }
+
+    Flow->PendingUdpNbl = NetBufferList;
+    Flow->PendingUdpEndpointHandle = Metadata->transportEndpointHandle;
+    Flow->PendingUdpRemoteScopeId = Metadata->remoteScopeId;
+    Flow->PendingUdpControlData = controlData;
+    Flow->PendingUdpControlDataLength = controlDataLength;
+    Flow->PendingUdpReplay = 0;
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+    return STATUS_SUCCESS;
+}
+
+VOID RpReleasePendingUdp(_Inout_ RP_FLOW* Flow)
+{
+    NET_BUFFER_LIST* nbl = NULL;
+    UCHAR* controlData = NULL;
+    KIRQL oldIrql;
+
+    if (Flow == NULL) {
+        return;
+    }
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    nbl = Flow->PendingUdpNbl;
+    controlData = Flow->PendingUdpControlData;
+    Flow->PendingUdpNbl = NULL;
+    Flow->PendingUdpControlData = NULL;
+    Flow->PendingUdpControlDataLength = 0;
+    Flow->PendingUdpEndpointHandle = 0;
+    Flow->PendingUdpReplay = 1;
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+
+    if (nbl != NULL) {
+        FwpsDereferenceNetBufferList(nbl, TRUE);
+    }
+    if (controlData != NULL) {
+        ExFreePoolWithTag(controlData, RP_TAG_REPLAY);
+    }
+}
+
+NTSTATUS RpReplayPendingUdp(_Inout_ RP_FLOW* Flow)
+{
+    RP_UDP_REPLAY_CONTEXT* replay = NULL;
+    NET_BUFFER_LIST* original = NULL;
+    NET_BUFFER_LIST* clone = NULL;
+    FWPS_TRANSPORT_SEND_PARAMS0 sendParams;
+    UCHAR* controlData = NULL;
+    ULONG controlDataLength = 0;
+    UINT64 endpointHandle = 0;
+    SCOPE_ID remoteScopeId;
+    ADDRESS_FAMILY family;
+    HANDLE injectionHandle;
+    KIRQL oldIrql;
+    NTSTATUS status;
+
+    if (Flow == NULL || Flow->Key.Protocol != IPPROTO_UDP) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    replay = (RP_UDP_REPLAY_CONTEXT*)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED,
+        sizeof(*replay),
+        RP_TAG_REPLAY);
+    if (replay == NULL) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+    RtlZeroMemory(replay, sizeof(*replay));
+    RtlZeroMemory(&remoteScopeId, sizeof(remoteScopeId));
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (Flow->Removed ||
+        Flow->PendingUdpNbl == NULL ||
+        InterlockedCompareExchange(&Flow->PendingUdpReplay, 1, 0) != 0) {
+        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+        ExFreePoolWithTag(replay, RP_TAG_REPLAY);
+        return STATUS_SUCCESS;
+    }
+
+    original = Flow->PendingUdpNbl;
+    endpointHandle = Flow->PendingUdpEndpointHandle;
+    remoteScopeId = Flow->PendingUdpRemoteScopeId;
+    controlData = Flow->PendingUdpControlData;
+    controlDataLength = Flow->PendingUdpControlDataLength;
+
+    Flow->PendingUdpNbl = NULL;
+    Flow->PendingUdpEndpointHandle = 0;
+    Flow->PendingUdpControlData = NULL;
+    Flow->PendingUdpControlDataLength = 0;
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+
+    RtlCopyMemory(replay->RemoteAddress, Flow->Key.DestinationAddress, 16);
+    replay->ControlData = controlData;
+    replay->ControlDataLength = controlDataLength;
+
+    status = FwpsAllocateCloneNetBufferList(
+        original,
+        NULL,
+        NULL,
+        0,
+        &clone);
+    FwpsDereferenceNetBufferList(original, TRUE);
+    original = NULL;
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    RtlZeroMemory(&sendParams, sizeof(sendParams));
+    sendParams.remoteAddress = replay->RemoteAddress;
+    sendParams.remoteScopeId = remoteScopeId;
+    sendParams.controlData = (WSACMSGHDR*)replay->ControlData;
+    sendParams.controlDataLength = replay->ControlDataLength;
+
+    if (Flow->Key.Family == 4) {
+        family = AF_INET;
+        injectionHandle = g_RpState.ReplayInjectionHandleV4;
+    } else if (Flow->Key.Family == 6) {
+        family = AF_INET6;
+        injectionHandle = g_RpState.ReplayInjectionHandleV6;
+    } else {
+        status = STATUS_INVALID_ADDRESS;
+        goto Exit;
+    }
+
+    status = FwpsInjectTransportSendAsync0(
+        injectionHandle,
+        NULL,
+        endpointHandle,
+        0,
+        &sendParams,
+        family,
+        Flow->CompartmentId,
+        clone,
+        RpUdpReplayComplete,
+        replay);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
+    clone = NULL;
+    replay = NULL;
+    return STATUS_SUCCESS;
+
+Exit:
+    if (clone != NULL) {
+        FwpsFreeCloneNetBufferList(clone, 0);
+    }
+    if (original != NULL) {
+        FwpsDereferenceNetBufferList(original, TRUE);
+    }
+    if (replay != NULL) {
+        if (replay->ControlData != NULL) {
+            ExFreePoolWithTag(replay->ControlData, RP_TAG_REPLAY);
+        }
+        ExFreePoolWithTag(replay, RP_TAG_REPLAY);
+    }
+    return status;
+}
+
 static VOID RpWriteBE16(_Out_writes_(2) UCHAR* Dst, _In_ UINT16 Value)
 {
     Dst[0] = (UCHAR)(Value >> 8);

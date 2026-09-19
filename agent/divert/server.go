@@ -308,6 +308,18 @@ func (s *Server) classifyFlow(input Flow, forceAutoDNSProxy bool) (*ClassifiedFl
 	return route, nil
 }
 
+// UDPAssociationActive reports whether route still owns the server-side UDP
+// association. Platform backends use it to distinguish a dead tunnel session
+// from a transient forwarding error without peeking into association internals.
+func (s *Server) UDPAssociationActive(route *ClassifiedFlow) bool {
+	if route == nil || route.owner != s || route.key.Protocol != ProtoUDP || route.udp == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.closed && s.udp[route.key] == route.udp
+}
+
 // RenewUDPAssociation recreates userspace state for an existing trusted OS
 // flow without rematching policy. WFP flow lifetime can outlive a relay tunnel
 // session, so a closed tunnel PacketConn must not permanently strand the

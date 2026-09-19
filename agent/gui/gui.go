@@ -17,7 +17,11 @@ import (
 )
 
 // ErrUnsupported is returned by Run on platforms without a desktop window.
-var ErrUnsupported = errors.New("desktop GUI is only available on Windows")
+var ErrUnsupported = errors.New("native desktop GUI is unavailable on this platform")
+
+// ErrExternalUI means the platform opened the shared local management UI in an
+// external system window/browser and the Agent should continue running.
+var ErrExternalUI = errors.New("management UI opened externally")
 
 // Version is the client version shown in the UI. Override at build time with
 // -ldflags "-X relayproxy/agent/gui.Version=x.y.z".

@@ -23,14 +23,14 @@ import (
 const (
 	wfpDevicePath = `\\.\RelayProxyWfp`
 
-	wfpIOCTLGetVersion  = uint32(0x80002000)
-	wfpIOCTLSetConfig   = uint32(0x80002004)
-	wfpIOCTLGetEvent    = uint32(0x80002008)
-	wfpIOCTLSetDecision = uint32(0x8000200c)
-	wfpIOCTLInjectUDP   = uint32(0x80002010)
-	wfpIOCTLHeartbeat   = uint32(0x80002014)
-	wfpIOCTLStop        = uint32(0x80002018)
-	wfpIOCTLRelease     = uint32(0x8000201c)
+	wfpIOCTLGetVersion    = uint32(0x80002000)
+	wfpIOCTLSetConfig     = uint32(0x80002004)
+	wfpIOCTLGetEvent      = uint32(0x80002008)
+	wfpIOCTLSetDecision   = uint32(0x8000200c)
+	wfpIOCTLInjectUDP     = uint32(0x80002010)
+	wfpIOCTLHeartbeat     = uint32(0x80002014)
+	wfpIOCTLStop          = uint32(0x80002018)
+	wfpIOCTLRelease       = uint32(0x8000201c)
 	wfpIOCTLSetProxyReady = uint32(0x80002020)
 )
 

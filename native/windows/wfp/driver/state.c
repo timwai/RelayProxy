@@ -441,10 +441,18 @@ static NTSTATUS RpQueueEventInternal(
     event->CompartmentId = Flow->CompartmentId;
     event->Protocol = Flow->Key.Protocol;
     event->Family = Flow->Key.Family;
-    event->SourcePort = Flow->Key.SourcePort;
-    event->DestinationPort = Flow->Key.DestinationPort;
-    RtlCopyMemory(event->SourceAddress, Flow->Key.SourceAddress, sizeof(event->SourceAddress));
-    RtlCopyMemory(event->DestinationAddress, Flow->Key.DestinationAddress, sizeof(event->DestinationAddress));
+    if ((Kind == RP_WFP_EVENT_DNS || Kind == RP_WFP_EVENT_UDP_DATA) &&
+        (Flags & RP_WFP_EVENT_FLAG_OUTBOUND) == 0) {
+        event->SourcePort = Flow->Key.DestinationPort;
+        event->DestinationPort = Flow->Key.SourcePort;
+        RtlCopyMemory(event->SourceAddress, Flow->Key.DestinationAddress, sizeof(event->SourceAddress));
+        RtlCopyMemory(event->DestinationAddress, Flow->Key.SourceAddress, sizeof(event->DestinationAddress));
+    } else {
+        event->SourcePort = Flow->Key.SourcePort;
+        event->DestinationPort = Flow->Key.DestinationPort;
+        RtlCopyMemory(event->SourceAddress, Flow->Key.SourceAddress, sizeof(event->SourceAddress));
+        RtlCopyMemory(event->DestinationAddress, Flow->Key.DestinationAddress, sizeof(event->DestinationAddress));
+    }
 
     if (ProcessPath != NULL && ProcessPath->data != NULL && ProcessPath->size >= sizeof(WCHAR)) {
         SIZE_T chars = ProcessPath->size / sizeof(WCHAR);

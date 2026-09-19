@@ -154,11 +154,7 @@ func (c *UDPDatagramConn) clearPending() {
 	}
 }
 
-func (c *UDPDatagramConn) assemble(frame, dst []byte) (int, bool) {
-	f, err := protocol.DecodeUDPFragment(frame)
-	if err != nil {
-		return 0, false
-	}
+func (c *UDPDatagramConn) assemble(f protocol.UDPFragment, dst []byte) (int, bool) {
 	if f.Count == 1 {
 		select {
 		case <-c.done:
@@ -247,12 +243,12 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			return 0, nil, os.ErrDeadlineExceeded
 		}
 
-		frame, available, err := c.channel.takeFrame()
+		queued, available, err := c.channel.takeDatagram()
 		if err != nil {
 			return 0, nil, err
 		}
 		if available {
-			n, complete := c.assemble(frame, p)
+			n, complete := c.assemble(queued.fragment, p)
 			if !complete {
 				continue
 			}
@@ -298,7 +294,7 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 				return 0, nil, net.ErrClosed
 			default:
 			}
-			n, complete := c.assemble(queued.frame, p)
+			n, complete := c.assemble(queued.fragment, p)
 			if !complete {
 				continue
 			}

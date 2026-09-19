@@ -127,6 +127,7 @@ NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config);
 VOID RpControllerCleanup(_In_opt_ PFILE_OBJECT FileObject);
 BOOLEAN RpIsControllerFile(_In_opt_ PFILE_OBJECT FileObject);
 NTSTATUS RpHeartbeat(_In_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid);
+NTSTATUS RpStopController(_In_opt_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid);
 UINT64 RpCurrentControllerGeneration(VOID);
 BOOLEAN RpControllerOwnsFlow(_In_ PFILE_OBJECT FileObject, _In_ const RP_FLOW* Flow);
 

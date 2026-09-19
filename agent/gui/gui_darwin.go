@@ -47,6 +47,6 @@ func ShowStartupError(err error, fallbackURL string) {
 }
 
 func ActivateExistingWindow() {}
-func RequestQuit()           {}
-func RequestRestart() error  { return ErrUnsupported }
-func WaitForRestartParent()  {}
+func RequestQuit()            {}
+func RequestRestart() error   { return ErrUnsupported }
+func WaitForRestartParent()   {}

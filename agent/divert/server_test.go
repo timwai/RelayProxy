@@ -235,6 +235,81 @@ func TestUDPReusesAssociationAndForwardsAllReplies(t *testing.T) {
 	}
 }
 
+func TestUDPRenewalPreservesFrozenDecisionAfterTunnelAssociationDies(t *testing.T) {
+	target, observations := udpReplyServer(t, 0)
+	var calls atomic.Int32
+	server := newTestServer(t, Options{
+		Dialer: connectedUDPDialer(&calls),
+		Config: Config{
+			DefaultAction: ActionProxy,
+			Rules: []Rule{{
+				Name: "frozen",
+				Enabled: true,
+				Process: "browser.exe",
+				Action: ActionProxy,
+				ExitID: "exit-a",
+			}},
+		},
+	})
+
+	route, err := server.ClassifyFlow(testFlow(ProtoUDP, target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := server.PinUDPAssociation(route); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.ForwardUDP(context.Background(), route, []byte("before"), func(context.Context, FlowKey, []byte) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-observations:
+		if got.payload != "before" {
+			t.Fatalf("first payload=%q", got.payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("first UDP packet not forwarded")
+	}
+
+	// Simulate the tunnel-backed PacketConn dying while the Windows UDP flow
+	// remains alive. New policy must not rewrite the already-authorized OS flow.
+	server.removeUDPAssociation(route.udp)
+	if server.UDPAssociationActive(route) {
+		t.Fatal("dead UDP association still reported active")
+	}
+	if err := server.ReloadRules(Config{DefaultAction: ActionReject}); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh, err := server.RenewUDPAssociation(route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh == route {
+		t.Fatal("renewal reused the dead classification object")
+	}
+	if fresh.Decision() != route.Decision() {
+		t.Fatalf("renewal changed frozen decision: before=%+v after=%+v", route.Decision(), fresh.Decision())
+	}
+	if err := server.PinUDPAssociation(fresh); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.ForwardUDP(context.Background(), fresh, []byte("after"), func(context.Context, FlowKey, []byte) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-observations:
+		if got.payload != "after" {
+			t.Fatalf("renewed payload=%q", got.payload)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("renewed UDP packet not forwarded")
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("UDP dials=%d want 2", calls.Load())
+	}
+}
+
 func TestUDPSameClientDifferentDestinationsRemainSeparate(t *testing.T) {
 	a, seenA := udpReplyServer(t, 1)
 	b, seenB := udpReplyServer(t, 1)

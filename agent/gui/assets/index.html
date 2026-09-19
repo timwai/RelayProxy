@@ -94,74 +94,74 @@
 
     .config-page-heading { display:flex;justify-content:space-between;align-items:center;gap:16px;padding:3px 0 2px; }
     .config-page-heading h1 { font-size:19px;font-weight:650;letter-spacing:-.4px; }
-    .config-eyebrow { font-size:9px;letter-spacing:2px;color:#8c9aaa;margin-bottom:5px;font-weight:600; }
-    .config-pill { font-size:10px;border:1px solid #dce7e4;color:#508779;background:#f3faf7;padding:4px 9px;border-radius:6px;white-space:nowrap; }
-    .dark .config-pill { background:#13352d;color:#93baae;border-color:#24473d; }
-    .config-card { padding:21px;border:1px solid #e0e6ec;background:#fff;border-radius:11px; }
-    .dark .config-card { border-color:#293342;background:#17202ddd; }
+    .config-eyebrow { font-size:9px;letter-spacing:2px;color:var(--rp-subtle);margin-bottom:5px;font-weight:600; }
+    .config-pill { font-size:10px;border:1px solid color-mix(in srgb,var(--rp-primary) 22%,var(--rp-border));color:var(--rp-primary);background:var(--rp-primary-soft);padding:4px 9px;border-radius:var(--rp-radius-sm);white-space:nowrap; }
+    .dark .config-pill { background:var(--rp-primary-soft);color:var(--rp-primary);border-color:color-mix(in srgb,var(--rp-primary) 28%,var(--rp-border)); }
+    .config-card { padding:21px;border:1px solid var(--rp-border);background:var(--rp-surface);border-radius:var(--rp-radius); }
+    .dark .config-card { border-color:var(--rp-border);background:var(--rp-surface); }
     .config-section-title { display:flex;gap:12px;align-items:center;margin-bottom:18px; }
-    .config-section-title>span { display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:#ecf6f1;color:#479681;font:12px Consolas,monospace; }
-    .dark .config-section-title>span { background:#163b31;color:#7cc2aa; }
+    .config-section-title>span { display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:var(--rp-primary-soft);color:var(--rp-primary);font:12px var(--rp-mono); }
+    .dark .config-section-title>span { background:var(--rp-primary-soft);color:var(--rp-primary); }
     .config-section-title h2 { font-size:13px;font-weight:600; }
-    .config-section-title p { font-size:11px;color:#8a96a8;margin-top:3px; }
+    .config-section-title p { font-size:11px;color:var(--rp-muted);margin-top:3px; }
     .config-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;margin-bottom:14px; }
     .config-field { margin-bottom:14px; }
     .config-grid .config-field { margin-bottom:0; }
-    .config-field label { display:block;font-size:12px;font-weight:550;color:#536478;margin-bottom:7px; }
-    .dark .config-field label { color:#acbbc9; }
-    .config-field input,.config-field select,.config-field textarea,.config-inline input { width:100%;font-size:12px;padding:9px 10px;border:1px solid #cfd9e2;border-radius:6px;background:#f9fbfc;color:inherit; }
-    .dark .config-field input,.dark .config-field select,.dark .config-field textarea,.dark .config-inline input { background:#101722;border-color:#344052; }
+    .config-field label { display:block;font-size:12px;font-weight:550;color:var(--rp-muted);margin-bottom:7px; }
+    .dark .config-field label { color:var(--rp-muted); }
+    .config-field input,.config-field select,.config-field textarea,.config-inline input { width:100%;font-size:12px;padding:9px 10px;border:1px solid var(--rp-border-strong);border-radius:var(--rp-radius-sm);background:var(--rp-surface-soft);color:var(--rp-text); }
+    .dark .config-field input,.dark .config-field select,.dark .config-field textarea,.dark .config-inline input { background:var(--rp-surface-soft);border-color:var(--rp-border-strong); }
     .config-field textarea { resize:vertical; }
-    .config-field small { display:block;font-size:10px;line-height:1.65;color:#8b98a7;margin-top:6px; }
-    .config-help { font-size:11px;color:#8594a5;line-height:1.7;margin-top:6px; }
-    .dark .config-help { color:#8396aa; }
-    .config-info { padding:10px 14px;border:1px solid #d7e8e7;border-radius:7px;background:#ecf7f4;color:#568778;font-size:11px;line-height:1.7; }
-    .dark .config-info { background:#102e28;border-color:#21443a;color:#8ab7a7; }
-    .config-advanced summary { cursor:pointer;font-size:12px;font-weight:550;color:#65778c;user-select:none; }
-    .dark .config-advanced summary { color:#a6b6c7; }
-    .config-advanced summary>span { float:right;font-size:10px;font-weight:400;color:#91a0b0;margin-left:14px; }
+    .config-field small { display:block;font-size:10px;line-height:1.65;color:var(--rp-subtle);margin-top:6px; }
+    .config-help { font-size:11px;color:var(--rp-muted);line-height:1.7;margin-top:6px; }
+    .dark .config-help { color:var(--rp-muted); }
+    .config-info { padding:10px 14px;border:1px solid color-mix(in srgb,var(--rp-primary) 20%,var(--rp-border));border-radius:var(--rp-radius-sm);background:var(--rp-primary-soft);color:var(--rp-primary);font-size:11px;line-height:1.7; }
+    .dark .config-info { background:var(--rp-primary-soft);border-color:color-mix(in srgb,var(--rp-primary) 24%,var(--rp-border));color:var(--rp-primary); }
+    .config-advanced summary { cursor:pointer;font-size:12px;font-weight:550;color:var(--rp-muted);user-select:none; }
+    .dark .config-advanced summary { color:var(--rp-muted); }
+    .config-advanced summary>span { float:right;font-size:10px;font-weight:400;color:var(--rp-subtle);margin-left:14px; }
     .config-advanced[open]>summary { margin-bottom:17px; }
-    .config-card>.config-advanced { border-top:1px solid #e5ebf1;margin-top:19px;padding-top:16px; }
-    .dark .config-card>.config-advanced { border-color:#2c3643; }
+    .config-card>.config-advanced { border-top:1px solid var(--rp-border);margin-top:19px;padding-top:16px; }
+    .dark .config-card>.config-advanced { border-color:var(--rp-border); }
     .config-inline,.config-actions,.config-actions>div,.config-preset-row { display:flex;gap:10px;align-items:center;flex-wrap:wrap; }
     .config-inline input { flex:1;min-width:180px; }
     .config-actions { justify-content:space-between;padding:3px 0;gap:14px; }
     .config-small,.config-secondary { border-radius:6px;padding:8px 12px;font-size:12px;font-weight:550;white-space:nowrap; }
-    .config-secondary { border:1px solid #d5dee7;color:#64778b;background:#ffffff60; }
-    .config-secondary:hover { background:#e9eff5; }
-    .dark .config-secondary { background:#1d283766;border-color:#344254;color:#a7b9ca; }
-    .dark .config-secondary:hover { background:#2d3a4c; }
+    .config-secondary { border:1px solid var(--rp-border-strong);color:var(--rp-muted);background:var(--rp-surface); }
+    .config-secondary:hover { background:var(--rp-surface-soft);color:var(--rp-text); }
+    .dark .config-secondary { background:var(--rp-surface);border-color:var(--rp-border-strong);color:var(--rp-muted); }
+    .dark .config-secondary:hover { background:var(--rp-surface-soft); }
     .config-secondary:disabled { opacity:.4;cursor:default; }
-    .config-address { display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:7px;background:#eef6f4;margin-top:4px;flex-wrap:wrap; }
-    .dark .config-address { background:#122b27; }
-    .config-address>span { font-size:10px;color:#759388; }
-    .config-address code { flex:1;font-size:11px;color:#309077;overflow-wrap:anywhere;user-select:text; }
-    .dark .config-address code { color:#7bc5ac; }
+    .config-address { display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:var(--rp-radius-sm);background:var(--rp-primary-soft);margin-top:4px;flex-wrap:wrap; }
+    .dark .config-address { background:var(--rp-primary-soft); }
+    .config-address>span { font-size:10px;color:var(--rp-muted); }
+    .config-address code { flex:1;font-size:11px;color:var(--rp-primary);overflow-wrap:anywhere;user-select:text; }
+    .dark .config-address code { color:var(--rp-primary); }
     .config-address button { padding:3px 8px;font-size:10px; }
     .config-check { display:flex;gap:8px;align-items:center;font-size:12px; }
-    .config-card input[type=checkbox],.config-check input[type=checkbox] { accent-color:#059669;width:16px;height:16px;flex-shrink:0; }
+    .config-card input[type=checkbox],.config-check input[type=checkbox] { accent-color:var(--rp-primary);width:16px;height:16px;flex-shrink:0; }
     .config-switch-line { display:flex;justify-content:space-between;align-items:center;margin-bottom:20px; }
     .config-switch-line strong { font-size:13px;font-weight:600; }
-    .config-switch-line small { display:block;color:#8798a9;font-size:11px;margin-top:4px; }
+    .config-switch-line small { display:block;color:var(--rp-muted);font-size:11px;margin-top:4px; }
     .config-permissions { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px; }
-    .config-permissions label { display:flex;align-items:center;gap:10px;padding:14px 10px;border:1px solid #e1e8ee;border-radius:8px; }
-    .dark .config-permissions label { border-color:#2f3d4d; }
+    .config-permissions label { display:flex;align-items:center;gap:10px;padding:14px 10px;border:1px solid var(--rp-border);border-radius:var(--rp-radius-sm); }
+    .dark .config-permissions label { border-color:var(--rp-border); }
     .config-permissions strong { display:block;font-size:12px;font-weight:550; }
-    .config-permissions small { display:block;font-size:10px;color:#8b9bad;margin-top:3px; }
-    .config-preset-row { padding:2px 0 1px;font-size:11px;color:#8295a5; }
+    .config-permissions small { display:block;font-size:10px;color:var(--rp-subtle);margin-top:3px; }
+    .config-preset-row { padding:2px 0 1px;font-size:11px;color:var(--rp-muted); }
     .config-preset-row button { padding:5px 10px;font-size:11px; }
     .config-preset-row small { flex:1;font-size:10px; }
-    .config-text-button { font-size:11px;color:#139777; }
+    .config-text-button { font-size:11px;color:var(--rp-primary); }
     .config-inline-action { float:right;margin-top:-24px; }
-    .draft-bar { flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;font-size:11px;background:#e7f6ef;border-bottom:1px solid #c5e6d8;color:#37765d; }
-    .dark .draft-bar { background:#102d24;border-color:#234c3b;color:#9ac8b0; }
+    .draft-bar { flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;font-size:11px;background:var(--rp-primary-soft);border-bottom:1px solid color-mix(in srgb,var(--rp-primary) 22%,var(--rp-border));color:var(--rp-primary); }
+    .dark .draft-bar { background:var(--rp-primary-soft);border-color:color-mix(in srgb,var(--rp-primary) 24%,var(--rp-border));color:var(--rp-primary); }
     .draft-bar>div { display:flex;gap:8px; }
     .draft-bar button { padding:5px 9px;font-size:10px; }
-    .config-form-error { padding:10px 24px;color:#ba4f58;background:#fff0f2;border-bottom:1px solid #f0ced3;font-size:12px;flex-shrink:0; }
-    .dark .config-form-error { color:#ec949a;background:#381d27;border-color:#533039; }
-    .nav-item[data-dirty=true]:after { content:"";width:5px;height:5px;border-radius:50%;background:#dca749;margin-left:auto; }
+    .config-form-error { padding:10px 24px;color:var(--rp-danger);background:color-mix(in srgb,var(--rp-danger) 8%,var(--rp-surface));border-bottom:1px solid color-mix(in srgb,var(--rp-danger) 24%,var(--rp-border));font-size:12px;flex-shrink:0; }
+    .dark .config-form-error { color:var(--rp-danger);background:color-mix(in srgb,var(--rp-danger) 9%,var(--rp-surface));border-color:color-mix(in srgb,var(--rp-danger) 24%,var(--rp-border)); }
+    .nav-item[data-dirty=true]:after { content:"";width:5px;height:5px;border-radius:50%;background:var(--rp-warning);margin-left:auto; }
     input:disabled,select:disabled,textarea:disabled { opacity:.5;cursor:not-allowed; }
-    [aria-invalid=true] { border-color:#d7626f!important; }
+    [aria-invalid=true] { border-color:var(--rp-danger)!important; }
     .tab-pane { min-height:0;flex:1; }
     @media(max-width:850px) { .config-permissions { grid-template-columns:1fr; }.config-permissions small { display:inline;margin-left:8px; }.config-grid{gap:14px;}.config-card{padding:17px;}.config-actions{align-items:flex-start;}.config-actions>div{gap:7px;}.config-page-heading h1{font-size:17px;} }
     @media(max-width:650px) { .rp-sidebar { width:156px; }.config-grid{grid-template-columns:1fr;}.config-advanced summary>span{float:none;display:block;margin:4px 0 0;}.config-page-heading{align-items:flex-start;flex-direction:column;}.draft-bar{padding:8px 12px;flex-wrap:wrap;}.config-inline-action{float:none;margin:0 0 6px;}.tab-pane{padding-left:16px;padding-right:16px;} }

@@ -12,7 +12,7 @@ static BOOLEAN RpKeysEqual(_In_ const RP_FLOW_KEY* A, _In_ const RP_FLOW_KEY* B)
         RtlCompareMemory(A->DestinationAddress, B->DestinationAddress, sizeof(A->DestinationAddress)) != sizeof(A->DestinationAddress)) {
         return FALSE;
     }
-    return A->ProcessId == 0 || B->ProcessId == 0 || A->ProcessId == B->ProcessId;
+    return A->ProcessId == B->ProcessId;
 }
 
 static VOID RpWatchdogThread(_In_opt_ PVOID Context)

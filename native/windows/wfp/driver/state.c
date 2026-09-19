@@ -738,7 +738,10 @@ NTSTATUS RpApplyDecision(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_DECISIO
         Decision->AbiVersion != RP_WFP_ABI_VERSION ||
         Decision->Size != sizeof(RP_WFP_DECISION) ||
         Decision->RequestId == 0 ||
-        (Decision->Flags & ~RP_WFP_DECISION_FLAG_DNS_AUTO) != 0 ||
+        (Decision->Flags & ~(RP_WFP_DECISION_FLAG_DNS_AUTO |
+                             RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY)) != 0 ||
+        (Decision->Flags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0 &&
+        (Decision->Flags & RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY) != 0 ||
         (Decision->Action != RP_WFP_ACTION_DIRECT &&
          Decision->Action != RP_WFP_ACTION_PROXY &&
          Decision->Action != RP_WFP_ACTION_REJECT)) {
@@ -749,7 +752,9 @@ NTSTATUS RpApplyDecision(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_DECISIO
     if (flow == NULL) {
         return STATUS_NOT_FOUND;
     }
-    if ((Decision->Flags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0 &&
+    if ((Decision->Flags &
+         (RP_WFP_DECISION_FLAG_DNS_AUTO |
+          RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY)) != 0 &&
         (flow->Key.Protocol != IPPROTO_UDP || flow->Key.DestinationPort != 53)) {
         RpDereferenceFlow(flow);
         return STATUS_INVALID_PARAMETER;
@@ -804,11 +809,26 @@ NTSTATUS RpSetProxyReady(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_PROXY_R
     g_RpState.ProxyReady = value;
     for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
         RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);
-        if (!flow->Removed &&
-            flow->Key.Protocol == IPPROTO_UDP &&
-            flow->Key.DestinationPort == 53 &&
-            (flow->DecisionFlags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0) {
+        if (flow->Removed ||
+            flow->Key.Protocol != IPPROTO_UDP ||
+            flow->Key.DestinationPort != 53) {
+            continue;
+        }
+        if ((flow->DecisionFlags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0) {
             flow->Action = value ? RP_WFP_ACTION_PROXY : RP_WFP_ACTION_DIRECT;
+            flow->LastSeen100ns = KeQueryInterruptTime();
+            continue;
+        }
+        if (value &&
+            (flow->DecisionFlags & RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY) != 0) {
+            /*
+             * Forced PROXY only gets a one-time startup escape hatch so the
+             * Agent can resolve/connect to its relay. Once Relay becomes ready,
+             * promote the flow to PROXY and clear the bootstrap bit. Later
+             * disconnects must not fail open for explicit PROXY mode.
+             */
+            flow->Action = RP_WFP_ACTION_PROXY;
+            flow->DecisionFlags &= ~RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY;
             flow->LastSeen100ns = KeQueryInterruptTime();
         }
     }

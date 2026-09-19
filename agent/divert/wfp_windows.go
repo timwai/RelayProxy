@@ -421,6 +421,9 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 	}
 	if err := i.device.decisionFlags(event.RequestID, driverAction, decisionFlags); err != nil {
 		route.traffic.Finish("failed", err)
+		if event.Protocol == ProtoUDP && route.Decision().Action != ActionReject {
+			i.server.ReleaseUDPAssociation(route)
+		}
 		i.forget(event.RequestID, event.AssociationID)
 		i.report(err)
 		return

@@ -29,7 +29,13 @@ var Version = "1.0.0"
 
 // DefaultWindowTitle is intentionally stable across releases. The second
 // instance uses it to locate and activate the first instance's native window.
-const DefaultWindowTitle = "RelayProxy 代理客户端"
+const (
+	DefaultWindowTitle  = "RelayProxy 代理客户端"
+	DefaultWindowWidth  = 1100
+	DefaultWindowHeight = 760
+	MinimumWindowWidth  = 820
+	MinimumWindowHeight = 560
+)
 
 // Options configures the desktop window.
 type Options struct {

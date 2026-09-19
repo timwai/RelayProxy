@@ -201,6 +201,7 @@ NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
         }
         g_RpState.ControllerPid = Config->ControllerPid;
         g_RpState.ControllerFileObject = fileObject;
+        g_RpState.ProxyReady = FALSE;
         g_RpState.TcpPortV4 = Config->TcpPortV4;
         g_RpState.TcpPortV6 = Config->TcpPortV6;
         g_RpState.HeartbeatMs = Config->HeartbeatMs;
@@ -367,6 +368,7 @@ VOID RpControllerFailOpen(VOID)
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
     g_RpState.ControllerActive = FALSE;
+    g_RpState.ProxyReady = FALSE;
     g_RpState.ControllerPid = 0;
     g_RpState.ControllerFileObject = NULL;
     g_RpState.TcpPortV4 = 0;
@@ -556,6 +558,7 @@ NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision)
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
     if (!flow->Removed) {
         flow->Action = Decision->Action;
+        flow->DecisionFlags = Decision->Flags;
         context = flow->CompletionContext;
         flow->CompletionContext = NULL;
     }
@@ -568,5 +571,36 @@ NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision)
 
     FwpsCompleteOperation0(context, NULL);
     RpDereferenceFlow(flow);
+    return STATUS_SUCCESS;
+}
+
+
+NTSTATUS RpSetProxyReady(_In_ const RP_WFP_PROXY_READY* Ready)
+{
+    KIRQL oldIrql;
+    PLIST_ENTRY entry;
+    BOOLEAN value;
+
+    if (Ready == NULL ||
+        Ready->AbiVersion != RP_WFP_ABI_VERSION ||
+        Ready->Size != sizeof(RP_WFP_PROXY_READY) ||
+        Ready->Ready > 1) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    value = Ready->Ready != 0;
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    g_RpState.ProxyReady = value;
+    for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
+        RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);
+        if (!flow->Removed &&
+            flow->Key.Protocol == IPPROTO_UDP &&
+            flow->Key.DestinationPort == 53 &&
+            (flow->DecisionFlags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0) {
+            flow->Action = value ? RP_WFP_ACTION_PROXY : RP_WFP_ACTION_DIRECT;
+            flow->LastSeen100ns = KeQueryInterruptTime();
+        }
+    }
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
     return STATUS_SUCCESS;
 }

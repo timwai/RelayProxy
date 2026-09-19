@@ -28,6 +28,7 @@ type udpAssociation struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	last   atomic.Int64
+	pinned atomic.Bool
 
 	mu        sync.Mutex
 	writeMu   sync.Mutex
@@ -42,7 +43,36 @@ type udpAssociation struct {
 
 func (a *udpAssociation) touch(now time.Time) { a.last.Store(now.UnixNano()) }
 func (a *udpAssociation) expired(now time.Time) bool {
+	if a.pinned.Load() {
+		return false
+	}
 	return now.Sub(time.Unix(0, a.last.Load())) >= a.server.opts.UDPIdleTimeout
+}
+
+// PinUDPAssociation binds an association lifetime to a trusted platform flow.
+// WFP uses this because a Windows UDP endpoint can remain idle longer than the
+// generic datagram timeout and later resume on the same kernel flow.
+func (s *Server) PinUDPAssociation(route *ClassifiedFlow) error {
+	if route == nil || route.owner != s || route.key.Protocol != ProtoUDP || route.udp == nil {
+		return errors.New("divert: invalid UDP classification")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || s.udp[route.key] != route.udp {
+		return ErrAssociationClosed
+	}
+	route.udp.pinned.Store(true)
+	return nil
+}
+
+// ReleaseUDPAssociation closes a platform-pinned UDP association when the OS
+// reports that its endpoint/flow is gone.
+func (s *Server) ReleaseUDPAssociation(route *ClassifiedFlow) {
+	if route == nil || route.owner != s || route.key.Protocol != ProtoUDP || route.udp == nil {
+		return
+	}
+	route.udp.pinned.Store(false)
+	s.removeUDPAssociation(route.udp)
 }
 
 // ForwardUDP preserves one tunnel association and decision for the original

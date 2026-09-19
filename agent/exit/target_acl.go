@@ -21,13 +21,43 @@ func (h *Handler) aclForRequest(policy *acl.Policy) (*requestACL, error) {
 	}
 	checker := &requestACL{local: h.cfg.ACLChecker}
 	if policy != nil {
-		var err error
-		checker.relay, err = acl.NewChecker(*policy)
+		relay, err := h.compiledRelayACL(policy)
 		if err != nil {
 			return nil, fmt.Errorf("invalid relay ACL policy: %w", err)
 		}
+		checker.relay = relay
 	}
 	return checker, nil
+}
+
+func (h *Handler) compiledRelayACL(policy *acl.Policy) (*acl.Checker, error) {
+	if policy == nil {
+		return nil, nil
+	}
+	key := policy.Fingerprint
+	if key == "" {
+		// Compatibility path for focused tests and older peers that don't carry
+		// the compiled-policy fingerprint. Correctness is unchanged; only the
+		// cache fast path is unavailable.
+		return acl.NewChecker(*policy)
+	}
+
+	h.relayACLMu.Lock()
+	defer h.relayACLMu.Unlock()
+	if h.relayACLCacheKey == key && h.relayACLCache != nil {
+		return h.relayACLCache, nil
+	}
+	compiled, err := acl.NewChecker(*policy)
+	if err != nil {
+		return nil, err
+	}
+	verified := compiled.Policy()
+	if verified.Fingerprint != key {
+		return nil, fmt.Errorf("relay ACL fingerprint mismatch")
+	}
+	h.relayACLCacheKey = key
+	h.relayACLCache = compiled
+	return compiled, nil
 }
 
 func (a *requestACL) CheckHostProtocol(ctx context.Context, host string, port uint16, transport string) error {

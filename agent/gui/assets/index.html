@@ -1018,6 +1018,24 @@
       proxy:'proxy', routing:'proxy', share:'proxy', rdp:'rdp', logs:'monitor', connections:'monitor', settings:'settings'
     };
     state.section = state.section || 'home';
+    var navigationKey = 'relayproxy-agent-navigation';
+    function loadNavigation() {
+      try {
+        var value = JSON.parse(localStorage.getItem(navigationKey) || '{}');
+        var section = sectionTabs[value.section] ? value.section : 'home';
+        var tab = value.tab && tabSections[value.tab] === section ? value.tab : null;
+        if (!tab) {
+          var first = (sectionTabs[section] || []).find(function (item) { return !item.action; });
+          tab = first ? first.id : 'home';
+        }
+        return { section: section, tab: tab };
+      } catch (_) {
+        return { section: 'home', tab: 'home' };
+      }
+    }
+    function rememberNavigation() {
+      try { localStorage.setItem(navigationKey, JSON.stringify({ section: state.section, tab: state.tab })); } catch (_) {}
+    }
 
     function renderSectionTabs(section, activeTab) {
       var host = $('secondary-tabs');
@@ -1070,6 +1088,7 @@
       pane.setAttribute('role', 'tabpanel');
       pane.setAttribute('aria-labelledby', 'tab-btn-' + id);
       renderSectionTabs(section, id);
+      rememberNavigation();
       if (id === 'logs') refreshLogs();
       if (id === 'connections') refreshConnectionsInline(true);
     }
@@ -1663,7 +1682,8 @@
       if (el) { el.dataset.placeholder = '1'; }
 
       applyTheme((window.RelayUITheme && window.RelayUITheme.get()) || document.documentElement.dataset.themeMode || 'system', false);
-      switchSection(state.section || 'home', state.tab || 'home');
+      var rememberedNavigation = loadNavigation();
+      switchSection(rememberedNavigation.section, rememberedNavigation.tab);
       setConfigReady(false);
       document.addEventListener('input', function (event) {
         if (!state.loaded || state.saving) return;

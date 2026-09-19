@@ -131,26 +131,101 @@ VOID RpStateShutdown(VOID)
     }
 }
 
+static BOOLEAN RpBeginControllerFailOpenLocked(VOID)
+{
+    PLIST_ENTRY entry;
+
+    if (g_RpState.ControllerFailingOpen) {
+        return FALSE;
+    }
+
+    g_RpState.ControllerFailingOpen = TRUE;
+    g_RpState.ControllerActive = FALSE;
+    g_RpState.ProxyReady = FALSE;
+    g_RpState.ControllerPid = 0;
+    g_RpState.ControllerFileObject = NULL;
+    g_RpState.TcpPortV4 = 0;
+    g_RpState.TcpPortV6 = 0;
+    g_RpState.HeartbeatMs = 0;
+    g_RpState.LastHeartbeat100ns = 0;
+
+    for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
+        RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);
+        if (!flow->Removed) {
+            /*
+             * A replacement controller does not own the previous Agent's
+             * userspace association. Keep surviving kernel flows safely DIRECT
+             * instead of reviving a stale PROXY route.
+             */
+            flow->Action = RP_WFP_ACTION_DIRECT;
+            flow->DecisionFlags = 0;
+        }
+    }
+    return TRUE;
+}
+
+static VOID RpFinishControllerFailOpen(VOID)
+{
+    KIRQL oldIrql;
+
+    RpFreeEvents();
+
+    for (;;) {
+        RP_FLOW* target = NULL;
+        HANDLE context = NULL;
+        PLIST_ENTRY entry;
+
+        KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+        for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
+            RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);
+            if (!flow->Removed && flow->CompletionContext != NULL) {
+                target = flow;
+                RpReferenceFlow(target);
+                context = flow->CompletionContext;
+                flow->CompletionContext = NULL;
+                flow->Action = RP_WFP_ACTION_DIRECT;
+                break;
+            }
+        }
+        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+
+        if (target == NULL) {
+            break;
+        }
+        FwpsCompleteOperation0(context, NULL);
+        RpDereferenceFlow(target);
+    }
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    g_RpState.ControllerFailingOpen = FALSE;
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+}
+
 BOOLEAN RpControllerHealthy(VOID)
 {
-    BOOLEAN healthy;
+    BOOLEAN healthy = FALSE;
+    BOOLEAN failOpen = FALSE;
     UINT64 timeout;
     UINT64 last;
     UINT64 now = KeQueryInterruptTime();
     KIRQL oldIrql;
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
-    timeout = (UINT64)g_RpState.HeartbeatMs * 10000ull;
-    last = g_RpState.LastHeartbeat100ns;
-    healthy = g_RpState.ControllerActive &&
-              g_RpState.ControllerPid != 0 &&
-              g_RpState.HeartbeatMs != 0 &&
-              now >= last &&
-              (now - last) <= timeout;
+    if (g_RpState.ControllerActive) {
+        timeout = (UINT64)g_RpState.HeartbeatMs * 10000ull;
+        last = g_RpState.LastHeartbeat100ns;
+        healthy = g_RpState.ControllerPid != 0 &&
+                  g_RpState.HeartbeatMs != 0 &&
+                  now >= last &&
+                  (now - last) <= timeout;
+        if (!healthy) {
+            failOpen = RpBeginControllerFailOpenLocked();
+        }
+    }
     KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
 
-    if (!healthy) {
-        RpControllerFailOpen();
+    if (failOpen) {
+        RpFinishControllerFailOpen();
     }
     return healthy;
 }
@@ -195,8 +270,9 @@ NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
     {
         KIRQL oldIrql;
         KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
-        if (g_RpState.ControllerActive &&
-            g_RpState.ControllerFileObject != fileObject) {
+        if (g_RpState.ControllerFailingOpen ||
+            (g_RpState.ControllerActive &&
+             g_RpState.ControllerFileObject != fileObject)) {
             KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
             return STATUS_DEVICE_BUSY;
         }
@@ -366,60 +442,15 @@ VOID RpRemoveFlow(_In_ RP_FLOW* Flow, _In_ BOOLEAN QueueClose)
 
 VOID RpControllerFailOpen(VOID)
 {
+    BOOLEAN failOpen;
     KIRQL oldIrql;
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
-    g_RpState.ControllerActive = FALSE;
-    g_RpState.ProxyReady = FALSE;
-    g_RpState.ControllerPid = 0;
-    g_RpState.ControllerFileObject = NULL;
-    g_RpState.TcpPortV4 = 0;
-    g_RpState.TcpPortV6 = 0;
-    g_RpState.HeartbeatMs = 0;
-    g_RpState.LastHeartbeat100ns = 0;
-    {
-        PLIST_ENTRY entry;
-        for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
-            RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);
-            if (!flow->Removed) {
-                /*
-                 * A replacement controller does not own the previous Agent's
-                 * userspace association. Keep surviving kernel flows safely
-                 * DIRECT instead of reviving a stale PROXY route.
-                 */
-                flow->Action = RP_WFP_ACTION_DIRECT;
-                flow->DecisionFlags = 0;
-            }
-        }
-    }
+    failOpen = RpBeginControllerFailOpenLocked();
     KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
 
-    RpFreeEvents();
-
-    for (;;) {
-        RP_FLOW* target = NULL;
-        HANDLE context = NULL;
-        PLIST_ENTRY entry;
-
-        KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
-        for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
-            RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);
-            if (!flow->Removed && flow->CompletionContext != NULL) {
-                target = flow;
-                RpReferenceFlow(target);
-                context = flow->CompletionContext;
-                flow->CompletionContext = NULL;
-                flow->Action = RP_WFP_ACTION_DIRECT;
-                break;
-            }
-        }
-        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
-
-        if (target == NULL) {
-            break;
-        }
-        FwpsCompleteOperation0(context, NULL);
-        RpDereferenceFlow(target);
+    if (failOpen) {
+        RpFinishControllerFailOpen();
     }
 }
 

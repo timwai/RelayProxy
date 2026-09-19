@@ -423,7 +423,7 @@ static VOID NTAPI RpRedirectClassify(
         return;
     }
 
-    status = FwpsAcquireClassifyHandle0(ClassifyContext, 0, &classifyHandle);
+    status = FwpsAcquireClassifyHandle0((VOID*)ClassifyContext, 0, &classifyHandle);
     if (!NT_SUCCESS(status)) {
         goto Block;
     }

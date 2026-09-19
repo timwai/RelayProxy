@@ -58,7 +58,7 @@ func (r *StreamRouter) handleOpenRDPTCP(ctx context.Context, header *protocol.St
 	target, err := r.authorizeRDP(clientSession.DeviceID, header.ExitDeviceID)
 	if err != nil {
 		writeRDPDenied(clientStream, req.RequestID, err.Error())
-		r.emitAudit(&repository.ConnectionAudit{ClientDeviceID: clientSession.DeviceID, ExitDeviceID: header.ExitDeviceID, Protocol: "rdp", Result: "UNAUTHORIZED", ErrorCode: protocol.ErrCodeAccessDenied, StartedAt: time.Now(), EndedAt: time.Now()})
+		r.emitAudit(&repository.ConnectionAudit{UserID: clientSession.OwnerUserID, ClientDeviceID: clientSession.DeviceID, ExitDeviceID: header.ExitDeviceID, Protocol: "rdp", Result: "UNAUTHORIZED", ErrorCode: protocol.ErrCodeAccessDenied, StartedAt: time.Now(), EndedAt: time.Now()})
 		return
 	}
 
@@ -101,7 +101,7 @@ func (r *StreamRouter) handleOpenRDPTCP(ctx context.Context, header *protocol.St
 	defer clientSession.ActiveStreams.Add(-1)
 	defer target.ActiveStreams.Add(-1)
 	up, down := r.pipeStreams(ctx, clientStream, targetStream, clientSession, target)
-	r.emitAudit(&repository.ConnectionAudit{ClientDeviceID: clientSession.DeviceID, ExitDeviceID: target.DeviceID, Protocol: "rdp", TargetHost: "127.0.0.1", TargetPort: 3389, StartedAt: time.Now(), EndedAt: time.Now(), BytesUp: up, BytesDown: down, Result: "SUCCESS"})
+	r.emitAudit(&repository.ConnectionAudit{UserID: clientSession.OwnerUserID, ClientDeviceID: clientSession.DeviceID, ExitDeviceID: target.DeviceID, Protocol: "rdp", TargetHost: "127.0.0.1", TargetPort: 3389, StartedAt: time.Now(), EndedAt: time.Now(), BytesUp: up, BytesDown: down, Result: "SUCCESS"})
 }
 
 func (r *StreamRouter) handleOpenRDPUDP(ctx context.Context, header *protocol.StreamHeader, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession, handshakeDeadline time.Time) {

@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
 	"relayproxy/internal/tunnel"
@@ -26,6 +25,7 @@ type TunnelDialer struct {
 	getTunnel     func() tunnel.TunnelSession
 	getClientID   func() string
 	defaultExitID atomic.Pointer[string]
+	requestSeq    atomic.Uint64
 }
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
@@ -47,6 +47,14 @@ func (d *TunnelDialer) GetDefaultExitID() string {
 	return *ptr
 }
 
+func (d *TunnelDialer) nextRequestID() string {
+	return d.nextRequestIDWithPrefix("req_")
+}
+
+func (d *TunnelDialer) nextRequestIDWithPrefix(prefix string) string {
+	return prefix + strconv.FormatUint(d.requestSeq.Add(1), 36)
+}
+
 func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host string, port uint16) (net.Conn, error) {
 	sess := d.getTunnel()
 	if sess == nil {
@@ -57,11 +65,6 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		exitNodeID = d.GetDefaultExitID()
 	}
 	// Empty exitNodeID is allowed: relay auto-selects when exactly one authorized exit is online (P3-1).
-
-	clientID := ""
-	if d.getClientID != nil {
-		clientID = d.getClientID()
-	}
 
 	// 1. Open stream on tunnel session
 	stream, err := sess.OpenStream(ctx)
@@ -77,16 +80,15 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	}
 
-	reqID := "req_" + uuid.New().String()[:8]
+	reqID := d.nextRequestID()
 
 	// 2. Write StreamHeader
 	header := &protocol.StreamHeader{
-		Magic:          protocol.MagicHeader,
-		Version:        protocol.CurrentVersion,
-		Type:           protocol.FrameTypeOpenTCP,
-		RequestID:      reqID,
-		ClientDeviceID: clientID,
-		ExitDeviceID:   exitNodeID,
+		Magic:        protocol.MagicHeader,
+		Version:      protocol.CurrentVersion,
+		Type:         protocol.FrameTypeOpenTCP,
+		RequestID:    reqID,
+		ExitDeviceID: exitNodeID,
 	}
 	if err := protocol.WriteStreamHeader(stream, header); err != nil {
 		stream.Close()
@@ -164,11 +166,6 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		exitNodeID = d.GetDefaultExitID()
 	}
 
-	clientID := ""
-	if d.getClientID != nil {
-		clientID = d.getClientID()
-	}
-
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
@@ -196,15 +193,14 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	}
 
-	reqID := "req_" + uuid.New().String()[:8]
+	reqID := d.nextRequestID()
 
 	header := &protocol.StreamHeader{
-		Magic:          protocol.MagicHeader,
-		Version:        protocol.CurrentVersion,
-		Type:           protocol.FrameTypeOpenUDP,
-		RequestID:      reqID,
-		ClientDeviceID: clientID,
-		ExitDeviceID:   exitNodeID,
+		Magic:        protocol.MagicHeader,
+		Version:      protocol.CurrentVersion,
+		Type:         protocol.FrameTypeOpenUDP,
+		RequestID:    reqID,
+		ExitDeviceID: exitNodeID,
 	}
 	if err := protocol.WriteStreamHeader(stream, header); err != nil {
 		stream.Close()

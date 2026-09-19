@@ -27,7 +27,6 @@ type StreamRouter struct {
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
 	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
-	ownerLookup       func(deviceID string) (string, error)
 	onAudit           func(audit *repository.ConnectionAudit)
 }
 
@@ -59,26 +58,32 @@ func NewStreamRouter(
 	}
 }
 
-// SetOwnerLookup optionally fills audit.UserID from device ownership.
-func (r *StreamRouter) SetOwnerLookup(fn func(deviceID string) (string, error)) {
-	r.ownerLookup = fn
-}
-
 func (r *StreamRouter) emitAudit(a *repository.ConnectionAudit) {
 	if r.onAudit == nil || a == nil {
 		return
 	}
-	if a.UserID == "" && r.ownerLookup != nil && a.ClientDeviceID != "" {
-		if uid, err := r.ownerLookup(a.ClientDeviceID); err == nil {
-			a.UserID = uid
-		}
-	}
 	r.onAudit(a)
+}
+
+func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool, error) {
+	if client == nil || exit == nil {
+		return false, nil
+	}
+	// Ownership is loaded as part of the authenticated session snapshot.
+	// Authorization changes invalidate that session, so matching owners can be
+	// checked without SQLite on every data stream.
+	if client.OwnerUserID != "" && exit.OwnerUserID != "" {
+		return client.OwnerUserID == exit.OwnerUserID, nil
+	}
+	if r.authChecker != nil {
+		return r.authChecker(client.DeviceID, exit.DeviceID)
+	}
+	return true, nil
 }
 
 // resolveExitSession returns an online exit session.
 // Empty exitDeviceID triggers auto-select when exactly one authorized exit is online (P3-1).
-func (r *StreamRouter) resolveExitSession(clientDeviceID, exitDeviceID string) (*session.DeviceSession, error) {
+func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDeviceID string) (*session.DeviceSession, error) {
 	if exitDeviceID != "" {
 		exitSession, exists := r.sessions.Get(exitDeviceID)
 		if !exists || !exitSession.IsExit() {
@@ -87,41 +92,40 @@ func (r *StreamRouter) resolveExitSession(clientDeviceID, exitDeviceID string) (
 		return exitSession, nil
 	}
 
-	exits := r.sessions.GetExits()
-	var candidates []*session.DeviceSession
-	for _, e := range exits {
-		if r.authChecker != nil {
-			ok, err := r.authChecker(clientDeviceID, e.DeviceID)
-			if err != nil || !ok {
-				continue
-			}
+	if client != nil && client.OwnerUserID != "" {
+		candidate, count := r.sessions.UniqueExitForOwner(client.OwnerUserID)
+		switch count {
+		case 0:
+			return nil, errNoExitOnline
+		case 1:
+			return candidate, nil
+		default:
+			return nil, errMultipleExits
 		}
-		candidates = append(candidates, e)
 	}
-	switch len(candidates) {
-	case 0:
+
+	exits := r.sessions.GetExits()
+	var candidate *session.DeviceSession
+	count := 0
+	for _, e := range exits {
+		ok, err := r.authorizeExit(client, e)
+		if err != nil || !ok {
+			continue
+		}
+		candidate = e
+		count++
+		if count > 1 {
+			return nil, errMultipleExits
+		}
+	}
+	if count == 0 {
 		return nil, errNoExitOnline
-	case 1:
-		log.Printf("[StreamRouter] Auto-selected unique exit %s for client %s", candidates[0].DeviceID, clientDeviceID)
-		return candidates[0], nil
-	default:
-		return nil, errMultipleExits
 	}
+	return candidate, nil
 }
 
 // HandleClientStream processes a new stream opened by a Client
 func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	if clientSession.Tunnel != nil {
-		go func() {
-			select {
-			case <-clientSession.Tunnel.Done():
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
-	}
 	defer clientStream.Close()
 	stopCancel := tunnel.InterruptOnCancel(ctx, clientStream)
 	defer stopCancel()
@@ -172,6 +176,7 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	now := time.Now()
 	baseAudit := func(result, errCode, resolvedIP string) *repository.ConnectionAudit {
 		return &repository.ConnectionAudit{
+			UserID:         clientSession.OwnerUserID,
 			ClientDeviceID: clientSession.DeviceID,
 			ExitDeviceID:   header.ExitDeviceID,
 			Protocol:       "tcp",
@@ -187,7 +192,7 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 
 	// 1. Resolve exit: explicit ID, or auto-pick when exactly one authorized exit is online (P3-1)
 	exitDeviceID := header.ExitDeviceID
-	exitSession, resolveErr := r.resolveExitSession(clientSession.DeviceID, exitDeviceID)
+	exitSession, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
 	if resolveErr != nil {
 		code := protocol.ErrCodeExitOffline
 		msg := resolveErr.Error()
@@ -209,19 +214,17 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 
 	// 2. Validate Client -> Exit authorization (P0-2)
 	// (auto-select already filtered by auth; explicit ID still needs the check)
-	if r.authChecker != nil {
-		authorized, err := r.authChecker(clientSession.DeviceID, exitDeviceID)
-		if err != nil || !authorized {
-			log.Printf("[StreamRouter] Unauthorized access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
-			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
-				RequestID:    req.RequestID,
-				Success:      false,
-				ErrorCode:    protocol.ErrCodeACLDenied,
-				ErrorMessage: "Client is not authorized to access this exit node",
-			})
-			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
-			return
-		}
+	authorized, authErr := r.authorizeExit(clientSession, exitSession)
+	if authErr != nil || !authorized {
+		log.Printf("[StreamRouter] Unauthorized access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+			RequestID:    req.RequestID,
+			Success:      false,
+			ErrorCode:    protocol.ErrCodeACLDenied,
+			ErrorMessage: "Client is not authorized to access this exit node",
+		})
+		r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
+		return
 	}
 
 	// Bind the Relay's own policy, replacing any policy supplied by the client.
@@ -321,15 +324,17 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	startTime := time.Now()
 	clientSession.ActiveStreams.Add(1)
 	exitSession.ActiveStreams.Add(1)
-	clientSession.ActiveExitID.Store(&exitDeviceID)
+	activeExitID := &exitSession.DeviceID
+	clientSession.ActiveExitID.Store(activeExitID)
 
 	bytesUp, bytesDown := r.pipeStreams(ctx, clientStream, exitStream, clientSession, exitSession)
 
 	if clientSession.ActiveStreams.Add(-1) <= 0 {
-		clientSession.ActiveExitID.CompareAndSwap(&exitDeviceID, nil)
+		clientSession.ActiveExitID.CompareAndSwap(activeExitID, nil)
 	}
 	exitSession.ActiveStreams.Add(-1)
 	r.emitAudit(&repository.ConnectionAudit{
+		UserID:         clientSession.OwnerUserID,
 		ClientDeviceID: clientSession.DeviceID,
 		ExitDeviceID:   exitDeviceID,
 		Protocol:       "tcp",
@@ -366,6 +371,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	now := time.Now()
 	baseAudit := func(result, errCode, resolvedIP string) *repository.ConnectionAudit {
 		return &repository.ConnectionAudit{
+			UserID:         clientSession.OwnerUserID,
 			ClientDeviceID: clientSession.DeviceID,
 			ExitDeviceID:   header.ExitDeviceID,
 			Protocol:       "udp",
@@ -380,7 +386,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	}
 
 	exitDeviceID := header.ExitDeviceID
-	exitSession, resolveErr := r.resolveExitSession(clientSession.DeviceID, exitDeviceID)
+	exitSession, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
 	if resolveErr != nil {
 		code := protocol.ErrCodeExitOffline
 		msg := resolveErr.Error()
@@ -400,19 +406,17 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	exitDeviceID = exitSession.DeviceID
 	header.ExitDeviceID = exitDeviceID
 
-	if r.authChecker != nil {
-		authorized, err := r.authChecker(clientSession.DeviceID, exitDeviceID)
-		if err != nil || !authorized {
-			log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
-			_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
-				RequestID:    req.RequestID,
-				Success:      false,
-				ErrorCode:    protocol.ErrCodeACLDenied,
-				ErrorMessage: "Client is not authorized to access this exit node",
-			})
-			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
-			return
-		}
+	authorized, authErr := r.authorizeExit(clientSession, exitSession)
+	if authErr != nil || !authorized {
+		log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
+		_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+			RequestID:    req.RequestID,
+			Success:      false,
+			ErrorCode:    protocol.ErrCodeACLDenied,
+			ErrorMessage: "Client is not authorized to access this exit node",
+		})
+		r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
+		return
 	}
 
 	// A client cannot weaken or replace the Relay's destination restrictions.
@@ -563,7 +567,8 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	startTime := time.Now()
 	clientSession.ActiveStreams.Add(1)
 	exitSession.ActiveStreams.Add(1)
-	clientSession.ActiveExitID.Store(&exitDeviceID)
+	activeExitID := &exitSession.DeviceID
+	clientSession.ActiveExitID.Store(activeExitID)
 
 	var bytesUp, bytesDown int64
 	if clientDatagrams != nil {
@@ -573,10 +578,11 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	}
 
 	if clientSession.ActiveStreams.Add(-1) <= 0 {
-		clientSession.ActiveExitID.CompareAndSwap(&exitDeviceID, nil)
+		clientSession.ActiveExitID.CompareAndSwap(activeExitID, nil)
 	}
 	exitSession.ActiveStreams.Add(-1)
 	r.emitAudit(&repository.ConnectionAudit{
+		UserID:         clientSession.OwnerUserID,
 		ClientDeviceID: clientSession.DeviceID,
 		ExitDeviceID:   exitDeviceID,
 		Protocol:       "udp",
@@ -649,33 +655,41 @@ func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelSt
 	monitor := func(s tunnel.TunnelStream) { defer complete(); var b [1]byte; _, _ = s.Read(b[:]) }
 	go monitor(s1)
 	go monitor(s2)
-	var up, down atomic.Int64
-	var activity atomic.Int64
-	activity.Store(time.Now().UnixNano())
-	forward := func(dst, src *tunnel.DatagramChannel, upward bool) {
+	var up, down int64
+	var activitySeq atomic.Uint64
+	const datagramStatsBatch = 64 * 1024
+	forward := func(dst, src *tunnel.DatagramChannel, upward bool, total *int64) {
 		defer complete()
+		pendingStats := 0
+		defer func() {
+			if pendingStats > 0 {
+				recordTransfer(c1, c2, upward, pendingStats)
+			}
+		}()
 		for {
 			frame, err := src.Receive(ctx)
 			if err != nil {
 				return
 			}
-			if err := dst.Send(ctx, frame); err != nil {
+			if err := dst.Forward(ctx, frame); err != nil {
 				return
 			}
 			n := len(frame) - protocol.UDPFragmentHeaderSize
-			if upward {
-				up.Add(int64(n))
-			} else {
-				down.Add(int64(n))
+			*total += int64(n)
+			pendingStats += n
+			if pendingStats >= datagramStatsBatch {
+				recordTransfer(c1, c2, upward, pendingStats)
+				pendingStats = 0
 			}
-			recordTransfer(c1, c2, upward, n)
-			activity.Store(time.Now().UnixNano())
+			activitySeq.Add(1)
 		}
 	}
-	go forward(d2, d1, true)
-	go forward(d1, d2, false)
+	go forward(d2, d1, true, &up)
+	go forward(d1, d2, false, &down)
 	var idleTicker *time.Ticker
 	var idleTick <-chan time.Time
+	lastActivity := time.Now()
+	lastActivitySeq := activitySeq.Load()
 	if idleTimeout > 0 {
 		idleTicker = time.NewTicker(min(time.Second, idleTimeout))
 		idleTick = idleTicker.C
@@ -689,12 +703,23 @@ wait:
 		case <-finished:
 			break wait
 		case now := <-idleTick:
-			if now.Sub(time.Unix(0, activity.Load())) >= idleTimeout {
-				break wait
+			seq := activitySeq.Load()
+			if seq != lastActivitySeq {
+				lastActivitySeq = seq
+				lastActivity = now
+				continue
+			}
+			if now.Sub(lastActivity) >= idleTimeout {
+				// Avoid closing on activity that raced with this tick.
+				if activitySeq.Load() == seq {
+					break wait
+				}
+				lastActivitySeq = activitySeq.Load()
+				lastActivity = now
 			}
 		}
 	}
 	stop()
 	wg.Wait()
-	return up.Load(), down.Load()
+	return up, down
 }

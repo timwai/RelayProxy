@@ -24,6 +24,12 @@ type ServerConfig struct {
 	Dialer        proxy.TunnelDialer
 }
 
+const proxyCopyBufferSize = 32 * 1024
+
+var proxyCopyBufferPool = sync.Pool{
+	New: func() any { return new([proxyCopyBufferSize]byte) },
+}
+
 type Server struct {
 	cfg    ServerConfig
 	ctx    context.Context
@@ -317,8 +323,9 @@ func (s *Server) pipeWithReader(clientConn net.Conn, clientReader io.Reader, tar
 
 	go func() {
 		defer wg.Done()
-		buf := make([]byte, 32*1024)
-		_, _ = io.CopyBuffer(targetConn, clientReader, buf)
+		bufp := proxyCopyBufferPool.Get().(*[proxyCopyBufferSize]byte)
+		_, _ = io.CopyBuffer(targetConn, clientReader, bufp[:])
+		proxyCopyBufferPool.Put(bufp)
 		if cw, ok := targetConn.(interface{ CloseWrite() error }); ok {
 			_ = cw.CloseWrite()
 		} else {
@@ -328,8 +335,9 @@ func (s *Server) pipeWithReader(clientConn net.Conn, clientReader io.Reader, tar
 
 	go func() {
 		defer wg.Done()
-		buf := make([]byte, 32*1024)
-		_, _ = io.CopyBuffer(clientConn, targetConn, buf)
+		bufp := proxyCopyBufferPool.Get().(*[proxyCopyBufferSize]byte)
+		_, _ = io.CopyBuffer(clientConn, targetConn, bufp[:])
+		proxyCopyBufferPool.Put(bufp)
 		if cw, ok := clientConn.(interface{ CloseWrite() error }); ok {
 			_ = cw.CloseWrite()
 		} else {

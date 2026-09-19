@@ -8,12 +8,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const (
-	bucketWidth = 250 * time.Millisecond
-	bucketCount = 8
+	bucketWidth    = 250 * time.Millisecond
+	bucketCount    = 8
+	rateFlushBytes = 256 * 1024
 )
 
 type Metadata struct {
@@ -99,6 +101,7 @@ type Registry struct {
 	now                  func() time.Time
 	maxActive, maxRecent int
 	next, total, omitted uint64
+	upload, download     atomic.Uint64
 	active               map[uint64]*Record
 	unlistedActive       int
 	recent               []*Record
@@ -106,11 +109,13 @@ type Registry struct {
 }
 
 type Record struct {
-	registry   *Registry
-	connection Connection
-	meter      meter
-	finished   bool
-	listed     bool
+	registry               *Registry
+	connection             Connection
+	meter                  meter
+	upload, download       atomic.Uint64
+	pendingUp, pendingDown atomic.Uint64
+	finished               bool
+	listed                 bool
 }
 
 func NewRegistry(maxActive, maxRecent int) *Registry {
@@ -185,16 +190,47 @@ func (r *Record) SetIP(ip string) {
 
 func (r *Record) AddUpload(n int)   { r.add(n, 0) }
 func (r *Record) AddDownload(n int) { r.add(0, n) }
+
 func (r *Record) add(up, down int) {
 	if r == nil || (up <= 0 && down <= 0) {
 		return
 	}
 	registry := r.registry
+	if up > 0 {
+		value := uint64(up)
+		r.upload.Add(value)
+		registry.upload.Add(value)
+		r.pendingUp.Add(value)
+	}
+	if down > 0 {
+		value := uint64(down)
+		r.download.Add(value)
+		registry.download.Add(value)
+		r.pendingDown.Add(value)
+	}
+	if r.pendingUp.Load()+r.pendingDown.Load() >= rateFlushBytes {
+		r.flushRates(registry.now())
+	}
+}
+
+func (r *Record) flushRates(now time.Time) {
+	if r == nil {
+		return
+	}
+	registry := r.registry
 	registry.mu.Lock()
-	defer registry.mu.Unlock()
-	now := registry.now()
-	r.meter.add(now, uint64(max(up, 0)), uint64(max(down, 0)))
-	registry.meter.add(now, uint64(max(up, 0)), uint64(max(down, 0)))
+	r.flushRatesLocked(now)
+	registry.mu.Unlock()
+}
+
+func (r *Record) flushRatesLocked(now time.Time) {
+	up := r.pendingUp.Swap(0)
+	down := r.pendingDown.Swap(0)
+	if up == 0 && down == 0 {
+		return
+	}
+	r.meter.add(now, up, down)
+	r.registry.meter.add(now, up, down)
 }
 
 func (r *Record) Finish(state string, err error) {
@@ -207,6 +243,8 @@ func (r *Record) Finish(state string, err error) {
 	if r.finished {
 		return
 	}
+	now := registry.now()
+	r.flushRatesLocked(now)
 	r.finished = true
 	if state == "" {
 		state = "closed"
@@ -215,7 +253,6 @@ func (r *Record) Finish(state string, err error) {
 	if err != nil {
 		r.connection.Error = err.Error()
 	}
-	now := registry.now()
 	r.connection.EndedAt = &now
 	if !r.listed {
 		registry.unlistedActive--
@@ -237,8 +274,14 @@ func (r *Registry) Snapshot() Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
+	for _, record := range r.active {
+		record.flushRatesLocked(now)
+	}
+	for _, record := range r.recent {
+		record.flushRatesLocked(now)
+	}
 	s := Snapshot{Connections: make([]Connection, 0, len(r.active)+len(r.recent)), Active: len(r.active) + r.unlistedActive,
-		Total: r.total, Omitted: r.omitted, Upload: r.meter.up, Download: r.meter.down, SampledAt: now, RateWindow: 2}
+		Total: r.total, Omitted: r.omitted, Upload: r.upload.Load(), Download: r.download.Load(), SampledAt: now, RateWindow: 2}
 	s.UploadRate, s.DownloadRate = r.meter.rates(now)
 	appendRecord := func(record *Record) {
 		c := record.connection
@@ -249,7 +292,7 @@ func (r *Registry) Snapshot() Snapshot {
 			c.EndedAt = &ended
 		}
 		c.Duration = max(0, end.Sub(c.StartedAt).Seconds())
-		c.Upload, c.Download = record.meter.up, record.meter.down
+		c.Upload, c.Download = record.upload.Load(), record.download.Load()
 		if !record.finished {
 			c.UploadRate, c.DownloadRate = record.meter.rates(now)
 		}

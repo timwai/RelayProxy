@@ -13,6 +13,7 @@ import (
 
 	"relayproxy/internal/config"
 	"relayproxy/internal/tunnel"
+	"relayproxy/internal/webui"
 	"relayproxy/server/repository"
 	"relayproxy/server/service"
 	"relayproxy/server/session"
@@ -159,6 +160,10 @@ func validMutationOrigin(req *http.Request) bool {
 }
 
 func (r *Router) registerRoutes() {
+	// Shared Agent/Server visual primitives. Product pages keep their own data
+	// behavior while consuming one design system and theme implementation.
+	r.mux.Handle("GET /ui/", http.StripPrefix("/ui/", webui.Handler()))
+
 	// Health check
 	r.mux.HandleFunc("GET /health", func(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

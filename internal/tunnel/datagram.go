@@ -122,15 +122,14 @@ func newDatagramMux(s *QUICSession) *datagramMux {
 // DatagramChannel carries bounded fragments for one association on one session
 // generation. Relays forward these fragments without reassembly.
 type DatagramChannel struct {
-	ID          uint64
-	mux         *datagramMux
-	frames      chan receivedDatagram
-	framesReady chan struct{}
-	done        chan struct{}
-	closeOnce   sync.Once
-	closed      bool // guarded by mux.mu
-	onClose     func()
-	reaper      *UDPDatagramConn // guarded by mux.mu
+	ID        uint64
+	mux       *datagramMux
+	frames    chan receivedDatagram
+	done      chan struct{}
+	closeOnce sync.Once
+	closed    bool // guarded by mux.mu
+	onClose   func()
+	reaper    *UDPDatagramConn // guarded by mux.mu
 }
 
 func OpenDatagramChannel(sess TunnelSession, id uint64) (*DatagramChannel, error) {
@@ -168,7 +167,7 @@ func (m *datagramMux) openChannel(id uint64) (*DatagramChannel, error) {
 	if !m.budget.reserveAssociation() {
 		return nil, ErrDatagramLimit
 	}
-	c := &DatagramChannel{ID: id, mux: m, frames: make(chan receivedDatagram, datagramQueueSize), framesReady: make(chan struct{}, 1), done: make(chan struct{})}
+	c := &DatagramChannel{ID: id, mux: m, frames: make(chan receivedDatagram, datagramQueueSize), done: make(chan struct{})}
 	m.channels[id] = c
 	return c, nil
 }
@@ -203,10 +202,6 @@ func (m *datagramMux) deliver(packet []byte) {
 	queued := receivedDatagram{frame: frame, bytes: len(packet)}
 	select {
 	case c.frames <- queued:
-		select {
-		case c.framesReady <- struct{}{}:
-		default:
-		}
 	default:
 		// Prefer the newest RDP frame when a burst outruns the consumer. Keeping
 		// old fragments in front of fresh ones creates visible animation latency
@@ -219,10 +214,6 @@ func (m *datagramMux) deliver(packet []byte) {
 		}
 		select {
 		case c.frames <- queued:
-			select {
-			case c.framesReady <- struct{}{}:
-			default:
-			}
 		default:
 			m.budget.releaseQueue(len(packet))
 			m.budget.queueDrops.Add(1)
@@ -266,6 +257,7 @@ func (m *datagramMux) reapLoop() {
 	defer m.wg.Done()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	conns := make([]*UDPDatagramConn, 0, maxDatagramAssociations)
 	for {
 		select {
 		case <-m.ctx.Done():
@@ -273,8 +265,8 @@ func (m *datagramMux) reapLoop() {
 		case <-m.done:
 			return
 		case now := <-ticker.C:
+			conns = conns[:0]
 			m.mu.RLock()
-			conns := make([]*UDPDatagramConn, 0, len(m.channels))
 			for _, channel := range m.channels {
 				if channel.reaper != nil {
 					conns = append(conns, channel.reaper)
@@ -377,37 +369,69 @@ func (c *DatagramChannel) Send(ctx context.Context, frame []byte) error {
 	}
 	return c.sendFrame(frame)
 }
+
+// Forward queues a fragment that was returned by DatagramChannel.Receive.
+// Receive only exposes frames that were already validated by the source mux,
+// so relay-to-relay forwarding can skip a redundant DecodeUDPFragment pass.
+func (c *DatagramChannel) Forward(ctx context.Context, frame []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.enqueueFrame(frame)
+}
+
 func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
-	for {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		frame, available, err := c.takeFrame()
-		if err != nil || available {
-			return frame, err
-		}
+	// Preserve close-first semantics without taking mux.mu on every packet.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.done:
+		return nil, net.ErrClosed
+	case <-c.mux.ctx.Done():
+		return nil, net.ErrClosed
+	default:
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-c.done:
+		return nil, net.ErrClosed
+	case <-c.mux.ctx.Done():
+		return nil, net.ErrClosed
+	case f := <-c.frames:
+		c.mux.budget.releaseQueue(f.bytes)
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		case <-c.done:
 			return nil, net.ErrClosed
 		case <-c.mux.ctx.Done():
 			return nil, net.ErrClosed
-		case <-c.framesReady:
+		default:
+			return f.frame, nil
 		}
 	}
 }
 
 func (c *DatagramChannel) takeFrame() ([]byte, bool, error) {
-	c.mux.mu.RLock()
-	defer c.mux.mu.RUnlock()
-	if c.closed || c.mux.closed || c.mux.ctx.Err() != nil {
+	select {
+	case <-c.done:
 		return nil, false, net.ErrClosed
+	case <-c.mux.ctx.Done():
+		return nil, false, net.ErrClosed
+	default:
 	}
+
 	select {
 	case f := <-c.frames:
 		c.mux.budget.releaseQueue(f.bytes)
-		return f.frame, true, nil
+		select {
+		case <-c.done:
+			return nil, false, net.ErrClosed
+		case <-c.mux.ctx.Done():
+			return nil, false, net.ErrClosed
+		default:
+			return f.frame, true, nil
+		}
 	default:
 		return nil, false, nil
 	}

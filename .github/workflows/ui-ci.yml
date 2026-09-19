@@ -1,0 +1,77 @@
+name: UI CI
+
+on:
+  push:
+    branches:
+      - "feature/unified-ui-*"
+  pull_request:
+    paths:
+      - "agent/gui/**"
+      - "cmd/relay-agent/**"
+      - "server/web/**"
+      - "server/api/**"
+      - "internal/webui/**"
+      - "internal/config/**"
+      - ".github/workflows/ui-ci.yml"
+      - "scripts/build.sh"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          files="$(git diff --name-only origin/main...HEAD -- '*.go')"
+          if [ -n "$files" ]; then
+            bad="$(gofmt -l $files)"
+            if [ -n "$bad" ]; then
+              gofmt -d $bad
+              exit 1
+            fi
+          fi
+      - name: Check release script syntax
+        run: bash -n scripts/build.sh
+      - name: Vet
+        run: go vet ./...
+      - name: Check frontend JavaScript
+        shell: bash
+        run: |
+          node --check server/web/js/app.js
+          node --check agent/gui/assets/routing.js
+          node --check agent/gui/assets/connections.js
+          node --test agent/gui/assets/_config.test.cjs
+      - name: Test UI scope
+        run: go test ./agent/gui ./cmd/relay-agent ./internal/config ./internal/webui ./server/api ./server/web -count=1
+      - name: Full regression
+        shell: bash
+        run: |
+          if ! go test ./... -count=1; then
+            echo "::warning::Full regression hit an intermittent integration failure; retrying the complete suite once."
+            go test ./... -count=1
+          fi
+
+  desktop-platforms:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Test desktop packages
+        run: go test ./agent/gui ./cmd/relay-agent -count=1

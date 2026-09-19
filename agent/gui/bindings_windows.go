@@ -190,8 +190,7 @@ func (a *appWindow) registerBindings() {
 		}
 		if in.GUI.Theme != nil {
 			theme := strings.ToLower(strings.TrimSpace(*in.GUI.Theme))
-			a.opts.Theme = theme
-			a.applyTheme(theme == "dark")
+			a.applyThemeMode(theme)
 		}
 		if in.GUI.MinimizeToTray != nil {
 			a.mu.Lock()
@@ -208,8 +207,7 @@ func (a *appWindow) registerBindings() {
 			a.mu.Lock()
 			a.minimizeTray = cfg.IsMinimizeToTray()
 			a.mu.Unlock()
-			a.opts.Theme = cfg.GUI.Theme
-			a.applyTheme(cfg.GUI.Theme == "dark")
+			a.applyThemeMode(cfg.GUI.Theme)
 		}
 		return saveResponse(res, err), nil
 	})
@@ -234,16 +232,17 @@ func (a *appWindow) registerBindings() {
 
 	_ = w.Bind("goSetTheme", func(theme string) (string, error) {
 		theme = strings.ToLower(strings.TrimSpace(theme))
-		if theme != "light" {
-			theme = "dark"
+		switch theme {
+		case "light", "dark", "system":
+		default:
+			theme = "system"
 		}
 		var in bridge.ConfigUpdate
 		in.GUI.Theme = &theme
 		if _, err := a.bridge.SaveConfig(in); err != nil {
 			return err.Error(), nil
 		}
-		a.opts.Theme = theme
-		a.applyTheme(theme == "dark")
+		a.applyThemeMode(theme)
 		return okResult, nil
 	})
 

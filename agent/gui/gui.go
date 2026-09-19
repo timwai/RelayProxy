@@ -17,7 +17,11 @@ import (
 )
 
 // ErrUnsupported is returned by Run on platforms without a desktop window.
-var ErrUnsupported = errors.New("desktop GUI is only available on Windows")
+var ErrUnsupported = errors.New("native desktop GUI is unavailable on this platform")
+
+// ErrExternalUI means the platform opened the shared local management UI in an
+// external system window/browser and the Agent should continue running.
+var ErrExternalUI = errors.New("management UI opened externally")
 
 // Version is the client version shown in the UI. Override at build time with
 // -ldflags "-X relayproxy/agent/gui.Version=x.y.z".
@@ -25,7 +29,13 @@ var Version = "1.0.0"
 
 // DefaultWindowTitle is intentionally stable across releases. The second
 // instance uses it to locate and activate the first instance's native window.
-const DefaultWindowTitle = "RelayProxy 代理客户端"
+const (
+	DefaultWindowTitle  = "RelayProxy 代理客户端"
+	DefaultWindowWidth  = 1100
+	DefaultWindowHeight = 760
+	MinimumWindowWidth  = 820
+	MinimumWindowHeight = 560
+)
 
 // Options configures the desktop window.
 type Options struct {
@@ -36,7 +46,7 @@ type Options struct {
 	StartMinimized bool
 	// MinimizeToTray makes the window's close button hide to the tray.
 	MinimizeToTray bool
-	// Theme is "dark" or "light".
+	// Theme is "dark", "light", or "system".
 	Theme string
 	// Title is the window title.
 	Title string
@@ -46,10 +56,14 @@ type Options struct {
 }
 
 func (o Options) theme() string {
-	if strings.EqualFold(o.Theme, "light") {
+	switch strings.ToLower(strings.TrimSpace(o.Theme)) {
+	case "light":
 		return "light"
+	case "system":
+		return "system"
+	default:
+		return "dark"
 	}
-	return "dark"
 }
 
 // ui is the platform-independent surface the tray and bindings drive.

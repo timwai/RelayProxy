@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -29,6 +30,7 @@ import (
 func main() {
 	configPath := flag.String("config", "configs/relay-server.yaml", "Path to configuration file")
 	flag.Parse()
+	startOptionalPprof()
 
 	log.Println("==================================================")
 	log.Println("      RelayProxy Server v1.0.0 Starting...        ")
@@ -61,6 +63,22 @@ func main() {
 	}
 	defer db.Close()
 	log.Println("[DB] SQLite connected with the server-approval schema.")
+
+	// Keep audit batches on their own single-connection SQLite handle. WAL
+	// allows reads on the primary handle to continue while an audit transaction
+	// commits, without weakening the per-handle PRAGMA guarantees in OpenDB.
+	auditDB := db
+	if !sqliteDSNIsMemory(cfg.Database.DSN) {
+		separateAuditDB, auditErr := repository.OpenDB(cfg.Database.Driver, cfg.Database.DSN)
+		if auditErr != nil {
+			log.Printf("[Audit] Dedicated SQLite handle unavailable, sharing primary DB: %v", auditErr)
+		} else {
+			auditDB = separateAuditDB
+			defer separateAuditDB.Close()
+			log.Println("[Audit] Dedicated SQLite WAL handle enabled.")
+		}
+	}
+
 	serverInstanceID, err := db.ServerInstanceID()
 	if err != nil {
 		log.Fatalf("[DB] Failed to load server instance identity: %v", err)
@@ -105,9 +123,34 @@ func main() {
 	}
 	go func() {
 		defer close(auditDone)
-		for a := range auditCh {
-			if err := db.InsertConnectionAudit(a); err != nil {
-				logAuditRateLimited(&lastAuditErrorLog, "[Audit] Failed to log connection: %v", err)
+		const batchSize = 100
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		batch := make([]*repository.ConnectionAudit, 0, batchSize)
+		flush := func() {
+			if len(batch) == 0 {
+				return
+			}
+			if err := auditDB.InsertConnectionAudits(batch); err != nil {
+				logAuditRateLimited(&lastAuditErrorLog, "[Audit] Failed to log connection batch: %v", err)
+			}
+			batch = batch[:0]
+		}
+		for {
+			select {
+			case a, ok := <-auditCh:
+				if !ok {
+					flush()
+					return
+				}
+				if a != nil {
+					batch = append(batch, a)
+				}
+				if len(batch) >= batchSize {
+					flush()
+				}
+			case <-ticker.C:
+				flush()
 			}
 		}
 	}()
@@ -130,9 +173,6 @@ func main() {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
 	router.SetRDPControlHandler(coordinator.HandleControl)
-	router.SetOwnerLookup(func(deviceID string) (string, error) {
-		return db.GetDeviceOwnerUserID(deviceID)
-	})
 
 	// 5. Start Tunnel Gateway (QUIC + TLS; QUIC requires TLS)
 	quicAddr := cfg.Server.QUIC.Listen
@@ -154,7 +194,7 @@ func main() {
 				return gateway.DeviceAuthorization{}, err
 			}
 			authorized := gateway.DeviceAuthorization{State: decision.State, DeviceID: decision.DeviceID,
-				ApprovedCapabilities: decision.ApprovedCapabilities}
+				OwnerUserID: decision.OwnerUserID, ApprovedCapabilities: decision.ApprovedCapabilities}
 			if decision.State == repository.EnrollmentApproved && decision.DeviceID != "" {
 				targets, listErr := db.ListRDPTargetsForController(decision.DeviceID)
 				if listErr != nil {
@@ -267,4 +307,9 @@ func main() {
 
 	log.Println("[Server] RelayProxy Server stopped.")
 	fmt.Println("Bye!")
+}
+
+func sqliteDSNIsMemory(dsn string) bool {
+	value := strings.ToLower(strings.TrimSpace(dsn))
+	return value == ":memory:" || strings.Contains(value, "file::memory:") || strings.Contains(value, "mode=memory")
 }

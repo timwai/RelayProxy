@@ -21,6 +21,12 @@ type Dialer interface {
 	DialUDP(context.Context, string, string, uint16) (net.PacketConn, error)
 }
 
+const tcpCopyBufferSize = 32 * 1024
+
+var tcpCopyBufferPool = sync.Pool{
+	New: func() any { return new([tcpCopyBufferSize]byte) },
+}
+
 type Options struct {
 	Config             Config
 	Dialer             Dialer
@@ -381,7 +387,9 @@ func bidirectionalCopy(ctx context.Context, a, b net.Conn) error {
 	defer stop()
 	results := make(chan error, 2)
 	copyOne := func(dst, src net.Conn) {
-		_, err := io.Copy(dst, src)
+		bufp := tcpCopyBufferPool.Get().(*[tcpCopyBufferSize]byte)
+		_, err := io.CopyBuffer(dst, src, bufp[:])
+		tcpCopyBufferPool.Put(bufp)
 		if err == nil {
 			if half, ok := dst.(interface{ CloseWrite() error }); ok {
 				err = half.CloseWrite()

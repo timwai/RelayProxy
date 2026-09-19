@@ -21,16 +21,12 @@ func WriteStreamHeader(w io.Writer, h *StreamHeader) error {
 		h.Version = CurrentVersion
 	}
 
-	reqIDBytes := []byte(h.RequestID)
-	clientIDBytes := []byte(h.ClientDeviceID)
-	exitIDBytes := []byte(h.ExitDeviceID)
-
-	if len(reqIDBytes) > MaxStringLen || len(clientIDBytes) > MaxStringLen || len(exitIDBytes) > MaxStringLen {
+	if len(h.RequestID) > MaxStringLen || len(h.ClientDeviceID) > MaxStringLen || len(h.ExitDeviceID) > MaxStringLen {
 		return fmt.Errorf("string length exceeds %d bytes in StreamHeader", MaxStringLen)
 	}
 
 	// 2 bytes magic + 1 byte version + 1 byte type + 1 + len(reqID) + 1 + len(clientID) + 1 + len(exitID)
-	totalLen := 2 + 1 + 1 + 1 + len(reqIDBytes) + 1 + len(clientIDBytes) + 1 + len(exitIDBytes)
+	totalLen := 2 + 1 + 1 + 1 + len(h.RequestID) + 1 + len(h.ClientDeviceID) + 1 + len(h.ExitDeviceID)
 	buf := make([]byte, totalLen)
 
 	binary.BigEndian.PutUint16(buf[0:2], h.Magic)
@@ -38,19 +34,19 @@ func WriteStreamHeader(w io.Writer, h *StreamHeader) error {
 	buf[3] = byte(h.Type)
 
 	offset := 4
-	buf[offset] = byte(len(reqIDBytes))
+	buf[offset] = byte(len(h.RequestID))
 	offset++
-	copy(buf[offset:], reqIDBytes)
-	offset += len(reqIDBytes)
+	copy(buf[offset:], h.RequestID)
+	offset += len(h.RequestID)
 
-	buf[offset] = byte(len(clientIDBytes))
+	buf[offset] = byte(len(h.ClientDeviceID))
 	offset++
-	copy(buf[offset:], clientIDBytes)
-	offset += len(clientIDBytes)
+	copy(buf[offset:], h.ClientDeviceID)
+	offset += len(h.ClientDeviceID)
 
-	buf[offset] = byte(len(exitIDBytes))
+	buf[offset] = byte(len(h.ExitDeviceID))
 	offset++
-	copy(buf[offset:], exitIDBytes)
+	copy(buf[offset:], h.ExitDeviceID)
 
 	n, err := w.Write(buf)
 	if err != nil {
@@ -64,9 +60,9 @@ func WriteStreamHeader(w io.Writer, h *StreamHeader) error {
 
 // ReadStreamHeader reads and decodes the StreamHeader from r
 func ReadStreamHeader(r io.Reader) (*StreamHeader, error) {
-	// Read fixed 4-byte prefix: Magic (2), Version (1), Type (1)
-	fixedBuf := make([]byte, 4)
-	if _, err := io.ReadFull(r, fixedBuf); err != nil {
+	// Read fixed 4-byte prefix: Magic (2), Version (1), Type (1).
+	var fixedBuf [4]byte
+	if _, err := io.ReadFull(r, fixedBuf[:]); err != nil {
 		return nil, err
 	}
 
@@ -82,33 +78,30 @@ func ReadStreamHeader(r io.Reader) (*StreamHeader, error) {
 
 	frameType := FrameType(fixedBuf[3])
 
-	// Helper to read length-prefixed string
+	var lenBuf [1]byte
+	var strBuf [MaxStringLen]byte
 	readString := func() (string, error) {
-		lenBuf := make([]byte, 1)
-		if _, err := io.ReadFull(r, lenBuf); err != nil {
+		if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
 			return "", err
 		}
 		strLen := int(lenBuf[0])
 		if strLen == 0 {
 			return "", nil
 		}
-		strBytes := make([]byte, strLen)
-		if _, err := io.ReadFull(r, strBytes); err != nil {
+		if _, err := io.ReadFull(r, strBuf[:strLen]); err != nil {
 			return "", err
 		}
-		return string(strBytes), nil
+		return string(strBuf[:strLen]), nil
 	}
 
 	reqID, err := readString()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read RequestID: %w", err)
 	}
-
 	clientID, err := readString()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read ClientDeviceID: %w", err)
 	}
-
 	exitID, err := readString()
 	if err != nil {
 		return nil, fmt.Errorf("failed to read ExitDeviceID: %w", err)
@@ -150,11 +143,11 @@ func WriteJSON(w io.Writer, val any) error {
 
 // ReadJSON reads a uint32 length-prefixed JSON payload from r and unmarshals into target
 func ReadJSON(r io.Reader, target any) error {
-	lenBuf := make([]byte, 4)
-	if _, err := io.ReadFull(r, lenBuf); err != nil {
+	var lenBuf [4]byte
+	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
 		return err
 	}
-	payloadLen := binary.BigEndian.Uint32(lenBuf)
+	payloadLen := binary.BigEndian.Uint32(lenBuf[:])
 	if payloadLen > MaxJSONPayloadLen {
 		return fmt.Errorf("payload size %d exceeds max %d", payloadLen, MaxJSONPayloadLen)
 	}

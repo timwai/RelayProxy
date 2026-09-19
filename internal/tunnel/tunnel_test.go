@@ -190,3 +190,13 @@ func TestTLSOpenStreamRespectsCancelledContext(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
 }
+
+func TestDefaultYAMUXConfigMatchesRelayStreamCapacity(t *testing.T) {
+	cfg := DefaultYAMUXConfig()
+	if cfg.AcceptBacklog != yamuxAcceptBacklog {
+		t.Fatalf("AcceptBacklog=%d want %d", cfg.AcceptBacklog, yamuxAcceptBacklog)
+	}
+	if cfg.AcceptBacklog < 1024 {
+		t.Fatalf("AcceptBacklog=%d is below the Relay default per-device stream capacity", cfg.AcceptBacklog)
+	}
+}

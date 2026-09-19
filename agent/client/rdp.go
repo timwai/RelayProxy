@@ -6,7 +6,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/google/uuid"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -33,10 +32,10 @@ func (d *TunnelDialer) DialRDPTCP(ctx context.Context, targetDeviceID string) (n
 	} else {
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	}
-	reqID := "rdp_" + uuid.NewString()[:8]
+	reqID := d.nextRequestIDWithPrefix("rdp_")
 	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
 		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeOpenRDP,
-		RequestID: reqID, ClientDeviceID: d.clientID(), ExitDeviceID: targetDeviceID,
+		RequestID: reqID, ExitDeviceID: targetDeviceID,
 	}); err != nil {
 		_ = stream.Close()
 		return nil, err
@@ -99,10 +98,10 @@ func (d *TunnelDialer) DialRDPUDP(ctx context.Context, targetDeviceID string) (n
 	} else {
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	}
-	reqID := "rdp_" + uuid.NewString()[:8]
+	reqID := d.nextRequestIDWithPrefix("rdp_")
 	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
 		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeOpenRDPUDP,
-		RequestID: reqID, ClientDeviceID: d.clientID(), ExitDeviceID: targetDeviceID,
+		RequestID: reqID, ExitDeviceID: targetDeviceID,
 	}); err != nil {
 		_ = stream.Close()
 		return nil, err
@@ -132,11 +131,4 @@ func (d *TunnelDialer) DialRDPUDP(ctx context.Context, targetDeviceID string) (n
 	_ = stream.SetDeadline(time.Time{})
 	keepDatagrams = true
 	return tunnel.NewUDPDatagramConnWithIdleTimeout(datagrams, stream, proxyAddr{net: "udp", addr: targetDeviceID}, 0), nil
-}
-
-func (d *TunnelDialer) clientID() string {
-	if d.getClientID == nil {
-		return ""
-	}
-	return d.getClientID()
 }

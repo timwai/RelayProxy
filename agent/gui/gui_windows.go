@@ -23,9 +23,11 @@ import (
 	"github.com/jchv/go-webview2/webviewloader"
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
+	"relayproxy/internal/webui"
 )
 
 const (
@@ -65,6 +67,35 @@ func setWindowDarkTitleBar(hwnd win.HWND, dark bool) {
 	_, _, _ = procDwmSetWindowAttribute.Call(uintptr(hwnd), 19, uintptr(unsafe.Pointer(&val)), 4)
 }
 
+func systemPrefersDark() bool {
+	key, err := registry.OpenKey(registry.CURRENT_USER,
+		`Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`, registry.QUERY_VALUE)
+	if err != nil {
+		return false
+	}
+	defer key.Close()
+	useLight, _, err := key.GetIntegerValue("AppsUseLightTheme")
+	return err == nil && useLight == 0
+}
+
+func (a *appWindow) themeDark() bool {
+	switch a.opts.theme() {
+	case "light":
+		return false
+	case "system":
+		return systemPrefersDark()
+	default:
+		return true
+	}
+}
+
+func (a *appWindow) applyThemeMode(mode string) {
+	a.opts.Theme = mode
+	dark := a.themeDark()
+	setWindowDarkTitleBar(a.hwnd, dark)
+	a.eval("applyTheme(" + jsonString(a.opts.theme()) + ", false)")
+}
+
 type appWindow struct {
 	bridge *bridge.UIBridge
 	opts   Options
@@ -94,10 +125,10 @@ func Run(b *bridge.UIBridge, opts Options) error {
 		opts.Title = "RelayProxy 代理客户端"
 	}
 	if opts.Width <= 0 {
-		opts.Width = 1040
+		opts.Width = DefaultWindowWidth
 	}
 	if opts.Height <= 0 {
-		opts.Height = 720
+		opts.Height = DefaultWindowHeight
 	}
 
 	a := &appWindow{
@@ -148,12 +179,14 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	}
 	a.w = w
 	a.hwnd = win.HWND(w.Window())
-	w.SetSize(opts.Width, opts.Height, webview2.HintMin)
+	// Keep the default window spacious, but allow the shared responsive layout
+	// to collapse the sidebar and configuration grids on smaller displays.
+	w.SetSize(MinimumWindowWidth, MinimumWindowHeight, webview2.HintMin)
 
 	// Apply the transparent brand icon to the title bar and the taskbar preview.
 	// A black-boxed icon here is exactly what the previous build shipped.
 	a.applyWindowIcons()
-	setWindowDarkTitleBar(a.hwnd, opts.theme() == "dark")
+	setWindowDarkTitleBar(a.hwnd, a.themeDark())
 
 	// Subclass the window procedure so the close button can hide to the tray and
 	// tray messages can be routed back into the app.
@@ -268,6 +301,21 @@ func (a *appWindow) renderHTML() (string, error) {
 		return "", fmt.Errorf("读取内嵌界面失败: %w", err)
 	}
 	html := string(raw)
+
+	// Native WebView2 has no HTTP origin for /ui assets. Inline the exact same
+	// shared design system used by the browser-hosted Agent and Server console.
+	// Shared assets are the foundation; page-specific styles come afterwards.
+	sharedCSS, err := webui.ReadAsset("base.css")
+	if err != nil {
+		return "", err
+	}
+	sharedTheme, err := webui.ReadAsset("theme.js")
+	if err != nil {
+		return "", err
+	}
+	sharedHead := "<style>" + string(sharedCSS) + "</style><script>" + string(sharedTheme) + "</script>"
+	html = strings.Replace(html, "<head>", "<head>"+sharedHead, 1)
+
 	if script, err := assets.ReadFile("assets/routing.js"); err == nil {
 		html = strings.Replace(html, `<script src="routing.js"></script>`, "<script>"+string(script)+"</script>", 1)
 	} else {
@@ -283,10 +331,16 @@ func (a *appWindow) renderHTML() (string, error) {
 		dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(logo)
 		html = strings.ReplaceAll(html, `src="icon.png"`, `src="`+dataURI+`"`)
 	}
-	// Honour the configured theme before first paint to avoid a flash.
-	if a.opts.theme() != "dark" {
-		html = strings.Replace(html, `<html lang="zh-CN" class="dark">`, `<html lang="zh-CN">`, 1)
+	// Honour the configured theme before first paint. The shared theme script
+	// reads data-theme-mode, and "system" resolves through the native OS setting.
+	mode := a.opts.theme()
+	dark := a.themeDark()
+	classAttr := ""
+	if dark {
+		classAttr = ` class="dark"`
 	}
+	html = strings.Replace(html, `<html lang="zh-CN" class="dark">`,
+		`<html lang="zh-CN"`+classAttr+` data-theme-mode="`+mode+`">`, 1)
 	return html, nil
 }
 
@@ -385,7 +439,7 @@ func (a *appWindow) snapshot() trayState {
 		ProxyUp:        proxyUp,
 		WindowVisible:  win.IsWindowVisible(a.hwnd),
 		AutoStart:      a.bridge.IsAutoStart(),
-		ThemeDark:      a.opts.theme() == "dark",
+		ThemeDark:      a.themeDark(),
 		MinimizeToTray: minimizeTray,
 	}
 }

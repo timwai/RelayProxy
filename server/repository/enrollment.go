@@ -34,6 +34,7 @@ type DeviceAuthorization struct {
 	State                string
 	RequestID            string
 	DeviceID             string
+	OwnerUserID          string
 	ApprovedCapabilities []string
 	RDPTargets           []*RDPTarget
 }
@@ -87,8 +88,9 @@ func (db *DB) ObserveDeviceIdentity(observation DeviceIdentityObservation) (*Dev
 				return nil, errors.New("approved identity has no device")
 			}
 			var state, capabilities string
-			if err := tx.QueryRow(`SELECT approval_state, approved_capabilities FROM devices WHERE id = ?`, deviceID.String).
-				Scan(&state, &capabilities); err != nil {
+			var owner sql.NullString
+			if err := tx.QueryRow(`SELECT approval_state, approved_capabilities, owner_user_id FROM devices WHERE id = ?`, deviceID.String).
+				Scan(&state, &capabilities, &owner); err != nil {
 				return nil, err
 			}
 			approved, err := decodeCapabilities(capabilities)
@@ -111,7 +113,7 @@ func (db *DB) ObserveDeviceIdentity(observation DeviceIdentityObservation) (*Dev
 			if err := tx.Commit(); err != nil {
 				return nil, err
 			}
-			return &DeviceAuthorization{State: state, DeviceID: deviceID.String, ApprovedCapabilities: effective}, nil
+			return &DeviceAuthorization{State: state, DeviceID: deviceID.String, OwnerUserID: owner.String, ApprovedCapabilities: effective}, nil
 		case EnrollmentRejected, EnrollmentRevoked:
 			if err := tx.Commit(); err != nil {
 				return nil, err

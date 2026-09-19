@@ -83,11 +83,17 @@ func (s *YAMUXStreamAdapter) CloseWrite() error {
 	return s.Stream.Close()
 }
 
+const (
+	maxConcurrentYAMUXOpens = 16
+	yamuxAcceptBacklog      = 1024
+)
+
 // TLSSession implements TunnelSession using TLS + yamux multiplexer
 type TLSSession struct {
 	conn     net.Conn
 	session  *yamux.Session
 	openGate chan struct{}
+	closed   atomic.Bool
 }
 
 // DefaultYAMUXConfig keeps stream setup responsive and permits enough
@@ -95,6 +101,10 @@ type TLSSession struct {
 // stream window.
 func DefaultYAMUXConfig() *yamux.Config {
 	config := yamux.DefaultConfig()
+	// Match the Relay's default per-device stream ceiling. yamux assumes a
+	// symmetric backlog and blocks outgoing SYNs when this queue fills; keeping
+	// the library default (256) would impose an unintended lower burst limit.
+	config.AcceptBacklog = yamuxAcceptBacklog
 	config.MaxStreamWindowSize = 16 << 20
 	config.StreamOpenTimeout = 15 * time.Second
 	config.StreamCloseTimeout = 30 * time.Second
@@ -108,7 +118,7 @@ func NewTLSSession(conn net.Conn, session *yamux.Session) *TLSSession {
 	return &TLSSession{
 		conn:     conn,
 		session:  session,
-		openGate: make(chan struct{}, 1),
+		openGate: make(chan struct{}, maxConcurrentYAMUXOpens),
 	}
 }
 
@@ -172,11 +182,16 @@ func ServerTLS(tlsConn net.Conn, yamuxConfig *yamux.Config) (*TLSSession, error)
 }
 
 func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
+	if s.closed.Load() {
+		return nil, net.ErrClosed
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	// yamux has no cancellable OpenStream. Permit only one underlying open
-	// worker, so cancelled callers cannot accumulate unbounded goroutines.
+
+	// yamux has no cancellable OpenStream. Bound concurrent underlying opens so
+	// cancelled callers cannot accumulate unbounded workers while browser-style
+	// connection bursts can still establish in parallel.
 	select {
 	case s.openGate <- struct{}{}:
 	case <-ctx.Done():
@@ -184,15 +199,37 @@ func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	case <-s.Done():
 		return nil, net.ErrClosed
 	}
+
+	releaseGate := func() { <-s.openGate }
 	if err := ctx.Err(); err != nil {
-		<-s.openGate
+		releaseGate()
 		return nil, err
+	}
+	if s.closed.Load() {
+		releaseGate()
+		return nil, net.ErrClosed
 	}
 	select {
 	case <-s.Done():
-		<-s.openGate
+		releaseGate()
 		return nil, net.ErrClosed
 	default:
+	}
+
+	// Background/TODO contexts cannot be cancelled by the caller. Avoid a
+	// wrapper goroutine and result channel on this common internal fast path.
+	// The gate still bounds yamux opens and Close waits for all occupied slots.
+	if ctx.Done() == nil {
+		stream, err := s.session.OpenStream()
+		releaseGate()
+		if err != nil {
+			return nil, err
+		}
+		if s.closed.Load() {
+			_ = (&YAMUXStreamAdapter{Stream: stream}).Close()
+			return nil, net.ErrClosed
+		}
+		return &YAMUXStreamAdapter{Stream: stream}, nil
 	}
 
 	type result struct {
@@ -201,7 +238,7 @@ func (s *TLSSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	}
 	ch := make(chan result)
 	go func() {
-		defer func() { <-s.openGate }()
+		defer releaseGate()
 		stream, err := s.session.OpenStream()
 		select {
 		case ch <- result{stream: stream, err: err}:
@@ -252,10 +289,21 @@ func (s *TLSSession) LocalAddr() net.Addr {
 }
 
 func (s *TLSSession) Close() error {
+	if s.closed.Swap(true) {
+		return nil
+	}
 	_ = s.session.Close()
 	err := s.conn.Close()
-	s.openGate <- struct{}{}
-	<-s.openGate
+	// Drain the full semaphore capacity. Once the yamux session is closed,
+	// new OpenStream callers fail quickly, so acquiring every slot forms a
+	// barrier for all in-flight OpenStream workers without serializing normal
+	// stream creation to a single worker.
+	for i := 0; i < cap(s.openGate); i++ {
+		s.openGate <- struct{}{}
+	}
+	for i := 0; i < cap(s.openGate); i++ {
+		<-s.openGate
+	}
 	return err
 }
 

@@ -20,6 +20,10 @@ import (
 
 const udpIdleTimeout = 60 * time.Second
 
+var udpPipeBufferPool = sync.Pool{
+	New: func() any { return make([]byte, protocol.MaxUDPDatagramPayload+1) },
+}
+
 type HandlerConfig struct {
 	ACLChecker     *acl.Checker
 	ConnectTimeout time.Duration
@@ -27,6 +31,7 @@ type HandlerConfig struct {
 
 type Handler struct {
 	cfg           HandlerConfig
+	resolver      *dnsCache
 	activeStreams atomic.Int64
 }
 
@@ -34,7 +39,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
-	return &Handler{cfg: cfg}
+	return &Handler{cfg: cfg, resolver: newDNSCache(defaultDNSCacheTTL, defaultDNSCacheEntries)}
 }
 
 func (h *Handler) ActiveStreams() int64 {
@@ -123,9 +128,10 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 				return
 			}
 		}
+		ips = []net.IP{targetIP}
 	} else {
 		var err error
-		ips, err = net.DefaultResolver.LookupIP(dialCtx, "ip", req.Host)
+		ips, err = h.resolver.lookup(dialCtx, req.Host)
 		if err != nil {
 			log.Printf("[ExitHandler] DNS resolution failed for %s: %v", req.Host, err)
 			_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
@@ -163,29 +169,7 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		}
 	}
 
-	var targetConn net.Conn
-	var lastErr error
-
-	if targetIP != nil {
-		targetAddr := net.JoinHostPort(targetIP.String(), strconv.Itoa(int(req.Port)))
-		dialer := net.Dialer{
-			Timeout:   timeout,
-			KeepAlive: 30 * time.Second,
-		}
-		targetConn, lastErr = dialer.DialContext(dialCtx, "tcp", targetAddr)
-	} else {
-		for _, ip := range ips {
-			targetAddr := net.JoinHostPort(ip.String(), strconv.Itoa(int(req.Port)))
-			dialer := net.Dialer{
-				Timeout:   timeout,
-				KeepAlive: 30 * time.Second,
-			}
-			targetConn, lastErr = dialer.DialContext(dialCtx, "tcp", targetAddr)
-			if lastErr == nil {
-				break
-			}
-		}
-	}
+	targetConn, lastErr := dialTCPIPs(dialCtx, ips, req.Port)
 
 	if targetConn == nil {
 		log.Printf("[ExitHandler] Dial to %s failed: %v", req.Host, lastErr)
@@ -202,6 +186,7 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		return
 	}
 	defer targetConn.Close()
+	tunnel.TuneTCPConn(targetConn)
 
 	resp := protocol.OpenTCPResponse{
 		RequestID: req.RequestID,
@@ -280,7 +265,7 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 		}
 		dialHost = targetIP.String()
 	} else {
-		ips, err := net.DefaultResolver.LookupIP(dialCtx, "ip", req.Host)
+		ips, err := h.resolver.lookup(dialCtx, req.Host)
 		if err != nil || len(ips) == 0 {
 			msg := "no IP addresses found for host: " + req.Host
 			if err != nil {
@@ -382,38 +367,27 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 }
 
 func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPConn) {
-	var wg sync.WaitGroup
-	wg.Add(2)
 	var once sync.Once
 	stop := func() { once.Do(func() { _ = pc.Close(); _ = conn.Close() }) }
 	defer stop()
 	stopCancel := context.AfterFunc(ctx, stop)
 	defer stopCancel()
-	var nextDeadlineRefresh atomic.Int64
-	touch := func() {
-		now := time.Now()
-		nowNanos := now.UnixNano()
-		next := nextDeadlineRefresh.Load()
-		if next != 0 && nowNanos < next {
-			return
-		}
-		if !nextDeadlineRefresh.CompareAndSwap(next, now.Add(time.Second).UnixNano()) {
-			return
-		}
-		_ = conn.SetDeadline(now.Add(udpIdleTimeout))
-	}
-	touch()
+
+	var activitySeq atomic.Uint64
+	finished := make(chan struct{}, 2)
+	_ = conn.SetDeadline(time.Now().Add(udpIdleTimeout))
 
 	go func() {
-		defer wg.Done()
+		defer func() { finished <- struct{}{} }()
 		defer stop()
-		buf := make([]byte, protocol.MaxUDPDatagramPayload)
+		buf := udpPipeBufferPool.Get().([]byte)
+		defer udpPipeBufferPool.Put(buf)
 		for {
-			n, _, err := pc.ReadFrom(buf)
+			n, _, err := pc.ReadFrom(buf[:protocol.MaxUDPDatagramPayload])
 			if err != nil {
 				return
 			}
-			touch()
+			activitySeq.Add(1)
 			if _, err := conn.Write(buf[:n]); err != nil {
 				return
 			}
@@ -421,11 +395,12 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPC
 	}()
 
 	go func() {
-		defer wg.Done()
+		defer func() { finished <- struct{}{} }()
 		defer stop()
 		// Read one extra byte so an oversized IPv6 datagram is rejected rather
 		// than forwarded as a silently truncated packet.
-		buf := make([]byte, protocol.MaxUDPDatagramPayload+1)
+		buf := udpPipeBufferPool.Get().([]byte)
+		defer udpPipeBufferPool.Put(buf)
 		for {
 			n, err := conn.Read(buf)
 			if err != nil {
@@ -434,14 +409,30 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPC
 			if n > protocol.MaxUDPDatagramPayload {
 				continue
 			}
-			touch()
+			activitySeq.Add(1)
 			if _, err := pc.WriteTo(buf[:n], nil); err != nil {
 				return
 			}
 		}
 	}()
 
-	wg.Wait()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	lastSeq := activitySeq.Load()
+	for completed := 0; completed < 2; {
+		select {
+		case <-ctx.Done():
+			stop()
+		case <-finished:
+			completed++
+		case now := <-ticker.C:
+			seq := activitySeq.Load()
+			if seq != lastSeq {
+				lastSeq = seq
+				_ = conn.SetDeadline(now.Add(udpIdleTimeout))
+			}
+		}
+	}
 }
 
 func isConnRefused(err error) bool {

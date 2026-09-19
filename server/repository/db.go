@@ -530,6 +530,43 @@ func (db *DB) InsertConnectionAudit(a *ConnectionAudit) error {
 	return err
 }
 
+// InsertConnectionAudits amortizes SQLite transaction/fsync overhead across a
+// burst of completed proxy connections. The caller retains ownership of the
+// audit objects and may reuse its slice after this method returns.
+func (db *DB) InsertConnectionAudits(audits []*ConnectionAudit) error {
+	if len(audits) == 0 {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT INTO connection_audit (id, user_id, client_device_id, exit_device_id, protocol, target_host, target_port, resolved_ip, started_at, ended_at, bytes_up, bytes_down, result, error_code)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, a := range audits {
+		if a == nil {
+			continue
+		}
+		if a.ID == "" {
+			a.ID = "aud_" + uuid.New().String()[:12]
+		}
+		if _, err := stmt.Exec(
+			a.ID, a.UserID, a.ClientDeviceID, a.ExitDeviceID, a.Protocol, a.TargetHost, a.TargetPort,
+			a.ResolvedIP, a.StartedAt, a.EndedAt, a.BytesUp, a.BytesDown, a.Result, a.ErrorCode,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // GetDeviceOwnerUserID returns the owner_user_id for a device, or empty if unknown.
 func (db *DB) GetDeviceOwnerUserID(deviceID string) (string, error) {
 	var owner sql.NullString

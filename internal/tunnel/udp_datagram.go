@@ -29,20 +29,24 @@ type pendingUDP struct {
 // UDPDatagramConn carries unreliable datagrams while retaining a reliable
 // stream solely as the authenticated association's lifetime signal.
 type UDPDatagramConn struct {
-	channel                     *DatagramChannel
-	stream                      TunnelStream
-	remote                      net.Addr
-	idleTimeout                 time.Duration
-	done                        chan struct{}
-	once                        sync.Once
-	mu                          sync.Mutex
-	readDeadline, writeDeadline time.Time
-	lastActivityNanos           atomic.Int64
-	deadlineChanged             chan struct{}
-	readMu, writeMu             sync.Mutex
-	assemblyMu                  sync.Mutex
-	pending                     map[uint32]*pendingUDP
-	packetID                    atomic.Uint32
+	channel            *DatagramChannel
+	stream             TunnelStream
+	remote             net.Addr
+	idleTimeout        time.Duration
+	done               chan struct{}
+	once               sync.Once
+	mu                 sync.Mutex
+	readDeadlineNanos  atomic.Int64
+	writeDeadlineNanos atomic.Int64
+	lastActivityNanos  atomic.Int64
+	activitySeq        atomic.Uint64
+	reapedActivitySeq  uint64
+	deadlineChanged    chan struct{}
+	readMu, writeMu    sync.Mutex
+	readTimer          *time.Timer
+	assemblyMu         sync.Mutex
+	pending            map[uint32]*pendingUDP
+	packetID           atomic.Uint32
 }
 
 func NewUDPDatagramConn(channel *DatagramChannel, stream TunnelStream, remote net.Addr) *UDPDatagramConn {
@@ -118,12 +122,25 @@ func (c *UDPDatagramConn) reap(now time.Time) {
 		}
 	}
 	c.assemblyMu.Unlock()
+
+	seq := c.activitySeq.Load()
+	if seq != c.reapedActivitySeq {
+		c.reapedActivitySeq = seq
+		c.lastActivityNanos.Store(now.UnixNano())
+	}
 	if c.idleTimeout > 0 && now.Sub(time.Unix(0, c.lastActivityNanos.Load())) >= c.idleTimeout {
+		// One final sequence check prevents a close racing with a packet that
+		// arrived after this reaper tick sampled activity.
+		if latest := c.activitySeq.Load(); latest != c.reapedActivitySeq {
+			c.reapedActivitySeq = latest
+			c.lastActivityNanos.Store(now.UnixNano())
+			return
+		}
 		_ = c.Close()
 	}
 }
 
-func (c *UDPDatagramConn) touch() { c.lastActivityNanos.Store(time.Now().UnixNano()) }
+func (c *UDPDatagramConn) touch() { c.activitySeq.Add(1) }
 func (c *UDPDatagramConn) dropLocked(id uint32, p *pendingUDP) {
 	delete(c.pending, id)
 	c.channel.mux.releaseReassembly(p.bytes)
@@ -142,6 +159,16 @@ func (c *UDPDatagramConn) assemble(frame, dst []byte) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
+	if f.Count == 1 {
+		select {
+		case <-c.done:
+			return 0, false
+		case <-c.channel.done:
+			return 0, false
+		default:
+			return copy(dst, f.Payload), true
+		}
+	}
 	c.assemblyMu.Lock()
 	defer c.assemblyMu.Unlock()
 	select {
@@ -150,9 +177,6 @@ func (c *UDPDatagramConn) assemble(frame, dst []byte) (int, bool) {
 	case <-c.channel.done:
 		return 0, false
 	default:
-	}
-	if f.Count == 1 {
-		return copy(dst, f.Payload), true
 	}
 	p := c.pending[f.PacketID]
 	if p == nil {
@@ -187,29 +211,42 @@ func (c *UDPDatagramConn) assemble(frame, dst []byte) (int, bool) {
 	return n, true
 }
 
-func deadlineTimer(deadline time.Time) (<-chan time.Time, func()) {
-	if deadline.IsZero() {
-		return nil, func() {}
+func (c *UDPDatagramConn) resetReadTimer(deadline time.Time) <-chan time.Time {
+	if c.readTimer != nil {
+		if !c.readTimer.Stop() {
+			select {
+			case <-c.readTimer.C:
+			default:
+			}
+		}
 	}
-	t := time.NewTimer(max(0, time.Until(deadline)))
-	return t.C, func() { t.Stop() }
+	if deadline.IsZero() {
+		return nil
+	}
+	d := max(time.Duration(0), time.Until(deadline))
+	if c.readTimer == nil {
+		c.readTimer = time.NewTimer(d)
+	} else {
+		c.readTimer.Reset(d)
+	}
+	return c.readTimer.C
 }
 
 func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 	c.readMu.Lock()
 	defer c.readMu.Unlock()
 	for {
-		c.mu.Lock()
-		deadline, changed := c.readDeadline, c.deadlineChanged
-		c.mu.Unlock()
 		select {
 		case <-c.done:
 			return 0, nil, net.ErrClosed
 		default:
 		}
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
+
+		deadlineNanos := c.readDeadlineNanos.Load()
+		if deadlineNanos != 0 && time.Now().UnixNano() >= deadlineNanos {
 			return 0, nil, os.ErrDeadlineExceeded
 		}
+
 		frame, available, err := c.channel.takeFrame()
 		if err != nil {
 			return 0, nil, err
@@ -222,55 +259,76 @@ func (c *UDPDatagramConn) ReadFrom(p []byte) (int, net.Addr, error) {
 			c.touch()
 			return n, c.remote, nil
 		}
-		timeout, stop := deadlineTimer(deadline)
+
+		// Only synchronize with deadlineChanged when the queue is empty and the
+		// read is about to block. This preserves SetReadDeadline wakeups while
+		// keeping the packet-ready path lock-free.
+		c.mu.Lock()
+		deadlineNanos = c.readDeadlineNanos.Load()
+		changed := c.deadlineChanged
+		c.mu.Unlock()
+
+		var deadline time.Time
+		if deadlineNanos != 0 {
+			if time.Now().UnixNano() >= deadlineNanos {
+				return 0, nil, os.ErrDeadlineExceeded
+			}
+			deadline = time.Unix(0, deadlineNanos)
+		}
+		timeout := c.resetReadTimer(deadline)
 		select {
 		case <-c.done:
-			stop()
 			return 0, nil, net.ErrClosed
 		case <-c.channel.done:
-			stop()
 			return 0, nil, net.ErrClosed
 		case <-c.channel.mux.ctx.Done():
-			stop()
 			return 0, nil, net.ErrClosed
 		case <-timeout:
-			stop()
 			return 0, nil, os.ErrDeadlineExceeded
 		case <-changed:
-			stop()
 			continue
-		case <-c.channel.framesReady:
-			stop()
-			continue
+		case queued := <-c.channel.frames:
+			c.channel.mux.budget.releaseQueue(queued.bytes)
+			select {
+			case <-c.done:
+				return 0, nil, net.ErrClosed
+			case <-c.channel.done:
+				return 0, nil, net.ErrClosed
+			case <-c.channel.mux.ctx.Done():
+				return 0, nil, net.ErrClosed
+			default:
+			}
+			n, complete := c.assemble(queued.frame, p)
+			if !complete {
+				continue
+			}
+			c.touch()
+			return n, c.remote, nil
 		}
 	}
 }
 
 func (c *UDPDatagramConn) send(frame []byte) error {
-	c.mu.Lock()
-	deadline := c.writeDeadline
-	c.mu.Unlock()
+	deadlineNanos := c.writeDeadlineNanos.Load()
 	select {
 	case <-c.done:
 		return net.ErrClosed
 	default:
 	}
-	if !deadline.IsZero() && !time.Now().Before(deadline) {
+	if deadlineNanos != 0 && time.Now().UnixNano() >= deadlineNanos {
 		return os.ErrDeadlineExceeded
 	}
 	return c.channel.sendFrame(frame)
 }
 
 func (c *UDPDatagramConn) sendFragment(packetID uint32, total uint16, index, count uint8, payload []byte) error {
-	c.mu.Lock()
-	deadline := c.writeDeadline
-	c.mu.Unlock()
+	deadlineNanos := c.writeDeadlineNanos.Load()
 	select {
 	case <-c.done:
 		return net.ErrClosed
 	default:
 	}
-	if !deadline.IsZero() && !time.Now().Before(deadline) {
+	if deadlineNanos != 0 && time.Now().UnixNano() >= deadlineNanos {
 		return os.ErrDeadlineExceeded
 	}
 	return c.channel.sendFragment(packetID, total, index, count, payload)
@@ -313,8 +371,14 @@ func (c *UDPDatagramConn) SetDeadline(t time.Time) error {
 		return net.ErrClosed
 	default:
 	}
-	c.readDeadline = t
-	c.writeDeadline = t
+	if t.IsZero() {
+		c.readDeadlineNanos.Store(0)
+		c.writeDeadlineNanos.Store(0)
+	} else {
+		deadlineNanos := t.UnixNano()
+		c.readDeadlineNanos.Store(deadlineNanos)
+		c.writeDeadlineNanos.Store(deadlineNanos)
+	}
 	close(c.deadlineChanged)
 	c.deadlineChanged = make(chan struct{})
 	return nil
@@ -327,7 +391,11 @@ func (c *UDPDatagramConn) SetReadDeadline(t time.Time) error {
 		return net.ErrClosed
 	default:
 	}
-	c.readDeadline = t
+	if t.IsZero() {
+		c.readDeadlineNanos.Store(0)
+	} else {
+		c.readDeadlineNanos.Store(t.UnixNano())
+	}
 	close(c.deadlineChanged)
 	c.deadlineChanged = make(chan struct{})
 	return nil
@@ -340,7 +408,11 @@ func (c *UDPDatagramConn) SetWriteDeadline(t time.Time) error {
 		return net.ErrClosed
 	default:
 	}
-	c.writeDeadline = t
+	if t.IsZero() {
+		c.writeDeadlineNanos.Store(0)
+	} else {
+		c.writeDeadlineNanos.Store(t.UnixNano())
+	}
 	close(c.deadlineChanged)
 	c.deadlineChanged = make(chan struct{})
 	return nil

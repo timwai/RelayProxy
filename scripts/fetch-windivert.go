@@ -20,7 +20,8 @@ import (
 )
 
 func main() {
-	out := flag.String("out", "dist/windows-amd64/windivert", "WinDivert runtime output directory; empty skips runtime fetching")
+	out := flag.String("out", "dist/windows-amd64/windivert", "WinDivert runtime output directory")
+	skipRuntime := flag.Bool("skip-runtime", false, "Skip WinDivert download/extraction when packaging ARM64")
 	embedArchive := flag.String("embed-archive", "", "Also write the verified upstream archive for go:embed")
 	agentZIP := flag.String("agent-zip", "", "Also package a Windows agent directory into this ZIP")
 	agentDir := flag.String("agent-dir", "", "Agent directory to package; defaults to the parent of -out")
@@ -28,14 +29,14 @@ func main() {
 	flag.Parse()
 
 	var err error
-	if strings.TrimSpace(*out) != "" {
+	if !*skipRuntime {
 		err = fetchRuntime(*out, *embedArchive)
 	}
 	if err == nil && *agentZIP != "" {
 		directory := strings.TrimSpace(*agentDir)
 		if directory == "" {
-			if strings.TrimSpace(*out) == "" {
-				err = fmt.Errorf("-agent-dir is required when -out is empty")
+			if *skipRuntime {
+				err = fmt.Errorf("-agent-dir is required with -skip-runtime")
 			} else {
 				directory = filepath.Dir(filepath.Clean(*out))
 			}
@@ -50,8 +51,8 @@ func main() {
 	}
 }
 
-// packageAgent bundles the client and its driver together. The explicit file
-// list excludes server binaries/configuration and includes WinDivert's license.
+// packageAgent bundles the client and architecture-appropriate interception
+// dependencies. The explicit file list excludes server binaries/configuration.
 func packageAgent(directory, destination, arch string) error {
 	if !strings.EqualFold(filepath.Ext(destination), ".zip") {
 		return fmt.Errorf("agent archive must have a .zip extension")

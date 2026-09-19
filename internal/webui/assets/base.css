@@ -27,6 +27,9 @@
   --rp-radius: 12px;
   --rp-radius-sm: 8px;
   --rp-sidebar-width: 212px;
+  --rp-control-height: 34px;
+  --rp-topbar-height: 64px;
+  --rp-content-max: 1480px;
   --rp-font: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
              "SF Pro Text", "PingFang SC", "Microsoft YaHei UI", sans-serif;
   --rp-mono: "Cascadia Mono", "SFMono-Regular", "SF Mono", "Consolas", monospace;
@@ -228,4 +231,63 @@ html, body {
 }
 @media (prefers-reduced-motion: reduce) {
   .rp-nav-item, .rp-tab { transition: none; }
+}
+
+
+/* Platform adaptation shared by Agent desktop/web and Server web. */
+html[data-platform="windows"] {
+  --rp-radius: 10px;
+  --rp-radius-sm: 7px;
+  --rp-control-height: 34px;
+  --rp-font: "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+}
+html[data-platform="macos"] {
+  --rp-radius: 13px;
+  --rp-radius-sm: 9px;
+  --rp-control-height: 36px;
+  --rp-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", sans-serif;
+}
+html[data-platform="linux"] {
+  --rp-font: Inter, "Noto Sans", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+}
+html[data-platform="macos"] button,
+html[data-platform="macos"] input,
+html[data-platform="macos"] select,
+html[data-platform="macos"] textarea {
+  letter-spacing: -.01em;
+}
+html[data-platform="windows"] .rp-sidebar {
+  scrollbar-width: thin;
+}
+.rp-control {
+  min-height: var(--rp-control-height);
+}
+.rp-topbar {
+  min-height: var(--rp-topbar-height);
+  padding-left: max(18px, env(safe-area-inset-left));
+  padding-right: max(18px, env(safe-area-inset-right));
+}
+.rp-content {
+  width: 100%;
+  max-width: var(--rp-content-max);
+  margin-inline: auto;
+  padding-left: max(18px, env(safe-area-inset-left));
+  padding-right: max(18px, env(safe-area-inset-right));
+}
+.rp-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.rp-table th,
+.rp-table td {
+  border-bottom: 1px solid var(--rp-border);
+}
+.rp-empty-state {
+  padding: 34px 20px;
+  color: var(--rp-muted);
+  text-align: center;
+}
+@media (max-width: 720px) {
+  :root { --rp-topbar-height: 56px; }
+  .rp-tabs { margin-bottom: 12px; }
 }

@@ -67,6 +67,8 @@ SOCKS5/HTTP 的进程归属来自本机客户端至代理监听端口的实际 T
 
 WFP 自注入包通过 injection-state 检查直接放行，RelayProxy 自身 PID 与本地回环也强制旁路，避免 DNS/隧道递归。DoH/DoT 属于普通 TCP/UDP 流量，不伪装成 UDP/53；是否代理由普通规则决定。
 
+DNS mode 是启动期设置：修改 `network.dns_mode` 后需要重启 Agent。这样可以避免 Windows DNS Client 长期复用的 UDP endpoint 在用户态 association 与内核 WFP action 之间出现新旧策略混用。这里的“需要重启”只针对模式变更；已经运行在 `auto` 模式时，Relay ready/lost 仍会对现有 UDP/53 flow 动态执行 DIRECT ↔ PROXY 切换。
+
 ## 实时连接窗口
 
 每秒刷新，速率为近 2 秒的平均值。窗口显示进程名/PID、请求或 DNS 关联域名、已知目标 IP、端口、协议、入口、动作、命中规则、双向速率、累计上传/下载和时长。点选连接可查看完整路径、本地端点、出口与错误原因；可暂停显示并查看最近结束、失败或阻断的连接。

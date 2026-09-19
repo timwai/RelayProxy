@@ -93,7 +93,7 @@ function Build-One {
                 throw "Inf2Cat failed for $TargetPlatform"
             }
         } else {
-            Write-Warning "Inf2Cat.exe not found; package has no catalog. Install the Windows Driver Kit to create an installable package."
+            throw "Inf2Cat.exe not found. Install the Windows Driver Kit, or use -SkipCatalog only for compile-only validation."
         }
     }
 

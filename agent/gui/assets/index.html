@@ -523,7 +523,7 @@
               </select>
               <p class="config-help">AUTO 可避免 Agent 启动和重连时的 DNS 自举死锁；Windows WFP 会对长期复用的 UDP DNS endpoint 动态切换 DIRECT / PROXY。</p>
             </div>
-            <p id="network-availability" class="config-help"></p><p class="config-help">保存后启用/关闭透明代理需重启；DNS 模式和分流规则可热应用于新流。Windows WFP 支持 x64 / ARM64，开启透明代理需管理员权限。</p>
+            <p id="network-availability" class="config-help"></p><p class="config-help">启用/关闭透明代理或切换 DNS 模式后需重启；分流规则可热应用于新流。AUTO 模式运行期间仍会随 Relay 就绪状态动态切换 DNS DIRECT / PROXY。Windows WFP 支持 x64 / ARM64，开启透明代理需管理员权限。</p>
           </details>
         </div>
 

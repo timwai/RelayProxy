@@ -331,7 +331,7 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 		cfg.RDP.Address = "127.0.0.1:3389"
 	}
 	if cfg.GUI.Theme == "" {
-		cfg.GUI.Theme = "dark"
+		cfg.GUI.Theme = "system"
 	}
 	if cfg.Web.Listen == "" {
 		cfg.Web.Listen = "127.0.0.1"

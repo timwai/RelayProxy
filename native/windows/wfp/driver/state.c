@@ -230,14 +230,58 @@ BOOLEAN RpControllerHealthy(VOID)
     return healthy;
 }
 
-VOID RpHeartbeat(VOID)
+static BOOLEAN RpControllerOwnsFileLocked(_In_opt_ PFILE_OBJECT FileObject)
 {
+    return g_RpState.ControllerActive &&
+           !g_RpState.ControllerFailingOpen &&
+           FileObject != NULL &&
+           g_RpState.ControllerFileObject == FileObject;
+}
+
+UINT64 RpCurrentControllerGeneration(VOID)
+{
+    UINT64 generation = 0;
     KIRQL oldIrql;
+
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
-    if (g_RpState.ControllerActive) {
-        g_RpState.LastHeartbeat100ns = KeQueryInterruptTime();
+    if (g_RpState.ControllerActive && !g_RpState.ControllerFailingOpen) {
+        generation = g_RpState.ControllerGeneration;
     }
     KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+    return generation;
+}
+
+BOOLEAN RpControllerOwnsFlow(_In_ PFILE_OBJECT FileObject, _In_ const RP_FLOW* Flow)
+{
+    BOOLEAN result;
+    KIRQL oldIrql;
+
+    if (Flow == NULL) {
+        return FALSE;
+    }
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    result = RpControllerOwnsFileLocked(FileObject) &&
+             !Flow->Removed &&
+             Flow->ControllerGeneration != 0 &&
+             Flow->ControllerGeneration == g_RpState.ControllerGeneration;
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+    return result;
+}
+
+NTSTATUS RpHeartbeat(_In_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid)
+{
+    NTSTATUS status = STATUS_ACCESS_DENIED;
+    KIRQL oldIrql;
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (RpControllerOwnsFileLocked(FileObject) &&
+        RequestorPid != 0 &&
+        RequestorPid == g_RpState.ControllerPid) {
+        g_RpState.LastHeartbeat100ns = KeQueryInterruptTime();
+        status = STATUS_SUCCESS;
+    }
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+    return status;
 }
 
 NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
@@ -276,6 +320,12 @@ NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
             KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
             return STATUS_DEVICE_BUSY;
         }
+        if (!g_RpState.ControllerActive) {
+            g_RpState.ControllerGeneration++;
+            if (g_RpState.ControllerGeneration == 0) {
+                g_RpState.ControllerGeneration++;
+            }
+        }
         g_RpState.ControllerPid = Config->ControllerPid;
         g_RpState.ControllerFileObject = fileObject;
         g_RpState.ProxyReady = FALSE;
@@ -294,9 +344,7 @@ BOOLEAN RpIsControllerFile(_In_opt_ PFILE_OBJECT FileObject)
     BOOLEAN result;
     KIRQL oldIrql;
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
-    result = g_RpState.ControllerActive &&
-             FileObject != NULL &&
-             g_RpState.ControllerFileObject == FileObject;
+    result = RpControllerOwnsFileLocked(FileObject);
     KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
     return result;
 }
@@ -546,6 +594,14 @@ static NTSTATUS RpQueueEventInternal(
     }
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (!g_RpState.ControllerActive ||
+        g_RpState.ControllerFailingOpen ||
+        Flow->ControllerGeneration == 0 ||
+        Flow->ControllerGeneration != g_RpState.ControllerGeneration) {
+        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+        ExFreePoolWithTag(node, RP_TAG_EVENT);
+        return STATUS_DEVICE_NOT_READY;
+    }
     if (g_RpState.EventCount >= RP_MAX_EVENTS) {
         KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
         ExFreePoolWithTag(node, RP_TAG_EVENT);
@@ -572,7 +628,7 @@ NTSTATUS RpQueueDatagramEvent(
     return RpQueueEventInternal(Kind, Flow, Flags, NULL, Payload, PayloadLength);
 }
 
-NTSTATUS RpReadEvent(_Out_writes_bytes_(OutputLength) VOID* Output, _In_ ULONG OutputLength, _Out_ ULONG_PTR* BytesWritten)
+NTSTATUS RpReadEvent(_In_ PFILE_OBJECT FileObject, _Out_writes_bytes_(OutputLength) VOID* Output, _In_ ULONG OutputLength, _Out_ ULONG_PTR* BytesWritten)
 {
     RP_EVENT_NODE* node = NULL;
     KIRQL oldIrql;
@@ -583,6 +639,10 @@ NTSTATUS RpReadEvent(_Out_writes_bytes_(OutputLength) VOID* Output, _In_ ULONG O
     *BytesWritten = 0;
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (!RpControllerOwnsFileLocked(FileObject)) {
+        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+        return STATUS_ACCESS_DENIED;
+    }
     if (IsListEmpty(&g_RpState.Events)) {
         KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
         return STATUS_NO_MORE_ENTRIES;
@@ -603,7 +663,7 @@ NTSTATUS RpReadEvent(_Out_writes_bytes_(OutputLength) VOID* Output, _In_ ULONG O
     return STATUS_SUCCESS;
 }
 
-NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision)
+NTSTATUS RpApplyDecision(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_DECISION* Decision)
 {
     RP_FLOW* flow;
     HANDLE context = NULL;
@@ -631,6 +691,13 @@ NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision)
     }
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (!RpControllerOwnsFileLocked(FileObject) ||
+        flow->ControllerGeneration == 0 ||
+        flow->ControllerGeneration != g_RpState.ControllerGeneration) {
+        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+        RpDereferenceFlow(flow);
+        return STATUS_ACCESS_DENIED;
+    }
     if (!flow->Removed) {
         flow->Action = Decision->Action;
         flow->DecisionFlags = Decision->Flags;
@@ -650,7 +717,7 @@ NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision)
 }
 
 
-NTSTATUS RpSetProxyReady(_In_ const RP_WFP_PROXY_READY* Ready)
+NTSTATUS RpSetProxyReady(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_PROXY_READY* Ready)
 {
     KIRQL oldIrql;
     PLIST_ENTRY entry;
@@ -665,6 +732,10 @@ NTSTATUS RpSetProxyReady(_In_ const RP_WFP_PROXY_READY* Ready)
 
     value = Ready->Ready != 0;
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (!RpControllerOwnsFileLocked(FileObject)) {
+        KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+        return STATUS_ACCESS_DENIED;
+    }
     g_RpState.ProxyReady = value;
     for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
         RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);

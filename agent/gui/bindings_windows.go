@@ -68,6 +68,32 @@ func (a *appWindow) registerBindings() {
 		a.bridge.ClearLogs()
 	})
 
+	// --- Windows WFP driver --------------------------------------------------
+
+	_ = w.Bind("goGetWFPDriverStatus", func() (string, error) {
+		data, _ := json.Marshal(divert.WindowsWFPDriverStatus())
+		return string(data), nil
+	})
+
+	_ = w.Bind("goInstallWFPDriver", func() (string, error) {
+		if a.bridge.GetStatus().DivertRunning {
+			data, _ := json.Marshal(map[string]any{
+				"ok":      false,
+				"message": "透明代理正在运行，请先关闭透明代理并重启客户端，再安装或更新 WFP 驱动。",
+				"status":  divert.WindowsWFPDriverStatus(),
+			})
+			return string(data), nil
+		}
+		status, err := installWFPDriverFromGUI()
+		if err != nil {
+			log.Printf("[GUI] 安装 WFP 驱动失败: %v", err)
+			data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error(), "status": status})
+			return string(data), nil
+		}
+		data, _ := json.Marshal(map[string]any{"ok": true, "message": "WFP 驱动已安装并就绪。", "status": status})
+		return string(data), nil
+	})
+
 	// --- configuration -------------------------------------------------------
 
 	_ = w.Bind("goGetConfig", func() (string, error) {

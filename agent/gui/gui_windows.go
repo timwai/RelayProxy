@@ -26,6 +26,7 @@ import (
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
+	"relayproxy/internal/webui"
 )
 
 const (
@@ -268,6 +269,20 @@ func (a *appWindow) renderHTML() (string, error) {
 		return "", fmt.Errorf("读取内嵌界面失败: %w", err)
 	}
 	html := string(raw)
+
+	// Native WebView2 has no HTTP origin for /ui assets. Inline the exact same
+	// shared design system used by the browser-hosted Agent and Server console.
+	if sharedCSS, err := webui.ReadAsset("base.css"); err == nil {
+		html = strings.Replace(html, "</head>", "<style>"+string(sharedCSS)+"</style></head>", 1)
+	} else {
+		return "", err
+	}
+	if sharedTheme, err := webui.ReadAsset("theme.js"); err == nil {
+		html = strings.Replace(html, "</head>", "<script>"+string(sharedTheme)+"</script></head>", 1)
+	} else {
+		return "", err
+	}
+
 	if script, err := assets.ReadFile("assets/routing.js"); err == nil {
 		html = strings.Replace(html, `<script src="routing.js"></script>`, "<script>"+string(script)+"</script>", 1)
 	} else {

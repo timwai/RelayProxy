@@ -88,7 +88,6 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
-
 func TestWebManagementLoadsSharedFoundationBeforePageStyles(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()

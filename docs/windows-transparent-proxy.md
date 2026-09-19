@@ -69,7 +69,7 @@ WFP 自注入包通过 injection-state 检查直接放行，RelayProxy 自身 PI
 
 DNS mode 是启动期设置：修改 `network.dns_mode` 后需要重启 Agent。这样可以避免 Windows DNS Client 长期复用的 UDP endpoint 在用户态 association 与内核 WFP action 之间出现新旧策略混用。这里的“需要重启”只针对模式变更；已经运行在 `auto` 模式时，Relay ready/lost 仍会对现有 UDP/53 flow 动态执行 DIRECT ↔ PROXY 切换。
 
-`proxy` 模式还有一个严格受限的启动例外：WFP 在 Relay 隧道建立前已经接管网络，而 Relay 地址本身可能需要系统 DNS 解析。因此仅在“本次 Agent 启动后尚未出现过第一次 Relay ready”期间，UDP/53 可以临时 DIRECT；第一次 Relay ready 时驱动会原地把这些 flow 提升为 PROXY 并清除 bootstrap 标记。此后即使 Relay 再次断开，`proxy` 模式也不会自动降级为 DIRECT。
+`proxy` 模式还有一个严格受限的启动例外：WFP 在 Relay 隧道建立前已经接管网络，而 Relay 地址本身可能需要系统 DNS 解析。因此仅在“本次 Agent 启动后尚未出现过第一次 Relay ready”期间，DNS 的 UDP/53 与 TCP/53 可以临时 DIRECT。第一次 Relay ready 时，驱动会把长期复用的 UDP/53 flow 原地提升为 PROXY 并清除 bootstrap 标记；启动阶段已经建立的短生命周期 TCP/53 连接允许自然结束，之后新建的 TCP/53 直接按 PROXY 处理。此后即使 Relay 再次断开，`proxy` 模式也不会自动降级为 DIRECT。
 
 ## 实时连接窗口
 

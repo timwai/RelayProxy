@@ -39,8 +39,16 @@ type Rule struct {
 }
 
 // Config is the divert network configuration.
+const (
+	DNSModeRule   = "rule"
+	DNSModeAuto   = "auto"
+	DNSModeDirect = "direct"
+	DNSModeProxy  = "proxy"
+)
+
 type Config struct {
 	Mode             string   `yaml:"mode" json:"mode"` // "" | divert
+	DNSMode          string   `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"`
 	DefaultAction    Action   `yaml:"default_action" json:"default_action"`
 	ExcludeProcesses []string `yaml:"exclude_processes" json:"exclude_processes"`
 	Rules            []Rule   `yaml:"rules" json:"rules"`

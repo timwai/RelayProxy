@@ -84,6 +84,22 @@ function Build-One {
     Copy-Item $sys (Join-Path $package "RelayProxyWfp.sys") -Force
     Copy-Item $Inf (Join-Path $package "RelayProxyWfp.inf") -Force
 
+    $signtool = $null
+    if ($CertificateThumbprint) {
+        $signtool = Find-Tool "signtool.exe"
+        if (-not $signtool) {
+            throw "signtool.exe not found"
+        }
+
+        # The catalog hashes the final SYS bytes. Sign the driver first, then
+        # build the CAT from that signed image, and sign the CAT last.
+        $sysTarget = Join-Path $package "RelayProxyWfp.sys"
+        & $signtool sign /sha1 $CertificateThumbprint /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $sysTarget
+        if ($LASTEXITCODE -ne 0) {
+            throw "Signing failed: $sysTarget"
+        }
+    }
+
     if (-not $SkipCatalog) {
         $inf2cat = Find-Tool "Inf2Cat.exe"
         if ($inf2cat) {
@@ -97,19 +113,14 @@ function Build-One {
         }
     }
 
-    if ($CertificateThumbprint) {
-        $signtool = Find-Tool "signtool.exe"
-        if (-not $signtool) {
-            throw "signtool.exe not found"
-        }
-        $targets = @((Join-Path $package "RelayProxyWfp.sys"))
+    if ($CertificateThumbprint -and -not $SkipCatalog) {
         $cat = Join-Path $package "RelayProxyWfp.cat"
-        if (Test-Path $cat) { $targets += $cat }
-        foreach ($target in $targets) {
-            & $signtool sign /sha1 $CertificateThumbprint /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $target
-            if ($LASTEXITCODE -ne 0) {
-                throw "Signing failed: $target"
-            }
+        if (-not (Test-Path $cat)) {
+            throw "Catalog was not produced: $cat"
+        }
+        & $signtool sign /sha1 $CertificateThumbprint /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $cat
+        if ($LASTEXITCODE -ne 0) {
+            throw "Signing failed: $cat"
         }
     }
 

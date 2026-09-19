@@ -532,7 +532,7 @@ func policyFingerprint(c *config.AgentConfigFile) string {
 		r.Rules = []routing.Rule{}
 	}
 	d := c.DivertConfig()
-	d.Mode = "" // mode is a startup setting, never published by a policy reload.
+	d.Mode = ""    // mode is a startup setting, never published by a policy reload.
 	d.DNSMode = "" // DNS mode also requires restart; persistent UDP endpoints retain their running policy.
 	if d.Rules == nil {
 		d.Rules = []divert.Rule{}

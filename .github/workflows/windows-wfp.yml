@@ -89,7 +89,7 @@ jobs:
       - name: Build WFP driver
         shell: pwsh
         run: |
-          ./scripts/build-wfp.ps1 -Platform '${{ matrix.platform }}' -Configuration Release -OutDir "$env:RUNNER_TEMP\wfp"
+          ./scripts/build-wfp.ps1 -Platform '${{ matrix.platform }}' -Configuration Release -OutDir "$env:RUNNER_TEMP\wfp" -SkipCatalog
       - name: Verify driver artifact
         shell: pwsh
         run: |

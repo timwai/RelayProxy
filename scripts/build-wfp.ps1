@@ -106,35 +106,24 @@ function Build-One {
     Write-Host "[WFP] MSBuild host: $msbuild" -ForegroundColor DarkGray
 
     $stampInf = Find-Tool "stampinf.exe"
-    if (-not $stampInf) {
-        throw @"
-stampinf.exe was not found.
-
-Visual Studio DriverKit integration is installed, but the WDK command-line
-tools are missing or incomplete. StampInf is supplied by the Windows Driver
-Kit, not by Visual Studio itself.
-
-Expected location resembles:
-  C:\Program Files (x86)\Windows Kits\10\bin\10.0.28000.0\x64\stampinf.exe
-
-Repair/install the full WDK, then retry:
-  winget install Microsoft.WindowsWDK.10.0.28000 --force
-
-You can verify manually with:
-  Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter stampinf.exe
-"@
-    }
-    $stampInfDir = Split-Path -Parent $stampInf
-    $stampInfToolPath = $stampInfDir.TrimEnd("\") + "\"
-    Write-Host "[WFP] StampInf tool: $stampInf" -ForegroundColor DarkGray
-
-    # Some WDK 28000 command-line builds run DPVerifierTask with a relative
-    # x86\InfVerif.dll path and fail even though the driver itself builds.
-    # Skip that embedded package-verification task here and perform mandatory
-    # validation explicitly with the x64 InfVerif.exe below. StampInf remains
-    # enabled, and the WDK host-tools directory is still placed first on PATH.
     $oldPath = $env:PATH
-    $env:PATH = $stampInfDir + ";" + $env:PATH
+    $extraMSBuildArgs = @()
+
+    if ($stampInf) {
+        $stampInfDir = Split-Path -Parent $stampInf
+        $stampInfToolPath = $stampInfDir.TrimEnd("\") + "\"
+        Write-Host "[WFP] StampInf tool: $stampInf" -ForegroundColor DarkGray
+        $env:PATH = $stampInfDir + ";" + $env:PATH
+        $extraMSBuildArgs += "/p:StampInfToolPath=$stampInfToolPath"
+    } else {
+        Write-Host "[WFP] Local StampInf tool not found; using the WDK/NuGet tool resolution." -ForegroundColor DarkGray
+    }
+
+    # WDK 28000 command-line builds can run DPVerifierTask with a relative
+    # x86\InfVerif.dll path and fail with 0x8007007E even after the SYS links.
+    # Disable only that embedded package-verification task. The stamped INF is
+    # validated explicitly with the standalone x64 InfVerif.exe below whenever
+    # the full WDK tools are available.
     try {
         & $msbuild $Project `
             /restore `
@@ -144,7 +133,7 @@ You can verify manually with:
             /p:Platform=$TargetPlatform `
             /p:SignMode=Off `
             /p:SkipPackageVerification=true `
-            "/p:StampInfToolPath=$stampInfToolPath" `
+            @extraMSBuildArgs `
             /nologo
     } finally {
         $env:PATH = $oldPath
@@ -166,13 +155,17 @@ You can verify manually with:
             Sort-Object FullName -Descending |
             Select-Object -ExpandProperty FullName -First 1
     }
-    if (-not $infVerif) {
-        throw "InfVerif.exe was not found under $toolsRoot. Repair the Windows Driver Kit installation."
-    }
-    Write-Host "[WFP] InfVerif tool: $infVerif" -ForegroundColor DarkGray
-    & $infVerif /h $builtInf
-    if ($LASTEXITCODE -ne 0) {
-        throw "INF verification failed for $TargetPlatform"
+
+    if ($infVerif) {
+        Write-Host "[WFP] InfVerif tool: $infVerif" -ForegroundColor DarkGray
+        & $infVerif /h $builtInf
+        if ($LASTEXITCODE -ne 0) {
+            throw "INF verification failed for $TargetPlatform"
+        }
+    } elseif ($SkipCatalog) {
+        Write-Warning "InfVerif.exe was not found; compile-only validation will continue because -SkipCatalog was requested."
+    } else {
+        throw "InfVerif.exe was not found under $toolsRoot. A release package requires the full WDK verification tools."
     }
 
     $sys = Join-Path $Root "native\windows\wfp\bin\$TargetPlatform\$Configuration\RelayProxyWfp.sys"

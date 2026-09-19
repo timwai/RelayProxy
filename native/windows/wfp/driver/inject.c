@@ -12,6 +12,11 @@ typedef struct _RP_UDP_REPLAY_CONTEXT {
     ULONG ControlDataLength;
 } RP_UDP_REPLAY_CONTEXT;
 
+static BOOLEAN RpAtDispatchLevel(VOID)
+{
+    return KeGetCurrentIrql() == DISPATCH_LEVEL;
+}
+
 static VOID NTAPI RpUdpReplayComplete(
     _Inout_ VOID* Context,
     _Inout_ NET_BUFFER_LIST* NetBufferList,
@@ -72,12 +77,12 @@ NTSTATUS RpCapturePendingUdp(
         RtlCopyMemory(controlData, Metadata->controlData, controlDataLength);
     }
 
-    FwpsReferenceNetBufferList(NetBufferList, TRUE);
+    FwpsReferenceNetBufferList(NetBufferList, FALSE);
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
     if (Flow->Removed || Flow->PendingUdpNbl != NULL) {
         KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
-        FwpsDereferenceNetBufferList(NetBufferList, TRUE);
+        FwpsDereferenceNetBufferList(NetBufferList, RpAtDispatchLevel());
         if (controlData != NULL) {
             ExFreePoolWithTag(controlData, RP_TAG_REPLAY);
         }
@@ -115,7 +120,7 @@ VOID RpReleasePendingUdp(_Inout_ RP_FLOW* Flow)
     KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
 
     if (nbl != NULL) {
-        FwpsDereferenceNetBufferList(nbl, TRUE);
+        FwpsDereferenceNetBufferList(nbl, RpAtDispatchLevel());
     }
     if (controlData != NULL) {
         ExFreePoolWithTag(controlData, RP_TAG_REPLAY);
@@ -184,7 +189,7 @@ NTSTATUS RpReplayPendingUdp(_Inout_ RP_FLOW* Flow)
         NULL,
         0,
         &clone);
-    FwpsDereferenceNetBufferList(original, TRUE);
+    FwpsDereferenceNetBufferList(original, RpAtDispatchLevel());
     original = NULL;
     if (!NT_SUCCESS(status)) {
         goto Exit;
@@ -231,7 +236,7 @@ Exit:
         FwpsFreeCloneNetBufferList(clone, 0);
     }
     if (original != NULL) {
-        FwpsDereferenceNetBufferList(original, TRUE);
+        FwpsDereferenceNetBufferList(original, RpAtDispatchLevel());
     }
     if (replay != NULL) {
         if (replay->Flow != NULL) {

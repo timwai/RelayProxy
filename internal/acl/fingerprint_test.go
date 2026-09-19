@@ -18,7 +18,9 @@ func TestPolicyFingerprintComesFromCompiledContent(t *testing.T) {
 		t.Fatalf("fingerprint was not recomputed: %q", snapshot.Fingerprint)
 	}
 	checker2, err := NewChecker(snapshot)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := checker2.Policy().Fingerprint; got != snapshot.Fingerprint {
 		t.Fatalf("fingerprint not stable: %q != %q", got, snapshot.Fingerprint)
 	}

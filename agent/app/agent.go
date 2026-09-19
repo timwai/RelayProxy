@@ -355,6 +355,11 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		a.divertSrv, err = divert.New(divert.Options{
 			Config: cfg.DivertConfig, Dialer: a.rawDialer, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
+			ProxyReady: func() bool {
+				a.mu.RLock()
+				defer a.mu.RUnlock()
+				return !a.closed.Load() && a.handshakeOK.Load() && a.readySession != nil
+			},
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
 				d := engine.DecideFlow(routing.Flow{Process: flow.Process, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
 				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired}
@@ -393,6 +398,7 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	a.rdpP2P = nil
 	a.rdpSession = nil
 	a.rdpTargets = nil
+	divertSrv := a.divertSrv
 	if newState != tunnel.StateConnected || sess == nil {
 		a.mu.Unlock()
 		if oldControl != nil {
@@ -409,6 +415,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	cfg, handler := cloneAgentConfig(a.cfg), a.exitHandler
 	a.wg.Add(1)
 	a.mu.Unlock()
+	if divertSrv != nil {
+		divertSrv.SetProxyReady(false)
+	}
 	if oldControl != nil {
 		_ = oldControl.Close()
 	}
@@ -529,7 +538,11 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
+	divertSrv := a.divertSrv
 	a.mu.Unlock()
+	if divertSrv != nil {
+		divertSrv.SetProxyReady(true)
+	}
 	log.Printf("[Agent] Device approved. SessionID: %s, Heartbeat: %ds", accepted.SessionID, accepted.HeartbeatSec)
 
 	var p2pManager *rdpp2p.Manager

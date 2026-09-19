@@ -2,7 +2,6 @@ package gui
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,13 +21,10 @@ import (
 	"relayproxy/internal/webui"
 )
 
-const webAuthCookie = "relayproxy_agent_web"
-
 // WebOptions configures the browser-accessible copy of the desktop UI.
 type WebOptions struct {
 	Listen string
 	Port   int
-	Token  string
 }
 
 // WebServer owns the local management listener. Done is closed when the user
@@ -37,7 +33,6 @@ type WebServer struct {
 	server   *http.Server
 	listener net.Listener
 	bridge   *bridge.UIBridge
-	token    string
 	loopback bool
 	done     chan struct{}
 	doneOnce sync.Once
@@ -55,15 +50,14 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 		return nil, fmt.Errorf("invalid web management port %d", opts.Port)
 	}
 	loopback := webLoopbackHost(host)
-	token := strings.TrimSpace(opts.Token)
-	if !loopback && len(token) < 32 {
-		return nil, errors.New("web management on a non-loopback address requires a web.token of at least 32 bytes")
+	if !loopback {
+		return nil, errors.New("agent web management is local-only; web.listen must be a loopback address")
 	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(opts.Port)))
 	if err != nil {
 		return nil, fmt.Errorf("start web management listener: %w", err)
 	}
-	w := &WebServer{listener: listener, bridge: b, token: token, loopback: loopback, done: make(chan struct{})}
+	w := &WebServer{listener: listener, bridge: b, loopback: loopback, done: make(chan struct{})}
 	mux := http.NewServeMux()
 	w.registerRoutes(mux)
 	w.server = &http.Server{
@@ -101,40 +95,12 @@ func (w *WebServer) authorize(next http.Handler) http.Handler {
 			http.Error(rw, "invalid Host for loopback management listener", http.StatusForbidden)
 			return
 		}
-		if w.token != "" {
-			if supplied := r.URL.Query().Get("token"); secureEqual(supplied, w.token) {
-				http.SetCookie(rw, &http.Cookie{Name: webAuthCookie, Value: w.token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
-				clean := *r.URL
-				query := clean.Query()
-				query.Del("token")
-				clean.RawQuery = query.Encode()
-				http.Redirect(rw, r, clean.String(), http.StatusSeeOther)
-				return
-			}
-			if !w.authorized(r) {
-				http.Error(rw, "unauthorized; open /?token=<web.token> once", http.StatusUnauthorized)
-				return
-			}
-		}
 		if isMutation(r.Method) && !sameOrigin(r) {
 			http.Error(rw, "cross-origin request rejected", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(rw, r)
 	})
-}
-
-func (w *WebServer) authorized(r *http.Request) bool {
-	auth := strings.TrimSpace(r.Header.Get("Authorization"))
-	if strings.HasPrefix(strings.ToLower(auth), "bearer ") && secureEqual(strings.TrimSpace(auth[7:]), w.token) {
-		return true
-	}
-	cookie, err := r.Cookie(webAuthCookie)
-	return err == nil && secureEqual(cookie.Value, w.token)
-}
-
-func secureEqual(a, b string) bool {
-	return len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 func isMutation(method string) bool {

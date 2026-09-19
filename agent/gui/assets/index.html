@@ -43,7 +43,7 @@
 
     input:focus, select:focus { outline: none; }
     button:focus-visible, input:focus-visible, select:focus-visible {
-      outline: 2px solid #10b981; outline-offset: 1px;
+      outline: 2px solid var(--rp-primary); outline-offset: 1px;
     }
 
     /* Single icon scale for the whole app: one stroke weight, one grid. */
@@ -58,30 +58,23 @@
     }
     .live-dot { animation: live-ring 2.4s var(--ease) infinite; }
 
-    .nav-item:hover { background: rgb(226 232 240 / .7); }
-    .dark .nav-item:hover { background: rgb(30 41 59 / .6); }
+    .nav-item:hover { background: var(--rp-surface); color: var(--rp-text); }
     .nav-item[aria-selected="true"] {
-      background: rgb(236 253 245);
-      color: rgb(4 120 87);
-      box-shadow: inset 2px 0 0 rgb(16 185 129);
+      background: var(--rp-sidebar-active);
+      color: var(--rp-primary);
+      box-shadow: inset 2px 0 0 var(--rp-primary);
     }
-    .nav-item[aria-selected="true"]:hover { background: rgb(209 250 229); }
-    .dark .nav-item[aria-selected="true"] {
-      background: rgb(6 78 59 / .35);
-      color: rgb(110 231 183);
-      box-shadow: inset 2px 0 0 rgb(52 211 153);
+    .nav-item[aria-selected="true"]:hover {
+      background: color-mix(in srgb, var(--rp-sidebar-active) 78%, var(--rp-surface));
     }
-    .dark .nav-item[aria-selected="true"]:hover { background: rgb(6 78 59 / .5); }
 
-    .btn-primary { background: #059669; color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: #047857; }
-    .btn-primary:active:not(:disabled) { background: #065f46; }
-    .btn-primary:disabled { background: rgb(226 232 240); color: rgb(148 163 184); cursor: default; }
-    .dark .btn-primary:disabled { background: rgb(51 65 85); color: rgb(100 116 139); }
+    .btn-primary { background: var(--rp-primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--rp-primary-hover); }
+    .btn-primary:active:not(:disabled) { background: color-mix(in srgb, var(--rp-primary-hover) 88%, #000); }
+    .btn-primary:disabled { background: var(--rp-surface-soft); color: var(--rp-subtle); cursor: default; }
 
-    .toggle-track { background: rgb(203 213 225); }
-    .dark .toggle-track { background: rgb(51 65 85); }
-    .peer:checked ~ .toggle-track { background: #059669; }
+    .toggle-track { background: var(--rp-border-strong); }
+    .peer:checked ~ .toggle-track { background: var(--rp-primary); }
     .toggle-knob { transition: transform .18s var(--ease); }
     .peer:checked ~ .toggle-track .toggle-knob { transform: translateX(16px); }
     .peer:disabled ~ .toggle-track { opacity: .5; }
@@ -94,81 +87,81 @@
 
     .config-page-heading { display:flex;justify-content:space-between;align-items:center;gap:16px;padding:3px 0 2px; }
     .config-page-heading h1 { font-size:19px;font-weight:650;letter-spacing:-.4px; }
-    .config-eyebrow { font-size:9px;letter-spacing:2px;color:#8c9aaa;margin-bottom:5px;font-weight:600; }
-    .config-pill { font-size:10px;border:1px solid #dce7e4;color:#508779;background:#f3faf7;padding:4px 9px;border-radius:6px;white-space:nowrap; }
-    .dark .config-pill { background:#13352d;color:#93baae;border-color:#24473d; }
-    .config-card { padding:21px;border:1px solid #e0e6ec;background:#fff;border-radius:11px; }
-    .dark .config-card { border-color:#293342;background:#17202ddd; }
+    .config-eyebrow { font-size:9px;letter-spacing:2px;color:var(--rp-subtle);margin-bottom:5px;font-weight:600; }
+    .config-pill { font-size:10px;border:1px solid color-mix(in srgb,var(--rp-primary) 22%,var(--rp-border));color:var(--rp-primary);background:var(--rp-primary-soft);padding:4px 9px;border-radius:var(--rp-radius-sm);white-space:nowrap; }
+    .dark .config-pill { background:var(--rp-primary-soft);color:var(--rp-primary);border-color:color-mix(in srgb,var(--rp-primary) 28%,var(--rp-border)); }
+    .config-card { padding:21px;border:1px solid var(--rp-border);background:var(--rp-surface);border-radius:var(--rp-radius); }
+    .dark .config-card { border-color:var(--rp-border);background:var(--rp-surface); }
     .config-section-title { display:flex;gap:12px;align-items:center;margin-bottom:18px; }
-    .config-section-title>span { display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:#ecf6f1;color:#479681;font:12px Consolas,monospace; }
-    .dark .config-section-title>span { background:#163b31;color:#7cc2aa; }
+    .config-section-title>span { display:grid;place-items:center;width:31px;height:31px;border-radius:9px;background:var(--rp-primary-soft);color:var(--rp-primary);font:12px var(--rp-mono); }
+    .dark .config-section-title>span { background:var(--rp-primary-soft);color:var(--rp-primary); }
     .config-section-title h2 { font-size:13px;font-weight:600; }
-    .config-section-title p { font-size:11px;color:#8a96a8;margin-top:3px; }
+    .config-section-title p { font-size:11px;color:var(--rp-muted);margin-top:3px; }
     .config-grid { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 18px;margin-bottom:14px; }
     .config-field { margin-bottom:14px; }
     .config-grid .config-field { margin-bottom:0; }
-    .config-field label { display:block;font-size:12px;font-weight:550;color:#536478;margin-bottom:7px; }
-    .dark .config-field label { color:#acbbc9; }
-    .config-field input,.config-field select,.config-field textarea,.config-inline input { width:100%;font-size:12px;padding:9px 10px;border:1px solid #cfd9e2;border-radius:6px;background:#f9fbfc;color:inherit; }
-    .dark .config-field input,.dark .config-field select,.dark .config-field textarea,.dark .config-inline input { background:#101722;border-color:#344052; }
+    .config-field label { display:block;font-size:12px;font-weight:550;color:var(--rp-muted);margin-bottom:7px; }
+    .dark .config-field label { color:var(--rp-muted); }
+    .config-field input,.config-field select,.config-field textarea,.config-inline input { width:100%;font-size:12px;padding:9px 10px;border:1px solid var(--rp-border-strong);border-radius:var(--rp-radius-sm);background:var(--rp-surface-soft);color:var(--rp-text); }
+    .dark .config-field input,.dark .config-field select,.dark .config-field textarea,.dark .config-inline input { background:var(--rp-surface-soft);border-color:var(--rp-border-strong); }
     .config-field textarea { resize:vertical; }
-    .config-field small { display:block;font-size:10px;line-height:1.65;color:#8b98a7;margin-top:6px; }
-    .config-help { font-size:11px;color:#8594a5;line-height:1.7;margin-top:6px; }
-    .dark .config-help { color:#8396aa; }
-    .config-info { padding:10px 14px;border:1px solid #d7e8e7;border-radius:7px;background:#ecf7f4;color:#568778;font-size:11px;line-height:1.7; }
-    .dark .config-info { background:#102e28;border-color:#21443a;color:#8ab7a7; }
-    .config-advanced summary { cursor:pointer;font-size:12px;font-weight:550;color:#65778c;user-select:none; }
-    .dark .config-advanced summary { color:#a6b6c7; }
-    .config-advanced summary>span { float:right;font-size:10px;font-weight:400;color:#91a0b0;margin-left:14px; }
+    .config-field small { display:block;font-size:10px;line-height:1.65;color:var(--rp-subtle);margin-top:6px; }
+    .config-help { font-size:11px;color:var(--rp-muted);line-height:1.7;margin-top:6px; }
+    .dark .config-help { color:var(--rp-muted); }
+    .config-info { padding:10px 14px;border:1px solid color-mix(in srgb,var(--rp-primary) 20%,var(--rp-border));border-radius:var(--rp-radius-sm);background:var(--rp-primary-soft);color:var(--rp-primary);font-size:11px;line-height:1.7; }
+    .dark .config-info { background:var(--rp-primary-soft);border-color:color-mix(in srgb,var(--rp-primary) 24%,var(--rp-border));color:var(--rp-primary); }
+    .config-advanced summary { cursor:pointer;font-size:12px;font-weight:550;color:var(--rp-muted);user-select:none; }
+    .dark .config-advanced summary { color:var(--rp-muted); }
+    .config-advanced summary>span { float:right;font-size:10px;font-weight:400;color:var(--rp-subtle);margin-left:14px; }
     .config-advanced[open]>summary { margin-bottom:17px; }
-    .config-card>.config-advanced { border-top:1px solid #e5ebf1;margin-top:19px;padding-top:16px; }
-    .dark .config-card>.config-advanced { border-color:#2c3643; }
+    .config-card>.config-advanced { border-top:1px solid var(--rp-border);margin-top:19px;padding-top:16px; }
+    .dark .config-card>.config-advanced { border-color:var(--rp-border); }
     .config-inline,.config-actions,.config-actions>div,.config-preset-row { display:flex;gap:10px;align-items:center;flex-wrap:wrap; }
     .config-inline input { flex:1;min-width:180px; }
     .config-actions { justify-content:space-between;padding:3px 0;gap:14px; }
     .config-small,.config-secondary { border-radius:6px;padding:8px 12px;font-size:12px;font-weight:550;white-space:nowrap; }
-    .config-secondary { border:1px solid #d5dee7;color:#64778b;background:#ffffff60; }
-    .config-secondary:hover { background:#e9eff5; }
-    .dark .config-secondary { background:#1d283766;border-color:#344254;color:#a7b9ca; }
-    .dark .config-secondary:hover { background:#2d3a4c; }
+    .config-secondary { border:1px solid var(--rp-border-strong);color:var(--rp-muted);background:var(--rp-surface); }
+    .config-secondary:hover { background:var(--rp-surface-soft);color:var(--rp-text); }
+    .dark .config-secondary { background:var(--rp-surface);border-color:var(--rp-border-strong);color:var(--rp-muted); }
+    .dark .config-secondary:hover { background:var(--rp-surface-soft); }
     .config-secondary:disabled { opacity:.4;cursor:default; }
-    .config-address { display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:7px;background:#eef6f4;margin-top:4px;flex-wrap:wrap; }
-    .dark .config-address { background:#122b27; }
-    .config-address>span { font-size:10px;color:#759388; }
-    .config-address code { flex:1;font-size:11px;color:#309077;overflow-wrap:anywhere;user-select:text; }
-    .dark .config-address code { color:#7bc5ac; }
+    .config-address { display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:var(--rp-radius-sm);background:var(--rp-primary-soft);margin-top:4px;flex-wrap:wrap; }
+    .dark .config-address { background:var(--rp-primary-soft); }
+    .config-address>span { font-size:10px;color:var(--rp-muted); }
+    .config-address code { flex:1;font-size:11px;color:var(--rp-primary);overflow-wrap:anywhere;user-select:text; }
+    .dark .config-address code { color:var(--rp-primary); }
     .config-address button { padding:3px 8px;font-size:10px; }
     .config-check { display:flex;gap:8px;align-items:center;font-size:12px; }
-    .config-card input[type=checkbox],.config-check input[type=checkbox] { accent-color:#059669;width:16px;height:16px;flex-shrink:0; }
+    .config-card input[type=checkbox],.config-check input[type=checkbox] { accent-color:var(--rp-primary);width:16px;height:16px;flex-shrink:0; }
     .config-switch-line { display:flex;justify-content:space-between;align-items:center;margin-bottom:20px; }
     .config-switch-line strong { font-size:13px;font-weight:600; }
-    .config-switch-line small { display:block;color:#8798a9;font-size:11px;margin-top:4px; }
+    .config-switch-line small { display:block;color:var(--rp-muted);font-size:11px;margin-top:4px; }
     .config-permissions { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px; }
-    .config-permissions label { display:flex;align-items:center;gap:10px;padding:14px 10px;border:1px solid #e1e8ee;border-radius:8px; }
-    .dark .config-permissions label { border-color:#2f3d4d; }
+    .config-permissions label { display:flex;align-items:center;gap:10px;padding:14px 10px;border:1px solid var(--rp-border);border-radius:var(--rp-radius-sm); }
+    .dark .config-permissions label { border-color:var(--rp-border); }
     .config-permissions strong { display:block;font-size:12px;font-weight:550; }
-    .config-permissions small { display:block;font-size:10px;color:#8b9bad;margin-top:3px; }
-    .config-preset-row { padding:2px 0 1px;font-size:11px;color:#8295a5; }
+    .config-permissions small { display:block;font-size:10px;color:var(--rp-subtle);margin-top:3px; }
+    .config-preset-row { padding:2px 0 1px;font-size:11px;color:var(--rp-muted); }
     .config-preset-row button { padding:5px 10px;font-size:11px; }
     .config-preset-row small { flex:1;font-size:10px; }
-    .config-text-button { font-size:11px;color:#139777; }
+    .config-text-button { font-size:11px;color:var(--rp-primary); }
     .config-inline-action { float:right;margin-top:-24px; }
-    .draft-bar { flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;font-size:11px;background:#e7f6ef;border-bottom:1px solid #c5e6d8;color:#37765d; }
-    .dark .draft-bar { background:#102d24;border-color:#234c3b;color:#9ac8b0; }
+    .draft-bar { flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px;font-size:11px;background:var(--rp-primary-soft);border-bottom:1px solid color-mix(in srgb,var(--rp-primary) 22%,var(--rp-border));color:var(--rp-primary); }
+    .dark .draft-bar { background:var(--rp-primary-soft);border-color:color-mix(in srgb,var(--rp-primary) 24%,var(--rp-border));color:var(--rp-primary); }
     .draft-bar>div { display:flex;gap:8px; }
     .draft-bar button { padding:5px 9px;font-size:10px; }
-    .config-form-error { padding:10px 24px;color:#ba4f58;background:#fff0f2;border-bottom:1px solid #f0ced3;font-size:12px;flex-shrink:0; }
-    .dark .config-form-error { color:#ec949a;background:#381d27;border-color:#533039; }
-    .nav-item[data-dirty=true]:after { content:"";width:5px;height:5px;border-radius:50%;background:#dca749;margin-left:auto; }
+    .config-form-error { padding:10px 24px;color:var(--rp-danger);background:color-mix(in srgb,var(--rp-danger) 8%,var(--rp-surface));border-bottom:1px solid color-mix(in srgb,var(--rp-danger) 24%,var(--rp-border));font-size:12px;flex-shrink:0; }
+    .dark .config-form-error { color:var(--rp-danger);background:color-mix(in srgb,var(--rp-danger) 9%,var(--rp-surface));border-color:color-mix(in srgb,var(--rp-danger) 24%,var(--rp-border)); }
+    .nav-item[data-dirty=true]:after { content:"";width:5px;height:5px;border-radius:50%;background:var(--rp-warning);margin-left:auto; }
     input:disabled,select:disabled,textarea:disabled { opacity:.5;cursor:not-allowed; }
-    [aria-invalid=true] { border-color:#d7626f!important; }
+    [aria-invalid=true] { border-color:var(--rp-danger)!important; }
     .tab-pane { min-height:0;flex:1; }
     @media(max-width:850px) { .config-permissions { grid-template-columns:1fr; }.config-permissions small { display:inline;margin-left:8px; }.config-grid{gap:14px;}.config-card{padding:17px;}.config-actions{align-items:flex-start;}.config-actions>div{gap:7px;}.config-page-heading h1{font-size:17px;} }
-    @media(max-width:650px) { nav.w-\[196px\] { width:156px; }.config-grid{grid-template-columns:1fr;}.config-advanced summary>span{float:none;display:block;margin:4px 0 0;}.config-page-heading{align-items:flex-start;flex-direction:column;}.draft-bar{padding:8px 12px;flex-wrap:wrap;}.config-inline-action{float:none;margin:0 0 6px;}.tab-pane{padding-left:16px;padding-right:16px;} }
+    @media(max-width:650px) { .rp-sidebar { width:156px; }.config-grid{grid-template-columns:1fr;}.config-advanced summary>span{float:none;display:block;margin:4px 0 0;}.config-page-heading{align-items:flex-start;flex-direction:column;}.draft-bar{padding:8px 12px;flex-wrap:wrap;}.config-inline-action{float:none;margin:0 0 6px;}.tab-pane{padding-left:16px;padding-right:16px;} }
     @media(prefers-reduced-motion:reduce) { .live-dot{animation:none;} }
   </style>
 </head>
-<body class="bg-slate-100 dark:bg-[#0d1117] text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">
+<body class="rp-shell text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">
 
   <!-- Unified icon sprite. Every icon in the app comes from here: one 24x24 grid,
        one stroke weight, currentColor so it follows the theme. -->
@@ -247,7 +240,7 @@
   <div class="flex-1 flex min-h-0">
 
     <!-- Sidebar -->
-    <nav class="w-[196px] bg-white/60 dark:bg-[#131a26]/70 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0">
+    <nav class="rp-sidebar flex flex-col shrink-0">
       <div class="flex items-center gap-2.5 px-3 py-3 border-b border-slate-200 dark:border-slate-800">
         <img src="icon.png" alt="RelayProxy" class="w-8 h-8 shrink-0" draggable="false">
         <div class="min-w-0">
@@ -256,44 +249,25 @@
         </div>
       </div>
 
-      <div class="flex-1 p-2 space-y-0.5">
-        <button onclick="switchTab('home')" id="tab-btn-home" aria-selected="true"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-gauge"/></svg><span>运行概览</span>
+      <div class="flex-1 p-2 space-y-1">
+        <div class="rp-nav-label">主菜单</div>
+        <button onclick="switchSection('home')" id="section-btn-home" aria-selected="true" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-gauge"/></svg><span>概览</span>
         </button>
-        <button onclick="switchTab('connection')" id="tab-btn-connection" aria-selected="false" class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg><span>连接与身份</span>
+        <button onclick="switchSection('network')" id="section-btn-network" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg><span>网络</span>
         </button>
-        <button onclick="switchTab('proxy')" id="tab-btn-proxy" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>本地代理</span>
+        <button onclick="switchSection('proxy')" id="section-btn-proxy" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>代理与路由</span>
         </button>
-        <button onclick="switchTab('routing')" id="tab-btn-routing" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>路由分流</span>
+        <button onclick="switchSection('rdp')" id="section-btn-rdp" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg><span>远程桌面</span>
         </button>
-        <button onclick="openConnections()" id="open-connections" class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400" title="在独立窗口查看实时连接">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>实时连接 ↗</span>
+        <button onclick="switchSection('monitor')" id="section-btn-monitor" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-terminal"/></svg><span>监控</span>
         </button>
-        <button onclick="switchTab('exit')" id="tab-btn-exit" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-globe"/></svg><span>选择出口</span>
-        </button>
-        <button onclick="switchTab('share')" id="tab-btn-share" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-shield"/></svg><span>出口共享</span>
-        </button>
-        <button onclick="switchTab('pair')" id="tab-btn-pair" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg><span>服务端审批</span>
-        </button>
-        <button onclick="switchTab('logs')" id="tab-btn-logs" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-terminal"/></svg><span>运行日志</span>
-        </button>
-        <button onclick="switchTab('settings')" id="tab-btn-settings" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-settings"/></svg><span>程序设置</span>
+        <button onclick="switchSection('settings')" id="section-btn-settings" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-settings"/></svg><span>设置</span>
         </button>
       </div>
 
@@ -310,23 +284,28 @@
             <span id="side-latency" class="mono text-[12px] text-slate-500 dark:text-slate-400">-- ms</span>
           </div>
         </div>
-        <button onclick="toggleTheme()" class="w-full px-3 py-1.5 rounded-md text-[12px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-800/60 flex items-center justify-center gap-1.5">
-          <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-bolt"/></svg>
-          <span id="theme-btn-label">浅色界面</span>
-        </button>
+        <div class="rp-theme-control w-full" aria-label="界面主题">
+          <button type="button" data-agent-theme="system" onclick="setThemeMode('system')">自动</button>
+          <button type="button" data-agent-theme="light" onclick="setThemeMode('light')">浅色</button>
+          <button type="button" data-agent-theme="dark" onclick="setThemeMode('dark')">深色</button>
+        </div>
       </div>
     </nav>
 
     <!-- Workspace -->
-    <main class="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
+    <main class="rp-main flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
+
+      <div class="shrink-0 px-6 rp-sticky-tabs">
+        <div id="secondary-tabs" class="rp-tabs" role="tablist" aria-label="当前模块功能"></div>
+      </div>
 
       <div id="config-state" role="status" class="hidden shrink-0 px-6 py-2 text-[12px] bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 border-b border-amber-300 dark:border-amber-500/30"></div>
 
-      <div id="draft-bar" class="draft-bar hidden" role="status"><span id="draft-summary"></span><div><button onclick="discardAllChanges()" class="config-secondary">放弃全部修改</button><button data-config-write disabled onclick="saveAllChanges()" class="btn-primary config-small">保存全部</button></div></div>
+      <div id="draft-bar" class="draft-bar hidden" role="status"><span id="draft-summary"></span><div><button onclick="discardAllChanges()" class="config-secondary rp-btn">放弃全部修改</button><button data-config-write disabled onclick="saveAllChanges()" class="btn-primary rp-btn rp-btn-primary config-small">保存全部</button></div></div>
       <div id="config-form-error" class="config-form-error hidden" role="alert"></div>
 
       <!-- ============ 概览仪表盘 ============ -->
-      <section id="tab-pane-home" class="tab-pane h-full overflow-y-auto px-6 py-4 space-y-4">
+      <section id="tab-pane-home" class="tab-pane rp-scroll h-full overflow-y-auto px-6 py-4 space-y-4">
         <div class="flex items-start justify-between gap-4">
           <div>
             <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">概览仪表盘</h1>
@@ -344,38 +323,38 @@
           </div>
         </div>
 
-        <div id="unpaired-banner" class="hidden flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30">
+        <div id="unpaired-banner" class="hidden rp-notice rp-notice-warning">
           <svg class="icon-lg text-amber-500" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
           <div class="min-w-0 flex-1">
             <div class="text-[13px] font-medium text-amber-700 dark:text-amber-300">等待服务端审批</div>
             <div id="approval-help" class="text-[12px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">客户端会自动提交安装身份，请管理员在服务端控制台批准。</div>
           </div>
-          <button onclick="switchTab('connection')" class="btn-primary px-3 py-1.5 rounded-md text-[12px] font-semibold shrink-0">配置连接</button>
+          <button onclick="switchTab('connection')" class="btn-primary rp-btn rp-btn-primary px-3 py-1.5 rounded-md text-[12px] font-semibold shrink-0">配置连接</button>
         </div>
 
-        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+        <div class="rp-stat-grid">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-bolt"/></svg><span>中继隧道</span>
             </div>
             <div id="home-tunnel" class="text-[16px] font-semibold mt-1.5 text-slate-400 dark:text-slate-500">未连接</div>
             <div id="home-transport" class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">传输：-</div>
           </div>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-clock"/></svg><span>往返延时</span>
             </div>
             <div id="home-latency" class="mono text-[16px] font-semibold mt-1.5 text-slate-400 dark:text-slate-500">-- ms</div>
             <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">心跳往返耗时</div>
           </div>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-globe"/></svg><span>当前出口节点</span>
             </div>
             <div id="home-exit" class="mono text-[14px] font-semibold mt-1.5 text-slate-800 dark:text-slate-100 truncate">未指定</div>
             <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">流量经该节点转发</div>
           </div>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>活跃转发流</span>
             </div>
@@ -385,8 +364,8 @@
         </div>
 
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">本地代理监听</h2>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
+          <h2 class="rp-section-title">本地代理监听</h2>
+          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
             <div class="flex items-center justify-between gap-4 px-4 py-2.5">
               <div class="flex items-center gap-2.5 min-w-0">
                 <span class="px-1.5 py-0.5 rounded text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400">SOCKS5</span>
@@ -411,20 +390,9 @@
           </div>
         </div>
 
-        <div id="rdp-panel">
-          <div class="flex items-center justify-between gap-3 mb-2">
-            <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200">远程桌面（RDP）</h2>
-            <button id="rdp-disconnect" onclick="disconnectRDP()" class="config-secondary hidden">断开</button>
-          </div>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
-            <div id="rdp-connection" class="text-[12px] text-slate-500 dark:text-slate-400 mb-2">服务端批准后，这里会显示可连接的目标设备。</div>
-            <div id="rdp-targets" class="space-y-2"></div>
-          </div>
-        </div>
-
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">快速开始</h2>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5 space-y-1.5">
+          <h2 class="rp-section-title">快速开始</h2>
+          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5 space-y-1.5">
             <div class="text-[12px] text-slate-500 dark:text-slate-400">设置浏览器或终端代理到上面的地址即可开始使用：</div>
             <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 select-text">curl -x socks5h://<span id="quick-socks5">127.0.0.1:1080</span> https://ipinfo.io</div>
             <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 select-text">curl -x http://<span id="quick-http">127.0.0.1:8080</span> https://ipinfo.io</div>
@@ -432,9 +400,30 @@
         </div>
       </section>
 
+      <section id="tab-pane-rdp" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">远程桌面（RDP）</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">查看服务端已授权的 RDP 主机并发起连接。</p>
+          </div>
+        </div>
+        <div id="rdp-panel">
+          <div class="flex items-center justify-between gap-3 mb-2">
+            <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200">远程桌面（RDP）</h2>
+            <button id="rdp-disconnect" onclick="disconnectRDP()" class="config-secondary hidden">断开</button>
+          </div>
+          <div class="rp-stat">
+            <div id="rdp-connection" class="text-[12px] text-slate-500 dark:text-slate-400 mb-2">服务端批准后，这里会显示可连接的目标设备。</div>
+            <div id="rdp-targets" class="space-y-2"></div>
+          </div>
+        </div>
+
+
+      </section>
+
       <section id="tab-pane-connection" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
         <div class="config-page-heading"><div><p class="config-eyebrow">CONNECTION</p><h1>连接与身份</h1><p class="config-help">只需填写服务器地址；安装身份会自动生成并安全保存在本机。</p></div><span class="config-pill">连接设置需重启</span></div>
-        <div class="config-card">
+        <div class="config-card rp-card">
           <div class="config-section-title"><span>01</span><div><h2>服务器与设备</h2><p>服务器填写主机名或 IP；端口在下方单独设置。</p></div></div>
           <div class="config-grid">
             <div class="config-field"><label for="cfg-server">中继服务器</label><input id="cfg-server" class="mono" autocomplete="off" placeholder="relay.example.com 或 192.168.1.10"></div>
@@ -445,7 +434,7 @@
           </div>
           <p id="connection-role-hint" class="config-help"></p>
         </div>
-        <div class="config-card">
+        <div class="config-card rp-card">
           <div class="config-section-title"><span>02</span><div><h2>连接端口</h2><p>默认 TCP 与 QUIC 均使用 443；通常无需修改。</p></div></div>
           <div class="config-grid">
             <div class="config-field"><label for="cfg-quic-port">QUIC 端口 / UDP</label><input id="cfg-quic-port" class="mono" type="number" min="1" max="65535" inputmode="numeric"></div>
@@ -453,7 +442,7 @@
           </div>
           <details class="config-advanced"><summary>隧道加密 <span>高级设置</span></summary><label class="config-check"><input id="cfg-tls-on" type="checkbox"><span>使用 TLS 加密隧道</span></label><p id="connection-tls-hint" class="config-help">独立于管理 HTTP / HTTPS。RDP UDP 需要 TLS + QUIC，且服务端 UDP 端口必须可达。</p></details>
         </div>
-        <div class="config-actions"><span id="connection-runtime" class="config-help mono"></span><div><button data-config-write disabled onclick="saveServer()" class="btn-primary config-small">保存连接设置</button></div></div>
+        <div class="config-actions"><span id="connection-runtime" class="config-help mono"></span><div><button data-config-write disabled onclick="saveServer()" class="btn-primary rp-btn rp-btn-primary config-small">保存连接设置</button></div></div>
       </section>
 
       <!-- ============ 本地代理服务 ============ -->
@@ -463,9 +452,9 @@
           <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">设置供浏览器或应用使用的代理地址。修改开关、监听地址和端口后需重启。</p>
         </div>
 
-        <div class="config-preset-row"><span>监听范围</span><button data-config-write disabled class="config-secondary" onclick="setProxyScope('local')">仅本机</button><button data-config-write disabled class="config-secondary" onclick="setProxyScope('lan')">允许局域网设备</button><small id="proxy-scope-hint"></small></div>
+        <div class="config-preset-row"><span>监听范围</span><button data-config-write disabled class="config-secondary rp-btn" onclick="setProxyScope('local')">仅本机</button><button data-config-write disabled class="config-secondary rp-btn" onclick="setProxyScope('lan')">允许局域网设备</button><small id="proxy-scope-hint"></small></div>
         <div id="proxy-role-hint" class="config-info hidden"></div>
-        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
           <div class="p-4 space-y-3">
             <div class="flex items-center justify-between gap-3">
               <div class="flex items-center gap-2">
@@ -530,7 +519,7 @@
 
         <div class="flex items-center justify-between gap-3">
           <span class="text-[12px] text-slate-500 dark:text-slate-400">监听地址与端口在客户端启动时绑定。</span>
-          <button data-config-write disabled onclick="saveProxy()" class="btn-primary px-4 py-2 rounded-md text-[13px] font-semibold">保存代理设置</button>
+          <button data-config-write disabled onclick="saveProxy()" class="btn-primary rp-btn rp-btn-primary px-4 py-2 rounded-md text-[13px] font-semibold">保存代理设置</button>
         </div>
             </section>
 
@@ -541,10 +530,10 @@
             <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">组合路由规则</h1>
             <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">透明代理、SOCKS5 与 HTTP 共用；第一条命中规则决定动作，新连接生效。</p>
           </div>
-          <button data-config-write disabled onclick="saveRouting()" class="btn-primary px-4 py-2 rounded-md text-[13px] font-semibold">保存并应用规则</button>
+          <button data-config-write disabled onclick="saveRouting()" class="btn-primary rp-btn rp-btn-primary px-4 py-2 rounded-md text-[13px] font-semibold">保存并应用规则</button>
         </div>
 
-        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
           <div class="flex items-center gap-6">
             <div class="flex items-center gap-3">
               <span class="text-[13px] font-medium text-slate-700 dark:text-slate-200">路由模式</span>
@@ -595,7 +584,7 @@
             <p id="routing-mode-hint" class="config-help"></p><p class="text-[12px] text-slate-500 dark:text-slate-400 mt-2">“UDP 必须使用原生数据报”仅影响 PROXY UDP；勾选后会拒绝 TLS 隧道和不支持数据报的旧出口，不回退到可靠流传输。</p>
           </div>
         </div>
-        <details id="network-advanced" class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 config-advanced"><summary>透明代理排除进程</summary>
+        <details id="network-advanced" class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 config-advanced"><summary>透明代理排除进程</summary>
           <label for="cfg-network-excludes" class="block text-[12px] mb-2 mt-3">始终直连的进程（每行一个；优先于上方规则）</label>
           <textarea id="cfg-network-excludes" rows="2" class="mono w-full text-[12px] p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded" placeholder="可选，如 updater.exe"></textarea>
           <p class="config-help">本程序及中继连接自动直连。点击“保存并应用规则”同时保存此列表。</p>
@@ -610,13 +599,13 @@
           <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">指定流量的中继出口。留空时，仅在有一个已授权在线出口时自动选择。</p>
         </div>
 
-        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-3">
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-3">
           <div>
             <label for="cfg-exit-id" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">出口设备 ID</label>
             <div class="flex items-center gap-2.5">
               <input id="cfg-exit-id" type="text" placeholder="dev_xxxxxxxx（留空则不指定）" autocomplete="off"
                      class="mono flex-1 text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
-              <button data-config-write disabled onclick="applyExit()" class="btn-primary px-4 py-2 rounded-md text-[13px] font-semibold shrink-0">应用切换</button>
+              <button data-config-write disabled onclick="applyExit()" class="btn-primary rp-btn rp-btn-primary px-4 py-2 rounded-md text-[13px] font-semibold shrink-0">应用切换</button>
             </div>
           </div>
           <div class="flex items-center justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/60">
@@ -625,7 +614,7 @@
           </div>
         </div>
 
-        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4">
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4">
           <div class="flex items-start gap-2.5">
             <svg class="icon-lg text-slate-400 mt-0.5" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
             <div class="text-[12px] text-slate-500 dark:text-slate-400 leading-relaxed">
@@ -640,7 +629,7 @@
       <section id="tab-pane-share" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
         <div class="config-page-heading"><div><p class="config-eyebrow">EXIT SHARING</p><h1>出口共享</h1><p class="config-help">让已授权设备通过本机网络访问目标。</p></div><span class="config-pill">保存后重启生效</span></div>
         <div id="share-role-hint" class="config-info"></div>
-        <div class="config-card">
+        <div class="config-card rp-card">
           <label class="config-switch-line"><span><strong>启用本机出口</strong><small>接收来自中继的转发请求</small></span><input id="cfg-exit-on" type="checkbox"></label>
           <div class="config-permissions">
             <label><input id="cfg-exit-internet" type="checkbox"><span><strong>互联网</strong><small>公网网站和服务</small></span></label>
@@ -656,7 +645,7 @@
             </div><p id="share-acl-hint" class="config-help"></p>
           </details>
         </div>
-        <div class="config-actions"><span class="config-help">本机开关决定是否申请并承载出口能力；最终权限仍由服务端管理员批准。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary config-small">保存出口设置</button></div>
+        <div class="config-actions"><span class="config-help">本机开关决定是否申请并承载出口能力；最终权限仍由服务端管理员批准。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary rp-btn rp-btn-primary config-small">保存出口设置</button></div>
       </section>
 
       <!-- ============ 服务端审批 ============ -->
@@ -666,7 +655,7 @@
           <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">无需配对码或设备令牌。客户端连接后自动提交申请，由服务端管理员审批。</p>
         </div>
 
-        <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
           <div>
             <div class="text-[12px] text-slate-500 dark:text-slate-400">当前设备</div>
             <div class="flex items-center gap-2 mt-1">
@@ -707,6 +696,41 @@
         </div>
       </section>
 
+      <!-- ============ 实时连接 ============ -->
+      <section id="tab-pane-connections" class="tab-pane tab-flex hidden h-full flex-col px-6 py-4">
+        <div class="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">实时连接</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">查看当前 Agent 正在处理的 TCP / UDP 流量。</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span id="inline-conn-live" class="rp-badge rp-badge-success">实时更新</span>
+            <button type="button" onclick="refreshConnectionsInline(true)" class="rp-btn">刷新</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">活跃连接</div><div id="inline-conn-active" class="mono text-[20px] font-semibold mt-1">0</div></div>
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">上传速率</div><div id="inline-conn-up-rate" class="mono text-[20px] font-semibold mt-1">0 B/s</div></div>
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">下载速率</div><div id="inline-conn-down-rate" class="mono text-[20px] font-semibold mt-1">0 B/s</div></div>
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">累计流量</div><div id="inline-conn-total" class="mono text-[16px] font-semibold mt-1">0 B / 0 B</div></div>
+        </div>
+        <div class="rp-toolbar mb-3">
+          <input id="inline-conn-search" type="search" placeholder="搜索进程、域名、IP 或规则" class="rp-input flex-1" oninput="renderConnectionsInline()">
+          <select id="inline-conn-protocol" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部协议</option><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+          <select id="inline-conn-action" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部动作</option><option value="PROXY">代理</option><option value="DIRECT">直连</option><option value="REJECT">阻断</option></select>
+        </div>
+        <div class="rp-card rp-scroll flex-1 min-h-0 overflow-auto">
+          <table class="rp-table text-[12px] min-w-[860px]">
+            <thead class="sticky top-0 bg-white dark:bg-[#151e2a] z-[1]"><tr class="text-left text-slate-500 dark:text-slate-400">
+              <th class="px-3 py-2">进程</th><th class="px-3 py-2">目标</th><th class="px-3 py-2">协议</th><th class="px-3 py-2">动作</th>
+              <th class="px-3 py-2">出口</th><th class="px-3 py-2 text-right">↑</th><th class="px-3 py-2 text-right">↓</th><th class="px-3 py-2">状态</th>
+            </tr></thead>
+            <tbody id="inline-connections-body"></tbody>
+          </table>
+        </div>
+        <div id="inline-conn-summary" class="text-[11px] text-slate-500 dark:text-slate-400 mt-2">尚未读取连接</div>
+      </section>
+
       <!-- ============ 系统设置 ============ -->
       <section id="tab-pane-settings" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
         <div>
@@ -715,17 +739,19 @@
         </div>
 
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">界面与启动</h2>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
+          <h2 class="rp-section-title">界面与启动</h2>
+          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
             <div class="flex items-center justify-between gap-4 px-4 py-2.5">
               <div class="min-w-0">
-                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">浅色界面</div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">在深色与浅色主题之间切换，立即生效</div>
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">界面主题</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">Windows / macOS 可跟随系统外观，也可固定浅色或深色</div>
               </div>
-              <label class="relative inline-flex items-center cursor-pointer shrink-0">
-                <input type="checkbox" id="cfg-theme-light" onchange="onToggleTheme(this)" class="sr-only peer">
-                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
-              </label>
+              <div class="rp-theme-control shrink-0">
+                <button type="button" data-agent-theme="system" onclick="setThemeMode('system')">跟随系统</button>
+                <button type="button" data-agent-theme="light" onclick="setThemeMode('light')">浅色</button>
+                <button type="button" data-agent-theme="dark" onclick="setThemeMode('dark')">深色</button>
+              </div>
+              <input type="hidden" id="cfg-theme-mode" value="system">
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-2.5">
               <div class="min-w-0">
@@ -761,8 +787,8 @@
         </div>
 
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">配置文件</h2>
-          <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-2.5">
+          <h2 class="rp-section-title">配置文件</h2>
+          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-2.5">
             <div class="mono text-[12px] text-slate-600 dark:text-slate-300 break-all select-text" id="cfg-path">-</div>
             <div class="flex items-center gap-2">
               <button onclick="openConfigDir()" class="h-8 px-3 rounded-md border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700/60 flex items-center gap-1.5 text-[12px]">
@@ -776,7 +802,7 @@
           </div>
         </div>
 
-        <div id="restart-card" class="card bg-white dark:bg-slate-800/50 border border-amber-300 dark:border-amber-500/40 rounded-lg p-4">
+        <div id="restart-card" class="card rp-card bg-white dark:bg-slate-800/50 border border-amber-300 dark:border-amber-500/40 rounded-lg p-4">
           <div class="text-[13px] font-medium text-amber-600 dark:text-amber-400">重启客户端</div>
           <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-1">重新启动 RelayProxy 并重新连接服务端；未保存的表单修改不会保留。</div>
           <button id="restart-button" onclick="doRestart()" class="mt-3 px-4 py-2 rounded-md text-[13px] font-semibold bg-amber-500 text-white hover:bg-amber-600 flex items-center gap-1.5">
@@ -784,7 +810,7 @@
           </button>
         </div>
 
-        <div class="card bg-white dark:bg-slate-800/50 border border-rose-300 dark:border-rose-500/40 rounded-lg p-4">
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-rose-300 dark:border-rose-500/40 rounded-lg p-4">
           <div class="text-[13px] font-medium text-rose-600 dark:text-rose-400">退出客户端</div>
           <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-1">停止本地代理、断开中继隧道并关闭客户端。</div>
           <button onclick="doQuit()" class="mt-3 px-4 py-2 rounded-md text-[13px] font-semibold bg-rose-600 text-white hover:bg-rose-700 flex items-center gap-1.5">
@@ -796,7 +822,7 @@
   </div>
 
   <!-- toast -->
-  <div id="toast" class="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 opacity-0 transition-all duration-200">
+  <div id="toast" role="status" aria-live="polite" class="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 opacity-0 transition-all duration-200">
     <div class="px-4 py-2 rounded-lg bg-slate-900/92 dark:bg-slate-700/95 text-white text-[12px] shadow-lg max-w-[520px]" id="toast-msg"></div>
   </div>
 
@@ -820,7 +846,7 @@
       network: ['cfg-network-excludes'],
       share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
       exit: ['cfg-exit-id'],
-      preferences: ['cfg-min-tray','cfg-start-min','cfg-theme-light']
+      preferences: ['cfg-min-tray','cfg-start-min','cfg-theme-mode']
     };
     var groupNames = {connection:'连接与身份',proxy:'本地代理',routing:'路由分流',network:'透明排除',share:'出口共享',exit:'选择出口',preferences:'程序设置'};
     function snapshotGroup(group) {
@@ -919,36 +945,155 @@
     }
 
     /* ---------- theme ---------- */
-    function applyTheme(dark, persist) {
+    function normalizeThemeMode(value) {
+      if (typeof value === 'boolean') return value ? 'dark' : 'light';
+      value = String(value || 'system').toLowerCase();
+      return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
+    }
+    function themeActual(mode) {
+      mode = normalizeThemeMode(mode);
+      if (window.RelayUITheme && typeof window.RelayUITheme.effective === 'function') return window.RelayUITheme.effective(mode);
+      if (mode === 'system') return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      return mode;
+    }
+    function syncThemeControls(mode) {
+      mode = normalizeThemeMode(mode);
+      var field = $('cfg-theme-mode');
+      if (field) field.value = mode;
+      document.querySelectorAll('[data-agent-theme]').forEach(function (button) {
+        var selected = button.dataset.agentTheme === mode;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      });
+    }
+    function applyTheme(value, persist) {
       if (persist && !state.loaded) { toast('请先载入有效配置'); return; }
-      document.documentElement.classList.toggle('dark', dark);
-      var btnLabel = $('theme-btn-label');
-      if (btnLabel) { btnLabel.textContent = dark ? '浅色界面' : '深色界面'; }
-      var toggle = $('cfg-theme-light');
-      if (toggle) { toggle.checked = !dark; }
+      var mode = normalizeThemeMode(value);
+      var actual = themeActual(mode);
+      if (window.RelayUITheme) {
+        if (persist && typeof window.RelayUITheme.set === 'function') actual = window.RelayUITheme.set(mode);
+        else if (typeof window.RelayUITheme.apply === 'function') actual = window.RelayUITheme.apply(mode, false);
+      }
+      document.documentElement.classList.toggle('dark', actual === 'dark');
+      document.documentElement.dataset.themeMode = mode;
+      syncThemeControls(mode);
       if (persist) {
-        save({ gui: { theme: dark ? 'dark' : 'light' } }, '主题已保存').then(function (ok) {
-          if (!ok && state.cfg) { applyTheme(state.cfg.theme !== 'light', false); }
+        save({ gui: { theme: mode } }, '主题已保存').then(function (ok) {
+          if (!ok && state.cfg) applyTheme(state.cfg.theme || 'system', false);
         });
       }
     }
-    function toggleTheme() { applyTheme(!document.documentElement.classList.contains('dark'), true); }
-    function onToggleTheme(el) { applyTheme(!el.checked, true); }
+    function setThemeMode(mode) { applyTheme(mode, true); }
+    function toggleTheme() { applyTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark', true); }
     window.applyTheme = applyTheme;
+    window.setThemeMode = setThemeMode;
     window.toggleTheme = toggleTheme;
-    window.onToggleTheme = onToggleTheme;
 
     /* ---------- navigation ---------- */
-    function switchTab(id) {
+    var sectionTabs = {
+      home: [{ id:'home', label:'运行概览' }],
+      network: [
+        { id:'connection', label:'连接与身份' },
+        { id:'exit', label:'选择出口' },
+        { id:'pair', label:'服务端审批' }
+      ],
+      proxy: [
+        { id:'proxy', label:'本地代理' },
+        { id:'routing', label:'路由分流' },
+        { id:'share', label:'出口共享' }
+      ],
+      rdp: [{ id:'rdp', label:'RDP 设备' }],
+      monitor: [
+        { id:'logs', label:'运行日志' },
+        { id:'connections', label:'实时连接' }
+      ],
+      settings: [{ id:'settings', label:'程序设置' }]
+    };
+    var tabSections = {
+      home:'home', connection:'network', exit:'network', pair:'network',
+      proxy:'proxy', routing:'proxy', share:'proxy', rdp:'rdp', logs:'monitor', connections:'monitor', settings:'settings'
+    };
+    state.section = state.section || 'home';
+    var navigationKey = 'relayproxy-agent-navigation';
+    function loadNavigation() {
+      try {
+        var value = JSON.parse(localStorage.getItem(navigationKey) || '{}');
+        var section = sectionTabs[value.section] ? value.section : 'home';
+        var tab = value.tab && tabSections[value.tab] === section ? value.tab : null;
+        if (!tab) {
+          var first = (sectionTabs[section] || []).find(function (item) { return !item.action; });
+          tab = first ? first.id : 'home';
+        }
+        return { section: section, tab: tab };
+      } catch (_) {
+        return { section: 'home', tab: 'home' };
+      }
+    }
+    function rememberNavigation() {
+      try { localStorage.setItem(navigationKey, JSON.stringify({ section: state.section, tab: state.tab })); } catch (_) {}
+    }
+
+    function renderSectionTabs(section, activeTab) {
+      var host = $('secondary-tabs');
+      if (!host) return;
+      host.innerHTML = '';
+      (sectionTabs[section] || []).forEach(function (tab) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'rp-tab';
+        button.textContent = tab.label;
+        button.id = 'tab-btn-' + tab.id;
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-controls', 'tab-pane-' + tab.id);
+        button.onclick = function () {
+          switchTab(tab.id, section);
+          if (tab.anchor) requestAnimationFrame(function () {
+            var target = $(tab.anchor);
+            if (target) target.scrollIntoView({ behavior:'smooth', block:'start' });
+          });
+        };
+        var selected = tab.id === activeTab;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
+        host.appendChild(button);
+      });
+    }
+    function switchSection(section, preferredTab) {
+      state.section = section;
+      document.querySelectorAll('[id^="section-btn-"]').forEach(function (button) {
+        button.setAttribute('aria-selected', String(button.id === 'section-btn-' + section));
+      });
+      var tabs = sectionTabs[section] || [];
+      var first = tabs.find(function (tab) { return !tab.action; });
+      var target = preferredTab || (first && first.id);
+      if (target) switchTab(target, section);
+      else renderSectionTabs(section, '');
+    }
+    function switchTab(id, section) {
+      section = section || tabSections[id] || state.section || 'home';
+      state.section = section;
       state.tab = id;
       document.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.add('hidden'); });
-      document.querySelectorAll('.nav-item').forEach(function (b) { b.setAttribute('aria-selected', 'false'); });
-      var btn = $('tab-btn-' + id), pane = $('tab-pane-' + id);
-      if (!btn || !pane) { return; }
-      btn.setAttribute('aria-selected', 'true');
+      document.querySelectorAll('[id^="section-btn-"]').forEach(function (button) {
+        button.setAttribute('aria-selected', String(button.id === 'section-btn-' + section));
+      });
+      var pane = $('tab-pane-' + id);
+      if (!pane) return;
+      var keepTabFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest('#secondary-tabs');
       pane.classList.remove('hidden');
-      if (id === 'logs') { refreshLogs(); }
+      pane.setAttribute('role', 'tabpanel');
+      pane.setAttribute('aria-labelledby', 'tab-btn-' + id);
+      renderSectionTabs(section, id);
+      if (keepTabFocus) {
+        var activeTab = $('tab-btn-' + id);
+        if (activeTab) activeTab.focus({ preventScroll: true });
+      }
+      rememberNavigation();
+      if (id === 'logs') refreshLogs();
+      if (id === 'connections') refreshConnectionsInline(true);
     }
+    window.switchSection = switchSection;
     window.switchTab = switchTab;
 
     /* ---------- helpers ---------- */
@@ -1057,7 +1202,7 @@
         return '<div class="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700/60">' +
           '<div class="min-w-0"><div class="text-[12px] font-medium text-slate-800 dark:text-slate-100 truncate">' + htmlEscape(target.name || target.deviceId) + '</div>' +
           '<div class="mono text-[10px] text-slate-400 truncate">' + htmlEscape(target.deviceId) + ' · ' + (target.online ? '在线' : '离线') + '</div></div>' +
-          '<button class="btn-primary px-2.5 py-1 rounded text-[11px] font-semibold shrink-0" ' + (active ? 'disabled' : '') + ' onclick="connectRDP(\'' + htmlEscape(target.deviceId).replace(/'/g, "\\'") + '\')">' + (active ? '已连接' : (target.online ? '连接' : '尝试连接')) + '</button></div>';
+          '<button class="btn-primary rp-btn rp-btn-primary px-2.5 py-1 rounded text-[11px] font-semibold shrink-0" ' + (active ? 'disabled' : '') + ' onclick="connectRDP(\'' + htmlEscape(target.deviceId).replace(/'/g, "\\'") + '\')">' + (active ? '已连接' : (target.online ? '连接' : '尝试连接')) + '</button></div>';
       }).join('') : '';
     }
 
@@ -1148,8 +1293,7 @@
       $('cfg-min-tray').checked = cfg.minimizeToTray !== false;
       $('cfg-start-min').checked = !!cfg.startMinimized;
 
-      var dark = (cfg.theme || 'dark') !== 'light';
-      applyTheme(dark, false);
+      applyTheme(cfg.theme || 'system', false);
       var notices = [];
       if (cfg.restartRequired) { notices.push('以下设置尚未生效，需重启客户端：' + (cfg.restartFields || []).join('、')); }
       if (cfg.reloadPending) { notices.push('文件中的规则尚未应用，请点击「重新读取并应用」。'); }
@@ -1425,6 +1569,84 @@
     window.copyAllLogs = copyAllLogs;
     window.clearLogs = clearLogs;
 
+    /* ---------- inline connection monitor ---------- */
+    var inlineConnections = { connections: [] };
+    function formatTrafficBytes(value, rate) {
+      var n = Math.max(0, Number(value) || 0), unit = 0;
+      var units = ['B','KB','MB','GB','TB'];
+      while (n >= 1024 && unit < units.length - 1) { n /= 1024; unit++; }
+      return n.toLocaleString('zh-CN', { maximumFractionDigits: unit ? 1 : 0 }) + ' ' + units[unit] + (rate ? '/s' : '');
+    }
+    function renderConnectionsInline() {
+      var body = $('inline-connections-body');
+      if (!body) return;
+      var search = (($('inline-conn-search') && $('inline-conn-search').value) || '').trim().toLowerCase();
+      var protocol = ($('inline-conn-protocol') && $('inline-conn-protocol').value) || '';
+      var action = ($('inline-conn-action') && $('inline-conn-action').value) || '';
+      var rows = (inlineConnections.connections || []).filter(function (row) {
+        if (protocol && row.protocol !== protocol) return false;
+        if (action && row.action !== action) return false;
+        if (!search) return true;
+        return [row.process, row.process_name, row.pid, row.host, row.ip, row.port, row.rule, row.source].some(function (value) {
+          return String(value == null ? '' : value).toLowerCase().indexOf(search) >= 0;
+        });
+      });
+      rows.sort(function (a, b) { return Number(b.id || 0) - Number(a.id || 0); });
+      body.innerHTML = '';
+      rows.slice(0, 300).forEach(function (record) {
+        var tr = document.createElement('tr');
+        var values = [
+          (record.process_name || record.process || '未知进程') + (record.pid ? ' · PID ' + record.pid : ''),
+          (record.host || record.ip || '未知目标') + (record.port ? ':' + record.port : ''),
+          String(record.protocol || '').toUpperCase(),
+          record.action || '—',
+          record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地'),
+          formatTrafficBytes(record.upload_rate, true),
+          formatTrafficBytes(record.download_rate, true),
+          record.state || '—'
+        ];
+        values.forEach(function (value, index) {
+          var td = document.createElement('td');
+          td.className = 'px-3 py-2 border-b border-slate-200 dark:border-slate-800' + (index === 5 || index === 6 ? ' text-right mono' : '');
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+      if (!rows.length) {
+        var empty = document.createElement('tr'), cell = document.createElement('td');
+        cell.colSpan = 8; cell.className = 'rp-empty-state';
+        cell.textContent = search || protocol || action ? '没有符合筛选条件的连接' : '当前没有连接';
+        empty.appendChild(cell); body.appendChild(empty);
+      }
+      if ($('inline-conn-summary')) $('inline-conn-summary').textContent =
+        rows.length + ' 条符合条件 · 本次运行共 ' + (inlineConnections.total || 0) + ' 条连接' +
+        (inlineConnections.omitted ? ' · ' + inlineConnections.omitted + ' 条明细未保留' : '');
+    }
+    async function refreshConnectionsInline(showError) {
+      if (!$('tab-pane-connections') || $('tab-pane-connections').classList.contains('hidden')) return;
+      var raw = await call('goGetConnections');
+      if (!raw) {
+        if (showError && $('inline-conn-live')) $('inline-conn-live').textContent = '暂不可用';
+        return;
+      }
+      try {
+        inlineConnections = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        inlineConnections.connections = Array.isArray(inlineConnections.connections) ? inlineConnections.connections : [];
+        if ($('inline-conn-active')) $('inline-conn-active').textContent = inlineConnections.active || 0;
+        if ($('inline-conn-up-rate')) $('inline-conn-up-rate').textContent = formatTrafficBytes(inlineConnections.upload_rate, true);
+        if ($('inline-conn-down-rate')) $('inline-conn-down-rate').textContent = formatTrafficBytes(inlineConnections.download_rate, true);
+        if ($('inline-conn-total')) $('inline-conn-total').textContent = formatTrafficBytes(inlineConnections.upload) + ' / ' + formatTrafficBytes(inlineConnections.download);
+        if ($('inline-conn-live')) { $('inline-conn-live').textContent = '实时更新'; $('inline-conn-live').className = 'rp-badge rp-badge-success'; }
+        renderConnectionsInline();
+      } catch (err) {
+        if ($('inline-conn-live')) { $('inline-conn-live').textContent = '读取失败'; $('inline-conn-live').className = 'rp-badge rp-badge-danger'; }
+        if (showError) toast('读取连接失败：' + err.message);
+      }
+    }
+    window.refreshConnectionsInline = refreshConnectionsInline;
+    window.renderConnectionsInline = renderConnectionsInline;
+
     /* ---------- polling ---------- */
     async function refreshStatus() {
       var raw = await call('goGetStatus');
@@ -1460,7 +1682,9 @@
       var el = $('log-console');
       if (el) { el.dataset.placeholder = '1'; }
 
-      applyTheme(document.documentElement.classList.contains('dark'), false);
+      applyTheme((window.RelayUITheme && window.RelayUITheme.get()) || document.documentElement.dataset.themeMode || 'system', false);
+      var rememberedNavigation = loadNavigation();
+      switchSection(rememberedNavigation.section, rememberedNavigation.tab);
       setConfigReady(false);
       document.addEventListener('input', function (event) {
         if (!state.loaded || state.saving) return;
@@ -1489,9 +1713,9 @@
       // Go pushes status every 1.5s; these polls cover the window's first paint.
       setInterval(refreshStatus, 3000);
       setInterval(function () {
-        // Only poll while the log tab is actually on screen; Go pushes log
-        // lines into window.onGoLog, so polling a hidden pane is wasted work.
+        // Poll only monitoring panes that are visible.
         if (!$('tab-pane-logs').classList.contains('hidden')) { refreshLogs(); }
+        if (!$('tab-pane-connections').classList.contains('hidden')) { refreshConnectionsInline(false); }
       }, 2000);
     });
   })();

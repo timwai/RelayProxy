@@ -46,7 +46,6 @@ func main() {
 	var webPortFlag int
 	flag.IntVar(&webPortFlag, "web-port", 0, "Override the web management port")
 	webListenFlag := flag.String("web-listen", "", "Override the web management listen address")
-	webTokenFlag := flag.String("web-token", "", "Override the web management access token")
 
 	flag.Parse()
 
@@ -135,8 +134,6 @@ func main() {
 				log.Fatalf("[Config] --web-port must be between 1 and 65535")
 			}
 			cfgFile.Web.Port = webPortFlag
-		case "web-token":
-			cfgFile.Web.Token = *webTokenFlag
 		}
 	})
 	if noWebFlag {
@@ -231,7 +228,6 @@ func main() {
 		webServer, err = gui.StartWeb(uiBridge, gui.WebOptions{
 			Listen: cfgFile.Web.Listen,
 			Port:   cfgFile.Web.Port,
-			Token:  cfgFile.Web.Token,
 		})
 		if err != nil {
 			log.Fatalf("[Web] Failed to start management page: %v", err)
@@ -269,6 +265,8 @@ func main() {
 		case err == nil:
 			log.Println("[Agent] Desktop session ended, RelayProxy Agent cleanly stopped.")
 			return
+		case errors.Is(err, gui.ErrExternalUI):
+			log.Println("[Agent] macOS management UI opened; continuing in background.")
 		case errors.Is(err, gui.ErrUnsupported):
 			log.Println("[Agent] Falling back to headless mode.")
 		default:
@@ -314,7 +312,7 @@ func resolveGUIMode(guiFlag, noGuiFlag, minimizedFlag bool) bool {
 	if guiFlag || minimizedFlag {
 		return true
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		return false
 	}
 	if len(os.Args) == 1 {

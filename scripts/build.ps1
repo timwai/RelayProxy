@@ -12,7 +12,7 @@
   说明：Windows 客户端为原生 WebView2 桌面窗口（含系统托盘），
   relay-agent-gui.exe 使用 -H=windowsgui 子系统，双击不会弹出控制台窗口；
   relay-agent.exe 保留 Console 子系统供 CLI / 脚本调用，带参数时会自动保持无窗口。
-  Windows arm64 产物可运行 Agent / Server，但系统透明代理目前仍只支持 amd64。
+  Windows amd64 / arm64 均支持原生 WFP 系统透明代理；amd64 额外保留 WinDivert 回退。
   Windows ARM64 桌面窗口需要 ARM64 WebView2 Runtime；缺失时会提示并继续提供本地 Web 管理页。
   管理界面通过 Linux 服务端的 Admin HTTPS 控制台访问，或直接使用桌面窗口。
 
@@ -59,6 +59,14 @@ try {
         Remove-Item -LiteralPath $resolvedOutput -Recurse -Force
     }
     New-Item -ItemType Directory -Path $OutDir | Out-Null
+
+    $wfpStage = Join-Path $OutDir ".wfp"
+    if (-not $SkipWFP) {
+        Write-Host "[prep] Build native WFP drivers for x64 + ARM64"
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\build-wfp.ps1") `
+            -Platform all -Configuration Release -OutDir $wfpStage
+        if ($LASTEXITCODE -ne 0) { throw "WFP driver build failed" }
+    }
 
     Write-Host "[prep] Verify and embed the official WinDivert runtime"
     & go run ./scripts/fetch-windivert.go `
@@ -178,6 +186,21 @@ try {
         -Package "./cmd/relay-server" `
         -Output (Join-Path $OutDir "windows-arm64/relay-server.exe")
 
+    if (-not $SkipWFP) {
+        foreach ($item in @(
+            @{ Source = "amd64"; Target = "windows-amd64" },
+            @{ Source = "arm64"; Target = "windows-arm64" }
+        )) {
+            $src = Join-Path $wfpStage $item.Source
+            $dst = Join-Path $OutDir ($item.Target + "\wfp")
+            New-Item -ItemType Directory -Path $dst -Force | Out-Null
+            Copy-Item (Join-Path $src "*") $dst -Force
+            Copy-Item (Join-Path $Root "scripts\install-wfp.ps1") (Join-Path $OutDir ($item.Target + "\install-wfp.ps1")) -Force
+            Copy-Item (Join-Path $Root "scripts\uninstall-wfp.ps1") (Join-Path $OutDir ($item.Target + "\uninstall-wfp.ps1")) -Force
+        }
+        Remove-Item -LiteralPath $wfpStage -Recurse -Force
+    }
+
     # Copy brand icon into Windows package for shortcuts / installers
     foreach ($t in @("windows-amd64", "windows-arm64")) {
         $brandOut = Join-Path $OutDir "$t/brand"
@@ -224,7 +247,61 @@ try {
     $checksumFile = Join-Path $OutDir "SHA256SUMS.txt"
     $lines = @()
     Get-ChildItem -Path $OutDir -Recurse -File |
-        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxy-agent-windows-amd64\.zip$' } |
+        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxyWfp\.(sys|inf|cat)$|^RelayProxy-agent-windows-(amd64|arm64)\.zip |
+        ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
+            $rel = $rel -replace '\\', '/'
+            $lines += "$hash  $rel"
+            Write-Host "  $hash  $rel"
+        }
+    $lines | Set-Content -Path $checksumFile -Encoding utf8
+
+    # Restore host env
+    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
+    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
+    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+
+    Write-Host ""
+    Write-Host "=================================================="
+    Write-Host " Build complete -> $OutDir" -ForegroundColor Green
+    Write-Host "=================================================="
+    Write-Host @"
+
+产物布局:
+  RelayProxy-agent-windows-amd64.zip Windows x64 客户端完整分发包（WFP + WinDivert 回退）
+  RelayProxy-agent-windows-arm64.zip Windows ARM64 客户端完整分发包（WFP）
+  linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
+  linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
+  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
+  windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
+  windows-amd64/wfp/                 WFP x64 驱动包及安装脚本
+  windows-arm64/wfp/                 WFP ARM64 驱动包及安装脚本
+  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端
+  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
+  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
+  */configs/*.yaml                  示例配置
+  SHA256SUMS.txt
+
+部署提示:
+  Linux:  chmod +x relay-server && ./relay-server -config configs/relay-server.yaml
+  Admin:  https://<server>:8443
+  桌面:   双击 relay-agent-gui.exe
+  透明代理: 以管理员身份启动 Windows 客户端；保存启用设置后重启
+  自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
+  配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
+  授权:   首次连接后，在服务端管理控制台批准设备
+  无界面: relay-agent.exe --no-gui
+  自定义: relay-agent.exe --config <配置文件路径>
+
+"@
+}
+finally {
+    Pop-Location
+}
+ } |
         ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')

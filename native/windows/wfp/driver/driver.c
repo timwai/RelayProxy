@@ -125,6 +125,31 @@ static NTSTATUS RpDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
         }
         break;
 
+    case RP_WFP_IOCTL_RELEASE:
+        if (buffer == NULL || inLength < sizeof(RP_WFP_RELEASE)) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        {
+            const RP_WFP_RELEASE* release = (const RP_WFP_RELEASE*)buffer;
+            RP_FLOW* flow;
+            if (release->AbiVersion != RP_WFP_ABI_VERSION ||
+                release->Size != sizeof(RP_WFP_RELEASE) ||
+                release->RequestId == 0) {
+                status = STATUS_INVALID_PARAMETER;
+                break;
+            }
+            flow = RpFindFlowByRequestId(release->RequestId);
+            if (flow == NULL) {
+                status = STATUS_NOT_FOUND;
+                break;
+            }
+            RpRemoveFlow(flow, FALSE);
+            RpDereferenceFlow(flow);
+            status = STATUS_SUCCESS;
+        }
+        break;
+
     default:
         status = STATUS_INVALID_DEVICE_REQUEST;
         break;

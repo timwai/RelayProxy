@@ -375,7 +375,24 @@ VOID RpControllerFailOpen(VOID)
     g_RpState.TcpPortV6 = 0;
     g_RpState.HeartbeatMs = 0;
     g_RpState.LastHeartbeat100ns = 0;
+    {
+        PLIST_ENTRY entry;
+        for (entry = g_RpState.Flows.Flink; entry != &g_RpState.Flows; entry = entry->Flink) {
+            RP_FLOW* flow = CONTAINING_RECORD(entry, RP_FLOW, Link);
+            if (!flow->Removed) {
+                /*
+                 * A replacement controller does not own the previous Agent's
+                 * userspace association. Keep surviving kernel flows safely
+                 * DIRECT instead of reviving a stale PROXY route.
+                 */
+                flow->Action = RP_WFP_ACTION_DIRECT;
+                flow->DecisionFlags = 0;
+            }
+        }
+    }
     KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+
+    RpFreeEvents();
 
     for (;;) {
         RP_FLOW* target = NULL;
@@ -544,6 +561,7 @@ NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision)
         Decision->AbiVersion != RP_WFP_ABI_VERSION ||
         Decision->Size != sizeof(RP_WFP_DECISION) ||
         Decision->RequestId == 0 ||
+        (Decision->Flags & ~RP_WFP_DECISION_FLAG_DNS_AUTO) != 0 ||
         (Decision->Action != RP_WFP_ACTION_DIRECT &&
          Decision->Action != RP_WFP_ACTION_PROXY &&
          Decision->Action != RP_WFP_ACTION_REJECT)) {
@@ -553,6 +571,11 @@ NTSTATUS RpApplyDecision(_In_ const RP_WFP_DECISION* Decision)
     flow = RpFindFlowByRequestId(Decision->RequestId);
     if (flow == NULL) {
         return STATUS_NOT_FOUND;
+    }
+    if ((Decision->Flags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0 &&
+        (flow->Key.Protocol != IPPROTO_UDP || flow->Key.DestinationPort != 53)) {
+        RpDereferenceFlow(flow);
+        return STATUS_INVALID_PARAMETER;
     }
 
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);

@@ -126,7 +126,10 @@
       }
       const selected = tab.settingsTab ? page === 'settings' && tab.settingsTab === settingsSubtab : tab.page === page;
       control.className = 'rp-tab' + (selected ? ' active' : '');
+      control.setAttribute('role', 'tab');
       control.setAttribute('aria-selected', String(selected));
+      control.tabIndex = selected ? 0 : -1;
+      if (!tab.settingsTab) control.setAttribute('aria-controls', 'page-' + tab.page);
       control.textContent = tab.label;
       host.appendChild(control);
     });
@@ -135,7 +138,10 @@
     let page = location.hash.slice(1);
     if (!titles[page] || ((page === 'settings' || page === 'rdp-ingress') && (!state.user || state.user.role !== 'admin'))) { page = 'overview'; }
     const section = pageSections[page] || 'overview';
-    all('.page').forEach(el => { el.hidden = el.id !== 'page-' + page; });
+    all('.page').forEach(el => {
+      el.hidden = el.id !== 'page-' + page;
+      el.setAttribute('role', 'tabpanel');
+    });
     all('[data-section]').forEach(el => {
       const active = el.dataset.section === section;
       el.classList.toggle('active', active);

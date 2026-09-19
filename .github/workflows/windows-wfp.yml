@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   go-windows:
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
@@ -58,7 +58,7 @@ jobs:
           go build -o "$env:RUNNER_TEMP\relay-agent-arm64.exe" ./cmd/relay-agent
 
   driver:
-    runs-on: windows-2025
+    runs-on: windows-2022
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -67,6 +67,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
       - name: Build WFP driver
         shell: pwsh
         run: |

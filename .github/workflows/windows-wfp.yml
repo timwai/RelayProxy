@@ -73,6 +73,41 @@ jobs:
           $env:GOOS = 'windows'
           $env:GOARCH = 'arm64'
           go build -o "$env:RUNNER_TEMP\relay-agent-arm64.exe" ./cmd/relay-agent
+      - name: Smoke-test ARM64 release packaging
+        shell: pwsh
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'arm64-package'
+          New-Item -ItemType Directory -Path (Join-Path $pkg 'configs'), (Join-Path $pkg 'wfp') -Force | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\relay-agent-arm64.exe" (Join-Path $pkg 'relay-agent.exe')
+          Copy-Item "$env:RUNNER_TEMP\relay-agent-arm64.exe" (Join-Path $pkg 'relay-agent-gui.exe')
+          Copy-Item 'configs/relay-agent.yaml' (Join-Path $pkg 'configs/relay-agent.yaml')
+          Copy-Item 'native/windows/wfp/RelayProxyWfp.inf' (Join-Path $pkg 'wfp/RelayProxyWfp.inf')
+          Set-Content -LiteralPath (Join-Path $pkg 'wfp/RelayProxyWfp.sys') -Value 'driver-smoke'
+          Set-Content -LiteralPath (Join-Path $pkg 'wfp/RelayProxyWfp.cat') -Value 'catalog-smoke'
+          Copy-Item 'scripts/install-wfp.ps1' (Join-Path $pkg 'install-wfp.ps1')
+          Copy-Item 'scripts/uninstall-wfp.ps1' (Join-Path $pkg 'uninstall-wfp.ps1')
+          $zip = Join-Path $env:RUNNER_TEMP 'RelayProxy-agent-windows-arm64.zip'
+          go run ./scripts/fetch-windivert.go -skip-runtime -agent-dir $pkg -agent-arch arm64 -agent-zip $zip
+          if ($LASTEXITCODE -ne 0) { throw 'ARM64 package smoke test failed' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names = @($archive.Entries | ForEach-Object FullName)
+            foreach ($required in @(
+              'windows-arm64/relay-agent.exe',
+              'windows-arm64/relay-agent-gui.exe',
+              'windows-arm64/wfp/RelayProxyWfp.sys',
+              'windows-arm64/wfp/RelayProxyWfp.inf',
+              'windows-arm64/wfp/RelayProxyWfp.cat',
+              'windows-arm64/install-wfp.ps1',
+              'windows-arm64/uninstall-wfp.ps1',
+              'windows-arm64/SHA256SUMS.txt'
+            )) {
+              if ($names -notcontains $required) { throw "ARM64 ZIP missing $required" }
+            }
+          } finally {
+            $archive.Dispose()
+          }
 
   driver:
     runs-on: windows-2022
@@ -90,13 +125,18 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build-wfp.ps1 -Platform '${{ matrix.platform }}' -Configuration Release -OutDir "$env:RUNNER_TEMP\wfp" -SkipCatalog
-      - name: Verify driver artifact
+      - name: Verify driver artifact and machine type
         shell: pwsh
         run: |
           $arch = if ('${{ matrix.platform }}' -eq 'x64') { 'amd64' } else { 'arm64' }
           $sys = "$env:RUNNER_TEMP\wfp\$arch\RelayProxyWfp.sys"
           if (-not (Test-Path $sys)) { throw "Missing $sys" }
           Get-Item $sys | Format-List FullName,Length
+          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
+          if (-not $dumpbin) { throw 'dumpbin.exe not found after MSBuild setup' }
+          $headers = (& $dumpbin.Source /headers $sys) -join [Environment]::NewLine
+          $machine = if ('${{ matrix.platform }}' -eq 'x64') { '8664 machine' } else { 'AA64 machine' }
+          if ($headers -notmatch [regex]::Escape($machine)) { throw "Unexpected driver machine type; expected $machine" }
       - uses: actions/upload-artifact@v4
         with:
           name: RelayProxyWfp-${{ matrix.platform }}

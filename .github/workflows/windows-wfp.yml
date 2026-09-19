@@ -11,6 +11,9 @@ on:
       - 'internal/config/**'
       - 'native/windows/wfp/**'
       - 'scripts/build-wfp.ps1'
+      - 'scripts/build.ps1'
+      - 'scripts/install-wfp.ps1'
+      - 'scripts/uninstall-wfp.ps1'
       - '.github/workflows/windows-wfp.yml'
       - 'go.mod'
       - 'go.sum'
@@ -22,6 +25,9 @@ on:
       - 'internal/config/**'
       - 'native/windows/wfp/**'
       - 'scripts/build-wfp.ps1'
+      - 'scripts/build.ps1'
+      - 'scripts/install-wfp.ps1'
+      - 'scripts/uninstall-wfp.ps1'
       - '.github/workflows/windows-wfp.yml'
       - 'go.mod'
       - 'go.sum'
@@ -39,6 +45,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Validate PowerShell scripts
+        shell: pwsh
+        run: |
+          foreach ($script in @('scripts/build.ps1','scripts/build-wfp.ps1','scripts/install-wfp.ps1','scripts/uninstall-wfp.ps1')) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$errors)
+            if ($errors.Count) {
+              $errors | Format-List
+              throw "PowerShell syntax validation failed: $script"
+            }
+          }
       - name: Test Windows packages
         shell: pwsh
         run: go test ./agent/divert ./agent/app ./internal/config ./cmd/relay-agent -count=1

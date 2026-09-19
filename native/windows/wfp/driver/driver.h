@@ -58,10 +58,13 @@ typedef struct _RP_DRIVER_STATE {
 
     BOOLEAN ControllerActive;
     ULONG ControllerPid;
+    PFILE_OBJECT ControllerFileObject;
     USHORT TcpPortV4;
     USHORT TcpPortV6;
     ULONG HeartbeatMs;
     UINT64 LastHeartbeat100ns;
+    KEVENT WatchdogStopEvent;
+    HANDLE WatchdogThread;
 
     HANDLE EngineHandle;
     HANDLE RedirectHandle;
@@ -99,6 +102,8 @@ VOID RpStateShutdown(VOID);
 VOID RpControllerFailOpen(VOID);
 BOOLEAN RpControllerHealthy(VOID);
 NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config);
+VOID RpControllerCleanup(_In_opt_ PFILE_OBJECT FileObject);
+BOOLEAN RpIsControllerFile(_In_opt_ PFILE_OBJECT FileObject);
 VOID RpHeartbeat(VOID);
 
 RP_FLOW* RpFindFlowByRequestId(_In_ UINT64 RequestId);

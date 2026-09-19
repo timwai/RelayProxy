@@ -89,9 +89,25 @@ type queuedDatagram struct {
 }
 
 type receivedDatagram struct {
+	packet   []byte
 	frame    []byte
 	fragment protocol.UDPFragment
 	bytes    int // Includes the retained association envelope's backing bytes.
+}
+
+// DatagramPacket is an opaque, validated native datagram owned by the caller.
+// Relay forwarding can hand the same backing buffer to another channel, which
+// avoids copying the fragment payload before quic-go performs its send copy.
+type DatagramPacket struct {
+	packet       []byte
+	payloadBytes int
+}
+
+func (p *DatagramPacket) PayloadBytes() int {
+	if p == nil {
+		return 0
+	}
+	return p.payloadBytes
 }
 
 type datagramMux struct {
@@ -201,7 +217,7 @@ func (m *datagramMux) deliver(packet []byte) {
 	if m.closed || c == nil || c.closed || !m.budget.reserveQueue(len(packet)) {
 		return
 	}
-	queued := receivedDatagram{frame: frame, fragment: fragment, bytes: len(packet)}
+	queued := receivedDatagram{packet: packet, frame: frame, fragment: fragment, bytes: len(packet)}
 	select {
 	case c.frames <- queued:
 	default:
@@ -330,16 +346,20 @@ func (c *DatagramChannel) enqueueFrameParts(frameSize int, fill func([]byte)) er
 	b[0], b[1], b[2] = 'R', 'U', 1
 	binary.BigEndian.PutUint64(b[3:11], c.ID)
 	fill(b[datagramEnvelopeSize:])
+	return c.queuePreparedPacket(b)
+}
 
+func (c *DatagramChannel) queuePreparedPacket(packet []byte) error {
+	n := len(packet)
 	c.mux.mu.RLock()
 	defer c.mux.mu.RUnlock()
 	if c.closed || c.mux.closed || c.mux.ctx.Err() != nil {
 		c.mux.budget.releaseQueue(n)
-		releaseDatagramPacket(b)
+		releaseDatagramPacket(packet)
 		return net.ErrClosed
 	}
 	select {
-	case c.mux.send <- queuedDatagram{channel: c, packet: b}:
+	case c.mux.send <- queuedDatagram{channel: c, packet: packet}:
 		select {
 		case c.mux.sendReady <- struct{}{}:
 		default:
@@ -356,7 +376,7 @@ func (c *DatagramChannel) enqueueFrameParts(frameSize int, fill func([]byte)) er
 		default:
 		}
 		select {
-		case c.mux.send <- queuedDatagram{channel: c, packet: b}:
+		case c.mux.send <- queuedDatagram{channel: c, packet: packet}:
 			select {
 			case c.mux.sendReady <- struct{}{}:
 			default:
@@ -364,7 +384,7 @@ func (c *DatagramChannel) enqueueFrameParts(frameSize int, fill func([]byte)) er
 		default:
 			c.mux.budget.releaseQueue(n)
 			c.mux.budget.queueDrops.Add(1)
-			releaseDatagramPacket(b)
+			releaseDatagramPacket(packet)
 		}
 	}
 	return nil
@@ -387,36 +407,75 @@ func (c *DatagramChannel) Forward(ctx context.Context, frame []byte) error {
 	return c.enqueueFrame(frame)
 }
 
-func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
+func (c *DatagramChannel) receiveDatagram(ctx context.Context) (receivedDatagram, error) {
 	// Preserve close-first semantics without taking mux.mu on every packet.
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return receivedDatagram{}, ctx.Err()
 	case <-c.done:
-		return nil, net.ErrClosed
+		return receivedDatagram{}, net.ErrClosed
 	case <-c.mux.ctx.Done():
-		return nil, net.ErrClosed
+		return receivedDatagram{}, net.ErrClosed
 	default:
 	}
 
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return receivedDatagram{}, ctx.Err()
 	case <-c.done:
-		return nil, net.ErrClosed
+		return receivedDatagram{}, net.ErrClosed
 	case <-c.mux.ctx.Done():
-		return nil, net.ErrClosed
+		return receivedDatagram{}, net.ErrClosed
 	case f := <-c.frames:
 		c.mux.budget.releaseQueue(f.bytes)
 		select {
 		case <-c.done:
-			return nil, net.ErrClosed
+			return receivedDatagram{}, net.ErrClosed
 		case <-c.mux.ctx.Done():
-			return nil, net.ErrClosed
+			return receivedDatagram{}, net.ErrClosed
 		default:
-			return f.frame, nil
+			return f, nil
 		}
 	}
+}
+
+func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
+	f, err := c.receiveDatagram(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return f.frame, nil
+}
+
+// ReceivePacket transfers ownership of one validated native datagram to the
+// caller. It is intended for Relay forwarding; endpoints should use Receive.
+func (c *DatagramChannel) ReceivePacket(ctx context.Context) (*DatagramPacket, error) {
+	f, err := c.receiveDatagram(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &DatagramPacket{packet: f.packet, payloadBytes: len(f.fragment.Payload)}, nil
+}
+
+// ForwardPacket consumes packet. The source ReceivePacket buffer is reused;
+// only the association envelope changes before quic-go queues its own copy.
+func (c *DatagramChannel) ForwardPacket(ctx context.Context, packet *DatagramPacket) error {
+	if packet == nil || len(packet.packet) < datagramEnvelopeSize+protocol.UDPFragmentHeaderSize {
+		return protocol.ErrUDPFragment
+	}
+	raw := packet.packet
+	packet.packet = nil
+	if err := ctx.Err(); err != nil {
+		releaseDatagramPacket(raw)
+		return err
+	}
+	if !c.mux.budget.reserveQueue(len(raw)) {
+		releaseDatagramPacket(raw)
+		return nil
+	}
+	raw[0], raw[1], raw[2] = 'R', 'U', 1
+	binary.BigEndian.PutUint64(raw[3:11], c.ID)
+	return c.queuePreparedPacket(raw)
 }
 
 func (c *DatagramChannel) takeDatagram() (receivedDatagram, bool, error) {

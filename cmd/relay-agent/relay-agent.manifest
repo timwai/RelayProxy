@@ -48,8 +48,10 @@
     </compatibility>
 
     <!--
-      The agent never needs elevation: the proxy listeners are unprivileged and
-      autostart is a HKCU Run entry. asInvoker keeps UAC out of the launch path.
+      Keep normal SOCKS/HTTP launches asInvoker. When transparent proxy mode is
+      enabled, the agent performs a targeted ShellExecute("runas") relaunch so
+      WFP driver installation/control receives administrator rights only when
+      that feature is actually used.
     -->
     <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
         <security>

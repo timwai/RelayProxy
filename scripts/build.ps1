@@ -36,6 +36,9 @@ if (-not $OutDir) {
 
 $ldflags = "-s -w -X main.Version=$Version"
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$wfpEmbedAsset = $null
+$wfpEmbedOriginal = $null
+$wfpEmbedTouched = $false
 
 Write-Host "=================================================="
 Write-Host " RelayProxy Build  v$Version"
@@ -75,6 +78,34 @@ try {
                 -CertificateThumbprint $WFPCertificateThumbprint
         }
         if ($LASTEXITCODE -ne 0) { throw "WFP driver build failed" }
+    }
+
+    $wfpEmbedAsset = Join-Path $Root "agent\divert\wfp\RelayProxyWfp.zip"
+    $wfpEmbedOriginal = [System.IO.File]::ReadAllBytes($wfpEmbedAsset)
+
+    function Set-WFPEmbedPayload {
+        param([ValidateSet("amd64", "arm64")][string]$Architecture)
+        if ($SkipWFP) { return }
+
+        $source = Join-Path $wfpStage $Architecture
+        $required = @("RelayProxyWfp.sys", "RelayProxyWfp.inf", "RelayProxyWfp.cat")
+        foreach ($name in $required) {
+            $path = Join-Path $source $name
+            if (-not (Test-Path $path)) {
+                throw "Missing WFP embed payload: $path"
+            }
+        }
+
+        $temporary = $wfpEmbedAsset + ".tmp.zip"
+        Remove-Item $temporary -Force -ErrorAction SilentlyContinue
+        Compress-Archive -LiteralPath @(
+            (Join-Path $source "RelayProxyWfp.sys"),
+            (Join-Path $source "RelayProxyWfp.inf"),
+            (Join-Path $source "RelayProxyWfp.cat")
+        ) -DestinationPath $temporary -CompressionLevel Optimal -Force
+        Move-Item $temporary $wfpEmbedAsset -Force
+        $script:wfpEmbedTouched = $true
+        Write-Host "[prep] Embed WFP $Architecture package into Windows agent" -ForegroundColor DarkGray
     }
 
     Write-Host "[prep] Verify and embed the official WinDivert runtime"
@@ -167,8 +198,9 @@ try {
         Show-Syso
     }
 
-    # --- Windows client (icons + manifest embedded via resource_windows.syso) ---
+    # --- Windows client (icons + manifest + architecture-specific WFP package) ---
     # Desktop build first: it is the artifact users are told to double-click.
+    Set-WFPEmbedPayload -Architecture "amd64"
     Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `
         -Package "./cmd/relay-agent" `
         -Output (Join-Path $OutDir "windows-amd64/relay-agent-gui.exe") `
@@ -182,6 +214,7 @@ try {
         -Package "./cmd/relay-server" `
         -Output (Join-Path $OutDir "windows-amd64/relay-server.exe")
 
+    Set-WFPEmbedPayload -Architecture "arm64"
     Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
         -Package "./cmd/relay-agent" `
         -Output (Join-Path $OutDir "windows-arm64/relay-agent-gui.exe") `
@@ -292,13 +325,13 @@ try {
   RelayProxy-agent-windows-arm64.zip Windows ARM64 客户端完整分发包（WFP）
   linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
   linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
-  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（EXE 内嵌 WFP + WinDivert）
   windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
   windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
   windows-amd64/windivert/          可选外置 WinDivert 运行库及许可证（EXE 已内嵌）
   windows-amd64/wfp/                 WFP x64 驱动包及安装脚本
   windows-arm64/wfp/                 WFP ARM64 驱动包及安装脚本
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端
+  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端（EXE 内嵌 WFP）
   windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
   windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
   */configs/*.yaml                  示例配置
@@ -318,5 +351,11 @@ try {
 "@
 }
 finally {
+    if ($wfpEmbedTouched -and $wfpEmbedAsset -and $null -ne $wfpEmbedOriginal) {
+        [System.IO.File]::WriteAllBytes($wfpEmbedAsset, $wfpEmbedOriginal)
+    }
+    if ($wfpEmbedAsset) {
+        Remove-Item ($wfpEmbedAsset + ".tmp.zip") -Force -ErrorAction SilentlyContinue
+    }
     Pop-Location
 }

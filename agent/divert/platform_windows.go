@@ -33,13 +33,21 @@ func WindowsPlatformReadiness() error {
 	return err
 }
 
-func selectWindowsBackend() (string, error) {
+func windowsBackendPreference() (string, error) {
 	requested := strings.ToLower(strings.TrimSpace(os.Getenv("RELAYPROXY_WINDOWS_BACKEND")))
 	if requested == "" {
 		requested = "auto"
 	}
 	if requested != "auto" && requested != "wfp" && requested != "windivert" {
 		return "", fmt.Errorf("unknown RELAYPROXY_WINDOWS_BACKEND %q", requested)
+	}
+	return requested, nil
+}
+
+func selectWindowsBackend() (string, error) {
+	requested, err := windowsBackendPreference()
+	if err != nil {
+		return "", err
 	}
 
 	if requested == "auto" || requested == "wfp" {
@@ -78,6 +86,19 @@ func (d *windowsPacketDevice) Close() error    { return d.handle.Close() }
 func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	if err := prepareLoopGuard(s); err != nil {
 		return nil, err
+	}
+	requested, err := windowsBackendPreference()
+	if err != nil {
+		return nil, err
+	}
+	if requested == "auto" || requested == "wfp" {
+		if installErr := ensureEmbeddedWFPInstalled(); installErr != nil {
+			// x64 auto mode keeps the legacy WinDivert fallback. Explicit WFP
+			// and Windows ARM64 must surface installation/readiness failures.
+			if requested == "wfp" || runtime.GOARCH != "amd64" {
+				return nil, installErr
+			}
+		}
 	}
 	backend, err := selectWindowsBackend()
 	if err != nil {

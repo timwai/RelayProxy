@@ -10,6 +10,7 @@
 #define RP_WFP_FEATURE_UDP             (1ull << 1)
 #define RP_WFP_FEATURE_IPV6            (1ull << 2)
 #define RP_WFP_FEATURE_SYSTEM_IDENTITY (1ull << 3)
+#define RP_WFP_FEATURE_DNS_CONTROL     (1ull << 4)
 
 #define RP_WFP_EVENT_FLOW      1u
 #define RP_WFP_EVENT_UDP_DATA  2u

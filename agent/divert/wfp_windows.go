@@ -169,7 +169,7 @@ type wfpUDPJob struct {
 	route *ClassifiedFlow
 }
 
-func wfpDNSProxyBootstrap(protocol Protocol, port uint16, mode DNSMode, proxyReady, proxyEverReady bool) bool {
+func wfpDNSProxyBootstrap(protocol Protocol, port uint16, mode string, proxyReady, proxyEverReady bool) bool {
 	return port == 53 &&
 		(protocol == ProtoUDP || protocol == ProtoTCP) &&
 		mode == DNSModeProxy &&

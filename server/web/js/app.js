@@ -23,7 +23,16 @@
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
   const capabilityNames = { 'proxy.client': '代理客户端', 'proxy.exit': '出口节点', 'rdp.controller': 'RDP 控制端', 'rdp.host': 'RDP 主机', 'rdp.public': 'RDP 公网入口' };
   const capabilityDescriptions = { 'proxy.client': '通过其他已授权出口转发本机流量', 'proxy.exit': '接收其他设备的代理转发请求', 'rdp.controller': '发起到已授权 RDP 主机的远程桌面连接', 'rdp.host': '向其他已授权设备提供本机 RDP 服务', 'rdp.public': '允许服务端为本机 RDP 分配公网入口' };
-  let settingsSubtab = 'admin';
+  const settingsSubtabKey = 'relayproxy-server-settings-tab';
+  const validSettingsSubtabs = new Set(sectionPages.settings.map(item => item.settingsTab).filter(Boolean));
+  let settingsSubtab = (() => {
+    try {
+      const saved = localStorage.getItem(settingsSubtabKey);
+      return validSettingsSubtabs.has(saved) ? saved : 'admin';
+    } catch (_) {
+      return 'admin';
+    }
+  })();
   let toastTimer;
   const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   const date = value => value && Number.isFinite(new Date(value).getTime()) && new Date(value).getFullYear() > 1970 ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '尚未连接';
@@ -102,7 +111,11 @@
     });
   }
   function setSettingsSubtab(name) {
-    settingsSubtab = name || 'admin';
+    settingsSubtab = validSettingsSubtabs.has(name) ? name : 'admin';
+    try { localStorage.setItem(settingsSubtabKey, settingsSubtab); } catch (_) {}
+    if (location.hash !== '#settings/' + settingsSubtab) {
+      history.replaceState(null, '', '#settings/' + settingsSubtab);
+    }
     applySettingsSubtab();
     renderSectionTabs('settings');
     const first = document.querySelector('#page-settings [data-settings-panel="' + settingsSubtab + '"] input, #page-settings [data-settings-panel="' + settingsSubtab + '"] select, #page-settings [data-settings-panel="' + settingsSubtab + '"] textarea');
@@ -135,7 +148,13 @@
     });
   }
   function navigate() {
-    let page = location.hash.slice(1);
+    const rawHash = location.hash.slice(1);
+    const parts = rawHash.split('/').filter(Boolean);
+    let page = parts[0] || 'overview';
+    if (page === 'settings' && parts[1] && validSettingsSubtabs.has(parts[1])) {
+      settingsSubtab = parts[1];
+      try { localStorage.setItem(settingsSubtabKey, settingsSubtab); } catch (_) {}
+    }
     if (!titles[page] || ((page === 'settings' || page === 'rdp-ingress') && (!state.user || state.user.role !== 'admin'))) { page = 'overview'; }
     const section = pageSections[page] || 'overview';
     all('.page').forEach(el => {

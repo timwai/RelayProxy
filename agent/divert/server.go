@@ -354,6 +354,13 @@ func (s *Server) RenewUDPAssociation(previous *ClassifiedFlow) (*ClassifiedFlow,
 			s.mu.Unlock()
 			return nil, ErrClosed
 		}
+		// Another forwarding worker may have renewed the same OS flow while
+		// expired associations were being closed outside the server lock.
+		if current := s.udp[previous.key]; current != nil {
+			route := current.route
+			s.mu.Unlock()
+			return route, nil
+		}
 	}
 	if len(s.udp) >= s.opts.MaxUDPAssociations {
 		s.mu.Unlock()

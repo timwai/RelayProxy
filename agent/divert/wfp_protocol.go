@@ -41,6 +41,8 @@ const (
 	wfpActionReject
 )
 
+const wfpDecisionFlagDNSAuto uint32 = 1 << 0
+
 type wfpVersion struct {
 	ABI      uint32
 	Size     uint32
@@ -93,6 +95,10 @@ func encodeWFPConfig(pid uint32, port4, port6 uint16, heartbeatMS uint32) []byte
 }
 
 func encodeWFPDecision(requestID uint64, action Action) ([]byte, error) {
+	return encodeWFPDecisionFlags(requestID, action, 0)
+}
+
+func encodeWFPDecisionFlags(requestID uint64, action Action, flags uint32) ([]byte, error) {
 	var native uint32
 	switch action {
 	case ActionDirect:
@@ -109,7 +115,18 @@ func encodeWFPDecision(requestID uint64, action Action) ([]byte, error) {
 	binary.LittleEndian.PutUint32(data[4:8], uint32(len(data)))
 	binary.LittleEndian.PutUint64(data[8:16], requestID)
 	binary.LittleEndian.PutUint32(data[16:20], native)
+	binary.LittleEndian.PutUint32(data[20:24], flags)
 	return data, nil
+}
+
+func encodeWFPProxyReady(ready bool) []byte {
+	data := make([]byte, 16)
+	binary.LittleEndian.PutUint32(data[0:4], wfpABIVersion)
+	binary.LittleEndian.PutUint32(data[4:8], uint32(len(data)))
+	if ready {
+		binary.LittleEndian.PutUint32(data[8:12], 1)
+	}
+	return data
 }
 
 func encodeWFPRelease(requestID uint64) ([]byte, error) {

@@ -125,10 +125,10 @@ func Run(b *bridge.UIBridge, opts Options) error {
 		opts.Title = "RelayProxy 代理客户端"
 	}
 	if opts.Width <= 0 {
-		opts.Width = 1100
+		opts.Width = DefaultWindowWidth
 	}
 	if opts.Height <= 0 {
-		opts.Height = 760
+		opts.Height = DefaultWindowHeight
 	}
 
 	a := &appWindow{
@@ -181,7 +181,7 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	a.hwnd = win.HWND(w.Window())
 	// Keep the default window spacious, but allow the shared responsive layout
 	// to collapse the sidebar and configuration grids on smaller displays.
-	w.SetSize(820, 560, webview2.HintMin)
+	w.SetSize(MinimumWindowWidth, MinimumWindowHeight, webview2.HintMin)
 
 	// Apply the transparent brand icon to the title bar and the taskbar preview.
 	// A black-boxed icon here is exactly what the previous build shipped.

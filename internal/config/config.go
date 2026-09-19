@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"relayproxy/agent/divert"
 	"relayproxy/agent/routing"
 )
 
@@ -116,6 +117,7 @@ type AgentConfigFile struct {
 		// Mode: "" (off, use SOCKS5/HTTP) or "divert" (system intercept via
 		// WinDivert / iptables / Network Extension). Legacy "tun" is rejected.
 		Mode             string   `yaml:"mode"`
+		DNSMode          string   `yaml:"dns_mode"`
 		ExcludeProcesses []string `yaml:"exclude_processes"`
 	} `yaml:"network"`
 
@@ -356,6 +358,9 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 		if *field == nil {
 			*field = BoolPtr(true)
 		}
+	}
+	if cfg.Network.DNSMode == "" {
+		cfg.Network.DNSMode = divert.DNSModeAuto
 	}
 	if cfg.Network.ExcludeProcesses == nil {
 		cfg.Network.ExcludeProcesses = []string{"relayproxy", "relayproxy.exe", "RelayProxy.exe"}

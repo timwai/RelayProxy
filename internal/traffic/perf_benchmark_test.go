@@ -33,7 +33,6 @@ func BenchmarkRegistrySnapshot128Active(b *testing.B) {
 	}
 }
 
-
 func BenchmarkRegistryStartFinishRecentFull(b *testing.B) {
 	registry := NewRegistry(8192, 512)
 	for i := 0; i < 512; i++ {

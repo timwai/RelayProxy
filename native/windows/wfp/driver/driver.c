@@ -142,6 +142,18 @@ static NTSTATUS RpDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
         }
         break;
 
+    case RP_WFP_IOCTL_SET_PROXY_READY:
+        if (!RpIsControllerFile(stack->FileObject)) {
+            status = STATUS_ACCESS_DENIED;
+            break;
+        }
+        if (buffer == NULL || inLength < sizeof(RP_WFP_PROXY_READY)) {
+            status = STATUS_BUFFER_TOO_SMALL;
+            break;
+        }
+        status = RpSetProxyReady((const RP_WFP_PROXY_READY*)buffer);
+        break;
+
     case RP_WFP_IOCTL_RELEASE:
         if (!RpIsControllerFile(stack->FileObject)) {
             status = STATUS_ACCESS_DENIED;

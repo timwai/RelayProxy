@@ -829,7 +829,7 @@
   </div>
 
   <!-- toast -->
-  <div id="toast" class="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 opacity-0 transition-all duration-200">
+  <div id="toast" role="status" aria-live="polite" class="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 opacity-0 transition-all duration-200">
     <div class="px-4 py-2 rounded-lg bg-slate-900/92 dark:bg-slate-700/95 text-white text-[12px] shadow-lg max-w-[520px]" id="toast-msg"></div>
   </div>
 
@@ -977,7 +977,10 @@
       if (persist && !state.loaded) { toast('请先载入有效配置'); return; }
       var mode = normalizeThemeMode(value);
       var actual = themeActual(mode);
-      if (window.RelayUITheme && typeof window.RelayUITheme.apply === 'function') actual = window.RelayUITheme.apply(mode, false);
+      if (window.RelayUITheme) {
+        if (persist && typeof window.RelayUITheme.set === 'function') actual = window.RelayUITheme.set(mode);
+        else if (typeof window.RelayUITheme.apply === 'function') actual = window.RelayUITheme.apply(mode, false);
+      }
       document.documentElement.classList.toggle('dark', actual === 'dark');
       document.documentElement.dataset.themeMode = mode;
       syncThemeControls(mode);

@@ -9,6 +9,9 @@
 
   <PropertyGroup Label="Globals">
     <ProjectGuid>{AE88A633-2D0D-4A3D-8B3E-0D3141D9C501}</ProjectGuid>
+    <TargetFramework>native</TargetFramework>
+    <_NuGetTargetFallbackMoniker>$(_NuGetTargetFallbackMoniker);native,Version=v0.0</_NuGetTargetFallbackMoniker>
+    <RestorePackages>true</RestorePackages>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>RelayProxyWfp</RootNamespace>
     <ProjectName>RelayProxyWfp</ProjectName>

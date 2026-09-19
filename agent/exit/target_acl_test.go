@@ -106,7 +106,6 @@ func TestExitDatagramRequiredRejectsStreamTransport(t *testing.T) {
 	}
 }
 
-
 func TestCompiledRelayACLCacheReusesVerifiedPolicy(t *testing.T) {
 	base, err := acl.NewChecker(acl.Policy{ID: "relay", AllowInternet: true, AllowPrivateNetwork: true})
 	if err != nil {

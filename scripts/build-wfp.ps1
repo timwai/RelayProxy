@@ -97,6 +97,28 @@ function Build-One {
     Write-Host "[WFP] Building $TargetPlatform / $Configuration" -ForegroundColor Cyan
 
     $msbuild = Find-MSBuild
+    $stampInf = Find-Tool "stampinf.exe"
+    if (-not $stampInf) {
+        throw @"
+stampinf.exe was not found.
+
+Visual Studio DriverKit integration is installed, but the WDK command-line
+tools are missing or incomplete. StampInf is supplied by the Windows Driver
+Kit, not by Visual Studio itself.
+
+Expected location resembles:
+  C:\Program Files (x86)\Windows Kits\10\bin\10.0.28000.0\x64\stampinf.exe
+
+Repair/install the full WDK, then retry:
+  winget install Microsoft.WindowsWDK.10.0.28000 --force
+
+You can verify manually with:
+  Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter stampinf.exe
+"@
+    }
+    $stampInfDir = Split-Path -Parent $stampInf
+    Write-Host "[WFP] StampInf tool: $stampInf" -ForegroundColor DarkGray
+
     & $msbuild $Project `
         /restore `
         /m `
@@ -104,6 +126,7 @@ function Build-One {
         /p:Configuration=$Configuration `
         /p:Platform=$TargetPlatform `
         /p:SignMode=Off `
+        "/p:StampInfToolPath=$stampInfDir" `
         /nologo
     if ($LASTEXITCODE -ne 0) {
         throw "WFP driver build failed for $TargetPlatform"

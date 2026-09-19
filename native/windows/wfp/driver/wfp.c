@@ -279,6 +279,9 @@ static VOID NTAPI RpAuthClassify(
             RpRemoveFlow(flow, TRUE);
         } else {
             ClassifyOut->actionType = FWP_ACTION_PERMIT;
+            if (flow->Key.Protocol == RP_IPPROTO_UDP) {
+                (VOID)RpReplayPendingUdp(flow);
+            }
         }
         RpDereferenceFlow(flow);
         return;
@@ -306,15 +309,8 @@ static VOID NTAPI RpAuthClassify(
         return;
     }
 
-    status = FwpsPendOperation0(Metadata->completionHandle, &completionContext);
-    if (!NT_SUCCESS(status)) {
-        ClassifyOut->actionType = FWP_ACTION_PERMIT;
-        return;
-    }
-
     flow = (RP_FLOW*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(*flow), RP_TAG_FLOW);
     if (flow == NULL) {
-        FwpsCompleteOperation0(completionContext, NULL);
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
         return;
     }
@@ -322,11 +318,39 @@ static VOID NTAPI RpAuthClassify(
     flow->Key = key;
     flow->RequestId = RpNextId();
     flow->AssociationId = key.Protocol == RP_IPPROTO_UDP ? flow->RequestId : 0;
-    flow->CompletionContext = completionContext;
     flow->CompartmentId = compartmentId;
+
+    /*
+     * FwpsPendOperation flushes non-TCP packet data when the ALE operation is
+     * completed. Reference the initial UDP NBL before pending so we can clone
+     * and replay it after reauthorization instead of relying on application
+     * retransmission. If capture is not possible, fail open before pending.
+     */
+    if (key.Protocol == RP_IPPROTO_UDP && LayerData != NULL) {
+        status = RpCapturePendingUdp(
+            flow,
+            Metadata,
+            (NET_BUFFER_LIST*)LayerData);
+        if (!NT_SUCCESS(status)) {
+            RpReleasePendingUdp(flow);
+            ExFreePoolWithTag(flow, RP_TAG_FLOW);
+            ClassifyOut->actionType = FWP_ACTION_PERMIT;
+            return;
+        }
+    }
+
+    status = FwpsPendOperation0(Metadata->completionHandle, &completionContext);
+    if (!NT_SUCCESS(status)) {
+        RpReleasePendingUdp(flow);
+        ExFreePoolWithTag(flow, RP_TAG_FLOW);
+        ClassifyOut->actionType = FWP_ACTION_PERMIT;
+        return;
+    }
+    flow->CompletionContext = completionContext;
 
     status = RpInsertPendingFlow(flow);
     if (!NT_SUCCESS(status)) {
+        RpReleasePendingUdp(flow);
         ExFreePoolWithTag(flow, RP_TAG_FLOW);
         FwpsCompleteOperation0(completionContext, NULL);
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
@@ -651,6 +675,8 @@ static VOID NTAPI RpDatagramClassify(
     _Inout_ FWPS_CLASSIFY_OUT0* ClassifyOut)
 {
     RP_FLOW* flow = (RP_FLOW*)(ULONG_PTR)FlowContext;
+    RP_FLOW_KEY fallbackKey;
+    BOOLEAN referencedFlow = FALSE;
     NET_BUFFER_LIST* nbl = (NET_BUFFER_LIST*)LayerData;
     NET_BUFFER* nb;
     ULONG direction;
@@ -678,14 +704,39 @@ static VOID NTAPI RpDatagramClassify(
         return;
     }
 
-    if (flow == NULL || flow->Removed || !RpControllerHealthy()) {
+    if (!RpControllerHealthy()) {
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
         return;
     }
 
+    /*
+     * The replayed first UDP packet can reach DATAGRAM_DATA before
+     * ALE_FLOW_ESTABLISHED has attached a flow context. Resolve it by tuple in
+     * that narrow window; a ProcessId of zero is intentionally a wildcard in
+     * RpKeysEqual because injected packets may not carry process metadata.
+     */
+    if (flow == NULL) {
+        if (RpExtractDatagramKey(Values, Metadata, &fallbackKey)) {
+            flow = RpFindFlowByKey(&fallbackKey);
+            referencedFlow = flow != NULL;
+        }
+    }
+    if (flow == NULL || flow->Removed) {
+        ClassifyOut->actionType = FWP_ACTION_PERMIT;
+        goto Exit;
+    }
+
     direction = RpDatagramDirection(Values);
     eventFlags = direction == FWP_DIRECTION_OUTBOUND ? RP_WFP_EVENT_FLAG_OUTBOUND : 0;
-    skipBytes = direction == FWP_DIRECTION_OUTBOUND ? RP_UDP_HEADER_SIZE : 0;
+    if (direction == FWP_DIRECTION_OUTBOUND) {
+        skipBytes = FWPS_IS_METADATA_FIELD_PRESENT(
+            Metadata,
+            FWPS_METADATA_FIELD_TRANSPORT_HEADER_SIZE)
+            ? Metadata->transportHeaderSize
+            : RP_UDP_HEADER_SIZE;
+    } else {
+        skipBytes = 0;
+    }
     isDNS = flow->Key.DestinationPort == 53;
 
     RpTouchFlow(flow);
@@ -695,7 +746,7 @@ static VOID NTAPI RpDatagramClassify(
         ClassifyOut->actionType = FWP_ACTION_BLOCK;
         ClassifyOut->flags |= FWPS_CLASSIFY_OUT_FLAG_ABSORB;
         ClassifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
-        return;
+        goto Exit;
     }
 
     for (nb = NET_BUFFER_LIST_FIRST_NB(nbl); nb != NULL; nb = NET_BUFFER_NEXT_NB(nb)) {
@@ -704,9 +755,21 @@ static VOID NTAPI RpDatagramClassify(
         payloadTotal += payloadLength;
 
         if (flow->Action == RP_WFP_ACTION_PROXY && direction == FWP_DIRECTION_OUTBOUND) {
-            (VOID)RpQueueNetBufferPayload(RP_WFP_EVENT_UDP_DATA, flow, eventFlags, nb, skipBytes);
-        } else if (flow->Action == RP_WFP_ACTION_DIRECT && isDNS && payloadLength != 0) {
-            (VOID)RpQueueNetBufferPayload(RP_WFP_EVENT_DNS, flow, eventFlags, nb, skipBytes);
+            (VOID)RpQueueNetBufferPayload(
+                RP_WFP_EVENT_UDP_DATA,
+                flow,
+                eventFlags,
+                nb,
+                skipBytes);
+        } else if (flow->Action == RP_WFP_ACTION_DIRECT &&
+                   isDNS &&
+                   payloadLength != 0) {
+            (VOID)RpQueueNetBufferPayload(
+                RP_WFP_EVENT_DNS,
+                flow,
+                eventFlags,
+                nb,
+                skipBytes);
         }
     }
 
@@ -717,18 +780,23 @@ static VOID NTAPI RpDatagramClassify(
             InterlockedAdd64(&flow->DownloadBytes, (LONG64)payloadTotal);
         }
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
-        return;
+        goto Exit;
     }
 
-    if (flow->Action == RP_WFP_ACTION_PROXY && direction == FWP_DIRECTION_OUTBOUND) {
+    if (flow->Action == RP_WFP_ACTION_PROXY &&
+        direction == FWP_DIRECTION_OUTBOUND) {
         ClassifyOut->actionType = FWP_ACTION_BLOCK;
         ClassifyOut->flags |= FWPS_CLASSIFY_OUT_FLAG_ABSORB;
         ClassifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
-        return;
+        goto Exit;
     }
 
-    /* There should be no native inbound traffic for a proxied UDP flow. */
     ClassifyOut->actionType = FWP_ACTION_PERMIT;
+
+Exit:
+    if (referencedFlow && flow != NULL) {
+        RpDereferenceFlow(flow);
+    }
 }
 
 static VOID NTAPI RpStreamClassify(
@@ -887,6 +955,27 @@ NTSTATUS RpWfpStart(_In_ PDEVICE_OBJECT DeviceObject)
         goto Exit;
     }
 
+    /*
+     * Initial outbound UDP replay deliberately uses separate handles. The
+     * DATAGRAM callout must see those packets again and apply the chosen
+     * DIRECT/PROXY decision, while receive-side reply injection is bypassed as
+     * self-injected traffic.
+     */
+    status = FwpsInjectionHandleCreate0(
+        AF_INET,
+        FWPS_INJECTION_TYPE_TRANSPORT,
+        &g_RpState.ReplayInjectionHandleV4);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+    status = FwpsInjectionHandleCreate0(
+        AF_INET6,
+        FWPS_INJECTION_TYPE_TRANSPORT,
+        &g_RpState.ReplayInjectionHandleV6);
+    if (!NT_SUCCESS(status)) {
+        goto Exit;
+    }
+
     RtlZeroMemory(&poolParameters, sizeof(poolParameters));
     poolParameters.Header.Type = NDIS_OBJECT_TYPE_DEFAULT;
     poolParameters.Header.Revision = NET_BUFFER_LIST_POOL_PARAMETERS_REVISION_1;
@@ -981,6 +1070,14 @@ VOID RpWfpStop(VOID)
     if (g_RpState.InjectionHandleV6 != NULL) {
         FwpsInjectionHandleDestroy0(g_RpState.InjectionHandleV6);
         g_RpState.InjectionHandleV6 = NULL;
+    }
+    if (g_RpState.ReplayInjectionHandleV4 != NULL) {
+        FwpsInjectionHandleDestroy0(g_RpState.ReplayInjectionHandleV4);
+        g_RpState.ReplayInjectionHandleV4 = NULL;
+    }
+    if (g_RpState.ReplayInjectionHandleV6 != NULL) {
+        FwpsInjectionHandleDestroy0(g_RpState.ReplayInjectionHandleV6);
+        g_RpState.ReplayInjectionHandleV6 = NULL;
     }
     if (g_RpState.NblPool != NULL) {
         NdisFreeNetBufferListPool(g_RpState.NblPool);

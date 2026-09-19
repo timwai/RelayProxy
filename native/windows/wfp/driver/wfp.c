@@ -704,7 +704,10 @@ static VOID NTAPI RpDatagramClassify(
     UINT64 payloadTotal = 0;
     BOOLEAN isDNS;
     HANDLE injectionHandle;
+    HANDLE replayInjectionHandle;
+    PVOID replayContext = NULL;
     FWPS_PACKET_INJECTION_STATE injectionState;
+    FWPS_PACKET_INJECTION_STATE replayState;
 
     UNREFERENCED_PARAMETER(ClassifyContext);
     UNREFERENCED_PARAMETER(Filter);
@@ -723,22 +726,41 @@ static VOID NTAPI RpDatagramClassify(
         return;
     }
 
+    /*
+     * The initial UDP packet replay uses a separate injection handle so it is
+     * classified normally, but carries the exact RP_FLOW as injection context.
+     * This removes any need to guess process ownership from a reused 5-tuple.
+     */
+    if (flow == NULL) {
+        replayInjectionHandle = Values->layerId == FWPS_LAYER_DATAGRAM_DATA_V4
+            ? g_RpState.ReplayInjectionHandleV4
+            : g_RpState.ReplayInjectionHandleV6;
+        replayState = FwpsQueryPacketInjectionState0(
+            replayInjectionHandle,
+            nbl,
+            &replayContext);
+        if ((replayState == FWPS_PACKET_INJECTED_BY_SELF ||
+             replayState == FWPS_PACKET_PREVIOUSLY_INJECTED_BY_SELF) &&
+            replayContext != NULL) {
+            flow = (RP_FLOW*)replayContext;
+        }
+    }
+
     if (!RpControllerHealthy()) {
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
         return;
     }
 
     /*
-     * The replayed first UDP packet can reach DATAGRAM_DATA before
-     * ALE_FLOW_ESTABLISHED has attached a flow context. Resolve it by tuple in
-     * that narrow window; a ProcessId of zero is intentionally a wildcard in
-     * RpKeysEqual because injected packets may not carry process metadata.
+     * Between ALE authorization and FLOW_ESTABLISHED, a normal application
+     * datagram can arrive before flow context association. Only use the table
+     * fallback when WFP supplied a real process id; RpKeysEqual remains strict.
      */
-    if (flow == NULL) {
-        if (RpExtractDatagramKey(Values, Metadata, &fallbackKey)) {
-            flow = RpFindFlowByKey(&fallbackKey);
-            referencedFlow = flow != NULL;
-        }
+    if (flow == NULL &&
+        RpExtractDatagramKey(Values, Metadata, &fallbackKey) &&
+        fallbackKey.ProcessId != 0) {
+        flow = RpFindFlowByKey(&fallbackKey);
+        referencedFlow = flow != NULL;
     }
     if (flow == NULL || flow->Removed) {
         ClassifyOut->actionType = FWP_ACTION_PERMIT;

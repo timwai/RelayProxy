@@ -4,7 +4,40 @@ RP_DRIVER_STATE g_RpState = {0};
 
 static BOOLEAN RpKeysEqual(_In_ const RP_FLOW_KEY* A, _In_ const RP_FLOW_KEY* B)
 {
-    return RtlCompareMemory(A, B, sizeof(*A)) == sizeof(*A);
+    if (A->Protocol != B->Protocol ||
+        A->Family != B->Family ||
+        A->SourcePort != B->SourcePort ||
+        A->DestinationPort != B->DestinationPort ||
+        RtlCompareMemory(A->SourceAddress, B->SourceAddress, sizeof(A->SourceAddress)) != sizeof(A->SourceAddress) ||
+        RtlCompareMemory(A->DestinationAddress, B->DestinationAddress, sizeof(A->DestinationAddress)) != sizeof(A->DestinationAddress)) {
+        return FALSE;
+    }
+    return A->ProcessId == 0 || B->ProcessId == 0 || A->ProcessId == B->ProcessId;
+}
+
+static VOID RpWatchdogThread(_In_opt_ PVOID Context)
+{
+    LARGE_INTEGER interval;
+    UNREFERENCED_PARAMETER(Context);
+
+    interval.QuadPart = -10000000ll; /* one second, relative */
+    for (;;) {
+        NTSTATUS status = KeWaitForSingleObject(
+            &g_RpState.WatchdogStopEvent,
+            Executive,
+            KernelMode,
+            FALSE,
+            &interval);
+        if (status == STATUS_SUCCESS) {
+            break;
+        }
+        if (status == STATUS_TIMEOUT) {
+            (VOID)RpControllerHealthy();
+            continue;
+        }
+        break;
+    }
+    PsTerminateSystemThread(STATUS_SUCCESS);
 }
 
 UINT64 RpNextId(VOID)
@@ -26,10 +59,26 @@ VOID RpDereferenceFlow(_In_ RP_FLOW* Flow)
 
 NTSTATUS RpStateInitialize(VOID)
 {
+    NTSTATUS status;
+
     RtlZeroMemory(&g_RpState, sizeof(g_RpState));
     KeInitializeSpinLock(&g_RpState.Lock);
     InitializeListHead(&g_RpState.Flows);
     InitializeListHead(&g_RpState.Events);
+    KeInitializeEvent(&g_RpState.WatchdogStopEvent, NotificationEvent, FALSE);
+
+    status = PsCreateSystemThread(
+        &g_RpState.WatchdogThread,
+        THREAD_ALL_ACCESS,
+        NULL,
+        NULL,
+        NULL,
+        RpWatchdogThread,
+        NULL);
+    if (!NT_SUCCESS(status)) {
+        g_RpState.WatchdogThread = NULL;
+        return status;
+    }
     return STATUS_SUCCESS;
 }
 
@@ -54,6 +103,13 @@ static VOID RpFreeEvents(VOID)
 
 VOID RpStateShutdown(VOID)
 {
+    if (g_RpState.WatchdogThread != NULL) {
+        KeSetEvent(&g_RpState.WatchdogStopEvent, IO_NO_INCREMENT, FALSE);
+        (VOID)ZwWaitForSingleObject(g_RpState.WatchdogThread, FALSE, NULL);
+        ZwClose(g_RpState.WatchdogThread);
+        g_RpState.WatchdogThread = NULL;
+    }
+
     RpControllerFailOpen();
     RpFreeEvents();
 
@@ -111,6 +167,8 @@ VOID RpHeartbeat(VOID)
 NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
 {
     ULONG requestorPid;
+    PIO_STACK_LOCATION stack;
+    PFILE_OBJECT fileObject;
 
     if (Config == NULL ||
         Config->AbiVersion != RP_WFP_ABI_VERSION ||
@@ -127,13 +185,22 @@ NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
     if (requestorPid == 0 || requestorPid != Config->ControllerPid) {
         return STATUS_ACCESS_DENIED;
     }
-
-    RpControllerFailOpen();
+    stack = IoGetCurrentIrpStackLocation(Irp);
+    fileObject = stack->FileObject;
+    if (fileObject == NULL) {
+        return STATUS_INVALID_HANDLE;
+    }
 
     {
         KIRQL oldIrql;
         KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+        if (g_RpState.ControllerActive &&
+            g_RpState.ControllerFileObject != fileObject) {
+            KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+            return STATUS_DEVICE_BUSY;
+        }
         g_RpState.ControllerPid = Config->ControllerPid;
+        g_RpState.ControllerFileObject = fileObject;
         g_RpState.TcpPortV4 = Config->TcpPortV4;
         g_RpState.TcpPortV6 = Config->TcpPortV6;
         g_RpState.HeartbeatMs = Config->HeartbeatMs;
@@ -142,6 +209,25 @@ NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
         KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
     }
     return STATUS_SUCCESS;
+}
+
+BOOLEAN RpIsControllerFile(_In_opt_ PFILE_OBJECT FileObject)
+{
+    BOOLEAN result;
+    KIRQL oldIrql;
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    result = g_RpState.ControllerActive &&
+             FileObject != NULL &&
+             g_RpState.ControllerFileObject == FileObject;
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+    return result;
+}
+
+VOID RpControllerCleanup(_In_opt_ PFILE_OBJECT FileObject)
+{
+    if (RpIsControllerFile(FileObject)) {
+        RpControllerFailOpen();
+    }
 }
 
 RP_FLOW* RpFindFlowByRequestId(_In_ UINT64 RequestId)
@@ -274,6 +360,7 @@ VOID RpControllerFailOpen(VOID)
     KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
     g_RpState.ControllerActive = FALSE;
     g_RpState.ControllerPid = 0;
+    g_RpState.ControllerFileObject = NULL;
     g_RpState.TcpPortV4 = 0;
     g_RpState.TcpPortV6 = 0;
     g_RpState.HeartbeatMs = 0;

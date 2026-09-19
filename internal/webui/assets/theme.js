@@ -62,4 +62,29 @@
     var button = event.target.closest && event.target.closest('[data-rp-theme]');
     if (button) window.RelayUITheme.set(button.dataset.rpTheme);
   });
+
+  function tablistKeydown(event) {
+    var tab = event.target.closest && event.target.closest('[role="tab"]');
+    if (!tab) return;
+    var list = tab.closest('[role="tablist"]');
+    if (!list) return;
+    var vertical = list.getAttribute('aria-orientation') === 'vertical';
+    var nextKey = vertical ? 'ArrowDown' : 'ArrowRight';
+    var prevKey = vertical ? 'ArrowUp' : 'ArrowLeft';
+    if (event.key !== nextKey && event.key !== prevKey && event.key !== 'Home' && event.key !== 'End') return;
+    var tabs = Array.prototype.filter.call(list.querySelectorAll('[role="tab"]'), function (item) {
+      return !item.disabled && item.getAttribute('aria-disabled') !== 'true' && !item.hidden && item.offsetParent !== null;
+    });
+    if (!tabs.length) return;
+    var index = tabs.indexOf(tab);
+    var target;
+    if (event.key === 'Home') target = tabs[0];
+    else if (event.key === 'End') target = tabs[tabs.length - 1];
+    else if (event.key === nextKey) target = tabs[(index + 1 + tabs.length) % tabs.length];
+    else target = tabs[(index - 1 + tabs.length) % tabs.length];
+    event.preventDefault();
+    target.focus();
+    target.click();
+  }
+  document.addEventListener('keydown', tablistKeydown);
 })();

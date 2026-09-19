@@ -175,9 +175,10 @@ type wfpInterceptor struct {
 	listeners []net.Listener
 	ctx       context.Context
 	cancel    context.CancelFunc
-	running   atomic.Bool
-	closeOnce sync.Once
-	wg        sync.WaitGroup
+	running        atomic.Bool
+	proxyEverReady atomic.Bool
+	closeOnce      sync.Once
+	wg             sync.WaitGroup
 
 	mu       sync.Mutex
 	requests map[uint64]*ClassifiedFlow
@@ -228,7 +229,8 @@ func startWFPInterceptor(s *Server) (systemInterceptor, error) {
 		}
 		return nil, fmt.Errorf("配置 WFP 驱动失败: %w", err)
 	}
-	if err := device.setProxyReady(s.proxyReady()); err != nil {
+	initialReady := s.proxyReady()
+	if err := device.setProxyReady(initialReady); err != nil {
 		_ = device.Close()
 		for _, listener := range listeners {
 			_ = listener.Close()
@@ -242,6 +244,7 @@ func startWFPInterceptor(s *Server) (systemInterceptor, error) {
 		requests: make(map[uint64]*ClassifiedFlow), udp: make(map[uint64]*ClassifiedFlow),
 		dns: newDNSAssociations(), queues: make([]chan wfpUDPJob, 8),
 	}
+	interceptor.proxyEverReady.Store(initialReady)
 	for index := range interceptor.queues {
 		interceptor.queues[index] = make(chan wfpUDPJob, 128)
 		interceptor.wg.Add(1)
@@ -266,6 +269,10 @@ func (i *wfpInterceptor) SetProxyReady(ready bool) {
 	}
 	if err := i.device.setProxyReady(ready); err != nil {
 		i.report(fmt.Errorf("更新 WFP Relay 状态失败: %w", err))
+		return
+	}
+	if ready {
+		i.proxyEverReady.Store(true)
 	}
 }
 
@@ -379,9 +386,13 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 		}
 	}
 
-	dnsAutoUDP := event.Protocol == ProtoUDP &&
-		event.Destination.Port() == 53 &&
-		i.server.engine.Config().DNSMode == DNSModeAuto
+	dnsUDP := event.Protocol == ProtoUDP && event.Destination.Port() == 53
+	dnsMode := i.server.engine.Config().DNSMode
+	dnsAutoUDP := dnsUDP && dnsMode == DNSModeAuto
+	dnsProxyBootstrapUDP := dnsUDP &&
+		dnsMode == DNSModeProxy &&
+		!i.server.proxyReady() &&
+		!i.proxyEverReady.Load()
 	var route *ClassifiedFlow
 	var err error
 	if dnsAutoUDP {
@@ -418,6 +429,15 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 		if !i.server.proxyReady() {
 			driverAction = ActionDirect
 		}
+	} else if dnsProxyBootstrapUDP {
+		/*
+		 * Forced PROXY needs one startup exception: WFP starts before the
+		 * relay tunnel, so the system resolver may be needed to resolve the
+		 * relay itself. The driver promotes this flow to PROXY on the first
+		 * successful Relay-ready transition and never fails it open again.
+		 */
+		decisionFlags |= wfpDecisionFlagDNSBootstrapProxy
+		driverAction = ActionDirect
 	}
 	if err := i.device.decisionFlags(event.RequestID, driverAction, decisionFlags); err != nil {
 		route.traffic.Finish("failed", err)

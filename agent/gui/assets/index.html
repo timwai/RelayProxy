@@ -43,7 +43,7 @@
 
     input:focus, select:focus { outline: none; }
     button:focus-visible, input:focus-visible, select:focus-visible {
-      outline: 2px solid #10b981; outline-offset: 1px;
+      outline: 2px solid var(--rp-primary); outline-offset: 1px;
     }
 
     /* Single icon scale for the whole app: one stroke weight, one grid. */
@@ -58,30 +58,23 @@
     }
     .live-dot { animation: live-ring 2.4s var(--ease) infinite; }
 
-    .nav-item:hover { background: rgb(226 232 240 / .7); }
-    .dark .nav-item:hover { background: rgb(30 41 59 / .6); }
+    .nav-item:hover { background: var(--rp-surface); color: var(--rp-text); }
     .nav-item[aria-selected="true"] {
-      background: rgb(236 253 245);
-      color: rgb(4 120 87);
-      box-shadow: inset 2px 0 0 rgb(16 185 129);
+      background: var(--rp-sidebar-active);
+      color: var(--rp-primary);
+      box-shadow: inset 2px 0 0 var(--rp-primary);
     }
-    .nav-item[aria-selected="true"]:hover { background: rgb(209 250 229); }
-    .dark .nav-item[aria-selected="true"] {
-      background: rgb(6 78 59 / .35);
-      color: rgb(110 231 183);
-      box-shadow: inset 2px 0 0 rgb(52 211 153);
+    .nav-item[aria-selected="true"]:hover {
+      background: color-mix(in srgb, var(--rp-sidebar-active) 78%, var(--rp-surface));
     }
-    .dark .nav-item[aria-selected="true"]:hover { background: rgb(6 78 59 / .5); }
 
-    .btn-primary { background: #059669; color: #fff; }
-    .btn-primary:hover:not(:disabled) { background: #047857; }
-    .btn-primary:active:not(:disabled) { background: #065f46; }
-    .btn-primary:disabled { background: rgb(226 232 240); color: rgb(148 163 184); cursor: default; }
-    .dark .btn-primary:disabled { background: rgb(51 65 85); color: rgb(100 116 139); }
+    .btn-primary { background: var(--rp-primary); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--rp-primary-hover); }
+    .btn-primary:active:not(:disabled) { background: color-mix(in srgb, var(--rp-primary-hover) 88%, #000); }
+    .btn-primary:disabled { background: var(--rp-surface-soft); color: var(--rp-subtle); cursor: default; }
 
-    .toggle-track { background: rgb(203 213 225); }
-    .dark .toggle-track { background: rgb(51 65 85); }
-    .peer:checked ~ .toggle-track { background: #059669; }
+    .toggle-track { background: var(--rp-border-strong); }
+    .peer:checked ~ .toggle-track { background: var(--rp-primary); }
     .toggle-knob { transition: transform .18s var(--ease); }
     .peer:checked ~ .toggle-track .toggle-knob { transform: translateX(16px); }
     .peer:disabled ~ .toggle-track { opacity: .5; }
@@ -168,7 +161,7 @@
     @media(prefers-reduced-motion:reduce) { .live-dot{animation:none;} }
   </style>
 </head>
-<body class="bg-slate-100 dark:bg-[#0d1117] text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">
+<body class="rp-shell text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">
 
   <!-- Unified icon sprite. Every icon in the app comes from here: one 24x24 grid,
        one stroke weight, currentColor so it follows the theme. -->
@@ -247,7 +240,7 @@
   <div class="flex-1 flex min-h-0">
 
     <!-- Sidebar -->
-    <nav class="rp-sidebar bg-white/60 dark:bg-[#131a26]/70 border-r border-slate-200 dark:border-slate-800 flex flex-col shrink-0">
+    <nav class="rp-sidebar flex flex-col shrink-0">
       <div class="flex items-center gap-2.5 px-3 py-3 border-b border-slate-200 dark:border-slate-800">
         <img src="icon.png" alt="RelayProxy" class="w-8 h-8 shrink-0" draggable="false">
         <div class="min-w-0">

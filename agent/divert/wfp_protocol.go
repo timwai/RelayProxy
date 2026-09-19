@@ -112,6 +112,17 @@ func encodeWFPDecision(requestID uint64, action Action) ([]byte, error) {
 	return data, nil
 }
 
+func encodeWFPRelease(requestID uint64) ([]byte, error) {
+	if requestID == 0 {
+		return nil, errors.New("wfp: missing request id")
+	}
+	data := make([]byte, 16)
+	binary.LittleEndian.PutUint32(data[0:4], wfpABIVersion)
+	binary.LittleEndian.PutUint32(data[4:8], uint32(len(data)))
+	binary.LittleEndian.PutUint64(data[8:16], requestID)
+	return data, nil
+}
+
 func encodeWFPUDPInjection(associationID uint64, payload []byte) ([]byte, error) {
 	if associationID == 0 {
 		return nil, errors.New("wfp: missing UDP association id")

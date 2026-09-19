@@ -128,9 +128,11 @@ You can verify manually with:
     $stampInfToolPath = $stampInfDir.TrimEnd("\") + "\"
     Write-Host "[WFP] StampInf tool: $stampInf" -ForegroundColor DarkGray
 
-    # Some WDK/MSBuild combinations still launch the tracked tool by its bare
-    # executable name even when StampInfToolPath is populated. Put the x64 host
-    # tools directory first on PATH as well as passing the documented property.
+    # Some WDK 28000 command-line builds run DPVerifierTask with a relative
+    # x86\InfVerif.dll path and fail even though the driver itself builds.
+    # Skip that embedded package-verification task here and perform mandatory
+    # validation explicitly with the x64 InfVerif.exe below. StampInf remains
+    # enabled, and the WDK host-tools directory is still placed first on PATH.
     $oldPath = $env:PATH
     $env:PATH = $stampInfDir + ";" + $env:PATH
     try {
@@ -141,6 +143,7 @@ You can verify manually with:
             /p:Configuration=$Configuration `
             /p:Platform=$TargetPlatform `
             /p:SignMode=Off `
+            /p:SkipPackageVerification=true `
             "/p:StampInfToolPath=$stampInfToolPath" `
             /nologo
     } finally {

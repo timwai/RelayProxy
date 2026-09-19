@@ -86,79 +86,46 @@ static NTSTATUS RpDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
         break;
 
     case RP_WFP_IOCTL_GET_EVENT:
-        if (!RpIsControllerFile(stack->FileObject)) {
-            status = STATUS_ACCESS_DENIED;
-            break;
-        }
         if (buffer == NULL || outLength == 0) {
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        status = RpReadEvent(buffer, outLength, &information);
+        status = RpReadEvent(stack->FileObject, buffer, outLength, &information);
         break;
 
     case RP_WFP_IOCTL_SET_DECISION:
-        if (!RpIsControllerFile(stack->FileObject)) {
-            status = STATUS_ACCESS_DENIED;
-            break;
-        }
         if (buffer == NULL || inLength < sizeof(RP_WFP_DECISION)) {
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        status = RpApplyDecision((const RP_WFP_DECISION*)buffer);
+        status = RpApplyDecision(stack->FileObject, (const RP_WFP_DECISION*)buffer);
         break;
 
     case RP_WFP_IOCTL_INJECT_UDP:
-        if (!RpIsControllerFile(stack->FileObject)) {
-            status = STATUS_ACCESS_DENIED;
-            break;
-        }
         if (buffer == NULL || inLength < (ULONG)FIELD_OFFSET(RP_WFP_UDP_INJECT, Payload)) {
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        status = RpInjectUdp((const RP_WFP_UDP_INJECT*)buffer, inLength);
+        status = RpInjectUdp(stack->FileObject, (const RP_WFP_UDP_INJECT*)buffer, inLength);
         break;
 
     case RP_WFP_IOCTL_HEARTBEAT:
-        if (RpIsControllerFile(stack->FileObject) &&
-            IoGetRequestorProcessId(Irp) == g_RpState.ControllerPid) {
-            RpHeartbeat();
-            status = STATUS_SUCCESS;
-        } else {
-            status = STATUS_ACCESS_DENIED;
-        }
+        status = RpHeartbeat(stack->FileObject, IoGetRequestorProcessId(Irp));
         break;
 
     case RP_WFP_IOCTL_STOP:
-        if (!g_RpState.ControllerActive ||
-            (RpIsControllerFile(stack->FileObject) &&
-             IoGetRequestorProcessId(Irp) == g_RpState.ControllerPid)) {
-            RpControllerFailOpen();
-            status = STATUS_SUCCESS;
-        } else {
-            status = STATUS_ACCESS_DENIED;
-        }
+        status = RpStopController(stack->FileObject, IoGetRequestorProcessId(Irp));
         break;
 
     case RP_WFP_IOCTL_SET_PROXY_READY:
-        if (!RpIsControllerFile(stack->FileObject)) {
-            status = STATUS_ACCESS_DENIED;
-            break;
-        }
         if (buffer == NULL || inLength < sizeof(RP_WFP_PROXY_READY)) {
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }
-        status = RpSetProxyReady((const RP_WFP_PROXY_READY*)buffer);
+        status = RpSetProxyReady(stack->FileObject, (const RP_WFP_PROXY_READY*)buffer);
         break;
 
     case RP_WFP_IOCTL_RELEASE:
-        if (!RpIsControllerFile(stack->FileObject)) {
-            status = STATUS_ACCESS_DENIED;
-            break;
-        }
         if (buffer == NULL || inLength < sizeof(RP_WFP_RELEASE)) {
             status = STATUS_BUFFER_TOO_SMALL;
             break;
@@ -175,6 +142,11 @@ static NTSTATUS RpDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
             flow = RpFindFlowByRequestId(release->RequestId);
             if (flow == NULL) {
                 status = STATUS_NOT_FOUND;
+                break;
+            }
+            if (!RpControllerOwnsFlow(stack->FileObject, flow)) {
+                RpDereferenceFlow(flow);
+                status = STATUS_ACCESS_DENIED;
                 break;
             }
             RpRemoveFlow(flow, FALSE);

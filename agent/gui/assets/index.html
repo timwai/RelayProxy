@@ -517,11 +517,11 @@
               <label for="cfg-dns-mode" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">DNS 处理模式</label>
               <select id="cfg-dns-mode" class="w-full text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
                 <option value="auto">AUTO · 隧道就绪后代理，断线自动直连</option>
-                <option value="proxy">PROXY · DNS 始终通过 Relay 隧道</option>
+                <option value="proxy">PROXY · 首次建连后强制通过 Relay 隧道</option>
                 <option value="direct">DIRECT · DNS 始终本地直连</option>
                 <option value="rule">RULE · 按普通路由规则决定</option>
               </select>
-              <p class="config-help">AUTO 可避免 Agent 启动和重连时的 DNS 自举死锁；Windows WFP 会对长期复用的 UDP DNS endpoint 动态切换 DIRECT / PROXY。</p>
+              <p class="config-help">AUTO 会随 Relay 就绪状态动态切换 DIRECT / PROXY。PROXY 仅在首次 Relay 建连前允许 DNS 临时直连以完成自举；首次连接成功后即强制通过 Relay，后续断线不会自动降级。</p>
             </div>
             <p id="network-availability" class="config-help"></p><p class="config-help">启用/关闭透明代理或切换 DNS 模式后需重启；分流规则可热应用于新流。AUTO 模式运行期间仍会随 Relay 就绪状态动态切换 DNS DIRECT / PROXY。Windows WFP 支持 x64 / ARM64，开启透明代理需管理员权限。</p>
           </details>

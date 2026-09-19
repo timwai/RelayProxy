@@ -49,15 +49,11 @@ function Find-MSBuild {
             $amd64 = Join-Path $vsPath "MSBuild\Current\Bin\amd64\MSBuild.exe"
             if (Test-Path $amd64) { return $amd64 }
 
-            $x64 = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
-            if (Test-Path $x64) { return $x64 }
+            throw "64-bit MSBuild was not found at $amd64. WDK 28000 INF verification requires the amd64 MSBuild host."
         }
     }
 
-    $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-
-    throw "MSBuild.exe not found. Install Visual Studio 2026 with Desktop development with C++ and the Windows Driver Kit component."
+    throw "64-bit MSBuild.exe not found. Install/repair Visual Studio 2026 with Desktop development with C++ and the Windows Driver Kit component."
 }
 
 function Assert-WDKVisualStudioIntegration {
@@ -108,9 +104,6 @@ function Build-One {
 
     $msbuild = Find-MSBuild
     Write-Host "[WFP] MSBuild host: $msbuild" -ForegroundColor DarkGray
-    if ($msbuild -notmatch "\\amd64\\MSBuild\.exe$") {
-        Write-Warning "64-bit MSBuild was not found; WDK 28000 INF verification may fail by trying to load x86\InfVerif.dll."
-    }
 
     $stampInf = Find-Tool "stampinf.exe"
     if (-not $stampInf) {
@@ -155,6 +148,28 @@ You can verify manually with:
     }
     if ($LASTEXITCODE -ne 0) {
         throw "WFP driver build failed for $TargetPlatform"
+    }
+
+    $builtInf = Join-Path $Root "native\windows\wfp\bin\$TargetPlatform\$Configuration\RelayProxyWfp.inf"
+    if (-not (Test-Path $builtInf)) {
+        throw "Stamped INF was not produced for $TargetPlatform: $builtInf"
+    }
+
+    $infVerif = $null
+    $toolsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Tools"
+    if (Test-Path $toolsRoot) {
+        $infVerif = Get-ChildItem $toolsRoot -Recurse -Filter InfVerif.exe -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\InfVerif\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -ExpandProperty FullName -First 1
+    }
+    if (-not $infVerif) {
+        throw "InfVerif.exe was not found under $toolsRoot. Repair the Windows Driver Kit installation."
+    }
+    Write-Host "[WFP] InfVerif tool: $infVerif" -ForegroundColor DarkGray
+    & $infVerif /h $builtInf
+    if ($LASTEXITCODE -ne 0) {
+        throw "INF verification failed for $TargetPlatform"
     }
 
     $sys = Join-Path $Root "native\windows\wfp\bin\$TargetPlatform\$Configuration\RelayProxyWfp.sys"

@@ -76,6 +76,40 @@ build_one darwin arm64 ./cmd/relay-agent "$OUT_DIR/darwin-arm64/relay-agent"
 show_syso
 trap - EXIT
 
+package_macos_app() {
+  local arch="$1"
+  local dir="$OUT_DIR/darwin-$arch"
+  local app="$dir/RelayProxy.app"
+  local contents="$app/Contents"
+  echo "[PACKAGE] darwin/$arch  RelayProxy.app"
+  mkdir -p "$contents/MacOS" "$contents/Resources"
+  cp "$dir/relay-agent" "$contents/MacOS/RelayProxy"
+  chmod +x "$contents/MacOS/RelayProxy"
+  cp "$ROOT/assets/brand/logo.png" "$contents/Resources/logo.png"
+  cat > "$contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+  <key>CFBundleDisplayName</key><string>RelayProxy</string>
+  <key>CFBundleExecutable</key><string>RelayProxy</string>
+  <key>CFBundleIdentifier</key><string>com.relayproxy.agent</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>RelayProxy</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+EOF
+}
+
+package_macos_app amd64
+package_macos_app arm64
+
 # Windows client + server (icons embedded)
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent-gui.exe" "-H=windowsgui"
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent.exe"

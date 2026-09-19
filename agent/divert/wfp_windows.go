@@ -462,13 +462,33 @@ func (i *wfpInterceptor) forwardUDP(queue <-chan wfpUDPJob) {
 			return
 		case job := <-queue:
 			i.dns.query(job.event.Source, job.event.Destination, job.event.Payload)
-			err := i.server.ForwardUDP(i.ctx, job.route, job.event.Payload, func(ctx context.Context, key FlowKey, payload []byte) error {
+			respond := func(ctx context.Context, key FlowKey, payload []byte) error {
 				if err := ctx.Err(); err != nil {
 					return err
 				}
 				i.dns.response(key.Destination, key.Source, payload)
 				return i.device.injectUDP(job.event.AssociationID, payload)
-			})
+			}
+			err := i.server.ForwardUDP(i.ctx, job.route, job.event.Payload, respond)
+			if err != nil && !i.server.UDPAssociationActive(job.route) && i.ctx.Err() == nil {
+				fresh, renewErr := i.server.RenewUDPAssociation(job.route)
+				if renewErr == nil {
+					if pinErr := i.server.PinUDPAssociation(fresh); pinErr != nil {
+						renewErr = pinErr
+					}
+				}
+				if renewErr == nil {
+					i.mu.Lock()
+					i.udp[job.event.AssociationID] = fresh
+					if job.event.RequestID != 0 {
+						i.requests[job.event.RequestID] = fresh
+					}
+					i.mu.Unlock()
+					err = i.server.ForwardUDP(i.ctx, fresh, job.event.Payload, respond)
+				} else {
+					err = errors.Join(err, renewErr)
+				}
+			}
 			i.report(err)
 		}
 	}

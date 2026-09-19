@@ -66,9 +66,9 @@ func TestEmbeddedWFPPackageRejectsExtraFile(t *testing.T) {
 	var buffer bytes.Buffer
 	writer := zip.NewWriter(&buffer)
 	for name, content := range map[string][]byte{
-		"RelayProxyWfp.sys": image,
-		"RelayProxyWfp.inf": []byte("CatalogFile=RelayProxyWfp.cat\nAddService=RelayProxyWfp\nRelayProxyWfp.sys"),
-		"RelayProxyWfp.cat": []byte("cat"),
+		"RelayProxyWfp.sys":                        image,
+		"RelayProxyWfp.inf":                        []byte("CatalogFile=RelayProxyWfp.cat\nAddService=RelayProxyWfp\nRelayProxyWfp.sys"),
+		"RelayProxyWfp.cat":                        []byte("cat"),
 		filepath.Join("unexpected", "payload.bin"): []byte("bad"),
 	} {
 		entry, err := writer.Create(name)

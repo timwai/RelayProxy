@@ -257,7 +257,25 @@ func installEmbeddedWFPPackage(files map[string][]byte) error {
 }
 
 func runWFPSystemTool(name string, args ...string) (string, error) {
-	command := exec.Command(name, args...)
+	switch strings.ToLower(name) {
+	case "pnputil.exe", "rundll32.exe", "sc.exe":
+	default:
+		return "", fmt.Errorf("refusing unexpected elevated system tool %q", name)
+	}
+	systemRoot := strings.TrimSpace(os.Getenv("SystemRoot"))
+	if systemRoot == "" {
+		systemRoot = `C:\Windows`
+	}
+	tool := filepath.Join(systemRoot, "System32", name)
+	info, err := os.Stat(tool)
+	if err != nil || !info.Mode().IsRegular() {
+		if err == nil {
+			err = errors.New("not a regular file")
+		}
+		return "", fmt.Errorf("Windows system tool unavailable %s: %w", tool, err)
+	}
+
+	command := exec.Command(tool, args...)
 	command.Env = os.Environ()
 	output, err := command.CombinedOutput()
 	return strings.TrimSpace(string(output)), err

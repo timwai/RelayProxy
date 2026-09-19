@@ -69,6 +69,7 @@ typedef struct _RP_DRIVER_STATE {
     volatile LONG64 NextId;
 
     BOOLEAN ControllerActive;
+    BOOLEAN ControllerFailingOpen;
     BOOLEAN ProxyReady;
     ULONG ControllerPid;
     PFILE_OBJECT ControllerFileObject;

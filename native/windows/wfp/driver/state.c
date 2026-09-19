@@ -126,6 +126,7 @@ VOID RpStateShutdown(VOID)
         if (flow == NULL) {
             break;
         }
+        RpReleasePendingUdp(flow);
         RpDereferenceFlow(flow);
     }
 }
@@ -348,6 +349,7 @@ VOID RpRemoveFlow(_In_ RP_FLOW* Flow, _In_ BOOLEAN QueueClose)
     if (completionContext != NULL) {
         FwpsCompleteOperation0(completionContext, NULL);
     }
+    RpReleasePendingUdp(Flow);
     if (QueueClose) {
         UINT64 counters[2];
         counters[0] = (UINT64)InterlockedCompareExchange64(&Flow->UploadBytes, 0, 0);

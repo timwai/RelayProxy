@@ -401,6 +401,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	divertSrv := a.divertSrv
 	if newState != tunnel.StateConnected || sess == nil {
 		a.mu.Unlock()
+		if divertSrv != nil {
+			divertSrv.SetProxyReady(false)
+		}
 		if oldControl != nil {
 			_ = oldControl.Close()
 		}

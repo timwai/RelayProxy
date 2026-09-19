@@ -243,11 +243,11 @@ func TestUDPRenewalPreservesFrozenDecisionAfterTunnelAssociationDies(t *testing.
 		Config: Config{
 			DefaultAction: ActionProxy,
 			Rules: []Rule{{
-				Name: "frozen",
+				Name:    "frozen",
 				Enabled: true,
 				Process: "browser.exe",
-				Action: ActionProxy,
-				ExitID: "exit-a",
+				Action:  ActionProxy,
+				ExitID:  "exit-a",
 			}},
 		},
 	})

@@ -265,6 +265,8 @@ func main() {
 		case err == nil:
 			log.Println("[Agent] Desktop session ended, RelayProxy Agent cleanly stopped.")
 			return
+		case errors.Is(err, gui.ErrExternalUI):
+			log.Println("[Agent] macOS management UI opened; continuing in background.")
 		case errors.Is(err, gui.ErrUnsupported):
 			log.Println("[Agent] Falling back to headless mode.")
 		default:
@@ -310,7 +312,7 @@ func resolveGUIMode(guiFlag, noGuiFlag, minimizedFlag bool) bool {
 	if guiFlag || minimizedFlag {
 		return true
 	}
-	if runtime.GOOS != "windows" {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		return false
 	}
 	if len(os.Args) == 1 {

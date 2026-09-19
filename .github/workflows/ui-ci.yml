@@ -43,6 +43,13 @@ jobs:
         run: bash -n scripts/build.sh
       - name: Vet
         run: go vet ./...
+      - name: Check frontend JavaScript
+        shell: bash
+        run: |
+          node --check server/web/js/app.js
+          node --check agent/gui/assets/routing.js
+          node --check agent/gui/assets/connections.js
+          node --test agent/gui/assets/_config.test.cjs
       - name: Test UI scope
         run: go test ./agent/gui ./cmd/relay-agent ./internal/config ./internal/webui ./server/api ./server/web -count=1
       - name: Full regression

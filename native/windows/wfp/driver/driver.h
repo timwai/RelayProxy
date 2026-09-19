@@ -15,6 +15,7 @@
 #define RP_TAG_EVENT 'eWpR'
 #define RP_TAG_CTX   'cWpR'
 #define RP_TAG_UDP   'uWpR'
+#define RP_TAG_REPLAY 'rWpR'
 
 #define RP_MAX_EVENTS 4096u
 #define RP_FLOW_TTL_100NS (5ull * 60ull * 10000000ull)
@@ -44,6 +45,12 @@ typedef struct _RP_FLOW {
     volatile LONG64 UploadBytes;
     volatile LONG64 DownloadBytes;
     LONG FlowAssociated;
+    NET_BUFFER_LIST* PendingUdpNbl;
+    UINT64 PendingUdpEndpointHandle;
+    SCOPE_ID PendingUdpRemoteScopeId;
+    UCHAR* PendingUdpControlData;
+    ULONG PendingUdpControlDataLength;
+    volatile LONG PendingUdpReplay;
     volatile LONG RefCount;
     volatile LONG Removed;
 } RP_FLOW;
@@ -76,6 +83,8 @@ typedef struct _RP_DRIVER_STATE {
     HANDLE RedirectHandle;
     HANDLE InjectionHandleV4;
     HANDLE InjectionHandleV6;
+    HANDLE ReplayInjectionHandleV4;
+    HANDLE ReplayInjectionHandleV6;
     NDIS_HANDLE NblPool;
 
     UINT32 AuthV4Id;
@@ -136,6 +145,12 @@ NTSTATUS RpWfpStart(_In_ PDEVICE_OBJECT DeviceObject);
 VOID RpWfpStop(VOID);
 
 NTSTATUS RpInjectUdp(_In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLength);
+NTSTATUS RpCapturePendingUdp(
+    _Inout_ RP_FLOW* Flow,
+    _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,
+    _In_ NET_BUFFER_LIST* NetBufferList);
+NTSTATUS RpReplayPendingUdp(_Inout_ RP_FLOW* Flow);
+VOID RpReleasePendingUdp(_Inout_ RP_FLOW* Flow);
 
 BOOLEAN RpExtractAleKey(_In_ const FWPS_INCOMING_VALUES0* Values, _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata, _Out_ RP_FLOW_KEY* Key, _Out_ UINT32* CompartmentId);
 BOOLEAN RpExtractDatagramKey(_In_ const FWPS_INCOMING_VALUES0* Values, _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata, _Out_ RP_FLOW_KEY* Key);

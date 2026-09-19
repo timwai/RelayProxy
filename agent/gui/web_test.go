@@ -88,6 +88,28 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
+
+func TestWebManagementLoadsSharedFoundationBeforePageStyles(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
+	body := response.Body.String()
+	shared := strings.Index(body, `/ui/base.css`)
+	pageStyle := strings.Index(body, `<style>`)
+	if shared < 0 || pageStyle < 0 || shared > pageStyle {
+		t.Fatalf("shared design system must load before page styles: shared=%d style=%d", shared, pageStyle)
+	}
+	for _, want := range []string{
+		`relayproxy-agent-navigation`,
+		`rememberNavigation()`,
+		`role', 'tab'`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Agent management page missing %q", want)
+		}
+	}
+}
+
 func TestWebRejectsCrossOriginMutation(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/reload", bytes.NewReader([]byte("{}")))

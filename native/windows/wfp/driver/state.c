@@ -348,7 +348,15 @@ VOID RpRemoveFlow(_In_ RP_FLOW* Flow, _In_ BOOLEAN QueueClose)
         FwpsCompleteOperation0(completionContext, NULL);
     }
     if (QueueClose) {
-        (VOID)RpQueueDatagramEvent(RP_WFP_EVENT_CLOSE, Flow, 0, NULL, 0);
+        UINT64 counters[2];
+        counters[0] = (UINT64)InterlockedCompareExchange64(&Flow->UploadBytes, 0, 0);
+        counters[1] = (UINT64)InterlockedCompareExchange64(&Flow->DownloadBytes, 0, 0);
+        (VOID)RpQueueDatagramEvent(
+            RP_WFP_EVENT_CLOSE,
+            Flow,
+            0,
+            (const UCHAR*)counters,
+            sizeof(counters));
     }
     RpDereferenceFlow(Flow);
 }

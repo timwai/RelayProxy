@@ -36,7 +36,7 @@ func BenchmarkDatagramForwardPacketReuse(b *testing.B) {
 		binary.BigEndian.PutUint32(frame[:4], uint32(i+1))
 		binary.BigEndian.PutUint16(frame[4:6], uint16(payloadBytes))
 		frame[6], frame[7] = 0, 1
-		p := &DatagramPacket{packet: packet, payloadBytes: payloadBytes}
+		p := DatagramPacket{packet: packet, payloadBytes: payloadBytes}
 		if err := channel.ForwardPacket(context.Background(), p); err != nil {
 			b.Fatal(err)
 		}

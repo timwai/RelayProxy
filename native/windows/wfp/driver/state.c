@@ -251,6 +251,20 @@ UINT64 RpCurrentControllerGeneration(VOID)
     return generation;
 }
 
+BOOLEAN RpIsControllerProcess(_In_ UINT64 ProcessId)
+{
+    BOOLEAN result;
+    KIRQL oldIrql;
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    result = g_RpState.ControllerActive &&
+             !g_RpState.ControllerFailingOpen &&
+             ProcessId != 0 &&
+             ProcessId == g_RpState.ControllerPid;
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+    return result;
+}
+
 BOOLEAN RpControllerOwnsFlow(_In_ PFILE_OBJECT FileObject, _In_ const RP_FLOW* Flow)
 {
     BOOLEAN result;

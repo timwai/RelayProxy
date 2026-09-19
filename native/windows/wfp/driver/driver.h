@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ntddk.h>
+#include <ntifs.h>
 #include <ndis.h>
 #include <fwpmk.h>
 #include <fwpsk.h>
@@ -44,6 +44,8 @@ typedef struct _RP_FLOW {
     volatile LONG64 UploadBytes;
     volatile LONG64 DownloadBytes;
     LONG FlowAssociated;
+    volatile LONG RefCount;
+    volatile LONG Removed;
 } RP_FLOW;
 
 typedef struct _RP_EVENT_NODE {
@@ -120,6 +122,8 @@ RP_FLOW* RpFindFlowByKey(_In_ const RP_FLOW_KEY* Key);
 NTSTATUS RpInsertPendingFlow(_In_ RP_FLOW* Flow);
 VOID RpRemoveFlow(_In_ RP_FLOW* Flow, _In_ BOOLEAN QueueClose);
 VOID RpTouchFlow(_In_ RP_FLOW* Flow);
+VOID RpReferenceFlow(_In_ RP_FLOW* Flow);
+VOID RpDereferenceFlow(_In_ RP_FLOW* Flow);
 UINT64 RpNextId(VOID);
 
 NTSTATUS RpQueueFlowEvent(_In_ const RP_FLOW* Flow, _In_opt_ const FWP_BYTE_BLOB* ProcessPath, _In_ ULONG Flags);

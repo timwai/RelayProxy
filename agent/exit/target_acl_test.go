@@ -127,7 +127,8 @@ func TestCompiledRelayACLCacheReusesVerifiedPolicy(t *testing.T) {
 
 	changed := policy
 	changed.AllowInternet = false
-	if _, err := h.compiledRelayACL(&changed); err == nil || !strings.Contains(err.Error(), "fingerprint mismatch") {
-		t.Fatalf("stale fingerprint accepted changed policy: %v", err)
+	fresh := NewHandler(HandlerConfig{})
+	if _, err := fresh.compiledRelayACL(&changed); err == nil || !strings.Contains(err.Error(), "fingerprint mismatch") {
+		t.Fatalf("stale fingerprint accepted changed policy on cache miss: %v", err)
 	}
 }

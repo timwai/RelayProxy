@@ -301,6 +301,9 @@ func TestWebManagementDefaultsAndLocalOnlyPolicy(t *testing.T) {
 	if !cfg.IsWebEnabled() || cfg.Web.Listen != "127.0.0.1" || cfg.Web.Port != 9090 {
 		t.Fatalf("unexpected web defaults: %+v", cfg.Web)
 	}
+	if cfg.GUI.Theme != "system" {
+		t.Fatalf("default GUI theme = %q, want system", cfg.GUI.Theme)
+	}
 	cfg.Web.Token = "legacy-value-is-ignored"
 	cfg.Web.Listen = "0.0.0.0"
 	if err := NormalizeAgentConfig(cfg); err == nil {

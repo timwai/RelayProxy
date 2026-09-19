@@ -17,8 +17,8 @@ const elevationParentArgument = "--relayproxy-elevation-parent"
 const elevationParentWaitMilliseconds = 30 * 1000
 
 var (
-	modShell32         = windows.NewLazySystemDLL("shell32.dll")
-	procShellExecuteW  = modShell32.NewProc("ShellExecuteW")
+	modShell32        = windows.NewLazySystemDLL("shell32.dll")
+	procShellExecuteW = modShell32.NewProc("ShellExecuteW")
 )
 
 // waitForElevationParent consumes the private parent marker before flag.Parse.

@@ -86,7 +86,6 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Proxy.SOCKS5.Listen = strings.TrimSpace(c.Proxy.SOCKS5.Listen)
 	c.Proxy.HTTP.Listen = strings.TrimSpace(c.Proxy.HTTP.Listen)
 	c.Web.Listen = strings.TrimSpace(c.Web.Listen)
-	c.Web.Token = strings.TrimSpace(c.Web.Token)
 	applyAgentDefaults(c)
 	return ValidateAgentConfig(c)
 }
@@ -133,11 +132,11 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c.Web.Port < 1 || c.Web.Port > 65535 {
 		return fmt.Errorf("web.port 必须在 1-65535 之间")
 	}
-	if c.IsWebEnabled() && !isLoopbackHost(c.Web.Listen) && len(c.Web.Token) < 32 {
-		return fmt.Errorf("web.token: Web 管理监听非本机地址时必须设置至少 32 字节的访问令牌")
+	if c.IsWebEnabled() && !isLoopbackHost(c.Web.Listen) {
+		return fmt.Errorf("web.listen: Agent Web 管理仅允许监听本机 loopback 地址")
 	}
-	if c.GUI.Theme != "dark" && c.GUI.Theme != "light" {
-		return fmt.Errorf("gui.theme 必须是 dark / light")
+	if c.GUI.Theme != "dark" && c.GUI.Theme != "light" && c.GUI.Theme != "system" {
+		return fmt.Errorf("gui.theme 必须是 dark / light / system")
 	}
 	if c.Mode != "EXIT" && (c.Proxy.SOCKS5.Enabled == nil || *c.Proxy.SOCKS5.Enabled) && (c.Proxy.HTTP.Enabled == nil || *c.Proxy.HTTP.Enabled) &&
 		listenAddressesOverlap(net.JoinHostPort(c.Proxy.SOCKS5.Listen, fmt.Sprint(c.Proxy.SOCKS5.Port)), net.JoinHostPort(c.Proxy.HTTP.Listen, fmt.Sprint(c.Proxy.HTTP.Port))) {

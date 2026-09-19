@@ -31,6 +31,7 @@ const (
 	wfpIOCTLHeartbeat   = uint32(0x80002014)
 	wfpIOCTLStop        = uint32(0x80002018)
 	wfpIOCTLRelease     = uint32(0x8000201c)
+	wfpIOCTLSetProxyReady = uint32(0x80002020)
 )
 
 const wfpHeartbeatInterval = 2 * time.Second
@@ -88,11 +89,20 @@ func (d *wfpDevice) configure(pid uint32, port4, port6 uint16) error {
 }
 
 func (d *wfpDevice) decision(requestID uint64, action Action) error {
-	data, err := encodeWFPDecision(requestID, action)
+	return d.decisionFlags(requestID, action, 0)
+}
+
+func (d *wfpDevice) decisionFlags(requestID uint64, action Action, flags uint32) error {
+	data, err := encodeWFPDecisionFlags(requestID, action, flags)
 	if err != nil {
 		return err
 	}
 	_, err = d.ioctl(wfpIOCTLSetDecision, data, nil)
+	return err
+}
+
+func (d *wfpDevice) setProxyReady(ready bool) error {
+	_, err := d.ioctl(wfpIOCTLSetProxyReady, encodeWFPProxyReady(ready), nil)
 	return err
 }
 
@@ -218,6 +228,13 @@ func startWFPInterceptor(s *Server) (systemInterceptor, error) {
 		}
 		return nil, fmt.Errorf("配置 WFP 驱动失败: %w", err)
 	}
+	if err := device.setProxyReady(s.proxyReady()); err != nil {
+		_ = device.Close()
+		for _, listener := range listeners {
+			_ = listener.Close()
+		}
+		return nil, fmt.Errorf("配置 WFP Relay 状态失败: %w", err)
+	}
 
 	ctx, cancel := context.WithCancel(s.ctx)
 	interceptor := &wfpInterceptor{
@@ -242,6 +259,15 @@ func startWFPInterceptor(s *Server) (systemInterceptor, error) {
 }
 
 func (i *wfpInterceptor) Running() bool { return i != nil && i.running.Load() }
+
+func (i *wfpInterceptor) SetProxyReady(ready bool) {
+	if i == nil || i.device == nil || i.ctx.Err() != nil {
+		return
+	}
+	if err := i.device.setProxyReady(ready); err != nil {
+		i.report(fmt.Errorf("更新 WFP Relay 状态失败: %w", err))
+	}
+}
 
 func (i *wfpInterceptor) ListenAddr() string {
 	if i == nil || len(i.listeners) == 0 {
@@ -343,15 +369,6 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 	if host := i.dns.lookup(event.Destination.Addr()); host != "" {
 		flow.Host, flow.DomainSource = host, "dns"
 	}
-	// Keep DNS bootstrap local on Windows. The Windows DNS Client service may
-	// own the packet instead of relay-agent.exe, and proxying the resolver
-	// request can deadlock a tunnel reconnect that itself needs DNS.
-	if event.Protocol == ProtoUDP && event.Destination.Port() == 53 {
-		if err := i.device.decision(event.RequestID, ActionDirect); err != nil {
-			i.report(err)
-		}
-		return
-	}
 	for _, addr := range []netip.Addr{event.Source.Addr(), event.Destination.Addr()} {
 		if addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsUnspecified() ||
 			addr == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
@@ -362,7 +379,16 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 		}
 	}
 
-	route, err := i.server.ClassifyFlow(flow)
+	dnsAutoUDP := event.Protocol == ProtoUDP &&
+		event.Destination.Port() == 53 &&
+		i.server.engine.Config().DNSMode == DNSModeAuto
+	var route *ClassifiedFlow
+	var err error
+	if dnsAutoUDP {
+		route, err = i.server.classifyFlow(flow, true)
+	} else {
+		route, err = i.server.ClassifyFlow(flow)
+	}
 	if err != nil {
 		_ = i.device.decision(event.RequestID, ActionReject)
 		i.report(err)
@@ -385,13 +411,21 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 	}
 	i.mu.Unlock()
 
-	if err := i.device.decision(event.RequestID, route.Decision().Action); err != nil {
+	driverAction := route.Decision().Action
+	var decisionFlags uint32
+	if dnsAutoUDP {
+		decisionFlags |= wfpDecisionFlagDNSAuto
+		if !i.server.proxyReady() {
+			driverAction = ActionDirect
+		}
+	}
+	if err := i.device.decisionFlags(event.RequestID, driverAction, decisionFlags); err != nil {
 		route.traffic.Finish("failed", err)
 		i.forget(event.RequestID, event.AssociationID)
 		i.report(err)
 		return
 	}
-	if route.Decision().Action == ActionDirect {
+	if driverAction == ActionDirect && route.Decision().Action == ActionDirect {
 		route.traffic.Activate()
 	}
 }

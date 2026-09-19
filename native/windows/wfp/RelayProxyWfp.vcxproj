@@ -54,7 +54,7 @@
       <SDLCheck>true</SDLCheck>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>fwpkclnt.lib;ndis.lib;wdmsec.lib;netio.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>fwpkclnt.lib;ndis.lib;wdmsec.lib;netio.lib;uuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 

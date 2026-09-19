@@ -36,7 +36,7 @@ type Options struct {
 	StartMinimized bool
 	// MinimizeToTray makes the window's close button hide to the tray.
 	MinimizeToTray bool
-	// Theme is "dark" or "light".
+	// Theme is "dark", "light", or "system".
 	Theme string
 	// Title is the window title.
 	Title string
@@ -46,10 +46,14 @@ type Options struct {
 }
 
 func (o Options) theme() string {
-	if strings.EqualFold(o.Theme, "light") {
+	switch strings.ToLower(strings.TrimSpace(o.Theme)) {
+	case "light":
 		return "light"
+	case "system":
+		return "system"
+	default:
+		return "dark"
 	}
-	return "dark"
 }
 
 // ui is the platform-independent surface the tray and bindings drive.

@@ -41,6 +41,7 @@ type Options struct {
 	SharedPolicy       func(Flow) Decision
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
+	ProxyReady         func() bool
 }
 
 // Server owns classified flows. OS interception is separately gated by a
@@ -128,6 +129,22 @@ func appendUnique(in []string, add ...string) []string {
 
 func (s *Server) Engine() *Engine { return s.engine }
 
+func (s *Server) proxyReady() bool {
+	return s.opts.ProxyReady != nil && s.opts.ProxyReady()
+}
+
+// SetProxyReady lets platform interceptors update stateful interception when
+// relay availability changes. Packet backends classify new associations using
+// the callback above; WFP additionally switches persistent UDP DNS flows.
+func (s *Server) SetProxyReady(ready bool) {
+	s.mu.Lock()
+	interceptor := s.interceptor
+	s.mu.Unlock()
+	if dynamic, ok := interceptor.(interface{ SetProxyReady(bool) }); ok {
+		dynamic.SetProxyReady(ready)
+	}
+}
+
 // ReloadRules does not acquire PolicyMu. Its owner may hold that lock while
 // publishing several policy engines atomically. Existing flows retain decisions.
 func (s *Server) ReloadRules(cfg Config) error {
@@ -188,6 +205,14 @@ func (s *Server) UDPListenAddr() string { return "" }
 // ClassifyFlow is the sole policy decision point. UDP packets sharing a complete
 // original five-tuple and process identity reuse the same immutable decision.
 func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
+	return s.classifyFlow(input, false)
+}
+
+// classifyFlow supports one WFP-specific refinement: an AUTO DNS flow keeps a
+// PROXY route in userspace even while the kernel temporarily passes DNS direct
+// during relay bootstrap. That allows a persistent Windows DNS UDP endpoint to
+// switch to PROXY without destroying and rebuilding its userspace association.
+func (s *Server) classifyFlow(input Flow, forceAutoDNSProxy bool) (*ClassifiedFlow, error) {
 	if s.opts.PolicyMu != nil {
 		s.opts.PolicyMu.RLock()
 		defer s.opts.PolicyMu.RUnlock()
@@ -228,7 +253,26 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	decision := Decision{Action: ActionDirect, Rule: "loop-guard"}
 	guarded := s.guard.MustDirectFlow(flow)
 	if !guarded {
-		decision = s.engine.MatchWith(flow, s.opts.SharedPolicy)
+		cfg := s.engine.Config()
+		isDNS := flow.Port == 53 && (flow.Protocol == ProtoUDP || flow.Protocol == ProtoTCP)
+		if isDNS {
+			switch cfg.DNSMode {
+			case DNSModeDirect:
+				decision = Decision{Action: ActionDirect, Rule: "dns-direct"}
+			case DNSModeProxy:
+				decision = Decision{Action: ActionProxy, Rule: "dns-proxy"}
+			case DNSModeAuto:
+				if forceAutoDNSProxy || s.proxyReady() {
+					decision = Decision{Action: ActionProxy, Rule: "dns-auto"}
+				} else {
+					decision = Decision{Action: ActionDirect, Rule: "dns-bootstrap"}
+				}
+			default:
+				decision = s.engine.MatchWith(flow, s.opts.SharedPolicy)
+			}
+		} else {
+			decision = s.engine.MatchWith(flow, s.opts.SharedPolicy)
+		}
 	}
 	if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {
 		decision.ExitID = s.opts.DefaultExitID()

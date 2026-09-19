@@ -87,19 +87,6 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	if err := prepareLoopGuard(s); err != nil {
 		return nil, err
 	}
-	requested, err := windowsBackendPreference()
-	if err != nil {
-		return nil, err
-	}
-	if requested == "auto" || requested == "wfp" {
-		if installErr := ensureEmbeddedWFPInstalled(); installErr != nil {
-			// x64 auto mode keeps the legacy WinDivert fallback. Explicit WFP
-			// and Windows ARM64 must surface installation/readiness failures.
-			if requested == "wfp" || runtime.GOARCH != "amd64" {
-				return nil, installErr
-			}
-		}
-	}
 	backend, err := selectWindowsBackend()
 	if err != nil {
 		return nil, err

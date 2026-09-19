@@ -88,6 +88,23 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
+func TestWebManagementKeepsWFPInstallerNativeOnly(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
+	if !strings.Contains(page.Body.String(), `id="wfp-driver-actions" class="hidden`) {
+		t.Fatal("WFP installer panel must be hidden by default in the shared page")
+	}
+
+	bridge := httptest.NewRecorder()
+	handler.ServeHTTP(bridge, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
+	if strings.Contains(bridge.Body.String(), "goInstallWFPDriver") ||
+		strings.Contains(bridge.Body.String(), "goGetWFPDriverStatus") {
+		t.Fatal("browser management bridge must not expose native WFP installer bindings")
+	}
+}
+
 func TestWebManagementLoadsSharedFoundationBeforePageStyles(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()

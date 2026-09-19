@@ -44,6 +44,7 @@ func main() {
 	minimizedFlag := flag.Bool("minimized", false, "Start the desktop window minimized to the system tray")
 	hiddenFlag := flag.Bool("hidden", false, "Alias for --minimized (kept for existing autostart entries)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
+	installWFPDriverFlag := flag.Bool("relayproxy-install-wfp-driver", false, "Install the bundled Windows WFP driver and exit")
 
 	var noWebFlag bool
 	flag.BoolVar(&noWebFlag, "no-web", false, "Disable the embedded web management page")
@@ -55,6 +56,15 @@ func main() {
 
 	if *versionFlag {
 		fmt.Printf("relay-agent %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
+
+	if *installWFPDriverFlag {
+		if err := installWFPDriverCLI(); err != nil {
+			log.Printf("[WFP] Driver installation failed: %v", err)
+			os.Exit(1)
+		}
+		log.Println("[WFP] Driver installation completed.")
 		return
 	}
 

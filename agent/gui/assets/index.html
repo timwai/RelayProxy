@@ -513,6 +513,13 @@
 
           <details class="p-4 config-advanced"><summary>系统透明代理 <span id="network-capability-status">正在检查运行条件</span></summary>
             <label class="config-check"><input type="checkbox" id="cfg-tun-on" disabled><span>启用系统透明代理</span></label>
+            <div id="wfp-driver-actions" class="hidden mt-3 p-3 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[12px] font-medium text-slate-700 dark:text-slate-200">Windows WFP 驱动</div>
+                <p id="wfp-driver-status" class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">正在检查驱动状态</p>
+              </div>
+              <button id="wfp-install-driver" type="button" onclick="installWFPDriver()" class="shrink-0 px-3 py-1.5 rounded-md border border-slate-300 dark:border-slate-600 text-[12px] font-medium text-slate-700 dark:text-slate-200 hover:bg-white dark:hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">安装驱动</button>
+            </div>
             <div class="mt-3">
               <label for="cfg-dns-mode" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">DNS 处理模式</label>
               <select id="cfg-dns-mode" class="w-full text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
@@ -1241,6 +1248,75 @@
         (running ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400');
     }
     window.onGoStatus = function (st) { if (st) { renderStatus(st); } };
+    /* ---------- native Windows WFP driver ---------- */
+    function renderWFPDriverStatus(status) {
+      var panel = $('wfp-driver-actions'), label = $('wfp-driver-status'), button = $('wfp-install-driver');
+      if (!panel || !label || !button) return;
+      status = status || {};
+      if (!status.package_available) {
+        label.textContent = status.package_error || '当前客户端没有内嵌可安装的 WFP 驱动包。';
+        button.textContent = '安装驱动';
+        button.disabled = true;
+        return;
+      }
+      if (status.ready && status.current) {
+        label.textContent = '当前版本已安装并就绪 · ' + (status.architecture || 'Windows');
+        button.textContent = '已安装';
+        button.disabled = true;
+        return;
+      }
+      if (status.ready) {
+        label.textContent = '检测到可用的 WFP 驱动，但与当前客户端内嵌版本不同。';
+        button.textContent = '更新驱动';
+        button.disabled = false;
+        return;
+      }
+      if (status.current) {
+        label.textContent = '当前版本驱动文件已存在但尚未就绪' + (status.reason ? '：' + status.reason : '。');
+        button.textContent = '修复驱动';
+        button.disabled = false;
+        return;
+      }
+      label.textContent = status.reason ? '未就绪：' + status.reason : '尚未安装 WFP 驱动。';
+      button.textContent = '安装驱动';
+      button.disabled = false;
+    }
+
+    async function refreshWFPDriverStatus() {
+      if (!hasFn('goGetWFPDriverStatus') || !$('wfp-driver-actions')) return;
+      var raw = await call('goGetWFPDriverStatus');
+      if (!raw) return;
+      try {
+        renderWFPDriverStatus(typeof raw === 'string' ? JSON.parse(raw) : raw);
+      } catch (err) {
+        $('wfp-driver-status').textContent = '读取驱动状态失败：' + err.message;
+      }
+    }
+
+    async function installWFPDriver() {
+      if (!hasFn('goInstallWFPDriver')) return;
+      var button = $('wfp-install-driver');
+      if (button) {
+        button.disabled = true;
+        button.textContent = '正在安装…';
+      }
+      toast('正在请求管理员权限并安装 WFP 驱动…');
+      var raw = await call('goInstallWFPDriver');
+      var out = mutationResult(raw);
+      if (out && out.status) renderWFPDriverStatus(out.status);
+      if (!out || !out.ok) {
+        toast((out && out.message) || 'WFP 驱动安装失败');
+        await refreshWFPDriverStatus();
+        return;
+      }
+      toast(out.message || 'WFP 驱动已安装并就绪');
+      await refreshWFPDriverStatus();
+      // Refresh capabilities without discarding unsaved form drafts.
+      await loadConfig();
+    }
+    window.installWFPDriver = installWFPDriver;
+
+
 
     /* ---------- config rendering ---------- */
     function renderConfig(cfg) {
@@ -1721,6 +1797,14 @@
       // window, but it has no process-replacement binding. Keep the restart
       // action visible only where the native launcher is available.
       if (!hasFn('goRestart') && $('restart-card')) { $('restart-card').classList.add('hidden'); }
+
+      // The WFP installer is a native Windows-only action. The browser bridge
+      // deliberately does not define these bindings, so this control never
+      // becomes visible in the Web management page or on other platforms.
+      if (hasFn('goGetWFPDriverStatus') && hasFn('goInstallWFPDriver') && $('wfp-driver-actions')) {
+        $('wfp-driver-actions').classList.remove('hidden');
+        refreshWFPDriverStatus();
+      }
 
       // Go pushes status every 1.5s; these polls cover the window's first paint.
       setInterval(refreshStatus, 3000);

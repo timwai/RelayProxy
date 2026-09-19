@@ -129,6 +129,7 @@ BOOLEAN RpIsControllerFile(_In_opt_ PFILE_OBJECT FileObject);
 NTSTATUS RpHeartbeat(_In_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid);
 NTSTATUS RpStopController(_In_opt_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid);
 UINT64 RpCurrentControllerGeneration(VOID);
+BOOLEAN RpIsControllerProcess(_In_ UINT64 ProcessId);
 BOOLEAN RpControllerOwnsFlow(_In_ PFILE_OBJECT FileObject, _In_ const RP_FLOW* Flow);
 BOOLEAN RpGetRedirectTarget(
     _In_ const RP_FLOW* Flow,

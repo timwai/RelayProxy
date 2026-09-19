@@ -20,13 +20,30 @@ import (
 )
 
 func main() {
-	out := flag.String("out", "dist/windows-amd64/windivert", "Windows runtime output directory")
+	out := flag.String("out", "dist/windows-amd64/windivert", "WinDivert runtime output directory")
+	skipRuntime := flag.Bool("skip-runtime", false, "Skip WinDivert download/extraction when packaging ARM64")
 	embedArchive := flag.String("embed-archive", "", "Also write the verified upstream archive for go:embed")
-	agentZIP := flag.String("agent-zip", "", "Also package the surrounding Windows agent directory into this ZIP")
+	agentZIP := flag.String("agent-zip", "", "Also package a Windows agent directory into this ZIP")
+	agentDir := flag.String("agent-dir", "", "Agent directory to package; defaults to the parent of -out")
+	agentArch := flag.String("agent-arch", "amd64", "Agent package architecture: amd64 or arm64")
 	flag.Parse()
-	err := fetchRuntime(*out, *embedArchive)
+
+	var err error
+	if !*skipRuntime {
+		err = fetchRuntime(*out, *embedArchive)
+	}
 	if err == nil && *agentZIP != "" {
-		err = packageAgent(filepath.Dir(filepath.Clean(*out)), *agentZIP)
+		directory := strings.TrimSpace(*agentDir)
+		if directory == "" {
+			if *skipRuntime {
+				err = fmt.Errorf("-agent-dir is required with -skip-runtime")
+			} else {
+				directory = filepath.Dir(filepath.Clean(*out))
+			}
+		}
+		if err == nil {
+			err = packageAgent(directory, *agentZIP, *agentArch)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -34,16 +51,49 @@ func main() {
 	}
 }
 
-// packageAgent bundles the client and its driver together. The explicit file
-// list excludes server binaries/configuration and includes WinDivert's license.
-func packageAgent(directory, destination string) error {
+// packageAgent bundles the client and architecture-appropriate interception
+// dependencies. The explicit file list excludes server binaries/configuration.
+func packageAgent(directory, destination, arch string) error {
 	if !strings.EqualFold(filepath.Ext(destination), ".zip") {
 		return fmt.Errorf("agent archive must have a .zip extension")
 	}
+	arch = strings.ToLower(strings.TrimSpace(arch))
+	if arch != "amd64" && arch != "arm64" {
+		return fmt.Errorf("unsupported agent architecture %q", arch)
+	}
 	files := []string{
 		"relay-agent-gui.exe", "relay-agent.exe", "configs/relay-agent.yaml",
-		"windivert/WinDivert.dll", "windivert/WinDivert64.sys",
-		"windivert/LICENSE", "windivert/README", "windivert/VERSION", "windivert/SOURCE.txt",
+	}
+	if arch == "amd64" {
+		files = append(files,
+			"windivert/WinDivert.dll", "windivert/WinDivert64.sys",
+			"windivert/LICENSE", "windivert/README", "windivert/VERSION", "windivert/SOURCE.txt",
+		)
+	}
+	wfpFiles := []string{
+		"wfp/RelayProxyWfp.sys", "wfp/RelayProxyWfp.inf", "wfp/RelayProxyWfp.cat",
+		"install-wfp.ps1", "uninstall-wfp.ps1",
+	}
+	wfpPresent := false
+	for _, name := range wfpFiles {
+		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err == nil {
+			wfpPresent = true
+			break
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if wfpPresent {
+		for _, name := range wfpFiles {
+			info, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name)))
+			if err != nil {
+				return fmt.Errorf("incomplete WFP driver package: %s: %w", name, err)
+			}
+			if !info.Mode().IsRegular() || info.Size() == 0 {
+				return fmt.Errorf("invalid WFP driver package file: %s", name)
+			}
+			files = append(files, name)
+		}
 	}
 	for _, name := range []string{"brand/icon.ico", "brand/logo.png", "README.md"} {
 		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err == nil {
@@ -78,7 +128,7 @@ func packageAgent(directory, destination string) error {
 		if err != nil {
 			return err
 		}
-		entry, err := archive.Create("windows-amd64/" + name)
+		entry, err := archive.Create("windows-" + arch + "/" + name)
 		if err != nil {
 			_ = source.Close()
 			return err
@@ -94,7 +144,7 @@ func packageAgent(directory, destination string) error {
 		}
 		fmt.Fprintf(&sums, "%x  %s\n", digest.Sum(nil), name)
 	}
-	manifest, err := archive.Create("windows-amd64/SHA256SUMS.txt")
+	manifest, err := archive.Create("windows-" + arch + "/SHA256SUMS.txt")
 	if err != nil {
 		return err
 	}
@@ -110,7 +160,7 @@ func packageAgent(directory, destination string) error {
 	if err := os.Rename(temporary.Name(), destination); err != nil {
 		return err
 	}
-	fmt.Printf("Windows agent + WinDivert package: %s\n", destination)
+	fmt.Printf("Windows %s agent package: %s\n", arch, destination)
 	return nil
 }
 

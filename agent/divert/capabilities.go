@@ -8,11 +8,9 @@ import (
 var ErrUnsupportedPlatform = errors.New("system transparent proxy is not supported by this build")
 var ErrPlatformNotReady = errors.New("system transparent proxy prerequisites are not satisfied")
 
-// Capabilities describes verified OS interception, not just a compiled rule
-// engine or an installed driver. False capabilities must never be advertised
-// as working through best-effort packet rewriting.
 type Capabilities struct {
 	Platform            string `json:"platform"`
+	Backend             string `json:"backend,omitempty"`
 	TCP                 bool   `json:"tcp"`
 	UDP                 bool   `json:"udp"`
 	IPv6                bool   `json:"ipv6"`
@@ -27,9 +25,6 @@ type Capabilities struct {
 
 func PlatformCapabilities() Capabilities { return platformCapabilities() }
 
-// Preflight is side-effect free: it loads no driver, opens no listener and
-// changes no firewall rule. It checks starting interception, regardless of the
-// stored mode, so callers that keep interception disabled need not call it.
 func Preflight(cfg Config) error {
 	if err := ValidateConfig(cfg); err != nil {
 		return err
@@ -56,9 +51,6 @@ func validatePlatformRules(cfg Config, caps Capabilities) error {
 	return nil
 }
 
-// ValidatePlatformRules checks rules applied to an active adapter, including
-// when a saved mode change will only take effect after restart. It performs no
-// environment/driver preflight and is safe before committing a configuration.
 func ValidatePlatformRules(cfg Config) error {
 	if err := ValidateConfig(cfg); err != nil {
 		return err

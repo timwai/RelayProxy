@@ -61,8 +61,12 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 
 	serverAddr := listener.Addr().String()
 
-	// Server accept goroutine
+	// Server accept goroutine. Keep the yamux session alive until the client
+	// has consumed the echoed payload; closing immediately after stream.Write
+	// can race the peer's write/read completion and surface "session shutdown".
 	serverErrCh := make(chan error, 1)
+	clientDone := make(chan struct{})
+	defer close(clientDone)
 	go func() {
 		rawConn, err := listener.Accept()
 		if err != nil {
@@ -94,6 +98,9 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 		}
 		_, err = stream.Write(buf[:n])
 		serverErrCh <- err
+		if err == nil {
+			<-clientDone
+		}
 	}()
 
 	// Client connect

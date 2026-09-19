@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -148,6 +149,7 @@ func TestInvalidUpdatesPreserveDiskAndRuntime(t *testing.T) {
 			in.Routing = &RoutingConfigUpdate{Rules: []routing.Rule{{Enabled: false, Processes: []string{"browser.exe"}, Ports: []string{"70000"}, Action: routing.ActionProxy}}}
 		}},
 		{"theme", func(in *ConfigUpdate) { in.GUI.Theme = ptr("unknown-theme") }},
+		{"dns mode", func(in *ConfigUpdate) { in.Network.DNSMode = ptr("sometimes") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -429,5 +431,34 @@ func TestConcurrentConfigUpdatesDoNotLoseUnrelatedFields(t *testing.T) {
 	cfg, err := config.LoadAgentConfig(b.configPath)
 	if err != nil || cfg.GUI.Theme != "light" || cfg.Server.Address != "new.example.test" {
 		t.Fatalf("concurrent updates lost fields: config = %+v, error = %v", cfg, err)
+	}
+}
+
+func TestDNSModeSaveRequiresRestartWithoutPublishingMixedWFPState(t *testing.T) {
+	b := newTestBridge(t)
+	before := b.agent.Config().DivertConfig.DNSMode
+	var in ConfigUpdate
+	in.Network.DNSMode = ptr(divert.DNSModeProxy)
+	result, err := b.SaveConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RestartRequired || result.ReloadPending {
+		t.Fatalf("DNS mode must be persisted as restart-only: %+v", result)
+	}
+	if !slices.Contains(result.RestartFields, "DNS 模式") {
+		t.Fatalf("restart fields do not identify DNS mode: %+v", result.RestartFields)
+	}
+	state, err := b.GetConfigState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Config.Network.DNSMode != divert.DNSModeProxy {
+		t.Fatalf("saved DNS mode=%q want %q", state.Config.Network.DNSMode, divert.DNSModeProxy)
+	}
+	if state.Runtime.Network.DNSMode != before ||
+		b.agent.Config().DivertConfig.DNSMode != before {
+		t.Fatalf("running DNS mode changed before restart: before=%q runtime=%q agent=%q",
+			before, state.Runtime.Network.DNSMode, b.agent.Config().DivertConfig.DNSMode)
 	}
 }

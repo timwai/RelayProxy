@@ -513,7 +513,17 @@
 
           <details class="p-4 config-advanced"><summary>系统透明代理 <span id="network-capability-status">正在检查运行条件</span></summary>
             <label class="config-check"><input type="checkbox" id="cfg-tun-on" disabled><span>启用系统透明代理</span></label>
-            <p id="network-availability" class="config-help"></p><p class="config-help">保存后需重启客户端；进程规则用于新连接。Windows 客户端已内嵌驱动，开启透明代理需管理员权限。</p>
+            <div class="mt-3">
+              <label for="cfg-dns-mode" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">DNS 处理模式</label>
+              <select id="cfg-dns-mode" class="w-full text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+                <option value="auto">AUTO · 隧道就绪后代理，断线自动直连</option>
+                <option value="proxy">PROXY · 首次建连后强制通过 Relay 隧道</option>
+                <option value="direct">DIRECT · DNS 始终本地直连</option>
+                <option value="rule">RULE · 按普通路由规则决定</option>
+              </select>
+              <p class="config-help">AUTO 会随 Relay 就绪状态动态切换 DIRECT / PROXY。PROXY 仅在首次 Relay 建连前允许 DNS 临时直连以完成自举；首次连接成功后即强制通过 Relay，后续断线不会自动降级。</p>
+            </div>
+            <p id="network-availability" class="config-help"></p><p class="config-help">启用/关闭透明代理或切换 DNS 模式后需重启；分流规则可热应用于新流。AUTO 模式运行期间仍会随 Relay 就绪状态动态切换 DNS DIRECT / PROXY。Windows WFP 支持 x64 / ARM64，开启透明代理需管理员权限。</p>
           </details>
         </div>
 
@@ -841,7 +851,7 @@
     }
     var groupFields = {
       connection: ['cfg-server','cfg-device-name','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport'],
-      proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on'],
+      proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on','cfg-dns-mode'],
       routing: ['cfg-routing-mode','cfg-routing-default'],
       network: ['cfg-network-excludes'],
       share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
@@ -895,6 +905,7 @@
       });
       var caps = state.cfg.networkCapabilities || {};
       $('cfg-tun-on').disabled = locked || (!networkReady(caps) && !$('cfg-tun-on').checked);
+      $('cfg-dns-mode').disabled = locked || !$('cfg-tun-on').checked;
       $('cfg-exit-on').disabled = locked;
       ['cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'].forEach(function (id) { $(id).disabled = locked || !$('cfg-exit-on').checked; });
       $('cfg-quic-port').disabled = locked || !tls || $('cfg-transport').value === 'tcp_only';
@@ -1256,6 +1267,8 @@
       $('cfg-http-port').value = http.port || 8080;
 
       $('cfg-tun-on').checked = cfg.networkMode === 'divert';
+      var network = cfg.network || {};
+      $('cfg-dns-mode').value = network.dns_mode || 'auto';
       var caps = cfg.networkCapabilities || {};
       var ready = networkReady(caps);
       $('network-capability-status').textContent = ready ? '可启用 · TCP / UDP / IPv6' : '暂不可启用';
@@ -1267,7 +1280,6 @@
       $('cfg-routing-mode').value = cfg.routing.mode;
       $('cfg-routing-default').value = cfg.routing.default_action;
       renderRoutingRules(cfg.routing.rules);
-      var network = cfg.network || {};
       $('cfg-network-excludes').value = (network.exclude_processes || []).join('\n');
 
       var activeSocks = running.socks5 || socks, activeHTTP = running.http || http;
@@ -1392,7 +1404,7 @@
         if (!$('cfg-tls-on').checked && $('cfg-transport').value === 'quic_only') fieldError('cfg-transport', 'QUIC 需要开启隧道 TLS');
         return { server: { address: hostValue('cfg-server', '服务器'), quicPort: portValue('cfg-quic-port','QUIC 端口'), tcpPort: portValue('cfg-tcp-port','TCP 端口'), tlsEnabled: $('cfg-tls-on').checked }, device: { name: $('cfg-device-name').value.trim() }, transport: $('cfg-tls-on').checked ? $('cfg-transport').value : 'tcp_only' };
       case 'proxy':
-        return { proxy: { socks5Enabled: $('cfg-socks-on').checked, socks5Listen: hostValue('cfg-socks-listen','SOCKS5 地址'), socks5Port: portValue('cfg-socks-port','SOCKS5 端口'), httpEnabled: $('cfg-http-on').checked, httpListen: hostValue('cfg-http-listen','HTTP 地址'), httpPort: portValue('cfg-http-port','HTTP 端口') }, network: { mode: $('cfg-tun-on').checked ? 'divert' : '' } };
+        return { proxy: { socks5Enabled: $('cfg-socks-on').checked, socks5Listen: hostValue('cfg-socks-listen','SOCKS5 地址'), socks5Port: portValue('cfg-socks-port','SOCKS5 端口'), httpEnabled: $('cfg-http-on').checked, httpListen: hostValue('cfg-http-listen','HTTP 地址'), httpPort: portValue('cfg-http-port','HTTP 端口') }, network: { mode: $('cfg-tun-on').checked ? 'divert' : '', dnsMode: $('cfg-dns-mode').value } };
       case 'share':
         return { exit: { enabled: $('cfg-exit-on').checked, allowInternet: $('cfg-exit-internet').checked, allowPrivateNetwork: $('cfg-exit-private').checked, allowLoopback: $('cfg-exit-loopback').checked, access: { mode: $('cfg-acl-mode').value, domains: splitLines($('cfg-acl-domains').value), cidrs: splitLines($('cfg-acl-cidrs').value) } } };
       case 'routing':

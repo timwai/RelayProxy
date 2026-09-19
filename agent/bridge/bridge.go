@@ -185,6 +185,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.Access.Domains = c.AccessDomains
 	res.Exit.Access.CIDRs = c.AccessCIDRs
 	res.Network.Mode = c.NetworkMode
+	res.Network.DNSMode = c.DivertConfig.DNSMode
 	res.Network.ExcludeProcesses = c.DivertConfig.ExcludeProcesses
 	res.Routing = c.Routing
 	return res
@@ -226,6 +227,7 @@ type ConfigUpdate struct {
 	} `json:"exit"`
 	Network struct {
 		Mode             *string   `json:"mode"` // "" (off) | "divert"
+		DNSMode          *string   `json:"dnsMode"`
 		ExcludeProcesses *[]string `json:"excludeProcesses"`
 	} `json:"network"`
 	Routing *RoutingConfigUpdate `json:"routing"`
@@ -379,6 +381,15 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 			return nil, fmt.Errorf("网络模式必须是 divert（或留空关闭）")
 		}
 	}
+	if in.Network.DNSMode != nil {
+		mode := strings.ToLower(strings.TrimSpace(*in.Network.DNSMode))
+		switch mode {
+		case divert.DNSModeAuto, divert.DNSModeProxy, divert.DNSModeDirect, divert.DNSModeRule:
+			cfg.Network.DNSMode = mode
+		default:
+			return nil, fmt.Errorf("DNS 模式必须是 auto / proxy / direct / rule")
+		}
+	}
 	if in.Network.ExcludeProcesses != nil {
 		cfg.Network.ExcludeProcesses = cleanLines(*in.Network.ExcludeProcesses)
 	}
@@ -454,7 +465,14 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	// The same validators ran before persistence. Publish both policy sets only
 	// after saving; mode, credentials and ACL remain the actual startup values.
 	dcfg := cfg.DivertConfig()
-	dcfg.Mode = b.agent.Config().NetworkMode
+	runtimeCfg := b.agent.Config()
+	dcfg.Mode = runtimeCfg.NetworkMode
+	// DNS mode is a startup setting. Existing Windows DNS Client UDP endpoints
+	// can remain alive for a long time, and changing their kernel WFP action
+	// without rebuilding the matching userspace association would mix old and
+	// new policy. Persist the desired value, but keep the running mode until
+	// restart so the UI and driver never disagree about an established flow.
+	dcfg.DNSMode = runtimeCfg.DivertConfig.DNSMode
 	if err := b.agent.ApplyPolicies(cfg.Routing, dcfg); err != nil {
 		return nil, fmt.Errorf("配置已保存在磁盘，但应用失败: %w", err)
 	}
@@ -492,6 +510,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"私网访问": c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
 		"访问控制模式": c.Exit.Access.Mode, "访问域名": strings.Join(c.Exit.Access.Domains, "\n"),
 		"访问地址": strings.Join(c.Exit.Access.CIDRs, "\n"), "透明代理开关": c.Network.Mode,
+		"DNS 模式": c.Network.DNSMode,
 	}
 }
 
@@ -513,7 +532,8 @@ func policyFingerprint(c *config.AgentConfigFile) string {
 		r.Rules = []routing.Rule{}
 	}
 	d := c.DivertConfig()
-	d.Mode = "" // mode is a startup setting, never published by a policy reload.
+	d.Mode = ""    // mode is a startup setting, never published by a policy reload.
+	d.DNSMode = "" // DNS mode also requires restart; persistent UDP endpoints retain their running policy.
 	if d.Rules == nil {
 		d.Rules = []divert.Rule{}
 	}

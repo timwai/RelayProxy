@@ -1,0 +1,148 @@
+name: Windows WFP CI
+
+on:
+  push:
+    branches:
+      - feature/windows-wfp
+    paths:
+      - 'agent/divert/**'
+      - 'agent/app/**'
+      - 'cmd/relay-agent/**'
+      - 'internal/config/**'
+      - 'native/windows/wfp/**'
+      - 'scripts/build-wfp.ps1'
+      - 'scripts/build.ps1'
+      - 'scripts/install-wfp.ps1'
+      - 'scripts/uninstall-wfp.ps1'
+      - '.github/workflows/windows-wfp.yml'
+      - 'go.mod'
+      - 'go.sum'
+  pull_request:
+    paths:
+      - 'agent/divert/**'
+      - 'agent/app/**'
+      - 'cmd/relay-agent/**'
+      - 'internal/config/**'
+      - 'native/windows/wfp/**'
+      - 'scripts/build-wfp.ps1'
+      - 'scripts/build.ps1'
+      - 'scripts/install-wfp.ps1'
+      - 'scripts/uninstall-wfp.ps1'
+      - '.github/workflows/windows-wfp.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  go-windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Validate PowerShell scripts
+        shell: pwsh
+        run: |
+          foreach ($script in @('scripts/build.ps1','scripts/build-wfp.ps1','scripts/install-wfp.ps1','scripts/uninstall-wfp.ps1')) {
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$errors)
+            if ($errors.Count) {
+              $errors | Format-List
+              throw "PowerShell syntax validation failed: $script"
+            }
+          }
+      - name: Test Windows packages
+        shell: pwsh
+        run: go test ./agent/divert ./agent/app ./internal/config ./cmd/relay-agent -count=1
+      - name: Compile Windows amd64
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -o "$env:RUNNER_TEMP\relay-agent-amd64.exe" ./cmd/relay-agent
+      - name: Compile Windows arm64
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'arm64'
+          go build -o "$env:RUNNER_TEMP\relay-agent-arm64.exe" ./cmd/relay-agent
+      - name: Smoke-test ARM64 release packaging
+        shell: pwsh
+        run: |
+          $pkg = Join-Path $env:RUNNER_TEMP 'arm64-package'
+          New-Item -ItemType Directory -Path (Join-Path $pkg 'configs'), (Join-Path $pkg 'wfp') -Force | Out-Null
+          Copy-Item "$env:RUNNER_TEMP\relay-agent-arm64.exe" (Join-Path $pkg 'relay-agent.exe')
+          Copy-Item "$env:RUNNER_TEMP\relay-agent-arm64.exe" (Join-Path $pkg 'relay-agent-gui.exe')
+          Copy-Item 'configs/relay-agent.yaml' (Join-Path $pkg 'configs/relay-agent.yaml')
+          Copy-Item 'native/windows/wfp/RelayProxyWfp.inf' (Join-Path $pkg 'wfp/RelayProxyWfp.inf')
+          Set-Content -LiteralPath (Join-Path $pkg 'wfp/RelayProxyWfp.sys') -Value 'driver-smoke'
+          Set-Content -LiteralPath (Join-Path $pkg 'wfp/RelayProxyWfp.cat') -Value 'catalog-smoke'
+          Copy-Item 'scripts/install-wfp.ps1' (Join-Path $pkg 'install-wfp.ps1')
+          Copy-Item 'scripts/uninstall-wfp.ps1' (Join-Path $pkg 'uninstall-wfp.ps1')
+          $zip = Join-Path $env:RUNNER_TEMP 'RelayProxy-agent-windows-arm64.zip'
+          go run ./scripts/fetch-windivert.go -skip-runtime -agent-dir $pkg -agent-arch arm64 -agent-zip $zip
+          if ($LASTEXITCODE -ne 0) { throw 'ARM64 package smoke test failed' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip)
+          try {
+            $names = @($archive.Entries | ForEach-Object FullName)
+            foreach ($required in @(
+              'windows-arm64/relay-agent.exe',
+              'windows-arm64/relay-agent-gui.exe',
+              'windows-arm64/wfp/RelayProxyWfp.sys',
+              'windows-arm64/wfp/RelayProxyWfp.inf',
+              'windows-arm64/wfp/RelayProxyWfp.cat',
+              'windows-arm64/install-wfp.ps1',
+              'windows-arm64/uninstall-wfp.ps1',
+              'windows-arm64/SHA256SUMS.txt'
+            )) {
+              if ($names -notcontains $required) { throw "ARM64 ZIP missing $required" }
+            }
+          } finally {
+            $archive.Dispose()
+          }
+
+  driver:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
+      - name: Build WFP driver
+        shell: pwsh
+        run: |
+          ./scripts/build-wfp.ps1 -Platform '${{ matrix.platform }}' -Configuration Release -OutDir "$env:RUNNER_TEMP\wfp" -SkipCatalog
+      - name: Verify driver artifact and machine type
+        shell: pwsh
+        run: |
+          $arch = if ('${{ matrix.platform }}' -eq 'x64') { 'amd64' } else { 'arm64' }
+          $sys = "$env:RUNNER_TEMP\wfp\$arch\RelayProxyWfp.sys"
+          if (-not (Test-Path $sys)) { throw "Missing $sys" }
+          Get-Item $sys | Format-List FullName,Length
+          $bytes = [IO.File]::ReadAllBytes($sys)
+          if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw 'Invalid PE image' }
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) { throw 'Invalid PE header offset' }
+          if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset+1] -ne 0x45 -or $bytes[$peOffset+2] -ne 0 -or $bytes[$peOffset+3] -ne 0) { throw 'Missing PE signature' }
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          $expected = if ('${{ matrix.platform }}' -eq 'x64') { [uint16]0x8664 } else { [uint16]0xAA64 }
+          if ($machine -ne $expected) { throw ("Unexpected driver machine 0x{0:X4}; expected 0x{1:X4}" -f $machine, $expected) }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxyWfp-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/wfp/**
+          if-no-files-found: error

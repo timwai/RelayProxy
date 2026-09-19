@@ -143,13 +143,6 @@ func main() {
 		log.Fatalf("[Config] Invalid startup configuration: %v", err)
 	}
 	networkMode := cfgFile.Network.Mode
-	if runtime.GOOS == "windows" && runtime.GOARCH != "amd64" && networkMode == "divert" {
-		// WinDivert currently ships only x64 binaries. Keep the ARM64 Agent
-		// usable with SOCKS5/HTTP instead of exiting before the UI can explain
-		// why transparent interception is unavailable.
-		log.Printf("[Agent] network.mode=divert is unavailable on Windows %s; starting with SOCKS5/HTTP only", runtime.GOARCH)
-		networkMode = ""
-	}
 
 	identityPath := filepath.Join(filepath.Dir(*configPath), "device-identity.json")
 	deviceIdentity, err := deviceidentity.LoadOrCreate(identityPath)

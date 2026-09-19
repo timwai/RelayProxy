@@ -83,10 +83,9 @@ func winDivertFiles(executable string) (string, error) {
 	return "", errors.New("客户端旁未找到外置 WinDivert.dll / WinDivert64.sys")
 }
 
-// WindowsPlatformReadiness never loads a DLL, installs a driver, binds a
-// listener or changes system networking. Opening the driver happens only when
-// the user actually starts an agent configured with network.mode=divert.
-func WindowsPlatformReadiness() error {
+// winDivertPlatformReadiness validates only the legacy x64 fallback. The
+// platform-level readiness selector lives in platform_windows.go.
+func winDivertPlatformReadiness() error {
 	if runtime.GOARCH != "amd64" {
 		return errors.New("系统透明代理目前需要 Windows x64 客户端")
 	}
@@ -139,7 +138,7 @@ func loadWinDivert() (*windivertAPI, error) {
 }
 
 func openWinDivert(filter string) (*windivertHandle, error) {
-	if err := WindowsPlatformReadiness(); err != nil {
+	if err := winDivertPlatformReadiness(); err != nil {
 		return nil, err
 	}
 	// The native parameter is const char*, not Windows' usual UTF-16 string.

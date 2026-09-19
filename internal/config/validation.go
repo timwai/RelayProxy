@@ -56,7 +56,11 @@ func (c *AgentConfigFile) ExitPolicy() acl.Policy {
 }
 
 func (c *AgentConfigFile) DivertConfig() divert.Config {
-	return divert.Config{Mode: c.Network.Mode, ExcludeProcesses: c.Network.ExcludeProcesses}
+	return divert.Config{
+		Mode:             c.Network.Mode,
+		DNSMode:          c.Network.DNSMode,
+		ExcludeProcesses: c.Network.ExcludeProcesses,
+	}
 }
 
 func validateAccess(p acl.Policy) error {
@@ -79,6 +83,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Mode = strings.ToUpper(strings.TrimSpace(c.Mode))
 	c.Transport.Mode = strings.ToLower(strings.TrimSpace(c.Transport.Mode))
 	c.Network.Mode = strings.ToLower(strings.TrimSpace(c.Network.Mode))
+	c.Network.DNSMode = strings.ToLower(strings.TrimSpace(c.Network.DNSMode))
 	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))
 	c.Routing.Mode = routing.Mode(strings.ToLower(strings.TrimSpace(string(c.Routing.Mode))))
 	c.Routing.DefaultAction = routing.Action(strings.ToUpper(strings.TrimSpace(string(c.Routing.DefaultAction))))

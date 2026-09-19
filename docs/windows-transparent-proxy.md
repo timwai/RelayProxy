@@ -1,24 +1,18 @@
 # Windows 系统透明代理
 
-Windows x64 客户端通过 WinDivert 截获新建 TCP 连接和 UDP 数据报。透明代理、SOCKS5 与 HTTP 使用同一套组合路由规则，按进程、域名/IP、端口和协议选择 DIRECT / PROXY / REJECT。PROXY 直接进入 Relay 隧道，并保留规则选定的出口。
+Windows amd64 与 ARM64 客户端优先使用 RelayProxy 原生 WFP callout driver 截获新建 TCP 连接和 UDP 数据报；amd64 在 WFP driver 不可用时保留 WinDivert 2.2.2 回退。透明代理、SOCKS5 与 HTTP 使用同一套路由规则，按进程、域名/IP、端口和协议选择 DIRECT / PROXY / REJECT。WFP 后端直接携带 Windows 进程身份，支持普通进程、SYSTEM/PID 4 与 Windows 服务流量。PROXY 直接进入 Relay 隧道，并保留规则选定的出口。
 
 ## 使用
 
-Windows x64 的 `relay-agent-gui.exe` 和 `relay-agent.exe` 已内嵌官方 WinDivert 2.2.2，单独分发一个 EXE 即可。构建脚本也会生成 `dist/RelayProxy-agent-windows-amd64.zip`，附带示例配置、可选外置运行库、许可证和 SHA256 校验清单。
+发布包的 `windows-amd64/wfp/` 与 `windows-arm64/wfp/` 分别包含对应架构的 `RelayProxyWfp.sys/.inf/.cat`。第一次使用 WFP 前，以管理员 PowerShell 执行同目录的 `install-wfp.ps1`；卸载使用 `uninstall-wfp.ps1`。正式部署必须使用满足 Windows 驱动签名策略的签名包。amd64 的 Agent 仍内嵌官方 WinDivert 2.2.2，WFP 不可用时可以自动回退；ARM64 没有 WinDivert 回退，因此需要安装 ARM64 WFP driver。
 
-> Windows ARM64 产物不包含 x64 WinDivert，因此不支持系统透明代理，但仍可使用 Agent、SOCKS5/HTTP 和本地 Web 管理页。ARM64 桌面窗口还需要安装匹配的 Microsoft Edge WebView2 Runtime；缺失时程序会提示并回退到 Web 管理页。
+1. 安装对应架构的 WFP driver，并确认 `sc query RelayProxyWfp` 为 RUNNING。
+2. 以管理员身份运行 `relay-agent-gui.exe` 或 `relay-agent.exe`，完成服务器与出口配置。
+3. 在“本地代理服务 → 系统透明代理”中启用并保存。命令行对应 `network.mode: divert`。
+4. 根据需要设置 `network.dns_mode`，默认 `auto`；再配置路由规则与默认动作。
+5. 点击“实时连接”查看普通进程、系统进程、PID、域名/IP、协议、动作、出口及双向流量。
 
-1. 将 `relay-agent-gui.exe` 放在固定位置。无需手动下载或携带 WinDivert DLL/驱动目录。
-2. 以管理员身份运行 `relay-agent-gui.exe`，完成服务器与出口配置。
-3. 在“本地代理服务 → 系统透明代理”中启用并保存，退出后仍以管理员身份启动。命令行对应 `network.mode: divert`。
-4. 打开“路由分流”，选择“按规则分流”，填写组合规则并保存。规则更新影响新建 TCP 连接及新的 UDP 关联，已建立的连接保留原决定。
-5. 点击左侧“实时连接 ↗”打开独立窗口，按进程、PID、域名/IP、端口、协议、动作或规则筛选，查看双向速率、累计流量和连接详情。
-
-界面根据实际权限和内嵌依赖显示启用条件。Windows 仍需要从磁盘加载 DLL 与 `.sys` 驱动：首次真正启动透明代理时，客户端将经过 SHA256 校验的原版文件、许可证与来源说明释放到 `%ProgramData%\RelayProxy-WinDivert\2.2.2-<校验前缀>\`，之后校验复用，损坏时重新释放。这个目录只允许 Administrators 和 SYSTEM 写入，不要求 EXE 所在目录可写。
-
-普通启动和查看设置不释放或加载驱动。缺少管理员权限时会在安装拦截前失败；WinDivert 打开失败会关闭已经创建的本地监听，不会把配置显示成已运行。
-
-如需替换动态库，可将兼容的 `WinDivert.dll` 与 `WinDivert64.sys` 一起放在 EXE 旁或其 `windivert` 子目录，这些外置文件优先于内嵌版本。
+WFP device 只允许 Administrators 与 SYSTEM 打开控制接口；Agent 通过心跳维持 controller 所有权。Agent 异常退出、控制句柄关闭或心跳超时后 driver 执行 fail-open，使待决流量恢复 DIRECT，避免遗留过滤规则造成整机断网。
 
 ## 组合路由规则
 
@@ -39,6 +33,7 @@ routing:
       exit_id: "office-exit"
 network:
   mode: divert
+  dns_mode: auto
   exclude_processes: [updater.exe]
 ```
 
@@ -61,6 +56,17 @@ SOCKS5/HTTP 的进程归属来自本机客户端至代理监听端口的实际 T
 
 透明代理的域名来自启用后观察到的明文 UDP DNS 查询与应答。只有查询端点、事务 ID、问题类型和域名一致时才建立关联，支持 A/AAAA 及 CNAME，遵守最短 TTL（最多保留 5 分钟）。同一 IP 对应多个有效域名时不选择其中任意一个。加密 DNS、TCP DNS、系统缓存、回环 DNS 和启用前的解析可能只有 IP 信息，域名规则不会命中这些未知名称。DNS 关联不证明该应用请求了这个域名，窗口会明确标注来源。
 
+### DNS 模式
+
+`network.dns_mode` 支持四种模式：
+
+- `auto`：默认。Relay 会话尚未通过认证时 DNS 直连；会话 ready 后，WFP 中已经存在的 UDP/53 flow 也会动态切换到 PROXY；会话丢失则立即恢复 DIRECT。
+- `proxy`：DNS 始终按 PROXY 处理，经 Relay tunnel 转发到应用原本选择的 DNS 服务器。UDP/53 复用现有 UDP forwarding 与 WFP reply injection；TCP/53 复用 TCP redirect/ForwardTCP。
+- `direct`：DNS 始终直连，但仍可观察明文 UDP DNS 应答建立 hostname association。
+- `rule`：DNS 与普通流量一样使用路由规则和默认动作。
+
+WFP 自注入包通过 injection-state 检查直接放行，RelayProxy 自身 PID 与本地回环也强制旁路，避免 DNS/隧道递归。DoH/DoT 属于普通 TCP/UDP 流量，不伪装成 UDP/53；是否代理由普通规则决定。
+
 ## 实时连接窗口
 
 每秒刷新，速率为近 2 秒的平均值。窗口显示进程名/PID、请求或 DNS 关联域名、已知目标 IP、端口、协议、入口、动作、命中规则、双向速率、累计上传/下载和时长。点选连接可查看完整路径、本地端点、出口与错误原因；可暂停显示并查看最近结束、失败或阻断的连接。
@@ -81,14 +87,22 @@ SOCKS5/HTTP 的进程归属来自本机客户端至代理监听端口的实际 T
 
 ## 构建
 
-`scripts/build.ps1` 和 `scripts/build.sh` 会先下载并校验固定版本的官方压缩包，再编译内嵌 WinDivert 的客户端。源码中的 `agent/divert/windivert/WinDivert-2.2.2-A.zip` 保留完整官方发行包及许可证；普通 `go build ./cmd/relay-agent` 同样会内嵌它，Linux/macOS 构建不会包含该资源。
+Windows 原生 driver 使用 `scripts/build-wfp.ps1`。在安装 Visual Studio 2022 Build Tools/C++ 与 WDK 10.0.26100.x 的 Windows 构建机上执行：
+
+```powershell
+.\scripts\build-wfp.ps1 -Platform all -Configuration Release
+```
+
+默认输出 `dist/windows-wfp/amd64` 与 `dist/windows-wfp/arm64`。可使用 `-CertificateThumbprint` 对 SYS/CAT 签名。`scripts/build.ps1` 默认同时构建 WFP x64/ARM64 并放入对应 Windows 发布目录；没有 WDK 的普通 Go 发布可临时使用 `-SkipWFP`，但该 ARM64 包不具备透明代理 driver。
+
+amd64 仍下载并校验固定版本的官方 WinDivert 2.2.2 作为回退；源码中的内嵌 WinDivert archive 及许可证保持原样。
 
 ## 当前边界
 
 - 支持 IPv4/IPv6 TCP 与 UDP；UDP 最大负载为 65507 字节。
-- 本进程、中继端点、中继域名的 DNS 查询和本机代理入口强制直连，避免重捕获形成循环。本机、组播、广播和链路本地流量不经隧道。
+- 本进程、中继端点和本机代理入口强制直连，避免重捕获形成循环。本机、组播、广播和链路本地流量不经隧道。DNS 行为由 `network.dns_mode` 控制。
 - 开启前已经建立的 TCP 连接继续使用原路径。需要让目标应用重新建立连接。
-- 不从网络层数据猜测 PID；通过 Windows TCP/UDP OWNER_PID 表取得归属。无法确定或存在多个 PID 时拒绝该流，并记录错误。
+- WFP 后端使用 ALE metadata 的 PID/process path，PID 4 在可信系统 metadata 下显示为 `System`；不会因为路径查询失败就把任意流量伪装成 System。amd64 的 WinDivert 回退仍使用 OWNER_PID 表。
 - 域名条件仅在存在请求域名或有效 DNS 关联时匹配，见上方说明。
 - 不支持原始 IP 分片重组、源路由、IPsec AH/ESP 和 IPv6 jumbogram；无法分类的出站报文丢弃并记录原因。普通入站报文继续交给 Windows 处理，捕获范围的扩大不会阻断它们；透明重定向监听端口仍阻止外来连接。
 - Linux 使用 NFQUEUE/iptables，macOS 使用签名后的 Network Extension；部署前提与验收方法分别见 `linux-transparent-proxy.md` 和 `../agent/divert/macos/README.md`。

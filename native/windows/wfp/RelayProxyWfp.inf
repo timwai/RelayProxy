@@ -1,0 +1,48 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4D36E97D-E325-11CE-BFC1-08002BE10318}
+Provider=%ProviderName%
+DriverVer=09/19/2026,1.0.0.0
+CatalogFile=RelayProxyWfp.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir=12
+RelayProxyWfp.CopyFiles=12
+
+[DefaultInstall.NTamd64]
+CopyFiles=RelayProxyWfp.CopyFiles
+
+[DefaultInstall.NTarm64]
+CopyFiles=RelayProxyWfp.CopyFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService=RelayProxyWfp,0x00000002,RelayProxyWfp.Service
+
+[DefaultInstall.NTarm64.Services]
+AddService=RelayProxyWfp,0x00000002,RelayProxyWfp.Service
+
+[RelayProxyWfp.CopyFiles]
+RelayProxyWfp.sys
+
+[RelayProxyWfp.Service]
+DisplayName=%ServiceName%
+Description=%ServiceDescription%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\RelayProxyWfp.sys
+Dependencies=BFE
+
+[SourceDisksNames]
+1=%DiskName%,,,
+
+[SourceDisksFiles]
+RelayProxyWfp.sys=1
+
+[Strings]
+ProviderName="RelayProxy"
+ServiceName="RelayProxy WFP Callout Driver"
+ServiceDescription="RelayProxy native Windows Filtering Platform transparent proxy"
+DiskName="RelayProxy WFP Driver"

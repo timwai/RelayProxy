@@ -501,7 +501,11 @@ func (i *wfpInterceptor) handleClose(event wfpEvent) {
 	if route == nil {
 		return
 	}
-	if route.Decision().Action == ActionDirect && len(event.Payload) >= 16 {
+	// The kernel counters represent only bytes that were actually passed
+	// DIRECT. AUTO DNS can spend part of one persistent UDP flow in DIRECT and
+	// later switch to PROXY, so add the counters regardless of the userspace
+	// route's final/durable action.
+	if len(event.Payload) >= 16 {
 		upload := binary.LittleEndian.Uint64(event.Payload[0:8])
 		download := binary.LittleEndian.Uint64(event.Payload[8:16])
 		if upload > 0 {

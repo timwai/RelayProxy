@@ -47,6 +47,15 @@ func budgetEnvelope(id uint64, frame []byte) []byte {
 	return b
 }
 
+func budgetFragment(t *testing.T, frame []byte) protocol.UDPFragment {
+	t.Helper()
+	fragment, err := protocol.DecodeUDPFragment(frame)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fragment
+}
+
 type budgetStream struct{ net.Conn }
 
 func (budgetStream) CloseWrite() error { return nil }
@@ -134,30 +143,30 @@ func TestDatagramReassemblyBudgetSharedAndReleased(t *testing.T) {
 	a, b := budgetMux(t, budget), budgetMux(t, budget)
 	pa, pb := budgetConn(t, budgetChannel(t, a, 1)), budgetConn(t, budgetChannel(t, b, 1))
 	dst := make([]byte, len(payload))
-	if _, complete := pa.assemble(frames[0], dst); complete {
+	if _, complete := pa.assemble(budgetFragment(t, frames[0]), dst); complete {
 		t.Fatal("incomplete packet delivered")
 	}
 	if got := budget.reassemblyBytes.Load(); got != int64(len(payload)) {
 		t.Fatalf("expected one complete-packet reservation, got %d", got)
 	}
-	if _, complete := pb.assemble(frames[0], dst); complete || b.reassemblyBytes.Load() != 0 || len(pb.pending) != 0 {
+	if _, complete := pb.assemble(budgetFragment(t, frames[0]), dst); complete || b.reassemblyBytes.Load() != 0 || len(pb.pending) != 0 {
 		t.Fatal("rejected assembly retained a session reservation")
 	}
 	if budget.reassemblyDrops.Load() != 1 {
 		t.Fatal("reassembly overload was not counted")
 	}
-	_, _ = pa.assemble(frames[0], dst) // Duplicate fragments cannot reserve again.
-	_, _ = pa.assemble(frames[2], dst)
-	n, complete := pa.assemble(frames[1], dst)
+	_, _ = pa.assemble(budgetFragment(t, frames[0]), dst) // Duplicate fragments cannot reserve again.
+	_, _ = pa.assemble(budgetFragment(t, frames[2]), dst)
+	n, complete := pa.assemble(budgetFragment(t, frames[1]), dst)
 	if !complete || n != len(payload) || !bytes.Equal(dst, payload) || budget.reassemblyBytes.Load() != 0 {
 		t.Fatalf("out-of-order completion: n=%d complete=%t usage=%+v", n, complete, budget.usage())
 	}
-	_, _ = pb.assemble(frames[0], dst)
+	_, _ = pb.assemble(budgetFragment(t, frames[0]), dst)
 	_ = pb.channel.Close()
 	if budget.reassemblyBytes.Load() != 0 || b.reassemblyBytes.Load() != 0 {
 		t.Fatalf("channel close did not synchronously release pending packet: %+v", budget.usage())
 	}
-	_, _ = pb.assemble(frames[1], dst)
+	_, _ = pb.assemble(budgetFragment(t, frames[1]), dst)
 	if budget.reassemblyBytes.Load() != 0 {
 		t.Fatal("closed association accepted a late reassembly reservation")
 	}
@@ -252,7 +261,7 @@ func TestQUICDisconnectReleasesNativeBudgets(t *testing.T) {
 	defer pb.Close()
 	payload := bytes.Repeat([]byte("p"), protocol.UDPFragmentPayload+1)
 	frame := budgetFrames(t, 1, payload)[0]
-	_, _ = pa.assemble(frame, make([]byte, len(payload)))
+	_, _ = pa.assemble(budgetFragment(t, frame), make([]byte, len(payload)))
 	ca.mux.deliver(budgetEnvelope(ca.ID, frame))
 	cb.mux.deliver(budgetEnvelope(cb.ID, frame))
 	_ = client.Close()
@@ -271,4 +280,51 @@ func TestQUICDisconnectReleasesNativeBudgets(t *testing.T) {
 	if got := NativeUDPUsage(); got.Associations != baseline.Associations || got.QueueBytes != baseline.QueueBytes || got.ReassemblyBytes != baseline.ReassemblyBytes {
 		t.Fatalf("QUIC disconnect leaked budget: before=%+v after=%+v", baseline, got)
 	}
+}
+
+
+func TestDatagramRelayPacketReusesBackingBuffer(t *testing.T) {
+	frame := budgetFrames(t, 7, []byte("relay-payload"))[0]
+	budget := &datagramBudget{associationLimit: 2, queueLimit: 1 << 16, reassemblyLimit: 1 << 16}
+	srcMux, dstMux := budgetMux(t, budget), budgetMux(t, budget)
+	src, dst := budgetChannel(t, srcMux, 11), budgetChannel(t, dstMux, 22)
+
+	envelope := budgetEnvelope(src.ID, frame)
+	srcMux.deliver(envelope)
+	packet, err := src.ReceivePacket(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packet.PayloadBytes() != len([]byte("relay-payload")) {
+		t.Fatalf("payload bytes=%d", packet.PayloadBytes())
+	}
+	backing := packet.packet
+	if err := dst.ForwardPacket(context.Background(), packet); err != nil {
+		t.Fatal(err)
+	}
+	if packet.packet != nil {
+		t.Fatal("ForwardPacket did not consume ownership")
+	}
+
+	dstMux.mu.RLock()
+	select {
+	case queued := <-dstMux.send:
+		dstMux.budget.releaseQueue(len(queued.packet))
+		if len(queued.packet) == 0 || &queued.packet[0] != &backing[0] {
+			dstMux.mu.RUnlock()
+			t.Fatal("relay forwarding copied the datagram buffer")
+		}
+		if got := binary.BigEndian.Uint64(queued.packet[3:11]); got != dst.ID {
+			dstMux.mu.RUnlock()
+			t.Fatalf("forwarded association=%d want=%d", got, dst.ID)
+		}
+		releaseDatagramPacket(queued.packet)
+	default:
+		dstMux.mu.RUnlock()
+		t.Fatal("forwarded datagram not queued")
+	}
+	dstMux.mu.RUnlock()
+	_ = src.Close()
+	_ = dst.Close()
+	requireBudgetZero(t, budget)
 }

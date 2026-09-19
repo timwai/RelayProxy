@@ -3,6 +3,14 @@
   var key = 'relayproxy-ui-theme';
   var media = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
+  function platformName() {
+    var value = String((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '').toLowerCase();
+    if (value.indexOf('mac') >= 0 || value.indexOf('iphone') >= 0 || value.indexOf('ipad') >= 0) return 'macos';
+    if (value.indexOf('win') >= 0) return 'windows';
+    if (value.indexOf('linux') >= 0 || value.indexOf('x11') >= 0) return 'linux';
+    return 'web';
+  }
+
   function normalize(mode) {
     mode = String(mode || '').toLowerCase();
     return mode === 'light' || mode === 'dark' || mode === 'system' ? mode : 'system';
@@ -31,11 +39,14 @@
     return actual;
   }
 
+  document.documentElement.dataset.platform = platformName();
+
   window.RelayUITheme = {
     get: function () { return normalize(document.documentElement.dataset.themeMode || stored()); },
     effective: effective,
     set: function (mode) { return apply(mode, true); },
-    apply: function (mode, persist) { return apply(mode, persist); }
+    apply: function (mode, persist) { return apply(mode, persist); },
+    platform: function () { return document.documentElement.dataset.platform || 'web'; }
   };
 
   if (media) {

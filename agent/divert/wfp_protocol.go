@@ -21,6 +21,7 @@ const (
 	wfpFeatureUDP
 	wfpFeatureIPv6
 	wfpFeatureSystemIdentity
+	wfpFeatureDNSControl
 )
 
 const (
@@ -76,7 +77,7 @@ func decodeWFPVersion(data []byte) (wfpVersion, error) {
 	if v.ABI != wfpABIVersion || v.Size < 16 {
 		return wfpVersion{}, fmt.Errorf("wfp: incompatible driver ABI %d size %d", v.ABI, v.Size)
 	}
-	required := wfpFeatureTCP | wfpFeatureUDP | wfpFeatureIPv6 | wfpFeatureSystemIdentity
+	required := wfpFeatureTCP | wfpFeatureUDP | wfpFeatureIPv6 | wfpFeatureSystemIdentity | wfpFeatureDNSControl
 	if v.Features&required != required {
 		return wfpVersion{}, fmt.Errorf("wfp: driver features 0x%x missing required 0x%x", v.Features, required)
 	}

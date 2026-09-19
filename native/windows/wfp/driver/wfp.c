@@ -7,7 +7,7 @@
 static NTSTATUS NTAPI RpNotify(
     _In_ FWPS_CALLOUT_NOTIFY_TYPE NotifyType,
     _In_ const GUID* FilterKey,
-    _Inout_ FWPS_FILTER0* Filter)
+    _Inout_ FWPS_FILTER1* Filter)
 {
     UNREFERENCED_PARAMETER(NotifyType);
     UNREFERENCED_PARAMETER(FilterKey);
@@ -227,7 +227,7 @@ static VOID NTAPI RpAuthClassify(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,
     _Inout_opt_ VOID* LayerData,
     _In_opt_ const VOID* ClassifyContext,
-    _In_ const FWPS_FILTER0* Filter,
+    _In_ const FWPS_FILTER1* Filter,
     _In_ UINT64 FlowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* ClassifyOut)
 {
@@ -374,7 +374,7 @@ static VOID NTAPI RpRedirectClassify(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,
     _Inout_opt_ VOID* LayerData,
     _In_opt_ const VOID* ClassifyContext,
-    _In_ const FWPS_FILTER0* Filter,
+    _In_ const FWPS_FILTER1* Filter,
     _In_ UINT64 FlowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* ClassifyOut)
 {
@@ -500,7 +500,7 @@ static VOID NTAPI RpFlowEstablishedClassify(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,
     _Inout_opt_ VOID* LayerData,
     _In_opt_ const VOID* ClassifyContext,
-    _In_ const FWPS_FILTER0* Filter,
+    _In_ const FWPS_FILTER1* Filter,
     _In_ UINT64 FlowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* ClassifyOut)
 {
@@ -646,7 +646,7 @@ static VOID NTAPI RpDatagramClassify(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,
     _Inout_opt_ VOID* LayerData,
     _In_opt_ const VOID* ClassifyContext,
-    _In_ const FWPS_FILTER0* Filter,
+    _In_ const FWPS_FILTER1* Filter,
     _In_ UINT64 FlowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* ClassifyOut)
 {
@@ -736,7 +736,7 @@ static VOID NTAPI RpStreamClassify(
     _In_ const FWPS_INCOMING_METADATA_VALUES0* Metadata,
     _Inout_opt_ VOID* LayerData,
     _In_opt_ const VOID* ClassifyContext,
-    _In_ const FWPS_FILTER0* Filter,
+    _In_ const FWPS_FILTER1* Filter,
     _In_ UINT64 FlowContext,
     _Inout_ FWPS_CLASSIFY_OUT0* ClassifyOut)
 {
@@ -776,17 +776,17 @@ static VOID NTAPI RpStreamClassify(
 static NTSTATUS RpRegisterRuntimeCallout(
     _In_ PDEVICE_OBJECT DeviceObject,
     _In_ const GUID* Key,
-    _In_ FWPS_CALLOUT_CLASSIFY_FN0 ClassifyFn,
+    _In_ FWPS_CALLOUT_CLASSIFY_FN1 ClassifyFn,
     _In_opt_ FWPS_CALLOUT_FLOW_DELETE_NOTIFY_FN0 FlowDeleteFn,
     _Out_ UINT32* CalloutId)
 {
-    FWPS_CALLOUT0 callout;
+    FWPS_CALLOUT1 callout;
     RtlZeroMemory(&callout, sizeof(callout));
     callout.calloutKey = *Key;
     callout.classifyFn = ClassifyFn;
     callout.notifyFn = RpNotify;
     callout.flowDeleteFn = FlowDeleteFn;
-    return FwpsCalloutRegister0(DeviceObject, &callout, CalloutId);
+    return FwpsCalloutRegister1(DeviceObject, &callout, CalloutId);
 }
 
 static NTSTATUS RpAddCalloutAndFilter(
@@ -922,7 +922,7 @@ NTSTATUS RpWfpStart(_In_ PDEVICE_OBJECT DeviceObject)
     provider.displayData.name = L"RelayProxy";
     provider.displayData.description = L"RelayProxy native transparent proxy";
     status = FwpmProviderAdd0(g_RpState.EngineHandle, &provider, NULL);
-    if (!NT_SUCCESS(status) && status != FWP_E_ALREADY_EXISTS) {
+    if (!NT_SUCCESS(status)) {
         goto Exit;
     }
 
@@ -933,7 +933,7 @@ NTSTATUS RpWfpStart(_In_ PDEVICE_OBJECT DeviceObject)
     subLayer.providerKey = (GUID*)&RP_PROVIDER_GUID;
     subLayer.weight = 0x7f00;
     status = FwpmSubLayerAdd0(g_RpState.EngineHandle, &subLayer, NULL);
-    if (!NT_SUCCESS(status) && status != FWP_E_ALREADY_EXISTS) {
+    if (!NT_SUCCESS(status)) {
         goto Exit;
     }
 

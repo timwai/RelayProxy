@@ -38,15 +38,25 @@ function Find-Tool {
 }
 
 function Find-MSBuild {
+    # WDK 28000 INF verification requires a 64-bit MSBuild host. Prefer the
+    # amd64 MSBuild explicitly; a 32-bit host makes the WDK task look for the
+    # obsolete x86\InfVerif.dll path and can fail after the driver already linked.
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath |
+            Select-Object -First 1
+        if ($vsPath) {
+            $amd64 = Join-Path $vsPath "MSBuild\Current\Bin\amd64\MSBuild.exe"
+            if (Test-Path $amd64) { return $amd64 }
+
+            $x64 = Join-Path $vsPath "MSBuild\Current\Bin\MSBuild.exe"
+            if (Test-Path $x64) { return $x64 }
+        }
+    }
+
     $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
 
-    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $vswhere) {
-        $path = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" |
-            Select-Object -First 1
-        if ($path) { return $path }
-    }
     throw "MSBuild.exe not found. Install Visual Studio 2026 with Desktop development with C++ and the Windows Driver Kit component."
 }
 
@@ -97,6 +107,11 @@ function Build-One {
     Write-Host "[WFP] Building $TargetPlatform / $Configuration" -ForegroundColor Cyan
 
     $msbuild = Find-MSBuild
+    Write-Host "[WFP] MSBuild host: $msbuild" -ForegroundColor DarkGray
+    if ($msbuild -notmatch "\\amd64\\MSBuild\.exe$") {
+        Write-Warning "64-bit MSBuild was not found; WDK 28000 INF verification may fail by trying to load x86\InfVerif.dll."
+    }
+
     $stampInf = Find-Tool "stampinf.exe"
     if (-not $stampInf) {
         throw @"

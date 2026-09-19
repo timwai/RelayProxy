@@ -103,10 +103,7 @@ type DatagramPacket struct {
 	payloadBytes int
 }
 
-func (p *DatagramPacket) PayloadBytes() int {
-	if p == nil {
-		return 0
-	}
+func (p DatagramPacket) PayloadBytes() int {
 	return p.payloadBytes
 }
 
@@ -449,22 +446,21 @@ func (c *DatagramChannel) Receive(ctx context.Context) ([]byte, error) {
 
 // ReceivePacket transfers ownership of one validated native datagram to the
 // caller. It is intended for Relay forwarding; endpoints should use Receive.
-func (c *DatagramChannel) ReceivePacket(ctx context.Context) (*DatagramPacket, error) {
+func (c *DatagramChannel) ReceivePacket(ctx context.Context) (DatagramPacket, error) {
 	f, err := c.receiveDatagram(ctx)
 	if err != nil {
-		return nil, err
+		return DatagramPacket{}, err
 	}
-	return &DatagramPacket{packet: f.packet, payloadBytes: len(f.fragment.Payload)}, nil
+	return DatagramPacket{packet: f.packet, payloadBytes: len(f.fragment.Payload)}, nil
 }
 
 // ForwardPacket consumes packet. The source ReceivePacket buffer is reused;
 // only the association envelope changes before quic-go queues its own copy.
-func (c *DatagramChannel) ForwardPacket(ctx context.Context, packet *DatagramPacket) error {
-	if packet == nil || len(packet.packet) < datagramEnvelopeSize+protocol.UDPFragmentHeaderSize {
+func (c *DatagramChannel) ForwardPacket(ctx context.Context, packet DatagramPacket) error {
+	if len(packet.packet) < datagramEnvelopeSize+protocol.UDPFragmentHeaderSize {
 		return protocol.ErrUDPFragment
 	}
 	raw := packet.packet
-	packet.packet = nil
 	if err := ctx.Err(); err != nil {
 		releaseDatagramPacket(raw)
 		return err

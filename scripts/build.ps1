@@ -22,7 +22,8 @@
 #>
 param(
     [string]$OutDir = "",
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.0",
+    [switch]$SkipWFP
 )
 
 $ErrorActionPreference = "Stop"
@@ -247,61 +248,7 @@ try {
     $checksumFile = Join-Path $OutDir "SHA256SUMS.txt"
     $lines = @()
     Get-ChildItem -Path $OutDir -Recurse -File |
-        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxyWfp\.(sys|inf|cat)$|^RelayProxy-agent-windows-(amd64|arm64)\.zip |
-        ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
-            $rel = $rel -replace '\\', '/'
-            $lines += "$hash  $rel"
-            Write-Host "  $hash  $rel"
-        }
-    $lines | Set-Content -Path $checksumFile -Encoding utf8
-
-    # Restore host env
-    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
-    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
-    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
-
-    Write-Host ""
-    Write-Host "=================================================="
-    Write-Host " Build complete -> $OutDir" -ForegroundColor Green
-    Write-Host "=================================================="
-    Write-Host @"
-
-产物布局:
-  RelayProxy-agent-windows-amd64.zip Windows x64 客户端完整分发包（WFP + WinDivert 回退）
-  RelayProxy-agent-windows-arm64.zip Windows ARM64 客户端完整分发包（WFP）
-  linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
-  linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
-  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
-  windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
-  windows-amd64/wfp/                 WFP x64 驱动包及安装脚本
-  windows-arm64/wfp/                 WFP ARM64 驱动包及安装脚本
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端
-  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
-  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
-  */configs/*.yaml                  示例配置
-  SHA256SUMS.txt
-
-部署提示:
-  Linux:  chmod +x relay-server && ./relay-server -config configs/relay-server.yaml
-  Admin:  https://<server>:8443
-  桌面:   双击 relay-agent-gui.exe
-  透明代理: 以管理员身份启动 Windows 客户端；保存启用设置后重启
-  自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
-  配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
-  授权:   首次连接后，在服务端管理控制台批准设备
-  无界面: relay-agent.exe --no-gui
-  自定义: relay-agent.exe --config <配置文件路径>
-
-"@
-}
-finally {
-    Pop-Location
-}
- } |
+        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxyWfp\.(sys|inf|cat)$|^RelayProxy-agent-windows-amd64\.zip$' } |
         ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')

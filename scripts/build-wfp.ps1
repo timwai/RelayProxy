@@ -1,0 +1,126 @@
+#Requires -Version 5.1
+[CmdletBinding()]
+param(
+    [ValidateSet("all", "x64", "ARM64")]
+    [string]$Platform = "all",
+    [ValidateSet("Debug", "Release")]
+    [string]$Configuration = "Release",
+    [string]$OutDir = "",
+    [string]$CertificateThumbprint = "",
+    [switch]$SkipCatalog
+)
+
+$ErrorActionPreference = "Stop"
+$Root = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
+$Project = Join-Path $Root "native\windows\wfp\RelayProxyWfp.vcxproj"
+$Inf = Join-Path $Root "native\windows\wfp\RelayProxyWfp.inf"
+
+if (-not $OutDir) {
+    $OutDir = Join-Path $Root "dist\windows-wfp"
+}
+$OutDir = [System.IO.Path]::GetFullPath($OutDir)
+
+function Find-Tool {
+    param([string]$Name)
+    $cmd = Get-Command $Name -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    $kits = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
+    if (Test-Path $kits) {
+        $match = Get-ChildItem $kits -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName "x64\$Name" } |
+            Where-Object { Test-Path $_ } |
+            Select-Object -First 1
+        if ($match) { return $match }
+    }
+    return $null
+}
+
+function Find-MSBuild {
+    $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vswhere) {
+        $path = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" |
+            Select-Object -First 1
+        if ($path) { return $path }
+    }
+    throw "MSBuild.exe not found. Install Visual Studio 2022 Build Tools with C++ and WDK support."
+}
+
+function Build-One {
+    param([string]$TargetPlatform)
+
+    $arch = if ($TargetPlatform -eq "x64") { "amd64" } else { "arm64" }
+    Write-Host "[WFP] Building $TargetPlatform / $Configuration" -ForegroundColor Cyan
+
+    $msbuild = Find-MSBuild
+    & $msbuild $Project `
+        /restore `
+        /m `
+        /t:Build `
+        /p:Configuration=$Configuration `
+        /p:Platform=$TargetPlatform `
+        /p:SignMode=Off `
+        /nologo
+    if ($LASTEXITCODE -ne 0) {
+        throw "WFP driver build failed for $TargetPlatform"
+    }
+
+    $sys = Join-Path $Root "native\windows\wfp\bin\$TargetPlatform\$Configuration\RelayProxyWfp.sys"
+    if (-not (Test-Path $sys)) {
+        $sys = Get-ChildItem (Join-Path $Root "native\windows\wfp") -Recurse -Filter RelayProxyWfp.sys |
+            Where-Object { $_.FullName -match [regex]::Escape($TargetPlatform) -and $_.FullName -match [regex]::Escape($Configuration) } |
+            Select-Object -ExpandProperty FullName -First 1
+    }
+    if (-not $sys -or -not (Test-Path $sys)) {
+        throw "RelayProxyWfp.sys was not produced for $TargetPlatform"
+    }
+
+    $package = Join-Path $OutDir $arch
+    New-Item -ItemType Directory -Path $package -Force | Out-Null
+    Copy-Item $sys (Join-Path $package "RelayProxyWfp.sys") -Force
+    Copy-Item $Inf (Join-Path $package "RelayProxyWfp.inf") -Force
+
+    if (-not $SkipCatalog) {
+        $inf2cat = Find-Tool "Inf2Cat.exe"
+        if ($inf2cat) {
+            $os = if ($TargetPlatform -eq "x64") { "10_X64" } else { "10_ARM64" }
+            & $inf2cat /driver:$package /os:$os /uselocaltime
+            if ($LASTEXITCODE -ne 0) {
+                throw "Inf2Cat failed for $TargetPlatform"
+            }
+        } else {
+            Write-Warning "Inf2Cat.exe not found; package has no catalog. Install the Windows Driver Kit to create an installable package."
+        }
+    }
+
+    if ($CertificateThumbprint) {
+        $signtool = Find-Tool "signtool.exe"
+        if (-not $signtool) {
+            throw "signtool.exe not found"
+        }
+        $targets = @((Join-Path $package "RelayProxyWfp.sys"))
+        $cat = Join-Path $package "RelayProxyWfp.cat"
+        if (Test-Path $cat) { $targets += $cat }
+        foreach ($target in $targets) {
+            & $signtool sign /sha1 $CertificateThumbprint /fd SHA256 /tr "http://timestamp.digicert.com" /td SHA256 $target
+            if ($LASTEXITCODE -ne 0) {
+                throw "Signing failed: $target"
+            }
+        }
+    }
+
+    $hash = (Get-FileHash (Join-Path $package "RelayProxyWfp.sys") -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Host "[WFP] $arch OK SHA256=$hash" -ForegroundColor Green
+}
+
+if (-not (Test-Path $Project)) { throw "Missing project: $Project" }
+if (-not (Test-Path $Inf)) { throw "Missing INF: $Inf" }
+
+$targets = if ($Platform -eq "all") { @("x64", "ARM64") } else { @($Platform) }
+foreach ($target in $targets) {
+    Build-One $target
+}

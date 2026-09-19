@@ -148,6 +148,7 @@ func TestInvalidUpdatesPreserveDiskAndRuntime(t *testing.T) {
 			in.Routing = &RoutingConfigUpdate{Rules: []routing.Rule{{Enabled: false, Processes: []string{"browser.exe"}, Ports: []string{"70000"}, Action: routing.ActionProxy}}}
 		}},
 		{"theme", func(in *ConfigUpdate) { in.GUI.Theme = ptr("unknown-theme") }},
+		{"dns mode", func(in *ConfigUpdate) { in.Network.DNSMode = ptr("sometimes") }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -429,5 +430,28 @@ func TestConcurrentConfigUpdatesDoNotLoseUnrelatedFields(t *testing.T) {
 	cfg, err := config.LoadAgentConfig(b.configPath)
 	if err != nil || cfg.GUI.Theme != "light" || cfg.Server.Address != "new.example.test" {
 		t.Fatalf("concurrent updates lost fields: config = %+v, error = %v", cfg, err)
+	}
+}
+
+func TestDNSModeSaveIsHotPolicy(t *testing.T) {
+	b := newTestBridge(t)
+	var in ConfigUpdate
+	in.Network.DNSMode = ptr(divert.DNSModeProxy)
+	result, err := b.SaveConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RestartRequired || result.ReloadPending {
+		t.Fatalf("DNS mode should hot-apply: %+v", result)
+	}
+	state, err := b.GetConfigState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Config.Network.DNSMode != divert.DNSModeProxy ||
+		state.Runtime.Network.DNSMode != divert.DNSModeProxy ||
+		b.agent.Config().DivertConfig.DNSMode != divert.DNSModeProxy {
+		t.Fatalf("DNS mode did not propagate: config=%q runtime=%q agent=%q",
+			state.Config.Network.DNSMode, state.Runtime.Network.DNSMode, b.agent.Config().DivertConfig.DNSMode)
 	}
 }

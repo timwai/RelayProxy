@@ -66,6 +66,7 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 	// can race the peer's write/read completion and surface "session shutdown".
 	serverErrCh := make(chan error, 1)
 	clientDone := make(chan struct{})
+	defer close(clientDone)
 	go func() {
 		rawConn, err := listener.Accept()
 		if err != nil {
@@ -132,7 +133,6 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 	if string(reply[:n]) != testMsg {
 		t.Fatalf("expected %s, got %s", testMsg, string(reply[:n]))
 	}
-	close(clientDone)
 
 	if err := <-serverErrCh; err != nil {
 		t.Fatalf("server encountered error: %v", err)

@@ -45,6 +45,21 @@ func packageAgent(directory, destination string) error {
 		"windivert/WinDivert.dll", "windivert/WinDivert64.sys",
 		"windivert/LICENSE", "windivert/README", "windivert/VERSION", "windivert/SOURCE.txt",
 	}
+	for _, name := range []string{
+		"wfp/RelayProxyWfp.sys", "wfp/RelayProxyWfp.inf",
+		"install-wfp.ps1", "uninstall-wfp.ps1",
+	} {
+		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err == nil {
+			files = append(files, name)
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if _, err := os.Stat(filepath.Join(directory, "wfp", "RelayProxyWfp.cat")); err == nil {
+		files = append(files, "wfp/RelayProxyWfp.cat")
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	for _, name := range []string{"brand/icon.ico", "brand/logo.png", "README.md"} {
 		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err == nil {
 			files = append(files, name)

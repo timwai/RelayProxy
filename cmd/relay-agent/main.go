@@ -46,7 +46,6 @@ func main() {
 	var webPortFlag int
 	flag.IntVar(&webPortFlag, "web-port", 0, "Override the web management port")
 	webListenFlag := flag.String("web-listen", "", "Override the web management listen address")
-	webTokenFlag := flag.String("web-token", "", "Override the web management access token")
 
 	flag.Parse()
 
@@ -135,8 +134,6 @@ func main() {
 				log.Fatalf("[Config] --web-port must be between 1 and 65535")
 			}
 			cfgFile.Web.Port = webPortFlag
-		case "web-token":
-			cfgFile.Web.Token = *webTokenFlag
 		}
 	})
 	if noWebFlag {
@@ -231,7 +228,6 @@ func main() {
 		webServer, err = gui.StartWeb(uiBridge, gui.WebOptions{
 			Listen: cfgFile.Web.Listen,
 			Port:   cfgFile.Web.Port,
-			Token:  cfgFile.Web.Token,
 		})
 		if err != nil {
 			log.Fatalf("[Web] Failed to start management page: %v", err)

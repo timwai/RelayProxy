@@ -455,7 +455,7 @@ Exit:
     return status;
 }
 
-NTSTATUS RpInjectUdp(_In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLength)
+NTSTATUS RpInjectUdp(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLength)
 {
     RP_FLOW* flow;
     RP_UDP_INJECTION_CONTEXT* context = NULL;
@@ -483,6 +483,11 @@ NTSTATUS RpInjectUdp(_In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLeng
         return STATUS_NOT_FOUND;
     }
 
+    if (!RpControllerOwnsFlow(FileObject, flow)) {
+        RpDereferenceFlow(flow);
+        return STATUS_ACCESS_DENIED;
+    }
+
     if (flow->Removed ||
         flow->Key.Protocol != 17 ||
         flow->Action != RP_WFP_ACTION_PROXY ||
@@ -508,6 +513,18 @@ NTSTATUS RpInjectUdp(_In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLeng
     } else {
         family = AF_INET6;
         injectionHandle = g_RpState.InjectionHandleV6;
+    }
+
+    /*
+     * Recheck after packet construction: a watchdog fail-open can invalidate
+     * the controller while memory is being prepared. Never inject a stale
+     * userspace reply into a flow owned by another controller generation.
+     */
+    if (!RpControllerOwnsFlow(FileObject, flow) ||
+        flow->Action != RP_WFP_ACTION_PROXY) {
+        RpUdpInjectComplete(context, nbl, FALSE);
+        RpDereferenceFlow(flow);
+        return STATUS_ACCESS_DENIED;
     }
 
     status = FwpsInjectTransportReceiveAsync(

@@ -703,6 +703,41 @@
         </div>
       </section>
 
+      <!-- ============ 实时连接 ============ -->
+      <section id="tab-pane-connections" class="tab-pane tab-flex hidden h-full flex-col px-6 py-4">
+        <div class="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">实时连接</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">查看当前 Agent 正在处理的 TCP / UDP 流量。</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span id="inline-conn-live" class="rp-badge rp-badge-success">实时更新</span>
+            <button type="button" onclick="refreshConnectionsInline(true)" class="rp-btn">刷新</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">活跃连接</div><div id="inline-conn-active" class="mono text-[20px] font-semibold mt-1">0</div></div>
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">上传速率</div><div id="inline-conn-up-rate" class="mono text-[20px] font-semibold mt-1">0 B/s</div></div>
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">下载速率</div><div id="inline-conn-down-rate" class="mono text-[20px] font-semibold mt-1">0 B/s</div></div>
+          <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">累计流量</div><div id="inline-conn-total" class="mono text-[16px] font-semibold mt-1">0 B / 0 B</div></div>
+        </div>
+        <div class="flex items-center gap-2 mb-3">
+          <input id="inline-conn-search" type="search" placeholder="搜索进程、域名、IP 或规则" class="rp-input flex-1" oninput="renderConnectionsInline()">
+          <select id="inline-conn-protocol" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部协议</option><option value="tcp">TCP</option><option value="udp">UDP</option></select>
+          <select id="inline-conn-action" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部动作</option><option value="PROXY">代理</option><option value="DIRECT">直连</option><option value="REJECT">阻断</option></select>
+        </div>
+        <div class="rp-card flex-1 min-h-0 overflow-auto">
+          <table class="rp-table text-[12px] min-w-[860px]">
+            <thead class="sticky top-0 bg-white dark:bg-[#151e2a] z-[1]"><tr class="text-left text-slate-500 dark:text-slate-400">
+              <th class="px-3 py-2">进程</th><th class="px-3 py-2">目标</th><th class="px-3 py-2">协议</th><th class="px-3 py-2">动作</th>
+              <th class="px-3 py-2">出口</th><th class="px-3 py-2 text-right">↑</th><th class="px-3 py-2 text-right">↓</th><th class="px-3 py-2">状态</th>
+            </tr></thead>
+            <tbody id="inline-connections-body"></tbody>
+          </table>
+        </div>
+        <div id="inline-conn-summary" class="text-[11px] text-slate-500 dark:text-slate-400 mt-2">尚未读取连接</div>
+      </section>
+
       <!-- ============ 系统设置 ============ -->
       <section id="tab-pane-settings" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
         <div>
@@ -974,13 +1009,13 @@
       rdp: [{ id:'rdp', label:'RDP 设备' }],
       monitor: [
         { id:'logs', label:'运行日志' },
-        { id:'connections', label:'实时连接', action:'connections' }
+        { id:'connections', label:'实时连接' }
       ],
       settings: [{ id:'settings', label:'程序设置' }]
     };
     var tabSections = {
       home:'home', connection:'network', exit:'network', pair:'network',
-      proxy:'proxy', routing:'proxy', share:'proxy', rdp:'rdp', logs:'monitor', settings:'settings'
+      proxy:'proxy', routing:'proxy', share:'proxy', rdp:'rdp', logs:'monitor', connections:'monitor', settings:'settings'
     };
     state.section = state.section || 'home';
 
@@ -993,19 +1028,15 @@
         button.type = 'button';
         button.className = 'rp-tab';
         button.textContent = tab.label;
-        if (!tab.action) button.id = 'tab-btn-' + tab.id;
-        if (tab.action === 'connections') {
-          button.onclick = openConnections;
-        } else {
-          button.onclick = function () {
-            switchTab(tab.id, section);
-            if (tab.anchor) requestAnimationFrame(function () {
-              var target = $(tab.anchor);
-              if (target) target.scrollIntoView({ behavior:'smooth', block:'start' });
-            });
-          };
-        }
-        var selected = !tab.action && tab.id === activeTab;
+        button.id = 'tab-btn-' + tab.id;
+        button.onclick = function () {
+          switchTab(tab.id, section);
+          if (tab.anchor) requestAnimationFrame(function () {
+            var target = $(tab.anchor);
+            if (target) target.scrollIntoView({ behavior:'smooth', block:'start' });
+          });
+        };
+        var selected = tab.id === activeTab;
         button.classList.toggle('active', selected);
         button.setAttribute('aria-selected', String(selected));
         host.appendChild(button);
@@ -1035,6 +1066,7 @@
       pane.classList.remove('hidden');
       renderSectionTabs(section, id);
       if (id === 'logs') refreshLogs();
+      if (id === 'connections') refreshConnectionsInline(true);
     }
     window.switchSection = switchSection;
     window.switchTab = switchTab;
@@ -1512,6 +1544,84 @@
     window.copyAllLogs = copyAllLogs;
     window.clearLogs = clearLogs;
 
+    /* ---------- inline connection monitor ---------- */
+    var inlineConnections = { connections: [] };
+    function formatTrafficBytes(value, rate) {
+      var n = Math.max(0, Number(value) || 0), unit = 0;
+      var units = ['B','KB','MB','GB','TB'];
+      while (n >= 1024 && unit < units.length - 1) { n /= 1024; unit++; }
+      return n.toLocaleString('zh-CN', { maximumFractionDigits: unit ? 1 : 0 }) + ' ' + units[unit] + (rate ? '/s' : '');
+    }
+    function renderConnectionsInline() {
+      var body = $('inline-connections-body');
+      if (!body) return;
+      var search = (($('inline-conn-search') && $('inline-conn-search').value) || '').trim().toLowerCase();
+      var protocol = ($('inline-conn-protocol') && $('inline-conn-protocol').value) || '';
+      var action = ($('inline-conn-action') && $('inline-conn-action').value) || '';
+      var rows = (inlineConnections.connections || []).filter(function (row) {
+        if (protocol && row.protocol !== protocol) return false;
+        if (action && row.action !== action) return false;
+        if (!search) return true;
+        return [row.process, row.process_name, row.pid, row.host, row.ip, row.port, row.rule, row.source].some(function (value) {
+          return String(value == null ? '' : value).toLowerCase().indexOf(search) >= 0;
+        });
+      });
+      rows.sort(function (a, b) { return Number(b.id || 0) - Number(a.id || 0); });
+      body.innerHTML = '';
+      rows.slice(0, 300).forEach(function (record) {
+        var tr = document.createElement('tr');
+        var values = [
+          (record.process_name || record.process || '未知进程') + (record.pid ? ' · PID ' + record.pid : ''),
+          (record.host || record.ip || '未知目标') + (record.port ? ':' + record.port : ''),
+          String(record.protocol || '').toUpperCase(),
+          record.action || '—',
+          record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地'),
+          formatTrafficBytes(record.upload_rate, true),
+          formatTrafficBytes(record.download_rate, true),
+          record.state || '—'
+        ];
+        values.forEach(function (value, index) {
+          var td = document.createElement('td');
+          td.className = 'px-3 py-2 border-b border-slate-200 dark:border-slate-800' + (index === 5 || index === 6 ? ' text-right mono' : '');
+          td.textContent = value;
+          tr.appendChild(td);
+        });
+        body.appendChild(tr);
+      });
+      if (!rows.length) {
+        var empty = document.createElement('tr'), cell = document.createElement('td');
+        cell.colSpan = 8; cell.className = 'rp-empty-state';
+        cell.textContent = search || protocol || action ? '没有符合筛选条件的连接' : '当前没有连接';
+        empty.appendChild(cell); body.appendChild(empty);
+      }
+      if ($('inline-conn-summary')) $('inline-conn-summary').textContent =
+        rows.length + ' 条符合条件 · 本次运行共 ' + (inlineConnections.total || 0) + ' 条连接' +
+        (inlineConnections.omitted ? ' · ' + inlineConnections.omitted + ' 条明细未保留' : '');
+    }
+    async function refreshConnectionsInline(showError) {
+      if (!$('tab-pane-connections') || $('tab-pane-connections').classList.contains('hidden')) return;
+      var raw = await call('goGetConnections');
+      if (!raw) {
+        if (showError && $('inline-conn-live')) $('inline-conn-live').textContent = '暂不可用';
+        return;
+      }
+      try {
+        inlineConnections = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        inlineConnections.connections = Array.isArray(inlineConnections.connections) ? inlineConnections.connections : [];
+        if ($('inline-conn-active')) $('inline-conn-active').textContent = inlineConnections.active || 0;
+        if ($('inline-conn-up-rate')) $('inline-conn-up-rate').textContent = formatTrafficBytes(inlineConnections.upload_rate, true);
+        if ($('inline-conn-down-rate')) $('inline-conn-down-rate').textContent = formatTrafficBytes(inlineConnections.download_rate, true);
+        if ($('inline-conn-total')) $('inline-conn-total').textContent = formatTrafficBytes(inlineConnections.upload) + ' / ' + formatTrafficBytes(inlineConnections.download);
+        if ($('inline-conn-live')) { $('inline-conn-live').textContent = '实时更新'; $('inline-conn-live').className = 'rp-badge rp-badge-success'; }
+        renderConnectionsInline();
+      } catch (err) {
+        if ($('inline-conn-live')) { $('inline-conn-live').textContent = '读取失败'; $('inline-conn-live').className = 'rp-badge rp-badge-danger'; }
+        if (showError) toast('读取连接失败：' + err.message);
+      }
+    }
+    window.refreshConnectionsInline = refreshConnectionsInline;
+    window.renderConnectionsInline = renderConnectionsInline;
+
     /* ---------- polling ---------- */
     async function refreshStatus() {
       var raw = await call('goGetStatus');
@@ -1577,9 +1687,9 @@
       // Go pushes status every 1.5s; these polls cover the window's first paint.
       setInterval(refreshStatus, 3000);
       setInterval(function () {
-        // Only poll while the log tab is actually on screen; Go pushes log
-        // lines into window.onGoLog, so polling a hidden pane is wasted work.
+        // Poll only monitoring panes that are visible.
         if (!$('tab-pane-logs').classList.contains('hidden')) { refreshLogs(); }
+        if (!$('tab-pane-connections').classList.contains('hidden')) { refreshConnectionsInline(false); }
       }, 2000);
     });
   })();

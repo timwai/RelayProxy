@@ -255,16 +255,35 @@ static VOID NTAPI RpAuthClassify(
         return;
     }
 
-    if (!RpControllerHealthy() ||
-        key.ProcessId == g_RpState.ControllerPid ||
+    flags = RpAleAuthFlags(Values);
+    reauthorize = (flags & FWP_CONDITION_FLAG_IS_REAUTHORIZE) != 0;
+
+    /*
+     * Heartbeat loss completes every pending ALE operation fail-open. For UDP,
+     * FwpsCompleteOperation discards the original non-TCP packet data, so the
+     * referenced first NBL still has to be replayed on the resulting reauth.
+     * The replay handle is intentionally distinct from reply injection; with
+     * the controller unhealthy DATAGRAM_DATA simply permits the replay DIRECT.
+     */
+    if (!RpControllerHealthy()) {
+        if (reauthorize && key.Protocol == RP_IPPROTO_UDP) {
+            flow = RpFindFlowByKey(&key);
+            if (flow != NULL) {
+                RpTouchFlow(flow);
+                (VOID)RpReplayPendingUdp(flow);
+                RpDereferenceFlow(flow);
+            }
+        }
+        ClassifyOut->actionType = FWP_ACTION_PERMIT;
+        return;
+    }
+
+    if (key.ProcessId == g_RpState.ControllerPid ||
         RpAddressIsLoopback(key.Family, key.SourceAddress) ||
         RpAddressIsLoopback(key.Family, key.DestinationAddress)) {
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
         return;
     }
-
-    flags = RpAleAuthFlags(Values);
-    reauthorize = (flags & FWP_CONDITION_FLAG_IS_REAUTHORIZE) != 0;
 
     flow = RpFindFlowByKey(&key);
     if (reauthorize) {

@@ -1087,10 +1087,15 @@
       });
       var pane = $('tab-pane-' + id);
       if (!pane) return;
+      var keepTabFocus = document.activeElement && document.activeElement.closest && document.activeElement.closest('#secondary-tabs');
       pane.classList.remove('hidden');
       pane.setAttribute('role', 'tabpanel');
       pane.setAttribute('aria-labelledby', 'tab-btn-' + id);
       renderSectionTabs(section, id);
+      if (keepTabFocus) {
+        var activeTab = $('tab-btn-' + id);
+        if (activeTab) activeTab.focus({ preventScroll: true });
+      }
       rememberNavigation();
       if (id === 'logs') refreshLogs();
       if (id === 'connections') refreshConnectionsInline(true);

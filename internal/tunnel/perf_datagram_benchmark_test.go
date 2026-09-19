@@ -22,16 +22,14 @@ func BenchmarkDatagramForwardPacketReuse(b *testing.B) {
 	}
 	payloadBytes := protocol.UDPFragmentPayload
 	packetSize := datagramEnvelopeSize + protocol.UDPFragmentHeaderSize + payloadBytes
-	// Warm the packet pool so the benchmark measures ownership transfer and
-	// queueing, not the first backing-array allocation.
-	warm := acquireDatagramPacket(packetSize)
-	releaseDatagramPacket(warm)
-
+	// Reuse one already-owned receive buffer. quic-go's receive allocation and
+	// send copy are outside this benchmark; this isolates Relay's forwarding
+	// envelope rewrite and queue ownership transfer.
+	packet := make([]byte, packetSize)
 	b.ReportAllocs()
 	b.SetBytes(int64(payloadBytes))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		packet := acquireDatagramPacket(packetSize)
 		frame := packet[datagramEnvelopeSize:]
 		binary.BigEndian.PutUint32(frame[:4], uint32(i+1))
 		binary.BigEndian.PutUint16(frame[4:6], uint16(payloadBytes))
@@ -44,7 +42,7 @@ func BenchmarkDatagramForwardPacketReuse(b *testing.B) {
 		if !ok {
 			b.Fatal("forwarded datagram not queued")
 		}
-		releaseDatagramPacket(job.packet)
+		packet = job.packet
 	}
 	b.StopTimer()
 	_ = channel.Close()

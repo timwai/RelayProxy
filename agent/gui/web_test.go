@@ -64,6 +64,28 @@ func TestWebServesSameEmbeddedManagementPage(t *testing.T) {
 	}
 }
 
+func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	for _, want := range []string{
+		`/ui/base.css`,
+		`/ui/theme.js`,
+		`id="section-btn-network"`,
+		`id="secondary-tabs"`,
+		`data-agent-theme="system"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("management page missing %q", want)
+		}
+	}
+	if strings.Contains(strings.ToLower(body), "web-token") {
+		t.Fatal("Agent management page still exposes web token UI")
+	}
+}
+
 func TestWebRejectsCrossOriginMutation(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/reload", bytes.NewReader([]byte("{}")))

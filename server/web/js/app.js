@@ -118,10 +118,6 @@
     }
     applySettingsSubtab();
     renderSectionTabs('settings');
-    const first = document.querySelector('#page-settings [data-settings-panel="' + settingsSubtab + '"] input, #page-settings [data-settings-panel="' + settingsSubtab + '"] select, #page-settings [data-settings-panel="' + settingsSubtab + '"] textarea');
-    if (first && document.activeElement && document.activeElement.closest && document.activeElement.closest('#secondary-tabs')) {
-      first.focus({preventScroll:true});
-    }
   }
   function renderSectionTabs(page) {
     const host = $('secondary-tabs');

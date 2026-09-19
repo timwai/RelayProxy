@@ -21,7 +21,7 @@ func Run(b *bridge.UIBridge, _ Options) error {
 		return fmt.Errorf("macOS UI: bridge is nil")
 	}
 	cfg := b.GetConfig()
-	if cfg == nil || !cfg.IsWebEnabled() {
+	if !cfg.IsWebEnabled() {
 		return fmt.Errorf("macOS UI requires the local web management page to be enabled")
 	}
 	host := cfg.Web.Listen

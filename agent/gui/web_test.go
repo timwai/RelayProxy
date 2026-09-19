@@ -75,6 +75,8 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 		`/ui/theme.js`,
 		`id="section-btn-network"`,
 		`id="secondary-tabs"`,
+		`id="tab-pane-connections"`,
+		`id="inline-connections-body"`,
 		`data-agent-theme="system"`,
 	} {
 		if !strings.Contains(body, want) {

@@ -46,15 +46,15 @@ func newWebTestBridge(t *testing.T) *bridge.UIBridge {
 	return bridge.NewUIBridge(agent, path)
 }
 
-func webTestHandler(b *bridge.UIBridge, loopback bool, token string) (*WebServer, http.Handler) {
-	w := &WebServer{bridge: b, loopback: loopback, token: token, done: make(chan struct{})}
+func webTestHandler(b *bridge.UIBridge, loopback bool) (*WebServer, http.Handler) {
+	w := &WebServer{bridge: b, loopback: loopback, done: make(chan struct{})}
 	mux := http.NewServeMux()
 	w.registerRoutes(mux)
 	return w, w.authorize(mux)
 }
 
 func TestWebServesSameEmbeddedManagementPage(t *testing.T) {
-	_, handler := webTestHandler(newWebTestBridge(t), true, "")
+	_, handler := webTestHandler(newWebTestBridge(t), true)
 	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -64,22 +64,9 @@ func TestWebServesSameEmbeddedManagementPage(t *testing.T) {
 	}
 }
 
-func TestWebTokenBootstrapAndOriginProtection(t *testing.T) {
-	_, handler := webTestHandler(newWebTestBridge(t), false, "secret-token")
-	unauthorized := httptest.NewRecorder()
-	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "http://agent.test/", nil))
-	if unauthorized.Code != http.StatusUnauthorized {
-		t.Fatalf("unauthorized status = %d", unauthorized.Code)
-	}
-
-	bootstrap := httptest.NewRecorder()
-	handler.ServeHTTP(bootstrap, httptest.NewRequest(http.MethodGet, "http://agent.test/?token=secret-token", nil))
-	if bootstrap.Code != http.StatusSeeOther || len(bootstrap.Result().Cookies()) != 1 || !bootstrap.Result().Cookies()[0].HttpOnly {
-		t.Fatalf("token bootstrap did not issue a secure session cookie: %+v", bootstrap.Result())
-	}
-
-	request := httptest.NewRequest(http.MethodPost, "http://agent.test/api/reload", bytes.NewReader([]byte("{}")))
-	request.AddCookie(bootstrap.Result().Cookies()[0])
+func TestWebRejectsCrossOriginMutation(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/reload", bytes.NewReader([]byte("{}")))
 	request.Header.Set("Origin", "http://evil.test")
 	forbidden := httptest.NewRecorder()
 	handler.ServeHTTP(forbidden, request)
@@ -90,7 +77,7 @@ func TestWebTokenBootstrapAndOriginProtection(t *testing.T) {
 
 func TestWebConfigMutationAndQuit(t *testing.T) {
 	b := newWebTestBridge(t)
-	w, handler := webTestHandler(b, true, "")
+	w, handler := webTestHandler(b, true)
 
 	configResponse := httptest.NewRecorder()
 	handler.ServeHTTP(configResponse, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/config", nil))
@@ -127,11 +114,8 @@ func TestWebConfigMutationAndQuit(t *testing.T) {
 	}
 }
 
-func TestWebRejectsNonLoopbackWithoutToken(t *testing.T) {
+func TestWebRejectsNonLoopbackListener(t *testing.T) {
 	if _, err := StartWeb(newWebTestBridge(t), WebOptions{Listen: "0.0.0.0", Port: 9090}); err == nil {
-		t.Fatal("non-loopback listener without token was accepted")
-	}
-	if _, err := StartWeb(newWebTestBridge(t), WebOptions{Listen: "0.0.0.0", Port: 9090, Token: "too-short"}); err == nil {
-		t.Fatal("non-loopback listener with a weak token was accepted")
+		t.Fatal("non-loopback Agent web listener was accepted")
 	}
 }

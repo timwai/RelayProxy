@@ -361,34 +361,34 @@ func (s *Server) RenewUDPAssociation(previous *ClassifiedFlow) (*ClassifiedFlow,
 	}
 
 	route := &ClassifiedFlow{
-		owner: s,
-		key: previous.key,
-		flow: previous.flow,
+		owner:    s,
+		key:      previous.key,
+		flow:     previous.flow,
 		decision: previous.decision,
 	}
 	exitID := route.decision.ExitID
 	route.traffic = s.opts.Traffic.Start(traffic.Metadata{
-		ProcessID: route.flow.ProcessID,
-		Process: route.flow.Process,
-		Source: route.key.Source.String(),
-		Host: route.flow.Host,
+		ProcessID:    route.flow.ProcessID,
+		Process:      route.flow.Process,
+		Source:       route.key.Source.String(),
+		Host:         route.flow.Host,
 		DomainSource: route.flow.DomainSource,
-		IP: route.flow.IP,
-		Port: route.flow.Port,
-		Protocol: string(route.flow.Protocol),
-		Entry: "transparent",
-		Action: string(route.decision.Action),
-		Rule: route.decision.Rule,
-		ExitID: exitID,
-		Accounting: "stream",
+		IP:           route.flow.IP,
+		Port:         route.flow.Port,
+		Protocol:     string(route.flow.Protocol),
+		Entry:        "transparent",
+		Action:       string(route.decision.Action),
+		Rule:         route.decision.Rule,
+		ExitID:       exitID,
+		Accounting:   "stream",
 	})
 	ctx, cancel := context.WithCancel(s.ctx)
 	association := &udpAssociation{
 		server: s,
-		route: route,
-		ctx: ctx,
+		route:  route,
+		ctx:    ctx,
 		cancel: cancel,
-		ready: make(chan struct{}),
+		ready:  make(chan struct{}),
 	}
 	association.touch(time.Now())
 	route.udp = association

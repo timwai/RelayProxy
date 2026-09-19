@@ -293,7 +293,7 @@ func TestApplyAgentDefaultsFillsEmptyRouting(t *testing.T) {
 	}
 }
 
-func TestWebManagementDefaultsAndRemoteAuthentication(t *testing.T) {
+func TestWebManagementDefaultsAndLocalOnlyPolicy(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	if err := NormalizeAgentConfig(cfg); err != nil {
 		t.Fatal(err)
@@ -301,16 +301,17 @@ func TestWebManagementDefaultsAndRemoteAuthentication(t *testing.T) {
 	if !cfg.IsWebEnabled() || cfg.Web.Listen != "127.0.0.1" || cfg.Web.Port != 9090 {
 		t.Fatalf("unexpected web defaults: %+v", cfg.Web)
 	}
+	cfg.Web.Token = "legacy-value-is-ignored"
 	cfg.Web.Listen = "0.0.0.0"
 	if err := NormalizeAgentConfig(cfg); err == nil {
-		t.Fatal("remote web listener without a token was accepted")
+		t.Fatal("remote Agent web listener was accepted")
 	}
-	cfg.Web.Token = "too-short"
-	if err := NormalizeAgentConfig(cfg); err == nil {
-		t.Fatal("remote web listener with a weak token was accepted")
-	}
-	cfg.Web.Token = "0123456789abcdef0123456789abcdef"
+}
+
+func TestAgentThemeAllowsSystem(t *testing.T) {
+	cfg := &AgentConfigFile{}
+	cfg.GUI.Theme = "system"
 	if err := NormalizeAgentConfig(cfg); err != nil {
-		t.Fatalf("authenticated remote web listener rejected: %v", err)
+		t.Fatalf("system theme rejected: %v", err)
 	}
 }

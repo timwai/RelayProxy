@@ -117,17 +117,27 @@ You can verify manually with:
 "@
     }
     $stampInfDir = Split-Path -Parent $stampInf
+    $stampInfToolPath = $stampInfDir.TrimEnd("\") + "\"
     Write-Host "[WFP] StampInf tool: $stampInf" -ForegroundColor DarkGray
 
-    & $msbuild $Project `
-        /restore `
-        /m `
-        /t:Build `
-        /p:Configuration=$Configuration `
-        /p:Platform=$TargetPlatform `
-        /p:SignMode=Off `
-        "/p:StampInfToolPath=$stampInfDir" `
-        /nologo
+    # Some WDK/MSBuild combinations still launch the tracked tool by its bare
+    # executable name even when StampInfToolPath is populated. Put the x64 host
+    # tools directory first on PATH as well as passing the documented property.
+    $oldPath = $env:PATH
+    $env:PATH = $stampInfDir + ";" + $env:PATH
+    try {
+        & $msbuild $Project `
+            /restore `
+            /m `
+            /t:Build `
+            /p:Configuration=$Configuration `
+            /p:Platform=$TargetPlatform `
+            /p:SignMode=Off `
+            "/p:StampInfToolPath=$stampInfToolPath" `
+            /nologo
+    } finally {
+        $env:PATH = $oldPath
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "WFP driver build failed for $TargetPlatform"
     }

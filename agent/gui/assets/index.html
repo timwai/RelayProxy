@@ -1029,6 +1029,8 @@
         button.className = 'rp-tab';
         button.textContent = tab.label;
         button.id = 'tab-btn-' + tab.id;
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-controls', 'tab-pane-' + tab.id);
         button.onclick = function () {
           switchTab(tab.id, section);
           if (tab.anchor) requestAnimationFrame(function () {
@@ -1039,6 +1041,7 @@
         var selected = tab.id === activeTab;
         button.classList.toggle('active', selected);
         button.setAttribute('aria-selected', String(selected));
+        button.tabIndex = selected ? 0 : -1;
         host.appendChild(button);
       });
     }
@@ -1064,6 +1067,8 @@
       var pane = $('tab-pane-' + id);
       if (!pane) return;
       pane.classList.remove('hidden');
+      pane.setAttribute('role', 'tabpanel');
+      pane.setAttribute('aria-labelledby', 'tab-btn-' + id);
       renderSectionTabs(section, id);
       if (id === 'logs') refreshLogs();
       if (id === 'connections') refreshConnectionsInline(true);

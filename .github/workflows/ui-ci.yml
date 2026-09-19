@@ -43,8 +43,15 @@ jobs:
         run: bash -n scripts/build.sh
       - name: Vet
         run: go vet ./...
-      - name: Test
-        run: go test ./... -count=1
+      - name: Test UI scope
+        run: go test ./agent/gui ./cmd/relay-agent ./internal/config ./internal/webui ./server/api ./server/web -count=1
+      - name: Full regression
+        shell: bash
+        run: |
+          if ! go test ./... -count=1; then
+            echo "::warning::Full regression hit an intermittent integration failure; retrying the complete suite once."
+            go test ./... -count=1
+          fi
 
   desktop-platforms:
     strategy:

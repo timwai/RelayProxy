@@ -19,6 +19,7 @@ import (
 
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/divert"
+	"relayproxy/internal/webui"
 )
 
 const webAuthCookie = "relayproxy_agent_web"
@@ -173,6 +174,7 @@ func setWebHeaders(w http.ResponseWriter) {
 }
 
 func (w *WebServer) registerRoutes(mux *http.ServeMux) {
+	mux.Handle("GET /ui/", http.StripPrefix("/ui/", webui.Handler()))
 	mux.HandleFunc("GET /", w.serveIndex)
 	mux.HandleFunc("GET /connections", w.serveConnections)
 	mux.HandleFunc("GET /web-bridge.js", w.serveWebBridge)
@@ -245,7 +247,8 @@ func serveHTMLAsset(rw http.ResponseWriter, name string) {
 		http.Error(rw, "embedded UI unavailable", http.StatusInternalServerError)
 		return
 	}
-	html := strings.Replace(string(data), "</head>", `<script src="/web-bridge.js"></script></head>`, 1)
+	shared := `<link rel="stylesheet" href="/ui/base.css"><script src="/ui/theme.js"></script><script src="/web-bridge.js"></script>`
+	html := strings.Replace(string(data), "</head>", shared+"</head>", 1)
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = rw.Write([]byte(html))
 }

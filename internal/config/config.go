@@ -123,14 +123,14 @@ type AgentConfigFile struct {
 		Enabled        *bool  `yaml:"enabled"`          // Default: true — launch the desktop window on start
 		MinimizeToTray *bool  `yaml:"minimize_to_tray"` // Default: true — closing the window hides to the tray
 		StartMinimized bool   `yaml:"start_minimized"`  // Default: false — boot straight into the tray
-		Theme          string `yaml:"theme"`            // "dark" (default) or "light"
+		Theme          string `yaml:"theme"`            // "dark", "light", or "system"
 	} `yaml:"gui"`
 
 	Web struct {
 		Enabled *bool  `yaml:"enabled"`
 		Listen  string `yaml:"listen"`
 		Port    int    `yaml:"port"`
-		Token   string `yaml:"token,omitempty"`
+		Token   string `yaml:"token,omitempty"` // Deprecated: accepted for old configs, ignored; Agent web UI is loopback-only
 	} `yaml:"web"`
 
 	Logging struct {

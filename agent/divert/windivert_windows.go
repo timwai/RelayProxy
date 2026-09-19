@@ -139,7 +139,7 @@ func loadWinDivert() (*windivertAPI, error) {
 }
 
 func openWinDivert(filter string) (*windivertHandle, error) {
-	if err := WindowsPlatformReadiness(); err != nil {
+	if err := winDivertPlatformReadiness(); err != nil {
 		return nil, err
 	}
 	// The native parameter is const char*, not Windows' usual UTF-16 string.

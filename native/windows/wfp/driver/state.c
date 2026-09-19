@@ -268,6 +268,34 @@ BOOLEAN RpControllerOwnsFlow(_In_ PFILE_OBJECT FileObject, _In_ const RP_FLOW* F
     return result;
 }
 
+BOOLEAN RpGetRedirectTarget(
+    _In_ const RP_FLOW* Flow,
+    _In_ UCHAR Family,
+    _Out_ ULONG* ControllerPid,
+    _Out_ USHORT* TcpPort)
+{
+    BOOLEAN result = FALSE;
+    KIRQL oldIrql;
+
+    if (Flow == NULL || ControllerPid == NULL || TcpPort == NULL ||
+        (Family != 4 && Family != 6)) {
+        return FALSE;
+    }
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (g_RpState.ControllerActive &&
+        !g_RpState.ControllerFailingOpen &&
+        !Flow->Removed &&
+        Flow->ControllerGeneration != 0 &&
+        Flow->ControllerGeneration == g_RpState.ControllerGeneration) {
+        *ControllerPid = g_RpState.ControllerPid;
+        *TcpPort = Family == 4 ? g_RpState.TcpPortV4 : g_RpState.TcpPortV6;
+        result = *ControllerPid != 0 && *TcpPort != 0;
+    }
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+    return result;
+}
+
 NTSTATUS RpHeartbeat(_In_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid)
 {
     NTSTATUS status = STATUS_ACCESS_DENIED;

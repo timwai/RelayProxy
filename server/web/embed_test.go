@@ -44,6 +44,9 @@ func TestServerConsoleKeepsLargeMenuAndSecondarySettingsTabs(t *testing.T) {
 		`settingsTab: 'certificate'`,
 		`settingsTab: 'acl'`,
 		`applySettingsSubtab()`,
+		`relayproxy-server-settings-tab`,
+		`#settings/`,
+		`role', 'tab'`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("server navigation missing %q", want)
@@ -66,5 +69,26 @@ func TestServerConsoleThemeUsesSharedTokens(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("server theme CSS missing %q", want)
 		}
+	}
+}
+
+func TestServerConsoleLoadsSharedFoundationBeforeProductCSS(t *testing.T) {
+	data, err := EmbeddedFiles.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	shared := strings.Index(page, `href="/ui/base.css"`)
+	product := strings.Index(page, `href="/css/style.css"`)
+	if shared < 0 || product < 0 || shared > product {
+		t.Fatalf("shared CSS must load before product CSS: shared=%d product=%d", shared, product)
+	}
+
+	style, err := EmbeddedFiles.ReadFile("css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(style), `margin-left:var(--rp-sidebar-width)`) {
+		t.Fatal("server layout no longer follows shared sidebar width")
 	}
 }

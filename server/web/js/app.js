@@ -4,6 +4,14 @@
   const all = selector => Array.from(document.querySelectorAll(selector));
   const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, deviceBusy: false, enrollmentBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
+  const sectionPages = {
+    overview: [{ page: 'overview', label: '运行总览' }],
+    devices: [{ page: 'devices', label: '设备管理' }, { page: 'exits', label: '出口节点' }],
+    connections: [{ page: 'sessions', label: '活跃会话' }],
+    rdp: [{ page: 'rdp-ingress', label: '公网入口', admin: true }],
+    settings: [{ page: 'settings', label: '服务配置', admin: true }]
+  };
+  const pageSections = { overview:'overview', devices:'devices', exits:'devices', sessions:'connections', 'rdp-ingress':'rdp', settings:'settings' };
   const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', rdp: 'RDP 公网入口', database: '数据库' };
   const roleNames = { CLIENT: '客户端', EXIT: '出口节点', BOTH: '客户端 + 出口' };
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
@@ -81,11 +89,32 @@
     navigate();
     await refresh();
   }
+  function renderSectionTabs(page) {
+    const host = $('secondary-tabs');
+    if (!host) { return; }
+    const section = pageSections[page] || 'overview';
+    host.innerHTML = '';
+    (sectionPages[section] || []).forEach(tab => {
+      if (tab.admin && (!state.user || state.user.role !== 'admin')) { return; }
+      const link = document.createElement('a');
+      link.href = '#' + tab.page;
+      link.className = 'rp-tab' + (tab.page === page ? ' active' : '');
+      link.setAttribute('aria-selected', String(tab.page === page));
+      link.textContent = tab.label;
+      host.appendChild(link);
+    });
+  }
   function navigate() {
     let page = location.hash.slice(1);
     if (!titles[page] || ((page === 'settings' || page === 'rdp-ingress') && (!state.user || state.user.role !== 'admin'))) { page = 'overview'; }
+    const section = pageSections[page] || 'overview';
     all('.page').forEach(el => { el.hidden = el.id !== 'page-' + page; });
-    all('[data-page]').forEach(el => { el.classList.toggle('active', el.dataset.page === page); el.setAttribute('aria-current', el.dataset.page === page ? 'page' : 'false'); });
+    all('[data-section]').forEach(el => {
+      const active = el.dataset.section === section;
+      el.classList.toggle('active', active);
+      el.setAttribute('aria-current', active ? 'page' : 'false');
+    });
+    renderSectionTabs(page);
     $('page-label').textContent = titles[page];
     document.title = titles[page] + ' · RelayProxy';
   }

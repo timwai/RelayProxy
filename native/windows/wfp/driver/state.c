@@ -740,8 +740,8 @@ NTSTATUS RpApplyDecision(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_DECISIO
         Decision->RequestId == 0 ||
         (Decision->Flags & ~(RP_WFP_DECISION_FLAG_DNS_AUTO |
                              RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY)) != 0 ||
-        (Decision->Flags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0 &&
-        (Decision->Flags & RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY) != 0 ||
+        ((Decision->Flags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0 &&
+         (Decision->Flags & RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY) != 0) ||
         (Decision->Action != RP_WFP_ACTION_DIRECT &&
          Decision->Action != RP_WFP_ACTION_PROXY &&
          Decision->Action != RP_WFP_ACTION_REJECT)) {

@@ -57,8 +57,8 @@ func (c *AgentConfigFile) ExitPolicy() acl.Policy {
 
 func (c *AgentConfigFile) DivertConfig() divert.Config {
 	return divert.Config{
-		Mode: c.Network.Mode,
-		DNSMode: c.Network.DNSMode,
+		Mode:             c.Network.Mode,
+		DNSMode:          c.Network.DNSMode,
 		ExcludeProcesses: c.Network.ExcludeProcesses,
 	}
 }

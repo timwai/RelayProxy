@@ -50,3 +50,21 @@ func TestServerConsoleKeepsLargeMenuAndSecondarySettingsTabs(t *testing.T) {
 		}
 	}
 }
+
+func TestServerConsoleThemeUsesSharedTokens(t *testing.T) {
+	style, err := EmbeddedFiles.ReadFile("css/style.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(style)
+	for _, want := range []string{
+		`background:var(--paper)`,
+		`var(--rp-surface-soft`,
+		`color-mix(in srgb,var(--paper)`,
+		`html[data-theme="dark"]`,
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("server theme CSS missing %q", want)
+		}
+	}
+}

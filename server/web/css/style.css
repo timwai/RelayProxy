@@ -50,3 +50,52 @@ dialog{border:1px solid var(--line);border-radius:17px;box-shadow:0 25px 100px #
 .rdp-ingress-table .table-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}
 .rdp-ingress-table .table-actions .small-button{margin:0}
 @media(max-width:600px){.rdp-ingress-form{padding:0 18px 18px}.rdp-ingress-form>.form-grid+.form-grid{margin-top:17px}.rdp-ingress-form>.button-row{margin-top:17px}.rdp-ingress-table{display:block}.rdp-ingress-table thead{display:none}.rdp-ingress-table tbody{display:grid;gap:10px;padding:12px}.rdp-ingress-table tbody tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 14px;padding:14px;border:1px solid var(--line);border-radius:9px;background:var(--paper)}.rdp-ingress-table tbody td{display:block;min-width:0;padding:0;border:0;white-space:normal;text-align:left}.rdp-ingress-table tbody td:nth-child(1){grid-column:1/-1;padding-bottom:10px;border-bottom:1px solid var(--line)}.rdp-ingress-table tbody td:nth-child(2)::before,.rdp-ingress-table tbody td:nth-child(3)::before,.rdp-ingress-table tbody td:nth-child(4)::before,.rdp-ingress-table tbody td:nth-child(5)::before,.rdp-ingress-table tbody td:nth-child(6)::before{display:block;margin-bottom:3px;color:var(--muted);font-size:10px;font-family:inherit;font-weight:500}.rdp-ingress-table tbody td:nth-child(2)::before{content:"端口"}.rdp-ingress-table tbody td:nth-child(3){grid-column:1/-1}.rdp-ingress-table tbody td:nth-child(3)::before{content:"来源"}.rdp-ingress-table tbody td:nth-child(4)::before{content:"速率 / 过期"}.rdp-ingress-table tbody td:nth-child(5)::before{content:"TCP / UDP"}.rdp-ingress-table tbody td:nth-child(6)::before{content:"状态"}.rdp-ingress-table tbody td:nth-child(7){grid-column:1/-1;padding-top:10px;border-top:1px solid var(--line)}.rdp-ingress-table tbody td:nth-child(7)::before{content:none}.rdp-ingress-table .table-actions{justify-content:flex-start}.rdp-ingress-table tbody td.empty{grid-column:1/-1;padding:30px 12px!important;text-align:center}}
+
+
+/* Shared personal-console dark theme. The structure remains server-specific,
+   while colors follow the Agent/Server design-system tokens. */
+html.dark{
+  color-scheme:dark;
+  --bg:#0d131d;
+  --paper:#151e2a;
+  --ink:#edf4fb;
+  --muted:#9fb0c1;
+  --line:#2a3747;
+  --accent:#4cc4a0;
+  --accent-light:#14372f;
+  --sidebar:#111923;
+  --danger:#ed7d87
+}
+html.dark body{background:var(--bg);color:var(--ink)}
+html.dark input,html.dark select,html.dark textarea{background:#111923;color:var(--ink);border-color:var(--line)}
+html.dark button{background:#182433;color:var(--ink);border-color:var(--line)}
+html.dark button:hover{background:#1e2c3d}
+html.dark button.primary{background:#168a70;border-color:#168a70;color:#fff}
+html.dark .login-view{background:radial-gradient(ellipse at 0 0,#14372f55,transparent 60%),var(--bg)}
+html.dark .login-card,html.dark .stat,html.dark .panel{background:var(--paper)}
+html.dark .topbar{background:#101823e8;border-color:var(--line);backdrop-filter:blur(16px)}
+html.dark .sidebar{background:var(--sidebar)}
+html.dark .sidebar nav a:hover{background:#ffffff0a}
+html.dark .sidebar nav a.active{background:#14372f;color:#71dbbc}
+html.dark .avatar{background:#243247;color:#edf4fb}
+html.dark .success{background:#15372d;color:#72d8af}
+html.dark .neutral{background:#202b39;color:#aab8c8}
+html.dark .warning-badge{background:#3b2b12;color:#efc46e}
+html.dark .transport{background:#172c3c;color:#78b9df}
+html.dark thead{background:#111923;border-color:var(--line)}
+html.dark th{color:#93a5b8}
+html.dark td{border-color:#222f3e}
+html.dark tbody tr:hover{background:#182330}
+html.dark .quick-actions>a+*,html.dark .quick-actions>button+*{border-color:#202e3d}
+html.dark .notice.warning{background:#332712;border-color:#5d461d;color:#e7c06e}
+html.dark .notice.error{background:#351a20;border-color:#663039;color:#ef9aa3}
+html.dark .notice.subtle{background:#162534;color:#9ab6cc}
+html.dark .section-number{background:#1c2937;color:#8eb5bd}
+html.dark .address-preview{background:#111923}
+html.dark .address-preview button{background:#182433}
+html.dark .save-bar{background:#151e2af2;border-color:#324354;box-shadow:0 8px 28px #0004}
+html.dark .settings-panel input:disabled,html.dark .settings-panel select:disabled{background:#111923;color:#708399}
+html.dark dialog{background:#151e2a;color:var(--ink);border-color:var(--line)}
+html.dark dialog::backdrop{background:#050b14aa}
+html.dark .server-secondary-tabs{margin-bottom:22px}
+html.dark .account-password,html.dark .logout-button{color:#aab8c8}

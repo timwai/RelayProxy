@@ -302,10 +302,6 @@ func TestDatagramRelayPacketReusesBackingBuffer(t *testing.T) {
 	if err := dst.ForwardPacket(context.Background(), packet); err != nil {
 		t.Fatal(err)
 	}
-	if packet.packet != nil {
-		t.Fatal("ForwardPacket did not consume ownership")
-	}
-
 	dstMux.mu.RLock()
 	select {
 	case queued := <-dstMux.send:

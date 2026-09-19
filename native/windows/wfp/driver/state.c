@@ -769,8 +769,26 @@ NTSTATUS RpApplyDecision(_In_ PFILE_OBJECT FileObject, _In_ const RP_WFP_DECISIO
         return STATUS_ACCESS_DENIED;
     }
     if (!flow->Removed) {
-        flow->Action = Decision->Action;
         flow->DecisionFlags = Decision->Flags;
+        if ((Decision->Flags & RP_WFP_DECISION_FLAG_DNS_AUTO) != 0) {
+            /*
+             * Resolve the ready/decision race under the same lock. If Relay
+             * became ready after userspace classified this flow but before the
+             * decision arrived, do not leave AUTO DNS stuck DIRECT until the
+             * next state transition.
+             */
+            flow->Action = g_RpState.ProxyReady ?
+                RP_WFP_ACTION_PROXY : RP_WFP_ACTION_DIRECT;
+        } else if ((Decision->Flags & RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY) != 0) {
+            if (g_RpState.ProxyReady) {
+                flow->Action = RP_WFP_ACTION_PROXY;
+                flow->DecisionFlags &= ~RP_WFP_DECISION_FLAG_DNS_BOOTSTRAP_PROXY;
+            } else {
+                flow->Action = RP_WFP_ACTION_DIRECT;
+            }
+        } else {
+            flow->Action = Decision->Action;
+        }
         context = flow->CompletionContext;
         flow->CompletionContext = NULL;
     }

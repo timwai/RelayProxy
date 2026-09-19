@@ -256,44 +256,25 @@
         </div>
       </div>
 
-      <div class="flex-1 p-2 space-y-0.5">
-        <button onclick="switchTab('home')" id="tab-btn-home" aria-selected="true"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-gauge"/></svg><span>运行概览</span>
+      <div class="flex-1 p-2 space-y-1">
+        <div class="rp-nav-label">主菜单</div>
+        <button onclick="switchSection('home')" id="section-btn-home" aria-selected="true" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-gauge"/></svg><span>概览</span>
         </button>
-        <button onclick="switchTab('connection')" id="tab-btn-connection" aria-selected="false" class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg><span>连接与身份</span>
+        <button onclick="switchSection('network')" id="section-btn-network" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg><span>网络</span>
         </button>
-        <button onclick="switchTab('proxy')" id="tab-btn-proxy" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>本地代理</span>
+        <button onclick="switchSection('proxy')" id="section-btn-proxy" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>代理与路由</span>
         </button>
-        <button onclick="switchTab('routing')" id="tab-btn-routing" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>路由分流</span>
+        <button onclick="switchSection('rdp')" id="section-btn-rdp" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg><span>远程桌面</span>
         </button>
-        <button onclick="openConnections()" id="open-connections" class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400" title="在独立窗口查看实时连接">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>实时连接 ↗</span>
+        <button onclick="switchSection('monitor')" id="section-btn-monitor" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-terminal"/></svg><span>监控</span>
         </button>
-        <button onclick="switchTab('exit')" id="tab-btn-exit" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-globe"/></svg><span>选择出口</span>
-        </button>
-        <button onclick="switchTab('share')" id="tab-btn-share" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-shield"/></svg><span>出口共享</span>
-        </button>
-        <button onclick="switchTab('pair')" id="tab-btn-pair" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg><span>服务端审批</span>
-        </button>
-        <button onclick="switchTab('logs')" id="tab-btn-logs" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-terminal"/></svg><span>运行日志</span>
-        </button>
-        <button onclick="switchTab('settings')" id="tab-btn-settings" aria-selected="false"
-                class="nav-item w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-[13px] font-medium text-slate-600 dark:text-slate-400">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-settings"/></svg><span>程序设置</span>
+        <button onclick="switchSection('settings')" id="section-btn-settings" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-settings"/></svg><span>设置</span>
         </button>
       </div>
 
@@ -310,15 +291,20 @@
             <span id="side-latency" class="mono text-[12px] text-slate-500 dark:text-slate-400">-- ms</span>
           </div>
         </div>
-        <button onclick="toggleTheme()" class="w-full px-3 py-1.5 rounded-md text-[12px] font-medium text-slate-500 dark:text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-800/60 flex items-center justify-center gap-1.5">
-          <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-bolt"/></svg>
-          <span id="theme-btn-label">浅色界面</span>
-        </button>
+        <div class="rp-theme-control w-full" aria-label="界面主题">
+          <button type="button" data-agent-theme="system" onclick="setThemeMode('system')">自动</button>
+          <button type="button" data-agent-theme="light" onclick="setThemeMode('light')">浅色</button>
+          <button type="button" data-agent-theme="dark" onclick="setThemeMode('dark')">深色</button>
+        </div>
       </div>
     </nav>
 
     <!-- Workspace -->
     <main class="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
+
+      <div class="shrink-0 px-6 pt-3">
+        <div id="secondary-tabs" class="rp-tabs" role="tablist" aria-label="当前模块功能"></div>
+      </div>
 
       <div id="config-state" role="status" class="hidden shrink-0 px-6 py-2 text-[12px] bg-amber-50 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 border-b border-amber-300 dark:border-amber-500/30"></div>
 
@@ -719,13 +705,15 @@
           <div class="card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
             <div class="flex items-center justify-between gap-4 px-4 py-2.5">
               <div class="min-w-0">
-                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">浅色界面</div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">在深色与浅色主题之间切换，立即生效</div>
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">界面主题</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">Windows / macOS 可跟随系统外观，也可固定浅色或深色</div>
               </div>
-              <label class="relative inline-flex items-center cursor-pointer shrink-0">
-                <input type="checkbox" id="cfg-theme-light" onchange="onToggleTheme(this)" class="sr-only peer">
-                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
-              </label>
+              <div class="rp-theme-control shrink-0">
+                <button type="button" data-agent-theme="system" onclick="setThemeMode('system')">跟随系统</button>
+                <button type="button" data-agent-theme="light" onclick="setThemeMode('light')">浅色</button>
+                <button type="button" data-agent-theme="dark" onclick="setThemeMode('dark')">深色</button>
+              </div>
+              <input type="hidden" id="cfg-theme-mode" value="system">
             </div>
             <div class="flex items-center justify-between gap-4 px-4 py-2.5">
               <div class="min-w-0">
@@ -820,7 +808,7 @@
       network: ['cfg-network-excludes'],
       share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
       exit: ['cfg-exit-id'],
-      preferences: ['cfg-min-tray','cfg-start-min','cfg-theme-light']
+      preferences: ['cfg-min-tray','cfg-start-min','cfg-theme-mode']
     };
     var groupNames = {connection:'连接与身份',proxy:'本地代理',routing:'路由分流',network:'透明排除',share:'出口共享',exit:'选择出口',preferences:'程序设置'};
     function snapshotGroup(group) {
@@ -919,36 +907,126 @@
     }
 
     /* ---------- theme ---------- */
-    function applyTheme(dark, persist) {
+    function normalizeThemeMode(value) {
+      if (typeof value === 'boolean') return value ? 'dark' : 'light';
+      value = String(value || 'system').toLowerCase();
+      return value === 'light' || value === 'dark' || value === 'system' ? value : 'system';
+    }
+    function themeActual(mode) {
+      mode = normalizeThemeMode(mode);
+      if (window.RelayUITheme && typeof window.RelayUITheme.effective === 'function') return window.RelayUITheme.effective(mode);
+      if (mode === 'system') return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      return mode;
+    }
+    function syncThemeControls(mode) {
+      mode = normalizeThemeMode(mode);
+      var field = $('cfg-theme-mode');
+      if (field) field.value = mode;
+      document.querySelectorAll('[data-agent-theme]').forEach(function (button) {
+        var selected = button.dataset.agentTheme === mode;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      });
+    }
+    function applyTheme(value, persist) {
       if (persist && !state.loaded) { toast('请先载入有效配置'); return; }
-      document.documentElement.classList.toggle('dark', dark);
-      var btnLabel = $('theme-btn-label');
-      if (btnLabel) { btnLabel.textContent = dark ? '浅色界面' : '深色界面'; }
-      var toggle = $('cfg-theme-light');
-      if (toggle) { toggle.checked = !dark; }
+      var mode = normalizeThemeMode(value);
+      var actual = themeActual(mode);
+      if (window.RelayUITheme && typeof window.RelayUITheme.apply === 'function') actual = window.RelayUITheme.apply(mode, false);
+      document.documentElement.classList.toggle('dark', actual === 'dark');
+      document.documentElement.dataset.themeMode = mode;
+      syncThemeControls(mode);
       if (persist) {
-        save({ gui: { theme: dark ? 'dark' : 'light' } }, '主题已保存').then(function (ok) {
-          if (!ok && state.cfg) { applyTheme(state.cfg.theme !== 'light', false); }
+        save({ gui: { theme: mode } }, '主题已保存').then(function (ok) {
+          if (!ok && state.cfg) applyTheme(state.cfg.theme || 'system', false);
         });
       }
     }
-    function toggleTheme() { applyTheme(!document.documentElement.classList.contains('dark'), true); }
-    function onToggleTheme(el) { applyTheme(!el.checked, true); }
+    function setThemeMode(mode) { applyTheme(mode, true); }
+    function toggleTheme() { applyTheme(document.documentElement.classList.contains('dark') ? 'light' : 'dark', true); }
     window.applyTheme = applyTheme;
+    window.setThemeMode = setThemeMode;
     window.toggleTheme = toggleTheme;
-    window.onToggleTheme = onToggleTheme;
 
     /* ---------- navigation ---------- */
-    function switchTab(id) {
+    var sectionTabs = {
+      home: [{ id:'home', label:'运行概览' }],
+      network: [
+        { id:'connection', label:'连接与身份' },
+        { id:'exit', label:'选择出口' },
+        { id:'pair', label:'服务端审批' }
+      ],
+      proxy: [
+        { id:'proxy', label:'本地代理' },
+        { id:'routing', label:'路由分流' },
+        { id:'share', label:'出口共享' }
+      ],
+      rdp: [{ id:'home', label:'RDP 设备', anchor:'rdp-panel' }],
+      monitor: [
+        { id:'logs', label:'运行日志' },
+        { id:'connections', label:'实时连接', action:'connections' }
+      ],
+      settings: [{ id:'settings', label:'程序设置' }]
+    };
+    var tabSections = {
+      home:'home', connection:'network', exit:'network', pair:'network',
+      proxy:'proxy', routing:'proxy', share:'proxy', logs:'monitor', settings:'settings'
+    };
+    state.section = state.section || 'home';
+
+    function renderSectionTabs(section, activeTab) {
+      var host = $('secondary-tabs');
+      if (!host) return;
+      host.innerHTML = '';
+      (sectionTabs[section] || []).forEach(function (tab) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'rp-tab';
+        button.textContent = tab.label;
+        if (!tab.action) button.id = 'tab-btn-' + tab.id;
+        if (tab.action === 'connections') {
+          button.onclick = openConnections;
+        } else {
+          button.onclick = function () {
+            switchTab(tab.id, section);
+            if (tab.anchor) requestAnimationFrame(function () {
+              var target = $(tab.anchor);
+              if (target) target.scrollIntoView({ behavior:'smooth', block:'start' });
+            });
+          };
+        }
+        var selected = !tab.action && tab.id === activeTab;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-selected', String(selected));
+        host.appendChild(button);
+      });
+    }
+    function switchSection(section, preferredTab) {
+      state.section = section;
+      document.querySelectorAll('[id^="section-btn-"]').forEach(function (button) {
+        button.setAttribute('aria-selected', String(button.id === 'section-btn-' + section));
+      });
+      var tabs = sectionTabs[section] || [];
+      var first = tabs.find(function (tab) { return !tab.action; });
+      var target = preferredTab || (first && first.id);
+      if (target) switchTab(target, section);
+      else renderSectionTabs(section, '');
+    }
+    function switchTab(id, section) {
+      section = section || tabSections[id] || state.section || 'home';
+      state.section = section;
       state.tab = id;
       document.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.add('hidden'); });
-      document.querySelectorAll('.nav-item').forEach(function (b) { b.setAttribute('aria-selected', 'false'); });
-      var btn = $('tab-btn-' + id), pane = $('tab-pane-' + id);
-      if (!btn || !pane) { return; }
-      btn.setAttribute('aria-selected', 'true');
+      document.querySelectorAll('[id^="section-btn-"]').forEach(function (button) {
+        button.setAttribute('aria-selected', String(button.id === 'section-btn-' + section));
+      });
+      var pane = $('tab-pane-' + id);
+      if (!pane) return;
       pane.classList.remove('hidden');
-      if (id === 'logs') { refreshLogs(); }
+      renderSectionTabs(section, id);
+      if (id === 'logs') refreshLogs();
     }
+    window.switchSection = switchSection;
     window.switchTab = switchTab;
 
     /* ---------- helpers ---------- */
@@ -1148,8 +1226,7 @@
       $('cfg-min-tray').checked = cfg.minimizeToTray !== false;
       $('cfg-start-min').checked = !!cfg.startMinimized;
 
-      var dark = (cfg.theme || 'dark') !== 'light';
-      applyTheme(dark, false);
+      applyTheme(cfg.theme || 'system', false);
       var notices = [];
       if (cfg.restartRequired) { notices.push('以下设置尚未生效，需重启客户端：' + (cfg.restartFields || []).join('、')); }
       if (cfg.reloadPending) { notices.push('文件中的规则尚未应用，请点击「重新读取并应用」。'); }
@@ -1460,7 +1537,8 @@
       var el = $('log-console');
       if (el) { el.dataset.placeholder = '1'; }
 
-      applyTheme(document.documentElement.classList.contains('dark'), false);
+      applyTheme((window.RelayUITheme && window.RelayUITheme.get()) || document.documentElement.dataset.themeMode || 'system', false);
+      switchSection(state.section || 'home', state.tab || 'home');
       setConfigReady(false);
       document.addEventListener('input', function (event) {
         if (!state.loaded || state.saving) return;

@@ -32,3 +32,16 @@ func BenchmarkRegistrySnapshot128Active(b *testing.B) {
 		_ = registry.Snapshot()
 	}
 }
+
+
+func BenchmarkRegistryStartFinishRecentFull(b *testing.B) {
+	registry := NewRegistry(8192, 512)
+	for i := 0; i < 512; i++ {
+		registry.Start(Metadata{Protocol: "tcp"}).Finish("closed", nil)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		registry.Start(Metadata{Protocol: "tcp"}).Finish("closed", nil)
+	}
+}

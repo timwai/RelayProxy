@@ -50,6 +50,46 @@ function Find-MSBuild {
     throw "MSBuild.exe not found. Install Visual Studio 2026 with Desktop development with C++ and the Windows Driver Kit component."
 }
 
+function Assert-WDKVisualStudioIntegration {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vswhere)) {
+        throw "vswhere.exe not found. Repair Visual Studio Installer before building the WFP driver."
+    }
+
+    $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath |
+        Select-Object -First 1
+    if (-not $vsPath) {
+        throw "No Visual Studio installation with MSBuild was found."
+    }
+
+    $driverKitPath = & $vswhere -latest -products * -requires Component.Microsoft.Windows.DriverKit -property installationPath |
+        Select-Object -First 1
+    if (-not $driverKitPath) {
+        throw @"
+Visual Studio Windows Driver Kit integration is missing.
+
+The WDK NuGet packages and Windows SDK are present, but Visual Studio has not
+installed the 'Windows Driver Kit' individual component
+(Component.Microsoft.Windows.DriverKit). Without that VSIX/MSBuild integration,
+MSBuild cannot resolve PlatformToolset=WindowsKernelModeDriver10.0 and fails
+with MSB8020.
+
+Fix:
+  1. Open Visual Studio Installer -> Visual Studio 2026 -> Modify.
+  2. Individual components -> select 'Windows Driver Kit'.
+  3. Apply changes, then restart all Visual Studio/PowerShell processes.
+
+Official automated setup:
+  winget configure -f 'https://raw.githubusercontent.com/microsoft/Windows-driver-samples/main/_wdk_utils/winget/configs/wdk-vscommunity.dsc.yaml'
+
+Detected Visual Studio:
+  $vsPath
+"@
+    }
+
+    Write-Host "[WFP] Visual Studio DriverKit integration: $driverKitPath" -ForegroundColor DarkGray
+}
+
 function Build-One {
     param([string]$TargetPlatform)
 
@@ -130,6 +170,8 @@ function Build-One {
 
 if (-not (Test-Path $Project)) { throw "Missing project: $Project" }
 if (-not (Test-Path $Inf)) { throw "Missing INF: $Inf" }
+
+Assert-WDKVisualStudioIntegration
 
 $targets = if ($Platform -eq "all") { @("x64", "ARM64") } else { @($Platform) }
 foreach ($target in $targets) {

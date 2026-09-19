@@ -302,7 +302,7 @@
     <!-- Workspace -->
     <main class="rp-main flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
 
-      <div class="shrink-0 px-6 pt-3">
+      <div class="shrink-0 px-6 rp-sticky-tabs">
         <div id="secondary-tabs" class="rp-tabs" role="tablist" aria-label="当前模块功能"></div>
       </div>
 
@@ -312,7 +312,7 @@
       <div id="config-form-error" class="config-form-error hidden" role="alert"></div>
 
       <!-- ============ 概览仪表盘 ============ -->
-      <section id="tab-pane-home" class="tab-pane h-full overflow-y-auto px-6 py-4 space-y-4">
+      <section id="tab-pane-home" class="tab-pane rp-scroll h-full overflow-y-auto px-6 py-4 space-y-4">
         <div class="flex items-start justify-between gap-4">
           <div>
             <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">概览仪表盘</h1>
@@ -330,7 +330,7 @@
           </div>
         </div>
 
-        <div id="unpaired-banner" class="hidden flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30">
+        <div id="unpaired-banner" class="hidden rp-notice rp-notice-warning">
           <svg class="icon-lg text-amber-500" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
           <div class="min-w-0 flex-1">
             <div class="text-[13px] font-medium text-amber-700 dark:text-amber-300">等待服务端审批</div>
@@ -339,29 +339,29 @@
           <button onclick="switchTab('connection')" class="btn-primary rp-btn rp-btn-primary px-3 py-1.5 rounded-md text-[12px] font-semibold shrink-0">配置连接</button>
         </div>
 
-        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+        <div class="rp-stat-grid">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-bolt"/></svg><span>中继隧道</span>
             </div>
             <div id="home-tunnel" class="text-[16px] font-semibold mt-1.5 text-slate-400 dark:text-slate-500">未连接</div>
             <div id="home-transport" class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">传输：-</div>
           </div>
-          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-clock"/></svg><span>往返延时</span>
             </div>
             <div id="home-latency" class="mono text-[16px] font-semibold mt-1.5 text-slate-400 dark:text-slate-500">-- ms</div>
             <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">心跳往返耗时</div>
           </div>
-          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-globe"/></svg><span>当前出口节点</span>
             </div>
             <div id="home-exit" class="mono text-[14px] font-semibold mt-1.5 text-slate-800 dark:text-slate-100 truncate">未指定</div>
             <div class="text-[11px] text-slate-400 dark:text-slate-500 mt-0.5">流量经该节点转发</div>
           </div>
-          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+          <div class="rp-stat">
             <div class="flex items-center gap-2 text-[12px] text-slate-500 dark:text-slate-400">
               <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-stream"/></svg><span>活跃转发流</span>
             </div>
@@ -371,7 +371,7 @@
         </div>
 
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">本地代理监听</h2>
+          <h2 class="rp-section-title">本地代理监听</h2>
           <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
             <div class="flex items-center justify-between gap-4 px-4 py-2.5">
               <div class="flex items-center gap-2.5 min-w-0">
@@ -398,7 +398,7 @@
         </div>
 
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">快速开始</h2>
+          <h2 class="rp-section-title">快速开始</h2>
           <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5 space-y-1.5">
             <div class="text-[12px] text-slate-500 dark:text-slate-400">设置浏览器或终端代理到上面的地址即可开始使用：</div>
             <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 select-text">curl -x socks5h://<span id="quick-socks5">127.0.0.1:1080</span> https://ipinfo.io</div>
@@ -419,7 +419,7 @@
             <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200">远程桌面（RDP）</h2>
             <button id="rdp-disconnect" onclick="disconnectRDP()" class="config-secondary hidden">断开</button>
           </div>
-          <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-3.5">
+          <div class="rp-stat">
             <div id="rdp-connection" class="text-[12px] text-slate-500 dark:text-slate-400 mb-2">服务端批准后，这里会显示可连接的目标设备。</div>
             <div id="rdp-targets" class="space-y-2"></div>
           </div>
@@ -721,12 +721,12 @@
           <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">下载速率</div><div id="inline-conn-down-rate" class="mono text-[20px] font-semibold mt-1">0 B/s</div></div>
           <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">累计流量</div><div id="inline-conn-total" class="mono text-[16px] font-semibold mt-1">0 B / 0 B</div></div>
         </div>
-        <div class="flex items-center gap-2 mb-3">
+        <div class="rp-toolbar mb-3">
           <input id="inline-conn-search" type="search" placeholder="搜索进程、域名、IP 或规则" class="rp-input flex-1" oninput="renderConnectionsInline()">
           <select id="inline-conn-protocol" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部协议</option><option value="tcp">TCP</option><option value="udp">UDP</option></select>
           <select id="inline-conn-action" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部动作</option><option value="PROXY">代理</option><option value="DIRECT">直连</option><option value="REJECT">阻断</option></select>
         </div>
-        <div class="rp-card flex-1 min-h-0 overflow-auto">
+        <div class="rp-card rp-scroll flex-1 min-h-0 overflow-auto">
           <table class="rp-table text-[12px] min-w-[860px]">
             <thead class="sticky top-0 bg-white dark:bg-[#151e2a] z-[1]"><tr class="text-left text-slate-500 dark:text-slate-400">
               <th class="px-3 py-2">进程</th><th class="px-3 py-2">目标</th><th class="px-3 py-2">协议</th><th class="px-3 py-2">动作</th>
@@ -746,7 +746,7 @@
         </div>
 
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">界面与启动</h2>
+          <h2 class="rp-section-title">界面与启动</h2>
           <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
             <div class="flex items-center justify-between gap-4 px-4 py-2.5">
               <div class="min-w-0">
@@ -794,7 +794,7 @@
         </div>
 
         <div>
-          <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mb-2">配置文件</h2>
+          <h2 class="rp-section-title">配置文件</h2>
           <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-2.5">
             <div class="mono text-[12px] text-slate-600 dark:text-slate-300 break-all select-text" id="cfg-path">-</div>
             <div class="flex items-center gap-2">

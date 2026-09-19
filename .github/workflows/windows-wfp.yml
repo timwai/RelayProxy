@@ -1,0 +1,86 @@
+name: Windows WFP CI
+
+on:
+  push:
+    branches:
+      - feature/windows-wfp
+    paths:
+      - 'agent/divert/**'
+      - 'agent/app/**'
+      - 'cmd/relay-agent/**'
+      - 'internal/config/**'
+      - 'native/windows/wfp/**'
+      - 'scripts/build-wfp.ps1'
+      - '.github/workflows/windows-wfp.yml'
+      - 'go.mod'
+      - 'go.sum'
+  pull_request:
+    paths:
+      - 'agent/divert/**'
+      - 'agent/app/**'
+      - 'cmd/relay-agent/**'
+      - 'internal/config/**'
+      - 'native/windows/wfp/**'
+      - 'scripts/build-wfp.ps1'
+      - '.github/workflows/windows-wfp.yml'
+      - 'go.mod'
+      - 'go.sum'
+
+permissions:
+  contents: read
+
+jobs:
+  go-windows:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test Windows packages
+        shell: pwsh
+        run: go test ./agent/divert ./agent/app ./internal/config ./cmd/relay-agent -count=1
+      - name: Compile Windows amd64
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'amd64'
+          go build -o "$env:RUNNER_TEMP\relay-agent-amd64.exe" ./cmd/relay-agent
+      - name: Compile Windows arm64
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = '0'
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'arm64'
+          go build -o "$env:RUNNER_TEMP\relay-agent-arm64.exe" ./cmd/relay-agent
+
+  driver:
+    runs-on: windows-2025
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: microsoft/setup-msbuild@v2
+      - name: Build WFP driver
+        shell: pwsh
+        run: |
+          ./scripts/build-wfp.ps1 -Platform '${{ matrix.platform }}' -Configuration Release -OutDir "$env:RUNNER_TEMP\wfp"
+      - name: Verify driver artifact
+        shell: pwsh
+        run: |
+          $arch = if ('${{ matrix.platform }}' -eq 'x64') { 'amd64' } else { 'arm64' }
+          $sys = "$env:RUNNER_TEMP\wfp\$arch\RelayProxyWfp.sys"
+          if (-not (Test-Path $sys)) { throw "Missing $sys" }
+          Get-Item $sys | Format-List FullName,Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxyWfp-${{ matrix.platform }}
+          path: |
+            ${{ runner.temp }}/wfp/**
+          if-no-files-found: error

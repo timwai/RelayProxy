@@ -16,11 +16,11 @@ import (
 
 const (
 	shellExecuteMaskNoCloseProcess = 0x00000040
-	waitInfinite                  = 0xffffffff
+	waitInfinite                   = 0xffffffff
 )
 
 var (
-	modShell32WFP        = windows.NewLazySystemDLL("shell32.dll")
+	modShell32WFP         = windows.NewLazySystemDLL("shell32.dll")
 	procShellExecuteExWFP = modShell32WFP.NewProc("ShellExecuteExW")
 )
 

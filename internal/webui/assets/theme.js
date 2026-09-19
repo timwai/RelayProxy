@@ -46,7 +46,7 @@
     else if (media.addListener) media.addListener(onMedia);
   }
 
-  apply(stored(), false);
+  apply(document.documentElement.dataset.themeMode || stored(), false);
   document.addEventListener('click', function (event) {
     var button = event.target.closest && event.target.closest('[data-rp-theme]');
     if (button) window.RelayUITheme.set(button.dataset.rpTheme);

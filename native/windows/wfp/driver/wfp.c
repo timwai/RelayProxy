@@ -278,7 +278,7 @@ static VOID NTAPI RpAuthClassify(
         return;
     }
 
-    if (key.ProcessId == g_RpState.ControllerPid ||
+    if (RpIsControllerProcess(key.ProcessId) ||
         RpAddressIsLoopback(key.Family, key.SourceAddress) ||
         RpAddressIsLoopback(key.Family, key.DestinationAddress)) {
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
@@ -435,6 +435,8 @@ static VOID NTAPI RpRedirectClassify(
     RP_WFP_REDIRECT_CONTEXT* redirectContext = NULL;
     NTSTATUS status;
     FWPS_CONNECTION_REDIRECT_STATE redirectState;
+    ULONG controllerPid = 0;
+    USHORT tcpPort = 0;
 
     UNREFERENCED_PARAMETER(LayerData);
     UNREFERENCED_PARAMETER(Filter);
@@ -446,7 +448,7 @@ static VOID NTAPI RpRedirectClassify(
     if (!RpControllerHealthy() ||
         !RpExtractAleKey(Values, Metadata, &key, &compartmentId) ||
         key.Protocol != RP_IPPROTO_TCP ||
-        key.ProcessId == g_RpState.ControllerPid) {
+        RpIsControllerProcess(key.ProcessId)) {
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
         return;
     }
@@ -468,6 +470,11 @@ static VOID NTAPI RpRedirectClassify(
         if (flow != NULL) {
             RpDereferenceFlow(flow);
         }
+        ClassifyOut->actionType = FWP_ACTION_PERMIT;
+        return;
+    }
+    if (!RpGetRedirectTarget(flow, key.Family, &controllerPid, &tcpPort)) {
+        RpDereferenceFlow(flow);
         ClassifyOut->actionType = FWP_ACTION_PERMIT;
         return;
     }
@@ -499,14 +506,14 @@ static VOID NTAPI RpRedirectClassify(
     redirectContext->Size = sizeof(*redirectContext);
     redirectContext->RequestId = flow->RequestId;
 
-    request->localRedirectTargetPID = g_RpState.ControllerPid;
+    request->localRedirectTargetPID = controllerPid;
     request->localRedirectHandle = g_RpState.RedirectHandle;
     request->localRedirectContext = redirectContext;
     request->localRedirectContextSize = sizeof(*redirectContext);
     RpSetLoopbackTarget(
         request,
         key.Family,
-        key.Family == 4 ? g_RpState.TcpPortV4 : g_RpState.TcpPortV6);
+        tcpPort);
 
     FwpsApplyModifiedLayerData0(classifyHandle, request, 0);
     redirectContext = NULL; /* WFP owns redirect context after apply. */

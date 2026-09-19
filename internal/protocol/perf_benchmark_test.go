@@ -70,7 +70,6 @@ func BenchmarkWriteJSONSmall(b *testing.B) {
 	}
 }
 
-
 func BenchmarkReadStreamHeaderCore(b *testing.B) {
 	var wire bytes.Buffer
 	if err := WriteStreamHeader(&wire, &StreamHeader{

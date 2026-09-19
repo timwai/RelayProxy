@@ -304,16 +304,17 @@ func (a *appWindow) renderHTML() (string, error) {
 
 	// Native WebView2 has no HTTP origin for /ui assets. Inline the exact same
 	// shared design system used by the browser-hosted Agent and Server console.
-	if sharedCSS, err := webui.ReadAsset("base.css"); err == nil {
-		html = strings.Replace(html, "</head>", "<style>"+string(sharedCSS)+"</style></head>", 1)
-	} else {
+	// Shared assets are the foundation; page-specific styles come afterwards.
+	sharedCSS, err := webui.ReadAsset("base.css")
+	if err != nil {
 		return "", err
 	}
-	if sharedTheme, err := webui.ReadAsset("theme.js"); err == nil {
-		html = strings.Replace(html, "</head>", "<script>"+string(sharedTheme)+"</script></head>", 1)
-	} else {
+	sharedTheme, err := webui.ReadAsset("theme.js")
+	if err != nil {
 		return "", err
 	}
+	sharedHead := "<style>" + string(sharedCSS) + "</style><script>" + string(sharedTheme) + "</script>"
+	html = strings.Replace(html, "<head>", "<head>"+sharedHead, 1)
 
 	if script, err := assets.ReadFile("assets/routing.js"); err == nil {
 		html = strings.Replace(html, `<script src="routing.js"></script>`, "<script>"+string(script)+"</script>", 1)

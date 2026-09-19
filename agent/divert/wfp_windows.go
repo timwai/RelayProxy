@@ -4,10 +4,12 @@ package divert
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -341,11 +343,39 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 	if host := i.dns.lookup(event.Destination.Addr()); host != "" {
 		flow.Host, flow.DomainSource = host, "dns"
 	}
+	// Keep DNS bootstrap local on Windows. The Windows DNS Client service may
+	// own the packet instead of relay-agent.exe, and proxying the resolver
+	// request can deadlock a tunnel reconnect that itself needs DNS.
+	if event.Protocol == ProtoUDP && event.Destination.Port() == 53 {
+		if err := i.device.decision(event.RequestID, ActionDirect); err != nil {
+			i.report(err)
+		}
+		return
+	}
+	for _, addr := range []netip.Addr{event.Source.Addr(), event.Destination.Addr()} {
+		if addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsUnspecified() ||
+			addr == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+			if err := i.device.decision(event.RequestID, ActionDirect); err != nil {
+				i.report(err)
+			}
+			return
+		}
+	}
+
 	route, err := i.server.ClassifyFlow(flow)
 	if err != nil {
 		_ = i.device.decision(event.RequestID, ActionReject)
 		i.report(err)
 		return
+	}
+
+	if event.Protocol == ProtoUDP && route.Decision().Action != ActionReject {
+		if err := i.server.PinUDPAssociation(route); err != nil {
+			route.traffic.Finish("failed", err)
+			_ = i.device.decision(event.RequestID, ActionReject)
+			i.report(err)
+			return
+		}
 	}
 
 	i.mu.Lock()
@@ -434,7 +464,24 @@ func (i *wfpInterceptor) handleClose(event wfpEvent) {
 		delete(i.udp, event.AssociationID)
 	}
 	i.mu.Unlock()
-	if route != nil && route.Decision().Action != ActionReject {
+	if route == nil {
+		return
+	}
+	if route.Decision().Action == ActionDirect && len(event.Payload) >= 16 {
+		upload := binary.LittleEndian.Uint64(event.Payload[0:8])
+		download := binary.LittleEndian.Uint64(event.Payload[8:16])
+		if upload > 0 {
+			route.traffic.AddUpload(int(min(upload, uint64(^uint(0)>>1))))
+		}
+		if download > 0 {
+			route.traffic.AddDownload(int(min(download, uint64(^uint(0)>>1))))
+		}
+	}
+	if route.Key().Protocol == ProtoUDP && route.Decision().Action != ActionReject {
+		i.server.ReleaseUDPAssociation(route)
+		return
+	}
+	if route.Decision().Action != ActionReject {
 		route.traffic.Finish("closed", nil)
 	}
 }

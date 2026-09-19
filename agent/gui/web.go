@@ -214,7 +214,7 @@ func serveHTMLAsset(rw http.ResponseWriter, name string) {
 		return
 	}
 	shared := `<link rel="stylesheet" href="/ui/base.css"><script src="/ui/theme.js"></script><script src="/web-bridge.js"></script>`
-	html := strings.Replace(string(data), "</head>", shared+"</head>", 1)
+	html := strings.Replace(string(data), "<head>", "<head>"+shared, 1)
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = rw.Write([]byte(html))
 }

@@ -61,3 +61,19 @@ func TestWFPRedirectContextRejectsZeroRequest(t *testing.T) {
 		t.Fatal("zero request id was accepted")
 	}
 }
+
+func TestWFPDecisionFlagsLayout(t *testing.T) {
+	data, err := encodeWFPDecisionFlags(99, ActionProxy, wfpDecisionFlagDNSAuto)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint64(data[8:16]); got != 99 {
+		t.Fatalf("request id=%d", got)
+	}
+	if got := binary.LittleEndian.Uint32(data[16:20]); got != wfpActionProxy {
+		t.Fatalf("action=%d", got)
+	}
+	if got := binary.LittleEndian.Uint32(data[20:24]); got != wfpDecisionFlagDNSAuto {
+		t.Fatalf("flags=%x", got)
+	}
+}

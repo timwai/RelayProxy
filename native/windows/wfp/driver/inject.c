@@ -6,6 +6,7 @@ typedef struct _RP_UDP_INJECTION_CONTEXT {
 } RP_UDP_INJECTION_CONTEXT;
 
 typedef struct _RP_UDP_REPLAY_CONTEXT {
+    RP_FLOW* Flow;
     UCHAR RemoteAddress[16];
     UCHAR* ControlData;
     ULONG ControlDataLength;
@@ -23,6 +24,9 @@ static VOID NTAPI RpUdpReplayComplete(
         FwpsFreeCloneNetBufferList(NetBufferList, 0);
     }
     if (replay != NULL) {
+        if (replay->Flow != NULL) {
+            RpDereferenceFlow(replay->Flow);
+        }
         if (replay->ControlData != NULL) {
             ExFreePoolWithTag(replay->ControlData, RP_TAG_REPLAY);
         }
@@ -168,6 +172,8 @@ NTSTATUS RpReplayPendingUdp(_Inout_ RP_FLOW* Flow)
     Flow->PendingUdpControlDataLength = 0;
     KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
 
+    RpReferenceFlow(Flow);
+    replay->Flow = Flow;
     RtlCopyMemory(replay->RemoteAddress, Flow->Key.DestinationAddress, 16);
     replay->ControlData = controlData;
     replay->ControlDataLength = controlDataLength;
@@ -203,7 +209,7 @@ NTSTATUS RpReplayPendingUdp(_Inout_ RP_FLOW* Flow)
 
     status = FwpsInjectTransportSendAsync0(
         injectionHandle,
-        NULL,
+        Flow,
         endpointHandle,
         0,
         &sendParams,
@@ -228,6 +234,9 @@ Exit:
         FwpsDereferenceNetBufferList(original, TRUE);
     }
     if (replay != NULL) {
+        if (replay->Flow != NULL) {
+            RpDereferenceFlow(replay->Flow);
+        }
         if (replay->ControlData != NULL) {
             ExFreePoolWithTag(replay->ControlData, RP_TAG_REPLAY);
         }

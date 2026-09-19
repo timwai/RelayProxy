@@ -132,11 +132,14 @@ jobs:
           $sys = "$env:RUNNER_TEMP\wfp\$arch\RelayProxyWfp.sys"
           if (-not (Test-Path $sys)) { throw "Missing $sys" }
           Get-Item $sys | Format-List FullName,Length
-          $dumpbin = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
-          if (-not $dumpbin) { throw 'dumpbin.exe not found after MSBuild setup' }
-          $headers = (& $dumpbin.Source /headers $sys) -join [Environment]::NewLine
-          $machine = if ('${{ matrix.platform }}' -eq 'x64') { '8664 machine' } else { 'AA64 machine' }
-          if ($headers -notmatch [regex]::Escape($machine)) { throw "Unexpected driver machine type; expected $machine" }
+          $bytes = [IO.File]::ReadAllBytes($sys)
+          if ($bytes.Length -lt 64 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw 'Invalid PE image' }
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ($peOffset -lt 0 -or $peOffset + 6 -gt $bytes.Length) { throw 'Invalid PE header offset' }
+          if ($bytes[$peOffset] -ne 0x50 -or $bytes[$peOffset+1] -ne 0x45 -or $bytes[$peOffset+2] -ne 0 -or $bytes[$peOffset+3] -ne 0) { throw 'Missing PE signature' }
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          $expected = if ('${{ matrix.platform }}' -eq 'x64') { [uint16]0x8664 } else { [uint16]0xAA64 }
+          if ($machine -ne $expected) { throw ("Unexpected driver machine 0x{0:X4}; expected 0x{1:X4}" -f $machine, $expected) }
       - uses: actions/upload-artifact@v4
         with:
           name: RelayProxyWfp-${{ matrix.platform }}

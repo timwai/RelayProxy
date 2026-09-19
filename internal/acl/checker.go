@@ -3,6 +3,9 @@ package acl
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -57,6 +60,7 @@ type Rule struct {
 type Policy struct {
 	ID                  string
 	Name                string
+	Fingerprint         string
 	AllowInternet       bool
 	AllowPrivateNetwork bool
 	AllowLoopback       bool // Allow localhost/loopback for testing/debugging
@@ -129,6 +133,19 @@ func (c *Checker) Policy() Policy {
 	return p
 }
 
+func policyFingerprint(p Policy) string {
+	p.Fingerprint = ""
+	for i := range p.Rules {
+		p.Rules[i].ipNet = nil
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:16])
+}
+
 func NewChecker(p Policy) (*Checker, error) {
 	p.Rules = slices.Clone(p.Rules)
 	p.AccessHosts = slices.Clone(p.AccessHosts)
@@ -164,10 +181,14 @@ func NewChecker(p Policy) (*Checker, error) {
 		}
 	}
 
-	// Sort rules by Priority descending (higher priority evaluates first)
+	// Sort rules by Priority descending (higher priority evaluates first).
 	sort.SliceStable(p.Rules, func(i, j int) bool {
 		return p.Rules[i].Priority > p.Rules[j].Priority
 	})
+	// Ignore any caller-supplied fingerprint. The checker publishes a digest of
+	// the normalized policy it actually compiled, so authenticated exits can
+	// cache compiled policy state without trusting an arbitrary cache key.
+	p.Fingerprint = policyFingerprint(p)
 
 	c := &Checker{policy: p}
 

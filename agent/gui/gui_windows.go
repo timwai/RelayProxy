@@ -67,7 +67,6 @@ func setWindowDarkTitleBar(hwnd win.HWND, dark bool) {
 	_, _, _ = procDwmSetWindowAttribute.Call(uintptr(hwnd), 19, uintptr(unsafe.Pointer(&val)), 4)
 }
 
-
 func systemPrefersDark() bool {
 	key, err := registry.OpenKey(registry.CURRENT_USER,
 		`Software\Microsoft\Windows\CurrentVersion\Themes\Personalize`, registry.QUERY_VALUE)

@@ -22,32 +22,103 @@ $OutDir = [System.IO.Path]::GetFullPath($OutDir)
 
 function Find-Tool {
     param([string]$Name)
+
     $cmd = Get-Command $Name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
 
-    $kits = "${env:ProgramFiles(x86)}\Windows Kits\10\bin"
-    if (Test-Path $kits) {
-        $match = Get-ChildItem $kits -Directory -ErrorAction SilentlyContinue |
-            Sort-Object Name -Descending |
-            ForEach-Object { Join-Path $_.FullName "x64\$Name" } |
-            Where-Object { Test-Path $_ } |
-            Select-Object -First 1
-        if ($match) { return $match }
+    $kits = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+    if (-not (Test-Path $kits)) {
+        return $null
     }
+
+    # WDK tools are not guaranteed to use the same host-architecture folder.
+    # Inf2Cat is commonly installed under x86 even for x64/ARM64 packages.
+    $hostArches = @("x64", "x86", "arm64")
+    $versionDirs = Get-ChildItem $kits -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } |
+        Sort-Object { [version]$_.Name } -Descending
+
+    foreach ($dir in $versionDirs) {
+        foreach ($hostArch in $hostArches) {
+            $candidate = Join-Path $dir.FullName ($hostArch + "\" + $Name)
+            if (Test-Path $candidate) {
+                return $candidate
+            }
+        }
+    }
+
+    foreach ($hostArch in $hostArches) {
+        $candidate = Join-Path $kits ($hostArch + "\" + $Name)
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    $match = Get-ChildItem $kits -Recurse -File -Filter $Name -ErrorAction SilentlyContinue |
+        Sort-Object FullName |
+        Select-Object -ExpandProperty FullName -First 1
+    if ($match) { return $match }
+
     return $null
 }
 
 function Find-MSBuild {
-    $cmd = Get-Command msbuild.exe -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-
+    # WDK 28000 INF verification requires a 64-bit MSBuild host. Prefer the
+    # amd64 MSBuild explicitly; a 32-bit host makes the WDK task look for the
+    # obsolete x86\InfVerif.dll path and can fail after the driver already linked.
     $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
     if (Test-Path $vswhere) {
-        $path = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find "MSBuild\**\Bin\MSBuild.exe" |
+        $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath |
             Select-Object -First 1
-        if ($path) { return $path }
+        if ($vsPath) {
+            $amd64 = Join-Path $vsPath "MSBuild\Current\Bin\amd64\MSBuild.exe"
+            if (Test-Path $amd64) { return $amd64 }
+
+            throw "64-bit MSBuild was not found at $amd64. WDK 28000 INF verification requires the amd64 MSBuild host."
+        }
     }
-    throw "MSBuild.exe not found. Install Visual Studio 2026 with Desktop development with C++ and the Windows Driver Kit component."
+
+    throw "64-bit MSBuild.exe not found. Install/repair Visual Studio 2026 with Desktop development with C++ and the Windows Driver Kit component."
+}
+
+function Assert-WDKVisualStudioIntegration {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (-not (Test-Path $vswhere)) {
+        throw "vswhere.exe not found. Repair Visual Studio Installer before building the WFP driver."
+    }
+
+    $vsPath = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -property installationPath |
+        Select-Object -First 1
+    if (-not $vsPath) {
+        throw "No Visual Studio installation with MSBuild was found."
+    }
+
+    $driverKitPath = & $vswhere -latest -products * -requires Component.Microsoft.Windows.DriverKit -property installationPath |
+        Select-Object -First 1
+    if (-not $driverKitPath) {
+        throw @"
+Visual Studio Windows Driver Kit integration is missing.
+
+The WDK NuGet packages and Windows SDK are present, but Visual Studio has not
+installed the 'Windows Driver Kit' individual component
+(Component.Microsoft.Windows.DriverKit). Without that VSIX/MSBuild integration,
+MSBuild cannot resolve PlatformToolset=WindowsKernelModeDriver10.0 and fails
+with MSB8020.
+
+Fix:
+  1. Open Visual Studio Installer -> Visual Studio 2026 -> Modify.
+  2. Individual components -> select 'Windows Driver Kit'.
+  3. Apply changes, then restart all Visual Studio/PowerShell processes.
+
+Official automated setup:
+  winget configure -f 'https://raw.githubusercontent.com/microsoft/Windows-driver-samples/main/_wdk_utils/winget/configs/wdk-vscommunity.dsc.yaml'
+
+Detected Visual Studio:
+  $vsPath
+"@
+    }
+
+    Write-Host "[WFP] Visual Studio DriverKit integration: $driverKitPath" -ForegroundColor DarkGray
 }
 
 function Build-One {
@@ -57,16 +128,69 @@ function Build-One {
     Write-Host "[WFP] Building $TargetPlatform / $Configuration" -ForegroundColor Cyan
 
     $msbuild = Find-MSBuild
-    & $msbuild $Project `
-        /restore `
-        /m `
-        /t:Build `
-        /p:Configuration=$Configuration `
-        /p:Platform=$TargetPlatform `
-        /p:SignMode=Off `
-        /nologo
+    Write-Host "[WFP] MSBuild host: $msbuild" -ForegroundColor DarkGray
+
+    $stampInf = Find-Tool "stampinf.exe"
+    $oldPath = $env:PATH
+    $extraMSBuildArgs = @()
+
+    if ($stampInf) {
+        $stampInfDir = Split-Path -Parent $stampInf
+        $stampInfToolPath = $stampInfDir.TrimEnd("\") + "\"
+        Write-Host "[WFP] StampInf tool: $stampInf" -ForegroundColor DarkGray
+        $env:PATH = $stampInfDir + ";" + $env:PATH
+        $extraMSBuildArgs += "/p:StampInfToolPath=$stampInfToolPath"
+    } else {
+        Write-Host "[WFP] Local StampInf tool not found; using the WDK/NuGet tool resolution." -ForegroundColor DarkGray
+    }
+
+    # WDK 28000 command-line builds can run DPVerifierTask with a relative
+    # x86\InfVerif.dll path and fail with 0x8007007E even after the SYS links.
+    # Disable only that embedded package-verification task. The stamped INF is
+    # validated explicitly with the standalone x64 InfVerif.exe below whenever
+    # the full WDK tools are available.
+    try {
+        & $msbuild $Project `
+            /restore `
+            /m `
+            /t:Build `
+            /p:Configuration=$Configuration `
+            /p:Platform=$TargetPlatform `
+            /p:SignMode=Off `
+            /p:SkipPackageVerification=true `
+            @extraMSBuildArgs `
+            /nologo
+    } finally {
+        $env:PATH = $oldPath
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "WFP driver build failed for $TargetPlatform"
+    }
+
+    $builtInf = Join-Path $Root "native\windows\wfp\bin\$TargetPlatform\$Configuration\RelayProxyWfp.inf"
+    if (-not (Test-Path $builtInf)) {
+        throw "Stamped INF was not produced for ${TargetPlatform}: $builtInf"
+    }
+
+    $infVerif = $null
+    $toolsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\Tools"
+    if (Test-Path $toolsRoot) {
+        $infVerif = Get-ChildItem $toolsRoot -Recurse -Filter InfVerif.exe -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\x64\\InfVerif\.exe$" } |
+            Sort-Object FullName -Descending |
+            Select-Object -ExpandProperty FullName -First 1
+    }
+
+    if ($infVerif) {
+        Write-Host "[WFP] InfVerif tool: $infVerif" -ForegroundColor DarkGray
+        & $infVerif /h $builtInf
+        if ($LASTEXITCODE -ne 0) {
+            throw "INF verification failed for $TargetPlatform"
+        }
+    } elseif ($SkipCatalog) {
+        Write-Warning "InfVerif.exe was not found; compile-only validation will continue because -SkipCatalog was requested."
+    } else {
+        throw "InfVerif.exe was not found under $toolsRoot. A release package requires the full WDK verification tools."
     }
 
     $sys = Join-Path $Root "native\windows\wfp\bin\$TargetPlatform\$Configuration\RelayProxyWfp.sys"
@@ -103,7 +227,25 @@ function Build-One {
     if (-not $SkipCatalog) {
         $inf2cat = Find-Tool "Inf2Cat.exe"
         if ($inf2cat) {
-            $os = if ($TargetPlatform -eq "x64") { "10_X64" } else { "10_ARM64" }
+            Write-Host "[WFP] Inf2Cat tool: $inf2cat" -ForegroundColor DarkGray
+
+            # Inf2Cat has no generic 10_ARM64 token. Discover the identifiers
+            # supported by this exact WDK instead of hard-coding a list that can
+            # drift between kit releases.
+            $helpText = (& $inf2cat /? 2>&1 | Out-String).ToUpperInvariant()
+            $suffix = if ($TargetPlatform -eq "x64") { "X64" } else { "ARM64" }
+            $matches = [regex]::Matches($helpText, "\b10_(?:[A-Z0-9]+_)?$suffix\b")
+            $osTargets = @(
+                $matches |
+                    ForEach-Object { $_.Value } |
+                    Sort-Object -Unique
+            )
+            if ($osTargets.Count -eq 0) {
+                throw "Inf2Cat did not advertise any Windows client $suffix identifiers."
+            }
+
+            $os = $osTargets -join ","
+            Write-Host "[WFP] Inf2Cat OS targets: $os" -ForegroundColor DarkGray
             & $inf2cat /driver:$package /os:$os /uselocaltime
             if ($LASTEXITCODE -ne 0) {
                 throw "Inf2Cat failed for $TargetPlatform"
@@ -130,6 +272,8 @@ function Build-One {
 
 if (-not (Test-Path $Project)) { throw "Missing project: $Project" }
 if (-not (Test-Path $Inf)) { throw "Missing INF: $Inf" }
+
+Assert-WDKVisualStudioIntegration
 
 $targets = if ($Platform -eq "all") { @("x64", "ARM64") } else { @($Platform) }
 foreach ($target in $targets) {

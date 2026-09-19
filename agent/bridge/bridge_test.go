@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -433,25 +434,31 @@ func TestConcurrentConfigUpdatesDoNotLoseUnrelatedFields(t *testing.T) {
 	}
 }
 
-func TestDNSModeSaveIsHotPolicy(t *testing.T) {
+func TestDNSModeSaveRequiresRestartWithoutPublishingMixedWFPState(t *testing.T) {
 	b := newTestBridge(t)
+	before := b.agent.Config().DivertConfig.DNSMode
 	var in ConfigUpdate
 	in.Network.DNSMode = ptr(divert.DNSModeProxy)
 	result, err := b.SaveConfig(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.RestartRequired || result.ReloadPending {
-		t.Fatalf("DNS mode should hot-apply: %+v", result)
+	if !result.RestartRequired || result.ReloadPending {
+		t.Fatalf("DNS mode must be persisted as restart-only: %+v", result)
+	}
+	if !slices.Contains(result.RestartFields, "DNS 模式") {
+		t.Fatalf("restart fields do not identify DNS mode: %+v", result.RestartFields)
 	}
 	state, err := b.GetConfigState()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Config.Network.DNSMode != divert.DNSModeProxy ||
-		state.Runtime.Network.DNSMode != divert.DNSModeProxy ||
-		b.agent.Config().DivertConfig.DNSMode != divert.DNSModeProxy {
-		t.Fatalf("DNS mode did not propagate: config=%q runtime=%q agent=%q",
-			state.Config.Network.DNSMode, state.Runtime.Network.DNSMode, b.agent.Config().DivertConfig.DNSMode)
+	if state.Config.Network.DNSMode != divert.DNSModeProxy {
+		t.Fatalf("saved DNS mode=%q want %q", state.Config.Network.DNSMode, divert.DNSModeProxy)
+	}
+	if state.Runtime.Network.DNSMode != before ||
+		b.agent.Config().DivertConfig.DNSMode != before {
+		t.Fatalf("running DNS mode changed before restart: before=%q runtime=%q agent=%q",
+			before, state.Runtime.Network.DNSMode, b.agent.Config().DivertConfig.DNSMode)
 	}
 }

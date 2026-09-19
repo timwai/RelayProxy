@@ -28,6 +28,10 @@ import (
 var Version = "1.0.0"
 
 func main() {
+	// A UAC replacement carries a private parent marker. Consume and wait for
+	// the old process before flag parsing and singleton acquisition.
+	waitForElevationParent()
+
 	configPath := flag.String("config", "", "Path to configuration file (Windows default: %USERPROFILE%\\.relayproxy\\relay-agent.yaml)")
 	serverFlag := flag.String("server", "", "Override server address")
 	exitFlag := flag.String("exit", "", "Default exit node ID (omit to auto-select when exactly one exit is online)")
@@ -143,6 +147,15 @@ func main() {
 		log.Fatalf("[Config] Invalid startup configuration: %v", err)
 	}
 	networkMode := cfgFile.Network.Mode
+
+	relaunchedElevated, err := ensureTransparentProxyElevation(networkMode)
+	if err != nil {
+		log.Fatalf("[WFP] Failed to acquire administrator privileges: %v", err)
+	}
+	if relaunchedElevated {
+		log.Println("[WFP] Relaunched with administrator privileges for transparent proxy.")
+		return
+	}
 
 	identityPath := filepath.Join(filepath.Dir(*configPath), "device-identity.json")
 	deviceIdentity, err := deviceidentity.LoadOrCreate(identityPath)

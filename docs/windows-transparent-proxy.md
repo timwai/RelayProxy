@@ -8,9 +8,9 @@ Windows amd64 与 ARM64 客户端优先使用 RelayProxy 原生 WFP callout driv
 
 发布目录仍保留 `windows-amd64/wfp/` 与 `windows-arm64/wfp/` 作为人工排障/恢复副本，但日常运行无需手工执行安装脚本。正式部署仍必须使用满足 Windows 驱动签名策略的签名 SYS/CAT；未签名驱动在默认 Windows 签名策略下会被系统拒绝。amd64 的 Agent 同时内嵌官方 WinDivert 2.2.2，WFP 自动安装失败时的 `auto` 模式可以回退；ARM64 没有 WinDivert 回退。
 
-1. 以管理员身份运行 `relay-agent-gui.exe` 或 `relay-agent.exe`，完成服务器与出口配置。
+1. 正常启动 `relay-agent-gui.exe` 或 `relay-agent.exe`，完成服务器与出口配置。
 2. 在“本地代理服务 → 系统透明代理”中启用并保存。命令行对应 `network.mode: divert`。
-3. 下一次透明代理启动时，Agent 自动安装/更新并启动对应架构 WFP driver；无需额外安装命令。
+3. 下一次透明代理启动时，如果当前进程没有管理员权限，Agent 会自动触发一次 Windows UAC 并以相同参数重启自己；随后自动安装/更新并启动对应架构 WFP driver，无需右键“以管理员身份运行”或额外执行安装脚本。
 4. 根据需要设置 `network.dns_mode`，默认 `auto`；再配置路由规则与默认动作。
 5. 点击“实时连接”查看普通进程、系统进程、PID、域名/IP、协议、动作、出口及双向流量。
 

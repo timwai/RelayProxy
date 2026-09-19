@@ -246,7 +246,7 @@ try {
 
     Write-Host "[prep] Package Windows ARM64 agent"
     & go run ./scripts/fetch-windivert.go `
-        -out "" `
+        -skip-runtime `
         -agent-dir (Join-Path $OutDir "windows-arm64") `
         -agent-arch "arm64" `
         -agent-zip (Join-Path $OutDir "RelayProxy-agent-windows-arm64.zip")

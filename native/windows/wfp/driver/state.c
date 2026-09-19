@@ -303,8 +303,27 @@ BOOLEAN RpIsControllerFile(_In_opt_ PFILE_OBJECT FileObject)
 
 VOID RpControllerCleanup(_In_opt_ PFILE_OBJECT FileObject)
 {
-    if (RpIsControllerFile(FileObject)) {
-        RpControllerFailOpen();
+    BOOLEAN failOpen = FALSE;
+    KIRQL oldIrql;
+
+    if (FileObject == NULL) {
+        return;
+    }
+
+    /*
+     * Match ownership and transition into fail-open under one lock. A stale
+     * cleanup IRP from the previous Agent must never tear down a controller
+     * that successfully reconnected after a watchdog timeout.
+     */
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (g_RpState.ControllerActive &&
+        g_RpState.ControllerFileObject == FileObject) {
+        failOpen = RpBeginControllerFailOpenLocked();
+    }
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+
+    if (failOpen) {
+        RpFinishControllerFailOpen();
     }
 }
 

@@ -9,7 +9,7 @@ func TestWFPDNSProxyBootstrap(t *testing.T) {
 		name           string
 		protocol       Protocol
 		port           uint16
-		mode           DNSMode
+		mode           string
 		proxyReady     bool
 		proxyEverReady bool
 		want           bool

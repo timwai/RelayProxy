@@ -28,6 +28,7 @@ const (
 	wfpIOCTLInjectUDP   = uint32(0x80002010)
 	wfpIOCTLHeartbeat   = uint32(0x80002014)
 	wfpIOCTLStop        = uint32(0x80002018)
+	wfpIOCTLRelease     = uint32(0x8000201c)
 )
 
 const wfpHeartbeatInterval = 2 * time.Second
@@ -119,6 +120,15 @@ func (d *wfpDevice) heartbeat() error {
 }
 
 func (d *wfpDevice) stop() { _, _ = d.ioctl(wfpIOCTLStop, nil, nil) }
+
+func (d *wfpDevice) release(requestID uint64) error {
+	data, err := encodeWFPRelease(requestID)
+	if err != nil {
+		return err
+	}
+	_, err = d.ioctl(wfpIOCTLRelease, data, nil)
+	return err
+}
 
 func (d *wfpDevice) Close() error {
 	d.mu.Lock()
@@ -468,13 +478,17 @@ func (i *wfpInterceptor) acceptTCP(listener net.Listener) {
 			continue
 		}
 		i.wg.Add(1)
-		go func(route *ClassifiedFlow, conn net.Conn) {
+		go func(requestID uint64, route *ClassifiedFlow, conn net.Conn) {
 			defer i.wg.Done()
+			defer i.forget(requestID, 0)
+			defer func() { _ = i.device.release(requestID) }()
 			if err := i.server.ForwardTCP(i.ctx, route, conn); err != nil {
 				route.traffic.Finish("failed", err)
 				i.report(err)
+				return
 			}
-		}(route, conn)
+			route.traffic.Finish("closed", nil)
+		}(requestID, route, conn)
 	}
 }
 

@@ -71,7 +71,8 @@ static NTSTATUS RpDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
             version->Features = RP_WFP_FEATURE_TCP |
                                 RP_WFP_FEATURE_UDP |
                                 RP_WFP_FEATURE_IPV6 |
-                                RP_WFP_FEATURE_SYSTEM_IDENTITY;
+                                RP_WFP_FEATURE_SYSTEM_IDENTITY |
+                                RP_WFP_FEATURE_DNS_CONTROL;
             information = sizeof(*version);
             status = STATUS_SUCCESS;
         }

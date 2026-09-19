@@ -114,7 +114,7 @@ static NTSTATUS RpDeviceControl(_In_ PDEVICE_OBJECT DeviceObject, _In_ PIRP Irp)
             status = STATUS_ACCESS_DENIED;
             break;
         }
-        if (buffer == NULL || inLength < FIELD_OFFSET(RP_WFP_UDP_INJECT, Payload)) {
+        if (buffer == NULL || inLength < (ULONG)FIELD_OFFSET(RP_WFP_UDP_INJECT, Payload)) {
             status = STATUS_BUFFER_TOO_SMALL;
             break;
         }

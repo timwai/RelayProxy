@@ -118,3 +118,20 @@ func TestConnectionCountsPartialIOAndPreservesHalfClose(t *testing.T) {
 		t.Fatalf("accounting: %+v", s)
 	}
 }
+
+func TestRegistryRecentRingKeepsNewestConnections(t *testing.T) {
+	r := NewRegistry(1, 3)
+	for i := 0; i < 8; i++ {
+		r.Start(Metadata{Host: "example.com"}).Finish("closed", nil)
+	}
+	s := r.Snapshot()
+	if len(s.Connections) != 3 {
+		t.Fatalf("recent length=%d want=3", len(s.Connections))
+	}
+	want := []uint64{8, 7, 6}
+	for i, id := range want {
+		if s.Connections[i].ID != id {
+			t.Fatalf("recent[%d].ID=%d want=%d", i, s.Connections[i].ID, id)
+		}
+	}
+}

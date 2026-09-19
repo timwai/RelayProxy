@@ -105,3 +105,30 @@ func TestExitDatagramRequiredRejectsStreamTransport(t *testing.T) {
 		t.Fatalf("required datagram response: %+v", resp)
 	}
 }
+
+func TestCompiledRelayACLCacheReusesVerifiedPolicy(t *testing.T) {
+	base, err := acl.NewChecker(acl.Policy{ID: "relay", AllowInternet: true, AllowPrivateNetwork: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := base.Policy()
+	h := NewHandler(HandlerConfig{})
+	first, err := h.compiledRelayACL(&policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.compiledRelayACL(&policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatal("compiled relay ACL cache missed identical policy")
+	}
+
+	changed := policy
+	changed.AllowInternet = false
+	fresh := NewHandler(HandlerConfig{})
+	if _, err := fresh.compiledRelayACL(&changed); err == nil || !strings.Contains(err.Error(), "fingerprint mismatch") {
+		t.Fatalf("stale fingerprint accepted changed policy on cache miss: %v", err)
+	}
+}

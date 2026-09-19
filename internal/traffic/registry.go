@@ -105,6 +105,7 @@ type Registry struct {
 	active               map[uint64]*Record
 	unlistedActive       int
 	recent               []*Record
+	recentHead           int
 	meter                meter
 }
 
@@ -259,11 +260,16 @@ func (r *Record) Finish(state string, err error) {
 		return
 	}
 	delete(registry.active, r.connection.ID)
-	registry.recent = append(registry.recent, r)
-	if len(registry.recent) > registry.maxRecent {
-		copy(registry.recent, registry.recent[1:])
-		registry.recent[len(registry.recent)-1] = nil
-		registry.recent = registry.recent[:registry.maxRecent]
+	if len(registry.recent) < registry.maxRecent {
+		registry.recent = append(registry.recent, r)
+		return
+	}
+	// Fixed-size ring: once history is full, completing a connection replaces
+	// the oldest slot in O(1) instead of shifting maxRecent pointers under mu.
+	registry.recent[registry.recentHead] = r
+	registry.recentHead++
+	if registry.recentHead == registry.maxRecent {
+		registry.recentHead = 0
 	}
 }
 

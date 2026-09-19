@@ -221,14 +221,14 @@ NTSTATUS RpInjectUdp(_In_ const RP_WFP_UDP_INJECT* Request, _In_ ULONG InputLeng
     ULONG expectedSize;
 
     if (Request == NULL ||
-        InputLength < FIELD_OFFSET(RP_WFP_UDP_INJECT, Payload) ||
+        InputLength < (ULONG)FIELD_OFFSET(RP_WFP_UDP_INJECT, Payload) ||
         Request->AbiVersion != RP_WFP_ABI_VERSION ||
         Request->AssociationId == 0 ||
         Request->PayloadLength > RP_WFP_MAX_UDP_PAYLOAD) {
         return STATUS_INVALID_PARAMETER;
     }
 
-    expectedSize = FIELD_OFFSET(RP_WFP_UDP_INJECT, Payload) + Request->PayloadLength;
+    expectedSize = (ULONG)FIELD_OFFSET(RP_WFP_UDP_INJECT, Payload) + Request->PayloadLength;
     if (Request->Size != expectedSize || InputLength != expectedSize) {
         return STATUS_INVALID_BUFFER_SIZE;
     }

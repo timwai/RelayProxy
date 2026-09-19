@@ -40,6 +40,8 @@ typedef struct _RP_FLOW {
     UINT32 InterfaceIndex;
     UINT32 SubInterfaceIndex;
     UINT64 LastSeen100ns;
+    volatile LONG64 UploadBytes;
+    volatile LONG64 DownloadBytes;
     LONG FlowAssociated;
 } RP_FLOW;
 
@@ -80,6 +82,8 @@ typedef struct _RP_DRIVER_STATE {
     UINT32 DatagramV6Id;
     UINT32 FlowV4Id;
     UINT32 FlowV6Id;
+    UINT32 StreamV4Id;
+    UINT32 StreamV6Id;
 } RP_DRIVER_STATE;
 
 extern RP_DRIVER_STATE g_RpState;
@@ -96,6 +100,8 @@ extern const GUID RP_CALLOUT_DATAGRAM_V4;
 extern const GUID RP_CALLOUT_DATAGRAM_V6;
 extern const GUID RP_CALLOUT_FLOW_V4;
 extern const GUID RP_CALLOUT_FLOW_V6;
+extern const GUID RP_CALLOUT_STREAM_V4;
+extern const GUID RP_CALLOUT_STREAM_V6;
 
 NTSTATUS RpStateInitialize(VOID);
 VOID RpStateShutdown(VOID);

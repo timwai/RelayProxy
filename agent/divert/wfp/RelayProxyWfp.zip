@@ -1,0 +1,2 @@
+RelayProxy WFP payload placeholder.
+scripts/build.ps1 replaces this file with an architecture-specific signed driver package before building relay-agent.exe.

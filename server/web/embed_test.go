@@ -31,7 +31,6 @@ func TestConsoleUsesUnifiedPersonalNavigation(t *testing.T) {
 	}
 }
 
-
 func TestServerConsoleKeepsLargeMenuAndSecondarySettingsTabs(t *testing.T) {
 	script, err := EmbeddedFiles.ReadFile("js/app.js")
 	if err != nil {

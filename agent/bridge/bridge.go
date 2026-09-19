@@ -185,6 +185,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.Access.Domains = c.AccessDomains
 	res.Exit.Access.CIDRs = c.AccessCIDRs
 	res.Network.Mode = c.NetworkMode
+	res.Network.DNSMode = c.DivertConfig.DNSMode
 	res.Network.ExcludeProcesses = c.DivertConfig.ExcludeProcesses
 	res.Routing = c.Routing
 	return res
@@ -226,6 +227,7 @@ type ConfigUpdate struct {
 	} `json:"exit"`
 	Network struct {
 		Mode             *string   `json:"mode"` // "" (off) | "divert"
+		DNSMode          *string   `json:"dnsMode"`
 		ExcludeProcesses *[]string `json:"excludeProcesses"`
 	} `json:"network"`
 	Routing *RoutingConfigUpdate `json:"routing"`
@@ -377,6 +379,15 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 			return nil, fmt.Errorf("network.mode=tun 已废弃，请使用 divert")
 		default:
 			return nil, fmt.Errorf("网络模式必须是 divert（或留空关闭）")
+		}
+	}
+	if in.Network.DNSMode != nil {
+		mode := strings.ToLower(strings.TrimSpace(*in.Network.DNSMode))
+		switch mode {
+		case divert.DNSModeAuto, divert.DNSModeProxy, divert.DNSModeDirect, divert.DNSModeRule:
+			cfg.Network.DNSMode = mode
+		default:
+			return nil, fmt.Errorf("DNS 模式必须是 auto / proxy / direct / rule")
 		}
 	}
 	if in.Network.ExcludeProcesses != nil {

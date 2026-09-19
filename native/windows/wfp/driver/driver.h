@@ -130,6 +130,11 @@ NTSTATUS RpHeartbeat(_In_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid);
 NTSTATUS RpStopController(_In_opt_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid);
 UINT64 RpCurrentControllerGeneration(VOID);
 BOOLEAN RpControllerOwnsFlow(_In_ PFILE_OBJECT FileObject, _In_ const RP_FLOW* Flow);
+BOOLEAN RpGetRedirectTarget(
+    _In_ const RP_FLOW* Flow,
+    _In_ UCHAR Family,
+    _Out_ ULONG* ControllerPid,
+    _Out_ USHORT* TcpPort);
 
 RP_FLOW* RpFindFlowByRequestId(_In_ UINT64 RequestId);
 RP_FLOW* RpFindFlowByAssociationId(_In_ UINT64 AssociationId);

@@ -179,7 +179,8 @@ func TestDatagramReassemblyExpiryReleasesBudget(t *testing.T) {
 	payload := bytes.Repeat([]byte("x"), protocol.UDPFragmentPayload+1)
 	budget := &datagramBudget{associationLimit: 1, queueLimit: 1 << 16, reassemblyLimit: int64(len(payload))}
 	pc := budgetConn(t, budgetChannel(t, budgetMux(t, budget), 1))
-	_, _ = pc.assemble(budgetFrames(t, 1, payload)[0], make([]byte, len(payload)))
+	frame := budgetFrames(t, 1, payload)[0]
+	_, _ = pc.assemble(budgetFragment(t, frame), make([]byte, len(payload)))
 	deadline := time.NewTimer(2 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)

@@ -34,20 +34,20 @@
 <div id="app-view" class="app-shell" hidden>
   <aside class="sidebar">
     <a class="brand" href="#overview"><span class="brand-mark"><svg><use href="#i-pulse"/></svg></span><span>RelayProxy<small>管理控制台</small></span></a>
-    <div class="nav-label">工作空间</div>
+    <div class="nav-label">主菜单</div>
     <nav aria-label="管理导航">
-      <a href="#overview" data-page="overview"><svg><use href="#i-grid"/></svg><span>总览</span></a>
-      <a href="#devices" data-page="devices"><svg><use href="#i-device"/></svg><span>设备管理</span><b id="nav-device-count">0</b></a>
-      <a href="#exits" data-page="exits"><svg><use href="#i-exit"/></svg><span>出口节点</span></a>
-      <a href="#sessions" data-page="sessions"><svg><use href="#i-activity"/></svg><span>活跃会话</span></a>
-      <a href="#rdp-ingress" data-page="rdp-ingress" data-admin><svg><use href="#i-device"/></svg><span>RDP 公网入口</span></a>
-      <a href="#settings" data-page="settings" data-admin><svg><use href="#i-settings"/></svg><span>服务配置</span><i id="settings-dot" hidden></i></a>
+      <a href="#overview" data-section="overview"><svg><use href="#i-grid"/></svg><span>概览</span></a>
+      <a href="#devices" data-section="devices"><svg><use href="#i-device"/></svg><span>设备</span><b id="nav-device-count">0</b></a>
+      <a href="#sessions" data-section="connections"><svg><use href="#i-activity"/></svg><span>连接</span></a>
+      <a href="#rdp-ingress" data-section="rdp" data-admin><svg><use href="#i-device"/></svg><span>RDP</span></a>
+      <a href="#settings" data-section="settings" data-admin><svg><use href="#i-settings"/></svg><span>设置</span><i id="settings-dot" hidden></i></a>
     </nav>
     <div class="sidebar-bottom"><div class="avatar" id="user-avatar">A</div><div class="user-info"><strong id="user-name"></strong><small id="user-role"></small><button class="account-password" data-open-password>修改密码</button></div><button id="logout" class="logout-button" title="退出登录">退出</button></div>
   </aside>
   <main>
-    <header class="topbar"><div><span class="breadcrumb">管理控制台</span><span class="slash">/</span><span id="page-label">总览</span></div><div class="top-actions"><span id="access-origin" class="origin mono"></span><button id="refresh" class="icon-button" title="刷新数据" aria-label="刷新数据"><svg><use href="#i-refresh"/></svg></button><button class="mobile-account" data-open-password title="修改管理密码" aria-label="修改管理密码">改密</button><button id="logout-mobile" class="mobile-logout" title="退出登录">退出</button></div></header>
+    <header class="topbar"><div><span class="breadcrumb">管理控制台</span><span class="slash">/</span><span id="page-label">总览</span></div><div class="top-actions"><div class="rp-theme-control" aria-label="界面主题"><button type="button" data-rp-theme="system">自动</button><button type="button" data-rp-theme="light">浅色</button><button type="button" data-rp-theme="dark">深色</button></div><span id="access-origin" class="origin mono"></span><button id="refresh" class="icon-button" title="刷新数据" aria-label="刷新数据"><svg><use href="#i-refresh"/></svg></button><button class="mobile-account" data-open-password title="修改管理密码" aria-label="修改管理密码">改密</button><button id="logout-mobile" class="mobile-logout" title="退出登录">退出</button></div></header>
     <div class="content">
+      <div id="secondary-tabs" class="rp-tabs server-secondary-tabs" role="tablist" aria-label="当前模块功能"></div>
       <div id="global-error" class="notice error" role="alert" hidden></div>
       <div id="restart-banner" class="notice warning" hidden><div><strong>配置已保存，等待服务重启</strong><p id="restart-summary"></p></div><a href="#settings">查看配置 →</a></div>
       <section id="page-overview" class="page">

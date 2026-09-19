@@ -386,13 +386,25 @@ func (i *wfpInterceptor) handleFlow(event wfpEvent) {
 		}
 	}
 
-	dnsUDP := event.Protocol == ProtoUDP && event.Destination.Port() == 53
+	dnsPort53 := event.Destination.Port() == 53 &&
+		(event.Protocol == ProtoUDP || event.Protocol == ProtoTCP)
+	dnsUDP := dnsPort53 && event.Protocol == ProtoUDP
 	dnsMode := i.server.engine.Config().DNSMode
 	dnsAutoUDP := dnsUDP && dnsMode == DNSModeAuto
-	dnsProxyBootstrapUDP := dnsUDP &&
+	dnsProxyBootstrap := dnsPort53 &&
 		dnsMode == DNSModeProxy &&
 		!i.server.proxyReady() &&
 		!i.proxyEverReady.Load()
+	if dnsProxyBootstrap && event.Protocol == ProtoTCP {
+		// DNS can fall back to TCP after a truncated UDP response. A TCP flow
+		// that began during initial bootstrap may finish DIRECT; after the first
+		// Relay-ready transition all newly classified TCP/53 flows are PROXY.
+		if err := i.device.decision(event.RequestID, ActionDirect); err != nil {
+			i.report(err)
+		}
+		return
+	}
+	dnsProxyBootstrapUDP := dnsProxyBootstrap && event.Protocol == ProtoUDP
 	var route *ClassifiedFlow
 	var err error
 	if dnsAutoUDP {

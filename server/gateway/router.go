@@ -672,14 +672,14 @@ func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelSt
 			}
 		}()
 		for {
-			frame, err := src.Receive(ctx)
+			packet, err := src.ReceivePacket(ctx)
 			if err != nil {
 				return
 			}
-			if err := dst.Forward(ctx, frame); err != nil {
+			n := packet.PayloadBytes()
+			if err := dst.ForwardPacket(ctx, packet); err != nil {
 				return
 			}
-			n := len(frame) - protocol.UDPFragmentHeaderSize
 			*total += int64(n)
 			pendingStats += n
 			if pendingStats >= datagramStatsBatch {

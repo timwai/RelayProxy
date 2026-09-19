@@ -178,11 +178,11 @@ func wfpDNSProxyBootstrap(protocol Protocol, port uint16, mode string, proxyRead
 }
 
 type wfpInterceptor struct {
-	server    *Server
-	device    *wfpDevice
-	listeners []net.Listener
-	ctx       context.Context
-	cancel    context.CancelFunc
+	server         *Server
+	device         *wfpDevice
+	listeners      []net.Listener
+	ctx            context.Context
+	cancel         context.CancelFunc
 	running        atomic.Bool
 	proxyEverReady atomic.Bool
 	closeOnce      sync.Once

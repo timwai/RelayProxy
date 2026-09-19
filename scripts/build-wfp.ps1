@@ -152,7 +152,7 @@ You can verify manually with:
 
     $builtInf = Join-Path $Root "native\windows\wfp\bin\$TargetPlatform\$Configuration\RelayProxyWfp.inf"
     if (-not (Test-Path $builtInf)) {
-        throw "Stamped INF was not produced for $TargetPlatform: $builtInf"
+        throw "Stamped INF was not produced for ${TargetPlatform}: $builtInf"
     }
 
     $infVerif = $null

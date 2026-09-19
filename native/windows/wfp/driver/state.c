@@ -284,6 +284,29 @@ NTSTATUS RpHeartbeat(_In_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid)
     return status;
 }
 
+NTSTATUS RpStopController(_In_opt_ PFILE_OBJECT FileObject, _In_ ULONG RequestorPid)
+{
+    BOOLEAN failOpen = FALSE;
+    NTSTATUS status = STATUS_ACCESS_DENIED;
+    KIRQL oldIrql;
+
+    KeAcquireSpinLock(&g_RpState.Lock, &oldIrql);
+    if (!g_RpState.ControllerActive && !g_RpState.ControllerFailingOpen) {
+        status = STATUS_SUCCESS;
+    } else if (RpControllerOwnsFileLocked(FileObject) &&
+               RequestorPid != 0 &&
+               RequestorPid == g_RpState.ControllerPid) {
+        failOpen = RpBeginControllerFailOpenLocked();
+        status = failOpen ? STATUS_SUCCESS : STATUS_DEVICE_BUSY;
+    }
+    KeReleaseSpinLock(&g_RpState.Lock, oldIrql);
+
+    if (failOpen) {
+        RpFinishControllerFailOpen();
+    }
+    return status;
+}
+
 NTSTATUS RpConfigureController(_In_ PIRP Irp, _In_ const RP_WFP_CONFIG* Config)
 {
     ULONG requestorPid;

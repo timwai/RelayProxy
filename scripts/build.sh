@@ -64,7 +64,7 @@ build_one() {
   echo "  OK  $(awk -v s="$size" 'BEGIN{printf "%.2f MB", s/1024/1024}')"
 }
 
-# Linux server/agent and macOS agent — hide Windows .syso during cross-compile
+# Linux + macOS server/agent — hide Windows .syso during cross-compile
 hide_syso
 trap show_syso EXIT
 build_one linux amd64 ./cmd/relay-server "$OUT_DIR/linux-amd64/relay-server"
@@ -150,19 +150,36 @@ build_native_macos_app() {
 
   echo "[BUILD] macOS native Host + NetworkExtension"
   if [[ ! -d "$project" ]]; then
-    (cd "$ROOT/macos" && xcodegen generate)
+    if ! (cd "$ROOT/macos" && xcodegen generate); then
+      echo "[WARN] macOS NetworkExtension project generation failed; portable artifacts are still available"
+      return 0
+    fi
     generated=1
   fi
 
   rm -rf "$derived"
-  xcodebuild     -project "$project"     -scheme RelayProxyMacHost     -configuration Release     -derivedDataPath "$derived"     DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM"     CODE_SIGN_STYLE=Manual     build
+  if ! xcodebuild \
+    -project "$project" \
+    -scheme RelayProxyMacHost \
+    -configuration Release \
+    -derivedDataPath "$derived" \
+    DEVELOPMENT_TEAM="$DEVELOPMENT_TEAM" \
+    CODE_SIGN_STYLE=Manual \
+    build; then
+    echo "[WARN] macOS NetworkExtension app build/signing failed; portable artifacts are still available"
+    rm -rf "$derived"
+    if [[ "$generated" == "1" ]]; then rm -rf "$project"; fi
+    return 0
+  fi
 
   mkdir -p "$native_dir"
   rm -rf "$native_dir/RelayProxyMacHost.app"
   cp -R "$derived/Build/Products/Release/RelayProxyMacHost.app" "$native_dir/RelayProxyMacHost.app"
 
   if command -v ditto >/dev/null 2>&1; then
-    ditto -c -k --sequesterRsrc --keepParent       "$native_dir/RelayProxyMacHost.app"       "$OUT_DIR/RelayProxy-macos-native.zip"
+    ditto -c -k --sequesterRsrc --keepParent \
+      "$native_dir/RelayProxyMacHost.app" \
+      "$OUT_DIR/RelayProxy-macos-native.zip"
   fi
 
   rm -rf "$derived"
@@ -223,6 +240,16 @@ package_release_archives() {
   if [[ -d "$OUT_DIR/darwin-native" ]]; then
     tar -C "$OUT_DIR" -czf "$OUT_DIR/RelayProxy-darwin-native.tar.gz" darwin-native
   fi
+
+  if command -v zip >/dev/null 2>&1; then
+    (
+      cd "$OUT_DIR"
+      zip -qry "RelayProxy-windows-amd64.zip" windows-amd64
+      zip -qry "RelayProxy-windows-arm64.zip" windows-arm64
+    )
+  else
+    echo "[SKIP] Windows full ZIP archives: zip command is unavailable; tar.gz archives were created"
+  fi
 }
 
 package_release_archives
@@ -262,5 +289,8 @@ if [[ -d "$OUT_DIR/darwin-native" ]]; then
   echo "  darwin-native/ RelayProxyMacHost.app + embedded NetworkExtension"
 fi
 echo "  RelayProxy-<target>.tar.gz release archives"
+if command -v zip >/dev/null 2>&1; then
+  echo "  RelayProxy-windows-{amd64,arm64}.zip full Windows release archives"
+fi
 echo "  RelayProxy-agent-windows-amd64.zip Agent-only Windows x64 package"
 echo "  SHA256SUMS.txt"

@@ -87,6 +87,21 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 		t.Fatal("Agent management page still exposes web token UI")
 	}
 	for _, forbidden := range []string{
+		`src="icon.png"`,
+		`id="brand-version"`,
+		`<span>Local Agent</span>`,
+		`<span>/</span>`,
+		`RelayProxy 代理客户端`,
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("management page still contains removed branding element %q", forbidden)
+		}
+	}
+	if !strings.Contains(body, `<title>RelayProxy</title>`) ||
+		!strings.Contains(body, `<div class="rp-reference-crumb"><b id="agent-section-label">概览</b></div>`) {
+		t.Fatal("management page missing simplified title or section heading")
+	}
+	for _, forbidden := range []string{
 		".rp-sidebar .rp-nav-label{display:none",
 		".rp-sidebar .rp-nav-item span{display:none",
 		".rp-sidebar>div:first-child>div:last-child{display:none",

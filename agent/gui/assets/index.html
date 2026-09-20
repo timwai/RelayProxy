@@ -177,9 +177,6 @@
     @media(prefers-reduced-motion:reduce) { .live-dot{animation:none;} }
   
     /* Reference restore: Agent shell and density. */
-    .rp-reference-workspace{margin:0 4px 5px;border:1px solid var(--rp-border);background:var(--rp-surface);border-radius:8px;padding:7px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--rp-muted);font-size:9px}
-    .rp-reference-workspace b{display:block;color:var(--rp-text);font-size:10px;font-weight:650}
-    .rp-reference-workspace small{display:block;color:var(--rp-subtle);font-size:8px;margin-top:1px}
     .rp-reference-top{height:56px;min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 18px;border-bottom:1px solid var(--rp-border);background:color-mix(in srgb,var(--rp-surface) 92%,transparent);backdrop-filter:blur(16px);z-index:8}
     .rp-reference-crumb{display:flex;align-items:center;gap:8px;color:var(--rp-muted);font-size:10px;min-width:0}
     .rp-reference-crumb b{color:var(--rp-text);font-weight:650}
@@ -233,7 +230,6 @@
         min-width:var(--rp-sidebar-width)!important;
         flex-basis:var(--rp-sidebar-width)!important;
       }
-      .rp-reference-workspace{display:flex!important}
       .rp-sidebar .rp-nav-label{display:block!important}
       .rp-sidebar .rp-nav-item{justify-content:flex-start!important;padding:0 9px!important}
       .rp-sidebar .rp-nav-item span{display:inline!important}
@@ -266,10 +262,6 @@
     .rp-section-title{font-size:12px!important;line-height:1.35}
     .rp-table th{font-size:10px!important;line-height:1.35}
     .rp-table td{font-size:12px!important;line-height:1.45}
-
-    .rp-reference-workspace{font-size:11px!important}
-    .rp-reference-workspace b{font-size:12px!important}
-    .rp-reference-workspace small{font-size:10px!important}
     .rp-reference-crumb{font-size:12px!important}
     .rp-reference-command{font-size:11px!important}
     .rp-reference-command kbd{font-size:10px!important}
@@ -443,10 +435,7 @@
 
     <!-- Sidebar -->
     <nav class="rp-sidebar flex flex-col shrink-0">
-
-      <div class="rp-reference-workspace"><div><b>本机设备</b><small>Local agent</small></div><span>⌄</span></div>
-
-      <div class="flex-1 p-2 space-y-1">
+<div class="flex-1 p-2 space-y-1">
         <div class="rp-nav-label">主菜单</div>
         <button onclick="switchSection('home')" id="section-btn-home" aria-selected="true" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-gauge"/></svg><span>概览</span>

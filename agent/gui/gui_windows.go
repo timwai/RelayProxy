@@ -112,6 +112,10 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	showMsgID = win.RegisterWindowMessage(windows.StringToUTF16Ptr("RelayProxyAgentShowWindow"))
 
 	icon, _ := assets.ReadFile("assets/icon.png")
+	trayIcon, trayErr := assets.ReadFile("assets/icon.ico")
+	if trayErr != nil || len(trayIcon) == 0 {
+		trayIcon = icon
+	}
 	dataPath := filepath.Join(os.Getenv("LOCALAPPDATA"), "RelayProxy", "wails-webview2")
 	if os.Getenv("LOCALAPPDATA") == "" {
 		if home, homeErr := os.UserHomeDir(); homeErr == nil {
@@ -176,7 +180,7 @@ func Run(b *bridge.UIBridge, opts Options) error {
 		a.closeConnections()
 	})
 
-	a.installTray(icon)
+	a.installTray(trayIcon)
 
 	activeApp.Store(a)
 	defer activeApp.Store(nil)

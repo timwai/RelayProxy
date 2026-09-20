@@ -618,8 +618,37 @@ func (db *DB) SetDeviceEnabled(deviceID string, enabled bool) error {
 	return nil
 }
 
-func (db *DB) DeleteDevice(deviceID string) error {
-	res, err := db.Exec(`DELETE FROM devices WHERE id = ?`, deviceID)
+func (db *DB) DeleteDevice(deviceID, reviewerID string) error {
+	if deviceID == "" || reviewerID == "" {
+		return errors.New("device id and reviewer id are required")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var fingerprint string
+	if err := tx.QueryRow(`SELECT public_key_fingerprint FROM devices WHERE id = ?`, deviceID).Scan(&fingerprint); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if err := insertAuthorizationAudit(tx, "device.delete", reviewerID, "device", deviceID,
+		map[string]any{"fingerprint": fingerprint}, now); err != nil {
+		return err
+	}
+
+	// Remove the identity and its previous enrollment record first. The identity
+	// table intentionally does not cascade from devices: deleting these rows
+	// makes the same installation appear as a fresh pending enrollment if it
+	// connects again later.
+	if _, err := tx.Exec(`DELETE FROM device_enrollment_requests WHERE fingerprint = ?`, fingerprint); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM device_identities WHERE fingerprint = ? AND device_id = ?`, fingerprint, deviceID); err != nil {
+		return err
+	}
+	res, err := tx.Exec(`DELETE FROM devices WHERE id = ?`, deviceID)
 	if err != nil {
 		return err
 	}
@@ -627,10 +656,10 @@ func (db *DB) DeleteDevice(deviceID string) error {
 	if err != nil {
 		return err
 	}
-	if n == 0 {
-		return fmt.Errorf("device not found")
+	if n != 1 {
+		return sql.ErrNoRows
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (db *DB) ServerInstanceID() (string, error) {

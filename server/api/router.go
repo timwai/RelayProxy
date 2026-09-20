@@ -185,6 +185,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/enrollments/{id}/reject", r.requireAuth(r.requireAdmin(r.handleRejectEnrollment)))
 	r.mux.HandleFunc("PUT /api/v1/devices/{id}/capabilities", r.requireAuth(r.requireAdmin(r.handleUpdateDeviceCapabilities)))
 	r.mux.HandleFunc("POST /api/v1/devices/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleRevokeDevice)))
+	r.mux.HandleFunc("DELETE /api/v1/devices/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteDevice)))
 
 	// Exit APIs
 	r.mux.HandleFunc("GET /api/v1/exits", r.requireAuth(r.handleListExits))
@@ -548,6 +549,29 @@ func (r *Router) handleRevokeDevice(w http.ResponseWriter, req *http.Request) {
 		r.onDeviceRevoked(id)
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": repository.EnrollmentRevoked})
+}
+
+func (r *Router) handleDeleteDevice(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	actor, _ := req.Context().Value(userContextKey).(string)
+	err := r.sessions.ChangeDeviceAuthorization(id, true, func() error {
+		return r.db.DeleteDevice(id, actor)
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "device not found")
+		} else {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	// Reconcile runtime services after the authorization snapshot has been
+	// invalidated. Delete has the same teardown needs as revoke, plus database
+	// cascades remove any RDP grants/services owned by this device.
+	if r.onDeviceRevoked != nil {
+		r.onDeviceRevoked(id)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "deleted"})
 }
 
 func (r *Router) handleUpdateDeviceCapabilities(w http.ResponseWriter, req *http.Request) {

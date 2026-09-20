@@ -144,9 +144,14 @@ function routingEditorElements() {
   };
 }
 
+function routingRuleActionsLocked() {
+  const save = $('routing-rule-save');
+  return !save || save.disabled;
+}
+
 function openRuleEditor(index) {
   const el = routingEditorElements();
-  if (!el.modal) return;
+  if (!el.modal || routingRuleActionsLocked()) return;
 
   routingRuleEditorIndex = Number.isInteger(index) ? index : -1;
   const editing = routingRuleEditorIndex >= 0 && routingRuleEditorIndex < routingRules.length;
@@ -190,6 +195,7 @@ function updateRoutingEditorDependencies() {
 }
 
 function saveRuleEditor() {
+  if (routingRuleActionsLocked()) return;
   const el = routingEditorElements();
   const name = el.name.value.trim();
   if (!name) {
@@ -233,6 +239,7 @@ function editRuleRow(index) {
 }
 
 function removeRuleRow(index) {
+  if (routingRuleActionsLocked()) return;
   const rule = routingRules[index];
   const name = rule && String(rule.name || '').trim();
   if (!confirm('删除路由规则“' + (name || ('#' + (index + 1))) + '”？')) return;
@@ -242,6 +249,7 @@ function removeRuleRow(index) {
 }
 
 function moveRuleRow(index, delta) {
+  if (routingRuleActionsLocked()) return;
   const to = index + delta;
   if (to < 0 || to >= routingRules.length) return;
   routingRules.splice(to, 0, routingRules.splice(index, 1)[0]);

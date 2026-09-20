@@ -1,6 +1,9 @@
 package gui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDesktopWindowDimensionsRemainResponsive(t *testing.T) {
 	if DefaultWindowWidth <= MinimumWindowWidth || DefaultWindowHeight <= MinimumWindowHeight {
@@ -16,5 +19,35 @@ func TestDesktopWindowDimensionsRemainResponsive(t *testing.T) {
 func TestDefaultWindowTitleIsProductNameOnly(t *testing.T) {
 	if DefaultWindowTitle != "RelayProxy" {
 		t.Fatalf("default window title = %q, want RelayProxy", DefaultWindowTitle)
+	}
+}
+
+
+func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
+	data, err := assets.ReadFile("assets/wails-bridge.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, name := range []string{
+		"goClearLogs",
+		"goCopyClipboard",
+		"goGetConfig",
+		"goGetConnections",
+		"goGetLogs",
+		"goGetStatus",
+		"goOpenConfigDir",
+		"goOpenConnections",
+		"goQuit",
+		"goReloadConfig",
+		"goRestart",
+		"goSaveConfig",
+		"goSelectExit",
+		"goSetAutostart",
+		"goSetTheme",
+	} {
+		if !strings.Contains(script, "window."+name) {
+			t.Fatalf("Wails bridge missing %s", name)
+		}
 	}
 }

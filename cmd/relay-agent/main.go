@@ -108,16 +108,6 @@ func main() {
 		log.Fatalf("[Config] Failed to load configuration %s: %v", *configPath, err)
 	}
 	log.Printf("[Config] Loaded %s", *configPath)
-	minimizedOverride := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "minimized" || f.Name == "hidden" {
-			minimizedOverride = true
-		}
-	})
-	if !minimizedOverride {
-		startMinimized = cfgFile.GUI.StartMinimized
-	}
-
 	// Apply CLI flag overrides
 	if *serverFlag != "" {
 		cfgFile.Server.Address = *serverFlag

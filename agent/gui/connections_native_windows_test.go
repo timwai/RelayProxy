@@ -15,7 +15,7 @@ func TestConnectionsDocumentRemainsReusableByWails(t *testing.T) {
 	for _, want := range []string{
 		`data-theme="dark"`,
 		`connections.js`,
-		`id="connections-body"`,
+		`id="connections"`,
 	} {
 		if !strings.Contains(dark, want) {
 			t.Fatalf("connections document missing %q", want)

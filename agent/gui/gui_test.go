@@ -28,6 +28,12 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(data)
+	if !strings.Contains(script, "relayproxy/agent/gui.WailsService.") {
+		t.Fatal("Wails bridge must call the runtime binding with the full Go package path")
+	}
+	if strings.Contains(script, "'gui.WailsService.") {
+		t.Fatal("Wails bridge still uses the invalid short package name")
+	}
 	for _, name := range []string{
 		"goClearLogs",
 		"goCopyClipboard",

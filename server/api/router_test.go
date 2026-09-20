@@ -99,6 +99,59 @@ func TestEnrollmentApprovalAPI(t *testing.T) {
 	}
 }
 
+func TestDeleteDeviceAPI(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	adminUser, err := router.db.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observation := repository.DeviceIdentityObservation{
+		Fingerprint: "delete-api-fingerprint", InstallationID: "delete-api-install", PublicKey: []byte("delete-api-key"),
+		DeviceName: "Delete API", Platform: "windows", Arch: "amd64",
+		RequestedCapabilities: []string{"proxy.client"},
+	}
+	pending, err := router.db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := router.db.ApproveEnrollment(pending.RequestID, adminUser.ID, []string{"proxy.client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.sessions.Register(&session.DeviceSession{DeviceID: device.ID})
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/devices/"+device.ID, nil)
+	deleteReq.AddCookie(adminCookie)
+	deleteRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK || !bytes.Contains(deleteRec.Body.Bytes(), []byte(`"state":"deleted"`)) {
+		t.Fatalf("delete failed: %d %s", deleteRec.Code, deleteRec.Body.String())
+	}
+	if _, online := router.sessions.Get(device.ID); online {
+		t.Fatal("deleted device session remained registered")
+	}
+	devices, err := router.db.ListDevices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range devices {
+		if item.ID == device.ID {
+			t.Fatalf("deleted device still listed: %+v", item)
+		}
+	}
+
+	decision, err := router.db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.State != repository.EnrollmentPending || decision.RequestID == "" {
+		t.Fatalf("deleted device did not return as pending enrollment: %+v", decision)
+	}
+}
+
 func TestUpdateDeviceCapabilitiesAPI(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()

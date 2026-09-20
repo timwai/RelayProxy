@@ -61,6 +61,6 @@ jobs:
           set -euo pipefail
           go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.23
           rm -rf /tmp/wails-bindings
-          wails3 generate bindings -names -d /tmp/wails-bindings ./agent/gui
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 wails3 generate bindings -names -d /tmp/wails-bindings ./agent/gui
           grep -R -F 'gui.WailsService.GetConfig' /tmp/wails-bindings
           grep -R -F 'gui.WailsService.GetConnections' /tmp/wails-bindings

@@ -92,6 +92,8 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 		`<span>Local Agent</span>`,
 		`<span>/</span>`,
 		`RelayProxy 代理客户端`,
+		`rp-reference-workspace`,
+		`<small>Local agent</small>`,
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("management page still contains removed branding element %q", forbidden)

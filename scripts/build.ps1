@@ -61,6 +61,7 @@ try {
     New-Item -ItemType Directory -Path $OutDir | Out-Null
 
     Write-Host "[prep] Verify and embed the official WinDivert runtime"
+    Reset-GoHostEnvironment
     & go run ./scripts/fetch-windivert.go `
         -out (Join-Path $OutDir "windows-amd64/windivert") `
         -embed-archive (Join-Path $Root "agent/divert/windivert/WinDivert-2.2.2-A.zip")
@@ -213,6 +214,7 @@ try {
     Copy-Item (Join-Path $Root "agent/divert/macos/README.md") (Join-Path $OutDir "darwin-amd64/README.md") -Force
     Copy-Item (Join-Path $Root "agent/divert/macos/README.md") (Join-Path $OutDir "darwin-arm64/README.md") -Force
     Write-Host "[prep] Package Windows agent with verified WinDivert runtime"
+    Reset-GoHostEnvironment
     & go run ./scripts/fetch-windivert.go `
         -out (Join-Path $OutDir "windows-amd64/windivert") `
         -agent-zip (Join-Path $OutDir "RelayProxy-agent-windows-amd64.zip")

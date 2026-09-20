@@ -3,7 +3,6 @@
 package gui
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -122,7 +121,7 @@ type appWindow struct {
 // init, and WebView2 requires the window and its message loop to share it.
 func Run(b *bridge.UIBridge, opts Options) error {
 	if opts.Title == "" {
-		opts.Title = "RelayProxy 代理客户端"
+		opts.Title = DefaultWindowTitle
 	}
 	if opts.Width <= 0 {
 		opts.Width = DefaultWindowWidth
@@ -325,11 +324,6 @@ func (a *appWindow) renderHTML() (string, error) {
 	// Inline Tailwind: no CDN, no network, no sibling files.
 	if idx := strings.Index(html, `<script src="tailwind.js"></script>`); idx >= 0 {
 		html = strings.Replace(html, `<script src="tailwind.js"></script>`, "<script>"+string(tailwindJS)+"</script>", 1)
-	}
-	// Inline the logo so the brand mark renders without a file server.
-	if logo, err := assets.ReadFile("assets/icon.png"); err == nil && len(logo) > 0 {
-		dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(logo)
-		html = strings.ReplaceAll(html, `src="icon.png"`, `src="`+dataURI+`"`)
 	}
 	// Honour the configured theme before first paint. The shared theme script
 	// reads data-theme-mode, and "system" resolves through the native OS setting.
@@ -540,7 +534,7 @@ func (a *appWindow) addTrayIcon() {
 		UCallbackMessage: wmTrayCallback,
 		HIcon:            loadAppIcon(size, size),
 	}
-	copy(nid.SzTip[:], windows.StringToUTF16("RelayProxy 代理客户端"))
+	copy(nid.SzTip[:], windows.StringToUTF16("RelayProxy"))
 	win.Shell_NotifyIcon(win.NIM_ADD, &nid)
 }
 

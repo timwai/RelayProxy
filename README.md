@@ -1151,12 +1151,14 @@ VERSION=1.0.0 ./scripts/build.sh
 ```text
 dist/
 ├── RelayProxy-agent-windows-amd64.zip
+├── RelayProxy-<target>.zip / .tar.gz
 ├── SHA256SUMS.txt
 │
 ├── windows-amd64/
 │   ├── relay-agent-gui.exe
 │   ├── relay-agent.exe
-│   └── relay-server.exe
+│   ├── relay-server.exe
+│   └── windivert/
 │
 ├── windows-arm64/
 │   ├── relay-agent-gui.exe
@@ -1173,12 +1175,24 @@ dist/
 │
 ├── darwin-amd64/
 │   ├── relay-agent
+│   ├── relay-server
 │   └── RelayProxy.app
 │
-└── darwin-arm64/
-    ├── relay-agent
-    └── RelayProxy.app
+├── darwin-arm64/
+│   ├── relay-agent
+│   ├── relay-server
+│   └── RelayProxy.app
+│
+├── darwin-universal/                # 仅在 macOS + lipo 环境生成
+│   ├── relay-agent
+│   ├── relay-server
+│   └── RelayProxy.app
+│
+└── darwin-native/                   # 可选：xcodegen + Xcode + DEVELOPMENT_TEAM
+    └── RelayProxyMacHost.app        # 内嵌 NetworkExtension
 ```
+
+其中 macOS Server 是“可构建实验产物”，不改变上方平台表中的正式支持范围。原生 macOS NetworkExtension App 只会在 macOS 构建机具备 Xcode、xcodegen，并设置 `DEVELOPMENT_TEAM` 时尝试生成；缺少这些条件时会跳过，不影响其余跨平台产物。
 
 ---
 

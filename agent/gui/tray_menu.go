@@ -4,13 +4,13 @@ import "strings"
 
 // Tray menu command identifiers.
 const (
-	MenuShow        = 1001
-	MenuCopyID      = 1002
-	MenuConfigDir   = 1003
-	MenuAutoStart   = 1004
-	MenuTheme       = 1005
-	MenuMinimize    = 1006
-	MenuExit        = 1007
+	MenuShow      = 1001
+	MenuCopyID    = 1002
+	MenuConfigDir = 1003
+	MenuAutoStart = 1004
+	MenuTheme     = 1005
+	MenuMinimize  = 1006
+	MenuExit      = 1007
 )
 
 // trayState is a plain snapshot of everything the tray menu renders, so the

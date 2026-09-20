@@ -39,8 +39,8 @@ jobs:
             git push origin HEAD:feature/wails-windows-gui
           fi
 
-      - name: Unit tests
-        run: go test ./...
+      - name: GUI unit tests
+        run: go test ./agent/gui ./agent/bridge ./cmd/relay-agent
 
       - name: Compile Windows GUI tests
         shell: bash

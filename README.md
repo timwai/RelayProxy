@@ -430,14 +430,23 @@ curl -x http://127.0.0.1:8080 https://ipinfo.io
 
 Agent 可以同时拥有 Client 和 Exit 能力。
 
-例如：
+```mermaid
+flowchart TB
+    L["Laptop<br/>Client"]
+    S["Relay Server"]
+    H["Home-PC<br/>Exit"]
+    O["Office-PC<br/>Exit"]
 
-```text
-Laptop      -> Client
-Home-PC     -> Exit
-Office-PC   -> Exit
-Server      -> Relay
+    L -->|"代理请求"| S
+    S -->|"选择 Home 出口"| H
+    S -->|"选择 Office 出口"| O
+
+    H --> HI["家庭 Internet"]
+    O --> OI["办公室 Internet"]
+    O --> OL["公司 LAN / VPN"]
 ```
+
+同一个 Client 可以根据默认出口或路由规则，把不同连接送往不同 Exit。
 
 Laptop 可以选择：
 

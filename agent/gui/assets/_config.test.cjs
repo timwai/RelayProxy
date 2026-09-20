@@ -45,7 +45,7 @@ function fixture(options = {}) {
   let reloads = 0;
   let loads = 0;
   const context = {
-    console, setTimeout() { return 1; }, clearTimeout() {}, setInterval() {},
+    console, setTimeout() { return 1; }, clearTimeout() {}, setInterval() {}, requestAnimationFrame(fn) { fn(); return 1; },
     URL, confirm() { return options.confirm !== false; },
     document: { getElementById: get, documentElement: element(), addEventListener() {},
       querySelectorAll(selector) { return selector === '[data-config-write]' ? [...buttons, get('routing-rule-save')] : []; },

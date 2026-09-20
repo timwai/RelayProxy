@@ -13,7 +13,6 @@ func TestDesktopWindowDimensionsRemainResponsive(t *testing.T) {
 	}
 }
 
-
 func TestDefaultWindowTitleIsProductNameOnly(t *testing.T) {
 	if DefaultWindowTitle != "RelayProxy" {
 		t.Fatalf("default window title = %q, want RelayProxy", DefaultWindowTitle)

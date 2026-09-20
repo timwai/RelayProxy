@@ -390,8 +390,8 @@ func buildICO(src image.Image, sizes []int) ([]byte, error) {
 		}
 		_ = buf.WriteByte(w)
 		_ = buf.WriteByte(h)
-		_ = buf.WriteByte(0) // colour count
-		_ = buf.WriteByte(0) // reserved
+		_ = buf.WriteByte(0)                                    // colour count
+		_ = buf.WriteByte(0)                                    // reserved
 		_ = binary.Write(&buf, binary.LittleEndian, uint16(1))  // planes
 		_ = binary.Write(&buf, binary.LittleEndian, uint16(32)) // bit count
 		_ = binary.Write(&buf, binary.LittleEndian, uint32(len(images[i])))

@@ -276,9 +276,6 @@
         <button onclick="switchSection('proxy')" id="section-btn-proxy" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>代理与路由</span>
         </button>
-        <button onclick="switchSection('rdp')" id="section-btn-rdp" aria-selected="false" class="nav-item rp-nav-item">
-          <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg><span>远程桌面</span>
-        </button>
         <button onclick="switchSection('monitor')" id="section-btn-monitor" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-terminal"/></svg><span>监控</span>
         </button>
@@ -414,27 +411,6 @@
             <div class="mono text-[12px] px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 select-text">curl -x http://<span id="quick-http">127.0.0.1:8080</span> https://ipinfo.io</div>
           </div>
         </div>
-      </section>
-
-      <section id="tab-pane-rdp" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
-        <div class="flex items-start justify-between gap-4">
-          <div>
-            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">远程桌面（RDP）</h1>
-            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">查看服务端已授权的 RDP 主机并发起连接。</p>
-          </div>
-        </div>
-        <div id="rdp-panel">
-          <div class="flex items-center justify-between gap-3 mb-2">
-            <h2 class="text-[13px] font-semibold text-slate-700 dark:text-slate-200">远程桌面（RDP）</h2>
-            <button id="rdp-disconnect" onclick="disconnectRDP()" class="config-secondary hidden">断开</button>
-          </div>
-          <div class="rp-stat">
-            <div id="rdp-connection" class="text-[12px] text-slate-500 dark:text-slate-400 mb-2">服务端批准后，这里会显示可连接的目标设备。</div>
-            <div id="rdp-targets" class="space-y-2"></div>
-          </div>
-        </div>
-
-
       </section>
 
       <section id="tab-pane-connection" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
@@ -1018,7 +994,6 @@
         { id:'routing', label:'路由分流' },
         { id:'share', label:'出口共享' }
       ],
-      rdp: [{ id:'rdp', label:'RDP 设备' }],
       monitor: [
         { id:'logs', label:'运行日志' },
         { id:'connections', label:'实时连接' }
@@ -1027,7 +1002,7 @@
     };
     var tabSections = {
       home:'home', connection:'network', exit:'network', pair:'network',
-      proxy:'proxy', routing:'proxy', share:'proxy', rdp:'rdp', logs:'monitor', connections:'monitor', settings:'settings'
+      proxy:'proxy', routing:'proxy', share:'proxy', logs:'monitor', connections:'monitor', settings:'settings'
     };
     state.section = state.section || 'home';
     var navigationKey = 'relayproxy-agent-navigation';
@@ -1185,7 +1160,6 @@
       markLeg('http', st.httpRunning);
       markLeg('tun', st.divertRunning);
       $('home-tun').textContent = st.divertRunning ? '按进程代理 TCP / UDP' : '未运行';
-      renderRDP(st);
       updateFieldDependencies();
     }
 
@@ -1194,49 +1168,6 @@
         return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[ch];
       });
     }
-
-    function renderRDP(st) {
-      var targets = Array.isArray(st.rdpTargets) ? st.rdpTargets : [];
-      var list = $('rdp-targets'), note = $('rdp-connection'), disconnect = $('rdp-disconnect');
-      if (!list || !note || !disconnect) return;
-      if (st.rdpListenAddr) {
-        var pathNames = { udp_p2p: 'UDP P2P', relay: 'QUIC Datagram Relay', disabled: 'Disabled' };
-        if (st.rdpUdpEnabled) {
-          var udpState = st.rdpUdpActive ? 'UDP 已启用' : 'UDP 已监听，等待 mstsc';
-          var udpPath = pathNames[st.rdpPathUdp] || '路径待确认';
-          note.textContent = '已监听 ' + st.rdpListenAddr + '（TCP + ' + udpState + ' · ' + udpPath + '）';
-        } else {
-          note.textContent = '已监听 ' + st.rdpListenAddr + '（仅 TCP）' + (st.rdpUdpReason ? '：' + st.rdpUdpReason : '：当前传输不支持 RDP UDP');
-        }
-        disconnect.classList.remove('hidden');
-      } else {
-        note.textContent = targets.length ? '选择一个目标，客户端会在本机回环地址启动 mstsc 入口。' : '服务端批准后，这里会显示可连接的目标设备。';
-        disconnect.classList.add('hidden');
-      }
-      list.innerHTML = targets.length ? targets.map(function (target) {
-        var active = st.rdpTargetId === target.deviceId;
-        return '<div class="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-700/60">' +
-          '<div class="min-w-0"><div class="text-[12px] font-medium text-slate-800 dark:text-slate-100 truncate">' + htmlEscape(target.name || target.deviceId) + '</div>' +
-          '<div class="mono text-[10px] text-slate-400 truncate">' + htmlEscape(target.deviceId) + ' · ' + (target.online ? '在线' : '离线') + '</div></div>' +
-          '<button class="btn-primary rp-btn rp-btn-primary px-2.5 py-1 rounded text-[11px] font-semibold shrink-0" ' + (active ? 'disabled' : '') + ' onclick="connectRDP(\'' + htmlEscape(target.deviceId).replace(/'/g, "\\'") + '\')">' + (active ? '已连接' : (target.online ? '连接' : '尝试连接')) + '</button></div>';
-      }).join('') : '';
-    }
-
-    async function connectRDP(targetID) {
-      var raw = await call('goConnectRDP', targetID, true);
-      if (!raw) return;
-      try {
-        var result = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (result && result.ok === false) throw new Error(result.message || 'RDP 连接失败');
-        toast('RDP 已启动，正在打开远程桌面');
-      } catch (err) { toast(err.message || 'RDP 连接失败'); }
-    }
-    async function disconnectRDP() {
-      await call('goDisconnectRDP');
-      toast('RDP 已断开');
-    }
-    window.connectRDP = connectRDP;
-    window.disconnectRDP = disconnectRDP;
 
     function markLeg(kind, running) {
       var el = $('home-' + kind + '-state');

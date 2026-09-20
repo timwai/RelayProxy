@@ -1,66 +1,151 @@
-# RelayProxy
+<p align="center">
+  <img src="./assets/brand/logo.png" width="128" alt="RelayProxy Logo">
+</p>
 
-RelayProxy 是一个面向个人、多设备和小型私有网络的中继代理系统。
+<h1 align="center">RelayProxy</h1>
 
-它由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。Agent 可以作为本地代理客户端，也可以作为出口节点；Server 负责设备身份审批、权限控制、会话协调、流量中继、设备管理和 Web 管理。
+<p align="center">
+  面向个人、多设备和小型私有网络的自建中继代理系统
+</p>
 
-典型用途包括：
+<p align="center">
+  <code>TCP / QUIC</code>
+  ·
+  <code>SOCKS5 / HTTP</code>
+  ·
+  <code>多出口</code>
+  ·
+  <code>规则分流</code>
+  ·
+  <code>设备审批</code>
+  ·
+  <code>Admin Web</code>
+</p>
 
-- 在多台电脑之间共享受控的网络出口。
-- 在外部设备上通过远端电脑访问互联网、局域网或 VPN 网络。
-- 为浏览器、终端和其他应用提供 SOCKS5 / HTTP 代理。
-- 在支持的平台上按进程、目标、端口和协议进行透明分流。
-- 通过中心服务统一审批设备、授予能力、撤销或删除设备。
-- 为指定设备创建受控的 RDP 公网入口。
-- 通过 GUI 或 Web 页面查看连接状态、出口节点、流量和运行日志。
+RelayProxy 由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。Agent 可以作为本地代理客户端，也可以作为出口节点；Server 负责设备身份审批、权限控制、会话协调、流量中继、设备管理和 Web 管理。
 
-> RelayProxy 更适合自建、受信任环境。公网部署时请启用 TLS、设置强管理密码、限制防火墙端口，并谨慎开放私网、回环地址和 RDP 入口。
+> 适合自建、受信任环境。公网部署时请启用 TLS、设置强管理密码、限制防火墙端口，并谨慎开放私网、回环地址和 RDP 入口。
+
+## 适合做什么
+
+| 场景 | 说明 |
+| --- | --- |
+| 🌐 远程出口 | 让笔记本通过家里或办公室电脑访问网络 |
+| 🏢 内网 / VPN 访问 | 通过处于公司 LAN 或 VPN 中的 Exit Agent 访问内部资源 |
+| 🧭 多出口切换 | 在 Home / Office / Cloud 等多个出口之间切换 |
+| 🔀 按规则分流 | 按进程、域名/IP、端口和协议选择 DIRECT / PROXY / REJECT |
+| 🛡️ 集中授权 | 所有新设备先进入待审批，再由 Server 授予能力 |
+| 🖥️ 图形化管理 | Windows 原生 GUI + Agent 本地 Web + Server Admin Web |
+| 📊 运行监控 | 查看在线设备、活动会话、实时连接、日志和流量 |
+| 🔐 受控 RDP 入口 | 为指定设备创建带来源限制、限速和过期时间的入口 |
+
+## 一图看懂
+
+```mermaid
+flowchart TB
+    U["用户 / 应用<br/>Browser · CLI · App"] --> A1["Agent A<br/>Client"]
+    A1 -->|"SOCKS5 / HTTP / 规则分流"| S["Relay Server"]
+
+    S -->|"设备审批"| ADM["Admin Web"]
+    ADM -->|"授予 Client / Exit 等能力"| S
+
+    S -->|"TCP / QUIC 隧道"| A2["Agent B<br/>Exit"]
+    S -->|"TCP / QUIC 隧道"| A3["Agent C<br/>Client + Exit"]
+
+    A2 --> NET["Internet"]
+    A3 --> LAN["LAN / VPN / Private Network"]
+
+    S -. "会话 / ACL / 审计" .-> DB[("SQLite")]
+```
+
+### 一个典型流量路径
+
+```mermaid
+flowchart LR
+    APP["笔记本应用"] -->|"127.0.0.1:1080"| C["Client Agent"]
+    C -->|"TCP / QUIC"| S["Relay Server"]
+    S --> E["Office-PC Exit Agent"]
+    E --> I["Internet"]
+    E --> L["公司 LAN"]
+    E --> V["公司 VPN"]
+```
+
+## 首次接入流程
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant S as Relay Server
+    participant W as Admin Web
+
+    A->>S: 首次连接 + 安装身份
+    S-->>A: pending
+    W->>S: 查看待审批设备
+    W->>S: 批准所需能力
+    S-->>A: 断开旧会话 / 等待重连
+    A->>S: 自动重连
+    S-->>A: approved + 已授权能力
+```
+
+Server 不会因为 Agent 声明了某项能力就自动授权。新安装的 Agent 首次连接后进入 **待审批**，管理员必须在 Server Web 控制台中明确批准其能力。
+
+## 文档导航
+
+- [主要功能](#2-主要功能)
+- [支持平台](#3-平台)
+- [快速开始](#4-快速开始)
+- [SOCKS5--HTTP](#5-使用-socks5--http-代理)
+- [出口节点](#6-出口节点)
+- [访问权限](#7-出口节点访问权限)
+- [路由分流](#8-路由分流)
+- [Windows 系统透明代理](#9-windows-系统透明代理)
+- [Agent GUI / Web](#10-agent-gui-与本地-web-管理)
+- [Server Web](#11-server-web-管理)
+- [RDP 公网入口](#12-rdp-公网入口)
+- [TLS 与 QUIC](#13-tls-与-quic)
+- [完整配置](#14-agent-完整配置示例)
+- [命令行](#15-agent-命令行)
+- [编译](#17-编译)
+- [常见问题](#20-常见问题)
 
 ---
 
 ## 1. 工作方式
 
-```text
-                         ┌──────────────────────────────┐
-                         │        Relay Server          │
-                         │                              │
-                         │  设备审批 / 权限 / ACL       │
-                         │  TCP / QUIC 隧道             │
-                         │  会话与流量中继              │
-                         │  Admin Web                   │
-                         └──────────────┬───────────────┘
-                                        │
-                     ┌──────────────────┼──────────────────┐
-                     │                  │                  │
-              ┌──────▼──────┐    ┌──────▼──────┐   ┌──────▼──────┐
-              │ Agent A     │    │ Agent B     │   │ Agent C     │
-              │ Client      │    │ Exit        │   │ Client+Exit │
-              │ SOCKS/HTTP  │    │ Internet    │   │ LAN / VPN   │
-              └─────────────┘    └─────────────┘   └─────────────┘
+RelayProxy 的核心不是“把所有设备直接互相暴露”，而是让设备先连接中心 Server，由 Server 管理身份、能力和流量路径。
+
+```mermaid
+flowchart LR
+    subgraph ClientSide["客户端侧"]
+        APP["应用"]
+        PA["Agent<br/>Client"]
+        APP --> PA
+    end
+
+    subgraph Control["中心服务"]
+        RS["Relay Server"]
+        AW["Admin Web"]
+        DB[("SQLite")]
+        AW --> RS
+        RS <--> DB
+    end
+
+    subgraph ExitSide["出口侧"]
+        PE["Agent<br/>Exit"]
+        OUT["Internet / LAN / VPN"]
+        PE --> OUT
+    end
+
+    PA <-->|"加密隧道"| RS
+    RS <-->|"授权后的中继"| PE
 ```
 
-例如：
+角色关系可以简单理解为：
 
-```text
-笔记本
-  │
-  │ SOCKS5 127.0.0.1:1080
-  ▼
-Relay Agent
-  │
-  │ TCP / QUIC
-  ▼
-Relay Server
-  │
-  ▼
-办公室电脑 Agent
-  │
-  ├── Internet
-  ├── 公司 LAN
-  └── 公司 VPN
-```
-
-Server 不会因为 Agent 声明了某项能力就自动授权。新安装的 Agent 首次连接后进入 **待审批**，管理员需要在 Server Web 控制台中明确批准其能力。
+- **Client**：发起代理请求。
+- **Exit**：替其他设备访问最终目标。
+- **Client + Exit**：一台 Agent 同时具备两种能力。
+- **Server**：不直接充当任意网络出口，主要负责认证、授权、协调和中继。
 
 ---
 
@@ -124,6 +209,15 @@ Windows ARM64 仍然可以正常使用 Relay 隧道、SOCKS5、HTTP、本地 Web
 # 4. 快速开始
 
 下面先给出一个最容易验证连通性的 **局域网测试配置**。
+
+```mermaid
+flowchart LR
+    S1["① 启动 Server"] --> S2["② 启动 Agent"]
+    S2 --> S3["③ Server 审批设备"]
+    S3 --> S4["④ 批准 Client / Exit 能力"]
+    S4 --> S5["⑤ Agent 自动重连"]
+    S5 --> S6["⑥ 使用 SOCKS5 / HTTP"]
+```
 
 测试配置使用明文 TCP。确认功能正常后，公网或跨网络部署请切换到 TLS。
 
@@ -374,12 +468,21 @@ GUI 中也可以直接选择出口节点。
 
 # 7. 出口节点访问权限
 
-出口权限由两层控制共同决定：
+出口权限由两层控制共同决定，最终结果取二者交集：
+
+```mermaid
+flowchart LR
+    R["请求目标"] --> SA{"Server ACL"}
+    SA -->|拒绝| X1["REJECT"]
+    SA -->|允许| EA{"Exit Agent ACL"}
+    EA -->|拒绝| X2["REJECT"]
+    EA -->|允许| OK["允许访问目标"]
+```
+
+换句话说：
 
 ```text
-Server ACL
-    ∩
-Exit Agent 本地 ACL
+最终允许 = Server ACL ∩ Exit Agent ACL
 ```
 
 也就是说，两边都允许时请求才会真正放行。
@@ -445,6 +548,26 @@ private_network
 # 8. 路由分流
 
 RelayProxy 使用组合路由规则决定连接如何处理。
+
+```mermaid
+flowchart TD
+    C["新连接"] --> R1{"规则 1 匹配？"}
+    R1 -->|否| R2{"规则 2 匹配？"}
+    R1 -->|是| A1["执行规则动作"]
+    R2 -->|否| RN["继续向下匹配"]
+    R2 -->|是| A2["执行规则动作"]
+    RN --> D["default_action"]
+
+    A1 --> DIRECT["DIRECT"]
+    A1 --> PROXY["PROXY"]
+    A1 --> REJECT["REJECT"]
+    A2 --> DIRECT
+    A2 --> PROXY
+    A2 --> REJECT
+    D --> DIRECT
+    D --> PROXY
+    D --> REJECT
+```
 
 支持三种动作：
 
@@ -578,6 +701,14 @@ Windows ARM64 当前建议使用 SOCKS5 / HTTP 模式。
 
 # 10. Agent GUI 与本地 Web 管理
 
+### 界面分工
+
+| 界面 | 主要用途 |
+| --- | --- |
+| 🖥️ Windows 原生 GUI | 日常配置、出口切换、路由规则、实时连接、日志 |
+| 🌐 Agent 本地 Web | 无桌面环境或浏览器管理，默认仅回环访问 |
+| 🛠️ Server Admin Web | 设备审批、能力授权、出口与会话、RDP 入口、服务配置 |
+
 ## Windows GUI
 
 启动：
@@ -692,6 +823,15 @@ Server Admin Web 用于：
 # 12. RDP 公网入口
 
 RelayProxy 可以由 Server 为已经授权的 RDP Host 创建受控公网入口。
+
+```mermaid
+flowchart LR
+    R["远程 RDP 客户端"] -->|"固定 TCP / UDP 端口"| S["Relay Server"]
+    S --> G{"入口策略"}
+    G -->|"来源 CIDR<br/>限速<br/>过期时间"| H["目标 Agent<br/>RDP Host"]
+    H --> D["127.0.0.1:3389"]
+    G -->|不满足| X["拒绝"]
+```
 
 默认：
 

@@ -5,7 +5,7 @@
     if (!globalThis.wails || !globalThis.wails.Call || typeof globalThis.wails.Call.ByName !== 'function') {
       return Promise.reject(new Error('Wails runtime is not ready'));
     }
-    return globalThis.wails.Call.ByName('gui.WailsService.' + method, ...args);
+    return globalThis.wails.Call.ByName('relayproxy/agent/gui.WailsService.' + method, ...args);
   }
 
   window.goOpenConnections = () => invoke('OpenConnections');

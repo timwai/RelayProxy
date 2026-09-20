@@ -228,11 +228,19 @@
     #secondary-tabs{margin-bottom:0!important}
     @media(max-width:900px){.rp-reference-command{display:none}}
     @media(max-width:760px){
-      .rp-reference-workspace{display:none}
-      .rp-sidebar>div:first-child>div:last-child{display:none}
-      .rp-sidebar .rp-nav-label{display:none}
-      .rp-sidebar .rp-nav-item{justify-content:center}
-      .rp-sidebar .rp-nav-item span{display:none}
+      /* Keep the desktop navigation readable. High-DPI WebView2 windows can
+         report a CSS viewport below this breakpoint even at normal startup size. */
+      :root{--rp-sidebar-width:clamp(168px,24vw,220px)}
+      .rp-sidebar{
+        width:var(--rp-sidebar-width)!important;
+        min-width:var(--rp-sidebar-width)!important;
+        flex-basis:var(--rp-sidebar-width)!important;
+      }
+      .rp-reference-workspace{display:flex!important}
+      .rp-sidebar>div:first-child>div:last-child{display:block!important}
+      .rp-sidebar .rp-nav-label{display:block!important}
+      .rp-sidebar .rp-nav-item{justify-content:flex-start!important;padding:0 9px!important}
+      .rp-sidebar .rp-nav-item span{display:inline!important}
       .rp-reference-top{padding:0 12px}
       .rp-reference-crumb>span:first-child{display:none}
       .tab-pane{padding:14px 16px 22px!important}
@@ -339,29 +347,10 @@
     #tab-pane-proxy .flex.items-end>div{flex:1 1 140px;width:auto!important;min-width:120px}
     #tab-pane-routing .flex.items-center.gap-6{flex-wrap:wrap}
 
-    /* Native GUI enters compact navigation while there is still enough room
-       to reflow the page cleanly. The previous 760px breakpoint was below the
-       native window's 820px minimum and therefore effectively unreachable. */
+    /* Responsive layout may reflow content, but the desktop sidebar keeps
+       its labels. Collapsing to icons based on CSS viewport width is unreliable
+       under Windows display scaling because WebView2 reports logical pixels. */
     @media(max-width:980px){
-      :root{--rp-sidebar-width:76px}
-      .rp-sidebar{
-        width:var(--rp-sidebar-width)!important;
-        min-width:var(--rp-sidebar-width)!important;
-        flex-basis:var(--rp-sidebar-width)!important;
-        padding:10px 7px!important;
-      }
-      .rp-reference-workspace{display:none!important}
-      .rp-sidebar>div:first-child{justify-content:center!important;padding:2px 0 8px!important}
-      .rp-sidebar>div:first-child>div:last-child{display:none!important}
-      .rp-sidebar .rp-nav-label{display:none!important}
-      .rp-sidebar .rp-nav-item{justify-content:center!important;padding:0!important}
-      .rp-sidebar .rp-nav-item span{display:none!important}
-      .rp-sidebar .rp-nav-item .icon{width:18px;height:18px}
-      .rp-sidebar>.m-2{margin:0!important}
-      .rp-sidebar>.m-2>div:first-child{display:none!important}
-      .rp-theme-control{width:100%!important;flex-direction:column!important;gap:2px!important}
-      .rp-theme-control button{width:100%;padding:5px 2px!important}
-      .rp-reference-command{display:none!important}
       .rp-reference-top{padding:0 14px!important;gap:10px}
       .tab-pane{padding:14px 18px 22px!important}
       .rp-sticky-tabs{padding-left:18px!important;padding-right:18px!important}

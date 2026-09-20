@@ -22,7 +22,6 @@ func TestResolveGUIMode(t *testing.T) {
 	}
 }
 
-
 func TestResolveStartMinimizedRequiresExplicitFlag(t *testing.T) {
 	if resolveStartMinimized(false, false) {
 		t.Fatal("manual GUI launch must show the main window")

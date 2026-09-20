@@ -35,6 +35,16 @@ if (-not $OutDir) {
 $ldflags = "-s -w -X main.Version=$Version"
 $stamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
+function Reset-GoHostEnvironment {
+    # Cross-compilation leaves GOOS/GOARCH pointing at the last target. Any
+    # subsequent `go run` helper must be built for the machine running this
+    # script, otherwise an ARM64 helper can be produced and fail on x64 Windows.
+    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
+    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
+    Remove-Item Env:GOARM -ErrorAction SilentlyContinue
+    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+}
+
 Write-Host "=================================================="
 Write-Host " RelayProxy Build  v$Version"
 Write-Host " Root:   $Root"

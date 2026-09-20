@@ -75,6 +75,7 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 		`/ui/theme.js`,
 		`id="section-btn-network"`,
 		`id="secondary-tabs"`,
+		`id="secondary-tabs-wrap"`,
 		`id="tab-pane-connections"`,
 		`id="inline-connections-body"`,
 		`data-agent-theme="system"`,
@@ -92,6 +93,8 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 		`<span>Local Agent</span>`,
 		`<span>/</span>`,
 		`RelayProxy 代理客户端`,
+		`class="rp-reference-workspace"`,
+		`<small>Local agent</small>`,
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("management page still contains removed branding element %q", forbidden)
@@ -100,6 +103,16 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	if !strings.Contains(body, `<title>RelayProxy</title>`) ||
 		!strings.Contains(body, `<div class="rp-reference-crumb"><b id="agent-section-label">概览</b></div>`) {
 		t.Fatal("management page missing simplified title or section heading")
+	}
+	for _, want := range []string{
+		`var showTabs = tabs.length > 1;`,
+		`wrap.classList.toggle('hidden', !showTabs);`,
+		`if (!showTabs) return;`,
+		`if (tabs.length > 1) pane.setAttribute('aria-labelledby', 'tab-btn-' + id);`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("management page missing single-tab suppression logic %q", want)
+		}
 	}
 	for _, forbidden := range []string{
 		".rp-sidebar .rp-nav-label{display:none",

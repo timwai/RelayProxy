@@ -415,6 +415,7 @@
     $('device-capabilities').innerHTML = capabilityOptionsHTML(requested, approved);
     $('device-capability-editor').hidden = !state.user || state.user.role !== 'admin' || device.approvalState !== 'approved';
     $('device-revoke').hidden = device.approvalState !== 'approved' || !state.user || state.user.role !== 'admin';
+    $('device-delete').hidden = !state.user || state.user.role !== 'admin';
     errorAt('device-action-error', '');
     errorAt('device-capability-error', '');
     $('device-dialog').showModal();
@@ -442,6 +443,23 @@
       $('device-dialog').close();
       toast('设备授权已撤销');
       await refresh();
+    } catch (err) { errorAt('device-action-error', err.message); }
+    finally { state.deviceBusy = false; all('#device-dialog button').forEach(button => { button.disabled = false; }); }
+  }
+  async function deleteDevice() {
+    if (state.deviceBusy || !state.selectedDevice) { return; }
+    const device = state.selectedDevice;
+    const label = device.name || device.id;
+    if (!confirm('永久删除设备「' + label + '」？\n\n这会立即断开当前连接，并清除该设备的授权、RDP 关系和安装身份。该客户端下次连接时会重新进入待审批。')) { return; }
+    state.deviceBusy = true;
+    all('#device-dialog button').forEach(button => { button.disabled = true; });
+    errorAt('device-action-error', '');
+    try {
+      await api('/devices/' + encodeURIComponent(device.id), { method: 'DELETE' });
+      state.selectedDevice = null;
+      $('device-dialog').close();
+      toast('设备已删除；再次连接时需要重新审批');
+      await refresh(true);
     } catch (err) { errorAt('device-action-error', err.message); }
     finally { state.deviceBusy = false; all('#device-dialog button').forEach(button => { button.disabled = false; }); }
   }
@@ -611,6 +629,7 @@
   $('refresh-enrollments').addEventListener('click', () => refresh(true));
   $('copy-admin-url').addEventListener('click', () => copy(managementURL($('admin-listen').value, $('admin-protocol').value === 'true')));
   $('device-revoke').addEventListener('click', revokeDevice);
+  $('device-delete').addEventListener('click', deleteDevice);
   $('device-capabilities-save').addEventListener('click', saveDeviceCapabilities);
   $('enrollment-approve').addEventListener('click', approveEnrollment);
   $('enrollment-reject').addEventListener('click', () => { if (state.selectedEnrollment) rejectEnrollment(state.selectedEnrollment.id); });

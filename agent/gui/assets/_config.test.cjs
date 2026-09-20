@@ -18,7 +18,7 @@ function element() {
       contains(name) { return classes.has(name); },
       toggle(name, force) { const add = force === undefined ? !classes.has(name) : force; add ? classes.add(name) : classes.delete(name); return add; }
     },
-    appendChild(child) { this.children.push(child); }, setAttribute() {}, focus() {},
+    appendChild(child) { this.children.push(child); }, setAttribute() {}, removeAttribute() {}, focus() {},
     replaceChildren(...children) { this.children = children; }, querySelector() { return null; },
     get innerHTML() { return this.markup || ''; },
     set innerHTML(value) { this.markup = value; this.children = []; }

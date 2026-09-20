@@ -35,7 +35,7 @@ RelayProxy 由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。A
 | 🧭 多出口切换 | 在 Home / Office / Cloud 等多个出口之间切换 |
 | 🔀 按规则分流 | 按进程、域名/IP、端口和协议选择 DIRECT / PROXY / REJECT |
 | 🛡️ 集中授权 | 所有新设备先进入待审批，再由 Server 授予能力 |
-| 🖥️ 图形化管理 | Windows 原生 GUI + Agent 本地 Web + Server Admin Web |
+| 🖥️ 图形化管理 | Windows Wails GUI + Agent 本地 Web + Server Admin Web |
 | 📊 运行监控 | 查看在线设备、活动会话、实时连接、日志和流量 |
 | 🔐 受控 RDP 入口 | 为指定设备创建带来源限制、限速和过期时间的入口 |
 
@@ -185,7 +185,7 @@ flowchart LR
 - 按 TCP / UDP 匹配。
 - 实时连接监控。
 - 本地运行日志。
-- Windows 原生 GUI。
+- Windows Wails 原生 GUI。
 - 本地 Web 管理页面。
 - 系统托盘和开机自启。
 
@@ -714,11 +714,13 @@ Windows ARM64 当前建议使用 SOCKS5 / HTTP 模式。
 
 | 界面 | 主要用途 |
 | --- | --- |
-| 🖥️ Windows 原生 GUI | 日常配置、出口切换、路由规则、实时连接、日志 |
+| 🖥️ Windows Wails GUI | 日常配置、出口切换、路由规则、实时连接、日志 |
 | 🌐 Agent 本地 Web | 无桌面环境或浏览器管理，默认仅回环访问 |
 | 🛠️ Server Admin Web | 设备审批、能力授权、出口与会话、RDP 入口、服务配置 |
 
 ## Windows GUI
+
+Windows 桌面客户端使用 **Wails v3 + WebView2**，继续复用 Agent Web 的界面与业务桥接能力。
 
 启动：
 

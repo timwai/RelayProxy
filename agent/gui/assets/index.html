@@ -175,6 +175,67 @@
     @media(max-width:850px) { .config-permissions { grid-template-columns:1fr; }.config-permissions small { display:inline;margin-left:8px; }.config-grid{gap:14px;}.config-card{padding:17px;}.config-actions{align-items:flex-start;}.config-actions>div{gap:7px;}.config-page-heading h1{font-size:17px;} }
     @media(max-width:650px) { .rp-sidebar { width:156px; }.config-grid{grid-template-columns:1fr;}.config-advanced summary>span{float:none;display:block;margin:4px 0 0;}.config-page-heading{align-items:flex-start;flex-direction:column;}.draft-bar{padding:8px 12px;flex-wrap:wrap;}.config-inline-action{float:none;margin:0 0 6px;}.tab-pane{padding-left:16px;padding-right:16px;} }
     @media(prefers-reduced-motion:reduce) { .live-dot{animation:none;} }
+  
+    /* Reference restore: Agent shell and density. */
+    .rp-reference-workspace{margin:0 4px 5px;border:1px solid var(--rp-border);background:var(--rp-surface);border-radius:8px;padding:7px 8px;display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--rp-muted);font-size:9px}
+    .rp-reference-workspace b{display:block;color:var(--rp-text);font-size:10px;font-weight:650}
+    .rp-reference-workspace small{display:block;color:var(--rp-subtle);font-size:8px;margin-top:1px}
+    .rp-reference-top{height:56px;min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 18px;border-bottom:1px solid var(--rp-border);background:color-mix(in srgb,var(--rp-surface) 92%,transparent);backdrop-filter:blur(16px);z-index:8}
+    .rp-reference-crumb{display:flex;align-items:center;gap:8px;color:var(--rp-muted);font-size:10px;min-width:0}
+    .rp-reference-crumb b{color:var(--rp-text);font-weight:650}
+    .rp-reference-command{width:min(340px,34vw);height:30px;border:1px solid var(--rp-border);background:var(--rp-surface-soft);border-radius:8px;display:flex;align-items:center;gap:7px;padding:0 8px;color:var(--rp-subtle);font-size:9px}
+    .rp-reference-command kbd{margin-left:auto;border:1px solid var(--rp-border);background:var(--rp-surface);border-radius:5px;padding:1px 5px;font:8px var(--rp-mono)}
+    .rp-reference-actions{display:flex;align-items:center;gap:6px}
+    .rp-sidebar{padding:11px 9px!important;gap:8px}
+    .rp-sidebar>div:first-child{padding:2px 7px 8px!important;gap:9px!important;border-bottom:0!important}
+    .rp-sidebar>div:first-child img{width:30px!important;height:30px!important;border-radius:8px}
+    .rp-sidebar>div:first-child .text-\[13px\]{font-size:13px!important}
+    .rp-sidebar>div.flex-1{padding:0 4px!important}
+    .rp-sidebar>.m-2{margin:0 4px!important}
+    .rp-sidebar>.m-2>div:first-child{padding:9px!important;border-radius:9px!important;background:transparent!important;border-left:0!important;border-right:0!important;border-bottom:0!important}
+    .rp-sidebar>.m-2>div:first-child span{font-size:9px!important}
+    .tab-pane{padding:14px 23px 24px!important}
+    #tab-pane-home>div:first-child h1,
+    #tab-pane-proxy>div:first-child h1,
+    #tab-pane-logs>div:first-child h1,
+    #tab-pane-connections>div:first-child h1,
+    #tab-pane-settings>div:first-child h1{font-size:21px!important;letter-spacing:-.04em;font-weight:650!important}
+    #tab-pane-home>div:first-child p,
+    #tab-pane-proxy>div:first-child p,
+    #tab-pane-logs>div:first-child p,
+    #tab-pane-connections>div:first-child p,
+    #tab-pane-settings>div:first-child p{font-size:10px!important;margin-top:4px!important;color:var(--rp-muted)!important}
+    .config-page-heading h1{font-size:21px!important;letter-spacing:-.04em}
+    .config-page-heading p{font-size:10px!important}
+    .config-eyebrow{display:none}
+    .config-pill{font-size:8px;padding:3px 6px;border-radius:6px}
+    .config-card{padding:14px!important;border-radius:10px!important}
+    .config-section-title{margin-bottom:12px!important}
+    .config-section-title>span{width:27px!important;height:27px!important;border-radius:7px!important;font-size:9px!important}
+    .config-section-title h2{font-size:10px!important}
+    .config-section-title p{font-size:8px!important}
+    .config-grid{gap:10px!important}
+    .config-field label{font-size:8px!important;margin-bottom:5px!important}
+    .config-field input,.config-field select,.config-field textarea,.config-inline input{padding:8px!important;border-radius:8px!important;font-size:9px!important;background:var(--rp-surface)!important}
+    .config-help,.config-field small{font-size:8px!important}
+    .card.rp-card{border-radius:10px!important;box-shadow:none!important}
+    .card.rp-card.p-4{padding:12px!important}
+    .toggle-track{width:34px!important;height:19px!important}
+    .toggle-knob{width:13px!important;height:13px!important}
+    .peer:checked~.toggle-track .toggle-knob{transform:translateX(15px)!important}
+    #secondary-tabs{margin-bottom:0!important}
+    @media(max-width:900px){.rp-reference-command{display:none}}
+    @media(max-width:760px){
+      .rp-reference-workspace{display:none}
+      .rp-sidebar>div:first-child>div:last-child{display:none}
+      .rp-sidebar .rp-nav-label{display:none}
+      .rp-sidebar .rp-nav-item{justify-content:center}
+      .rp-sidebar .rp-nav-item span{display:none}
+      .rp-reference-top{padding:0 12px}
+      .rp-reference-crumb>span:first-child{display:none}
+      .tab-pane{padding:14px 16px 22px!important}
+    }
+
   </style>
 </head>
 <body class="rp-shell text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">
@@ -308,6 +369,12 @@
     <!-- Workspace -->
     <main class="rp-main flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
 
+      <header class="rp-reference-top">
+        <div class="rp-reference-crumb"><span>Local Agent</span><span>/</span><b id="agent-section-label">概览</b></div>
+        <div class="rp-reference-command">⌕ <span>搜索设置或命令</span><kbd>Ctrl K</kbd></div>
+        <div class="rp-reference-actions"><span class="rp-badge rp-badge-success">Agent</span><button type="button" onclick="reloadConfig()" class="rp-btn">重载配置</button></div>
+      </header>
+
       <div class="shrink-0 px-6 rp-sticky-tabs">
         <div id="secondary-tabs" class="rp-tabs" role="tablist" aria-label="当前模块功能"></div>
       </div>
@@ -321,8 +388,8 @@
       <section id="tab-pane-home" class="tab-pane rp-scroll h-full overflow-y-auto px-6 py-4 space-y-4">
         <div class="flex items-start justify-between gap-4">
           <div>
-            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">概览仪表盘</h1>
-            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">中继隧道与本地代理的运行状态。</p>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">本机代理控制台</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">首屏直接展示连接状态、本地代理和当前出口。</p>
           </div>
           <div class="text-right shrink-0">
             <div class="text-[12px] text-slate-500 dark:text-slate-400">本机设备</div>
@@ -726,7 +793,7 @@
       <!-- ============ 系统设置 ============ -->
       <section id="tab-pane-settings" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
         <div>
-          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">程序设置</h1>
+          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">客户端设置</h1>
           <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">界面外观、启动行为与配置文件。连接参数在「连接与身份」中设置。</p>
         </div>
 
@@ -982,6 +1049,7 @@
     window.toggleTheme = toggleTheme;
 
     /* ---------- navigation ---------- */
+    var sectionLabels = {home:'概览',network:'网络',proxy:'代理与路由',monitor:'监控',settings:'设置'};
     var sectionTabs = {
       home: [{ id:'home', label:'运行概览' }],
       network: [
@@ -1052,6 +1120,8 @@
     }
     function switchSection(section, preferredTab) {
       state.section = section;
+      var sectionLabel = $('agent-section-label');
+      if (sectionLabel) sectionLabel.textContent = sectionLabels[section] || section;
       document.querySelectorAll('[id^="section-btn-"]').forEach(function (button) {
         button.setAttribute('aria-selected', String(button.id === 'section-btn-' + section));
       });
@@ -1064,6 +1134,8 @@
     function switchTab(id, section) {
       section = section || tabSections[id] || state.section || 'home';
       state.section = section;
+      var sectionLabel = $('agent-section-label');
+      if (sectionLabel) sectionLabel.textContent = sectionLabels[section] || section;
       state.tab = id;
       document.querySelectorAll('.tab-pane').forEach(function (p) { p.classList.add('hidden'); });
       document.querySelectorAll('[id^="section-btn-"]').forEach(function (button) {

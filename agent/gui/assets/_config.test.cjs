@@ -48,7 +48,7 @@ function fixture(options = {}) {
     console, setTimeout() { return 1; }, clearTimeout() {}, setInterval() {},
     URL, confirm() { return options.confirm !== false; },
     document: { getElementById: get, documentElement: element(), addEventListener() {},
-      querySelectorAll(selector) { return selector === '[data-config-write]' ? buttons : []; },
+      querySelectorAll(selector) { return selector === '[data-config-write]' ? [...buttons, get('routing-rule-save')] : []; },
       createElement: element, createTextNode(text) { return text; } },
     goGetConfig: async () => { loads++; return JSON.stringify(cfg); },
     goGetStatus: async () => JSON.stringify(options.status || { connected: false }),
@@ -162,11 +162,19 @@ test('shared editor round-trips compound selectors and exclusions without enabli
   assert.equal(f.reloads, 1);
 });
 
-test('native UDP requirement is shown and can be removed from the shared editor', async () => {
+test('native UDP requirement is read-only in the list and edited through the modal', async () => {
   const f = fixture();
   await f.context.refreshAll();
-  assert.match(f.get('routing-rules-body').children[0].innerHTML, /checked onchange="routingRules\[0\]\.datagram_required/);
-  vm.runInContext('routingRules[0].datagram_required = false', f.context);
+  const row = f.get('routing-rules-body').children[0].innerHTML;
+  assert.match(row, /routing-datagram/);
+  assert.match(row, /UDP 原生数据报/);
+  assert.doesNotMatch(row, /<input|<select|<textarea|onchange=/);
+
+  f.context.editRuleRow(0);
+  assert.equal(f.get('routing-rule-datagram').checked, true);
+  f.get('routing-rule-datagram').checked = false;
+  f.context.saveRuleEditor();
+
   await f.context.saveRouting();
   assert.equal(f.saves[0].routing.rules[0].datagram_required, false);
 });

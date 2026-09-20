@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -41,6 +42,67 @@ func TestNewDatabaseGenerationAndEnrollmentApproval(t *testing.T) {
 	var auditCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM authorization_audit WHERE target_id = ?`, approved.ID).Scan(&auditCount); err != nil || auditCount != 2 {
 		t.Fatalf("authorization audit count=%d err=%v", auditCount, err)
+	}
+}
+
+func TestDeleteDeviceAllowsFreshEnrollment(t *testing.T) {
+	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "delete-device.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	admin := &User{Username: "admin", PasswordHash: "hash", Role: "admin", Status: "active"}
+	if err := db.CreateUser(admin); err != nil {
+		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "delete-fingerprint", InstallationID: "delete-installation", PublicKey: []byte("delete-key"),
+		DeviceName: "delete-me", Platform: "windows", Arch: "amd64",
+		RequestedCapabilities: []string{"proxy.client", "rdp.host"},
+	}
+	pending, err := db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := db.ApproveEnrollment(pending.RequestID, admin.ID, []string{"proxy.client", "rdp.host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DeleteDevice(device.ID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var deviceCount, identityCount, enrollmentCount, grantCount, rdpServiceCount int
+	for query, dst := range map[string]*int{
+		`SELECT COUNT(*) FROM devices WHERE id = ?`:                    &deviceCount,
+		`SELECT COUNT(*) FROM device_identities WHERE fingerprint = ?`: &identityCount,
+		`SELECT COUNT(*) FROM device_enrollment_requests WHERE fingerprint = ?`: &enrollmentCount,
+		`SELECT COUNT(*) FROM device_grants WHERE device_id = ?`:        &grantCount,
+		`SELECT COUNT(*) FROM rdp_services WHERE device_id = ?`:        &rdpServiceCount,
+	} {
+		arg := any(device.ID)
+		if strings.Contains(query, "fingerprint") {
+			arg = observation.Fingerprint
+		}
+		if err := db.QueryRow(query, arg).Scan(dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if deviceCount != 0 || identityCount != 0 || enrollmentCount != 0 || grantCount != 0 || rdpServiceCount != 0 {
+		t.Fatalf("device delete left rows: device=%d identity=%d enrollment=%d grants=%d rdp=%d",
+			deviceCount, identityCount, enrollmentCount, grantCount, rdpServiceCount)
+	}
+
+	decision, err := db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.State != EnrollmentPending || decision.RequestID == "" || decision.DeviceID != "" {
+		t.Fatalf("deleted installation did not return as fresh pending enrollment: %+v", decision)
+	}
+	if decision.RequestID == pending.RequestID {
+		t.Fatal("deleted installation reused its old enrollment request")
 	}
 }
 

@@ -57,7 +57,6 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 	}
 }
 
-
 func TestRoutingRulesUseReadOnlyListAndModalEditor(t *testing.T) {
 	indexData, err := assets.ReadFile("assets/index.html")
 	if err != nil {

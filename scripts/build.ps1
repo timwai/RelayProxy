@@ -135,6 +135,45 @@ try {
         Write-Host "  OK  $([math]::Round($size/1MB, 2)) MB" -ForegroundColor Green
     }
 
+    function Package-MacOSApp {
+        param([string]$Arch)
+
+        $dir = Join-Path $OutDir "darwin-$Arch"
+        $app = Join-Path $dir "RelayProxy.app"
+        $contents = Join-Path $app "Contents"
+        $macOSDir = Join-Path $contents "MacOS"
+        $resources = Join-Path $contents "Resources"
+
+        Write-Host ""
+        Write-Host "[PACKAGE] darwin/$Arch  RelayProxy.app" -ForegroundColor Cyan
+
+        New-Item -ItemType Directory -Path $macOSDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $resources -Force | Out-Null
+        Copy-Item (Join-Path $dir "relay-agent") (Join-Path $macOSDir "RelayProxy") -Force
+        Copy-Item (Join-Path $Root "assets\brand\logo.png") (Join-Path $resources "logo.png") -Force
+
+        $plist = @"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
+  <key>CFBundleDisplayName</key><string>RelayProxy</string>
+  <key>CFBundleExecutable</key><string>RelayProxy</string>
+  <key>CFBundleIdentifier</key><string>com.relayproxy.agent</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>RelayProxy</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>$Version</string>
+  <key>CFBundleVersion</key><string>$Version</string>
+  <key>LSMinimumSystemVersion</key><string>11.0</string>
+  <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>
+"@
+        $plist | Set-Content -Path (Join-Path $contents "Info.plist") -Encoding utf8
+    }
+
     # --- Linux server/agent and macOS agent ---
     Hide-Syso
     try {
@@ -158,9 +197,17 @@ try {
             -Package "./cmd/relay-agent" `
             -Output (Join-Path $OutDir "darwin-amd64/relay-agent")
 
+        Invoke-GoBuild -GOOS "darwin" -GOARCH "amd64" `
+            -Package "./cmd/relay-server" `
+            -Output (Join-Path $OutDir "darwin-amd64/relay-server")
+
         Invoke-GoBuild -GOOS "darwin" -GOARCH "arm64" `
             -Package "./cmd/relay-agent" `
             -Output (Join-Path $OutDir "darwin-arm64/relay-agent")
+
+        Invoke-GoBuild -GOOS "darwin" -GOARCH "arm64" `
+            -Package "./cmd/relay-server" `
+            -Output (Join-Path $OutDir "darwin-arm64/relay-server")
     } finally {
         Show-Syso
     }
@@ -234,13 +281,87 @@ try {
         -agent-zip (Join-Path $OutDir "RelayProxy-agent-windows-amd64.zip")
     if ($LASTEXITCODE -ne 0) { throw "Windows agent packaging failed" }
 
+    # --- Full platform distribution archives ---
+    function New-TargetArchive {
+        param([string]$Target)
+
+        $source = Join-Path $OutDir $Target
+        $archive = Join-Path $OutDir ("RelayProxy-" + $Target + ".zip")
+        if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+        Write-Host "[PACKAGE] $Target -> $archive" -ForegroundColor Cyan
+        Compress-Archive -Path (Join-Path $source "*") -DestinationPath $archive -CompressionLevel Optimal
+    }
+
+    foreach ($target in @("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64")) {
+        New-TargetArchive -Target $target
+    }
+
+
     # --- Checksums ---
     Write-Host ""
     Write-Host "[SHA256]" -ForegroundColor Cyan
     $checksumFile = Join-Path $OutDir "SHA256SUMS.txt"
     $lines = @()
     Get-ChildItem -Path $OutDir -Recurse -File |
-        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxy-agent-windows-amd64\.zip$' } |
+        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxy-.*\.zip |
+        ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
+            $rel = $rel -replace '\\', '/'
+            $lines += "$hash  $rel"
+            Write-Host "  $hash  $rel"
+        }
+    $lines | Set-Content -Path $checksumFile -Encoding utf8
+
+    # Restore host env
+    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
+    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
+    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+
+    Write-Host ""
+    Write-Host "=================================================="
+    Write-Host " Build complete -> $OutDir" -ForegroundColor Green
+    Write-Host "=================================================="
+    Write-Host @"
+
+产物布局:
+  RelayProxy-agent-windows-amd64.zip Windows x64 Agent 完整分发包（含 WinDivert）
+  RelayProxy-<platform>-<arch>.zip    各平台完整目录分发包
+  linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
+  linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
+  darwin-amd64/relay-agent          macOS Intel Agent
+  darwin-amd64/relay-server         macOS Intel Server（可构建实验产物）
+  darwin-amd64/RelayProxy.app       macOS Intel Agent App 包装
+  darwin-arm64/relay-agent          macOS Apple Silicon Agent
+  darwin-arm64/relay-server         macOS Apple Silicon Server（可构建实验产物）
+  darwin-arm64/RelayProxy.app        macOS Apple Silicon Agent App 包装
+  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
+  windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
+  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端（不含 x64 WinDivert）
+  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
+  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
+  */configs/*.yaml                  示例配置
+  SHA256SUMS.txt
+
+部署提示:
+  Linux:  chmod +x relay-server && ./relay-server -config configs/relay-server.yaml
+  Admin:  https://<server>:8443
+  桌面:   双击 relay-agent-gui.exe
+  透明代理: 以管理员身份启动 Windows 客户端；保存启用设置后重启
+  自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
+  配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
+  授权:   首次连接后，在服务端管理控制台批准设备
+  无界面: relay-agent.exe --no-gui
+  自定义: relay-agent.exe --config <配置文件路径>
+
+"@
+}
+finally {
+    Pop-Location
+}
+ } |
         ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')

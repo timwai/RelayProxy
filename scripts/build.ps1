@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
   RelayProxy 跨平台发布编译脚本
@@ -214,7 +214,6 @@ try {
         Show-Syso
     }
 
-    
     Package-MacOSApp -Arch "amd64"
     Package-MacOSApp -Arch "arm64"
 
@@ -333,189 +332,35 @@ try {
 产物布局:
   RelayProxy-agent-windows-amd64.zip Windows x64 Agent 完整分发包（含 WinDivert）
   RelayProxy-<platform>-<arch>.zip    各平台完整目录分发包
-  linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
-  linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
+  linux-amd64/relay-agent           Linux x86_64 Agent
+  linux-amd64/relay-server          Linux x86_64 Server（含 Admin Web UI）
+  linux-arm64/relay-agent           Linux ARM64 Agent
+  linux-arm64/relay-server          Linux ARM64 Server（含 Admin Web UI）
   darwin-amd64/relay-agent          macOS Intel Agent
   darwin-amd64/relay-server         macOS Intel Server（可构建实验产物）
   darwin-amd64/RelayProxy.app       macOS Intel Agent App 包装
   darwin-arm64/relay-agent          macOS Apple Silicon Agent
   darwin-arm64/relay-server         macOS Apple Silicon Server（可构建实验产物）
-  darwin-arm64/RelayProxy.app        macOS Apple Silicon Agent App 包装
-  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
-  windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端（不含 x64 WinDivert）
-  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
-  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
+  darwin-arm64/RelayProxy.app       macOS Apple Silicon Agent App 包装
+  windows-amd64/relay-agent-gui.exe Windows x64 桌面客户端（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-agent.exe     Windows x64 Agent CLI（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-server.exe    Windows x64 Server（含 Admin UI）
+  windows-amd64/windivert/          外置 WinDivert 运行库与许可证
+  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端
+  windows-arm64/relay-agent.exe     Windows ARM64 Agent CLI
+  windows-arm64/relay-server.exe    Windows ARM64 Server（含 Admin UI）
   */configs/*.yaml                  示例配置
   SHA256SUMS.txt
 
-部署提示:
-  Linux:  chmod +x relay-server && ./relay-server -config configs/relay-server.yaml
-  Admin:  https://<server>:8443
-  桌面:   双击 relay-agent-gui.exe
-  透明代理: 以管理员身份启动 Windows 客户端；保存启用设置后重启
-  自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
-  配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
-  授权:   首次连接后，在服务端管理控制台批准设备
-  无界面: relay-agent.exe --no-gui
-  自定义: relay-agent.exe --config <配置文件路径>
-
-"@
-}
-finally {
-    Pop-Location
-}
- } |
-        ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
-            $rel = $rel -replace '\\', '/'
-            $lines += "$hash  $rel"
-            Write-Host "  $hash  $rel"
-        }
-    $lines | Set-Content -Path $checksumFile -Encoding utf8
-
-    # Restore host env
-    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
-    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
-    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
-
-    Write-Host ""
-    Write-Host "=================================================="
-    Write-Host " Build complete -> $OutDir" -ForegroundColor Green
-    Write-Host "=================================================="
-    Write-Host @"
-
-产物布局:
-  RelayProxy-agent-windows-amd64.zip Windows 客户端完整分发包（含 WinDivert）
-  linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
-  linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
-  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
-  windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端（不含 x64 WinDivert）
-  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
-  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
-  */configs/*.yaml                  示例配置
-  SHA256SUMS.txt
+说明:
+  macOS Server 当前作为可构建实验产物输出，不改变 README 中的正式支持范围。
+  原生 macOS NetworkExtension Host 需要在 macOS 上使用 scripts/build.sh 构建。
 
 部署提示:
-  Linux:  chmod +x relay-server && ./relay-server -config configs/relay-server.yaml
+  Linux:  chmod +x relay-server relay-agent
   Admin:  https://<server>:8443
   桌面:   双击 relay-agent-gui.exe
-  透明代理: 以管理员身份启动 Windows 客户端；保存启用设置后重启
-  自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
-  配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
-  授权:   首次连接后，在服务端管理控制台批准设备
-  无界面: relay-agent.exe --no-gui
-  自定义: relay-agent.exe --config <配置文件路径>
-
-"@
-}
-finally {
-    Pop-Location
-}
- } |
-        ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
-            $rel = $rel -replace '\\', '/'
-            $lines += "$hash  $rel"
-            Write-Host "  $hash  $rel"
-        }
-    $lines | Set-Content -Path $checksumFile -Encoding utf8
-
-    # Restore host env
-    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
-    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
-    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
-
-    Write-Host ""
-    Write-Host "=================================================="
-    Write-Host " Build complete -> $OutDir" -ForegroundColor Green
-    Write-Host "=================================================="
-    Write-Host @"
-
-产物布局:
-  RelayProxy-agent-windows-amd64.zip Windows x64 Agent 完整分发包（含 WinDivert）
-  RelayProxy-<platform>-<arch>.zip    各平台完整目录分发包
-  linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
-  linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
-  darwin-amd64/relay-agent          macOS Intel Agent
-  darwin-amd64/relay-server         macOS Intel Server（可构建实验产物）
-  darwin-amd64/RelayProxy.app       macOS Intel Agent App 包装
-  darwin-arm64/relay-agent          macOS Apple Silicon Agent
-  darwin-arm64/relay-server         macOS Apple Silicon Server（可构建实验产物）
-  darwin-arm64/RelayProxy.app        macOS Apple Silicon Agent App 包装
-  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
-  windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端（不含 x64 WinDivert）
-  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
-  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
-  */configs/*.yaml                  示例配置
-  SHA256SUMS.txt
-
-部署提示:
-  Linux:  chmod +x relay-server && ./relay-server -config configs/relay-server.yaml
-  Admin:  https://<server>:8443
-  桌面:   双击 relay-agent-gui.exe
-  透明代理: 以管理员身份启动 Windows 客户端；保存启用设置后重启
-  自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
-  配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
-  授权:   首次连接后，在服务端管理控制台批准设备
-  无界面: relay-agent.exe --no-gui
-  自定义: relay-agent.exe --config <配置文件路径>
-
-"@
-}
-finally {
-    Pop-Location
-}
- } |
-        ForEach-Object {
-            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
-            $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
-            $rel = $rel -replace '\\', '/'
-            $lines += "$hash  $rel"
-            Write-Host "  $hash  $rel"
-        }
-    $lines | Set-Content -Path $checksumFile -Encoding utf8
-
-    # Restore host env
-    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
-    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
-    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
-
-    Write-Host ""
-    Write-Host "=================================================="
-    Write-Host " Build complete -> $OutDir" -ForegroundColor Green
-    Write-Host "=================================================="
-    Write-Host @"
-
-产物布局:
-  RelayProxy-agent-windows-amd64.zip Windows 客户端完整分发包（含 WinDivert）
-  linux-amd64/relay-server          Linux x86_64 服务端（含 Admin Web UI）
-  linux-arm64/relay-server          Linux ARM64  服务端（含 Admin Web UI）
-  windows-amd64/relay-agent-gui.exe Windows 桌面客户端（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-agent.exe     Windows 客户端 CLI（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-server.exe    Windows 本地服务端（可选，含 Admin UI）
-  windows-amd64/windivert/          可选外置运行库及许可证（EXE 已内嵌）
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端（不含 x64 WinDivert）
-  windows-arm64/relay-agent.exe     Windows ARM64 客户端 CLI
-  windows-arm64/relay-server.exe    Windows ARM64 本地服务端（含 Admin UI）
-  */configs/*.yaml                  示例配置
-  SHA256SUMS.txt
-
-部署提示:
-  Linux:  chmod +x relay-server && ./relay-server -config configs/relay-server.yaml
-  Admin:  https://<server>:8443
-  桌面:   双击 relay-agent-gui.exe
-  透明代理: 以管理员身份启动 Windows 客户端；保存启用设置后重启
+  透明代理: 以管理员身份启动 Windows x64 客户端；保存启用设置后重启
   自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
   配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
   授权:   首次连接后，在服务端管理控制台批准设备

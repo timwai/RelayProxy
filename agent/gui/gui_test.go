@@ -56,3 +56,59 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		}
 	}
 }
+
+
+func TestRoutingRulesUseReadOnlyListAndModalEditor(t *testing.T) {
+	indexData, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	routingData, err := assets.ReadFile("assets/routing.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := string(indexData)
+	script := string(routingData)
+
+	for _, want := range []string{
+		`id="routing-rule-modal"`,
+		`id="routing-rule-name"`,
+		`id="routing-rule-processes"`,
+		`id="routing-rule-targets"`,
+		`id="routing-rule-ports"`,
+		`id="routing-rule-action"`,
+		`id="routing-rule-save"`,
+		`class="routing-rule-table"`,
+	} {
+		if !strings.Contains(index, want) {
+			t.Fatalf("routing editor UI missing %q", want)
+		}
+	}
+	for _, want := range []string{
+		"openRuleEditor(-1)",
+		"openRuleEditor(index)",
+		"saveRuleEditor()",
+		"routing-edit-button",
+		"routing-status",
+		"routing-token-list",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("routing script missing modal/list behavior %q", want)
+		}
+	}
+
+	start := strings.Index(script, "function createRuleRow")
+	end := strings.Index(script, "function unconstrainedRule")
+	if start < 0 || end <= start {
+		t.Fatal("unable to locate routing rule row renderer")
+	}
+	rowRenderer := script[start:end]
+	for _, forbidden := range []string{"<input", "<select", "<textarea", "oninput=", "onchange="} {
+		if strings.Contains(rowRenderer, forbidden) {
+			t.Fatalf("routing list must be read-only; row renderer contains %q", forbidden)
+		}
+	}
+	if strings.Contains(script, `oninput="routingRules[`) {
+		t.Fatal("routing script still contains legacy inline rule editing")
+	}
+}

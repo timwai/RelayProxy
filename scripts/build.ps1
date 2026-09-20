@@ -309,7 +309,8 @@ try {
     $checksumFile = Join-Path $OutDir "SHA256SUMS.txt"
     $lines = @()
     Get-ChildItem -Path $OutDir -Recurse -File |
-        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxy-.*\.zip
+        Where-Object { $_.Name -match '^(relay-server|relay-agent(-gui)?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxy-.*\.zip$' } |
+        ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
             $rel = $rel -replace '\\', '/'

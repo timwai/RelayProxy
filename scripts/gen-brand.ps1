@@ -5,6 +5,13 @@
 #>
 $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+# This script runs Go helpers on the build host. Do not inherit cross-build
+# targets such as GOOS=windows/GOARCH=arm64 from the caller.
+Remove-Item Env:GOOS -ErrorAction SilentlyContinue
+Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
+Remove-Item Env:GOARM -ErrorAction SilentlyContinue
+Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
 Set-Location $Root
 
 Write-Host "[1/3] Generate PNG/ICO assets"

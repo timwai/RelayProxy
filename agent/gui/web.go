@@ -150,12 +150,6 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
-	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
-	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
-	mux.HandleFunc("POST /api/rdp/disconnect", func(rw http.ResponseWriter, _ *http.Request) {
-		w.bridge.DisconnectRDP()
-		writeWebJSON(rw, map[string]bool{"ok": true})
-	})
 	mux.HandleFunc("GET /api/logs", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetLogs(500)) })
 	mux.HandleFunc("DELETE /api/logs", func(rw http.ResponseWriter, _ *http.Request) {
 		w.bridge.ClearLogs()
@@ -177,22 +171,6 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 		writeWebJSON(rw, map[string]bool{"ok": true})
 		w.requestQuit()
 	})
-}
-
-func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
-	var in struct {
-		TargetID   string `json:"targetId"`
-		AutoLaunch bool   `json:"autoLaunch"`
-	}
-	if err := decodeWebJSON(rw, r, &in); err != nil {
-		return
-	}
-	target, err := w.bridge.ConnectRDP(in.TargetID, in.AutoLaunch)
-	if err != nil {
-		writeWebError(rw, err)
-		return
-	}
-	writeWebJSON(rw, map[string]any{"ok": true, "target": target})
 }
 
 func (w *WebServer) serveIndex(rw http.ResponseWriter, r *http.Request) {
@@ -398,9 +376,6 @@ const webBridgeJS = `(function () {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
   window.goGetStatus = function () { return request('/api/status'); };
-  window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
-  window.goConnectRDP = function (targetId, autoLaunch) { return json('/api/rdp/connect', 'POST', {targetId:targetId, autoLaunch:!!autoLaunch}); };
-  window.goDisconnectRDP = function () { return json('/api/rdp/disconnect', 'POST', {}); };
   window.goGetLogs = function () { return request('/api/logs'); };
   window.goClearLogs = function () { return request('/api/logs', {method:'DELETE'}); };
   window.goGetConfig = function () { return request('/api/config'); };

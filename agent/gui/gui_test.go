@@ -112,7 +112,6 @@ func TestRoutingRulesUseReadOnlyListAndModalEditor(t *testing.T) {
 	}
 }
 
-
 func TestSettingsDoNotHideManualLaunch(t *testing.T) {
 	data, err := assets.ReadFile("assets/index.html")
 	if err != nil {

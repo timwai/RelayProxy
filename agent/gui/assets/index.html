@@ -73,6 +73,22 @@
     .btn-primary:active:not(:disabled) { background: color-mix(in srgb, var(--rp-primary-hover) 88%, #000); }
     .btn-primary:disabled { background: var(--rp-surface-soft); color: var(--rp-subtle); cursor: default; }
 
+    /* Toast must stay readable in both themes. Keep this out of Tailwind
+       opacity utilities because the in-app Play build may omit uncommon
+       fractions such as bg-slate-900/92, leaving white text on a light page. */
+    .rp-toast-message {
+      background: rgba(15, 23, 42, .94);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, .10);
+      box-shadow: 0 10px 28px rgba(15, 23, 42, .24);
+    }
+    .dark .rp-toast-message {
+      background: rgba(30, 41, 59, .96);
+      color: #f8fafc;
+      border-color: rgba(255, 255, 255, .12);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .34);
+    }
+
     .toggle-track { background: var(--rp-border-strong); }
     .peer:checked ~ .toggle-track { background: var(--rp-primary); }
     .toggle-knob { transition: transform .18s var(--ease); }
@@ -823,7 +839,7 @@
 
   <!-- toast -->
   <div id="toast" role="status" aria-live="polite" class="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 opacity-0 transition-all duration-200">
-    <div class="px-4 py-2 rounded-lg bg-slate-900/92 dark:bg-slate-700/95 text-white text-[12px] shadow-lg max-w-[520px]" id="toast-msg"></div>
+    <div class="rp-toast-message px-4 py-2 rounded-lg text-[12px] max-w-[520px]" id="toast-msg"></div>
   </div>
 
   <script>

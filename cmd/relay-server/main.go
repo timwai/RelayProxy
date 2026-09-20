@@ -195,15 +195,6 @@ func main() {
 			}
 			authorized := gateway.DeviceAuthorization{State: decision.State, DeviceID: decision.DeviceID,
 				OwnerUserID: decision.OwnerUserID, ApprovedCapabilities: decision.ApprovedCapabilities}
-			if decision.State == repository.EnrollmentApproved && decision.DeviceID != "" {
-				targets, listErr := db.ListRDPTargetsForController(decision.DeviceID)
-				if listErr != nil {
-					return gateway.DeviceAuthorization{}, listErr
-				}
-				for _, target := range targets {
-					authorized.RDPTargets = append(authorized.RDPTargets, protocol.RDPTarget{DeviceID: target.DeviceID, Name: target.Name, Online: target.Online})
-				}
-			}
 			return authorized, nil
 		},
 		RecheckDevice: func(fingerprint, deviceID string) bool {

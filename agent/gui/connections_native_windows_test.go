@@ -49,7 +49,6 @@ func TestWailsBridgeExposesConnectionBinding(t *testing.T) {
 	}
 }
 
-
 func TestWindowsTrayIconHasMultipleSizes(t *testing.T) {
 	data, err := assets.ReadFile("assets/icon.ico")
 	if err != nil {

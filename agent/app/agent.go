@@ -192,7 +192,6 @@ type AgentStatus struct {
 	DivertRunning bool         `json:"divertRunning"`
 	ActiveStreams int64        `json:"activeStreams"`
 	ApprovalState string       `json:"approvalState"`
-	RDPTargets    []rdp.Target `json:"rdpTargets,omitempty"`
 	RDPListenAddr string       `json:"rdpListenAddr,omitempty"`
 	RDPTargetID   string       `json:"rdpTargetId,omitempty"`
 	RDPUDPEnabled bool         `json:"rdpUdpEnabled"`
@@ -797,7 +796,6 @@ func (a *Agent) Status() AgentStatus {
 		NetworkMode:   a.cfg.NetworkMode, LatencyMs: a.latencyMs.Load(),
 	}
 	sess, handler, divertSrv := a.readySession, a.exitHandler, a.divertSrv
-	st.RDPTargets = slices.Clone(a.rdpTargets)
 	if a.rdpConnection != nil {
 		st.RDPListenAddr = a.rdpConnection.ListenAddr
 		st.RDPTargetID = a.rdpConnection.Target.DeviceID

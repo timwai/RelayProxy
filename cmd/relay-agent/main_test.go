@@ -21,3 +21,16 @@ func TestResolveGUIMode(t *testing.T) {
 		})
 	}
 }
+
+
+func TestResolveStartMinimizedRequiresExplicitFlag(t *testing.T) {
+	if resolveStartMinimized(false, false) {
+		t.Fatal("manual GUI launch must show the main window")
+	}
+	if !resolveStartMinimized(true, false) {
+		t.Fatal("--minimized must start in the tray")
+	}
+	if !resolveStartMinimized(false, true) {
+		t.Fatal("--hidden must start in the tray")
+	}
+}

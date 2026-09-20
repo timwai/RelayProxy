@@ -3,6 +3,7 @@
 package gui
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 )
@@ -45,5 +46,19 @@ func TestWailsBridgeExposesConnectionBinding(t *testing.T) {
 		if !strings.Contains(script, want) {
 			t.Fatalf("Wails bridge missing %q", want)
 		}
+	}
+}
+
+
+func TestWindowsTrayIconHasMultipleSizes(t *testing.T) {
+	data, err := assets.ReadFile("assets/icon.ico")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) < 6 || string(data[:4]) != "\x00\x00\x01\x00" {
+		t.Fatal("Windows tray icon is not a valid ICO")
+	}
+	if count := binary.LittleEndian.Uint16(data[4:6]); count < 4 {
+		t.Fatalf("Windows tray icon contains only %d frame(s); want multiple DPI sizes", count)
 	}
 }

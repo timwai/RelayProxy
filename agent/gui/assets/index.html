@@ -238,6 +238,146 @@
       .tab-pane{padding:14px 16px 22px!important}
     }
 
+    /* GUI resize + typography correction.
+       The native window bottoms out at 820px, so responsive collapse must
+       happen before that width instead of at the old unreachable 760px. */
+    html, body {
+      font-size:13px;
+      line-height:1.45;
+      -webkit-text-size-adjust:100%;
+      text-size-adjust:100%;
+    }
+
+    /* Keep the whole app on one readable type scale. */
+    .rp-nav-label{font-size:10px!important;line-height:1.3}
+    .rp-nav-item{font-size:12px!important;line-height:1.35}
+    .rp-tab{font-size:11px!important;line-height:1.35}
+    .rp-btn{font-size:12px!important;line-height:1.2}
+    .rp-badge{font-size:10px!important;line-height:1.2}
+    .rp-input,.rp-select,.rp-textarea{font-size:12px!important;line-height:1.4}
+    .rp-theme-control button{font-size:10px!important;line-height:1.2}
+    .rp-stat-label{font-size:11px!important}
+    .rp-stat-value{font-size:20px!important;line-height:1.2}
+    .rp-stat-meta{font-size:10px!important}
+    .rp-notice{font-size:11px!important;line-height:1.55}
+    .rp-section-title{font-size:12px!important;line-height:1.35}
+    .rp-table th{font-size:10px!important;line-height:1.35}
+    .rp-table td{font-size:12px!important;line-height:1.45}
+
+    .rp-reference-workspace{font-size:11px!important}
+    .rp-reference-workspace b{font-size:12px!important}
+    .rp-reference-workspace small{font-size:10px!important}
+    .rp-reference-crumb{font-size:12px!important}
+    .rp-reference-command{font-size:11px!important}
+    .rp-reference-command kbd{font-size:10px!important}
+    .rp-reference-actions{flex:0 0 auto}
+
+    #tab-pane-home>div:first-child h1,
+    #tab-pane-proxy>div:first-child h1,
+    #tab-pane-logs>div:first-child h1,
+    #tab-pane-connections>div:first-child h1,
+    #tab-pane-settings>div:first-child h1,
+    .config-page-heading h1{font-size:21px!important;line-height:1.25!important;letter-spacing:-.025em!important}
+    #tab-pane-home>div:first-child p,
+    #tab-pane-proxy>div:first-child p,
+    #tab-pane-logs>div:first-child p,
+    #tab-pane-connections>div:first-child p,
+    #tab-pane-settings>div:first-child p,
+    .config-page-heading p{font-size:12px!important;line-height:1.55!important}
+
+    .config-pill{font-size:10px!important}
+    .config-section-title>span{font-size:11px!important}
+    .config-section-title h2{font-size:13px!important;line-height:1.35}
+    .config-section-title p{font-size:11px!important;line-height:1.45}
+    .config-field label{font-size:12px!important;line-height:1.35}
+    .config-field input,.config-field select,.config-field textarea,.config-inline input{
+      min-height:36px;
+      font-size:13px!important;
+      line-height:1.4;
+    }
+    .config-field small{font-size:10px!important}
+    .config-help{font-size:11px!important;line-height:1.6}
+    .config-info{font-size:11px!important}
+    .config-advanced summary{font-size:12px!important}
+    .config-advanced summary>span{font-size:10px!important}
+    .config-small,.config-secondary{font-size:12px!important}
+    .config-address>span{font-size:11px!important}
+    .config-address code{font-size:12px!important}
+    .config-address button{font-size:11px!important}
+    .config-check{font-size:12px!important}
+    .config-switch-line strong{font-size:13px!important}
+    .config-switch-line small{font-size:11px!important}
+    .config-permissions strong{font-size:12px!important}
+    .config-permissions small{font-size:10px!important}
+    .config-preset-row{font-size:11px!important}
+    .config-preset-row button,.config-text-button{font-size:11px!important}
+    .draft-bar{font-size:11px!important}
+
+    /* Container-driven grids avoid squeezing two/three fixed columns into a
+       workspace that became narrow after accounting for the sidebar. */
+    .config-grid{
+      grid-template-columns:repeat(auto-fit,minmax(260px,1fr))!important;
+      gap:12px 16px!important;
+    }
+    .config-permissions{
+      grid-template-columns:repeat(auto-fit,minmax(170px,1fr))!important;
+    }
+    .config-page-heading,.config-actions{flex-wrap:wrap}
+    .config-actions>div{min-width:0}
+    .config-inline{min-width:0}
+    .config-inline input{min-width:160px}
+
+    .rp-reference-top{min-width:0}
+    .rp-reference-crumb{flex:0 1 auto;min-width:0;white-space:nowrap}
+    .rp-reference-command{flex:0 1 340px;min-width:170px}
+    #secondary-tabs{max-width:100%;overflow-x:auto;scrollbar-width:thin}
+    .tab-pane{min-width:0}
+    #tab-pane-home>div:first-child,
+    #tab-pane-logs>div:first-child,
+    #tab-pane-connections>div:first-child{flex-wrap:wrap}
+    #tab-pane-proxy .flex.items-end{flex-wrap:wrap}
+    #tab-pane-proxy .flex.items-end>div{flex:1 1 140px;width:auto!important;min-width:120px}
+    #tab-pane-routing .flex.items-center.gap-6{flex-wrap:wrap}
+
+    /* Native GUI enters compact navigation while there is still enough room
+       to reflow the page cleanly. The previous 760px breakpoint was below the
+       native window's 820px minimum and therefore effectively unreachable. */
+    @media(max-width:980px){
+      :root{--rp-sidebar-width:76px}
+      .rp-sidebar{
+        width:var(--rp-sidebar-width)!important;
+        min-width:var(--rp-sidebar-width)!important;
+        flex-basis:var(--rp-sidebar-width)!important;
+        padding:10px 7px!important;
+      }
+      .rp-reference-workspace{display:none!important}
+      .rp-sidebar>div:first-child{justify-content:center!important;padding:2px 0 8px!important}
+      .rp-sidebar>div:first-child>div:last-child{display:none!important}
+      .rp-sidebar .rp-nav-label{display:none!important}
+      .rp-sidebar .rp-nav-item{justify-content:center!important;padding:0!important}
+      .rp-sidebar .rp-nav-item span{display:none!important}
+      .rp-sidebar .rp-nav-item .icon{width:18px;height:18px}
+      .rp-sidebar>.m-2{margin:0!important}
+      .rp-sidebar>.m-2>div:first-child{display:none!important}
+      .rp-theme-control{width:100%!important;flex-direction:column!important;gap:2px!important}
+      .rp-theme-control button{width:100%;padding:5px 2px!important}
+      .rp-reference-command{display:none!important}
+      .rp-reference-top{padding:0 14px!important;gap:10px}
+      .tab-pane{padding:14px 18px 22px!important}
+      .rp-sticky-tabs{padding-left:18px!important;padding-right:18px!important}
+      #config-state{padding-left:18px!important;padding-right:18px!important}
+    }
+
+    @media(max-width:860px){
+      .rp-reference-crumb>span:first-child{display:none}
+      .rp-reference-top{padding:0 12px!important}
+      .tab-pane{padding-left:14px!important;padding-right:14px!important}
+      .rp-sticky-tabs{padding-left:14px!important;padding-right:14px!important}
+      .config-grid{grid-template-columns:1fr!important}
+      .config-permissions{grid-template-columns:1fr!important}
+      .config-actions{align-items:flex-start}
+    }
+
   </style>
 </head>
 <body class="rp-shell text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">

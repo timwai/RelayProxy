@@ -33,28 +33,6 @@ func (a *appWindow) registerBindings() {
 		return a.statusJSON(), nil
 	})
 
-	_ = w.Bind("goGetRDPTargets", func() (string, error) {
-		data, err := json.Marshal(a.bridge.GetRDPTargets())
-		if err != nil {
-			return "[]", nil
-		}
-		return string(data), nil
-	})
-
-	_ = w.Bind("goConnectRDP", func(targetID string, autoLaunch bool) (string, error) {
-		target, err := a.bridge.ConnectRDP(targetID, autoLaunch)
-		if err != nil {
-			return saveResponse(nil, err), nil
-		}
-		data, _ := json.Marshal(map[string]any{"ok": true, "target": target})
-		return string(data), nil
-	})
-
-	_ = w.Bind("goDisconnectRDP", func() (string, error) {
-		a.bridge.DisconnectRDP()
-		return `{"ok":true}`, nil
-	})
-
 	_ = w.Bind("goGetLogs", func() (string, error) {
 		entries := a.bridge.GetLogs(500)
 		data, err := json.Marshal(entries)

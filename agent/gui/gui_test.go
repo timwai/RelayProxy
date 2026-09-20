@@ -22,7 +22,6 @@ func TestDefaultWindowTitleIsProductNameOnly(t *testing.T) {
 	}
 }
 
-
 func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 	data, err := assets.ReadFile("assets/wails-bridge.js")
 	if err != nil {

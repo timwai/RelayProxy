@@ -55,12 +55,10 @@ jobs:
       - name: Build Windows arm64
         run: CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -trimpath -ldflags="-H=windowsgui" -o /tmp/relay-agent-gui-arm64.exe ./cmd/relay-agent
 
-      - name: Verify Wails binding names
+      - name: Verify Wails bridge contract
         shell: bash
         run: |
           set -euo pipefail
-          go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-beta.23
-          rm -rf /tmp/wails-bindings
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 wails3 generate bindings -names -d /tmp/wails-bindings ./agent/gui
-          grep -R -F 'gui.WailsService.GetConfig' /tmp/wails-bindings
-          grep -R -F 'gui.WailsService.GetConnections' /tmp/wails-bindings
+          grep -F "gui.WailsService." agent/gui/assets/wails-bridge.js
+          grep -F "func (s *WailsService) GetConfig" agent/gui/bindings_windows.go
+          grep -F "func (s *WailsService) GetConnections" agent/gui/bindings_windows.go

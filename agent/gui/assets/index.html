@@ -998,16 +998,6 @@
                 <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
               </label>
             </div>
-            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
-              <div class="min-w-0">
-                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">启动时直接进入托盘</div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">下次启动不弹出主界面</div>
-              </div>
-              <label class="relative inline-flex items-center cursor-pointer shrink-0">
-                <input type="checkbox" id="cfg-start-min" onchange="onToggleStartMin(this)" class="sr-only peer">
-                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
-              </label>
-            </div>
           </div>
         </div>
 
@@ -1095,7 +1085,7 @@
       network: ['cfg-network-excludes'],
       share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
       exit: ['cfg-exit-id'],
-      preferences: ['cfg-min-tray','cfg-start-min','cfg-theme-mode']
+      preferences: ['cfg-min-tray','cfg-theme-mode']
     };
     var groupNames = {connection:'连接与身份',proxy:'本地代理',routing:'路由分流',network:'透明排除',share:'出口共享',exit:'选择出口',preferences:'程序设置'};
     function snapshotGroup(group) {
@@ -1505,7 +1495,6 @@
       $('cfg-acl-cidrs').value = (cfg.accessCidrs || []).join('\n');
       $('cfg-autostart').checked = !!cfg.isAutostart;
       $('cfg-min-tray').checked = cfg.minimizeToTray !== false;
-      $('cfg-start-min').checked = !!cfg.startMinimized;
 
       applyTheme(cfg.theme || 'system', false);
       var notices = [];
@@ -1615,7 +1604,7 @@
         return { network: { excludeProcesses: splitRuleList($('cfg-network-excludes').value) } };
       case 'exit': return { proxy: { defaultExitId: $('cfg-exit-id').value.trim() } };
       case 'preferences':
-        return { gui: { theme: $('cfg-theme-light').checked ? 'light' : 'dark', minimizeToTray: $('cfg-min-tray').checked, startMinimized: $('cfg-start-min').checked } };
+        return { gui: { theme: $('cfg-theme-light').checked ? 'light' : 'dark', minimizeToTray: $('cfg-min-tray').checked } };
       default: return {};
       }
     }
@@ -1668,11 +1657,6 @@
         if (!ok && state.cfg) { el.checked = state.cfg.minimizeToTray !== false; markDrafts(); }
       });
     }
-    function onToggleStartMin(el) {
-      save({ gui: { startMinimized: el.checked } }, el.checked ? '下次启动将直接进入托盘' : '下次启动将显示主界面').then(function (ok) {
-        if (!ok && state.cfg) { el.checked = !!state.cfg.startMinimized; markDrafts(); }
-      });
-    }
     function openConfigDir() { call('goOpenConfigDir'); }
     async function doRestart() {
       var dirty = dirtyGroups(true).length;
@@ -1697,7 +1681,6 @@
     }
     window.onToggleAutostart = onToggleAutostart;
     window.onToggleMinTray = onToggleMinTray;
-    window.onToggleStartMin = onToggleStartMin;
     window.openConfigDir = openConfigDir;
     window.doRestart = doRestart;
     window.doQuit = doQuit;

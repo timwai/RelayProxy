@@ -86,6 +86,15 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	if strings.Contains(strings.ToLower(body), "web-token") {
 		t.Fatal("Agent management page still exposes web token UI")
 	}
+	for _, forbidden := range []string{
+		".rp-sidebar .rp-nav-label{display:none",
+		".rp-sidebar .rp-nav-item span{display:none",
+		".rp-sidebar>div:first-child>div:last-child{display:none",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("responsive Agent UI must preserve labeled sidebar; found %q", forbidden)
+		}
+	}
 }
 
 func TestWebManagementDoesNotExposeRDPTargetInventory(t *testing.T) {

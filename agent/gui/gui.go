@@ -30,7 +30,7 @@ var Version = "1.0.0"
 // DefaultWindowTitle is intentionally stable across releases. The second
 // instance uses it to locate and activate the first instance's native window.
 const (
-	DefaultWindowTitle  = "RelayProxy 代理客户端"
+	DefaultWindowTitle  = "RelayProxy"
 	DefaultWindowWidth  = 1100
 	DefaultWindowHeight = 760
 	MinimumWindowWidth  = 820

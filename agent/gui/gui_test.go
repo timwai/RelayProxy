@@ -111,3 +111,21 @@ func TestRoutingRulesUseReadOnlyListAndModalEditor(t *testing.T) {
 		t.Fatal("routing script still contains legacy inline rule editing")
 	}
 }
+
+
+func TestSettingsDoNotHideManualLaunch(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, forbidden := range []string{
+		`id="cfg-start-min"`,
+		"启动时直接进入托盘",
+		"onToggleStartMin",
+	} {
+		if strings.Contains(page, forbidden) {
+			t.Fatalf("settings still expose manual start-minimized behavior %q", forbidden)
+		}
+	}
+}

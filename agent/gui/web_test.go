@@ -88,6 +88,39 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
+func TestWebManagementDoesNotExposeRDPTargetInventory(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
+	body := page.Body.String()
+	for _, forbidden := range []string{"section-btn-rdp", "tab-pane-rdp", "rdp-targets", "goConnectRDP", "goGetRDPTargets"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("Agent management page still exposes RDP inventory hook %q", forbidden)
+		}
+	}
+
+	bridgeJS := httptest.NewRecorder()
+	handler.ServeHTTP(bridgeJS, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
+	for _, forbidden := range []string{"goGetRDPTargets", "goConnectRDP", "goDisconnectRDP", "/api/rdp/targets", "/api/rdp/connect", "/api/rdp/disconnect"} {
+		if strings.Contains(bridgeJS.Body.String(), forbidden) {
+			t.Fatalf("Agent web bridge still exposes RDP inventory hook %q", forbidden)
+		}
+	}
+
+	for _, path := range []string{"/api/rdp/targets", "/api/rdp/connect", "/api/rdp/disconnect"} {
+		method := http.MethodGet
+		if path != "/api/rdp/targets" {
+			method = http.MethodPost
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(method, "http://127.0.0.1"+path, strings.NewReader("{}")))
+		if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("removed Agent RDP endpoint %s returned %d", path, rec.Code)
+		}
+	}
+}
+
 func TestWebManagementLoadsSharedFoundationBeforePageStyles(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()

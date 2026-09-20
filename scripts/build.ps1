@@ -54,6 +54,10 @@ Write-Host "=================================================="
 
 Push-Location $Root
 try {
+    # The caller may already have GOOS/GOARCH set from a previous cross-build.
+    # Reset before invoking any host-side Go helper.
+    Reset-GoHostEnvironment
+
     Write-Host "[prep] Generate brand icons + Windows resources"
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\gen-brand.ps1")
     if ($LASTEXITCODE -ne 0) { throw "gen-brand failed" }

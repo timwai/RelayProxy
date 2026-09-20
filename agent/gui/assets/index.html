@@ -186,6 +186,8 @@
     .rp-reference-command{width:min(340px,34vw);height:30px;border:1px solid var(--rp-border);background:var(--rp-surface-soft);border-radius:8px;display:flex;align-items:center;gap:7px;padding:0 8px;color:var(--rp-subtle);font-size:9px}
     .rp-reference-command kbd{margin-left:auto;border:1px solid var(--rp-border);background:var(--rp-surface);border-radius:5px;padding:1px 5px;font:8px var(--rp-mono)}
     .rp-reference-actions{display:flex;align-items:center;gap:6px}
+    .btn-primary,.rp-btn-primary{background:var(--rp-text)!important;border-color:var(--rp-text)!important;color:var(--rp-surface)!important}
+    .btn-primary:hover:not(:disabled),.rp-btn-primary:hover:not(:disabled){background:color-mix(in srgb,var(--rp-text) 88%,var(--rp-muted))!important;border-color:transparent!important}
     .rp-sidebar{padding:11px 9px!important;gap:8px}
     .rp-sidebar>div:first-child{padding:2px 7px 8px!important;gap:9px!important;border-bottom:0!important}
     .rp-sidebar>div:first-child img{width:30px!important;height:30px!important;border-radius:8px}
@@ -325,6 +327,7 @@
           <div class="mono text-[11px] text-emerald-600 dark:text-emerald-400 leading-tight" id="brand-version">v-</div>
         </div>
       </div>
+      <div class="rp-reference-workspace"><div><b>本机设备</b><small>Local agent</small></div><span>⌄</span></div>
 
       <div class="flex-1 p-2 space-y-1">
         <div class="rp-nav-label">主菜单</div>

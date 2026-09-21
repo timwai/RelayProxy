@@ -445,11 +445,11 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	sessionID := "sess_" + uuid.New().String()
 	welcome := protocol.DeviceAccepted{
-		State:                "approved",
-		DeviceID:             authorization.DeviceID,
-		ApprovedCapabilities: authorization.ApprovedCapabilities,
-		RDPTargets:           authorization.RDPTargets,
-		RemoteDesktopTargets: authorization.RemoteDesktopTargets,
+		State:                 "approved",
+		DeviceID:              authorization.DeviceID,
+		ApprovedCapabilities:  authorization.ApprovedCapabilities,
+		RDPTargets:            authorization.RDPTargets,
+		RemoteDesktopTargets:  authorization.RemoteDesktopTargets,
 		SessionID:             sessionID,
 		HeartbeatSec:          g.cfg.HeartbeatSec,
 		MaxConnections:        g.cfg.MaxConnectionsPerDevice,

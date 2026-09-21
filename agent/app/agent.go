@@ -207,40 +207,40 @@ type AgentStatus struct {
 var ErrRestartRequired = errors.New("agent role change requires restart")
 
 type Agent struct {
-	cfg           AgentConfig
-	tunnelMgr     *tunnel.TunnelManager
-	dialer        *routing.RoutingDialer
-	rawDialer     *client.TunnelDialer
-	routingEngine *routing.Engine
-	traffic       *traffic.Registry
-	exitHandler   *exit.Handler
-	socksServer   *socks5.Server
-	httpServer    *httpproxy.Server
-	divertSrv     *divert.Server
-	ctrlStream    tunnel.TunnelStream
-	readySession  tunnel.TunnelSession
-	epoch         uint64
-	started       bool
-	selectedExit  atomic.Pointer[string]
-	latencyMs     atomic.Int64
-	handshakeOK   atomic.Bool
-	approvalState atomic.Pointer[string]
+	cfg                  AgentConfig
+	tunnelMgr            *tunnel.TunnelManager
+	dialer               *routing.RoutingDialer
+	rawDialer            *client.TunnelDialer
+	routingEngine        *routing.Engine
+	traffic              *traffic.Registry
+	exitHandler          *exit.Handler
+	socksServer          *socks5.Server
+	httpServer           *httpproxy.Server
+	divertSrv            *divert.Server
+	ctrlStream           tunnel.TunnelStream
+	readySession         tunnel.TunnelSession
+	epoch                uint64
+	started              bool
+	selectedExit         atomic.Pointer[string]
+	latencyMs            atomic.Int64
+	handshakeOK          atomic.Bool
+	approvalState        atomic.Pointer[string]
 	approvedMode         string
 	rdpTargets           []rdp.Target
 	remoteDesktopTargets []protocol.RemoteDesktopTarget
 	rdpConnection        *rdp.Connection
-	rdpP2P        *rdpp2p.Manager
-	rdpSession    *rdpp2p.Session
-	desktopHost   desktop.HostHandler
-	closed        atomic.Bool
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	mu            sync.RWMutex
-	policyMu      sync.RWMutex
-	lifecycleMu   sync.Mutex
-	closeOnce     sync.Once
-	closeErr      error
+	rdpP2P               *rdpp2p.Manager
+	rdpSession           *rdpp2p.Session
+	desktopHost          desktop.HostHandler
+	closed               atomic.Bool
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	mu                   sync.RWMutex
+	policyMu             sync.RWMutex
+	lifecycleMu          sync.Mutex
+	closeOnce            sync.Once
+	closeErr             error
 }
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
@@ -1358,7 +1358,7 @@ func (a *Agent) closeRuntime() error {
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
 		a.rdpSession, a.rdpP2P = nil, nil
 		a.rdpTargets = nil
-	a.remoteDesktopTargets = nil
+		a.remoteDesktopTargets = nil
 		a.cancel()
 		a.mu.Unlock()
 		var errs []error

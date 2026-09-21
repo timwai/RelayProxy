@@ -65,16 +65,16 @@ type DeviceAccepted struct {
 	ApprovedCapabilities  []string              `json:"approvedCapabilities,omitempty"`
 	RDPTargets            []RDPTarget           `json:"rdpTargets,omitempty"`
 	RemoteDesktopTargets  []RemoteDesktopTarget `json:"remoteDesktopTargets,omitempty"`
-	RendezvousAddress     string      `json:"rendezvousAddress,omitempty"`
-	RDPLeaseSec           int         `json:"rdpLeaseSec,omitempty"`
-	SessionID             string      `json:"sessionId,omitempty"`
-	HeartbeatSec          int         `json:"heartbeat,omitempty"`
-	MaxConnections        int         `json:"maxConnections,omitempty"`
-	ServerTime            int64       `json:"serverTime"`
-	RetryAfterSec         int         `json:"retryAfterSec,omitempty"`
-	TransportCapabilities []string    `json:"transportCapabilities,omitempty"`
-	ErrorCode             string      `json:"errorCode,omitempty"`
-	ErrorMessage          string      `json:"errorMessage,omitempty"`
+	RendezvousAddress     string                `json:"rendezvousAddress,omitempty"`
+	RDPLeaseSec           int                   `json:"rdpLeaseSec,omitempty"`
+	SessionID             string                `json:"sessionId,omitempty"`
+	HeartbeatSec          int                   `json:"heartbeat,omitempty"`
+	MaxConnections        int                   `json:"maxConnections,omitempty"`
+	ServerTime            int64                 `json:"serverTime"`
+	RetryAfterSec         int                   `json:"retryAfterSec,omitempty"`
+	TransportCapabilities []string              `json:"transportCapabilities,omitempty"`
+	ErrorCode             string                `json:"errorCode,omitempty"`
+	ErrorMessage          string                `json:"errorMessage,omitempty"`
 }
 
 // DeviceAuthPayload returns an unambiguous length-prefixed signature payload.

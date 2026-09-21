@@ -179,27 +179,27 @@ func (c AgentConfig) IsRDPEnabled() bool {
 }
 
 type AgentStatus struct {
-	Connected     bool         `json:"connected"`
-	Transport     string       `json:"transport"`
-	LatencyMs     int64        `json:"latency"`
-	DeviceID      string       `json:"deviceId"`
-	DeviceName    string       `json:"deviceName"`
-	Mode          string       `json:"mode"`
-	SelectedExit  string       `json:"selectedExit"`
-	SOCKS5Running bool         `json:"socks5Running"`
-	HTTPRunning   bool         `json:"httpRunning"`
-	ExitRunning   bool         `json:"exitRunning"`
-	NetworkMode   string       `json:"networkMode"`
-	DivertRunning bool         `json:"divertRunning"`
-	ActiveStreams int64        `json:"activeStreams"`
-	ApprovalState string       `json:"approvalState"`
-	RDPListenAddr string       `json:"rdpListenAddr,omitempty"`
-	RDPTargetID   string       `json:"rdpTargetId,omitempty"`
-	RDPUDPEnabled bool         `json:"rdpUdpEnabled"`
-	RDPUDPActive  bool         `json:"rdpUdpActive"`
-	RDPUDPReason  string       `json:"rdpUdpReason,omitempty"`
-	RDPPathTCP    string       `json:"rdpPathTcp,omitempty"`
-	RDPPathUDP    string       `json:"rdpPathUdp,omitempty"`
+	Connected     bool   `json:"connected"`
+	Transport     string `json:"transport"`
+	LatencyMs     int64  `json:"latency"`
+	DeviceID      string `json:"deviceId"`
+	DeviceName    string `json:"deviceName"`
+	Mode          string `json:"mode"`
+	SelectedExit  string `json:"selectedExit"`
+	SOCKS5Running bool   `json:"socks5Running"`
+	HTTPRunning   bool   `json:"httpRunning"`
+	ExitRunning   bool   `json:"exitRunning"`
+	NetworkMode   string `json:"networkMode"`
+	DivertRunning bool   `json:"divertRunning"`
+	ActiveStreams int64  `json:"activeStreams"`
+	ApprovalState string `json:"approvalState"`
+	RDPListenAddr string `json:"rdpListenAddr,omitempty"`
+	RDPTargetID   string `json:"rdpTargetId,omitempty"`
+	RDPUDPEnabled bool   `json:"rdpUdpEnabled"`
+	RDPUDPActive  bool   `json:"rdpUdpActive"`
+	RDPUDPReason  string `json:"rdpUdpReason,omitempty"`
+	RDPPathTCP    string `json:"rdpPathTcp,omitempty"`
+	RDPPathUDP    string `json:"rdpPathUdp,omitempty"`
 }
 
 // ErrRestartRequired means a saved startup setting has not changed the running

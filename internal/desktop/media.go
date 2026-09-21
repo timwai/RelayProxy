@@ -18,8 +18,8 @@ const (
 type MediaPacketType uint8
 
 const (
-	MediaPacketVideo MediaPacketType = 1
-	MediaPacketAudio MediaPacketType = 2
+	MediaPacketVideo  MediaPacketType = 1
+	MediaPacketAudio  MediaPacketType = 2
 	MediaPacketCursor MediaPacketType = 3
 )
 

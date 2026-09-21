@@ -9,10 +9,10 @@ import (
 const (
 	DeviceProtocolVersion = 3
 
-	CapabilityProxyClient = "proxy.client"
-	CapabilityProxyExit   = "proxy.exit"
-	CapabilityRDPClient   = "rdp.controller"
-	CapabilityRDPHost     = "rdp.host"
+	CapabilityProxyClient       = "proxy.client"
+	CapabilityProxyExit         = "proxy.exit"
+	CapabilityRDPClient         = "rdp.controller"
+	CapabilityRDPHost           = "rdp.host"
 	CapabilityRDPPublic         = "rdp.public"
 	CapabilityDesktopController = "desktop.controller"
 	CapabilityDesktopHost       = "desktop.host"

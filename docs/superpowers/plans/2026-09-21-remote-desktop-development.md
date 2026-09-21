@@ -22,7 +22,7 @@
 | Windows Host 可视 MVP | 🧪 分支验证中 | GDI 捕获虚拟桌面，限制最高约 1280×720 / 10 FPS，CPU JPEG 编码 |
 | Controller Viewer MVP | 🧪 分支验证中 | Controller 重组 JPEG 帧，Wails GUI 内置实时预览与全屏 |
 | Windows Home 完整“看到画面”链路 | 🧪 代码已完成，待 CI/PR | 当前分支提交 `71e5de57787264e5ecb86550f7b2e9e4f3a5f17b`；尚未完成 CI、PR 与 main 合并 |
-| 键盘 / 鼠标输入 | ⏳ 未开始 | 计划走独立高优先级控制通道，Host 使用 `SendInput` |
+| 键盘 / 鼠标输入 | ✅ Windows MVP 已完成 | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
 | 光标 | ⏳ 未开始 | 计划与视频分离传输并在 Viewer 本地绘制 |
 | 剪贴板 | ⏳ 未开始 | RD1 先实现 Unicode 文本双向同步 |
 | DXGI / WGC Capture | ⏳ 待替换 MVP | 最终 Windows Capture 路径仍按设计采用 GPU surface |
@@ -74,6 +74,10 @@ Controller reassembly
 JPEG latest-frame cache
   ↓
 Wails GUI preview / fullscreen
+  ↕ reliable session stream
+keyboard / mouse / wheel
+  ↓
+Windows SendInput
 ```
 
 但该提交**尚未完成 PR、CI 与 main 合并**，因此不能视为正式发布能力。
@@ -99,6 +103,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 - Server 双跳媒体 Relay。
 - Controller 分片重组。
 - GUI Session 状态与 Viewer 展示。
+- Viewer → Relay → Host 的键盘/鼠标可靠控制链路与 Windows `SendInput` 注入。
 
 在这条验证链路通过 CI 和 Windows 实机验证后，再替换 Capture / Codec / Viewer，而不重新改动授权和 Relay 协议层。
 

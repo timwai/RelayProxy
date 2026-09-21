@@ -700,12 +700,12 @@
           <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 dark:border-slate-700/60">
             <div>
               <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Relay Desktop 预览</div>
-              <div id="desktop-viewer-meta" class="text-[10px] text-slate-500 dark:text-slate-400">等待视频帧…</div>
+              <div id="desktop-viewer-meta" class="text-[10px] text-slate-500 dark:text-slate-400">等待视频帧… · 点击画面后可控制键鼠</div>
             </div>
             <button type="button" onclick="toggleDesktopFullscreen()" class="rp-btn">全屏</button>
           </div>
           <div id="desktop-viewer-stage" class="bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
-            <img id="desktop-viewer-image" alt="远程桌面画面" class="block max-w-full max-h-[70vh] object-contain select-none" draggable="false">
+            <img id="desktop-viewer-image" alt="远程桌面画面" tabindex="0" class="block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default" draggable="false">
           </div>
         </div>
 
@@ -1114,7 +1114,9 @@
     'use strict';
 
     var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null };
-    var desktopFrameSeq = 0, desktopFrameBusy = false;
+    var desktopFrameSeq = 0, desktopFrameBusy = false, desktopInputSeq = 0;
+    var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
+    var desktopPressedKeys = {}, desktopPressedButtons = {};
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1534,7 +1536,7 @@
         $('desktop-viewer-image').src = 'data:' + mime + ';base64,' + frame.data;
         $('desktop-viewer-meta').textContent =
           (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
-          'JPEG MVP · QUIC Datagram';
+          'JPEG MVP · QUIC Datagram · 键鼠控制';
       } finally {
         desktopFrameBusy = false;
       }
@@ -1547,6 +1549,150 @@
       } else if (stage.requestFullscreen) {
         stage.requestFullscreen();
       }
+    }
+    function remoteDesktopInputReady() {
+      var status = state.desktopStatus || {};
+      return status.state === 'connected' && status.backend === 'relay' && hasFn('goSendRemoteDesktopInput');
+    }
+    function sendRemoteDesktopInput(event) {
+      if (!remoteDesktopInputReady() || !event) return Promise.resolve(false);
+      event.sequence = ++desktopInputSeq;
+      return call('goSendRemoteDesktopInput', JSON.stringify(event)).then(function (raw) {
+        var result = mutationResult(raw);
+        if (result && result.ok === false) {
+          var now = Date.now();
+          if (now - desktopInputErrorAt > 3000) {
+            desktopInputErrorAt = now;
+            toast(result.message || '远程输入发送失败');
+          }
+          return false;
+        }
+        return true;
+      }).catch(function (err) {
+        var now = Date.now();
+        if (now - desktopInputErrorAt > 3000) {
+          desktopInputErrorAt = now;
+          toast('远程输入发送失败：' + (err.message || err));
+        }
+        return false;
+      });
+    }
+    function desktopPointerPosition(event) {
+      var image = $('desktop-viewer-image');
+      if (!image) return null;
+      var rect = image.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      var rx = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+      var ry = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+      return { x: Math.round(rx * 65535), y: Math.round(ry * 65535) };
+    }
+    function desktopMouseButtonName(button) {
+      if (button === 0) return 'left';
+      if (button === 1) return 'middle';
+      if (button === 2) return 'right';
+      if (button === 3) return 'x1';
+      if (button === 4) return 'x2';
+      return '';
+    }
+    function flushDesktopMouseMove() {
+      desktopMoveTimer = null;
+      var pending = desktopMovePending;
+      desktopMovePending = null;
+      if (pending) sendRemoteDesktopInput(pending);
+    }
+    function queueDesktopMouseMove(event) {
+      if (!remoteDesktopInputReady()) return;
+      var point = desktopPointerPosition(event);
+      if (!point) return;
+      desktopMovePending = { kind: 'mouse_move', x: point.x, y: point.y };
+      if (!desktopMoveTimer) desktopMoveTimer = setTimeout(flushDesktopMouseMove, 16);
+    }
+    function sendDesktopMouseButton(event, down) {
+      if (!remoteDesktopInputReady()) return;
+      var button = desktopMouseButtonName(event.button);
+      if (!button) return;
+      var point = desktopPointerPosition(event);
+      if (!point) return;
+      if (down) desktopPressedButtons[button] = true;
+      else delete desktopPressedButtons[button];
+      sendRemoteDesktopInput({
+        kind: down ? 'mouse_button_down' : 'mouse_button_up',
+        button: button, x: point.x, y: point.y
+      });
+      event.preventDefault();
+    }
+    function desktopKeyExtended(event) {
+      var code = String(event.code || '');
+      return event.location === 2 ||
+        /^(Arrow|Insert|Delete|Home|End|PageUp|PageDown)/.test(code) ||
+        code === 'NumpadDivide' || code === 'NumpadEnter';
+    }
+    function sendDesktopKey(event, down) {
+      if (!remoteDesktopInputReady()) return;
+      var image = $('desktop-viewer-image');
+      if (!image || document.activeElement !== image) return;
+      var vk = Number(event.keyCode || event.which || 0);
+      if (!vk || vk < 1 || vk > 65535) return;
+      var keyID = String(vk);
+      var extended = desktopKeyExtended(event);
+      if (down) desktopPressedKeys[keyID] = { virtualKey: vk, extended: extended };
+      else delete desktopPressedKeys[keyID];
+      sendRemoteDesktopInput({
+        kind: down ? 'key_down' : 'key_up',
+        virtualKey: vk, extended: extended
+      });
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    function releaseDesktopInput() {
+      Object.keys(desktopPressedKeys).forEach(function (key) {
+        var item = desktopPressedKeys[key];
+        sendRemoteDesktopInput({ kind: 'key_up', virtualKey: item.virtualKey, extended: !!item.extended });
+      });
+      desktopPressedKeys = {};
+      Object.keys(desktopPressedButtons).forEach(function (button) {
+        sendRemoteDesktopInput({ kind: 'mouse_button_up', button: button, x: 32768, y: 32768 });
+      });
+      desktopPressedButtons = {};
+    }
+    function bindRemoteDesktopInput() {
+      var image = $('desktop-viewer-image');
+      if (!image) return;
+      image.addEventListener('pointermove', queueDesktopMouseMove);
+      image.addEventListener('pointerdown', function (event) {
+        try { image.focus({ preventScroll: true }); } catch (_) { image.focus(); }
+        try { image.setPointerCapture(event.pointerId); } catch (_) {}
+        sendDesktopMouseButton(event, true);
+      });
+      image.addEventListener('pointerup', function (event) {
+        sendDesktopMouseButton(event, false);
+        try { image.releasePointerCapture(event.pointerId); } catch (_) {}
+      });
+      image.addEventListener('pointercancel', function (event) {
+        var button = desktopMouseButtonName(event.button);
+        if (button && desktopPressedButtons[button]) sendDesktopMouseButton(event, false);
+      });
+      image.addEventListener('wheel', function (event) {
+        if (!remoteDesktopInputReady()) return;
+        var point = desktopPointerPosition(event);
+        if (!point) return;
+        var horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+        var raw = horizontal ? event.deltaX : event.deltaY;
+        if (!raw) return;
+        var delta = horizontal ? (raw > 0 ? 120 : -120) : (raw > 0 ? -120 : 120);
+        sendRemoteDesktopInput({
+          kind: 'mouse_wheel', x: point.x, y: point.y,
+          wheelDelta: delta, horizontal: horizontal
+        });
+        event.preventDefault();
+      }, { passive: false });
+      image.addEventListener('keydown', function (event) { sendDesktopKey(event, true); });
+      image.addEventListener('keyup', function (event) { sendDesktopKey(event, false); });
+      image.addEventListener('blur', releaseDesktopInput);
+      image.addEventListener('contextmenu', function (event) { event.preventDefault(); });
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) releaseDesktopInput();
+      });
     }
     window.refreshRemoteDesktopFrame = refreshRemoteDesktopFrame;
     window.toggleDesktopFullscreen = toggleDesktopFullscreen;
@@ -2135,6 +2281,7 @@
       loadConfig();
       refreshStatus();
       refreshLogs();
+      bindRemoteDesktopInput();
 
       // The browser management page shares this HTML with the native Windows
       // window, but it has no process-replacement binding. Keep the restart

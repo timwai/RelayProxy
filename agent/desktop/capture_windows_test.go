@@ -3,7 +3,6 @@
 package desktop
 
 import (
-	"image"
 	"testing"
 	"time"
 
@@ -24,9 +23,8 @@ func TestCopyDXGIFrameConvertsBGRAAndStride(t *testing.T) {
 		3, 2, 1, 255, 6, 5, 4, 255,
 		9, 8, 7, 255, 12, 11, 10, 255,
 	}
-	if got.Stride != 8 || !image.Pt(2, 2).In(got.Bounds().Max.Add(image.Pt(1, 1))) {
-		// The pixel assertion below is the real check; keep this branch only
-		// to make unexpected image layout changes fail with useful context.
+	if got.Bounds().Dx() != 2 || got.Bounds().Dy() != 2 || got.Stride != 8 {
+		t.Fatalf("unexpected image layout: bounds=%v stride=%d", got.Bounds(), got.Stride)
 	}
 	if len(got.Pix) != len(want) {
 		t.Fatalf("pix len=%d want=%d", len(got.Pix), len(want))

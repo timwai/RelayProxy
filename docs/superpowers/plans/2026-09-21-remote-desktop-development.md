@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 已完成，RD1 Windows 可视 MVP 验证中  
+> 状态：实施中 — RD0 已完成，RD1 Windows 可交互 MVP 已合并 main，正在替换高性能媒体栈  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发分支：`feature/relay-desktop-windows-mvp`
@@ -19,10 +19,11 @@
 | Remote Desktop 目标发现 | ✅ 已合并 main | Welcome 同时支持兼容 `RDPTargets` 与新的 `RemoteDesktopTargets` |
 | RD/1 媒体协议 | ✅ 已完成基础层 | 二进制媒体头、分片、重组、独立 Desktop Datagram association 已实现 |
 | Server 双跳媒体 Relay | ✅ 已合并 main | Controller ↔ Relay ↔ Target 使用 QUIC Datagram 转发，媒体不进入 JSON |
-| Windows Host 可视 MVP | 🧪 分支验证中 | GDI 捕获虚拟桌面，限制最高约 1280×720 / 10 FPS，CPU JPEG 编码 |
-| Controller Viewer MVP | 🧪 分支验证中 | Controller 重组 JPEG 帧，Wails GUI 内置实时预览与全屏 |
-| Windows Home 完整“看到画面”链路 | 🧪 代码已完成，待 CI/PR | 当前分支提交 `71e5de57787264e5ecb86550f7b2e9e4f3a5f17b`；尚未完成 CI、PR 与 main 合并 |
-| 键盘 / 鼠标输入 | ✅ Windows MVP 已完成 | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
+| Windows Host 可视 MVP | ✅ 已合并 main | GDI 捕获虚拟桌面 + CPU JPEG；支持按会话选择画质、最高 4K/30 FPS 安全上限与 JPEG 软码率约束 |
+| Controller Viewer MVP | ✅ 已合并 main | Controller 重组 JPEG 帧，Wails GUI 内置实时预览、全屏和键鼠控制 |
+| Windows Home 完整“看到并操作”链路 | ✅ 已合并 main | PR #21 已合并，main merge commit `50610f16a9d1e8c8ac4d24a014e1b302775614d0`；Go/UI/Windows/macOS CI 通过 |
+| 键盘 / 鼠标输入 | ✅ 已合并 main | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
+| 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ⏳ 未开始 | 计划与视频分离传输并在 Viewer 本地绘制 |
 | 剪贴板 | ⏳ 未开始 | RD1 先实现 Unicode 文本双向同步 |
 | DXGI / WGC Capture | ⏳ 待替换 MVP | 最终 Windows Capture 路径仍按设计采用 GPU surface |
@@ -40,19 +41,9 @@
 
 ### 0.2 当前功能分支
 
-当前分支：
+当前 Windows 可交互 MVP 已通过 PR #21 合并到 `main`；后续高性能媒体栈在独立功能分支继续演进。
 
-```text
-feature/relay-desktop-windows-mvp
-```
-
-当前可视 MVP 提交：
-
-```text
-71e5de57787264e5ecb86550f7b2e9e4f3a5f17b
-```
-
-这一版已经完成代码层面的完整画面路径：
+当前已完成的端到端路径：
 
 ```text
 Windows Host
@@ -80,7 +71,7 @@ keyboard / mouse / wheel
 Windows SendInput
 ```
 
-但该提交**尚未完成 PR、CI 与 main 合并**，因此不能视为正式发布能力。
+该 JPEG 路径现在作为可运行的功能基线保留；后续 Capture / Codec / Viewer 可以独立替换，不需要重做授权、Relay Datagram 与输入控制链路。
 
 ### 0.3 当前实现与最终设计的差异
 

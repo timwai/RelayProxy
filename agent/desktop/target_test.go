@@ -49,4 +49,6 @@ func TestTargetDesktopMediaRejectsMissingHostBackend(t *testing.T) {
 	}
 }
 
-var _ HostHandler = HostHandlerFunc(func(context.Context, *desktopmedia.MediaConn) error { return errors.New("unused") })
+var _ HostHandler = HostHandlerFunc(func(context.Context, *desktopmedia.MediaConn, protocol.RemoteDesktopConnectOptions) error {
+	return errors.New("unused")
+})

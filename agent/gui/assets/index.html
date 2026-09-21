@@ -696,6 +696,64 @@
 
         <div id="desktop-session-banner" class="hidden rp-notice rp-notice-info"></div>
 
+        <details class="rp-card p-4" id="desktop-connect-settings">
+          <summary class="cursor-pointer select-none text-[12px] font-semibold text-slate-800 dark:text-slate-100">连接设置</summary>
+          <div class="grid grid-cols-2 xl:grid-cols-5 gap-3 mt-3">
+            <div>
+              <label for="desktop-opt-backend" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">协议</label>
+              <select id="desktop-opt-backend" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="auto">自动</option>
+                <option value="relay">Relay Desktop</option>
+                <option value="rdp">Windows RDP</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-quality" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">画质</label>
+              <select id="desktop-opt-quality" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="auto">自动</option>
+                <option value="smooth">流畅</option>
+                <option value="balanced">均衡</option>
+                <option value="high">高清</option>
+                <option value="extreme">极致</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-resolution" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">分辨率</label>
+              <select id="desktop-opt-resolution" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="auto">自动</option>
+                <option value="1280x720">1280×720</option>
+                <option value="1920x1080">1920×1080</option>
+                <option value="2560x1440">2560×1440</option>
+                <option value="native">原始 / 最高 4K</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-fps" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">帧率</label>
+              <select id="desktop-opt-fps" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="0">自动</option>
+                <option value="10">10 FPS</option>
+                <option value="15">15 FPS</option>
+                <option value="24">24 FPS</option>
+                <option value="30">30 FPS</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-bitrate" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">码率上限</label>
+              <select id="desktop-opt-bitrate" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="0">自动</option>
+                <option value="3">3 Mbps</option>
+                <option value="6">6 Mbps</option>
+                <option value="8">8 Mbps</option>
+                <option value="12">12 Mbps</option>
+                <option value="20">20 Mbps</option>
+              </select>
+            </div>
+          </div>
+          <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
+            设置仅作用于下一次连接。当前 JPEG MVP 的码率为软上限；升级 H.264 硬件编码后将切换为编码器目标码率。Windows RDP 会忽略媒体画质参数。
+          </div>
+        </details>
+
         <div id="desktop-viewer" class="hidden rp-card overflow-hidden">
           <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 dark:border-slate-700/60">
             <div>
@@ -1436,6 +1494,38 @@
       if (typeof raw === 'object') return raw;
       try { return JSON.parse(raw); } catch (_) { return fallback; }
     }
+    function remoteDesktopConnectOptions() {
+      var backend = $('desktop-opt-backend') ? $('desktop-opt-backend').value : 'auto';
+      var quality = $('desktop-opt-quality') ? $('desktop-opt-quality').value : 'auto';
+      var resolutionValue = $('desktop-opt-resolution') ? $('desktop-opt-resolution').value : 'auto';
+      var fps = $('desktop-opt-fps') ? Number($('desktop-opt-fps').value || 0) : 0;
+      var bitrateMbps = $('desktop-opt-bitrate') ? Number($('desktop-opt-bitrate').value || 0) : 0;
+      var resolution = {};
+      if (resolutionValue === 'native') {
+        resolution.mode = 'native';
+      } else if (/^\d+x\d+$/.test(resolutionValue)) {
+        var size = resolutionValue.split('x');
+        resolution = { mode:'fixed', width:Number(size[0]), height:Number(size[1]) };
+      }
+      return {
+        backend: backend || 'auto',
+        scene: 'auto',
+        quality: quality || 'auto',
+        resolution: resolution,
+        fps: fps,
+        maxBitrate: bitrateMbps > 0 ? Math.round(bitrateMbps * 1000000) : 0
+      };
+    }
+    function remoteDesktopOptionsSummary() {
+      var options = remoteDesktopConnectOptions();
+      var parts = [];
+      if (options.quality && options.quality !== 'auto') parts.push(options.quality);
+      if (options.resolution && options.resolution.mode === 'fixed') parts.push(options.resolution.width + '×' + options.resolution.height);
+      else if (options.resolution && options.resolution.mode === 'native') parts.push('native');
+      if (options.fps) parts.push(options.fps + ' FPS');
+      if (options.maxBitrate) parts.push((options.maxBitrate / 1000000) + ' Mbps');
+      return parts.length ? parts.join(' · ') : '自动画质';
+    }
     function renderRemoteDesktopTargets() {
       var host = $('desktop-targets');
       if (!host) return;
@@ -1536,7 +1626,7 @@
         $('desktop-viewer-image').src = 'data:' + mime + ';base64,' + frame.data;
         $('desktop-viewer-meta').textContent =
           (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
-          'JPEG MVP · QUIC Datagram · 键鼠控制';
+          'JPEG MVP · QUIC Datagram · 键鼠控制 · ' + remoteDesktopOptionsSummary();
       } finally {
         desktopFrameBusy = false;
       }
@@ -1730,14 +1820,14 @@
       }
       if (button) button.disabled = true;
       try {
-        var raw = await call('goConnectRemoteDesktop', targetID, JSON.stringify({ backend:'auto', scene:'auto', quality:'auto' }));
+        var raw = await call('goConnectRemoteDesktop', targetID, JSON.stringify(remoteDesktopConnectOptions()));
         var result = parseJSONResult(raw, { ok:false, message:'没有收到连接结果' });
         if (!result.ok) {
           toast(result.message || '远程桌面连接失败');
           return;
         }
         desktopFrameSeq = 0;
-        toast('远程桌面已启动');
+        toast('远程桌面已启动 · ' + remoteDesktopOptionsSummary());
         await refreshRemoteDesktopStatus(false);
         await refreshRemoteDesktopFrame();
       } finally {

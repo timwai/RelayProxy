@@ -14,13 +14,13 @@ import (
 // normally starts or attaches the capture/encoder pipeline and blocks until the
 // session ends.
 type HostHandler interface {
-	HandleDesktopMedia(context.Context, *desktopmedia.MediaConn) error
+	HandleDesktopMedia(context.Context, *desktopmedia.MediaConn, protocol.RemoteDesktopConnectOptions) error
 }
 
-type HostHandlerFunc func(context.Context, *desktopmedia.MediaConn) error
+type HostHandlerFunc func(context.Context, *desktopmedia.MediaConn, protocol.RemoteDesktopConnectOptions) error
 
-func (f HostHandlerFunc) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaConn) error {
-	return f(ctx, conn)
+func (f HostHandlerFunc) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions) error {
+	return f(ctx, conn, options)
 }
 
 // HandleTargetMediaStreamWithHeader negotiates the target half of a Relay
@@ -60,5 +60,9 @@ func HandleTargetMediaStreamWithHeader(ctx context.Context, stream tunnel.Tunnel
 		return err
 	}
 	_ = stream.SetDeadline(time.Time{})
-	return handler.HandleDesktopMedia(ctx, conn)
+	var options protocol.RemoteDesktopConnectOptions
+	if req.Options != nil {
+		options = *req.Options
+	}
+	return handler.HandleDesktopMedia(ctx, conn, options)
 }

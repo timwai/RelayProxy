@@ -4,6 +4,8 @@ import (
 	"context"
 	"image"
 	"testing"
+
+	"relayproxy/internal/protocol"
 )
 
 type testCaptureSource struct {
@@ -36,5 +38,31 @@ func TestHostCaptureJPEG(t *testing.T) {
 	}
 	if len(data) < 4 || data[0] != 0xff || data[1] != 0xd8 {
 		t.Fatal("capture did not produce JPEG")
+	}
+}
+
+func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
+	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
+		Quality:    protocol.DesktopQualityHigh,
+		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 1600, Height: 900},
+		FPS:        24,
+		MaxBitrate: 8_000_000,
+	})
+	if cfg.MaxWidth != 1600 || cfg.MaxHeight != 900 || cfg.MaxFPS != 24 {
+		t.Fatalf("unexpected media size/fps: %+v", cfg)
+	}
+	if cfg.JPEGQuality != 78 || cfg.MaxBitrate != 8_000_000 {
+		t.Fatalf("unexpected quality policy: %+v", cfg)
+	}
+}
+
+func TestResolveHostConfigClampsUnsafeValues(t *testing.T) {
+	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
+		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 9000, Height: 9000},
+		FPS:        240,
+		MaxBitrate: 500_000_000,
+	})
+	if cfg.MaxWidth != maxJPEGWidth || cfg.MaxHeight != maxJPEGHeight || cfg.MaxFPS != maxJPEGFPS || cfg.MaxBitrate != maxJPEGBitrate {
+		t.Fatalf("unsafe values were not clamped: %+v", cfg)
 	}
 }

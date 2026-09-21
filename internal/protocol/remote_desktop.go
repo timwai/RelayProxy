@@ -162,12 +162,12 @@ type RemoteDesktopFrame struct {
 type DesktopInputKind string
 
 const (
-	DesktopInputKeyDown     DesktopInputKind = "key_down"
-	DesktopInputKeyUp       DesktopInputKind = "key_up"
-	DesktopInputMouseMove   DesktopInputKind = "mouse_move"
-	DesktopInputMouseDown   DesktopInputKind = "mouse_button_down"
-	DesktopInputMouseUp     DesktopInputKind = "mouse_button_up"
-	DesktopInputMouseWheel  DesktopInputKind = "mouse_wheel"
+	DesktopInputKeyDown    DesktopInputKind = "key_down"
+	DesktopInputKeyUp      DesktopInputKind = "key_up"
+	DesktopInputMouseMove  DesktopInputKind = "mouse_move"
+	DesktopInputMouseDown  DesktopInputKind = "mouse_button_down"
+	DesktopInputMouseUp    DesktopInputKind = "mouse_button_up"
+	DesktopInputMouseWheel DesktopInputKind = "mouse_wheel"
 )
 
 const (

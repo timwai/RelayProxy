@@ -42,19 +42,29 @@ func sendKeyboardInput(vk uint16, flags uint32) error {
 func mouseButtonFlags(button string, down bool) (flags uint32, data uint32, ok bool) {
 	switch button {
 	case protocol.DesktopMouseButtonLeft:
-		if down { return win.MOUSEEVENTF_LEFTDOWN, 0, true }
+		if down {
+			return win.MOUSEEVENTF_LEFTDOWN, 0, true
+		}
 		return win.MOUSEEVENTF_LEFTUP, 0, true
 	case protocol.DesktopMouseButtonRight:
-		if down { return win.MOUSEEVENTF_RIGHTDOWN, 0, true }
+		if down {
+			return win.MOUSEEVENTF_RIGHTDOWN, 0, true
+		}
 		return win.MOUSEEVENTF_RIGHTUP, 0, true
 	case protocol.DesktopMouseButtonMiddle:
-		if down { return win.MOUSEEVENTF_MIDDLEDOWN, 0, true }
+		if down {
+			return win.MOUSEEVENTF_MIDDLEDOWN, 0, true
+		}
 		return win.MOUSEEVENTF_MIDDLEUP, 0, true
 	case protocol.DesktopMouseButtonX1:
-		if down { return win.MOUSEEVENTF_XDOWN, win.XBUTTON1, true }
+		if down {
+			return win.MOUSEEVENTF_XDOWN, win.XBUTTON1, true
+		}
 		return win.MOUSEEVENTF_XUP, win.XBUTTON1, true
 	case protocol.DesktopMouseButtonX2:
-		if down { return win.MOUSEEVENTF_XDOWN, win.XBUTTON2, true }
+		if down {
+			return win.MOUSEEVENTF_XDOWN, win.XBUTTON2, true
+		}
 		return win.MOUSEEVENTF_XUP, win.XBUTTON2, true
 	default:
 		return 0, 0, false

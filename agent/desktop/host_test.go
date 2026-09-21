@@ -11,7 +11,7 @@ type testCaptureSource struct {
 }
 
 func (s *testCaptureSource) Capture(context.Context) (*image.RGBA, error) { return s.frame, nil }
-func (s *testCaptureSource) Close() error                                { return nil }
+func (s *testCaptureSource) Close() error                                 { return nil }
 
 func TestFitRGBAPreservesAspectRatio(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 1920, 1080))

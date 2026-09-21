@@ -125,7 +125,7 @@ func (r *StreamRouter) handleOpenDesktopMedia(ctx context.Context, header *proto
 	target.ActiveStreams.Add(1)
 	defer clientSession.ActiveStreams.Add(-1)
 	defer target.ActiveStreams.Add(-1)
-	up, down := r.pipeDatagrams(ctx, clientStream, targetStream, clientDatagrams, targetDatagrams, clientSession, target, 0)
+	up, down := r.pipeDesktopDatagrams(ctx, clientStream, targetStream, clientDatagrams, targetDatagrams, clientSession, target)
 	log.Printf("[Desktop] media relay closed controller=%s target=%s up=%d down=%d", clientSession.DeviceID, target.DeviceID, up, down)
 	r.emitAudit(&repository.ConnectionAudit{
 		UserID: clientSession.OwnerUserID, ClientDeviceID: clientSession.DeviceID, ExitDeviceID: target.DeviceID,

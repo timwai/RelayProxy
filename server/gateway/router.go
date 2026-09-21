@@ -657,18 +657,39 @@ func (r *StreamRouter) targetPolicy(ctx context.Context, exit *session.DeviceSes
 // Native forwarding changes only the session-scoped association envelope.
 // Fragment payloads remain opaque to the Relay, with bounded transport queues.
 func (r *StreamRouter) pipeDatagrams(ctx context.Context, s1, s2 tunnel.TunnelStream, d1, d2 *tunnel.DatagramChannel, c1, c2 *session.DeviceSession, idleTimeout time.Duration) (int64, int64) {
+	return r.pipeDatagramAssociation(ctx, s1, s2, d1, d2, c1, c2, idleTimeout, false)
+}
+
+// pipeDesktopDatagrams keeps RD/1 media on native QUIC datagrams while relaying
+// the authenticated lifetime stream bidirectionally for latency-sensitive,
+// reliable input/control messages.
+func (r *StreamRouter) pipeDesktopDatagrams(ctx context.Context, s1, s2 tunnel.TunnelStream, d1, d2 *tunnel.DatagramChannel, c1, c2 *session.DeviceSession) (int64, int64) {
+	return r.pipeDatagramAssociation(ctx, s1, s2, d1, d2, c1, c2, 0, true)
+}
+
+func (r *StreamRouter) pipeDatagramAssociation(ctx context.Context, s1, s2 tunnel.TunnelStream, d1, d2 *tunnel.DatagramChannel, c1, c2 *session.DeviceSession, idleTimeout time.Duration, relayReliableStream bool) (int64, int64) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var once sync.Once
 	stop := func() { once.Do(func() { cancel(); _ = d1.Close(); _ = d2.Close(); _ = s1.Close(); _ = s2.Close() }) }
 	defer stop()
 	var wg sync.WaitGroup
-	wg.Add(4)
 	finished := make(chan struct{}, 4)
 	complete := func() { wg.Done(); finished <- struct{}{} }
-	monitor := func(s tunnel.TunnelStream) { defer complete(); var b [1]byte; _, _ = s.Read(b[:]) }
-	go monitor(s1)
-	go monitor(s2)
+	if relayReliableStream {
+		wg.Add(3)
+		go func() {
+			defer complete()
+			tunnel.Pipe(ctx, s1, s2, 0, func(upward bool, n int) {
+				recordTransfer(c1, c2, upward, n)
+			})
+		}()
+	} else {
+		wg.Add(4)
+		monitor := func(s tunnel.TunnelStream) { defer complete(); var b [1]byte; _, _ = s.Read(b[:]) }
+		go monitor(s1)
+		go monitor(s2)
+	}
 	var up, down int64
 	var activitySeq atomic.Uint64
 	const datagramStatsBatch = 64 * 1024

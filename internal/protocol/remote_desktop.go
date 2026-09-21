@@ -156,6 +156,47 @@ type RemoteDesktopFrame struct {
 	Data     []byte `json:"data,omitempty"`
 }
 
+// DesktopInputEvent is a normalized interactive input event carried on the
+// reliable side channel of a Relay Desktop media association. Pointer
+// coordinates use the Windows SendInput absolute range [0, 65535].
+type DesktopInputKind string
+
+const (
+	DesktopInputKeyDown     DesktopInputKind = "key_down"
+	DesktopInputKeyUp       DesktopInputKind = "key_up"
+	DesktopInputMouseMove   DesktopInputKind = "mouse_move"
+	DesktopInputMouseDown   DesktopInputKind = "mouse_button_down"
+	DesktopInputMouseUp     DesktopInputKind = "mouse_button_up"
+	DesktopInputMouseWheel  DesktopInputKind = "mouse_wheel"
+)
+
+const (
+	DesktopMouseButtonLeft   = "left"
+	DesktopMouseButtonRight  = "right"
+	DesktopMouseButtonMiddle = "middle"
+	DesktopMouseButtonX1     = "x1"
+	DesktopMouseButtonX2     = "x2"
+)
+
+type DesktopInputEvent struct {
+	Sequence   uint64           `json:"sequence,omitempty"`
+	Kind       DesktopInputKind `json:"kind"`
+	VirtualKey uint16           `json:"virtualKey,omitempty"`
+	Extended   bool             `json:"extended,omitempty"`
+	X          uint16           `json:"x,omitempty"`
+	Y          uint16           `json:"y,omitempty"`
+	Button     string           `json:"button,omitempty"`
+	WheelDelta int32            `json:"wheelDelta,omitempty"`
+	Horizontal bool             `json:"horizontal,omitempty"`
+}
+
+const DesktopSessionInput = "input"
+
+type DesktopSessionMessage struct {
+	Type  string             `json:"type"`
+	Input *DesktopInputEvent `json:"input,omitempty"`
+}
+
 const (
 	DesktopControlCapabilities    = "capabilities"
 	DesktopControlConnectRequest  = "connect_request"

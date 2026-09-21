@@ -1,11 +1,13 @@
 # RelayProxy 下一代远程桌面设计
 
 > 日期：2026-09-21  
-> 状态：设计冻结，待按开发文档实施  
+> 状态：设计冻结，实施中 — RD0 已完成，RD1 进行中  
 > 目标项目：RelayProxy  
 > 前置基础：`docs/superpowers/specs/2026-09-16-rdp-integration-server-approval-design.md` 已完成 M1–M5  
 > 设计原则：自动优先、低延迟优先、文本清晰优先、P2P 优先但不迷信 P2P、RDP 保留但不再等同于“远程桌面”
 
+> **实施说明（2026-09-21）**：统一 Remote Desktop 模型、GUI、独立 Desktop 授权、RD/1 QUIC Datagram 与 Server Relay 已开始落地。为尽快验证 Windows Home 的完整媒体链路，RD1 当前功能分支先使用 **GDI + JPEG + Wails 预览** 打通 Host→Relay→Controller；这只是过渡验证路径，不修改本设计中 **DXGI/WGC + H.264 Hardware MFT + 原生 D3D11 Viewer** 的最终目标。实时实施状态以 `docs/superpowers/plans/2026-09-21-remote-desktop-development.md` 为准。
+>
 ## 1. 背景与结论
 
 RelayProxy 当前已经具备完整的设备身份、服务端审批、RDP Controller/Host 能力、设备间授权、QUIC/TLS 隧道、QUIC Datagram、P2P 打洞、Relay fallback、RDP 公网入口与 Windows `mstsc.exe` 自动启动能力。

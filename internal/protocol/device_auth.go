@@ -59,11 +59,12 @@ type AuthProof struct {
 }
 
 type DeviceAccepted struct {
-	Success               bool        `json:"success"`
-	State                 string      `json:"state"`
-	DeviceID              string      `json:"deviceId,omitempty"`
-	ApprovedCapabilities  []string    `json:"approvedCapabilities,omitempty"`
-	RDPTargets            []RDPTarget `json:"rdpTargets,omitempty"`
+	Success               bool                  `json:"success"`
+	State                 string                `json:"state"`
+	DeviceID              string                `json:"deviceId,omitempty"`
+	ApprovedCapabilities  []string              `json:"approvedCapabilities,omitempty"`
+	RDPTargets            []RDPTarget           `json:"rdpTargets,omitempty"`
+	RemoteDesktopTargets  []RemoteDesktopTarget `json:"remoteDesktopTargets,omitempty"`
 	RendezvousAddress     string      `json:"rendezvousAddress,omitempty"`
 	RDPLeaseSec           int         `json:"rdpLeaseSec,omitempty"`
 	SessionID             string      `json:"sessionId,omitempty"`

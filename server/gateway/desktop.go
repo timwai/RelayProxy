@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"log"
 	"time"
 
@@ -11,10 +12,30 @@ import (
 	"relayproxy/server/session"
 )
 
+func (r *StreamRouter) authorizeDesktop(controller, target string) (*session.DeviceSession, error) {
+	if !containsCapability(controllerGrants(r.sessions, controller), protocol.CapabilityDesktopController) {
+		return nil, errors.New("device is not approved for Relay Desktop controller access")
+	}
+	targetSession, ok := r.sessions.Get(target)
+	if !ok || targetSession == nil || !containsCapability(targetSession.Grants, protocol.CapabilityDesktopHost) {
+		return nil, errors.New("Relay Desktop target is offline or not approved")
+	}
+	if r.desktopChecker == nil {
+		return nil, errors.New("Relay Desktop authorization is not configured")
+	}
+	allowed, err := r.desktopChecker(controller, target)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, errors.New("controller is not authorized for this Relay Desktop target")
+	}
+	return targetSession, nil
+}
+
 // handleOpenDesktopMedia creates two independent RD/1 native-datagram
-// associations and forwards packets between them. RD1 deliberately reuses the
-// existing owner-scoped RDP grant as admission authority until desktop-specific
-// grants are exposed by the admin model.
+// associations and forwards packets between them. Relay Desktop admission is
+// independent from Native RDP and does not require port 3389.
 func (r *StreamRouter) handleOpenDesktopMedia(ctx context.Context, header *protocol.StreamHeader, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession, handshakeDeadline time.Time) {
 	var req protocol.OpenDesktopMediaRequest
 	if err := protocol.ReadJSON(clientStream, &req); err != nil {
@@ -25,7 +46,7 @@ func (r *StreamRouter) handleOpenDesktopMedia(ctx context.Context, header *proto
 			RequestID: req.RequestID, ErrorCode: code, ErrorMessage: message,
 		})
 	}
-	target, err := r.authorizeRDP(clientSession.DeviceID, header.ExitDeviceID)
+	target, err := r.authorizeDesktop(clientSession.DeviceID, header.ExitDeviceID)
 	if err != nil {
 		deny(protocol.ErrCodeAccessDenied, err.Error())
 		r.emitAudit(&repository.ConnectionAudit{

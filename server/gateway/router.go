@@ -27,6 +27,7 @@ type StreamRouter struct {
 	relayPolicy       *acl.Policy
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
 	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
+	desktopChecker    func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	onAudit           func(audit *repository.ConnectionAudit)
 }
@@ -35,6 +36,12 @@ type StreamRouter struct {
 // check. RDP admission is intentionally separate from generic exit access.
 func (r *StreamRouter) SetRDPChecker(fn func(controllerDeviceID, targetDeviceID string) (bool, error)) {
 	r.rdpChecker = fn
+}
+
+// SetDesktopChecker installs Relay Desktop authorization independently from
+// Native RDP so Windows Home targets do not need a local RDP service.
+func (r *StreamRouter) SetDesktopChecker(fn func(controllerDeviceID, targetDeviceID string) (bool, error)) {
+	r.desktopChecker = fn
 }
 
 // SetRDPControlHandler installs the short-lived rendezvous control handler.

@@ -26,9 +26,11 @@ type StreamRouter struct {
 	aclChecker        *acl.Checker
 	relayPolicy       *acl.Policy
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
-	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
-	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
-	onAudit           func(audit *repository.ConnectionAudit)
+	rdpChecker            func(controllerDeviceID, targetDeviceID string) (bool, error)
+	rdpControlHandler     func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
+	desktopControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
+	desktopMediaChecker   func(controllerDeviceID, targetDeviceID string, sessionID uint64, token []byte) (bool, error)
+	onAudit               func(audit *repository.ConnectionAudit)
 }
 
 // SetRDPChecker installs the server-side Controller -> Target authorization
@@ -43,6 +45,14 @@ func (r *StreamRouter) SetRDPChecker(fn func(controllerDeviceID, targetDeviceID 
 // signaling frames.
 func (r *StreamRouter) SetRDPControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
 	r.rdpControlHandler = fn
+}
+
+func (r *StreamRouter) SetDesktopControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
+	r.desktopControlHandler = fn
+}
+
+func (r *StreamRouter) SetDesktopMediaChecker(fn func(controllerDeviceID, targetDeviceID string, sessionID uint64, token []byte) (bool, error)) {
+	r.desktopMediaChecker = fn
 }
 
 func NewStreamRouter(
@@ -160,6 +170,10 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	case protocol.FrameTypeRDPControl:
 		if r.rdpControlHandler != nil && (containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) || containsCapability(clientSession.Grants, protocol.CapabilityRDPHost)) {
 			r.rdpControlHandler(ctx, clientStream, clientSession)
+		}
+	case protocol.FrameTypeDesktopControl:
+		if r.desktopControlHandler != nil && (containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) || containsCapability(clientSession.Grants, protocol.CapabilityRDPHost)) {
+			r.desktopControlHandler(ctx, clientStream, clientSession)
 		}
 	default:
 		log.Printf("[StreamRouter] Unsupported FrameType %d from device %s", header.Type, clientSession.DeviceID)

@@ -56,6 +56,9 @@ type Host struct {
 	input  InputSink
 	cfg    HostConfig
 
+	codecMu   sync.RWMutex
+	codecCaps []protocol.DesktopCodecCapability
+
 	sessionMu sync.Mutex
 	closeOnce sync.Once
 }
@@ -370,6 +373,24 @@ func fitRGBA(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
 		}
 	}
 	return dst
+}
+
+func (h *Host) SetCodecCapabilities(capabilities []protocol.DesktopCodecCapability) {
+	if h == nil {
+		return
+	}
+	h.codecMu.Lock()
+	h.codecCaps = append(h.codecCaps[:0], capabilities...)
+	h.codecMu.Unlock()
+}
+
+func (h *Host) CodecCapabilities() []protocol.DesktopCodecCapability {
+	if h == nil {
+		return nil
+	}
+	h.codecMu.RLock()
+	defer h.codecMu.RUnlock()
+	return append([]protocol.DesktopCodecCapability(nil), h.codecCaps...)
 }
 
 func (h *Host) Close() error {

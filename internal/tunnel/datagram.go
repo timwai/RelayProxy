@@ -25,8 +25,20 @@ const (
 	maxPooledDatagramPacket   = 2048
 )
 
-var ErrDatagramsUnsupported = errors.New("native UDP datagrams are not supported by this session")
-var ErrDatagramLimit = errors.New("UDP association capacity reached")
+var ErrDatagramsUnsupported = errors.New("native datagrams are not supported by this session")
+var ErrDatagramLimit = errors.New("datagram association capacity reached")
+var ErrDatagramKind = errors.New("unsupported datagram payload kind")
+
+type DatagramKind byte
+
+const (
+	DatagramKindUDP          DatagramKind = 'U'
+	DatagramKindDesktopMedia DatagramKind = 'D'
+)
+
+func validDatagramKind(kind DatagramKind) bool {
+	return kind == DatagramKindUDP || kind == DatagramKindDesktopMedia
+}
 
 var datagramPacketPool sync.Pool
 
@@ -137,6 +149,7 @@ func newDatagramMux(s *QUICSession) *datagramMux {
 // generation. Relays forward these fragments without reassembly.
 type DatagramChannel struct {
 	ID        uint64
+	kind      DatagramKind
 	mux       *datagramMux
 	frames    chan receivedDatagram
 	done      chan struct{}
@@ -147,13 +160,32 @@ type DatagramChannel struct {
 }
 
 func OpenDatagramChannel(sess TunnelSession, id uint64) (*DatagramChannel, error) {
+	return openDatagramChannel(sess, id, DatagramKindUDP)
+}
+
+// OpenDesktopDatagramChannel opens an opaque native-datagram association for
+// Relay Desktop media. The payload is not interpreted by the tunnel package;
+// the desktop media layer validates its own packet header and generation.
+func OpenDesktopDatagramChannel(sess TunnelSession, id uint64) (*DatagramChannel, error) {
+	return openDatagramChannel(sess, id, DatagramKindDesktopMedia)
+}
+
+func openDatagramChannel(sess TunnelSession, id uint64, kind DatagramKind) (*DatagramChannel, error) {
 	if !PeerSupportsDatagrams(sess) {
 		return nil, ErrDatagramsUnsupported
 	}
-	return sess.(*QUICSession).datagrams.openChannel(id)
+	return sess.(*QUICSession).datagrams.openChannelKind(id, kind)
 }
 
+// openChannel preserves the existing UDP-only helper used by focused tests.
 func (m *datagramMux) openChannel(id uint64) (*DatagramChannel, error) {
+	return m.openChannelKind(id, DatagramKindUDP)
+}
+
+func (m *datagramMux) openChannelKind(id uint64, kind DatagramKind) (*DatagramChannel, error) {
+	if !validDatagramKind(kind) {
+		return nil, ErrDatagramKind
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed || m.ctx.Err() != nil {
@@ -176,12 +208,12 @@ func (m *datagramMux) openChannel(id uint64) (*DatagramChannel, error) {
 		}
 	}
 	if m.channels[id] != nil {
-		return nil, errors.New("duplicate UDP association ID")
+		return nil, errors.New("duplicate datagram association ID")
 	}
 	if !m.budget.reserveAssociation() {
 		return nil, ErrDatagramLimit
 	}
-	c := &DatagramChannel{ID: id, mux: m, frames: make(chan receivedDatagram, datagramQueueSize), done: make(chan struct{})}
+	c := &DatagramChannel{ID: id, kind: kind, mux: m, frames: make(chan receivedDatagram, datagramQueueSize), done: make(chan struct{})}
 	m.channels[id] = c
 	return c, nil
 }
@@ -199,19 +231,27 @@ func (m *datagramMux) receiveLoop() {
 }
 
 func (m *datagramMux) deliver(packet []byte) {
-	if len(packet) < datagramEnvelopeSize || packet[0] != 'R' || packet[1] != 'U' || packet[2] != 1 {
+	if len(packet) < datagramEnvelopeSize || packet[0] != 'R' || packet[2] != 1 {
+		return
+	}
+	kind := DatagramKind(packet[1])
+	if !validDatagramKind(kind) {
 		return
 	}
 	frame := packet[datagramEnvelopeSize:]
-	fragment, err := protocol.DecodeUDPFragment(frame)
-	if err != nil {
-		return
+	var fragment protocol.UDPFragment
+	if kind == DatagramKindUDP {
+		var err error
+		fragment, err = protocol.DecodeUDPFragment(frame)
+		if err != nil {
+			return
+		}
 	}
 	id := binary.BigEndian.Uint64(packet[3:11])
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	c := m.channels[id]
-	if m.closed || c == nil || c.closed || !m.budget.reserveQueue(len(packet)) {
+	if m.closed || c == nil || c.closed || c.kind != kind || !m.budget.reserveQueue(len(packet)) {
 		return
 	}
 	queued := receivedDatagram{packet: packet, frame: frame, fragment: fragment, bytes: len(packet)}
@@ -312,13 +352,18 @@ func (m *datagramMux) takeSend() (queuedDatagram, bool) {
 }
 
 func (c *DatagramChannel) sendFrame(frame []byte) error {
-	if _, err := protocol.DecodeUDPFragment(frame); err != nil {
-		return err
+	if c.kind == DatagramKindUDP {
+		if _, err := protocol.DecodeUDPFragment(frame); err != nil {
+			return err
+		}
 	}
 	return c.enqueueFrame(frame)
 }
 
 func (c *DatagramChannel) sendFragment(packetID uint32, total uint16, index, count uint8, payload []byte) error {
+	if c.kind != DatagramKindUDP {
+		return ErrDatagramKind
+	}
 	n := protocol.UDPFragmentHeaderSize + len(payload)
 	return c.enqueueFrameParts(n, func(frame []byte) {
 		binary.BigEndian.PutUint32(frame[:4], packetID)
@@ -340,7 +385,7 @@ func (c *DatagramChannel) enqueueFrameParts(frameSize int, fill func([]byte)) er
 	// Packet allocation and payload copy do not need the association map lock.
 	// Close is serialized only around the actual queue transaction below.
 	b := acquireDatagramPacket(n)
-	b[0], b[1], b[2] = 'R', 'U', 1
+	b[0], b[1], b[2] = 'R', byte(c.kind), 1
 	binary.BigEndian.PutUint64(b[3:11], c.ID)
 	fill(b[datagramEnvelopeSize:])
 	return c.queuePreparedPacket(b)
@@ -394,9 +439,9 @@ func (c *DatagramChannel) Send(ctx context.Context, frame []byte) error {
 	return c.sendFrame(frame)
 }
 
-// Forward queues a fragment that was returned by DatagramChannel.Receive.
-// Receive only exposes frames that were already validated by the source mux,
-// so relay-to-relay forwarding can skip a redundant DecodeUDPFragment pass.
+// Forward queues a payload returned by DatagramChannel.Receive. UDP channels
+// contain validated UDP fragments; Desktop channels contain opaque media
+// packets that are validated by the desktop protocol layer.
 func (c *DatagramChannel) Forward(ctx context.Context, frame []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -451,14 +496,25 @@ func (c *DatagramChannel) ReceivePacket(ctx context.Context) (DatagramPacket, er
 	if err != nil {
 		return DatagramPacket{}, err
 	}
-	return DatagramPacket{packet: f.packet, payloadBytes: len(f.fragment.Payload)}, nil
+	payloadBytes := len(f.frame)
+	if c.kind == DatagramKindUDP {
+		payloadBytes = len(f.fragment.Payload)
+	}
+	return DatagramPacket{packet: f.packet, payloadBytes: payloadBytes}, nil
 }
 
 // ForwardPacket consumes packet. The source ReceivePacket buffer is reused;
 // only the association envelope changes before quic-go queues its own copy.
 func (c *DatagramChannel) ForwardPacket(ctx context.Context, packet DatagramPacket) error {
-	if len(packet.packet) < datagramEnvelopeSize+protocol.UDPFragmentHeaderSize {
-		return protocol.ErrUDPFragment
+	minSize := datagramEnvelopeSize
+	if c.kind == DatagramKindUDP {
+		minSize += protocol.UDPFragmentHeaderSize
+	}
+	if len(packet.packet) < minSize {
+		if c.kind == DatagramKindUDP {
+			return protocol.ErrUDPFragment
+		}
+		return ErrDatagramKind
 	}
 	raw := packet.packet
 	if err := ctx.Err(); err != nil {
@@ -469,7 +525,7 @@ func (c *DatagramChannel) ForwardPacket(ctx context.Context, packet DatagramPack
 		releaseDatagramPacket(raw)
 		return nil
 	}
-	raw[0], raw[1], raw[2] = 'R', 'U', 1
+	raw[0], raw[1], raw[2] = 'R', byte(c.kind), 1
 	binary.BigEndian.PutUint64(raw[3:11], c.ID)
 	return c.queuePreparedPacket(raw)
 }

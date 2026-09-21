@@ -38,7 +38,7 @@ func TestCopyDXGIFrameConvertsBGRAAndStride(t *testing.T) {
 
 func TestCopyDXGIFrameReusesBuffer(t *testing.T) {
 	frame := screencapture.Frame{
-		Pix: []byte{1, 2, 3, 4},
+		Pix:   []byte{1, 2, 3, 4},
 		Width: 1, Height: 1, Stride: 4, Seq: 1, At: time.Now(),
 	}
 	first, err := copyDXGIFrame(frame, nil)

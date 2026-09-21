@@ -1,9 +1,106 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：待实施  
+> 状态：实施中 — RD0 已完成，RD1 Windows 可视 MVP 验证中  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
-> 基线：main 分支，现有 RDP M1–M5 已完成
+> 基线：main 分支，现有 RDP M1–M5 已完成  
+> 当前开发分支：`feature/relay-desktop-windows-mvp`
+
+## 0. 当前进度
+
+更新时间：**2026-09-21**
+
+| 阶段 / 能力 | 状态 | 当前实现 |
+| --- | --- | --- |
+| RD0 Remote Desktop 统一模型 | ✅ 已完成 | `RemoteDesktopTarget`、`DesktopCapabilities`、统一 Connect/Disconnect/Status API 已落地 |
+| RD0 GUI 统一入口 | ✅ 已完成 | Agent GUI 已提供“远程桌面”设备列表，不再要求用户手填 RDP Target ID |
+| Native RDP 兼容 | ✅ 保持可用 | 原有 mstsc、RDP P2P / Relay、3389 目标链路继续保留 |
+| Desktop 独立授权 | ✅ 已合并 main | `desktop.controller / desktop.host` 与 Native RDP 独立鉴权；Windows Home 不再要求存在 `rdp_services` / 3389 才能成为 Relay Desktop 目标 |
+| Remote Desktop 目标发现 | ✅ 已合并 main | Welcome 同时支持兼容 `RDPTargets` 与新的 `RemoteDesktopTargets` |
+| RD/1 媒体协议 | ✅ 已完成基础层 | 二进制媒体头、分片、重组、独立 Desktop Datagram association 已实现 |
+| Server 双跳媒体 Relay | ✅ 已合并 main | Controller ↔ Relay ↔ Target 使用 QUIC Datagram 转发，媒体不进入 JSON |
+| Windows Host 可视 MVP | 🧪 分支验证中 | GDI 捕获虚拟桌面，限制最高约 1280×720 / 10 FPS，CPU JPEG 编码 |
+| Controller Viewer MVP | 🧪 分支验证中 | Controller 重组 JPEG 帧，Wails GUI 内置实时预览与全屏 |
+| Windows Home 完整“看到画面”链路 | 🧪 代码已完成，待 CI/PR | 当前分支提交 `71e5de57787264e5ecb86550f7b2e9e4f3a5f17b`；尚未完成 CI、PR 与 main 合并 |
+| 键盘 / 鼠标输入 | ⏳ 未开始 | 计划走独立高优先级控制通道，Host 使用 `SendInput` |
+| 光标 | ⏳ 未开始 | 计划与视频分离传输并在 Viewer 本地绘制 |
+| 剪贴板 | ⏳ 未开始 | RD1 先实现 Unicode 文本双向同步 |
+| DXGI / WGC Capture | ⏳ 待替换 MVP | 最终 Windows Capture 路径仍按设计采用 GPU surface |
+| H.264 硬件编解码 | ⏳ 待实现 | Media Foundation Hardware MFT；替换当前 JPEG 验证路径 |
+| 原生 D3D11 Viewer | ⏳ 待实现 | 当前 Wails 图片预览仅用于功能闭环，不作为最终低延迟 Viewer |
+| RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
+
+### 0.1 已合并主线的关键进度
+
+- RD/1 原生 QUIC Datagram 媒体 association 已进入 `main`。
+- Relay Desktop 媒体双跳 Relay 已进入 `main`。
+- Relay Desktop 授权已从 Native RDP 中拆分，`desktop.controller / desktop.host` 已进入 `main`。
+- Windows Home 类型目标可以仅凭 `desktop.host` 被发现和授权，不要求本机 RDP Host 或 `127.0.0.1:3389`。
+- 上述授权模型合并后的主线提交为 `a044e70dc93ab10b94c6ebe289a880c45a2cf2b4`。
+
+### 0.2 当前功能分支
+
+当前分支：
+
+```text
+feature/relay-desktop-windows-mvp
+```
+
+当前可视 MVP 提交：
+
+```text
+71e5de57787264e5ecb86550f7b2e9e4f3a5f17b
+```
+
+这一版已经完成代码层面的完整画面路径：
+
+```text
+Windows Host
+  ↓
+GDI virtual desktop capture
+  ↓
+RGBA resize ≤ 1280×720
+  ↓
+JPEG encode ≈ 10 FPS
+  ↓
+RD/1 packetize
+  ↓
+QUIC Datagram
+  ↓
+Relay Server
+  ↓
+Controller reassembly
+  ↓
+JPEG latest-frame cache
+  ↓
+Wails GUI preview / fullscreen
+```
+
+但该提交**尚未完成 PR、CI 与 main 合并**，因此不能视为正式发布能力。
+
+### 0.3 当前实现与最终设计的差异
+
+为了优先验证 Windows Home 的端到端链路，RD1 中间增加了一个功能验证阶段：
+
+```text
+当前验证：
+GDI → CPU RGBA → JPEG → Wails WebView preview
+
+最终目标：
+DXGI / WGC → D3D11 texture → GPU convert → H.264 HW encoder
+→ RD/1 → H.264 HW decoder → D3D11 native viewer
+```
+
+GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经正确工作：
+
+- Windows Home 不依赖 RDP Host 的授权和目标发现。
+- Host Capture → Encoder → Packetizer 的生命周期。
+- RD/1 QUIC Datagram 数据面。
+- Server 双跳媒体 Relay。
+- Controller 分片重组。
+- GUI Session 状态与 Viewer 展示。
+
+在这条验证链路通过 CI 和 Windows 实机验证后，再替换 Capture / Codec / Viewer，而不重新改动授权和 Relay 协议层。
 
 ## 1. 开发策略
 
@@ -23,11 +120,11 @@
 ## 2. 开发里程碑
 
 ```text
-RD0  Remote Desktop 抽象 + GUI
-RD1  Windows Relay Desktop Relay-only MVP
-RD2  P2P + ABR + 性能统计
-RD3  H.265 / 4:4:4 / 音频 / 多显示器
-RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC
+RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
+RD1  Windows Relay Desktop Relay-only MVP                🧪 进行中
+RD2  P2P + ABR + 性能统计                                ⏳ 未开始
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    ⏳ 未开始
+RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 
 RD0、RD1、RD2 是首个可发布版本的范围。

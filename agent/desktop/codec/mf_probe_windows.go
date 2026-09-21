@@ -31,7 +31,8 @@ var (
 	ole32DLL       = windows.NewLazySystemDLL("ole32.dll")
 	procMFStartup  = mfplatDLL.NewProc("MFStartup")
 	procMFShutdown = mfplatDLL.NewProc("MFShutdown")
-	procMFTEnumEx  = mfplatDLL.NewProc("MFTEnumEx")
+	procMFTEnumEx        = mfplatDLL.NewProc("MFTEnumEx")
+	procMFCreateMediaType = mfplatDLL.NewProc("MFCreateMediaType")
 	procCoInitEx   = ole32DLL.NewProc("CoInitializeEx")
 	procCoUninit   = ole32DLL.NewProc("CoUninitialize")
 	procCoTaskFree = ole32DLL.NewProc("CoTaskMemFree")
@@ -112,7 +113,7 @@ func releaseIUnknown(object unsafe.Pointer) {
 	}
 }
 
-func enumerateMFT(category windows.GUID, flags uint32, input, output *mftRegisterTypeInfo) (int, error) {
+func enumerateMFTActivations(category windows.GUID, flags uint32, input, output *mftRegisterTypeInfo) ([]unsafe.Pointer, error) {
 	var activations unsafe.Pointer
 	var count uint32
 	hr, _, _ := procMFTEnumEx.Call(
@@ -124,16 +125,30 @@ func enumerateMFT(category windows.GUID, flags uint32, input, output *mftRegiste
 		uintptr(unsafe.Pointer(&count)),
 	)
 	if hresultFailed(hr) {
-		return 0, hresultError("MFTEnumEx", hr)
+		return nil, hresultError("MFTEnumEx", hr)
 	}
-	if activations != nil {
-		items := unsafe.Slice((*unsafe.Pointer)(activations), int(count))
-		for _, item := range items {
-			releaseIUnknown(item)
-		}
-		procCoTaskFree.Call(uintptr(activations))
+	if activations == nil || count == 0 {
+		return nil, nil
 	}
-	return int(count), nil
+	items := unsafe.Slice((*unsafe.Pointer)(activations), int(count))
+	out := append([]unsafe.Pointer(nil), items...)
+	procCoTaskFree.Call(uintptr(activations))
+	return out, nil
+}
+
+func releaseMFTActivations(items []unsafe.Pointer) {
+	for _, item := range items {
+		releaseIUnknown(item)
+	}
+}
+
+func enumerateMFT(category windows.GUID, flags uint32, input, output *mftRegisterTypeInfo) (int, error) {
+	items, err := enumerateMFTActivations(category, flags, input, output)
+	if err != nil {
+		return 0, err
+	}
+	defer releaseMFTActivations(items)
+	return len(items), nil
 }
 
 // ProbeH264MediaFoundation verifies the transforms needed by the planned

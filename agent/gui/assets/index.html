@@ -171,6 +171,74 @@
     .nav-item[data-dirty=true]:after { content:"";width:5px;height:5px;border-radius:50%;background:var(--rp-warning);margin-left:auto; }
     input:disabled,select:disabled,textarea:disabled { opacity:.5;cursor:not-allowed; }
     [aria-invalid=true] { border-color:var(--rp-danger)!important; }
+    
+    /* Routing rules: read-only list + focused modal editor. */
+    .routing-rule-table-shell{overflow:hidden;border:1px solid var(--rp-border);border-radius:var(--rp-radius-sm);background:var(--rp-surface)}
+    .routing-rule-table{width:100%;border-collapse:collapse;table-layout:fixed}
+    .routing-rule-table thead{background:var(--rp-surface-soft);color:var(--rp-muted);font-size:11px}
+    .routing-rule-table th{padding:9px 12px;text-align:left;font-weight:600;border-bottom:1px solid var(--rp-border)}
+    .routing-rule-row{border-bottom:1px solid var(--rp-border);vertical-align:middle}
+    .routing-rule-row:last-child{border-bottom:0}
+    .routing-rule-row:hover{background:color-mix(in srgb,var(--rp-primary-soft) 38%,var(--rp-surface))}
+    .routing-rule-row.is-disabled{opacity:.58}
+    .routing-rule-row td{padding:12px}
+    .routing-rule-title-line{display:flex;align-items:center;gap:8px;min-width:0}
+    .routing-rule-title-line strong{font-size:12px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+    .routing-priority{font-size:10px;color:var(--rp-subtle);flex-shrink:0}
+    .routing-status{font-size:9px;font-weight:650;padding:2px 6px;border-radius:999px;white-space:nowrap;flex-shrink:0}
+    .routing-status.is-on{color:var(--rp-primary);background:var(--rp-primary-soft)}
+    .routing-status.is-off{color:var(--rp-subtle);background:var(--rp-surface-soft);border:1px solid var(--rp-border)}
+    .routing-rule-meta{font-size:10px;color:var(--rp-subtle);margin-top:5px}
+    .routing-match-line{display:flex;align-items:flex-start;gap:8px;margin:3px 0;min-width:0}
+    .routing-match-label{width:30px;flex:0 0 30px;font-size:10px;color:var(--rp-subtle);line-height:20px}
+    .routing-token-list{display:flex;gap:4px;flex-wrap:wrap;min-width:0}
+    .routing-token{display:inline-block;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 6px;border:1px solid var(--rp-border);border-radius:5px;background:var(--rp-surface-soft);font-size:10px;color:var(--rp-muted)}
+    .routing-token-more{color:var(--rp-primary);border-color:color-mix(in srgb,var(--rp-primary) 25%,var(--rp-border));background:var(--rp-primary-soft)}
+    .routing-any{font-size:10px;color:var(--rp-subtle);line-height:20px}
+    .routing-protocol{font-size:10px;color:var(--rp-muted);padding:3px 7px;border-radius:5px;background:var(--rp-surface-soft);border:1px solid var(--rp-border);white-space:nowrap}
+    .routing-action{display:inline-flex;align-items:center;font-size:10px;font-weight:650;padding:3px 7px;border-radius:5px;white-space:nowrap}
+    .routing-action-proxy{color:var(--rp-primary);background:var(--rp-primary-soft)}
+    .routing-action-direct{color:#2563eb;background:rgba(37,99,235,.10)}
+    .routing-action-reject{color:var(--rp-danger);background:color-mix(in srgb,var(--rp-danger) 10%,var(--rp-surface))}
+    .routing-exit,.routing-datagram{display:block;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--rp-subtle);margin-top:5px}
+    .routing-datagram{color:var(--rp-warning)}
+    .routing-ops-cell{text-align:right;white-space:nowrap}
+    .routing-order-buttons{display:inline-flex;margin-right:5px}
+    .routing-icon-button,.routing-edit-button,.routing-delete-button{font-size:10px;padding:5px 7px;border-radius:5px}
+    .routing-icon-button{color:var(--rp-muted)}
+    .routing-icon-button:hover:not(:disabled),.routing-edit-button:hover{background:var(--rp-surface-soft);color:var(--rp-text)}
+    .routing-icon-button:disabled{opacity:.25;cursor:default}
+    .routing-edit-button{color:var(--rp-primary);font-weight:600}
+    .routing-delete-button{color:var(--rp-danger)}
+    .routing-delete-button:hover{background:color-mix(in srgb,var(--rp-danger) 8%,var(--rp-surface))}
+    .routing-empty{text-align:center;padding:42px 20px!important;color:var(--rp-muted)}
+    .routing-empty strong{display:block;font-size:12px;color:var(--rp-text);font-weight:600;margin-bottom:5px}
+    .routing-empty span{font-size:11px;color:var(--rp-subtle)}
+    .routing-modal{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(15,23,42,.50);backdrop-filter:blur(4px)}
+    .routing-modal.hidden{display:none}
+    .routing-modal-panel{width:min(760px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 40px));display:flex;flex-direction:column;border:1px solid var(--rp-border);border-radius:12px;background:var(--rp-surface);box-shadow:0 24px 70px rgba(15,23,42,.28);overflow:hidden}
+    .routing-modal-header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:18px 20px;border-bottom:1px solid var(--rp-border)}
+    .routing-modal-header h2{font-size:15px;font-weight:650;color:var(--rp-text)}
+    .routing-modal-header p{font-size:10px;color:var(--rp-muted);margin-top:4px}
+    .routing-modal-close{width:30px;height:30px;display:grid;place-items:center;border-radius:6px;color:var(--rp-muted);font-size:19px;line-height:1}
+    .routing-modal-close:hover{background:var(--rp-surface-soft);color:var(--rp-text)}
+    .routing-modal-body{padding:18px 20px;overflow:auto}
+    .routing-modal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 16px}
+    .routing-modal-field{min-width:0}
+    .routing-modal-field.full{grid-column:1/-1}
+    .routing-modal-field>label,.routing-modal-label{display:block;font-size:11px;font-weight:600;color:var(--rp-muted);margin-bottom:6px}
+    .routing-modal-field input[type=text],.routing-modal-field textarea,.routing-modal-field select{width:100%;padding:8px 10px;font-size:12px;color:var(--rp-text);background:var(--rp-surface-soft);border:1px solid var(--rp-border-strong);border-radius:6px}
+    .routing-modal-field textarea{resize:vertical;min-height:72px;line-height:1.5}
+    .routing-modal-field small{display:block;font-size:9px;line-height:1.55;color:var(--rp-subtle);margin-top:5px}
+    .routing-modal-check{display:flex;align-items:flex-start;gap:9px;padding:9px 10px;border:1px solid var(--rp-border);border-radius:6px;background:var(--rp-surface-soft)}
+    .routing-modal-check input{width:15px;height:15px;accent-color:var(--rp-primary);margin-top:1px}
+    .routing-modal-check strong{display:block;font-size:11px;font-weight:600}
+    .routing-modal-check small{display:block;font-size:9px;color:var(--rp-subtle);margin-top:2px}
+    .routing-modal-check.is-disabled{opacity:.48}
+    .routing-modal-footer{display:flex;align-items:center;justify-content:flex-end;gap:9px;padding:13px 20px;border-top:1px solid var(--rp-border);background:var(--rp-surface-soft)}
+    .routing-modal-footer button{font-size:11px;padding:7px 13px;border-radius:6px}
+    @media(max-width:720px){.routing-modal-grid{grid-template-columns:1fr}.routing-modal-field.full{grid-column:auto}.routing-rule-table{min-width:760px}.routing-rule-table-shell{overflow-x:auto}}
+
     .tab-pane { min-height:0;flex:1; }
     @media(max-width:850px) { .config-permissions { grid-template-columns:1fr; }.config-permissions small { display:inline;margin-left:8px; }.config-grid{gap:14px;}.config-card{padding:17px;}.config-actions{align-items:flex-start;}.config-actions>div{gap:7px;}.config-page-heading h1{font-size:17px;} }
     @media(max-width:650px) { .rp-sidebar { width:156px; }.config-grid{grid-template-columns:1fr;}.config-advanced summary>span{float:none;display:block;margin:4px 0 0;}.config-page-heading{align-items:flex-start;flex-direction:column;}.draft-bar{padding:8px 12px;flex-wrap:wrap;}.config-inline-action{float:none;margin:0 0 6px;}.tab-pane{padding-left:16px;padding-right:16px;} }
@@ -731,22 +799,11 @@
             
             <p class="config-help mb-2">同一栏多个值任选其一，不同栏同时满足；逗号分隔，留空或 * 表示任意。进程可填名称或完整路径，目标可填域名、IPv4/IPv6 或 CIDR 网段。</p>
             <p class="config-help mb-3">进程名、域名和 IP 均支持前后通配：* 匹配任意长度，? 匹配单个字符。例如 chrome*、*example*、192.168.*、*.1、2001:db8:*。</p>
-            <div class="overflow-x-auto rounded border border-slate-200 dark:border-slate-700/60">
-              <table class="w-full text-left border-collapse" id="routing-rules-table">
-                <thead>
-                  <tr class="bg-slate-50 dark:bg-slate-800/80 text-[12px] text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700/60">
-                    <th class="font-medium p-2">启用 / 名称</th>
-                    <th class="font-medium p-2">进程</th>
-                    <th class="font-medium p-2">域名 / IP</th>
-                    <th class="font-medium p-2">目标端口</th>
-                    <th class="font-medium p-2">协议</th>
-                    <th class="font-medium p-2">动作 / 出口</th>
-                    <th class="font-medium p-2 w-16 text-center">操作</th>
-                  </tr>
-                </thead>
-                <tbody id="routing-rules-body" class="divide-y divide-slate-100 dark:divide-slate-800 text-[13px]">
-                  <!-- Rules injected by JS -->
-                </tbody>
+            <div class="routing-rule-table-shell">
+              <table class="routing-rule-table" id="routing-rules-table">
+                <colgroup><col style="width:22%"><col style="width:38%"><col style="width:10%"><col style="width:16%"><col style="width:14%"></colgroup>
+                <thead><tr><th>优先级 / 规则</th><th>匹配条件</th><th>协议</th><th>动作 / 出口</th><th class="text-right">操作</th></tr></thead>
+                <tbody id="routing-rules-body"><!-- Read-only rows injected by routing.js --></tbody>
               </table>
             </div>
             <p id="routing-mode-hint" class="config-help"></p><p class="text-[12px] text-slate-500 dark:text-slate-400 mt-2">“UDP 必须使用原生数据报”仅影响 PROXY UDP；勾选后会拒绝 TLS 隧道和不支持数据报的旧出口，不回退到可靠流传输。</p>
@@ -941,16 +998,6 @@
                 <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
               </label>
             </div>
-            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
-              <div class="min-w-0">
-                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">启动时直接进入托盘</div>
-                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">下次启动不弹出主界面</div>
-              </div>
-              <label class="relative inline-flex items-center cursor-pointer shrink-0">
-                <input type="checkbox" id="cfg-start-min" onchange="onToggleStartMin(this)" class="sr-only peer">
-                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
-              </label>
-            </div>
           </div>
         </div>
 
@@ -989,6 +1036,30 @@
     </main>
   </div>
 
+  <!-- routing rule editor -->
+  <div id="routing-rule-modal" class="routing-modal hidden" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="routing-rule-modal-title" onclick="if(event.target===this) closeRuleEditor()">
+    <form class="routing-modal-panel" onsubmit="event.preventDefault(); saveRuleEditor();">
+      <div class="routing-modal-header">
+        <div><h2 id="routing-rule-modal-title">编辑路由规则</h2><p>列表仅用于查看；确认后进入未保存草稿，最后再统一保存应用。</p></div>
+        <button type="button" class="routing-modal-close" onclick="closeRuleEditor()" aria-label="关闭编辑窗口">×</button>
+      </div>
+      <div class="routing-modal-body">
+        <div class="routing-modal-grid">
+          <div class="routing-modal-field full"><label for="routing-rule-name">规则名称</label><input id="routing-rule-name" type="text" maxlength="80" autocomplete="off" placeholder="例如：浏览器走代理"></div>
+          <div class="routing-modal-field"><span class="routing-modal-label">规则状态</span><label class="routing-modal-check"><input id="routing-rule-enabled" type="checkbox"><span><strong>启用此规则</strong><small>停用后保留配置，但不参与匹配。</small></span></label></div>
+          <div class="routing-modal-field"><label for="routing-rule-protocol">协议</label><select id="routing-rule-protocol"><option value="any">TCP + UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option></select><small>TCP + UDP 表示不限制协议。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-processes">进程名称或路径</label><textarea id="routing-rule-processes" placeholder="chrome.exe&#10;C:\Apps\tool.exe"></textarea><small>每行或逗号分隔；支持 * 和 ?。留空表示任意进程。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-targets">域名 / IP / CIDR</label><textarea id="routing-rule-targets" placeholder="*.example.com&#10;192.168.*&#10;10.0.0.0/8"></textarea><small>域名、IPv4/IPv6 与 CIDR 可混合；留空表示任意目标。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-ports">目标端口</label><textarea id="routing-rule-ports" placeholder="80&#10;443&#10;8000-9000"></textarea><small>支持单端口和端口范围；留空表示任意端口。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-action">匹配动作</label><select id="routing-rule-action" onchange="updateRoutingEditorDependencies()"><option value="PROXY">PROXY · 走代理</option><option value="DIRECT">DIRECT · 本地直连</option><option value="REJECT">REJECT · 阻断连接</option></select><small>第一条启用且匹配的规则决定动作。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-exit">指定出口 ID</label><input id="routing-rule-exit" type="text" autocomplete="off" placeholder="留空使用当前出口"><small>仅 PROXY 动作可指定出口。</small></div>
+          <div class="routing-modal-field"><span class="routing-modal-label">UDP 代理要求</span><label id="routing-rule-datagram-wrap" class="routing-modal-check"><input id="routing-rule-datagram" type="checkbox"><span><strong>必须使用原生数据报</strong><small>不支持数据报时拒绝，不回退到可靠流。</small></span></label></div>
+        </div>
+      </div>
+      <div class="routing-modal-footer"><button type="button" class="config-secondary" onclick="closeRuleEditor()">取消</button><button id="routing-rule-save" data-config-write disabled type="submit" class="btn-primary rp-btn rp-btn-primary">确认修改</button></div>
+    </form>
+  </div>
+
   <!-- toast -->
   <div id="toast" role="status" aria-live="polite" class="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 opacity-0 transition-all duration-200">
     <div class="rp-toast-message px-4 py-2 rounded-lg text-[12px] max-w-[520px]" id="toast-msg"></div>
@@ -1014,7 +1085,7 @@
       network: ['cfg-network-excludes'],
       share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
       exit: ['cfg-exit-id'],
-      preferences: ['cfg-min-tray','cfg-start-min','cfg-theme-mode']
+      preferences: ['cfg-min-tray','cfg-theme-mode']
     };
     var groupNames = {connection:'连接与身份',proxy:'本地代理',routing:'路由分流',network:'透明排除',share:'出口共享',exit:'选择出口',preferences:'程序设置'};
     function snapshotGroup(group) {
@@ -1047,7 +1118,7 @@
     function setConfigReady(ready) {
       state.loaded = ready;
       document.querySelectorAll('[data-config-write]').forEach(function (el) { el.disabled = !state.loaded || state.saving; });
-      document.querySelectorAll('input[id^="cfg-"], select[id^="cfg-"], textarea[id^="cfg-"], #routing-rules-body input, #routing-rules-body select, #network-rules-body input, #network-rules-body select').forEach(function (el) { el.disabled = !state.loaded || state.saving; });
+      document.querySelectorAll('input[id^="cfg-"], select[id^="cfg-"], textarea[id^="cfg-"], #routing-rule-modal input, #routing-rule-modal select, #routing-rule-modal textarea, #network-rules-body input, #network-rules-body select').forEach(function (el) { el.disabled = !state.loaded || state.saving; });
       updateFieldDependencies();
     }
     function updateFieldDependencies() {
@@ -1424,7 +1495,6 @@
       $('cfg-acl-cidrs').value = (cfg.accessCidrs || []).join('\n');
       $('cfg-autostart').checked = !!cfg.isAutostart;
       $('cfg-min-tray').checked = cfg.minimizeToTray !== false;
-      $('cfg-start-min').checked = !!cfg.startMinimized;
 
       applyTheme(cfg.theme || 'system', false);
       var notices = [];
@@ -1534,7 +1604,7 @@
         return { network: { excludeProcesses: splitRuleList($('cfg-network-excludes').value) } };
       case 'exit': return { proxy: { defaultExitId: $('cfg-exit-id').value.trim() } };
       case 'preferences':
-        return { gui: { theme: $('cfg-theme-light').checked ? 'light' : 'dark', minimizeToTray: $('cfg-min-tray').checked, startMinimized: $('cfg-start-min').checked } };
+        return { gui: { theme: $('cfg-theme-light').checked ? 'light' : 'dark', minimizeToTray: $('cfg-min-tray').checked } };
       default: return {};
       }
     }
@@ -1587,11 +1657,6 @@
         if (!ok && state.cfg) { el.checked = state.cfg.minimizeToTray !== false; markDrafts(); }
       });
     }
-    function onToggleStartMin(el) {
-      save({ gui: { startMinimized: el.checked } }, el.checked ? '下次启动将直接进入托盘' : '下次启动将显示主界面').then(function (ok) {
-        if (!ok && state.cfg) { el.checked = !!state.cfg.startMinimized; markDrafts(); }
-      });
-    }
     function openConfigDir() { call('goOpenConfigDir'); }
     async function doRestart() {
       var dirty = dirtyGroups(true).length;
@@ -1616,7 +1681,6 @@
     }
     window.onToggleAutostart = onToggleAutostart;
     window.onToggleMinTray = onToggleMinTray;
-    window.onToggleStartMin = onToggleStartMin;
     window.openConfigDir = openConfigDir;
     window.doRestart = doRestart;
     window.doQuit = doQuit;

@@ -182,8 +182,10 @@ func trimToContent(src image.Image) (image.Image, int, int) {
 	if bh > side {
 		side = bh
 	}
-	// 8% breathing room so the mark never touches the icon edge.
-	pad := side * 8 / 100
+	// Keep only a small safety margin. Windows notification icons are often
+	// rendered at 16-24px, where the old 8% margin made the visible mark look
+	// noticeably undersized.
+	pad := side * 2 / 100
 	if pad < 1 {
 		pad = 1
 	}
@@ -388,8 +390,8 @@ func buildICO(src image.Image, sizes []int) ([]byte, error) {
 		}
 		_ = buf.WriteByte(w)
 		_ = buf.WriteByte(h)
-		_ = buf.WriteByte(0) // colour count
-		_ = buf.WriteByte(0) // reserved
+		_ = buf.WriteByte(0)                                    // colour count
+		_ = buf.WriteByte(0)                                    // reserved
 		_ = binary.Write(&buf, binary.LittleEndian, uint16(1))  // planes
 		_ = binary.Write(&buf, binary.LittleEndian, uint16(32)) // bit count
 		_ = binary.Write(&buf, binary.LittleEndian, uint32(len(images[i])))

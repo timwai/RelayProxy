@@ -1,10 +1,10 @@
-// Package gui implements the RelayProxy desktop client: a native WebView2
-// window (no browser, no console) with a system tray icon, wired to the agent
-// core through the bridge package.
+// Package gui implements the RelayProxy desktop client. On Windows the native
+// shell, system tray and auxiliary windows are provided by Wails v3, while the
+// Agent core remains connected through the bridge package.
 //
-// The UI is plain HTML/CSS/JavaScript rendered from embedded assets, matching
-// the design document's "HTML + native JavaScript + JS Bridge" constraint. On
-// non-Windows platforms the desktop window is unavailable and Run reports it.
+// The UI stays plain HTML/CSS/JavaScript rendered from embedded assets. Wails
+// owns the Windows WebView2 lifecycle and Go<->JavaScript transport; non-Windows
+// platforms keep their existing platform-specific behaviour.
 package gui
 
 import (

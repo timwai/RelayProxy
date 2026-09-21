@@ -59,7 +59,7 @@ func main() {
 	// race for the named mutex or local proxy listeners.
 	gui.WaitForRestartParent()
 
-	startMinimized := *minimizedFlag || *hiddenFlag
+	startMinimized := resolveStartMinimized(*minimizedFlag, *hiddenFlag)
 	wantGUI := resolveGUIMode(*guiFlag, *noGuiFlag, startMinimized)
 
 	// A bare double-click or a minimized login launch can land on the
@@ -108,16 +108,6 @@ func main() {
 		log.Fatalf("[Config] Failed to load configuration %s: %v", *configPath, err)
 	}
 	log.Printf("[Config] Loaded %s", *configPath)
-	minimizedOverride := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "minimized" || f.Name == "hidden" {
-			minimizedOverride = true
-		}
-	})
-	if !minimizedOverride {
-		startMinimized = cfgFile.GUI.StartMinimized
-	}
-
 	// Apply CLI flag overrides
 	if *serverFlag != "" {
 		cfgFile.Server.Address = *serverFlag
@@ -305,6 +295,12 @@ func main() {
 // GUI-named binary (relay-agent-gui.exe), an explicit GUI/minimized launch, and
 // a bare double-click (no arguments at all) select the desktop window; ordinary
 // CLI arguments keep the process headless.
+func resolveStartMinimized(minimizedFlag, hiddenFlag bool) bool {
+	// Persisted GUI preferences must never hide a manual launch. Starting in the
+	// tray is reserved for an explicit command-line request (used by autostart).
+	return minimizedFlag || hiddenFlag
+}
+
 func resolveGUIMode(guiFlag, noGuiFlag, minimizedFlag bool) bool {
 	if noGuiFlag {
 		return false

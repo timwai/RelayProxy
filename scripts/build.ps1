@@ -11,7 +11,7 @@
     - Windows 服务端 amd64 / arm64（relay-server.exe，Console 子系统，含 Admin UI）
     - 每个平台目录的完整 ZIP 分发包
 
-  说明：Windows 客户端为原生 WebView2 桌面窗口（含系统托盘），
+  说明：Windows 客户端使用 Wails v3 + WebView2 桌面窗口（含系统托盘），
   relay-agent-gui.exe 使用 -H=windowsgui 子系统，双击不会弹出控制台窗口；
   relay-agent.exe 保留 Console 子系统供 CLI / 脚本调用，带参数时会自动保持无窗口。
   Windows arm64 产物可运行 Agent / Server，但系统透明代理目前仍只支持 amd64。

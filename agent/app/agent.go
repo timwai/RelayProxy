@@ -207,39 +207,40 @@ type AgentStatus struct {
 var ErrRestartRequired = errors.New("agent role change requires restart")
 
 type Agent struct {
-	cfg           AgentConfig
-	tunnelMgr     *tunnel.TunnelManager
-	dialer        *routing.RoutingDialer
-	rawDialer     *client.TunnelDialer
-	routingEngine *routing.Engine
-	traffic       *traffic.Registry
-	exitHandler   *exit.Handler
-	socksServer   *socks5.Server
-	httpServer    *httpproxy.Server
-	divertSrv     *divert.Server
-	ctrlStream    tunnel.TunnelStream
-	readySession  tunnel.TunnelSession
-	epoch         uint64
-	started       bool
-	selectedExit  atomic.Pointer[string]
-	latencyMs     atomic.Int64
-	handshakeOK   atomic.Bool
-	approvalState atomic.Pointer[string]
-	approvedMode  string
-	rdpTargets    []rdp.Target
-	rdpConnection *rdp.Connection
-	rdpP2P        *rdpp2p.Manager
-	rdpSession    *rdpp2p.Session
-	desktopHost   desktop.HostHandler
-	closed        atomic.Bool
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	mu            sync.RWMutex
-	policyMu      sync.RWMutex
-	lifecycleMu   sync.Mutex
-	closeOnce     sync.Once
-	closeErr      error
+	cfg                  AgentConfig
+	tunnelMgr            *tunnel.TunnelManager
+	dialer               *routing.RoutingDialer
+	rawDialer            *client.TunnelDialer
+	routingEngine        *routing.Engine
+	traffic              *traffic.Registry
+	exitHandler          *exit.Handler
+	socksServer          *socks5.Server
+	httpServer           *httpproxy.Server
+	divertSrv            *divert.Server
+	ctrlStream           tunnel.TunnelStream
+	readySession         tunnel.TunnelSession
+	epoch                uint64
+	started              bool
+	selectedExit         atomic.Pointer[string]
+	latencyMs            atomic.Int64
+	handshakeOK          atomic.Bool
+	approvalState        atomic.Pointer[string]
+	approvedMode         string
+	rdpTargets           []rdp.Target
+	remoteDesktopTargets []protocol.RemoteDesktopTarget
+	rdpConnection        *rdp.Connection
+	rdpP2P               *rdpp2p.Manager
+	rdpSession           *rdpp2p.Session
+	desktopHost          desktop.HostHandler
+	closed               atomic.Bool
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	mu                   sync.RWMutex
+	policyMu             sync.RWMutex
+	lifecycleMu          sync.Mutex
+	closeOnce            sync.Once
+	closeErr             error
 }
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
@@ -394,6 +395,7 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	a.rdpP2P = nil
 	a.rdpSession = nil
 	a.rdpTargets = nil
+	a.remoteDesktopTargets = nil
 	if newState != tunnel.StateConnected || sess == nil {
 		a.mu.Unlock()
 		if oldControl != nil {
@@ -473,7 +475,10 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		transportCaps = append(transportCaps, protocol.CapabilityTargetACL)
 	}
 	if cfg.IsRDPEnabled() {
-		requested = append(requested, protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic)
+		requested = append(requested,
+			protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic,
+			protocol.CapabilityDesktopController, protocol.CapabilityDesktopHost,
+		)
 	}
 	clientNonce := make([]byte, 32)
 	if _, err := rand.Read(clientNonce); err != nil {
@@ -528,6 +533,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	for _, target := range accepted.RDPTargets {
 		a.rdpTargets = append(a.rdpTargets, rdp.Target{DeviceID: target.DeviceID, Name: target.Name, Online: target.Online})
 	}
+	a.remoteDesktopTargets = slices.Clone(accepted.RemoteDesktopTargets)
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
 	a.mu.Unlock()
@@ -572,12 +578,13 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		a.heartbeatLoop(ctx, ctrl, sess, accepted.HeartbeatSec, epoch)
 	}()
 	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
+	allowDesktop := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityDesktopHost)
 	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
-	if allowExit || allowRDP || p2pManager != nil {
+	if allowExit || allowRDP || allowDesktop || p2pManager != nil {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			a.acceptIncomingStreams(ctx, sess, handler, allowRDP, cfg.RDPAddress, accepted.MaxConnections, p2pManager, &workers)
+			a.acceptIncomingStreams(ctx, sess, handler, allowRDP, allowDesktop, cfg.RDPAddress, accepted.MaxConnections, p2pManager, &workers)
 		}()
 	}
 	select {
@@ -667,7 +674,7 @@ func (a *Agent) SetDesktopHost(handler desktop.HostHandler) {
 	a.mu.Unlock()
 }
 
-func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, workers *sync.WaitGroup) {
+func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, allowRDP, allowDesktop bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, workers *sync.WaitGroup) {
 	if maxStreams <= 0 {
 		maxStreams = 1024
 	}
@@ -692,7 +699,7 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			_ = stream.Close()
 			continue
 		}
-		if header.Type == protocol.FrameTypeOpenDesktopMedia && allowRDP {
+		if header.Type == protocol.FrameTypeOpenDesktopMedia && allowDesktop {
 			a.mu.RLock()
 			desktopHost := a.desktopHost
 			a.mu.RUnlock()
@@ -906,10 +913,15 @@ func modeForApprovedCapabilities(capabilities []string) string {
 	}
 }
 
-// RemoteDesktopTargets adapts the current server-approved RDP target list into
-// the unified desktop model. Relay Desktop capabilities will be merged here as
-// that backend is implemented; callers no longer need to depend on agent/rdp.
+// RemoteDesktopTargets returns the server-owned unified target list. Legacy
+// servers that only send RDPTargets remain supported as a Native-RDP fallback.
 func (a *Agent) RemoteDesktopTargets() []protocol.RemoteDesktopTarget {
+	a.mu.RLock()
+	remoteTargets := slices.Clone(a.remoteDesktopTargets)
+	a.mu.RUnlock()
+	if len(remoteTargets) > 0 {
+		return remoteTargets
+	}
 	rdpTargets := a.RDPTargets()
 	targets := make([]protocol.RemoteDesktopTarget, 0, len(rdpTargets))
 	for _, target := range rdpTargets {
@@ -1282,6 +1294,7 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	a.rdpSession = nil
 	a.rdpP2P = nil
 	a.rdpTargets = nil
+	a.remoteDesktopTargets = nil
 	a.mu.Unlock()
 	if conn != nil {
 		_ = conn.Close()
@@ -1345,6 +1358,7 @@ func (a *Agent) closeRuntime() error {
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
 		a.rdpSession, a.rdpP2P = nil, nil
 		a.rdpTargets = nil
+		a.remoteDesktopTargets = nil
 		a.cancel()
 		a.mu.Unlock()
 		var errs []error

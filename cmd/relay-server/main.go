@@ -172,6 +172,9 @@ func main() {
 	router.SetRDPChecker(func(controllerDeviceID, targetDeviceID string) (bool, error) {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
+	router.SetDesktopChecker(func(controllerDeviceID, targetDeviceID string) (bool, error) {
+		return db.AuthorizeDesktop(controllerDeviceID, targetDeviceID)
+	})
 	router.SetRDPControlHandler(coordinator.HandleControl)
 
 	// 5. Start Tunnel Gateway (QUIC + TLS; QUIC requires TLS)
@@ -195,6 +198,27 @@ func main() {
 			}
 			authorized := gateway.DeviceAuthorization{State: decision.State, DeviceID: decision.DeviceID,
 				OwnerUserID: decision.OwnerUserID, ApprovedCapabilities: decision.ApprovedCapabilities}
+			if decision.State == repository.EnrollmentApproved && decision.DeviceID != "" {
+				rdpTargets, listErr := db.ListRDPTargetsForController(decision.DeviceID)
+				if listErr != nil {
+					return gateway.DeviceAuthorization{}, listErr
+				}
+				for _, target := range rdpTargets {
+					authorized.RDPTargets = append(authorized.RDPTargets, protocol.RDPTarget{
+						DeviceID: target.DeviceID, Name: target.Name, Online: target.Online,
+					})
+				}
+				desktopTargets, listErr := db.ListRemoteDesktopTargetsForController(decision.DeviceID)
+				if listErr != nil {
+					return gateway.DeviceAuthorization{}, listErr
+				}
+				for _, target := range desktopTargets {
+					authorized.RemoteDesktopTargets = append(authorized.RemoteDesktopTargets, protocol.RemoteDesktopTarget{
+						DeviceID: target.DeviceID, Name: target.Name, Online: target.Online,
+						Capabilities: protocol.DesktopCapabilities{NativeRDP: target.NativeRDP, RelayDesktop: target.RelayDesktop},
+					})
+				}
+			}
 			return authorized, nil
 		},
 		RecheckDevice: func(fingerprint, deviceID string) bool {

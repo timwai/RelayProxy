@@ -46,6 +46,7 @@ type DeviceAuthorization struct {
 	OwnerUserID          string
 	ApprovedCapabilities []string
 	RDPTargets           []protocol.RDPTarget
+	RemoteDesktopTargets []protocol.RemoteDesktopTarget
 }
 
 const deviceRejectionDrainTimeout = time.Second
@@ -448,6 +449,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		DeviceID:              authorization.DeviceID,
 		ApprovedCapabilities:  authorization.ApprovedCapabilities,
 		RDPTargets:            authorization.RDPTargets,
+		RemoteDesktopTargets:  authorization.RemoteDesktopTargets,
 		SessionID:             sessionID,
 		HeartbeatSec:          g.cfg.HeartbeatSec,
 		MaxConnections:        g.cfg.MaxConnectionsPerDevice,

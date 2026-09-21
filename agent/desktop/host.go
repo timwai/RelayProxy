@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"image"
 	"image/jpeg"
 	"log"
@@ -19,6 +20,16 @@ import (
 type CaptureSource interface {
 	Capture(context.Context) (*image.RGBA, error)
 	Close() error
+}
+
+// SessionCaptureSource lets a backend acquire expensive per-session resources
+// (for example IDXGIOutputDuplication) only while somebody is actually
+// connected. CaptureSource remains deliberately small so the JPEG MVP and
+// future hardware encoders can share the same Host lifecycle.
+type SessionCaptureSource interface {
+	BeginSession(context.Context, HostConfig) error
+	EndSession() error
+	CaptureBackend() string
 }
 
 type HostConfig struct {
@@ -176,7 +187,15 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	defer h.sessionMu.Unlock()
 
 	sessionConfig := ResolveHostConfig(h.cfg, options)
-	log.Printf("[Desktop] JPEG session config=%dx%d fps=%d quality=%d maxBitrate=%d", sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
+	backend := ""
+	if source, ok := h.source.(SessionCaptureSource); ok {
+		if err := source.BeginSession(ctx, sessionConfig); err != nil {
+			return fmt.Errorf("start desktop capture session: %w", err)
+		}
+		defer source.EndSession()
+		backend = source.CaptureBackend()
+	}
+	log.Printf("[Desktop] JPEG session capture=%s config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
 	if h.input == nil {
 		return h.streamFrames(ctx, conn, sessionConfig)
 	}

@@ -14,11 +14,11 @@ func newFocusedDatagramMux(t *testing.T) *datagramMux {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return &datagramMux{
-		ctx:      ctx,
-		budget:   &datagramBudget{associationLimit: 8, queueLimit: 1 << 20, reassemblyLimit: 1 << 20},
-		channels: make(map[uint64]*DatagramChannel),
-		done:     make(chan struct{}),
-		send:     make(chan queuedDatagram, datagramSendQueueSize),
+		ctx:       ctx,
+		budget:    &datagramBudget{associationLimit: 8, queueLimit: 1 << 20, reassemblyLimit: 1 << 20},
+		channels:  make(map[uint64]*DatagramChannel),
+		done:      make(chan struct{}),
+		send:      make(chan queuedDatagram, datagramSendQueueSize),
 		sendReady: make(chan struct{}, 1),
 	}
 }

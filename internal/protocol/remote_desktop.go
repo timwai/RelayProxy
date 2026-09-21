@@ -147,6 +147,7 @@ type RemoteDesktopStatus struct {
 
 const (
 	DesktopControlCapabilities    = "capabilities"
+	DesktopControlCapabilitiesAck = "capabilities_ack"
 	DesktopControlConnectRequest  = "connect_request"
 	DesktopControlConnectNotify   = "connect_notify"
 	DesktopControlConnectResponse = "connect_response"

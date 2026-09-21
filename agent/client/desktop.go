@@ -14,6 +14,12 @@ import (
 // Desktop video/audio/cursor media. Reliable stream fallback is intentionally
 // forbidden to avoid head-of-line blocking for interactive video.
 func (d *TunnelDialer) DialDesktopMedia(ctx context.Context, targetDeviceID string) (*desktopmedia.MediaConn, error) {
+	return d.DialDesktopMediaWithOptions(ctx, targetDeviceID, protocol.RemoteDesktopConnectOptions{})
+}
+
+// DialDesktopMediaWithOptions carries controller media preferences to the
+// authorized Host as part of the existing Relay Desktop media handshake.
+func (d *TunnelDialer) DialDesktopMediaWithOptions(ctx context.Context, targetDeviceID string, options protocol.RemoteDesktopConnectOptions) (*desktopmedia.MediaConn, error) {
 	sess := d.getTunnel()
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
@@ -56,6 +62,7 @@ func (d *TunnelDialer) DialDesktopMedia(ctx context.Context, targetDeviceID stri
 	}
 	if err := protocol.WriteJSON(stream, protocol.OpenDesktopMediaRequest{
 		RequestID: reqID, TimeoutMs: 10000, Mode: protocol.DesktopMediaModeDatagram, AssociationID: datagrams.ID,
+		Options: &options,
 	}); err != nil {
 		_ = stream.Close()
 		return nil, err

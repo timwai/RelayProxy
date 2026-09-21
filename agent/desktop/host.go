@@ -26,6 +26,7 @@ type HostConfig struct {
 	MaxWidth    int
 	MaxHeight   int
 	JPEGQuality int
+	MaxBitrate  int
 	PacketSize  int
 }
 
@@ -84,6 +85,74 @@ func NewHostWithInput(source CaptureSource, input InputSink, cfg HostConfig) (*H
 	return &Host{source: source, input: input, cfg: cfg}, nil
 }
 
+const (
+	maxJPEGWidth   = 3840
+	maxJPEGHeight  = 2160
+	maxJPEGFPS     = 30
+	maxJPEGBitrate = 100_000_000
+)
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+// ResolveHostConfig maps user-facing Relay Desktop preferences to the current
+// JPEG MVP. These values are deliberately session-local so one controller
+// cannot permanently alter Host defaults for another session.
+func ResolveHostConfig(base HostConfig, options protocol.RemoteDesktopConnectOptions) HostConfig {
+	cfg := base
+	switch options.Quality {
+	case protocol.DesktopQualitySmooth:
+		cfg.MaxWidth, cfg.MaxHeight, cfg.MaxFPS, cfg.JPEGQuality, cfg.MaxBitrate = 960, 540, 15, 55, 3_000_000
+	case protocol.DesktopQualityBalanced:
+		cfg.MaxWidth, cfg.MaxHeight, cfg.MaxFPS, cfg.JPEGQuality, cfg.MaxBitrate = 1280, 720, 20, 68, 6_000_000
+	case protocol.DesktopQualityHigh:
+		cfg.MaxWidth, cfg.MaxHeight, cfg.MaxFPS, cfg.JPEGQuality, cfg.MaxBitrate = 1920, 1080, 30, 78, 12_000_000
+	case protocol.DesktopQualityExtreme:
+		cfg.MaxWidth, cfg.MaxHeight, cfg.MaxFPS, cfg.JPEGQuality, cfg.MaxBitrate = 2560, 1440, 30, 85, 20_000_000
+	}
+
+	resolution := options.Resolution
+	switch resolution.Mode {
+	case "native":
+		cfg.MaxWidth, cfg.MaxHeight = maxJPEGWidth, maxJPEGHeight
+	case "fixed":
+		if resolution.Width > 0 {
+			cfg.MaxWidth = resolution.Width
+		}
+		if resolution.Height > 0 {
+			cfg.MaxHeight = resolution.Height
+		}
+	}
+	if resolution.MaxWidth > 0 {
+		cfg.MaxWidth = resolution.MaxWidth
+	}
+	if resolution.MaxHeight > 0 {
+		cfg.MaxHeight = resolution.MaxHeight
+	}
+	if options.FPS > 0 {
+		cfg.MaxFPS = options.FPS
+	}
+	if options.MaxBitrate > 0 {
+		cfg.MaxBitrate = options.MaxBitrate
+	}
+
+	cfg.MaxWidth = clampInt(cfg.MaxWidth, 320, maxJPEGWidth)
+	cfg.MaxHeight = clampInt(cfg.MaxHeight, 180, maxJPEGHeight)
+	cfg.MaxFPS = clampInt(cfg.MaxFPS, 1, maxJPEGFPS)
+	cfg.JPEGQuality = clampInt(cfg.JPEGQuality, 25, 95)
+	if cfg.MaxBitrate > 0 {
+		cfg.MaxBitrate = clampInt(cfg.MaxBitrate, 250_000, maxJPEGBitrate)
+	}
+	return cfg
+}
+
 func newMediaSessionID() (uint64, error) {
 	var raw [8]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -99,22 +168,24 @@ func newMediaSessionID() (uint64, error) {
 // HandleDesktopMedia owns one host-side media session. The MVP intentionally
 // uses independent JPEG frames; later DXGI + H.264 replaces capture/encoding
 // behind this method without changing the RD/1 transport or session API.
-func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaConn) error {
+func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions) error {
 	if h == nil || conn == nil {
 		return errors.New("desktop media connection is unavailable")
 	}
 	h.sessionMu.Lock()
 	defer h.sessionMu.Unlock()
 
+	sessionConfig := ResolveHostConfig(h.cfg, options)
+	log.Printf("[Desktop] JPEG session config=%dx%d fps=%d quality=%d maxBitrate=%d", sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
 	if h.input == nil {
-		return h.streamFrames(ctx, conn)
+		return h.streamFrames(ctx, conn, sessionConfig)
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer h.input.ReleaseAll()
 
 	errorsCh := make(chan error, 2)
-	go func() { errorsCh <- h.streamFrames(sessionCtx, conn) }()
+	go func() { errorsCh <- h.streamFrames(sessionCtx, conn, sessionConfig) }()
 	go func() { errorsCh <- h.readInputLoop(sessionCtx, conn) }()
 
 	first := <-errorsCh
@@ -159,19 +230,19 @@ func (h *Host) readInputLoop(ctx context.Context, conn *desktopmedia.MediaConn) 
 	}
 }
 
-func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn) error {
+func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig) error {
 	sessionID, err := newMediaSessionID()
 	if err != nil {
 		return err
 	}
 	var frameID uint32 = 1
 	var sequence uint32 = 1
-	frameInterval := time.Second / time.Duration(h.cfg.MaxFPS)
+	frameInterval := time.Second / time.Duration(cfg.MaxFPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
 
 	sendFrame := func() error {
-		encoded, err := h.captureJPEG(ctx)
+		encoded, err := h.captureJPEGWithConfig(ctx, cfg)
 		if err != nil {
 			return err
 		}
@@ -184,7 +255,7 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn) e
 			KeyFrame:   true,
 			Data:       encoded,
 		}
-		packets, next, err := desktopmedia.PacketizeFrame(frame, h.cfg.PacketSize, sequence)
+		packets, next, err := desktopmedia.PacketizeFrame(frame, cfg.PacketSize, sequence)
 		if err != nil {
 			return err
 		}
@@ -214,16 +285,39 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn) e
 }
 
 func (h *Host) captureJPEG(ctx context.Context) ([]byte, error) {
+	return h.captureJPEGWithConfig(ctx, h.cfg)
+}
+
+func (h *Host) captureJPEGWithConfig(ctx context.Context, cfg HostConfig) ([]byte, error) {
 	frame, err := h.source.Capture(ctx)
 	if err != nil {
 		return nil, err
 	}
-	frame = fitRGBA(frame, h.cfg.MaxWidth, h.cfg.MaxHeight)
-	var out bytes.Buffer
-	if err := jpeg.Encode(&out, frame, &jpeg.Options{Quality: h.cfg.JPEGQuality}); err != nil {
-		return nil, err
+	frame = fitRGBA(frame, cfg.MaxWidth, cfg.MaxHeight)
+	quality := cfg.JPEGQuality
+	if quality <= 0 {
+		quality = DefaultHostConfig().JPEGQuality
 	}
-	return out.Bytes(), nil
+	var frameBudget int
+	if cfg.MaxBitrate > 0 && cfg.MaxFPS > 0 {
+		frameBudget = cfg.MaxBitrate / 8 / cfg.MaxFPS
+	}
+
+	var encoded []byte
+	for attempt := 0; attempt < 4; attempt++ {
+		var out bytes.Buffer
+		if err := jpeg.Encode(&out, frame, &jpeg.Options{Quality: quality}); err != nil {
+			return nil, err
+		}
+		encoded = append(encoded[:0], out.Bytes()...)
+		// JPEG has no true rate controller. Treat MaxBitrate as a soft per-frame
+		// budget until H.264 replaces this MVP encoder.
+		if frameBudget <= 0 || len(encoded) <= frameBudget*11/10 || quality <= 25 {
+			break
+		}
+		quality = clampInt(quality-10, 25, 95)
+	}
+	return encoded, nil
 }
 
 func fitRGBA(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {

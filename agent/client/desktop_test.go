@@ -43,6 +43,10 @@ func TestDialDesktopMediaNegotiatesNativeDatagrams(t *testing.T) {
 			served <- protocol.NewRelayError(protocol.ErrCodeInvalidRequest, "invalid desktop media request")
 			return
 		}
+		if req.Options == nil || req.Options.Quality != protocol.DesktopQualityHigh || req.Options.FPS != 24 || req.Options.MaxBitrate != 8_000_000 {
+			served <- protocol.NewRelayError(protocol.ErrCodeInvalidRequest, "desktop media options were not forwarded")
+			return
+		}
 		channel, err := tunnel.OpenDesktopDatagramChannel(relaySession, req.AssociationID)
 		if err != nil {
 			served <- err
@@ -61,7 +65,11 @@ func TestDialDesktopMediaNegotiatesNativeDatagrams(t *testing.T) {
 	}()
 
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return clientSession }, func() string { return "controller" })
-	conn, err := dialer.DialDesktopMedia(ctx, "desktop-target")
+	conn, err := dialer.DialDesktopMediaWithOptions(ctx, "desktop-target", protocol.RemoteDesktopConnectOptions{
+		Quality: protocol.DesktopQualityHigh,
+		FPS: 24,
+		MaxBitrate: 8_000_000,
+	})
 	if err != nil {
 		close(release)
 		t.Fatal(err)

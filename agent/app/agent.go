@@ -1003,7 +1003,7 @@ func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDes
 		session, err := desktop.StartController(a.ctx, targetID, func(ctx context.Context, id string) (*desktopmedia.MediaConn, error) {
 			dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
-			return a.rawDialer.DialDesktopMedia(dialCtx, id)
+			return a.rawDialer.DialDesktopMediaWithOptions(dialCtx, id, options)
 		})
 		if err != nil {
 			return protocol.RemoteDesktopSessionInfo{}, err

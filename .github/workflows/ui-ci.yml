@@ -7,11 +7,14 @@ on:
   pull_request:
     paths:
       - "agent/gui/**"
+      - "agent/desktop/**"
       - "cmd/relay-agent/**"
       - "server/web/**"
       - "server/api/**"
       - "internal/webui/**"
       - "internal/config/**"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/ui-ci.yml"
       - "scripts/build.sh"
 

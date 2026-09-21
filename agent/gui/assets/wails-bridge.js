@@ -11,6 +11,10 @@
   window.goOpenConnections = () => invoke('OpenConnections');
   window.goGetConnections = () => invoke('GetConnections');
   window.goGetStatus = () => invoke('GetStatus');
+  window.goGetRemoteDesktopTargets = () => invoke('GetRemoteDesktopTargets');
+  window.goConnectRemoteDesktop = (targetID, rawOptions) => invoke('ConnectRemoteDesktop', targetID, rawOptions);
+  window.goDisconnectRemoteDesktop = () => invoke('DisconnectRemoteDesktop');
+  window.goGetRemoteDesktopStatus = () => invoke('GetRemoteDesktopStatus');
   window.goGetLogs = () => invoke('GetLogs');
   window.goClearLogs = () => invoke('ClearLogs');
   window.goGetConfig = () => invoke('GetConfig');

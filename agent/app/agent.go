@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"relayproxy/agent/client"
+	"relayproxy/agent/desktop"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
 	"relayproxy/agent/rdp"
@@ -178,27 +179,27 @@ func (c AgentConfig) IsRDPEnabled() bool {
 }
 
 type AgentStatus struct {
-	Connected     bool         `json:"connected"`
-	Transport     string       `json:"transport"`
-	LatencyMs     int64        `json:"latency"`
-	DeviceID      string       `json:"deviceId"`
-	DeviceName    string       `json:"deviceName"`
-	Mode          string       `json:"mode"`
-	SelectedExit  string       `json:"selectedExit"`
-	SOCKS5Running bool         `json:"socks5Running"`
-	HTTPRunning   bool         `json:"httpRunning"`
-	ExitRunning   bool         `json:"exitRunning"`
-	NetworkMode   string       `json:"networkMode"`
-	DivertRunning bool         `json:"divertRunning"`
-	ActiveStreams int64        `json:"activeStreams"`
-	ApprovalState string       `json:"approvalState"`
-	RDPListenAddr string       `json:"rdpListenAddr,omitempty"`
-	RDPTargetID   string       `json:"rdpTargetId,omitempty"`
-	RDPUDPEnabled bool         `json:"rdpUdpEnabled"`
-	RDPUDPActive  bool         `json:"rdpUdpActive"`
-	RDPUDPReason  string       `json:"rdpUdpReason,omitempty"`
-	RDPPathTCP    string       `json:"rdpPathTcp,omitempty"`
-	RDPPathUDP    string       `json:"rdpPathUdp,omitempty"`
+	Connected     bool   `json:"connected"`
+	Transport     string `json:"transport"`
+	LatencyMs     int64  `json:"latency"`
+	DeviceID      string `json:"deviceId"`
+	DeviceName    string `json:"deviceName"`
+	Mode          string `json:"mode"`
+	SelectedExit  string `json:"selectedExit"`
+	SOCKS5Running bool   `json:"socks5Running"`
+	HTTPRunning   bool   `json:"httpRunning"`
+	ExitRunning   bool   `json:"exitRunning"`
+	NetworkMode   string `json:"networkMode"`
+	DivertRunning bool   `json:"divertRunning"`
+	ActiveStreams int64  `json:"activeStreams"`
+	ApprovalState string `json:"approvalState"`
+	RDPListenAddr string `json:"rdpListenAddr,omitempty"`
+	RDPTargetID   string `json:"rdpTargetId,omitempty"`
+	RDPUDPEnabled bool   `json:"rdpUdpEnabled"`
+	RDPUDPActive  bool   `json:"rdpUdpActive"`
+	RDPUDPReason  string `json:"rdpUdpReason,omitempty"`
+	RDPPathTCP    string `json:"rdpPathTcp,omitempty"`
+	RDPPathUDP    string `json:"rdpPathUdp,omitempty"`
 }
 
 // ErrRestartRequired means a saved startup setting has not changed the running
@@ -878,6 +879,102 @@ func modeForApprovedCapabilities(capabilities []string) string {
 	default:
 		return ""
 	}
+}
+
+// RemoteDesktopTargets adapts the current server-approved RDP target list into
+// the unified desktop model. Relay Desktop capabilities will be merged here as
+// that backend is implemented; callers no longer need to depend on agent/rdp.
+func (a *Agent) RemoteDesktopTargets() []protocol.RemoteDesktopTarget {
+	rdpTargets := a.RDPTargets()
+	targets := make([]protocol.RemoteDesktopTarget, 0, len(rdpTargets))
+	for _, target := range rdpTargets {
+		targets = append(targets, protocol.RemoteDesktopTarget{
+			DeviceID: target.DeviceID,
+			Name:     target.Name,
+			Online:   target.Online,
+			Capabilities: protocol.DesktopCapabilities{
+				NativeRDP: true,
+			},
+		})
+	}
+	return targets
+}
+
+func (a *Agent) remoteDesktopTarget(targetID string) (protocol.RemoteDesktopTarget, bool) {
+	for _, target := range a.RemoteDesktopTargets() {
+		if target.DeviceID == targetID {
+			return target, true
+		}
+	}
+	return protocol.RemoteDesktopTarget{}, false
+}
+
+// ConnectRemoteDesktop is the single entry point used by the GUI. RD0 adapts
+// the existing Native RDP backend; Relay Desktop will be added behind the same
+// API without changing the UI contract.
+func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDesktopConnectOptions) (protocol.RemoteDesktopSessionInfo, error) {
+	targetID = strings.TrimSpace(targetID)
+	target, ok := a.remoteDesktopTarget(targetID)
+	if !ok {
+		return protocol.RemoteDesktopSessionInfo{}, errors.New("remote desktop target is not approved")
+	}
+	if !target.Online {
+		return protocol.RemoteDesktopSessionInfo{}, errors.New("remote desktop target is offline")
+	}
+	backend, err := desktop.SelectBackend(target, options)
+	if err != nil {
+		return protocol.RemoteDesktopSessionInfo{}, err
+	}
+	switch backend {
+	case protocol.DesktopBackendRDP:
+		autoLaunch := true
+		if options.AutoLaunch != nil {
+			autoLaunch = *options.AutoLaunch
+		}
+		if _, err := a.ConnectRDP(targetID, autoLaunch); err != nil {
+			return protocol.RemoteDesktopSessionInfo{}, err
+		}
+		status := a.Status()
+		return protocol.RemoteDesktopSessionInfo{
+			Target:       target,
+			Backend:      protocol.DesktopBackendRDP,
+			State:        "connected",
+			ListenAddr:   status.RDPListenAddr,
+			PathTCP:      status.RDPPathTCP,
+			PathUDP:      status.RDPPathUDP,
+			UDPEnabled:   status.RDPUDPEnabled,
+			AutoLaunched: autoLaunch,
+		}, nil
+	case protocol.DesktopBackendRelay:
+		return protocol.RemoteDesktopSessionInfo{}, fmt.Errorf("%w: Relay Desktop backend is not implemented yet", desktop.ErrBackendUnavailable)
+	default:
+		return protocol.RemoteDesktopSessionInfo{}, fmt.Errorf("unsupported remote desktop backend %q", backend)
+	}
+}
+
+func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
+	status := a.Status()
+	out := protocol.RemoteDesktopStatus{State: "idle"}
+	if status.RDPTargetID == "" {
+		return out
+	}
+	out.State = "connected"
+	out.Backend = protocol.DesktopBackendRDP
+	out.TargetID = status.RDPTargetID
+	if target, ok := a.remoteDesktopTarget(status.RDPTargetID); ok {
+		out.TargetName = target.Name
+	}
+	out.ListenAddr = status.RDPListenAddr
+	out.PathTCP = status.RDPPathTCP
+	out.PathUDP = status.RDPPathUDP
+	out.UDPEnabled = status.RDPUDPEnabled
+	out.UDPActive = status.RDPUDPActive
+	out.UDPReason = status.RDPUDPReason
+	return out
+}
+
+func (a *Agent) DisconnectRemoteDesktop() {
+	a.DisconnectRDP()
 }
 
 // RDPTargets returns the server-approved target list received during the last

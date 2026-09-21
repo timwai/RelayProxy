@@ -19,6 +19,7 @@ import (
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
+	"relayproxy/internal/protocol"
 )
 
 const autoStartName = "RelayProxy Agent"
@@ -76,6 +77,22 @@ func (b *UIBridge) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, err
 
 func (b *UIBridge) DisconnectRDP() {
 	b.agent.DisconnectRDP()
+}
+
+func (b *UIBridge) GetRemoteDesktopTargets() []protocol.RemoteDesktopTarget {
+	return b.agent.RemoteDesktopTargets()
+}
+
+func (b *UIBridge) ConnectRemoteDesktop(targetID string, options protocol.RemoteDesktopConnectOptions) (protocol.RemoteDesktopSessionInfo, error) {
+	return b.agent.ConnectRemoteDesktop(strings.TrimSpace(targetID), options)
+}
+
+func (b *UIBridge) DisconnectRemoteDesktop() {
+	b.agent.DisconnectRemoteDesktop()
+}
+
+func (b *UIBridge) GetRemoteDesktopStatus() protocol.RemoteDesktopStatus {
+	return b.agent.RemoteDesktopStatus()
 }
 
 // GetLogs returns recent running logs

@@ -511,6 +511,9 @@
         <button onclick="switchSection('network')" id="section-btn-network" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg><span>网络</span>
         </button>
+        <button onclick="switchSection('desktop')" id="section-btn-desktop" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-eye"/></svg><span>远程桌面</span>
+        </button>
         <button onclick="switchSection('proxy')" id="section-btn-proxy" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>代理与路由</span>
         </button>
@@ -679,6 +682,34 @@
           <details class="config-advanced"><summary>隧道加密 <span>高级设置</span></summary><label class="config-check"><input id="cfg-tls-on" type="checkbox"><span>使用 TLS 加密隧道</span></label><p id="connection-tls-hint" class="config-help">独立于管理 HTTP / HTTPS。RDP UDP 需要 TLS + QUIC，且服务端 UDP 端口必须可达。</p></details>
         </div>
         <div class="config-actions"><span id="connection-runtime" class="config-help mono"></span><div><button data-config-write disabled onclick="saveServer()" class="btn-primary rp-btn rp-btn-primary config-small">保存连接设置</button></div></div>
+      </section>
+
+      <!-- ============ 远程桌面 ============ -->
+      <section id="tab-pane-desktop" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">远程桌面</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">统一入口自动选择可用 backend；当前阶段复用现有 Windows RDP，Relay Desktop 后续接入。</p>
+          </div>
+          <button type="button" onclick="refreshRemoteDesktopTargets(true)" class="rp-btn">刷新设备</button>
+        </div>
+
+        <div id="desktop-session-banner" class="hidden rp-notice rp-notice-info"></div>
+
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="rp-section-title mb-0">可访问设备</h2>
+          <span id="desktop-target-count" class="rp-badge">0 台</span>
+        </div>
+        <div id="desktop-targets" class="space-y-2">
+          <div class="rp-card p-4 text-[12px] text-slate-500 dark:text-slate-400">正在读取远程桌面目标…</div>
+        </div>
+
+        <div class="rp-card p-4">
+          <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">自动模式</div>
+          <div class="text-[11px] leading-6 text-slate-500 dark:text-slate-400 mt-1">
+            当前版本会把已有 RDP Host 作为 Native RDP backend；后续 Relay Desktop 上线后，Windows Home 会自动使用 Relay Desktop，高性能场景也可自动绕过 RDP。
+          </div>
+        </div>
       </section>
 
       <!-- ============ 本地代理服务 ============ -->
@@ -1069,7 +1100,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {} };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null };
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1229,7 +1260,7 @@
     window.toggleTheme = toggleTheme;
 
     /* ---------- navigation ---------- */
-    var sectionLabels = {home:'概览',network:'网络',proxy:'代理与路由',monitor:'监控',settings:'设置'};
+    var sectionLabels = {home:'概览',network:'网络',desktop:'远程桌面',proxy:'代理与路由',monitor:'监控',settings:'设置'};
     var sectionTabs = {
       home: [{ id:'home', label:'运行概览' }],
       network: [
@@ -1237,6 +1268,7 @@
         { id:'exit', label:'选择出口' },
         { id:'pair', label:'服务端审批' }
       ],
+      desktop: [{ id:'desktop', label:'远程桌面' }],
       proxy: [
         { id:'proxy', label:'本地代理' },
         { id:'routing', label:'路由分流' },
@@ -1249,7 +1281,7 @@
       settings: [{ id:'settings', label:'程序设置' }]
     };
     var tabSections = {
-      home:'home', connection:'network', exit:'network', pair:'network',
+      home:'home', connection:'network', exit:'network', pair:'network', desktop:'desktop',
       proxy:'proxy', routing:'proxy', share:'proxy', logs:'monitor', connections:'monitor', settings:'settings'
     };
     state.section = state.section || 'home';
@@ -1342,6 +1374,7 @@
       rememberNavigation();
       if (id === 'logs') refreshLogs();
       if (id === 'connections') refreshConnectionsInline(true);
+      if (id === 'desktop') { refreshRemoteDesktopTargets(false); refreshRemoteDesktopStatus(false); }
     }
     window.switchSection = switchSection;
     window.switchTab = switchTab;
@@ -1380,6 +1413,151 @@
     };
     window.addrOf = addrOf;
     window.copyText = copyText;
+
+    /* ---------- remote desktop ---------- */
+    function parseJSONResult(raw, fallback) {
+      if (raw == null || raw === '') return fallback;
+      if (typeof raw === 'object') return raw;
+      try { return JSON.parse(raw); } catch (_) { return fallback; }
+    }
+    function renderRemoteDesktopTargets() {
+      var host = $('desktop-targets');
+      if (!host) return;
+      var targets = Array.isArray(state.desktopTargets) ? state.desktopTargets : [];
+      $('desktop-target-count').textContent = targets.length + ' 台';
+      host.innerHTML = '';
+      if (!hasFn('goGetRemoteDesktopTargets')) {
+        host.innerHTML = '<div class="rp-card p-4 text-[12px] text-slate-500 dark:text-slate-400">远程桌面连接目前仅在 Windows 原生 GUI 中可用。</div>';
+        return;
+      }
+      if (!targets.length) {
+        host.innerHTML = '<div class="rp-card p-4 text-[12px] text-slate-500 dark:text-slate-400">当前没有服务端授权的远程桌面目标。</div>';
+        return;
+      }
+      targets.forEach(function (target) {
+        var caps = target.capabilities || {};
+        var active = state.desktopStatus && state.desktopStatus.targetId === target.deviceId && state.desktopStatus.state === 'connected';
+        var card = document.createElement('div');
+        card.className = 'rp-card p-4 flex items-center justify-between gap-4';
+        var info = document.createElement('div');
+        info.className = 'min-w-0';
+        var title = document.createElement('div');
+        title.className = 'flex items-center gap-2';
+        var name = document.createElement('span');
+        name.className = 'text-[13px] font-semibold text-slate-800 dark:text-slate-100 truncate';
+        name.textContent = target.name || target.deviceId;
+        var online = document.createElement('span');
+        online.className = 'rp-badge ' + (target.online ? 'rp-badge-success' : '');
+        online.textContent = target.online ? '在线' : '离线';
+        title.appendChild(name);
+        title.appendChild(online);
+        var meta = document.createElement('div');
+        meta.className = 'text-[11px] text-slate-500 dark:text-slate-400 mt-1';
+        var backends = [];
+        if (caps.nativeRdp) backends.push('Windows RDP');
+        if (caps.relayDesktop) backends.push('Relay Desktop');
+        meta.textContent = (backends.length ? backends.join(' · ') : '无可用 backend') + ' · ' + target.deviceId;
+        info.appendChild(title);
+        info.appendChild(meta);
+
+        var actions = document.createElement('div');
+        actions.className = 'flex items-center gap-2 shrink-0';
+        if (active) {
+          var disconnect = document.createElement('button');
+          disconnect.type = 'button';
+          disconnect.className = 'rp-btn';
+          disconnect.textContent = '断开';
+          disconnect.onclick = disconnectRemoteDesktop;
+          actions.appendChild(disconnect);
+        } else {
+          var connect = document.createElement('button');
+          connect.type = 'button';
+          connect.className = 'btn-primary rp-btn rp-btn-primary';
+          connect.textContent = '远程桌面';
+          connect.disabled = !target.online || (!caps.nativeRdp && !caps.relayDesktop);
+          connect.onclick = function () { connectRemoteDesktop(target.deviceId, connect); };
+          actions.appendChild(connect);
+        }
+        card.appendChild(info);
+        card.appendChild(actions);
+        host.appendChild(card);
+      });
+    }
+    function renderRemoteDesktopStatus() {
+      var banner = $('desktop-session-banner');
+      if (!banner) return;
+      var status = state.desktopStatus || { state:'idle' };
+      var connected = status.state === 'connected';
+      banner.classList.toggle('hidden', !connected);
+      if (!connected) return;
+      var parts = [
+        '已连接 ' + (status.targetName || status.targetId || ''),
+        'Backend: ' + String(status.backend || '').toUpperCase()
+      ];
+      if (status.pathTcp) parts.push('TCP: ' + status.pathTcp);
+      if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
+      banner.textContent = parts.join(' · ');
+    }
+    async function refreshRemoteDesktopTargets(showError) {
+      if (!hasFn('goGetRemoteDesktopTargets')) {
+        renderRemoteDesktopTargets();
+        return;
+      }
+      var raw = await call('goGetRemoteDesktopTargets');
+      var targets = parseJSONResult(raw, null);
+      if (!Array.isArray(targets)) {
+        if (showError) toast('读取远程桌面设备失败');
+        return;
+      }
+      state.desktopTargets = targets;
+      renderRemoteDesktopTargets();
+    }
+    async function refreshRemoteDesktopStatus(showError) {
+      if (!hasFn('goGetRemoteDesktopStatus')) return;
+      var raw = await call('goGetRemoteDesktopStatus');
+      var status = parseJSONResult(raw, null);
+      if (!status) {
+        if (showError) toast('读取远程桌面状态失败');
+        return;
+      }
+      state.desktopStatus = status;
+      renderRemoteDesktopStatus();
+      renderRemoteDesktopTargets();
+    }
+    async function connectRemoteDesktop(targetID, button) {
+      if (!hasFn('goConnectRemoteDesktop')) {
+        toast('当前界面不支持发起远程桌面');
+        return;
+      }
+      if (button) button.disabled = true;
+      try {
+        var raw = await call('goConnectRemoteDesktop', targetID, JSON.stringify({ backend:'auto', scene:'auto', quality:'auto' }));
+        var result = parseJSONResult(raw, { ok:false, message:'没有收到连接结果' });
+        if (!result.ok) {
+          toast(result.message || '远程桌面连接失败');
+          return;
+        }
+        toast('远程桌面已启动');
+        await refreshRemoteDesktopStatus(false);
+      } finally {
+        if (button) button.disabled = false;
+      }
+    }
+    async function disconnectRemoteDesktop() {
+      if (!hasFn('goDisconnectRemoteDesktop')) return;
+      var raw = await call('goDisconnectRemoteDesktop');
+      var result = parseJSONResult(raw, { ok:false });
+      if (!result.ok) {
+        toast(result.message || '断开远程桌面失败');
+        return;
+      }
+      toast('远程桌面已断开');
+      await refreshRemoteDesktopStatus(false);
+    }
+    window.refreshRemoteDesktopTargets = refreshRemoteDesktopTargets;
+    window.refreshRemoteDesktopStatus = refreshRemoteDesktopStatus;
+    window.connectRemoteDesktop = connectRemoteDesktop;
+    window.disconnectRemoteDesktop = disconnectRemoteDesktop;
 
     /* ---------- status rendering ---------- */
     function renderStatus(st) {
@@ -1913,6 +2091,7 @@
         // Poll only monitoring panes that are visible.
         if (!$('tab-pane-logs').classList.contains('hidden')) { refreshLogs(); }
         if (!$('tab-pane-connections').classList.contains('hidden')) { refreshConnectionsInline(false); }
+        if (!$('tab-pane-desktop').classList.contains('hidden')) { refreshRemoteDesktopStatus(false); }
       }, 2000);
     });
   })();

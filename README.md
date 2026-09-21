@@ -24,6 +24,12 @@
 
 RelayProxy 由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。Agent 可以作为本地代理客户端，也可以作为出口节点；Server 负责设备身份审批、权限控制、会话协调、流量中继、设备管理和 Web 管理。
 
+> **Relay Desktop 开发进度（2026-09-21）**
+>
+> 统一 Remote Desktop 模型、GUI 入口、独立 `desktop.controller / desktop.host` 授权、目标发现、RD/1 QUIC Datagram 媒体通道与 Server 双跳 Relay 已进入主线。Windows 可视 MVP 正在 `feature/relay-desktop-windows-mvp` 分支验证：当前采用 **GDI 抓屏 → 最高约 1280×720 / 10 FPS → JPEG → RD/1 → Wails 内置预览**，用于先打通 Windows Home 的完整画面链路。
+>
+> 该 JPEG 路径仍属于开发验证，不是最终高性能实现，也尚未作为正式发布能力。后续仍按设计升级为 **DXGI Desktop Duplication / WGC + Media Foundation H.264 硬件编解码 + 原生 D3D11 Viewer**，并继续补齐键鼠、光标、剪贴板、P2P、ABR 与性能统计。详细进度见 `docs/superpowers/plans/2026-09-21-remote-desktop-development.md`。
+
 > 适合自建、受信任环境。公网部署时请启用 TLS、设置强管理密码、限制防火墙端口，并谨慎开放私网、回环地址和 RDP 入口。
 
 ## 适合做什么

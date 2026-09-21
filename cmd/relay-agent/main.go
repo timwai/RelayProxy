@@ -18,6 +18,7 @@ import (
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
+	"relayproxy/agent/desktop"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
 	"relayproxy/internal/config"
@@ -198,6 +199,17 @@ func main() {
 	agent, err := app.NewAgent(agentCfg)
 	if err != nil {
 		log.Fatalf("[Agent] Invalid startup settings: %v", err)
+	}
+	var desktopHost *desktop.Host
+	if runtime.GOOS == "windows" && agentCfg.IsRDPEnabled() {
+		desktopHost, err = desktop.NewSystemHost()
+		if err != nil {
+			log.Printf("[Desktop] Windows capture backend unavailable: %v", err)
+		} else {
+			agent.SetDesktopHost(desktopHost)
+			defer desktopHost.Close()
+			log.Println("[Desktop] Windows JPEG capture backend enabled")
+		}
 	}
 	if err := agent.Start(); err != nil {
 		log.Fatalf("[Agent] Failed to start agent: %v", err)

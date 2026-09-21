@@ -2,8 +2,11 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 
+	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
 
@@ -13,6 +16,8 @@ type MediaConn struct {
 	channel   *tunnel.DatagramChannel
 	stream    tunnel.TunnelStream
 	closeOnce sync.Once
+	readMu    sync.Mutex
+	writeMu   sync.Mutex
 }
 
 func NewMediaConn(channel *tunnel.DatagramChannel, stream tunnel.TunnelStream) *MediaConn {
@@ -38,6 +43,46 @@ func (c *MediaConn) Receive(ctx context.Context) ([]byte, error) {
 		return nil, tunnel.ErrDatagramsUnsupported
 	}
 	return c.channel.Receive(ctx)
+}
+
+func (c *MediaConn) SendSessionMessage(ctx context.Context, message protocol.DesktopSessionMessage) error {
+	if c == nil || c.stream == nil {
+		return errors.New("Relay Desktop reliable channel is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.stream.SetWriteDeadline(deadline); err != nil {
+			return err
+		}
+		defer c.stream.SetWriteDeadline(time.Time{})
+	}
+	return protocol.WriteJSON(c.stream, message)
+}
+
+func (c *MediaConn) ReceiveSessionMessage(ctx context.Context) (protocol.DesktopSessionMessage, error) {
+	if c == nil || c.stream == nil {
+		return protocol.DesktopSessionMessage{}, errors.New("Relay Desktop reliable channel is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return protocol.DesktopSessionMessage{}, err
+	}
+	c.readMu.Lock()
+	defer c.readMu.Unlock()
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := c.stream.SetReadDeadline(deadline); err != nil {
+			return protocol.DesktopSessionMessage{}, err
+		}
+		defer c.stream.SetReadDeadline(time.Time{})
+	}
+	var message protocol.DesktopSessionMessage
+	if err := protocol.ReadJSON(c.stream, &message); err != nil {
+		return protocol.DesktopSessionMessage{}, err
+	}
+	return message, nil
 }
 
 func (c *MediaConn) Close() error {

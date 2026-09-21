@@ -25,6 +25,7 @@ import (
 	rdpp2p "relayproxy/agent/rdp/p2p"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
+	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy/httpproxy"
@@ -232,6 +233,7 @@ type Agent struct {
 	rdpP2P               *rdpp2p.Manager
 	rdpSession           *rdpp2p.Session
 	desktopHost          desktop.HostHandler
+	desktopConnection    *desktop.ControllerSession
 	closed               atomic.Bool
 	ctx                  context.Context
 	cancel               context.CancelFunc
@@ -390,10 +392,12 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	oldControl := a.ctrlStream
 	oldRDP := a.rdpConnection
 	oldP2P := a.rdpP2P
+	oldDesktop := a.desktopConnection
 	a.ctrlStream = nil
 	a.rdpConnection = nil
 	a.rdpP2P = nil
 	a.rdpSession = nil
+	a.desktopConnection = nil
 	a.rdpTargets = nil
 	a.remoteDesktopTargets = nil
 	if newState != tunnel.StateConnected || sess == nil {
@@ -406,6 +410,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 		}
 		if oldP2P != nil {
 			_ = oldP2P.Close()
+		}
+		if oldDesktop != nil {
+			_ = oldDesktop.Close()
 		}
 		return
 	}
@@ -420,6 +427,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	}
 	if oldP2P != nil {
 		_ = oldP2P.Close()
+	}
+	if oldDesktop != nil {
+		_ = oldDesktop.Close()
 	}
 	go func() {
 		defer a.wg.Done()
@@ -477,8 +487,14 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsRDPEnabled() {
 		requested = append(requested,
 			protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic,
-			protocol.CapabilityDesktopController, protocol.CapabilityDesktopHost,
+			protocol.CapabilityDesktopController,
 		)
+		a.mu.RLock()
+		desktopHostReady := a.desktopHost != nil
+		a.mu.RUnlock()
+		if desktopHostReady {
+			requested = append(requested, protocol.CapabilityDesktopHost)
+		}
 	}
 	clientNonce := make([]byte, 32)
 	if _, err := rand.Read(clientNonce); err != nil {
@@ -946,9 +962,8 @@ func (a *Agent) remoteDesktopTarget(targetID string) (protocol.RemoteDesktopTarg
 	return protocol.RemoteDesktopTarget{}, false
 }
 
-// ConnectRemoteDesktop is the single entry point used by the GUI. RD0 adapts
-// the existing Native RDP backend; Relay Desktop will be added behind the same
-// API without changing the UI contract.
+// ConnectRemoteDesktop is the single entry point used by the GUI. Native RDP
+// and Relay Desktop share discovery but retain separate media implementations.
 func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDesktopConnectOptions) (protocol.RemoteDesktopSessionInfo, error) {
 	targetID = strings.TrimSpace(targetID)
 	target, ok := a.remoteDesktopTarget(targetID)
@@ -964,6 +979,7 @@ func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDes
 	}
 	switch backend {
 	case protocol.DesktopBackendRDP:
+		a.disconnectRelayDesktop()
 		autoLaunch := true
 		if options.AutoLaunch != nil {
 			autoLaunch = *options.AutoLaunch
@@ -983,13 +999,51 @@ func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDes
 			AutoLaunched: autoLaunch,
 		}, nil
 	case protocol.DesktopBackendRelay:
-		return protocol.RemoteDesktopSessionInfo{}, fmt.Errorf("%w: Relay Desktop backend is not implemented yet", desktop.ErrBackendUnavailable)
+		a.DisconnectRDP()
+		session, err := desktop.StartController(a.ctx, targetID, func(ctx context.Context, id string) (*desktopmedia.MediaConn, error) {
+			dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			return a.rawDialer.DialDesktopMedia(dialCtx, id)
+		})
+		if err != nil {
+			return protocol.RemoteDesktopSessionInfo{}, err
+		}
+		a.mu.Lock()
+		if a.closed.Load() || !a.handshakeOK.Load() || a.readySession == nil {
+			a.mu.Unlock()
+			_ = session.Close()
+			return protocol.RemoteDesktopSessionInfo{}, errors.New("relay session is no longer approved")
+		}
+		old := a.desktopConnection
+		a.desktopConnection = session
+		a.mu.Unlock()
+		if old != nil {
+			_ = old.Close()
+		}
+		return protocol.RemoteDesktopSessionInfo{
+			Target: target, Backend: protocol.DesktopBackendRelay, State: "connected",
+			PathTCP: "relay-control", PathUDP: "quic-datagram", UDPEnabled: true,
+		}, nil
 	default:
 		return protocol.RemoteDesktopSessionInfo{}, fmt.Errorf("unsupported remote desktop backend %q", backend)
 	}
 }
 
 func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
+	a.mu.RLock()
+	desktopSession := a.desktopConnection
+	a.mu.RUnlock()
+	if desktopSession != nil && desktopSession.Active() {
+		targetID := desktopSession.TargetID()
+		out := protocol.RemoteDesktopStatus{
+			State: "connected", Backend: protocol.DesktopBackendRelay, TargetID: targetID,
+			PathTCP: "relay-control", PathUDP: "quic-datagram", UDPEnabled: true, UDPActive: true,
+		}
+		if target, ok := a.remoteDesktopTarget(targetID); ok {
+			out.TargetName = target.Name
+		}
+		return out
+	}
 	status := a.Status()
 	out := protocol.RemoteDesktopStatus{State: "idle"}
 	if status.RDPTargetID == "" {
@@ -1010,7 +1064,44 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 	return out
 }
 
+func (a *Agent) RemoteDesktopFrame() protocol.RemoteDesktopFrame {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return protocol.RemoteDesktopFrame{}
+	}
+	frame, ok := session.LatestFrame()
+	if !ok {
+		return protocol.RemoteDesktopFrame{}
+	}
+	return protocol.RemoteDesktopFrame{Sequence: frame.Sequence, MimeType: frame.MimeType, Width: frame.Width, Height: frame.Height, Data: frame.Data}
+}
+
+func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	return session.SendInput(ctx, event)
+}
+
+func (a *Agent) disconnectRelayDesktop() {
+	a.mu.Lock()
+	session := a.desktopConnection
+	a.desktopConnection = nil
+	a.mu.Unlock()
+	if session != nil {
+		_ = session.Close()
+	}
+}
+
 func (a *Agent) DisconnectRemoteDesktop() {
+	a.disconnectRelayDesktop()
 	a.DisconnectRDP()
 }
 
@@ -1290,9 +1381,11 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	conn := a.rdpConnection
 	p2pSession := a.rdpSession
 	p2pManager := a.rdpP2P
+	desktopSession := a.desktopConnection
 	a.rdpConnection = nil
 	a.rdpSession = nil
 	a.rdpP2P = nil
+	a.desktopConnection = nil
 	a.rdpTargets = nil
 	a.remoteDesktopTargets = nil
 	a.mu.Unlock()
@@ -1304,6 +1397,9 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	}
 	if p2pManager != nil {
 		_ = p2pManager.Close()
+	}
+	if desktopSession != nil {
+		_ = desktopSession.Close()
 	}
 }
 
@@ -1354,9 +1450,9 @@ func (a *Agent) closeRuntime() error {
 		a.handshakeOK.Store(false)
 		a.readySession = nil
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
-		rdpSession, rdpP2P := a.rdpSession, a.rdpP2P
+		rdpSession, rdpP2P, desktopSession := a.rdpSession, a.rdpP2P, a.desktopConnection
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
-		a.rdpSession, a.rdpP2P = nil, nil
+		a.rdpSession, a.rdpP2P, a.desktopConnection = nil, nil, nil
 		a.rdpTargets = nil
 		a.remoteDesktopTargets = nil
 		a.cancel()
@@ -1382,6 +1478,9 @@ func (a *Agent) closeRuntime() error {
 		}
 		if rdpP2P != nil {
 			errs = append(errs, rdpP2P.Close())
+		}
+		if desktopSession != nil {
+			errs = append(errs, desktopSession.Close())
 		}
 		if a.tunnelMgr != nil {
 			errs = append(errs, a.tunnelMgr.Close())

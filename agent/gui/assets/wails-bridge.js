@@ -15,6 +15,8 @@
   window.goConnectRemoteDesktop = (targetID, rawOptions) => invoke('ConnectRemoteDesktop', targetID, rawOptions);
   window.goDisconnectRemoteDesktop = () => invoke('DisconnectRemoteDesktop');
   window.goGetRemoteDesktopStatus = () => invoke('GetRemoteDesktopStatus');
+  window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');
+  window.goSendRemoteDesktopInput = raw => invoke('SendRemoteDesktopInput', raw);
   window.goGetLogs = () => invoke('GetLogs');
   window.goClearLogs = () => invoke('ClearLogs');
   window.goGetConfig = () => invoke('GetConfig');

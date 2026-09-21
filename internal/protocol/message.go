@@ -94,6 +94,8 @@ type OpenDesktopMediaRequest struct {
 	TimeoutMs     int    `json:"timeout"`
 	Mode          string `json:"mode"`
 	AssociationID uint64 `json:"associationId"`
+	SessionID     uint64 `json:"sessionId"`
+	SessionToken  []byte `json:"sessionToken"`
 }
 
 type OpenDesktopMediaResponse struct {

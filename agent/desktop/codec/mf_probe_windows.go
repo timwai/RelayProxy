@@ -27,14 +27,14 @@ const (
 )
 
 var (
-	mfplatDLL       = windows.NewLazySystemDLL("mfplat.dll")
-	ole32DLL        = windows.NewLazySystemDLL("ole32.dll")
-	procMFStartup   = mfplatDLL.NewProc("MFStartup")
-	procMFShutdown  = mfplatDLL.NewProc("MFShutdown")
-	procMFTEnumEx   = mfplatDLL.NewProc("MFTEnumEx")
-	procCoInitEx    = ole32DLL.NewProc("CoInitializeEx")
-	procCoUninit    = ole32DLL.NewProc("CoUninitialize")
-	procCoTaskFree  = ole32DLL.NewProc("CoTaskMemFree")
+	mfplatDLL      = windows.NewLazySystemDLL("mfplat.dll")
+	ole32DLL       = windows.NewLazySystemDLL("ole32.dll")
+	procMFStartup  = mfplatDLL.NewProc("MFStartup")
+	procMFShutdown = mfplatDLL.NewProc("MFShutdown")
+	procMFTEnumEx  = mfplatDLL.NewProc("MFTEnumEx")
+	procCoInitEx   = ole32DLL.NewProc("CoInitializeEx")
+	procCoUninit   = ole32DLL.NewProc("CoUninitialize")
+	procCoTaskFree = ole32DLL.NewProc("CoTaskMemFree")
 )
 
 var (
@@ -46,7 +46,7 @@ var (
 		Data1: 0xd6c02d4b, Data2: 0x6833, Data3: 0x45b4,
 		Data4: [8]byte{0x97, 0x1a, 0x05, 0xa4, 0xb0, 0x4b, 0xab, 0x91},
 	}
-	mfMediaTypeVideo = mediaTypeGUID(0x73646976) // 'vids'
+	mfMediaTypeVideo  = mediaTypeGUID(0x73646976) // 'vids'
 	mfVideoFormatH264 = mediaTypeGUID(fourCC('H', '2', '6', '4'))
 	mfVideoFormatNV12 = mediaTypeGUID(fourCC('N', 'V', '1', '2'))
 )

@@ -67,7 +67,6 @@ func TestResolveHostConfigClampsUnsafeValues(t *testing.T) {
 	}
 }
 
-
 func TestHostCodecCapabilitiesAreCopied(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	host, err := NewHost(&testCaptureSource{frame: src}, DefaultHostConfig())

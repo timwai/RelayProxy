@@ -12,7 +12,7 @@ type H264Probe struct {
 	HardwareDecoderCount int
 	SoftwareEncoderCount int
 	SoftwareDecoderCount int
-	Error                 string
+	Error                string
 }
 
 func (p H264Probe) EncodeAvailable() bool {

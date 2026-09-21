@@ -35,6 +35,15 @@ func (r *StreamRouter) handleOpenDesktopMedia(ctx context.Context, header *proto
 		})
 		return
 	}
+	if req.SessionID == 0 || len(req.SessionToken) == 0 || r.desktopMediaChecker == nil {
+		deny(protocol.ErrCodeAccessDenied, "Relay Desktop session is not authorized")
+		return
+	}
+	mediaAllowed, mediaErr := r.desktopMediaChecker(clientSession.DeviceID, target.DeviceID, req.SessionID, req.SessionToken)
+	if mediaErr != nil || !mediaAllowed {
+		deny(protocol.ErrCodeAccessDenied, "Relay Desktop session is invalid, expired, or revoked")
+		return
+	}
 	if req.Mode != protocol.DesktopMediaModeDatagram || req.AssociationID == 0 ||
 		!tunnel.PeerSupportsDatagrams(clientSession.Tunnel) || !tunnel.PeerSupportsDatagrams(target.Tunnel) {
 		deny(protocol.ErrCodeDatagramRequired, "Relay Desktop media requires QUIC Datagram on both tunnel legs")

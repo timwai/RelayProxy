@@ -20,6 +20,7 @@ import (
 	"relayproxy/internal/config"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
+	serverdesktop "relayproxy/server/desktop"
 	"relayproxy/server/gateway"
 	serverrdp "relayproxy/server/rdp"
 	"relayproxy/server/repository"
@@ -109,6 +110,9 @@ func main() {
 	coordinator := serverrdp.NewCoordinator(sessionMgr, db, time.Duration(cfg.RDP.LeaseSec)*time.Second, rendezvousAddress)
 	coordinator.Start(context.Background())
 	defer coordinator.Close()
+	desktopCoordinator := serverdesktop.NewCoordinator(sessionMgr, db.AuthorizeRDP, time.Duration(cfg.RDP.LeaseSec)*time.Second)
+	desktopCoordinator.Start(context.Background())
+	defer desktopCoordinator.Close()
 
 	// Async audit writer (N5): bounded channel + background insert
 	auditCh := make(chan *repository.ConnectionAudit, 2048)
@@ -173,6 +177,8 @@ func main() {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
 	router.SetRDPControlHandler(coordinator.HandleControl)
+	router.SetDesktopControlHandler(desktopCoordinator.HandleControl)
+	router.SetDesktopMediaChecker(desktopCoordinator.ValidateMedia)
 
 	// 5. Start Tunnel Gateway (QUIC + TLS; QUIC requires TLS)
 	quicAddr := cfg.Server.QUIC.Listen
@@ -195,6 +201,24 @@ func main() {
 			}
 			authorized := gateway.DeviceAuthorization{State: decision.State, DeviceID: decision.DeviceID,
 				OwnerUserID: decision.OwnerUserID, ApprovedCapabilities: decision.ApprovedCapabilities}
+			if decision.State == "approved" && decision.DeviceID != "" {
+				targets, listErr := db.ListRDPTargetsForController(decision.DeviceID)
+				if listErr != nil {
+					return gateway.DeviceAuthorization{}, listErr
+				}
+				authorized.RDPTargets = make([]protocol.RDPTarget, 0, len(targets))
+				for _, target := range targets {
+					if target == nil {
+						continue
+					}
+					_, online := sessionMgr.Get(target.DeviceID)
+					item := protocol.RDPTarget{DeviceID: target.DeviceID, Name: target.Name, Online: online}
+					if capabilities, ok := desktopCoordinator.Capabilities(target.DeviceID); ok {
+						item.DesktopCapabilities = &capabilities
+					}
+					authorized.RDPTargets = append(authorized.RDPTargets, item)
+				}
+			}
 			return authorized, nil
 		},
 		RecheckDevice: func(fingerprint, deviceID string) bool {
@@ -206,6 +230,7 @@ func main() {
 		OnDeviceDisconnected: func(deviceID string) {
 			_ = db.UpdateDeviceLastSeen(deviceID)
 			coordinator.CloseDevice(deviceID)
+			desktopCoordinator.CloseDevice(deviceID)
 		},
 		MaxConnections:          cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
@@ -246,8 +271,8 @@ func main() {
 	}
 	apiRouter := api.NewRouter(authService, deviceService, sessionMgr, db,
 		api.WithServerSettings(settings, tlsConfig),
-		api.WithDeviceAuthorizationChanged(func(deviceID string) { coordinator.CloseDevice(deviceID); ingress.Reload() }),
-		api.WithDeviceRevoked(func(deviceID string) { coordinator.CloseDevice(deviceID); ingress.CloseDevice(deviceID) }),
+		api.WithDeviceAuthorizationChanged(func(deviceID string) { coordinator.CloseDevice(deviceID); desktopCoordinator.CloseDevice(deviceID); ingress.Reload() }),
+		api.WithDeviceRevoked(func(deviceID string) { coordinator.CloseDevice(deviceID); desktopCoordinator.CloseDevice(deviceID); ingress.CloseDevice(deviceID) }),
 		api.WithRDPIngressEnabled(ingress.Enabled),
 		api.WithRDPIngressReload(func(string) error { return ingress.Reload() }),
 		api.WithRDPIngressStatus(func(id string) api.RDPIngressRuntimeStatus {

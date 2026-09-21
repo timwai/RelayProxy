@@ -689,12 +689,25 @@
         <div class="flex items-start justify-between gap-4">
           <div>
             <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">远程桌面</h1>
-            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">统一入口自动选择可用 backend；当前阶段复用现有 Windows RDP，Relay Desktop 后续接入。</p>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">统一入口自动选择 Native RDP 或 Relay Desktop；Windows Home 可使用内置屏幕串流。</p>
           </div>
           <button type="button" onclick="refreshRemoteDesktopTargets(true)" class="rp-btn">刷新设备</button>
         </div>
 
         <div id="desktop-session-banner" class="hidden rp-notice rp-notice-info"></div>
+
+        <div id="desktop-viewer" class="hidden rp-card overflow-hidden">
+          <div class="flex items-center justify-between gap-3 px-3 py-2 border-b border-slate-200 dark:border-slate-700/60">
+            <div>
+              <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Relay Desktop 预览</div>
+              <div id="desktop-viewer-meta" class="text-[10px] text-slate-500 dark:text-slate-400">等待视频帧…</div>
+            </div>
+            <button type="button" onclick="toggleDesktopFullscreen()" class="rp-btn">全屏</button>
+          </div>
+          <div id="desktop-viewer-stage" class="bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
+            <img id="desktop-viewer-image" alt="远程桌面画面" class="block max-w-full max-h-[70vh] object-contain select-none" draggable="false">
+          </div>
+        </div>
 
         <div class="flex items-center justify-between gap-3">
           <h2 class="rp-section-title mb-0">可访问设备</h2>
@@ -707,7 +720,7 @@
         <div class="rp-card p-4">
           <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">自动模式</div>
           <div class="text-[11px] leading-6 text-slate-500 dark:text-slate-400 mt-1">
-            当前版本会把已有 RDP Host 作为 Native RDP backend；后续 Relay Desktop 上线后，Windows Home 会自动使用 Relay Desktop，高性能场景也可自动绕过 RDP。
+            自动模式会根据目标能力选择 backend：仅支持 Relay Desktop 的 Windows Home 会直接使用内置串流；支持 Native RDP 的设备仍可按场景选择 RDP。当前 Relay Desktop 为 JPEG MVP，后续升级 DXGI + H.264。
           </div>
         </div>
       </section>
@@ -1101,6 +1114,7 @@
     'use strict';
 
     var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null };
+    var desktopFrameSeq = 0, desktopFrameBusy = false;
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1488,7 +1502,14 @@
       if (!banner) return;
       var status = state.desktopStatus || { state:'idle' };
       var connected = status.state === 'connected';
+      var relay = connected && status.backend === 'relay';
       banner.classList.toggle('hidden', !connected);
+      $('desktop-viewer').classList.toggle('hidden', !relay);
+      if (!relay) {
+        desktopFrameSeq = 0;
+        $('desktop-viewer-image').removeAttribute('src');
+        $('desktop-viewer-meta').textContent = '等待视频帧…';
+      }
       if (!connected) return;
       var parts = [
         '已连接 ' + (status.targetName || status.targetId || ''),
@@ -1498,6 +1519,38 @@
       if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
       banner.textContent = parts.join(' · ');
     }
+    async function refreshRemoteDesktopFrame() {
+      if (desktopFrameBusy || !hasFn('goGetRemoteDesktopFrame')) return;
+      var status = state.desktopStatus || {};
+      if (status.state !== 'connected' || status.backend !== 'relay') return;
+      if ($('tab-pane-desktop').classList.contains('hidden')) return;
+      desktopFrameBusy = true;
+      try {
+        var raw = await call('goGetRemoteDesktopFrame');
+        var frame = parseJSONResult(raw, null);
+        if (!frame || !frame.sequence || !frame.data || frame.sequence === desktopFrameSeq) return;
+        desktopFrameSeq = frame.sequence;
+        var mime = frame.mimeType || 'image/jpeg';
+        $('desktop-viewer-image').src = 'data:' + mime + ';base64,' + frame.data;
+        $('desktop-viewer-meta').textContent =
+          (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
+          'JPEG MVP · QUIC Datagram';
+      } finally {
+        desktopFrameBusy = false;
+      }
+    }
+    function toggleDesktopFullscreen() {
+      var stage = $('desktop-viewer-stage');
+      if (!stage) return;
+      if (document.fullscreenElement) {
+        document.exitFullscreen();
+      } else if (stage.requestFullscreen) {
+        stage.requestFullscreen();
+      }
+    }
+    window.refreshRemoteDesktopFrame = refreshRemoteDesktopFrame;
+    window.toggleDesktopFullscreen = toggleDesktopFullscreen;
+
     async function refreshRemoteDesktopTargets(showError) {
       if (!hasFn('goGetRemoteDesktopTargets')) {
         renderRemoteDesktopTargets();
@@ -1537,8 +1590,10 @@
           toast(result.message || '远程桌面连接失败');
           return;
         }
+        desktopFrameSeq = 0;
         toast('远程桌面已启动');
         await refreshRemoteDesktopStatus(false);
+        await refreshRemoteDesktopFrame();
       } finally {
         if (button) button.disabled = false;
       }
@@ -1551,6 +1606,7 @@
         toast(result.message || '断开远程桌面失败');
         return;
       }
+      desktopFrameSeq = 0;
       toast('远程桌面已断开');
       await refreshRemoteDesktopStatus(false);
     }
@@ -2093,6 +2149,7 @@
         if (!$('tab-pane-connections').classList.contains('hidden')) { refreshConnectionsInline(false); }
         if (!$('tab-pane-desktop').classList.contains('hidden')) { refreshRemoteDesktopStatus(false); }
       }, 2000);
+      setInterval(refreshRemoteDesktopFrame, 100);
     });
   })();
   </script>

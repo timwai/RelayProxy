@@ -145,6 +145,17 @@ type RemoteDesktopStatus struct {
 	UDPReason  string         `json:"udpReason,omitempty"`
 }
 
+// RemoteDesktopFrame is the MVP viewer surface. JPEG bytes are carried only
+// across the local Agent -> Wails bridge; Relay transport uses binary RD/1
+// datagrams and never base64-encodes media on the network.
+type RemoteDesktopFrame struct {
+	Sequence uint64 `json:"sequence"`
+	MimeType string `json:"mimeType"`
+	Width    int    `json:"width,omitempty"`
+	Height   int    `json:"height,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+}
+
 const (
 	DesktopControlCapabilities    = "capabilities"
 	DesktopControlConnectRequest  = "connect_request"

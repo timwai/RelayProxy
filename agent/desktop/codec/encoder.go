@@ -26,7 +26,7 @@ type VideoConfig struct {
 	FPS           int
 	TargetBitrate int
 	KeyframeEvery time.Duration
-	LowLatency    bool
+	DisableLowLatency bool
 }
 
 func DefaultVideoConfig() VideoConfig {
@@ -36,8 +36,7 @@ func DefaultVideoConfig() VideoConfig {
 		FPS:           30,
 		TargetBitrate: 6_000_000,
 		KeyframeEvery: 2 * time.Second,
-		LowLatency:    true,
-	}
+		}
 }
 
 func NormalizeVideoConfig(cfg VideoConfig) (VideoConfig, error) {

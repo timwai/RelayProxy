@@ -261,7 +261,7 @@ func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, er
 				return false, fmt.Errorf("unlock async MFT: %w", err)
 			}
 		}
-		if cfg.LowLatency {
+		if !cfg.DisableLowLatency {
 			_ = attributeSetUINT32(attributes, &mfLowLatency, 1)
 		}
 

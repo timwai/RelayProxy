@@ -26,8 +26,8 @@
 | 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ⏳ 未开始 | 计划与视频分离传输并在 Viewer 本地绘制 |
 | 剪贴板 | ⏳ 未开始 | RD1 先实现 Unicode 文本双向同步 |
-| DXGI / WGC Capture | ⏳ 待替换 MVP | 最终 Windows Capture 路径仍按设计采用 GPU surface |
-| H.264 硬件编解码 | ⏳ 待实现 | Media Foundation Hardware MFT；替换当前 JPEG 验证路径 |
+| DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
+| H.264 硬件编解码 | 🧪 能力探测中 | Media Foundation MFT 探测 NV12→H.264 encoder 与 H.264→NV12 decoder，区分硬件/软件；下一步实例化 Hardware MFT 编码器 |
 | 原生 D3D11 Viewer | ⏳ 待实现 | 当前 Wails 图片预览仅用于功能闭环，不作为最终低延迟 Viewer |
 | RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
 
@@ -79,7 +79,7 @@ Windows SendInput
 
 ```text
 当前验证：
-GDI → CPU RGBA → JPEG → Wails WebView preview
+DXGI Desktop Duplication（不可用时 GDI）→ CPU RGBA → JPEG → Wails WebView preview
 
 最终目标：
 DXGI / WGC → D3D11 texture → GPU convert → H.264 HW encoder

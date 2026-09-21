@@ -66,3 +66,24 @@ func TestResolveHostConfigClampsUnsafeValues(t *testing.T) {
 		t.Fatalf("unsafe values were not clamped: %+v", cfg)
 	}
 }
+
+
+func TestHostCodecCapabilitiesAreCopied(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	host, err := NewHost(&testCaptureSource{frame: src}, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := []protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}}
+	host.SetCodecCapabilities(input)
+	input[0].Codec = "mutated"
+	first := host.CodecCapabilities()
+	if len(first) != 1 || first[0].Codec != "h264" {
+		t.Fatalf("host capability mutated through caller slice: %+v", first)
+	}
+	first[0].Codec = "changed"
+	second := host.CodecCapabilities()
+	if second[0].Codec != "h264" {
+		t.Fatalf("host returned internal capability slice: %+v", second)
+	}
+}

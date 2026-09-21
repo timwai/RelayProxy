@@ -13,6 +13,9 @@ import (
 
 	"github.com/go-mswin/screencapture"
 	"github.com/lxn/win"
+
+	desktopcodec "relayproxy/agent/desktop/codec"
+	"relayproxy/internal/protocol"
 )
 
 type gdiCapture struct {
@@ -315,5 +318,12 @@ func NewSystemHost() (*Host, error) {
 		_ = source.Close()
 		return nil, err
 	}
+	probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	probe := desktopcodec.ProbeH264MediaFoundation(probeCtx)
+	cancel()
+	host.SetCodecCapabilities([]protocol.DesktopCodecCapability{probe.Capability()})
+	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
+		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
+		probe.SoftwareEncoderCount, probe.SoftwareDecoderCount, probe.Error)
 	return host, nil
-}
+

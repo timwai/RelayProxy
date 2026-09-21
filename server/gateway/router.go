@@ -155,6 +155,8 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 		r.handleOpenRDPTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenRDPUDP:
 		r.handleOpenRDPUDP(ctx, header, clientStream, clientSession, handshakeDeadline)
+	case protocol.FrameTypeOpenDesktopMedia:
+		r.handleOpenDesktopMedia(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeRDPControl:
 		if r.rdpControlHandler != nil && (containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) || containsCapability(clientSession.Grants, protocol.CapabilityRDPHost)) {
 			r.rdpControlHandler(ctx, clientStream, clientSession)

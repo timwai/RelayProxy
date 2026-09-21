@@ -230,6 +230,7 @@ type Agent struct {
 	rdpConnection *rdp.Connection
 	rdpP2P        *rdpp2p.Manager
 	rdpSession    *rdpp2p.Session
+	desktopHost   desktop.HostHandler
 	closed        atomic.Bool
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -657,6 +658,15 @@ func (a *Agent) sendRDPControlRequest(ctx context.Context, sess tunnel.TunnelSes
 	return response, nil
 }
 
+// SetDesktopHost installs the Relay Desktop target-side media consumer. The
+// handler owns capture/encode session lifecycle; nil keeps Relay Desktop
+// explicitly unavailable instead of accepting a session that can only black-screen.
+func (a *Agent) SetDesktopHost(handler desktop.HostHandler) {
+	a.mu.Lock()
+	a.desktopHost = handler
+	a.mu.Unlock()
+}
+
 func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, workers *sync.WaitGroup) {
 	if maxStreams <= 0 {
 		maxStreams = 1024
@@ -680,6 +690,21 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 		if err != nil {
 			admitted.Add(-1)
 			_ = stream.Close()
+			continue
+		}
+		if header.Type == protocol.FrameTypeOpenDesktopMedia && allowRDP {
+			a.mu.RLock()
+			desktopHost := a.desktopHost
+			a.mu.RUnlock()
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				if err := desktop.HandleTargetMediaStreamWithHeader(ctx, stream, sess, header, desktopHost); err != nil &&
+					!errors.Is(err, context.Canceled) && !errors.Is(err, net.ErrClosed) && !errors.Is(err, io.EOF) {
+					log.Printf("[Desktop] target media stream failed: %v", err)
+				}
+			}()
 			continue
 		}
 		if (header.Type == protocol.FrameTypeOpenRDP || header.Type == protocol.FrameTypeOpenRDPUDP) && allowRDP {

@@ -6,19 +6,20 @@ import "relayproxy/internal/acl"
 type FrameType uint8
 
 const (
-	FrameTypeControl        FrameType = 0x01
-	FrameTypeOpenTCP        FrameType = 0x02
-	FrameTypeOpenTCPResp    FrameType = 0x03
-	FrameTypeData           FrameType = 0x04
-	FrameTypePing           FrameType = 0x05
-	FrameTypePong           FrameType = 0x06
-	FrameTypeGoAway         FrameType = 0x07
-	FrameTypeOpenUDP        FrameType = 0x08
-	FrameTypeOpenUDPResp    FrameType = 0x09
-	FrameTypeOpenRDP        FrameType = 0x0A
-	FrameTypeOpenRDPUDP     FrameType = 0x0B
-	FrameTypeRDPControl     FrameType = 0x0C
-	FrameTypeDesktopControl FrameType = 0x0D
+	FrameTypeControl          FrameType = 0x01
+	FrameTypeOpenTCP          FrameType = 0x02
+	FrameTypeOpenTCPResp      FrameType = 0x03
+	FrameTypeData             FrameType = 0x04
+	FrameTypePing             FrameType = 0x05
+	FrameTypePong             FrameType = 0x06
+	FrameTypeGoAway           FrameType = 0x07
+	FrameTypeOpenUDP          FrameType = 0x08
+	FrameTypeOpenUDPResp      FrameType = 0x09
+	FrameTypeOpenRDP          FrameType = 0x0A
+	FrameTypeOpenRDPUDP       FrameType = 0x0B
+	FrameTypeRDPControl       FrameType = 0x0C
+	FrameTypeDesktopControl   FrameType = 0x0D
+	FrameTypeOpenDesktopMedia FrameType = 0x0E
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream
@@ -81,6 +82,27 @@ type OpenRDPRequest struct {
 	Mode             string `json:"mode,omitempty"`
 	AssociationID    uint64 `json:"associationId,omitempty"`
 	DatagramRequired bool   `json:"datagramRequired,omitempty"`
+}
+
+const DesktopMediaModeDatagram = "desktop_datagram_v1"
+
+// OpenDesktopMediaRequest establishes one authenticated Relay Desktop media
+// association. The reliable stream remains open as the association lifetime
+// signal; encoded media itself flows only over native QUIC datagrams.
+type OpenDesktopMediaRequest struct {
+	RequestID     string `json:"requestId"`
+	TimeoutMs     int    `json:"timeout"`
+	Mode          string `json:"mode"`
+	AssociationID uint64 `json:"associationId"`
+}
+
+type OpenDesktopMediaResponse struct {
+	RequestID     string `json:"requestId"`
+	Success       bool   `json:"success"`
+	ErrorCode     string `json:"errorCode,omitempty"`
+	ErrorMessage  string `json:"errorMessage,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	AssociationID uint64 `json:"associationId,omitempty"`
 }
 
 // RDPControlType values are exchanged over short-lived, authenticated

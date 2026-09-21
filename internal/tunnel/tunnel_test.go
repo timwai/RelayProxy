@@ -61,8 +61,11 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 
 	serverAddr := listener.Addr().String()
 
-	// Server accept goroutine
+	// Server accept goroutine. Complete TLS and yamux setup before the client
+	// opens its first stream so this test measures multiplexing, not scheduler
+	// timing during two concurrent protocol handshakes.
 	serverErrCh := make(chan error, 1)
+	serverReady := make(chan struct{}, 1)
 	go func() {
 		rawConn, err := listener.Accept()
 		if err != nil {
@@ -70,12 +73,22 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 			return
 		}
 		tlsConn := tls.Server(rawConn, tlsServerConfig)
+		handshakeCtx, handshakeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := tlsConn.HandshakeContext(handshakeCtx); err != nil {
+			handshakeCancel()
+			_ = rawConn.Close()
+			serverErrCh <- err
+			return
+		}
+		handshakeCancel()
 		session, err := ServerTLS(tlsConn, nil)
 		if err != nil {
+			_ = rawConn.Close()
 			serverErrCh <- err
 			return
 		}
 		defer session.Close()
+		serverReady <- struct{}{}
 
 		// Accept a stream
 		stream, err := session.AcceptStream(context.Background())
@@ -105,6 +118,14 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 		t.Fatalf("DialTLS failed: %v", err)
 	}
 	defer clientSession.Close()
+
+	select {
+	case <-serverReady:
+	case err := <-serverErrCh:
+		t.Fatalf("server setup failed: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("server setup timed out: %v", ctx.Err())
+	}
 
 	clientStream, err := clientSession.OpenStream(ctx)
 	if err != nil {

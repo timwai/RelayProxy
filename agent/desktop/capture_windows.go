@@ -326,4 +326,4 @@ func NewSystemHost() (*Host, error) {
 		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
 		probe.SoftwareEncoderCount, probe.SoftwareDecoderCount, probe.Error)
 	return host, nil
-
+}

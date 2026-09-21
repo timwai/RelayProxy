@@ -27,15 +27,15 @@ const (
 )
 
 var (
-	mfplatDLL      = windows.NewLazySystemDLL("mfplat.dll")
-	ole32DLL       = windows.NewLazySystemDLL("ole32.dll")
-	procMFStartup  = mfplatDLL.NewProc("MFStartup")
-	procMFShutdown = mfplatDLL.NewProc("MFShutdown")
-	procMFTEnumEx        = mfplatDLL.NewProc("MFTEnumEx")
+	mfplatDLL             = windows.NewLazySystemDLL("mfplat.dll")
+	ole32DLL              = windows.NewLazySystemDLL("ole32.dll")
+	procMFStartup         = mfplatDLL.NewProc("MFStartup")
+	procMFShutdown        = mfplatDLL.NewProc("MFShutdown")
+	procMFTEnumEx         = mfplatDLL.NewProc("MFTEnumEx")
 	procMFCreateMediaType = mfplatDLL.NewProc("MFCreateMediaType")
-	procCoInitEx   = ole32DLL.NewProc("CoInitializeEx")
-	procCoUninit   = ole32DLL.NewProc("CoUninitialize")
-	procCoTaskFree = ole32DLL.NewProc("CoTaskMemFree")
+	procCoInitEx          = ole32DLL.NewProc("CoInitializeEx")
+	procCoUninit          = ole32DLL.NewProc("CoUninitialize")
+	procCoTaskFree        = ole32DLL.NewProc("CoTaskMemFree")
 )
 
 var (

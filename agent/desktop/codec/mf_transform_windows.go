@@ -22,16 +22,16 @@ const (
 
 	imfActivateActivateObject = 33
 
-	imfTransformGetAttributes = 8
-	imfTransformSetInputType  = 15
-	imfTransformSetOutputType = 16
+	imfTransformGetAttributes  = 8
+	imfTransformSetInputType   = 15
+	imfTransformSetOutputType  = 16
 	imfTransformProcessMessage = 23
 
-	mftMessageCommandFlush          = 0x00000000
-	mftMessageNotifyBeginStreaming  = 0x10000000
-	mftMessageNotifyEndStreaming    = 0x10000001
-	mftMessageNotifyEndOfStream     = 0x10000002
-	mftMessageNotifyStartOfStream   = 0x10000003
+	mftMessageCommandFlush         = 0x00000000
+	mftMessageNotifyBeginStreaming = 0x10000000
+	mftMessageNotifyEndStreaming   = 0x10000001
+	mftMessageNotifyEndOfStream    = 0x10000002
+	mftMessageNotifyStartOfStream  = 0x10000003
 
 	mfVideoInterlaceProgressive = 2
 )

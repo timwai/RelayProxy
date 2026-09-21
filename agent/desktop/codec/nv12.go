@@ -42,7 +42,7 @@ func RGBAtoNV12(src *image.RGBA, dst []byte) ([]byte, error) {
 		return int(src.Pix[offset]), int(src.Pix[offset+1]), int(src.Pix[offset+2])
 	}
 	luma := func(r, g, b int) byte {
-		return clamp8(((47*r+157*g+16*b+128)>>8)+16)
+		return clamp8(((47*r + 157*g + 16*b + 128) >> 8) + 16)
 	}
 	chroma := func(r, g, b int) (int, int) {
 		u := ((-26*r - 87*g + 113*b + 128) >> 8) + 128

@@ -201,7 +201,7 @@ func main() {
 		log.Fatalf("[Agent] Invalid startup settings: %v", err)
 	}
 	var desktopHost *desktop.Host
-	if runtime.GOOS == "windows" && agentCfg.RDPEnabled {
+	if runtime.GOOS == "windows" && agentCfg.IsRDPEnabled() {
 		desktopHost, err = desktop.NewSystemHost()
 		if err != nil {
 			log.Printf("[Desktop] Windows capture backend unavailable: %v", err)

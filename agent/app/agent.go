@@ -1078,6 +1078,18 @@ func (a *Agent) RemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	return protocol.RemoteDesktopFrame{Sequence: frame.Sequence, MimeType: frame.MimeType, Width: frame.Width, Height: frame.Height, Data: frame.Data}
 }
 
+func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	return session.SendInput(ctx, event)
+}
+
 func (a *Agent) disconnectRelayDesktop() {
 	a.mu.Lock()
 	session := a.desktopConnection

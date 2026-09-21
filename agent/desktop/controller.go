@@ -9,6 +9,7 @@ import (
 	"time"
 
 	desktopmedia "relayproxy/internal/desktop"
+	"relayproxy/internal/protocol"
 )
 
 type DesktopMediaDialer func(context.Context, string) (*desktopmedia.MediaConn, error)
@@ -100,6 +101,19 @@ func (s *ControllerSession) Active() bool {
 	default:
 		return true
 	}
+}
+
+func (s *ControllerSession) SendInput(ctx context.Context, event protocol.DesktopInputEvent) error {
+	if s == nil || !s.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	if err := ValidateDesktopInputEvent(event); err != nil {
+		return err
+	}
+	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+		Type:  protocol.DesktopSessionInput,
+		Input: &event,
+	})
 }
 
 func (s *ControllerSession) LatestFrame() (FrameSnapshot, bool) {

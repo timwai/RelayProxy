@@ -8,10 +8,12 @@ import (
 	"errors"
 	"image"
 	"image/jpeg"
+	"log"
 	"sync"
 	"time"
 
 	desktopmedia "relayproxy/internal/desktop"
+	"relayproxy/internal/protocol"
 )
 
 type CaptureSource interface {
@@ -39,6 +41,7 @@ func DefaultHostConfig() HostConfig {
 
 type Host struct {
 	source CaptureSource
+	input  InputSink
 	cfg    HostConfig
 
 	sessionMu sync.Mutex
@@ -46,6 +49,10 @@ type Host struct {
 }
 
 func NewHost(source CaptureSource, cfg HostConfig) (*Host, error) {
+	return NewHostWithInput(source, nil, cfg)
+}
+
+func NewHostWithInput(source CaptureSource, input InputSink, cfg HostConfig) (*Host, error) {
 	if source == nil {
 		return nil, errors.New("desktop capture source is required")
 	}
@@ -74,7 +81,7 @@ func NewHost(source CaptureSource, cfg HostConfig) (*Host, error) {
 	if cfg.PacketSize <= desktopmedia.MediaHeaderSize {
 		cfg.PacketSize = defaults.PacketSize
 	}
-	return &Host{source: source, cfg: cfg}, nil
+	return &Host{source: source, input: input, cfg: cfg}, nil
 }
 
 func newMediaSessionID() (uint64, error) {
@@ -99,6 +106,60 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	h.sessionMu.Lock()
 	defer h.sessionMu.Unlock()
 
+	if h.input == nil {
+		return h.streamFrames(ctx, conn)
+	}
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer h.input.ReleaseAll()
+
+	errorsCh := make(chan error, 2)
+	go func() { errorsCh <- h.streamFrames(sessionCtx, conn) }()
+	go func() { errorsCh <- h.readInputLoop(sessionCtx, conn) }()
+
+	first := <-errorsCh
+	cancel()
+	_ = conn.Close()
+	second := <-errorsCh
+	if first != nil && !errors.Is(first, context.Canceled) {
+		return first
+	}
+	if second != nil && !errors.Is(second, context.Canceled) {
+		return second
+	}
+	return ctx.Err()
+}
+
+func (h *Host) readInputLoop(ctx context.Context, conn *desktopmedia.MediaConn) error {
+	var lastSequence uint64
+	for {
+		message, err := conn.ReceiveSessionMessage(ctx)
+		if err != nil {
+			return err
+		}
+		if message.Type != protocol.DesktopSessionInput || message.Input == nil {
+			return errors.New("invalid Relay Desktop session control message")
+		}
+		event := *message.Input
+		if err := ValidateDesktopInputEvent(event); err != nil {
+			return err
+		}
+		if event.Sequence != 0 {
+			if event.Sequence <= lastSequence {
+				continue
+			}
+			lastSequence = event.Sequence
+		}
+		if err := h.input.ApplyInput(ctx, event); err != nil {
+			// Input injection can be rejected by Windows UIPI when the remote
+			// foreground process is more privileged than the Agent. Keep video
+			// alive and surface the failure through logs instead of tearing down.
+			log.Printf("[Desktop] input injection failed: %v", err)
+		}
+	}
+}
+
+func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn) error {
 	sessionID, err := newMediaSessionID()
 	if err != nil {
 		return err

@@ -99,6 +99,10 @@ func (b *UIBridge) GetRemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	return b.agent.RemoteDesktopFrame()
 }
 
+func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
+	return b.agent.SendRemoteDesktopInput(event)
+}
+
 // GetLogs returns recent running logs
 func (b *UIBridge) GetLogs(limit int) []app.LogEntry {
 	return app.GlobalLogBuffer.Get(limit)

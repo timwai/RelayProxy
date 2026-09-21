@@ -124,7 +124,7 @@ func NewSystemHost() (*Host, error) {
 	if err != nil {
 		return nil, err
 	}
-	host, err := NewHost(source, DefaultHostConfig())
+	host, err := NewHostWithInput(source, newWindowsInputSink(), DefaultHostConfig())
 	if err != nil {
 		_ = source.Close()
 		return nil, err

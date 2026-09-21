@@ -34,11 +34,54 @@ const (
 	DesktopQualityCustom   DesktopQuality = "custom"
 )
 
+type DesktopCaptureCapability struct {
+	Backend    string `json:"backend"`
+	DirtyRects bool   `json:"dirtyRects,omitempty"`
+	MoveRects  bool   `json:"moveRects,omitempty"`
+	Cursor     bool   `json:"cursor,omitempty"`
+}
+
+type DesktopCodecCapability struct {
+	Codec      string `json:"codec"`
+	Encoder    string `json:"encoder,omitempty"`
+	Hardware   bool   `json:"hardware,omitempty"`
+	Encode     bool   `json:"encode,omitempty"`
+	Decode     bool   `json:"decode,omitempty"`
+	Chroma420  bool   `json:"chroma420,omitempty"`
+	Chroma444  bool   `json:"chroma444,omitempty"`
+	BitDepth8  bool   `json:"bitDepth8,omitempty"`
+	BitDepth10 bool   `json:"bitDepth10,omitempty"`
+	MaxWidth   int    `json:"maxWidth,omitempty"`
+	MaxHeight  int    `json:"maxHeight,omitempty"`
+	MaxFPS     int    `json:"maxFps,omitempty"`
+}
+
+type DesktopDisplayCapability struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	RefreshHz int    `json:"refreshHz,omitempty"`
+	Primary   bool   `json:"primary,omitempty"`
+	HDR       bool   `json:"hdr,omitempty"`
+}
+
 // DesktopCapabilities is the summary safe to expose to a controller before a
-// desktop session starts. Detailed codec negotiation belongs to the session.
+// desktop session starts. Detailed codec negotiation still happens per session.
 type DesktopCapabilities struct {
-	NativeRDP    bool `json:"nativeRdp"`
-	RelayDesktop bool `json:"relayDesktop"`
+	NativeRDP      bool                       `json:"nativeRdp"`
+	RelayDesktop   bool                       `json:"relayDesktop"`
+	Captures       []DesktopCaptureCapability `json:"captures,omitempty"`
+	Codecs         []DesktopCodecCapability   `json:"codecs,omitempty"`
+	Displays       []DesktopDisplayCapability `json:"displays,omitempty"`
+	Audio          bool                       `json:"audio,omitempty"`
+	Clipboard      bool                       `json:"clipboard,omitempty"`
+	MultiMonitor   bool                       `json:"multiMonitor,omitempty"`
+	HDR            bool                       `json:"hdr,omitempty"`
+	VirtualDisplay bool                       `json:"virtualDisplay,omitempty"`
+	MaxWidth       int                        `json:"maxWidth,omitempty"`
+	MaxHeight      int                        `json:"maxHeight,omitempty"`
+	MaxFPS         int                        `json:"maxFps,omitempty"`
 }
 
 // RemoteDesktopTarget is the unified target model used by Agent UI and future
@@ -50,13 +93,27 @@ type RemoteDesktopTarget struct {
 	Capabilities DesktopCapabilities `json:"capabilities"`
 }
 
-// RemoteDesktopConnectOptions intentionally starts small. Media-specific fields
-// will be added when Relay Desktop lands; legacy RDP ignores them.
+type DesktopResolutionOptions struct {
+	Mode      string `json:"mode,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	MaxWidth  int    `json:"maxWidth,omitempty"`
+	MaxHeight int    `json:"maxHeight,omitempty"`
+}
+
+// RemoteDesktopConnectOptions is shared by Native RDP and Relay Desktop.
+// Backend-specific implementations ignore fields that do not apply to them.
 type RemoteDesktopConnectOptions struct {
-	Backend    DesktopBackend `json:"backend,omitempty"`
-	Scene      DesktopScene   `json:"scene,omitempty"`
-	Quality    DesktopQuality `json:"quality,omitempty"`
-	AutoLaunch *bool          `json:"autoLaunch,omitempty"`
+	Backend    DesktopBackend           `json:"backend,omitempty"`
+	Scene      DesktopScene             `json:"scene,omitempty"`
+	Quality    DesktopQuality           `json:"quality,omitempty"`
+	Resolution DesktopResolutionOptions `json:"resolution,omitempty"`
+	FPS        int                      `json:"fps,omitempty"`
+	MaxBitrate int                      `json:"maxBitrate,omitempty"`
+	DisplayID  string                   `json:"displayId,omitempty"`
+	Clipboard  *bool                    `json:"clipboard,omitempty"`
+	Audio      *bool                    `json:"audio,omitempty"`
+	AutoLaunch *bool                    `json:"autoLaunch,omitempty"`
 }
 
 // RemoteDesktopSessionInfo is returned after a backend has successfully
@@ -86,4 +143,73 @@ type RemoteDesktopStatus struct {
 	UDPEnabled bool           `json:"udpEnabled,omitempty"`
 	UDPActive  bool           `json:"udpActive,omitempty"`
 	UDPReason  string         `json:"udpReason,omitempty"`
+}
+
+const (
+	DesktopControlCapabilities    = "capabilities"
+	DesktopControlConnectRequest  = "connect_request"
+	DesktopControlConnectNotify   = "connect_notify"
+	DesktopControlConnectResponse = "connect_response"
+	DesktopControlConfig          = "config"
+	DesktopControlConfigAck       = "config_ack"
+	DesktopControlStats           = "stats"
+	DesktopControlIDRRequest      = "idr_request"
+	DesktopControlPathChange      = "path_change"
+	DesktopControlLeaseRenew      = "lease_renew"
+	DesktopControlLeaseAck        = "lease_ack"
+	DesktopControlSessionClose    = "session_close"
+	DesktopControlError           = "error"
+)
+
+type DesktopVideoConfig struct {
+	Generation    uint32 `json:"generation"`
+	Codec         string `json:"codec"`
+	Width         int    `json:"width"`
+	Height        int    `json:"height"`
+	FPS           int    `json:"fps"`
+	TargetBitrate int    `json:"targetBitrate"`
+	MaxBitrate    int    `json:"maxBitrate,omitempty"`
+	Chroma        string `json:"chroma,omitempty"`
+	BitDepth      int    `json:"bitDepth,omitempty"`
+	DisplayID     string `json:"displayId,omitempty"`
+}
+
+type DesktopSessionStats struct {
+	CaptureFPS       float64 `json:"captureFps,omitempty"`
+	EncodeFPS        float64 `json:"encodeFps,omitempty"`
+	DecodeFPS        float64 `json:"decodeFps,omitempty"`
+	RenderFPS        float64 `json:"renderFps,omitempty"`
+	ActualBitrate    int64   `json:"actualBitrate,omitempty"`
+	TargetBitrate    int64   `json:"targetBitrate,omitempty"`
+	RTTMs            float64 `json:"rttMs,omitempty"`
+	JitterMs         float64 `json:"jitterMs,omitempty"`
+	LossPercent      float64 `json:"lossPercent,omitempty"`
+	DeliveryRate     int64   `json:"deliveryRate,omitempty"`
+	SendQueueDelayMs float64 `json:"sendQueueDelayMs,omitempty"`
+	CaptureMs        float64 `json:"captureMs,omitempty"`
+	EncodeMs         float64 `json:"encodeMs,omitempty"`
+	DecodeMs         float64 `json:"decodeMs,omitempty"`
+	RenderMs         float64 `json:"renderMs,omitempty"`
+	DroppedFrames    uint64  `json:"droppedFrames,omitempty"`
+	Path             string  `json:"path,omitempty"`
+}
+
+// DesktopControlMessage is carried over FrameTypeDesktopControl. The server
+// derives the sender identity from DeviceSession; ControllerID/TargetID are
+// descriptive fields and must not be trusted as authentication.
+type DesktopControlMessage struct {
+	Type           string                       `json:"type"`
+	SessionID      uint64                       `json:"sessionId,omitempty"`
+	ControllerID   string                       `json:"controllerId,omitempty"`
+	TargetID       string                       `json:"targetId,omitempty"`
+	SessionToken   []byte                       `json:"sessionToken,omitempty"`
+	Capabilities   *DesktopCapabilities         `json:"capabilities,omitempty"`
+	Options        *RemoteDesktopConnectOptions `json:"options,omitempty"`
+	Config         *DesktopVideoConfig          `json:"config,omitempty"`
+	Stats          *DesktopSessionStats         `json:"stats,omitempty"`
+	LeaseExpiresAt int64                        `json:"leaseExpiresAt,omitempty"`
+	LeaseSec       int                          `json:"leaseSec,omitempty"`
+	Path           string                       `json:"path,omitempty"`
+	ErrorCode      string                       `json:"errorCode,omitempty"`
+	ErrorMessage   string                       `json:"errorMessage,omitempty"`
 }

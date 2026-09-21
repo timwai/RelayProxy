@@ -13,7 +13,9 @@ const (
 	CapabilityProxyExit   = "proxy.exit"
 	CapabilityRDPClient   = "rdp.controller"
 	CapabilityRDPHost     = "rdp.host"
-	CapabilityRDPPublic   = "rdp.public"
+	CapabilityRDPPublic         = "rdp.public"
+	CapabilityDesktopController = "desktop.controller"
+	CapabilityDesktopHost       = "desktop.host"
 
 	ErrCodeApprovalPending  = "APPROVAL_PENDING"
 	ErrCodeDeviceRejected   = "DEVICE_REJECTED"

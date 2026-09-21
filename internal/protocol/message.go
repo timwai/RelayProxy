@@ -17,7 +17,8 @@ const (
 	FrameTypeOpenUDPResp FrameType = 0x09
 	FrameTypeOpenRDP     FrameType = 0x0A
 	FrameTypeOpenRDPUDP  FrameType = 0x0B
-	FrameTypeRDPControl  FrameType = 0x0C
+	FrameTypeRDPControl     FrameType = 0x0C
+	FrameTypeDesktopControl FrameType = 0x0D
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

@@ -91,9 +91,5 @@ jobs:
             $errors | ForEach-Object { Write-Error $_.Message }
             exit 1
           }
-      - name: Probe DXGI module checksum
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: go mod download -json github.com/go-mswin/screencapture@v0.1.1
       - name: Test desktop packages
         run: go test ./agent/gui ./cmd/relay-agent -count=1

@@ -27,9 +27,10 @@ const (
 // local target address is deliberately absent: the target Agent always dials
 // its own configured RDP service.
 type RDPTarget struct {
-	DeviceID string `json:"deviceId"`
-	Name     string `json:"name"`
-	Online   bool   `json:"online"`
+	DeviceID            string               `json:"deviceId"`
+	Name                string               `json:"name"`
+	Online              bool                 `json:"online"`
+	DesktopCapabilities *DesktopCapabilities `json:"desktopCapabilities,omitempty"`
 }
 
 type DeviceHello struct {

@@ -10,6 +10,7 @@ import (
 
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/divert"
+	"relayproxy/internal/protocol"
 )
 
 const okResult = "ok"
@@ -45,6 +46,56 @@ func (s *WailsService) GetStatus() (string, error) {
 		return "{}", nil
 	}
 	return s.owner.statusJSON(), nil
+}
+
+func (s *WailsService) GetRemoteDesktopTargets() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "[]", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopTargets())
+	if err != nil {
+		return "[]", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) ConnectRemoteDesktop(targetID string, rawOptions string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	var options protocol.RemoteDesktopConnectOptions
+	if strings.TrimSpace(rawOptions) != "" {
+		if err := json.Unmarshal([]byte(rawOptions), &options); err != nil {
+			data, _ := json.Marshal(map[string]any{"ok": false, "message": "invalid remote desktop options: " + err.Error()})
+			return string(data), nil
+		}
+	}
+	session, err := s.owner.bridge.ConnectRemoteDesktop(targetID, options)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{"ok": true, "session": session})
+	return string(data), nil
+}
+
+func (s *WailsService) DisconnectRemoteDesktop() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	s.owner.bridge.DisconnectRemoteDesktop()
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) GetRemoteDesktopStatus() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"state":"idle"}`, nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopStatus())
+	if err != nil {
+		return `{"state":"idle"}`, nil
+	}
+	return string(data), nil
 }
 
 func (s *WailsService) GetLogs() (string, error) {

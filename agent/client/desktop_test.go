@@ -66,8 +66,8 @@ func TestDialDesktopMediaNegotiatesNativeDatagrams(t *testing.T) {
 
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return clientSession }, func() string { return "controller" })
 	conn, err := dialer.DialDesktopMediaWithOptions(ctx, "desktop-target", protocol.RemoteDesktopConnectOptions{
-		Quality: protocol.DesktopQualityHigh,
-		FPS: 24,
+		Quality:    protocol.DesktopQualityHigh,
+		FPS:        24,
 		MaxBitrate: 8_000_000,
 	})
 	if err != nil {

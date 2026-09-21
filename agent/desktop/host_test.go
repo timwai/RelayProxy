@@ -41,12 +41,11 @@ func TestHostCaptureJPEG(t *testing.T) {
 	}
 }
 
-
 func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
 	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
-		Quality: protocol.DesktopQualityHigh,
+		Quality:    protocol.DesktopQualityHigh,
 		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 1600, Height: 900},
-		FPS: 24,
+		FPS:        24,
 		MaxBitrate: 8_000_000,
 	})
 	if cfg.MaxWidth != 1600 || cfg.MaxHeight != 900 || cfg.MaxFPS != 24 {
@@ -60,7 +59,7 @@ func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
 func TestResolveHostConfigClampsUnsafeValues(t *testing.T) {
 	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
 		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 9000, Height: 9000},
-		FPS: 240,
+		FPS:        240,
 		MaxBitrate: 500_000_000,
 	})
 	if cfg.MaxWidth != maxJPEGWidth || cfg.MaxHeight != maxJPEGHeight || cfg.MaxFPS != maxJPEGFPS || cfg.MaxBitrate != maxJPEGBitrate {

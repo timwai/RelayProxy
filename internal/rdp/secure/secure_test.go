@@ -70,3 +70,44 @@ func TestDataCodecReusableBuffers(t *testing.T) {
 		t.Fatalf("short destination error=%v", err)
 	}
 }
+
+func TestDesktopMediaDomainRejectsRDPAuthentication(t *testing.T) {
+	key := bytes.Repeat([]byte{0x51}, 32)
+
+	punchPacket, err := (PunchPacket{
+		Type: PunchRequest, SessionID: 71, Nonce: 99,
+	}).EncodeWithDomain(key, DomainDesktopMedia)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodePunchPacketWithDomain(punchPacket, key, DomainDesktopMedia); err != nil {
+		t.Fatalf("desktop punch rejected: %v", err)
+	}
+	if _, err := DecodePunchPacket(punchPacket, key); err != ErrBadMAC {
+		t.Fatalf("desktop punch accepted by RDP domain: %v", err)
+	}
+
+	desktopSender, err := NewDataCodecWithDomain(71, key, DomainDesktopMedia)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desktopReceiver, err := NewDataCodecWithDomain(71, key, DomainDesktopMedia)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rdpReceiver, err := NewDataCodec(71, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := desktopSender.Encode([]byte("desktop-media"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := desktopReceiver.Decode(wire)
+	if err != nil || string(payload) != "desktop-media" {
+		t.Fatalf("desktop data decode failed: err=%v payload=%q", err, payload)
+	}
+	if _, err := rdpReceiver.Decode(wire); err != ErrBadMAC {
+		t.Fatalf("desktop data accepted by RDP domain: %v", err)
+	}
+}

@@ -118,3 +118,41 @@ func TestPacketConnRoundTripsLargeDatagram(t *testing.T) {
 		t.Fatalf("large datagram mismatch: n=%d want=%d", n, len(payload))
 	}
 }
+
+func TestPacketConnDesktopDomainKeepaliveIsIsolated(t *testing.T) {
+	target, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	controller, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := []byte("0123456789abcdef0123456789abcdef")
+	conn, err := newPacketConn(&UDPResult{
+		Conn: controller, RemoteAddr: target.LocalAddr().(*net.UDPAddr),
+		SessionID: 72, Key: key, Domain: secure.DomainDesktopMedia,
+	}, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	_ = target.SetReadDeadline(time.Now().Add(time.Second))
+	buffer := make([]byte, 128)
+	n, source, err := target.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := secure.DecodePunchPacketWithDomain(buffer[:n], key, secure.DomainDesktopMedia)
+	if err != nil {
+		t.Fatalf("decode desktop keepalive: %v", err)
+	}
+	if _, err := secure.DecodePunchPacket(buffer[:n], key); err != secure.ErrBadMAC {
+		t.Fatalf("desktop keepalive accepted by RDP domain: %v", err)
+	}
+	if err := WritePunchAckWithDomain(target, source, packet, key, secure.DomainDesktopMedia); err != nil {
+		t.Fatalf("acknowledge desktop keepalive: %v", err)
+	}
+}

@@ -3,6 +3,7 @@
 package desktop
 
 import (
+	"errors"
 	"testing"
 	"time"
 

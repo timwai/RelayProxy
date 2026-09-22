@@ -219,7 +219,7 @@ func TestCombinedWeakNetworkABRAndPathSwitchDoNotFlap(t *testing.T) {
 			t.Fatalf("path switched before hold elapsed at second=%d: %+v", second, decision)
 		}
 	}
-	fallbackAt := start.Add((2*time.Second)+policy.UpgradeHold)
+	fallbackAt := start.Add((2 * time.Second) + policy.UpgradeHold)
 	fallback := gate.Evaluate(fallbackAt, "udp_p2p", impairedDirect, "relay", relay, policy)
 	if !fallback.Switch || fallback.Reason != "candidate_stable_better" {
 		t.Fatalf("sustained combined impairment did not fall back: %+v", fallback)

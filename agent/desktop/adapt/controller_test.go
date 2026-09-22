@@ -362,7 +362,11 @@ func TestSetResolutionScaleSynchronizesManualGeneration(t *testing.T) {
 		t.Fatalf("manual resolution scale=%d want=67", controller.TargetResolutionScale())
 	}
 	controller.SetResolutionScale(10)
-	if controller.TargetResolutionScale() != cfg.MinResolutionScale {
-		t.Fatalf("resolution scale below floor=%d want=%d", controller.TargetResolutionScale(), cfg.MinResolutionScale)
+	if controller.TargetResolutionScale() != 10 {
+		t.Fatalf("manual resolution scale=%d want=10", controller.TargetResolutionScale())
+	}
+	controller.SetResolutionScale(0)
+	if controller.TargetResolutionScale() != 100 {
+		t.Fatalf("invalid zero resolution scale=%d want=100", controller.TargetResolutionScale())
 	}
 }

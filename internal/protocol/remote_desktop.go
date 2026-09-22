@@ -203,6 +203,7 @@ const (
 	DesktopSessionPing        = "ping"
 	DesktopSessionPong        = "pong"
 	DesktopSessionStatsReport = "stats"
+	DesktopSessionVideoControl = "video_control"
 )
 
 type DesktopSessionMessage struct {
@@ -212,7 +213,8 @@ type DesktopSessionMessage struct {
 	Cursor      *DesktopCursorState    `json:"cursor,omitempty"`
 	Clipboard   *DesktopClipboardState `json:"clipboard,omitempty"`
 	Probe       *DesktopSessionProbe   `json:"probe,omitempty"`
-	Stats       *DesktopSessionStats   `json:"stats,omitempty"`
+	Stats        *DesktopSessionStats   `json:"stats,omitempty"`
+	VideoControl *DesktopVideoControl   `json:"videoControl,omitempty"`
 }
 
 const (
@@ -256,6 +258,10 @@ type DesktopCursorState struct {
 	HotspotX     int    `json:"hotspotX,omitempty"`
 	HotspotY     int    `json:"hotspotY,omitempty"`
 	PNG          []byte `json:"png,omitempty"`
+}
+
+type DesktopVideoControl struct {
+	TargetBitrate int `json:"targetBitrate,omitempty"`
 }
 
 type DesktopVideoConfig struct {

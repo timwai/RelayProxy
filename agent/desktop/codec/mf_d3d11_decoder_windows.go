@@ -125,10 +125,10 @@ func createMFDecoderD3D11() (*mfDecoderD3D11, error) {
 
 	multithread, err := comQueryInterface(device, &iidID3D10Multithread)
 	if err == nil {
-		hr = comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
+		protected := comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
 		releaseIUnknown(multithread)
-		if hresultFailed(hr) {
-			return fail(hresultError("ID3D10Multithread.SetMultithreadProtected", hr))
+		if protected == 0 {
+			return fail(errors.New("ID3D10Multithread.SetMultithreadProtected returned FALSE"))
 		}
 	}
 

@@ -197,6 +197,7 @@ type DesktopInputEvent struct {
 const (
 	DesktopSessionInput       = "input"
 	DesktopSessionVideoConfig = "video_config"
+	DesktopSessionIDRRequest  = "idr_request"
 )
 
 type DesktopSessionMessage struct {

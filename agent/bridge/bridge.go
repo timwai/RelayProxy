@@ -103,6 +103,14 @@ func (b *UIBridge) GetRemoteDesktopCursor(knownCursorID string) protocol.Desktop
 	return b.agent.RemoteDesktopCursor(strings.TrimSpace(knownCursorID))
 }
 
+func (b *UIBridge) GetRemoteDesktopClipboard(knownSequence uint64) protocol.DesktopClipboardState {
+	return b.agent.RemoteDesktopClipboard(knownSequence)
+}
+
+func (b *UIBridge) SendRemoteDesktopClipboard(text string) error {
+	return b.agent.SendRemoteDesktopClipboard(text)
+}
+
 func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	return b.agent.SendRemoteDesktopInput(event)
 }

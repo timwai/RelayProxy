@@ -240,6 +240,15 @@ func (s *ControllerSession) probeLoop(ctx context.Context) {
 	}
 }
 
+func (s *ControllerSession) VideoConfigSnapshot() protocol.DesktopVideoConfig {
+	if s == nil {
+		return protocol.DesktopVideoConfig{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.videoConfig
+}
+
 func (s *ControllerSession) currentVideoConfig(ctx context.Context) (protocol.DesktopVideoConfig, bool) {
 	s.mu.RLock()
 	config := s.videoConfig

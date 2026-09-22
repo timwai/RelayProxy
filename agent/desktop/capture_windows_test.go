@@ -16,7 +16,7 @@ func TestCopyDXGIFrameConvertsBGRAAndStride(t *testing.T) {
 		1, 2, 3, 0, 4, 5, 6, 0, 99, 99, 99, 99,
 		7, 8, 9, 0, 10, 11, 12, 0, 88, 88, 88, 88,
 	}
-	frame := screencapture.Frame{Pix: pix, Width: 2, Height: 2, Stride: 12, Seq: 1, At: time.Now()}
+	frame := windowsCaptureFrame{Pix: pix, Width: 2, Height: 2, Stride: 12, Sequence: 1, At: time.Now()}
 	got, err := copyDXGIFrame(frame, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -39,9 +39,9 @@ func TestCopyDXGIFrameConvertsBGRAAndStride(t *testing.T) {
 }
 
 func TestCopyDXGIFrameReusesBuffer(t *testing.T) {
-	frame := screencapture.Frame{
+	frame := windowsCaptureFrame{
 		Pix:   []byte{1, 2, 3, 4},
-		Width: 1, Height: 1, Stride: 4, Seq: 1, At: time.Now(),
+		Width: 1, Height: 1, Stride: 4, Sequence: 1, At: time.Now(),
 	}
 	first, err := copyDXGIFrame(frame, nil)
 	if err != nil {
@@ -169,25 +169,62 @@ func TestWindowsCaptureBackendPolicy(t *testing.T) {
 		{preference: protocol.DesktopCaptureBackend("invalid"), wantErr: true, explicit: true},
 	}
 	for _, tt := range tests {
-		got, err := windowsCaptureBackend(tt.preference)
+		got, err := screencaptureBackend(tt.preference)
 		if (err != nil) != tt.wantErr {
 			t.Fatalf("preference=%q err=%v wantErr=%v", tt.preference, err, tt.wantErr)
 		}
 		if !tt.wantErr && got != tt.want {
 			t.Fatalf("preference=%q backend=%v want=%v", tt.preference, got, tt.want)
 		}
+		if tt.preference == protocol.DesktopCaptureWGC && !errors.Is(err, errWindowsGraphicsCaptureUnavailable) {
+			t.Fatalf("WGC error=%v want=%v", err, errWindowsGraphicsCaptureUnavailable)
+		}
 		if gotExplicit := explicitWindowsCaptureBackend(tt.preference); gotExplicit != tt.explicit {
 			t.Fatalf("preference=%q explicit=%v want=%v", tt.preference, gotExplicit, tt.explicit)
 		}
 	}
-	if !windowsCaptureRequiresDisplayTarget(screencapture.BackendDuplication) {
-		t.Fatal("DXGI must require a concrete display target")
+	for _, preference := range []protocol.DesktopCaptureBackend{
+		protocol.DesktopCaptureDXGI,
+		protocol.DesktopCaptureWGC,
+	} {
+		if !windowsCaptureRequiresDisplayTarget(preference) {
+			t.Fatalf("%s must require a concrete display target", preference)
+		}
 	}
-	if windowsCaptureRequiresDisplayTarget(screencapture.BackendGDI) ||
-		windowsCaptureRequiresDisplayTarget(screencapture.BackendAuto) {
-		t.Fatal("GDI/Auto unexpectedly require a concrete display target")
+	for _, preference := range []protocol.DesktopCaptureBackend{
+		"",
+		protocol.DesktopCaptureAuto,
+		protocol.DesktopCaptureGDI,
+	} {
+		if windowsCaptureRequiresDisplayTarget(preference) {
+			t.Fatalf("%s unexpectedly requires a concrete display target", preference)
+		}
 	}
 	if got := normalizedWindowsCaptureBackend(""); got != protocol.DesktopCaptureAuto {
 		t.Fatalf("normalized empty capture backend=%q want=auto", got)
+	}
+}
+
+func TestWindowsCaptureFramePreservesPaddedStride(t *testing.T) {
+	frame := windowsCaptureFrame{
+		Pix:      make([]byte, 24*2),
+		Width:    4,
+		Height:   2,
+		Stride:   24,
+		Sequence: 7,
+		At:       time.Now(),
+	}
+	if !frame.Valid() {
+		t.Fatal("padded Windows capture frame was rejected")
+	}
+	if got := len(frame.Row(1)); got != 16 {
+		t.Fatalf("row bytes=%d want=16", got)
+	}
+	if frame.Row(-1) != nil || frame.Row(2) != nil {
+		t.Fatal("out-of-range row returned data")
+	}
+	frame.Stride = 15
+	if frame.Valid() {
+		t.Fatal("short-stride Windows capture frame was accepted")
 	}
 }

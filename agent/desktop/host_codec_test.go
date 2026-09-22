@@ -264,3 +264,20 @@ func TestRawFrameFitsH264(t *testing.T) {
 		t.Fatal("invalid BGRA stride was accepted")
 	}
 }
+
+func TestEncoderStageMilliseconds(t *testing.T) {
+	total, convert, codec := encoderStageMilliseconds(desktopcodec.EncoderStats{
+		LastEncodeTime:  8 * time.Millisecond,
+		LastConvertTime: 3 * time.Millisecond,
+	})
+	if total != 8 || convert != 3 || codec != 5 {
+		t.Fatalf("encoder stages total=%v convert=%v codec=%v", total, convert, codec)
+	}
+	_, _, codec = encoderStageMilliseconds(desktopcodec.EncoderStats{
+		LastEncodeTime:  2 * time.Millisecond,
+		LastConvertTime: 3 * time.Millisecond,
+	})
+	if codec != 0 {
+		t.Fatalf("negative codec duration was not clamped: %v", codec)
+	}
+}

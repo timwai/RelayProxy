@@ -2136,6 +2136,11 @@
       parts.push('RX ' + formatDesktopBitrate(stats.actualBitrate));
       if (stats.captureFps) parts.push('Capture ' + stats.captureFps.toFixed(1) + ' FPS');
       if (stats.encodeFps) parts.push('Encode ' + stats.encodeFps.toFixed(1) + ' FPS');
+      if (stats.receiveFps) parts.push('RX ' + stats.receiveFps.toFixed(1) + ' FPS');
+      if (stats.decodeFps) parts.push('Decode ' + stats.decodeFps.toFixed(1) + ' FPS');
+      if (stats.renderFps) parts.push('Render ' + stats.renderFps.toFixed(1) + ' FPS');
+      if (stats.decodeMs) parts.push('Decode ' + stats.decodeMs.toFixed(1) + ' ms');
+      if (stats.renderMs) parts.push('Render ' + stats.renderMs.toFixed(1) + ' ms');
       if (stats.targetBitrate) parts.push('Target ' + formatDesktopBitrate(stats.targetBitrate));
       target.textContent = '网络统计：' + parts.join(' · ');
     }

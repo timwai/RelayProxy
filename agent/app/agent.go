@@ -1096,6 +1096,32 @@ func (a *Agent) RemoteDesktopCursor(knownCursorID string) protocol.DesktopCursor
 	return cursor
 }
 
+func (a *Agent) RemoteDesktopClipboard(knownSequence uint64) protocol.DesktopClipboardState {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return protocol.DesktopClipboardState{}
+	}
+	clipboard, ok := session.LatestClipboard(knownSequence)
+	if !ok {
+		return protocol.DesktopClipboardState{}
+	}
+	return clipboard
+}
+
+func (a *Agent) SendRemoteDesktopClipboard(text string) error {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	return session.SendClipboard(ctx, text)
+}
+
 func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	a.mu.RLock()
 	session := a.desktopConnection

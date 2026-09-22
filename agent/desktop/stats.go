@@ -36,6 +36,7 @@ type sessionStatsTracker struct {
 	diagnosticRecvFrames    uint64
 	diagnosticLossDetected  uint64
 	diagnosticLossRecovered uint64
+	diagnosticDropped       uint64
 
 	probeSequence uint64
 	pendingProbes map[uint64]time.Time
@@ -159,6 +160,7 @@ func (s *sessionStatsTracker) SetPath(path string) {
 	s.diagnosticRecvFrames = s.recvFrames
 	s.diagnosticLossDetected = s.lossDetected
 	s.diagnosticLossRecovered = s.lossRecovered
+	s.diagnosticDropped = s.remote.DroppedFrames + s.dropped
 }
 
 // PathQuality returns media-path-local quality since the most recent path
@@ -286,7 +288,6 @@ func (s *sessionStatsTracker) AdaptationSnapshot(now time.Time) protocol.Desktop
 	stats.RTTMs = s.rttMs
 	stats.JitterMs = s.jitterMs
 	stats.LossPercent = lossPercent
-	stats.DroppedFrames += s.dropped
 	if s.path != "" {
 		stats.Path = s.path
 	}
@@ -327,6 +328,12 @@ func (s *sessionStatsTracker) DiagnosticsSnapshot(now time.Time) protocol.Deskto
 	}
 
 	stats := s.remote
+	totalDropped := s.remote.DroppedFrames + s.dropped
+	droppedDelta := totalDropped
+	if totalDropped >= s.diagnosticDropped {
+		droppedDelta = totalDropped - s.diagnosticDropped
+	}
+	stats.DroppedFrames = droppedDelta
 	stats.ReceiveFPS = float64(frameDelta) / elapsed
 	stats.DecodeFPS = s.viewer.DecodeFPS
 	stats.RenderFPS = s.viewer.RenderFPS
@@ -350,6 +357,7 @@ func (s *sessionStatsTracker) DiagnosticsSnapshot(now time.Time) protocol.Deskto
 	s.diagnosticRecvFrames = s.recvFrames
 	s.diagnosticLossDetected = s.lossDetected
 	s.diagnosticLossRecovered = s.lossRecovered
+	s.diagnosticDropped = totalDropped
 	return stats
 }
 

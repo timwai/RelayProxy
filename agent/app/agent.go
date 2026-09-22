@@ -1094,6 +1094,18 @@ func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	return session.SendInput(ctx, event)
 }
 
+func (a *Agent) RequestRemoteDesktopIDR() error {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	return session.RequestIDR(ctx)
+}
+
 func (a *Agent) disconnectRelayDesktop() {
 	a.mu.Lock()
 	session := a.desktopConnection

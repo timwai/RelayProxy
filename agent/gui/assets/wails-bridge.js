@@ -17,6 +17,10 @@
   window.goGetRemoteDesktopStatus = () => invoke('GetRemoteDesktopStatus');
   window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');
   window.goGetRemoteDesktopCursor = cursorID => invoke('GetRemoteDesktopCursor', cursorID || '');
+  window.goGetRemoteDesktopClipboard = sequence => invoke('GetRemoteDesktopClipboard', sequence || 0);
+  window.goSendRemoteDesktopClipboard = text => invoke('SendRemoteDesktopClipboard', text || '');
+  window.goGetClipboardText = () => invoke('GetClipboardText');
+  window.goSetClipboardText = text => invoke('SetClipboardText', text || '');
   window.goSendRemoteDesktopInput = raw => invoke('SendRemoteDesktopInput', raw);
   window.goRequestRemoteDesktopIDR = () => invoke('RequestRemoteDesktopIDR');
   window.goGetLogs = () => invoke('GetLogs');

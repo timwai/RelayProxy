@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"time"
 	"unsafe"
 
@@ -54,6 +55,50 @@ type wgcFrameStream struct {
 	at       time.Time
 	lastErr  error
 	closed   bool
+}
+
+// windowsD3D11CaptureSurface owns one capture texture reference and the device
+// that created it. Keeping both references makes the surface safe to hand
+// beyond the WGC frame lifetime and across a later frame-pool Recreate.
+type windowsD3D11CaptureSurface struct {
+	device  *graphicsdirect3d11.ID3D11Device
+	texture *graphicsdirect3d11.ID3D11Texture2D
+	format  graphicsdxgicommon.DXGI_FORMAT
+	once    sync.Once
+}
+
+func (s *windowsD3D11CaptureSurface) Backend() string {
+	if s == nil {
+		return ""
+	}
+	return "d3d11"
+}
+
+func (s *windowsD3D11CaptureSurface) Format() string {
+	if s == nil {
+		return ""
+	}
+	if s.format == graphicsdxgicommon.DXGI_FORMAT_B8G8R8A8_UNORM {
+		return "bgra8"
+	}
+	return fmt.Sprintf("dxgi-%d", int32(s.format))
+}
+
+func (s *windowsD3D11CaptureSurface) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.once.Do(func() {
+		if s.texture != nil {
+			s.texture.Release()
+			s.texture = nil
+		}
+		if s.device != nil {
+			s.device.Release()
+			s.device = nil
+		}
+	})
+	return nil
 }
 
 func windowsWGCAvailable() bool {
@@ -294,6 +339,163 @@ func (s *wgcFrameStream) WaitFrame(ctx context.Context) (windowsCaptureFrame, er
 		case <-timer.C:
 		}
 	}
+}
+
+func (s *wgcFrameStream) NativeFrame(ctx context.Context) (NativeCaptureFrame, error) {
+	if s == nil || s.closed {
+		return NativeCaptureFrame{}, screencapture.ErrBackendUnavailable
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := winrtruntime.Initialize(); err != nil {
+		return NativeCaptureFrame{}, err
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return NativeCaptureFrame{}, err
+		}
+		frame, fresh, err := s.tryNativeFrameLocked()
+		if err != nil {
+			s.lastErr = err
+			return NativeCaptureFrame{}, err
+		}
+		if fresh {
+			s.lastErr = nil
+			return frame, nil
+		}
+		timer := time.NewTimer(4 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return NativeCaptureFrame{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (s *wgcFrameStream) tryNativeFrameLocked() (NativeCaptureFrame, bool, error) {
+	if s.pool == nil || s.device == nil {
+		return NativeCaptureFrame{}, false, screencapture.ErrBackendUnavailable
+	}
+	var latest *winrtcapture.IDirect3D11CaptureFrame
+	for {
+		frame, err := s.pool.TryGetNextFrame()
+		if err != nil {
+			if latest != nil {
+				latest.Release()
+			}
+			return NativeCaptureFrame{}, false, fmt.Errorf("WGC get next native frame: %w", err)
+		}
+		if frame == nil {
+			break
+		}
+		if latest != nil {
+			latest.Release()
+		}
+		latest = frame
+	}
+	if latest == nil {
+		return NativeCaptureFrame{}, false, nil
+	}
+
+	size, err := latest.ContentSize()
+	if err != nil {
+		latest.Release()
+		return NativeCaptureFrame{}, false, fmt.Errorf("WGC read native frame content size: %w", err)
+	}
+	if size.Width <= 0 || size.Height <= 0 {
+		latest.Release()
+		return NativeCaptureFrame{}, false, fmt.Errorf("WGC native frame has invalid size %dx%d", size.Width, size.Height)
+	}
+	native, err := s.nativeSurfaceFrameLocked(latest, size)
+	latest.Release()
+	if err != nil {
+		return NativeCaptureFrame{}, false, err
+	}
+
+	if size != s.poolSize {
+		if err := s.pool.Recreate(
+			s.winrtDevice,
+			winrtdirectx.DirectXPixelFormatB8G8R8A8UIntNormalized,
+			wgcFramePoolBuffers,
+			size,
+		); err != nil {
+			_ = native.Surface.Close()
+			return NativeCaptureFrame{}, false, fmt.Errorf(
+				"WGC recreate frame pool for native %dx%d: %w", size.Width, size.Height, err,
+			)
+		}
+		s.poolSize = size
+	}
+	s.sequence++
+	s.at = native.CapturedAt
+	return native, true, nil
+}
+
+func (s *wgcFrameStream) nativeSurfaceFrameLocked(
+	frame *winrtcapture.IDirect3D11CaptureFrame,
+	size winrtgraphics.SizeInt32,
+) (NativeCaptureFrame, error) {
+	surface, err := frame.Surface()
+	if err != nil {
+		return NativeCaptureFrame{}, fmt.Errorf("WGC get native Direct3D surface: %w", err)
+	}
+	if surface == nil {
+		return NativeCaptureFrame{}, errors.New("WGC native frame surface is nil")
+	}
+	defer surface.Release()
+
+	access, err := wgcQueryInterface[win32direct3d11.IDirect3DDxgiInterfaceAccess](
+		surface,
+		&win32direct3d11.IID_IDirect3DDxgiInterfaceAccess,
+	)
+	if err != nil {
+		return NativeCaptureFrame{}, fmt.Errorf("WGC native surface query DXGI access: %w", err)
+	}
+	defer access.Release()
+
+	var textureUnknown *win32.IUnknown
+	if err := access.GetInterface(&graphicsdirect3d11.IID_ID3D11Texture2D, &textureUnknown); err != nil {
+		return NativeCaptureFrame{}, fmt.Errorf("WGC native get ID3D11Texture2D: %w", err)
+	}
+	if textureUnknown == nil {
+		return NativeCaptureFrame{}, errors.New("WGC native frame texture is nil")
+	}
+	texture := wgcCast[graphicsdirect3d11.ID3D11Texture2D](textureUnknown)
+
+	var desc graphicsdirect3d11.D3D11_TEXTURE2D_DESC
+	texture.GetDesc(&desc)
+	if desc.Format != graphicsdxgicommon.DXGI_FORMAT_B8G8R8A8_UNORM {
+		texture.Release()
+		return NativeCaptureFrame{}, fmt.Errorf("WGC native frame format=%v want BGRA8", desc.Format)
+	}
+	if size.Width > int32(desc.Width) || size.Height > int32(desc.Height) {
+		texture.Release()
+		return NativeCaptureFrame{}, fmt.Errorf(
+			"WGC native content %dx%d exceeds texture %dx%d",
+			size.Width, size.Height, desc.Width, desc.Height,
+		)
+	}
+
+	s.device.AddRef()
+	owned := &windowsD3D11CaptureSurface{
+		device:  s.device,
+		texture: texture,
+		format:  desc.Format,
+	}
+	native := NativeCaptureFrame{
+		Width:      int(size.Width),
+		Height:     int(size.Height),
+		CapturedAt: time.Now(),
+		Surface:    owned,
+	}
+	if err := native.Validate(); err != nil {
+		_ = owned.Close()
+		return NativeCaptureFrame{}, err
+	}
+	return native, nil
 }
 
 func (s *wgcFrameStream) refreshLocked() (bool, error) {

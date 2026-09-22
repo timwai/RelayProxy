@@ -127,7 +127,6 @@ func TestJitterSequenceIsReproducible(t *testing.T) {
 	}
 }
 
-
 func TestSetProfileStartsNewDeterministicPhase(t *testing.T) {
 	conn, err := NewPacketConn(&fakePacketConn{}, Profile{
 		Delay:  20 * time.Millisecond,

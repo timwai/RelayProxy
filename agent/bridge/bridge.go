@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"relayproxy/agent/app"
+	"relayproxy/agent/desktop"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/routing"
@@ -97,6 +98,10 @@ func (b *UIBridge) GetRemoteDesktopStatus() protocol.RemoteDesktopStatus {
 
 func (b *UIBridge) GetRemoteDesktopStats() protocol.DesktopSessionStats {
 	return b.agent.RemoteDesktopStats()
+}
+
+func (b *UIBridge) GetRemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
+	return b.agent.RemoteDesktopDiagnostics()
 }
 
 func (b *UIBridge) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStats) {

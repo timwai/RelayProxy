@@ -208,44 +208,45 @@ type AgentStatus struct {
 var ErrRestartRequired = errors.New("agent role change requires restart")
 
 type Agent struct {
-	cfg                  AgentConfig
-	tunnelMgr            *tunnel.TunnelManager
-	dialer               *routing.RoutingDialer
-	rawDialer            *client.TunnelDialer
-	routingEngine        *routing.Engine
-	traffic              *traffic.Registry
-	exitHandler          *exit.Handler
-	socksServer          *socks5.Server
-	httpServer           *httpproxy.Server
-	divertSrv            *divert.Server
-	ctrlStream           tunnel.TunnelStream
-	readySession         tunnel.TunnelSession
-	epoch                uint64
-	started              bool
-	selectedExit         atomic.Pointer[string]
-	latencyMs            atomic.Int64
-	handshakeOK          atomic.Bool
-	approvalState        atomic.Pointer[string]
-	approvedMode         string
-	rdpTargets           []rdp.Target
-	remoteDesktopTargets []protocol.RemoteDesktopTarget
-	rdpConnection        *rdp.Connection
-	rdpP2P               *rdpp2p.Manager
-	rdpSession           *rdpp2p.Session
-	desktopHost          desktop.HostHandler
-	desktopConnection    *desktop.ControllerSession
-	desktopP2PSession    *rdpp2p.Session
-	desktopTargetMedia   map[string]*desktopmedia.MediaConn
-	desktopTargetPaths   map[string]*rdpp2p.ApplicationPath
-	closed               atomic.Bool
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	wg                   sync.WaitGroup
-	mu                   sync.RWMutex
-	policyMu             sync.RWMutex
-	lifecycleMu          sync.Mutex
-	closeOnce            sync.Once
-	closeErr             error
+	cfg                    AgentConfig
+	tunnelMgr              *tunnel.TunnelManager
+	dialer                 *routing.RoutingDialer
+	rawDialer              *client.TunnelDialer
+	routingEngine          *routing.Engine
+	traffic                *traffic.Registry
+	exitHandler            *exit.Handler
+	socksServer            *socks5.Server
+	httpServer             *httpproxy.Server
+	divertSrv              *divert.Server
+	ctrlStream             tunnel.TunnelStream
+	readySession           tunnel.TunnelSession
+	epoch                  uint64
+	started                bool
+	selectedExit           atomic.Pointer[string]
+	latencyMs              atomic.Int64
+	handshakeOK            atomic.Bool
+	approvalState          atomic.Pointer[string]
+	approvedMode           string
+	rdpTargets             []rdp.Target
+	remoteDesktopTargets   []protocol.RemoteDesktopTarget
+	rdpConnection          *rdp.Connection
+	rdpP2P                 *rdpp2p.Manager
+	rdpSession             *rdpp2p.Session
+	desktopHost            desktop.HostHandler
+	desktopConnection      *desktop.ControllerSession
+	desktopP2PSession      *rdpp2p.Session
+	lastDesktopDiagnostics desktop.DesktopDiagnosticsReport
+	desktopTargetMedia     map[string]*desktopmedia.MediaConn
+	desktopTargetPaths     map[string]*rdpp2p.ApplicationPath
+	closed                 atomic.Bool
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	wg                     sync.WaitGroup
+	mu                     sync.RWMutex
+	policyMu               sync.RWMutex
+	lifecycleMu            sync.Mutex
+	closeOnce              sync.Once
+	closeErr               error
 }
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
@@ -1318,6 +1319,17 @@ func (a *Agent) RemoteDesktopStats() protocol.DesktopSessionStats {
 	return session.Stats()
 }
 
+func (a *Agent) RemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
+	a.mu.RLock()
+	session := a.desktopConnection
+	last := a.lastDesktopDiagnostics
+	a.mu.RUnlock()
+	if session != nil {
+		return session.Diagnostics()
+	}
+	return last
+}
+
 func (a *Agent) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStats) {
 	a.mu.RLock()
 	session := a.desktopConnection
@@ -1429,8 +1441,16 @@ func (a *Agent) disconnectRelayDesktop() {
 	a.desktopConnection = nil
 	a.desktopP2PSession = nil
 	a.mu.Unlock()
+
+	var report desktop.DesktopDiagnosticsReport
 	if session != nil {
 		_ = session.Close()
+		report = session.Diagnostics()
+	}
+	if report.SchemaVersion != 0 {
+		a.mu.Lock()
+		a.lastDesktopDiagnostics = report
+		a.mu.Unlock()
 	}
 	if direct != nil {
 		_ = direct.Close()

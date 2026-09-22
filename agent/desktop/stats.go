@@ -30,6 +30,14 @@ type sessionStatsTracker struct {
 	abrLossDetected  uint64
 	abrLossRecovered uint64
 
+	diagnosticAt            time.Time
+	diagnosticRecvBytes     uint64
+	diagnosticRecvPackets   uint64
+	diagnosticRecvFrames    uint64
+	diagnosticLossDetected  uint64
+	diagnosticLossRecovered uint64
+	diagnosticDropped       uint64
+
 	probeSequence uint64
 	pendingProbes map[uint64]time.Time
 	rttMs         float64
@@ -51,6 +59,7 @@ func newSessionStatsTracker(path string) *sessionStatsTracker {
 	now := time.Now()
 	return &sessionStatsTracker{
 		started:       now,
+		diagnosticAt:  now,
 		missing:       make(map[uint32]struct{}),
 		pendingProbes: make(map[uint64]time.Time),
 		path:          path,
@@ -141,6 +150,17 @@ func (s *sessionStatsTracker) SetPath(path string) {
 	s.pathBaseLossDetected = s.lossDetected
 	s.pathBaseLossRecovered = s.lossRecovered
 	s.pathBaseDropped = s.dropped
+
+	// Diagnostics samples are labeled with the active media path. Reset the
+	// short-window counters at the boundary so the first udp_p2p sample cannot
+	// accidentally include Relay bytes/loss (or vice versa).
+	s.diagnosticAt = s.pathStarted
+	s.diagnosticRecvBytes = s.recvBytes
+	s.diagnosticRecvPackets = s.recvPackets
+	s.diagnosticRecvFrames = s.recvFrames
+	s.diagnosticLossDetected = s.lossDetected
+	s.diagnosticLossRecovered = s.lossRecovered
+	s.diagnosticDropped = s.remote.DroppedFrames + s.dropped
 }
 
 // PathQuality returns media-path-local quality since the most recent path
@@ -276,6 +296,68 @@ func (s *sessionStatsTracker) AdaptationSnapshot(now time.Time) protocol.Desktop
 	s.abrPackets = s.recvPackets
 	s.abrLossDetected = s.lossDetected
 	s.abrLossRecovered = s.lossRecovered
+	return stats
+}
+
+func (s *sessionStatsTracker) DiagnosticsSnapshot(now time.Time) protocol.DesktopSessionStats {
+	if s == nil {
+		return protocol.DesktopSessionStats{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if now.IsZero() {
+		now = time.Now()
+	}
+	elapsed := now.Sub(s.diagnosticAt).Seconds()
+	if elapsed <= 0 {
+		elapsed = 0.001
+	}
+
+	bytesDelta := s.recvBytes - s.diagnosticRecvBytes
+	packetDelta := s.recvPackets - s.diagnosticRecvPackets
+	frameDelta := s.recvFrames - s.diagnosticRecvFrames
+	detectedDelta := s.lossDetected - s.diagnosticLossDetected
+	recoveredDelta := s.lossRecovered - s.diagnosticLossRecovered
+	outstanding := uint64(0)
+	if detectedDelta > recoveredDelta {
+		outstanding = detectedDelta - recoveredDelta
+	}
+	total := packetDelta + outstanding
+	lossPercent := 0.0
+	if total > 0 {
+		lossPercent = float64(outstanding) * 100 / float64(total)
+	}
+
+	stats := s.remote
+	totalDropped := s.remote.DroppedFrames + s.dropped
+	droppedDelta := totalDropped
+	if totalDropped >= s.diagnosticDropped {
+		droppedDelta = totalDropped - s.diagnosticDropped
+	}
+	stats.DroppedFrames = droppedDelta
+	stats.ReceiveFPS = float64(frameDelta) / elapsed
+	stats.DecodeFPS = s.viewer.DecodeFPS
+	stats.RenderFPS = s.viewer.RenderFPS
+	stats.DecodeMs = s.viewer.DecodeMs
+	stats.RenderMs = s.viewer.RenderMs
+	stats.DecoderBackend = s.viewer.DecoderBackend
+	stats.DecoderHardware = s.viewer.DecoderHardware
+	stats.ActualBitrate = int64(float64(bytesDelta*8) / elapsed)
+	stats.DeliveryRate = stats.ActualBitrate
+	stats.RTTMs = s.rttMs
+	stats.JitterMs = s.jitterMs
+	stats.LossPercent = lossPercent
+	if s.path != "" {
+		stats.Path = s.path
+	}
+
+	s.diagnosticAt = now
+	s.diagnosticRecvBytes = s.recvBytes
+	s.diagnosticRecvPackets = s.recvPackets
+	s.diagnosticRecvFrames = s.recvFrames
+	s.diagnosticLossDetected = s.lossDetected
+	s.diagnosticLossRecovered = s.lossRecovered
+	s.diagnosticDropped = totalDropped
 	return stats
 }
 

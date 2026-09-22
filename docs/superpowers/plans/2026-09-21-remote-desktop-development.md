@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、媒体链路诊断、generation-aware Viewer rebuild 与 H.264 运行期分辨率热切换均已合并 main；当前分支把 resolution generation 接入 scene-aware ABR，并增加更长的降档/恢复滞回  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、媒体链路诊断与 generation-aware H.264 热切换均已合并 main；当前分支增加可导出的短窗口实机会话诊断，用于 LAN / NAT / IPv6 / Relay-only / Wi-Fi / GPU 矩阵标定  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #57 已合并，merge `c16525bf9d77197ec5d51c994f692f53710a7e57`）
+> 当前开发基线：`main`（PR #58 已合并，merge `69d202901fd57ed4c0a0746de3011ba7ee26b1ec`）
 
 ## 0. 当前进度
 
@@ -30,7 +30,7 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换；当前分支继续把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换，PR #58 已把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR；当前分支继续补齐可导出的实机会话诊断时间序列 |
 
 ### 0.1 已合并主线的关键进度
 
@@ -137,7 +137,7 @@ Windows SendInput / CF_UNICODETEXT
 - Wails Viewer 顶部新增“运行中分辨率”选择器；只在 Relay Desktop + H.264 时显示，并根据 `MaxWidth / MaxHeight` 禁用超出本次会话上限的档位。会话横幅同步显示实际尺寸与 `G<n>`，便于实机验证 Encoder / Decoder rebuild。
 - PR #57 先提供用户手动运行期切换用于验证；当前分支继续把分辨率档位接入 scene-aware ABR，并为降档/升档增加更长的 pressure/recovery hysteresis。
 
-### 0.2.6 Scene-aware Adaptive Resolution（当前分支）
+### 0.2.6 Scene-aware Adaptive Resolution（已合并 PR #58）
 
 - ABR 新增独立 resolution state：默认从 100% 开始，使用 100% → 75% → 50% 档位；Quality 场景最低保持 75%，Office / Auto / Gaming / Performance 最低可到 50%。
 - 对已经很小的会话，`AdaptiveMinResolutionScale` 会根据 H.264 320×180 最小尺寸自动抬高分辨率下限，避免请求不可编码尺寸。
@@ -149,6 +149,17 @@ Windows SendInput / CF_UNICODETEXT
 - H.264 `MaxWidth / MaxHeight` 现在使用本次会话实际最高编码尺寸，而不是用户输入的矩形上限；例如 16:10 源在 1920×1080 bound 下实际 ceiling 为 1728×1080，从而 75% / 50% 档位能按真实纵横比稳定缩放。
 - Viewer 的运行中分辨率选择器新增动态“最高”项，可精确恢复到 1728×1080 等非标准 negotiated ceiling。
 - 新测试覆盖：短时 severe pressure 不降分辨率、完整 hold 后 100→75、第二个 hold 后 75→50、Quality 75% 下限、Gaming 保 FPS/降尺寸、恢复顺序、手动 generation scale 同步，以及 ABR control 只在 tier change 时携带尺寸字段。
+
+### 0.2.7 可导出实机会话诊断（当前分支）
+
+- Controller 新增 session-local diagnostics recorder，默认每 500 ms 记录一条样本，固定最多 1200 条，即保留最近约 10 分钟；使用有界环形缓冲，长时间会话不会无限增长内存。
+- 诊断样本使用独立的短窗口统计，而不是 GUI `Snapshot()` 的全会话累计平均：记录窗口 RX bitrate / RX FPS / packet loss，并叠加当前 RTT、Jitter、Host Send Queue Delay、Dropped Frames、Capture/Encode/Decode/Render 指标。
+- 每条样本同时保存当时的 `DesktopVideoConfig`（Generation / Codec / 当前分辨率 / ceiling / FPS / bitrate）和本轮 ABR decision（reason、目标 bitrate/FPS、resolution scale、是否触发 generation rebuild），可直接回看网络变化与自适应动作的因果时间线。
+- Path 切换会重置 diagnostics 短窗口基线，避免第一条 `udp_p2p` 样本混入上一条 Relay 路径的 bytes/loss，反向切换同理。
+- 报告额外保留 scene、连接 options、当前 config/stats；不包含 session token、剪贴板正文、键盘输入或视频帧内容。
+- Agent 在 Relay Desktop 断开时保存最后一份 diagnostics report，因此测试结束后再点击导出仍可取到本次会话数据。
+- Wails 新增 `GetRemoteDesktopDiagnostics`，Remote Desktop 页面增加“导出诊断”按钮，直接保存带 schemaVersion 的 JSON；文件名包含目标 ID 与生成时间，便于多机矩阵归档。
+- 新测试覆盖 500 ms window bitrate/FPS/loss、diagnostics 与 ABR loss window 相互独立、1200 样本有界保留、报告副本隔离，以及 GUI/Wails 导出绑定。
 
 ### 0.3 本轮进度（2026-09-22）
 

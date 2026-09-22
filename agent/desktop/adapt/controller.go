@@ -260,13 +260,14 @@ func (c *Controller) SetResolutionScale(scale int) {
 	if c == nil {
 		return
 	}
-	if scale < c.cfg.MinResolutionScale {
-		scale = c.cfg.MinResolutionScale
-	}
-	if scale > 100 {
+	// This synchronizes observed media state, including an explicit manual
+	// resolution choice below the scene's automatic floor. The floor only
+	// constrains future automatic downshifts; recovery may still walk a manual
+	// lower setting back toward 100%.
+	if scale <= 0 {
 		scale = 100
 	}
-	if scale <= 0 {
+	if scale > 100 {
 		scale = 100
 	}
 	c.targetResolutionScale = scale

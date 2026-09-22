@@ -318,6 +318,8 @@ type DesktopSessionStats struct {
 	DeliveryRate     int64   `json:"deliveryRate,omitempty"`
 	SendQueueDelayMs float64 `json:"sendQueueDelayMs,omitempty"`
 	CaptureMs        float64 `json:"captureMs,omitempty"`
+	ConvertMs        float64 `json:"convertMs,omitempty"`
+	CodecMs          float64 `json:"codecMs,omitempty"`
 	EncodeMs         float64 `json:"encodeMs,omitempty"`
 	DecodeMs         float64 `json:"decodeMs,omitempty"`
 	RenderMs         float64 `json:"renderMs,omitempty"`

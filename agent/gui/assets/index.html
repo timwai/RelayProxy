@@ -1772,6 +1772,7 @@
         var mediaLabel = codecLabel;
         if (status.width && status.height) mediaLabel += ' ' + status.width + '×' + status.height;
         if (status.fps) mediaLabel += ' @ ' + status.fps + ' FPS';
+        if (status.generation) mediaLabel += ' · G' + status.generation;
         parts.push('Media: ' + mediaLabel);
       }
       if (status.pathTcp) parts.push('TCP: ' + status.pathTcp);

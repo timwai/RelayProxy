@@ -333,26 +333,65 @@ func copyDXGIFrame(src screencapture.Frame, dst *image.RGBA) (*image.RGBA, error
 	return dst, nil
 }
 
-func (c *windowsCapture) captureStreamLocked(ctx context.Context) (*image.RGBA, error) {
+func (c *windowsCapture) borrowedStreamFrameLocked(ctx context.Context) (screencapture.Frame, error) {
 	if c.stream == nil {
-		return nil, screencapture.ErrBackendUnavailable
+		return screencapture.Frame{}, screencapture.ErrBackendUnavailable
 	}
-	frame, fresh := c.stream.Frame()
-	if !fresh || !frame.Valid() {
-		if c.frame != nil {
+	frame, _ := c.stream.Frame()
+	if frame.Valid() {
+		return frame, nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	return c.stream.WaitFrame(waitCtx)
+}
+
+func (c *windowsCapture) captureStreamLocked(ctx context.Context) (*image.RGBA, error) {
+	frame, err := c.borrowedStreamFrameLocked(ctx)
+	if err != nil {
+		if errors.Is(err, screencapture.ErrNoFrame) && c.frame != nil {
 			return c.frame, nil
 		}
-		waitCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
-		defer cancel()
-		var err error
-		frame, err = c.stream.WaitFrame(waitCtx)
-		if err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
-	var err error
 	c.frame, err = copyDXGIFrame(frame, c.frame)
 	return c.frame, err
+}
+
+func (c *windowsCapture) CaptureRaw(ctx context.Context) (desktopcodec.RawFrame, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return desktopcodec.RawFrame{}, false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return desktopcodec.RawFrame{}, false, errors.New("Windows desktop capture is closed")
+	}
+	if c.stream == nil {
+		return desktopcodec.RawFrame{}, false, nil
+	}
+	frame, err := c.borrowedStreamFrameLocked(ctx)
+	if err == nil && frame.Valid() {
+		return desktopcodec.RawFrame{
+			Format: desktopcodec.PixelFormatBGRA,
+			Pix:    frame.Pix,
+			Width:  frame.Width,
+			Height: frame.Height,
+			Stride: frame.Stride,
+		}, true, nil
+	}
+	if c.selectedDisplay != nil {
+		if err == nil {
+			err = screencapture.ErrNoFrame
+		}
+		return desktopcodec.RawFrame{}, false, fmt.Errorf("selected display raw capture failed: %w", err)
+	}
+	if err != nil && !errors.Is(err, screencapture.ErrNoFrame) {
+		log.Printf("[Desktop] raw per-display capture failed, switching session to virtual desktop GDI: %v", err)
+		c.closeStreamLocked()
+		c.backend = "gdi"
+	}
+	return desktopcodec.RawFrame{}, false, nil
 }
 
 func (c *windowsCapture) Capture(ctx context.Context) (*image.RGBA, error) {

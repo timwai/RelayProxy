@@ -203,9 +203,9 @@ const (
 )
 
 type DesktopSessionMessage struct {
-	Type        string              `json:"type"`
-	Input       *DesktopInputEvent  `json:"input,omitempty"`
-	VideoConfig *DesktopVideoConfig `json:"videoConfig,omitempty"`
+	Type        string                 `json:"type"`
+	Input       *DesktopInputEvent     `json:"input,omitempty"`
+	VideoConfig *DesktopVideoConfig    `json:"videoConfig,omitempty"`
 	Cursor      *DesktopCursorState    `json:"cursor,omitempty"`
 	Clipboard   *DesktopClipboardState `json:"clipboard,omitempty"`
 }

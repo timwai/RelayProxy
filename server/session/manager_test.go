@@ -50,11 +50,11 @@ func TestDesktopCapabilitiesForTargetUsesAuthorizedOnlineSnapshot(t *testing.T) 
 		Grants: []string{protocol.CapabilityDesktopHost},
 		DesktopCapabilities: protocol.DesktopCapabilities{
 			RelayDesktop: true,
-			Captures: []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}},
-			Codecs: []protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}},
-			Displays: []protocol.DesktopDisplayCapability{{ID: "10", Name: "DISPLAY1", Width: 1920, Height: 1080, Primary: true}},
+			Captures:     []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}},
+			Codecs:       []protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}},
+			Displays:     []protocol.DesktopDisplayCapability{{ID: "10", Name: "DISPLAY1", Width: 1920, Height: 1080, Primary: true}},
 			MultiMonitor: false,
-			MaxWidth: 3840, MaxHeight: 2160, MaxFPS: 30,
+			MaxWidth:     3840, MaxHeight: 2160, MaxFPS: 30,
 		},
 	}
 	got := DesktopCapabilitiesForTarget(sess, true, true)
@@ -72,7 +72,7 @@ func TestDesktopCapabilitiesForTargetDoesNotLeakUnusableSnapshot(t *testing.T) {
 		Grants: []string{protocol.CapabilityRDPHost},
 		DesktopCapabilities: protocol.DesktopCapabilities{
 			RelayDesktop: true,
-			Displays: []protocol.DesktopDisplayCapability{{ID: "secret-display", Width: 1920, Height: 1080}},
+			Displays:     []protocol.DesktopDisplayCapability{{ID: "secret-display", Width: 1920, Height: 1080}},
 		},
 	}
 	got := DesktopCapabilitiesForTarget(sess, true, true)

@@ -4,6 +4,7 @@ package viewer
 
 import (
 	"fmt"
+	"runtime"
 	"syscall"
 	"unsafe"
 
@@ -162,8 +163,8 @@ type d3d11VideoProcessorCaps struct {
 }
 
 type d3d11SubresourceData struct {
-	SysMem          unsafe.Pointer
-	SysMemPitch     uint32
+	SysMem           unsafe.Pointer
+	SysMemPitch      uint32
 	SysMemSlicePitch uint32
 }
 
@@ -461,7 +462,8 @@ func (r *d3d11Renderer) initVideoProcessor() error {
 		id3d11VideoProcessorEnumeratorGetCaps,
 		uintptr(unsafe.Pointer(&caps)),
 	)
-	if !hresultFailed(capsHR) &&
+	if runtime.GOARCH == "amd64" &&
+		!hresultFailed(capsHR) &&
 		bgraSupport&d3d11VideoProcessorFormatSupportInput != 0 &&
 		caps.MaxInputStreams >= 2 &&
 		caps.MaxStreamStates >= 2 &&

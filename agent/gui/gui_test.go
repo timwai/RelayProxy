@@ -148,3 +148,25 @@ func TestRemoteDesktopStatsExposeRealtimeCongestionSignals(t *testing.T) {
 		}
 	}
 }
+
+
+func TestRemoteDesktopDisplaySelectionUsesAdvertisedTargetDisplays(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"desktopDisplaySelections: {}",
+		"function remoteDesktopDisplaySelection(targetID)",
+		"displayId: remoteDesktopDisplaySelection(targetID)",
+		"Array.isArray(caps.displays)",
+		"allDisplays.textContent = '全部显示器'",
+		"state.desktopDisplaySelections[target.deviceId] = displaySelect.value",
+		"remoteDesktopConnectOptions(targetID)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop display selection UI missing %q", want)
+		}
+	}
+}

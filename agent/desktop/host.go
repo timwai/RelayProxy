@@ -272,6 +272,19 @@ func (h *Host) readSessionControlLoop(
 			}
 			continue
 
+		case protocol.DesktopSessionPing:
+			if message.Probe == nil {
+				continue
+			}
+			probe := *message.Probe
+			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+				Type:  protocol.DesktopSessionPong,
+				Probe: &probe,
+			}); err != nil {
+				return err
+			}
+			continue
+
 		case protocol.DesktopSessionInput:
 			if message.Input == nil {
 				return errors.New("Relay Desktop input message is missing the event")
@@ -334,6 +347,11 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 	}
 	var frameID uint32 = 1
 	var sequence uint32 = 1
+	var sentFrames uint64
+	var sentBytes uint64
+	lastReportAt := time.Now()
+	var lastReportFrames uint64
+	var lastReportBytes uint64
 	frameInterval := time.Second / time.Duration(cfg.MaxFPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
@@ -363,6 +381,28 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 		}
 		frameID++
 		sequence = next
+		sentFrames++
+		sentBytes += uint64(len(encoded))
+		now := time.Now()
+		if elapsed := now.Sub(lastReportAt); elapsed >= time.Second {
+			seconds := elapsed.Seconds()
+			stats := protocol.DesktopSessionStats{
+				CaptureFPS:    float64(sentFrames-lastReportFrames) / seconds,
+				EncodeFPS:     float64(sentFrames-lastReportFrames) / seconds,
+				ActualBitrate: int64(float64((sentBytes-lastReportBytes)*8) / seconds),
+				TargetBitrate: int64(cfg.MaxBitrate),
+				Path:          "relay",
+			}
+			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+				Type:  protocol.DesktopSessionStatsReport,
+				Stats: &stats,
+			}); err != nil {
+				return err
+			}
+			lastReportAt = now
+			lastReportFrames = sentFrames
+			lastReportBytes = sentBytes
+		}
 		return nil
 	}
 

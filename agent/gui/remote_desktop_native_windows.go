@@ -15,6 +15,60 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+type nativeViewerPerf struct {
+	started      time.Time
+	decodeFrames uint64
+	renderFrames uint64
+	decodeTime   time.Duration
+	renderTime   time.Duration
+}
+
+func newNativeViewerPerf(now time.Time) *nativeViewerPerf {
+	return &nativeViewerPerf{started: now}
+}
+
+func (p *nativeViewerPerf) observeDecode(frames int, elapsed time.Duration) {
+	if p == nil || frames <= 0 {
+		return
+	}
+	p.decodeFrames += uint64(frames)
+	p.decodeTime += elapsed
+}
+
+func (p *nativeViewerPerf) observeRender(elapsed time.Duration) {
+	if p == nil {
+		return
+	}
+	p.renderFrames++
+	p.renderTime += elapsed
+}
+
+func (p *nativeViewerPerf) report(now time.Time) (protocol.DesktopSessionStats, bool) {
+	if p == nil {
+		return protocol.DesktopSessionStats{}, false
+	}
+	elapsed := now.Sub(p.started)
+	if elapsed < time.Second {
+		return protocol.DesktopSessionStats{}, false
+	}
+	seconds := elapsed.Seconds()
+	stats := protocol.DesktopSessionStats{}
+	if p.decodeFrames > 0 {
+		stats.DecodeFPS = float64(p.decodeFrames) / seconds
+		stats.DecodeMs = float64(p.decodeTime.Microseconds()) / 1000 / float64(p.decodeFrames)
+	}
+	if p.renderFrames > 0 {
+		stats.RenderFPS = float64(p.renderFrames) / seconds
+		stats.RenderMs = float64(p.renderTime.Microseconds()) / 1000 / float64(p.renderFrames)
+	}
+	p.started = now
+	p.decodeFrames = 0
+	p.renderFrames = 0
+	p.decodeTime = 0
+	p.renderTime = 0
+	return stats, true
+}
+
 type nativeDesktopSession struct {
 	cancel context.CancelFunc
 
@@ -160,6 +214,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	var lastSequence uint64
 	var converted []byte
 	var lastRecovery time.Time
+	perf := newNativeViewerPerf(time.Now())
 
 	for {
 		select {
@@ -192,7 +247,9 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			continue
 		}
 
+		decodeStarted := time.Now()
 		decoded, err := s.decoder.Decode(ctx, frame.Data, time.Duration(frame.Timestamp)*time.Microsecond)
+		decodeElapsed := time.Since(decodeStarted)
 		if err != nil {
 			if time.Since(lastRecovery) >= 500*time.Millisecond {
 				lastRecovery = time.Now()
@@ -204,10 +261,18 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			log.Printf("[Desktop] native viewer H.264 decode failed: %v", err)
 			continue
 		}
+		perf.observeDecode(len(decoded), decodeElapsed)
 		for i := range decoded {
 			decodedFrame := &decoded[i]
 			func() {
 				defer decodedFrame.Close()
+				renderStarted := time.Now()
+				rendered := false
+				defer func() {
+					if rendered {
+						perf.observeRender(time.Since(renderStarted))
+					}
+				}()
 				if decodedFrame.Format != desktopcodec.PixelFormatNV12 {
 					return
 				}
@@ -244,6 +309,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 							log.Printf("[Desktop] zero-copy D3D11 submit failed, falling back to readback: %v", err)
 						} else {
 							s.gpuFrameActive = true
+							rendered = true
 							return
 						}
 					}
@@ -272,11 +338,16 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				s.baseBGRA = append(s.baseBGRA[:0], converted...)
 				if err = s.present(); err != nil {
 					log.Printf("[Desktop] native viewer render failed: %v", err)
+				} else {
+					rendered = true
 				}
 			}()
 			if err != nil {
 				return
 			}
+		}
+		if stats, ok := perf.report(time.Now()); ok {
+			owner.bridge.ReportRemoteDesktopViewerStats(stats)
 		}
 	}
 }

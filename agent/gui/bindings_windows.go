@@ -129,6 +129,17 @@ func (s *WailsService) GetRemoteDesktopStatus() (string, error) {
 	return string(data), nil
 }
 
+func (s *WailsService) GetRemoteDesktopStats() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopStats())
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
 func (s *WailsService) GetRemoteDesktopFrame() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "{}", nil

@@ -82,3 +82,33 @@ func TestAdaptationSnapshotUsesWindowedLoss(t *testing.T) {
 		t.Fatalf("stable window lossPercent=%v", third.LossPercent)
 	}
 }
+
+func TestPathQualityResetsAtPathBoundary(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	stats.MergeRemote(protocol.DesktopSessionStats{SendQueueDelayMs: 7})
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 100}, 100)
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 101}, 100)
+
+	relay := stats.PathQuality(time.Now(), true)
+	if !relay.Available || !relay.Relay || relay.LossPercent != 0 || relay.QueueDelayMs != 7 {
+		t.Fatalf("relay quality=%+v", relay)
+	}
+
+	stats.SetPath("udp_p2p")
+	if direct := stats.PathQuality(time.Now(), false); direct.Available {
+		t.Fatalf("new path should not be available before media arrives: %+v", direct)
+	}
+
+	// A large sequence jump on the first packet of the new path must not be
+	// counted as loss from the old path.
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 500}, 100)
+	direct := stats.PathQuality(time.Now(), false)
+	if !direct.Available || direct.Relay || direct.LossPercent != 0 {
+		t.Fatalf("direct quality after first packet=%+v", direct)
+	}
+
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 502}, 100)
+	if got := stats.PathQuality(time.Now(), false).LossPercent; got <= 0 {
+		t.Fatalf("direct lossPercent=%v", got)
+	}
+}

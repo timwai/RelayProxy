@@ -380,7 +380,7 @@ func (m *Manager) handleTCP(conn net.Conn) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		item := m.sessions[sessionID]
-		if item == nil || item.isExpired() {
+		if item == nil || item.isExpired() || item.Purpose != protocol.P2PPurposeRDP {
 			return nil, false
 		}
 		return append([]byte(nil), item.Token...), true
@@ -720,6 +720,9 @@ func (s *Session) candidateList(ctx context.Context, protocolName string) []prot
 }
 
 func (s *Session) DialTCP(ctx context.Context) (net.Conn, error) {
+	if s == nil || s.Purpose != protocol.P2PPurposeRDP {
+		return nil, errors.New("TCP direct path is only available for RDP sessions")
+	}
 	candidates := s.candidateList(ctx, "tcp")
 	if len(candidates) == 0 {
 		return nil, errors.New("RDP TCP direct candidates unavailable")

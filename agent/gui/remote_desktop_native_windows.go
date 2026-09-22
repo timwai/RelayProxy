@@ -256,7 +256,8 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			if err != nil {
 				return
 			}
-		}	}
+		}
+	}
 }
 
 func (s *nativeDesktopSession) refreshCursor(owner *appWindow) bool {

@@ -195,24 +195,24 @@ type DesktopInputEvent struct {
 }
 
 const (
-	DesktopSessionInput       = "input"
-	DesktopSessionVideoConfig = "video_config"
-	DesktopSessionIDRRequest  = "idr_request"
-	DesktopSessionCursor      = "cursor"
-	DesktopSessionClipboard   = "clipboard"
-	DesktopSessionPing        = "ping"
-	DesktopSessionPong        = "pong"
-	DesktopSessionStatsReport = "stats"
+	DesktopSessionInput        = "input"
+	DesktopSessionVideoConfig  = "video_config"
+	DesktopSessionIDRRequest   = "idr_request"
+	DesktopSessionCursor       = "cursor"
+	DesktopSessionClipboard    = "clipboard"
+	DesktopSessionPing         = "ping"
+	DesktopSessionPong         = "pong"
+	DesktopSessionStatsReport  = "stats"
 	DesktopSessionVideoControl = "video_control"
 )
 
 type DesktopSessionMessage struct {
-	Type        string                 `json:"type"`
-	Input       *DesktopInputEvent     `json:"input,omitempty"`
-	VideoConfig *DesktopVideoConfig    `json:"videoConfig,omitempty"`
-	Cursor      *DesktopCursorState    `json:"cursor,omitempty"`
-	Clipboard   *DesktopClipboardState `json:"clipboard,omitempty"`
-	Probe       *DesktopSessionProbe   `json:"probe,omitempty"`
+	Type         string                 `json:"type"`
+	Input        *DesktopInputEvent     `json:"input,omitempty"`
+	VideoConfig  *DesktopVideoConfig    `json:"videoConfig,omitempty"`
+	Cursor       *DesktopCursorState    `json:"cursor,omitempty"`
+	Clipboard    *DesktopClipboardState `json:"clipboard,omitempty"`
+	Probe        *DesktopSessionProbe   `json:"probe,omitempty"`
 	Stats        *DesktopSessionStats   `json:"stats,omitempty"`
 	VideoControl *DesktopVideoControl   `json:"videoControl,omitempty"`
 }

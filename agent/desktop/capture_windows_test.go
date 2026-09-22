@@ -151,3 +151,31 @@ func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T
 		t.Fatalf("upper display mapped y range=%d..%d", start, end)
 	}
 }
+
+func TestWindowsCaptureBackendPolicy(t *testing.T) {
+	tests := []struct {
+		preference protocol.DesktopCaptureBackend
+		want       screencapture.Backend
+		wantErr    bool
+		explicit   bool
+	}{
+		{preference: "", want: screencapture.BackendAuto},
+		{preference: protocol.DesktopCaptureAuto, want: screencapture.BackendAuto},
+		{preference: protocol.DesktopCaptureDXGI, want: screencapture.BackendDuplication, explicit: true},
+		{preference: protocol.DesktopCaptureGDI, want: screencapture.BackendGDI, explicit: true},
+		{preference: protocol.DesktopCaptureWGC, wantErr: true, explicit: true},
+		{preference: protocol.DesktopCaptureBackend("invalid"), wantErr: true, explicit: true},
+	}
+	for _, tt := range tests {
+		got, err := windowsCaptureBackend(tt.preference)
+		if (err != nil) != tt.wantErr {
+			t.Fatalf("preference=%q err=%v wantErr=%v", tt.preference, err, tt.wantErr)
+		}
+		if !tt.wantErr && got != tt.want {
+			t.Fatalf("preference=%q backend=%v want=%v", tt.preference, got, tt.want)
+		}
+		if gotExplicit := explicitWindowsCaptureBackend(tt.preference); gotExplicit != tt.explicit {
+			t.Fatalf("preference=%q explicit=%v want=%v", tt.preference, gotExplicit, tt.explicit)
+		}
+	}
+}

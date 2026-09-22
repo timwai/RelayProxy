@@ -210,7 +210,7 @@ func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaCon
 			Path:          "relay",
 		}
 		if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
-			Type:  protocol.DesktopSessionStats,
+			Type:  protocol.DesktopSessionStatsReport,
 			Stats: &stats,
 		}); err != nil {
 			return err

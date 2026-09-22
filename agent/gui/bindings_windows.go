@@ -136,7 +136,6 @@ func (s *WailsService) RequestRemoteDesktopIDR() (string, error) {
 	return `{"ok":true}`, nil
 }
 
-
 func (s *WailsService) GetLogs() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil

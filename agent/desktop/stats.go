@@ -39,14 +39,22 @@ type sessionStatsTracker struct {
 	remote protocol.DesktopSessionStats
 	viewer protocol.DesktopSessionStats
 	path   string
+
+	pathStarted           time.Time
+	pathBasePackets       uint64
+	pathBaseLossDetected  uint64
+	pathBaseLossRecovered uint64
+	pathBaseDropped       uint64
 }
 
 func newSessionStatsTracker(path string) *sessionStatsTracker {
+	now := time.Now()
 	return &sessionStatsTracker{
-		started:       time.Now(),
+		started:       now,
 		missing:       make(map[uint32]struct{}),
 		pendingProbes: make(map[uint64]time.Time),
 		path:          path,
+		pathStarted:   now,
 	}
 }
 
@@ -114,8 +122,57 @@ func (s *sessionStatsTracker) SetPath(path string) {
 		return
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.path == path {
+		return
+	}
+
+	// A path transition is also a packet-order boundary. Outstanding packets
+	// from the previous path are now final loss; carrying its last sequence into
+	// the next path would manufacture a large cross-path sequence gap.
+	if len(s.missing) > 0 {
+		s.lostBase += uint64(len(s.missing))
+		clear(s.missing)
+	}
+	s.haveSequence = false
 	s.path = path
-	s.mu.Unlock()
+	s.pathStarted = time.Now()
+	s.pathBasePackets = s.recvPackets
+	s.pathBaseLossDetected = s.lossDetected
+	s.pathBaseLossRecovered = s.lossRecovered
+	s.pathBaseDropped = s.dropped
+}
+
+// PathQuality returns media-path-local quality since the most recent path
+// transition. RTT/Jitter are intentionally left unset for now because the
+// existing ping/pong runs on the reliable Relay stream and is not a direct-path
+// probe. Loss and host send-queue delay are safe inputs for the current policy.
+func (s *sessionStatsTracker) PathQuality(now time.Time, relay bool) PathQuality {
+	if s == nil {
+		return PathQuality{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	packetDelta := s.recvPackets - s.pathBasePackets
+	detectedDelta := s.lossDetected - s.pathBaseLossDetected
+	recoveredDelta := s.lossRecovered - s.pathBaseLossRecovered
+	outstanding := uint64(0)
+	if detectedDelta > recoveredDelta {
+		outstanding = detectedDelta - recoveredDelta
+	}
+	total := packetDelta + outstanding
+	lossPercent := 0.0
+	if total > 0 {
+		lossPercent = float64(outstanding) * 100 / float64(total)
+	}
+
+	return PathQuality{
+		Available:    packetDelta > 0,
+		Relay:        relay,
+		LossPercent:  lossPercent,
+		QueueDelayMs: s.remote.SendQueueDelayMs,
+	}
 }
 
 func (s *sessionStatsTracker) MergeRemote(stats protocol.DesktopSessionStats) {

@@ -381,6 +381,7 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 	lastReportAt := time.Now()
 	var lastReportFrames uint64
 	var lastReportBytes uint64
+	var sendQueueDelayMs float64
 	frameInterval := time.Second / time.Duration(cfg.MaxFPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
@@ -404,7 +405,10 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 			return err
 		}
 		for _, packet := range packets {
-			if err := conn.Send(ctx, packet); err != nil {
+			started := time.Now()
+			err := conn.Send(ctx, packet)
+			sendQueueDelayMs = smoothSendQueueDelayMs(sendQueueDelayMs, time.Since(started))
+			if err != nil {
 				return err
 			}
 		}
@@ -418,9 +422,10 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 			stats := protocol.DesktopSessionStats{
 				CaptureFPS:    float64(sentFrames-lastReportFrames) / seconds,
 				EncodeFPS:     float64(sentFrames-lastReportFrames) / seconds,
-				ActualBitrate: int64(float64((sentBytes-lastReportBytes)*8) / seconds),
-				TargetBitrate: int64(cfg.MaxBitrate),
-				Path:          "relay",
+				ActualBitrate:     int64(float64((sentBytes-lastReportBytes)*8) / seconds),
+				TargetBitrate:     int64(cfg.MaxBitrate),
+				SendQueueDelayMs: sendQueueDelayMs,
+				Path:              "relay",
 			}
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 				Type:  protocol.DesktopSessionStatsReport,

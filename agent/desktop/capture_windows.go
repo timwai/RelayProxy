@@ -225,7 +225,30 @@ func resolveWindowsDisplay(displays []screencapture.Display, displayID string) (
 	return screencapture.Display{}, true, fmt.Errorf("Windows display %q is no longer available", displayID)
 }
 
+func windowsCaptureBackend(preference protocol.DesktopCaptureBackend) (screencapture.Backend, error) {
+	switch preference {
+	case "", protocol.DesktopCaptureAuto:
+		return screencapture.BackendAuto, nil
+	case protocol.DesktopCaptureDXGI:
+		return screencapture.BackendDuplication, nil
+	case protocol.DesktopCaptureGDI:
+		return screencapture.BackendGDI, nil
+	case protocol.DesktopCaptureWGC:
+		return screencapture.BackendAuto, errors.New("Windows Graphics Capture is not implemented yet")
+	default:
+		return screencapture.BackendAuto, fmt.Errorf("unsupported Windows capture backend %q", preference)
+	}
+}
+
+func explicitWindowsCaptureBackend(preference protocol.DesktopCaptureBackend) bool {
+	return preference != "" && preference != protocol.DesktopCaptureAuto
+}
+
 func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error {
+	requestedBackend, backendErr := windowsCaptureBackend(cfg.CaptureBackend)
+	if backendErr != nil {
+		return backendErr
+	}
 	displays, listErr := screencapture.Displays(ctx)
 
 	c.mu.Lock()
@@ -250,18 +273,21 @@ func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error
 		return selectErr
 	}
 	if target.ID == 0 {
+		if requestedBackend == screencapture.BackendDuplication {
+			return errors.New("DXGI capture requires selecting a specific display when multiple displays are active")
+		}
 		return nil
 	}
 
 	stream, err := screencapture.CaptureDisplay(ctx, target, screencapture.Options{
-		Backend:    screencapture.BackendAuto,
+		Backend:    requestedBackend,
 		FPS:        float64(cfg.MaxFPS),
 		QueueDepth: screencapture.MinQueueDepth,
 		Timeout:    100 * time.Millisecond,
 	})
 	if err != nil {
-		if selected {
-			return fmt.Errorf("capture selected Windows display %q: %w", cfg.DisplayID, err)
+		if selected || explicitWindowsCaptureBackend(cfg.CaptureBackend) {
+			return fmt.Errorf("capture Windows display using %s: %w", cfg.CaptureBackend, err)
 		}
 		log.Printf("[Desktop] per-display capture unavailable, using virtual desktop GDI: %v", err)
 		return nil

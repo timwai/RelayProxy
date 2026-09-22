@@ -72,9 +72,14 @@ func (p *nativeViewerPerf) report(now time.Time) (protocol.DesktopSessionStats, 
 type nativeDesktopSession struct {
 	cancel context.CancelFunc
 
-	viewer  desktopviewer.Native
-	decoder desktopcodec.Decoder
-	inputCh chan protocol.DesktopInputEvent
+	mediaMu       sync.RWMutex
+	viewer        desktopviewer.Native
+	decoder       desktopcodec.Decoder
+	inputCh       chan protocol.DesktopInputEvent
+	title         string
+	generation    uint32
+	decoderWidth  int
+	decoderHeight int
 
 	cursorID       string
 	cursorSequence uint64
@@ -91,6 +96,135 @@ type nativeDesktopSession struct {
 
 	done      chan struct{}
 	closeOnce sync.Once
+}
+
+func nativeDesktopViewerConfig(title string, width, height int, inputCh chan protocol.DesktopInputEvent) desktopviewer.Config {
+	return desktopviewer.Config{
+		Title:  title,
+		Width:  width,
+		Height: height,
+		OnInput: func(event protocol.DesktopInputEvent) {
+			select {
+			case inputCh <- event:
+			default:
+				if event.Kind != protocol.DesktopInputMouseMove {
+					log.Printf("[Desktop] native viewer input queue full; dropped %s", event.Kind)
+				}
+			}
+		},
+	}
+}
+
+func openNativeDesktopDecoder(
+	ctx context.Context,
+	native desktopviewer.Native,
+	width, height int,
+) (desktopcodec.Decoder, error) {
+	decoderConfig := desktopcodec.VideoConfig{
+		Width:         width,
+		Height:        height,
+		FPS:           30,
+		TargetBitrate: 6_000_000,
+		KeyframeEvery: 2 * time.Second,
+	}
+	var decoder desktopcodec.Decoder
+	var err error
+	if device := native.D3D11Device(); device != 0 {
+		decoder, err = desktopcodec.OpenMFH264DecoderWithD3D11(ctx, decoderConfig, true, device)
+		if err != nil {
+			log.Printf("[Desktop] shared-device H.264 decoder unavailable, falling back: %v", err)
+			decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
+		}
+	} else {
+		decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
+	}
+	return decoder, err
+}
+
+func nativeDesktopFrameNeedsRebuild(generation uint32, width, height int, frame protocol.RemoteDesktopFrame) bool {
+	return frame.Generation != generation || frame.Width != width || frame.Height != height
+}
+
+func (s *nativeDesktopSession) focusViewer() {
+	if s == nil {
+		return
+	}
+	s.mediaMu.RLock()
+	defer s.mediaMu.RUnlock()
+	if s.viewer != nil {
+		s.viewer.Focus()
+	}
+}
+
+func (s *nativeDesktopSession) decoderStatus() (string, bool, bool) {
+	if s == nil {
+		return "", false, false
+	}
+	s.mediaMu.RLock()
+	defer s.mediaMu.RUnlock()
+	if s.decoder == nil {
+		return "", false, false
+	}
+	return s.decoder.Backend(), s.decoder.Hardware(), s.gpuCursor
+}
+
+func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame protocol.RemoteDesktopFrame) error {
+	if s == nil || frame.Width <= 0 || frame.Height <= 0 {
+		return errors.New("invalid Relay Desktop media generation")
+	}
+	s.mediaMu.RLock()
+	currentViewer := s.viewer
+	sameSize := s.decoderWidth == frame.Width && s.decoderHeight == frame.Height
+	title := s.title
+	inputCh := s.inputCh
+	s.mediaMu.RUnlock()
+
+	var (
+		nextViewer  = currentViewer
+		nextDecoder desktopcodec.Decoder
+		err         error
+	)
+	if !sameSize {
+		nextViewer, err = desktopviewer.Open(nativeDesktopViewerConfig(title, frame.Width, frame.Height, inputCh))
+		if err != nil {
+			return fmt.Errorf("reopen D3D11 viewer for generation %d: %w", frame.Generation, err)
+		}
+	}
+	nextDecoder, err = openNativeDesktopDecoder(ctx, nextViewer, frame.Width, frame.Height)
+	if err != nil {
+		if !sameSize && nextViewer != nil {
+			_ = nextViewer.Close()
+		}
+		return fmt.Errorf("reopen H.264 decoder for generation %d: %w", frame.Generation, err)
+	}
+
+	s.mediaMu.Lock()
+	oldViewer := s.viewer
+	oldDecoder := s.decoder
+	s.viewer = nextViewer
+	s.decoder = nextDecoder
+	s.generation = frame.Generation
+	s.decoderWidth = frame.Width
+	s.decoderHeight = frame.Height
+	s.gpuCursor = nextViewer.SupportsGPUCursor() && nextDecoder.Backend() == "media-foundation-d3d11-zero-copy"
+	s.gpuFrameActive = false
+	s.baseBGRA = nil
+	s.presentBGRA = nil
+	s.frameWidth = 0
+	s.frameHeight = 0
+	s.frameStride = 0
+	s.mediaMu.Unlock()
+
+	if oldDecoder != nil {
+		_ = oldDecoder.Close()
+	}
+	if !sameSize && oldViewer != nil {
+		_ = oldViewer.Close()
+	}
+	if !sameSize {
+		nextViewer.Focus()
+	}
+	return nil
 }
 
 func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {

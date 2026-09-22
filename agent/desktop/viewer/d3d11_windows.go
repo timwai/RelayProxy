@@ -23,17 +23,22 @@ const (
 	d3d11MapWriteDiscard          = 4
 
 	dxgiFormatB8G8R8A8UNorm     = 87
+	dxgiFormatNV12               = 103
 	dxgiUsageRenderTargetOutput = 0x20
 	dxgiSwapEffectDiscard       = 0
 
 	d3d11VPIVDimensionTexture2D = 1
 	d3d11VPOVDimensionTexture2D = 1
 
+	d3d11VideoProcessorFormatSupportInput  = 0x1
+	d3d11VideoProcessorFormatSupportOutput = 0x2
+
 	id3d10MultithreadSetMultithreadProtected = 5
 	id3d11VideoDeviceCreateVideoProcessor    = 4
 	id3d11VideoDeviceCreateInputView         = 8
 	id3d11VideoDeviceCreateOutputView        = 9
 	id3d11VideoDeviceCreateEnumerator        = 10
+	id3d11VideoProcessorEnumeratorCheckFormat = 8
 	id3d11VideoContextSetStreamFrameFormat   = 27
 	id3d11VideoContextVideoProcessorBlt      = 53
 )
@@ -377,6 +382,36 @@ func (r *d3d11Renderer) initVideoProcessor() error {
 			return fail(ErrUnavailable)
 		}
 		return fail(hresultError("ID3D11VideoDevice.CreateVideoProcessorEnumerator", hr))
+	}
+
+	var nv12Support uint32
+	hr = comCall(
+		enumerator,
+		id3d11VideoProcessorEnumeratorCheckFormat,
+		dxgiFormatNV12,
+		uintptr(unsafe.Pointer(&nv12Support)),
+	)
+	if hresultFailed(hr) || nv12Support&d3d11VideoProcessorFormatSupportInput == 0 {
+		releaseCOM(enumerator)
+		if hresultFailed(hr) {
+			return fail(hresultError("ID3D11VideoProcessorEnumerator.CheckVideoProcessorFormat(NV12)", hr))
+		}
+		return fail(fmt.Errorf("%w: D3D11 video processor does not accept NV12", ErrUnavailable))
+	}
+
+	var bgraSupport uint32
+	hr = comCall(
+		enumerator,
+		id3d11VideoProcessorEnumeratorCheckFormat,
+		dxgiFormatB8G8R8A8UNorm,
+		uintptr(unsafe.Pointer(&bgraSupport)),
+	)
+	if hresultFailed(hr) || bgraSupport&d3d11VideoProcessorFormatSupportOutput == 0 {
+		releaseCOM(enumerator)
+		if hresultFailed(hr) {
+			return fail(hresultError("ID3D11VideoProcessorEnumerator.CheckVideoProcessorFormat(BGRA)", hr))
+		}
+		return fail(fmt.Errorf("%w: D3D11 video processor cannot output BGRA", ErrUnavailable))
 	}
 
 	var processor unsafe.Pointer

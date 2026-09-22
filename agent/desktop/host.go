@@ -420,12 +420,12 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 		if elapsed := now.Sub(lastReportAt); elapsed >= time.Second {
 			seconds := elapsed.Seconds()
 			stats := protocol.DesktopSessionStats{
-				CaptureFPS:    float64(sentFrames-lastReportFrames) / seconds,
-				EncodeFPS:     float64(sentFrames-lastReportFrames) / seconds,
-				ActualBitrate:     int64(float64((sentBytes-lastReportBytes)*8) / seconds),
-				TargetBitrate:     int64(cfg.MaxBitrate),
+				CaptureFPS:       float64(sentFrames-lastReportFrames) / seconds,
+				EncodeFPS:        float64(sentFrames-lastReportFrames) / seconds,
+				ActualBitrate:    int64(float64((sentBytes-lastReportBytes)*8) / seconds),
+				TargetBitrate:    int64(cfg.MaxBitrate),
 				SendQueueDelayMs: sendQueueDelayMs,
-				Path:              "relay",
+				Path:             "relay",
 			}
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 				Type:  protocol.DesktopSessionStatsReport,

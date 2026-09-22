@@ -403,6 +403,16 @@ func (s *ControllerSession) DatagramPathName() string {
 	return s.conn.DatagramPathName()
 }
 
+// PathQuality exposes only metrics that are local to the active media path.
+// The reliable control-stream RTT remains available in Stats(), but it is not
+// used here because it does not measure udp_p2p.
+func (s *ControllerSession) PathQuality() PathQuality {
+	if s == nil || s.stats == nil {
+		return PathQuality{}
+	}
+	return s.stats.PathQuality(time.Now(), s.DatagramPathName() == "relay")
+}
+
 func (s *ControllerSession) Stats() protocol.DesktopSessionStats {
 	if s == nil || s.stats == nil {
 		return protocol.DesktopSessionStats{}

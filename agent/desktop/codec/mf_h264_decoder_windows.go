@@ -609,6 +609,20 @@ func (d *MFH264Decoder) Hardware() bool {
 	return d != nil && d.info.Hardware
 }
 
+func (d *MFH264Decoder) Backend() string {
+	if d == nil {
+		return ""
+	}
+	switch {
+	case d.info.Hardware && d.info.D3D11Aware:
+		return "media-foundation-d3d11"
+	case d.info.Hardware:
+		return "media-foundation-hardware"
+	default:
+		return "media-foundation-software"
+	}
+}
+
 func (d *MFH264Decoder) Close() error {
 	if d == nil {
 		return nil

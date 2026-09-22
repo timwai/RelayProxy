@@ -10,22 +10,22 @@ import (
 )
 
 type DeviceSession struct {
-	DeviceID      string
-	DeviceName    string
-	OwnerUserID   string   // authenticated ownership snapshot; invalidated by authorization changes
-	Mode          string   // "CLIENT", "EXIT", "BOTH"
+	DeviceID            string
+	DeviceName          string
+	OwnerUserID         string   // authenticated ownership snapshot; invalidated by authorization changes
+	Mode                string   // "CLIENT", "EXIT", "BOTH"
 	Capabilities        []string // authenticated transport/protocol features
 	Grants              []string // server-approved product capabilities
 	DesktopCapabilities protocol.DesktopCapabilities
 	Transport           tunnel.TransportType
-	Tunnel        tunnel.TunnelSession
-	ControlStream tunnel.TunnelStream
-	ConnectedAt   time.Time
-	LastHeartbeat atomic.Int64 // Unix timestamp in seconds
-	ActiveStreams atomic.Int64
-	ActiveExitID  atomic.Pointer[string]
-	BytesUp       atomic.Int64
-	BytesDown     atomic.Int64
+	Tunnel              tunnel.TunnelSession
+	ControlStream       tunnel.TunnelStream
+	ConnectedAt         time.Time
+	LastHeartbeat       atomic.Int64 // Unix timestamp in seconds
+	ActiveStreams       atomic.Int64
+	ActiveExitID        atomic.Pointer[string]
+	BytesUp             atomic.Int64
+	BytesDown           atomic.Int64
 }
 
 func (s *DeviceSession) IsExit() bool {

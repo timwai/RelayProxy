@@ -472,7 +472,7 @@ func (h *Host) streamH264Frames(
 			SendQueueDelayMs: sendQueueDelayMs,
 			DroppedFrames:    droppedFrames,
 			Path:             "relay",
-			CaptureBackend:   captureBackend,
+			CaptureBackend:   captureBackendName(h.source, captureBackend),
 			CaptureFormat:    captureFormat,
 			EncoderBackend:   current.Backend,
 			EncoderHardware:  current.Hardware,

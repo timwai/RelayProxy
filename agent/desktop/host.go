@@ -46,6 +46,18 @@ type SessionCaptureSource interface {
 // CaptureCapabilitySource exposes a fresh platform capture/display snapshot.
 // Display IDs are intentionally session-local: callers should use them only
 // while the corresponding authenticated Agent session remains online.
+func captureBackendName(source CaptureSource, fallback string) string {
+	if sessionSource, ok := source.(SessionCaptureSource); ok {
+		if backend := sessionSource.CaptureBackend(); backend != "" {
+			return backend
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return "generic"
+}
+
 type CaptureCapabilitySource interface {
 	DesktopCaptureCapabilities(context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error)
 }
@@ -557,7 +569,8 @@ func (h *Host) streamFrames(
 				SendQueueDelayMs: sendQueueDelayMs,
 				DroppedFrames:    droppedFrames,
 				Path:             "relay",
-				CaptureBackend:   captureBackend,
+				CaptureBackend:   captureBackendName(h.source, captureBackend),
+				CaptureFormat:    "rgba",
 				EncoderBackend:   "jpeg-go",
 			}
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{

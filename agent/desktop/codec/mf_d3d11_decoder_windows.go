@@ -14,25 +14,25 @@ const (
 	d3dDriverTypeHardware = 1
 	d3d11SDKVersion       = 7
 
-	d3d11CreateDeviceBGRASupport = 0x20
+	d3d11CreateDeviceBGRASupport  = 0x20
 	d3d11CreateDeviceVideoSupport = 0x800
 
-	d3d11UsageStaging     = 3
-	d3d11CPUAccessRead    = 0x20000
-	d3d11MapRead          = 1
-	dxgiFormatNV12        = 103
+	d3d11UsageStaging  = 3
+	d3d11CPUAccessRead = 0x20000
+	d3d11MapRead       = 1
+	dxgiFormatNV12     = 103
 
-	imfSampleGetBufferByIndex = 40
-	imfDXGIBufferGetResource = 3
+	imfSampleGetBufferByIndex        = 40
+	imfDXGIBufferGetResource         = 3
 	imfDXGIBufferGetSubresourceIndex = 4
-	imfDXGIDeviceManagerResetDevice = 7
+	imfDXGIDeviceManagerResetDevice  = 7
 
 	id3d10MultithreadSetMultithreadProtected = 5
 )
 
 var (
-	mfD3D11DLL                 = windows.NewLazySystemDLL("d3d11.dll")
-	procD3D11CreateDevice      = mfD3D11DLL.NewProc("D3D11CreateDevice")
+	mfD3D11DLL                    = windows.NewLazySystemDLL("d3d11.dll")
+	procD3D11CreateDevice         = mfD3D11DLL.NewProc("D3D11CreateDevice")
 	procMFCreateDXGIDeviceManager = mfplatDLL.NewProc("MFCreateDXGIDeviceManager")
 
 	mfSAD3D11Aware = windows.GUID{

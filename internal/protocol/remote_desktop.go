@@ -199,13 +199,15 @@ const (
 	DesktopSessionVideoConfig = "video_config"
 	DesktopSessionIDRRequest  = "idr_request"
 	DesktopSessionCursor      = "cursor"
+	DesktopSessionClipboard   = "clipboard"
 )
 
 type DesktopSessionMessage struct {
 	Type        string              `json:"type"`
 	Input       *DesktopInputEvent  `json:"input,omitempty"`
 	VideoConfig *DesktopVideoConfig `json:"videoConfig,omitempty"`
-	Cursor      *DesktopCursorState `json:"cursor,omitempty"`
+	Cursor      *DesktopCursorState    `json:"cursor,omitempty"`
+	Clipboard   *DesktopClipboardState `json:"clipboard,omitempty"`
 }
 
 const (
@@ -223,6 +225,13 @@ const (
 	DesktopControlSessionClose    = "session_close"
 	DesktopControlError           = "error"
 )
+
+const MaxDesktopClipboardBytes = 1 << 20
+
+type DesktopClipboardState struct {
+	Sequence uint64 `json:"sequence"`
+	Text     string `json:"text"`
+}
 
 type DesktopCursorState struct {
 	Sequence     uint64 `json:"sequence"`

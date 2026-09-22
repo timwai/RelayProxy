@@ -51,6 +51,7 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goSetAutostart",
 		"goSetTheme",
 		"goSetRemoteDesktopResolution",
+		"goGetRemoteDesktopDiagnostics",
 	} {
 		if !strings.Contains(script, "window."+name) {
 			t.Fatalf("Wails bridge missing %s", name)
@@ -244,6 +245,29 @@ func TestRemoteDesktopRuntimeResolutionSwitcher(t *testing.T) {
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop runtime resolution UI missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopDiagnosticsExport(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-diagnostics-export-btn"`,
+		"async function exportRemoteDesktopDiagnostics()",
+		"call('goGetRemoteDesktopDiagnostics')",
+		"desktopDiagnosticsFilename(report)",
+		"new Blob([payload], { type:'application/json;charset=utf-8' })",
+		"link.download = desktopDiagnosticsFilename(report)",
+		"URL.createObjectURL(blob)",
+		"URL.revokeObjectURL(url)",
+		"最近约 10 分钟",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop diagnostics export missing %q", want)
 		}
 	}
 }

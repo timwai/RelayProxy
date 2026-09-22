@@ -197,6 +197,7 @@ func (h *Host) streamH264Frames(
 	var lastCapturedFrames uint64
 	var lastCaptureMs float64
 	var sendQueueDelayMs float64
+	var droppedFrames uint64
 	frameInterval := time.Second / time.Duration(videoCfg.FPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
@@ -261,6 +262,7 @@ func (h *Host) streamH264Frames(
 			CaptureMs:        lastCaptureMs,
 			EncodeMs:         float64(current.LastEncodeTime.Microseconds()) / 1000,
 			SendQueueDelayMs: sendQueueDelayMs,
+			DroppedFrames:    droppedFrames,
 			Path:             "relay",
 		}
 		if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
@@ -301,8 +303,16 @@ func (h *Host) streamH264Frames(
 				videoCfg = nextConfig
 				log.Printf("[Desktop] H.264 target bitrate updated=%d", videoCfg.TargetBitrate)
 			}
-		case now := <-ticker.C:
-			captureStarted := time.Now()
+		case scheduled := <-ticker.C:
+			now := time.Now()
+			if dropped := staleScheduledFrameCount(scheduled, now, frameInterval); dropped > 0 {
+				droppedFrames += dropped
+				if err := reportStats(now); err != nil {
+					return err
+				}
+				continue
+			}
+			captureStarted := now
 			frame, err := h.source.Capture(ctx)
 			lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
 			if err != nil {
@@ -311,7 +321,7 @@ func (h *Host) streamH264Frames(
 			if err := sendRGBA(frame, now); err != nil {
 				return err
 			}
-			if err := reportStats(now); err != nil {
+			if err := reportStats(time.Now()); err != nil {
 				return err
 			}
 		}

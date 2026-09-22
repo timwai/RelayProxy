@@ -382,6 +382,7 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 	var lastReportFrames uint64
 	var lastReportBytes uint64
 	var sendQueueDelayMs float64
+	var droppedFrames uint64
 	frameInterval := time.Second / time.Duration(cfg.MaxFPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
@@ -425,6 +426,7 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 				ActualBitrate:    int64(float64((sentBytes-lastReportBytes)*8) / seconds),
 				TargetBitrate:    int64(cfg.MaxBitrate),
 				SendQueueDelayMs: sendQueueDelayMs,
+				DroppedFrames:    droppedFrames,
 				Path:             "relay",
 			}
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
@@ -447,7 +449,11 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-ticker.C:
+		case scheduled := <-ticker.C:
+			if dropped := staleScheduledFrameCount(scheduled, time.Now(), frameInterval); dropped > 0 {
+				droppedFrames += dropped
+				continue
+			}
 			if err := sendFrame(); err != nil {
 				return err
 			}

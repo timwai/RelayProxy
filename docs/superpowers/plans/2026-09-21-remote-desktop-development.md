@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回与 direct-path RTT/Jitter 探测已合并 main，已具备确定性 transport shim，已完成 send-queue ABR 拥塞闭环与默认路径策略场景标定，进入组合弱网场景与跨 NAT 实机验证  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回与 direct-path RTT/Jitter 探测已合并 main，已具备确定性 transport shim 与 send-queue ABR 拥塞闭环；当前分支已加入 stale-frame/drop 实时性保护，继续进入组合弱网场景与跨 NAT 实机验证  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #47 已合并）
@@ -30,7 +30,7 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、bitrate-only ABR、Relay Desktop P2P 已全部进入 main。P2P 复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，并使用独立 `desktop_media` purpose；可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`。PR #42 已补齐运行期恢复与 2/4/8/16/30 秒有界指数退避；PR #43 增加集中式路径评分、切换滞回、P2P 质量主动降级和路径变化 IDR 恢复；PR #44 复用认证 `PunchKeep/PunchAck` 在同一 `udp_p2p` socket 上测量真实 direct-path RTT/Jitter，并以 EWMA 输入路径评分；PR #46 增加确定性 Datagram transport shim，覆盖 delay/jitter/random loss/burst loss/限速，并加入路径切换与真实 probe 弱网场景测试；PR #47 打通 Host 媒体 Send 阻塞时间 → `SendQueueDelayMs` Stats → bitrate-only ABR 的拥塞闭环，在丢包出现前即可对发送队列积压快速降码率，并补齐带宽骤降/恢复与默认路径策略标定场景。下一步为组合弱网场景和跨 NAT 实机验证 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、bitrate-only ABR、Relay Desktop P2P 已全部进入 main。P2P 复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，并使用独立 `desktop_media` purpose；可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`。PR #42 已补齐运行期恢复与 2/4/8/16/30 秒有界指数退避；PR #43 增加集中式路径评分、切换滞回、P2P 质量主动降级和路径变化 IDR 恢复；PR #44 复用认证 `PunchKeep/PunchAck` 在同一 `udp_p2p` socket 上测量真实 direct-path RTT/Jitter，并以 EWMA 输入路径评分；PR #46 增加确定性 Datagram transport shim；PR #47 打通 Host 媒体 Send 阻塞时间 → `SendQueueDelayMs` Stats → bitrate-only ABR 的拥塞闭环。当前分支进一步让 H.264/JPEG 在媒体发送或编码落后至少一个帧周期时丢弃过期采样，不追赶历史 tick，并把 drop 累计进 `DroppedFrames` 供 ABR 感知。下一步为组合弱网场景和跨 NAT 实机验证 |
 
 ### 0.1 已合并主线的关键进度
 
@@ -137,7 +137,7 @@ UI CI
 下一轮重点：
 
 1. 扩展 transport shim 场景到随机丢包 + burst loss + jitter + bandwidth drop 的组合，并验证 ABR 与 path switch 联动不会互相放大抖动。
-2. 增加持续队列积压下的 stale-frame/drop 策略测试，确认视频 backlog 不会无限增长、输入可靠通道不被媒体队列拖慢。
+2. ✅ 已加入 stale-frame/drop 实时性保护：H.264/JPEG 捕获循环不追赶过期 ticker，落后至少一个帧周期时直接跳过旧采样并累计 `DroppedFrames`；继续在组合弱网测试中验证持续积压下的行为。 
 3. 用组合弱网结果继续校准 `PathScorePolicy` 的权重、upgrade/emergency margin 与 hold window；默认值先保持本轮场景测试固化的行为。
 4. 完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵验证。
 5. 根据实机数据继续调整 ABR 阈值和 P2P retry/path-switch 参数。

@@ -501,16 +501,24 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		requested = append(requested, protocol.CapabilityProxyExit)
 		transportCaps = append(transportCaps, protocol.CapabilityTargetACL)
 	}
+	var desktopCapabilities *protocol.DesktopCapabilities
 	if cfg.IsRDPEnabled() {
 		requested = append(requested,
 			protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic,
 			protocol.CapabilityDesktopController,
 		)
 		a.mu.RLock()
-		desktopHostReady := a.desktopHost != nil
+		desktopHost := a.desktopHost
 		a.mu.RUnlock()
-		if desktopHostReady {
+		if desktopHost != nil {
 			requested = append(requested, protocol.CapabilityDesktopHost)
+			if provider, ok := desktopHost.(desktop.HostCapabilityProvider); ok {
+				capabilityCtx, cancelCapabilities := context.WithTimeout(ctx, 2*time.Second)
+				snapshot := provider.DesktopCapabilities(capabilityCtx)
+				cancelCapabilities()
+				snapshot.RelayDesktop = true
+				desktopCapabilities = &snapshot
+			}
 		}
 	}
 	clientNonce := make([]byte, 32)
@@ -524,6 +532,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		ClientNonce:     clientNonce, DeviceName: cfg.DeviceName, Platform: runtime.GOOS,
 		Arch: runtime.GOARCH, ClientVersion: "2.0.0",
 		RequestedCapabilities: requested, TransportCapabilities: transportCaps,
+		DesktopCapabilities: desktopCapabilities,
 	}
 	if err := protocol.WriteJSON(ctrl, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)

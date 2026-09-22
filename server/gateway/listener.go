@@ -460,17 +460,25 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		RDPLeaseSec:           g.cfg.RDPLeaseSec,
 	}
 
+	desktopCapabilities := protocol.DesktopCapabilities{}
+	if hello.DesktopCapabilities != nil {
+		desktopCapabilities = *hello.DesktopCapabilities
+		desktopCapabilities.Captures = append([]protocol.DesktopCaptureCapability(nil), hello.DesktopCapabilities.Captures...)
+		desktopCapabilities.Codecs = append([]protocol.DesktopCodecCapability(nil), hello.DesktopCapabilities.Codecs...)
+		desktopCapabilities.Displays = append([]protocol.DesktopDisplayCapability(nil), hello.DesktopCapabilities.Displays...)
+	}
 	deviceSession := &session.DeviceSession{
-		DeviceID:      authorization.DeviceID,
-		DeviceName:    hello.DeviceName,
-		OwnerUserID:   authorization.OwnerUserID,
-		Mode:          modeForCapabilities(authorization.ApprovedCapabilities),
-		Capabilities:  hello.TransportCapabilities,
-		Grants:        authorization.ApprovedCapabilities,
-		Transport:     sess.Transport(),
-		Tunnel:        sess,
-		ControlStream: ctrlStream,
-		ConnectedAt:   time.Now(),
+		DeviceID:            authorization.DeviceID,
+		DeviceName:          hello.DeviceName,
+		OwnerUserID:         authorization.OwnerUserID,
+		Mode:                modeForCapabilities(authorization.ApprovedCapabilities),
+		Capabilities:        hello.TransportCapabilities,
+		Grants:              authorization.ApprovedCapabilities,
+		DesktopCapabilities: desktopCapabilities,
+		Transport:           sess.Transport(),
+		Tunnel:              sess,
+		ControlStream:       ctrlStream,
+		ConnectedAt:         time.Now(),
 	}
 
 	g.mu.Lock()

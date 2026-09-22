@@ -33,16 +33,17 @@ type RDPTarget struct {
 }
 
 type DeviceHello struct {
-	ProtocolVersion       int      `json:"protocolVersion"`
-	InstallationID        string   `json:"installationId"`
-	PublicKey             []byte   `json:"publicKey"`
-	ClientNonce           []byte   `json:"clientNonce"`
-	DeviceName            string   `json:"deviceName"`
-	Platform              string   `json:"platform"`
-	Arch                  string   `json:"arch"`
-	ClientVersion         string   `json:"clientVersion"`
-	RequestedCapabilities []string `json:"requestedCapabilities"`
-	TransportCapabilities []string `json:"transportCapabilities,omitempty"`
+	ProtocolVersion       int                  `json:"protocolVersion"`
+	InstallationID        string               `json:"installationId"`
+	PublicKey             []byte               `json:"publicKey"`
+	ClientNonce           []byte               `json:"clientNonce"`
+	DeviceName            string               `json:"deviceName"`
+	Platform              string               `json:"platform"`
+	Arch                  string               `json:"arch"`
+	ClientVersion         string               `json:"clientVersion"`
+	RequestedCapabilities []string             `json:"requestedCapabilities"`
+	TransportCapabilities []string             `json:"transportCapabilities,omitempty"`
+	DesktopCapabilities   *DesktopCapabilities `json:"desktopCapabilities,omitempty"`
 }
 
 type AuthChallenge struct {

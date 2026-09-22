@@ -32,6 +32,20 @@ type SessionCaptureSource interface {
 	CaptureBackend() string
 }
 
+// CaptureCapabilitySource exposes a fresh platform capture/display snapshot.
+// Display IDs are intentionally session-local: callers should use them only
+// while the corresponding authenticated Agent session remains online.
+type CaptureCapabilitySource interface {
+	DesktopCaptureCapabilities(context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error)
+}
+
+// HostCapabilityProvider is implemented by the concrete Relay Desktop host so
+// Agent authentication can advertise current media/display capabilities
+// without coupling the Agent package to platform-specific capture code.
+type HostCapabilityProvider interface {
+	DesktopCapabilities(context.Context) protocol.DesktopCapabilities
+}
+
 type HostConfig struct {
 	MaxFPS      int
 	MaxWidth    int
@@ -578,6 +592,38 @@ func (h *Host) CodecCapabilities() []protocol.DesktopCodecCapability {
 	h.codecMu.RLock()
 	defer h.codecMu.RUnlock()
 	return append([]protocol.DesktopCodecCapability(nil), h.codecCaps...)
+}
+
+func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabilities {
+	if h == nil {
+		return protocol.DesktopCapabilities{}
+	}
+	caps := protocol.DesktopCapabilities{
+		RelayDesktop: true,
+		Codecs:       h.CodecCapabilities(),
+		MaxWidth:     maxJPEGWidth,
+		MaxHeight:    maxJPEGHeight,
+		MaxFPS:       maxJPEGFPS,
+	}
+	if _, ok := h.source.(ClipboardEndpoint); ok {
+		caps.Clipboard = true
+	}
+	_, hasCursor := h.source.(CursorCaptureSource)
+	if provider, ok := h.source.(CaptureCapabilitySource); ok {
+		captures, displays, err := provider.DesktopCaptureCapabilities(ctx)
+		if err == nil {
+			caps.Captures = append([]protocol.DesktopCaptureCapability(nil), captures...)
+			caps.Displays = append([]protocol.DesktopDisplayCapability(nil), displays...)
+			caps.MultiMonitor = len(displays) > 1
+		}
+	}
+	if len(caps.Captures) == 0 {
+		caps.Captures = []protocol.DesktopCaptureCapability{{
+			Backend: "generic",
+			Cursor:  hasCursor,
+		}}
+	}
+	return caps
 }
 
 func (h *Host) Close() error {

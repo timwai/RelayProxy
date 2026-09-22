@@ -174,6 +174,46 @@ func newSystemCapture() (*windowsCapture, error) {
 	return capture, nil
 }
 
+func windowsDesktopCapabilitySnapshot(displays []screencapture.Display) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability) {
+	captures := []protocol.DesktopCaptureCapability{{
+		Backend: "gdi",
+		Cursor:  true,
+	}}
+	hasDXGI := false
+	out := make([]protocol.DesktopDisplayCapability, 0, len(displays))
+	for _, display := range displays {
+		if display.Duplicable() {
+			hasDXGI = true
+		}
+		out = append(out, protocol.DesktopDisplayCapability{
+			ID:      strconv.FormatUint(display.ID, 10),
+			Name:    display.DeviceName,
+			Width:   display.PixelWidth,
+			Height:  display.PixelHeight,
+			Primary: display.Primary,
+		})
+	}
+	if hasDXGI {
+		captures = append(captures, protocol.DesktopCaptureCapability{
+			Backend: "dxgi",
+			Cursor:  true,
+		})
+	}
+	return captures, out
+}
+
+func (c *windowsCapture) DesktopCaptureCapabilities(ctx context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	displays, err := screencapture.Displays(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	captures, capabilities := windowsDesktopCapabilitySnapshot(displays)
+	return captures, capabilities, nil
+}
+
 func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

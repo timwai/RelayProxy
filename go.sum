@@ -4,8 +4,6 @@ github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9
 github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
 github.com/deploymenttheory/go-bindings-win32 v0.2.1 h1:mApZJdaGj636R5lLwSPIIdA+6hKPewtdg8VpePc5VBA=
 github.com/deploymenttheory/go-bindings-win32 v0.2.1/go.mod h1:UCwSCOc2LcmtnGEQFuhyDZ9pFjMdpxvOhR4MsjOji94=
-github.com/deploymenttheory/go-bindings-win32 v0.5.0 h1:B5qu2L+XvQRPe0/ni7Q9PAu3j3it94cyDJjGTeMLG/o=
-github.com/deploymenttheory/go-bindings-win32 v0.5.0/go.mod h1:J3mOfF0N1uFmI8Cm3GPtq1YJYnwAKUkOsmc36GYbm0w=
 github.com/deploymenttheory/go-bindings-winrt v0.6.0 h1:wgM2t5ur6dgEZMiFD50lWmLpKxzpac0waK/FoXIXB/w=
 github.com/deploymenttheory/go-bindings-winrt v0.6.0/go.mod h1:9NHSiJJNrtzRHquQTrfpcPa5b0YYOpwNxBoHWh9i6eo=
 github.com/deploymenttheory/go-winmd v0.4.0 h1:snHk08j1NJZl7ZFzVdsYDNWnDCCdNu+wAEmMuP3F3RA=

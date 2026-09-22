@@ -57,11 +57,11 @@ func (c ImpairmentConfig) normalized() ImpairmentConfig {
 }
 
 type ImpairmentStats struct {
-	SendPackets       uint64
-	SendDropped       uint64
-	ReceivePackets    uint64
-	ReceiveDropped    uint64
-	SendPayloadBytes  uint64
+	SendPackets         uint64
+	SendDropped         uint64
+	ReceivePackets      uint64
+	ReceiveDropped      uint64
+	SendPayloadBytes    uint64
 	ReceivePayloadBytes uint64
 }
 

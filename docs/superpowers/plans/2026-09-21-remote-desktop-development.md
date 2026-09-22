@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网与 stale-frame/drop 已合并 main；Host capability snapshot / 显示器枚举已通过 PR #52 合并，当前分支继续打通 Relay Desktop 指定显示器捕获、光标和输入坐标映射  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网、stale-frame/drop 与指定显示器链路已合并 main；当前分支把 scene-aware ABR 场景策略开放到 GUI 连接设置  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #52 已合并，merge `95a22aee838af804a5a1ab50963649b88cd7614f`）
+> 当前开发基线：`main`（PR #53 已合并，merge `18dd9bb5d414abb5ebee473f1b58a6c1cd6dabfb`）
 
 ## 0. 当前进度
 
@@ -26,11 +26,11 @@
 | 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ✅ 已合并 main | Windows Host 以 60 Hz 独立采集位置/可见性，形状仅在 HCURSOR 变化时生成 PNG；可靠 session stream 传输，Controller 缓存形状，Wails Viewer 在视频表面本地叠加；PR #31 merge commit `f7101025c98fe1c09547a3a1203d20a6f3b6b888` |
 | 剪贴板 | ✅ 已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本；连接时仅建立基线不互相覆盖，后续变化按序号传播并做回环去重；GUI 可关闭同步，文件/图片暂不传输；PR #32 merge commit `010b8f5abc1408e3c824ebdaf13e943cf003dcc1` |
-| DXGI / WGC Capture | 🧪 指定显示器链路实施中 | 单显示器优先 DXGI / GDI Auto；未指定显示器且存在多屏时继续保留虚拟桌面 GDI。当前分支使用 PR #52 的实时 `Displays` capability，通过 session-local `DisplayID` 指定单屏捕获，并同步映射光标与 Windows `SendInput` 坐标 |
+| DXGI / WGC Capture | ✅ 指定显示器链路已合并 main | PR #53 已打通 capability 驱动的 per-target 选屏、session-local `DisplayID`、单屏 DXGI/GDI Auto 捕获、光标局部坐标与 Windows `SendInput` 虚拟桌面坐标映射；未指定显示器时继续保留原虚拟桌面行为 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。当前分支继续补在线 Host capability snapshot / 显示器枚举，下一步进入选屏链路与跨 NAT / Wi-Fi 实机验证 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射；当前分支继续把 scene-aware ABR 场景选择开放到 GUI，之后进入跨 NAT / Wi-Fi 实机验证 |
 
 ### 0.1 已合并主线的关键进度
 
@@ -87,7 +87,7 @@ Windows SendInput / CF_UNICODETEXT
 
 该 JPEG 路径现在作为可运行的功能基线保留；后续 Capture / Codec / Viewer 可以独立替换，不需要重做授权、Relay Datagram 与输入控制链路。
 
-### 0.2.1 指定显示器链路（当前分支）
+### 0.2.1 指定显示器链路（已合并 PR #53）
 
 - GUI 在每个支持 Relay Desktop 且上报多显示器的目标卡片上提供显示器选择器；默认“全部显示器”保持原虚拟桌面行为，不改变既有用户路径。
 - `RemoteDesktopConnectOptions.DisplayID` 现在进入 session-local `HostConfig`，不会修改 Host 全局默认设置，也不会跨会话残留。
@@ -97,6 +97,13 @@ Windows SendInput / CF_UNICODETEXT
 - Windows `SendInput` 将 Viewer 的单屏归一化坐标重新映射到整个 virtual desktop 的绝对坐标，覆盖左侧负 X、副屏右侧及主屏上方负 Y 等布局。
 - `DesktopVideoConfig.DisplayID` 与 `RemoteDesktopStatus.DisplayID/DisplayName` 回显当前会话选择，GUI session banner 可直接确认实机正在控制哪块屏幕。
 - Windows 单测覆盖 session-scoped DisplayID、默认多屏虚拟桌面、左右双屏与负 Y 坐标映射；GUI 回归覆盖 capability 驱动的 per-target selector 与状态展示。
+
+### 0.2.2 Scene 策略 GUI（当前分支）
+
+- `DesktopScene` 与 scene-aware FPS ABR 已在 PR #51 落地，但此前 GUI 始终固定发送 `scene: auto`，用户无法选择 Gaming / Performance 的保帧率策略。
+- 当前分支在 Remote Desktop 连接设置中新增“场景”：自动、办公、性能、游戏、画质，并直接透传现有 `RemoteDesktopConnectOptions.Scene`，不新增协议字段。
+- Gaming / Performance 继续使用 negotiated FPS 作为 adaptive minimum，只通过 bitrate 应对拥塞；Office / Auto / Quality 在持续 severe pressure 下可降低采集 FPS。
+- 连接摘要显示所选场景，设置帮助文字明确说明场景只影响自适应取舍，避免与“画质”预设混淆。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换与可导出实机会话诊断均已合并 main；当前分支为诊断报告增加可直接比较的聚合 Summary / percentile / 事件计数  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、可导出实机会话诊断与聚合 Summary 均已合并 main；当前重点进入 LAN / NAT / IPv6 / Relay-only / Wi-Fi / GPU 实机矩阵验证与参数标定  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #59 已合并，merge `2037496c317789a7c4b3e3a4d9832cebb4f3234b`）
+> 当前开发基线：`main`（PR #60 已合并，merge `b352f71d53952a340d1c03fa83c727c92df85651`）
 
 ## 0. 当前进度
 
@@ -30,7 +30,7 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换，PR #58 已把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR，PR #59 已补齐可导出的实机会话诊断时间序列；当前分支继续增加聚合 Summary，便于跨场景/跨 GPU 对比标定 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换，PR #58 已把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR，PR #59 已补齐可导出的实机会话诊断时间序列，PR #60 已加入 schema v2 聚合 Summary、percentile 与路径/Generation/ABR/backend 分布统计；RD2 当前进入实机矩阵验证与参数标定阶段 |
 
 ### 0.1 已合并主线的关键进度
 
@@ -161,7 +161,7 @@ Windows SendInput / CF_UNICODETEXT
 - Wails 新增 `GetRemoteDesktopDiagnostics`，Remote Desktop 页面增加“导出诊断”按钮，直接保存带 schemaVersion 的 JSON；文件名包含目标 ID 与生成时间，便于多机矩阵归档。
 - 新测试覆盖 500 ms window bitrate/FPS/loss、diagnostics 与 ABR loss window 相互独立、1200 样本有界保留、报告副本隔离，以及 GUI/Wails 导出绑定。
 
-### 0.2.8 诊断聚合 Summary（当前分支）
+### 0.2.8 诊断聚合 Summary（已合并 PR #60）
 
 - Diagnostics schema 升级到 v2，在原始 500 ms samples 之外新增 `summary`，用于不同网络、设备和 GPU 样本的直接比较。
 - Summary 为 RTT、Jitter、Loss、Send Queue Delay、Actual Bitrate、Receive/Decode/Render FPS、Capture/Encode/Decode/Render latency 计算 `min / avg / p50 / p95 / max`；不可用的 RTT/阶段耗时不会以 0 污染 percentile。
@@ -220,11 +220,11 @@ UI CI
 
 下一轮重点：
 
-1. ✅ 已补齐组合弱网确定性场景：同一 transport shim profile 同时启用 jitter、random loss、burst loss 与 bandwidth shaping，并增加 ABR + path switch 联动场景，验证短时劣化优先降码率但不切路、持续劣化经过完整 hold 后才回退 Relay、恢复后 direct path 必须重新满足 promotion hold。
-2. ✅ 已加入 stale-frame/drop 实时性保护：H.264/JPEG 捕获循环不追赶过期 ticker，落后至少一个帧周期时直接跳过旧采样并累计 `DroppedFrames`；继续在组合弱网测试中验证持续积压下的行为。 
-3. 用组合弱网结果继续校准 `PathScorePolicy` 的权重、upgrade/emergency margin 与 hold window；默认值先保持本轮场景测试固化的行为。
-4. 完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵验证。
-5. 根据实机数据继续调整 ABR 阈值和 P2P retry/path-switch 参数。
+1. ✅ 组合弱网确定性场景、stale-frame/drop 实时性保护、bitrate/FPS/resolution 三层 ABR、generation-aware Encoder/Decoder rebuild 与可导出 diagnostics schema v2 均已进入 `main`。
+2. 使用“导出诊断”完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵；每次测试保留 raw 500 ms samples 与 Summary，重点比较 p50/p95 RTT/Jitter/Loss/Queue、DroppedFrames、PathSwitches、GenerationChanges、ABRChanges 与 ResolutionChanges。
+3. 完成 Intel / NVIDIA / AMD 编码与解码路径验证，并通过 `CaptureBackends / EncoderBackends / DecoderBackends`、硬件样本数确认实际媒体链路，而不是仅依据日志或 FPS 推测。
+4. 在真实样本完成前保持当前 `PathScorePolicy`、ABR pressure/recovery window 和 P2P retry/path-switch 默认参数，不用纯模拟结果直接改生产权重。
+5. 根据实机诊断 Summary 对 ABR 阈值、resolution hold、PathScorePolicy 权重、upgrade/emergency margin 与 P2P retry/path-switch 参数做定向校准，并继续用确定性弱网场景防止回归。
 
 ### 0.3.1 组合弱网联动验证（本轮新增）
 

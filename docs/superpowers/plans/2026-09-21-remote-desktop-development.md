@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream 与真实 WinRT WGC monitor capture 均已合并 main；当前分支让 GUI 按目标 capability 动态暴露 WGC/DXGI/GDI 采集后端  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、真实 WinRT WGC monitor capture 与 capability-aware WGC GUI 均已合并 main；当前分支落地 owned native capture Surface，为 WGC→MF GPU surface 编码链路建立零 CPU readback 接口  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #66 已合并，merge `9d91c0d951ce5acb6cc47f36e04506982d6ac776`）
+> 当前开发基线：`main`（PR #67 已合并，merge `e1841d2da67d578c10532d84fe16b251b2ec462a`）
 
 ## 0. 当前进度
 
@@ -219,7 +219,26 @@ Windows SendInput / CF_UNICODETEXT
 - 当前阶段仍是 D3D11 → staging CPU BGRA readback，再进入现有 NV12/H.264；WGC capture 已是真实 GPU surface 来源，但 capture→encoder 零拷贝仍属于后续优化。
 - `GraphicsCaptureSession.IsSupported()` 已接入 capability snapshot：仅 Windows amd64 且运行时确认支持 WGC 时才上报 `wgc`；Go/UI/Windows/macOS CI 均已通过，PR #66 merge `9d91c0d951ce5acb6cc47f36e04506982d6ac776`。
 
-### 0.2.13 Capability-aware Capture Selector（当前分支）\n\n- GUI 不再静态写死 DXGI/GDI；采集下拉框根据当前 Relay Desktop 目标 `capabilities.captures` 动态生成 `WGC / DXGI / GDI`。\n- WGC 只有目标明确上报时才出现；旧节点没有 capture capability snapshot 时仅保留历史 DXGI/GDI 兼容选项，不推断 WGC。\n- 当前选择的后端在设备刷新后如果不再存在，会自动回到 `auto`，避免显示器/驱动/系统能力变化后保留失效配置。\n- 明确 Relay Desktop，或 Auto 但目标没有 Native RDP、因此必然使用 Relay Desktop 时，连接前会校验显式采集后端是否由该目标上报；不支持时在本地直接提示，不发起注定失败的会话。\n- Auto 协议仍由现有 `SelectBackend` 决定 RDP/Relay，不因为选择采集后端而偷偷改变协议选择语义。\n- 帮助文案明确：采集 Auto 仍保持现有 DXGI→GDI 策略；WGC 是可显式选择的实机 A/B 后端，且多屏全部显示器仍需 GDI。\n\n### 0.3 本轮进度（2026-09-22）
+### 0.2.13 Capability-aware Capture Selector（已合并 PR #67）
+
+- GUI 不再静态写死 DXGI/GDI；采集下拉框根据当前 Relay Desktop 目标 `capabilities.captures` 动态生成 `WGC / DXGI / GDI`。
+- WGC 只有目标明确上报时才出现；旧节点没有 capture capability snapshot 时仅保留历史 DXGI/GDI 兼容选项，不推断 WGC。
+- 当前选择的后端在设备刷新后如果不再存在，会自动回到 `auto`，避免显示器/驱动/系统能力变化后保留失效配置。
+- 明确 Relay Desktop，或 Auto 但目标没有 Native RDP、因此必然使用 Relay Desktop 时，连接前会校验显式采集后端是否由该目标上报；不支持时在本地直接提示，不发起注定失败的会话。
+- Auto 协议仍由现有 `SelectBackend` 决定 RDP/Relay，不因为选择采集后端而偷偷改变协议选择语义。
+- 帮助文案明确：采集 Auto 仍保持现有 DXGI→GDI 策略；WGC 是可显式选择的实机 A/B 后端，且多屏全部显示器仍需 GDI。
+- Go/UI/Windows/macOS CI 全绿，PR #67 merge `e1841d2da67d578c10532d84fe16b251b2ec462a`。
+
+### 0.2.14 Owned Native Capture Surface（当前分支）
+
+- Host 新增平台无关 `CaptureSurface / NativeCaptureFrame / NativeCaptureSource` 契约；generic Host/协议层只看 backend、format、尺寸和显式 `Close()` 生命周期，不泄漏 COM/D3D11 类型。
+- Windows frame stream 新增可选 `windowsNativeFrameStream`；现有 screencapture DXGI/GDI 不实现该接口，因此当前 CPU 路径完全不变。
+- `windowsCapture.CaptureNative` 只对 native-capable stream 返回 frame，并在交付前统一验证尺寸、surface backend/format；surface ownership 明确转移给调用方。
+- WGC 新增 owned `windowsD3D11CaptureSurface`：直接从 WinRT `IDirect3DSurface` 解包 `ID3D11Texture2D`，保留 texture 与 D3D11 device 引用，不经过 staging texture、Map 或 CPU 像素复制。
+- WGC native path 仍 drain FramePool 只保留最新帧；分辨率变化会在释放 WinRT frame 后 Recreate FramePool，已交付的 D3D11 texture 依靠独立 AddRef 保持有效。
+- 当前 H.264 主循环尚未消费 `NativeCaptureSource`，因此本轮不会改变生产编码行为；下一步接 MF DXGI surface sample / GPU BGRA→NV12 后再有条件启用。
+
+### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
 

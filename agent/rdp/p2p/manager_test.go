@@ -131,7 +131,6 @@ func TestDesktopMediaSessionCannotDialRDPDirectTCP(t *testing.T) {
 	}
 }
 
-
 func TestDirectPathMetricsSmoothRTTAndJitter(t *testing.T) {
 	session := &Session{}
 	session.observeDirectPathRTT(20 * time.Millisecond)

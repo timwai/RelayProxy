@@ -29,7 +29,7 @@
 | DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
-| 原生 D3D11 Viewer | 🧪 零拷贝优化中 | PR #33 已合并独立 Win32/D3D11 Viewer；PR #34 已合并异步 MF 硬件 Decoder、IMFDXGIDeviceManager 与 DXGI NV12 surface staging readback；当前分支共享 Viewer D3D11 device，并用 VideoProcessor 将解码 surface 直接呈现到 swap chain |
+| 原生 D3D11 Viewer | 🧪 零拷贝优化中 | PR #33 已合并独立 Win32/D3D11 Viewer；PR #34 已合并异步 MF 硬件 Decoder、IMFDXGIDeviceManager 与 DXGI NV12 staging readback；当前分支共享 Viewer D3D11 device，并用 VideoProcessor 将解码 surface 直接呈现到 swap chain；远端光标可见时暂按需 readback，下一步迁到 GPU overlay |
 | RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
 
 ### 0.1 已合并主线的关键进度

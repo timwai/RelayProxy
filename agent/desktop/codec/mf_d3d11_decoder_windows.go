@@ -82,10 +82,54 @@ type mfDecoderD3D11 struct {
 	context unsafe.Pointer
 	manager unsafe.Pointer
 	token   uint32
+	shared  bool
 
 	staging       unsafe.Pointer
 	stagingWidth  int
 	stagingHeight int
+}
+
+func finishMFDecoderD3D11(device, context unsafe.Pointer) (*mfDecoderD3D11, error) {
+	if device == nil || context == nil {
+		releaseIUnknown(context)
+		releaseIUnknown(device)
+		return nil, errors.New("D3D11 video device creation returned incomplete objects")
+	}
+	graphics := &mfDecoderD3D11{device: device, context: context}
+	fail := func(err error) (*mfDecoderD3D11, error) {
+		graphics.Close()
+		return nil, err
+	}
+
+	multithread, err := comQueryInterface(device, &iidID3D10Multithread)
+	if err == nil {
+		protected := comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
+		releaseIUnknown(multithread)
+		if protected == 0 {
+			return fail(errors.New("ID3D10Multithread.SetMultithreadProtected returned FALSE"))
+		}
+	}
+
+	hr, _, _ := procMFCreateDXGIDeviceManager.Call(
+		uintptr(unsafe.Pointer(&graphics.token)),
+		uintptr(unsafe.Pointer(&graphics.manager)),
+	)
+	if hresultFailed(hr) {
+		return fail(hresultError("MFCreateDXGIDeviceManager", hr))
+	}
+	if graphics.manager == nil {
+		return fail(errors.New("MFCreateDXGIDeviceManager returned nil"))
+	}
+	hr = comCall(
+		graphics.manager,
+		imfDXGIDeviceManagerResetDevice,
+		uintptr(graphics.device),
+		uintptr(graphics.token),
+	)
+	if hresultFailed(hr) {
+		return fail(hresultError("IMFDXGIDeviceManager.ResetDevice", hr))
+	}
+	return graphics, nil
 }
 
 func createMFDecoderD3D11() (*mfDecoderD3D11, error) {
@@ -111,46 +155,31 @@ func createMFDecoderD3D11() (*mfDecoderD3D11, error) {
 	if hresultFailed(hr) {
 		return nil, hresultError("D3D11CreateDevice(video)", hr)
 	}
-	if device == nil || context == nil {
-		releaseIUnknown(context)
-		releaseIUnknown(device)
-		return nil, errors.New("D3D11 video device creation returned incomplete objects")
-	}
+	return finishMFDecoderD3D11(device, context)
+}
 
-	graphics := &mfDecoderD3D11{device: device, context: context}
-	fail := func(err error) (*mfDecoderD3D11, error) {
-		graphics.Close()
+func createMFDecoderD3D11FromDevice(deviceHandle uintptr) (*mfDecoderD3D11, error) {
+	if deviceHandle == 0 {
+		return createMFDecoderD3D11()
+	}
+	device := unsafe.Pointer(deviceHandle)
+	comCall(device, 1) // IUnknown::AddRef; graphics owns this reference.
+
+	var context unsafe.Pointer
+	comCall(
+		device,
+		40, // ID3D11Device::GetImmediateContext
+		uintptr(unsafe.Pointer(&context)),
+	)
+	if context == nil {
+		releaseIUnknown(device)
+		return nil, errors.New("external D3D11 device returned nil immediate context")
+	}
+	graphics, err := finishMFDecoderD3D11(device, context)
+	if err != nil {
 		return nil, err
 	}
-
-	multithread, err := comQueryInterface(device, &iidID3D10Multithread)
-	if err == nil {
-		protected := comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
-		releaseIUnknown(multithread)
-		if protected == 0 {
-			return fail(errors.New("ID3D10Multithread.SetMultithreadProtected returned FALSE"))
-		}
-	}
-
-	hr, _, _ = procMFCreateDXGIDeviceManager.Call(
-		uintptr(unsafe.Pointer(&graphics.token)),
-		uintptr(unsafe.Pointer(&graphics.manager)),
-	)
-	if hresultFailed(hr) {
-		return fail(hresultError("MFCreateDXGIDeviceManager", hr))
-	}
-	if graphics.manager == nil {
-		return fail(errors.New("MFCreateDXGIDeviceManager returned nil"))
-	}
-	hr = comCall(
-		graphics.manager,
-		imfDXGIDeviceManagerResetDevice,
-		uintptr(graphics.device),
-		uintptr(graphics.token),
-	)
-	if hresultFailed(hr) {
-		return fail(hresultError("IMFDXGIDeviceManager.ResetDevice", hr))
-	}
+	graphics.shared = true
 	return graphics, nil
 }
 
@@ -235,6 +264,110 @@ func sampleBufferByIndex(sample unsafe.Pointer, index uint32) (unsafe.Pointer, e
 	return buffer, nil
 }
 
+func decoderSampleSurface(sample unsafe.Pointer, graphics *mfDecoderD3D11, width, height int) (*D3D11Surface, error) {
+	buffer, err := sampleBufferByIndex(sample, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseIUnknown(buffer)
+
+	dxgiBuffer, err := comQueryInterface(buffer, &iidIMFDXGIBuffer)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseIUnknown(dxgiBuffer)
+
+	var source unsafe.Pointer
+	hr := comCall(
+		dxgiBuffer,
+		imfDXGIBufferGetResource,
+		uintptr(unsafe.Pointer(&iidID3D11Texture2D)),
+		uintptr(unsafe.Pointer(&source)),
+	)
+	if hresultFailed(hr) {
+		return nil, hresultError("IMFDXGIBuffer.GetResource(ID3D11Texture2D)", hr)
+	}
+	if source == nil {
+		return nil, errors.New("IMFDXGIBuffer returned nil ID3D11Texture2D")
+	}
+
+	var subresource uint32
+	hr = comCall(
+		dxgiBuffer,
+		imfDXGIBufferGetSubresourceIndex,
+		uintptr(unsafe.Pointer(&subresource)),
+	)
+	if hresultFailed(hr) {
+		releaseIUnknown(source)
+		return nil, hresultError("IMFDXGIBuffer.GetSubresourceIndex", hr)
+	}
+	return &D3D11Surface{
+		Resource:    uintptr(source),
+		Subresource: subresource,
+		release: func() {
+			releaseIUnknown(source)
+		},
+		readback: func() ([]byte, error) {
+			if graphics == nil {
+				return nil, ErrDecoderUnavailable
+			}
+			return graphics.readNV12Resource(source, subresource, width, height)
+		},
+	}, nil
+}
+
+func (g *mfDecoderD3D11) readNV12Resource(source unsafe.Pointer, subresource uint32, width, height int) ([]byte, error) {
+	if g == nil || g.context == nil || source == nil {
+		return nil, errors.New("D3D11 decoder context is unavailable")
+	}
+	if err := g.ensureStaging(width, height); err != nil {
+		return nil, err
+	}
+
+	comCall(
+		g.context,
+		46, // ID3D11DeviceContext::CopySubresourceRegion
+		uintptr(g.staging),
+		0,
+		0,
+		0,
+		0,
+		uintptr(source),
+		uintptr(subresource),
+		0,
+	)
+
+	var mapped mfD3D11MappedSubresource
+	hr := comCall(
+		g.context,
+		14, // ID3D11DeviceContext::Map
+		uintptr(g.staging),
+		0,
+		d3d11MapRead,
+		0,
+		uintptr(unsafe.Pointer(&mapped)),
+	)
+	if hresultFailed(hr) {
+		return nil, hresultError("ID3D11DeviceContext.Map(NV12 staging)", hr)
+	}
+	if mapped.Data == nil || int(mapped.RowPitch) < width {
+		comCall(g.context, 15, uintptr(g.staging), 0)
+		return nil, errors.New("D3D11 NV12 staging map returned invalid row pitch")
+	}
+
+	rows := height + height/2
+	mappedBytes := unsafe.Slice((*byte)(mapped.Data), int(mapped.RowPitch)*rows)
+	out := make([]byte, width*rows)
+	for row := 0; row < rows; row++ {
+		copy(
+			out[row*width:(row+1)*width],
+			mappedBytes[row*int(mapped.RowPitch):row*int(mapped.RowPitch)+width],
+		)
+	}
+	comCall(g.context, 15, uintptr(g.staging), 0)
+	return out, nil
+}
+
 func (g *mfDecoderD3D11) readNV12Sample(sample unsafe.Pointer, width, height int) ([]byte, error) {
 	if g == nil || g.context == nil {
 		return nil, errors.New("D3D11 decoder context is unavailable")
@@ -275,53 +408,7 @@ func (g *mfDecoderD3D11) readNV12Sample(sample unsafe.Pointer, width, height int
 	if hresultFailed(hr) {
 		return nil, hresultError("IMFDXGIBuffer.GetSubresourceIndex", hr)
 	}
-	if err := g.ensureStaging(width, height); err != nil {
-		return nil, err
-	}
-
-	// Copy only the buffer's selected array/subresource into staging subresource 0.
-	comCall(
-		g.context,
-		46, // ID3D11DeviceContext::CopySubresourceRegion
-		uintptr(g.staging),
-		0,
-		0,
-		0,
-		0,
-		uintptr(source),
-		uintptr(subresource),
-		0,
-	)
-
-	var mapped mfD3D11MappedSubresource
-	hr = comCall(
-		g.context,
-		14, // ID3D11DeviceContext::Map
-		uintptr(g.staging),
-		0,
-		d3d11MapRead,
-		0,
-		uintptr(unsafe.Pointer(&mapped)),
-	)
-	if hresultFailed(hr) {
-		return nil, hresultError("ID3D11DeviceContext.Map(NV12 staging)", hr)
-	}
-	if mapped.Data == nil || int(mapped.RowPitch) < width {
-		comCall(g.context, 15, uintptr(g.staging), 0)
-		return nil, errors.New("D3D11 NV12 staging map returned invalid row pitch")
-	}
-
-	rows := height + height/2
-	mappedBytes := unsafe.Slice((*byte)(mapped.Data), int(mapped.RowPitch)*rows)
-	out := make([]byte, width*rows)
-	for row := 0; row < rows; row++ {
-		copy(
-			out[row*width:(row+1)*width],
-			mappedBytes[row*int(mapped.RowPitch):row*int(mapped.RowPitch)+width],
-		)
-	}
-	comCall(g.context, 15, uintptr(g.staging), 0)
-	return out, nil
+	return g.readNV12Resource(source, subresource, width, height)
 }
 
 func (g *mfDecoderD3D11) Close() {

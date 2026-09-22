@@ -32,6 +32,50 @@ type RawCaptureSource interface {
 	CaptureRaw(context.Context) (desktopcodec.RawFrame, bool, error)
 }
 
+// CaptureSurface is an owned platform-native image resource. Surface users
+// must Close it exactly once after the encoder/renderer is finished with the
+// frame. The interface deliberately keeps COM/D3D11 types out of the generic
+// Host and protocol layers.
+type CaptureSurface interface {
+	Backend() string
+	Format() string
+	Close() error
+}
+
+// NativeCaptureFrame is the zero-readback counterpart to RawFrame. CapturedAt
+// is a wall-clock capture timestamp; the media loop converts it to its
+// session-relative encoder timestamp. Surface owns the underlying native
+// resource reference until Close.
+type NativeCaptureFrame struct {
+	Width      int
+	Height     int
+	CapturedAt time.Time
+	Surface    CaptureSurface
+}
+
+func (f NativeCaptureFrame) Validate() error {
+	if f.Width <= 0 || f.Height <= 0 {
+		return errors.New("native capture frame has invalid dimensions")
+	}
+	if f.Surface == nil {
+		return errors.New("native capture frame has no surface")
+	}
+	if f.Surface.Backend() == "" {
+		return errors.New("native capture frame surface has no backend")
+	}
+	if f.Surface.Format() == "" {
+		return errors.New("native capture frame surface has no format")
+	}
+	return nil
+}
+
+// NativeCaptureSource is optional. It lets Windows capture keep frames on the
+// GPU until a native-surface encoder is available. Returning available=false
+// is not an error and leaves the existing RawCaptureSource/RGBA paths intact.
+type NativeCaptureSource interface {
+	CaptureNative(context.Context) (NativeCaptureFrame, bool, error)
+}
+
 // SessionCaptureSource lets a backend acquire expensive per-session resources
 // (for example IDXGIOutputDuplication) only while somebody is actually
 // connected. CaptureSource remains deliberately small so the JPEG MVP and

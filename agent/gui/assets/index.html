@@ -787,6 +787,7 @@
               <div id="desktop-runtime-resolution-wrap" class="hidden items-center gap-1.5">
                 <select id="desktop-runtime-resolution" title="运行中切换 H.264 分辨率" class="text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
                   <option value="">当前分辨率</option>
+                  <option id="desktop-runtime-resolution-max" value="max">最高</option>
                   <option value="960x540">960×540</option>
                   <option value="1280x720">1280×720</option>
                   <option value="1600x900">1600×900</option>
@@ -1727,9 +1728,14 @@
       current.textContent = status.width && status.height
         ? '当前 ' + status.width + '×' + status.height + (status.generation ? ' · G' + status.generation : '')
         : '当前分辨率';
+      var maxOption = $('desktop-runtime-resolution-max');
+      if (maxOption) {
+        maxOption.textContent = maxWidth && maxHeight ? '最高 ' + maxWidth + '×' + maxHeight : '最高';
+        maxOption.disabled = !maxWidth || !maxHeight;
+      }
       Array.prototype.forEach.call(select.options, function (option, index) {
-        if (index === 0 || !option.value) {
-          option.disabled = false;
+        if (index === 0 || !option.value || option.value === 'max') {
+          if (option.value !== 'max') option.disabled = false;
           return;
         }
         var parts = option.value.split('x');
@@ -2075,12 +2081,22 @@
       var select = $('desktop-runtime-resolution');
       var apply = $('desktop-runtime-resolution-apply');
       var value = select ? String(select.value || '') : '';
-      var match = /^(\d+)x(\d+)$/.exec(value);
-      if (!match) {
+      var width = 0, height = 0;
+      if (value === 'max') {
+        var status = state.desktopStatus || {};
+        width = Number(status.maxWidth || status.width || 0);
+        height = Number(status.maxHeight || status.height || 0);
+      } else {
+        var match = /^(\d+)x(\d+)$/.exec(value);
+        if (match) {
+          width = Number(match[1]);
+          height = Number(match[2]);
+        }
+      }
+      if (!width || !height) {
         toast('请选择要切换的分辨率');
         return;
       }
-      var width = Number(match[1]), height = Number(match[2]);
       if (apply) apply.disabled = true;
       if (select) select.disabled = true;
       try {

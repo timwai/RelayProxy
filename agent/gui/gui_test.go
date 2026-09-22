@@ -282,16 +282,30 @@ func TestRemoteDesktopCaptureBackendSelector(t *testing.T) {
 	page := string(data)
 	for _, want := range []string{
 		`id="desktop-opt-capture"`,
-		`<option value="dxgi">DXGI</option>`,
-		`<option value="gdi">GDI</option>`,
-		`var captureBackend = $('desktop-opt-capture') ? $('desktop-opt-capture').value : 'auto';`,
-		`captureBackend: captureBackend || 'auto'`,
-		`parts.push('Capture ' + options.captureBackend.toUpperCase())`,
-		`显式 DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端`,
-		`强制 DXGI 时请先选择具体显示器`,
+		"function remoteDesktopCaptureBackends(target)",
+		"Array.isArray(caps.captures)",
+		"capture && capture.backend",
+		"function remoteDesktopCaptureBackendSupported(targetID, backend)",
+		"if (!captures.length) return backend === 'dxgi' || backend === 'gdi';",
+		"function syncRemoteDesktopCaptureOptions()",
+		"['wgc', 'WGC']",
+		"['dxgi', 'DXGI']",
+		"['gdi', 'GDI']",
+		"syncRemoteDesktopCaptureOptions();",
+		"var captureBackend = $('desktop-opt-capture') ? $('desktop-opt-capture').value : 'auto';",
+		"captureBackend: captureBackend || 'auto'",
+		"var relayRequired = options.backend === 'relay'",
+		"!remoteDesktopCaptureBackendSupported(targetID, options.captureBackend)",
+		"目标未提供 ' + options.captureBackend.toUpperCase() + ' 采集能力",
+		"WGC 仅在目标 Windows 运行时确认支持时出现",
+		"显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端",
+		"强制 WGC/DXGI 时请先选择具体显示器",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop capture backend selector missing %q", want)
 		}
+	}
+	if strings.Contains(page, `<option value="wgc">WGC</option>`) {
+		t.Fatal("WGC must not be a static option; it must come from target capabilities")
 	}
 }

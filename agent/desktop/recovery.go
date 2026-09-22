@@ -8,11 +8,11 @@ import (
 const h264RecoveryRetryFrames = 15
 
 type h264RecoveryState struct {
-	generation       uint32
-	lastFrameID      uint32
-	waitingKeyFrame  bool
-	requestPending   bool
-	droppedSinceIDR  int
+	generation      uint32
+	lastFrameID     uint32
+	waitingKeyFrame bool
+	requestPending  bool
+	droppedSinceIDR int
 }
 
 func (s *h264RecoveryState) Reset() {

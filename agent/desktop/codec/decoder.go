@@ -15,6 +15,14 @@ type D3D11Surface struct {
 
 	releaseOnce sync.Once
 	release     func()
+	readback    func() ([]byte, error)
+}
+
+func (s *D3D11Surface) ReadNV12() ([]byte, error) {
+	if s == nil || s.readback == nil {
+		return nil, ErrDecoderUnavailable
+	}
+	return s.readback()
 }
 
 func (s *D3D11Surface) Close() {

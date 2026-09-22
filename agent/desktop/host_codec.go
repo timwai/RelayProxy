@@ -126,6 +126,8 @@ func (h *Host) streamSessionFrames(
 		Codec:         "jpeg",
 		Width:         cfg.MaxWidth,
 		Height:        cfg.MaxHeight,
+		MaxWidth:      cfg.MaxWidth,
+		MaxHeight:     cfg.MaxHeight,
 		FPS:           cfg.MaxFPS,
 		TargetBitrate: cfg.MaxBitrate,
 		DisplayID:     cfg.DisplayID,

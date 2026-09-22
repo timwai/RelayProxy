@@ -478,7 +478,14 @@ func (h *Host) readSessionControlLoop(
 	}
 }
 
-func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, captureBackend string, fpsUpdates <-chan int) error {
+func (h *Host) streamFrames(
+	ctx context.Context,
+	conn *desktopmedia.MediaConn,
+	cfg HostConfig,
+	captureBackend string,
+	generation uint32,
+	fpsUpdates <-chan int,
+) error {
 	sessionID, err := newMediaSessionID()
 	if err != nil {
 		return err
@@ -505,7 +512,7 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 		frame := desktopmedia.EncodedFrame{
 			SessionID:  sessionID,
 			StreamID:   1,
-			Generation: 1,
+			Generation: generation,
 			FrameID:    frameID,
 			Timestamp:  uint64(time.Now().UnixMicro()),
 			KeyFrame:   true,

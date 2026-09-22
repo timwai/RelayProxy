@@ -156,3 +156,76 @@ func TestPacketConnDesktopDomainKeepaliveIsIsolated(t *testing.T) {
 		t.Fatalf("acknowledge desktop keepalive: %v", err)
 	}
 }
+
+
+func TestPacketConnMeasuresAuthenticatedKeepaliveRTT(t *testing.T) {
+	target, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+
+	controller, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := []byte("0123456789abcdef0123456789abcdef")
+	conn, err := newPacketConn(&UDPResult{
+		Conn: controller, RemoteAddr: target.LocalAddr().(*net.UDPAddr),
+		SessionID: 73, Key: key, Domain: secure.DomainDesktopMedia,
+	}, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	rtts := make(chan time.Duration, 1)
+	conn.SetProbeObserver(func(rtt time.Duration) {
+		select {
+		case rtts <- rtt:
+		default:
+		}
+	})
+
+	readDone := make(chan error, 1)
+	go func() {
+		buffer := make([]byte, 1500)
+		_, _, err := conn.ReadFrom(buffer)
+		readDone <- err
+	}()
+
+	_ = target.SetReadDeadline(time.Now().Add(time.Second))
+	buffer := make([]byte, 128)
+	n, source, err := target.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, err := secure.DecodePunchPacketWithDomain(buffer[:n], key, secure.DomainDesktopMedia)
+	if err != nil {
+		t.Fatalf("decode desktop keepalive: %v", err)
+	}
+	if keep.Type != secure.PunchKeep || keep.SessionID != 73 {
+		t.Fatalf("unexpected keepalive: %+v", keep)
+	}
+
+	time.Sleep(5 * time.Millisecond)
+	if err := WritePunchAckWithDomain(target, source, keep, key, secure.DomainDesktopMedia); err != nil {
+		t.Fatalf("acknowledge keepalive: %v", err)
+	}
+
+	select {
+	case rtt := <-rtts:
+		if rtt <= 0 {
+			t.Fatalf("rtt=%s", rtt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for direct-path RTT observation")
+	}
+
+	_ = conn.Close()
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("PacketConn reader did not stop after close")
+	}
+}

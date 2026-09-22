@@ -32,6 +32,9 @@ type nativeDesktopSession struct {
 	frameHeight    int
 	frameStride    int
 
+	gpuCursor      bool
+	gpuFrameActive bool
+
 	done      chan struct{}
 	closeOnce sync.Once
 }
@@ -107,11 +110,12 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	}
 
 	session := &nativeDesktopSession{
-		cancel:  cancel,
-		viewer:  native,
-		decoder: decoder,
-		inputCh: inputCh,
-		done:    make(chan struct{}),
+		cancel:    cancel,
+		viewer:    native,
+		decoder:   decoder,
+		inputCh:   inputCh,
+		gpuCursor: native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
+		done:      make(chan struct{}),
 	}
 
 	a.desktopViewerMu.Lock()
@@ -132,7 +136,8 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		"width":    frame.Width,
 		"height":   frame.Height,
 		"hardware": decoder.Hardware(),
-		"decoder":  decoder.Backend(),
+		"decoder":   decoder.Backend(),
+		"gpuCursor": session.gpuCursor,
 	}, nil
 }
 
@@ -174,7 +179,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		frame := owner.bridge.GetRemoteDesktopFrame()
 		frameChanged := frame.Sequence != 0 && frame.Sequence != lastSequence && frame.MimeType == "video/h264"
 		if !frameChanged {
-			if cursorChanged && len(s.baseBGRA) > 0 {
+			if cursorChanged && !s.gpuFrameActive && len(s.baseBGRA) > 0 {
 				if err := s.present(); err != nil {
 					log.Printf("[Desktop] native viewer cursor render failed: %v", err)
 					return
@@ -212,23 +217,39 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				s.frameStride = decodedFrame.Width * 4
 
 				needsCursorComposite := s.cursorState.Visible &&
-					s.cursorBitmap.Width > 0 && s.cursorBitmap.Height > 0
+					s.cursorBitmap.Width > 0 && s.cursorBitmap.Height > 0 &&
+					!s.gpuCursor
 
 				if decodedFrame.D3D11 != nil && !needsCursorComposite {
-					s.baseBGRA = nil
-					err = s.viewer.SubmitD3D11(desktopviewer.D3D11Frame{
+					if s.gpuCursor {
+						if cursorErr := s.viewer.SetCursor(desktopviewer.CursorOverlay{
+							State: s.cursorState, Bitmap: s.cursorBitmap,
+						}); cursorErr != nil {
+							log.Printf("[Desktop] GPU cursor update failed: %v", cursorErr)
+							s.gpuCursor = false
+							if s.cursorState.Visible {
+								needsCursorComposite = true
+							}
+						}
+					}
+					if !needsCursorComposite {
+						s.baseBGRA = nil
+						err = s.viewer.SubmitD3D11(desktopviewer.D3D11Frame{
 						Resource:    decodedFrame.D3D11.Resource,
 						Subresource: decodedFrame.D3D11.Subresource,
 						Width:       decodedFrame.Width,
-						Height:      decodedFrame.Height,
-					})
-					if err != nil {
-						log.Printf("[Desktop] zero-copy D3D11 submit failed, falling back to readback: %v", err)
-					} else {
-						return
+							Height:      decodedFrame.Height,
+						})
+						if err != nil {
+							log.Printf("[Desktop] zero-copy D3D11 submit failed, falling back to readback: %v", err)
+						} else {
+							s.gpuFrameActive = true
+							return
+						}
 					}
 				}
 
+				s.gpuFrameActive = false
 				nv12 := decodedFrame.Pix
 				if decodedFrame.D3D11 != nil {
 					nv12, err = decodedFrame.D3D11.ReadNV12()
@@ -278,6 +299,15 @@ func (s *nativeDesktopSession) refreshCursor(owner *appWindow) bool {
 		}
 	}
 	s.cursorState = state
+	if s.gpuCursor && s.gpuFrameActive {
+		if err := s.viewer.SetCursor(desktopviewer.CursorOverlay{
+			State: s.cursorState, Bitmap: s.cursorBitmap,
+		}); err != nil {
+			log.Printf("[Desktop] GPU cursor redraw failed: %v", err)
+			s.gpuCursor = false
+			s.gpuFrameActive = false
+		}
+	}
 	return true
 }
 
@@ -353,7 +383,8 @@ func (a *appWindow) nativeDesktopViewerStatus() map[string]any {
 		return map[string]any{
 			"open":     true,
 			"hardware": session.decoder.Hardware(),
-			"decoder":  session.decoder.Backend(),
+			"decoder":   session.decoder.Backend(),
+			"gpuCursor": session.gpuCursor,
 		}
 	}
 }

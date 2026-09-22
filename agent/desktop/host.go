@@ -32,7 +32,6 @@ type RawCaptureSource interface {
 	CaptureRaw(context.Context) (desktopcodec.RawFrame, bool, error)
 }
 
-
 // SessionCaptureSource lets a backend acquire expensive per-session resources
 // (for example IDXGIOutputDuplication) only while somebody is actually
 // connected. CaptureSource remains deliberately small so the JPEG MVP and
@@ -43,9 +42,6 @@ type SessionCaptureSource interface {
 	CaptureBackend() string
 }
 
-// CaptureCapabilitySource exposes a fresh platform capture/display snapshot.
-// Display IDs are intentionally session-local: callers should use them only
-// while the corresponding authenticated Agent session remains online.
 func captureBackendName(source CaptureSource, fallback string) string {
 	if sessionSource, ok := source.(SessionCaptureSource); ok {
 		if backend := sessionSource.CaptureBackend(); backend != "" {
@@ -58,6 +54,9 @@ func captureBackendName(source CaptureSource, fallback string) string {
 	return "generic"
 }
 
+// CaptureCapabilitySource exposes a fresh platform capture/display snapshot.
+// Display IDs are intentionally session-local: callers should use them only
+// while the corresponding authenticated Agent session remains online.
 type CaptureCapabilitySource interface {
 	DesktopCaptureCapabilities(context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error)
 }

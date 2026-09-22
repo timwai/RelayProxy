@@ -428,6 +428,15 @@ func (s *ControllerSession) TargetID() string {
 	return s.targetID
 }
 
+func (s *ControllerSession) Done() <-chan struct{} {
+	if s == nil {
+		done := make(chan struct{})
+		close(done)
+		return done
+	}
+	return s.done
+}
+
 func (s *ControllerSession) Active() bool {
 	if s == nil {
 		return false

@@ -3,6 +3,7 @@
 package desktop
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -232,5 +233,72 @@ func TestWindowsCaptureFramePreservesPaddedStride(t *testing.T) {
 	frame.Stride = 15
 	if frame.Valid() {
 		t.Fatal("short-stride Windows capture frame was accepted")
+	}
+}
+
+
+type fakeNativeWindowsFrameStream struct {
+	frame NativeCaptureFrame
+	err   error
+}
+
+func (s *fakeNativeWindowsFrameStream) Frame() (windowsCaptureFrame, bool) {
+	return windowsCaptureFrame{}, false
+}
+
+func (s *fakeNativeWindowsFrameStream) WaitFrame(context.Context) (windowsCaptureFrame, error) {
+	return windowsCaptureFrame{}, screencapture.ErrNoFrame
+}
+
+func (s *fakeNativeWindowsFrameStream) Backend() protocol.DesktopCaptureBackend {
+	return protocol.DesktopCaptureWGC
+}
+
+func (s *fakeNativeWindowsFrameStream) Close() error { return nil }
+
+func (s *fakeNativeWindowsFrameStream) NativeFrame(context.Context) (NativeCaptureFrame, error) {
+	return s.frame, s.err
+}
+
+func TestWindowsCaptureNativeUsesOnlyNativeCapableStreams(t *testing.T) {
+	surface := &testCaptureSurface{backend: "d3d11", format: "bgra8"}
+	capture := &windowsCapture{
+		stream: &fakeNativeWindowsFrameStream{
+			frame: NativeCaptureFrame{
+				Width:      1920,
+				Height:     1080,
+				CapturedAt: time.Now(),
+				Surface:    surface,
+			},
+		},
+		backend: "wgc",
+	}
+	frame, available, err := capture.CaptureNative(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available {
+		t.Fatal("native-capable stream did not expose a native frame")
+	}
+	if frame.Surface != surface {
+		t.Fatal("CaptureNative replaced the owned capture surface")
+	}
+	if surface.closed != 0 {
+		t.Fatal("CaptureNative closed the surface before handing ownership to the caller")
+	}
+	if err := frame.Surface.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if surface.closed != 1 {
+		t.Fatalf("surface close count=%d want=1", surface.closed)
+	}
+
+	capture.stream = &screencaptureFrameStream{backend: protocol.DesktopCaptureDXGI}
+	frame, available, err = capture.CaptureNative(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if available || frame.Surface != nil {
+		t.Fatal("CPU-only stream unexpectedly exposed a native surface")
 	}
 }

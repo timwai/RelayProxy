@@ -17,7 +17,7 @@ type testDatagramPath struct {
 	closed  bool
 }
 
-func (p *testDatagramPath) Name() string                         { return p.name }
+func (p *testDatagramPath) Name() string                       { return p.name }
 func (p *testDatagramPath) Send(context.Context, []byte) error { return p.sendErr }
 func (p *testDatagramPath) Receive(context.Context) ([]byte, error) {
 	if p.recvErr != nil {

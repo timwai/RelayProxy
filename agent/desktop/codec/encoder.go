@@ -15,9 +15,9 @@ const (
 )
 
 var (
-	ErrInvalidVideoConfig = errors.New("invalid video encoder configuration")
-	ErrInvalidFrame       = errors.New("invalid video frame")
-	ErrEncoderUnavailable      = errors.New("video encoder unavailable")
+	ErrInvalidVideoConfig        = errors.New("invalid video encoder configuration")
+	ErrInvalidFrame              = errors.New("invalid video frame")
+	ErrEncoderUnavailable        = errors.New("video encoder unavailable")
 	ErrEncoderControlUnsupported = errors.New("video encoder control unsupported")
 	ErrEncoderRebuildRequired    = errors.New("video encoder rebuild required")
 )

@@ -37,7 +37,6 @@ func TestRawFrameValidation(t *testing.T) {
 	}
 }
 
-
 func TestBitrateOnlyReconfigure(t *testing.T) {
 	current := DefaultVideoConfig()
 	next := current

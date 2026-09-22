@@ -4,7 +4,7 @@ package codec
 
 import (
 	"context"
-		"sync"
+	"sync"
 	"time"
 )
 

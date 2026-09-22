@@ -112,9 +112,11 @@ type MFH264Transform struct {
 }
 
 type mfTransformCommand struct {
-	close bool
-	input *mfEncodeInput
-	reply chan mfTransformResult
+	close    bool
+	input    *mfEncodeInput
+	forceIDR bool
+	bitrate  *int
+	reply    chan mfTransformResult
 }
 
 type mfEncodeInput struct {
@@ -516,6 +518,14 @@ func (s *MFH264Transform) run(cfg VideoConfig, preferHardware, allowAsync bool, 
 				command.reply <- mfTransformResult{}
 				return
 			}
+			if command.forceIDR {
+				command.reply <- mfTransformResult{err: forceH264IDR(transform)}
+				continue
+			}
+			if command.bitrate != nil {
+				command.reply <- mfTransformResult{err: setH264MeanBitrate(transform, *command.bitrate)}
+				continue
+			}
 			if command.input != nil {
 				if asyncState != nil {
 					asyncState.enqueue(command)
@@ -687,6 +697,42 @@ func (s *MFH264Transform) EncodeNV12(ctx context.Context, data []byte, timestamp
 	case result := <-reply:
 		return result.packets, result.err
 	}
+}
+
+func (s *MFH264Transform) runControl(ctx context.Context, command mfTransformCommand) error {
+	if s == nil {
+		return ErrEncoderUnavailable
+	}
+	if command.reply == nil {
+		command.reply = make(chan mfTransformResult, 1)
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		return ErrEncoderUnavailable
+	case s.commands <- command:
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.done:
+		return ErrEncoderUnavailable
+	case result := <-command.reply:
+		return result.err
+	}
+}
+
+func (s *MFH264Transform) ForceIDR(ctx context.Context) error {
+	return s.runControl(ctx, mfTransformCommand{forceIDR: true})
+}
+
+func (s *MFH264Transform) SetBitrate(ctx context.Context, bitrate int) error {
+	if bitrate < 250_000 || bitrate > 100_000_000 {
+		return fmt.Errorf("%w: bitrate must be between 250 kbps and 100 Mbps", ErrInvalidVideoConfig)
+	}
+	value := bitrate
+	return s.runControl(ctx, mfTransformCommand{bitrate: &value})
 }
 
 func (s *MFH264Transform) Info() MFH264TransformInfo {

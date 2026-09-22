@@ -4,12 +4,9 @@ package codec
 
 import (
 	"context"
-	"errors"
-	"sync"
+		"sync"
 	"time"
 )
-
-var ErrEncoderControlUnsupported = errors.New("Media Foundation encoder control is not implemented yet")
 
 type MFH264Encoder struct {
 	transform *MFH264Transform
@@ -74,12 +71,42 @@ func (e *MFH264Encoder) Encode(ctx context.Context, frame RawFrame) ([]EncodedPa
 	return packets, nil
 }
 
-func (e *MFH264Encoder) ForceIDR(context.Context) error {
-	return ErrEncoderControlUnsupported
+func (e *MFH264Encoder) ForceIDR(ctx context.Context) error {
+	if e == nil {
+		return ErrEncoderUnavailable
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed || e.transform == nil {
+		return ErrEncoderUnavailable
+	}
+	return e.transform.ForceIDR(ctx)
 }
 
-func (e *MFH264Encoder) Reconfigure(context.Context, VideoConfig) error {
-	return ErrEncoderControlUnsupported
+func (e *MFH264Encoder) Reconfigure(ctx context.Context, cfg VideoConfig) error {
+	if e == nil {
+		return ErrEncoderUnavailable
+	}
+	cfg, err := NormalizeVideoConfig(cfg)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed || e.transform == nil {
+		return ErrEncoderUnavailable
+	}
+	if !bitrateOnlyReconfigure(e.cfg, cfg) {
+		return ErrEncoderRebuildRequired
+	}
+	if cfg.TargetBitrate == e.cfg.TargetBitrate {
+		return nil
+	}
+	if err := e.transform.SetBitrate(ctx, cfg.TargetBitrate); err != nil {
+		return err
+	}
+	e.cfg.TargetBitrate = cfg.TargetBitrate
+	return nil
 }
 
 func (e *MFH264Encoder) Stats() EncoderStats {

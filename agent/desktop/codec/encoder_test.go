@@ -36,3 +36,17 @@ func TestRawFrameValidation(t *testing.T) {
 		t.Fatal("short NV12 frame accepted")
 	}
 }
+
+
+func TestBitrateOnlyReconfigure(t *testing.T) {
+	current := DefaultVideoConfig()
+	next := current
+	next.TargetBitrate = current.TargetBitrate / 2
+	if !bitrateOnlyReconfigure(current, next) {
+		t.Fatal("bitrate-only change should be supported in place")
+	}
+	next.Width = current.Width + 2
+	if bitrateOnlyReconfigure(current, next) {
+		t.Fatal("resolution change must require encoder rebuild")
+	}
+}

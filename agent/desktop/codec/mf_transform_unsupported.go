@@ -18,6 +18,14 @@ func OpenMFH264Transform(context.Context, VideoConfig, bool) (*MFH264Transform, 
 	return nil, ErrEncoderUnavailable
 }
 
+func (s *MFH264Transform) ForceIDR(context.Context) error {
+	return ErrEncoderUnavailable
+}
+
+func (s *MFH264Transform) SetBitrate(context.Context, int) error {
+	return ErrEncoderUnavailable
+}
+
 func (s *MFH264Transform) Info() MFH264TransformInfo {
 	return MFH264TransformInfo{}
 }

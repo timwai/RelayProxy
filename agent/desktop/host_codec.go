@@ -139,11 +139,17 @@ func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaCon
 	var sequence uint32 = 1
 	started := time.Now()
 	lastIDR := started
+	lastReportAt := started
+	lastEncoderStats := encoder.Stats()
+	var capturedFrames uint64
+	var lastCapturedFrames uint64
+	var lastCaptureMs float64
 	frameInterval := time.Second / time.Duration(videoCfg.FPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
 
 	sendRGBA := func(frame *image.RGBA, now time.Time) error {
+		capturedFrames++
 		frame = fitRGBAEven(frame, videoCfg.Width, videoCfg.Height)
 		if frame == nil || frame.Bounds().Dx() != videoCfg.Width || frame.Bounds().Dy() != videoCfg.Height {
 			return errors.New("desktop capture dimensions changed during H.264 session")
@@ -187,6 +193,34 @@ func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaCon
 		return nil
 	}
 
+	reportStats := func(now time.Time) error {
+		elapsed := now.Sub(lastReportAt)
+		if elapsed < time.Second {
+			return nil
+		}
+		seconds := elapsed.Seconds()
+		current := encoder.Stats()
+		stats := protocol.DesktopSessionStats{
+			CaptureFPS:    float64(capturedFrames-lastCapturedFrames) / seconds,
+			EncodeFPS:     float64(current.Frames-lastEncoderStats.Frames) / seconds,
+			ActualBitrate: int64(float64((current.Bytes-lastEncoderStats.Bytes)*8) / seconds),
+			TargetBitrate: int64(videoCfg.TargetBitrate),
+			CaptureMs:     lastCaptureMs,
+			EncodeMs:      float64(current.LastEncodeTime.Microseconds()) / 1000,
+			Path:          "relay",
+		}
+		if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+			Type:  protocol.DesktopSessionStats,
+			Stats: &stats,
+		}); err != nil {
+			return err
+		}
+		lastReportAt = now
+		lastEncoderStats = current
+		lastCapturedFrames = capturedFrames
+		return nil
+	}
+
 	if err := sendRGBA(first, started); err != nil {
 		return err
 	}
@@ -201,11 +235,16 @@ func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaCon
 				lastIDR = time.Now()
 			}
 		case now := <-ticker.C:
+			captureStarted := time.Now()
 			frame, err := h.source.Capture(ctx)
+			lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
 			if err != nil {
 				return err
 			}
 			if err := sendRGBA(frame, now); err != nil {
+				return err
+			}
+			if err := reportStats(now); err != nil {
 				return err
 			}
 		}

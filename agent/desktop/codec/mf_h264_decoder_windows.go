@@ -22,9 +22,10 @@ type MFH264Decoder struct {
 }
 
 type MFH264DecoderInfo struct {
-	Hardware bool
-	Async    bool
-	Config   VideoConfig
+	Hardware   bool
+	Async      bool
+	D3D11Aware bool
+	Config     VideoConfig
 }
 
 type mfDecodeInput struct {
@@ -59,7 +60,15 @@ func applyDecoderOutputType(transform unsafe.Pointer, cfg VideoConfig) error {
 	return setTransformType(transform, imfTransformSetOutputType, outputType)
 }
 
-func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig) (bool, error) {
+func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig, graphics *mfDecoderD3D11) (bool, bool, error) {
+	d3d11Aware := false
+	if graphics != nil {
+		aware, err := graphics.Attach(transform)
+		if err != nil {
+			return false, false, fmt.Errorf("attach D3D11 decoder manager: %w", err)
+		}
+		d3d11Aware = aware
+	}
 	attributes, attrErr := transformAttributes(transform)
 	if attrErr == nil {
 		defer releaseIUnknown(attributes)
@@ -67,7 +76,7 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig) (bool, erro
 		isAsync := getErr == nil && async != 0
 		if isAsync {
 			if err := attributeSetUINT32(attributes, &mfTransformAsyncUnlock, 1); err != nil {
-				return false, fmt.Errorf("unlock async decoder MFT: %w", err)
+				return false, d3d11Aware, fmt.Errorf("unlock async decoder MFT: %w", err)
 			}
 		}
 		if !cfg.DisableLowLatency {
@@ -77,25 +86,25 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig) (bool, erro
 
 	inputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
 	if err != nil {
-		return false, err
+		return false, d3d11Aware, err
 	}
 	defer releaseIUnknown(inputType)
 	if err := setTransformType(transform, imfTransformSetInputType, inputType); err != nil {
-		return false, err
+		return false, d3d11Aware, err
 	}
 	if err := applyDecoderOutputType(transform, cfg); err != nil {
-		return false, err
+		return false, d3d11Aware, err
 	}
 	if err := processTransformMessage(transform, mftMessageNotifyBeginStreaming); err != nil {
-		return false, err
+		return false, d3d11Aware, err
 	}
 	if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
-		return false, err
+		return false, d3d11Aware, err
 	}
-	return false, nil
+	return false, d3d11Aware, nil
 }
 
-func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool) (unsafe.Pointer, MFH264DecoderInfo, error) {
+func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool, graphics *mfDecoderD3D11) (unsafe.Pointer, MFH264DecoderInfo, error) {
 	h264 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatH264}
 	rawNV12 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatNV12}
 	var failures []error
@@ -117,10 +126,16 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 				failures = append(failures, err)
 				continue
 			}
-			async, err := configureH264Decoder(transform, cfg)
+			var groupGraphics *mfDecoderD3D11
+			if group.hardware {
+				groupGraphics = graphics
+			}
+			async, d3d11Aware, err := configureH264Decoder(transform, cfg, groupGraphics)
 			if err == nil {
 				releaseMFTActivations(activations[index+1:])
-				return transform, MFH264DecoderInfo{Hardware: group.hardware, Async: async, Config: cfg}, nil
+				return transform, MFH264DecoderInfo{
+					Hardware: group.hardware, Async: async, D3D11Aware: d3d11Aware, Config: cfg,
+				}, nil
 			}
 			releaseIUnknown(transform)
 			failures = append(failures, err)
@@ -179,12 +194,26 @@ func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, initCh chan<- 
 	}
 	defer shutdownMF()
 
-	transform, info, err := openConfiguredH264Decoder(context.Background(), cfg, preferHardware)
+	graphics, graphicsErr := createMFDecoderD3D11()
+	if graphicsErr != nil {
+		graphics = nil
+	}
+	transform, info, err := openConfiguredH264Decoder(context.Background(), cfg, preferHardware, graphics)
 	if err != nil {
+		if graphics != nil {
+			graphics.Close()
+		}
 		initCh <- mfDecoderInit{err: err}
 		return
 	}
 	defer releaseIUnknown(transform)
+	if !info.D3D11Aware && graphics != nil {
+		graphics.Close()
+		graphics = nil
+	}
+	if graphics != nil {
+		defer graphics.Close()
+	}
 
 	var eventPump *mfEventPump
 	var eventCh <-chan mfAsyncEvent
@@ -197,7 +226,7 @@ func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, initCh chan<- 
 		}
 		defer eventPump.Close()
 		eventCh = eventPump.events
-		asyncState = newMFAsyncDecodeState(transform, info)
+		asyncState = newMFAsyncDecodeState(transform, info, graphics)
 	}
 	initCh <- mfDecoderInit{info: info}
 
@@ -243,7 +272,7 @@ func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, initCh chan<- 
 				if asyncState != nil {
 					asyncState.enqueue(command)
 				} else {
-					frames, err := processSyncH264Decode(transform, info, *command.input)
+					frames, err := processSyncH264Decode(transform, info, graphics, *command.input)
 					command.reply <- mfDecodeResult{frames: frames, err: err}
 				}
 
@@ -267,6 +296,7 @@ func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, initCh chan<- 
 type mfAsyncDecodeState struct {
 	transform unsafe.Pointer
 	info      MFH264DecoderInfo
+	graphics  *mfDecoderD3D11
 
 	needInput int
 	pending   []mfDecodeCommand
@@ -275,8 +305,8 @@ type mfAsyncDecodeState struct {
 	fatal     error
 }
 
-func newMFAsyncDecodeState(transform unsafe.Pointer, info MFH264DecoderInfo) *mfAsyncDecodeState {
-	return &mfAsyncDecodeState{transform: transform, info: info}
+func newMFAsyncDecodeState(transform unsafe.Pointer, info MFH264DecoderInfo, graphics *mfDecoderD3D11) *mfAsyncDecodeState {
+	return &mfAsyncDecodeState{transform: transform, info: info, graphics: graphics}
 }
 
 func (s *mfAsyncDecodeState) reply(command mfDecodeCommand, frames []DecodedFrame, err error) {
@@ -373,7 +403,7 @@ func (s *mfAsyncDecodeState) handle(event mfAsyncEvent) {
 		if len(s.inFlight) > 0 && s.inFlight[0].input != nil {
 			fallback = s.inFlight[0].input.timestamp
 		}
-		frame, hr, err := processDecoderOutputOnce(s.transform, s.info, fallback)
+		frame, hr, err := processDecoderOutputOnce(s.transform, s.info, s.graphics, fallback)
 		if err != nil {
 			s.fail(err)
 			return
@@ -398,7 +428,7 @@ func (s *mfAsyncDecodeState) handle(event mfAsyncEvent) {
 	}
 }
 
-func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, fallbackTimestamp time.Duration) (*DecodedFrame, uintptr, error) {
+func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, graphics *mfDecoderD3D11, fallbackTimestamp time.Duration) (*DecodedFrame, uintptr, error) {
 	streamInfo, err := getOutputStreamInfo(transform)
 	if err != nil {
 		return nil, 0, err
@@ -438,7 +468,7 @@ func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, 
 	if out.Sample == nil {
 		return nil, hr, errors.New("H.264 decoder ProcessOutput succeeded without a sample")
 	}
-	data, err := sampleBytes(out.Sample)
+	data, err := decoderSampleBytes(out.Sample, info, graphics)
 	timestamp := sampleTimestamp(out.Sample, fallbackTimestamp)
 	releaseIUnknown(out.Sample)
 	if err != nil {
@@ -460,10 +490,10 @@ func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, 
 	return frame, hr, nil
 }
 
-func drainSyncH264DecoderOutput(transform unsafe.Pointer, info MFH264DecoderInfo, fallbackTimestamp time.Duration) ([]DecodedFrame, error) {
+func drainSyncH264DecoderOutput(transform unsafe.Pointer, info MFH264DecoderInfo, graphics *mfDecoderD3D11, fallbackTimestamp time.Duration) ([]DecodedFrame, error) {
 	var frames []DecodedFrame
 	for {
-		frame, hr, err := processDecoderOutputOnce(transform, info, fallbackTimestamp)
+		frame, hr, err := processDecoderOutputOnce(transform, info, graphics, fallbackTimestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -485,7 +515,7 @@ func drainSyncH264DecoderOutput(transform unsafe.Pointer, info MFH264DecoderInfo
 	}
 }
 
-func processSyncH264Decode(transform unsafe.Pointer, info MFH264DecoderInfo, input mfDecodeInput) ([]DecodedFrame, error) {
+func processSyncH264Decode(transform unsafe.Pointer, info MFH264DecoderInfo, graphics *mfDecoderD3D11, input mfDecodeInput) ([]DecodedFrame, error) {
 	sample, err := createInputSample(input.data, input.timestamp, input.duration)
 	if err != nil {
 		return nil, err
@@ -495,7 +525,7 @@ func processSyncH264Decode(transform unsafe.Pointer, info MFH264DecoderInfo, inp
 	var frames []DecodedFrame
 	hr := processTransformInputSample(transform, sample)
 	if uint32(hr) == mfENotAccepting {
-		pending, err := drainSyncH264DecoderOutput(transform, info, input.timestamp)
+		pending, err := drainSyncH264DecoderOutput(transform, info, graphics, input.timestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -505,7 +535,7 @@ func processSyncH264Decode(transform unsafe.Pointer, info MFH264DecoderInfo, inp
 	if hresultFailed(hr) {
 		return nil, hresultError("H.264 decoder IMFTransform.ProcessInput", hr)
 	}
-	decoded, err := drainSyncH264DecoderOutput(transform, info, input.timestamp)
+	decoded, err := drainSyncH264DecoderOutput(transform, info, graphics, input.timestamp)
 	if err != nil {
 		return nil, err
 	}

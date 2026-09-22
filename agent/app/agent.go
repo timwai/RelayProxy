@@ -1064,6 +1064,16 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 	return out
 }
 
+func (a *Agent) RemoteDesktopStats() protocol.DesktopSessionStats {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return protocol.DesktopSessionStats{}
+	}
+	return session.Stats()
+}
+
 func (a *Agent) RemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	a.mu.RLock()
 	session := a.desktopConnection

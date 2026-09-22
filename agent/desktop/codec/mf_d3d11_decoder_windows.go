@@ -82,6 +82,7 @@ type mfDecoderD3D11 struct {
 	context unsafe.Pointer
 	manager unsafe.Pointer
 	token   uint32
+	shared  bool
 
 	staging       unsafe.Pointer
 	stagingWidth  int
@@ -174,7 +175,12 @@ func createMFDecoderD3D11FromDevice(deviceHandle uintptr) (*mfDecoderD3D11, erro
 		releaseIUnknown(device)
 		return nil, errors.New("external D3D11 device returned nil immediate context")
 	}
-	return finishMFDecoderD3D11(device, context)
+	graphics, err := finishMFDecoderD3D11(device, context)
+	if err != nil {
+		return nil, err
+	}
+	graphics.shared = true
+	return graphics, nil
 }
 
 func (g *mfDecoderD3D11) Attach(transform unsafe.Pointer) (bool, error) {

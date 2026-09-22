@@ -1926,11 +1926,13 @@
         toast(result.message || '原生 Viewer 启动失败');
         return;
       }
-      var decoderLabel = result.decoder === 'media-foundation-d3d11'
-        ? 'D3D11 / DXVA 硬件解码'
-        : (result.decoder === 'media-foundation-hardware'
-          ? 'Media Foundation 硬件解码'
-          : 'Media Foundation 软件解码');
+      var decoderLabel = result.decoder === 'media-foundation-d3d11-zero-copy'
+        ? 'D3D11 / DXVA 零拷贝'
+        : (result.decoder === 'media-foundation-d3d11'
+          ? 'D3D11 / DXVA 硬件解码'
+          : (result.decoder === 'media-foundation-hardware'
+            ? 'Media Foundation 硬件解码'
+            : 'Media Foundation 软件解码'));
       toast(result.alreadyOpen ? '原生 Viewer 已切到前台' :
         '原生 Viewer 已启动 · ' + decoderLabel);
     }

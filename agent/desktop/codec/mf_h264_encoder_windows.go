@@ -1,0 +1,111 @@
+//go:build windows
+
+package codec
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+)
+
+var ErrEncoderControlUnsupported = errors.New("Media Foundation encoder control is not implemented yet")
+
+type MFH264Encoder struct {
+	transform *MFH264Transform
+	cfg       VideoConfig
+
+	mu      sync.Mutex
+	scratch []byte
+	stats   EncoderStats
+	closed  bool
+}
+
+func OpenMFH264Encoder(ctx context.Context, cfg VideoConfig, preferHardware bool) (*MFH264Encoder, error) {
+	cfg, err := NormalizeVideoConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
+	// This slice deliberately selects only synchronous MFTs. Asynchronous
+	// hardware MFTs require METransformNeedInput/HaveOutput event handling,
+	// which is added separately rather than emulated with polling.
+	transform, err := openMFH264Transform(ctx, cfg, preferHardware, false)
+	if err != nil {
+		return nil, err
+	}
+	info := transform.Info()
+	return &MFH264Encoder{
+		transform: transform,
+		cfg:       cfg,
+		stats: EncoderStats{
+			Hardware: info.Hardware,
+			Backend:  "media-foundation",
+		},
+	}, nil
+}
+
+func (e *MFH264Encoder) Encode(ctx context.Context, frame RawFrame) ([]EncodedPacket, error) {
+	if e == nil {
+		return nil, ErrEncoderUnavailable
+	}
+	start := time.Now()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return nil, ErrEncoderUnavailable
+	}
+	if frame.Width != e.cfg.Width || frame.Height != e.cfg.Height {
+		return nil, ErrInvalidFrame
+	}
+	var err error
+	e.scratch, err = frameToNV12(frame, e.scratch)
+	if err != nil {
+		return nil, err
+	}
+	packets, err := e.transform.EncodeNV12(ctx, e.scratch, frame.Timestamp)
+	if err != nil {
+		return nil, err
+	}
+	for _, packet := range packets {
+		e.stats.Bytes += uint64(len(packet.Data))
+	}
+	e.stats.Frames++
+	e.stats.LastEncodeTime = time.Since(start)
+	return packets, nil
+}
+
+func (e *MFH264Encoder) ForceIDR(context.Context) error {
+	return ErrEncoderControlUnsupported
+}
+
+func (e *MFH264Encoder) Reconfigure(context.Context, VideoConfig) error {
+	return ErrEncoderControlUnsupported
+}
+
+func (e *MFH264Encoder) Stats() EncoderStats {
+	if e == nil {
+		return EncoderStats{}
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.stats
+}
+
+func (e *MFH264Encoder) Close() error {
+	if e == nil {
+		return nil
+	}
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return nil
+	}
+	e.closed = true
+	transform := e.transform
+	e.transform = nil
+	e.mu.Unlock()
+	if transform != nil {
+		return transform.Close()
+	}
+	return nil
+}

@@ -1059,48 +1059,109 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 	if controller == nil || manager == nil || targetID == "" {
 		return
 	}
+	policy := desktop.DefaultPathRetryPolicy()
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
-		ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
-		defer cancel()
+		failures := 0
 
-		direct, err := manager.StartControllerForPurpose(ctx, targetID, protocol.P2PPurposeDesktopMedia)
-		if err != nil {
-			log.Printf("[Desktop] P2P session unavailable, Relay Datagram remains active: %v", err)
-			return
-		}
-		packetConn, err := direct.DialUDP(ctx)
-		if err != nil {
-			_ = direct.Close()
-			log.Printf("[Desktop] P2P UDP unavailable, Relay Datagram remains active: %v", err)
-			return
-		}
-		path := desktopmedia.NewPacketConnDatagramPath("udp_p2p", packetConn, 5*time.Second, func() {
-			_ = direct.Close()
-		})
-
-		a.mu.Lock()
-		if a.closed.Load() || a.desktopConnection != controller || !controller.Active() {
-			a.mu.Unlock()
-			_ = path.Close()
-			return
-		}
-		old := a.desktopP2PSession
-		a.desktopP2PSession = direct
-		a.mu.Unlock()
-		if old != nil && old != direct {
-			_ = old.Close()
-		}
-		direct.SetOnClose(func() {
-			a.mu.Lock()
-			if a.desktopP2PSession == direct {
-				a.desktopP2PSession = nil
+		waitRetry := func(delay time.Duration) bool {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-a.ctx.Done():
+				return false
+			case <-controller.Done():
+				return false
+			case <-timer.C:
+				return true
 			}
-			a.mu.Unlock()
-		})
-		controller.SetDatagramPath(path)
-		log.Printf("[Desktop] controller media path switched target=%s path=%s", targetID, path.Name())
+		}
+
+		for {
+			select {
+			case <-a.ctx.Done():
+				return
+			case <-controller.Done():
+				return
+			default:
+			}
+
+			attemptCtx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
+			direct, err := manager.StartControllerForPurpose(attemptCtx, targetID, protocol.P2PPurposeDesktopMedia)
+			if err == nil {
+				var packetConn net.PacketConn
+				packetConn, err = direct.DialUDP(attemptCtx)
+				if err == nil {
+					path := desktopmedia.NewPacketConnDatagramPath("udp_p2p", packetConn, 5*time.Second, func() {
+						_ = direct.Close()
+					})
+					lost := make(chan struct{})
+					var lostOnce sync.Once
+					direct.SetOnClose(func() {
+						a.mu.Lock()
+						if a.desktopP2PSession == direct {
+							a.desktopP2PSession = nil
+						}
+						a.mu.Unlock()
+						lostOnce.Do(func() { close(lost) })
+					})
+
+					a.mu.Lock()
+					if a.closed.Load() || a.desktopConnection != controller || !controller.Active() {
+						a.mu.Unlock()
+						cancel()
+						_ = path.Close()
+						return
+					}
+					old := a.desktopP2PSession
+					a.desktopP2PSession = direct
+					a.mu.Unlock()
+					cancel()
+
+					if old != nil && old != direct {
+						_ = old.Close()
+					}
+					connectedAt := time.Now()
+					controller.SetDatagramPath(path)
+					log.Printf("[Desktop] controller media path switched target=%s path=%s", targetID, path.Name())
+
+					select {
+					case <-a.ctx.Done():
+						_ = path.Close()
+						return
+					case <-controller.Done():
+						_ = path.Close()
+						return
+					case <-lost:
+					}
+
+					if !controller.Active() {
+						return
+					}
+					aliveFor := time.Since(connectedAt)
+					if policy.Stable(aliveFor) {
+						failures = 0
+					}
+					delay := policy.Delay(failures)
+					failures++
+					log.Printf("[Desktop] P2P media path lost after %s; Relay Datagram active, retrying in %s", aliveFor.Round(time.Second), delay)
+					if !waitRetry(delay) {
+						return
+					}
+					continue
+				}
+				_ = direct.Close()
+			}
+			cancel()
+
+			delay := policy.Delay(failures)
+			failures++
+			log.Printf("[Desktop] P2P media unavailable, Relay Datagram active; retrying in %s: %v", delay, err)
+			if !waitRetry(delay) {
+				return
+			}
+		}
 	}()
 }
 

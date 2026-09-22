@@ -149,6 +149,16 @@ func (s *sessionStatsTracker) SetPath(path string) {
 	s.pathBaseLossDetected = s.lossDetected
 	s.pathBaseLossRecovered = s.lossRecovered
 	s.pathBaseDropped = s.dropped
+
+	// Diagnostics samples are labeled with the active media path. Reset the
+	// short-window counters at the boundary so the first udp_p2p sample cannot
+	// accidentally include Relay bytes/loss (or vice versa).
+	s.diagnosticAt = s.pathStarted
+	s.diagnosticRecvBytes = s.recvBytes
+	s.diagnosticRecvPackets = s.recvPackets
+	s.diagnosticRecvFrames = s.recvFrames
+	s.diagnosticLossDetected = s.lossDetected
+	s.diagnosticLossRecovered = s.lossRecovered
 }
 
 // PathQuality returns media-path-local quality since the most recent path

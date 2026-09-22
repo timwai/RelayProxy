@@ -125,6 +125,17 @@ func (s *WailsService) SendRemoteDesktopInput(rawEvent string) (string, error) {
 	return `{"ok":true}`, nil
 }
 
+func (s *WailsService) RequestRemoteDesktopIDR() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if err := s.owner.bridge.RequestRemoteDesktopIDR(); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
 func (s *WailsService) GetLogs() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil

@@ -1629,6 +1629,10 @@
       if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
       banner.textContent = parts.join(' · ');
     }
+    function requestDesktopIDR() {
+      if (!hasFn('goRequestRemoteDesktopIDR')) return;
+      call('goRequestRemoteDesktopIDR').catch(function () {});
+    }
     function resetDesktopVideoDecoder() {
       if (desktopVideoDecoder) {
         try { desktopVideoDecoder.close(); } catch (_) {}
@@ -1694,6 +1698,7 @@
             desktopVideoDecodeErrorAt = now;
             toast('H.264 解码失败：' + (err && err.message ? err.message : err));
           }
+          requestDesktopIDR();
           resetDesktopVideoDecoder();
         }
       });
@@ -1705,7 +1710,11 @@
     }
     function decodeDesktopH264Frame(frame) {
       var decoder = ensureDesktopVideoDecoder(frame.codec || 'avc1.42E01F');
-      if (!frame.keyFrame && decoder.decodeQueueSize > 4) return;
+      if (!frame.keyFrame && decoder.decodeQueueSize > 4) {
+        requestDesktopIDR();
+        resetDesktopVideoDecoder();
+        return;
+      }
       var bytes = base64ToBytes(frame.data);
       decoder.decode(new EncodedVideoChunk({
         type: frame.keyFrame ? 'key' : 'delta',

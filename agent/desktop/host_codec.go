@@ -28,10 +28,10 @@ func sendVideoConfig(ctx context.Context, conn *desktopmedia.MediaConn, cfg prot
 	})
 }
 
-func (h *Host) streamSessionFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, options protocol.RemoteDesktopConnectOptions) error {
+func (h *Host) streamSessionFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, options protocol.RemoteDesktopConnectOptions, idrRequests <-chan struct{}) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	if preference == "h264" && h.canEncodeH264() {
-		if err := h.streamH264Frames(ctx, conn, cfg); err == nil || errors.Is(err, context.Canceled) {
+		if err := h.streamH264Frames(ctx, conn, cfg, idrRequests); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {
 			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
@@ -86,7 +86,7 @@ func sendEncodedDesktopFrame(ctx context.Context, conn *desktopmedia.MediaConn, 
 	return nil
 }
 
-func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig) error {
+func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, idrRequests <-chan struct{}) error {
 	first, err := h.source.Capture(ctx)
 	if err != nil {
 		return err
@@ -194,6 +194,12 @@ func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaCon
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-idrRequests:
+			if err := encoder.ForceIDR(ctx); err != nil && !errors.Is(err, desktopcodec.ErrEncoderControlUnsupported) {
+				log.Printf("[Desktop] H.264 IDR request failed: %v", err)
+			} else {
+				lastIDR = time.Now()
+			}
 		case now := <-ticker.C:
 			frame, err := h.source.Capture(ctx)
 			if err != nil {

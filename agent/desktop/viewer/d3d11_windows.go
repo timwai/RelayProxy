@@ -21,15 +21,15 @@ const (
 	d3d11CPUAccessWrite          = 0x10000
 	d3d11MapWriteDiscard         = 4
 
-	dxgiFormatB8G8R8A8UNorm       = 87
-	dxgiUsageRenderTargetOutput   = 0x20
-	dxgiSwapEffectDiscard         = 0
+	dxgiFormatB8G8R8A8UNorm     = 87
+	dxgiUsageRenderTargetOutput = 0x20
+	dxgiSwapEffectDiscard       = 0
 )
 
 var (
-	d3d11DLL                         = windows.NewLazySystemDLL("d3d11.dll")
+	d3d11DLL                          = windows.NewLazySystemDLL("d3d11.dll")
 	procD3D11CreateDeviceAndSwapChain = d3d11DLL.NewProc("D3D11CreateDeviceAndSwapChain")
-	iidID3D11Texture2D               = windows.GUID{
+	iidID3D11Texture2D                = windows.GUID{
 		Data1: 0x6f15aaf2, Data2: 0xd208, Data3: 0x4e89,
 		Data4: [8]byte{0x9a, 0xb4, 0x48, 0x95, 0x35, 0xd3, 0x4f, 0x9c},
 	}
@@ -144,12 +144,12 @@ func createD3D11DeviceAndSwapChain(hwnd win.HWND, width, height int, driverType 
 			Height: uint32(height),
 			Format: dxgiFormatB8G8R8A8UNorm,
 		},
-		SampleDesc:  dxgiSampleDesc{Count: 1},
-		BufferUsage: dxgiUsageRenderTargetOutput,
-		BufferCount: 2,
+		SampleDesc:   dxgiSampleDesc{Count: 1},
+		BufferUsage:  dxgiUsageRenderTargetOutput,
+		BufferCount:  2,
 		OutputWindow: hwnd,
-		Windowed:    1,
-		SwapEffect:  dxgiSwapEffectDiscard,
+		Windowed:     1,
+		SwapEffect:   dxgiSwapEffectDiscard,
 	}
 	var swapChain, device, context unsafe.Pointer
 	var selectedLevel uint32

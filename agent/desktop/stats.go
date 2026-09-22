@@ -19,11 +19,11 @@ type sessionStatsTracker struct {
 	recvFrames  uint64
 	dropped     uint64
 
-	haveSequence bool
-	lastSequence uint32
-	missing      map[uint32]struct{}
-	lostBase     uint64
-	lossDetected uint64
+	haveSequence  bool
+	lastSequence  uint32
+	missing       map[uint32]struct{}
+	lostBase      uint64
+	lossDetected  uint64
 	lossRecovered uint64
 
 	abrPackets       uint64

@@ -2403,7 +2403,9 @@
       if (stats.decodeFps) parts.push('Decode ' + stats.decodeFps.toFixed(1) + ' FPS');
       if (stats.renderFps) parts.push('Render ' + stats.renderFps.toFixed(1) + ' FPS');
       if (stats.captureMs) parts.push('Capture ' + stats.captureMs.toFixed(1) + ' ms');
-      if (stats.encodeMs) parts.push('Encode ' + stats.encodeMs.toFixed(1) + ' ms');
+      if (stats.convertMs) parts.push('Convert ' + stats.convertMs.toFixed(1) + ' ms');
+      if (stats.codecMs) parts.push('Codec ' + stats.codecMs.toFixed(1) + ' ms');
+      if (stats.encodeMs) parts.push('Encode total ' + stats.encodeMs.toFixed(1) + ' ms');
       if (stats.decodeMs) parts.push('Decode ' + stats.decodeMs.toFixed(1) + ' ms');
       if (stats.renderMs) parts.push('Render ' + stats.renderMs.toFixed(1) + ' ms');
       if (stats.targetBitrate) parts.push('Target ' + formatDesktopBitrate(stats.targetBitrate));

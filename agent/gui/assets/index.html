@@ -762,7 +762,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 使用 ABR 动态码率，连接设置中的码率作为上限；Media Foundation 编码器会在会话中热更新目标码率。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -1189,7 +1189,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {} };
     var desktopFrameSeq = 0, desktopFrameBusy = false, desktopInputSeq = 0;
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
@@ -1515,7 +1515,27 @@
       if (typeof raw === 'object') return raw;
       try { return JSON.parse(raw); } catch (_) { return fallback; }
     }
-    function remoteDesktopConnectOptions() {
+    function remoteDesktopTargetByID(targetID) {
+      var targets = Array.isArray(state.desktopTargets) ? state.desktopTargets : [];
+      for (var i = 0; i < targets.length; i++) {
+        if (targets[i] && targets[i].deviceId === targetID) return targets[i];
+      }
+      return null;
+    }
+    function remoteDesktopDisplaySelection(targetID) {
+      if (!targetID) return '';
+      var selected = String((state.desktopDisplaySelections || {})[targetID] || '');
+      if (!selected) return '';
+      var target = remoteDesktopTargetByID(targetID);
+      var displays = target && target.capabilities && Array.isArray(target.capabilities.displays)
+        ? target.capabilities.displays : [];
+      for (var i = 0; i < displays.length; i++) {
+        if (String(displays[i].id || '') === selected) return selected;
+      }
+      delete state.desktopDisplaySelections[targetID];
+      return '';
+    }
+    function remoteDesktopConnectOptions(targetID) {
       var backend = $('desktop-opt-backend') ? $('desktop-opt-backend').value : 'auto';
       var quality = $('desktop-opt-quality') ? $('desktop-opt-quality').value : 'auto';
       var codecChoice = $('desktop-opt-codec') ? $('desktop-opt-codec').value : 'auto';
@@ -1541,11 +1561,12 @@
         resolution: resolution,
         fps: fps,
         maxBitrate: bitrateMbps > 0 ? Math.round(bitrateMbps * 1000000) : 0,
+        displayId: remoteDesktopDisplaySelection(targetID),
         clipboard: clipboard
       };
     }
-    function remoteDesktopOptionsSummary() {
-      var options = remoteDesktopConnectOptions();
+    function remoteDesktopOptionsSummary(targetID) {
+      var options = remoteDesktopConnectOptions(targetID);
       var parts = [];
       if (options.codec) parts.push(options.codec === 'h264' ? 'H.264' : 'JPEG');
       if (options.quality && options.quality !== 'auto') parts.push(options.quality);
@@ -1553,6 +1574,19 @@
       else if (options.resolution && options.resolution.mode === 'native') parts.push('native');
       if (options.fps) parts.push(options.fps + ' FPS');
       if (options.maxBitrate) parts.push((options.maxBitrate / 1000000) + ' Mbps');
+      if (options.displayId) {
+        var target = remoteDesktopTargetByID(targetID);
+        var displays = target && target.capabilities && Array.isArray(target.capabilities.displays)
+          ? target.capabilities.displays : [];
+        var displayName = options.displayId;
+        for (var i = 0; i < displays.length; i++) {
+          if (String(displays[i].id || '') === options.displayId) {
+            displayName = displays[i].name || ('显示器 ' + (i + 1));
+            break;
+          }
+        }
+        parts.push(displayName);
+      }
       if (options.clipboard) parts.push('文本剪贴板');
       return parts.length ? parts.join(' · ') : '自动画质';
     }
@@ -1598,6 +1632,30 @@
 
         var actions = document.createElement('div');
         actions.className = 'flex items-center gap-2 shrink-0';
+        var displays = Array.isArray(caps.displays) ? caps.displays : [];
+        if (!active && caps.relayDesktop && displays.length > 1) {
+          var displaySelect = document.createElement('select');
+          displaySelect.className = 'text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md max-w-[180px]';
+          displaySelect.title = 'Relay Desktop 显示器';
+          var allDisplays = document.createElement('option');
+          allDisplays.value = '';
+          allDisplays.textContent = '全部显示器';
+          displaySelect.appendChild(allDisplays);
+          displays.forEach(function (display, index) {
+            var option = document.createElement('option');
+            option.value = String(display.id || '');
+            var label = display.name || ('显示器 ' + (index + 1));
+            if (display.width && display.height) label += ' · ' + display.width + '×' + display.height;
+            if (display.primary) label += ' · 主屏';
+            option.textContent = label;
+            displaySelect.appendChild(option);
+          });
+          displaySelect.value = remoteDesktopDisplaySelection(target.deviceId);
+          displaySelect.onchange = function () {
+            state.desktopDisplaySelections[target.deviceId] = displaySelect.value;
+          };
+          actions.appendChild(displaySelect);
+        }
         if (active) {
           var disconnect = document.createElement('button');
           disconnect.type = 'button';
@@ -2171,7 +2229,7 @@
       }
       if (button) button.disabled = true;
       try {
-        var raw = await call('goConnectRemoteDesktop', targetID, JSON.stringify(remoteDesktopConnectOptions()));
+        var raw = await call('goConnectRemoteDesktop', targetID, JSON.stringify(remoteDesktopConnectOptions(targetID)));
         var result = parseJSONResult(raw, { ok:false, message:'没有收到连接结果' });
         if (!result.ok) {
           toast(result.message || '远程桌面连接失败');
@@ -2179,7 +2237,7 @@
         }
         desktopFrameSeq = 0;
         resetDesktopClipboard();
-        toast('远程桌面已启动 · ' + remoteDesktopOptionsSummary());
+        toast('远程桌面已启动 · ' + remoteDesktopOptionsSummary(targetID));
         await refreshRemoteDesktopStatus(false);
         await refreshRemoteDesktopFrame();
       } finally {

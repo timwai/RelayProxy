@@ -53,3 +53,28 @@ func TestCopyDXGIFrameReusesBuffer(t *testing.T) {
 		t.Fatal("DXGI conversion allocated a replacement buffer for the same size")
 	}
 }
+
+func TestWindowsDesktopCapabilitySnapshot(t *testing.T) {
+	captures, displays := windowsDesktopCapabilitySnapshot([]screencapture.Display{
+		{
+			ID: 10, DeviceName: `\\.\DISPLAY1`, PixelWidth: 1920, PixelHeight: 1080,
+			Primary: true, AdapterIndex: 0, OutputIndex: 0,
+		},
+		{
+			ID: 20, DeviceName: `\\.\DISPLAY2`, PixelWidth: 2560, PixelHeight: 1440,
+			AdapterIndex: -1, OutputIndex: -1,
+		},
+	})
+	if len(captures) != 2 || captures[0].Backend != "gdi" || captures[1].Backend != "dxgi" {
+		t.Fatalf("capture capabilities=%+v", captures)
+	}
+	if len(displays) != 2 {
+		t.Fatalf("display capabilities=%d want=2", len(displays))
+	}
+	if displays[0].ID != "10" || !displays[0].Primary || displays[0].Width != 1920 || displays[0].Height != 1080 {
+		t.Fatalf("primary display=%+v", displays[0])
+	}
+	if displays[1].ID != "20" || displays[1].Width != 2560 || displays[1].Height != 1440 {
+		t.Fatalf("secondary display=%+v", displays[1])
+	}
+}

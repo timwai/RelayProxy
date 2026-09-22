@@ -24,11 +24,24 @@ type UDPResult struct {
 	RemoteAddr *net.UDPAddr
 	SessionID  uint64
 	Key        []byte
+	Domain     secure.Domain
 }
 
 // Punch races all validated UDP candidates on one socket and returns the
 // authenticated peer address. The caller owns conn after a successful return.
 func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.RDPCandidate, sessionID uint64, key []byte, timeout time.Duration) (*UDPResult, error) {
+	return PunchWithDomain(ctx, conn, candidates, sessionID, key, timeout, secure.DomainRDP)
+}
+
+func PunchWithDomain(
+	ctx context.Context,
+	conn *net.UDPConn,
+	candidates []protocol.RDPCandidate,
+	sessionID uint64,
+	key []byte,
+	timeout time.Duration,
+	domain secure.Domain,
+) (*UDPResult, error) {
 	if conn == nil || sessionID == 0 || len(key) < 16 {
 		return nil, errors.New("invalid RDP UDP punch session")
 	}
@@ -63,7 +76,10 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.RDPCand
 	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
 		return nil, err
 	}
-	request := secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}.Encode(key)
+	request, err := (secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}).EncodeWithDomain(key, domain)
+	if err != nil {
+		return nil, err
+	}
 	nextSend := time.Time{}
 	buffer := make([]byte, 1500)
 	for {
@@ -82,10 +98,13 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.RDPCand
 		n, remote, err := conn.ReadFromUDPAddrPort(buffer)
 		if err == nil {
 			remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
-			packet, decodeErr := secure.DecodePunchPacket(buffer[:n], key)
+			packet, decodeErr := secure.DecodePunchPacketWithDomain(buffer[:n], key, domain)
 			if decodeErr == nil && packet.Type == secure.PunchAck && packet.SessionID == sessionID && packet.Nonce == nonce {
 				_ = conn.SetReadDeadline(time.Time{})
-				return &UDPResult{Conn: conn, RemoteAddr: net.UDPAddrFromAddrPort(remote), SessionID: sessionID, Key: append([]byte(nil), key...)}, nil
+				return &UDPResult{
+					Conn: conn, RemoteAddr: net.UDPAddrFromAddrPort(remote), SessionID: sessionID,
+					Key: append([]byte(nil), key...), Domain: domain,
+				}, nil
 			}
 		} else {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
@@ -120,11 +139,31 @@ func DecodePunch(raw []byte, key []byte) (secure.PunchPacket, error) {
 	return secure.DecodePunchPacket(raw, key)
 }
 
+func DecodePunchWithDomain(raw []byte, key []byte, domain secure.Domain) (secure.PunchPacket, error) {
+	return secure.DecodePunchPacketWithDomain(raw, key, domain)
+}
+
 func WritePunchAck(conn *net.UDPConn, addr *net.UDPAddr, request secure.PunchPacket, key []byte) error {
+	return WritePunchAckWithDomain(conn, addr, request, key, secure.DomainRDP)
+}
+
+func WritePunchAckWithDomain(
+	conn *net.UDPConn,
+	addr *net.UDPAddr,
+	request secure.PunchPacket,
+	key []byte,
+	domain secure.Domain,
+) error {
 	if request.Type != secure.PunchRequest && request.Type != secure.PunchKeep {
 		return errors.New("not a punch request or keepalive")
 	}
-	_, err := conn.WriteToUDP(secure.PunchPacket{Type: secure.PunchAck, SessionID: request.SessionID, Nonce: request.Nonce}.Encode(key), addr)
+	packet, err := (secure.PunchPacket{
+		Type: secure.PunchAck, SessionID: request.SessionID, Nonce: request.Nonce,
+	}).EncodeWithDomain(key, domain)
+	if err != nil {
+		return err
+	}
+	_, err = conn.WriteToUDP(packet, addr)
 	return err
 }
 
@@ -137,6 +176,7 @@ type PacketConn struct {
 	remotePort netip.AddrPort
 	sessionID  uint64
 	key        []byte
+	domain     secure.Domain
 	encode     *secure.DataCodec
 	decode     *secure.DataCodec
 	readMu     sync.Mutex
@@ -158,11 +198,15 @@ func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, 
 	if result == nil || result.Conn == nil || result.RemoteAddr == nil {
 		return nil, errors.New("invalid RDP UDP result")
 	}
-	encode, err := secure.NewDataCodec(result.SessionID, result.Key)
+	domain := result.Domain
+	if domain == "" {
+		domain = secure.DomainRDP
+	}
+	encode, err := secure.NewDataCodecWithDomain(result.SessionID, result.Key, domain)
 	if err != nil {
 		return nil, err
 	}
-	decode, err := secure.NewDataCodec(result.SessionID, result.Key)
+	decode, err := secure.NewDataCodecWithDomain(result.SessionID, result.Key, domain)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +221,7 @@ func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, 
 		remotePort: remotePort,
 		sessionID:  result.SessionID,
 		key:        append([]byte(nil), result.Key...),
+		domain:     domain,
 		encode:     encode,
 		decode:     decode,
 		done:       make(chan struct{}),
@@ -204,7 +249,12 @@ func (c *PacketConn) keepaliveLoop(interval time.Duration) {
 			return
 		case <-ticker.C:
 			nonce++
-			packet := secure.PunchPacket{Type: secure.PunchKeep, SessionID: c.sessionID, Nonce: nonce}.Encode(c.key)
+			packet, err := (secure.PunchPacket{
+				Type: secure.PunchKeep, SessionID: c.sessionID, Nonce: nonce,
+			}).EncodeWithDomain(c.key, c.domain)
+			if err != nil {
+				return
+			}
 			if _, err := c.conn.WriteToUDPAddrPort(packet, c.remotePort); err != nil {
 				return
 			}

@@ -784,6 +784,18 @@
               <div id="desktop-viewer-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">网络统计：--</div>
             </div>
             <div class="flex items-center gap-2">
+              <div id="desktop-runtime-resolution-wrap" class="hidden items-center gap-1.5">
+                <select id="desktop-runtime-resolution" title="运行中切换 H.264 分辨率" class="text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                  <option value="">当前分辨率</option>
+                  <option value="960x540">960×540</option>
+                  <option value="1280x720">1280×720</option>
+                  <option value="1600x900">1600×900</option>
+                  <option value="1920x1080">1920×1080</option>
+                  <option value="2560x1440">2560×1440</option>
+                  <option value="3840x2160">3840×2160</option>
+                </select>
+                <button id="desktop-runtime-resolution-apply" type="button" onclick="setRemoteDesktopResolution()" class="rp-btn">切换</button>
+              </div>
               <button id="desktop-native-viewer-btn" type="button" onclick="openDesktopNativeViewer()" class="rp-btn hidden">原生 Viewer</button>
               <button type="button" onclick="toggleDesktopFullscreen()" class="rp-btn">全屏</button>
             </div>
@@ -1692,6 +1704,45 @@
         host.appendChild(card);
       });
     }
+    function updateDesktopRuntimeResolutionControl(status) {
+      var wrap = $('desktop-runtime-resolution-wrap');
+      var select = $('desktop-runtime-resolution');
+      var apply = $('desktop-runtime-resolution-apply');
+      if (!wrap || !select || !apply) return;
+      status = status || {};
+      var enabled = status.state === 'connected' && status.backend === 'relay' &&
+        status.codec === 'h264' && hasFn('goSetRemoteDesktopResolution');
+      wrap.classList.toggle('hidden', !enabled);
+      wrap.classList.toggle('flex', enabled);
+      select.disabled = !enabled;
+      apply.disabled = !enabled;
+      if (!enabled) {
+        select.value = '';
+        return;
+      }
+
+      var maxWidth = Number(status.maxWidth || status.width || 0);
+      var maxHeight = Number(status.maxHeight || status.height || 0);
+      var current = select.options[0];
+      current.textContent = status.width && status.height
+        ? '当前 ' + status.width + '×' + status.height + (status.generation ? ' · G' + status.generation : '')
+        : '当前分辨率';
+      Array.prototype.forEach.call(select.options, function (option, index) {
+        if (index === 0 || !option.value) {
+          option.disabled = false;
+          return;
+        }
+        var parts = option.value.split('x');
+        var width = Number(parts[0] || 0);
+        var height = Number(parts[1] || 0);
+        option.disabled = !!(maxWidth && maxHeight && (width > maxWidth || height > maxHeight));
+      });
+      select.value = '';
+      wrap.title = maxWidth && maxHeight
+        ? '当前会话上限 ' + maxWidth + '×' + maxHeight + '；切换会递增媒体 Generation 并重建 H.264 编解码器'
+        : '运行中切换 H.264 分辨率';
+    }
+
     function renderRemoteDesktopStatus() {
       var banner = $('desktop-session-banner');
       if (!banner) return;
@@ -1700,6 +1751,7 @@
       var relay = connected && status.backend === 'relay';
       banner.classList.toggle('hidden', !connected);
       $('desktop-viewer').classList.toggle('hidden', !relay);
+      updateDesktopRuntimeResolutionControl(status);
       if (!relay) {
         desktopFrameSeq = 0; desktopFrameGeneration = 0;
         resetDesktopVideoDecoder();
@@ -2013,6 +2065,38 @@
         desktopFrameBusy = false;
       }
     }
+
+    async function setRemoteDesktopResolution() {
+      if (!hasFn('goSetRemoteDesktopResolution')) {
+        toast('当前界面不支持运行中切换分辨率');
+        return;
+      }
+      var select = $('desktop-runtime-resolution');
+      var apply = $('desktop-runtime-resolution-apply');
+      var value = select ? String(select.value || '') : '';
+      var match = /^(\d+)x(\d+)$/.exec(value);
+      if (!match) {
+        toast('请选择要切换的分辨率');
+        return;
+      }
+      var width = Number(match[1]), height = Number(match[2]);
+      if (apply) apply.disabled = true;
+      if (select) select.disabled = true;
+      try {
+        var raw = await call('goSetRemoteDesktopResolution', width, height);
+        var result = mutationResult(raw);
+        if (result && result.ok === false) {
+          toast(result.message || '切换远程桌面分辨率失败');
+          return;
+        }
+        toast('已请求切换到 ' + width + '×' + height + ' · 等待新媒体 Generation');
+      } catch (err) {
+        toast('切换远程桌面分辨率失败：' + (err && err.message ? err.message : err));
+      } finally {
+        updateDesktopRuntimeResolutionControl(state.desktopStatus || {});
+      }
+    }
+    window.setRemoteDesktopResolution = setRemoteDesktopResolution;
 
     async function openDesktopNativeViewer() {
       if (!hasFn('goOpenRemoteDesktopNativeViewer')) return;

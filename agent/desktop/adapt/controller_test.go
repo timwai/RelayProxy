@@ -68,7 +68,6 @@ func TestABRHonorsFloorAndCeiling(t *testing.T) {
 	}
 }
 
-
 func TestABRDropsOnSendQueueBeforePacketLoss(t *testing.T) {
 	controller := NewController(DefaultConfig(protocol.DesktopSceneOffice, 8_000_000))
 

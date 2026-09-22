@@ -60,7 +60,6 @@ func TestSessionStatsSeparatesReceiveAndViewerFPS(t *testing.T) {
 	}
 }
 
-
 func TestAdaptationSnapshotUsesWindowedLoss(t *testing.T) {
 	stats := newSessionStatsTracker("relay")
 	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 100}, 100)

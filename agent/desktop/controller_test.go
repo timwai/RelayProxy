@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/jpeg"
 	"testing"

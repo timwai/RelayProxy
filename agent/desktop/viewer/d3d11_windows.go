@@ -23,7 +23,7 @@ const (
 	d3d11MapWriteDiscard          = 4
 
 	dxgiFormatB8G8R8A8UNorm     = 87
-	dxgiFormatNV12               = 103
+	dxgiFormatNV12              = 103
 	dxgiUsageRenderTargetOutput = 0x20
 	dxgiSwapEffectDiscard       = 0
 
@@ -33,14 +33,14 @@ const (
 	d3d11VideoProcessorFormatSupportInput  = 0x1
 	d3d11VideoProcessorFormatSupportOutput = 0x2
 
-	id3d10MultithreadSetMultithreadProtected = 5
-	id3d11VideoDeviceCreateVideoProcessor    = 4
-	id3d11VideoDeviceCreateInputView         = 8
-	id3d11VideoDeviceCreateOutputView        = 9
-	id3d11VideoDeviceCreateEnumerator        = 10
+	id3d10MultithreadSetMultithreadProtected  = 5
+	id3d11VideoDeviceCreateVideoProcessor     = 4
+	id3d11VideoDeviceCreateInputView          = 8
+	id3d11VideoDeviceCreateOutputView         = 9
+	id3d11VideoDeviceCreateEnumerator         = 10
 	id3d11VideoProcessorEnumeratorCheckFormat = 8
-	id3d11VideoContextSetStreamFrameFormat   = 27
-	id3d11VideoContextVideoProcessorBlt      = 53
+	id3d11VideoContextSetStreamFrameFormat    = 27
+	id3d11VideoContextVideoProcessorBlt       = 53
 )
 
 var (

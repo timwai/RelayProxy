@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、可导出实机会话诊断与聚合 Summary 均已合并 main；当前分支继续优化 Host 捕获→编码热路径，先移除原生 BGRA 捕获到 H.264 之间不必要的 RGBA staging  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary 与 Host BGRA fast path 均已合并 main；当前分支增加 capture backend 显式策略，为 DXGI/GDI 实机 A/B 和后续 WGC 接入建立稳定控制面  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #61 已合并，merge `7b31d5bf6fe7d37b680e3f05cb910ed94f01c879`）
+> 当前开发基线：`main`（PR #62 已合并，merge `83eb04ed082e2c8c3db2843bda553545d52813d2`）
 
 ## 0. 当前进度
 
@@ -171,7 +171,7 @@ Windows SendInput / CF_UNICODETEXT
 - Percentile 使用确定性的 nearest-rank 计算；原始 samples 继续保留，因此需要更复杂统计时仍可离线重算。
 - 新测试固定 p50/p95、路径/Generation/ABR/Resolution 事件计数、backend/codec/resolution 分布和不可用值过滤行为。
 
-### 0.2.9 Host BGRA Fast Path（当前分支）
+### 0.2.9 Host BGRA Fast Path（已合并 PR #62）
 
 - Windows `go-mswin/screencapture` 的 DXGI Desktop Duplication / GDI stream 原生输出均为 top-down BGRA，并保留真实 stride；此前 Relay Desktop 会先逐像素复制/交换为 RGBA，再由 Media Foundation H.264 路径逐像素转 NV12。
 - Encoder `RawFrame` 新增 `PixelFormatBGRA`，`BGRAtoNV12` 可直接消费带 padding RowPitch 的 BGRA，BT.709 limited-range 转换结果与现有 RGBA 路径保持一致。
@@ -182,6 +182,18 @@ Windows SendInput / CF_UNICODETEXT
 - `DesktopSessionStats.CaptureFormat` / diagnostics `CaptureFormats` 新增 `bgra-direct` 与 `rgba` 可观察值；Viewer 实时统计显示 `Capture dxgi/bgra-direct` 等实际链路。
 - Capture backend 改为每次 stats 上报时读取当前 backend，因此 DXGI 运行期失败转 GDI 后，GUI/diagnostics 不再错误保留 `dxgi` 标签。
 - 本轮仍然是 CPU BGRA→NV12；最终目标依旧是 `D3D11 texture → GPU scale/color convert → NV12 surface → hardware encoder`。当前 capture dependency 只提供 DXGI Desktop Duplication / GDI，WGC 需要后续单独实现 WinRT capture backend 或替换/扩展 capture 层。
+
+### 0.2.10 Capture Backend Policy（当前分支）
+
+- `RemoteDesktopConnectOptions` 新增 `CaptureBackend`：`auto / dxgi / gdi / wgc`；`wgc` 先作为 wire/API 预留值，当前 Windows Host 明确返回“未实现”，不会静默当成 Auto。
+- `HostConfig` 把 capture preference 保持为 session-local，不修改 Host 全局默认；Diagnostics 导出的连接 options 会自然记录请求值，便于同一机器做 DXGI/GDI A/B。
+- `auto` 保持现有行为：单屏/指定屏幕优先 `screencapture.BackendAuto`，必要时回退虚拟桌面 GDI。
+- 显式 `dxgi` 映射到 Desktop Duplication 并采用 strict policy：初始化失败、显示器枚举失败都直接结束会话，不允许偷偷切 GDI。
+- 多显示器“全部显示器”当前依赖 virtual desktop GDI；因此显式 DXGI 必须选择具体显示器。该约束在 Host 侧强制，不依赖 GUI 正确性。
+- 显式 `gdi` 固定 GDI；选择具体显示器时使用 per-display GDI stream，未选具体显示器时允许 virtual desktop GDI。
+- GUI 连接设置新增“采集：自动 / DXGI / GDI”，连接摘要显示显式 Capture backend；帮助文字明确该选项主要用于实机矩阵和问题定位。
+- 当前 capability snapshot 继续只公布真实可用的 GDI/DXGI；在 WinRT WGC backend 真正实现之前 GUI 不提供 WGC 选项。
+- 测试覆盖协议→HostConfig 透传、空值归一到 Auto、DXGI/GDI/WGC 映射、strict backend 识别和 DXGI concrete-display 约束。
 
 ### 0.3 本轮进度（2026-09-22）
 

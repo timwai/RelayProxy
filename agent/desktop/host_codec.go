@@ -12,6 +12,76 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+type h264GenerationEncoder interface {
+	desktopcodec.Encoder
+	SequenceHeader() []byte
+}
+
+type h264GenerationEncoderOpener func(
+	context.Context,
+	desktopcodec.VideoConfig,
+	bool,
+) (h264GenerationEncoder, error)
+
+func openMFH264GenerationEncoder(
+	ctx context.Context,
+	cfg desktopcodec.VideoConfig,
+	preferHardware bool,
+) (h264GenerationEncoder, error) {
+	return desktopcodec.OpenMFH264Encoder(ctx, cfg, preferHardware)
+}
+
+func openH264GenerationEncoder(
+	ctx context.Context,
+	cfg desktopcodec.VideoConfig,
+	opener h264GenerationEncoderOpener,
+) (h264GenerationEncoder, desktopcodec.VideoConfig, []byte, error) {
+	if opener == nil {
+		return nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrEncoderUnavailable
+	}
+	normalized, err := desktopcodec.NormalizeVideoConfig(cfg)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	encoder, err := opener(ctx, normalized, true)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	if encoder == nil {
+		return nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrEncoderUnavailable
+	}
+	// A fresh encoder normally starts with an IDR. Ask explicitly as well so
+	// every generation can be decoded independently. Unsupported control is
+	// tolerated; the send loop still withholds delta frames until a keyframe.
+	_ = encoder.ForceIDR(ctx)
+	return encoder, normalized, encoder.SequenceHeader(), nil
+}
+
+func h264DesktopVideoConfig(
+	generation uint32,
+	cfg desktopcodec.VideoConfig,
+	maxBitrate int,
+	displayID string,
+	sequenceHeader []byte,
+) protocol.DesktopVideoConfig {
+	if maxBitrate <= 0 {
+		maxBitrate = cfg.TargetBitrate
+	}
+	return protocol.DesktopVideoConfig{
+		Generation:    generation,
+		Codec:         "h264",
+		CodecString:   desktopcodec.H264CodecString(sequenceHeader),
+		Width:         cfg.Width,
+		Height:        cfg.Height,
+		FPS:           cfg.FPS,
+		TargetBitrate: cfg.TargetBitrate,
+		MaxBitrate:    maxBitrate,
+		Chroma:        "420",
+		BitDepth:      8,
+		DisplayID:     displayID,
+	}
+}
+
 func (h *Host) canEncodeH264() bool {
 	for _, capability := range h.CodecCapabilities() {
 		if capability.Codec == "h264" && capability.Encode {

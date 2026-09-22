@@ -64,9 +64,9 @@ func TestHostCaptureJPEG(t *testing.T) {
 
 func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
 	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
-		Quality:    protocol.DesktopQualityHigh,
-		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 1600, Height: 900},
-		FPS:        24,
+		Quality:        protocol.DesktopQualityHigh,
+		Resolution:     protocol.DesktopResolutionOptions{Mode: "fixed", Width: 1600, Height: 900},
+		FPS:            24,
 		MaxBitrate:     8_000_000,
 		DisplayID:      "42",
 		CaptureBackend: protocol.DesktopCaptureDXGI,

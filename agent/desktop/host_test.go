@@ -15,6 +15,18 @@ type testCaptureSource struct {
 func (s *testCaptureSource) Capture(context.Context) (*image.RGBA, error) { return s.frame, nil }
 func (s *testCaptureSource) Close() error                                 { return nil }
 
+type testCapabilityCaptureSource struct {
+	testCaptureSource
+}
+
+func (s *testCapabilityCaptureSource) DesktopCaptureCapabilities(context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error) {
+	return []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}}, []protocol.DesktopDisplayCapability{{
+		ID: "display-1", Name: "Primary", Width: 1920, Height: 1080, Primary: true,
+	}, {
+		ID: "display-2", Name: "Secondary", Width: 2560, Height: 1440,
+	}}, nil
+}
+
 func TestFitRGBAPreservesAspectRatio(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 1920, 1080))
 	got := fitRGBA(src, 1280, 720)
@@ -123,5 +135,32 @@ func TestQueueLatestIntReplacesPendingValue(t *testing.T) {
 		}
 	default:
 		t.Fatal("latest queued value missing")
+	}
+}
+
+func TestHostDesktopCapabilitiesIncludeDynamicCaptureSnapshot(t *testing.T) {
+	source := &testCapabilityCaptureSource{
+		testCaptureSource: testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))},
+	}
+	host, err := NewHost(source, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.SetCodecCapabilities([]protocol.DesktopCodecCapability{{Codec: "h264", Encode: true, Hardware: true}})
+	caps := host.DesktopCapabilities(context.Background())
+	if !caps.RelayDesktop || !caps.MultiMonitor {
+		t.Fatalf("unexpected desktop summary: %+v", caps)
+	}
+	if caps.MaxWidth != maxJPEGWidth || caps.MaxHeight != maxJPEGHeight || caps.MaxFPS != maxJPEGFPS {
+		t.Fatalf("unexpected host limits: %+v", caps)
+	}
+	if len(caps.Captures) != 1 || caps.Captures[0].Backend != "dxgi" || !caps.Captures[0].Cursor {
+		t.Fatalf("capture capabilities=%+v", caps.Captures)
+	}
+	if len(caps.Displays) != 2 || caps.Displays[1].ID != "display-2" || caps.Displays[1].Width != 2560 {
+		t.Fatalf("display capabilities=%+v", caps.Displays)
+	}
+	if len(caps.Codecs) != 1 || caps.Codecs[0].Codec != "h264" || !caps.Codecs[0].Hardware {
+		t.Fatalf("codec capabilities=%+v", caps.Codecs)
 	}
 }

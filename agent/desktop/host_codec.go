@@ -287,7 +287,7 @@ func (h *Host) streamH264Frames(
 		if frame == nil || frame.Bounds().Dx() != videoCfg.Width || frame.Bounds().Dy() != videoCfg.Height {
 			return errors.New("desktop capture dimensions changed during H.264 session")
 		}
-		if now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
+		if needsGenerationKeyFrame || now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
 			if err := encoder.ForceIDR(ctx); err == nil {
 				lastIDR = now
 			}
@@ -304,8 +304,16 @@ func (h *Host) streamH264Frames(
 			return err
 		}
 		for _, encoded := range packets {
+			if needsGenerationKeyFrame && !encoded.KeyFrame {
+				// Never expose a new generation starting from a dependent frame.
+				// Keep asking for IDR on subsequent captures until the encoder
+				// produces a keyframe that the Viewer can start from.
+				continue
+			}
 			data := encoded.Data
 			if encoded.KeyFrame {
+				needsGenerationKeyFrame = false
+				lastIDR = now
 				data = desktopcodec.H264WithSequenceHeader(data, sequenceHeader)
 			}
 			mediaFrame := desktopmedia.EncodedFrame{

@@ -19,8 +19,8 @@ import (
 	graphicsdxgicommon "github.com/deploymenttheory/go-bindings-win32/bindings/win32/graphics/dxgi/common"
 	graphicsgdi "github.com/deploymenttheory/go-bindings-win32/bindings/win32/graphics/gdi"
 	systemwinrt "github.com/deploymenttheory/go-bindings-win32/bindings/win32/system/winrt"
-	win32capture "github.com/deploymenttheory/go-bindings-win32/bindings/win32/system/winrt/graphics/capture"
 	win32direct3d11 "github.com/deploymenttheory/go-bindings-win32/bindings/win32/system/winrt/direct3d11"
+	win32capture "github.com/deploymenttheory/go-bindings-win32/bindings/win32/system/winrt/graphics/capture"
 
 	winrtruntime "github.com/deploymenttheory/go-bindings-winrt/bindings/runtime/winrt"
 	winrtfoundation "github.com/deploymenttheory/go-bindings-winrt/bindings/winrt/foundation"

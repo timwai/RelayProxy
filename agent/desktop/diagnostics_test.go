@@ -100,7 +100,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 10, JitterMs: 1, LossPercent: 0,
 				SendQueueDelayMs: 2, ActualBitrate: 1_000_000, ReceiveFPS: 30,
-				DecodeFPS: 29, RenderFPS: 28, CaptureMs: 2, EncodeMs: 3,
+				DecodeFPS: 29, RenderFPS: 28, CaptureMs: 2, ConvertMs: 1, CodecMs: 2, EncodeMs: 3,
 				DecodeMs: 4, RenderMs: 5, CaptureBackend: "dxgi", CaptureFormat: "bgra-direct",
 				EncoderBackend: "media-foundation", EncoderHardware: true,
 				DecoderBackend: "mf-d3d11", DecoderHardware: true,
@@ -112,6 +112,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 20, JitterMs: 2, LossPercent: 1,
 				SendQueueDelayMs: 4, ActualBitrate: 2_000_000, ReceiveFPS: 25,
+				ConvertMs: 2, CodecMs: 4, EncodeMs: 6,
 				DroppedFrames: 1, CaptureBackend: "dxgi", CaptureFormat: "bgra-direct",
 				EncoderBackend: "media-foundation", EncoderHardware: true,
 				DecoderBackend: "mf-d3d11", DecoderHardware: true,
@@ -126,6 +127,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "udp_p2p", RTTMs: 30, JitterMs: 3, LossPercent: 2,
 				SendQueueDelayMs: 6, ActualBitrate: 3_000_000, ReceiveFPS: 20,
+				ConvertMs: 3, CodecMs: 6, EncodeMs: 9,
 				DroppedFrames: 2, CaptureBackend: "dxgi", CaptureFormat: "bgra-direct",
 				EncoderBackend: "media-foundation", EncoderHardware: true,
 				DecoderBackend: "mf-d3d11", DecoderHardware: true,
@@ -209,6 +211,18 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 	if got := summary.ActualBitrate; got.Samples != 5 || got.P50 != 3_000_000 ||
 		got.P95 != 5_000_000 {
 		t.Fatalf("bitrate summary=%+v", got)
+	}
+	if got := summary.ConvertMs; got.Samples != 3 || got.Min != 1 || got.Avg != 2 ||
+		got.P50 != 2 || got.P95 != 3 {
+		t.Fatalf("convert summary=%+v", got)
+	}
+	if got := summary.CodecMs; got.Samples != 3 || got.Min != 2 || got.Avg != 4 ||
+		got.P50 != 4 || got.P95 != 6 {
+		t.Fatalf("codec summary=%+v", got)
+	}
+	if got := summary.EncodeMs; got.Samples != 3 || got.Min != 3 || got.Avg != 6 ||
+		got.P50 != 6 || got.P95 != 9 {
+		t.Fatalf("encode summary=%+v", got)
 	}
 }
 

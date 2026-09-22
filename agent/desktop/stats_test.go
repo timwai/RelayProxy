@@ -59,3 +59,27 @@ func TestSessionStatsSeparatesReceiveAndViewerFPS(t *testing.T) {
 		t.Fatalf("viewer stats=%+v", got)
 	}
 }
+
+
+func TestAdaptationSnapshotUsesWindowedLoss(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 100}, 100)
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 102}, 100)
+	first := stats.AdaptationSnapshot(time.Now())
+	if first.LossPercent <= 0 {
+		t.Fatalf("first lossPercent=%v", first.LossPercent)
+	}
+
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 101}, 100)
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 103}, 100)
+	second := stats.AdaptationSnapshot(time.Now())
+	if second.LossPercent != 0 {
+		t.Fatalf("recovered window lossPercent=%v", second.LossPercent)
+	}
+
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 104}, 100)
+	third := stats.AdaptationSnapshot(time.Now())
+	if third.LossPercent != 0 {
+		t.Fatalf("stable window lossPercent=%v", third.LossPercent)
+	}
+}

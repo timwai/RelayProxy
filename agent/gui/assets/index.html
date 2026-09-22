@@ -2134,6 +2134,9 @@
       if (stats.jitterMs) parts.push('Jitter ' + stats.jitterMs.toFixed(1) + ' ms');
       parts.push('Loss ' + Number(stats.lossPercent || 0).toFixed(2) + '%');
       parts.push('RX ' + formatDesktopBitrate(stats.actualBitrate));
+      if (stats.path) parts.push('Path ' + (stats.path === 'udp_p2p' ? 'P2P' : stats.path));
+      if (stats.pathSwitches) parts.push('Switch ' + stats.pathSwitches);
+      if (stats.idrRequests) parts.push('IDR ' + stats.idrRequests);
       if (stats.captureFps) parts.push('Capture ' + stats.captureFps.toFixed(1) + ' FPS');
       if (stats.encodeFps) parts.push('Encode ' + stats.encodeFps.toFixed(1) + ' FPS');
       if (stats.receiveFps) parts.push('RX ' + stats.receiveFps.toFixed(1) + ' FPS');

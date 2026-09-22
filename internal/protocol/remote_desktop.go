@@ -314,6 +314,7 @@ type DesktopSessionStats struct {
 	DroppedFrames    uint64  `json:"droppedFrames,omitempty"`
 	Path             string  `json:"path,omitempty"`
 	CaptureBackend   string  `json:"captureBackend,omitempty"`
+	CaptureFormat    string  `json:"captureFormat,omitempty"`
 	EncoderBackend   string  `json:"encoderBackend,omitempty"`
 	EncoderHardware  bool    `json:"encoderHardware,omitempty"`
 	DecoderBackend   string  `json:"decoderBackend,omitempty"`

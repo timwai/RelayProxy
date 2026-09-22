@@ -126,7 +126,7 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 				s.stats.ObservePong(*message.Probe, time.Now())
 			}
 
-		case protocol.DesktopSessionStats:
+		case protocol.DesktopSessionStatsReport:
 			if message.Stats != nil && s.stats != nil {
 				s.stats.MergeRemote(*message.Stats)
 			}

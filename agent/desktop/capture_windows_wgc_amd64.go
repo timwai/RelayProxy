@@ -83,6 +83,25 @@ func openWGCFrameStream(
 	return stream, nil
 }
 
+type wgcUnknown interface {
+	QueryInterface(*win32.GUID, **win32.IUnknown) error
+}
+
+func wgcQueryInterface[T any](obj wgcUnknown, iid *win32.GUID) (*T, error) {
+	var out *win32.IUnknown
+	if err := obj.QueryInterface(iid, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		return nil, errors.New("COM QueryInterface returned nil")
+	}
+	return (*T)(unsafe.Pointer(out)), nil
+}
+
+func wgcCast[T any](obj *win32.IUnknown) *T {
+	return (*T)(unsafe.Pointer(obj))
+}
+
 func (s *wgcFrameStream) initialize(display screencapture.Display) error {
 	var selectedLevel graphicsdirect3d.D3D_FEATURE_LEVEL
 	if err := graphicsdirect3d11.D3D11CreateDevice(
@@ -107,7 +126,7 @@ func (s *wgcFrameStream) initialize(display screencapture.Display) error {
 		return fmt.Errorf("%w: D3D11 returned a nil device/context", errWindowsGraphicsCaptureUnavailable)
 	}
 
-	dxgiDevice, err := win32.QueryInterface[graphicsdxgi.IDXGIDevice](s.device, &graphicsdxgi.IID_IDXGIDevice)
+	dxgiDevice, err := wgcQueryInterface[graphicsdxgi.IDXGIDevice](s.device, &graphicsdxgi.IID_IDXGIDevice)
 	if err != nil {
 		return fmt.Errorf("WGC query IDXGIDevice: %w", err)
 	}
@@ -120,7 +139,7 @@ func (s *wgcFrameStream) initialize(display screencapture.Display) error {
 	if inspectable == nil {
 		return errors.New("WGC WinRT D3D11 device is nil")
 	}
-	s.winrtDevice, err = win32.QueryInterface[winrtdirect3d11.IDirect3DDevice](
+	s.winrtDevice, err = wgcQueryInterface[winrtdirect3d11.IDirect3DDevice](
 		inspectable,
 		&winrtdirect3d11.IID_IDirect3DDevice,
 	)
@@ -136,7 +155,7 @@ func (s *wgcFrameStream) initialize(display screencapture.Display) error {
 	if err != nil {
 		return fmt.Errorf("%w: get GraphicsCaptureItem interop: %v", errWindowsGraphicsCaptureUnavailable, err)
 	}
-	interop := win32.Cast[win32capture.IGraphicsCaptureItemInterop](factoryUnknown)
+	interop := wgcCast[win32capture.IGraphicsCaptureItemInterop](factoryUnknown)
 	defer interop.Release()
 
 	var itemUnknown *win32.IUnknown
@@ -151,7 +170,7 @@ func (s *wgcFrameStream) initialize(display screencapture.Display) error {
 	if itemUnknown == nil {
 		return errors.New("WGC monitor capture item is nil")
 	}
-	s.item = win32.Cast[winrtcapture.IGraphicsCaptureItem](itemUnknown)
+	s.item = wgcCast[winrtcapture.IGraphicsCaptureItem](itemUnknown)
 
 	size, err := s.item.Size()
 	if err != nil {
@@ -183,7 +202,7 @@ func (s *wgcFrameStream) initialize(display screencapture.Display) error {
 		return fmt.Errorf("WGC create capture session: %w", err)
 	}
 
-	session2, err := win32.QueryInterface[winrtcapture.IGraphicsCaptureSession2](
+	session2, err := wgcQueryInterface[winrtcapture.IGraphicsCaptureSession2](
 		s.session,
 		&winrtcapture.IID_IGraphicsCaptureSession2,
 	)
@@ -333,7 +352,7 @@ func (s *wgcFrameStream) readbackLocked(
 	}
 	defer surface.Release()
 
-	access, err := win32.QueryInterface[win32direct3d11.IDirect3DDxgiInterfaceAccess](
+	access, err := wgcQueryInterface[win32direct3d11.IDirect3DDxgiInterfaceAccess](
 		surface,
 		&win32direct3d11.IID_IDirect3DDxgiInterfaceAccess,
 	)
@@ -349,7 +368,7 @@ func (s *wgcFrameStream) readbackLocked(
 	if textureUnknown == nil {
 		return errors.New("WGC frame texture is nil")
 	}
-	texture := win32.Cast[graphicsdirect3d11.ID3D11Texture2D](textureUnknown)
+	texture := wgcCast[graphicsdirect3d11.ID3D11Texture2D](textureUnknown)
 	defer texture.Release()
 
 	var desc graphicsdirect3d11.D3D11_TEXTURE2D_DESC
@@ -461,11 +480,11 @@ func (s *wgcFrameStream) closeLocked() error {
 	}
 	s.closed = true
 	var firstErr error
-	closeWinRT := func(obj win32.Unknown) {
+	closeWinRT := func(obj wgcUnknown) {
 		if obj == nil {
 			return
 		}
-		closable, err := win32.QueryInterface[winrtfoundation.IClosable](obj, &winrtfoundation.IID_IClosable)
+		closable, err := wgcQueryInterface[winrtfoundation.IClosable](obj, &winrtfoundation.IID_IClosable)
 		if err != nil {
 			return
 		}

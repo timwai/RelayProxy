@@ -331,6 +331,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer ticker.Stop()
 
 	var lastSequence uint64
+	var lastGeneration = s.generation
 	var converted []byte
 	var lastRecovery time.Time
 	perf := newNativeViewerPerf(time.Now())
@@ -351,7 +352,8 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 
 		cursorChanged := s.refreshCursor(owner)
 		frame := owner.bridge.GetRemoteDesktopFrame()
-		frameChanged := frame.Sequence != 0 && frame.Sequence != lastSequence && frame.MimeType == "video/h264"
+		frameChanged := frame.Sequence != 0 && frame.MimeType == "video/h264" &&
+			(frame.Sequence != lastSequence || frame.Generation != lastGeneration)
 		if !frameChanged {
 			if cursorChanged && !s.gpuFrameActive && len(s.baseBGRA) > 0 {
 				if err := s.present(); err != nil {
@@ -362,8 +364,32 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			continue
 		}
 		lastSequence = frame.Sequence
+		lastGeneration = frame.Generation
 		if frame.Width <= 0 || frame.Height <= 0 || len(frame.Data) == 0 {
 			continue
+		}
+
+		if nativeDesktopFrameNeedsRebuild(s.generation, s.decoderWidth, s.decoderHeight, frame) {
+			if !frame.KeyFrame {
+				if time.Since(lastRecovery) >= 500*time.Millisecond {
+					lastRecovery = time.Now()
+					if requestErr := owner.bridge.RequestRemoteDesktopIDR(); requestErr != nil {
+						log.Printf("[Desktop] native viewer generation IDR request failed: %v", requestErr)
+					}
+				}
+				continue
+			}
+			if err := s.rebuildMediaPipeline(ctx, frame); err != nil {
+				log.Printf("[Desktop] native viewer generation rebuild failed: %v", err)
+				if time.Since(lastRecovery) >= 500*time.Millisecond {
+					lastRecovery = time.Now()
+					_ = owner.bridge.RequestRemoteDesktopIDR()
+				}
+				continue
+			}
+			converted = nil
+			perf = newNativeViewerPerf(time.Now())
+			log.Printf("[Desktop] native viewer switched generation=%d size=%dx%d decoder=%s", frame.Generation, frame.Width, frame.Height, s.decoder.Backend())
 		}
 
 		decodeStarted := time.Now()
@@ -572,11 +598,12 @@ func (a *appWindow) nativeDesktopViewerStatus() map[string]any {
 	case <-session.done:
 		return map[string]any{"open": false}
 	default:
+		decoder, hardware, gpuCursor := session.decoderStatus()
 		return map[string]any{
 			"open":      true,
-			"hardware":  session.decoder.Hardware(),
-			"decoder":   session.decoder.Backend(),
-			"gpuCursor": session.gpuCursor,
+			"hardware":  hardware,
+			"decoder":   decoder,
+			"gpuCursor": gpuCursor,
 		}
 	}
 }

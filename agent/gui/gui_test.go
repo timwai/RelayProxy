@@ -149,7 +149,6 @@ func TestRemoteDesktopStatsExposeRealtimeCongestionSignals(t *testing.T) {
 	}
 }
 
-
 func TestRemoteDesktopDisplaySelectionUsesAdvertisedTargetDisplays(t *testing.T) {
 	data, err := assets.ReadFile("assets/index.html")
 	if err != nil {

@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P 核心链路已合并 main，进入实机验证与切换策略硬化  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P 与运行期自动恢复已合并 main，进入路径评分/切换滞回、NetEm 与跨 NAT 实机验证  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #42 已合并）
@@ -83,7 +83,48 @@ Windows SendInput / CF_UNICODETEXT
 
 该 JPEG 路径现在作为可运行的功能基线保留；后续 Capture / Codec / Viewer 可以独立替换，不需要重做授权、Relay Datagram 与输入控制链路。
 
-### 0.3 当前实现与最终设计的差异
+### 0.3 本轮进度（2026-09-22）
+
+本轮完成 **Relay Desktop P2P 运行期恢复硬化**，对应 PR #42，已合并到 `main`，merge commit：`7bde35595f2cc3103b56d40dc0eab8f6347f926b`。
+
+已完成：
+
+- Controller 侧 P2P 从“一次性尝试”改为会话级自动恢复。
+- 首次 UDP punch 失败时继续使用 QUIC Datagram Relay，Desktop Session 不失败、不重建。
+- `udp_p2p` 运行中断开后立即回退 Relay，并自动重新尝试直连。
+- P2P 重试采用有界指数退避：`2s → 4s → 8s → 16s → 30s`。
+- 短时间反复掉线保留退避历史，防止 NAT / Wi-Fi 抖动导致高频重连。
+- 直连连续稳定 20 秒后清零退避状态。
+- Controller Session 关闭、Agent 关闭或主 Relay 会话结束时，P2P retry worker 立即退出。
+- 修复 P2P lease 提前关闭时 `desktopP2PSession` 可能残留的生命周期竞态。
+- 新增 `PathRetryPolicy` 与指数退避/稳定窗口单元测试。
+
+验证结果：
+
+```text
+Go CI
+  ✓ gofmt
+  ✓ go vet
+  ✓ go test ./...
+  ✓ race core data path
+  ✓ benchmark smoke
+
+UI CI
+  ✓ frontend / UI regression
+  ✓ Windows desktop packages
+  ✓ macOS desktop packages
+```
+
+当前 RD2 剩余重点：
+
+1. 实现统一 Path Metrics / Path Score，纳入 RTT、loss、jitter、queue delay 和 relay penalty。
+2. 增加路径升级/降级 hysteresis，避免 `udp_p2p ↔ relay` 因短时指标波动频繁切换。
+3. 路径切换时记录统计事件，并按需要触发 H.264 IDR。
+4. 增加 NetEm / transport shim，覆盖 RTT、丢包、jitter、限速、突发丢包和带宽骤降/恢复。
+5. 完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵验证。
+6. 根据实机数据继续调整 ABR 阈值和 P2P retry/path-switch 参数。
+
+### 0.4 当前实现与最终设计的差异
 
 为了优先验证 Windows Home 的端到端链路，RD1 中间增加了一个功能验证阶段：
 

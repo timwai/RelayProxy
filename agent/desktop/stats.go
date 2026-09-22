@@ -23,6 +23,12 @@ type sessionStatsTracker struct {
 	lastSequence uint32
 	missing      map[uint32]struct{}
 	lostBase     uint64
+	lossDetected uint64
+	lossRecovered uint64
+
+	abrPackets       uint64
+	abrLossDetected  uint64
+	abrLossRecovered uint64
 
 	probeSequence uint64
 	pendingProbes map[uint64]time.Time
@@ -66,6 +72,7 @@ func (s *sessionStatsTracker) ObservePacket(header desktopmedia.MediaHeader, byt
 	if sequence > s.lastSequence {
 		gap := uint64(sequence - s.lastSequence - 1)
 		if gap > 0 {
+			s.lossDetected += gap
 			if gap <= maxTrackedMissingPackets {
 				for missing := s.lastSequence + 1; missing != sequence; missing++ {
 					s.missing[missing] = struct{}{}
@@ -80,6 +87,7 @@ func (s *sessionStatsTracker) ObservePacket(header desktopmedia.MediaHeader, byt
 	}
 	if _, ok := s.missing[sequence]; ok {
 		delete(s.missing, sequence)
+		s.lossRecovered++
 	}
 }
 
@@ -168,6 +176,41 @@ func (s *sessionStatsTracker) ObservePong(probe protocol.DesktopSessionProbe, no
 		}
 	}
 	s.lastRTTMs = rtt
+}
+
+func (s *sessionStatsTracker) AdaptationSnapshot(now time.Time) protocol.DesktopSessionStats {
+	if s == nil {
+		return protocol.DesktopSessionStats{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	packetDelta := s.recvPackets - s.abrPackets
+	detectedDelta := s.lossDetected - s.abrLossDetected
+	recoveredDelta := s.lossRecovered - s.abrLossRecovered
+	outstanding := uint64(0)
+	if detectedDelta > recoveredDelta {
+		outstanding = detectedDelta - recoveredDelta
+	}
+	total := packetDelta + outstanding
+	lossPercent := 0.0
+	if total > 0 {
+		lossPercent = float64(outstanding) * 100 / float64(total)
+	}
+
+	stats := s.remote
+	stats.RTTMs = s.rttMs
+	stats.JitterMs = s.jitterMs
+	stats.LossPercent = lossPercent
+	stats.DroppedFrames += s.dropped
+	if s.path != "" {
+		stats.Path = s.path
+	}
+
+	s.abrPackets = s.recvPackets
+	s.abrLossDetected = s.lossDetected
+	s.abrLossRecovered = s.lossRecovered
+	return stats
 }
 
 func (s *sessionStatsTracker) Snapshot(now time.Time) protocol.DesktopSessionStats {

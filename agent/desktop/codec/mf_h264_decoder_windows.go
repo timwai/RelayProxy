@@ -69,11 +69,12 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig, graphics *m
 		}
 		d3d11Aware = aware
 	}
+	isAsync := false
 	attributes, attrErr := transformAttributes(transform)
 	if attrErr == nil {
 		defer releaseIUnknown(attributes)
 		async, getErr := attributeGetUINT32(attributes, &mfTransformAsync)
-		isAsync := getErr == nil && async != 0
+		isAsync = getErr == nil && async != 0
 		if isAsync {
 			if err := attributeSetUINT32(attributes, &mfTransformAsyncUnlock, 1); err != nil {
 				return false, d3d11Aware, fmt.Errorf("unlock async decoder MFT: %w", err)
@@ -101,7 +102,7 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig, graphics *m
 	if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
 		return false, d3d11Aware, err
 	}
-	return false, d3d11Aware, nil
+	return isAsync, d3d11Aware, nil
 }
 
 func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool, graphics *mfDecoderD3D11) (unsafe.Pointer, MFH264DecoderInfo, error) {
@@ -392,9 +393,6 @@ func (s *mfAsyncDecodeState) handle(event mfAsyncEvent) {
 	}
 	switch event.kind {
 	case meTransformNeedInput:
-		if len(s.inFlight) > 0 {
-			s.finishOldest()
-		}
 		s.needInput++
 		s.submitAvailable()
 

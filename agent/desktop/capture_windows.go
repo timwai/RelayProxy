@@ -227,10 +227,6 @@ func resolveWindowsDisplay(displays []screencapture.Display, displayID string) (
 
 func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error {
 	displays, listErr := screencapture.Displays(ctx)
-	target, selected, selectErr := resolveWindowsDisplay(displays, cfg.DisplayID)
-	if selectErr != nil {
-		return selectErr
-	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -242,11 +238,16 @@ func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error
 	c.backend = "gdi"
 
 	if listErr != nil {
-		if selected {
-			return fmt.Errorf("enumerate Windows displays: %w", listErr)
+		if cfg.DisplayID != "" {
+			return fmt.Errorf("enumerate Windows displays for %q: %w", cfg.DisplayID, listErr)
 		}
 		log.Printf("[Desktop] display enumeration unavailable, using virtual desktop GDI: %v", listErr)
 		return nil
+	}
+
+	target, selected, selectErr := resolveWindowsDisplay(displays, cfg.DisplayID)
+	if selectErr != nil {
+		return selectErr
 	}
 	if target.ID == 0 {
 		return nil

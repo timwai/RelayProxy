@@ -103,10 +103,13 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 				continue
 			}
 			config := *message.VideoConfig
+			previousConfig := s.VideoConfigSnapshot()
 			if !s.applyVideoConfig(config) {
 				continue
 			}
-			s.configureABR(config)
+			if videoConfigRequiresABRReset(previousConfig, config) {
+				s.configureABR(config)
+			}
 			s.configOnce.Do(func() { close(s.configReady) })
 
 		case protocol.DesktopSessionCursor:
@@ -151,6 +154,24 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func videoConfigRequiresABRReset(previous, next protocol.DesktopVideoConfig) bool {
+	if previous.Codec == "" {
+		return true
+	}
+	if previous.Codec != next.Codec || previous.FPS != next.FPS {
+		return true
+	}
+	previousMaxBitrate := previous.MaxBitrate
+	if previousMaxBitrate <= 0 {
+		previousMaxBitrate = previous.TargetBitrate
+	}
+	nextMaxBitrate := next.MaxBitrate
+	if nextMaxBitrate <= 0 {
+		nextMaxBitrate = next.TargetBitrate
+	}
+	return previousMaxBitrate != nextMaxBitrate
 }
 
 func (s *ControllerSession) configureABR(config protocol.DesktopVideoConfig) {

@@ -11,18 +11,18 @@ func TestPathSwitchScenarioPromotesStableDirectPath(t *testing.T) {
 	policy.EmergencyMargin = 1000
 
 	relay := PathQuality{
-		Available: true,
-		Relay: true,
-		RTTMs: 85,
-		JitterMs: 8,
-		LossPercent: 0.4,
+		Available:    true,
+		Relay:        true,
+		RTTMs:        85,
+		JitterMs:     8,
+		LossPercent:  0.4,
 		QueueDelayMs: 5,
 	}
 	direct := PathQuality{
-		Available: true,
-		RTTMs: 36,
-		JitterMs: 3,
-		LossPercent: 0.1,
+		Available:    true,
+		RTTMs:        36,
+		JitterMs:     3,
+		LossPercent:  0.1,
 		QueueDelayMs: 2,
 	}
 
@@ -46,18 +46,18 @@ func TestPathSwitchScenarioIgnoresTransientDirectDegradation(t *testing.T) {
 	policy.EmergencyMargin = 1000
 
 	direct := PathQuality{
-		Available: true,
-		RTTMs: 32,
-		JitterMs: 2,
-		LossPercent: 0.1,
+		Available:    true,
+		RTTMs:        32,
+		JitterMs:     2,
+		LossPercent:  0.1,
 		QueueDelayMs: 1,
 	}
 	relay := PathQuality{
-		Available: true,
-		Relay: true,
-		RTTMs: 72,
-		JitterMs: 6,
-		LossPercent: 0.3,
+		Available:    true,
+		Relay:        true,
+		RTTMs:        72,
+		JitterMs:     6,
+		LossPercent:  0.3,
 		QueueDelayMs: 4,
 	}
 
@@ -94,18 +94,18 @@ func TestPathSwitchScenarioFallsBackAfterSustainedDirectLoss(t *testing.T) {
 	policy.EmergencyMargin = 1000
 
 	direct := PathQuality{
-		Available: true,
-		RTTMs: 48,
-		JitterMs: 15,
-		LossPercent: 3.2,
+		Available:    true,
+		RTTMs:        48,
+		JitterMs:     15,
+		LossPercent:  3.2,
 		QueueDelayMs: 24,
 	}
 	relay := PathQuality{
-		Available: true,
-		Relay: true,
-		RTTMs: 68,
-		JitterMs: 5,
-		LossPercent: 0.2,
+		Available:    true,
+		Relay:        true,
+		RTTMs:        68,
+		JitterMs:     5,
+		LossPercent:  0.2,
 		QueueDelayMs: 3,
 	}
 

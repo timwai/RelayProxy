@@ -742,8 +742,6 @@
               <label for="desktop-opt-capture" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">采集</label>
               <select id="desktop-opt-capture" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
                 <option value="auto">自动</option>
-                <option value="dxgi">DXGI</option>
-                <option value="gdi">GDI</option>
               </select>
             </div>
             <div>
@@ -783,7 +781,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；采集“自动”优先 DXGI 并按现有策略回退 GDI，显式 DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 DXGI 时请先选择具体显示器。H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”仍优先 DXGI 并按现有策略回退 GDI，显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -1556,6 +1554,68 @@
       }
       return null;
     }
+    function remoteDesktopCaptureBackends(target) {
+      var caps = target && target.capabilities ? target.capabilities : {};
+      var captures = Array.isArray(caps.captures) ? caps.captures : [];
+      var out = [];
+      captures.forEach(function (capture) {
+        var backend = String(capture && capture.backend || '').toLowerCase();
+        if (backend && out.indexOf(backend) < 0) out.push(backend);
+      });
+      return out;
+    }
+    function remoteDesktopCaptureBackendSupported(targetID, backend) {
+      backend = String(backend || 'auto').toLowerCase();
+      if (backend === 'auto') return true;
+      var target = remoteDesktopTargetByID(targetID);
+      if (!target) return false;
+      var captures = remoteDesktopCaptureBackends(target);
+      // Older peers did not advertise capture capabilities. Preserve their
+      // historical DXGI/GDI behavior, but never infer WGC support.
+      if (!captures.length) return backend === 'dxgi' || backend === 'gdi';
+      return captures.indexOf(backend) >= 0;
+    }
+    function syncRemoteDesktopCaptureOptions() {
+      var select = $('desktop-opt-capture');
+      if (!select) return;
+      var current = String(select.value || 'auto').toLowerCase();
+      var targets = Array.isArray(state.desktopTargets) ? state.desktopTargets : [];
+      var advertised = false;
+      var supported = {};
+      targets.forEach(function (target) {
+        var caps = target && target.capabilities ? target.capabilities : {};
+        if (!caps.relayDesktop) return;
+        var backends = remoteDesktopCaptureBackends(target);
+        if (backends.length) advertised = true;
+        backends.forEach(function (backend) { supported[backend] = true; });
+      });
+      // Backward compatibility for old targets without an online capture
+      // capability snapshot. WGC must always be explicitly advertised.
+      if (!advertised) {
+        supported.dxgi = true;
+        supported.gdi = true;
+      }
+      select.innerHTML = '';
+      var auto = document.createElement('option');
+      auto.value = 'auto';
+      auto.textContent = '自动';
+      select.appendChild(auto);
+      [
+        ['wgc', 'WGC'],
+        ['dxgi', 'DXGI'],
+        ['gdi', 'GDI']
+      ].forEach(function (entry) {
+        if (!supported[entry[0]]) return;
+        var option = document.createElement('option');
+        option.value = entry[0];
+        option.textContent = entry[1];
+        select.appendChild(option);
+      });
+      select.value = supported[current] || current === 'auto' ? current : 'auto';
+      select.title = advertised
+        ? '采集后端来自当前 Relay Desktop 目标上报能力；WGC 不会在未支持的目标上出现'
+        : '目标未上报采集能力；保留兼容 DXGI/GDI 选项';
+    }
     function remoteDesktopDisplaySelection(targetID) {
       if (!targetID) return '';
       var selected = String((state.desktopDisplaySelections || {})[targetID] || '');
@@ -1638,6 +1698,7 @@
       var host = $('desktop-targets');
       if (!host) return;
       var targets = Array.isArray(state.desktopTargets) ? state.desktopTargets : [];
+      syncRemoteDesktopCaptureOptions();
       $('desktop-target-count').textContent = targets.length + ' 台';
       host.innerHTML = '';
       if (!hasFn('goGetRemoteDesktopTargets')) {
@@ -2428,9 +2489,19 @@
         toast('当前界面不支持发起远程桌面');
         return;
       }
+      var options = remoteDesktopConnectOptions(targetID);
+      var target = remoteDesktopTargetByID(targetID);
+      var caps = target && target.capabilities ? target.capabilities : {};
+      var relayRequired = options.backend === 'relay' ||
+        (options.backend !== 'rdp' && !!caps.relayDesktop && !caps.nativeRdp);
+      if (relayRequired && options.captureBackend !== 'auto' &&
+          !remoteDesktopCaptureBackendSupported(targetID, options.captureBackend)) {
+        toast('目标未提供 ' + options.captureBackend.toUpperCase() + ' 采集能力，请选择自动或目标支持的采集后端');
+        return;
+      }
       if (button) button.disabled = true;
       try {
-        var raw = await call('goConnectRemoteDesktop', targetID, JSON.stringify(remoteDesktopConnectOptions(targetID)));
+        var raw = await call('goConnectRemoteDesktop', targetID, JSON.stringify(options));
         var result = parseJSONResult(raw, { ok:false, message:'没有收到连接结果' });
         if (!result.ok) {
           toast(result.message || '远程桌面连接失败');

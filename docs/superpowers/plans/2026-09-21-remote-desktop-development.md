@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy 与 backend-neutral capture stream 均已合并 main；当前分支实现真实 WinRT Windows Graphics Capture（WGC）monitor stream  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream 与真实 WinRT WGC monitor capture 均已合并 main；当前分支让 GUI 按目标 capability 动态暴露 WGC/DXGI/GDI 采集后端  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #65 已合并，merge `9866b106f829bd99a5cb20c58ccacd4218f523e7`）
+> 当前开发基线：`main`（PR #66 已合并，merge `9d91c0d951ce5acb6cc47f36e04506982d6ac776`）
 
 ## 0. 当前进度
 
@@ -205,7 +205,7 @@ Windows SendInput / CF_UNICODETEXT
 - DXGI/WGC 仍要求 concrete display，Auto/GDI 保留 virtual desktop 行为；错误提示改为 backend-neutral，避免未来 WGC 复用时错误显示 DXGI。
 - Windows-only 单测改为验证通用 frame 的 padded stride / row 边界、capture preference→当前 adapter 映射、WGC unavailable sentinel 与 concrete-display 约束。
 
-### 0.2.12 Windows Graphics Capture（PR #66，当前分支）
+### 0.2.12 Windows Graphics Capture（已合并 PR #66）
 
 - Windows amd64 新增真实 `wgcFrameStream`：通过 `IGraphicsCaptureItemInterop::CreateForMonitor` 创建指定显示器的 `GraphicsCaptureItem`。
 - 使用 `Direct3D11CaptureFramePool.CreateFreeThreaded`，Agent 无需依赖 UI `DispatcherQueue`；WGC 可在现有后台 Host capture 链路中工作。
@@ -217,9 +217,9 @@ Windows SendInput / CF_UNICODETEXT
 - `captureBackend=wgc` 已路由到真实 WGC stream；非 amd64 Windows 保留明确 unavailable fallback，不影响 Auto / DXGI / GDI。
 - 依赖固定为正式兼容组合 `go-bindings-winrt v0.6.0 + go-bindings-win32 v0.2.1`；不依赖 unreleased WinRT bindings。
 - 当前阶段仍是 D3D11 → staging CPU BGRA readback，再进入现有 NV12/H.264；WGC capture 已是真实 GPU surface 来源，但 capture→encoder 零拷贝仍属于后续优化。
-- PR #66 Windows CI 正在验证真实 WinRT/D3D11 ABI；验证通过后再把 WGC 加入 capability snapshot/GUI 可选 backend。
+- `GraphicsCaptureSession.IsSupported()` 已接入 capability snapshot：仅 Windows amd64 且运行时确认支持 WGC 时才上报 `wgc`；Go/UI/Windows/macOS CI 均已通过，PR #66 merge `9d91c0d951ce5acb6cc47f36e04506982d6ac776`。
 
-### 0.3 本轮进度（2026-09-22）
+### 0.2.13 Capability-aware Capture Selector（当前分支）\n\n- GUI 不再静态写死 DXGI/GDI；采集下拉框根据当前 Relay Desktop 目标 `capabilities.captures` 动态生成 `WGC / DXGI / GDI`。\n- WGC 只有目标明确上报时才出现；旧节点没有 capture capability snapshot 时仅保留历史 DXGI/GDI 兼容选项，不推断 WGC。\n- 当前选择的后端在设备刷新后如果不再存在，会自动回到 `auto`，避免显示器/驱动/系统能力变化后保留失效配置。\n- 明确 Relay Desktop，或 Auto 但目标没有 Native RDP、因此必然使用 Relay Desktop 时，连接前会校验显式采集后端是否由该目标上报；不支持时在本地直接提示，不发起注定失败的会话。\n- Auto 协议仍由现有 `SelectBackend` 决定 RDP/Relay，不因为选择采集后端而偷偷改变协议选择语义。\n- 帮助文案明确：采集 Auto 仍保持现有 DXGI→GDI 策略；WGC 是可显式选择的实机 A/B 后端，且多屏全部显示器仍需 GDI。\n\n### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
 

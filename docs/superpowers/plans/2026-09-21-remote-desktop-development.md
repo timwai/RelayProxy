@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网、stale-frame/drop 与指定显示器链路已合并 main；当前分支把 scene-aware ABR 场景策略开放到 GUI 连接设置  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网、stale-frame/drop、指定显示器与 Scene GUI 均已合并 main；当前分支补齐实机验证所需的端到端媒体链路诊断  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #53 已合并，merge `18dd9bb5d414abb5ebee473f1b58a6c1cd6dabfb`）
+> 当前开发基线：`main`（PR #54 已合并，merge `7a778281eb5691c695703ba5d9251b4ec400a24b`）
 
 ## 0. 当前进度
 
@@ -30,7 +30,7 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射；当前分支继续把 scene-aware ABR 场景选择开放到 GUI，之后进入跨 NAT / Wi-Fi 实机验证 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI；当前分支继续补实机验证所需的 Capture / Encoder / Decoder 实际 backend 与 negotiated media 信息 |
 
 ### 0.1 已合并主线的关键进度
 
@@ -98,12 +98,21 @@ Windows SendInput / CF_UNICODETEXT
 - `DesktopVideoConfig.DisplayID` 与 `RemoteDesktopStatus.DisplayID/DisplayName` 回显当前会话选择，GUI session banner 可直接确认实机正在控制哪块屏幕。
 - Windows 单测覆盖 session-scoped DisplayID、默认多屏虚拟桌面、左右双屏与负 Y 坐标映射；GUI 回归覆盖 capability 驱动的 per-target selector 与状态展示。
 
-### 0.2.2 Scene 策略 GUI（当前分支）
+### 0.2.2 Scene 策略 GUI（已合并 PR #54）
 
 - `DesktopScene` 与 scene-aware FPS ABR 已在 PR #51 落地，但此前 GUI 始终固定发送 `scene: auto`，用户无法选择 Gaming / Performance 的保帧率策略。
-- 当前分支在 Remote Desktop 连接设置中新增“场景”：自动、办公、性能、游戏、画质，并直接透传现有 `RemoteDesktopConnectOptions.Scene`，不新增协议字段。
+- PR #54 在 Remote Desktop 连接设置中新增“场景”：自动、办公、性能、游戏、画质，并直接透传现有 `RemoteDesktopConnectOptions.Scene`，不新增协议字段。
 - Gaming / Performance 继续使用 negotiated FPS 作为 adaptive minimum，只通过 bitrate 应对拥塞；Office / Auto / Quality 在持续 severe pressure 下可降低采集 FPS。
 - 连接摘要显示所选场景，设置帮助文字明确说明场景只影响自适应取舍，避免与“画质”预设混淆。
+
+### 0.2.3 实机媒体链路诊断（当前分支）
+
+- `RemoteDesktopStatus` 回显当前 negotiated `generation / codec / width / height / fps`，GUI 会话横幅可直接确认当前实际媒体配置。
+- Host `DesktopSessionStats` 新增 `CaptureBackend / EncoderBackend / EncoderHardware`：Windows 单屏链路可区分 DXGI / GDI，H.264 可区分 Media Foundation 硬件或软件 MFT，JPEG fallback 明确标记 `jpeg-go`。
+- 原生 D3D11 Viewer 通过现有 viewer stats 回报 `DecoderBackend / DecoderHardware`；Controller 聚合时保留 Host 诊断并叠加 Viewer 诊断，不互相覆盖。
+- GUI 网络统计条现在同时显示 Path、Capture、Encoder(HW/SW)、Decoder(HW/SW)、RTT/Jitter/Loss、Queue、Dropped、吞吐和各阶段 FPS/耗时；WebCodecs fallback 在本地 decoder 活跃时标记为 `webcodecs`。
+- 该诊断闭环用于后续 LAN / IPv4 NAT / IPv6 / Relay-only / Wi-Fi 抖动，以及 Intel / NVIDIA / AMD 实机矩阵，避免只根据 FPS 或日志猜测实际媒体路径。
+- 本轮不启用动态分辨率 ABR：Media Foundation 编码器对尺寸变化返回 `ErrEncoderRebuildRequired`，原生 Viewer 也仍按首次尺寸创建 decoder；需要先完成 generation-aware encoder/decoder rebuild 后再开启尺寸切换。
 
 ### 0.3 本轮进度（2026-09-22）
 
@@ -177,7 +186,7 @@ UI CI
 - 网络恢复时先把 bitrate 按既有稳定窗口逐步恢复到上限；之后再用更长的稳定窗口慢速恢复 FPS，避免 bitrate 与 FPS 同时上冲重新制造队列积压。
 - Host Stats 新增 `TargetFPS`，Viewer 网络统计条同步展示目标 FPS，方便实机校准 pressure/recovery window。
 
-### 0.3.3 在线 Host Capability Snapshot（当前分支）
+### 0.3.3 在线 Host Capability Snapshot（已合并 PR #52）
 
 - Agent 握手的 `DeviceHello` 新增可选 `DesktopCapabilities` 快照；只有本次实例实际装载 Relay Desktop Host 时才上报，不改变数据库中的管理员授权模型。
 - Windows Host 在握手时重新枚举当前显示器，把会话级 HMONITOR ID、设备名、像素尺寸、主屏标记以及 GDI / DXGI capture backend 汇总到 `Displays / Captures`；显示器 ID 明确不持久化，布局变化或重连后重新获取。

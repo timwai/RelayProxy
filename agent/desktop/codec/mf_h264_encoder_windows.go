@@ -54,11 +54,13 @@ func (e *MFH264Encoder) Encode(ctx context.Context, frame RawFrame) ([]EncodedPa
 	if frame.Width != e.cfg.Width || frame.Height != e.cfg.Height {
 		return nil, ErrInvalidFrame
 	}
+	convertStarted := time.Now()
 	var err error
 	e.scratch, err = frameToNV12(frame, e.scratch)
 	if err != nil {
 		return nil, err
 	}
+	e.stats.LastConvertTime = time.Since(convertStarted)
 	packets, err := e.transform.EncodeNV12(ctx, e.scratch, frame.Timestamp)
 	if err != nil {
 		return nil, err

@@ -58,6 +58,7 @@ type DesktopDiagnosticsSummary struct {
 	Resolutions             map[string]int                 `json:"resolutions,omitempty"`
 	ABRReasons              map[string]int                 `json:"abrReasons,omitempty"`
 	CaptureBackends         map[string]int                 `json:"captureBackends,omitempty"`
+	CaptureFormats          map[string]int                 `json:"captureFormats,omitempty"`
 	EncoderBackends         map[string]int                 `json:"encoderBackends,omitempty"`
 	DecoderBackends         map[string]int                 `json:"decoderBackends,omitempty"`
 	RTTMs                   DesktopDiagnosticMetricSummary `json:"rttMs"`
@@ -210,6 +211,7 @@ func summarizeDesktopDiagnostics(
 		Resolutions:       make(map[string]int),
 		ABRReasons:        make(map[string]int),
 		CaptureBackends:   make(map[string]int),
+		CaptureFormats:    make(map[string]int),
 		EncoderBackends:   make(map[string]int),
 		DecoderBackends:   make(map[string]int),
 	}
@@ -263,6 +265,7 @@ func summarizeDesktopDiagnostics(
 				fmt.Sprintf("%dx%d", sample.Config.Width, sample.Config.Height))
 		}
 		incrementDiagnosticCount(summary.CaptureBackends, sample.Stats.CaptureBackend)
+		incrementDiagnosticCount(summary.CaptureFormats, sample.Stats.CaptureFormat)
 		incrementDiagnosticCount(summary.EncoderBackends, sample.Stats.EncoderBackend)
 		incrementDiagnosticCount(summary.DecoderBackends, sample.Stats.DecoderBackend)
 	}

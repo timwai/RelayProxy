@@ -121,7 +121,7 @@ func TestFrameMatchesVideoConfigGeneration(t *testing.T) {
 func TestApplyVideoConfigRejectsStaleGenerationAndClearsLatest(t *testing.T) {
 	session := &ControllerSession{
 		videoConfig: protocol.DesktopVideoConfig{Generation: 1, Codec: "h264", Width: 1920, Height: 1080},
-		latest: FrameSnapshot{Generation: 1, Sequence: 8, Data: []byte{1}},
+		latest:      FrameSnapshot{Generation: 1, Sequence: 8, Data: []byte{1}},
 	}
 	if !session.applyVideoConfig(protocol.DesktopVideoConfig{Generation: 2, Codec: "h264", Width: 1280, Height: 720}) {
 		t.Fatal("new video generation was rejected")

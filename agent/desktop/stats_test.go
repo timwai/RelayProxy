@@ -82,3 +82,25 @@ func TestAdaptationSnapshotUsesWindowedLoss(t *testing.T) {
 		t.Fatalf("stable window lossPercent=%v", third.LossPercent)
 	}
 }
+
+
+func TestSessionStatsTracksPathSwitchesAndIDRRequests(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	stats.SetPath("relay")
+	stats.SetPath("udp_p2p")
+	stats.SetPath("udp_p2p")
+	stats.ObserveIDRRequest()
+	stats.SetPath("relay")
+	stats.ObserveIDRRequest()
+
+	got := stats.Snapshot(time.Now())
+	if got.Path != "relay" {
+		t.Fatalf("path=%q", got.Path)
+	}
+	if got.PathSwitches != 2 {
+		t.Fatalf("pathSwitches=%d", got.PathSwitches)
+	}
+	if got.IDRRequests != 2 {
+		t.Fatalf("idrRequests=%d", got.IDRRequests)
+	}
+}

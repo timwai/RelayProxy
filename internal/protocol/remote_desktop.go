@@ -296,6 +296,8 @@ type DesktopSessionStats struct {
 	DecodeMs         float64 `json:"decodeMs,omitempty"`
 	RenderMs         float64 `json:"renderMs,omitempty"`
 	DroppedFrames    uint64  `json:"droppedFrames,omitempty"`
+	IDRRequests      uint64  `json:"idrRequests,omitempty"`
+	PathSwitches     uint64  `json:"pathSwitches,omitempty"`
 	Path             string  `json:"path,omitempty"`
 }
 

@@ -285,9 +285,15 @@ func snapshotFromEncodedFrame(frame *desktopmedia.EncodedFrame, config protocol.
 }
 
 func (s *ControllerSession) sendIDRRequest(ctx context.Context) error {
-	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+	if err := s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 		Type: protocol.DesktopSessionIDRRequest,
-	})
+	}); err != nil {
+		return err
+	}
+	if s.stats != nil {
+		s.stats.ObserveIDRRequest()
+	}
+	return nil
 }
 
 func (s *ControllerSession) markIDRRequestFailed() {
@@ -340,7 +346,12 @@ func (s *ControllerSession) readLoop(ctx context.Context) {
 	defer s.conn.Close()
 	reassembler := desktopmedia.NewReassembler(desktopmedia.ReassemblerConfig{})
 	for {
+		beforePath := s.conn.DatagramPathName()
 		packet, err := s.conn.Receive(ctx)
+		afterPath := s.conn.DatagramPathName()
+		if beforePath != afterPath {
+			s.handlePathChange(ctx, beforePath, afterPath)
+		}
 		if err != nil {
 			return
 		}
@@ -373,6 +384,40 @@ func (s *ControllerSession) readLoop(ctx context.Context) {
 	}
 }
 
+func (s *ControllerSession) handlePathChange(ctx context.Context, oldPath, newPath string) {
+	if s == nil || oldPath == newPath || newPath == "" {
+		return
+	}
+	if s.stats != nil {
+		s.stats.SetPath(newPath)
+	}
+	s.mu.RLock()
+	codec := s.videoConfig.Codec
+	s.mu.RUnlock()
+	if codec != "h264" || !s.Active() {
+		return
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, time.Second)
+	err := s.RequestIDR(requestCtx)
+	cancel()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		log.Printf("[Desktop] request H.264 IDR after path change %s -> %s failed: %v", oldPath, newPath, err)
+		return
+	}
+	log.Printf("[Desktop] media path changed %s -> %s", oldPath, newPath)
+}
+
+func (s *ControllerSession) handlePathChangeAsync(oldPath, newPath string) {
+	if s == nil || oldPath == newPath {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		s.handlePathChange(ctx, oldPath, newPath)
+	}()
+}
+
 func (s *ControllerSession) SetDatagramPath(path desktopmedia.DatagramPath) {
 	if s == nil || s.conn == nil {
 		if path != nil {
@@ -380,20 +425,20 @@ func (s *ControllerSession) SetDatagramPath(path desktopmedia.DatagramPath) {
 		}
 		return
 	}
+	oldPath := s.conn.DatagramPathName()
 	s.conn.SetDatagramPath(path)
-	if s.stats != nil {
-		s.stats.SetPath(s.conn.DatagramPathName())
-	}
+	newPath := s.conn.DatagramPathName()
+	s.handlePathChangeAsync(oldPath, newPath)
 }
 
 func (s *ControllerSession) ClearDatagramPath(path desktopmedia.DatagramPath) {
 	if s == nil || s.conn == nil {
 		return
 	}
+	oldPath := s.conn.DatagramPathName()
 	s.conn.ClearDatagramPath(path)
-	if s.stats != nil {
-		s.stats.SetPath(s.conn.DatagramPathName())
-	}
+	newPath := s.conn.DatagramPathName()
+	s.handlePathChangeAsync(oldPath, newPath)
 }
 
 func (s *ControllerSession) DatagramPathName() string {

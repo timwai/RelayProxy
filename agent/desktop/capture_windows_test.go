@@ -78,3 +78,76 @@ func TestWindowsDesktopCapabilitySnapshot(t *testing.T) {
 		t.Fatalf("secondary display=%+v", displays[1])
 	}
 }
+
+func TestResolveWindowsDisplayUsesSessionScopedID(t *testing.T) {
+	displays := []screencapture.Display{
+		{ID: 10, DeviceName: `\\.\DISPLAY1`, Bounds: screencapture.Rect{X: 0, Y: 0, W: 1920, H: 1080}},
+		{ID: 20, DeviceName: `\\.\DISPLAY2`, Bounds: screencapture.Rect{X: 1920, Y: 0, W: 2560, H: 1440}},
+	}
+	got, selected, err := resolveWindowsDisplay(displays, "20")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !selected || got.ID != 20 || got.DeviceName != `\\.\DISPLAY2` {
+		t.Fatalf("selected display=%+v selected=%v", got, selected)
+	}
+	if _, selected, err := resolveWindowsDisplay(displays, "999"); err == nil || !selected {
+		t.Fatalf("stale display id was not rejected: selected=%v err=%v", selected, err)
+	}
+	if _, selected, err := resolveWindowsDisplay(displays, "invalid"); err == nil || !selected {
+		t.Fatalf("invalid display id was not rejected: selected=%v err=%v", selected, err)
+	}
+}
+
+func TestResolveWindowsDisplayKeepsVirtualDesktopForMultipleDisplays(t *testing.T) {
+	displays := []screencapture.Display{{ID: 10}, {ID: 20}}
+	got, selected, err := resolveWindowsDisplay(displays, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected || got.ID != 0 {
+		t.Fatalf("default multi-display target=%+v selected=%v", got, selected)
+	}
+
+	got, selected, err = resolveWindowsDisplay(displays[:1], "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected || got.ID != 10 {
+		t.Fatalf("single-display optimization target=%+v selected=%v", got, selected)
+	}
+}
+
+func TestMapDisplayNormalizedToVirtualSideBySide(t *testing.T) {
+	virtual := screencapture.Rect{X: -1920, Y: 0, W: 3840, H: 1080}
+	left := screencapture.Rect{X: -1920, Y: 0, W: 1920, H: 1080}
+	right := screencapture.Rect{X: 0, Y: 0, W: 1920, H: 1080}
+
+	leftStart, _ := mapDisplayNormalizedToVirtual(0, 0, left, virtual)
+	leftEnd, _ := mapDisplayNormalizedToVirtual(65535, 0, left, virtual)
+	rightStart, _ := mapDisplayNormalizedToVirtual(0, 0, right, virtual)
+	rightEnd, _ := mapDisplayNormalizedToVirtual(65535, 0, right, virtual)
+
+	if leftStart != 0 {
+		t.Fatalf("left display start=%d want=0", leftStart)
+	}
+	if leftEnd >= 32768 {
+		t.Fatalf("left display end=%d crossed virtual midpoint", leftEnd)
+	}
+	if rightStart <= 32767 {
+		t.Fatalf("right display start=%d did not enter right half", rightStart)
+	}
+	if rightEnd != 65535 {
+		t.Fatalf("right display end=%d want=65535", rightEnd)
+	}
+}
+
+func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T) {
+	virtual := screencapture.Rect{X: 0, Y: -1200, W: 1920, H: 2280}
+	upper := screencapture.Rect{X: 0, Y: -1200, W: 1920, H: 1200}
+	_, start := mapDisplayNormalizedToVirtual(0, 0, upper, virtual)
+	_, end := mapDisplayNormalizedToVirtual(0, 65535, upper, virtual)
+	if start != 0 || end >= 35000 {
+		t.Fatalf("upper display mapped y range=%d..%d", start, end)
+	}
+}

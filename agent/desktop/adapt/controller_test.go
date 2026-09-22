@@ -67,3 +67,79 @@ func TestABRHonorsFloorAndCeiling(t *testing.T) {
 		t.Fatalf("target=%d max=%d", controller.TargetBitrate(), cfg.MaxBitrate)
 	}
 }
+
+
+func TestABRDropsOnSendQueueBeforePacketLoss(t *testing.T) {
+	controller := NewController(DefaultConfig(protocol.DesktopSceneOffice, 8_000_000))
+
+	decision := controller.Observe(protocol.DesktopSessionStats{
+		RTTMs:            35,
+		JitterMs:         3,
+		LossPercent:      0,
+		SendQueueDelayMs: 130,
+	})
+	if !decision.Changed || decision.TargetBitrate != 4_800_000 || decision.Reason != "severe_queue" {
+		t.Fatalf("queue congestion decision=%+v", decision)
+	}
+}
+
+func TestABRBandwidthCollapseAndStableRecovery(t *testing.T) {
+	controller := NewController(DefaultConfig(protocol.DesktopSceneOffice, 10_000_000))
+
+	first := controller.Observe(protocol.DesktopSessionStats{
+		RTTMs:            35,
+		JitterMs:         3,
+		SendQueueDelayMs: 75,
+	})
+	if !first.Changed || first.TargetBitrate != 7_500_000 || first.Reason != "queue" {
+		t.Fatalf("first congestion decision=%+v", first)
+	}
+
+	second := controller.Observe(protocol.DesktopSessionStats{
+		RTTMs:            40,
+		JitterMs:         4,
+		SendQueueDelayMs: 140,
+	})
+	if !second.Changed || second.TargetBitrate != 4_500_000 || second.Reason != "severe_queue" {
+		t.Fatalf("collapse decision=%+v", second)
+	}
+
+	for i := 0; i < 3; i++ {
+		decision := controller.Observe(protocol.DesktopSessionStats{
+			RTTMs:            35,
+			JitterMs:         2,
+			LossPercent:      0.1,
+			SendQueueDelayMs: 4,
+		})
+		if decision.Changed {
+			t.Fatalf("recovered too quickly at window %d: %+v", i, decision)
+		}
+	}
+	recovery := controller.Observe(protocol.DesktopSessionStats{
+		RTTMs:            35,
+		JitterMs:         2,
+		LossPercent:      0.1,
+		SendQueueDelayMs: 4,
+	})
+	if !recovery.Changed || recovery.Reason != "stable_recovery" || recovery.TargetBitrate <= 4_500_000 {
+		t.Fatalf("stable recovery decision=%+v", recovery)
+	}
+}
+
+func TestABRQueueDelayBlocksRecoveryWithoutForcingExtraDrop(t *testing.T) {
+	controller := NewController(DefaultConfig(protocol.DesktopSceneOffice, 8_000_000))
+	controller.Observe(protocol.DesktopSessionStats{LossPercent: 5})
+	reduced := controller.TargetBitrate()
+
+	for i := 0; i < 8; i++ {
+		decision := controller.Observe(protocol.DesktopSessionStats{
+			RTTMs:            30,
+			JitterMs:         2,
+			LossPercent:      0.1,
+			SendQueueDelayMs: 20,
+		})
+		if decision.TargetBitrate != reduced {
+			t.Fatalf("queue-delayed recovery changed bitrate at window %d: %+v", i, decision)
+		}
+	}
+}

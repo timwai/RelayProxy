@@ -24,23 +24,23 @@ type DesktopDiagnosticAdaptation struct {
 }
 
 type DesktopDiagnosticSample struct {
-	AtUnixMs   int64                       `json:"atUnixMs"`
-	Config     protocol.DesktopVideoConfig `json:"config"`
+	AtUnixMs   int64                        `json:"atUnixMs"`
+	Config     protocol.DesktopVideoConfig  `json:"config"`
 	Stats      protocol.DesktopSessionStats `json:"stats"`
-	Adaptation DesktopDiagnosticAdaptation `json:"adaptation"`
+	Adaptation DesktopDiagnosticAdaptation  `json:"adaptation"`
 }
 
 type DesktopDiagnosticsReport struct {
-	SchemaVersion    int                                  `json:"schemaVersion"`
-	TargetID         string                               `json:"targetId,omitempty"`
-	Scene            protocol.DesktopScene                `json:"scene,omitempty"`
-	StartedAtUnixMs  int64                                `json:"startedAtUnixMs"`
-	GeneratedAtUnixMs int64                               `json:"generatedAtUnixMs"`
-	SampleIntervalMs int                                  `json:"sampleIntervalMs"`
-	Options          protocol.RemoteDesktopConnectOptions `json:"options"`
-	CurrentConfig    protocol.DesktopVideoConfig          `json:"currentConfig"`
-	CurrentStats     protocol.DesktopSessionStats         `json:"currentStats"`
-	Samples          []DesktopDiagnosticSample            `json:"samples"`
+	SchemaVersion     int                                  `json:"schemaVersion"`
+	TargetID          string                               `json:"targetId,omitempty"`
+	Scene             protocol.DesktopScene                `json:"scene,omitempty"`
+	StartedAtUnixMs   int64                                `json:"startedAtUnixMs"`
+	GeneratedAtUnixMs int64                                `json:"generatedAtUnixMs"`
+	SampleIntervalMs  int                                  `json:"sampleIntervalMs"`
+	Options           protocol.RemoteDesktopConnectOptions `json:"options"`
+	CurrentConfig     protocol.DesktopVideoConfig          `json:"currentConfig"`
+	CurrentStats      protocol.DesktopSessionStats         `json:"currentStats"`
+	Samples           []DesktopDiagnosticSample            `json:"samples"`
 }
 
 type sessionDiagnosticsRecorder struct {

@@ -12,6 +12,35 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+type h264RuntimeError struct {
+	Generation uint32
+	Err        error
+}
+
+func (e *h264RuntimeError) Error() string {
+	if e == nil || e.Err == nil {
+		return "H.264 runtime failure"
+	}
+	return e.Err.Error()
+}
+
+func (e *h264RuntimeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func nextDesktopMediaGeneration(current uint32) (uint32, error) {
+	if current == ^uint32(0) {
+		return 0, errors.New("Relay Desktop media generation exhausted")
+	}
+	if current == 0 {
+		return 1, nil
+	}
+	return current + 1, nil
+}
+
 type h264GenerationEncoder interface {
 	desktopcodec.Encoder
 	SequenceHeader() []byte
@@ -114,15 +143,27 @@ func (h *Host) streamSessionFrames(
 	resolutionUpdates <-chan desktopResolutionTarget,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
+	jpegGeneration := uint32(1)
 	if preference == "h264" && h.canEncodeH264() {
 		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {
-			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
+			var runtimeErr *h264RuntimeError
+			if errors.As(err, &runtimeErr) {
+				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
+				if generationErr != nil {
+					return generationErr
+				}
+				jpegGeneration = nextGeneration
+				log.Printf("[Desktop] H.264 runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
+					runtimeErr.Generation, jpegGeneration, runtimeErr.Err)
+			} else {
+				log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
+			}
 		}
 	}
 	if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
-		Generation:    1,
+		Generation:    jpegGeneration,
 		Codec:         "jpeg",
 		Width:         cfg.MaxWidth,
 		Height:        cfg.MaxHeight,
@@ -134,7 +175,7 @@ func (h *Host) streamSessionFrames(
 	}); err != nil {
 		return err
 	}
-	return h.streamFrames(ctx, conn, cfg, captureBackend, fpsUpdates)
+	return h.streamFrames(ctx, conn, cfg, captureBackend, jpegGeneration, fpsUpdates)
 }
 
 func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
@@ -243,7 +284,14 @@ func (h *Host) streamH264Frames(
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
 	resolutionUpdates <-chan desktopResolutionTarget,
-) error {
+) (retErr error) {
+	var advertised bool
+	var advertisedGeneration uint32
+	defer func() {
+		if retErr != nil && advertised && !errors.Is(retErr, context.Canceled) {
+			retErr = &h264RuntimeError{Generation: advertisedGeneration, Err: retErr}
+		}
+	}()
 	first, err := h.source.Capture(ctx)
 	if err != nil {
 		return err
@@ -287,6 +335,8 @@ func (h *Host) streamH264Frames(
 	)); err != nil {
 		return err
 	}
+	advertised = true
+	advertisedGeneration = generation
 
 	sessionID, err := newMediaSessionID()
 	if err != nil {
@@ -449,9 +499,9 @@ func (h *Host) streamH264Frames(
 			if nextConfig.Width == videoCfg.Width && nextConfig.Height == videoCfg.Height {
 				continue
 			}
-			nextGeneration := generation + 1
-			if nextGeneration == 0 {
-				return errors.New("Relay Desktop media generation exhausted")
+			nextGeneration, err := nextDesktopMediaGeneration(generation)
+			if err != nil {
+				return err
 			}
 			nextEncoder, nextConfig, nextSequenceHeader, err := openH264GenerationEncoder(
 				ctx, nextConfig, openMFH264GenerationEncoder,
@@ -468,6 +518,7 @@ func (h *Host) streamH264Frames(
 				_ = nextEncoder.Close()
 				return err
 			}
+			advertisedGeneration = nextGeneration
 
 			oldEncoder := encoder
 			encoder = nextEncoder

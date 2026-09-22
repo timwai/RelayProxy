@@ -208,12 +208,15 @@ func TestH264DesktopVideoConfigCarriesGenerationBounds(t *testing.T) {
 		Width: 1280, Height: 720, FPS: 30, TargetBitrate: 2_500_000,
 		KeyframeEvery: 2 * time.Second,
 	}
-	got := h264DesktopVideoConfig(4, cfg, 8_000_000, "display-2", []byte{0, 0, 0, 1, 0x67})
+	got := h264DesktopVideoConfig(4, cfg, 1920, 1080, 8_000_000, "display-2", []byte{0, 0, 0, 1, 0x67})
 	if got.Generation != 4 || got.Width != 1280 || got.Height != 720 || got.FPS != 30 {
 		t.Fatalf("video config=%+v", got)
 	}
 	if got.TargetBitrate != 2_500_000 || got.MaxBitrate != 8_000_000 || got.DisplayID != "display-2" {
 		t.Fatalf("video config bounds=%+v", got)
+	}
+	if got.MaxWidth != 1920 || got.MaxHeight != 1080 {
+		t.Fatalf("video config resolution ceiling=%+v", got)
 	}
 	if got.Codec != "h264" || got.Chroma != "420" || got.BitDepth != 8 {
 		t.Fatalf("video config codec fields=%+v", got)

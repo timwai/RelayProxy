@@ -24,6 +24,8 @@ func frameToNV12(frame RawFrame, dst []byte) ([]byte, error) {
 			Rect:   image.Rect(0, 0, frame.Width, frame.Height),
 		}
 		return RGBAtoNV12(src, dst)
+	case PixelFormatBGRA:
+		return BGRAtoNV12(frame.Pix, frame.Width, frame.Height, frame.Stride, dst)
 	case PixelFormatNV12:
 		if frame.Stride == frame.Width {
 			copy(dst, frame.Pix[:required])

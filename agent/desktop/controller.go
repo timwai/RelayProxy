@@ -44,6 +44,8 @@ type ControllerSession struct {
 
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState
+
+	stats *sessionStatsTracker
 }
 
 func StartController(parent context.Context, targetID string, dial DesktopMediaDialer) (*ControllerSession, error) {
@@ -64,8 +66,10 @@ func StartController(parent context.Context, targetID string, dial DesktopMediaD
 		cancel:      cancel,
 		done:        make(chan struct{}),
 		configReady: make(chan struct{}),
+		stats:       newSessionStatsTracker("relay"),
 	}
 	go session.controlLoop(ctx)
+	go session.probeLoop(ctx)
 	go session.readLoop(ctx)
 	return session, nil
 }
@@ -116,6 +120,41 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 				s.latestClipboard = clipboard
 			}
 			s.mu.Unlock()
+
+		case protocol.DesktopSessionPong:
+			if message.Probe != nil && s.stats != nil {
+				s.stats.ObservePong(*message.Probe, time.Now())
+			}
+
+		case protocol.DesktopSessionStats:
+			if message.Stats != nil && s.stats != nil {
+				s.stats.MergeRemote(*message.Stats)
+			}
+		}
+	}
+}
+
+func (s *ControllerSession) probeLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			if s.stats == nil {
+				continue
+			}
+			probe := s.stats.NewProbe(now)
+			probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+			err := s.conn.SendSessionMessage(probeCtx, protocol.DesktopSessionMessage{
+				Type:  protocol.DesktopSessionPing,
+				Probe: &probe,
+			})
+			cancel()
+			if err != nil {
+				return
+			}
 		}
 	}
 }
@@ -230,12 +269,20 @@ func (s *ControllerSession) readLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
+		if s.stats != nil {
+			if header, _, decodeErr := desktopmedia.DecodeMediaPacket(packet); decodeErr == nil {
+				s.stats.ObservePacket(header, len(packet))
+			}
+		}
 		frame, err := reassembler.Push(packet, time.Now())
 		if err != nil || frame == nil {
 			continue
 		}
 		config, configured := s.currentVideoConfig(ctx)
 		if !s.acceptVideoFrame(ctx, frame, config, configured) {
+			if s.stats != nil {
+				s.stats.ObserveDroppedFrame()
+			}
 			continue
 		}
 		snapshot, ok := snapshotFromEncodedFrame(frame, config, configured)
@@ -245,7 +292,17 @@ func (s *ControllerSession) readLoop(ctx context.Context) {
 		s.mu.Lock()
 		s.latest = snapshot
 		s.mu.Unlock()
+		if s.stats != nil {
+			s.stats.ObserveFrame()
+		}
 	}
+}
+
+func (s *ControllerSession) Stats() protocol.DesktopSessionStats {
+	if s == nil || s.stats == nil {
+		return protocol.DesktopSessionStats{}
+	}
+	return s.stats.Snapshot(time.Now())
 }
 
 func (s *ControllerSession) TargetID() string {

@@ -25,7 +25,7 @@ func (e *abrTestEncoder) Reconfigure(_ context.Context, cfg desktopcodec.VideoCo
 	return nil
 }
 func (e *abrTestEncoder) Stats() desktopcodec.EncoderStats { return desktopcodec.EncoderStats{} }
-func (e *abrTestEncoder) Close() error                    { return nil }
+func (e *abrTestEncoder) Close() error                     { return nil }
 
 func TestReconfigureH264BitrateClampsToSessionBounds(t *testing.T) {
 	encoder := &abrTestEncoder{}

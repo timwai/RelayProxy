@@ -701,7 +701,7 @@
 
         <details class="rp-card p-4" id="desktop-connect-settings">
           <summary class="cursor-pointer select-none text-[12px] font-semibold text-slate-800 dark:text-slate-100">连接设置</summary>
-          <div class="grid grid-cols-2 xl:grid-cols-7 gap-3 mt-3">
+          <div class="grid grid-cols-2 xl:grid-cols-8 gap-3 mt-3">
             <div>
               <label for="desktop-opt-backend" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">协议</label>
               <select id="desktop-opt-backend" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
@@ -736,6 +736,14 @@
                 <option value="auto">自动</option>
                 <option value="h264">H.264</option>
                 <option value="jpeg">JPEG 兼容</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-capture" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">采集</label>
+              <select id="desktop-opt-capture" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="auto">自动</option>
+                <option value="dxgi">DXGI</option>
+                <option value="gdi">GDI</option>
               </select>
             </div>
             <div>
@@ -775,7 +783,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；采集“自动”优先 DXGI 并按现有策略回退 GDI，显式 DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 DXGI 时请先选择具体显示器。H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -1566,6 +1574,7 @@
       var scene = $('desktop-opt-scene') ? $('desktop-opt-scene').value : 'auto';
       var quality = $('desktop-opt-quality') ? $('desktop-opt-quality').value : 'auto';
       var codecChoice = $('desktop-opt-codec') ? $('desktop-opt-codec').value : 'auto';
+      var captureBackend = $('desktop-opt-capture') ? $('desktop-opt-capture').value : 'auto';
       var webCodecs = typeof window.VideoDecoder === 'function' && typeof window.EncodedVideoChunk === 'function';
       var codec = codecChoice === 'auto' ? (webCodecs ? 'h264' : 'jpeg') : codecChoice;
       if (codec === 'h264' && !webCodecs) codec = 'jpeg';
@@ -1585,6 +1594,7 @@
         scene: scene || 'auto',
         quality: quality || 'auto',
         codec: codec,
+        captureBackend: captureBackend || 'auto',
         resolution: resolution,
         fps: fps,
         maxBitrate: bitrateMbps > 0 ? Math.round(bitrateMbps * 1000000) : 0,
@@ -1596,6 +1606,9 @@
       var options = remoteDesktopConnectOptions(targetID);
       var parts = [];
       if (options.codec) parts.push(options.codec === 'h264' ? 'H.264' : 'JPEG');
+      if (options.captureBackend && options.captureBackend !== 'auto') {
+        parts.push('Capture ' + options.captureBackend.toUpperCase());
+      }
       if (options.scene && options.scene !== 'auto') {
         var sceneLabels = { office:'办公', performance:'性能', gaming:'游戏', quality:'画质' };
         parts.push(sceneLabels[options.scene] || options.scene);

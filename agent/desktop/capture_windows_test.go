@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-mswin/screencapture"
+
+	"relayproxy/internal/protocol"
 )
 
 func TestCopyDXGIFrameConvertsBGRAAndStride(t *testing.T) {
@@ -149,5 +151,43 @@ func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T
 	_, end := mapDisplayNormalizedToVirtual(0, 65535, upper, virtual)
 	if start != 0 || end >= 35000 {
 		t.Fatalf("upper display mapped y range=%d..%d", start, end)
+	}
+}
+
+func TestWindowsCaptureBackendPolicy(t *testing.T) {
+	tests := []struct {
+		preference protocol.DesktopCaptureBackend
+		want       screencapture.Backend
+		wantErr    bool
+		explicit   bool
+	}{
+		{preference: "", want: screencapture.BackendAuto},
+		{preference: protocol.DesktopCaptureAuto, want: screencapture.BackendAuto},
+		{preference: protocol.DesktopCaptureDXGI, want: screencapture.BackendDuplication, explicit: true},
+		{preference: protocol.DesktopCaptureGDI, want: screencapture.BackendGDI, explicit: true},
+		{preference: protocol.DesktopCaptureWGC, wantErr: true, explicit: true},
+		{preference: protocol.DesktopCaptureBackend("invalid"), wantErr: true, explicit: true},
+	}
+	for _, tt := range tests {
+		got, err := windowsCaptureBackend(tt.preference)
+		if (err != nil) != tt.wantErr {
+			t.Fatalf("preference=%q err=%v wantErr=%v", tt.preference, err, tt.wantErr)
+		}
+		if !tt.wantErr && got != tt.want {
+			t.Fatalf("preference=%q backend=%v want=%v", tt.preference, got, tt.want)
+		}
+		if gotExplicit := explicitWindowsCaptureBackend(tt.preference); gotExplicit != tt.explicit {
+			t.Fatalf("preference=%q explicit=%v want=%v", tt.preference, gotExplicit, tt.explicit)
+		}
+	}
+	if !windowsCaptureRequiresDisplayTarget(screencapture.BackendDuplication) {
+		t.Fatal("DXGI must require a concrete display target")
+	}
+	if windowsCaptureRequiresDisplayTarget(screencapture.BackendGDI) ||
+		windowsCaptureRequiresDisplayTarget(screencapture.BackendAuto) {
+		t.Fatal("GDI/Auto unexpectedly require a concrete display target")
+	}
+	if got := normalizedWindowsCaptureBackend(""); got != protocol.DesktopCaptureAuto {
+		t.Fatalf("normalized empty capture backend=%q want=auto", got)
 	}
 }

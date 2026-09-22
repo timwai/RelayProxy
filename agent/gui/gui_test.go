@@ -128,3 +128,22 @@ func TestSettingsDoNotHideManualLaunch(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteDesktopStatsExposeRealtimeCongestionSignals(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"stats.path || status.pathUdp || 'relay'",
+		"'Queue ' + Number(stats.sendQueueDelayMs || 0).toFixed(1) + ' ms'",
+		"'Dropped ' + Number(stats.droppedFrames || 0)",
+		"'Capture ' + stats.captureMs.toFixed(1) + ' ms'",
+		"'Encode ' + stats.encodeMs.toFixed(1) + ' ms'",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop stats UI missing %q", want)
+		}
+	}
+}

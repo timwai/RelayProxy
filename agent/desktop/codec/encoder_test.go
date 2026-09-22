@@ -49,3 +49,20 @@ func TestBitrateOnlyReconfigure(t *testing.T) {
 		t.Fatal("resolution change must require encoder rebuild")
 	}
 }
+
+func TestRawFrameValidationAcceptsPaddedBGRA(t *testing.T) {
+	frame := RawFrame{
+		Format: PixelFormatBGRA,
+		Width:  4,
+		Height: 2,
+		Stride: 24,
+		Pix:    make([]byte, 48),
+	}
+	if err := frame.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	frame.Stride = 15
+	if !errors.Is(frame.Validate(), ErrInvalidFrame) {
+		t.Fatal("BGRA frame with short stride accepted")
+	}
+}

@@ -1200,10 +1200,10 @@
     'use strict';
 
     var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {} };
-    var desktopFrameSeq = 0, desktopFrameBusy = false, desktopInputSeq = 0;
+    var desktopFrameSeq = 0, desktopFrameGeneration = 0, desktopFrameBusy = false, desktopInputSeq = 0;
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
-    var desktopVideoDecoder = null, desktopVideoCodec = '', desktopVideoDecodeErrorAt = 0;
+    var desktopVideoDecoder = null, desktopVideoCodec = '', desktopVideoGeneration = 0, desktopVideoNeedsKeyFrame = true, desktopVideoDecodeErrorAt = 0;
     var desktopCursorSeq = 0, desktopCursorBusy = false, desktopCursorID = '', desktopCursorLast = null;
     var desktopClipboardSeq = 0, desktopClipboardBusy = false, desktopClipboardLocal = '', desktopClipboardReady = false, desktopClipboardErrorAt = 0;
     var earlyLogs = [];
@@ -1701,7 +1701,7 @@
       banner.classList.toggle('hidden', !connected);
       $('desktop-viewer').classList.toggle('hidden', !relay);
       if (!relay) {
-        desktopFrameSeq = 0;
+        desktopFrameSeq = 0; desktopFrameGeneration = 0;
         resetDesktopVideoDecoder();
         resetDesktopCursor();
         resetDesktopClipboard();
@@ -1878,6 +1878,8 @@
       }
       desktopVideoDecoder = null;
       desktopVideoCodec = '';
+      desktopVideoGeneration = 0;
+      desktopVideoNeedsKeyFrame = true;
       var canvas = $('desktop-viewer-canvas');
       if (canvas) {
         var ctx = canvas.getContext('2d');
@@ -1907,14 +1909,18 @@
       if (canvas) canvas.classList.remove('hidden');
       if (desktopCursorLast) requestAnimationFrame(function () { renderDesktopCursor(desktopCursorLast); });
     }
-    function ensureDesktopVideoDecoder(codec) {
+    function ensureDesktopVideoDecoder(codec, generation) {
       if (typeof window.VideoDecoder !== 'function' || typeof window.EncodedVideoChunk !== 'function') {
         throw new Error('当前 WebView 不支持 WebCodecs H.264 解码');
       }
       codec = codec || 'avc1.42E01F';
-      if (desktopVideoDecoder && desktopVideoCodec === codec && desktopVideoDecoder.state !== 'closed') return desktopVideoDecoder;
+      generation = Number(generation || 0);
+      if (desktopVideoDecoder && desktopVideoCodec === codec && desktopVideoGeneration === generation &&
+          desktopVideoDecoder.state !== 'closed') return desktopVideoDecoder;
       resetDesktopVideoDecoder();
       desktopVideoCodec = codec;
+      desktopVideoGeneration = generation;
+      desktopVideoNeedsKeyFrame = true;
       desktopVideoDecoder = new VideoDecoder({
         output: function (videoFrame) {
           try {
@@ -1950,12 +1956,17 @@
       return desktopVideoDecoder;
     }
     function decodeDesktopH264Frame(frame) {
-      var decoder = ensureDesktopVideoDecoder(frame.codec || 'avc1.42E01F');
+      var decoder = ensureDesktopVideoDecoder(frame.codec || 'avc1.42E01F', frame.generation);
+      if (desktopVideoNeedsKeyFrame && !frame.keyFrame) {
+        requestDesktopIDR();
+        return;
+      }
       if (!frame.keyFrame && decoder.decodeQueueSize > 4) {
         requestDesktopIDR();
         resetDesktopVideoDecoder();
         return;
       }
+      if (frame.keyFrame) desktopVideoNeedsKeyFrame = false;
       var bytes = base64ToBytes(frame.data);
       decoder.decode(new EncodedVideoChunk({
         type: frame.keyFrame ? 'key' : 'delta',
@@ -1973,8 +1984,11 @@
       try {
         var raw = await call('goGetRemoteDesktopFrame');
         var frame = parseJSONResult(raw, null);
-        if (!frame || !frame.sequence || !frame.data || frame.sequence === desktopFrameSeq) return;
+        if (!frame || !frame.sequence || !frame.data) return;
+        var frameGeneration = Number(frame.generation || 0);
+        if (frame.sequence === desktopFrameSeq && frameGeneration === desktopFrameGeneration) return;
         desktopFrameSeq = frame.sequence;
+        desktopFrameGeneration = frameGeneration;
         var mime = frame.mimeType || 'image/jpeg';
         if (mime.indexOf('video/h264') === 0) {
           decodeDesktopH264Frame(frame);
@@ -2262,7 +2276,7 @@
           toast(result.message || '远程桌面连接失败');
           return;
         }
-        desktopFrameSeq = 0;
+        desktopFrameSeq = 0; desktopFrameGeneration = 0;
         resetDesktopClipboard();
         toast('远程桌面已启动 · ' + remoteDesktopOptionsSummary(targetID));
         await refreshRemoteDesktopStatus(false);
@@ -2279,7 +2293,7 @@
         toast(result.message || '断开远程桌面失败');
         return;
       }
-      desktopFrameSeq = 0;
+      desktopFrameSeq = 0; desktopFrameGeneration = 0;
       resetDesktopClipboard();
       toast('远程桌面已断开');
       await refreshRemoteDesktopStatus(false);

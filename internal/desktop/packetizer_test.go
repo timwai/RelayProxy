@@ -130,3 +130,64 @@ func TestReassemblerExpiresPartialFrames(t *testing.T) {
 		t.Fatalf("completed = %+v", got)
 	}
 }
+
+func TestReassemblerKeepsGenerationsSeparate(t *testing.T) {
+	first := EncodedFrame{
+		SessionID: 7, StreamID: 1, Generation: 1, FrameID: 1,
+		Data: bytes.Repeat([]byte("old"), 500),
+	}
+	second := EncodedFrame{
+		SessionID: 7, StreamID: 1, Generation: 2, FrameID: 1,
+		KeyFrame: true, Data: bytes.Repeat([]byte("new"), 500),
+	}
+	firstPackets, _, err := PacketizeFrame(first, 800, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondPackets, _, err := PacketizeFrame(second, 800, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(firstPackets) < 2 || len(secondPackets) < 2 {
+		t.Fatal("test frames must span multiple packets")
+	}
+
+	r := NewReassembler(ReassemblerConfig{})
+	now := time.Unix(5, 0)
+	if got, err := r.Push(firstPackets[0], now); err != nil || got != nil {
+		t.Fatalf("old generation first fragment = %+v, %v", got, err)
+	}
+	if got, err := r.Push(secondPackets[0], now); err != nil || got != nil {
+		t.Fatalf("new generation first fragment = %+v, %v", got, err)
+	}
+
+	var completedNew *EncodedFrame
+	for _, packet := range secondPackets[1:] {
+		got, pushErr := r.Push(packet, now)
+		if pushErr != nil {
+			t.Fatal(pushErr)
+		}
+		if got != nil {
+			completedNew = got
+		}
+	}
+	if completedNew == nil || completedNew.Generation != 2 || completedNew.FrameID != 1 ||
+		!bytes.Equal(completedNew.Data, second.Data) {
+		t.Fatalf("new generation frame=%+v", completedNew)
+	}
+
+	var completedOld *EncodedFrame
+	for _, packet := range firstPackets[1:] {
+		got, pushErr := r.Push(packet, now)
+		if pushErr != nil {
+			t.Fatal(pushErr)
+		}
+		if got != nil {
+			completedOld = got
+		}
+	}
+	if completedOld == nil || completedOld.Generation != 1 || completedOld.FrameID != 1 ||
+		!bytes.Equal(completedOld.Data, first.Data) {
+		t.Fatalf("old generation frame=%+v", completedOld)
+	}
+}

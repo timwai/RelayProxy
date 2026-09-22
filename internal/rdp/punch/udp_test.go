@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"relayproxy/internal/rdp/secure"
+	"relayproxy/internal/testnetem"
 )
 
 func TestPacketConnSendsAuthenticatedKeepalive(t *testing.T) {
@@ -219,6 +220,88 @@ func TestPacketConnMeasuresAuthenticatedKeepaliveRTT(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for direct-path RTT observation")
+	}
+
+	_ = conn.Close()
+	select {
+	case <-readDone:
+	case <-time.After(time.Second):
+		t.Fatal("PacketConn reader did not stop after close")
+	}
+}
+
+func TestPacketConnProbeRTTIncludesDeterministicImpairment(t *testing.T) {
+	target, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+
+	controller, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := []byte("0123456789abcdef0123456789abcdef")
+	conn, err := newPacketConn(&UDPResult{
+		Conn: controller, RemoteAddr: target.LocalAddr().(*net.UDPAddr),
+		SessionID: 74, Key: key, Domain: secure.DomainDesktopMedia,
+	}, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	shaped, err := testnetem.NewPacketConn(target, testnetem.Profile{
+		Delay: 25 * time.Millisecond,
+		Seed:  74,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rtts := make(chan time.Duration, 1)
+	conn.SetProbeObserver(func(rtt time.Duration) {
+		select {
+		case rtts <- rtt:
+		default:
+		}
+	})
+
+	readDone := make(chan error, 1)
+	go func() {
+		buffer := make([]byte, 1500)
+		_, _, err := conn.ReadFrom(buffer)
+		readDone <- err
+	}()
+
+	_ = target.SetReadDeadline(time.Now().Add(time.Second))
+	buffer := make([]byte, 128)
+	n, source, err := target.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep, err := secure.DecodePunchPacketWithDomain(buffer[:n], key, secure.DomainDesktopMedia)
+	if err != nil {
+		t.Fatalf("decode desktop keepalive: %v", err)
+	}
+
+	ack, err := (secure.PunchPacket{
+		Type: secure.PunchAck, SessionID: keep.SessionID, Nonce: keep.Nonce,
+	}).EncodeWithDomain(key, secure.DomainDesktopMedia)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := shaped.WriteTo(ack, source); err != nil {
+		t.Fatalf("send impaired acknowledgement: %v", err)
+	}
+
+	select {
+	case rtt := <-rtts:
+		if rtt < 20*time.Millisecond {
+			t.Fatalf("rtt=%s did not include configured impairment", rtt)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for impaired direct-path RTT observation")
 	}
 
 	_ = conn.Close()

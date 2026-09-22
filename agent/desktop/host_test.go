@@ -86,3 +86,29 @@ func TestHostCodecCapabilitiesAreCopied(t *testing.T) {
 		t.Fatalf("host returned internal capability slice: %+v", second)
 	}
 }
+
+
+func TestFitRGBAEven(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1366, 768))
+	got := fitRGBAEven(src, 1280, 720)
+	if got.Bounds().Dx()%2 != 0 || got.Bounds().Dy()%2 != 0 {
+		t.Fatalf("H.264 frame is not even-sized: %v", got.Bounds())
+	}
+	if got.Bounds().Dx() > 1280 || got.Bounds().Dy() > 720 {
+		t.Fatalf("H.264 frame exceeded bounds: %v", got.Bounds())
+	}
+}
+
+func TestHostCanEncodeH264(t *testing.T) {
+	host, err := NewHost(&testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))}, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if host.canEncodeH264() {
+		t.Fatal("H.264 unexpectedly enabled without capability")
+	}
+	host.SetCodecCapabilities([]protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}})
+	if !host.canEncodeH264() {
+		t.Fatal("H.264 encode capability was ignored")
+	}
+}

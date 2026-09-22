@@ -156,6 +156,15 @@ func (s *nativeDesktopSession) focusViewer() {
 	}
 }
 
+func (s *nativeDesktopSession) disableGPUCursor() {
+	if s == nil {
+		return
+	}
+	s.mediaMu.Lock()
+	s.disableGPUCursor()
+	s.mediaMu.Unlock()
+}
+
 func (s *nativeDesktopSession) decoderStatus() (string, bool, bool) {
 	if s == nil {
 		return "", false, false
@@ -287,7 +296,7 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		cancel()
 		_ = decoder.Close()
 		_ = native.Close()
-		existing.viewer.Focus()
+		existing.focusViewer()
 		return map[string]any{"ok": true, "alreadyOpen": true}, nil
 	}
 	a.desktopViewer = session
@@ -436,7 +445,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 							State: s.cursorState, Bitmap: s.cursorBitmap,
 						}); cursorErr != nil {
 							log.Printf("[Desktop] GPU cursor update failed: %v", cursorErr)
-							s.gpuCursor = false
+							s.disableGPUCursor()
 							if s.cursorState.Visible {
 								needsCursorComposite = true
 							}
@@ -522,7 +531,7 @@ func (s *nativeDesktopSession) refreshCursor(owner *appWindow) bool {
 			State: s.cursorState, Bitmap: s.cursorBitmap,
 		}); err != nil {
 			log.Printf("[Desktop] GPU cursor redraw failed: %v", err)
-			s.gpuCursor = false
+			s.disableGPUCursor()
 			s.gpuFrameActive = false
 		}
 	}

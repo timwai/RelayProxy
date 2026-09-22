@@ -198,12 +198,14 @@ const (
 	DesktopSessionInput       = "input"
 	DesktopSessionVideoConfig = "video_config"
 	DesktopSessionIDRRequest  = "idr_request"
+	DesktopSessionCursor      = "cursor"
 )
 
 type DesktopSessionMessage struct {
 	Type        string              `json:"type"`
 	Input       *DesktopInputEvent  `json:"input,omitempty"`
 	VideoConfig *DesktopVideoConfig `json:"videoConfig,omitempty"`
+	Cursor      *DesktopCursorState `json:"cursor,omitempty"`
 }
 
 const (
@@ -221,6 +223,21 @@ const (
 	DesktopControlSessionClose    = "session_close"
 	DesktopControlError           = "error"
 )
+
+type DesktopCursorState struct {
+	Sequence     uint64 `json:"sequence"`
+	X            int    `json:"x"`
+	Y            int    `json:"y"`
+	ScreenWidth  int    `json:"screenWidth"`
+	ScreenHeight int    `json:"screenHeight"`
+	Visible      bool   `json:"visible"`
+	CursorID     string `json:"cursorId,omitempty"`
+	Width        int    `json:"width,omitempty"`
+	Height       int    `json:"height,omitempty"`
+	HotspotX     int    `json:"hotspotX,omitempty"`
+	HotspotY     int    `json:"hotspotY,omitempty"`
+	PNG          []byte `json:"png,omitempty"`
+}
 
 type DesktopVideoConfig struct {
 	Generation    uint32 `json:"generation"`

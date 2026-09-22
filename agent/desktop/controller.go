@@ -31,7 +31,7 @@ type ControllerSession struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 
-	closeOnce sync.Once
+	closeOnce   sync.Once
 	mu          sync.RWMutex
 	latest      FrameSnapshot
 	videoConfig protocol.DesktopVideoConfig
@@ -52,9 +52,9 @@ func StartController(parent context.Context, targetID string, dial DesktopMediaD
 	}
 	ctx, cancel := context.WithCancel(parent)
 	session := &ControllerSession{
-		targetID: targetID,
-		conn:     conn,
-		cancel:   cancel,
+		targetID:    targetID,
+		conn:        conn,
+		cancel:      cancel,
 		done:        make(chan struct{}),
 		configReady: make(chan struct{}),
 	}

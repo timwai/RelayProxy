@@ -89,3 +89,15 @@ func TestConfigureABROnlyForH264(t *testing.T) {
 		t.Fatalf("H.264 was not adapted: %+v", decision)
 	}
 }
+
+func TestVideoConfigSnapshotExposesSelectedDisplay(t *testing.T) {
+	session := &ControllerSession{
+		videoConfig: protocol.DesktopVideoConfig{
+			Codec: "h264", Width: 1920, Height: 1080, DisplayID: "20",
+		},
+	}
+	got := session.VideoConfigSnapshot()
+	if got.Codec != "h264" || got.DisplayID != "20" || got.Width != 1920 || got.Height != 1080 {
+		t.Fatalf("video config snapshot=%+v", got)
+	}
+}

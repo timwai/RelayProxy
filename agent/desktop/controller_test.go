@@ -53,7 +53,6 @@ func TestLatestCursorOmitsKnownShape(t *testing.T) {
 	}
 }
 
-
 func TestLatestClipboardSkipsKnownSequence(t *testing.T) {
 	session := &ControllerSession{
 		done: make(chan struct{}),

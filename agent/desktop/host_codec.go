@@ -236,28 +236,27 @@ func (h *Host) streamH264Frames(
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
 	}
-	encoder, err := desktopcodec.OpenMFH264Encoder(ctx, videoCfg, true)
+	encoder, normalizedCfg, sequenceHeader, err := openH264GenerationEncoder(
+		ctx, videoCfg, openMFH264GenerationEncoder,
+	)
 	if err != nil {
 		return err
 	}
-	defer encoder.Close()
+	videoCfg = normalizedCfg
+	defer func() {
+		if encoder != nil {
+			_ = encoder.Close()
+		}
+	}()
 
-	_ = encoder.ForceIDR(ctx)
-	sequenceHeader := encoder.SequenceHeader()
-	codecString := desktopcodec.H264CodecString(sequenceHeader)
-	if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
-		Generation:    1,
-		Codec:         "h264",
-		CodecString:   codecString,
-		Width:         videoCfg.Width,
-		Height:        videoCfg.Height,
-		FPS:           videoCfg.FPS,
-		TargetBitrate: videoCfg.TargetBitrate,
-		MaxBitrate:    videoCfg.TargetBitrate,
-		Chroma:        "420",
-		BitDepth:      8,
-		DisplayID:     cfg.DisplayID,
-	}); err != nil {
+	generation := uint32(1)
+	sessionMaxBitrate := cfg.MaxBitrate
+	if sessionMaxBitrate <= 0 {
+		sessionMaxBitrate = videoCfg.TargetBitrate
+	}
+	if err := sendVideoConfig(ctx, conn, h264DesktopVideoConfig(
+		generation, videoCfg, sessionMaxBitrate, cfg.DisplayID, sequenceHeader,
+	)); err != nil {
 		return err
 	}
 
@@ -276,6 +275,7 @@ func (h *Host) streamH264Frames(
 	var lastCaptureMs float64
 	var sendQueueDelayMs float64
 	var droppedFrames uint64
+	needsGenerationKeyFrame := true
 	targetFPS := videoCfg.FPS
 	frameInterval := frameIntervalForFPS(targetFPS)
 	ticker := time.NewTicker(frameInterval)
@@ -311,7 +311,7 @@ func (h *Host) streamH264Frames(
 			mediaFrame := desktopmedia.EncodedFrame{
 				SessionID:  sessionID,
 				StreamID:   1,
-				Generation: 1,
+				Generation: generation,
 				FrameID:    frameID,
 				Timestamp:  uint64(encoded.Timestamp.Microseconds()),
 				KeyFrame:   encoded.KeyFrame,

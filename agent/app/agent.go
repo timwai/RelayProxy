@@ -1075,7 +1075,11 @@ func (a *Agent) RemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	if !ok {
 		return protocol.RemoteDesktopFrame{}
 	}
-	return protocol.RemoteDesktopFrame{Sequence: frame.Sequence, MimeType: frame.MimeType, Width: frame.Width, Height: frame.Height, Data: frame.Data}
+	return protocol.RemoteDesktopFrame{
+		Sequence: frame.Sequence, MimeType: frame.MimeType, Codec: frame.Codec,
+		Width: frame.Width, Height: frame.Height, Timestamp: frame.Timestamp,
+		KeyFrame: frame.KeyFrame, Data: frame.Data,
+	}
 }
 
 func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {

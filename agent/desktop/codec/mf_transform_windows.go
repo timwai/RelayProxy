@@ -16,10 +16,12 @@ import (
 )
 
 const (
-	imfAttributesGetUINT32 = 7
-	imfAttributesSetUINT32 = 21
-	imfAttributesSetUINT64 = 22
-	imfAttributesSetGUID   = 24
+	imfAttributesGetUINT32   = 7
+	imfAttributesGetBlobSize = 14
+	imfAttributesGetBlob     = 15
+	imfAttributesSetUINT32   = 21
+	imfAttributesSetUINT64   = 22
+	imfAttributesSetGUID     = 24
 
 	imfActivateActivateObject = 33
 
@@ -76,6 +78,10 @@ var (
 		Data1: 0x20332624, Data2: 0xfb0d, Data3: 0x4d9e,
 		Data4: [8]byte{0xbd, 0x0d, 0xcb, 0xf6, 0x78, 0x6c, 0x10, 0x2e},
 	}
+	mfMTMPEGSequenceHeader = windows.GUID{
+		Data1: 0x3c036de7, Data2: 0x3ad0, Data3: 0x4c9e,
+		Data4: [8]byte{0x92, 0x16, 0xee, 0x6d, 0x6a, 0xc2, 0x1c, 0xb3},
+	}
 	mfMTFixedSizeSamples = windows.GUID{
 		Data1: 0xb8ebefaf, Data2: 0xb718, Data3: 0x4e04,
 		Data4: [8]byte{0xb0, 0xa9, 0x11, 0x67, 0x75, 0xe3, 0x32, 0x1b},
@@ -99,9 +105,10 @@ var (
 )
 
 type MFH264TransformInfo struct {
-	Hardware bool
-	Async    bool
-	Config   VideoConfig
+	Hardware       bool
+	Async          bool
+	Config         VideoConfig
+	SequenceHeader []byte
 }
 
 type MFH264Transform struct {
@@ -194,6 +201,34 @@ func attributeGetUINT32(attributes unsafe.Pointer, key *windows.GUID) (uint32, e
 	return value, nil
 }
 
+func attributeGetBlob(attributes unsafe.Pointer, key *windows.GUID) ([]byte, error) {
+	var size uint32
+	hr := comCall(attributes, imfAttributesGetBlobSize, uintptr(unsafe.Pointer(key)), uintptr(unsafe.Pointer(&size)))
+	if hresultFailed(hr) {
+		return nil, hresultError("IMFAttributes.GetBlobSize", hr)
+	}
+	if size == 0 {
+		return nil, nil
+	}
+	data := make([]byte, size)
+	var written uint32
+	hr = comCall(
+		attributes,
+		imfAttributesGetBlob,
+		uintptr(unsafe.Pointer(key)),
+		uintptr(unsafe.Pointer(&data[0])),
+		uintptr(size),
+		uintptr(unsafe.Pointer(&written)),
+	)
+	if hresultFailed(hr) {
+		return nil, hresultError("IMFAttributes.GetBlob", hr)
+	}
+	if written > size {
+		return nil, errors.New("IMFAttributes.GetBlob returned an invalid size")
+	}
+	return data[:written], nil
+}
+
 func packPair(high, low uint32) uint64 {
 	return uint64(high)<<32 | uint64(low)
 }
@@ -284,7 +319,7 @@ func processTransformMessage(transform unsafe.Pointer, message uint32) error {
 	return nil
 }
 
-func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, error) {
+func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []byte, error) {
 	attributes, err := transformAttributes(transform)
 	if err == nil {
 		defer releaseIUnknown(attributes)
@@ -292,7 +327,7 @@ func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, er
 		isAsync := getErr == nil && async != 0
 		if isAsync {
 			if err := attributeSetUINT32(attributes, &mfTransformAsyncUnlock, 1); err != nil {
-				return false, fmt.Errorf("unlock async MFT: %w", err)
+				return false, nil, fmt.Errorf("unlock async MFT: %w", err)
 			}
 		}
 		if !cfg.DisableLowLatency {
@@ -301,56 +336,58 @@ func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, er
 
 		outputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		defer releaseIUnknown(outputType)
 		// The Microsoft H.264 encoder requires its output media type first.
 		if err := setTransformType(transform, imfTransformSetOutputType, outputType); err != nil {
-			return false, err
+			return false, nil, err
 		}
+		sequenceHeader, _ := attributeGetBlob(outputType, &mfMTMPEGSequenceHeader)
 
 		inputType, err := createVideoMediaType(&mfVideoFormatNV12, cfg, false)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		defer releaseIUnknown(inputType)
 		if err := setTransformType(transform, imfTransformSetInputType, inputType); err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if err := processTransformMessage(transform, mftMessageNotifyBeginStreaming); err != nil {
-			return false, err
+			return false, nil, err
 		}
 		if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
-			return false, err
+			return false, nil, err
 		}
-		return isAsync, nil
+		return isAsync, sequenceHeader, nil
 	}
 
 	// Some older transforms do not expose a transform attribute store. Media
 	// type negotiation still works, but async/low-latency hints cannot be set.
 	outputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer releaseIUnknown(outputType)
 	if err := setTransformType(transform, imfTransformSetOutputType, outputType); err != nil {
-		return false, err
+		return false, nil, err
 	}
+	sequenceHeader, _ := attributeGetBlob(outputType, &mfMTMPEGSequenceHeader)
 	inputType, err := createVideoMediaType(&mfVideoFormatNV12, cfg, false)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	defer releaseIUnknown(inputType)
 	if err := setTransformType(transform, imfTransformSetInputType, inputType); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if err := processTransformMessage(transform, mftMessageNotifyBeginStreaming); err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
-		return false, err
+		return false, nil, err
 	}
-	return false, nil
+	return false, sequenceHeader, nil
 }
 
 func activationGroups(preferHardware bool) []struct {
@@ -399,10 +436,13 @@ func openConfiguredH264Transform(ctx context.Context, cfg VideoConfig, preferHar
 				failures = append(failures, err)
 				continue
 			}
-			async, err := configureH264Transform(transform, cfg)
+			async, sequenceHeader, err := configureH264Transform(transform, cfg)
 			if err == nil && (!async || allowAsync) {
 				releaseMFTActivations(activations[index+1:])
-				return transform, MFH264TransformInfo{Hardware: group.hardware, Async: async, Config: cfg}, nil
+				return transform, MFH264TransformInfo{
+					Hardware: group.hardware, Async: async, Config: cfg,
+					SequenceHeader: append([]byte(nil), sequenceHeader...),
+				}, nil
 			}
 			releaseIUnknown(transform)
 			if err != nil {

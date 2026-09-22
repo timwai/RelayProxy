@@ -109,6 +109,13 @@ func (e *MFH264Encoder) Reconfigure(ctx context.Context, cfg VideoConfig) error 
 	return nil
 }
 
+func (e *MFH264Encoder) SequenceHeader() []byte {
+	if e == nil || e.transform == nil {
+		return nil
+	}
+	return append([]byte(nil), e.transform.Info().SequenceHeader...)
+}
+
 func (e *MFH264Encoder) Stats() EncoderStats {
 	if e == nil {
 		return EncoderStats{}

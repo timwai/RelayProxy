@@ -107,6 +107,7 @@ type RemoteDesktopConnectOptions struct {
 	Backend    DesktopBackend           `json:"backend,omitempty"`
 	Scene      DesktopScene             `json:"scene,omitempty"`
 	Quality    DesktopQuality           `json:"quality,omitempty"`
+	Codec      string                   `json:"codec,omitempty"`
 	Resolution DesktopResolutionOptions `json:"resolution,omitempty"`
 	FPS        int                      `json:"fps,omitempty"`
 	MaxBitrate int                      `json:"maxBitrate,omitempty"`
@@ -149,11 +150,14 @@ type RemoteDesktopStatus struct {
 // across the local Agent -> Wails bridge; Relay transport uses binary RD/1
 // datagrams and never base64-encodes media on the network.
 type RemoteDesktopFrame struct {
-	Sequence uint64 `json:"sequence"`
-	MimeType string `json:"mimeType"`
-	Width    int    `json:"width,omitempty"`
-	Height   int    `json:"height,omitempty"`
-	Data     []byte `json:"data,omitempty"`
+	Sequence  uint64 `json:"sequence"`
+	MimeType  string `json:"mimeType"`
+	Codec     string `json:"codec,omitempty"`
+	Width     int    `json:"width,omitempty"`
+	Height    int    `json:"height,omitempty"`
+	Timestamp uint64 `json:"timestamp,omitempty"`
+	KeyFrame  bool   `json:"keyFrame,omitempty"`
+	Data      []byte `json:"data,omitempty"`
 }
 
 // DesktopInputEvent is a normalized interactive input event carried on the
@@ -190,11 +194,15 @@ type DesktopInputEvent struct {
 	Horizontal bool             `json:"horizontal,omitempty"`
 }
 
-const DesktopSessionInput = "input"
+const (
+	DesktopSessionInput       = "input"
+	DesktopSessionVideoConfig = "video_config"
+)
 
 type DesktopSessionMessage struct {
-	Type  string             `json:"type"`
-	Input *DesktopInputEvent `json:"input,omitempty"`
+	Type        string              `json:"type"`
+	Input       *DesktopInputEvent  `json:"input,omitempty"`
+	VideoConfig *DesktopVideoConfig `json:"videoConfig,omitempty"`
 }
 
 const (
@@ -216,6 +224,7 @@ const (
 type DesktopVideoConfig struct {
 	Generation    uint32 `json:"generation"`
 	Codec         string `json:"codec"`
+	CodecString   string `json:"codecString,omitempty"`
 	Width         int    `json:"width"`
 	Height        int    `json:"height"`
 	FPS           int    `json:"fps"`

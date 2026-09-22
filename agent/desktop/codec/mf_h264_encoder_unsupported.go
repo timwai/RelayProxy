@@ -22,6 +22,10 @@ func (e *MFH264Encoder) Reconfigure(context.Context, VideoConfig) error {
 	return ErrEncoderUnavailable
 }
 
+func (e *MFH264Encoder) SequenceHeader() []byte {
+	return nil
+}
+
 func (e *MFH264Encoder) Stats() EncoderStats {
 	return EncoderStats{}
 }

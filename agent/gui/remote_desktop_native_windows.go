@@ -132,10 +132,10 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 
 	go session.run(ctx, a)
 	return map[string]any{
-		"ok":       true,
-		"width":    frame.Width,
-		"height":   frame.Height,
-		"hardware": decoder.Hardware(),
+		"ok":        true,
+		"width":     frame.Width,
+		"height":    frame.Height,
+		"hardware":  decoder.Hardware(),
 		"decoder":   decoder.Backend(),
 		"gpuCursor": session.gpuCursor,
 	}, nil
@@ -235,8 +235,8 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 					if !needsCursorComposite {
 						s.baseBGRA = nil
 						err = s.viewer.SubmitD3D11(desktopviewer.D3D11Frame{
-						Resource:    decodedFrame.D3D11.Resource,
-						Subresource: decodedFrame.D3D11.Subresource,
+							Resource:    decodedFrame.D3D11.Resource,
+							Subresource: decodedFrame.D3D11.Subresource,
 							Width:       decodedFrame.Width,
 							Height:      decodedFrame.Height,
 						})
@@ -381,8 +381,8 @@ func (a *appWindow) nativeDesktopViewerStatus() map[string]any {
 		return map[string]any{"open": false}
 	default:
 		return map[string]any{
-			"open":     true,
-			"hardware": session.decoder.Hardware(),
+			"open":      true,
+			"hardware":  session.decoder.Hardware(),
 			"decoder":   session.decoder.Backend(),
 			"gpuCursor": session.gpuCursor,
 		}

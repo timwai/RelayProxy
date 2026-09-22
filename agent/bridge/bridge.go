@@ -99,6 +99,10 @@ func (b *UIBridge) GetRemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	return b.agent.RemoteDesktopFrame()
 }
 
+func (b *UIBridge) GetRemoteDesktopCursor(knownCursorID string) protocol.DesktopCursorState {
+	return b.agent.RemoteDesktopCursor(strings.TrimSpace(knownCursorID))
+}
+
 func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	return b.agent.SendRemoteDesktopInput(event)
 }

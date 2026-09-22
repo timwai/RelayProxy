@@ -40,3 +40,23 @@ func TestSessionStatsRTTAndRemoteMerge(t *testing.T) {
 		t.Fatalf("stats=%+v", got)
 	}
 }
+
+
+func TestSessionStatsSeparatesReceiveAndViewerFPS(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	stats.started = time.Now().Add(-time.Second)
+	stats.ObserveFrame()
+	stats.MergeViewer(protocol.DesktopSessionStats{
+		DecodeFPS: 59,
+		RenderFPS: 58,
+		DecodeMs:  2.5,
+		RenderMs:  1.2,
+	})
+	got := stats.Snapshot(time.Now())
+	if got.ReceiveFPS <= 0 {
+		t.Fatalf("receiveFps=%v", got.ReceiveFPS)
+	}
+	if got.DecodeFPS != 59 || got.RenderFPS != 58 || got.DecodeMs != 2.5 || got.RenderMs != 1.2 {
+		t.Fatalf("viewer stats=%+v", got)
+	}
+}

@@ -11,7 +11,7 @@ func TestFrameToNV12PacksStride(t *testing.T) {
 
 	out, err := frameToNV12(RawFrame{
 		Format: PixelFormatNV12,
-		Pix: raw, Width: width, Height: height, Stride: stride,
+		Pix:    raw, Width: width, Height: height, Stride: stride,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)

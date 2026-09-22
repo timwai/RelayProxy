@@ -39,7 +39,7 @@ const (
 
 	mfVideoInterlaceProgressive = 2
 
-	mftOutputStreamProvidesSamples = 0x100
+	mftOutputStreamProvidesSamples   = 0x100
 	mftOutputStreamCanProvideSamples = 0x200
 )
 

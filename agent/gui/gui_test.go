@@ -273,3 +273,25 @@ func TestRemoteDesktopDiagnosticsExport(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteDesktopCaptureBackendSelector(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-opt-capture"`,
+		`<option value="dxgi">DXGI</option>`,
+		`<option value="gdi">GDI</option>`,
+		`var captureBackend = $('desktop-opt-capture') ? $('desktop-opt-capture').value : 'auto';`,
+		`captureBackend: captureBackend || 'auto'`,
+		`parts.push('Capture ' + options.captureBackend.toUpperCase())`,
+		`显式 DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端`,
+		`强制 DXGI 时请先选择具体显示器`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop capture backend selector missing %q", want)
+		}
+	}
+}

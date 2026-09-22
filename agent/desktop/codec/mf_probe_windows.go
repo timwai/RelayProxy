@@ -27,15 +27,18 @@ const (
 )
 
 var (
-	mfplatDLL             = windows.NewLazySystemDLL("mfplat.dll")
-	ole32DLL              = windows.NewLazySystemDLL("ole32.dll")
-	procMFStartup         = mfplatDLL.NewProc("MFStartup")
-	procMFShutdown        = mfplatDLL.NewProc("MFShutdown")
-	procMFTEnumEx         = mfplatDLL.NewProc("MFTEnumEx")
-	procMFCreateMediaType = mfplatDLL.NewProc("MFCreateMediaType")
-	procCoInitEx          = ole32DLL.NewProc("CoInitializeEx")
-	procCoUninit          = ole32DLL.NewProc("CoUninitialize")
-	procCoTaskFree        = ole32DLL.NewProc("CoTaskMemFree")
+	mfplatDLL                       = windows.NewLazySystemDLL("mfplat.dll")
+	ole32DLL                        = windows.NewLazySystemDLL("ole32.dll")
+	procMFStartup                   = mfplatDLL.NewProc("MFStartup")
+	procMFShutdown                  = mfplatDLL.NewProc("MFShutdown")
+	procMFTEnumEx                   = mfplatDLL.NewProc("MFTEnumEx")
+	procMFCreateMediaType           = mfplatDLL.NewProc("MFCreateMediaType")
+	procMFCreateSample              = mfplatDLL.NewProc("MFCreateSample")
+	procMFCreateMemoryBuffer        = mfplatDLL.NewProc("MFCreateMemoryBuffer")
+	procMFCreateAlignedMemoryBuffer = mfplatDLL.NewProc("MFCreateAlignedMemoryBuffer")
+	procCoInitEx                    = ole32DLL.NewProc("CoInitializeEx")
+	procCoUninit                    = ole32DLL.NewProc("CoUninitialize")
+	procCoTaskFree                  = ole32DLL.NewProc("CoTaskMemFree")
 )
 
 var (

@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -22,10 +23,13 @@ const (
 
 	imfActivateActivateObject = 33
 
-	imfTransformGetAttributes  = 8
-	imfTransformSetInputType   = 15
-	imfTransformSetOutputType  = 16
-	imfTransformProcessMessage = 23
+	imfTransformGetOutputStreamInfo = 7
+	imfTransformGetAttributes       = 8
+	imfTransformSetInputType        = 15
+	imfTransformSetOutputType       = 16
+	imfTransformProcessMessage      = 23
+	imfTransformProcessInput        = 24
+	imfTransformProcessOutput       = 25
 
 	mftMessageCommandFlush         = 0x00000000
 	mftMessageNotifyBeginStreaming = 0x10000000
@@ -34,6 +38,9 @@ const (
 	mftMessageNotifyStartOfStream  = 0x10000003
 
 	mfVideoInterlaceProgressive = 2
+
+	mftOutputStreamProvidesSamples   = 0x100
+	mftOutputStreamCanProvideSamples = 0x200
 )
 
 var (
@@ -106,7 +113,32 @@ type MFH264Transform struct {
 
 type mfTransformCommand struct {
 	close bool
-	reply chan error
+	input *mfEncodeInput
+	reply chan mfTransformResult
+}
+
+type mfEncodeInput struct {
+	data      []byte
+	timestamp time.Duration
+	duration  time.Duration
+}
+
+type mfTransformResult struct {
+	packets []EncodedPacket
+	err     error
+}
+
+type mftOutputStreamInfo struct {
+	Flags     uint32
+	Size      uint32
+	Alignment uint32
+}
+
+type mftOutputDataBuffer struct {
+	StreamID uint32
+	Sample   unsafe.Pointer
+	Status   uint32
+	Events   unsafe.Pointer
 }
 
 type mfTransformInit struct {
@@ -343,7 +375,7 @@ func activationGroups(preferHardware bool) []struct {
 	}{software, hardware}
 }
 
-func openConfiguredH264Transform(ctx context.Context, cfg VideoConfig, preferHardware bool) (unsafe.Pointer, MFH264TransformInfo, error) {
+func openConfiguredH264Transform(ctx context.Context, cfg VideoConfig, preferHardware, allowAsync bool) (unsafe.Pointer, MFH264TransformInfo, error) {
 	rawNV12 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatNV12}
 	h264 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatH264}
 	var failures []error
@@ -366,12 +398,16 @@ func openConfiguredH264Transform(ctx context.Context, cfg VideoConfig, preferHar
 				continue
 			}
 			async, err := configureH264Transform(transform, cfg)
-			if err == nil {
+			if err == nil && (!async || allowAsync) {
 				releaseMFTActivations(activations[index+1:])
 				return transform, MFH264TransformInfo{Hardware: group.hardware, Async: async, Config: cfg}, nil
 			}
 			releaseIUnknown(transform)
-			failures = append(failures, err)
+			if err != nil {
+				failures = append(failures, err)
+			} else {
+				failures = append(failures, errors.New("asynchronous MFT requires event-driven processing"))
+			}
 		}
 		releaseMFTActivations(activations)
 	}
@@ -382,6 +418,10 @@ func openConfiguredH264Transform(ctx context.Context, cfg VideoConfig, preferHar
 }
 
 func OpenMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware bool) (*MFH264Transform, error) {
+	return openMFH264Transform(ctx, cfg, preferHardware, true)
+}
+
+func openMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware, allowAsync bool) (*MFH264Transform, error) {
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -391,7 +431,7 @@ func OpenMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware bo
 		commands: make(chan mfTransformCommand),
 		done:     make(chan struct{}),
 	}
-	go session.run(cfg, preferHardware, initCh)
+	go session.run(cfg, preferHardware, allowAsync, initCh)
 
 	select {
 	case <-ctx.Done():
@@ -408,7 +448,7 @@ func OpenMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware bo
 	}
 }
 
-func (s *MFH264Transform) run(cfg VideoConfig, preferHardware bool, initCh chan<- mfTransformInit) {
+func (s *MFH264Transform) run(cfg VideoConfig, preferHardware, allowAsync bool, initCh chan<- mfTransformInit) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(s.done)
@@ -427,7 +467,7 @@ func (s *MFH264Transform) run(cfg VideoConfig, preferHardware bool, initCh chan<
 	}
 	defer shutdownMF()
 
-	transform, info, err := openConfiguredH264Transform(context.Background(), cfg, preferHardware)
+	transform, info, err := openConfiguredH264Transform(context.Background(), cfg, preferHardware, allowAsync)
 	if err != nil {
 		initCh <- mfTransformInit{err: err}
 		return
@@ -440,10 +480,171 @@ func (s *MFH264Transform) run(cfg VideoConfig, preferHardware bool, initCh chan<
 			_ = processTransformMessage(transform, mftMessageNotifyEndOfStream)
 			_ = processTransformMessage(transform, mftMessageNotifyEndStreaming)
 			_ = processTransformMessage(transform, mftMessageCommandFlush)
-			command.reply <- nil
+			command.reply <- mfTransformResult{}
 			return
 		}
-		command.reply <- errors.New("unsupported Media Foundation transform command")
+		if command.input != nil {
+			if info.Async {
+				command.reply <- mfTransformResult{err: errors.New("asynchronous MFT processing is not enabled")}
+				continue
+			}
+			packets, err := processSyncH264Frame(transform, info.Config, *command.input)
+			command.reply <- mfTransformResult{packets: packets, err: err}
+			continue
+		}
+		command.reply <- mfTransformResult{err: errors.New("unsupported Media Foundation transform command")}
+	}
+}
+
+func getOutputStreamInfo(transform unsafe.Pointer) (mftOutputStreamInfo, error) {
+	var info mftOutputStreamInfo
+	hr := comCall(transform, imfTransformGetOutputStreamInfo, 0, uintptr(unsafe.Pointer(&info)))
+	if hresultFailed(hr) {
+		return mftOutputStreamInfo{}, hresultError("IMFTransform.GetOutputStreamInfo", hr)
+	}
+	return info, nil
+}
+
+func processTransformInputSample(transform, sample unsafe.Pointer) uintptr {
+	return comCall(transform, imfTransformProcessInput, 0, uintptr(sample), 0)
+}
+
+func processTransformOutputOnce(transform unsafe.Pointer, fallbackTimestamp time.Duration) (*EncodedPacket, uintptr, error) {
+	info, err := getOutputStreamInfo(transform)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var outputSample unsafe.Pointer
+	if info.Flags&(mftOutputStreamProvidesSamples|mftOutputStreamCanProvideSamples) == 0 {
+		if info.Size == 0 {
+			return nil, 0, errors.New("MFT requires a caller output sample but reported zero buffer size")
+		}
+		outputSample, err = createOutputSample(info.Size, info.Alignment)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	out := mftOutputDataBuffer{StreamID: 0, Sample: outputSample}
+	var status uint32
+	hr := comCall(
+		transform,
+		imfTransformProcessOutput,
+		0,
+		1,
+		uintptr(unsafe.Pointer(&out)),
+		uintptr(unsafe.Pointer(&status)),
+	)
+	if out.Events != nil {
+		releaseIUnknown(out.Events)
+	}
+	if hresultFailed(hr) {
+		if out.Sample != nil {
+			releaseIUnknown(out.Sample)
+		}
+		return nil, hr, nil
+	}
+	if out.Sample == nil {
+		return nil, hr, errors.New("MFT ProcessOutput succeeded without a sample")
+	}
+	data, err := sampleBytes(out.Sample)
+	packet := &EncodedPacket{
+		Codec:     "h264",
+		Data:      data,
+		Timestamp: sampleTimestamp(out.Sample, fallbackTimestamp),
+		KeyFrame:  sampleIsCleanPoint(out.Sample),
+	}
+	releaseIUnknown(out.Sample)
+	if err != nil {
+		return nil, hr, err
+	}
+	if len(packet.Data) == 0 {
+		return nil, hr, nil
+	}
+	return packet, hr, nil
+}
+
+func drainSyncH264Output(transform unsafe.Pointer, fallbackTimestamp time.Duration) ([]EncodedPacket, error) {
+	var packets []EncodedPacket
+	for {
+		packet, hr, err := processTransformOutputOnce(transform, fallbackTimestamp)
+		if err != nil {
+			return nil, err
+		}
+		if uint32(hr) == mfETransformNeedMoreInput {
+			return packets, nil
+		}
+		if hresultFailed(hr) {
+			return nil, hresultError("IMFTransform.ProcessOutput", hr)
+		}
+		if packet != nil {
+			packets = append(packets, *packet)
+		}
+	}
+}
+
+func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEncodeInput) ([]EncodedPacket, error) {
+	sample, err := createInputSample(input.data, input.timestamp, input.duration)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseIUnknown(sample)
+
+	var packets []EncodedPacket
+	hr := processTransformInputSample(transform, sample)
+	if uint32(hr) == mfENotAccepting {
+		pending, err := drainSyncH264Output(transform, input.timestamp)
+		if err != nil {
+			return nil, err
+		}
+		packets = append(packets, pending...)
+		hr = processTransformInputSample(transform, sample)
+	}
+	if hresultFailed(hr) {
+		return nil, hresultError("IMFTransform.ProcessInput", hr)
+	}
+	encoded, err := drainSyncH264Output(transform, input.timestamp)
+	if err != nil {
+		return nil, err
+	}
+	return append(packets, encoded...), nil
+}
+
+func (s *MFH264Transform) EncodeNV12(ctx context.Context, data []byte, timestamp time.Duration) ([]EncodedPacket, error) {
+	if s == nil {
+		return nil, ErrEncoderUnavailable
+	}
+	if s.info.Async {
+		return nil, errors.New("asynchronous Media Foundation MFT processing is not enabled")
+	}
+	if len(data) != s.info.Config.Width*s.info.Config.Height*3/2 {
+		return nil, fmt.Errorf("%w: NV12 sample size does not match configured frame", ErrInvalidFrame)
+	}
+	duration := time.Second / time.Duration(s.info.Config.FPS)
+	reply := make(chan mfTransformResult, 1)
+	command := mfTransformCommand{
+		input: &mfEncodeInput{
+			data:      append([]byte(nil), data...),
+			timestamp: timestamp,
+			duration:  duration,
+		},
+		reply: reply,
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, ErrEncoderUnavailable
+	case s.commands <- command:
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.done:
+		return nil, ErrEncoderUnavailable
+	case result := <-reply:
+		return result.packets, result.err
 	}
 }
 
@@ -460,10 +661,10 @@ func (s *MFH264Transform) Close() error {
 	}
 	var closeErr error
 	s.closeOnce.Do(func() {
-		reply := make(chan error, 1)
+		reply := make(chan mfTransformResult, 1)
 		select {
 		case s.commands <- mfTransformCommand{close: true, reply: reply}:
-			closeErr = <-reply
+			closeErr = (<-reply).err
 			close(s.commands)
 		case <-s.done:
 		}

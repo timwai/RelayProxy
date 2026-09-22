@@ -188,7 +188,8 @@ func TestDiagnosticsSnapshotUsesShortWindow(t *testing.T) {
 	}
 
 	empty := stats.DiagnosticsSnapshot(now.Add(500 * time.Millisecond))
-	if empty.ActualBitrate != 0 || empty.ReceiveFPS != 0 || empty.LossPercent != 0 {
+	if empty.ActualBitrate != 0 || empty.ReceiveFPS != 0 || empty.LossPercent != 0 ||
+		empty.DroppedFrames != 0 {
 		t.Fatalf("diagnostic window did not advance: %+v", empty)
 	}
 }
@@ -203,5 +204,36 @@ func TestDiagnosticsSnapshotDoesNotConsumeABRLossWindow(t *testing.T) {
 	}
 	if got := stats.AdaptationSnapshot(now).LossPercent; got <= 0 {
 		t.Fatalf("diagnostics unexpectedly consumed ABR loss window: %v", got)
+	}
+}
+
+func TestDiagnosticsWindowResetsAtPathBoundary(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	now := time.Now()
+	stats.diagnosticAt = now.Add(-500 * time.Millisecond)
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 10}, 1000)
+	stats.ObserveFrame()
+	before := stats.DiagnosticsSnapshot(now)
+	if before.ActualBitrate <= 0 || before.ReceiveFPS <= 0 || before.Path != "relay" {
+		t.Fatalf("relay diagnostic sample=%+v", before)
+	}
+
+	stats.ObservePacket(desktopmedia.MediaHeader{Sequence: 11}, 1000)
+	stats.ObserveFrame()
+	stats.SetPath("udp_p2p")
+	after := stats.DiagnosticsSnapshot(time.Now().Add(500 * time.Millisecond))
+	if after.ActualBitrate != 0 || after.ReceiveFPS != 0 || after.LossPercent != 0 ||
+		after.Path != "udp_p2p" {
+		t.Fatalf("path boundary leaked previous media into diagnostics: %+v", after)
+	}
+}
+
+func TestAdaptationSnapshotStillIncludesLocalDroppedFrames(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	stats.MergeRemote(protocol.DesktopSessionStats{DroppedFrames: 3})
+	stats.ObserveDroppedFrame()
+	got := stats.AdaptationSnapshot(time.Now())
+	if got.DroppedFrames != 4 {
+		t.Fatalf("adaptation dropped frames=%d want=4", got.DroppedFrames)
 	}
 }

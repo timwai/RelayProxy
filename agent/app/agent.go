@@ -1098,14 +1098,6 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					})
 					lost := make(chan struct{})
 					var lostOnce sync.Once
-					direct.SetOnClose(func() {
-						a.mu.Lock()
-						if a.desktopP2PSession == direct {
-							a.desktopP2PSession = nil
-						}
-						a.mu.Unlock()
-						lostOnce.Do(func() { close(lost) })
-					})
 
 					a.mu.Lock()
 					if a.closed.Load() || a.desktopConnection != controller || !controller.Active() {
@@ -1117,6 +1109,14 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					old := a.desktopP2PSession
 					a.desktopP2PSession = direct
 					a.mu.Unlock()
+					direct.SetOnClose(func() {
+						a.mu.Lock()
+						if a.desktopP2PSession == direct {
+							a.desktopP2PSession = nil
+						}
+						a.mu.Unlock()
+						lostOnce.Do(func() { close(lost) })
+					})
 					cancel()
 
 					if old != nil && old != direct {

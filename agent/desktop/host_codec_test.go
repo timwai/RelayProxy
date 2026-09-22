@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	desktopcodec "relayproxy/agent/desktop/codec"
+	desktopmedia "relayproxy/internal/desktop"
 )
 
 type abrTestEncoder struct {
@@ -77,5 +79,56 @@ func TestReconfigureH264BitrateSkipsUnchangedTarget(t *testing.T) {
 	}
 	if next.TargetBitrate != current.TargetBitrate || len(encoder.configs) != 0 {
 		t.Fatalf("unchanged target reconfigured: next=%+v configs=%+v", next, encoder.configs)
+	}
+}
+
+type delayedDesktopPath struct {
+	delay time.Duration
+}
+
+func (p *delayedDesktopPath) Name() string { return "test-delayed" }
+func (p *delayedDesktopPath) Send(ctx context.Context, _ []byte) error {
+	timer := time.NewTimer(p.delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+func (p *delayedDesktopPath) Receive(context.Context) ([]byte, error) {
+	return nil, errors.New("receive is not used")
+}
+func (p *delayedDesktopPath) Close() error { return nil }
+
+func TestSendEncodedDesktopFrameMeasuresQueueDelay(t *testing.T) {
+	conn := desktopmedia.NewMediaConn(nil, nil)
+	conn.SetDatagramPath(&delayedDesktopPath{delay: 15 * time.Millisecond})
+	defer conn.Close()
+
+	frame := desktopmedia.EncodedFrame{
+		SessionID:  1,
+		StreamID:   1,
+		Generation: 1,
+		FrameID:    1,
+		Timestamp:  1,
+		KeyFrame:   true,
+		Data:       []byte("frame"),
+	}
+	sequence := uint32(1)
+	var queueDelayMs float64
+	if err := sendEncodedDesktopFrame(
+		context.Background(),
+		conn,
+		frame,
+		1200,
+		&sequence,
+		&queueDelayMs,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if queueDelayMs < 10 {
+		t.Fatalf("queue delay=%vms did not include blocked media send", queueDelayMs)
 	}
 }

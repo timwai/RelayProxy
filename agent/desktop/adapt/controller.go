@@ -12,6 +12,7 @@ type NetworkEstimate struct {
 	RTT          time.Duration
 	Jitter       time.Duration
 	Loss         float64
+	QueueDelay   time.Duration
 	Dropped      uint64
 }
 
@@ -118,6 +119,7 @@ func (c *Controller) Observe(stats protocol.DesktopSessionStats) MediaDecision {
 		RTT:          time.Duration(stats.RTTMs * float64(time.Millisecond)),
 		Jitter:       time.Duration(stats.JitterMs * float64(time.Millisecond)),
 		Loss:         stats.LossPercent,
+		QueueDelay:   time.Duration(stats.SendQueueDelayMs * float64(time.Millisecond)),
 		Dropped:      droppedDelta,
 	}
 	return c.observeEstimate(estimate)
@@ -181,6 +183,8 @@ func (c *Controller) degradeFactor(estimate NetworkEstimate) (float64, string) {
 		return 0.60, "frame_loss"
 	case estimate.Loss >= 5:
 		return 0.60, "severe_loss"
+	case estimate.QueueDelay >= 120*time.Millisecond:
+		return 0.60, "severe_queue"
 	case estimate.Jitter >= 80*time.Millisecond:
 		return 0.65, "severe_jitter"
 	case estimate.RTT >= 350*time.Millisecond:
@@ -189,12 +193,16 @@ func (c *Controller) degradeFactor(estimate NetworkEstimate) (float64, string) {
 		return 0.78, "frame_loss"
 	case estimate.Loss >= 2:
 		return 0.75, "loss"
+	case estimate.QueueDelay >= 60*time.Millisecond:
+		return 0.75, "queue"
 	case estimate.Jitter >= 40*time.Millisecond:
 		return 0.80, "jitter"
 	case estimate.RTT >= 250*time.Millisecond:
 		return 0.85, "high_rtt"
 	case estimate.Loss >= 1:
 		return 0.90, "mild_loss"
+	case estimate.QueueDelay >= 30*time.Millisecond:
+		return 0.90, "mild_queue"
 	case estimate.Jitter >= 25*time.Millisecond:
 		return 0.90, "mild_jitter"
 	default:
@@ -203,7 +211,10 @@ func (c *Controller) degradeFactor(estimate NetworkEstimate) (float64, string) {
 }
 
 func (c *Controller) stableEstimate(estimate NetworkEstimate) bool {
-	if estimate.Dropped != 0 || estimate.Loss > 0.3 || estimate.Jitter > 15*time.Millisecond {
+	if estimate.Dropped != 0 ||
+		estimate.Loss > 0.3 ||
+		estimate.Jitter > 15*time.Millisecond ||
+		estimate.QueueDelay > 15*time.Millisecond {
 		return false
 	}
 	// A long but stable path can still carry a high bitrate. RTT alone only

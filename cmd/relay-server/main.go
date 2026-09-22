@@ -213,9 +213,15 @@ func main() {
 					return gateway.DeviceAuthorization{}, listErr
 				}
 				for _, target := range desktopTargets {
+					var onlineSession *session.DeviceSession
+					if current, ok := sessionMgr.Get(target.DeviceID); ok {
+						onlineSession = current
+					}
 					authorized.RemoteDesktopTargets = append(authorized.RemoteDesktopTargets, protocol.RemoteDesktopTarget{
 						DeviceID: target.DeviceID, Name: target.Name, Online: target.Online,
-						Capabilities: protocol.DesktopCapabilities{NativeRDP: target.NativeRDP, RelayDesktop: target.RelayDesktop},
+						Capabilities: session.DesktopCapabilitiesForTarget(
+							onlineSession, target.NativeRDP, target.RelayDesktop,
+						),
 					})
 				}
 			}

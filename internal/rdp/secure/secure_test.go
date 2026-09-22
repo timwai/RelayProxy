@@ -71,7 +71,6 @@ func TestDataCodecReusableBuffers(t *testing.T) {
 	}
 }
 
-
 func TestDesktopMediaDomainRejectsRDPAuthentication(t *testing.T) {
 	key := bytes.Repeat([]byte{0x51}, 32)
 

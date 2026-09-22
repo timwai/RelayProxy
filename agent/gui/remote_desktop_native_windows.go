@@ -93,6 +93,10 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	var decoder desktopcodec.Decoder
 	if device := native.D3D11Device(); device != 0 {
 		decoder, err = desktopcodec.OpenMFH264DecoderWithD3D11(ctx, decoderConfig, true, device)
+		if err != nil {
+			log.Printf("[Desktop] shared-device H.264 decoder unavailable, falling back: %v", err)
+			decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
+		}
 	} else {
 		decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
 	}

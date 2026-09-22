@@ -222,3 +222,25 @@ func TestH264DesktopVideoConfigCarriesGenerationBounds(t *testing.T) {
 		t.Fatalf("video config codec fields=%+v", got)
 	}
 }
+
+func TestNextDesktopMediaGeneration(t *testing.T) {
+	next, err := nextDesktopMediaGeneration(0)
+	if err != nil || next != 1 {
+		t.Fatalf("generation 0 -> %d err=%v", next, err)
+	}
+	next, err = nextDesktopMediaGeneration(7)
+	if err != nil || next != 8 {
+		t.Fatalf("generation 7 -> %d err=%v", next, err)
+	}
+	if _, err := nextDesktopMediaGeneration(^uint32(0)); err == nil {
+		t.Fatal("generation overflow was accepted")
+	}
+}
+
+func TestH264RuntimeErrorPreservesGenerationAndCause(t *testing.T) {
+	cause := errors.New("encode failed")
+	err := &h264RuntimeError{Generation: 5, Err: cause}
+	if err.Generation != 5 || !errors.Is(err, cause) {
+		t.Fatalf("runtime error=%+v", err)
+	}
+}

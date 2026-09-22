@@ -11,12 +11,15 @@ import (
 
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
+
+	"relayproxy/internal/protocol"
 )
 
 const (
 	nativeViewerClass = "RelayProxyNativeViewerWindow"
 
 	wmNativeViewerFrame = win.WM_APP + 0x311
+	wmMouseHWheel       = 0x020e
 )
 
 var (
@@ -36,6 +39,10 @@ type windowsViewer struct {
 	latest  Frame
 
 	renderer *d3d11Renderer
+
+	inputSequence  uint64
+	pressedKeys    map[uint16]bool
+	pressedButtons map[string]bool
 
 	errMu sync.Mutex
 	err   error
@@ -75,8 +82,10 @@ func Open(config Config) (Native, error) {
 		config.Title = "RelayProxy Remote Desktop"
 	}
 	viewer := &windowsViewer{
-		config: config,
-		done:   make(chan struct{}),
+		config:         config,
+		done:           make(chan struct{}),
+		pressedKeys:    make(map[uint16]bool),
+		pressedButtons: make(map[string]bool),
 	}
 	initCh := make(chan error, 1)
 	go viewer.run(initCh)
@@ -166,10 +175,93 @@ func (v *windowsViewer) run(initCh chan<- error) {
 }
 
 func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+	viewer, _ := nativeViewerFor(hwnd)
 	switch msg {
+	case win.WM_KEYDOWN, win.WM_SYSKEYDOWN:
+		if viewer != nil {
+			key := uint16(wParam)
+			viewer.pressedKeys[key] = true
+			viewer.emitInput(protocol.DesktopInputEvent{
+				Kind:       protocol.DesktopInputKeyDown,
+				VirtualKey: key,
+				Extended:   lParam&(1<<24) != 0,
+			})
+		}
+		return 0
+
+	case win.WM_KEYUP, win.WM_SYSKEYUP:
+		if viewer != nil {
+			key := uint16(wParam)
+			delete(viewer.pressedKeys, key)
+			viewer.emitInput(protocol.DesktopInputEvent{
+				Kind:       protocol.DesktopInputKeyUp,
+				VirtualKey: key,
+				Extended:   lParam&(1<<24) != 0,
+			})
+		}
+		return 0
+
+	case win.WM_MOUSEMOVE:
+		if viewer != nil {
+			x, y := clientPoint(lParam)
+			nx, ny := viewer.normalizedPointer(x, y)
+			viewer.emitInput(protocol.DesktopInputEvent{
+				Kind: protocol.DesktopInputMouseMove,
+				X:    nx,
+				Y:    ny,
+			})
+		}
+		return 0
+
+	case win.WM_LBUTTONDOWN, win.WM_RBUTTONDOWN, win.WM_MBUTTONDOWN, win.WM_XBUTTONDOWN:
+		if viewer != nil {
+			button := mouseButton(msg, wParam)
+			if button != "" {
+				viewer.pressedButtons[button] = true
+				win.SetFocus(hwnd)
+				win.SetCapture(hwnd)
+				viewer.emitInput(protocol.DesktopInputEvent{
+					Kind:   protocol.DesktopInputMouseDown,
+					Button: button,
+				})
+			}
+		}
+		return 0
+
+	case win.WM_LBUTTONUP, win.WM_RBUTTONUP, win.WM_MBUTTONUP, win.WM_XBUTTONUP:
+		if viewer != nil {
+			button := mouseButton(msg, wParam)
+			if button != "" {
+				delete(viewer.pressedButtons, button)
+				viewer.emitInput(protocol.DesktopInputEvent{
+					Kind:   protocol.DesktopInputMouseUp,
+					Button: button,
+				})
+				if len(viewer.pressedButtons) == 0 {
+					win.ReleaseCapture()
+				}
+			}
+		}
+		return 0
+
+	case win.WM_MOUSEWHEEL, wmMouseHWheel:
+		if viewer != nil {
+			viewer.emitInput(protocol.DesktopInputEvent{
+				Kind:       protocol.DesktopInputMouseWheel,
+				WheelDelta: int32(int16(uint16(wParam >> 16))),
+				Horizontal: msg == wmMouseHWheel,
+			})
+		}
+		return 0
+
+	case win.WM_KILLFOCUS:
+		if viewer != nil {
+			viewer.releasePressedInput()
+		}
+		return 0
+
 	case wmNativeViewerFrame:
-		if value, ok := nativeViewerWindows.Load(uintptr(hwnd)); ok {
-			viewer := value.(*windowsViewer)
+		if viewer != nil {
 			if err := viewer.renderLatest(); err != nil {
 				viewer.setError(err)
 				win.DestroyWindow(hwnd)
@@ -189,6 +281,84 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		return 0
 	}
 	return win.DefWindowProc(hwnd, msg, wParam, lParam)
+}
+
+func nativeViewerFor(hwnd win.HWND) (*windowsViewer, bool) {
+	value, ok := nativeViewerWindows.Load(uintptr(hwnd))
+	if !ok {
+		return nil, false
+	}
+	viewer, ok := value.(*windowsViewer)
+	return viewer, ok
+}
+
+func clientPoint(lParam uintptr) (int, int) {
+	x := int(int16(uint16(lParam & 0xffff)))
+	y := int(int16(uint16((lParam >> 16) & 0xffff)))
+	return x, y
+}
+
+func (v *windowsViewer) normalizedPointer(x, y int) (uint16, uint16) {
+	if v.config.Width <= 1 || v.config.Height <= 1 {
+		return 0, 0
+	}
+	if x < 0 {
+		x = 0
+	} else if x >= v.config.Width {
+		x = v.config.Width - 1
+	}
+	if y < 0 {
+		y = 0
+	} else if y >= v.config.Height {
+		y = v.config.Height - 1
+	}
+	return uint16(x * 65535 / (v.config.Width - 1)), uint16(y * 65535 / (v.config.Height - 1))
+}
+
+func mouseButton(msg uint32, wParam uintptr) string {
+	switch msg {
+	case win.WM_LBUTTONDOWN, win.WM_LBUTTONUP:
+		return protocol.DesktopMouseButtonLeft
+	case win.WM_RBUTTONDOWN, win.WM_RBUTTONUP:
+		return protocol.DesktopMouseButtonRight
+	case win.WM_MBUTTONDOWN, win.WM_MBUTTONUP:
+		return protocol.DesktopMouseButtonMiddle
+	case win.WM_XBUTTONDOWN, win.WM_XBUTTONUP:
+		if uint16(wParam>>16) == 1 {
+			return protocol.DesktopMouseButtonX1
+		}
+		if uint16(wParam>>16) == 2 {
+			return protocol.DesktopMouseButtonX2
+		}
+	}
+	return ""
+}
+
+func (v *windowsViewer) emitInput(event protocol.DesktopInputEvent) {
+	if v == nil || v.config.OnInput == nil {
+		return
+	}
+	v.inputSequence++
+	event.Sequence = v.inputSequence
+	v.config.OnInput(event)
+}
+
+func (v *windowsViewer) releasePressedInput() {
+	for key := range v.pressedKeys {
+		v.emitInput(protocol.DesktopInputEvent{
+			Kind:       protocol.DesktopInputKeyUp,
+			VirtualKey: key,
+		})
+	}
+	clear(v.pressedKeys)
+	for button := range v.pressedButtons {
+		v.emitInput(protocol.DesktopInputEvent{
+			Kind:   protocol.DesktopInputMouseUp,
+			Button: button,
+		})
+	}
+	clear(v.pressedButtons)
+	win.ReleaseCapture()
 }
 
 func (v *windowsViewer) renderLatest() error {

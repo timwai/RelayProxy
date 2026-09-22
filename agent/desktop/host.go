@@ -46,6 +46,13 @@ type HostCapabilityProvider interface {
 	DesktopCapabilities(context.Context) protocol.DesktopCapabilities
 }
 
+// SessionInputSink lets platform input map viewer-local normalized coordinates
+// into the same display geometry that the capture session is streaming.
+type SessionInputSink interface {
+	BeginInputSession(context.Context, HostConfig) error
+	EndInputSession() error
+}
+
 type HostConfig struct {
 	MaxFPS      int
 	MaxWidth    int
@@ -53,6 +60,7 @@ type HostConfig struct {
 	JPEGQuality int
 	MaxBitrate  int
 	PacketSize  int
+	DisplayID   string
 }
 
 func DefaultHostConfig() HostConfig {
@@ -189,6 +197,7 @@ func ResolveHostConfig(base HostConfig, options protocol.RemoteDesktopConnectOpt
 	if options.MaxBitrate > 0 {
 		cfg.MaxBitrate = options.MaxBitrate
 	}
+	cfg.DisplayID = options.DisplayID
 
 	cfg.MaxWidth = clampInt(cfg.MaxWidth, 320, maxJPEGWidth)
 	cfg.MaxHeight = clampInt(cfg.MaxHeight, 180, maxJPEGHeight)
@@ -231,7 +240,13 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 		defer source.EndSession()
 		backend = source.CaptureBackend()
 	}
-	log.Printf("[Desktop] session capture=%s config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
+	if input, ok := h.input.(SessionInputSink); ok {
+		if err := input.BeginInputSession(ctx, sessionConfig); err != nil {
+			return fmt.Errorf("start desktop input session: %w", err)
+		}
+		defer input.EndInputSession()
+	}
+	log.Printf("[Desktop] session capture=%s display=%q config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.DisplayID, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

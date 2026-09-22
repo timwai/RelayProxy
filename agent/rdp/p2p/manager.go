@@ -633,6 +633,9 @@ func (s *Session) setRemote(remote *net.UDPAddr, remotePort netip.AddrPort) {
 	if s.remotePort == remotePort {
 		s.remote = remote
 		s.mu.Unlock()
+		if s.manager != nil {
+			s.manager.notifyApplicationReady(s)
+		}
 		return
 	}
 	s.remote, s.remotePort = remote, remotePort
@@ -640,6 +643,9 @@ func (s *Session) setRemote(remote *net.UDPAddr, remotePort netip.AddrPort) {
 	s.remoteWake = make(chan struct{})
 	s.mu.Unlock()
 	close(wake)
+	if s.manager != nil {
+		s.manager.notifyApplicationReady(s)
+	}
 }
 
 func (s *Session) setCandidates(raw []protocol.RDPCandidate, forward bool) {
@@ -839,8 +845,8 @@ func (s *Session) closeLocal() {
 	s.closeOnce.Do(func() {
 		close(s.closed)
 		s.mu.Lock()
-		udp, local, reassembler := s.udp, s.localUDP, s.udpReassembler
-		s.udp, s.localUDP, s.udpReassembler = nil, nil, nil
+		udp, local, reassembler, applicationPath := s.udp, s.localUDP, s.udpReassembler, s.applicationPath
+		s.udp, s.localUDP, s.udpReassembler, s.applicationPath = nil, nil, nil, nil
 		onClose = s.onClose
 		s.onClose = nil
 		conns := make([]net.Conn, 0, len(s.directConns))
@@ -862,6 +868,9 @@ func (s *Session) closeLocal() {
 		}
 		if reassembler != nil {
 			reassembler.Close()
+		}
+		if applicationPath != nil {
+			applicationPath.closeLocal()
 		}
 		for _, conn := range conns {
 			_ = conn.Close()

@@ -54,6 +54,9 @@ type appWindow struct {
 
 	monitorMu sync.Mutex
 	monitor   *application.WebviewWindow
+
+	desktopViewerMu sync.Mutex
+	desktopViewer   *nativeDesktopSession
 }
 
 func systemPrefersDark() bool {
@@ -189,6 +192,7 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	defer detachLogTap(b)
 	a.pushStatusLoop()
 	defer a.stopStatusLoop()
+	defer a.stopNativeDesktopViewer()
 
 	if !opts.StartMinimized {
 		window.Center()

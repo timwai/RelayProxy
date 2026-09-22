@@ -3,14 +3,17 @@ package viewer
 import (
 	"errors"
 	"fmt"
+
+	"relayproxy/internal/protocol"
 )
 
 var ErrUnavailable = errors.New("native desktop viewer unavailable")
 
 type Config struct {
-	Title  string
-	Width  int
-	Height int
+	Title   string
+	Width   int
+	Height  int
+	OnInput func(protocol.DesktopInputEvent)
 }
 
 type Frame struct {

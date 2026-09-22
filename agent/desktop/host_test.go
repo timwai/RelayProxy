@@ -25,8 +25,8 @@ type testSessionCaptureSource struct {
 }
 
 func (s *testSessionCaptureSource) BeginSession(context.Context, HostConfig) error { return nil }
-func (s *testSessionCaptureSource) EndSession() error                             { return nil }
-func (s *testSessionCaptureSource) CaptureBackend() string                        { return s.backend }
+func (s *testSessionCaptureSource) EndSession() error                              { return nil }
+func (s *testSessionCaptureSource) CaptureBackend() string                         { return s.backend }
 
 func (s *testCapabilityCaptureSource) DesktopCaptureCapabilities(context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error) {
 	return []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}}, []protocol.DesktopDisplayCapability{{

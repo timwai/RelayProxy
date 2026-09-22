@@ -136,11 +136,18 @@ UI CI
 
 下一轮重点：
 
-1. 扩展 transport shim 场景到随机丢包 + burst loss + jitter + bandwidth drop 的组合，并验证 ABR 与 path switch 联动不会互相放大抖动。
+1. ✅ 已补齐组合弱网确定性场景：同一 transport shim profile 同时启用 jitter、random loss、burst loss 与 bandwidth shaping，并增加 ABR + path switch 联动场景，验证短时劣化优先降码率但不切路、持续劣化经过完整 hold 后才回退 Relay、恢复后 direct path 必须重新满足 promotion hold。
 2. ✅ 已加入 stale-frame/drop 实时性保护：H.264/JPEG 捕获循环不追赶过期 ticker，落后至少一个帧周期时直接跳过旧采样并累计 `DroppedFrames`；继续在组合弱网测试中验证持续积压下的行为。 
 3. 用组合弱网结果继续校准 `PathScorePolicy` 的权重、upgrade/emergency margin 与 hold window；默认值先保持本轮场景测试固化的行为。
 4. 完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵验证。
 5. 根据实机数据继续调整 ABR 阈值和 P2P retry/path-switch 参数。
+
+### 0.3.1 组合弱网联动验证（本轮新增）
+
+- `internal/testnetem` 增加组合 profile 确定性测试：30 ms 基线延迟、±12 ms jitter、18% random loss、周期 burst loss 与 12 KB/s 写侧限速同时启用，并验证固定 seed 下 drop/delay/queue 序列可重复。
+- `agent/desktop/path_policy_scenario_test.go` 增加 ABR 与路径切换联动场景：短时组合劣化立即触发 bitrate 降级，但不会绕过 `PathSwitchGate`；健康窗口会取消 fallback probation，ABR 仍按稳定窗口慢恢复。
+- 持续组合劣化必须经过完整 `UpgradeHold` 才从 `udp_p2p` 回退 Relay；回退后的健康 direct path 也必须重新经历 promotion hold，防止 P2P / Relay 来回振荡。
+- 该轮只固化现有默认参数行为，不因纯模拟结果调整生产权重；权重调整继续等待跨 NAT / Wi-Fi 实机数据。
 
 ### 0.4 当前实现与最终设计的差异
 

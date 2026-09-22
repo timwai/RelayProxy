@@ -176,3 +176,62 @@ func TestSetProfileStartsNewDeterministicPhase(t *testing.T) {
 		t.Fatalf("replayed deterministic delay=%s want=%s", replayedFirst, first)
 	}
 }
+
+func TestCombinedImpairmentProfileIsDeterministic(t *testing.T) {
+	type sample struct {
+		drop  bool
+		delay time.Duration
+		queue time.Duration
+	}
+
+	run := func() []sample {
+		conn, err := NewPacketConn(&fakePacketConn{}, Profile{
+			Delay:              30 * time.Millisecond,
+			Jitter:             12 * time.Millisecond,
+			LossPercent:        18,
+			BurstEveryPackets:  7,
+			BurstLengthPackets: 2,
+			RateBytesPerSecond: 12_000,
+			Seed:               20260922,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Unix(40, 0)
+		out := make([]sample, 18)
+		conn.mu.Lock()
+		defer conn.mu.Unlock()
+		for i := range out {
+			out[i] = sample{
+				drop:  conn.shouldDropLocked(),
+				delay: conn.packetDelayLocked(),
+				queue: conn.writeQueueDelayLocked(1200, now),
+			}
+		}
+		return out
+	}
+
+	first, second := run(), run()
+	drops := 0
+	queueBuilt := false
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("combined impairment sample %d is not reproducible: %+v != %+v", i, first[i], second[i])
+		}
+		if first[i].drop {
+			drops++
+		}
+		if first[i].delay < 18*time.Millisecond || first[i].delay > 42*time.Millisecond {
+			t.Fatalf("sample %d delay=%s outside jitter window", i, first[i].delay)
+		}
+		if first[i].queue > 0 {
+			queueBuilt = true
+		}
+	}
+	if drops < 6 {
+		t.Fatalf("combined profile drops=%d, expected burst plus random loss", drops)
+	}
+	if !queueBuilt {
+		t.Fatal("combined profile did not build a bandwidth-shaping queue")
+	}
+}

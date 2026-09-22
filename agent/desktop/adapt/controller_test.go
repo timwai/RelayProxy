@@ -228,3 +228,145 @@ func TestAdaptiveMinFPSPreservesInteractiveScenes(t *testing.T) {
 		t.Fatalf("office min fps=%d want=10", got)
 	}
 }
+
+func TestAdaptiveResolutionWaitsForPersistentSeverePressure(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneOffice, 10_000_000)
+	cfg.ResolutionPressureWindows = 3
+	controller := NewController(cfg)
+
+	first := controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 140})
+	if first.TargetResolutionScale != 100 || first.ResolutionChanged {
+		t.Fatalf("resolution changed before bitrate reduced: %+v", first)
+	}
+	second := controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 140})
+	if second.TargetResolutionScale != 100 || second.ResolutionChanged {
+		t.Fatalf("resolution changed on first eligible pressure window: %+v", second)
+	}
+	third := controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 140})
+	if third.TargetResolutionScale != 100 || third.ResolutionChanged {
+		t.Fatalf("resolution changed before full pressure hold: %+v", third)
+	}
+	fourth := controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 140})
+	if !fourth.ResolutionChanged || fourth.TargetResolutionScale != 75 || fourth.Reason != "resolution_downshift" {
+		t.Fatalf("persistent pressure did not downshift resolution: %+v", fourth)
+	}
+}
+
+func TestAdaptiveResolutionCanReachSecondTierAfterAnotherHold(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneOffice, 10_000_000)
+	cfg.ResolutionPressureWindows = 2
+	controller := NewController(cfg)
+
+	for i := 0; i < 12 && controller.TargetResolutionScale() == 100; i++ {
+		controller.Observe(protocol.DesktopSessionStats{LossPercent: 8})
+	}
+	if controller.TargetResolutionScale() != 75 {
+		t.Fatalf("first resolution tier=%d want=75", controller.TargetResolutionScale())
+	}
+	for i := 0; i < cfg.ResolutionPressureWindows; i++ {
+		controller.Observe(protocol.DesktopSessionStats{LossPercent: 8})
+	}
+	if controller.TargetResolutionScale() != 50 {
+		t.Fatalf("second resolution tier=%d want=50", controller.TargetResolutionScale())
+	}
+}
+
+func TestQualitySceneKeepsAtLeastSeventyFivePercentResolution(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneQuality, 10_000_000)
+	cfg.ResolutionPressureWindows = 1
+	controller := NewController(cfg)
+	for i := 0; i < 12; i++ {
+		controller.Observe(protocol.DesktopSessionStats{LossPercent: 10})
+	}
+	if controller.TargetResolutionScale() != 75 {
+		t.Fatalf("quality resolution scale=%d want=75", controller.TargetResolutionScale())
+	}
+}
+
+func TestGamingKeepsFPSButMayReduceResolutionAfterPersistentPressure(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneGaming, 10_000_000)
+	cfg.ResolutionPressureWindows = 2
+	controller := NewController(cfg)
+	for i := 0; i < 8; i++ {
+		controller.Observe(protocol.DesktopSessionStats{
+			SendQueueDelayMs: 160,
+			DroppedFrames:    uint64(i + 1),
+		})
+	}
+	if controller.TargetFPS() != cfg.MaxFPS {
+		t.Fatalf("gaming fps changed=%d want=%d", controller.TargetFPS(), cfg.MaxFPS)
+	}
+	if controller.TargetResolutionScale() >= 100 {
+		t.Fatalf("gaming resolution did not adapt under sustained pressure: %d", controller.TargetResolutionScale())
+	}
+}
+
+func TestAdaptiveRecoveryRestoresFPSBeforeResolution(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneOffice, 2_000_000)
+	cfg.MinBitrate = cfg.MaxBitrate
+	cfg.MaxFPS = 30
+	cfg.InitialFPS = 30
+	cfg.MinFPS = 10
+	cfg.FPSPressureWindows = 1
+	cfg.FPSRecoveryWindows = 2
+	cfg.ResolutionPressureWindows = 1
+	cfg.ResolutionRecoveryWindows = 3
+	controller := NewController(cfg)
+
+	pressure := controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 150})
+	if pressure.TargetFPS >= 30 || pressure.TargetResolutionScale != 75 {
+		t.Fatalf("pressure did not reduce fps/resolution: %+v", pressure)
+	}
+
+	healthy := protocol.DesktopSessionStats{RTTMs: 30, JitterMs: 2, LossPercent: 0.1, SendQueueDelayMs: 4}
+	for controller.TargetFPS() < cfg.MaxFPS {
+		beforeScale := controller.TargetResolutionScale()
+		for i := 0; i < cfg.FPSRecoveryWindows; i++ {
+			controller.Observe(healthy)
+		}
+		if controller.TargetResolutionScale() != beforeScale {
+			t.Fatalf("resolution recovered before fps: scale %d -> %d fps=%d",
+				beforeScale, controller.TargetResolutionScale(), controller.TargetFPS())
+		}
+	}
+	for i := 0; i < cfg.ResolutionRecoveryWindows-1; i++ {
+		decision := controller.Observe(healthy)
+		if decision.ResolutionChanged {
+			t.Fatalf("resolution recovered too quickly at window %d: %+v", i, decision)
+		}
+	}
+	decision := controller.Observe(healthy)
+	if !decision.ResolutionChanged || decision.TargetResolutionScale != 100 ||
+		decision.Reason != "resolution_recovery" {
+		t.Fatalf("resolution recovery decision=%+v", decision)
+	}
+}
+
+func TestAdaptiveMinResolutionScaleHonorsSceneAndCodecFloor(t *testing.T) {
+	if got := AdaptiveMinResolutionScale(protocol.DesktopSceneOffice, 1920, 1080); got != 50 {
+		t.Fatalf("office min resolution scale=%d want=50", got)
+	}
+	if got := AdaptiveMinResolutionScale(protocol.DesktopSceneQuality, 1920, 1080); got != 75 {
+		t.Fatalf("quality min resolution scale=%d want=75", got)
+	}
+	if got := AdaptiveMinResolutionScale(protocol.DesktopSceneOffice, 480, 270); got != 67 {
+		t.Fatalf("small-session min resolution scale=%d want=67", got)
+	}
+}
+
+func TestSetResolutionScaleSynchronizesManualGeneration(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneOffice, 8_000_000)
+	controller := NewController(cfg)
+	controller.SetResolutionScale(67)
+	if controller.TargetResolutionScale() != 67 {
+		t.Fatalf("manual resolution scale=%d want=67", controller.TargetResolutionScale())
+	}
+	controller.SetResolutionScale(10)
+	if controller.TargetResolutionScale() != 10 {
+		t.Fatalf("manual resolution scale=%d want=10", controller.TargetResolutionScale())
+	}
+	controller.SetResolutionScale(0)
+	if controller.TargetResolutionScale() != 100 {
+		t.Fatalf("invalid zero resolution scale=%d want=100", controller.TargetResolutionScale())
+	}
+}

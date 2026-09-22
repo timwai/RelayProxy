@@ -330,12 +330,14 @@ func (h *Host) streamH264Frames(
 	}()
 
 	generation := uint32(1)
+	sessionMaxWidth := videoCfg.Width
+	sessionMaxHeight := videoCfg.Height
 	sessionMaxBitrate := cfg.MaxBitrate
 	if sessionMaxBitrate <= 0 {
 		sessionMaxBitrate = videoCfg.TargetBitrate
 	}
 	if err := sendVideoConfig(ctx, conn, h264DesktopVideoConfig(
-		generation, videoCfg, cfg.MaxWidth, cfg.MaxHeight, sessionMaxBitrate, cfg.DisplayID, sequenceHeader,
+		generation, videoCfg, sessionMaxWidth, sessionMaxHeight, sessionMaxBitrate, cfg.DisplayID, sequenceHeader,
 	)); err != nil {
 		return err
 	}
@@ -516,7 +518,7 @@ func (h *Host) streamH264Frames(
 				continue
 			}
 			nextProtocolConfig := h264DesktopVideoConfig(
-				nextGeneration, nextConfig, cfg.MaxWidth, cfg.MaxHeight, sessionMaxBitrate, cfg.DisplayID, nextSequenceHeader,
+				nextGeneration, nextConfig, sessionMaxWidth, sessionMaxHeight, sessionMaxBitrate, cfg.DisplayID, nextSequenceHeader,
 			)
 			if err := sendVideoConfig(ctx, conn, nextProtocolConfig); err != nil {
 				_ = nextEncoder.Close()

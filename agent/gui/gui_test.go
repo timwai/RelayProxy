@@ -230,6 +230,7 @@ func TestRemoteDesktopRuntimeResolutionSwitcher(t *testing.T) {
 		`id="desktop-runtime-resolution-wrap"`,
 		`id="desktop-runtime-resolution"`,
 		`id="desktop-runtime-resolution-apply"`,
+		`id="desktop-runtime-resolution-max"`,
 		"function updateDesktopRuntimeResolutionControl(status)",
 		"status.codec === 'h264'",
 		"status.maxWidth || status.width || 0",
@@ -237,6 +238,8 @@ func TestRemoteDesktopRuntimeResolutionSwitcher(t *testing.T) {
 		"option.disabled = !!(maxWidth && maxHeight && (width > maxWidth || height > maxHeight))",
 		"async function setRemoteDesktopResolution()",
 		"call('goSetRemoteDesktopResolution', width, height)",
+		"value === 'max'",
+		"'最高 ' + maxWidth + '×' + maxHeight",
 		"等待新媒体 Generation",
 	} {
 		if !strings.Contains(page, want) {

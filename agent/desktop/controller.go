@@ -109,6 +109,8 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			}
 			if videoConfigRequiresABRReset(previousConfig, config) {
 				s.configureABR(config)
+			} else {
+				s.syncABRResolution(config)
 			}
 			s.configOnce.Do(func() { close(s.configReady) })
 
@@ -174,6 +176,77 @@ func videoConfigRequiresABRReset(previous, next protocol.DesktopVideoConfig) boo
 	return previousMaxBitrate != nextMaxBitrate
 }
 
+func videoConfigResolutionCeiling(config protocol.DesktopVideoConfig) (int, int) {
+	maxWidth := config.MaxWidth
+	if maxWidth <= 0 {
+		maxWidth = config.Width
+	}
+	maxHeight := config.MaxHeight
+	if maxHeight <= 0 {
+		maxHeight = config.Height
+	}
+	return maxWidth, maxHeight
+}
+
+func videoConfigResolutionScale(config protocol.DesktopVideoConfig) int {
+	maxWidth, maxHeight := videoConfigResolutionCeiling(config)
+	if config.Width <= 0 || config.Height <= 0 || maxWidth <= 0 || maxHeight <= 0 {
+		return 100
+	}
+	widthScale := (config.Width*100 + maxWidth - 1) / maxWidth
+	heightScale := (config.Height*100 + maxHeight - 1) / maxHeight
+	scale := widthScale
+	if heightScale > scale {
+		scale = heightScale
+	}
+	if scale < 1 {
+		scale = 1
+	}
+	if scale > 100 {
+		scale = 100
+	}
+	return scale
+}
+
+func resolutionBoundsForScale(config protocol.DesktopVideoConfig, scale int) (int, int, bool) {
+	maxWidth, maxHeight := videoConfigResolutionCeiling(config)
+	if maxWidth <= 0 || maxHeight <= 0 || scale <= 0 {
+		return 0, 0, false
+	}
+	if scale > 100 {
+		scale = 100
+	}
+	width := maxWidth * scale / 100
+	height := maxHeight * scale / 100
+	if width < 320 {
+		width = 320
+	}
+	if height < 180 {
+		height = 180
+	}
+	if width > maxWidth {
+		width = maxWidth
+	}
+	if height > maxHeight {
+		height = maxHeight
+	}
+	width &^= 1
+	height &^= 1
+	if width < 320 || height < 180 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func (s *ControllerSession) syncABRResolution(config protocol.DesktopVideoConfig) {
+	s.abrMu.Lock()
+	defer s.abrMu.Unlock()
+	if s.abr == nil {
+		return
+	}
+	s.abr.SetResolutionScale(videoConfigResolutionScale(config))
+}
+
 func (s *ControllerSession) configureABR(config protocol.DesktopVideoConfig) {
 	s.abrMu.Lock()
 	defer s.abrMu.Unlock()
@@ -187,6 +260,9 @@ func (s *ControllerSession) configureABR(config protocol.DesktopVideoConfig) {
 	}
 	cfg := desktopadapt.DefaultConfig(s.options.Scene, maxBitrate)
 	cfg.InitialBitrate = config.TargetBitrate
+	maxWidth, maxHeight := videoConfigResolutionCeiling(config)
+	cfg.MinResolutionScale = desktopadapt.AdaptiveMinResolutionScale(s.options.Scene, maxWidth, maxHeight)
+	cfg.InitialResolutionScale = videoConfigResolutionScale(config)
 	if config.FPS > 0 {
 		cfg.MaxFPS = config.FPS
 		cfg.InitialFPS = config.FPS
@@ -204,6 +280,23 @@ func (s *ControllerSession) abrDecision(stats protocol.DesktopSessionStats) desk
 	return s.abr.Observe(stats)
 }
 
+func abrVideoControl(
+	config protocol.DesktopVideoConfig,
+	decision desktopadapt.MediaDecision,
+) protocol.DesktopVideoControl {
+	control := protocol.DesktopVideoControl{
+		TargetBitrate: decision.TargetBitrate,
+		TargetFPS:     decision.TargetFPS,
+	}
+	if decision.ResolutionChanged {
+		if width, height, ok := resolutionBoundsForScale(config, decision.TargetResolutionScale); ok {
+			control.TargetWidth = width
+			control.TargetHeight = height
+		}
+	}
+	return control
+}
+
 func (s *ControllerSession) abrLoop(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -216,23 +309,28 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 				continue
 			}
 			decision := s.abrDecision(s.stats.AdaptationSnapshot(time.Now()))
-			if !decision.Changed || (decision.TargetBitrate <= 0 && decision.TargetFPS <= 0) {
+			if !decision.Changed {
+				continue
+			}
+			config := s.VideoConfigSnapshot()
+			control := abrVideoControl(config, decision)
+			if control.TargetBitrate <= 0 && control.TargetFPS <= 0 &&
+				(control.TargetWidth <= 0 || control.TargetHeight <= 0) {
 				continue
 			}
 			controlCtx, cancel := context.WithTimeout(ctx, time.Second)
 			err := s.conn.SendSessionMessage(controlCtx, protocol.DesktopSessionMessage{
-				Type: protocol.DesktopSessionVideoControl,
-				VideoControl: &protocol.DesktopVideoControl{
-					TargetBitrate: decision.TargetBitrate,
-					TargetFPS:     decision.TargetFPS,
-				},
+				Type:         protocol.DesktopSessionVideoControl,
+				VideoControl: &control,
 			})
 			cancel()
 			if err != nil {
 				log.Printf("[Desktop] ABR media control failed: %v", err)
 				return
 			}
-			log.Printf("[Desktop] ABR target bitrate=%d fps=%d reason=%s", decision.TargetBitrate, decision.TargetFPS, decision.Reason)
+			log.Printf("[Desktop] ABR target bitrate=%d fps=%d resolution=%dx%d scale=%d%% reason=%s",
+				decision.TargetBitrate, decision.TargetFPS, control.TargetWidth, control.TargetHeight,
+				decision.TargetResolutionScale, decision.Reason)
 		}
 	}
 }

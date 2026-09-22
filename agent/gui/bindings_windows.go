@@ -120,6 +120,50 @@ func (s *WailsService) GetRemoteDesktopCursor(knownCursorID string) (string, err
 	return string(data), nil
 }
 
+func (s *WailsService) GetRemoteDesktopClipboard(knownSequence uint64) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopClipboard(knownSequence))
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) SendRemoteDesktopClipboard(text string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if err := s.owner.bridge.SendRemoteDesktopClipboard(text); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) GetClipboardText() (string, error) {
+	if s == nil || s.owner == nil || s.owner.app == nil {
+		return "", nil
+	}
+	text, ok := s.owner.app.Clipboard.Text()
+	if !ok {
+		return "", nil
+	}
+	return text, nil
+}
+
+func (s *WailsService) SetClipboardText(text string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.app == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if !s.owner.app.Clipboard.SetText(text) {
+		return `{"ok":false,"message":"clipboard unavailable"}`, nil
+	}
+	return `{"ok":true}`, nil
+}
+
+
 func (s *WailsService) SendRemoteDesktopInput(rawEvent string) (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil

@@ -254,11 +254,11 @@ func (h *Host) streamH264Frames(
 		seconds := elapsed.Seconds()
 		current := encoder.Stats()
 		stats := protocol.DesktopSessionStats{
-			CaptureFPS:    float64(capturedFrames-lastCapturedFrames) / seconds,
-			EncodeFPS:     float64(current.Frames-lastEncoderStats.Frames) / seconds,
-			ActualBitrate: int64(float64((current.Bytes-lastEncoderStats.Bytes)*8) / seconds),
-			TargetBitrate: int64(videoCfg.TargetBitrate),
-			CaptureMs:     lastCaptureMs,
+			CaptureFPS:       float64(capturedFrames-lastCapturedFrames) / seconds,
+			EncodeFPS:        float64(current.Frames-lastEncoderStats.Frames) / seconds,
+			ActualBitrate:    int64(float64((current.Bytes-lastEncoderStats.Bytes)*8) / seconds),
+			TargetBitrate:    int64(videoCfg.TargetBitrate),
+			CaptureMs:        lastCaptureMs,
 			EncodeMs:         float64(current.LastEncodeTime.Microseconds()) / 1000,
 			SendQueueDelayMs: sendQueueDelayMs,
 			Path:             "relay",

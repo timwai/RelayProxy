@@ -14,7 +14,6 @@ func TestFrameValidate(t *testing.T) {
 	}
 }
 
-
 func TestD3D11FrameValidate(t *testing.T) {
 	valid := D3D11Frame{Resource: 1, Width: 1920, Height: 1080}
 	if err := valid.Validate(); err != nil {

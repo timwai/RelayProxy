@@ -624,7 +624,11 @@ func (s *MFH264Transform) EncodeNV12(ctx context.Context, data []byte, timestamp
 	duration := time.Second / time.Duration(s.info.Config.FPS)
 	reply := make(chan mfTransformResult, 1)
 	command := mfTransformCommand{
-		input: &mfEncodeInput{data: data, timestamp: timestamp, duration: duration},
+		input: &mfEncodeInput{
+			data:      append([]byte(nil), data...),
+			timestamp: timestamp,
+			duration:  duration,
+		},
 		reply: reply,
 	}
 	select {

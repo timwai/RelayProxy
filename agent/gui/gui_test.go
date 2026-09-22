@@ -164,6 +164,7 @@ func TestRemoteDesktopDisplaySelectionUsesAdvertisedTargetDisplays(t *testing.T)
 		"allDisplays.textContent = '全部显示器'",
 		"state.desktopDisplaySelections[target.deviceId] = displaySelect.value",
 		"remoteDesktopConnectOptions(targetID)",
+		"status.displayName || status.displayId",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop display selection UI missing %q", want)

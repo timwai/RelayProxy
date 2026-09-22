@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary 与 Host BGRA fast path 均已合并 main；当前分支增加 capture backend 显式策略，为 DXGI/GDI 实机 A/B 和后续 WGC 接入建立稳定控制面  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path 与 Capture backend policy 均已合并 main；当前分支拆分 Host H.264 Convert/Codec 耗时，为 GPU zero-copy 优化建立可量化基线  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #62 已合并，merge `83eb04ed082e2c8c3db2843bda553545d52813d2`）
+> 当前开发基线：`main`（PR #63 已合并，merge `64f565ac850f25b22f5ceef60a65eb0e71962495`）
 
 ## 0. 当前进度
 
@@ -183,7 +183,7 @@ Windows SendInput / CF_UNICODETEXT
 - Capture backend 改为每次 stats 上报时读取当前 backend，因此 DXGI 运行期失败转 GDI 后，GUI/diagnostics 不再错误保留 `dxgi` 标签。
 - 本轮仍然是 CPU BGRA→NV12；最终目标依旧是 `D3D11 texture → GPU scale/color convert → NV12 surface → hardware encoder`。当前 capture dependency 只提供 DXGI Desktop Duplication / GDI，WGC 需要后续单独实现 WinRT capture backend 或替换/扩展 capture 层。
 
-### 0.2.10 Capture Backend Policy（当前分支）
+### 0.2.10 Capture Backend Policy（已合并 PR #63）
 
 - `RemoteDesktopConnectOptions` 新增 `CaptureBackend`：`auto / dxgi / gdi / wgc`；`wgc` 先作为 wire/API 预留值，当前 Windows Host 明确返回“未实现”，不会静默当成 Auto。
 - `HostConfig` 把 capture preference 保持为 session-local，不修改 Host 全局默认；Diagnostics 导出的连接 options 会自然记录请求值，便于同一机器做 DXGI/GDI A/B。
@@ -194,6 +194,16 @@ Windows SendInput / CF_UNICODETEXT
 - GUI 连接设置新增“采集：自动 / DXGI / GDI”，连接摘要显示显式 Capture backend；帮助文字明确该选项主要用于实机矩阵和问题定位。
 - 当前 capability snapshot 继续只公布真实可用的 GDI/DXGI；在 WinRT WGC backend 真正实现之前 GUI 不提供 WGC 选项。
 - 测试覆盖协议→HostConfig 透传、空值归一到 Auto、DXGI/GDI/WGC 映射、strict backend 识别和 DXGI concrete-display 约束。
+
+### 0.2.11 Host Convert / Codec Timing（当前分支）
+
+- Media Foundation H.264 的既有 `EncodeMs` 保持历史语义：从 `Encode()` 进入到 MFT 输出完成的总耗时，不改变既有性能预算和诊断兼容性。
+- `EncoderStats` 新增 `LastConvertTime`，单独测量 `frameToNV12` 阶段；BGRA direct、RGBA scale fallback 与未来 NV12/GPU surface 路径都可使用同一指标比较。
+- Host Stats 新增 `ConvertMs` 与 `CodecMs`。`CodecMs` 由 `EncodeMs - ConvertMs` 派生并 clamp 到 0，因此 MFT 部分和像素转换部分可以分别观察。
+- Viewer 网络统计同时显示 `Convert / Codec / Encode total`，实机跑 DXGI 与 GDI A/B 时可直接判断 CPU 像素转换是否为主要瓶颈。
+- Diagnostics Summary 增加 ConvertMs / CodecMs 的 min / avg / p50 / p95 / max；配合 `CaptureFormats` 可直接比较 `bgra-direct` 与 `rgba` 缩放路径。
+- 本轮不改变 ABR：Convert/Codec timing 只做 observability，不作为网络拥塞输入，避免 CPU/GPU 性能波动被误当作链路带宽问题。
+- 下一步可用这些实机数据判断何时值得进入真正的 `D3D11 texture → GPU NV12 → hardware encoder`，以及 GPU conversion 应优先覆盖 native-size 还是 scaled resolution 路径。
 
 ### 0.3 本轮进度（2026-09-22）
 

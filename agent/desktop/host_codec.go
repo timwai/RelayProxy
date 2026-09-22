@@ -204,6 +204,19 @@ func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
 	return dst
 }
 
+func rawFrameFitsH264(frame desktopcodec.RawFrame, maxWidth, maxHeight int) bool {
+	if frame.Validate() != nil {
+		return false
+	}
+	if maxWidth > 0 && frame.Width > maxWidth {
+		return false
+	}
+	if maxHeight > 0 && frame.Height > maxHeight {
+		return false
+	}
+	return true
+}
+
 func h264ResolutionConfig(
 	src *image.RGBA,
 	target desktopResolutionTarget,
@@ -308,8 +321,7 @@ func (h *Host) streamH264Frames(
 		if rawErr != nil {
 			return rawErr
 		}
-		if available && candidate.Width <= cfg.MaxWidth && candidate.Height <= cfg.MaxHeight &&
-			candidate.Validate() == nil {
+		if available && rawFrameFitsH264(candidate, cfg.MaxWidth, cfg.MaxHeight) {
 			firstRaw = candidate
 			rawAvailable = true
 		}
@@ -607,7 +619,7 @@ func (h *Host) streamH264Frames(
 					return rawErr
 				}
 				if available && rawFrame.Width == videoCfg.Width && rawFrame.Height == videoCfg.Height &&
-					rawFrame.Validate() == nil {
+					rawFrameFitsH264(rawFrame, videoCfg.Width, videoCfg.Height) {
 					captureFormat = "bgra-direct"
 					if err := sendRawFrame(rawFrame, now); err != nil {
 						return err

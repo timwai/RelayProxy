@@ -505,7 +505,7 @@ func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, 
 	timestamp := sampleTimestamp(out.Sample, fallbackTimestamp)
 
 	if graphics != nil && info.D3D11Aware {
-		if surface, surfaceErr := decoderSampleSurface(out.Sample); surfaceErr == nil {
+		if surface, surfaceErr := decoderSampleSurface(out.Sample, graphics, info.Config.Width, info.Config.Height); surfaceErr == nil {
 			releaseIUnknown(out.Sample)
 			return &DecodedFrame{
 				Format:    PixelFormatNV12,

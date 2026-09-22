@@ -96,6 +96,15 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig, graphics *m
 	if err := applyDecoderOutputType(transform, cfg); err != nil {
 		return false, d3d11Aware, err
 	}
+	if d3d11Aware {
+		streamInfo, err := getOutputStreamInfo(transform)
+		if err != nil {
+			return false, d3d11Aware, err
+		}
+		if streamInfo.Flags&(mftOutputStreamProvidesSamples|mftOutputStreamCanProvideSamples) == 0 {
+			return false, d3d11Aware, errors.New("D3D11 decoder requires caller-provided GPU output samples")
+		}
+	}
 	if err := processTransformMessage(transform, mftMessageNotifyBeginStreaming); err != nil {
 		return false, d3d11Aware, err
 	}

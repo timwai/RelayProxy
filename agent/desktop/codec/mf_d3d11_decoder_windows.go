@@ -320,10 +320,7 @@ func (g *mfDecoderD3D11) readNV12Sample(sample unsafe.Pointer, width, height int
 			mappedBytes[row*int(mapped.RowPitch):row*int(mapped.RowPitch)+width],
 		)
 	}
-	unmapHR := comCall(g.context, 15, uintptr(g.staging), 0)
-	if hresultFailed(unmapHR) {
-		return nil, hresultError("ID3D11DeviceContext.Unmap(NV12 staging)", unmapHR)
-	}
+	comCall(g.context, 15, uintptr(g.staging), 0)
 	return out, nil
 }
 

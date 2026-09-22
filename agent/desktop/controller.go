@@ -32,15 +32,15 @@ type ControllerSession struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 
-	closeOnce    sync.Once
-	mu           sync.RWMutex
-	latest       FrameSnapshot
-	latestCursor    protocol.DesktopCursorState
-	latestClipboard protocol.DesktopClipboardState
+	closeOnce        sync.Once
+	mu               sync.RWMutex
+	latest           FrameSnapshot
+	latestCursor     protocol.DesktopCursorState
+	latestClipboard  protocol.DesktopClipboardState
 	clipboardSendSeq uint64
-	videoConfig     protocol.DesktopVideoConfig
-	configReady  chan struct{}
-	configOnce   sync.Once
+	videoConfig      protocol.DesktopVideoConfig
+	configReady      chan struct{}
+	configOnce       sync.Once
 
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState

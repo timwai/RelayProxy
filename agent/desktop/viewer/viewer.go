@@ -23,6 +23,20 @@ type Frame struct {
 	Stride int
 }
 
+type D3D11Frame struct {
+	Resource    uintptr
+	Subresource uint32
+	Width       int
+	Height      int
+}
+
+func (f D3D11Frame) Validate() error {
+	if f.Resource == 0 || f.Width <= 0 || f.Height <= 0 {
+		return fmt.Errorf("%w: invalid D3D11 frame", ErrUnavailable)
+	}
+	return nil
+}
+
 func (f Frame) Validate() error {
 	if f.Width <= 0 || f.Height <= 0 {
 		return fmt.Errorf("%w: invalid frame dimensions", ErrUnavailable)
@@ -35,6 +49,8 @@ func (f Frame) Validate() error {
 
 type Native interface {
 	Submit(Frame) error
+	SubmitD3D11(D3D11Frame) error
+	D3D11Device() uintptr
 	Focus()
 	Done() <-chan struct{}
 	Close() error

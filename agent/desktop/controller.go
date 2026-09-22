@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	desktopadapt "relayproxy/agent/desktop/adapt"
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
 )
@@ -46,9 +47,22 @@ type ControllerSession struct {
 	recovery   h264RecoveryState
 
 	stats *sessionStatsTracker
+
+	options protocol.RemoteDesktopConnectOptions
+	abrMu   sync.Mutex
+	abr     *desktopadapt.Controller
 }
 
 func StartController(parent context.Context, targetID string, dial DesktopMediaDialer) (*ControllerSession, error) {
+	return StartControllerWithOptions(parent, targetID, dial, protocol.RemoteDesktopConnectOptions{})
+}
+
+func StartControllerWithOptions(
+	parent context.Context,
+	targetID string,
+	dial DesktopMediaDialer,
+	options protocol.RemoteDesktopConnectOptions,
+) (*ControllerSession, error) {
 	if targetID == "" {
 		return nil, errors.New("Relay Desktop target id is required")
 	}
@@ -67,9 +81,11 @@ func StartController(parent context.Context, targetID string, dial DesktopMediaD
 		done:        make(chan struct{}),
 		configReady: make(chan struct{}),
 		stats:       newSessionStatsTracker("relay"),
+		options:     options,
 	}
 	go session.controlLoop(ctx)
 	go session.probeLoop(ctx)
+	go session.abrLoop(ctx)
 	go session.readLoop(ctx)
 	return session, nil
 }
@@ -85,9 +101,11 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			if message.VideoConfig == nil {
 				continue
 			}
+			config := *message.VideoConfig
 			s.mu.Lock()
-			s.videoConfig = *message.VideoConfig
+			s.videoConfig = config
 			s.mu.Unlock()
+			s.configureABR(config)
 			s.configOnce.Do(func() { close(s.configReady) })
 
 		case protocol.DesktopSessionCursor:
@@ -130,6 +148,63 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			if message.Stats != nil && s.stats != nil {
 				s.stats.MergeRemote(*message.Stats)
 			}
+		}
+	}
+}
+
+func (s *ControllerSession) configureABR(config protocol.DesktopVideoConfig) {
+	s.abrMu.Lock()
+	defer s.abrMu.Unlock()
+	if config.Codec != "h264" || config.TargetBitrate <= 0 {
+		s.abr = nil
+		return
+	}
+	maxBitrate := config.MaxBitrate
+	if maxBitrate <= 0 {
+		maxBitrate = config.TargetBitrate
+	}
+	cfg := desktopadapt.DefaultConfig(s.options.Scene, maxBitrate)
+	cfg.InitialBitrate = config.TargetBitrate
+	s.abr = desktopadapt.NewController(cfg)
+}
+
+func (s *ControllerSession) abrDecision(stats protocol.DesktopSessionStats) desktopadapt.MediaDecision {
+	s.abrMu.Lock()
+	defer s.abrMu.Unlock()
+	if s.abr == nil {
+		return desktopadapt.MediaDecision{}
+	}
+	return s.abr.Observe(stats)
+}
+
+func (s *ControllerSession) abrLoop(ctx context.Context) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if s.stats == nil {
+				continue
+			}
+			decision := s.abrDecision(s.stats.Snapshot(time.Now()))
+			if !decision.Changed || decision.TargetBitrate <= 0 {
+				continue
+			}
+			controlCtx, cancel := context.WithTimeout(ctx, time.Second)
+			err := s.conn.SendSessionMessage(controlCtx, protocol.DesktopSessionMessage{
+				Type: protocol.DesktopSessionVideoControl,
+				VideoControl: &protocol.DesktopVideoControl{
+					TargetBitrate: decision.TargetBitrate,
+				},
+			})
+			cancel()
+			if err != nil {
+				log.Printf("[Desktop] ABR bitrate control failed: %v", err)
+				return
+			}
+			log.Printf("[Desktop] ABR target bitrate=%d reason=%s", decision.TargetBitrate, decision.Reason)
 		}
 	}
 }

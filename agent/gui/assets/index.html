@@ -1699,6 +1699,7 @@
         '已连接 ' + (status.targetName || status.targetId || ''),
         'Backend: ' + String(status.backend || '').toUpperCase()
       ];
+      if (status.displayName || status.displayId) parts.push('显示器: ' + (status.displayName || status.displayId));
       if (status.pathTcp) parts.push('TCP: ' + status.pathTcp);
       if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
       banner.textContent = parts.join(' · ');

@@ -237,7 +237,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 						err = s.viewer.SubmitD3D11(desktopviewer.D3D11Frame{
 						Resource:    decodedFrame.D3D11.Resource,
 						Subresource: decodedFrame.D3D11.Subresource,
-						Width:       decodedFrame.Width,
+							Width:       decodedFrame.Width,
 							Height:      decodedFrame.Height,
 						})
 						if err != nil {

@@ -247,7 +247,7 @@ func (s *ControllerSession) applyVideoConfig(config protocol.DesktopVideoConfig)
 	}
 	s.mu.Lock()
 	current := s.videoConfig
-	if current.Generation != 0 && config.Generation != 0 && config.Generation < current.Generation {
+	if current.Generation != 0 && (config.Generation == 0 || config.Generation < current.Generation) {
 		s.mu.Unlock()
 		return false
 	}

@@ -137,8 +137,9 @@ func (c *gdiCapture) Close() error {
 
 // windowsCapture keeps virtual-desktop GDI as the compatibility default. When
 // a session names a DisplayID it captures exactly that current monitor through
-// screencapture (DXGI when available, GDI otherwise) and exposes the same
-// monitor geometry to the cursor channel.
+// a backend-neutral frame stream and exposes the same monitor geometry to the
+// cursor channel. The current stream adapter implements DXGI/GDI; WGC can plug
+// into the same contract without changing Host media code.
 type windowsCapture struct {
 	mu       sync.Mutex
 	cursorMu sync.Mutex
@@ -281,7 +282,8 @@ func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error
 	}
 	if target.ID == 0 {
 		if windowsCaptureRequiresDisplayTarget(requestedBackend) {
-			return errors.New("DXGI capture requires selecting a specific display when multiple displays are active")
+			return fmt.Errorf("%s capture requires selecting a specific display when multiple displays are active",
+				requestedBackend)
 		}
 		return nil
 	}

@@ -59,12 +59,13 @@ func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
 		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 1600, Height: 900},
 		FPS:        24,
 		MaxBitrate: 8_000_000,
+		DisplayID:  "42",
 	})
 	if cfg.MaxWidth != 1600 || cfg.MaxHeight != 900 || cfg.MaxFPS != 24 {
 		t.Fatalf("unexpected media size/fps: %+v", cfg)
 	}
-	if cfg.JPEGQuality != 78 || cfg.MaxBitrate != 8_000_000 {
-		t.Fatalf("unexpected quality policy: %+v", cfg)
+	if cfg.JPEGQuality != 78 || cfg.MaxBitrate != 8_000_000 || cfg.DisplayID != "42" {
+		t.Fatalf("unexpected quality/display policy: %+v", cfg)
 	}
 }
 

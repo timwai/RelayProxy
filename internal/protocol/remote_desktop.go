@@ -134,16 +134,18 @@ type RemoteDesktopSessionInfo struct {
 // RemoteDesktopStatus is a stable UI-facing snapshot. The GUI must not infer
 // desktop state by parsing log lines.
 type RemoteDesktopStatus struct {
-	State      string         `json:"state"`
-	Backend    DesktopBackend `json:"backend,omitempty"`
-	TargetID   string         `json:"targetId,omitempty"`
-	TargetName string         `json:"targetName,omitempty"`
-	ListenAddr string         `json:"listenAddr,omitempty"`
-	PathTCP    string         `json:"pathTcp,omitempty"`
-	PathUDP    string         `json:"pathUdp,omitempty"`
-	UDPEnabled bool           `json:"udpEnabled,omitempty"`
-	UDPActive  bool           `json:"udpActive,omitempty"`
-	UDPReason  string         `json:"udpReason,omitempty"`
+	State       string         `json:"state"`
+	Backend     DesktopBackend `json:"backend,omitempty"`
+	TargetID    string         `json:"targetId,omitempty"`
+	TargetName  string         `json:"targetName,omitempty"`
+	DisplayID   string         `json:"displayId,omitempty"`
+	DisplayName string         `json:"displayName,omitempty"`
+	ListenAddr  string         `json:"listenAddr,omitempty"`
+	PathTCP     string         `json:"pathTcp,omitempty"`
+	PathUDP     string         `json:"pathUdp,omitempty"`
+	UDPEnabled  bool           `json:"udpEnabled,omitempty"`
+	UDPActive   bool           `json:"udpActive,omitempty"`
+	UDPReason   string         `json:"udpReason,omitempty"`
 }
 
 // RemoteDesktopFrame is the MVP viewer surface. JPEG bytes are carried only

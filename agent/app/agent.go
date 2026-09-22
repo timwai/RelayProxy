@@ -1268,8 +1268,16 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 			State: "connected", Backend: protocol.DesktopBackendRelay, TargetID: targetID,
 			PathTCP: "relay-control", PathUDP: pathUDP, UDPEnabled: true, UDPActive: true,
 		}
+		config := desktopSession.VideoConfigSnapshot()
+		out.DisplayID = config.DisplayID
 		if target, ok := a.remoteDesktopTarget(targetID); ok {
 			out.TargetName = target.Name
+			for _, display := range target.Capabilities.Displays {
+				if display.ID == out.DisplayID {
+					out.DisplayName = display.Name
+					break
+				}
+			}
 		}
 		return out
 	}

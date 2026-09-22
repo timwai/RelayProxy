@@ -5,9 +5,11 @@ package desktop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"unsafe"
 
+	"github.com/go-mswin/screencapture"
 	"github.com/lxn/win"
 
 	"relayproxy/internal/protocol"
@@ -19,6 +21,10 @@ type windowsInputSink struct {
 	buttons map[string]bool
 	lastX   uint16
 	lastY   uint16
+
+	displayMapped bool
+	displayBounds screencapture.Rect
+	virtualBounds screencapture.Rect
 }
 
 func newWindowsInputSink() *windowsInputSink {
@@ -26,6 +32,111 @@ func newWindowsInputSink() *windowsInputSink {
 		keys:    make(map[uint16]bool),
 		buttons: make(map[string]bool),
 	}
+}
+
+func virtualDesktopBounds() (screencapture.Rect, error) {
+	bounds := screencapture.Rect{
+		X: int(win.GetSystemMetrics(win.SM_XVIRTUALSCREEN)),
+		Y: int(win.GetSystemMetrics(win.SM_YVIRTUALSCREEN)),
+		W: int(win.GetSystemMetrics(win.SM_CXVIRTUALSCREEN)),
+		H: int(win.GetSystemMetrics(win.SM_CYVIRTUALSCREEN)),
+	}
+	if bounds.W <= 0 || bounds.H <= 0 {
+		return screencapture.Rect{}, errors.New("invalid Windows virtual desktop geometry")
+	}
+	return bounds, nil
+}
+
+func normalizedDisplayAxis(value uint16, displayOffset, displaySize, virtualSize int) uint16 {
+	if displaySize <= 0 || virtualSize <= 0 {
+		return value
+	}
+	displaySpan := displaySize - 1
+	if displaySpan < 1 {
+		displaySpan = 1
+	}
+	virtualSpan := virtualSize - 1
+	if virtualSpan < 1 {
+		virtualSpan = 1
+	}
+	pixel := displayOffset + int((int64(value)*int64(displaySpan)+32767)/65535)
+	if pixel < 0 {
+		pixel = 0
+	}
+	if pixel > virtualSpan {
+		pixel = virtualSpan
+	}
+	mapped := (int64(pixel)*65535 + int64(virtualSpan)/2) / int64(virtualSpan)
+	if mapped < 0 {
+		return 0
+	}
+	if mapped > 65535 {
+		return 65535
+	}
+	return uint16(mapped)
+}
+
+func mapDisplayNormalizedToVirtual(x, y uint16, display, virtual screencapture.Rect) (uint16, uint16) {
+	return normalizedDisplayAxis(x, display.X-virtual.X, display.W, virtual.W),
+		normalizedDisplayAxis(y, display.Y-virtual.Y, display.H, virtual.H)
+}
+
+func (s *windowsInputSink) BeginInputSession(ctx context.Context, cfg HostConfig) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	s.displayMapped = false
+	s.displayBounds = screencapture.Rect{}
+	s.virtualBounds = screencapture.Rect{}
+	s.mu.Unlock()
+	if cfg.DisplayID == "" {
+		return nil
+	}
+	displays, err := screencapture.Displays(ctx)
+	if err != nil {
+		return fmt.Errorf("enumerate displays for input mapping: %w", err)
+	}
+	display, selected, err := resolveWindowsDisplay(displays, cfg.DisplayID)
+	if err != nil {
+		return err
+	}
+	if !selected || display.ID == 0 {
+		return fmt.Errorf("Windows display %q cannot be mapped for input", cfg.DisplayID)
+	}
+	virtual, err := virtualDesktopBounds()
+	if err != nil {
+		return err
+	}
+	if display.Bounds.W <= 0 || display.Bounds.H <= 0 {
+		return fmt.Errorf("Windows display %q has invalid geometry", cfg.DisplayID)
+	}
+
+	s.mu.Lock()
+	s.displayMapped = true
+	s.displayBounds = display.Bounds
+	s.virtualBounds = virtual
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *windowsInputSink) EndInputSession() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	s.displayMapped = false
+	s.displayBounds = screencapture.Rect{}
+	s.virtualBounds = screencapture.Rect{}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *windowsInputSink) mapMousePoint(x, y uint16) (uint16, uint16) {
+	if !s.displayMapped {
+		return x, y
+	}
+	return mapDisplayNormalizedToVirtual(x, y, s.displayBounds, s.virtualBounds)
 }
 
 func sendKeyboardInput(vk uint16, flags uint32) error {
@@ -97,7 +208,6 @@ func (s *windowsInputSink) ApplyInput(ctx context.Context, event protocol.Deskto
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.lastX, s.lastY = event.X, event.Y
 	switch event.Kind {
 	case protocol.DesktopInputKeyDown, protocol.DesktopInputKeyUp:
 		flags := uint32(0)
@@ -116,14 +226,18 @@ func (s *windowsInputSink) ApplyInput(ctx context.Context, event protocol.Deskto
 			delete(s.keys, event.VirtualKey)
 		}
 	case protocol.DesktopInputMouseMove:
-		return sendMouseInput(event.X, event.Y, win.MOUSEEVENTF_MOVE|win.MOUSEEVENTF_MOVE_NOCOALESCE, 0)
+		x, y := s.mapMousePoint(event.X, event.Y)
+		s.lastX, s.lastY = x, y
+		return sendMouseInput(x, y, win.MOUSEEVENTF_MOVE|win.MOUSEEVENTF_MOVE_NOCOALESCE, 0)
 	case protocol.DesktopInputMouseDown, protocol.DesktopInputMouseUp:
+		x, y := s.mapMousePoint(event.X, event.Y)
+		s.lastX, s.lastY = x, y
 		down := event.Kind == protocol.DesktopInputMouseDown
 		flags, data, ok := mouseButtonFlags(event.Button, down)
 		if !ok {
 			return errors.New("unsupported Windows mouse button")
 		}
-		if err := sendMouseInput(event.X, event.Y, win.MOUSEEVENTF_MOVE|flags, data); err != nil {
+		if err := sendMouseInput(x, y, win.MOUSEEVENTF_MOVE|flags, data); err != nil {
 			return err
 		}
 		if down {
@@ -132,11 +246,13 @@ func (s *windowsInputSink) ApplyInput(ctx context.Context, event protocol.Deskto
 			delete(s.buttons, event.Button)
 		}
 	case protocol.DesktopInputMouseWheel:
+		x, y := s.mapMousePoint(event.X, event.Y)
+		s.lastX, s.lastY = x, y
 		flags := uint32(win.MOUSEEVENTF_WHEEL)
 		if event.Horizontal {
 			flags = win.MOUSEEVENTF_HWHEEL
 		}
-		return sendMouseInput(event.X, event.Y, win.MOUSEEVENTF_MOVE|flags, uint32(event.WheelDelta))
+		return sendMouseInput(x, y, win.MOUSEEVENTF_MOVE|flags, uint32(event.WheelDelta))
 	}
 	return nil
 }

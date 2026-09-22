@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"log"
@@ -134,21 +135,20 @@ func (c *gdiCapture) Close() error {
 	return nil
 }
 
-// windowsCapture preserves the old virtual-desktop GDI backend as a fallback
-// while using DXGI Desktop Duplication for the common single-display case.
-// Multi-monitor stays on GDI until Relay Desktop carries display geometry in
-// the session, otherwise normalized input coordinates would target the wrong
-// monitor.
+// windowsCapture keeps virtual-desktop GDI as the compatibility default. When
+// a session names a DisplayID it captures exactly that current monitor through
+// screencapture (DXGI when available, GDI otherwise) and exposes the same
+// monitor geometry to the cursor channel.
 type windowsCapture struct {
 	mu       sync.Mutex
 	cursorMu sync.Mutex
 
-	gdi        *gdiCapture
-	dxgiTarget *screencapture.Display
-	stream     *screencapture.Stream
-	frame      *image.RGBA
-	backend    string
-	closed     bool
+	gdi             *gdiCapture
+	stream          *screencapture.Stream
+	selectedDisplay *screencapture.Display
+	frame           *image.RGBA
+	backend         string
+	closed          bool
 
 	cursorHandle   uintptr
 	cursorPNG      []byte
@@ -163,15 +163,7 @@ func newSystemCapture() (*windowsCapture, error) {
 	if err != nil {
 		return nil, err
 	}
-	capture := &windowsCapture{gdi: gdi, backend: "gdi"}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	displays, err := screencapture.Displays(ctx)
-	if err == nil && len(displays) == 1 && displays[0].Duplicable() {
-		target := displays[0]
-		capture.dxgiTarget = &target
-	}
-	return capture, nil
+	return &windowsCapture{gdi: gdi, backend: "gdi"}, nil
 }
 
 func windowsDesktopCapabilitySnapshot(displays []screencapture.Display) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability) {
@@ -214,29 +206,76 @@ func (c *windowsCapture) DesktopCaptureCapabilities(ctx context.Context) ([]prot
 	return captures, capabilities, nil
 }
 
+func resolveWindowsDisplay(displays []screencapture.Display, displayID string) (screencapture.Display, bool, error) {
+	if displayID == "" {
+		if len(displays) == 1 {
+			return displays[0], false, nil
+		}
+		return screencapture.Display{}, false, nil
+	}
+	id, err := strconv.ParseUint(displayID, 10, 64)
+	if err != nil || id == 0 {
+		return screencapture.Display{}, true, fmt.Errorf("invalid Windows display id %q", displayID)
+	}
+	for _, display := range displays {
+		if display.ID == id {
+			return display, true, nil
+		}
+	}
+	return screencapture.Display{}, true, fmt.Errorf("Windows display %q is no longer available", displayID)
+}
+
 func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error {
+	displays, listErr := screencapture.Displays(ctx)
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return errors.New("Windows desktop capture is closed")
 	}
-	c.closeDXGILocked()
+	c.closeStreamLocked()
+	c.selectedDisplay = nil
 	c.backend = "gdi"
-	if c.dxgiTarget == nil {
+
+	if listErr != nil {
+		if cfg.DisplayID != "" {
+			return fmt.Errorf("enumerate Windows displays for %q: %w", cfg.DisplayID, listErr)
+		}
+		log.Printf("[Desktop] display enumeration unavailable, using virtual desktop GDI: %v", listErr)
 		return nil
 	}
-	stream, err := screencapture.CaptureDisplay(ctx, *c.dxgiTarget, screencapture.Options{
-		Backend:    screencapture.BackendDuplication,
+
+	target, selected, selectErr := resolveWindowsDisplay(displays, cfg.DisplayID)
+	if selectErr != nil {
+		return selectErr
+	}
+	if target.ID == 0 {
+		return nil
+	}
+
+	stream, err := screencapture.CaptureDisplay(ctx, target, screencapture.Options{
+		Backend:    screencapture.BackendAuto,
 		FPS:        float64(cfg.MaxFPS),
 		QueueDepth: screencapture.MinQueueDepth,
 		Timeout:    100 * time.Millisecond,
 	})
 	if err != nil {
-		log.Printf("[Desktop] DXGI Desktop Duplication unavailable, using GDI fallback: %v", err)
+		if selected {
+			return fmt.Errorf("capture selected Windows display %q: %w", cfg.DisplayID, err)
+		}
+		log.Printf("[Desktop] per-display capture unavailable, using virtual desktop GDI: %v", err)
 		return nil
 	}
 	c.stream = stream
-	c.backend = "dxgi"
+	if stream.Backend() == screencapture.BackendDuplication {
+		c.backend = "dxgi"
+	} else {
+		c.backend = "gdi"
+	}
+	if selected {
+		copy := target
+		c.selectedDisplay = &copy
+	}
 	c.frame = nil
 	return nil
 }
@@ -247,7 +286,8 @@ func (c *windowsCapture) EndSession() error {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.closeDXGILocked()
+	c.closeStreamLocked()
+	c.selectedDisplay = nil
 	if !c.closed {
 		c.backend = "gdi"
 	}
@@ -263,7 +303,7 @@ func (c *windowsCapture) CaptureBackend() string {
 	return c.backend
 }
 
-func (c *windowsCapture) closeDXGILocked() {
+func (c *windowsCapture) closeStreamLocked() {
 	if c.stream != nil {
 		_ = c.stream.Close()
 		c.stream = nil
@@ -293,7 +333,7 @@ func copyDXGIFrame(src screencapture.Frame, dst *image.RGBA) (*image.RGBA, error
 	return dst, nil
 }
 
-func (c *windowsCapture) captureDXGILocked(ctx context.Context) (*image.RGBA, error) {
+func (c *windowsCapture) captureStreamLocked(ctx context.Context) (*image.RGBA, error) {
 	if c.stream == nil {
 		return nil, screencapture.ErrBackendUnavailable
 	}
@@ -325,13 +365,19 @@ func (c *windowsCapture) Capture(ctx context.Context) (*image.RGBA, error) {
 		return nil, errors.New("Windows desktop capture is closed")
 	}
 	if c.stream != nil {
-		frame, err := c.captureDXGILocked(ctx)
+		frame, err := c.captureStreamLocked(ctx)
 		if err == nil {
 			return frame, nil
 		}
+		if c.selectedDisplay != nil {
+			if errors.Is(err, screencapture.ErrNoFrame) && c.frame != nil {
+				return c.frame, nil
+			}
+			return nil, fmt.Errorf("selected display capture failed: %w", err)
+		}
 		if !errors.Is(err, screencapture.ErrNoFrame) {
-			log.Printf("[Desktop] DXGI capture failed, switching session to GDI: %v", err)
-			c.closeDXGILocked()
+			log.Printf("[Desktop] per-display capture failed, switching session to virtual desktop GDI: %v", err)
+			c.closeStreamLocked()
 			c.backend = "gdi"
 		} else if c.frame != nil {
 			return c.frame, nil
@@ -350,7 +396,7 @@ func (c *windowsCapture) Close() error {
 		return nil
 	}
 	c.closed = true
-	c.closeDXGILocked()
+	c.closeStreamLocked()
 	gdi := c.gdi
 	c.gdi = nil
 	c.mu.Unlock()
@@ -539,20 +585,43 @@ func (c *windowsCapture) CaptureCursor(ctx context.Context) (protocol.DesktopCur
 	if err != nil {
 		return protocol.DesktopCursorState{}, err
 	}
-	screenX := win.GetSystemMetrics(win.SM_XVIRTUALSCREEN)
-	screenY := win.GetSystemMetrics(win.SM_YVIRTUALSCREEN)
-	screenWidth := win.GetSystemMetrics(win.SM_CXVIRTUALSCREEN)
-	screenHeight := win.GetSystemMetrics(win.SM_CYVIRTUALSCREEN)
+
+	c.mu.Lock()
+	var selectedDisplay *screencapture.Display
+	if c.selectedDisplay != nil {
+		copy := *c.selectedDisplay
+		selectedDisplay = &copy
+	}
+	c.mu.Unlock()
+
+	screenX := int(win.GetSystemMetrics(win.SM_XVIRTUALSCREEN))
+	screenY := int(win.GetSystemMetrics(win.SM_YVIRTUALSCREEN))
+	screenWidth := int(win.GetSystemMetrics(win.SM_CXVIRTUALSCREEN))
+	screenHeight := int(win.GetSystemMetrics(win.SM_CYVIRTUALSCREEN))
+	if selectedDisplay != nil {
+		screenX = selectedDisplay.Bounds.X
+		screenY = selectedDisplay.Bounds.Y
+		screenWidth = selectedDisplay.Bounds.W
+		screenHeight = selectedDisplay.Bounds.H
+	}
 	if screenWidth <= 0 || screenHeight <= 0 {
-		return protocol.DesktopCursorState{}, errors.New("invalid Windows virtual desktop geometry")
+		return protocol.DesktopCursorState{}, errors.New("invalid Windows desktop capture geometry")
+	}
+
+	cursorX := int(info.ScreenPos.X) - screenX
+	cursorY := int(info.ScreenPos.Y) - screenY
+	visible := info.Flags&cursorShowing != 0
+	if selectedDisplay != nil &&
+		(cursorX < 0 || cursorY < 0 || cursorX >= screenWidth || cursorY >= screenHeight) {
+		visible = false
 	}
 
 	state := protocol.DesktopCursorState{
-		X:            int(info.ScreenPos.X - screenX),
-		Y:            int(info.ScreenPos.Y - screenY),
-		ScreenWidth:  int(screenWidth),
-		ScreenHeight: int(screenHeight),
-		Visible:      info.Flags&cursorShowing != 0,
+		X:            cursorX,
+		Y:            cursorY,
+		ScreenWidth:  screenWidth,
+		ScreenHeight: screenHeight,
+		Visible:      visible,
 	}
 	if info.HCursor == 0 {
 		return state, nil

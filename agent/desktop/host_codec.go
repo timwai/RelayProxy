@@ -52,6 +52,7 @@ func (h *Host) streamSessionFrames(
 		Height:        cfg.MaxHeight,
 		FPS:           cfg.MaxFPS,
 		TargetBitrate: cfg.MaxBitrate,
+		DisplayID:     cfg.DisplayID,
 	}); err != nil {
 		return err
 	}
@@ -181,6 +182,7 @@ func (h *Host) streamH264Frames(
 		MaxBitrate:    videoCfg.TargetBitrate,
 		Chroma:        "420",
 		BitDepth:      8,
+		DisplayID:     cfg.DisplayID,
 	}); err != nil {
 		return err
 	}

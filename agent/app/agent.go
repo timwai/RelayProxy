@@ -232,9 +232,10 @@ type Agent struct {
 	rdpConnection        *rdp.Connection
 	rdpP2P               *rdpp2p.Manager
 	rdpSession           *rdpp2p.Session
-	desktopHost          desktop.HostHandler
-	desktopConnection    *desktop.ControllerSession
-	desktopP2PSession    *rdpp2p.Session
+	desktopHost             desktop.HostHandler
+	desktopConnection       *desktop.ControllerSession
+	desktopP2PSession       *rdpp2p.Session
+	lastDesktopDiagnostics  desktop.DesktopDiagnosticsReport
 	desktopTargetMedia   map[string]*desktopmedia.MediaConn
 	desktopTargetPaths   map[string]*rdpp2p.ApplicationPath
 	closed               atomic.Bool
@@ -1318,6 +1319,17 @@ func (a *Agent) RemoteDesktopStats() protocol.DesktopSessionStats {
 	return session.Stats()
 }
 
+func (a *Agent) RemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
+	a.mu.RLock()
+	session := a.desktopConnection
+	last := a.lastDesktopDiagnostics
+	a.mu.RUnlock()
+	if session != nil && session.Active() {
+		return session.Diagnostics()
+	}
+	return last
+}
+
 func (a *Agent) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStats) {
 	a.mu.RLock()
 	session := a.desktopConnection
@@ -1429,8 +1441,16 @@ func (a *Agent) disconnectRelayDesktop() {
 	a.desktopConnection = nil
 	a.desktopP2PSession = nil
 	a.mu.Unlock()
+
+	var report desktop.DesktopDiagnosticsReport
 	if session != nil {
 		_ = session.Close()
+		report = session.Diagnostics()
+	}
+	if report.SchemaVersion != 0 {
+		a.mu.Lock()
+		a.lastDesktopDiagnostics = report
+		a.mu.Unlock()
 	}
 	if direct != nil {
 		_ = direct.Close()

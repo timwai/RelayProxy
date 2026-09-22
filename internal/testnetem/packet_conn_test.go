@@ -15,11 +15,11 @@ func (f *fakePacketConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 	f.writes++
 	return len(p), nil
 }
-func (f *fakePacketConn) Close() error                       { return nil }
-func (f *fakePacketConn) LocalAddr() net.Addr                { return &net.UDPAddr{} }
-func (f *fakePacketConn) SetDeadline(time.Time) error        { return nil }
-func (f *fakePacketConn) SetReadDeadline(time.Time) error    { return nil }
-func (f *fakePacketConn) SetWriteDeadline(time.Time) error   { return nil }
+func (f *fakePacketConn) Close() error                     { return nil }
+func (f *fakePacketConn) LocalAddr() net.Addr              { return &net.UDPAddr{} }
+func (f *fakePacketConn) SetDeadline(time.Time) error      { return nil }
+func (f *fakePacketConn) SetReadDeadline(time.Time) error  { return nil }
+func (f *fakePacketConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestNewPacketConnRejectsNil(t *testing.T) {
 	if _, err := NewPacketConn(nil, Profile{}); err == nil {

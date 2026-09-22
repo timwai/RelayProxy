@@ -15,3 +15,21 @@ func TestSmoothSendQueueDelayMs(t *testing.T) {
 		t.Fatalf("second=%v", second)
 	}
 }
+
+func TestStaleScheduledFrameCount(t *testing.T) {
+	base := time.Unix(100, 0)
+	interval := 20 * time.Millisecond
+
+	if got := staleScheduledFrameCount(base, base.Add(19*time.Millisecond), interval); got != 0 {
+		t.Fatalf("fresh schedule drops=%d", got)
+	}
+	if got := staleScheduledFrameCount(base, base.Add(20*time.Millisecond), interval); got != 1 {
+		t.Fatalf("one stale interval drops=%d", got)
+	}
+	if got := staleScheduledFrameCount(base, base.Add(55*time.Millisecond), interval); got != 2 {
+		t.Fatalf("multi-interval lag drops=%d", got)
+	}
+	if got := staleScheduledFrameCount(base, base.Add(time.Second), 0); got != 0 {
+		t.Fatalf("invalid interval drops=%d", got)
+	}
+}

@@ -132,12 +132,18 @@ type RDPCandidate struct {
 	Priority uint32 `json:"priority"`
 }
 
+const (
+	P2PPurposeRDP          = "rdp"
+	P2PPurposeDesktopMedia = "desktop_media"
+)
+
 // RDPControlMessage binds signaling to a server-issued session. Device IDs in
 // requests are advisory only; the server derives the controller from the
 // authenticated tunnel session and validates the target against its grant.
 // SessionToken is memory-only and is never persisted or logged.
 type RDPControlMessage struct {
 	Type              string         `json:"type"`
+	Purpose           string         `json:"purpose,omitempty"`
 	SessionID         uint64         `json:"sessionId,omitempty"`
 	ControllerID      string         `json:"controllerId,omitempty"`
 	TargetID          string         `json:"targetId,omitempty"`

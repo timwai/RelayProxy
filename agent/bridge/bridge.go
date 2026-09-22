@@ -103,6 +103,10 @@ func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) erro
 	return b.agent.SendRemoteDesktopInput(event)
 }
 
+func (b *UIBridge) RequestRemoteDesktopIDR() error {
+	return b.agent.RequestRemoteDesktopIDR()
+}
+
 // GetLogs returns recent running logs
 func (b *UIBridge) GetLogs(limit int) []app.LogEntry {
 	return app.GlobalLogBuffer.Get(limit)

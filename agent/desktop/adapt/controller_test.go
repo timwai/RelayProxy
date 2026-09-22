@@ -257,7 +257,7 @@ func TestAdaptiveResolutionCanReachSecondTierAfterAnotherHold(t *testing.T) {
 	cfg.ResolutionPressureWindows = 2
 	controller := NewController(cfg)
 
-	for controller.TargetResolutionScale() == 100 {
+	for i := 0; i < 12 && controller.TargetResolutionScale() == 100; i++ {
 		controller.Observe(protocol.DesktopSessionStats{LossPercent: 8})
 	}
 	if controller.TargetResolutionScale() != 75 {

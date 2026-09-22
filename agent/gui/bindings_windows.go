@@ -120,7 +120,6 @@ func (s *WailsService) GetRemoteDesktopCursor(knownCursorID string) (string, err
 	return string(data), nil
 }
 
-
 func (s *WailsService) SendRemoteDesktopInput(rawEvent string) (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil

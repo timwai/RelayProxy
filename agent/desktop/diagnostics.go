@@ -70,6 +70,8 @@ type DesktopDiagnosticsSummary struct {
 	DecodeFPS               DesktopDiagnosticMetricSummary `json:"decodeFps"`
 	RenderFPS               DesktopDiagnosticMetricSummary `json:"renderFps"`
 	CaptureMs               DesktopDiagnosticMetricSummary `json:"captureMs"`
+	ConvertMs               DesktopDiagnosticMetricSummary `json:"convertMs"`
+	CodecMs                 DesktopDiagnosticMetricSummary `json:"codecMs"`
 	EncodeMs                DesktopDiagnosticMetricSummary `json:"encodeMs"`
 	DecodeMs                DesktopDiagnosticMetricSummary `json:"decodeMs"`
 	RenderMs                DesktopDiagnosticMetricSummary `json:"renderMs"`
@@ -292,6 +294,10 @@ func summarizeDesktopDiagnostics(
 		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.RenderFPS }, positive)
 	summary.CaptureMs = desktopDiagnosticMetric(samples,
 		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.CaptureMs }, positive)
+	summary.ConvertMs = desktopDiagnosticMetric(samples,
+		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.ConvertMs }, positive)
+	summary.CodecMs = desktopDiagnosticMetric(samples,
+		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.CodecMs }, positive)
 	summary.EncodeMs = desktopDiagnosticMetric(samples,
 		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.EncodeMs }, positive)
 	summary.DecodeMs = desktopDiagnosticMetric(samples,

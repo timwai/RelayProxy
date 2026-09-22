@@ -3,16 +3,20 @@
 package desktop
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"image"
+	"image/png"
 	"log"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
 
 	"github.com/go-mswin/screencapture"
 	"github.com/lxn/win"
+	"golang.org/x/sys/windows"
 
 	desktopcodec "relayproxy/agent/desktop/codec"
 	"relayproxy/internal/protocol"
@@ -136,7 +140,8 @@ func (c *gdiCapture) Close() error {
 // the session, otherwise normalized input coordinates would target the wrong
 // monitor.
 type windowsCapture struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	cursorMu sync.Mutex
 
 	gdi        *gdiCapture
 	dxgiTarget *screencapture.Display
@@ -144,6 +149,13 @@ type windowsCapture struct {
 	frame      *image.RGBA
 	backend    string
 	closed     bool
+
+	cursorHandle  uintptr
+	cursorPNG     []byte
+	cursorWidth   int
+	cursorHeight  int
+	cursorHotspotX int
+	cursorHotspotY int
 }
 
 func newSystemCapture() (*windowsCapture, error) {
@@ -306,6 +318,223 @@ func (c *windowsCapture) Close() error {
 		return gdi.Close()
 	}
 	return nil
+}
+
+type windowsCursorInfo struct {
+	Size      uint32
+	Flags     uint32
+	HCursor   uintptr
+	ScreenPos win.POINT
+}
+
+const cursorShowing = 0x00000001
+
+var (
+	cursorUser32DLL    = windows.NewLazySystemDLL("user32.dll")
+	procGetCursorInfo  = cursorUser32DLL.NewProc("GetCursorInfo")
+)
+
+func currentWindowsCursor() (windowsCursorInfo, error) {
+	var info windowsCursorInfo
+	info.Size = uint32(unsafe.Sizeof(info))
+	ret, _, callErr := procGetCursorInfo.Call(uintptr(unsafe.Pointer(&info)))
+	if ret == 0 {
+		if callErr != nil && callErr != windows.ERROR_SUCCESS {
+			return windowsCursorInfo{}, callErr
+		}
+		return windowsCursorInfo{}, errors.New("GetCursorInfo failed")
+	}
+	return info, nil
+}
+
+func cursorBitmapSize(iconInfo win.ICONINFO) (int, int) {
+	var bitmap win.BITMAP
+	if iconInfo.HbmColor != 0 {
+		if win.GetObject(win.HGDIOBJ(iconInfo.HbmColor), unsafe.Sizeof(bitmap), unsafe.Pointer(&bitmap)) != 0 {
+			if bitmap.BmWidth > 0 && bitmap.BmHeight > 0 {
+				return int(bitmap.BmWidth), int(bitmap.BmHeight)
+			}
+		}
+	}
+	if iconInfo.HbmMask != 0 {
+		bitmap = win.BITMAP{}
+		if win.GetObject(win.HGDIOBJ(iconInfo.HbmMask), unsafe.Sizeof(bitmap), unsafe.Pointer(&bitmap)) != 0 {
+			height := bitmap.BmHeight
+			if iconInfo.HbmColor == 0 {
+				height /= 2
+			}
+			if bitmap.BmWidth > 0 && height > 0 {
+				return int(bitmap.BmWidth), int(height)
+			}
+		}
+	}
+	return int(win.GetSystemMetrics(win.SM_CXCURSOR)), int(win.GetSystemMetrics(win.SM_CYCURSOR))
+}
+
+func renderCursorBGRA(hCursor uintptr, width, height int, background byte) ([]byte, error) {
+	if hCursor == 0 || width <= 0 || height <= 0 || width > 512 || height > 512 {
+		return nil, errors.New("invalid Windows cursor dimensions")
+	}
+	screenDC := win.GetDC(0)
+	if screenDC == 0 {
+		return nil, errors.New("GetDC failed for cursor capture")
+	}
+	defer win.ReleaseDC(0, screenDC)
+
+	memoryDC := win.CreateCompatibleDC(screenDC)
+	if memoryDC == 0 {
+		return nil, errors.New("CreateCompatibleDC failed for cursor capture")
+	}
+	defer win.DeleteDC(memoryDC)
+
+	header := win.BITMAPINFOHEADER{
+		BiSize:        uint32(unsafe.Sizeof(win.BITMAPINFOHEADER{})),
+		BiWidth:       int32(width),
+		BiHeight:      -int32(height),
+		BiPlanes:      1,
+		BiBitCount:    32,
+		BiCompression: win.BI_RGB,
+		BiSizeImage:   uint32(width * height * 4),
+	}
+	var bits unsafe.Pointer
+	bitmap := win.CreateDIBSection(screenDC, &header, win.DIB_RGB_COLORS, &bits, 0, 0)
+	if bitmap == 0 || bits == nil {
+		return nil, errors.New("CreateDIBSection failed for cursor capture")
+	}
+	old := win.SelectObject(memoryDC, win.HGDIOBJ(bitmap))
+	defer func() {
+		win.SelectObject(memoryDC, old)
+		win.DeleteObject(win.HGDIOBJ(bitmap))
+	}()
+
+	raw := unsafe.Slice((*byte)(bits), width*height*4)
+	for i := 0; i+3 < len(raw); i += 4 {
+		raw[i] = background
+		raw[i+1] = background
+		raw[i+2] = background
+		raw[i+3] = 0
+	}
+	if !win.DrawIconEx(memoryDC, 0, 0, win.HICON(hCursor), int32(width), int32(height), 0, 0, win.DI_NORMAL) {
+		return nil, errors.New("DrawIconEx failed for cursor capture")
+	}
+	return append([]byte(nil), raw...), nil
+}
+
+func cursorImageFromRenders(black, white []byte, width, height int) (*image.NRGBA, error) {
+	expected := width * height * 4
+	if width <= 0 || height <= 0 || len(black) < expected || len(white) < expected {
+		return nil, errors.New("invalid cursor render buffers")
+	}
+	out := image.NewNRGBA(image.Rect(0, 0, width, height))
+	clamp := func(value int) byte {
+		if value < 0 {
+			return 0
+		}
+		if value > 255 {
+			return 255
+		}
+		return byte(value)
+	}
+	for si, di := 0, 0; si < expected; si, di = si+4, di+4 {
+		db := int(white[si]) - int(black[si])
+		dg := int(white[si+1]) - int(black[si+1])
+		dr := int(white[si+2]) - int(black[si+2])
+		if db < 0 {
+			db = 0
+		}
+		if dg < 0 {
+			dg = 0
+		}
+		if dr < 0 {
+			dr = 0
+		}
+		alpha := 255 - (db+dg+dr)/3
+		if alpha <= 0 {
+			continue
+		}
+		out.Pix[di+3] = byte(alpha)
+		out.Pix[di] = clamp(int(black[si+2]) * 255 / alpha)
+		out.Pix[di+1] = clamp(int(black[si+1]) * 255 / alpha)
+		out.Pix[di+2] = clamp(int(black[si]) * 255 / alpha)
+	}
+	return out, nil
+}
+
+func captureWindowsCursorShape(hCursor uintptr) ([]byte, int, int, int, int, error) {
+	var iconInfo win.ICONINFO
+	if !win.GetIconInfo(win.HICON(hCursor), &iconInfo) {
+		return nil, 0, 0, 0, 0, errors.New("GetIconInfo failed for cursor")
+	}
+	if iconInfo.HbmColor != 0 {
+		defer win.DeleteObject(win.HGDIOBJ(iconInfo.HbmColor))
+	}
+	if iconInfo.HbmMask != 0 {
+		defer win.DeleteObject(win.HGDIOBJ(iconInfo.HbmMask))
+	}
+	width, height := cursorBitmapSize(iconInfo)
+	black, err := renderCursorBGRA(hCursor, width, height, 0)
+	if err != nil {
+		return nil, 0, 0, 0, 0, err
+	}
+	white, err := renderCursorBGRA(hCursor, width, height, 0xff)
+	if err != nil {
+		return nil, 0, 0, 0, 0, err
+	}
+	cursorImage, err := cursorImageFromRenders(black, white, width, height)
+	if err != nil {
+		return nil, 0, 0, 0, 0, err
+	}
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, cursorImage); err != nil {
+		return nil, 0, 0, 0, 0, err
+	}
+	return encoded.Bytes(), width, height, int(iconInfo.XHotspot), int(iconInfo.YHotspot), nil
+}
+
+func (c *windowsCapture) CaptureCursor(ctx context.Context) (protocol.DesktopCursorState, error) {
+	if err := ctx.Err(); err != nil {
+		return protocol.DesktopCursorState{}, err
+	}
+	info, err := currentWindowsCursor()
+	if err != nil {
+		return protocol.DesktopCursorState{}, err
+	}
+	screenX := win.GetSystemMetrics(win.SM_XVIRTUALSCREEN)
+	screenY := win.GetSystemMetrics(win.SM_YVIRTUALSCREEN)
+	screenWidth := win.GetSystemMetrics(win.SM_CXVIRTUALSCREEN)
+	screenHeight := win.GetSystemMetrics(win.SM_CYVIRTUALSCREEN)
+	if screenWidth <= 0 || screenHeight <= 0 {
+		return protocol.DesktopCursorState{}, errors.New("invalid Windows virtual desktop geometry")
+	}
+
+	state := protocol.DesktopCursorState{
+		X:            int(info.ScreenPos.X - screenX),
+		Y:            int(info.ScreenPos.Y - screenY),
+		ScreenWidth:  int(screenWidth),
+		ScreenHeight: int(screenHeight),
+		Visible:      info.Flags&cursorShowing != 0,
+	}
+	if info.HCursor == 0 {
+		return state, nil
+	}
+	state.CursorID = strconv.FormatUint(uint64(info.HCursor), 16)
+
+	c.cursorMu.Lock()
+	defer c.cursorMu.Unlock()
+	if c.cursorHandle != info.HCursor {
+		shape, width, height, hotspotX, hotspotY, shapeErr := captureWindowsCursorShape(info.HCursor)
+		c.cursorHandle = info.HCursor
+		c.cursorPNG = append(c.cursorPNG[:0], shape...)
+		c.cursorWidth, c.cursorHeight = width, height
+		c.cursorHotspotX, c.cursorHotspotY = hotspotX, hotspotY
+		if shapeErr != nil {
+			log.Printf("[Desktop] capture Windows cursor shape failed: %v", shapeErr)
+		}
+	}
+	state.PNG = append([]byte(nil), c.cursorPNG...)
+	state.Width, state.Height = c.cursorWidth, c.cursorHeight
+	state.HotspotX, state.HotspotY = c.cursorHotspotX, c.cursorHotspotY
+	return state, nil
 }
 
 func NewSystemHost() (*Host, error) {

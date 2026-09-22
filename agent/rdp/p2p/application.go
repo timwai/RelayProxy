@@ -19,6 +19,13 @@ const applicationQueueDepth = 128
 
 type ApplicationHandler func(*Session, *ApplicationPath)
 
+func securityDomainForPurpose(purpose string) secure.Domain {
+	if purpose == protocol.P2PPurposeDesktopMedia {
+		return secure.DomainDesktopMedia
+	}
+	return secure.DomainRDP
+}
+
 // ApplicationPath exposes one authenticated P2P UDP lease to an application.
 // Signaling, candidate discovery, punching, fragmentation, HMAC and replay
 // protection remain owned by the existing P2P manager.
@@ -245,12 +252,13 @@ func (m *Manager) startTargetApplicationUDP(item *Session) (err error) {
 		return err
 	}
 	tunnel.TuneUDPConn(conn)
-	encode, err := secure.NewDataCodec(item.ID, item.Token)
+	domain := securityDomainForPurpose(item.Purpose)
+	encode, err := secure.NewDataCodecWithDomain(item.ID, item.Token, domain)
 	if err != nil {
 		_ = conn.Close()
 		return err
 	}
-	decode, err := secure.NewDataCodec(item.ID, item.Token)
+	decode, err := secure.NewDataCodecWithDomain(item.ID, item.Token, domain)
 	if err != nil {
 		_ = conn.Close()
 		return err
@@ -318,11 +326,15 @@ func (m *Manager) targetApplicationUDPReadLoop(item *Session, path *ApplicationP
 		}
 		source = netip.AddrPortFrom(source.Addr().Unmap(), source.Port())
 
-		packet, punchErr := secure.DecodePunchPacket(buffer[:n], item.Token)
+		packet, punchErr := secure.DecodePunchPacketWithDomain(
+			buffer[:n], item.Token, securityDomainForPurpose(item.Purpose),
+		)
 		if punchErr == nil && packet.SessionID == item.ID {
 			if packet.Type == secure.PunchRequest || packet.Type == secure.PunchKeep {
 				sourceAddr := net.UDPAddrFromAddrPort(source)
-				_ = punch.WritePunchAck(conn, sourceAddr, packet, item.Token)
+				_ = punch.WritePunchAckWithDomain(
+					conn, sourceAddr, packet, item.Token, securityDomainForPurpose(item.Purpose),
+				)
 				item.setRemote(sourceAddr, source)
 				continue
 			}

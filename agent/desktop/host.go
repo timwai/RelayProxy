@@ -212,11 +212,22 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	if hasCursor {
 		workerCount++
 	}
+	clipboardEndpoint, hasClipboard := h.source.(ClipboardEndpoint)
+	syncClipboard := hasClipboard && clipboardEnabled(options)
+	clipboardState := &clipboardSyncState{}
+	if syncClipboard {
+		workerCount++
+	}
 	errorsCh := make(chan error, workerCount)
 	go func() { errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests) }()
-	go func() { errorsCh <- h.readSessionControlLoop(sessionCtx, conn, idrRequests) }()
+	go func() {
+		errorsCh <- h.readSessionControlLoop(sessionCtx, conn, idrRequests, clipboardEndpoint, clipboardState, syncClipboard)
+	}()
 	if hasCursor {
 		go func() { errorsCh <- h.streamCursor(sessionCtx, conn, cursorSource) }()
+	}
+	if syncClipboard {
+		go func() { errorsCh <- h.streamClipboard(sessionCtx, conn, clipboardEndpoint, clipboardState) }()
 	}
 
 	first := <-errorsCh
@@ -238,8 +249,16 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	return ctx.Err()
 }
 
-func (h *Host) readSessionControlLoop(ctx context.Context, conn *desktopmedia.MediaConn, idrRequests chan<- struct{}) error {
-	var lastSequence uint64
+func (h *Host) readSessionControlLoop(
+	ctx context.Context,
+	conn *desktopmedia.MediaConn,
+	idrRequests chan<- struct{},
+	clipboard ClipboardEndpoint,
+	clipboardState *clipboardSyncState,
+	syncClipboard bool,
+) error {
+	var lastInputSequence uint64
+	var lastClipboardSequence uint64
 	for {
 		message, err := conn.ReceiveSessionMessage(ctx)
 		if err != nil {
@@ -265,10 +284,10 @@ func (h *Host) readSessionControlLoop(ctx context.Context, conn *desktopmedia.Me
 				return err
 			}
 			if event.Sequence != 0 {
-				if event.Sequence <= lastSequence {
+				if event.Sequence <= lastInputSequence {
 					continue
 				}
-				lastSequence = event.Sequence
+				lastInputSequence = event.Sequence
 			}
 			if err := h.input.ApplyInput(ctx, event); err != nil {
 				// Input injection can be rejected by Windows UIPI when the remote
@@ -276,6 +295,31 @@ func (h *Host) readSessionControlLoop(ctx context.Context, conn *desktopmedia.Me
 				// alive and surface the failure through logs instead of tearing down.
 				log.Printf("[Desktop] input injection failed: %v", err)
 			}
+
+		case protocol.DesktopSessionClipboard:
+			if message.Clipboard == nil || !syncClipboard || clipboard == nil || clipboardState == nil {
+				continue
+			}
+			update := *message.Clipboard
+			if update.Sequence != 0 {
+				if update.Sequence <= lastClipboardSequence {
+					continue
+				}
+				lastClipboardSequence = update.Sequence
+			}
+			text, err := validateClipboardText(update.Text)
+			if err != nil {
+				log.Printf("[Desktop] remote clipboard ignored: %v", err)
+				continue
+			}
+			if clipboardState.IsCurrent(text) {
+				continue
+			}
+			if err := clipboard.SetClipboardText(ctx, text); err != nil {
+				log.Printf("[Desktop] apply remote clipboard failed: %v", err)
+				continue
+			}
+			clipboardState.Seed(text)
 
 		default:
 			return errors.New("invalid Relay Desktop session control message")

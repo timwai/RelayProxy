@@ -32,13 +32,15 @@ type ControllerSession struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 
-	closeOnce    sync.Once
-	mu           sync.RWMutex
-	latest       FrameSnapshot
-	latestCursor protocol.DesktopCursorState
-	videoConfig  protocol.DesktopVideoConfig
-	configReady  chan struct{}
-	configOnce   sync.Once
+	closeOnce        sync.Once
+	mu               sync.RWMutex
+	latest           FrameSnapshot
+	latestCursor     protocol.DesktopCursorState
+	latestClipboard  protocol.DesktopClipboardState
+	clipboardSendSeq uint64
+	videoConfig      protocol.DesktopVideoConfig
+	configReady      chan struct{}
+	configOnce       sync.Once
 
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState
@@ -96,6 +98,23 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 				cursor.PNG = append([]byte(nil), cursor.PNG...)
 			}
 			s.latestCursor = cursor
+			s.mu.Unlock()
+
+		case protocol.DesktopSessionClipboard:
+			if message.Clipboard == nil {
+				continue
+			}
+			clipboard := *message.Clipboard
+			text, err := validateClipboardText(clipboard.Text)
+			if err != nil {
+				log.Printf("[Desktop] remote clipboard update ignored: %v", err)
+				continue
+			}
+			clipboard.Text = text
+			s.mu.Lock()
+			if clipboard.Sequence > s.latestClipboard.Sequence {
+				s.latestClipboard = clipboard
+			}
 			s.mu.Unlock()
 		}
 	}
@@ -259,6 +278,39 @@ func (s *ControllerSession) SendInput(ctx context.Context, event protocol.Deskto
 		Type:  protocol.DesktopSessionInput,
 		Input: &event,
 	})
+}
+
+func (s *ControllerSession) SendClipboard(ctx context.Context, text string) error {
+	if s == nil || !s.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	text, err := validateClipboardText(text)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.clipboardSendSeq++
+	sequence := s.clipboardSendSeq
+	s.mu.Unlock()
+	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+		Type: protocol.DesktopSessionClipboard,
+		Clipboard: &protocol.DesktopClipboardState{
+			Sequence: sequence,
+			Text:     text,
+		},
+	})
+}
+
+func (s *ControllerSession) LatestClipboard(knownSequence uint64) (protocol.DesktopClipboardState, bool) {
+	if s == nil {
+		return protocol.DesktopClipboardState{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.latestClipboard.Sequence == 0 || s.latestClipboard.Sequence == knownSequence {
+		return protocol.DesktopClipboardState{}, false
+	}
+	return s.latestClipboard, true
 }
 
 func (s *ControllerSession) LatestCursor(knownCursorID string) (protocol.DesktopCursorState, bool) {

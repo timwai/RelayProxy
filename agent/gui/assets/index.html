@@ -757,8 +757,12 @@
               </select>
             </div>
           </div>
+          <label class="mt-3 inline-flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-300">
+            <input id="desktop-opt-clipboard" type="checkbox" checked class="rounded border-slate-300 dark:border-slate-600">
+            <span>同步文本剪贴板</span>
+          </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 码率由 Media Foundation 编码器控制。Windows RDP 会忽略媒体画质参数。
+            设置仅作用于下一次连接。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 码率由 Media Foundation 编码器控制。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -1187,6 +1191,7 @@
     var desktopPressedKeys = {}, desktopPressedButtons = {};
     var desktopVideoDecoder = null, desktopVideoCodec = '', desktopVideoDecodeErrorAt = 0;
     var desktopCursorSeq = 0, desktopCursorBusy = false, desktopCursorID = '', desktopCursorLast = null;
+    var desktopClipboardSeq = 0, desktopClipboardBusy = false, desktopClipboardLocal = '', desktopClipboardReady = false, desktopClipboardErrorAt = 0;
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1516,6 +1521,7 @@
       var resolutionValue = $('desktop-opt-resolution') ? $('desktop-opt-resolution').value : 'auto';
       var fps = $('desktop-opt-fps') ? Number($('desktop-opt-fps').value || 0) : 0;
       var bitrateMbps = $('desktop-opt-bitrate') ? Number($('desktop-opt-bitrate').value || 0) : 0;
+      var clipboard = $('desktop-opt-clipboard') ? !!$('desktop-opt-clipboard').checked : true;
       var resolution = {};
       if (resolutionValue === 'native') {
         resolution.mode = 'native';
@@ -1530,7 +1536,8 @@
         codec: codec,
         resolution: resolution,
         fps: fps,
-        maxBitrate: bitrateMbps > 0 ? Math.round(bitrateMbps * 1000000) : 0
+        maxBitrate: bitrateMbps > 0 ? Math.round(bitrateMbps * 1000000) : 0,
+        clipboard: clipboard
       };
     }
     function remoteDesktopOptionsSummary() {
@@ -1542,6 +1549,7 @@
       else if (options.resolution && options.resolution.mode === 'native') parts.push('native');
       if (options.fps) parts.push(options.fps + ' FPS');
       if (options.maxBitrate) parts.push((options.maxBitrate / 1000000) + ' Mbps');
+      if (options.clipboard) parts.push('文本剪贴板');
       return parts.length ? parts.join(' · ') : '自动画质';
     }
     function renderRemoteDesktopTargets() {
@@ -1619,6 +1627,7 @@
         desktopFrameSeq = 0;
         resetDesktopVideoDecoder();
         resetDesktopCursor();
+        resetDesktopClipboard();
         showDesktopJPEGSurface();
         $('desktop-viewer-image').removeAttribute('src');
         $('desktop-viewer-meta').textContent = '等待视频帧…';
@@ -1709,6 +1718,68 @@
         renderDesktopCursor(cursor);
       } finally {
         desktopCursorBusy = false;
+      }
+    }
+
+    function desktopClipboardEnabled() {
+      var option = $('desktop-opt-clipboard');
+      return !option || !!option.checked;
+    }
+    function resetDesktopClipboard() {
+      desktopClipboardSeq = 0;
+      desktopClipboardBusy = false;
+      desktopClipboardLocal = '';
+      desktopClipboardReady = false;
+    }
+    function reportDesktopClipboardError(message) {
+      var now = Date.now();
+      if (now - desktopClipboardErrorAt > 3000) {
+        desktopClipboardErrorAt = now;
+        toast(message);
+      }
+    }
+    async function refreshRemoteDesktopClipboard() {
+      if (desktopClipboardBusy || !desktopClipboardEnabled()) return;
+      if (!hasFn('goGetRemoteDesktopClipboard') || !hasFn('goSendRemoteDesktopClipboard') ||
+          !hasFn('goGetClipboardText') || !hasFn('goSetClipboardText')) return;
+      var status = state.desktopStatus || {};
+      if (status.state !== 'connected' || status.backend !== 'relay') return;
+
+      desktopClipboardBusy = true;
+      try {
+        if (!desktopClipboardReady) {
+          var initialLocal = await call('goGetClipboardText');
+          desktopClipboardLocal = String(initialLocal == null ? '' : initialLocal);
+          desktopClipboardReady = true;
+        }
+
+        var rawRemote = await call('goGetRemoteDesktopClipboard', desktopClipboardSeq);
+        var remote = parseJSONResult(rawRemote, null);
+        if (remote && remote.sequence && remote.sequence !== desktopClipboardSeq) {
+          var remoteText = String(remote.text == null ? '' : remote.text);
+          if (remoteText !== desktopClipboardLocal) {
+            var setResult = mutationResult(await call('goSetClipboardText', remoteText));
+            if (setResult && setResult.ok === false) {
+              throw new Error(setResult.message || '写入本地剪贴板失败');
+            }
+            desktopClipboardLocal = remoteText;
+          }
+          desktopClipboardSeq = remote.sequence;
+        }
+
+        var localTextRaw = await call('goGetClipboardText');
+        var localText = String(localTextRaw == null ? '' : localTextRaw);
+        if (localText !== desktopClipboardLocal) {
+          var sendResult = mutationResult(await call('goSendRemoteDesktopClipboard', localText));
+          if (sendResult && sendResult.ok === false) {
+            throw new Error(sendResult.message || '发送远程剪贴板失败');
+          }
+          desktopClipboardLocal = localText;
+        }
+      } catch (err) {
+        reportDesktopClipboardError('剪贴板同步失败：' + (err && err.message ? err.message : err));
+      } finally {
+        desktopClipboardBusy = false;
       }
     }
 
@@ -2042,6 +2113,7 @@
           return;
         }
         desktopFrameSeq = 0;
+        resetDesktopClipboard();
         toast('远程桌面已启动 · ' + remoteDesktopOptionsSummary());
         await refreshRemoteDesktopStatus(false);
         await refreshRemoteDesktopFrame();
@@ -2058,6 +2130,7 @@
         return;
       }
       desktopFrameSeq = 0;
+      resetDesktopClipboard();
       toast('远程桌面已断开');
       await refreshRemoteDesktopStatus(false);
     }
@@ -2610,6 +2683,7 @@
       }, 2000);
       setInterval(refreshRemoteDesktopFrame, 100);
       setInterval(refreshRemoteDesktopCursor, 33);
+      setInterval(refreshRemoteDesktopClipboard, 250);
       window.addEventListener('resize', function () {
         if (desktopCursorLast) renderDesktopCursor(desktopCursorLast);
       });

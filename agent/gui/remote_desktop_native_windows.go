@@ -20,6 +20,7 @@ type nativeDesktopSession struct {
 
 	viewer  desktopviewer.Native
 	decoder desktopcodec.Decoder
+	inputCh chan protocol.DesktopInputEvent
 
 	done      chan struct{}
 	closeOnce sync.Once
@@ -53,8 +54,12 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		TargetBitrate: 6_000_000,
 		KeyframeEvery: 2 * time.Second,
 	}
-	decoder, err := desktopcodec.OpenMFH264Decoder(context.Background(), decoderConfig, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	inputCh := make(chan protocol.DesktopInputEvent, 512)
+
+	decoder, err := desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("open Media Foundation H.264 decoder: %w", err)
 	}
 
@@ -66,27 +71,37 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		Title:  title,
 		Width:  frame.Width,
 		Height: frame.Height,
+		OnInput: func(event protocol.DesktopInputEvent) {
+			select {
+			case inputCh <- event:
+			default:
+				if event.Kind != protocol.DesktopInputMouseMove {
+					log.Printf("[Desktop] native viewer input queue full; dropped %s", event.Kind)
+				}
+			}
+		},
 	})
 	if err != nil {
+		cancel()
 		_ = decoder.Close()
 		return nil, fmt.Errorf("open D3D11 viewer: %w", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	session := &nativeDesktopSession{
 		cancel:  cancel,
 		viewer:  native,
 		decoder: decoder,
+		inputCh: inputCh,
 		done:    make(chan struct{}),
 	}
 
 	a.desktopViewerMu.Lock()
-	if a.desktopViewer != nil {
+	if existing := a.desktopViewer; existing != nil {
 		a.desktopViewerMu.Unlock()
 		cancel()
 		_ = native.Close()
 		_ = decoder.Close()
-		a.desktopViewer.viewer.Focus()
+		existing.viewer.Focus()
 		return map[string]any{"ok": true, "alreadyOpen": true}, nil
 	}
 	a.desktopViewer = session
@@ -103,6 +118,7 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 
 func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer close(s.done)
+	go s.inputLoop(ctx, owner)
 	defer s.decoder.Close()
 	defer s.viewer.Close()
 	defer func() {
@@ -177,6 +193,19 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			}); err != nil {
 				log.Printf("[Desktop] native viewer render failed: %v", err)
 				return
+			}
+		}
+	}
+}
+
+func (s *nativeDesktopSession) inputLoop(ctx context.Context, owner *appWindow) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event := <-s.inputCh:
+			if err := owner.bridge.SendRemoteDesktopInput(event); err != nil && ctx.Err() == nil {
+				log.Printf("[Desktop] native viewer input send failed: %v", err)
 			}
 		}
 	}

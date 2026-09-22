@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P 与运行期自动恢复已合并 main，进入路径评分/切换滞回、NetEm 与跨 NAT 实机验证  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P、运行期自动恢复与路径评分/切换滞回已合并 main，进入 direct-path RTT/Jitter 探测、NetEm 与跨 NAT 实机验证  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #42 已合并）
+> 当前开发基线：`main`（PR #43 已合并）
 
 ## 0. 当前进度
 
@@ -30,10 +30,11 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、bitrate-only ABR、Relay Desktop P2P 已全部进入 main。P2P 复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，并使用独立 `desktop_media` purpose；可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`。PR #42 已补齐运行期恢复：首次打洞失败或 P2P 运行中断开时保持 QUIC Datagram Relay，不中断 Desktop Session，并按 2/4/8/16/30 秒有界指数退避自动重试；直连稳定 20 秒后清零退避。下一步重点是跨 NAT 实机验证、路径质量评分/切换滞回与 NetEm 验证 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、bitrate-only ABR、Relay Desktop P2P 已全部进入 main。P2P 复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，并使用独立 `desktop_media` purpose；可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`。PR #42 已补齐运行期恢复与 2/4/8/16/30 秒有界指数退避；PR #43 增加集中式路径评分、切换滞回、P2P 质量主动降级和路径变化 IDR 恢复。当前评分只使用媒体路径本地可归因的丢包与 Host send-queue delay；direct-path RTT/Jitter 探测、NetEm 和跨 NAT 实机验证继续进行 |
 
 ### 0.1 已合并主线的关键进度
 
+- RD2 路径评分与切换滞回已通过 PR #43 合并到 `main`（merge `275f78d717befb5aafa241db915fc1dfc2c8d915`）：新增集中式 `PathScorePolicy` 与 `PathSwitchGate`，把 RTT/Jitter/Loss/QueueDelay/Relay penalty 权重和升级阈值统一收口到可测试策略结构；当前运行时只使用可明确归因到媒体路径的丢包与 Host send-queue delay，避免把可靠 Relay 控制流上的 RTT/Jitter 错当作 P2P 指标。Controller 在切到 `udp_p2p` 前保存 Relay 媒体质量基线，P2P 连续劣化超过滞回窗口会主动降级回 Relay；路径变化会请求 H.264 IDR，且主动降级继续复用原有 P2P 指数退避恢复。Go CI、UI 全量回归、Windows/macOS Desktop package 均通过。
 - RD2 P2P 恢复硬化已通过 PR #42 合并到 `main`（merge `7bde35595f2cc3103b56d40dc0eab8f6347f926b`）：Controller 不再只尝试一次直连；首次 punch 失败或 `udp_p2p` 运行中丢失后继续使用 QUIC Datagram Relay，并按 2/4/8/16/30 秒上限退避自动重试，不重建 Desktop Session。短时抖动保留退避历史，直连连续稳定 20 秒后再清零；Controller Session 关闭会立即结束重试 worker。Go CI 与 UI CI（Windows/macOS）全部通过。
 - RD2 Relay Desktop P2P 已通过 PR #39 合并到 `main`（merge `00c547e6e643664d34ec479c9ce4b9be4559baa2`），Go CI / UI CI 全部通过：新增独立 `desktop_media` P2P purpose，复用既有 rendezvous、候选发现、UDP punch、HMAC 与 replay protection；Controller 先建立 Relay Desktop 基线会话，再后台打洞并把视频 Datagram 热切到 `udp_p2p`；可靠 session stream 继续走 Relay，直连失败或关闭后自动回退 QUIC Datagram Relay。Target 侧按服务端写入的 `ClientDeviceID` 精确绑定媒体会话，并限制 Desktop P2P lease 不能打开 Native RDP TCP/3389，避免跨 purpose 权限复用。
 - RD2 bitrate-only ABR 已通过 PR #38 合并到 `main`（merge `0cfb166c6a8df29579db07a0f7b377f17bec437d`）：500 ms 网络窗口基于丢包/Jitter/异常 RTT/新增 dropped frame 快速降码率，稳定窗口后缓慢恢复；用户设置码率保持为上限，Media Foundation H.264 通过 `ICodecAPI MeanBitRate` 热更新，无需重建 Encoder。
@@ -53,7 +54,7 @@
 
 ### 0.2 当前开发状态
 
-当前 Windows 可交互 MVP 与 RD1 高性能媒体链路均已进入 `main`；RD2 的 Stats、bitrate-only ABR、P2P 媒体直连与运行期自动恢复也已合并。当前不再以旧的 `feature/relay-desktop-windows-mvp` 为开发基线，后续工作从最新 `main` 拉分支继续。
+当前 Windows 可交互 MVP 与 RD1 高性能媒体链路均已进入 `main`；RD2 的 Stats、bitrate-only ABR、P2P 媒体直连、运行期自动恢复以及路径评分/切换滞回也已合并。当前不再以旧的 `feature/relay-desktop-windows-mvp` 为开发基线，后续工作从最新 `main` 拉分支继续。
 
 当前已完成的端到端路径：
 
@@ -85,19 +86,19 @@ Windows SendInput / CF_UNICODETEXT
 
 ### 0.3 本轮进度（2026-09-22）
 
-本轮完成 **Relay Desktop P2P 运行期恢复硬化**，对应 PR #42，已合并到 `main`，merge commit：`7bde35595f2cc3103b56d40dc0eab8f6347f926b`。
+本轮完成 **Relay Desktop 路径评分与切换滞回**，对应 PR #43，已合并到 `main`，merge commit：`275f78d717befb5aafa241db915fc1dfc2c8d915`。
 
 已完成：
 
-- Controller 侧 P2P 从“一次性尝试”改为会话级自动恢复。
-- 首次 UDP punch 失败时继续使用 QUIC Datagram Relay，Desktop Session 不失败、不重建。
-- `udp_p2p` 运行中断开后立即回退 Relay，并自动重新尝试直连。
-- P2P 重试采用有界指数退避：`2s → 4s → 8s → 16s → 30s`。
-- 短时间反复掉线保留退避历史，防止 NAT / Wi-Fi 抖动导致高频重连。
-- 直连连续稳定 20 秒后清零退避状态。
-- Controller Session 关闭、Agent 关闭或主 Relay 会话结束时，P2P retry worker 立即退出。
-- 修复 P2P lease 提前关闭时 `desktopP2PSession` 可能残留的生命周期竞态。
-- 新增 `PathRetryPolicy` 与指数退避/稳定窗口单元测试。
+- 新增集中式 `PathScorePolicy`，统一管理 RTT、Jitter、Loss、Send Queue Delay、Relay penalty、升级 margin、稳定窗口和紧急切换阈值，避免策略常数散落在会话代码中。
+- 新增 `PathSwitchGate`，候选路径必须持续优于当前路径达到滞回窗口后才能切换；当前路径不可用或候选优势极大时允许快速切换。
+- Controller Stats 增加媒体路径局部质量窗口；每次 Relay ↔ P2P 切换都会重置 path-local packet-order 边界，避免把跨路径的 Sequence 跳变误判为大规模丢包。
+- P2P 切换前保存 Relay 媒体质量基线；`udp_p2p` 激活后持续比较媒体丢包与 Host send-queue delay。
+- P2P 路径持续劣化超过滞回窗口时，不再等待 UDP lease 完全失效，而是主动降级回 QUIC Datagram Relay。
+- 主动质量降级继续复用现有 2/4/8/16/30 秒有界指数退避与 20 秒稳定窗口，避免质量差的 NAT/Wi-Fi 环境频繁重连。
+- Relay → P2P 和 P2P → Relay 路径变化都会触发 H.264 IDR 恢复，降低切换时丢失参考帧导致长时间花屏/黑屏的概率。
+- 明确暂不把现有 session ping/pong RTT/Jitter 用进 P2P 路径评分，因为该探针仍走可靠 Relay session stream，不能代表 direct media path。
+- 新增路径评分、Relay penalty、稳定候选滞回、候选重置、紧急切换和 path-boundary 统计单元测试。
 
 验证结果：
 
@@ -110,19 +111,18 @@ Go CI
   ✓ benchmark smoke
 
 UI CI
-  ✓ frontend / UI regression
+  ✓ frontend / UI full regression
   ✓ Windows desktop packages
   ✓ macOS desktop packages
 ```
 
-当前 RD2 剩余重点：
+下一轮重点：
 
-1. 实现统一 Path Metrics / Path Score，纳入 RTT、loss、jitter、queue delay 和 relay penalty。
-2. 增加路径升级/降级 hysteresis，避免 `udp_p2p ↔ relay` 因短时指标波动频繁切换。
-3. 路径切换时记录统计事件，并按需要触发 H.264 IDR。
-4. 增加 NetEm / transport shim，覆盖 RTT、丢包、jitter、限速、突发丢包和带宽骤降/恢复。
-5. 完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵验证。
-6. 根据实机数据继续调整 ABR 阈值和 P2P retry/path-switch 参数。
+1. 为 `desktop_media` P2P 增加专用 direct-path probe，得到真正的 P2P RTT/Jitter，而不是复用 Relay session ping/pong。
+2. 增加 NetEm / transport shim，覆盖 RTT、丢包、jitter、限速、突发丢包和带宽骤降/恢复。
+3. 用 direct-path probe + NetEm 数据重新标定 `PathScorePolicy` 权重、upgrade margin、emergency margin 和 hold window。
+4. 完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵验证。
+5. 根据实机数据继续调整 ABR 阈值和 P2P retry/path-switch 参数。
 
 ### 0.4 当前实现与最终设计的差异
 
@@ -171,7 +171,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 ```text
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
-RD2  P2P + ABR + 性能统计                                🧪 核心实现已完成，实机验证/硬化中
+RD2  P2P + ABR + 性能统计                                🧪 路径评分/滞回已完成，direct probe / NetEm / 实机验证中
 RD3  H.265 / 4:4:4 / 音频 / 多显示器                    ⏳ 未开始
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```

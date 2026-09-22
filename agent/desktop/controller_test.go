@@ -1,9 +1,9 @@
 package desktop
 
 import (
+	"bytes"
 	"image"
 	"image/jpeg"
-	"bytes"
 	"testing"
 
 	desktopmedia "relayproxy/internal/desktop"

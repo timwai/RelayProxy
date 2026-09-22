@@ -200,6 +200,9 @@ const (
 	DesktopSessionIDRRequest  = "idr_request"
 	DesktopSessionCursor      = "cursor"
 	DesktopSessionClipboard   = "clipboard"
+	DesktopSessionPing        = "ping"
+	DesktopSessionPong        = "pong"
+	DesktopSessionStats       = "stats"
 )
 
 type DesktopSessionMessage struct {
@@ -208,6 +211,8 @@ type DesktopSessionMessage struct {
 	VideoConfig *DesktopVideoConfig    `json:"videoConfig,omitempty"`
 	Cursor      *DesktopCursorState    `json:"cursor,omitempty"`
 	Clipboard   *DesktopClipboardState `json:"clipboard,omitempty"`
+	Probe       *DesktopSessionProbe    `json:"probe,omitempty"`
+	Stats       *DesktopSessionStats    `json:"stats,omitempty"`
 }
 
 const (
@@ -225,6 +230,11 @@ const (
 	DesktopControlSessionClose    = "session_close"
 	DesktopControlError           = "error"
 )
+
+type DesktopSessionProbe struct {
+	Sequence uint64 `json:"sequence"`
+	SentAtUS int64  `json:"sentAtUs"`
+}
 
 const MaxDesktopClipboardBytes = 1 << 20
 

@@ -56,6 +56,21 @@ type wgcFrameStream struct {
 	closed   bool
 }
 
+func windowsWGCAvailable() bool {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := winrtruntime.Initialize(); err != nil {
+		return false
+	}
+	statics, err := winrtcapture.GraphicsCaptureSessionStatics()
+	if err != nil {
+		return false
+	}
+	defer statics.Release()
+	supported, err := statics.IsSupported()
+	return err == nil && supported
+}
+
 func openWGCFrameStream(
 	ctx context.Context,
 	display screencapture.Display,

@@ -76,13 +76,14 @@ type SessionInputSink interface {
 }
 
 type HostConfig struct {
-	MaxFPS      int
-	MaxWidth    int
-	MaxHeight   int
-	JPEGQuality int
-	MaxBitrate  int
-	PacketSize  int
-	DisplayID   string
+	MaxFPS         int
+	MaxWidth       int
+	MaxHeight      int
+	JPEGQuality    int
+	MaxBitrate     int
+	PacketSize     int
+	DisplayID      string
+	CaptureBackend protocol.DesktopCaptureBackend
 }
 
 func DefaultHostConfig() HostConfig {
@@ -260,6 +261,10 @@ func ResolveHostConfig(base HostConfig, options protocol.RemoteDesktopConnectOpt
 		cfg.MaxBitrate = options.MaxBitrate
 	}
 	cfg.DisplayID = options.DisplayID
+	cfg.CaptureBackend = options.CaptureBackend
+	if cfg.CaptureBackend == "" {
+		cfg.CaptureBackend = protocol.DesktopCaptureAuto
+	}
 
 	cfg.MaxWidth = clampInt(cfg.MaxWidth, 320, maxJPEGWidth)
 	cfg.MaxHeight = clampInt(cfg.MaxHeight, 180, maxJPEGHeight)
@@ -311,7 +316,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 		}
 		defer input.EndInputSession()
 	}
-	log.Printf("[Desktop] session capture=%s display=%q config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.DisplayID, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
+	log.Printf("[Desktop] session capture=%s requestedCapture=%s display=%q config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.CaptureBackend, sessionConfig.DisplayID, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

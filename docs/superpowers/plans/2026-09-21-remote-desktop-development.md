@@ -29,11 +29,12 @@
 | DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
-| 原生 D3D11 Viewer | 🧪 零拷贝优化中 | PR #33 已合并独立 Win32/D3D11 Viewer；PR #34 已合并异步 MF 硬件 Decoder、IMFDXGIDeviceManager 与 DXGI NV12 staging readback；当前分支共享 Viewer D3D11 device，并用 VideoProcessor 将解码 surface 直接呈现到 swap chain；远端光标可见时暂按需 readback，下一步迁到 GPU overlay |
+| 原生 D3D11 Viewer | 🧪 GPU 光标优化中 | PR #33 已合并原生 Win32/D3D11 Viewer；PR #34 已合并异步 MF/DXVA 解码；PR #35 已合并共享 D3D11 device + DXGI surface → VideoProcessor → swap chain 零拷贝视频；当前分支将独立远端光标作为第二个 BGRA VideoProcessor stream 在 GPU 合成，amd64 启用，能力不足/ARM64 自动回退 CPU 光标路径 |
 | RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
 
 ### 0.1 已合并主线的关键进度
 
+- 零拷贝视频呈现已通过 PR #35 合并到 `main`（merge `afcb5a8b71d800a6812301ed17ec1a299dfdbd04`）：Viewer 与 MF Decoder 共用 D3D11 device，DXGI NV12 surface 由 VideoProcessor 直接转换并呈现到 swap chain，保留 staging/CPU 回退。
 - D3D11-aware / DXVA 解码已通过 PR #34 合并到 `main`（merge `9abb7fdd9b5c966fb0da3b988f9efc65db832a70`）：支持异步 Decoder MFT、`IMFDXGIDeviceManager` 和 DXGI NV12 surface，并在协商失败时安全回退系统内存硬解/软解。
 - 原生 D3D11 Viewer 第一版已通过 PR #33 合并到 `main`（merge `9dcce5255ca7c49bb6e81bba6a0147b7d04980d4`）：Controller H.264 帧不再必须经过 JS/Base64/WebCodecs，可直接由 Go 侧 Media Foundation 解码并交给独立 Win32/D3D11 窗口显示；原生键鼠和独立远端光标也已接通。
 - Unicode 文本剪贴板已通过 PR #32 合并到 `main`：可靠 session stream 双向同步 CF_UNICODETEXT，连接时建立基线，后续按序号传播并避免回环。
@@ -67,6 +68,7 @@ Controller reassembly / H.264 loss recovery
 Native Win32 Viewer
   ↓
 Media Foundation H.264 decode → DXGI NV12 surface → D3D11 VideoProcessor → swap chain
+  ↘ 独立光标：amd64 优先第二 BGRA VideoProcessor stream；不支持时 CPU 合成
   ↘ 不支持共享 surface 时回退 NV12/BGRA CPU 路径
   ↕ reliable session stream
 keyboard / mouse / cursor / clipboard

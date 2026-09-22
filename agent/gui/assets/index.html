@@ -771,6 +771,7 @@
             <div>
               <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Relay Desktop 预览</div>
               <div id="desktop-viewer-meta" class="text-[10px] text-slate-500 dark:text-slate-400">等待视频帧… · 点击画面后可控制键鼠</div>
+              <div id="desktop-viewer-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">网络统计：--</div>
             </div>
             <div class="flex items-center gap-2">
               <button id="desktop-native-viewer-btn" type="button" onclick="openDesktopNativeViewer()" class="rp-btn hidden">原生 Viewer</button>
@@ -2111,6 +2112,34 @@
       state.desktopTargets = targets;
       renderRemoteDesktopTargets();
     }
+    function formatDesktopBitrate(value) {
+      value = Number(value || 0);
+      if (value >= 1000000) return (value / 1000000).toFixed(value >= 10000000 ? 1 : 2) + ' Mbps';
+      if (value >= 1000) return Math.round(value / 1000) + ' Kbps';
+      return value > 0 ? Math.round(value) + ' bps' : '--';
+    }
+    async function refreshRemoteDesktopStats() {
+      var target = $('desktop-viewer-stats');
+      if (!target || !hasFn('goGetRemoteDesktopStats')) return;
+      var status = state.desktopStatus || {};
+      if (status.state !== 'connected' || status.backend !== 'relay') {
+        target.textContent = '网络统计：--';
+        return;
+      }
+      var raw = await call('goGetRemoteDesktopStats');
+      var stats = parseJSONResult(raw, null);
+      if (!stats) return;
+      var parts = [];
+      if (stats.rttMs) parts.push('RTT ' + stats.rttMs.toFixed(1) + ' ms');
+      if (stats.jitterMs) parts.push('Jitter ' + stats.jitterMs.toFixed(1) + ' ms');
+      parts.push('Loss ' + Number(stats.lossPercent || 0).toFixed(2) + '%');
+      parts.push('RX ' + formatDesktopBitrate(stats.actualBitrate));
+      if (stats.captureFps) parts.push('Capture ' + stats.captureFps.toFixed(1) + ' FPS');
+      if (stats.encodeFps) parts.push('Encode ' + stats.encodeFps.toFixed(1) + ' FPS');
+      if (stats.targetBitrate) parts.push('Target ' + formatDesktopBitrate(stats.targetBitrate));
+      target.textContent = '网络统计：' + parts.join(' · ');
+    }
+
     async function refreshRemoteDesktopStatus(showError) {
       if (!hasFn('goGetRemoteDesktopStatus')) return;
       var raw = await call('goGetRemoteDesktopStatus');
@@ -2706,7 +2735,10 @@
         // Poll only monitoring panes that are visible.
         if (!$('tab-pane-logs').classList.contains('hidden')) { refreshLogs(); }
         if (!$('tab-pane-connections').classList.contains('hidden')) { refreshConnectionsInline(false); }
-        if (!$('tab-pane-desktop').classList.contains('hidden')) { refreshRemoteDesktopStatus(false); }
+        if (!$('tab-pane-desktop').classList.contains('hidden')) {
+          refreshRemoteDesktopStatus(false);
+          refreshRemoteDesktopStats();
+        }
       }, 2000);
       setInterval(refreshRemoteDesktopFrame, 100);
       setInterval(refreshRemoteDesktopCursor, 33);

@@ -126,3 +126,54 @@ func TestJitterSequenceIsReproducible(t *testing.T) {
 		}
 	}
 }
+
+
+func TestSetProfileStartsNewDeterministicPhase(t *testing.T) {
+	conn, err := NewPacketConn(&fakePacketConn{}, Profile{
+		Delay:  20 * time.Millisecond,
+		Jitter: 5 * time.Millisecond,
+		Seed:   42,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn.mu.Lock()
+	first := conn.packetDelayLocked()
+	_ = conn.writeQueueDelayLocked(1000, time.Unix(10, 0))
+	conn.mu.Unlock()
+
+	conn.SetProfile(Profile{
+		Delay:              40 * time.Millisecond,
+		Jitter:             10 * time.Millisecond,
+		RateBytesPerSecond: 2000,
+		Seed:               99,
+	})
+	got := conn.Profile()
+	if got.Delay != 40*time.Millisecond || got.Jitter != 10*time.Millisecond || got.RateBytesPerSecond != 2000 || got.Seed != 99 {
+		t.Fatalf("profile after change=%+v", got)
+	}
+
+	conn.mu.Lock()
+	changedFirst := conn.packetDelayLocked()
+	queueDelay := conn.writeQueueDelayLocked(1000, time.Unix(20, 0))
+	conn.mu.Unlock()
+	if changedFirst < 30*time.Millisecond || changedFirst > 50*time.Millisecond {
+		t.Fatalf("changed first delay=%s outside configured window", changedFirst)
+	}
+	if queueDelay != 0 {
+		t.Fatalf("new impairment phase retained old shaper backlog: %s", queueDelay)
+	}
+
+	conn.SetProfile(Profile{
+		Delay:  20 * time.Millisecond,
+		Jitter: 5 * time.Millisecond,
+		Seed:   42,
+	})
+	conn.mu.Lock()
+	replayedFirst := conn.packetDelayLocked()
+	conn.mu.Unlock()
+	if replayedFirst != first {
+		t.Fatalf("replayed deterministic delay=%s want=%s", replayedFirst, first)
+	}
+}

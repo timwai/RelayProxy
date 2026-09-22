@@ -280,6 +280,23 @@ func (s *ControllerSession) abrDecision(stats protocol.DesktopSessionStats) desk
 	return s.abr.Observe(stats)
 }
 
+func abrVideoControl(
+	config protocol.DesktopVideoConfig,
+	decision desktopadapt.MediaDecision,
+) protocol.DesktopVideoControl {
+	control := protocol.DesktopVideoControl{
+		TargetBitrate: decision.TargetBitrate,
+		TargetFPS:     decision.TargetFPS,
+	}
+	if decision.ResolutionChanged {
+		if width, height, ok := resolutionBoundsForScale(config, decision.TargetResolutionScale); ok {
+			control.TargetWidth = width
+			control.TargetHeight = height
+		}
+	}
+	return control
+}
+
 func (s *ControllerSession) abrLoop(ctx context.Context) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -295,17 +312,8 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 			if !decision.Changed {
 				continue
 			}
-			control := &protocol.DesktopVideoControl{
-				TargetBitrate: decision.TargetBitrate,
-				TargetFPS:     decision.TargetFPS,
-			}
-			if decision.ResolutionChanged {
-				config := s.VideoConfigSnapshot()
-				if width, height, ok := resolutionBoundsForScale(config, decision.TargetResolutionScale); ok {
-					control.TargetWidth = width
-					control.TargetHeight = height
-				}
-			}
+			config := s.VideoConfigSnapshot()
+			control := abrVideoControl(config, decision)
 			if control.TargetBitrate <= 0 && control.TargetFPS <= 0 &&
 				(control.TargetWidth <= 0 || control.TargetHeight <= 0) {
 				continue
@@ -313,7 +321,7 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 			controlCtx, cancel := context.WithTimeout(ctx, time.Second)
 			err := s.conn.SendSessionMessage(controlCtx, protocol.DesktopSessionMessage{
 				Type:         protocol.DesktopSessionVideoControl,
-				VideoControl: control,
+				VideoControl: &control,
 			})
 			cancel()
 			if err != nil {

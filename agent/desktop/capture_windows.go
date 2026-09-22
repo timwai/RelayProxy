@@ -333,26 +333,33 @@ func copyDXGIFrame(src screencapture.Frame, dst *image.RGBA) (*image.RGBA, error
 	return dst, nil
 }
 
-func (c *windowsCapture) borrowedStreamFrameLocked(ctx context.Context) (screencapture.Frame, error) {
+func (c *windowsCapture) borrowedStreamFrameLocked(ctx context.Context) (screencapture.Frame, bool, error) {
 	if c.stream == nil {
-		return screencapture.Frame{}, screencapture.ErrBackendUnavailable
+		return screencapture.Frame{}, false, screencapture.ErrBackendUnavailable
 	}
-	frame, _ := c.stream.Frame()
+	frame, fresh := c.stream.Frame()
 	if frame.Valid() {
-		return frame, nil
+		return frame, fresh, nil
 	}
 	waitCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 	defer cancel()
-	return c.stream.WaitFrame(waitCtx)
+	frame, err := c.stream.WaitFrame(waitCtx)
+	if err != nil {
+		return screencapture.Frame{}, false, err
+	}
+	return frame, true, nil
 }
 
 func (c *windowsCapture) captureStreamLocked(ctx context.Context) (*image.RGBA, error) {
-	frame, err := c.borrowedStreamFrameLocked(ctx)
+	frame, fresh, err := c.borrowedStreamFrameLocked(ctx)
 	if err != nil {
 		if errors.Is(err, screencapture.ErrNoFrame) && c.frame != nil {
 			return c.frame, nil
 		}
 		return nil, err
+	}
+	if !fresh && c.frame != nil {
+		return c.frame, nil
 	}
 	c.frame, err = copyDXGIFrame(frame, c.frame)
 	return c.frame, err
@@ -370,7 +377,7 @@ func (c *windowsCapture) CaptureRaw(ctx context.Context) (desktopcodec.RawFrame,
 	if c.stream == nil {
 		return desktopcodec.RawFrame{}, false, nil
 	}
-	frame, err := c.borrowedStreamFrameLocked(ctx)
+	frame, _, err := c.borrowedStreamFrameLocked(ctx)
 	if err == nil && frame.Valid() {
 		return desktopcodec.RawFrame{
 			Format: desktopcodec.PixelFormatBGRA,

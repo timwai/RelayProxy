@@ -394,7 +394,7 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 				Path:          "relay",
 			}
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
-				Type:  protocol.DesktopSessionStats,
+				Type:  protocol.DesktopSessionStatsReport,
 				Stats: &stats,
 			}); err != nil {
 				return err

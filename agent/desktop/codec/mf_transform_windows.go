@@ -20,8 +20,8 @@ const (
 	imfAttributesGetBlobSize = 14
 	imfAttributesGetBlob     = 15
 	imfAttributesSetUINT32   = 21
-	imfAttributesSetUINT64 = 22
-	imfAttributesSetGUID   = 24
+	imfAttributesSetUINT64   = 22
+	imfAttributesSetGUID     = 24
 
 	imfActivateActivateObject = 33
 

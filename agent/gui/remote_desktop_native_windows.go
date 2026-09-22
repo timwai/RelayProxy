@@ -67,12 +67,6 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	inputCh := make(chan protocol.DesktopInputEvent, 512)
 
-	decoder, err := desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("open Media Foundation H.264 decoder: %w", err)
-	}
-
 	title := "RelayProxy Remote Desktop"
 	if status.TargetName != "" {
 		title += " - " + status.TargetName
@@ -93,8 +87,19 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	})
 	if err != nil {
 		cancel()
-		_ = decoder.Close()
 		return nil, fmt.Errorf("open D3D11 viewer: %w", err)
+	}
+
+	var decoder desktopcodec.Decoder
+	if device := native.D3D11Device(); device != 0 {
+		decoder, err = desktopcodec.OpenMFH264DecoderWithD3D11(ctx, decoderConfig, true, device)
+	} else {
+		decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
+	}
+	if err != nil {
+		cancel()
+		_ = native.Close()
+		return nil, fmt.Errorf("open Media Foundation H.264 decoder: %w", err)
 	}
 
 	session := &nativeDesktopSession{
@@ -109,8 +114,8 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	if existing := a.desktopViewer; existing != nil {
 		a.desktopViewerMu.Unlock()
 		cancel()
-		_ = native.Close()
 		_ = decoder.Close()
+		_ = native.Close()
 		existing.viewer.Focus()
 		return map[string]any{"ok": true, "alreadyOpen": true}, nil
 	}
@@ -130,8 +135,8 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer close(s.done)
 	go s.inputLoop(ctx, owner)
-	defer s.decoder.Close()
 	defer s.viewer.Close()
+	defer s.decoder.Close()
 	defer func() {
 		owner.desktopViewerMu.Lock()
 		if owner.desktopViewer == s {
@@ -190,31 +195,64 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			log.Printf("[Desktop] native viewer H.264 decode failed: %v", err)
 			continue
 		}
-		for _, decodedFrame := range decoded {
-			if decodedFrame.Format != desktopcodec.PixelFormatNV12 {
-				continue
-			}
-			converted, err = desktopcodec.NV12ToBGRA(
-				decodedFrame.Pix,
-				decodedFrame.Width,
-				decodedFrame.Height,
-				decodedFrame.Stride,
-				converted,
-			)
+		for i := range decoded {
+			decodedFrame := &decoded[i]
+			func() {
+				defer decodedFrame.Close()
+				if decodedFrame.Format != desktopcodec.PixelFormatNV12 {
+					return
+				}
+
+				s.frameWidth = decodedFrame.Width
+				s.frameHeight = decodedFrame.Height
+				s.frameStride = decodedFrame.Width * 4
+
+				needsCursorComposite := s.cursorState.Visible &&
+					s.cursorBitmap.Width > 0 && s.cursorBitmap.Height > 0
+
+				if decodedFrame.D3D11 != nil && !needsCursorComposite {
+					s.baseBGRA = nil
+					err = s.viewer.SubmitD3D11(desktopviewer.D3D11Frame{
+						Resource:    decodedFrame.D3D11.Resource,
+						Subresource: decodedFrame.D3D11.Subresource,
+						Width:       decodedFrame.Width,
+						Height:      decodedFrame.Height,
+					})
+					if err != nil {
+						log.Printf("[Desktop] zero-copy D3D11 submit failed, falling back to readback: %v", err)
+					} else {
+						return
+					}
+				}
+
+				nv12 := decodedFrame.Pix
+				if decodedFrame.D3D11 != nil {
+					nv12, err = decodedFrame.D3D11.ReadNV12()
+					if err != nil {
+						log.Printf("[Desktop] D3D11 surface readback failed: %v", err)
+						return
+					}
+				}
+				converted, err = desktopcodec.NV12ToBGRA(
+					nv12,
+					decodedFrame.Width,
+					decodedFrame.Height,
+					decodedFrame.Stride,
+					converted,
+				)
+				if err != nil {
+					log.Printf("[Desktop] native viewer NV12 conversion failed: %v", err)
+					return
+				}
+				s.baseBGRA = append(s.baseBGRA[:0], converted...)
+				if err = s.present(); err != nil {
+					log.Printf("[Desktop] native viewer render failed: %v", err)
+				}
+			}()
 			if err != nil {
-				log.Printf("[Desktop] native viewer NV12 conversion failed: %v", err)
-				continue
-			}
-			s.baseBGRA = append(s.baseBGRA[:0], converted...)
-			s.frameWidth = decodedFrame.Width
-			s.frameHeight = decodedFrame.Height
-			s.frameStride = decodedFrame.Width * 4
-			if err := s.present(); err != nil {
-				log.Printf("[Desktop] native viewer render failed: %v", err)
 				return
 			}
-		}
-	}
+		}	}
 }
 
 func (s *nativeDesktopSession) refreshCursor(owner *appWindow) bool {
@@ -289,7 +327,6 @@ func (a *appWindow) stopNativeDesktopViewer() {
 	}
 	session.closeOnce.Do(func() {
 		session.cancel()
-		_ = session.viewer.Close()
 	})
 	<-session.done
 }

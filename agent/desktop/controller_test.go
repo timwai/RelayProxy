@@ -31,3 +31,24 @@ func TestSnapshotFromEncodedFrameLegacyJPEG(t *testing.T) {
 		t.Fatalf("snapshot=%+v ok=%v", got, ok)
 	}
 }
+
+func TestLatestCursorOmitsKnownShape(t *testing.T) {
+	session := &ControllerSession{
+		done: make(chan struct{}),
+		latestCursor: protocol.DesktopCursorState{
+			Sequence: 3, CursorID: "cursor-a", Visible: true, PNG: []byte{1, 2, 3},
+		},
+	}
+	cursor, ok := session.LatestCursor("")
+	if !ok || len(cursor.PNG) != 3 {
+		t.Fatalf("cursor=%+v ok=%v", cursor, ok)
+	}
+	cursor.PNG[0] = 9
+	if session.latestCursor.PNG[0] != 1 {
+		t.Fatal("LatestCursor returned internal PNG storage")
+	}
+	cursor, ok = session.LatestCursor("cursor-a")
+	if !ok || len(cursor.PNG) != 0 {
+		t.Fatalf("known-shape cursor=%+v ok=%v", cursor, ok)
+	}
+}

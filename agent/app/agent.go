@@ -1082,6 +1082,20 @@ func (a *Agent) RemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	}
 }
 
+func (a *Agent) RemoteDesktopCursor(knownCursorID string) protocol.DesktopCursorState {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return protocol.DesktopCursorState{}
+	}
+	cursor, ok := session.LatestCursor(knownCursorID)
+	if !ok {
+		return protocol.DesktopCursorState{}
+	}
+	return cursor
+}
+
 func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	a.mu.RLock()
 	session := a.desktopConnection

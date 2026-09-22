@@ -32,12 +32,13 @@ type ControllerSession struct {
 	cancel   context.CancelFunc
 	done     chan struct{}
 
-	closeOnce   sync.Once
-	mu          sync.RWMutex
-	latest      FrameSnapshot
-	videoConfig protocol.DesktopVideoConfig
-	configReady chan struct{}
-	configOnce  sync.Once
+	closeOnce    sync.Once
+	mu           sync.RWMutex
+	latest       FrameSnapshot
+	latestCursor protocol.DesktopCursorState
+	videoConfig  protocol.DesktopVideoConfig
+	configReady  chan struct{}
+	configOnce   sync.Once
 
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState
@@ -73,13 +74,30 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		if message.Type != protocol.DesktopSessionVideoConfig || message.VideoConfig == nil {
-			continue
+		switch message.Type {
+		case protocol.DesktopSessionVideoConfig:
+			if message.VideoConfig == nil {
+				continue
+			}
+			s.mu.Lock()
+			s.videoConfig = *message.VideoConfig
+			s.mu.Unlock()
+			s.configOnce.Do(func() { close(s.configReady) })
+
+		case protocol.DesktopSessionCursor:
+			if message.Cursor == nil {
+				continue
+			}
+			cursor := *message.Cursor
+			s.mu.Lock()
+			if len(cursor.PNG) == 0 && cursor.CursorID != "" && cursor.CursorID == s.latestCursor.CursorID {
+				cursor.PNG = append([]byte(nil), s.latestCursor.PNG...)
+			} else {
+				cursor.PNG = append([]byte(nil), cursor.PNG...)
+			}
+			s.latestCursor = cursor
+			s.mu.Unlock()
 		}
-		s.mu.Lock()
-		s.videoConfig = *message.VideoConfig
-		s.mu.Unlock()
-		s.configOnce.Do(func() { close(s.configReady) })
 	}
 }
 
@@ -241,6 +259,24 @@ func (s *ControllerSession) SendInput(ctx context.Context, event protocol.Deskto
 		Type:  protocol.DesktopSessionInput,
 		Input: &event,
 	})
+}
+
+func (s *ControllerSession) LatestCursor(knownCursorID string) (protocol.DesktopCursorState, bool) {
+	if s == nil {
+		return protocol.DesktopCursorState{}, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.latestCursor.Sequence == 0 {
+		return protocol.DesktopCursorState{}, false
+	}
+	cursor := s.latestCursor
+	if knownCursorID != "" && knownCursorID == cursor.CursorID {
+		cursor.PNG = nil
+	} else {
+		cursor.PNG = append([]byte(nil), cursor.PNG...)
+	}
+	return cursor, true
 }
 
 func (s *ControllerSession) LatestFrame() (FrameSnapshot, bool) {

@@ -770,9 +770,10 @@
             </div>
             <button type="button" onclick="toggleDesktopFullscreen()" class="rp-btn">全屏</button>
           </div>
-          <div id="desktop-viewer-stage" class="bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
+          <div id="desktop-viewer-stage" class="relative bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
             <img id="desktop-viewer-image" alt="远程桌面画面" tabindex="0" class="block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default" draggable="false">
             <canvas id="desktop-viewer-canvas" tabindex="0" class="hidden block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default"></canvas>
+            <img id="desktop-viewer-cursor" alt="" class="hidden pointer-events-none absolute z-10 max-w-none select-none" draggable="false">
           </div>
         </div>
 
@@ -1185,6 +1186,7 @@
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
     var desktopVideoDecoder = null, desktopVideoCodec = '', desktopVideoDecodeErrorAt = 0;
+    var desktopCursorSeq = 0, desktopCursorBusy = false, desktopCursorID = '', desktopCursorLast = null;
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1616,6 +1618,7 @@
       if (!relay) {
         desktopFrameSeq = 0;
         resetDesktopVideoDecoder();
+        resetDesktopCursor();
         showDesktopJPEGSurface();
         $('desktop-viewer-image').removeAttribute('src');
         $('desktop-viewer-meta').textContent = '等待视频帧…';
@@ -1629,6 +1632,86 @@
       if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
       banner.textContent = parts.join(' · ');
     }
+    function defaultDesktopCursorDataURL() {
+      var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="32" viewBox="0 0 24 32">' +
+        '<path d="M2 1 L2 25 L8 19 L13 30 L18 28 L13 17 L22 17 Z" fill="white" stroke="black" stroke-width="2" stroke-linejoin="round"/></svg>';
+      return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+    }
+    function resetDesktopCursor() {
+      desktopCursorSeq = 0;
+      desktopCursorID = '';
+      desktopCursorLast = null;
+      var cursor = $('desktop-viewer-cursor');
+      if (cursor) {
+        cursor.classList.add('hidden');
+        cursor.removeAttribute('src');
+      }
+      [$('desktop-viewer-image'), $('desktop-viewer-canvas')].forEach(function (surface) {
+        if (surface) surface.style.cursor = '';
+      });
+    }
+    function renderDesktopCursor(cursorState) {
+      desktopCursorLast = cursorState || desktopCursorLast;
+      var cursor = $('desktop-viewer-cursor');
+      var stage = $('desktop-viewer-stage');
+      var surface = desktopViewerSurface();
+      var state = desktopCursorLast;
+      if (!cursor || !stage || !surface || !state || !state.visible ||
+          !state.screenWidth || !state.screenHeight) {
+        if (cursor) cursor.classList.add('hidden');
+        if (surface) surface.style.cursor = '';
+        return;
+      }
+      var surfaceRect = surface.getBoundingClientRect();
+      var stageRect = stage.getBoundingClientRect();
+      if (!surfaceRect.width || !surfaceRect.height) {
+        cursor.classList.add('hidden');
+        surface.style.cursor = '';
+        return;
+      }
+      if (state.cursorId && state.cursorId !== desktopCursorID) {
+        cursor.src = state.png ? 'data:image/png;base64,' + state.png : defaultDesktopCursorDataURL();
+        desktopCursorID = state.cursorId;
+      } else if (!cursor.getAttribute('src')) {
+        cursor.src = state.png ? 'data:image/png;base64,' + state.png : defaultDesktopCursorDataURL();
+      }
+      var scaleX = surfaceRect.width / state.screenWidth;
+      var scaleY = surfaceRect.height / state.screenHeight;
+      var width = Math.max(1, (state.width || 24) * scaleX);
+      var height = Math.max(1, (state.height || 32) * scaleY);
+      var left = surfaceRect.left - stageRect.left + (state.x - (state.hotspotX || 0)) * scaleX;
+      var top = surfaceRect.top - stageRect.top + (state.y - (state.hotspotY || 0)) * scaleY;
+      cursor.style.left = left + 'px';
+      cursor.style.top = top + 'px';
+      cursor.style.width = width + 'px';
+      cursor.style.height = height + 'px';
+      cursor.classList.remove('hidden');
+      surface.style.cursor = 'none';
+    }
+    async function refreshRemoteDesktopCursor() {
+      if (desktopCursorBusy || !hasFn('goGetRemoteDesktopCursor')) return;
+      var status = state.desktopStatus || {};
+      if (status.state !== 'connected' || status.backend !== 'relay') return;
+      if ($('tab-pane-desktop').classList.contains('hidden')) return;
+      desktopCursorBusy = true;
+      try {
+        var raw = await call('goGetRemoteDesktopCursor', desktopCursorID);
+        var cursor = parseJSONResult(raw, null);
+        if (!cursor || !cursor.sequence) return;
+        if (cursor.sequence === desktopCursorSeq) {
+          if (desktopCursorLast) renderDesktopCursor(desktopCursorLast);
+          return;
+        }
+        desktopCursorSeq = cursor.sequence;
+        if (!cursor.png && desktopCursorLast && cursor.cursorId === desktopCursorLast.cursorId) {
+          cursor.png = desktopCursorLast.png;
+        }
+        renderDesktopCursor(cursor);
+      } finally {
+        desktopCursorBusy = false;
+      }
+    }
+
     function requestDesktopIDR() {
       if (!hasFn('goRequestRemoteDesktopIDR')) return;
       call('goRequestRemoteDesktopIDR').catch(function () {});
@@ -1660,11 +1743,13 @@
       var image = $('desktop-viewer-image'), canvas = $('desktop-viewer-canvas');
       if (image) image.classList.remove('hidden');
       if (canvas) canvas.classList.add('hidden');
+      if (desktopCursorLast) requestAnimationFrame(function () { renderDesktopCursor(desktopCursorLast); });
     }
     function showDesktopH264Surface() {
       var image = $('desktop-viewer-image'), canvas = $('desktop-viewer-canvas');
       if (image) image.classList.add('hidden');
       if (canvas) canvas.classList.remove('hidden');
+      if (desktopCursorLast) requestAnimationFrame(function () { renderDesktopCursor(desktopCursorLast); });
     }
     function ensureDesktopVideoDecoder(codec) {
       if (typeof window.VideoDecoder !== 'function' || typeof window.EncodedVideoChunk !== 'function') {
@@ -2524,6 +2609,13 @@
         if (!$('tab-pane-desktop').classList.contains('hidden')) { refreshRemoteDesktopStatus(false); }
       }, 2000);
       setInterval(refreshRemoteDesktopFrame, 100);
+      setInterval(refreshRemoteDesktopCursor, 33);
+      window.addEventListener('resize', function () {
+        if (desktopCursorLast) renderDesktopCursor(desktopCursorLast);
+      });
+      document.addEventListener('fullscreenchange', function () {
+        if (desktopCursorLast) requestAnimationFrame(function () { renderDesktopCursor(desktopCursorLast); });
+      });
     });
   })();
   </script>

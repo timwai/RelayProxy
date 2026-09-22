@@ -207,19 +207,33 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	idrRequests := make(chan struct{}, 1)
 
-	errorsCh := make(chan error, 2)
+	workerCount := 2
+	cursorSource, hasCursor := h.source.(CursorCaptureSource)
+	if hasCursor {
+		workerCount++
+	}
+	errorsCh := make(chan error, workerCount)
 	go func() { errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests) }()
 	go func() { errorsCh <- h.readSessionControlLoop(sessionCtx, conn, idrRequests) }()
+	if hasCursor {
+		go func() { errorsCh <- h.streamCursor(sessionCtx, conn, cursorSource) }()
+	}
 
 	first := <-errorsCh
 	cancel()
 	_ = conn.Close()
-	second := <-errorsCh
+	var sessionErr error
 	if first != nil && !errors.Is(first, context.Canceled) {
-		return first
+		sessionErr = first
 	}
-	if second != nil && !errors.Is(second, context.Canceled) {
-		return second
+	for i := 1; i < workerCount; i++ {
+		err := <-errorsCh
+		if sessionErr == nil && err != nil && !errors.Is(err, context.Canceled) {
+			sessionErr = err
+		}
+	}
+	if sessionErr != nil {
+		return sessionErr
 	}
 	return ctx.Err()
 }

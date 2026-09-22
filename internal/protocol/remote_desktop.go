@@ -157,14 +157,15 @@ type RemoteDesktopStatus struct {
 // across the local Agent -> Wails bridge; Relay transport uses binary RD/1
 // datagrams and never base64-encodes media on the network.
 type RemoteDesktopFrame struct {
-	Sequence  uint64 `json:"sequence"`
-	MimeType  string `json:"mimeType"`
-	Codec     string `json:"codec,omitempty"`
-	Width     int    `json:"width,omitempty"`
-	Height    int    `json:"height,omitempty"`
-	Timestamp uint64 `json:"timestamp,omitempty"`
-	KeyFrame  bool   `json:"keyFrame,omitempty"`
-	Data      []byte `json:"data,omitempty"`
+	Sequence   uint64 `json:"sequence"`
+	Generation uint32 `json:"generation,omitempty"`
+	MimeType   string `json:"mimeType"`
+	Codec      string `json:"codec,omitempty"`
+	Width      int    `json:"width,omitempty"`
+	Height     int    `json:"height,omitempty"`
+	Timestamp  uint64 `json:"timestamp,omitempty"`
+	KeyFrame   bool   `json:"keyFrame,omitempty"`
+	Data       []byte `json:"data,omitempty"`
 }
 
 // DesktopInputEvent is a normalized interactive input event carried on the

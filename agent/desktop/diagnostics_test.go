@@ -96,7 +96,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 	samples := []DesktopDiagnosticSample{
 		{
 			AtUnixMs: start.UnixMilli(),
-			Config: protocol.DesktopVideoConfig{Generation: 1, Codec: "h264", Width: 1920, Height: 1080},
+			Config:   protocol.DesktopVideoConfig{Generation: 1, Codec: "h264", Width: 1920, Height: 1080},
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 10, JitterMs: 1, LossPercent: 0,
 				SendQueueDelayMs: 2, ActualBitrate: 1_000_000, ReceiveFPS: 30,
@@ -108,7 +108,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 		},
 		{
 			AtUnixMs: start.Add(500 * time.Millisecond).UnixMilli(),
-			Config: protocol.DesktopVideoConfig{Generation: 1, Codec: "h264", Width: 1920, Height: 1080},
+			Config:   protocol.DesktopVideoConfig{Generation: 1, Codec: "h264", Width: 1920, Height: 1080},
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 20, JitterMs: 2, LossPercent: 1,
 				SendQueueDelayMs: 4, ActualBitrate: 2_000_000, ReceiveFPS: 25,
@@ -122,7 +122,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 		},
 		{
 			AtUnixMs: start.Add(time.Second).UnixMilli(),
-			Config: protocol.DesktopVideoConfig{Generation: 2, Codec: "h264", Width: 1440, Height: 810},
+			Config:   protocol.DesktopVideoConfig{Generation: 2, Codec: "h264", Width: 1440, Height: 810},
 			Stats: protocol.DesktopSessionStats{
 				Path: "udp_p2p", RTTMs: 30, JitterMs: 3, LossPercent: 2,
 				SendQueueDelayMs: 6, ActualBitrate: 3_000_000, ReceiveFPS: 20,
@@ -138,7 +138,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 		},
 		{
 			AtUnixMs: start.Add(1500 * time.Millisecond).UnixMilli(),
-			Config: protocol.DesktopVideoConfig{Generation: 2, Codec: "h264", Width: 1440, Height: 810},
+			Config:   protocol.DesktopVideoConfig{Generation: 2, Codec: "h264", Width: 1440, Height: 810},
 			Stats: protocol.DesktopSessionStats{
 				Path: "udp_p2p", RTTMs: 40, JitterMs: 4, LossPercent: 3,
 				SendQueueDelayMs: 8, ActualBitrate: 4_000_000, ReceiveFPS: 15,
@@ -148,7 +148,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 		},
 		{
 			AtUnixMs: start.Add(2 * time.Second).UnixMilli(),
-			Config: protocol.DesktopVideoConfig{Generation: 3, Codec: "jpeg", Width: 1280, Height: 720},
+			Config:   protocol.DesktopVideoConfig{Generation: 3, Codec: "jpeg", Width: 1280, Height: 720},
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 50, JitterMs: 5, LossPercent: 4,
 				SendQueueDelayMs: 10, ActualBitrate: 5_000_000, ReceiveFPS: 10,

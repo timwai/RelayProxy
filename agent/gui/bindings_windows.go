@@ -70,6 +70,7 @@ func (s *WailsService) ConnectRemoteDesktop(targetID string, rawOptions string) 
 			return string(data), nil
 		}
 	}
+	s.owner.stopNativeDesktopViewer()
 	session, err := s.owner.bridge.ConnectRemoteDesktop(targetID, options)
 	if err != nil {
 		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
@@ -83,8 +84,38 @@ func (s *WailsService) DisconnectRemoteDesktop() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil
 	}
+	s.owner.stopNativeDesktopViewer()
 	s.owner.bridge.DisconnectRemoteDesktop()
 	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) OpenRemoteDesktopNativeViewer() (string, error) {
+	if s == nil || s.owner == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	result, err := s.owner.openNativeDesktopViewer()
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(result)
+	return string(data), nil
+}
+
+func (s *WailsService) CloseRemoteDesktopNativeViewer() (string, error) {
+	if s == nil || s.owner == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	s.owner.stopNativeDesktopViewer()
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) GetRemoteDesktopNativeViewerStatus() (string, error) {
+	if s == nil || s.owner == nil {
+		return `{"open":false}`, nil
+	}
+	data, _ := json.Marshal(s.owner.nativeDesktopViewerStatus())
+	return string(data), nil
 }
 
 func (s *WailsService) GetRemoteDesktopStatus() (string, error) {

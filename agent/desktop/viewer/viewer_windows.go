@@ -39,6 +39,7 @@ type windowsViewer struct {
 	latest      Frame
 	latestD3D11 D3D11Frame
 	latestIsGPU bool
+	cursor      CursorOverlay
 
 	renderer *d3d11Renderer
 
@@ -376,6 +377,7 @@ func (v *windowsViewer) renderLatest() error {
 	isGPU := v.latestIsGPU
 	gpuFrame := v.latestD3D11
 	cpuFrame := v.latest
+	cursor := v.cursor
 	if isGPU && gpuFrame.Resource != 0 {
 		retainCOM(unsafe.Pointer(gpuFrame.Resource))
 	}
@@ -392,7 +394,7 @@ func (v *windowsViewer) renderLatest() error {
 			return nil
 		}
 		defer releaseCOM(unsafe.Pointer(gpuFrame.Resource))
-		return v.renderer.RenderD3D11(gpuFrame)
+		return v.renderer.RenderD3D11(gpuFrame, cursor)
 	}
 	if len(cpuFrame.BGRA) == 0 {
 		return nil
@@ -511,6 +513,32 @@ func (v *windowsViewer) D3D11Device() uintptr {
 		return 0
 	}
 	return v.renderer.DeviceHandle()
+}
+
+func (v *windowsViewer) SupportsGPUCursor() bool {
+	return v != nil && v.renderer != nil && v.renderer.SupportsGPUCursor()
+}
+
+func (v *windowsViewer) SetCursor(cursor CursorOverlay) error {
+	if v == nil || !v.SupportsGPUCursor() {
+		return ErrUnavailable
+	}
+	copyCursor := cursor
+	copyCursor.Bitmap.Pix = append([]byte(nil), cursor.Bitmap.Pix...)
+
+	v.frameMu.Lock()
+	v.cursor = copyCursor
+	renderGPU := v.latestIsGPU && v.latestD3D11.Resource != 0
+	v.frameMu.Unlock()
+	if !renderGPU {
+		return nil
+	}
+
+	hwnd := win.HWND(v.hwnd.Load())
+	if hwnd == 0 || win.PostMessage(hwnd, wmNativeViewerFrame, 0, 0) == 0 {
+		return ErrUnavailable
+	}
+	return nil
 }
 
 func (v *windowsViewer) Focus() {

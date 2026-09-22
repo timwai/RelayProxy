@@ -30,6 +30,11 @@ type D3D11Frame struct {
 	Height      int
 }
 
+type CursorOverlay struct {
+	State  protocol.DesktopCursorState
+	Bitmap CursorBitmap
+}
+
 func (f D3D11Frame) Validate() error {
 	if f.Resource == 0 || f.Width <= 0 || f.Height <= 0 {
 		return fmt.Errorf("%w: invalid D3D11 frame", ErrUnavailable)
@@ -51,6 +56,8 @@ type Native interface {
 	Submit(Frame) error
 	SubmitD3D11(D3D11Frame) error
 	D3D11Device() uintptr
+	SupportsGPUCursor() bool
+	SetCursor(CursorOverlay) error
 	Focus()
 	Done() <-chan struct{}
 	Close() error

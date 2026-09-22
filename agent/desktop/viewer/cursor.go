@@ -42,6 +42,52 @@ func DecodeCursorPNG(id string, data []byte) (CursorBitmap, error) {
 	}, nil
 }
 
+func cursorRects(width, height int, state protocol.DesktopCursorState, shape CursorBitmap) (image.Rectangle, image.Rectangle, bool) {
+	if width <= 0 || height <= 0 || !state.Visible ||
+		state.ScreenWidth <= 0 || state.ScreenHeight <= 0 ||
+		shape.Width <= 0 || shape.Height <= 0 {
+		return image.Rectangle{}, image.Rectangle{}, false
+	}
+
+	scaleX := float64(width) / float64(state.ScreenWidth)
+	scaleY := float64(height) / float64(state.ScreenHeight)
+	sourceWidth := state.Width
+	sourceHeight := state.Height
+	if sourceWidth <= 0 {
+		sourceWidth = shape.Width
+	}
+	if sourceHeight <= 0 {
+		sourceHeight = shape.Height
+	}
+
+	destWidth := max(1, int(math.Round(float64(sourceWidth)*scaleX)))
+	destHeight := max(1, int(math.Round(float64(sourceHeight)*scaleY)))
+	left := int(math.Round(float64(state.X-state.HotspotX) * scaleX))
+	top := int(math.Round(float64(state.Y-state.HotspotY) * scaleY))
+	fullDest := image.Rect(left, top, left+destWidth, top+destHeight)
+	dest := fullDest.Intersect(image.Rect(0, 0, width, height))
+	if dest.Empty() {
+		return image.Rectangle{}, image.Rectangle{}, false
+	}
+
+	srcLeft := (dest.Min.X - fullDest.Min.X) * shape.Width / destWidth
+	srcTop := (dest.Min.Y - fullDest.Min.Y) * shape.Height / destHeight
+	srcRightNumerator := (dest.Max.X - fullDest.Min.X) * shape.Width
+	srcBottomNumerator := (dest.Max.Y - fullDest.Min.Y) * shape.Height
+	srcRight := (srcRightNumerator + destWidth - 1) / destWidth
+	srcBottom := (srcBottomNumerator + destHeight - 1) / destHeight
+	source := image.Rect(
+		max(0, srcLeft),
+		max(0, srcTop),
+		min(shape.Width, srcRight),
+		min(shape.Height, srcBottom),
+	)
+	if source.Empty() {
+		return image.Rectangle{}, image.Rectangle{}, false
+	}
+	return source, dest, true
+}
+
 func CompositeCursorBGRA(base []byte, width, height, stride int, state protocol.DesktopCursorState, shape CursorBitmap, dst []byte) ([]byte, error) {
 	if width <= 0 || height <= 0 || stride < width*4 || len(base) < stride*height {
 		return nil, fmt.Errorf("%w: invalid BGRA base frame", ErrUnavailable)

@@ -52,3 +52,24 @@ func TestCompositeCursorBGRACopiesInvisibleFrame(t *testing.T) {
 		}
 	}
 }
+
+func TestCursorRectsClipsAtFrameEdge(t *testing.T) {
+	shape := CursorBitmap{Width: 20, Height: 10}
+	state := protocol.DesktopCursorState{
+		Visible: true,
+		X:       2, Y: 3,
+		HotspotX: 5, HotspotY: 4,
+		ScreenWidth: 100, ScreenHeight: 100,
+		Width: 20, Height: 10,
+	}
+	source, dest, ok := cursorRects(100, 100, state, shape)
+	if !ok {
+		t.Fatal("cursor was unexpectedly clipped away")
+	}
+	if dest.Min.X != 0 || dest.Min.Y != 0 {
+		t.Fatalf("dest min=%v want (0,0)", dest.Min)
+	}
+	if source.Min.X <= 0 || source.Min.Y <= 0 {
+		t.Fatalf("source was not clipped with destination: %v", source)
+	}
+}

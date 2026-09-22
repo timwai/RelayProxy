@@ -1933,6 +1933,7 @@
           : (result.decoder === 'media-foundation-hardware'
             ? 'Media Foundation 硬件解码'
             : 'Media Foundation 软件解码'));
+      if (result.gpuCursor) decoderLabel += ' · GPU 光标';
       toast(result.alreadyOpen ? '原生 Viewer 已切到前台' :
         '原生 Viewer 已启动 · ' + decoderLabel);
     }

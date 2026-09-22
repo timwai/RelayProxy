@@ -1096,7 +1096,6 @@ func (a *Agent) RemoteDesktopCursor(knownCursorID string) protocol.DesktopCursor
 	return cursor
 }
 
-
 func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	a.mu.RLock()
 	session := a.desktopConnection

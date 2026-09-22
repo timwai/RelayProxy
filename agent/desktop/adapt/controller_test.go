@@ -142,3 +142,89 @@ func TestABRQueueDelayBlocksRecoveryWithoutForcingExtraDrop(t *testing.T) {
 		}
 	}
 }
+
+func TestABRReducesFPSAfterPersistentSeverePressureForOffice(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneOffice, 10_000_000)
+	cfg.MaxFPS = 30
+	cfg.InitialFPS = 30
+	cfg.MinFPS = AdaptiveMinFPS(cfg.Scene, cfg.MaxFPS)
+	controller := NewController(cfg)
+
+	for i := 0; i < cfg.FPSPressureWindows-1; i++ {
+		decision := controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 140})
+		if decision.TargetFPS != 30 {
+			t.Fatalf("fps reduced before persistent-pressure window %d: %+v", i, decision)
+		}
+	}
+	decision := controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 140})
+	if decision.TargetFPS != 22 {
+		t.Fatalf("persistent severe pressure fps=%d want=22 decision=%+v", decision.TargetFPS, decision)
+	}
+	if controller.TargetFPS() != 22 {
+		t.Fatalf("controller target fps=%d want=22", controller.TargetFPS())
+	}
+}
+
+func TestABRKeepsFPSForGamingScene(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneGaming, 10_000_000)
+	cfg.MaxFPS = 30
+	cfg.InitialFPS = 30
+	cfg.MinFPS = AdaptiveMinFPS(cfg.Scene, cfg.MaxFPS)
+	controller := NewController(cfg)
+
+	for i := 0; i < 16; i++ {
+		controller.Observe(protocol.DesktopSessionStats{
+			LossPercent:      8,
+			SendQueueDelayMs: 180,
+			DroppedFrames:    uint64(i + 1),
+		})
+	}
+	if controller.TargetFPS() != 30 {
+		t.Fatalf("gaming fps changed under congestion: %d", controller.TargetFPS())
+	}
+}
+
+func TestABRRecoversFPSOnlyAfterStableRecoveryWindow(t *testing.T) {
+	cfg := DefaultConfig(protocol.DesktopSceneOffice, 2_000_000)
+	cfg.MinBitrate = cfg.MaxBitrate
+	cfg.MaxFPS = 30
+	cfg.InitialFPS = 30
+	cfg.MinFPS = 10
+	cfg.FPSPressureWindows = 4
+	cfg.FPSRecoveryWindows = 8
+	controller := NewController(cfg)
+
+	for i := 0; i < cfg.FPSPressureWindows; i++ {
+		controller.Observe(protocol.DesktopSessionStats{SendQueueDelayMs: 150})
+	}
+	if controller.TargetFPS() != 22 {
+		t.Fatalf("fps did not reduce under persistent pressure: %d", controller.TargetFPS())
+	}
+
+	for i := 0; i < cfg.FPSRecoveryWindows-1; i++ {
+		decision := controller.Observe(protocol.DesktopSessionStats{
+			RTTMs: 30, JitterMs: 2, LossPercent: 0.1, SendQueueDelayMs: 4,
+		})
+		if decision.TargetFPS != 22 || decision.Changed {
+			t.Fatalf("fps recovered too quickly at stable window %d: %+v", i, decision)
+		}
+	}
+	decision := controller.Observe(protocol.DesktopSessionStats{
+		RTTMs: 30, JitterMs: 2, LossPercent: 0.1, SendQueueDelayMs: 4,
+	})
+	if !decision.Changed || decision.Reason != "fps_recovery" || decision.TargetFPS != 27 {
+		t.Fatalf("fps recovery decision=%+v", decision)
+	}
+}
+
+func TestAdaptiveMinFPSPreservesInteractiveScenes(t *testing.T) {
+	if got := AdaptiveMinFPS(protocol.DesktopSceneGaming, 24); got != 24 {
+		t.Fatalf("gaming min fps=%d want=24", got)
+	}
+	if got := AdaptiveMinFPS(protocol.DesktopScenePerformance, 30); got != 30 {
+		t.Fatalf("performance min fps=%d want=30", got)
+	}
+	if got := AdaptiveMinFPS(protocol.DesktopSceneOffice, 30); got != 10 {
+		t.Fatalf("office min fps=%d want=10", got)
+	}
+}

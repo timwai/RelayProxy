@@ -165,6 +165,11 @@ func (s *ControllerSession) configureABR(config protocol.DesktopVideoConfig) {
 	}
 	cfg := desktopadapt.DefaultConfig(s.options.Scene, maxBitrate)
 	cfg.InitialBitrate = config.TargetBitrate
+	if config.FPS > 0 {
+		cfg.MaxFPS = config.FPS
+		cfg.InitialFPS = config.FPS
+		cfg.MinFPS = desktopadapt.AdaptiveMinFPS(s.options.Scene, config.FPS)
+	}
 	s.abr = desktopadapt.NewController(cfg)
 }
 
@@ -189,7 +194,7 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 				continue
 			}
 			decision := s.abrDecision(s.stats.AdaptationSnapshot(time.Now()))
-			if !decision.Changed || decision.TargetBitrate <= 0 {
+			if !decision.Changed || (decision.TargetBitrate <= 0 && decision.TargetFPS <= 0) {
 				continue
 			}
 			controlCtx, cancel := context.WithTimeout(ctx, time.Second)
@@ -197,14 +202,15 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 				Type: protocol.DesktopSessionVideoControl,
 				VideoControl: &protocol.DesktopVideoControl{
 					TargetBitrate: decision.TargetBitrate,
+					TargetFPS:     decision.TargetFPS,
 				},
 			})
 			cancel()
 			if err != nil {
-				log.Printf("[Desktop] ABR bitrate control failed: %v", err)
+				log.Printf("[Desktop] ABR media control failed: %v", err)
 				return
 			}
-			log.Printf("[Desktop] ABR target bitrate=%d reason=%s", decision.TargetBitrate, decision.Reason)
+			log.Printf("[Desktop] ABR target bitrate=%d fps=%d reason=%s", decision.TargetBitrate, decision.TargetFPS, decision.Reason)
 		}
 	}
 }

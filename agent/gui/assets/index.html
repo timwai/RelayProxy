@@ -2148,6 +2148,7 @@
       if (stats.decodeMs) parts.push('Decode ' + stats.decodeMs.toFixed(1) + ' ms');
       if (stats.renderMs) parts.push('Render ' + stats.renderMs.toFixed(1) + ' ms');
       if (stats.targetBitrate) parts.push('Target ' + formatDesktopBitrate(stats.targetBitrate));
+      if (stats.targetFps) parts.push('Target FPS ' + Number(stats.targetFps));
       target.textContent = '网络统计：' + parts.join(' · ');
     }
 

@@ -35,10 +35,11 @@ func (h *Host) streamSessionFrames(
 	options protocol.RemoteDesktopConnectOptions,
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
+	fpsUpdates <-chan int,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	if preference == "h264" && h.canEncodeH264() {
-		if err := h.streamH264Frames(ctx, conn, cfg, idrRequests, bitrateUpdates); err == nil || errors.Is(err, context.Canceled) {
+		if err := h.streamH264Frames(ctx, conn, cfg, idrRequests, bitrateUpdates, fpsUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {
 			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
@@ -54,7 +55,7 @@ func (h *Host) streamSessionFrames(
 	}); err != nil {
 		return err
 	}
-	return h.streamFrames(ctx, conn, cfg)
+	return h.streamFrames(ctx, conn, cfg, fpsUpdates)
 }
 
 func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
@@ -138,6 +139,7 @@ func (h *Host) streamH264Frames(
 	cfg HostConfig,
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
+	fpsUpdates <-chan int,
 ) error {
 	first, err := h.source.Capture(ctx)
 	if err != nil {
@@ -198,7 +200,8 @@ func (h *Host) streamH264Frames(
 	var lastCaptureMs float64
 	var sendQueueDelayMs float64
 	var droppedFrames uint64
-	frameInterval := time.Second / time.Duration(videoCfg.FPS)
+	targetFPS := videoCfg.FPS
+	frameInterval := frameIntervalForFPS(targetFPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
 
@@ -259,6 +262,7 @@ func (h *Host) streamH264Frames(
 			EncodeFPS:        float64(current.Frames-lastEncoderStats.Frames) / seconds,
 			ActualBitrate:    int64(float64((current.Bytes-lastEncoderStats.Bytes)*8) / seconds),
 			TargetBitrate:    int64(videoCfg.TargetBitrate),
+			TargetFPS:        targetFPS,
 			CaptureMs:        lastCaptureMs,
 			EncodeMs:         float64(current.LastEncodeTime.Microseconds()) / 1000,
 			SendQueueDelayMs: sendQueueDelayMs,
@@ -303,6 +307,15 @@ func (h *Host) streamH264Frames(
 				videoCfg = nextConfig
 				log.Printf("[Desktop] H.264 target bitrate updated=%d", videoCfg.TargetBitrate)
 			}
+		case nextFPS := <-fpsUpdates:
+			nextFPS = clampInt(nextFPS, 1, cfg.MaxFPS)
+			if nextFPS == targetFPS {
+				continue
+			}
+			targetFPS = nextFPS
+			frameInterval = frameIntervalForFPS(targetFPS)
+			ticker.Reset(frameInterval)
+			log.Printf("[Desktop] H.264 capture fps updated=%d", targetFPS)
 		case scheduled := <-ticker.C:
 			now := time.Now()
 			if dropped := staleScheduledFrameCount(scheduled, now, frameInterval); dropped > 0 {

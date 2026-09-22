@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回与 direct-path RTT/Jitter 探测已合并 main，已具备确定性 transport shim 与 send-queue ABR 拥塞闭环；当前分支已加入 stale-frame/drop 实时性保护，继续进入组合弱网场景与跨 NAT 实机验证  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网与 stale-frame/drop 已合并 main；当前分支继续加入 scene-aware adaptive FPS pacing，随后进入跨 NAT / Wi-Fi 实机验证  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #47 已合并）
+> 当前开发基线：`main`（PR #50 已合并，merge `6797f16279c2a82c1a87e52433ec282d5b3deb12`）
 
 ## 0. 当前进度
 
@@ -150,6 +150,14 @@ UI CI
 - 该轮只固化现有默认参数行为，不因纯模拟结果调整生产权重；权重调整继续等待跨 NAT / Wi-Fi 实机数据。
 
 - Viewer 网络统计条现已补充媒体 Path、Send Queue Delay、Dropped Frames、Capture/Encode 耗时，便于跨 NAT / Wi-Fi 实机验证时直接观察拥塞与 stale-frame 行为。
+
+### 0.3.2 Scene-aware Adaptive FPS（当前分支）
+
+- `DesktopVideoControl` 新增向后兼容的 `TargetFPS` 字段；Host 只调整采集 ticker，不重建 H.264 Encoder、不改变 resolution/generation。
+- Office / Auto / Quality 只有在 severe queue、持续 stale/drop、严重丢包或严重 jitter 连续多个 500 ms 窗口后才降低采集 FPS，避免单次抖动造成画面节拍变化。
+- Gaming / Performance 的 adaptive minimum FPS 等于 negotiated FPS，因此 ABR 继续只降码率，不牺牲高帧率交互目标。
+- 网络恢复时先把 bitrate 按既有稳定窗口逐步恢复到上限；之后再用更长的稳定窗口慢速恢复 FPS，避免 bitrate 与 FPS 同时上冲重新制造队列积压。
+- Host Stats 新增 `TargetFPS`，Viewer 网络统计条同步展示目标 FPS，方便实机校准 pressure/recovery window。
 
 ### 0.4 当前实现与最终设计的差异
 

@@ -150,10 +150,10 @@ type windowsCapture struct {
 	backend    string
 	closed     bool
 
-	cursorHandle  uintptr
-	cursorPNG     []byte
-	cursorWidth   int
-	cursorHeight  int
+	cursorHandle   uintptr
+	cursorPNG      []byte
+	cursorWidth    int
+	cursorHeight   int
 	cursorHotspotX int
 	cursorHotspotY int
 }
@@ -330,8 +330,8 @@ type windowsCursorInfo struct {
 const cursorShowing = 0x00000001
 
 var (
-	cursorUser32DLL    = windows.NewLazySystemDLL("user32.dll")
-	procGetCursorInfo  = cursorUser32DLL.NewProc("GetCursorInfo")
+	cursorUser32DLL   = windows.NewLazySystemDLL("user32.dll")
+	procGetCursorInfo = cursorUser32DLL.NewProc("GetCursorInfo")
 )
 
 func currentWindowsCursor() (windowsCursorInfo, error) {

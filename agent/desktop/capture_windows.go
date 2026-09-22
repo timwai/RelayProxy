@@ -341,7 +341,7 @@ func (c *windowsCapture) closeStreamLocked() {
 	c.frame = nil
 }
 
-func copyDXGIFrame(src windowsCaptureFrame, dst *image.RGBA) (*image.RGBA, error) {
+func copyWindowsBGRAFrame(src windowsCaptureFrame, dst *image.RGBA) (*image.RGBA, error) {
 	if !src.Valid() {
 		return nil, screencapture.ErrNoFrame
 	}
@@ -391,7 +391,7 @@ func (c *windowsCapture) captureStreamLocked(ctx context.Context) (*image.RGBA, 
 	if !fresh && c.frame != nil {
 		return c.frame, nil
 	}
-	c.frame, err = copyDXGIFrame(frame, c.frame)
+	c.frame, err = copyWindowsBGRAFrame(frame, c.frame)
 	return c.frame, err
 }
 

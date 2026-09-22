@@ -1,0 +1,207 @@
+package desktop
+
+import (
+	"context"
+	"errors"
+	"image"
+	"log"
+	"time"
+
+	desktopcodec "relayproxy/agent/desktop/codec"
+	desktopmedia "relayproxy/internal/desktop"
+	"relayproxy/internal/protocol"
+)
+
+func (h *Host) canEncodeH264() bool {
+	for _, capability := range h.CodecCapabilities() {
+		if capability.Codec == "h264" && capability.Encode {
+			return true
+		}
+	}
+	return false
+}
+
+func sendVideoConfig(ctx context.Context, conn *desktopmedia.MediaConn, cfg protocol.DesktopVideoConfig) error {
+	return conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+		Type:        protocol.DesktopSessionVideoConfig,
+		VideoConfig: &cfg,
+	})
+}
+
+func (h *Host) streamSessionFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, options protocol.RemoteDesktopConnectOptions) error {
+	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
+	if preference == "h264" && h.canEncodeH264() {
+		if err := h.streamH264Frames(ctx, conn, cfg); err == nil || errors.Is(err, context.Canceled) {
+			return err
+		} else {
+			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
+		}
+	}
+	if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
+		Generation:    1,
+		Codec:         "jpeg",
+		Width:         cfg.MaxWidth,
+		Height:        cfg.MaxHeight,
+		FPS:           cfg.MaxFPS,
+		TargetBitrate: cfg.MaxBitrate,
+	}); err != nil {
+		return err
+	}
+	return h.streamFrames(ctx, conn, cfg)
+}
+
+func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
+	frame := fitRGBA(src, maxWidth, maxHeight)
+	if frame == nil {
+		return nil
+	}
+	b := frame.Bounds()
+	width, height := b.Dx()&^1, b.Dy()&^1
+	if width < 2 || height < 2 {
+		return frame
+	}
+	if width == b.Dx() && height == b.Dy() {
+		return frame
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		srcOffset := frame.PixOffset(b.Min.X, b.Min.Y+y)
+		dstOffset := dst.PixOffset(0, y)
+		copy(dst.Pix[dstOffset:dstOffset+width*4], frame.Pix[srcOffset:srcOffset+width*4])
+	}
+	return dst
+}
+
+func sendEncodedDesktopFrame(ctx context.Context, conn *desktopmedia.MediaConn, frame desktopmedia.EncodedFrame, packetSize int, sequence *uint32) error {
+	packets, next, err := desktopmedia.PacketizeFrame(frame, packetSize, *sequence)
+	if err != nil {
+		return err
+	}
+	for _, packet := range packets {
+		if err := conn.Send(ctx, packet); err != nil {
+			return err
+		}
+	}
+	*sequence = next
+	return nil
+}
+
+func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig) error {
+	first, err := h.source.Capture(ctx)
+	if err != nil {
+		return err
+	}
+	first = fitRGBAEven(first, cfg.MaxWidth, cfg.MaxHeight)
+	if first == nil || first.Bounds().Dx()%2 != 0 || first.Bounds().Dy()%2 != 0 {
+		return errors.New("H.264 capture requires an even-sized frame")
+	}
+
+	bitrate := cfg.MaxBitrate
+	if bitrate <= 0 {
+		bitrate = 6_000_000
+	}
+	videoCfg := desktopcodec.VideoConfig{
+		Width:         first.Bounds().Dx(),
+		Height:        first.Bounds().Dy(),
+		FPS:           cfg.MaxFPS,
+		TargetBitrate: bitrate,
+		KeyframeEvery: 2 * time.Second,
+	}
+	encoder, err := desktopcodec.OpenMFH264Encoder(ctx, videoCfg, true)
+	if err != nil {
+		return err
+	}
+	defer encoder.Close()
+
+	_ = encoder.ForceIDR(ctx)
+	sequenceHeader := encoder.SequenceHeader()
+	codecString := desktopcodec.H264CodecString(sequenceHeader)
+	if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
+		Generation:    1,
+		Codec:         "h264",
+		CodecString:   codecString,
+		Width:         videoCfg.Width,
+		Height:        videoCfg.Height,
+		FPS:           videoCfg.FPS,
+		TargetBitrate: videoCfg.TargetBitrate,
+		MaxBitrate:    videoCfg.TargetBitrate,
+		Chroma:        "420",
+		BitDepth:      8,
+	}); err != nil {
+		return err
+	}
+
+	sessionID, err := newMediaSessionID()
+	if err != nil {
+		return err
+	}
+	var frameID uint32 = 1
+	var sequence uint32 = 1
+	started := time.Now()
+	lastIDR := started
+	frameInterval := time.Second / time.Duration(videoCfg.FPS)
+	ticker := time.NewTicker(frameInterval)
+	defer ticker.Stop()
+
+	sendRGBA := func(frame *image.RGBA, now time.Time) error {
+		frame = fitRGBAEven(frame, videoCfg.Width, videoCfg.Height)
+		if frame == nil || frame.Bounds().Dx() != videoCfg.Width || frame.Bounds().Dy() != videoCfg.Height {
+			return errors.New("desktop capture dimensions changed during H.264 session")
+		}
+		if now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
+			if err := encoder.ForceIDR(ctx); err == nil {
+				lastIDR = now
+			}
+		}
+		packets, err := encoder.Encode(ctx, desktopcodec.RawFrame{
+			Format:    desktopcodec.PixelFormatRGBA,
+			Pix:       frame.Pix,
+			Width:     videoCfg.Width,
+			Height:    videoCfg.Height,
+			Stride:    frame.Stride,
+			Timestamp: now.Sub(started),
+		})
+		if err != nil {
+			return err
+		}
+		for _, encoded := range packets {
+			data := encoded.Data
+			if encoded.KeyFrame {
+				data = desktopcodec.H264WithSequenceHeader(data, sequenceHeader)
+			}
+			mediaFrame := desktopmedia.EncodedFrame{
+				SessionID:  sessionID,
+				StreamID:   1,
+				Generation: 1,
+				FrameID:    frameID,
+				Timestamp:  uint64(encoded.Timestamp.Microseconds()),
+				KeyFrame:   encoded.KeyFrame,
+				Config:     encoded.Config,
+				Data:       data,
+			}
+			if err := sendEncodedDesktopFrame(ctx, conn, mediaFrame, cfg.PacketSize, &sequence); err != nil {
+				return err
+			}
+			frameID++
+		}
+		return nil
+	}
+
+	if err := sendRGBA(first, started); err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case now := <-ticker.C:
+			frame, err := h.source.Capture(ctx)
+			if err != nil {
+				return err
+			}
+			if err := sendRGBA(frame, now); err != nil {
+				return err
+			}
+		}
+	}
+}

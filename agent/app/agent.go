@@ -1274,6 +1274,8 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 		out.Codec = config.Codec
 		out.Width = config.Width
 		out.Height = config.Height
+		out.MaxWidth = config.MaxWidth
+		out.MaxHeight = config.MaxHeight
 		out.FPS = config.FPS
 		if target, ok := a.remoteDesktopTarget(targetID); ok {
 			out.TargetName = target.Name

@@ -196,3 +196,25 @@ func TestRemoteDesktopSceneSelectorFeedsAdaptivePolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteDesktopWebCodecsTracksMediaGeneration(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"desktopFrameGeneration = 0",
+		"desktopVideoGeneration = 0",
+		"desktopVideoNeedsKeyFrame = true",
+		"ensureDesktopVideoDecoder(codec, generation)",
+		"desktopVideoGeneration === generation",
+		"ensureDesktopVideoDecoder(frame.codec || 'avc1.42E01F', frame.generation)",
+		"frameGeneration === desktopFrameGeneration",
+		"if (desktopVideoNeedsKeyFrame && !frame.keyFrame)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop generation-aware WebCodecs path missing %q", want)
+		}
+	}
+}

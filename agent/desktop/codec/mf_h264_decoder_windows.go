@@ -131,11 +131,11 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 			return nil, MFH264DecoderInfo{}, err
 		}
 		return transform, MFH264DecoderInfo{
-			Hardware: hardware,
-			Async: async,
+			Hardware:   hardware,
+			Async:      async,
 			D3D11Aware: d3d11Aware,
-			ZeroCopy: d3d11Aware && candidateGraphics != nil && candidateGraphics.shared,
-			Config: cfg,
+			ZeroCopy:   d3d11Aware && candidateGraphics != nil && candidateGraphics.shared,
+			Config:     cfg,
 		}, nil
 	}
 

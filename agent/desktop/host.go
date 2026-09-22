@@ -198,17 +198,18 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 		defer source.EndSession()
 		backend = source.CaptureBackend()
 	}
-	log.Printf("[Desktop] JPEG session capture=%s config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
-	if h.input == nil {
-		return h.streamSessionFrames(ctx, conn, sessionConfig, options)
-	}
+	log.Printf("[Desktop] session capture=%s config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
+
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer h.input.ReleaseAll()
+	if h.input != nil {
+		defer h.input.ReleaseAll()
+	}
+	idrRequests := make(chan struct{}, 1)
 
 	errorsCh := make(chan error, 2)
-	go func() { errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options) }()
-	go func() { errorsCh <- h.readInputLoop(sessionCtx, conn) }()
+	go func() { errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests) }()
+	go func() { errorsCh <- h.readSessionControlLoop(sessionCtx, conn, idrRequests) }()
 
 	first := <-errorsCh
 	cancel()
@@ -223,31 +224,47 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	return ctx.Err()
 }
 
-func (h *Host) readInputLoop(ctx context.Context, conn *desktopmedia.MediaConn) error {
+func (h *Host) readSessionControlLoop(ctx context.Context, conn *desktopmedia.MediaConn, idrRequests chan<- struct{}) error {
 	var lastSequence uint64
 	for {
 		message, err := conn.ReceiveSessionMessage(ctx)
 		if err != nil {
 			return err
 		}
-		if message.Type != protocol.DesktopSessionInput || message.Input == nil {
-			return errors.New("invalid Relay Desktop session control message")
-		}
-		event := *message.Input
-		if err := ValidateDesktopInputEvent(event); err != nil {
-			return err
-		}
-		if event.Sequence != 0 {
-			if event.Sequence <= lastSequence {
+		switch message.Type {
+		case protocol.DesktopSessionIDRRequest:
+			select {
+			case idrRequests <- struct{}{}:
+			default:
+			}
+			continue
+
+		case protocol.DesktopSessionInput:
+			if message.Input == nil {
+				return errors.New("Relay Desktop input message is missing the event")
+			}
+			if h.input == nil {
 				continue
 			}
-			lastSequence = event.Sequence
-		}
-		if err := h.input.ApplyInput(ctx, event); err != nil {
-			// Input injection can be rejected by Windows UIPI when the remote
-			// foreground process is more privileged than the Agent. Keep video
-			// alive and surface the failure through logs instead of tearing down.
-			log.Printf("[Desktop] input injection failed: %v", err)
+			event := *message.Input
+			if err := ValidateDesktopInputEvent(event); err != nil {
+				return err
+			}
+			if event.Sequence != 0 {
+				if event.Sequence <= lastSequence {
+					continue
+				}
+				lastSequence = event.Sequence
+			}
+			if err := h.input.ApplyInput(ctx, event); err != nil {
+				// Input injection can be rejected by Windows UIPI when the remote
+				// foreground process is more privileged than the Agent. Keep video
+				// alive and surface the failure through logs instead of tearing down.
+				log.Printf("[Desktop] input injection failed: %v", err)
+			}
+
+		default:
+			return errors.New("invalid Relay Desktop session control message")
 		}
 	}
 }

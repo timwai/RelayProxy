@@ -174,3 +174,25 @@ func TestVideoConfigRequiresABRReset(t *testing.T) {
 		t.Fatal("codec change did not reset ABR")
 	}
 }
+
+func TestRequestResolutionRejectsUnsupportedSession(t *testing.T) {
+	session := &ControllerSession{
+		done: make(chan struct{}),
+		videoConfig: protocol.DesktopVideoConfig{
+			Generation: 1,
+			Codec:      "jpeg",
+			Width:      1280,
+			Height:     720,
+			MaxWidth:   1920,
+			MaxHeight:  1080,
+		},
+	}
+	if err := session.RequestResolution(context.Background(), 960, 540); err == nil {
+		t.Fatal("JPEG session accepted runtime resolution switching")
+	}
+
+	session.videoConfig.Codec = "h264"
+	if err := session.RequestResolution(context.Background(), 2560, 1440); err == nil {
+		t.Fatal("resolution above negotiated ceiling was accepted")
+	}
+}

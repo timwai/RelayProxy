@@ -698,13 +698,23 @@
 
         <details class="rp-card p-4" id="desktop-connect-settings">
           <summary class="cursor-pointer select-none text-[12px] font-semibold text-slate-800 dark:text-slate-100">连接设置</summary>
-          <div class="grid grid-cols-2 xl:grid-cols-6 gap-3 mt-3">
+          <div class="grid grid-cols-2 xl:grid-cols-7 gap-3 mt-3">
             <div>
               <label for="desktop-opt-backend" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">协议</label>
               <select id="desktop-opt-backend" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
                 <option value="auto">自动</option>
                 <option value="relay">Relay Desktop</option>
                 <option value="rdp">Windows RDP</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-scene" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">场景</label>
+              <select id="desktop-opt-scene" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="auto">自动</option>
+                <option value="office">办公</option>
+                <option value="performance">性能</option>
+                <option value="gaming">游戏</option>
+                <option value="quality">画质</option>
               </select>
             </div>
             <div>
@@ -762,7 +772,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -1537,6 +1547,7 @@
     }
     function remoteDesktopConnectOptions(targetID) {
       var backend = $('desktop-opt-backend') ? $('desktop-opt-backend').value : 'auto';
+      var scene = $('desktop-opt-scene') ? $('desktop-opt-scene').value : 'auto';
       var quality = $('desktop-opt-quality') ? $('desktop-opt-quality').value : 'auto';
       var codecChoice = $('desktop-opt-codec') ? $('desktop-opt-codec').value : 'auto';
       var webCodecs = typeof window.VideoDecoder === 'function' && typeof window.EncodedVideoChunk === 'function';
@@ -1555,7 +1566,7 @@
       }
       return {
         backend: backend || 'auto',
-        scene: 'auto',
+        scene: scene || 'auto',
         quality: quality || 'auto',
         codec: codec,
         resolution: resolution,
@@ -1569,6 +1580,10 @@
       var options = remoteDesktopConnectOptions(targetID);
       var parts = [];
       if (options.codec) parts.push(options.codec === 'h264' ? 'H.264' : 'JPEG');
+      if (options.scene && options.scene !== 'auto') {
+        var sceneLabels = { office:'办公', performance:'性能', gaming:'游戏', quality:'画质' };
+        parts.push(sceneLabels[options.scene] || options.scene);
+      }
       if (options.quality && options.quality !== 'auto') parts.push(options.quality);
       if (options.resolution && options.resolution.mode === 'fixed') parts.push(options.resolution.width + '×' + options.resolution.height);
       else if (options.resolution && options.resolution.mode === 'native') parts.push('native');

@@ -368,6 +368,22 @@ func (s *ControllerSession) markIDRRequestFailed() {
 	s.recoveryMu.Unlock()
 }
 
+func (s *ControllerSession) RequestResolution(ctx context.Context, width, height int) error {
+	if s == nil || !s.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	if _, err := validateDesktopResolutionTarget(width, height, maxJPEGWidth, maxJPEGHeight); err != nil {
+		return err
+	}
+	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+		Type: protocol.DesktopSessionVideoControl,
+		VideoControl: &protocol.DesktopVideoControl{
+			TargetWidth:  width,
+			TargetHeight: height,
+		},
+	})
+}
+
 func (s *ControllerSession) RequestIDR(ctx context.Context) error {
 	if s == nil || !s.Active() {
 		return errors.New("Relay Desktop session is not active")

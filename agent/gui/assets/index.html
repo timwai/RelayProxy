@@ -762,7 +762,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 码率由 Media Foundation 编码器控制。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 使用 ABR 动态码率，连接设置中的码率作为上限；Media Foundation 编码器会在会话中热更新目标码率。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 

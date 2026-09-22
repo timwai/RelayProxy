@@ -116,6 +116,25 @@ func clampInt(value, minValue, maxValue int) int {
 	return value
 }
 
+func queueLatestInt(ch chan int, value int) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- value:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- value:
+	default:
+	}
+}
+
 // ResolveHostConfig maps user-facing Relay Desktop preferences to the current
 // JPEG MVP. These values are deliberately session-local so one controller
 // cannot permanently alter Host defaults for another session.
@@ -207,6 +226,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	idrRequests := make(chan struct{}, 1)
 	bitrateUpdates := make(chan int, 1)
+	fpsUpdates := make(chan int, 1)
 
 	workerCount := 2
 	cursorSource, hasCursor := h.source.(CursorCaptureSource)
@@ -221,11 +241,12 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	errorsCh := make(chan error, workerCount)
 	go func() {
-		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests, bitrateUpdates)
+		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests, bitrateUpdates, fpsUpdates)
 	}()
 	go func() {
 		errorsCh <- h.readSessionControlLoop(
-			sessionCtx, conn, idrRequests, bitrateUpdates, clipboardEndpoint, clipboardState, syncClipboard,
+			sessionCtx, conn, idrRequests, bitrateUpdates, fpsUpdates, sessionConfig.MaxFPS,
+			clipboardEndpoint, clipboardState, syncClipboard,
 		)
 	}()
 	if hasCursor {
@@ -259,6 +280,8 @@ func (h *Host) readSessionControlLoop(
 	conn *desktopmedia.MediaConn,
 	idrRequests chan<- struct{},
 	bitrateUpdates chan int,
+	fpsUpdates chan int,
+	maxFPS int,
 	clipboard ClipboardEndpoint,
 	clipboardState *clipboardSyncState,
 	syncClipboard bool,
@@ -295,21 +318,19 @@ func (h *Host) readSessionControlLoop(
 			if message.VideoControl == nil {
 				continue
 			}
-			target := message.VideoControl.TargetBitrate
-			if target < 250_000 || target > maxJPEGBitrate {
-				log.Printf("[Desktop] ignoring invalid ABR target bitrate=%d", target)
-				continue
-			}
-			select {
-			case bitrateUpdates <- target:
-			default:
-				select {
-				case <-bitrateUpdates:
-				default:
+			control := message.VideoControl
+			if control.TargetBitrate != 0 {
+				if control.TargetBitrate < 250_000 || control.TargetBitrate > maxJPEGBitrate {
+					log.Printf("[Desktop] ignoring invalid ABR target bitrate=%d", control.TargetBitrate)
+				} else {
+					queueLatestInt(bitrateUpdates, control.TargetBitrate)
 				}
-				select {
-				case bitrateUpdates <- target:
-				default:
+			}
+			if control.TargetFPS != 0 {
+				if maxFPS <= 0 || control.TargetFPS < 1 || control.TargetFPS > maxFPS {
+					log.Printf("[Desktop] ignoring invalid ABR target fps=%d max=%d", control.TargetFPS, maxFPS)
+				} else {
+					queueLatestInt(fpsUpdates, control.TargetFPS)
 				}
 			}
 			continue
@@ -369,7 +390,7 @@ func (h *Host) readSessionControlLoop(
 	}
 }
 
-func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig) error {
+func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, fpsUpdates <-chan int) error {
 	sessionID, err := newMediaSessionID()
 	if err != nil {
 		return err
@@ -383,7 +404,8 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 	var lastReportBytes uint64
 	var sendQueueDelayMs float64
 	var droppedFrames uint64
-	frameInterval := time.Second / time.Duration(cfg.MaxFPS)
+	targetFPS := cfg.MaxFPS
+	frameInterval := frameIntervalForFPS(targetFPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
 
@@ -425,6 +447,7 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 				EncodeFPS:        float64(sentFrames-lastReportFrames) / seconds,
 				ActualBitrate:    int64(float64((sentBytes-lastReportBytes)*8) / seconds),
 				TargetBitrate:    int64(cfg.MaxBitrate),
+				TargetFPS:        targetFPS,
 				SendQueueDelayMs: sendQueueDelayMs,
 				DroppedFrames:    droppedFrames,
 				Path:             "relay",
@@ -449,6 +472,15 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case nextFPS := <-fpsUpdates:
+			nextFPS = clampInt(nextFPS, 1, cfg.MaxFPS)
+			if nextFPS == targetFPS {
+				continue
+			}
+			targetFPS = nextFPS
+			frameInterval = frameIntervalForFPS(targetFPS)
+			ticker.Reset(frameInterval)
+			log.Printf("[Desktop] JPEG capture fps updated=%d", targetFPS)
 		case scheduled := <-ticker.C:
 			if dropped := staleScheduledFrameCount(scheduled, time.Now(), frameInterval); dropped > 0 {
 				droppedFrames += dropped

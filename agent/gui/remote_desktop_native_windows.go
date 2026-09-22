@@ -161,7 +161,7 @@ func (s *nativeDesktopSession) disableGPUCursor() {
 		return
 	}
 	s.mediaMu.Lock()
-	s.disableGPUCursor()
+	s.gpuCursor = false
 	s.mediaMu.Unlock()
 }
 

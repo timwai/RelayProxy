@@ -76,7 +76,6 @@ func RGBAtoNV12(src *image.RGBA, dst []byte) ([]byte, error) {
 	return dst, nil
 }
 
-
 // NV12ToBGRA converts a limited-range BT.709 NV12 frame to tightly packed
 // BGRA. It is the native Viewer bring-up path; the later zero-copy D3D11 video
 // processor can replace this CPU conversion without changing decoder/session

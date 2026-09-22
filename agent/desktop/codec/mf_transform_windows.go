@@ -473,26 +473,70 @@ func (s *MFH264Transform) run(cfg VideoConfig, preferHardware, allowAsync bool, 
 		return
 	}
 	defer releaseIUnknown(transform)
-	initCh <- mfTransformInit{info: info}
 
-	for command := range s.commands {
-		if command.close {
-			_ = processTransformMessage(transform, mftMessageNotifyEndOfStream)
-			_ = processTransformMessage(transform, mftMessageNotifyEndStreaming)
-			_ = processTransformMessage(transform, mftMessageCommandFlush)
-			command.reply <- mfTransformResult{}
+	var eventPump *mfEventPump
+	var eventCh <-chan mfAsyncEvent
+	var asyncState *mfAsyncState
+	if info.Async {
+		eventPump, err = startMFEventPump(transform)
+		if err != nil {
+			initCh <- mfTransformInit{err: fmt.Errorf("start Media Foundation async event pump: %w", err)}
 			return
 		}
-		if command.input != nil {
-			if info.Async {
-				command.reply <- mfTransformResult{err: errors.New("asynchronous MFT processing is not enabled")}
+		defer eventPump.Close()
+		eventCh = eventPump.events
+		asyncState = newMFAsyncState(transform, info.Config)
+	}
+	initCh <- mfTransformInit{info: info}
+
+	for {
+		select {
+		case command, ok := <-s.commands:
+			if !ok {
+				if asyncState != nil {
+					asyncState.fail(ErrEncoderUnavailable)
+				}
+				return
+			}
+			if command.close {
+				if asyncState != nil {
+					asyncState.fail(ErrEncoderUnavailable)
+				}
+				if eventPump != nil {
+					if err := eventPump.Close(); err != nil {
+						command.reply <- mfTransformResult{err: err}
+						return
+					}
+					eventPump = nil
+					eventCh = nil
+				}
+				_ = processTransformMessage(transform, mftMessageNotifyEndOfStream)
+				_ = processTransformMessage(transform, mftMessageNotifyEndStreaming)
+				_ = processTransformMessage(transform, mftMessageCommandFlush)
+				command.reply <- mfTransformResult{}
+				return
+			}
+			if command.input != nil {
+				if asyncState != nil {
+					asyncState.enqueue(command)
+				} else {
+					packets, err := processSyncH264Frame(transform, info.Config, *command.input)
+					command.reply <- mfTransformResult{packets: packets, err: err}
+				}
 				continue
 			}
-			packets, err := processSyncH264Frame(transform, info.Config, *command.input)
-			command.reply <- mfTransformResult{packets: packets, err: err}
-			continue
+			command.reply <- mfTransformResult{err: errors.New("unsupported Media Foundation transform command")}
+
+		case event, ok := <-eventCh:
+			if !ok {
+				if asyncState != nil && asyncState.fatal == nil {
+					asyncState.fail(errors.New("Media Foundation async event pump stopped"))
+				}
+				eventCh = nil
+				continue
+			}
+			asyncState.handle(event)
 		}
-		command.reply <- mfTransformResult{err: errors.New("unsupported Media Foundation transform command")}
 	}
 }
 
@@ -614,9 +658,6 @@ func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEnc
 func (s *MFH264Transform) EncodeNV12(ctx context.Context, data []byte, timestamp time.Duration) ([]EncodedPacket, error) {
 	if s == nil {
 		return nil, ErrEncoderUnavailable
-	}
-	if s.info.Async {
-		return nil, errors.New("asynchronous Media Foundation MFT processing is not enabled")
 	}
 	if len(data) != s.info.Config.Width*s.info.Config.Height*3/2 {
 		return nil, fmt.Errorf("%w: NV12 sample size does not match configured frame", ErrInvalidFrame)

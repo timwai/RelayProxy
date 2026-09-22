@@ -26,10 +26,10 @@ func OpenMFH264Encoder(ctx context.Context, cfg VideoConfig, preferHardware bool
 	if err != nil {
 		return nil, err
 	}
-	// This slice deliberately selects only synchronous MFTs. Asynchronous
-	// hardware MFTs require METransformNeedInput/HaveOutput event handling,
-	// which is added separately rather than emulated with polling.
-	transform, err := openMFH264Transform(ctx, cfg, preferHardware, false)
+	// Hardware Media Foundation encoders are commonly asynchronous MFTs.
+	// The transform owns a blocking IMFMediaEventGenerator pump and therefore
+	// does not poll for METransformNeedInput/METransformHaveOutput.
+	transform, err := openMFH264Transform(ctx, cfg, preferHardware, true)
 	if err != nil {
 		return nil, err
 	}

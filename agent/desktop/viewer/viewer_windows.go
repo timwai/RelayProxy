@@ -541,7 +541,6 @@ func (v *windowsViewer) SetCursor(cursor CursorOverlay) error {
 	return nil
 }
 
-
 func (v *windowsViewer) Focus() {
 	if v == nil {
 		return

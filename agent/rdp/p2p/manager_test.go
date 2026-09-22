@@ -38,7 +38,6 @@ func TestStartTargetUDPCloseRaceDoesNotPublishSockets(t *testing.T) {
 	}
 }
 
-
 func TestStartControllerForDesktopMediaCarriesPurpose(t *testing.T) {
 	var got protocol.RDPControlMessage
 	m := NewManager(context.Background(), func(_ context.Context, message protocol.RDPControlMessage) (protocol.RDPControlMessage, error) {
@@ -108,7 +107,6 @@ func TestApplicationHandlerAttachesReadyDesktopPath(t *testing.T) {
 		t.Fatal("application handler was not notified")
 	}
 }
-
 
 func TestDesktopMediaSessionCannotDialRDPDirectTCP(t *testing.T) {
 	m := NewManager(context.Background(), func(context.Context, protocol.RDPControlMessage) (protocol.RDPControlMessage, error) {

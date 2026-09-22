@@ -36,9 +36,11 @@ type sessionStatsTracker struct {
 	jitterMs      float64
 	lastRTTMs     float64
 
-	remote protocol.DesktopSessionStats
-	viewer protocol.DesktopSessionStats
-	path   string
+	remote       protocol.DesktopSessionStats
+	viewer       protocol.DesktopSessionStats
+	path         string
+	pathSwitches uint64
+	idrRequests  uint64
 }
 
 func newSessionStatsTracker(path string) *sessionStatsTracker {
@@ -114,7 +116,19 @@ func (s *sessionStatsTracker) SetPath(path string) {
 		return
 	}
 	s.mu.Lock()
+	if s.path != "" && s.path != path {
+		s.pathSwitches++
+	}
 	s.path = path
+	s.mu.Unlock()
+}
+
+func (s *sessionStatsTracker) ObserveIDRRequest() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.idrRequests++
 	s.mu.Unlock()
 }
 
@@ -212,6 +226,8 @@ func (s *sessionStatsTracker) AdaptationSnapshot(now time.Time) protocol.Desktop
 	stats.JitterMs = s.jitterMs
 	stats.LossPercent = lossPercent
 	stats.DroppedFrames += s.dropped
+	stats.IDRRequests = s.idrRequests
+	stats.PathSwitches = s.pathSwitches
 	if s.path != "" {
 		stats.Path = s.path
 	}
@@ -250,6 +266,8 @@ func (s *sessionStatsTracker) Snapshot(now time.Time) protocol.DesktopSessionSta
 	stats.JitterMs = s.jitterMs
 	stats.LossPercent = lossPercent
 	stats.DroppedFrames += s.dropped
+	stats.IDRRequests = s.idrRequests
+	stats.PathSwitches = s.pathSwitches
 	if s.path != "" {
 		stats.Path = s.path
 	}

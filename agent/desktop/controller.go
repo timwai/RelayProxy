@@ -372,7 +372,19 @@ func (s *ControllerSession) RequestResolution(ctx context.Context, width, height
 	if s == nil || !s.Active() {
 		return errors.New("Relay Desktop session is not active")
 	}
-	if _, err := validateDesktopResolutionTarget(width, height, maxJPEGWidth, maxJPEGHeight); err != nil {
+	config := s.VideoConfigSnapshot()
+	if config.Codec != "h264" {
+		return errors.New("runtime resolution switching requires H.264")
+	}
+	maxWidth := config.MaxWidth
+	if maxWidth <= 0 {
+		maxWidth = maxJPEGWidth
+	}
+	maxHeight := config.MaxHeight
+	if maxHeight <= 0 {
+		maxHeight = maxJPEGHeight
+	}
+	if _, err := validateDesktopResolutionTarget(width, height, maxWidth, maxHeight); err != nil {
 		return err
 	}
 	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{

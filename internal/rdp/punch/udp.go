@@ -188,10 +188,21 @@ type PacketConn struct {
 	readFrame  []byte
 	readWire   []byte
 	writeWire  []byte
+
+	probeMu       sync.Mutex
+	probeSent     map[uint64]time.Time
+	probeObserver func(time.Duration)
 }
 
 func NewPacketConn(result *UDPResult) (*PacketConn, error) {
 	return newPacketConn(result, punchKeepInterval)
+}
+
+// NewPacketConnWithKeepalive creates the authenticated UDP association with a
+// caller-selected keepalive/probe interval. Relay Desktop uses a shorter
+// interval than Native RDP so path RTT/Jitter can feed its switching policy.
+func NewPacketConnWithKeepalive(result *UDPResult, keepInterval time.Duration) (*PacketConn, error) {
+	return newPacketConn(result, keepInterval)
 }
 
 func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, error) {
@@ -229,11 +240,64 @@ func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, 
 		readFrame:  make([]byte, protocol.UDPFragmentHeaderSize+protocol.UDPFragmentPayload),
 		readWire:   make([]byte, secure.MaxDataPayload+dataWireOverhead),
 		writeWire:  make([]byte, secure.MaxDataPayload+dataWireOverhead),
+		probeSent:  make(map[uint64]time.Time),
 	}
 	if keepInterval > 0 {
 		go c.keepaliveLoop(keepInterval)
 	}
 	return c, nil
+}
+
+func (c *PacketConn) SetProbeObserver(observer func(time.Duration)) {
+	if c == nil {
+		return
+	}
+	c.probeMu.Lock()
+	c.probeObserver = observer
+	c.probeMu.Unlock()
+}
+
+func (c *PacketConn) rememberProbe(nonce uint64, sentAt time.Time) {
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	// A missing peer must not grow the pending-probe map forever. The normal
+	// desktop interval is one second, so entries older than one minute are no
+	// longer useful for path quality.
+	for id, sent := range c.probeSent {
+		if sentAt.Sub(sent) > time.Minute {
+			delete(c.probeSent, id)
+		}
+	}
+	if len(c.probeSent) >= 64 {
+		for id := range c.probeSent {
+			delete(c.probeSent, id)
+		}
+	}
+	c.probeSent[nonce] = sentAt
+}
+
+func (c *PacketConn) forgetProbe(nonce uint64) {
+	c.probeMu.Lock()
+	delete(c.probeSent, nonce)
+	c.probeMu.Unlock()
+}
+
+func (c *PacketConn) observeProbeAck(nonce uint64, receivedAt time.Time) {
+	c.probeMu.Lock()
+	sentAt, ok := c.probeSent[nonce]
+	if ok {
+		delete(c.probeSent, nonce)
+	}
+	observer := c.probeObserver
+	c.probeMu.Unlock()
+	if !ok || observer == nil {
+		return
+	}
+	rtt := receivedAt.Sub(sentAt)
+	if rtt < 0 {
+		return
+	}
+	observer(rtt)
 }
 
 func (c *PacketConn) keepaliveLoop(interval time.Duration) {
@@ -255,7 +319,10 @@ func (c *PacketConn) keepaliveLoop(interval time.Duration) {
 			if err != nil {
 				return
 			}
+			sentAt := time.Now()
+			c.rememberProbe(nonce, sentAt)
 			if _, err := c.conn.WriteToUDPAddrPort(packet, c.remotePort); err != nil {
+				c.forgetProbe(nonce)
 				return
 			}
 		}
@@ -273,6 +340,14 @@ func (c *PacketConn) ReadFrom(buffer []byte) (int, net.Addr, error) {
 		}
 		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
 		if remote != c.remotePort {
+			continue
+		}
+		// Keepalive acknowledgements share this authenticated direct UDP socket.
+		// Consume them before media decoding so they measure the exact P2P path
+		// without becoming visible to the application datagram stream.
+		if packet, punchErr := secure.DecodePunchPacketWithDomain(wire[:n], c.key, c.domain); punchErr == nil &&
+			packet.Type == secure.PunchAck && packet.SessionID == c.sessionID {
+			c.observeProbeAck(packet.Nonce, time.Now())
 			continue
 		}
 		decoded, err := c.decode.DecodeTo(wire[:n], c.readFrame)

@@ -691,7 +691,10 @@
             <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">远程桌面</h1>
             <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">统一入口自动选择 Native RDP 或 Relay Desktop；Windows Home 可使用内置屏幕串流。</p>
           </div>
-          <button type="button" onclick="refreshRemoteDesktopTargets(true)" class="rp-btn">刷新设备</button>
+          <div class="flex items-center gap-2">
+            <button id="desktop-diagnostics-export-btn" type="button" onclick="exportRemoteDesktopDiagnostics()" class="rp-btn hidden" title="导出最近约 10 分钟的 Relay Desktop 网络、媒体和 ABR 时间序列">导出诊断</button>
+            <button type="button" onclick="refreshRemoteDesktopTargets(true)" class="rp-btn">刷新设备</button>
+          </div>
         </div>
 
         <div id="desktop-session-banner" class="hidden rp-notice rp-notice-info"></div>
@@ -2073,6 +2076,45 @@
       }
     }
 
+    function desktopDiagnosticsFilename(report) {
+      report = report || {};
+      var target = String(report.targetId || 'session').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 48);
+      var stamp = new Date(Number(report.generatedAtUnixMs || Date.now())).toISOString()
+        .replace(/[:.]/g, '-');
+      return 'relay-desktop-diagnostics-' + target + '-' + stamp + '.json';
+    }
+
+    async function exportRemoteDesktopDiagnostics() {
+      if (!hasFn('goGetRemoteDesktopDiagnostics')) {
+        toast('当前界面不支持导出 Relay Desktop 诊断');
+        return;
+      }
+      try {
+        var raw = await call('goGetRemoteDesktopDiagnostics');
+        var report = parseJSONResult(raw, null);
+        if (!report || !report.schemaVersion) {
+          toast('还没有可导出的 Relay Desktop 诊断数据');
+          return;
+        }
+        var samples = Array.isArray(report.samples) ? report.samples : [];
+        var payload = JSON.stringify(report, null, 2);
+        var blob = new Blob([payload], { type:'application/json;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = desktopDiagnosticsFilename(report);
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        toast('已导出 Relay Desktop 诊断 · ' + samples.length + ' 个样本');
+      } catch (err) {
+        toast('导出 Relay Desktop 诊断失败：' + (err && err.message ? err.message : err));
+      }
+    }
+    window.exportRemoteDesktopDiagnostics = exportRemoteDesktopDiagnostics;
+
     async function setRemoteDesktopResolution() {
       if (!hasFn('goSetRemoteDesktopResolution')) {
         toast('当前界面不支持运行中切换分辨率');
@@ -2939,6 +2981,9 @@
       if (!hasFn('goRestart') && $('restart-card')) { $('restart-card').classList.add('hidden'); }
       if (hasFn('goOpenRemoteDesktopNativeViewer') && $('desktop-native-viewer-btn')) {
         $('desktop-native-viewer-btn').classList.remove('hidden');
+      }
+      if (hasFn('goGetRemoteDesktopDiagnostics') && $('desktop-diagnostics-export-btn')) {
+        $('desktop-diagnostics-export-btn').classList.remove('hidden');
       }
 
       // Go pushes status every 1.5s; these polls cover the window's first paint.

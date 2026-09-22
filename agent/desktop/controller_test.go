@@ -32,7 +32,6 @@ func TestSnapshotFromEncodedFrameLegacyJPEG(t *testing.T) {
 	}
 }
 
-
 func TestLatestCursorOmitsKnownShape(t *testing.T) {
 	session := &ControllerSession{
 		done: make(chan struct{}),

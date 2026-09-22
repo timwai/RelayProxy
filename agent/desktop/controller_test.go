@@ -70,7 +70,6 @@ func TestLatestClipboardSkipsKnownSequence(t *testing.T) {
 	}
 }
 
-
 func TestConfigureABROnlyForH264(t *testing.T) {
 	session := &ControllerSession{
 		options: protocol.RemoteDesktopConnectOptions{Scene: protocol.DesktopSceneGaming},

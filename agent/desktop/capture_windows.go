@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/png"
 	"log"
@@ -367,8 +368,14 @@ func (c *windowsCapture) Capture(ctx context.Context) (*image.RGBA, error) {
 		if err == nil {
 			return frame, nil
 		}
+		if c.selectedDisplay != nil {
+			if errors.Is(err, screencapture.ErrNoFrame) && c.frame != nil {
+				return c.frame, nil
+			}
+			return nil, fmt.Errorf("selected display capture failed: %w", err)
+		}
 		if !errors.Is(err, screencapture.ErrNoFrame) {
-			log.Printf("[Desktop] DXGI capture failed, switching session to GDI: %v", err)
+			log.Printf("[Desktop] per-display capture failed, switching session to virtual desktop GDI: %v", err)
 			c.closeStreamLocked()
 			c.backend = "gdi"
 		} else if c.frame != nil {

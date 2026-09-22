@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	desktopcodec "relayproxy/agent/desktop/codec"
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
 )
@@ -20,6 +21,15 @@ import (
 type CaptureSource interface {
 	Capture(context.Context) (*image.RGBA, error)
 	Close() error
+}
+
+// RawCaptureSource is an optional zero-staging path for capture backends that
+// already expose encoder-friendly pixels. Returned Pix may be borrowed from the
+// capture backend and must be consumed before the next CaptureRaw, Capture or
+// Close call. The bool is false when the backend cannot provide the requested
+// frame without falling back to the regular RGBA path.
+type RawCaptureSource interface {
+	CaptureRaw(context.Context) (desktopcodec.RawFrame, bool, error)
 }
 
 // SessionCaptureSource lets a backend acquire expensive per-session resources
@@ -30,6 +40,18 @@ type SessionCaptureSource interface {
 	BeginSession(context.Context, HostConfig) error
 	EndSession() error
 	CaptureBackend() string
+}
+
+func captureBackendName(source CaptureSource, fallback string) string {
+	if sessionSource, ok := source.(SessionCaptureSource); ok {
+		if backend := sessionSource.CaptureBackend(); backend != "" {
+			return backend
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	return "generic"
 }
 
 // CaptureCapabilitySource exposes a fresh platform capture/display snapshot.
@@ -546,7 +568,8 @@ func (h *Host) streamFrames(
 				SendQueueDelayMs: sendQueueDelayMs,
 				DroppedFrames:    droppedFrames,
 				Path:             "relay",
-				CaptureBackend:   captureBackend,
+				CaptureBackend:   captureBackendName(h.source, captureBackend),
+				CaptureFormat:    "rgba",
 				EncoderBackend:   "jpeg-go",
 			}
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{

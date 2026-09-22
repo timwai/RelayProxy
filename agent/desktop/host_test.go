@@ -19,6 +19,15 @@ type testCapabilityCaptureSource struct {
 	testCaptureSource
 }
 
+type testSessionCaptureSource struct {
+	testCaptureSource
+	backend string
+}
+
+func (s *testSessionCaptureSource) BeginSession(context.Context, HostConfig) error { return nil }
+func (s *testSessionCaptureSource) EndSession() error                              { return nil }
+func (s *testSessionCaptureSource) CaptureBackend() string                         { return s.backend }
+
 func (s *testCapabilityCaptureSource) DesktopCaptureCapabilities(context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error) {
 	return []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}}, []protocol.DesktopDisplayCapability{{
 		ID: "display-1", Name: "Primary", Width: 1920, Height: 1080, Primary: true,
@@ -202,5 +211,23 @@ func TestQueueLatestResolutionReplacesPendingValue(t *testing.T) {
 		}
 	default:
 		t.Fatal("latest resolution update missing")
+	}
+}
+
+func TestCaptureBackendNameReadsLiveSessionBackend(t *testing.T) {
+	source := &testSessionCaptureSource{
+		testCaptureSource: testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))},
+		backend:           "dxgi",
+	}
+	if got := captureBackendName(source, "gdi"); got != "dxgi" {
+		t.Fatalf("capture backend=%q want=dxgi", got)
+	}
+	source.backend = "gdi"
+	if got := captureBackendName(source, "dxgi"); got != "gdi" {
+		t.Fatalf("capture backend after fallback=%q want=gdi", got)
+	}
+	source.backend = ""
+	if got := captureBackendName(source, "dxgi"); got != "dxgi" {
+		t.Fatalf("capture backend fallback=%q want=dxgi", got)
 	}
 }

@@ -63,3 +63,41 @@ func TestRGBAtoNV12ReusesDestination(t *testing.T) {
 		t.Fatal("destination buffer was not reused")
 	}
 }
+
+func TestBGRAtoNV12MatchesRGBAWithPaddedStride(t *testing.T) {
+	rgba := solidRGBA(4, 2, 20, 80, 140)
+	want, err := RGBAtoNV12(rgba, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stride := 24
+	bgra := make([]byte, stride*2)
+	for y := 0; y < 2; y++ {
+		for x := 0; x < 4; x++ {
+			o := y*stride + x*4
+			bgra[o] = 140
+			bgra[o+1] = 80
+			bgra[o+2] = 20
+			bgra[o+3] = 0
+		}
+	}
+	got, err := BGRAtoNV12(bgra, 4, 2, stride, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("BGRA NV12 len=%d want=%d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("BGRA NV12[%d]=%d want=%d", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBGRAtoNV12RejectsShortStride(t *testing.T) {
+	if _, err := BGRAtoNV12(make([]byte, 4*4*2), 4, 2, 12, nil); err == nil {
+		t.Fatal("BGRA frame with short stride accepted")
+	}
+}

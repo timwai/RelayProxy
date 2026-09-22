@@ -2370,7 +2370,11 @@
       var parts = [];
       var mediaPath = stats.path || status.pathUdp || 'relay';
       parts.push('Path ' + mediaPath);
-      if (stats.captureBackend) parts.push('Capture ' + stats.captureBackend);
+      if (stats.captureBackend) {
+        var captureLabel = stats.captureBackend;
+        if (stats.captureFormat) captureLabel += '/' + stats.captureFormat;
+        parts.push('Capture ' + captureLabel);
+      }
       if (stats.encoderBackend) parts.push('Encoder ' + stats.encoderBackend + (stats.encoderHardware ? ' HW' : ' SW'));
       var decoderBackend = stats.decoderBackend || (desktopVideoDecoder ? 'webcodecs' : '');
       if (decoderBackend) parts.push('Decoder ' + decoderBackend + (stats.decoderBackend ? (stats.decoderHardware ? ' HW' : ' SW') : ''));

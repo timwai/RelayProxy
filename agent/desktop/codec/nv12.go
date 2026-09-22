@@ -16,17 +16,40 @@ func clamp8(value int) byte {
 }
 
 // RGBAtoNV12 converts an opaque RGB desktop frame to NV12 using limited-range
-// BT.709 coefficients. The conversion is intentionally CPU based for the
-// first H.264 bring-up path; the later D3D11 video-processor stage can replace
-// it without changing the Encoder contract.
+// BT.709 coefficients.
 func RGBAtoNV12(src *image.RGBA, dst []byte) ([]byte, error) {
 	if src == nil {
 		return nil, fmt.Errorf("%w: nil RGBA image", ErrInvalidFrame)
 	}
 	bounds := src.Bounds()
-	width, height := bounds.Dx(), bounds.Dy()
+	return packedRGBAToNV12(
+		src.Pix,
+		bounds.Dx(),
+		bounds.Dy(),
+		src.Stride,
+		false,
+		dst,
+	)
+}
+
+// BGRAtoNV12 converts a top-down BGRA desktop frame directly to NV12 without
+// first swapping it into an intermediate RGBA image. Stride is preserved so
+// borrowed DXGI staging textures with padded RowPitch can be consumed safely.
+func BGRAtoNV12(pix []byte, width, height, stride int, dst []byte) ([]byte, error) {
+	return packedRGBAToNV12(pix, width, height, stride, true, dst)
+}
+
+func packedRGBAToNV12(
+	pix []byte,
+	width, height, stride int,
+	bgra bool,
+	dst []byte,
+) ([]byte, error) {
 	if width <= 0 || height <= 0 || width%2 != 0 || height%2 != 0 {
 		return nil, fmt.Errorf("%w: NV12 conversion requires positive even dimensions", ErrInvalidFrame)
+	}
+	if stride < width*4 || len(pix) < stride*height {
+		return nil, fmt.Errorf("%w: packed RGB buffer is too small", ErrInvalidFrame)
 	}
 	required := width * height * 3 / 2
 	if cap(dst) < required {
@@ -38,8 +61,11 @@ func RGBAtoNV12(src *image.RGBA, dst []byte) ([]byte, error) {
 	uvPlane := dst[width*height:]
 
 	rgb := func(x, y int) (int, int, int) {
-		offset := src.PixOffset(bounds.Min.X+x, bounds.Min.Y+y)
-		return int(src.Pix[offset]), int(src.Pix[offset+1]), int(src.Pix[offset+2])
+		offset := y*stride + x*4
+		if bgra {
+			return int(pix[offset+2]), int(pix[offset+1]), int(pix[offset])
+		}
+		return int(pix[offset]), int(pix[offset+1]), int(pix[offset+2])
 	}
 	luma := func(r, g, b int) byte {
 		return clamp8(((47*r + 157*g + 16*b + 128) >> 8) + 16)

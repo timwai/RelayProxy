@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、可导出实机会话诊断与聚合 Summary 均已合并 main；当前重点进入 LAN / NAT / IPv6 / Relay-only / Wi-Fi / GPU 实机矩阵验证与参数标定  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、可导出实机会话诊断与聚合 Summary 均已合并 main；当前分支继续优化 Host 捕获→编码热路径，先移除原生 BGRA 捕获到 H.264 之间不必要的 RGBA staging  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #60 已合并，merge `b352f71d53952a340d1c03fa83c727c92df85651`）
+> 当前开发基线：`main`（PR #61 已合并，merge `7b31d5bf6fe7d37b680e3f05cb910ed94f01c879`）
 
 ## 0. 当前进度
 
@@ -171,6 +171,18 @@ Windows SendInput / CF_UNICODETEXT
 - Percentile 使用确定性的 nearest-rank 计算；原始 samples 继续保留，因此需要更复杂统计时仍可离线重算。
 - 新测试固定 p50/p95、路径/Generation/ABR/Resolution 事件计数、backend/codec/resolution 分布和不可用值过滤行为。
 
+### 0.2.9 Host BGRA Fast Path（当前分支）
+
+- Windows `go-mswin/screencapture` 的 DXGI Desktop Duplication / GDI stream 原生输出均为 top-down BGRA，并保留真实 stride；此前 Relay Desktop 会先逐像素复制/交换为 RGBA，再由 Media Foundation H.264 路径逐像素转 NV12。
+- Encoder `RawFrame` 新增 `PixelFormatBGRA`，`BGRAtoNV12` 可直接消费带 padding RowPitch 的 BGRA，BT.709 limited-range 转换结果与现有 RGBA 路径保持一致。
+- `windowsCapture` 新增可选 borrowed raw capture 接口：像素只借用到下一次 `CaptureRaw / Capture / Close`；Host 同步完成 NV12 转换后才请求下一帧，不跨帧持有底层 DXGI/GDI buffer。
+- H.264 在捕获原生尺寸不需要缩放时直接走 `BGRA → NV12 → Media Foundation Encoder`，省掉一遍全帧 BGRA→RGBA staging；当用户设置较低最大分辨率或 ABR 降分辨率时，仍自动回退现有 RGBA scale 路径。
+- 分辨率恢复到本次会话最高尺寸后会再次尝试 BGRA direct fast path；因此 resolution ABR 不会永久关闭该优化。
+- 原 RGBA/JPEG 路径保留 DXGI idle-frame cache：静止桌面不会因为本轮重构反复复制同一 staging texture。
+- `DesktopSessionStats.CaptureFormat` / diagnostics `CaptureFormats` 新增 `bgra-direct` 与 `rgba` 可观察值；Viewer 实时统计显示 `Capture dxgi/bgra-direct` 等实际链路。
+- Capture backend 改为每次 stats 上报时读取当前 backend，因此 DXGI 运行期失败转 GDI 后，GUI/diagnostics 不再错误保留 `dxgi` 标签。
+- 本轮仍然是 CPU BGRA→NV12；最终目标依旧是 `D3D11 texture → GPU scale/color convert → NV12 surface → hardware encoder`。当前 capture dependency 只提供 DXGI Desktop Duplication / GDI，WGC 需要后续单独实现 WinRT capture backend 或替换/扩展 capture 层。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
@@ -259,7 +271,7 @@ UI CI
 
 ```text
 当前验证：
-DXGI Desktop Duplication（不可用时 GDI）→ RGBA/NV12 → Media Foundation H.264
+DXGI Desktop Duplication（不可用时 GDI）→ 原生尺寸优先 BGRA direct → CPU NV12（缩放时回退 RGBA）→ Media Foundation H.264
 → RD/1 QUIC Datagram → WebCodecs Canvas
 ↘ H.264 不可用时自动回退 JPEG
 

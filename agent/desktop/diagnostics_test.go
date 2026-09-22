@@ -101,7 +101,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 				Path: "relay", RTTMs: 10, JitterMs: 1, LossPercent: 0,
 				SendQueueDelayMs: 2, ActualBitrate: 1_000_000, ReceiveFPS: 30,
 				DecodeFPS: 29, RenderFPS: 28, CaptureMs: 2, EncodeMs: 3,
-				DecodeMs: 4, RenderMs: 5, CaptureBackend: "dxgi",
+				DecodeMs: 4, RenderMs: 5, CaptureBackend: "dxgi", CaptureFormat: "bgra-direct",
 				EncoderBackend: "media-foundation", EncoderHardware: true,
 				DecoderBackend: "mf-d3d11", DecoderHardware: true,
 			},
@@ -112,7 +112,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 20, JitterMs: 2, LossPercent: 1,
 				SendQueueDelayMs: 4, ActualBitrate: 2_000_000, ReceiveFPS: 25,
-				DroppedFrames: 1, CaptureBackend: "dxgi",
+				DroppedFrames: 1, CaptureBackend: "dxgi", CaptureFormat: "bgra-direct",
 				EncoderBackend: "media-foundation", EncoderHardware: true,
 				DecoderBackend: "mf-d3d11", DecoderHardware: true,
 			},
@@ -126,7 +126,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "udp_p2p", RTTMs: 30, JitterMs: 3, LossPercent: 2,
 				SendQueueDelayMs: 6, ActualBitrate: 3_000_000, ReceiveFPS: 20,
-				DroppedFrames: 2, CaptureBackend: "dxgi",
+				DroppedFrames: 2, CaptureBackend: "dxgi", CaptureFormat: "bgra-direct",
 				EncoderBackend: "media-foundation", EncoderHardware: true,
 				DecoderBackend: "mf-d3d11", DecoderHardware: true,
 			},
@@ -142,7 +142,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "udp_p2p", RTTMs: 40, JitterMs: 4, LossPercent: 3,
 				SendQueueDelayMs: 8, ActualBitrate: 4_000_000, ReceiveFPS: 15,
-				CaptureBackend: "gdi", EncoderBackend: "media-foundation",
+				CaptureBackend: "gdi", CaptureFormat: "rgba", EncoderBackend: "media-foundation",
 				DecoderBackend: "webcodecs",
 			},
 		},
@@ -152,7 +152,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 50, JitterMs: 5, LossPercent: 4,
 				SendQueueDelayMs: 10, ActualBitrate: 5_000_000, ReceiveFPS: 10,
-				DroppedFrames: 3, CaptureBackend: "gdi",
+				DroppedFrames: 3, CaptureBackend: "gdi", CaptureFormat: "rgba",
 				EncoderBackend: "jpeg-go", DecoderBackend: "image",
 			},
 			Adaptation: DesktopDiagnosticAdaptation{
@@ -185,6 +185,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 		t.Fatalf("summary ABR reasons=%+v", summary.ABRReasons)
 	}
 	if summary.CaptureBackends["dxgi"] != 3 || summary.CaptureBackends["gdi"] != 2 ||
+		summary.CaptureFormats["bgra-direct"] != 3 || summary.CaptureFormats["rgba"] != 2 ||
 		summary.EncoderBackends["media-foundation"] != 4 ||
 		summary.DecoderBackends["mf-d3d11"] != 3 {
 		t.Fatalf("summary backends=%+v %+v %+v",

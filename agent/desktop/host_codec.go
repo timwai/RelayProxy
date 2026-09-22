@@ -204,6 +204,19 @@ func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
 	return dst
 }
 
+func rawFrameFitsH264(frame desktopcodec.RawFrame, maxWidth, maxHeight int) bool {
+	if frame.Validate() != nil {
+		return false
+	}
+	if maxWidth > 0 && frame.Width > maxWidth {
+		return false
+	}
+	if maxHeight > 0 && frame.Height > maxHeight {
+		return false
+	}
+	return true
+}
+
 func h264ResolutionConfig(
 	src *image.RGBA,
 	target desktopResolutionTarget,
@@ -296,13 +309,40 @@ func (h *Host) streamH264Frames(
 			retErr = &h264RuntimeError{Generation: advertisedGeneration, Err: retErr}
 		}
 	}()
-	first, err := h.source.Capture(ctx)
-	if err != nil {
-		return err
+	var (
+		first        *image.RGBA
+		firstRaw     desktopcodec.RawFrame
+		rawSource    RawCaptureSource
+		rawAvailable bool
+	)
+	if source, ok := h.source.(RawCaptureSource); ok {
+		rawSource = source
+		candidate, available, rawErr := source.CaptureRaw(ctx)
+		if rawErr != nil {
+			return rawErr
+		}
+		if available && rawFrameFitsH264(candidate, cfg.MaxWidth, cfg.MaxHeight) {
+			firstRaw = candidate
+			rawAvailable = true
+		}
 	}
-	first = fitRGBAEven(first, cfg.MaxWidth, cfg.MaxHeight)
-	if first == nil || first.Bounds().Dx()%2 != 0 || first.Bounds().Dy()%2 != 0 {
-		return errors.New("H.264 capture requires an even-sized frame")
+	if !rawAvailable {
+		var err error
+		first, err = h.source.Capture(ctx)
+		if err != nil {
+			return err
+		}
+		first = fitRGBAEven(first, cfg.MaxWidth, cfg.MaxHeight)
+		if first == nil || first.Bounds().Dx()%2 != 0 || first.Bounds().Dy()%2 != 0 {
+			return errors.New("H.264 capture requires an even-sized frame")
+		}
+	}
+
+	width, height := 0, 0
+	if rawAvailable {
+		width, height = firstRaw.Width, firstRaw.Height
+	} else {
+		width, height = first.Bounds().Dx(), first.Bounds().Dy()
 	}
 
 	bitrate := cfg.MaxBitrate
@@ -310,8 +350,8 @@ func (h *Host) streamH264Frames(
 		bitrate = 6_000_000
 	}
 	videoCfg := desktopcodec.VideoConfig{
-		Width:         first.Bounds().Dx(),
-		Height:        first.Bounds().Dy(),
+		Width:         width,
+		Height:        height,
 		FPS:           cfg.MaxFPS,
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
@@ -359,39 +399,33 @@ func (h *Host) streamH264Frames(
 	var lastCaptureMs float64
 	var sendQueueDelayMs float64
 	var droppedFrames uint64
+	captureFormat := "rgba"
+	if rawAvailable {
+		captureFormat = "bgra-direct"
+	}
 	needsGenerationKeyFrame := true
 	targetFPS := videoCfg.FPS
 	frameInterval := frameIntervalForFPS(targetFPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
 
-	sendRGBA := func(frame *image.RGBA, now time.Time) error {
+	sendRawFrame := func(frame desktopcodec.RawFrame, now time.Time) error {
 		capturedFrames++
-		frame = fitRGBAEven(frame, videoCfg.Width, videoCfg.Height)
-		if frame == nil || frame.Bounds().Dx() != videoCfg.Width || frame.Bounds().Dy() != videoCfg.Height {
+		if frame.Width != videoCfg.Width || frame.Height != videoCfg.Height {
 			return errors.New("desktop capture dimensions changed during H.264 session")
 		}
+		frame.Timestamp = now.Sub(started)
 		if needsGenerationKeyFrame || now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
 			if err := encoder.ForceIDR(ctx); err == nil {
 				lastIDR = now
 			}
 		}
-		packets, err := encoder.Encode(ctx, desktopcodec.RawFrame{
-			Format:    desktopcodec.PixelFormatRGBA,
-			Pix:       frame.Pix,
-			Width:     videoCfg.Width,
-			Height:    videoCfg.Height,
-			Stride:    frame.Stride,
-			Timestamp: now.Sub(started),
-		})
+		packets, err := encoder.Encode(ctx, frame)
 		if err != nil {
 			return err
 		}
 		for _, encoded := range packets {
 			if needsGenerationKeyFrame && !encoded.KeyFrame {
-				// Never expose a new generation starting from a dependent frame.
-				// Keep asking for IDR on subsequent captures until the encoder
-				// produces a keyframe that the Viewer can start from.
 				continue
 			}
 			data := encoded.Data
@@ -418,6 +452,20 @@ func (h *Host) streamH264Frames(
 		return nil
 	}
 
+	sendRGBA := func(frame *image.RGBA, now time.Time) error {
+		frame = fitRGBAEven(frame, videoCfg.Width, videoCfg.Height)
+		if frame == nil || frame.Bounds().Dx() != videoCfg.Width || frame.Bounds().Dy() != videoCfg.Height {
+			return errors.New("desktop capture dimensions changed during H.264 session")
+		}
+		return sendRawFrame(desktopcodec.RawFrame{
+			Format: desktopcodec.PixelFormatRGBA,
+			Pix:    frame.Pix,
+			Width:  videoCfg.Width,
+			Height: videoCfg.Height,
+			Stride: frame.Stride,
+		}, now)
+	}
+
 	reportStats := func(now time.Time) error {
 		elapsed := now.Sub(lastReportAt)
 		if elapsed < time.Second {
@@ -436,7 +484,8 @@ func (h *Host) streamH264Frames(
 			SendQueueDelayMs: sendQueueDelayMs,
 			DroppedFrames:    droppedFrames,
 			Path:             "relay",
-			CaptureBackend:   captureBackend,
+			CaptureBackend:   captureBackendName(h.source, captureBackend),
+			CaptureFormat:    captureFormat,
 			EncoderBackend:   current.Backend,
 			EncoderHardware:  current.Hardware,
 		}
@@ -452,7 +501,11 @@ func (h *Host) streamH264Frames(
 		return nil
 	}
 
-	if err := sendRGBA(first, started); err != nil {
+	if rawAvailable {
+		if err := sendRawFrame(firstRaw, started); err != nil {
+			return err
+		}
+	} else if err := sendRGBA(first, started); err != nil {
 		return err
 	}
 	for {
@@ -530,6 +583,7 @@ func (h *Host) streamH264Frames(
 			encoder = nextEncoder
 			videoCfg = nextConfig
 			sequenceHeader = nextSequenceHeader
+			captureFormat = "rgba"
 			generation = nextGeneration
 			frameID = 1
 			needsGenerationKeyFrame = true
@@ -558,11 +612,30 @@ func (h *Host) streamH264Frames(
 				continue
 			}
 			captureStarted := now
+			if rawSource != nil && videoCfg.Width == sessionMaxWidth && videoCfg.Height == sessionMaxHeight {
+				rawFrame, available, rawErr := rawSource.CaptureRaw(ctx)
+				lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
+				if rawErr != nil {
+					return rawErr
+				}
+				if available && rawFrame.Width == videoCfg.Width && rawFrame.Height == videoCfg.Height &&
+					rawFrameFitsH264(rawFrame, videoCfg.Width, videoCfg.Height) {
+					captureFormat = "bgra-direct"
+					if err := sendRawFrame(rawFrame, now); err != nil {
+						return err
+					}
+					if err := reportStats(time.Now()); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 			frame, err := h.source.Capture(ctx)
 			lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
 			if err != nil {
 				return err
 			}
+			captureFormat = "rgba"
 			if err := sendRGBA(frame, now); err != nil {
 				return err
 			}

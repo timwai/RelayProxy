@@ -11,6 +11,7 @@ type PixelFormat string
 
 const (
 	PixelFormatRGBA PixelFormat = "rgba"
+	PixelFormatBGRA PixelFormat = "bgra"
 	PixelFormatNV12 PixelFormat = "nv12"
 )
 
@@ -99,9 +100,9 @@ func (f RawFrame) Validate() error {
 		return fmt.Errorf("%w: H.264 4:2:0 frames require positive even dimensions", ErrInvalidFrame)
 	}
 	switch f.Format {
-	case PixelFormatRGBA:
+	case PixelFormatRGBA, PixelFormatBGRA:
 		if f.Stride < f.Width*4 || len(f.Pix) < f.Stride*f.Height {
-			return fmt.Errorf("%w: RGBA buffer is too small", ErrInvalidFrame)
+			return fmt.Errorf("%w: %s buffer is too small", ErrInvalidFrame, f.Format)
 		}
 	case PixelFormatNV12:
 		if f.Stride < f.Width || len(f.Pix) < f.Stride*f.Height+f.Stride*(f.Height/2) {

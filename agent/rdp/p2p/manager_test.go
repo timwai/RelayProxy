@@ -108,3 +108,27 @@ func TestApplicationHandlerAttachesReadyDesktopPath(t *testing.T) {
 		t.Fatal("application handler was not notified")
 	}
 }
+
+
+func TestDesktopMediaSessionCannotDialRDPDirectTCP(t *testing.T) {
+	m := NewManager(context.Background(), func(context.Context, protocol.RDPControlMessage) (protocol.RDPControlMessage, error) {
+		return protocol.RDPControlMessage{Type: protocol.RDPControlLeaseAck}, nil
+	}, "127.0.0.1:9", time.Minute, "")
+	defer m.Close()
+
+	session := m.newSession(
+		8,
+		protocol.P2PPurposeDesktopMedia,
+		"controller",
+		"target",
+		[]byte("0123456789abcdef"),
+		nil,
+		0,
+	)
+	if session == nil {
+		t.Fatal("session was not created")
+	}
+	if _, err := session.DialTCP(context.Background()); err == nil {
+		t.Fatal("desktop media lease unexpectedly opened an RDP TCP path")
+	}
+}

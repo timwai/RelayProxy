@@ -15,6 +15,7 @@
   window.goConnectRemoteDesktop = (targetID, rawOptions) => invoke('ConnectRemoteDesktop', targetID, rawOptions);
   window.goDisconnectRemoteDesktop = () => invoke('DisconnectRemoteDesktop');
   window.goGetRemoteDesktopStatus = () => invoke('GetRemoteDesktopStatus');
+  window.goGetRemoteDesktopStats = () => invoke('GetRemoteDesktopStats');
   window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');
   window.goOpenRemoteDesktopNativeViewer = () => invoke('OpenRemoteDesktopNativeViewer');
   window.goCloseRemoteDesktopNativeViewer = () => invoke('CloseRemoteDesktopNativeViewer');

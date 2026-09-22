@@ -93,3 +93,15 @@ jobs:
           }
       - name: Test desktop packages
         run: go test ./agent/desktop/... ./agent/gui ./cmd/relay-agent -count=1
+      - name: Cross-build Windows ARM64 desktop stack
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:GOOS = 'windows'
+          $env:GOARCH = 'arm64'
+          $env:CGO_ENABLED = '0'
+          go build ./agent/desktop/... ./agent/gui
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $out = Join-Path $env:RUNNER_TEMP 'relay-agent-arm64.exe'
+          go build -o $out ./cmd/relay-agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

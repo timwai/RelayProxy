@@ -69,3 +69,24 @@ func TestLatestClipboardSkipsKnownSequence(t *testing.T) {
 		t.Fatal("known clipboard sequence was returned again")
 	}
 }
+
+
+func TestConfigureABROnlyForH264(t *testing.T) {
+	session := &ControllerSession{
+		options: protocol.RemoteDesktopConnectOptions{Scene: protocol.DesktopSceneGaming},
+	}
+	session.configureABR(protocol.DesktopVideoConfig{
+		Codec: "jpeg", TargetBitrate: 6_000_000, MaxBitrate: 6_000_000,
+	})
+	if decision := session.abrDecision(protocol.DesktopSessionStats{LossPercent: 10}); decision.Changed {
+		t.Fatalf("JPEG unexpectedly adapted: %+v", decision)
+	}
+
+	session.configureABR(protocol.DesktopVideoConfig{
+		Codec: "h264", TargetBitrate: 6_000_000, MaxBitrate: 6_000_000,
+	})
+	decision := session.abrDecision(protocol.DesktopSessionStats{LossPercent: 5})
+	if !decision.Changed || decision.TargetBitrate >= 6_000_000 {
+		t.Fatalf("H.264 was not adapted: %+v", decision)
+	}
+}

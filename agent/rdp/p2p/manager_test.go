@@ -130,3 +130,31 @@ func TestDesktopMediaSessionCannotDialRDPDirectTCP(t *testing.T) {
 		t.Fatal("desktop media lease unexpectedly opened an RDP TCP path")
 	}
 }
+
+
+func TestDirectPathMetricsSmoothRTTAndJitter(t *testing.T) {
+	session := &Session{}
+	session.observeDirectPathRTT(20 * time.Millisecond)
+	first := session.DirectPathMetrics()
+	if first.Samples != 1 || first.RTTMs < 19.9 || first.RTTMs > 20.1 || first.JitterMs != 0 {
+		t.Fatalf("first metrics=%+v", first)
+	}
+
+	session.observeDirectPathRTT(30 * time.Millisecond)
+	second := session.DirectPathMetrics()
+	if second.Samples != 2 || second.RTTMs < 21.9 || second.RTTMs > 22.1 {
+		t.Fatalf("second metrics=%+v", second)
+	}
+	if second.JitterMs < 9.9 || second.JitterMs > 10.1 {
+		t.Fatalf("second jitter=%v", second.JitterMs)
+	}
+
+	session.observeDirectPathRTT(22 * time.Millisecond)
+	third := session.DirectPathMetrics()
+	if third.Samples != 3 || third.RTTMs < 21.9 || third.RTTMs > 22.1 {
+		t.Fatalf("third metrics=%+v", third)
+	}
+	if third.JitterMs < 9.5 || third.JitterMs > 9.7 {
+		t.Fatalf("third jitter=%v", third.JitterMs)
+	}
+}

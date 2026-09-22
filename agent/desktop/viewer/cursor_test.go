@@ -53,12 +53,11 @@ func TestCompositeCursorBGRACopiesInvisibleFrame(t *testing.T) {
 	}
 }
 
-
 func TestCursorRectsClipsAtFrameEdge(t *testing.T) {
 	shape := CursorBitmap{Width: 20, Height: 10}
 	state := protocol.DesktopCursorState{
 		Visible: true,
-		X: 2, Y: 3,
+		X:       2, Y: 3,
 		HotspotX: 5, HotspotY: 4,
 		ScreenWidth: 100, ScreenHeight: 100,
 		Width: 20, Height: 10,

@@ -67,14 +67,16 @@ func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
 		Quality:    protocol.DesktopQualityHigh,
 		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 1600, Height: 900},
 		FPS:        24,
-		MaxBitrate: 8_000_000,
-		DisplayID:  "42",
+		MaxBitrate:     8_000_000,
+		DisplayID:      "42",
+		CaptureBackend: protocol.DesktopCaptureDXGI,
 	})
 	if cfg.MaxWidth != 1600 || cfg.MaxHeight != 900 || cfg.MaxFPS != 24 {
 		t.Fatalf("unexpected media size/fps: %+v", cfg)
 	}
-	if cfg.JPEGQuality != 78 || cfg.MaxBitrate != 8_000_000 || cfg.DisplayID != "42" {
-		t.Fatalf("unexpected quality/display policy: %+v", cfg)
+	if cfg.JPEGQuality != 78 || cfg.MaxBitrate != 8_000_000 || cfg.DisplayID != "42" ||
+		cfg.CaptureBackend != protocol.DesktopCaptureDXGI {
+		t.Fatalf("unexpected quality/display/capture policy: %+v", cfg)
 	}
 }
 
@@ -229,5 +231,12 @@ func TestCaptureBackendNameReadsLiveSessionBackend(t *testing.T) {
 	source.backend = ""
 	if got := captureBackendName(source, "dxgi"); got != "dxgi" {
 		t.Fatalf("capture backend fallback=%q want=dxgi", got)
+	}
+}
+
+func TestResolveHostConfigDefaultsCaptureBackend(t *testing.T) {
+	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{})
+	if cfg.CaptureBackend != protocol.DesktopCaptureAuto {
+		t.Fatalf("default capture backend=%q want=auto", cfg.CaptureBackend)
 	}
 }

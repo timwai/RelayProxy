@@ -75,3 +75,53 @@ func RGBAtoNV12(src *image.RGBA, dst []byte) ([]byte, error) {
 	}
 	return dst, nil
 }
+
+
+// NV12ToBGRA converts a limited-range BT.709 NV12 frame to tightly packed
+// BGRA. It is the native Viewer bring-up path; the later zero-copy D3D11 video
+// processor can replace this CPU conversion without changing decoder/session
+// contracts.
+func NV12ToBGRA(src []byte, width, height, stride int, dst []byte) ([]byte, error) {
+	if width <= 0 || height <= 0 || width%2 != 0 || height%2 != 0 {
+		return nil, fmt.Errorf("%w: NV12 decode requires positive even dimensions", ErrInvalidFrame)
+	}
+	if stride < width {
+		return nil, fmt.Errorf("%w: NV12 stride is smaller than width", ErrInvalidFrame)
+	}
+	requiredNV12 := stride*height + stride*(height/2)
+	if len(src) < requiredNV12 {
+		return nil, fmt.Errorf("%w: NV12 buffer is too small", ErrInvalidFrame)
+	}
+	requiredBGRA := width * height * 4
+	if cap(dst) < requiredBGRA {
+		dst = make([]byte, requiredBGRA)
+	} else {
+		dst = dst[:requiredBGRA]
+	}
+
+	yPlane := src[:stride*height]
+	uvPlane := src[stride*height:]
+	for y := 0; y < height; y++ {
+		yRow := y * stride
+		uvRow := (y / 2) * stride
+		outRow := y * width * 4
+		for x := 0; x < width; x++ {
+			yy := int(yPlane[yRow+x]) - 16
+			if yy < 0 {
+				yy = 0
+			}
+			uv := uvRow + (x &^ 1)
+			u := int(uvPlane[uv]) - 128
+			v := int(uvPlane[uv+1]) - 128
+			r := (298*yy + 459*v + 128) >> 8
+			g := (298*yy - 55*u - 136*v + 128) >> 8
+			b := (298*yy + 541*u + 128) >> 8
+			di := outRow + x*4
+			dst[di] = clamp8(b)
+			dst[di+1] = clamp8(g)
+			dst[di+2] = clamp8(r)
+			dst[di+3] = 0xff
+		}
+	}
+	return dst, nil
+}

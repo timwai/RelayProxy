@@ -47,7 +47,8 @@ type ControllerSession struct {
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState
 
-	stats *sessionStatsTracker
+	stats       *sessionStatsTracker
+	diagnostics *sessionDiagnosticsRecorder
 
 	options protocol.RemoteDesktopConnectOptions
 	abrMu   sync.Mutex
@@ -75,6 +76,7 @@ func StartControllerWithOptions(
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(parent)
+	now := time.Now()
 	session := &ControllerSession{
 		targetID:    targetID,
 		conn:        conn,
@@ -82,6 +84,7 @@ func StartControllerWithOptions(
 		done:        make(chan struct{}),
 		configReady: make(chan struct{}),
 		stats:       newSessionStatsTracker("relay"),
+		diagnostics: newSessionDiagnosticsRecorder(targetID, options, now),
 		options:     options,
 	}
 	go session.controlLoop(ctx)
@@ -308,11 +311,15 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 			if s.stats == nil {
 				continue
 			}
-			decision := s.abrDecision(s.stats.AdaptationSnapshot(time.Now()))
+			now := time.Now()
+			decision := s.abrDecision(s.stats.AdaptationSnapshot(now))
+			config := s.VideoConfigSnapshot()
+			if s.diagnostics != nil {
+				s.diagnostics.Record(now, config, s.stats.DiagnosticsSnapshot(now), decision)
+			}
 			if !decision.Changed {
 				continue
 			}
-			config := s.VideoConfigSnapshot()
 			control := abrVideoControl(config, decision)
 			if control.TargetBitrate <= 0 && control.TargetFPS <= 0 &&
 				(control.TargetWidth <= 0 || control.TargetHeight <= 0) {
@@ -634,6 +641,21 @@ func (s *ControllerSession) Stats() protocol.DesktopSessionStats {
 		stats.Path = path
 	}
 	return stats
+}
+
+func (s *ControllerSession) Diagnostics() DesktopDiagnosticsReport {
+	if s == nil || s.diagnostics == nil {
+		return DesktopDiagnosticsReport{}
+	}
+	now := time.Now()
+	stats := protocol.DesktopSessionStats{}
+	if s.stats != nil {
+		stats = s.stats.Snapshot(now)
+		if path := s.DatagramPathName(); path != "" {
+			stats.Path = path
+		}
+	}
+	return s.diagnostics.Report(now, s.VideoConfigSnapshot(), stats)
 }
 
 func (s *ControllerSession) UpdateViewerStats(stats protocol.DesktopSessionStats) {

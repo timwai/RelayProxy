@@ -25,8 +25,8 @@ type ApplicationHandler func(*Session, *ApplicationPath)
 type ApplicationPath struct {
 	session *Session
 
-	incoming chan []byte
-	done     chan struct{}
+	incoming  chan []byte
+	done      chan struct{}
 	closeOnce sync.Once
 	writeMu   sync.Mutex
 	wire      []byte

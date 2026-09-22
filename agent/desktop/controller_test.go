@@ -52,3 +52,21 @@ func TestLatestCursorOmitsKnownShape(t *testing.T) {
 		t.Fatalf("known-shape cursor=%+v ok=%v", cursor, ok)
 	}
 }
+
+
+func TestLatestClipboardSkipsKnownSequence(t *testing.T) {
+	session := &ControllerSession{
+		done: make(chan struct{}),
+		latestClipboard: protocol.DesktopClipboardState{
+			Sequence: 4,
+			Text:     "hello",
+		},
+	}
+	clipboard, ok := session.LatestClipboard(0)
+	if !ok || clipboard.Sequence != 4 || clipboard.Text != "hello" {
+		t.Fatalf("clipboard=%+v ok=%v", clipboard, ok)
+	}
+	if _, ok := session.LatestClipboard(4); ok {
+		t.Fatal("known clipboard sequence was returned again")
+	}
+}

@@ -81,8 +81,12 @@ func openH264GenerationEncoder(
 	}
 	// A fresh encoder normally starts with an IDR. Ask explicitly as well so
 	// every generation can be decoded independently. Unsupported control is
-	// tolerated; the send loop still withholds delta frames until a keyframe.
-	_ = encoder.ForceIDR(ctx)
+	// tolerated; other control failures indicate that this encoder instance
+	// is not healthy enough to advertise as a new generation.
+	if err := encoder.ForceIDR(ctx); err != nil && !errors.Is(err, desktopcodec.ErrEncoderControlUnsupported) {
+		_ = encoder.Close()
+		return nil, desktopcodec.VideoConfig{}, nil, err
+	}
 	return encoder, normalized, encoder.SequenceHeader(), nil
 }
 

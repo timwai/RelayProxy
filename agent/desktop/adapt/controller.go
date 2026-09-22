@@ -17,26 +17,32 @@ type NetworkEstimate struct {
 }
 
 type MediaDecision struct {
-	TargetBitrate int
-	TargetFPS     int
-	Changed       bool
-	ForceIDR      bool
-	Reason        string
+	TargetBitrate         int
+	TargetFPS             int
+	TargetResolutionScale int
+	ResolutionChanged     bool
+	Changed               bool
+	ForceIDR              bool
+	Reason                string
 }
 
 type Config struct {
-	Scene              protocol.DesktopScene
-	MinBitrate         int
-	MaxBitrate         int
-	InitialBitrate     int
-	MinFPS             int
-	MaxFPS             int
-	InitialFPS         int
-	StableWindows      int
-	FPSPressureWindows int
-	FPSRecoveryWindows int
-	IncreaseRatio      float64
-	IncreaseFloor      int
+	Scene                     protocol.DesktopScene
+	MinBitrate                int
+	MaxBitrate                int
+	InitialBitrate            int
+	MinFPS                    int
+	MaxFPS                    int
+	InitialFPS                int
+	MinResolutionScale        int
+	InitialResolutionScale    int
+	StableWindows             int
+	FPSPressureWindows        int
+	FPSRecoveryWindows        int
+	ResolutionPressureWindows int
+	ResolutionRecoveryWindows int
+	IncreaseRatio             float64
+	IncreaseFloor             int
 }
 
 func DefaultConfig(scene protocol.DesktopScene, maxBitrate int) Config {
@@ -57,19 +63,27 @@ func DefaultConfig(scene protocol.DesktopScene, maxBitrate int) Config {
 	if scene == protocol.DesktopSceneGaming || scene == protocol.DesktopScenePerformance {
 		minFPS = 30
 	}
+	minResolutionScale := 50
+	if scene == protocol.DesktopSceneQuality {
+		minResolutionScale = 75
+	}
 	return Config{
-		Scene:              scene,
-		MinBitrate:         minBitrate,
-		MaxBitrate:         maxBitrate,
-		InitialBitrate:     maxBitrate,
-		MinFPS:             minFPS,
-		MaxFPS:             30,
-		InitialFPS:         30,
-		StableWindows:      4,
-		FPSPressureWindows: 4,
-		FPSRecoveryWindows: 8,
-		IncreaseRatio:      1.08,
-		IncreaseFloor:      150_000,
+		Scene:                     scene,
+		MinBitrate:                minBitrate,
+		MaxBitrate:                maxBitrate,
+		InitialBitrate:            maxBitrate,
+		MinFPS:                    minFPS,
+		MaxFPS:                    30,
+		InitialFPS:                30,
+		MinResolutionScale:        minResolutionScale,
+		InitialResolutionScale:    100,
+		StableWindows:             4,
+		FPSPressureWindows:        4,
+		FPSRecoveryWindows:        8,
+		ResolutionPressureWindows: 8,
+		ResolutionRecoveryWindows: 16,
+		IncreaseRatio:             1.08,
+		IncreaseFloor:             150_000,
 	}
 }
 
@@ -99,12 +113,15 @@ func AdaptiveMinFPS(scene protocol.DesktopScene, maxFPS int) int {
 type Controller struct {
 	cfg Config
 
-	target      int
-	targetFPS   int
-	stable      int
-	fpsPressure int
-	fpsStable   int
-	lastDropped uint64
+	target                int
+	targetFPS             int
+	targetResolutionScale int
+	stable                int
+	fpsPressure           int
+	fpsStable             int
+	resolutionPressure    int
+	resolutionStable      int
+	lastDropped           uint64
 }
 
 func NewController(cfg Config) *Controller {
@@ -153,13 +170,42 @@ func NewController(cfg Config) *Controller {
 	if cfg.FPSRecoveryWindows <= 0 {
 		cfg.FPSRecoveryWindows = 8
 	}
+	if cfg.MinResolutionScale <= 0 {
+		cfg.MinResolutionScale = 50
+	}
+	if cfg.MinResolutionScale < 50 {
+		cfg.MinResolutionScale = 50
+	}
+	if cfg.MinResolutionScale > 100 {
+		cfg.MinResolutionScale = 100
+	}
+	if cfg.InitialResolutionScale <= 0 {
+		cfg.InitialResolutionScale = 100
+	}
+	if cfg.InitialResolutionScale > 100 {
+		cfg.InitialResolutionScale = 100
+	}
+	if cfg.InitialResolutionScale < cfg.MinResolutionScale {
+		cfg.InitialResolutionScale = cfg.MinResolutionScale
+	}
+	if cfg.ResolutionPressureWindows <= 0 {
+		cfg.ResolutionPressureWindows = 8
+	}
+	if cfg.ResolutionRecoveryWindows <= 0 {
+		cfg.ResolutionRecoveryWindows = 16
+	}
 	if cfg.IncreaseRatio <= 1 {
 		cfg.IncreaseRatio = 1.08
 	}
 	if cfg.IncreaseFloor <= 0 {
 		cfg.IncreaseFloor = 150_000
 	}
-	return &Controller{cfg: cfg, target: cfg.InitialBitrate, targetFPS: cfg.InitialFPS}
+	return &Controller{
+		cfg:                   cfg,
+		target:                cfg.InitialBitrate,
+		targetFPS:             cfg.InitialFPS,
+		targetResolutionScale: cfg.InitialResolutionScale,
+	}
 }
 
 func (c *Controller) TargetBitrate() int {
@@ -174,6 +220,13 @@ func (c *Controller) TargetFPS() int {
 		return 0
 	}
 	return c.targetFPS
+}
+
+func (c *Controller) TargetResolutionScale() int {
+	if c == nil {
+		return 0
+	}
+	return c.targetResolutionScale
 }
 
 func (c *Controller) Observe(stats protocol.DesktopSessionStats) MediaDecision {
@@ -197,12 +250,59 @@ func (c *Controller) Observe(stats protocol.DesktopSessionStats) MediaDecision {
 	return c.observeEstimate(estimate)
 }
 
+func nextLowerResolutionScale(current, minimum int) int {
+	if current > 75 && minimum <= 75 {
+		return 75
+	}
+	if current > minimum {
+		return minimum
+	}
+	return current
+}
+
+func nextHigherResolutionScale(current int) int {
+	if current < 75 {
+		return 75
+	}
+	if current < 100 {
+		return 100
+	}
+	return current
+}
+
+func (c *Controller) resolutionBitrateFloorReached() bool {
+	if c == nil {
+		return false
+	}
+	threshold := c.cfg.MaxBitrate * 45 / 100
+	doubleFloor := c.cfg.MinBitrate * 2
+	if doubleFloor > threshold {
+		threshold = doubleFloor
+	}
+	if threshold > c.cfg.MaxBitrate {
+		threshold = c.cfg.MaxBitrate
+	}
+	return c.target <= threshold
+}
+
+func (c *Controller) shouldReduceResolution(estimate NetworkEstimate) bool {
+	if c == nil || c.targetResolutionScale <= c.cfg.MinResolutionScale {
+		return false
+	}
+	return estimate.Dropped > 0 ||
+		estimate.QueueDelay >= 120*time.Millisecond ||
+		estimate.Loss >= 5 ||
+		estimate.Jitter >= 80*time.Millisecond
+}
+
 func (c *Controller) observeEstimate(estimate NetworkEstimate) MediaDecision {
 	factor, reason := c.degradeFactor(estimate)
 	if factor < 1 {
 		c.stable = 0
 		c.fpsStable = 0
+		c.resolutionStable = 0
 		changed := false
+		resolutionChanged := false
 
 		next := int(math.Floor(float64(c.target) * factor))
 		if next < c.cfg.MinBitrate {
@@ -230,26 +330,55 @@ func (c *Controller) observeEstimate(estimate NetworkEstimate) MediaDecision {
 			c.fpsPressure = 0
 		}
 
+		if c.shouldReduceResolution(estimate) && c.resolutionBitrateFloorReached() {
+			c.resolutionPressure++
+			if c.resolutionPressure >= c.cfg.ResolutionPressureWindows {
+				nextScale := nextLowerResolutionScale(c.targetResolutionScale, c.cfg.MinResolutionScale)
+				if nextScale < c.targetResolutionScale {
+					c.targetResolutionScale = nextScale
+					changed = true
+					resolutionChanged = true
+					reason = "resolution_downshift"
+				}
+				c.resolutionPressure = 0
+			}
+		} else {
+			c.resolutionPressure = 0
+		}
+
 		return MediaDecision{
-			TargetBitrate: c.target,
-			TargetFPS:     c.targetFPS,
-			Changed:       changed,
-			Reason:        reason,
+			TargetBitrate:         c.target,
+			TargetFPS:             c.targetFPS,
+			TargetResolutionScale: c.targetResolutionScale,
+			ResolutionChanged:     resolutionChanged,
+			Changed:               changed,
+			Reason:                reason,
 		}
 	}
 
 	c.fpsPressure = 0
+	c.resolutionPressure = 0
 	if !c.stableEstimate(estimate) {
 		c.stable = 0
 		c.fpsStable = 0
-		return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
+		c.resolutionStable = 0
+		return MediaDecision{
+			TargetBitrate:         c.target,
+			TargetFPS:             c.targetFPS,
+			TargetResolutionScale: c.targetResolutionScale,
+		}
 	}
 
 	if c.target < c.cfg.MaxBitrate {
 		c.fpsStable = 0
+		c.resolutionStable = 0
 		c.stable++
 		if c.stable < c.cfg.StableWindows {
-			return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
+			return MediaDecision{
+				TargetBitrate:         c.target,
+				TargetFPS:             c.targetFPS,
+				TargetResolutionScale: c.targetResolutionScale,
+			}
 		}
 		c.stable = 0
 
@@ -262,42 +391,87 @@ func (c *Controller) observeEstimate(estimate NetworkEstimate) MediaDecision {
 			next = c.cfg.MaxBitrate
 		}
 		if next == c.target {
-			return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
+			return MediaDecision{
+				TargetBitrate:         c.target,
+				TargetFPS:             c.targetFPS,
+				TargetResolutionScale: c.targetResolutionScale,
+			}
 		}
 		c.target = next
 		return MediaDecision{
-			TargetBitrate: c.target,
-			TargetFPS:     c.targetFPS,
-			Changed:       true,
-			Reason:        "stable_recovery",
+			TargetBitrate:         c.target,
+			TargetFPS:             c.targetFPS,
+			TargetResolutionScale: c.targetResolutionScale,
+			Changed:               true,
+			Reason:                "stable_recovery",
 		}
 	}
 
 	c.stable = 0
-	if c.targetFPS >= c.cfg.MaxFPS {
+	if c.targetFPS < c.cfg.MaxFPS {
+		c.resolutionStable = 0
+		c.fpsStable++
+		if c.fpsStable < c.cfg.FPSRecoveryWindows {
+			return MediaDecision{
+				TargetBitrate:         c.target,
+				TargetFPS:             c.targetFPS,
+				TargetResolutionScale: c.targetResolutionScale,
+			}
+		}
 		c.fpsStable = 0
-		return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
+		step := c.cfg.MaxFPS / 6
+		if step < 1 {
+			step = 1
+		}
+		nextFPS := c.targetFPS + step
+		if nextFPS > c.cfg.MaxFPS {
+			nextFPS = c.cfg.MaxFPS
+		}
+		c.targetFPS = nextFPS
+		return MediaDecision{
+			TargetBitrate:         c.target,
+			TargetFPS:             c.targetFPS,
+			TargetResolutionScale: c.targetResolutionScale,
+			Changed:               true,
+			Reason:                "fps_recovery",
+		}
 	}
 
-	c.fpsStable++
-	if c.fpsStable < c.cfg.FPSRecoveryWindows {
-		return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
-	}
 	c.fpsStable = 0
-	step := c.cfg.MaxFPS / 6
-	if step < 1 {
-		step = 1
+	if c.targetResolutionScale >= 100 {
+		c.resolutionStable = 0
+		return MediaDecision{
+			TargetBitrate:         c.target,
+			TargetFPS:             c.targetFPS,
+			TargetResolutionScale: c.targetResolutionScale,
+		}
 	}
-	nextFPS := c.targetFPS + step
-	if nextFPS > c.cfg.MaxFPS {
-		nextFPS = c.cfg.MaxFPS
+
+	c.resolutionStable++
+	if c.resolutionStable < c.cfg.ResolutionRecoveryWindows {
+		return MediaDecision{
+			TargetBitrate:         c.target,
+			TargetFPS:             c.targetFPS,
+			TargetResolutionScale: c.targetResolutionScale,
+		}
 	}
-	c.targetFPS = nextFPS
+	c.resolutionStable = 0
+	nextScale := nextHigherResolutionScale(c.targetResolutionScale)
+	if nextScale == c.targetResolutionScale {
+		return MediaDecision{
+			TargetBitrate:         c.target,
+			TargetFPS:             c.targetFPS,
+			TargetResolutionScale: c.targetResolutionScale,
+		}
+	}
+	c.targetResolutionScale = nextScale
 	return MediaDecision{
-		TargetBitrate: c.target,
-		TargetFPS:     c.targetFPS,
-		Changed:       true,
-		Reason:        "fps_recovery",
+		TargetBitrate:         c.target,
+		TargetFPS:             c.targetFPS,
+		TargetResolutionScale: c.targetResolutionScale,
+		ResolutionChanged:     true,
+		Changed:               true,
+		Reason:                "resolution_recovery",
 	}
 }
 

@@ -22,5 +22,6 @@ type Decoder interface {
 	Decode(context.Context, []byte, time.Duration) ([]DecodedFrame, error)
 	Flush(context.Context) error
 	Hardware() bool
+	Backend() string
 	Close() error
 }

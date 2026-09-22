@@ -34,6 +34,7 @@ const (
 	imfTransformProcessOutput       = 25
 
 	mftMessageCommandFlush         = 0x00000000
+	mftMessageSetD3DManager        = 0x00000002
 	mftMessageNotifyBeginStreaming = 0x10000000
 	mftMessageNotifyEndStreaming   = 0x10000001
 	mftMessageNotifyEndOfStream    = 0x10000002
@@ -311,12 +312,16 @@ func setTransformType(transform unsafe.Pointer, method int, mediaType unsafe.Poi
 	return nil
 }
 
-func processTransformMessage(transform unsafe.Pointer, message uint32) error {
-	hr := comCall(transform, imfTransformProcessMessage, uintptr(message), 0)
+func processTransformMessageParam(transform unsafe.Pointer, message uint32, param uintptr) error {
+	hr := comCall(transform, imfTransformProcessMessage, uintptr(message), param)
 	if hresultFailed(hr) {
 		return hresultError("IMFTransform.ProcessMessage", hr)
 	}
 	return nil
+}
+
+func processTransformMessage(transform unsafe.Pointer, message uint32) error {
+	return processTransformMessageParam(transform, message, 0)
 }
 
 func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []byte, error) {

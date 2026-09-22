@@ -200,14 +200,14 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	log.Printf("[Desktop] JPEG session capture=%s config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
 	if h.input == nil {
-		return h.streamFrames(ctx, conn, sessionConfig)
+		return h.streamSessionFrames(ctx, conn, sessionConfig, options)
 	}
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer h.input.ReleaseAll()
 
 	errorsCh := make(chan error, 2)
-	go func() { errorsCh <- h.streamFrames(sessionCtx, conn, sessionConfig) }()
+	go func() { errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options) }()
 	go func() { errorsCh <- h.readInputLoop(sessionCtx, conn) }()
 
 	first := <-errorsCh

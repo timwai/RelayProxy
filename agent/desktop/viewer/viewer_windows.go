@@ -35,10 +35,10 @@ type windowsViewer struct {
 
 	hwnd atomic.Uintptr
 
-	frameMu      sync.Mutex
-	latest       Frame
-	latestD3D11  D3D11Frame
-	latestIsGPU  bool
+	frameMu     sync.Mutex
+	latest      Frame
+	latestD3D11 D3D11Frame
+	latestIsGPU bool
 
 	renderer *d3d11Renderer
 

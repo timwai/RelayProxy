@@ -87,6 +87,33 @@ func DefaultConfig(scene protocol.DesktopScene, maxBitrate int) Config {
 	}
 }
 
+// AdaptiveMinResolutionScale returns the smallest percentage of the
+// negotiated H.264 ceiling ABR may request. Quality mode preserves at least
+// 75%; other scenes may reach 50%. Codec minimum dimensions can raise the
+// floor for already-small sessions.
+func AdaptiveMinResolutionScale(scene protocol.DesktopScene, maxWidth, maxHeight int) int {
+	minimum := 50
+	if scene == protocol.DesktopSceneQuality {
+		minimum = 75
+	}
+	if maxWidth > 0 {
+		widthFloor := (320*100 + maxWidth - 1) / maxWidth
+		if widthFloor > minimum {
+			minimum = widthFloor
+		}
+	}
+	if maxHeight > 0 {
+		heightFloor := (180*100 + maxHeight - 1) / maxHeight
+		if heightFloor > minimum {
+			minimum = heightFloor
+		}
+	}
+	if minimum > 100 {
+		return 100
+	}
+	return minimum
+}
+
 // AdaptiveMinFPS returns the lowest capture cadence ABR may choose for the
 // negotiated scene. Gaming/performance preserve the negotiated FPS; desktop
 // and quality-oriented scenes may trade motion cadence for realtime latency.
@@ -227,6 +254,24 @@ func (c *Controller) TargetResolutionScale() int {
 		return 0
 	}
 	return c.targetResolutionScale
+}
+
+func (c *Controller) SetResolutionScale(scale int) {
+	if c == nil {
+		return
+	}
+	if scale < c.cfg.MinResolutionScale {
+		scale = c.cfg.MinResolutionScale
+	}
+	if scale > 100 {
+		scale = 100
+	}
+	if scale <= 0 {
+		scale = 100
+	}
+	c.targetResolutionScale = scale
+	c.resolutionPressure = 0
+	c.resolutionStable = 0
 }
 
 func (c *Controller) Observe(stats protocol.DesktopSessionStats) MediaDecision {

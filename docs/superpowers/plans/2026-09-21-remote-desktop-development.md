@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网与 stale-frame/drop 已合并 main；当前分支补齐在线 Host capability snapshot 与显示器枚举，为多显示器选择和实机验证提供实时能力数据  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网与 stale-frame/drop 已合并 main；Host capability snapshot / 显示器枚举已通过 PR #52 合并，当前分支继续打通 Relay Desktop 指定显示器捕获、光标和输入坐标映射  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #51 已合并，merge `504d6dacb939cacef5614c715c6703656e5c51db`）
+> 当前开发基线：`main`（PR #52 已合并，merge `95a22aee838af804a5a1ab50963649b88cd7614f`）
 
 ## 0. 当前进度
 
@@ -26,7 +26,7 @@
 | 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ✅ 已合并 main | Windows Host 以 60 Hz 独立采集位置/可见性，形状仅在 HCURSOR 变化时生成 PNG；可靠 session stream 传输，Controller 缓存形状，Wails Viewer 在视频表面本地叠加；PR #31 merge commit `f7101025c98fe1c09547a3a1203d20a6f3b6b888` |
 | 剪贴板 | ✅ 已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本；连接时仅建立基线不互相覆盖，后续变化按序号传播并做回环去重；GUI 可关闭同步，文件/图片暂不传输；PR #32 merge commit `010b8f5abc1408e3c824ebdaf13e943cf003dcc1` |
-| DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
+| DXGI / WGC Capture | 🧪 指定显示器链路实施中 | 单显示器优先 DXGI / GDI Auto；未指定显示器且存在多屏时继续保留虚拟桌面 GDI。当前分支使用 PR #52 的实时 `Displays` capability，通过 session-local `DisplayID` 指定单屏捕获，并同步映射光标与 Windows `SendInput` 坐标 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
@@ -86,6 +86,17 @@ Windows SendInput / CF_UNICODETEXT
 ```
 
 该 JPEG 路径现在作为可运行的功能基线保留；后续 Capture / Codec / Viewer 可以独立替换，不需要重做授权、Relay Datagram 与输入控制链路。
+
+### 0.2.1 指定显示器链路（当前分支）
+
+- GUI 在每个支持 Relay Desktop 且上报多显示器的目标卡片上提供显示器选择器；默认“全部显示器”保持原虚拟桌面行为，不改变既有用户路径。
+- `RemoteDesktopConnectOptions.DisplayID` 现在进入 session-local `HostConfig`，不会修改 Host 全局默认设置，也不会跨会话残留。
+- Windows Host 每次会话重新枚举显示器并按 session-scoped HMONITOR ID 校验目标；显式选屏失败时直接报错，不会静默回退到其他显示器或整个虚拟桌面。
+- 指定显示器通过 `screencapture.CaptureDisplay + BackendAuto` 捕获：DXGI Desktop Duplication 可用时优先使用，不可用时由 capture 层回退单显示器 GDI。
+- Cursor channel 使用所选显示器 `Bounds` 生成局部坐标；光标位于其他屏幕时标记为不可见，Viewer 不会把其他屏幕的指针叠到当前画面。
+- Windows `SendInput` 将 Viewer 的单屏归一化坐标重新映射到整个 virtual desktop 的绝对坐标，覆盖左侧负 X、副屏右侧及主屏上方负 Y 等布局。
+- `DesktopVideoConfig.DisplayID` 与 `RemoteDesktopStatus.DisplayID/DisplayName` 回显当前会话选择，GUI session banner 可直接确认实机正在控制哪块屏幕。
+- Windows 单测覆盖 session-scoped DisplayID、默认多屏虚拟桌面、左右双屏与负 Y 坐标映射；GUI 回归覆盖 capability 驱动的 per-target selector 与状态展示。
 
 ### 0.3 本轮进度（2026-09-22）
 

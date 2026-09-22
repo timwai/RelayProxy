@@ -22,6 +22,16 @@ type nativeDesktopSession struct {
 	decoder desktopcodec.Decoder
 	inputCh chan protocol.DesktopInputEvent
 
+	cursorID       string
+	cursorSequence uint64
+	cursorState    protocol.DesktopCursorState
+	cursorBitmap   desktopviewer.CursorBitmap
+	baseBGRA       []byte
+	presentBGRA    []byte
+	frameWidth     int
+	frameHeight    int
+	frameStride    int
+
 	done      chan struct{}
 	closeOnce sync.Once
 }
@@ -133,7 +143,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer ticker.Stop()
 
 	var lastSequence uint64
-	var bgra []byte
+	var converted []byte
 	var lastRecovery time.Time
 
 	for {
@@ -149,8 +159,17 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		if status.State != "connected" || status.Backend != protocol.DesktopBackendRelay {
 			return
 		}
+
+		cursorChanged := s.refreshCursor(owner)
 		frame := owner.bridge.GetRemoteDesktopFrame()
-		if frame.Sequence == 0 || frame.Sequence == lastSequence || frame.MimeType != "video/h264" {
+		frameChanged := frame.Sequence != 0 && frame.Sequence != lastSequence && frame.MimeType == "video/h264"
+		if !frameChanged {
+			if cursorChanged && len(s.baseBGRA) > 0 {
+				if err := s.present(); err != nil {
+					log.Printf("[Desktop] native viewer cursor render failed: %v", err)
+					return
+				}
+			}
 			continue
 		}
 		lastSequence = frame.Sequence
@@ -174,28 +193,73 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			if decodedFrame.Format != desktopcodec.PixelFormatNV12 {
 				continue
 			}
-			bgra, err = desktopcodec.NV12ToBGRA(
+			converted, err = desktopcodec.NV12ToBGRA(
 				decodedFrame.Pix,
 				decodedFrame.Width,
 				decodedFrame.Height,
 				decodedFrame.Stride,
-				bgra,
+				converted,
 			)
 			if err != nil {
 				log.Printf("[Desktop] native viewer NV12 conversion failed: %v", err)
 				continue
 			}
-			if err := s.viewer.Submit(desktopviewer.Frame{
-				BGRA:   bgra,
-				Width:  decodedFrame.Width,
-				Height: decodedFrame.Height,
-				Stride: decodedFrame.Width * 4,
-			}); err != nil {
+			s.baseBGRA = append(s.baseBGRA[:0], converted...)
+			s.frameWidth = decodedFrame.Width
+			s.frameHeight = decodedFrame.Height
+			s.frameStride = decodedFrame.Width * 4
+			if err := s.present(); err != nil {
 				log.Printf("[Desktop] native viewer render failed: %v", err)
 				return
 			}
 		}
 	}
+}
+
+func (s *nativeDesktopSession) refreshCursor(owner *appWindow) bool {
+	state := owner.bridge.GetRemoteDesktopCursor(s.cursorID)
+	if state.Sequence == 0 || state.Sequence == s.cursorSequence {
+		return false
+	}
+	s.cursorSequence = state.Sequence
+	if state.CursorID != "" && state.CursorID != s.cursorID {
+		if len(state.PNG) > 0 {
+			bitmap, err := desktopviewer.DecodeCursorPNG(state.CursorID, state.PNG)
+			if err != nil {
+				log.Printf("[Desktop] native viewer cursor decode failed: %v", err)
+			} else {
+				s.cursorBitmap = bitmap
+				s.cursorID = state.CursorID
+			}
+		}
+	}
+	s.cursorState = state
+	return true
+}
+
+func (s *nativeDesktopSession) present() error {
+	if len(s.baseBGRA) == 0 || s.frameWidth <= 0 || s.frameHeight <= 0 || s.frameStride <= 0 {
+		return nil
+	}
+	var err error
+	s.presentBGRA, err = desktopviewer.CompositeCursorBGRA(
+		s.baseBGRA,
+		s.frameWidth,
+		s.frameHeight,
+		s.frameStride,
+		s.cursorState,
+		s.cursorBitmap,
+		s.presentBGRA,
+	)
+	if err != nil {
+		return err
+	}
+	return s.viewer.Submit(desktopviewer.Frame{
+		BGRA:   s.presentBGRA,
+		Width:  s.frameWidth,
+		Height: s.frameHeight,
+		Stride: s.frameStride,
+	})
 }
 
 func (s *nativeDesktopSession) inputLoop(ctx context.Context, owner *appWindow) {

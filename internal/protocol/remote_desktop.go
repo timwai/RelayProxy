@@ -275,6 +275,7 @@ type DesktopVideoConfig struct {
 type DesktopSessionStats struct {
 	CaptureFPS       float64 `json:"captureFps,omitempty"`
 	EncodeFPS        float64 `json:"encodeFps,omitempty"`
+	ReceiveFPS       float64 `json:"receiveFps,omitempty"`
 	DecodeFPS        float64 `json:"decodeFps,omitempty"`
 	RenderFPS        float64 `json:"renderFps,omitempty"`
 	ActualBitrate    int64   `json:"actualBitrate,omitempty"`

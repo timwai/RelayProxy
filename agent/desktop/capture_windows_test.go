@@ -58,7 +58,7 @@ func TestCopyDXGIFrameReusesBuffer(t *testing.T) {
 }
 
 func TestWindowsDesktopCapabilitySnapshot(t *testing.T) {
-	captures, displays := windowsDesktopCapabilitySnapshot([]screencapture.Display{
+	source := []screencapture.Display{
 		{
 			ID: 10, DeviceName: `\\.\DISPLAY1`, PixelWidth: 1920, PixelHeight: 1080,
 			Primary: true, AdapterIndex: 0, OutputIndex: 0,
@@ -67,9 +67,14 @@ func TestWindowsDesktopCapabilitySnapshot(t *testing.T) {
 			ID: 20, DeviceName: `\\.\DISPLAY2`, PixelWidth: 2560, PixelHeight: 1440,
 			AdapterIndex: -1, OutputIndex: -1,
 		},
-	})
+	}
+	captures, displays := windowsDesktopCapabilitySnapshot(source, false)
 	if len(captures) != 2 || captures[0].Backend != "gdi" || captures[1].Backend != "dxgi" {
 		t.Fatalf("capture capabilities=%+v", captures)
+	}
+	withWGC, _ := windowsDesktopCapabilitySnapshot(source, true)
+	if len(withWGC) != 3 || withWGC[2].Backend != "wgc" {
+		t.Fatalf("WGC capture capabilities=%+v", withWGC)
 	}
 	if len(displays) != 2 {
 		t.Fatalf("display capabilities=%d want=2", len(displays))

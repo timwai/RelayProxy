@@ -13,7 +13,7 @@ import (
 	"relayproxy/internal/protocol"
 )
 
-var errWindowsGraphicsCaptureUnavailable = errors.New("Windows Graphics Capture is not implemented yet")
+var errWindowsGraphicsCaptureUnavailable = errors.New("Windows Graphics Capture is unavailable")
 
 type windowsCaptureFrame struct {
 	Pix      []byte
@@ -61,6 +61,9 @@ func (screencaptureFrameStreamFactory) Open(
 	preference protocol.DesktopCaptureBackend,
 	maxFPS int,
 ) (windowsFrameStream, error) {
+	if normalizedWindowsCaptureBackend(preference) == protocol.DesktopCaptureWGC {
+		return openWGCFrameStream(ctx, display, maxFPS)
+	}
 	backend, err := screencaptureBackend(preference)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,8 @@ module relayproxy
 go 1.27.1
 
 require (
+	github.com/deploymenttheory/go-bindings-win32 v0.2.1
+	github.com/deploymenttheory/go-bindings-winrt v0.6.0
 	github.com/florianl/go-nfqueue/v2 v2.1.0
 	github.com/go-ole/go-ole v1.3.0
 	github.com/go-mswin/screencapture v0.1.1

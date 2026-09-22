@@ -172,7 +172,7 @@ func newSystemCapture() (*windowsCapture, error) {
 	}, nil
 }
 
-func windowsDesktopCapabilitySnapshot(displays []screencapture.Display) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability) {
+func windowsDesktopCapabilitySnapshot(displays []screencapture.Display, hasWGC bool) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability) {
 	captures := []protocol.DesktopCaptureCapability{{
 		Backend: "gdi",
 		Cursor:  true,
@@ -197,6 +197,12 @@ func windowsDesktopCapabilitySnapshot(displays []screencapture.Display) ([]proto
 			Cursor:  true,
 		})
 	}
+	if hasWGC {
+		captures = append(captures, protocol.DesktopCaptureCapability{
+			Backend: "wgc",
+			Cursor:  true,
+		})
+	}
 	return captures, out
 }
 
@@ -208,7 +214,7 @@ func (c *windowsCapture) DesktopCaptureCapabilities(ctx context.Context) ([]prot
 	if err != nil {
 		return nil, nil, err
 	}
-	captures, capabilities := windowsDesktopCapabilitySnapshot(displays)
+	captures, capabilities := windowsDesktopCapabilitySnapshot(displays, windowsWGCAvailable())
 	return captures, capabilities, nil
 }
 

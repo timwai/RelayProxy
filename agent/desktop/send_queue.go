@@ -18,6 +18,13 @@ func smoothSendQueueDelayMs(current float64, elapsed time.Duration) float64 {
 // scheduled capture is at least one whole frame interval old, it is better to
 // drop that obsolete sample and wait for the next current frame than to burst
 // through historical ticks after a blocked network send or slow encode.
+func frameIntervalForFPS(fps int) time.Duration {
+	if fps <= 0 {
+		fps = 1
+	}
+	return time.Second / time.Duration(fps)
+}
+
 func staleScheduledFrameCount(scheduled, now time.Time, frameInterval time.Duration) uint64 {
 	if frameInterval <= 0 || scheduled.IsZero() || !now.After(scheduled) {
 		return 0

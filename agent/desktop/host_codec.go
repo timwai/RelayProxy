@@ -79,13 +79,25 @@ func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
 	return dst
 }
 
-func sendEncodedDesktopFrame(ctx context.Context, conn *desktopmedia.MediaConn, frame desktopmedia.EncodedFrame, packetSize int, sequence *uint32) error {
+func sendEncodedDesktopFrame(
+	ctx context.Context,
+	conn *desktopmedia.MediaConn,
+	frame desktopmedia.EncodedFrame,
+	packetSize int,
+	sequence *uint32,
+	sendQueueDelayMs *float64,
+) error {
 	packets, next, err := desktopmedia.PacketizeFrame(frame, packetSize, *sequence)
 	if err != nil {
 		return err
 	}
 	for _, packet := range packets {
-		if err := conn.Send(ctx, packet); err != nil {
+		started := time.Now()
+		err := conn.Send(ctx, packet)
+		if sendQueueDelayMs != nil {
+			*sendQueueDelayMs = smoothSendQueueDelayMs(*sendQueueDelayMs, time.Since(started))
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -184,6 +196,7 @@ func (h *Host) streamH264Frames(
 	var capturedFrames uint64
 	var lastCapturedFrames uint64
 	var lastCaptureMs float64
+	var sendQueueDelayMs float64
 	frameInterval := time.Second / time.Duration(videoCfg.FPS)
 	ticker := time.NewTicker(frameInterval)
 	defer ticker.Stop()
@@ -225,7 +238,7 @@ func (h *Host) streamH264Frames(
 				Config:     encoded.Config,
 				Data:       data,
 			}
-			if err := sendEncodedDesktopFrame(ctx, conn, mediaFrame, cfg.PacketSize, &sequence); err != nil {
+			if err := sendEncodedDesktopFrame(ctx, conn, mediaFrame, cfg.PacketSize, &sequence, &sendQueueDelayMs); err != nil {
 				return err
 			}
 			frameID++
@@ -246,8 +259,9 @@ func (h *Host) streamH264Frames(
 			ActualBitrate: int64(float64((current.Bytes-lastEncoderStats.Bytes)*8) / seconds),
 			TargetBitrate: int64(videoCfg.TargetBitrate),
 			CaptureMs:     lastCaptureMs,
-			EncodeMs:      float64(current.LastEncodeTime.Microseconds()) / 1000,
-			Path:          "relay",
+			EncodeMs:         float64(current.LastEncodeTime.Microseconds()) / 1000,
+			SendQueueDelayMs: sendQueueDelayMs,
+			Path:             "relay",
 		}
 		if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 			Type:  protocol.DesktopSessionStatsReport,

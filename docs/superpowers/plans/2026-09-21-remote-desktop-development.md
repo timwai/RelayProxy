@@ -27,7 +27,7 @@
 | 光标 | ⏳ 未开始 | 计划与视频分离传输并在 Viewer 本地绘制 |
 | 剪贴板 | ⏳ 未开始 | RD1 先实现 Unicode 文本双向同步 |
 | DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
-| H.264 硬件编解码 | 🧪 同步编码数据面已接入 | Media Foundation MFT 已完成能力探测、激活、NV12 输入、IMFSample/Buffer、ProcessInput/ProcessOutput 与 keyframe 读取；同步 MFT 可产生真实 H.264 sample，异步硬件 MFT 下一步接 METransformNeedInput/METransformHaveOutput event loop |
+| H.264 硬件编解码 | 🧪 异步硬件 Encoder 已接入 | Media Foundation 同步/异步 MFT 均进入编码数据面；异步路径使用阻塞 IMFMediaEventGenerator pump 处理 METransformNeedInput/METransformHaveOutput，不使用定时轮询；下一步接 ICodecAPI IDR/bitrate 控制并替换 JPEG Host 媒体管线 |
 | 原生 D3D11 Viewer | ⏳ 待实现 | 当前 Wails 图片预览仅用于功能闭环，不作为最终低延迟 Viewer |
 | RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
 

@@ -92,4 +92,4 @@ jobs:
             exit 1
           }
       - name: Test desktop packages
-        run: go test ./agent/gui ./cmd/relay-agent -count=1
+        run: go test ./agent/desktop/... ./agent/gui ./cmd/relay-agent -count=1

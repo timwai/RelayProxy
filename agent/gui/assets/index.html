@@ -698,7 +698,7 @@
 
         <details class="rp-card p-4" id="desktop-connect-settings">
           <summary class="cursor-pointer select-none text-[12px] font-semibold text-slate-800 dark:text-slate-100">连接设置</summary>
-          <div class="grid grid-cols-2 xl:grid-cols-5 gap-3 mt-3">
+          <div class="grid grid-cols-2 xl:grid-cols-6 gap-3 mt-3">
             <div>
               <label for="desktop-opt-backend" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">协议</label>
               <select id="desktop-opt-backend" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
@@ -715,6 +715,14 @@
                 <option value="balanced">均衡</option>
                 <option value="high">高清</option>
                 <option value="extreme">极致</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-codec" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">视频编码</label>
+              <select id="desktop-opt-codec" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="auto">自动</option>
+                <option value="h264">H.264</option>
+                <option value="jpeg">JPEG 兼容</option>
               </select>
             </div>
             <div>
@@ -750,7 +758,7 @@
             </div>
           </div>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。当前 JPEG MVP 的码率为软上限；升级 H.264 硬件编码后将切换为编码器目标码率。Windows RDP 会忽略媒体画质参数。
+            设置仅作用于下一次连接。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；H.264 码率由 Media Foundation 编码器控制。Windows RDP 会忽略媒体画质参数。
           </div>
         </details>
 
@@ -764,6 +772,7 @@
           </div>
           <div id="desktop-viewer-stage" class="bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
             <img id="desktop-viewer-image" alt="远程桌面画面" tabindex="0" class="block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default" draggable="false">
+            <canvas id="desktop-viewer-canvas" tabindex="0" class="hidden block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default"></canvas>
           </div>
         </div>
 
@@ -778,7 +787,7 @@
         <div class="rp-card p-4">
           <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">自动模式</div>
           <div class="text-[11px] leading-6 text-slate-500 dark:text-slate-400 mt-1">
-            自动模式会根据目标能力选择 backend：仅支持 Relay Desktop 的 Windows Home 会直接使用内置串流；支持 Native RDP 的设备仍可按场景选择 RDP。当前 Relay Desktop 为 JPEG MVP，后续升级 DXGI + H.264。
+            自动模式会根据目标能力选择 backend：Relay Desktop 在 WebCodecs 可用时优先 H.264 + Media Foundation，并在编码器或解码器不可用时保留 JPEG 兼容路径；Windows Home 不依赖系统 RDP 服务。
           </div>
         </div>
       </section>
@@ -1175,6 +1184,7 @@
     var desktopFrameSeq = 0, desktopFrameBusy = false, desktopInputSeq = 0;
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
+    var desktopVideoDecoder = null, desktopVideoCodec = '', desktopVideoDecodeErrorAt = 0;
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1497,6 +1507,10 @@
     function remoteDesktopConnectOptions() {
       var backend = $('desktop-opt-backend') ? $('desktop-opt-backend').value : 'auto';
       var quality = $('desktop-opt-quality') ? $('desktop-opt-quality').value : 'auto';
+      var codecChoice = $('desktop-opt-codec') ? $('desktop-opt-codec').value : 'auto';
+      var webCodecs = typeof window.VideoDecoder === 'function' && typeof window.EncodedVideoChunk === 'function';
+      var codec = codecChoice === 'auto' ? (webCodecs ? 'h264' : 'jpeg') : codecChoice;
+      if (codec === 'h264' && !webCodecs) codec = 'jpeg';
       var resolutionValue = $('desktop-opt-resolution') ? $('desktop-opt-resolution').value : 'auto';
       var fps = $('desktop-opt-fps') ? Number($('desktop-opt-fps').value || 0) : 0;
       var bitrateMbps = $('desktop-opt-bitrate') ? Number($('desktop-opt-bitrate').value || 0) : 0;
@@ -1511,6 +1525,7 @@
         backend: backend || 'auto',
         scene: 'auto',
         quality: quality || 'auto',
+        codec: codec,
         resolution: resolution,
         fps: fps,
         maxBitrate: bitrateMbps > 0 ? Math.round(bitrateMbps * 1000000) : 0
@@ -1519,6 +1534,7 @@
     function remoteDesktopOptionsSummary() {
       var options = remoteDesktopConnectOptions();
       var parts = [];
+      if (options.codec) parts.push(options.codec === 'h264' ? 'H.264' : 'JPEG');
       if (options.quality && options.quality !== 'auto') parts.push(options.quality);
       if (options.resolution && options.resolution.mode === 'fixed') parts.push(options.resolution.width + '×' + options.resolution.height);
       else if (options.resolution && options.resolution.mode === 'native') parts.push('native');
@@ -1599,6 +1615,8 @@
       $('desktop-viewer').classList.toggle('hidden', !relay);
       if (!relay) {
         desktopFrameSeq = 0;
+        resetDesktopVideoDecoder();
+        showDesktopJPEGSurface();
         $('desktop-viewer-image').removeAttribute('src');
         $('desktop-viewer-meta').textContent = '等待视频帧…';
       }
@@ -1611,6 +1629,91 @@
       if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
       banner.textContent = parts.join(' · ');
     }
+    function resetDesktopVideoDecoder() {
+      if (desktopVideoDecoder) {
+        try { desktopVideoDecoder.close(); } catch (_) {}
+      }
+      desktopVideoDecoder = null;
+      desktopVideoCodec = '';
+      var canvas = $('desktop-viewer-canvas');
+      if (canvas) {
+        var ctx = canvas.getContext('2d');
+        if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
+    }
+    function base64ToBytes(value) {
+      var binary = atob(value || '');
+      var out = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+      return out;
+    }
+    function desktopViewerSurface() {
+      var canvas = $('desktop-viewer-canvas');
+      if (canvas && !canvas.classList.contains('hidden')) return canvas;
+      return $('desktop-viewer-image');
+    }
+    function showDesktopJPEGSurface() {
+      var image = $('desktop-viewer-image'), canvas = $('desktop-viewer-canvas');
+      if (image) image.classList.remove('hidden');
+      if (canvas) canvas.classList.add('hidden');
+    }
+    function showDesktopH264Surface() {
+      var image = $('desktop-viewer-image'), canvas = $('desktop-viewer-canvas');
+      if (image) image.classList.add('hidden');
+      if (canvas) canvas.classList.remove('hidden');
+    }
+    function ensureDesktopVideoDecoder(codec) {
+      if (typeof window.VideoDecoder !== 'function' || typeof window.EncodedVideoChunk !== 'function') {
+        throw new Error('当前 WebView 不支持 WebCodecs H.264 解码');
+      }
+      codec = codec || 'avc1.42E01F';
+      if (desktopVideoDecoder && desktopVideoCodec === codec && desktopVideoDecoder.state !== 'closed') return desktopVideoDecoder;
+      resetDesktopVideoDecoder();
+      desktopVideoCodec = codec;
+      desktopVideoDecoder = new VideoDecoder({
+        output: function (videoFrame) {
+          try {
+            var canvas = $('desktop-viewer-canvas');
+            if (!canvas) return;
+            var width = videoFrame.displayWidth || videoFrame.codedWidth;
+            var height = videoFrame.displayHeight || videoFrame.codedHeight;
+            if (width && height && (canvas.width !== width || canvas.height !== height)) {
+              canvas.width = width;
+              canvas.height = height;
+            }
+            var ctx = canvas.getContext('2d', { alpha:false });
+            if (ctx) ctx.drawImage(videoFrame, 0, 0, canvas.width, canvas.height);
+            showDesktopH264Surface();
+          } finally {
+            videoFrame.close();
+          }
+        },
+        error: function (err) {
+          var now = Date.now();
+          if (now - desktopVideoDecodeErrorAt > 3000) {
+            desktopVideoDecodeErrorAt = now;
+            toast('H.264 解码失败：' + (err && err.message ? err.message : err));
+          }
+          resetDesktopVideoDecoder();
+        }
+      });
+      desktopVideoDecoder.configure({
+        codec: codec,
+        optimizeForLatency: true
+      });
+      return desktopVideoDecoder;
+    }
+    function decodeDesktopH264Frame(frame) {
+      var decoder = ensureDesktopVideoDecoder(frame.codec || 'avc1.42E01F');
+      if (!frame.keyFrame && decoder.decodeQueueSize > 4) return;
+      var bytes = base64ToBytes(frame.data);
+      decoder.decode(new EncodedVideoChunk({
+        type: frame.keyFrame ? 'key' : 'delta',
+        timestamp: Number(frame.timestamp || frame.sequence || 0),
+        data: bytes
+      }));
+    }
+
     async function refreshRemoteDesktopFrame() {
       if (desktopFrameBusy || !hasFn('goGetRemoteDesktopFrame')) return;
       var status = state.desktopStatus || {};
@@ -1623,14 +1726,30 @@
         if (!frame || !frame.sequence || !frame.data || frame.sequence === desktopFrameSeq) return;
         desktopFrameSeq = frame.sequence;
         var mime = frame.mimeType || 'image/jpeg';
-        $('desktop-viewer-image').src = 'data:' + mime + ';base64,' + frame.data;
-        $('desktop-viewer-meta').textContent =
-          (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
-          'JPEG MVP · QUIC Datagram · 键鼠控制 · ' + remoteDesktopOptionsSummary();
+        if (mime.indexOf('video/h264') === 0) {
+          decodeDesktopH264Frame(frame);
+          $('desktop-viewer-meta').textContent =
+            (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
+            'H.264 · WebCodecs · QUIC Datagram · 键鼠控制 · ' + remoteDesktopOptionsSummary();
+        } else {
+          resetDesktopVideoDecoder();
+          showDesktopJPEGSurface();
+          $('desktop-viewer-image').src = 'data:' + mime + ';base64,' + frame.data;
+          $('desktop-viewer-meta').textContent =
+            (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
+            'JPEG · QUIC Datagram · 键鼠控制 · ' + remoteDesktopOptionsSummary();
+        }
+      } catch (err) {
+        var now = Date.now();
+        if (now - desktopVideoDecodeErrorAt > 3000) {
+          desktopVideoDecodeErrorAt = now;
+          toast('远程画面处理失败：' + (err.message || err));
+        }
       } finally {
         desktopFrameBusy = false;
       }
     }
+
     function toggleDesktopFullscreen() {
       var stage = $('desktop-viewer-stage');
       if (!stage) return;
@@ -1668,7 +1787,7 @@
       });
     }
     function desktopPointerPosition(event) {
-      var image = $('desktop-viewer-image');
+      var image = (event && event.currentTarget) || desktopViewerSurface();
       if (!image) return null;
       var rect = image.getBoundingClientRect();
       if (!rect.width || !rect.height) return null;
@@ -1719,7 +1838,7 @@
     }
     function sendDesktopKey(event, down) {
       if (!remoteDesktopInputReady()) return;
-      var image = $('desktop-viewer-image');
+      var image = desktopViewerSurface();
       if (!image || document.activeElement !== image) return;
       var vk = Number(event.keyCode || event.which || 0);
       if (!vk || vk < 1 || vk > 65535) return;
@@ -1746,44 +1865,46 @@
       desktopPressedButtons = {};
     }
     function bindRemoteDesktopInput() {
-      var image = $('desktop-viewer-image');
-      if (!image) return;
-      image.addEventListener('pointermove', queueDesktopMouseMove);
-      image.addEventListener('pointerdown', function (event) {
-        try { image.focus({ preventScroll: true }); } catch (_) { image.focus(); }
-        try { image.setPointerCapture(event.pointerId); } catch (_) {}
-        sendDesktopMouseButton(event, true);
-      });
-      image.addEventListener('pointerup', function (event) {
-        sendDesktopMouseButton(event, false);
-        try { image.releasePointerCapture(event.pointerId); } catch (_) {}
-      });
-      image.addEventListener('pointercancel', function (event) {
-        var button = desktopMouseButtonName(event.button);
-        if (button && desktopPressedButtons[button]) sendDesktopMouseButton(event, false);
-      });
-      image.addEventListener('wheel', function (event) {
-        if (!remoteDesktopInputReady()) return;
-        var point = desktopPointerPosition(event);
-        if (!point) return;
-        var horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
-        var raw = horizontal ? event.deltaX : event.deltaY;
-        if (!raw) return;
-        var delta = horizontal ? (raw > 0 ? 120 : -120) : (raw > 0 ? -120 : 120);
-        sendRemoteDesktopInput({
-          kind: 'mouse_wheel', x: point.x, y: point.y,
-          wheelDelta: delta, horizontal: horizontal
+      var surfaces = [$('desktop-viewer-image'), $('desktop-viewer-canvas')].filter(Boolean);
+      surfaces.forEach(function (image) {
+        image.addEventListener('pointermove', queueDesktopMouseMove);
+        image.addEventListener('pointerdown', function (event) {
+          try { image.focus({ preventScroll: true }); } catch (_) { image.focus(); }
+          try { image.setPointerCapture(event.pointerId); } catch (_) {}
+          sendDesktopMouseButton(event, true);
         });
-        event.preventDefault();
-      }, { passive: false });
-      image.addEventListener('keydown', function (event) { sendDesktopKey(event, true); });
-      image.addEventListener('keyup', function (event) { sendDesktopKey(event, false); });
-      image.addEventListener('blur', releaseDesktopInput);
-      image.addEventListener('contextmenu', function (event) { event.preventDefault(); });
+        image.addEventListener('pointerup', function (event) {
+          sendDesktopMouseButton(event, false);
+          try { image.releasePointerCapture(event.pointerId); } catch (_) {}
+        });
+        image.addEventListener('pointercancel', function (event) {
+          var button = desktopMouseButtonName(event.button);
+          if (button && desktopPressedButtons[button]) sendDesktopMouseButton(event, false);
+        });
+        image.addEventListener('wheel', function (event) {
+          if (!remoteDesktopInputReady()) return;
+          var point = desktopPointerPosition(event);
+          if (!point) return;
+          var horizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+          var raw = horizontal ? event.deltaX : event.deltaY;
+          if (!raw) return;
+          var delta = horizontal ? (raw > 0 ? 120 : -120) : (raw > 0 ? -120 : 120);
+          sendRemoteDesktopInput({
+            kind: 'mouse_wheel', x: point.x, y: point.y,
+            wheelDelta: delta, horizontal: horizontal
+          });
+          event.preventDefault();
+        }, { passive: false });
+        image.addEventListener('keydown', function (event) { sendDesktopKey(event, true); });
+        image.addEventListener('keyup', function (event) { sendDesktopKey(event, false); });
+        image.addEventListener('blur', releaseDesktopInput);
+        image.addEventListener('contextmenu', function (event) { event.preventDefault(); });
+      });
       document.addEventListener('visibilitychange', function () {
         if (document.hidden) releaseDesktopInput();
       });
     }
+
     window.refreshRemoteDesktopFrame = refreshRemoteDesktopFrame;
     window.toggleDesktopFullscreen = toggleDesktopFullscreen;
 
@@ -2372,6 +2493,13 @@
       refreshStatus();
       refreshLogs();
       bindRemoteDesktopInput();
+      if (typeof window.VideoDecoder !== 'function' || typeof window.EncodedVideoChunk !== 'function') {
+        var codecSelect = $('desktop-opt-codec');
+        if (codecSelect) {
+          var h264Option = Array.from(codecSelect.options || []).find(function (option) { return option.value === 'h264'; });
+          if (h264Option) { h264Option.disabled = true; h264Option.textContent = 'H.264（当前 WebView 不支持）'; }
+        }
+      }
 
       // The browser management page shares this HTML with the native Windows
       // window, but it has no process-replacement binding. Keep the restart

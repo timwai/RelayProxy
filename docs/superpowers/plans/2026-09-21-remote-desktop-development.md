@@ -29,11 +29,12 @@
 | DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
-| 原生 D3D11 Viewer | ⏳ 待实现 | 当前 Wails 图片预览仅用于功能闭环，不作为最终低延迟 Viewer |
+| 原生 D3D11 Viewer | ✅ 第一版已合并 main，DXVA 优化分支进行中 | PR #33 已合并独立 Win32/D3D11 Viewer、MF H.264 解码、原生键鼠与独立光标；当前分支继续接异步硬件 Decoder、IMFDXGIDeviceManager 与 DXGI NV12 surface staging readback |
 | RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
 
 ### 0.1 已合并主线的关键进度
 
+- 原生 D3D11 Viewer 第一版已通过 PR #33 合并到 `main`（merge `9dcce5255ca7c49bb6e81bba6a0147b7d04980d4`）：Controller H.264 帧不再必须经过 JS/Base64/WebCodecs，可直接由 Go 侧 Media Foundation 解码并交给独立 Win32/D3D11 窗口显示；原生键鼠和独立远端光标也已接通。
 - Unicode 文本剪贴板已通过 PR #32 合并到 `main`：可靠 session stream 双向同步 CF_UNICODETEXT，连接时建立基线，后续按序号传播并避免回环。
 - 独立光标通道已通过 PR #31 合并到 `main`：Windows 光标位置/可见性与形状脱离视频帧传输，Viewer 本地叠加并按 hotspot 缩放定位。
 - H.264 Datagram 丢包恢复已通过 PR #30 合并到 `main`：FrameID 缺口或 WebCodecs 解码失败会停止消费依赖帧并经可靠控制流请求 IDR，恢复到新 keyframe 后继续播放。
@@ -52,27 +53,23 @@
 ```text
 Windows Host
   ↓
-GDI virtual desktop capture
+DXGI Desktop Duplication（不可用时 GDI）
   ↓
-RGBA resize ≤ 1280×720
+Media Foundation H.264（不可用时 JPEG）
   ↓
-JPEG encode ≈ 10 FPS
-  ↓
-RD/1 packetize
-  ↓
-QUIC Datagram
+RD/1 QUIC Datagram
   ↓
 Relay Server
   ↓
-Controller reassembly
+Controller reassembly / H.264 loss recovery
   ↓
-JPEG latest-frame cache
+Native Win32 Viewer
   ↓
-Wails GUI preview / fullscreen
+Media Foundation H.264 decode → NV12 → D3D11 swap chain
   ↕ reliable session stream
-keyboard / mouse / wheel
+keyboard / mouse / cursor / clipboard
   ↓
-Windows SendInput
+Windows SendInput / CF_UNICODETEXT
 ```
 
 该 JPEG 路径现在作为可运行的功能基线保留；后续 Capture / Codec / Viewer 可以独立替换，不需要重做授权、Relay Datagram 与输入控制链路。

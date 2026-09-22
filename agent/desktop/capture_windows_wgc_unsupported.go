@@ -9,6 +9,8 @@ import (
 	"github.com/go-mswin/screencapture"
 )
 
+func windowsWGCAvailable() bool { return false }
+
 func openWGCFrameStream(
 	ctx context.Context,
 	display screencapture.Display,

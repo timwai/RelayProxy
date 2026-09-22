@@ -1122,18 +1122,20 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					if old != nil && old != direct {
 						_ = old.Close()
 					}
+					relayQuality := controller.PathQuality()
 					connectedAt := time.Now()
 					controller.SetDatagramPath(path)
+					a.requestRelayDesktopPathIDR(controller, targetID, "relay", path.Name())
 					log.Printf("[Desktop] controller media path switched target=%s path=%s", targetID, path.Name())
 
-					select {
-					case <-a.ctx.Done():
+					qualityFallback, sessionAlive := a.waitRelayDesktopDirectPath(controller, targetID, path, lost, relayQuality)
+					if !sessionAlive {
 						_ = path.Close()
 						return
-					case <-controller.Done():
-						_ = path.Close()
-						return
-					case <-lost:
+					}
+					controller.ClearDatagramPath(path)
+					if controller.Active() {
+						a.requestRelayDesktopPathIDR(controller, targetID, path.Name(), "relay")
 					}
 
 					if !controller.Active() {
@@ -1145,7 +1147,11 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					}
 					delay := policy.Delay(failures)
 					failures++
-					log.Printf("[Desktop] P2P media path lost after %s; Relay Datagram active, retrying in %s", aliveFor.Round(time.Second), delay)
+					if qualityFallback != "" {
+						log.Printf("[Desktop] P2P media path demoted after %s reason=%s; Relay Datagram active, retrying in %s", aliveFor.Round(time.Second), qualityFallback, delay)
+					} else {
+						log.Printf("[Desktop] P2P media path lost after %s; Relay Datagram active, retrying in %s", aliveFor.Round(time.Second), delay)
+					}
 					if !waitRetry(delay) {
 						return
 					}

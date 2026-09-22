@@ -138,6 +138,46 @@ func clampInt(value, minValue, maxValue int) int {
 	return value
 }
 
+type desktopResolutionTarget struct {
+	MaxWidth  int
+	MaxHeight int
+}
+
+func queueLatestResolution(ch chan desktopResolutionTarget, value desktopResolutionTarget) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- value:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- value:
+	default:
+	}
+}
+
+func validateDesktopResolutionTarget(width, height, maxWidth, maxHeight int) (desktopResolutionTarget, error) {
+	if width <= 0 || height <= 0 {
+		return desktopResolutionTarget{}, errors.New("Relay Desktop resolution target requires width and height")
+	}
+	if width < 320 || height < 180 {
+		return desktopResolutionTarget{}, errors.New("Relay Desktop resolution target is below the minimum 320x180 bounds")
+	}
+	if maxWidth > 0 && width > maxWidth {
+		return desktopResolutionTarget{}, fmt.Errorf("Relay Desktop resolution width %d exceeds session maximum %d", width, maxWidth)
+	}
+	if maxHeight > 0 && height > maxHeight {
+		return desktopResolutionTarget{}, fmt.Errorf("Relay Desktop resolution height %d exceeds session maximum %d", height, maxHeight)
+	}
+	return desktopResolutionTarget{MaxWidth: width, MaxHeight: height}, nil
+}
+
 func queueLatestInt(ch chan int, value int) {
 	if ch == nil {
 		return
@@ -259,6 +299,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	idrRequests := make(chan struct{}, 1)
 	bitrateUpdates := make(chan int, 1)
 	fpsUpdates := make(chan int, 1)
+	resolutionUpdates := make(chan desktopResolutionTarget, 1)
 
 	workerCount := 2
 	cursorSource, hasCursor := h.source.(CursorCaptureSource)
@@ -273,11 +314,12 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	errorsCh := make(chan error, workerCount)
 	go func() {
-		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, backend, idrRequests, bitrateUpdates, fpsUpdates)
+		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, backend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates)
 	}()
 	go func() {
 		errorsCh <- h.readSessionControlLoop(
-			sessionCtx, conn, idrRequests, bitrateUpdates, fpsUpdates, sessionConfig.MaxFPS,
+			sessionCtx, conn, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates,
+			sessionConfig.MaxFPS, sessionConfig.MaxWidth, sessionConfig.MaxHeight,
 			clipboardEndpoint, clipboardState, syncClipboard,
 		)
 	}()
@@ -313,7 +355,10 @@ func (h *Host) readSessionControlLoop(
 	idrRequests chan<- struct{},
 	bitrateUpdates chan int,
 	fpsUpdates chan int,
+	resolutionUpdates chan desktopResolutionTarget,
 	maxFPS int,
+	maxWidth int,
+	maxHeight int,
 	clipboard ClipboardEndpoint,
 	clipboardState *clipboardSyncState,
 	syncClipboard bool,
@@ -363,6 +408,17 @@ func (h *Host) readSessionControlLoop(
 					log.Printf("[Desktop] ignoring invalid ABR target fps=%d max=%d", control.TargetFPS, maxFPS)
 				} else {
 					queueLatestInt(fpsUpdates, control.TargetFPS)
+				}
+			}
+			if control.TargetWidth != 0 || control.TargetHeight != 0 {
+				target, err := validateDesktopResolutionTarget(
+					control.TargetWidth, control.TargetHeight, maxWidth, maxHeight,
+				)
+				if err != nil {
+					log.Printf("[Desktop] ignoring invalid resolution control %dx%d: %v",
+						control.TargetWidth, control.TargetHeight, err)
+				} else {
+					queueLatestResolution(resolutionUpdates, target)
 				}
 			}
 			continue

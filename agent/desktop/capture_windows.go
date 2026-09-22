@@ -144,7 +144,8 @@ type windowsCapture struct {
 	cursorMu sync.Mutex
 
 	gdi             *gdiCapture
-	stream          *screencapture.Stream
+	stream          windowsFrameStream
+	streamFactory   windowsFrameStreamFactory
 	selectedDisplay *screencapture.Display
 	frame           *image.RGBA
 	backend         string
@@ -163,7 +164,11 @@ func newSystemCapture() (*windowsCapture, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &windowsCapture{gdi: gdi, backend: "gdi"}, nil
+	return &windowsCapture{
+		gdi:           gdi,
+		streamFactory: screencaptureFrameStreamFactory{},
+		backend:       "gdi",
+	}, nil
 }
 
 func windowsDesktopCapabilitySnapshot(displays []screencapture.Display) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability) {
@@ -225,21 +230,6 @@ func resolveWindowsDisplay(displays []screencapture.Display, displayID string) (
 	return screencapture.Display{}, true, fmt.Errorf("Windows display %q is no longer available", displayID)
 }
 
-func windowsCaptureBackend(preference protocol.DesktopCaptureBackend) (screencapture.Backend, error) {
-	switch preference {
-	case "", protocol.DesktopCaptureAuto:
-		return screencapture.BackendAuto, nil
-	case protocol.DesktopCaptureDXGI:
-		return screencapture.BackendDuplication, nil
-	case protocol.DesktopCaptureGDI:
-		return screencapture.BackendGDI, nil
-	case protocol.DesktopCaptureWGC:
-		return screencapture.BackendAuto, errors.New("Windows Graphics Capture is not implemented yet")
-	default:
-		return screencapture.BackendAuto, fmt.Errorf("unsupported Windows capture backend %q", preference)
-	}
-}
-
 func normalizedWindowsCaptureBackend(preference protocol.DesktopCaptureBackend) protocol.DesktopCaptureBackend {
 	if preference == "" {
 		return protocol.DesktopCaptureAuto
@@ -251,14 +241,19 @@ func explicitWindowsCaptureBackend(preference protocol.DesktopCaptureBackend) bo
 	return normalizedWindowsCaptureBackend(preference) != protocol.DesktopCaptureAuto
 }
 
-func windowsCaptureRequiresDisplayTarget(backend screencapture.Backend) bool {
-	return backend == screencapture.BackendDuplication
+func windowsCaptureRequiresDisplayTarget(preference protocol.DesktopCaptureBackend) bool {
+	switch normalizedWindowsCaptureBackend(preference) {
+	case protocol.DesktopCaptureDXGI, protocol.DesktopCaptureWGC:
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error {
-	requestedBackend, backendErr := windowsCaptureBackend(cfg.CaptureBackend)
-	if backendErr != nil {
-		return backendErr
+	requestedBackend := normalizedWindowsCaptureBackend(cfg.CaptureBackend)
+	if c.streamFactory == nil {
+		return errors.New("Windows capture stream factory is unavailable")
 	}
 	displays, listErr := screencapture.Displays(ctx)
 
@@ -291,14 +286,9 @@ func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error
 		return nil
 	}
 
-	stream, err := screencapture.CaptureDisplay(ctx, target, screencapture.Options{
-		Backend:    requestedBackend,
-		FPS:        float64(cfg.MaxFPS),
-		QueueDepth: screencapture.MinQueueDepth,
-		Timeout:    100 * time.Millisecond,
-	})
+	stream, err := c.streamFactory.Open(ctx, target, requestedBackend, cfg.MaxFPS)
 	if err != nil {
-		if selected || explicitWindowsCaptureBackend(cfg.CaptureBackend) {
+		if selected || explicitWindowsCaptureBackend(requestedBackend) {
 			return fmt.Errorf("capture Windows display using %s: %w",
 				normalizedWindowsCaptureBackend(cfg.CaptureBackend), err)
 		}
@@ -306,9 +296,8 @@ func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error
 		return nil
 	}
 	c.stream = stream
-	if stream.Backend() == screencapture.BackendDuplication {
-		c.backend = "dxgi"
-	} else {
+	c.backend = string(stream.Backend())
+	if c.backend == "" {
 		c.backend = "gdi"
 	}
 	if selected {
@@ -350,7 +339,7 @@ func (c *windowsCapture) closeStreamLocked() {
 	c.frame = nil
 }
 
-func copyDXGIFrame(src screencapture.Frame, dst *image.RGBA) (*image.RGBA, error) {
+func copyDXGIFrame(src windowsCaptureFrame, dst *image.RGBA) (*image.RGBA, error) {
 	if !src.Valid() {
 		return nil, screencapture.ErrNoFrame
 	}
@@ -372,9 +361,9 @@ func copyDXGIFrame(src screencapture.Frame, dst *image.RGBA) (*image.RGBA, error
 	return dst, nil
 }
 
-func (c *windowsCapture) borrowedStreamFrameLocked(ctx context.Context) (screencapture.Frame, bool, error) {
+func (c *windowsCapture) borrowedStreamFrameLocked(ctx context.Context) (windowsCaptureFrame, bool, error) {
 	if c.stream == nil {
-		return screencapture.Frame{}, false, screencapture.ErrBackendUnavailable
+		return windowsCaptureFrame{}, false, screencapture.ErrBackendUnavailable
 	}
 	frame, fresh := c.stream.Frame()
 	if frame.Valid() {
@@ -384,7 +373,7 @@ func (c *windowsCapture) borrowedStreamFrameLocked(ctx context.Context) (screenc
 	defer cancel()
 	frame, err := c.stream.WaitFrame(waitCtx)
 	if err != nil {
-		return screencapture.Frame{}, false, err
+		return windowsCaptureFrame{}, false, err
 	}
 	return frame, true, nil
 }

@@ -170,3 +170,25 @@ func TestRemoteDesktopDisplaySelectionUsesAdvertisedTargetDisplays(t *testing.T)
 		}
 	}
 }
+
+func TestRemoteDesktopSceneSelectorFeedsAdaptivePolicy(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-opt-scene"`,
+		`<option value="office">办公</option>`,
+		`<option value="performance">性能</option>`,
+		`<option value="gaming">游戏</option>`,
+		`<option value="quality">画质</option>`,
+		`var scene = $('desktop-opt-scene') ? $('desktop-opt-scene').value : 'auto';`,
+		`scene: scene || 'auto'`,
+		`游戏 / 性能优先保持协商帧率`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop scene selector missing %q", want)
+		}
+	}
+}

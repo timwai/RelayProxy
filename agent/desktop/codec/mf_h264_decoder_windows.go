@@ -25,6 +25,7 @@ type MFH264DecoderInfo struct {
 	Hardware   bool
 	Async      bool
 	D3D11Aware bool
+	ZeroCopy   bool
 	Config     VideoConfig
 }
 
@@ -130,7 +131,11 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 			return nil, MFH264DecoderInfo{}, err
 		}
 		return transform, MFH264DecoderInfo{
-			Hardware: hardware, Async: async, D3D11Aware: d3d11Aware, Config: cfg,
+			Hardware: hardware,
+			Async: async,
+			D3D11Aware: d3d11Aware,
+			ZeroCopy: d3d11Aware && candidateGraphics != nil && candidateGraphics.shared,
+			Config: cfg,
 		}, nil
 	}
 
@@ -504,7 +509,7 @@ func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, 
 	}
 	timestamp := sampleTimestamp(out.Sample, fallbackTimestamp)
 
-	if graphics != nil && info.D3D11Aware {
+	if graphics != nil && info.ZeroCopy {
 		if surface, surfaceErr := decoderSampleSurface(out.Sample, graphics, info.Config.Width, info.Config.Height); surfaceErr == nil {
 			releaseIUnknown(out.Sample)
 			return &DecodedFrame{
@@ -660,6 +665,8 @@ func (d *MFH264Decoder) Backend() string {
 		return ""
 	}
 	switch {
+	case d.info.Hardware && d.info.ZeroCopy:
+		return "media-foundation-d3d11-zero-copy"
 	case d.info.Hardware && d.info.D3D11Aware:
 		return "media-foundation-d3d11"
 	case d.info.Hardware:

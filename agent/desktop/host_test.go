@@ -111,3 +111,17 @@ func TestHostCanEncodeH264(t *testing.T) {
 		t.Fatal("H.264 encode capability was ignored")
 	}
 }
+
+func TestQueueLatestIntReplacesPendingValue(t *testing.T) {
+	ch := make(chan int, 1)
+	queueLatestInt(ch, 10)
+	queueLatestInt(ch, 20)
+	select {
+	case got := <-ch:
+		if got != 20 {
+			t.Fatalf("latest queued value=%d want=20", got)
+		}
+	default:
+		t.Fatal("latest queued value missing")
+	}
+}

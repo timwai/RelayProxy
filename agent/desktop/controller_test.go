@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"testing"
 
+	desktopadapt "relayproxy/agent/desktop/adapt"
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
 )
@@ -195,5 +196,71 @@ func TestRequestResolutionRejectsUnsupportedSession(t *testing.T) {
 	session.videoConfig.Codec = "h264"
 	if err := session.RequestResolution(context.Background(), 2560, 1440); err == nil {
 		t.Fatal("resolution above negotiated ceiling was accepted")
+	}
+}
+
+func TestVideoConfigResolutionScaleAndBounds(t *testing.T) {
+	config := protocol.DesktopVideoConfig{
+		Codec: "h264", Width: 1280, Height: 720, MaxWidth: 1920, MaxHeight: 1080,
+	}
+	if got := videoConfigResolutionScale(config); got != 67 {
+		t.Fatalf("resolution scale=%d want=67", got)
+	}
+	width, height, ok := resolutionBoundsForScale(config, 75)
+	if !ok || width != 1440 || height != 810 {
+		t.Fatalf("75%% bounds=%dx%d ok=%v", width, height, ok)
+	}
+	width, height, ok = resolutionBoundsForScale(config, 50)
+	if !ok || width != 960 || height != 540 {
+		t.Fatalf("50%% bounds=%dx%d ok=%v", width, height, ok)
+	}
+}
+
+func TestABRVideoControlOnlyCarriesResolutionOnTierChange(t *testing.T) {
+	config := protocol.DesktopVideoConfig{
+		Codec: "h264", Width: 1920, Height: 1080, MaxWidth: 1920, MaxHeight: 1080,
+	}
+	bitrateOnly := abrVideoControl(config, desktopadapt.MediaDecision{
+		TargetBitrate: 4_000_000,
+		TargetFPS:     30,
+		Changed:       true,
+	})
+	if bitrateOnly.TargetWidth != 0 || bitrateOnly.TargetHeight != 0 {
+		t.Fatalf("bitrate-only ABR unexpectedly rebuilt resolution: %+v", bitrateOnly)
+	}
+
+	resolution := abrVideoControl(config, desktopadapt.MediaDecision{
+		TargetBitrate:         2_000_000,
+		TargetFPS:             22,
+		TargetResolutionScale: 75,
+		ResolutionChanged:     true,
+		Changed:               true,
+	})
+	if resolution.TargetWidth != 1440 || resolution.TargetHeight != 810 {
+		t.Fatalf("resolution ABR control=%+v", resolution)
+	}
+}
+
+func TestSyncABRResolutionTracksManualGeneration(t *testing.T) {
+	session := &ControllerSession{
+		options: protocol.RemoteDesktopConnectOptions{Scene: protocol.DesktopSceneOffice},
+	}
+	initial := protocol.DesktopVideoConfig{
+		Generation: 1, Codec: "h264", Width: 1920, Height: 1080,
+		MaxWidth: 1920, MaxHeight: 1080, FPS: 30,
+		TargetBitrate: 8_000_000, MaxBitrate: 8_000_000,
+	}
+	session.configureABR(initial)
+	if session.abr == nil || session.abr.TargetResolutionScale() != 100 {
+		t.Fatalf("initial ABR resolution=%v", session.abr)
+	}
+
+	manual := initial
+	manual.Generation = 2
+	manual.Width = 1280
+	manual.Height = 720
+	session.syncABRResolution(manual)
+	if got := session.abr.TargetResolutionScale(); got != 67 {
+		t.Fatalf("manual generation resolution scale=%d want=67", got)
 	}
 }

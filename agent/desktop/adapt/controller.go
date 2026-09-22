@@ -25,18 +25,18 @@ type MediaDecision struct {
 }
 
 type Config struct {
-	Scene               protocol.DesktopScene
-	MinBitrate          int
-	MaxBitrate          int
-	InitialBitrate      int
-	MinFPS              int
-	MaxFPS              int
-	InitialFPS          int
-	StableWindows       int
-	FPSPressureWindows  int
-	FPSRecoveryWindows  int
-	IncreaseRatio       float64
-	IncreaseFloor       int
+	Scene              protocol.DesktopScene
+	MinBitrate         int
+	MaxBitrate         int
+	InitialBitrate     int
+	MinFPS             int
+	MaxFPS             int
+	InitialFPS         int
+	StableWindows      int
+	FPSPressureWindows int
+	FPSRecoveryWindows int
+	IncreaseRatio      float64
+	IncreaseFloor      int
 }
 
 func DefaultConfig(scene protocol.DesktopScene, maxBitrate int) Config {

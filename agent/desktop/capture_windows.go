@@ -401,6 +401,37 @@ func (c *windowsCapture) captureStreamLocked(ctx context.Context) (*image.RGBA, 
 	return c.frame, err
 }
 
+func (c *windowsCapture) CaptureNative(ctx context.Context) (NativeCaptureFrame, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return NativeCaptureFrame{}, false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return NativeCaptureFrame{}, false, errors.New("Windows desktop capture is closed")
+	}
+	if c.stream == nil {
+		return NativeCaptureFrame{}, false, nil
+	}
+	native, ok := c.stream.(windowsNativeFrameStream)
+	if !ok {
+		return NativeCaptureFrame{}, false, nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	frame, err := native.NativeFrame(waitCtx)
+	if err != nil {
+		return NativeCaptureFrame{}, false, err
+	}
+	if err := frame.Validate(); err != nil {
+		if frame.Surface != nil {
+			_ = frame.Surface.Close()
+		}
+		return NativeCaptureFrame{}, false, err
+	}
+	return frame, true, nil
+}
+
 func (c *windowsCapture) CaptureRaw(ctx context.Context) (desktopcodec.RawFrame, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return desktopcodec.RawFrame{}, false, err

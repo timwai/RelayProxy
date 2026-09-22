@@ -258,7 +258,7 @@ func sampleBufferByIndex(sample unsafe.Pointer, index uint32) (unsafe.Pointer, e
 	return buffer, nil
 }
 
-func decoderSampleSurface(sample unsafe.Pointer) (*D3D11Surface, error) {
+func decoderSampleSurface(sample unsafe.Pointer, graphics *mfDecoderD3D11, width, height int) (*D3D11Surface, error) {
 	buffer, err := sampleBufferByIndex(sample, 0)
 	if err != nil {
 		return nil, err
@@ -301,7 +301,65 @@ func decoderSampleSurface(sample unsafe.Pointer) (*D3D11Surface, error) {
 		release: func() {
 			releaseIUnknown(source)
 		},
+		readback: func() ([]byte, error) {
+			if graphics == nil {
+				return nil, ErrDecoderUnavailable
+			}
+			return graphics.readNV12Resource(source, subresource, width, height)
+		},
 	}, nil
+}
+
+func (g *mfDecoderD3D11) readNV12Resource(source unsafe.Pointer, subresource uint32, width, height int) ([]byte, error) {
+	if g == nil || g.context == nil || source == nil {
+		return nil, errors.New("D3D11 decoder context is unavailable")
+	}
+	if err := g.ensureStaging(width, height); err != nil {
+		return nil, err
+	}
+
+	comCall(
+		g.context,
+		46, // ID3D11DeviceContext::CopySubresourceRegion
+		uintptr(g.staging),
+		0,
+		0,
+		0,
+		0,
+		uintptr(source),
+		uintptr(subresource),
+		0,
+	)
+
+	var mapped mfD3D11MappedSubresource
+	hr := comCall(
+		g.context,
+		14, // ID3D11DeviceContext::Map
+		uintptr(g.staging),
+		0,
+		d3d11MapRead,
+		0,
+		uintptr(unsafe.Pointer(&mapped)),
+	)
+	if hresultFailed(hr) {
+		return nil, hresultError("ID3D11DeviceContext.Map(NV12 staging)", hr)
+	}
+	if mapped.Data == nil || int(mapped.RowPitch) < width {
+		comCall(g.context, 15, uintptr(g.staging), 0)
+		return nil, errors.New("D3D11 NV12 staging map returned invalid row pitch")
+	}
+
+	rows := height + height/2
+	mappedBytes := unsafe.Slice((*byte)(mapped.Data), int(mapped.RowPitch)*rows)
+	out := make([]byte, width*rows)
+	for row := 0; row < rows; row++ {
+		copy(
+			out[row*width:(row+1)*width],
+			mappedBytes[row*int(mapped.RowPitch):row*int(mapped.RowPitch)+width],
+		)
+	}
+	comCall(g.context, 15, uintptr(g.staging), 0)
+	return out, nil
 }
 
 func (g *mfDecoderD3D11) readNV12Sample(sample unsafe.Pointer, width, height int) ([]byte, error) {
@@ -344,53 +402,7 @@ func (g *mfDecoderD3D11) readNV12Sample(sample unsafe.Pointer, width, height int
 	if hresultFailed(hr) {
 		return nil, hresultError("IMFDXGIBuffer.GetSubresourceIndex", hr)
 	}
-	if err := g.ensureStaging(width, height); err != nil {
-		return nil, err
-	}
-
-	// Copy only the buffer's selected array/subresource into staging subresource 0.
-	comCall(
-		g.context,
-		46, // ID3D11DeviceContext::CopySubresourceRegion
-		uintptr(g.staging),
-		0,
-		0,
-		0,
-		0,
-		uintptr(source),
-		uintptr(subresource),
-		0,
-	)
-
-	var mapped mfD3D11MappedSubresource
-	hr = comCall(
-		g.context,
-		14, // ID3D11DeviceContext::Map
-		uintptr(g.staging),
-		0,
-		d3d11MapRead,
-		0,
-		uintptr(unsafe.Pointer(&mapped)),
-	)
-	if hresultFailed(hr) {
-		return nil, hresultError("ID3D11DeviceContext.Map(NV12 staging)", hr)
-	}
-	if mapped.Data == nil || int(mapped.RowPitch) < width {
-		comCall(g.context, 15, uintptr(g.staging), 0)
-		return nil, errors.New("D3D11 NV12 staging map returned invalid row pitch")
-	}
-
-	rows := height + height/2
-	mappedBytes := unsafe.Slice((*byte)(mapped.Data), int(mapped.RowPitch)*rows)
-	out := make([]byte, width*rows)
-	for row := 0; row < rows; row++ {
-		copy(
-			out[row*width:(row+1)*width],
-			mappedBytes[row*int(mapped.RowPitch):row*int(mapped.RowPitch)+width],
-		)
-	}
-	comCall(g.context, 15, uintptr(g.staging), 0)
-	return out, nil
+	return g.readNV12Resource(source, subresource, width, height)
 }
 
 func (g *mfDecoderD3D11) Close() {

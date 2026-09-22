@@ -15,9 +15,11 @@ const (
 )
 
 var (
-	ErrInvalidVideoConfig = errors.New("invalid video encoder configuration")
-	ErrInvalidFrame       = errors.New("invalid video frame")
-	ErrEncoderUnavailable = errors.New("video encoder unavailable")
+	ErrInvalidVideoConfig        = errors.New("invalid video encoder configuration")
+	ErrInvalidFrame              = errors.New("invalid video frame")
+	ErrEncoderUnavailable        = errors.New("video encoder unavailable")
+	ErrEncoderControlUnsupported = errors.New("video encoder control unsupported")
+	ErrEncoderRebuildRequired    = errors.New("video encoder rebuild required")
 )
 
 type VideoConfig struct {
@@ -73,6 +75,14 @@ func NormalizeVideoConfig(cfg VideoConfig) (VideoConfig, error) {
 		return VideoConfig{}, fmt.Errorf("%w: keyframe interval must be between 250ms and 30s", ErrInvalidVideoConfig)
 	}
 	return cfg, nil
+}
+
+func bitrateOnlyReconfigure(current, next VideoConfig) bool {
+	return current.Width == next.Width &&
+		current.Height == next.Height &&
+		current.FPS == next.FPS &&
+		current.KeyframeEvery == next.KeyframeEvery &&
+		current.DisableLowLatency == next.DisableLowLatency
 }
 
 type RawFrame struct {

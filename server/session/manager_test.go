@@ -44,3 +44,47 @@ func TestIsExitRequiresCapability(t *testing.T) {
 		})
 	}
 }
+
+func TestDesktopCapabilitiesForTargetUsesAuthorizedOnlineSnapshot(t *testing.T) {
+	sess := &DeviceSession{
+		Grants: []string{protocol.CapabilityDesktopHost},
+		DesktopCapabilities: protocol.DesktopCapabilities{
+			RelayDesktop: true,
+			Captures: []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}},
+			Codecs: []protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}},
+			Displays: []protocol.DesktopDisplayCapability{{ID: "10", Name: "DISPLAY1", Width: 1920, Height: 1080, Primary: true}},
+			MultiMonitor: false,
+			MaxWidth: 3840, MaxHeight: 2160, MaxFPS: 30,
+		},
+	}
+	got := DesktopCapabilitiesForTarget(sess, true, true)
+	if !got.NativeRDP || !got.RelayDesktop || len(got.Displays) != 1 || got.Displays[0].ID != "10" {
+		t.Fatalf("merged capabilities=%+v", got)
+	}
+	got.Displays[0].ID = "mutated"
+	if sess.DesktopCapabilities.Displays[0].ID != "10" {
+		t.Fatal("returned display slice aliases authenticated session snapshot")
+	}
+}
+
+func TestDesktopCapabilitiesForTargetDoesNotLeakUnusableSnapshot(t *testing.T) {
+	sess := &DeviceSession{
+		Grants: []string{protocol.CapabilityRDPHost},
+		DesktopCapabilities: protocol.DesktopCapabilities{
+			RelayDesktop: true,
+			Displays: []protocol.DesktopDisplayCapability{{ID: "secret-display", Width: 1920, Height: 1080}},
+		},
+	}
+	got := DesktopCapabilitiesForTarget(sess, true, true)
+	if !got.NativeRDP || !got.RelayDesktop {
+		t.Fatalf("backend authorization flags lost: %+v", got)
+	}
+	if len(got.Displays) != 0 || len(got.Codecs) != 0 || len(got.Captures) != 0 {
+		t.Fatalf("dynamic desktop details leaked without current desktop.host grant: %+v", got)
+	}
+
+	got = DesktopCapabilitiesForTarget(sess, true, false)
+	if got.RelayDesktop || len(got.Displays) != 0 {
+		t.Fatalf("relay details leaked to native-RDP-only target: %+v", got)
+	}
+}

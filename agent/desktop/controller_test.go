@@ -137,3 +137,40 @@ func TestApplyVideoConfigRejectsStaleGenerationAndClearsLatest(t *testing.T) {
 		t.Fatalf("current video config regressed: %+v", got)
 	}
 }
+
+func TestVideoConfigRequiresABRReset(t *testing.T) {
+	base := protocol.DesktopVideoConfig{
+		Generation: 1, Codec: "h264", Width: 1920, Height: 1080,
+		FPS: 30, TargetBitrate: 6_000_000, MaxBitrate: 12_000_000,
+	}
+	if !videoConfigRequiresABRReset(protocol.DesktopVideoConfig{}, base) {
+		t.Fatal("initial video config did not initialize ABR")
+	}
+
+	nextGeneration := base
+	nextGeneration.Generation = 2
+	nextGeneration.Width = 1280
+	nextGeneration.Height = 720
+	nextGeneration.TargetBitrate = 3_000_000
+	if videoConfigRequiresABRReset(base, nextGeneration) {
+		t.Fatal("resolution-only generation switch reset ABR")
+	}
+
+	nextFPS := nextGeneration
+	nextFPS.FPS = 24
+	if !videoConfigRequiresABRReset(base, nextFPS) {
+		t.Fatal("FPS negotiation change did not reset ABR")
+	}
+
+	nextMaxBitrate := nextGeneration
+	nextMaxBitrate.MaxBitrate = 8_000_000
+	if !videoConfigRequiresABRReset(base, nextMaxBitrate) {
+		t.Fatal("bitrate ceiling change did not reset ABR")
+	}
+
+	nextCodec := nextGeneration
+	nextCodec.Codec = "jpeg"
+	if !videoConfigRequiresABRReset(base, nextCodec) {
+		t.Fatal("codec change did not reset ABR")
+	}
+}

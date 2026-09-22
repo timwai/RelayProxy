@@ -204,6 +204,16 @@ func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
 	return dst
 }
 
+func encoderStageMilliseconds(stats desktopcodec.EncoderStats) (totalMs, convertMs, codecMs float64) {
+	totalMs = float64(stats.LastEncodeTime.Microseconds()) / 1000
+	convertMs = float64(stats.LastConvertTime.Microseconds()) / 1000
+	codecMs = totalMs - convertMs
+	if codecMs < 0 {
+		codecMs = 0
+	}
+	return totalMs, convertMs, codecMs
+}
+
 func rawFrameFitsH264(frame desktopcodec.RawFrame, maxWidth, maxHeight int) bool {
 	if frame.Validate() != nil {
 		return false
@@ -473,6 +483,7 @@ func (h *Host) streamH264Frames(
 		}
 		seconds := elapsed.Seconds()
 		current := encoder.Stats()
+		encodeMs, convertMs, codecMs := encoderStageMilliseconds(current)
 		stats := protocol.DesktopSessionStats{
 			CaptureFPS:       float64(capturedFrames-lastCapturedFrames) / seconds,
 			EncodeFPS:        float64(current.Frames-lastEncoderStats.Frames) / seconds,
@@ -480,7 +491,9 @@ func (h *Host) streamH264Frames(
 			TargetBitrate:    int64(videoCfg.TargetBitrate),
 			TargetFPS:        targetFPS,
 			CaptureMs:        lastCaptureMs,
-			EncodeMs:         float64(current.LastEncodeTime.Microseconds()) / 1000,
+			ConvertMs:        convertMs,
+			CodecMs:          codecMs,
+			EncodeMs:         encodeMs,
 			SendQueueDelayMs: sendQueueDelayMs,
 			DroppedFrames:    droppedFrames,
 			Path:             "relay",

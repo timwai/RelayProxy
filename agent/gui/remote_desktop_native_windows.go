@@ -234,7 +234,7 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	a.desktopViewerMu.Lock()
 	if existing := a.desktopViewer; existing != nil {
 		a.desktopViewerMu.Unlock()
-		existing.viewer.Focus()
+		existing.focusViewer()
 		return map[string]any{"ok": true, "alreadyOpen": true}, nil
 	}
 	a.desktopViewerMu.Unlock()
@@ -248,13 +248,6 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		return nil, errors.New("H.264 frame is not ready; wait for the remote picture and retry")
 	}
 
-	decoderConfig := desktopcodec.VideoConfig{
-		Width:         frame.Width,
-		Height:        frame.Height,
-		FPS:           30,
-		TargetBitrate: 6_000_000,
-		KeyframeEvery: 2 * time.Second,
-	}
 	ctx, cancel := context.WithCancel(context.Background())
 	inputCh := make(chan protocol.DesktopInputEvent, 512)
 
@@ -262,35 +255,13 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	if status.TargetName != "" {
 		title += " - " + status.TargetName
 	}
-	native, err := desktopviewer.Open(desktopviewer.Config{
-		Title:  title,
-		Width:  frame.Width,
-		Height: frame.Height,
-		OnInput: func(event protocol.DesktopInputEvent) {
-			select {
-			case inputCh <- event:
-			default:
-				if event.Kind != protocol.DesktopInputMouseMove {
-					log.Printf("[Desktop] native viewer input queue full; dropped %s", event.Kind)
-				}
-			}
-		},
-	})
+	native, err := desktopviewer.Open(nativeDesktopViewerConfig(title, frame.Width, frame.Height, inputCh))
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("open D3D11 viewer: %w", err)
 	}
 
-	var decoder desktopcodec.Decoder
-	if device := native.D3D11Device(); device != 0 {
-		decoder, err = desktopcodec.OpenMFH264DecoderWithD3D11(ctx, decoderConfig, true, device)
-		if err != nil {
-			log.Printf("[Desktop] shared-device H.264 decoder unavailable, falling back: %v", err)
-			decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
-		}
-	} else {
-		decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
-	}
+	decoder, err := openNativeDesktopDecoder(ctx, native, frame.Width, frame.Height)
 	if err != nil {
 		cancel()
 		_ = native.Close()
@@ -298,12 +269,16 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	}
 
 	session := &nativeDesktopSession{
-		cancel:    cancel,
-		viewer:    native,
-		decoder:   decoder,
-		inputCh:   inputCh,
-		gpuCursor: native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
-		done:      make(chan struct{}),
+		cancel:        cancel,
+		viewer:        native,
+		decoder:       decoder,
+		inputCh:       inputCh,
+		title:         title,
+		generation:    frame.Generation,
+		decoderWidth:  frame.Width,
+		decoderHeight: frame.Height,
+		gpuCursor:     native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
+		done:          make(chan struct{}),
 	}
 
 	a.desktopViewerMu.Lock()
@@ -332,8 +307,18 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer close(s.done)
 	go s.inputLoop(ctx, owner)
-	defer s.viewer.Close()
-	defer s.decoder.Close()
+	defer func() {
+		s.mediaMu.RLock()
+		viewer := s.viewer
+		decoder := s.decoder
+		s.mediaMu.RUnlock()
+		if decoder != nil {
+			_ = decoder.Close()
+		}
+		if viewer != nil {
+			_ = viewer.Close()
+		}
+	}()
 	defer func() {
 		owner.desktopViewerMu.Lock()
 		if owner.desktopViewer == s {

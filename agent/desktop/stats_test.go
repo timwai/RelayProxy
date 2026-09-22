@@ -41,7 +41,6 @@ func TestSessionStatsRTTAndRemoteMerge(t *testing.T) {
 	}
 }
 
-
 func TestSessionStatsSeparatesReceiveAndViewerFPS(t *testing.T) {
 	stats := newSessionStatsTracker("relay")
 	stats.started = time.Now().Add(-time.Second)

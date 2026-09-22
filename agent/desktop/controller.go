@@ -188,7 +188,7 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 			if s.stats == nil {
 				continue
 			}
-			decision := s.abrDecision(s.stats.Snapshot(time.Now()))
+			decision := s.abrDecision(s.stats.AdaptationSnapshot(time.Now()))
 			if !decision.Changed || decision.TargetBitrate <= 0 {
 				continue
 			}

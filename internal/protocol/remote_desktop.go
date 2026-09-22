@@ -202,7 +202,7 @@ const (
 	DesktopSessionClipboard   = "clipboard"
 	DesktopSessionPing        = "ping"
 	DesktopSessionPong        = "pong"
-	DesktopSessionStats       = "stats"
+	DesktopSessionStatsReport = "stats"
 )
 
 type DesktopSessionMessage struct {

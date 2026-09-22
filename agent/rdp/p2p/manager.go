@@ -772,7 +772,9 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 		}
 		cancel()
 	}
-	result, err := punch.Punch(ctx, conn, candidates, s.ID, s.Token, 1200*time.Millisecond)
+	result, err := punch.PunchWithDomain(
+		ctx, conn, candidates, s.ID, s.Token, 1200*time.Millisecond, securityDomainForPurpose(s.Purpose),
+	)
 	if err != nil {
 		_ = conn.Close()
 		return nil, err

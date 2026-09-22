@@ -23,6 +23,7 @@ type MFH264Decoder struct {
 
 type MFH264DecoderInfo struct {
 	Hardware bool
+	Async    bool
 	Config   VideoConfig
 }
 
@@ -72,13 +73,6 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig) (bool, erro
 		if !cfg.DisableLowLatency {
 			_ = attributeSetUINT32(attributes, &mfLowLatency, 1)
 		}
-		if isAsync {
-			// The first native-viewer slice intentionally uses the synchronous
-			// ProcessInput/ProcessOutput contract. Async hardware decoders are
-			// selected in the next zero-copy D3D11 slice instead of pretending
-			// that their event contract is synchronous.
-			return true, nil
-		}
 	}
 
 	inputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
@@ -124,16 +118,12 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 				continue
 			}
 			async, err := configureH264Decoder(transform, cfg)
-			if err == nil && !async {
+			if err == nil {
 				releaseMFTActivations(activations[index+1:])
-				return transform, MFH264DecoderInfo{Hardware: group.hardware, Config: cfg}, nil
+				return transform, MFH264DecoderInfo{Hardware: group.hardware, Async: async, Config: cfg}, nil
 			}
 			releaseIUnknown(transform)
-			if err != nil {
-				failures = append(failures, err)
-			} else {
-				failures = append(failures, errors.New("asynchronous H.264 decoder requires the D3D11 event-driven path"))
-			}
+			failures = append(failures, err)
 		}
 		releaseMFTActivations(activations)
 	}
@@ -195,30 +185,215 @@ func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, initCh chan<- 
 		return
 	}
 	defer releaseIUnknown(transform)
+
+	var eventPump *mfEventPump
+	var eventCh <-chan mfAsyncEvent
+	var asyncState *mfAsyncDecodeState
+	if info.Async {
+		eventPump, err = startMFEventPump(transform)
+		if err != nil {
+			initCh <- mfDecoderInit{err: fmt.Errorf("start decoder Media Foundation async event pump: %w", err)}
+			return
+		}
+		defer eventPump.Close()
+		eventCh = eventPump.events
+		asyncState = newMFAsyncDecodeState(transform, info)
+	}
 	initCh <- mfDecoderInit{info: info}
 
-	for command := range d.commands {
-		switch {
-		case command.close:
-			_ = processTransformMessage(transform, mftMessageNotifyEndOfStream)
-			_ = processTransformMessage(transform, mftMessageNotifyEndStreaming)
-			_ = processTransformMessage(transform, mftMessageCommandFlush)
-			command.reply <- mfDecodeResult{}
-			return
-
-		case command.flush:
-			err := processTransformMessage(transform, mftMessageCommandFlush)
-			if err == nil {
-				err = processTransformMessage(transform, mftMessageNotifyStartOfStream)
+	for {
+		select {
+		case command, ok := <-d.commands:
+			if !ok {
+				if asyncState != nil {
+					asyncState.fail(ErrDecoderUnavailable)
+				}
+				return
 			}
-			command.reply <- mfDecodeResult{err: err}
+			switch {
+			case command.close:
+				if asyncState != nil {
+					asyncState.fail(ErrDecoderUnavailable)
+				}
+				if eventPump != nil {
+					if err := eventPump.Close(); err != nil {
+						command.reply <- mfDecodeResult{err: err}
+						return
+					}
+					eventPump = nil
+					eventCh = nil
+				}
+				_ = processTransformMessage(transform, mftMessageNotifyEndOfStream)
+				_ = processTransformMessage(transform, mftMessageNotifyEndStreaming)
+				_ = processTransformMessage(transform, mftMessageCommandFlush)
+				command.reply <- mfDecodeResult{}
+				return
 
-		case command.input != nil:
-			frames, err := processSyncH264Decode(transform, info, *command.input)
-			command.reply <- mfDecodeResult{frames: frames, err: err}
+			case command.flush:
+				if asyncState != nil {
+					asyncState.reset(errors.New("decoder flushed"))
+				}
+				err := processTransformMessage(transform, mftMessageCommandFlush)
+				if err == nil {
+					err = processTransformMessage(transform, mftMessageNotifyStartOfStream)
+				}
+				command.reply <- mfDecodeResult{err: err}
 
-		default:
-			command.reply <- mfDecodeResult{err: errors.New("unsupported Media Foundation decoder command")}
+			case command.input != nil:
+				if asyncState != nil {
+					asyncState.enqueue(command)
+				} else {
+					frames, err := processSyncH264Decode(transform, info, *command.input)
+					command.reply <- mfDecodeResult{frames: frames, err: err}
+				}
+
+			default:
+				command.reply <- mfDecodeResult{err: errors.New("unsupported Media Foundation decoder command")}
+			}
+
+		case event, ok := <-eventCh:
+			if !ok {
+				if asyncState != nil && asyncState.fatal == nil {
+					asyncState.fail(errors.New("decoder Media Foundation async event pump stopped"))
+				}
+				eventCh = nil
+				continue
+			}
+			asyncState.handle(event)
+		}
+	}
+}
+
+type mfAsyncDecodeState struct {
+	transform unsafe.Pointer
+	info      MFH264DecoderInfo
+
+	needInput int
+	pending   []mfDecodeCommand
+	inFlight  []mfDecodeCommand
+	output    []DecodedFrame
+	fatal     error
+}
+
+func newMFAsyncDecodeState(transform unsafe.Pointer, info MFH264DecoderInfo) *mfAsyncDecodeState {
+	return &mfAsyncDecodeState{transform: transform, info: info}
+}
+
+func (s *mfAsyncDecodeState) reply(command mfDecodeCommand, frames []DecodedFrame, err error) {
+	command.reply <- mfDecodeResult{frames: frames, err: err}
+}
+
+func (s *mfAsyncDecodeState) reset(err error) {
+	if err == nil {
+		err = ErrDecoderUnavailable
+	}
+	for _, command := range s.pending {
+		s.reply(command, nil, err)
+	}
+	for _, command := range s.inFlight {
+		s.reply(command, nil, err)
+	}
+	s.pending = nil
+	s.inFlight = nil
+	s.output = nil
+	s.needInput = 0
+}
+
+func (s *mfAsyncDecodeState) fail(err error) {
+	if err == nil {
+		err = ErrDecoderUnavailable
+	}
+	if s.fatal == nil {
+		s.fatal = err
+	}
+	s.reset(s.fatal)
+}
+
+func (s *mfAsyncDecodeState) enqueue(command mfDecodeCommand) {
+	if s.fatal != nil {
+		s.reply(command, nil, s.fatal)
+		return
+	}
+	s.pending = append(s.pending, command)
+	s.submitAvailable()
+}
+
+func (s *mfAsyncDecodeState) submitAvailable() {
+	for s.fatal == nil && s.needInput > 0 && len(s.pending) > 0 {
+		command := s.pending[0]
+		s.pending = s.pending[1:]
+		sample, err := createInputSample(command.input.data, command.input.timestamp, command.input.duration)
+		if err != nil {
+			s.reply(command, nil, err)
+			s.fail(err)
+			return
+		}
+		hr := processTransformInputSample(s.transform, sample)
+		releaseIUnknown(sample)
+		if hresultFailed(hr) {
+			err := hresultError("H.264 decoder IMFTransform.ProcessInput async", hr)
+			s.reply(command, nil, err)
+			s.fail(err)
+			return
+		}
+		s.needInput--
+		s.inFlight = append(s.inFlight, command)
+	}
+}
+
+func (s *mfAsyncDecodeState) finishOldest() {
+	if len(s.inFlight) == 0 {
+		return
+	}
+	command := s.inFlight[0]
+	s.inFlight = s.inFlight[1:]
+	frames := append([]DecodedFrame(nil), s.output...)
+	s.output = nil
+	s.reply(command, frames, nil)
+}
+
+func (s *mfAsyncDecodeState) handle(event mfAsyncEvent) {
+	if s.fatal != nil {
+		return
+	}
+	if event.err != nil {
+		s.fail(event.err)
+		return
+	}
+	switch event.kind {
+	case meTransformNeedInput:
+		if len(s.inFlight) > 0 {
+			s.finishOldest()
+		}
+		s.needInput++
+		s.submitAvailable()
+
+	case meTransformHaveOutput:
+		fallback := time.Duration(0)
+		if len(s.inFlight) > 0 && s.inFlight[0].input != nil {
+			fallback = s.inFlight[0].input.timestamp
+		}
+		frame, hr, err := processDecoderOutputOnce(s.transform, s.info, fallback)
+		if err != nil {
+			s.fail(err)
+			return
+		}
+		switch uint32(hr) {
+		case mfETransformNeedMoreInput:
+			return
+		case mfETransformStreamChange:
+			if err := applyDecoderOutputType(s.transform, s.info.Config); err != nil {
+				s.fail(err)
+			}
+			return
+		}
+		if hresultFailed(hr) {
+			s.fail(hresultError("H.264 decoder IMFTransform.ProcessOutput async", hr))
+			return
+		}
+		if frame != nil {
+			s.output = append(s.output, *frame)
+			s.finishOldest()
 		}
 	}
 }

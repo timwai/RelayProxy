@@ -206,6 +206,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 		defer h.input.ReleaseAll()
 	}
 	idrRequests := make(chan struct{}, 1)
+	bitrateUpdates := make(chan int, 1)
 
 	workerCount := 2
 	cursorSource, hasCursor := h.source.(CursorCaptureSource)
@@ -219,9 +220,13 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 		workerCount++
 	}
 	errorsCh := make(chan error, workerCount)
-	go func() { errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests) }()
 	go func() {
-		errorsCh <- h.readSessionControlLoop(sessionCtx, conn, idrRequests, clipboardEndpoint, clipboardState, syncClipboard)
+		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests, bitrateUpdates)
+	}()
+	go func() {
+		errorsCh <- h.readSessionControlLoop(
+			sessionCtx, conn, idrRequests, bitrateUpdates, clipboardEndpoint, clipboardState, syncClipboard,
+		)
 	}()
 	if hasCursor {
 		go func() { errorsCh <- h.streamCursor(sessionCtx, conn, cursorSource) }()
@@ -253,6 +258,7 @@ func (h *Host) readSessionControlLoop(
 	ctx context.Context,
 	conn *desktopmedia.MediaConn,
 	idrRequests chan<- struct{},
+	bitrateUpdates chan int,
 	clipboard ClipboardEndpoint,
 	clipboardState *clipboardSyncState,
 	syncClipboard bool,
@@ -282,6 +288,29 @@ func (h *Host) readSessionControlLoop(
 				Probe: &probe,
 			}); err != nil {
 				return err
+			}
+			continue
+
+		case protocol.DesktopSessionVideoControl:
+			if message.VideoControl == nil {
+				continue
+			}
+			target := message.VideoControl.TargetBitrate
+			if target < 250_000 || target > maxJPEGBitrate {
+				log.Printf("[Desktop] ignoring invalid ABR target bitrate=%d", target)
+				continue
+			}
+			select {
+			case bitrateUpdates <- target:
+			default:
+				select {
+				case <-bitrateUpdates:
+				default:
+				}
+				select {
+				case bitrateUpdates <- target:
+				default:
+				}
 			}
 			continue
 

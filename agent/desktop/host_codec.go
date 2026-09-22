@@ -28,10 +28,17 @@ func sendVideoConfig(ctx context.Context, conn *desktopmedia.MediaConn, cfg prot
 	})
 }
 
-func (h *Host) streamSessionFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, options protocol.RemoteDesktopConnectOptions, idrRequests <-chan struct{}) error {
+func (h *Host) streamSessionFrames(
+	ctx context.Context,
+	conn *desktopmedia.MediaConn,
+	cfg HostConfig,
+	options protocol.RemoteDesktopConnectOptions,
+	idrRequests <-chan struct{},
+	bitrateUpdates <-chan int,
+) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	if preference == "h264" && h.canEncodeH264() {
-		if err := h.streamH264Frames(ctx, conn, cfg, idrRequests); err == nil || errors.Is(err, context.Canceled) {
+		if err := h.streamH264Frames(ctx, conn, cfg, idrRequests, bitrateUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {
 			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
@@ -86,7 +93,40 @@ func sendEncodedDesktopFrame(ctx context.Context, conn *desktopmedia.MediaConn, 
 	return nil
 }
 
-func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, idrRequests <-chan struct{}) error {
+func reconfigureH264Bitrate(
+	ctx context.Context,
+	encoder desktopcodec.Encoder,
+	current desktopcodec.VideoConfig,
+	targetBitrate int,
+	maxBitrate int,
+) (desktopcodec.VideoConfig, error) {
+	if encoder == nil {
+		return current, desktopcodec.ErrEncoderUnavailable
+	}
+	if targetBitrate < 250_000 {
+		targetBitrate = 250_000
+	}
+	if maxBitrate > 0 && targetBitrate > maxBitrate {
+		targetBitrate = maxBitrate
+	}
+	if targetBitrate == current.TargetBitrate {
+		return current, nil
+	}
+	next := current
+	next.TargetBitrate = targetBitrate
+	if err := encoder.Reconfigure(ctx, next); err != nil {
+		return current, err
+	}
+	return next, nil
+}
+
+func (h *Host) streamH264Frames(
+	ctx context.Context,
+	conn *desktopmedia.MediaConn,
+	cfg HostConfig,
+	idrRequests <-chan struct{},
+	bitrateUpdates <-chan int,
+) error {
 	first, err := h.source.Capture(ctx)
 	if err != nil {
 		return err
@@ -233,6 +273,19 @@ func (h *Host) streamH264Frames(ctx context.Context, conn *desktopmedia.MediaCon
 				log.Printf("[Desktop] H.264 IDR request failed: %v", err)
 			} else {
 				lastIDR = time.Now()
+			}
+
+		case targetBitrate := <-bitrateUpdates:
+			nextConfig, err := reconfigureH264Bitrate(ctx, encoder, videoCfg, targetBitrate, cfg.MaxBitrate)
+			if err != nil {
+				if !errors.Is(err, desktopcodec.ErrEncoderControlUnsupported) {
+					log.Printf("[Desktop] H.264 bitrate reconfigure failed target=%d: %v", targetBitrate, err)
+				}
+				continue
+			}
+			if nextConfig.TargetBitrate != videoCfg.TargetBitrate {
+				videoCfg = nextConfig
+				log.Printf("[Desktop] H.264 target bitrate updated=%d", videoCfg.TargetBitrate)
 			}
 		case now := <-ticker.C:
 			captureStarted := time.Now()

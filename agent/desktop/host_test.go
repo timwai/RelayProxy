@@ -87,7 +87,6 @@ func TestHostCodecCapabilitiesAreCopied(t *testing.T) {
 	}
 }
 
-
 func TestFitRGBAEven(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 1366, 768))
 	got := fitRGBAEven(src, 1280, 720)

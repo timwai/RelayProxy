@@ -11,6 +11,15 @@ const (
 	DesktopBackendRelay DesktopBackend = "relay"
 )
 
+type DesktopCaptureBackend string
+
+const (
+	DesktopCaptureAuto DesktopCaptureBackend = "auto"
+	DesktopCaptureDXGI DesktopCaptureBackend = "dxgi"
+	DesktopCaptureGDI  DesktopCaptureBackend = "gdi"
+	DesktopCaptureWGC  DesktopCaptureBackend = "wgc"
+)
+
 // DesktopScene describes the user's intent. It is deliberately higher level
 // than codec/bitrate knobs so backend and media policy can evolve independently.
 type DesktopScene string
@@ -106,9 +115,10 @@ type DesktopResolutionOptions struct {
 type RemoteDesktopConnectOptions struct {
 	Backend    DesktopBackend           `json:"backend,omitempty"`
 	Scene      DesktopScene             `json:"scene,omitempty"`
-	Quality    DesktopQuality           `json:"quality,omitempty"`
-	Codec      string                   `json:"codec,omitempty"`
-	Resolution DesktopResolutionOptions `json:"resolution,omitempty"`
+	Quality        DesktopQuality           `json:"quality,omitempty"`
+	Codec          string                   `json:"codec,omitempty"`
+	CaptureBackend DesktopCaptureBackend    `json:"captureBackend,omitempty"`
+	Resolution     DesktopResolutionOptions `json:"resolution,omitempty"`
 	FPS        int                      `json:"fps,omitempty"`
 	MaxBitrate int                      `json:"maxBitrate,omitempty"`
 	DisplayID  string                   `json:"displayId,omitempty"`

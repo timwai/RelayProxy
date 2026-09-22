@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path 与 capture backend policy 均已合并 main；当前分支隔离第三方 capture stream/frame 类型，为 WinRT WGC 接入建立 backend-neutral 数据面  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy 与 backend-neutral capture stream 均已合并 main；当前分支实现真实 WinRT Windows Graphics Capture（WGC）monitor stream  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #63 已合并，merge `64f565ac850f25b22f5ceef60a65eb0e71962495`）
+> 当前开发基线：`main`（PR #65 已合并，merge `9866b106f829bd99a5cb20c58ccacd4218f523e7`）
 
 ## 0. 当前进度
 
@@ -195,15 +195,29 @@ Windows SendInput / CF_UNICODETEXT
 - 当前 capability snapshot 继续只公布真实可用的 GDI/DXGI；在 WinRT WGC backend 真正实现之前 GUI 不提供 WGC 选项。
 - 测试覆盖协议→HostConfig 透传、空值归一到 Auto、DXGI/GDI/WGC 映射、strict backend 识别和 DXGI concrete-display 约束。
 
-### 0.2.11 Windows Capture Stream Abstraction（当前分支）
+### 0.2.11 Windows Capture Stream Abstraction（已合并 PR #65）
 
 - 新增 backend-neutral `windowsCaptureFrame`：只暴露 BGRA `Pix / Width / Height / Stride / Sequence / At`，保留真实 padded RowPitch，不再让 Host capture 主循环依赖 `screencapture.Frame`。
 - 新增 `windowsFrameStream`：统一 `Frame / WaitFrame / Backend / Close` 生命周期；`windowsCapture` 只依赖该接口，borrowed BGRA fast path、RGBA fallback 与 idle-frame cache 均保持原语义。
 - 新增 `windowsFrameStreamFactory`：负责按 `auto / dxgi / gdi / wgc` preference 创建具体 stream。当前 `screencaptureFrameStreamFactory` 适配现有 DXGI Desktop Duplication / GDI。
 - 第三方 `*screencapture.Stream` 与 `screencapture.Frame` 被限制在 adapter 文件内；后续 WinRT WGC backend 只需新增另一套 factory/stream 实现，不需要改 H.264 Host 主循环、Stats 或 ABR。
-- `WGC` 仍显式返回未实现错误，但错误现在来自当前 adapter，而不是 Host capture 主逻辑；后续替换 factory 即可真正启用。
+- PR #65 合并时 `WGC` 仍显式返回 unavailable；该限制已被隔离在 adapter/factory 边界，Host capture 主逻辑无需感知 WGC。
 - DXGI/WGC 仍要求 concrete display，Auto/GDI 保留 virtual desktop 行为；错误提示改为 backend-neutral，避免未来 WGC 复用时错误显示 DXGI。
 - Windows-only 单测改为验证通用 frame 的 padded stride / row 边界、capture preference→当前 adapter 映射、WGC unavailable sentinel 与 concrete-display 约束。
+
+### 0.2.12 Windows Graphics Capture（PR #66，当前分支）
+
+- Windows amd64 新增真实 `wgcFrameStream`：通过 `IGraphicsCaptureItemInterop::CreateForMonitor` 创建指定显示器的 `GraphicsCaptureItem`。
+- 使用 `Direct3D11CaptureFramePool.CreateFreeThreaded`，Agent 无需依赖 UI `DispatcherQueue`；WGC 可在现有后台 Host capture 链路中工作。
+- 新建带 `D3D11_CREATE_DEVICE_BGRA_SUPPORT` 的 D3D11 device，并通过 `CreateDirect3D11DeviceFromDXGIDevice` 包装为 WinRT `IDirect3DDevice`。
+- 每次取帧会 drain FramePool，只保留最新 frame，避免网络/编码阻塞恢复后追赶历史帧；这与现有 stale-frame/drop 实时性策略保持一致。
+- WinRT `IDirect3DSurface` 通过 `IDirect3DDxgiInterfaceAccess` 解包为 `ID3D11Texture2D`，复制到可复用 staging texture 后 `Map` 为 padded BGRA RowPitch，直接适配 `windowsCaptureFrame`。
+- WGC 自带 cursor composition 被关闭，继续使用 Relay Desktop 已有的独立 cursor channel，避免视频帧与本地 cursor 重复叠加。
+- monitor content size 改变时自动 `Recreate` FramePool；staging texture 按 texture desc 复用/重建。
+- `captureBackend=wgc` 已路由到真实 WGC stream；非 amd64 Windows 保留明确 unavailable fallback，不影响 Auto / DXGI / GDI。
+- 依赖固定为正式兼容组合 `go-bindings-winrt v0.6.0 + go-bindings-win32 v0.2.1`；不依赖 unreleased WinRT bindings。
+- 当前阶段仍是 D3D11 → staging CPU BGRA readback，再进入现有 NV12/H.264；WGC capture 已是真实 GPU surface 来源，但 capture→encoder 零拷贝仍属于后续优化。
+- PR #66 Windows CI 正在验证真实 WinRT/D3D11 ABI；验证通过后再把 WGC 加入 capability snapshot/GUI 可选 backend。
 
 ### 0.3 本轮进度（2026-09-22）
 

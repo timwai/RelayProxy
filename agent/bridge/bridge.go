@@ -95,6 +95,10 @@ func (b *UIBridge) GetRemoteDesktopStatus() protocol.RemoteDesktopStatus {
 	return b.agent.RemoteDesktopStatus()
 }
 
+func (b *UIBridge) GetRemoteDesktopStats() protocol.DesktopSessionStats {
+	return b.agent.RemoteDesktopStats()
+}
+
 func (b *UIBridge) GetRemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	return b.agent.RemoteDesktopFrame()
 }

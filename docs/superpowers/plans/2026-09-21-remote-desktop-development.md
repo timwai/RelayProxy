@@ -149,6 +149,8 @@ UI CI
 - 持续组合劣化必须经过完整 `UpgradeHold` 才从 `udp_p2p` 回退 Relay；回退后的健康 direct path 也必须重新经历 promotion hold，防止 P2P / Relay 来回振荡。
 - 该轮只固化现有默认参数行为，不因纯模拟结果调整生产权重；权重调整继续等待跨 NAT / Wi-Fi 实机数据。
 
+- Viewer 网络统计条现已补充媒体 Path、Send Queue Delay、Dropped Frames、Capture/Encode 耗时，便于跨 NAT / Wi-Fi 实机验证时直接观察拥塞与 stale-frame 行为。
+
 ### 0.4 当前实现与最终设计的差异
 
 为了优先验证 Windows Home 的端到端链路，RD1 中间增加了一个功能验证阶段：

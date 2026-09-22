@@ -269,6 +269,10 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		}
 		return 0
 
+	case win.WM_SETCURSOR:
+		win.SetCursor(0)
+		return 1
+
 	case win.WM_ERASEBKGND:
 		return 1
 

@@ -109,6 +109,15 @@ func (s *sessionStatsTracker) ObserveDroppedFrame() {
 	s.mu.Unlock()
 }
 
+func (s *sessionStatsTracker) SetPath(path string) {
+	if s == nil || path == "" {
+		return
+	}
+	s.mu.Lock()
+	s.path = path
+	s.mu.Unlock()
+}
+
 func (s *sessionStatsTracker) MergeRemote(stats protocol.DesktopSessionStats) {
 	if s == nil {
 		return

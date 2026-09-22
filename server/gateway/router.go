@@ -165,7 +165,11 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	case protocol.FrameTypeOpenDesktopMedia:
 		r.handleOpenDesktopMedia(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeRDPControl:
-		if r.rdpControlHandler != nil && (containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) || containsCapability(clientSession.Grants, protocol.CapabilityRDPHost)) {
+		if r.rdpControlHandler != nil &&
+			(containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) ||
+				containsCapability(clientSession.Grants, protocol.CapabilityRDPHost) ||
+				containsCapability(clientSession.Grants, protocol.CapabilityDesktopController) ||
+				containsCapability(clientSession.Grants, protocol.CapabilityDesktopHost)) {
 			r.rdpControlHandler(ctx, clientStream, clientSession)
 		}
 	default:

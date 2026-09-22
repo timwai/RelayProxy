@@ -18,10 +18,85 @@ type MediaConn struct {
 	closeOnce sync.Once
 	readMu    sync.Mutex
 	writeMu   sync.Mutex
+
+	pathMu sync.RWMutex
+	direct DatagramPath
 }
 
 func NewMediaConn(channel *tunnel.DatagramChannel, stream tunnel.TunnelStream) *MediaConn {
 	return &MediaConn{channel: channel, stream: stream}
+}
+
+func (c *MediaConn) SetDatagramPath(path DatagramPath) {
+	if c == nil {
+		if path != nil {
+			_ = path.Close()
+		}
+		return
+	}
+	c.pathMu.Lock()
+	old := c.direct
+	c.direct = path
+	c.pathMu.Unlock()
+	if old != nil && old != path {
+		_ = old.Close()
+	}
+}
+
+func (c *MediaConn) ClearDatagramPath(path DatagramPath) {
+	if c == nil {
+		return
+	}
+	c.pathMu.Lock()
+	if path != nil && c.direct != path {
+		c.pathMu.Unlock()
+		return
+	}
+	old := c.direct
+	c.direct = nil
+	c.pathMu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+}
+
+func (c *MediaConn) DatagramPathName() string {
+	if c == nil {
+		return ""
+	}
+	c.pathMu.RLock()
+	path := c.direct
+	c.pathMu.RUnlock()
+	if path == nil {
+		return "relay"
+	}
+	if name := path.Name(); name != "" {
+		return name
+	}
+	return "direct"
+}
+
+func (c *MediaConn) directPath() DatagramPath {
+	if c == nil {
+		return nil
+	}
+	c.pathMu.RLock()
+	defer c.pathMu.RUnlock()
+	return c.direct
+}
+
+func (c *MediaConn) failDirectPath(path DatagramPath) {
+	if c == nil || path == nil {
+		return
+	}
+	c.pathMu.Lock()
+	if c.direct != path {
+		c.pathMu.Unlock()
+		return
+	}
+	c.direct = nil
+	c.pathMu.Unlock()
+	_ = path.Close()
 }
 
 func (c *MediaConn) AssociationID() uint64 {
@@ -32,14 +107,39 @@ func (c *MediaConn) AssociationID() uint64 {
 }
 
 func (c *MediaConn) Send(ctx context.Context, packet []byte) error {
-	if c == nil || c.channel == nil {
+	if c == nil {
+		return tunnel.ErrDatagramsUnsupported
+	}
+	if path := c.directPath(); path != nil {
+		if err := path.Send(ctx, packet); err == nil {
+			return nil
+		} else if ctx.Err() != nil {
+			return ctx.Err()
+		} else {
+			c.failDirectPath(path)
+		}
+	}
+	if c.channel == nil {
 		return tunnel.ErrDatagramsUnsupported
 	}
 	return c.channel.Send(ctx, packet)
 }
 
 func (c *MediaConn) Receive(ctx context.Context) ([]byte, error) {
-	if c == nil || c.channel == nil {
+	if c == nil {
+		return nil, tunnel.ErrDatagramsUnsupported
+	}
+	if path := c.directPath(); path != nil {
+		packet, err := path.Receive(ctx)
+		if err == nil {
+			return packet, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		c.failDirectPath(path)
+	}
+	if c.channel == nil {
 		return nil, tunnel.ErrDatagramsUnsupported
 	}
 	return c.channel.Receive(ctx)
@@ -91,8 +191,17 @@ func (c *MediaConn) Close() error {
 	}
 	var err error
 	c.closeOnce.Do(func() {
+		c.pathMu.Lock()
+		direct := c.direct
+		c.direct = nil
+		c.pathMu.Unlock()
+		if direct != nil {
+			err = direct.Close()
+		}
 		if c.channel != nil {
-			err = c.channel.Close()
+			if channelErr := c.channel.Close(); err == nil {
+				err = channelErr
+			}
 		}
 		if c.stream != nil {
 			if streamErr := c.stream.Close(); err == nil {

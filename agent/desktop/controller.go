@@ -373,11 +373,45 @@ func (s *ControllerSession) readLoop(ctx context.Context) {
 	}
 }
 
+func (s *ControllerSession) SetDatagramPath(path desktopmedia.DatagramPath) {
+	if s == nil || s.conn == nil {
+		if path != nil {
+			_ = path.Close()
+		}
+		return
+	}
+	s.conn.SetDatagramPath(path)
+	if s.stats != nil {
+		s.stats.SetPath(s.conn.DatagramPathName())
+	}
+}
+
+func (s *ControllerSession) ClearDatagramPath(path desktopmedia.DatagramPath) {
+	if s == nil || s.conn == nil {
+		return
+	}
+	s.conn.ClearDatagramPath(path)
+	if s.stats != nil {
+		s.stats.SetPath(s.conn.DatagramPathName())
+	}
+}
+
+func (s *ControllerSession) DatagramPathName() string {
+	if s == nil || s.conn == nil {
+		return ""
+	}
+	return s.conn.DatagramPathName()
+}
+
 func (s *ControllerSession) Stats() protocol.DesktopSessionStats {
 	if s == nil || s.stats == nil {
 		return protocol.DesktopSessionStats{}
 	}
-	return s.stats.Snapshot(time.Now())
+	stats := s.stats.Snapshot(time.Now())
+	if path := s.DatagramPathName(); path != "" {
+		stats.Path = path
+	}
+	return stats
 }
 
 func (s *ControllerSession) UpdateViewerStats(stats protocol.DesktopSessionStats) {

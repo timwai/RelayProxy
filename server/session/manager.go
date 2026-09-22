@@ -14,9 +14,10 @@ type DeviceSession struct {
 	DeviceName    string
 	OwnerUserID   string   // authenticated ownership snapshot; invalidated by authorization changes
 	Mode          string   // "CLIENT", "EXIT", "BOTH"
-	Capabilities  []string // authenticated transport/protocol features
-	Grants        []string // server-approved product capabilities
-	Transport     tunnel.TransportType
+	Capabilities        []string // authenticated transport/protocol features
+	Grants              []string // server-approved product capabilities
+	DesktopCapabilities protocol.DesktopCapabilities
+	Transport           tunnel.TransportType
 	Tunnel        tunnel.TunnelSession
 	ControlStream tunnel.TunnelStream
 	ConnectedAt   time.Time
@@ -38,6 +39,33 @@ func (s *DeviceSession) IsExit() bool {
 
 func (s *DeviceSession) TouchHeartbeat() {
 	s.LastHeartbeat.Store(time.Now().Unix())
+}
+
+func DesktopCapabilitiesForTarget(sess *DeviceSession, nativeRDP, relayDesktop bool) protocol.DesktopCapabilities {
+	base := protocol.DesktopCapabilities{
+		NativeRDP:    nativeRDP,
+		RelayDesktop: relayDesktop,
+	}
+	if sess == nil || !relayDesktop {
+		return base
+	}
+	hasDesktopHostGrant := false
+	for _, grant := range sess.Grants {
+		if grant == protocol.CapabilityDesktopHost {
+			hasDesktopHostGrant = true
+			break
+		}
+	}
+	if !hasDesktopHostGrant {
+		return base
+	}
+	caps := sess.DesktopCapabilities
+	caps.NativeRDP = nativeRDP
+	caps.RelayDesktop = relayDesktop
+	caps.Captures = append([]protocol.DesktopCaptureCapability(nil), caps.Captures...)
+	caps.Codecs = append([]protocol.DesktopCodecCapability(nil), caps.Codecs...)
+	caps.Displays = append([]protocol.DesktopDisplayCapability(nil), caps.Displays...)
+	return caps
 }
 
 type Manager struct {

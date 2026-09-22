@@ -178,4 +178,14 @@ func TestWindowsCaptureBackendPolicy(t *testing.T) {
 			t.Fatalf("preference=%q explicit=%v want=%v", tt.preference, gotExplicit, tt.explicit)
 		}
 	}
+	if !windowsCaptureRequiresDisplayTarget(screencapture.BackendDuplication) {
+		t.Fatal("DXGI must require a concrete display target")
+	}
+	if windowsCaptureRequiresDisplayTarget(screencapture.BackendGDI) ||
+		windowsCaptureRequiresDisplayTarget(screencapture.BackendAuto) {
+		t.Fatal("GDI/Auto unexpectedly require a concrete display target")
+	}
+	if got := normalizedWindowsCaptureBackend(""); got != protocol.DesktopCaptureAuto {
+		t.Fatalf("normalized empty capture backend=%q want=auto", got)
+	}
 }

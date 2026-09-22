@@ -30,12 +30,12 @@ const (
 	d3d11VPOVDimensionTexture2D = 1
 
 	id3d10MultithreadSetMultithreadProtected = 5
-	id3d11VideoDeviceCreateVideoProcessor     = 4
-	id3d11VideoDeviceCreateInputView          = 8
-	id3d11VideoDeviceCreateOutputView         = 9
-	id3d11VideoDeviceCreateEnumerator         = 10
-	id3d11VideoContextSetStreamFrameFormat    = 27
-	id3d11VideoContextVideoProcessorBlt       = 53
+	id3d11VideoDeviceCreateVideoProcessor    = 4
+	id3d11VideoDeviceCreateInputView         = 8
+	id3d11VideoDeviceCreateOutputView        = 9
+	id3d11VideoDeviceCreateEnumerator        = 10
+	id3d11VideoContextSetStreamFrameFormat   = 27
+	id3d11VideoContextVideoProcessorBlt      = 53
 )
 
 var (
@@ -144,11 +144,11 @@ type d3d11VideoProcessorStream struct {
 	PastFrames        uint32
 	FutureFrames      uint32
 
-	PastSurfaces       unsafe.Pointer
-	InputSurface       unsafe.Pointer
-	FutureSurfaces     unsafe.Pointer
-	PastSurfacesRight  unsafe.Pointer
-	InputSurfaceRight  unsafe.Pointer
+	PastSurfaces        unsafe.Pointer
+	InputSurface        unsafe.Pointer
+	FutureSurfaces      unsafe.Pointer
+	PastSurfacesRight   unsafe.Pointer
+	InputSurfaceRight   unsafe.Pointer
 	FutureSurfacesRight unsafe.Pointer
 }
 

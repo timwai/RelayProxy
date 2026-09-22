@@ -17,14 +17,15 @@ import (
 type DesktopMediaDialer func(context.Context, string) (*desktopmedia.MediaConn, error)
 
 type FrameSnapshot struct {
-	Sequence  uint64
-	MimeType  string
-	Codec     string
-	Width     int
-	Height    int
-	Timestamp uint64
-	KeyFrame  bool
-	Data      []byte
+	Sequence   uint64
+	Generation uint32
+	MimeType   string
+	Codec      string
+	Width      int
+	Height     int
+	Timestamp  uint64
+	KeyFrame   bool
+	Data       []byte
 }
 
 type ControllerSession struct {
@@ -102,9 +103,9 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 				continue
 			}
 			config := *message.VideoConfig
-			s.mu.Lock()
-			s.videoConfig = config
-			s.mu.Unlock()
+			if !s.applyVideoConfig(config) {
+				continue
+			}
 			s.configureABR(config)
 			s.configOnce.Do(func() { close(s.configReady) })
 
@@ -240,6 +241,40 @@ func (s *ControllerSession) probeLoop(ctx context.Context) {
 	}
 }
 
+func (s *ControllerSession) applyVideoConfig(config protocol.DesktopVideoConfig) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	current := s.videoConfig
+	if current.Generation != 0 && (config.Generation == 0 || config.Generation < current.Generation) {
+		s.mu.Unlock()
+		return false
+	}
+	generationChanged := current.Generation != 0 && config.Generation != 0 && current.Generation != config.Generation
+	s.videoConfig = config
+	if generationChanged {
+		s.latest = FrameSnapshot{}
+	}
+	s.mu.Unlock()
+	if generationChanged {
+		s.recoveryMu.Lock()
+		s.recovery.Reset()
+		s.recoveryMu.Unlock()
+	}
+	return true
+}
+
+func frameMatchesVideoConfig(frame *desktopmedia.EncodedFrame, config protocol.DesktopVideoConfig, configured bool) bool {
+	if frame == nil {
+		return false
+	}
+	if !configured || config.Generation == 0 {
+		return true
+	}
+	return frame.Generation == config.Generation
+}
+
 func (s *ControllerSession) VideoConfigSnapshot() protocol.DesktopVideoConfig {
 	if s == nil {
 		return protocol.DesktopVideoConfig{}
@@ -276,10 +311,11 @@ func snapshotFromEncodedFrame(frame *desktopmedia.EncodedFrame, config protocol.
 		return FrameSnapshot{}, false
 	}
 	snapshot := FrameSnapshot{
-		Sequence:  uint64(frame.FrameID),
-		Timestamp: frame.Timestamp,
-		KeyFrame:  frame.KeyFrame,
-		Data:      append([]byte(nil), frame.Data...),
+		Sequence:   uint64(frame.FrameID),
+		Generation: frame.Generation,
+		Timestamp:  frame.Timestamp,
+		KeyFrame:   frame.KeyFrame,
+		Data:       append([]byte(nil), frame.Data...),
 	}
 	if configured && config.Codec == "h264" {
 		snapshot.MimeType = "video/h264"
@@ -369,6 +405,12 @@ func (s *ControllerSession) readLoop(ctx context.Context) {
 			continue
 		}
 		config, configured := s.currentVideoConfig(ctx)
+		if !frameMatchesVideoConfig(frame, config, configured) {
+			if s.stats != nil {
+				s.stats.ObserveDroppedFrame()
+			}
+			continue
+		}
 		if !s.acceptVideoFrame(ctx, frame, config, configured) {
 			if s.stats != nil {
 				s.stats.ObserveDroppedFrame()

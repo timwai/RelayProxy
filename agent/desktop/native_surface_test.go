@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	"errors"
 	"testing"
 	"time"
 )
@@ -91,9 +90,8 @@ func TestNativeCaptureSurfaceOwnershipIsExplicit(t *testing.T) {
 func TestNativeCaptureFrameValidateDoesNotOwnSurfaceOnError(t *testing.T) {
 	surface := &testCaptureSurface{backend: "d3d11", format: "bgra8"}
 	frame := NativeCaptureFrame{Width: 0, Height: 1080, Surface: surface}
-	if !errors.Is(frame.Validate(), frame.Validate()) {
-		// Keep this test free of error-string coupling; Validate only reports
-		// validity and never takes ownership of the surface.
+	if err := frame.Validate(); err == nil {
+		t.Fatal("invalid native capture frame was accepted")
 	}
 	if surface.closed != 0 {
 		t.Fatal("Validate unexpectedly closed caller-owned surface")

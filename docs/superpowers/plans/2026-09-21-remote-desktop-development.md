@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 已完成，RD1 Windows 可交互 MVP 已合并 main，正在替换高性能媒体栈  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、bitrate-only ABR、Relay Desktop P2P 核心链路已合并 main，进入实机验证与切换策略硬化  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发分支：`feature/relay-desktop-windows-mvp`
+> 当前开发基线：`main`（PR #39 已合并）
 
 ## 0. 当前进度
 
@@ -30,10 +30,11 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 P2P 分支进行中 | Stats 与 bitrate-only ABR 已合并 main；当前复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，为 Relay Desktop 增加 `desktop_media` P2P purpose。可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`，失败或断开自动回退 QUIC Datagram Relay |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、bitrate-only ABR、Relay Desktop P2P 已全部进入 main。P2P 复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，并使用独立 `desktop_media` purpose；可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`，失败或断开自动回退 QUIC Datagram Relay。下一步重点是跨 NAT 实机验证、切换稳定性与路径策略硬化 |
 
 ### 0.1 已合并主线的关键进度
 
+- RD2 Relay Desktop P2P 已通过 PR #39 合并到 `main`（merge `00c547e6e643664d34ec479c9ce4b9be4559baa2`），Go CI / UI CI 全部通过：新增独立 `desktop_media` P2P purpose，复用既有 rendezvous、候选发现、UDP punch、HMAC 与 replay protection；Controller 先建立 Relay Desktop 基线会话，再后台打洞并把视频 Datagram 热切到 `udp_p2p`；可靠 session stream 继续走 Relay，直连失败或关闭后自动回退 QUIC Datagram Relay。Target 侧按服务端写入的 `ClientDeviceID` 精确绑定媒体会话，并限制 Desktop P2P lease 不能打开 Native RDP TCP/3389，避免跨 purpose 权限复用。
 - RD2 bitrate-only ABR 已通过 PR #38 合并到 `main`（merge `0cfb166c6a8df29579db07a0f7b377f17bec437d`）：500 ms 网络窗口基于丢包/Jitter/异常 RTT/新增 dropped frame 快速降码率，稳定窗口后缓慢恢复；用户设置码率保持为上限，Media Foundation H.264 通过 `ICodecAPI MeanBitRate` 热更新，无需重建 Encoder。
 - RD2 Stats 基础已通过 PR #37 合并到 `main`（merge `f29cca17aeef2e104f240b397c3e00db92282f0d`）：Controller 聚合 RTT/Jitter/丢包/接收码率与帧率，Host 上报 Capture/Encode 指标，Native Viewer 上报 Decode/Render FPS 与耗时。
 - GPU 光标合成已通过 PR #36 合并到 `main`：amd64 优先使用第二个 BGRA VideoProcessor stream 在 GPU 叠加远端光标；能力不足和 ARM64 自动回退 CPU 光标合成。
@@ -49,9 +50,9 @@
 - Windows Home 类型目标可以仅凭 `desktop.host` 被发现和授权，不要求本机 RDP Host 或 `127.0.0.1:3389`。
 - 上述授权模型合并后的主线提交为 `a044e70dc93ab10b94c6ebe289a880c45a2cf2b4`。
 
-### 0.2 当前功能分支
+### 0.2 当前开发状态
 
-当前 Windows 可交互 MVP 已通过 PR #21 合并到 `main`；后续高性能媒体栈在独立功能分支继续演进。
+当前 Windows 可交互 MVP 与 RD1 高性能媒体链路均已进入 `main`；RD2 的 Stats、bitrate-only ABR、P2P 媒体直连核心能力也已合并。当前不再以旧的 `feature/relay-desktop-windows-mvp` 为开发基线，后续工作从最新 `main` 拉分支继续。
 
 当前已完成的端到端路径：
 
@@ -62,9 +63,9 @@ DXGI Desktop Duplication（不可用时 GDI）
   ↓
 Media Foundation H.264（不可用时 JPEG）
   ↓
-RD/1 QUIC Datagram
-  ↓
-Relay Server
+RD/1 Datagram
+  ├─ 优先：authenticated UDP P2P（desktop_media / udp_p2p）
+  └─ 回退：QUIC Datagram → Relay Server → QUIC Datagram
   ↓
 Controller reassembly / H.264 loss recovery
   ↓
@@ -73,8 +74,8 @@ Native Win32 Viewer
 Media Foundation H.264 decode → DXGI NV12 surface → D3D11 VideoProcessor → swap chain
   ↘ 独立光标：amd64 优先第二 BGRA VideoProcessor stream；不支持时 CPU 合成
   ↘ 不支持共享 surface 时回退 NV12/BGRA CPU 路径
-  ↕ reliable session stream
-keyboard / mouse / cursor / clipboard
+  ↕ reliable session stream 始终经 Relay
+keyboard / mouse / cursor / clipboard / ping-pong / ABR control / stats
   ↓
 Windows SendInput / CF_UNICODETEXT
 ```
@@ -128,7 +129,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 ```text
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
-RD2  P2P + ABR + 性能统计                                🧪 进行中
+RD2  P2P + ABR + 性能统计                                🧪 核心实现已完成，实机验证/硬化中
 RD3  H.265 / 4:4:4 / 音频 / 多显示器                    ⏳ 未开始
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```

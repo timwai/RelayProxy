@@ -123,6 +123,7 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		"width":    frame.Width,
 		"height":   frame.Height,
 		"hardware": decoder.Hardware(),
+		"decoder":  decoder.Backend(),
 	}, nil
 }
 
@@ -310,6 +311,7 @@ func (a *appWindow) nativeDesktopViewerStatus() map[string]any {
 		return map[string]any{
 			"open":     true,
 			"hardware": session.decoder.Hardware(),
+			"decoder":  session.decoder.Backend(),
 		}
 	}
 }

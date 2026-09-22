@@ -35,8 +35,10 @@ type windowsViewer struct {
 
 	hwnd atomic.Uintptr
 
-	frameMu sync.Mutex
-	latest  Frame
+	frameMu      sync.Mutex
+	latest       Frame
+	latestD3D11  D3D11Frame
+	latestIsGPU  bool
 
 	renderer *d3d11Renderer
 
@@ -149,6 +151,7 @@ func (v *windowsViewer) run(initCh chan<- error) {
 	nativeViewerWindows.Store(uintptr(hwnd), v)
 	defer func() {
 		nativeViewerWindows.Delete(uintptr(hwnd))
+		v.releaseLatestD3D11()
 		renderer.Close()
 		v.renderer = nil
 		v.hwnd.Store(0)
@@ -370,15 +373,42 @@ func (v *windowsViewer) releasePressedInput() {
 
 func (v *windowsViewer) renderLatest() error {
 	v.frameMu.Lock()
-	frame := v.latest
-	v.frameMu.Unlock()
-	if len(frame.BGRA) == 0 {
-		return nil
+	isGPU := v.latestIsGPU
+	gpuFrame := v.latestD3D11
+	cpuFrame := v.latest
+	if isGPU && gpuFrame.Resource != 0 {
+		retainCOM(unsafe.Pointer(gpuFrame.Resource))
 	}
+	v.frameMu.Unlock()
+
 	if v.renderer == nil {
+		if isGPU && gpuFrame.Resource != 0 {
+			releaseCOM(unsafe.Pointer(gpuFrame.Resource))
+		}
 		return ErrUnavailable
 	}
-	return v.renderer.Render(frame)
+	if isGPU {
+		if gpuFrame.Resource == 0 {
+			return nil
+		}
+		defer releaseCOM(unsafe.Pointer(gpuFrame.Resource))
+		return v.renderer.RenderD3D11(gpuFrame)
+	}
+	if len(cpuFrame.BGRA) == 0 {
+		return nil
+	}
+	return v.renderer.Render(cpuFrame)
+}
+
+func (v *windowsViewer) releaseLatestD3D11() {
+	v.frameMu.Lock()
+	resource := v.latestD3D11.Resource
+	v.latestD3D11 = D3D11Frame{}
+	v.latestIsGPU = false
+	v.frameMu.Unlock()
+	if resource != 0 {
+		releaseCOM(unsafe.Pointer(resource))
+	}
 }
 
 func (v *windowsViewer) setError(err error) {
@@ -422,15 +452,65 @@ func (v *windowsViewer) Submit(frame Frame) error {
 		Stride: frame.Stride,
 	}
 	copy(copyFrame.BGRA, frame.BGRA[:bytes])
+
 	v.frameMu.Lock()
+	oldResource := v.latestD3D11.Resource
 	v.latest = copyFrame
+	v.latestD3D11 = D3D11Frame{}
+	v.latestIsGPU = false
 	v.frameMu.Unlock()
+	if oldResource != 0 {
+		releaseCOM(unsafe.Pointer(oldResource))
+	}
 
 	hwnd := win.HWND(v.hwnd.Load())
 	if hwnd == 0 || win.PostMessage(hwnd, wmNativeViewerFrame, 0, 0) == 0 {
 		return ErrUnavailable
 	}
 	return nil
+}
+
+func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
+	if v == nil {
+		return ErrUnavailable
+	}
+	if err := frame.Validate(); err != nil {
+		return err
+	}
+	if frame.Width != v.config.Width || frame.Height != v.config.Height {
+		return fmt.Errorf("%w: native viewer is %dx%d, D3D11 frame is %dx%d", ErrUnavailable, v.config.Width, v.config.Height, frame.Width, frame.Height)
+	}
+	select {
+	case <-v.done:
+		return ErrUnavailable
+	default:
+	}
+
+	resource := unsafe.Pointer(frame.Resource)
+	retainCOM(resource)
+
+	v.frameMu.Lock()
+	oldResource := v.latestD3D11.Resource
+	v.latest = Frame{}
+	v.latestD3D11 = frame
+	v.latestIsGPU = true
+	v.frameMu.Unlock()
+	if oldResource != 0 {
+		releaseCOM(unsafe.Pointer(oldResource))
+	}
+
+	hwnd := win.HWND(v.hwnd.Load())
+	if hwnd == 0 || win.PostMessage(hwnd, wmNativeViewerFrame, 0, 0) == 0 {
+		return ErrUnavailable
+	}
+	return nil
+}
+
+func (v *windowsViewer) D3D11Device() uintptr {
+	if v == nil || v.renderer == nil {
+		return 0
+	}
+	return v.renderer.DeviceHandle()
 }
 
 func (v *windowsViewer) Focus() {

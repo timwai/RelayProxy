@@ -123,11 +123,12 @@ type EncodedPacket struct {
 }
 
 type EncoderStats struct {
-	Frames         uint64
-	Bytes          uint64
-	LastEncodeTime time.Duration
-	Hardware       bool
-	Backend        string
+	Frames          uint64
+	Bytes           uint64
+	LastEncodeTime  time.Duration
+	LastConvertTime time.Duration
+	Hardware        bool
+	Backend         string
 }
 
 type Encoder interface {

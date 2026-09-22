@@ -262,6 +262,7 @@ type DesktopCursorState struct {
 
 type DesktopVideoControl struct {
 	TargetBitrate int `json:"targetBitrate,omitempty"`
+	TargetFPS     int `json:"targetFps,omitempty"`
 }
 
 type DesktopVideoConfig struct {
@@ -286,6 +287,7 @@ type DesktopSessionStats struct {
 	RenderFPS        float64 `json:"renderFps,omitempty"`
 	ActualBitrate    int64   `json:"actualBitrate,omitempty"`
 	TargetBitrate    int64   `json:"targetBitrate,omitempty"`
+	TargetFPS        int     `json:"targetFps,omitempty"`
 	RTTMs            float64 `json:"rttMs,omitempty"`
 	JitterMs         float64 `json:"jitterMs,omitempty"`
 	LossPercent      float64 `json:"lossPercent,omitempty"`

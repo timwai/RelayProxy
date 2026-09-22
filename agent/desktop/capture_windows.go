@@ -584,20 +584,43 @@ func (c *windowsCapture) CaptureCursor(ctx context.Context) (protocol.DesktopCur
 	if err != nil {
 		return protocol.DesktopCursorState{}, err
 	}
-	screenX := win.GetSystemMetrics(win.SM_XVIRTUALSCREEN)
-	screenY := win.GetSystemMetrics(win.SM_YVIRTUALSCREEN)
-	screenWidth := win.GetSystemMetrics(win.SM_CXVIRTUALSCREEN)
-	screenHeight := win.GetSystemMetrics(win.SM_CYVIRTUALSCREEN)
+
+	c.mu.Lock()
+	var selectedDisplay *screencapture.Display
+	if c.selectedDisplay != nil {
+		copy := *c.selectedDisplay
+		selectedDisplay = &copy
+	}
+	c.mu.Unlock()
+
+	screenX := int(win.GetSystemMetrics(win.SM_XVIRTUALSCREEN))
+	screenY := int(win.GetSystemMetrics(win.SM_YVIRTUALSCREEN))
+	screenWidth := int(win.GetSystemMetrics(win.SM_CXVIRTUALSCREEN))
+	screenHeight := int(win.GetSystemMetrics(win.SM_CYVIRTUALSCREEN))
+	if selectedDisplay != nil {
+		screenX = selectedDisplay.Bounds.X
+		screenY = selectedDisplay.Bounds.Y
+		screenWidth = selectedDisplay.Bounds.W
+		screenHeight = selectedDisplay.Bounds.H
+	}
 	if screenWidth <= 0 || screenHeight <= 0 {
-		return protocol.DesktopCursorState{}, errors.New("invalid Windows virtual desktop geometry")
+		return protocol.DesktopCursorState{}, errors.New("invalid Windows desktop capture geometry")
+	}
+
+	cursorX := int(info.ScreenPos.X) - screenX
+	cursorY := int(info.ScreenPos.Y) - screenY
+	visible := info.Flags&cursorShowing != 0
+	if selectedDisplay != nil &&
+		(cursorX < 0 || cursorY < 0 || cursorX >= screenWidth || cursorY >= screenHeight) {
+		visible = false
 	}
 
 	state := protocol.DesktopCursorState{
-		X:            int(info.ScreenPos.X - screenX),
-		Y:            int(info.ScreenPos.Y - screenY),
-		ScreenWidth:  int(screenWidth),
-		ScreenHeight: int(screenHeight),
-		Visible:      info.Flags&cursorShowing != 0,
+		X:            cursorX,
+		Y:            cursorY,
+		ScreenWidth:  screenWidth,
+		ScreenHeight: screenHeight,
+		Visible:      visible,
 	}
 	if info.HCursor == 0 {
 		return state, nil

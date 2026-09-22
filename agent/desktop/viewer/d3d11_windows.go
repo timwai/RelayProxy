@@ -33,13 +33,20 @@ const (
 	d3d11VideoProcessorFormatSupportInput  = 0x1
 	d3d11VideoProcessorFormatSupportOutput = 0x2
 
+	d3d11VideoProcessorFeatureLegacy      = 0x10
+	d3d11VideoProcessorFeatureAlphaStream = 0x80
+
 	id3d10MultithreadSetMultithreadProtected  = 5
 	id3d11VideoDeviceCreateVideoProcessor     = 4
 	id3d11VideoDeviceCreateInputView          = 8
 	id3d11VideoDeviceCreateOutputView         = 9
 	id3d11VideoDeviceCreateEnumerator         = 10
 	id3d11VideoProcessorEnumeratorCheckFormat = 8
+	id3d11VideoProcessorEnumeratorGetCaps     = 9
 	id3d11VideoContextSetStreamFrameFormat    = 27
+	id3d11VideoContextSetStreamSourceRect     = 30
+	id3d11VideoContextSetStreamDestRect       = 31
+	id3d11VideoContextSetStreamAlpha          = 32
 	id3d11VideoContextVideoProcessorBlt       = 53
 )
 
@@ -142,6 +149,31 @@ type d3d11VideoProcessorOutputViewDesc struct {
 	ArraySize     uint32
 }
 
+type d3d11VideoProcessorCaps struct {
+	DeviceCaps              uint32
+	FeatureCaps             uint32
+	FilterCaps              uint32
+	InputFormatCaps         uint32
+	AutoStreamCaps          uint32
+	StereoCaps              uint32
+	RateConversionCapsCount uint32
+	MaxInputStreams         uint32
+	MaxStreamStates         uint32
+}
+
+type d3d11SubresourceData struct {
+	SysMem          unsafe.Pointer
+	SysMemPitch     uint32
+	SysMemSlicePitch uint32
+}
+
+type d3d11Rect struct {
+	Left   int32
+	Top    int32
+	Right  int32
+	Bottom int32
+}
+
 type d3d11VideoProcessorStream struct {
 	Enable            int32
 	OutputIndex       uint32
@@ -172,6 +204,14 @@ type d3d11Renderer struct {
 	videoProcessor  unsafe.Pointer
 	videoOutputView unsafe.Pointer
 	outputFrame     uint32
+
+	gpuCursor     bool
+	cursorTexture unsafe.Pointer
+	cursorView    unsafe.Pointer
+	cursorID      string
+	cursorWidth   int
+	cursorHeight  int
+	cursorBGRA    []byte
 }
 
 func hresultFailed(value uintptr) bool {
@@ -414,6 +454,22 @@ func (r *d3d11Renderer) initVideoProcessor() error {
 		return fail(fmt.Errorf("%w: D3D11 video processor cannot output BGRA", ErrUnavailable))
 	}
 
+	gpuCursorCapable := false
+	var caps d3d11VideoProcessorCaps
+	capsHR := comCall(
+		enumerator,
+		id3d11VideoProcessorEnumeratorGetCaps,
+		uintptr(unsafe.Pointer(&caps)),
+	)
+	if !hresultFailed(capsHR) &&
+		bgraSupport&d3d11VideoProcessorFormatSupportInput != 0 &&
+		caps.MaxInputStreams >= 2 &&
+		caps.MaxStreamStates >= 2 &&
+		caps.FeatureCaps&d3d11VideoProcessorFeatureAlphaStream != 0 &&
+		caps.FeatureCaps&d3d11VideoProcessorFeatureLegacy == 0 {
+		gpuCursorCapable = true
+	}
+
 	var processor unsafe.Pointer
 	hr = comCall(
 		videoDevice,
@@ -457,6 +513,7 @@ func (r *d3d11Renderer) initVideoProcessor() error {
 	r.videoEnumerator = enumerator
 	r.videoProcessor = processor
 	r.videoOutputView = outputView
+	r.gpuCursor = gpuCursorCapable
 	comCall(
 		r.videoContext,
 		id3d11VideoContextSetStreamFrameFormat,
@@ -529,6 +586,110 @@ func (r *d3d11Renderer) DeviceHandle() uintptr {
 	return uintptr(r.device)
 }
 
+func (r *d3d11Renderer) SupportsGPUCursor() bool {
+	return r != nil && r.gpuCursor && r.videoProcessor != nil
+}
+
+func cursorBitmapBGRA(shape CursorBitmap, dst []byte) ([]byte, error) {
+	if shape.Width <= 0 || shape.Height <= 0 || shape.Stride < shape.Width*4 ||
+		len(shape.Pix) < shape.Stride*shape.Height {
+		return nil, fmt.Errorf("%w: invalid cursor bitmap", ErrUnavailable)
+	}
+	required := shape.Width * shape.Height * 4
+	if cap(dst) < required {
+		dst = make([]byte, required)
+	} else {
+		dst = dst[:required]
+	}
+	for y := 0; y < shape.Height; y++ {
+		srcRow := y * shape.Stride
+		dstRow := y * shape.Width * 4
+		for x := 0; x < shape.Width; x++ {
+			si := srcRow + x*4
+			di := dstRow + x*4
+			dst[di] = shape.Pix[si+2]
+			dst[di+1] = shape.Pix[si+1]
+			dst[di+2] = shape.Pix[si]
+			dst[di+3] = shape.Pix[si+3]
+		}
+	}
+	return dst, nil
+}
+
+func (r *d3d11Renderer) ensureGPUCursor(shape CursorBitmap) error {
+	if !r.SupportsGPUCursor() {
+		return ErrUnavailable
+	}
+	if shape.ID != "" && shape.ID == r.cursorID &&
+		shape.Width == r.cursorWidth && shape.Height == r.cursorHeight &&
+		r.cursorTexture != nil && r.cursorView != nil {
+		return nil
+	}
+
+	pixels, err := cursorBitmapBGRA(shape, r.cursorBGRA)
+	if err != nil {
+		return err
+	}
+	r.cursorBGRA = pixels
+
+	desc := d3d11Texture2DDesc{
+		Width:      uint32(shape.Width),
+		Height:     uint32(shape.Height),
+		MipLevels:  1,
+		ArraySize:  1,
+		Format:     dxgiFormatB8G8R8A8UNorm,
+		SampleDesc: dxgiSampleDesc{Count: 1},
+		Usage:      0, // D3D11_USAGE_DEFAULT required by video processor input views.
+	}
+	data := d3d11SubresourceData{
+		SysMem:      unsafe.Pointer(&pixels[0]),
+		SysMemPitch: uint32(shape.Width * 4),
+	}
+	var texture unsafe.Pointer
+	hr := comCall(
+		r.device,
+		5, // ID3D11Device::CreateTexture2D
+		uintptr(unsafe.Pointer(&desc)),
+		uintptr(unsafe.Pointer(&data)),
+		uintptr(unsafe.Pointer(&texture)),
+	)
+	if hresultFailed(hr) || texture == nil {
+		if !hresultFailed(hr) {
+			return ErrUnavailable
+		}
+		return hresultError("ID3D11Device.CreateTexture2D(cursor)", hr)
+	}
+
+	inputDesc := d3d11VideoProcessorInputViewDesc{
+		ViewDimension: d3d11VPIVDimensionTexture2D,
+	}
+	var view unsafe.Pointer
+	hr = comCall(
+		r.videoDevice,
+		id3d11VideoDeviceCreateInputView,
+		uintptr(texture),
+		uintptr(r.videoEnumerator),
+		uintptr(unsafe.Pointer(&inputDesc)),
+		uintptr(unsafe.Pointer(&view)),
+	)
+	if hresultFailed(hr) || view == nil {
+		releaseCOM(texture)
+		if !hresultFailed(hr) {
+			return ErrUnavailable
+		}
+		return hresultError("ID3D11VideoDevice.CreateVideoProcessorInputView(cursor)", hr)
+	}
+
+	releaseCOM(r.cursorView)
+	releaseCOM(r.cursorTexture)
+	r.cursorTexture = texture
+	r.cursorView = view
+	r.cursorID = shape.ID
+	r.cursorWidth = shape.Width
+	r.cursorHeight = shape.Height
+	return nil
+}
+
 func (r *d3d11Renderer) Render(frame Frame) error {
 	if r == nil || r.context == nil || r.upload == nil || r.backBuffer == nil || r.swapChain == nil {
 		return ErrUnavailable
@@ -573,7 +734,7 @@ func (r *d3d11Renderer) Render(frame Frame) error {
 	return r.present()
 }
 
-func (r *d3d11Renderer) RenderD3D11(frame D3D11Frame) error {
+func (r *d3d11Renderer) RenderD3D11(frame D3D11Frame, cursor CursorOverlay) error {
 	if r == nil || r.videoDevice == nil || r.videoContext == nil ||
 		r.videoEnumerator == nil || r.videoProcessor == nil ||
 		r.videoOutputView == nil || r.swapChain == nil {
@@ -621,18 +782,73 @@ func (r *d3d11Renderer) RenderD3D11(frame D3D11Frame) error {
 	}
 	defer releaseCOM(inputView)
 
-	stream := d3d11VideoProcessorStream{
+	streams := [2]d3d11VideoProcessorStream{{
 		Enable:       1,
 		InputSurface: inputView,
+	}}
+	streamCount := uintptr(1)
+
+	if r.SupportsGPUCursor() && cursor.State.Visible {
+		sourceRect, destRect, ok := cursorRects(r.width, r.height, cursor.State, cursor.Bitmap)
+		if ok {
+			if err := r.ensureGPUCursor(cursor.Bitmap); err != nil {
+				return err
+			}
+			src := d3d11Rect{
+				Left: int32(sourceRect.Min.X), Top: int32(sourceRect.Min.Y),
+				Right: int32(sourceRect.Max.X), Bottom: int32(sourceRect.Max.Y),
+			}
+			dst := d3d11Rect{
+				Left: int32(destRect.Min.X), Top: int32(destRect.Min.Y),
+				Right: int32(destRect.Max.X), Bottom: int32(destRect.Max.Y),
+			}
+			comCall(
+				r.videoContext,
+				id3d11VideoContextSetStreamFrameFormat,
+				uintptr(r.videoProcessor),
+				1,
+				0, // progressive
+			)
+			comCall(
+				r.videoContext,
+				id3d11VideoContextSetStreamSourceRect,
+				uintptr(r.videoProcessor),
+				1,
+				1,
+				uintptr(unsafe.Pointer(&src)),
+			)
+			comCall(
+				r.videoContext,
+				id3d11VideoContextSetStreamDestRect,
+				uintptr(r.videoProcessor),
+				1,
+				1,
+				uintptr(unsafe.Pointer(&dst)),
+			)
+			comCall(
+				r.videoContext,
+				id3d11VideoContextSetStreamAlpha,
+				uintptr(r.videoProcessor),
+				1,
+				1,
+				uintptr(0x3f800000), // float32(1.0)
+			)
+			streams[1] = d3d11VideoProcessorStream{
+				Enable:       1,
+				InputSurface: r.cursorView,
+			}
+			streamCount = 2
+		}
 	}
+
 	hr = comCall(
 		r.videoContext,
 		id3d11VideoContextVideoProcessorBlt,
 		uintptr(r.videoProcessor),
 		uintptr(r.videoOutputView),
 		uintptr(r.outputFrame),
-		1,
-		uintptr(unsafe.Pointer(&stream)),
+		streamCount,
+		uintptr(unsafe.Pointer(&streams[0])),
 	)
 	if hresultFailed(hr) {
 		return hresultError("ID3D11VideoContext.VideoProcessorBlt", hr)
@@ -658,6 +874,8 @@ func (r *d3d11Renderer) Close() {
 	if r == nil {
 		return
 	}
+	releaseCOM(r.cursorView)
+	releaseCOM(r.cursorTexture)
 	releaseCOM(r.videoOutputView)
 	releaseCOM(r.videoProcessor)
 	releaseCOM(r.videoEnumerator)
@@ -668,6 +886,8 @@ func (r *d3d11Renderer) Close() {
 	releaseCOM(r.context)
 	releaseCOM(r.device)
 	releaseCOM(r.swapChain)
+	r.cursorView = nil
+	r.cursorTexture = nil
 	r.videoOutputView = nil
 	r.videoProcessor = nil
 	r.videoEnumerator = nil

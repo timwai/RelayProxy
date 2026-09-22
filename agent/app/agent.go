@@ -1324,7 +1324,7 @@ func (a *Agent) RemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
 	session := a.desktopConnection
 	last := a.lastDesktopDiagnostics
 	a.mu.RUnlock()
-	if session != nil && session.Active() {
+	if session != nil {
 		return session.Diagnostics()
 	}
 	return last

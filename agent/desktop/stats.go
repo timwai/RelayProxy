@@ -31,6 +31,7 @@ type sessionStatsTracker struct {
 	lastRTTMs     float64
 
 	remote protocol.DesktopSessionStats
+	viewer protocol.DesktopSessionStats
 	path   string
 }
 
@@ -109,6 +110,15 @@ func (s *sessionStatsTracker) MergeRemote(stats protocol.DesktopSessionStats) {
 	s.mu.Unlock()
 }
 
+func (s *sessionStatsTracker) MergeViewer(stats protocol.DesktopSessionStats) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.viewer = stats
+	s.mu.Unlock()
+}
+
 func (s *sessionStatsTracker) NewProbe(now time.Time) protocol.DesktopSessionProbe {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -177,7 +187,11 @@ func (s *sessionStatsTracker) Snapshot(now time.Time) protocol.DesktopSessionSta
 		lossPercent = float64(lost) * 100 / float64(total)
 	}
 	stats := s.remote
-	stats.DecodeFPS = float64(s.recvFrames) / elapsed
+	stats.ReceiveFPS = float64(s.recvFrames) / elapsed
+	stats.DecodeFPS = s.viewer.DecodeFPS
+	stats.RenderFPS = s.viewer.RenderFPS
+	stats.DecodeMs = s.viewer.DecodeMs
+	stats.RenderMs = s.viewer.RenderMs
 	stats.ActualBitrate = int64(float64(s.recvBytes*8) / elapsed)
 	stats.DeliveryRate = stats.ActualBitrate
 	stats.RTTMs = s.rttMs

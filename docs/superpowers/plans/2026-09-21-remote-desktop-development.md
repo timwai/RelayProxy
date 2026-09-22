@@ -29,11 +29,12 @@
 | DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
-| 原生 D3D11 Viewer | 🧪 GPU 光标优化中 | PR #33 已合并原生 Win32/D3D11 Viewer；PR #34 已合并异步 MF/DXVA 解码；PR #35 已合并共享 D3D11 device + DXGI surface → VideoProcessor → swap chain 零拷贝视频；当前分支将独立远端光标作为第二个 BGRA VideoProcessor stream 在 GPU 合成，amd64 启用，能力不足/ARM64 自动回退 CPU 光标路径 |
-| RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
+| 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
+| RD2 P2P / ABR / Stats | 🧪 Stats 基础分支进行中 | 新增 Controller RTT/Jitter/丢包/接收码率与 FPS 统计，Host 上报 Capture/Encode FPS、实际/目标码率，Native Viewer 上报 Decode/Render FPS 与耗时；下一步 ABR 与 P2P 复用同一快照 |
 
 ### 0.1 已合并主线的关键进度
 
+- GPU 光标合成已通过 PR #36 合并到 `main`：amd64 优先使用第二个 BGRA VideoProcessor stream 在 GPU 叠加远端光标；能力不足和 ARM64 自动回退 CPU 光标合成。
 - 零拷贝视频呈现已通过 PR #35 合并到 `main`（merge `afcb5a8b71d800a6812301ed17ec1a299dfdbd04`）：Viewer 与 MF Decoder 共用 D3D11 device，DXGI NV12 surface 由 VideoProcessor 直接转换并呈现到 swap chain，保留 staging/CPU 回退。
 - D3D11-aware / DXVA 解码已通过 PR #34 合并到 `main`（merge `9abb7fdd9b5c966fb0da3b988f9efc65db832a70`）：支持异步 Decoder MFT、`IMFDXGIDeviceManager` 和 DXGI NV12 surface，并在协商失败时安全回退系统内存硬解/软解。
 - 原生 D3D11 Viewer 第一版已通过 PR #33 合并到 `main`（merge `9dcce5255ca7c49bb6e81bba6a0147b7d04980d4`）：Controller H.264 帧不再必须经过 JS/Base64/WebCodecs，可直接由 Go 侧 Media Foundation 解码并交给独立 Win32/D3D11 窗口显示；原生键鼠和独立远端光标也已接通。
@@ -124,8 +125,8 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 
 ```text
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
-RD1  Windows Relay Desktop Relay-only MVP                🧪 进行中
-RD2  P2P + ABR + 性能统计                                ⏳ 未开始
+RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
+RD2  P2P + ABR + 性能统计                                🧪 进行中
 RD3  H.265 / 4:4:4 / 音频 / 多显示器                    ⏳ 未开始
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```

@@ -11,11 +11,11 @@ import (
 )
 
 func TestSnapshotFromEncodedFrameH264(t *testing.T) {
-	frame := &desktopmedia.EncodedFrame{FrameID: 7, Timestamp: 1234, KeyFrame: true, Data: []byte{0, 0, 0, 1, 0x65}}
+	frame := &desktopmedia.EncodedFrame{Generation: 3, FrameID: 7, Timestamp: 1234, KeyFrame: true, Data: []byte{0, 0, 0, 1, 0x65}}
 	got, ok := snapshotFromEncodedFrame(frame, protocol.DesktopVideoConfig{
-		Codec: "h264", CodecString: "avc1.42E01F", Width: 1280, Height: 720,
+		Generation: 3, Codec: "h264", CodecString: "avc1.42E01F", Width: 1280, Height: 720,
 	}, true)
-	if !ok || got.MimeType != "video/h264" || got.Codec != "avc1.42E01F" || !got.KeyFrame || got.Width != 1280 {
+	if !ok || got.Generation != 3 || got.MimeType != "video/h264" || got.Codec != "avc1.42E01F" || !got.KeyFrame || got.Width != 1280 {
 		t.Fatalf("snapshot=%+v ok=%v", got, ok)
 	}
 }
@@ -99,5 +99,41 @@ func TestVideoConfigSnapshotExposesSelectedDisplay(t *testing.T) {
 	got := session.VideoConfigSnapshot()
 	if got.Codec != "h264" || got.DisplayID != "20" || got.Width != 1920 || got.Height != 1080 {
 		t.Fatalf("video config snapshot=%+v", got)
+	}
+}
+
+func TestFrameMatchesVideoConfigGeneration(t *testing.T) {
+	config := protocol.DesktopVideoConfig{Generation: 4, Codec: "h264"}
+	if !frameMatchesVideoConfig(&desktopmedia.EncodedFrame{Generation: 4}, config, true) {
+		t.Fatal("matching generation was rejected")
+	}
+	if frameMatchesVideoConfig(&desktopmedia.EncodedFrame{Generation: 3}, config, true) {
+		t.Fatal("stale generation was accepted")
+	}
+	if frameMatchesVideoConfig(&desktopmedia.EncodedFrame{Generation: 5}, config, true) {
+		t.Fatal("future generation was accepted before its config")
+	}
+	if !frameMatchesVideoConfig(&desktopmedia.EncodedFrame{Generation: 9}, protocol.DesktopVideoConfig{}, false) {
+		t.Fatal("legacy unconfigured frame was rejected")
+	}
+}
+
+func TestApplyVideoConfigRejectsStaleGenerationAndClearsLatest(t *testing.T) {
+	session := &ControllerSession{
+		videoConfig: protocol.DesktopVideoConfig{Generation: 1, Codec: "h264", Width: 1920, Height: 1080},
+		latest: FrameSnapshot{Generation: 1, Sequence: 8, Data: []byte{1}},
+	}
+	if !session.applyVideoConfig(protocol.DesktopVideoConfig{Generation: 2, Codec: "h264", Width: 1280, Height: 720}) {
+		t.Fatal("new video generation was rejected")
+	}
+	if session.latest.Sequence != 0 || len(session.latest.Data) != 0 {
+		t.Fatalf("previous generation frame was not cleared: %+v", session.latest)
+	}
+	if session.applyVideoConfig(protocol.DesktopVideoConfig{Generation: 1, Codec: "h264", Width: 1920, Height: 1080}) {
+		t.Fatal("stale video config was accepted")
+	}
+	got := session.VideoConfigSnapshot()
+	if got.Generation != 2 || got.Width != 1280 || got.Height != 720 {
+		t.Fatalf("current video config regressed: %+v", got)
 	}
 }

@@ -77,6 +77,18 @@ type Session struct {
 
 	applicationPath *ApplicationPath
 	appNotified     bool
+
+	directMetricsMu sync.Mutex
+	directRTTMs     float64
+	directJitterMs  float64
+	directLastRTTMs float64
+	directSamples   uint64
+}
+
+type DirectPathMetrics struct {
+	RTTMs    float64
+	JitterMs float64
+	Samples  uint64
 }
 
 func NewManager(parent context.Context, send ControlSender, targetAddress string, lease time.Duration, rendezvous string) *Manager {
@@ -779,10 +791,21 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 		_ = conn.Close()
 		return nil, err
 	}
-	packetConn, err := punch.NewPacketConn(result)
+	var packetConn *punch.PacketConn
+	if s.Purpose == protocol.P2PPurposeDesktopMedia {
+		// Relay Desktop path switching runs on a one-second quality cadence.
+		// Probe the exact authenticated P2P socket at the same cadence instead
+		// of reusing the reliable Relay session's RTT.
+		packetConn, err = punch.NewPacketConnWithKeepalive(result, time.Second)
+	} else {
+		packetConn, err = punch.NewPacketConn(result)
+	}
 	if err != nil {
 		_ = conn.Close()
 		return nil, err
+	}
+	if s.Purpose == protocol.P2PPurposeDesktopMedia {
+		packetConn.SetProbeObserver(s.observeDirectPathRTT)
 	}
 	trackedPacket := s.trackPacketConn(packetConn)
 	if trackedPacket == nil {
@@ -790,6 +813,47 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 	}
 	s.pathUDP.Store("udp_p2p")
 	return trackedPacket, nil
+}
+
+func (s *Session) observeDirectPathRTT(rtt time.Duration) {
+	if s == nil || rtt < 0 {
+		return
+	}
+	sample := float64(rtt.Microseconds()) / 1000
+	s.directMetricsMu.Lock()
+	defer s.directMetricsMu.Unlock()
+
+	if s.directRTTMs == 0 {
+		s.directRTTMs = sample
+	} else {
+		s.directRTTMs = s.directRTTMs*0.8 + sample*0.2
+	}
+	if s.directLastRTTMs != 0 {
+		delta := sample - s.directLastRTTMs
+		if delta < 0 {
+			delta = -delta
+		}
+		if s.directJitterMs == 0 {
+			s.directJitterMs = delta
+		} else {
+			s.directJitterMs = s.directJitterMs*0.8 + delta*0.2
+		}
+	}
+	s.directLastRTTMs = sample
+	s.directSamples++
+}
+
+func (s *Session) DirectPathMetrics() DirectPathMetrics {
+	if s == nil {
+		return DirectPathMetrics{}
+	}
+	s.directMetricsMu.Lock()
+	defer s.directMetricsMu.Unlock()
+	return DirectPathMetrics{
+		RTTMs:    s.directRTTMs,
+		JitterMs: s.directJitterMs,
+		Samples:  s.directSamples,
+	}
 }
 
 func (s *Session) PathTCP() string {

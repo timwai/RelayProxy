@@ -27,7 +27,8 @@
 | 光标 | ⏳ 未开始 | 计划与视频分离传输并在 Viewer 本地绘制 |
 | 剪贴板 | ⏳ 未开始 | RD1 先实现 Unicode 文本双向同步 |
 | DXGI / WGC Capture | ✅ DXGI 已合并 main | 单显示器优先 DXGI Desktop Duplication，运行时不可用自动回退 GDI；多显示器仍暂用 GDI 直到显示器几何协议完成 |
-| H.264 硬件编解码 | 🧪 Encoder 控制面已接入 | Media Foundation 同步/异步 MFT 均进入编码数据面；ICodecAPI 接入 ForceKeyFrame 与 MeanBitRate 动态控制，分辨率/FPS 变化明确要求 encoder rebuild；下一步替换 Host JPEG 媒体管线并保留 JPEG fallback |
+| H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
+| H.264 Datagram 丢包恢复 | 🧪 分支验证中 | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程 |
 | 原生 D3D11 Viewer | ⏳ 待实现 | 当前 Wails 图片预览仅用于功能闭环，不作为最终低延迟 Viewer |
 | RD2 P2P / ABR / Stats | ⏳ 未开始 | 待 RD1 Relay-only 基础稳定后进入 |
 
@@ -79,7 +80,9 @@ Windows SendInput
 
 ```text
 当前验证：
-DXGI Desktop Duplication（不可用时 GDI）→ CPU RGBA → JPEG → Wails WebView preview
+DXGI Desktop Duplication（不可用时 GDI）→ RGBA/NV12 → Media Foundation H.264
+→ RD/1 QUIC Datagram → WebCodecs Canvas
+↘ H.264 不可用时自动回退 JPEG
 
 最终目标：
 DXGI / WGC → D3D11 texture → GPU convert → H.264 HW encoder

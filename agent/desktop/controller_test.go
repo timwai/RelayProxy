@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"bytes"
+	"context"
 	"image"
 	"image/jpeg"
 	"testing"
@@ -135,5 +136,64 @@ func TestApplyVideoConfigRejectsStaleGenerationAndClearsLatest(t *testing.T) {
 	got := session.VideoConfigSnapshot()
 	if got.Generation != 2 || got.Width != 1280 || got.Height != 720 {
 		t.Fatalf("current video config regressed: %+v", got)
+	}
+}
+
+func TestVideoConfigRequiresABRReset(t *testing.T) {
+	base := protocol.DesktopVideoConfig{
+		Generation: 1, Codec: "h264", Width: 1920, Height: 1080,
+		FPS: 30, TargetBitrate: 6_000_000, MaxBitrate: 12_000_000,
+	}
+	if !videoConfigRequiresABRReset(protocol.DesktopVideoConfig{}, base) {
+		t.Fatal("initial video config did not initialize ABR")
+	}
+
+	nextGeneration := base
+	nextGeneration.Generation = 2
+	nextGeneration.Width = 1280
+	nextGeneration.Height = 720
+	nextGeneration.TargetBitrate = 3_000_000
+	if videoConfigRequiresABRReset(base, nextGeneration) {
+		t.Fatal("resolution-only generation switch reset ABR")
+	}
+
+	nextFPS := nextGeneration
+	nextFPS.FPS = 24
+	if !videoConfigRequiresABRReset(base, nextFPS) {
+		t.Fatal("FPS negotiation change did not reset ABR")
+	}
+
+	nextMaxBitrate := nextGeneration
+	nextMaxBitrate.MaxBitrate = 8_000_000
+	if !videoConfigRequiresABRReset(base, nextMaxBitrate) {
+		t.Fatal("bitrate ceiling change did not reset ABR")
+	}
+
+	nextCodec := nextGeneration
+	nextCodec.Codec = "jpeg"
+	if !videoConfigRequiresABRReset(base, nextCodec) {
+		t.Fatal("codec change did not reset ABR")
+	}
+}
+
+func TestRequestResolutionRejectsUnsupportedSession(t *testing.T) {
+	session := &ControllerSession{
+		done: make(chan struct{}),
+		videoConfig: protocol.DesktopVideoConfig{
+			Generation: 1,
+			Codec:      "jpeg",
+			Width:      1280,
+			Height:     720,
+			MaxWidth:   1920,
+			MaxHeight:  1080,
+		},
+	}
+	if err := session.RequestResolution(context.Background(), 960, 540); err == nil {
+		t.Fatal("JPEG session accepted runtime resolution switching")
+	}
+
+	session.videoConfig.Codec = "h264"
+	if err := session.RequestResolution(context.Background(), 2560, 1440); err == nil {
+		t.Fatal("resolution above negotiated ceiling was accepted")
 	}
 }

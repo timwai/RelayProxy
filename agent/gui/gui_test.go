@@ -50,6 +50,7 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goSelectExit",
 		"goSetAutostart",
 		"goSetTheme",
+		"goSetRemoteDesktopResolution",
 	} {
 		if !strings.Contains(script, "window."+name) {
 			t.Fatalf("Wails bridge missing %s", name)
@@ -215,6 +216,31 @@ func TestRemoteDesktopWebCodecsTracksMediaGeneration(t *testing.T) {
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop generation-aware WebCodecs path missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopRuntimeResolutionSwitcher(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-runtime-resolution-wrap"`,
+		`id="desktop-runtime-resolution"`,
+		`id="desktop-runtime-resolution-apply"`,
+		"function updateDesktopRuntimeResolutionControl(status)",
+		"status.codec === 'h264'",
+		"status.maxWidth || status.width || 0",
+		"status.maxHeight || status.height || 0",
+		"option.disabled = !!(maxWidth && maxHeight && (width > maxWidth || height > maxHeight))",
+		"async function setRemoteDesktopResolution()",
+		"call('goSetRemoteDesktopResolution', width, height)",
+		"等待新媒体 Generation",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop runtime resolution UI missing %q", want)
 		}
 	}
 }

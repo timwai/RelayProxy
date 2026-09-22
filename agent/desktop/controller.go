@@ -103,10 +103,13 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 				continue
 			}
 			config := *message.VideoConfig
+			previousConfig := s.VideoConfigSnapshot()
 			if !s.applyVideoConfig(config) {
 				continue
 			}
-			s.configureABR(config)
+			if videoConfigRequiresABRReset(previousConfig, config) {
+				s.configureABR(config)
+			}
 			s.configOnce.Do(func() { close(s.configReady) })
 
 		case protocol.DesktopSessionCursor:
@@ -151,6 +154,24 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func videoConfigRequiresABRReset(previous, next protocol.DesktopVideoConfig) bool {
+	if previous.Codec == "" {
+		return true
+	}
+	if previous.Codec != next.Codec || previous.FPS != next.FPS {
+		return true
+	}
+	previousMaxBitrate := previous.MaxBitrate
+	if previousMaxBitrate <= 0 {
+		previousMaxBitrate = previous.TargetBitrate
+	}
+	nextMaxBitrate := next.MaxBitrate
+	if nextMaxBitrate <= 0 {
+		nextMaxBitrate = next.TargetBitrate
+	}
+	return previousMaxBitrate != nextMaxBitrate
 }
 
 func (s *ControllerSession) configureABR(config protocol.DesktopVideoConfig) {
@@ -345,6 +366,34 @@ func (s *ControllerSession) markIDRRequestFailed() {
 	s.recoveryMu.Lock()
 	s.recovery.RequestFailed()
 	s.recoveryMu.Unlock()
+}
+
+func (s *ControllerSession) RequestResolution(ctx context.Context, width, height int) error {
+	if s == nil || !s.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	config := s.VideoConfigSnapshot()
+	if config.Codec != "h264" {
+		return errors.New("runtime resolution switching requires H.264")
+	}
+	maxWidth := config.MaxWidth
+	if maxWidth <= 0 {
+		maxWidth = maxJPEGWidth
+	}
+	maxHeight := config.MaxHeight
+	if maxHeight <= 0 {
+		maxHeight = maxJPEGHeight
+	}
+	if _, err := validateDesktopResolutionTarget(width, height, maxWidth, maxHeight); err != nil {
+		return err
+	}
+	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+		Type: protocol.DesktopSessionVideoControl,
+		VideoControl: &protocol.DesktopVideoControl{
+			TargetWidth:  width,
+			TargetHeight: height,
+		},
+	})
 }
 
 func (s *ControllerSession) RequestIDR(ctx context.Context) error {

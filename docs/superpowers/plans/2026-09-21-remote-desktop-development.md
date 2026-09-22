@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、Scene GUI 与端到端媒体链路诊断均已合并 main；当前分支补齐 generation-aware 媒体边界和 Viewer decoder 重建，为后续动态分辨率 ABR 做安全前置  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、Scene GUI、媒体链路诊断与 generation-aware Viewer rebuild 均已合并 main；当前分支实现 H.264 Encoder generation 重建和运行期分辨率热切换，为动态分辨率 ABR 打通发送端链路  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #55 已合并，merge `7a52c0ffec861dfc7c74dab26558273c0446787f`）
+> 当前开发基线：`main`（PR #56 已合并，merge `8a50f02cec4e568cd2ef4ba14bf5c2535a106e71`）
 
 ## 0. 当前进度
 
@@ -30,7 +30,7 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断；当前分支继续完成 generation-aware 媒体边界和 Viewer decoder 重建 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 Controller/WebCodecs/Native Viewer 的 generation-aware 边界和 decoder rebuild；当前分支继续实现 Host Encoder generation rebuild 与运行期分辨率热切换 |
 
 ### 0.1 已合并主线的关键进度
 
@@ -114,7 +114,7 @@ Windows SendInput / CF_UNICODETEXT
 - 该诊断闭环用于后续 LAN / IPv4 NAT / IPv6 / Relay-only / Wi-Fi 抖动，以及 Intel / NVIDIA / AMD 实机矩阵，避免只根据 FPS 或日志猜测实际媒体路径。
 - PR #55 不启用动态分辨率 ABR：Media Foundation 编码器对尺寸变化返回 `ErrEncoderRebuildRequired`；本轮 generation 分支先解决 Controller / WebCodecs / Native Viewer 的安全 generation 边界和 decoder rebuild，再进入 Host encoder rebuild 与尺寸 ABR。
 
-### 0.2.4 Generation-aware 媒体切换基础（当前分支）
+### 0.2.4 Generation-aware 媒体切换基础（已合并 PR #56）
 
 - 本地 `RemoteDesktopFrame / FrameSnapshot` 现在携带 RD/1 `Generation`，Viewer 不再只用可重复的 `FrameID` 识别帧。
 - Controller 只允许媒体帧使用相同 generation 的 `DesktopVideoConfig`：旧 generation 的迟到 Datagram、以及新 generation 配置到达前抢跑的 Datagram 都会被丢弃，避免用错误尺寸/Codec 配置解释帧。
@@ -123,7 +123,19 @@ Windows SendInput / CF_UNICODETEXT
 - 原生 Win32/D3D11 Viewer 在同尺寸 generation 变化时重建 Media Foundation Decoder；尺寸变化时先创建新的 D3D11 Viewer + 对应 Decoder，全部成功后再原子切换并关闭旧 pipeline，避免先拆现有画面再尝试恢复。
 - Native Viewer 的 frame 去重改为 `(generation, sequence)`；因此新 generation 从 FrameID=1 重新编号也不会被上一 generation 的序号误判为重复。
 - Windows 单测覆盖 generation/尺寸变化的 native rebuild 判定；Controller 单测覆盖 stale/future generation 拒绝、latest frame 清理和配置单调性；GUI 回归覆盖 WebCodecs generation reset / keyframe gate。
-- 当前仍不主动发送尺寸 ABR 控制。本轮只建立安全切换语义；下一步 Host 需要在尺寸变化时重建 H.264 Encoder、递增 Generation、先发送可靠 VideoConfig 再发送新 generation keyframe。
+- PR #56 不主动发送尺寸 ABR 控制，只建立安全切换语义；当前分支继续完成 Host H.264 Encoder rebuild、可靠 VideoConfig 发布和新 generation keyframe。
+
+### 0.2.5 H.264 运行期分辨率 Generation（当前分支）
+
+- `DesktopVideoControl` 新增可选 `TargetWidth / TargetHeight`；仅 H.264 Relay Desktop 会话允许运行期切换，JPEG 和 Native RDP 不进入该路径。
+- `DesktopVideoConfig / RemoteDesktopStatus` 新增 `MaxWidth / MaxHeight`，区分“当前实际编码尺寸”和“本次会话允许恢复到的分辨率上限”；Controller 会在发送控制消息前按 negotiated ceiling 拒绝越界请求。
+- Host 收到尺寸控制后先重新 Capture，并使用目标宽高作为最大边界按源屏幕比例计算真实偶数尺寸，因此 16:10、超宽屏不会被强制拉伸成 16:9。
+- 新尺寸先创建新的 Media Foundation H.264 Encoder 并请求 IDR；只有新 Encoder 创建成功、可靠 `VideoConfig(generation+1)` 发送成功后，才替换旧 Encoder。
+- 新 generation 的 `FrameID` 从 1 重新开始，但 Generation 单调递增；Host 在首个 keyframe 产生前不发送任何 delta frame，Viewer 可从该 generation 独立恢复。
+- 分辨率 generation 切换保留现有 ABR Controller 状态：只要 Codec、协商 FPS 和 bitrate ceiling 未变，就不会因尺寸变化清空 bitrate/FPS pressure/recovery 历史。
+- H.264 运行期失败后的 JPEG fallback 同样保持 Generation 单调递增，例如 G2 H.264 失败后使用 G3 JPEG，避免被 Controller 的 stale-config 防护正确拒绝后造成黑屏。
+- Wails Viewer 顶部新增“运行中分辨率”选择器；只在 Relay Desktop + H.264 时显示，并根据 `MaxWidth / MaxHeight` 禁用超出本次会话上限的档位。会话横幅同步显示实际尺寸与 `G<n>`，便于实机验证 Encoder / Decoder rebuild。
+- 当前仍由用户手动触发尺寸切换用于验证。下一步再把分辨率档位接入 scene-aware ABR，并为降档/升档增加更长的 pressure/recovery hysteresis，避免网络波动导致频繁 Encoder rebuild。
 
 ### 0.3 本轮进度（2026-09-22）
 

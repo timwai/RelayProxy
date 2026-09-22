@@ -144,6 +144,8 @@ type RemoteDesktopStatus struct {
 	Codec       string         `json:"codec,omitempty"`
 	Width       int            `json:"width,omitempty"`
 	Height      int            `json:"height,omitempty"`
+	MaxWidth    int            `json:"maxWidth,omitempty"`
+	MaxHeight   int            `json:"maxHeight,omitempty"`
 	FPS         int            `json:"fps,omitempty"`
 	ListenAddr  string         `json:"listenAddr,omitempty"`
 	PathTCP     string         `json:"pathTcp,omitempty"`
@@ -271,6 +273,8 @@ type DesktopCursorState struct {
 type DesktopVideoControl struct {
 	TargetBitrate int `json:"targetBitrate,omitempty"`
 	TargetFPS     int `json:"targetFps,omitempty"`
+	TargetWidth   int `json:"targetWidth,omitempty"`
+	TargetHeight  int `json:"targetHeight,omitempty"`
 }
 
 type DesktopVideoConfig struct {
@@ -279,6 +283,8 @@ type DesktopVideoConfig struct {
 	CodecString   string `json:"codecString,omitempty"`
 	Width         int    `json:"width"`
 	Height        int    `json:"height"`
+	MaxWidth      int    `json:"maxWidth,omitempty"`
+	MaxHeight     int    `json:"maxHeight,omitempty"`
 	FPS           int    `json:"fps"`
 	TargetBitrate int    `json:"targetBitrate"`
 	MaxBitrate    int    `json:"maxBitrate,omitempty"`

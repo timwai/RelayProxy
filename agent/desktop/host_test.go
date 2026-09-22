@@ -165,3 +165,42 @@ func TestHostDesktopCapabilitiesIncludeDynamicCaptureSnapshot(t *testing.T) {
 		t.Fatalf("codec capabilities=%+v", caps.Codecs)
 	}
 }
+
+func TestValidateDesktopResolutionTarget(t *testing.T) {
+	target, err := validateDesktopResolutionTarget(1280, 720, 1920, 1080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.MaxWidth != 1280 || target.MaxHeight != 720 {
+		t.Fatalf("target=%+v", target)
+	}
+
+	for _, test := range []struct {
+		width, height int
+	}{
+		{0, 720},
+		{1280, 0},
+		{319, 180},
+		{320, 179},
+		{1921, 1080},
+		{1920, 1081},
+	} {
+		if _, err := validateDesktopResolutionTarget(test.width, test.height, 1920, 1080); err == nil {
+			t.Fatalf("invalid resolution %dx%d accepted", test.width, test.height)
+		}
+	}
+}
+
+func TestQueueLatestResolutionReplacesPendingValue(t *testing.T) {
+	ch := make(chan desktopResolutionTarget, 1)
+	queueLatestResolution(ch, desktopResolutionTarget{MaxWidth: 1920, MaxHeight: 1080})
+	queueLatestResolution(ch, desktopResolutionTarget{MaxWidth: 1280, MaxHeight: 720})
+	select {
+	case got := <-ch:
+		if got.MaxWidth != 1280 || got.MaxHeight != 720 {
+			t.Fatalf("latest resolution=%+v", got)
+		}
+	default:
+		t.Fatal("latest resolution update missing")
+	}
+}

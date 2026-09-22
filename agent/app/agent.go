@@ -1274,6 +1274,8 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 		out.Codec = config.Codec
 		out.Width = config.Width
 		out.Height = config.Height
+		out.MaxWidth = config.MaxWidth
+		out.MaxHeight = config.MaxHeight
 		out.FPS = config.FPS
 		if target, ok := a.remoteDesktopTarget(targetID); ok {
 			out.TargetName = target.Name
@@ -1394,6 +1396,18 @@ func (a *Agent) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
 	defer cancel()
 	return session.SendInput(ctx, event)
+}
+
+func (a *Agent) SetRemoteDesktopResolution(width, height int) error {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	return session.RequestResolution(ctx, width, height)
 }
 
 func (a *Agent) RequestRemoteDesktopIDR() error {

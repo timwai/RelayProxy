@@ -12,6 +12,113 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+type h264RuntimeError struct {
+	Generation uint32
+	Err        error
+}
+
+func (e *h264RuntimeError) Error() string {
+	if e == nil || e.Err == nil {
+		return "H.264 runtime failure"
+	}
+	return e.Err.Error()
+}
+
+func (e *h264RuntimeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func nextDesktopMediaGeneration(current uint32) (uint32, error) {
+	if current == ^uint32(0) {
+		return 0, errors.New("Relay Desktop media generation exhausted")
+	}
+	if current == 0 {
+		return 1, nil
+	}
+	return current + 1, nil
+}
+
+type h264GenerationEncoder interface {
+	desktopcodec.Encoder
+	SequenceHeader() []byte
+}
+
+type h264GenerationEncoderOpener func(
+	context.Context,
+	desktopcodec.VideoConfig,
+	bool,
+) (h264GenerationEncoder, error)
+
+func openMFH264GenerationEncoder(
+	ctx context.Context,
+	cfg desktopcodec.VideoConfig,
+	preferHardware bool,
+) (h264GenerationEncoder, error) {
+	return desktopcodec.OpenMFH264Encoder(ctx, cfg, preferHardware)
+}
+
+func openH264GenerationEncoder(
+	ctx context.Context,
+	cfg desktopcodec.VideoConfig,
+	opener h264GenerationEncoderOpener,
+) (h264GenerationEncoder, desktopcodec.VideoConfig, []byte, error) {
+	if opener == nil {
+		return nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrEncoderUnavailable
+	}
+	normalized, err := desktopcodec.NormalizeVideoConfig(cfg)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	encoder, err := opener(ctx, normalized, true)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	if encoder == nil {
+		return nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrEncoderUnavailable
+	}
+	// A fresh encoder normally starts with an IDR. Ask explicitly as well so
+	// every generation can be decoded independently. Unsupported control is
+	// tolerated; other control failures indicate that this encoder instance
+	// is not healthy enough to advertise as a new generation.
+	if err := encoder.ForceIDR(ctx); err != nil && !errors.Is(err, desktopcodec.ErrEncoderControlUnsupported) {
+		_ = encoder.Close()
+		return nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	return encoder, normalized, encoder.SequenceHeader(), nil
+}
+
+func h264DesktopVideoConfig(
+	generation uint32,
+	cfg desktopcodec.VideoConfig,
+	maxWidth int,
+	maxHeight int,
+	maxBitrate int,
+	displayID string,
+	sequenceHeader []byte,
+) protocol.DesktopVideoConfig {
+	if maxBitrate <= 0 {
+		maxBitrate = cfg.TargetBitrate
+	}
+	return protocol.DesktopVideoConfig{
+		Generation:    generation,
+		Codec:         "h264",
+		CodecString:   desktopcodec.H264CodecString(sequenceHeader),
+		Width:         cfg.Width,
+		Height:        cfg.Height,
+		MaxWidth:      maxWidth,
+		MaxHeight:     maxHeight,
+		FPS:           cfg.FPS,
+		TargetBitrate: cfg.TargetBitrate,
+		MaxBitrate:    maxBitrate,
+		Chroma:        "420",
+		BitDepth:      8,
+		DisplayID:     displayID,
+	}
+}
+
 func (h *Host) canEncodeH264() bool {
 	for _, capability := range h.CodecCapabilities() {
 		if capability.Codec == "h264" && capability.Encode {
@@ -37,27 +144,42 @@ func (h *Host) streamSessionFrames(
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
+	resolutionUpdates <-chan desktopResolutionTarget,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
+	jpegGeneration := uint32(1)
 	if preference == "h264" && h.canEncodeH264() {
-		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates); err == nil || errors.Is(err, context.Canceled) {
+		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {
-			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
+			var runtimeErr *h264RuntimeError
+			if errors.As(err, &runtimeErr) {
+				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
+				if generationErr != nil {
+					return generationErr
+				}
+				jpegGeneration = nextGeneration
+				log.Printf("[Desktop] H.264 runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
+					runtimeErr.Generation, jpegGeneration, runtimeErr.Err)
+			} else {
+				log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
+			}
 		}
 	}
 	if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
-		Generation:    1,
+		Generation:    jpegGeneration,
 		Codec:         "jpeg",
 		Width:         cfg.MaxWidth,
 		Height:        cfg.MaxHeight,
+		MaxWidth:      cfg.MaxWidth,
+		MaxHeight:     cfg.MaxHeight,
 		FPS:           cfg.MaxFPS,
 		TargetBitrate: cfg.MaxBitrate,
 		DisplayID:     cfg.DisplayID,
 	}); err != nil {
 		return err
 	}
-	return h.streamFrames(ctx, conn, cfg, captureBackend, fpsUpdates)
+	return h.streamFrames(ctx, conn, cfg, captureBackend, jpegGeneration, fpsUpdates)
 }
 
 func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
@@ -80,6 +202,28 @@ func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
 		copy(dst.Pix[dstOffset:dstOffset+width*4], frame.Pix[srcOffset:srcOffset+width*4])
 	}
 	return dst
+}
+
+func h264ResolutionConfig(
+	src *image.RGBA,
+	target desktopResolutionTarget,
+	current desktopcodec.VideoConfig,
+) (*image.RGBA, desktopcodec.VideoConfig, error) {
+	if src == nil {
+		return nil, current, errors.New("H.264 resolution update requires a capture frame")
+	}
+	frame := fitRGBAEven(src, target.MaxWidth, target.MaxHeight)
+	if frame == nil {
+		return nil, current, errors.New("H.264 resolution update produced an empty frame")
+	}
+	next := current
+	next.Width = frame.Bounds().Dx()
+	next.Height = frame.Bounds().Dy()
+	normalized, err := desktopcodec.NormalizeVideoConfig(next)
+	if err != nil {
+		return nil, current, err
+	}
+	return frame, normalized, nil
 }
 
 func sendEncodedDesktopFrame(
@@ -143,7 +287,15 @@ func (h *Host) streamH264Frames(
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
-) error {
+	resolutionUpdates <-chan desktopResolutionTarget,
+) (retErr error) {
+	var advertised bool
+	var advertisedGeneration uint32
+	defer func() {
+		if retErr != nil && advertised && !errors.Is(retErr, context.Canceled) {
+			retErr = &h264RuntimeError{Generation: advertisedGeneration, Err: retErr}
+		}
+	}()
 	first, err := h.source.Capture(ctx)
 	if err != nil {
 		return err
@@ -164,30 +316,31 @@ func (h *Host) streamH264Frames(
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
 	}
-	encoder, err := desktopcodec.OpenMFH264Encoder(ctx, videoCfg, true)
+	encoder, normalizedCfg, sequenceHeader, err := openH264GenerationEncoder(
+		ctx, videoCfg, openMFH264GenerationEncoder,
+	)
 	if err != nil {
 		return err
 	}
-	defer encoder.Close()
+	videoCfg = normalizedCfg
+	defer func() {
+		if encoder != nil {
+			_ = encoder.Close()
+		}
+	}()
 
-	_ = encoder.ForceIDR(ctx)
-	sequenceHeader := encoder.SequenceHeader()
-	codecString := desktopcodec.H264CodecString(sequenceHeader)
-	if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
-		Generation:    1,
-		Codec:         "h264",
-		CodecString:   codecString,
-		Width:         videoCfg.Width,
-		Height:        videoCfg.Height,
-		FPS:           videoCfg.FPS,
-		TargetBitrate: videoCfg.TargetBitrate,
-		MaxBitrate:    videoCfg.TargetBitrate,
-		Chroma:        "420",
-		BitDepth:      8,
-		DisplayID:     cfg.DisplayID,
-	}); err != nil {
+	generation := uint32(1)
+	sessionMaxBitrate := cfg.MaxBitrate
+	if sessionMaxBitrate <= 0 {
+		sessionMaxBitrate = videoCfg.TargetBitrate
+	}
+	if err := sendVideoConfig(ctx, conn, h264DesktopVideoConfig(
+		generation, videoCfg, cfg.MaxWidth, cfg.MaxHeight, sessionMaxBitrate, cfg.DisplayID, sequenceHeader,
+	)); err != nil {
 		return err
 	}
+	advertised = true
+	advertisedGeneration = generation
 
 	sessionID, err := newMediaSessionID()
 	if err != nil {
@@ -204,6 +357,7 @@ func (h *Host) streamH264Frames(
 	var lastCaptureMs float64
 	var sendQueueDelayMs float64
 	var droppedFrames uint64
+	needsGenerationKeyFrame := true
 	targetFPS := videoCfg.FPS
 	frameInterval := frameIntervalForFPS(targetFPS)
 	ticker := time.NewTicker(frameInterval)
@@ -215,7 +369,7 @@ func (h *Host) streamH264Frames(
 		if frame == nil || frame.Bounds().Dx() != videoCfg.Width || frame.Bounds().Dy() != videoCfg.Height {
 			return errors.New("desktop capture dimensions changed during H.264 session")
 		}
-		if now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
+		if needsGenerationKeyFrame || now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
 			if err := encoder.ForceIDR(ctx); err == nil {
 				lastIDR = now
 			}
@@ -232,14 +386,22 @@ func (h *Host) streamH264Frames(
 			return err
 		}
 		for _, encoded := range packets {
+			if needsGenerationKeyFrame && !encoded.KeyFrame {
+				// Never expose a new generation starting from a dependent frame.
+				// Keep asking for IDR on subsequent captures until the encoder
+				// produces a keyframe that the Viewer can start from.
+				continue
+			}
 			data := encoded.Data
 			if encoded.KeyFrame {
+				needsGenerationKeyFrame = false
+				lastIDR = now
 				data = desktopcodec.H264WithSequenceHeader(data, sequenceHeader)
 			}
 			mediaFrame := desktopmedia.EncodedFrame{
 				SessionID:  sessionID,
 				StreamID:   1,
-				Generation: 1,
+				Generation: generation,
 				FrameID:    frameID,
 				Timestamp:  uint64(encoded.Timestamp.Microseconds()),
 				KeyFrame:   encoded.KeyFrame,
@@ -303,7 +465,7 @@ func (h *Host) streamH264Frames(
 			}
 
 		case targetBitrate := <-bitrateUpdates:
-			nextConfig, err := reconfigureH264Bitrate(ctx, encoder, videoCfg, targetBitrate, cfg.MaxBitrate)
+			nextConfig, err := reconfigureH264Bitrate(ctx, encoder, videoCfg, targetBitrate, sessionMaxBitrate)
 			if err != nil {
 				if !errors.Is(err, desktopcodec.ErrEncoderControlUnsupported) {
 					log.Printf("[Desktop] H.264 bitrate reconfigure failed target=%d: %v", targetBitrate, err)
@@ -323,6 +485,67 @@ func (h *Host) streamH264Frames(
 			frameInterval = frameIntervalForFPS(targetFPS)
 			ticker.Reset(frameInterval)
 			log.Printf("[Desktop] H.264 capture fps updated=%d", targetFPS)
+
+		case target := <-resolutionUpdates:
+			now := time.Now()
+			captureStarted := now
+			rawFrame, err := h.source.Capture(ctx)
+			lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
+			if err != nil {
+				return err
+			}
+			nextFrame, nextConfig, err := h264ResolutionConfig(rawFrame, target, videoCfg)
+			if err != nil {
+				log.Printf("[Desktop] H.264 resolution update rejected target=%dx%d: %v",
+					target.MaxWidth, target.MaxHeight, err)
+				continue
+			}
+			if nextConfig.Width == videoCfg.Width && nextConfig.Height == videoCfg.Height {
+				continue
+			}
+			nextGeneration, err := nextDesktopMediaGeneration(generation)
+			if err != nil {
+				return err
+			}
+			nextEncoder, nextConfig, nextSequenceHeader, err := openH264GenerationEncoder(
+				ctx, nextConfig, openMFH264GenerationEncoder,
+			)
+			if err != nil {
+				log.Printf("[Desktop] H.264 encoder rebuild failed target=%dx%d: %v",
+					nextConfig.Width, nextConfig.Height, err)
+				continue
+			}
+			nextProtocolConfig := h264DesktopVideoConfig(
+				nextGeneration, nextConfig, cfg.MaxWidth, cfg.MaxHeight, sessionMaxBitrate, cfg.DisplayID, nextSequenceHeader,
+			)
+			if err := sendVideoConfig(ctx, conn, nextProtocolConfig); err != nil {
+				_ = nextEncoder.Close()
+				return err
+			}
+			advertisedGeneration = nextGeneration
+
+			oldEncoder := encoder
+			encoder = nextEncoder
+			videoCfg = nextConfig
+			sequenceHeader = nextSequenceHeader
+			generation = nextGeneration
+			frameID = 1
+			needsGenerationKeyFrame = true
+			lastIDR = now
+			lastEncoderStats = encoder.Stats()
+			lastCapturedFrames = capturedFrames
+			lastReportAt = now
+			if oldEncoder != nil {
+				if err := oldEncoder.Close(); err != nil {
+					log.Printf("[Desktop] close previous H.264 generation failed: %v", err)
+				}
+			}
+			log.Printf("[Desktop] H.264 generation switched=%d size=%dx%d bitrate=%d",
+				generation, videoCfg.Width, videoCfg.Height, videoCfg.TargetBitrate)
+			if err := sendRGBA(nextFrame, now); err != nil {
+				return err
+			}
+
 		case scheduled := <-ticker.C:
 			now := time.Now()
 			if dropped := staleScheduledFrameCount(scheduled, now, frameInterval); dropped > 0 {

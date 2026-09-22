@@ -123,6 +123,10 @@ func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) erro
 	return b.agent.SendRemoteDesktopInput(event)
 }
 
+func (b *UIBridge) SetRemoteDesktopResolution(width, height int) error {
+	return b.agent.SetRemoteDesktopResolution(width, height)
+}
+
 func (b *UIBridge) RequestRemoteDesktopIDR() error {
 	return b.agent.RequestRemoteDesktopIDR()
 }

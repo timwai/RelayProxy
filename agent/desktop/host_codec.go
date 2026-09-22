@@ -37,10 +37,11 @@ func (h *Host) streamSessionFrames(
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
+	resolutionUpdates <-chan desktopResolutionTarget,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	if preference == "h264" && h.canEncodeH264() {
-		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates); err == nil || errors.Is(err, context.Canceled) {
+		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {
 			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
@@ -143,6 +144,7 @@ func (h *Host) streamH264Frames(
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
+	resolutionUpdates <-chan desktopResolutionTarget,
 ) error {
 	first, err := h.source.Capture(ctx)
 	if err != nil {

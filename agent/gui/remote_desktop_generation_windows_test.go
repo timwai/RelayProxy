@@ -41,10 +41,10 @@ func TestNativeDesktopFrameNeedsRebuild(t *testing.T) {
 			want:       true,
 		},
 		{
-			name:       "legacy zero generation stable",
-			width:      1280,
-			height:     720,
-			frame:      protocol.RemoteDesktopFrame{Width: 1280, Height: 720},
+			name:   "legacy zero generation stable",
+			width:  1280,
+			height: 720,
+			frame:  protocol.RemoteDesktopFrame{Width: 1280, Height: 720},
 		},
 	}
 	for _, tt := range tests {

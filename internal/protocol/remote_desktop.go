@@ -211,8 +211,8 @@ type DesktopSessionMessage struct {
 	VideoConfig *DesktopVideoConfig    `json:"videoConfig,omitempty"`
 	Cursor      *DesktopCursorState    `json:"cursor,omitempty"`
 	Clipboard   *DesktopClipboardState `json:"clipboard,omitempty"`
-	Probe       *DesktopSessionProbe    `json:"probe,omitempty"`
-	Stats       *DesktopSessionStats    `json:"stats,omitempty"`
+	Probe       *DesktopSessionProbe   `json:"probe,omitempty"`
+	Stats       *DesktopSessionStats   `json:"stats,omitempty"`
 }
 
 const (

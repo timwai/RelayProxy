@@ -93,6 +93,33 @@ func sendEncodedDesktopFrame(ctx context.Context, conn *desktopmedia.MediaConn, 
 	return nil
 }
 
+func reconfigureH264Bitrate(
+	ctx context.Context,
+	encoder desktopcodec.Encoder,
+	current desktopcodec.VideoConfig,
+	targetBitrate int,
+	maxBitrate int,
+) (desktopcodec.VideoConfig, error) {
+	if encoder == nil {
+		return current, desktopcodec.ErrEncoderUnavailable
+	}
+	if targetBitrate < 250_000 {
+		targetBitrate = 250_000
+	}
+	if maxBitrate > 0 && targetBitrate > maxBitrate {
+		targetBitrate = maxBitrate
+	}
+	if targetBitrate == current.TargetBitrate {
+		return current, nil
+	}
+	next := current
+	next.TargetBitrate = targetBitrate
+	if err := encoder.Reconfigure(ctx, next); err != nil {
+		return current, err
+	}
+	return next, nil
+}
+
 func (h *Host) streamH264Frames(
 	ctx context.Context,
 	conn *desktopmedia.MediaConn,
@@ -249,25 +276,17 @@ func (h *Host) streamH264Frames(
 			}
 
 		case targetBitrate := <-bitrateUpdates:
-			if targetBitrate < 250_000 {
-				targetBitrate = 250_000
-			}
-			if cfg.MaxBitrate > 0 && targetBitrate > cfg.MaxBitrate {
-				targetBitrate = cfg.MaxBitrate
-			}
-			if targetBitrate == videoCfg.TargetBitrate {
-				continue
-			}
-			nextConfig := videoCfg
-			nextConfig.TargetBitrate = targetBitrate
-			if err := encoder.Reconfigure(ctx, nextConfig); err != nil {
+			nextConfig, err := reconfigureH264Bitrate(ctx, encoder, videoCfg, targetBitrate, cfg.MaxBitrate)
+			if err != nil {
 				if !errors.Is(err, desktopcodec.ErrEncoderControlUnsupported) {
 					log.Printf("[Desktop] H.264 bitrate reconfigure failed target=%d: %v", targetBitrate, err)
 				}
 				continue
 			}
-			videoCfg = nextConfig
-			log.Printf("[Desktop] H.264 target bitrate updated=%d", targetBitrate)
+			if nextConfig.TargetBitrate != videoCfg.TargetBitrate {
+				videoCfg = nextConfig
+				log.Printf("[Desktop] H.264 target bitrate updated=%d", videoCfg.TargetBitrate)
+			}
 		case now := <-ticker.C:
 			captureStarted := time.Now()
 			frame, err := h.source.Capture(ctx)

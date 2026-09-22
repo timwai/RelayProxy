@@ -288,6 +288,7 @@ func (s *sessionStatsTracker) AdaptationSnapshot(now time.Time) protocol.Desktop
 	stats.RTTMs = s.rttMs
 	stats.JitterMs = s.jitterMs
 	stats.LossPercent = lossPercent
+	stats.DroppedFrames += s.dropped
 	if s.path != "" {
 		stats.Path = s.path
 	}
@@ -346,7 +347,6 @@ func (s *sessionStatsTracker) DiagnosticsSnapshot(now time.Time) protocol.Deskto
 	stats.RTTMs = s.rttMs
 	stats.JitterMs = s.jitterMs
 	stats.LossPercent = lossPercent
-	stats.DroppedFrames += s.dropped
 	if s.path != "" {
 		stats.Path = s.path
 	}

@@ -305,6 +305,13 @@ func (s *ControllerSession) Stats() protocol.DesktopSessionStats {
 	return s.stats.Snapshot(time.Now())
 }
 
+func (s *ControllerSession) UpdateViewerStats(stats protocol.DesktopSessionStats) {
+	if s == nil || s.stats == nil {
+		return
+	}
+	s.stats.MergeViewer(stats)
+}
+
 func (s *ControllerSession) TargetID() string {
 	if s == nil {
 		return ""

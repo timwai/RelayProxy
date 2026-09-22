@@ -30,10 +30,12 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 P2P 分支进行中 | Stats 与 bitrate-only ABR 已合并 main；当前复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，为 Relay Desktop 增加 `desktop_media` P2P purpose。可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`，失败或断开自动回退 QUIC Datagram Relay |
+| RD2 P2P / ABR / Stats | 🧪 路径可观测性收尾中 | Stats、bitrate-only ABR、P2P Datagram 已合并 main；P2P 已使用独立 Desktop MAC domain。当前补 path switch / IDR request 计数，并在 Relay↔P2P 切换时主动触发 H.264 recovery，便于后续 path scoring/hysteresis 与实机验证 |
 
 ### 0.1 已合并主线的关键进度
 
+- P2P 安全 domain separation 已通过 PR #40 合并到 `main`（merge `f6f13f4b3e672d325ced1d70572bc4637659ed2a`）：Relay Desktop 的 punch/data MAC 使用独立 `relayproxy-desktop-media-*` domain，Native RDP 保持原 wire domain；同 token/session ID 跨 domain 验签必须失败。
+- RD2 P2P Datagram 已通过 PR #39 合并到 `main`（merge `00c547e6e643664d34ec479c9ce4b9be4559baa2`）：可靠控制保持 Relay，媒体打洞成功后热切 `udp_p2p`，失败/断开自动回退 QUIC Datagram Relay；`desktop_media` lease 与 Native RDP TCP/3389 权限严格隔离。
 - RD2 bitrate-only ABR 已通过 PR #38 合并到 `main`（merge `0cfb166c6a8df29579db07a0f7b377f17bec437d`）：500 ms 网络窗口基于丢包/Jitter/异常 RTT/新增 dropped frame 快速降码率，稳定窗口后缓慢恢复；用户设置码率保持为上限，Media Foundation H.264 通过 `ICodecAPI MeanBitRate` 热更新，无需重建 Encoder。
 - RD2 Stats 基础已通过 PR #37 合并到 `main`（merge `f29cca17aeef2e104f240b397c3e00db92282f0d`）：Controller 聚合 RTT/Jitter/丢包/接收码率与帧率，Host 上报 Capture/Encode 指标，Native Viewer 上报 Decode/Render FPS 与耗时。
 - GPU 光标合成已通过 PR #36 合并到 `main`：amd64 优先使用第二个 BGRA VideoProcessor stream 在 GPU 叠加远端光标；能力不足和 ARM64 自动回退 CPU 光标合成。

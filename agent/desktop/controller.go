@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"image/jpeg"
+	"log"
 	"sync"
 	"time"
 
@@ -37,6 +38,9 @@ type ControllerSession struct {
 	videoConfig protocol.DesktopVideoConfig
 	configReady chan struct{}
 	configOnce  sync.Once
+
+	recoveryMu sync.Mutex
+	recovery   h264RecoveryState
 }
 
 func StartController(parent context.Context, targetID string, dial DesktopMediaDialer) (*ControllerSession, error) {
@@ -129,6 +133,57 @@ func snapshotFromEncodedFrame(frame *desktopmedia.EncodedFrame, config protocol.
 	return snapshot, true
 }
 
+func (s *ControllerSession) sendIDRRequest(ctx context.Context) error {
+	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+		Type: protocol.DesktopSessionIDRRequest,
+	})
+}
+
+func (s *ControllerSession) markIDRRequestFailed() {
+	s.recoveryMu.Lock()
+	s.recovery.RequestFailed()
+	s.recoveryMu.Unlock()
+}
+
+func (s *ControllerSession) RequestIDR(ctx context.Context) error {
+	if s == nil || !s.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	s.recoveryMu.Lock()
+	request := s.recovery.ForceRecovery()
+	s.recoveryMu.Unlock()
+	if !request {
+		return nil
+	}
+	if err := s.sendIDRRequest(ctx); err != nil {
+		s.markIDRRequestFailed()
+		return err
+	}
+	return nil
+}
+
+func (s *ControllerSession) acceptVideoFrame(ctx context.Context, frame *desktopmedia.EncodedFrame, config protocol.DesktopVideoConfig, configured bool) bool {
+	if !configured || config.Codec != "h264" {
+		s.recoveryMu.Lock()
+		s.recovery.Reset()
+		s.recoveryMu.Unlock()
+		return true
+	}
+	s.recoveryMu.Lock()
+	accept, request := s.recovery.Observe(frame, config)
+	s.recoveryMu.Unlock()
+	if request {
+		requestCtx, cancel := context.WithTimeout(ctx, time.Second)
+		err := s.sendIDRRequest(requestCtx)
+		cancel()
+		if err != nil {
+			s.markIDRRequestFailed()
+			log.Printf("[Desktop] request H.264 IDR after frame loss failed: %v", err)
+		}
+	}
+	return accept
+}
+
 func (s *ControllerSession) readLoop(ctx context.Context) {
 	defer close(s.done)
 	defer s.conn.Close()
@@ -143,6 +198,9 @@ func (s *ControllerSession) readLoop(ctx context.Context) {
 			continue
 		}
 		config, configured := s.currentVideoConfig(ctx)
+		if !s.acceptVideoFrame(ctx, frame, config, configured) {
+			continue
+		}
 		snapshot, ok := snapshotFromEncodedFrame(frame, config, configured)
 		if !ok {
 			continue

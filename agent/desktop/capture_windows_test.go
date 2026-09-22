@@ -18,7 +18,7 @@ func TestCopyDXGIFrameConvertsBGRAAndStride(t *testing.T) {
 		7, 8, 9, 0, 10, 11, 12, 0, 88, 88, 88, 88,
 	}
 	frame := windowsCaptureFrame{Pix: pix, Width: 2, Height: 2, Stride: 12, Sequence: 1, At: time.Now()}
-	got, err := copyDXGIFrame(frame, nil)
+	got, err := copyWindowsBGRAFrame(frame, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,11 +44,11 @@ func TestCopyDXGIFrameReusesBuffer(t *testing.T) {
 		Pix:   []byte{1, 2, 3, 4},
 		Width: 1, Height: 1, Stride: 4, Sequence: 1, At: time.Now(),
 	}
-	first, err := copyDXGIFrame(frame, nil)
+	first, err := copyWindowsBGRAFrame(frame, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := copyDXGIFrame(frame, first)
+	second, err := copyWindowsBGRAFrame(frame, first)
 	if err != nil {
 		t.Fatal(err)
 	}

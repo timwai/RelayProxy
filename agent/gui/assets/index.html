@@ -772,7 +772,10 @@
               <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Relay Desktop 预览</div>
               <div id="desktop-viewer-meta" class="text-[10px] text-slate-500 dark:text-slate-400">等待视频帧… · 点击画面后可控制键鼠</div>
             </div>
-            <button type="button" onclick="toggleDesktopFullscreen()" class="rp-btn">全屏</button>
+            <div class="flex items-center gap-2">
+              <button id="desktop-native-viewer-btn" type="button" onclick="openDesktopNativeViewer()" class="rp-btn hidden">原生 Viewer</button>
+              <button type="button" onclick="toggleDesktopFullscreen()" class="rp-btn">全屏</button>
+            </div>
           </div>
           <div id="desktop-viewer-stage" class="relative bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
             <img id="desktop-viewer-image" alt="远程桌面画面" tabindex="0" class="block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default" draggable="false">
@@ -1915,6 +1918,19 @@
       }
     }
 
+    async function openDesktopNativeViewer() {
+      if (!hasFn('goOpenRemoteDesktopNativeViewer')) return;
+      var raw = await call('goOpenRemoteDesktopNativeViewer');
+      var result = parseJSONResult(raw, { ok:false });
+      if (!result.ok) {
+        toast(result.message || '原生 Viewer 启动失败');
+        return;
+      }
+      toast(result.alreadyOpen ? '原生 Viewer 已切到前台' :
+        '原生 Viewer 已启动' + (result.hardware ? ' · Media Foundation 硬件解码' : ' · Media Foundation 解码'));
+    }
+    window.openDesktopNativeViewer = openDesktopNativeViewer;
+
     function toggleDesktopFullscreen() {
       var stage = $('desktop-viewer-stage');
       if (!stage) return;
@@ -2672,6 +2688,9 @@
       // window, but it has no process-replacement binding. Keep the restart
       // action visible only where the native launcher is available.
       if (!hasFn('goRestart') && $('restart-card')) { $('restart-card').classList.add('hidden'); }
+      if (hasFn('goOpenRemoteDesktopNativeViewer') && $('desktop-native-viewer-btn')) {
+        $('desktop-native-viewer-btn').classList.remove('hidden');
+      }
 
       // Go pushes status every 1.5s; these polls cover the window's first paint.
       setInterval(refreshStatus, 3000);

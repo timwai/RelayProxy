@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	desktopcodec "relayproxy/agent/desktop/codec"
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
 )
@@ -21,6 +22,16 @@ type CaptureSource interface {
 	Capture(context.Context) (*image.RGBA, error)
 	Close() error
 }
+
+// RawCaptureSource is an optional zero-staging path for capture backends that
+// already expose encoder-friendly pixels. Returned Pix may be borrowed from the
+// capture backend and must be consumed before the next CaptureRaw, Capture or
+// Close call. The bool is false when the backend cannot provide the requested
+// frame without falling back to the regular RGBA path.
+type RawCaptureSource interface {
+	CaptureRaw(context.Context) (desktopcodec.RawFrame, bool, error)
+}
+
 
 // SessionCaptureSource lets a backend acquire expensive per-session resources
 // (for example IDXGIOutputDuplication) only while somebody is actually

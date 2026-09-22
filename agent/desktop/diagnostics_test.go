@@ -152,7 +152,7 @@ func TestSummarizeDesktopDiagnostics(t *testing.T) {
 			Stats: protocol.DesktopSessionStats{
 				Path: "relay", RTTMs: 50, JitterMs: 5, LossPercent: 4,
 				SendQueueDelayMs: 10, ActualBitrate: 5_000_000, ReceiveFPS: 10,
-				DroppedFrames: 3, CaptureBackend: "gdi",
+				DroppedFrames: 3, CaptureBackend: "gdi", CaptureFormat: "rgba",
 				EncoderBackend: "jpeg-go", DecoderBackend: "image",
 			},
 			Adaptation: DesktopDiagnosticAdaptation{

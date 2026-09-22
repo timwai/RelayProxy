@@ -16,6 +16,7 @@
   window.goDisconnectRemoteDesktop = () => invoke('DisconnectRemoteDesktop');
   window.goGetRemoteDesktopStatus = () => invoke('GetRemoteDesktopStatus');
   window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');
+  window.goGetRemoteDesktopCursor = cursorID => invoke('GetRemoteDesktopCursor', cursorID || '');
   window.goSendRemoteDesktopInput = raw => invoke('SendRemoteDesktopInput', raw);
   window.goRequestRemoteDesktopIDR = () => invoke('RequestRemoteDesktopIDR');
   window.goGetLogs = () => invoke('GetLogs');

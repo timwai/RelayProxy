@@ -142,6 +142,10 @@ func TestRemoteDesktopStatsExposeRealtimeCongestionSignals(t *testing.T) {
 		"'Capture ' + stats.captureMs.toFixed(1) + ' ms'",
 		"'Encode ' + stats.encodeMs.toFixed(1) + ' ms'",
 		"'Target FPS ' + Number(stats.targetFps)",
+		"'Capture ' + stats.captureBackend",
+		"'Encoder ' + stats.encoderBackend + (stats.encoderHardware ? ' HW' : ' SW')",
+		"stats.decoderBackend || (desktopVideoDecoder ? 'webcodecs' : '')",
+		"'Media: ' + mediaLabel",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop stats UI missing %q", want)

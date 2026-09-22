@@ -44,6 +44,13 @@ type windowsFrameStream interface {
 	Close() error
 }
 
+// windowsNativeFrameStream is implemented only by backends that can retain an
+// owned GPU/native surface beyond the capture call. CPU-only DXGI/GDI streams
+// continue to expose windowsCaptureFrame and need no native-surface methods.
+type windowsNativeFrameStream interface {
+	NativeFrame(context.Context) (NativeCaptureFrame, error)
+}
+
 type windowsFrameStreamFactory interface {
 	Open(
 		context.Context,

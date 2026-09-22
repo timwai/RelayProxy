@@ -18,19 +18,25 @@ type NetworkEstimate struct {
 
 type MediaDecision struct {
 	TargetBitrate int
+	TargetFPS     int
 	Changed       bool
 	ForceIDR      bool
 	Reason        string
 }
 
 type Config struct {
-	Scene          protocol.DesktopScene
-	MinBitrate     int
-	MaxBitrate     int
-	InitialBitrate int
-	StableWindows  int
-	IncreaseRatio  float64
-	IncreaseFloor  int
+	Scene               protocol.DesktopScene
+	MinBitrate          int
+	MaxBitrate          int
+	InitialBitrate      int
+	MinFPS              int
+	MaxFPS              int
+	InitialFPS          int
+	StableWindows       int
+	FPSPressureWindows  int
+	FPSRecoveryWindows  int
+	IncreaseRatio       float64
+	IncreaseFloor       int
 }
 
 func DefaultConfig(scene protocol.DesktopScene, maxBitrate int) Config {
@@ -47,22 +53,57 @@ func DefaultConfig(scene protocol.DesktopScene, maxBitrate int) Config {
 	if minBitrate > maxBitrate {
 		minBitrate = maxBitrate
 	}
-	return Config{
-		Scene:          scene,
-		MinBitrate:     minBitrate,
-		MaxBitrate:     maxBitrate,
-		InitialBitrate: maxBitrate,
-		StableWindows:  4,
-		IncreaseRatio:  1.08,
-		IncreaseFloor:  150_000,
+	minFPS := 10
+	if scene == protocol.DesktopSceneGaming || scene == protocol.DesktopScenePerformance {
+		minFPS = 30
 	}
+	return Config{
+		Scene:              scene,
+		MinBitrate:         minBitrate,
+		MaxBitrate:         maxBitrate,
+		InitialBitrate:     maxBitrate,
+		MinFPS:             minFPS,
+		MaxFPS:             30,
+		InitialFPS:         30,
+		StableWindows:      4,
+		FPSPressureWindows: 4,
+		FPSRecoveryWindows: 8,
+		IncreaseRatio:      1.08,
+		IncreaseFloor:      150_000,
+	}
+}
+
+// AdaptiveMinFPS returns the lowest capture cadence ABR may choose for the
+// negotiated scene. Gaming/performance preserve the negotiated FPS; desktop
+// and quality-oriented scenes may trade motion cadence for realtime latency.
+func AdaptiveMinFPS(scene protocol.DesktopScene, maxFPS int) int {
+	if maxFPS <= 0 {
+		return 0
+	}
+	if scene == protocol.DesktopSceneGaming || scene == protocol.DesktopScenePerformance {
+		return maxFPS
+	}
+	minFPS := maxFPS / 3
+	if minFPS < 5 {
+		minFPS = 5
+	}
+	if minFPS > 15 {
+		minFPS = 15
+	}
+	if minFPS > maxFPS {
+		minFPS = maxFPS
+	}
+	return minFPS
 }
 
 type Controller struct {
 	cfg Config
 
 	target      int
+	targetFPS   int
 	stable      int
+	fpsPressure int
+	fpsStable   int
 	lastDropped uint64
 }
 
@@ -85,8 +126,32 @@ func NewController(cfg Config) *Controller {
 	if cfg.InitialBitrate > cfg.MaxBitrate {
 		cfg.InitialBitrate = cfg.MaxBitrate
 	}
+	if cfg.MaxFPS <= 0 {
+		cfg.MaxFPS = 30
+	}
+	if cfg.InitialFPS <= 0 {
+		cfg.InitialFPS = cfg.MaxFPS
+	}
+	if cfg.InitialFPS > cfg.MaxFPS {
+		cfg.InitialFPS = cfg.MaxFPS
+	}
+	if cfg.MinFPS <= 0 {
+		cfg.MinFPS = AdaptiveMinFPS(cfg.Scene, cfg.MaxFPS)
+	}
+	if cfg.MinFPS > cfg.MaxFPS {
+		cfg.MinFPS = cfg.MaxFPS
+	}
+	if cfg.InitialFPS < cfg.MinFPS {
+		cfg.InitialFPS = cfg.MinFPS
+	}
 	if cfg.StableWindows <= 0 {
 		cfg.StableWindows = 4
+	}
+	if cfg.FPSPressureWindows <= 0 {
+		cfg.FPSPressureWindows = 4
+	}
+	if cfg.FPSRecoveryWindows <= 0 {
+		cfg.FPSRecoveryWindows = 8
 	}
 	if cfg.IncreaseRatio <= 1 {
 		cfg.IncreaseRatio = 1.08
@@ -94,7 +159,7 @@ func NewController(cfg Config) *Controller {
 	if cfg.IncreaseFloor <= 0 {
 		cfg.IncreaseFloor = 150_000
 	}
-	return &Controller{cfg: cfg, target: cfg.InitialBitrate}
+	return &Controller{cfg: cfg, target: cfg.InitialBitrate, targetFPS: cfg.InitialFPS}
 }
 
 func (c *Controller) TargetBitrate() int {
@@ -102,6 +167,13 @@ func (c *Controller) TargetBitrate() int {
 		return 0
 	}
 	return c.target
+}
+
+func (c *Controller) TargetFPS() int {
+	if c == nil {
+		return 0
+	}
+	return c.targetFPS
 }
 
 func (c *Controller) Observe(stats protocol.DesktopSessionStats) MediaDecision {
@@ -129,52 +201,114 @@ func (c *Controller) observeEstimate(estimate NetworkEstimate) MediaDecision {
 	factor, reason := c.degradeFactor(estimate)
 	if factor < 1 {
 		c.stable = 0
+		c.fpsStable = 0
+		changed := false
+
 		next := int(math.Floor(float64(c.target) * factor))
 		if next < c.cfg.MinBitrate {
 			next = c.cfg.MinBitrate
 		}
-		if next >= c.target {
-			return MediaDecision{TargetBitrate: c.target}
+		if next < c.target {
+			c.target = next
+			changed = true
 		}
-		c.target = next
+
+		if c.shouldReduceFPS(estimate) && c.targetFPS > c.cfg.MinFPS {
+			c.fpsPressure++
+			if c.fpsPressure >= c.cfg.FPSPressureWindows {
+				nextFPS := c.targetFPS * 3 / 4
+				if nextFPS < c.cfg.MinFPS {
+					nextFPS = c.cfg.MinFPS
+				}
+				if nextFPS < c.targetFPS {
+					c.targetFPS = nextFPS
+					changed = true
+				}
+				c.fpsPressure = 0
+			}
+		} else {
+			c.fpsPressure = 0
+		}
+
 		return MediaDecision{
 			TargetBitrate: c.target,
-			Changed:       true,
+			TargetFPS:     c.targetFPS,
+			Changed:       changed,
 			Reason:        reason,
 		}
 	}
 
+	c.fpsPressure = 0
 	if !c.stableEstimate(estimate) {
 		c.stable = 0
-		return MediaDecision{TargetBitrate: c.target}
+		c.fpsStable = 0
+		return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
 	}
-	if c.target >= c.cfg.MaxBitrate {
-		c.stable = 0
-		return MediaDecision{TargetBitrate: c.target}
-	}
-	c.stable++
-	if c.stable < c.cfg.StableWindows {
-		return MediaDecision{TargetBitrate: c.target}
-	}
-	c.stable = 0
 
-	ratioIncrease := int(math.Ceil(float64(c.target) * (c.cfg.IncreaseRatio - 1)))
-	if ratioIncrease < c.cfg.IncreaseFloor {
-		ratioIncrease = c.cfg.IncreaseFloor
+	if c.target < c.cfg.MaxBitrate {
+		c.fpsStable = 0
+		c.stable++
+		if c.stable < c.cfg.StableWindows {
+			return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
+		}
+		c.stable = 0
+
+		ratioIncrease := int(math.Ceil(float64(c.target) * (c.cfg.IncreaseRatio - 1)))
+		if ratioIncrease < c.cfg.IncreaseFloor {
+			ratioIncrease = c.cfg.IncreaseFloor
+		}
+		next := c.target + ratioIncrease
+		if next > c.cfg.MaxBitrate {
+			next = c.cfg.MaxBitrate
+		}
+		if next == c.target {
+			return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
+		}
+		c.target = next
+		return MediaDecision{
+			TargetBitrate: c.target,
+			TargetFPS:     c.targetFPS,
+			Changed:       true,
+			Reason:        "stable_recovery",
+		}
 	}
-	next := c.target + ratioIncrease
-	if next > c.cfg.MaxBitrate {
-		next = c.cfg.MaxBitrate
+
+	c.stable = 0
+	if c.targetFPS >= c.cfg.MaxFPS {
+		c.fpsStable = 0
+		return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
 	}
-	if next == c.target {
-		return MediaDecision{TargetBitrate: c.target}
+
+	c.fpsStable++
+	if c.fpsStable < c.cfg.FPSRecoveryWindows {
+		return MediaDecision{TargetBitrate: c.target, TargetFPS: c.targetFPS}
 	}
-	c.target = next
+	c.fpsStable = 0
+	step := c.cfg.MaxFPS / 6
+	if step < 1 {
+		step = 1
+	}
+	nextFPS := c.targetFPS + step
+	if nextFPS > c.cfg.MaxFPS {
+		nextFPS = c.cfg.MaxFPS
+	}
+	c.targetFPS = nextFPS
 	return MediaDecision{
 		TargetBitrate: c.target,
+		TargetFPS:     c.targetFPS,
 		Changed:       true,
-		Reason:        "stable_recovery",
+		Reason:        "fps_recovery",
 	}
+}
+
+func (c *Controller) shouldReduceFPS(estimate NetworkEstimate) bool {
+	if c == nil || c.cfg.MinFPS >= c.cfg.MaxFPS {
+		return false
+	}
+	return estimate.Dropped > 0 ||
+		estimate.QueueDelay >= 120*time.Millisecond ||
+		estimate.Loss >= 5 ||
+		estimate.Jitter >= 80*time.Millisecond
 }
 
 func (c *Controller) degradeFactor(estimate NetworkEstimate) (float64, string) {

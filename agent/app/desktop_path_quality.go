@@ -8,6 +8,7 @@ import (
 	"time"
 
 	desktop "relayproxy/agent/desktop"
+	rdpp2p "relayproxy/agent/rdp/p2p"
 	desktopmedia "relayproxy/internal/desktop"
 )
 
@@ -31,6 +32,7 @@ func (a *Agent) waitRelayDesktopDirectPath(
 	controller *desktop.ControllerSession,
 	targetID string,
 	path desktopmedia.DatagramPath,
+	direct *rdpp2p.Session,
 	lost <-chan struct{},
 	relayQuality desktop.PathQuality,
 ) (qualityFallback string, sessionAlive bool) {
@@ -58,6 +60,13 @@ func (a *Agent) waitRelayDesktopDirectPath(
 			if !directQuality.Available {
 				continue
 			}
+			if direct != nil {
+				metrics := direct.DirectPathMetrics()
+				if metrics.Samples > 0 {
+					directQuality.RTTMs = metrics.RTTMs
+					directQuality.JitterMs = metrics.JitterMs
+				}
+			}
 			decision := gate.Evaluate(
 				now,
 				path.Name(),
@@ -70,11 +79,13 @@ func (a *Agent) waitRelayDesktopDirectPath(
 				continue
 			}
 			log.Printf(
-				"[Desktop] P2P media quality fallback target=%s reason=%s direct_score=%.2f relay_score=%.2f loss=%.2f%% queue=%.2fms",
+				"[Desktop] P2P media quality fallback target=%s reason=%s direct_score=%.2f relay_score=%.2f rtt=%.2fms jitter=%.2fms loss=%.2f%% queue=%.2fms",
 				targetID,
 				decision.Reason,
 				decision.CurrentScore,
 				decision.CandidateScore,
+				directQuality.RTTMs,
+				directQuality.JitterMs,
 				directQuality.LossPercent,
 				directQuality.QueueDelayMs,
 			)

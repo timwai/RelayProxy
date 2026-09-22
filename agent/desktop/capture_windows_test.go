@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/go-mswin/screencapture"
+
+	"relayproxy/internal/protocol"
 )
 
 func TestCopyDXGIFrameConvertsBGRAAndStride(t *testing.T) {

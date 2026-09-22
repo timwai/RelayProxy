@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网与 stale-frame/drop 已合并 main；当前分支继续加入 scene-aware adaptive FPS pacing，随后进入跨 NAT / Wi-Fi 实机验证  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、运行期自动恢复、路径评分/切换滞回、direct-path RTT/Jitter、组合弱网与 stale-frame/drop 已合并 main；当前分支补齐在线 Host capability snapshot 与显示器枚举，为多显示器选择和实机验证提供实时能力数据  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #50 已合并，merge `6797f16279c2a82c1a87e52433ec282d5b3deb12`）
+> 当前开发基线：`main`（PR #51 已合并，merge `504d6dacb939cacef5614c715c6703656e5c51db`）
 
 ## 0. 当前进度
 
@@ -30,7 +30,7 @@
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
-| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、bitrate-only ABR、Relay Desktop P2P 已全部进入 main。P2P 复用现有 rendezvous / candidate / UDP punch / HMAC-replay 保护，并使用独立 `desktop_media` purpose；可靠控制始终走 Relay，视频 Datagram 打洞成功后热切到 `udp_p2p`。PR #42 已补齐运行期恢复与 2/4/8/16/30 秒有界指数退避；PR #43 增加集中式路径评分、切换滞回、P2P 质量主动降级和路径变化 IDR 恢复；PR #44 复用认证 `PunchKeep/PunchAck` 在同一 `udp_p2p` socket 上测量真实 direct-path RTT/Jitter，并以 EWMA 输入路径评分；PR #46 增加确定性 Datagram transport shim；PR #47 打通 Host 媒体 Send 阻塞时间 → `SendQueueDelayMs` Stats → bitrate-only ABR 的拥塞闭环。当前分支进一步让 H.264/JPEG 在媒体发送或编码落后至少一个帧周期时丢弃过期采样，不追赶历史 tick，并把 drop 累计进 `DroppedFrames` 供 ABR 感知。下一步为组合弱网场景和跨 NAT 实机验证 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。当前分支继续补在线 Host capability snapshot / 显示器枚举，下一步进入选屏链路与跨 NAT / Wi-Fi 实机验证 |
 
 ### 0.1 已合并主线的关键进度
 
@@ -151,13 +151,23 @@ UI CI
 
 - Viewer 网络统计条现已补充媒体 Path、Send Queue Delay、Dropped Frames、Capture/Encode 耗时，便于跨 NAT / Wi-Fi 实机验证时直接观察拥塞与 stale-frame 行为。
 
-### 0.3.2 Scene-aware Adaptive FPS（当前分支）
+### 0.3.2 Scene-aware Adaptive FPS（已合并 PR #51）
 
 - `DesktopVideoControl` 新增向后兼容的 `TargetFPS` 字段；Host 只调整采集 ticker，不重建 H.264 Encoder、不改变 resolution/generation。
 - Office / Auto / Quality 只有在 severe queue、持续 stale/drop、严重丢包或严重 jitter 连续多个 500 ms 窗口后才降低采集 FPS，避免单次抖动造成画面节拍变化。
 - Gaming / Performance 的 adaptive minimum FPS 等于 negotiated FPS，因此 ABR 继续只降码率，不牺牲高帧率交互目标。
 - 网络恢复时先把 bitrate 按既有稳定窗口逐步恢复到上限；之后再用更长的稳定窗口慢速恢复 FPS，避免 bitrate 与 FPS 同时上冲重新制造队列积压。
 - Host Stats 新增 `TargetFPS`，Viewer 网络统计条同步展示目标 FPS，方便实机校准 pressure/recovery window。
+
+### 0.3.3 在线 Host Capability Snapshot（当前分支）
+
+- Agent 握手的 `DeviceHello` 新增可选 `DesktopCapabilities` 快照；只有本次实例实际装载 Relay Desktop Host 时才上报，不改变数据库中的管理员授权模型。
+- Windows Host 在握手时重新枚举当前显示器，把会话级 HMONITOR ID、设备名、像素尺寸、主屏标记以及 GDI / DXGI capture backend 汇总到 `Displays / Captures`；显示器 ID 明确不持久化，布局变化或重连后重新获取。
+- Media Foundation H.264 codec 能力、Host 最大分辨率/FPS、Clipboard 等现有能力一并进入同一 snapshot，为 Controller 在连接前展示真实能力提供数据源。
+- Server 不把动态显示器/GPU 信息写入数据库；Gateway 只把快照保存在当前认证 `DeviceSession`，避免离线后继续暴露过期硬件状态。
+- Controller 获取 `RemoteDesktopTargets` 时仍先通过数据库验证所有权、显式 grant 与 backend 权限；只有目标当前在线且该认证 Session 的有效 grant 仍包含 `desktop.host`，才合并显示器/codec/capture 等动态详情。
+- Server 返回动态切片前再次复制，避免认证快照被 Controller 侧 DTO 修改；没有当前 `desktop.host` grant 或仅允许 Native RDP 时不会泄露显示器详情。
+- 该能力快照是后续 GUI 显示器下拉框、`DisplayID` 选屏、选中显示器 DXGI/GDI Capture、光标/输入坐标几何校正的基础层。
 
 ### 0.4 当前实现与最终设计的差异
 

@@ -33,3 +33,12 @@ func TestStaleScheduledFrameCount(t *testing.T) {
 		t.Fatalf("invalid interval drops=%d", got)
 	}
 }
+
+func TestFrameIntervalForFPS(t *testing.T) {
+	if got := frameIntervalForFPS(20); got != 50*time.Millisecond {
+		t.Fatalf("20 fps interval=%s want=50ms", got)
+	}
+	if got := frameIntervalForFPS(0); got != time.Second {
+		t.Fatalf("invalid fps interval=%s want=1s", got)
+	}
+}

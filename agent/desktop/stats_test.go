@@ -112,3 +112,24 @@ func TestPathQualityResetsAtPathBoundary(t *testing.T) {
 		t.Fatalf("direct lossPercent=%v", got)
 	}
 }
+
+func TestSessionStatsPreservesMediaPipelineDiagnostics(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	stats.started = time.Now().Add(-time.Second)
+	stats.MergeRemote(protocol.DesktopSessionStats{
+		CaptureBackend:  "dxgi",
+		EncoderBackend:  "media-foundation",
+		EncoderHardware: true,
+	})
+	stats.MergeViewer(protocol.DesktopSessionStats{
+		DecoderBackend:  "media-foundation-d3d11-zero-copy",
+		DecoderHardware: true,
+	})
+	got := stats.Snapshot(time.Now())
+	if got.CaptureBackend != "dxgi" || got.EncoderBackend != "media-foundation" || !got.EncoderHardware {
+		t.Fatalf("host media diagnostics=%+v", got)
+	}
+	if got.DecoderBackend != "media-foundation-d3d11-zero-copy" || !got.DecoderHardware {
+		t.Fatalf("viewer media diagnostics=%+v", got)
+	}
+}

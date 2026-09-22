@@ -110,6 +110,21 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 	rawNV12 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatNV12}
 	var failures []error
 
+	tryActivation := func(activation unsafe.Pointer, hardware bool, candidateGraphics *mfDecoderD3D11) (unsafe.Pointer, MFH264DecoderInfo, error) {
+		transform, err := activateObject(activation, &iidIMFTransform)
+		if err != nil {
+			return nil, MFH264DecoderInfo{}, err
+		}
+		async, d3d11Aware, err := configureH264Decoder(transform, cfg, candidateGraphics)
+		if err != nil {
+			releaseIUnknown(transform)
+			return nil, MFH264DecoderInfo{}, err
+		}
+		return transform, MFH264DecoderInfo{
+			Hardware: hardware, Async: async, D3D11Aware: d3d11Aware, Config: cfg,
+		}, nil
+	}
+
 	for _, group := range activationGroups(preferHardware) {
 		if err := ctx.Err(); err != nil {
 			return nil, MFH264DecoderInfo{}, err
@@ -120,25 +135,28 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 			continue
 		}
 		for index, activation := range activations {
-			transform, err := activateObject(activation, &iidIMFTransform)
-			releaseIUnknown(activation)
-			activations[index] = nil
-			if err != nil {
-				failures = append(failures, err)
+			if activation == nil {
 				continue
 			}
-			var groupGraphics *mfDecoderD3D11
-			if group.hardware {
-				groupGraphics = graphics
+
+			if group.hardware && graphics != nil {
+				transform, info, err := tryActivation(activation, true, graphics)
+				if err == nil {
+					releaseIUnknown(activation)
+					activations[index] = nil
+					releaseMFTActivations(activations[index+1:])
+					return transform, info, nil
+				}
+				failures = append(failures, fmt.Errorf("D3D11 hardware decoder: %w", err))
 			}
-			async, d3d11Aware, err := configureH264Decoder(transform, cfg, groupGraphics)
+
+			transform, info, err := tryActivation(activation, group.hardware, nil)
+			releaseIUnknown(activation)
+			activations[index] = nil
 			if err == nil {
 				releaseMFTActivations(activations[index+1:])
-				return transform, MFH264DecoderInfo{
-					Hardware: group.hardware, Async: async, D3D11Aware: d3d11Aware, Config: cfg,
-				}, nil
+				return transform, info, nil
 			}
-			releaseIUnknown(transform)
 			failures = append(failures, err)
 		}
 		releaseMFTActivations(activations)

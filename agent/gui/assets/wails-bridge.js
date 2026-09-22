@@ -16,6 +16,9 @@
   window.goDisconnectRemoteDesktop = () => invoke('DisconnectRemoteDesktop');
   window.goGetRemoteDesktopStatus = () => invoke('GetRemoteDesktopStatus');
   window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');
+  window.goOpenRemoteDesktopNativeViewer = () => invoke('OpenRemoteDesktopNativeViewer');
+  window.goCloseRemoteDesktopNativeViewer = () => invoke('CloseRemoteDesktopNativeViewer');
+  window.goGetRemoteDesktopNativeViewerStatus = () => invoke('GetRemoteDesktopNativeViewerStatus');
   window.goGetRemoteDesktopCursor = cursorID => invoke('GetRemoteDesktopCursor', cursorID || '');
   window.goGetRemoteDesktopClipboard = sequence => invoke('GetRemoteDesktopClipboard', sequence || 0);
   window.goSendRemoteDesktopClipboard = text => invoke('SendRemoteDesktopClipboard', text || '');

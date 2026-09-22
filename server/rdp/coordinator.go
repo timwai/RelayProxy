@@ -300,7 +300,7 @@ func (c *Coordinator) connect(controllerID string, message protocol.RDPControlMe
 	notify := protocol.RDPControlMessage{
 		Type: protocol.RDPControlConnectNotify, Purpose: purpose, SessionID: id,
 		ControllerID: controllerID, TargetID: message.TargetID, SessionToken: append([]byte(nil), token...),
-		Candidates: append([]protocol.RDPCandidate(nil), controllerCandidates...),
+		Candidates:     append([]protocol.RDPCandidate(nil), controllerCandidates...),
 		LeaseExpiresAt: lease.ExpiresAt.UnixMilli(), RDPOnline: purpose == protocol.P2PPurposeRDP,
 	}
 	if err := c.notify(targetSession, notify); err != nil {
@@ -312,7 +312,7 @@ func (c *Coordinator) connect(controllerID string, message protocol.RDPControlMe
 	return protocol.RDPControlMessage{
 		Type: protocol.RDPControlConnectResponse, Purpose: purpose, SessionID: id,
 		ControllerID: controllerID, TargetID: message.TargetID, SessionToken: append([]byte(nil), token...),
-		Candidates: append([]protocol.RDPCandidate(nil), targetCandidates...),
+		Candidates:     append([]protocol.RDPCandidate(nil), targetCandidates...),
 		LeaseExpiresAt: lease.ExpiresAt.UnixMilli(), RDPOnline: purpose == protocol.P2PPurposeRDP,
 	}
 }

@@ -403,14 +403,22 @@ func (s *ControllerSession) DatagramPathName() string {
 	return s.conn.DatagramPathName()
 }
 
-// PathQuality exposes only metrics that are local to the active media path.
-// The reliable control-stream RTT remains available in Stats(), but it is not
-// used here because it does not measure udp_p2p.
+// PathQuality exposes media-path-local loss/queue metrics. When Relay is the
+// active media path, its reliable session probe is also a useful Relay
+// baseline. udp_p2p RTT/Jitter is supplied separately by the authenticated
+// direct socket and is never inferred from this Relay probe.
 func (s *ControllerSession) PathQuality() PathQuality {
 	if s == nil || s.stats == nil {
 		return PathQuality{}
 	}
-	return s.stats.PathQuality(time.Now(), s.DatagramPathName() == "relay")
+	now := time.Now()
+	quality := s.stats.PathQuality(now, s.DatagramPathName() == "relay")
+	if quality.Relay {
+		snapshot := s.stats.Snapshot(now)
+		quality.RTTMs = snapshot.RTTMs
+		quality.JitterMs = snapshot.JitterMs
+	}
+	return quality
 }
 
 func (s *ControllerSession) Stats() protocol.DesktopSessionStats {

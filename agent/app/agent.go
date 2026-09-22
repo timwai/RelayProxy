@@ -1128,7 +1128,7 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					a.requestRelayDesktopPathIDR(controller, targetID, "relay", path.Name())
 					log.Printf("[Desktop] controller media path switched target=%s path=%s", targetID, path.Name())
 
-					qualityFallback, sessionAlive := a.waitRelayDesktopDirectPath(controller, targetID, path, lost, relayQuality)
+					qualityFallback, sessionAlive := a.waitRelayDesktopDirectPath(controller, targetID, path, direct, lost, relayQuality)
 					if !sessionAlive {
 						_ = path.Close()
 						return

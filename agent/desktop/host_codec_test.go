@@ -244,3 +244,23 @@ func TestH264RuntimeErrorPreservesGenerationAndCause(t *testing.T) {
 		t.Fatalf("runtime error=%+v", err)
 	}
 }
+
+func TestRawFrameFitsH264(t *testing.T) {
+	frame := desktopcodec.RawFrame{
+		Format: desktopcodec.PixelFormatBGRA,
+		Width:  1920,
+		Height: 1080,
+		Stride: 1920*4 + 128,
+		Pix:    make([]byte, (1920*4+128)*1080),
+	}
+	if !rawFrameFitsH264(frame, 1920, 1080) {
+		t.Fatal("native-size padded BGRA frame was rejected")
+	}
+	if rawFrameFitsH264(frame, 1280, 720) {
+		t.Fatal("oversized raw frame bypassed the scaler")
+	}
+	frame.Stride = 100
+	if rawFrameFitsH264(frame, 1920, 1080) {
+		t.Fatal("invalid BGRA stride was accepted")
+	}
+}

@@ -273,6 +273,9 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		return 1
 
 	case win.WM_CLOSE:
+		if viewer != nil {
+			viewer.releasePressedInput()
+		}
 		win.DestroyWindow(hwnd)
 		return 0
 

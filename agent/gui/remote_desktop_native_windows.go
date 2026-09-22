@@ -347,6 +347,8 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			}
 		}
 		if stats, ok := perf.report(time.Now()); ok {
+			stats.DecoderBackend = s.decoder.Backend()
+			stats.DecoderHardware = s.decoder.Hardware()
 			owner.bridge.ReportRemoteDesktopViewerStats(stats)
 		}
 	}

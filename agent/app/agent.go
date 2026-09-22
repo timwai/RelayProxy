@@ -1270,6 +1270,11 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 		}
 		config := desktopSession.VideoConfigSnapshot()
 		out.DisplayID = config.DisplayID
+		out.Generation = config.Generation
+		out.Codec = config.Codec
+		out.Width = config.Width
+		out.Height = config.Height
+		out.FPS = config.FPS
 		if target, ok := a.remoteDesktopTarget(targetID); ok {
 			out.TargetName = target.Name
 			for _, display := range target.Capabilities.Displays {

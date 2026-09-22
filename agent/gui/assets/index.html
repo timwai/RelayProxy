@@ -1715,6 +1715,13 @@
         'Backend: ' + String(status.backend || '').toUpperCase()
       ];
       if (status.displayName || status.displayId) parts.push('显示器: ' + (status.displayName || status.displayId));
+      if (status.codec) {
+        var codecLabel = status.codec === 'h264' ? 'H.264' : String(status.codec).toUpperCase();
+        var mediaLabel = codecLabel;
+        if (status.width && status.height) mediaLabel += ' ' + status.width + '×' + status.height;
+        if (status.fps) mediaLabel += ' @ ' + status.fps + ' FPS';
+        parts.push('Media: ' + mediaLabel);
+      }
       if (status.pathTcp) parts.push('TCP: ' + status.pathTcp);
       if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
       banner.textContent = parts.join(' · ');
@@ -2206,6 +2213,10 @@
       var parts = [];
       var mediaPath = stats.path || status.pathUdp || 'relay';
       parts.push('Path ' + mediaPath);
+      if (stats.captureBackend) parts.push('Capture ' + stats.captureBackend);
+      if (stats.encoderBackend) parts.push('Encoder ' + stats.encoderBackend + (stats.encoderHardware ? ' HW' : ' SW'));
+      var decoderBackend = stats.decoderBackend || (desktopVideoDecoder ? 'webcodecs' : '');
+      if (decoderBackend) parts.push('Decoder ' + decoderBackend + (stats.decoderBackend ? (stats.decoderHardware ? ' HW' : ' SW') : ''));
       if (stats.rttMs) parts.push('RTT ' + stats.rttMs.toFixed(1) + ' ms');
       if (stats.jitterMs) parts.push('Jitter ' + stats.jitterMs.toFixed(1) + ' ms');
       parts.push('Loss ' + Number(stats.lossPercent || 0).toFixed(2) + '%');

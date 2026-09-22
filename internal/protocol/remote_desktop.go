@@ -140,6 +140,11 @@ type RemoteDesktopStatus struct {
 	TargetName  string         `json:"targetName,omitempty"`
 	DisplayID   string         `json:"displayId,omitempty"`
 	DisplayName string         `json:"displayName,omitempty"`
+	Generation  uint32         `json:"generation,omitempty"`
+	Codec       string         `json:"codec,omitempty"`
+	Width       int            `json:"width,omitempty"`
+	Height      int            `json:"height,omitempty"`
+	FPS         int            `json:"fps,omitempty"`
 	ListenAddr  string         `json:"listenAddr,omitempty"`
 	PathTCP     string         `json:"pathTcp,omitempty"`
 	PathUDP     string         `json:"pathUdp,omitempty"`
@@ -301,6 +306,11 @@ type DesktopSessionStats struct {
 	RenderMs         float64 `json:"renderMs,omitempty"`
 	DroppedFrames    uint64  `json:"droppedFrames,omitempty"`
 	Path             string  `json:"path,omitempty"`
+	CaptureBackend   string  `json:"captureBackend,omitempty"`
+	EncoderBackend   string  `json:"encoderBackend,omitempty"`
+	EncoderHardware  bool    `json:"encoderHardware,omitempty"`
+	DecoderBackend   string  `json:"decoderBackend,omitempty"`
+	DecoderHardware  bool    `json:"decoderHardware,omitempty"`
 }
 
 // DesktopControlMessage is carried over FrameTypeDesktopControl. The server

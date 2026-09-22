@@ -33,13 +33,14 @@ func (h *Host) streamSessionFrames(
 	conn *desktopmedia.MediaConn,
 	cfg HostConfig,
 	options protocol.RemoteDesktopConnectOptions,
+	captureBackend string,
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	if preference == "h264" && h.canEncodeH264() {
-		if err := h.streamH264Frames(ctx, conn, cfg, idrRequests, bitrateUpdates, fpsUpdates); err == nil || errors.Is(err, context.Canceled) {
+		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {
 			log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
@@ -56,7 +57,7 @@ func (h *Host) streamSessionFrames(
 	}); err != nil {
 		return err
 	}
-	return h.streamFrames(ctx, conn, cfg, fpsUpdates)
+	return h.streamFrames(ctx, conn, cfg, captureBackend, fpsUpdates)
 }
 
 func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
@@ -138,6 +139,7 @@ func (h *Host) streamH264Frames(
 	ctx context.Context,
 	conn *desktopmedia.MediaConn,
 	cfg HostConfig,
+	captureBackend string,
 	idrRequests <-chan struct{},
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
@@ -270,6 +272,9 @@ func (h *Host) streamH264Frames(
 			SendQueueDelayMs: sendQueueDelayMs,
 			DroppedFrames:    droppedFrames,
 			Path:             "relay",
+			CaptureBackend:   captureBackend,
+			EncoderBackend:   current.Backend,
+			EncoderHardware:  current.Hardware,
 		}
 		if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 			Type:  protocol.DesktopSessionStatsReport,

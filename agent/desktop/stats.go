@@ -301,6 +301,8 @@ func (s *sessionStatsTracker) Snapshot(now time.Time) protocol.DesktopSessionSta
 	stats.RenderFPS = s.viewer.RenderFPS
 	stats.DecodeMs = s.viewer.DecodeMs
 	stats.RenderMs = s.viewer.RenderMs
+	stats.DecoderBackend = s.viewer.DecoderBackend
+	stats.DecoderHardware = s.viewer.DecoderHardware
 	stats.ActualBitrate = int64(float64(s.recvBytes*8) / elapsed)
 	stats.DeliveryRate = stats.ActualBitrate
 	stats.RTTMs = s.rttMs

@@ -232,13 +232,16 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	defer h.sessionMu.Unlock()
 
 	sessionConfig := ResolveHostConfig(h.cfg, options)
-	backend := ""
+	backend := "generic"
 	if source, ok := h.source.(SessionCaptureSource); ok {
 		if err := source.BeginSession(ctx, sessionConfig); err != nil {
 			return fmt.Errorf("start desktop capture session: %w", err)
 		}
 		defer source.EndSession()
 		backend = source.CaptureBackend()
+		if backend == "" {
+			backend = "generic"
+		}
 	}
 	if input, ok := h.input.(SessionInputSink); ok {
 		if err := input.BeginInputSession(ctx, sessionConfig); err != nil {
@@ -270,7 +273,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	errorsCh := make(chan error, workerCount)
 	go func() {
-		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, idrRequests, bitrateUpdates, fpsUpdates)
+		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, backend, idrRequests, bitrateUpdates, fpsUpdates)
 	}()
 	go func() {
 		errorsCh <- h.readSessionControlLoop(
@@ -419,7 +422,7 @@ func (h *Host) readSessionControlLoop(
 	}
 }
 
-func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, fpsUpdates <-chan int) error {
+func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, cfg HostConfig, captureBackend string, fpsUpdates <-chan int) error {
 	sessionID, err := newMediaSessionID()
 	if err != nil {
 		return err
@@ -480,6 +483,8 @@ func (h *Host) streamFrames(ctx context.Context, conn *desktopmedia.MediaConn, c
 				SendQueueDelayMs: sendQueueDelayMs,
 				DroppedFrames:    droppedFrames,
 				Path:             "relay",
+				CaptureBackend:   captureBackend,
+				EncoderBackend:   "jpeg-go",
 			}
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 				Type:  protocol.DesktopSessionStatsReport,

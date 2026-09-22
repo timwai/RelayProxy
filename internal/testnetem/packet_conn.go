@@ -78,6 +78,22 @@ func (c *PacketConn) Profile() Profile {
 	return c.profile
 }
 
+// SetProfile starts a new deterministic impairment phase. It resets the
+// pseudo-random sequence and write shaper backlog so tests can model abrupt
+// bandwidth/latency changes without recreating the UDP socket.
+func (c *PacketConn) SetProfile(profile Profile) {
+	if c == nil {
+		return
+	}
+	profile = profile.normalized()
+	c.mu.Lock()
+	c.profile = profile
+	c.rng = rand.New(rand.NewSource(profile.Seed))
+	c.packetSeq = 0
+	c.nextWrite = time.Time{}
+	c.mu.Unlock()
+}
+
 func (c *PacketConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	if c == nil || c.PacketConn == nil {
 		return 0, net.ErrClosed

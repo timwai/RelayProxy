@@ -8,6 +8,9 @@ import (
 )
 
 type EncodedFrame struct {
+	// Type defaults to MediaPacketVideo for backward compatibility. Audio and
+	// future media streams must set it explicitly and use PacketizeMediaFrame.
+	Type       MediaPacketType
 	SessionID  uint64
 	StreamID   uint16
 	Generation uint32
@@ -19,7 +22,22 @@ type EncodedFrame struct {
 }
 
 func PacketizeFrame(frame EncodedFrame, maxPacketSize int, firstSequence uint32) ([][]byte, uint32, error) {
-	if frame.SessionID == 0 || frame.StreamID == 0 || frame.Generation == 0 {
+	if frame.Type != 0 && frame.Type != MediaPacketVideo {
+		return nil, firstSequence, fmt.Errorf("%w: PacketizeFrame only accepts video", ErrMediaPacket)
+	}
+	frame.Type = MediaPacketVideo
+	return PacketizeMediaFrame(frame, maxPacketSize, firstSequence)
+}
+
+// PacketizeMediaFrame fragments one typed media frame into RD/1 datagrams.
+// Existing video callers should keep using PacketizeFrame; audio uses this
+// entry point with Type=MediaPacketAudio and an independent stream/sequence.
+func PacketizeMediaFrame(frame EncodedFrame, maxPacketSize int, firstSequence uint32) ([][]byte, uint32, error) {
+	packetType := frame.Type
+	if packetType == 0 {
+		packetType = MediaPacketVideo
+	}
+	if !validMediaType(packetType) || frame.SessionID == 0 || frame.StreamID == 0 || frame.Generation == 0 {
 		return nil, firstSequence, ErrMediaPacket
 	}
 	if len(frame.Data) == 0 || len(frame.Data) > MaxEncodedFrameSize {
@@ -53,7 +71,7 @@ func PacketizeFrame(frame EncodedFrame, maxPacketSize int, firstSequence uint32)
 		}
 		packet, err := EncodeMediaPacket(MediaHeader{
 			Version:       MediaProtocolVersion,
-			Type:          MediaPacketVideo,
+			Type:          packetType,
 			Flags:         flags,
 			SessionID:     frame.SessionID,
 			StreamID:      frame.StreamID,
@@ -74,12 +92,17 @@ func PacketizeFrame(frame EncodedFrame, maxPacketSize int, firstSequence uint32)
 }
 
 type ReassemblerConfig struct {
-	MaxFrames int
+	// PacketType defaults to MediaPacketVideo. Use MediaPacketAudio for a
+	// dedicated audio reassembler; mixing packet types in one reassembler is
+	// intentionally rejected so frame/sequence state stays stream-specific.
+	PacketType MediaPacketType
+	MaxFrames  int
 	MaxBytes  int
 	FrameTTL  time.Duration
 }
 
 type frameKey struct {
+	packetType MediaPacketType
 	sessionID  uint64
 	streamID   uint16
 	generation uint32
@@ -102,6 +125,9 @@ type Reassembler struct {
 }
 
 func NewReassembler(cfg ReassemblerConfig) *Reassembler {
+	if cfg.PacketType == 0 {
+		cfg.PacketType = MediaPacketVideo
+	}
 	if cfg.MaxFrames <= 0 {
 		cfg.MaxFrames = 32
 	}
@@ -122,7 +148,7 @@ func (r *Reassembler) Push(packet []byte, now time.Time) (*EncodedFrame, error) 
 	if err != nil {
 		return nil, err
 	}
-	if header.Type != MediaPacketVideo {
+	if header.Type != r.cfg.PacketType {
 		return nil, ErrMediaPacket
 	}
 	if now.IsZero() {
@@ -134,6 +160,7 @@ func (r *Reassembler) Push(packet []byte, now time.Time) (*EncodedFrame, error) 
 	r.evictExpiredLocked(now)
 
 	key := frameKey{
+		packetType: header.Type,
 		sessionID:  header.SessionID,
 		streamID:   header.StreamID,
 		generation: header.Generation,
@@ -199,6 +226,7 @@ func (r *Reassembler) Push(packet []byte, now time.Time) (*EncodedFrame, error) 
 	}
 	flags := pending.header.Flags
 	frame := &EncodedFrame{
+		Type:       header.Type,
 		SessionID:  header.SessionID,
 		StreamID:   header.StreamID,
 		Generation: header.Generation,

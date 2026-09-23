@@ -124,6 +124,18 @@ class MainActivity : Activity() {
 
         statusBadge = chip("已停止", muted, Color.rgb(241, 245, 249))
         top.addView(statusBadge)
+
+        top.addView(TextView(this).apply {
+            text = "设置"
+            textSize = 11.5f
+            setTextColor(Color.rgb(191, 219, 254))
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(6), dp(2), dp(6))
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+            }
+        })
         card.addView(top)
 
         val metrics = LinearLayout(this).apply {
@@ -195,25 +207,6 @@ class MainActivity : Activity() {
         }
         row.addView(stop, LinearLayout.LayoutParams(0, dp(52), 0.55f))
         column.addView(row)
-
-        val settings = Button(this).apply {
-            text = "设置"
-            textSize = 13.5f
-            setTextColor(Color.rgb(71, 85, 105))
-            setTypeface(typeface, Typeface.BOLD)
-            setAllCaps(false)
-            background = rounded(surface, 13, line)
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
-            }
-        }
-        column.addView(
-            settings,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(46)
-            ).apply { topMargin = dp(10) }
-        )
 
         return column
     }

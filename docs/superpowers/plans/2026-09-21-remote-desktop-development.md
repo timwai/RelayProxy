@@ -529,7 +529,8 @@ Windows SendInput / CF_UNICODETEXT
 - 根据 `receivedFrames + concealmentFrames + gapSkippedFrames` 计算估算网络 audio loss%，并直接汇总 queue drop、PLC concealment、large-gap skip、reorder、duplicate、late、playout timeout 与最大 queue 深度。
 - 显式 `Audio=false` 的会话不生成 `audioValidation`；启用音频但尚未拿到 `audio_config` 时会保留 requested 状态且 `active=false`，方便定位 Host 无 loopback/capability 的问题。
 - 新增 Opus runtime bitrate/loss/queue 汇总、PCM fallback 与 Audio=false 回归测试。
-- 下一步：CI 通过后补一个 Windows 实机验证说明/命令清单，直接用现有 diagnostics export 对两台机器跑 capture → Opus → network → PLC → WASAPI 基线，并根据真实数据再决定 bitrate/FEC。
+- 新增 `scripts/analyze-desktop-audio.ps1` 与 Windows 实机验证清单：直接读取 GUI 导出的 schema v5 diagnostics JSON，输出 codec/bitrate/compression/loss/PLC/queue 指标，并支持 Opus、loss、queue、gap、timeout、compression ratio 阈值作为可重复测试 gate；Windows CI 解析检查该脚本语法。
+- 下一步：在两台 Windows 实机上跑 capture → Opus → network → PLC → WASAPI 基线并保存诊断文件，根据真实数据再决定 bitrate/FEC。
 
 ### 0.3 本轮进度（2026-09-22）
 

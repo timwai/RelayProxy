@@ -11,3 +11,10 @@ func TestNextRemoteDesktopAudioFrameRequiresConnectedSession(t *testing.T) {
 		t.Fatal("audio frame read without an active Relay Desktop session succeeded")
 	}
 }
+
+func TestRemoteDesktopAudioEnabledRequiresConnectedSession(t *testing.T) {
+	agent := &Agent{}
+	if agent.RemoteDesktopAudioEnabled() {
+		t.Fatal("disconnected agent reported Relay Desktop audio enabled")
+	}
+}

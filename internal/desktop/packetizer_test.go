@@ -192,7 +192,6 @@ func TestReassemblerKeepsGenerationsSeparate(t *testing.T) {
 	}
 }
 
-
 func TestPacketizeAndReassembleAudioOutOfOrder(t *testing.T) {
 	data := bytes.Repeat([]byte{0x10, 0x20, 0x30, 0x40}, 900)
 	frame := EncodedFrame{

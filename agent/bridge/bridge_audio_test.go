@@ -11,3 +11,10 @@ func TestNextRemoteDesktopAudioFrameRejectsUnavailableBridge(t *testing.T) {
 		t.Fatal("nil bridge audio frame read succeeded")
 	}
 }
+
+func TestRemoteDesktopAudioEnabledRejectsUnavailableBridge(t *testing.T) {
+	var bridge *UIBridge
+	if bridge.RemoteDesktopAudioEnabled() {
+		t.Fatal("nil bridge reported Relay Desktop audio enabled")
+	}
+}

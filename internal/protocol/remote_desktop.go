@@ -89,6 +89,7 @@ type DesktopCapabilities struct {
 	Codecs         []DesktopCodecCapability   `json:"codecs,omitempty"`
 	Displays       []DesktopDisplayCapability `json:"displays,omitempty"`
 	Audio          bool                       `json:"audio,omitempty"`
+	AudioCodecs    []string                   `json:"audioCodecs,omitempty"`
 	Clipboard      bool                       `json:"clipboard,omitempty"`
 	MultiMonitor   bool                       `json:"multiMonitor,omitempty"`
 	HDR            bool                       `json:"hdr,omitempty"`
@@ -129,6 +130,7 @@ type RemoteDesktopConnectOptions struct {
 	DisplayID      string                   `json:"displayId,omitempty"`
 	Clipboard      *bool                    `json:"clipboard,omitempty"`
 	Audio          *bool                    `json:"audio,omitempty"`
+	AudioCodec     string                   `json:"audioCodec,omitempty"`
 	AutoLaunch     *bool                    `json:"autoLaunch,omitempty"`
 }
 

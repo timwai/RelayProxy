@@ -42,6 +42,12 @@ type wgcFrameStream struct {
 	pool        *winrtcapture.IDirect3D11CaptureFramePool
 	session     *winrtcapture.IGraphicsCaptureSession
 
+	frameReady             chan struct{}
+	closedReady            chan struct{}
+	frameArrivedHandler    *winrtcapture.TypedEventHandlerOfDirect3D11CaptureFramePoolAndObject
+	frameArrivedToken      winrtruntime.EventRegistrationToken
+	frameArrivedRegistered bool
+
 	staging       *graphicsdirect3d11.ID3D11Texture2D
 	stagingSource graphicsdirect3d11.D3D11_TEXTURE2D_DESC
 	poolSize      winrtgraphics.SizeInt32
@@ -88,7 +94,10 @@ func openWGCFrameStream(
 		return nil, fmt.Errorf("%w: initialize WinRT: %v", errWindowsGraphicsCaptureUnavailable, err)
 	}
 
-	stream := &wgcFrameStream{}
+	stream := &wgcFrameStream{
+		frameReady:  make(chan struct{}, 1),
+		closedReady: make(chan struct{}),
+	}
 	if err := stream.initialize(display, maxFPS); err != nil {
 		_ = stream.closeLocked()
 		return nil, err
@@ -214,6 +223,9 @@ func (s *wgcFrameStream) initialize(display screencapture.Display, maxFPS int) e
 	if err != nil {
 		return fmt.Errorf("WGC create capture session: %w", err)
 	}
+	if err := s.registerFrameArrived(); err != nil {
+		return err
+	}
 
 	session2, err := wgcQueryInterface[winrtcapture.IGraphicsCaptureSession2](
 		s.session,
@@ -234,6 +246,39 @@ func (s *wgcFrameStream) initialize(display screencapture.Display, maxFPS int) e
 	if err := s.session.StartCapture(); err != nil {
 		return fmt.Errorf("WGC start capture: %w", err)
 	}
+	return nil
+}
+
+func signalWGCFrameReady(ready chan struct{}) {
+	if ready == nil {
+		return
+	}
+	select {
+	case ready <- struct{}{}:
+	default:
+	}
+}
+
+func (s *wgcFrameStream) registerFrameArrived() error {
+	if s == nil || s.pool == nil {
+		return screencapture.ErrBackendUnavailable
+	}
+	handler, err := winrtcapture.NewTypedEventHandlerOfDirect3D11CaptureFramePoolAndObject(
+		func(_ *winrtcapture.IDirect3D11CaptureFramePool, _ *winrtruntime.IInspectable) {
+			signalWGCFrameReady(s.frameReady)
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("WGC create FrameArrived handler: %w", err)
+	}
+	token, err := s.pool.AddFrameArrived(handler)
+	if err != nil {
+		handler.Close()
+		return fmt.Errorf("WGC register FrameArrived handler: %w", err)
+	}
+	s.frameArrivedHandler = handler
+	s.frameArrivedToken = token
+	s.frameArrivedRegistered = true
 	return nil
 }
 
@@ -294,57 +339,56 @@ func (s *wgcFrameStream) Backend() protocol.DesktopCaptureBackend {
 	return protocol.DesktopCaptureWGC
 }
 
-func (s *wgcFrameStream) Frame() (windowsCaptureFrame, bool) {
+func (s *wgcFrameStream) refreshFrame() (windowsCaptureFrame, bool, error) {
 	if s == nil || s.closed {
-		return windowsCaptureFrame{}, false
+		return windowsCaptureFrame{}, false, screencapture.ErrBackendUnavailable
 	}
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := winrtruntime.Initialize(); err != nil {
 		s.fail(err)
-		return windowsCaptureFrame{}, false
+		return windowsCaptureFrame{}, false, err
 	}
 	fresh, err := s.refreshLocked()
 	if err != nil {
 		s.fail(err)
+		return windowsCaptureFrame{}, false, err
+	}
+	return s.snapshot(), fresh, nil
+}
+
+func (s *wgcFrameStream) Frame() (windowsCaptureFrame, bool) {
+	frame, fresh, err := s.refreshFrame()
+	if err != nil {
 		return windowsCaptureFrame{}, false
 	}
-	return s.snapshot(), fresh
+	return frame, fresh
 }
 
 func (s *wgcFrameStream) WaitFrame(ctx context.Context) (windowsCaptureFrame, error) {
 	if s == nil || s.closed {
 		return windowsCaptureFrame{}, screencapture.ErrBackendUnavailable
 	}
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
-	if err := winrtruntime.Initialize(); err != nil {
-		s.fail(err)
-		return windowsCaptureFrame{}, err
-	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return windowsCaptureFrame{}, err
 		}
-		fresh, err := s.refreshLocked()
+		frame, fresh, err := s.refreshFrame()
 		if err != nil {
-			s.fail(err)
 			return windowsCaptureFrame{}, err
 		}
 		if fresh {
-			return s.snapshot(), nil
+			return frame, nil
 		}
 		if s.lastErr != nil {
 			return windowsCaptureFrame{}, s.lastErr
 		}
-		timer := time.NewTimer(4 * time.Millisecond)
 		select {
 		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
 			return windowsCaptureFrame{}, ctx.Err()
-		case <-timer.C:
+		case <-s.closedReady:
+			return windowsCaptureFrame{}, screencapture.ErrBackendUnavailable
+		case <-s.frameReady:
 		}
 	}
 }
@@ -547,6 +591,9 @@ func (s *wgcFrameStream) closeLocked() error {
 		return nil
 	}
 	s.closed = true
+	if s.closedReady != nil {
+		close(s.closedReady)
+	}
 	var firstErr error
 	closeWinRT := func(obj wgcUnknown) {
 		if obj == nil {
@@ -566,10 +613,20 @@ func (s *wgcFrameStream) closeLocked() error {
 		s.session.Release()
 		s.session = nil
 	}
+	if s.pool != nil && s.frameArrivedRegistered {
+		if err := s.pool.RemoveFrameArrived(s.frameArrivedToken); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		s.frameArrivedRegistered = false
+	}
 	if s.pool != nil {
 		closeWinRT(s.pool)
 		s.pool.Release()
 		s.pool = nil
+	}
+	if s.frameArrivedHandler != nil {
+		s.frameArrivedHandler.Close()
+		s.frameArrivedHandler = nil
 	}
 	if s.staging != nil {
 		s.staging.Release()

@@ -85,13 +85,21 @@ func codecAPISetUI4(transform unsafe.Pointer, property *windows.GUID, value uint
 	return nil
 }
 
-func forceH264IDR(transform unsafe.Pointer) error {
+func forceVideoKeyFrame(transform unsafe.Pointer) error {
 	return codecAPISetUI4(transform, &codecAPIForceKeyFrame, 1)
 }
 
-func setH264MeanBitrate(transform unsafe.Pointer, bitrate int) error {
+func setVideoMeanBitrate(transform unsafe.Pointer, bitrate int) error {
 	if bitrate <= 0 {
-		return errors.New("H.264 bitrate must be positive")
+		return errors.New("video bitrate must be positive")
 	}
 	return codecAPISetUI4(transform, &codecAPIMeanBitRate, uint32(bitrate))
+}
+
+func forceH264IDR(transform unsafe.Pointer) error {
+	return forceVideoKeyFrame(transform)
+}
+
+func setH264MeanBitrate(transform unsafe.Pointer, bitrate int) error {
+	return setVideoMeanBitrate(transform, bitrate)
 }

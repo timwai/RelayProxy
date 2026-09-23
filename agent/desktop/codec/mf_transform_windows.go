@@ -41,6 +41,7 @@ const (
 	mftMessageNotifyStartOfStream  = 0x10000003
 
 	mfVideoInterlaceProgressive = 2
+	h265ProfileMain4208         = 1
 
 	mftOutputStreamProvidesSamples   = 0x100
 	mftOutputStreamCanProvideSamples = 0x200
@@ -83,6 +84,14 @@ var (
 		Data1: 0x3c036de7, Data2: 0x3ad0, Data3: 0x4c9e,
 		Data4: [8]byte{0x92, 0x16, 0xee, 0x6d, 0x6a, 0xc2, 0x1c, 0xb3},
 	}
+	mfMTVideoProfile = windows.GUID{
+		Data1: 0xad76a80b, Data2: 0x2d5c, Data3: 0x4e0b,
+		Data4: [8]byte{0xb3, 0x75, 0x64, 0xe5, 0x20, 0x13, 0x70, 0x36},
+	}
+	mfMTVideoLevel = windows.GUID{
+		Data1: 0x96f66574, Data2: 0x11c5, Data3: 0x4015,
+		Data4: [8]byte{0x86, 0x66, 0xbf, 0xf5, 0x16, 0x43, 0x6d, 0xa7},
+	}
 	mfMTFixedSizeSamples = windows.GUID{
 		Data1: 0xb8ebefaf, Data2: 0xb718, Data3: 0x4e04,
 		Data4: [8]byte{0xb0, 0xa9, 0x11, 0x67, 0x75, 0xe3, 0x32, 0x1b},
@@ -105,7 +114,27 @@ var (
 	}
 )
 
+type mfVideoEncoderSpec struct {
+	Codec         string
+	Label         string
+	OutputSubtype *windows.GUID
+	OutputProfile uint32
+	OutputLevel   func(VideoConfig) uint32
+}
+
+var (
+	mfH264EncoderSpec = mfVideoEncoderSpec{
+		Codec: "h264", Label: "H.264", OutputSubtype: &mfVideoFormatH264,
+	}
+	mfH265EncoderSpec = mfVideoEncoderSpec{
+		Codec: "h265", Label: "H.265", OutputSubtype: &mfVideoFormatHEVC,
+		OutputProfile: h265ProfileMain4208,
+		OutputLevel:   h265MediaFoundationLevel,
+	}
+)
+
 type MFH264TransformInfo struct {
+	Codec          string
 	Hardware       bool
 	Async          bool
 	D3D11Aware     bool
@@ -115,6 +144,7 @@ type MFH264TransformInfo struct {
 
 type MFH264Transform struct {
 	info      MFH264TransformInfo
+	spec      mfVideoEncoderSpec
 	commands  chan mfTransformCommand
 	done      chan struct{}
 	closeOnce sync.Once
@@ -326,60 +356,60 @@ func processTransformMessage(transform unsafe.Pointer, message uint32) error {
 	return processTransformMessageParam(transform, message, 0)
 }
 
-func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []byte, error) {
-	attributes, err := transformAttributes(transform)
-	if err == nil {
+func createEncoderOutputType(spec mfVideoEncoderSpec, cfg VideoConfig) (unsafe.Pointer, error) {
+	outputType, err := createVideoMediaType(spec.OutputSubtype, cfg, true)
+	if err != nil {
+		return nil, err
+	}
+	if spec.OutputProfile != 0 {
+		if err := attributeSetUINT32(outputType, &mfMTVideoProfile, spec.OutputProfile); err != nil {
+			releaseIUnknown(outputType)
+			return nil, err
+		}
+	}
+	if spec.OutputLevel != nil {
+		if level := spec.OutputLevel(cfg); level != 0 {
+			if err := attributeSetUINT32(outputType, &mfMTVideoLevel, level); err != nil {
+				releaseIUnknown(outputType)
+				return nil, err
+			}
+		}
+	}
+	return outputType, nil
+}
+
+func configureVideoEncoderTransform(
+	transform unsafe.Pointer,
+	cfg VideoConfig,
+	spec mfVideoEncoderSpec,
+) (bool, []byte, error) {
+	attributes, attrErr := transformAttributes(transform)
+	isAsync := false
+	if attrErr == nil {
 		defer releaseIUnknown(attributes)
 		async, getErr := attributeGetUINT32(attributes, &mfTransformAsync)
-		isAsync := getErr == nil && async != 0
+		isAsync = getErr == nil && async != 0
 		if isAsync {
 			if err := attributeSetUINT32(attributes, &mfTransformAsyncUnlock, 1); err != nil {
-				return false, nil, fmt.Errorf("unlock async MFT: %w", err)
+				return false, nil, fmt.Errorf("unlock async %s MFT: %w", spec.Label, err)
 			}
 		}
 		if !cfg.DisableLowLatency {
 			_ = attributeSetUINT32(attributes, &mfLowLatency, 1)
 		}
-
-		outputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
-		if err != nil {
-			return false, nil, err
-		}
-		defer releaseIUnknown(outputType)
-		// The Microsoft H.264 encoder requires its output media type first.
-		if err := setTransformType(transform, imfTransformSetOutputType, outputType); err != nil {
-			return false, nil, err
-		}
-		sequenceHeader, _ := attributeGetBlob(outputType, &mfMTMPEGSequenceHeader)
-
-		inputType, err := createVideoMediaType(&mfVideoFormatNV12, cfg, false)
-		if err != nil {
-			return false, nil, err
-		}
-		defer releaseIUnknown(inputType)
-		if err := setTransformType(transform, imfTransformSetInputType, inputType); err != nil {
-			return false, nil, err
-		}
-		if err := processTransformMessage(transform, mftMessageNotifyBeginStreaming); err != nil {
-			return false, nil, err
-		}
-		if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
-			return false, nil, err
-		}
-		return isAsync, sequenceHeader, nil
 	}
 
-	// Some older transforms do not expose a transform attribute store. Media
-	// type negotiation still works, but async/low-latency hints cannot be set.
-	outputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
+	outputType, err := createEncoderOutputType(spec, cfg)
 	if err != nil {
 		return false, nil, err
 	}
 	defer releaseIUnknown(outputType)
+	// Microsoft video encoders require the compressed output type before NV12 input.
 	if err := setTransformType(transform, imfTransformSetOutputType, outputType); err != nil {
 		return false, nil, err
 	}
 	sequenceHeader, _ := attributeGetBlob(outputType, &mfMTMPEGSequenceHeader)
+
 	inputType, err := createVideoMediaType(&mfVideoFormatNV12, cfg, false)
 	if err != nil {
 		return false, nil, err
@@ -394,7 +424,11 @@ func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []
 	if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
 		return false, nil, err
 	}
-	return false, sequenceHeader, nil
+	return isAsync, sequenceHeader, nil
+}
+
+func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []byte, error) {
+	return configureVideoEncoderTransform(transform, cfg, mfH264EncoderSpec)
 }
 
 func activationGroups(preferHardware bool) []struct {
@@ -421,15 +455,16 @@ func activationGroups(preferHardware bool) []struct {
 	}{software, hardware}
 }
 
-func openConfiguredH264Transform(
+func openConfiguredVideoTransform(
 	ctx context.Context,
 	cfg VideoConfig,
 	preferHardware bool,
 	allowAsync bool,
 	graphics *mfDecoderD3D11,
+	spec mfVideoEncoderSpec,
 ) (unsafe.Pointer, MFH264TransformInfo, error) {
 	rawNV12 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatNV12}
-	h264 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatH264}
+	compressed := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: *spec.OutputSubtype}
 	var failures []error
 
 	tryActivation := func(
@@ -446,14 +481,14 @@ func openConfiguredH264Transform(
 			d3d11Aware, err = candidateGraphics.Attach(transform)
 			if err != nil {
 				releaseIUnknown(transform)
-				return nil, MFH264TransformInfo{}, fmt.Errorf("attach D3D11 encoder manager: %w", err)
+				return nil, MFH264TransformInfo{}, fmt.Errorf("attach D3D11 %s encoder manager: %w", spec.Label, err)
 			}
 			if !d3d11Aware {
 				releaseIUnknown(transform)
-				return nil, MFH264TransformInfo{}, errors.New("encoder MFT is not D3D11-aware")
+				return nil, MFH264TransformInfo{}, fmt.Errorf("%s encoder MFT is not D3D11-aware", spec.Label)
 			}
 		}
-		async, sequenceHeader, err := configureH264Transform(transform, cfg)
+		async, sequenceHeader, err := configureVideoEncoderTransform(transform, cfg, spec)
 		if err != nil {
 			releaseIUnknown(transform)
 			return nil, MFH264TransformInfo{}, err
@@ -463,6 +498,7 @@ func openConfiguredH264Transform(
 			return nil, MFH264TransformInfo{}, errors.New("asynchronous MFT requires event-driven processing")
 		}
 		return transform, MFH264TransformInfo{
+			Codec:          spec.Codec,
 			Hardware:       hardware,
 			Async:          async,
 			D3D11Aware:     d3d11Aware,
@@ -475,7 +511,9 @@ func openConfiguredH264Transform(
 		if err := ctx.Err(); err != nil {
 			return nil, MFH264TransformInfo{}, err
 		}
-		activations, err := enumerateMFTActivations(mftCategoryVideoEncoder, group.flags, &rawNV12, &h264)
+		activations, err := enumerateMFTActivations(
+			mftCategoryVideoEncoder, group.flags, &rawNV12, &compressed,
+		)
 		if err != nil {
 			failures = append(failures, err)
 			continue
@@ -493,7 +531,7 @@ func openConfiguredH264Transform(
 						releaseMFTActivations(activations[index+1:])
 						return transform, info, nil
 					}
-					failures = append(failures, fmt.Errorf("D3D11 hardware encoder: %w", err))
+					failures = append(failures, fmt.Errorf("D3D11 hardware %s encoder: %w", spec.Label, err))
 				}
 				releaseIUnknown(activation)
 				activations[index] = nil
@@ -514,15 +552,36 @@ func openConfiguredH264Transform(
 	if len(failures) == 0 {
 		return nil, MFH264TransformInfo{}, ErrEncoderUnavailable
 	}
-	return nil, MFH264TransformInfo{}, fmt.Errorf("%w: %v", ErrEncoderUnavailable, errors.Join(failures...))
+	return nil, MFH264TransformInfo{}, fmt.Errorf(
+		"%w: %s: %v", ErrEncoderUnavailable, spec.Label, errors.Join(failures...),
+	)
+}
+
+func openConfiguredH264Transform(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	allowAsync bool,
+	graphics *mfDecoderD3D11,
+) (unsafe.Pointer, MFH264TransformInfo, error) {
+	return openConfiguredVideoTransform(
+		ctx, cfg, preferHardware, allowAsync, graphics, mfH264EncoderSpec,
+	)
 }
 
 func OpenMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware bool) (*MFH264Transform, error) {
 	return openMFH264Transform(ctx, cfg, preferHardware, true)
 }
 
-func openMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware, allowAsync bool) (*MFH264Transform, error) {
-	return openMFH264TransformWithDevice(ctx, cfg, preferHardware, allowAsync, 0)
+func openMFH264Transform(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	allowAsync bool,
+) (*MFH264Transform, error) {
+	return openMFVideoTransformWithDevice(
+		ctx, cfg, preferHardware, allowAsync, 0, mfH264EncoderSpec,
+	)
 }
 
 func openMFH264TransformWithDevice(
@@ -532,16 +591,33 @@ func openMFH264TransformWithDevice(
 	allowAsync bool,
 	device uintptr,
 ) (*MFH264Transform, error) {
+	return openMFVideoTransformWithDevice(
+		ctx, cfg, preferHardware, allowAsync, device, mfH264EncoderSpec,
+	)
+}
+
+func openMFVideoTransformWithDevice(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	allowAsync bool,
+	device uintptr,
+	spec mfVideoEncoderSpec,
+) (*MFH264Transform, error) {
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if spec.OutputSubtype == nil || spec.Codec == "" {
+		return nil, fmt.Errorf("%w: invalid Media Foundation encoder spec", ErrEncoderUnavailable)
+	}
 	initCh := make(chan mfTransformInit, 1)
 	session := &MFH264Transform{
+		spec:     spec,
 		commands: make(chan mfTransformCommand),
 		done:     make(chan struct{}),
 	}
-	go session.run(cfg, preferHardware, allowAsync, device, initCh)
+	go session.run(cfg, preferHardware, allowAsync, device, spec, initCh)
 
 	select {
 	case <-ctx.Done():
@@ -563,6 +639,7 @@ func (s *MFH264Transform) run(
 	preferHardware bool,
 	allowAsync bool,
 	device uintptr,
+	spec mfVideoEncoderSpec,
 	initCh chan<- mfTransformInit,
 ) {
 	runtime.LockOSThread()
@@ -587,13 +664,13 @@ func (s *MFH264Transform) run(
 	if device != 0 {
 		graphics, err = createMFDecoderD3D11FromDevice(device)
 		if err != nil {
-			initCh <- mfTransformInit{err: fmt.Errorf("create D3D11 encoder manager: %w", err)}
+			initCh <- mfTransformInit{err: fmt.Errorf("create D3D11 %s encoder manager: %w", spec.Label, err)}
 			return
 		}
 		defer graphics.Close()
 	}
-	transform, info, err := openConfiguredH264Transform(
-		context.Background(), cfg, preferHardware, allowAsync, graphics,
+	transform, info, err := openConfiguredVideoTransform(
+		context.Background(), cfg, preferHardware, allowAsync, graphics, spec,
 	)
 	if err != nil {
 		initCh <- mfTransformInit{err: err}
@@ -601,7 +678,9 @@ func (s *MFH264Transform) run(
 	}
 	defer releaseIUnknown(transform)
 	if device != 0 && !info.D3D11Aware {
-		initCh <- mfTransformInit{err: fmt.Errorf("%w: no D3D11-aware H.264 encoder MFT", ErrEncoderUnavailable)}
+		initCh <- mfTransformInit{err: fmt.Errorf(
+			"%w: no D3D11-aware %s encoder MFT", ErrEncoderUnavailable, spec.Label,
+		)}
 		return
 	}
 
@@ -616,7 +695,7 @@ func (s *MFH264Transform) run(
 		}
 		defer eventPump.Close()
 		eventCh = eventPump.events
-		asyncState = newMFAsyncState(transform, info.Config)
+		asyncState = newMFAsyncState(transform, info.Config, spec.Codec)
 	}
 	initCh <- mfTransformInit{info: info}
 
@@ -648,18 +727,20 @@ func (s *MFH264Transform) run(
 				return
 			}
 			if command.forceIDR {
-				command.reply <- mfTransformResult{err: forceH264IDR(transform)}
+				command.reply <- mfTransformResult{err: forceVideoKeyFrame(transform)}
 				continue
 			}
 			if command.bitrate != nil {
-				command.reply <- mfTransformResult{err: setH264MeanBitrate(transform, *command.bitrate)}
+				command.reply <- mfTransformResult{err: setVideoMeanBitrate(transform, *command.bitrate)}
 				continue
 			}
 			if command.input != nil {
 				if asyncState != nil {
 					asyncState.enqueue(command)
 				} else {
-					packets, err := processSyncH264Frame(transform, info.Config, *command.input)
+					packets, err := processSyncVideoFrame(
+						transform, spec.Codec, *command.input,
+					)
 					command.reply <- mfTransformResult{packets: packets, err: err}
 				}
 				continue
@@ -692,7 +773,11 @@ func processTransformInputSample(transform, sample unsafe.Pointer) uintptr {
 	return comCall(transform, imfTransformProcessInput, 0, uintptr(sample), 0)
 }
 
-func processTransformOutputOnce(transform unsafe.Pointer, fallbackTimestamp time.Duration) (*EncodedPacket, uintptr, error) {
+func processTransformOutputOnce(
+	transform unsafe.Pointer,
+	codec string,
+	fallbackTimestamp time.Duration,
+) (*EncodedPacket, uintptr, error) {
 	info, err := getOutputStreamInfo(transform)
 	if err != nil {
 		return nil, 0, err
@@ -733,7 +818,7 @@ func processTransformOutputOnce(transform unsafe.Pointer, fallbackTimestamp time
 	}
 	data, err := sampleBytes(out.Sample)
 	packet := &EncodedPacket{
-		Codec:     "h264",
+		Codec:     codec,
 		Data:      data,
 		Timestamp: sampleTimestamp(out.Sample, fallbackTimestamp),
 		KeyFrame:  sampleIsCleanPoint(out.Sample),
@@ -748,10 +833,14 @@ func processTransformOutputOnce(transform unsafe.Pointer, fallbackTimestamp time
 	return packet, hr, nil
 }
 
-func drainSyncH264Output(transform unsafe.Pointer, fallbackTimestamp time.Duration) ([]EncodedPacket, error) {
+func drainSyncVideoOutput(
+	transform unsafe.Pointer,
+	codec string,
+	fallbackTimestamp time.Duration,
+) ([]EncodedPacket, error) {
 	var packets []EncodedPacket
 	for {
-		packet, hr, err := processTransformOutputOnce(transform, fallbackTimestamp)
+		packet, hr, err := processTransformOutputOnce(transform, codec, fallbackTimestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -767,7 +856,15 @@ func drainSyncH264Output(transform unsafe.Pointer, fallbackTimestamp time.Durati
 	}
 }
 
-func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEncodeInput) ([]EncodedPacket, error) {
+func drainSyncH264Output(transform unsafe.Pointer, fallbackTimestamp time.Duration) ([]EncodedPacket, error) {
+	return drainSyncVideoOutput(transform, "h264", fallbackTimestamp)
+}
+
+func processSyncVideoFrame(
+	transform unsafe.Pointer,
+	codec string,
+	input mfEncodeInput,
+) ([]EncodedPacket, error) {
 	sample, err := createEncodeInputSample(input)
 	if err != nil {
 		return nil, err
@@ -777,7 +874,7 @@ func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEnc
 	var packets []EncodedPacket
 	hr := processTransformInputSample(transform, sample)
 	if uint32(hr) == mfENotAccepting {
-		pending, err := drainSyncH264Output(transform, input.timestamp)
+		pending, err := drainSyncVideoOutput(transform, codec, input.timestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -787,11 +884,19 @@ func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEnc
 	if hresultFailed(hr) {
 		return nil, hresultError("IMFTransform.ProcessInput", hr)
 	}
-	encoded, err := drainSyncH264Output(transform, input.timestamp)
+	encoded, err := drainSyncVideoOutput(transform, codec, input.timestamp)
 	if err != nil {
 		return nil, err
 	}
 	return append(packets, encoded...), nil
+}
+
+func processSyncH264Frame(
+	transform unsafe.Pointer,
+	_ VideoConfig,
+	input mfEncodeInput,
+) ([]EncodedPacket, error) {
+	return processSyncVideoFrame(transform, "h264", input)
 }
 
 func (s *MFH264Transform) EncodeNV12(ctx context.Context, data []byte, timestamp time.Duration) ([]EncodedPacket, error) {

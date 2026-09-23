@@ -294,6 +294,8 @@ type DesktopVideoControl struct {
 	TargetHeight  int `json:"targetHeight,omitempty"`
 }
 
+const DesktopAudioCodecPCMS16LE = "pcm_s16le"
+
 // DesktopAudioConfig describes one audio generation carried on the dedicated
 // RD/1 audio media stream. The first implementation may use PCM for bring-up;
 // the model intentionally supports compressed codecs without another protocol

@@ -234,7 +234,12 @@ func (s *ControllerSession) enqueueAudioFrame(frame *desktopmedia.EncodedFrame) 
 	copy(s.audioQueue[insertAt+1:], s.audioQueue[insertAt:])
 	s.audioQueue[insertAt] = snapshot
 	if len(s.audioQueue) > maxControllerAudioFrames {
+		dropped := s.audioQueue[0]
 		s.audioStats.QueueDroppedFrames++
+		if dropped.FrameID > s.audioStats.LastConsumedFrameID {
+			s.audioStats.LastConsumedFrameID = dropped.FrameID
+		}
+		s.audioConcealmentRun = 0
 		copy(s.audioQueue, s.audioQueue[1:])
 		s.audioQueue[len(s.audioQueue)-1] = AudioFrameSnapshot{}
 		s.audioQueue = s.audioQueue[:len(s.audioQueue)-1]

@@ -10,7 +10,13 @@ import (
 	"relayproxy/internal/protocol"
 )
 
-const maxControllerAudioFrames = 8
+const (
+	maxControllerAudioFrames          = 8
+	controllerAudioPlayoutFrames      = 2
+	defaultControllerAudioFramePeriod = 20 * time.Millisecond
+	minControllerAudioPlayoutDelay    = 20 * time.Millisecond
+	maxControllerAudioPlayoutDelay    = 80 * time.Millisecond
+)
 
 type audioRuntimeCounters struct {
 	ReceivedFrames            uint64
@@ -20,7 +26,12 @@ type audioRuntimeCounters struct {
 	QueueDroppedFrames        uint64
 	GenerationDiscardedFrames uint64
 	RejectedFrames            uint64
+	ReorderedFrames           uint64
+	DuplicateFrames           uint64
+	LateFrames                uint64
+	PlayoutTimeoutFrames      uint64
 	LastFrameID               uint32
+	LastConsumedFrameID       uint32
 	LastMediaTimestampUS      uint64
 	LastReceivedAtUnixMs      int64
 	LastConsumedAtUnixMs      int64
@@ -38,7 +49,12 @@ type DesktopAudioDiagnostics struct {
 	QueueDroppedFrames        uint64                      `json:"queueDroppedFrames"`
 	GenerationDiscardedFrames uint64                      `json:"generationDiscardedFrames"`
 	RejectedFrames            uint64                      `json:"rejectedFrames"`
+	ReorderedFrames           uint64                      `json:"reorderedFrames"`
+	DuplicateFrames           uint64                      `json:"duplicateFrames"`
+	LateFrames                uint64                      `json:"lateFrames"`
+	PlayoutTimeoutFrames      uint64                      `json:"playoutTimeoutFrames"`
 	LastFrameID               uint32                      `json:"lastFrameId,omitempty"`
+	LastConsumedFrameID       uint32                      `json:"lastConsumedFrameId,omitempty"`
 	LastMediaTimestampUS      uint64                      `json:"lastMediaTimestampUs,omitempty"`
 	LastReceivedAtUnixMs      int64                       `json:"lastReceivedAtUnixMs,omitempty"`
 	LastConsumedAtUnixMs      int64                       `json:"lastConsumedAtUnixMs,omitempty"`
@@ -50,6 +66,7 @@ type AudioFrameSnapshot struct {
 	Timestamp  uint64
 	Config     bool
 	Data       []byte
+	receivedAt time.Time
 }
 
 func validDesktopAudioConfig(config protocol.DesktopAudioConfig) bool {
@@ -88,6 +105,7 @@ func (s *ControllerSession) applyAudioConfig(config protocol.DesktopAudioConfig)
 		s.audioStats.GenerationDiscardedFrames += uint64(len(s.audioQueue))
 		clear(s.audioQueue)
 		s.audioQueue = s.audioQueue[:0]
+		s.audioStats.LastConsumedFrameID = 0
 	}
 	s.audioConfig = config
 	s.signalAudioLocked()
@@ -129,7 +147,12 @@ func (s *ControllerSession) AudioDiagnosticsSnapshot() DesktopAudioDiagnostics {
 		QueueDroppedFrames:        stats.QueueDroppedFrames,
 		GenerationDiscardedFrames: stats.GenerationDiscardedFrames,
 		RejectedFrames:            stats.RejectedFrames,
+		ReorderedFrames:           stats.ReorderedFrames,
+		DuplicateFrames:           stats.DuplicateFrames,
+		LateFrames:                stats.LateFrames,
+		PlayoutTimeoutFrames:      stats.PlayoutTimeoutFrames,
 		LastFrameID:               stats.LastFrameID,
+		LastConsumedFrameID:       stats.LastConsumedFrameID,
 		LastMediaTimestampUS:      stats.LastMediaTimestampUS,
 		LastReceivedAtUnixMs:      stats.LastReceivedAtUnixMs,
 		LastConsumedAtUnixMs:      stats.LastConsumedAtUnixMs,
@@ -157,6 +180,7 @@ func audioSnapshotFromEncodedFrame(frame *desktopmedia.EncodedFrame) AudioFrameS
 		Timestamp:  frame.Timestamp,
 		Config:     frame.Config,
 		Data:       append([]byte(nil), frame.Data...),
+		receivedAt: time.Now(),
 	}
 }
 
@@ -170,18 +194,41 @@ func (s *ControllerSession) enqueueAudioFrame(frame *desktopmedia.EncodedFrame) 
 		s.audioStats.RejectedFrames++
 		return false
 	}
+	if last := s.audioStats.LastConsumedFrameID; last != 0 && frame.FrameID <= last {
+		s.audioStats.RejectedFrames++
+		s.audioStats.LateFrames++
+		return false
+	}
+	for i := range s.audioQueue {
+		if s.audioQueue[i].FrameID == frame.FrameID {
+			s.audioStats.RejectedFrames++
+			s.audioStats.DuplicateFrames++
+			return false
+		}
+	}
+
 	snapshot := audioSnapshotFromEncodedFrame(frame)
 	s.audioStats.ReceivedFrames++
 	s.audioStats.ReceivedBytes += uint64(len(snapshot.Data))
 	s.audioStats.LastFrameID = snapshot.FrameID
 	s.audioStats.LastMediaTimestampUS = snapshot.Timestamp
-	s.audioStats.LastReceivedAtUnixMs = time.Now().UnixMilli()
-	if len(s.audioQueue) >= maxControllerAudioFrames {
+	s.audioStats.LastReceivedAtUnixMs = snapshot.receivedAt.UnixMilli()
+
+	insertAt := len(s.audioQueue)
+	for insertAt > 0 && s.audioQueue[insertAt-1].FrameID > snapshot.FrameID {
+		insertAt--
+	}
+	if insertAt < len(s.audioQueue) {
+		s.audioStats.ReorderedFrames++
+	}
+	s.audioQueue = append(s.audioQueue, AudioFrameSnapshot{})
+	copy(s.audioQueue[insertAt+1:], s.audioQueue[insertAt:])
+	s.audioQueue[insertAt] = snapshot
+	if len(s.audioQueue) > maxControllerAudioFrames {
 		s.audioStats.QueueDroppedFrames++
 		copy(s.audioQueue, s.audioQueue[1:])
-		s.audioQueue[len(s.audioQueue)-1] = snapshot
-	} else {
-		s.audioQueue = append(s.audioQueue, snapshot)
+		s.audioQueue[len(s.audioQueue)-1] = AudioFrameSnapshot{}
+		s.audioQueue = s.audioQueue[:len(s.audioQueue)-1]
 	}
 	s.signalAudioLocked()
 	return true
@@ -197,39 +244,106 @@ func (s *ControllerSession) signalAudioLocked() {
 	}
 }
 
+func audioPlayoutDelay(config protocol.DesktopAudioConfig) time.Duration {
+	period := time.Duration(config.FrameDurationMs) * time.Millisecond
+	if period <= 0 {
+		period = defaultControllerAudioFramePeriod
+	}
+	delay := 2 * period
+	if delay < minControllerAudioPlayoutDelay {
+		delay = minControllerAudioPlayoutDelay
+	}
+	if delay > maxControllerAudioPlayoutDelay {
+		delay = maxControllerAudioPlayoutDelay
+	}
+	return delay
+}
+
+func (s *ControllerSession) audioFrameReadyLocked(now time.Time) (ready bool, wait time.Duration, timeout bool) {
+	if s == nil || len(s.audioQueue) == 0 {
+		return false, 0, false
+	}
+	if len(s.audioQueue) >= controllerAudioPlayoutFrames {
+		return true, 0, false
+	}
+	oldest := s.audioQueue[0]
+	if oldest.receivedAt.IsZero() {
+		return true, 0, false
+	}
+	remaining := audioPlayoutDelay(s.audioConfig) - now.Sub(oldest.receivedAt)
+	if remaining <= 0 {
+		return true, 0, true
+	}
+	return false, remaining, false
+}
+
 func (s *ControllerSession) NextAudioFrame(ctx context.Context) (AudioFrameSnapshot, protocol.DesktopAudioConfig, error) {
 	if s == nil {
 		return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop session is unavailable")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	for {
 		s.audioMu.Lock()
-		for len(s.audioQueue) > 0 {
+		config := s.audioConfig
+		for len(s.audioQueue) > 0 && s.audioQueue[0].Generation != config.Generation {
+			copy(s.audioQueue, s.audioQueue[1:])
+			s.audioQueue[len(s.audioQueue)-1] = AudioFrameSnapshot{}
+			s.audioQueue = s.audioQueue[:len(s.audioQueue)-1]
+			s.audioStats.RejectedFrames++
+		}
+		ready, wait, timedOut := s.audioFrameReadyLocked(time.Now())
+		if ready && len(s.audioQueue) > 0 {
 			frame := s.audioQueue[0]
 			copy(s.audioQueue, s.audioQueue[1:])
 			s.audioQueue[len(s.audioQueue)-1] = AudioFrameSnapshot{}
 			s.audioQueue = s.audioQueue[:len(s.audioQueue)-1]
-			config := s.audioConfig
-			if frame.Generation == config.Generation {
-				s.audioStats.ConsumedFrames++
-				s.audioStats.ConsumedBytes += uint64(len(frame.Data))
-				s.audioStats.LastConsumedAtUnixMs = time.Now().UnixMilli()
-				s.audioMu.Unlock()
-				frame.Data = append([]byte(nil), frame.Data...)
-				return frame, config, nil
+			if timedOut {
+				s.audioStats.PlayoutTimeoutFrames++
 			}
-			s.audioStats.RejectedFrames++
+			s.audioStats.ConsumedFrames++
+			s.audioStats.ConsumedBytes += uint64(len(frame.Data))
+			s.audioStats.LastConsumedFrameID = frame.FrameID
+			s.audioStats.LastConsumedAtUnixMs = time.Now().UnixMilli()
+			s.audioMu.Unlock()
+			frame.Data = append([]byte(nil), frame.Data...)
+			return frame, config, nil
 		}
 		notify := s.audioNotify
+		done := s.done
 		s.audioMu.Unlock()
 		if notify == nil {
 			return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop audio queue is unavailable")
 		}
+		if wait <= 0 {
+			select {
+			case <-ctx.Done():
+				return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, ctx.Err()
+			case <-done:
+				return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop session is closed")
+			case <-notify:
+			}
+			continue
+		}
+
+		timer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, ctx.Err()
-		case <-s.done:
+		case <-done:
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop session is closed")
 		case <-notify:
+			if !timer.Stop() {
+				<-timer.C
+			}
+		case <-timer.C:
 		}
 	}
 }

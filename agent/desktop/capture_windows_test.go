@@ -160,6 +160,65 @@ func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T
 	}
 }
 
+func TestAutoWindowsCaptureBackendOrder(t *testing.T) {
+	tests := []struct {
+		name       string
+		display    screencapture.Display
+		hasWGC     bool
+		want       []protocol.DesktopCaptureBackend
+	}{
+		{
+			name:    "duplication and WGC",
+			display: screencapture.Display{AdapterIndex: 0, OutputIndex: 0},
+			hasWGC:  true,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureDXGI,
+				protocol.DesktopCaptureWGC,
+				protocol.DesktopCaptureGDI,
+			},
+		},
+		{
+			name:    "duplication without WGC",
+			display: screencapture.Display{AdapterIndex: 0, OutputIndex: 0},
+			hasWGC:  false,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureDXGI,
+				protocol.DesktopCaptureGDI,
+			},
+		},
+		{
+			name:    "WGC when duplication unavailable",
+			display: screencapture.Display{AdapterIndex: -1, OutputIndex: -1},
+			hasWGC:  true,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureWGC,
+				protocol.DesktopCaptureGDI,
+			},
+		},
+		{
+			name:    "GDI last resort",
+			display: screencapture.Display{AdapterIndex: -1, OutputIndex: -1},
+			hasWGC:  false,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureGDI,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := autoWindowsCaptureBackendOrder(tt.display, tt.hasWGC)
+			if len(got) != len(tt.want) {
+				t.Fatalf("backend order=%v want=%v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("backend order=%v want=%v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestWindowsCaptureBackendPolicy(t *testing.T) {
 	tests := []struct {
 		preference protocol.DesktopCaptureBackend

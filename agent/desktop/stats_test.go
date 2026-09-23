@@ -237,3 +237,25 @@ func TestAdaptationSnapshotStillIncludesLocalDroppedFrames(t *testing.T) {
 		t.Fatalf("adaptation dropped frames=%d want=4", got.DroppedFrames)
 	}
 }
+
+
+func TestSessionStatsIgnoreAudioSequenceDomain(t *testing.T) {
+	stats := newSessionStatsTracker("relay")
+	stats.ObservePacket(desktopmedia.MediaHeader{Type: desktopmedia.MediaPacketVideo, Sequence: 10}, 100)
+	stats.ObservePacket(desktopmedia.MediaHeader{Type: desktopmedia.MediaPacketAudio, StreamID: 2, Sequence: 500}, 400)
+	stats.ObservePacket(desktopmedia.MediaHeader{Type: desktopmedia.MediaPacketVideo, Sequence: 11}, 100)
+
+	stats.mu.Lock()
+	recvPackets := stats.recvPackets
+	recvBytes := stats.recvBytes
+	lastSequence := stats.lastSequence
+	lossDetected := stats.lossDetected
+	stats.mu.Unlock()
+
+	if recvPackets != 2 || recvBytes != 200 {
+		t.Fatalf("video stats included audio traffic: packets=%d bytes=%d", recvPackets, recvBytes)
+	}
+	if lastSequence != 11 || lossDetected != 0 {
+		t.Fatalf("audio sequence polluted video loss state: last=%d loss=%d", lastSequence, lossDetected)
+	}
+}

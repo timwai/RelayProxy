@@ -32,6 +32,25 @@ type RawCaptureSource interface {
 	CaptureRaw(context.Context) (desktopcodec.RawFrame, bool, error)
 }
 
+// CaptureFrameRateController is an optional capture-side cadence control.
+// The Host ticker remains authoritative for delivered media FPS; capable
+// backends may use this hint to avoid producing frames that the Host will not
+// consume after ABR lowers the target cadence.
+type CaptureFrameRateController interface {
+	SetCaptureFPS(int) error
+}
+
+func setCaptureFrameRate(source CaptureSource, fps int) error {
+	if source == nil || fps <= 0 {
+		return nil
+	}
+	controller, ok := source.(CaptureFrameRateController)
+	if !ok {
+		return nil
+	}
+	return controller.SetCaptureFPS(fps)
+}
+
 // SessionCaptureSource lets a backend acquire expensive per-session resources
 // (for example IDXGIOutputDuplication) only while somebody is actually
 // connected. CaptureSource remains deliberately small so the JPEG MVP and
@@ -605,6 +624,9 @@ func (h *Host) streamFrames(
 			targetFPS = nextFPS
 			frameInterval = frameIntervalForFPS(targetFPS)
 			ticker.Reset(frameInterval)
+			if err := setCaptureFrameRate(h.source, targetFPS); err != nil {
+				log.Printf("[Desktop] JPEG capture backend fps update=%d failed: %v", targetFPS, err)
+			}
 			log.Printf("[Desktop] JPEG capture fps updated=%d", targetFPS)
 		case scheduled := <-ticker.C:
 			if dropped := staleScheduledFrameCount(scheduled, time.Now(), frameInterval); dropped > 0 {

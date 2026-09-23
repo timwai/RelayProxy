@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #86 已合并，merge `f769d91862e0fe5ecc475553936e29b621e3c8f0`）
+> 当前开发基线：`main`（PR #88 已合并，merge `1766022d708b8be9164ed7b1843f68c006a6a370`）
 
 ## 0. 当前进度
 
@@ -397,7 +397,7 @@ Windows SendInput / CF_UNICODETEXT
 - PR #83 已合并到 `main`，merge `6be4fa4d577bd10aad5b1178032e01aba68f4919`；修正 stale import/gofmt 后 Go format/vet/full test/race/benchmark 全部通过。
 - #85 首轮 CI 仍复现最后一条 stream 的 `session shutdown`，确认 #83 还存在“server final Write 成功后立即 defer Close、client 尚未消费完”的生命周期竞态；PR #86 增加 client-completion barrier 后 Go CI 全绿并已合并 `f769d91862e0fe5ecc475553936e29b621e3c8f0`。
 
-### 0.2.30 RD3 Audio Media Foundation（当前分支）
+### 0.2.30 RD3 Audio Media Foundation（已合并 PR #85）
 
 - 为 RD/1 预留固定媒体 stream ID：video=1、audio=2、cursor=3；音频使用独立 stream/sequence 域，避免与视频丢包统计互相污染。
 - 新增 `DesktopAudioConfig` / `audio_config` session message，描述 generation、codec、sample rate、channels、bit depth、frame duration 与 target bitrate；先建立稳定 wire model，再接具体 Windows capture/decoder。
@@ -406,6 +406,29 @@ Windows SendInput / CF_UNICODETEXT
 - 现有 ABR/loss tracker 继续只计算 video packet sequence；audio datagram 不会制造假的 video packet gap。
 - 新增 audio out-of-order fragmentation/reassembly、video/audio type isolation、audio config JSON round-trip 与 sequence-domain 隔离测试。
 - 本阶段不启用音频采集或播放，也不修改默认 GUI；下一步接 Controller audio demux/buffer，再实现 Windows WASAPI loopback capture/native playback。
+- PR #85 已合并到 `main`，merge `8ca93fac7d59705334c1df43ddf50b826ef606d3`；基于 PR #86 的生命周期修复后 Go CI、UI full regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.31 RD3 Audio Controller Demux / Realtime Queue（已合并 PR #88）
+
+- Controller control loop 接收 `audio_config`，要求 generation 单调递增；同一 generation 内 codec/sample-rate/channel/bit-depth/frame-duration 等格式字段不可变化，格式切换必须 rollover。
+- 媒体 read loop 先解析 RD/1 header，再按 packet type 分流到独立 video/audio Reassembler；audio 使用 250 ms partial-frame TTL 和独立容量，不再经过 video JPEG/H.26x generation/recovery 路径。
+- audio 只接受保留的 stream ID=2 且 generation 必须匹配当前 AudioConfig；旧 generation 和错误 stream 的音频直接丢弃。
+- Controller 增加最多 8 帧的 realtime audio queue。消费者落后时丢最旧帧保留最新尾部，避免音频像可靠队列一样持续积压延迟。
+- generation 切换会清空旧 audio queue；`NextAudioFrame(ctx)` 提供阻塞式消费接口，并在返回时复制 payload，供 Windows native playback goroutine 直接使用，不走 WebView 轮询。
+- 新增 invalid/stale config、同 generation 格式变更、stream/generation 隔离、queue overflow、generation clear、payload copy 与 context cancellation 测试。
+- 下一步：把 `NextAudioFrame` 接到 Agent/Bridge 的 native-only 路径并实现 Windows WASAPI render；随后实现 Host WASAPI loopback capture 与 PCM bring-up，再评估 AAC/Opus 压缩。
+- PR #88 已合并到 `main`，merge `1766022d708b8be9164ed7b1843f68c006a6a370`；Go CI、UI full regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.32 RD3 Windows WASAPI PCM Player Core（当前分支）
+
+- 新增独立 `agent/desktop/audio` 播放层，不把 COM/WASAPI 生命周期放进 Controller；公开 `PCMConfig` / `Player` / `OpenPCMPlayer`，非 Windows 提供 unavailable stub。
+- 首轮 transport/playback 固定为 signed PCM S16LE，支持 8–192 kHz、1–8 channels；默认 bit depth=16，并严格校验 block alignment，先完成可靠 bring-up 再评估压缩 codec。
+- Windows 使用项目现有固定依赖 `go-bindings-win32 v0.2.1` 的 `IMMDeviceEnumerator → IAudioClient → IAudioRenderClient`，不新增音频第三方库。
+- WASAPI 使用默认 multimedia render endpoint、shared mode、40 ms requested buffer，以及 `AUTOCONVERTPCM | SRC_DEFAULT_QUALITY`，允许 Windows audio engine 把 transport PCM 转换到实际设备 mix format。
+- COM 初始化、endpoint/client/render interface 与所有 Write 都运行在 `runtime.LockOSThread` 的专用 goroutine；关闭顺序为 Stop → RenderClient Release → AudioClient Release → Endpoint Release → Enumerator Release → CoUninitialize。
+- Write 根据 `GetCurrentPadding` 计算剩余 capacity，必要时把一个 20 ms network frame 分成多个 WASAPI buffer write；buffer 满时短周期等待并响应 context/Close，避免无界阻塞。
+- 跨 goroutine Write 会复制输入 PCM，防止上层复用接收 buffer；新增 PCM normalization/alignment 和 Windows packed `WAVEFORMATEX` 字段测试。
+- 下一步：在 #88 的 `NextAudioFrame(ctx)` 上启动 native playback goroutine，并只在 `RemoteDesktopConnectOptions.Audio` 开启时播放；之后接 Host WASAPI loopback capture。
 
 ### 0.3 本轮进度（2026-09-22）
 

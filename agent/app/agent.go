@@ -1323,6 +1323,16 @@ func (a *Agent) RemoteDesktopStats() protocol.DesktopSessionStats {
 	return session.Stats()
 }
 
+func (a *Agent) RemoteDesktopAudioDiagnostics() desktop.DesktopAudioDiagnostics {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return desktop.DesktopAudioDiagnostics{}
+	}
+	return session.AudioDiagnosticsSnapshot()
+}
+
 func (a *Agent) RemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
 	a.mu.RLock()
 	session := a.desktopConnection

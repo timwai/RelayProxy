@@ -119,7 +119,6 @@ func TestH265RuntimeErrorPreservesGenerationAndCause(t *testing.T) {
 	}
 }
 
-
 func TestH265ValidationSentinelIsPrivateAndExplicit(t *testing.T) {
 	if !h265ValidationRequested("h265-validation") || !h265ValidationRequested(" H265-VALIDATION ") {
 		t.Fatal("internal H.265 validation sentinel was not recognized")

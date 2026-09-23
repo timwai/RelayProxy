@@ -94,8 +94,11 @@ func openAutoWindowsFrameStream(
 	var attempts []error
 	for _, candidate := range autoWindowsCaptureBackendOrder(display, hasWGC) {
 		stream, err := open(ctx, display, candidate, maxFPS)
-		if err == nil {
+		if err == nil && stream != nil {
 			return stream, nil
+		}
+		if err == nil {
+			err = errors.New("capture backend returned a nil stream")
 		}
 		attempts = append(attempts, fmt.Errorf("%s: %w", candidate, err))
 		if ctx.Err() != nil {

@@ -61,7 +61,78 @@ func (screencaptureFrameStreamFactory) Open(
 	preference protocol.DesktopCaptureBackend,
 	maxFPS int,
 ) (windowsFrameStream, error) {
-	if normalizedWindowsCaptureBackend(preference) == protocol.DesktopCaptureWGC {
+	preference = normalizedWindowsCaptureBackend(preference)
+	if preference != protocol.DesktopCaptureAuto {
+		return openConcreteWindowsFrameStream(ctx, display, preference, maxFPS)
+	}
+	return openAutoWindowsFrameStream(
+		ctx,
+		display,
+		maxFPS,
+		windowsWGCAvailable(),
+		openConcreteWindowsFrameStream,
+	)
+}
+
+type windowsFrameStreamOpener func(
+	context.Context,
+	screencapture.Display,
+	protocol.DesktopCaptureBackend,
+	int,
+) (windowsFrameStream, error)
+
+func openAutoWindowsFrameStream(
+	ctx context.Context,
+	display screencapture.Display,
+	maxFPS int,
+	hasWGC bool,
+	open windowsFrameStreamOpener,
+) (windowsFrameStream, error) {
+	if open == nil {
+		return nil, errors.New("Windows capture stream opener is unavailable")
+	}
+	var attempts []error
+	for _, candidate := range autoWindowsCaptureBackendOrder(display, hasWGC) {
+		stream, err := open(ctx, display, candidate, maxFPS)
+		if err == nil && stream != nil {
+			return stream, nil
+		}
+		if err == nil {
+			err = errors.New("capture backend returned a nil stream")
+		}
+		attempts = append(attempts, fmt.Errorf("%s: %w", candidate, err))
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+	}
+	if len(attempts) == 0 {
+		return nil, errors.New("no Windows capture backend candidates")
+	}
+	return nil, fmt.Errorf("automatic Windows capture failed: %w", errors.Join(attempts...))
+}
+
+func autoWindowsCaptureBackendOrder(
+	display screencapture.Display,
+	hasWGC bool,
+) []protocol.DesktopCaptureBackend {
+	backends := make([]protocol.DesktopCaptureBackend, 0, 3)
+	if display.Duplicable() {
+		backends = append(backends, protocol.DesktopCaptureDXGI)
+	}
+	if hasWGC {
+		backends = append(backends, protocol.DesktopCaptureWGC)
+	}
+	backends = append(backends, protocol.DesktopCaptureGDI)
+	return backends
+}
+
+func openConcreteWindowsFrameStream(
+	ctx context.Context,
+	display screencapture.Display,
+	preference protocol.DesktopCaptureBackend,
+	maxFPS int,
+) (windowsFrameStream, error) {
+	if preference == protocol.DesktopCaptureWGC {
 		return openWGCFrameStream(ctx, display, maxFPS)
 	}
 	backend, err := screencaptureBackend(preference)

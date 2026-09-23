@@ -3,6 +3,7 @@
 package desktop
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -157,6 +158,165 @@ func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T
 	_, end := mapDisplayNormalizedToVirtual(0, 65535, upper, virtual)
 	if start != 0 || end >= 35000 {
 		t.Fatalf("upper display mapped y range=%d..%d", start, end)
+	}
+}
+
+type testWindowsFrameStream struct {
+	backend protocol.DesktopCaptureBackend
+}
+
+func (s *testWindowsFrameStream) Frame() (windowsCaptureFrame, bool) {
+	return windowsCaptureFrame{}, false
+}
+
+func (s *testWindowsFrameStream) WaitFrame(context.Context) (windowsCaptureFrame, error) {
+	return windowsCaptureFrame{}, nil
+}
+
+func (s *testWindowsFrameStream) Backend() protocol.DesktopCaptureBackend {
+	return s.backend
+}
+
+func (s *testWindowsFrameStream) Close() error { return nil }
+
+func TestOpenAutoWindowsFrameStreamFallsThroughInOrder(t *testing.T) {
+	display := screencapture.Display{AdapterIndex: 0, OutputIndex: 0}
+	var attempts []protocol.DesktopCaptureBackend
+	stream, err := openAutoWindowsFrameStream(
+		context.Background(),
+		display,
+		30,
+		true,
+		func(
+			_ context.Context,
+			_ screencapture.Display,
+			backend protocol.DesktopCaptureBackend,
+			_ int,
+		) (windowsFrameStream, error) {
+			attempts = append(attempts, backend)
+			if backend != protocol.DesktopCaptureGDI {
+				return nil, errors.New("backend unavailable")
+			}
+			return &testWindowsFrameStream{backend: backend}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []protocol.DesktopCaptureBackend{
+		protocol.DesktopCaptureDXGI,
+		protocol.DesktopCaptureWGC,
+		protocol.DesktopCaptureGDI,
+	}
+	if len(attempts) != len(want) {
+		t.Fatalf("attempts=%v want=%v", attempts, want)
+	}
+	for i := range want {
+		if attempts[i] != want[i] {
+			t.Fatalf("attempts=%v want=%v", attempts, want)
+		}
+	}
+	if stream == nil {
+		t.Fatal("automatic capture returned a nil stream")
+	}
+	if stream.Backend() != protocol.DesktopCaptureGDI {
+		t.Fatalf("selected backend=%v want=gdi", stream.Backend())
+	}
+}
+
+func TestOpenAutoWindowsFrameStreamStopsOnFirstSuccess(t *testing.T) {
+	display := screencapture.Display{AdapterIndex: 0, OutputIndex: 0}
+	var attempts []protocol.DesktopCaptureBackend
+	stream, err := openAutoWindowsFrameStream(
+		context.Background(),
+		display,
+		30,
+		true,
+		func(
+			_ context.Context,
+			_ screencapture.Display,
+			backend protocol.DesktopCaptureBackend,
+			_ int,
+		) (windowsFrameStream, error) {
+			attempts = append(attempts, backend)
+			if backend == protocol.DesktopCaptureDXGI {
+				return nil, errors.New("DXGI unavailable")
+			}
+			return &testWindowsFrameStream{backend: backend}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 2 ||
+		attempts[0] != protocol.DesktopCaptureDXGI ||
+		attempts[1] != protocol.DesktopCaptureWGC {
+		t.Fatalf("attempts=%v want=[dxgi wgc]", attempts)
+	}
+	if stream == nil {
+		t.Fatal("automatic capture returned a nil stream")
+	}
+	if stream.Backend() != protocol.DesktopCaptureWGC {
+		t.Fatalf("selected backend=%v want=wgc", stream.Backend())
+	}
+}
+
+func TestAutoWindowsCaptureBackendOrder(t *testing.T) {
+	tests := []struct {
+		name    string
+		display screencapture.Display
+		hasWGC  bool
+		want    []protocol.DesktopCaptureBackend
+	}{
+		{
+			name:    "duplication and WGC",
+			display: screencapture.Display{AdapterIndex: 0, OutputIndex: 0},
+			hasWGC:  true,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureDXGI,
+				protocol.DesktopCaptureWGC,
+				protocol.DesktopCaptureGDI,
+			},
+		},
+		{
+			name:    "duplication without WGC",
+			display: screencapture.Display{AdapterIndex: 0, OutputIndex: 0},
+			hasWGC:  false,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureDXGI,
+				protocol.DesktopCaptureGDI,
+			},
+		},
+		{
+			name:    "WGC when duplication unavailable",
+			display: screencapture.Display{AdapterIndex: -1, OutputIndex: -1},
+			hasWGC:  true,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureWGC,
+				protocol.DesktopCaptureGDI,
+			},
+		},
+		{
+			name:    "GDI last resort",
+			display: screencapture.Display{AdapterIndex: -1, OutputIndex: -1},
+			hasWGC:  false,
+			want: []protocol.DesktopCaptureBackend{
+				protocol.DesktopCaptureGDI,
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := autoWindowsCaptureBackendOrder(tt.display, tt.hasWGC)
+			if len(got) != len(tt.want) {
+				t.Fatalf("backend order=%v want=%v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("backend order=%v want=%v", got, tt.want)
+				}
+			}
+		})
 	}
 }
 

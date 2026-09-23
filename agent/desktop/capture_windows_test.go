@@ -162,7 +162,9 @@ func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T
 }
 
 type testWindowsFrameStream struct {
-	backend protocol.DesktopCaptureBackend
+	backend    protocol.DesktopCaptureBackend
+	fpsUpdates []int
+	fpsErr     error
 }
 
 func (s *testWindowsFrameStream) Frame() (windowsCaptureFrame, bool) {
@@ -178,6 +180,32 @@ func (s *testWindowsFrameStream) Backend() protocol.DesktopCaptureBackend {
 }
 
 func (s *testWindowsFrameStream) Close() error { return nil }
+
+func (s *testWindowsFrameStream) SetMaxFPS(fps int) error {
+	s.fpsUpdates = append(s.fpsUpdates, fps)
+	return s.fpsErr
+}
+
+func TestWindowsCaptureForwardsDynamicFrameRateToStream(t *testing.T) {
+	stream := &testWindowsFrameStream{backend: protocol.DesktopCaptureWGC}
+	capture := &windowsCapture{stream: stream, backend: string(protocol.DesktopCaptureWGC)}
+	if err := capture.SetCaptureFPS(12); err != nil {
+		t.Fatal(err)
+	}
+	if len(stream.fpsUpdates) != 1 || stream.fpsUpdates[0] != 12 {
+		t.Fatalf("stream FPS updates=%v want=[12]", stream.fpsUpdates)
+	}
+}
+
+func TestWindowsCaptureDynamicFrameRateIsNoopWithoutActiveStream(t *testing.T) {
+	capture := &windowsCapture{backend: "gdi"}
+	if err := capture.SetCaptureFPS(12); err != nil {
+		t.Fatal(err)
+	}
+	if err := capture.SetCaptureFPS(0); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestOpenAutoWindowsFrameStreamFallsThroughInOrder(t *testing.T) {
 	display := screencapture.Display{AdapterIndex: 0, OutputIndex: 0}

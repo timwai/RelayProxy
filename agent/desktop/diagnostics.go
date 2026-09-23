@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	desktopDiagnosticsSchemaVersion = 4
+	desktopDiagnosticsSchemaVersion = 5
 	desktopDiagnosticsMaxSamples    = 1200
 	desktopDiagnosticsIntervalMs    = 500
 )
@@ -92,6 +92,39 @@ type DesktopDiagnosticsSummary struct {
 	RenderMs                DesktopDiagnosticMetricSummary `json:"renderMs"`
 }
 
+type DesktopAudioValidationSummary struct {
+	Requested                   bool    `json:"requested"`
+	RequestedCodec              string  `json:"requestedCodec,omitempty"`
+	Active                      bool    `json:"active"`
+	Codec                       string  `json:"codec,omitempty"`
+	ConfiguredSamples           int     `json:"configuredSamples,omitempty"`
+	OpusSamples                 int     `json:"opusSamples,omitempty"`
+	PCMSamples                  int     `json:"pcmSamples,omitempty"`
+	PCMFallbackSamples          int     `json:"pcmFallbackSamples,omitempty"`
+	SampleRate                  int     `json:"sampleRate,omitempty"`
+	Channels                    int     `json:"channels,omitempty"`
+	BitsPerSample               int     `json:"bitsPerSample,omitempty"`
+	FrameDurationMs             int     `json:"frameDurationMs,omitempty"`
+	TargetBitrate               int     `json:"targetBitrate,omitempty"`
+	RawPCMBitrate               int     `json:"rawPcmBitrate,omitempty"`
+	ObservedPayloadBitrate      int64   `json:"observedPayloadBitrate,omitempty"`
+	ObservedCompressionRatio    float64 `json:"observedCompressionRatio,omitempty"`
+	EstimatedNetworkLossPercent float64 `json:"estimatedNetworkLossPercent,omitempty"`
+	ReceivedFrames              uint64  `json:"receivedFrames,omitempty"`
+	ConsumedFrames              uint64  `json:"consumedFrames,omitempty"`
+	ReceivedBytes               uint64  `json:"receivedBytes,omitempty"`
+	ConsumedBytes               uint64  `json:"consumedBytes,omitempty"`
+	QueueDroppedFrames          uint64  `json:"queueDroppedFrames,omitempty"`
+	ConcealmentFrames           uint64  `json:"concealmentFrames,omitempty"`
+	GapSkippedFrames            uint64  `json:"gapSkippedFrames,omitempty"`
+	ReorderedFrames             uint64  `json:"reorderedFrames,omitempty"`
+	DuplicateFrames             uint64  `json:"duplicateFrames,omitempty"`
+	LateFrames                  uint64  `json:"lateFrames,omitempty"`
+	PlayoutTimeoutFrames        uint64  `json:"playoutTimeoutFrames,omitempty"`
+	MaxQueueFrames              int     `json:"maxQueueFrames,omitempty"`
+	SampleSpanMs                int64   `json:"sampleSpanMs,omitempty"`
+}
+
 type DesktopHEVCValidationSummary struct {
 	Requested               bool           `json:"requested"`
 	HEVCSamples             int            `json:"hevcSamples"`
@@ -117,6 +150,7 @@ type DesktopDiagnosticsReport struct {
 	CurrentStats      protocol.DesktopSessionStats         `json:"currentStats"`
 	CurrentAudio      DesktopAudioDiagnostics              `json:"currentAudio"`
 	Summary           DesktopDiagnosticsSummary            `json:"summary"`
+	AudioValidation   *DesktopAudioValidationSummary       `json:"audioValidation,omitempty"`
 	HEVCValidation    *DesktopHEVCValidationSummary        `json:"hevcValidation,omitempty"`
 	Samples           []DesktopDiagnosticSample            `json:"samples"`
 }
@@ -381,6 +415,102 @@ func summarizeDesktopDiagnostics(
 	return summary
 }
 
+func desktopAudioRequested(options protocol.RemoteDesktopConnectOptions) bool {
+	return options.Audio == nil || *options.Audio
+}
+
+func summarizeAudioValidation(
+	options protocol.RemoteDesktopConnectOptions,
+	samples []DesktopDiagnosticSample,
+	current DesktopAudioDiagnostics,
+) *DesktopAudioValidationSummary {
+	requested := desktopAudioRequested(options)
+	if !requested && current.Config.Generation == 0 {
+		return nil
+	}
+	summary := &DesktopAudioValidationSummary{
+		Requested:      requested,
+		RequestedCodec: strings.ToLower(strings.TrimSpace(options.AudioCodec)),
+	}
+	var (
+		firstConfigured *DesktopDiagnosticSample
+		lastConfigured  *DesktopDiagnosticSample
+	)
+	for i := range samples {
+		sample := samples[i]
+		if sample.Audio.Config.Generation == 0 {
+			continue
+		}
+		summary.ConfiguredSamples++
+		switch strings.ToLower(strings.TrimSpace(sample.Audio.Config.Codec)) {
+		case protocol.DesktopAudioCodecOpus:
+			summary.OpusSamples++
+		case protocol.DesktopAudioCodecPCMS16LE:
+			summary.PCMSamples++
+			if summary.RequestedCodec == protocol.DesktopAudioCodecOpus {
+				summary.PCMFallbackSamples++
+			}
+		}
+		if sample.Audio.QueueFrames > summary.MaxQueueFrames {
+			summary.MaxQueueFrames = sample.Audio.QueueFrames
+		}
+		if firstConfigured == nil {
+			copy := sample
+			firstConfigured = &copy
+		}
+		copy := sample
+		lastConfigured = &copy
+	}
+
+	latest := current
+	if latest.Config.Generation == 0 && lastConfigured != nil {
+		latest = lastConfigured.Audio
+	}
+	if latest.Config.Generation == 0 {
+		return summary
+	}
+	summary.Active = true
+	summary.Codec = strings.ToLower(strings.TrimSpace(latest.Config.Codec))
+	summary.SampleRate = latest.Config.SampleRate
+	summary.Channels = latest.Config.Channels
+	summary.BitsPerSample = latest.Config.BitsPerSample
+	summary.FrameDurationMs = latest.Config.FrameDurationMs
+	summary.TargetBitrate = latest.Config.TargetBitrate
+	if latest.Config.SampleRate > 0 && latest.Config.Channels > 0 && latest.Config.BitsPerSample > 0 {
+		summary.RawPCMBitrate = latest.Config.SampleRate * latest.Config.Channels * latest.Config.BitsPerSample
+	}
+	summary.ReceivedFrames = latest.ReceivedFrames
+	summary.ConsumedFrames = latest.ConsumedFrames
+	summary.ReceivedBytes = latest.ReceivedBytes
+	summary.ConsumedBytes = latest.ConsumedBytes
+	summary.QueueDroppedFrames = latest.QueueDroppedFrames
+	summary.ConcealmentFrames = latest.ConcealmentFrames
+	summary.GapSkippedFrames = latest.GapSkippedFrames
+	summary.ReorderedFrames = latest.ReorderedFrames
+	summary.DuplicateFrames = latest.DuplicateFrames
+	summary.LateFrames = latest.LateFrames
+	summary.PlayoutTimeoutFrames = latest.PlayoutTimeoutFrames
+	if latest.QueueFrames > summary.MaxQueueFrames {
+		summary.MaxQueueFrames = latest.QueueFrames
+	}
+	missing := latest.ConcealmentFrames + latest.GapSkippedFrames
+	totalNetworkFrames := latest.ReceivedFrames + missing
+	if totalNetworkFrames > 0 && missing > 0 {
+		summary.EstimatedNetworkLossPercent = float64(missing) * 100 / float64(totalNetworkFrames)
+	}
+	if firstConfigured != nil && lastConfigured != nil &&
+		lastConfigured.AtUnixMs > firstConfigured.AtUnixMs &&
+		lastConfigured.Audio.ReceivedBytes >= firstConfigured.Audio.ReceivedBytes {
+		summary.SampleSpanMs = lastConfigured.AtUnixMs - firstConfigured.AtUnixMs
+		deltaBytes := lastConfigured.Audio.ReceivedBytes - firstConfigured.Audio.ReceivedBytes
+		summary.ObservedPayloadBitrate = int64(deltaBytes) * 8 * 1000 / summary.SampleSpanMs
+		if summary.ObservedPayloadBitrate > 0 && summary.RawPCMBitrate > 0 {
+			summary.ObservedCompressionRatio = float64(summary.RawPCMBitrate) / float64(summary.ObservedPayloadBitrate)
+		}
+	}
+	return summary
+}
+
 func summarizeHEVCValidation(
 	options protocol.RemoteDesktopConnectOptions,
 	samples []DesktopDiagnosticSample,
@@ -445,6 +575,7 @@ func (r *sessionDiagnosticsRecorder) Report(
 		CurrentStats:      stats,
 		CurrentAudio:      audio,
 		Summary:           summarizeDesktopDiagnostics(r.started, now, samples),
+		AudioValidation:   summarizeAudioValidation(r.options, samples, audio),
 		HEVCValidation:    summarizeHEVCValidation(r.options, samples),
 		Samples:           samples,
 	}

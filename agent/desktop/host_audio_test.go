@@ -59,11 +59,11 @@ func (s *audioTestStream) Write(p []byte) (int, error) {
 	s.mu.Unlock()
 	return len(p), nil
 }
-func (s *audioTestStream) Close() error                       { return nil }
-func (s *audioTestStream) CloseWrite() error                  { return nil }
-func (s *audioTestStream) SetDeadline(time.Time) error        { return nil }
-func (s *audioTestStream) SetReadDeadline(time.Time) error    { return nil }
-func (s *audioTestStream) SetWriteDeadline(time.Time) error   { return nil }
+func (s *audioTestStream) Close() error                     { return nil }
+func (s *audioTestStream) CloseWrite() error                { return nil }
+func (s *audioTestStream) SetDeadline(time.Time) error      { return nil }
+func (s *audioTestStream) SetReadDeadline(time.Time) error  { return nil }
+func (s *audioTestStream) SetWriteDeadline(time.Time) error { return nil }
 
 func TestDesktopAudioEnabledDefaultsOn(t *testing.T) {
 	if !desktopAudioEnabled(protocol.RemoteDesktopConnectOptions{}) {

@@ -126,23 +126,44 @@ func wgcCast[T any](obj *win32.IUnknown) *T {
 
 func (s *wgcFrameStream) initialize(display screencapture.Display, maxFPS int) error {
 	var selectedLevel graphicsdirect3d.D3D_FEATURE_LEVEL
-	if err := graphicsdirect3d11.D3D11CreateDevice(
-		nil,
-		graphicsdirect3d.D3D_DRIVER_TYPE_HARDWARE,
-		0,
+	featureLevels := []graphicsdirect3d.D3D_FEATURE_LEVEL{
+		graphicsdirect3d.D3D_FEATURE_LEVEL_11_1,
+		graphicsdirect3d.D3D_FEATURE_LEVEL_11_0,
+		graphicsdirect3d.D3D_FEATURE_LEVEL_10_1,
+		graphicsdirect3d.D3D_FEATURE_LEVEL_10_0,
+	}
+	flags := []graphicsdirect3d11.D3D11_CREATE_DEVICE_FLAG{
+		graphicsdirect3d11.D3D11_CREATE_DEVICE_BGRA_SUPPORT |
+			graphicsdirect3d11.D3D11_CREATE_DEVICE_VIDEO_SUPPORT,
 		graphicsdirect3d11.D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-		[]graphicsdirect3d.D3D_FEATURE_LEVEL{
-			graphicsdirect3d.D3D_FEATURE_LEVEL_11_1,
-			graphicsdirect3d.D3D_FEATURE_LEVEL_11_0,
-			graphicsdirect3d.D3D_FEATURE_LEVEL_10_1,
-			graphicsdirect3d.D3D_FEATURE_LEVEL_10_0,
-		},
-		graphicsdirect3d11.D3D11_SDK_VERSION,
-		&s.device,
-		&selectedLevel,
-		&s.context,
-	); err != nil {
-		return fmt.Errorf("%w: create D3D11 device: %v", errWindowsGraphicsCaptureUnavailable, err)
+	}
+	var createErr error
+	for _, flag := range flags {
+		createErr = graphicsdirect3d11.D3D11CreateDevice(
+			nil,
+			graphicsdirect3d.D3D_DRIVER_TYPE_HARDWARE,
+			0,
+			flag,
+			featureLevels,
+			graphicsdirect3d11.D3D11_SDK_VERSION,
+			&s.device,
+			&selectedLevel,
+			&s.context,
+		)
+		if createErr == nil && s.device != nil && s.context != nil {
+			break
+		}
+		if s.context != nil {
+			s.context.Release()
+			s.context = nil
+		}
+		if s.device != nil {
+			s.device.Release()
+			s.device = nil
+		}
+	}
+	if createErr != nil {
+		return fmt.Errorf("%w: create D3D11 device: %v", errWindowsGraphicsCaptureUnavailable, createErr)
 	}
 	if s.device == nil || s.context == nil {
 		return fmt.Errorf("%w: D3D11 returned a nil device/context", errWindowsGraphicsCaptureUnavailable)

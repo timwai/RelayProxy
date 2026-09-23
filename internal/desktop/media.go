@@ -16,8 +16,8 @@ const (
 )
 
 const (
-	MediaStreamVideoID uint16 = 1
-	MediaStreamAudioID uint16 = 2
+	MediaStreamVideoID  uint16 = 1
+	MediaStreamAudioID  uint16 = 2
 	MediaStreamCursorID uint16 = 3
 )
 

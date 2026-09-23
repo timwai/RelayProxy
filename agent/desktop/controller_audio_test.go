@@ -372,3 +372,134 @@ func TestAudioPlayoutDelayIsBounded(t *testing.T) {
 		}
 	}
 }
+
+func testOpusAudioConfig(generation uint32) protocol.DesktopAudioConfig {
+	cfg := testAudioConfig(generation)
+	cfg.Codec = protocol.DesktopAudioCodecOpus
+	cfg.TargetBitrate = 96_000
+	return cfg
+}
+
+func TestOpusAudioGapEmitsConcealmentBeforeFutureFrame(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testOpusAudioConfig(1)) {
+		t.Fatal("Opus audio config rejected")
+	}
+	for _, id := range []uint32{1, 3, 4} {
+		if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+			Type:       desktopmedia.MediaPacketAudio,
+			StreamID:   desktopmedia.MediaStreamAudioID,
+			Generation: 1,
+			FrameID:    id,
+			Timestamp:  uint64(id) * 20_000,
+			Data:       []byte{byte(id)},
+		}) {
+			t.Fatalf("enqueue frame %d failed", id)
+		}
+	}
+
+	first, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.FrameID != 1 || first.Concealment {
+		t.Fatalf("first frame=%+v", first)
+	}
+
+	plc, config, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plc.Concealment || plc.FrameID != 2 || len(plc.Data) != 0 ||
+		plc.Timestamp != 40_000 || config.Codec != protocol.DesktopAudioCodecOpus {
+		t.Fatalf("PLC frame=%+v config=%+v", plc, config)
+	}
+
+	next, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.FrameID != 3 || next.Concealment {
+		t.Fatalf("next frame=%+v", next)
+	}
+
+	got := session.AudioDiagnosticsSnapshot()
+	if got.ConcealmentFrames != 1 || got.GapSkippedFrames != 0 ||
+		got.ConsumedFrames != 2 || got.LastConsumedFrameID != 3 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}
+
+func TestOpusAudioConcealmentBurstIsBounded(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testOpusAudioConfig(1)) {
+		t.Fatal("Opus audio config rejected")
+	}
+	for _, id := range []uint32{10, 11} {
+		if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+			Type:       desktopmedia.MediaPacketAudio,
+			StreamID:   desktopmedia.MediaStreamAudioID,
+			Generation: 1,
+			FrameID:    id,
+			Timestamp:  uint64(id) * 20_000,
+			Data:       []byte{byte(id)},
+		}) {
+			t.Fatalf("enqueue frame %d failed", id)
+		}
+	}
+
+	for want := uint32(1); want <= maxControllerAudioConcealmentFrames; want++ {
+		frame, _, err := session.NextAudioFrame(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !frame.Concealment || frame.FrameID != want {
+			t.Fatalf("concealment frame=%+v want id=%d", frame, want)
+		}
+	}
+	frame, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Concealment || frame.FrameID != 10 {
+		t.Fatalf("post-cap frame=%+v want live frame 10", frame)
+	}
+	got := session.AudioDiagnosticsSnapshot()
+	if got.ConcealmentFrames != maxControllerAudioConcealmentFrames ||
+		got.GapSkippedFrames != 6 ||
+		got.ConsumedFrames != 1 ||
+		got.LastConsumedFrameID != 10 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}
+
+func TestOpusQueueOverflowSkipsDroppedFramesWithoutPLC(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testOpusAudioConfig(1)) {
+		t.Fatal("Opus audio config rejected")
+	}
+	for i := 1; i <= maxControllerAudioFrames+2; i++ {
+		if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+			Type:       desktopmedia.MediaPacketAudio,
+			StreamID:   desktopmedia.MediaStreamAudioID,
+			Generation: 1,
+			FrameID:    uint32(i),
+			Timestamp:  uint64(i) * 20_000,
+			Data:       []byte{byte(i)},
+		}) {
+			t.Fatalf("enqueue frame %d failed", i)
+		}
+	}
+	frame, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Concealment || frame.FrameID != 3 {
+		t.Fatalf("overflow playout frame=%+v want live frame 3", frame)
+	}
+	got := session.AudioDiagnosticsSnapshot()
+	if got.QueueDroppedFrames != 2 || got.ConcealmentFrames != 0 ||
+		got.LastConsumedFrameID != 3 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}

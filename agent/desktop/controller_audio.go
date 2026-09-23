@@ -11,11 +11,12 @@ import (
 )
 
 const (
-	maxControllerAudioFrames          = 8
-	controllerAudioPlayoutFrames      = 2
-	defaultControllerAudioFramePeriod = 20 * time.Millisecond
-	minControllerAudioPlayoutDelay    = 20 * time.Millisecond
-	maxControllerAudioPlayoutDelay    = 80 * time.Millisecond
+	maxControllerAudioFrames            = 8
+	maxControllerAudioConcealmentFrames = 3
+	controllerAudioPlayoutFrames        = 2
+	defaultControllerAudioFramePeriod   = 20 * time.Millisecond
+	minControllerAudioPlayoutDelay      = 20 * time.Millisecond
+	maxControllerAudioPlayoutDelay      = 80 * time.Millisecond
 )
 
 type audioRuntimeCounters struct {
@@ -30,6 +31,8 @@ type audioRuntimeCounters struct {
 	DuplicateFrames           uint64
 	LateFrames                uint64
 	PlayoutTimeoutFrames      uint64
+	ConcealmentFrames         uint64
+	GapSkippedFrames          uint64
 	LastFrameID               uint32
 	LastConsumedFrameID       uint32
 	LastMediaTimestampUS      uint64
@@ -53,6 +56,8 @@ type DesktopAudioDiagnostics struct {
 	DuplicateFrames           uint64                      `json:"duplicateFrames"`
 	LateFrames                uint64                      `json:"lateFrames"`
 	PlayoutTimeoutFrames      uint64                      `json:"playoutTimeoutFrames"`
+	ConcealmentFrames         uint64                      `json:"concealmentFrames"`
+	GapSkippedFrames          uint64                      `json:"gapSkippedFrames"`
 	LastFrameID               uint32                      `json:"lastFrameId,omitempty"`
 	LastConsumedFrameID       uint32                      `json:"lastConsumedFrameId,omitempty"`
 	LastMediaTimestampUS      uint64                      `json:"lastMediaTimestampUs,omitempty"`
@@ -61,12 +66,13 @@ type DesktopAudioDiagnostics struct {
 }
 
 type AudioFrameSnapshot struct {
-	Generation uint32
-	FrameID    uint32
-	Timestamp  uint64
-	Config     bool
-	Data       []byte
-	receivedAt time.Time
+	Generation  uint32
+	FrameID     uint32
+	Timestamp   uint64
+	Config      bool
+	Concealment bool
+	Data        []byte
+	receivedAt  time.Time
 }
 
 func validDesktopAudioConfig(config protocol.DesktopAudioConfig) bool {
@@ -106,6 +112,7 @@ func (s *ControllerSession) applyAudioConfig(config protocol.DesktopAudioConfig)
 		clear(s.audioQueue)
 		s.audioQueue = s.audioQueue[:0]
 		s.audioStats.LastConsumedFrameID = 0
+		s.audioConcealmentRun = 0
 	}
 	s.audioConfig = config
 	s.signalAudioLocked()
@@ -151,6 +158,8 @@ func (s *ControllerSession) AudioDiagnosticsSnapshot() DesktopAudioDiagnostics {
 		DuplicateFrames:           stats.DuplicateFrames,
 		LateFrames:                stats.LateFrames,
 		PlayoutTimeoutFrames:      stats.PlayoutTimeoutFrames,
+		ConcealmentFrames:         stats.ConcealmentFrames,
+		GapSkippedFrames:          stats.GapSkippedFrames,
 		LastFrameID:               stats.LastFrameID,
 		LastConsumedFrameID:       stats.LastConsumedFrameID,
 		LastMediaTimestampUS:      stats.LastMediaTimestampUS,
@@ -225,7 +234,12 @@ func (s *ControllerSession) enqueueAudioFrame(frame *desktopmedia.EncodedFrame) 
 	copy(s.audioQueue[insertAt+1:], s.audioQueue[insertAt:])
 	s.audioQueue[insertAt] = snapshot
 	if len(s.audioQueue) > maxControllerAudioFrames {
+		dropped := s.audioQueue[0]
 		s.audioStats.QueueDroppedFrames++
+		if dropped.FrameID > s.audioStats.LastConsumedFrameID {
+			s.audioStats.LastConsumedFrameID = dropped.FrameID
+		}
+		s.audioConcealmentRun = 0
 		copy(s.audioQueue, s.audioQueue[1:])
 		s.audioQueue[len(s.audioQueue)-1] = AudioFrameSnapshot{}
 		s.audioQueue = s.audioQueue[:len(s.audioQueue)-1]
@@ -257,6 +271,25 @@ func audioPlayoutDelay(config protocol.DesktopAudioConfig) time.Duration {
 		delay = maxControllerAudioPlayoutDelay
 	}
 	return delay
+}
+
+func nextAudioFrameID(last uint32) uint32 {
+	if last == 0 {
+		return 1
+	}
+	return last + 1
+}
+
+func audioConcealmentTimestamp(head AudioFrameSnapshot, expected uint32, config protocol.DesktopAudioConfig) uint64 {
+	periodUS := uint64(config.FrameDurationMs) * 1000
+	if periodUS == 0 || head.FrameID <= expected {
+		return head.Timestamp
+	}
+	delta := uint64(head.FrameID-expected) * periodUS
+	if head.Timestamp < delta {
+		return 0
+	}
+	return head.Timestamp - delta
 }
 
 func (s *ControllerSession) audioFrameReadyLocked(now time.Time) (ready bool, wait time.Duration, timeout bool) {
@@ -295,6 +328,28 @@ func (s *ControllerSession) NextAudioFrame(ctx context.Context) (AudioFrameSnaps
 		}
 		ready, wait, timedOut := s.audioFrameReadyLocked(time.Now())
 		if ready && len(s.audioQueue) > 0 {
+			head := s.audioQueue[0]
+			expected := nextAudioFrameID(s.audioStats.LastConsumedFrameID)
+			if config.Codec == protocol.DesktopAudioCodecOpus && head.FrameID > expected {
+				if s.audioConcealmentRun < maxControllerAudioConcealmentFrames {
+					s.audioConcealmentRun++
+					s.audioStats.ConcealmentFrames++
+					s.audioStats.LastConsumedFrameID = expected
+					s.audioStats.LastConsumedAtUnixMs = time.Now().UnixMilli()
+					frame := AudioFrameSnapshot{
+						Generation:  config.Generation,
+						FrameID:     expected,
+						Timestamp:   audioConcealmentTimestamp(head, expected, config),
+						Concealment: true,
+					}
+					s.audioMu.Unlock()
+					return frame, config, nil
+				}
+				s.audioStats.GapSkippedFrames += uint64(head.FrameID - expected)
+				s.audioStats.LastConsumedFrameID = head.FrameID - 1
+				s.audioConcealmentRun = 0
+			}
+
 			frame := s.audioQueue[0]
 			copy(s.audioQueue, s.audioQueue[1:])
 			s.audioQueue[len(s.audioQueue)-1] = AudioFrameSnapshot{}
@@ -306,6 +361,7 @@ func (s *ControllerSession) NextAudioFrame(ctx context.Context) (AudioFrameSnaps
 			s.audioStats.ConsumedBytes += uint64(len(frame.Data))
 			s.audioStats.LastConsumedFrameID = frame.FrameID
 			s.audioStats.LastConsumedAtUnixMs = time.Now().UnixMilli()
+			s.audioConcealmentRun = 0
 			s.audioMu.Unlock()
 			frame.Data = append([]byte(nil), frame.Data...)
 			return frame, config, nil

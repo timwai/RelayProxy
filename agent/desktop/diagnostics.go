@@ -56,6 +56,8 @@ type DesktopDiagnosticsSummary struct {
 	AudioDuplicateFrames    uint64                         `json:"audioDuplicateFrames,omitempty"`
 	AudioLateFrames         uint64                         `json:"audioLateFrames,omitempty"`
 	AudioPlayoutTimeouts    uint64                         `json:"audioPlayoutTimeouts,omitempty"`
+	AudioConcealmentFrames  uint64                         `json:"audioConcealmentFrames,omitempty"`
+	AudioGapSkippedFrames   uint64                         `json:"audioGapSkippedFrames,omitempty"`
 	AudioMaxQueueFrames     int                            `json:"audioMaxQueueFrames,omitempty"`
 	AudioCodecs             map[string]int                 `json:"audioCodecs,omitempty"`
 	AudioQueueFrames        DesktopDiagnosticMetricSummary `json:"audioQueueFrames"`
@@ -326,6 +328,12 @@ func summarizeDesktopDiagnostics(
 		}
 		if sample.Audio.PlayoutTimeoutFrames > summary.AudioPlayoutTimeouts {
 			summary.AudioPlayoutTimeouts = sample.Audio.PlayoutTimeoutFrames
+		}
+		if sample.Audio.ConcealmentFrames > summary.AudioConcealmentFrames {
+			summary.AudioConcealmentFrames = sample.Audio.ConcealmentFrames
+		}
+		if sample.Audio.GapSkippedFrames > summary.AudioGapSkippedFrames {
+			summary.AudioGapSkippedFrames = sample.Audio.GapSkippedFrames
 		}
 		if sample.Config.Width > 0 && sample.Config.Height > 0 {
 			incrementDiagnosticCount(summary.Resolutions,

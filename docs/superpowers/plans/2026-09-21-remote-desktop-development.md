@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #97 已合并，merge `0d896e891a9020ee74989c967f5f2a95122dd231`）
+> 当前开发基线：`main`（PR #98 已合并，merge `7d0499dfe7a764df157e8d33abe33ce0fd8621a4`）
 
 ## 0. 当前进度
 
@@ -490,7 +490,7 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 config validation、S16LE 440 Hz stereo encode/decode round-trip、压缩尺寸与错误输入测试。
 - PR #97 已合并到 `main`，merge `0d896e891a9020ee74989c967f5f2a95122dd231`；Go format/vet/test/race/benchmark、UI regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.40 RD3 Opus Negotiation / End-to-End Data Path（当前分支）
+### 0.2.40 RD3 Opus Negotiation / End-to-End Data Path（已合并 PR #98）
 
 - `DesktopCapabilities` 新增 `audioCodecs`，新 Host 在 loopback audio 可用时声明 `[opus, pcm_s16le]`；server gateway/session 对该 slice 做独立拷贝，继续保持 capability snapshot 隔离。
 - `RemoteDesktopConnectOptions` 新增内部协商字段 `audioCodec`。Controller 在 Relay Desktop dial 前自动选择：新目标优先 Opus；legacy 目标只有 `Audio=true` 且没有 codec list 时严格按 PCM-only 处理；显式 `Audio=false` 不携带 codec。
@@ -498,7 +498,18 @@ Windows SendInput / CF_UNICODETEXT
 - `audio_config` 通过现有 generation 模型声明实际 codec 与 target bitrate；Opus payload 继续使用独立 audio stream ID=2 / sequence domain，并进入现有 bounded jitter queue。
 - Windows native viewer 按 `audio_config.codec` 创建 Opus decoder；Opus frame 在进入 WASAPI player 前恢复为 PCM，原有 PCM alignment 校验、player rebuild 与错误恢复路径继续复用。
 - 新增 Controller 协商测试、legacy PCM fallback、显式 codec 拒绝、Host Opus transport/reassembly/decode 集成测试，以及 audio codec capability copy 测试。
-- 下一步：CI 通过后补 Opus 弱网/丢帧场景与 PLC 策略，随后做 Windows 实机 capture → Opus → network → decode → WASAPI 验证和带宽/延迟基线。
+- PR #98 已合并到 `main`，merge `7d0499dfe7a764df157e8d33abe33ce0fd8621a4`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.41 RD3 Opus Packet-Loss Concealment（当前分支）
+
+- Controller 在 Opus playout 中根据 FrameID 明确识别网络缺口；缺失帧不再直接跳过，而是产生 `Concealment` playout event，Native Viewer 调用 Pion Opus decoder 的 PLC 生成完整 20 ms PCM 后继续交给 WASAPI。
+- 单次连续 concealment 严格限制为 3 帧（60 ms）。超过上限的大缺口直接推进到最新可播放真实帧，并记录 `gapSkippedFrames`，防止长断网后用 PLC 回放历史时间、造成音频持续落后。
+- 本地 8 帧 realtime queue overflow 与网络丢帧分开处理：overflow 主动丢掉的旧 FrameID 会同步推进 playout cursor，不再被 PLC 补回；这保持了“宁可丢旧音频也不增加长期延迟”的实时策略。
+- Opus decoder wrapper 新增 `DecodePLC()`，把 Pion 的 signed-int16 PLC 输出恢复为现有 S16LE byte frame；未收到任何真实 Opus packet 前的 PLC 由底层 decoder 输出静音，已 prime 后使用 codec concealment 状态。
+- Audio diagnostics 新增 `concealmentFrames` 与 `gapSkippedFrames`，summary 同步导出 `audioConcealmentFrames` / `audioGapSkippedFrames`，可区分网络缺帧被平滑掩盖与大缺口主动追实时。
+- 新增单帧缺失、连续大缺口 3 帧 PLC 上限、queue-overflow 不触发 PLC、Opus codec PLC PCM 输出与诊断汇总测试。
+- 新增真实 RD/1 packet-loss 集成链：Host 连续生成 4 帧 Opus datagram，确定性丢弃 FrameID=2 的实际 packet，再经 audio Reassembler → Controller gap detector → PLC event → Opus decoder，验证恢复后的三段 PCM 均保持完整 20 ms 帧长。
+- 下一步：做 Windows 实机 capture → Opus → loss/jitter → PLC → WASAPI 的听感、CPU 与端到端延迟验证，并据实机数据决定是否需要自适应 Opus bitrate/FEC。
 
 ### 0.3 本轮进度（2026-09-22）
 

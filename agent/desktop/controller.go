@@ -44,11 +44,12 @@ type ControllerSession struct {
 	configReady      chan struct{}
 	configOnce       sync.Once
 
-	audioMu     sync.Mutex
-	audioConfig protocol.DesktopAudioConfig
-	audioQueue  []AudioFrameSnapshot
-	audioNotify chan struct{}
-	audioStats  audioRuntimeCounters
+	audioMu             sync.Mutex
+	audioConfig         protocol.DesktopAudioConfig
+	audioQueue          []AudioFrameSnapshot
+	audioNotify         chan struct{}
+	audioStats          audioRuntimeCounters
+	audioConcealmentRun int
 
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState

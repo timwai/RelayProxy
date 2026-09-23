@@ -110,3 +110,43 @@ func TestOpusCodecRejectsWrongFrameAndPacket(t *testing.T) {
 		t.Fatal("oversized Opus packet was accepted")
 	}
 }
+
+func TestOpusDecoderPLCProducesPCMFrame(t *testing.T) {
+	cfg, err := NormalizeOpusConfig(OpusConfig{Bitrate: 96_000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoder, err := NewOpusEncoder(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder, err := NewOpusDecoder(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet, err := encoder.EncodePCM(testOpusPCM(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decoder.DecodePacket(packet); err != nil {
+		t.Fatal(err)
+	}
+	plc, err := decoder.DecodePLC()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plc) != cfg.PCMFrameBytes() {
+		t.Fatalf("PLC PCM bytes=%d want=%d", len(plc), cfg.PCMFrameBytes())
+	}
+	var energy int64
+	for i := 0; i+1 < len(plc); i += 2 {
+		v := int64(int16(binary.LittleEndian.Uint16(plc[i : i+2])))
+		if v < 0 {
+			v = -v
+		}
+		energy += v
+	}
+	if energy == 0 {
+		t.Fatal("primed Opus PLC frame is silent")
+	}
+}

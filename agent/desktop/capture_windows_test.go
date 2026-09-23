@@ -3,6 +3,7 @@
 package desktop
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -157,6 +158,100 @@ func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T
 	_, end := mapDisplayNormalizedToVirtual(0, 65535, upper, virtual)
 	if start != 0 || end >= 35000 {
 		t.Fatalf("upper display mapped y range=%d..%d", start, end)
+	}
+}
+
+type testWindowsFrameStream struct {
+	backend protocol.DesktopCaptureBackend
+}
+
+func (s *testWindowsFrameStream) Frame() (windowsCaptureFrame, bool) {
+	return windowsCaptureFrame{}, false
+}
+
+func (s *testWindowsFrameStream) WaitFrame(context.Context) (windowsCaptureFrame, error) {
+	return windowsCaptureFrame{}, nil
+}
+
+func (s *testWindowsFrameStream) Backend() protocol.DesktopCaptureBackend {
+	return s.backend
+}
+
+func (s *testWindowsFrameStream) Close() error { return nil }
+
+func TestOpenAutoWindowsFrameStreamFallsThroughInOrder(t *testing.T) {
+	display := screencapture.Display{AdapterIndex: 0, OutputIndex: 0}
+	var attempts []protocol.DesktopCaptureBackend
+	stream, err := openAutoWindowsFrameStream(
+		context.Background(),
+		display,
+		30,
+		true,
+		func(
+			_ context.Context,
+			_ screencapture.Display,
+			backend protocol.DesktopCaptureBackend,
+			_ int,
+		) (windowsFrameStream, error) {
+			attempts = append(attempts, backend)
+			if backend != protocol.DesktopCaptureGDI {
+				return nil, errors.New("backend unavailable")
+			}
+			return &testWindowsFrameStream{backend: backend}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []protocol.DesktopCaptureBackend{
+		protocol.DesktopCaptureDXGI,
+		protocol.DesktopCaptureWGC,
+		protocol.DesktopCaptureGDI,
+	}
+	if len(attempts) != len(want) {
+		t.Fatalf("attempts=%v want=%v", attempts, want)
+	}
+	for i := range want {
+		if attempts[i] != want[i] {
+			t.Fatalf("attempts=%v want=%v", attempts, want)
+		}
+	}
+	if stream == nil || stream.Backend() != protocol.DesktopCaptureGDI {
+		t.Fatalf("selected stream=%v backend=%v", stream, stream.Backend())
+	}
+}
+
+func TestOpenAutoWindowsFrameStreamStopsOnFirstSuccess(t *testing.T) {
+	display := screencapture.Display{AdapterIndex: 0, OutputIndex: 0}
+	var attempts []protocol.DesktopCaptureBackend
+	stream, err := openAutoWindowsFrameStream(
+		context.Background(),
+		display,
+		30,
+		true,
+		func(
+			_ context.Context,
+			_ screencapture.Display,
+			backend protocol.DesktopCaptureBackend,
+			_ int,
+		) (windowsFrameStream, error) {
+			attempts = append(attempts, backend)
+			if backend == protocol.DesktopCaptureDXGI {
+				return nil, errors.New("DXGI unavailable")
+			}
+			return &testWindowsFrameStream{backend: backend}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 2 ||
+		attempts[0] != protocol.DesktopCaptureDXGI ||
+		attempts[1] != protocol.DesktopCaptureWGC {
+		t.Fatalf("attempts=%v want=[dxgi wgc]", attempts)
+	}
+	if stream == nil || stream.Backend() != protocol.DesktopCaptureWGC {
+		t.Fatalf("selected stream backend=%v want=wgc", stream.Backend())
 	}
 }
 

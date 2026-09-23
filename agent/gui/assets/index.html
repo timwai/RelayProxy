@@ -1789,7 +1789,7 @@
       if (!wrap || !select || !apply) return;
       status = status || {};
       var enabled = status.state === 'connected' && status.backend === 'relay' &&
-        status.codec === 'h264' && hasFn('goSetRemoteDesktopResolution');
+        (status.codec === 'h264' || status.codec === 'h265') && hasFn('goSetRemoteDesktopResolution');
       wrap.classList.toggle('hidden', !enabled);
       wrap.classList.toggle('flex', enabled);
       select.disabled = !enabled;
@@ -2131,6 +2131,16 @@
           $('desktop-viewer-meta').textContent =
             (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
             'H.264 · WebCodecs · QUIC Datagram · 键鼠控制 · ' + remoteDesktopOptionsSummary();
+        } else if (mime.indexOf('video/h265') === 0) {
+          // The embedded WebView does not claim HEVC WebCodecs support. Hidden
+          // HEVC validation sessions are rendered by the native MF/D3D11
+          // viewer; do not misinterpret an HEVC access unit as a JPEG image.
+          resetDesktopVideoDecoder();
+          showDesktopJPEGSurface();
+          $('desktop-viewer-image').removeAttribute('src');
+          $('desktop-viewer-meta').textContent =
+            (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
+            'H.265 · 请使用原生查看器 · QUIC Datagram · 键鼠控制';
         } else {
           resetDesktopVideoDecoder();
           showDesktopJPEGSurface();

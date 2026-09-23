@@ -4,12 +4,45 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
 )
 
 const maxControllerAudioFrames = 8
+
+type audioRuntimeCounters struct {
+	ReceivedFrames            uint64
+	ReceivedBytes             uint64
+	ConsumedFrames            uint64
+	ConsumedBytes             uint64
+	QueueDroppedFrames        uint64
+	GenerationDiscardedFrames uint64
+	RejectedFrames            uint64
+	LastFrameID               uint32
+	LastMediaTimestampUS      uint64
+	LastReceivedAtUnixMs      int64
+	LastConsumedAtUnixMs      int64
+}
+
+type DesktopAudioDiagnostics struct {
+	Enabled                   bool                        `json:"enabled"`
+	Config                    protocol.DesktopAudioConfig `json:"config"`
+	QueueFrames               int                         `json:"queueFrames"`
+	QueueCapacity             int                         `json:"queueCapacity"`
+	ReceivedFrames            uint64                      `json:"receivedFrames"`
+	ReceivedBytes             uint64                      `json:"receivedBytes"`
+	ConsumedFrames            uint64                      `json:"consumedFrames"`
+	ConsumedBytes             uint64                      `json:"consumedBytes"`
+	QueueDroppedFrames        uint64                      `json:"queueDroppedFrames"`
+	GenerationDiscardedFrames uint64                      `json:"generationDiscardedFrames"`
+	RejectedFrames            uint64                      `json:"rejectedFrames"`
+	LastFrameID               uint32                      `json:"lastFrameId,omitempty"`
+	LastMediaTimestampUS      uint64                      `json:"lastMediaTimestampUs,omitempty"`
+	LastReceivedAtUnixMs      int64                       `json:"lastReceivedAtUnixMs,omitempty"`
+	LastConsumedAtUnixMs      int64                       `json:"lastConsumedAtUnixMs,omitempty"`
+}
 
 type AudioFrameSnapshot struct {
 	Generation uint32
@@ -52,6 +85,7 @@ func (s *ControllerSession) applyAudioConfig(config protocol.DesktopAudioConfig)
 		return false
 	}
 	if current.Generation != config.Generation {
+		s.audioStats.GenerationDiscardedFrames += uint64(len(s.audioQueue))
 		clear(s.audioQueue)
 		s.audioQueue = s.audioQueue[:0]
 	}
@@ -74,6 +108,32 @@ func (s *ControllerSession) AudioConfigSnapshot() protocol.DesktopAudioConfig {
 	s.audioMu.Lock()
 	defer s.audioMu.Unlock()
 	return s.audioConfig
+}
+
+func (s *ControllerSession) AudioDiagnosticsSnapshot() DesktopAudioDiagnostics {
+	if s == nil {
+		return DesktopAudioDiagnostics{}
+	}
+	s.audioMu.Lock()
+	defer s.audioMu.Unlock()
+	stats := s.audioStats
+	return DesktopAudioDiagnostics{
+		Enabled:                   s.options.Audio == nil || *s.options.Audio,
+		Config:                    s.audioConfig,
+		QueueFrames:               len(s.audioQueue),
+		QueueCapacity:             maxControllerAudioFrames,
+		ReceivedFrames:            stats.ReceivedFrames,
+		ReceivedBytes:             stats.ReceivedBytes,
+		ConsumedFrames:            stats.ConsumedFrames,
+		ConsumedBytes:             stats.ConsumedBytes,
+		QueueDroppedFrames:        stats.QueueDroppedFrames,
+		GenerationDiscardedFrames: stats.GenerationDiscardedFrames,
+		RejectedFrames:            stats.RejectedFrames,
+		LastFrameID:               stats.LastFrameID,
+		LastMediaTimestampUS:      stats.LastMediaTimestampUS,
+		LastReceivedAtUnixMs:      stats.LastReceivedAtUnixMs,
+		LastConsumedAtUnixMs:      stats.LastConsumedAtUnixMs,
+	}
 }
 
 func audioFrameMatchesConfig(
@@ -107,10 +167,17 @@ func (s *ControllerSession) enqueueAudioFrame(frame *desktopmedia.EncodedFrame) 
 	s.audioMu.Lock()
 	defer s.audioMu.Unlock()
 	if !audioFrameMatchesConfig(frame, s.audioConfig) {
+		s.audioStats.RejectedFrames++
 		return false
 	}
 	snapshot := audioSnapshotFromEncodedFrame(frame)
+	s.audioStats.ReceivedFrames++
+	s.audioStats.ReceivedBytes += uint64(len(snapshot.Data))
+	s.audioStats.LastFrameID = snapshot.FrameID
+	s.audioStats.LastMediaTimestampUS = snapshot.Timestamp
+	s.audioStats.LastReceivedAtUnixMs = time.Now().UnixMilli()
 	if len(s.audioQueue) >= maxControllerAudioFrames {
+		s.audioStats.QueueDroppedFrames++
 		copy(s.audioQueue, s.audioQueue[1:])
 		s.audioQueue[len(s.audioQueue)-1] = snapshot
 	} else {
@@ -143,10 +210,14 @@ func (s *ControllerSession) NextAudioFrame(ctx context.Context) (AudioFrameSnaps
 			s.audioQueue = s.audioQueue[:len(s.audioQueue)-1]
 			config := s.audioConfig
 			if frame.Generation == config.Generation {
+				s.audioStats.ConsumedFrames++
+				s.audioStats.ConsumedBytes += uint64(len(frame.Data))
+				s.audioStats.LastConsumedAtUnixMs = time.Now().UnixMilli()
 				s.audioMu.Unlock()
 				frame.Data = append([]byte(nil), frame.Data...)
 				return frame, config, nil
 			}
+			s.audioStats.RejectedFrames++
 		}
 		notify := s.audioNotify
 		s.audioMu.Unlock()

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	desktopDiagnosticsSchemaVersion = 3
+	desktopDiagnosticsSchemaVersion = 4
 	desktopDiagnosticsMaxSamples    = 1200
 	desktopDiagnosticsIntervalMs    = 500
 )
@@ -31,6 +31,7 @@ type DesktopDiagnosticSample struct {
 	AtUnixMs   int64                        `json:"atUnixMs"`
 	Config     protocol.DesktopVideoConfig  `json:"config"`
 	Stats      protocol.DesktopSessionStats `json:"stats"`
+	Audio      DesktopAudioDiagnostics      `json:"audio"`
 	Adaptation DesktopDiagnosticAdaptation  `json:"adaptation"`
 }
 
@@ -45,6 +46,15 @@ type DesktopDiagnosticMetricSummary struct {
 
 type DesktopDiagnosticsSummary struct {
 	SampleCount             int                            `json:"sampleCount"`
+	AudioConfiguredSamples  int                            `json:"audioConfiguredSamples,omitempty"`
+	AudioReceivedFrames     uint64                         `json:"audioReceivedFrames,omitempty"`
+	AudioConsumedFrames     uint64                         `json:"audioConsumedFrames,omitempty"`
+	AudioQueueDroppedFrames uint64                         `json:"audioQueueDroppedFrames,omitempty"`
+	AudioGenerationDiscards uint64                         `json:"audioGenerationDiscards,omitempty"`
+	AudioRejectedFrames     uint64                         `json:"audioRejectedFrames,omitempty"`
+	AudioMaxQueueFrames     int                            `json:"audioMaxQueueFrames,omitempty"`
+	AudioCodecs             map[string]int                 `json:"audioCodecs,omitempty"`
+	AudioQueueFrames        DesktopDiagnosticMetricSummary `json:"audioQueueFrames"`
 	SessionDurationMs       int64                          `json:"sessionDurationMs"`
 	SampleSpanMs            int64                          `json:"sampleSpanMs"`
 	PathSwitches            int                            `json:"pathSwitches"`
@@ -99,6 +109,7 @@ type DesktopDiagnosticsReport struct {
 	Options           protocol.RemoteDesktopConnectOptions `json:"options"`
 	CurrentConfig     protocol.DesktopVideoConfig          `json:"currentConfig"`
 	CurrentStats      protocol.DesktopSessionStats         `json:"currentStats"`
+	CurrentAudio      DesktopAudioDiagnostics              `json:"currentAudio"`
 	Summary           DesktopDiagnosticsSummary            `json:"summary"`
 	HEVCValidation    *DesktopHEVCValidationSummary        `json:"hevcValidation,omitempty"`
 	Samples           []DesktopDiagnosticSample            `json:"samples"`
@@ -143,6 +154,7 @@ func (r *sessionDiagnosticsRecorder) Record(
 	now time.Time,
 	config protocol.DesktopVideoConfig,
 	stats protocol.DesktopSessionStats,
+	audio DesktopAudioDiagnostics,
 	decision desktopadapt.MediaDecision,
 ) {
 	if r == nil {
@@ -155,6 +167,7 @@ func (r *sessionDiagnosticsRecorder) Record(
 		AtUnixMs:   now.UnixMilli(),
 		Config:     config,
 		Stats:      stats,
+		Audio:      audio,
 		Adaptation: diagnosticAdaptation(decision),
 	}
 	r.mu.Lock()
@@ -225,6 +238,7 @@ func summarizeDesktopDiagnostics(
 		Codecs:            make(map[string]int),
 		Resolutions:       make(map[string]int),
 		ABRReasons:        make(map[string]int),
+		AudioCodecs:       make(map[string]int),
 		CaptureBackends:   make(map[string]int),
 		CaptureFormats:    make(map[string]int),
 		EncoderBackends:   make(map[string]int),
@@ -275,6 +289,28 @@ func summarizeDesktopDiagnostics(
 
 		incrementDiagnosticCount(summary.Paths, path)
 		incrementDiagnosticCount(summary.Codecs, sample.Config.Codec)
+		if sample.Audio.Config.Generation != 0 {
+			summary.AudioConfiguredSamples++
+			incrementDiagnosticCount(summary.AudioCodecs, sample.Audio.Config.Codec)
+		}
+		if sample.Audio.QueueFrames > summary.AudioMaxQueueFrames {
+			summary.AudioMaxQueueFrames = sample.Audio.QueueFrames
+		}
+		if sample.Audio.ReceivedFrames > summary.AudioReceivedFrames {
+			summary.AudioReceivedFrames = sample.Audio.ReceivedFrames
+		}
+		if sample.Audio.ConsumedFrames > summary.AudioConsumedFrames {
+			summary.AudioConsumedFrames = sample.Audio.ConsumedFrames
+		}
+		if sample.Audio.QueueDroppedFrames > summary.AudioQueueDroppedFrames {
+			summary.AudioQueueDroppedFrames = sample.Audio.QueueDroppedFrames
+		}
+		if sample.Audio.GenerationDiscardedFrames > summary.AudioGenerationDiscards {
+			summary.AudioGenerationDiscards = sample.Audio.GenerationDiscardedFrames
+		}
+		if sample.Audio.RejectedFrames > summary.AudioRejectedFrames {
+			summary.AudioRejectedFrames = sample.Audio.RejectedFrames
+		}
 		if sample.Config.Width > 0 && sample.Config.Height > 0 {
 			incrementDiagnosticCount(summary.Resolutions,
 				fmt.Sprintf("%dx%d", sample.Config.Width, sample.Config.Height))
@@ -313,6 +349,11 @@ func summarizeDesktopDiagnostics(
 		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.DecodeMs }, positive)
 	summary.RenderMs = desktopDiagnosticMetric(samples,
 		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.RenderMs }, positive)
+	summary.AudioQueueFrames = desktopDiagnosticMetric(samples,
+		func(sample DesktopDiagnosticSample) float64 { return float64(sample.Audio.QueueFrames) },
+		func(sample DesktopDiagnosticSample, _ float64) bool {
+			return sample.Audio.Config.Generation != 0
+		})
 	return summary
 }
 
@@ -357,6 +398,7 @@ func (r *sessionDiagnosticsRecorder) Report(
 	now time.Time,
 	config protocol.DesktopVideoConfig,
 	stats protocol.DesktopSessionStats,
+	audio DesktopAudioDiagnostics,
 ) DesktopDiagnosticsReport {
 	if r == nil {
 		return DesktopDiagnosticsReport{}
@@ -377,6 +419,7 @@ func (r *sessionDiagnosticsRecorder) Report(
 		Options:           r.options,
 		CurrentConfig:     config,
 		CurrentStats:      stats,
+		CurrentAudio:      audio,
 		Summary:           summarizeDesktopDiagnostics(r.started, now, samples),
 		HEVCValidation:    summarizeHEVCValidation(r.options, samples),
 		Samples:           samples,

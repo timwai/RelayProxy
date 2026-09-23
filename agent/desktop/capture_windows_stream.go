@@ -44,6 +44,10 @@ type windowsFrameStream interface {
 	Close() error
 }
 
+type windowsFrameRateStream interface {
+	SetMaxFPS(int) error
+}
+
 type windowsFrameStreamFactory interface {
 	Open(
 		context.Context,

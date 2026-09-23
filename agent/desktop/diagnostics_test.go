@@ -372,9 +372,89 @@ func TestSessionDiagnosticsReportCarriesCurrentAudio(t *testing.T) {
 	}
 	recorder.Record(start, protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio, desktopadapt.MediaDecision{})
 	report := recorder.Report(start.Add(time.Second), protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio)
-	if report.SchemaVersion != 4 || report.CurrentAudio.Config.Generation != 3 ||
+	if report.SchemaVersion != 5 || report.CurrentAudio.Config.Generation != 3 ||
 		report.CurrentAudio.QueueFrames != 2 || len(report.Samples) != 1 ||
 		report.Samples[0].Audio.ReceivedFrames != 7 {
 		t.Fatalf("audio report=%+v", report)
+	}
+}
+
+func TestSummarizeAudioValidationReportsOpusRuntime(t *testing.T) {
+	start := time.Unix(600, 0)
+	options := protocol.RemoteDesktopConnectOptions{AudioCodec: protocol.DesktopAudioCodecOpus}
+	config := protocol.DesktopAudioConfig{
+		Generation:      1,
+		Codec:           protocol.DesktopAudioCodecOpus,
+		SampleRate:      48_000,
+		Channels:        2,
+		BitsPerSample:   16,
+		FrameDurationMs: 20,
+		TargetBitrate:   96_000,
+	}
+	samples := []DesktopDiagnosticSample{
+		{
+			AtUnixMs: start.UnixMilli(),
+			Audio: DesktopAudioDiagnostics{
+				Enabled: true, Config: config, QueueFrames: 1,
+				ReceivedFrames: 10, ReceivedBytes: 1_200,
+				ConsumedFrames: 9, ConsumedBytes: 1_080,
+			},
+		},
+		{
+			AtUnixMs: start.Add(time.Second).UnixMilli(),
+			Audio: DesktopAudioDiagnostics{
+				Enabled: true, Config: config, QueueFrames: 3,
+				ReceivedFrames: 60, ReceivedBytes: 13_200,
+				ConsumedFrames: 57, ConsumedBytes: 12_600,
+				ConcealmentFrames: 2, GapSkippedFrames: 1,
+				ReorderedFrames: 4, DuplicateFrames: 1, LateFrames: 2,
+				PlayoutTimeoutFrames: 1,
+			},
+		},
+	}
+	current := samples[len(samples)-1].Audio
+	got := summarizeAudioValidation(options, samples, current)
+	if got == nil || !got.Requested || !got.Active {
+		t.Fatalf("audio validation=%+v", got)
+	}
+	if got.RequestedCodec != protocol.DesktopAudioCodecOpus ||
+		got.Codec != protocol.DesktopAudioCodecOpus ||
+		got.OpusSamples != 2 || got.PCMSamples != 0 || got.PCMFallbackSamples != 0 {
+		t.Fatalf("audio codec summary=%+v", got)
+	}
+	if got.RawPCMBitrate != 1_536_000 || got.TargetBitrate != 96_000 ||
+		got.ObservedPayloadBitrate != 96_000 || got.ObservedCompressionRatio != 16 {
+		t.Fatalf("audio bitrate summary=%+v", got)
+	}
+	if got.EstimatedNetworkLossPercent != float64(3)*100/63 ||
+		got.ConcealmentFrames != 2 || got.GapSkippedFrames != 1 ||
+		got.MaxQueueFrames != 3 || got.SampleSpanMs != 1000 {
+		t.Fatalf("audio loss/queue summary=%+v", got)
+	}
+}
+
+func TestSummarizeAudioValidationMarksPCMOpusFallback(t *testing.T) {
+	disabled := false
+	if got := summarizeAudioValidation(
+		protocol.RemoteDesktopConnectOptions{Audio: &disabled},
+		nil,
+		DesktopAudioDiagnostics{},
+	); got != nil {
+		t.Fatalf("disabled audio unexpectedly has validation summary: %+v", got)
+	}
+
+	config := testAudioConfig(1)
+	samples := []DesktopDiagnosticSample{{
+		AtUnixMs: time.Unix(700, 0).UnixMilli(),
+		Audio: DesktopAudioDiagnostics{Enabled: true, Config: config, ReceivedFrames: 10},
+	}}
+	got := summarizeAudioValidation(
+		protocol.RemoteDesktopConnectOptions{AudioCodec: protocol.DesktopAudioCodecOpus},
+		samples,
+		samples[0].Audio,
+	)
+	if got == nil || got.PCMSamples != 1 || got.PCMFallbackSamples != 1 ||
+		got.Codec != protocol.DesktopAudioCodecPCMS16LE {
+		t.Fatalf("PCM fallback summary=%+v", got)
 	}
 }

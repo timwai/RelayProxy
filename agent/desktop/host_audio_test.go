@@ -148,7 +148,7 @@ func TestStreamSessionAudioRejectsWrongFrameSize(t *testing.T) {
 	}
 	stream := &audioTestStream{}
 	conn := desktopmedia.NewMediaConn(nil, stream)
-	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{})
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{}, nil)
 	if err == nil {
 		t.Fatal("short audio capture frame was accepted")
 	}
@@ -189,7 +189,7 @@ func TestStreamSessionAudioEmitsConfigAndReassemblablePCM(t *testing.T) {
 	conn := desktopmedia.NewMediaConn(nil, stream)
 	conn.SetDatagramPath(path)
 
-	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{})
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{}, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("stream error=%v want EOF after one synthetic frame", err)
 	}
@@ -293,7 +293,7 @@ func TestStreamSessionAudioEncodesNegotiatedOpus(t *testing.T) {
 
 	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
 		AudioCodec: protocol.DesktopAudioCodecOpus,
-	})
+	}, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("stream error=%v want EOF after one synthetic Opus frame", err)
 	}
@@ -402,7 +402,7 @@ func TestOpusPacketLossFlowsThroughReassemblerToPLC(t *testing.T) {
 
 	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
 		AudioCodec: protocol.DesktopAudioCodecOpus,
-	})
+	}, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("stream error=%v want EOF", err)
 	}
@@ -498,5 +498,35 @@ func TestOpusPacketLossFlowsThroughReassemblerToPLC(t *testing.T) {
 	if got.ConcealmentFrames != 1 || got.GapSkippedFrames != 0 ||
 		got.ReceivedFrames != 3 || got.ConsumedFrames != 2 {
 		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}
+
+func TestStreamSessionAudioAppliesOpusLossUpdate(t *testing.T) {
+	_, _, frameBytes, err := desktopaudio.NormalizeFrameDuration(hostAudioPCMConfig, hostAudioFrameDuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := &fakeAudioCapture{
+		frames: [][]byte{make([]byte, frameBytes)},
+		endErr: io.EOF,
+	}
+	host := &Host{
+		cfg: DefaultHostConfig(),
+		audioOpen: func(context.Context, desktopaudio.PCMConfig, time.Duration) (desktopaudio.Capture, error) {
+			return capture, nil
+		},
+	}
+	stream := &audioTestStream{}
+	path := &audioRecordingDatagramPath{}
+	conn := desktopmedia.NewMediaConn(nil, stream)
+	conn.SetDatagramPath(path)
+	lossUpdates := make(chan int, 1)
+	lossUpdates <- 101
+
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
+		AudioCodec: protocol.DesktopAudioCodecOpus,
+	}, lossUpdates)
+	if err == nil {
+		t.Fatal("invalid Opus loss update was ignored")
 	}
 }

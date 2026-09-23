@@ -105,6 +105,16 @@ func (e *OpusEncoder) Config() OpusConfig {
 	return e.cfg
 }
 
+func (e *OpusEncoder) SetLossRate(percent int) error {
+	if e == nil || e.enc == nil {
+		return errors.New("Relay Desktop Opus encoder is unavailable")
+	}
+	if err := e.enc.SetLossRate(percent); err != nil {
+		return fmt.Errorf("set Opus loss rate: %w", err)
+	}
+	return nil
+}
+
 func (e *OpusEncoder) EncodePCM(pcm []byte) ([]byte, error) {
 	if e == nil || e.enc == nil {
 		return nil, errors.New("Relay Desktop Opus encoder is unavailable")

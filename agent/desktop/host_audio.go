@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -42,7 +43,12 @@ func (h *Host) desktopAudioAvailable() bool {
 	return ok && provider.DesktopAudioAvailable()
 }
 
-func (h *Host) streamSessionAudio(ctx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions) error {
+func (h *Host) streamSessionAudio(
+	ctx context.Context,
+	conn *desktopmedia.MediaConn,
+	options protocol.RemoteDesktopConnectOptions,
+	lossUpdates <-chan int,
+) error {
 	if h == nil || conn == nil || h.audioOpen == nil {
 		return errors.New("Relay Desktop audio capture is unavailable")
 	}
@@ -119,6 +125,14 @@ func (h *Host) streamSessionAudio(ctx context.Context, conn *desktopmedia.MediaC
 		}
 		mediaData := data
 		if opusEncoder != nil {
+			select {
+			case loss := <-lossUpdates:
+				if err := opusEncoder.SetLossRate(loss); err != nil {
+					return err
+				}
+				log.Printf("[Desktop] Opus encoder expected packet loss=%d%%", loss)
+			default:
+			}
 			mediaData, err = opusEncoder.EncodePCM(data)
 			if err != nil {
 				return err

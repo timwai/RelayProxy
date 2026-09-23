@@ -378,6 +378,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	bitrateUpdates := make(chan int, 1)
 	fpsUpdates := make(chan int, 1)
 	resolutionUpdates := make(chan desktopResolutionTarget, 1)
+	audioLossUpdates := make(chan int, 1)
 
 	workerCount := 2
 	cursorSource, hasCursor := h.source.(CursorCaptureSource)
@@ -400,7 +401,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}()
 	go func() {
 		errorsCh <- h.readSessionControlLoop(
-			sessionCtx, conn, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates,
+			sessionCtx, conn, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates, audioLossUpdates,
 			sessionConfig.MaxFPS, sessionConfig.MaxWidth, sessionConfig.MaxHeight,
 			clipboardEndpoint, clipboardState, syncClipboard,
 		)
@@ -413,7 +414,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	if streamAudio {
 		go func() {
-			err := h.streamSessionAudio(sessionCtx, conn, options)
+			err := h.streamSessionAudio(sessionCtx, conn, options, audioLossUpdates)
 			if err != nil && !errors.Is(err, context.Canceled) && sessionCtx.Err() == nil {
 				log.Printf("[Desktop] audio capture disabled for this session: %v", err)
 			}
@@ -450,6 +451,7 @@ func (h *Host) readSessionControlLoop(
 	bitrateUpdates chan int,
 	fpsUpdates chan int,
 	resolutionUpdates chan desktopResolutionTarget,
+	audioLossUpdates chan int,
 	maxFPS int,
 	maxWidth int,
 	maxHeight int,
@@ -483,6 +485,18 @@ func (h *Host) readSessionControlLoop(
 			}); err != nil {
 				return err
 			}
+			continue
+
+		case protocol.DesktopSessionAudioControl:
+			if message.AudioControl == nil {
+				continue
+			}
+			loss := message.AudioControl.ExpectedLossPercent
+			if loss < 0 || loss > 100 {
+				log.Printf("[Desktop] ignoring invalid Opus expected loss=%d", loss)
+				continue
+			}
+			queueLatestInt(audioLossUpdates, loss)
 			continue
 
 		case protocol.DesktopSessionVideoControl:

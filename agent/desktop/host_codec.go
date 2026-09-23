@@ -689,6 +689,60 @@ func (h *Host) streamH264Frames(
 		return nil
 	}
 
+	migrateGPUToCPU := func(now time.Time, cause error) error {
+		if !gpuEnabled {
+			return cause
+		}
+		nextEncoder, nextConfig, nextSequenceHeader, nextGeneration, openErr :=
+			openNextH264CPUGeneration(ctx, generation, videoCfg, openMFH264GenerationEncoder)
+		if openErr != nil {
+			return errors.Join(cause, fmt.Errorf("CPU H.264 runtime fallback unavailable: %w", openErr))
+		}
+		nextProtocolConfig := h264DesktopVideoConfig(
+			nextGeneration, nextConfig, sessionMaxWidth, sessionMaxHeight,
+			sessionMaxBitrate, cfg.DisplayID, nextSequenceHeader,
+		)
+		if err := sendVideoConfig(ctx, conn, nextProtocolConfig); err != nil {
+			_ = nextEncoder.Close()
+			return errors.Join(cause, err)
+		}
+		advertisedGeneration = nextGeneration
+
+		oldEncoder := encoder
+		oldConverter := d3dConverter
+		encoder = nextEncoder
+		d3dEncoder = nil
+		d3dConverter = nil
+		d3dSource = nil
+		gpuEnabled = false
+		videoCfg = nextConfig
+		sequenceHeader = nextSequenceHeader
+		generation = nextGeneration
+		frameID = 1
+		needsGenerationKeyFrame = true
+		lastIDR = now
+		lastEncoderStats = encoder.Stats()
+		lastCapturedFrames = capturedFrames
+		lastReportAt = now
+		captureFormat = "rgba"
+		if rawSource != nil && videoCfg.Width == sessionMaxWidth && videoCfg.Height == sessionMaxHeight {
+			captureFormat = "bgra-direct"
+		}
+		if oldEncoder != nil {
+			if err := oldEncoder.Close(); err != nil {
+				log.Printf("[Desktop] close failed D3D11 H.264 encoder during CPU migration: %v", err)
+			}
+		}
+		if oldConverter != nil {
+			_ = oldConverter.Close()
+		}
+		log.Printf(
+			"[Desktop] H.264 GPU runtime failure migrated to CPU generation=%d encode=%dx%d bitrate=%d cause=%v",
+			generation, videoCfg.Width, videoCfg.Height, videoCfg.TargetBitrate, cause,
+		)
+		return nil
+	}
+
 	if gpuEnabled {
 		if err := sendD3D11Frame(firstD3D, started); err != nil {
 			return err

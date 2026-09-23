@@ -434,8 +434,10 @@ func (h *Host) streamH264Frames(
 		firstD3D      *D3D11CaptureFrame
 		sequenceHeader []byte
 		normalizedCfg desktopcodec.VideoConfig
-		err           error
-		gpuEnabled    bool
+		err            error
+		gpuEnabled     bool
+		gpuInputWidth  int
+		gpuInputHeight int
 	)
 	if source, ok := h.source.(D3D11CaptureSource); ok {
 		candidate, available, captureErr := source.CaptureD3D11(ctx)
@@ -448,6 +450,8 @@ func (h *Host) streamH264Frames(
 				d3dSource = source
 				firstD3D = candidate
 				gpuEnabled = true
+				gpuInputWidth = candidate.Width
+				gpuInputHeight = candidate.Height
 				log.Printf("[Desktop] H.264 zero-copy path enabled capture=%dx%d encode=%dx%d",
 					candidate.Width, candidate.Height, normalizedCfg.Width, normalizedCfg.Height)
 			} else {
@@ -711,6 +715,94 @@ func (h *Host) streamH264Frames(
 
 		case target := <-resolutionUpdates:
 			now := time.Now()
+			if gpuEnabled && d3dSource != nil {
+				captureStarted := now
+				frame, available, captureErr := d3dSource.CaptureD3D11(ctx)
+				lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
+				if captureErr != nil {
+					log.Printf("[Desktop] H.264 GPU resolution capture failed target=%dx%d: %v",
+						target.MaxWidth, target.MaxHeight, captureErr)
+					continue
+				}
+				if !available || frame == nil {
+					continue
+				}
+				nextWidth, nextHeight, fitErr := fitEvenDimensions(
+					frame.Width, frame.Height, target.MaxWidth, target.MaxHeight,
+				)
+				if fitErr != nil {
+					frame.Close()
+					log.Printf("[Desktop] H.264 GPU resolution update rejected target=%dx%d: %v",
+						target.MaxWidth, target.MaxHeight, fitErr)
+					continue
+				}
+				if nextWidth == videoCfg.Width && nextHeight == videoCfg.Height &&
+					frame.Width == gpuInputWidth && frame.Height == gpuInputHeight {
+					frame.Close()
+					continue
+				}
+				nextConfig := videoCfg
+				nextConfig.Width = nextWidth
+				nextConfig.Height = nextHeight
+				nextGeneration, generationErr := nextDesktopMediaGeneration(generation)
+				if generationErr != nil {
+					frame.Close()
+					return generationErr
+				}
+				nextEncoder, nextD3DEncoder, nextConverter, nextConfig, nextSequenceHeader, openErr :=
+					openH264D3D11Generation(ctx, nextConfig, frame)
+				if openErr != nil {
+					frame.Close()
+					log.Printf("[Desktop] H.264 D3D11 generation rebuild failed target=%dx%d: %v",
+						nextWidth, nextHeight, openErr)
+					continue
+				}
+				nextProtocolConfig := h264DesktopVideoConfig(
+					nextGeneration, nextConfig, sessionMaxWidth, sessionMaxHeight,
+					sessionMaxBitrate, cfg.DisplayID, nextSequenceHeader,
+				)
+				if err := sendVideoConfig(ctx, conn, nextProtocolConfig); err != nil {
+					frame.Close()
+					_ = nextEncoder.Close()
+					_ = nextConverter.Close()
+					return err
+				}
+				advertisedGeneration = nextGeneration
+
+				oldEncoder := encoder
+				oldConverter := d3dConverter
+				encoder = nextEncoder
+				d3dEncoder = nextD3DEncoder
+				d3dConverter = nextConverter
+				videoCfg = nextConfig
+				sequenceHeader = nextSequenceHeader
+				gpuInputWidth = frame.Width
+				gpuInputHeight = frame.Height
+				captureFormat = "d3d11-nv12"
+				generation = nextGeneration
+				frameID = 1
+				needsGenerationKeyFrame = true
+				lastIDR = now
+				lastEncoderStats = encoder.Stats()
+				lastCapturedFrames = capturedFrames
+				lastReportAt = now
+				if oldEncoder != nil {
+					if err := oldEncoder.Close(); err != nil {
+						log.Printf("[Desktop] close previous D3D11 H.264 generation failed: %v", err)
+					}
+				}
+				if oldConverter != nil {
+					_ = oldConverter.Close()
+				}
+				log.Printf("[Desktop] H.264 D3D11 generation switched=%d capture=%dx%d encode=%dx%d bitrate=%d",
+					generation, frame.Width, frame.Height, videoCfg.Width, videoCfg.Height, videoCfg.TargetBitrate)
+				err := sendD3D11Frame(frame, now)
+				frame.Close()
+				if err != nil {
+					return err
+				}
+				continue
+			}
 			captureStarted := now
 			rawFrame, err := h.source.Capture(ctx)
 			lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000

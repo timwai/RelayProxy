@@ -745,11 +745,14 @@ func (h *Host) streamH264Frames(
 	}
 
 	if gpuEnabled {
-		if err := sendD3D11Frame(firstD3D, started); err != nil {
-			return err
-		}
+		firstErr := sendD3D11Frame(firstD3D, started)
 		firstD3D.Close()
 		firstD3D = nil
+		if firstErr != nil {
+			if fallbackErr := migrateGPUToCPU(started, firstErr); fallbackErr != nil {
+				return fallbackErr
+			}
+		}
 	} else if rawAvailable {
 		if err := sendRawFrame(firstRaw, started); err != nil {
 			return err
@@ -877,7 +880,9 @@ func (h *Host) streamH264Frames(
 				err := sendD3D11Frame(frame, now)
 				frame.Close()
 				if err != nil {
-					return err
+					if fallbackErr := migrateGPUToCPU(now, err); fallbackErr != nil {
+						return fallbackErr
+					}
 				}
 				continue
 			}
@@ -961,7 +966,10 @@ func (h *Host) streamH264Frames(
 						}
 						continue
 					}
-					return captureErr
+					if fallbackErr := migrateGPUToCPU(time.Now(), captureErr); fallbackErr != nil {
+						return fallbackErr
+					}
+					continue
 				}
 				if !available || frame == nil {
 					droppedFrames++
@@ -981,7 +989,10 @@ func (h *Host) streamH264Frames(
 					)
 					if convertErr != nil {
 						frame.Close()
-						return convertErr
+						if fallbackErr := migrateGPUToCPU(time.Now(), convertErr); fallbackErr != nil {
+							return fallbackErr
+						}
+						continue
 					}
 					oldConverter := d3dConverter
 					d3dConverter = nextConverter
@@ -996,7 +1007,10 @@ func (h *Host) streamH264Frames(
 				err := sendD3D11Frame(frame, now)
 				frame.Close()
 				if err != nil {
-					return err
+					if fallbackErr := migrateGPUToCPU(time.Now(), err); fallbackErr != nil {
+						return fallbackErr
+					}
+					continue
 				}
 				captureFormat = "d3d11-nv12"
 				if err := reportStats(time.Now()); err != nil {

@@ -380,12 +380,20 @@ Windows SendInput / CF_UNICODETEXT
 - 该入口的目的仅是 Intel/NVIDIA/AMD 实机兼容性和零拷贝链路验证；通过实机矩阵前不开放 H.265 GUI 选项，也不把 H.265 加入自动协商。
 - PR #81 已合并到 `main`，merge `a2e291c6d9ee55987fd55eb87af24a933bb382c8`；Go CI 首轮仅命中既有 `TestTLSTunnelMultiplexing` flaky，重跑 full test/race/benchmark 通过；UI full regression 与 Windows/macOS desktop package 全部通过。
 
-### 0.2.28 RD3 HEVC Validation Diagnostics Summary（当前分支）
+### 0.2.28 RD3 HEVC Validation Diagnostics Summary（已合并 PR #82）
 
 - 诊断报告 schema 升级到 v3，仅当连接请求使用内部 `h265-validation` sentinel 时增加 `hevcValidation` 汇总；普通 H.264/JPEG 报告保持无该字段。
 - 汇总直接统计实际 `h265` 样本数、H.264/JPEG fallback 样本数、HEVC 硬编/硬解样本数，避免实机测试后人工扫描最多 1200 条时间序列。
 - HEVC 样本单独聚合 capture backend/format、encoder backend、decoder backend，可直接区分 WGC D3D11 zero-copy、CPU fallback 与不同 Media Foundation decoder 路径。
 - 现有逐样本网络/ABR/时延数据和通用 summary 保持不变；该汇总只做验证结果压缩，不改变媒体策略或能力协商。
+- PR #82 已合并到 `main`，merge `1784f870a5031be900f23e28d2f19c64134de7c2`；Go CI 首轮再次命中既有 `TestTLSTunnelMultiplexing` flaky，重跑后 full test/race/benchmark 通过；UI full regression 与 Windows/macOS desktop package 全部通过。
+
+### 0.2.29 CI Reliability：TLS Tunnel Multiplexing Flake（当前分支）
+
+- 连续两个 HEVC PR 的 Linux Go CI 都偶发失败在既有 `internal/tunnel/TestTLSTunnelMultiplexing`；实际失败点是客户端首个 stream write 收到 `session shutdown`，与 HEVC 代码无关。
+- 原测试使用 `net.Pipe + 手工 TLS + yamux`，只开一条 stream，却以“Multiplexing”命名；服务端提前退出时客户端断言看不到服务端 accept/read/write 的根因。
+- 测试改为真实 loopback TCP + TLS 1.3，并通过生产 `DialTLS` / `ServerTLS` 建立会话；一次保持 4 条 yamux stream 同时存活，再逐条 echo，覆盖真正的 multiplexing。
+- 客户端失败时同步附带服务端错误上下文，并为每条 stream 设置有界 I/O deadline；不使用 sleep 放宽时序，也不修改生产 tunnel 实现。
 
 ### 0.3 本轮进度（2026-09-22）
 

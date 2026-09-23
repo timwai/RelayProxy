@@ -44,6 +44,11 @@ type ControllerSession struct {
 	configReady      chan struct{}
 	configOnce       sync.Once
 
+	audioMu     sync.Mutex
+	audioConfig protocol.DesktopAudioConfig
+	audioQueue  []AudioFrameSnapshot
+	audioNotify chan struct{}
+
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState
 
@@ -83,6 +88,7 @@ func StartControllerWithOptions(
 		cancel:      cancel,
 		done:        make(chan struct{}),
 		configReady: make(chan struct{}),
+		audioNotify: make(chan struct{}, 1),
 		stats:       newSessionStatsTracker("relay"),
 		diagnostics: newSessionDiagnosticsRecorder(targetID, options, now),
 		options:     options,
@@ -116,6 +122,14 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 				s.syncABRResolution(config)
 			}
 			s.configOnce.Do(func() { close(s.configReady) })
+
+		case protocol.DesktopSessionAudioConfig:
+			if message.AudioConfig == nil {
+				continue
+			}
+			if !s.applyAudioConfig(*message.AudioConfig) {
+				log.Printf("[Desktop] invalid or stale audio config ignored: %+v", *message.AudioConfig)
+			}
 
 		case protocol.DesktopSessionCursor:
 			if message.Cursor == nil {
@@ -563,18 +577,37 @@ func (s *ControllerSession) acceptVideoFrame(ctx context.Context, frame *desktop
 func (s *ControllerSession) readLoop(ctx context.Context) {
 	defer close(s.done)
 	defer s.conn.Close()
-	reassembler := desktopmedia.NewReassembler(desktopmedia.ReassemblerConfig{})
+	videoReassembler := desktopmedia.NewReassembler(desktopmedia.ReassemblerConfig{})
+	audioReassembler := desktopmedia.NewReassembler(desktopmedia.ReassemblerConfig{
+		PacketType: desktopmedia.MediaPacketAudio,
+		MaxFrames:  16,
+		MaxBytes:   4 << 20,
+		FrameTTL:   250 * time.Millisecond,
+	})
 	for {
 		packet, err := s.conn.Receive(ctx)
 		if err != nil {
 			return
 		}
-		if s.stats != nil {
-			if header, _, decodeErr := desktopmedia.DecodeMediaPacket(packet); decodeErr == nil {
-				s.stats.ObservePacket(header, len(packet))
-			}
+		header, _, decodeErr := desktopmedia.DecodeMediaPacket(packet)
+		if decodeErr != nil {
+			continue
 		}
-		frame, err := reassembler.Push(packet, time.Now())
+		if s.stats != nil {
+			s.stats.ObservePacket(header, len(packet))
+		}
+		now := time.Now()
+		if header.Type == desktopmedia.MediaPacketAudio {
+			frame, pushErr := audioReassembler.Push(packet, now)
+			if pushErr == nil && frame != nil {
+				s.enqueueAudioFrame(frame)
+			}
+			continue
+		}
+		if header.Type != desktopmedia.MediaPacketVideo {
+			continue
+		}
+		frame, err := videoReassembler.Push(packet, now)
 		if err != nil || frame == nil {
 			continue
 		}

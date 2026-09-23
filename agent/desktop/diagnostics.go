@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 )
 
 const (
-	desktopDiagnosticsSchemaVersion = 2
+	desktopDiagnosticsSchemaVersion = 3
 	desktopDiagnosticsMaxSamples    = 1200
 	desktopDiagnosticsIntervalMs    = 500
 )
@@ -75,6 +76,19 @@ type DesktopDiagnosticsSummary struct {
 	RenderMs                DesktopDiagnosticMetricSummary `json:"renderMs"`
 }
 
+type DesktopHEVCValidationSummary struct {
+	Requested               bool           `json:"requested"`
+	HEVCSamples             int            `json:"hevcSamples"`
+	H264FallbackSamples     int            `json:"h264FallbackSamples,omitempty"`
+	JPEGFallbackSamples     int            `json:"jpegFallbackSamples,omitempty"`
+	HardwareEncodingSamples int            `json:"hardwareEncodingSamples,omitempty"`
+	HardwareDecodingSamples int            `json:"hardwareDecodingSamples,omitempty"`
+	CaptureBackends         map[string]int `json:"captureBackends,omitempty"`
+	CaptureFormats          map[string]int `json:"captureFormats,omitempty"`
+	EncoderBackends         map[string]int `json:"encoderBackends,omitempty"`
+	DecoderBackends         map[string]int `json:"decoderBackends,omitempty"`
+}
+
 type DesktopDiagnosticsReport struct {
 	SchemaVersion     int                                  `json:"schemaVersion"`
 	TargetID          string                               `json:"targetId,omitempty"`
@@ -86,6 +100,7 @@ type DesktopDiagnosticsReport struct {
 	CurrentConfig     protocol.DesktopVideoConfig          `json:"currentConfig"`
 	CurrentStats      protocol.DesktopSessionStats         `json:"currentStats"`
 	Summary           DesktopDiagnosticsSummary            `json:"summary"`
+	HEVCValidation    *DesktopHEVCValidationSummary         `json:"hevcValidation,omitempty"`
 	Samples           []DesktopDiagnosticSample            `json:"samples"`
 }
 
@@ -301,6 +316,43 @@ func summarizeDesktopDiagnostics(
 	return summary
 }
 
+func summarizeHEVCValidation(
+	options protocol.RemoteDesktopConnectOptions,
+	samples []DesktopDiagnosticSample,
+) *DesktopHEVCValidationSummary {
+	if !strings.EqualFold(strings.TrimSpace(options.Codec), protocol.DesktopCodecH265Validation) {
+		return nil
+	}
+	summary := &DesktopHEVCValidationSummary{
+		Requested:       true,
+		CaptureBackends: make(map[string]int),
+		CaptureFormats:  make(map[string]int),
+		EncoderBackends: make(map[string]int),
+		DecoderBackends: make(map[string]int),
+	}
+	for _, sample := range samples {
+		switch strings.ToLower(strings.TrimSpace(sample.Config.Codec)) {
+		case "h265":
+			summary.HEVCSamples++
+			if sample.Stats.EncoderHardware {
+				summary.HardwareEncodingSamples++
+			}
+			if sample.Stats.DecoderHardware {
+				summary.HardwareDecodingSamples++
+			}
+			incrementDiagnosticCount(summary.CaptureBackends, sample.Stats.CaptureBackend)
+			incrementDiagnosticCount(summary.CaptureFormats, sample.Stats.CaptureFormat)
+			incrementDiagnosticCount(summary.EncoderBackends, sample.Stats.EncoderBackend)
+			incrementDiagnosticCount(summary.DecoderBackends, sample.Stats.DecoderBackend)
+		case "h264":
+			summary.H264FallbackSamples++
+		case "jpeg":
+			summary.JPEGFallbackSamples++
+		}
+	}
+	return summary
+}
+
 func (r *sessionDiagnosticsRecorder) Report(
 	now time.Time,
 	config protocol.DesktopVideoConfig,
@@ -326,6 +378,7 @@ func (r *sessionDiagnosticsRecorder) Report(
 		CurrentConfig:     config,
 		CurrentStats:      stats,
 		Summary:           summarizeDesktopDiagnostics(r.started, now, samples),
+		HEVCValidation:    summarizeHEVCValidation(r.options, samples),
 		Samples:           samples,
 	}
 }

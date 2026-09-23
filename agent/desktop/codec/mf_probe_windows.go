@@ -53,6 +53,7 @@ var (
 	}
 	mfMediaTypeVideo  = mediaTypeGUID(0x73646976) // 'vids'
 	mfVideoFormatH264 = mediaTypeGUID(fourCC('H', '2', '6', '4'))
+	mfVideoFormatHEVC = mediaTypeGUID(fourCC('H', 'E', 'V', 'C'))
 	mfVideoFormatNV12 = mediaTypeGUID(fourCC('N', 'V', '1', '2'))
 )
 
@@ -207,6 +208,62 @@ func ProbeH264MediaFoundation(ctx context.Context) H264Probe {
 	probe.SoftwareDecoderCount, err = enumerateMFT(mftCategoryVideoDecoder, softwareFlags, &h264, &rawNV12)
 	if err != nil {
 		probe.Error = err.Error()
+	}
+	return probe
+}
+
+// ProbeH265MediaFoundation enumerates HEVC transforms without activating them.
+// The result is kept internal to RD3 probing until the full H.265 session path
+// is available, so discovering a transform cannot make H.265 user-selectable.
+func ProbeH265MediaFoundation(ctx context.Context) H265Probe {
+	probe := H265Probe{}
+	if err := ctx.Err(); err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	uninitCOM, err := initializeCOM()
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	defer uninitCOM()
+
+	shutdownMF, err := startupMediaFoundation()
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	defer shutdownMF()
+	probe.MediaFoundation = true
+
+	rawNV12 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatNV12}
+	hevc := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatHEVC}
+	hardwareFlags := uint32(mftEnumHardware | mftEnumSortAndFilter)
+	softwareFlags := uint32(mftEnumSync | mftEnumAsync | mftEnumLocal | mftEnumSortAndFilter)
+
+	probe.HardwareEncoderCount, err = enumerateMFT(mftCategoryVideoEncoder, hardwareFlags, &rawNV12, &hevc)
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	probe.HardwareDecoderCount, err = enumerateMFT(mftCategoryVideoDecoder, hardwareFlags, &hevc, &rawNV12)
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	probe.SoftwareEncoderCount, err = enumerateMFT(mftCategoryVideoEncoder, softwareFlags, &rawNV12, &hevc)
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	probe.SoftwareDecoderCount, err = enumerateMFT(mftCategoryVideoDecoder, softwareFlags, &hevc, &rawNV12)
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
 	}
 	return probe
 }

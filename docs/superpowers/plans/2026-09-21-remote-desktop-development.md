@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline 与 GPU runtime → CPU H.264 generation 热迁移均已合并 main；下一阶段优先扩大 GPU path 实际命中率并推进 RD3 codec/audio 能力  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline 与 GPU runtime → CPU H.264 generation 热迁移均已合并 main；当前分支进入 RD3，先增加 HEVC/H.265 Media Foundation 编解码能力探测，但不提前开放 codec 选择  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
@@ -311,6 +311,15 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 CPU fallback generation 单测，覆盖 generation 递增、独立 sequence header、ForceIDR 与 generation overflow 不应调用 encoder opener。
 
 - PR #75 已合并到 `main`，merge `0833f53b3c7da42903ea666ac39eba623e91f858`；Go CI、race、benchmark、UI full regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.22 RD3 HEVC / H.265 Media Foundation Probe（当前分支）
+
+- 新增 `H265Probe`，沿用 H.264 probe 的硬件/软件 encoder/decoder 计数语义，并可转换为内部 `DesktopCodecCapability{Codec:"h265"}` 供后续 RD3 使用。
+- Windows 新增 `MFVideoFormat_HEVC` 对应的 Media Foundation MFT 枚举：分别探测 `NV12 → HEVC` encoder 与 `HEVC → NV12` decoder，硬件和软件 transform 分开计数；探测只枚举 activation，不占用实际 GPU encoder session。
+- Windows Host 启动时额外记录 H.265 probe 日志，便于 Intel / NVIDIA / AMD 实机矩阵直接确认 `hwEnc/hwDec/swEnc/swDec`，但在线 capability snapshot 仍然只广告已经具备完整运行链的 H.264。
+- `NormalizeCodecPreference` 暂不接受 `h265/hevc`；新增回归测试固定“探测能力 ≠ 用户可选择能力”，防止 Viewer decoder / Host stream path 尚未实现时误开放半成品选项。
+- 非 Windows 平台提供明确 unavailable stub；现有 H.264/JPEG 运行逻辑、Auto capture 策略和 GUI 均不改变。
+- 下一步将在此 probe 基础上参数化 Media Foundation transform 层，增加 HEVC encoder/decoder 与 Annex-B VPS/SPS/PPS / codec string 处理，再完成 Viewer generation-aware H.265 解码后才开放 capability/选择器。
 
 ### 0.3 本轮进度（2026-09-22）
 

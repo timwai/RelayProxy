@@ -798,5 +798,15 @@ func NewSystemHost() (*Host, error) {
 	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
 		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
 		probe.SoftwareEncoderCount, probe.SoftwareDecoderCount, probe.Error)
+
+	// RD3 discovery only: log HEVC availability for real Intel/NVIDIA/AMD
+	// validation, but do not advertise H.265 until the session codec path and
+	// viewer decoder are both implemented.
+	hevcProbeCtx, hevcCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	hevcProbe := desktopcodec.ProbeH265MediaFoundation(hevcProbeCtx)
+	hevcCancel()
+	log.Printf("[Desktop] Media Foundation H.265 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
+		hevcProbe.MediaFoundation, hevcProbe.HardwareEncoderCount, hevcProbe.HardwareDecoderCount,
+		hevcProbe.SoftwareEncoderCount, hevcProbe.SoftwareDecoderCount, hevcProbe.Error)
 	return host, nil
 }

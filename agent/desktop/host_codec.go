@@ -427,13 +427,13 @@ func (h *Host) streamH264Frames(
 		KeyframeEvery: 2 * time.Second,
 	}
 	var (
-		encoder       h264GenerationEncoder
-		d3dEncoder    desktopcodec.D3D11Encoder
-		d3dConverter  *desktopcodec.D3D11NV12Converter
-		d3dSource     D3D11CaptureSource
-		firstD3D      *D3D11CaptureFrame
+		encoder        h264GenerationEncoder
+		d3dEncoder     desktopcodec.D3D11Encoder
+		d3dConverter   *desktopcodec.D3D11NV12Converter
+		d3dSource      D3D11CaptureSource
+		firstD3D       *D3D11CaptureFrame
 		sequenceHeader []byte
-		normalizedCfg desktopcodec.VideoConfig
+		normalizedCfg  desktopcodec.VideoConfig
 		err            error
 		gpuEnabled     bool
 		gpuInputWidth  int

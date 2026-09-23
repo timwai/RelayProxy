@@ -38,7 +38,7 @@ type D3D11CaptureFrame struct {
 	Subresource uint32
 	Width       int
 	Height      int
-	Timestamp   time.Duration
+	At          time.Time
 
 	releaseOnce sync.Once
 	release     func()

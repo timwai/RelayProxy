@@ -90,6 +90,56 @@ func openH264GenerationEncoder(
 	return encoder, normalized, encoder.SequenceHeader(), nil
 }
 
+func openH264D3D11Generation(
+	ctx context.Context,
+	cfg desktopcodec.VideoConfig,
+	frame *D3D11CaptureFrame,
+) (
+	h264GenerationEncoder,
+	desktopcodec.D3D11Encoder,
+	*desktopcodec.D3D11NV12Converter,
+	desktopcodec.VideoConfig,
+	[]byte,
+	error,
+) {
+	if frame == nil || !frame.Valid() {
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrInvalidFrame
+	}
+	normalized, err := desktopcodec.NormalizeVideoConfig(cfg)
+	if err != nil {
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	converter, err := desktopcodec.OpenD3D11NV12Converter(frame.Device, desktopcodec.D3D11ConvertConfig{
+		InputWidth:   frame.Width,
+		InputHeight:  frame.Height,
+		OutputWidth:  normalized.Width,
+		OutputHeight: normalized.Height,
+		FPS:          normalized.FPS,
+	})
+	if err != nil {
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	opener := func(
+		ctx context.Context,
+		cfg desktopcodec.VideoConfig,
+		preferHardware bool,
+	) (h264GenerationEncoder, error) {
+		return desktopcodec.OpenMFH264EncoderWithD3D11(ctx, cfg, preferHardware, frame.Device)
+	}
+	encoder, normalized, sequenceHeader, err := openH264GenerationEncoder(ctx, normalized, opener)
+	if err != nil {
+		_ = converter.Close()
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	d3dEncoder, ok := encoder.(desktopcodec.D3D11Encoder)
+	if !ok {
+		_ = encoder.Close()
+		_ = converter.Close()
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrEncoderUnavailable
+	}
+	return encoder, d3dEncoder, converter, normalized, sequenceHeader, nil
+}
+
 func h264DesktopVideoConfig(
 	generation uint32,
 	cfg desktopcodec.VideoConfig,

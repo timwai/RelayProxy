@@ -437,7 +437,7 @@ func (s *mfAsyncDecodeState) submitAvailable() {
 		hr := processTransformInputSample(s.transform, sample)
 		releaseIUnknown(sample)
 		if hresultFailed(hr) {
-			err := hresultError("H.264 decoder IMFTransform.ProcessInput async", hr)
+			err := hresultError(s.info.Codec+" decoder IMFTransform.ProcessInput async", hr)
 			s.reply(command, nil, err)
 			s.fail(err)
 			return
@@ -491,7 +491,7 @@ func (s *mfAsyncDecodeState) handle(event mfAsyncEvent) {
 			return
 		}
 		if hresultFailed(hr) {
-			s.fail(hresultError("H.264 decoder IMFTransform.ProcessOutput async", hr))
+			s.fail(hresultError(s.info.Codec+" decoder IMFTransform.ProcessOutput async", hr))
 			return
 		}
 		if frame != nil {
@@ -539,7 +539,7 @@ func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, 
 		return nil, hr, nil
 	}
 	if out.Sample == nil {
-		return nil, hr, errors.New("H.264 decoder ProcessOutput succeeded without a sample")
+		return nil, hr, fmt.Errorf("%s decoder ProcessOutput succeeded without a sample", info.Codec)
 	}
 	timestamp := sampleTimestamp(out.Sample, fallbackTimestamp)
 
@@ -595,7 +595,7 @@ func drainSyncH264DecoderOutput(transform unsafe.Pointer, info MFH264DecoderInfo
 			continue
 		}
 		if hresultFailed(hr) {
-			return nil, hresultError("H.264 decoder IMFTransform.ProcessOutput", hr)
+			return nil, hresultError(info.Codec+" decoder IMFTransform.ProcessOutput", hr)
 		}
 		if frame != nil {
 			frames = append(frames, *frame)
@@ -621,7 +621,7 @@ func processSyncH264Decode(transform unsafe.Pointer, info MFH264DecoderInfo, gra
 		hr = processTransformInputSample(transform, sample)
 	}
 	if hresultFailed(hr) {
-		return nil, hresultError("H.264 decoder IMFTransform.ProcessInput", hr)
+		return nil, hresultError(info.Codec+" decoder IMFTransform.ProcessInput", hr)
 	}
 	decoded, err := drainSyncH264DecoderOutput(transform, info, graphics, input.timestamp)
 	if err != nil {
@@ -669,7 +669,7 @@ func (d *MFH264Decoder) runCommand(ctx context.Context, command mfDecodeCommand)
 
 func (d *MFH264Decoder) Decode(ctx context.Context, data []byte, timestamp time.Duration) ([]DecodedFrame, error) {
 	if len(data) == 0 {
-		return nil, fmt.Errorf("%w: empty H.264 access unit", ErrInvalidFrame)
+		return nil, fmt.Errorf("%w: empty %s access unit", ErrInvalidFrame, d.info.Codec)
 	}
 	duration := time.Second / time.Duration(d.info.Config.FPS)
 	result, err := d.runCommand(ctx, mfDecodeCommand{

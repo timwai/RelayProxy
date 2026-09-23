@@ -18,7 +18,6 @@ import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -102,66 +101,16 @@ class MainActivity : Activity() {
             setBackgroundColor(bg)
         }
 
-        root.addView(buildHeader())
-        root.addView(buildStatusCard(), cardParams(18))
+        root.addView(buildStatusCard())
         root.addView(buildConnectionCard(), cardParams(16))
         root.addView(buildPolicyCard(), cardParams(16))
         root.addView(buildActionRow(), cardParams(18))
-
-        root.addView(TextView(this).apply {
-            text = "RelayProxy Android · 网络出口节点"
-            textSize = 12f
-            setTextColor(Color.rgb(148, 163, 184))
-            gravity = Gravity.CENTER
-            setPadding(0, dp(22), 0, 0)
-        })
 
         return ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(bg)
             addView(root)
         }
-    }
-
-    private fun buildHeader(): View {
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-
-        val logoFrame = LinearLayout(this).apply {
-            gravity = Gravity.CENTER
-            background = rounded(surface, 18, line)
-            elevation = dp(2).toFloat()
-        }
-        logoFrame.addView(ImageView(this).apply {
-            setImageResource(R.drawable.relayproxy_logo)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        }, LinearLayout.LayoutParams(dp(54), dp(54)))
-        row.addView(logoFrame, LinearLayout.LayoutParams(dp(64), dp(64)))
-
-        row.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(12), 0, 0, 0)
-            addView(TextView(this@MainActivity).apply {
-                text = "RelayProxy"
-                textSize = 25f
-                setTextColor(ink)
-                setTypeface(typeface, Typeface.BOLD)
-            })
-            addView(TextView(this@MainActivity).apply {
-                text = "Android 网络出口"
-                textSize = 13f
-                setTextColor(muted)
-                setPadding(0, dp(2), 0, 0)
-            })
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-
-        statusBadge = chip("已停止", muted, Color.rgb(241, 245, 249))
-        row.addView(statusBadge)
-
-        return row
     }
 
     private fun buildStatusCard(): View {
@@ -188,15 +137,8 @@ class MainActivity : Activity() {
             addView(statusSummary)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
-        top.addView(TextView(this).apply {
-            text = "EXIT"
-            textSize = 11f
-            setTextColor(Color.rgb(191, 219, 254))
-            setTypeface(typeface, Typeface.BOLD)
-            gravity = Gravity.CENTER
-            background = rounded(Color.rgb(30, 64, 175), 10)
-            setPadding(dp(11), dp(7), dp(11), dp(7))
-        })
+        statusBadge = chip("已停止", muted, Color.rgb(241, 245, 249))
+        top.addView(statusBadge)
         card.addView(top)
 
         val metrics = LinearLayout(this).apply {

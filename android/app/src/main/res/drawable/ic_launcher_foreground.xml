@@ -1,3 +1,3 @@
 <inset xmlns:android="http://schemas.android.com/apk/res/android"
     android:drawable="@drawable/relayproxy_logo"
-    android:inset="18dp" />
+    android:inset="22dp" />

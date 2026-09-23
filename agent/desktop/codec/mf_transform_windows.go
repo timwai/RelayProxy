@@ -88,6 +88,10 @@ var (
 		Data1: 0xad76a80b, Data2: 0x2d5c, Data3: 0x4e0b,
 		Data4: [8]byte{0xb3, 0x75, 0x64, 0xe5, 0x20, 0x13, 0x70, 0x36},
 	}
+	mfMTVideoLevel = windows.GUID{
+		Data1: 0x96f66574, Data2: 0x11c5, Data3: 0x4015,
+		Data4: [8]byte{0x86, 0x66, 0xbf, 0xf5, 0x16, 0x43, 0x6d, 0xa7},
+	}
 	mfMTFixedSizeSamples = windows.GUID{
 		Data1: 0xb8ebefaf, Data2: 0xb718, Data3: 0x4e04,
 		Data4: [8]byte{0xb0, 0xa9, 0x11, 0x67, 0x75, 0xe3, 0x32, 0x1b},
@@ -115,6 +119,7 @@ type mfVideoEncoderSpec struct {
 	Label         string
 	OutputSubtype *windows.GUID
 	OutputProfile uint32
+	OutputLevel   func(VideoConfig) uint32
 }
 
 var (
@@ -124,6 +129,7 @@ var (
 	mfH265EncoderSpec = mfVideoEncoderSpec{
 		Codec: "h265", Label: "H.265", OutputSubtype: &mfVideoFormatHEVC,
 		OutputProfile: h265ProfileMain4208,
+		OutputLevel:   h265MediaFoundationLevel,
 	}
 )
 
@@ -359,6 +365,14 @@ func createEncoderOutputType(spec mfVideoEncoderSpec, cfg VideoConfig) (unsafe.P
 		if err := attributeSetUINT32(outputType, &mfMTVideoProfile, spec.OutputProfile); err != nil {
 			releaseIUnknown(outputType)
 			return nil, err
+		}
+	}
+	if spec.OutputLevel != nil {
+		if level := spec.OutputLevel(cfg); level != 0 {
+			if err := attributeSetUINT32(outputType, &mfMTVideoLevel, level); err != nil {
+				releaseIUnknown(outputType)
+				return nil, err
+			}
 		}
 	}
 	return outputType, nil

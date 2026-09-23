@@ -148,7 +148,7 @@ func TestStreamSessionAudioRejectsWrongFrameSize(t *testing.T) {
 	}
 	stream := &audioTestStream{}
 	conn := desktopmedia.NewMediaConn(nil, stream)
-	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{})
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{}, nil)
 	if err == nil {
 		t.Fatal("short audio capture frame was accepted")
 	}
@@ -189,7 +189,7 @@ func TestStreamSessionAudioEmitsConfigAndReassemblablePCM(t *testing.T) {
 	conn := desktopmedia.NewMediaConn(nil, stream)
 	conn.SetDatagramPath(path)
 
-	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{})
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{}, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("stream error=%v want EOF after one synthetic frame", err)
 	}
@@ -293,7 +293,7 @@ func TestStreamSessionAudioEncodesNegotiatedOpus(t *testing.T) {
 
 	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
 		AudioCodec: protocol.DesktopAudioCodecOpus,
-	})
+	}, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("stream error=%v want EOF after one synthetic Opus frame", err)
 	}
@@ -402,7 +402,7 @@ func TestOpusPacketLossFlowsThroughReassemblerToPLC(t *testing.T) {
 
 	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
 		AudioCodec: protocol.DesktopAudioCodecOpus,
-	})
+	}, nil)
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("stream error=%v want EOF", err)
 	}

@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #100 已合并，merge `4d23d2771c69f91881f40c422e2650cbc64a2dec`）
+> 当前开发基线：`main`（PR #101 已合并，merge `da6dfaec3fd4e01ec473af5dfc09ae845b08c7d2`）
 
 ## 0. 当前进度
 
@@ -521,7 +521,7 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 loss quantization / baseline / recovery / PCM reset、Opus encoder loss control 与 Host live update 测试。
 - PR #100 已合并到 `main`，merge `4d23d2771c69f91881f40c422e2650cbc64a2dec`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.43 RD3 Audio Validation Diagnostics Summary（当前分支）
+### 0.2.43 RD3 Audio Validation Diagnostics Summary（已合并 PR #101）
 
 - Desktop diagnostics schema 升级到 v5，新增 `audioValidation` 汇总，不新增第二套导出入口；现有诊断 JSON 即可直接用于 Windows 双机实测。
 - 汇总记录 requested/actual codec、Opus/PCM sample 数和 Opus→PCM fallback 次数，能直接确认协商结果是否真的落到 Opus，而不是仅看连接参数。
@@ -530,7 +530,16 @@ Windows SendInput / CF_UNICODETEXT
 - 显式 `Audio=false` 的会话不生成 `audioValidation`；启用音频但尚未拿到 `audio_config` 时会保留 requested 状态且 `active=false`，方便定位 Host 无 loopback/capability 的问题。
 - 新增 Opus runtime bitrate/loss/queue 汇总、PCM fallback 与 Audio=false 回归测试。
 - 新增 `scripts/analyze-desktop-audio.ps1` 与 Windows 实机验证清单：直接读取 GUI 导出的 schema v5 diagnostics JSON，输出 codec/bitrate/compression/loss/PLC/queue 指标，并支持 Opus、loss、queue、gap、timeout、compression ratio 阈值作为可重复测试 gate；Windows CI 解析检查该脚本语法。
-- 下一步：在两台 Windows 实机上跑 capture → Opus → network → PLC → WASAPI 基线并保存诊断文件，根据真实数据再决定 bitrate/FEC。
+- PR #101 已合并到 `main`，merge `da6dfaec3fd4e01ec473af5dfc09ae845b08c7d2`；Go CI、UI regression、Windows/macOS desktop package 与 PowerShell analyzer syntax 全部通过。
+
+### 0.2.44 RD3 Live Audio Diagnostics UI（当前分支）
+
+- 新增轻量 `GetRemoteDesktopAudioDiagnostics` binding，只返回当前 `DesktopAudioDiagnostics` snapshot；不会每 2 秒拉取包含最多 1200 条样本的完整 diagnostics report，也不会把 20 ms audio frame 暴露给 WebView。
+- Relay Desktop 预览区新增独立“音频”状态行，实时显示实际 codec、sample rate、channels、target bitrate、queue depth 与基于 received/concealment/skip 的估算 network loss。
+- 只有异常/有事件的指标才追加展示 PLC concealment、large-gap skip、local queue drop、reorder 与 playout timeout，避免正常状态下信息过载。
+- 非 Relay / 未连接状态显示 `音频：--`；音频已启用但尚未收到 `audio_config` 时显示等待音频流，显式关闭时显示已关闭。
+- 新增 Agent/Bridge unavailable 回归与 GUI binding/render token 测试。
+- 下一步：CI 通过后，代码侧音频主链先进入实机验证阶段；在拿到 Windows 双机 diagnostics 前不继续盲调 Opus bitrate/FEC。
 
 ### 0.3 本轮进度（2026-09-22）
 

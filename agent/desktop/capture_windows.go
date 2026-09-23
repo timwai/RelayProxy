@@ -339,6 +339,22 @@ func (c *windowsCapture) CaptureBackend() string {
 	return c.backend
 }
 
+func (c *windowsCapture) SetCaptureFPS(fps int) error {
+	if c == nil || fps <= 0 {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.stream == nil {
+		return nil
+	}
+	controller, ok := c.stream.(windowsFrameRateStream)
+	if !ok {
+		return nil
+	}
+	return controller.SetMaxFPS(fps)
+}
+
 func (c *windowsCapture) closeStreamLocked() {
 	if c.stream != nil {
 		_ = c.stream.Close()

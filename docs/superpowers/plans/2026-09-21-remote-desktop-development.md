@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector 与 Auto DXGI → WGC → GDI 回退均已合并 main；当前分支让 WGC 真正遵守 negotiated MaxFPS  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退与 WGC negotiated FPS cap 均已合并 main；当前分支让 WGC capture cadence 实时跟随 ABR FPS 变化  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
+> 当前开发基线：`main`（PR #69 已合并，merge `baf5c35e129c607cbdba437d9496e70391baf9ed`）
 
 ## 0. 当前进度
 
@@ -239,13 +239,22 @@ Windows SendInput / CF_UNICODETEXT
 - 新增纯编排回归测试，固定 `DXGI → WGC → GDI` 顺序、WGC 不可用时的 `DXGI → GDI`、不可 Duplication 时的 `WGC → GDI`，并验证成功后立即停止继续尝试。
 - GUI 帮助文案同步说明新的 Auto 回退顺序。
 
-### 0.2.15 WGC Frame-rate Cap（当前分支）
+### 0.2.15 WGC Frame-rate Cap（已合并 PR #69）
 
 - WGC 初始化不再忽略 HostConfig.MaxFPS；Windows amd64 在创建 GraphicsCaptureSession 后尝试 QueryInterface 到 IGraphicsCaptureSession5。
 - 支持 Session5 的系统会通过 MinUpdateInterval 把 negotiated MaxFPS 转成 Windows.Foundation.TimeSpan（100 ns tick），降低 WGC 在 Host 只消费 10/15/24/30 FPS 时仍按高刷新率生成 GPU frame 的无效开销。
 - Session5 是可选能力：旧 Windows 不支持该接口、或 SetMinUpdateInterval 被 runtime 拒绝时，不中断 WGC，会继续依赖 Relay Desktop Host ticker / latest-frame drain 保证输出帧率与实时性。
 - 显式 WGC、Auto 选到 WGC 两条路径都会复用同一限制，不改变 DXGI/GDI 行为。
 - Windows amd64 单测固定 1 / 30 / 60 FPS 与极高 FPS 的 TimeSpan 换算，并覆盖 0/负数代表“不设置 runtime 限制”。
+
+### 0.2.16 Dynamic Capture FPS Propagation（当前分支）
+
+- 新增可选 `CaptureFrameRateController`：Host 的媒体 ticker 仍是最终输出 FPS 的权威，capture backend 可接收 FPS hint 以减少不再需要的上游 frame 生产。
+- H.264 与 JPEG 两条媒体循环在 ABR `fpsUpdates` 生效并重置 ticker 后，都会同步调用 capture-side FPS controller；控制失败只记录日志，不中断会话。
+- Windows `windowsCapture` 将 FPS 更新转发给当前实现 `windowsFrameRateStream` 的 stream；DXGI/GDI 不实现该接口，因此行为完全保持不变。
+- WGC 实现运行时 `SetMaxFPS`，在 WinRT 线程模型下重新设置 `IGraphicsCaptureSession5.MinUpdateInterval`；显式 WGC 与 Auto fallback 到 WGC 都自动获得该能力。
+- 旧 Windows 缺少 Session5 时继续把动态限帧当作可选优化，依靠 Host ticker + latest-frame drain 保持正确输出，不降低兼容性。
+- 单测覆盖 Host optional-controller dispatch、Windows stream forwarding、无 active stream no-op，并通过编译期断言固定 WGC 对动态 FPS 接口的实现。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -90,6 +90,29 @@ func openH264GenerationEncoder(
 	return encoder, normalized, encoder.SequenceHeader(), nil
 }
 
+func openNextH264CPUGeneration(
+	ctx context.Context,
+	currentGeneration uint32,
+	cfg desktopcodec.VideoConfig,
+	opener h264GenerationEncoderOpener,
+) (
+	h264GenerationEncoder,
+	desktopcodec.VideoConfig,
+	[]byte,
+	uint32,
+	error,
+) {
+	nextGeneration, err := nextDesktopMediaGeneration(currentGeneration)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, 0, err
+	}
+	encoder, normalized, sequenceHeader, err := openH264GenerationEncoder(ctx, cfg, opener)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, 0, err
+	}
+	return encoder, normalized, sequenceHeader, nextGeneration, nil
+}
+
 func openH264D3D11Generation(
 	ctx context.Context,
 	cfg desktopcodec.VideoConfig,

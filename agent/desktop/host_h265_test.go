@@ -7,6 +7,7 @@ import (
 	"time"
 
 	desktopcodec "relayproxy/agent/desktop/codec"
+	"relayproxy/internal/protocol"
 )
 
 func testH265SequenceHeader() []byte {
@@ -128,7 +129,7 @@ func TestH265ValidationSentinelIsPrivateAndExplicit(t *testing.T) {
 			t.Fatalf("public codec preference %q unexpectedly enabled validation HEVC", value)
 		}
 	}
-	if got := desktopcodec.NormalizeCodecPreference(h265ValidationCodecPreference); got != "auto" {
+	if got := desktopcodec.NormalizeCodecPreference(protocol.DesktopCodecH265Validation); got != "auto" {
 		t.Fatalf("validation sentinel leaked into public codec normalizer: %q", got)
 	}
 }

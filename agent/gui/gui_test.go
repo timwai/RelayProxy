@@ -313,7 +313,6 @@ func TestRemoteDesktopCaptureBackendSelector(t *testing.T) {
 	}
 }
 
-
 func TestRemoteDesktopHEVCValidationOverrideIsOptIn(t *testing.T) {
 	base := protocol.RemoteDesktopConnectOptions{
 		Backend: protocol.DesktopBackendAuto,

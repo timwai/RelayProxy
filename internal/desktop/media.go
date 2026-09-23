@@ -15,6 +15,12 @@ const (
 	MaxEncodedFrameSize = 32 << 20
 )
 
+const (
+	MediaStreamVideoID  uint16 = 1
+	MediaStreamAudioID  uint16 = 2
+	MediaStreamCursorID uint16 = 3
+)
+
 type MediaPacketType uint8
 
 const (

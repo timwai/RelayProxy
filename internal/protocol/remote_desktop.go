@@ -222,6 +222,7 @@ type DesktopInputEvent struct {
 const (
 	DesktopSessionInput        = "input"
 	DesktopSessionVideoConfig  = "video_config"
+	DesktopSessionAudioConfig  = "audio_config"
 	DesktopSessionIDRRequest   = "idr_request"
 	DesktopSessionCursor       = "cursor"
 	DesktopSessionClipboard    = "clipboard"
@@ -235,6 +236,7 @@ type DesktopSessionMessage struct {
 	Type         string                 `json:"type"`
 	Input        *DesktopInputEvent     `json:"input,omitempty"`
 	VideoConfig  *DesktopVideoConfig    `json:"videoConfig,omitempty"`
+	AudioConfig  *DesktopAudioConfig    `json:"audioConfig,omitempty"`
 	Cursor       *DesktopCursorState    `json:"cursor,omitempty"`
 	Clipboard    *DesktopClipboardState `json:"clipboard,omitempty"`
 	Probe        *DesktopSessionProbe   `json:"probe,omitempty"`
@@ -290,6 +292,20 @@ type DesktopVideoControl struct {
 	TargetFPS     int `json:"targetFps,omitempty"`
 	TargetWidth   int `json:"targetWidth,omitempty"`
 	TargetHeight  int `json:"targetHeight,omitempty"`
+}
+
+// DesktopAudioConfig describes one audio generation carried on the dedicated
+// RD/1 audio media stream. The first implementation may use PCM for bring-up;
+// the model intentionally supports compressed codecs without another protocol
+// revision.
+type DesktopAudioConfig struct {
+	Generation      uint32 `json:"generation"`
+	Codec           string `json:"codec"`
+	SampleRate      int    `json:"sampleRate"`
+	Channels        int    `json:"channels"`
+	BitsPerSample   int    `json:"bitsPerSample,omitempty"`
+	FrameDurationMs int    `json:"frameDurationMs,omitempty"`
+	TargetBitrate   int    `json:"targetBitrate,omitempty"`
 }
 
 type DesktopVideoConfig struct {

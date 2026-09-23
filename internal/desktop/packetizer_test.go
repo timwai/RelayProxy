@@ -191,3 +191,71 @@ func TestReassemblerKeepsGenerationsSeparate(t *testing.T) {
 		t.Fatalf("old generation frame=%+v", completedOld)
 	}
 }
+
+func TestPacketizeAndReassembleAudioOutOfOrder(t *testing.T) {
+	data := bytes.Repeat([]byte{0x10, 0x20, 0x30, 0x40}, 900)
+	frame := EncodedFrame{
+		Type:       MediaPacketAudio,
+		SessionID:  21,
+		StreamID:   2,
+		Generation: 1,
+		FrameID:    17,
+		Timestamp:  20_000,
+		Config:     true,
+		Data:       data,
+	}
+	packets, next, err := PacketizeMediaFrame(frame, 700, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packets) < 2 || next != 500+uint32(len(packets)) {
+		t.Fatalf("packets=%d next=%d", len(packets), next)
+	}
+	for _, packet := range packets {
+		header, _, decodeErr := DecodeMediaPacket(packet)
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if header.Type != MediaPacketAudio || header.StreamID != 2 {
+			t.Fatalf("audio header=%+v", header)
+		}
+	}
+	slices.Reverse(packets)
+	r := NewReassembler(ReassemblerConfig{PacketType: MediaPacketAudio})
+	var completed *EncodedFrame
+	now := time.Unix(6, 0)
+	for _, packet := range packets {
+		got, pushErr := r.Push(packet, now)
+		if pushErr != nil {
+			t.Fatal(pushErr)
+		}
+		if got != nil {
+			completed = got
+		}
+	}
+	if completed == nil || completed.Type != MediaPacketAudio || !completed.Config ||
+		completed.Generation != 1 || !bytes.Equal(completed.Data, data) {
+		t.Fatalf("completed audio frame=%+v", completed)
+	}
+}
+
+func TestVideoReassemblerRejectsAudioPackets(t *testing.T) {
+	packets, _, err := PacketizeMediaFrame(EncodedFrame{
+		Type: MediaPacketAudio, SessionID: 1, StreamID: 2, Generation: 1, FrameID: 1, Data: []byte("audio"),
+	}, 1200, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewReassembler(ReassemblerConfig{}).Push(packets[0], time.Now()); !errors.Is(err, ErrMediaPacket) {
+		t.Fatalf("video reassembler error=%v, want ErrMediaPacket", err)
+	}
+}
+
+func TestPacketizeFrameRejectsAudioType(t *testing.T) {
+	_, _, err := PacketizeFrame(EncodedFrame{
+		Type: MediaPacketAudio, SessionID: 1, StreamID: 2, Generation: 1, FrameID: 1, Data: []byte("audio"),
+	}, 1200, 1)
+	if !errors.Is(err, ErrMediaPacket) {
+		t.Fatalf("error=%v, want ErrMediaPacket", err)
+	}
+}

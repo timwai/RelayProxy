@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #83 已合并，merge `6be4fa4d577bd10aad5b1178032e01aba68f4919`）
+> 当前开发基线：`main`（PR #86 已合并，merge `f769d91862e0fe5ecc475553936e29b621e3c8f0`）
 
 ## 0. 当前进度
 
@@ -395,6 +395,7 @@ Windows SendInput / CF_UNICODETEXT
 - 测试改为真实 loopback TCP + TLS 1.3，并通过生产 `DialTLS` / `ServerTLS` 建立会话；一次保持 4 条 yamux stream 同时存活，再逐条 echo，覆盖真正的 multiplexing。
 - 客户端失败时同步附带服务端错误上下文，并为每条 stream 设置有界 I/O deadline；不使用 sleep 放宽时序，也不修改生产 tunnel 实现。
 - PR #83 已合并到 `main`，merge `6be4fa4d577bd10aad5b1178032e01aba68f4919`；修正 stale import/gofmt 后 Go format/vet/full test/race/benchmark 全部通过。
+- #85 首轮 CI 仍复现最后一条 stream 的 `session shutdown`，确认 #83 还存在“server final Write 成功后立即 defer Close、client 尚未消费完”的生命周期竞态；PR #86 增加 client-completion barrier 后 Go CI 全绿并已合并 `f769d91862e0fe5ecc475553936e29b621e3c8f0`。
 
 ### 0.2.30 RD3 Audio Media Foundation（当前分支）
 

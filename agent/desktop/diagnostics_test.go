@@ -67,6 +67,9 @@ func TestSessionDiagnosticsRecorderKeepsBoundedRecentSamples(t *testing.T) {
 	if report.CurrentConfig.Generation != 13 || report.CurrentStats.Path != "relay" {
 		t.Fatalf("current report state=%+v %+v", report.CurrentConfig, report.CurrentStats)
 	}
+	if report.HEVCValidation != nil {
+		t.Fatalf("ordinary H.264 report unexpectedly contains HEVC validation summary: %+v", report.HEVCValidation)
+	}
 
 	report.Samples[0].Stats.Path = "mutated"
 	again := recorder.Report(start.Add(12*time.Minute), protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{})
@@ -223,5 +226,72 @@ func TestDesktopDiagnosticMetricSkipsUnavailableValues(t *testing.T) {
 		func(sample DesktopDiagnosticSample) float64 { return sample.Stats.DecodeMs }, positive)
 	if got.Samples != 2 || got.Min != 2 || got.Avg != 3 || got.P50 != 2 || got.P95 != 4 {
 		t.Fatalf("filtered metric=%+v", got)
+	}
+}
+
+func TestSessionDiagnosticsReportSummarizesHEVCValidation(t *testing.T) {
+	start := time.Unix(300, 0)
+	recorder := newSessionDiagnosticsRecorder("target-hevc", protocol.RemoteDesktopConnectOptions{
+		Backend: protocol.DesktopBackendRelay,
+		Codec:   protocol.DesktopCodecH265Validation,
+	}, start)
+
+	samples := []struct {
+		config protocol.DesktopVideoConfig
+		stats  protocol.DesktopSessionStats
+	}{
+		{
+			config: protocol.DesktopVideoConfig{Generation: 1, Codec: "h265", Width: 1920, Height: 1080},
+			stats: protocol.DesktopSessionStats{
+				CaptureBackend: "wgc", CaptureFormat: "bgra-d3d11",
+				EncoderBackend: "media-foundation-hevc", EncoderHardware: true,
+				DecoderBackend: "mf-hevc-d3d11", DecoderHardware: true,
+			},
+		},
+		{
+			config: protocol.DesktopVideoConfig{Generation: 2, Codec: "h265", Width: 1280, Height: 720},
+			stats: protocol.DesktopSessionStats{
+				CaptureBackend: "gdi", CaptureFormat: "rgba",
+				EncoderBackend: "media-foundation-hevc",
+				DecoderBackend: "mf-hevc",
+			},
+		},
+		{
+			config: protocol.DesktopVideoConfig{Generation: 3, Codec: "h264", Width: 1280, Height: 720},
+			stats: protocol.DesktopSessionStats{
+				EncoderBackend: "media-foundation",
+				DecoderBackend: "mf-d3d11",
+			},
+		},
+		{
+			config: protocol.DesktopVideoConfig{Generation: 4, Codec: "jpeg", Width: 1280, Height: 720},
+			stats: protocol.DesktopSessionStats{
+				EncoderBackend: "jpeg-go",
+				DecoderBackend: "image",
+			},
+		},
+	}
+	for i, sample := range samples {
+		recorder.Record(start.Add(time.Duration(i)*500*time.Millisecond), sample.config, sample.stats, desktopadapt.MediaDecision{})
+	}
+
+	report := recorder.Report(start.Add(3*time.Second), samples[len(samples)-1].config, samples[len(samples)-1].stats)
+	got := report.HEVCValidation
+	if got == nil || !got.Requested {
+		t.Fatalf("missing HEVC validation summary: %+v", got)
+	}
+	if got.HEVCSamples != 2 || got.H264FallbackSamples != 1 || got.JPEGFallbackSamples != 1 {
+		t.Fatalf("HEVC/fallback samples=%+v", got)
+	}
+	if got.HardwareEncodingSamples != 1 || got.HardwareDecodingSamples != 1 {
+		t.Fatalf("HEVC hardware samples=%d/%d", got.HardwareEncodingSamples, got.HardwareDecodingSamples)
+	}
+	if got.CaptureBackends["wgc"] != 1 || got.CaptureBackends["gdi"] != 1 ||
+		got.CaptureFormats["bgra-d3d11"] != 1 || got.CaptureFormats["rgba"] != 1 {
+		t.Fatalf("HEVC capture summary=%+v %+v", got.CaptureBackends, got.CaptureFormats)
+	}
+	if got.EncoderBackends["media-foundation-hevc"] != 2 ||
+		got.DecoderBackends["mf-hevc-d3d11"] != 1 || got.DecoderBackends["mf-hevc"] != 1 {
+		t.Fatalf("HEVC backend summary=%+v %+v", got.EncoderBackends, got.DecoderBackends)
 	}
 }

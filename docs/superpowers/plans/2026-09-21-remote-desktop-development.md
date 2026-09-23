@@ -370,7 +370,7 @@ Windows SendInput / CF_UNICODETEXT
 - 本分支仍不修改 `NormalizeCodecPreference`、Host capability advertisement、Controller/GUI codec selector 或默认协商；待 Windows 实机端到端验证后再开放 H.265。
 - PR #80 已合并到 `main`，merge `a76cc133a180982b29e5332beb13c4d4096835f7`；Go format/vet/full test/race/benchmark、UI full regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.27 RD3 HEVC End-to-End Validation Negotiation（当前分支）
+### 0.2.27 RD3 HEVC End-to-End Validation Negotiation（已合并 PR #81）
 
 - 新增仅供实机验证的内部 codec sentinel：`h265-validation`。它不出现在 GUI、Host capability advertisement 或公开 `NormalizeCodecPreference` 中，普通 `auto/h264/jpeg` 行为保持不变。
 - Controller 显式携带该 sentinel 时，Host 优先启动已合并的 H.265 generation pipeline；成功后沿现有 RD/1 Datagram、Controller H.265 snapshot/ABR/recovery 与 Windows native HEVC decoder 路径完成端到端验证。
@@ -378,6 +378,14 @@ Windows SendInput / CF_UNICODETEXT
 - Windows GUI 增加隐藏环境变量触发：启动前设置 `RELAYPROXY_DESKTOP_HEVC_VALIDATION=1` 时，只覆盖下一次 Remote Desktop 连接参数为 `backend=relay` + `codec=h265-validation`；界面本身仍不显示 H.265 选项，取消环境变量后恢复原行为。
 - 隐藏 H.265 会话状态下允许现有 runtime resolution 控件继续触发 generation rebuild；嵌入式 WebView 不尝试把 `video/h265` 当 JPEG/WebCodecs H.264 解码，而是明确提示使用 Windows 原生 Media Foundation 查看器。
 - 该入口的目的仅是 Intel/NVIDIA/AMD 实机兼容性和零拷贝链路验证；通过实机矩阵前不开放 H.265 GUI 选项，也不把 H.265 加入自动协商。
+- PR #81 已合并到 `main`，merge `a2e291c6d9ee55987fd55eb87af24a933bb382c8`；Go CI 首轮仅命中既有 `TestTLSTunnelMultiplexing` flaky，重跑 full test/race/benchmark 通过；UI full regression 与 Windows/macOS desktop package 全部通过。
+
+### 0.2.28 RD3 HEVC Validation Diagnostics Summary（当前分支）
+
+- 诊断报告 schema 升级到 v3，仅当连接请求使用内部 `h265-validation` sentinel 时增加 `hevcValidation` 汇总；普通 H.264/JPEG 报告保持无该字段。
+- 汇总直接统计实际 `h265` 样本数、H.264/JPEG fallback 样本数、HEVC 硬编/硬解样本数，避免实机测试后人工扫描最多 1200 条时间序列。
+- HEVC 样本单独聚合 capture backend/format、encoder backend、decoder backend，可直接区分 WGC D3D11 zero-copy、CPU fallback 与不同 Media Foundation decoder 路径。
+- 现有逐样本网络/ABR/时延数据和通用 summary 保持不变；该汇总只做验证结果压缩，不改变媒体策略或能力协商。
 
 ### 0.3 本轮进度（2026-09-22）
 

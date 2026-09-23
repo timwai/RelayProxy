@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	desktopaudio "relayproxy/agent/desktop/audio"
 	desktopcodec "relayproxy/agent/desktop/codec"
 	desktopviewer "relayproxy/agent/desktop/viewer"
 	"relayproxy/internal/protocol"
@@ -362,7 +363,11 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 
 func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer close(s.done)
+	defer s.cancel()
 	go s.inputLoop(ctx, owner)
+	if owner.bridge.RemoteDesktopAudioEnabled() {
+		go s.audioLoop(ctx, owner)
+	}
 	defer func() {
 		s.mediaMu.RLock()
 		viewer := s.viewer
@@ -608,6 +613,72 @@ func (s *nativeDesktopSession) present() error {
 		Height: s.frameHeight,
 		Stride: s.frameStride,
 	})
+}
+
+func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) {
+	var (
+		player       desktopaudio.Player
+		activeConfig protocol.DesktopAudioConfig
+	)
+	defer func() {
+		if player != nil {
+			_ = player.Close()
+		}
+	}()
+
+	for {
+		frame, config, err := owner.bridge.NextRemoteDesktopAudioFrame(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("[Desktop] native audio stream stopped: %v", err)
+			}
+			return
+		}
+		if config.Codec != protocol.DesktopAudioCodecPCMS16LE {
+			log.Printf("[Desktop] native audio codec %q is not supported", config.Codec)
+			return
+		}
+
+		pcm := desktopaudio.PCMConfig{
+			SampleRate:    config.SampleRate,
+			Channels:      config.Channels,
+			BitsPerSample: config.BitsPerSample,
+		}
+		if player == nil || activeConfig != config {
+			if player != nil {
+				_ = player.Close()
+				player = nil
+			}
+			next, openErr := desktopaudio.OpenPCMPlayer(ctx, pcm)
+			if openErr != nil {
+				if ctx.Err() == nil {
+					log.Printf("[Desktop] open native WASAPI audio player failed: %v", openErr)
+				}
+				return
+			}
+			player = next
+			activeConfig = config
+			log.Printf("[Desktop] native audio generation=%d codec=%s format=%dHz/%dch/%dbit",
+				config.Generation, config.Codec, config.SampleRate, config.Channels, config.BitsPerSample)
+		}
+		if len(frame.Data) == 0 {
+			continue
+		}
+		if validateErr := pcm.ValidatePayload(frame.Data); validateErr != nil {
+			log.Printf("[Desktop] invalid native PCM frame generation=%d frame=%d: %v",
+				frame.Generation, frame.FrameID, validateErr)
+			continue
+		}
+		if writeErr := player.Write(ctx, frame.Data); writeErr != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("[Desktop] native WASAPI audio write failed: %v", writeErr)
+			_ = player.Close()
+			player = nil
+			activeConfig = protocol.DesktopAudioConfig{}
+		}
+	}
 }
 
 func (s *nativeDesktopSession) inputLoop(ctx context.Context, owner *appWindow) {

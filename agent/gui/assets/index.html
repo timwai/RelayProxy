@@ -790,7 +790,7 @@
             <div>
               <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Relay Desktop 预览</div>
               <div id="desktop-viewer-meta" class="text-[10px] text-slate-500 dark:text-slate-400">等待视频帧… · 点击画面后可控制键鼠</div>
-              <div id="desktop-viewer-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">网络统计：--</div>
+              <div id="desktop-viewer-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">网络统计：--</div>\n              <div id="desktop-viewer-audio-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">音频：--</div>
             </div>
             <div class="flex items-center gap-2">
               <div id="desktop-runtime-resolution-wrap" class="hidden items-center gap-1.5">
@@ -2482,6 +2482,42 @@
       target.textContent = '网络统计：' + parts.join(' · ');
     }
 
+    async function refreshRemoteDesktopAudioStats() {
+      var target = $('desktop-viewer-audio-stats');
+      if (!target || !hasFn('goGetRemoteDesktopAudioDiagnostics')) return;
+      var status = state.desktopStatus || {};
+      if (status.state !== 'connected' || status.backend !== 'relay') {
+        target.textContent = '音频：--';
+        return;
+      }
+      var raw = await call('goGetRemoteDesktopAudioDiagnostics');
+      var audio = parseJSONResult(raw, null);
+      if (!audio) return;
+      var config = audio.config || {};
+      if (!config.generation) {
+        target.textContent = audio.enabled ? '音频：等待音频流…' : '音频：已关闭';
+        return;
+      }
+      var codec = String(config.codec || '').toLowerCase();
+      var codecLabel = codec === 'opus' ? 'Opus' : (codec === 'pcm_s16le' ? 'PCM' : (codec || '--'));
+      var parts = [codecLabel];
+      if (config.sampleRate) {
+        parts.push((Number(config.sampleRate) / 1000).toFixed(Number(config.sampleRate) % 1000 ? 1 : 0) + ' kHz');
+      }
+      if (config.channels) parts.push(Number(config.channels) + ' ch');
+      if (config.targetBitrate) parts.push('Target ' + formatDesktopBitrate(config.targetBitrate));
+      parts.push('Q ' + Number(audio.queueFrames || 0) + '/' + Number(audio.queueCapacity || 0));
+      var missing = Number(audio.concealmentFrames || 0) + Number(audio.gapSkippedFrames || 0);
+      var total = Number(audio.receivedFrames || 0) + missing;
+      if (total > 0) parts.push('Loss ' + (missing * 100 / total).toFixed(2) + '%');
+      if (audio.concealmentFrames) parts.push('PLC ' + Number(audio.concealmentFrames));
+      if (audio.gapSkippedFrames) parts.push('Skip ' + Number(audio.gapSkippedFrames));
+      if (audio.queueDroppedFrames) parts.push('Drop ' + Number(audio.queueDroppedFrames));
+      if (audio.reorderedFrames) parts.push('Reorder ' + Number(audio.reorderedFrames));
+      if (audio.playoutTimeoutFrames) parts.push('Timeout ' + Number(audio.playoutTimeoutFrames));
+      target.textContent = '音频：' + parts.join(' · ');
+    }
+
     async function refreshRemoteDesktopStatus(showError) {
       if (!hasFn('goGetRemoteDesktopStatus')) return;
       var raw = await call('goGetRemoteDesktopStatus');
@@ -3093,6 +3129,7 @@
         if (!$('tab-pane-desktop').classList.contains('hidden')) {
           refreshRemoteDesktopStatus(false);
           refreshRemoteDesktopStats();
+          refreshRemoteDesktopAudioStats();
         }
       }, 2000);
       setInterval(refreshRemoteDesktopFrame, 100);

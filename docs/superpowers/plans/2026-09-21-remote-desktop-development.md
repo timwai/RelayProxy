@@ -376,6 +376,7 @@ Windows SendInput / CF_UNICODETEXT
 - Controller 显式携带该 sentinel 时，Host 优先启动已合并的 H.265 generation pipeline；成功后沿现有 RD/1 Datagram、Controller H.265 snapshot/ABR/recovery 与 Windows native HEVC decoder 路径完成端到端验证。
 - 若 HEVC 在发送首个 VideoConfig 前不可用，则自动回退到已广告的 H.264，再由现有逻辑回退 JPEG；若 HEVC 已经广告 generation 后发生运行时失败，则使用下一 generation 直接回退 JPEG，避免 generation 倒退。
 - Windows GUI 增加隐藏环境变量触发：启动前设置 `RELAYPROXY_DESKTOP_HEVC_VALIDATION=1` 时，只覆盖下一次 Remote Desktop 连接参数为 `backend=relay` + `codec=h265-validation`；界面本身仍不显示 H.265 选项，取消环境变量后恢复原行为。
+- 隐藏 H.265 会话状态下允许现有 runtime resolution 控件继续触发 generation rebuild；嵌入式 WebView 不尝试把 `video/h265` 当 JPEG/WebCodecs H.264 解码，而是明确提示使用 Windows 原生 Media Foundation 查看器。
 - 该入口的目的仅是 Intel/NVIDIA/AMD 实机兼容性和零拷贝链路验证；通过实机矩阵前不开放 H.265 GUI 选项，也不把 H.265 加入自动协商。
 
 ### 0.3 本轮进度（2026-09-22）

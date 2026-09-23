@@ -372,3 +372,131 @@ func TestHostDesktopCapabilitiesAdvertiseAudioCodecs(t *testing.T) {
 		t.Fatalf("audio codecs=%v", caps.AudioCodecs)
 	}
 }
+
+func TestOpusPacketLossFlowsThroughReassemblerToPLC(t *testing.T) {
+	cfg, _, frameBytes, err := desktopaudio.NormalizeFrameDuration(hostAudioPCMConfig, hostAudioFrameDuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames := make([][]byte, 4)
+	for frameIndex := range frames {
+		frame := make([]byte, frameBytes)
+		for i := range frame {
+			frame[i] = byte((frameIndex*37 + i*11 + 19) % 251)
+		}
+		frames[frameIndex] = frame
+	}
+	capture := &fakeAudioCapture{frames: frames, endErr: io.EOF}
+	hostConfig := DefaultHostConfig()
+	hostConfig.PacketSize = 600
+	host := &Host{
+		cfg: hostConfig,
+		audioOpen: func(context.Context, desktopaudio.PCMConfig, time.Duration) (desktopaudio.Capture, error) {
+			return capture, nil
+		},
+	}
+	stream := &audioTestStream{}
+	path := &audioRecordingDatagramPath{}
+	conn := desktopmedia.NewMediaConn(nil, stream)
+	conn.SetDatagramPath(path)
+
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
+		AudioCodec: protocol.DesktopAudioCodecOpus,
+	})
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("stream error=%v want EOF", err)
+	}
+
+	stream.mu.Lock()
+	controlBytes := bytes.Join(stream.messages, nil)
+	stream.mu.Unlock()
+	var message protocol.DesktopSessionMessage
+	if err := protocol.ReadJSON(bytes.NewReader(controlBytes), &message); err != nil {
+		t.Fatal(err)
+	}
+	if message.AudioConfig == nil || message.AudioConfig.Codec != protocol.DesktopAudioCodecOpus {
+		t.Fatalf("audio config=%+v", message.AudioConfig)
+	}
+	audioConfig := *message.AudioConfig
+
+	controller := newAudioControllerTestSession()
+	if !controller.applyAudioConfig(audioConfig) {
+		t.Fatalf("controller rejected audio config=%+v", audioConfig)
+	}
+	reassembler := desktopmedia.NewReassembler(desktopmedia.ReassemblerConfig{
+		PacketType: desktopmedia.MediaPacketAudio,
+		MaxFrames:  8,
+		MaxBytes:   frameBytes * 4,
+		FrameTTL:   time.Second,
+	})
+	droppedPackets := 0
+	for _, packet := range path.snapshot() {
+		header, _, decodeErr := desktopmedia.DecodeMediaPacket(packet)
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if header.FrameID == 2 {
+			droppedPackets++
+			continue
+		}
+		frame, pushErr := reassembler.Push(packet, time.Now())
+		if pushErr != nil {
+			t.Fatal(pushErr)
+		}
+		if frame != nil && !controller.enqueueAudioFrame(frame) {
+			t.Fatalf("controller rejected reassembled frame %d", frame.FrameID)
+		}
+	}
+	if droppedPackets == 0 {
+		t.Fatal("test did not drop any frame 2 datagrams")
+	}
+
+	first, _, err := controller.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	lost, _, err := controller.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, _, err := controller.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.FrameID != 1 || first.Concealment ||
+		lost.FrameID != 2 || !lost.Concealment ||
+		third.FrameID != 3 || third.Concealment {
+		t.Fatalf("playout sequence first=%+v lost=%+v third=%+v", first, lost, third)
+	}
+
+	decoder, err := desktopaudio.NewOpusDecoder(desktopaudio.OpusConfig{
+		SampleRate:      audioConfig.SampleRate,
+		Channels:        audioConfig.Channels,
+		BitsPerSample:   audioConfig.BitsPerSample,
+		FrameDurationMs: audioConfig.FrameDurationMs,
+		Bitrate:         audioConfig.TargetBitrate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstPCM, err := decoder.DecodePacket(first.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plcPCM, err := decoder.DecodePLC()
+	if err != nil {
+		t.Fatal(err)
+	}
+	thirdPCM, err := decoder.DecodePacket(third.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(firstPCM) != frameBytes || len(plcPCM) != frameBytes || len(thirdPCM) != frameBytes {
+		t.Fatalf("decoded PCM sizes=%d/%d/%d want=%d", len(firstPCM), len(plcPCM), len(thirdPCM), frameBytes)
+	}
+	got := controller.AudioDiagnosticsSnapshot()
+	if got.ConcealmentFrames != 1 || got.GapSkippedFrames != 0 ||
+		got.ReceivedFrames != 3 || got.ConsumedFrames != 2 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}

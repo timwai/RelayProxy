@@ -618,6 +618,7 @@ func (s *nativeDesktopSession) present() error {
 func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) {
 	var (
 		player       desktopaudio.Player
+		opusDecoder  *desktopaudio.OpusDecoder
 		activeConfig protocol.DesktopAudioConfig
 	)
 	defer func() {
@@ -634,10 +635,6 @@ func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) 
 			}
 			return
 		}
-		if config.Codec != protocol.DesktopAudioCodecPCMS16LE {
-			log.Printf("[Desktop] native audio codec %q is not supported", config.Codec)
-			return
-		}
 
 		pcm := desktopaudio.PCMConfig{
 			SampleRate:    config.SampleRate,
@@ -648,7 +645,28 @@ func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) 
 			if player != nil {
 				_ = player.Close()
 				player = nil
+			opusDecoder = nil
+
+			switch config.Codec {
+			case protocol.DesktopAudioCodecPCMS16LE:
+			case protocol.DesktopAudioCodecOpus:
+				nextDecoder, decodeErr := desktopaudio.NewOpusDecoder(desktopaudio.OpusConfig{
+					SampleRate:      config.SampleRate,
+					Channels:        config.Channels,
+					BitsPerSample:   config.BitsPerSample,
+					FrameDurationMs: config.FrameDurationMs,
+					Bitrate:         config.TargetBitrate,
+				})
+				if decodeErr != nil {
+					log.Printf("[Desktop] create native Opus decoder failed: %v", decodeErr)
+					return
+				}
+				opusDecoder = nextDecoder
+			default:
+				log.Printf("[Desktop] native audio codec %q is not supported", config.Codec)
+				return
 			}
+
 			next, openErr := desktopaudio.OpenPCMPlayer(ctx, pcm)
 			if openErr != nil {
 				if ctx.Err() == nil {
@@ -658,24 +676,35 @@ func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) 
 			}
 			player = next
 			activeConfig = config
-			log.Printf("[Desktop] native audio generation=%d codec=%s format=%dHz/%dch/%dbit",
-				config.Generation, config.Codec, config.SampleRate, config.Channels, config.BitsPerSample)
+			log.Printf("[Desktop] native audio generation=%d codec=%s format=%dHz/%dch/%dbit bitrate=%d",
+				config.Generation, config.Codec, config.SampleRate, config.Channels, config.BitsPerSample, config.TargetBitrate)
 		}
 		if len(frame.Data) == 0 {
 			continue
 		}
-		if validateErr := pcm.ValidatePayload(frame.Data); validateErr != nil {
+
+		pcmData := frame.Data
+		if opusDecoder != nil {
+			pcmData, err = opusDecoder.DecodePacket(frame.Data)
+			if err != nil {
+				log.Printf("[Desktop] Opus decode failed generation=%d frame=%d: %v",
+					frame.Generation, frame.FrameID, err)
+				continue
+			}
+		}
+		if validateErr := pcm.ValidatePayload(pcmData); validateErr != nil {
 			log.Printf("[Desktop] invalid native PCM frame generation=%d frame=%d: %v",
 				frame.Generation, frame.FrameID, validateErr)
 			continue
 		}
-		if writeErr := player.Write(ctx, frame.Data); writeErr != nil {
+		if writeErr := player.Write(ctx, pcmData); writeErr != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			log.Printf("[Desktop] native WASAPI audio write failed: %v", writeErr)
 			_ = player.Close()
 			player = nil
+			opusDecoder = nil
 			activeConfig = protocol.DesktopAudioConfig{}
 		}
 	}

@@ -1340,6 +1340,13 @@ func (a *Agent) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStat
 	session.UpdateViewerStats(stats)
 }
 
+func (a *Agent) RemoteDesktopAudioEnabled() bool {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	return session != nil && session.Active() && session.AudioEnabled()
+}
+
 func (a *Agent) NextRemoteDesktopAudioFrame(ctx context.Context) (desktop.AudioFrameSnapshot, protocol.DesktopAudioConfig, error) {
 	if ctx == nil {
 		ctx = context.Background()

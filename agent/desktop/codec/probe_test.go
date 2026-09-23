@@ -36,7 +36,6 @@ func TestH264ProbeNoEncoderClearsEncoderName(t *testing.T) {
 	}
 }
 
-
 func TestH265ProbeCapability(t *testing.T) {
 	probe := H265Probe{
 		MediaFoundation:      true,

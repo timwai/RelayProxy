@@ -446,7 +446,7 @@ func TestSummarizeAudioValidationMarksPCMOpusFallback(t *testing.T) {
 	config := testAudioConfig(1)
 	samples := []DesktopDiagnosticSample{{
 		AtUnixMs: time.Unix(700, 0).UnixMilli(),
-		Audio: DesktopAudioDiagnostics{Enabled: true, Config: config, ReceivedFrames: 10},
+		Audio:    DesktopAudioDiagnostics{Enabled: true, Config: config, ReceivedFrames: 10},
 	}}
 	got := summarizeAudioValidation(
 		protocol.RemoteDesktopConnectOptions{AudioCodec: protocol.DesktopAudioCodecOpus},

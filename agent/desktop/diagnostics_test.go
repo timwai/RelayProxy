@@ -229,7 +229,6 @@ func TestDesktopDiagnosticMetricSkipsUnavailableValues(t *testing.T) {
 	}
 }
 
-
 func TestSessionDiagnosticsReportSummarizesHEVCValidation(t *testing.T) {
 	start := time.Unix(300, 0)
 	recorder := newSessionDiagnosticsRecorder("target-hevc", protocol.RemoteDesktopConnectOptions{

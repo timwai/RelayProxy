@@ -248,6 +248,52 @@ func TestH264DesktopVideoConfigCarriesGenerationBounds(t *testing.T) {
 	}
 }
 
+func TestOpenNextH264CPUGenerationAdvancesGeneration(t *testing.T) {
+	opened := &abrTestEncoder{sequenceHeader: []byte{0, 0, 0, 1, 0x67}}
+	opener := func(context.Context, desktopcodec.VideoConfig, bool) (h264GenerationEncoder, error) {
+		return opened, nil
+	}
+	cfg := desktopcodec.VideoConfig{
+		Width: 1280, Height: 720, FPS: 30, TargetBitrate: 4_000_000,
+		KeyframeEvery: 2 * time.Second,
+	}
+	encoder, normalized, header, generation, err := openNextH264CPUGeneration(
+		context.Background(), 4, cfg, opener,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if encoder != opened || generation != 5 {
+		t.Fatalf("encoder=%p generation=%d", encoder, generation)
+	}
+	if normalized.Width != 1280 || normalized.Height != 720 || normalized.TargetBitrate != 4_000_000 {
+		t.Fatalf("normalized=%+v", normalized)
+	}
+	if string(header) != string(opened.sequenceHeader) {
+		t.Fatalf("header=%v want=%v", header, opened.sequenceHeader)
+	}
+	if opened.forceIDRCalls != 1 {
+		t.Fatalf("ForceIDR calls=%d want=1", opened.forceIDRCalls)
+	}
+}
+
+func TestOpenNextH264CPUGenerationDoesNotOpenOnOverflow(t *testing.T) {
+	calls := 0
+	opener := func(context.Context, desktopcodec.VideoConfig, bool) (h264GenerationEncoder, error) {
+		calls++
+		return &abrTestEncoder{}, nil
+	}
+	_, _, _, _, err := openNextH264CPUGeneration(
+		context.Background(), ^uint32(0), desktopcodec.DefaultVideoConfig(), opener,
+	)
+	if err == nil {
+		t.Fatal("expected generation overflow")
+	}
+	if calls != 0 {
+		t.Fatalf("opener calls=%d want=0", calls)
+	}
+}
+
 func TestNextDesktopMediaGeneration(t *testing.T) {
 	next, err := nextDesktopMediaGeneration(0)
 	if err != nil || next != 1 {

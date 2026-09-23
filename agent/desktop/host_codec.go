@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"log"
 	"time"
@@ -88,6 +89,29 @@ func openH264GenerationEncoder(
 		return nil, desktopcodec.VideoConfig{}, nil, err
 	}
 	return encoder, normalized, encoder.SequenceHeader(), nil
+}
+
+func openNextH264CPUGeneration(
+	ctx context.Context,
+	currentGeneration uint32,
+	cfg desktopcodec.VideoConfig,
+	opener h264GenerationEncoderOpener,
+) (
+	h264GenerationEncoder,
+	desktopcodec.VideoConfig,
+	[]byte,
+	uint32,
+	error,
+) {
+	nextGeneration, err := nextDesktopMediaGeneration(currentGeneration)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, 0, err
+	}
+	encoder, normalized, sequenceHeader, err := openH264GenerationEncoder(ctx, cfg, opener)
+	if err != nil {
+		return nil, desktopcodec.VideoConfig{}, nil, 0, err
+	}
+	return encoder, normalized, sequenceHeader, nextGeneration, nil
 }
 
 func openH264D3D11Generation(
@@ -666,12 +690,69 @@ func (h *Host) streamH264Frames(
 		return nil
 	}
 
-	if gpuEnabled {
-		if err := sendD3D11Frame(firstD3D, started); err != nil {
-			return err
+	migrateGPUToCPU := func(now time.Time, cause error) error {
+		if !gpuEnabled {
+			return cause
 		}
+		nextEncoder, nextConfig, nextSequenceHeader, nextGeneration, openErr :=
+			openNextH264CPUGeneration(ctx, generation, videoCfg, openMFH264GenerationEncoder)
+		if openErr != nil {
+			return errors.Join(cause, fmt.Errorf("CPU H.264 runtime fallback unavailable: %w", openErr))
+		}
+		nextProtocolConfig := h264DesktopVideoConfig(
+			nextGeneration, nextConfig, sessionMaxWidth, sessionMaxHeight,
+			sessionMaxBitrate, cfg.DisplayID, nextSequenceHeader,
+		)
+		if err := sendVideoConfig(ctx, conn, nextProtocolConfig); err != nil {
+			_ = nextEncoder.Close()
+			return errors.Join(cause, err)
+		}
+		advertisedGeneration = nextGeneration
+
+		oldEncoder := encoder
+		oldConverter := d3dConverter
+		encoder = nextEncoder
+		d3dEncoder = nil
+		d3dConverter = nil
+		d3dSource = nil
+		gpuEnabled = false
+		videoCfg = nextConfig
+		sequenceHeader = nextSequenceHeader
+		generation = nextGeneration
+		frameID = 1
+		needsGenerationKeyFrame = true
+		lastIDR = now
+		lastEncoderStats = encoder.Stats()
+		lastCapturedFrames = capturedFrames
+		lastReportAt = now
+		captureFormat = "rgba"
+		if rawSource != nil && videoCfg.Width == sessionMaxWidth && videoCfg.Height == sessionMaxHeight {
+			captureFormat = "bgra-direct"
+		}
+		if oldEncoder != nil {
+			if err := oldEncoder.Close(); err != nil {
+				log.Printf("[Desktop] close failed D3D11 H.264 encoder during CPU migration: %v", err)
+			}
+		}
+		if oldConverter != nil {
+			_ = oldConverter.Close()
+		}
+		log.Printf(
+			"[Desktop] H.264 GPU runtime failure migrated to CPU generation=%d encode=%dx%d bitrate=%d cause=%v",
+			generation, videoCfg.Width, videoCfg.Height, videoCfg.TargetBitrate, cause,
+		)
+		return nil
+	}
+
+	if gpuEnabled {
+		firstErr := sendD3D11Frame(firstD3D, started)
 		firstD3D.Close()
 		firstD3D = nil
+		if firstErr != nil {
+			if fallbackErr := migrateGPUToCPU(started, firstErr); fallbackErr != nil {
+				return fallbackErr
+			}
+		}
 	} else if rawAvailable {
 		if err := sendRawFrame(firstRaw, started); err != nil {
 			return err
@@ -799,7 +880,9 @@ func (h *Host) streamH264Frames(
 				err := sendD3D11Frame(frame, now)
 				frame.Close()
 				if err != nil {
-					return err
+					if fallbackErr := migrateGPUToCPU(now, err); fallbackErr != nil {
+						return fallbackErr
+					}
 				}
 				continue
 			}
@@ -883,7 +966,10 @@ func (h *Host) streamH264Frames(
 						}
 						continue
 					}
-					return captureErr
+					if fallbackErr := migrateGPUToCPU(time.Now(), captureErr); fallbackErr != nil {
+						return fallbackErr
+					}
+					continue
 				}
 				if !available || frame == nil {
 					droppedFrames++
@@ -903,7 +989,10 @@ func (h *Host) streamH264Frames(
 					)
 					if convertErr != nil {
 						frame.Close()
-						return convertErr
+						if fallbackErr := migrateGPUToCPU(time.Now(), convertErr); fallbackErr != nil {
+							return fallbackErr
+						}
+						continue
 					}
 					oldConverter := d3dConverter
 					d3dConverter = nextConverter
@@ -918,7 +1007,10 @@ func (h *Host) streamH264Frames(
 				err := sendD3D11Frame(frame, now)
 				frame.Close()
 				if err != nil {
-					return err
+					if fallbackErr := migrateGPUToCPU(time.Now(), err); fallbackErr != nil {
+						return fallbackErr
+					}
+					continue
 				}
 				captureFormat = "d3d11-nv12"
 				if err := reportStats(time.Now()); err != nil {

@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	maxControllerAudioFrames             = 8
-	maxControllerAudioConcealmentFrames  = 3
-	controllerAudioPlayoutFrames         = 2
-	defaultControllerAudioFramePeriod = 20 * time.Millisecond
-	minControllerAudioPlayoutDelay    = 20 * time.Millisecond
-	maxControllerAudioPlayoutDelay    = 80 * time.Millisecond
+	maxControllerAudioFrames            = 8
+	maxControllerAudioConcealmentFrames = 3
+	controllerAudioPlayoutFrames        = 2
+	defaultControllerAudioFramePeriod   = 20 * time.Millisecond
+	minControllerAudioPlayoutDelay      = 20 * time.Millisecond
+	maxControllerAudioPlayoutDelay      = 80 * time.Millisecond
 )
 
 type audioRuntimeCounters struct {
@@ -66,9 +66,9 @@ type DesktopAudioDiagnostics struct {
 }
 
 type AudioFrameSnapshot struct {
-	Generation uint32
-	FrameID    uint32
-	Timestamp  uint64
+	Generation  uint32
+	FrameID     uint32
+	Timestamp   uint64
 	Config      bool
 	Concealment bool
 	Data        []byte

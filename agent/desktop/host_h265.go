@@ -14,10 +14,8 @@ import (
 	"relayproxy/internal/protocol"
 )
 
-const h265ValidationCodecPreference = "h265-validation"
-
 func h265ValidationRequested(value string) bool {
-	return strings.EqualFold(strings.TrimSpace(value), h265ValidationCodecPreference)
+	return strings.EqualFold(strings.TrimSpace(value), protocol.DesktopCodecH265Validation)
 }
 
 // h265RuntimeError mirrors the H.264 generation error boundary while H.265

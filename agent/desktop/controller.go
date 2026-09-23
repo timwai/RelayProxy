@@ -253,7 +253,7 @@ func (s *ControllerSession) syncABRResolution(config protocol.DesktopVideoConfig
 func (s *ControllerSession) configureABR(config protocol.DesktopVideoConfig) {
 	s.abrMu.Lock()
 	defer s.abrMu.Unlock()
-	if config.Codec != "h264" || config.TargetBitrate <= 0 {
+	if !desktopAdaptiveVideoCodec(config.Codec) || config.TargetBitrate <= 0 {
 		s.abr = nil
 		return
 	}
@@ -432,6 +432,21 @@ func (s *ControllerSession) currentVideoConfig(ctx context.Context) (protocol.De
 	}
 }
 
+func desktopVideoMIME(codec string) string {
+	switch codec {
+	case "h264":
+		return "video/h264"
+	case "h265":
+		return "video/h265"
+	default:
+		return ""
+	}
+}
+
+func desktopAdaptiveVideoCodec(codec string) bool {
+	return codec == "h264" || codec == "h265"
+}
+
 func snapshotFromEncodedFrame(frame *desktopmedia.EncodedFrame, config protocol.DesktopVideoConfig, configured bool) (FrameSnapshot, bool) {
 	if frame == nil {
 		return FrameSnapshot{}, false
@@ -443,12 +458,17 @@ func snapshotFromEncodedFrame(frame *desktopmedia.EncodedFrame, config protocol.
 		KeyFrame:   frame.KeyFrame,
 		Data:       append([]byte(nil), frame.Data...),
 	}
-	if configured && config.Codec == "h264" {
-		snapshot.MimeType = "video/h264"
-		snapshot.Codec = config.CodecString
-		snapshot.Width = config.Width
-		snapshot.Height = config.Height
-		return snapshot, true
+	if configured {
+		if mimeType := desktopVideoMIME(config.Codec); mimeType != "" {
+			snapshot.MimeType = mimeType
+			snapshot.Codec = config.CodecString
+			snapshot.Width = config.Width
+			snapshot.Height = config.Height
+			return snapshot, true
+		}
+		if config.Codec != "" && config.Codec != "jpeg" {
+			return FrameSnapshot{}, false
+		}
 	}
 	cfg, err := jpeg.DecodeConfig(bytes.NewReader(frame.Data))
 	if err != nil {
@@ -478,8 +498,8 @@ func (s *ControllerSession) RequestResolution(ctx context.Context, width, height
 		return errors.New("Relay Desktop session is not active")
 	}
 	config := s.VideoConfigSnapshot()
-	if config.Codec != "h264" {
-		return errors.New("runtime resolution switching requires H.264")
+	if !desktopAdaptiveVideoCodec(config.Codec) {
+		return errors.New("runtime resolution switching requires H.264 or H.265")
 	}
 	maxWidth := config.MaxWidth
 	if maxWidth <= 0 {
@@ -519,7 +539,7 @@ func (s *ControllerSession) RequestIDR(ctx context.Context) error {
 }
 
 func (s *ControllerSession) acceptVideoFrame(ctx context.Context, frame *desktopmedia.EncodedFrame, config protocol.DesktopVideoConfig, configured bool) bool {
-	if !configured || config.Codec != "h264" {
+	if !configured || !desktopAdaptiveVideoCodec(config.Codec) {
 		s.recoveryMu.Lock()
 		s.recovery.Reset()
 		s.recoveryMu.Unlock()
@@ -534,7 +554,7 @@ func (s *ControllerSession) acceptVideoFrame(ctx context.Context, frame *desktop
 		cancel()
 		if err != nil {
 			s.markIDRRequestFailed()
-			log.Printf("[Desktop] request H.264 IDR after frame loss failed: %v", err)
+			log.Printf("[Desktop] request %s IDR after frame loss failed: %v", config.Codec, err)
 		}
 	}
 	return accept

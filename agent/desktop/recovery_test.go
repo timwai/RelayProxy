@@ -72,3 +72,22 @@ func TestH264RecoveryForceAndFailure(t *testing.T) {
 		t.Fatal("failed IDR request was not retryable")
 	}
 }
+
+func TestH265RecoveryUsesKeyFrameGate(t *testing.T) {
+	var state h264RecoveryState
+	config := protocol.DesktopVideoConfig{Generation: 2, Codec: "h265"}
+	accept, request := state.Observe(
+		&desktopmedia.EncodedFrame{Generation: 2, FrameID: 1},
+		config,
+	)
+	if accept || !request {
+		t.Fatalf("initial HEVC delta accept=%v request=%v", accept, request)
+	}
+	accept, request = state.Observe(
+		&desktopmedia.EncodedFrame{Generation: 2, FrameID: 2, KeyFrame: true},
+		config,
+	)
+	if !accept || request {
+		t.Fatalf("HEVC keyframe accept=%v request=%v", accept, request)
+	}
+}

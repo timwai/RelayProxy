@@ -22,6 +22,16 @@ func TestSnapshotFromEncodedFrameH264(t *testing.T) {
 	}
 }
 
+func TestSnapshotFromEncodedFrameH265(t *testing.T) {
+	frame := &desktopmedia.EncodedFrame{Generation: 4, FrameID: 9, Timestamp: 2345, KeyFrame: true, Data: []byte{0, 0, 0, 1, 0x26, 0x01}}
+	got, ok := snapshotFromEncodedFrame(frame, protocol.DesktopVideoConfig{
+		Generation: 4, Codec: "h265", CodecString: "hvc1", Width: 1920, Height: 1080,
+	}, true)
+	if !ok || got.Generation != 4 || got.MimeType != "video/h265" || got.Codec != "hvc1" || !got.KeyFrame || got.Width != 1920 {
+		t.Fatalf("snapshot=%+v ok=%v", got, ok)
+	}
+}
+
 func TestSnapshotFromEncodedFrameLegacyJPEG(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 16, 8))
 	var out bytes.Buffer
@@ -72,7 +82,7 @@ func TestLatestClipboardSkipsKnownSequence(t *testing.T) {
 	}
 }
 
-func TestConfigureABROnlyForH264(t *testing.T) {
+func TestConfigureABRForInterFrameCodecs(t *testing.T) {
 	session := &ControllerSession{
 		options: protocol.RemoteDesktopConnectOptions{Scene: protocol.DesktopSceneGaming},
 	}
@@ -89,6 +99,14 @@ func TestConfigureABROnlyForH264(t *testing.T) {
 	decision := session.abrDecision(protocol.DesktopSessionStats{LossPercent: 5})
 	if !decision.Changed || decision.TargetBitrate >= 6_000_000 {
 		t.Fatalf("H.264 was not adapted: %+v", decision)
+	}
+
+	session.configureABR(protocol.DesktopVideoConfig{
+		Codec: "h265", TargetBitrate: 6_000_000, MaxBitrate: 6_000_000,
+	})
+	decision = session.abrDecision(protocol.DesktopSessionStats{LossPercent: 5})
+	if !decision.Changed || decision.TargetBitrate >= 6_000_000 {
+		t.Fatalf("H.265 was not adapted: %+v", decision)
 	}
 }
 

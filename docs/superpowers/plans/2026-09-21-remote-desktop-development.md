@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline、GPU runtime → CPU H.264 generation 热迁移、RD3 HEVC/H.265 Media Foundation 能力探测、隐藏 HEVC encoder core 与隐藏 HEVC decoder/D3D11 NV12 core 均已合并 main；下一阶段接入 Viewer generation-aware H.265 decoder rebuild，完整 Host/Viewer H.265 链路就绪前不开放选择  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline、GPU runtime → CPU H.264 generation 热迁移、RD3 HEVC/H.265 Media Foundation 能力探测、隐藏 HEVC encoder core 与隐藏 HEVC decoder/D3D11 NV12 core 均已合并 main；当前分支接入 Controller/Windows native Viewer 的 generation-aware H.265 decoder rebuild，Host 端 H.265 generation/协商就绪前仍不开放选择  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
@@ -346,6 +346,17 @@ Windows SendInput / CF_UNICODETEXT
 - 本分支仍不开放 `NormalizeCodecPreference("h265")`、Host capability、Controller/GUI selector 或 RD/1 会话协商；下一步先在 Viewer 增加 HEVC codec string/参数集解析与 generation-aware decoder rebuild，再接 Host H.265 generation。
 
 - PR #78 已合并到 `main`，merge `ae9d25eabac7a7d5ec9398a3c7f60bbe5a695206`；Go format/vet/full test/race/benchmark、UI full regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.25 RD3 HEVC Viewer Generation（当前分支）
+
+- Controller 的压缩帧快照从 H.264-only 扩展为 codec-aware：`h264 → video/h264`、`h265 → video/h265`，保留 `CodecString`、generation、尺寸、timestamp 与 keyframe 元数据；未知已配置 codec 不再误按 JPEG 解析。
+- Controller 的 scene-aware ABR、runtime resolution control 与 keyframe/IDR loss recovery 扩展到 H.265；JPEG 等 intra/legacy 路径仍不进入这些 inter-frame 状态机。
+- Windows native viewer 新增 MIME → codec 映射，并按 codec 选择 `OpenMFH264Decoder*` 或 `OpenMFH265Decoder*`；共享 Viewer D3D11 device 优先，失败后仍回退到普通 Media Foundation decoder。
+- native viewer pipeline 现在把 codec identity 与 generation/尺寸一起作为 decoder rebuild 条件；即使尺寸不变，只要 generation 或 H.264↔H.265 发生变化，也会创建新 decoder，成功后再原子替换并关闭旧 decoder。
+- H.265 decoder 输出继续复用已合并的 NV12 CPU/D3D11 surface 渲染、GPU cursor、staging readback 和性能统计路径，不复制一套 renderer。
+- 初次打开 native viewer 与后续轮询均接受 `video/h264` / `video/h265`；decode/重建日志改为带 codec，不再写死 H.264。
+- 新增 H.265 Controller snapshot/ABR/recovery 测试，以及 Windows MIME mapping、codec-switch/same-generation rebuild 测试。
+- `NormalizeCodecPreference("h265")`、Host capability 广告和 GUI codec selector 仍保持关闭；下一步实现 Host H.265 generation（CPU + WGC D3D11 zero-copy）、HEVC codec string，并在端到端验证后再开放协商。
 
 ### 0.3 本轮进度（2026-09-22）
 

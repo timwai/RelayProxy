@@ -78,6 +78,7 @@ type nativeDesktopSession struct {
 	inputCh       chan protocol.DesktopInputEvent
 	title         string
 	generation    uint32
+	decoderCodec  string
 	decoderWidth  int
 	decoderHeight int
 
@@ -115,9 +116,25 @@ func nativeDesktopViewerConfig(title string, width, height int, inputCh chan pro
 	}
 }
 
+func nativeDesktopFrameCodec(frame protocol.RemoteDesktopFrame) string {
+	switch frame.MimeType {
+	case "video/h264":
+		return "h264"
+	case "video/h265":
+		return "h265"
+	default:
+		return ""
+	}
+}
+
+func nativeDesktopVideoFrame(frame protocol.RemoteDesktopFrame) bool {
+	return nativeDesktopFrameCodec(frame) != ""
+}
+
 func openNativeDesktopDecoder(
 	ctx context.Context,
 	native desktopviewer.Native,
+	codec string,
 	width, height int,
 ) (desktopcodec.Decoder, error) {
 	decoderConfig := desktopcodec.VideoConfig{
@@ -127,22 +144,45 @@ func openNativeDesktopDecoder(
 		TargetBitrate: 6_000_000,
 		KeyframeEvery: 2 * time.Second,
 	}
+	var (
+		openShared func(context.Context, desktopcodec.VideoConfig, bool, uintptr) (desktopcodec.Decoder, error)
+		openCPU    func(context.Context, desktopcodec.VideoConfig, bool) (desktopcodec.Decoder, error)
+	)
+	switch codec {
+	case "h264":
+		openShared = desktopcodec.OpenMFH264DecoderWithD3D11
+		openCPU = desktopcodec.OpenMFH264Decoder
+	case "h265":
+		openShared = desktopcodec.OpenMFH265DecoderWithD3D11
+		openCPU = desktopcodec.OpenMFH265Decoder
+	default:
+		return nil, fmt.Errorf("unsupported native Relay Desktop codec %q", codec)
+	}
+
 	var decoder desktopcodec.Decoder
 	var err error
 	if device := native.D3D11Device(); device != 0 {
-		decoder, err = desktopcodec.OpenMFH264DecoderWithD3D11(ctx, decoderConfig, true, device)
+		decoder, err = openShared(ctx, decoderConfig, true, device)
 		if err != nil {
-			log.Printf("[Desktop] shared-device H.264 decoder unavailable, falling back: %v", err)
-			decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
+			log.Printf("[Desktop] shared-device %s decoder unavailable, falling back: %v", codec, err)
+			decoder, err = openCPU(ctx, decoderConfig, true)
 		}
 	} else {
-		decoder, err = desktopcodec.OpenMFH264Decoder(ctx, decoderConfig, true)
+		decoder, err = openCPU(ctx, decoderConfig, true)
 	}
 	return decoder, err
 }
 
-func nativeDesktopFrameNeedsRebuild(generation uint32, width, height int, frame protocol.RemoteDesktopFrame) bool {
-	return frame.Generation != generation || frame.Width != width || frame.Height != height
+func nativeDesktopFrameNeedsRebuild(
+	generation uint32,
+	codec string,
+	width, height int,
+	frame protocol.RemoteDesktopFrame,
+) bool {
+	return frame.Generation != generation ||
+		nativeDesktopFrameCodec(frame) != codec ||
+		frame.Width != width ||
+		frame.Height != height
 }
 
 func (s *nativeDesktopSession) focusViewer() {
@@ -181,6 +221,10 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 	if s == nil || frame.Width <= 0 || frame.Height <= 0 {
 		return errors.New("invalid Relay Desktop media generation")
 	}
+	codec := nativeDesktopFrameCodec(frame)
+	if codec == "" {
+		return fmt.Errorf("unsupported Relay Desktop video MIME type %q", frame.MimeType)
+	}
 	s.mediaMu.RLock()
 	currentViewer := s.viewer
 	sameSize := s.decoderWidth == frame.Width && s.decoderHeight == frame.Height
@@ -199,12 +243,12 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 			return fmt.Errorf("reopen D3D11 viewer for generation %d: %w", frame.Generation, err)
 		}
 	}
-	nextDecoder, err = openNativeDesktopDecoder(ctx, nextViewer, frame.Width, frame.Height)
+	nextDecoder, err = openNativeDesktopDecoder(ctx, nextViewer, codec, frame.Width, frame.Height)
 	if err != nil {
 		if !sameSize && nextViewer != nil {
 			_ = nextViewer.Close()
 		}
-		return fmt.Errorf("reopen H.264 decoder for generation %d: %w", frame.Generation, err)
+		return fmt.Errorf("reopen %s decoder for generation %d: %w", codec, frame.Generation, err)
 	}
 
 	s.mediaMu.Lock()
@@ -213,6 +257,7 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 	s.viewer = nextViewer
 	s.decoder = nextDecoder
 	s.generation = frame.Generation
+	s.decoderCodec = codec
 	s.decoderWidth = frame.Width
 	s.decoderHeight = frame.Height
 	s.gpuCursor = nextViewer.SupportsGPUCursor() && nextDecoder.Backend() == "media-foundation-d3d11-zero-copy"
@@ -253,8 +298,9 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		return nil, errors.New("Relay Desktop session is not connected")
 	}
 	frame := a.bridge.GetRemoteDesktopFrame()
-	if frame.Sequence == 0 || frame.MimeType != "video/h264" || frame.Width <= 0 || frame.Height <= 0 || len(frame.Data) == 0 {
-		return nil, errors.New("H.264 frame is not ready; wait for the remote picture and retry")
+	codec := nativeDesktopFrameCodec(frame)
+	if frame.Sequence == 0 || codec == "" || frame.Width <= 0 || frame.Height <= 0 || len(frame.Data) == 0 {
+		return nil, errors.New("H.264/H.265 frame is not ready; wait for the remote picture and retry")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -270,11 +316,11 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		return nil, fmt.Errorf("open D3D11 viewer: %w", err)
 	}
 
-	decoder, err := openNativeDesktopDecoder(ctx, native, frame.Width, frame.Height)
+	decoder, err := openNativeDesktopDecoder(ctx, native, codec, frame.Width, frame.Height)
 	if err != nil {
 		cancel()
 		_ = native.Close()
-		return nil, fmt.Errorf("open Media Foundation H.264 decoder: %w", err)
+		return nil, fmt.Errorf("open Media Foundation %s decoder: %w", codec, err)
 	}
 
 	session := &nativeDesktopSession{
@@ -284,6 +330,7 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		inputCh:       inputCh,
 		title:         title,
 		generation:    frame.Generation,
+		decoderCodec:  codec,
 		decoderWidth:  frame.Width,
 		decoderHeight: frame.Height,
 		gpuCursor:     native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
@@ -361,7 +408,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 
 		cursorChanged := s.refreshCursor(owner)
 		frame := owner.bridge.GetRemoteDesktopFrame()
-		frameChanged := frame.Sequence != 0 && frame.MimeType == "video/h264" &&
+		frameChanged := frame.Sequence != 0 && nativeDesktopVideoFrame(frame) &&
 			(frame.Sequence != lastSequence || frame.Generation != lastGeneration)
 		if !frameChanged {
 			if cursorChanged && !s.gpuFrameActive && len(s.baseBGRA) > 0 {
@@ -378,7 +425,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			continue
 		}
 
-		if nativeDesktopFrameNeedsRebuild(s.generation, s.decoderWidth, s.decoderHeight, frame) {
+		if nativeDesktopFrameNeedsRebuild(s.generation, s.decoderCodec, s.decoderWidth, s.decoderHeight, frame) {
 			if !frame.KeyFrame {
 				if time.Since(lastRecovery) >= 500*time.Millisecond {
 					lastRecovery = time.Now()
@@ -398,7 +445,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			}
 			converted = nil
 			perf = newNativeViewerPerf(time.Now())
-			log.Printf("[Desktop] native viewer switched generation=%d size=%dx%d decoder=%s", frame.Generation, frame.Width, frame.Height, s.decoder.Backend())
+			log.Printf("[Desktop] native viewer switched generation=%d codec=%s size=%dx%d decoder=%s", frame.Generation, s.decoderCodec, frame.Width, frame.Height, s.decoder.Backend())
 		}
 
 		decodeStarted := time.Now()
@@ -412,7 +459,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				}
 			}
 			_ = s.decoder.Flush(ctx)
-			log.Printf("[Desktop] native viewer H.264 decode failed: %v", err)
+			log.Printf("[Desktop] native viewer %s decode failed: %v", s.decoderCodec, err)
 			continue
 		}
 		perf.observeDecode(len(decoded), decodeElapsed)

@@ -4,7 +4,7 @@
 
 ## Phase 1：Android 作为网络出口
 
-状态：**首版功能与 UI 已实现，CI 构建验证中 / 待真机验收**
+状态：**首版功能与 UI 已实现，GitHub Actions 构建已通过 / 待真机验收**
 
 - [x] Android 独立工程骨架
 - [x] gomobile Go Core

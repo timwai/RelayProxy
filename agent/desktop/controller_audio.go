@@ -328,21 +328,23 @@ func (s *ControllerSession) NextAudioFrame(ctx context.Context) (AudioFrameSnaps
 		}
 
 		timer := time.NewTimer(wait)
+		stopTimer := func() {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}
 		select {
 		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
+			stopTimer()
 			return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, ctx.Err()
 		case <-done:
-			if !timer.Stop() {
-				<-timer.C
-			}
+			stopTimer()
 			return AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop session is closed")
 		case <-notify:
-			if !timer.Stop() {
-				<-timer.C
-			}
+			stopTimer()
 		case <-timer.C:
 		}
 	}

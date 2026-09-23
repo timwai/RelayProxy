@@ -44,6 +44,14 @@ type windowsFrameStream interface {
 	Close() error
 }
 
+// windowsFrameRateController is intentionally optional: capture backends that
+// own their producer cadence (currently WGC) can reduce work when session ABR
+// lowers FPS. Backends without runtime rate control remain governed by the Host
+// send ticker and keep their existing behavior.
+type windowsFrameRateController interface {
+	SetFrameRateLimit(int) error
+}
+
 type windowsFrameStreamFactory interface {
 	Open(
 		context.Context,

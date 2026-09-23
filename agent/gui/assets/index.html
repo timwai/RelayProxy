@@ -781,7 +781,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”仍优先 DXGI 并按现有策略回退 GDI，显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 

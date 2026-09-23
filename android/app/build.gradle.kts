@@ -4,13 +4,6 @@ plugins {
 }
 
 val relayAbi = providers.gradleProperty("relayAbi").orNull
-val generatedBrandRes = layout.buildDirectory.dir("generated/relayproxyBrandRes")
-val prepareBrandResources = tasks.register<Copy>("prepareBrandResources") {
-    from(rootProject.file("../assets/brand/icon-256.png"))
-    into(generatedBrandRes.map { it.dir("drawable-nodpi") })
-    rename { "relayproxy_logo.png" }
-}
-
 android {
     namespace = "com.relayproxy.android"
     compileSdk = 35
@@ -27,10 +20,6 @@ android {
                 abiFilters += relayAbi
             }
         }
-    }
-
-    sourceSets {
-        getByName("main").res.srcDir(generatedBrandRes)
     }
 
     buildTypes {
@@ -52,12 +41,6 @@ android {
         jniLibs {
             useLegacyPackaging = true
         }
-    }
-}
-
-tasks.configureEach {
-    if (name.startsWith("merge") && name.endsWith("Resources")) {
-        dependsOn(prepareBrandResources)
     }
 }
 

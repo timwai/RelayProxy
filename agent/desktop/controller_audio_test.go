@@ -13,7 +13,7 @@ import (
 func testAudioConfig(generation uint32) protocol.DesktopAudioConfig {
 	return protocol.DesktopAudioConfig{
 		Generation:      generation,
-		Codec:           "pcm_s16le",
+		Codec:           protocol.DesktopAudioCodecPCMS16LE,
 		SampleRate:      48_000,
 		Channels:        2,
 		BitsPerSample:   16,
@@ -26,6 +26,21 @@ func newAudioControllerTestSession() *ControllerSession {
 	return &ControllerSession{
 		done:        make(chan struct{}),
 		audioNotify: make(chan struct{}, 1),
+	}
+}
+
+func TestControllerAudioEnabledDefaultsOnAndHonorsExplicitDisable(t *testing.T) {
+	if !newAudioControllerTestSession().AudioEnabled() {
+		t.Fatal("audio should default to enabled")
+	}
+	disabled := false
+	session := newAudioControllerTestSession()
+	session.options.Audio = &disabled
+	if session.AudioEnabled() {
+		t.Fatal("explicit Audio=false was ignored")
+	}
+	if (*ControllerSession)(nil).AudioEnabled() {
+		t.Fatal("nil session reported audio enabled")
 	}
 }
 

@@ -355,10 +355,10 @@ func TestSessionDiagnosticsReportCarriesCurrentAudio(t *testing.T) {
 	start := time.Unix(500, 0)
 	recorder := newSessionDiagnosticsRecorder("target-audio", protocol.RemoteDesktopConnectOptions{}, start)
 	audio := DesktopAudioDiagnostics{
-		Enabled:       true,
-		Config:        testAudioConfig(3),
-		QueueFrames:   2,
-		QueueCapacity: maxControllerAudioFrames,
+		Enabled:        true,
+		Config:         testAudioConfig(3),
+		QueueFrames:    2,
+		QueueCapacity:  maxControllerAudioFrames,
 		ReceivedFrames: 7,
 		ConsumedFrames: 5,
 	}

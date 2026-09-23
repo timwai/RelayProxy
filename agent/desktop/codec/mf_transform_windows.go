@@ -559,8 +559,15 @@ func OpenMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware bo
 	return openMFH264Transform(ctx, cfg, preferHardware, true)
 }
 
-func openMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware, allowAsync bool) (*MFH264Transform, error) {
-	return openMFH264TransformWithDevice(ctx, cfg, preferHardware, allowAsync, 0)
+func openMFH264Transform(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	allowAsync bool,
+) (*MFH264Transform, error) {
+	return openMFVideoTransformWithDevice(
+		ctx, cfg, preferHardware, allowAsync, 0, mfH264EncoderSpec,
+	)
 }
 
 func openMFH264TransformWithDevice(
@@ -570,16 +577,33 @@ func openMFH264TransformWithDevice(
 	allowAsync bool,
 	device uintptr,
 ) (*MFH264Transform, error) {
+	return openMFVideoTransformWithDevice(
+		ctx, cfg, preferHardware, allowAsync, device, mfH264EncoderSpec,
+	)
+}
+
+func openMFVideoTransformWithDevice(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	allowAsync bool,
+	device uintptr,
+	spec mfVideoEncoderSpec,
+) (*MFH264Transform, error) {
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if spec.OutputSubtype == nil || spec.Codec == "" {
+		return nil, fmt.Errorf("%w: invalid Media Foundation encoder spec", ErrEncoderUnavailable)
+	}
 	initCh := make(chan mfTransformInit, 1)
 	session := &MFH264Transform{
+		spec:     spec,
 		commands: make(chan mfTransformCommand),
 		done:     make(chan struct{}),
 	}
-	go session.run(cfg, preferHardware, allowAsync, device, initCh)
+	go session.run(cfg, preferHardware, allowAsync, device, spec, initCh)
 
 	select {
 	case <-ctx.Done():
@@ -601,6 +625,7 @@ func (s *MFH264Transform) run(
 	preferHardware bool,
 	allowAsync bool,
 	device uintptr,
+	spec mfVideoEncoderSpec,
 	initCh chan<- mfTransformInit,
 ) {
 	runtime.LockOSThread()
@@ -625,13 +650,13 @@ func (s *MFH264Transform) run(
 	if device != 0 {
 		graphics, err = createMFDecoderD3D11FromDevice(device)
 		if err != nil {
-			initCh <- mfTransformInit{err: fmt.Errorf("create D3D11 encoder manager: %w", err)}
+			initCh <- mfTransformInit{err: fmt.Errorf("create D3D11 %s encoder manager: %w", spec.Label, err)}
 			return
 		}
 		defer graphics.Close()
 	}
-	transform, info, err := openConfiguredH264Transform(
-		context.Background(), cfg, preferHardware, allowAsync, graphics,
+	transform, info, err := openConfiguredVideoTransform(
+		context.Background(), cfg, preferHardware, allowAsync, graphics, spec,
 	)
 	if err != nil {
 		initCh <- mfTransformInit{err: err}
@@ -639,7 +664,9 @@ func (s *MFH264Transform) run(
 	}
 	defer releaseIUnknown(transform)
 	if device != 0 && !info.D3D11Aware {
-		initCh <- mfTransformInit{err: fmt.Errorf("%w: no D3D11-aware H.264 encoder MFT", ErrEncoderUnavailable)}
+		initCh <- mfTransformInit{err: fmt.Errorf(
+			"%w: no D3D11-aware %s encoder MFT", ErrEncoderUnavailable, spec.Label,
+		)}
 		return
 	}
 
@@ -654,7 +681,7 @@ func (s *MFH264Transform) run(
 		}
 		defer eventPump.Close()
 		eventCh = eventPump.events
-		asyncState = newMFAsyncState(transform, info.Config)
+		asyncState = newMFAsyncState(transform, info.Config, spec.Codec)
 	}
 	initCh <- mfTransformInit{info: info}
 
@@ -686,18 +713,20 @@ func (s *MFH264Transform) run(
 				return
 			}
 			if command.forceIDR {
-				command.reply <- mfTransformResult{err: forceH264IDR(transform)}
+				command.reply <- mfTransformResult{err: forceVideoKeyFrame(transform)}
 				continue
 			}
 			if command.bitrate != nil {
-				command.reply <- mfTransformResult{err: setH264MeanBitrate(transform, *command.bitrate)}
+				command.reply <- mfTransformResult{err: setVideoMeanBitrate(transform, *command.bitrate)}
 				continue
 			}
 			if command.input != nil {
 				if asyncState != nil {
 					asyncState.enqueue(command)
 				} else {
-					packets, err := processSyncH264Frame(transform, info.Config, *command.input)
+					packets, err := processSyncVideoFrame(
+						transform, spec.Codec, *command.input,
+					)
 					command.reply <- mfTransformResult{packets: packets, err: err}
 				}
 				continue

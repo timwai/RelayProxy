@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	desktopaudio "relayproxy/agent/desktop/audio"
@@ -41,7 +42,7 @@ func (h *Host) desktopAudioAvailable() bool {
 	return ok && provider.DesktopAudioAvailable()
 }
 
-func (h *Host) streamSessionAudio(ctx context.Context, conn *desktopmedia.MediaConn) error {
+func (h *Host) streamSessionAudio(ctx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions) error {
 	if h == nil || conn == nil || h.audioOpen == nil {
 		return errors.New("Relay Desktop audio capture is unavailable")
 	}
@@ -55,15 +56,40 @@ func (h *Host) streamSessionAudio(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	defer capture.Close()
 
+	codec := strings.TrimSpace(strings.ToLower(options.AudioCodec))
+	if codec == "" {
+		codec = protocol.DesktopAudioCodecPCMS16LE
+	}
+	var opusEncoder *desktopaudio.OpusEncoder
+	targetBitrate := cfg.BytesPerSecond() * 8
+	switch codec {
+	case protocol.DesktopAudioCodecPCMS16LE:
+	case protocol.DesktopAudioCodecOpus:
+		opusCfg := desktopaudio.OpusConfig{
+			SampleRate:      cfg.SampleRate,
+			Channels:        cfg.Channels,
+			BitsPerSample:   cfg.BitsPerSample,
+			FrameDurationMs: int(duration / time.Millisecond),
+			Bitrate:         desktopaudio.DefaultOpusBitrate,
+		}
+		opusEncoder, err = desktopaudio.NewOpusEncoder(opusCfg)
+		if err != nil {
+			return fmt.Errorf("create Relay Desktop Opus encoder: %w", err)
+		}
+		targetBitrate = opusEncoder.Config().Bitrate
+	default:
+		return fmt.Errorf("unsupported Relay Desktop audio codec %q", codec)
+	}
+
 	generation := uint32(1)
 	audioConfig := protocol.DesktopAudioConfig{
 		Generation:      generation,
-		Codec:           protocol.DesktopAudioCodecPCMS16LE,
+		Codec:           codec,
 		SampleRate:      cfg.SampleRate,
 		Channels:        cfg.Channels,
 		BitsPerSample:   cfg.BitsPerSample,
 		FrameDurationMs: int(duration / time.Millisecond),
-		TargetBitrate:   cfg.BytesPerSecond() * 8,
+		TargetBitrate:   targetBitrate,
 	}
 	if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 		Type:        protocol.DesktopSessionAudioConfig,
@@ -91,6 +117,13 @@ func (h *Host) streamSessionAudio(ctx context.Context, conn *desktopmedia.MediaC
 		if err := cfg.ValidatePayload(data); err != nil {
 			return err
 		}
+		mediaData := data
+		if opusEncoder != nil {
+			mediaData, err = opusEncoder.EncodePCM(data)
+			if err != nil {
+				return err
+			}
+		}
 		frame := desktopmedia.EncodedFrame{
 			Type:       desktopmedia.MediaPacketAudio,
 			SessionID:  sessionID,
@@ -98,7 +131,7 @@ func (h *Host) streamSessionAudio(ctx context.Context, conn *desktopmedia.MediaC
 			Generation: generation,
 			FrameID:    frameID,
 			Timestamp:  uint64(time.Since(started).Microseconds()),
-			Data:       data,
+			Data:       mediaData,
 		}
 		packets, next, err := desktopmedia.PacketizeMediaFrame(frame, h.cfg.PacketSize, sequence)
 		if err != nil {

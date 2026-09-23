@@ -500,3 +500,33 @@ func TestOpusPacketLossFlowsThroughReassemblerToPLC(t *testing.T) {
 		t.Fatalf("audio diagnostics=%+v", got)
 	}
 }
+
+func TestStreamSessionAudioAppliesOpusLossUpdate(t *testing.T) {
+	_, _, frameBytes, err := desktopaudio.NormalizeFrameDuration(hostAudioPCMConfig, hostAudioFrameDuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture := &fakeAudioCapture{
+		frames: [][]byte{make([]byte, frameBytes)},
+		endErr: io.EOF,
+	}
+	host := &Host{
+		cfg: DefaultHostConfig(),
+		audioOpen: func(context.Context, desktopaudio.PCMConfig, time.Duration) (desktopaudio.Capture, error) {
+			return capture, nil
+		},
+	}
+	stream := &audioTestStream{}
+	path := &audioRecordingDatagramPath{}
+	conn := desktopmedia.NewMediaConn(nil, stream)
+	conn.SetDatagramPath(path)
+	lossUpdates := make(chan int, 1)
+	lossUpdates <- 101
+
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
+		AudioCodec: protocol.DesktopAudioCodecOpus,
+	}, lossUpdates)
+	if err == nil {
+		t.Fatal("invalid Opus loss update was ignored")
+	}
+}

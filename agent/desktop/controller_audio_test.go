@@ -170,3 +170,85 @@ func TestNextAudioFrameRespectsContextCancellation(t *testing.T) {
 		t.Fatalf("error=%v want deadline exceeded", err)
 	}
 }
+
+func TestAudioDiagnosticsTrackQueueDropsAndConsumption(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testAudioConfig(1)) {
+		t.Fatal("audio config rejected")
+	}
+	for i := 1; i <= maxControllerAudioFrames+2; i++ {
+		if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+			Type:       desktopmedia.MediaPacketAudio,
+			SessionID:  1,
+			StreamID:   desktopmedia.MediaStreamAudioID,
+			Generation: 1,
+			FrameID:    uint32(i),
+			Timestamp:  uint64(i * 20_000),
+			Data:       []byte{byte(i), 0, byte(i), 0},
+		}) {
+			t.Fatalf("enqueue frame %d failed", i)
+		}
+	}
+	before := session.AudioDiagnosticsSnapshot()
+	if !before.Enabled || before.Config.Generation != 1 {
+		t.Fatalf("audio diagnostics config=%+v", before)
+	}
+	if before.QueueFrames != maxControllerAudioFrames ||
+		before.QueueCapacity != maxControllerAudioFrames ||
+		before.ReceivedFrames != maxControllerAudioFrames+2 ||
+		before.ReceivedBytes != uint64((maxControllerAudioFrames+2)*4) ||
+		before.QueueDroppedFrames != 2 ||
+		before.ConsumedFrames != 0 ||
+		before.LastFrameID != maxControllerAudioFrames+2 ||
+		before.LastMediaTimestampUS != uint64((maxControllerAudioFrames+2)*20_000) ||
+		before.LastReceivedAtUnixMs == 0 {
+		t.Fatalf("audio diagnostics before consume=%+v", before)
+	}
+
+	frame, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.FrameID != 3 {
+		t.Fatalf("consumed frame=%d want=3", frame.FrameID)
+	}
+	after := session.AudioDiagnosticsSnapshot()
+	if after.QueueFrames != maxControllerAudioFrames-1 ||
+		after.ConsumedFrames != 1 ||
+		after.ConsumedBytes != 4 ||
+		after.LastConsumedAtUnixMs == 0 {
+		t.Fatalf("audio diagnostics after consume=%+v", after)
+	}
+}
+
+func TestAudioDiagnosticsTrackRejectedAndGenerationDiscardedFrames(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testAudioConfig(1)) {
+		t.Fatal("audio config rejected")
+	}
+	if session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+		Type:       desktopmedia.MediaPacketAudio,
+		StreamID:   desktopmedia.MediaStreamAudioID,
+		Generation: 2,
+		FrameID:    1,
+		Data:       []byte{1, 0, 1, 0},
+	}) {
+		t.Fatal("future generation frame was accepted")
+	}
+	if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+		Type:       desktopmedia.MediaPacketAudio,
+		StreamID:   desktopmedia.MediaStreamAudioID,
+		Generation: 1,
+		FrameID:    2,
+		Data:       []byte{2, 0, 2, 0},
+	}) {
+		t.Fatal("valid generation frame was rejected")
+	}
+	if !session.applyAudioConfig(testAudioConfig(2)) {
+		t.Fatal("generation 2 config rejected")
+	}
+	got := session.AudioDiagnosticsSnapshot()
+	if got.RejectedFrames != 1 || got.GenerationDiscardedFrames != 1 || got.QueueFrames != 0 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}

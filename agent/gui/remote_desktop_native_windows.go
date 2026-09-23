@@ -680,18 +680,29 @@ func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) 
 			log.Printf("[Desktop] native audio generation=%d codec=%s format=%dHz/%dch/%dbit bitrate=%d",
 				config.Generation, config.Codec, config.SampleRate, config.Channels, config.BitsPerSample, config.TargetBitrate)
 		}
-		if len(frame.Data) == 0 {
+		var pcmData []byte
+		switch {
+		case frame.Concealment:
+			if opusDecoder == nil {
+				continue
+			}
+			pcmData, err = opusDecoder.DecodePLC()
+			if err != nil {
+				log.Printf("[Desktop] Opus PLC failed generation=%d frame=%d: %v",
+					frame.Generation, frame.FrameID, err)
+				continue
+			}
+		case len(frame.Data) == 0:
 			continue
-		}
-
-		pcmData := frame.Data
-		if opusDecoder != nil {
+		case opusDecoder != nil:
 			pcmData, err = opusDecoder.DecodePacket(frame.Data)
 			if err != nil {
 				log.Printf("[Desktop] Opus decode failed generation=%d frame=%d: %v",
 					frame.Generation, frame.FrameID, err)
 				continue
 			}
+		default:
+			pcmData = frame.Data
 		}
 		if validateErr := pcm.ValidatePayload(pcmData); validateErr != nil {
 			log.Printf("[Desktop] invalid native PCM frame generation=%d frame=%d: %v",

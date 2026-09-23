@@ -45,7 +45,7 @@ type wgcFrameStream struct {
 	frameReady             chan struct{}
 	closedReady            chan struct{}
 	frameArrivedHandler    *winrtcapture.TypedEventHandlerOfDirect3D11CaptureFramePoolAndObject
-	frameArrivedToken      winrtruntime.EventRegistrationToken
+	frameArrivedToken      systemwinrt.EventRegistrationToken
 	frameArrivedRegistered bool
 
 	staging       *graphicsdirect3d11.ID3D11Texture2D
@@ -264,7 +264,7 @@ func (s *wgcFrameStream) registerFrameArrived() error {
 		return screencapture.ErrBackendUnavailable
 	}
 	handler, err := winrtcapture.NewTypedEventHandlerOfDirect3D11CaptureFramePoolAndObject(
-		func(_ *winrtcapture.IDirect3D11CaptureFramePool, _ *winrtruntime.IInspectable) {
+		func(_ *winrtcapture.IDirect3D11CaptureFramePool, _ *systemwinrt.IInspectable) {
 			signalWGCFrameReady(s.frameReady)
 		},
 	)

@@ -114,6 +114,28 @@ func (f RawFrame) Validate() error {
 	return nil
 }
 
+type D3D11EncodeFrame struct {
+	Resource    uintptr
+	Subresource uint32
+	Width       int
+	Height      int
+	Timestamp   time.Duration
+}
+
+func (f D3D11EncodeFrame) Validate() error {
+	if f.Resource == 0 {
+		return fmt.Errorf("%w: D3D11 resource is nil", ErrInvalidFrame)
+	}
+	if f.Width <= 0 || f.Height <= 0 || f.Width%2 != 0 || f.Height%2 != 0 {
+		return fmt.Errorf("%w: D3D11 NV12 frames require positive even dimensions", ErrInvalidFrame)
+	}
+	return nil
+}
+
+type D3D11Encoder interface {
+	EncodeD3D11(context.Context, D3D11EncodeFrame) ([]EncodedPacket, error)
+}
+
 type EncodedPacket struct {
 	Codec     string
 	Data      []byte

@@ -82,8 +82,6 @@ func openWGCFrameStream(
 	if display.ID == 0 {
 		return nil, errors.New("WGC capture requires a concrete Windows display")
 	}
-	_ = maxFPS
-
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if err := winrtruntime.Initialize(); err != nil {
@@ -91,7 +89,7 @@ func openWGCFrameStream(
 	}
 
 	stream := &wgcFrameStream{}
-	if err := stream.initialize(display); err != nil {
+	if err := stream.initialize(display, maxFPS); err != nil {
 		_ = stream.closeLocked()
 		return nil, err
 	}
@@ -117,7 +115,7 @@ func wgcCast[T any](obj *win32.IUnknown) *T {
 	return (*T)(unsafe.Pointer(obj))
 }
 
-func (s *wgcFrameStream) initialize(display screencapture.Display) error {
+func (s *wgcFrameStream) initialize(display screencapture.Display, maxFPS int) error {
 	var selectedLevel graphicsdirect3d.D3D_FEATURE_LEVEL
 	if err := graphicsdirect3d11.D3D11CreateDevice(
 		nil,
@@ -231,10 +229,43 @@ func (s *wgcFrameStream) initialize(display screencapture.Display) error {
 	}
 	session2.Release()
 
+	s.configureFrameRateLimit(maxFPS)
+
 	if err := s.session.StartCapture(); err != nil {
 		return fmt.Errorf("WGC start capture: %w", err)
 	}
 	return nil
+}
+
+func wgcMinUpdateInterval(maxFPS int) winrtfoundation.TimeSpan {
+	if maxFPS <= 0 {
+		return winrtfoundation.TimeSpan{}
+	}
+	interval := time.Second / time.Duration(maxFPS)
+	ticks := interval / (100 * time.Nanosecond)
+	if ticks < 1 {
+		ticks = 1
+	}
+	return winrtfoundation.TimeSpan{Duration: int64(ticks)}
+}
+
+func (s *wgcFrameStream) configureFrameRateLimit(maxFPS int) {
+	interval := wgcMinUpdateInterval(maxFPS)
+	if s == nil || s.session == nil || interval.Duration <= 0 {
+		return
+	}
+	session5, err := wgcQueryInterface[winrtcapture.IGraphicsCaptureSession5](
+		s.session,
+		&winrtcapture.IID_IGraphicsCaptureSession5,
+	)
+	if err != nil {
+		return
+	}
+	defer session5.Release()
+	// Session5 is optional on older Windows builds. Treat the frame-rate cap
+	// as an efficiency hint: WGC remains usable even when this property is
+	// unavailable or rejected by the runtime.
+	_ = session5.SetMinUpdateInterval(interval)
 }
 
 func (s *wgcFrameStream) Backend() protocol.DesktopCaptureBackend {

@@ -645,6 +645,7 @@ func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) 
 			if player != nil {
 				_ = player.Close()
 				player = nil
+			}
 			opusDecoder = nil
 
 			switch config.Codec {

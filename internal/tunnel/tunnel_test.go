@@ -14,7 +14,6 @@ import (
 	"net"
 	"testing"
 	"time"
-
 )
 
 // generateSelfSignedCert generates an in-memory TLS certificate for testing

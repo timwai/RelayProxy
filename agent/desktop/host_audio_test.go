@@ -60,6 +60,7 @@ func (s *audioTestStream) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 func (s *audioTestStream) Close() error                       { return nil }
+func (s *audioTestStream) CloseWrite() error                  { return nil }
 func (s *audioTestStream) SetDeadline(time.Time) error        { return nil }
 func (s *audioTestStream) SetReadDeadline(time.Time) error    { return nil }
 func (s *audioTestStream) SetWriteDeadline(time.Time) error   { return nil }

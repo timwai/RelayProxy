@@ -393,6 +393,159 @@ func (s *wgcFrameStream) WaitFrame(ctx context.Context) (windowsCaptureFrame, er
 	}
 }
 
+func (s *wgcFrameStream) refreshD3D11Frame() (*D3D11CaptureFrame, bool, error) {
+	if s == nil || s.closed {
+		return nil, false, screencapture.ErrBackendUnavailable
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := winrtruntime.Initialize(); err != nil {
+		s.fail(err)
+		return nil, false, err
+	}
+	frame, fresh, err := s.captureD3D11Locked()
+	if err != nil {
+		s.fail(err)
+		return nil, false, err
+	}
+	return frame, fresh, nil
+}
+
+func (s *wgcFrameStream) WaitD3D11Frame(ctx context.Context) (*D3D11CaptureFrame, error) {
+	if s == nil || s.closed {
+		return nil, screencapture.ErrBackendUnavailable
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		frame, fresh, err := s.refreshD3D11Frame()
+		if err != nil {
+			return nil, err
+		}
+		if fresh && frame != nil {
+			return frame, nil
+		}
+		if s.lastErr != nil {
+			return nil, s.lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-s.closedReady:
+			return nil, screencapture.ErrBackendUnavailable
+		case <-s.frameReady:
+		}
+	}
+}
+
+func (s *wgcFrameStream) captureD3D11Locked() (*D3D11CaptureFrame, bool, error) {
+	if s.pool == nil || s.device == nil {
+		return nil, false, screencapture.ErrBackendUnavailable
+	}
+	var latest *winrtcapture.IDirect3D11CaptureFrame
+	for {
+		frame, err := s.pool.TryGetNextFrame()
+		if err != nil {
+			if latest != nil {
+				latest.Release()
+			}
+			return nil, false, fmt.Errorf("WGC get next D3D11 frame: %w", err)
+		}
+		if frame == nil {
+			break
+		}
+		if latest != nil {
+			latest.Release()
+		}
+		latest = frame
+	}
+	if latest == nil {
+		return nil, false, nil
+	}
+	defer latest.Release()
+
+	size, err := latest.ContentSize()
+	if err != nil {
+		return nil, false, fmt.Errorf("WGC read D3D11 frame content size: %w", err)
+	}
+	if size.Width <= 0 || size.Height <= 0 {
+		return nil, false, fmt.Errorf("WGC D3D11 frame has invalid size %dx%d", size.Width, size.Height)
+	}
+
+	surface, err := latest.Surface()
+	if err != nil {
+		return nil, false, fmt.Errorf("WGC get D3D11 surface: %w", err)
+	}
+	if surface == nil {
+		return nil, false, errors.New("WGC D3D11 frame surface is nil")
+	}
+	defer surface.Release()
+
+	access, err := wgcQueryInterface[win32direct3d11.IDirect3DDxgiInterfaceAccess](
+		surface,
+		&win32direct3d11.IID_IDirect3DDxgiInterfaceAccess,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("WGC D3D11 surface query DXGI access: %w", err)
+	}
+	defer access.Release()
+
+	var textureUnknown *win32.IUnknown
+	if err := access.GetInterface(&graphicsdirect3d11.IID_ID3D11Texture2D, &textureUnknown); err != nil {
+		return nil, false, fmt.Errorf("WGC get D3D11 texture: %w", err)
+	}
+	if textureUnknown == nil {
+		return nil, false, errors.New("WGC D3D11 texture is nil")
+	}
+	texture := wgcCast[graphicsdirect3d11.ID3D11Texture2D](textureUnknown)
+
+	var desc graphicsdirect3d11.D3D11_TEXTURE2D_DESC
+	texture.GetDesc(&desc)
+	if desc.Format != graphicsdxgicommon.DXGI_FORMAT_B8G8R8A8_UNORM {
+		texture.Release()
+		return nil, false, fmt.Errorf("WGC D3D11 texture format=%v want BGRA8", desc.Format)
+	}
+	if size.Width > int32(desc.Width) || size.Height > int32(desc.Height) {
+		texture.Release()
+		return nil, false, fmt.Errorf(
+			"WGC D3D11 content %dx%d exceeds texture %dx%d",
+			size.Width, size.Height, desc.Width, desc.Height,
+		)
+	}
+
+	if size != s.poolSize {
+		if err := s.pool.Recreate(
+			s.winrtDevice,
+			winrtdirectx.DirectXPixelFormatB8G8R8A8UIntNormalized,
+			wgcFramePoolBuffers,
+			size,
+		); err != nil {
+			texture.Release()
+			return nil, false, fmt.Errorf(
+				"WGC recreate D3D11 frame pool for %dx%d: %w", size.Width, size.Height, err,
+			)
+		}
+		s.poolSize = size
+	}
+
+	now := time.Now()
+	s.sequence++
+	s.at = now
+	s.lastErr = nil
+	return &D3D11CaptureFrame{
+		Device:      uintptr(unsafe.Pointer(s.device)),
+		Resource:    uintptr(unsafe.Pointer(texture)),
+		Subresource: 0,
+		Width:       int(size.Width),
+		Height:      int(size.Height),
+		At:          now,
+		release: func() {
+			texture.Release()
+		},
+	}, true, nil
+}
+
 func (s *wgcFrameStream) refreshLocked() (bool, error) {
 	if s.pool == nil {
 		return false, screencapture.ErrBackendUnavailable

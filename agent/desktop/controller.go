@@ -330,7 +330,13 @@ func (s *ControllerSession) abrLoop(ctx context.Context) {
 			decision := s.abrDecision(s.stats.AdaptationSnapshot(now))
 			config := s.VideoConfigSnapshot()
 			if s.diagnostics != nil {
-				s.diagnostics.Record(now, config, s.stats.DiagnosticsSnapshot(now), decision)
+				s.diagnostics.Record(
+					now,
+					config,
+					s.stats.DiagnosticsSnapshot(now),
+					s.AudioDiagnosticsSnapshot(),
+					decision,
+				)
 			}
 			if !decision.Changed {
 				continue
@@ -709,7 +715,12 @@ func (s *ControllerSession) Diagnostics() DesktopDiagnosticsReport {
 			stats.Path = path
 		}
 	}
-	return s.diagnostics.Report(now, s.VideoConfigSnapshot(), stats)
+	return s.diagnostics.Report(
+		now,
+		s.VideoConfigSnapshot(),
+		stats,
+		s.AudioDiagnosticsSnapshot(),
+	)
 }
 
 func (s *ControllerSession) UpdateViewerStats(stats protocol.DesktopSessionStats) {

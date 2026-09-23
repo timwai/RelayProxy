@@ -32,6 +32,38 @@ type RawCaptureSource interface {
 	CaptureRaw(context.Context) (desktopcodec.RawFrame, bool, error)
 }
 
+type D3D11CaptureFrame struct {
+	Device      uintptr
+	Resource    uintptr
+	Subresource uint32
+	Width       int
+	Height      int
+	Timestamp   time.Duration
+
+	releaseOnce sync.Once
+	release     func()
+}
+
+func (f *D3D11CaptureFrame) Valid() bool {
+	return f != nil && f.Device != 0 && f.Resource != 0 &&
+		f.Width > 0 && f.Height > 0 && f.Width%2 == 0 && f.Height%2 == 0
+}
+
+func (f *D3D11CaptureFrame) Close() {
+	if f == nil {
+		return
+	}
+	f.releaseOnce.Do(func() {
+		if f.release != nil {
+			f.release()
+		}
+	})
+}
+
+type D3D11CaptureSource interface {
+	CaptureD3D11(context.Context) (*D3D11CaptureFrame, bool, error)
+}
+
 // CaptureFPSController is an optional capture-side rate control hook. The Host
 // still owns its send ticker; backends such as WGC can additionally lower their
 // producer cadence when ABR reduces the session FPS, avoiding frames that would

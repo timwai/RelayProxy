@@ -47,3 +47,9 @@ Thumbs.db
 .superpowers/
 .workbuddy/
 .smoke/
+
+# Android / Gradle / gomobile
+/android/.gradle/
+/android/**/build/
+/android/local.properties
+/android/app/libs/*.aar

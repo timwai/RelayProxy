@@ -1,0 +1,75 @@
+name: Android Client
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/android-client-exit
+    paths:
+      - "android/**"
+      - "mobile/androidcore/**"
+      - "agent/exit/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/android.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "mobile/androidcore/**"
+      - "agent/exit/**"
+      - "internal/**"
+      - "go.mod"
+      - "go.sum"
+
+jobs:
+  debug-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install gomobile
+        run: |
+          # Current gomobile requires x/mobile to be present in the module graph.
+          # Keep this build-only tool dependency out of RelayProxy's runtime module.
+          go get -tool golang.org/x/mobile/cmd/gobind@latest
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          gomobile init
+
+      - name: Build mobile core AAR
+        run: |
+          mkdir -p android/app/libs
+          gomobile bind -target=android -androidapi 26 \
+            -javapkg com.relayproxy.core \
+            -o android/app/libs/mobilecore.aar \
+            ./mobile/androidcore
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build debug APK
+        run: gradle -p android :app:assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relayproxy-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk

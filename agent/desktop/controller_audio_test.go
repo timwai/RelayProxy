@@ -472,3 +472,34 @@ func TestOpusAudioConcealmentBurstIsBounded(t *testing.T) {
 		t.Fatalf("audio diagnostics=%+v", got)
 	}
 }
+
+func TestOpusQueueOverflowSkipsDroppedFramesWithoutPLC(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testOpusAudioConfig(1)) {
+		t.Fatal("Opus audio config rejected")
+	}
+	for i := 1; i <= maxControllerAudioFrames+2; i++ {
+		if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+			Type:       desktopmedia.MediaPacketAudio,
+			StreamID:   desktopmedia.MediaStreamAudioID,
+			Generation: 1,
+			FrameID:    uint32(i),
+			Timestamp:  uint64(i) * 20_000,
+			Data:       []byte{byte(i)},
+		}) {
+			t.Fatalf("enqueue frame %d failed", i)
+		}
+	}
+	frame, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.Concealment || frame.FrameID != 3 {
+		t.Fatalf("overflow playout frame=%+v want live frame 3", frame)
+	}
+	got := session.AudioDiagnosticsSnapshot()
+	if got.QueueDroppedFrames != 2 || got.ConcealmentFrames != 0 ||
+		got.LastConsumedFrameID != 3 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}

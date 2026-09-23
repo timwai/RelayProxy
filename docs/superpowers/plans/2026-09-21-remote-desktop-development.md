@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #95 已合并，merge `a057810cfe9aae35ca77844d0383cc246523077b`）
+> 当前开发基线：`main`（PR #96 已合并，merge `bba4a4cc0fe111bff9d0e7dfb7c5045d739e8031`）
 
 ## 0. 当前进度
 
@@ -471,14 +471,24 @@ Windows SendInput / CF_UNICODETEXT
 - 所有 datagram 再通过真正的 audio `Reassembler` 还原，最终 payload 必须与 synthetic capture 原始 PCM byte-for-byte 一致，同时确认 capture 生命周期正确关闭。
 - PR #95 已合并到 `main`，merge `a057810cfe9aae35ca77844d0383cc246523077b`；Go CI 与 UI CI 全部通过。
 
-### 0.2.38 RD3 Bounded Audio Jitter / Playout Buffer（当前分支）
+### 0.2.38 RD3 Bounded Audio Jitter / Playout Buffer（已合并 PR #96）
 
 - Controller audio queue 从单纯 arrival-order FIFO 改为同 generation 内按 FrameID 有序插入；轻微 datagram/frame completion 乱序在进入 native player 前被重排。
 - 保持 8 帧 realtime 上限；队列达到 2 帧即可立即播放，正常 20 ms PCM 因此只增加约 1 帧启动缓存。若缺少相邻帧，单帧最长只等待基于 frame duration 的 20–80 ms 有界 playout deadline，随后继续播放而不是无限等待。
 - 已消费 FrameID 之后才到达的旧帧直接记为 late/rejected；queue 内相同 FrameID 直接记为 duplicate/rejected，避免 WASAPI 重复播放旧声音。
 - generation 切换继续清空旧队列，并重置该 generation 的 consumed head；原有 queue overflow 仍丢最旧帧，优先保持实时性。
 - Audio diagnostics 增加 reordered / duplicate / late / playout-timeout 与 last-consumed-frame 指标，便于 Windows 实机区分网络乱序、真正丢帧和播放器跟不上。
-- 新增乱序恢复、duplicate/late 拒绝、bounded playout timeout 与 delay clamp 单测；下一步在 CI 通过后继续评估压缩音频，优先 Opus，避免当前 1.536 Mbps PCM 长期占用带宽。
+- PR #96 已合并到 `main`，merge `bba4a4cc0fe111bff9d0e7dfb7c5045d739e8031`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.39 RD3 Pure-Go Opus Codec Foundation（当前分支）
+
+- 协议新增 `DesktopAudioCodecOpus = "opus"`，但本阶段不改变 Host 当前默认 PCM wire codec；先把 codec core 单独做稳，下一阶段再做能力协商与 PCM fallback。
+- 引入 Pion Opus 2026-08 encoder 提交线的纯 Go module，不使用 CGO/libopus，保持 Windows amd64/arm64 与 macOS 的现有 Go 构建模型。
+- 新增 `OpusConfig` / `OpusEncoder` / `OpusDecoder`：首轮严格固定 48 kHz、mono/stereo、S16LE、20 ms；默认 96 kbps，合法 bitrate 6–510 kbps。
+- 现有 48 kHz stereo PCM 一帧为 3840 bytes；96 kbps / 20 ms Opus 的目标 payload 约 240 bytes 级别，可在完成协商后显著降低当前 1.536 Mbps PCM 数据面带宽。
+- Encoder 输入必须是完整单个 20 ms PCM frame；Decoder 输出固定恢复为与 config 对应的 PCM frame，继续复用现有 WASAPI Player、bounded jitter queue 与 generation 模型。
+- 新增 config validation、S16LE 440 Hz stereo encode/decode round-trip、压缩尺寸与错误输入测试。
+- 下一步：Host 优先发送 Opus、Controller/Native Viewer 解码回 PCM 后再进入现有 jitter/WASAPI 链；远端不声明 Opus 时保持 `pcm_s16le` 回退。
 
 ### 0.3 本轮进度（2026-09-22）
 

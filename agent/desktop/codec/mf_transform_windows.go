@@ -759,7 +759,11 @@ func processTransformInputSample(transform, sample unsafe.Pointer) uintptr {
 	return comCall(transform, imfTransformProcessInput, 0, uintptr(sample), 0)
 }
 
-func processTransformOutputOnce(transform unsafe.Pointer, fallbackTimestamp time.Duration) (*EncodedPacket, uintptr, error) {
+func processTransformOutputOnce(
+	transform unsafe.Pointer,
+	codec string,
+	fallbackTimestamp time.Duration,
+) (*EncodedPacket, uintptr, error) {
 	info, err := getOutputStreamInfo(transform)
 	if err != nil {
 		return nil, 0, err
@@ -800,7 +804,7 @@ func processTransformOutputOnce(transform unsafe.Pointer, fallbackTimestamp time
 	}
 	data, err := sampleBytes(out.Sample)
 	packet := &EncodedPacket{
-		Codec:     "h264",
+		Codec:     codec,
 		Data:      data,
 		Timestamp: sampleTimestamp(out.Sample, fallbackTimestamp),
 		KeyFrame:  sampleIsCleanPoint(out.Sample),
@@ -815,10 +819,14 @@ func processTransformOutputOnce(transform unsafe.Pointer, fallbackTimestamp time
 	return packet, hr, nil
 }
 
-func drainSyncH264Output(transform unsafe.Pointer, fallbackTimestamp time.Duration) ([]EncodedPacket, error) {
+func drainSyncVideoOutput(
+	transform unsafe.Pointer,
+	codec string,
+	fallbackTimestamp time.Duration,
+) ([]EncodedPacket, error) {
 	var packets []EncodedPacket
 	for {
-		packet, hr, err := processTransformOutputOnce(transform, fallbackTimestamp)
+		packet, hr, err := processTransformOutputOnce(transform, codec, fallbackTimestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -834,7 +842,15 @@ func drainSyncH264Output(transform unsafe.Pointer, fallbackTimestamp time.Durati
 	}
 }
 
-func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEncodeInput) ([]EncodedPacket, error) {
+func drainSyncH264Output(transform unsafe.Pointer, fallbackTimestamp time.Duration) ([]EncodedPacket, error) {
+	return drainSyncVideoOutput(transform, "h264", fallbackTimestamp)
+}
+
+func processSyncVideoFrame(
+	transform unsafe.Pointer,
+	codec string,
+	input mfEncodeInput,
+) ([]EncodedPacket, error) {
 	sample, err := createEncodeInputSample(input)
 	if err != nil {
 		return nil, err
@@ -844,7 +860,7 @@ func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEnc
 	var packets []EncodedPacket
 	hr := processTransformInputSample(transform, sample)
 	if uint32(hr) == mfENotAccepting {
-		pending, err := drainSyncH264Output(transform, input.timestamp)
+		pending, err := drainSyncVideoOutput(transform, codec, input.timestamp)
 		if err != nil {
 			return nil, err
 		}
@@ -854,11 +870,19 @@ func processSyncH264Frame(transform unsafe.Pointer, cfg VideoConfig, input mfEnc
 	if hresultFailed(hr) {
 		return nil, hresultError("IMFTransform.ProcessInput", hr)
 	}
-	encoded, err := drainSyncH264Output(transform, input.timestamp)
+	encoded, err := drainSyncVideoOutput(transform, codec, input.timestamp)
 	if err != nil {
 		return nil, err
 	}
 	return append(packets, encoded...), nil
+}
+
+func processSyncH264Frame(
+	transform unsafe.Pointer,
+	_ VideoConfig,
+	input mfEncodeInput,
+) ([]EncodedPacket, error) {
+	return processSyncVideoFrame(transform, "h264", input)
 }
 
 func (s *MFH264Transform) EncodeNV12(ctx context.Context, data []byte, timestamp time.Duration) ([]EncodedPacket, error) {

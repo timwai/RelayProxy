@@ -48,7 +48,7 @@ class NetworkBinder(context: Context) {
                 if (connectivity.bindProcessToNetwork(network)) {
                     onAvailable()
                 } else {
-                    onError("无法将 RelayProxy 进程绑定到$networkLabel网络")
+                    onError("无法将 RelayProxy 进程绑定到${networkLabel}网络")
                 }
             }
 
@@ -61,7 +61,7 @@ class NetworkBinder(context: Context) {
             }
 
             override fun onUnavailable() {
-                onError("$networkLabel网络不可用")
+                onError("${networkLabel}网络不可用")
             }
         }
 
@@ -70,7 +70,7 @@ class NetworkBinder(context: Context) {
             connectivity.requestNetwork(request, cb)
         } catch (t: Throwable) {
             callback = null
-            onError(t.message ?: "请求$networkLabel网络失败")
+            onError(t.message ?: "请求${networkLabel}网络失败")
         }
     }
 

@@ -198,24 +198,42 @@ func openConfiguredVideoDecoder(ctx context.Context, cfg VideoConfig, preferHard
 }
 
 func OpenMFH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool) (Decoder, error) {
-	return openMFH264Decoder(ctx, cfg, preferHardware, 0)
+	return openMFVideoDecoder(ctx, cfg, preferHardware, 0, mfH264DecoderSpec)
 }
 
 func OpenMFH264DecoderWithD3D11(ctx context.Context, cfg VideoConfig, preferHardware bool, device uintptr) (Decoder, error) {
-	return openMFH264Decoder(ctx, cfg, preferHardware, device)
+	return openMFVideoDecoder(ctx, cfg, preferHardware, device, mfH264DecoderSpec)
 }
 
-func openMFH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool, device uintptr) (Decoder, error) {
+func OpenMFH265Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool) (Decoder, error) {
+	return openMFVideoDecoder(ctx, cfg, preferHardware, 0, mfH265DecoderSpec)
+}
+
+func OpenMFH265DecoderWithD3D11(ctx context.Context, cfg VideoConfig, preferHardware bool, device uintptr) (Decoder, error) {
+	return openMFVideoDecoder(ctx, cfg, preferHardware, device, mfH265DecoderSpec)
+}
+
+func openMFVideoDecoder(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	device uintptr,
+	spec mfVideoDecoderSpec,
+) (Decoder, error) {
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if spec.InputSubtype == nil || spec.Codec == "" {
+		return nil, fmt.Errorf("%w: invalid Media Foundation decoder spec", ErrDecoderUnavailable)
+	}
 	session := &MFH264Decoder{
+		spec:     spec,
 		commands: make(chan mfDecodeCommand),
 		done:     make(chan struct{}),
 	}
 	initCh := make(chan mfDecoderInit, 1)
-	go session.run(cfg, preferHardware, device, initCh)
+	go session.run(cfg, preferHardware, device, spec, initCh)
 
 	select {
 	case <-ctx.Done():
@@ -232,7 +250,7 @@ func openMFH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool
 	}
 }
 
-func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, device uintptr, initCh chan<- mfDecoderInit) {
+func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, device uintptr, spec mfVideoDecoderSpec, initCh chan<- mfDecoderInit) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(d.done)
@@ -255,7 +273,7 @@ func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, device uintptr
 	if graphicsErr != nil {
 		graphics = nil
 	}
-	transform, info, err := openConfiguredH264Decoder(context.Background(), cfg, preferHardware, graphics)
+	transform, info, err := openConfiguredVideoDecoder(context.Background(), cfg, preferHardware, graphics, spec)
 	if err != nil {
 		if graphics != nil {
 			graphics.Close()

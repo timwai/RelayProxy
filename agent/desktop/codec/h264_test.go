@@ -23,7 +23,6 @@ func TestH264WithSequenceHeaderAvoidsDuplicateParameterSets(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeCodecPreferenceDoesNotEnableH265BeforeSessionSupport(t *testing.T) {
 	if got := NormalizeCodecPreference("h265"); got != "auto" {
 		t.Fatalf("H.265 became selectable before session support: %q", got)

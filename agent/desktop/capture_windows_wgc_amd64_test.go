@@ -26,3 +26,21 @@ func TestWGCMinUpdateInterval(t *testing.T) {
 		})
 	}
 }
+
+func TestSignalWGCFrameReadyCoalesces(t *testing.T) {
+	ready := make(chan struct{}, 1)
+	signalWGCFrameReady(ready)
+	signalWGCFrameReady(ready)
+	if got := len(ready); got != 1 {
+		t.Fatalf("queued signals=%d want=1", got)
+	}
+	<-ready
+	signalWGCFrameReady(ready)
+	if got := len(ready); got != 1 {
+		t.Fatalf("queued signals after consume=%d want=1", got)
+	}
+}
+
+func TestSignalWGCFrameReadyAllowsNilChannel(t *testing.T) {
+	signalWGCFrameReady(nil)
+}

@@ -484,15 +484,20 @@ func openConfiguredH264Transform(
 			if activation == nil {
 				continue
 			}
-			if group.hardware && graphics != nil {
-				transform, info, err := tryActivation(activation, true, graphics)
-				if err == nil {
-					releaseIUnknown(activation)
-					activations[index] = nil
-					releaseMFTActivations(activations[index+1:])
-					return transform, info, nil
+			if graphics != nil {
+				if group.hardware {
+					transform, info, err := tryActivation(activation, true, graphics)
+					if err == nil {
+						releaseIUnknown(activation)
+						activations[index] = nil
+						releaseMFTActivations(activations[index+1:])
+						return transform, info, nil
+					}
+					failures = append(failures, fmt.Errorf("D3D11 hardware encoder: %w", err))
 				}
-				failures = append(failures, fmt.Errorf("D3D11 hardware encoder: %w", err))
+				releaseIUnknown(activation)
+				activations[index] = nil
+				continue
 			}
 
 			transform, info, err := tryActivation(activation, group.hardware, nil)

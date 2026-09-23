@@ -46,7 +46,7 @@ type D3D11CaptureFrame struct {
 
 func (f *D3D11CaptureFrame) Valid() bool {
 	return f != nil && f.Device != 0 && f.Resource != 0 &&
-		f.Width > 0 && f.Height > 0 && f.Width%2 == 0 && f.Height%2 == 0
+		f.Width > 0 && f.Height > 0
 }
 
 func (f *D3D11CaptureFrame) Close() {

@@ -539,6 +539,9 @@ func (h *Host) streamH264Frames(
 			targetFPS = nextFPS
 			frameInterval = frameIntervalForFPS(targetFPS)
 			ticker.Reset(frameInterval)
+			if err := setCaptureFrameRate(h.source, targetFPS); err != nil {
+				log.Printf("[Desktop] H.264 capture backend fps update=%d failed: %v", targetFPS, err)
+			}
 			log.Printf("[Desktop] H.264 capture fps updated=%d", targetFPS)
 
 		case target := <-resolutionUpdates:

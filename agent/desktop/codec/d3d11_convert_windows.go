@@ -14,13 +14,13 @@ import (
 const (
 	dxgiFormatB8G8R8A8UNorm = 87
 
-	d3d11UsageDefault      = 0
-	d3d11BindRenderTarget  = 0x20
-	d3d11VPIVTexture2D     = 1
-	d3d11VPOVTexture2D     = 1
-	d3d11VPFormatInput     = 0x1
-	d3d11VPFormatOutput    = 0x2
-	d3d11VPUsageSpeed      = 1
+	d3d11UsageDefault       = 0
+	d3d11BindRenderTarget   = 0x20
+	d3d11VPIVTexture2D      = 1
+	d3d11VPOVTexture2D      = 1
+	d3d11VPFormatInput      = 0x1
+	d3d11VPFormatOutput     = 0x2
+	d3d11VPUsageSpeed       = 1
 	d3d11VPFrameProgressive = 0
 
 	id3d11VideoDeviceCreateProcessor  = 4
@@ -109,15 +109,15 @@ type d3d11VPStream struct {
 type D3D11NV12Converter struct {
 	cfg D3D11ConvertConfig
 
-	device          unsafe.Pointer
-	context         unsafe.Pointer
-	videoDevice     unsafe.Pointer
-	videoContext    unsafe.Pointer
-	enumerator      unsafe.Pointer
-	processor       unsafe.Pointer
-	outputTexture   unsafe.Pointer
-	outputView      unsafe.Pointer
-	outputFrame     uint32
+	device        unsafe.Pointer
+	context       unsafe.Pointer
+	videoDevice   unsafe.Pointer
+	videoContext  unsafe.Pointer
+	enumerator    unsafe.Pointer
+	processor     unsafe.Pointer
+	outputTexture unsafe.Pointer
+	outputView    unsafe.Pointer
+	outputFrame   uint32
 }
 
 func OpenD3D11NV12Converter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D11NV12Converter, error) {

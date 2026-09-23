@@ -441,15 +441,16 @@ func activationGroups(preferHardware bool) []struct {
 	}{software, hardware}
 }
 
-func openConfiguredH264Transform(
+func openConfiguredVideoTransform(
 	ctx context.Context,
 	cfg VideoConfig,
 	preferHardware bool,
 	allowAsync bool,
 	graphics *mfDecoderD3D11,
+	spec mfVideoEncoderSpec,
 ) (unsafe.Pointer, MFH264TransformInfo, error) {
 	rawNV12 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatNV12}
-	h264 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatH264}
+	compressed := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: *spec.OutputSubtype}
 	var failures []error
 
 	tryActivation := func(
@@ -466,14 +467,14 @@ func openConfiguredH264Transform(
 			d3d11Aware, err = candidateGraphics.Attach(transform)
 			if err != nil {
 				releaseIUnknown(transform)
-				return nil, MFH264TransformInfo{}, fmt.Errorf("attach D3D11 encoder manager: %w", err)
+				return nil, MFH264TransformInfo{}, fmt.Errorf("attach D3D11 %s encoder manager: %w", spec.Label, err)
 			}
 			if !d3d11Aware {
 				releaseIUnknown(transform)
-				return nil, MFH264TransformInfo{}, errors.New("encoder MFT is not D3D11-aware")
+				return nil, MFH264TransformInfo{}, fmt.Errorf("%s encoder MFT is not D3D11-aware", spec.Label)
 			}
 		}
-		async, sequenceHeader, err := configureH264Transform(transform, cfg)
+		async, sequenceHeader, err := configureVideoEncoderTransform(transform, cfg, spec)
 		if err != nil {
 			releaseIUnknown(transform)
 			return nil, MFH264TransformInfo{}, err
@@ -483,6 +484,7 @@ func openConfiguredH264Transform(
 			return nil, MFH264TransformInfo{}, errors.New("asynchronous MFT requires event-driven processing")
 		}
 		return transform, MFH264TransformInfo{
+			Codec:          spec.Codec,
 			Hardware:       hardware,
 			Async:          async,
 			D3D11Aware:     d3d11Aware,
@@ -495,7 +497,9 @@ func openConfiguredH264Transform(
 		if err := ctx.Err(); err != nil {
 			return nil, MFH264TransformInfo{}, err
 		}
-		activations, err := enumerateMFTActivations(mftCategoryVideoEncoder, group.flags, &rawNV12, &h264)
+		activations, err := enumerateMFTActivations(
+			mftCategoryVideoEncoder, group.flags, &rawNV12, &compressed,
+		)
 		if err != nil {
 			failures = append(failures, err)
 			continue
@@ -513,7 +517,7 @@ func openConfiguredH264Transform(
 						releaseMFTActivations(activations[index+1:])
 						return transform, info, nil
 					}
-					failures = append(failures, fmt.Errorf("D3D11 hardware encoder: %w", err))
+					failures = append(failures, fmt.Errorf("D3D11 hardware %s encoder: %w", spec.Label, err))
 				}
 				releaseIUnknown(activation)
 				activations[index] = nil
@@ -534,7 +538,21 @@ func openConfiguredH264Transform(
 	if len(failures) == 0 {
 		return nil, MFH264TransformInfo{}, ErrEncoderUnavailable
 	}
-	return nil, MFH264TransformInfo{}, fmt.Errorf("%w: %v", ErrEncoderUnavailable, errors.Join(failures...))
+	return nil, MFH264TransformInfo{}, fmt.Errorf(
+		"%w: %s: %v", ErrEncoderUnavailable, spec.Label, errors.Join(failures...),
+	)
+}
+
+func openConfiguredH264Transform(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	allowAsync bool,
+	graphics *mfDecoderD3D11,
+) (unsafe.Pointer, MFH264TransformInfo, error) {
+	return openConfiguredVideoTransform(
+		ctx, cfg, preferHardware, allowAsync, graphics, mfH264EncoderSpec,
+	)
 }
 
 func OpenMFH264Transform(ctx context.Context, cfg VideoConfig, preferHardware bool) (*MFH264Transform, error) {

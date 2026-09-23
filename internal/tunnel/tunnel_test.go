@@ -63,6 +63,7 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 	testMsg := []byte("hello relayproxy stream")
 	serverErrCh := make(chan error, 1)
 	serverReady := make(chan struct{}, 1)
+	clientDone := make(chan struct{})
 	go func() {
 		rawConn, err := listener.Accept()
 		if err != nil {
@@ -113,7 +114,17 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 				return
 			}
 		}
-		serverErrCh <- nil
+
+		// Writing the final echo only queues bytes into yamux. Do not close the
+		// server session until the client confirms it consumed every reply;
+		// otherwise the deferred session.Close can race the last client write/read
+		// and surface a spurious "session shutdown".
+		select {
+		case <-clientDone:
+			serverErrCh <- nil
+		case <-ctx.Done():
+			serverErrCh <- ctx.Err()
+		}
 	}()
 
 	clientSession, err := DialTLS(ctx, listener.Addr().String(), &tls.Config{
@@ -173,6 +184,7 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 			t.Fatalf("stream %d expected %q, got %q", i, testMsg, reply)
 		}
 	}
+	close(clientDone)
 
 	select {
 	case err := <-serverErrCh:

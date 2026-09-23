@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #93 已合并，merge `797729c73f21894530c39cc7288f3147714301a1`）
+> 当前开发基线：`main`（PR #94 已合并，merge `e7696ba957683d850d1af890dc25552051f37ccc`）
 
 ## 0. 当前进度
 
@@ -455,13 +455,21 @@ Windows SendInput / CF_UNICODETEXT
 - Windows host capability snapshot 现在声明 loopback audio 支持；非 Windows 继续保持 unavailable stub。
 - PR #93 已合并到 `main`，merge `797729c73f21894530c39cc7288f3147714301a1`；Go CI、UI regression、Windows/macOS desktop package 全部通过。CI 已覆盖编译与回归，但仍需 Windows 实机确认实际 loopback 播放链。
 
-### 0.2.36 RD3 Audio Runtime Diagnostics（当前分支）
+### 0.2.36 RD3 Audio Runtime Diagnostics（已合并 PR #94）
 
 - Controller 为 audio 单独维护运行计数，不并入 video ABR/loss domain：记录接收/消费帧与字节、8 帧 realtime queue 当前深度、queue overflow drop、generation rollover 丢弃、错误 generation/stream 拒绝，以及最后接收/消费时间。
 - `AudioDiagnosticsSnapshot` 同时暴露当前 `audio_config`、queue capacity、最后 FrameID 与媒体时间戳，可区分 Host 无数据、网络/重组无数据、Controller queue 堵塞和 native viewer 未消费。
 - 诊断导出 schema 从 v3 升级到 v4；每个 500 ms sample 增加 audio snapshot，report 增加 `currentAudio`，summary 增加 audio codec 分布、最大/percentile queue depth 与累计 received/consumed/drop/reject 指标。
 - generation 切换时被清理的旧队列与实时队列满导致的 drop 分开统计，避免把正常格式切换误判成网络/播放拥塞。
-- 下一步：完成 CI 后用于 Windows PCM 实机 bring-up；若 audio received 持续增长但 consumed 不增长，优先排查 native/WASAPI player；若 queue drop 增长则再引入小型自适应 jitter/playout buffer。
+- PR #94 已合并到 `main`，merge `e7696ba957683d850d1af890dc25552051f37ccc`；Go test/race、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.37 RD3 Audio Transport Integration Coverage（当前分支）
+
+- 新增 synthetic loopback capture + recording direct datagram path 集成测试，不依赖真实声卡即可驱动 Host 的 `streamSessionAudio` 主链。
+- 测试验证可靠控制流首先产生 `audio_config`，并校验 PCM S16LE / 48 kHz / stereo / 16-bit / 20 ms / target bitrate 元数据。
+- 强制使用较小 RD/1 packet size 把 3840-byte PCM frame 分成多个 datagram，逐包校验 type=audio、stream ID=2、generation/frame ID 与独立 sequence 连续性。
+- 所有 datagram 再通过真正的 audio `Reassembler` 还原，最终 payload 必须与 synthetic capture 原始 PCM byte-for-byte 一致，同时确认 capture 生命周期正确关闭。
+- 该测试补齐 #93 之前只覆盖参数/错误路径而未覆盖的 Host → RD/1 packetizer → audio reassembler 集成链；下一步仍是 Windows 实机 WASAPI capture/playback 验证，再依据 #94 诊断数据决定 jitter buffer 与压缩方案。
 
 ### 0.3 本轮进度（2026-09-22）
 

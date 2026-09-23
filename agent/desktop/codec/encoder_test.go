@@ -99,6 +99,10 @@ func TestD3D11ConvertConfigValidation(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
+	cfg.InputWidth = 1919
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("odd BGRA input width rejected: %v", err)
+	}
 	cfg.OutputWidth = 1279
 	if !errors.Is(cfg.Validate(), ErrInvalidVideoConfig) {
 		t.Fatal("odd NV12 output width accepted")

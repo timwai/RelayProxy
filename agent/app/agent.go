@@ -1340,6 +1340,19 @@ func (a *Agent) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStat
 	session.UpdateViewerStats(stats)
 }
 
+func (a *Agent) NextRemoteDesktopAudioFrame(ctx context.Context) (desktop.AudioFrameSnapshot, protocol.DesktopAudioConfig, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return desktop.AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop session is not connected")
+	}
+	return session.NextAudioFrame(ctx)
+}
+
 func (a *Agent) RemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	a.mu.RLock()
 	session := a.desktopConnection

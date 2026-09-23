@@ -216,8 +216,11 @@ func TestOpenAutoWindowsFrameStreamFallsThroughInOrder(t *testing.T) {
 			t.Fatalf("attempts=%v want=%v", attempts, want)
 		}
 	}
-	if stream == nil || stream.Backend() != protocol.DesktopCaptureGDI {
-		t.Fatalf("selected stream=%v backend=%v", stream, stream.Backend())
+	if stream == nil {
+		t.Fatal("automatic capture returned a nil stream")
+	}
+	if stream.Backend() != protocol.DesktopCaptureGDI {
+		t.Fatalf("selected backend=%v want=gdi", stream.Backend())
 	}
 }
 
@@ -250,8 +253,11 @@ func TestOpenAutoWindowsFrameStreamStopsOnFirstSuccess(t *testing.T) {
 		attempts[1] != protocol.DesktopCaptureWGC {
 		t.Fatalf("attempts=%v want=[dxgi wgc]", attempts)
 	}
-	if stream == nil || stream.Backend() != protocol.DesktopCaptureWGC {
-		t.Fatalf("selected stream backend=%v want=wgc", stream.Backend())
+	if stream == nil {
+		t.Fatal("automatic capture returned a nil stream")
+	}
+	if stream.Backend() != protocol.DesktopCaptureWGC {
+		t.Fatalf("selected backend=%v want=wgc", stream.Backend())
 	}
 }
 

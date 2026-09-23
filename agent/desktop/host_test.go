@@ -19,6 +19,17 @@ type testCapabilityCaptureSource struct {
 	testCaptureSource
 }
 
+type testFrameRateCaptureSource struct {
+	testCaptureSource
+	fps []int
+	err error
+}
+
+func (s *testFrameRateCaptureSource) SetCaptureFPS(fps int) error {
+	s.fps = append(s.fps, fps)
+	return s.err
+}
+
 type testSessionCaptureSource struct {
 	testCaptureSource
 	backend string
@@ -34,6 +45,30 @@ func (s *testCapabilityCaptureSource) DesktopCaptureCapabilities(context.Context
 	}, {
 		ID: "display-2", Name: "Secondary", Width: 2560, Height: 1440,
 	}}, nil
+}
+
+func TestSetCaptureFrameRateForwardsToOptionalController(t *testing.T) {
+	source := &testFrameRateCaptureSource{}
+	if err := setCaptureFrameRate(source, 15); err != nil {
+		t.Fatal(err)
+	}
+	if len(source.fps) != 1 || source.fps[0] != 15 {
+		t.Fatalf("capture fps updates=%v want=[15]", source.fps)
+	}
+}
+
+func TestSetCaptureFrameRateIgnoresUnsupportedAndInvalidValues(t *testing.T) {
+	source := &testCaptureSource{}
+	if err := setCaptureFrameRate(source, 15); err != nil {
+		t.Fatal(err)
+	}
+	controller := &testFrameRateCaptureSource{}
+	if err := setCaptureFrameRate(controller, 0); err != nil {
+		t.Fatal(err)
+	}
+	if len(controller.fps) != 0 {
+		t.Fatalf("invalid FPS unexpectedly forwarded: %v", controller.fps)
+	}
 }
 
 func TestFitRGBAPreservesAspectRatio(t *testing.T) {

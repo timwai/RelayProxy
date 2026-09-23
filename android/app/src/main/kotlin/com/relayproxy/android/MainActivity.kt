@@ -464,16 +464,26 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
             control.showText = false
-            control.buttonTintList = ColorStateList.valueOf(brand)
+            control.thumbTintList = ColorStateList(
+                arrayOf(
+                    intArrayOf(android.R.attr.state_checked),
+                    intArrayOf()
+                ),
+                intArrayOf(brand, Color.rgb(148, 163, 184))
+            )
+            control.trackTintList = ColorStateList(
+                arrayOf(
+                    intArrayOf(android.R.attr.state_checked),
+                    intArrayOf()
+                ),
+                intArrayOf(Color.rgb(147, 197, 253), Color.rgb(226, 232, 240))
+            )
             addView(control)
         }
 
     private fun divider() = View(this).apply {
         setBackgroundColor(Color.rgb(241, 245, 249))
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(1)
-        )
+        minimumHeight = dp(1)
     }
 
     private fun metric(label: String): Pair<LinearLayout, TextView> {

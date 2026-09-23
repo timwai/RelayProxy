@@ -118,3 +118,18 @@ func TestH265RuntimeErrorPreservesGenerationAndCause(t *testing.T) {
 		t.Fatalf("runtime error=%+v", err)
 	}
 }
+
+
+func TestH265ValidationSentinelIsPrivateAndExplicit(t *testing.T) {
+	if !h265ValidationRequested("h265-validation") || !h265ValidationRequested(" H265-VALIDATION ") {
+		t.Fatal("internal H.265 validation sentinel was not recognized")
+	}
+	for _, value := range []string{"", "auto", "h264", "h265", "hevc", "jpeg"} {
+		if h265ValidationRequested(value) {
+			t.Fatalf("public codec preference %q unexpectedly enabled validation HEVC", value)
+		}
+	}
+	if got := desktopcodec.NormalizeCodecPreference(h265ValidationCodecPreference); got != "auto" {
+		t.Fatalf("validation sentinel leaked into public codec normalizer: %q", got)
+	}
+}

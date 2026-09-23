@@ -148,7 +148,7 @@ func TestStreamSessionAudioRejectsWrongFrameSize(t *testing.T) {
 	}
 	stream := &audioTestStream{}
 	conn := desktopmedia.NewMediaConn(nil, stream)
-	err = host.streamSessionAudio(context.Background(), conn)
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{})
 	if err == nil {
 		t.Fatal("short audio capture frame was accepted")
 	}
@@ -189,7 +189,7 @@ func TestStreamSessionAudioEmitsConfigAndReassemblablePCM(t *testing.T) {
 	conn := desktopmedia.NewMediaConn(nil, stream)
 	conn.SetDatagramPath(path)
 
-	err = host.streamSessionAudio(context.Background(), conn)
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{})
 	if !errors.Is(err, io.EOF) {
 		t.Fatalf("stream error=%v want EOF after one synthetic frame", err)
 	}
@@ -262,5 +262,113 @@ func TestStreamSessionAudioEmitsConfigAndReassemblablePCM(t *testing.T) {
 	capture.mu.Unlock()
 	if !closed {
 		t.Fatal("synthetic audio capture was not closed")
+	}
+}
+
+func TestStreamSessionAudioEncodesNegotiatedOpus(t *testing.T) {
+	cfg, duration, frameBytes, err := desktopaudio.NormalizeFrameDuration(hostAudioPCMConfig, hostAudioFrameDuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, frameBytes)
+	for i := range payload {
+		payload[i] = byte((i*17 + 23) % 251)
+	}
+	capture := &fakeAudioCapture{
+		frames: [][]byte{payload},
+		endErr: io.EOF,
+	}
+	hostConfig := DefaultHostConfig()
+	hostConfig.PacketSize = 600
+	host := &Host{
+		cfg: hostConfig,
+		audioOpen: func(context.Context, desktopaudio.PCMConfig, time.Duration) (desktopaudio.Capture, error) {
+			return capture, nil
+		},
+	}
+	stream := &audioTestStream{}
+	path := &audioRecordingDatagramPath{}
+	conn := desktopmedia.NewMediaConn(nil, stream)
+	conn.SetDatagramPath(path)
+
+	err = host.streamSessionAudio(context.Background(), conn, protocol.RemoteDesktopConnectOptions{
+		AudioCodec: protocol.DesktopAudioCodecOpus,
+	})
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("stream error=%v want EOF after one synthetic Opus frame", err)
+	}
+
+	stream.mu.Lock()
+	controlBytes := bytes.Join(stream.messages, nil)
+	stream.mu.Unlock()
+	var message protocol.DesktopSessionMessage
+	if err := protocol.ReadJSON(bytes.NewReader(controlBytes), &message); err != nil {
+		t.Fatalf("decode Opus audio config: %v", err)
+	}
+	if message.AudioConfig == nil {
+		t.Fatal("Opus audio config is missing")
+	}
+	audioConfig := *message.AudioConfig
+	if audioConfig.Codec != protocol.DesktopAudioCodecOpus ||
+		audioConfig.TargetBitrate != desktopaudio.DefaultOpusBitrate ||
+		audioConfig.SampleRate != cfg.SampleRate ||
+		audioConfig.Channels != cfg.Channels ||
+		audioConfig.FrameDurationMs != int(duration/time.Millisecond) {
+		t.Fatalf("Opus audio config=%+v", audioConfig)
+	}
+
+	packets := path.snapshot()
+	if len(packets) == 0 {
+		t.Fatal("Opus audio emitted no datagrams")
+	}
+	reassembler := desktopmedia.NewReassembler(desktopmedia.ReassemblerConfig{
+		PacketType: desktopmedia.MediaPacketAudio,
+		MaxFrames:  4,
+		MaxBytes:   frameBytes * 2,
+		FrameTTL:   time.Second,
+	})
+	var rebuilt *desktopmedia.EncodedFrame
+	for _, packet := range packets {
+		frame, pushErr := reassembler.Push(packet, time.Now())
+		if pushErr != nil {
+			t.Fatal(pushErr)
+		}
+		if frame != nil {
+			rebuilt = frame
+		}
+	}
+	if rebuilt == nil || len(rebuilt.Data) == 0 || len(rebuilt.Data) >= len(payload) {
+		t.Fatalf("rebuilt Opus frame=%+v PCM bytes=%d", rebuilt, len(payload))
+	}
+
+	decoder, err := desktopaudio.NewOpusDecoder(desktopaudio.OpusConfig{
+		SampleRate:      audioConfig.SampleRate,
+		Channels:        audioConfig.Channels,
+		BitsPerSample:   audioConfig.BitsPerSample,
+		FrameDurationMs: audioConfig.FrameDurationMs,
+		Bitrate:         audioConfig.TargetBitrate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decoder.DecodePacket(rebuilt.Data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != frameBytes {
+		t.Fatalf("decoded Opus PCM bytes=%d want=%d", len(decoded), frameBytes)
+	}
+}
+
+func TestHostDesktopCapabilitiesAdvertiseAudioCodecs(t *testing.T) {
+	host := &Host{source: fakeAudioCapabilitySource{available: true}}
+	caps := host.DesktopCapabilities(context.Background())
+	if !caps.Audio {
+		t.Fatal("audio-capable host did not advertise audio")
+	}
+	if len(caps.AudioCodecs) != 2 ||
+		caps.AudioCodecs[0] != protocol.DesktopAudioCodecOpus ||
+		caps.AudioCodecs[1] != protocol.DesktopAudioCodecPCMS16LE {
+		t.Fatalf("audio codecs=%v", caps.AudioCodecs)
 	}
 }

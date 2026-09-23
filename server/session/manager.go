@@ -64,6 +64,7 @@ func DesktopCapabilitiesForTarget(sess *DeviceSession, nativeRDP, relayDesktop b
 	caps.RelayDesktop = relayDesktop
 	caps.Captures = append([]protocol.DesktopCaptureCapability(nil), caps.Captures...)
 	caps.Codecs = append([]protocol.DesktopCodecCapability(nil), caps.Codecs...)
+	caps.AudioCodecs = append([]string(nil), caps.AudioCodecs...)
 	caps.Displays = append([]protocol.DesktopDisplayCapability(nil), caps.Displays...)
 	return caps
 }

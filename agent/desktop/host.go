@@ -413,7 +413,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	if streamAudio {
 		go func() {
-			err := h.streamSessionAudio(sessionCtx, conn)
+			err := h.streamSessionAudio(sessionCtx, conn, options)
 			if err != nil && !errors.Is(err, context.Canceled) && sessionCtx.Err() == nil {
 				log.Printf("[Desktop] audio capture disabled for this session: %v", err)
 			}
@@ -789,6 +789,7 @@ func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabili
 	}
 	if h.desktopAudioAvailable() {
 		caps.Audio = true
+		caps.AudioCodecs = []string{protocol.DesktopAudioCodecOpus, protocol.DesktopAudioCodecPCMS16LE}
 	}
 	_, hasCursor := h.source.(CursorCaptureSource)
 	if provider, ok := h.source.(CaptureCapabilitySource); ok {

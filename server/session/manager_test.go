@@ -52,6 +52,8 @@ func TestDesktopCapabilitiesForTargetUsesAuthorizedOnlineSnapshot(t *testing.T) 
 			RelayDesktop: true,
 			Captures:     []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}},
 			Codecs:       []protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}},
+			Audio:        true,
+			AudioCodecs:  []string{protocol.DesktopAudioCodecOpus, protocol.DesktopAudioCodecPCMS16LE},
 			Displays:     []protocol.DesktopDisplayCapability{{ID: "10", Name: "DISPLAY1", Width: 1920, Height: 1080, Primary: true}},
 			MultiMonitor: false,
 			MaxWidth:     3840, MaxHeight: 2160, MaxFPS: 30,
@@ -62,8 +64,12 @@ func TestDesktopCapabilitiesForTargetUsesAuthorizedOnlineSnapshot(t *testing.T) 
 		t.Fatalf("merged capabilities=%+v", got)
 	}
 	got.Displays[0].ID = "mutated"
+	got.AudioCodecs[0] = "mutated"
 	if sess.DesktopCapabilities.Displays[0].ID != "10" {
 		t.Fatal("returned display slice aliases authenticated session snapshot")
+	}
+	if sess.DesktopCapabilities.AudioCodecs[0] != protocol.DesktopAudioCodecOpus {
+		t.Fatal("returned audio codec slice aliases authenticated session snapshot")
 	}
 }
 

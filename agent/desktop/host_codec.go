@@ -892,6 +892,29 @@ func (h *Host) streamH264Frames(
 					}
 					continue
 				}
+				if frame.Width != gpuInputWidth || frame.Height != gpuInputHeight {
+					nextConverter, convertErr := desktopcodec.OpenD3D11NV12Converter(
+						frame.Device,
+						desktopcodec.D3D11ConvertConfig{
+							InputWidth: frame.Width, InputHeight: frame.Height,
+							OutputWidth: videoCfg.Width, OutputHeight: videoCfg.Height,
+							FPS: videoCfg.FPS,
+						},
+					)
+					if convertErr != nil {
+						frame.Close()
+						return convertErr
+					}
+					oldConverter := d3dConverter
+					d3dConverter = nextConverter
+					gpuInputWidth = frame.Width
+					gpuInputHeight = frame.Height
+					if oldConverter != nil {
+						_ = oldConverter.Close()
+					}
+					log.Printf("[Desktop] H.264 D3D11 capture geometry updated=%dx%d encode=%dx%d",
+						gpuInputWidth, gpuInputHeight, videoCfg.Width, videoCfg.Height)
+				}
 				err := sendD3D11Frame(frame, now)
 				frame.Close()
 				if err != nil {

@@ -1219,6 +1219,10 @@ func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDes
 		}, nil
 	case protocol.DesktopBackendRelay:
 		a.DisconnectRDP()
+		options, err = negotiateRemoteDesktopAudio(target, options)
+		if err != nil {
+			return protocol.RemoteDesktopSessionInfo{}, err
+		}
 		session, err := desktop.StartControllerWithOptions(a.ctx, targetID, func(ctx context.Context, id string) (*desktopmedia.MediaConn, error) {
 			dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()

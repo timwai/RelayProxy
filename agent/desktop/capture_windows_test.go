@@ -185,6 +185,42 @@ func (s *testWindowsFrameStream) Backend() protocol.DesktopCaptureBackend {
 
 func (s *testWindowsFrameStream) Close() error { return nil }
 
+type testWindowsD3D11FrameStream struct {
+	testWindowsFrameStream
+	frame *D3D11CaptureFrame
+}
+
+func (s *testWindowsD3D11FrameStream) WaitD3D11Frame(context.Context) (*D3D11CaptureFrame, error) {
+	return s.frame, nil
+}
+
+func TestWindowsCaptureD3D11DelegatesToSurfaceStream(t *testing.T) {
+	frame := &D3D11CaptureFrame{Device: 1, Resource: 2, Width: 1280, Height: 720}
+	stream := &testWindowsD3D11FrameStream{
+		testWindowsFrameStream: testWindowsFrameStream{backend: protocol.DesktopCaptureWGC},
+		frame:                  frame,
+	}
+	capture := &windowsCapture{stream: stream}
+	got, available, err := capture.CaptureD3D11(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available || got != frame {
+		t.Fatalf("available=%v frame=%p want=%p", available, got, frame)
+	}
+}
+
+func TestWindowsCaptureD3D11UnavailableOnCPUSurfaceStream(t *testing.T) {
+	capture := &windowsCapture{stream: &testWindowsFrameStream{backend: protocol.DesktopCaptureDXGI}}
+	frame, available, err := capture.CaptureD3D11(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if available || frame != nil {
+		t.Fatalf("available=%v frame=%v want unavailable", available, frame)
+	}
+}
+
 func TestWindowsCaptureSetCaptureFPSDelegatesToStream(t *testing.T) {
 	stream := &testWindowsFrameStream{backend: protocol.DesktopCaptureWGC}
 	capture := &windowsCapture{stream: stream}

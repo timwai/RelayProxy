@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待与 Media Foundation D3D11 input surface 均已合并 main；当前分支实现 WGC D3D11 texture 借用和 VideoProcessor BGRA→NV12/缩放，为下一轮 Host 直接 EncodeD3D11 做准备  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface 与 WGC GPU BGRA→NV12 converter 均已合并 main；下一阶段把 Host H.264 主循环切到 WGC texture → VideoProcessor → EncodeD3D11，并保留 CPU fallback  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
@@ -276,7 +276,7 @@ Windows SendInput / CF_UNICODETEXT
 - 当前尚未把 WGC BGRA capture texture 接到该入口；下一步是在同一 capture device 上用 D3D11 VideoProcessor 做 BGRA→NV12（同时承担 resolution scale），再把生成的 NV12 texture 交给本轮新增的 `EncodeD3D11`。
 - PR #72 已合并到 `main`，merge `39d436279cf684d71b6c83ff105f242f576c2d61`；Go CI（含 race/benchmark）、UI full regression、Windows/macOS desktop package 均通过。首次 Go 全量测试仅遇到既有 `internal/tunnel/TestTLSTunnelMultiplexing` QUIC flaky，原 head 重跑后通过，未修改无关 tunnel 代码。
 
-### 0.2.19 WGC GPU Surface + BGRA→NV12 VideoProcessor（当前分支）
+### 0.2.19 WGC GPU Surface + BGRA→NV12 VideoProcessor（已合并 PR #73）
 
 - Host 新增可选 `D3D11CaptureSource`：捕获端可以借出 D3D11 device + texture resource；texture 持有独立 COM 引用并通过 `Close()` 精确释放，device 仅在 capture session 生命周期内借用。
 - WGC 新增 `WaitD3D11Frame`，直接从 WinRT `IDirect3D11Surface` 获取 `ID3D11Texture2D`，不创建 staging texture、不执行 `CopyResource → Map → CPU BGRA`；现有 CPU `Frame/WaitFrame/CaptureRaw` 路径保持不变。
@@ -285,6 +285,7 @@ Windows SendInput / CF_UNICODETEXT
 - Converter 使用 `VideoProcessorBlt` 同时完成 BGRA→NV12 色彩转换和输入尺寸→编码尺寸缩放，因此后续 resolution ABR 不需要 CPU resize；BGRA 输入允许奇数尺寸，NV12 输出仍强制偶数尺寸。
 - `Convert` 返回借用的 NV12 `D3D11EncodeFrame`；调用方必须在下一次 Convert/Close 前同步送入 PR #72 新增的 `EncodeD3D11`，避免额外 texture allocation/copy。
 - 新增 converter 配置、D3D11 capture frame COM lifetime 与 Windows surface delegation 单测；当前尚未切换 Host H.264 主循环，下一轮会用 capability/fallback 方式把 WGC GPU surface → converter → Media Foundation D3D11 encoder 串成真实运行路径。
+- PR #73 已合并到 `main`，merge `1a0840673a1a17cd862753e38c330f8b57d997d1`；Go CI（重跑既有 tunnel flaky 后含 race/benchmark）、UI full regression、Windows/macOS desktop package 全部通过。
 
 ### 0.3 本轮进度（2026-09-22）
 

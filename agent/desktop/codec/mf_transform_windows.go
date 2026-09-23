@@ -41,7 +41,7 @@ const (
 	mftMessageNotifyStartOfStream  = 0x10000003
 
 	mfVideoInterlaceProgressive = 2
-	h265ProfileMain4208          = 1
+	h265ProfileMain4208         = 1
 
 	mftOutputStreamProvidesSamples   = 0x100
 	mftOutputStreamCanProvideSamples = 0x200

@@ -12,7 +12,7 @@ import (
 	"time"
 	"unsafe"
 
-	win32 "github.com/deploymenttheory/go-bindings-win32/bindings/win32"
+	win32 "github.com/deploymenttheory/go-bindings-win32/bindings/runtime/win32"
 	winaudio "github.com/deploymenttheory/go-bindings-win32/bindings/win32/media/audio"
 	systemcom "github.com/deploymenttheory/go-bindings-win32/bindings/win32/system/com"
 )

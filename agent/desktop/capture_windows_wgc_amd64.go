@@ -229,7 +229,7 @@ func (s *wgcFrameStream) initialize(display screencapture.Display, maxFPS int) e
 	}
 	session2.Release()
 
-	s.configureFrameRateLimit(maxFPS)
+	_ = s.configureFrameRateLimit(maxFPS)
 
 	if err := s.session.StartCapture(); err != nil {
 		return fmt.Errorf("WGC start capture: %w", err)
@@ -249,23 +249,40 @@ func wgcMinUpdateInterval(maxFPS int) winrtfoundation.TimeSpan {
 	return winrtfoundation.TimeSpan{Duration: int64(ticks)}
 }
 
-func (s *wgcFrameStream) configureFrameRateLimit(maxFPS int) {
+func (s *wgcFrameStream) configureFrameRateLimit(maxFPS int) error {
 	interval := wgcMinUpdateInterval(maxFPS)
 	if s == nil || s.session == nil || interval.Duration <= 0 {
-		return
+		return nil
 	}
 	session5, err := wgcQueryInterface[winrtcapture.IGraphicsCaptureSession5](
 		s.session,
 		&winrtcapture.IID_IGraphicsCaptureSession5,
 	)
 	if err != nil {
-		return
+		// Session5 is optional on older Windows builds. The Host ticker and
+		// latest-frame drain still enforce delivered FPS when it is absent.
+		return nil
 	}
 	defer session5.Release()
-	// Session5 is optional on older Windows builds. Treat the frame-rate cap
-	// as an efficiency hint: WGC remains usable even when this property is
-	// unavailable or rejected by the runtime.
-	_ = session5.SetMinUpdateInterval(interval)
+	return session5.SetMinUpdateInterval(interval)
+}
+
+func (s *wgcFrameStream) SetMaxFPS(maxFPS int) error {
+	if s == nil || maxFPS <= 0 {
+		return nil
+	}
+	if s.closed || s.session == nil {
+		return screencapture.ErrBackendUnavailable
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := winrtruntime.Initialize(); err != nil {
+		return fmt.Errorf("WGC initialize WinRT for frame-rate update: %w", err)
+	}
+	if err := s.configureFrameRateLimit(maxFPS); err != nil {
+		return fmt.Errorf("WGC set frame-rate limit=%d: %w", maxFPS, err)
+	}
+	return nil
 }
 
 func (s *wgcFrameStream) Backend() protocol.DesktopCaptureBackend {

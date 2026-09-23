@@ -100,7 +100,7 @@ type DesktopDiagnosticsReport struct {
 	CurrentConfig     protocol.DesktopVideoConfig          `json:"currentConfig"`
 	CurrentStats      protocol.DesktopSessionStats         `json:"currentStats"`
 	Summary           DesktopDiagnosticsSummary            `json:"summary"`
-	HEVCValidation    *DesktopHEVCValidationSummary         `json:"hevcValidation,omitempty"`
+	HEVCValidation    *DesktopHEVCValidationSummary        `json:"hevcValidation,omitempty"`
 	Samples           []DesktopDiagnosticSample            `json:"samples"`
 }
 

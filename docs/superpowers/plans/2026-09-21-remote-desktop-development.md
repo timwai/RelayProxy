@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter 与 Host zero-copy H.264 pipeline 均已合并 main；当前分支补 GPU runtime failure → CPU H.264 generation 热迁移，只有 CPU H.264 也失败才继续降 JPEG  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline 与 GPU runtime → CPU H.264 generation 热迁移均已合并 main；下一阶段优先扩大 GPU path 实际命中率并推进 RD3 codec/audio 能力  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
@@ -300,7 +300,7 @@ Windows SendInput / CF_UNICODETEXT
 - 资源析构顺序固定为 encoder → converter/output texture，generation 切换和 session close 保持一致，避免异步 MFT flush 仍引用最后一个 NV12 surface。
 - PR #74 已合并到 `main`，merge `6cb0d3291d483d02149fab6eeee6c93208be1e69`；Go CI、race、benchmark、UI full regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.21 GPU Runtime → CPU H.264 Generation Migration（当前分支）
+### 0.2.21 GPU Runtime → CPU H.264 Generation Migration（已合并 PR #75）
 
 - WGC zero-copy 会话启动成功后，运行期出现非 timeout 的 D3D11 capture 错误、VideoProcessor 几何重建失败或 `EncodeD3D11`/转换失败时，不再立即退出 H.264 并触发 JPEG fallback。
 - Host 新增 CPU H.264 generation 迁移事务：先按当前分辨率/bitrate/FPS 打开新的 CPU-input Media Foundation H.264 encoder，再发送新的 `VideoConfig(G+1)` 与独立 SPS/PPS，随后要求新 generation 首帧 IDR。
@@ -309,6 +309,8 @@ Windows SendInput / CF_UNICODETEXT
 - 资源析构顺序仍保持 encoder → converter：新 generation 已成功广告后才关闭旧 D3D11 encoder，然后释放 converter/output texture，避免异步 MFT 仍引用最后一个 NV12 surface。
 - 如果 CPU H.264 generation 无法创建或新的 `VideoConfig` 无法发送，才让现有 `h264RuntimeError` 边界继续升级到 JPEG generation fallback。
 - 新增 CPU fallback generation 单测，覆盖 generation 递增、独立 sequence header、ForceIDR 与 generation overflow 不应调用 encoder opener。
+
+- PR #75 已合并到 `main`，merge `0833f53b3c7da42903ea666ac39eba623e91f858`；Go CI、race、benchmark、UI full regression、Windows/macOS desktop package 全部通过。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #98 已合并，merge `7d0499dfe7a764df157e8d33abe33ce0fd8621a4`）
+> 当前开发基线：`main`（PR #99 已合并，merge `866014812867ab7217ac05c123415ccd0ec3dc3a`）
 
 ## 0. 当前进度
 
@@ -500,7 +500,7 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 Controller 协商测试、legacy PCM fallback、显式 codec 拒绝、Host Opus transport/reassembly/decode 集成测试，以及 audio codec capability copy 测试。
 - PR #98 已合并到 `main`，merge `7d0499dfe7a764df157e8d33abe33ce0fd8621a4`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.41 RD3 Opus Packet-Loss Concealment（当前分支）
+### 0.2.41 RD3 Opus Packet-Loss Concealment（已合并 PR #99）
 
 - Controller 在 Opus playout 中根据 FrameID 明确识别网络缺口；缺失帧不再直接跳过，而是产生 `Concealment` playout event，Native Viewer 调用 Pion Opus decoder 的 PLC 生成完整 20 ms PCM 后继续交给 WASAPI。
 - 单次连续 concealment 严格限制为 3 帧（60 ms）。超过上限的大缺口直接推进到最新可播放真实帧，并记录 `gapSkippedFrames`，防止长断网后用 PLC 回放历史时间、造成音频持续落后。
@@ -509,7 +509,17 @@ Windows SendInput / CF_UNICODETEXT
 - Audio diagnostics 新增 `concealmentFrames` 与 `gapSkippedFrames`，summary 同步导出 `audioConcealmentFrames` / `audioGapSkippedFrames`，可区分网络缺帧被平滑掩盖与大缺口主动追实时。
 - 新增单帧缺失、连续大缺口 3 帧 PLC 上限、queue-overflow 不触发 PLC、Opus codec PLC PCM 输出与诊断汇总测试。
 - 新增真实 RD/1 packet-loss 集成链：Host 连续生成 4 帧 Opus datagram，确定性丢弃 FrameID=2 的实际 packet，再经 audio Reassembler → Controller gap detector → PLC event → Opus decoder，验证恢复后的三段 PCM 均保持完整 20 ms 帧长。
-- 下一步：做 Windows 实机 capture → Opus → loss/jitter → PLC → WASAPI 的听感、CPU 与端到端延迟验证，并据实机数据决定是否需要自适应 Opus bitrate/FEC。
+- PR #99 已合并到 `main`，merge `866014812867ab7217ac05c123415ccd0ec3dc3a`；Go format/vet/test/race/benchmark、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.42 RD3 Opus Loss Feedback Control（当前分支）
+
+- 协议新增独立 `audio_control` / `DesktopAudioControl.ExpectedLossPercent`，与 video ABR control 分离；只有已协商 Opus 的 session 才会产生该反馈，legacy PCM 不发送新 control message。
+- Controller 每秒根据 audio playout 的累计 `receivedFrames`、`concealmentFrames`、`gapSkippedFrames` 计算增量丢帧比例；本地 realtime queue overflow 不计入网络丢帧反馈，避免把播放器跟不上误判为链路 loss。
+- 丢帧率以 5 个百分点为步长量化，并要求至少 10 帧样本再更新，减少单个丢包导致 encoder 参数抖动；纯净窗口会恢复到 0%。
+- Host 控制循环校验 0–100% 后只保留最新 loss target；Opus stream 在下一帧 encode 前调用 Pion `SetLossRate`，不重建 encoder、不切 generation、不影响 video ABR。
+- `OpusEncoder` wrapper 新增 `SetLossRate`，并保留 Pion 参数合法性校验；当前只使用其 packet-loss resilience control，不启用尚未在当前 pinned encoder 路径验证的 FEC。
+- 新增 loss quantization / baseline / recovery / PCM reset、Opus encoder loss control 与 Host live update 测试。
+- 下一步：CI 通过后做 Windows 实机 capture → Opus → loss/jitter → PLC → WASAPI 的听感、CPU 与端到端延迟验证；根据真实诊断再决定 bitrate/FEC 参数，不用模拟结果直接改生产默认值。
 
 ### 0.3 本轮进度（2026-09-22）
 

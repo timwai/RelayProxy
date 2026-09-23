@@ -465,6 +465,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		desktopCapabilities = *hello.DesktopCapabilities
 		desktopCapabilities.Captures = append([]protocol.DesktopCaptureCapability(nil), hello.DesktopCapabilities.Captures...)
 		desktopCapabilities.Codecs = append([]protocol.DesktopCodecCapability(nil), hello.DesktopCapabilities.Codecs...)
+		desktopCapabilities.AudioCodecs = append([]string(nil), hello.DesktopCapabilities.AudioCodecs...)
 		desktopCapabilities.Displays = append([]protocol.DesktopDisplayCapability(nil), hello.DesktopCapabilities.Displays...)
 	}
 	deviceSession := &session.DeviceSession{

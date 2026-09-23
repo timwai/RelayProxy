@@ -4,7 +4,7 @@
 
 ## Phase 1：Android 作为网络出口
 
-状态：**首版代码已实现，待 CI / 真机验收**
+状态：**首版功能与 UI 已实现，CI 构建验证中 / 待真机验收**
 
 - [x] Android 独立工程骨架
 - [x] gomobile Go Core
@@ -21,6 +21,10 @@
 - [x] 状态、审批状态、设备 ID、活跃连接、延迟展示
 - [x] Android 构建文档
 - [x] GitHub Actions Debug APK 构建工作流
+- [x] Android 现代化卡片式 UI
+- [x] RelayProxy 品牌 Launcher / Round / 通知图标
+- [x] macOS Apple Silicon ARM64 + ARM32 双 APK 打包脚本
+- [x] Release 默认打包与自动签名支持
 
 ## Phase 1 验收
 

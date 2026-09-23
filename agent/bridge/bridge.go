@@ -109,6 +109,10 @@ func (b *UIBridge) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionS
 	b.agent.ReportRemoteDesktopViewerStats(stats)
 }
 
+func (b *UIBridge) RemoteDesktopAudioEnabled() bool {
+	return b != nil && b.agent != nil && b.agent.RemoteDesktopAudioEnabled()
+}
+
 // NextRemoteDesktopAudioFrame is intentionally a Go-only/native-viewer API.
 // WailsService does not bind it into JavaScript; 20 ms audio frames stay out of
 // JSON/WebView polling and are consumed by a blocking native playback goroutine.

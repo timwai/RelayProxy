@@ -780,6 +780,37 @@ func (h *Host) streamH264Frames(
 				continue
 			}
 			captureStarted := now
+			if gpuEnabled && d3dSource != nil {
+				frame, available, captureErr := d3dSource.CaptureD3D11(ctx)
+				lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
+				if captureErr != nil {
+					if errors.Is(captureErr, context.DeadlineExceeded) {
+						droppedFrames++
+						if err := reportStats(time.Now()); err != nil {
+							return err
+						}
+						continue
+					}
+					return captureErr
+				}
+				if !available || frame == nil {
+					droppedFrames++
+					if err := reportStats(time.Now()); err != nil {
+						return err
+					}
+					continue
+				}
+				err := sendD3D11Frame(frame, now)
+				frame.Close()
+				if err != nil {
+					return err
+				}
+				captureFormat = "d3d11-nv12"
+				if err := reportStats(time.Now()); err != nil {
+					return err
+				}
+				continue
+			}
 			if rawSource != nil && videoCfg.Width == sessionMaxWidth && videoCfg.Height == sessionMaxHeight {
 				rawFrame, available, rawErr := rawSource.CaptureRaw(ctx)
 				lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000

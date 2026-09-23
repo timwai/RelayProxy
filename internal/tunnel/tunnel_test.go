@@ -51,53 +51,79 @@ func generateSelfSignedCert(t *testing.T) tls.Certificate {
 
 func TestTLSTunnelMultiplexing(t *testing.T) {
 	cert := generateSelfSignedCert(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	clientRaw, serverRaw := net.Pipe()
-	clientTLS := tls.Client(clientRaw, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13})
-	serverTLS := tls.Server(serverRaw, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	defer listener.Close()
 
+	const streamCount = 4
+	testMsg := []byte("hello relayproxy stream")
 	serverErrCh := make(chan error, 1)
 	serverReady := make(chan struct{}, 1)
 	go func() {
+		rawConn, err := listener.Accept()
+		if err != nil {
+			serverErrCh <- err
+			return
+		}
+		serverTLS := tls.Server(rawConn, &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+		})
 		if err := serverTLS.HandshakeContext(ctx); err != nil {
+			_ = rawConn.Close()
 			serverErrCh <- err
 			return
 		}
 		session, err := ServerTLS(serverTLS, nil)
 		if err != nil {
+			_ = rawConn.Close()
 			serverErrCh <- err
 			return
 		}
 		defer session.Close()
 		serverReady <- struct{}{}
 
-		stream, err := session.AcceptStream(ctx)
-		if err != nil {
-			serverErrCh <- err
-			return
+		streams := make([]TunnelStream, 0, streamCount)
+		for i := 0; i < streamCount; i++ {
+			stream, err := session.AcceptStream(ctx)
+			if err != nil {
+				serverErrCh <- fmt.Errorf("accept stream %d: %w", i, err)
+				return
+			}
+			streams = append(streams, stream)
 		}
-		defer stream.Close()
+		defer func() {
+			for _, stream := range streams {
+				_ = stream.Close()
+			}
+		}()
 
-		buf := make([]byte, 1024)
-		n, err := stream.Read(buf)
-		if err != nil {
-			serverErrCh <- err
-			return
+		buf := make([]byte, len(testMsg))
+		for i, stream := range streams {
+			if _, err := io.ReadFull(stream, buf); err != nil {
+				serverErrCh <- fmt.Errorf("read stream %d: %w", i, err)
+				return
+			}
+			if _, err := stream.Write(buf); err != nil {
+				serverErrCh <- fmt.Errorf("write stream %d: %w", i, err)
+				return
+			}
 		}
-		_, err = stream.Write(buf[:n])
-		serverErrCh <- err
+		serverErrCh <- nil
 	}()
 
-	if err := clientTLS.HandshakeContext(ctx); err != nil {
-		t.Fatalf("client TLS handshake failed: %v", err)
-	}
-	clientMux, err := yamux.Client(clientTLS, DefaultYAMUXConfig())
+	clientSession, err := DialTLS(ctx, listener.Addr().String(), &tls.Config{
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS13,
+	}, nil)
 	if err != nil {
-		t.Fatalf("yamux client init failed: %v", err)
+		t.Fatalf("DialTLS failed: %v", err)
 	}
-	clientSession := NewTLSSession(clientTLS, clientMux)
 	defer clientSession.Close()
 
 	select {
@@ -108,27 +134,54 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 		t.Fatalf("server setup timed out: %v", ctx.Err())
 	}
 
-	clientStream, err := clientSession.OpenStream(ctx)
-	if err != nil {
-		t.Fatalf("OpenStream failed: %v", err)
+	streams := make([]TunnelStream, 0, streamCount)
+	for i := 0; i < streamCount; i++ {
+		stream, err := clientSession.OpenStream(ctx)
+		if err != nil {
+			t.Fatalf("OpenStream %d failed: %v", i, err)
+		}
+		streams = append(streams, stream)
 	}
-	defer clientStream.Close()
+	defer func() {
+		for _, stream := range streams {
+			_ = stream.Close()
+		}
+	}()
 
-	testMsg := "hello relayproxy stream"
-	if _, err := clientStream.Write([]byte(testMsg)); err != nil {
-		t.Fatalf("clientStream.Write failed: %v", err)
+	for i, stream := range streams {
+		if err := stream.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("SetDeadline stream %d failed: %v", i, err)
+		}
+		if _, err := stream.Write(testMsg); err != nil {
+			select {
+			case serverErr := <-serverErrCh:
+				t.Fatalf("client stream %d write failed: %v; server: %v", i, err, serverErr)
+			default:
+				t.Fatalf("client stream %d write failed: %v", i, err)
+			}
+		}
+
+		reply := make([]byte, len(testMsg))
+		if _, err := io.ReadFull(stream, reply); err != nil {
+			select {
+			case serverErr := <-serverErrCh:
+				t.Fatalf("client stream %d read failed: %v; server: %v", i, err, serverErr)
+			default:
+				t.Fatalf("client stream %d read failed: %v", i, err)
+			}
+		}
+		if string(reply) != string(testMsg) {
+			t.Fatalf("stream %d expected %q, got %q", i, testMsg, reply)
+		}
 	}
 
-	reply := make([]byte, 1024)
-	n, err := io.ReadAtLeast(clientStream, reply, len(testMsg))
-	if err != nil {
-		t.Fatalf("clientStream.Read failed: %v", err)
-	}
-	if string(reply[:n]) != testMsg {
-		t.Fatalf("expected %s, got %s", testMsg, string(reply[:n]))
-	}
-	if err := <-serverErrCh; err != nil {
-		t.Fatalf("server encountered error: %v", err)
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			t.Fatalf("server encountered error: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("server echo timed out: %v", ctx.Err())
 	}
 }
 

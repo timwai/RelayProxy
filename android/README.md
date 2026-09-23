@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-android.ps1
 
 `dist/android/`
 
-Windows 脚本默认构建 Release。未配置签名时输出 `RelayProxy-Android-release-unsigned.apk`；配置签名后输出 `RelayProxy-Android-release.apk`。如需 Debug，可执行 `./scripts/build-android.ps1 -Configuration Debug`。若需要自动生成可安装的签名 Release APK，请设置：
+Windows 脚本默认构建 Release，并签名为 `RelayProxy-Android-release.apk`（未配置 `RELAY_ANDROID_*` 时使用本机 debug 密钥）。如需 Debug，可执行 `./scripts/build-android.ps1 -Configuration Debug`。正式发布请设置：
 
 ```powershell
 $env:RELAY_ANDROID_KEYSTORE="D:\keys\relayproxy.jks"
@@ -77,11 +77,11 @@ Gradle 同时使用 `-PrelayAbi=<ABI>` 限定 APK 中的原生库，因此两个
 ./scripts/build-android-macos.sh --clean
 ```
 
-默认输出：
+默认构建两个 **已签名** Release APK（未配置 `RELAY_ANDROID_*` 时使用本机 Android debug 密钥，可直接安装）：
 
 ```text
-dist/android/RelayProxy-Android-arm64-release-unsigned.apk
-dist/android/RelayProxy-Android-arm32-release-unsigned.apk
+dist/android/RelayProxy-Android-arm64-release.apk
+dist/android/RelayProxy-Android-arm32-release.apk
 ```
 
 只构建 ARM64：
@@ -109,14 +109,7 @@ dist/android/RelayProxy-Android-arm64-release.apk
 dist/android/RelayProxy-Android-arm32-release.apk
 ```
 
-未配置签名时输出：
-
-```text
-dist/android/RelayProxy-Android-arm64-release-unsigned.apk
-dist/android/RelayProxy-Android-arm32-release-unsigned.apk
-```
-
-自动签名使用与 Windows 脚本相同的环境变量：
+未配置 `RELAY_ANDROID_*` 时，脚本会用本机 `~/.android/debug.keystore` 签名，APK 可直接安装。上架或正式发布请设置：
 
 ```bash
 export RELAY_ANDROID_KEYSTORE="$HOME/keys/relayproxy.jks"

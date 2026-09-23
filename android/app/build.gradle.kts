@@ -33,11 +33,20 @@ android {
         }
     }
 
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = true
         }
     }
+}
+
+kotlin {
+    jvmToolchain(17)
 }
 
 dependencies {

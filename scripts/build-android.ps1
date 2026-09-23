@@ -8,11 +8,8 @@
   and copies the final artifact to dist/android.
 
   Debug APKs are signed by the Android debug keystore and are directly installable.
-  Release APKs are signed automatically when these environment variables exist:
-    RELAY_ANDROID_KEYSTORE
-    RELAY_ANDROID_KEY_ALIAS
-    RELAY_ANDROID_KEYSTORE_PASSWORD
-    RELAY_ANDROID_KEY_PASSWORD
+  Release APKs use RELAY_ANDROID_* when set; otherwise they are signed with the
+  local Android debug keystore so they can be sideloaded.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\scripts\build-android.ps1
@@ -225,6 +222,53 @@ function Resolve-ApkSigner {
     return $null
 }
 
+function Test-ReleaseSigning {
+    return [bool](
+        $env:RELAY_ANDROID_KEYSTORE -and
+        $env:RELAY_ANDROID_KEY_ALIAS -and
+        $env:RELAY_ANDROID_KEYSTORE_PASSWORD -and
+        $env:RELAY_ANDROID_KEY_PASSWORD
+    )
+}
+
+function Ensure-DebugKeystore {
+    $ks = Join-Path $env:USERPROFILE ".android\debug.keystore"
+    if (Test-Path -LiteralPath $ks) { return $ks }
+    $keytool = Resolve-CommandPath "keytool"
+    if (-not $keytool) { throw "keytool not found. Install JDK 17 to create a debug keystore." }
+    $androidDir = Split-Path -Parent $ks
+    New-Item -ItemType Directory -Path $androidDir -Force | Out-Null
+    Invoke-Checked $keytool "-genkeypair" "-keystore" $ks "-alias" "androiddebugkey" "-keyalg" "RSA" "-keysize" "2048" "-validity" "10000" "-storepass" "android" "-keypass" "android" "-dname" "CN=Android Debug,O=Android,C=US"
+    return $ks
+}
+
+function Sign-Apk {
+    param(
+        [string]$SdkRoot,
+        [string]$SourceApk,
+        [string]$FinalApk
+    )
+
+    $apksigner = Resolve-ApkSigner $SdkRoot
+    if (-not $apksigner) {
+        throw "apksigner.bat not found in Android build-tools."
+    }
+    if (Test-Path -LiteralPath $FinalApk) {
+        Remove-Item -LiteralPath $FinalApk -Force
+    }
+
+    if (Test-ReleaseSigning) {
+        if (-not (Test-Path -LiteralPath $env:RELAY_ANDROID_KEYSTORE)) {
+            throw "RELAY_ANDROID_KEYSTORE does not exist: $env:RELAY_ANDROID_KEYSTORE"
+        }
+        Invoke-Checked $apksigner "sign" "--ks" $env:RELAY_ANDROID_KEYSTORE "--ks-key-alias" $env:RELAY_ANDROID_KEY_ALIAS "--ks-pass" "env:RELAY_ANDROID_KEYSTORE_PASSWORD" "--key-pass" "env:RELAY_ANDROID_KEY_PASSWORD" "--out" $FinalApk $SourceApk
+    } else {
+        $debugKs = Ensure-DebugKeystore
+        Invoke-Checked $apksigner "sign" "--ks" $debugKs "--ks-key-alias" "androiddebugkey" "--ks-pass" "pass:android" "--key-pass" "pass:android" "--out" $FinalApk $SourceApk
+    }
+    Invoke-Checked $apksigner "verify" "--verbose" $FinalApk
+}
+
 function Copy-FinalApk {
     param(
         [string]$Source,
@@ -255,6 +299,18 @@ try {
     Write-Step "Validate host toolchain"
     if (-not (Resolve-CommandPath "go")) { throw "Go was not found in PATH." }
     if (-not (Resolve-CommandPath "java")) { throw "Java was not found in PATH. JDK 17 is recommended." }
+
+    $goBin = (& go env GOBIN).Trim()
+    if ($LASTEXITCODE -ne 0) { $goBin = "" }
+    $goPath = (& go env GOPATH).Trim()
+    if ($LASTEXITCODE -eq 0 -and $goPath) {
+        $goPathBin = Join-Path $goPath "bin"
+        if ($goBin) {
+            $env:Path = "$goBin;$goPathBin;$env:Path"
+        } else {
+            $env:Path = "$goPathBin;$env:Path"
+        }
+    }
 
     Invoke-Checked "go" "version"
     Invoke-Checked "java" "-version"
@@ -343,33 +399,16 @@ try {
         $finalApk = Copy-FinalApk $source "RelayProxy-Android-debug.apk"
     } else {
         $unsigned = Join-Path $AppDir "build\outputs\apk\release\app-release-unsigned.apk"
-        $hasSigning = (
-            $env:RELAY_ANDROID_KEYSTORE -and
-            $env:RELAY_ANDROID_KEY_ALIAS -and
-            $env:RELAY_ANDROID_KEYSTORE_PASSWORD -and
-            $env:RELAY_ANDROID_KEY_PASSWORD
-        )
-
-        if ($hasSigning) {
-            if (-not (Test-Path -LiteralPath $env:RELAY_ANDROID_KEYSTORE)) {
-                throw "RELAY_ANDROID_KEYSTORE does not exist: $env:RELAY_ANDROID_KEYSTORE"
-            }
-            $apksigner = Resolve-ApkSigner $sdkRoot
-            if (-not $apksigner) {
-                throw "apksigner.bat not found in Android build-tools."
-            }
-
+        New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+        $finalApk = Join-Path $OutDir "RelayProxy-Android-release.apk"
+        if (Test-ReleaseSigning) {
             Write-Step "Sign Release APK"
-            New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
-            $finalApk = Join-Path $OutDir "RelayProxy-Android-release.apk"
-            if (Test-Path -LiteralPath $finalApk) {
-                Remove-Item -LiteralPath $finalApk -Force
-            }
-            Invoke-Checked $apksigner "sign" "--ks" $env:RELAY_ANDROID_KEYSTORE "--ks-key-alias" $env:RELAY_ANDROID_KEY_ALIAS "--ks-pass" "env:RELAY_ANDROID_KEYSTORE_PASSWORD" "--key-pass" "env:RELAY_ANDROID_KEY_PASSWORD" "--out" $finalApk $unsigned
-            Invoke-Checked $apksigner "verify" "--verbose" $finalApk
         } else {
-            $finalApk = Copy-FinalApk $unsigned "RelayProxy-Android-release-unsigned.apk"
-            Write-Warning "Release APK is unsigned. Set all RELAY_ANDROID_* signing variables to create an installable signed release APK."
+            Write-Step "Sign Release APK with local debug keystore"
+        }
+        Sign-Apk -SdkRoot $sdkRoot -SourceApk $unsigned -FinalApk $finalApk
+        if (-not (Test-ReleaseSigning)) {
+            Write-Warning "Release APK is signed with the local Android debug keystore. Set RELAY_ANDROID_* for production signing."
         }
     }
 

@@ -15,6 +15,8 @@ BUILD_TOOLS_VERSION="35.0.0"
 NDK_VERSION="27.2.12479018"
 GRADLE_VERSION="8.9"
 ANDROID_API="26"
+COMMANDLINE_TOOLS_ZIP_URL="https://dl.google.com/android/repository/commandlinetools-mac-14742923_latest.zip"
+DEFAULT_SDK_ROOT="${HOME}/Library/Android/sdk"
 
 usage() {
   cat <<'USAGE'
@@ -46,6 +48,8 @@ Release signing environment variables:
   RELAY_ANDROID_KEY_ALIAS
   RELAY_ANDROID_KEYSTORE_PASSWORD
   RELAY_ANDROID_KEY_PASSWORD
+
+If those are unset, the script signs with a local Android debug keystore so the APK can be sideloaded.
 USAGE
 }
 
@@ -85,11 +89,25 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 not found in PATH"
 }
 
+ensure_go_bin_on_path() {
+  local gobin gopath
+  gobin="$(go env GOBIN 2>/dev/null || true)"
+  gopath="$(go env GOPATH 2>/dev/null || true)"
+  if [[ -n "$gobin" ]]; then
+    export PATH="$gobin:$PATH"
+  fi
+  if [[ -n "$gopath" ]]; then
+    export PATH="${gopath%%:*}/bin:$PATH"
+  fi
+}
+
 resolve_android_sdk() {
   local candidates=(
     "${ANDROID_SDK_ROOT:-}"
     "${ANDROID_HOME:-}"
-    "$HOME/Library/Android/sdk"
+    "$DEFAULT_SDK_ROOT"
+    "/opt/homebrew/share/android-commandlinetools"
+    "/usr/local/share/android-commandlinetools"
   )
   local candidate
   for candidate in "${candidates[@]}"; do
@@ -99,6 +117,33 @@ resolve_android_sdk() {
     fi
   done
   return 1
+}
+
+bootstrap_android_sdk() {
+  local sdk="$DEFAULT_SDK_ROOT"
+  local cache_root="$HOME/Library/Caches/RelayProxy/tools"
+  local zip="$cache_root/commandlinetools-mac.zip"
+  local tmp
+  need_cmd curl
+  need_cmd unzip
+  step "Bootstrap Android SDK command-line tools"
+  mkdir -p "$sdk/cmdline-tools" "$cache_root"
+  curl -fL "$COMMANDLINE_TOOLS_ZIP_URL" -o "$zip"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/relayproxy-cmdline-tools.XXXXXX")"
+  unzip -q "$zip" -d "$tmp"
+  rm -rf "$sdk/cmdline-tools/latest"
+  mkdir -p "$sdk/cmdline-tools/latest"
+  if [[ -d "$tmp/cmdline-tools/bin" ]]; then
+    mv "$tmp/cmdline-tools/"* "$sdk/cmdline-tools/latest/"
+  elif [[ -d "$tmp/cmdline-tools/latest/bin" ]]; then
+    mv "$tmp/cmdline-tools/latest/"* "$sdk/cmdline-tools/latest/"
+  else
+    rm -rf "$tmp"
+    fail "Unexpected Android command-line tools zip layout"
+  fi
+  rm -rf "$tmp" "$zip"
+  [[ -x "$sdk/cmdline-tools/latest/bin/sdkmanager" ]] || fail "sdkmanager missing after command-line tools bootstrap"
+  (cd "$sdk" && pwd)
 }
 
 resolve_sdkmanager() {
@@ -211,14 +256,80 @@ resolve_apksigner() {
   find "$sdk/build-tools" -type f -name apksigner -perm -111 2>/dev/null | sort | tail -n 1
 }
 
+has_release_signing() {
+  [[ -n "${RELAY_ANDROID_KEYSTORE:-}" && \
+     -n "${RELAY_ANDROID_KEY_ALIAS:-}" && \
+     -n "${RELAY_ANDROID_KEYSTORE_PASSWORD:-}" && \
+     -n "${RELAY_ANDROID_KEY_PASSWORD:-}" ]]
+}
+
+ensure_debug_keystore() {
+  local ks="$HOME/.android/debug.keystore"
+  if [[ -f "$ks" ]]; then
+    echo "$ks"
+    return 0
+  fi
+  need_cmd keytool
+  mkdir -p "$HOME/.android"
+  keytool -genkeypair \
+    -keystore "$ks" \
+    -alias androiddebugkey \
+    -keyalg RSA \
+    -keysize 2048 \
+    -validity 10000 \
+    -storepass android \
+    -keypass android \
+    -dname "CN=Android Debug,O=Android,C=US"
+  echo "$ks"
+}
+
+sign_apk() {
+  local source_apk="$1"
+  local final_apk="$2"
+  local apksigner
+  apksigner="$(resolve_apksigner "$SDK_ROOT" || true)"
+  [[ -n "$apksigner" ]] || fail "apksigner not found in Android build-tools"
+  rm -f "$final_apk"
+  if has_release_signing; then
+    [[ -f "$RELAY_ANDROID_KEYSTORE" ]] || fail "Keystore not found: $RELAY_ANDROID_KEYSTORE"
+    "$apksigner" sign \
+      --ks "$RELAY_ANDROID_KEYSTORE" \
+      --ks-key-alias "$RELAY_ANDROID_KEY_ALIAS" \
+      --ks-pass env:RELAY_ANDROID_KEYSTORE_PASSWORD \
+      --key-pass env:RELAY_ANDROID_KEY_PASSWORD \
+      --out "$final_apk" \
+      "$source_apk"
+  else
+    local debug_ks
+    debug_ks="$(ensure_debug_keystore)"
+    "$apksigner" sign \
+      --ks "$debug_ks" \
+      --ks-key-alias androiddebugkey \
+      --ks-pass pass:android \
+      --key-pass pass:android \
+      --out "$final_apk" \
+      "$source_apk"
+  fi
+  "$apksigner" verify --verbose "$final_apk"
+}
+
 [[ "$(uname -s)" == "Darwin" ]] || fail "This script is intended for macOS"
 [[ "$(uname -m)" == "arm64" ]] || fail "This script is intended for Apple Silicon (arm64), including Mac mini M4"
 
 need_cmd go
+ensure_go_bin_on_path
 resolve_java17 || fail "JDK not found. Install JDK 17 (Homebrew: brew install openjdk@17)."
 
+if [[ -n "${ANDROID_SDK_ROOT:-}" && ! -d "$ANDROID_SDK_ROOT" ]]; then
+  fail "ANDROID_SDK_ROOT is set but not a directory: $ANDROID_SDK_ROOT"
+fi
+if [[ -n "${ANDROID_HOME:-}" && ! -d "$ANDROID_HOME" ]]; then
+  fail "ANDROID_HOME is set but not a directory: $ANDROID_HOME"
+fi
 SDK_ROOT="$(resolve_android_sdk || true)"
-[[ -n "$SDK_ROOT" ]] || fail "Android SDK not found. Install Android Studio SDK or set ANDROID_SDK_ROOT."
+if [[ -z "$SDK_ROOT" ]]; then
+  SDK_ROOT="$(bootstrap_android_sdk)"
+fi
 export ANDROID_SDK_ROOT="$SDK_ROOT"
 export ANDROID_HOME="$SDK_ROOT"
 
@@ -345,30 +456,13 @@ build_one_arch() {
   else
     source_apk="$APP_DIR/build/outputs/apk/release/app-release-unsigned.apk"
     [[ -f "$source_apk" ]] || fail "Expected APK not found: $source_apk"
-
-    if [[ -n "${RELAY_ANDROID_KEYSTORE:-}" && \
-          -n "${RELAY_ANDROID_KEY_ALIAS:-}" && \
-          -n "${RELAY_ANDROID_KEYSTORE_PASSWORD:-}" && \
-          -n "${RELAY_ANDROID_KEY_PASSWORD:-}" ]]; then
-      [[ -f "$RELAY_ANDROID_KEYSTORE" ]] || fail "Keystore not found: $RELAY_ANDROID_KEYSTORE"
-      local apksigner
-      apksigner="$(resolve_apksigner "$SDK_ROOT" || true)"
-      [[ -n "$apksigner" ]] || fail "apksigner not found in Android build-tools"
-      final_apk="$OUT_DIR/RelayProxy-Android-$arch_name-release.apk"
-      rm -f "$final_apk"
+    final_apk="$OUT_DIR/RelayProxy-Android-$arch_name-release.apk"
+    if has_release_signing; then
       step "Sign $arch_name Release APK"
-      "$apksigner" sign \
-        --ks "$RELAY_ANDROID_KEYSTORE" \
-        --ks-key-alias "$RELAY_ANDROID_KEY_ALIAS" \
-        --ks-pass env:RELAY_ANDROID_KEYSTORE_PASSWORD \
-        --key-pass env:RELAY_ANDROID_KEY_PASSWORD \
-        --out "$final_apk" \
-        "$source_apk"
-      "$apksigner" verify --verbose "$final_apk"
     else
-      final_apk="$OUT_DIR/RelayProxy-Android-$arch_name-release-unsigned.apk"
-      cp -f "$source_apk" "$final_apk"
+      step "Sign $arch_name Release APK with local debug keystore"
     fi
+    sign_apk "$source_apk" "$final_apk"
   fi
 
   FINAL_APKS+=("$final_apk")
@@ -382,12 +476,8 @@ if (( BUILD_ARM32 == 1 )); then
   build_one_arch "arm32" "armeabi-v7a" "android/arm"
 fi
 
-if [[ "$CONFIGURATION" == "Release" && \
-      ( -z "${RELAY_ANDROID_KEYSTORE:-}" || \
-        -z "${RELAY_ANDROID_KEY_ALIAS:-}" || \
-        -z "${RELAY_ANDROID_KEYSTORE_PASSWORD:-}" || \
-        -z "${RELAY_ANDROID_KEY_PASSWORD:-}" ) ]]; then
-  printf '\nWARNING: Release APKs are unsigned. Set RELAY_ANDROID_* signing variables for installable release APKs.\n' >&2
+if [[ "$CONFIGURATION" == "Release" ]] && ! has_release_signing; then
+  printf '\nWARNING: Release APKs are signed with the local Android debug keystore. Set RELAY_ANDROID_* for production signing.\n' >&2
 fi
 
 printf '\n\033[1;32m==================================================\n'

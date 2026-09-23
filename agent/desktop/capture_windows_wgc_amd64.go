@@ -268,6 +268,28 @@ func (s *wgcFrameStream) configureFrameRateLimit(maxFPS int) {
 	_ = session5.SetMinUpdateInterval(interval)
 }
 
+func (s *wgcFrameStream) SetFrameRateLimit(maxFPS int) error {
+	if maxFPS <= 0 {
+		return fmt.Errorf("invalid WGC frame rate %d", maxFPS)
+	}
+	if s == nil {
+		return screencapture.ErrBackendUnavailable
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if err := winrtruntime.Initialize(); err != nil {
+		return err
+	}
+	if s.closed || s.session == nil {
+		return screencapture.ErrBackendUnavailable
+	}
+	// Keep the same compatibility semantics as session initialization:
+	// IGraphicsCaptureSession5 is optional and SetMinUpdateInterval is only an
+	// efficiency hint. Unsupported/rejected updates must not tear down capture.
+	s.configureFrameRateLimit(maxFPS)
+	return nil
+}
+
 func (s *wgcFrameStream) Backend() protocol.DesktopCaptureBackend {
 	return protocol.DesktopCaptureWGC
 }

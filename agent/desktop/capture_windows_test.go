@@ -163,6 +163,12 @@ func TestMapDisplayNormalizedToVirtualHandlesNegativeVerticalOrigin(t *testing.T
 
 type testWindowsFrameStream struct {
 	backend protocol.DesktopCaptureBackend
+	fps     int
+}
+
+func (s *testWindowsFrameStream) SetFrameRateLimit(fps int) error {
+	s.fps = fps
+	return nil
 }
 
 func (s *testWindowsFrameStream) Frame() (windowsCaptureFrame, bool) {
@@ -178,6 +184,24 @@ func (s *testWindowsFrameStream) Backend() protocol.DesktopCaptureBackend {
 }
 
 func (s *testWindowsFrameStream) Close() error { return nil }
+
+func TestWindowsCaptureSetCaptureFPSDelegatesToStream(t *testing.T) {
+	stream := &testWindowsFrameStream{backend: protocol.DesktopCaptureWGC}
+	capture := &windowsCapture{stream: stream}
+	if err := capture.SetCaptureFPS(12); err != nil {
+		t.Fatal(err)
+	}
+	if stream.fps != 12 {
+		t.Fatalf("stream fps=%d want=12", stream.fps)
+	}
+}
+
+func TestWindowsCaptureSetCaptureFPSRejectsInvalidValue(t *testing.T) {
+	capture := &windowsCapture{}
+	if err := capture.SetCaptureFPS(0); err == nil {
+		t.Fatal("expected invalid fps error")
+	}
+}
 
 func TestOpenAutoWindowsFrameStreamFallsThroughInOrder(t *testing.T) {
 	display := screencapture.Display{AdapterIndex: 0, OutputIndex: 0}

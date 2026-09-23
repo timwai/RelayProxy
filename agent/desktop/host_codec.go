@@ -539,6 +539,7 @@ func (h *Host) streamH264Frames(
 			targetFPS = nextFPS
 			frameInterval = frameIntervalForFPS(targetFPS)
 			ticker.Reset(frameInterval)
+			applyCaptureFPS(h.source, targetFPS)
 			log.Printf("[Desktop] H.264 capture fps updated=%d", targetFPS)
 
 		case target := <-resolutionUpdates:

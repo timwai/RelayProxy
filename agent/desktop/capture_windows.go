@@ -339,6 +339,28 @@ func (c *windowsCapture) CaptureBackend() string {
 	return c.backend
 }
 
+func (c *windowsCapture) SetCaptureFPS(fps int) error {
+	if fps <= 0 {
+		return fmt.Errorf("invalid Windows capture fps %d", fps)
+	}
+	if c == nil {
+		return errors.New("Windows desktop capture is unavailable")
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return errors.New("Windows desktop capture is closed")
+	}
+	if c.stream == nil {
+		return nil
+	}
+	controller, ok := c.stream.(windowsFrameRateController)
+	if !ok {
+		return nil
+	}
+	return controller.SetFrameRateLimit(fps)
+}
+
 func (c *windowsCapture) closeStreamLocked() {
 	if c.stream != nil {
 		_ = c.stream.Close()

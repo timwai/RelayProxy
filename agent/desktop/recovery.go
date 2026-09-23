@@ -23,7 +23,7 @@ func (s *h264RecoveryState) Observe(frame *desktopmedia.EncodedFrame, config pro
 	if frame == nil {
 		return false, false
 	}
-	if config.Codec != "h264" {
+	if config.Codec != "h264" && config.Codec != "h265" {
 		s.Reset()
 		return true, false
 	}

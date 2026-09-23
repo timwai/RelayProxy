@@ -10,18 +10,33 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 const mfETransformStreamChange = 0xc00d6d61
 
+type mfVideoDecoderSpec struct {
+	Codec        string
+	Label        string
+	InputSubtype *windows.GUID
+}
+
+var (
+	mfH264DecoderSpec = mfVideoDecoderSpec{Codec: "h264", Label: "H.264", InputSubtype: &mfVideoFormatH264}
+	mfH265DecoderSpec = mfVideoDecoderSpec{Codec: "h265", Label: "H.265", InputSubtype: &mfVideoFormatHEVC}
+)
+
 type MFH264Decoder struct {
 	info      MFH264DecoderInfo
+	spec      mfVideoDecoderSpec
 	commands  chan mfDecodeCommand
 	done      chan struct{}
 	closeOnce sync.Once
 }
 
 type MFH264DecoderInfo struct {
+	Codec      string
 	Hardware   bool
 	Async      bool
 	D3D11Aware bool

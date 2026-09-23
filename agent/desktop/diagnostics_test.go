@@ -329,6 +329,7 @@ func TestSummarizeDesktopDiagnosticsIncludesAudio(t *testing.T) {
 				Enabled: true, Config: audioConfig, QueueFrames: 1, QueueCapacity: 8,
 				ReceivedFrames: 50, ConsumedFrames: 48, QueueDroppedFrames: 3,
 				GenerationDiscardedFrames: 2, RejectedFrames: 4,
+				ReorderedFrames: 5, DuplicateFrames: 2, LateFrames: 3, PlayoutTimeoutFrames: 1,
 			},
 		},
 	}
@@ -339,6 +340,10 @@ func TestSummarizeDesktopDiagnosticsIncludesAudio(t *testing.T) {
 		summary.AudioQueueDroppedFrames != 3 ||
 		summary.AudioGenerationDiscards != 2 ||
 		summary.AudioRejectedFrames != 4 ||
+		summary.AudioReorderedFrames != 5 ||
+		summary.AudioDuplicateFrames != 2 ||
+		summary.AudioLateFrames != 3 ||
+		summary.AudioPlayoutTimeouts != 1 ||
 		summary.AudioMaxQueueFrames != 4 {
 		t.Fatalf("audio summary=%+v", summary)
 	}

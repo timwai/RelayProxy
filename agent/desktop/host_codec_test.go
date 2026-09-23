@@ -44,9 +44,9 @@ func (e *abrTestEncoder) Close() error {
 
 func TestFitEvenDimensions(t *testing.T) {
 	tests := []struct {
-		name                 string
-		width, height        int
-		maxWidth, maxHeight  int
+		name                  string
+		width, height         int
+		maxWidth, maxHeight   int
 		wantWidth, wantHeight int
 	}{
 		{name: "native even", width: 1920, height: 1080, maxWidth: 1920, maxHeight: 1080, wantWidth: 1920, wantHeight: 1080},

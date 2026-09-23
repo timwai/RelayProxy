@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hashicorp/yamux"
 )
 
 // generateSelfSignedCert generates an in-memory TLS certificate for testing

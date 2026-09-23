@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIGURATION="Debug"
+CONFIGURATION="Release"
 OUT_DIR=""
 CLEAN=0
 SKIP_TESTS=0
@@ -27,8 +27,8 @@ Legacy entrypoint:
   ./scripts/build-android-macos-arm64.sh [options]
 
 Options:
-  --debug                  Build Debug APK (default)
-  --release                Build Release APK
+  --debug                  Build Debug APK
+  --release                Build Release APK (default)
   --clean                  Remove previous Android outputs first
   --skip-tests             Skip Go test preflight
   --skip-sdk-install       Do not run sdkmanager for pinned packages

@@ -19,6 +19,16 @@ type testCapabilityCaptureSource struct {
 	testCaptureSource
 }
 
+type testFPSCaptureSource struct {
+	testCaptureSource
+	fps int
+}
+
+func (s *testFPSCaptureSource) SetCaptureFPS(fps int) error {
+	s.fps = fps
+	return nil
+}
+
 type testSessionCaptureSource struct {
 	testCaptureSource
 	backend string
@@ -42,6 +52,18 @@ func TestFitRGBAPreservesAspectRatio(t *testing.T) {
 	if got.Bounds().Dx() != 1280 || got.Bounds().Dy() != 720 {
 		t.Fatalf("scaled size=%dx%d", got.Bounds().Dx(), got.Bounds().Dy())
 	}
+}
+
+func TestApplyCaptureFPSDelegatesToOptionalController(t *testing.T) {
+	source := &testFPSCaptureSource{}
+	applyCaptureFPS(source, 15)
+	if source.fps != 15 {
+		t.Fatalf("capture fps=%d want=15", source.fps)
+	}
+}
+
+func TestApplyCaptureFPSIgnoresUnsupportedSource(t *testing.T) {
+	applyCaptureFPS(&testCaptureSource{}, 15)
 }
 
 func TestHostCaptureJPEG(t *testing.T) {

@@ -30,6 +30,7 @@ func TestSessionDiagnosticsRecorderKeepsBoundedRecentSamples(t *testing.T) {
 				Path:          "udp_p2p",
 				ActualBitrate: int64(i),
 			},
+			DesktopAudioDiagnostics{},
 			desktopadapt.MediaDecision{
 				Changed:       i%5 == 0,
 				TargetBitrate: 4_000_000,
@@ -44,7 +45,7 @@ func TestSessionDiagnosticsRecorderKeepsBoundedRecentSamples(t *testing.T) {
 		Codec:      "h264",
 		Width:      1280,
 		Height:     720,
-	}, protocol.DesktopSessionStats{Path: "relay"})
+	}, protocol.DesktopSessionStats{Path: "relay"}, DesktopAudioDiagnostics{})
 
 	if report.SchemaVersion != desktopDiagnosticsSchemaVersion ||
 		report.SampleIntervalMs != desktopDiagnosticsIntervalMs ||
@@ -72,7 +73,7 @@ func TestSessionDiagnosticsRecorderKeepsBoundedRecentSamples(t *testing.T) {
 	}
 
 	report.Samples[0].Stats.Path = "mutated"
-	again := recorder.Report(start.Add(12*time.Minute), protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{})
+	again := recorder.Report(start.Add(12*time.Minute), protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, DesktopAudioDiagnostics{})
 	if again.Samples[0].Stats.Path != "udp_p2p" {
 		t.Fatal("report exposed recorder sample storage")
 	}
@@ -272,10 +273,10 @@ func TestSessionDiagnosticsReportSummarizesHEVCValidation(t *testing.T) {
 		},
 	}
 	for i, sample := range samples {
-		recorder.Record(start.Add(time.Duration(i)*500*time.Millisecond), sample.config, sample.stats, desktopadapt.MediaDecision{})
+		recorder.Record(start.Add(time.Duration(i)*500*time.Millisecond), sample.config, sample.stats, DesktopAudioDiagnostics{}, desktopadapt.MediaDecision{})
 	}
 
-	report := recorder.Report(start.Add(3*time.Second), samples[len(samples)-1].config, samples[len(samples)-1].stats)
+	report := recorder.Report(start.Add(3*time.Second), samples[len(samples)-1].config, samples[len(samples)-1].stats, DesktopAudioDiagnostics{})
 	got := report.HEVCValidation
 	if got == nil || !got.Requested {
 		t.Fatalf("missing HEVC validation summary: %+v", got)
@@ -293,5 +294,79 @@ func TestSessionDiagnosticsReportSummarizesHEVCValidation(t *testing.T) {
 	if got.EncoderBackends["media-foundation-hevc"] != 2 ||
 		got.DecoderBackends["mf-hevc-d3d11"] != 1 || got.DecoderBackends["mf-hevc"] != 1 {
 		t.Fatalf("HEVC backend summary=%+v %+v", got.EncoderBackends, got.DecoderBackends)
+	}
+}
+
+func TestSummarizeDesktopDiagnosticsIncludesAudio(t *testing.T) {
+	start := time.Unix(400, 0)
+	audioConfig := protocol.DesktopAudioConfig{
+		Generation:      1,
+		Codec:           protocol.DesktopAudioCodecPCMS16LE,
+		SampleRate:      48_000,
+		Channels:        2,
+		BitsPerSample:   16,
+		FrameDurationMs: 20,
+		TargetBitrate:   1_536_000,
+	}
+	samples := []DesktopDiagnosticSample{
+		{
+			AtUnixMs: start.UnixMilli(),
+			Audio: DesktopAudioDiagnostics{
+				Enabled: true, Config: audioConfig, QueueFrames: 2, QueueCapacity: 8,
+				ReceivedFrames: 10, ConsumedFrames: 8,
+			},
+		},
+		{
+			AtUnixMs: start.Add(500 * time.Millisecond).UnixMilli(),
+			Audio: DesktopAudioDiagnostics{
+				Enabled: true, Config: audioConfig, QueueFrames: 4, QueueCapacity: 8,
+				ReceivedFrames: 30, ConsumedFrames: 25, QueueDroppedFrames: 1,
+			},
+		},
+		{
+			AtUnixMs: start.Add(time.Second).UnixMilli(),
+			Audio: DesktopAudioDiagnostics{
+				Enabled: true, Config: audioConfig, QueueFrames: 1, QueueCapacity: 8,
+				ReceivedFrames: 50, ConsumedFrames: 48, QueueDroppedFrames: 3,
+				GenerationDiscardedFrames: 2, RejectedFrames: 4,
+			},
+		},
+	}
+	summary := summarizeDesktopDiagnostics(start, start.Add(1500*time.Millisecond), samples)
+	if summary.AudioConfiguredSamples != 3 ||
+		summary.AudioReceivedFrames != 50 ||
+		summary.AudioConsumedFrames != 48 ||
+		summary.AudioQueueDroppedFrames != 3 ||
+		summary.AudioGenerationDiscards != 2 ||
+		summary.AudioRejectedFrames != 4 ||
+		summary.AudioMaxQueueFrames != 4 {
+		t.Fatalf("audio summary=%+v", summary)
+	}
+	if summary.AudioCodecs[protocol.DesktopAudioCodecPCMS16LE] != 3 {
+		t.Fatalf("audio codecs=%+v", summary.AudioCodecs)
+	}
+	if got := summary.AudioQueueFrames; got.Samples != 3 || got.Min != 1 ||
+		got.Avg != 7.0/3.0 || got.P50 != 2 || got.P95 != 4 || got.Max != 4 {
+		t.Fatalf("audio queue summary=%+v", got)
+	}
+}
+
+func TestSessionDiagnosticsReportCarriesCurrentAudio(t *testing.T) {
+	start := time.Unix(500, 0)
+	recorder := newSessionDiagnosticsRecorder("target-audio", protocol.RemoteDesktopConnectOptions{}, start)
+	audio := DesktopAudioDiagnostics{
+		Enabled:       true,
+		Config:        testAudioConfig(3),
+		QueueFrames:   2,
+		QueueCapacity: maxControllerAudioFrames,
+		ReceivedFrames: 7,
+		ConsumedFrames: 5,
+	}
+	recorder.Record(start, protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio, desktopadapt.MediaDecision{})
+	report := recorder.Report(start.Add(time.Second), protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio)
+	if report.SchemaVersion != 4 || report.CurrentAudio.Config.Generation != 3 ||
+		report.CurrentAudio.QueueFrames != 2 || len(report.Samples) != 1 ||
+		report.Samples[0].Audio.ReceivedFrames != 7 {
+		t.Fatalf("audio report=%+v", report)
 	}
 }

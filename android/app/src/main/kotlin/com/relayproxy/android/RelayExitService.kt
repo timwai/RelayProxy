@@ -167,7 +167,7 @@ class RelayExitService : Service() {
 
     private fun buildNotification(text: String): Notification =
         Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setSmallIcon(R.drawable.ic_stat_relayproxy)
             .setContentTitle("RelayProxy 网络出口")
             .setContentText(text)
             .setOngoing(true)

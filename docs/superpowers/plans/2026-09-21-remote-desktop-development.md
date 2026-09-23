@@ -347,7 +347,7 @@ Windows SendInput / CF_UNICODETEXT
 
 - PR #78 已合并到 `main`，merge `ae9d25eabac7a7d5ec9398a3c7f60bbe5a695206`；Go format/vet/full test/race/benchmark、UI full regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.25 RD3 HEVC Viewer Generation（当前分支）
+### 0.2.25 RD3 HEVC Viewer Generation（已合并 PR #79）
 
 - Controller 的压缩帧快照从 H.264-only 扩展为 codec-aware：`h264 → video/h264`、`h265 → video/h265`，保留 `CodecString`、generation、尺寸、timestamp 与 keyframe 元数据；未知已配置 codec 不再误按 JPEG 解析。
 - Controller 的 scene-aware ABR、runtime resolution control 与 keyframe/IDR loss recovery 扩展到 H.265；JPEG 等 intra/legacy 路径仍不进入这些 inter-frame 状态机。
@@ -357,6 +357,17 @@ Windows SendInput / CF_UNICODETEXT
 - 初次打开 native viewer 与后续轮询均接受 `video/h264` / `video/h265`；decode/重建日志改为带 codec，不再写死 H.264。
 - 新增 H.265 Controller snapshot/ABR/recovery 测试，以及 Windows MIME mapping、codec-switch/same-generation rebuild 测试。
 - `NormalizeCodecPreference("h265")`、Host capability 广告和 GUI codec selector 仍保持关闭；下一步实现 Host H.265 generation（CPU + WGC D3D11 zero-copy）、HEVC codec string，并在端到端验证后再开放协商。
+- PR #79 已合并到 `main`，merge `1e3afb98d42e77999709c37a8d6d5eca996696a8`；Go CI 与 UI CI 均通过。
+
+### 0.2.26 RD3 HEVC Host Generation（当前分支）
+
+- 新增隐藏 Host H.265 generation pipeline，保持用户侧 H.265 选择/能力广告关闭；先让 Host 可以稳定产生 generation-aware HEVC，再开放端到端协商。
+- CPU 路径复用现有 RawCaptureSource / RGBA → NV12 生命周期，使用 `MFH265Encoder` 输出 HEVC Annex-B，并在每个新 generation 的首个关键帧前补 VPS/SPS/PPS sequence header。
+- WGC GPU 路径复用 `D3D11CaptureSource → D3D11 VideoProcessor BGRA→NV12 → EncodeD3D11` 零拷贝链，仅将编码器切换为 `OpenMFH265EncoderWithD3D11`，保留 runtime GPU→CPU HEVC generation 迁移。
+- H.265 generation 沿用现有 bitrate/FPS/resolution ABR、IDR 请求、统计、generation rollover 与资源关闭顺序，不复制网络/ABR 状态机。
+- 新增 `H265CodecString`：从 Annex-B SPS 的 `profile_tier_level` 生成 RFC 6381 `hvc1.<profile>.<compat>.<tier+level>.<constraints>`，并处理 emulation-prevention byte。
+- 新增 Host generation/codec metadata 与 HEVC codec-string 回归测试。
+- 本分支仍不修改 `NormalizeCodecPreference`、Host capability advertisement、Controller/GUI codec selector 或默认协商；待 Windows 实机端到端验证后再开放 H.265。
 
 ### 0.3 本轮进度（2026-09-22）
 
@@ -488,7 +499,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    ⏳ 未开始
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 HEVC codec/viewer/host generation 已进入实现
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

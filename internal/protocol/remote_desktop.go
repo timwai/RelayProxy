@@ -225,6 +225,7 @@ const (
 	DesktopSessionInput        = "input"
 	DesktopSessionVideoConfig  = "video_config"
 	DesktopSessionAudioConfig  = "audio_config"
+	DesktopSessionAudioControl = "audio_control"
 	DesktopSessionIDRRequest   = "idr_request"
 	DesktopSessionCursor       = "cursor"
 	DesktopSessionClipboard    = "clipboard"
@@ -239,6 +240,7 @@ type DesktopSessionMessage struct {
 	Input        *DesktopInputEvent     `json:"input,omitempty"`
 	VideoConfig  *DesktopVideoConfig    `json:"videoConfig,omitempty"`
 	AudioConfig  *DesktopAudioConfig    `json:"audioConfig,omitempty"`
+	AudioControl *DesktopAudioControl   `json:"audioControl,omitempty"`
 	Cursor       *DesktopCursorState    `json:"cursor,omitempty"`
 	Clipboard    *DesktopClipboardState `json:"clipboard,omitempty"`
 	Probe        *DesktopSessionProbe   `json:"probe,omitempty"`
@@ -313,6 +315,10 @@ type DesktopAudioConfig struct {
 	BitsPerSample   int    `json:"bitsPerSample,omitempty"`
 	FrameDurationMs int    `json:"frameDurationMs,omitempty"`
 	TargetBitrate   int    `json:"targetBitrate,omitempty"`
+}
+
+type DesktopAudioControl struct {
+	ExpectedLossPercent int `json:"expectedLossPercent"`
 }
 
 type DesktopVideoConfig struct {

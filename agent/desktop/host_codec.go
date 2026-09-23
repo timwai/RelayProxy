@@ -90,6 +90,56 @@ func openH264GenerationEncoder(
 	return encoder, normalized, encoder.SequenceHeader(), nil
 }
 
+func openH264D3D11Generation(
+	ctx context.Context,
+	cfg desktopcodec.VideoConfig,
+	frame *D3D11CaptureFrame,
+) (
+	h264GenerationEncoder,
+	desktopcodec.D3D11Encoder,
+	*desktopcodec.D3D11NV12Converter,
+	desktopcodec.VideoConfig,
+	[]byte,
+	error,
+) {
+	if frame == nil || !frame.Valid() {
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrInvalidFrame
+	}
+	normalized, err := desktopcodec.NormalizeVideoConfig(cfg)
+	if err != nil {
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	converter, err := desktopcodec.OpenD3D11NV12Converter(frame.Device, desktopcodec.D3D11ConvertConfig{
+		InputWidth:   frame.Width,
+		InputHeight:  frame.Height,
+		OutputWidth:  normalized.Width,
+		OutputHeight: normalized.Height,
+		FPS:          normalized.FPS,
+	})
+	if err != nil {
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	opener := func(
+		ctx context.Context,
+		cfg desktopcodec.VideoConfig,
+		preferHardware bool,
+	) (h264GenerationEncoder, error) {
+		return desktopcodec.OpenMFH264EncoderWithD3D11(ctx, cfg, preferHardware, frame.Device)
+	}
+	encoder, normalized, sequenceHeader, err := openH264GenerationEncoder(ctx, normalized, opener)
+	if err != nil {
+		_ = converter.Close()
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
+	}
+	d3dEncoder, ok := encoder.(desktopcodec.D3D11Encoder)
+	if !ok {
+		_ = encoder.Close()
+		_ = converter.Close()
+		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, desktopcodec.ErrEncoderUnavailable
+	}
+	return encoder, d3dEncoder, converter, normalized, sequenceHeader, nil
+}
+
 func h264DesktopVideoConfig(
 	generation uint32,
 	cfg desktopcodec.VideoConfig,
@@ -180,6 +230,26 @@ func (h *Host) streamSessionFrames(
 		return err
 	}
 	return h.streamFrames(ctx, conn, cfg, captureBackend, jpegGeneration, fpsUpdates)
+}
+
+func fitEvenDimensions(width, height, maxWidth, maxHeight int) (int, int, error) {
+	if width <= 0 || height <= 0 || maxWidth <= 0 || maxHeight <= 0 {
+		return 0, 0, errors.New("invalid H.264 source or target dimensions")
+	}
+	dw, dh := width, height
+	if width > maxWidth || height > maxHeight {
+		dw, dh = maxWidth, height*maxWidth/width
+		if dh > maxHeight {
+			dh = maxHeight
+			dw = width * maxHeight / height
+		}
+	}
+	dw &^= 1
+	dh &^= 1
+	if dw < 2 || dh < 2 {
+		return 0, 0, errors.New("H.264 fitted dimensions are too small")
+	}
+	return dw, dh, nil
 }
 
 func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
@@ -356,16 +426,58 @@ func (h *Host) streamH264Frames(
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
 	}
-	encoder, normalizedCfg, sequenceHeader, err := openH264GenerationEncoder(
-		ctx, videoCfg, openMFH264GenerationEncoder,
+	var (
+		encoder        h264GenerationEncoder
+		d3dEncoder     desktopcodec.D3D11Encoder
+		d3dConverter   *desktopcodec.D3D11NV12Converter
+		d3dSource      D3D11CaptureSource
+		firstD3D       *D3D11CaptureFrame
+		sequenceHeader []byte
+		normalizedCfg  desktopcodec.VideoConfig
+		err            error
+		gpuEnabled     bool
+		gpuInputWidth  int
+		gpuInputHeight int
 	)
-	if err != nil {
-		return err
+	if source, ok := h.source.(D3D11CaptureSource); ok {
+		candidate, available, captureErr := source.CaptureD3D11(ctx)
+		if captureErr != nil {
+			log.Printf("[Desktop] D3D11 capture probe failed, keeping CPU H.264 path: %v", captureErr)
+		} else if available && candidate != nil {
+			encoder, d3dEncoder, d3dConverter, normalizedCfg, sequenceHeader, err =
+				openH264D3D11Generation(ctx, videoCfg, candidate)
+			if err == nil {
+				d3dSource = source
+				firstD3D = candidate
+				gpuEnabled = true
+				gpuInputWidth = candidate.Width
+				gpuInputHeight = candidate.Height
+				log.Printf("[Desktop] H.264 zero-copy path enabled capture=%dx%d encode=%dx%d",
+					candidate.Width, candidate.Height, normalizedCfg.Width, normalizedCfg.Height)
+			} else {
+				candidate.Close()
+				log.Printf("[Desktop] D3D11 H.264 initialization failed, keeping CPU path: %v", err)
+			}
+		}
+	}
+	if !gpuEnabled {
+		encoder, normalizedCfg, sequenceHeader, err = openH264GenerationEncoder(
+			ctx, videoCfg, openMFH264GenerationEncoder,
+		)
+		if err != nil {
+			return err
+		}
 	}
 	videoCfg = normalizedCfg
 	defer func() {
+		if firstD3D != nil {
+			firstD3D.Close()
+		}
 		if encoder != nil {
 			_ = encoder.Close()
+		}
+		if d3dConverter != nil {
+			_ = d3dConverter.Close()
 		}
 	}()
 
@@ -403,6 +515,9 @@ func (h *Host) streamH264Frames(
 	if rawAvailable {
 		captureFormat = "bgra-direct"
 	}
+	if gpuEnabled {
+		captureFormat = "d3d11-nv12"
+	}
 	needsGenerationKeyFrame := true
 	targetFPS := videoCfg.FPS
 	frameInterval := frameIntervalForFPS(targetFPS)
@@ -421,6 +536,56 @@ func (h *Host) streamH264Frames(
 			}
 		}
 		packets, err := encoder.Encode(ctx, frame)
+		if err != nil {
+			return err
+		}
+		for _, encoded := range packets {
+			if needsGenerationKeyFrame && !encoded.KeyFrame {
+				continue
+			}
+			data := encoded.Data
+			if encoded.KeyFrame {
+				needsGenerationKeyFrame = false
+				lastIDR = now
+				data = desktopcodec.H264WithSequenceHeader(data, sequenceHeader)
+			}
+			mediaFrame := desktopmedia.EncodedFrame{
+				SessionID:  sessionID,
+				StreamID:   1,
+				Generation: generation,
+				FrameID:    frameID,
+				Timestamp:  uint64(encoded.Timestamp.Microseconds()),
+				KeyFrame:   encoded.KeyFrame,
+				Config:     encoded.Config,
+				Data:       data,
+			}
+			if err := sendEncodedDesktopFrame(ctx, conn, mediaFrame, cfg.PacketSize, &sequence, &sendQueueDelayMs); err != nil {
+				return err
+			}
+			frameID++
+		}
+		return nil
+	}
+
+	sendD3D11Frame := func(frame *D3D11CaptureFrame, now time.Time) error {
+		if !gpuEnabled || frame == nil || !frame.Valid() || d3dConverter == nil || d3dEncoder == nil {
+			return desktopcodec.ErrEncoderUnavailable
+		}
+		capturedFrames++
+		converted, err := d3dConverter.Convert(
+			frame.Resource,
+			frame.Subresource,
+			now.Sub(started),
+		)
+		if err != nil {
+			return err
+		}
+		if needsGenerationKeyFrame || now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
+			if err := encoder.ForceIDR(ctx); err == nil {
+				lastIDR = now
+			}
+		}
+		packets, err := d3dEncoder.EncodeD3D11(ctx, converted)
 		if err != nil {
 			return err
 		}
@@ -501,7 +666,13 @@ func (h *Host) streamH264Frames(
 		return nil
 	}
 
-	if rawAvailable {
+	if gpuEnabled {
+		if err := sendD3D11Frame(firstD3D, started); err != nil {
+			return err
+		}
+		firstD3D.Close()
+		firstD3D = nil
+	} else if rawAvailable {
 		if err := sendRawFrame(firstRaw, started); err != nil {
 			return err
 		}
@@ -544,6 +715,94 @@ func (h *Host) streamH264Frames(
 
 		case target := <-resolutionUpdates:
 			now := time.Now()
+			if gpuEnabled && d3dSource != nil {
+				captureStarted := now
+				frame, available, captureErr := d3dSource.CaptureD3D11(ctx)
+				lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
+				if captureErr != nil {
+					log.Printf("[Desktop] H.264 GPU resolution capture failed target=%dx%d: %v",
+						target.MaxWidth, target.MaxHeight, captureErr)
+					continue
+				}
+				if !available || frame == nil {
+					continue
+				}
+				nextWidth, nextHeight, fitErr := fitEvenDimensions(
+					frame.Width, frame.Height, target.MaxWidth, target.MaxHeight,
+				)
+				if fitErr != nil {
+					frame.Close()
+					log.Printf("[Desktop] H.264 GPU resolution update rejected target=%dx%d: %v",
+						target.MaxWidth, target.MaxHeight, fitErr)
+					continue
+				}
+				if nextWidth == videoCfg.Width && nextHeight == videoCfg.Height &&
+					frame.Width == gpuInputWidth && frame.Height == gpuInputHeight {
+					frame.Close()
+					continue
+				}
+				nextConfig := videoCfg
+				nextConfig.Width = nextWidth
+				nextConfig.Height = nextHeight
+				nextGeneration, generationErr := nextDesktopMediaGeneration(generation)
+				if generationErr != nil {
+					frame.Close()
+					return generationErr
+				}
+				nextEncoder, nextD3DEncoder, nextConverter, nextConfig, nextSequenceHeader, openErr :=
+					openH264D3D11Generation(ctx, nextConfig, frame)
+				if openErr != nil {
+					frame.Close()
+					log.Printf("[Desktop] H.264 D3D11 generation rebuild failed target=%dx%d: %v",
+						nextWidth, nextHeight, openErr)
+					continue
+				}
+				nextProtocolConfig := h264DesktopVideoConfig(
+					nextGeneration, nextConfig, sessionMaxWidth, sessionMaxHeight,
+					sessionMaxBitrate, cfg.DisplayID, nextSequenceHeader,
+				)
+				if err := sendVideoConfig(ctx, conn, nextProtocolConfig); err != nil {
+					frame.Close()
+					_ = nextEncoder.Close()
+					_ = nextConverter.Close()
+					return err
+				}
+				advertisedGeneration = nextGeneration
+
+				oldEncoder := encoder
+				oldConverter := d3dConverter
+				encoder = nextEncoder
+				d3dEncoder = nextD3DEncoder
+				d3dConverter = nextConverter
+				videoCfg = nextConfig
+				sequenceHeader = nextSequenceHeader
+				gpuInputWidth = frame.Width
+				gpuInputHeight = frame.Height
+				captureFormat = "d3d11-nv12"
+				generation = nextGeneration
+				frameID = 1
+				needsGenerationKeyFrame = true
+				lastIDR = now
+				lastEncoderStats = encoder.Stats()
+				lastCapturedFrames = capturedFrames
+				lastReportAt = now
+				if oldEncoder != nil {
+					if err := oldEncoder.Close(); err != nil {
+						log.Printf("[Desktop] close previous D3D11 H.264 generation failed: %v", err)
+					}
+				}
+				if oldConverter != nil {
+					_ = oldConverter.Close()
+				}
+				log.Printf("[Desktop] H.264 D3D11 generation switched=%d capture=%dx%d encode=%dx%d bitrate=%d",
+					generation, frame.Width, frame.Height, videoCfg.Width, videoCfg.Height, videoCfg.TargetBitrate)
+				err := sendD3D11Frame(frame, now)
+				frame.Close()
+				if err != nil {
+					return err
+				}
+				continue
+			}
 			captureStarted := now
 			rawFrame, err := h.source.Capture(ctx)
 			lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
@@ -613,6 +872,60 @@ func (h *Host) streamH264Frames(
 				continue
 			}
 			captureStarted := now
+			if gpuEnabled && d3dSource != nil {
+				frame, available, captureErr := d3dSource.CaptureD3D11(ctx)
+				lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000
+				if captureErr != nil {
+					if errors.Is(captureErr, context.DeadlineExceeded) {
+						droppedFrames++
+						if err := reportStats(time.Now()); err != nil {
+							return err
+						}
+						continue
+					}
+					return captureErr
+				}
+				if !available || frame == nil {
+					droppedFrames++
+					if err := reportStats(time.Now()); err != nil {
+						return err
+					}
+					continue
+				}
+				if frame.Width != gpuInputWidth || frame.Height != gpuInputHeight {
+					nextConverter, convertErr := desktopcodec.OpenD3D11NV12Converter(
+						frame.Device,
+						desktopcodec.D3D11ConvertConfig{
+							InputWidth: frame.Width, InputHeight: frame.Height,
+							OutputWidth: videoCfg.Width, OutputHeight: videoCfg.Height,
+							FPS: videoCfg.FPS,
+						},
+					)
+					if convertErr != nil {
+						frame.Close()
+						return convertErr
+					}
+					oldConverter := d3dConverter
+					d3dConverter = nextConverter
+					gpuInputWidth = frame.Width
+					gpuInputHeight = frame.Height
+					if oldConverter != nil {
+						_ = oldConverter.Close()
+					}
+					log.Printf("[Desktop] H.264 D3D11 capture geometry updated=%dx%d encode=%dx%d",
+						gpuInputWidth, gpuInputHeight, videoCfg.Width, videoCfg.Height)
+				}
+				err := sendD3D11Frame(frame, now)
+				frame.Close()
+				if err != nil {
+					return err
+				}
+				captureFormat = "d3d11-nv12"
+				if err := reportStats(time.Now()); err != nil {
+					return err
+				}
+				continue
+			}
 			if rawSource != nil && videoCfg.Width == sessionMaxWidth && videoCfg.Height == sessionMaxHeight {
 				rawFrame, available, rawErr := rawSource.CaptureRaw(ctx)
 				lastCaptureMs = float64(time.Since(captureStarted).Microseconds()) / 1000

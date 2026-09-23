@@ -42,6 +42,31 @@ func (e *abrTestEncoder) Close() error {
 	return nil
 }
 
+func TestFitEvenDimensions(t *testing.T) {
+	tests := []struct {
+		name                  string
+		width, height         int
+		maxWidth, maxHeight   int
+		wantWidth, wantHeight int
+	}{
+		{name: "native even", width: 1920, height: 1080, maxWidth: 1920, maxHeight: 1080, wantWidth: 1920, wantHeight: 1080},
+		{name: "crop odd source", width: 1365, height: 767, maxWidth: 2000, maxHeight: 1200, wantWidth: 1364, wantHeight: 766},
+		{name: "scale by width", width: 2560, height: 1440, maxWidth: 1920, maxHeight: 1080, wantWidth: 1920, wantHeight: 1080},
+		{name: "scale by height", width: 1920, height: 1200, maxWidth: 1280, maxHeight: 720, wantWidth: 1152, wantHeight: 720},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w, h, err := fitEvenDimensions(tt.width, tt.height, tt.maxWidth, tt.maxHeight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w != tt.wantWidth || h != tt.wantHeight {
+				t.Fatalf("fit=%dx%d want=%dx%d", w, h, tt.wantWidth, tt.wantHeight)
+			}
+		})
+	}
+}
+
 func TestReconfigureH264BitrateClampsToSessionBounds(t *testing.T) {
 	encoder := &abrTestEncoder{}
 	current := desktopcodec.VideoConfig{

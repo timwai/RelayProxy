@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface 与 WGC GPU BGRA→NV12 converter 均已合并 main；下一阶段把 Host H.264 主循环切到 WGC texture → VideoProcessor → EncodeD3D11，并保留 CPU fallback  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface 与 WGC GPU BGRA→NV12 converter 均已合并 main；当前分支把 Host H.264 主循环切到 WGC texture → VideoProcessor → EncodeD3D11，并在初始化失败时保留原 CPU H.264 fallback  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
@@ -286,6 +286,18 @@ Windows SendInput / CF_UNICODETEXT
 - `Convert` 返回借用的 NV12 `D3D11EncodeFrame`；调用方必须在下一次 Convert/Close 前同步送入 PR #72 新增的 `EncodeD3D11`，避免额外 texture allocation/copy。
 - 新增 converter 配置、D3D11 capture frame COM lifetime 与 Windows surface delegation 单测；当前尚未切换 Host H.264 主循环，下一轮会用 capability/fallback 方式把 WGC GPU surface → converter → Media Foundation D3D11 encoder 串成真实运行路径。
 - PR #73 已合并到 `main`，merge `1a0840673a1a17cd862753e38c330f8b57d997d1`；Go CI（重跑既有 tunnel flaky 后含 race/benchmark）、UI full regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.20 Host H.264 WGC Zero-copy Pipeline（当前分支）
+
+- Host H.264 会话继续用现有首帧逻辑确定 negotiated encode size，随后探测可选 `D3D11CaptureSource`；只有 WGC surface、VideoProcessor converter 和 D3D11-aware Media Foundation encoder 三者全部成功时才启用 GPU path。
+- GPU 初始化失败不会中断 H.264：直接保留现有 `BGRA/RGBA → CPU NV12 → Media Foundation` 路径；因此不支持 VideoProcessor、D3D11-aware encoder 或 WGC surface 的机器行为不变。
+- GPU 稳态路径为 `WGC ID3D11Texture2D(BGRA) → VideoProcessor(scale + NV12) → MFCreateDXGISurfaceBuffer → EncodeD3D11`，不执行 staging `CopyResource/Map`、CPU BGRA copy、CPU resize 或 `frameToNV12`。
+- Stats 的 `CaptureFormat` 在 GPU path 下上报 `d3d11-nv12`，encoder backend 继续由 PR #72 上报 `media-foundation-d3d11`，可通过导出 diagnostics 确认真实零拷贝路径。
+- adaptive FPS 继续只控制 capture producer/ticker；D3D11 converter/encoder 保持 negotiated FPS 配置，不因临时降帧重建。
+- adaptive resolution 在 GPU path 下直接抓取 D3D11 source，按纯尺寸计算生成目标偶数分辨率，成对重建 converter + D3D11 encoder generation，再发送新的 `VideoConfig/G<n>`；不再为了分辨率切换读取 CPU RGBA。
+- 如果显示器运行期改变源分辨率但编码输出分辨率不变，仅重建 VideoProcessor input geometry，不重建 encoder generation。
+- WGC 300 ms 内无新 D3D11 frame 视为 dropped frame 并继续 GPU path，不因静态画面回退到 CPU staging。
+- 资源析构顺序固定为 encoder → converter/output texture，generation 切换和 session close 保持一致，避免异步 MFT flush 仍引用最后一个 NV12 surface。
 
 ### 0.3 本轮进度（2026-09-22）
 

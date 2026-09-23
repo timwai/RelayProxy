@@ -60,6 +60,13 @@ func (s *ControllerSession) applyAudioConfig(config protocol.DesktopAudioConfig)
 	return true
 }
 
+func (s *ControllerSession) AudioEnabled() bool {
+	if s == nil {
+		return false
+	}
+	return s.options.Audio == nil || *s.options.Audio
+}
+
 func (s *ControllerSession) AudioConfigSnapshot() protocol.DesktopAudioConfig {
 	if s == nil {
 		return protocol.DesktopAudioConfig{}

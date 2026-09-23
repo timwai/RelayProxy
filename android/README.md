@@ -14,7 +14,7 @@ Android 第一阶段只实现 **网络出口节点**：手机加入 RelayProxy �
 
 `scripts/build-android.ps1`
 
-默认构建可直接安装的 Debug APK：
+默认构建 Release APK：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build-android.ps1
@@ -36,7 +36,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-android.ps1
 
 `dist/android/`
 
-Debug 文件名为 `RelayProxy-Android-debug.apk`。Release 默认输出未签名 APK；若需要自动生成可安装的签名 Release APK，请设置：
+Windows 脚本默认构建 Release。未配置签名时输出 `RelayProxy-Android-release-unsigned.apk`；配置签名后输出 `RelayProxy-Android-release.apk`。如需 Debug，可执行 `./scripts/build-android.ps1 -Configuration Debug`。若需要自动生成可安装的签名 Release APK，请设置：
 
 ```powershell
 $env:RELAY_ANDROID_KEYSTORE="D:\keys\relayproxy.jks"
@@ -65,7 +65,7 @@ $env:RELAY_ANDROID_KEY_PASSWORD="your-key-password"
 
 Gradle 同时使用 `-PrelayAbi=<ABI>` 限定 APK 中的原生库，因此两个 APK 都只包含各自架构，不会混入 x86 / x86_64。
 
-默认构建两个可直接安装的 Debug APK：
+默认构建两个 Release APK：
 
 ```bash
 ./scripts/build-android-macos.sh
@@ -80,8 +80,8 @@ Gradle 同时使用 `-PrelayAbi=<ABI>` 限定 APK 中的原生库，因此两个
 默认输出：
 
 ```text
-dist/android/RelayProxy-Android-arm64-debug.apk
-dist/android/RelayProxy-Android-arm32-debug.apk
+dist/android/RelayProxy-Android-arm64-release-unsigned.apk
+dist/android/RelayProxy-Android-arm32-release-unsigned.apk
 ```
 
 只构建 ARM64：
@@ -96,13 +96,13 @@ dist/android/RelayProxy-Android-arm32-debug.apk
 ./scripts/build-android-macos.sh --arm32-only
 ```
 
-Release 默认同样生成两个架构包：
+显式构建 Debug：
 
 ```bash
-./scripts/build-android-macos.sh --release --clean
+./scripts/build-android-macos.sh --debug --clean
 ```
 
-配置签名后输出：
+默认 Release 配置签名后输出：
 
 ```text
 dist/android/RelayProxy-Android-arm64-release.apk

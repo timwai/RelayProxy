@@ -52,6 +52,10 @@ type windowsFrameRateController interface {
 	SetFrameRateLimit(int) error
 }
 
+type windowsD3D11FrameStream interface {
+	WaitD3D11Frame(context.Context) (*D3D11CaptureFrame, error)
+}
+
 type windowsFrameStreamFactory interface {
 	Open(
 		context.Context,

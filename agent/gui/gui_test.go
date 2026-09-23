@@ -3,6 +3,8 @@ package gui
 import (
 	"strings"
 	"testing"
+
+	"relayproxy/internal/protocol"
 )
 
 func TestDesktopWindowDimensionsRemainResponsive(t *testing.T) {
@@ -308,5 +310,25 @@ func TestRemoteDesktopCaptureBackendSelector(t *testing.T) {
 	}
 	if strings.Contains(page, `<option value="wgc">WGC</option>`) {
 		t.Fatal("WGC must not be a static option; it must come from target capabilities")
+	}
+}
+
+
+func TestRemoteDesktopHEVCValidationOverrideIsOptIn(t *testing.T) {
+	base := protocol.RemoteDesktopConnectOptions{
+		Backend: protocol.DesktopBackendAuto,
+		Codec:   "h264",
+	}
+	for _, value := range []string{"", "0", "false", "off", "no"} {
+		got := applyRemoteDesktopHEVCValidationOptions(base, value)
+		if got.Backend != base.Backend || got.Codec != base.Codec {
+			t.Fatalf("disabled validation env %q changed options: %+v", value, got)
+		}
+	}
+	for _, value := range []string{"1", "true", "TRUE", " yes ", "on"} {
+		got := applyRemoteDesktopHEVCValidationOptions(base, value)
+		if got.Backend != protocol.DesktopBackendRelay || got.Codec != protocol.DesktopCodecH265Validation {
+			t.Fatalf("enabled validation env %q produced %+v", value, got)
+		}
 	}
 }

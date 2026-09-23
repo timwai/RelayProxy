@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture 与 capability-aware GUI selector 均已合并 main；当前分支补齐 Auto 的 DXGI → WGC → GDI 分级回退  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector 与 Auto DXGI → WGC → GDI 回退均已合并 main；当前分支让 WGC 真正遵守 negotiated MaxFPS  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #67 已合并，merge `e1841d2da67d578c10532d84fe16b251b2ec462a`）
+> 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
 
 ## 0. 当前进度
 
@@ -229,7 +229,7 @@ Windows SendInput / CF_UNICODETEXT
 - 帮助文案明确 WGC/DXGI/GDI 都可用于实机 A/B；WGC 不会在未确认支持的目标上出现；多屏“全部显示器”仍需要 GDI。
 - GUI/Windows/macOS CI 已通过，PR #67 merge `e1841d2da67d578c10532d84fe16b251b2ec462a`。
 
-### 0.2.14 Automatic Capture Fallback（当前分支）
+### 0.2.14 Automatic Capture Fallback（已合并 PR #68）
 
 - 单屏或已选择具体显示器时，`captureBackend=auto` 不再直接委托给第三方 BackendAuto，而是由 Relay Desktop 显式编排候选后端。
 - 保留性能优先顺序：可 Desktop Duplication 的显示器先尝试 `DXGI`；失败后若 Windows runtime 支持 WGC，则尝试 `WGC`；最后回退 `GDI`。
@@ -238,6 +238,14 @@ Windows SendInput / CF_UNICODETEXT
 - Auto 只在候选初始化失败时向下回退；成功后通过现有 Session Stats / Diagnostics 上报实际 Capture backend。
 - 新增纯编排回归测试，固定 `DXGI → WGC → GDI` 顺序、WGC 不可用时的 `DXGI → GDI`、不可 Duplication 时的 `WGC → GDI`，并验证成功后立即停止继续尝试。
 - GUI 帮助文案同步说明新的 Auto 回退顺序。
+
+### 0.2.15 WGC Frame-rate Cap（当前分支）
+
+- WGC 初始化不再忽略 HostConfig.MaxFPS；Windows amd64 在创建 GraphicsCaptureSession 后尝试 QueryInterface 到 IGraphicsCaptureSession5。
+- 支持 Session5 的系统会通过 MinUpdateInterval 把 negotiated MaxFPS 转成 Windows.Foundation.TimeSpan（100 ns tick），降低 WGC 在 Host 只消费 10/15/24/30 FPS 时仍按高刷新率生成 GPU frame 的无效开销。
+- Session5 是可选能力：旧 Windows 不支持该接口、或 SetMinUpdateInterval 被 runtime 拒绝时，不中断 WGC，会继续依赖 Relay Desktop Host ticker / latest-frame drain 保证输出帧率与实时性。
+- 显式 WGC、Auto 选到 WGC 两条路径都会复用同一限制，不改变 DXGI/GDI 行为。
+- Windows amd64 单测固定 1 / 30 / 60 FPS 与极高 FPS 的 TimeSpan 换算，并覆盖 0/负数代表“不设置 runtime 限制”。
 
 ### 0.3 本轮进度（2026-09-22）
 

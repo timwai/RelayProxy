@@ -262,3 +262,24 @@ func TestResolveHostConfigDefaultsCaptureBackend(t *testing.T) {
 		t.Fatalf("default capture backend=%q want=auto", cfg.CaptureBackend)
 	}
 }
+
+func TestD3D11CaptureFrameLifetime(t *testing.T) {
+	releases := 0
+	frame := &D3D11CaptureFrame{
+		Device: 1, Resource: 2,
+		Width: 1920, Height: 1080,
+		release: func() { releases++ },
+	}
+	if !frame.Valid() {
+		t.Fatal("valid D3D11 capture frame rejected")
+	}
+	frame.Close()
+	frame.Close()
+	if releases != 1 {
+		t.Fatalf("release count=%d want=1", releases)
+	}
+	frame.Resource = 0
+	if frame.Valid() {
+		t.Fatal("D3D11 capture frame with nil resource accepted")
+	}
+}

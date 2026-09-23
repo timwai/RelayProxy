@@ -349,3 +349,24 @@ func TestRemoteDesktopHEVCValidationOverrideIsOptIn(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoteDesktopLiveAudioStats(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-viewer-audio-stats"`,
+		"async function refreshRemoteDesktopAudioStats()",
+		"call('goGetRemoteDesktopAudioDiagnostics')",
+		"audio.concealmentFrames",
+		"audio.gapSkippedFrames",
+		"audio.queueDroppedFrames",
+		"refreshRemoteDesktopAudioStats();",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop live audio stats missing %q", want)
+		}
+	}
+}

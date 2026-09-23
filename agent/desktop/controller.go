@@ -44,8 +44,8 @@ type ControllerSession struct {
 	configReady      chan struct{}
 	configOnce       sync.Once
 
-	audioMu     sync.Mutex
-	audioConfig protocol.DesktopAudioConfig
+	audioMu             sync.Mutex
+	audioConfig         protocol.DesktopAudioConfig
 	audioQueue          []AudioFrameSnapshot
 	audioNotify         chan struct{}
 	audioStats          audioRuntimeCounters

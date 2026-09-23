@@ -73,7 +73,6 @@ func TestH264RecoveryForceAndFailure(t *testing.T) {
 	}
 }
 
-
 func TestH265RecoveryUsesKeyFrameGate(t *testing.T) {
 	var state h264RecoveryState
 	config := protocol.DesktopVideoConfig{Generation: 2, Codec: "h265"}

@@ -34,6 +34,7 @@ var (
 	procMFTEnumEx                   = mfplatDLL.NewProc("MFTEnumEx")
 	procMFCreateMediaType           = mfplatDLL.NewProc("MFCreateMediaType")
 	procMFCreateSample              = mfplatDLL.NewProc("MFCreateSample")
+	procMFCreateDXGISurfaceBuffer   = mfplatDLL.NewProc("MFCreateDXGISurfaceBuffer")
 	procMFCreateMemoryBuffer        = mfplatDLL.NewProc("MFCreateMemoryBuffer")
 	procMFCreateAlignedMemoryBuffer = mfplatDLL.NewProc("MFCreateAlignedMemoryBuffer")
 	procCoInitEx                    = ole32DLL.NewProc("CoInitializeEx")

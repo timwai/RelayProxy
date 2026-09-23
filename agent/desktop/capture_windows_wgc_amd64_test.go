@@ -4,6 +4,8 @@ package desktop
 
 import "testing"
 
+var _ windowsFrameRateStream = (*wgcFrameStream)(nil)
+
 func TestWGCMinUpdateInterval(t *testing.T) {
 	tests := []struct {
 		name     string

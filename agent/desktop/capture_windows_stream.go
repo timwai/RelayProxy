@@ -65,10 +65,35 @@ func (screencaptureFrameStreamFactory) Open(
 	if preference != protocol.DesktopCaptureAuto {
 		return openConcreteWindowsFrameStream(ctx, display, preference, maxFPS)
 	}
+	return openAutoWindowsFrameStream(
+		ctx,
+		display,
+		maxFPS,
+		windowsWGCAvailable(),
+		openConcreteWindowsFrameStream,
+	)
+}
 
+type windowsFrameStreamOpener func(
+	context.Context,
+	screencapture.Display,
+	protocol.DesktopCaptureBackend,
+	int,
+) (windowsFrameStream, error)
+
+func openAutoWindowsFrameStream(
+	ctx context.Context,
+	display screencapture.Display,
+	maxFPS int,
+	hasWGC bool,
+	open windowsFrameStreamOpener,
+) (windowsFrameStream, error) {
+	if open == nil {
+		return nil, errors.New("Windows capture stream opener is unavailable")
+	}
 	var attempts []error
-	for _, candidate := range autoWindowsCaptureBackendOrder(display, windowsWGCAvailable()) {
-		stream, err := openConcreteWindowsFrameStream(ctx, display, candidate, maxFPS)
+	for _, candidate := range autoWindowsCaptureBackendOrder(display, hasWGC) {
+		stream, err := open(ctx, display, candidate, maxFPS)
 		if err == nil {
 			return stream, nil
 		}

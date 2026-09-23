@@ -136,6 +136,27 @@ type D3D11Encoder interface {
 	EncodeD3D11(context.Context, D3D11EncodeFrame) ([]EncodedPacket, error)
 }
 
+type D3D11ConvertConfig struct {
+	InputWidth   int
+	InputHeight  int
+	OutputWidth  int
+	OutputHeight int
+	FPS          int
+}
+
+func (c D3D11ConvertConfig) Validate() error {
+	if c.InputWidth <= 0 || c.InputHeight <= 0 || c.OutputWidth <= 0 || c.OutputHeight <= 0 {
+		return fmt.Errorf("%w: D3D11 converter dimensions must be positive", ErrInvalidVideoConfig)
+	}
+	if c.InputWidth%2 != 0 || c.InputHeight%2 != 0 || c.OutputWidth%2 != 0 || c.OutputHeight%2 != 0 {
+		return fmt.Errorf("%w: D3D11 NV12 conversion requires even dimensions", ErrInvalidVideoConfig)
+	}
+	if c.FPS < 1 || c.FPS > 60 {
+		return fmt.Errorf("%w: D3D11 converter fps must be between 1 and 60", ErrInvalidVideoConfig)
+	}
+	return nil
+}
+
 type EncodedPacket struct {
 	Codec     string
 	Data      []byte

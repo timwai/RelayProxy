@@ -23,7 +23,7 @@ func TestH265CodecStringProfileSpaceTierAndConstraints(t *testing.T) {
 	header := []byte{
 		0, 0, 1, 0x42, 0x01,
 		0x01,
-		0xA2, // profile_space=B, high tier, profile_idc=2
+		0xA2,                   // profile_space=B, high tier, profile_idc=2
 		0x80, 0x00, 0x00, 0x00, // reverse -> 1
 		0x90, 0x01, 0, 0, 0, 0,
 		0x78, // level_idc=120

@@ -197,6 +197,7 @@ func (p *mfEventPump) Close() error {
 type mfAsyncState struct {
 	transform unsafe.Pointer
 	cfg       VideoConfig
+	codec     string
 
 	needInput int
 	pending   []mfTransformCommand
@@ -205,8 +206,8 @@ type mfAsyncState struct {
 	fatal     error
 }
 
-func newMFAsyncState(transform unsafe.Pointer, cfg VideoConfig) *mfAsyncState {
-	return &mfAsyncState{transform: transform, cfg: cfg}
+func newMFAsyncState(transform unsafe.Pointer, cfg VideoConfig, codec string) *mfAsyncState {
+	return &mfAsyncState{transform: transform, cfg: cfg, codec: codec}
 }
 
 func (s *mfAsyncState) reply(command mfTransformCommand, packets []EncodedPacket, err error) {
@@ -305,7 +306,7 @@ func (s *mfAsyncState) handle(event mfAsyncEvent) {
 		if len(s.inFlight) > 0 && s.inFlight[0].input != nil {
 			fallback = s.inFlight[0].input.timestamp
 		}
-		packet, hr, err := processTransformOutputOnce(s.transform, fallback)
+		packet, hr, err := processTransformOutputOnce(s.transform, s.codec, fallback)
 		if err != nil {
 			s.fail(err)
 			return

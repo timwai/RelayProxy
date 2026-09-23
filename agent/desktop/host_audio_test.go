@@ -135,7 +135,7 @@ func TestHostDesktopAudioAvailableUsesSourceCapability(t *testing.T) {
 }
 
 func TestStreamSessionAudioRejectsWrongFrameSize(t *testing.T) {
-	cfg, _, frameBytes, err := desktopaudio.NormalizeFrameDuration(hostAudioPCMConfig, hostAudioFrameDuration)
+	_, _, frameBytes, err := desktopaudio.NormalizeFrameDuration(hostAudioPCMConfig, hostAudioFrameDuration)
 	if err != nil {
 		t.Fatal(err)
 	}

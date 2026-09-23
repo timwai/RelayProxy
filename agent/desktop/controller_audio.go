@@ -48,7 +48,11 @@ func (s *ControllerSession) applyAudioConfig(config protocol.DesktopAudioConfig)
 	if current.Generation != 0 && config.Generation < current.Generation {
 		return false
 	}
+	if current.Generation != 0 && current.Generation == config.Generation && current != config {
+		return false
+	}
 	if current.Generation != config.Generation {
+		clear(s.audioQueue)
 		s.audioQueue = s.audioQueue[:0]
 	}
 	s.audioConfig = config
@@ -128,6 +132,7 @@ func (s *ControllerSession) NextAudioFrame(ctx context.Context) (AudioFrameSnaps
 		for len(s.audioQueue) > 0 {
 			frame := s.audioQueue[0]
 			copy(s.audioQueue, s.audioQueue[1:])
+			s.audioQueue[len(s.audioQueue)-1] = AudioFrameSnapshot{}
 			s.audioQueue = s.audioQueue[:len(s.audioQueue)-1]
 			config := s.audioConfig
 			if frame.Generation == config.Generation {

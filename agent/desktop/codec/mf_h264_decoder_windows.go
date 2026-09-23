@@ -10,18 +10,33 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 const mfETransformStreamChange = 0xc00d6d61
 
+type mfVideoDecoderSpec struct {
+	Codec        string
+	Label        string
+	InputSubtype *windows.GUID
+}
+
+var (
+	mfH264DecoderSpec = mfVideoDecoderSpec{Codec: "h264", Label: "H.264", InputSubtype: &mfVideoFormatH264}
+	mfH265DecoderSpec = mfVideoDecoderSpec{Codec: "h265", Label: "H.265", InputSubtype: &mfVideoFormatHEVC}
+)
+
 type MFH264Decoder struct {
 	info      MFH264DecoderInfo
+	spec      mfVideoDecoderSpec
 	commands  chan mfDecodeCommand
 	done      chan struct{}
 	closeOnce sync.Once
 }
 
 type MFH264DecoderInfo struct {
+	Codec      string
 	Hardware   bool
 	Async      bool
 	D3D11Aware bool
@@ -61,7 +76,7 @@ func applyDecoderOutputType(transform unsafe.Pointer, cfg VideoConfig) error {
 	return setTransformType(transform, imfTransformSetOutputType, outputType)
 }
 
-func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig, graphics *mfDecoderD3D11) (bool, bool, error) {
+func configureVideoDecoder(transform unsafe.Pointer, cfg VideoConfig, graphics *mfDecoderD3D11, spec mfVideoDecoderSpec) (bool, bool, error) {
 	d3d11Aware := false
 	if graphics != nil {
 		aware, err := graphics.Attach(transform)
@@ -86,7 +101,7 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig, graphics *m
 		}
 	}
 
-	inputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
+	inputType, err := createVideoMediaType(spec.InputSubtype, cfg, true)
 	if err != nil {
 		return false, d3d11Aware, err
 	}
@@ -115,8 +130,8 @@ func configureH264Decoder(transform unsafe.Pointer, cfg VideoConfig, graphics *m
 	return isAsync, d3d11Aware, nil
 }
 
-func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool, graphics *mfDecoderD3D11) (unsafe.Pointer, MFH264DecoderInfo, error) {
-	h264 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatH264}
+func openConfiguredVideoDecoder(ctx context.Context, cfg VideoConfig, preferHardware bool, graphics *mfDecoderD3D11, spec mfVideoDecoderSpec) (unsafe.Pointer, MFH264DecoderInfo, error) {
+	compressed := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: *spec.InputSubtype}
 	rawNV12 := mftRegisterTypeInfo{MajorType: mfMediaTypeVideo, Subtype: mfVideoFormatNV12}
 	var failures []error
 
@@ -125,12 +140,13 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 		if err != nil {
 			return nil, MFH264DecoderInfo{}, err
 		}
-		async, d3d11Aware, err := configureH264Decoder(transform, cfg, candidateGraphics)
+		async, d3d11Aware, err := configureVideoDecoder(transform, cfg, candidateGraphics, spec)
 		if err != nil {
 			releaseIUnknown(transform)
 			return nil, MFH264DecoderInfo{}, err
 		}
 		return transform, MFH264DecoderInfo{
+			Codec:      spec.Codec,
 			Hardware:   hardware,
 			Async:      async,
 			D3D11Aware: d3d11Aware,
@@ -143,7 +159,7 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 		if err := ctx.Err(); err != nil {
 			return nil, MFH264DecoderInfo{}, err
 		}
-		activations, err := enumerateMFTActivations(mftCategoryVideoDecoder, group.flags, &h264, &rawNV12)
+		activations, err := enumerateMFTActivations(mftCategoryVideoDecoder, group.flags, &compressed, &rawNV12)
 		if err != nil {
 			failures = append(failures, err)
 			continue
@@ -161,7 +177,7 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 					releaseMFTActivations(activations[index+1:])
 					return transform, info, nil
 				}
-				failures = append(failures, fmt.Errorf("D3D11 hardware decoder: %w", err))
+				failures = append(failures, fmt.Errorf("D3D11 hardware %s decoder: %w", spec.Label, err))
 			}
 
 			transform, info, err := tryActivation(activation, group.hardware, nil)
@@ -178,28 +194,46 @@ func openConfiguredH264Decoder(ctx context.Context, cfg VideoConfig, preferHardw
 	if len(failures) == 0 {
 		return nil, MFH264DecoderInfo{}, ErrDecoderUnavailable
 	}
-	return nil, MFH264DecoderInfo{}, fmt.Errorf("%w: %v", ErrDecoderUnavailable, errors.Join(failures...))
+	return nil, MFH264DecoderInfo{}, fmt.Errorf("%w: %s: %v", ErrDecoderUnavailable, spec.Label, errors.Join(failures...))
 }
 
 func OpenMFH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool) (Decoder, error) {
-	return openMFH264Decoder(ctx, cfg, preferHardware, 0)
+	return openMFVideoDecoder(ctx, cfg, preferHardware, 0, mfH264DecoderSpec)
 }
 
 func OpenMFH264DecoderWithD3D11(ctx context.Context, cfg VideoConfig, preferHardware bool, device uintptr) (Decoder, error) {
-	return openMFH264Decoder(ctx, cfg, preferHardware, device)
+	return openMFVideoDecoder(ctx, cfg, preferHardware, device, mfH264DecoderSpec)
 }
 
-func openMFH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool, device uintptr) (Decoder, error) {
+func OpenMFH265Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool) (Decoder, error) {
+	return openMFVideoDecoder(ctx, cfg, preferHardware, 0, mfH265DecoderSpec)
+}
+
+func OpenMFH265DecoderWithD3D11(ctx context.Context, cfg VideoConfig, preferHardware bool, device uintptr) (Decoder, error) {
+	return openMFVideoDecoder(ctx, cfg, preferHardware, device, mfH265DecoderSpec)
+}
+
+func openMFVideoDecoder(
+	ctx context.Context,
+	cfg VideoConfig,
+	preferHardware bool,
+	device uintptr,
+	spec mfVideoDecoderSpec,
+) (Decoder, error) {
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
+	if spec.InputSubtype == nil || spec.Codec == "" {
+		return nil, fmt.Errorf("%w: invalid Media Foundation decoder spec", ErrDecoderUnavailable)
+	}
 	session := &MFH264Decoder{
+		spec:     spec,
 		commands: make(chan mfDecodeCommand),
 		done:     make(chan struct{}),
 	}
 	initCh := make(chan mfDecoderInit, 1)
-	go session.run(cfg, preferHardware, device, initCh)
+	go session.run(cfg, preferHardware, device, spec, initCh)
 
 	select {
 	case <-ctx.Done():
@@ -216,7 +250,7 @@ func openMFH264Decoder(ctx context.Context, cfg VideoConfig, preferHardware bool
 	}
 }
 
-func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, device uintptr, initCh chan<- mfDecoderInit) {
+func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, device uintptr, spec mfVideoDecoderSpec, initCh chan<- mfDecoderInit) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	defer close(d.done)
@@ -239,7 +273,7 @@ func (d *MFH264Decoder) run(cfg VideoConfig, preferHardware bool, device uintptr
 	if graphicsErr != nil {
 		graphics = nil
 	}
-	transform, info, err := openConfiguredH264Decoder(context.Background(), cfg, preferHardware, graphics)
+	transform, info, err := openConfiguredVideoDecoder(context.Background(), cfg, preferHardware, graphics, spec)
 	if err != nil {
 		if graphics != nil {
 			graphics.Close()
@@ -403,7 +437,7 @@ func (s *mfAsyncDecodeState) submitAvailable() {
 		hr := processTransformInputSample(s.transform, sample)
 		releaseIUnknown(sample)
 		if hresultFailed(hr) {
-			err := hresultError("H.264 decoder IMFTransform.ProcessInput async", hr)
+			err := hresultError(s.info.Codec+" decoder IMFTransform.ProcessInput async", hr)
 			s.reply(command, nil, err)
 			s.fail(err)
 			return
@@ -457,7 +491,7 @@ func (s *mfAsyncDecodeState) handle(event mfAsyncEvent) {
 			return
 		}
 		if hresultFailed(hr) {
-			s.fail(hresultError("H.264 decoder IMFTransform.ProcessOutput async", hr))
+			s.fail(hresultError(s.info.Codec+" decoder IMFTransform.ProcessOutput async", hr))
 			return
 		}
 		if frame != nil {
@@ -505,7 +539,7 @@ func processDecoderOutputOnce(transform unsafe.Pointer, info MFH264DecoderInfo, 
 		return nil, hr, nil
 	}
 	if out.Sample == nil {
-		return nil, hr, errors.New("H.264 decoder ProcessOutput succeeded without a sample")
+		return nil, hr, fmt.Errorf("%s decoder ProcessOutput succeeded without a sample", info.Codec)
 	}
 	timestamp := sampleTimestamp(out.Sample, fallbackTimestamp)
 
@@ -561,7 +595,7 @@ func drainSyncH264DecoderOutput(transform unsafe.Pointer, info MFH264DecoderInfo
 			continue
 		}
 		if hresultFailed(hr) {
-			return nil, hresultError("H.264 decoder IMFTransform.ProcessOutput", hr)
+			return nil, hresultError(info.Codec+" decoder IMFTransform.ProcessOutput", hr)
 		}
 		if frame != nil {
 			frames = append(frames, *frame)
@@ -587,7 +621,7 @@ func processSyncH264Decode(transform unsafe.Pointer, info MFH264DecoderInfo, gra
 		hr = processTransformInputSample(transform, sample)
 	}
 	if hresultFailed(hr) {
-		return nil, hresultError("H.264 decoder IMFTransform.ProcessInput", hr)
+		return nil, hresultError(info.Codec+" decoder IMFTransform.ProcessInput", hr)
 	}
 	decoded, err := drainSyncH264DecoderOutput(transform, info, graphics, input.timestamp)
 	if err != nil {
@@ -635,7 +669,7 @@ func (d *MFH264Decoder) runCommand(ctx context.Context, command mfDecodeCommand)
 
 func (d *MFH264Decoder) Decode(ctx context.Context, data []byte, timestamp time.Duration) ([]DecodedFrame, error) {
 	if len(data) == 0 {
-		return nil, fmt.Errorf("%w: empty H.264 access unit", ErrInvalidFrame)
+		return nil, fmt.Errorf("%w: empty %s access unit", ErrInvalidFrame, d.info.Codec)
 	}
 	duration := time.Second / time.Duration(d.info.Config.FPS)
 	result, err := d.runCommand(ctx, mfDecodeCommand{

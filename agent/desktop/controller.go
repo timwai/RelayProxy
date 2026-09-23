@@ -48,6 +48,7 @@ type ControllerSession struct {
 	audioConfig protocol.DesktopAudioConfig
 	audioQueue  []AudioFrameSnapshot
 	audioNotify chan struct{}
+	audioStats  audioRuntimeCounters
 
 	recoveryMu sync.Mutex
 	recovery   h264RecoveryState

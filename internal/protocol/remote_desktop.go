@@ -50,6 +50,11 @@ type DesktopCaptureCapability struct {
 	Cursor     bool   `json:"cursor,omitempty"`
 }
 
+// DesktopCodecH265Validation is an internal diagnostics-only codec sentinel.
+// It must never be advertised as a normal codec capability or rendered as a
+// user-facing codec choice.
+const DesktopCodecH265Validation = "h265-validation"
+
 type DesktopCodecCapability struct {
 	Codec      string `json:"codec"`
 	Encoder    string `json:"encoder,omitempty"`

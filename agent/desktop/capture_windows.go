@@ -423,6 +423,37 @@ func (c *windowsCapture) captureStreamLocked(ctx context.Context) (*image.RGBA, 
 	return c.frame, err
 }
 
+func (c *windowsCapture) CaptureD3D11(ctx context.Context) (*D3D11CaptureFrame, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, false, errors.New("Windows desktop capture is closed")
+	}
+	if c.stream == nil {
+		return nil, false, nil
+	}
+	stream, ok := c.stream.(windowsD3D11FrameStream)
+	if !ok {
+		return nil, false, nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	defer cancel()
+	frame, err := stream.WaitD3D11Frame(waitCtx)
+	if err != nil {
+		return nil, false, err
+	}
+	if frame == nil || !frame.Valid() {
+		if frame != nil {
+			frame.Close()
+		}
+		return nil, false, screencapture.ErrNoFrame
+	}
+	return frame, true, nil
+}
+
 func (c *windowsCapture) CaptureRaw(ctx context.Context) (desktopcodec.RawFrame, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return desktopcodec.RawFrame{}, false, err

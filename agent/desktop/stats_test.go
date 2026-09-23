@@ -238,7 +238,6 @@ func TestAdaptationSnapshotStillIncludesLocalDroppedFrames(t *testing.T) {
 	}
 }
 
-
 func TestSessionStatsIgnoreAudioSequenceDomain(t *testing.T) {
 	stats := newSessionStatsTracker("relay")
 	stats.ObservePacket(desktopmedia.MediaHeader{Type: desktopmedia.MediaPacketVideo, Sequence: 10}, 100)

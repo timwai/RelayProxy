@@ -13,9 +13,9 @@ import (
 // MediaConn owns one Relay Desktop native-datagram association and its reliable
 // lifetime stream. Encoded media packets are opaque at this layer.
 type MediaConn struct {
-	channel   *tunnel.DatagramChannel
-	stream    tunnel.TunnelStream
-	closeOnce sync.Once
+	channel       *tunnel.DatagramChannel
+	stream        tunnel.TunnelStream
+	closeOnce     sync.Once
 	readMu        sync.Mutex
 	writeMu       sync.Mutex
 	datagramWrite sync.Mutex

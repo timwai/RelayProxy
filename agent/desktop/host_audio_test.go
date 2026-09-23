@@ -359,3 +359,16 @@ func TestStreamSessionAudioEncodesNegotiatedOpus(t *testing.T) {
 		t.Fatalf("decoded Opus PCM bytes=%d want=%d", len(decoded), frameBytes)
 	}
 }
+
+func TestHostDesktopCapabilitiesAdvertiseAudioCodecs(t *testing.T) {
+	host := &Host{source: fakeAudioCapabilitySource{available: true}}
+	caps := host.DesktopCapabilities(context.Background())
+	if !caps.Audio {
+		t.Fatal("audio-capable host did not advertise audio")
+	}
+	if len(caps.AudioCodecs) != 2 ||
+		caps.AudioCodecs[0] != protocol.DesktopAudioCodecOpus ||
+		caps.AudioCodecs[1] != protocol.DesktopAudioCodecPCMS16LE {
+		t.Fatalf("audio codecs=%v", caps.AudioCodecs)
+	}
+}

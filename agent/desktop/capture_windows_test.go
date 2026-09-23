@@ -263,10 +263,10 @@ func TestOpenAutoWindowsFrameStreamStopsOnFirstSuccess(t *testing.T) {
 
 func TestAutoWindowsCaptureBackendOrder(t *testing.T) {
 	tests := []struct {
-		name       string
-		display    screencapture.Display
-		hasWGC     bool
-		want       []protocol.DesktopCaptureBackend
+		name    string
+		display screencapture.Display
+		hasWGC  bool
+		want    []protocol.DesktopCaptureBackend
 	}{
 		{
 			name:    "duplication and WGC",

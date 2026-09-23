@@ -101,6 +101,13 @@ func (b *UIBridge) GetRemoteDesktopStats() protocol.DesktopSessionStats {
 	return b.agent.RemoteDesktopStats()
 }
 
+func (b *UIBridge) GetRemoteDesktopAudioDiagnostics() desktop.DesktopAudioDiagnostics {
+	if b == nil || b.agent == nil {
+		return desktop.DesktopAudioDiagnostics{}
+	}
+	return b.agent.RemoteDesktopAudioDiagnostics()
+}
+
 func (b *UIBridge) GetRemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
 	return b.agent.RemoteDesktopDiagnostics()
 }

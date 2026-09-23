@@ -11,3 +11,11 @@ func OpenMFH264Decoder(context.Context, VideoConfig, bool) (Decoder, error) {
 func OpenMFH264DecoderWithD3D11(context.Context, VideoConfig, bool, uintptr) (Decoder, error) {
 	return nil, ErrDecoderUnavailable
 }
+
+func OpenMFH265Decoder(context.Context, VideoConfig, bool) (Decoder, error) {
+	return nil, ErrDecoderUnavailable
+}
+
+func OpenMFH265DecoderWithD3D11(context.Context, VideoConfig, bool, uintptr) (Decoder, error) {
+	return nil, ErrDecoderUnavailable
+}

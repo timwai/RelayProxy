@@ -71,6 +71,12 @@ func (s *sessionStatsTracker) ObservePacket(header desktopmedia.MediaHeader, byt
 	if s == nil {
 		return
 	}
+	// Existing ABR/loss metrics describe the video stream. Audio uses an
+	// independent stream/sequence domain and must not manufacture video loss
+	// when its datagrams are interleaved with video packets.
+	if header.Type != 0 && header.Type != desktopmedia.MediaPacketVideo {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.recvPackets++

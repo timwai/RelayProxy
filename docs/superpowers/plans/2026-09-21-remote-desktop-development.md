@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #96 已合并，merge `bba4a4cc0fe111bff9d0e7dfb7c5045d739e8031`）
+> 当前开发基线：`main`（PR #97 已合并，merge `0d896e891a9020ee74989c967f5f2a95122dd231`）
 
 ## 0. 当前进度
 
@@ -480,7 +480,7 @@ Windows SendInput / CF_UNICODETEXT
 - Audio diagnostics 增加 reordered / duplicate / late / playout-timeout 与 last-consumed-frame 指标，便于 Windows 实机区分网络乱序、真正丢帧和播放器跟不上。
 - PR #96 已合并到 `main`，merge `bba4a4cc0fe111bff9d0e7dfb7c5045d739e8031`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.39 RD3 Pure-Go Opus Codec Foundation（当前分支）
+### 0.2.39 RD3 Pure-Go Opus Codec Foundation（已合并 PR #97）
 
 - 协议新增 `DesktopAudioCodecOpus = "opus"`，但本阶段不改变 Host 当前默认 PCM wire codec；先把 codec core 单独做稳，下一阶段再做能力协商与 PCM fallback。
 - 引入 Pion Opus 2026-08 encoder 提交线的纯 Go module，不使用 CGO/libopus，保持 Windows amd64/arm64 与 macOS 的现有 Go 构建模型。
@@ -488,7 +488,17 @@ Windows SendInput / CF_UNICODETEXT
 - 现有 48 kHz stereo PCM 一帧为 3840 bytes；96 kbps / 20 ms Opus 的目标 payload 约 240 bytes 级别，可在完成协商后显著降低当前 1.536 Mbps PCM 数据面带宽。
 - Encoder 输入必须是完整单个 20 ms PCM frame；Decoder 输出固定恢复为与 config 对应的 PCM frame，继续复用现有 WASAPI Player、bounded jitter queue 与 generation 模型。
 - 新增 config validation、S16LE 440 Hz stereo encode/decode round-trip、压缩尺寸与错误输入测试。
-- 下一步：Host 优先发送 Opus、Controller/Native Viewer 解码回 PCM 后再进入现有 jitter/WASAPI 链；远端不声明 Opus 时保持 `pcm_s16le` 回退。
+- PR #97 已合并到 `main`，merge `0d896e891a9020ee74989c967f5f2a95122dd231`；Go format/vet/test/race/benchmark、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.40 RD3 Opus Negotiation / End-to-End Data Path（当前分支）
+
+- `DesktopCapabilities` 新增 `audioCodecs`，新 Host 在 loopback audio 可用时声明 `[opus, pcm_s16le]`；server gateway/session 对该 slice 做独立拷贝，继续保持 capability snapshot 隔离。
+- `RemoteDesktopConnectOptions` 新增内部协商字段 `audioCodec`。Controller 在 Relay Desktop dial 前自动选择：新目标优先 Opus；legacy 目标只有 `Audio=true` 且没有 codec list 时严格按 PCM-only 处理；显式 `Audio=false` 不携带 codec。
+- Host capture 仍统一使用现有 48 kHz/stereo/S16LE/20 ms WASAPI loopback；选择 Opus 时仅在 RD/1 packetize 前编码为 96 kbps Opus，PCM fallback 路径保持原样。
+- `audio_config` 通过现有 generation 模型声明实际 codec 与 target bitrate；Opus payload 继续使用独立 audio stream ID=2 / sequence domain，并进入现有 bounded jitter queue。
+- Windows native viewer 按 `audio_config.codec` 创建 Opus decoder；Opus frame 在进入 WASAPI player 前恢复为 PCM，原有 PCM alignment 校验、player rebuild 与错误恢复路径继续复用。
+- 新增 Controller 协商测试、legacy PCM fallback、显式 codec 拒绝、Host Opus transport/reassembly/decode 集成测试，以及 audio codec capability copy 测试。
+- 下一步：CI 通过后补 Opus 弱网/丢帧场景与 PLC 策略，随后做 Windows 实机 capture → Opus → network → decode → WASAPI 验证和带宽/延迟基线。
 
 ### 0.3 本轮进度（2026-09-22）
 

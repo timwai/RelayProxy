@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,6 +107,16 @@ func (b *UIBridge) GetRemoteDesktopDiagnostics() desktop.DesktopDiagnosticsRepor
 
 func (b *UIBridge) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStats) {
 	b.agent.ReportRemoteDesktopViewerStats(stats)
+}
+
+// NextRemoteDesktopAudioFrame is intentionally a Go-only/native-viewer API.
+// WailsService does not bind it into JavaScript; 20 ms audio frames stay out of
+// JSON/WebView polling and are consumed by a blocking native playback goroutine.
+func (b *UIBridge) NextRemoteDesktopAudioFrame(ctx context.Context) (desktop.AudioFrameSnapshot, protocol.DesktopAudioConfig, error) {
+	if b == nil || b.agent == nil {
+		return desktop.AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop bridge is unavailable")
+	}
+	return b.agent.NextRemoteDesktopAudioFrame(ctx)
 }
 
 func (b *UIBridge) GetRemoteDesktopFrame() protocol.RemoteDesktopFrame {

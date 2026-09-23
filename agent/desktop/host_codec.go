@@ -511,6 +511,9 @@ func (h *Host) streamH264Frames(
 	if rawAvailable {
 		captureFormat = "bgra-direct"
 	}
+	if gpuEnabled {
+		captureFormat = "d3d11-nv12"
+	}
 	needsGenerationKeyFrame := true
 	targetFPS := videoCfg.FPS
 	frameInterval := frameIntervalForFPS(targetFPS)
@@ -529,6 +532,56 @@ func (h *Host) streamH264Frames(
 			}
 		}
 		packets, err := encoder.Encode(ctx, frame)
+		if err != nil {
+			return err
+		}
+		for _, encoded := range packets {
+			if needsGenerationKeyFrame && !encoded.KeyFrame {
+				continue
+			}
+			data := encoded.Data
+			if encoded.KeyFrame {
+				needsGenerationKeyFrame = false
+				lastIDR = now
+				data = desktopcodec.H264WithSequenceHeader(data, sequenceHeader)
+			}
+			mediaFrame := desktopmedia.EncodedFrame{
+				SessionID:  sessionID,
+				StreamID:   1,
+				Generation: generation,
+				FrameID:    frameID,
+				Timestamp:  uint64(encoded.Timestamp.Microseconds()),
+				KeyFrame:   encoded.KeyFrame,
+				Config:     encoded.Config,
+				Data:       data,
+			}
+			if err := sendEncodedDesktopFrame(ctx, conn, mediaFrame, cfg.PacketSize, &sequence, &sendQueueDelayMs); err != nil {
+				return err
+			}
+			frameID++
+		}
+		return nil
+	}
+
+	sendD3D11Frame := func(frame *D3D11CaptureFrame, now time.Time) error {
+		if !gpuEnabled || frame == nil || !frame.Valid() || d3dConverter == nil || d3dEncoder == nil {
+			return desktopcodec.ErrEncoderUnavailable
+		}
+		capturedFrames++
+		converted, err := d3dConverter.Convert(
+			frame.Resource,
+			frame.Subresource,
+			now.Sub(started),
+		)
+		if err != nil {
+			return err
+		}
+		if needsGenerationKeyFrame || now.Sub(lastIDR) >= videoCfg.KeyframeEvery {
+			if err := encoder.ForceIDR(ctx); err == nil {
+				lastIDR = now
+			}
+		}
+		packets, err := d3dEncoder.EncodeD3D11(ctx, converted)
 		if err != nil {
 			return err
 		}
@@ -609,7 +662,13 @@ func (h *Host) streamH264Frames(
 		return nil
 	}
 
-	if rawAvailable {
+	if gpuEnabled {
+		if err := sendD3D11Frame(firstD3D, started); err != nil {
+			return err
+		}
+		firstD3D.Close()
+		firstD3D = nil
+	} else if rawAvailable {
 		if err := sendRawFrame(firstRaw, started); err != nil {
 			return err
 		}

@@ -97,8 +97,8 @@ type ReassemblerConfig struct {
 	// intentionally rejected so frame/sequence state stays stream-specific.
 	PacketType MediaPacketType
 	MaxFrames  int
-	MaxBytes  int
-	FrameTTL  time.Duration
+	MaxBytes   int
+	FrameTTL   time.Duration
 }
 
 type frameKey struct {

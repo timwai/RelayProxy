@@ -66,3 +66,26 @@ func TestRawFrameValidationAcceptsPaddedBGRA(t *testing.T) {
 		t.Fatal("BGRA frame with short stride accepted")
 	}
 }
+
+func TestD3D11EncodeFrameValidation(t *testing.T) {
+	frame := D3D11EncodeFrame{
+		Resource:  1,
+		Width:     1280,
+		Height:    720,
+		Timestamp: time.Second,
+	}
+	if err := frame.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	frame.Resource = 0
+	if !errors.Is(frame.Validate(), ErrInvalidFrame) {
+		t.Fatal("nil D3D11 resource accepted")
+	}
+
+	frame.Resource = 1
+	frame.Width = 1279
+	if !errors.Is(frame.Validate(), ErrInvalidFrame) {
+		t.Fatal("odd D3D11 width accepted")
+	}
+}

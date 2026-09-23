@@ -262,7 +262,7 @@ func (s *mfAsyncState) submitAvailable() {
 }
 
 func (s *mfAsyncState) submit(input mfEncodeInput) error {
-	sample, err := createInputSample(input.data, input.timestamp, input.duration)
+	sample, err := createEncodeInputSample(input)
 	if err != nil {
 		return err
 	}

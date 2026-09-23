@@ -192,6 +192,48 @@ func createInputSample(data []byte, timestamp, duration time.Duration) (unsafe.P
 	return sample, nil
 }
 
+func createD3D11InputSample(frame D3D11EncodeFrame, duration time.Duration) (unsafe.Pointer, error) {
+	if err := frame.Validate(); err != nil {
+		return nil, err
+	}
+	var buffer unsafe.Pointer
+	hr, _, _ := procMFCreateDXGISurfaceBuffer.Call(
+		uintptr(unsafe.Pointer(&iidID3D11Texture2D)),
+		frame.Resource,
+		uintptr(frame.Subresource),
+		0,
+		uintptr(unsafe.Pointer(&buffer)),
+	)
+	if hresultFailed(hr) {
+		return nil, hresultError("MFCreateDXGISurfaceBuffer", hr)
+	}
+	if buffer == nil {
+		return nil, errors.New("MFCreateDXGISurfaceBuffer returned nil")
+	}
+	defer releaseIUnknown(buffer)
+
+	sample, err := createMFSample()
+	if err != nil {
+		return nil, err
+	}
+	if err := addSampleBuffer(sample, buffer); err != nil {
+		releaseIUnknown(sample)
+		return nil, err
+	}
+	if err := setSampleTiming(sample, frame.Timestamp, duration); err != nil {
+		releaseIUnknown(sample)
+		return nil, err
+	}
+	return sample, nil
+}
+
+func createEncodeInputSample(input mfEncodeInput) (unsafe.Pointer, error) {
+	if input.surface != nil {
+		return createD3D11InputSample(*input.surface, input.duration)
+	}
+	return createInputSample(input.data, input.timestamp, input.duration)
+}
+
 func createOutputSample(size, alignment uint32) (unsafe.Pointer, error) {
 	sample, err := createMFSample()
 	if err != nil {

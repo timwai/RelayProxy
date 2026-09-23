@@ -10,7 +10,15 @@ func OpenMFH264Encoder(context.Context, VideoConfig, bool) (*MFH264Encoder, erro
 	return nil, ErrEncoderUnavailable
 }
 
+func OpenMFH264EncoderWithD3D11(context.Context, VideoConfig, bool, uintptr) (*MFH264Encoder, error) {
+	return nil, ErrEncoderUnavailable
+}
+
 func (e *MFH264Encoder) Encode(context.Context, RawFrame) ([]EncodedPacket, error) {
+	return nil, ErrEncoderUnavailable
+}
+
+func (e *MFH264Encoder) EncodeD3D11(context.Context, D3D11EncodeFrame) ([]EncodedPacket, error) {
 	return nil, ErrEncoderUnavailable
 }
 

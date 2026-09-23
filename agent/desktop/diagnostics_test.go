@@ -330,6 +330,7 @@ func TestSummarizeDesktopDiagnosticsIncludesAudio(t *testing.T) {
 				ReceivedFrames: 50, ConsumedFrames: 48, QueueDroppedFrames: 3,
 				GenerationDiscardedFrames: 2, RejectedFrames: 4,
 				ReorderedFrames: 5, DuplicateFrames: 2, LateFrames: 3, PlayoutTimeoutFrames: 1,
+				ConcealmentFrames: 6, GapSkippedFrames: 8,
 			},
 		},
 	}
@@ -344,6 +345,8 @@ func TestSummarizeDesktopDiagnosticsIncludesAudio(t *testing.T) {
 		summary.AudioDuplicateFrames != 2 ||
 		summary.AudioLateFrames != 3 ||
 		summary.AudioPlayoutTimeouts != 1 ||
+		summary.AudioConcealmentFrames != 6 ||
+		summary.AudioGapSkippedFrames != 8 ||
 		summary.AudioMaxQueueFrames != 4 {
 		t.Fatalf("audio summary=%+v", summary)
 	}

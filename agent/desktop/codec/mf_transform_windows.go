@@ -41,6 +41,7 @@ const (
 	mftMessageNotifyStartOfStream  = 0x10000003
 
 	mfVideoInterlaceProgressive = 2
+	h265ProfileMain4208          = 1
 
 	mftOutputStreamProvidesSamples   = 0x100
 	mftOutputStreamCanProvideSamples = 0x200
@@ -83,6 +84,10 @@ var (
 		Data1: 0x3c036de7, Data2: 0x3ad0, Data3: 0x4c9e,
 		Data4: [8]byte{0x92, 0x16, 0xee, 0x6d, 0x6a, 0xc2, 0x1c, 0xb3},
 	}
+	mfMTVideoProfile = windows.GUID{
+		Data1: 0xad76a80b, Data2: 0x2d5c, Data3: 0x4e0b,
+		Data4: [8]byte{0xb3, 0x75, 0x64, 0xe5, 0x20, 0x13, 0x70, 0x36},
+	}
 	mfMTFixedSizeSamples = windows.GUID{
 		Data1: 0xb8ebefaf, Data2: 0xb718, Data3: 0x4e04,
 		Data4: [8]byte{0xb0, 0xa9, 0x11, 0x67, 0x75, 0xe3, 0x32, 0x1b},
@@ -105,7 +110,25 @@ var (
 	}
 )
 
+type mfVideoEncoderSpec struct {
+	Codec         string
+	Label         string
+	OutputSubtype *windows.GUID
+	OutputProfile uint32
+}
+
+var (
+	mfH264EncoderSpec = mfVideoEncoderSpec{
+		Codec: "h264", Label: "H.264", OutputSubtype: &mfVideoFormatH264,
+	}
+	mfH265EncoderSpec = mfVideoEncoderSpec{
+		Codec: "h265", Label: "H.265", OutputSubtype: &mfVideoFormatHEVC,
+		OutputProfile: h265ProfileMain4208,
+	}
+)
+
 type MFH264TransformInfo struct {
+	Codec          string
 	Hardware       bool
 	Async          bool
 	D3D11Aware     bool
@@ -115,6 +138,7 @@ type MFH264TransformInfo struct {
 
 type MFH264Transform struct {
 	info      MFH264TransformInfo
+	spec      mfVideoEncoderSpec
 	commands  chan mfTransformCommand
 	done      chan struct{}
 	closeOnce sync.Once

@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 )
 
 type testDatagramPath struct {
@@ -66,5 +67,89 @@ func TestMediaConnReceiveClearsFailedDirectPath(t *testing.T) {
 	}
 	if !path.isClosed() {
 		t.Fatal("failed direct path was not closed")
+	}
+}
+
+type blockingDatagramPath struct {
+	entered chan struct{}
+	release chan struct{}
+
+	mu         sync.Mutex
+	active     int
+	concurrent bool
+}
+
+func (p *blockingDatagramPath) Name() string { return "udp_p2p" }
+func (p *blockingDatagramPath) Receive(context.Context) ([]byte, error) {
+	return nil, net.ErrClosed
+}
+func (p *blockingDatagramPath) Close() error { return nil }
+func (p *blockingDatagramPath) Send(ctx context.Context, _ []byte) error {
+	p.mu.Lock()
+	if p.active > 0 {
+		p.concurrent = true
+	}
+	p.active++
+	p.mu.Unlock()
+
+	select {
+	case p.entered <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	p.mu.Lock()
+	p.active--
+	p.mu.Unlock()
+	return nil
+}
+
+func TestMediaConnSerializesConcurrentDatagramSends(t *testing.T) {
+	path := &blockingDatagramPath{
+		entered: make(chan struct{}, 2),
+		release: make(chan struct{}, 2),
+	}
+	conn := &MediaConn{}
+	conn.SetDatagramPath(path)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 2)
+	go func() { done <- conn.Send(ctx, []byte("video")) }()
+	select {
+	case <-path.entered:
+	case <-ctx.Done():
+		t.Fatal("first datagram send did not enter path")
+	}
+	go func() { done <- conn.Send(ctx, []byte("audio")) }()
+
+	select {
+	case <-path.entered:
+		t.Fatal("second datagram send entered path concurrently")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	path.release <- struct{}{}
+	select {
+	case <-path.entered:
+	case <-ctx.Done():
+		t.Fatal("second datagram send did not enter after first completed")
+	}
+	path.release <- struct{}{}
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	path.mu.Lock()
+	concurrent := path.concurrent
+	path.mu.Unlock()
+	if concurrent {
+		t.Fatal("datagram path observed concurrent Send calls")
 	}
 }

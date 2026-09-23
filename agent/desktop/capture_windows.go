@@ -206,6 +206,10 @@ func windowsDesktopCapabilitySnapshot(displays []screencapture.Display, hasWGC b
 	return captures, out
 }
 
+func (c *windowsCapture) DesktopAudioAvailable() bool {
+	return c != nil
+}
+
 func (c *windowsCapture) DesktopCaptureCapabilities(ctx context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, nil, err

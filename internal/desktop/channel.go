@@ -13,11 +13,12 @@ import (
 // MediaConn owns one Relay Desktop native-datagram association and its reliable
 // lifetime stream. Encoded media packets are opaque at this layer.
 type MediaConn struct {
-	channel   *tunnel.DatagramChannel
-	stream    tunnel.TunnelStream
-	closeOnce sync.Once
-	readMu    sync.Mutex
-	writeMu   sync.Mutex
+	channel       *tunnel.DatagramChannel
+	stream        tunnel.TunnelStream
+	closeOnce     sync.Once
+	readMu        sync.Mutex
+	writeMu       sync.Mutex
+	datagramWrite sync.Mutex
 
 	pathMu sync.RWMutex
 	direct DatagramPath
@@ -110,6 +111,8 @@ func (c *MediaConn) Send(ctx context.Context, packet []byte) error {
 	if c == nil {
 		return tunnel.ErrDatagramsUnsupported
 	}
+	c.datagramWrite.Lock()
+	defer c.datagramWrite.Unlock()
 	if path := c.directPath(); path != nil {
 		if err := path.Send(ctx, packet); err == nil {
 			return nil

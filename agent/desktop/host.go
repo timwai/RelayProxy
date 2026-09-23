@@ -147,9 +147,10 @@ func DefaultHostConfig() HostConfig {
 }
 
 type Host struct {
-	source CaptureSource
-	input  InputSink
-	cfg    HostConfig
+	source    CaptureSource
+	input     InputSink
+	cfg       HostConfig
+	audioOpen audioCaptureFactory
 
 	codecMu   sync.RWMutex
 	codecCaps []protocol.DesktopCodecCapability
@@ -191,7 +192,7 @@ func NewHostWithInput(source CaptureSource, input InputSink, cfg HostConfig) (*H
 	if cfg.PacketSize <= desktopmedia.MediaHeaderSize {
 		cfg.PacketSize = defaults.PacketSize
 	}
-	return &Host{source: source, input: input, cfg: cfg}, nil
+	return &Host{source: source, input: input, cfg: cfg, audioOpen: openDefaultAudioCapture}, nil
 }
 
 const (
@@ -389,6 +390,10 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	if syncClipboard {
 		workerCount++
 	}
+	streamAudio := h.desktopAudioAvailable() && desktopAudioEnabled(options)
+	if streamAudio {
+		workerCount++
+	}
 	errorsCh := make(chan error, workerCount)
 	go func() {
 		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, backend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates)
@@ -405,6 +410,18 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	if syncClipboard {
 		go func() { errorsCh <- h.streamClipboard(sessionCtx, conn, clipboardEndpoint, clipboardState) }()
+	}
+	if streamAudio {
+		go func() {
+			err := h.streamSessionAudio(sessionCtx, conn)
+			if err != nil && !errors.Is(err, context.Canceled) && sessionCtx.Err() == nil {
+				log.Printf("[Desktop] audio capture disabled for this session: %v", err)
+			}
+			if sessionCtx.Err() == nil {
+				<-sessionCtx.Done()
+			}
+			errorsCh <- sessionCtx.Err()
+		}()
 	}
 
 	first := <-errorsCh
@@ -769,6 +786,9 @@ func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabili
 	}
 	if _, ok := h.source.(ClipboardEndpoint); ok {
 		caps.Clipboard = true
+	}
+	if h.desktopAudioAvailable() {
+		caps.Audio = true
 	}
 	_, hasCursor := h.source.(CursorCaptureSource)
 	if provider, ok := h.source.(CaptureCapabilitySource); ok {

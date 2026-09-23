@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline、GPU runtime → CPU H.264 generation 热迁移与 RD3 HEVC/H.265 Media Foundation 能力探测均已合并 main；当前分支参数化 MF encoder transform 并加入隐藏 HEVC encoder core，完整 Host/Viewer H.265 链路就绪前仍不开放选择  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline、GPU runtime → CPU H.264 generation 热迁移、RD3 HEVC/H.265 Media Foundation 能力探测与隐藏 HEVC encoder core 均已合并 main；下一阶段实现隐藏 HEVC decoder core 与 D3D11 NV12 output，再接 Viewer generation，完整链路就绪前不开放选择  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
@@ -323,7 +323,7 @@ Windows SendInput / CF_UNICODETEXT
 
 - PR #76 已合并到 `main`，merge `c008e1fb0ed5a28cdd10913ce4aafcd1310f800c`；Go CI、race、benchmark、UI full regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.23 RD3 HEVC Encoder Core（当前分支）
+### 0.2.23 RD3 HEVC Encoder Core（已合并 PR #77）
 
 - Media Foundation encoder transform 从 H.264 写死输出改为内部 `mfVideoEncoderSpec`：codec 名称、输出 subtype、profile、level、同步/异步输出标记和 D3D11 surface input 均由 spec 驱动；现有 `MFH264Transform` / `MFH264Encoder` 对外 API 保持兼容。
 - 新增隐藏 `MFH265Encoder`，支持 CPU RawFrame → NV12 → HEVC 和 D3D11 NV12 surface → HEVC 两条路径，并复用现有异步 `IMFMediaEventGenerator`、ForceKeyFrame、动态 mean bitrate、stats 与安全 Close 生命周期。
@@ -333,6 +333,8 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 HEVC level、VPS/SPS/PPS、sequence-header 注入和 Encoder / D3D11Encoder 接口契约测试；非 Windows 提供 HEVC encoder unavailable stub。
 - 本分支不修改 `NormalizeCodecPreference`、Host capability 广告、Controller/GUI 选择器、RD/1 会话协商或 Viewer decoder；因此 H.265 仍不可被用户选择，避免 encoder 单边就绪造成半链路状态。
 - 下一步：实现 Media Foundation HEVC decoder（含 D3D11 NV12 output）与 HEVC codec string / generation-aware Viewer rebuild，再接入 Host H.265 generation 和 capability negotiation。
+
+- PR #77 已合并到 `main`，merge `89218c686a9696c340203328bcd39ef1bb320123`；Go CI 重跑通过 format/vet/full test/race/benchmark，UI full regression、Windows/macOS desktop package 全部通过。首轮 Go CI 唯一失败为既有 `internal/tunnel/TestTLSTunnelMultiplexing` 的本机 QUIC timeout，重跑即通过，与 HEVC 变更无关。
 
 ### 0.3 本轮进度（2026-09-22）
 

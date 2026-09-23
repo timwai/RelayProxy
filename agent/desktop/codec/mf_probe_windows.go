@@ -212,7 +212,6 @@ func ProbeH264MediaFoundation(ctx context.Context) H264Probe {
 	return probe
 }
 
-
 // ProbeH265MediaFoundation enumerates HEVC transforms without activating them.
 // The result is kept internal to RD3 probing until the full H.265 session path
 // is available, so discovering a transform cannot make H.265 user-selectable.

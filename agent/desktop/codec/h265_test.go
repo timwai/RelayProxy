@@ -54,3 +54,45 @@ func TestH265WithSequenceHeader(t *testing.T) {
 		t.Fatalf("duplicated HEVC sequence header: %d != %d", len(got), len(already))
 	}
 }
+
+
+func TestH265MediaFoundationLevel(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  VideoConfig
+		want uint32
+	}{
+		{
+			name: "720p30",
+			cfg:  VideoConfig{Width: 1280, Height: 720, FPS: 30, TargetBitrate: 6_000_000},
+			want: 4,
+		},
+		{
+			name: "1080p30",
+			cfg:  VideoConfig{Width: 1920, Height: 1080, FPS: 30, TargetBitrate: 12_000_000},
+			want: 5,
+		},
+		{
+			name: "1080p60",
+			cfg:  VideoConfig{Width: 1920, Height: 1080, FPS: 60, TargetBitrate: 12_000_000},
+			want: 6,
+		},
+		{
+			name: "4k60",
+			cfg:  VideoConfig{Width: 3840, Height: 2160, FPS: 60, TargetBitrate: 20_000_000},
+			want: 8,
+		},
+		{
+			name: "4k60 high bitrate",
+			cfg:  VideoConfig{Width: 3840, Height: 2160, FPS: 60, TargetBitrate: 100_000_000},
+			want: 11,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := h265MediaFoundationLevel(tc.cfg); got != tc.want {
+				t.Fatalf("level=%d want=%d", got, tc.want)
+			}
+		})
+	}
+}

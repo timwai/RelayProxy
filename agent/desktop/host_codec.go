@@ -222,7 +222,29 @@ func (h *Host) streamSessionFrames(
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	jpegGeneration := uint32(1)
-	if preference == "h264" && h.canEncodeH264() {
+	if h265ValidationRequested(options.Codec) {
+		if err := h.streamH265Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
+			return err
+		} else {
+			var runtimeErr *h265RuntimeError
+			if errors.As(err, &runtimeErr) {
+				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
+				if generationErr != nil {
+					return generationErr
+				}
+				jpegGeneration = nextGeneration
+				log.Printf("[Desktop] H.265 validation runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
+					runtimeErr.Generation, jpegGeneration, runtimeErr.Err)
+			} else {
+				// The validation sentinel is intentionally not part of the public codec
+				// preference normalizer. If HEVC cannot even establish generation 1,
+				// fall back through the already-advertised H.264 path before JPEG.
+				preference = "h264"
+				log.Printf("[Desktop] H.265 validation session unavailable, falling back to H.264/JPEG: %v", err)
+			}
+		}
+	}
+	if jpegGeneration == 1 && preference == "h264" && h.canEncodeH264() {
 		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err
 		} else {

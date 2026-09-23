@@ -5,6 +5,7 @@ package gui
 import (
 	"encoding/json"
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -70,6 +71,7 @@ func (s *WailsService) ConnectRemoteDesktop(targetID string, rawOptions string) 
 			return string(data), nil
 		}
 	}
+	options = applyRemoteDesktopHEVCValidationOptions(options, os.Getenv(remoteDesktopHEVCValidationEnv))
 	s.owner.stopNativeDesktopViewer()
 	session, err := s.owner.bridge.ConnectRemoteDesktop(targetID, options)
 	if err != nil {

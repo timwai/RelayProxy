@@ -3,6 +3,8 @@ package gui
 import (
 	"strings"
 	"testing"
+
+	"relayproxy/internal/protocol"
 )
 
 func TestDesktopWindowDimensionsRemainResponsive(t *testing.T) {
@@ -236,6 +238,7 @@ func TestRemoteDesktopRuntimeResolutionSwitcher(t *testing.T) {
 		`id="desktop-runtime-resolution-max"`,
 		"function updateDesktopRuntimeResolutionControl(status)",
 		"status.codec === 'h264'",
+		"status.codec === 'h265'",
 		"status.maxWidth || status.width || 0",
 		"status.maxHeight || status.height || 0",
 		"option.disabled = !!(maxWidth && maxHeight && (width > maxWidth || height > maxHeight))",
@@ -247,6 +250,23 @@ func TestRemoteDesktopRuntimeResolutionSwitcher(t *testing.T) {
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop runtime resolution UI missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopHiddenHEVCUsesNativeViewer(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"mime.indexOf('video/h265') === 0",
+		"$('desktop-viewer-image').removeAttribute('src')",
+		"H.265 · 请使用原生查看器 · QUIC Datagram · 键鼠控制",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("hidden HEVC native-viewer guard missing %q", want)
 		}
 	}
 }
@@ -308,5 +328,24 @@ func TestRemoteDesktopCaptureBackendSelector(t *testing.T) {
 	}
 	if strings.Contains(page, `<option value="wgc">WGC</option>`) {
 		t.Fatal("WGC must not be a static option; it must come from target capabilities")
+	}
+}
+
+func TestRemoteDesktopHEVCValidationOverrideIsOptIn(t *testing.T) {
+	base := protocol.RemoteDesktopConnectOptions{
+		Backend: protocol.DesktopBackendAuto,
+		Codec:   "h264",
+	}
+	for _, value := range []string{"", "0", "false", "off", "no"} {
+		got := applyRemoteDesktopHEVCValidationOptions(base, value)
+		if got.Backend != base.Backend || got.Codec != base.Codec {
+			t.Fatalf("disabled validation env %q changed options: %+v", value, got)
+		}
+	}
+	for _, value := range []string{"1", "true", "TRUE", " yes ", "on"} {
+		got := applyRemoteDesktopHEVCValidationOptions(base, value)
+		if got.Backend != protocol.DesktopBackendRelay || got.Codec != protocol.DesktopCodecH265Validation {
+			t.Fatalf("enabled validation env %q produced %+v", value, got)
+		}
 	}
 }

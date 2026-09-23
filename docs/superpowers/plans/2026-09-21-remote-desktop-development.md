@@ -359,7 +359,7 @@ Windows SendInput / CF_UNICODETEXT
 - `NormalizeCodecPreference("h265")`、Host capability 广告和 GUI codec selector 仍保持关闭；下一步实现 Host H.265 generation（CPU + WGC D3D11 zero-copy）、HEVC codec string，并在端到端验证后再开放协商。
 - PR #79 已合并到 `main`，merge `1e3afb98d42e77999709c37a8d6d5eca996696a8`；Go CI 与 UI CI 均通过。
 
-### 0.2.26 RD3 HEVC Host Generation（当前分支）
+### 0.2.26 RD3 HEVC Host Generation（已合并 PR #80）
 
 - 新增隐藏 Host H.265 generation pipeline，保持用户侧 H.265 选择/能力广告关闭；先让 Host 可以稳定产生 generation-aware HEVC，再开放端到端协商。
 - CPU 路径复用现有 RawCaptureSource / RGBA → NV12 生命周期，使用 `MFH265Encoder` 输出 HEVC Annex-B，并在每个新 generation 的首个关键帧前补 VPS/SPS/PPS sequence header。
@@ -368,6 +368,16 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 `H265CodecString`：从 Annex-B SPS 的 `profile_tier_level` 生成 RFC 6381 `hvc1.<profile>.<compat>.<tier+level>.<constraints>`，并处理 emulation-prevention byte。
 - 新增 Host generation/codec metadata 与 HEVC codec-string 回归测试。
 - 本分支仍不修改 `NormalizeCodecPreference`、Host capability advertisement、Controller/GUI codec selector 或默认协商；待 Windows 实机端到端验证后再开放 H.265。
+- PR #80 已合并到 `main`，merge `a76cc133a180982b29e5332beb13c4d4096835f7`；Go format/vet/full test/race/benchmark、UI full regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.27 RD3 HEVC End-to-End Validation Negotiation（当前分支）
+
+- 新增仅供实机验证的内部 codec sentinel：`h265-validation`。它不出现在 GUI、Host capability advertisement 或公开 `NormalizeCodecPreference` 中，普通 `auto/h264/jpeg` 行为保持不变。
+- Controller 显式携带该 sentinel 时，Host 优先启动已合并的 H.265 generation pipeline；成功后沿现有 RD/1 Datagram、Controller H.265 snapshot/ABR/recovery 与 Windows native HEVC decoder 路径完成端到端验证。
+- 若 HEVC 在发送首个 VideoConfig 前不可用，则自动回退到已广告的 H.264，再由现有逻辑回退 JPEG；若 HEVC 已经广告 generation 后发生运行时失败，则使用下一 generation 直接回退 JPEG，避免 generation 倒退。
+- Windows GUI 增加隐藏环境变量触发：启动前设置 `RELAYPROXY_DESKTOP_HEVC_VALIDATION=1` 时，只覆盖下一次 Remote Desktop 连接参数为 `backend=relay` + `codec=h265-validation`；界面本身仍不显示 H.265 选项，取消环境变量后恢复原行为。
+- 隐藏 H.265 会话状态下允许现有 runtime resolution 控件继续触发 generation rebuild；嵌入式 WebView 不尝试把 `video/h265` 当 JPEG/WebCodecs H.264 解码，而是明确提示使用 Windows 原生 Media Foundation 查看器。
+- 该入口的目的仅是 Intel/NVIDIA/AMD 实机兼容性和零拷贝链路验证；通过实机矩阵前不开放 H.265 GUI 选项，也不把 H.265 加入自动协商。
 
 ### 0.3 本轮进度（2026-09-22）
 

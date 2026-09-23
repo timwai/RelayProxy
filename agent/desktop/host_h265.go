@@ -6,12 +6,17 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"strings"
 	"time"
 
 	desktopcodec "relayproxy/agent/desktop/codec"
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
 )
+
+func h265ValidationRequested(value string) bool {
+	return strings.EqualFold(strings.TrimSpace(value), protocol.DesktopCodecH265Validation)
+}
 
 // h265RuntimeError mirrors the H.264 generation error boundary while H.265
 // remains an internal-only Host path. It lets callers preserve the last

@@ -252,3 +252,123 @@ func TestAudioDiagnosticsTrackRejectedAndGenerationDiscardedFrames(t *testing.T)
 		t.Fatalf("audio diagnostics=%+v", got)
 	}
 }
+
+func TestAudioQueueReordersFramesBeforePlayout(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testAudioConfig(1)) {
+		t.Fatal("audio config rejected")
+	}
+	for _, id := range []uint32{2, 1} {
+		if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+			Type:       desktopmedia.MediaPacketAudio,
+			StreamID:   desktopmedia.MediaStreamAudioID,
+			Generation: 1,
+			FrameID:    id,
+			Timestamp:  uint64(id) * 20_000,
+			Data:       []byte{byte(id), 0, byte(id), 0},
+		}) {
+			t.Fatalf("enqueue frame %d failed", id)
+		}
+	}
+	frame, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.FrameID != 1 {
+		t.Fatalf("first playout frame=%d want=1", frame.FrameID)
+	}
+	got := session.AudioDiagnosticsSnapshot()
+	if got.ReorderedFrames != 1 || got.LastConsumedFrameID != 1 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}
+
+func TestAudioQueueRejectsDuplicateAndLateFrames(t *testing.T) {
+	session := newAudioControllerTestSession()
+	if !session.applyAudioConfig(testAudioConfig(1)) {
+		t.Fatal("audio config rejected")
+	}
+	frame := func(id uint32) *desktopmedia.EncodedFrame {
+		return &desktopmedia.EncodedFrame{
+			Type:       desktopmedia.MediaPacketAudio,
+			StreamID:   desktopmedia.MediaStreamAudioID,
+			Generation: 1,
+			FrameID:    id,
+			Timestamp:  uint64(id) * 20_000,
+			Data:       []byte{byte(id), 0, byte(id), 0},
+		}
+	}
+	if !session.enqueueAudioFrame(frame(1)) || !session.enqueueAudioFrame(frame(2)) {
+		t.Fatal("initial frames rejected")
+	}
+	if session.enqueueAudioFrame(frame(2)) {
+		t.Fatal("duplicate queued frame was accepted")
+	}
+	first, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.FrameID != 1 {
+		t.Fatalf("first frame=%d want=1", first.FrameID)
+	}
+	if session.enqueueAudioFrame(frame(1)) {
+		t.Fatal("late frame older than playout head was accepted")
+	}
+	got := session.AudioDiagnosticsSnapshot()
+	if got.DuplicateFrames != 1 || got.LateFrames != 1 || got.RejectedFrames != 2 {
+		t.Fatalf("audio diagnostics=%+v", got)
+	}
+}
+
+func TestAudioSingleFrameExpiresBoundedPlayoutWait(t *testing.T) {
+	session := newAudioControllerTestSession()
+	cfg := testAudioConfig(1)
+	cfg.FrameDurationMs = 20
+	if !session.applyAudioConfig(cfg) {
+		t.Fatal("audio config rejected")
+	}
+	if !session.enqueueAudioFrame(&desktopmedia.EncodedFrame{
+		Type:       desktopmedia.MediaPacketAudio,
+		StreamID:   desktopmedia.MediaStreamAudioID,
+		Generation: 1,
+		FrameID:    1,
+		Timestamp:  20_000,
+		Data:       []byte{1, 0, 1, 0},
+	}) {
+		t.Fatal("audio frame rejected")
+	}
+	session.audioMu.Lock()
+	session.audioQueue[0].receivedAt = time.Now().Add(-time.Second)
+	session.audioMu.Unlock()
+
+	frame, _, err := session.NextAudioFrame(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frame.FrameID != 1 {
+		t.Fatalf("frame=%d want=1", frame.FrameID)
+	}
+	got := session.AudioDiagnosticsSnapshot()
+	if got.PlayoutTimeoutFrames != 1 {
+		t.Fatalf("playout timeout frames=%d want=1", got.PlayoutTimeoutFrames)
+	}
+}
+
+func TestAudioPlayoutDelayIsBounded(t *testing.T) {
+	tests := []struct {
+		frameMs int
+		want    time.Duration
+	}{
+		{frameMs: 0, want: 40 * time.Millisecond},
+		{frameMs: 5, want: 20 * time.Millisecond},
+		{frameMs: 20, want: 40 * time.Millisecond},
+		{frameMs: 100, want: 80 * time.Millisecond},
+	}
+	for _, tc := range tests {
+		cfg := testAudioConfig(1)
+		cfg.FrameDurationMs = tc.frameMs
+		if got := audioPlayoutDelay(cfg); got != tc.want {
+			t.Fatalf("frameMs=%d delay=%s want=%s", tc.frameMs, got, tc.want)
+		}
+	}
+}

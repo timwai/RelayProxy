@@ -298,6 +298,7 @@ func TestRemoteDesktopCaptureBackendSelector(t *testing.T) {
 		"!remoteDesktopCaptureBackendSupported(targetID, options.captureBackend)",
 		"目标未提供 ' + options.captureBackend.toUpperCase() + ' 采集能力",
 		"WGC 仅在目标 Windows 运行时确认支持时出现",
+		"采集“自动”按 DXGI → WGC → GDI 顺序选择",
 		"显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端",
 		"强制 WGC/DXGI 时请先选择具体显示器",
 	} {

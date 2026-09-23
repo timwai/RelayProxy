@@ -508,7 +508,8 @@ Windows SendInput / CF_UNICODETEXT
 - Opus decoder wrapper 新增 `DecodePLC()`，把 Pion 的 signed-int16 PLC 输出恢复为现有 S16LE byte frame；未收到任何真实 Opus packet 前的 PLC 由底层 decoder 输出静音，已 prime 后使用 codec concealment 状态。
 - Audio diagnostics 新增 `concealmentFrames` 与 `gapSkippedFrames`，summary 同步导出 `audioConcealmentFrames` / `audioGapSkippedFrames`，可区分网络缺帧被平滑掩盖与大缺口主动追实时。
 - 新增单帧缺失、连续大缺口 3 帧 PLC 上限、queue-overflow 不触发 PLC、Opus codec PLC PCM 输出与诊断汇总测试。
-- 下一步：CI 通过后增加基于确定性 datagram impairment 的真实 packet-loss 场景，并做 Windows 实机 capture → Opus → loss/jitter → PLC → WASAPI 的听感与延迟验证。
+- 新增真实 RD/1 packet-loss 集成链：Host 连续生成 4 帧 Opus datagram，确定性丢弃 FrameID=2 的实际 packet，再经 audio Reassembler → Controller gap detector → PLC event → Opus decoder，验证恢复后的三段 PCM 均保持完整 20 ms 帧长。
+- 下一步：做 Windows 实机 capture → Opus → loss/jitter → PLC → WASAPI 的听感、CPU 与端到端延迟验证，并据实机数据决定是否需要自适应 Opus bitrate/FEC。
 
 ### 0.3 本轮进度（2026-09-22）
 

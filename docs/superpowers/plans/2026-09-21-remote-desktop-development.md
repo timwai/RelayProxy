@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS 与 FrameArrived 事件驱动等待均已合并 main；下一阶段推进 D3D11 texture → GPU convert/NV12 surface → Media Foundation hardware encoder 的 capture→encoder 零拷贝路径  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS 与 FrameArrived 事件驱动等待均已合并 main；当前分支先让 Media Foundation encoder 绑定外部 D3D11 device manager，并支持 D3D11 NV12 texture 直接封装 input sample，为 capture→encoder 零拷贝打通 MF 入口  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
@@ -265,6 +265,15 @@ Windows SendInput / CF_UNICODETEXT
 - Close 生命周期先停止 capture session，再注销 `FrameArrived` token、关闭 frame pool，最后释放 Go typed handler，避免 native callback 持有悬挂 delegate。
 - 新增 signal coalescing 单测；Go CI、UI full regression、Windows/macOS desktop package CI 全部通过。
 - PR #71 已合并到 `main`，merge `6df077d1a237b4ebd08a377fa19cae21de943588`。
+
+### 0.2.18 Media Foundation D3D11 Input Surface（当前分支）
+
+- Codec 新增 `D3D11EncodeFrame` / `D3D11Encoder` 可选接口，描述外部 `ID3D11Texture2D` resource、subresource、尺寸与时间戳，不改变现有 CPU `RawFrame` encoder contract。
+- Windows H.264 encoder 新增 `OpenMFH264EncoderWithD3D11`；使用已有 DXGI device manager 基础设施把外部 D3D11 device 通过 `MFT_MESSAGE_SET_D3D_MANAGER` 绑定到 D3D11-aware hardware encoder MFT。
+- D3D11 模式只在 MFT 明确上报 `MF_SA_D3D11_AWARE` 时成立；不支持的 encoder 不伪装成零拷贝路径。
+- 新增 `MFCreateDXGISurfaceBuffer` input sample：NV12 `ID3D11Texture2D` 可以直接封装为 `IMFMediaBuffer/IMFSample` 并送入同步或异步 `ProcessInput`，不经过 CPU `frameToNV12` / memory buffer copy。
+- 原有 `OpenMFH264Encoder`、CPU NV12/BGRA/RGBA 输入与非 Windows stub 保持兼容；只有显式选择 D3D11 encoder API 才要求外部 device。
+- 当前尚未把 WGC BGRA capture texture 接到该入口；下一步是在同一 capture device 上用 D3D11 VideoProcessor 做 BGRA→NV12（同时承担 resolution scale），再把生成的 NV12 texture 交给本轮新增的 `EncodeD3D11`。
 
 ### 0.3 本轮进度（2026-09-22）
 

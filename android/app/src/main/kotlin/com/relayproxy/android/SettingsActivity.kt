@@ -30,10 +30,16 @@ class SettingsActivity : Activity() {
     private lateinit var tlsEnabled: Switch
     private lateinit var insecureTls: Switch
     private lateinit var allowPrivate: Switch
-    private lateinit var cellularOnly: Switch
+    private lateinit var networkMode: Spinner
 
     private val transportValues = listOf("auto", "quic_only", "tcp_only")
     private val transportLabels = listOf("自动选择", "仅 QUIC", "仅 TCP/TLS")
+    private val networkModeValues = listOf(
+        NetworkBinder.MODE_AUTO,
+        NetworkBinder.MODE_CELLULAR,
+        NetworkBinder.MODE_WIFI,
+    )
+    private val networkModeLabels = listOf("自动选择", "仅移动数据", "仅 Wi-Fi")
 
     private val bg = Color.rgb(246, 248, 252)
     private val surface = Color.WHITE
@@ -127,14 +133,24 @@ class SettingsActivity : Activity() {
         addSectionHeader(policy, "出口策略", "控制加密、出口网络和私网访问范围。")
         tlsEnabled = Switch(this)
         insecureTls = Switch(this)
-        cellularOnly = Switch(this)
         allowPrivate = Switch(this)
 
         policy.addView(switchRow("启用 TLS", "推荐开启。", tlsEnabled), topMargin(14))
         policy.addView(divider(), topMargin(10))
         policy.addView(switchRow("允许自签名证书", "仅用于可信的自建服务端。", insecureTls), topMargin(10))
         policy.addView(divider(), topMargin(10))
-        policy.addView(switchRow("仅使用移动数据", "将出口固定到蜂窝网络。", cellularOnly), topMargin(10))
+
+        networkMode = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@SettingsActivity,
+                android.R.layout.simple_spinner_item,
+                networkModeLabels
+            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            setPadding(dp(12), 0, dp(10), 0)
+            minimumHeight = dp(50)
+        }
+        policy.addView(labeled("出口网络", networkMode), topMargin(10))
         policy.addView(divider(), topMargin(10))
         policy.addView(switchRow("允许访问出口侧私网", "开启后可访问手机所在局域网。", allowPrivate), topMargin(10))
         root.addView(policy, topMargin(14))
@@ -179,7 +195,9 @@ class SettingsActivity : Activity() {
             tlsEnabled = tlsEnabled.isChecked,
             insecureTls = insecureTls.isChecked,
             allowPrivateNetwork = allowPrivate.isChecked,
-            cellularOnly = cellularOnly.isChecked,
+            networkMode = networkModeValues.getOrElse(networkMode.selectedItemPosition) {
+                NetworkBinder.MODE_AUTO
+            },
         )
         if (config.serverAddress.isBlank()) {
             server.error = "必须填写 Server 地址"
@@ -201,7 +219,7 @@ class SettingsActivity : Activity() {
         tlsEnabled.isChecked = cfg.tlsEnabled
         insecureTls.isChecked = cfg.insecureTls
         allowPrivate.isChecked = cfg.allowPrivateNetwork
-        cellularOnly.isChecked = cfg.cellularOnly
+        networkMode.setSelection(networkModeValues.indexOf(cfg.networkMode).coerceAtLeast(0))
     }
 
     private fun card() = LinearLayout(this).apply {

@@ -26,6 +26,7 @@ class MainActivity : Activity() {
     private lateinit var statusStreams: TextView
     private lateinit var statusLatency: TextView
     private lateinit var statusDetail: TextView
+    private lateinit var toggleButton: Button
 
     private val bg = Color.rgb(246, 248, 252)
     private val surface = Color.WHITE
@@ -170,45 +171,28 @@ class MainActivity : Activity() {
     }
 
     private fun buildActionRow(): View {
-        val column = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-        }
-
-        val start = Button(this).apply {
+        toggleButton = Button(this).apply {
             text = "启动"
             textSize = 15f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             setAllCaps(false)
             background = rounded(brand, 14)
-            setOnClickListener { startRelay() }
+            setOnClickListener { toggleRelay() }
         }
-        row.addView(start, LinearLayout.LayoutParams(0, dp(52), 1f))
+        return toggleButton
+    }
 
-        row.addView(View(this), LinearLayout.LayoutParams(dp(10), 1))
-
-        val stop = Button(this).apply {
-            text = "停止"
-            textSize = 15f
-            setTextColor(danger)
-            setTypeface(typeface, Typeface.BOLD)
-            setAllCaps(false)
-            background = rounded(surface, 14, Color.rgb(254, 202, 202))
-            setOnClickListener {
-                startService(
-                    Intent(this@MainActivity, RelayExitService::class.java)
-                        .setAction(RelayExitService.ACTION_STOP)
-                )
-            }
+    private fun toggleRelay() {
+        val store = ConfigStore(this)
+        if (store.isDesiredRunning()) {
+            startService(
+                Intent(this, RelayExitService::class.java)
+                    .setAction(RelayExitService.ACTION_STOP)
+            )
+        } else {
+            startRelay()
         }
-        row.addView(stop, LinearLayout.LayoutParams(0, dp(52), 0.55f))
-        column.addView(row)
-
-        return column
     }
 
     private fun startRelay() {
@@ -277,6 +261,17 @@ class MainActivity : Activity() {
         statusTransport.text = transportValue.ifBlank { "—" }
         statusStreams.text = streams.toString()
         statusLatency.text = if (latency > 0) "$latency ms" else "—"
+
+        val desiredRunning = ConfigStore(this).isDesiredRunning()
+        if (desiredRunning) {
+            toggleButton.text = "停止"
+            toggleButton.setTextColor(danger)
+            toggleButton.background = rounded(surface, 14, Color.rgb(254, 202, 202))
+        } else {
+            toggleButton.text = "启动"
+            toggleButton.setTextColor(Color.WHITE)
+            toggleButton.background = rounded(brand, 14)
+        }
 
         statusDetail.text = when {
             error.isNotBlank() -> error

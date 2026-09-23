@@ -34,7 +34,7 @@ class RelayExitService : Service() {
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private var core: Client? = null
-    private var cellularBinder: CellularBinder? = null
+    private var networkBinder: NetworkBinder? = null
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -77,7 +77,7 @@ class RelayExitService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refresh)
-        cellularBinder?.release()
+        networkBinder?.release()
         val running = core
         core = null
         runCatching { running?.stop() }
@@ -89,7 +89,7 @@ class RelayExitService : Service() {
 
     private fun startRelay() {
         startForeground(NOTIFICATION_ID, buildNotification("正在启动"))
-        if (core != null || cellularBinder != null) return
+        if (core != null || networkBinder != null) return
 
         val config = ConfigStore(this).load()
         if (config.serverAddress.isBlank()) {
@@ -98,24 +98,27 @@ class RelayExitService : Service() {
             return
         }
 
-        if (config.cellularOnly) {
-            status = waitingStatus("等待移动数据网络")
-            val binder = CellularBinder(this)
-            cellularBinder = binder
-            binder.bind(
-                onAvailable = { startCore(config) },
-                onLost = {
-                    stopCoreOnly()
-                    status = waitingStatus("移动数据断开，等待恢复")
-                },
-                onError = { message ->
-                    stopCoreOnly()
-                    status = errorStatus(message)
-                },
-            )
-        } else {
+        if (config.networkMode == NetworkBinder.MODE_AUTO) {
             startCore(config)
+            return
         }
+
+        val networkLabel = if (config.networkMode == NetworkBinder.MODE_WIFI) "Wi-Fi" else "移动数据"
+        status = waitingStatus("等待$networkLabel网络")
+        val binder = NetworkBinder(this)
+        networkBinder = binder
+        binder.bind(
+            mode = config.networkMode,
+            onAvailable = { startCore(config) },
+            onLost = {
+                stopCoreOnly()
+                status = waitingStatus("$networkLabel断开，等待恢复")
+            },
+            onError = { message ->
+                stopCoreOnly()
+                status = errorStatus(message)
+            },
+        )
     }
 
     private fun startCore(config: ExitConfig) {
@@ -153,8 +156,8 @@ class RelayExitService : Service() {
             core = null
             value
         }
-        val binder = cellularBinder
-        cellularBinder = null
+        val binder = networkBinder
+        networkBinder = null
         executor.execute {
             runCatching { old?.stop() }
             runCatching { binder?.release() }

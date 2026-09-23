@@ -12,7 +12,7 @@ data class ExitConfig(
     val tlsEnabled: Boolean = true,
     val insecureTls: Boolean = false,
     val allowPrivateNetwork: Boolean = false,
-    val cellularOnly: Boolean = false,
+    val networkMode: String = NetworkBinder.MODE_AUTO,
 ) {
     fun coreJson(): String = JSONObject()
         .put("serverAddress", serverAddress.trim())
@@ -31,17 +31,28 @@ data class ExitConfig(
 class ConfigStore(context: Context) {
     private val prefs = context.getSharedPreferences("relayproxy_android", Context.MODE_PRIVATE)
 
-    fun load(): ExitConfig = ExitConfig(
-        serverAddress = prefs.getString("serverAddress", "") ?: "",
-        deviceName = prefs.getString("deviceName", "RelayProxy Android") ?: "RelayProxy Android",
-        quicPort = prefs.getInt("quicPort", 443),
-        tcpPort = prefs.getInt("tcpPort", 443),
-        transportMode = prefs.getString("transportMode", "auto") ?: "auto",
-        tlsEnabled = prefs.getBoolean("tlsEnabled", true),
-        insecureTls = prefs.getBoolean("insecureTls", false),
-        allowPrivateNetwork = prefs.getBoolean("allowPrivateNetwork", false),
-        cellularOnly = prefs.getBoolean("cellularOnly", false),
-    )
+    fun load(): ExitConfig {
+        val savedNetworkMode = prefs.getString("networkMode", null)
+        val migratedNetworkMode = savedNetworkMode ?: if (
+            prefs.getBoolean("cellularOnly", false)
+        ) {
+            NetworkBinder.MODE_CELLULAR
+        } else {
+            NetworkBinder.MODE_AUTO
+        }
+
+        return ExitConfig(
+            serverAddress = prefs.getString("serverAddress", "") ?: "",
+            deviceName = prefs.getString("deviceName", "RelayProxy Android") ?: "RelayProxy Android",
+            quicPort = prefs.getInt("quicPort", 443),
+            tcpPort = prefs.getInt("tcpPort", 443),
+            transportMode = prefs.getString("transportMode", "auto") ?: "auto",
+            tlsEnabled = prefs.getBoolean("tlsEnabled", true),
+            insecureTls = prefs.getBoolean("insecureTls", false),
+            allowPrivateNetwork = prefs.getBoolean("allowPrivateNetwork", false),
+            networkMode = migratedNetworkMode,
+        )
+    }
 
     fun save(config: ExitConfig) {
         prefs.edit()
@@ -53,7 +64,8 @@ class ConfigStore(context: Context) {
             .putBoolean("tlsEnabled", config.tlsEnabled)
             .putBoolean("insecureTls", config.insecureTls)
             .putBoolean("allowPrivateNetwork", config.allowPrivateNetwork)
-            .putBoolean("cellularOnly", config.cellularOnly)
+            .putString("networkMode", config.networkMode)
+            .remove("cellularOnly")
             .apply()
     }
 

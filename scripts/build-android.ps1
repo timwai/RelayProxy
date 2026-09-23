@@ -22,7 +22,7 @@
 #>
 param(
     [ValidateSet("Debug", "Release")]
-    [string]$Configuration = "Debug",
+    [string]$Configuration = "Release",
     [string]$OutDir = "",
     [switch]$Clean,
     [switch]$SkipTests,

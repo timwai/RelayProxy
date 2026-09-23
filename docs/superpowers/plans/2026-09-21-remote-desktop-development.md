@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #99 已合并，merge `866014812867ab7217ac05c123415ccd0ec3dc3a`）
+> 当前开发基线：`main`（PR #100 已合并，merge `4d23d2771c69f91881f40c422e2650cbc64a2dec`）
 
 ## 0. 当前进度
 
@@ -511,7 +511,7 @@ Windows SendInput / CF_UNICODETEXT
 - 新增真实 RD/1 packet-loss 集成链：Host 连续生成 4 帧 Opus datagram，确定性丢弃 FrameID=2 的实际 packet，再经 audio Reassembler → Controller gap detector → PLC event → Opus decoder，验证恢复后的三段 PCM 均保持完整 20 ms 帧长。
 - PR #99 已合并到 `main`，merge `866014812867ab7217ac05c123415ccd0ec3dc3a`；Go format/vet/test/race/benchmark、UI regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.42 RD3 Opus Loss Feedback Control（当前分支）
+### 0.2.42 RD3 Opus Loss Feedback Control（已合并 PR #100）
 
 - 协议新增独立 `audio_control` / `DesktopAudioControl.ExpectedLossPercent`，与 video ABR control 分离；只有已协商 Opus 的 session 才会产生该反馈，legacy PCM 不发送新 control message。
 - Controller 每秒根据 audio playout 的累计 `receivedFrames`、`concealmentFrames`、`gapSkippedFrames` 计算增量丢帧比例；本地 realtime queue overflow 不计入网络丢帧反馈，避免把播放器跟不上误判为链路 loss。
@@ -519,7 +519,17 @@ Windows SendInput / CF_UNICODETEXT
 - Host 控制循环校验 0–100% 后只保留最新 loss target；Opus stream 在下一帧 encode 前调用 Pion `SetLossRate`，不重建 encoder、不切 generation、不影响 video ABR。
 - `OpusEncoder` wrapper 新增 `SetLossRate`，并保留 Pion 参数合法性校验；当前只使用其 packet-loss resilience control，不启用尚未在当前 pinned encoder 路径验证的 FEC。
 - 新增 loss quantization / baseline / recovery / PCM reset、Opus encoder loss control 与 Host live update 测试。
-- 下一步：CI 通过后做 Windows 实机 capture → Opus → loss/jitter → PLC → WASAPI 的听感、CPU 与端到端延迟验证；根据真实诊断再决定 bitrate/FEC 参数，不用模拟结果直接改生产默认值。
+- PR #100 已合并到 `main`，merge `4d23d2771c69f91881f40c422e2650cbc64a2dec`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.43 RD3 Audio Validation Diagnostics Summary（当前分支）
+
+- Desktop diagnostics schema 升级到 v5，新增 `audioValidation` 汇总，不新增第二套导出入口；现有诊断 JSON 即可直接用于 Windows 双机实测。
+- 汇总记录 requested/actual codec、Opus/PCM sample 数和 Opus→PCM fallback 次数，能直接确认协商结果是否真的落到 Opus，而不是仅看连接参数。
+- 汇总当前 48 kHz / channel / bit depth / frame duration / target bitrate，并根据诊断窗口内 `receivedBytes` 增量计算实际 audio payload bitrate；同时给出相对 raw PCM bitrate 的观测压缩比。
+- 根据 `receivedFrames + concealmentFrames + gapSkippedFrames` 计算估算网络 audio loss%，并直接汇总 queue drop、PLC concealment、large-gap skip、reorder、duplicate、late、playout timeout 与最大 queue 深度。
+- 显式 `Audio=false` 的会话不生成 `audioValidation`；启用音频但尚未拿到 `audio_config` 时会保留 requested 状态且 `active=false`，方便定位 Host 无 loopback/capability 的问题。
+- 新增 Opus runtime bitrate/loss/queue 汇总、PCM fallback 与 Audio=false 回归测试。
+- 下一步：CI 通过后补一个 Windows 实机验证说明/命令清单，直接用现有 diagnostics export 对两台机器跑 capture → Opus → network → PLC → WASAPI 基线，并根据真实数据再决定 bitrate/FEC。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -150,3 +150,20 @@ func TestOpusDecoderPLCProducesPCMFrame(t *testing.T) {
 		t.Fatal("primed Opus PLC frame is silent")
 	}
 }
+
+func TestOpusEncoderLossRateControl(t *testing.T) {
+	encoder, err := NewOpusEncoder(OpusConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, percent := range []int{0, 5, 25, 100} {
+		if err := encoder.SetLossRate(percent); err != nil {
+			t.Fatalf("SetLossRate(%d): %v", percent, err)
+		}
+	}
+	for _, percent := range []int{-1, 101} {
+		if err := encoder.SetLossRate(percent); err == nil {
+			t.Fatalf("SetLossRate(%d) unexpectedly succeeded", percent)
+		}
+	}
+}

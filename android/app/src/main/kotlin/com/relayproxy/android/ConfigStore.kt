@@ -56,4 +56,10 @@ class ConfigStore(context: Context) {
             .putBoolean("cellularOnly", config.cellularOnly)
             .apply()
     }
+
+    fun isDesiredRunning(): Boolean = prefs.getBoolean("desiredRunning", false)
+
+    fun setDesiredRunning(running: Boolean) {
+        prefs.edit().putBoolean("desiredRunning", running).apply()
+    }
 }

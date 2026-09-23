@@ -3,7 +3,6 @@ package com.relayproxy.android
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -11,40 +10,22 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.text.InputType
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
 import android.widget.Button
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Spinner
-import android.widget.Switch
 import android.widget.TextView
 import org.json.JSONObject
 
 class MainActivity : Activity() {
-    private lateinit var server: EditText
-    private lateinit var deviceName: EditText
-    private lateinit var quicPort: EditText
-    private lateinit var tcpPort: EditText
-    private lateinit var transport: Spinner
-    private lateinit var tlsEnabled: Switch
-    private lateinit var insecureTls: Switch
-    private lateinit var allowPrivate: Switch
-    private lateinit var cellularOnly: Switch
-
     private lateinit var statusBadge: TextView
     private lateinit var statusSummary: TextView
     private lateinit var statusTransport: TextView
     private lateinit var statusStreams: TextView
     private lateinit var statusLatency: TextView
-    private lateinit var statusView: TextView
-
-    private val transportValues = listOf("auto", "quic_only", "tcp_only")
-    private val transportLabels = listOf("自动选择", "仅 QUIC", "仅 TCP/TLS")
+    private lateinit var statusDetail: TextView
 
     private val bg = Color.rgb(246, 248, 252)
     private val surface = Color.WHITE
@@ -72,7 +53,6 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         configureWindow()
         setContentView(buildUi())
-        loadConfig()
         requestNotificationPermission()
     }
 
@@ -88,6 +68,9 @@ class MainActivity : Activity() {
     }
 
     private fun configureWindow() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(true)
+        }
         window.statusBarColor = bg
         window.navigationBarColor = bg
         window.decorView.systemUiVisibility =
@@ -97,14 +80,12 @@ class MainActivity : Activity() {
     private fun buildUi(): ScrollView {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(18), dp(20), dp(36))
+            setPadding(dp(16), dp(12), dp(16), dp(28))
             setBackgroundColor(bg)
         }
 
         root.addView(buildStatusCard())
-        root.addView(buildConnectionCard(), cardParams(16))
-        root.addView(buildPolicyCard(), cardParams(16))
-        root.addView(buildActionRow(), cardParams(18))
+        root.addView(buildActionRow(), topMargin(14))
 
         return ScrollView(this).apply {
             isFillViewport = true
@@ -114,7 +95,11 @@ class MainActivity : Activity() {
     }
 
     private fun buildStatusCard(): View {
-        val card = card(ink)
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = rounded(ink, 18)
+        }
 
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -123,16 +108,16 @@ class MainActivity : Activity() {
         top.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply {
-                text = "出口运行状态"
-                textSize = 13f
+                text = "出口状态"
+                textSize = 12f
                 setTextColor(Color.rgb(148, 163, 184))
             })
             statusSummary = TextView(this@MainActivity).apply {
                 text = "服务未启动"
-                textSize = 20f
+                textSize = 18f
                 setTextColor(Color.WHITE)
                 setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, dp(4), 0, 0)
+                setPadding(0, dp(2), 0, 0)
             }
             addView(statusSummary)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -143,168 +128,56 @@ class MainActivity : Activity() {
 
         val metrics = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(22), 0, 0)
+            setPadding(0, dp(12), 0, 0)
         }
+
         val transportMetric = metric("传输")
         statusTransport = transportMetric.second
         metrics.addView(transportMetric.first, weighted())
-        val streamsMetric = metric("活跃连接")
+
+        val streamsMetric = metric("连接")
         statusStreams = streamsMetric.second
         metrics.addView(streamsMetric.first, weighted())
+
         val latencyMetric = metric("延迟")
         statusLatency = latencyMetric.second
         metrics.addView(latencyMetric.first, weighted())
+
         card.addView(metrics)
 
-        statusView = TextView(this).apply {
+        statusDetail = TextView(this).apply {
             text = "等待启动"
-            textSize = 12f
+            textSize = 11.5f
             setTextColor(Color.rgb(203, 213, 225))
-            setLineSpacing(0f, 1.25f)
-            setTextIsSelectable(true)
-            setPadding(0, dp(18), 0, 0)
+            maxLines = 2
+            setPadding(0, dp(10), 0, 0)
         }
-        card.addView(statusView)
-
-        return card
-    }
-
-    private fun buildConnectionCard(): View {
-        val card = card(surface)
-        addSectionHeader(
-            card,
-            "连接设置",
-            "配置 Relay Server 与隧道传输方式。配置会保存在应用私有目录中。"
-        )
-
-        server = styledField("relay.example.com")
-        card.addView(labeled("Relay Server", server), topMargin(18))
-
-        deviceName = styledField("RelayProxy Android")
-        card.addView(labeled("设备名称", deviceName), topMargin(14))
-
-        transport = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity,
-                android.R.layout.simple_spinner_item,
-                transportLabels
-            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            background = rounded(Color.rgb(248, 250, 252), 13, line)
-            setPadding(dp(12), 0, dp(10), 0)
-            minimumHeight = dp(52)
-        }
-        card.addView(labeled("传输方式", transport), topMargin(14))
-
-        quicPort = numberField("443")
-        tcpPort = numberField("443")
-        val ports = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val q = labeled("QUIC 端口", quicPort)
-            addView(q, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            val spacer = View(this@MainActivity)
-            addView(spacer, LinearLayout.LayoutParams(dp(12), 1))
-            val t = labeled("TCP / TLS 端口", tcpPort)
-            addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        }
-        card.addView(ports, topMargin(14))
-
-        return card
-    }
-
-    private fun buildPolicyCard(): View {
-        val card = card(surface)
-        addSectionHeader(
-            card,
-            "出口策略",
-            "控制加密方式、出口网络以及手机侧可访问的目标范围。"
-        )
-
-        tlsEnabled = Switch(this)
-        insecureTls = Switch(this)
-        cellularOnly = Switch(this)
-        allowPrivate = Switch(this)
-
-        card.addView(
-            switchRow(
-                "启用 TLS",
-                "推荐开启。保护 Relay Server 与手机出口节点之间的传输。",
-                tlsEnabled
-            ),
-            topMargin(16)
-        )
-        card.addView(
-            divider(),
-            topMargin(12)
-        )
-        card.addView(
-            switchRow(
-                "允许自签名证书",
-                "仅在你信任 Relay Server 且没有正式证书时开启。",
-                insecureTls
-            ),
-            topMargin(12)
-        )
-        card.addView(
-            divider(),
-            topMargin(12)
-        )
-        card.addView(
-            switchRow(
-                "仅使用移动数据",
-                "将 Relay 隧道和出口连接固定到蜂窝网络。",
-                cellularOnly
-            ),
-            topMargin(12)
-        )
-        card.addView(
-            divider(),
-            topMargin(12)
-        )
-        card.addView(
-            switchRow(
-                "允许访问出口侧私网",
-                "关闭时仅允许公网目标；开启后可访问手机所在局域网。",
-                allowPrivate
-            ),
-            topMargin(12)
-        )
+        card.addView(statusDetail)
 
         return card
     }
 
     private fun buildActionRow(): View {
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
 
         val start = Button(this).apply {
-            text = "启动网络共享"
+            text = "启动"
             textSize = 15f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             setAllCaps(false)
-            minimumHeight = dp(54)
             background = rounded(brand, 14)
-            setOnClickListener {
-                val config = readConfig()
-                if (config.serverAddress.isBlank()) {
-                    server.error = "必须填写 Server 地址"
-                    server.requestFocus()
-                    return@setOnClickListener
-                }
-                ConfigStore(this@MainActivity).save(config)
-                val intent = Intent(this@MainActivity, RelayExitService::class.java)
-                    .setAction(RelayExitService.ACTION_START)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    startForegroundService(intent)
-                } else {
-                    startService(intent)
-                }
-            }
+            setOnClickListener { startRelay() }
         }
-        row.addView(start, LinearLayout.LayoutParams(0, dp(54), 1f))
+        row.addView(start, LinearLayout.LayoutParams(0, dp(52), 1f))
 
-        row.addView(View(this), LinearLayout.LayoutParams(dp(12), 1))
+        row.addView(View(this), LinearLayout.LayoutParams(dp(10), 1))
 
         val stop = Button(this).apply {
             text = "停止"
@@ -312,7 +185,6 @@ class MainActivity : Activity() {
             setTextColor(danger)
             setTypeface(typeface, Typeface.BOLD)
             setAllCaps(false)
-            minimumHeight = dp(54)
             background = rounded(surface, 14, Color.rgb(254, 202, 202))
             setOnClickListener {
                 startService(
@@ -321,202 +193,46 @@ class MainActivity : Activity() {
                 )
             }
         }
-        row.addView(stop, LinearLayout.LayoutParams(0, dp(54), 0.42f))
+        row.addView(stop, LinearLayout.LayoutParams(0, dp(52), 0.55f))
+        column.addView(row)
 
-        return row
-    }
-
-    private fun card(fill: Int): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(18), dp(18), dp(18), dp(18))
-        background = rounded(fill, 20, if (fill == surface) line else null)
-        if (fill == surface) elevation = dp(1).toFloat()
-    }
-
-    private fun addSectionHeader(parent: LinearLayout, title: String, subtitle: String) {
-        parent.addView(TextView(this).apply {
-            text = title
-            textSize = 18f
-            setTextColor(ink)
+        val settings = Button(this).apply {
+            text = "设置"
+            textSize = 13.5f
+            setTextColor(Color.rgb(71, 85, 105))
             setTypeface(typeface, Typeface.BOLD)
-        })
-        parent.addView(TextView(this).apply {
-            text = subtitle
-            textSize = 12.5f
-            setTextColor(muted)
-            setLineSpacing(0f, 1.2f)
-            setPadding(0, dp(5), 0, 0)
-        })
+            setAllCaps(false)
+            background = rounded(surface, 13, line)
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+            }
+        }
+        column.addView(
+            settings,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(46)
+            ).apply { topMargin = dp(10) }
+        )
+
+        return column
     }
 
-    private fun styledField(hintText: String) = EditText(this).apply {
-        hint = hintText
-        setSingleLine(true)
-        textSize = 15f
-        setTextColor(ink)
-        setHintTextColor(Color.rgb(148, 163, 184))
-        background = rounded(Color.rgb(248, 250, 252), 13, line)
-        setPadding(dp(14), 0, dp(14), 0)
-        minimumHeight = dp(52)
-    }
-
-    private fun numberField(hintText: String) = styledField(hintText).apply {
-        inputType = InputType.TYPE_CLASS_NUMBER
-    }
-
-    private fun labeled(labelText: String, child: View): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply {
-                text = labelText
-                textSize = 12.5f
-                setTextColor(Color.rgb(71, 85, 105))
-                setTypeface(typeface, Typeface.BOLD)
-                setPadding(dp(2), 0, 0, dp(7))
-            })
-            addView(
-                child,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-                )
-            )
+    private fun startRelay() {
+        val config = ConfigStore(this).load()
+        if (config.serverAddress.isBlank()) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
         }
 
-    private fun switchRow(title: String, subtitle: String, control: Switch): LinearLayout =
-        LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(TextView(this@MainActivity).apply {
-                    text = title
-                    textSize = 14.5f
-                    setTextColor(ink)
-                    setTypeface(typeface, Typeface.BOLD)
-                })
-                addView(TextView(this@MainActivity).apply {
-                    text = subtitle
-                    textSize = 12f
-                    setTextColor(muted)
-                    setLineSpacing(0f, 1.15f)
-                    setPadding(0, dp(3), dp(12), 0)
-                })
-            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-
-            control.showText = false
-            control.thumbTintList = ColorStateList(
-                arrayOf(
-                    intArrayOf(android.R.attr.state_checked),
-                    intArrayOf()
-                ),
-                intArrayOf(brand, Color.rgb(148, 163, 184))
-            )
-            control.trackTintList = ColorStateList(
-                arrayOf(
-                    intArrayOf(android.R.attr.state_checked),
-                    intArrayOf()
-                ),
-                intArrayOf(Color.rgb(147, 197, 253), Color.rgb(226, 232, 240))
-            )
-            addView(control)
+        val intent = Intent(this, RelayExitService::class.java)
+            .setAction(RelayExitService.ACTION_START)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
         }
-
-    private fun divider() = View(this).apply {
-        setBackgroundColor(Color.rgb(241, 245, 249))
-        minimumHeight = dp(1)
     }
-
-    private fun metric(label: String): Pair<LinearLayout, TextView> {
-        val value = TextView(this).apply {
-            text = "—"
-            textSize = 16f
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-            gravity = Gravity.CENTER_HORIZONTAL
-        }
-        val group = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            addView(TextView(this@MainActivity).apply {
-                text = label
-                textSize = 11f
-                setTextColor(Color.rgb(148, 163, 184))
-                gravity = Gravity.CENTER_HORIZONTAL
-            })
-            addView(value, topMargin(4))
-        }
-        return group to value
-    }
-
-    private fun chip(textValue: String, color: Int, fill: Int) = TextView(this).apply {
-        text = textValue
-        textSize = 11.5f
-        setTextColor(color)
-        setTypeface(typeface, Typeface.BOLD)
-        gravity = Gravity.CENTER
-        background = rounded(fill, 11)
-        setPadding(dp(10), dp(7), dp(10), dp(7))
-    }
-
-    private fun updateChip(textValue: String, color: Int, fill: Int) {
-        statusBadge.text = textValue
-        statusBadge.setTextColor(color)
-        statusBadge.background = rounded(fill, 11)
-    }
-
-    private fun rounded(fill: Int, radiusDp: Int, stroke: Int? = null) =
-        GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            setColor(fill)
-            cornerRadius = dp(radiusDp).toFloat()
-            if (stroke != null) setStroke(dp(1), stroke)
-        }
-
-    private fun cardParams(top: Int) = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT
-    ).apply { topMargin = dp(top) }
-
-    private fun topMargin(top: Int) = LinearLayout.LayoutParams(
-        ViewGroup.LayoutParams.MATCH_PARENT,
-        ViewGroup.LayoutParams.WRAP_CONTENT
-    ).apply { topMargin = dp(top) }
-
-    private fun weighted() = LinearLayout.LayoutParams(
-        0,
-        ViewGroup.LayoutParams.WRAP_CONTENT,
-        1f
-    )
-
-    private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
-
-    private fun loadConfig() {
-        val cfg = ConfigStore(this).load()
-        server.setText(cfg.serverAddress)
-        deviceName.setText(cfg.deviceName)
-        quicPort.setText(cfg.quicPort.toString())
-        tcpPort.setText(cfg.tcpPort.toString())
-        val index = transportValues.indexOf(cfg.transportMode)
-        transport.setSelection(if (index >= 0) index else 0)
-        tlsEnabled.isChecked = cfg.tlsEnabled
-        insecureTls.isChecked = cfg.insecureTls
-        allowPrivate.isChecked = cfg.allowPrivateNetwork
-        cellularOnly.isChecked = cfg.cellularOnly
-    }
-
-    private fun readConfig(): ExitConfig = ExitConfig(
-        serverAddress = server.text.toString().trim(),
-        deviceName = deviceName.text.toString().trim().ifBlank { "RelayProxy Android" },
-        quicPort = quicPort.text.toString().toIntOrNull() ?: 443,
-        tcpPort = tcpPort.text.toString().toIntOrNull() ?: 443,
-        transportMode = transportValues.getOrElse(transport.selectedItemPosition) { "auto" },
-        tlsEnabled = tlsEnabled.isChecked,
-        insecureTls = insecureTls.isChecked,
-        allowPrivateNetwork = allowPrivate.isChecked,
-        cellularOnly = cellularOnly.isChecked,
-    )
 
     private fun renderStatus() {
         val obj = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
@@ -528,7 +244,6 @@ class MainActivity : Activity() {
 
         val state = obj.optString("connectionState", "UNKNOWN")
         val approval = obj.optString("approvalState", "unknown")
-        val deviceId = obj.optString("deviceId", "")
         val transportValue = obj.optString("transport", "")
         val streams = obj.optLong("activeStreams", 0)
         val latency = obj.optLong("latencyMs", 0)
@@ -537,7 +252,7 @@ class MainActivity : Activity() {
 
         when (state) {
             "CONNECTED" -> {
-                statusSummary.text = if (approved) "网络出口已就绪" else "已连接，等待出口授权"
+                statusSummary.text = if (approved) "网络出口已就绪" else "已连接，等待授权"
                 if (approved) {
                     updateChip("运行中", success, successSoft)
                 } else {
@@ -545,7 +260,7 @@ class MainActivity : Activity() {
                 }
             }
             "CONNECTING" -> {
-                statusSummary.text = "正在连接 Relay Server"
+                statusSummary.text = "正在连接"
                 updateChip("连接中", brand, brandSoft)
             }
             "WAITING_NETWORK" -> {
@@ -553,7 +268,7 @@ class MainActivity : Activity() {
                 updateChip("等待网络", warning, warningSoft)
             }
             "ERROR" -> {
-                statusSummary.text = "出口服务发生错误"
+                statusSummary.text = "服务异常"
                 updateChip("错误", danger, dangerSoft)
             }
             "STOPPED" -> {
@@ -562,7 +277,7 @@ class MainActivity : Activity() {
             }
             else -> {
                 statusSummary.text = state
-                updateChip("状态更新", brand, brandSoft)
+                updateChip("更新中", brand, brandSoft)
             }
         }
 
@@ -570,20 +285,74 @@ class MainActivity : Activity() {
         statusStreams.text = streams.toString()
         statusLatency.text = if (latency > 0) "$latency ms" else "—"
 
-        val approvalText = when (approval) {
-            "approved" -> "已批准"
-            "pending" -> "等待审批"
-            "rejected" -> "已拒绝"
-            else -> approval
-        }
-
-        statusView.text = buildString {
-            append("设备审批：").append(approvalText)
-            append("  ·  出口权限：").append(if (approved) "已授权" else "未授权")
-            if (deviceId.isNotBlank()) append("\n设备 ID：").append(deviceId)
-            if (error.isNotBlank()) append("\n").append(error)
+        statusDetail.text = when {
+            error.isNotBlank() -> error
+            approval == "pending" -> "设备等待服务端审批"
+            approval == "rejected" -> "设备审批已拒绝"
+            state == "CONNECTED" && approved -> "后台常驻运行中"
+            state == "STOPPED" -> "点击启动后可退出 App，服务继续后台运行"
+            else -> "审批：$approval"
         }
     }
+
+    private fun metric(label: String): Pair<LinearLayout, TextView> {
+        val value = TextView(this).apply {
+            text = "—"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val group = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 10.5f
+                setTextColor(Color.rgb(148, 163, 184))
+                gravity = Gravity.CENTER_HORIZONTAL
+            })
+            addView(value, topMargin(2))
+        }
+        return group to value
+    }
+
+    private fun chip(textValue: String, color: Int, fill: Int) = TextView(this).apply {
+        text = textValue
+        textSize = 11f
+        setTextColor(color)
+        setTypeface(typeface, Typeface.BOLD)
+        gravity = Gravity.CENTER
+        background = rounded(fill, 10)
+        setPadding(dp(9), dp(6), dp(9), dp(6))
+    }
+
+    private fun updateChip(textValue: String, color: Int, fill: Int) {
+        statusBadge.text = textValue
+        statusBadge.setTextColor(color)
+        statusBadge.background = rounded(fill, 10)
+    }
+
+    private fun rounded(fill: Int, radiusDp: Int, stroke: Int? = null) =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius = dp(radiusDp).toFloat()
+            if (stroke != null) setStroke(dp(1), stroke)
+        }
+
+    private fun weighted() = LinearLayout.LayoutParams(
+        0,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+        1f
+    )
+
+    private fun topMargin(top: Int) = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT
+    ).apply { topMargin = dp(top) }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= 33 &&

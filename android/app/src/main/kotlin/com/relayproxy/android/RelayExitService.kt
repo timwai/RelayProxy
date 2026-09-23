@@ -3,6 +3,7 @@ package com.relayproxy.android
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.os.Handler
@@ -53,9 +54,23 @@ class RelayExitService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val store = ConfigStore(this)
         when (intent?.action) {
-            ACTION_STOP -> stopRelay()
-            else -> startRelay()
+            ACTION_STOP -> {
+                store.setDesiredRunning(false)
+                stopRelay()
+            }
+            ACTION_START -> {
+                store.setDesiredRunning(true)
+                startRelay()
+            }
+            else -> {
+                if (store.isDesiredRunning()) {
+                    startRelay()
+                } else {
+                    stopSelf()
+                }
+            }
         }
         return START_STICKY
     }
@@ -165,13 +180,23 @@ class RelayExitService : Service() {
         )
     }
 
-    private fun buildNotification(text: String): Notification =
-        Notification.Builder(this, CHANNEL_ID)
+    private fun buildNotification(text: String): Notification {
+        val openApp = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_relayproxy)
             .setContentTitle("RelayProxy 网络出口")
             .setContentText(text)
+            .setContentIntent(openApp)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .build()
+    }
 
     private fun updateNotification() {
         val obj = runCatching { JSONObject(status) }.getOrNull()

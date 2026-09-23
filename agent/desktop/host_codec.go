@@ -182,6 +182,26 @@ func (h *Host) streamSessionFrames(
 	return h.streamFrames(ctx, conn, cfg, captureBackend, jpegGeneration, fpsUpdates)
 }
 
+func fitEvenDimensions(width, height, maxWidth, maxHeight int) (int, int, error) {
+	if width <= 0 || height <= 0 || maxWidth <= 0 || maxHeight <= 0 {
+		return 0, 0, errors.New("invalid H.264 source or target dimensions")
+	}
+	dw, dh := width, height
+	if width > maxWidth || height > maxHeight {
+		dw, dh = maxWidth, height*maxWidth/width
+		if dh > maxHeight {
+			dh = maxHeight
+			dw = width * maxHeight / height
+		}
+	}
+	dw &^= 1
+	dh &^= 1
+	if dw < 2 || dh < 2 {
+		return 0, 0, errors.New("H.264 fitted dimensions are too small")
+	}
+	return dw, dh, nil
+}
+
 func fitRGBAEven(src *image.RGBA, maxWidth, maxHeight int) *image.RGBA {
 	frame := fitRGBA(src, maxWidth, maxHeight)
 	if frame == nil {

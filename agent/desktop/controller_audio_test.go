@@ -40,6 +40,11 @@ func TestApplyAudioConfigRejectsInvalidAndStaleGeneration(t *testing.T) {
 	if session.applyAudioConfig(testAudioConfig(1)) {
 		t.Fatal("stale audio generation was accepted")
 	}
+	mutated := testAudioConfig(2)
+	mutated.SampleRate = 44_100
+	if session.applyAudioConfig(mutated) {
+		t.Fatal("same audio generation changed format without generation rollover")
+	}
 	if got := session.AudioConfigSnapshot(); got.Generation != 2 || got.SampleRate != 48_000 {
 		t.Fatalf("audio config=%+v", got)
 	}

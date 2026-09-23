@@ -55,7 +55,6 @@ func TestH265WithSequenceHeader(t *testing.T) {
 	}
 }
 
-
 func TestH265MediaFoundationLevel(t *testing.T) {
 	tests := []struct {
 		name string

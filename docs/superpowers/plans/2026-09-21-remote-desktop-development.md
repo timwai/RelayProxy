@@ -1,14 +1,14 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path、capture backend policy、backend-neutral capture stream、真实 WinRT WGC monitor capture、capability-aware GUI selector、Auto DXGI → WGC → GDI 回退、negotiated/runtime adaptive WGC FPS、FrameArrived 事件驱动等待、Media Foundation D3D11 input surface、WGC GPU BGRA→NV12 converter、Host zero-copy H.264 pipeline、GPU runtime → CPU H.264 generation 热迁移、RD3 HEVC/H.265 Media Foundation 能力探测、隐藏 HEVC encoder core 与隐藏 HEVC decoder/D3D11 NV12 core 均已合并 main；当前分支接入 Controller/Windows native Viewer 的 generation-aware H.265 decoder rebuild，Host 端 H.265 generation/协商就绪前仍不开放选择  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #68 已合并，merge `730ec1d0f30cf94300fbb4ad39dab4c09a63fa33`）
+> 当前开发基线：`main`（PR #83 已合并，merge `6be4fa4d577bd10aad5b1178032e01aba68f4919`）
 
 ## 0. 当前进度
 
-更新时间：**2026-09-22**
+更新时间：**2026-09-23**
 
 | 阶段 / 能力 | 状态 | 当前实现 |
 | --- | --- | --- |
@@ -388,12 +388,23 @@ Windows SendInput / CF_UNICODETEXT
 - 现有逐样本网络/ABR/时延数据和通用 summary 保持不变；该汇总只做验证结果压缩，不改变媒体策略或能力协商。
 - PR #82 已合并到 `main`，merge `1784f870a5031be900f23e28d2f19c64134de7c2`；Go CI 首轮再次命中既有 `TestTLSTunnelMultiplexing` flaky，重跑后 full test/race/benchmark 通过；UI full regression 与 Windows/macOS desktop package 全部通过。
 
-### 0.2.29 CI Reliability：TLS Tunnel Multiplexing Flake（当前分支）
+### 0.2.29 CI Reliability：TLS Tunnel Multiplexing Flake（已合并 PR #83）
 
 - 连续两个 HEVC PR 的 Linux Go CI 都偶发失败在既有 `internal/tunnel/TestTLSTunnelMultiplexing`；实际失败点是客户端首个 stream write 收到 `session shutdown`，与 HEVC 代码无关。
 - 原测试使用 `net.Pipe + 手工 TLS + yamux`，只开一条 stream，却以“Multiplexing”命名；服务端提前退出时客户端断言看不到服务端 accept/read/write 的根因。
 - 测试改为真实 loopback TCP + TLS 1.3，并通过生产 `DialTLS` / `ServerTLS` 建立会话；一次保持 4 条 yamux stream 同时存活，再逐条 echo，覆盖真正的 multiplexing。
 - 客户端失败时同步附带服务端错误上下文，并为每条 stream 设置有界 I/O deadline；不使用 sleep 放宽时序，也不修改生产 tunnel 实现。
+- PR #83 已合并到 `main`，merge `6be4fa4d577bd10aad5b1178032e01aba68f4919`；修正 stale import/gofmt 后 Go format/vet/full test/race/benchmark 全部通过。
+
+### 0.2.30 RD3 Audio Media Foundation（当前分支）
+
+- 为 RD/1 预留固定媒体 stream ID：video=1、audio=2、cursor=3；音频使用独立 stream/sequence 域，避免与视频丢包统计互相污染。
+- 新增 `DesktopAudioConfig` / `audio_config` session message，描述 generation、codec、sample rate、channels、bit depth、frame duration 与 target bitrate；先建立稳定 wire model，再接具体 Windows capture/decoder。
+- 现有 `PacketizeFrame` 保持 video-only 兼容接口；新增 typed `PacketizeMediaFrame`，可复用同一 RD/1 header/MTU fragmentation 发送 audio。
+- Reassembler 新增 packet-type scope，默认仍只接受 video；未来 Controller 将为 audio 使用独立 reassembler，禁止把 audio fragment 混入 video generation/frame 状态。
+- 现有 ABR/loss tracker 继续只计算 video packet sequence；audio datagram 不会制造假的 video packet gap。
+- 新增 audio out-of-order fragmentation/reassembly、video/audio type isolation、audio config JSON round-trip 与 sequence-domain 隔离测试。
+- 本阶段不启用音频采集或播放，也不修改默认 GUI；下一步接 Controller audio demux/buffer，再实现 Windows WASAPI loopback capture/native playback。
 
 ### 0.3 本轮进度（2026-09-22）
 
@@ -525,7 +536,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 HEVC codec/viewer/host generation 已进入实现
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 HEVC 验证链已就绪，音频数据面基础开发中
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

@@ -426,14 +426,52 @@ func (h *Host) streamH264Frames(
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
 	}
-	encoder, normalizedCfg, sequenceHeader, err := openH264GenerationEncoder(
-		ctx, videoCfg, openMFH264GenerationEncoder,
+	var (
+		encoder       h264GenerationEncoder
+		d3dEncoder    desktopcodec.D3D11Encoder
+		d3dConverter  *desktopcodec.D3D11NV12Converter
+		d3dSource     D3D11CaptureSource
+		firstD3D      *D3D11CaptureFrame
+		sequenceHeader []byte
+		normalizedCfg desktopcodec.VideoConfig
+		err           error
+		gpuEnabled    bool
 	)
-	if err != nil {
-		return err
+	if source, ok := h.source.(D3D11CaptureSource); ok {
+		candidate, available, captureErr := source.CaptureD3D11(ctx)
+		if captureErr != nil {
+			log.Printf("[Desktop] D3D11 capture probe failed, keeping CPU H.264 path: %v", captureErr)
+		} else if available && candidate != nil {
+			encoder, d3dEncoder, d3dConverter, normalizedCfg, sequenceHeader, err =
+				openH264D3D11Generation(ctx, videoCfg, candidate)
+			if err == nil {
+				d3dSource = source
+				firstD3D = candidate
+				gpuEnabled = true
+				log.Printf("[Desktop] H.264 zero-copy path enabled capture=%dx%d encode=%dx%d",
+					candidate.Width, candidate.Height, normalizedCfg.Width, normalizedCfg.Height)
+			} else {
+				candidate.Close()
+				log.Printf("[Desktop] D3D11 H.264 initialization failed, keeping CPU path: %v", err)
+			}
+		}
+	}
+	if !gpuEnabled {
+		encoder, normalizedCfg, sequenceHeader, err = openH264GenerationEncoder(
+			ctx, videoCfg, openMFH264GenerationEncoder,
+		)
+		if err != nil {
+			return err
+		}
 	}
 	videoCfg = normalizedCfg
 	defer func() {
+		if firstD3D != nil {
+			firstD3D.Close()
+		}
+		if d3dConverter != nil {
+			_ = d3dConverter.Close()
+		}
 		if encoder != nil {
 			_ = encoder.Close()
 		}

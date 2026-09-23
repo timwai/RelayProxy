@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #94 已合并，merge `e7696ba957683d850d1af890dc25552051f37ccc`）
+> 当前开发基线：`main`（PR #95 已合并，merge `a057810cfe9aae35ca77844d0383cc246523077b`）
 
 ## 0. 当前进度
 
@@ -463,13 +463,22 @@ Windows SendInput / CF_UNICODETEXT
 - generation 切换时被清理的旧队列与实时队列满导致的 drop 分开统计，避免把正常格式切换误判成网络/播放拥塞。
 - PR #94 已合并到 `main`，merge `e7696ba957683d850d1af890dc25552051f37ccc`；Go test/race、UI regression、Windows/macOS desktop package 全部通过。
 
-### 0.2.37 RD3 Audio Transport Integration Coverage（当前分支）
+### 0.2.37 RD3 Audio Transport Integration Coverage（已合并 PR #95）
 
 - 新增 synthetic loopback capture + recording direct datagram path 集成测试，不依赖真实声卡即可驱动 Host 的 `streamSessionAudio` 主链。
 - 测试验证可靠控制流首先产生 `audio_config`，并校验 PCM S16LE / 48 kHz / stereo / 16-bit / 20 ms / target bitrate 元数据。
 - 强制使用较小 RD/1 packet size 把 3840-byte PCM frame 分成多个 datagram，逐包校验 type=audio、stream ID=2、generation/frame ID 与独立 sequence 连续性。
 - 所有 datagram 再通过真正的 audio `Reassembler` 还原，最终 payload 必须与 synthetic capture 原始 PCM byte-for-byte 一致，同时确认 capture 生命周期正确关闭。
-- 该测试补齐 #93 之前只覆盖参数/错误路径而未覆盖的 Host → RD/1 packetizer → audio reassembler 集成链；下一步仍是 Windows 实机 WASAPI capture/playback 验证，再依据 #94 诊断数据决定 jitter buffer 与压缩方案。
+- PR #95 已合并到 `main`，merge `a057810cfe9aae35ca77844d0383cc246523077b`；Go CI 与 UI CI 全部通过。
+
+### 0.2.38 RD3 Bounded Audio Jitter / Playout Buffer（当前分支）
+
+- Controller audio queue 从单纯 arrival-order FIFO 改为同 generation 内按 FrameID 有序插入；轻微 datagram/frame completion 乱序在进入 native player 前被重排。
+- 保持 8 帧 realtime 上限；队列达到 2 帧即可立即播放，正常 20 ms PCM 因此只增加约 1 帧启动缓存。若缺少相邻帧，单帧最长只等待基于 frame duration 的 20–80 ms 有界 playout deadline，随后继续播放而不是无限等待。
+- 已消费 FrameID 之后才到达的旧帧直接记为 late/rejected；queue 内相同 FrameID 直接记为 duplicate/rejected，避免 WASAPI 重复播放旧声音。
+- generation 切换继续清空旧队列，并重置该 generation 的 consumed head；原有 queue overflow 仍丢最旧帧，优先保持实时性。
+- Audio diagnostics 增加 reordered / duplicate / late / playout-timeout 与 last-consumed-frame 指标，便于 Windows 实机区分网络乱序、真正丢帧和播放器跟不上。
+- 新增乱序恢复、duplicate/late 拒绝、bounded playout timeout 与 delay clamp 单测；下一步在 CI 通过后继续评估压缩音频，优先 Opus，避免当前 1.536 Mbps PCM 长期占用带宽。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -473,11 +473,11 @@ func (h *Host) streamH264Frames(
 		if firstD3D != nil {
 			firstD3D.Close()
 		}
-		if d3dConverter != nil {
-			_ = d3dConverter.Close()
-		}
 		if encoder != nil {
 			_ = encoder.Close()
+		}
+		if d3dConverter != nil {
+			_ = d3dConverter.Close()
 		}
 	}()
 

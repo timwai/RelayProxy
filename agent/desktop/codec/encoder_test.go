@@ -89,3 +89,23 @@ func TestD3D11EncodeFrameValidation(t *testing.T) {
 		t.Fatal("odd D3D11 width accepted")
 	}
 }
+
+func TestD3D11ConvertConfigValidation(t *testing.T) {
+	cfg := D3D11ConvertConfig{
+		InputWidth: 1920, InputHeight: 1080,
+		OutputWidth: 1280, OutputHeight: 720,
+		FPS: 30,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.OutputWidth = 1279
+	if !errors.Is(cfg.Validate(), ErrInvalidVideoConfig) {
+		t.Fatal("odd NV12 output width accepted")
+	}
+	cfg.OutputWidth = 1280
+	cfg.FPS = 0
+	if !errors.Is(cfg.Validate(), ErrInvalidVideoConfig) {
+		t.Fatal("zero converter FPS accepted")
+	}
+}

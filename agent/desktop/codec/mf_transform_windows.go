@@ -350,60 +350,52 @@ func processTransformMessage(transform unsafe.Pointer, message uint32) error {
 	return processTransformMessageParam(transform, message, 0)
 }
 
-func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []byte, error) {
-	attributes, err := transformAttributes(transform)
-	if err == nil {
+func createEncoderOutputType(spec mfVideoEncoderSpec, cfg VideoConfig) (unsafe.Pointer, error) {
+	outputType, err := createVideoMediaType(spec.OutputSubtype, cfg, true)
+	if err != nil {
+		return nil, err
+	}
+	if spec.OutputProfile != 0 {
+		if err := attributeSetUINT32(outputType, &mfMTVideoProfile, spec.OutputProfile); err != nil {
+			releaseIUnknown(outputType)
+			return nil, err
+		}
+	}
+	return outputType, nil
+}
+
+func configureVideoEncoderTransform(
+	transform unsafe.Pointer,
+	cfg VideoConfig,
+	spec mfVideoEncoderSpec,
+) (bool, []byte, error) {
+	attributes, attrErr := transformAttributes(transform)
+	isAsync := false
+	if attrErr == nil {
 		defer releaseIUnknown(attributes)
 		async, getErr := attributeGetUINT32(attributes, &mfTransformAsync)
-		isAsync := getErr == nil && async != 0
+		isAsync = getErr == nil && async != 0
 		if isAsync {
 			if err := attributeSetUINT32(attributes, &mfTransformAsyncUnlock, 1); err != nil {
-				return false, nil, fmt.Errorf("unlock async MFT: %w", err)
+				return false, nil, fmt.Errorf("unlock async %s MFT: %w", spec.Label, err)
 			}
 		}
 		if !cfg.DisableLowLatency {
 			_ = attributeSetUINT32(attributes, &mfLowLatency, 1)
 		}
-
-		outputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
-		if err != nil {
-			return false, nil, err
-		}
-		defer releaseIUnknown(outputType)
-		// The Microsoft H.264 encoder requires its output media type first.
-		if err := setTransformType(transform, imfTransformSetOutputType, outputType); err != nil {
-			return false, nil, err
-		}
-		sequenceHeader, _ := attributeGetBlob(outputType, &mfMTMPEGSequenceHeader)
-
-		inputType, err := createVideoMediaType(&mfVideoFormatNV12, cfg, false)
-		if err != nil {
-			return false, nil, err
-		}
-		defer releaseIUnknown(inputType)
-		if err := setTransformType(transform, imfTransformSetInputType, inputType); err != nil {
-			return false, nil, err
-		}
-		if err := processTransformMessage(transform, mftMessageNotifyBeginStreaming); err != nil {
-			return false, nil, err
-		}
-		if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
-			return false, nil, err
-		}
-		return isAsync, sequenceHeader, nil
 	}
 
-	// Some older transforms do not expose a transform attribute store. Media
-	// type negotiation still works, but async/low-latency hints cannot be set.
-	outputType, err := createVideoMediaType(&mfVideoFormatH264, cfg, true)
+	outputType, err := createEncoderOutputType(spec, cfg)
 	if err != nil {
 		return false, nil, err
 	}
 	defer releaseIUnknown(outputType)
+	// Microsoft video encoders require the compressed output type before NV12 input.
 	if err := setTransformType(transform, imfTransformSetOutputType, outputType); err != nil {
 		return false, nil, err
 	}
 	sequenceHeader, _ := attributeGetBlob(outputType, &mfMTMPEGSequenceHeader)
+
 	inputType, err := createVideoMediaType(&mfVideoFormatNV12, cfg, false)
 	if err != nil {
 		return false, nil, err
@@ -418,7 +410,11 @@ func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []
 	if err := processTransformMessage(transform, mftMessageNotifyStartOfStream); err != nil {
 		return false, nil, err
 	}
-	return false, sequenceHeader, nil
+	return isAsync, sequenceHeader, nil
+}
+
+func configureH264Transform(transform unsafe.Pointer, cfg VideoConfig) (bool, []byte, error) {
+	return configureVideoEncoderTransform(transform, cfg, mfH264EncoderSpec)
 }
 
 func activationGroups(preferHardware bool) []struct {

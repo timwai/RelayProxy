@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #91 已合并，merge `7982b90aeb186a6f8cb2e7e84e81463db45caeea`）
+> 当前开发基线：`main`（PR #92 已合并，merge `eefcb76b2e87c6ace104af5a754fe51fccf9436f`）
 
 ## 0. 当前进度
 
@@ -436,14 +436,24 @@ Windows SendInput / CF_UNICODETEXT
 - 修正 `go-bindings-win32` runtime import 路径后，Go CI、UI regression、Windows/macOS desktop package 全部通过。
 - PR #91 已合并到 `main`，merge `7982b90aeb186a6f8cb2e7e84e81463db45caeea`；旧 PR #89 已关闭，由 #91 替代。
 
-### 0.2.34 RD3 Native Viewer Audio Playback（当前分支）
+### 0.2.34 RD3 Native Viewer Audio Playback（已合并 PR #92）
 
 - 固定首个 wire codec 名称为 `pcm_s16le`，Controller audio config/tests 与 native playback 共用协议常量，避免 Host/Controller/Viewer 出现字符串漂移。
 - `ControllerSession.AudioEnabled()` 默认启用音频，并严格遵守显式 `RemoteDesktopConnectOptions.Audio=false`；Agent/Bridge 只向 Go/native viewer 暴露这一状态，不增加 WebView 音频轮询。
 - Windows native viewer 在 session 生命周期内启动独立 audio goroutine，阻塞消费 #90 的 `NextRemoteDesktopAudioFrame`，首次 PCM frame 到达后再惰性打开 WASAPI player。
 - audio generation 或格式变化时关闭并重建 player；每帧在写入前复用 `PCMConfig.ValidatePayload` 做 block alignment 校验，WASAPI 写失败时丢弃旧 player 并允许下一帧重建。
-- viewer run 退出时现在主动 cancel session context，确保既有 input goroutine 与新增 audio goroutine 一并退出，避免窗口自行关闭或 Relay session 断开后的 goroutine 残留。
-- 本阶段仍不产生 Host 音频；下一步实现 Windows WASAPI loopback capture，发送 `audio_config` + RD/1 audio stream，完成 PCM 端到端 bring-up。
+- viewer run 退出时主动 cancel session context，确保 input/audio goroutine 一并退出。
+- PR #92 已合并到 `main`，merge `eefcb76b2e87c6ace104af5a754fe51fccf9436f`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.35 RD3 WASAPI Loopback Capture / PCM E2E（当前分支）
+
+- 新增 `audio.Capture` 与 `OpenLoopbackCapture`；Windows 使用默认 multimedia render endpoint + WASAPI shared-mode loopback，将系统播放音频转换为 S16LE PCM。
+- 首轮 Host 音频固定为 48 kHz / stereo / 16-bit / 20 ms，每帧 3840 bytes；capture worker 在锁定 OS thread 的 COM apartment 内读取 `IAudioCaptureClient`，支持 silent packet、context cancellation 与 Close。
+- Host 在目标平台声明 audio capability 后，默认随 Relay Desktop session 启动音频；显式 `Audio=false` 保持关闭。audio 初始化/设备失败只禁用当前 session 音频，不主动中断视频。
+- Host 先通过可靠控制流发送 `audio_config`，再用独立 stream ID=2 / sequence domain 将 PCM 经 `PacketizeMediaFrame` 发送，Controller/Native Viewer 复用既有 #88/#90/#92 链路接收播放。
+- `MediaConn.Send` 增加 datagram 写串行化，避免视频与音频并发 direct-path 发送时相互覆盖 socket write deadline。
+- Windows host capability snapshot 现在声明 loopback audio 支持；非 Windows 继续保持 unavailable stub。
+- 下一步：完整 CI 后做 Windows 实机 PCM loopback bring-up，随后根据带宽/CPU 数据决定 Opus/AAC 压缩与抖动缓冲策略。
 
 ### 0.3 本轮进度（2026-09-22）
 

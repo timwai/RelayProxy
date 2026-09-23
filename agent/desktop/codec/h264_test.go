@@ -22,3 +22,13 @@ func TestH264WithSequenceHeaderAvoidsDuplicateParameterSets(t *testing.T) {
 		t.Fatalf("duplicated sequence header: %d != %d", len(got), len(already))
 	}
 }
+
+
+func TestNormalizeCodecPreferenceDoesNotEnableH265BeforeSessionSupport(t *testing.T) {
+	if got := NormalizeCodecPreference("h265"); got != "auto" {
+		t.Fatalf("H.265 became selectable before session support: %q", got)
+	}
+	if got := NormalizeCodecPreference("hevc"); got != "auto" {
+		t.Fatalf("HEVC became selectable before session support: %q", got)
+	}
+}

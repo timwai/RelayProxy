@@ -98,6 +98,7 @@ func StartControllerWithOptions(
 	go session.controlLoop(ctx)
 	go session.probeLoop(ctx)
 	go session.abrLoop(ctx)
+	go session.audioControlLoop(ctx)
 	go session.readLoop(ctx)
 	return session, nil
 }

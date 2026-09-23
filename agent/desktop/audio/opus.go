@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -162,6 +163,22 @@ func (d *OpusDecoder) DecodePacket(packet []byte) ([]byte, error) {
 	pcm := make([]byte, d.cfg.PCMFrameBytes())
 	if _, _, err := d.dec.Decode(packet, pcm); err != nil {
 		return nil, fmt.Errorf("decode Opus frame: %w", err)
+	}
+	return pcm, nil
+}
+
+func (d *OpusDecoder) DecodePLC() ([]byte, error) {
+	if d == nil {
+		return nil, errors.New("Relay Desktop Opus decoder is unavailable")
+	}
+	samplesPerChannel := d.cfg.SampleRate * d.cfg.FrameDurationMs / 1000
+	pcm16 := make([]int16, samplesPerChannel*d.cfg.Channels)
+	if err := d.dec.DecodePLC(pcm16); err != nil {
+		return nil, fmt.Errorf("decode Opus PLC frame: %w", err)
+	}
+	pcm := make([]byte, len(pcm16)*2)
+	for i, sample := range pcm16 {
+		binary.LittleEndian.PutUint16(pcm[i*2:i*2+2], uint16(sample))
 	}
 	return pcm, nil
 }

@@ -719,6 +719,21 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #934 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #624 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：实现 oneVPL HEVC AYUV encoder/decoder backend，接入现有 generation-aware Host / native Viewer；只有实现层和 runtime probe 同时可用时才开放公开 4:4:4 capability。
 
+### 0.2.58 RD3 oneVPL HEVC 4:4:4 End-to-End MVP（已进入 main）
+
+- oneVPL HEVC 8-bit 4:4:4 encoder 已接入 Host generation：Windows amd64 运行时动态加载 `libvpl.dll`，要求 HEVC RExt + AYUV，使用 oneVPL internal system-memory surface；Relay Desktop 的 RGBA/BGRA/I444 输入统一转换为 I444/AYUV 后进入硬件编码器。
+- oneVPL encoder 支持 IDR、bitrate-only reset、HEVC VPS/SPS/PPS 提取与现有 generation-aware CONFIG/ABR 生命周期；4:2:0 H.265 继续使用 Media Foundation，不改变成熟路径。
+- native Viewer 新增 I444 CPU frame 渲染路径；NV12 + D3D11 zero-copy 路径保持不变。
+- oneVPL HEVC 4:4:4 decoder 已接入原生 Viewer：首次 generation 通过 `MFXVideoDECODE_DecodeHeader` 解析码流，再严格确认 HEVC RExt / AYUV / 8-bit 4:4:4；输出 surface 经 Synchronize + Map(read) 拆成 I444 后进入 Viewer。
+- Decoder 维护未消费 bitstream、处理 device-busy / more-data / generation 参数变化，并在 Flush 后关闭 decoder component、下一次关键帧懒初始化，保持现有 Viewer 恢复语义。
+- 在线 codec capability 新增 `encodeChroma / decodeChroma` 方向级列表；新 peer 优先按方向判断 4:2:0 / 4:4:4，旧 peer 继续使用 `chroma420 / chroma444` 共享字段。
+- 只有本机 oneVPL probe 同时确认 HEVC 4:4:4 encode + decode，且 RelayProxy encoder/decoder 实现均已存在时才公开 `Chroma444=true`；不按 Intel GPU 型号猜能力。
+- H.265 `auto` 明确等价于现有 4:2:0 路径并要求对应方向的 `420` capability；oneVPL-only 4:4:4 设备不会被误用于 H.265 4:2:0 session。
+- 混合 MF/oneVPL 场景保留方向精度，同时对旧客户端保持保守共享 capability；Host 与 Server session snapshot 对新增嵌套 chroma slice 做深拷贝，避免 capability alias。
+- 代表实现 PR：#107（encoder）、#108（I444 Viewer）、#109（decoder）、#110（runtime capability advertisement）；#110 merge `80dd506`。
+- 验证：PR #110 Go CI #954 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #644 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
+- 当前 4:4:4 路径属于 CPU-surface MVP：Capture → I444/AYUV CPU packing → oneVPL HEVC HW encode → RD/1 → oneVPL HEVC HW decode → I444 CPU readback → BGRA native Viewer。下一步优化为 D3D11 AYUV texture / GPU color conversion / decoder texture zero-copy，去掉两端 CPU packing/readback，并完成 Intel 双机实测矩阵。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
@@ -849,7 +864,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 多显示器/P2P + 4:4:4 协商/I444 + oneVPL Probe 已完成，真实 4:4:4 codec backend 待接入
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🧪 H.265 + Opus + 多显示器/P2P + oneVPL HEVC 4:4:4 CPU-surface MVP 已完成，D3D11 zero-copy / 实机验证中
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

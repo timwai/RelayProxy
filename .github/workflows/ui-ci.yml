@@ -35,13 +35,10 @@ jobs:
       - name: Check Go formatting
         shell: bash
         run: |
-          files="$(git diff --name-only origin/main...HEAD -- '*.go')"
-          if [ -n "$files" ]; then
-            bad="$(gofmt -l $files)"
-            if [ -n "$bad" ]; then
-              gofmt -d $bad
-              exit 1
-            fi
+          bad="$(git ls-files '*.go' | xargs gofmt -l)"
+          if [ -n "$bad" ]; then
+            gofmt -d $bad
+            exit 1
           fi
       - name: Check release script syntax
         run: bash -n scripts/build.sh

@@ -87,7 +87,6 @@ func TestNativeDesktopFrameNeedsRebuild(t *testing.T) {
 	}
 }
 
-
 func TestNativeDesktopViewportResolution(t *testing.T) {
 	tests := []struct {
 		name     string

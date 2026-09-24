@@ -79,13 +79,13 @@ type nativeDesktopSession struct {
 	disconnectOnClose bool
 	persistPlacement  bool
 
-	mediaMu       sync.RWMutex
-	viewer        desktopviewer.Native
-	decoder       desktopcodec.Decoder
-	inputCh       chan protocol.DesktopInputEvent
-	viewportCh    chan desktopviewer.Viewport
-	title         string
-	generation    uint32
+	mediaMu         sync.RWMutex
+	viewer          desktopviewer.Native
+	decoder         desktopcodec.Decoder
+	inputCh         chan protocol.DesktopInputEvent
+	viewportCh      chan desktopviewer.Viewport
+	title           string
+	generation      uint32
 	decoderCodec    string
 	decoderChroma   string
 	decoderBitDepth int

@@ -385,6 +385,8 @@ func TestRemoteDesktopFollowViewport(t *testing.T) {
 		"window.devicePixelRatio",
 		"function remoteDesktopViewportMayGrow(status)",
 		"async function applyRemoteDesktopViewportResolution()",
+		"goSetRemoteDesktopViewportResolution",
+		"call('goSetRemoteDesktopViewportResolution', target.width, target.height)",
 		"function scheduleRemoteDesktopViewportResolution()",
 		"new ResizeObserver(function ()",
 		"state.desktopFollowViewport = !!followViewport;",

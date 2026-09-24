@@ -7,10 +7,10 @@ package codec
 // to controllers.
 type OneVPLProbe struct {
 	DispatcherAvailable bool
-	HardwareRuntime      bool
-	HEVC444Encode        bool
-	HEVC444Decode        bool
-	Error                string
+	HardwareRuntime     bool
+	HEVC444Encode       bool
+	HEVC444Decode       bool
+	Error               string
 }
 
 func (p OneVPLProbe) HEVC444EndToEnd() bool {

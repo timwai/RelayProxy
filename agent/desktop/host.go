@@ -139,6 +139,8 @@ type HostConfig struct {
 	MaxBitrate     int
 	PacketSize     int
 	DisplayID      string
+	Chroma         desktopcodec.ChromaFormat
+	BitDepth       int
 	CaptureBackend protocol.DesktopCaptureBackend
 }
 
@@ -149,6 +151,8 @@ func DefaultHostConfig() HostConfig {
 		MaxHeight:   720,
 		JPEGQuality: 68,
 		PacketSize:  1150,
+		Chroma:      desktopcodec.Chroma420,
+		BitDepth:    8,
 	}
 }
 
@@ -198,6 +202,12 @@ func NewHostWithInput(source CaptureSource, input InputSink, cfg HostConfig) (*H
 	}
 	if cfg.PacketSize <= desktopmedia.MediaHeaderSize {
 		cfg.PacketSize = defaults.PacketSize
+	}
+	if cfg.Chroma == "" {
+		cfg.Chroma = defaults.Chroma
+	}
+	if cfg.BitDepth == 0 {
+		cfg.BitDepth = defaults.BitDepth
 	}
 	return &Host{source: source, input: input, cfg: cfg, audioOpen: openDefaultAudioCapture}, nil
 }
@@ -389,6 +399,13 @@ func ResolveHostConfig(base HostConfig, options protocol.RemoteDesktopConnectOpt
 		cfg.MaxBitrate = options.MaxBitrate
 	}
 	cfg.DisplayID = options.DisplayID
+	switch options.Chroma {
+	case protocol.DesktopChroma444:
+		cfg.Chroma = desktopcodec.Chroma444
+	default:
+		cfg.Chroma = desktopcodec.Chroma420
+	}
+	cfg.BitDepth = 8
 	cfg.CaptureBackend = options.CaptureBackend
 	if cfg.CaptureBackend == "" {
 		cfg.CaptureBackend = protocol.DesktopCaptureAuto
@@ -456,7 +473,7 @@ func (h *Host) handleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 		}
 		defer input.EndInputSession()
 	}
-	log.Printf("[Desktop] session capture=%s requestedCapture=%s display=%q config=%dx%d fps=%d quality=%d maxBitrate=%d", backend, sessionConfig.CaptureBackend, sessionConfig.DisplayID, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate)
+	log.Printf("[Desktop] session capture=%s requestedCapture=%s display=%q config=%dx%d fps=%d quality=%d maxBitrate=%d chroma=%s bitDepth=%d", backend, sessionConfig.CaptureBackend, sessionConfig.DisplayID, sessionConfig.MaxWidth, sessionConfig.MaxHeight, sessionConfig.MaxFPS, sessionConfig.JPEGQuality, sessionConfig.MaxBitrate, sessionConfig.Chroma, sessionConfig.BitDepth)
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

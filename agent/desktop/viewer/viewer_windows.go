@@ -50,6 +50,10 @@ type windowsViewer struct {
 
 	reconfigureCh chan viewerReconfigureRequest
 
+	fullscreen        bool
+	windowedStyle     uint32
+	windowedPlacement win.WINDOWPLACEMENT
+
 	inputSequence  uint64
 	pressedKeys    map[uint16]bool
 	pressedButtons map[string]bool
@@ -131,6 +135,7 @@ func (v *windowsViewer) run(initCh chan<- error) {
 	}
 
 	style := uint32(win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU | win.WS_MINIMIZEBOX | win.WS_MAXIMIZEBOX | win.WS_THICKFRAME | win.WS_CLIPCHILDREN)
+	v.windowedStyle = style
 	clientWidth, clientHeight := v.config.ViewportWidth, v.config.ViewportHeight
 	if clientWidth <= 0 {
 		clientWidth = v.config.Width
@@ -252,6 +257,12 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 	case win.WM_KEYDOWN, win.WM_SYSKEYDOWN:
 		if viewer != nil {
 			key := uint16(wParam)
+			if nativeViewerFullscreenShortcut(msg, key, lParam) {
+				if lParam&(1<<30) == 0 {
+					viewer.toggleFullscreen(hwnd)
+				}
+				return 0
+			}
 			viewer.pressedKeys[key] = true
 			viewer.emitInput(protocol.DesktopInputEvent{
 				Kind:       protocol.DesktopInputKeyDown,
@@ -264,6 +275,9 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 	case win.WM_KEYUP, win.WM_SYSKEYUP:
 		if viewer != nil {
 			key := uint16(wParam)
+			if nativeViewerFullscreenShortcut(msg, key, lParam) {
+				return 0
+			}
 			delete(viewer.pressedKeys, key)
 			viewer.emitInput(protocol.DesktopInputEvent{
 				Kind:       protocol.DesktopInputKeyUp,
@@ -375,6 +389,70 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		return 0
 	}
 	return win.DefWindowProc(hwnd, msg, wParam, lParam)
+}
+
+func nativeViewerFullscreenShortcut(msg uint32, key uint16, lParam uintptr) bool {
+	if msg != win.WM_SYSKEYDOWN && msg != win.WM_SYSKEYUP {
+		return false
+	}
+	return key == win.VK_RETURN && lParam&(1<<29) != 0
+}
+
+func (v *windowsViewer) toggleFullscreen(hwnd win.HWND) {
+	if v == nil || hwnd == 0 {
+		return
+	}
+	if v.fullscreen {
+		if v.windowedStyle != 0 {
+			win.SetWindowLong(hwnd, win.GWL_STYLE, int32(v.windowedStyle))
+		}
+		if v.windowedPlacement.Length != 0 {
+			win.SetWindowPlacement(hwnd, &v.windowedPlacement)
+		}
+		win.SetWindowPos(
+			hwnd,
+			0,
+			0, 0, 0, 0,
+			win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_NOACTIVATE|win.SWP_FRAMECHANGED,
+		)
+		v.fullscreen = false
+		win.SetForegroundWindow(hwnd)
+		win.SetFocus(hwnd)
+		return
+	}
+
+	placement := win.WINDOWPLACEMENT{Length: uint32(unsafe.Sizeof(win.WINDOWPLACEMENT{}))}
+	if !win.GetWindowPlacement(hwnd, &placement) {
+		return
+	}
+	monitor := win.MonitorFromWindow(hwnd, win.MONITOR_DEFAULTTONEAREST)
+	if monitor == 0 {
+		return
+	}
+	monitorInfo := win.MONITORINFO{CbSize: uint32(unsafe.Sizeof(win.MONITORINFO{}))}
+	if !win.GetMonitorInfo(monitor, &monitorInfo) {
+		return
+	}
+
+	v.windowedPlacement = placement
+	win.SetWindowLong(
+		hwnd,
+		win.GWL_STYLE,
+		int32(win.WS_POPUP|win.WS_VISIBLE|win.WS_CLIPCHILDREN),
+	)
+	rect := monitorInfo.RcMonitor
+	win.SetWindowPos(
+		hwnd,
+		win.HWND_TOP,
+		rect.Left,
+		rect.Top,
+		rect.Right-rect.Left,
+		rect.Bottom-rect.Top,
+		win.SWP_FRAMECHANGED,
+	)
+	v.fullscreen = true
+	win.SetForegroundWindow(hwnd)
+	win.SetFocus(hwnd)
 }
 
 func nativeViewerFor(hwnd win.HWND) (*windowsViewer, bool) {

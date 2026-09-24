@@ -1836,7 +1836,12 @@
 
       var currentID = String(status.displayId || '');
       var options = [];
-      options.push({ id:'', label:'全部显示器' });
+      var perDisplayOnly = status.captureBackend === 'dxgi' || status.captureBackend === 'wgc';
+      options.push({
+        id:'',
+        label: perDisplayOnly ? '全部显示器（当前采集后端不支持）' : '全部显示器',
+        disabled: perDisplayOnly
+      });
       displays.forEach(function (display, index) {
         var id = String(display && display.id || '');
         if (!id) return;
@@ -1853,6 +1858,7 @@
           var option = document.createElement('option');
           option.value = item.id;
           option.textContent = item.label;
+          option.disabled = !!item.disabled;
           select.appendChild(option);
         });
         select.dataset.options = signature;
@@ -1868,6 +1874,9 @@
       wrap.title = status.displayName
         ? '当前：' + status.displayName + '；切换无需断开连接，会创建新的媒体 Generation'
         : '运行中切换显示器；切换无需断开连接';
+      if (perDisplayOnly) {
+        wrap.title += '；显式 ' + String(status.captureBackend).toUpperCase() + ' 仅支持具体显示器';
+      }
     }
 
     async function setRemoteDesktopDisplay() {

@@ -1179,7 +1179,6 @@ func (a *appWindow) stopNativeDesktopViewer() {
 	}
 }
 
-
 func (a *appWindow) nativeDesktopViewerStatus() map[string]any {
 	if a == nil {
 		return map[string]any{"open": false, "windows": 0}

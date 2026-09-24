@@ -403,13 +403,12 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	oldControl := a.ctrlStream
 	oldRDP := a.rdpConnection
 	oldP2P := a.rdpP2P
-	oldDesktop := a.desktopConnection
+	oldDesktops := a.takeDesktopSessionsLocked()
 	oldDesktopP2P := a.desktopP2PSession
 	a.ctrlStream = nil
 	a.rdpConnection = nil
 	a.rdpP2P = nil
 	a.rdpSession = nil
-	a.desktopConnection = nil
 	a.desktopP2PSession = nil
 	a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
 	a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
@@ -426,8 +425,10 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 		if oldP2P != nil {
 			_ = oldP2P.Close()
 		}
-		if oldDesktop != nil {
-			_ = oldDesktop.Close()
+		for _, oldDesktop := range oldDesktops {
+			if oldDesktop != nil {
+				_ = oldDesktop.Close()
+			}
 		}
 		if oldDesktopP2P != nil {
 			_ = oldDesktopP2P.Close()
@@ -446,8 +447,10 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	if oldP2P != nil {
 		_ = oldP2P.Close()
 	}
-	if oldDesktop != nil {
-		_ = oldDesktop.Close()
+	for _, oldDesktop := range oldDesktops {
+		if oldDesktop != nil {
+			_ = oldDesktop.Close()
+		}
 	}
 	if oldDesktopP2P != nil {
 		_ = oldDesktopP2P.Close()

@@ -580,6 +580,20 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #793 的 gofmt/vet/test/race/benchmark 全部通过；UI CI #483 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：当前 swap-chain backbuffer 会随 media generation 尺寸变化，但任意宽高比的 Native Viewer 客户区仍可能由 DXGI 拉伸画面；后续应补 D3D11 letterbox / aspect-fit viewport，以及对应的鼠标输入可视区域坐标映射。
 
+### 0.2.48 RD3 Native Viewer Aspect-fit Letterbox（已进入 main）
+
+- Native Viewer 的顶层窗口继续负责键盘/鼠标输入与 viewport 管理；新增一个禁用的 `STATIC` child render surface，D3D11 swap chain 改为绑定该 child HWND，而不是直接绑定整个顶层 client area。
+- child render surface 根据当前 `viewport × media` 实时计算 aspect-fit 矩形；窗口比例与媒体比例不一致时只移动/缩放 child，不改变媒体 generation，也不改变 decoder / swap chain 的媒体分辨率。
+- 顶层窗口背景固定为黑色并启用 `WS_CLIPCHILDREN`，因此未被 render surface 覆盖的区域自然形成 letterbox / pillarbox，不需要额外 shader 或 CPU 缩放路径。
+- 该结构同时覆盖零拷贝 D3D11 decoder 和 CPU BGRA fallback：两条路径仍向媒体尺寸 swap chain 输出，Windows 只在等比例 child surface 内做最终窗口缩放，因此不会出现非等比拉伸。
+- child surface 使用 `WS_DISABLED`；Win32 会把原本命中 disabled child 的鼠标输入转交给父窗口，因此现有父窗口统一输入、capture、按键释放逻辑无需复制到第二个 WndProc。
+- `normalizedPointer` 改为基于实际可见媒体矩形，而不是整个 client viewport；黑边区域的鼠标位置会 clamp 到最近的画面边缘，再归一化为 0..65535，避免 pillarbox / letterbox 导致远端鼠标横纵坐标偏移。
+- media generation 改变时，现有 in-place `Reconfigure` 完成后会重新布局 child render surface；窗口大小与位置保持不变，新的媒体宽高比会立即重新居中。
+- 新增 `aspectFitRect` 纯函数和 Windows 回归测试，覆盖同宽高比、16:9→方窗、4:3→宽窗以及左右黑边 clamp 到远端画面边缘。
+- 实现提交：`a12e044`；测试提交：`9d2c0a0`；格式修复：`337baf7`。
+- 验证：Go CI #797 gofmt/vet/test/race/benchmark 通过；UI CI #487 Linux UI/full regression、macOS desktop package 与 Windows desktop package 均通过。
+- 下一步：补 Native Viewer 真正的 borderless fullscreen / `Alt+Enter` 切换，以及多显示器下记忆/恢复窗口 placement；随后再进入 H.265 正式产品化验证。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

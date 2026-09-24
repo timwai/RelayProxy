@@ -53,6 +53,7 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goSetAutostart",
 		"goSetTheme",
 		"goSetRemoteDesktopResolution",
+		"goSetRemoteDesktopDisplay",
 		"goGetRemoteDesktopDiagnostics",
 	} {
 		if !strings.Contains(script, "window."+name) {
@@ -405,5 +406,29 @@ func TestRemoteDesktopFollowViewport(t *testing.T) {
 	}
 	if strings.Contains(page, `</div>\n              <div id="desktop-viewer-audio-stats"`) {
 		t.Fatal("remote desktop viewer contains a literal \\n before audio diagnostics")
+	}
+}
+
+
+func TestRemoteDesktopRuntimeDisplaySwitcher(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-runtime-display-wrap"`,
+		`id="desktop-runtime-display"`,
+		"function remoteDesktopDisplays(targetID)",
+		"function updateDesktopRuntimeDisplayControl(status)",
+		"async function setRemoteDesktopDisplay()",
+		"call('goSetRemoteDesktopDisplay', displayID)",
+		"全部显示器",
+		"等待新媒体 Generation",
+		"releaseDesktopInput()",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop runtime display UI missing %q", want)
+		}
 	}
 }

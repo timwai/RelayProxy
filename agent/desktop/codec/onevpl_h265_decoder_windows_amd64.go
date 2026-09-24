@@ -17,9 +17,16 @@ import (
 )
 
 const (
+	oneVPLIOPatternOutVideoMemory  = 0x10
 	oneVPLIOPatternOutSystemMemory = 0x20
 	oneVPLMapRead                  = 0x1
-	oneVPLFrameInterfaceSync       = 72
+
+	oneVPLHandleD3D11Device            = 3
+	oneVPLResourceDX11Texture          = 5
+	oneVPLFrameInterfaceAddRef         = 16
+	oneVPLFrameInterfaceGetNativeHandle = 56
+	oneVPLFrameInterfaceGetDeviceHandle = 64
+	oneVPLFrameInterfaceSync            = 72
 
 	oneVPLBitstreamCodecID   = 20
 	oneVPLBitstreamTimestamp = 32
@@ -38,6 +45,7 @@ type oneVPLH265DecoderAPI struct {
 	init         uintptr
 	decode       uintptr
 	closeDecoder uintptr
+	setHandle    uintptr
 }
 
 func loadOneVPLH265DecoderAPI(module windows.Handle) (oneVPLH265DecoderAPI, error) {
@@ -63,6 +71,9 @@ func loadOneVPLH265DecoderAPI(module windows.Handle) (oneVPLH265DecoderAPI, erro
 		return oneVPLH265DecoderAPI{}, err
 	}
 	if api.closeDecoder, err = resolve("MFXVideoDECODE_Close"); err != nil {
+		return oneVPLH265DecoderAPI{}, err
+	}
+	if api.setHandle, err = resolve("MFXVideoCORE_SetHandle"); err != nil {
 		return oneVPLH265DecoderAPI{}, err
 	}
 	return api, nil
@@ -105,6 +116,16 @@ func createOneVPLH265DecoderSession(
 }
 
 func oneVPLHEVC444DecoderDesiredParam(cfg VideoConfig) (oneVPLVideoParam, VideoConfig, error) {
+	return oneVPLHEVC444DecoderDesiredParamForIO(cfg, oneVPLIOPatternOutSystemMemory)
+}
+
+func oneVPLHEVC444DecoderDesiredParamForIO(
+	cfg VideoConfig,
+	ioPattern uint16,
+) (oneVPLVideoParam, VideoConfig, error) {
+	if ioPattern != oneVPLIOPatternOutSystemMemory && ioPattern != oneVPLIOPatternOutVideoMemory {
+		return oneVPLVideoParam{}, VideoConfig{}, fmt.Errorf("%w: invalid oneVPL decoder IOPattern 0x%x", ErrInvalidVideoConfig, ioPattern)
+	}
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return oneVPLVideoParam{}, VideoConfig{}, err
@@ -135,11 +156,15 @@ func oneVPLHEVC444DecoderDesiredParam(cfg VideoConfig) (oneVPLVideoParam, VideoC
 	param.putU16(oneVPLFrameInfoChroma, oneVPLChromaYUV444)
 	param.putU32(oneVPLVideoParamCodecID, oneVPLCodecHEVC)
 	param.putU16(oneVPLVideoParamCodecProfile, oneVPLHEVCProfileRExt)
-	param.putU16(oneVPLVideoParamIOPattern, oneVPLIOPatternOutSystemMemory)
+	param.putU16(oneVPLVideoParamIOPattern, ioPattern)
 	return param, cfg, nil
 }
 
 func oneVPLHEVC444DecoderParamPreserved(param *oneVPLVideoParam) bool {
+	return oneVPLHEVC444DecoderParamPreservedForIO(param, oneVPLIOPatternOutSystemMemory)
+}
+
+func oneVPLHEVC444DecoderParamPreservedForIO(param *oneVPLVideoParam, ioPattern uint16) bool {
 	if param == nil {
 		return false
 	}
@@ -149,11 +174,19 @@ func oneVPLHEVC444DecoderParamPreserved(param *oneVPLVideoParam) bool {
 		param.u16(oneVPLFrameInfoBitDepthLuma) == 8 &&
 		param.u16(oneVPLFrameInfoBitDepthChroma) == 8 &&
 		param.u16(oneVPLFrameInfoChroma) == oneVPLChromaYUV444 &&
-		param.u16(oneVPLVideoParamIOPattern) == oneVPLIOPatternOutSystemMemory
+		param.u16(oneVPLVideoParamIOPattern) == ioPattern
 }
 
 func applyOneVPLHEVC444DecoderOutput(header oneVPLVideoParam, cfg VideoConfig) (oneVPLVideoParam, error) {
-	desired, normalized, err := oneVPLHEVC444DecoderDesiredParam(cfg)
+	return applyOneVPLHEVC444DecoderOutputForIO(header, cfg, oneVPLIOPatternOutSystemMemory)
+}
+
+func applyOneVPLHEVC444DecoderOutputForIO(
+	header oneVPLVideoParam,
+	cfg VideoConfig,
+	ioPattern uint16,
+) (oneVPLVideoParam, error) {
+	desired, normalized, err := oneVPLHEVC444DecoderDesiredParamForIO(cfg, ioPattern)
 	if err != nil {
 		return oneVPLVideoParam{}, err
 	}
@@ -193,7 +226,7 @@ func applyOneVPLHEVC444DecoderOutput(header oneVPLVideoParam, cfg VideoConfig) (
 	param.putU16(oneVPLFrameInfoChroma, oneVPLChromaYUV444)
 	param.putU32(oneVPLVideoParamCodecID, oneVPLCodecHEVC)
 	param.putU16(oneVPLVideoParamCodecProfile, oneVPLHEVCProfileRExt)
-	param.putU16(oneVPLVideoParamIOPattern, oneVPLIOPatternOutSystemMemory)
+	param.putU16(oneVPLVideoParamIOPattern, ioPattern)
 	return param, nil
 }
 
@@ -212,10 +245,35 @@ type oneVPLH265Decoder struct {
 	pending     []byte
 	inputBuffer []byte
 	i444Scratch []byte
+	ioPattern   uint16
+	d3d11Device uintptr
 }
 
 func OpenOneVPLH265Decoder(ctx context.Context, cfg VideoConfig) (Decoder, error) {
-	_, cfg, err := oneVPLHEVC444DecoderDesiredParam(cfg)
+	return openOneVPLH265Decoder(ctx, cfg, 0)
+}
+
+func OpenOneVPLH265DecoderWithD3D11(
+	ctx context.Context,
+	cfg VideoConfig,
+	device uintptr,
+) (Decoder, error) {
+	if device == 0 {
+		return nil, fmt.Errorf("%w: D3D11 device is nil", ErrDecoderUnavailable)
+	}
+	return openOneVPLH265Decoder(ctx, cfg, device)
+}
+
+func openOneVPLH265Decoder(
+	ctx context.Context,
+	cfg VideoConfig,
+	device uintptr,
+) (Decoder, error) {
+	ioPattern := uint16(oneVPLIOPatternOutSystemMemory)
+	if device != 0 {
+		ioPattern = oneVPLIOPatternOutVideoMemory
+	}
+	_, cfg, err := oneVPLHEVC444DecoderDesiredParamForIO(cfg, ioPattern)
 	if err != nil {
 		return nil, err
 	}
@@ -246,12 +304,26 @@ func OpenOneVPLH265Decoder(ctx context.Context, cfg VideoConfig) (Decoder, error
 		}
 	}()
 
+	if device != 0 {
+		status, _, _ := syscall.SyscallN(
+			decoderAPI.setHandle,
+			session,
+			oneVPLHandleD3D11Device,
+			device,
+		)
+		if got := oneVPLStatus(status); got != 0 {
+			return nil, fmt.Errorf("%w: MFXVideoCORE_SetHandle(D3D11) returned %d", ErrDecoderUnavailable, got)
+		}
+	}
+
 	decoder := &oneVPLH265Decoder{
 		base:    base,
 		api:     decoderAPI,
 		loader:  loader,
-		session: session,
-		cfg:     cfg,
+		session:      session,
+		cfg:          cfg,
+		ioPattern:    ioPattern,
+		d3d11Device:  device,
 	}
 	cleanupBase = false
 	cleanupSession = false
@@ -327,7 +399,7 @@ func (d *oneVPLH265Decoder) initializeLocked(ctx context.Context, bitstream *one
 	}
 	var header oneVPLVideoParam
 	header.putU32(oneVPLVideoParamCodecID, oneVPLCodecHEVC)
-	header.putU16(oneVPLVideoParamIOPattern, oneVPLIOPatternOutSystemMemory)
+	header.putU16(oneVPLVideoParamIOPattern, d.ioPattern)
 	status, _, _ := syscall.SyscallN(
 		d.api.decodeHeader,
 		d.session,
@@ -342,7 +414,7 @@ func (d *oneVPLH265Decoder) initializeLocked(ctx context.Context, bitstream *one
 		return fmt.Errorf("%w: MFXVideoDECODE_DecodeHeader returned %d", ErrDecoderUnavailable, got)
 	}
 
-	param, err := applyOneVPLHEVC444DecoderOutput(header, d.cfg)
+	param, err := applyOneVPLHEVC444DecoderOutputForIO(header, d.cfg, d.ioPattern)
 	if err != nil {
 		return err
 	}
@@ -354,10 +426,10 @@ func (d *oneVPLH265Decoder) initializeLocked(ctx context.Context, bitstream *one
 		uintptr(unsafe.Pointer(&queryParam[0])),
 	)
 	queryStatus := oneVPLStatus(status)
-	if !oneVPLStatusOK(queryStatus) || !oneVPLHEVC444DecoderParamPreserved(&queryParam) {
+	if !oneVPLStatusOK(queryStatus) || !oneVPLHEVC444DecoderParamPreservedForIO(&queryParam, d.ioPattern) {
 		return fmt.Errorf(
 			"%w: oneVPL HEVC 4:4:4 decoder query status=%d preserved=%t",
-			ErrDecoderUnavailable, queryStatus, oneVPLHEVC444DecoderParamPreserved(&queryParam),
+			ErrDecoderUnavailable, queryStatus, oneVPLHEVC444DecoderParamPreservedForIO(&queryParam, d.ioPattern),
 		)
 	}
 	status, _, _ = syscall.SyscallN(

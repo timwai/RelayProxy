@@ -56,11 +56,12 @@ func TestDesktopCapabilitiesForTargetUsesAuthorizedOnlineSnapshot(t *testing.T) 
 			AudioCodecs:  []string{protocol.DesktopAudioCodecOpus, protocol.DesktopAudioCodecPCMS16LE},
 			Displays:     []protocol.DesktopDisplayCapability{{ID: "10", Name: "DISPLAY1", Width: 1920, Height: 1080, Primary: true}},
 			MultiMonitor: false,
+			MultiStream:  true,
 			MaxWidth:     3840, MaxHeight: 2160, MaxFPS: 30,
 		},
 	}
 	got := DesktopCapabilitiesForTarget(sess, true, true)
-	if !got.NativeRDP || !got.RelayDesktop || len(got.Displays) != 1 || got.Displays[0].ID != "10" {
+	if !got.NativeRDP || !got.RelayDesktop || !got.MultiStream || len(got.Displays) != 1 || got.Displays[0].ID != "10" {
 		t.Fatalf("merged capabilities=%+v", got)
 	}
 	got.Displays[0].ID = "mutated"

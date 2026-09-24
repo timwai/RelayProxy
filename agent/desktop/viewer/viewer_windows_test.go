@@ -5,6 +5,8 @@ package viewer
 import (
 	"errors"
 	"testing"
+
+	"github.com/lxn/win"
 )
 
 func TestViewportPackingRoundTrip(t *testing.T) {
@@ -105,5 +107,25 @@ func TestNormalizedPointerUsesVisibleMediaRect(t *testing.T) {
 				t.Fatalf("normalizedPointer(%d,%d)=(%d,%d) want=(%d,%d)", tt.x, tt.y, gotX, gotY, tt.wantX, tt.wantY)
 			}
 		})
+	}
+}
+
+
+func TestNativeViewerFullscreenShortcut(t *testing.T) {
+	altContext := uintptr(1 << 29)
+	if !nativeViewerFullscreenShortcut(win.WM_SYSKEYDOWN, win.VK_RETURN, altContext) {
+		t.Fatal("Alt+Enter syskeydown was not recognized")
+	}
+	if !nativeViewerFullscreenShortcut(win.WM_SYSKEYUP, win.VK_RETURN, altContext) {
+		t.Fatal("Alt+Enter syskeyup was not recognized")
+	}
+	if nativeViewerFullscreenShortcut(win.WM_KEYDOWN, win.VK_RETURN, altContext) {
+		t.Fatal("plain WM_KEYDOWN should not trigger fullscreen")
+	}
+	if nativeViewerFullscreenShortcut(win.WM_SYSKEYDOWN, win.VK_RETURN, 0) {
+		t.Fatal("Enter without Alt context should not trigger fullscreen")
+	}
+	if nativeViewerFullscreenShortcut(win.WM_SYSKEYDOWN, win.VK_F11, altContext) {
+		t.Fatal("unrelated system key should not trigger fullscreen")
 	}
 }

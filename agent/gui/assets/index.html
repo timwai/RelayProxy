@@ -735,6 +735,7 @@
               <select id="desktop-opt-codec" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
                 <option value="auto">自动</option>
                 <option value="h264">H.264</option>
+                <option value="h265">H.265 / HEVC（原生 Viewer）</option>
                 <option value="jpeg">JPEG 兼容</option>
               </select>
             </div>
@@ -781,7 +782,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式在本机 WebCodecs 可用时优先 H.264，否则使用 JPEG；采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；显示器列表来自目标当前在线会话，布局变化后请刷新设备。自动模式仍优先成熟的 H.264 路径（WebCodecs 不可用时使用 JPEG）；H.265 / HEVC 目前需要显式选择、目标上报 Encode、本机上报 Decode，并使用原生 Viewer 播放。采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 / H.265 均使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -795,7 +796,7 @@
             </div>
             <div class="flex items-center gap-2">
               <div id="desktop-runtime-resolution-wrap" class="hidden items-center gap-1.5">
-                <select id="desktop-runtime-resolution" title="运行中切换 H.264 分辨率" class="text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <select id="desktop-runtime-resolution" title="运行中切换 H.264 / H.265 分辨率" class="text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
                   <option value="">当前分辨率</option>
                   <option value="viewport">跟随窗口</option>
                   <option id="desktop-runtime-resolution-max" value="max">最高</option>
@@ -830,7 +831,7 @@
         <div class="rp-card p-4">
           <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">自动模式</div>
           <div class="text-[11px] leading-6 text-slate-500 dark:text-slate-400 mt-1">
-            自动模式会根据目标能力选择 backend：Relay Desktop 在 WebCodecs 可用时优先 H.264 + Media Foundation，并在编码器或解码器不可用时保留 JPEG 兼容路径；Windows Home 不依赖系统 RDP 服务。
+            自动模式会根据目标能力选择 backend：Relay Desktop 继续优先 H.264 + Media Foundation，并在 WebCodecs 不可用时保留 JPEG 兼容路径。H.265 / HEVC 已可显式选择，但在 Intel / NVIDIA / AMD 双机验证完成前不会成为自动默认；Windows Home 不依赖系统 RDP 服务。
           </div>
         </div>
       </section>
@@ -1557,6 +1558,20 @@
       }
       return null;
     }
+    function remoteDesktopCodecCapability(targetID, codec) {
+      var target = remoteDesktopTargetByID(targetID);
+      var codecs = target && target.capabilities && Array.isArray(target.capabilities.codecs)
+        ? target.capabilities.codecs : [];
+      codec = String(codec || '').toLowerCase();
+      for (var i = 0; i < codecs.length; i++) {
+        if (String(codecs[i] && codecs[i].codec || '').toLowerCase() === codec) return codecs[i];
+      }
+      return null;
+    }
+    function remoteDesktopTargetCanEncodeCodec(targetID, codec) {
+      var capability = remoteDesktopCodecCapability(targetID, codec);
+      return !!(capability && capability.encode);
+    }
     function remoteDesktopCaptureBackends(target) {
       var caps = target && target.capabilities ? target.capabilities : {};
       var captures = Array.isArray(caps.captures) ? caps.captures : [];
@@ -1668,7 +1683,10 @@
     function remoteDesktopOptionsSummary(targetID) {
       var options = remoteDesktopConnectOptions(targetID);
       var parts = [];
-      if (options.codec) parts.push(options.codec === 'h264' ? 'H.264' : 'JPEG');
+      if (options.codec) {
+        var codecLabels = { h264:'H.264', h265:'H.265', jpeg:'JPEG' };
+        parts.push(codecLabels[options.codec] || String(options.codec).toUpperCase());
+      }
       if (options.captureBackend && options.captureBackend !== 'auto') {
         parts.push('Capture ' + options.captureBackend.toUpperCase());
       }
@@ -1735,7 +1753,11 @@
         var backends = [];
         if (caps.nativeRdp) backends.push('Windows RDP');
         if (caps.relayDesktop) backends.push('Relay Desktop');
-        meta.textContent = (backends.length ? backends.join(' · ') : '无可用 backend') + ' · ' + target.deviceId;
+        var mediaCaps = [];
+        if (remoteDesktopTargetCanEncodeCodec(target.deviceId, 'h264')) mediaCaps.push('H.264');
+        if (remoteDesktopTargetCanEncodeCodec(target.deviceId, 'h265')) mediaCaps.push('H.265');
+        meta.textContent = (backends.length ? backends.join(' · ') : '无可用 backend') +
+          (mediaCaps.length ? ' · ' + mediaCaps.join('/') : '') + ' · ' + target.deviceId;
         info.appendChild(title);
         info.appendChild(meta);
 
@@ -2226,9 +2248,9 @@
             (frame.width && frame.height ? frame.width + '×' + frame.height + ' · ' : '') +
             'H.264 · WebCodecs · QUIC Datagram · 键鼠控制 · ' + remoteDesktopOptionsSummary();
         } else if (mime.indexOf('video/h265') === 0) {
-          // The embedded WebView does not claim HEVC WebCodecs support. Hidden
-          // HEVC validation sessions are rendered by the native MF/D3D11
-          // viewer; do not misinterpret an HEVC access unit as a JPEG image.
+          // HEVC is intentionally rendered by the native MF/D3D11 viewer.
+          // The embedded WebView does not claim portable HEVC WebCodecs support,
+          // so never reinterpret an HEVC access unit as a JPEG image.
           resetDesktopVideoDecoder();
           showDesktopJPEGSurface();
           $('desktop-viewer-image').removeAttribute('src');
@@ -2657,6 +2679,15 @@
       if (relayRequired && options.captureBackend !== 'auto' &&
           !remoteDesktopCaptureBackendSupported(targetID, options.captureBackend)) {
         toast('目标未提供 ' + options.captureBackend.toUpperCase() + ' 采集能力，请选择自动或目标支持的采集后端');
+        return;
+      }
+      if (relayRequired && options.codec === 'h265' &&
+          !remoteDesktopTargetCanEncodeCodec(targetID, 'h265')) {
+        toast('目标未上报 H.265 / HEVC 编码能力，请改用 H.264 或 JPEG');
+        return;
+      }
+      if (relayRequired && options.codec === 'h265' && !hasFn('goOpenRemoteDesktopNativeViewer')) {
+        toast('H.265 / HEVC 当前需要 Windows 原生 Viewer');
         return;
       }
       if (button) button.disabled = true;
@@ -3224,6 +3255,14 @@
         if (codecSelect) {
           var h264Option = Array.from(codecSelect.options || []).find(function (option) { return option.value === 'h264'; });
           if (h264Option) { h264Option.disabled = true; h264Option.textContent = 'H.264（当前 WebView 不支持）'; }
+        }
+      }
+      var desktopCodecSelect = $('desktop-opt-codec');
+      if (desktopCodecSelect && !hasFn('goOpenRemoteDesktopNativeViewer')) {
+        var h265Option = Array.from(desktopCodecSelect.options || []).find(function (option) { return option.value === 'h265'; });
+        if (h265Option) {
+          h265Option.disabled = true;
+          h265Option.textContent = 'H.265 / HEVC（需要 Windows 原生 Viewer）';
         }
       }
 

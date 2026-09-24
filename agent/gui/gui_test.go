@@ -370,3 +370,33 @@ func TestRemoteDesktopLiveAudioStats(t *testing.T) {
 		}
 	}
 }
+
+
+func TestRemoteDesktopFollowViewport(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`<option value="auto">跟随窗口（自动）</option>`,
+		`<option value="viewport">跟随窗口</option>`,
+		"desktopFollowViewport: false",
+		"function remoteDesktopViewportTarget(status)",
+		"window.devicePixelRatio",
+		"function remoteDesktopViewportMayGrow(status)",
+		"async function applyRemoteDesktopViewportResolution()",
+		"function scheduleRemoteDesktopViewportResolution()",
+		"new ResizeObserver(function ()",
+		"state.desktopFollowViewport = !!followViewport;",
+		"state.desktopFollowViewport = false;",
+		"scheduleRemoteDesktopViewportResolution();",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop follow viewport missing %q", want)
+		}
+	}
+	if strings.Contains(page, `</div>\n              <div id="desktop-viewer-audio-stats"`) {
+		t.Fatal("remote desktop viewer contains a literal \\n before audio diagnostics")
+	}
+}

@@ -42,7 +42,6 @@ func TestCloneDesktopDisplaysDoesNotAliasSource(t *testing.T) {
 	}
 }
 
-
 func TestDesktopDisplayRecoveryTarget(t *testing.T) {
 	displays := []protocol.DesktopDisplayCapability{
 		{ID: "10", Name: "Primary", Primary: true},
@@ -50,44 +49,44 @@ func TestDesktopDisplayRecoveryTarget(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		cfg     HostConfig
+		name     string
+		cfg      HostConfig
 		displays []protocol.DesktopDisplayCapability
-		want    string
-		recover bool
+		want     string
+		recover  bool
 	}{
 		{
-			name: "current display still available",
-			cfg: HostConfig{DisplayID: "20", CaptureBackend: protocol.DesktopCaptureDXGI},
+			name:     "current display still available",
+			cfg:      HostConfig{DisplayID: "20", CaptureBackend: protocol.DesktopCaptureDXGI},
 			displays: displays,
 		},
 		{
-			name: "auto returns to virtual desktop",
-			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureAuto},
+			name:     "auto returns to virtual desktop",
+			cfg:      HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureAuto},
 			displays: displays,
-			want: "", recover: true,
+			want:     "", recover: true,
 		},
 		{
-			name: "gdi returns to virtual desktop",
-			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureGDI},
+			name:     "gdi returns to virtual desktop",
+			cfg:      HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureGDI},
 			displays: displays,
-			want: "", recover: true,
+			want:     "", recover: true,
 		},
 		{
-			name: "dxgi selects primary",
-			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureDXGI},
+			name:     "dxgi selects primary",
+			cfg:      HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureDXGI},
 			displays: displays,
-			want: "10", recover: true,
+			want:     "10", recover: true,
 		},
 		{
-			name: "wgc selects first when no primary",
-			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureWGC},
-			displays: []protocol.DesktopDisplayCapability{{ID:"20"}, {ID:"10"}},
-			want: "20", recover: true,
+			name:     "wgc selects first when no primary",
+			cfg:      HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureWGC},
+			displays: []protocol.DesktopDisplayCapability{{ID: "20"}, {ID: "10"}},
+			want:     "20", recover: true,
 		},
 		{
-			name: "per display backend cannot recover with no displays",
-			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureDXGI},
+			name:     "per display backend cannot recover with no displays",
+			cfg:      HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureDXGI},
 			displays: nil,
 		},
 	}

@@ -79,7 +79,6 @@ func TestH265ProbeHardwareRequiresBothDirections(t *testing.T) {
 	}
 }
 
-
 func TestH265CapabilityAddsOneVPL444OnlyEndToEnd(t *testing.T) {
 	capability, available := H265Capability(H265Probe{}, OneVPLProbe{
 		DispatcherAvailable: true,
@@ -133,7 +132,6 @@ func TestH265CapabilityDoesNotAdvertisePartialOneVPL444(t *testing.T) {
 		t.Fatalf("empty Media Foundation probe advertised 4:2:0: %+v", capability)
 	}
 }
-
 
 func TestH265CapabilityPreservesMixedDirectional420WithOneVPL(t *testing.T) {
 	capability, available := H265Capability(

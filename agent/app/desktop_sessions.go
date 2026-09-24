@@ -258,6 +258,8 @@ func (a *Agent) remoteDesktopStatusForSession(sessionID string, session *desktop
 	out.DisplayID = config.DisplayID
 	out.Generation = config.Generation
 	out.Codec = config.Codec
+	out.Chroma = config.Chroma
+	out.BitDepth = config.BitDepth
 	out.Width = config.Width
 	out.Height = config.Height
 	out.MaxWidth = config.MaxWidth
@@ -349,6 +351,7 @@ func (a *Agent) RemoteDesktopFrameForSession(sessionID string) protocol.RemoteDe
 	}
 	return protocol.RemoteDesktopFrame{
 		Sequence: frame.Sequence, Generation: frame.Generation, MimeType: frame.MimeType, Codec: frame.Codec,
+		Chroma: frame.Chroma, BitDepth: frame.BitDepth,
 		Width: frame.Width, Height: frame.Height, Timestamp: frame.Timestamp,
 		KeyFrame: frame.KeyFrame, Data: frame.Data,
 	}

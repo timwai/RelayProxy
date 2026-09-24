@@ -467,6 +467,63 @@ func synchronizeOneVPLSurface(ctx context.Context, surface uintptr) error {
 	}
 }
 
+func retainOneVPLSurface(surface uintptr) error {
+	method, err := oneVPLSurfaceInterfaceMethod(surface, oneVPLFrameInterfaceAddRef)
+	if err != nil {
+		return err
+	}
+	status, _, _ := syscall.SyscallN(method, surface)
+	if got := oneVPLStatus(status); got != 0 {
+		return fmt.Errorf("oneVPL surface AddRef returned %d", got)
+	}
+	return nil
+}
+
+func oneVPLD3D11SurfaceHandles(surface uintptr) (resource, device uintptr, err error) {
+	nativeMethod, err := oneVPLSurfaceInterfaceMethod(surface, oneVPLFrameInterfaceGetNativeHandle)
+	if err != nil {
+		return 0, 0, err
+	}
+	var resourceType uint32
+	status, _, _ := syscall.SyscallN(
+		nativeMethod,
+		surface,
+		uintptr(unsafe.Pointer(&resource)),
+		uintptr(unsafe.Pointer(&resourceType)),
+	)
+	if got := oneVPLStatus(status); got != 0 {
+		return 0, 0, fmt.Errorf("oneVPL surface GetNativeHandle returned %d", got)
+	}
+	if resource == 0 || resourceType != oneVPLResourceDX11Texture {
+		return 0, 0, fmt.Errorf(
+			"oneVPL surface native resource=%#x type=%d, want D3D11 texture",
+			resource, resourceType,
+		)
+	}
+
+	deviceMethod, err := oneVPLSurfaceInterfaceMethod(surface, oneVPLFrameInterfaceGetDeviceHandle)
+	if err != nil {
+		return 0, 0, err
+	}
+	var deviceType uint32
+	status, _, _ = syscall.SyscallN(
+		deviceMethod,
+		surface,
+		uintptr(unsafe.Pointer(&device)),
+		uintptr(unsafe.Pointer(&deviceType)),
+	)
+	if got := oneVPLStatus(status); got != 0 {
+		return 0, 0, fmt.Errorf("oneVPL surface GetDeviceHandle returned %d", got)
+	}
+	if device == 0 || deviceType != oneVPLHandleD3D11Device {
+		return 0, 0, fmt.Errorf(
+			"oneVPL surface device=%#x type=%d, want D3D11 device",
+			device, deviceType,
+		)
+	}
+	return resource, device, nil
+}
+
 func mapOneVPLSurfaceRead(surface uintptr) error {
 	method, err := oneVPLSurfaceInterfaceMethod(surface, oneVPLFrameInterfaceMap)
 	if err != nil {
@@ -534,10 +591,49 @@ func (d *oneVPLH265Decoder) outputSurfaceLocked(
 	if surface == 0 {
 		return nil, errors.New("oneVPL decoder returned a nil output surface")
 	}
-	defer releaseOneVPLSurface(surface)
 	if err := synchronizeOneVPLSurface(ctx, surface); err != nil {
+		releaseOneVPLSurface(surface)
 		return nil, err
 	}
+	if d.ioPattern == oneVPLIOPatternOutVideoMemory {
+		resource, device, err := oneVPLD3D11SurfaceHandles(surface)
+		if err != nil {
+			releaseOneVPLSurface(surface)
+			return nil, err
+		}
+		if d.d3d11Device != 0 && device != d.d3d11Device {
+			releaseOneVPLSurface(surface)
+			return nil, fmt.Errorf(
+				"oneVPL decoder returned D3D11 device %#x, want viewer device %#x",
+				device, d.d3d11Device,
+			)
+		}
+		owner := surface
+		return []DecodedFrame{{
+			Format: PixelFormatAYUV,
+			D3D11: &D3D11Surface{
+				Device:      device,
+				Resource:    resource,
+				Subresource: 0,
+				Format:      PixelFormatAYUV,
+				release: func() {
+					releaseOneVPLSurface(owner)
+				},
+				gpuRetain: func() error {
+					return retainOneVPLSurface(owner)
+				},
+				gpuRelease: func() {
+					releaseOneVPLSurface(owner)
+				},
+			},
+			Width:     d.cfg.Width,
+			Height:    d.cfg.Height,
+			Timestamp: timestamp,
+			Hardware:  true,
+		}}, nil
+	}
+
+	defer releaseOneVPLSurface(surface)
 	if err := mapOneVPLSurfaceRead(surface); err != nil {
 		return nil, err
 	}
@@ -708,6 +804,9 @@ func (d *oneVPLH265Decoder) Hardware() bool {
 func (d *oneVPLH265Decoder) Backend() string {
 	if d == nil {
 		return ""
+	}
+	if d.ioPattern == oneVPLIOPatternOutVideoMemory {
+		return "onevpl-hevc444-d3d11-zero-copy"
 	}
 	return "onevpl-hevc444"
 }

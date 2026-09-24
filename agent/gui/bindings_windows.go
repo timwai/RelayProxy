@@ -267,6 +267,17 @@ func (s *WailsService) SetRemoteDesktopViewportResolution(width, height int) (st
 	return `{"ok":true}`, nil
 }
 
+func (s *WailsService) SetRemoteDesktopDisplay(displayID string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if err := s.owner.bridge.SetRemoteDesktopDisplay(displayID); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
 func (s *WailsService) RequestRemoteDesktopIDR() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil

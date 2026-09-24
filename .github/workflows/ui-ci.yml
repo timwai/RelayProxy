@@ -3,6 +3,7 @@ name: UI CI
 on:
   push:
     branches:
+      - "main"
       - "feature/unified-ui-*"
   pull_request:
     paths:

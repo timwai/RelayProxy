@@ -435,10 +435,11 @@ func (v *windowsViewer) toggleFullscreen(hwnd win.HWND) {
 	}
 
 	v.windowedPlacement = placement
+	fullscreenStyle := uint32(win.WS_POPUP | win.WS_VISIBLE | win.WS_CLIPCHILDREN)
 	win.SetWindowLong(
 		hwnd,
 		win.GWL_STYLE,
-		int32(win.WS_POPUP|win.WS_VISIBLE|win.WS_CLIPCHILDREN),
+		int32(fullscreenStyle),
 	)
 	rect := monitorInfo.RcMonitor
 	win.SetWindowPos(

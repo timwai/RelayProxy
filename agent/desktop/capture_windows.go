@@ -268,55 +268,67 @@ func (c *windowsCapture) BeginSession(ctx context.Context, cfg HostConfig) error
 	}
 	displays, listErr := screencapture.Displays(ctx)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return errors.New("Windows desktop capture is closed")
-	}
-	c.closeStreamLocked()
-	c.selectedDisplay = nil
-	c.backend = "gdi"
-
+	var (
+		nextStream   windowsFrameStream
+		nextSelected *screencapture.Display
+		nextBackend  = "gdi"
+	)
 	if listErr != nil {
 		if cfg.DisplayID != "" || windowsCaptureRequiresDisplayTarget(requestedBackend) {
 			return fmt.Errorf("enumerate Windows displays for capture backend %s: %w",
 				normalizedWindowsCaptureBackend(cfg.CaptureBackend), listErr)
 		}
 		log.Printf("[Desktop] display enumeration unavailable, using virtual desktop GDI: %v", listErr)
-		return nil
+	} else {
+		target, selected, selectErr := resolveWindowsDisplay(displays, cfg.DisplayID)
+		if selectErr != nil {
+			return selectErr
+		}
+		if target.ID == 0 {
+			if windowsCaptureRequiresDisplayTarget(requestedBackend) {
+				return fmt.Errorf("%s capture requires selecting a specific display when multiple displays are active",
+					requestedBackend)
+			}
+		} else {
+			stream, err := c.streamFactory.Open(ctx, target, requestedBackend, cfg.MaxFPS)
+			if err != nil {
+				if selected || explicitWindowsCaptureBackend(requestedBackend) {
+					return fmt.Errorf("capture Windows display using %s: %w",
+						normalizedWindowsCaptureBackend(cfg.CaptureBackend), err)
+				}
+				log.Printf("[Desktop] per-display capture unavailable, using virtual desktop GDI: %v", err)
+			} else {
+				nextStream = stream
+				nextBackend = string(stream.Backend())
+				if nextBackend == "" {
+					nextBackend = "gdi"
+				}
+				if selected {
+					copy := target
+					nextSelected = &copy
+				}
+			}
+		}
 	}
 
-	target, selected, selectErr := resolveWindowsDisplay(displays, cfg.DisplayID)
-	if selectErr != nil {
-		return selectErr
-	}
-	if target.ID == 0 {
-		if windowsCaptureRequiresDisplayTarget(requestedBackend) {
-			return fmt.Errorf("%s capture requires selecting a specific display when multiple displays are active",
-				requestedBackend)
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		if nextStream != nil {
+			_ = nextStream.Close()
 		}
-		return nil
+		return errors.New("Windows desktop capture is closed")
 	}
-
-	stream, err := c.streamFactory.Open(ctx, target, requestedBackend, cfg.MaxFPS)
-	if err != nil {
-		if selected || explicitWindowsCaptureBackend(requestedBackend) {
-			return fmt.Errorf("capture Windows display using %s: %w",
-				normalizedWindowsCaptureBackend(cfg.CaptureBackend), err)
-		}
-		log.Printf("[Desktop] per-display capture unavailable, using virtual desktop GDI: %v", err)
-		return nil
-	}
-	c.stream = stream
-	c.backend = string(stream.Backend())
-	if c.backend == "" {
-		c.backend = "gdi"
-	}
-	if selected {
-		copy := target
-		c.selectedDisplay = &copy
-	}
+	oldStream := c.stream
+	c.stream = nextStream
+	c.selectedDisplay = nextSelected
+	c.backend = nextBackend
 	c.frame = nil
+	c.mu.Unlock()
+
+	if oldStream != nil {
+		_ = oldStream.Close()
+	}
 	return nil
 }
 

@@ -217,6 +217,18 @@ type desktopResolutionTarget struct {
 	MaxHeight int
 }
 
+type desktopDisplaySwitchError struct {
+	DisplayID  string
+	Generation uint32
+}
+
+func (e *desktopDisplaySwitchError) Error() string {
+	if e == nil {
+		return "Relay Desktop display switch"
+	}
+	return fmt.Sprintf("Relay Desktop display switch to %q after generation %d", e.DisplayID, e.Generation)
+}
+
 func queueLatestResolution(ch chan desktopResolutionTarget, value desktopResolutionTarget) {
 	if ch == nil {
 		return
@@ -250,6 +262,25 @@ func validateDesktopResolutionTarget(width, height, maxWidth, maxHeight int) (de
 		return desktopResolutionTarget{}, fmt.Errorf("Relay Desktop resolution height %d exceeds session maximum %d", height, maxHeight)
 	}
 	return desktopResolutionTarget{MaxWidth: width, MaxHeight: height}, nil
+}
+
+func queueLatestString(ch chan string, value string) {
+	if ch == nil {
+		return
+	}
+	select {
+	case ch <- value:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- value:
+	default:
+	}
 }
 
 func queueLatestInt(ch chan int, value int) {
@@ -378,6 +409,7 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	bitrateUpdates := make(chan int, 1)
 	fpsUpdates := make(chan int, 1)
 	resolutionUpdates := make(chan desktopResolutionTarget, 1)
+	displayUpdates := make(chan string, 1)
 	audioLossUpdates := make(chan int, 1)
 
 	workerCount := 2
@@ -397,11 +429,14 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	}
 	errorsCh := make(chan error, workerCount)
 	go func() {
-		errorsCh <- h.streamSessionFrames(sessionCtx, conn, sessionConfig, options, backend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates)
+		errorsCh <- h.streamSessionFrames(
+			sessionCtx, conn, sessionConfig, options, backend,
+			idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates, displayUpdates,
+		)
 	}()
 	go func() {
 		errorsCh <- h.readSessionControlLoop(
-			sessionCtx, conn, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates, audioLossUpdates,
+			sessionCtx, conn, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates, displayUpdates, audioLossUpdates,
 			sessionConfig.MaxFPS, sessionConfig.MaxWidth, sessionConfig.MaxHeight,
 			clipboardEndpoint, clipboardState, syncClipboard,
 		)
@@ -451,6 +486,7 @@ func (h *Host) readSessionControlLoop(
 	bitrateUpdates chan int,
 	fpsUpdates chan int,
 	resolutionUpdates chan desktopResolutionTarget,
+	displayUpdates chan string,
 	audioLossUpdates chan int,
 	maxFPS int,
 	maxWidth int,
@@ -529,6 +565,9 @@ func (h *Host) readSessionControlLoop(
 					queueLatestResolution(resolutionUpdates, target)
 				}
 			}
+			if control.DisplayID != nil {
+				queueLatestString(displayUpdates, strings.TrimSpace(*control.DisplayID))
+			}
 			continue
 
 		case protocol.DesktopSessionInput:
@@ -593,6 +632,7 @@ func (h *Host) streamFrames(
 	captureBackend string,
 	generation uint32,
 	fpsUpdates <-chan int,
+	displayUpdates <-chan string,
 ) error {
 	sessionID, err := newMediaSessionID()
 	if err != nil {
@@ -678,6 +718,11 @@ func (h *Host) streamFrames(
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case displayID := <-displayUpdates:
+			if displayID == cfg.DisplayID {
+				continue
+			}
+			return &desktopDisplaySwitchError{DisplayID: displayID, Generation: generation}
 		case nextFPS := <-fpsUpdates:
 			nextFPS = clampInt(nextFPS, 1, cfg.MaxFPS)
 			if nextFPS == targetFPS {

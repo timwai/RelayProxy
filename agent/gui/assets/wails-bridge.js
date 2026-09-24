@@ -10,6 +10,7 @@
 
   window.goOpenConnections = () => invoke('OpenConnections');
   window.goGetConnections = () => invoke('GetConnections');
+  window.goClearConnections = () => invoke('ClearConnections');
   window.goGetStatus = () => invoke('GetStatus');
   window.goGetRemoteDesktopTargets = () => invoke('GetRemoteDesktopTargets');
   window.goConnectRemoteDesktop = (targetID, rawOptions) => invoke('ConnectRemoteDesktop', targetID, rawOptions);

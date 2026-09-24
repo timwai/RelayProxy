@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -229,8 +230,98 @@ func TestWebConfigMutationAndQuit(t *testing.T) {
 	}
 }
 
-func TestWebRejectsNonLoopbackListener(t *testing.T) {
-	if _, err := StartWeb(newWebTestBridge(t), WebOptions{Listen: "0.0.0.0", Port: 9090}); err == nil {
-		t.Fatal("non-loopback Agent web listener was accepted")
+func TestWebAcceptsNonLoopbackListener(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server, err := StartWeb(newWebTestBridge(t), WebOptions{Listen: "0.0.0.0", Port: port})
+	if err != nil {
+		t.Fatalf("non-loopback Agent web listener was rejected: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close(context.Background()) })
+	if server.loopback {
+		t.Fatal("0.0.0.0 listener was incorrectly marked as loopback")
+	}
+}
+
+func TestConnectionsPageSupportsStatusFilterClearAndNewestFirst(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/connections", nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("connections page status = %d", page.Code)
+	}
+	for _, want := range []string{
+		`id="state-filter"`,
+		`value="connecting"`,
+		`value="active"`,
+		`value="closed"`,
+		`value="failed"`,
+		`value="rejected"`,
+		`id="clear"`,
+		`data-sort="started_at"`,
+		`.state.connecting`,
+		`.state.active`,
+		`.state.closed`,
+		`.state.failed`,
+		`.state.rejected`,
+	} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("connections page missing %q", want)
+		}
+	}
+
+	script := httptest.NewRecorder()
+	handler.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/connections.js", nil))
+	for _, want := range []string{
+		"sort = 'started_at'",
+		"state !== 'all' && row.state !== state",
+		"window.goClearConnections",
+		"startedAt(record.started_at)",
+	} {
+		if !strings.Contains(script.Body.String(), want) {
+			t.Fatalf("connections script missing %q", want)
+		}
+	}
+
+	clear := httptest.NewRecorder()
+	handler.ServeHTTP(clear, httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/api/connections", nil))
+	if clear.Code != http.StatusOK || !strings.Contains(clear.Body.String(), `"ok":true`) {
+		t.Fatalf("clear connections response = %d %s", clear.Code, clear.Body.String())
+	}
+
+	bridgeJS := httptest.NewRecorder()
+	handler.ServeHTTP(bridgeJS, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
+	if !strings.Contains(bridgeJS.Body.String(), "goClearConnections") {
+		t.Fatal("browser bridge missing clear connections method")
+	}
+}
+
+func TestMainWebConnectionsPaneMatchesRealtimeMonitorFeatures(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("main web status = %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`id="inline-conn-state"`,
+		`onclick="clearConnectionsInline()"`,
+		"Date.parse(a.started_at",
+		"inline-conn-state ",
+		"已清空已结束连接历史，活跃连接已保留",
+		"连接时间 ↓",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("main web connections pane missing %q", want)
+		}
 	}
 }

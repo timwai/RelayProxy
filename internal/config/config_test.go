@@ -293,7 +293,7 @@ func TestApplyAgentDefaultsFillsEmptyRouting(t *testing.T) {
 	}
 }
 
-func TestWebManagementDefaultsAndLocalOnlyPolicy(t *testing.T) {
+func TestWebManagementDefaultsAndRemoteListenAllowed(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	if err := NormalizeAgentConfig(cfg); err != nil {
 		t.Fatal(err)
@@ -305,9 +305,11 @@ func TestWebManagementDefaultsAndLocalOnlyPolicy(t *testing.T) {
 		t.Fatalf("default GUI theme = %q, want system", cfg.GUI.Theme)
 	}
 	cfg.Web.Token = "legacy-value-is-ignored"
-	cfg.Web.Listen = "0.0.0.0"
-	if err := NormalizeAgentConfig(cfg); err == nil {
-		t.Fatal("remote Agent web listener was accepted")
+	for _, listen := range []string{"0.0.0.0", "::", "192.0.2.10"} {
+		cfg.Web.Listen = listen
+		if err := NormalizeAgentConfig(cfg); err != nil {
+			t.Fatalf("remote Agent web listener %q was rejected: %v", listen, err)
+		}
 	}
 }
 

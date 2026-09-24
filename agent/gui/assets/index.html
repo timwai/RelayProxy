@@ -239,6 +239,16 @@
     .routing-modal-footer button{font-size:11px;padding:7px 13px;border-radius:6px}
     @media(max-width:720px){.routing-modal-grid{grid-template-columns:1fr}.routing-modal-field.full{grid-column:auto}.routing-rule-table{min-width:760px}.routing-rule-table-shell{overflow-x:auto}}
 
+    .inline-conn-state{display:inline-flex;align-items:center;border:1px solid currentColor;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:650;line-height:1.3}
+    .inline-conn-state.connecting{color:#9a6a00;background:rgba(154,106,0,.08)}
+    .inline-conn-state.active{color:#087d5a;background:rgba(8,125,90,.08)}
+    .inline-conn-state.closed{color:var(--rp-muted);background:var(--rp-surface-soft)}
+    .inline-conn-state.failed{color:var(--rp-danger);background:color-mix(in srgb,var(--rp-danger) 8%,var(--rp-surface))}
+    .inline-conn-state.rejected{color:#b55216;background:rgba(181,82,22,.08)}
+    .dark .inline-conn-state.connecting{color:#f2c45f;background:rgba(242,196,95,.08)}
+    .dark .inline-conn-state.active{color:#61ddb1;background:rgba(97,221,177,.08)}
+    .dark .inline-conn-state.rejected{color:#ffad76;background:rgba(255,173,118,.08)}
+
     .tab-pane { min-height:0;flex:1; }
     @media(max-width:850px) { .config-permissions { grid-template-columns:1fr; }.config-permissions small { display:inline;margin-left:8px; }.config-grid{gap:14px;}.config-card{padding:17px;}.config-actions{align-items:flex-start;}.config-actions>div{gap:7px;}.config-page-heading h1{font-size:17px;} }
     @media(max-width:650px) { .rp-sidebar { width:156px; }.config-grid{grid-template-columns:1fr;}.config-advanced summary>span{float:none;display:block;margin:4px 0 0;}.config-page-heading{align-items:flex-start;flex-direction:column;}.draft-bar{padding:8px 12px;flex-wrap:wrap;}.config-inline-action{float:none;margin:0 0 6px;}.tab-pane{padding-left:16px;padding-right:16px;} }
@@ -1098,6 +1108,7 @@
           <div class="flex items-center gap-2 shrink-0">
             <span id="inline-conn-live" class="rp-badge rp-badge-success">实时更新</span>
             <button type="button" onclick="refreshConnectionsInline(true)" class="rp-btn">刷新</button>
+            <button type="button" onclick="clearConnectionsInline()" class="rp-btn" title="清空已结束连接历史，保留活跃连接">清空历史</button>
           </div>
         </div>
         <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
@@ -1108,14 +1119,15 @@
         </div>
         <div class="rp-toolbar mb-3">
           <input id="inline-conn-search" type="search" placeholder="搜索进程、域名、IP 或规则" class="rp-input flex-1" oninput="renderConnectionsInline()">
+          <select id="inline-conn-state" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部状态</option><option value="connecting">连接中</option><option value="active">活跃</option><option value="closed">已结束</option><option value="failed">失败</option><option value="rejected">已阻断</option></select>
           <select id="inline-conn-protocol" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部协议</option><option value="tcp">TCP</option><option value="udp">UDP</option></select>
           <select id="inline-conn-action" class="rp-select w-[120px]" onchange="renderConnectionsInline()"><option value="">全部动作</option><option value="PROXY">代理</option><option value="DIRECT">直连</option><option value="REJECT">阻断</option></select>
         </div>
         <div class="rp-card rp-scroll flex-1 min-h-0 overflow-auto">
-          <table class="rp-table text-[12px] min-w-[860px]">
+          <table class="rp-table text-[12px] min-w-[1040px]">
             <thead class="sticky top-0 bg-white dark:bg-[#151e2a] z-[1]"><tr class="text-left text-slate-500 dark:text-slate-400">
               <th class="px-3 py-2">进程</th><th class="px-3 py-2">目标</th><th class="px-3 py-2">协议</th><th class="px-3 py-2">动作</th>
-              <th class="px-3 py-2">出口</th><th class="px-3 py-2 text-right">↑</th><th class="px-3 py-2 text-right">↓</th><th class="px-3 py-2">状态</th>
+              <th class="px-3 py-2">出口</th><th class="px-3 py-2 text-right">↑</th><th class="px-3 py-2 text-right">↓</th><th class="px-3 py-2">状态</th><th class="px-3 py-2">连接时间 ↓</th>
             </tr></thead>
             <tbody id="inline-connections-body"></tbody>
           </table>
@@ -3313,9 +3325,12 @@
       var body = $('inline-connections-body');
       if (!body) return;
       var search = (($('inline-conn-search') && $('inline-conn-search').value) || '').trim().toLowerCase();
+      var stateFilter = ($('inline-conn-state') && $('inline-conn-state').value) || '';
       var protocol = ($('inline-conn-protocol') && $('inline-conn-protocol').value) || '';
       var action = ($('inline-conn-action') && $('inline-conn-action').value) || '';
+      var stateNames = {connecting:'连接中',active:'活跃',closed:'已结束',failed:'失败',rejected:'已阻断'};
       var rows = (inlineConnections.connections || []).filter(function (row) {
+        if (stateFilter && row.state !== stateFilter) return false;
         if (protocol && row.protocol !== protocol) return false;
         if (action && row.action !== action) return false;
         if (!search) return true;
@@ -3323,7 +3338,12 @@
           return String(value == null ? '' : value).toLowerCase().indexOf(search) >= 0;
         });
       });
-      rows.sort(function (a, b) { return Number(b.id || 0) - Number(a.id || 0); });
+      rows.sort(function (a, b) {
+        var at = Date.parse(a.started_at || '') || 0;
+        var bt = Date.parse(b.started_at || '') || 0;
+        if (bt !== at) return bt - at;
+        return Number(b.id || 0) - Number(a.id || 0);
+      });
       body.innerHTML = '';
       rows.slice(0, 300).forEach(function (record) {
         var tr = document.createElement('tr');
@@ -3334,8 +3354,7 @@
           record.action || '—',
           record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地'),
           formatTrafficBytes(record.upload_rate, true),
-          formatTrafficBytes(record.download_rate, true),
-          record.state || '—'
+          formatTrafficBytes(record.download_rate, true)
         ];
         values.forEach(function (value, index) {
           var td = document.createElement('td');
@@ -3343,18 +3362,37 @@
           td.textContent = value;
           tr.appendChild(td);
         });
+        var statusCell = document.createElement('td');
+        statusCell.className = 'px-3 py-2 border-b border-slate-200 dark:border-slate-800';
+        var status = document.createElement('span');
+        status.className = 'inline-conn-state ' + (record.state || 'closed');
+        status.textContent = stateNames[record.state] || record.state || '—';
+        statusCell.appendChild(status);
+        tr.appendChild(statusCell);
+        var timeCell = document.createElement('td');
+        timeCell.className = 'px-3 py-2 border-b border-slate-200 dark:border-slate-800 mono text-[11px]';
+        var started = new Date(record.started_at);
+        timeCell.textContent = Number.isNaN(started.getTime()) ? '—' : started.toLocaleString('zh-CN', {hour12:false});
+        tr.appendChild(timeCell);
         body.appendChild(tr);
       });
       if (!rows.length) {
         var empty = document.createElement('tr'), cell = document.createElement('td');
-        cell.colSpan = 8; cell.className = 'rp-empty-state';
-        cell.textContent = search || protocol || action ? '没有符合筛选条件的连接' : '当前没有连接';
+        cell.colSpan = 9; cell.className = 'rp-empty-state';
+        cell.textContent = search || stateFilter || protocol || action ? '没有符合筛选条件的连接' : '当前没有连接';
         empty.appendChild(cell); body.appendChild(empty);
       }
       if ($('inline-conn-summary')) $('inline-conn-summary').textContent =
         rows.length + ' 条符合条件 · 本次运行共 ' + (inlineConnections.total || 0) + ' 条连接' +
         (inlineConnections.omitted ? ' · ' + inlineConnections.omitted + ' 条明细未保留' : '');
     }
+    async function clearConnectionsInline() {
+      if (!hasFn('goClearConnections')) { toast('当前界面不支持清空连接历史'); return; }
+      await call('goClearConnections');
+      await refreshConnectionsInline(true);
+      toast('已清空已结束连接历史，活跃连接已保留');
+    }
+    window.clearConnectionsInline = clearConnectionsInline;
     async function refreshConnectionsInline(showError) {
       if (!$('tab-pane-connections') || $('tab-pane-connections').classList.contains('hidden')) return;
       var raw = await call('goGetConnections');

@@ -135,3 +135,36 @@ func TestRegistryRecentRingKeepsNewestConnections(t *testing.T) {
 		}
 	}
 }
+
+func TestClearRecentPreservesActiveConnectionsAndTrafficTotals(t *testing.T) {
+	r := NewRegistry(2, 3)
+	active := r.Start(Metadata{Host: "active.example"})
+	active.Activate()
+	active.AddUpload(128)
+	finished := r.Start(Metadata{Host: "finished.example"})
+	finished.AddDownload(256)
+	finished.Finish("closed", nil)
+
+	before := r.Snapshot()
+	if len(before.Connections) != 2 || before.Total != 2 || before.Upload != 128 || before.Download != 256 {
+		t.Fatalf("unexpected pre-clear snapshot: %+v", before)
+	}
+
+	r.ClearRecent()
+	after := r.Snapshot()
+	if len(after.Connections) != 1 || after.Connections[0].ID != active.connection.ID || after.Active != 1 {
+		t.Fatalf("clear removed or changed active connection: %+v", after)
+	}
+	if after.Total != 1 || after.Omitted != 0 {
+		t.Fatalf("clear did not reset the connection history counters: %+v", after)
+	}
+	if after.Upload != 128 || after.Download != 256 {
+		t.Fatalf("clear reset process traffic totals: %+v", after)
+	}
+
+	active.Finish("closed", nil)
+	final := r.Snapshot()
+	if len(final.Connections) != 1 || final.Connections[0].ID != active.connection.ID || final.Active != 0 || final.Total != 1 {
+		t.Fatalf("active connection did not enter fresh history after clear: %+v", final)
+	}
+}

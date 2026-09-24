@@ -27,7 +27,7 @@ type WebOptions struct {
 	Port   int
 }
 
-// WebServer owns the local management listener. Done is closed when the user
+// WebServer owns the browser management listener. Done is closed when the user
 // requests shutdown from the page.
 type WebServer struct {
 	server   *http.Server
@@ -50,9 +50,6 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 		return nil, fmt.Errorf("invalid web management port %d", opts.Port)
 	}
 	loopback := webLoopbackHost(host)
-	if !loopback {
-		return nil, errors.New("agent web management is local-only; web.listen must be a loopback address")
-	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(opts.Port)))
 	if err != nil {
 		return nil, fmt.Errorf("start web management listener: %w", err)
@@ -164,6 +161,10 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/select-exit", w.selectExit)
 	mux.HandleFunc("POST /api/autostart", w.setAutostart)
 	mux.HandleFunc("GET /api/connections", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetConnections()) })
+	mux.HandleFunc("DELETE /api/connections", func(rw http.ResponseWriter, _ *http.Request) {
+		w.bridge.ClearConnections()
+		writeWebJSON(rw, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("GET /api/config-path", func(rw http.ResponseWriter, _ *http.Request) {
 		writeWebJSON(rw, map[string]string{"path": w.bridge.ConfigPath()})
 	})
@@ -385,6 +386,7 @@ const webBridgeJS = `(function () {
   window.goSetAutostart = function (enabled) { return json('/api/autostart', 'POST', {enabled:enabled}); };
   window.goOpenConnections = async function () { window.open('/connections', '_blank', 'noopener'); return 'ok'; };
   window.goGetConnections = function () { return request('/api/connections'); };
+  window.goClearConnections = function () { return request('/api/connections', {method:'DELETE'}); };
   window.goOpenConfigDir = async function () { var out = JSON.parse(await request('/api/config-path')); alert('配置文件：' + out.path); };
   window.goQuit = function () { return json('/api/quit', 'POST', {}); };
 })();`

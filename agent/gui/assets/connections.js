@@ -5,7 +5,7 @@
   const entries = {transparent:'透明代理',socks5:'SOCKS5',http:'HTTP'};
   const actions = {PROXY:'代理',DIRECT:'直连',REJECT:'阻断'};
   const ruleNames = {default:'默认动作',global_proxy:'全局代理',direct:'全局直连',exclude:'排除进程','loop-guard':'回环保护'};
-  let snapshot = {connections:[]}, paused = false, page = 0, selected = null, sort = 'id', descending = true;
+  let snapshot = {connections:[]}, paused = false, page = 0, selected = null, sort = 'started_at', descending = true;
   const pageSize = 200;
   const text = value => String(value == null ? '' : value);
   const isActive = row => row.state === 'active' || row.state === 'connecting';
@@ -18,6 +18,18 @@
   function duration(seconds) {
     const n = Math.max(0,Math.floor(Number(seconds)||0));
     return n < 60 ? n+' 秒' : n < 3600 ? Math.floor(n/60)+' 分 '+n%60+' 秒' : Math.floor(n/3600)+' 时 '+Math.floor(n%3600/60)+' 分';
+  }
+  function startedAt(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString('zh-CN',{hour12:false});
+  }
+  function sortValue(row, key) {
+    if (key === 'host') return row.host || row.ip || '';
+    if (key === 'started_at') {
+      const value = Date.parse(row.started_at);
+      return Number.isNaN(value) ? 0 : value;
+    }
+    return row[key];
   }
   function cell(row, primary, secondary, className = '', title = '') {
     const td = document.createElement('td'); td.className = className;
@@ -46,12 +58,12 @@
     const query = $('search').value.trim().toLowerCase(), state = $('state-filter').value;
     const protocol = $('protocol-filter').value, action = $('action-filter').value;
     const rows = snapshot.connections.filter(row => {
-      if (state === 'active' && !isActive(row) || state === 'finished' && isActive(row) || state === 'failed' && row.state !== 'failed' && row.state !== 'rejected') return false;
+      if (state !== 'all' && row.state !== state) return false;
       if (protocol && row.protocol !== protocol || action && row.action !== action) return false;
       return !query || [row.process,row.process_name,row.pid,row.host,row.ip,row.port,row.rule,row.source].some(value => text(value).toLowerCase().includes(query));
     });
     rows.sort((a,b) => {
-      const x = sort === 'host' ? a.host || a.ip : a[sort], y = sort === 'host' ? b.host || b.ip : b[sort];
+      const x = sortValue(a,sort), y = sortValue(b,sort);
       const difference = typeof x === 'number' && typeof y === 'number' ? x-y : text(x).localeCompare(text(y));
       return difference ? (descending ? -difference : difference) : b.id-a.id;
     });
@@ -67,12 +79,13 @@
       cell(row,bytes(record.upload_rate,true),'','num'); cell(row,bytes(record.download_rate,true),'','num');
       cell(row,bytes(record.upload),'','num'); cell(row,bytes(record.download),'','num');
       const status = cell(row,''); status.firstChild.className = 'state '+record.state; status.firstChild.textContent = states[record.state] || record.state;
+      cell(row,startedAt(record.started_at));
       cell(row,duration(record.duration),'','num');
       const select = () => { selected = record.id; render(); };
       row.onclick = select; row.onkeydown = event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(); } };
       fragment.appendChild(row);
     });
-    if (!rows.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 11; td.className = 'empty'; td.textContent = query || protocol || action ? '没有符合筛选条件的连接' : state === 'active' ? '当前没有活跃连接。应用发起新连接后会显示在这里。' : '暂无连接记录'; row.appendChild(td); fragment.appendChild(row); }
+    if (!rows.length) { const row = document.createElement('tr'), td = document.createElement('td'); td.colSpan = 12; td.className = 'empty'; td.textContent = query || protocol || action || state !== 'all' ? '没有符合筛选条件的连接' : '暂无连接记录'; row.appendChild(td); fragment.appendChild(row); }
     body.replaceChildren(fragment);
     $('row-count').textContent = rows.length+' 条符合条件 · 本次共 '+(snapshot.total || 0)+' 条连接'+(snapshot.omitted ? ' · '+snapshot.omitted+' 条未保留明细（达到容量上限）' : '');
     $('page').textContent = (page+1)+' / '+pages; $('previous').disabled = page === 0; $('next').disabled = page+1 >= pages;
@@ -100,6 +113,27 @@
   }
   ['search','state-filter','protocol-filter','action-filter'].forEach(id => $(id).addEventListener(id === 'search' ? 'input' : 'change',() => { page = 0; render(); }));
   $('pause').onclick = () => { paused = !paused; $('pause').textContent = paused ? '继续刷新' : '暂停刷新'; $('pause').setAttribute('aria-pressed',String(paused)); $('live-label').textContent = paused ? '已暂停刷新' : '正在更新'; $('live-state').classList.toggle('muted',paused); };
+  $('clear').onclick = async () => {
+    const button = $('clear');
+    button.disabled = true;
+    try {
+      if (typeof window.goClearConnections !== 'function') throw new Error('当前界面不支持清空连接历史');
+      await window.goClearConnections();
+      selected = null; page = 0;
+      if (typeof window.goGetConnections === 'function') {
+        const raw = await window.goGetConnections();
+        if (raw) display(typeof raw === 'string' ? JSON.parse(raw) : raw);
+      } else {
+        snapshot.connections = snapshot.connections.filter(isActive);
+        render();
+      }
+      $('error').hidden = true;
+    } catch (error) {
+      $('error').hidden = false; $('error').textContent = '清空连接历史失败：'+error.message;
+    } finally {
+      button.disabled = false;
+    }
+  };
   $('previous').onclick = () => { page--; render(); }; $('next').onclick = () => { page++; render(); };
   document.querySelectorAll('[data-sort]').forEach(button => button.onclick = () => {
     if (sort === button.dataset.sort) descending = !descending; else { sort = button.dataset.sort; descending = true; }

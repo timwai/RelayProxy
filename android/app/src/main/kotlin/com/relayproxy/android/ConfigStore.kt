@@ -1,6 +1,8 @@
 package com.relayproxy.android
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import org.json.JSONObject
 
 data class ExitConfig(
@@ -28,8 +30,25 @@ data class ExitConfig(
         .toString()
 }
 
-class ConfigStore(context: Context) {
+class ConfigStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("relayproxy_android", Context.MODE_PRIVATE)
+
+    fun defaultDeviceName(): String {
+        val systemName = runCatching {
+            Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
+        }.getOrNull()?.trim().orEmpty()
+        if (systemName.isNotBlank()) return systemName
+
+        val manufacturer = Build.MANUFACTURER?.trim().orEmpty()
+        val model = Build.MODEL?.trim().orEmpty()
+        if (model.isBlank()) return "Android"
+        if (manufacturer.isBlank() || model.startsWith(manufacturer, ignoreCase = true)) {
+            return model
+        }
+        return manufacturer.replaceFirstChar {
+            if (it.isLowerCase()) it.titlecase() else it.toString()
+        } + " " + model
+    }
 
     fun load(): ExitConfig {
         val savedNetworkMode = prefs.getString("networkMode", null)
@@ -41,9 +60,18 @@ class ConfigStore(context: Context) {
             NetworkBinder.MODE_AUTO
         }
 
+        val savedDeviceName = prefs.getString("deviceName", null)?.trim().orEmpty()
+        val resolvedDeviceName = if (
+            savedDeviceName.isBlank() || savedDeviceName == "RelayProxy Android"
+        ) {
+            defaultDeviceName()
+        } else {
+            savedDeviceName
+        }
+
         return ExitConfig(
             serverAddress = prefs.getString("serverAddress", "") ?: "",
-            deviceName = prefs.getString("deviceName", "RelayProxy Android") ?: "RelayProxy Android",
+            deviceName = resolvedDeviceName,
             quicPort = prefs.getInt("quicPort", 443),
             tcpPort = prefs.getInt("tcpPort", 443),
             transportMode = prefs.getString("transportMode", "auto") ?: "auto",

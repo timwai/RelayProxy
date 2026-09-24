@@ -77,7 +77,7 @@ class SettingsActivity : Activity() {
         addSectionHeader(connection, "连接设置", "配置 Relay Server 和传输参数。")
         server = styledField("relay.example.com")
         connection.addView(labeled("Relay Server", server), topMargin(16))
-        deviceName = styledField("RelayProxy Android")
+        deviceName = styledField(ConfigStore(this).defaultDeviceName())
         connection.addView(labeled("设备名称", deviceName), topMargin(12))
 
         transport = Spinner(this).apply {
@@ -158,7 +158,9 @@ class SettingsActivity : Activity() {
     private fun saveAndClose() {
         val config = ExitConfig(
             serverAddress = server.text.toString().trim(),
-            deviceName = deviceName.text.toString().trim().ifBlank { "RelayProxy Android" },
+            deviceName = deviceName.text.toString().trim().ifBlank {
+                ConfigStore(this).defaultDeviceName()
+            },
             quicPort = quicPort.text.toString().toIntOrNull() ?: 443,
             tcpPort = tcpPort.text.toString().toIntOrNull() ?: 443,
             transportMode = transportValues.getOrElse(transport.selectedItemPosition) { "auto" },

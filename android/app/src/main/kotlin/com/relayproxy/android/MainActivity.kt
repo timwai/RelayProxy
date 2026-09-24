@@ -2,6 +2,8 @@ package com.relayproxy.android
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
@@ -22,6 +24,8 @@ import android.widget.TextView
 import org.json.JSONObject
 
 class MainActivity : Activity() {
+    private lateinit var statusCard: LinearLayout
+    private lateinit var infoCard: LinearLayout
     private lateinit var statusBadge: TextView
     private lateinit var statusSummary: TextView
     private lateinit var statusTransport: TextView
@@ -36,6 +40,7 @@ class MainActivity : Activity() {
     private lateinit var infoExitPermission: TextView
     private lateinit var infoUptime: TextView
     private lateinit var infoDeviceId: TextView
+    private var currentDeviceId: String = ""
     private lateinit var toggleButton: Button
 
     private val bg = Color.rgb(246, 248, 252)
@@ -137,6 +142,7 @@ class MainActivity : Activity() {
             setPadding(dp(18), dp(18), dp(18), dp(18))
             background = rounded(ink, 18)
         }
+        statusCard = card
 
         val top = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -213,6 +219,7 @@ class MainActivity : Activity() {
             background = rounded(surface, 18, line)
             elevation = dp(1).toFloat()
         }
+        infoCard = card
 
         card.addView(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -242,9 +249,7 @@ class MainActivity : Activity() {
         infoApproval = infoRow(card, "设备审批")
         infoExitPermission = infoRow(card, "出口权限")
         infoUptime = infoRow(card, "运行时长")
-        infoDeviceId = infoRow(card, "设备 ID").apply {
-            setTextIsSelectable(true)
-        }
+        infoDeviceId = deviceIdRow(card)
 
         return card
     }
@@ -273,6 +278,65 @@ class MainActivity : Activity() {
         row.addView(value, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.58f))
         parent.addView(row)
         return value
+    }
+
+    private fun deviceIdRow(parent: LinearLayout): TextView {
+        val block = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(14), 0, 0)
+        }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(TextView(this).apply {
+            text = "设备 ID"
+            textSize = 12.5f
+            setTextColor(muted)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(TextView(this).apply {
+            text = "复制"
+            textSize = 12f
+            setTextColor(brand)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(10), dp(4), 0, dp(4))
+            setOnClickListener { copyDeviceId() }
+        })
+        block.addView(header)
+
+        val value = TextView(this).apply {
+            text = "—"
+            textSize = 12.5f
+            setTextColor(ink)
+            typeface = Typeface.MONOSPACE
+            setTextIsSelectable(true)
+            setHorizontallyScrolling(false)
+            maxLines = 6
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setPadding(dp(10), dp(9), dp(10), dp(9))
+            background = rounded(Color.argb(80, 255, 255, 255), 10, Color.argb(90, 148, 163, 184))
+        }
+        block.addView(
+            value,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(6) }
+        )
+
+        parent.addView(block)
+        return value
+    }
+
+    private fun copyDeviceId() {
+        if (currentDeviceId.isBlank()) {
+            android.widget.Toast.makeText(this, "暂无设备 ID", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("RelayProxy Device ID", currentDeviceId))
+        android.widget.Toast.makeText(this, "设备 ID 已复制", android.widget.Toast.LENGTH_SHORT).show()
     }
 
     private fun buildActionRow(): View {
@@ -331,6 +395,7 @@ class MainActivity : Activity() {
         val latency = obj.optLong("latencyMs", 0)
         val approved = obj.optBoolean("exitApproved", false)
         val deviceId = obj.optString("deviceId", "")
+        currentDeviceId = deviceId
         val uptimeMs = obj.optLong("serviceUptimeMs", 0)
         val error = obj.optString("lastError", "")
 
@@ -378,7 +443,8 @@ class MainActivity : Activity() {
         infoApproval.text = approvalLabel(approval)
         infoExitPermission.text = if (approved) "已授权" else "未授权"
         infoUptime.text = formatDuration(uptimeMs)
-        infoDeviceId.text = deviceId.ifBlank { "—" }
+        infoDeviceId.text = formatDeviceId(deviceId)
+        applyStateTheme(state, approved, approval)
 
         val desiredRunning = store.isDesiredRunning()
         if (desiredRunning) {
@@ -399,6 +465,49 @@ class MainActivity : Activity() {
             state == "STOPPED" -> "点击启动后可退出 App，服务继续后台运行"
             else -> "审批：$approval"
         }
+    }
+
+    private fun applyStateTheme(state: String, approved: Boolean, approval: String) {
+        val palette = when {
+            state == "CONNECTED" && approved -> intArrayOf(
+                Color.rgb(21, 128, 61),
+                Color.rgb(240, 253, 244),
+                Color.rgb(187, 247, 208),
+            )
+            state == "CONNECTED" && approval != "approved" -> intArrayOf(
+                Color.rgb(180, 83, 9),
+                Color.rgb(255, 251, 235),
+                Color.rgb(253, 230, 138),
+            )
+            state == "CONNECTING" -> intArrayOf(
+                Color.rgb(29, 78, 216),
+                Color.rgb(239, 246, 255),
+                Color.rgb(191, 219, 254),
+            )
+            state == "WAITING_NETWORK" -> intArrayOf(
+                Color.rgb(180, 83, 9),
+                Color.rgb(255, 251, 235),
+                Color.rgb(253, 230, 138),
+            )
+            state == "ERROR" -> intArrayOf(
+                Color.rgb(185, 28, 28),
+                Color.rgb(254, 242, 242),
+                Color.rgb(254, 202, 202),
+            )
+            else -> intArrayOf(
+                Color.rgb(51, 65, 85),
+                Color.rgb(248, 250, 252),
+                Color.rgb(203, 213, 225),
+            )
+        }
+
+        statusCard.background = rounded(palette[0], 18)
+        infoCard.background = rounded(palette[1], 18, palette[2])
+    }
+
+    private fun formatDeviceId(value: String): String {
+        if (value.isBlank()) return "—"
+        return value.chunked(16).joinToString("\n")
     }
 
     private fun networkModeLabel(mode: String): String = when (mode) {

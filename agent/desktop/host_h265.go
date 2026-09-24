@@ -18,9 +18,9 @@ func h265ValidationRequested(value string) bool {
 	return strings.EqualFold(strings.TrimSpace(value), protocol.DesktopCodecH265Validation)
 }
 
-// h265RuntimeError mirrors the H.264 generation error boundary while H.265
-// remains an internal-only Host path. It lets callers preserve the last
-// advertised generation if an HEVC session fails after CONFIG was sent.
+// h265RuntimeError mirrors the H.264 generation error boundary. It lets
+// public and diagnostics HEVC sessions preserve the last advertised generation
+// if a runtime failure occurs after CONFIG was sent.
 type h265RuntimeError struct {
 	Generation uint32
 	Err        error

@@ -39,7 +39,6 @@ func TestI444ToAYUVHonorsPlaneStride(t *testing.T) {
 	}
 }
 
-
 func TestAYUVToI444RoundTrip(t *testing.T) {
 	src := []byte{
 		10, 20, 11, 21,

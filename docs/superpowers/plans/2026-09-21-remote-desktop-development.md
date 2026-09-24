@@ -663,6 +663,22 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #884 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #574 的 frontend / UI full regression、Windows desktop package、macOS desktop package 均已通过。
 - 下一步：Windows 双机实测显示器热插拔与跨 DPI/负坐标布局；随后进入“同一远端同时打开多个显示器”的独立多窗口 / 多媒体流设计，而不是继续把单流切屏模型无限扩展。
 
+### 0.2.54 RD3 Independent Multi-Stream / Multi-Window Foundation（已进入 main）
+
+- Windows System Host 不再把整个 Relay Desktop 媒体生命周期锁成单实例：新增 `HostSessionFactory`，每条媒体关联独立创建 `windowsCapture + windowsInputSink`，因此 DXGI / WGC stream、显示器几何、输入坐标和 cursor 状态不会在多个窗口间共享可变状态；旧自定义 Host 未配置 factory 时继续保持原串行语义。
+- `DesktopCapabilities` 新增 `MultiStream`；只有具备真正 per-session isolation 的 Host 才上报，避免“协议允许多流但底层 capture 仍共享”的假能力。Server 的在线 capability snapshot 使用整结构复制并深拷贝切片，`MultiStream` 会从 Host 登录快照完整透传到 Controller。
+- `RemoteDesktopSessionInfo / RemoteDesktopStatus` 新增本地逻辑 `SessionID`；Agent 从单一 `desktopConnection` 演进为 primary + `desktopConnections[sessionID]` registry，连接、状态、Frame、Cursor、Input、Viewport ABR、IDR、Stats 与 Audio 均提供 session-scoped API。
+- 旧 API 保持兼容：`ConnectRemoteDesktop / GetRemoteDesktopStatus` 继续指向 primary；primary 结束时可提升剩余活动 session，Tunnel replacement、global disconnect、Agent shutdown 会去重并关闭全部媒体 session。
+- Native Viewer 从单窗口指针扩展为 `desktopViewers[sessionID]`；每个 Win32/D3D11 Viewer 独立读取自己的媒体 generation、decoder、cursor、input 和 viewport resolution，不再间接读取 primary 会话。
+- GUI 的运行中显示器控件新增“独立窗口”。它复制 primary 的 codec / scene / quality / FPS / resolution / capture backend，仅替换具体 `DisplayID`；secondary 默认关闭 Audio、Clipboard、AutoLaunch，避免多个窗口重复采集系统音频或互相竞争剪贴板。
+- secondary Viewer 关闭时自动释放对应媒体 session；primary Viewer 仍保持原语义——关闭窗口不会主动断开 primary Remote Desktop。
+- 当前 P2P rendezvous 仍按 `ControllerID` 关联 target-side desktop media，无法区分同一 Controller 的两条并发媒体流。为保证正确性，只要活动 desktop stream > 1，就主动关闭 primary desktop P2P、停止 P2P retry，并让所有并发窗口使用 Relay QUIC Datagram；不会冒险把 direct socket 绑到错误窗口。
+- 单流模式仍保留原 P2P 行为；从多流降回单流后，本阶段不自动复用旧 direct association，重新连接 primary 即可恢复 P2P。下一阶段会把逻辑 Desktop SessionID 带进 P2P rendezvous 后再消除这一限制。
+- 新增 SessionID/registry 去重与 primary promotion、P2P eligibility、Host isolation / MultiStream capability、Server capability passthrough、Wails/GUI multi-window 静态回归。
+- 代表提交：`9263a8a`、`74235bf`、`09f274b`、`7c351ff`、`b0a67c6`、`fe1642d`、`4616c52`、`29bbea6`、`9bf945d`、`549d327`、`a3c5aff`、`32e886b`、`74616f0`、`dc70595`、`f7eb952`、`d67dce6`，格式/测试收尾至 `e757b57`。
+- 验证：Go CI #919 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #609 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：给 P2P rendezvous / `RDPControlMessage` / target media association 增加逻辑 Desktop SessionID，以 `(ControllerID, SessionID)` 唯一标识并发 direct media；随后让每个 Viewer independently upgrade/fallback Relay ↔ P2P。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
@@ -793,7 +809,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 公共协商 + Opus + 运行时多显示器/热插拔已完成，4:4:4 / 独立多流待开发
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 热插拔 + 独立 Relay 多流/多窗口已完成，P2P 多流 / 4:4:4 待开发
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

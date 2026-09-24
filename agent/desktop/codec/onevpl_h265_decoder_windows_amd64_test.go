@@ -70,7 +70,6 @@ func TestOneVPLHEVC444DecoderRejects420Config(t *testing.T) {
 	}
 }
 
-
 func TestOneVPLHEVC444DecoderVideoMemoryParam(t *testing.T) {
 	cfg := DefaultVideoConfig()
 	cfg.Width = 1920

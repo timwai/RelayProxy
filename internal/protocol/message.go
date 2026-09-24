@@ -90,11 +90,12 @@ const DesktopMediaModeDatagram = "desktop_datagram_v1"
 // association. The reliable stream remains open as the association lifetime
 // signal; encoded media itself flows only over native QUIC datagrams.
 type OpenDesktopMediaRequest struct {
-	RequestID     string                       `json:"requestId"`
-	TimeoutMs     int                          `json:"timeout"`
-	Mode          string                       `json:"mode"`
-	AssociationID uint64                       `json:"associationId"`
-	Options       *RemoteDesktopConnectOptions `json:"options,omitempty"`
+	RequestID        string                       `json:"requestId"`
+	TimeoutMs        int                          `json:"timeout"`
+	Mode             string                       `json:"mode"`
+	AssociationID    uint64                       `json:"associationId"`
+	DesktopSessionID string                       `json:"desktopSessionId,omitempty"`
+	Options          *RemoteDesktopConnectOptions `json:"options,omitempty"`
 }
 
 type OpenDesktopMediaResponse struct {
@@ -145,6 +146,7 @@ type RDPControlMessage struct {
 	Type              string         `json:"type"`
 	Purpose           string         `json:"purpose,omitempty"`
 	SessionID         uint64         `json:"sessionId,omitempty"`
+	DesktopSessionID  string         `json:"desktopSessionId,omitempty"`
 	ControllerID      string         `json:"controllerId,omitempty"`
 	TargetID          string         `json:"targetId,omitempty"`
 	SessionToken      []byte         `json:"sessionToken,omitempty"`

@@ -43,6 +43,7 @@ type Registration struct {
 type Lease struct {
 	ID                   uint64
 	Purpose              string
+	DesktopSessionID     string
 	ControllerID         string
 	TargetID             string
 	Token                []byte
@@ -119,7 +120,7 @@ func (c *Coordinator) Close() {
 		cancel()
 	}
 	for _, lease := range leases {
-		c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, ErrorCode: "SERVER_SHUTDOWN"})
+		c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, DesktopSessionID: lease.DesktopSessionID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, ErrorCode: "SERVER_SHUTDOWN"})
 	}
 }
 
@@ -147,7 +148,7 @@ func (c *Coordinator) sweep(ctx context.Context) {
 			}
 			c.mu.Unlock()
 			for _, lease := range expired {
-				c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, ErrorCode: "LEASE_EXPIRED"})
+				c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, DesktopSessionID: lease.DesktopSessionID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, ErrorCode: "LEASE_EXPIRED"})
 			}
 		}
 	}
@@ -278,7 +279,7 @@ func (c *Coordinator) connect(controllerID string, message protocol.RDPControlMe
 		return rdpError("INTERNAL", "failed to allocate P2P session token")
 	}
 	lease := &Lease{
-		ID: id, Purpose: purpose, ControllerID: controllerID, TargetID: message.TargetID, Token: token,
+		ID: id, Purpose: purpose, DesktopSessionID: message.DesktopSessionID, ControllerID: controllerID, TargetID: message.TargetID, Token: token,
 		ControllerCandidates: controllerCandidates, TargetCandidates: targetCandidates, ExpiresAt: time.Now().Add(c.lease),
 	}
 	c.mu.Lock()
@@ -298,7 +299,7 @@ func (c *Coordinator) connect(controllerID string, message protocol.RDPControlMe
 	c.mu.Unlock()
 
 	notify := protocol.RDPControlMessage{
-		Type: protocol.RDPControlConnectNotify, Purpose: purpose, SessionID: id,
+		Type: protocol.RDPControlConnectNotify, Purpose: purpose, SessionID: id, DesktopSessionID: message.DesktopSessionID,
 		ControllerID: controllerID, TargetID: message.TargetID, SessionToken: append([]byte(nil), token...),
 		Candidates:     append([]protocol.RDPCandidate(nil), controllerCandidates...),
 		LeaseExpiresAt: lease.ExpiresAt.UnixMilli(), RDPOnline: purpose == protocol.P2PPurposeRDP,
@@ -310,7 +311,7 @@ func (c *Coordinator) connect(controllerID string, message protocol.RDPControlMe
 		return rdpError("TARGET_NOTIFY_FAILED", "failed to notify P2P target")
 	}
 	return protocol.RDPControlMessage{
-		Type: protocol.RDPControlConnectResponse, Purpose: purpose, SessionID: id,
+		Type: protocol.RDPControlConnectResponse, Purpose: purpose, SessionID: id, DesktopSessionID: message.DesktopSessionID,
 		ControllerID: controllerID, TargetID: message.TargetID, SessionToken: append([]byte(nil), token...),
 		Candidates:     append([]protocol.RDPCandidate(nil), targetCandidates...),
 		LeaseExpiresAt: lease.ExpiresAt.UnixMilli(), RDPOnline: purpose == protocol.P2PPurposeRDP,
@@ -373,7 +374,7 @@ func (c *Coordinator) candidateUpdate(deviceID string, message protocol.RDPContr
 	if deviceID == lease.TargetID {
 		otherID = lease.ControllerID
 	}
-	forward := protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: lease.Purpose, SessionID: lease.ID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, SessionToken: append([]byte(nil), lease.Token...), Candidates: append([]protocol.RDPCandidate(nil), validated...), LeaseExpiresAt: lease.ExpiresAt.UnixMilli()}
+	forward := protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: lease.Purpose, SessionID: lease.ID, DesktopSessionID: lease.DesktopSessionID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, SessionToken: append([]byte(nil), lease.Token...), Candidates: append([]protocol.RDPCandidate(nil), validated...), LeaseExpiresAt: lease.ExpiresAt.UnixMilli()}
 	other, otherOK := c.sessions.Get(otherID)
 	c.mu.Unlock()
 	if !otherOK || other == nil {
@@ -382,7 +383,7 @@ func (c *Coordinator) candidateUpdate(deviceID string, message protocol.RDPContr
 	if err := c.notify(other, forward); err != nil {
 		return rdpError("PEER_NOTIFY_FAILED", "failed to forward RDP candidates")
 	}
-	return protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: lease.Purpose, SessionID: message.SessionID, LeaseExpiresAt: forward.LeaseExpiresAt}
+	return protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: lease.Purpose, SessionID: message.SessionID, DesktopSessionID: lease.DesktopSessionID, LeaseExpiresAt: forward.LeaseExpiresAt}
 }
 
 func (c *Coordinator) renew(deviceID string, message protocol.RDPControlMessage) protocol.RDPControlMessage {
@@ -424,7 +425,7 @@ func (c *Coordinator) renew(deviceID string, message protocol.RDPControlMessage)
 	if !ok {
 		return rdpError("SESSION_NOT_FOUND", "RDP session is no longer active")
 	}
-	return protocol.RDPControlMessage{Type: protocol.RDPControlLeaseAck, Purpose: lease.Purpose, SessionID: lease.ID, LeaseExpiresAt: expires}
+	return protocol.RDPControlMessage{Type: protocol.RDPControlLeaseAck, Purpose: lease.Purpose, SessionID: lease.ID, DesktopSessionID: lease.DesktopSessionID, LeaseExpiresAt: expires}
 }
 
 func (c *Coordinator) validLeasePeer(deviceID string, id uint64, token []byte) bool {
@@ -485,7 +486,7 @@ func (c *Coordinator) closeLease(deviceID string, id uint64, reason string) {
 	if lease == nil {
 		return
 	}
-	c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, SessionToken: append([]byte(nil), lease.Token...), ErrorCode: reason})
+	c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, DesktopSessionID: lease.DesktopSessionID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, SessionToken: append([]byte(nil), lease.Token...), ErrorCode: reason})
 }
 
 // CloseDevice invalidates every in-memory lease involving a revoked or
@@ -505,7 +506,7 @@ func (c *Coordinator) CloseDevice(deviceID string) {
 	delete(c.connectWindows, deviceID)
 	c.mu.Unlock()
 	for _, lease := range leases {
-		c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, SessionToken: append([]byte(nil), lease.Token...), ErrorCode: "DEVICE_REVOKED_OR_OFFLINE"})
+		c.notifyLease(lease, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: lease.Purpose, SessionID: lease.ID, DesktopSessionID: lease.DesktopSessionID, ControllerID: lease.ControllerID, TargetID: lease.TargetID, SessionToken: append([]byte(nil), lease.Token...), ErrorCode: "DEVICE_REVOKED_OR_OFFLINE"})
 	}
 }
 

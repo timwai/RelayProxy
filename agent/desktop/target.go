@@ -23,6 +23,24 @@ func (f HostHandlerFunc) HandleDesktopMedia(ctx context.Context, conn *desktopme
 	return f(ctx, conn, options)
 }
 
+// HostSessionHandler is an optional extension used by multi-stream Relay
+// Desktop hosts. Legacy HostHandler implementations continue to work and see
+// an empty logical session ID.
+type HostSessionHandler interface {
+	HostHandler
+	HandleDesktopMediaSession(context.Context, *desktopmedia.MediaConn, protocol.RemoteDesktopConnectOptions, string) error
+}
+
+type HostSessionHandlerFunc func(context.Context, *desktopmedia.MediaConn, protocol.RemoteDesktopConnectOptions, string) error
+
+func (f HostSessionHandlerFunc) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions) error {
+	return f(ctx, conn, options, "")
+}
+
+func (f HostSessionHandlerFunc) HandleDesktopMediaSession(ctx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions, desktopSessionID string) error {
+	return f(ctx, conn, options, desktopSessionID)
+}
+
 // HandleTargetMediaStreamWithHeader negotiates the target half of a Relay
 // Desktop native-datagram path. It never reports success without a registered
 // Host backend.
@@ -63,6 +81,9 @@ func HandleTargetMediaStreamWithHeader(ctx context.Context, stream tunnel.Tunnel
 	var options protocol.RemoteDesktopConnectOptions
 	if req.Options != nil {
 		options = *req.Options
+	}
+	if sessionHandler, ok := handler.(HostSessionHandler); ok {
+		return sessionHandler.HandleDesktopMediaSession(ctx, conn, options, req.DesktopSessionID)
 	}
 	return handler.HandleDesktopMedia(ctx, conn, options)
 }

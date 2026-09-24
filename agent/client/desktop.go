@@ -20,6 +20,14 @@ func (d *TunnelDialer) DialDesktopMedia(ctx context.Context, targetDeviceID stri
 // DialDesktopMediaWithOptions carries controller media preferences to the
 // authorized Host as part of the existing Relay Desktop media handshake.
 func (d *TunnelDialer) DialDesktopMediaWithOptions(ctx context.Context, targetDeviceID string, options protocol.RemoteDesktopConnectOptions) (*desktopmedia.MediaConn, error) {
+	return d.DialDesktopMediaForSessionWithOptions(ctx, targetDeviceID, "", options)
+}
+
+// DialDesktopMediaForSessionWithOptions is the session-scoped Relay Desktop
+// handshake used by independent multi-window sessions. The logical desktop
+// session ID is forwarded unchanged to the target so its Relay and P2P media
+// paths can be associated without relying on ControllerID alone.
+func (d *TunnelDialer) DialDesktopMediaForSessionWithOptions(ctx context.Context, targetDeviceID, desktopSessionID string, options protocol.RemoteDesktopConnectOptions) (*desktopmedia.MediaConn, error) {
 	sess := d.getTunnel()
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
@@ -62,7 +70,7 @@ func (d *TunnelDialer) DialDesktopMediaWithOptions(ctx context.Context, targetDe
 	}
 	if err := protocol.WriteJSON(stream, protocol.OpenDesktopMediaRequest{
 		RequestID: reqID, TimeoutMs: 10000, Mode: protocol.DesktopMediaModeDatagram, AssociationID: datagrams.ID,
-		Options: &options,
+		DesktopSessionID: desktopSessionID, Options: &options,
 	}); err != nil {
 		_ = stream.Close()
 		return nil, err

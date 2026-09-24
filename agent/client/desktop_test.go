@@ -39,7 +39,7 @@ func TestDialDesktopMediaNegotiatesNativeDatagrams(t *testing.T) {
 			served <- err
 			return
 		}
-		if req.Mode != protocol.DesktopMediaModeDatagram || req.AssociationID == 0 {
+		if req.Mode != protocol.DesktopMediaModeDatagram || req.AssociationID == 0 || req.DesktopSessionID != "desktop-window-1" {
 			served <- protocol.NewRelayError(protocol.ErrCodeInvalidRequest, "invalid desktop media request")
 			return
 		}
@@ -65,7 +65,7 @@ func TestDialDesktopMediaNegotiatesNativeDatagrams(t *testing.T) {
 	}()
 
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return clientSession }, func() string { return "controller" })
-	conn, err := dialer.DialDesktopMediaWithOptions(ctx, "desktop-target", protocol.RemoteDesktopConnectOptions{
+	conn, err := dialer.DialDesktopMediaForSessionWithOptions(ctx, "desktop-target", "desktop-window-1", protocol.RemoteDesktopConnectOptions{
 		Quality:    protocol.DesktopQualityHigh,
 		FPS:        24,
 		MaxBitrate: 8_000_000,

@@ -207,6 +207,18 @@ type AgentStatus struct {
 // agent. In particular, a role change must never reuse the previous exit handler.
 var ErrRestartRequired = errors.New("agent role change requires restart")
 
+type desktopTargetSessionKey struct {
+	controllerID string
+	sessionID    string
+}
+
+func makeDesktopTargetSessionKey(controllerID, sessionID string) desktopTargetSessionKey {
+	return desktopTargetSessionKey{
+		controllerID: strings.TrimSpace(controllerID),
+		sessionID:    strings.TrimSpace(sessionID),
+	}
+}
+
 type Agent struct {
 	cfg                     AgentConfig
 	tunnelMgr               *tunnel.TunnelManager
@@ -236,10 +248,10 @@ type Agent struct {
 	desktopConnection       *desktop.ControllerSession
 	desktopPrimarySessionID string
 	desktopConnections      map[string]*desktop.ControllerSession
-	desktopP2PSession       *rdpp2p.Session
+	desktopP2PSessions      map[string]*rdpp2p.Session
 	lastDesktopDiagnostics  desktop.DesktopDiagnosticsReport
-	desktopTargetMedia      map[string]*desktopmedia.MediaConn
-	desktopTargetPaths      map[string]*rdpp2p.ApplicationPath
+	desktopTargetMedia      map[desktopTargetSessionKey]*desktopmedia.MediaConn
+	desktopTargetPaths      map[desktopTargetSessionKey]*rdpp2p.ApplicationPath
 	closed                  atomic.Bool
 	ctx                     context.Context
 	cancel                  context.CancelFunc
@@ -249,6 +261,26 @@ type Agent struct {
 	lifecycleMu             sync.Mutex
 	closeOnce               sync.Once
 	closeErr                error
+}
+
+func (a *Agent) takeDesktopP2PSessionsLocked() []*rdpp2p.Session {
+	if a == nil {
+		return nil
+	}
+	seen := make(map[*rdpp2p.Session]struct{})
+	out := make([]*rdpp2p.Session, 0, len(a.desktopP2PSessions))
+	for _, direct := range a.desktopP2PSessions {
+		if direct == nil {
+			continue
+		}
+		if _, ok := seen[direct]; ok {
+			continue
+		}
+		seen[direct] = struct{}{}
+		out = append(out, direct)
+	}
+	a.desktopP2PSessions = make(map[string]*rdpp2p.Session)
+	return out
 }
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
@@ -328,8 +360,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a := &Agent{
 		cfg: cfg, ctx: ctx, cancel: cancel, routingEngine: engine, traffic: traffic.NewRegistry(0, 0),
 		desktopConnections: make(map[string]*desktop.ControllerSession),
-		desktopTargetMedia: make(map[string]*desktopmedia.MediaConn),
-		desktopTargetPaths: make(map[string]*rdpp2p.ApplicationPath),
+		desktopP2PSessions: make(map[string]*rdpp2p.Session),
+		desktopTargetMedia: make(map[desktopTargetSessionKey]*desktopmedia.MediaConn),
+		desktopTargetPaths: make(map[desktopTargetSessionKey]*rdpp2p.ApplicationPath),
 	}
 	a.rawDialer = client.NewTunnelDialer(func() tunnel.TunnelSession {
 		a.mu.RLock()
@@ -404,14 +437,13 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	oldRDP := a.rdpConnection
 	oldP2P := a.rdpP2P
 	oldDesktops := a.takeDesktopSessionsLocked()
-	oldDesktopP2P := a.desktopP2PSession
+	oldDesktopP2P := a.takeDesktopP2PSessionsLocked()
 	a.ctrlStream = nil
 	a.rdpConnection = nil
 	a.rdpP2P = nil
 	a.rdpSession = nil
-	a.desktopP2PSession = nil
-	a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
-	a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
+	a.desktopTargetMedia = make(map[desktopTargetSessionKey]*desktopmedia.MediaConn)
+	a.desktopTargetPaths = make(map[desktopTargetSessionKey]*rdpp2p.ApplicationPath)
 	a.rdpTargets = nil
 	a.remoteDesktopTargets = nil
 	if newState != tunnel.StateConnected || sess == nil {
@@ -430,8 +462,10 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 				_ = oldDesktop.Close()
 			}
 		}
-		if oldDesktopP2P != nil {
-			_ = oldDesktopP2P.Close()
+		for _, direct := range oldDesktopP2P {
+			if direct != nil {
+				_ = direct.Close()
+			}
 		}
 		return
 	}
@@ -452,8 +486,10 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 			_ = oldDesktop.Close()
 		}
 	}
-	if oldDesktopP2P != nil {
-		_ = oldDesktopP2P.Close()
+	for _, direct := range oldDesktopP2P {
+		if direct != nil {
+			_ = direct.Close()
+		}
 	}
 	go func() {
 		defer a.wg.Done()
@@ -738,53 +774,54 @@ func (a *Agent) handleDesktopApplicationPath(session *rdpp2p.Session, path *rdpp
 		}
 		return
 	}
-	controllerID := session.ControllerID
+	key := makeDesktopTargetSessionKey(session.ControllerID, session.DesktopSessionID)
 	a.mu.Lock()
 	if a.desktopTargetMedia == nil {
-		a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
+		a.desktopTargetMedia = make(map[desktopTargetSessionKey]*desktopmedia.MediaConn)
 	}
 	if a.desktopTargetPaths == nil {
-		a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
+		a.desktopTargetPaths = make(map[desktopTargetSessionKey]*rdpp2p.ApplicationPath)
 	}
-	conn := a.desktopTargetMedia[controllerID]
+	conn := a.desktopTargetMedia[key]
 	if conn == nil {
-		old := a.desktopTargetPaths[controllerID]
-		a.desktopTargetPaths[controllerID] = path
+		old := a.desktopTargetPaths[key]
+		a.desktopTargetPaths[key] = path
 		a.mu.Unlock()
 		if old != nil && old != path {
 			_ = old.Close()
 		}
 		return
 	}
-	delete(a.desktopTargetPaths, controllerID)
+	delete(a.desktopTargetPaths, key)
 	a.mu.Unlock()
 	conn.SetDatagramPath(path)
-	log.Printf("[Desktop] target media path switched controller=%s path=%s", controllerID, path.Name())
+	log.Printf("[Desktop] target media path switched controller=%s session=%s path=%s", key.controllerID, key.sessionID, path.Name())
 }
 
-func (a *Agent) bindDesktopTargetMedia(controllerID string, conn *desktopmedia.MediaConn) func() {
+func (a *Agent) bindDesktopTargetMedia(controllerID, desktopSessionID string, conn *desktopmedia.MediaConn) func() {
 	if controllerID == "" || conn == nil {
 		return func() {}
 	}
+	key := makeDesktopTargetSessionKey(controllerID, desktopSessionID)
 	a.mu.Lock()
 	if a.desktopTargetMedia == nil {
-		a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
+		a.desktopTargetMedia = make(map[desktopTargetSessionKey]*desktopmedia.MediaConn)
 	}
 	if a.desktopTargetPaths == nil {
-		a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
+		a.desktopTargetPaths = make(map[desktopTargetSessionKey]*rdpp2p.ApplicationPath)
 	}
-	a.desktopTargetMedia[controllerID] = conn
-	path := a.desktopTargetPaths[controllerID]
-	delete(a.desktopTargetPaths, controllerID)
+	a.desktopTargetMedia[key] = conn
+	path := a.desktopTargetPaths[key]
+	delete(a.desktopTargetPaths, key)
 	a.mu.Unlock()
 	if path != nil {
 		conn.SetDatagramPath(path)
-		log.Printf("[Desktop] target media path attached controller=%s path=%s", controllerID, path.Name())
+		log.Printf("[Desktop] target media path attached controller=%s session=%s path=%s", key.controllerID, key.sessionID, path.Name())
 	}
 	return func() {
 		a.mu.Lock()
-		if a.desktopTargetMedia[controllerID] == conn {
-			delete(a.desktopTargetMedia, controllerID)
+		if a.desktopTargetMedia[key] == conn {
+			delete(a.desktopTargetMedia, key)
 		}
 		a.mu.Unlock()
 	}
@@ -822,9 +859,12 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			controllerID := header.ClientDeviceID
 			if desktopHost != nil {
 				baseHost := desktopHost
-				desktopHost = desktop.HostHandlerFunc(func(hostCtx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions) error {
-					unbind := a.bindDesktopTargetMedia(controllerID, conn)
+				desktopHost = desktop.HostSessionHandlerFunc(func(hostCtx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions, desktopSessionID string) error {
+					unbind := a.bindDesktopTargetMedia(controllerID, desktopSessionID, conn)
 					defer unbind()
+					if sessionHost, ok := baseHost.(desktop.HostSessionHandler); ok {
+						return sessionHost.HandleDesktopMediaSession(hostCtx, conn, options, desktopSessionID)
+					}
 					return baseHost.HandleDesktopMedia(hostCtx, conn, options)
 				})
 			}
@@ -1071,8 +1111,9 @@ func (a *Agent) remoteDesktopTarget(targetID string) (protocol.RemoteDesktopTarg
 	return protocol.RemoteDesktopTarget{}, false
 }
 
-func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSession, targetID string, manager *rdpp2p.Manager) {
-	if controller == nil || manager == nil || targetID == "" {
+func (a *Agent) startRelayDesktopDirectPath(sessionID string, controller *desktop.ControllerSession, targetID string, manager *rdpp2p.Manager) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" || controller == nil || manager == nil || targetID == "" {
 		return
 	}
 	policy := desktop.DefaultPathRetryPolicy()
@@ -1102,13 +1143,12 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 				return
 			default:
 			}
-			if !a.desktopP2PEligible(controller) {
-				log.Printf("[Desktop] P2P media disabled for target=%s while multiple desktop streams are active", targetID)
+			if !a.desktopP2PEligible(sessionID, controller) {
 				return
 			}
 
 			attemptCtx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
-			direct, err := manager.StartControllerForPurpose(attemptCtx, targetID, protocol.P2PPurposeDesktopMedia)
+			direct, err := manager.StartControllerForPurposeWithSessionID(attemptCtx, targetID, protocol.P2PPurposeDesktopMedia, sessionID)
 			if err == nil {
 				var packetConn net.PacketConn
 				packetConn, err = direct.DialUDP(attemptCtx)
@@ -1120,25 +1160,22 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					var lostOnce sync.Once
 
 					a.mu.Lock()
-					activeDesktopSessions := 0
-					for _, candidate := range a.desktopConnections {
-						if candidate != nil && candidate.Active() {
-							activeDesktopSessions++
-						}
-					}
-					if a.closed.Load() || a.desktopConnection != controller || !controller.Active() || activeDesktopSessions > 1 {
+					if a.closed.Load() || a.desktopConnections[sessionID] != controller || !controller.Active() {
 						a.mu.Unlock()
 						cancel()
 						_ = path.Close()
 						return
 					}
-					old := a.desktopP2PSession
-					a.desktopP2PSession = direct
+					if a.desktopP2PSessions == nil {
+						a.desktopP2PSessions = make(map[string]*rdpp2p.Session)
+					}
+					old := a.desktopP2PSessions[sessionID]
+					a.desktopP2PSessions[sessionID] = direct
 					a.mu.Unlock()
 					direct.SetOnClose(func() {
 						a.mu.Lock()
-						if a.desktopP2PSession == direct {
-							a.desktopP2PSession = nil
+						if a.desktopP2PSessions[sessionID] == direct {
+							delete(a.desktopP2PSessions, sessionID)
 						}
 						a.mu.Unlock()
 						lostOnce.Do(func() { close(lost) })
@@ -1152,7 +1189,7 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					connectedAt := time.Now()
 					controller.SetDatagramPath(path)
 					a.requestRelayDesktopPathIDR(controller, targetID, "relay", path.Name())
-					log.Printf("[Desktop] controller media path switched target=%s path=%s", targetID, path.Name())
+					log.Printf("[Desktop] controller media path switched target=%s session=%s path=%s", targetID, sessionID, path.Name())
 
 					qualityFallback, sessionAlive := a.waitRelayDesktopDirectPath(controller, targetID, path, direct, lost, relayQuality)
 					if !sessionAlive {
@@ -1174,9 +1211,9 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					delay := policy.Delay(failures)
 					failures++
 					if qualityFallback != "" {
-						log.Printf("[Desktop] P2P media path demoted after %s reason=%s; Relay Datagram active, retrying in %s", aliveFor.Round(time.Second), qualityFallback, delay)
+						log.Printf("[Desktop] P2P media path demoted target=%s session=%s after %s reason=%s; Relay Datagram active, retrying in %s", targetID, sessionID, aliveFor.Round(time.Second), qualityFallback, delay)
 					} else {
-						log.Printf("[Desktop] P2P media path lost after %s; Relay Datagram active, retrying in %s", aliveFor.Round(time.Second), delay)
+						log.Printf("[Desktop] P2P media path lost target=%s session=%s after %s; Relay Datagram active, retrying in %s", targetID, sessionID, aliveFor.Round(time.Second), delay)
 					}
 					if !waitRetry(delay) {
 						return
@@ -1189,7 +1226,7 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 
 			delay := policy.Delay(failures)
 			failures++
-			log.Printf("[Desktop] P2P media unavailable, Relay Datagram active; retrying in %s: %v", delay, err)
+			log.Printf("[Desktop] P2P media unavailable target=%s session=%s; Relay Datagram active; retrying in %s: %v", targetID, sessionID, delay, err)
 			if !waitRetry(delay) {
 				return
 			}
@@ -1479,8 +1516,7 @@ func (a *Agent) RequestRemoteDesktopIDR() error {
 func (a *Agent) disconnectRelayDesktop() {
 	a.mu.Lock()
 	sessions := a.takeDesktopSessionsLocked()
-	direct := a.desktopP2PSession
-	a.desktopP2PSession = nil
+	directs := a.takeDesktopP2PSessionsLocked()
 	a.mu.Unlock()
 
 	var report desktop.DesktopDiagnosticsReport
@@ -1498,8 +1534,10 @@ func (a *Agent) disconnectRelayDesktop() {
 		a.lastDesktopDiagnostics = report
 		a.mu.Unlock()
 	}
-	if direct != nil {
-		_ = direct.Close()
+	for _, direct := range directs {
+		if direct != nil {
+			_ = direct.Close()
+		}
 	}
 }
 
@@ -1785,13 +1823,12 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	p2pSession := a.rdpSession
 	p2pManager := a.rdpP2P
 	desktopSessions := a.takeDesktopSessionsLocked()
-	desktopP2P := a.desktopP2PSession
+	desktopP2P := a.takeDesktopP2PSessionsLocked()
 	a.rdpConnection = nil
 	a.rdpSession = nil
 	a.rdpP2P = nil
-	a.desktopP2PSession = nil
-	a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
-	a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
+	a.desktopTargetMedia = make(map[desktopTargetSessionKey]*desktopmedia.MediaConn)
+	a.desktopTargetPaths = make(map[desktopTargetSessionKey]*rdpp2p.ApplicationPath)
 	a.rdpTargets = nil
 	a.remoteDesktopTargets = nil
 	a.mu.Unlock()
@@ -1809,8 +1846,10 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 			_ = desktopSession.Close()
 		}
 	}
-	if desktopP2P != nil {
-		_ = desktopP2P.Close()
+	for _, direct := range desktopP2P {
+		if direct != nil {
+			_ = direct.Close()
+		}
 	}
 }
 
@@ -1863,11 +1902,11 @@ func (a *Agent) closeRuntime() error {
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
 		rdpSession, rdpP2P := a.rdpSession, a.rdpP2P
 		desktopSessions := a.takeDesktopSessionsLocked()
-		desktopP2P := a.desktopP2PSession
+		desktopP2P := a.takeDesktopP2PSessionsLocked()
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
-		a.rdpSession, a.rdpP2P, a.desktopP2PSession = nil, nil, nil
-		a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
-		a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
+		a.rdpSession, a.rdpP2P = nil, nil
+		a.desktopTargetMedia = make(map[desktopTargetSessionKey]*desktopmedia.MediaConn)
+		a.desktopTargetPaths = make(map[desktopTargetSessionKey]*rdpp2p.ApplicationPath)
 		a.rdpTargets = nil
 		a.remoteDesktopTargets = nil
 		a.cancel()
@@ -1899,8 +1938,10 @@ func (a *Agent) closeRuntime() error {
 				errs = append(errs, desktopSession.Close())
 			}
 		}
-		if desktopP2P != nil {
-			errs = append(errs, desktopP2P.Close())
+		for _, direct := range desktopP2P {
+			if direct != nil {
+				errs = append(errs, direct.Close())
+			}
 		}
 		if a.tunnelMgr != nil {
 			errs = append(errs, a.tunnelMgr.Close())

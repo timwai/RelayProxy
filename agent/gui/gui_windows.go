@@ -57,6 +57,7 @@ type appWindow struct {
 
 	desktopViewerMu sync.Mutex
 	desktopViewer   *nativeDesktopSession
+	desktopViewers  map[string]*nativeDesktopSession
 }
 
 func systemPrefersDark() bool {
@@ -106,10 +107,11 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	files["connections.html"] = &fstest.MapFile{Data: []byte(connectionsHTML), Mode: 0o444}
 
 	a := &appWindow{
-		bridge:       b,
-		opts:         opts,
-		minimizeTray: opts.MinimizeToTray,
-		stopCh:       make(chan struct{}),
+		bridge:         b,
+		opts:           opts,
+		minimizeTray:   opts.MinimizeToTray,
+		stopCh:         make(chan struct{}),
+		desktopViewers: make(map[string]*nativeDesktopSession),
 	}
 
 	showMsgID = win.RegisterWindowMessage(windows.StringToUTF16Ptr("RelayProxyAgentShowWindow"))

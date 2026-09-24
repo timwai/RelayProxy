@@ -608,6 +608,18 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #802 的 gofmt/vet/test/race/benchmark 全部通过；UI CI #492 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：增加 Native Viewer 的窗口 placement 持久化（跨 Viewer 重开记忆显示器/位置/尺寸），然后开始 H.265 capability negotiation 与 UI 正式公开。
 
+### 0.2.50 RD3 Native Viewer Window Placement Persistence（已进入 main）
+
+- Native Viewer 的普通窗口位置、外框尺寸与最大化状态现在持久化到既有 `relay-agent.yaml -> gui.native_viewer`，不新增第二套 UI 状态文件。
+- Viewer 公共契约新增 `WindowPlacement`；Windows 实现通过 `GetWindowPlacement` 在 `WM_MOVE / WM_SIZE / WM_CLOSE` 时缓存普通窗口 placement，支持负 X/Y 坐标，因此左侧或上方副屏也能正确记忆。
+- 全屏状态不会覆盖普通窗口 placement；进入 borderless fullscreen 前缓存 `WINDOWPLACEMENT`，即使用户直接在全屏中关闭 Viewer，下次仍恢复进入全屏前的普通窗口位置/大小。
+- 恢复使用 `SetWindowPlacement` 而不是把 `RcNormalPosition` 直接传给 `CreateWindowEx`，由 Windows 正确处理 workspace 坐标、任务栏偏移和最大化语义。
+- GUI 关闭 Native Viewer 时通过现有 `persistGUI -> bridge.SaveConfig` 增量保存 placement；不会覆盖 server/proxy/routing 等无关配置，也不会产生 restart/reload pending。
+- 配置新增尺寸校验：placement 一旦存在，宽高必须在 320×180 到 16384×16384 范围；YAML round-trip、Bridge 增量保存和 Win32 placement 转换均有回归测试。
+- 主要提交：`75dc512`、`0e8a0bd`、`f876779`、`b9bd2d7`、`65d8916`、`875798a`，测试与格式收尾至 `61c8c7b`。
+- 验证：Go CI #818 全部通过；UI CI #508 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：正式公开 H.265/HEVC capability 与显式 codec 选择；`auto` 暂继续使用成熟 H.264 路径，待 Intel/NVIDIA/AMD 两机验证完成后再考虑默认 HEVC。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

@@ -70,3 +70,58 @@ func TestH265ProbeHardwareRequiresBothDirections(t *testing.T) {
 		t.Fatal("H.265 hardware end-to-end reported without a hardware decoder")
 	}
 }
+
+
+func TestH265CapabilityAddsOneVPL444OnlyEndToEnd(t *testing.T) {
+	capability, available := H265Capability(H265Probe{}, OneVPLProbe{
+		DispatcherAvailable: true,
+		HardwareRuntime:     true,
+		HEVC444Encode:       true,
+		HEVC444Decode:       true,
+	})
+	if !available {
+		t.Fatal("oneVPL HEVC 4:4:4 capability was not made available")
+	}
+	if capability.Codec != "h265" || capability.Encoder != "onevpl-hevc444" {
+		t.Fatalf("unexpected oneVPL capability: %+v", capability)
+	}
+	if !capability.Encode || !capability.Decode || !capability.Chroma444 ||
+		capability.Chroma420 || !capability.BitDepth8 || !capability.Hardware {
+		t.Fatalf("incorrect oneVPL-only capability: %+v", capability)
+	}
+}
+
+func TestH265CapabilityMergesMediaFoundationAndOneVPL(t *testing.T) {
+	capability, available := H265Capability(
+		H265Probe{HardwareEncoderCount: 1, HardwareDecoderCount: 1},
+		OneVPLProbe{
+			DispatcherAvailable: true,
+			HardwareRuntime:     true,
+			HEVC444Encode:       true,
+			HEVC444Decode:       true,
+		},
+	)
+	if !available {
+		t.Fatal("combined HEVC capability was not available")
+	}
+	if !capability.Chroma420 || !capability.Chroma444 {
+		t.Fatalf("combined HEVC chroma capability is incomplete: %+v", capability)
+	}
+	if capability.Encoder != "media-foundation+onevpl-hevc444" {
+		t.Fatalf("encoder=%q", capability.Encoder)
+	}
+}
+
+func TestH265CapabilityDoesNotAdvertisePartialOneVPL444(t *testing.T) {
+	capability, available := H265Capability(H265Probe{}, OneVPLProbe{
+		DispatcherAvailable: true,
+		HardwareRuntime:     true,
+		HEVC444Encode:       true,
+	})
+	if available || capability.Chroma444 || capability.Encode || capability.Decode {
+		t.Fatalf("partial oneVPL 4:4:4 was advertised: %+v", capability)
+	}
+	if capability.Chroma420 || capability.BitDepth8 {
+		t.Fatalf("empty Media Foundation probe advertised 4:2:0: %+v", capability)
+	}
+}

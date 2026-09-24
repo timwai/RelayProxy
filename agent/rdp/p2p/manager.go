@@ -47,10 +47,11 @@ type Manager struct {
 type Session struct {
 	manager         *Manager
 	ID              uint64
-	Purpose         string
-	ControllerID    string
-	TargetID        string
-	Token           []byte
+	Purpose          string
+	DesktopSessionID string
+	ControllerID     string
+	TargetID         string
+	Token            []byte
 	ExpiresAt       atomic.Int64
 	mu              sync.Mutex
 	candidates      []protocol.RDPCandidate
@@ -230,6 +231,13 @@ func (m *Manager) StartController(ctx context.Context, targetID string) (*Sessio
 }
 
 func (m *Manager) StartControllerForPurpose(ctx context.Context, targetID, purpose string) (*Session, error) {
+	return m.StartControllerForPurposeWithSessionID(ctx, targetID, purpose, "")
+}
+
+// StartControllerForPurposeWithSessionID starts a direct-path lease for one
+// logical Relay Desktop media session. desktopSessionID is ignored by legacy
+// RDP purpose users and preserved end-to-end for desktop_media.
+func (m *Manager) StartControllerForPurposeWithSessionID(ctx context.Context, targetID, purpose, desktopSessionID string) (*Session, error) {
 	if m == nil || m.send == nil {
 		return nil, errors.New("P2P manager requires a control sender")
 	}
@@ -246,7 +254,7 @@ func (m *Manager) StartControllerForPurpose(ctx context.Context, targetID, purpo
 		return nil, errors.New("unsupported P2P session purpose")
 	}
 	response, err := m.send(ctx, protocol.RDPControlMessage{
-		Type: protocol.RDPControlConnectRequest, Purpose: purpose,
+		Type: protocol.RDPControlConnectRequest, Purpose: purpose, DesktopSessionID: desktopSessionID,
 		TargetID: targetID, Candidates: m.currentCandidates(),
 	})
 	if err != nil {
@@ -261,8 +269,11 @@ func (m *Manager) StartControllerForPurpose(ctx context.Context, targetID, purpo
 	if response.Purpose == "" {
 		response.Purpose = purpose
 	}
-	item := m.newSession(
-		response.SessionID, response.Purpose, response.ControllerID, response.TargetID,
+	if response.DesktopSessionID == "" {
+		response.DesktopSessionID = desktopSessionID
+	}
+	item := m.newSessionWithDesktopSessionID(
+		response.SessionID, response.Purpose, response.DesktopSessionID, response.ControllerID, response.TargetID,
 		response.SessionToken, response.Candidates, response.LeaseExpiresAt,
 	)
 	if item == nil {
@@ -289,8 +300,8 @@ func (m *Manager) HandleControl(message protocol.RDPControlMessage) {
 		if purpose == "" {
 			purpose = protocol.P2PPurposeRDP
 		}
-		item := m.newSession(
-			message.SessionID, purpose, message.ControllerID, message.TargetID,
+		item := m.newSessionWithDesktopSessionID(
+			message.SessionID, purpose, message.DesktopSessionID, message.ControllerID, message.TargetID,
 			message.SessionToken, message.Candidates, message.LeaseExpiresAt,
 		)
 		if item == nil {
@@ -331,11 +342,15 @@ func (m *Manager) HandleControl(message protocol.RDPControlMessage) {
 }
 
 func (m *Manager) newSession(id uint64, purpose, controllerID, targetID string, token []byte, candidates []protocol.RDPCandidate, expires int64) *Session {
+	return m.newSessionWithDesktopSessionID(id, purpose, "", controllerID, targetID, token, candidates, expires)
+}
+
+func (m *Manager) newSessionWithDesktopSessionID(id uint64, purpose, desktopSessionID, controllerID, targetID string, token []byte, candidates []protocol.RDPCandidate, expires int64) *Session {
 	if expires == 0 {
 		expires = time.Now().Add(m.lease).UnixMilli()
 	}
 	item := &Session{
-		manager: m, ID: id, Purpose: purpose, ControllerID: controllerID, TargetID: targetID,
+		manager: m, ID: id, Purpose: purpose, DesktopSessionID: desktopSessionID, ControllerID: controllerID, TargetID: targetID,
 		Token: append([]byte(nil), token...), candidates: append([]protocol.RDPCandidate(nil), candidates...),
 		localCandidates: m.currentCandidates(), directConns: make(map[net.Conn]struct{}),
 		directPackets: make(map[net.PacketConn]struct{}), candidateWake: make(chan struct{}),
@@ -672,7 +687,7 @@ func (s *Session) setCandidates(raw []protocol.RDPCandidate, forward bool) {
 	s.mu.Unlock()
 	if forward && s.manager.send != nil {
 		ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
-		_, _ = s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: s.Purpose, SessionID: s.ID, ControllerID: s.ControllerID, TargetID: s.TargetID, SessionToken: append([]byte(nil), s.Token...), Candidates: validated})
+		_, _ = s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: s.Purpose, SessionID: s.ID, DesktopSessionID: s.DesktopSessionID, ControllerID: s.ControllerID, TargetID: s.TargetID, SessionToken: append([]byte(nil), s.Token...), Candidates: validated})
 		cancel()
 	}
 }
@@ -701,7 +716,7 @@ func (s *Session) publishCandidates(protocolName string, raw []protocol.RDPCandi
 		return
 	}
 	ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
-	_, _ = s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: s.Purpose, SessionID: s.ID, ControllerID: controllerID, TargetID: targetID, SessionToken: token, Candidates: merged})
+	_, _ = s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, Purpose: s.Purpose, SessionID: s.ID, DesktopSessionID: s.DesktopSessionID, ControllerID: controllerID, TargetID: targetID, SessionToken: token, Candidates: merged})
 	cancel()
 }
 
@@ -882,7 +897,7 @@ func (s *Session) Close() error {
 	s.manager.mu.Unlock()
 	if s.manager.send != nil && !s.manager.closed.Load() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		_, _ = s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: s.Purpose, SessionID: s.ID, ControllerID: s.ControllerID, TargetID: s.TargetID, SessionToken: append([]byte(nil), s.Token...)})
+		_, _ = s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlSessionClose, Purpose: s.Purpose, SessionID: s.ID, DesktopSessionID: s.DesktopSessionID, ControllerID: s.ControllerID, TargetID: s.TargetID, SessionToken: append([]byte(nil), s.Token...)})
 		cancel()
 	}
 	return nil
@@ -1060,7 +1075,7 @@ func (s *Session) renewLoop() {
 				return
 			}
 			ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
-			response, err := s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlLeaseRenew, Purpose: s.Purpose, SessionID: s.ID, ControllerID: s.ControllerID, TargetID: s.TargetID, SessionToken: append([]byte(nil), s.Token...)})
+			response, err := s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlLeaseRenew, Purpose: s.Purpose, SessionID: s.ID, DesktopSessionID: s.DesktopSessionID, ControllerID: s.ControllerID, TargetID: s.TargetID, SessionToken: append([]byte(nil), s.Token...)})
 			cancel()
 			if err != nil || response.Type == protocol.RDPControlError {
 				s.removeLocal()

@@ -822,6 +822,10 @@ func NewSystemHost() (*Host, error) {
 	hevcProbe := desktopcodec.ProbeH265MediaFoundation(hevcProbeCtx)
 	hevcCancel()
 
+	oneVPLProbeCtx, oneVPLCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	oneVPLProbe := desktopcodec.ProbeOneVPLHEVC444(oneVPLProbeCtx)
+	oneVPLCancel()
+
 	codecCapabilities := []protocol.DesktopCodecCapability{probe.Capability()}
 	if hevcProbe.EncodeAvailable() || hevcProbe.DecodeAvailable() {
 		codecCapabilities = append(codecCapabilities, hevcProbe.Capability())
@@ -835,5 +839,9 @@ func NewSystemHost() (*Host, error) {
 		hevcProbe.MediaFoundation, hevcProbe.HardwareEncoderCount, hevcProbe.HardwareDecoderCount,
 		hevcProbe.SoftwareEncoderCount, hevcProbe.SoftwareDecoderCount,
 		hevcProbe.EncodeAvailable() || hevcProbe.DecodeAvailable(), hevcProbe.Error)
+	log.Printf("[Desktop] oneVPL HEVC 4:4:4 probe dispatcher=%t hwRuntime=%t encode=%t decode=%t endToEnd=%t advertised=false error=%q",
+		oneVPLProbe.DispatcherAvailable, oneVPLProbe.HardwareRuntime,
+		oneVPLProbe.HEVC444Encode, oneVPLProbe.HEVC444Decode,
+		oneVPLProbe.HEVC444EndToEnd(), oneVPLProbe.Error)
 	return host, nil
 }

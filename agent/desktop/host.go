@@ -119,6 +119,11 @@ type HostCapabilityProvider interface {
 	DesktopCapabilities(context.Context) protocol.DesktopCapabilities
 }
 
+// HostSessionFactory creates isolated capture/input state for one media
+// association. System hosts use it so concurrent Relay Desktop viewers never
+// share mutable DXGI/WGC streams or per-display input geometry.
+type HostSessionFactory func() (CaptureSource, InputSink, error)
+
 // SessionInputSink lets platform input map viewer-local normalized coordinates
 // into the same display geometry that the capture session is streaming.
 type SessionInputSink interface {
@@ -148,10 +153,11 @@ func DefaultHostConfig() HostConfig {
 }
 
 type Host struct {
-	source    CaptureSource
-	input     InputSink
-	cfg       HostConfig
-	audioOpen audioCaptureFactory
+	source         CaptureSource
+	input          InputSink
+	cfg            HostConfig
+	audioOpen      audioCaptureFactory
+	sessionFactory HostSessionFactory
 
 	codecMu   sync.RWMutex
 	codecCaps []protocol.DesktopCodecCapability
@@ -194,6 +200,45 @@ func NewHostWithInput(source CaptureSource, input InputSink, cfg HostConfig) (*H
 		cfg.PacketSize = defaults.PacketSize
 	}
 	return &Host{source: source, input: input, cfg: cfg, audioOpen: openDefaultAudioCapture}, nil
+}
+
+func (h *Host) SetSessionFactory(factory HostSessionFactory) {
+	if h == nil {
+		return
+	}
+	h.sessionMu.Lock()
+	h.sessionFactory = factory
+	h.sessionMu.Unlock()
+}
+
+func (h *Host) isolatedSessionHost() (*Host, func(), bool, error) {
+	if h == nil {
+		return nil, nil, false, errors.New("Relay Desktop host is unavailable")
+	}
+	h.sessionMu.Lock()
+	factory := h.sessionFactory
+	h.sessionMu.Unlock()
+	if factory == nil {
+		return h, func() {}, false, nil
+	}
+	source, input, err := factory()
+	if err != nil {
+		return nil, nil, true, err
+	}
+	if source == nil {
+		return nil, nil, true, errors.New("Relay Desktop session factory returned no capture source")
+	}
+	session := &Host{
+		source:    source,
+		input:     input,
+		cfg:       h.cfg,
+		audioOpen: h.audioOpen,
+		codecCaps: h.CodecCapabilities(),
+	}
+	cleanup := func() {
+		_ = source.Close()
+	}
+	return session, cleanup, true, nil
 }
 
 const (
@@ -378,9 +423,21 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	if h == nil || conn == nil {
 		return errors.New("desktop media connection is unavailable")
 	}
+	sessionHost, cleanup, isolated, err := h.isolatedSessionHost()
+	if err != nil {
+		return fmt.Errorf("create Relay Desktop session resources: %w", err)
+	}
+	if isolated {
+		defer cleanup()
+		return sessionHost.handleDesktopMedia(ctx, conn, options)
+	}
+
 	h.sessionMu.Lock()
 	defer h.sessionMu.Unlock()
+	return h.handleDesktopMedia(ctx, conn, options)
+}
 
+func (h *Host) handleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaConn, options protocol.RemoteDesktopConnectOptions) error {
 	sessionConfig := ResolveHostConfig(h.cfg, options)
 	backend := "generic"
 	if source, ok := h.source.(SessionCaptureSource); ok {

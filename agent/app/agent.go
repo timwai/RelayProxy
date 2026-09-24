@@ -1230,46 +1230,11 @@ func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDes
 
 func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 	a.mu.RLock()
+	sessionID := a.desktopPrimarySessionID
 	desktopSession := a.desktopConnection
 	a.mu.RUnlock()
 	if desktopSession != nil && desktopSession.Active() {
-		targetID := desktopSession.TargetID()
-		pathUDP := desktopSession.DatagramPathName()
-		if pathUDP == "" || pathUDP == "relay" {
-			pathUDP = "quic-datagram"
-		}
-		out := protocol.RemoteDesktopStatus{
-			State: "connected", Backend: protocol.DesktopBackendRelay, TargetID: targetID,
-			PathTCP: "relay-control", PathUDP: pathUDP, UDPEnabled: true, UDPActive: true,
-		}
-		config := desktopSession.VideoConfigSnapshot()
-		out.CaptureBackend = desktopSession.CaptureBackendPreference()
-		out.DisplayID = config.DisplayID
-		out.Generation = config.Generation
-		out.Codec = config.Codec
-		out.Width = config.Width
-		out.Height = config.Height
-		out.MaxWidth = config.MaxWidth
-		out.MaxHeight = config.MaxHeight
-		out.FPS = config.FPS
-		liveDisplays, live := desktopSession.DisplayCapabilitiesSnapshot()
-		out.DisplaysReady = live
-		if live {
-			out.Displays = liveDisplays
-		}
-		if target, ok := a.remoteDesktopTarget(targetID); ok {
-			out.TargetName = target.Name
-			if !live {
-				out.Displays = append([]protocol.DesktopDisplayCapability(nil), target.Capabilities.Displays...)
-			}
-		}
-		for _, display := range out.Displays {
-			if display.ID == out.DisplayID {
-				out.DisplayName = display.Name
-				break
-			}
-		}
-		return out
+		return a.remoteDesktopStatusForSession(sessionID, desktopSession)
 	}
 	status := a.Status()
 	out := protocol.RemoteDesktopStatus{State: "idle"}

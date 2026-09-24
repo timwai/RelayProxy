@@ -182,10 +182,7 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			}
 
 		case protocol.DesktopSessionDisplays:
-			s.mu.Lock()
-			s.displays = append(s.displays[:0], message.Displays...)
-			s.displaysReady = true
-			s.mu.Unlock()
+			s.applyDisplayCapabilities(message.Displays)
 		}
 	}
 }
@@ -811,6 +808,16 @@ func (s *ControllerSession) CaptureBackendPreference() protocol.DesktopCaptureBa
 		return protocol.DesktopCaptureAuto
 	}
 	return s.options.CaptureBackend
+}
+
+func (s *ControllerSession) applyDisplayCapabilities(displays []protocol.DesktopDisplayCapability) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.displays = append(s.displays[:0], displays...)
+	s.displaysReady = true
+	s.mu.Unlock()
 }
 
 func (s *ControllerSession) DisplayCapabilitiesSnapshot() ([]protocol.DesktopDisplayCapability, bool) {

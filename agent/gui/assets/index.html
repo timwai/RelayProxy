@@ -1884,7 +1884,7 @@
 
     async function applyRemoteDesktopViewportResolution() {
       desktopViewportTimer = null;
-      if (!state.desktopFollowViewport || !hasFn('goSetRemoteDesktopResolution')) return;
+      if (!state.desktopFollowViewport || !hasFn('goSetRemoteDesktopViewportResolution')) return;
       var status = state.desktopStatus || {};
       if (state.tab !== 'desktop' || status.state !== 'connected' || status.backend !== 'relay' ||
           (status.codec !== 'h264' && status.codec !== 'h265')) return;
@@ -1905,7 +1905,7 @@
         return;
       }
 
-      var raw = await call('goSetRemoteDesktopResolution', target.width, target.height);
+      var raw = await call('goSetRemoteDesktopViewportResolution', target.width, target.height);
       var result = mutationResult(raw);
       if (result && result.ok === false) return;
       desktopViewportLastWidth = target.width;
@@ -2302,6 +2302,10 @@
       var apply = $('desktop-runtime-resolution-apply');
       var value = select ? String(select.value || '') : '';
       if (value === 'viewport') {
+        if (!hasFn('goSetRemoteDesktopViewportResolution')) {
+          toast('当前界面不支持跟随窗口分辨率');
+          return;
+        }
         state.desktopFollowViewport = true;
         resetRemoteDesktopViewportFollow();
         updateDesktopRuntimeResolutionControl(state.desktopStatus || {});

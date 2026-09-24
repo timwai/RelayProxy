@@ -693,6 +693,19 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #922 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #612 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：进入 RD3 剩余的 4:4:4 / 高色彩质量链路设计与实现，同时保留 Windows 双机多显示器、多窗口 P2P 与跨 DPI/负坐标布局实测作为发布前验证项。
 
+### 0.2.56 RD3 4:4:4 Negotiation / I444 Media Foundation（已进入 main）
+
+- `RemoteDesktopConnectOptions` 新增 `Chroma=auto|420|444`，Controller 在发起连接前进行严格 capability negotiation：显式 4:4:4 仅允许 H.264 / H.265，并要求 Target 同时上报 `Encode + Chroma444`、Controller 本机上报 `Decode + Chroma444`；任一端缺失都会直接拒绝，不静默降成 4:2:0。
+- `VideoConfig / RemoteDesktopStatus / RemoteDesktopFrame / Controller FrameSnapshot` 全链路携带 chroma 与 bit depth；native Viewer 的 generation rebuild 条件扩展为 codec + chroma + bit-depth + resolution，因此未来同分辨率 4:2:0 ↔ 4:4:4 切换也会 flush/reopen decoder。
+- Codec 层新增 `PixelFormatI444` 与 8-bit planar I444 surface，并实现 RGBA→I444、padded BGRA→I444、I444→BGRA 的 BT.709 limited-range 转换；每个像素保留独立 U/V sample，为彩色文字/UI 边缘的 4:4:4 backend 提供公共 CPU 输入/验证边界。
+- Host session policy 新增 `Chroma / BitDepth`；H.264/H.265 CONFIG 不再硬编码 `420/8`，而是从 generation config 产生，旧 peer/旧调用仍默认 4:2:0 8-bit。
+- Windows 内置 Media Foundation 路径明确保持 8-bit 4:2:0：MF H.264/H.265 encoder/decoder 遇到 4:4:4 会返回 unavailable，Host 在没有真正 4:4:4 encoder backend 时也会拒绝 session，不允许“NV12 实际 4:2:0、协议却标 4:4:4”的假能力。
+- GUI 新增“色彩采样”选择（自动 / 4:2:0 / 4:4:4），并在目标未上报相应 Chroma444 encode capability 时前置阻止连接；帮助文案同步修正多窗口现在已支持每个媒体流独立 Relay ↔ P2P。
+- 新增 chroma negotiation、VideoConfig 格式校验、Host chroma policy、I444 stride/彩色边缘 round-trip、native Viewer chroma/bit-depth rebuild 与 GUI contract 回归。
+- 代表实现 PR：#105；merge `98829f1`。
+- 验证：Go CI #928 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #618 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：接入第一个真正能输出/解码 4:4:4 的 Windows codec backend。优先评估 NVENC / QSV / AMF 的 vendor-native 能力与部署成本；只有实际 probe 成功的 backend 才允许把 `Chroma444=true` 写入在线 capability snapshot。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
@@ -823,7 +836,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 热插拔 + 独立多流/多窗口 P2P 已完成，4:4:4 待开发
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 多显示器/P2P + 4:4:4 协商/I444 基础已完成，真实 4:4:4 codec backend 待接入
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

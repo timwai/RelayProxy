@@ -28,19 +28,19 @@ const (
 )
 
 var (
-	oneVPLCodecHEVC = oneVPLFourCC('H', 'E', 'V', 'C')
+	oneVPLCodecHEVC  = oneVPLFourCC('H', 'E', 'V', 'C')
 	oneVPLFourCCAYUV = oneVPLFourCC('A', 'Y', 'U', 'V')
 )
 
 const (
-	oneVPLPropImpl = "mfxImplDescription.Impl"
-	oneVPLPropAccel = "mfxImplDescription.AccelerationMode"
+	oneVPLPropImpl   = "mfxImplDescription.Impl"
+	oneVPLPropAccel  = "mfxImplDescription.AccelerationMode"
 	oneVPLPropVendor = "mfxImplDescription.VendorID"
 
-	oneVPLPropHEVCEncoder = "mfxImplDescription.mfxEncoderDescription.encoder.CodecID"
+	oneVPLPropHEVCEncoder      = "mfxImplDescription.mfxEncoderDescription.encoder.CodecID"
 	oneVPLPropHEVCEncoderColor = "mfxImplDescription.mfxEncoderDescription.encoder.encprofile.encmemdesc.ColorFormats"
 
-	oneVPLPropHEVCDecoder = "mfxImplDescription.mfxDecoderDescription.decoder.CodecID"
+	oneVPLPropHEVCDecoder      = "mfxImplDescription.mfxDecoderDescription.decoder.CodecID"
 	oneVPLPropHEVCDecoderColor = "mfxImplDescription.mfxDecoderDescription.decoder.decprofile.decmemdesc.ColorFormats"
 )
 

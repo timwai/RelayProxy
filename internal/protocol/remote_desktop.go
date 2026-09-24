@@ -80,6 +80,19 @@ type DesktopCodecCapability struct {
 	MaxFPS       int      `json:"maxFps,omitempty"`
 }
 
+func CloneDesktopCodecCapabilities(capabilities []DesktopCodecCapability) []DesktopCodecCapability {
+	if len(capabilities) == 0 {
+		return nil
+	}
+	cloned := make([]DesktopCodecCapability, len(capabilities))
+	for i := range capabilities {
+		cloned[i] = capabilities[i]
+		cloned[i].EncodeChroma = append([]string(nil), capabilities[i].EncodeChroma...)
+		cloned[i].DecodeChroma = append([]string(nil), capabilities[i].DecodeChroma...)
+	}
+	return cloned
+}
+
 type DesktopDisplayCapability struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`

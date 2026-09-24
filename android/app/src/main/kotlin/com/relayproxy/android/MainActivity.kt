@@ -6,6 +6,8 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -26,6 +28,14 @@ class MainActivity : Activity() {
     private lateinit var statusStreams: TextView
     private lateinit var statusLatency: TextView
     private lateinit var statusDetail: TextView
+    private lateinit var infoServer: TextView
+    private lateinit var infoDevice: TextView
+    private lateinit var infoNetworkMode: TextView
+    private lateinit var infoActiveNetwork: TextView
+    private lateinit var infoApproval: TextView
+    private lateinit var infoExitPermission: TextView
+    private lateinit var infoUptime: TextView
+    private lateinit var infoDeviceId: TextView
     private lateinit var toggleButton: Button
 
     private val bg = Color.rgb(246, 248, 252)
@@ -78,21 +88,47 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
     }
 
-    private fun buildUi(): ScrollView {
-        val root = LinearLayout(this).apply {
+    private fun buildUi(): View {
+        val page = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(30), dp(20), dp(36))
             setBackgroundColor(bg)
         }
 
-        root.addView(buildStatusCard())
-        root.addView(buildActionRow(), topMargin(24))
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(30), dp(20), dp(24))
+        }
+        content.addView(buildStatusCard())
+        content.addView(buildInfoCard(), topMargin(18))
 
-        return ScrollView(this).apply {
+        val scroll = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(bg)
-            addView(root)
+            addView(content)
         }
+        page.addView(
+            scroll,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            )
+        )
+
+        page.addView(
+            buildActionRow(),
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(54),
+            ).apply {
+                leftMargin = dp(20)
+                rightMargin = dp(20)
+                topMargin = dp(12)
+                bottomMargin = dp(24)
+            }
+        )
+
+        return page
     }
 
     private fun buildStatusCard(): View {
@@ -170,6 +206,75 @@ class MainActivity : Activity() {
         return card
     }
 
+    private fun buildInfoCard(): View {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = rounded(surface, 18, line)
+            elevation = dp(1).toFloat()
+        }
+
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(TextView(this@MainActivity).apply {
+                text = "运行信息"
+                textSize = 17f
+                setTextColor(ink)
+                setTypeface(typeface, Typeface.BOLD)
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(this@MainActivity).apply {
+                text = "详情"
+                textSize = 11.5f
+                setTextColor(brand)
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(dp(10), dp(5), 0, dp(5))
+                setOnClickListener {
+                    startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                }
+            })
+        })
+
+        infoServer = infoRow(card, "Relay Server")
+        infoDevice = infoRow(card, "设备名称")
+        infoNetworkMode = infoRow(card, "出口网络")
+        infoActiveNetwork = infoRow(card, "当前网络")
+        infoApproval = infoRow(card, "设备审批")
+        infoExitPermission = infoRow(card, "出口权限")
+        infoUptime = infoRow(card, "运行时长")
+        infoDeviceId = infoRow(card, "设备 ID").apply {
+            setTextIsSelectable(true)
+        }
+
+        return card
+    }
+
+    private fun infoRow(parent: LinearLayout, label: String): TextView {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(13), 0, 0)
+        }
+        row.addView(TextView(this).apply {
+            text = label
+            textSize = 12.5f
+            setTextColor(muted)
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.42f))
+
+        val value = TextView(this).apply {
+            text = "—"
+            textSize = 13f
+            setTextColor(ink)
+            setTypeface(typeface, Typeface.BOLD)
+            gravity = Gravity.END
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        }
+        row.addView(value, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.58f))
+        parent.addView(row)
+        return value
+    }
+
     private fun buildActionRow(): View {
         toggleButton = Button(this).apply {
             text = "启动"
@@ -225,6 +330,8 @@ class MainActivity : Activity() {
         val streams = obj.optLong("activeStreams", 0)
         val latency = obj.optLong("latencyMs", 0)
         val approved = obj.optBoolean("exitApproved", false)
+        val deviceId = obj.optString("deviceId", "")
+        val uptimeMs = obj.optLong("serviceUptimeMs", 0)
         val error = obj.optString("lastError", "")
 
         when (state) {
@@ -262,7 +369,18 @@ class MainActivity : Activity() {
         statusStreams.text = streams.toString()
         statusLatency.text = if (latency > 0) "$latency ms" else "—"
 
-        val desiredRunning = ConfigStore(this).isDesiredRunning()
+        val store = ConfigStore(this)
+        val config = store.load()
+        infoServer.text = config.serverAddress.ifBlank { "未配置" }
+        infoDevice.text = config.deviceName.ifBlank { "RelayProxy Android" }
+        infoNetworkMode.text = networkModeLabel(config.networkMode)
+        infoActiveNetwork.text = activeNetworkLabel(config.networkMode)
+        infoApproval.text = approvalLabel(approval)
+        infoExitPermission.text = if (approved) "已授权" else "未授权"
+        infoUptime.text = formatDuration(uptimeMs)
+        infoDeviceId.text = deviceId.ifBlank { "—" }
+
+        val desiredRunning = store.isDesiredRunning()
         if (desiredRunning) {
             toggleButton.text = "停止"
             toggleButton.setTextColor(danger)
@@ -280,6 +398,48 @@ class MainActivity : Activity() {
             state == "CONNECTED" && approved -> "后台常驻运行中"
             state == "STOPPED" -> "点击启动后可退出 App，服务继续后台运行"
             else -> "审批：$approval"
+        }
+    }
+
+    private fun networkModeLabel(mode: String): String = when (mode) {
+        NetworkBinder.MODE_WIFI -> "仅 Wi-Fi"
+        NetworkBinder.MODE_CELLULAR -> "仅移动数据"
+        else -> "自动选择"
+    }
+
+    private fun activeNetworkLabel(mode: String): String {
+        if (mode == NetworkBinder.MODE_WIFI) return "Wi-Fi"
+        if (mode == NetworkBinder.MODE_CELLULAR) return "移动数据"
+
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val network = connectivity.activeNetwork ?: return "未连接"
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return "未知"
+        return when {
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "移动数据"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "以太网"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
+            else -> "其他"
+        }
+    }
+
+    private fun approvalLabel(value: String): String = when (value) {
+        "approved" -> "已批准"
+        "pending" -> "等待审批"
+        "rejected" -> "已拒绝"
+        else -> "未知"
+    }
+
+    private fun formatDuration(uptimeMs: Long): String {
+        if (uptimeMs <= 0) return "—"
+        val totalSeconds = uptimeMs / 1000
+        val hours = totalSeconds / 3600
+        val minutes = (totalSeconds % 3600) / 60
+        val seconds = totalSeconds % 60
+        return when {
+            hours > 0 -> hours.toString() + "小时 " + minutes + "分"
+            minutes > 0 -> minutes.toString() + "分 " + seconds + "秒"
+            else -> seconds.toString() + "秒"
         }
     }
 

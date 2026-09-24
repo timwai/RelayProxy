@@ -9,6 +9,7 @@ import android.content.Intent
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import com.relayproxy.core.androidcore.Androidcore
 import com.relayproxy.core.androidcore.Client
 import org.json.JSONObject
@@ -28,7 +29,19 @@ class RelayExitService : Service() {
             .put("approvalState", "unknown")
             .toString()
 
-        fun statusJson(): String = status
+        @Volatile
+        private var serviceStartedAtElapsed: Long = 0
+
+        fun statusJson(): String = runCatching {
+            val uptime = if (serviceStartedAtElapsed > 0) {
+                (SystemClock.elapsedRealtime() - serviceStartedAtElapsed).coerceAtLeast(0)
+            } else {
+                0
+            }
+            JSONObject(status)
+                .put("serviceUptimeMs", uptime)
+                .toString()
+        }.getOrElse { status }
     }
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -62,10 +75,16 @@ class RelayExitService : Service() {
             }
             ACTION_START -> {
                 store.setDesiredRunning(true)
+                if (serviceStartedAtElapsed == 0L) {
+                    serviceStartedAtElapsed = SystemClock.elapsedRealtime()
+                }
                 startRelay()
             }
             else -> {
                 if (store.isDesiredRunning()) {
+                    if (serviceStartedAtElapsed == 0L) {
+                        serviceStartedAtElapsed = SystemClock.elapsedRealtime()
+                    }
                     startRelay()
                 } else {
                     stopSelf()
@@ -165,6 +184,7 @@ class RelayExitService : Service() {
                 .put("connectionState", "STOPPED")
                 .put("approvalState", "unknown")
                 .toString()
+            serviceStartedAtElapsed = 0
             handler.post {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()

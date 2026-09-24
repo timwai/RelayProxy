@@ -4,6 +4,7 @@ package codec
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -43,6 +44,9 @@ func openMFH264Encoder(
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.Chroma != Chroma420 || cfg.BitDepth != 8 {
+		return nil, fmt.Errorf("%w: Media Foundation H.264 only supports the Relay Desktop 8-bit 4:2:0 path", ErrEncoderUnavailable)
 	}
 	// Hardware Media Foundation encoders are commonly asynchronous MFTs.
 	// The transform owns a blocking IMFMediaEventGenerator pump and therefore

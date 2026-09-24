@@ -144,17 +144,20 @@ func TestFitRGBAEven(t *testing.T) {
 	}
 }
 
-func TestHostCanEncodeH264(t *testing.T) {
+func TestHostCanEncodeAdvertisedVideoCodecs(t *testing.T) {
 	host, err := NewHost(&testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))}, DefaultHostConfig())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if host.canEncodeH264() {
-		t.Fatal("H.264 unexpectedly enabled without capability")
+	if host.canEncodeH264() || host.canEncodeH265() {
+		t.Fatal("video codec unexpectedly enabled without capability")
 	}
-	host.SetCodecCapabilities([]protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}})
-	if !host.canEncodeH264() {
-		t.Fatal("H.264 encode capability was ignored")
+	host.SetCodecCapabilities([]protocol.DesktopCodecCapability{
+		{Codec: "h264", Encode: true},
+		{Codec: "h265", Encode: true},
+	})
+	if !host.canEncodeH264() || !host.canEncodeH265() {
+		t.Fatal("advertised video encode capability was ignored")
 	}
 }
 

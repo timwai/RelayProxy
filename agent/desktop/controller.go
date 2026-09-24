@@ -87,13 +87,13 @@ func StartControllerWithOptions(
 	ctx, cancel := context.WithCancel(parent)
 	now := time.Now()
 	session := &ControllerSession{
-		targetID:    targetID,
-		conn:        conn,
-		cancel:      cancel,
-		done:        make(chan struct{}),
-		configReady: make(chan struct{}),
-		audioNotify: make(chan struct{}, 1),
-		stats:       newSessionStatsTracker("relay"),
+		targetID:       targetID,
+		conn:           conn,
+		cancel:         cancel,
+		done:           make(chan struct{}),
+		configReady:    make(chan struct{}),
+		audioNotify:    make(chan struct{}, 1),
+		stats:          newSessionStatsTracker("relay"),
 		diagnostics:    newSessionDiagnosticsRecorder(targetID, options, now),
 		options:        options,
 		followViewport: desktopResolutionModeFollowsViewport(options.Resolution.Mode),

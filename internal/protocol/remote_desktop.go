@@ -156,9 +156,10 @@ type RemoteDesktopStatus struct {
 	TargetID       string                `json:"targetId,omitempty"`
 	TargetName     string                `json:"targetName,omitempty"`
 	DisplayID      string                `json:"displayId,omitempty"`
-	DisplayName    string                `json:"displayName,omitempty"`
-	CaptureBackend DesktopCaptureBackend `json:"captureBackend,omitempty"`
-	Generation     uint32                `json:"generation,omitempty"`
+	DisplayName    string                     `json:"displayName,omitempty"`
+	Displays       []DesktopDisplayCapability `json:"displays,omitempty"`
+	CaptureBackend DesktopCaptureBackend      `json:"captureBackend,omitempty"`
+	Generation     uint32                     `json:"generation,omitempty"`
 	Codec          string                `json:"codec,omitempty"`
 	Width          int                   `json:"width,omitempty"`
 	Height         int                   `json:"height,omitempty"`
@@ -233,6 +234,7 @@ const (
 	DesktopSessionPing         = "ping"
 	DesktopSessionPong         = "pong"
 	DesktopSessionStatsReport  = "stats"
+	DesktopSessionDisplays     = "displays"
 	DesktopSessionVideoControl = "video_control"
 )
 
@@ -245,8 +247,9 @@ type DesktopSessionMessage struct {
 	Cursor       *DesktopCursorState    `json:"cursor,omitempty"`
 	Clipboard    *DesktopClipboardState `json:"clipboard,omitempty"`
 	Probe        *DesktopSessionProbe   `json:"probe,omitempty"`
-	Stats        *DesktopSessionStats   `json:"stats,omitempty"`
-	VideoControl *DesktopVideoControl   `json:"videoControl,omitempty"`
+	Stats        *DesktopSessionStats       `json:"stats,omitempty"`
+	Displays     []DesktopDisplayCapability `json:"displays,omitempty"`
+	VideoControl *DesktopVideoControl       `json:"videoControl,omitempty"`
 }
 
 const (

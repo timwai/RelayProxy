@@ -936,6 +936,15 @@ func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
 	return v.SubmitGPU(frame.GPUFrame())
 }
 
+func (v *windowsViewer) SupportsGPUFormat(format desktopgpu.Format) bool {
+	if v == nil {
+		return false
+	}
+	v.rendererMu.RLock()
+	defer v.rendererMu.RUnlock()
+	return v.renderer != nil && v.renderer.SupportsGPUFormat(format)
+}
+
 func (v *windowsViewer) D3D11Device() uintptr {
 	if v == nil {
 		return 0

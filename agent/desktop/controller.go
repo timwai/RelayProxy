@@ -2,9 +2,9 @@ package desktop
 
 import (
 	"bytes"
-	"fmt"
 	"context"
 	"errors"
+	"fmt"
 	"image/jpeg"
 	"log"
 	"strings"

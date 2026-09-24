@@ -41,7 +41,6 @@ func I444ToAYUV(src []byte, width, height, stride int, dst []byte) ([]byte, erro
 	return dst, nil
 }
 
-
 // AYUVToI444 unpacks DXGI AYUV system-memory rows (V,U,Y,A) into tightly
 // packed planar 8-bit I444. The alpha byte is intentionally ignored.
 func AYUVToI444(src []byte, width, height, stride int, dst []byte) ([]byte, error) {

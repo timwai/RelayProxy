@@ -304,3 +304,29 @@ func TestDesktopResolutionModeFollowsViewport(t *testing.T) {
 		t.Fatal("controller session reported disabled viewport follow as enabled")
 	}
 }
+
+
+func TestRequestDisplayRejectsVirtualDesktopForPerDisplayBackends(t *testing.T) {
+	for _, backend := range []protocol.DesktopCaptureBackend{
+		protocol.DesktopCaptureDXGI,
+		protocol.DesktopCaptureWGC,
+	} {
+		session := &ControllerSession{
+			done: make(chan struct{}),
+			options: protocol.RemoteDesktopConnectOptions{
+				CaptureBackend: backend,
+			},
+			videoConfig: protocol.DesktopVideoConfig{
+				Generation: 1,
+				Codec:      "h264",
+				DisplayID:  "20",
+			},
+		}
+		if err := session.RequestDisplay(context.Background(), "20"); err != nil {
+			t.Fatalf("%s same-display request failed: %v", backend, err)
+		}
+		if err := session.RequestDisplay(context.Background(), ""); err == nil {
+			t.Fatalf("%s accepted virtual-desktop switch", backend)
+		}
+	}
+}

@@ -83,6 +83,8 @@ func NormalizeCodecPreference(value string) string {
 		return "jpeg"
 	case "h264", "avc", "avc1":
 		return "h264"
+	case "h265", "hevc", "hvc1", "hev1":
+		return "h265"
 	default:
 		return "auto"
 	}

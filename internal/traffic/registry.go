@@ -273,6 +273,22 @@ func (r *Record) Finish(state string, err error) {
 	}
 }
 
+// ClearRecent removes completed connection history without interrupting active
+// connections or resetting the traffic byte counters for the current process.
+func (r *Registry) ClearRecent() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recent = nil
+	r.recentHead = 0
+	// Start a fresh connection-count window. Active connections are retained and
+	// remain part of the new total; unlisted active records are still omitted.
+	r.total = uint64(len(r.active) + r.unlistedActive)
+	r.omitted = uint64(r.unlistedActive)
+}
+
 func (r *Registry) Snapshot() Snapshot {
 	if r == nil {
 		return Snapshot{Connections: []Connection{}, RateWindow: 2, SampledAt: time.Now()}

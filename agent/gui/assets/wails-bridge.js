@@ -10,6 +10,7 @@
 
   window.goOpenConnections = () => invoke('OpenConnections');
   window.goGetConnections = () => invoke('GetConnections');
+  window.goClearConnections = () => invoke('ClearConnections');
   window.goGetStatus = () => invoke('GetStatus');
   window.goGetLogs = () => invoke('GetLogs');
   window.goClearLogs = () => invoke('ClearLogs');

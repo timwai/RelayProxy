@@ -40,6 +40,12 @@ func (s *WailsService) GetConnections() (string, error) {
 	return string(data), nil
 }
 
+func (s *WailsService) ClearConnections() {
+	if s != nil && s.owner != nil && s.owner.bridge != nil {
+		s.owner.bridge.ClearConnections()
+	}
+}
+
 func (s *WailsService) GetStatus() (string, error) {
 	if s == nil || s.owner == nil {
 		return "{}", nil

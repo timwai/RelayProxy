@@ -161,6 +161,10 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/select-exit", w.selectExit)
 	mux.HandleFunc("POST /api/autostart", w.setAutostart)
 	mux.HandleFunc("GET /api/connections", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetConnections()) })
+	mux.HandleFunc("DELETE /api/connections", func(rw http.ResponseWriter, _ *http.Request) {
+		w.bridge.ClearConnections()
+		writeWebJSON(rw, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("GET /api/config-path", func(rw http.ResponseWriter, _ *http.Request) {
 		writeWebJSON(rw, map[string]string{"path": w.bridge.ConfigPath()})
 	})
@@ -382,6 +386,7 @@ const webBridgeJS = `(function () {
   window.goSetAutostart = function (enabled) { return json('/api/autostart', 'POST', {enabled:enabled}); };
   window.goOpenConnections = async function () { window.open('/connections', '_blank', 'noopener'); return 'ok'; };
   window.goGetConnections = function () { return request('/api/connections'); };
+  window.goClearConnections = function () { return request('/api/connections', {method:'DELETE'}); };
   window.goOpenConfigDir = async function () { var out = JSON.parse(await request('/api/config-path')); alert('配置文件：' + out.path); };
   window.goQuit = function () { return json('/api/quit', 'POST', {}); };
 })();`

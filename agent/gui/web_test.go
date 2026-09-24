@@ -249,3 +249,57 @@ func TestWebAcceptsNonLoopbackListener(t *testing.T) {
 		t.Fatal("0.0.0.0 listener was incorrectly marked as loopback")
 	}
 }
+
+func TestConnectionsPageSupportsStatusFilterClearAndNewestFirst(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/connections", nil))
+	if page.Code != http.StatusOK {
+		t.Fatalf("connections page status = %d", page.Code)
+	}
+	for _, want := range []string{
+		`id="state-filter"`,
+		`value="connecting"`,
+		`value="active"`,
+		`value="closed"`,
+		`value="failed"`,
+		`value="rejected"`,
+		`id="clear"`,
+		`data-sort="started_at"`,
+		`.state.connecting`,
+		`.state.active`,
+		`.state.closed`,
+		`.state.failed`,
+		`.state.rejected`,
+	} {
+		if !strings.Contains(page.Body.String(), want) {
+			t.Fatalf("connections page missing %q", want)
+		}
+	}
+
+	script := httptest.NewRecorder()
+	handler.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/connections.js", nil))
+	for _, want := range []string{
+		"sort = 'started_at'",
+		"state !== 'all' && row.state !== state",
+		"window.goClearConnections",
+		"startedAt(record.started_at)",
+	} {
+		if !strings.Contains(script.Body.String(), want) {
+			t.Fatalf("connections script missing %q", want)
+		}
+	}
+
+	clear := httptest.NewRecorder()
+	handler.ServeHTTP(clear, httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/api/connections", nil))
+	if clear.Code != http.StatusOK || !strings.Contains(clear.Body.String(), `"ok":true`) {
+		t.Fatalf("clear connections response = %d %s", clear.Code, clear.Body.String())
+	}
+
+	bridgeJS := httptest.NewRecorder()
+	handler.ServeHTTP(bridgeJS, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
+	if !strings.Contains(bridgeJS.Body.String(), "goClearConnections") {
+		t.Fatal("browser bridge missing clear connections method")
+	}
+}

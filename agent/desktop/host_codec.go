@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"strings"
 	"time"
 
 	desktopcodec "relayproxy/agent/desktop/codec"
@@ -219,6 +220,43 @@ func sendVideoConfig(ctx context.Context, conn *desktopmedia.MediaConn, cfg prot
 		Type:        protocol.DesktopSessionVideoConfig,
 		VideoConfig: &cfg,
 	})
+}
+
+func (h *Host) switchSessionDisplay(
+	ctx context.Context,
+	current HostConfig,
+	displayID string,
+) (HostConfig, error) {
+	if h == nil {
+		return current, errors.New("Relay Desktop host is unavailable")
+	}
+	displayID = strings.TrimSpace(displayID)
+	if displayID == current.DisplayID {
+		return current, nil
+	}
+	source, ok := h.source.(SessionCaptureSource)
+	if !ok {
+		return current, errors.New("capture backend does not support runtime display switching")
+	}
+
+	next := current
+	next.DisplayID = displayID
+	if err := source.BeginSession(ctx, next); err != nil {
+		return current, fmt.Errorf("switch desktop capture to display %q: %w", displayID, err)
+	}
+	if input, ok := h.input.(SessionInputSink); ok {
+		if err := input.BeginInputSession(ctx, next); err != nil {
+			rollbackErr := source.BeginSession(ctx, current)
+			if rollbackErr != nil {
+				return current, errors.Join(
+					fmt.Errorf("switch desktop input to display %q: %w", displayID, err),
+					fmt.Errorf("restore previous desktop capture display %q: %w", current.DisplayID, rollbackErr),
+				)
+			}
+			return current, fmt.Errorf("switch desktop input to display %q: %w", displayID, err)
+		}
+	}
+	return next, nil
 }
 
 func (h *Host) streamSessionFrames(

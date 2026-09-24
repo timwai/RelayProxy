@@ -110,7 +110,6 @@ func TestNormalizedPointerUsesVisibleMediaRect(t *testing.T) {
 	}
 }
 
-
 func TestNativeViewerFullscreenShortcut(t *testing.T) {
 	altContext := uintptr(1 << 29)
 	if !nativeViewerFullscreenShortcut(win.WM_SYSKEYDOWN, win.VK_RETURN, altContext) {

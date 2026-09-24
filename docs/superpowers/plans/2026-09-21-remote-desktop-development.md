@@ -679,6 +679,20 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #919 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #609 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：给 P2P rendezvous / `RDPControlMessage` / target media association 增加逻辑 Desktop SessionID，以 `(ControllerID, SessionID)` 唯一标识并发 direct media；随后让每个 Viewer independently upgrade/fallback Relay ↔ P2P。
 
+### 0.2.55 RD3 Independent Multi-Stream P2P Binding（已进入 main）
+
+- Relay Desktop 媒体握手与 P2P control plane 新增向后兼容的 `DesktopSessionID`；Controller 在创建逻辑桌面 session 后即把同一个 ID 带入 Relay media request 与 `desktop_media` rendezvous，旧单流调用保持空 ID 兼容。
+- P2P `Session / Lease` 保存并在 connect request/response/notify、candidate update、lease renew 与 session close 中完整透传 `DesktopSessionID`，避免后续重协商或候选更新丢失窗口身份。
+- Target 侧 Relay media 与 direct application path 不再只按 `ControllerID` 关联，改为 `(ControllerID, DesktopSessionID)` 复合键；同一 Controller 的多个窗口可以并行建立 direct path，不会把 P2P socket 绑定到错误媒体流。
+- Agent Controller 侧从单一 `desktopP2PSession` 演进为 `desktopP2PSessions[sessionID]`；每个 Relay Desktop session 独立执行 P2P 建连、质量监测、Relay ↔ P2P 切换、退避重试和关闭清理。
+- 多流场景不再主动关闭 primary P2P，也不再因为活动 stream > 1 停止 P2P retry；primary/secondary Viewer 均可独立升级为 `udp_p2p`，某一窗口 direct path 丢失或质量降级只回退该窗口的 Relay Datagram。
+- primary 替换、单 session 关闭、Tunnel replacement、global disconnect 与 Agent shutdown 均按 session 去重关闭 direct leases，旧 direct lease 的异步 OnClose 不会误删同一窗口已经重连的新 lease。
+- Target Host 新增可选 `HostSessionHandler` 扩展，将逻辑 session ID 暴露给多流 Host wrapper；旧 `HostHandler` 实现无需修改即可继续工作。
+- 新增 per-session P2P eligibility、Relay media SessionID、P2P manager SessionID 与 session-aware Host handler 回归。
+- 代表实现 PR：#104；merge `ffceef7`。
+- 验证：Go CI #922 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #612 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：进入 RD3 剩余的 4:4:4 / 高色彩质量链路设计与实现，同时保留 Windows 双机多显示器、多窗口 P2P 与跨 DPI/负坐标布局实测作为发布前验证项。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
@@ -809,7 +823,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 热插拔 + 独立 Relay 多流/多窗口已完成，P2P 多流 / 4:4:4 待开发
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 热插拔 + 独立多流/多窗口 P2P 已完成，4:4:4 待开发
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

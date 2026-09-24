@@ -23,11 +23,13 @@ func TestH264WithSequenceHeaderAvoidsDuplicateParameterSets(t *testing.T) {
 	}
 }
 
-func TestNormalizeCodecPreferenceDoesNotEnableH265BeforeSessionSupport(t *testing.T) {
-	if got := NormalizeCodecPreference("h265"); got != "auto" {
-		t.Fatalf("H.265 became selectable before session support: %q", got)
+func TestNormalizeCodecPreferenceSupportsPublicH265(t *testing.T) {
+	for _, value := range []string{"h265", "HEVC", "hvc1", "hev1"} {
+		if got := NormalizeCodecPreference(value); got != "h265" {
+			t.Fatalf("NormalizeCodecPreference(%q)=%q want h265", value, got)
+		}
 	}
-	if got := NormalizeCodecPreference("hevc"); got != "auto" {
-		t.Fatalf("HEVC became selectable before session support: %q", got)
+	if got := NormalizeCodecPreference("h265-validation"); got != "auto" {
+		t.Fatalf("diagnostic sentinel leaked into public codec normalization: %q", got)
 	}
 }

@@ -41,3 +41,62 @@ func TestCloneDesktopDisplaysDoesNotAliasSource(t *testing.T) {
 		t.Fatal("cloned display capabilities alias source storage")
 	}
 }
+
+
+func TestDesktopDisplayRecoveryTarget(t *testing.T) {
+	displays := []protocol.DesktopDisplayCapability{
+		{ID: "10", Name: "Primary", Primary: true},
+		{ID: "20", Name: "Secondary"},
+	}
+
+	tests := []struct {
+		name    string
+		cfg     HostConfig
+		displays []protocol.DesktopDisplayCapability
+		want    string
+		recover bool
+	}{
+		{
+			name: "current display still available",
+			cfg: HostConfig{DisplayID: "20", CaptureBackend: protocol.DesktopCaptureDXGI},
+			displays: displays,
+		},
+		{
+			name: "auto returns to virtual desktop",
+			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureAuto},
+			displays: displays,
+			want: "", recover: true,
+		},
+		{
+			name: "gdi returns to virtual desktop",
+			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureGDI},
+			displays: displays,
+			want: "", recover: true,
+		},
+		{
+			name: "dxgi selects primary",
+			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureDXGI},
+			displays: displays,
+			want: "10", recover: true,
+		},
+		{
+			name: "wgc selects first when no primary",
+			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureWGC},
+			displays: []protocol.DesktopDisplayCapability{{ID:"20"}, {ID:"10"}},
+			want: "20", recover: true,
+		},
+		{
+			name: "per display backend cannot recover with no displays",
+			cfg: HostConfig{DisplayID: "30", CaptureBackend: protocol.DesktopCaptureDXGI},
+			displays: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, recover := desktopDisplayRecoveryTarget(tt.cfg, tt.displays)
+			if got != tt.want || recover != tt.recover {
+				t.Fatalf("recovery target=(%q,%v) want=(%q,%v)", got, recover, tt.want, tt.recover)
+			}
+		})
+	}
+}

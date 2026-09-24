@@ -138,6 +138,11 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c.GUI.Theme != "dark" && c.GUI.Theme != "light" && c.GUI.Theme != "system" {
 		return fmt.Errorf("gui.theme 必须是 dark / light / system")
 	}
+	if p := c.GUI.NativeViewer; p.Width != 0 || p.Height != 0 {
+		if p.Width < 320 || p.Height < 180 || p.Width > 16384 || p.Height > 16384 {
+			return fmt.Errorf("gui.native_viewer 尺寸必须在 320x180 到 16384x16384 之间")
+		}
+	}
 	if c.Mode != "EXIT" && (c.Proxy.SOCKS5.Enabled == nil || *c.Proxy.SOCKS5.Enabled) && (c.Proxy.HTTP.Enabled == nil || *c.Proxy.HTTP.Enabled) &&
 		listenAddressesOverlap(net.JoinHostPort(c.Proxy.SOCKS5.Listen, fmt.Sprint(c.Proxy.SOCKS5.Port)), net.JoinHostPort(c.Proxy.HTTP.Listen, fmt.Sprint(c.Proxy.HTTP.Port))) {
 		return fmt.Errorf("SOCKS5 与 HTTP 代理的监听地址和端口冲突，请使用不同端口")

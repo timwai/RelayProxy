@@ -155,9 +155,10 @@ type RemoteDesktopStatus struct {
 	Backend     DesktopBackend `json:"backend,omitempty"`
 	TargetID    string         `json:"targetId,omitempty"`
 	TargetName  string         `json:"targetName,omitempty"`
-	DisplayID   string         `json:"displayId,omitempty"`
-	DisplayName string         `json:"displayName,omitempty"`
-	Generation  uint32         `json:"generation,omitempty"`
+	DisplayID      string                `json:"displayId,omitempty"`
+	DisplayName    string                `json:"displayName,omitempty"`
+	CaptureBackend DesktopCaptureBackend `json:"captureBackend,omitempty"`
+	Generation     uint32                `json:"generation,omitempty"`
 	Codec       string         `json:"codec,omitempty"`
 	Width       int            `json:"width,omitempty"`
 	Height      int            `json:"height,omitempty"`

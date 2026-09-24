@@ -105,6 +105,10 @@ func (b *UIBridge) GetRemoteDesktopStatusForSession(sessionID string) protocol.R
 	return b.agent.RemoteDesktopStatusForSession(strings.TrimSpace(sessionID))
 }
 
+func (b *UIBridge) GetRemoteDesktopConnectOptionsForSession(sessionID string) protocol.RemoteDesktopConnectOptions {
+	return b.agent.RemoteDesktopConnectOptionsForSession(strings.TrimSpace(sessionID))
+}
+
 func (b *UIBridge) DisconnectRemoteDesktop() {
 	b.agent.DisconnectRemoteDesktop()
 }

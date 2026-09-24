@@ -315,7 +315,24 @@ func (h *Host) streamSessionFrames(
 			if err == nil || errors.Is(err, context.Canceled) {
 				return err
 			}
+			recoveryGeneration := generation
 			var runtimeErr *h265RuntimeError
+			if errors.As(err, &runtimeErr) {
+				recoveryGeneration = runtimeErr.Generation
+			}
+			if nextConfig, recovered, recoveryErr := h.recoverMissingSessionDisplay(ctx, cfg); recoveryErr != nil {
+				log.Printf("[Desktop] H.265 display-loss recovery check failed: %v", recoveryErr)
+			} else if recovered {
+				nextGeneration, generationErr := nextDesktopMediaGeneration(recoveryGeneration)
+				if generationErr != nil {
+					return generationErr
+				}
+				cfg = nextConfig
+				generation = nextGeneration
+				log.Printf("[Desktop] H.265 recovered missing display; switched to %q generation=%d",
+					cfg.DisplayID, generation)
+				continue
+			}
 			if errors.As(err, &runtimeErr) {
 				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
 				if generationErr != nil {
@@ -349,7 +366,24 @@ func (h *Host) streamSessionFrames(
 			if err == nil || errors.Is(err, context.Canceled) {
 				return err
 			}
+			recoveryGeneration := generation
 			var runtimeErr *h265RuntimeError
+			if errors.As(err, &runtimeErr) {
+				recoveryGeneration = runtimeErr.Generation
+			}
+			if nextConfig, recovered, recoveryErr := h.recoverMissingSessionDisplay(ctx, cfg); recoveryErr != nil {
+				log.Printf("[Desktop] H.265 display-loss recovery check failed: %v", recoveryErr)
+			} else if recovered {
+				nextGeneration, generationErr := nextDesktopMediaGeneration(recoveryGeneration)
+				if generationErr != nil {
+					return generationErr
+				}
+				cfg = nextConfig
+				generation = nextGeneration
+				log.Printf("[Desktop] H.265 recovered missing display; switched to %q generation=%d",
+					cfg.DisplayID, generation)
+				continue
+			}
 			if errors.As(err, &runtimeErr) {
 				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
 				if generationErr != nil {
@@ -383,7 +417,24 @@ func (h *Host) streamSessionFrames(
 			if err == nil || errors.Is(err, context.Canceled) {
 				return err
 			}
+			recoveryGeneration := generation
 			var runtimeErr *h264RuntimeError
+			if errors.As(err, &runtimeErr) {
+				recoveryGeneration = runtimeErr.Generation
+			}
+			if nextConfig, recovered, recoveryErr := h.recoverMissingSessionDisplay(ctx, cfg); recoveryErr != nil {
+				log.Printf("[Desktop] H.264 display-loss recovery check failed: %v", recoveryErr)
+			} else if recovered {
+				nextGeneration, generationErr := nextDesktopMediaGeneration(recoveryGeneration)
+				if generationErr != nil {
+					return generationErr
+				}
+				cfg = nextConfig
+				generation = nextGeneration
+				log.Printf("[Desktop] H.264 recovered missing display; switched to %q generation=%d",
+					cfg.DisplayID, generation)
+				continue
+			}
 			if errors.As(err, &runtimeErr) {
 				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
 				if generationErr != nil {
@@ -415,12 +466,29 @@ func (h *Host) streamSessionFrames(
 		}
 		err := h.streamFrames(ctx, conn, cfg, captureBackend, generation, fpsUpdates, displayUpdates)
 		var displaySwitch *desktopDisplaySwitchError
-		if !errors.As(err, &displaySwitch) {
+		if errors.As(err, &displaySwitch) {
+			if switchErr := applyDisplaySwitch(displaySwitch); switchErr != nil {
+				return switchErr
+			}
+			continue
+		}
+		if err == nil || errors.Is(err, context.Canceled) {
 			return err
 		}
-		if switchErr := applyDisplaySwitch(displaySwitch); switchErr != nil {
-			return switchErr
+		if nextConfig, recovered, recoveryErr := h.recoverMissingSessionDisplay(ctx, cfg); recoveryErr != nil {
+			log.Printf("[Desktop] JPEG display-loss recovery check failed: %v", recoveryErr)
+		} else if recovered {
+			nextGeneration, generationErr := nextDesktopMediaGeneration(generation)
+			if generationErr != nil {
+				return generationErr
+			}
+			cfg = nextConfig
+			generation = nextGeneration
+			log.Printf("[Desktop] JPEG recovered missing display; switched to %q generation=%d",
+				cfg.DisplayID, generation)
+			continue
 		}
+		return err
 	}
 }
 

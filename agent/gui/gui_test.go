@@ -409,7 +409,6 @@ func TestRemoteDesktopFollowViewport(t *testing.T) {
 	}
 }
 
-
 func TestRemoteDesktopRuntimeDisplaySwitcher(t *testing.T) {
 	data, err := assets.ReadFile("assets/index.html")
 	if err != nil {

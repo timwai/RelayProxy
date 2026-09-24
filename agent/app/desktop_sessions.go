@@ -216,12 +216,12 @@ func (a *Agent) connectRelayDesktopSession(
 	}()
 
 	return protocol.RemoteDesktopSessionInfo{
-		SessionID: sessionID,
-		Target:    target,
-		Backend:   protocol.DesktopBackendRelay,
-		State:     "connected",
-		PathTCP:   "relay-control",
-		PathUDP:   "quic-datagram",
+		SessionID:  sessionID,
+		Target:     target,
+		Backend:    protocol.DesktopBackendRelay,
+		State:      "connected",
+		PathTCP:    "relay-control",
+		PathUDP:    "quic-datagram",
 		UDPEnabled: true,
 	}, nil
 }

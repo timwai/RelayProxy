@@ -1219,6 +1219,19 @@ func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDes
 		}, nil
 	case protocol.DesktopBackendRelay:
 		a.DisconnectRDP()
+		a.mu.RLock()
+		desktopHost := a.desktopHost
+		a.mu.RUnlock()
+		var localCodecCapabilities []protocol.DesktopCodecCapability
+		if provider, ok := desktopHost.(interface {
+			CodecCapabilities() []protocol.DesktopCodecCapability
+		}); ok {
+			localCodecCapabilities = provider.CodecCapabilities()
+		}
+		options, err = negotiateRemoteDesktopVideo(target, localCodecCapabilities, options)
+		if err != nil {
+			return protocol.RemoteDesktopSessionInfo{}, err
+		}
 		options, err = negotiateRemoteDesktopAudio(target, options)
 		if err != nil {
 			return protocol.RemoteDesktopSessionInfo{}, err

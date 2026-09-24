@@ -64,18 +64,20 @@ type DesktopCaptureCapability struct {
 const DesktopCodecH265Validation = "h265-validation"
 
 type DesktopCodecCapability struct {
-	Codec      string `json:"codec"`
-	Encoder    string `json:"encoder,omitempty"`
-	Hardware   bool   `json:"hardware,omitempty"`
-	Encode     bool   `json:"encode,omitempty"`
-	Decode     bool   `json:"decode,omitempty"`
-	Chroma420  bool   `json:"chroma420,omitempty"`
-	Chroma444  bool   `json:"chroma444,omitempty"`
-	BitDepth8  bool   `json:"bitDepth8,omitempty"`
-	BitDepth10 bool   `json:"bitDepth10,omitempty"`
-	MaxWidth   int    `json:"maxWidth,omitempty"`
-	MaxHeight  int    `json:"maxHeight,omitempty"`
-	MaxFPS     int    `json:"maxFps,omitempty"`
+	Codec        string   `json:"codec"`
+	Encoder      string   `json:"encoder,omitempty"`
+	Hardware     bool     `json:"hardware,omitempty"`
+	Encode       bool     `json:"encode,omitempty"`
+	Decode       bool     `json:"decode,omitempty"`
+	Chroma420    bool     `json:"chroma420,omitempty"`
+	Chroma444    bool     `json:"chroma444,omitempty"`
+	EncodeChroma []string `json:"encodeChroma,omitempty"`
+	DecodeChroma []string `json:"decodeChroma,omitempty"`
+	BitDepth8    bool     `json:"bitDepth8,omitempty"`
+	BitDepth10   bool     `json:"bitDepth10,omitempty"`
+	MaxWidth     int      `json:"maxWidth,omitempty"`
+	MaxHeight    int      `json:"maxHeight,omitempty"`
+	MaxFPS       int      `json:"maxFps,omitempty"`
 }
 
 type DesktopDisplayCapability struct {

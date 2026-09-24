@@ -42,13 +42,12 @@ func TestCloneDesktopCodecCapabilitiesDeepCopiesDirectionalChroma(t *testing.T) 
 	}
 }
 
-
 func TestCloneDesktopGPUCapabilityDeepCopiesFormats(t *testing.T) {
 	original := &DesktopGPUCapability{
-		Backend:        "d3d11",
-		DecodeZeroCopy: true,
+		Backend:         "d3d11",
+		DecodeZeroCopy:  true,
 		DisplayZeroCopy: true,
-		Formats:        []string{"nv12", "ayuv"},
+		Formats:         []string{"nv12", "ayuv"},
 	}
 	cloned := CloneDesktopGPUCapability(original)
 	if cloned == nil {

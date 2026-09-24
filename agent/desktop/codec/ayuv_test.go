@@ -38,3 +38,26 @@ func TestI444ToAYUVHonorsPlaneStride(t *testing.T) {
 		t.Fatalf("AYUV=%v want=%v", got, want)
 	}
 }
+
+
+func TestAYUVToBGRAPreservesDominantColors(t *testing.T) {
+	i444 := []byte{
+		63, 173,
+		102, 42,
+		240, 26,
+	}
+	ayuv, err := I444ToAYUV(i444, 2, 1, 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bgra, err := AYUVToBGRA(ayuv, 2, 1, 8, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int(bgra[2]) <= int(bgra[1]) || int(bgra[2]) <= int(bgra[0]) {
+		t.Fatalf("first pixel lost red dominance: %v", bgra[:4])
+	}
+	if int(bgra[5]) <= int(bgra[4]) || int(bgra[5]) <= int(bgra[6]) {
+		t.Fatalf("second pixel lost green dominance: %v", bgra[4:8])
+	}
+}

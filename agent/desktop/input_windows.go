@@ -85,12 +85,12 @@ func (s *windowsInputSink) BeginInputSession(ctx context.Context, cfg HostConfig
 	if s == nil {
 		return nil
 	}
-	s.mu.Lock()
-	s.displayMapped = false
-	s.displayBounds = screencapture.Rect{}
-	s.virtualBounds = screencapture.Rect{}
-	s.mu.Unlock()
 	if cfg.DisplayID == "" {
+		s.mu.Lock()
+		s.displayMapped = false
+		s.displayBounds = screencapture.Rect{}
+		s.virtualBounds = screencapture.Rect{}
+		s.mu.Unlock()
 		return nil
 	}
 	displays, err := screencapture.Displays(ctx)

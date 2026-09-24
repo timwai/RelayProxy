@@ -17,6 +17,10 @@ func TestH264ProbeCapability(t *testing.T) {
 	if !capability.Encode || !capability.Decode || !capability.Hardware || !capability.Chroma420 || !capability.BitDepth8 {
 		t.Fatalf("incomplete H.264 capability: %+v", capability)
 	}
+	if len(capability.EncodeChroma) != 1 || capability.EncodeChroma[0] != "420" ||
+		len(capability.DecodeChroma) != 1 || capability.DecodeChroma[0] != "420" {
+		t.Fatalf("missing directional H.264 chroma: %+v", capability)
+	}
 }
 
 func TestH264ProbeHardwareRequiresBothDirections(t *testing.T) {
@@ -51,6 +55,10 @@ func TestH265ProbeCapability(t *testing.T) {
 	if !capability.Encode || !capability.Decode || !capability.Hardware ||
 		!capability.Chroma420 || !capability.BitDepth8 {
 		t.Fatalf("incomplete H.265 capability: %+v", capability)
+	}
+	if len(capability.EncodeChroma) != 1 || capability.EncodeChroma[0] != "420" ||
+		len(capability.DecodeChroma) != 1 || capability.DecodeChroma[0] != "420" {
+		t.Fatalf("missing directional H.265 chroma: %+v", capability)
 	}
 }
 
@@ -123,5 +131,31 @@ func TestH265CapabilityDoesNotAdvertisePartialOneVPL444(t *testing.T) {
 	}
 	if capability.Chroma420 || capability.BitDepth8 {
 		t.Fatalf("empty Media Foundation probe advertised 4:2:0: %+v", capability)
+	}
+}
+
+
+func TestH265CapabilityPreservesMixedDirectional420WithOneVPL(t *testing.T) {
+	capability, available := H265Capability(
+		H265Probe{HardwareDecoderCount: 1},
+		OneVPLProbe{
+			DispatcherAvailable: true,
+			HardwareRuntime:     true,
+			HEVC444Encode:       true,
+			HEVC444Decode:       true,
+		},
+	)
+	if !available {
+		t.Fatal("mixed HEVC capability was not available")
+	}
+	if capability.Chroma420 {
+		t.Fatalf("legacy shared 4:2:0 flag should be conservative: %+v", capability)
+	}
+	if len(capability.EncodeChroma) != 1 || capability.EncodeChroma[0] != "444" {
+		t.Fatalf("encode chroma=%v want [444]", capability.EncodeChroma)
+	}
+	if len(capability.DecodeChroma) != 2 ||
+		capability.DecodeChroma[0] != "420" || capability.DecodeChroma[1] != "444" {
+		t.Fatalf("decode chroma=%v want [420 444]", capability.DecodeChroma)
 	}
 }

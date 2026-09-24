@@ -44,8 +44,8 @@ func (p H264Probe) Capability() protocol.DesktopCodecCapability {
 }
 
 // H265Probe summarizes HEVC/H.265 transforms exposed by Media Foundation.
-// It is intentionally separate from the advertised Host codec list until the
-// full H.265 encode/decode session path is implemented.
+// Public Relay Desktop negotiation advertises this capability only when the
+// current machine exposes at least an HEVC encoder or decoder.
 type H265Probe struct {
 	MediaFoundation      bool
 	HardwareEncoderCount int

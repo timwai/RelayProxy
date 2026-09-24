@@ -798,6 +798,13 @@ func (s *ControllerSession) TargetID() string {
 	return s.targetID
 }
 
+func (s *ControllerSession) CaptureBackendPreference() protocol.DesktopCaptureBackend {
+	if s == nil || s.options.CaptureBackend == "" {
+		return protocol.DesktopCaptureAuto
+	}
+	return s.options.CaptureBackend
+}
+
 func (s *ControllerSession) Done() <-chan struct{} {
 	if s == nil {
 		done := make(chan struct{})

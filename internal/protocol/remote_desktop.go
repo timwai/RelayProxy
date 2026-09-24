@@ -292,10 +292,11 @@ type DesktopCursorState struct {
 }
 
 type DesktopVideoControl struct {
-	TargetBitrate int `json:"targetBitrate,omitempty"`
-	TargetFPS     int `json:"targetFps,omitempty"`
-	TargetWidth   int `json:"targetWidth,omitempty"`
-	TargetHeight  int `json:"targetHeight,omitempty"`
+	TargetBitrate int     `json:"targetBitrate,omitempty"`
+	TargetFPS     int     `json:"targetFps,omitempty"`
+	TargetWidth   int     `json:"targetWidth,omitempty"`
+	TargetHeight  int     `json:"targetHeight,omitempty"`
+	DisplayID     *string `json:"displayId,omitempty"`
 }
 
 const (

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"image/jpeg"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,7 @@ type ControllerSession struct {
 	latestClipboard  protocol.DesktopClipboardState
 	clipboardSendSeq uint64
 	videoConfig      protocol.DesktopVideoConfig
+	followViewport   bool
 	configReady      chan struct{}
 	configOnce       sync.Once
 
@@ -92,8 +94,9 @@ func StartControllerWithOptions(
 		configReady: make(chan struct{}),
 		audioNotify: make(chan struct{}, 1),
 		stats:       newSessionStatsTracker("relay"),
-		diagnostics: newSessionDiagnosticsRecorder(targetID, options, now),
-		options:     options,
+		diagnostics:    newSessionDiagnosticsRecorder(targetID, options, now),
+		options:        options,
+		followViewport: desktopResolutionModeFollowsViewport(options.Resolution.Mode),
 	}
 	go session.controlLoop(ctx)
 	go session.probeLoop(ctx)
@@ -516,7 +519,25 @@ func (s *ControllerSession) markIDRRequestFailed() {
 	s.recoveryMu.Unlock()
 }
 
-func (s *ControllerSession) RequestResolution(ctx context.Context, width, height int) error {
+func desktopResolutionModeFollowsViewport(mode string) bool {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto", "follow_viewport":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *ControllerSession) ViewportFollowEnabled() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.followViewport
+}
+
+func (s *ControllerSession) requestResolution(ctx context.Context, width, height int, followViewport bool) error {
 	if s == nil || !s.Active() {
 		return errors.New("Relay Desktop session is not active")
 	}
@@ -535,13 +556,27 @@ func (s *ControllerSession) RequestResolution(ctx context.Context, width, height
 	if _, err := validateDesktopResolutionTarget(width, height, maxWidth, maxHeight); err != nil {
 		return err
 	}
-	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+	if err := s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
 		Type: protocol.DesktopSessionVideoControl,
 		VideoControl: &protocol.DesktopVideoControl{
 			TargetWidth:  width,
 			TargetHeight: height,
 		},
-	})
+	}); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.followViewport = followViewport
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *ControllerSession) RequestResolution(ctx context.Context, width, height int) error {
+	return s.requestResolution(ctx, width, height, false)
+}
+
+func (s *ControllerSession) RequestViewportResolution(ctx context.Context, width, height int) error {
+	return s.requestResolution(ctx, width, height, true)
 }
 
 func (s *ControllerSession) RequestIDR(ctx context.Context) error {

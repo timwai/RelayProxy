@@ -798,19 +798,23 @@ func NewSystemHost() (*Host, error) {
 	probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	probe := desktopcodec.ProbeH264MediaFoundation(probeCtx)
 	cancel()
-	host.SetCodecCapabilities([]protocol.DesktopCodecCapability{probe.Capability()})
-	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
-		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
-		probe.SoftwareEncoderCount, probe.SoftwareDecoderCount, probe.Error)
 
-	// RD3 discovery only: log HEVC availability for real Intel/NVIDIA/AMD
-	// validation, but do not advertise H.265 until the session codec path and
-	// viewer decoder are both implemented.
 	hevcProbeCtx, hevcCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	hevcProbe := desktopcodec.ProbeH265MediaFoundation(hevcProbeCtx)
 	hevcCancel()
-	log.Printf("[Desktop] Media Foundation H.265 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
+
+	codecCapabilities := []protocol.DesktopCodecCapability{probe.Capability()}
+	if hevcProbe.EncodeAvailable() || hevcProbe.DecodeAvailable() {
+		codecCapabilities = append(codecCapabilities, hevcProbe.Capability())
+	}
+	host.SetCodecCapabilities(codecCapabilities)
+
+	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
+		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
+		probe.SoftwareEncoderCount, probe.SoftwareDecoderCount, probe.Error)
+	log.Printf("[Desktop] Media Foundation H.265 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d advertised=%t error=%q",
 		hevcProbe.MediaFoundation, hevcProbe.HardwareEncoderCount, hevcProbe.HardwareDecoderCount,
-		hevcProbe.SoftwareEncoderCount, hevcProbe.SoftwareDecoderCount, hevcProbe.Error)
+		hevcProbe.SoftwareEncoderCount, hevcProbe.SoftwareDecoderCount,
+		hevcProbe.EncodeAvailable() || hevcProbe.DecodeAvailable(), hevcProbe.Error)
 	return host, nil
 }

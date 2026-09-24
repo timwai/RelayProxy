@@ -232,10 +232,12 @@ type Agent struct {
 	rdpConnection          *rdp.Connection
 	rdpP2P                 *rdpp2p.Manager
 	rdpSession             *rdpp2p.Session
-	desktopHost            desktop.HostHandler
-	desktopConnection      *desktop.ControllerSession
-	desktopP2PSession      *rdpp2p.Session
-	lastDesktopDiagnostics desktop.DesktopDiagnosticsReport
+	desktopHost             desktop.HostHandler
+	desktopConnection       *desktop.ControllerSession
+	desktopPrimarySessionID string
+	desktopConnections      map[string]*desktop.ControllerSession
+	desktopP2PSession       *rdpp2p.Session
+	lastDesktopDiagnostics  desktop.DesktopDiagnosticsReport
 	desktopTargetMedia     map[string]*desktopmedia.MediaConn
 	desktopTargetPaths     map[string]*rdpp2p.ApplicationPath
 	closed                 atomic.Bool
@@ -325,6 +327,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Agent{
 		cfg: cfg, ctx: ctx, cancel: cancel, routingEngine: engine, traffic: traffic.NewRegistry(0, 0),
+		desktopConnections: make(map[string]*desktop.ControllerSession),
 		desktopTargetMedia: make(map[string]*desktopmedia.MediaConn),
 		desktopTargetPaths: make(map[string]*rdpp2p.ApplicationPath),
 	}

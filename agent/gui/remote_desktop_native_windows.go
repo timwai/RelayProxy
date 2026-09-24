@@ -338,6 +338,12 @@ func openNativeDesktopDecoder(
 		Chroma:        videoChroma,
 		BitDepth:      bitDepth,
 	}
+	if videoChroma == desktopcodec.Chroma444 {
+		if codec != "h265" {
+			return nil, fmt.Errorf("Relay Desktop 4:4:4 native decode currently supports H.265 only")
+		}
+		return desktopcodec.OpenOneVPLH265Decoder(ctx, decoderConfig)
+	}
 	var (
 		openShared func(context.Context, desktopcodec.VideoConfig, bool, uintptr) (desktopcodec.Decoder, error)
 		openCPU    func(context.Context, desktopcodec.VideoConfig, bool) (desktopcodec.Decoder, error)

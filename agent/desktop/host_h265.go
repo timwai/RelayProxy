@@ -59,6 +59,17 @@ func openMFH265GenerationEncoder(
 	return desktopcodec.OpenMFH265Encoder(ctx, cfg, preferHardware)
 }
 
+func openPreferredH265GenerationEncoder(
+	ctx context.Context,
+	cfg desktopcodec.VideoConfig,
+	preferHardware bool,
+) (h265GenerationEncoder, error) {
+	if cfg.Chroma == desktopcodec.Chroma444 {
+		return desktopcodec.OpenOneVPLH265Encoder(ctx, cfg)
+	}
+	return openMFH265GenerationEncoder(ctx, cfg, preferHardware)
+}
+
 func openH265GenerationEncoder(
 	ctx context.Context,
 	cfg desktopcodec.VideoConfig,
@@ -297,7 +308,8 @@ func (h *Host) streamH265Frames(
 		gpuInputWidth  int
 		gpuInputHeight int
 	)
-	if source, ok := h.source.(D3D11CaptureSource); ok {
+	if videoCfg.Chroma != desktopcodec.Chroma444 {
+		if source, ok := h.source.(D3D11CaptureSource); ok {
 		candidate, available, captureErr := source.CaptureD3D11(ctx)
 		if captureErr != nil {
 			log.Printf("[Desktop] D3D11 capture probe failed, keeping CPU H.265 path: %v", captureErr)
@@ -317,10 +329,11 @@ func (h *Host) streamH265Frames(
 				log.Printf("[Desktop] D3D11 H.265 initialization failed, keeping CPU path: %v", err)
 			}
 		}
+		}
 	}
 	if !gpuEnabled {
 		encoder, normalizedCfg, sequenceHeader, err = openH265GenerationEncoder(
-			ctx, videoCfg, openMFH265GenerationEncoder,
+			ctx, videoCfg, openPreferredH265GenerationEncoder,
 		)
 		if err != nil {
 			return err
@@ -532,7 +545,7 @@ func (h *Host) streamH265Frames(
 			return cause
 		}
 		nextEncoder, nextConfig, nextSequenceHeader, nextGeneration, openErr :=
-			openNextH265CPUGeneration(ctx, generation, videoCfg, openMFH265GenerationEncoder)
+			openNextH265CPUGeneration(ctx, generation, videoCfg, openPreferredH265GenerationEncoder)
 		if openErr != nil {
 			return errors.Join(cause, fmt.Errorf("CPU H.265 runtime fallback unavailable: %w", openErr))
 		}
@@ -750,7 +763,7 @@ func (h *Host) streamH265Frames(
 				return err
 			}
 			nextEncoder, nextConfig, nextSequenceHeader, err := openH265GenerationEncoder(
-				ctx, nextConfig, openMFH265GenerationEncoder,
+				ctx, nextConfig, openPreferredH265GenerationEncoder,
 			)
 			if err != nil {
 				log.Printf("[Desktop] H.265 encoder rebuild failed target=%dx%d: %v",

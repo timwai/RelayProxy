@@ -1287,6 +1287,7 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 			PathTCP: "relay-control", PathUDP: pathUDP, UDPEnabled: true, UDPActive: true,
 		}
 		config := desktopSession.VideoConfigSnapshot()
+		out.CaptureBackend = desktopSession.CaptureBackendPreference()
 		out.DisplayID = config.DisplayID
 		out.Generation = config.Generation
 		out.Codec = config.Codec

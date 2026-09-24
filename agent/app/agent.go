@@ -1222,54 +1222,7 @@ func (a *Agent) ConnectRemoteDesktop(targetID string, options protocol.RemoteDes
 		}, nil
 	case protocol.DesktopBackendRelay:
 		a.DisconnectRDP()
-		a.mu.RLock()
-		desktopHost := a.desktopHost
-		a.mu.RUnlock()
-		var localCodecCapabilities []protocol.DesktopCodecCapability
-		if provider, ok := desktopHost.(interface {
-			CodecCapabilities() []protocol.DesktopCodecCapability
-		}); ok {
-			localCodecCapabilities = provider.CodecCapabilities()
-		}
-		options, err = negotiateRemoteDesktopVideo(target, localCodecCapabilities, options)
-		if err != nil {
-			return protocol.RemoteDesktopSessionInfo{}, err
-		}
-		options, err = negotiateRemoteDesktopAudio(target, options)
-		if err != nil {
-			return protocol.RemoteDesktopSessionInfo{}, err
-		}
-		session, err := desktop.StartControllerWithOptions(a.ctx, targetID, func(ctx context.Context, id string) (*desktopmedia.MediaConn, error) {
-			dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-			return a.rawDialer.DialDesktopMediaWithOptions(dialCtx, id, options)
-		}, options)
-		if err != nil {
-			return protocol.RemoteDesktopSessionInfo{}, err
-		}
-		a.mu.Lock()
-		if a.closed.Load() || !a.handshakeOK.Load() || a.readySession == nil {
-			a.mu.Unlock()
-			_ = session.Close()
-			return protocol.RemoteDesktopSessionInfo{}, errors.New("relay session is no longer approved")
-		}
-		old := a.desktopConnection
-		oldDirect := a.desktopP2PSession
-		p2pManager := a.rdpP2P
-		a.desktopConnection = session
-		a.desktopP2PSession = nil
-		a.mu.Unlock()
-		if old != nil {
-			_ = old.Close()
-		}
-		if oldDirect != nil {
-			_ = oldDirect.Close()
-		}
-		a.startRelayDesktopDirectPath(session, targetID, p2pManager)
-		return protocol.RemoteDesktopSessionInfo{
-			Target: target, Backend: protocol.DesktopBackendRelay, State: "connected",
-			PathTCP: "relay-control", PathUDP: "quic-datagram", UDPEnabled: true,
-		}, nil
+		return a.connectRelayDesktopSession(target, options, true)
 	default:
 		return protocol.RemoteDesktopSessionInfo{}, fmt.Errorf("unsupported remote desktop backend %q", backend)
 	}

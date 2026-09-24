@@ -320,8 +320,9 @@ type ConfigUpdate struct {
 	GUI     struct {
 		Enabled        *bool   `json:"enabled"`
 		MinimizeToTray *bool   `json:"minimizeToTray"`
-		StartMinimized *bool   `json:"startMinimized"`
-		Theme          *string `json:"theme"`
+		StartMinimized *bool                      `json:"startMinimized"`
+		Theme          *string                    `json:"theme"`
+		NativeViewer   *config.GUIWindowPlacement `json:"nativeViewer"`
 	} `json:"gui"`
 }
 
@@ -506,6 +507,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.GUI.Theme != nil {
 		cfg.GUI.Theme = strings.ToLower(strings.TrimSpace(*in.GUI.Theme))
+	}
+	if in.GUI.NativeViewer != nil {
+		cfg.GUI.NativeViewer = *in.GUI.NativeViewer
 	}
 
 	if err := config.NormalizeAgentConfig(cfg); err != nil {

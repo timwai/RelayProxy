@@ -222,11 +222,15 @@ func (h *Host) streamH265Frames(
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
 	resolutionUpdates <-chan desktopResolutionTarget,
+	displayUpdates <-chan string,
+	startGeneration uint32,
 ) (retErr error) {
 	var advertised bool
 	var advertisedGeneration uint32
 	defer func() {
-		if retErr != nil && advertised && !errors.Is(retErr, context.Canceled) {
+		var displaySwitch *desktopDisplaySwitchError
+		if retErr != nil && advertised && !errors.Is(retErr, context.Canceled) &&
+			!errors.As(retErr, &displaySwitch) {
 			retErr = &h265RuntimeError{Generation: advertisedGeneration, Err: retErr}
 		}
 	}()
@@ -332,7 +336,10 @@ func (h *Host) streamH265Frames(
 		}
 	}()
 
-	generation := uint32(1)
+	generation := startGeneration
+	if generation == 0 {
+		generation = 1
+	}
 	sessionMaxWidth := videoCfg.Width
 	sessionMaxHeight := videoCfg.Height
 	sessionMaxBitrate := cfg.MaxBitrate
@@ -620,6 +627,13 @@ func (h *Host) streamH265Frames(
 			ticker.Reset(frameInterval)
 			applyCaptureFPS(h.source, targetFPS)
 			log.Printf("[Desktop] H.265 capture fps updated=%d", targetFPS)
+
+		case displayID := <-displayUpdates:
+			displayID = strings.TrimSpace(displayID)
+			if displayID == cfg.DisplayID {
+				continue
+			}
+			return &desktopDisplaySwitchError{DisplayID: displayID, Generation: generation}
 
 		case target := <-resolutionUpdates:
 			now := time.Now()

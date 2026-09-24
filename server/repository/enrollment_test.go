@@ -75,11 +75,11 @@ func TestDeleteDeviceAllowsFreshEnrollment(t *testing.T) {
 
 	var deviceCount, identityCount, enrollmentCount, grantCount, rdpServiceCount int
 	for query, dst := range map[string]*int{
-		`SELECT COUNT(*) FROM devices WHERE id = ?`:                    &deviceCount,
-		`SELECT COUNT(*) FROM device_identities WHERE fingerprint = ?`: &identityCount,
+		`SELECT COUNT(*) FROM devices WHERE id = ?`:                             &deviceCount,
+		`SELECT COUNT(*) FROM device_identities WHERE fingerprint = ?`:          &identityCount,
 		`SELECT COUNT(*) FROM device_enrollment_requests WHERE fingerprint = ?`: &enrollmentCount,
-		`SELECT COUNT(*) FROM device_grants WHERE device_id = ?`:        &grantCount,
-		`SELECT COUNT(*) FROM rdp_services WHERE device_id = ?`:        &rdpServiceCount,
+		`SELECT COUNT(*) FROM device_grants WHERE device_id = ?`:                &grantCount,
+		`SELECT COUNT(*) FROM rdp_services WHERE device_id = ?`:                 &rdpServiceCount,
 	} {
 		arg := any(device.ID)
 		if strings.Contains(query, "fingerprint") {

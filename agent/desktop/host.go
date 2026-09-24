@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/jpeg"
 	"log"
+	"strings"
 	"sync"
 	"time"
 

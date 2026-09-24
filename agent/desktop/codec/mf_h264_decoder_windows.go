@@ -224,6 +224,9 @@ func openMFVideoDecoder(
 	if err != nil {
 		return nil, err
 	}
+	if cfg.Chroma != Chroma420 || cfg.BitDepth != 8 {
+		return nil, fmt.Errorf("%w: Media Foundation %s decoder only supports the Relay Desktop 8-bit 4:2:0 path", ErrDecoderUnavailable, spec.Label)
+	}
 	if spec.InputSubtype == nil || spec.Codec == "" {
 		return nil, fmt.Errorf("%w: invalid Media Foundation decoder spec", ErrDecoderUnavailable)
 	}

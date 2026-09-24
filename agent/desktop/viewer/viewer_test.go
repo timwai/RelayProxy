@@ -24,7 +24,6 @@ func TestD3D11FrameValidate(t *testing.T) {
 	}
 }
 
-
 func TestD3D11FrameGPUFrameCompatibility(t *testing.T) {
 	legacy := D3D11Frame{
 		Resource:    7,

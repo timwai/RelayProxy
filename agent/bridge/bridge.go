@@ -89,6 +89,22 @@ func (b *UIBridge) ConnectRemoteDesktop(targetID string, options protocol.Remote
 	return b.agent.ConnectRemoteDesktop(strings.TrimSpace(targetID), options)
 }
 
+func (b *UIBridge) ConnectRemoteDesktopSession(targetID string, options protocol.RemoteDesktopConnectOptions) (protocol.RemoteDesktopSessionInfo, error) {
+	return b.agent.ConnectRemoteDesktopSession(strings.TrimSpace(targetID), options)
+}
+
+func (b *UIBridge) DisconnectRemoteDesktopSession(sessionID string) {
+	b.agent.DisconnectRemoteDesktopSession(strings.TrimSpace(sessionID))
+}
+
+func (b *UIBridge) GetRemoteDesktopStatuses() []protocol.RemoteDesktopStatus {
+	return b.agent.RemoteDesktopStatuses()
+}
+
+func (b *UIBridge) GetRemoteDesktopStatusForSession(sessionID string) protocol.RemoteDesktopStatus {
+	return b.agent.RemoteDesktopStatusForSession(strings.TrimSpace(sessionID))
+}
+
 func (b *UIBridge) DisconnectRemoteDesktop() {
 	b.agent.DisconnectRemoteDesktop()
 }
@@ -99,6 +115,10 @@ func (b *UIBridge) GetRemoteDesktopStatus() protocol.RemoteDesktopStatus {
 
 func (b *UIBridge) GetRemoteDesktopStats() protocol.DesktopSessionStats {
 	return b.agent.RemoteDesktopStats()
+}
+
+func (b *UIBridge) GetRemoteDesktopStatsForSession(sessionID string) protocol.DesktopSessionStats {
+	return b.agent.RemoteDesktopStatsForSession(strings.TrimSpace(sessionID))
 }
 
 func (b *UIBridge) GetRemoteDesktopAudioDiagnostics() desktop.DesktopAudioDiagnostics {
@@ -116,8 +136,17 @@ func (b *UIBridge) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionS
 	b.agent.ReportRemoteDesktopViewerStats(stats)
 }
 
+func (b *UIBridge) ReportRemoteDesktopViewerStatsForSession(sessionID string, stats protocol.DesktopSessionStats) {
+	b.agent.ReportRemoteDesktopViewerStatsForSession(strings.TrimSpace(sessionID), stats)
+}
+
 func (b *UIBridge) RemoteDesktopAudioEnabled() bool {
 	return b != nil && b.agent != nil && b.agent.RemoteDesktopAudioEnabled()
+}
+
+func (b *UIBridge) RemoteDesktopAudioEnabledForSession(sessionID string) bool {
+	return b != nil && b.agent != nil &&
+		b.agent.RemoteDesktopAudioEnabledForSession(strings.TrimSpace(sessionID))
 }
 
 // NextRemoteDesktopAudioFrame is intentionally a Go-only/native-viewer API.
@@ -130,12 +159,30 @@ func (b *UIBridge) NextRemoteDesktopAudioFrame(ctx context.Context) (desktop.Aud
 	return b.agent.NextRemoteDesktopAudioFrame(ctx)
 }
 
+func (b *UIBridge) NextRemoteDesktopAudioFrameForSession(
+	ctx context.Context,
+	sessionID string,
+) (desktop.AudioFrameSnapshot, protocol.DesktopAudioConfig, error) {
+	if b == nil || b.agent == nil {
+		return desktop.AudioFrameSnapshot{}, protocol.DesktopAudioConfig{}, errors.New("Relay Desktop bridge is unavailable")
+	}
+	return b.agent.NextRemoteDesktopAudioFrameForSession(ctx, strings.TrimSpace(sessionID))
+}
+
 func (b *UIBridge) GetRemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	return b.agent.RemoteDesktopFrame()
 }
 
+func (b *UIBridge) GetRemoteDesktopFrameForSession(sessionID string) protocol.RemoteDesktopFrame {
+	return b.agent.RemoteDesktopFrameForSession(strings.TrimSpace(sessionID))
+}
+
 func (b *UIBridge) GetRemoteDesktopCursor(knownCursorID string) protocol.DesktopCursorState {
 	return b.agent.RemoteDesktopCursor(strings.TrimSpace(knownCursorID))
+}
+
+func (b *UIBridge) GetRemoteDesktopCursorForSession(sessionID, knownCursorID string) protocol.DesktopCursorState {
+	return b.agent.RemoteDesktopCursorForSession(strings.TrimSpace(sessionID), strings.TrimSpace(knownCursorID))
 }
 
 func (b *UIBridge) GetRemoteDesktopClipboard(knownSequence uint64) protocol.DesktopClipboardState {
@@ -150,12 +197,20 @@ func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) erro
 	return b.agent.SendRemoteDesktopInput(event)
 }
 
+func (b *UIBridge) SendRemoteDesktopInputForSession(sessionID string, event protocol.DesktopInputEvent) error {
+	return b.agent.SendRemoteDesktopInputForSession(strings.TrimSpace(sessionID), event)
+}
+
 func (b *UIBridge) SetRemoteDesktopResolution(width, height int) error {
 	return b.agent.SetRemoteDesktopResolution(width, height)
 }
 
 func (b *UIBridge) SetRemoteDesktopViewportResolution(width, height int) error {
 	return b.agent.SetRemoteDesktopViewportResolution(width, height)
+}
+
+func (b *UIBridge) SetRemoteDesktopViewportResolutionForSession(sessionID string, width, height int) error {
+	return b.agent.SetRemoteDesktopViewportResolutionForSession(strings.TrimSpace(sessionID), width, height)
 }
 
 func (b *UIBridge) SetRemoteDesktopDisplay(displayID string) error {
@@ -166,8 +221,17 @@ func (b *UIBridge) RemoteDesktopViewportFollowEnabled() bool {
 	return b != nil && b.agent != nil && b.agent.RemoteDesktopViewportFollowEnabled()
 }
 
+func (b *UIBridge) RemoteDesktopViewportFollowEnabledForSession(sessionID string) bool {
+	return b != nil && b.agent != nil &&
+		b.agent.RemoteDesktopViewportFollowEnabledForSession(strings.TrimSpace(sessionID))
+}
+
 func (b *UIBridge) RequestRemoteDesktopIDR() error {
 	return b.agent.RequestRemoteDesktopIDR()
+}
+
+func (b *UIBridge) RequestRemoteDesktopIDRForSession(sessionID string) error {
+	return b.agent.RequestRemoteDesktopIDRForSession(strings.TrimSpace(sessionID))
 }
 
 // GetLogs returns recent running logs

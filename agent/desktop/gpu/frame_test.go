@@ -29,7 +29,6 @@ func TestParseFormat(t *testing.T) {
 	}
 }
 
-
 func TestFrameLifetimeHooks(t *testing.T) {
 	retains := 0
 	releases := 0

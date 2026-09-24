@@ -60,6 +60,18 @@ type ServerConfig struct {
 	} `yaml:"logging"`
 }
 
+type GUIWindowPlacement struct {
+	X         int  `yaml:"x,omitempty" json:"x,omitempty"`
+	Y         int  `yaml:"y,omitempty" json:"y,omitempty"`
+	Width     int  `yaml:"width,omitempty" json:"width,omitempty"`
+	Height    int  `yaml:"height,omitempty" json:"height,omitempty"`
+	Maximized bool `yaml:"maximized,omitempty" json:"maximized,omitempty"`
+}
+
+func (p GUIWindowPlacement) Valid() bool {
+	return p.Width > 0 && p.Height > 0
+}
+
 type AgentConfigFile struct {
 	Server struct {
 		Address    string `yaml:"address"` // e.g. "127.0.0.1" or "relay.example.com"
@@ -123,7 +135,8 @@ type AgentConfigFile struct {
 		Enabled        *bool  `yaml:"enabled"`          // Default: true — launch the desktop window on start
 		MinimizeToTray *bool  `yaml:"minimize_to_tray"` // Default: true — closing the window hides to the tray
 		StartMinimized bool   `yaml:"start_minimized"`  // Default: false — boot straight into the tray
-		Theme          string `yaml:"theme"`            // "dark", "light", or "system"
+		Theme          string             `yaml:"theme"`            // "dark", "light", or "system"
+		NativeViewer   GUIWindowPlacement `yaml:"native_viewer,omitempty"`
 	} `yaml:"gui"`
 
 	Web struct {

@@ -53,16 +53,20 @@ func TestStartControllerForDesktopMediaCarriesPurpose(t *testing.T) {
 	}, "127.0.0.1:9", time.Minute, "")
 	defer m.Close()
 
-	session, err := m.StartControllerForPurpose(context.Background(), "target", protocol.P2PPurposeDesktopMedia)
+	session, err := m.StartControllerForPurposeWithSessionID(context.Background(), "target", protocol.P2PPurposeDesktopMedia, "desktop-window-2")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer session.closeLocal()
-	if got.Type != protocol.RDPControlConnectRequest || got.Purpose != protocol.P2PPurposeDesktopMedia || got.TargetID != "target" {
+	if got.Type != protocol.RDPControlConnectRequest || got.Purpose != protocol.P2PPurposeDesktopMedia ||
+		got.TargetID != "target" || got.DesktopSessionID != "desktop-window-2" {
 		t.Fatalf("control=%+v", got)
 	}
 	if session.Purpose != protocol.P2PPurposeDesktopMedia {
 		t.Fatalf("purpose=%q", session.Purpose)
+	}
+	if session.DesktopSessionID != "desktop-window-2" {
+		t.Fatalf("desktop session id=%q", session.DesktopSessionID)
 	}
 }
 

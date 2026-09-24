@@ -898,14 +898,17 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 					}
 					if !needsCursorComposite {
 						s.baseBGRA = nil
-						err = s.viewer.SubmitD3D11(desktopviewer.D3D11Frame{
-							Resource:    decodedFrame.D3D11.Resource,
-							Subresource: decodedFrame.D3D11.Subresource,
-							Width:       decodedFrame.Width,
-							Height:      decodedFrame.Height,
-						})
+						gpuFrame, gpuErr := decodedFrame.D3D11.GPUFrame(
+							decodedFrame.Width,
+							decodedFrame.Height,
+						)
+						if gpuErr == nil {
+							err = s.viewer.SubmitGPU(gpuFrame)
+						} else {
+							err = gpuErr
+						}
 						if err != nil {
-							log.Printf("[Desktop] zero-copy D3D11 submit failed, falling back to readback: %v", err)
+							log.Printf("[Desktop] zero-copy GPU submit failed, falling back to readback: %v", err)
 						} else {
 							s.gpuFrameActive = true
 							rendered = true

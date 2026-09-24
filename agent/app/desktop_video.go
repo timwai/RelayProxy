@@ -67,6 +67,14 @@ func negotiateRemoteDesktopVideo(
 		if !ok || !localCodec.Decode {
 			return options, fmt.Errorf("this device does not advertise H.265 decode support")
 		}
+		if chroma != protocol.DesktopChroma444 {
+			if !targetCodec.Chroma420 {
+				return options, fmt.Errorf("Relay Desktop target does not advertise H.265 4:2:0 encode support")
+			}
+			if !localCodec.Chroma420 {
+				return options, fmt.Errorf("this device does not advertise H.265 4:2:0 decode support")
+			}
+		}
 	}
 
 	if chroma != protocol.DesktopChroma444 {

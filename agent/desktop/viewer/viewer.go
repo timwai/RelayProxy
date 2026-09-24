@@ -94,6 +94,7 @@ type Native interface {
 	SubmitGPU(desktopgpu.Frame) error
 	SubmitD3D11(D3D11Frame) error
 	D3D11Device() uintptr
+	SupportsGPUFormat(desktopgpu.Format) bool
 	SupportsGPUCursor() bool
 	SetCursor(CursorOverlay) error
 	Reconfigure(width, height int) error

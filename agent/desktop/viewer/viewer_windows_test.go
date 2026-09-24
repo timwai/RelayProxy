@@ -45,7 +45,6 @@ func TestWindowsViewerReconfigureNoopDoesNotNeedWindow(t *testing.T) {
 	}
 }
 
-
 func TestAspectFitRect(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -87,9 +86,9 @@ func TestNormalizedPointerUsesVisibleMediaRect(t *testing.T) {
 	viewer.media.Store(packViewport(1600, 1200))
 
 	tests := []struct {
-		name string
-		x    int
-		y    int
+		name  string
+		x     int
+		y     int
 		wantX uint16
 		wantY uint16
 	}{

@@ -128,3 +128,17 @@ func TestNativeViewerFullscreenShortcut(t *testing.T) {
 		t.Fatal("unrelated system key should not trigger fullscreen")
 	}
 }
+
+
+func TestWindowPlacementRoundTrip(t *testing.T) {
+	for _, tt := range []WindowPlacement{
+		{X: 120, Y: 80, Width: 1280, Height: 720},
+		{X: -1600, Y: 40, Width: 1600, Height: 900, Maximized: true},
+	} {
+		win32 := windowPlacementToWin32(tt)
+		got := windowPlacementFromWin32(win32)
+		if got != tt {
+			t.Fatalf("window placement round trip=%+v want=%+v", got, tt)
+		}
+	}
+}

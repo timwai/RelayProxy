@@ -61,9 +61,11 @@ type testSwitchInputSink struct {
 	failDisplay string
 }
 
-func (s *testSwitchInputSink) ApplyInput(context.Context, protocol.DesktopInputEvent) error { return nil }
-func (s *testSwitchInputSink) ReleaseAll() error                                            { return nil }
-func (s *testSwitchInputSink) EndInputSession() error                                       { return nil }
+func (s *testSwitchInputSink) ApplyInput(context.Context, protocol.DesktopInputEvent) error {
+	return nil
+}
+func (s *testSwitchInputSink) ReleaseAll() error      { return nil }
+func (s *testSwitchInputSink) EndInputSession() error { return nil }
 func (s *testSwitchInputSink) BeginInputSession(_ context.Context, cfg HostConfig) error {
 	s.begin = append(s.begin, cfg)
 	if cfg.DisplayID == s.failDisplay {
@@ -320,7 +322,6 @@ func TestD3D11CaptureFrameLifetime(t *testing.T) {
 		t.Fatal("D3D11 capture frame with nil resource accepted")
 	}
 }
-
 
 func TestQueueLatestStringReplacesPendingDisplay(t *testing.T) {
 	ch := make(chan string, 1)

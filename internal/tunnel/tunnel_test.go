@@ -268,7 +268,17 @@ func TestDefaultYAMUXConfigMatchesRelayStreamCapacity(t *testing.T) {
 
 func TestDefaultQUICConfigKeepAlivePeriod(t *testing.T) {
 	cfg := DefaultQUICConfig()
-	if cfg.KeepAlivePeriod != 30*time.Second {
-		t.Fatalf("KeepAlivePeriod = %v, want 30s", cfg.KeepAlivePeriod)
+	if cfg.KeepAlivePeriod != 0 {
+		t.Fatalf("KeepAlivePeriod = %v, want disabled", cfg.KeepAlivePeriod)
+	}
+	if cfg.MaxIdleTimeout != 120*time.Second {
+		t.Fatalf("MaxIdleTimeout = %v, want 120s", cfg.MaxIdleTimeout)
+	}
+}
+
+func TestDefaultYAMUXConfigDisablesRedundantKeepAlive(t *testing.T) {
+	cfg := DefaultYAMUXConfig()
+	if cfg.EnableKeepAlive {
+		t.Fatal("yamux keepalive must stay disabled; Relay control heartbeat owns liveness")
 	}
 }

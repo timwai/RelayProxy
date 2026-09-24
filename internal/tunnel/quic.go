@@ -111,8 +111,11 @@ type QUICSession struct {
 // stream/connection caps still bound peer-controlled memory growth.
 func DefaultQUICConfig() *quic.Config {
 	return &quic.Config{
-		MaxIdleTimeout:                 60 * time.Second,
-		KeepAlivePeriod:                30 * time.Second,
+		// RelayProxy has an authenticated application-layer Ping/Pong heartbeat.
+		// Keep transport-level keepalive disabled to avoid duplicate idle packets
+		// and radio wakeups, especially on mobile exits.
+		MaxIdleTimeout:                 120 * time.Second,
+		KeepAlivePeriod:                0,
 		InitialStreamReceiveWindow:     4 << 20,
 		MaxStreamReceiveWindow:         32 << 20,
 		InitialConnectionReceiveWindow: 16 << 20,

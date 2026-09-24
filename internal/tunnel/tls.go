@@ -108,8 +108,9 @@ func DefaultYAMUXConfig() *yamux.Config {
 	config.MaxStreamWindowSize = 16 << 20
 	config.StreamOpenTimeout = 15 * time.Second
 	config.StreamCloseTimeout = 30 * time.Second
-	config.EnableKeepAlive = true
-	config.KeepAliveInterval = 15 * time.Second
+	// RelayProxy's control channel already provides end-to-end liveness.
+	// A second yamux keepalive would only add redundant idle wakeups.
+	config.EnableKeepAlive = false
 	return config
 }
 
@@ -119,6 +120,15 @@ func NewTLSSession(conn net.Conn, session *yamux.Session) *TLSSession {
 		conn:     conn,
 		session:  session,
 		openGate: make(chan struct{}, maxConcurrentYAMUXOpens),
+	}
+}
+
+func disableTunnelTCPKeepAlive(conn net.Conn) {
+	switch c := conn.(type) {
+	case *net.TCPConn:
+		_ = c.SetKeepAlive(false)
+	case *tls.Conn:
+		disableTunnelTCPKeepAlive(c.NetConn())
 	}
 }
 
@@ -132,6 +142,7 @@ func DialTLS(ctx context.Context, targetAddr string, tlsConfig *tls.Config, yamu
 		return nil, fmt.Errorf("tcp dial failed: %w", err)
 	}
 	TuneTCPConn(rawConn)
+	disableTunnelTCPKeepAlive(rawConn)
 
 	var sessionConn net.Conn = rawConn
 	if tlsConfig != nil {
@@ -169,6 +180,7 @@ func DialTLS(ctx context.Context, targetAddr string, tlsConfig *tls.Config, yamu
 
 // ServerTLS wraps an incoming TLS net.Conn into a yamux server session
 func ServerTLS(tlsConn net.Conn, yamuxConfig *yamux.Config) (*TLSSession, error) {
+	disableTunnelTCPKeepAlive(tlsConn)
 	if yamuxConfig == nil {
 		yamuxConfig = DefaultYAMUXConfig()
 	}

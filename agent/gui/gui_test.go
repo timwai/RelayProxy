@@ -371,7 +371,6 @@ func TestRemoteDesktopLiveAudioStats(t *testing.T) {
 	}
 }
 
-
 func TestRemoteDesktopFollowViewport(t *testing.T) {
 	data, err := assets.ReadFile("assets/index.html")
 	if err != nil {

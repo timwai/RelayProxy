@@ -467,7 +467,6 @@ func TestSwitchSessionDisplayInputFailureRollsCaptureBack(t *testing.T) {
 	}
 }
 
-
 func TestHostMultiStreamCapabilityRequiresSessionFactory(t *testing.T) {
 	host, err := NewHost(&testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 1, 1))}, DefaultHostConfig())
 	if err != nil {

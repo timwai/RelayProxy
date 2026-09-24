@@ -115,6 +115,10 @@ func H265Capability(mf H265Probe, oneVPL OneVPLProbe) (protocol.DesktopCodecCapa
 		capability.Codec = "h265"
 		capability.Encode = true
 		capability.Decode = true
+		// Legacy peers only understand the shared Chroma420 flag. Once the
+		// oneVPL backend makes Encode/Decode both true, keep that legacy flag
+		// conservative unless Media Foundation also supports both directions.
+		capability.Chroma420 = mf.EncodeAvailable() && mf.DecodeAvailable()
 		capability.Chroma444 = true
 		capability.EncodeChroma = appendDesktopChroma(capability.EncodeChroma, "444")
 		capability.DecodeChroma = appendDesktopChroma(capability.DecodeChroma, "444")

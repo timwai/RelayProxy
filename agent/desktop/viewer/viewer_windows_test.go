@@ -129,7 +129,6 @@ func TestNativeViewerFullscreenShortcut(t *testing.T) {
 	}
 }
 
-
 func TestWindowPlacementRoundTrip(t *testing.T) {
 	for _, tt := range []WindowPlacement{
 		{X: 120, Y: 80, Width: 1280, Height: 720},

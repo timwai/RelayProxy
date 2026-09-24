@@ -16,6 +16,16 @@ type testCaptureSource struct {
 func (s *testCaptureSource) Capture(context.Context) (*image.RGBA, error) { return s.frame, nil }
 func (s *testCaptureSource) Close() error                                 { return nil }
 
+type testClosableCaptureSource struct {
+	testCaptureSource
+	closed bool
+}
+
+func (s *testClosableCaptureSource) Close() error {
+	s.closed = true
+	return nil
+}
+
 type testCapabilityCaptureSource struct {
 	testCaptureSource
 }
@@ -146,6 +156,50 @@ func TestResolveHostConfigClampsUnsafeValues(t *testing.T) {
 	})
 	if cfg.MaxWidth != maxJPEGWidth || cfg.MaxHeight != maxJPEGHeight || cfg.MaxFPS != maxJPEGFPS || cfg.MaxBitrate != maxJPEGBitrate {
 		t.Fatalf("unsafe values were not clamped: %+v", cfg)
+	}
+}
+
+func TestHostSessionFactoryCreatesIsolatedResources(t *testing.T) {
+	host, err := NewHost(&testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 1, 1))}, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	host.SetCodecCapabilities([]protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}})
+
+	var created []*testClosableCaptureSource
+	host.SetSessionFactory(func() (CaptureSource, InputSink, error) {
+		source := &testClosableCaptureSource{
+			testCaptureSource: testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))},
+		}
+		created = append(created, source)
+		return source, &testSwitchInputSink{}, nil
+	})
+
+	first, cleanupFirst, isolated, err := host.isolatedSessionHost()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isolated || first == host {
+		t.Fatal("session factory did not create an isolated host")
+	}
+	second, cleanupSecond, isolated, err := host.isolatedSessionHost()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !isolated || second == host || second == first || first.source == second.source {
+		t.Fatal("session hosts share mutable resources")
+	}
+	if got := first.CodecCapabilities(); len(got) != 1 || got[0].Codec != "h264" {
+		t.Fatalf("isolated host lost codec capabilities: %+v", got)
+	}
+
+	cleanupFirst()
+	if len(created) != 2 || !created[0].closed || created[1].closed {
+		t.Fatalf("unexpected cleanup state: %+v", created)
+	}
+	cleanupSecond()
+	if !created[1].closed {
+		t.Fatal("second isolated capture source was not closed")
 	}
 }
 

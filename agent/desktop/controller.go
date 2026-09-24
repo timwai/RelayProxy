@@ -810,6 +810,26 @@ func (s *ControllerSession) CaptureBackendPreference() protocol.DesktopCaptureBa
 	return s.options.CaptureBackend
 }
 
+func (s *ControllerSession) ConnectOptionsSnapshot() protocol.RemoteDesktopConnectOptions {
+	if s == nil {
+		return protocol.RemoteDesktopConnectOptions{}
+	}
+	options := s.options
+	if options.Audio != nil {
+		value := *options.Audio
+		options.Audio = &value
+	}
+	if options.Clipboard != nil {
+		value := *options.Clipboard
+		options.Clipboard = &value
+	}
+	if options.AutoLaunch != nil {
+		value := *options.AutoLaunch
+		options.AutoLaunch = &value
+	}
+	return options
+}
+
 func (s *ControllerSession) applyDisplayCapabilities(displays []protocol.DesktopDisplayCapability) {
 	if s == nil {
 		return

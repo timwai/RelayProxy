@@ -5,12 +5,12 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log"
 	"slices"
 	"strings"
 	"time"
 
 	"relayproxy/agent/desktop"
+	rdpp2p "relayproxy/agent/rdp/p2p"
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
 )
@@ -23,25 +23,17 @@ func newRemoteDesktopSessionID() (string, error) {
 	return fmt.Sprintf("desktop_%x", raw[:]), nil
 }
 
-func (a *Agent) desktopP2PEligible(controller *desktop.ControllerSession) bool {
+func (a *Agent) desktopP2PEligible(sessionID string, controller *desktop.ControllerSession) bool {
 	if a == nil || controller == nil {
+		return false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
 		return false
 	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	if a.desktopConnection != controller || !controller.Active() {
-		return false
-	}
-	active := 0
-	for _, session := range a.desktopConnections {
-		if session != nil && session.Active() {
-			active++
-			if active > 1 {
-				return false
-			}
-		}
-	}
-	return active <= 1
+	return a.desktopConnections[sessionID] == controller && controller.Active()
 }
 
 func (a *Agent) desktopSessionByID(sessionID string) *desktop.ControllerSession {
@@ -94,13 +86,13 @@ func (a *Agent) removeDesktopSession(sessionID string, session *desktop.Controll
 		return
 	}
 	delete(a.desktopConnections, sessionID)
+	if direct := a.desktopP2PSessions[sessionID]; direct != nil {
+		directToClose = direct
+		delete(a.desktopP2PSessions, sessionID)
+	}
 	if a.desktopPrimarySessionID == sessionID && a.desktopConnection == session {
 		a.desktopConnection = nil
 		a.desktopPrimarySessionID = ""
-		if a.desktopP2PSession != nil {
-			directToClose = a.desktopP2PSession
-			a.desktopP2PSession = nil
-		}
 		ids := make([]string, 0, len(a.desktopConnections))
 		for id, candidate := range a.desktopConnections {
 			if candidate != nil && candidate.Active() {
@@ -157,7 +149,7 @@ func (a *Agent) connectRelayDesktopSession(
 	session, err := desktop.StartControllerWithOptions(a.ctx, target.DeviceID, func(ctx context.Context, id string) (*desktopmedia.MediaConn, error) {
 		dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
-		return a.rawDialer.DialDesktopMediaWithOptions(dialCtx, id, options)
+		return a.rawDialer.DialDesktopMediaForSessionWithOptions(dialCtx, id, sessionID, options)
 	}, options)
 	if err != nil {
 		return protocol.RemoteDesktopSessionInfo{}, err
@@ -172,6 +164,9 @@ func (a *Agent) connectRelayDesktopSession(
 	if a.desktopConnections == nil {
 		a.desktopConnections = make(map[string]*desktop.ControllerSession)
 	}
+	if a.desktopP2PSessions == nil {
+		a.desktopP2PSessions = make(map[string]*rdpp2p.Session)
+	}
 	if !primary && a.desktopConnection == nil {
 		primary = true
 	}
@@ -179,21 +174,18 @@ func (a *Agent) connectRelayDesktopSession(
 	var oldDirect interface{ Close() error }
 	if primary {
 		old = a.desktopConnection
-		if a.desktopPrimarySessionID != "" {
-			delete(a.desktopConnections, a.desktopPrimarySessionID)
-		}
-		if a.desktopP2PSession != nil {
-			oldDirect = a.desktopP2PSession
+		oldPrimaryID := a.desktopPrimarySessionID
+		if oldPrimaryID != "" {
+			delete(a.desktopConnections, oldPrimaryID)
+			if direct := a.desktopP2PSessions[oldPrimaryID]; direct != nil {
+				oldDirect = direct
+				delete(a.desktopP2PSessions, oldPrimaryID)
+			}
 		}
 		a.desktopConnection = session
 		a.desktopPrimarySessionID = sessionID
-		a.desktopP2PSession = nil
 	}
 	a.desktopConnections[sessionID] = session
-	if !primary && a.desktopP2PSession != nil {
-		oldDirect = a.desktopP2PSession
-		a.desktopP2PSession = nil
-	}
 	p2pManager := a.rdpP2P
 	a.mu.Unlock()
 
@@ -202,13 +194,8 @@ func (a *Agent) connectRelayDesktopSession(
 	}
 	if oldDirect != nil {
 		_ = oldDirect.Close()
-		if !primary {
-			log.Printf("[Desktop] disabled primary P2P media while multiple Relay Desktop streams are active")
-		}
 	}
-	if primary {
-		a.startRelayDesktopDirectPath(session, target.DeviceID, p2pManager)
-	}
+	a.startRelayDesktopDirectPath(sessionID, session, target.DeviceID, p2pManager)
 
 	go func() {
 		<-session.Done()

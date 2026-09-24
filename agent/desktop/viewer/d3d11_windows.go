@@ -50,6 +50,8 @@ const (
 	id3d11VideoContextSetStreamDestRect       = 31
 	id3d11VideoContextSetStreamAlpha          = 32
 	id3d11VideoContextVideoProcessorBlt       = 53
+	id3d11DeviceContextClearState              = 110
+	id3d11DeviceContextFlush                   = 111
 )
 
 var (
@@ -657,7 +659,13 @@ func (r *d3d11Renderer) Reconfigure(width, height int) error {
 		return nil
 	}
 	oldWidth, oldHeight := r.width, r.height
+	if r.context != nil {
+		comCall(r.context, id3d11DeviceContextClearState)
+	}
 	r.releaseMediaResources()
+	if r.context != nil {
+		comCall(r.context, id3d11DeviceContextFlush)
+	}
 	if err := r.configureMediaResources(width, height); err != nil {
 		r.releaseMediaResources()
 		if rollbackErr := r.configureMediaResources(oldWidth, oldHeight); rollbackErr != nil {
@@ -964,7 +972,13 @@ func (r *d3d11Renderer) Close() {
 	if r == nil {
 		return
 	}
+	if r.context != nil {
+		comCall(r.context, id3d11DeviceContextClearState)
+	}
 	r.releaseMediaResources()
+	if r.context != nil {
+		comCall(r.context, id3d11DeviceContextFlush)
+	}
 	releaseCOM(r.context)
 	releaseCOM(r.device)
 	releaseCOM(r.swapChain)

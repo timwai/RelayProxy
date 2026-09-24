@@ -425,6 +425,10 @@ func TestRemoteDesktopRuntimeDisplaySwitcher(t *testing.T) {
 		"全部显示器",
 		"等待新媒体 Generation",
 		"releaseDesktopInput()",
+		"status.captureBackend === 'dxgi'",
+		"status.captureBackend === 'wgc'",
+		"option.disabled = !!item.disabled",
+		"全部显示器（当前采集后端不支持）",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop runtime display UI missing %q", want)

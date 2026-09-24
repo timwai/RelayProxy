@@ -432,7 +432,6 @@ func TestConcurrentConfigUpdatesDoNotLoseUnrelatedFields(t *testing.T) {
 	}
 }
 
-
 func TestSaveNativeViewerPlacementPreservesOtherConfig(t *testing.T) {
 	b := newTestBridge(t)
 	before, err := config.LoadAgentConfig(b.configPath)

@@ -13,6 +13,14 @@ const (
 	PixelFormatRGBA PixelFormat = "rgba"
 	PixelFormatBGRA PixelFormat = "bgra"
 	PixelFormatNV12 PixelFormat = "nv12"
+	PixelFormatI444 PixelFormat = "i444"
+)
+
+type ChromaFormat string
+
+const (
+	Chroma420 ChromaFormat = "420"
+	Chroma444 ChromaFormat = "444"
 )
 
 var (
@@ -29,6 +37,8 @@ type VideoConfig struct {
 	FPS               int
 	TargetBitrate     int
 	KeyframeEvery     time.Duration
+	Chroma            ChromaFormat
+	BitDepth          int
 	DisableLowLatency bool
 }
 
@@ -39,6 +49,8 @@ func DefaultVideoConfig() VideoConfig {
 		FPS:           30,
 		TargetBitrate: 6_000_000,
 		KeyframeEvery: 2 * time.Second,
+		Chroma:        Chroma420,
+		BitDepth:      8,
 	}
 }
 
@@ -59,6 +71,12 @@ func NormalizeVideoConfig(cfg VideoConfig) (VideoConfig, error) {
 	if cfg.KeyframeEvery == 0 {
 		cfg.KeyframeEvery = defaults.KeyframeEvery
 	}
+	if cfg.Chroma == "" {
+		cfg.Chroma = defaults.Chroma
+	}
+	if cfg.BitDepth == 0 {
+		cfg.BitDepth = defaults.BitDepth
+	}
 
 	if cfg.Width < 320 || cfg.Width > 3840 || cfg.Width%2 != 0 {
 		return VideoConfig{}, fmt.Errorf("%w: width must be an even value between 320 and 3840", ErrInvalidVideoConfig)
@@ -75,6 +93,14 @@ func NormalizeVideoConfig(cfg VideoConfig) (VideoConfig, error) {
 	if cfg.KeyframeEvery < 250*time.Millisecond || cfg.KeyframeEvery > 30*time.Second {
 		return VideoConfig{}, fmt.Errorf("%w: keyframe interval must be between 250ms and 30s", ErrInvalidVideoConfig)
 	}
+	switch cfg.Chroma {
+	case Chroma420, Chroma444:
+	default:
+		return VideoConfig{}, fmt.Errorf("%w: chroma must be 420 or 444", ErrInvalidVideoConfig)
+	}
+	if cfg.BitDepth != 8 {
+		return VideoConfig{}, fmt.Errorf("%w: only 8-bit video is implemented in the current Relay Desktop pipeline", ErrInvalidVideoConfig)
+	}
 	return cfg, nil
 }
 
@@ -83,6 +109,8 @@ func bitrateOnlyReconfigure(current, next VideoConfig) bool {
 		current.Height == next.Height &&
 		current.FPS == next.FPS &&
 		current.KeyframeEvery == next.KeyframeEvery &&
+		current.Chroma == next.Chroma &&
+		current.BitDepth == next.BitDepth &&
 		current.DisableLowLatency == next.DisableLowLatency
 }
 
@@ -97,7 +125,7 @@ type RawFrame struct {
 
 func (f RawFrame) Validate() error {
 	if f.Width <= 0 || f.Height <= 0 || f.Width%2 != 0 || f.Height%2 != 0 {
-		return fmt.Errorf("%w: H.264 4:2:0 frames require positive even dimensions", ErrInvalidFrame)
+		return fmt.Errorf("%w: video frames require positive even dimensions", ErrInvalidFrame)
 	}
 	switch f.Format {
 	case PixelFormatRGBA, PixelFormatBGRA:
@@ -107,6 +135,10 @@ func (f RawFrame) Validate() error {
 	case PixelFormatNV12:
 		if f.Stride < f.Width || len(f.Pix) < f.Stride*f.Height+f.Stride*(f.Height/2) {
 			return fmt.Errorf("%w: NV12 buffer is too small", ErrInvalidFrame)
+		}
+	case PixelFormatI444:
+		if f.Stride < f.Width || len(f.Pix) < f.Stride*f.Height*3 {
+			return fmt.Errorf("%w: I444 buffer is too small", ErrInvalidFrame)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported pixel format %q", ErrInvalidFrame, f.Format)
@@ -127,7 +159,7 @@ func (f D3D11EncodeFrame) Validate() error {
 		return fmt.Errorf("%w: D3D11 resource is nil", ErrInvalidFrame)
 	}
 	if f.Width <= 0 || f.Height <= 0 || f.Width%2 != 0 || f.Height%2 != 0 {
-		return fmt.Errorf("%w: D3D11 NV12 frames require positive even dimensions", ErrInvalidFrame)
+		return fmt.Errorf("%w: D3D11 encode frames require positive even dimensions", ErrInvalidFrame)
 	}
 	return nil
 }

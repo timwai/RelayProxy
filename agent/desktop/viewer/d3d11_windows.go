@@ -23,6 +23,7 @@ const (
 	d3d11CPUAccessWrite           = 0x10000
 	d3d11MapWriteDiscard          = 4
 
+	dxgiFormatUnknown           = 0
 	dxgiFormatB8G8R8A8UNorm     = 87
 	dxgiFormatNV12              = 103
 	dxgiUsageRenderTargetOutput = 0x20
@@ -581,6 +582,93 @@ func newD3D11Renderer(hwnd win.HWND, width, height int) (*d3d11Renderer, error) 
 	return r, nil
 }
 
+func (r *d3d11Renderer) releaseMediaResources() {
+	if r == nil {
+		return
+	}
+	releaseCOM(r.cursorView)
+	releaseCOM(r.cursorTexture)
+	releaseCOM(r.videoOutputView)
+	releaseCOM(r.videoProcessor)
+	releaseCOM(r.videoEnumerator)
+	releaseCOM(r.videoContext)
+	releaseCOM(r.videoDevice)
+	releaseCOM(r.backBuffer)
+	releaseCOM(r.upload)
+	r.cursorView = nil
+	r.cursorTexture = nil
+	r.videoOutputView = nil
+	r.videoProcessor = nil
+	r.videoEnumerator = nil
+	r.videoContext = nil
+	r.videoDevice = nil
+	r.backBuffer = nil
+	r.upload = nil
+	r.cursorID = ""
+	r.cursorWidth = 0
+	r.cursorHeight = 0
+	r.cursorBGRA = nil
+	r.gpuCursor = false
+	r.outputFrame = 0
+}
+
+func (r *d3d11Renderer) configureMediaResources(width, height int) error {
+	if r == nil || r.device == nil || r.swapChain == nil || width <= 0 || height <= 0 {
+		return ErrUnavailable
+	}
+	hr := comCall(
+		r.swapChain,
+		13, // IDXGISwapChain::ResizeBuffers
+		0,
+		uintptr(width),
+		uintptr(height),
+		dxgiFormatUnknown,
+		0,
+	)
+	if hresultFailed(hr) {
+		return hresultError("IDXGISwapChain.ResizeBuffers", hr)
+	}
+
+	upload, err := createUploadTexture(r.device, width, height)
+	if err != nil {
+		return err
+	}
+	backBuffer, err := getSwapChainBackBuffer(r.swapChain)
+	if err != nil {
+		releaseCOM(upload)
+		return err
+	}
+
+	r.width = width
+	r.height = height
+	r.upload = upload
+	r.backBuffer = backBuffer
+	if protectErr := protectD3D11Multithread(r.device); protectErr == nil {
+		_ = r.initVideoProcessor()
+	}
+	return nil
+}
+
+func (r *d3d11Renderer) Reconfigure(width, height int) error {
+	if r == nil || width <= 0 || height <= 0 {
+		return fmt.Errorf("%w: invalid D3D11 viewer geometry", ErrUnavailable)
+	}
+	if width == r.width && height == r.height {
+		return nil
+	}
+	oldWidth, oldHeight := r.width, r.height
+	r.releaseMediaResources()
+	if err := r.configureMediaResources(width, height); err != nil {
+		r.releaseMediaResources()
+		if rollbackErr := r.configureMediaResources(oldWidth, oldHeight); rollbackErr != nil {
+			return fmt.Errorf("resize D3D11 media to %dx%d: %w (rollback to %dx%d failed: %v)",
+				width, height, err, oldWidth, oldHeight, rollbackErr)
+		}
+		return fmt.Errorf("resize D3D11 media to %dx%d: %w", width, height, err)
+	}
+	return nil
+}
+
 func (r *d3d11Renderer) DeviceHandle() uintptr {
 	if r == nil || r.device == nil || r.videoProcessor == nil {
 		return 0
@@ -876,27 +964,10 @@ func (r *d3d11Renderer) Close() {
 	if r == nil {
 		return
 	}
-	releaseCOM(r.cursorView)
-	releaseCOM(r.cursorTexture)
-	releaseCOM(r.videoOutputView)
-	releaseCOM(r.videoProcessor)
-	releaseCOM(r.videoEnumerator)
-	releaseCOM(r.videoContext)
-	releaseCOM(r.videoDevice)
-	releaseCOM(r.backBuffer)
-	releaseCOM(r.upload)
+	r.releaseMediaResources()
 	releaseCOM(r.context)
 	releaseCOM(r.device)
 	releaseCOM(r.swapChain)
-	r.cursorView = nil
-	r.cursorTexture = nil
-	r.videoOutputView = nil
-	r.videoProcessor = nil
-	r.videoEnumerator = nil
-	r.videoContext = nil
-	r.videoDevice = nil
-	r.backBuffer = nil
-	r.upload = nil
 	r.context = nil
 	r.device = nil
 	r.swapChain = nil

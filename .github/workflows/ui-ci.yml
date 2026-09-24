@@ -98,5 +98,28 @@ jobs:
               exit 1
             }
           }
+      - name: Test audio diagnostics analyzer
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $fixture = '.\\testdata\\desktop-audio-diagnostics-opus-v5.json'
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\analyze-desktop-audio.ps1 -Path $fixture -RequireOpus -MaxLossPercent 5 -MaxQueueDrops 0 -MaxGapSkippedFrames 0 -MaxPlayoutTimeouts 0 -MinCompressionRatio 8
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Expected analyzer baseline fixture to pass, exit=$LASTEXITCODE"
+            exit 1
+          }
+
+          $failure = Start-Process powershell -NoNewWindow -Wait -PassThru -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', '.\\scripts\\analyze-desktop-audio.ps1',
+            '-Path', $fixture,
+            '-RequireOpus',
+            '-MaxLossPercent', '1'
+          )
+          if ($failure.ExitCode -ne 1) {
+            Write-Error "Expected analyzer loss gate to fail with exit 1, exit=$($failure.ExitCode)"
+            exit 1
+          }
       - name: Test desktop packages
         run: go test ./agent/desktop/... ./agent/gui ./cmd/relay-agent -count=1

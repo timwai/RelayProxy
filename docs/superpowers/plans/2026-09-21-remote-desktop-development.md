@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 主链与音频 capture/Opus/PLC/loss-feedback/诊断链均已完成，当前进入 Windows 实机验证阶段；H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #101 已合并，merge `da6dfaec3fd4e01ec473af5dfc09ae845b08c7d2`）
+> 当前开发基线：`main`（PR #102 已合并，merge `98e508a2847707106a86c78d91ce33c4382381e1`）
 
 ## 0. 当前进度
 
@@ -532,14 +532,22 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 `scripts/analyze-desktop-audio.ps1` 与 Windows 实机验证清单：直接读取 GUI 导出的 schema v5 diagnostics JSON，输出 codec/bitrate/compression/loss/PLC/queue 指标，并支持 Opus、loss、queue、gap、timeout、compression ratio 阈值作为可重复测试 gate；Windows CI 解析检查该脚本语法。
 - PR #101 已合并到 `main`，merge `da6dfaec3fd4e01ec473af5dfc09ae845b08c7d2`；Go CI、UI regression、Windows/macOS desktop package 与 PowerShell analyzer syntax 全部通过。
 
-### 0.2.44 RD3 Live Audio Diagnostics UI（当前分支）
+### 0.2.44 RD3 Live Audio Diagnostics UI（已合并 PR #102）
 
 - 新增轻量 `GetRemoteDesktopAudioDiagnostics` binding，只返回当前 `DesktopAudioDiagnostics` snapshot；不会每 2 秒拉取包含最多 1200 条样本的完整 diagnostics report，也不会把 20 ms audio frame 暴露给 WebView。
 - Relay Desktop 预览区新增独立“音频”状态行，实时显示实际 codec、sample rate、channels、target bitrate、queue depth 与基于 received/concealment/skip 的估算 network loss。
 - 只有异常/有事件的指标才追加展示 PLC concealment、large-gap skip、local queue drop、reorder 与 playout timeout，避免正常状态下信息过载。
 - 非 Relay / 未连接状态显示 `音频：--`；音频已启用但尚未收到 `audio_config` 时显示等待音频流，显式关闭时显示已关闭。
 - 新增 Agent/Bridge unavailable 回归与 GUI binding/render token 测试。
-- 下一步：CI 通过后，代码侧音频主链先进入实机验证阶段；在拿到 Windows 双机 diagnostics 前不继续盲调 Opus bitrate/FEC。
+- PR #102 已合并到 `main`，merge `98e508a2847707106a86c78d91ce33c4382381e1`；Go CI、UI regression、Windows/macOS desktop package 全部通过。
+
+### 0.2.45 RD3 Audio Analyzer Execution CI（当前分支）
+
+- 新增 schema v5 Opus diagnostics 固定 fixture，覆盖 `active=opus`、96 kbps payload、16x PCM 压缩比、2% 网络 loss、PLC 与零 queue/gap/timeout 的基线场景。
+- Windows CI 不再只做 `analyze-desktop-audio.ps1` 语法解析，而是实际执行 analyzer：`RequireOpus + MaxLossPercent=5 + queue/gap/timeout=0 + MinCompressionRatio=8` 必须返回 0。
+- 同一 fixture 再以 `MaxLossPercent=1` 执行，必须返回 exit code 1，验证 threshold gate 不只是打印报告而是能真正阻断不合格实机结果。
+- 这一步只验证分析工具语义，不修改任何生产音频参数；Opus bitrate/FEC 仍等待 Windows 双机实测数据。
+- 下一步：CI 通过后合入，随后音频代码侧暂停调参，转向下一项不依赖实机硬件的 Remote Desktop 收尾工作。
 
 ### 0.3 本轮进度（2026-09-22）
 

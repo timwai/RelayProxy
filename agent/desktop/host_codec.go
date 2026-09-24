@@ -234,6 +234,10 @@ func (h *Host) streamSessionFrames(
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	jpegGeneration := uint32(1)
+	if preference == "h265" && !h.canEncodeH265() {
+		log.Printf("[Desktop] H.265 requested but encoder capability is unavailable; trying H.264 fallback")
+		preference = "h264"
+	}
 	if preference == "h265" && h.canEncodeH265() {
 		if err := h.streamH265Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err

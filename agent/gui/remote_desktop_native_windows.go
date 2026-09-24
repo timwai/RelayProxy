@@ -864,7 +864,8 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 						perf.observeRender(time.Since(renderStarted))
 					}
 				}()
-				if decodedFrame.Format != desktopcodec.PixelFormatNV12 {
+				if decodedFrame.Format != desktopcodec.PixelFormatNV12 &&
+					decodedFrame.Format != desktopcodec.PixelFormatI444 {
 					return
 				}
 
@@ -876,7 +877,8 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 					s.cursorBitmap.Width > 0 && s.cursorBitmap.Height > 0 &&
 					!s.gpuCursor
 
-				if decodedFrame.D3D11 != nil && !needsCursorComposite {
+				if decodedFrame.Format == desktopcodec.PixelFormatNV12 &&
+					decodedFrame.D3D11 != nil && !needsCursorComposite {
 					if s.gpuCursor {
 						if cursorErr := s.viewer.SetCursor(desktopviewer.CursorOverlay{
 							State: s.cursorState, Bitmap: s.cursorBitmap,
@@ -907,24 +909,39 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				}
 
 				s.gpuFrameActive = false
-				nv12 := decodedFrame.Pix
-				if decodedFrame.D3D11 != nil {
-					nv12, err = decodedFrame.D3D11.ReadNV12()
+				switch decodedFrame.Format {
+				case desktopcodec.PixelFormatNV12:
+					nv12 := decodedFrame.Pix
+					if decodedFrame.D3D11 != nil {
+						nv12, err = decodedFrame.D3D11.ReadNV12()
+						if err != nil {
+							log.Printf("[Desktop] D3D11 surface readback failed: %v", err)
+							return
+						}
+					}
+					converted, err = desktopcodec.NV12ToBGRA(
+						nv12,
+						decodedFrame.Width,
+						decodedFrame.Height,
+						decodedFrame.Stride,
+						converted,
+					)
 					if err != nil {
-						log.Printf("[Desktop] D3D11 surface readback failed: %v", err)
+						log.Printf("[Desktop] native viewer NV12 conversion failed: %v", err)
 						return
 					}
-				}
-				converted, err = desktopcodec.NV12ToBGRA(
-					nv12,
-					decodedFrame.Width,
-					decodedFrame.Height,
-					decodedFrame.Stride,
-					converted,
-				)
-				if err != nil {
-					log.Printf("[Desktop] native viewer NV12 conversion failed: %v", err)
-					return
+				case desktopcodec.PixelFormatI444:
+					converted, err = desktopcodec.I444ToBGRA(
+						decodedFrame.Pix,
+						decodedFrame.Width,
+						decodedFrame.Height,
+						decodedFrame.Stride,
+						converted,
+					)
+					if err != nil {
+						log.Printf("[Desktop] native viewer I444 conversion failed: %v", err)
+						return
+					}
 				}
 				s.baseBGRA = append(s.baseBGRA[:0], converted...)
 				if err = s.present(); err != nil {

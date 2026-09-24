@@ -318,8 +318,8 @@ type ConfigUpdate struct {
 	} `json:"network"`
 	Routing *RoutingConfigUpdate `json:"routing"`
 	GUI     struct {
-		Enabled        *bool   `json:"enabled"`
-		MinimizeToTray *bool   `json:"minimizeToTray"`
+		Enabled        *bool                      `json:"enabled"`
+		MinimizeToTray *bool                      `json:"minimizeToTray"`
 		StartMinimized *bool                      `json:"startMinimized"`
 		Theme          *string                    `json:"theme"`
 		NativeViewer   *config.GUIWindowPlacement `json:"nativeViewer"`

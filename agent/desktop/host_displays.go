@@ -27,6 +27,63 @@ func sameDesktopDisplays(a, b []protocol.DesktopDisplayCapability) bool {
 	return true
 }
 
+func desktopDisplayRecoveryTarget(
+	cfg HostConfig,
+	displays []protocol.DesktopDisplayCapability,
+) (string, bool) {
+	current := cfg.DisplayID
+	if current == "" {
+		return "", false
+	}
+	for _, display := range displays {
+		if display.ID == current {
+			return "", false
+		}
+	}
+	switch cfg.CaptureBackend {
+	case protocol.DesktopCaptureDXGI, protocol.DesktopCaptureWGC:
+		if len(displays) == 0 {
+			return "", false
+		}
+		for _, display := range displays {
+			if display.Primary && display.ID != "" {
+				return display.ID, true
+			}
+		}
+		for _, display := range displays {
+			if display.ID != "" {
+				return display.ID, true
+			}
+		}
+		return "", false
+	default:
+		return "", true
+	}
+}
+
+func (h *Host) recoverMissingSessionDisplay(
+	ctx context.Context,
+	cfg HostConfig,
+) (HostConfig, bool, error) {
+	provider, ok := h.source.(CaptureCapabilitySource)
+	if !ok {
+		return cfg, false, nil
+	}
+	_, displays, err := provider.DesktopCaptureCapabilities(ctx)
+	if err != nil {
+		return cfg, false, err
+	}
+	target, recover := desktopDisplayRecoveryTarget(cfg, displays)
+	if !recover {
+		return cfg, false, nil
+	}
+	next, err := h.switchSessionDisplay(ctx, cfg, target)
+	if err != nil {
+		return cfg, false, err
+	}
+	return next, true, nil
+}
+
 func (h *Host) streamSessionDisplays(
 	ctx context.Context,
 	conn *desktopmedia.MediaConn,

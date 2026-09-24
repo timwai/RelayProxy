@@ -30,33 +30,48 @@ class NetworkBinder(context: Context) {
         val transport = when (mode) {
             MODE_CELLULAR -> NetworkCapabilities.TRANSPORT_CELLULAR
             MODE_WIFI -> NetworkCapabilities.TRANSPORT_WIFI
-            else -> {
-                onAvailable()
-                return
-            }
+            else -> null
         }
-        val networkLabel = if (mode == MODE_WIFI) "Wi-Fi" else "移动数据"
+        val networkLabel = when (mode) {
+            MODE_WIFI -> "Wi-Fi"
+            MODE_CELLULAR -> "移动数据"
+            else -> "默认"
+        }
 
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .addTransportType(transport)
-            .build()
+        val request = transport?.let {
+            NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .addTransportType(it)
+                .build()
+        }
 
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 if (boundNetwork == network) return
+
+                val previous = boundNetwork
                 boundNetwork = network
-                if (connectivity.bindProcessToNetwork(network)) {
-                    onAvailable()
-                } else {
+
+                if (mode != MODE_AUTO && !connectivity.bindProcessToNetwork(network)) {
                     onError("无法将 RelayProxy 进程绑定到${networkLabel}网络")
+                    return
                 }
+
+                // A new matching/default network replaces the previous one.
+                // Tear down the old tunnel first so sockets are recreated on
+                // the new path immediately instead of waiting for heartbeat timeout.
+                if (previous != null && previous != network) {
+                    onLost()
+                }
+                onAvailable()
             }
 
             override fun onLost(network: Network) {
                 if (boundNetwork == network) {
                     boundNetwork = null
-                    connectivity.bindProcessToNetwork(null)
+                    if (mode != MODE_AUTO) {
+                        connectivity.bindProcessToNetwork(null)
+                    }
                     onLost()
                 }
             }
@@ -68,15 +83,23 @@ class NetworkBinder(context: Context) {
 
         callback = cb
         try {
-            if (mode == MODE_WIFI) {
-                // Wi-Fi-only should be passive: wait for an existing Wi-Fi network
-                // instead of keeping an active network request that can increase
-                // scanning / radio wakeups while Wi-Fi is unavailable.
-                connectivity.registerNetworkCallback(request, cb)
-            } else {
-                // Cellular-only is an explicit request to keep cellular available
-                // as the Relay exit even when another default network is active.
-                connectivity.requestNetwork(request, cb)
+            when (mode) {
+                MODE_AUTO -> {
+                    // Observe the system-selected default network. This is passive
+                    // and lets Relay reconnect immediately on Wi-Fi/cellular changes.
+                    connectivity.registerDefaultNetworkCallback(cb)
+                }
+                MODE_WIFI -> {
+                    // Wi-Fi-only should be passive: wait for an existing Wi-Fi network
+                    // instead of keeping an active network request that can increase
+                    // scanning / radio wakeups while Wi-Fi is unavailable.
+                    connectivity.registerNetworkCallback(requireNotNull(request), cb)
+                }
+                else -> {
+                    // Cellular-only is an explicit request to keep cellular available
+                    // as the Relay exit even when another default network is active.
+                    connectivity.requestNetwork(requireNotNull(request), cb)
+                }
             }
         } catch (t: Throwable) {
             callback = null

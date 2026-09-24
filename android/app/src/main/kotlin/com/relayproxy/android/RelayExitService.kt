@@ -146,15 +146,15 @@ class RelayExitService : Service() {
             return
         }
 
-        if (config.networkMode == NetworkBinder.MODE_AUTO) {
-            startCore(config)
-            return
+        val networkLabel = when (config.networkMode) {
+            NetworkBinder.MODE_WIFI -> "Wi-Fi"
+            NetworkBinder.MODE_CELLULAR -> "移动数据"
+            else -> "可用"
         }
-
-        val networkLabel = if (config.networkMode == NetworkBinder.MODE_WIFI) "Wi-Fi" else "移动数据"
         status = waitingStatus("等待${networkLabel}网络")
         updateNotificationIfChanged(force = true)
         scheduleRefresh(WAITING_REFRESH_MS)
+
         val binder = NetworkBinder(this)
         networkBinder = binder
         binder.bind(
@@ -165,7 +165,11 @@ class RelayExitService : Service() {
             },
             onLost = {
                 stopCoreOnly()
-                status = waitingStatus("${networkLabel}断开，等待恢复")
+                status = if (config.networkMode == NetworkBinder.MODE_AUTO) {
+                    waitingStatus("网络已变化，正在重新连接")
+                } else {
+                    waitingStatus("${networkLabel}断开，等待恢复")
+                }
                 requestRefreshSoon()
             },
             onError = { message ->

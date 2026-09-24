@@ -21,73 +21,73 @@ const (
 	oneVPLVideoParamSize = 208
 	oneVPLBitstreamSize  = 72
 
-	oneVPLVideoParamAsyncDepth = 14
+	oneVPLVideoParamAsyncDepth    = 14
 	oneVPLVideoParamBRCMultiplier = 46
-	oneVPLVideoParamFrameInfo = 48
-	oneVPLVideoParamCodecID = 116
-	oneVPLVideoParamCodecProfile = 120
-	oneVPLVideoParamTargetUsage = 126
-	oneVPLVideoParamGopPicSize = 128
-	oneVPLVideoParamGopRefDist = 130
-	oneVPLVideoParamIDRInterval = 134
-	oneVPLVideoParamRateControl = 136
-	oneVPLVideoParamTargetKbps = 142
-	oneVPLVideoParamMaxKbps = 144
-	oneVPLVideoParamIOPattern = 186
+	oneVPLVideoParamFrameInfo     = 48
+	oneVPLVideoParamCodecID       = 116
+	oneVPLVideoParamCodecProfile  = 120
+	oneVPLVideoParamTargetUsage   = 126
+	oneVPLVideoParamGopPicSize    = 128
+	oneVPLVideoParamGopRefDist    = 130
+	oneVPLVideoParamIDRInterval   = 134
+	oneVPLVideoParamRateControl   = 136
+	oneVPLVideoParamTargetKbps    = 142
+	oneVPLVideoParamMaxKbps       = 144
+	oneVPLVideoParamIOPattern     = 186
 
-	oneVPLFrameInfoBitDepthLuma = oneVPLVideoParamFrameInfo + 18
+	oneVPLFrameInfoBitDepthLuma   = oneVPLVideoParamFrameInfo + 18
 	oneVPLFrameInfoBitDepthChroma = oneVPLVideoParamFrameInfo + 20
-	oneVPLFrameInfoFourCC = oneVPLVideoParamFrameInfo + 32
-	oneVPLFrameInfoWidth = oneVPLVideoParamFrameInfo + 36
-	oneVPLFrameInfoHeight = oneVPLVideoParamFrameInfo + 38
-	oneVPLFrameInfoCropW = oneVPLVideoParamFrameInfo + 44
-	oneVPLFrameInfoCropH = oneVPLVideoParamFrameInfo + 46
-	oneVPLFrameInfoFrameRateN = oneVPLVideoParamFrameInfo + 48
-	oneVPLFrameInfoFrameRateD = oneVPLVideoParamFrameInfo + 52
-	oneVPLFrameInfoPicStruct = oneVPLVideoParamFrameInfo + 62
-	oneVPLFrameInfoChroma = oneVPLVideoParamFrameInfo + 64
+	oneVPLFrameInfoFourCC         = oneVPLVideoParamFrameInfo + 32
+	oneVPLFrameInfoWidth          = oneVPLVideoParamFrameInfo + 36
+	oneVPLFrameInfoHeight         = oneVPLVideoParamFrameInfo + 38
+	oneVPLFrameInfoCropW          = oneVPLVideoParamFrameInfo + 44
+	oneVPLFrameInfoCropH          = oneVPLVideoParamFrameInfo + 46
+	oneVPLFrameInfoFrameRateN     = oneVPLVideoParamFrameInfo + 48
+	oneVPLFrameInfoFrameRateD     = oneVPLVideoParamFrameInfo + 52
+	oneVPLFrameInfoPicStruct      = oneVPLVideoParamFrameInfo + 62
+	oneVPLFrameInfoChroma         = oneVPLVideoParamFrameInfo + 64
 
 	oneVPLSurfaceFrameInterface = 0
-	oneVPLSurfaceInfo = 16
-	oneVPLSurfaceData = 88
-	oneVPLSurfaceInfoFourCC = oneVPLSurfaceInfo + 32
-	oneVPLSurfacePitchHigh = oneVPLSurfaceData + 30
-	oneVPLSurfaceTimestamp = oneVPLSurfaceData + 32
-	oneVPLSurfacePitchLow = oneVPLSurfaceData + 46
-	oneVPLSurfaceY = oneVPLSurfaceData + 48
-	oneVPLSurfaceU = oneVPLSurfaceData + 56
-	oneVPLSurfaceV = oneVPLSurfaceData + 64
-	oneVPLSurfaceA = oneVPLSurfaceData + 72
+	oneVPLSurfaceInfo           = 16
+	oneVPLSurfaceData           = 88
+	oneVPLSurfaceInfoFourCC     = oneVPLSurfaceInfo + 32
+	oneVPLSurfacePitchHigh      = oneVPLSurfaceData + 30
+	oneVPLSurfaceTimestamp      = oneVPLSurfaceData + 32
+	oneVPLSurfacePitchLow       = oneVPLSurfaceData + 46
+	oneVPLSurfaceY              = oneVPLSurfaceData + 48
+	oneVPLSurfaceU              = oneVPLSurfaceData + 56
+	oneVPLSurfaceV              = oneVPLSurfaceData + 64
+	oneVPLSurfaceA              = oneVPLSurfaceData + 72
 
 	oneVPLFrameInterfaceRelease = 24
-	oneVPLFrameInterfaceMap = 40
-	oneVPLFrameInterfaceUnmap = 48
+	oneVPLFrameInterfaceMap     = 40
+	oneVPLFrameInterfaceUnmap   = 48
 
-	oneVPLBitstreamData = 40
+	oneVPLBitstreamData       = 40
 	oneVPLBitstreamDataOffset = 48
 	oneVPLBitstreamDataLength = 52
-	oneVPLBitstreamMaxLength = 56
-	oneVPLBitstreamFrameType = 62
+	oneVPLBitstreamMaxLength  = 56
+	oneVPLBitstreamFrameType  = 62
 
-	oneVPLMapWrite = 0x2
+	oneVPLMapWrite                = 0x2
 	oneVPLIOPatternInSystemMemory = 0x02
-	oneVPLChromaYUV444 = 3
-	oneVPLPicStructProgressive = 1
-	oneVPLHEVCProfileRExt = 4
-	oneVPLTargetUsageBalanced = 4
-	oneVPLRateControlVBR = 2
+	oneVPLChromaYUV444            = 3
+	oneVPLPicStructProgressive    = 1
+	oneVPLHEVCProfileRExt         = 4
+	oneVPLTargetUsageBalanced     = 4
+	oneVPLRateControlVBR          = 2
 
-	oneVPLFrameTypeI = 0x0001
+	oneVPLFrameTypeI   = 0x0001
 	oneVPLFrameTypeRef = 0x0040
 	oneVPLFrameTypeIDR = 0x0080
 
-	oneVPLWarnInExecution = 1
-	oneVPLWarnDeviceBusy = 2
+	oneVPLWarnInExecution            = 1
+	oneVPLWarnDeviceBusy             = 2
 	oneVPLWarnIncompatibleVideoParam = 5
-	oneVPLErrNotEnoughBuffer = -5
-	oneVPLErrMoreData = -10
+	oneVPLErrNotEnoughBuffer         = -5
+	oneVPLErrMoreData                = -10
 
-	oneVPLAPIVersion22 = uint32(2<<16 | 2)
+	oneVPLAPIVersion22   = uint32(2<<16 | 2)
 	oneVPLPropAPIVersion = "mfxImplDescription.ApiVersion.Version"
 )
 
@@ -103,11 +103,11 @@ func (p *oneVPLVideoParam) putU32(offset int, value uint32) {
 }
 
 func (p *oneVPLVideoParam) u16(offset int) uint16 {
-	return binary.LittleEndian.Uint16(p[offset:offset+2])
+	return binary.LittleEndian.Uint16(p[offset : offset+2])
 }
 
 func (p *oneVPLVideoParam) u32(offset int) uint32 {
-	return binary.LittleEndian.Uint32(p[offset:offset+4])
+	return binary.LittleEndian.Uint32(p[offset : offset+4])
 }
 
 func alignOneVPLDimension(value int) int {
@@ -489,7 +489,7 @@ func fillOneVPLAYUVSurface(
 		return fmt.Errorf("oneVPL encode surface FourCC=0x%08x, want AYUV", got)
 	}
 	pitch := int(*(*uint16)(unsafe.Pointer(surface + oneVPLSurfacePitchLow))) |
-		int(*(*uint16)(unsafe.Pointer(surface+oneVPLSurfacePitchHigh)))<<16
+		int(*(*uint16)(unsafe.Pointer(surface + oneVPLSurfacePitchHigh)))<<16
 	if pitch < width*4 {
 		return fmt.Errorf("oneVPL AYUV pitch=%d is smaller than visible row=%d", pitch, width*4)
 	}

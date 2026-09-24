@@ -109,9 +109,16 @@ jobs:
             exit 1
           }
 
-          & powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\analyze-desktop-audio.ps1 -Path $fixture -RequireOpus -MaxLossPercent 1
-          if ($LASTEXITCODE -ne 1) {
-            Write-Error "Expected analyzer loss gate to fail with exit 1, exit=$LASTEXITCODE"
+          $failure = Start-Process powershell -NoNewWindow -Wait -PassThru -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', '.\\scripts\\analyze-desktop-audio.ps1',
+            '-Path', $fixture,
+            '-RequireOpus',
+            '-MaxLossPercent', '1'
+          )
+          if ($failure.ExitCode -ne 1) {
+            Write-Error "Expected analyzer loss gate to fail with exit 1, exit=$($failure.ExitCode)"
             exit 1
           }
       - name: Test desktop packages

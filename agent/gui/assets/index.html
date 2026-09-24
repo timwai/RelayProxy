@@ -747,7 +747,7 @@
             <div>
               <label for="desktop-opt-resolution" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">分辨率</label>
               <select id="desktop-opt-resolution" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
-                <option value="auto">自动</option>
+                <option value="auto">跟随窗口（自动）</option>
                 <option value="1280x720">1280×720</option>
                 <option value="1920x1080">1920×1080</option>
                 <option value="2560x1440">2560×1440</option>
@@ -790,12 +790,14 @@
             <div>
               <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">Relay Desktop 预览</div>
               <div id="desktop-viewer-meta" class="text-[10px] text-slate-500 dark:text-slate-400">等待视频帧… · 点击画面后可控制键鼠</div>
-              <div id="desktop-viewer-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">网络统计：--</div>\n              <div id="desktop-viewer-audio-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">音频：--</div>
+              <div id="desktop-viewer-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">网络统计：--</div>
+              <div id="desktop-viewer-audio-stats" class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">音频：--</div>
             </div>
             <div class="flex items-center gap-2">
               <div id="desktop-runtime-resolution-wrap" class="hidden items-center gap-1.5">
                 <select id="desktop-runtime-resolution" title="运行中切换 H.264 分辨率" class="text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
                   <option value="">当前分辨率</option>
+                  <option value="viewport">跟随窗口</option>
                   <option id="desktop-runtime-resolution-max" value="max">最高</option>
                   <option value="960x540">960×540</option>
                   <option value="1280x720">1280×720</option>
@@ -1221,13 +1223,14 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {} };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {}, desktopFollowViewport: false };
     var desktopFrameSeq = 0, desktopFrameGeneration = 0, desktopFrameBusy = false, desktopInputSeq = 0;
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
     var desktopVideoDecoder = null, desktopVideoCodec = '', desktopVideoGeneration = 0, desktopVideoNeedsKeyFrame = true, desktopVideoDecodeErrorAt = 0;
     var desktopCursorSeq = 0, desktopCursorBusy = false, desktopCursorID = '', desktopCursorLast = null;
     var desktopClipboardSeq = 0, desktopClipboardBusy = false, desktopClipboardLocal = '', desktopClipboardReady = false, desktopClipboardErrorAt = 0;
+    var desktopViewportTimer = null, desktopViewportLastWidth = 0, desktopViewportLastHeight = 0, desktopViewportObserver = null;
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1676,6 +1679,7 @@
       if (options.quality && options.quality !== 'auto') parts.push(options.quality);
       if (options.resolution && options.resolution.mode === 'fixed') parts.push(options.resolution.width + '×' + options.resolution.height);
       else if (options.resolution && options.resolution.mode === 'native') parts.push('native');
+      else if (state.desktopFollowViewport) parts.push('跟随窗口');
       if (options.fps) parts.push(options.fps + ' FPS');
       if (options.maxBitrate) parts.push((options.maxBitrate / 1000000) + ' Mbps');
       if (options.displayId) {
@@ -1803,7 +1807,9 @@
       var maxHeight = Number(status.maxHeight || status.height || 0);
       var current = select.options[0];
       current.textContent = status.width && status.height
-        ? '当前 ' + status.width + '×' + status.height + (status.generation ? ' · G' + status.generation : '')
+        ? '当前 ' + status.width + '×' + status.height +
+          (status.generation ? ' · G' + status.generation : '') +
+          (state.desktopFollowViewport ? ' · 跟随窗口' : '')
         : '当前分辨率';
       var maxOption = $('desktop-runtime-resolution-max');
       if (maxOption) {
@@ -1811,7 +1817,7 @@
         maxOption.disabled = !maxWidth || !maxHeight;
       }
       Array.prototype.forEach.call(select.options, function (option, index) {
-        if (index === 0 || !option.value || option.value === 'max') {
+        if (index === 0 || !option.value || option.value === 'max' || option.value === 'viewport') {
           if (option.value !== 'max') option.disabled = false;
           return;
         }
@@ -1820,10 +1826,85 @@
         var height = Number(parts[1] || 0);
         option.disabled = !!(maxWidth && maxHeight && (width > maxWidth || height > maxHeight));
       });
-      select.value = '';
+      select.value = state.desktopFollowViewport ? 'viewport' : '';
       wrap.title = maxWidth && maxHeight
         ? '当前会话上限 ' + maxWidth + '×' + maxHeight + '；切换会递增媒体 Generation 并重建 H.264 编解码器'
         : '运行中切换 H.264 分辨率';
+    }
+
+
+    function resetRemoteDesktopViewportFollow() {
+      clearTimeout(desktopViewportTimer);
+      desktopViewportTimer = null;
+      desktopViewportLastWidth = 0;
+      desktopViewportLastHeight = 0;
+    }
+
+    function remoteDesktopViewportTarget(status) {
+      status = status || {};
+      var stage = $('desktop-viewer-stage');
+      if (!stage) return null;
+      var rect = stage.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
+      var maxWidth = Number(status.maxWidth || status.width || 0);
+      var maxHeight = Number(status.maxHeight || status.height || 0);
+      if (!maxWidth || !maxHeight) return null;
+
+      var deviceScale = Math.max(1, Number(window.devicePixelRatio || 1));
+      var viewportWidth = Math.max(320, Math.floor(rect.width * deviceScale));
+      var viewportHeight = Math.max(180, Math.floor(rect.height * deviceScale));
+      var scale = Math.min(viewportWidth / maxWidth, viewportHeight / maxHeight, 1);
+      var width = Math.floor(maxWidth * scale);
+      var height = Math.floor(maxHeight * scale);
+      width -= width % 2;
+      height -= height % 2;
+      if (width < 320 || height < 180) return null;
+      return { width: width, height: height };
+    }
+
+    function remoteDesktopViewportMayGrow(status) {
+      if (!desktopViewportLastWidth || !desktopViewportLastHeight) return false;
+      var width = Number(status.width || 0);
+      var height = Number(status.height || 0);
+      return Math.abs(width - desktopViewportLastWidth) <= 2 &&
+        Math.abs(height - desktopViewportLastHeight) <= 2;
+    }
+
+    async function applyRemoteDesktopViewportResolution() {
+      desktopViewportTimer = null;
+      if (!state.desktopFollowViewport || !hasFn('goSetRemoteDesktopResolution')) return;
+      var status = state.desktopStatus || {};
+      if (state.tab !== 'desktop' || status.state !== 'connected' || status.backend !== 'relay' ||
+          (status.codec !== 'h264' && status.codec !== 'h265')) return;
+
+      var target = remoteDesktopViewportTarget(status);
+      var currentWidth = Number(status.width || 0);
+      var currentHeight = Number(status.height || 0);
+      if (!target || !currentWidth || !currentHeight) return;
+
+      var shrink = currentWidth > target.width + 2 || currentHeight > target.height + 2;
+      var grow = (currentWidth < target.width - 2 || currentHeight < target.height - 2) &&
+        remoteDesktopViewportMayGrow(status);
+      if (!shrink && !grow) {
+        if (Math.abs(currentWidth - target.width) <= 2 && Math.abs(currentHeight - target.height) <= 2) {
+          desktopViewportLastWidth = target.width;
+          desktopViewportLastHeight = target.height;
+        }
+        return;
+      }
+
+      var raw = await call('goSetRemoteDesktopResolution', target.width, target.height);
+      var result = mutationResult(raw);
+      if (result && result.ok === false) return;
+      desktopViewportLastWidth = target.width;
+      desktopViewportLastHeight = target.height;
+    }
+
+    function scheduleRemoteDesktopViewportResolution() {
+      clearTimeout(desktopViewportTimer);
+      desktopViewportTimer = setTimeout(function () {
+        applyRemoteDesktopViewportResolution();
+      }, 300);
     }
 
     function renderRemoteDesktopStatus() {
@@ -1835,6 +1916,7 @@
       banner.classList.toggle('hidden', !connected);
       $('desktop-viewer').classList.toggle('hidden', !relay);
       updateDesktopRuntimeResolutionControl(status);
+      if (relay) scheduleRemoteDesktopViewportResolution();
       if (!relay) {
         desktopFrameSeq = 0; desktopFrameGeneration = 0;
         resetDesktopVideoDecoder();
@@ -2207,6 +2289,14 @@
       var select = $('desktop-runtime-resolution');
       var apply = $('desktop-runtime-resolution-apply');
       var value = select ? String(select.value || '') : '';
+      if (value === 'viewport') {
+        state.desktopFollowViewport = true;
+        resetRemoteDesktopViewportFollow();
+        updateDesktopRuntimeResolutionControl(state.desktopStatus || {});
+        scheduleRemoteDesktopViewportResolution();
+        toast('已启用跟随窗口分辨率');
+        return;
+      }
       var width = 0, height = 0;
       if (value === 'max') {
         var status = state.desktopStatus || {};
@@ -2223,6 +2313,8 @@
         toast('请选择要切换的分辨率');
         return;
       }
+      state.desktopFollowViewport = false;
+      resetRemoteDesktopViewportFollow();
       if (apply) apply.disabled = true;
       if (select) select.disabled = true;
       try {
@@ -2248,6 +2340,11 @@
       if (!result.ok) {
         toast(result.message || '原生 Viewer 启动失败');
         return;
+      }
+      if (state.desktopFollowViewport) {
+        state.desktopFollowViewport = false;
+        resetRemoteDesktopViewportFollow();
+        updateDesktopRuntimeResolutionControl(state.desktopStatus || {});
       }
       var decoderLabel = result.decoder === 'media-foundation-d3d11-zero-copy'
         ? 'D3D11 / DXVA 零拷贝'
@@ -2536,6 +2633,7 @@
         return;
       }
       var options = remoteDesktopConnectOptions(targetID);
+      var followViewport = $('desktop-opt-resolution') && $('desktop-opt-resolution').value === 'auto';
       var target = remoteDesktopTargetByID(targetID);
       var caps = target && target.capabilities ? target.capabilities : {};
       var relayRequired = options.backend === 'relay' ||
@@ -2555,6 +2653,8 @@
         }
         desktopFrameSeq = 0; desktopFrameGeneration = 0;
         resetDesktopClipboard();
+        state.desktopFollowViewport = !!followViewport;
+        resetRemoteDesktopViewportFollow();
         toast('远程桌面已启动 · ' + remoteDesktopOptionsSummary(targetID));
         await refreshRemoteDesktopStatus(false);
         await refreshRemoteDesktopFrame();
@@ -2572,6 +2672,8 @@
       }
       desktopFrameSeq = 0; desktopFrameGeneration = 0;
       resetDesktopClipboard();
+      state.desktopFollowViewport = false;
+      resetRemoteDesktopViewportFollow();
       toast('远程桌面已断开');
       await refreshRemoteDesktopStatus(false);
     }
@@ -3135,11 +3237,20 @@
       setInterval(refreshRemoteDesktopFrame, 100);
       setInterval(refreshRemoteDesktopCursor, 33);
       setInterval(refreshRemoteDesktopClipboard, 250);
+      var desktopStage = $('desktop-viewer-stage');
+      if (typeof ResizeObserver === 'function' && desktopStage) {
+        desktopViewportObserver = new ResizeObserver(function () {
+          scheduleRemoteDesktopViewportResolution();
+        });
+        desktopViewportObserver.observe(desktopStage);
+      }
       window.addEventListener('resize', function () {
         if (desktopCursorLast) renderDesktopCursor(desktopCursorLast);
+        scheduleRemoteDesktopViewportResolution();
       });
       document.addEventListener('fullscreenchange', function () {
         if (desktopCursorLast) requestAnimationFrame(function () { renderDesktopCursor(desktopCursorLast); });
+        scheduleRemoteDesktopViewportResolution();
       });
     });
   })();

@@ -1601,6 +1601,12 @@
       if (!capability || !capability.encode) return false;
       chroma = String(chroma || 'auto').toLowerCase();
       if (chroma === 'auto' || !chroma) chroma = '420';
+      var directional = Array.isArray(capability.encodeChroma) ? capability.encodeChroma : [];
+      if (directional.length) {
+        return directional.some(function (value) {
+          return String(value || '').toLowerCase() === chroma;
+        });
+      }
       if (chroma === '444') return !!capability.chroma444;
       if (chroma === '420') return !!capability.chroma420;
       return false;

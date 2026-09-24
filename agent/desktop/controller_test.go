@@ -282,3 +282,26 @@ func TestSyncABRResolutionTracksManualGeneration(t *testing.T) {
 		t.Fatalf("manual generation resolution scale=%d want=67", got)
 	}
 }
+
+
+func TestDesktopResolutionModeFollowsViewport(t *testing.T) {
+	for _, mode := range []string{"", "auto", "follow_viewport", " FOLLOW_VIEWPORT "} {
+		if !desktopResolutionModeFollowsViewport(mode) {
+			t.Fatalf("mode %q should follow viewport", mode)
+		}
+	}
+	for _, mode := range []string{"fixed", "native", "manual"} {
+		if desktopResolutionModeFollowsViewport(mode) {
+			t.Fatalf("mode %q unexpectedly follows viewport", mode)
+		}
+	}
+
+	session := &ControllerSession{followViewport: true}
+	if !session.ViewportFollowEnabled() {
+		t.Fatal("controller session lost viewport-follow state")
+	}
+	session.followViewport = false
+	if session.ViewportFollowEnabled() {
+		t.Fatal("controller session reported disabled viewport follow as enabled")
+	}
+}

@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/lxn/win"
+
+	desktopgpu "relayproxy/agent/desktop/gpu"
 )
 
 func TestViewportPackingRoundTrip(t *testing.T) {
@@ -139,5 +141,27 @@ func TestWindowPlacementRoundTrip(t *testing.T) {
 		if got != tt {
 			t.Fatalf("window placement round trip=%+v want=%+v", got, tt)
 		}
+	}
+}
+
+
+func TestDXGIFormatForGPUFormat(t *testing.T) {
+	tests := []struct {
+		format desktopgpu.Format
+		want   uint32
+	}{
+		{format: desktopgpu.FormatNV12, want: dxgiFormatNV12},
+		{format: desktopgpu.FormatAYUV, want: dxgiFormatAYUV},
+		{format: desktopgpu.FormatP010, want: dxgiFormatP010},
+		{format: desktopgpu.FormatBGRA, want: dxgiFormatB8G8R8A8UNorm},
+	}
+	for _, tt := range tests {
+		got, ok := dxgiFormatForGPUFormat(tt.format)
+		if !ok || got != tt.want {
+			t.Fatalf("format %s -> %d ok=%t want=%d", tt.format, got, ok, tt.want)
+		}
+	}
+	if _, ok := dxgiFormatForGPUFormat(desktopgpu.Format("unknown")); ok {
+		t.Fatal("unknown GPU format mapped to a DXGI format")
 	}
 }

@@ -296,6 +296,14 @@ func (a *Agent) remoteDesktopStatusForSession(sessionID string, session *desktop
 	return out
 }
 
+func (a *Agent) RemoteDesktopConnectOptionsForSession(sessionID string) protocol.RemoteDesktopConnectOptions {
+	session := a.desktopSessionByID(sessionID)
+	if session == nil || !session.Active() {
+		return protocol.RemoteDesktopConnectOptions{}
+	}
+	return session.ConnectOptionsSnapshot()
+}
+
 func (a *Agent) RemoteDesktopStatusForSession(sessionID string) protocol.RemoteDesktopStatus {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {

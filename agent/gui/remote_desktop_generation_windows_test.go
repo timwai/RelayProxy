@@ -5,6 +5,7 @@ package gui
 import (
 	"testing"
 
+	desktopviewer "relayproxy/agent/desktop/viewer"
 	"relayproxy/internal/protocol"
 )
 
@@ -83,5 +84,70 @@ func TestNativeDesktopFrameNeedsRebuild(t *testing.T) {
 				t.Fatalf("nativeDesktopFrameNeedsRebuild()=%t want=%t", got, tt.want)
 			}
 		})
+	}
+}
+
+
+func TestNativeDesktopViewportResolution(t *testing.T) {
+	tests := []struct {
+		name     string
+		viewport desktopviewer.Viewport
+		status   protocol.RemoteDesktopStatus
+		width    int
+		height   int
+		ok       bool
+	}{
+		{
+			name:     "same aspect shrinks to viewport",
+			viewport: desktopviewer.Viewport{Width: 1280, Height: 720},
+			status:   protocol.RemoteDesktopStatus{Width: 1920, Height: 1080, MaxWidth: 3840, MaxHeight: 2160},
+			width:    1280,
+			height:   720,
+			ok:       true,
+		},
+		{
+			name:     "square viewport preserves media aspect",
+			viewport: desktopviewer.Viewport{Width: 1000, Height: 1000},
+			status:   protocol.RemoteDesktopStatus{Width: 1920, Height: 1080, MaxWidth: 3840, MaxHeight: 2160},
+			width:    1000,
+			height:   562,
+			ok:       true,
+		},
+		{
+			name:     "viewport cannot exceed session ceiling",
+			viewport: desktopviewer.Viewport{Width: 3000, Height: 2000},
+			status:   protocol.RemoteDesktopStatus{Width: 1920, Height: 1080, MaxWidth: 1920, MaxHeight: 1080},
+			width:    1920,
+			height:   1080,
+			ok:       true,
+		},
+		{
+			name:     "tiny viewport rejected",
+			viewport: desktopviewer.Viewport{Width: 200, Height: 100},
+			status:   protocol.RemoteDesktopStatus{Width: 1920, Height: 1080, MaxWidth: 1920, MaxHeight: 1080},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			width, height, ok := nativeDesktopViewportResolution(tt.viewport, tt.status)
+			if width != tt.width || height != tt.height || ok != tt.ok {
+				t.Fatalf("viewport resolution=%dx%d ok=%v want=%dx%d ok=%v", width, height, ok, tt.width, tt.height, tt.ok)
+			}
+		})
+	}
+}
+
+func TestNativeDesktopViewportGrowRequiresLastRequestedGeneration(t *testing.T) {
+	if nativeDesktopViewportMayGrow(1280, 720, 0, 0) {
+		t.Fatal("viewport grew before any stable/requested baseline")
+	}
+	if !nativeDesktopViewportMayGrow(1280, 720, 1280, 720) {
+		t.Fatal("matching viewport generation did not allow growth")
+	}
+	if !nativeDesktopViewportMayGrow(1279, 721, 1280, 720) {
+		t.Fatal("small generation rounding difference blocked growth")
+	}
+	if nativeDesktopViewportMayGrow(960, 540, 1280, 720) {
+		t.Fatal("ABR-downshifted generation was allowed to grow over adaptation")
 	}
 }

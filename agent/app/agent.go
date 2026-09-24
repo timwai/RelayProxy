@@ -1456,6 +1456,25 @@ func (a *Agent) SetRemoteDesktopResolution(width, height int) error {
 	return session.RequestResolution(ctx, width, height)
 }
 
+func (a *Agent) SetRemoteDesktopViewportResolution(width, height int) error {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)
+	defer cancel()
+	return session.RequestViewportResolution(ctx, width, height)
+}
+
+func (a *Agent) RemoteDesktopViewportFollowEnabled() bool {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	return session != nil && session.Active() && session.ViewportFollowEnabled()
+}
+
 func (a *Agent) RequestRemoteDesktopIDR() error {
 	a.mu.RLock()
 	session := a.desktopConnection

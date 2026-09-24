@@ -609,6 +609,73 @@ func (a *appWindow) openNativeDesktopViewerForSession(
 	}, nil
 }
 
+func (a *appWindow) openRemoteDesktopDisplayWindow(targetID, displayID string) (map[string]any, error) {
+	if a == nil || a.bridge == nil {
+		return nil, errors.New("GUI unavailable")
+	}
+	targetID = strings.TrimSpace(targetID)
+	displayID = strings.TrimSpace(displayID)
+	if targetID == "" || displayID == "" {
+		return nil, errors.New("independent desktop window requires a target and display")
+	}
+	primary := a.bridge.GetRemoteDesktopStatus()
+	if primary.State != "connected" || primary.Backend != protocol.DesktopBackendRelay ||
+		primary.TargetID != targetID || primary.SessionID == "" {
+		return nil, errors.New("connect the Relay Desktop target before opening an independent display window")
+	}
+
+	options := a.bridge.GetRemoteDesktopConnectOptionsForSession(primary.SessionID)
+	options.Backend = protocol.DesktopBackendRelay
+	options.DisplayID = displayID
+	disabled := false
+	options.Audio = &disabled
+	options.Clipboard = &disabled
+	options.AutoLaunch = &disabled
+
+	info, err := a.bridge.ConnectRemoteDesktopSession(targetID, options)
+	if err != nil {
+		return nil, err
+	}
+	if info.SessionID == "" {
+		return nil, errors.New("independent Relay Desktop session did not return a session id")
+	}
+
+	ready := false
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(8 * time.Second)
+	defer timeout.Stop()
+	for !ready {
+		frame := a.bridge.GetRemoteDesktopFrameForSession(info.SessionID)
+		if frame.Sequence != 0 && nativeDesktopVideoFrame(frame) &&
+			frame.Width > 0 && frame.Height > 0 && len(frame.Data) > 0 {
+			ready = true
+			break
+		}
+		status := a.bridge.GetRemoteDesktopStatusForSession(info.SessionID)
+		if status.State != "connected" {
+			a.bridge.DisconnectRemoteDesktopSession(info.SessionID)
+			return nil, errors.New("independent Relay Desktop session ended before video became ready")
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			a.bridge.DisconnectRemoteDesktopSession(info.SessionID)
+			return nil, errors.New("independent Relay Desktop video did not become ready")
+		}
+	}
+
+	result, err := a.openNativeDesktopViewerForSession(info.SessionID, false, true)
+	if err != nil {
+		a.bridge.DisconnectRemoteDesktopSession(info.SessionID)
+		return nil, err
+	}
+	result["targetId"] = targetID
+	result["displayId"] = displayID
+	result["relayOnly"] = true
+	return result, nil
+}
+
 func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer close(s.done)
 	defer s.cancel()

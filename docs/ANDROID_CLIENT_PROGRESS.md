@@ -46,3 +46,15 @@
 - Phase 2：电池优化白名单引导、开机启动、断线原因诊断。
 - Phase 3：Android `VpnService` 客户端入口，让 Android 自身也能作为 RelayProxy Client。
 - Phase 3：按应用路由、域名/IP 规则和分流。
+
+
+## 省电与后台常驻优化
+
+- [x] 后台轮询按状态自适应降频：前台 1s、连接中 3s、活跃转发 5s、空闲 20s、等待/错误 30s
+- [x] 通知内容无变化时不重复更新，减少主线程与 SystemUI 唤醒
+- [x] Android 出口节点心跳从默认 15s 放宽到 30s，服务端按会话独立心跳周期计算超时
+- [x] QUIC KeepAlive 从 15s 调整为 30s，减少空闲网络唤醒
+- [x] 仅 Wi-Fi 模式使用被动网络监听，不主动维持 Wi-Fi 网络请求
+- [x] 自动网络模式监听默认网络切换，Wi-Fi / 蜂窝切换时立即重建隧道
+- [x] 隧道断线重连沿用 1s → 2s → 4s → 8s → 16s → 30s 指数退避并带 jitter
+- [x] Android CI 增加 gateway/session/tunnel 兼容性 Go 测试

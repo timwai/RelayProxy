@@ -21,6 +21,7 @@ type DeviceSession struct {
 	Tunnel              tunnel.TunnelSession
 	ControlStream       tunnel.TunnelStream
 	ConnectedAt         time.Time
+	HeartbeatSec        int
 	LastHeartbeat       atomic.Int64 // Unix timestamp in seconds
 	ActiveStreams       atomic.Int64
 	ActiveExitID        atomic.Pointer[string]

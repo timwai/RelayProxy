@@ -49,7 +49,10 @@ type DeviceAuthorization struct {
 	RemoteDesktopTargets []protocol.RemoteDesktopTarget
 }
 
-const deviceRejectionDrainTimeout = time.Second
+const (
+	deviceRejectionDrainTimeout = time.Second
+	androidExitHeartbeatSec     = 30
+)
 
 // writeDeviceRejection half-closes the control stream after the framed
 // rejection is fully queued, then gives the peer a short bounded window to
@@ -444,6 +447,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		capabilities = append(capabilities, protocol.UDPModeDatagram)
 	}
 	sessionID := "sess_" + uuid.New().String()
+	heartbeatSec := g.heartbeatForDevice(hello, authorization.ApprovedCapabilities)
 	welcome := protocol.DeviceAccepted{
 		State:                 "approved",
 		DeviceID:              authorization.DeviceID,
@@ -451,7 +455,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		RDPTargets:            authorization.RDPTargets,
 		RemoteDesktopTargets:  authorization.RemoteDesktopTargets,
 		SessionID:             sessionID,
-		HeartbeatSec:          g.cfg.HeartbeatSec,
+		HeartbeatSec:          heartbeatSec,
 		MaxConnections:        g.cfg.MaxConnectionsPerDevice,
 		ServerTime:            time.Now().Unix(),
 		Success:               true,
@@ -479,6 +483,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		Tunnel:              sess,
 		ControlStream:       ctrlStream,
 		ConnectedAt:         time.Now(),
+		HeartbeatSec:        heartbeatSec,
 	}
 
 	g.mu.Lock()
@@ -557,6 +562,19 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 }
 
+func (g *Gateway) heartbeatForDevice(hello protocol.DeviceHello, approvedCapabilities []string) int {
+	heartbeatSec := g.cfg.HeartbeatSec
+	if heartbeatSec <= 0 {
+		heartbeatSec = 15
+	}
+	if hello.Platform == "android" &&
+		containsCapability(approvedCapabilities, protocol.CapabilityProxyExit) &&
+		heartbeatSec < androidExitHeartbeatSec {
+		return androidExitHeartbeatSec
+	}
+	return heartbeatSec
+}
+
 func containsCapability(capabilities []string, expected string) bool {
 	for _, capability := range capabilities {
 		if capability == expected {
@@ -617,7 +635,14 @@ func (g *Gateway) acceptControlStream(sess tunnel.TunnelSession, deadline time.T
 
 func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 	defer dev.Tunnel.Close()
-	heartbeatTimeout := 3*time.Duration(g.cfg.HeartbeatSec)*time.Second + 5*time.Second
+	heartbeatSec := dev.HeartbeatSec
+	if heartbeatSec <= 0 {
+		heartbeatSec = g.cfg.HeartbeatSec
+	}
+	if heartbeatSec <= 0 {
+		heartbeatSec = 15
+	}
+	heartbeatTimeout := 3*time.Duration(heartbeatSec)*time.Second + 5*time.Second
 	for {
 		_ = dev.ControlStream.SetReadDeadline(time.Now().Add(heartbeatTimeout))
 		var ping protocol.PingMessage

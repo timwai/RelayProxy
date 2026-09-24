@@ -264,3 +264,11 @@ func TestDefaultYAMUXConfigMatchesRelayStreamCapacity(t *testing.T) {
 		t.Fatalf("AcceptBacklog=%d is below the Relay default per-device stream capacity", cfg.AcceptBacklog)
 	}
 }
+
+
+func TestDefaultQUICConfigKeepAlivePeriod(t *testing.T) {
+	cfg := DefaultQUICConfig()
+	if cfg.KeepAlivePeriod != 30*time.Second {
+		t.Fatalf("KeepAlivePeriod = %v, want 30s", cfg.KeepAlivePeriod)
+	}
+}

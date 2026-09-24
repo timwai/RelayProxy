@@ -277,3 +277,40 @@ func TestCloseWaitsForAuditProducers(t *testing.T) {
 		t.Fatal("Close did not finish")
 	}
 }
+
+
+func TestHeartbeatForDeviceAndroidExit(t *testing.T) {
+	g := &Gateway{cfg: GatewayConfig{HeartbeatSec: 15}}
+
+	got := g.heartbeatForDevice(protocol.DeviceHello{Platform: "android"}, []string{protocol.CapabilityProxyExit})
+	if got != 30 {
+		t.Fatalf("android exit heartbeat = %d, want 30", got)
+	}
+
+	g.cfg.HeartbeatSec = 45
+	got = g.heartbeatForDevice(protocol.DeviceHello{Platform: "android"}, []string{protocol.CapabilityProxyExit})
+	if got != 45 {
+		t.Fatalf("configured android exit heartbeat = %d, want 45", got)
+	}
+}
+
+func TestHeartbeatForDeviceKeepsDefaultForOtherClients(t *testing.T) {
+	g := &Gateway{cfg: GatewayConfig{HeartbeatSec: 15}}
+
+	cases := []struct {
+		name       string
+		hello      protocol.DeviceHello
+		capability []string
+	}{
+		{name: "desktop exit", hello: protocol.DeviceHello{Platform: "windows"}, capability: []string{protocol.CapabilityProxyExit}},
+		{name: "android client only", hello: protocol.DeviceHello{Platform: "android"}, capability: []string{protocol.CapabilityProxyClient}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := g.heartbeatForDevice(tc.hello, tc.capability); got != 15 {
+				t.Fatalf("heartbeat = %d, want 15", got)
+			}
+		})
+	}
+}

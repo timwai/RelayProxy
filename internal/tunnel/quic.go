@@ -112,7 +112,7 @@ type QUICSession struct {
 func DefaultQUICConfig() *quic.Config {
 	return &quic.Config{
 		MaxIdleTimeout:                 60 * time.Second,
-		KeepAlivePeriod:                15 * time.Second,
+		KeepAlivePeriod:                30 * time.Second,
 		InitialStreamReceiveWindow:     4 << 20,
 		MaxStreamReceiveWindow:         32 << 20,
 		InitialConnectionReceiveWindow: 16 << 20,

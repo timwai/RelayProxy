@@ -318,3 +318,30 @@ func TestAgentThemeAllowsSystem(t *testing.T) {
 		t.Fatalf("system theme rejected: %v", err)
 	}
 }
+
+
+func TestNativeViewerPlacementRoundTrips(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	cfg := &AgentConfigFile{}
+	cfg.GUI.NativeViewer = GUIWindowPlacement{
+		X: -1600, Y: 40, Width: 1600, Height: 900, Maximized: true,
+	}
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.GUI.NativeViewer != cfg.GUI.NativeViewer {
+		t.Fatalf("native viewer placement=%+v want=%+v", loaded.GUI.NativeViewer, cfg.GUI.NativeViewer)
+	}
+}
+
+func TestNativeViewerPlacementValidation(t *testing.T) {
+	cfg := &AgentConfigFile{}
+	cfg.GUI.NativeViewer = GUIWindowPlacement{Width: 200, Height: 100}
+	if err := NormalizeAgentConfig(cfg); err == nil {
+		t.Fatal("undersized native viewer placement was accepted")
+	}
+}

@@ -132,9 +132,9 @@ type AgentConfigFile struct {
 	} `yaml:"network"`
 
 	GUI struct {
-		Enabled        *bool  `yaml:"enabled"`          // Default: true — launch the desktop window on start
-		MinimizeToTray *bool  `yaml:"minimize_to_tray"` // Default: true — closing the window hides to the tray
-		StartMinimized bool   `yaml:"start_minimized"`  // Default: false — boot straight into the tray
+		Enabled        *bool              `yaml:"enabled"`          // Default: true — launch the desktop window on start
+		MinimizeToTray *bool              `yaml:"minimize_to_tray"` // Default: true — closing the window hides to the tray
+		StartMinimized bool               `yaml:"start_minimized"`  // Default: false — boot straight into the tray
 		Theme          string             `yaml:"theme"`            // "dark", "light", or "system"
 		NativeViewer   GUIWindowPlacement `yaml:"native_viewer,omitempty"`
 	} `yaml:"gui"`

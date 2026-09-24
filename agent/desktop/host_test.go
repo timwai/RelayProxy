@@ -466,3 +466,20 @@ func TestSwitchSessionDisplayInputFailureRollsCaptureBack(t *testing.T) {
 		t.Fatalf("capture rollback sequence=%+v", source.begin)
 	}
 }
+
+
+func TestHostMultiStreamCapabilityRequiresSessionFactory(t *testing.T) {
+	host, err := NewHost(&testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 1, 1))}, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caps := host.DesktopCapabilities(context.Background()); caps.MultiStream {
+		t.Fatal("legacy shared host advertised multi-stream support")
+	}
+	host.SetSessionFactory(func() (CaptureSource, InputSink, error) {
+		return &testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 1, 1))}, nil, nil
+	})
+	if caps := host.DesktopCapabilities(context.Background()); !caps.MultiStream {
+		t.Fatal("isolated session factory did not advertise multi-stream support")
+	}
+}

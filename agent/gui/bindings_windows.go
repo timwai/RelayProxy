@@ -104,6 +104,19 @@ func (s *WailsService) OpenRemoteDesktopNativeViewer() (string, error) {
 	return string(data), nil
 }
 
+func (s *WailsService) OpenRemoteDesktopDisplayWindow(targetID, displayID string) (string, error) {
+	if s == nil || s.owner == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	result, err := s.owner.openRemoteDesktopDisplayWindow(targetID, displayID)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(result)
+	return string(data), nil
+}
+
 func (s *WailsService) CloseRemoteDesktopNativeViewer() (string, error) {
 	if s == nil || s.owner == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil

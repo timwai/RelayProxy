@@ -14,6 +14,8 @@ const (
 	PixelFormatBGRA PixelFormat = "bgra"
 	PixelFormatNV12 PixelFormat = "nv12"
 	PixelFormatI444 PixelFormat = "i444"
+	PixelFormatAYUV PixelFormat = "ayuv"
+	PixelFormatP010 PixelFormat = "p010"
 )
 
 type ChromaFormat string

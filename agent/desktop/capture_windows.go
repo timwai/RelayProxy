@@ -807,6 +807,13 @@ func NewSystemHost() (*Host, error) {
 		_ = source.Close()
 		return nil, err
 	}
+	host.SetSessionFactory(func() (CaptureSource, InputSink, error) {
+		sessionSource, err := newSystemCapture()
+		if err != nil {
+			return nil, nil, err
+		}
+		return sessionSource, newWindowsInputSink(), nil
+	})
 	probeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	probe := desktopcodec.ProbeH264MediaFoundation(probeCtx)
 	cancel()

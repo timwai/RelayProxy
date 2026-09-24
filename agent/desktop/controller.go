@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"bytes"
+	"fmt"
 	"context"
 	"errors"
 	"image/jpeg"

@@ -1774,12 +1774,11 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	conn := a.rdpConnection
 	p2pSession := a.rdpSession
 	p2pManager := a.rdpP2P
-	desktopSession := a.desktopConnection
+	desktopSessions := a.takeDesktopSessionsLocked()
 	desktopP2P := a.desktopP2PSession
 	a.rdpConnection = nil
 	a.rdpSession = nil
 	a.rdpP2P = nil
-	a.desktopConnection = nil
 	a.desktopP2PSession = nil
 	a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
 	a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
@@ -1795,8 +1794,10 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	if p2pManager != nil {
 		_ = p2pManager.Close()
 	}
-	if desktopSession != nil {
-		_ = desktopSession.Close()
+	for _, desktopSession := range desktopSessions {
+		if desktopSession != nil {
+			_ = desktopSession.Close()
+		}
 	}
 	if desktopP2P != nil {
 		_ = desktopP2P.Close()
@@ -1850,10 +1851,11 @@ func (a *Agent) closeRuntime() error {
 		a.handshakeOK.Store(false)
 		a.readySession = nil
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
-		rdpSession, rdpP2P, desktopSession := a.rdpSession, a.rdpP2P, a.desktopConnection
+		rdpSession, rdpP2P := a.rdpSession, a.rdpP2P
+		desktopSessions := a.takeDesktopSessionsLocked()
 		desktopP2P := a.desktopP2PSession
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
-		a.rdpSession, a.rdpP2P, a.desktopConnection, a.desktopP2PSession = nil, nil, nil, nil
+		a.rdpSession, a.rdpP2P, a.desktopP2PSession = nil, nil, nil
 		a.desktopTargetMedia = make(map[string]*desktopmedia.MediaConn)
 		a.desktopTargetPaths = make(map[string]*rdpp2p.ApplicationPath)
 		a.rdpTargets = nil
@@ -1882,8 +1884,10 @@ func (a *Agent) closeRuntime() error {
 		if rdpP2P != nil {
 			errs = append(errs, rdpP2P.Close())
 		}
-		if desktopSession != nil {
-			errs = append(errs, desktopSession.Close())
+		for _, desktopSession := range desktopSessions {
+			if desktopSession != nil {
+				errs = append(errs, desktopSession.Close())
+			}
 		}
 		if desktopP2P != nil {
 			errs = append(errs, desktopP2P.Close())

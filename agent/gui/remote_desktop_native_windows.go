@@ -139,7 +139,7 @@ func (s *nativeDesktopSession) requestIDR(owner *appWindow) error {
 	if s != nil && s.sessionID != "" {
 		return owner.bridge.RequestRemoteDesktopIDRForSession(s.sessionID)
 	}
-	return owner.bridge.RequestRemoteDesktopIDR()
+	return s.requestIDR(owner)
 }
 
 func (s *nativeDesktopSession) sendInput(owner *appWindow, event protocol.DesktopInputEvent) error {
@@ -168,7 +168,7 @@ func (s *nativeDesktopSession) reportViewerStats(owner *appWindow, stats protoco
 		owner.bridge.ReportRemoteDesktopViewerStatsForSession(s.sessionID, stats)
 		return
 	}
-	owner.bridge.ReportRemoteDesktopViewerStats(stats)
+	s.reportViewerStats(owner, stats)
 }
 
 func (s *nativeDesktopSession) audioEnabled(owner *appWindow) bool {
@@ -614,7 +614,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer s.cancel()
 	go s.inputLoop(ctx, owner)
 	go s.viewportLoop(ctx, owner)
-	if owner.bridge.RemoteDesktopAudioEnabled() {
+	if s.audioEnabled(owner) {
 		go s.audioLoop(ctx, owner)
 	}
 	defer func() {
@@ -628,7 +628,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		if viewer != nil {
 			placement := viewer.WindowPlacement()
 			_ = viewer.Close()
-			if placement.Valid() {
+			if s.persistPlacement && placement.Valid() {
 				if err := owner.persistGUI(map[string]any{
 					"nativeViewer": map[string]any{
 						"x": placement.X, "y": placement.Y,
@@ -646,7 +646,14 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		if owner.desktopViewer == s {
 			owner.desktopViewer = nil
 		}
+		key := s.sessionKey()
+		if owner.desktopViewers[key] == s {
+			delete(owner.desktopViewers, key)
+		}
 		owner.desktopViewerMu.Unlock()
+		if s.disconnectOnClose && s.sessionID != "" {
+			owner.bridge.DisconnectRemoteDesktopSession(s.sessionID)
+		}
 	}()
 
 	ticker := time.NewTicker(8 * time.Millisecond)
@@ -667,13 +674,13 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		case <-ticker.C:
 		}
 
-		status := owner.bridge.GetRemoteDesktopStatus()
+		status := s.status(owner)
 		if status.State != "connected" || status.Backend != protocol.DesktopBackendRelay {
 			return
 		}
 
 		cursorChanged := s.refreshCursor(owner)
-		frame := owner.bridge.GetRemoteDesktopFrame()
+		frame := s.frame(owner)
 		frameChanged := frame.Sequence != 0 && nativeDesktopVideoFrame(frame) &&
 			(frame.Sequence != lastSequence || frame.Generation != lastGeneration)
 		if !frameChanged {
@@ -695,7 +702,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			if !frame.KeyFrame {
 				if time.Since(lastRecovery) >= 500*time.Millisecond {
 					lastRecovery = time.Now()
-					if requestErr := owner.bridge.RequestRemoteDesktopIDR(); requestErr != nil {
+					if requestErr := s.requestIDR(owner); requestErr != nil {
 						log.Printf("[Desktop] native viewer generation IDR request failed: %v", requestErr)
 					}
 				}
@@ -705,7 +712,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				log.Printf("[Desktop] native viewer generation rebuild failed: %v", err)
 				if time.Since(lastRecovery) >= 500*time.Millisecond {
 					lastRecovery = time.Now()
-					_ = owner.bridge.RequestRemoteDesktopIDR()
+					_ = s.requestIDR(owner)
 				}
 				continue
 			}
@@ -720,7 +727,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		if err != nil {
 			if time.Since(lastRecovery) >= 500*time.Millisecond {
 				lastRecovery = time.Now()
-				if requestErr := owner.bridge.RequestRemoteDesktopIDR(); requestErr != nil {
+				if requestErr := s.requestIDR(owner); requestErr != nil {
 					log.Printf("[Desktop] native viewer IDR request failed: %v", requestErr)
 				}
 			}
@@ -852,10 +859,10 @@ func (s *nativeDesktopSession) viewportLoop(ctx context.Context, owner *appWindo
 			if !viewport.Valid() || viewportChanged.IsZero() || now.Sub(viewportChanged) < debounce {
 				continue
 			}
-			if !owner.bridge.RemoteDesktopViewportFollowEnabled() {
+			if !s.viewportFollowEnabled(owner) {
 				continue
 			}
-			status := owner.bridge.GetRemoteDesktopStatus()
+			status := s.status(owner)
 			if status.State != "connected" || status.Backend != protocol.DesktopBackendRelay ||
 				(status.Codec != "h264" && status.Codec != "h265") {
 				continue
@@ -881,7 +888,7 @@ func (s *nativeDesktopSession) viewportLoop(ctx context.Context, owner *appWindo
 				!lastRequest.IsZero() && now.Sub(lastRequest) < retry {
 				continue
 			}
-			if err := owner.bridge.SetRemoteDesktopViewportResolution(width, height); err != nil {
+			if err := s.setViewportResolution(owner, width, height); err != nil {
 				if lastRequest.IsZero() || now.Sub(lastRequest) >= retry {
 					log.Printf("[Desktop] native viewer viewport resolution %dx%d failed: %v", width, height, err)
 				}
@@ -896,7 +903,7 @@ func (s *nativeDesktopSession) viewportLoop(ctx context.Context, owner *appWindo
 }
 
 func (s *nativeDesktopSession) refreshCursor(owner *appWindow) bool {
-	state := owner.bridge.GetRemoteDesktopCursor(s.cursorID)
+	state := s.cursor(owner, s.cursorID)
 	if state.Sequence == 0 || state.Sequence == s.cursorSequence {
 		return false
 	}
@@ -963,7 +970,7 @@ func (s *nativeDesktopSession) audioLoop(ctx context.Context, owner *appWindow) 
 	}()
 
 	for {
-		frame, config, err := owner.bridge.NextRemoteDesktopAudioFrame(ctx)
+		frame, config, err := s.nextAudioFrame(ctx, owner)
 		if err != nil {
 			if ctx.Err() == nil {
 				log.Printf("[Desktop] native audio stream stopped: %v", err)
@@ -1063,7 +1070,7 @@ func (s *nativeDesktopSession) inputLoop(ctx context.Context, owner *appWindow) 
 		case <-ctx.Done():
 			return
 		case event := <-s.inputCh:
-			if err := owner.bridge.SendRemoteDesktopInput(event); err != nil && ctx.Err() == nil {
+			if err := s.sendInput(owner, event); err != nil && ctx.Err() == nil {
 				log.Printf("[Desktop] native viewer input send failed: %v", err)
 			}
 		}
@@ -1075,35 +1082,57 @@ func (a *appWindow) stopNativeDesktopViewer() {
 		return
 	}
 	a.desktopViewerMu.Lock()
-	session := a.desktopViewer
-	a.desktopViewer = nil
-	a.desktopViewerMu.Unlock()
-	if session == nil {
-		return
+	seen := make(map[*nativeDesktopSession]struct{})
+	sessions := make([]*nativeDesktopSession, 0, len(a.desktopViewers)+1)
+	add := func(session *nativeDesktopSession) {
+		if session == nil {
+			return
+		}
+		if _, ok := seen[session]; ok {
+			return
+		}
+		seen[session] = struct{}{}
+		sessions = append(sessions, session)
 	}
-	session.closeOnce.Do(func() {
-		session.cancel()
-	})
-	<-session.done
+	add(a.desktopViewer)
+	for _, session := range a.desktopViewers {
+		add(session)
+	}
+	a.desktopViewer = nil
+	a.desktopViewers = make(map[string]*nativeDesktopSession)
+	a.desktopViewerMu.Unlock()
+
+	for _, session := range sessions {
+		session.closeOnce.Do(func() {
+			session.cancel()
+		})
+	}
+	for _, session := range sessions {
+		<-session.done
+	}
 }
+
 
 func (a *appWindow) nativeDesktopViewerStatus() map[string]any {
 	if a == nil {
-		return map[string]any{"open": false}
+		return map[string]any{"open": false, "windows": 0}
 	}
 	a.desktopViewerMu.Lock()
 	session := a.desktopViewer
+	windows := len(a.desktopViewers)
 	a.desktopViewerMu.Unlock()
 	if session == nil {
-		return map[string]any{"open": false}
+		return map[string]any{"open": false, "windows": windows}
 	}
 	select {
 	case <-session.done:
-		return map[string]any{"open": false}
+		return map[string]any{"open": false, "windows": windows}
 	default:
 		decoder, hardware, gpuCursor := session.decoderStatus()
 		return map[string]any{
 			"open":      true,
+			"windows":   windows,
+			"sessionId": session.sessionID,
 			"hardware":  hardware,
 			"decoder":   decoder,
 			"gpuCursor": gpuCursor,

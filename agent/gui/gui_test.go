@@ -396,6 +396,7 @@ func TestRemoteDesktopFollowViewport(t *testing.T) {
 		"<option value=\"444\">4:4:4（需端到端支持）</option>",
 		"function remoteDesktopTargetSupportsChroma(targetID, codec, chroma)",
 		"if (chroma === 'auto' || !chroma) chroma = '420';",
+		"Array.isArray(capability.encodeChroma) ? capability.encodeChroma : []",
 		"options.chroma === '444'",
 		"目标未上报 ' + String(options.codec || '').toUpperCase() + ' 4:4:4 编码能力",
 		"4:4:4 当前需要 Windows 原生 Viewer",

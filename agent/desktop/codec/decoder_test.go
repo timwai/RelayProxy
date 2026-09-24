@@ -69,7 +69,6 @@ func TestD3D11SurfaceGPUFrameRejectsCPUOnlyFormat(t *testing.T) {
 	}
 }
 
-
 func TestD3D11SurfaceGPUFrameLifetime(t *testing.T) {
 	retains := 0
 	releases := 0

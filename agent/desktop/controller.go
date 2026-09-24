@@ -43,6 +43,8 @@ type ControllerSession struct {
 	latestClipboard  protocol.DesktopClipboardState
 	clipboardSendSeq uint64
 	videoConfig      protocol.DesktopVideoConfig
+	displays         []protocol.DesktopDisplayCapability
+	displaysReady    bool
 	followViewport   bool
 	configReady      chan struct{}
 	configOnce       sync.Once
@@ -178,6 +180,12 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			if message.Stats != nil && s.stats != nil {
 				s.stats.MergeRemote(*message.Stats)
 			}
+
+		case protocol.DesktopSessionDisplays:
+			s.mu.Lock()
+			s.displays = append(s.displays[:0], message.Displays...)
+			s.displaysReady = true
+			s.mu.Unlock()
 		}
 	}
 }
@@ -803,6 +811,18 @@ func (s *ControllerSession) CaptureBackendPreference() protocol.DesktopCaptureBa
 		return protocol.DesktopCaptureAuto
 	}
 	return s.options.CaptureBackend
+}
+
+func (s *ControllerSession) DisplayCapabilitiesSnapshot() ([]protocol.DesktopDisplayCapability, bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.displaysReady {
+		return nil, false
+	}
+	return append([]protocol.DesktopDisplayCapability(nil), s.displays...), true
 }
 
 func (s *ControllerSession) Done() <-chan struct{} {

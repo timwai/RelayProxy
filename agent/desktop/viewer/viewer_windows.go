@@ -18,8 +18,9 @@ import (
 const (
 	nativeViewerClass = "RelayProxyNativeViewerWindow"
 
-	wmNativeViewerFrame = win.WM_APP + 0x311
-	wmMouseHWheel       = 0x020e
+	wmNativeViewerFrame       = win.WM_APP + 0x311
+	wmNativeViewerReconfigure = win.WM_APP + 0x312
+	wmMouseHWheel             = 0x020e
 )
 
 var (
@@ -35,6 +36,7 @@ type windowsViewer struct {
 
 	hwnd     atomic.Uintptr
 	viewport atomic.Uint64
+	media    atomic.Uint64
 
 	frameMu     sync.Mutex
 	latest      Frame
@@ -42,7 +44,10 @@ type windowsViewer struct {
 	latestIsGPU bool
 	cursor      CursorOverlay
 
-	renderer *d3d11Renderer
+	rendererMu sync.RWMutex
+	renderer   *d3d11Renderer
+
+	reconfigureCh chan viewerReconfigureRequest
 
 	inputSequence  uint64
 	pressedKeys    map[uint16]bool
@@ -53,6 +58,12 @@ type windowsViewer struct {
 
 	closeOnce sync.Once
 	done      chan struct{}
+}
+
+type viewerReconfigureRequest struct {
+	width  int
+	height int
+	reply  chan error
 }
 
 func registerNativeViewerClass() error {
@@ -87,10 +98,12 @@ func Open(config Config) (Native, error) {
 	}
 	viewer := &windowsViewer{
 		config:         config,
+		reconfigureCh:  make(chan viewerReconfigureRequest, 1),
 		done:           make(chan struct{}),
 		pressedKeys:    make(map[uint16]bool),
 		pressedButtons: make(map[string]bool),
 	}
+	viewer.media.Store(packViewport(config.Width, config.Height))
 	initCh := make(chan error, 1)
 	go viewer.run(initCh)
 	if err := <-initCh; err != nil {
@@ -162,13 +175,19 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		initCh <- err
 		return
 	}
+	v.rendererMu.Lock()
 	v.renderer = renderer
+	v.rendererMu.Unlock()
 	nativeViewerWindows.Store(uintptr(hwnd), v)
 	defer func() {
 		nativeViewerWindows.Delete(uintptr(hwnd))
-		v.releaseLatestD3D11()
-		renderer.Close()
-		v.renderer = nil
+		v.clearLatestFrame()
+		v.rendererMu.Lock()
+		if v.renderer != nil {
+			v.renderer.Close()
+			v.renderer = nil
+		}
+		v.rendererMu.Unlock()
 		v.hwnd.Store(0)
 	}()
 
@@ -296,6 +315,12 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		}
 		return 0
 
+	case wmNativeViewerReconfigure:
+		if viewer != nil {
+			viewer.applyReconfigure()
+		}
+		return 0
+
 	case win.WM_SETCURSOR:
 		win.SetCursor(0)
 		return 1
@@ -372,6 +397,48 @@ func (v *windowsViewer) notifyViewport() {
 	}
 }
 
+func (v *windowsViewer) mediaSize() Viewport {
+	if v == nil {
+		return Viewport{}
+	}
+	return unpackViewport(v.media.Load())
+}
+
+func (v *windowsViewer) applyReconfigure() {
+	if v == nil {
+		return
+	}
+	var request viewerReconfigureRequest
+	select {
+	case request = <-v.reconfigureCh:
+	default:
+		return
+	}
+	var err error
+	if request.width <= 0 || request.height <= 0 {
+		err = fmt.Errorf("%w: invalid native viewer media dimensions", ErrUnavailable)
+	} else {
+		current := v.mediaSize()
+		if current.Width != request.width || current.Height != request.height {
+			v.rendererMu.Lock()
+			if v.renderer == nil {
+				err = ErrUnavailable
+			} else {
+				v.clearLatestFrame()
+				err = v.renderer.Reconfigure(request.width, request.height)
+				if err == nil {
+					v.media.Store(packViewport(request.width, request.height))
+				}
+			}
+			v.rendererMu.Unlock()
+		}
+	}
+	select {
+	case request.reply <- err:
+	default:
+	}
+}
+
 func (v *windowsViewer) normalizedPointer(x, y int) (uint16, uint16) {
 	viewport := v.Viewport()
 	width, height := viewport.Width, viewport.Height
@@ -441,6 +508,9 @@ func (v *windowsViewer) releasePressedInput() {
 }
 
 func (v *windowsViewer) renderLatest() error {
+	v.rendererMu.RLock()
+	defer v.rendererMu.RUnlock()
+
 	v.frameMu.Lock()
 	isGPU := v.latestIsGPU
 	gpuFrame := v.latestD3D11
@@ -468,6 +538,18 @@ func (v *windowsViewer) renderLatest() error {
 		return nil
 	}
 	return v.renderer.Render(cpuFrame)
+}
+
+func (v *windowsViewer) clearLatestFrame() {
+	v.frameMu.Lock()
+	resource := v.latestD3D11.Resource
+	v.latest = Frame{}
+	v.latestD3D11 = D3D11Frame{}
+	v.latestIsGPU = false
+	v.frameMu.Unlock()
+	if resource != 0 {
+		releaseCOM(unsafe.Pointer(resource))
+	}
 }
 
 func (v *windowsViewer) releaseLatestD3D11() {
@@ -499,8 +581,9 @@ func (v *windowsViewer) Submit(frame Frame) error {
 	if err := frame.Validate(); err != nil {
 		return err
 	}
-	if frame.Width != v.config.Width || frame.Height != v.config.Height {
-		return fmt.Errorf("%w: native viewer is %dx%d, frame is %dx%d", ErrUnavailable, v.config.Width, v.config.Height, frame.Width, frame.Height)
+	media := v.mediaSize()
+	if frame.Width != media.Width || frame.Height != media.Height {
+		return fmt.Errorf("%w: native viewer media is %dx%d, frame is %dx%d", ErrUnavailable, media.Width, media.Height, frame.Width, frame.Height)
 	}
 	select {
 	case <-v.done:
@@ -547,8 +630,9 @@ func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
 	if err := frame.Validate(); err != nil {
 		return err
 	}
-	if frame.Width != v.config.Width || frame.Height != v.config.Height {
-		return fmt.Errorf("%w: native viewer is %dx%d, D3D11 frame is %dx%d", ErrUnavailable, v.config.Width, v.config.Height, frame.Width, frame.Height)
+	media := v.mediaSize()
+	if frame.Width != media.Width || frame.Height != media.Height {
+		return fmt.Errorf("%w: native viewer media is %dx%d, D3D11 frame is %dx%d", ErrUnavailable, media.Width, media.Height, frame.Width, frame.Height)
 	}
 	select {
 	case <-v.done:
@@ -577,14 +661,58 @@ func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
 }
 
 func (v *windowsViewer) D3D11Device() uintptr {
-	if v == nil || v.renderer == nil {
+	if v == nil {
+		return 0
+	}
+	v.rendererMu.RLock()
+	defer v.rendererMu.RUnlock()
+	if v.renderer == nil {
 		return 0
 	}
 	return v.renderer.DeviceHandle()
 }
 
 func (v *windowsViewer) SupportsGPUCursor() bool {
-	return v != nil && v.renderer != nil && v.renderer.SupportsGPUCursor()
+	if v == nil {
+		return false
+	}
+	v.rendererMu.RLock()
+	defer v.rendererMu.RUnlock()
+	return v.renderer != nil && v.renderer.SupportsGPUCursor()
+}
+
+func (v *windowsViewer) Reconfigure(width, height int) error {
+	if v == nil || width <= 0 || height <= 0 {
+		return fmt.Errorf("%w: invalid native viewer media dimensions", ErrUnavailable)
+	}
+	current := v.mediaSize()
+	if current.Width == width && current.Height == height {
+		return nil
+	}
+	request := viewerReconfigureRequest{
+		width:  width,
+		height: height,
+		reply:  make(chan error, 1),
+	}
+	select {
+	case <-v.done:
+		return ErrUnavailable
+	case v.reconfigureCh <- request:
+	}
+	hwnd := win.HWND(v.hwnd.Load())
+	if hwnd == 0 || win.PostMessage(hwnd, wmNativeViewerReconfigure, 0, 0) == 0 {
+		select {
+		case <-v.reconfigureCh:
+		default:
+		}
+		return ErrUnavailable
+	}
+	select {
+	case <-v.done:
+		return ErrUnavailable
+	case err := <-request.reply:
+		return err
+	}
 }
 
 func (v *windowsViewer) Viewport() Viewport {

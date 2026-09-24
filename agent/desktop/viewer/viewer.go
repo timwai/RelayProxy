@@ -18,12 +18,25 @@ func (v Viewport) Valid() bool {
 	return v.Width > 0 && v.Height > 0
 }
 
+type WindowPlacement struct {
+	X         int
+	Y         int
+	Width     int
+	Height    int
+	Maximized bool
+}
+
+func (p WindowPlacement) Valid() bool {
+	return p.Width > 0 && p.Height > 0
+}
+
 type Config struct {
 	Title          string
 	Width          int
 	Height         int
 	ViewportWidth  int
 	ViewportHeight int
+	Placement      WindowPlacement
 	OnInput        func(protocol.DesktopInputEvent)
 	OnViewport     func(Viewport)
 }
@@ -72,6 +85,7 @@ type Native interface {
 	SetCursor(CursorOverlay) error
 	Reconfigure(width, height int) error
 	Viewport() Viewport
+	WindowPlacement() WindowPlacement
 	Focus()
 	Done() <-chan struct{}
 	Close() error

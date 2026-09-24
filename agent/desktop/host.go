@@ -903,8 +903,12 @@ func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabili
 	if h == nil {
 		return protocol.DesktopCapabilities{}
 	}
+	h.sessionMu.Lock()
+	multiStream := h.sessionFactory != nil
+	h.sessionMu.Unlock()
 	caps := protocol.DesktopCapabilities{
 		RelayDesktop: true,
+		MultiStream:  multiStream,
 		Codecs:       h.CodecCapabilities(),
 		MaxWidth:     maxJPEGWidth,
 		MaxHeight:    maxJPEGHeight,

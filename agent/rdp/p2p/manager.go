@@ -45,36 +45,36 @@ type Manager struct {
 }
 
 type Session struct {
-	manager         *Manager
-	ID              uint64
+	manager          *Manager
+	ID               uint64
 	Purpose          string
 	DesktopSessionID string
 	ControllerID     string
 	TargetID         string
 	Token            []byte
-	ExpiresAt       atomic.Int64
-	mu              sync.Mutex
-	candidates      []protocol.RDPCandidate
-	localCandidates []protocol.RDPCandidate
-	remote          *net.UDPAddr
-	remotePort      netip.AddrPort
-	udp             *net.UDPConn
-	localUDP        *net.UDPConn
-	udpStarting     bool
-	udpEncode       *secure.DataCodec
-	udpDecode       *secure.DataCodec
-	udpWire         []byte
-	udpPacketID     atomic.Uint32
-	udpReassembler  *punch.Reassembler
-	directConns     map[net.Conn]struct{}
-	directPackets   map[net.PacketConn]struct{}
-	candidateWake   chan struct{}
-	remoteWake      chan struct{}
-	closed          chan struct{}
-	closeOnce       sync.Once
-	onClose         func()
-	pathTCP         atomic.Value // string
-	pathUDP         atomic.Value // string
+	ExpiresAt        atomic.Int64
+	mu               sync.Mutex
+	candidates       []protocol.RDPCandidate
+	localCandidates  []protocol.RDPCandidate
+	remote           *net.UDPAddr
+	remotePort       netip.AddrPort
+	udp              *net.UDPConn
+	localUDP         *net.UDPConn
+	udpStarting      bool
+	udpEncode        *secure.DataCodec
+	udpDecode        *secure.DataCodec
+	udpWire          []byte
+	udpPacketID      atomic.Uint32
+	udpReassembler   *punch.Reassembler
+	directConns      map[net.Conn]struct{}
+	directPackets    map[net.PacketConn]struct{}
+	candidateWake    chan struct{}
+	remoteWake       chan struct{}
+	closed           chan struct{}
+	closeOnce        sync.Once
+	onClose          func()
+	pathTCP          atomic.Value // string
+	pathUDP          atomic.Value // string
 
 	applicationPath *ApplicationPath
 	appNotified     bool

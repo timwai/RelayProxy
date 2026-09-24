@@ -54,6 +54,7 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goSetTheme",
 		"goSetRemoteDesktopResolution",
 		"goSetRemoteDesktopDisplay",
+		"goOpenRemoteDesktopDisplayWindow",
 		"goGetRemoteDesktopDiagnostics",
 	} {
 		if !strings.Contains(script, "window."+name) {
@@ -432,6 +433,13 @@ func TestRemoteDesktopRuntimeDisplaySwitcher(t *testing.T) {
 		"status.captureBackend === 'wgc'",
 		"option.disabled = !!item.disabled",
 		"全部显示器（当前采集后端不支持）",
+		`id="desktop-open-display-window"`,
+		"caps.multiStream",
+		"hasFn('goOpenRemoteDesktopDisplayWindow')",
+		"async function openRemoteDesktopDisplayWindow()",
+		"call('goOpenRemoteDesktopDisplayWindow', status.targetId || '', displayID)",
+		"并发窗口使用 Relay Datagram",
+		"目标上报 MultiStream 时",
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("remote desktop runtime display UI missing %q", want)

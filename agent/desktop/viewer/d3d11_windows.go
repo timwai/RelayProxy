@@ -50,8 +50,8 @@ const (
 	id3d11VideoContextSetStreamDestRect       = 31
 	id3d11VideoContextSetStreamAlpha          = 32
 	id3d11VideoContextVideoProcessorBlt       = 53
-	id3d11DeviceContextClearState              = 110
-	id3d11DeviceContextFlush                   = 111
+	id3d11DeviceContextClearState             = 110
+	id3d11DeviceContextFlush                  = 111
 )
 
 var (

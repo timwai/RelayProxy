@@ -54,6 +54,9 @@ type windowsViewer struct {
 	windowedStyle     uint32
 	windowedPlacement win.WINDOWPLACEMENT
 
+	placementMu   sync.RWMutex
+	lastPlacement WindowPlacement
+
 	inputSequence  uint64
 	pressedKeys    map[uint16]bool
 	pressedButtons map[string]bool
@@ -148,16 +151,24 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		initCh <- fmt.Errorf("AdjustWindowRect failed: %w", windows.GetLastError())
 		return
 	}
+	x, y := int32(win.CW_USEDEFAULT), int32(win.CW_USEDEFAULT)
+	windowWidth, windowHeight := rect.Right-rect.Left, rect.Bottom-rect.Top
+	if placement := v.config.Placement; placement.Valid() {
+		x = int32(placement.X)
+		y = int32(placement.Y)
+		windowWidth = int32(placement.Width)
+		windowHeight = int32(placement.Height)
+	}
 	instance := win.GetModuleHandle(nil)
 	hwnd := win.CreateWindowEx(
 		0,
 		nativeViewerClassName,
 		title,
 		style,
-		int32(win.CW_USEDEFAULT),
-		int32(win.CW_USEDEFAULT),
-		rect.Right-rect.Left,
-		rect.Bottom-rect.Top,
+		x,
+		y,
+		windowWidth,
+		windowHeight,
 		0,
 		0,
 		instance,
@@ -230,9 +241,15 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		v.hwnd.Store(0)
 	}()
 
-	win.ShowWindow(hwnd, win.SW_SHOW)
+	v.rememberWindowPlacement(hwnd)
+	showCmd := int32(win.SW_SHOW)
+	if v.config.Placement.Valid() && v.config.Placement.Maximized {
+		showCmd = win.SW_SHOWMAXIMIZED
+	}
+	win.ShowWindow(hwnd, showCmd)
 	win.UpdateWindow(hwnd)
 	win.SetForegroundWindow(hwnd)
+	v.rememberWindowPlacement(hwnd)
 	v.notifyViewport()
 	initCh <- nil
 
@@ -352,6 +369,13 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 			height := int(uint16((lParam >> 16) & 0xffff))
 			viewer.updateViewport(width, height, true)
 			viewer.layoutRenderWindow()
+			viewer.rememberWindowPlacement(hwnd)
+		}
+		return 0
+
+	case win.WM_MOVE:
+		if viewer != nil {
+			viewer.rememberWindowPlacement(hwnd)
 		}
 		return 0
 
@@ -380,6 +404,7 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 	case win.WM_CLOSE:
 		if viewer != nil {
 			viewer.releasePressedInput()
+			viewer.rememberWindowPlacement(hwnd)
 		}
 		win.DestroyWindow(hwnd)
 		return 0
@@ -389,6 +414,39 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		return 0
 	}
 	return win.DefWindowProc(hwnd, msg, wParam, lParam)
+}
+
+func windowPlacementFromWin32(value win.WINDOWPLACEMENT) WindowPlacement {
+	rect := value.RcNormalPosition
+	width := int(rect.Right - rect.Left)
+	height := int(rect.Bottom - rect.Top)
+	if width <= 0 || height <= 0 {
+		return WindowPlacement{}
+	}
+	return WindowPlacement{
+		X:         int(rect.Left),
+		Y:         int(rect.Top),
+		Width:     width,
+		Height:    height,
+		Maximized: value.ShowCmd == win.SW_SHOWMAXIMIZED || value.ShowCmd == win.SW_MAXIMIZE,
+	}
+}
+
+func (v *windowsViewer) rememberWindowPlacement(hwnd win.HWND) {
+	if v == nil || hwnd == 0 || v.fullscreen {
+		return
+	}
+	value := win.WINDOWPLACEMENT{Length: uint32(unsafe.Sizeof(win.WINDOWPLACEMENT{}))}
+	if !win.GetWindowPlacement(hwnd, &value) {
+		return
+	}
+	placement := windowPlacementFromWin32(value)
+	if !placement.Valid() {
+		return
+	}
+	v.placementMu.Lock()
+	v.lastPlacement = placement
+	v.placementMu.Unlock()
 }
 
 func nativeViewerFullscreenShortcut(msg uint32, key uint16, lParam uintptr) bool {
@@ -435,6 +493,11 @@ func (v *windowsViewer) toggleFullscreen(hwnd win.HWND) {
 	}
 
 	v.windowedPlacement = placement
+	if cached := windowPlacementFromWin32(placement); cached.Valid() {
+		v.placementMu.Lock()
+		v.lastPlacement = cached
+		v.placementMu.Unlock()
+	}
 	fullscreenStyle := uint32(win.WS_POPUP | win.WS_VISIBLE | win.WS_CLIPCHILDREN)
 	win.SetWindowLong(
 		hwnd,
@@ -908,6 +971,19 @@ func (v *windowsViewer) Viewport() Viewport {
 		height = v.config.Height
 	}
 	return Viewport{Width: width, Height: height}
+}
+
+func (v *windowsViewer) WindowPlacement() WindowPlacement {
+	if v == nil {
+		return WindowPlacement{}
+	}
+	hwnd := win.HWND(v.hwnd.Load())
+	if hwnd != 0 {
+		v.rememberWindowPlacement(hwnd)
+	}
+	v.placementMu.RLock()
+	defer v.placementMu.RUnlock()
+	return v.lastPlacement
 }
 
 func (v *windowsViewer) SetCursor(cursor CursorOverlay) error {

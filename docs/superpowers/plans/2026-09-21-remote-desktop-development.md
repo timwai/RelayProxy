@@ -706,6 +706,19 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #928 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #618 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：接入第一个真正能输出/解码 4:4:4 的 Windows codec backend。优先评估 NVENC / QSV / AMF 的 vendor-native 能力与部署成本；只有实际 probe 成功的 backend 才允许把 `Chroma444=true` 写入在线 capability snapshot。
 
+### 0.2.57 RD3 Intel oneVPL HEVC 4:4:4 Probe（已进入 main）
+
+- Windows amd64 新增 oneVPL dispatcher 动态探测，不引入编译期 oneVPL SDK 依赖；运行时按需加载 `libvpl.dll`。
+- Probe 不依据 GPU 型号/代际推断能力，而是使用 oneVPL dispatcher property filters 真实筛选 Intel Hardware + D3D11 implementation。
+- HEVC 4:4:4 encode / decode 独立探测：分别要求 HEVC codec + AYUV ColorFormats，并只在两侧都满足时认为 `HEVC444EndToEnd=true`。
+- Win64 `mfxVariant` ABI 显式建模，并增加 size/offset 回归，锁定 `MFXSetConfigFilterProperty` 的 16-byte indirect argument 布局。
+- 非 Windows/非 amd64 平台提供安全 unsupported fallback，不影响现有跨平台编译。
+- Probe 已接入 Windows Host 启动诊断，输出 dispatcher / hardware runtime / HEVC444 encode / decode / end-to-end 状态。
+- 本阶段刻意保持 `advertised=false`：驱动/硬件能力与 RelayProxy 已实现 codec backend 分离，避免仅检测到 oneVPL 就错误上报 `Chroma444=true`。
+- 代表实现 PR：#106；merge `a2f87dd`。
+- 验证：Go CI #934 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #624 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：实现 oneVPL HEVC AYUV encoder/decoder backend，接入现有 generation-aware Host / native Viewer；只有实现层和 runtime probe 同时可用时才开放公开 4:4:4 capability。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
@@ -836,7 +849,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 多显示器/P2P + 4:4:4 协商/I444 基础已完成，真实 4:4:4 codec backend 待接入
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 + Opus + 多显示器/P2P + 4:4:4 协商/I444 + oneVPL Probe 已完成，真实 4:4:4 codec backend 待接入
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

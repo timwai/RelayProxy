@@ -96,7 +96,7 @@ class MainActivity : Activity() {
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(30), dp(20), dp(24))
+            setPadding(dp(20), dp(50), dp(20), dp(24))
         }
         content.addView(buildStatusCard())
         content.addView(buildInfoCard(), topMargin(18))

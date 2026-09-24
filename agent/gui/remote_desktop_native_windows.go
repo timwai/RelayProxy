@@ -77,6 +77,7 @@ type nativeDesktopSession struct {
 	viewer        desktopviewer.Native
 	decoder       desktopcodec.Decoder
 	inputCh       chan protocol.DesktopInputEvent
+	viewportCh    chan desktopviewer.Viewport
 	title         string
 	generation    uint32
 	decoderCodec  string
@@ -100,11 +101,38 @@ type nativeDesktopSession struct {
 	closeOnce sync.Once
 }
 
-func nativeDesktopViewerConfig(title string, width, height int, inputCh chan protocol.DesktopInputEvent) desktopviewer.Config {
+func queueLatestNativeViewport(ch chan desktopviewer.Viewport, viewport desktopviewer.Viewport) {
+	if ch == nil || !viewport.Valid() {
+		return
+	}
+	select {
+	case ch <- viewport:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- viewport:
+	default:
+	}
+}
+
+func nativeDesktopViewerConfig(
+	title string,
+	width, height int,
+	inputCh chan protocol.DesktopInputEvent,
+	viewportCh chan desktopviewer.Viewport,
+	viewport desktopviewer.Viewport,
+) desktopviewer.Config {
 	return desktopviewer.Config{
-		Title:  title,
-		Width:  width,
-		Height: height,
+		Title:          title,
+		Width:          width,
+		Height:         height,
+		ViewportWidth:  viewport.Width,
+		ViewportHeight: viewport.Height,
 		OnInput: func(event protocol.DesktopInputEvent) {
 			select {
 			case inputCh <- event:
@@ -113,6 +141,9 @@ func nativeDesktopViewerConfig(title string, width, height int, inputCh chan pro
 					log.Printf("[Desktop] native viewer input queue full; dropped %s", event.Kind)
 				}
 			}
+		},
+		OnViewport: func(viewport desktopviewer.Viewport) {
+			queueLatestNativeViewport(viewportCh, viewport)
 		},
 	}
 }
@@ -131,6 +162,63 @@ func nativeDesktopFrameCodec(frame protocol.RemoteDesktopFrame) string {
 func nativeDesktopVideoFrame(frame protocol.RemoteDesktopFrame) bool {
 	return nativeDesktopFrameCodec(frame) != ""
 }
+
+func nativeDesktopViewportResolution(
+	viewport desktopviewer.Viewport,
+	status protocol.RemoteDesktopStatus,
+) (int, int, bool) {
+	if !viewport.Valid() || status.Width <= 0 || status.Height <= 0 {
+		return 0, 0, false
+	}
+	maxWidth := status.MaxWidth
+	if maxWidth <= 0 {
+		maxWidth = status.Width
+	}
+	maxHeight := status.MaxHeight
+	if maxHeight <= 0 {
+		maxHeight = status.Height
+	}
+	if maxWidth <= 0 || maxHeight <= 0 {
+		return 0, 0, false
+	}
+
+	limitWidth := viewport.Width
+	if limitWidth > maxWidth {
+		limitWidth = maxWidth
+	}
+	limitHeight := viewport.Height
+	if limitHeight > maxHeight {
+		limitHeight = maxHeight
+	}
+	aspect := float64(status.Width) / float64(status.Height)
+	width := limitWidth
+	height := int(float64(width) / aspect)
+	if height > limitHeight {
+		height = limitHeight
+		width = int(float64(height) * aspect)
+	}
+	width &^= 1
+	height &^= 1
+	if width < 320 || height < 180 {
+		return 0, 0, false
+	}
+	return width, height, true
+}
+
+func nativeDesktopViewportMayGrow(currentWidth, currentHeight, lastWidth, lastHeight int) bool {
+	if lastWidth <= 0 || lastHeight <= 0 {
+		return false
+	}
+	return absInt(currentWidth-lastWidth) <= 2 && absInt(currentHeight-lastHeight) <= 2
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
 
 func openNativeDesktopDecoder(
 	ctx context.Context,
@@ -231,6 +319,11 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 	sameSize := s.decoderWidth == frame.Width && s.decoderHeight == frame.Height
 	title := s.title
 	inputCh := s.inputCh
+	viewportCh := s.viewportCh
+	viewport := desktopviewer.Viewport{}
+	if currentViewer != nil {
+		viewport = currentViewer.Viewport()
+	}
 	s.mediaMu.RUnlock()
 
 	var (
@@ -239,7 +332,9 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 		err         error
 	)
 	if !sameSize {
-		nextViewer, err = desktopviewer.Open(nativeDesktopViewerConfig(title, frame.Width, frame.Height, inputCh))
+		nextViewer, err = desktopviewer.Open(nativeDesktopViewerConfig(
+			title, frame.Width, frame.Height, inputCh, viewportCh, viewport,
+		))
 		if err != nil {
 			return fmt.Errorf("reopen D3D11 viewer for generation %d: %w", frame.Generation, err)
 		}
@@ -306,12 +401,15 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	inputCh := make(chan protocol.DesktopInputEvent, 512)
+	viewportCh := make(chan desktopviewer.Viewport, 1)
 
 	title := "RelayProxy Remote Desktop"
 	if status.TargetName != "" {
 		title += " - " + status.TargetName
 	}
-	native, err := desktopviewer.Open(nativeDesktopViewerConfig(title, frame.Width, frame.Height, inputCh))
+	native, err := desktopviewer.Open(nativeDesktopViewerConfig(
+		title, frame.Width, frame.Height, inputCh, viewportCh, desktopviewer.Viewport{},
+	))
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("open D3D11 viewer: %w", err)
@@ -329,6 +427,7 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		viewer:        native,
 		decoder:       decoder,
 		inputCh:       inputCh,
+		viewportCh:    viewportCh,
 		title:         title,
 		generation:    frame.Generation,
 		decoderCodec:  codec,
@@ -365,6 +464,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 	defer close(s.done)
 	defer s.cancel()
 	go s.inputLoop(ctx, owner)
+	go s.viewportLoop(ctx, owner)
 	if owner.bridge.RemoteDesktopAudioEnabled() {
 		go s.audioLoop(ctx, owner)
 	}
@@ -556,6 +656,80 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			stats.DecoderBackend = s.decoder.Backend()
 			stats.DecoderHardware = s.decoder.Hardware()
 			owner.bridge.ReportRemoteDesktopViewerStats(stats)
+		}
+	}
+}
+
+func (s *nativeDesktopSession) viewportLoop(ctx context.Context, owner *appWindow) {
+	if s == nil || owner == nil || owner.bridge == nil || s.viewportCh == nil {
+		return
+	}
+	const (
+		debounce = 300 * time.Millisecond
+		retry    = 2 * time.Second
+	)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	var (
+		viewport        desktopviewer.Viewport
+		viewportChanged time.Time
+		lastWidth       int
+		lastHeight      int
+		lastRequest     time.Time
+	)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case next := <-s.viewportCh:
+			if next.Valid() {
+				viewport = next
+				viewportChanged = time.Now()
+			}
+		case now := <-ticker.C:
+			if !viewport.Valid() || viewportChanged.IsZero() || now.Sub(viewportChanged) < debounce {
+				continue
+			}
+			if !owner.bridge.RemoteDesktopViewportFollowEnabled() {
+				continue
+			}
+			status := owner.bridge.GetRemoteDesktopStatus()
+			if status.State != "connected" || status.Backend != protocol.DesktopBackendRelay ||
+				(status.Codec != "h264" && status.Codec != "h265") {
+				continue
+			}
+			width, height, ok := nativeDesktopViewportResolution(viewport, status)
+			if !ok {
+				continue
+			}
+			currentWidth, currentHeight := status.Width, status.Height
+			if absInt(currentWidth-width) <= 2 && absInt(currentHeight-height) <= 2 {
+				lastWidth, lastHeight = width, height
+				lastRequest = time.Time{}
+				continue
+			}
+
+			shrink := currentWidth > width+2 || currentHeight > height+2
+			grow := (currentWidth < width-2 || currentHeight < height-2) &&
+				nativeDesktopViewportMayGrow(currentWidth, currentHeight, lastWidth, lastHeight)
+			if !shrink && !grow {
+				continue
+			}
+			if width == lastWidth && height == lastHeight &&
+				!lastRequest.IsZero() && now.Sub(lastRequest) < retry {
+				continue
+			}
+			if err := owner.bridge.SetRemoteDesktopViewportResolution(width, height); err != nil {
+				if lastRequest.IsZero() || now.Sub(lastRequest) >= retry {
+					log.Printf("[Desktop] native viewer viewport resolution %dx%d failed: %v", width, height, err)
+				}
+				lastRequest = now
+				continue
+			}
+			lastWidth, lastHeight = width, height
+			lastRequest = now
+			log.Printf("[Desktop] native viewer viewport=%dx%d requested media=%dx%d", viewport.Width, viewport.Height, width, height)
 		}
 	}
 }

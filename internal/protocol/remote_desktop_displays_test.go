@@ -25,7 +25,6 @@ func TestDesktopVideoControlDisplayIDDistinguishesVirtualDesktopRequest(t *testi
 	}
 }
 
-
 func TestCloneDesktopCodecCapabilitiesDeepCopiesDirectionalChroma(t *testing.T) {
 	original := []DesktopCodecCapability{{
 		Codec:        "h265",

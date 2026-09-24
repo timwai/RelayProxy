@@ -1465,16 +1465,20 @@ func (a *Agent) RequestRemoteDesktopIDR() error {
 
 func (a *Agent) disconnectRelayDesktop() {
 	a.mu.Lock()
-	session := a.desktopConnection
+	sessions := a.takeDesktopSessionsLocked()
 	direct := a.desktopP2PSession
-	a.desktopConnection = nil
 	a.desktopP2PSession = nil
 	a.mu.Unlock()
 
 	var report desktop.DesktopDiagnosticsReport
-	if session != nil {
+	for _, session := range sessions {
+		if session == nil {
+			continue
+		}
 		_ = session.Close()
-		report = session.Diagnostics()
+		if item := session.Diagnostics(); item.SchemaVersion != 0 {
+			report = item
+		}
 	}
 	if report.SchemaVersion != 0 {
 		a.mu.Lock()

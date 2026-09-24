@@ -165,6 +165,18 @@ func openH264D3D11Generation(
 	return encoder, d3dEncoder, converter, normalized, sequenceHeader, nil
 }
 
+func desktopVideoFormat(cfg desktopcodec.VideoConfig) (string, int) {
+	chroma := cfg.Chroma
+	if chroma == "" {
+		chroma = desktopcodec.Chroma420
+	}
+	bitDepth := cfg.BitDepth
+	if bitDepth <= 0 {
+		bitDepth = 8
+	}
+	return string(chroma), bitDepth
+}
+
 func h264DesktopVideoConfig(
 	generation uint32,
 	cfg desktopcodec.VideoConfig,
@@ -177,6 +189,7 @@ func h264DesktopVideoConfig(
 	if maxBitrate <= 0 {
 		maxBitrate = cfg.TargetBitrate
 	}
+	chroma, bitDepth := desktopVideoFormat(cfg)
 	return protocol.DesktopVideoConfig{
 		Generation:    generation,
 		Codec:         "h264",
@@ -188,8 +201,8 @@ func h264DesktopVideoConfig(
 		FPS:           cfg.FPS,
 		TargetBitrate: cfg.TargetBitrate,
 		MaxBitrate:    maxBitrate,
-		Chroma:        string(cfg.Chroma),
-		BitDepth:      cfg.BitDepth,
+		Chroma:        chroma,
+		BitDepth:      bitDepth,
 		DisplayID:     displayID,
 	}
 }

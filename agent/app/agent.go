@@ -1297,6 +1297,7 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 		out.MaxHeight = config.MaxHeight
 		out.FPS = config.FPS
 		liveDisplays, live := desktopSession.DisplayCapabilitiesSnapshot()
+		out.DisplaysReady = live
 		if live {
 			out.Displays = liveDisplays
 		}

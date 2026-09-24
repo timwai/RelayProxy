@@ -148,6 +148,19 @@ func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
 	}
 }
 
+func TestResolveHostConfigCarriesChromaPreference(t *testing.T) {
+	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
+		Chroma: protocol.DesktopChroma444,
+	})
+	if cfg.Chroma != desktopcodec.Chroma444 || cfg.BitDepth != 8 {
+		t.Fatalf("host video format=%s/%d", cfg.Chroma, cfg.BitDepth)
+	}
+	legacy := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{})
+	if legacy.Chroma != desktopcodec.Chroma420 || legacy.BitDepth != 8 {
+		t.Fatalf("legacy host video format=%s/%d", legacy.Chroma, legacy.BitDepth)
+	}
+}
+
 func TestResolveHostConfigClampsUnsafeValues(t *testing.T) {
 	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
 		Resolution: protocol.DesktopResolutionOptions{Mode: "fixed", Width: 9000, Height: 9000},

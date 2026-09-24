@@ -77,10 +77,28 @@ func TestNativeDesktopFrameNeedsRebuild(t *testing.T) {
 			height: 720,
 			frame:  protocol.RemoteDesktopFrame{MimeType: "video/h264", Width: 1280, Height: 720},
 		},
+		{
+			name:       "same generation chroma change",
+			generation: 3,
+			codec:      "h264",
+			width:      1920,
+			height:     1080,
+			frame:      protocol.RemoteDesktopFrame{Generation: 3, MimeType: "video/h264", Chroma: "444", BitDepth: 8, Width: 1920, Height: 1080},
+			want:       true,
+		},
+		{
+			name:       "same generation bit depth change",
+			generation: 3,
+			codec:      "h264",
+			width:      1920,
+			height:     1080,
+			frame:      protocol.RemoteDesktopFrame{Generation: 3, MimeType: "video/h264", Chroma: "420", BitDepth: 10, Width: 1920, Height: 1080},
+			want:       true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := nativeDesktopFrameNeedsRebuild(tt.generation, tt.codec, tt.width, tt.height, tt.frame); got != tt.want {
+			if got := nativeDesktopFrameNeedsRebuild(tt.generation, tt.codec, "420", 8, tt.width, tt.height, tt.frame); got != tt.want {
 				t.Fatalf("nativeDesktopFrameNeedsRebuild()=%t want=%t", got, tt.want)
 			}
 		})

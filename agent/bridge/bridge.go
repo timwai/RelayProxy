@@ -154,6 +154,14 @@ func (b *UIBridge) SetRemoteDesktopResolution(width, height int) error {
 	return b.agent.SetRemoteDesktopResolution(width, height)
 }
 
+func (b *UIBridge) SetRemoteDesktopViewportResolution(width, height int) error {
+	return b.agent.SetRemoteDesktopViewportResolution(width, height)
+}
+
+func (b *UIBridge) RemoteDesktopViewportFollowEnabled() bool {
+	return b != nil && b.agent != nil && b.agent.RemoteDesktopViewportFollowEnabled()
+}
+
 func (b *UIBridge) RequestRemoteDesktopIDR() error {
 	return b.agent.RequestRemoteDesktopIDR()
 }

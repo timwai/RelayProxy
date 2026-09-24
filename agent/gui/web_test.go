@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net"
 	"net/http"
@@ -229,8 +230,22 @@ func TestWebConfigMutationAndQuit(t *testing.T) {
 	}
 }
 
-func TestWebRejectsNonLoopbackListener(t *testing.T) {
-	if _, err := StartWeb(newWebTestBridge(t), WebOptions{Listen: "0.0.0.0", Port: 9090}); err == nil {
-		t.Fatal("non-loopback Agent web listener was accepted")
+func TestWebAcceptsNonLoopbackListener(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	server, err := StartWeb(newWebTestBridge(t), WebOptions{Listen: "0.0.0.0", Port: port})
+	if err != nil {
+		t.Fatalf("non-loopback Agent web listener was rejected: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close(context.Background()) })
+	if server.loopback {
+		t.Fatal("0.0.0.0 listener was incorrectly marked as loopback")
 	}
 }

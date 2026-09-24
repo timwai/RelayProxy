@@ -27,7 +27,7 @@ type WebOptions struct {
 	Port   int
 }
 
-// WebServer owns the local management listener. Done is closed when the user
+// WebServer owns the browser management listener. Done is closed when the user
 // requests shutdown from the page.
 type WebServer struct {
 	server   *http.Server
@@ -50,9 +50,6 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 		return nil, fmt.Errorf("invalid web management port %d", opts.Port)
 	}
 	loopback := webLoopbackHost(host)
-	if !loopback {
-		return nil, errors.New("agent web management is local-only; web.listen must be a loopback address")
-	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(opts.Port)))
 	if err != nil {
 		return nil, fmt.Errorf("start web management listener: %w", err)

@@ -94,11 +94,11 @@ func CloneDesktopCodecCapabilities(capabilities []DesktopCodecCapability) []Desk
 }
 
 type DesktopGPUCapability struct {
-	Backend        string   `json:"backend,omitempty"`
-	EncodeZeroCopy bool     `json:"encodeZeroCopy,omitempty"`
-	DecodeZeroCopy bool     `json:"decodeZeroCopy,omitempty"`
-	DisplayZeroCopy bool    `json:"displayZeroCopy,omitempty"`
-	Formats        []string `json:"formats,omitempty"`
+	Backend         string   `json:"backend,omitempty"`
+	EncodeZeroCopy  bool     `json:"encodeZeroCopy,omitempty"`
+	DecodeZeroCopy  bool     `json:"decodeZeroCopy,omitempty"`
+	DisplayZeroCopy bool     `json:"displayZeroCopy,omitempty"`
+	Formats         []string `json:"formats,omitempty"`
 }
 
 func CloneDesktopGPUCapability(capability *DesktopGPUCapability) *DesktopGPUCapability {

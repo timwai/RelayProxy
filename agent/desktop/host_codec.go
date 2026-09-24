@@ -285,8 +285,8 @@ func (h *Host) streamSessionFrames(
 	displayUpdates <-chan string,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
-	if cfg.Chroma == desktopcodec.Chroma444 {
-		return errors.New("Relay Desktop 4:4:4 was negotiated, but no 4:4:4 encoder backend is registered")
+	if cfg.Chroma == desktopcodec.Chroma444 && preference != "h265" {
+		return errors.New("Relay Desktop 4:4:4 currently requires the H.265 oneVPL backend")
 	}
 	generation := uint32(1)
 	if preference == "h265" && !h.canEncodeH265() {

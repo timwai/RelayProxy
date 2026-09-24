@@ -1976,7 +1976,7 @@
         }
         var label = select && select.options[select.selectedIndex]
           ? select.options[select.selectedIndex].textContent : displayID;
-        toast('已打开独立窗口：' + label + ' · 并发窗口使用 Relay Datagram');
+        toast('已打开独立窗口：' + label + ' · 媒体路径将独立选择 Relay / P2P');
       } catch (err) {
         toast('打开独立显示器窗口失败：' + (err && err.message ? err.message : err));
       } finally {

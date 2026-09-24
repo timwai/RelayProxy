@@ -139,7 +139,7 @@ func (s *nativeDesktopSession) requestIDR(owner *appWindow) error {
 	if s != nil && s.sessionID != "" {
 		return owner.bridge.RequestRemoteDesktopIDRForSession(s.sessionID)
 	}
-	return s.requestIDR(owner)
+	return owner.bridge.RequestRemoteDesktopIDR()
 }
 
 func (s *nativeDesktopSession) sendInput(owner *appWindow, event protocol.DesktopInputEvent) error {
@@ -168,7 +168,7 @@ func (s *nativeDesktopSession) reportViewerStats(owner *appWindow, stats protoco
 		owner.bridge.ReportRemoteDesktopViewerStatsForSession(s.sessionID, stats)
 		return
 	}
-	s.reportViewerStats(owner, stats)
+	owner.bridge.ReportRemoteDesktopViewerStats(stats)
 }
 
 func (s *nativeDesktopSession) audioEnabled(owner *appWindow) bool {

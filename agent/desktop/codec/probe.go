@@ -34,11 +34,16 @@ func (p H264Probe) Capability() protocol.DesktopCodecCapability {
 		Hardware:  p.HardwareEndToEnd(),
 		Encode:    p.EncodeAvailable(),
 		Decode:    p.DecodeAvailable(),
-		Chroma420: true,
-		BitDepth8: true,
+		Chroma420: p.EncodeAvailable() || p.DecodeAvailable(),
+		BitDepth8: p.EncodeAvailable() || p.DecodeAvailable(),
 	}
-	if !capability.Encode {
+	if capability.Encode {
+		capability.EncodeChroma = []string{"420"}
+	} else {
 		capability.Encoder = ""
+	}
+	if capability.Decode {
+		capability.DecodeChroma = []string{"420"}
 	}
 	return capability
 }
@@ -68,17 +73,63 @@ func (p H265Probe) HardwareEndToEnd() bool {
 }
 
 func (p H265Probe) Capability() protocol.DesktopCodecCapability {
+	available := p.EncodeAvailable() || p.DecodeAvailable()
 	capability := protocol.DesktopCodecCapability{
 		Codec:     "h265",
 		Encoder:   "media-foundation",
 		Hardware:  p.HardwareEndToEnd(),
 		Encode:    p.EncodeAvailable(),
 		Decode:    p.DecodeAvailable(),
-		Chroma420: true,
-		BitDepth8: true,
+		Chroma420: available,
+		BitDepth8: available,
 	}
-	if !capability.Encode {
+	if capability.Encode {
+		capability.EncodeChroma = []string{"420"}
+	} else {
 		capability.Encoder = ""
 	}
+	if capability.Decode {
+		capability.DecodeChroma = []string{"420"}
+	}
 	return capability
+}
+
+func appendDesktopChroma(values []string, chroma string) []string {
+	for _, value := range values {
+		if value == chroma {
+			return values
+		}
+	}
+	return append(values, chroma)
+}
+
+// H265Capability combines the established Media Foundation 4:2:0 path with
+// the oneVPL HEVC RExt 4:4:4 path. Because DesktopCodecCapability currently
+// has shared chroma flags rather than direction-specific chroma flags, 4:4:4
+// is advertised only when this machine can both encode and decode it.
+func H265Capability(mf H265Probe, oneVPL OneVPLProbe) (protocol.DesktopCodecCapability, bool) {
+	capability := mf.Capability()
+	available := mf.EncodeAvailable() || mf.DecodeAvailable()
+
+	if oneVPL.HEVC444EndToEnd() {
+		capability.Codec = "h265"
+		capability.Encode = true
+		capability.Decode = true
+		// Legacy peers only understand the shared Chroma420 flag. Once the
+		// oneVPL backend makes Encode/Decode both true, keep that legacy flag
+		// conservative unless Media Foundation also supports both directions.
+		capability.Chroma420 = mf.EncodeAvailable() && mf.DecodeAvailable()
+		capability.Chroma444 = true
+		capability.EncodeChroma = appendDesktopChroma(capability.EncodeChroma, "444")
+		capability.DecodeChroma = appendDesktopChroma(capability.DecodeChroma, "444")
+		capability.BitDepth8 = true
+		capability.Hardware = true
+		if capability.Encoder == "" {
+			capability.Encoder = "onevpl-hevc444"
+		} else {
+			capability.Encoder = "media-foundation+onevpl-hevc444"
+		}
+		available = true
+	}
+	return capability, available
 }

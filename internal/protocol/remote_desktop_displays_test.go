@@ -24,3 +24,20 @@ func TestDesktopVideoControlDisplayIDDistinguishesVirtualDesktopRequest(t *testi
 		t.Fatalf("virtual desktop display request lost empty displayId: %s", with)
 	}
 }
+
+func TestCloneDesktopCodecCapabilitiesDeepCopiesDirectionalChroma(t *testing.T) {
+	original := []DesktopCodecCapability{{
+		Codec:        "h265",
+		EncodeChroma: []string{"420", "444"},
+		DecodeChroma: []string{"444"},
+	}}
+	cloned := CloneDesktopCodecCapabilities(original)
+	if len(cloned) != 1 {
+		t.Fatalf("cloned len=%d", len(cloned))
+	}
+	cloned[0].EncodeChroma[0] = "changed"
+	cloned[0].DecodeChroma[0] = "changed"
+	if original[0].EncodeChroma[0] != "420" || original[0].DecodeChroma[0] != "444" {
+		t.Fatalf("clone aliases original slices: original=%+v cloned=%+v", original, cloned)
+	}
+}

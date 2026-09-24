@@ -18,8 +18,8 @@ func videoTarget(codecs ...protocol.DesktopCodecCapability) protocol.RemoteDeskt
 }
 
 func TestNegotiateRemoteDesktopVideoAcceptsH265WhenBothSidesSupportIt(t *testing.T) {
-	target := videoTarget(protocol.DesktopCodecCapability{Codec: "h265", Encode: true})
-	local := []protocol.DesktopCodecCapability{{Codec: "h265", Decode: true}}
+	target := videoTarget(protocol.DesktopCodecCapability{Codec: "h265", Encode: true, Chroma420: true})
+	local := []protocol.DesktopCodecCapability{{Codec: "h265", Decode: true, Chroma420: true}}
 	options, err := negotiateRemoteDesktopVideo(
 		target,
 		local,
@@ -34,8 +34,8 @@ func TestNegotiateRemoteDesktopVideoAcceptsH265WhenBothSidesSupportIt(t *testing
 }
 
 func TestNegotiateRemoteDesktopVideoRejectsH265WithoutTargetEncoder(t *testing.T) {
-	target := videoTarget(protocol.DesktopCodecCapability{Codec: "h265", Decode: true})
-	local := []protocol.DesktopCodecCapability{{Codec: "h265", Decode: true}}
+	target := videoTarget(protocol.DesktopCodecCapability{Codec: "h265", Decode: true, Chroma420: true})
+	local := []protocol.DesktopCodecCapability{{Codec: "h265", Decode: true, Chroma420: true}}
 	if _, err := negotiateRemoteDesktopVideo(
 		target,
 		local,
@@ -46,8 +46,8 @@ func TestNegotiateRemoteDesktopVideoRejectsH265WithoutTargetEncoder(t *testing.T
 }
 
 func TestNegotiateRemoteDesktopVideoRejectsH265WithoutLocalDecoder(t *testing.T) {
-	target := videoTarget(protocol.DesktopCodecCapability{Codec: "h265", Encode: true})
-	local := []protocol.DesktopCodecCapability{{Codec: "h265", Encode: true}}
+	target := videoTarget(protocol.DesktopCodecCapability{Codec: "h265", Encode: true, Chroma420: true})
+	local := []protocol.DesktopCodecCapability{{Codec: "h265", Encode: true, Chroma420: true}}
 	if _, err := negotiateRemoteDesktopVideo(
 		target,
 		local,
@@ -165,5 +165,113 @@ func TestNegotiateRemoteDesktopVideoRejects444WithAutoCodec(t *testing.T) {
 		protocol.RemoteDesktopConnectOptions{Codec: "auto", Chroma: protocol.DesktopChroma444},
 	); err == nil {
 		t.Fatal("4:4:4 request with auto codec was accepted")
+	}
+}
+
+func TestNegotiateRemoteDesktopVideoRejectsH265AutoWithout420(t *testing.T) {
+	target := videoTarget(protocol.DesktopCodecCapability{
+		Codec: "h265", Encode: true, Decode: true, Chroma444: true, BitDepth8: true,
+	})
+	local := []protocol.DesktopCodecCapability{{
+		Codec: "h265", Encode: true, Decode: true, Chroma444: true, BitDepth8: true,
+	}}
+	if _, err := negotiateRemoteDesktopVideo(
+		target,
+		local,
+		protocol.RemoteDesktopConnectOptions{Codec: "h265", Chroma: protocol.DesktopChromaAuto},
+	); err == nil {
+		t.Fatal("H.265 auto accepted a 4:4:4-only target")
+	}
+}
+
+func TestNegotiateRemoteDesktopVideoRejectsH265420WithoutLocal420(t *testing.T) {
+	target := videoTarget(protocol.DesktopCodecCapability{
+		Codec: "h265", Encode: true, Chroma420: true, BitDepth8: true,
+	})
+	local := []protocol.DesktopCodecCapability{{
+		Codec: "h265", Decode: true, Chroma444: true, BitDepth8: true,
+	}}
+	if _, err := negotiateRemoteDesktopVideo(
+		target,
+		local,
+		protocol.RemoteDesktopConnectOptions{Codec: "h265", Chroma: protocol.DesktopChroma420},
+	); err == nil {
+		t.Fatal("H.265 4:2:0 accepted a 4:4:4-only local decoder")
+	}
+}
+
+func TestNegotiateRemoteDesktopVideoAcceptsH265444OneVPLStyleCapability(t *testing.T) {
+	target := videoTarget(protocol.DesktopCodecCapability{
+		Codec: "h265", Encode: true, Decode: true, Chroma444: true, BitDepth8: true,
+	})
+	local := []protocol.DesktopCodecCapability{{
+		Codec: "h265", Encode: true, Decode: true, Chroma444: true, BitDepth8: true,
+	}}
+	options, err := negotiateRemoteDesktopVideo(
+		target,
+		local,
+		protocol.RemoteDesktopConnectOptions{Codec: "h265", Chroma: protocol.DesktopChroma444},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Codec != "h265" || options.Chroma != protocol.DesktopChroma444 {
+		t.Fatalf("negotiated options=%+v", options)
+	}
+}
+
+func TestNegotiateRemoteDesktopVideoPrefersDirectionalChromaOverLegacyFlags(t *testing.T) {
+	target := videoTarget(protocol.DesktopCodecCapability{
+		Codec:        "h265",
+		Encode:       true,
+		Decode:       true,
+		Chroma420:    true,
+		Chroma444:    true,
+		EncodeChroma: []string{"444"},
+		DecodeChroma: []string{"420", "444"},
+		BitDepth8:    true,
+	})
+	local := []protocol.DesktopCodecCapability{{
+		Codec:        "h265",
+		Encode:       true,
+		Decode:       true,
+		Chroma420:    true,
+		Chroma444:    true,
+		EncodeChroma: []string{"420", "444"},
+		DecodeChroma: []string{"420", "444"},
+		BitDepth8:    true,
+	}}
+	if _, err := negotiateRemoteDesktopVideo(
+		target,
+		local,
+		protocol.RemoteDesktopConnectOptions{Codec: "h265", Chroma: protocol.DesktopChroma420},
+	); err == nil {
+		t.Fatal("directional encode chroma was ignored in favor of legacy shared Chroma420")
+	}
+}
+
+func TestNegotiateRemoteDesktopVideoAcceptsDirectionalH265444(t *testing.T) {
+	target := videoTarget(protocol.DesktopCodecCapability{
+		Codec:        "h265",
+		Encode:       true,
+		Decode:       true,
+		EncodeChroma: []string{"444"},
+		DecodeChroma: []string{"444"},
+		BitDepth8:    true,
+	})
+	local := []protocol.DesktopCodecCapability{{
+		Codec:        "h265",
+		Encode:       true,
+		Decode:       true,
+		EncodeChroma: []string{"444"},
+		DecodeChroma: []string{"444"},
+		BitDepth8:    true,
+	}}
+	if _, err := negotiateRemoteDesktopVideo(
+		target,
+		local,
+		protocol.RemoteDesktopConnectOptions{Codec: "h265", Chroma: protocol.DesktopChroma444},
+	); err != nil {
+		t.Fatal(err)
 	}
 }

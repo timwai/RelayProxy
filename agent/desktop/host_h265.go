@@ -181,8 +181,8 @@ func h265DesktopVideoConfig(
 		FPS:           cfg.FPS,
 		TargetBitrate: cfg.TargetBitrate,
 		MaxBitrate:    maxBitrate,
-		Chroma:        "420",
-		BitDepth:      8,
+		Chroma:        string(cfg.Chroma),
+		BitDepth:      cfg.BitDepth,
 		DisplayID:     displayID,
 	}
 }
@@ -280,6 +280,8 @@ func (h *Host) streamH265Frames(
 		FPS:           cfg.MaxFPS,
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
+		Chroma:        cfg.Chroma,
+		BitDepth:      cfg.BitDepth,
 	}
 	var (
 		encoder        h265GenerationEncoder

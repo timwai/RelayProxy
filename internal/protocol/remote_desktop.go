@@ -93,6 +93,23 @@ func CloneDesktopCodecCapabilities(capabilities []DesktopCodecCapability) []Desk
 	return cloned
 }
 
+type DesktopGPUCapability struct {
+	Backend        string   `json:"backend,omitempty"`
+	EncodeZeroCopy bool     `json:"encodeZeroCopy,omitempty"`
+	DecodeZeroCopy bool     `json:"decodeZeroCopy,omitempty"`
+	DisplayZeroCopy bool    `json:"displayZeroCopy,omitempty"`
+	Formats        []string `json:"formats,omitempty"`
+}
+
+func CloneDesktopGPUCapability(capability *DesktopGPUCapability) *DesktopGPUCapability {
+	if capability == nil {
+		return nil
+	}
+	cloned := *capability
+	cloned.Formats = append([]string(nil), capability.Formats...)
+	return &cloned
+}
+
 type DesktopDisplayCapability struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
@@ -110,6 +127,7 @@ type DesktopCapabilities struct {
 	RelayDesktop   bool                       `json:"relayDesktop"`
 	Captures       []DesktopCaptureCapability `json:"captures,omitempty"`
 	Codecs         []DesktopCodecCapability   `json:"codecs,omitempty"`
+	GPU            *DesktopGPUCapability      `json:"gpu,omitempty"`
 	Displays       []DesktopDisplayCapability `json:"displays,omitempty"`
 	Audio          bool                       `json:"audio,omitempty"`
 	AudioCodecs    []string                   `json:"audioCodecs,omitempty"`

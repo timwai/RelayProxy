@@ -903,7 +903,7 @@ func (h *Host) SetCodecCapabilities(capabilities []protocol.DesktopCodecCapabili
 		return
 	}
 	h.codecMu.Lock()
-	h.codecCaps = append(h.codecCaps[:0], capabilities...)
+	h.codecCaps = protocol.CloneDesktopCodecCapabilities(capabilities)
 	h.codecMu.Unlock()
 }
 
@@ -913,7 +913,7 @@ func (h *Host) CodecCapabilities() []protocol.DesktopCodecCapability {
 	}
 	h.codecMu.RLock()
 	defer h.codecMu.RUnlock()
-	return append([]protocol.DesktopCodecCapability(nil), h.codecCaps...)
+	return protocol.CloneDesktopCodecCapabilities(h.codecCaps)
 }
 
 func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabilities {

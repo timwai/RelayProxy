@@ -21,6 +21,8 @@ type D3D11Surface struct {
 	releaseOnce sync.Once
 	release     func()
 	readback    func() ([]byte, error)
+	gpuRetain   func() error
+	gpuRelease  func()
 }
 
 func (s *D3D11Surface) ReadNV12() ([]byte, error) {
@@ -50,6 +52,7 @@ func (s *D3D11Surface) GPUFrame(width, height int) (desktopgpu.Frame, error) {
 	if err := frame.Validate(); err != nil {
 		return desktopgpu.Frame{}, fmt.Errorf("%w: %v", ErrDecoderUnavailable, err)
 	}
+	frame = desktopgpu.WithLifetime(frame, s.gpuRetain, s.gpuRelease)
 	return frame, nil
 }
 

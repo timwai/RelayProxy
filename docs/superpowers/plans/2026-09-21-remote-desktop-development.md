@@ -592,7 +592,21 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 `aspectFitRect` 纯函数和 Windows 回归测试，覆盖同宽高比、16:9→方窗、4:3→宽窗以及左右黑边 clamp 到远端画面边缘。
 - 实现提交：`a12e044`；测试提交：`9d2c0a0`；格式修复：`337baf7`。
 - 验证：Go CI #797 gofmt/vet/test/race/benchmark 通过；UI CI #487 Linux UI/full regression、macOS desktop package 与 Windows desktop package 均通过。
-- 下一步：补 Native Viewer 真正的 borderless fullscreen / `Alt+Enter` 切换，以及多显示器下记忆/恢复窗口 placement；随后再进入 H.265 正式产品化验证。
+- 下一步：✅ borderless fullscreen / `Alt+Enter` 已在 0.2.49 完成；后续继续做多显示器窗口 placement 持久化与 H.265 正式产品化验证。
+
+### 0.2.49 RD3 Native Viewer Borderless Fullscreen（已进入 main）
+
+- Native Win32 Viewer 新增 `Alt+Enter` 本地快捷键；仅拦截带 Alt context 的 `WM_SYSKEYDOWN / WM_SYSKEYUP + VK_RETURN`，普通 Enter、F11 与其他远端按键继续按既有输入链路发送。
+- 全屏不创建新窗口、不重建 renderer/decoder，也不触发媒体 generation：同一个顶层 HWND 仅把 window style 从 overlapped/resizable 切为 `WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN`，D3D11 child render surface 和当前媒体 pipeline 原样保留。
+- 进入全屏前保存 `WINDOWPLACEMENT`；使用 `MonitorFromWindow(..., MONITOR_DEFAULTTONEAREST)` 与 `MONITORINFO.RcMonitor` 覆盖当前 Viewer 所在显示器，而不是固定主屏。
+- 退出全屏时恢复原 window style 与 `WINDOWPLACEMENT`，因此普通窗口的位置、大小以及进入全屏前的最大化状态都可以恢复。
+- style 改变通过 `SetWindowLong + SetWindowPos(SWP_FRAMECHANGED)` 生效；全屏切换后重新前置并设置键盘焦点，不改变已有 viewport/letterbox/鼠标归一化逻辑。
+- 对按住 `Alt+Enter` 的系统键自动重复做 repeat-bit 过滤，只在首次 keydown 时切换一次，避免长按导致窗口在全屏/窗口模式之间快速来回跳。
+- 修复 Go 对 `WS_POPUP (0x80000000)` 的常量转换限制：先落到运行时 `uint32` style 再传入 `SetWindowLong(int32)`，兼容 Win32 最高位 style bit。
+- 新增 fullscreen shortcut 判定测试，覆盖 Alt+Enter down/up、普通 Enter、无 Alt context 以及其他 system key。
+- 实现提交：`e766997`；Win32 style 修复：`cda76fd`；测试：`ecc3e71`；格式修复：`a38eed3`。
+- 验证：Go CI #802 的 gofmt/vet/test/race/benchmark 全部通过；UI CI #492 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：增加 Native Viewer 的窗口 placement 持久化（跨 Viewer 重开记忆显示器/位置/尺寸），然后开始 H.265 capability negotiation 与 UI 正式公开。
 
 ### 0.3 本轮进度（2026-09-22）
 

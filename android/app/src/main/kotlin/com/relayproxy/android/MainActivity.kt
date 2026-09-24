@@ -74,11 +74,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        RelayExitService.setUiVisible(true)
         handler.removeCallbacks(pollStatus)
         handler.post(pollStatus)
     }
 
     override fun onPause() {
+        RelayExitService.setUiVisible(false)
         handler.removeCallbacks(pollStatus)
         super.onPause()
     }

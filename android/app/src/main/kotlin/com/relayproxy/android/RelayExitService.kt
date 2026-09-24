@@ -23,6 +23,13 @@ class RelayExitService : Service() {
         private const val CHANNEL_ID = "relayproxy_exit"
         private const val NOTIFICATION_ID = 1001
 
+        private const val UI_REFRESH_MS = 1_000L
+        private const val CONNECTING_REFRESH_MS = 3_000L
+        private const val ACTIVE_REFRESH_MS = 5_000L
+        private const val IDLE_REFRESH_MS = 20_000L
+        private const val WAITING_REFRESH_MS = 30_000L
+        private const val ERROR_REFRESH_MS = 30_000L
+
         @Volatile
         private var status = JSONObject()
             .put("connectionState", "STOPPED")
@@ -31,6 +38,17 @@ class RelayExitService : Service() {
 
         @Volatile
         private var serviceStartedAtElapsed: Long = 0
+
+        @Volatile
+        private var uiVisible = false
+
+        @Volatile
+        private var activeInstance: RelayExitService? = null
+
+        fun setUiVisible(visible: Boolean) {
+            uiVisible = visible
+            activeInstance?.requestRefreshSoon()
+        }
 
         fun statusJson(): String = runCatching {
             val uptime = if (serviceStartedAtElapsed > 0) {
@@ -48,6 +66,7 @@ class RelayExitService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private var core: Client? = null
     private var networkBinder: NetworkBinder? = null
+    private var lastNotificationText: String? = null
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -55,15 +74,18 @@ class RelayExitService : Service() {
                 status = runCatching { it.statusJSON() }
                     .getOrElse { errorStatus(it.message ?: "读取状态失败") }
             }
-            updateNotification()
-            handler.postDelayed(this, 2000)
+            updateNotificationIfChanged()
+            val delay = nextRefreshDelay()
+            if (delay > 0) {
+                handler.postDelayed(this, delay)
+            }
         }
     }
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         createNotificationChannel()
-        handler.post(refresh)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -96,6 +118,9 @@ class RelayExitService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refresh)
+        if (activeInstance === this) {
+            activeInstance = null
+        }
         networkBinder?.release()
         val running = core
         core = null
@@ -107,13 +132,17 @@ class RelayExitService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun startRelay() {
-        startForeground(NOTIFICATION_ID, buildNotification("正在启动"))
+        val startingText = "正在启动"
+        startForeground(NOTIFICATION_ID, buildNotification(startingText))
+        lastNotificationText = startingText
+        scheduleRefresh(0)
         if (core != null || networkBinder != null) return
 
         val config = ConfigStore(this).load()
         if (config.serverAddress.isBlank()) {
             status = errorStatus("请先填写 Relay Server 地址")
-            updateNotification()
+            updateNotificationIfChanged(force = true)
+            scheduleRefresh(ERROR_REFRESH_MS)
             return
         }
 
@@ -124,18 +153,25 @@ class RelayExitService : Service() {
 
         val networkLabel = if (config.networkMode == NetworkBinder.MODE_WIFI) "Wi-Fi" else "移动数据"
         status = waitingStatus("等待${networkLabel}网络")
+        updateNotificationIfChanged(force = true)
+        scheduleRefresh(WAITING_REFRESH_MS)
         val binder = NetworkBinder(this)
         networkBinder = binder
         binder.bind(
             mode = config.networkMode,
-            onAvailable = { startCore(config) },
+            onAvailable = {
+                startCore(config)
+                requestRefreshSoon()
+            },
             onLost = {
                 stopCoreOnly()
                 status = waitingStatus("${networkLabel}断开，等待恢复")
+                requestRefreshSoon()
             },
             onError = { message ->
                 stopCoreOnly()
                 status = errorStatus(message)
+                requestRefreshSoon()
             },
         )
     }
@@ -154,6 +190,7 @@ class RelayExitService : Service() {
                     status = errorStatus(t.message ?: t.javaClass.simpleName)
                 }
             }
+            requestRefreshSoon()
         }
     }
 
@@ -185,6 +222,7 @@ class RelayExitService : Service() {
                 .put("approvalState", "unknown")
                 .toString()
             serviceStartedAtElapsed = 0
+            lastNotificationText = null
             handler.post {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
@@ -221,18 +259,59 @@ class RelayExitService : Service() {
             .build()
     }
 
-    private fun updateNotification() {
+    private fun updateNotificationIfChanged(force: Boolean = false) {
         val obj = runCatching { JSONObject(status) }.getOrNull()
         val state = obj?.optString("connectionState", "UNKNOWN") ?: "UNKNOWN"
         val approval = obj?.optString("approvalState", "unknown") ?: "unknown"
         val streams = obj?.optLong("activeStreams", 0) ?: 0
         val text = when {
-            state == "CONNECTED" && approval == "approved" -> "已连接 · 活跃连接 $streams"
+            state == "CONNECTED" && approval == "approved" && streams > 0 ->
+                "已连接 · 活跃连接 $streams"
+            state == "CONNECTED" && approval == "approved" ->
+                "已连接 · 空闲"
+            state == "WAITING_NETWORK" ->
+                obj?.optString("lastError", "等待网络") ?: "等待网络"
+            state == "ERROR" ->
+                obj?.optString("lastError", "服务异常") ?: "服务异常"
             state == "STOPPED" -> "已停止"
             else -> "$state · $approval"
         }
+
+        if (!force && text == lastNotificationText) {
+            return
+        }
+        lastNotificationText = text
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, buildNotification(text))
+    }
+
+    private fun nextRefreshDelay(): Long {
+        if (uiVisible) return UI_REFRESH_MS
+
+        val obj = runCatching { JSONObject(status) }.getOrNull()
+        val state = obj?.optString("connectionState", "UNKNOWN") ?: "UNKNOWN"
+        val streams = obj?.optLong("activeStreams", 0) ?: 0
+        return when (state) {
+            "CONNECTING" -> CONNECTING_REFRESH_MS
+            "CONNECTED" -> if (streams > 0) ACTIVE_REFRESH_MS else IDLE_REFRESH_MS
+            "WAITING_NETWORK" -> WAITING_REFRESH_MS
+            "ERROR" -> ERROR_REFRESH_MS
+            "STOPPED" -> 0L
+            else -> IDLE_REFRESH_MS
+        }
+    }
+
+    private fun requestRefreshSoon() {
+        scheduleRefresh(0)
+    }
+
+    private fun scheduleRefresh(delayMs: Long) {
+        handler.removeCallbacks(refresh)
+        if (delayMs <= 0) {
+            handler.post(refresh)
+        } else {
+            handler.postDelayed(refresh, delayMs)
+        }
     }
 
     private fun errorStatus(message: String): String = JSONObject()

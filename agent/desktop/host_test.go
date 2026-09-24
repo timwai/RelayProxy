@@ -6,6 +6,7 @@ import (
 	"image"
 	"testing"
 
+	desktopcodec "relayproxy/agent/desktop/codec"
 	"relayproxy/internal/protocol"
 )
 

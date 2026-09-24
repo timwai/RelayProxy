@@ -1102,6 +1102,10 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 				return
 			default:
 			}
+			if !a.desktopP2PEligible(controller) {
+				log.Printf("[Desktop] P2P media disabled for target=%s while multiple desktop streams are active", targetID)
+				return
+			}
 
 			attemptCtx, cancel := context.WithTimeout(a.ctx, 8*time.Second)
 			direct, err := manager.StartControllerForPurpose(attemptCtx, targetID, protocol.P2PPurposeDesktopMedia)
@@ -1116,7 +1120,13 @@ func (a *Agent) startRelayDesktopDirectPath(controller *desktop.ControllerSessio
 					var lostOnce sync.Once
 
 					a.mu.Lock()
-					if a.closed.Load() || a.desktopConnection != controller || !controller.Active() {
+					activeDesktopSessions := 0
+					for _, candidate := range a.desktopConnections {
+						if candidate != nil && candidate.Active() {
+							activeDesktopSessions++
+						}
+					}
+					if a.closed.Load() || a.desktopConnection != controller || !controller.Active() || activeDesktopSessions > 1 {
 						a.mu.Unlock()
 						cancel()
 						_ = path.Close()

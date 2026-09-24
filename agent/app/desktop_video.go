@@ -37,6 +37,34 @@ func desktopCodecCapability(
 	return protocol.DesktopCodecCapability{}, false
 }
 
+func desktopCodecSupportsChroma(
+	capability protocol.DesktopCodecCapability,
+	chroma protocol.DesktopChroma,
+	encode bool,
+) bool {
+	values := capability.DecodeChroma
+	if encode {
+		values = capability.EncodeChroma
+	}
+	if len(values) > 0 {
+		want := string(chroma)
+		for _, value := range values {
+			if strings.EqualFold(strings.TrimSpace(value), want) {
+				return true
+			}
+		}
+		return false
+	}
+	switch chroma {
+	case protocol.DesktopChroma420:
+		return capability.Chroma420
+	case protocol.DesktopChroma444:
+		return capability.Chroma444
+	default:
+		return false
+	}
+}
+
 func negotiateRemoteDesktopVideo(
 	target protocol.RemoteDesktopTarget,
 	localCapabilities []protocol.DesktopCodecCapability,
@@ -68,10 +96,10 @@ func negotiateRemoteDesktopVideo(
 			return options, fmt.Errorf("this device does not advertise H.265 decode support")
 		}
 		if chroma != protocol.DesktopChroma444 {
-			if !targetCodec.Chroma420 {
+			if !desktopCodecSupportsChroma(targetCodec, protocol.DesktopChroma420, true) {
 				return options, fmt.Errorf("Relay Desktop target does not advertise H.265 4:2:0 encode support")
 			}
-			if !localCodec.Chroma420 {
+			if !desktopCodecSupportsChroma(localCodec, protocol.DesktopChroma420, false) {
 				return options, fmt.Errorf("this device does not advertise H.265 4:2:0 decode support")
 			}
 		}
@@ -84,11 +112,13 @@ func negotiateRemoteDesktopVideo(
 		return options, fmt.Errorf("Relay Desktop 4:4:4 requires an explicit H.264 or H.265 codec")
 	}
 	targetCodec, ok := desktopCodecCapability(target.Capabilities.Codecs, preference)
-	if !ok || !targetCodec.Encode || !targetCodec.Chroma444 {
+	if !ok || !targetCodec.Encode ||
+		!desktopCodecSupportsChroma(targetCodec, protocol.DesktopChroma444, true) {
 		return options, fmt.Errorf("Relay Desktop target does not advertise %s 4:4:4 encode support", strings.ToUpper(preference))
 	}
 	localCodec, ok := desktopCodecCapability(localCapabilities, preference)
-	if !ok || !localCodec.Decode || !localCodec.Chroma444 {
+	if !ok || !localCodec.Decode ||
+		!desktopCodecSupportsChroma(localCodec, protocol.DesktopChroma444, false) {
 		return options, fmt.Errorf("this device does not advertise %s 4:4:4 decode support", strings.ToUpper(preference))
 	}
 	return options, nil

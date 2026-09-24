@@ -33,7 +33,8 @@ var (
 type windowsViewer struct {
 	config Config
 
-	hwnd atomic.Uintptr
+	hwnd     atomic.Uintptr
+	viewport atomic.Uint64
 
 	frameMu     sync.Mutex
 	latest      Frame
@@ -114,8 +115,15 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		return
 	}
 
-	style := uint32(win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU | win.WS_MINIMIZEBOX)
-	rect := win.RECT{Left: 0, Top: 0, Right: int32(v.config.Width), Bottom: int32(v.config.Height)}
+	style := uint32(win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU | win.WS_MINIMIZEBOX | win.WS_MAXIMIZEBOX | win.WS_THICKFRAME)
+	clientWidth, clientHeight := v.config.ViewportWidth, v.config.ViewportHeight
+	if clientWidth <= 0 {
+		clientWidth = v.config.Width
+	}
+	if clientHeight <= 0 {
+		clientHeight = v.config.Height
+	}
+	rect := win.RECT{Left: 0, Top: 0, Right: int32(clientWidth), Bottom: int32(clientHeight)}
 	if !win.AdjustWindowRect(&rect, style, false) {
 		initCh <- fmt.Errorf("AdjustWindowRect failed: %w", windows.GetLastError())
 		return
@@ -140,6 +148,12 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		return
 	}
 	v.hwnd.Store(uintptr(hwnd))
+	var clientRect win.RECT
+	if win.GetClientRect(hwnd, &clientRect) {
+		v.updateViewport(int(clientRect.Right-clientRect.Left), int(clientRect.Bottom-clientRect.Top), false)
+	} else {
+		v.updateViewport(clientWidth, clientHeight, false)
+	}
 
 	renderer, err := newD3D11Renderer(hwnd, v.config.Width, v.config.Height)
 	if err != nil {
@@ -161,6 +175,7 @@ func (v *windowsViewer) run(initCh chan<- error) {
 	win.ShowWindow(hwnd, win.SW_SHOW)
 	win.UpdateWindow(hwnd)
 	win.SetForegroundWindow(hwnd)
+	v.notifyViewport()
 	initCh <- nil
 
 	var msg win.MSG
@@ -264,6 +279,14 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		}
 		return 0
 
+	case win.WM_SIZE:
+		if viewer != nil {
+			width := int(uint16(lParam & 0xffff))
+			height := int(uint16((lParam >> 16) & 0xffff))
+			viewer.updateViewport(width, height, true)
+		}
+		return 0
+
 	case wmNativeViewerFrame:
 		if viewer != nil {
 			if err := viewer.renderLatest(); err != nil {
@@ -309,21 +332,66 @@ func clientPoint(lParam uintptr) (int, int) {
 	return x, y
 }
 
+func packViewport(width, height int) uint64 {
+	if width <= 0 || height <= 0 {
+		return 0
+	}
+	return uint64(uint32(width))<<32 | uint64(uint32(height))
+}
+
+func unpackViewport(value uint64) Viewport {
+	if value == 0 {
+		return Viewport{}
+	}
+	return Viewport{
+		Width:  int(uint32(value >> 32)),
+		Height: int(uint32(value)),
+	}
+}
+
+func (v *windowsViewer) updateViewport(width, height int, notify bool) {
+	if v == nil || width <= 0 || height <= 0 {
+		return
+	}
+	next := packViewport(width, height)
+	if next == 0 || v.viewport.Swap(next) == next {
+		return
+	}
+	if notify {
+		v.notifyViewport()
+	}
+}
+
+func (v *windowsViewer) notifyViewport() {
+	if v == nil || v.config.OnViewport == nil {
+		return
+	}
+	viewport := v.Viewport()
+	if viewport.Valid() {
+		v.config.OnViewport(viewport)
+	}
+}
+
 func (v *windowsViewer) normalizedPointer(x, y int) (uint16, uint16) {
-	if v.config.Width <= 1 || v.config.Height <= 1 {
+	viewport := v.Viewport()
+	width, height := viewport.Width, viewport.Height
+	if width <= 1 || height <= 1 {
+		width, height = v.config.Width, v.config.Height
+	}
+	if width <= 1 || height <= 1 {
 		return 0, 0
 	}
 	if x < 0 {
 		x = 0
-	} else if x >= v.config.Width {
-		x = v.config.Width - 1
+	} else if x >= width {
+		x = width - 1
 	}
 	if y < 0 {
 		y = 0
-	} else if y >= v.config.Height {
-		y = v.config.Height - 1
+	} else if y >= height {
+		y = height - 1
 	}
-	return uint16(x * 65535 / (v.config.Width - 1)), uint16(y * 65535 / (v.config.Height - 1))
+	return uint16(x * 65535 / (width - 1)), uint16(y * 65535 / (height - 1))
 }
 
 func mouseButton(msg uint32, wParam uintptr) string {
@@ -517,6 +585,24 @@ func (v *windowsViewer) D3D11Device() uintptr {
 
 func (v *windowsViewer) SupportsGPUCursor() bool {
 	return v != nil && v.renderer != nil && v.renderer.SupportsGPUCursor()
+}
+
+func (v *windowsViewer) Viewport() Viewport {
+	if v == nil {
+		return Viewport{}
+	}
+	viewport := unpackViewport(v.viewport.Load())
+	if viewport.Valid() {
+		return viewport
+	}
+	width, height := v.config.ViewportWidth, v.config.ViewportHeight
+	if width <= 0 {
+		width = v.config.Width
+	}
+	if height <= 0 {
+		height = v.config.Height
+	}
+	return Viewport{Width: width, Height: height}
 }
 
 func (v *windowsViewer) SetCursor(cursor CursorOverlay) error {

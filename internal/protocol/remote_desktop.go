@@ -43,6 +43,14 @@ const (
 	DesktopQualityCustom   DesktopQuality = "custom"
 )
 
+type DesktopChroma string
+
+const (
+	DesktopChromaAuto DesktopChroma = "auto"
+	DesktopChroma420  DesktopChroma = "420"
+	DesktopChroma444  DesktopChroma = "444"
+)
+
 type DesktopCaptureCapability struct {
 	Backend    string `json:"backend"`
 	DirtyRects bool   `json:"dirtyRects,omitempty"`
@@ -124,6 +132,7 @@ type RemoteDesktopConnectOptions struct {
 	Scene          DesktopScene             `json:"scene,omitempty"`
 	Quality        DesktopQuality           `json:"quality,omitempty"`
 	Codec          string                   `json:"codec,omitempty"`
+	Chroma         DesktopChroma            `json:"chroma,omitempty"`
 	CaptureBackend DesktopCaptureBackend    `json:"captureBackend,omitempty"`
 	Resolution     DesktopResolutionOptions `json:"resolution,omitempty"`
 	FPS            int                      `json:"fps,omitempty"`
@@ -165,6 +174,8 @@ type RemoteDesktopStatus struct {
 	CaptureBackend DesktopCaptureBackend      `json:"captureBackend,omitempty"`
 	Generation     uint32                     `json:"generation,omitempty"`
 	Codec          string                     `json:"codec,omitempty"`
+	Chroma         string                     `json:"chroma,omitempty"`
+	BitDepth       int                        `json:"bitDepth,omitempty"`
 	Width          int                        `json:"width,omitempty"`
 	Height         int                        `json:"height,omitempty"`
 	MaxWidth       int                        `json:"maxWidth,omitempty"`
@@ -186,6 +197,8 @@ type RemoteDesktopFrame struct {
 	Generation uint32 `json:"generation,omitempty"`
 	MimeType   string `json:"mimeType"`
 	Codec      string `json:"codec,omitempty"`
+	Chroma     string `json:"chroma,omitempty"`
+	BitDepth   int    `json:"bitDepth,omitempty"`
 	Width      int    `json:"width,omitempty"`
 	Height     int    `json:"height,omitempty"`
 	Timestamp  uint64 `json:"timestamp,omitempty"`

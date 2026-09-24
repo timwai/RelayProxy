@@ -6,6 +6,7 @@ import (
 	"image"
 	"testing"
 
+	desktopcodec "relayproxy/agent/desktop/codec"
 	"relayproxy/internal/protocol"
 )
 
@@ -145,6 +146,19 @@ func TestResolveHostConfigQualityAndExplicitOverrides(t *testing.T) {
 	if cfg.JPEGQuality != 78 || cfg.MaxBitrate != 8_000_000 || cfg.DisplayID != "42" ||
 		cfg.CaptureBackend != protocol.DesktopCaptureDXGI {
 		t.Fatalf("unexpected quality/display/capture policy: %+v", cfg)
+	}
+}
+
+func TestResolveHostConfigCarriesChromaPreference(t *testing.T) {
+	cfg := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{
+		Chroma: protocol.DesktopChroma444,
+	})
+	if cfg.Chroma != desktopcodec.Chroma444 || cfg.BitDepth != 8 {
+		t.Fatalf("host video format=%s/%d", cfg.Chroma, cfg.BitDepth)
+	}
+	legacy := ResolveHostConfig(DefaultHostConfig(), protocol.RemoteDesktopConnectOptions{})
+	if legacy.Chroma != desktopcodec.Chroma420 || legacy.BitDepth != 8 {
+		t.Fatalf("legacy host video format=%s/%d", legacy.Chroma, legacy.BitDepth)
 	}
 }
 

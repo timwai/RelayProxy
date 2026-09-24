@@ -26,6 +26,31 @@ func TestNormalizeVideoConfigRejectsOdd420Dimensions(t *testing.T) {
 	}
 }
 
+func TestNormalizeVideoConfigAccepts4448Bit(t *testing.T) {
+	cfg := DefaultVideoConfig()
+	cfg.Chroma = Chroma444
+	normalized, err := NormalizeVideoConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.Chroma != Chroma444 || normalized.BitDepth != 8 {
+		t.Fatalf("normalized format=%s/%d", normalized.Chroma, normalized.BitDepth)
+	}
+}
+
+func TestNormalizeVideoConfigRejectsUnsupportedChromaAndBitDepth(t *testing.T) {
+	cfg := DefaultVideoConfig()
+	cfg.Chroma = ChromaFormat("422")
+	if _, err := NormalizeVideoConfig(cfg); !errors.Is(err, ErrInvalidVideoConfig) {
+		t.Fatalf("422 err=%v", err)
+	}
+	cfg = DefaultVideoConfig()
+	cfg.BitDepth = 10
+	if _, err := NormalizeVideoConfig(cfg); !errors.Is(err, ErrInvalidVideoConfig) {
+		t.Fatalf("10-bit err=%v", err)
+	}
+}
+
 func TestRawFrameValidation(t *testing.T) {
 	frame := RawFrame{Format: PixelFormatNV12, Width: 1280, Height: 720, Stride: 1280, Pix: make([]byte, 1280*720*3/2)}
 	if err := frame.Validate(); err != nil {
@@ -47,6 +72,11 @@ func TestBitrateOnlyReconfigure(t *testing.T) {
 	next.Width = current.Width + 2
 	if bitrateOnlyReconfigure(current, next) {
 		t.Fatal("resolution change must require encoder rebuild")
+	}
+	next = current
+	next.Chroma = Chroma444
+	if bitrateOnlyReconfigure(current, next) {
+		t.Fatal("chroma change must require encoder rebuild")
 	}
 }
 

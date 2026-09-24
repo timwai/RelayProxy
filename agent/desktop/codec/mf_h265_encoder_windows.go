@@ -4,6 +4,7 @@ package codec
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -47,6 +48,9 @@ func openMFH265Encoder(
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return nil, err
+	}
+	if cfg.Chroma != Chroma420 || cfg.BitDepth != 8 {
+		return nil, fmt.Errorf("%w: Media Foundation H.265 only supports the Relay Desktop 8-bit 4:2:0 path", ErrEncoderUnavailable)
 	}
 	transform, err := openMFVideoTransformWithDevice(
 		ctx, cfg, preferHardware, true, device, mfH265EncoderSpec,

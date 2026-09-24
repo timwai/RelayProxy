@@ -701,7 +701,7 @@
 
         <details class="rp-card p-4" id="desktop-connect-settings">
           <summary class="cursor-pointer select-none text-[12px] font-semibold text-slate-800 dark:text-slate-100">连接设置</summary>
-          <div class="grid grid-cols-2 xl:grid-cols-8 gap-3 mt-3">
+          <div class="grid grid-cols-2 xl:grid-cols-9 gap-3 mt-3">
             <div>
               <label for="desktop-opt-backend" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">协议</label>
               <select id="desktop-opt-backend" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
@@ -737,6 +737,14 @@
                 <option value="h264">H.264</option>
                 <option value="h265">H.265 / HEVC（原生 Viewer）</option>
                 <option value="jpeg">JPEG 兼容</option>
+              </select>
+            </div>
+            <div>
+              <label for="desktop-opt-chroma" class="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">色彩采样</label>
+              <select id="desktop-opt-chroma" class="w-full text-[12px] px-2.5 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
+                <option value="auto">自动</option>
+                <option value="420">4:2:0</option>
+                <option value="444">4:4:4（需端到端支持）</option>
               </select>
             </div>
             <div>
@@ -782,7 +790,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；连接后也可在预览工具栏直接切换显示器，不需要断开重连。连接前的显示器列表来自目标登录快照；连接后 Host 会自动推送实时显示器列表，热插拔、分辨率或主屏变化会自动刷新当前会话下拉框。目标上报 MultiStream 时，可为具体显示器打开独立原生窗口；并发桌面流当前统一使用 Relay Datagram，关闭独立窗口会自动释放对应媒体会话。自动模式仍优先成熟的 H.264 路径（WebCodecs 不可用时使用 JPEG）；H.265 / HEVC 目前需要显式选择、目标上报 Encode、本机上报 Decode，并使用原生 Viewer 播放。采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 / H.265 均使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；连接后也可在预览工具栏直接切换显示器，不需要断开重连。连接前的显示器列表来自目标登录快照；连接后 Host 会自动推送实时显示器列表，热插拔、分辨率或主屏变化会自动刷新当前会话下拉框。目标上报 MultiStream 时，可为具体显示器打开独立原生窗口；每个并发桌面流可独立在 Relay Datagram 与 P2P 之间升级/回退，关闭独立窗口会自动释放对应媒体会话。自动模式仍优先成熟的 H.264 8-bit 4:2:0 路径（WebCodecs 不可用时使用 JPEG）；4:4:4 仅在目标编码和本机解码均明确上报 Chroma444 时允许连接，当前 Windows 内置 Media Foundation H.264/H.265 仍保持 4:2:0，不会伪装成 4:4:4。H.265 / HEVC 目前需要显式选择、目标上报 Encode、本机上报 Decode，并使用原生 Viewer 播放。采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 / H.265 均使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -1576,6 +1584,14 @@
       var capability = remoteDesktopCodecCapability(targetID, codec);
       return !!(capability && capability.encode);
     }
+    function remoteDesktopTargetSupportsChroma(targetID, codec, chroma) {
+      var capability = remoteDesktopCodecCapability(targetID, codec);
+      if (!capability || !capability.encode) return false;
+      chroma = String(chroma || 'auto').toLowerCase();
+      if (chroma === '444') return !!capability.chroma444;
+      if (chroma === '420') return !!capability.chroma420;
+      return true;
+    }
     function remoteDesktopCaptureBackends(target) {
       var caps = target && target.capabilities ? target.capabilities : {};
       var captures = Array.isArray(caps.captures) ? caps.captures : [];
@@ -1656,6 +1672,7 @@
       var scene = $('desktop-opt-scene') ? $('desktop-opt-scene').value : 'auto';
       var quality = $('desktop-opt-quality') ? $('desktop-opt-quality').value : 'auto';
       var codecChoice = $('desktop-opt-codec') ? $('desktop-opt-codec').value : 'auto';
+      var chroma = $('desktop-opt-chroma') ? $('desktop-opt-chroma').value : 'auto';
       var captureBackend = $('desktop-opt-capture') ? $('desktop-opt-capture').value : 'auto';
       var webCodecs = typeof window.VideoDecoder === 'function' && typeof window.EncodedVideoChunk === 'function';
       var codec = codecChoice === 'auto' ? (webCodecs ? 'h264' : 'jpeg') : codecChoice;
@@ -1676,6 +1693,7 @@
         scene: scene || 'auto',
         quality: quality || 'auto',
         codec: codec,
+        chroma: chroma || 'auto',
         captureBackend: captureBackend || 'auto',
         resolution: resolution,
         fps: fps,
@@ -1691,6 +1709,8 @@
         var codecLabels = { h264:'H.264', h265:'H.265', jpeg:'JPEG' };
         parts.push(codecLabels[options.codec] || String(options.codec).toUpperCase());
       }
+      if (options.chroma === '444') parts.push('4:4:4');
+      else if (options.chroma === '420') parts.push('4:2:0');
       if (options.captureBackend && options.captureBackend !== 'auto') {
         parts.push('Capture ' + options.captureBackend.toUpperCase());
       }
@@ -1956,7 +1976,7 @@
         }
         var label = select && select.options[select.selectedIndex]
           ? select.options[select.selectedIndex].textContent : displayID;
-        toast('已打开独立窗口：' + label + ' · 并发窗口使用 Relay Datagram');
+        toast('已打开独立窗口：' + label + ' · 媒体路径将独立选择 Relay / P2P');
       } catch (err) {
         toast('打开独立显示器窗口失败：' + (err && err.message ? err.message : err));
       } finally {
@@ -2842,6 +2862,15 @@
       if (relayRequired && options.codec === 'h265' &&
           !remoteDesktopTargetCanEncodeCodec(targetID, 'h265')) {
         toast('目标未上报 H.265 / HEVC 编码能力，请改用 H.264 或 JPEG');
+        return;
+      }
+      if (relayRequired && options.chroma === '444' &&
+          !remoteDesktopTargetSupportsChroma(targetID, options.codec, '444')) {
+        toast('目标未上报 ' + String(options.codec || '').toUpperCase() + ' 4:4:4 编码能力，请改用 4:2:0');
+        return;
+      }
+      if (relayRequired && options.chroma === '444' && !hasFn('goOpenRemoteDesktopNativeViewer')) {
+        toast('4:4:4 当前需要 Windows 原生 Viewer');
         return;
       }
       if (relayRequired && options.codec === 'h265' && !hasFn('goOpenRemoteDesktopNativeViewer')) {

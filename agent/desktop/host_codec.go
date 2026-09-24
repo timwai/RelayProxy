@@ -165,6 +165,18 @@ func openH264D3D11Generation(
 	return encoder, d3dEncoder, converter, normalized, sequenceHeader, nil
 }
 
+func desktopVideoFormat(cfg desktopcodec.VideoConfig) (string, int) {
+	chroma := cfg.Chroma
+	if chroma == "" {
+		chroma = desktopcodec.Chroma420
+	}
+	bitDepth := cfg.BitDepth
+	if bitDepth <= 0 {
+		bitDepth = 8
+	}
+	return string(chroma), bitDepth
+}
+
 func h264DesktopVideoConfig(
 	generation uint32,
 	cfg desktopcodec.VideoConfig,
@@ -177,6 +189,7 @@ func h264DesktopVideoConfig(
 	if maxBitrate <= 0 {
 		maxBitrate = cfg.TargetBitrate
 	}
+	chroma, bitDepth := desktopVideoFormat(cfg)
 	return protocol.DesktopVideoConfig{
 		Generation:    generation,
 		Codec:         "h264",
@@ -188,8 +201,8 @@ func h264DesktopVideoConfig(
 		FPS:           cfg.FPS,
 		TargetBitrate: cfg.TargetBitrate,
 		MaxBitrate:    maxBitrate,
-		Chroma:        "420",
-		BitDepth:      8,
+		Chroma:        chroma,
+		BitDepth:      bitDepth,
 		DisplayID:     displayID,
 	}
 }
@@ -272,6 +285,9 @@ func (h *Host) streamSessionFrames(
 	displayUpdates <-chan string,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
+	if cfg.Chroma == desktopcodec.Chroma444 {
+		return errors.New("Relay Desktop 4:4:4 was negotiated, but no 4:4:4 encoder backend is registered")
+	}
 	generation := uint32(1)
 	if preference == "h265" && !h.canEncodeH265() {
 		log.Printf("[Desktop] H.265 requested but encoder capability is unavailable; trying H.264 fallback")
@@ -689,6 +705,8 @@ func (h *Host) streamH264Frames(
 		FPS:           cfg.MaxFPS,
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
+		Chroma:        cfg.Chroma,
+		BitDepth:      cfg.BitDepth,
 	}
 	var (
 		encoder        h264GenerationEncoder

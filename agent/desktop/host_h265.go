@@ -170,6 +170,7 @@ func h265DesktopVideoConfig(
 	if maxBitrate <= 0 {
 		maxBitrate = cfg.TargetBitrate
 	}
+	chroma, bitDepth := desktopVideoFormat(cfg)
 	return protocol.DesktopVideoConfig{
 		Generation:    generation,
 		Codec:         "h265",
@@ -181,8 +182,8 @@ func h265DesktopVideoConfig(
 		FPS:           cfg.FPS,
 		TargetBitrate: cfg.TargetBitrate,
 		MaxBitrate:    maxBitrate,
-		Chroma:        "420",
-		BitDepth:      8,
+		Chroma:        chroma,
+		BitDepth:      bitDepth,
 		DisplayID:     displayID,
 	}
 }
@@ -280,6 +281,8 @@ func (h *Host) streamH265Frames(
 		FPS:           cfg.MaxFPS,
 		TargetBitrate: bitrate,
 		KeyframeEvery: 2 * time.Second,
+		Chroma:        cfg.Chroma,
+		BitDepth:      cfg.BitDepth,
 	}
 	var (
 		encoder        h265GenerationEncoder

@@ -23,6 +23,8 @@ type FrameSnapshot struct {
 	Generation uint32
 	MimeType   string
 	Codec      string
+	Chroma     string
+	BitDepth   int
 	Width      int
 	Height     int
 	Timestamp  uint64
@@ -494,6 +496,8 @@ func snapshotFromEncodedFrame(frame *desktopmedia.EncodedFrame, config protocol.
 		if mimeType := desktopVideoMIME(config.Codec); mimeType != "" {
 			snapshot.MimeType = mimeType
 			snapshot.Codec = config.CodecString
+			snapshot.Chroma = config.Chroma
+			snapshot.BitDepth = config.BitDepth
 			snapshot.Width = config.Width
 			snapshot.Height = config.Height
 			return snapshot, true

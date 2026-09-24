@@ -1380,6 +1380,7 @@ func (a *Agent) RemoteDesktopFrame() protocol.RemoteDesktopFrame {
 	}
 	return protocol.RemoteDesktopFrame{
 		Sequence: frame.Sequence, Generation: frame.Generation, MimeType: frame.MimeType, Codec: frame.Codec,
+		Chroma: frame.Chroma, BitDepth: frame.BitDepth,
 		Width: frame.Width, Height: frame.Height, Timestamp: frame.Timestamp,
 		KeyFrame: frame.KeyFrame, Data: frame.Data,
 	}

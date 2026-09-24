@@ -392,6 +392,12 @@ func TestRemoteDesktopFollowViewport(t *testing.T) {
 		"<option value=\"h265\">H.265 / HEVC（原生 Viewer）</option>",
 		"function remoteDesktopCodecCapability(targetID, codec)",
 		"function remoteDesktopTargetCanEncodeCodec(targetID, codec)",
+		"id=\"desktop-opt-chroma\"",
+		"<option value=\"444\">4:4:4（需端到端支持）</option>",
+		"function remoteDesktopTargetSupportsChroma(targetID, codec, chroma)",
+		"options.chroma === '444'",
+		"目标未上报 ' + String(options.codec || '').toUpperCase() + ' 4:4:4 编码能力",
+		"4:4:4 当前需要 Windows 原生 Viewer",
 		"options.codec === 'h265'",
 		"目标未上报 H.265 / HEVC 编码能力",
 		"H.265 / HEVC 当前需要 Windows 原生 Viewer",
@@ -438,7 +444,7 @@ func TestRemoteDesktopRuntimeDisplaySwitcher(t *testing.T) {
 		"hasFn('goOpenRemoteDesktopDisplayWindow')",
 		"async function openRemoteDesktopDisplayWindow()",
 		"call('goOpenRemoteDesktopDisplayWindow', status.targetId || '', displayID)",
-		"并发窗口使用 Relay Datagram",
+		"媒体路径将独立选择 Relay / P2P",
 		"目标上报 MultiStream 时",
 	} {
 		if !strings.Contains(page, want) {

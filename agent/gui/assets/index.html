@@ -1600,9 +1600,10 @@
       var capability = remoteDesktopCodecCapability(targetID, codec);
       if (!capability || !capability.encode) return false;
       chroma = String(chroma || 'auto').toLowerCase();
+      if (chroma === 'auto' || !chroma) chroma = '420';
       if (chroma === '444') return !!capability.chroma444;
       if (chroma === '420') return !!capability.chroma420;
-      return true;
+      return false;
     }
     function remoteDesktopCaptureBackends(target) {
       var caps = target && target.capabilities ? target.capabilities : {};
@@ -2872,8 +2873,9 @@
         return;
       }
       if (relayRequired && options.codec === 'h265' &&
-          !remoteDesktopTargetCanEncodeCodec(targetID, 'h265')) {
-        toast('目标未上报 H.265 / HEVC 编码能力，请改用 H.264 或 JPEG');
+          !remoteDesktopTargetSupportsChroma(targetID, 'h265', options.chroma)) {
+        var requestedChroma = options.chroma === '444' ? '4:4:4' : '4:2:0';
+        toast('目标未上报 H.265 / HEVC ' + requestedChroma + ' 编码能力，请调整色彩采样或改用 H.264');
         return;
       }
       if (relayRequired && options.chroma === '444' &&

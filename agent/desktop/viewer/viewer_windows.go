@@ -151,24 +151,16 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		initCh <- fmt.Errorf("AdjustWindowRect failed: %w", windows.GetLastError())
 		return
 	}
-	x, y := int32(win.CW_USEDEFAULT), int32(win.CW_USEDEFAULT)
-	windowWidth, windowHeight := rect.Right-rect.Left, rect.Bottom-rect.Top
-	if placement := v.config.Placement; placement.Valid() {
-		x = int32(placement.X)
-		y = int32(placement.Y)
-		windowWidth = int32(placement.Width)
-		windowHeight = int32(placement.Height)
-	}
 	instance := win.GetModuleHandle(nil)
 	hwnd := win.CreateWindowEx(
 		0,
 		nativeViewerClassName,
 		title,
 		style,
-		x,
-		y,
-		windowWidth,
-		windowHeight,
+		int32(win.CW_USEDEFAULT),
+		int32(win.CW_USEDEFAULT),
+		rect.Right-rect.Left,
+		rect.Bottom-rect.Top,
 		0,
 		0,
 		instance,
@@ -179,6 +171,10 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		return
 	}
 	v.hwnd.Store(uintptr(hwnd))
+	if placement := v.config.Placement; placement.Valid() {
+		value := windowPlacementToWin32(placement)
+		win.SetWindowPlacement(hwnd, &value)
+	}
 	var clientRect win.RECT
 	if win.GetClientRect(hwnd, &clientRect) {
 		v.updateViewport(int(clientRect.Right-clientRect.Left), int(clientRect.Bottom-clientRect.Top), false)
@@ -414,6 +410,21 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		return 0
 	}
 	return win.DefWindowProc(hwnd, msg, wParam, lParam)
+}
+
+func windowPlacementToWin32(value WindowPlacement) win.WINDOWPLACEMENT {
+	showCmd := uint32(win.SW_SHOWNORMAL)
+	if value.Maximized {
+		showCmd = win.SW_SHOWMAXIMIZED
+	}
+	return win.WINDOWPLACEMENT{
+		Length:  uint32(unsafe.Sizeof(win.WINDOWPLACEMENT{})),
+		ShowCmd: showCmd,
+		RcNormalPosition: win.RECT{
+			Left: int32(value.X), Top: int32(value.Y),
+			Right: int32(value.X + value.Width), Bottom: int32(value.Y + value.Height),
+		},
+	}
 }
 
 func windowPlacementFromWin32(value win.WINDOWPLACEMENT) WindowPlacement {
@@ -976,10 +987,6 @@ func (v *windowsViewer) Viewport() Viewport {
 func (v *windowsViewer) WindowPlacement() WindowPlacement {
 	if v == nil {
 		return WindowPlacement{}
-	}
-	hwnd := win.HWND(v.hwnd.Load())
-	if hwnd != 0 {
-		v.rememberWindowPlacement(hwnd)
 	}
 	v.placementMu.RLock()
 	defer v.placementMu.RUnlock()

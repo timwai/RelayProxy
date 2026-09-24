@@ -782,7 +782,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；连接后也可在预览工具栏直接切换显示器，不需要断开重连。连接前的显示器列表来自目标登录快照；连接后 Host 会自动推送实时显示器列表，热插拔、分辨率或主屏变化会自动刷新当前会话下拉框。自动模式仍优先成熟的 H.264 路径（WebCodecs 不可用时使用 JPEG）；H.265 / HEVC 目前需要显式选择、目标上报 Encode、本机上报 Decode，并使用原生 Viewer 播放。采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 / H.265 均使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；连接后也可在预览工具栏直接切换显示器，不需要断开重连。连接前的显示器列表来自目标登录快照；连接后 Host 会自动推送实时显示器列表，热插拔、分辨率或主屏变化会自动刷新当前会话下拉框。目标上报 MultiStream 时，可为具体显示器打开独立原生窗口；并发桌面流当前统一使用 Relay Datagram，关闭独立窗口会自动释放对应媒体会话。自动模式仍优先成熟的 H.264 路径（WebCodecs 不可用时使用 JPEG）；H.265 / HEVC 目前需要显式选择、目标上报 Encode、本机上报 Decode，并使用原生 Viewer 播放。采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 / H.265 均使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -797,6 +797,7 @@
             <div class="flex items-center gap-2">
               <div id="desktop-runtime-display-wrap" class="hidden items-center gap-1.5">
                 <select id="desktop-runtime-display" title="运行中切换远程显示器" onchange="setRemoteDesktopDisplay()" class="text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md"></select>
+                <button id="desktop-open-display-window" type="button" onclick="openRemoteDesktopDisplayWindow()" class="rp-btn hidden" title="为当前选择的具体显示器打开独立 Relay Desktop 原生窗口">独立窗口</button>
               </div>
               <div id="desktop-runtime-resolution-wrap" class="hidden items-center gap-1.5">
                 <select id="desktop-runtime-resolution" title="运行中切换 H.264 / H.265 分辨率" class="text-[11px] px-2 py-1.5 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md">
@@ -1826,14 +1827,22 @@
     function updateDesktopRuntimeDisplayControl(status) {
       var wrap = $('desktop-runtime-display-wrap');
       var select = $('desktop-runtime-display');
+      var windowButton = $('desktop-open-display-window');
       if (!wrap || !select) return;
       status = status || {};
       var displays = remoteDesktopDisplays(status.targetId || '');
+      var target = remoteDesktopTargetByID(status.targetId || '');
+      var caps = target && target.capabilities ? target.capabilities : {};
       var enabled = status.state === 'connected' && status.backend === 'relay' &&
         displays.length > 1 && hasFn('goSetRemoteDesktopDisplay');
+      var multiWindow = enabled && !!caps.multiStream && hasFn('goOpenRemoteDesktopDisplayWindow');
       wrap.classList.toggle('hidden', !enabled);
       wrap.classList.toggle('flex', enabled);
       select.disabled = !enabled;
+      if (windowButton) {
+        windowButton.classList.toggle('hidden', !multiWindow);
+        windowButton.disabled = !multiWindow || !String(select.value || '');
+      }
       if (!enabled) {
         select.replaceChildren();
         return;
@@ -1876,6 +1885,9 @@
         select.appendChild(current);
         select.value = currentID;
       }
+      if (windowButton) {
+        windowButton.disabled = !multiWindow || !String(select.value || '');
+      }
       wrap.title = status.displayName
         ? '当前：' + status.displayName + '；切换无需断开连接，会创建新的媒体 Generation'
         : '运行中切换显示器；切换无需断开连接';
@@ -1914,6 +1926,44 @@
       }
     }
     window.setRemoteDesktopDisplay = setRemoteDesktopDisplay;
+
+    async function openRemoteDesktopDisplayWindow() {
+      if (!hasFn('goOpenRemoteDesktopDisplayWindow')) {
+        toast('当前界面不支持独立显示器窗口');
+        return;
+      }
+      var status = state.desktopStatus || {};
+      var target = remoteDesktopTargetByID(status.targetId || '');
+      var caps = target && target.capabilities ? target.capabilities : {};
+      if (!caps.multiStream) {
+        toast('目标当前未上报多流桌面能力');
+        return;
+      }
+      var select = $('desktop-runtime-display');
+      var button = $('desktop-open-display-window');
+      var displayID = String(select && select.value || '');
+      if (!displayID) {
+        toast('请先选择一个具体显示器');
+        return;
+      }
+      if (button) button.disabled = true;
+      try {
+        var raw = await call('goOpenRemoteDesktopDisplayWindow', status.targetId || '', displayID);
+        var result = mutationResult(raw);
+        if (result && result.ok === false) {
+          toast(result.message || '打开独立显示器窗口失败');
+          return;
+        }
+        var label = select && select.options[select.selectedIndex]
+          ? select.options[select.selectedIndex].textContent : displayID;
+        toast('已打开独立窗口：' + label + ' · 并发窗口使用 Relay Datagram');
+      } catch (err) {
+        toast('打开独立显示器窗口失败：' + (err && err.message ? err.message : err));
+      } finally {
+        updateDesktopRuntimeDisplayControl(state.desktopStatus || {});
+      }
+    }
+    window.openRemoteDesktopDisplayWindow = openRemoteDesktopDisplayWindow;
 
     function updateDesktopRuntimeResolutionControl(status) {
       var wrap = $('desktop-runtime-resolution-wrap');

@@ -428,6 +428,10 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 	if streamAudio {
 		workerCount++
 	}
+	displayProvider, streamDisplays := h.source.(CaptureCapabilitySource)
+	if streamDisplays {
+		workerCount++
+	}
 	errorsCh := make(chan error, workerCount)
 	go func() {
 		errorsCh <- h.streamSessionFrames(
@@ -458,6 +462,11 @@ func (h *Host) HandleDesktopMedia(ctx context.Context, conn *desktopmedia.MediaC
 				<-sessionCtx.Done()
 			}
 			errorsCh <- sessionCtx.Err()
+		}()
+	}
+	if streamDisplays {
+		go func() {
+			errorsCh <- h.streamSessionDisplays(sessionCtx, conn, displayProvider)
 		}()
 	}
 

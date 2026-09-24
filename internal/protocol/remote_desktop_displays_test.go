@@ -41,3 +41,20 @@ func TestCloneDesktopCodecCapabilitiesDeepCopiesDirectionalChroma(t *testing.T) 
 		t.Fatalf("clone aliases original slices: original=%+v cloned=%+v", original, cloned)
 	}
 }
+
+func TestCloneDesktopGPUCapabilityDeepCopiesFormats(t *testing.T) {
+	original := &DesktopGPUCapability{
+		Backend:         "d3d11",
+		DecodeZeroCopy:  true,
+		DisplayZeroCopy: true,
+		Formats:         []string{"nv12", "ayuv"},
+	}
+	cloned := CloneDesktopGPUCapability(original)
+	if cloned == nil {
+		t.Fatal("GPU capability clone is nil")
+	}
+	cloned.Formats[0] = "changed"
+	if original.Formats[0] != "nv12" {
+		t.Fatalf("GPU capability clone aliases original: original=%+v cloned=%+v", original, cloned)
+	}
+}

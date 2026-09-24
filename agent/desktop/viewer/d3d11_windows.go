@@ -10,6 +10,8 @@ import (
 
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
+
+	desktopgpu "relayproxy/agent/desktop/gpu"
 )
 
 const (
@@ -25,7 +27,9 @@ const (
 
 	dxgiFormatUnknown           = 0
 	dxgiFormatB8G8R8A8UNorm     = 87
+	dxgiFormatAYUV              = 100
 	dxgiFormatNV12              = 103
+	dxgiFormatP010              = 104
 	dxgiUsageRenderTargetOutput = 0x20
 	dxgiSwapEffectDiscard       = 0
 
@@ -428,19 +432,21 @@ func (r *d3d11Renderer) initVideoProcessor() error {
 		return fail(hresultError("ID3D11VideoDevice.CreateVideoProcessorEnumerator", hr))
 	}
 
-	var nv12Support uint32
-	hr = comCall(
-		enumerator,
-		id3d11VideoProcessorEnumeratorCheckFormat,
-		dxgiFormatNV12,
-		uintptr(unsafe.Pointer(&nv12Support)),
-	)
-	if hresultFailed(hr) || nv12Support&d3d11VideoProcessorFormatSupportInput == 0 {
-		releaseCOM(enumerator)
-		if hresultFailed(hr) {
-			return fail(hresultError("ID3D11VideoProcessorEnumerator.CheckVideoProcessorFormat(NV12)", hr))
+	hasVideoInput := false
+	for _, format := range []uint32{dxgiFormatNV12, dxgiFormatAYUV, dxgiFormatP010} {
+		supported, supportErr := d3d11VideoProcessorSupportsInput(enumerator, format)
+		if supportErr != nil {
+			releaseCOM(enumerator)
+			return fail(supportErr)
 		}
-		return fail(fmt.Errorf("%w: D3D11 video processor does not accept NV12", ErrUnavailable))
+		if supported {
+			hasVideoInput = true
+			break
+		}
+	}
+	if !hasVideoInput {
+		releaseCOM(enumerator)
+		return fail(fmt.Errorf("%w: D3D11 video processor does not accept NV12, AYUV, or P010", ErrUnavailable))
 	}
 
 	var bgraSupport uint32
@@ -832,17 +838,63 @@ func (r *d3d11Renderer) Render(frame Frame) error {
 	return r.present()
 }
 
-func (r *d3d11Renderer) RenderD3D11(frame D3D11Frame, cursor CursorOverlay) error {
+func dxgiFormatForGPUFormat(format desktopgpu.Format) (uint32, bool) {
+	switch format {
+	case desktopgpu.FormatNV12:
+		return dxgiFormatNV12, true
+	case desktopgpu.FormatAYUV:
+		return dxgiFormatAYUV, true
+	case desktopgpu.FormatP010:
+		return dxgiFormatP010, true
+	case desktopgpu.FormatBGRA:
+		return dxgiFormatB8G8R8A8UNorm, true
+	default:
+		return 0, false
+	}
+}
+
+func d3d11VideoProcessorSupportsInput(enumerator unsafe.Pointer, format uint32) (bool, error) {
+	if enumerator == nil {
+		return false, ErrUnavailable
+	}
+	var support uint32
+	hr := comCall(
+		enumerator,
+		id3d11VideoProcessorEnumeratorCheckFormat,
+		uintptr(format),
+		uintptr(unsafe.Pointer(&support)),
+	)
+	if hresultFailed(hr) {
+		return false, hresultError("ID3D11VideoProcessorEnumerator.CheckVideoProcessorFormat", hr)
+	}
+	return support&d3d11VideoProcessorFormatSupportInput != 0, nil
+}
+
+func (r *d3d11Renderer) RenderGPU(frame desktopgpu.Frame, cursor CursorOverlay) error {
 	if r == nil || r.videoDevice == nil || r.videoContext == nil ||
 		r.videoEnumerator == nil || r.videoProcessor == nil ||
 		r.videoOutputView == nil || r.swapChain == nil {
 		return ErrUnavailable
 	}
 	if err := frame.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
+	}
+	if frame.Device != 0 && frame.Device != uintptr(r.device) {
+		return fmt.Errorf("%w: GPU frame belongs to a different D3D11 device", ErrUnavailable)
 	}
 	if frame.Width != r.width || frame.Height != r.height {
-		return fmt.Errorf("%w: D3D11 frame dimensions changed from %dx%d to %dx%d", ErrUnavailable, r.width, r.height, frame.Width, frame.Height)
+		return fmt.Errorf("%w: GPU frame dimensions changed from %dx%d to %dx%d", ErrUnavailable, r.width, r.height, frame.Width, frame.Height)
+	}
+	expectedFormat, ok := dxgiFormatForGPUFormat(frame.Format)
+	if !ok {
+		return fmt.Errorf("%w: unsupported D3D11 GPU format %q", ErrUnavailable, frame.Format)
+	}
+	supported, err := d3d11VideoProcessorSupportsInput(r.videoEnumerator, expectedFormat)
+	if err != nil {
+		return err
+	}
+	if !supported {
+		return fmt.Errorf("%w: D3D11 video processor does not accept %s", ErrUnavailable, frame.Format)
 	}
 
 	source := unsafe.Pointer(frame.Resource)
@@ -854,6 +906,12 @@ func (r *d3d11Renderer) RenderD3D11(frame D3D11Frame, cursor CursorOverlay) erro
 	)
 	if textureDesc.MipLevels == 0 {
 		return fmt.Errorf("%w: D3D11 decoder texture has zero mip levels", ErrUnavailable)
+	}
+	if textureDesc.Format != expectedFormat {
+		return fmt.Errorf(
+			"%w: GPU frame format %s expects DXGI %d, texture reports DXGI %d",
+			ErrUnavailable, frame.Format, expectedFormat, textureDesc.Format,
+		)
 	}
 
 	inputDesc := d3d11VideoProcessorInputViewDesc{
@@ -953,6 +1011,13 @@ func (r *d3d11Renderer) RenderD3D11(frame D3D11Frame, cursor CursorOverlay) erro
 	}
 	r.outputFrame++
 	return r.present()
+}
+
+func (r *d3d11Renderer) RenderD3D11(frame D3D11Frame, cursor CursorOverlay) error {
+	if err := frame.Validate(); err != nil {
+		return err
+	}
+	return r.RenderGPU(frame.GPUFrame(), cursor)
 }
 
 func (r *d3d11Renderer) present() error {

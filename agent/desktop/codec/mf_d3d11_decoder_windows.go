@@ -302,8 +302,10 @@ func decoderSampleSurface(sample unsafe.Pointer, graphics *mfDecoderD3D11, width
 		return nil, hresultError("IMFDXGIBuffer.GetSubresourceIndex", hr)
 	}
 	return &D3D11Surface{
+		Device:      uintptr(graphics.device),
 		Resource:    uintptr(source),
 		Subresource: subresource,
+		Format:      PixelFormatNV12,
 		release: func() {
 			releaseIUnknown(source)
 		},

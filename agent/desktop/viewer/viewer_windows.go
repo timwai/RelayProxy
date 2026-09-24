@@ -12,6 +12,7 @@ import (
 	"github.com/lxn/win"
 	"golang.org/x/sys/windows"
 
+	desktopgpu "relayproxy/agent/desktop/gpu"
 	"relayproxy/internal/protocol"
 )
 
@@ -41,7 +42,7 @@ type windowsViewer struct {
 
 	frameMu     sync.Mutex
 	latest      Frame
-	latestD3D11 D3D11Frame
+	latestGPU   desktopgpu.Frame
 	latestIsGPU bool
 	cursor      CursorOverlay
 
@@ -764,7 +765,7 @@ func (v *windowsViewer) renderLatest() error {
 
 	v.frameMu.Lock()
 	isGPU := v.latestIsGPU
-	gpuFrame := v.latestD3D11
+	gpuFrame := v.latestGPU
 	cpuFrame := v.latest
 	cursor := v.cursor
 	if isGPU && gpuFrame.Resource != 0 {
@@ -783,7 +784,7 @@ func (v *windowsViewer) renderLatest() error {
 			return nil
 		}
 		defer releaseCOM(unsafe.Pointer(gpuFrame.Resource))
-		return v.renderer.RenderD3D11(gpuFrame, cursor)
+		return v.renderer.RenderGPU(gpuFrame, cursor)
 	}
 	if len(cpuFrame.BGRA) == 0 {
 		return nil
@@ -793,9 +794,9 @@ func (v *windowsViewer) renderLatest() error {
 
 func (v *windowsViewer) clearLatestFrame() {
 	v.frameMu.Lock()
-	resource := v.latestD3D11.Resource
+	resource := v.latestGPU.Resource
 	v.latest = Frame{}
-	v.latestD3D11 = D3D11Frame{}
+	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if resource != 0 {
@@ -805,8 +806,8 @@ func (v *windowsViewer) clearLatestFrame() {
 
 func (v *windowsViewer) releaseLatestD3D11() {
 	v.frameMu.Lock()
-	resource := v.latestD3D11.Resource
-	v.latestD3D11 = D3D11Frame{}
+	resource := v.latestGPU.Resource
+	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if resource != 0 {
@@ -858,9 +859,9 @@ func (v *windowsViewer) Submit(frame Frame) error {
 	copy(copyFrame.BGRA, frame.BGRA[:bytes])
 
 	v.frameMu.Lock()
-	oldResource := v.latestD3D11.Resource
+	oldResource := v.latestGPU.Resource
 	v.latest = copyFrame
-	v.latestD3D11 = D3D11Frame{}
+	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if oldResource != 0 {
@@ -874,16 +875,16 @@ func (v *windowsViewer) Submit(frame Frame) error {
 	return nil
 }
 
-func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
+func (v *windowsViewer) SubmitGPU(frame desktopgpu.Frame) error {
 	if v == nil {
 		return ErrUnavailable
 	}
 	if err := frame.Validate(); err != nil {
-		return err
+		return fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	media := v.mediaSize()
 	if frame.Width != media.Width || frame.Height != media.Height {
-		return fmt.Errorf("%w: native viewer media is %dx%d, D3D11 frame is %dx%d", ErrUnavailable, media.Width, media.Height, frame.Width, frame.Height)
+		return fmt.Errorf("%w: native viewer media is %dx%d, GPU frame is %dx%d", ErrUnavailable, media.Width, media.Height, frame.Width, frame.Height)
 	}
 	select {
 	case <-v.done:
@@ -895,9 +896,9 @@ func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
 	retainCOM(resource)
 
 	v.frameMu.Lock()
-	oldResource := v.latestD3D11.Resource
+	oldResource := v.latestGPU.Resource
 	v.latest = Frame{}
-	v.latestD3D11 = frame
+	v.latestGPU = frame
 	v.latestIsGPU = true
 	v.frameMu.Unlock()
 	if oldResource != 0 {
@@ -909,6 +910,13 @@ func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
 		return ErrUnavailable
 	}
 	return nil
+}
+
+func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
+	if err := frame.Validate(); err != nil {
+		return err
+	}
+	return v.SubmitGPU(frame.GPUFrame())
 }
 
 func (v *windowsViewer) D3D11Device() uintptr {
@@ -1002,7 +1010,7 @@ func (v *windowsViewer) SetCursor(cursor CursorOverlay) error {
 
 	v.frameMu.Lock()
 	v.cursor = copyCursor
-	renderGPU := v.latestIsGPU && v.latestD3D11.Resource != 0
+	renderGPU := v.latestIsGPU && v.latestGPU.Resource != 0
 	v.frameMu.Unlock()
 	if !renderGPU {
 		return nil

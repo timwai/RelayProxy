@@ -44,6 +44,7 @@ class NetworkBinder(context: Context) {
 
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
+                if (boundNetwork == network) return
                 boundNetwork = network
                 if (connectivity.bindProcessToNetwork(network)) {
                     onAvailable()
@@ -67,7 +68,16 @@ class NetworkBinder(context: Context) {
 
         callback = cb
         try {
-            connectivity.requestNetwork(request, cb)
+            if (mode == MODE_WIFI) {
+                // Wi-Fi-only should be passive: wait for an existing Wi-Fi network
+                // instead of keeping an active network request that can increase
+                // scanning / radio wakeups while Wi-Fi is unavailable.
+                connectivity.registerNetworkCallback(request, cb)
+            } else {
+                // Cellular-only is an explicit request to keep cellular available
+                // as the Relay exit even when another default network is active.
+                connectivity.requestNetwork(request, cb)
+            }
         } catch (t: Throwable) {
             callback = null
             onError(t.message ?: "请求${networkLabel}网络失败")

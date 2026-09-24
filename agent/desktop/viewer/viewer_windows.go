@@ -769,6 +769,10 @@ func (v *windowsViewer) renderLatest() error {
 	cpuFrame := v.latest
 	cursor := v.cursor
 	if isGPU && gpuFrame.Resource != 0 {
+		if err := gpuFrame.Retain(); err != nil {
+			v.frameMu.Unlock()
+			return fmt.Errorf("%w: retain GPU frame: %v", ErrUnavailable, err)
+		}
 		retainCOM(unsafe.Pointer(gpuFrame.Resource))
 	}
 	v.frameMu.Unlock()
@@ -776,6 +780,7 @@ func (v *windowsViewer) renderLatest() error {
 	if v.renderer == nil {
 		if isGPU && gpuFrame.Resource != 0 {
 			releaseCOM(unsafe.Pointer(gpuFrame.Resource))
+			gpuFrame.Release()
 		}
 		return ErrUnavailable
 	}
@@ -784,6 +789,7 @@ func (v *windowsViewer) renderLatest() error {
 			return nil
 		}
 		defer releaseCOM(unsafe.Pointer(gpuFrame.Resource))
+		defer gpuFrame.Release()
 		return v.renderer.RenderGPU(gpuFrame, cursor)
 	}
 	if len(cpuFrame.BGRA) == 0 {
@@ -795,23 +801,27 @@ func (v *windowsViewer) renderLatest() error {
 func (v *windowsViewer) clearLatestFrame() {
 	v.frameMu.Lock()
 	resource := v.latestGPU.Resource
+	oldGPU := v.latestGPU
 	v.latest = Frame{}
 	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if resource != 0 {
 		releaseCOM(unsafe.Pointer(resource))
+		oldGPU.Release()
 	}
 }
 
 func (v *windowsViewer) releaseLatestD3D11() {
 	v.frameMu.Lock()
 	resource := v.latestGPU.Resource
+	oldGPU := v.latestGPU
 	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if resource != 0 {
 		releaseCOM(unsafe.Pointer(resource))
+		oldGPU.Release()
 	}
 }
 
@@ -860,12 +870,14 @@ func (v *windowsViewer) Submit(frame Frame) error {
 
 	v.frameMu.Lock()
 	oldResource := v.latestGPU.Resource
+	oldGPU := v.latestGPU
 	v.latest = copyFrame
 	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if oldResource != 0 {
 		releaseCOM(unsafe.Pointer(oldResource))
+		oldGPU.Release()
 	}
 
 	hwnd := win.HWND(v.hwnd.Load())
@@ -892,17 +904,22 @@ func (v *windowsViewer) SubmitGPU(frame desktopgpu.Frame) error {
 	default:
 	}
 
+	if err := frame.Retain(); err != nil {
+		return fmt.Errorf("%w: retain GPU frame: %v", ErrUnavailable, err)
+	}
 	resource := unsafe.Pointer(frame.Resource)
 	retainCOM(resource)
 
 	v.frameMu.Lock()
 	oldResource := v.latestGPU.Resource
+	oldGPU := v.latestGPU
 	v.latest = Frame{}
 	v.latestGPU = frame
 	v.latestIsGPU = true
 	v.frameMu.Unlock()
 	if oldResource != 0 {
 		releaseCOM(unsafe.Pointer(oldResource))
+		oldGPU.Release()
 	}
 
 	hwnd := win.HWND(v.hwnd.Load())

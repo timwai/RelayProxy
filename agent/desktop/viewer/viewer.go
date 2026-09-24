@@ -70,6 +70,7 @@ type Native interface {
 	D3D11Device() uintptr
 	SupportsGPUCursor() bool
 	SetCursor(CursorOverlay) error
+	Reconfigure(width, height int) error
 	Viewport() Viewport
 	Focus()
 	Done() <-chan struct{}

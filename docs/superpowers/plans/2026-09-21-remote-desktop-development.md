@@ -636,6 +636,33 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #832 全部通过；UI CI #522 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：进入真实多显示器增强——运行中切换显示器、显示器热插拔/布局变化刷新，以及后续独立多窗口/多流设计。
 
+### 0.2.52 RD3 Runtime Multi-Display Switching（已进入 main）
+
+- Relay Desktop 运行中切换显示器已经从“断开重连”升级为媒体会话内热切换：`DesktopVideoControl.DisplayID *string` 使用指针语义区分“没有显示器控制请求”和“显式切回全部显示器（空字符串）”。
+- Controller 新增 `RequestDisplay`，Agent / Bridge / Wails / 前端完整暴露 `SetRemoteDesktopDisplay`；连接后 Viewer 工具栏直接显示当前目标的显示器选择框。
+- Host 收到切屏请求后不会把它当媒体故障：当前 H.264 / H.265 / JPEG generation 正常结束，事务式切换 capture + input geometry，再在同一 RD/1 媒体连接上启动下一 generation。
+- Windows capture 切换已改为事务式：先成功打开新 stream 再替换旧 stream；新显示器或新 backend 打开失败时，旧画面继续保留。
+- Windows input 映射同步事务化；新显示器输入几何初始化失败时，Host 会把 capture 回滚到旧显示器，避免“画面在新屏、鼠标还映射旧屏”的半切换状态。
+- `auto / GDI` 会话允许运行中切回虚拟桌面；显式 `DXGI / WGC` 仍要求具体显示器。Session status 公开请求的 capture backend preference，GUI 会直接禁用不合法的“全部显示器”，而不是等 Host 返回错误。
+- 切屏前 GUI 主动释放已按下键鼠状态；新 `VideoConfig.DisplayID + Generation` 是切换完成的最终权威状态，ABR、IDR、P2P/Relay path 与 audio side-channel 不需要重建。
+- 新增 Host capture/input rollback、latest display control、DXGI/WGC 约束和 GUI/Wails binding 回归。
+- 代表提交：`3611dce`、`a3ad4ed`、`83e0155`、`3413d7b`、`c662a36`、`f0c435b`、`e5a5467`、`e0e9edb`、`217c2b7`，测试/格式收尾至 `56e2f64`。
+- 验证：Go CI #849 全部通过；UI CI #539 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
+
+### 0.2.53 RD3 Live Display Topology + Display-Loss Recovery（已进入 main）
+
+- 活动 Relay Desktop session 新增可靠控制消息 `DesktopSessionDisplays`；Host 通过现有 `CaptureCapabilitySource` 每 2 秒轻量刷新一次显示器拓扑，仅在 ID / 名称 / 尺寸 / RefreshHz / Primary / HDR 等快照真正变化时发送。
+- 热插拔刷新完全走现有媒体 side-channel，不依赖重新认证或 Server 数据库更新：连接前仍使用登录阶段 capability snapshot，连接后 Controller 保存实时 display snapshot，Agent status 与 GUI 优先使用该快照。
+- `RemoteDesktopStatus` 新增 `Displays / DisplaysReady`。独立 ready 标志明确区分“还没收到实时列表”和“实时列表确实为空”，避免 JSON `omitempty` 让空拓扑错误回退到旧登录快照。
+- GUI 当前会话显示器下拉框因此会自动响应显示器插拔、分辨率变化和主屏变化；无需断开或手工刷新设备。
+- 当前正在观看的显示器被拔掉时，媒体错误路径会立即重新枚举拓扑并尝试自愈，而不是先降级 codec：`auto / GDI` 回到虚拟桌面；显式 `DXGI / WGC` 优先切到剩余主屏，否则选择首个可用显示器。
+- 丢屏恢复沿用运行时切屏的事务和 generation boundary：capture/input 成功切换后，同一 codec 用下一 generation 继续；不会把旧屏残留帧混到新屏，也不会因为单纯的显示器移除误触发 H.265→H.264→JPEG 降级链。
+- 如果显式 DXGI/WGC 时系统暂时没有任何显示器，恢复策略不会伪造目标；会保留错误并等待后续拓扑/会话处理。
+- 新增 topology change、defensive snapshot copy、empty topology、wire-level empty `displayId`、丢屏恢复策略等回归。
+- 代表提交：`a6d6d09`、`9aaf838`、`b9bfdea`、`0e9b36c`、`9bbe355`、`2eaa109`、`caec356`、`278cbd3`、`bbec42f`、`b7909a4`、`c79cc3e`，测试/格式收尾至 `1d90233`。
+- 验证：Go CI #884 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #574 的 frontend / UI full regression、Windows desktop package、macOS desktop package 均已通过。
+- 下一步：Windows 双机实测显示器热插拔与跨 DPI/负坐标布局；随后进入“同一远端同时打开多个显示器”的独立多窗口 / 多媒体流设计，而不是继续把单流切屏模型无限扩展。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
@@ -766,7 +793,7 @@ GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经
 RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
 RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
 RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
-RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 HEVC 验证链已就绪，音频数据面基础开发中
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    🚧 H.265 公共协商 + Opus + 运行时多显示器/热插拔已完成，4:4:4 / 独立多流待开发
 RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
 ```
 

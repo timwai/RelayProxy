@@ -14,6 +14,7 @@ import (
 	desktop "relayproxy/agent/desktop"
 	desktopaudio "relayproxy/agent/desktop/audio"
 	desktopcodec "relayproxy/agent/desktop/codec"
+	desktopgpu "relayproxy/agent/desktop/gpu"
 	desktopviewer "relayproxy/agent/desktop/viewer"
 	"relayproxy/internal/protocol"
 )
@@ -342,6 +343,15 @@ func openNativeDesktopDecoder(
 		if codec != "h265" {
 			return nil, fmt.Errorf("Relay Desktop 4:4:4 native decode currently supports H.265 only")
 		}
+		if device := native.D3D11Device(); device != 0 &&
+			native.SupportsGPUFormat(desktopgpu.FormatAYUV) &&
+			native.SupportsGPUCursor() {
+			decoder, err := desktopcodec.OpenOneVPLH265DecoderWithD3D11(ctx, decoderConfig, device)
+			if err == nil {
+				return decoder, nil
+			}
+			log.Printf("[Desktop] oneVPL D3D11 AYUV decode unavailable, falling back to CPU surface: %v", err)
+		}
 		return desktopcodec.OpenOneVPLH265Decoder(ctx, decoderConfig)
 	}
 	var (
@@ -423,6 +433,18 @@ func (s *nativeDesktopSession) disableGPUCursor() {
 	s.mediaMu.Unlock()
 }
 
+func nativeDesktopDecoderUsesGPUCursor(decoder desktopcodec.Decoder) bool {
+	if decoder == nil {
+		return false
+	}
+	switch decoder.Backend() {
+	case "media-foundation-d3d11-zero-copy", "onevpl-hevc444-d3d11-zero-copy":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *nativeDesktopSession) decoderStatus() (string, bool, bool) {
 	if s == nil {
 		return "", false, false
@@ -481,7 +503,7 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 	s.decoderBitDepth = nativeDesktopFrameBitDepth(frame)
 	s.decoderWidth = frame.Width
 	s.decoderHeight = frame.Height
-	s.gpuCursor = currentViewer.SupportsGPUCursor() && nextDecoder.Backend() == "media-foundation-d3d11-zero-copy"
+	s.gpuCursor = currentViewer.SupportsGPUCursor() && nativeDesktopDecoderUsesGPUCursor(nextDecoder)
 	s.gpuFrameActive = false
 	s.baseBGRA = nil
 	s.presentBGRA = nil
@@ -491,6 +513,7 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 	s.mediaMu.Unlock()
 
 	if oldDecoder != nil {
+		currentViewer.ClearFrame()
 		_ = oldDecoder.Close()
 	}
 	return nil
@@ -623,7 +646,7 @@ func (a *appWindow) openNativeDesktopViewerForSession(
 		decoderBitDepth:   nativeDesktopFrameBitDepth(frame),
 		decoderWidth:      frame.Width,
 		decoderHeight:     frame.Height,
-		gpuCursor:         native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
+		gpuCursor:         native.SupportsGPUCursor() && nativeDesktopDecoderUsesGPUCursor(decoder),
 		done:              make(chan struct{}),
 	}
 
@@ -742,12 +765,15 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		viewer := s.viewer
 		decoder := s.decoder
 		s.mediaMu.RUnlock()
+		var placement desktopviewer.WindowPlacement
+		if viewer != nil {
+			placement = viewer.WindowPlacement()
+			_ = viewer.Close()
+		}
 		if decoder != nil {
 			_ = decoder.Close()
 		}
 		if viewer != nil {
-			placement := viewer.WindowPlacement()
-			_ = viewer.Close()
 			if s.persistPlacement && placement.Valid() {
 				if err := owner.persistGUI(map[string]any{
 					"nativeViewer": map[string]any{
@@ -871,7 +897,8 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 					}
 				}()
 				if decodedFrame.Format != desktopcodec.PixelFormatNV12 &&
-					decodedFrame.Format != desktopcodec.PixelFormatI444 {
+					decodedFrame.Format != desktopcodec.PixelFormatI444 &&
+					decodedFrame.Format != desktopcodec.PixelFormatAYUV {
 					return
 				}
 
@@ -883,8 +910,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 					s.cursorBitmap.Width > 0 && s.cursorBitmap.Height > 0 &&
 					!s.gpuCursor
 
-				if decodedFrame.Format == desktopcodec.PixelFormatNV12 &&
-					decodedFrame.D3D11 != nil && !needsCursorComposite {
+				if decodedFrame.D3D11 != nil && !needsCursorComposite {
 					if s.gpuCursor {
 						if cursorErr := s.viewer.SetCursor(desktopviewer.CursorOverlay{
 							State: s.cursorState, Bitmap: s.cursorBitmap,
@@ -908,6 +934,10 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 							err = gpuErr
 						}
 						if err != nil {
+							if decodedFrame.Format == desktopcodec.PixelFormatAYUV {
+								log.Printf("[Desktop] zero-copy AYUV submit failed: %v", err)
+								return
+							}
 							log.Printf("[Desktop] zero-copy GPU submit failed, falling back to readback: %v", err)
 						} else {
 							s.gpuFrameActive = true

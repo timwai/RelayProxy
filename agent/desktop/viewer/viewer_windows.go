@@ -796,7 +796,7 @@ func (v *windowsViewer) clearLatestFrame() {
 	v.frameMu.Lock()
 	resource := v.latestGPU.Resource
 	v.latest = Frame{}
-	v.latestGPU = D3D11Frame{}
+	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if resource != 0 {
@@ -807,7 +807,7 @@ func (v *windowsViewer) clearLatestFrame() {
 func (v *windowsViewer) releaseLatestD3D11() {
 	v.frameMu.Lock()
 	resource := v.latestGPU.Resource
-	v.latestGPU = D3D11Frame{}
+	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if resource != 0 {
@@ -861,7 +861,7 @@ func (v *windowsViewer) Submit(frame Frame) error {
 	v.frameMu.Lock()
 	oldResource := v.latestGPU.Resource
 	v.latest = copyFrame
-	v.latestGPU = D3D11Frame{}
+	v.latestGPU = desktopgpu.Frame{}
 	v.latestIsGPU = false
 	v.frameMu.Unlock()
 	if oldResource != 0 {

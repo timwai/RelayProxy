@@ -579,6 +579,29 @@ func (s *ControllerSession) RequestViewportResolution(ctx context.Context, width
 	return s.requestResolution(ctx, width, height, true)
 }
 
+func (s *ControllerSession) RequestDisplay(ctx context.Context, displayID string) error {
+	if s == nil || !s.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	displayID = strings.TrimSpace(displayID)
+	config := s.VideoConfigSnapshot()
+	if displayID == config.DisplayID {
+		return nil
+	}
+	if displayID == "" {
+		switch s.options.CaptureBackend {
+		case protocol.DesktopCaptureDXGI, protocol.DesktopCaptureWGC:
+			return fmt.Errorf("%s capture requires selecting a specific display", s.options.CaptureBackend)
+		}
+	}
+	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
+		Type: protocol.DesktopSessionVideoControl,
+		VideoControl: &protocol.DesktopVideoControl{
+			DisplayID: &displayID,
+		},
+	})
+}
+
 func (s *ControllerSession) RequestIDR(ctx context.Context) error {
 	if s == nil || !s.Active() {
 		return errors.New("Relay Desktop session is not active")

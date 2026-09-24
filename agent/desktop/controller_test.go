@@ -305,7 +305,6 @@ func TestDesktopResolutionModeFollowsViewport(t *testing.T) {
 	}
 }
 
-
 func TestRequestDisplayRejectsVirtualDesktopForPerDisplayBackends(t *testing.T) {
 	for _, backend := range []protocol.DesktopCaptureBackend{
 		protocol.DesktopCaptureDXGI,

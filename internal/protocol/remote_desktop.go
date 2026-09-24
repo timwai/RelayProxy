@@ -158,6 +158,7 @@ type RemoteDesktopStatus struct {
 	DisplayID      string                     `json:"displayId,omitempty"`
 	DisplayName    string                     `json:"displayName,omitempty"`
 	Displays       []DesktopDisplayCapability `json:"displays,omitempty"`
+	DisplaysReady  bool                       `json:"displaysReady,omitempty"`
 	CaptureBackend DesktopCaptureBackend      `json:"captureBackend,omitempty"`
 	Generation     uint32                     `json:"generation,omitempty"`
 	Codec          string                     `json:"codec,omitempty"`

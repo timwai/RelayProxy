@@ -144,7 +144,6 @@ func TestWindowPlacementRoundTrip(t *testing.T) {
 	}
 }
 
-
 func TestDXGIFormatForGPUFormat(t *testing.T) {
 	tests := []struct {
 		format desktopgpu.Format

@@ -1845,17 +1845,29 @@
       var stage = $('desktop-viewer-stage');
       if (!stage) return null;
       var rect = stage.getBoundingClientRect();
-      if (!rect.width || !rect.height) return null;
-      var maxWidth = Number(status.maxWidth || status.width || 0);
-      var maxHeight = Number(status.maxHeight || status.height || 0);
-      if (!maxWidth || !maxHeight) return null;
+      if (!rect.width) return null;
+
+      var currentWidth = Number(status.width || 0);
+      var currentHeight = Number(status.height || 0);
+      var maxWidth = Number(status.maxWidth || currentWidth || 0);
+      var maxHeight = Number(status.maxHeight || currentHeight || 0);
+      if (!currentWidth || !currentHeight || !maxWidth || !maxHeight) return null;
 
       var deviceScale = Math.max(1, Number(window.devicePixelRatio || 1));
+      var cssHeightBudget = document.fullscreenElement === stage
+        ? Math.max(180, Number(window.innerHeight || 0))
+        : Math.max(280, Math.floor(Number(window.innerHeight || 0) * 0.7));
       var viewportWidth = Math.max(320, Math.floor(rect.width * deviceScale));
-      var viewportHeight = Math.max(180, Math.floor(rect.height * deviceScale));
-      var scale = Math.min(viewportWidth / maxWidth, viewportHeight / maxHeight, 1);
-      var width = Math.floor(maxWidth * scale);
-      var height = Math.floor(maxHeight * scale);
+      var viewportHeight = Math.max(180, Math.floor(cssHeightBudget * deviceScale));
+      var limitWidth = Math.min(maxWidth, viewportWidth);
+      var limitHeight = Math.min(maxHeight, viewportHeight);
+      var aspect = currentWidth / currentHeight;
+      var width = Math.min(limitWidth, Math.floor(limitHeight * aspect));
+      var height = Math.floor(width / aspect);
+      if (height > limitHeight) {
+        height = limitHeight;
+        width = Math.floor(height * aspect);
+      }
       width -= width % 2;
       height -= height % 2;
       if (width < 320 || height < 180) return null;

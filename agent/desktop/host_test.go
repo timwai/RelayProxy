@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"image"
 	"testing"
 
@@ -37,6 +38,39 @@ type testSessionCaptureSource struct {
 func (s *testSessionCaptureSource) BeginSession(context.Context, HostConfig) error { return nil }
 func (s *testSessionCaptureSource) EndSession() error                              { return nil }
 func (s *testSessionCaptureSource) CaptureBackend() string                         { return s.backend }
+
+type testSwitchCaptureSource struct {
+	testCaptureSource
+	backend     string
+	begin       []HostConfig
+	failDisplay string
+}
+
+func (s *testSwitchCaptureSource) BeginSession(_ context.Context, cfg HostConfig) error {
+	s.begin = append(s.begin, cfg)
+	if cfg.DisplayID == s.failDisplay {
+		return errors.New("capture switch rejected")
+	}
+	return nil
+}
+func (s *testSwitchCaptureSource) EndSession() error      { return nil }
+func (s *testSwitchCaptureSource) CaptureBackend() string { return s.backend }
+
+type testSwitchInputSink struct {
+	begin       []HostConfig
+	failDisplay string
+}
+
+func (s *testSwitchInputSink) ApplyInput(context.Context, protocol.DesktopInputEvent) error { return nil }
+func (s *testSwitchInputSink) ReleaseAll() error                                            { return nil }
+func (s *testSwitchInputSink) EndInputSession() error                                       { return nil }
+func (s *testSwitchInputSink) BeginInputSession(_ context.Context, cfg HostConfig) error {
+	s.begin = append(s.begin, cfg)
+	if cfg.DisplayID == s.failDisplay {
+		return errors.New("input switch rejected")
+	}
+	return nil
+}
 
 func (s *testCapabilityCaptureSource) DesktopCaptureCapabilities(context.Context) ([]protocol.DesktopCaptureCapability, []protocol.DesktopDisplayCapability, error) {
 	return []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}}, []protocol.DesktopDisplayCapability{{
@@ -284,5 +318,96 @@ func TestD3D11CaptureFrameLifetime(t *testing.T) {
 	frame.Resource = 0
 	if frame.Valid() {
 		t.Fatal("D3D11 capture frame with nil resource accepted")
+	}
+}
+
+
+func TestQueueLatestStringReplacesPendingDisplay(t *testing.T) {
+	ch := make(chan string, 1)
+	queueLatestString(ch, "display-1")
+	queueLatestString(ch, "")
+	select {
+	case got := <-ch:
+		if got != "" {
+			t.Fatalf("latest display=%q want virtual desktop", got)
+		}
+	default:
+		t.Fatal("latest display update missing")
+	}
+}
+
+func TestSwitchSessionDisplayUpdatesCaptureAndInput(t *testing.T) {
+	source := &testSwitchCaptureSource{
+		testCaptureSource: testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))},
+		backend:           "dxgi",
+	}
+	input := &testSwitchInputSink{}
+	host, err := NewHostWithInput(source, input, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := DefaultHostConfig()
+	current.DisplayID = "display-1"
+	next, err := host.switchSessionDisplay(context.Background(), current, " display-2 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.DisplayID != "display-2" {
+		t.Fatalf("next display=%q want display-2", next.DisplayID)
+	}
+	if len(source.begin) != 1 || source.begin[0].DisplayID != "display-2" {
+		t.Fatalf("capture begin=%+v", source.begin)
+	}
+	if len(input.begin) != 1 || input.begin[0].DisplayID != "display-2" {
+		t.Fatalf("input begin=%+v", input.begin)
+	}
+}
+
+func TestSwitchSessionDisplayCaptureFailureKeepsCurrentConfig(t *testing.T) {
+	source := &testSwitchCaptureSource{
+		testCaptureSource: testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))},
+		failDisplay:       "display-2",
+	}
+	input := &testSwitchInputSink{}
+	host, err := NewHostWithInput(source, input, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := DefaultHostConfig()
+	current.DisplayID = "display-1"
+	next, err := host.switchSessionDisplay(context.Background(), current, "display-2")
+	if err == nil {
+		t.Fatal("capture switch failure was accepted")
+	}
+	if next.DisplayID != current.DisplayID {
+		t.Fatalf("failed switch changed config to %q", next.DisplayID)
+	}
+	if len(input.begin) != 0 {
+		t.Fatalf("input changed after capture failure: %+v", input.begin)
+	}
+}
+
+func TestSwitchSessionDisplayInputFailureRollsCaptureBack(t *testing.T) {
+	source := &testSwitchCaptureSource{
+		testCaptureSource: testCaptureSource{frame: image.NewRGBA(image.Rect(0, 0, 2, 2))},
+	}
+	input := &testSwitchInputSink{failDisplay: "display-2"}
+	host, err := NewHostWithInput(source, input, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := DefaultHostConfig()
+	current.DisplayID = "display-1"
+	next, err := host.switchSessionDisplay(context.Background(), current, "display-2")
+	if err == nil {
+		t.Fatal("input switch failure was accepted")
+	}
+	if next.DisplayID != current.DisplayID {
+		t.Fatalf("failed input switch changed config to %q", next.DisplayID)
+	}
+	if len(source.begin) != 2 ||
+		source.begin[0].DisplayID != "display-2" ||
+		source.begin[1].DisplayID != "display-1" {
+		t.Fatalf("capture rollback sequence=%+v", source.begin)
 	}
 }

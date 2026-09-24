@@ -86,9 +86,11 @@ type nativeDesktopSession struct {
 	viewportCh    chan desktopviewer.Viewport
 	title         string
 	generation    uint32
-	decoderCodec  string
-	decoderWidth  int
-	decoderHeight int
+	decoderCodec    string
+	decoderChroma   string
+	decoderBitDepth int
+	decoderWidth    int
+	decoderHeight   int
 
 	cursorID       string
 	cursorSequence uint64
@@ -312,14 +314,29 @@ func openNativeDesktopDecoder(
 	ctx context.Context,
 	native desktopviewer.Native,
 	codec string,
+	chroma string,
+	bitDepth int,
 	width, height int,
 ) (desktopcodec.Decoder, error) {
+	videoChroma := desktopcodec.Chroma420
+	switch strings.TrimSpace(chroma) {
+	case "", "420":
+	case "444":
+		videoChroma = desktopcodec.Chroma444
+	default:
+		return nil, fmt.Errorf("unsupported Relay Desktop chroma %q", chroma)
+	}
+	if bitDepth == 0 {
+		bitDepth = 8
+	}
 	decoderConfig := desktopcodec.VideoConfig{
 		Width:         width,
 		Height:        height,
 		FPS:           30,
 		TargetBitrate: 6_000_000,
 		KeyframeEvery: 2 * time.Second,
+		Chroma:        videoChroma,
+		BitDepth:      bitDepth,
 	}
 	var (
 		openShared func(context.Context, desktopcodec.VideoConfig, bool, uintptr) (desktopcodec.Decoder, error)
@@ -350,14 +367,32 @@ func openNativeDesktopDecoder(
 	return decoder, err
 }
 
+func nativeDesktopFrameChroma(frame protocol.RemoteDesktopFrame) string {
+	if strings.TrimSpace(frame.Chroma) == "" {
+		return "420"
+	}
+	return strings.TrimSpace(frame.Chroma)
+}
+
+func nativeDesktopFrameBitDepth(frame protocol.RemoteDesktopFrame) int {
+	if frame.BitDepth <= 0 {
+		return 8
+	}
+	return frame.BitDepth
+}
+
 func nativeDesktopFrameNeedsRebuild(
 	generation uint32,
 	codec string,
+	chroma string,
+	bitDepth int,
 	width, height int,
 	frame protocol.RemoteDesktopFrame,
 ) bool {
 	return frame.Generation != generation ||
 		nativeDesktopFrameCodec(frame) != codec ||
+		nativeDesktopFrameChroma(frame) != chroma ||
+		nativeDesktopFrameBitDepth(frame) != bitDepth ||
 		frame.Width != width ||
 		frame.Height != height
 }
@@ -417,7 +452,11 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 			return fmt.Errorf("reconfigure D3D11 viewer for generation %d: %w", frame.Generation, err)
 		}
 	}
-	nextDecoder, err := openNativeDesktopDecoder(ctx, currentViewer, codec, frame.Width, frame.Height)
+	nextDecoder, err := openNativeDesktopDecoder(
+		ctx, currentViewer, codec,
+		nativeDesktopFrameChroma(frame), nativeDesktopFrameBitDepth(frame),
+		frame.Width, frame.Height,
+	)
 	if err != nil {
 		if !sameSize {
 			if rollbackErr := currentViewer.Reconfigure(oldWidth, oldHeight); rollbackErr != nil {
@@ -432,6 +471,8 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 	s.decoder = nextDecoder
 	s.generation = frame.Generation
 	s.decoderCodec = codec
+	s.decoderChroma = nativeDesktopFrameChroma(frame)
+	s.decoderBitDepth = nativeDesktopFrameBitDepth(frame)
 	s.decoderWidth = frame.Width
 	s.decoderHeight = frame.Height
 	s.gpuCursor = currentViewer.SupportsGPUCursor() && nextDecoder.Backend() == "media-foundation-d3d11-zero-copy"
@@ -549,7 +590,11 @@ func (a *appWindow) openNativeDesktopViewerForSession(
 		return nil, fmt.Errorf("open D3D11 viewer: %w", err)
 	}
 
-	decoder, err := openNativeDesktopDecoder(ctx, native, codec, frame.Width, frame.Height)
+	decoder, err := openNativeDesktopDecoder(
+		ctx, native, codec,
+		nativeDesktopFrameChroma(frame), nativeDesktopFrameBitDepth(frame),
+		frame.Width, frame.Height,
+	)
 	if err != nil {
 		cancel()
 		_ = native.Close()
@@ -568,6 +613,8 @@ func (a *appWindow) openNativeDesktopViewerForSession(
 		title:             title,
 		generation:        frame.Generation,
 		decoderCodec:      codec,
+		decoderChroma:     nativeDesktopFrameChroma(frame),
+		decoderBitDepth:   nativeDesktopFrameBitDepth(frame),
 		decoderWidth:      frame.Width,
 		decoderHeight:     frame.Height,
 		gpuCursor:         native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
@@ -765,7 +812,10 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			continue
 		}
 
-		if nativeDesktopFrameNeedsRebuild(s.generation, s.decoderCodec, s.decoderWidth, s.decoderHeight, frame) {
+		if nativeDesktopFrameNeedsRebuild(
+			s.generation, s.decoderCodec, s.decoderChroma, s.decoderBitDepth,
+			s.decoderWidth, s.decoderHeight, frame,
+		) {
 			if !frame.KeyFrame {
 				if time.Since(lastRecovery) >= 500*time.Millisecond {
 					lastRecovery = time.Now()

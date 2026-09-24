@@ -303,3 +303,25 @@ func TestConnectionsPageSupportsStatusFilterClearAndNewestFirst(t *testing.T) {
 		t.Fatal("browser bridge missing clear connections method")
 	}
 }
+
+func TestMainWebConnectionsPaneMatchesRealtimeMonitorFeatures(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("main web status = %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		`id="inline-conn-state"`,
+		`onclick="clearConnectionsInline()"`,
+		"Date.parse(a.started_at",
+		"inline-conn-state ",
+		"已清空已结束连接历史，活跃连接已保留",
+		"连接时间 ↓",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("main web connections pane missing %q", want)
+		}
+	}
+}

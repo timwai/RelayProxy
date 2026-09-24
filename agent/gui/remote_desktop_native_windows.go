@@ -315,47 +315,37 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 	}
 	s.mediaMu.RLock()
 	currentViewer := s.viewer
-	sameSize := s.decoderWidth == frame.Width && s.decoderHeight == frame.Height
-	title := s.title
-	inputCh := s.inputCh
-	viewportCh := s.viewportCh
-	viewport := desktopviewer.Viewport{}
-	if currentViewer != nil {
-		viewport = currentViewer.Viewport()
-	}
+	oldWidth := s.decoderWidth
+	oldHeight := s.decoderHeight
+	sameSize := oldWidth == frame.Width && oldHeight == frame.Height
 	s.mediaMu.RUnlock()
+	if currentViewer == nil {
+		return errors.New("native Relay Desktop viewer is unavailable")
+	}
 
-	var (
-		nextViewer  = currentViewer
-		nextDecoder desktopcodec.Decoder
-		err         error
-	)
 	if !sameSize {
-		nextViewer, err = desktopviewer.Open(nativeDesktopViewerConfig(
-			title, frame.Width, frame.Height, inputCh, viewportCh, viewport,
-		))
-		if err != nil {
-			return fmt.Errorf("reopen D3D11 viewer for generation %d: %w", frame.Generation, err)
+		if err := currentViewer.Reconfigure(frame.Width, frame.Height); err != nil {
+			return fmt.Errorf("reconfigure D3D11 viewer for generation %d: %w", frame.Generation, err)
 		}
 	}
-	nextDecoder, err = openNativeDesktopDecoder(ctx, nextViewer, codec, frame.Width, frame.Height)
+	nextDecoder, err := openNativeDesktopDecoder(ctx, currentViewer, codec, frame.Width, frame.Height)
 	if err != nil {
-		if !sameSize && nextViewer != nil {
-			_ = nextViewer.Close()
+		if !sameSize {
+			if rollbackErr := currentViewer.Reconfigure(oldWidth, oldHeight); rollbackErr != nil {
+				log.Printf("[Desktop] native viewer rollback to %dx%d failed after decoder error: %v", oldWidth, oldHeight, rollbackErr)
+			}
 		}
 		return fmt.Errorf("reopen %s decoder for generation %d: %w", codec, frame.Generation, err)
 	}
 
 	s.mediaMu.Lock()
-	oldViewer := s.viewer
 	oldDecoder := s.decoder
-	s.viewer = nextViewer
 	s.decoder = nextDecoder
 	s.generation = frame.Generation
 	s.decoderCodec = codec
 	s.decoderWidth = frame.Width
 	s.decoderHeight = frame.Height
-	s.gpuCursor = nextViewer.SupportsGPUCursor() && nextDecoder.Backend() == "media-foundation-d3d11-zero-copy"
+	s.gpuCursor = currentViewer.SupportsGPUCursor() && nextDecoder.Backend() == "media-foundation-d3d11-zero-copy"
 	s.gpuFrameActive = false
 	s.baseBGRA = nil
 	s.presentBGRA = nil
@@ -366,12 +356,6 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 
 	if oldDecoder != nil {
 		_ = oldDecoder.Close()
-	}
-	if !sameSize && oldViewer != nil {
-		_ = oldViewer.Close()
-	}
-	if !sameSize {
-		nextViewer.Focus()
 	}
 	return nil
 }

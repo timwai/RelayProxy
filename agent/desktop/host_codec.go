@@ -231,86 +231,159 @@ func (h *Host) streamSessionFrames(
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
 	resolutionUpdates <-chan desktopResolutionTarget,
+	displayUpdates <-chan string,
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
-	jpegGeneration := uint32(1)
+	generation := uint32(1)
 	if preference == "h265" && !h.canEncodeH265() {
 		log.Printf("[Desktop] H.265 requested but encoder capability is unavailable; trying H.264 fallback")
 		preference = "h264"
 	}
-	if preference == "h265" && h.canEncodeH265() {
-		if err := h.streamH265Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
+
+	applyDisplaySwitch := func(request *desktopDisplaySwitchError) error {
+		if request == nil {
+			return errors.New("Relay Desktop display switch request is missing")
+		}
+		nextGeneration, err := nextDesktopMediaGeneration(request.Generation)
+		if err != nil {
 			return err
+		}
+		nextConfig, switchErr := h.switchSessionDisplay(ctx, cfg, request.DisplayID)
+		if switchErr != nil {
+			log.Printf("[Desktop] display switch to %q rejected; restarting current display %q at generation=%d: %v",
+				request.DisplayID, cfg.DisplayID, nextGeneration, switchErr)
 		} else {
+			cfg = nextConfig
+			log.Printf("[Desktop] display switched to %q generation=%d capture=%s",
+				cfg.DisplayID, nextGeneration, captureBackendName(h.source, captureBackend))
+		}
+		generation = nextGeneration
+		return nil
+	}
+
+	if preference == "h265" && h.canEncodeH265() {
+		for {
+			err := h.streamH265Frames(
+				ctx, conn, cfg, captureBackend,
+				idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates, displayUpdates, generation,
+			)
+			var displaySwitch *desktopDisplaySwitchError
+			if errors.As(err, &displaySwitch) {
+				if switchErr := applyDisplaySwitch(displaySwitch); switchErr != nil {
+					return switchErr
+				}
+				continue
+			}
+			if err == nil || errors.Is(err, context.Canceled) {
+				return err
+			}
 			var runtimeErr *h265RuntimeError
 			if errors.As(err, &runtimeErr) {
 				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
 				if generationErr != nil {
 					return generationErr
 				}
-				jpegGeneration = nextGeneration
+				generation = nextGeneration
+				preference = "jpeg"
 				log.Printf("[Desktop] H.265 runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
-					runtimeErr.Generation, jpegGeneration, runtimeErr.Err)
+					runtimeErr.Generation, generation, runtimeErr.Err)
 			} else {
 				preference = "h264"
 				log.Printf("[Desktop] H.265 session unavailable, falling back to H.264/JPEG: %v", err)
 			}
+			break
 		}
 	}
+
 	if h265ValidationRequested(options.Codec) {
-		if err := h.streamH265Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
-			return err
-		} else {
+		for {
+			err := h.streamH265Frames(
+				ctx, conn, cfg, captureBackend,
+				idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates, displayUpdates, generation,
+			)
+			var displaySwitch *desktopDisplaySwitchError
+			if errors.As(err, &displaySwitch) {
+				if switchErr := applyDisplaySwitch(displaySwitch); switchErr != nil {
+					return switchErr
+				}
+				continue
+			}
+			if err == nil || errors.Is(err, context.Canceled) {
+				return err
+			}
 			var runtimeErr *h265RuntimeError
 			if errors.As(err, &runtimeErr) {
 				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
 				if generationErr != nil {
 					return generationErr
 				}
-				jpegGeneration = nextGeneration
+				generation = nextGeneration
+				preference = "jpeg"
 				log.Printf("[Desktop] H.265 validation runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
-					runtimeErr.Generation, jpegGeneration, runtimeErr.Err)
+					runtimeErr.Generation, generation, runtimeErr.Err)
 			} else {
-				// The validation sentinel is intentionally not part of the public codec
-				// preference normalizer. If HEVC cannot even establish generation 1,
-				// fall back through the already-advertised H.264 path before JPEG.
 				preference = "h264"
 				log.Printf("[Desktop] H.265 validation session unavailable, falling back to H.264/JPEG: %v", err)
 			}
+			break
 		}
 	}
-	if jpegGeneration == 1 && preference == "h264" && h.canEncodeH264() {
-		if err := h.streamH264Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
-			return err
-		} else {
+
+	if preference == "h264" && h.canEncodeH264() {
+		for {
+			err := h.streamH264Frames(
+				ctx, conn, cfg, captureBackend,
+				idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates, displayUpdates, generation,
+			)
+			var displaySwitch *desktopDisplaySwitchError
+			if errors.As(err, &displaySwitch) {
+				if switchErr := applyDisplaySwitch(displaySwitch); switchErr != nil {
+					return switchErr
+				}
+				continue
+			}
+			if err == nil || errors.Is(err, context.Canceled) {
+				return err
+			}
 			var runtimeErr *h264RuntimeError
 			if errors.As(err, &runtimeErr) {
 				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
 				if generationErr != nil {
 					return generationErr
 				}
-				jpegGeneration = nextGeneration
+				generation = nextGeneration
 				log.Printf("[Desktop] H.264 runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
-					runtimeErr.Generation, jpegGeneration, runtimeErr.Err)
+					runtimeErr.Generation, generation, runtimeErr.Err)
 			} else {
 				log.Printf("[Desktop] H.264 session unavailable, falling back to JPEG: %v", err)
 			}
+			break
 		}
 	}
-	if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
-		Generation:    jpegGeneration,
-		Codec:         "jpeg",
-		Width:         cfg.MaxWidth,
-		Height:        cfg.MaxHeight,
-		MaxWidth:      cfg.MaxWidth,
-		MaxHeight:     cfg.MaxHeight,
-		FPS:           cfg.MaxFPS,
-		TargetBitrate: cfg.MaxBitrate,
-		DisplayID:     cfg.DisplayID,
-	}); err != nil {
-		return err
+
+	for {
+		if err := sendVideoConfig(ctx, conn, protocol.DesktopVideoConfig{
+			Generation:    generation,
+			Codec:         "jpeg",
+			Width:         cfg.MaxWidth,
+			Height:        cfg.MaxHeight,
+			MaxWidth:      cfg.MaxWidth,
+			MaxHeight:     cfg.MaxHeight,
+			FPS:           cfg.MaxFPS,
+			TargetBitrate: cfg.MaxBitrate,
+			DisplayID:     cfg.DisplayID,
+		}); err != nil {
+			return err
+		}
+		err := h.streamFrames(ctx, conn, cfg, captureBackend, generation, fpsUpdates, displayUpdates)
+		var displaySwitch *desktopDisplaySwitchError
+		if !errors.As(err, &displaySwitch) {
+			return err
+		}
+		if switchErr := applyDisplaySwitch(displaySwitch); switchErr != nil {
+			return switchErr
+		}
 	}
-	return h.streamFrames(ctx, conn, cfg, captureBackend, jpegGeneration, fpsUpdates)
 }
 
 func fitEvenDimensions(width, height, maxWidth, maxHeight int) (int, int, error) {
@@ -452,11 +525,15 @@ func (h *Host) streamH264Frames(
 	bitrateUpdates <-chan int,
 	fpsUpdates <-chan int,
 	resolutionUpdates <-chan desktopResolutionTarget,
+	displayUpdates <-chan string,
+	startGeneration uint32,
 ) (retErr error) {
 	var advertised bool
 	var advertisedGeneration uint32
 	defer func() {
-		if retErr != nil && advertised && !errors.Is(retErr, context.Canceled) {
+		var displaySwitch *desktopDisplaySwitchError
+		if retErr != nil && advertised && !errors.Is(retErr, context.Canceled) &&
+			!errors.As(retErr, &displaySwitch) {
 			retErr = &h264RuntimeError{Generation: advertisedGeneration, Err: retErr}
 		}
 	}()
@@ -562,7 +639,10 @@ func (h *Host) streamH264Frames(
 		}
 	}()
 
-	generation := uint32(1)
+	generation := startGeneration
+	if generation == 0 {
+		generation = 1
+	}
 	sessionMaxWidth := videoCfg.Width
 	sessionMaxHeight := videoCfg.Height
 	sessionMaxBitrate := cfg.MaxBitrate
@@ -850,6 +930,13 @@ func (h *Host) streamH264Frames(
 			ticker.Reset(frameInterval)
 			applyCaptureFPS(h.source, targetFPS)
 			log.Printf("[Desktop] H.264 capture fps updated=%d", targetFPS)
+
+		case displayID := <-displayUpdates:
+			displayID = strings.TrimSpace(displayID)
+			if displayID == cfg.DisplayID {
+				continue
+			}
+			return &desktopDisplaySwitchError{DisplayID: displayID, Generation: generation}
 
 		case target := <-resolutionUpdates:
 			now := time.Now()

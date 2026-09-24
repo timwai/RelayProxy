@@ -21,9 +21,9 @@ const (
 	oneVPLIOPatternOutSystemMemory = 0x20
 	oneVPLMapRead                  = 0x1
 
-	oneVPLHandleD3D11Device            = 3
-	oneVPLResourceDX11Texture          = 5
-	oneVPLFrameInterfaceAddRef         = 16
+	oneVPLHandleD3D11Device             = 3
+	oneVPLResourceDX11Texture           = 5
+	oneVPLFrameInterfaceAddRef          = 16
 	oneVPLFrameInterfaceGetNativeHandle = 56
 	oneVPLFrameInterfaceGetDeviceHandle = 64
 	oneVPLFrameInterfaceSync            = 72
@@ -317,13 +317,13 @@ func openOneVPLH265Decoder(
 	}
 
 	decoder := &oneVPLH265Decoder{
-		base:    base,
-		api:     decoderAPI,
-		loader:  loader,
-		session:      session,
-		cfg:          cfg,
-		ioPattern:    ioPattern,
-		d3d11Device:  device,
+		base:        base,
+		api:         decoderAPI,
+		loader:      loader,
+		session:     session,
+		cfg:         cfg,
+		ioPattern:   ioPattern,
+		d3d11Device: device,
 	}
 	cleanupBase = false
 	cleanupSession = false

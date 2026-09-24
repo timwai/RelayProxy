@@ -936,6 +936,13 @@ func (v *windowsViewer) SubmitD3D11(frame D3D11Frame) error {
 	return v.SubmitGPU(frame.GPUFrame())
 }
 
+func (v *windowsViewer) ClearFrame() {
+	if v == nil {
+		return
+	}
+	v.clearLatestFrame()
+}
+
 func (v *windowsViewer) SupportsGPUFormat(format desktopgpu.Format) bool {
 	if v == nil {
 		return false

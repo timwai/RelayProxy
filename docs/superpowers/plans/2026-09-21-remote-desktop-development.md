@@ -4,11 +4,11 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #101 已合并，merge `da6dfaec3fd4e01ec473af5dfc09ae845b08c7d2`）
+> 当前开发基线：`main`（PR #102 已合并，merge `98e508a2847707106a86c78d91ce33c4382381e1`；后续 follow_viewport 直接在 main 继续）
 
 ## 0. 当前进度
 
-更新时间：**2026-09-23**
+更新时间：**2026-09-24**
 
 | 阶段 / 能力 | 状态 | 当前实现 |
 | --- | --- | --- |
@@ -532,14 +532,26 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 `scripts/analyze-desktop-audio.ps1` 与 Windows 实机验证清单：直接读取 GUI 导出的 schema v5 diagnostics JSON，输出 codec/bitrate/compression/loss/PLC/queue 指标，并支持 Opus、loss、queue、gap、timeout、compression ratio 阈值作为可重复测试 gate；Windows CI 解析检查该脚本语法。
 - PR #101 已合并到 `main`，merge `da6dfaec3fd4e01ec473af5dfc09ae845b08c7d2`；Go CI、UI regression、Windows/macOS desktop package 与 PowerShell analyzer syntax 全部通过。
 
-### 0.2.44 RD3 Live Audio Diagnostics UI（当前分支）
+### 0.2.44 RD3 Live Audio Diagnostics UI（已合并 PR #102）
 
 - 新增轻量 `GetRemoteDesktopAudioDiagnostics` binding，只返回当前 `DesktopAudioDiagnostics` snapshot；不会每 2 秒拉取包含最多 1200 条样本的完整 diagnostics report，也不会把 20 ms audio frame 暴露给 WebView。
 - Relay Desktop 预览区新增独立“音频”状态行，实时显示实际 codec、sample rate、channels、target bitrate、queue depth 与基于 received/concealment/skip 的估算 network loss。
 - 只有异常/有事件的指标才追加展示 PLC concealment、large-gap skip、local queue drop、reorder 与 playout timeout，避免正常状态下信息过载。
 - 非 Relay / 未连接状态显示 `音频：--`；音频已启用但尚未收到 `audio_config` 时显示等待音频流，显式关闭时显示已关闭。
 - 新增 Agent/Bridge unavailable 回归与 GUI binding/render token 测试。
-- 下一步：CI 通过后，代码侧音频主链先进入实机验证阶段；在拿到 Windows 双机 diagnostics 前不继续盲调 Opus bitrate/FEC。
+- PR #102 已合并到 `main`，merge `98e508a2847707106a86c78d91ce33c4382381e1`。
+- 下一步：代码侧音频主链先进入实机验证阶段；在拿到 Windows 双机 diagnostics 前不继续盲调 Opus bitrate/FEC。
+
+### 0.2.45 RD3 Follow Viewport Resolution（已进入 main）
+
+- 连接设置中的“自动”分辨率明确为“跟随窗口（自动）”：Relay Desktop 嵌入预览根据 Viewer stage 的 CSS 尺寸与 `devicePixelRatio` 计算目标像素，并按当前 session 的 `MaxWidth / MaxHeight` 保持源画面纵横比、偶数尺寸和最低 320×180 边界。
+- 不新增 wire message，继续复用既有 `SetRemoteDesktopResolution → DesktopVideoControl(TargetWidth/TargetHeight) → generation rebuild` 链路，因此 H.264 / 隐藏 H.265 validation 与现有 ABR/decoder generation 语义保持一致。
+- 使用 `ResizeObserver` + window resize/fullscreen 事件，300 ms debounce 后更新 viewport；正常窗口缩小时及时降低不必要的编码像素。
+- 为避免和 scene-aware ABR 抢控制权，viewport 只有在当前媒体尺寸仍等于上一次 viewport 请求时才允许自动升档；如果 ABR 已因 loss/queue/jitter 把 generation 降到更低分辨率，窗口放大不会强制把它顶回高分辨率。
+- 运行中手动选择固定分辨率/“最高”会关闭 viewport follow；下拉框新增“跟随窗口”可重新启用。打开原生 Win32 Viewer 时会暂停嵌入 WebView 的 viewport follow，避免用较小的 WebView 尺寸限制独立原生窗口；后续可由原生 Viewer 自己上报 viewport。
+- 修复 PR #102 页面模板中网络统计与音频统计之间残留的字面 `\\n`，避免界面显示异常文本。
+- UI 实现已直接提交 `main`：`5141bf8edbf8788571f613c15e52f3dd65403a77`；回归测试：`fea60f4c679b7b28529eaa2666f1544e4c34079c`。
+- 下一步：等待主线 CI，并在 Windows 实机确认窗口缩放 / 全屏 / ABR 降档 / generation rebuild 组合行为；音频参数仍等待双机 diagnostics 后再标定。
 
 ### 0.3 本轮进度（2026-09-22）
 

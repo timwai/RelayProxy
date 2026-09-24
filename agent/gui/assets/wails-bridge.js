@@ -20,6 +20,7 @@
   window.goGetRemoteDesktopDiagnostics = () => invoke('GetRemoteDesktopDiagnostics');
   window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');
   window.goOpenRemoteDesktopNativeViewer = () => invoke('OpenRemoteDesktopNativeViewer');
+  window.goOpenRemoteDesktopDisplayWindow = (targetID, displayID) => invoke('OpenRemoteDesktopDisplayWindow', targetID, displayID);
   window.goCloseRemoteDesktopNativeViewer = () => invoke('CloseRemoteDesktopNativeViewer');
   window.goGetRemoteDesktopNativeViewerStatus = () => invoke('GetRemoteDesktopNativeViewerStatus');
   window.goGetRemoteDesktopCursor = cursorID => invoke('GetRemoteDesktopCursor', cursorID || '');

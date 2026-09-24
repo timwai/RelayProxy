@@ -444,7 +444,7 @@ func TestRemoteDesktopRuntimeDisplaySwitcher(t *testing.T) {
 		"hasFn('goOpenRemoteDesktopDisplayWindow')",
 		"async function openRemoteDesktopDisplayWindow()",
 		"call('goOpenRemoteDesktopDisplayWindow', status.targetId || '', displayID)",
-		"并发窗口使用 Relay Datagram",
+		"媒体路径将独立选择 Relay / P2P",
 		"目标上报 MultiStream 时",
 	} {
 		if !strings.Contains(page, want) {

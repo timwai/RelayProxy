@@ -40,7 +40,6 @@ func TestDecodedFrameCloseReleasesD3D11Surface(t *testing.T) {
 	}
 }
 
-
 func TestD3D11SurfaceGPUFrameCarriesTypedMetadata(t *testing.T) {
 	surface := &D3D11Surface{
 		Device:      11,

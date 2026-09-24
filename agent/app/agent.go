@@ -1296,13 +1296,20 @@ func (a *Agent) RemoteDesktopStatus() protocol.RemoteDesktopStatus {
 		out.MaxWidth = config.MaxWidth
 		out.MaxHeight = config.MaxHeight
 		out.FPS = config.FPS
+		liveDisplays, live := desktopSession.DisplayCapabilitiesSnapshot()
+		if live {
+			out.Displays = liveDisplays
+		}
 		if target, ok := a.remoteDesktopTarget(targetID); ok {
 			out.TargetName = target.Name
-			for _, display := range target.Capabilities.Displays {
-				if display.ID == out.DisplayID {
-					out.DisplayName = display.Name
-					break
-				}
+			if !live {
+				out.Displays = append([]protocol.DesktopDisplayCapability(nil), target.Capabilities.Displays...)
+			}
+		}
+		for _, display := range out.Displays {
+			if display.ID == out.DisplayID {
+				out.DisplayName = display.Name
+				break
 			}
 		}
 		return out
@@ -1491,19 +1498,23 @@ func (a *Agent) SetRemoteDesktopDisplay(displayID string) error {
 	}
 	displayID = strings.TrimSpace(displayID)
 	if displayID != "" {
-		target, ok := a.remoteDesktopTarget(session.TargetID())
-		if !ok {
-			return errors.New("Relay Desktop target is no longer available")
+		displays, live := session.DisplayCapabilitiesSnapshot()
+		if !live {
+			target, ok := a.remoteDesktopTarget(session.TargetID())
+			if !ok {
+				return errors.New("Relay Desktop target is no longer available")
+			}
+			displays = target.Capabilities.Displays
 		}
 		found := false
-		for _, display := range target.Capabilities.Displays {
+		for _, display := range displays {
 			if display.ID == displayID {
 				found = true
 				break
 			}
 		}
 		if !found {
-			return fmt.Errorf("Relay Desktop display %q is not advertised by the target", displayID)
+			return fmt.Errorf("Relay Desktop display %q is not available in the current target snapshot", displayID)
 		}
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 2*time.Second)

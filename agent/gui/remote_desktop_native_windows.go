@@ -219,7 +219,6 @@ func absInt(value int) int {
 	return value
 }
 
-
 func openNativeDesktopDecoder(
 	ctx context.Context,
 	native desktopviewer.Native,

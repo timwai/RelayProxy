@@ -92,6 +92,7 @@ type DesktopCapabilities struct {
 	AudioCodecs    []string                   `json:"audioCodecs,omitempty"`
 	Clipboard      bool                       `json:"clipboard,omitempty"`
 	MultiMonitor   bool                       `json:"multiMonitor,omitempty"`
+	MultiStream    bool                       `json:"multiStream,omitempty"`
 	HDR            bool                       `json:"hdr,omitempty"`
 	VirtualDisplay bool                       `json:"virtualDisplay,omitempty"`
 	MaxWidth       int                        `json:"maxWidth,omitempty"`
@@ -138,6 +139,7 @@ type RemoteDesktopConnectOptions struct {
 // prepared a session. For Native RDP, ListenAddr is the local loopback endpoint
 // handed to mstsc.
 type RemoteDesktopSessionInfo struct {
+	SessionID    string              `json:"sessionId,omitempty"`
 	Target       RemoteDesktopTarget `json:"target"`
 	Backend      DesktopBackend      `json:"backend"`
 	State        string              `json:"state"`
@@ -151,6 +153,7 @@ type RemoteDesktopSessionInfo struct {
 // RemoteDesktopStatus is a stable UI-facing snapshot. The GUI must not infer
 // desktop state by parsing log lines.
 type RemoteDesktopStatus struct {
+	SessionID      string                     `json:"sessionId,omitempty"`
 	State          string                     `json:"state"`
 	Backend        DesktopBackend             `json:"backend,omitempty"`
 	TargetID       string                     `json:"targetId,omitempty"`

@@ -1814,8 +1814,8 @@
     function remoteDesktopDisplays(targetID) {
       var status = state.desktopStatus || {};
       if (status.state === 'connected' && status.backend === 'relay' &&
-          status.targetId === targetID && Array.isArray(status.displays)) {
-        return status.displays.slice();
+          status.targetId === targetID && status.displaysReady) {
+        return Array.isArray(status.displays) ? status.displays.slice() : [];
       }
       var target = remoteDesktopTargetByID(targetID);
       var displays = target && target.capabilities && Array.isArray(target.capabilities.displays)

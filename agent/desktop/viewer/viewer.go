@@ -9,11 +9,23 @@ import (
 
 var ErrUnavailable = errors.New("native desktop viewer unavailable")
 
+type Viewport struct {
+	Width  int
+	Height int
+}
+
+func (v Viewport) Valid() bool {
+	return v.Width > 0 && v.Height > 0
+}
+
 type Config struct {
-	Title   string
-	Width   int
-	Height  int
-	OnInput func(protocol.DesktopInputEvent)
+	Title          string
+	Width          int
+	Height         int
+	ViewportWidth  int
+	ViewportHeight int
+	OnInput        func(protocol.DesktopInputEvent)
+	OnViewport     func(Viewport)
 }
 
 type Frame struct {
@@ -58,6 +70,7 @@ type Native interface {
 	D3D11Device() uintptr
 	SupportsGPUCursor() bool
 	SetCursor(CursorOverlay) error
+	Viewport() Viewport
 	Focus()
 	Done() <-chan struct{}
 	Close() error

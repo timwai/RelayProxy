@@ -566,6 +566,20 @@ Windows SendInput / CF_UNICODETEXT
 - Windows/macOS desktop package、Linux UI scope/full regression 已验证通过；功能提交从 `4ef0a1a` 延续至本轮 main。
 - 下一步：Native Viewer 仍会在媒体尺寸 generation 改变时重建 D3D11 Viewer pipeline；后续可继续把 renderer 改造成同一 HWND 内 resize/reconfigure，减少动态分辨率切换时的窗口重建闪烁。H.265 正式公开仍等待 Intel/NVIDIA/AMD 实机验证。
 
+### 0.2.47 RD3 Native Viewer In-place Generation Reconfigure（已进入 main）
+
+- Native Viewer 新增 `Reconfigure(width, height)` 契约；H.264 / H.265 generation 在分辨率变化时不再关闭旧 Viewer、创建新 HWND，而是在当前窗口内原地切换媒体尺寸。
+- Win32 Viewer 使用独立 `WM_APP` reconfigure 消息把 D3D11 resize 调度回 Viewer 所属 OS thread；媒体线程只提交同步请求并等待结果，不直接跨线程操作 swap chain。
+- D3D11 renderer 保留现有 device/context/swap chain，只重建与媒体尺寸相关的 upload texture、backbuffer 引用、video processor、output view 与 GPU cursor view，并通过 `IDXGISwapChain::ResizeBuffers` 切换新 generation 尺寸。
+- resize 前执行 `ID3D11DeviceContext::ClearState + Flush` 并释放旧 backbuffer/view 引用，满足 DXGI `ResizeBuffers` 对 outstanding references 的要求；如果新尺寸资源创建失败，会尝试回滚到旧媒体尺寸。
+- Viewer 将本地 viewport 尺寸与当前媒体尺寸拆成两个原子状态；`Submit / SubmitD3D11` 按当前 media size 校验，不再把初始 `Config.Width / Height` 当成永久固定尺寸。
+- generation rebuild 现在只替换 decoder；Media Foundation 仍复用 Viewer 的同一个 D3D11 device，窗口位置、窗口大小、最大化状态和焦点都不会因媒体分辨率变化而被重建。
+- 如果新 decoder 创建失败，Controller 会请求 Viewer 回滚到旧媒体尺寸，避免 renderer 与仍在工作的旧 decoder 尺寸永久失配。
+- 新增 Windows viewport packing / media-size / headless reconfigure no-op 回归；Windows desktop package 已覆盖新的 Native interface 与 Win32/D3D11 编译路径。
+- 功能提交：`7d0c44c`（Viewer contract）、`d6a2aab`（D3D11 in-place resize）、`607a089`（Win32-thread reconfigure）、`082f1f2`（generation 保持同 HWND）、`621bf7b`（ClearState/Flush 稳定性）、`a249437`（格式修复）。
+- 验证：Go CI #793 的 gofmt/vet/test/race/benchmark 全部通过；UI CI #483 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：当前 swap-chain backbuffer 会随 media generation 尺寸变化，但任意宽高比的 Native Viewer 客户区仍可能由 DXGI 拉伸画面；后续应补 D3D11 letterbox / aspect-fit viewport，以及对应的鼠标输入可视区域坐标映射。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

@@ -85,7 +85,6 @@ func TestNegotiateRemoteDesktopVideoPreservesHEVCValidationSentinel(t *testing.T
 	}
 }
 
-
 func TestNegotiateRemoteDesktopVideoNormalizesChroma(t *testing.T) {
 	options, err := negotiateRemoteDesktopVideo(
 		videoTarget(),

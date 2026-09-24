@@ -193,13 +193,25 @@ func h264DesktopVideoConfig(
 	}
 }
 
-func (h *Host) canEncodeH264() bool {
+func (h *Host) canEncodeCodec(codec string) bool {
+	if h == nil {
+		return false
+	}
+	codec = desktopcodec.NormalizeCodecPreference(codec)
 	for _, capability := range h.CodecCapabilities() {
-		if capability.Codec == "h264" && capability.Encode {
+		if desktopcodec.NormalizeCodecPreference(capability.Codec) == codec && capability.Encode {
 			return true
 		}
 	}
 	return false
+}
+
+func (h *Host) canEncodeH264() bool {
+	return h.canEncodeCodec("h264")
+}
+
+func (h *Host) canEncodeH265() bool {
+	return h.canEncodeCodec("h265")
 }
 
 func sendVideoConfig(ctx context.Context, conn *desktopmedia.MediaConn, cfg protocol.DesktopVideoConfig) error {
@@ -222,6 +234,25 @@ func (h *Host) streamSessionFrames(
 ) error {
 	preference := desktopcodec.NormalizeCodecPreference(options.Codec)
 	jpegGeneration := uint32(1)
+	if preference == "h265" && h.canEncodeH265() {
+		if err := h.streamH265Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
+			return err
+		} else {
+			var runtimeErr *h265RuntimeError
+			if errors.As(err, &runtimeErr) {
+				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
+				if generationErr != nil {
+					return generationErr
+				}
+				jpegGeneration = nextGeneration
+				log.Printf("[Desktop] H.265 runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
+					runtimeErr.Generation, jpegGeneration, runtimeErr.Err)
+			} else {
+				preference = "h264"
+				log.Printf("[Desktop] H.265 session unavailable, falling back to H.264/JPEG: %v", err)
+			}
+		}
+	}
 	if h265ValidationRequested(options.Codec) {
 		if err := h.streamH265Frames(ctx, conn, cfg, captureBackend, idrRequests, bitrateUpdates, fpsUpdates, resolutionUpdates); err == nil || errors.Is(err, context.Canceled) {
 			return err

@@ -212,3 +212,11 @@ type Encoder interface {
 	Stats() EncoderStats
 	Close() error
 }
+
+// SequenceHeaderEncoder exposes codec parameter sets used by Relay Desktop
+// generation metadata. Encoders may return nil when parameter sets are emitted
+// in-band with the first key frame.
+type SequenceHeaderEncoder interface {
+	Encoder
+	SequenceHeader() []byte
+}

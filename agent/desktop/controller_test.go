@@ -329,3 +329,16 @@ func TestRequestDisplayRejectsVirtualDesktopForPerDisplayBackends(t *testing.T) 
 		}
 	}
 }
+
+
+func TestCaptureBackendPreferenceDefaultsToAuto(t *testing.T) {
+	if got := (&ControllerSession{}).CaptureBackendPreference(); got != protocol.DesktopCaptureAuto {
+		t.Fatalf("default capture backend=%q want=auto", got)
+	}
+	session := &ControllerSession{
+		options: protocol.RemoteDesktopConnectOptions{CaptureBackend: protocol.DesktopCaptureWGC},
+	}
+	if got := session.CaptureBackendPreference(); got != protocol.DesktopCaptureWGC {
+		t.Fatalf("capture backend=%q want=wgc", got)
+	}
+}

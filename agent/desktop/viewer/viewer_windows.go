@@ -34,9 +34,10 @@ var (
 type windowsViewer struct {
 	config Config
 
-	hwnd     atomic.Uintptr
-	viewport atomic.Uint64
-	media    atomic.Uint64
+	hwnd       atomic.Uintptr
+	renderHwnd atomic.Uintptr
+	viewport   atomic.Uint64
+	media      atomic.Uint64
 
 	frameMu     sync.Mutex
 	latest      Frame
@@ -80,6 +81,7 @@ func registerNativeViewerClass() error {
 			Style:         win.CS_HREDRAW | win.CS_VREDRAW,
 			LpfnWndProc:   nativeViewerWndProc,
 			HInstance:     instance,
+			HbrBackground: win.HBRUSH(win.GetStockObject(win.BLACK_BRUSH)),
 			LpszClassName: nativeViewerClassName,
 		}
 		if atom := win.RegisterClassEx(&wc); atom == 0 {
@@ -128,7 +130,7 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		return
 	}
 
-	style := uint32(win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU | win.WS_MINIMIZEBOX | win.WS_MAXIMIZEBOX | win.WS_THICKFRAME)
+	style := uint32(win.WS_OVERLAPPED | win.WS_CAPTION | win.WS_SYSMENU | win.WS_MINIMIZEBOX | win.WS_MAXIMIZEBOX | win.WS_THICKFRAME | win.WS_CLIPCHILDREN)
 	clientWidth, clientHeight := v.config.ViewportWidth, v.config.ViewportHeight
 	if clientWidth <= 0 {
 		clientWidth = v.config.Width
@@ -168,8 +170,39 @@ func (v *windowsViewer) run(initCh chan<- error) {
 		v.updateViewport(clientWidth, clientHeight, false)
 	}
 
-	renderer, err := newD3D11Renderer(hwnd, v.config.Width, v.config.Height)
+	staticClass, err := windows.UTF16PtrFromString("STATIC")
 	if err != nil {
+		v.hwnd.Store(0)
+		win.DestroyWindow(hwnd)
+		initCh <- err
+		return
+	}
+	renderHwnd := win.CreateWindowEx(
+		0,
+		staticClass,
+		nil,
+		uint32(win.WS_CHILD|win.WS_VISIBLE|win.WS_DISABLED|win.SS_BLACKRECT),
+		0,
+		0,
+		int32(clientWidth),
+		int32(clientHeight),
+		hwnd,
+		0,
+		instance,
+		nil,
+	)
+	if renderHwnd == 0 {
+		v.hwnd.Store(0)
+		win.DestroyWindow(hwnd)
+		initCh <- fmt.Errorf("CreateWindowEx native render surface failed: %w", windows.GetLastError())
+		return
+	}
+	v.renderHwnd.Store(uintptr(renderHwnd))
+	v.layoutRenderWindow()
+
+	renderer, err := newD3D11Renderer(renderHwnd, v.config.Width, v.config.Height)
+	if err != nil {
+		v.renderHwnd.Store(0)
 		v.hwnd.Store(0)
 		win.DestroyWindow(hwnd)
 		initCh <- err
@@ -188,6 +221,7 @@ func (v *windowsViewer) run(initCh chan<- error) {
 			v.renderer = nil
 		}
 		v.rendererMu.Unlock()
+		v.renderHwnd.Store(0)
 		v.hwnd.Store(0)
 	}()
 
@@ -303,6 +337,7 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 			width := int(uint16(lParam & 0xffff))
 			height := int(uint16((lParam >> 16) & 0xffff))
 			viewer.updateViewport(width, height, true)
+			viewer.layoutRenderWindow()
 		}
 		return 0
 
@@ -326,7 +361,7 @@ func nativeViewerWindowProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) u
 		return 1
 
 	case win.WM_ERASEBKGND:
-		return 1
+		return win.DefWindowProc(hwnd, msg, wParam, lParam)
 
 	case win.WM_CLOSE:
 		if viewer != nil {
@@ -397,6 +432,69 @@ func (v *windowsViewer) notifyViewport() {
 	}
 }
 
+type fitRect struct {
+	Left   int
+	Top    int
+	Right  int
+	Bottom int
+}
+
+func (r fitRect) Width() int {
+	return r.Right - r.Left
+}
+
+func (r fitRect) Height() int {
+	return r.Bottom - r.Top
+}
+
+func aspectFitRect(viewport, media Viewport) fitRect {
+	if !viewport.Valid() || !media.Valid() {
+		return fitRect{}
+	}
+	width, height := viewport.Width, viewport.Height
+	if int64(viewport.Width)*int64(media.Height) > int64(viewport.Height)*int64(media.Width) {
+		height = viewport.Height
+		width = int(int64(height) * int64(media.Width) / int64(media.Height))
+	} else {
+		width = viewport.Width
+		height = int(int64(width) * int64(media.Height) / int64(media.Width))
+	}
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		height = 1
+	}
+	left := (viewport.Width - width) / 2
+	top := (viewport.Height - height) / 2
+	return fitRect{
+		Left: left, Top: top,
+		Right: left + width, Bottom: top + height,
+	}
+}
+
+func (v *windowsViewer) layoutRenderWindow() {
+	if v == nil {
+		return
+	}
+	renderHwnd := win.HWND(v.renderHwnd.Load())
+	if renderHwnd == 0 {
+		return
+	}
+	rect := aspectFitRect(v.Viewport(), v.mediaSize())
+	if rect.Width() <= 0 || rect.Height() <= 0 {
+		return
+	}
+	win.MoveWindow(
+		renderHwnd,
+		int32(rect.Left),
+		int32(rect.Top),
+		int32(rect.Width()),
+		int32(rect.Height()),
+		true,
+	)
+}
+
 func (v *windowsViewer) mediaSize() Viewport {
 	if v == nil {
 		return Viewport{}
@@ -428,6 +526,7 @@ func (v *windowsViewer) applyReconfigure() {
 				err = v.renderer.Reconfigure(request.width, request.height)
 				if err == nil {
 					v.media.Store(packViewport(request.width, request.height))
+					v.layoutRenderWindow()
 				}
 			}
 			v.rendererMu.Unlock()
@@ -440,24 +539,23 @@ func (v *windowsViewer) applyReconfigure() {
 }
 
 func (v *windowsViewer) normalizedPointer(x, y int) (uint16, uint16) {
-	viewport := v.Viewport()
-	width, height := viewport.Width, viewport.Height
-	if width <= 1 || height <= 1 {
-		width, height = v.config.Width, v.config.Height
-	}
+	rect := aspectFitRect(v.Viewport(), v.mediaSize())
+	width, height := rect.Width(), rect.Height()
 	if width <= 1 || height <= 1 {
 		return 0, 0
 	}
-	if x < 0 {
-		x = 0
-	} else if x >= width {
-		x = width - 1
+	if x < rect.Left {
+		x = rect.Left
+	} else if x >= rect.Right {
+		x = rect.Right - 1
 	}
-	if y < 0 {
-		y = 0
-	} else if y >= height {
-		y = height - 1
+	if y < rect.Top {
+		y = rect.Top
+	} else if y >= rect.Bottom {
+		y = rect.Bottom - 1
 	}
+	x -= rect.Left
+	y -= rect.Top
 	return uint16(x * 65535 / (width - 1)), uint16(y * 65535 / (height - 1))
 }
 

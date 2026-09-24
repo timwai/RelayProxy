@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
+	desktop "relayproxy/agent/desktop"
 	desktopaudio "relayproxy/agent/desktop/audio"
 	desktopcodec "relayproxy/agent/desktop/codec"
 	desktopviewer "relayproxy/agent/desktop/viewer"
@@ -73,6 +75,10 @@ func (p *nativeViewerPerf) report(now time.Time) (protocol.DesktopSessionStats, 
 type nativeDesktopSession struct {
 	cancel context.CancelFunc
 
+	sessionID         string
+	disconnectOnClose bool
+	persistPlacement  bool
+
 	mediaMu       sync.RWMutex
 	viewer        desktopviewer.Native
 	decoder       desktopcodec.Decoder
@@ -99,6 +105,87 @@ type nativeDesktopSession struct {
 
 	done      chan struct{}
 	closeOnce sync.Once
+}
+
+func (s *nativeDesktopSession) sessionKey() string {
+	if s == nil || strings.TrimSpace(s.sessionID) == "" {
+		return "primary"
+	}
+	return strings.TrimSpace(s.sessionID)
+}
+
+func (s *nativeDesktopSession) status(owner *appWindow) protocol.RemoteDesktopStatus {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.GetRemoteDesktopStatusForSession(s.sessionID)
+	}
+	return owner.bridge.GetRemoteDesktopStatus()
+}
+
+func (s *nativeDesktopSession) frame(owner *appWindow) protocol.RemoteDesktopFrame {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.GetRemoteDesktopFrameForSession(s.sessionID)
+	}
+	return owner.bridge.GetRemoteDesktopFrame()
+}
+
+func (s *nativeDesktopSession) cursor(owner *appWindow, knownCursorID string) protocol.DesktopCursorState {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.GetRemoteDesktopCursorForSession(s.sessionID, knownCursorID)
+	}
+	return owner.bridge.GetRemoteDesktopCursor(knownCursorID)
+}
+
+func (s *nativeDesktopSession) requestIDR(owner *appWindow) error {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.RequestRemoteDesktopIDRForSession(s.sessionID)
+	}
+	return owner.bridge.RequestRemoteDesktopIDR()
+}
+
+func (s *nativeDesktopSession) sendInput(owner *appWindow, event protocol.DesktopInputEvent) error {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.SendRemoteDesktopInputForSession(s.sessionID, event)
+	}
+	return owner.bridge.SendRemoteDesktopInput(event)
+}
+
+func (s *nativeDesktopSession) viewportFollowEnabled(owner *appWindow) bool {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.RemoteDesktopViewportFollowEnabledForSession(s.sessionID)
+	}
+	return owner.bridge.RemoteDesktopViewportFollowEnabled()
+}
+
+func (s *nativeDesktopSession) setViewportResolution(owner *appWindow, width, height int) error {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.SetRemoteDesktopViewportResolutionForSession(s.sessionID, width, height)
+	}
+	return owner.bridge.SetRemoteDesktopViewportResolution(width, height)
+}
+
+func (s *nativeDesktopSession) reportViewerStats(owner *appWindow, stats protocol.DesktopSessionStats) {
+	if s != nil && s.sessionID != "" {
+		owner.bridge.ReportRemoteDesktopViewerStatsForSession(s.sessionID, stats)
+		return
+	}
+	owner.bridge.ReportRemoteDesktopViewerStats(stats)
+}
+
+func (s *nativeDesktopSession) audioEnabled(owner *appWindow) bool {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.RemoteDesktopAudioEnabledForSession(s.sessionID)
+	}
+	return owner.bridge.RemoteDesktopAudioEnabled()
+}
+
+func (s *nativeDesktopSession) nextAudioFrame(
+	ctx context.Context,
+	owner *appWindow,
+) (desktop.AudioFrameSnapshot, protocol.DesktopAudioConfig, error) {
+	if s != nil && s.sessionID != "" {
+		return owner.bridge.NextRemoteDesktopAudioFrameForSession(ctx, s.sessionID)
+	}
+	return owner.bridge.NextRemoteDesktopAudioFrame(ctx)
 }
 
 func queueLatestNativeViewport(ch chan desktopviewer.Viewport, viewport desktopviewer.Viewport) {
@@ -366,19 +453,62 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	if a == nil || a.bridge == nil {
 		return nil, errors.New("GUI unavailable")
 	}
-	a.desktopViewerMu.Lock()
-	if existing := a.desktopViewer; existing != nil {
-		a.desktopViewerMu.Unlock()
-		existing.focusViewer()
-		return map[string]any{"ok": true, "alreadyOpen": true}, nil
-	}
-	a.desktopViewerMu.Unlock()
-
 	status := a.bridge.GetRemoteDesktopStatus()
 	if status.State != "connected" || status.Backend != protocol.DesktopBackendRelay {
 		return nil, errors.New("Relay Desktop session is not connected")
 	}
-	frame := a.bridge.GetRemoteDesktopFrame()
+	return a.openNativeDesktopViewerForSession(status.SessionID, true, false)
+}
+
+func (a *appWindow) openNativeDesktopViewerForSession(
+	sessionID string,
+	primary bool,
+	disconnectOnClose bool,
+) (map[string]any, error) {
+	if a == nil || a.bridge == nil {
+		return nil, errors.New("GUI unavailable")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	key := sessionID
+	if key == "" {
+		key = "primary"
+	}
+
+	a.desktopViewerMu.Lock()
+	if a.desktopViewers == nil {
+		a.desktopViewers = make(map[string]*nativeDesktopSession)
+	}
+	if existing := a.desktopViewers[key]; existing != nil {
+		a.desktopViewerMu.Unlock()
+		existing.focusViewer()
+		return map[string]any{"ok": true, "alreadyOpen": true, "sessionId": sessionID}, nil
+	}
+	if primary && a.desktopViewer != nil {
+		existing := a.desktopViewer
+		a.desktopViewerMu.Unlock()
+		existing.focusViewer()
+		return map[string]any{"ok": true, "alreadyOpen": true, "sessionId": existing.sessionID}, nil
+	}
+	a.desktopViewerMu.Unlock()
+
+	var status protocol.RemoteDesktopStatus
+	var frame protocol.RemoteDesktopFrame
+	if sessionID != "" {
+		status = a.bridge.GetRemoteDesktopStatusForSession(sessionID)
+		frame = a.bridge.GetRemoteDesktopFrameForSession(sessionID)
+	} else {
+		status = a.bridge.GetRemoteDesktopStatus()
+		frame = a.bridge.GetRemoteDesktopFrame()
+	}
+	if status.State != "connected" || status.Backend != protocol.DesktopBackendRelay {
+		return nil, errors.New("Relay Desktop session is not connected")
+	}
+	if sessionID == "" {
+		sessionID = status.SessionID
+		if sessionID != "" {
+			key = sessionID
+		}
+	}
 	codec := nativeDesktopFrameCodec(frame)
 	if frame.Sequence == 0 || codec == "" || frame.Width <= 0 || frame.Height <= 0 || len(frame.Data) == 0 {
 		return nil, errors.New("H.264/H.265 frame is not ready; wait for the remote picture and retry")
@@ -392,7 +522,19 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	if status.TargetName != "" {
 		title += " - " + status.TargetName
 	}
-	savedPlacement := a.bridge.GetConfig().GUI.NativeViewer
+	if status.DisplayName != "" {
+		title += " - " + status.DisplayName
+	}
+
+	placement := desktopviewer.WindowPlacement{}
+	if primary {
+		savedPlacement := a.bridge.GetConfig().GUI.NativeViewer
+		placement = desktopviewer.WindowPlacement{
+			X: savedPlacement.X, Y: savedPlacement.Y,
+			Width: savedPlacement.Width, Height: savedPlacement.Height,
+			Maximized: savedPlacement.Maximized,
+		}
+	}
 	native, err := desktopviewer.Open(nativeDesktopViewerConfig(
 		title,
 		frame.Width,
@@ -400,11 +542,7 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 		inputCh,
 		viewportCh,
 		desktopviewer.Viewport{},
-		desktopviewer.WindowPlacement{
-			X: savedPlacement.X, Y: savedPlacement.Y,
-			Width: savedPlacement.Width, Height: savedPlacement.Height,
-			Maximized: savedPlacement.Maximized,
-		},
+		placement,
 	))
 	if err != nil {
 		cancel()
@@ -419,35 +557,50 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	}
 
 	session := &nativeDesktopSession{
-		cancel:        cancel,
-		viewer:        native,
-		decoder:       decoder,
-		inputCh:       inputCh,
-		viewportCh:    viewportCh,
-		title:         title,
-		generation:    frame.Generation,
-		decoderCodec:  codec,
-		decoderWidth:  frame.Width,
-		decoderHeight: frame.Height,
-		gpuCursor:     native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
-		done:          make(chan struct{}),
+		cancel:            cancel,
+		sessionID:         sessionID,
+		disconnectOnClose: disconnectOnClose,
+		persistPlacement:  primary,
+		viewer:            native,
+		decoder:           decoder,
+		inputCh:           inputCh,
+		viewportCh:        viewportCh,
+		title:             title,
+		generation:        frame.Generation,
+		decoderCodec:      codec,
+		decoderWidth:      frame.Width,
+		decoderHeight:     frame.Height,
+		gpuCursor:         native.SupportsGPUCursor() && decoder.Backend() == "media-foundation-d3d11-zero-copy",
+		done:              make(chan struct{}),
 	}
 
 	a.desktopViewerMu.Lock()
-	if existing := a.desktopViewer; existing != nil {
+	if a.desktopViewers == nil {
+		a.desktopViewers = make(map[string]*nativeDesktopSession)
+	}
+	if existing := a.desktopViewers[key]; existing != nil || (primary && a.desktopViewer != nil) {
+		if existing == nil {
+			existing = a.desktopViewer
+		}
 		a.desktopViewerMu.Unlock()
 		cancel()
 		_ = decoder.Close()
 		_ = native.Close()
-		existing.focusViewer()
-		return map[string]any{"ok": true, "alreadyOpen": true}, nil
+		if existing != nil {
+			existing.focusViewer()
+		}
+		return map[string]any{"ok": true, "alreadyOpen": true, "sessionId": sessionID}, nil
 	}
-	a.desktopViewer = session
+	a.desktopViewers[key] = session
+	if primary {
+		a.desktopViewer = session
+	}
 	a.desktopViewerMu.Unlock()
 
 	go session.run(ctx, a)
 	return map[string]any{
 		"ok":        true,
+		"sessionId": sessionID,
 		"width":     frame.Width,
 		"height":    frame.Height,
 		"hardware":  decoder.Hardware(),

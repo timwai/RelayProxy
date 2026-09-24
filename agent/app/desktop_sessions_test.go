@@ -71,24 +71,27 @@ func TestRemovePrimaryDesktopSessionPromotesRemainingSession(t *testing.T) {
 	}
 }
 
-func TestDesktopP2PEligibleOnlyForSinglePrimaryStream(t *testing.T) {
+func TestDesktopP2PEligibleIsScopedToLogicalSession(t *testing.T) {
 	primary := &desktop.ControllerSession{}
 	secondary := &desktop.ControllerSession{}
 	a := &Agent{
 		desktopConnection:       primary,
 		desktopPrimarySessionID: "primary",
 		desktopConnections: map[string]*desktop.ControllerSession{
-			"primary": primary,
+			"primary":   primary,
+			"secondary": secondary,
 		},
 	}
-	if !a.desktopP2PEligible(primary) {
-		t.Fatal("single primary Relay Desktop stream should be P2P eligible")
+	if !a.desktopP2PEligible("primary", primary) {
+		t.Fatal("registered primary Relay Desktop stream should be P2P eligible")
 	}
-	a.desktopConnections["secondary"] = secondary
-	if a.desktopP2PEligible(primary) {
-		t.Fatal("primary Relay Desktop stream remained P2P eligible with a concurrent secondary stream")
+	if !a.desktopP2PEligible("secondary", secondary) {
+		t.Fatal("registered secondary Relay Desktop stream should be independently P2P eligible")
 	}
-	if a.desktopP2PEligible(secondary) {
-		t.Fatal("secondary Relay Desktop stream became P2P eligible")
+	if a.desktopP2PEligible("primary", secondary) {
+		t.Fatal("P2P eligibility crossed logical desktop sessions")
+	}
+	if a.desktopP2PEligible("missing", primary) {
+		t.Fatal("unregistered logical desktop session became P2P eligible")
 	}
 }

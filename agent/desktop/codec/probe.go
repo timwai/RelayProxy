@@ -34,11 +34,16 @@ func (p H264Probe) Capability() protocol.DesktopCodecCapability {
 		Hardware:  p.HardwareEndToEnd(),
 		Encode:    p.EncodeAvailable(),
 		Decode:    p.DecodeAvailable(),
-		Chroma420: true,
-		BitDepth8: true,
+		Chroma420: p.EncodeAvailable() || p.DecodeAvailable(),
+		BitDepth8: p.EncodeAvailable() || p.DecodeAvailable(),
 	}
-	if !capability.Encode {
+	if capability.Encode {
+		capability.EncodeChroma = []string{"420"}
+	} else {
 		capability.Encoder = ""
+	}
+	if capability.Decode {
+		capability.DecodeChroma = []string{"420"}
 	}
 	return capability
 }
@@ -78,10 +83,24 @@ func (p H265Probe) Capability() protocol.DesktopCodecCapability {
 		Chroma420: available,
 		BitDepth8: available,
 	}
-	if !capability.Encode {
+	if capability.Encode {
+		capability.EncodeChroma = []string{"420"}
+	} else {
 		capability.Encoder = ""
 	}
+	if capability.Decode {
+		capability.DecodeChroma = []string{"420"}
+	}
 	return capability
+}
+
+func appendDesktopChroma(values []string, chroma string) []string {
+	for _, value := range values {
+		if value == chroma {
+			return values
+		}
+	}
+	return append(values, chroma)
 }
 
 // H265Capability combines the established Media Foundation 4:2:0 path with
@@ -97,6 +116,8 @@ func H265Capability(mf H265Probe, oneVPL OneVPLProbe) (protocol.DesktopCodecCapa
 		capability.Encode = true
 		capability.Decode = true
 		capability.Chroma444 = true
+		capability.EncodeChroma = appendDesktopChroma(capability.EncodeChroma, "444")
+		capability.DecodeChroma = appendDesktopChroma(capability.DecodeChroma, "444")
 		capability.BitDepth8 = true
 		capability.Hardware = true
 		if capability.Encoder == "" {

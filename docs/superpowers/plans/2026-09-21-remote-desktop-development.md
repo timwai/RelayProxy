@@ -553,6 +553,19 @@ Windows SendInput / CF_UNICODETEXT
 - UI 实现已直接提交 `main`：`5141bf8edbf8788571f613c15e52f3dd65403a77`；回归测试：`fea60f4c679b7b28529eaa2666f1544e4c34079c`。
 - 下一步：等待主线 CI，并在 Windows 实机确认窗口缩放 / 全屏 / ABR 降档 / generation rebuild 组合行为；音频参数仍等待双机 diagnostics 后再标定。
 
+### 0.2.46 RD3 Native Viewer Viewport（已进入 main）
+
+- 原生 Win32/D3D11 Viewer 窗口从固定尺寸改为可缩放窗口，启用 `WS_THICKFRAME / WS_MAXIMIZEBOX`；Viewer 新增独立 `Viewport` 契约和 `OnViewport` 回调，媒体编码尺寸与本地窗口客户区尺寸不再混为同一个概念。
+- `WM_SIZE` 现在实时更新 Native Viewer 客户区尺寸；鼠标绝对坐标归一化改为基于实际 viewport，而不是旧的编码分辨率，窗口缩放后输入映射不会继续使用旧尺寸。
+- Native Viewer 增加独立 viewport worker：窗口变化先做 300 ms debounce，再根据当前媒体纵横比、session `MaxWidth / MaxHeight` 和实际客户区计算偶数目标尺寸，最低仍保持 320×180。
+- viewport 请求与手动分辨率请求在 Controller 内正式拆分：`RequestResolution` 会关闭 follow，`RequestViewportResolution` 会开启 follow；WebView 也改用新的 viewport-aware binding，避免手动分辨率和自动跟随在 Go/JS 两侧状态不一致。
+- Native Viewer 的自动升档继续服从 ABR：只有当前 generation 仍等于上一次 viewport 请求时才允许因窗口放大而升分辨率；如果 ABR 已因 loss/queue/jitter 主动降档，viewport 不会立即把它顶回高分辨率。窗口缩小时仍可继续降到更合适的编码尺寸。
+- generation 导致 Viewer pipeline 重建时会保留旧窗口的客户区尺寸，再以该 viewport 初始化新 Viewer，避免媒体分辨率变化把用户刚调整的窗口大小直接覆盖。
+- 新增 viewport 比例/上限/最小尺寸、ABR grow gate、resolution mode 状态以及 GUI viewport binding 回归测试。
+- 主线 CI 调整：`UI CI` 现在也在 `main` push 上执行 Windows/macOS desktop package；Go/UI 的 gofmt 检查改为仓库全量文件，消除连续直接提交 main 时 `origin/main...HEAD` shallow merge-base 竞态。
+- Windows/macOS desktop package、Linux UI scope/full regression 已验证通过；功能提交从 `4ef0a1a` 延续至本轮 main。
+- 下一步：Native Viewer 仍会在媒体尺寸 generation 改变时重建 D3D11 Viewer pipeline；后续可继续把 renderer 改造成同一 HWND 内 resize/reconfigure，减少动态分辨率切换时的窗口重建闪烁。H.265 正式公开仍等待 Intel/NVIDIA/AMD 实机验证。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

@@ -310,25 +310,25 @@ func (h *Host) streamH265Frames(
 	)
 	if videoCfg.Chroma != desktopcodec.Chroma444 {
 		if source, ok := h.source.(D3D11CaptureSource); ok {
-		candidate, available, captureErr := source.CaptureD3D11(ctx)
-		if captureErr != nil {
-			log.Printf("[Desktop] D3D11 capture probe failed, keeping CPU H.265 path: %v", captureErr)
-		} else if available && candidate != nil {
-			encoder, d3dEncoder, d3dConverter, normalizedCfg, sequenceHeader, err =
-				openH265D3D11Generation(ctx, videoCfg, candidate)
-			if err == nil {
-				d3dSource = source
-				firstD3D = candidate
-				gpuEnabled = true
-				gpuInputWidth = candidate.Width
-				gpuInputHeight = candidate.Height
-				log.Printf("[Desktop] H.265 zero-copy path enabled capture=%dx%d encode=%dx%d",
-					candidate.Width, candidate.Height, normalizedCfg.Width, normalizedCfg.Height)
-			} else {
-				candidate.Close()
-				log.Printf("[Desktop] D3D11 H.265 initialization failed, keeping CPU path: %v", err)
+			candidate, available, captureErr := source.CaptureD3D11(ctx)
+			if captureErr != nil {
+				log.Printf("[Desktop] D3D11 capture probe failed, keeping CPU H.265 path: %v", captureErr)
+			} else if available && candidate != nil {
+				encoder, d3dEncoder, d3dConverter, normalizedCfg, sequenceHeader, err =
+					openH265D3D11Generation(ctx, videoCfg, candidate)
+				if err == nil {
+					d3dSource = source
+					firstD3D = candidate
+					gpuEnabled = true
+					gpuInputWidth = candidate.Width
+					gpuInputHeight = candidate.Height
+					log.Printf("[Desktop] H.265 zero-copy path enabled capture=%dx%d encode=%dx%d",
+						candidate.Width, candidate.Height, normalizedCfg.Width, normalizedCfg.Height)
+				} else {
+					candidate.Close()
+					log.Printf("[Desktop] D3D11 H.265 initialization failed, keeping CPU path: %v", err)
+				}
 			}
-		}
 		}
 	}
 	if !gpuEnabled {

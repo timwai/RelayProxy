@@ -10,6 +10,10 @@ on:
       - "mobile/androidcore/**"
       - "agent/exit/**"
       - "internal/**"
+      - "server/gateway/**"
+      - "server/session/**"
+      - "server/gateway/**"
+      - "server/session/**"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/android.yml"
@@ -44,6 +48,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Test Android relay compatibility
+        run: |
+          go test ./mobile/androidcore ./agent/exit ./internal/tunnel ./server/session ./server/gateway -count=1
 
       - name: Install gomobile
         run: |

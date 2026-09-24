@@ -30,7 +30,8 @@ class SettingsActivity : Activity() {
     private lateinit var tlsEnabled: Switch
     private lateinit var insecureTls: Switch
     private lateinit var allowPrivate: Switch
-    private lateinit var networkMode: Spinner
+    private val networkModeTabs = mutableListOf<TextView>()
+    private var selectedNetworkModeIndex = 0
 
     private val transportValues = listOf("auto", "quic_only", "tcp_only")
     private val transportLabels = listOf("自动选择", "仅 QUIC", "仅 TCP/TLS")
@@ -68,30 +69,9 @@ class SettingsActivity : Activity() {
     private fun buildUi(): ScrollView {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(28))
+            setPadding(dp(20), dp(30), dp(20), dp(36))
             setBackgroundColor(bg)
         }
-
-        val header = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        header.addView(Button(this).apply {
-            text = "返回"
-            textSize = 13f
-            setTextColor(Color.rgb(71, 85, 105))
-            setAllCaps(false)
-            background = rounded(surface, 12, line)
-            setOnClickListener { finish() }
-        }, LinearLayout.LayoutParams(dp(72), dp(42)))
-        header.addView(TextView(this).apply {
-            text = "设置"
-            textSize = 20f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(dp(14), 0, 0, 0)
-        })
-        root.addView(header)
 
         val connection = card()
         addSectionHeader(connection, "连接设置", "配置 Relay Server 和传输参数。")
@@ -140,17 +120,7 @@ class SettingsActivity : Activity() {
         policy.addView(switchRow("允许自签名证书", "仅用于可信的自建服务端。", insecureTls), topMargin(10))
         policy.addView(divider(), topMargin(10))
 
-        networkMode = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@SettingsActivity,
-                android.R.layout.simple_spinner_item,
-                networkModeLabels
-            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            background = rounded(Color.rgb(248, 250, 252), 13, line)
-            setPadding(dp(12), 0, dp(10), 0)
-            minimumHeight = dp(50)
-        }
-        policy.addView(labeled("出口网络", networkMode), topMargin(10))
+        policy.addView(labeled("出口网络", buildNetworkModeTabs()), topMargin(12))
         policy.addView(divider(), topMargin(10))
         policy.addView(switchRow("允许访问出口侧私网", "开启后可访问手机所在局域网。", allowPrivate), topMargin(10))
         root.addView(policy, topMargin(14))
@@ -195,7 +165,7 @@ class SettingsActivity : Activity() {
             tlsEnabled = tlsEnabled.isChecked,
             insecureTls = insecureTls.isChecked,
             allowPrivateNetwork = allowPrivate.isChecked,
-            networkMode = networkModeValues.getOrElse(networkMode.selectedItemPosition) {
+            networkMode = networkModeValues.getOrElse(selectedNetworkModeIndex) {
                 NetworkBinder.MODE_AUTO
             },
         )
@@ -219,7 +189,57 @@ class SettingsActivity : Activity() {
         tlsEnabled.isChecked = cfg.tlsEnabled
         insecureTls.isChecked = cfg.insecureTls
         allowPrivate.isChecked = cfg.allowPrivateNetwork
-        networkMode.setSelection(networkModeValues.indexOf(cfg.networkMode).coerceAtLeast(0))
+        selectNetworkMode(networkModeValues.indexOf(cfg.networkMode).coerceAtLeast(0))
+    }
+
+    private fun buildNetworkModeTabs(): View {
+        networkModeTabs.clear()
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = rounded(Color.rgb(241, 245, 249), 13, line)
+        }
+
+        networkModeLabels.forEachIndexed { index, label ->
+            val tab = TextView(this).apply {
+                text = label
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(dp(6), 0, dp(6), 0)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { selectNetworkMode(index) }
+            }
+            networkModeTabs += tab
+            container.addView(
+                tab,
+                LinearLayout.LayoutParams(
+                    0,
+                    dp(42),
+                    1f,
+                ).apply {
+                    if (index > 0) leftMargin = dp(4)
+                }
+            )
+        }
+
+        selectNetworkMode(selectedNetworkModeIndex)
+        return container
+    }
+
+    private fun selectNetworkMode(index: Int) {
+        selectedNetworkModeIndex = index.coerceIn(0, networkModeValues.lastIndex)
+        networkModeTabs.forEachIndexed { tabIndex, tab ->
+            val selected = tabIndex == selectedNetworkModeIndex
+            tab.setTextColor(if (selected) Color.WHITE else Color.rgb(71, 85, 105))
+            tab.background = if (selected) {
+                rounded(brand, 10)
+            } else {
+                rounded(Color.TRANSPARENT, 10)
+            }
+        }
     }
 
     private fun card() = LinearLayout(this).apply {

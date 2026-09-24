@@ -81,12 +81,12 @@ class MainActivity : Activity() {
     private fun buildUi(): ScrollView {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(28))
+            setPadding(dp(20), dp(30), dp(20), dp(36))
             setBackgroundColor(bg)
         }
 
         root.addView(buildStatusCard())
-        root.addView(buildActionRow(), topMargin(14))
+        root.addView(buildActionRow(), topMargin(24))
 
         return ScrollView(this).apply {
             isFillViewport = true
@@ -98,7 +98,7 @@ class MainActivity : Activity() {
     private fun buildStatusCard(): View {
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(14), dp(16), dp(14))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
             background = rounded(ink, 18)
         }
 
@@ -141,7 +141,7 @@ class MainActivity : Activity() {
 
         val metrics = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(12), 0, 0)
+            setPadding(0, dp(16), 0, 0)
         }
 
         val transportMetric = metric("传输")
@@ -163,7 +163,7 @@ class MainActivity : Activity() {
             textSize = 11.5f
             setTextColor(Color.rgb(203, 213, 225))
             maxLines = 2
-            setPadding(0, dp(10), 0, 0)
+            setPadding(0, dp(14), 0, 0)
         }
         card.addView(statusDetail)
 

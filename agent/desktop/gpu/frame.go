@@ -20,6 +20,11 @@ const (
 	FormatBGRA Format = "bgra"
 )
 
+type frameLifetime struct {
+	retain  func() error
+	release func()
+}
+
 type Frame struct {
 	Backend     Backend
 	Device      uintptr
@@ -28,6 +33,30 @@ type Frame struct {
 	Width       int
 	Height      int
 	Format      Format
+
+	lifetime *frameLifetime
+}
+
+func WithLifetime(frame Frame, retain func() error, release func()) Frame {
+	if retain == nil || release == nil {
+		return frame
+	}
+	frame.lifetime = &frameLifetime{retain: retain, release: release}
+	return frame
+}
+
+func (f Frame) Retain() error {
+	if f.lifetime == nil || f.lifetime.retain == nil {
+		return nil
+	}
+	return f.lifetime.retain()
+}
+
+func (f Frame) Release() {
+	if f.lifetime == nil || f.lifetime.release == nil {
+		return
+	}
+	f.lifetime.release()
 }
 
 func (f Frame) Validate() error {

@@ -870,6 +870,18 @@ func d3d11VideoProcessorSupportsInput(enumerator unsafe.Pointer, format uint32) 
 	return support&d3d11VideoProcessorFormatSupportInput != 0, nil
 }
 
+func (r *d3d11Renderer) SupportsGPUFormat(format desktopgpu.Format) bool {
+	if r == nil || r.videoEnumerator == nil {
+		return false
+	}
+	dxgiFormat, ok := dxgiFormatForGPUFormat(format)
+	if !ok {
+		return false
+	}
+	supported, err := d3d11VideoProcessorSupportsInput(r.videoEnumerator, dxgiFormat)
+	return err == nil && supported
+}
+
 func (r *d3d11Renderer) RenderGPU(frame desktopgpu.Frame, cursor CursorOverlay) error {
 	if r == nil || r.videoDevice == nil || r.videoContext == nil ||
 		r.videoEnumerator == nil || r.videoProcessor == nil ||

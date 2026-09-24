@@ -68,3 +68,30 @@ func TestD3D11SurfaceGPUFrameRejectsCPUOnlyFormat(t *testing.T) {
 		t.Fatal("CPU-only I444 surface was exposed as a GPU frame")
 	}
 }
+
+func TestD3D11SurfaceGPUFrameLifetime(t *testing.T) {
+	retains := 0
+	releases := 0
+	surface := &D3D11Surface{
+		Resource: 1,
+		Format:   PixelFormatAYUV,
+		gpuRetain: func() error {
+			retains++
+			return nil
+		},
+		gpuRelease: func() {
+			releases++
+		},
+	}
+	frame, err := surface.GPUFrame(640, 480)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := frame.Retain(); err != nil {
+		t.Fatal(err)
+	}
+	frame.Release()
+	if retains != 1 || releases != 1 {
+		t.Fatalf("GPU surface lifetime retains=%d releases=%d", retains, releases)
+	}
+}

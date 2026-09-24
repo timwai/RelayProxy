@@ -168,7 +168,6 @@ func TestNegotiateRemoteDesktopVideoRejects444WithAutoCodec(t *testing.T) {
 	}
 }
 
-
 func TestNegotiateRemoteDesktopVideoRejectsH265AutoWithout420(t *testing.T) {
 	target := videoTarget(protocol.DesktopCodecCapability{
 		Codec: "h265", Encode: true, Decode: true, Chroma444: true, BitDepth8: true,
@@ -220,7 +219,6 @@ func TestNegotiateRemoteDesktopVideoAcceptsH265444OneVPLStyleCapability(t *testi
 		t.Fatalf("negotiated options=%+v", options)
 	}
 }
-
 
 func TestNegotiateRemoteDesktopVideoPrefersDirectionalChromaOverLegacyFlags(t *testing.T) {
 	target := videoTarget(protocol.DesktopCodecCapability{

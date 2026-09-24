@@ -283,7 +283,6 @@ func TestSyncABRResolutionTracksManualGeneration(t *testing.T) {
 	}
 }
 
-
 func TestDesktopResolutionModeFollowsViewport(t *testing.T) {
 	for _, mode := range []string{"", "auto", "follow_viewport", " FOLLOW_VIEWPORT "} {
 		if !desktopResolutionModeFollowsViewport(mode) {

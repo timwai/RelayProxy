@@ -126,6 +126,7 @@ func nativeDesktopViewerConfig(
 	inputCh chan protocol.DesktopInputEvent,
 	viewportCh chan desktopviewer.Viewport,
 	viewport desktopviewer.Viewport,
+	placement desktopviewer.WindowPlacement,
 ) desktopviewer.Config {
 	return desktopviewer.Config{
 		Title:          title,
@@ -133,6 +134,7 @@ func nativeDesktopViewerConfig(
 		Height:         height,
 		ViewportWidth:  viewport.Width,
 		ViewportHeight: viewport.Height,
+		Placement:      placement,
 		OnInput: func(event protocol.DesktopInputEvent) {
 			select {
 			case inputCh <- event:
@@ -390,8 +392,19 @@ func (a *appWindow) openNativeDesktopViewer() (map[string]any, error) {
 	if status.TargetName != "" {
 		title += " - " + status.TargetName
 	}
+	savedPlacement := a.bridge.GetConfig().GUI.NativeViewer
 	native, err := desktopviewer.Open(nativeDesktopViewerConfig(
-		title, frame.Width, frame.Height, inputCh, viewportCh, desktopviewer.Viewport{},
+		title,
+		frame.Width,
+		frame.Height,
+		inputCh,
+		viewportCh,
+		desktopviewer.Viewport{},
+		desktopviewer.WindowPlacement{
+			X: savedPlacement.X, Y: savedPlacement.Y,
+			Width: savedPlacement.Width, Height: savedPlacement.Height,
+			Maximized: savedPlacement.Maximized,
+		},
 	))
 	if err != nil {
 		cancel()
@@ -460,7 +473,19 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 			_ = decoder.Close()
 		}
 		if viewer != nil {
+			placement := viewer.WindowPlacement()
 			_ = viewer.Close()
+			if placement.Valid() {
+				if err := owner.persistGUI(map[string]any{
+					"nativeViewer": map[string]any{
+						"x": placement.X, "y": placement.Y,
+						"width": placement.Width, "height": placement.Height,
+						"maximized": placement.Maximized,
+					},
+				}); err != nil {
+					log.Printf("[Desktop] persist native viewer placement failed: %v", err)
+				}
+			}
 		}
 	}()
 	defer func() {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	desktopgpu "relayproxy/agent/desktop/gpu"
 	"relayproxy/internal/protocol"
 )
 
@@ -55,6 +56,17 @@ type D3D11Frame struct {
 	Height      int
 }
 
+func (f D3D11Frame) GPUFrame() desktopgpu.Frame {
+	return desktopgpu.Frame{
+		Backend:     desktopgpu.BackendD3D11,
+		Resource:    f.Resource,
+		Subresource: f.Subresource,
+		Width:       f.Width,
+		Height:      f.Height,
+		Format:      desktopgpu.FormatNV12,
+	}
+}
+
 type CursorOverlay struct {
 	State  protocol.DesktopCursorState
 	Bitmap CursorBitmap
@@ -79,6 +91,7 @@ func (f Frame) Validate() error {
 
 type Native interface {
 	Submit(Frame) error
+	SubmitGPU(desktopgpu.Frame) error
 	SubmitD3D11(D3D11Frame) error
 	D3D11Device() uintptr
 	SupportsGPUCursor() bool

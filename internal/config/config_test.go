@@ -319,7 +319,6 @@ func TestAgentThemeAllowsSystem(t *testing.T) {
 	}
 }
 
-
 func TestNativeViewerPlacementRoundTrips(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	cfg := &AgentConfigFile{}

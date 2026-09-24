@@ -620,6 +620,22 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #818 全部通过；UI CI #508 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：正式公开 H.265/HEVC capability 与显式 codec 选择；`auto` 暂继续使用成熟 H.264 路径，待 Intel/NVIDIA/AMD 两机验证完成后再考虑默认 HEVC。
 
+### 0.2.51 RD3 Public H.265 / HEVC Negotiation（已进入 main）
+
+- H.265 不再仅能通过 `h265-validation` 隐藏哨兵触发：公共 codec normalizer 现在识别 `h265 / hevc / hvc1 / hev1`，同时继续保证 diagnostics-only `h265-validation` 不会泄露为普通 capability。
+- Windows `NewSystemHost` 同时探测 Media Foundation H.264 与 H.265 encoder/decoder；只要本机存在 HEVC Encode 或 Decode，就把真实 `DesktopCodecCapability{Codec:"h265", Encode, Decode, Hardware,...}` 纳入认证阶段上报。
+- Server 的 `DesktopCapabilitiesForTarget` 已确认完整复制 `Codecs`，因此目标 HEVC capability 会原样到达控制端，不需要数据库 schema 或额外 server 协议改造。
+- 公共 Host 会话新增 H.265 分支，直接复用既有 HEVC Media Foundation encoder、D3D11 zero-copy generation、ABR、IDR、动态码率/FPS/分辨率和 generation hot-switch 数据面。
+- H.265 显式请求在连接前做双端能力校验：目标必须上报 `Encode=true`，本机必须通过自身 Host capability 上报 `Decode=true`；仅有 encoder 或仅有 decoder 都不会误启用 HEVC。
+- 运行时容错继续保留：显式 H.265 在 Host encoder capability 缺失或 encoder 启动失败时先尝试 H.264，再落到 JPEG；若已经发送 HEVC CONFIG 后发生 generation runtime failure，则使用新的 generation 安全回退，避免旧 HEVC 帧与 fallback 帧混代。
+- Windows GUI 视频编码下拉框正式增加 “H.265 / HEVC（原生 Viewer）”；目标卡片展示其上报的 H.264/H.265 Encode 能力，连接前也会做目标 capability 预检查。
+- Embedded WebView 不宣称可移植的 HEVC WebCodecs 支持：H.265 帧明确提示使用 Native Viewer；浏览器管理页没有原生 Viewer binding 时会禁用 H.265 选项。Native MF/D3D11 Viewer 已支持 H.265 decode、letterbox、follow viewport、ABR generation 和全屏。
+- `auto` 策略保持不变：当前仍优先成熟 H.264（WebCodecs 不可用时 JPEG），不会因为本轮 capability 公开就自动切 HEVC；待 Intel/NVIDIA/AMD 双机验证数据稳定后再评估默认策略。
+- 新增 codec normalizer、Host H.265 encode capability、双端 negotiation、GUI capability gating 回归；旧 HEVC validation env/sentinel 继续保留用于强制诊断。
+- 主要提交：`3823ec4`、`1c86e50`、`d2437f0`、`c111059`、`1f95772`、`c972c7e`、`5c78d12`、`285f7e0`、`2fa32af`，文档/注释收尾至 `d925dae`。
+- 验证：Go CI #832 全部通过；UI CI #522 的 Linux UI/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：进入真实多显示器增强——运行中切换显示器、显示器热插拔/布局变化刷新，以及后续独立多窗口/多流设计。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

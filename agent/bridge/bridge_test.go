@@ -431,3 +431,36 @@ func TestConcurrentConfigUpdatesDoNotLoseUnrelatedFields(t *testing.T) {
 		t.Fatalf("concurrent updates lost fields: config = %+v, error = %v", cfg, err)
 	}
 }
+
+
+func TestSaveNativeViewerPlacementPreservesOtherConfig(t *testing.T) {
+	b := newTestBridge(t)
+	before, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	placement := config.GUIWindowPlacement{
+		X: -1600, Y: 40, Width: 1600, Height: 900, Maximized: true,
+	}
+	var in ConfigUpdate
+	in.GUI.NativeViewer = &placement
+	result, err := b.SaveConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.GUI.NativeViewer != placement {
+		t.Fatalf("saved placement=%+v want=%+v", after.GUI.NativeViewer, placement)
+	}
+	if before.Server.Address != after.Server.Address ||
+		before.Proxy.DefaultExitID != after.Proxy.DefaultExitID ||
+		!reflect.DeepEqual(before.Routing, after.Routing) {
+		t.Fatal("saving native viewer placement changed unrelated configuration")
+	}
+	if result.RestartRequired || result.ReloadPending {
+		t.Fatalf("placement-only save should be hot metadata: %+v", result)
+	}
+}

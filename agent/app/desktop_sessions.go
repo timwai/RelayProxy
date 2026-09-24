@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"strings"
 	"time"
@@ -20,6 +21,27 @@ func newRemoteDesktopSessionID() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("desktop_%x", raw[:]), nil
+}
+
+func (a *Agent) desktopP2PEligible(controller *desktop.ControllerSession) bool {
+	if a == nil || controller == nil {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.desktopConnection != controller || !controller.Active() {
+		return false
+	}
+	active := 0
+	for _, session := range a.desktopConnections {
+		if session != nil && session.Active() {
+			active++
+			if active > 1 {
+				return false
+			}
+		}
+	}
+	return active <= 1
 }
 
 func (a *Agent) desktopSessionByID(sessionID string) *desktop.ControllerSession {
@@ -168,6 +190,10 @@ func (a *Agent) connectRelayDesktopSession(
 		a.desktopP2PSession = nil
 	}
 	a.desktopConnections[sessionID] = session
+	if !primary && a.desktopP2PSession != nil {
+		oldDirect = a.desktopP2PSession
+		a.desktopP2PSession = nil
+	}
 	p2pManager := a.rdpP2P
 	a.mu.Unlock()
 
@@ -176,6 +202,9 @@ func (a *Agent) connectRelayDesktopSession(
 	}
 	if oldDirect != nil {
 		_ = oldDirect.Close()
+		if !primary {
+			log.Printf("[Desktop] disabled primary P2P media while multiple Relay Desktop streams are active")
+		}
 	}
 	if primary {
 		a.startRelayDesktopDirectPath(session, target.DeviceID, p2pManager)

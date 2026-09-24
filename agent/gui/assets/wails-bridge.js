@@ -29,6 +29,7 @@
   window.goSetClipboardText = text => invoke('SetClipboardText', text || '');
   window.goSendRemoteDesktopInput = raw => invoke('SendRemoteDesktopInput', raw);
   window.goSetRemoteDesktopResolution = (width, height) => invoke('SetRemoteDesktopResolution', width, height);
+  window.goSetRemoteDesktopViewportResolution = (width, height) => invoke('SetRemoteDesktopViewportResolution', width, height);
   window.goRequestRemoteDesktopIDR = () => invoke('RequestRemoteDesktopIDR');
   window.goGetLogs = () => invoke('GetLogs');
   window.goClearLogs = () => invoke('ClearLogs');

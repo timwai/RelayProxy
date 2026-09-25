@@ -602,6 +602,82 @@ func fillOneVPLAYUVSurface(
 	return nil
 }
 
+func copyOneVPLAYUVD3D11Surface(
+	context unsafe.Pointer,
+	surface uintptr,
+	frame D3D11EncodeFrame,
+) error {
+	if context == nil {
+		return fmt.Errorf("%w: oneVPL D3D11 context is nil", ErrEncoderUnavailable)
+	}
+	if err := frame.Validate(); err != nil {
+		return err
+	}
+	if frame.PixelFormat() != PixelFormatAYUV {
+		return fmt.Errorf("%w: oneVPL D3D11 HEVC 4:4:4 requires AYUV input", ErrInvalidFrame)
+	}
+	targetResource, targetDevice, err := oneVPLD3D11SurfaceHandles(surface)
+	if err != nil {
+		return err
+	}
+	if frame.Device != 0 && targetDevice != frame.Device {
+		return fmt.Errorf(
+			"%w: source D3D11 device %#x does not match oneVPL device %#x",
+			ErrInvalidFrame, frame.Device, targetDevice,
+		)
+	}
+
+	source := unsafe.Pointer(frame.Resource)
+	target := unsafe.Pointer(targetResource)
+	var sourceDesc, targetDesc mfD3D11Texture2DDesc
+	comCall(source, 10, uintptr(unsafe.Pointer(&sourceDesc))) // ID3D11Texture2D::GetDesc
+	comCall(target, 10, uintptr(unsafe.Pointer(&targetDesc)))
+	if sourceDesc.MipLevels == 0 || targetDesc.MipLevels == 0 {
+		return fmt.Errorf("%w: invalid D3D11 texture metadata", ErrInvalidFrame)
+	}
+	if sourceDesc.Format != dxgiFormatAYUV || targetDesc.Format != dxgiFormatAYUV {
+		return fmt.Errorf(
+			"%w: AYUV copy requires DXGI format %d, source=%d target=%d",
+			ErrInvalidFrame, dxgiFormatAYUV, sourceDesc.Format, targetDesc.Format,
+		)
+	}
+	if int(sourceDesc.Width) < frame.Width || int(sourceDesc.Height) < frame.Height {
+		return fmt.Errorf(
+			"%w: AYUV source texture=%dx%d smaller than frame=%dx%d",
+			ErrInvalidFrame, sourceDesc.Width, sourceDesc.Height, frame.Width, frame.Height,
+		)
+	}
+	if int(targetDesc.Width) < frame.Width || int(targetDesc.Height) < frame.Height {
+		return fmt.Errorf(
+			"%w: oneVPL AYUV target=%dx%d smaller than frame=%dx%d",
+			ErrInvalidFrame, targetDesc.Width, targetDesc.Height, frame.Width, frame.Height,
+		)
+	}
+	sourceSubresources := uint64(sourceDesc.MipLevels) * uint64(sourceDesc.ArraySize)
+	if uint64(frame.Subresource) >= sourceSubresources {
+		return fmt.Errorf(
+			"%w: D3D11 source subresource=%d exceeds %d",
+			ErrInvalidFrame, frame.Subresource, sourceSubresources,
+		)
+	}
+
+	comCall(
+		context,
+		46, // ID3D11DeviceContext::CopySubresourceRegion
+		uintptr(target),
+		0,
+		0,
+		0,
+		0,
+		uintptr(source),
+		uintptr(frame.Subresource),
+		0,
+	)
+	stamp := uint64(frame.Timestamp.Nanoseconds()) * 90_000 / uint64(time.Second)
+	*(*uint64)(unsafe.Pointer(surface + oneVPLSurfaceTimestamp)) = stamp
+	return nil
+}
+
 func oneVPLH265IsKeyFrame(data []byte, frameType uint16) bool {
 	if frameType&(oneVPLFrameTypeI|oneVPLFrameTypeIDR) != 0 {
 		return true
@@ -677,6 +753,9 @@ func (e *oneVPLH265Encoder) Encode(ctx context.Context, frame RawFrame) ([]Encod
 	defer e.mu.Unlock()
 	if e.closed || e.session == 0 {
 		return nil, ErrEncoderUnavailable
+	}
+	if e.ioPattern != oneVPLIOPatternInSystemMemory {
+		return nil, fmt.Errorf("%w: raw frames are disabled for the oneVPL D3D11 encoder", ErrEncoderUnavailable)
 	}
 	i444, stride, err := e.rawFrameI444(frame)
 	if err != nil {
@@ -769,6 +848,110 @@ func (e *oneVPLH265Encoder) Encode(ctx context.Context, frame RawFrame) ([]Encod
 		}
 	}
 	return nil, errors.New("oneVPL HEVC encoder remained busy")
+}
+
+func (e *oneVPLH265Encoder) EncodeD3D11(
+	ctx context.Context,
+	frame D3D11EncodeFrame,
+) ([]EncodedPacket, error) {
+	if e == nil {
+		return nil, ErrEncoderUnavailable
+	}
+	start := time.Now()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed || e.session == 0 || e.ioPattern != oneVPLIOPatternInVideoMemory ||
+		e.d3d11Device == 0 || e.d3d11Context == nil {
+		return nil, ErrEncoderUnavailable
+	}
+	if err := frame.Validate(); err != nil {
+		return nil, err
+	}
+	if frame.Width != e.cfg.Width || frame.Height != e.cfg.Height {
+		return nil, ErrInvalidFrame
+	}
+	if frame.PixelFormat() != PixelFormatAYUV {
+		return nil, fmt.Errorf("%w: oneVPL D3D11 HEVC 4:4:4 requires AYUV input", ErrInvalidFrame)
+	}
+	if frame.Device != 0 && frame.Device != e.d3d11Device {
+		return nil, fmt.Errorf(
+			"%w: D3D11 frame device %#x does not match encoder device %#x",
+			ErrInvalidFrame, frame.Device, e.d3d11Device,
+		)
+	}
+
+	for attempt := 0; attempt < 4; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var surface uintptr
+		status, _, _ := syscall.SyscallN(
+			e.api.getSurface,
+			e.session,
+			uintptr(unsafe.Pointer(&surface)),
+		)
+		if got := oneVPLStatus(status); got != 0 || surface == 0 {
+			return nil, fmt.Errorf("MFXMemory_GetSurfaceForEncode returned %d", got)
+		}
+		if err := copyOneVPLAYUVD3D11Surface(e.d3d11Context, surface, frame); err != nil {
+			releaseOneVPLSurface(surface)
+			return nil, err
+		}
+
+		var ctrl [56]byte
+		ctrlPtr := uintptr(0)
+		if e.forceIDR {
+			binary.LittleEndian.PutUint16(ctrl[32:34], oneVPLFrameTypeI|oneVPLFrameTypeRef|oneVPLFrameTypeIDR)
+			ctrlPtr = uintptr(unsafe.Pointer(&ctrl[0]))
+		}
+		var syncPoint uintptr
+		status, _, _ = syscall.SyscallN(
+			e.api.encode,
+			e.session,
+			ctrlPtr,
+			surface,
+			uintptr(unsafe.Pointer(&e.bitstream[0])),
+			uintptr(unsafe.Pointer(&syncPoint)),
+		)
+		releaseOneVPLSurface(surface)
+		runtime.KeepAlive(frame)
+		runtime.KeepAlive(ctrl)
+		runtime.KeepAlive(e.bitstreamData)
+		got := oneVPLStatus(status)
+		switch got {
+		case 0:
+			e.forceIDR = false
+			packets, syncErr := e.syncOutputLocked(ctx, syncPoint, frame.Timestamp)
+			if syncErr != nil {
+				return nil, syncErr
+			}
+			for _, packet := range packets {
+				e.stats.Bytes += uint64(len(packet.Data))
+			}
+			e.stats.Frames++
+			e.stats.LastEncodeTime = time.Since(start)
+			return packets, nil
+		case oneVPLErrMoreData:
+			e.forceIDR = false
+			e.stats.Frames++
+			e.stats.LastEncodeTime = time.Since(start)
+			return nil, nil
+		case oneVPLWarnDeviceBusy:
+			timer := time.NewTimer(2 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, ctx.Err()
+			case <-timer.C:
+			}
+			continue
+		case oneVPLErrNotEnoughBuffer:
+			return nil, fmt.Errorf("oneVPL HEVC output exceeded %d-byte bitstream buffer", len(e.bitstreamData))
+		default:
+			return nil, fmt.Errorf("MFXVideoENCODE_EncodeFrameAsync returned %d", got)
+		}
+	}
+	return nil, errors.New("oneVPL HEVC D3D11 encoder remained busy")
 }
 
 func (e *oneVPLH265Encoder) ForceIDR(context.Context) error {

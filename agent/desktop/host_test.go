@@ -253,6 +253,38 @@ func TestHostGPUCapabilityIsCopied(t *testing.T) {
 	}
 }
 
+func TestHostGPUCandidateDiagnosticsAreCopied(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	host, err := NewHost(&testCaptureSource{frame: src}, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := []protocol.DesktopGPUCandidateDiagnostics{{
+		Backend:       "nvcodec-hevc444",
+		Vendor:        "nvidia",
+		DeviceProbe:   true,
+		DeviceCount:   1,
+		HEVC444Decode: true,
+		Implemented:   false,
+	}}
+	host.SetGPUCandidateDiagnostics(input)
+	input[0].Backend = "mutated"
+
+	first := host.GPUCandidateDiagnostics()
+	if len(first) != 1 || first[0].Backend != "nvcodec-hevc444" || !first[0].HEVC444Decode {
+		t.Fatalf("host GPU candidate snapshot=%+v", first)
+	}
+	first[0].Vendor = "mutated"
+	if got := host.GPUCandidateDiagnostics(); len(got) != 1 || got[0].Vendor != "nvidia" {
+		t.Fatalf("host exposed GPU candidate storage: %+v", got)
+	}
+
+	caps := host.DesktopCapabilities(context.Background())
+	if len(caps.GPUCandidates) != 1 || caps.GPUCandidates[0].DeviceCount != 1 {
+		t.Fatalf("desktop capability lost GPU candidate diagnostics: %+v", caps.GPUCandidates)
+	}
+}
+
 func TestHostCodecCapabilitiesAreCopied(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	host, err := NewHost(&testCaptureSource{frame: src}, DefaultHostConfig())

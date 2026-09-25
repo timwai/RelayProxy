@@ -1123,6 +1123,24 @@ func NewSystemHost() (*Host, error) {
 	}
 	host.SetCodecCapabilities(codecCapabilities)
 	host.SetGPUCapability(gpuCapability)
+	gpuCandidates := make([]protocol.DesktopGPUCandidateDiagnostics, 0, len(h265444Candidates))
+	for _, candidate := range h265444Candidates {
+		gpuCandidates = append(gpuCandidates, protocol.DesktopGPUCandidateDiagnostics{
+			Backend:          candidate.Backend,
+			Vendor:           candidate.Vendor,
+			RuntimeAvailable: candidate.RuntimeAvailable,
+			EncodeRuntime:    candidate.EncodeRuntime,
+			DecodeRuntime:    candidate.DecodeRuntime,
+			DeviceProbe:      candidate.DeviceProbe,
+			DeviceCount:      candidate.DeviceCount,
+			HEVC444Encode:    candidate.HEVC444Encode,
+			HEVC444Decode:    candidate.HEVC444Decode,
+			Version:          candidate.Version,
+			Implemented:      candidate.Implemented,
+			Error:            candidate.Error,
+		})
+	}
+	host.SetGPUCandidateDiagnostics(gpuCandidates)
 
 	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
 		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	desktopDiagnosticsSchemaVersion = 6
+	desktopDiagnosticsSchemaVersion = 7
 	desktopDiagnosticsMaxSamples    = 1200
 	desktopDiagnosticsIntervalMs    = 500
 )
@@ -169,8 +169,9 @@ type DesktopDiagnosticsReport struct {
 	Summary           DesktopDiagnosticsSummary            `json:"summary"`
 	AudioValidation   *DesktopAudioValidationSummary       `json:"audioValidation,omitempty"`
 	HEVCValidation    *DesktopHEVCValidationSummary        `json:"hevcValidation,omitempty"`
-	TargetGPU         *protocol.DesktopGPUCapability       `json:"targetGpu,omitempty"`
-	GPUValidation     *DesktopGPUValidationSummary         `json:"gpuValidation,omitempty"`
+	TargetGPU           *protocol.DesktopGPUCapability             `json:"targetGpu,omitempty"`
+	TargetGPUCandidates []protocol.DesktopGPUCandidateDiagnostics   `json:"targetGpuCandidates,omitempty"`
+	GPUValidation       *DesktopGPUValidationSummary                 `json:"gpuValidation,omitempty"`
 	Samples           []DesktopDiagnosticSample            `json:"samples"`
 }
 
@@ -179,8 +180,9 @@ type sessionDiagnosticsRecorder struct {
 	targetID  string
 	options   protocol.RemoteDesktopConnectOptions
 	started   time.Time
-	targetGPU *protocol.DesktopGPUCapability
-	samples   []DesktopDiagnosticSample
+	targetGPU           *protocol.DesktopGPUCapability
+	targetGPUCandidates []protocol.DesktopGPUCandidateDiagnostics
+	samples             []DesktopDiagnosticSample
 }
 
 func newSessionDiagnosticsRecorder(
@@ -205,6 +207,17 @@ func (r *sessionDiagnosticsRecorder) SetTargetGPUCapability(capability *protocol
 	}
 	r.mu.Lock()
 	r.targetGPU = protocol.CloneDesktopGPUCapability(capability)
+	r.mu.Unlock()
+}
+
+func (r *sessionDiagnosticsRecorder) SetTargetGPUCandidates(
+	candidates []protocol.DesktopGPUCandidateDiagnostics,
+) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.targetGPUCandidates = protocol.CloneDesktopGPUCandidateDiagnostics(candidates)
 	r.mu.Unlock()
 }
 
@@ -727,8 +740,9 @@ func (r *sessionDiagnosticsRecorder) Report(
 		Summary:           summarizeDesktopDiagnostics(r.started, now, samples),
 		AudioValidation:   summarizeAudioValidation(r.options, samples, audio),
 		HEVCValidation:    summarizeHEVCValidation(r.options, samples),
-		TargetGPU:         protocol.CloneDesktopGPUCapability(r.targetGPU),
-		GPUValidation:     summarizeGPUValidation(r.targetGPU, config, samples),
+		TargetGPU:           protocol.CloneDesktopGPUCapability(r.targetGPU),
+		TargetGPUCandidates: protocol.CloneDesktopGPUCandidateDiagnostics(r.targetGPUCandidates),
+		GPUValidation:       summarizeGPUValidation(r.targetGPU, config, samples),
 		Samples:           samples,
 	}
 }

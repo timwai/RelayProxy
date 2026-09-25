@@ -52,6 +52,9 @@ func TestDesktopCapabilitiesForTargetUsesAuthorizedOnlineSnapshot(t *testing.T) 
 			RelayDesktop: true,
 			Captures:     []protocol.DesktopCaptureCapability{{Backend: "dxgi", Cursor: true}},
 			Codecs:       []protocol.DesktopCodecCapability{{Codec: "h264", Encode: true}},
+			GPUCandidates: []protocol.DesktopGPUCandidateDiagnostics{{
+				Backend: "nvcodec-hevc444", Vendor: "nvidia", DeviceProbe: true, HEVC444Decode: true,
+			}},
 			Audio:        true,
 			AudioCodecs:  []string{protocol.DesktopAudioCodecOpus, protocol.DesktopAudioCodecPCMS16LE},
 			Displays:     []protocol.DesktopDisplayCapability{{ID: "10", Name: "DISPLAY1", Width: 1920, Height: 1080, Primary: true}},
@@ -64,13 +67,20 @@ func TestDesktopCapabilitiesForTargetUsesAuthorizedOnlineSnapshot(t *testing.T) 
 	if !got.NativeRDP || !got.RelayDesktop || !got.MultiStream || len(got.Displays) != 1 || got.Displays[0].ID != "10" {
 		t.Fatalf("merged capabilities=%+v", got)
 	}
+	if len(got.GPUCandidates) != 1 || got.GPUCandidates[0].Backend != "nvcodec-hevc444" {
+		t.Fatalf("GPU candidates=%+v", got.GPUCandidates)
+	}
 	got.Displays[0].ID = "mutated"
 	got.AudioCodecs[0] = "mutated"
+	got.GPUCandidates[0].Backend = "mutated"
 	if sess.DesktopCapabilities.Displays[0].ID != "10" {
 		t.Fatal("returned display slice aliases authenticated session snapshot")
 	}
 	if sess.DesktopCapabilities.AudioCodecs[0] != protocol.DesktopAudioCodecOpus {
 		t.Fatal("returned audio codec slice aliases authenticated session snapshot")
+	}
+	if sess.DesktopCapabilities.GPUCandidates[0].Backend != "nvcodec-hevc444" {
+		t.Fatal("returned GPU candidate slice aliases authenticated session snapshot")
 	}
 }
 
@@ -80,13 +90,17 @@ func TestDesktopCapabilitiesForTargetDoesNotLeakUnusableSnapshot(t *testing.T) {
 		DesktopCapabilities: protocol.DesktopCapabilities{
 			RelayDesktop: true,
 			Displays:     []protocol.DesktopDisplayCapability{{ID: "secret-display", Width: 1920, Height: 1080}},
+			GPUCandidates: []protocol.DesktopGPUCandidateDiagnostics{{
+				Backend: "secret-vendor-runtime", Vendor: "secret-vendor", RuntimeAvailable: true,
+			}},
 		},
 	}
 	got := DesktopCapabilitiesForTarget(sess, true, true)
 	if !got.NativeRDP || !got.RelayDesktop {
 		t.Fatalf("backend authorization flags lost: %+v", got)
 	}
-	if len(got.Displays) != 0 || len(got.Codecs) != 0 || len(got.Captures) != 0 {
+	if len(got.Displays) != 0 || len(got.Codecs) != 0 || len(got.Captures) != 0 ||
+		len(got.GPUCandidates) != 0 || got.GPU != nil {
 		t.Fatalf("dynamic desktop details leaked without current desktop.host grant: %+v", got)
 	}
 

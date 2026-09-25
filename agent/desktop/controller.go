@@ -780,6 +780,13 @@ func (s *ControllerSession) SetTargetGPUCapability(capability *protocol.DesktopG
 	s.diagnostics.SetTargetGPUCapability(capability)
 }
 
+func (s *ControllerSession) SetTargetGPUCandidates(candidates []protocol.DesktopGPUCandidateDiagnostics) {
+	if s == nil || s.diagnostics == nil {
+		return
+	}
+	s.diagnostics.SetTargetGPUCandidates(candidates)
+}
+
 func (s *ControllerSession) Diagnostics() DesktopDiagnosticsReport {
 	if s == nil || s.diagnostics == nil {
 		return DesktopDiagnosticsReport{}

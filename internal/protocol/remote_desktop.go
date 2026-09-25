@@ -110,6 +110,30 @@ func CloneDesktopGPUCapability(capability *DesktopGPUCapability) *DesktopGPUCapa
 	return &cloned
 }
 
+// DesktopGPUCandidateDiagnostics is an authenticated target snapshot used only
+// for diagnostics and implementation planning. It MUST NOT participate in
+// codec/backend selection or make a codec/chroma format publicly negotiable.
+type DesktopGPUCandidateDiagnostics struct {
+	Backend          string `json:"backend,omitempty"`
+	Vendor           string `json:"vendor,omitempty"`
+	RuntimeAvailable bool   `json:"runtimeAvailable,omitempty"`
+	EncodeRuntime    bool   `json:"encodeRuntime,omitempty"`
+	DecodeRuntime    bool   `json:"decodeRuntime,omitempty"`
+	DeviceProbe      bool   `json:"deviceProbe,omitempty"`
+	DeviceCount      int    `json:"deviceCount,omitempty"`
+	HEVC444Encode    bool   `json:"hevc444Encode,omitempty"`
+	HEVC444Decode    bool   `json:"hevc444Decode,omitempty"`
+	Version          string `json:"version,omitempty"`
+	Implemented      bool   `json:"implemented,omitempty"`
+	Error            string `json:"error,omitempty"`
+}
+
+func CloneDesktopGPUCandidateDiagnostics(
+	candidates []DesktopGPUCandidateDiagnostics,
+) []DesktopGPUCandidateDiagnostics {
+	return append([]DesktopGPUCandidateDiagnostics(nil), candidates...)
+}
+
 type DesktopDisplayCapability struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
@@ -127,8 +151,9 @@ type DesktopCapabilities struct {
 	RelayDesktop   bool                       `json:"relayDesktop"`
 	Captures       []DesktopCaptureCapability `json:"captures,omitempty"`
 	Codecs         []DesktopCodecCapability   `json:"codecs,omitempty"`
-	GPU            *DesktopGPUCapability      `json:"gpu,omitempty"`
-	Displays       []DesktopDisplayCapability `json:"displays,omitempty"`
+	GPU            *DesktopGPUCapability              `json:"gpu,omitempty"`
+	GPUCandidates  []DesktopGPUCandidateDiagnostics   `json:"gpuCandidates,omitempty"`
+	Displays       []DesktopDisplayCapability         `json:"displays,omitempty"`
 	Audio          bool                       `json:"audio,omitempty"`
 	AudioCodecs    []string                   `json:"audioCodecs,omitempty"`
 	Clipboard      bool                       `json:"clipboard,omitempty"`
@@ -141,6 +166,17 @@ type DesktopCapabilities struct {
 	MaxFPS         int                        `json:"maxFps,omitempty"`
 }
 
+func CloneDesktopCapabilities(capabilities DesktopCapabilities) DesktopCapabilities {
+	cloned := capabilities
+	cloned.Captures = append([]DesktopCaptureCapability(nil), capabilities.Captures...)
+	cloned.Codecs = CloneDesktopCodecCapabilities(capabilities.Codecs)
+	cloned.GPU = CloneDesktopGPUCapability(capabilities.GPU)
+	cloned.GPUCandidates = CloneDesktopGPUCandidateDiagnostics(capabilities.GPUCandidates)
+	cloned.Displays = append([]DesktopDisplayCapability(nil), capabilities.Displays...)
+	cloned.AudioCodecs = append([]string(nil), capabilities.AudioCodecs...)
+	return cloned
+}
+
 // RemoteDesktopTarget is the unified target model used by Agent UI and future
 // Relay Desktop negotiation. Existing RDP targets are adapted into this model.
 type RemoteDesktopTarget struct {
@@ -148,6 +184,18 @@ type RemoteDesktopTarget struct {
 	Name         string              `json:"name"`
 	Online       bool                `json:"online"`
 	Capabilities DesktopCapabilities `json:"capabilities"`
+}
+
+func CloneRemoteDesktopTargets(targets []RemoteDesktopTarget) []RemoteDesktopTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+	cloned := make([]RemoteDesktopTarget, len(targets))
+	for i := range targets {
+		cloned[i] = targets[i]
+		cloned[i].Capabilities = CloneDesktopCapabilities(targets[i].Capabilities)
+	}
+	return cloned
 }
 
 type DesktopResolutionOptions struct {

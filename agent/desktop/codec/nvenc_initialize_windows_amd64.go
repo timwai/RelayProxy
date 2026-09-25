@@ -199,7 +199,7 @@ func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
 	)
 
 	rcFlags := binary.LittleEndian.Uint32(
-		config.Data[nvencConfigRCFlagsOffset : nvencConfigRCFlagsOffset+4],
+		config.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4],
 	)
 	rcFlags &^= nvencRCFlagEnableLookahead
 	if cfg.DisableLowLatency {
@@ -228,17 +228,17 @@ func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
 		)
 	}
 	binary.LittleEndian.PutUint32(
-		config.Data[nvencConfigRCFlagsOffset : nvencConfigRCFlagsOffset+4],
+		config.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4],
 		rcFlags,
 	)
 
 	hevcFlags := binary.LittleEndian.Uint32(
-		config.Data[nvencConfigHEVCBitfieldOffset : nvencConfigHEVCBitfieldOffset+4],
+		config.Data[nvencConfigHEVCBitfieldOffset:nvencConfigHEVCBitfieldOffset+4],
 	)
 	hevcFlags &^= nvencHEVCChromaMask
 	hevcFlags |= nvencHEVCChroma444 | nvencHEVCRepeatSPSPPS
 	binary.LittleEndian.PutUint32(
-		config.Data[nvencConfigHEVCBitfieldOffset : nvencConfigHEVCBitfieldOffset+4],
+		config.Data[nvencConfigHEVCBitfieldOffset:nvencConfigHEVCBitfieldOffset+4],
 		hevcFlags,
 	)
 	return nil

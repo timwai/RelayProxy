@@ -2,13 +2,13 @@
 
 package codec
 
-var _ D3D11Encoder = (*oneVPLH265Encoder)(nil)
-
 import (
 	"encoding/binary"
 	"testing"
 	"unsafe"
 )
+
+var _ D3D11Encoder = (*oneVPLH265Encoder)(nil)
 
 func TestOneVPLHEVC444VideoParamABI(t *testing.T) {
 	cfg := DefaultVideoConfig()

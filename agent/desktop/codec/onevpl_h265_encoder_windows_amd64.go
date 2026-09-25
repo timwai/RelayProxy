@@ -323,7 +323,30 @@ type oneVPLH265Encoder struct {
 }
 
 func OpenOneVPLH265Encoder(ctx context.Context, cfg VideoConfig) (SequenceHeaderEncoder, error) {
-	param, cfg, err := oneVPLHEVC444VideoParam(cfg)
+	return openOneVPLH265Encoder(ctx, cfg, 0)
+}
+
+func OpenOneVPLH265EncoderWithD3D11(
+	ctx context.Context,
+	cfg VideoConfig,
+	device uintptr,
+) (SequenceHeaderEncoder, error) {
+	if device == 0 {
+		return nil, fmt.Errorf("%w: D3D11 device is nil", ErrEncoderUnavailable)
+	}
+	return openOneVPLH265Encoder(ctx, cfg, device)
+}
+
+func openOneVPLH265Encoder(
+	ctx context.Context,
+	cfg VideoConfig,
+	device uintptr,
+) (SequenceHeaderEncoder, error) {
+	ioPattern := uint16(oneVPLIOPatternInSystemMemory)
+	if device != 0 {
+		ioPattern = oneVPLIOPatternInVideoMemory
+	}
+	param, cfg, err := oneVPLHEVC444VideoParamForIO(cfg, ioPattern)
 	if err != nil {
 		return nil, err
 	}
@@ -346,13 +369,35 @@ func OpenOneVPLH265Encoder(ctx context.Context, cfg VideoConfig) (SequenceHeader
 	if err != nil {
 		return nil, err
 	}
+	var d3d11Context unsafe.Pointer
 	cleanupSession := true
 	defer func() {
 		if cleanupSession {
 			base.closeSession(session)
 			base.unload(loader)
+			releaseIUnknown(d3d11Context)
 		}
 	}()
+
+	if device != 0 {
+		status, _, _ := syscall.SyscallN(
+			encAPI.setHandle,
+			session,
+			oneVPLHandleD3D11Device,
+			device,
+		)
+		if got := oneVPLStatus(status); got != 0 {
+			return nil, fmt.Errorf("%w: MFXVideoCORE_SetHandle(D3D11) returned %d", ErrEncoderUnavailable, got)
+		}
+		comCall(
+			unsafe.Pointer(device),
+			40, // ID3D11Device::GetImmediateContext
+			uintptr(unsafe.Pointer(&d3d11Context)),
+		)
+		if d3d11Context == nil {
+			return nil, fmt.Errorf("%w: D3D11 device returned nil immediate context", ErrEncoderUnavailable)
+		}
+	}
 
 	queryParam := param
 	status, _, _ := syscall.SyscallN(
@@ -362,10 +407,10 @@ func OpenOneVPLH265Encoder(ctx context.Context, cfg VideoConfig) (SequenceHeader
 		uintptr(unsafe.Pointer(&queryParam[0])),
 	)
 	queryStatus := oneVPLStatus(status)
-	if !oneVPLStatusOK(queryStatus) || !oneVPLHEVC444ParamPreserved(&queryParam) {
+	if !oneVPLStatusOK(queryStatus) || !oneVPLHEVC444ParamPreservedForIO(&queryParam, ioPattern) {
 		return nil, fmt.Errorf(
 			"%w: oneVPL HEVC 4:4:4 query status=%d preserved=%t",
-			ErrEncoderUnavailable, queryStatus, oneVPLHEVC444ParamPreserved(&queryParam),
+			ErrEncoderUnavailable, queryStatus, oneVPLHEVC444ParamPreservedForIO(&queryParam, ioPattern),
 		)
 	}
 
@@ -383,6 +428,10 @@ func OpenOneVPLH265Encoder(ctx context.Context, cfg VideoConfig) (SequenceHeader
 	if bufferSize < 4<<20 {
 		bufferSize = 4 << 20
 	}
+	backend := "onevpl-hevc444"
+	if device != 0 {
+		backend = "onevpl-hevc444-d3d11-zero-copy"
+	}
 	encoder := &oneVPLH265Encoder{
 		base:          base,
 		api:           encAPI,
@@ -392,9 +441,12 @@ func OpenOneVPLH265Encoder(ctx context.Context, cfg VideoConfig) (SequenceHeader
 		param:         queryParam,
 		bitstreamData: make([]byte, bufferSize),
 		forceIDR:      true,
+		ioPattern:     ioPattern,
+		d3d11Device:   device,
+		d3d11Context:  d3d11Context,
 		stats: EncoderStats{
 			Hardware: true,
-			Backend:  "onevpl-hevc444",
+			Backend:  backend,
 		},
 	}
 	encoder.resetBitstreamLocked()

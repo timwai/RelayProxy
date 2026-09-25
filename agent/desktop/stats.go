@@ -348,6 +348,7 @@ func (s *sessionStatsTracker) DiagnosticsSnapshot(now time.Time) protocol.Deskto
 	stats.RenderMs = s.viewer.RenderMs
 	stats.DecoderBackend = s.viewer.DecoderBackend
 	stats.DecoderHardware = s.viewer.DecoderHardware
+	stats.RenderBackend = s.viewer.RenderBackend
 	stats.ActualBitrate = int64(float64(bytesDelta*8) / elapsed)
 	stats.DeliveryRate = stats.ActualBitrate
 	stats.RTTMs = s.rttMs
@@ -391,6 +392,7 @@ func (s *sessionStatsTracker) Snapshot(now time.Time) protocol.DesktopSessionSta
 	stats.RenderMs = s.viewer.RenderMs
 	stats.DecoderBackend = s.viewer.DecoderBackend
 	stats.DecoderHardware = s.viewer.DecoderHardware
+	stats.RenderBackend = s.viewer.RenderBackend
 	stats.ActualBitrate = int64(float64(s.recvBytes*8) / elapsed)
 	stats.DeliveryRate = stats.ActualBitrate
 	stats.RTTMs = s.rttMs

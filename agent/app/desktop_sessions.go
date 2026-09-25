@@ -154,6 +154,7 @@ func (a *Agent) connectRelayDesktopSession(
 	if err != nil {
 		return protocol.RemoteDesktopSessionInfo{}, err
 	}
+	session.SetTargetGPUCapability(target.Capabilities.GPU)
 
 	a.mu.Lock()
 	if a.closed.Load() || !a.handshakeOK.Load() || a.readySession == nil {

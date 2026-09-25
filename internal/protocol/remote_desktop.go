@@ -418,6 +418,7 @@ type DesktopSessionStats struct {
 	EncoderHardware  bool    `json:"encoderHardware,omitempty"`
 	DecoderBackend   string  `json:"decoderBackend,omitempty"`
 	DecoderHardware  bool    `json:"decoderHardware,omitempty"`
+	RenderBackend    string  `json:"renderBackend,omitempty"`
 }
 
 // DesktopControlMessage is carried over FrameTypeDesktopControl. The server

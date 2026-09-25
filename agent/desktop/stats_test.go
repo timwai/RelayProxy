@@ -124,12 +124,14 @@ func TestSessionStatsPreservesMediaPipelineDiagnostics(t *testing.T) {
 	stats.MergeViewer(protocol.DesktopSessionStats{
 		DecoderBackend:  "media-foundation-d3d11-zero-copy",
 		DecoderHardware: true,
+		RenderBackend:   "d3d11-zero-copy",
 	})
 	got := stats.Snapshot(time.Now())
 	if got.CaptureBackend != "dxgi" || got.EncoderBackend != "media-foundation" || !got.EncoderHardware {
 		t.Fatalf("host media diagnostics=%+v", got)
 	}
-	if got.DecoderBackend != "media-foundation-d3d11-zero-copy" || !got.DecoderHardware {
+	if got.DecoderBackend != "media-foundation-d3d11-zero-copy" || !got.DecoderHardware ||
+		got.RenderBackend != "d3d11-zero-copy" {
 		t.Fatalf("viewer media diagnostics=%+v", got)
 	}
 }
@@ -164,6 +166,7 @@ func TestDiagnosticsSnapshotUsesShortWindow(t *testing.T) {
 		RenderMs:        1.2,
 		DecoderBackend:  "media-foundation-d3d11-zero-copy",
 		DecoderHardware: true,
+		RenderBackend:   "d3d11-zero-copy",
 	})
 
 	got := stats.DiagnosticsSnapshot(now)
@@ -183,7 +186,7 @@ func TestDiagnosticsSnapshotUsesShortWindow(t *testing.T) {
 	}
 	if got.CaptureBackend != "dxgi" || got.EncoderBackend != "media-foundation" ||
 		!got.EncoderHardware || got.DecoderBackend != "media-foundation-d3d11-zero-copy" ||
-		!got.DecoderHardware {
+		!got.DecoderHardware || got.RenderBackend != "d3d11-zero-copy" {
 		t.Fatalf("pipeline diagnostics=%+v", got)
 	}
 

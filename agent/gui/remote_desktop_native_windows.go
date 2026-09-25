@@ -20,11 +20,12 @@ import (
 )
 
 type nativeViewerPerf struct {
-	started      time.Time
-	decodeFrames uint64
-	renderFrames uint64
-	decodeTime   time.Duration
-	renderTime   time.Duration
+	started       time.Time
+	decodeFrames  uint64
+	renderFrames  uint64
+	decodeTime    time.Duration
+	renderTime    time.Duration
+	renderBackend string
 }
 
 func newNativeViewerPerf(now time.Time) *nativeViewerPerf {
@@ -39,12 +40,15 @@ func (p *nativeViewerPerf) observeDecode(frames int, elapsed time.Duration) {
 	p.decodeTime += elapsed
 }
 
-func (p *nativeViewerPerf) observeRender(elapsed time.Duration) {
+func (p *nativeViewerPerf) observeRender(elapsed time.Duration, backend string) {
 	if p == nil {
 		return
 	}
 	p.renderFrames++
 	p.renderTime += elapsed
+	if strings.TrimSpace(backend) != "" {
+		p.renderBackend = strings.TrimSpace(backend)
+	}
 }
 
 func (p *nativeViewerPerf) report(now time.Time) (protocol.DesktopSessionStats, bool) {
@@ -64,12 +68,14 @@ func (p *nativeViewerPerf) report(now time.Time) (protocol.DesktopSessionStats, 
 	if p.renderFrames > 0 {
 		stats.RenderFPS = float64(p.renderFrames) / seconds
 		stats.RenderMs = float64(p.renderTime.Microseconds()) / 1000 / float64(p.renderFrames)
+		stats.RenderBackend = p.renderBackend
 	}
 	p.started = now
 	p.decodeFrames = 0
 	p.renderFrames = 0
 	p.decodeTime = 0
 	p.renderTime = 0
+	p.renderBackend = ""
 	return stats, true
 }
 
@@ -891,9 +897,10 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				defer decodedFrame.Close()
 				renderStarted := time.Now()
 				rendered := false
+				renderBackend := ""
 				defer func() {
 					if rendered {
-						perf.observeRender(time.Since(renderStarted))
+						perf.observeRender(time.Since(renderStarted), renderBackend)
 					}
 				}()
 				if decodedFrame.Format != desktopcodec.PixelFormatNV12 &&
@@ -941,6 +948,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 							log.Printf("[Desktop] zero-copy GPU submit failed, falling back to readback: %v", err)
 						} else {
 							s.gpuFrameActive = true
+							renderBackend = "d3d11-zero-copy"
 							rendered = true
 							return
 						}
@@ -986,6 +994,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				if err = s.present(); err != nil {
 					log.Printf("[Desktop] native viewer render failed: %v", err)
 				} else {
+					renderBackend = "cpu-bgra"
 					rendered = true
 				}
 			}()
@@ -996,7 +1005,7 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		if stats, ok := perf.report(time.Now()); ok {
 			stats.DecoderBackend = s.decoder.Backend()
 			stats.DecoderHardware = s.decoder.Hardware()
-			owner.bridge.ReportRemoteDesktopViewerStats(stats)
+			s.reportViewerStats(owner, stats)
 		}
 	}
 }

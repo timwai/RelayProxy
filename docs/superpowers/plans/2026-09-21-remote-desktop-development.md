@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #118 已合并，merge `eb6e10a1f64c7e12e428a2f420911344a64b791f`；gofmt 修复 `016b34c4867084b21aa88cc651d4513b3c4e65ba`）
+> 当前开发基线：`main`（PR #119 已合并，merge `fed484f6e64f79d6a2e681585a026089a137e8ce`）
 
 ## 0. 当前进度
 
@@ -812,6 +812,19 @@ Windows SendInput / CF_UNICODETEXT
 - 代表实现 PR：#118；merge `eb6e10a1f64c7e12e428a2f420911344a64b791f`；gofmt 修复 `016b34c4867084b21aa88cc651d4513b3c4e65ba`。
 - 验证：Go CI #999 的 format/vet/full test/race/benchmark 全部通过；UI CI #689 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：先实现 NVIDIA / AMD 的“candidate runtime probe”与诊断输出，但不注册 public opener、不公开 `Chroma444`；待各自 encode/decode backend 真正落地并通过 D3D11 实测后再加入正式 registry capability。
+
+### 0.2.65 RD3 NVIDIA / AMD HEVC 4:4:4 Runtime Candidate Probe（已进入 main）
+
+- 新增 diagnostic-only `H265444RuntimeCandidate`，与正式 `h265444BackendRegistry` 完全分离；candidate 结果不能直接影响 `Chroma444` negotiation。
+- NVIDIA NVENC candidate：Windows amd64 动态加载 `nvEncodeAPI64.dll`，解析 `NvEncodeAPIGetMaxSupportedVersion` 与 `NvEncodeAPICreateInstance`，并记录驱动支持的 NVENC API 版本。
+- NVIDIA NVDEC candidate：动态加载 `nvcuvid.dll` 并确认 `cuvidGetDecoderCaps` entry point 存在。当前不调用该函数，因为 NVIDIA 要求有效 CUDA context 才能安全查询 codec/chroma capability。
+- AMD AMF candidate：动态加载 `amfrt64.dll`，解析 `AMFInit` / `AMFQueryVersion` 并记录 runtime version。
+- `EncodeRuntime` / `DecodeRuntime` 仅表示未来 vendor integration 所需 runtime entry points 可加载，不代表当前 GPU 支持 HEVC 4:4:4。
+- Windows Host 启动日志新增结构化 candidate 输出：vendor / backend / runtime / encodeRuntime / decodeRuntime / version / implemented / advertised=false / error。
+- Windows ARM64、Linux、macOS 使用 stub；不会因 NVIDIA/AMD x64 probe 引入额外 DLL 或编译依赖。
+- 代表实现 PR：#119；merge `fed484f6e64f79d6a2e681585a026089a137e8ce`。
+- 验证：Go CI #1002 的 format/vet/full test/race/benchmark 全部通过；UI CI #692 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：在 candidate 层继续做真实 device/context capability probe。NVIDIA 需要创建受控 CUDA/D3D11 device context 后查询 NVENC HEVC/YUV444 encode caps 与 NVDEC HEVC/4:4:4 decode caps；AMD 需要通过 AMF factory/context 创建 HEVC component 并查询 surface/chroma 支持。即使 probe 成功，仍不注册 public opener，直到实际 encode/decode + D3D11 zero-copy 路径完成。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -47,13 +47,13 @@ func probeOneVPLH265444Backend(ctx context.Context) H265444BackendProbe {
 
 var h265444BackendRegistry = []h265444Backend{
 	{
-		name:                 H265444BackendOneVPL,
-		probe:                probeOneVPLH265444Backend,
-		openEncoder:          OpenOneVPLH265Encoder,
-		openEncoderD3D11:     OpenOneVPLH265EncoderWithD3D11,
-		openDecoder:          OpenOneVPLH265Decoder,
-		openDecoderD3D11:     OpenOneVPLH265DecoderWithD3D11,
-		probeDecoderD3D11:    ProbeOneVPLH265DecoderD3D11,
+		name:              H265444BackendOneVPL,
+		probe:             probeOneVPLH265444Backend,
+		openEncoder:       OpenOneVPLH265Encoder,
+		openEncoderD3D11:  OpenOneVPLH265EncoderWithD3D11,
+		openDecoder:       OpenOneVPLH265Decoder,
+		openDecoderD3D11:  OpenOneVPLH265DecoderWithD3D11,
+		probeDecoderD3D11: ProbeOneVPLH265DecoderD3D11,
 	},
 }
 

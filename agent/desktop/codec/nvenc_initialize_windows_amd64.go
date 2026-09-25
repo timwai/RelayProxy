@@ -34,26 +34,26 @@ const (
 	nvencConfigRCFlagsOffset          = nvencConfigRCParamsOffset + 36
 	nvencConfigRCLookaheadDepthOffset = nvencConfigRCParamsOffset + 90
 
-	nvencInitializeVersionOffset         = 0
-	nvencInitializeEncodeGUIDOffset      = 4
-	nvencInitializePresetGUIDOffset      = 20
-	nvencInitializeWidthOffset           = 36
-	nvencInitializeHeightOffset          = 40
-	nvencInitializeDARWidthOffset        = 44
-	nvencInitializeDARHeightOffset       = 48
-	nvencInitializeFrameRateNumOffset    = 52
-	nvencInitializeFrameRateDenOffset    = 56
-	nvencInitializeEnableAsyncOffset     = 60
-	nvencInitializeEnablePTDOffset       = 64
-	nvencInitializeEncodeConfigOffset    = 88
-	nvencInitializeMaxWidthOffset        = 96
-	nvencInitializeMaxHeightOffset       = 100
-	nvencInitializeTuningInfoOffset      = 136
-	nvencInitializeBufferFormatOffset    = 140
+	nvencInitializeVersionOffset      = 0
+	nvencInitializeEncodeGUIDOffset   = 4
+	nvencInitializePresetGUIDOffset   = 20
+	nvencInitializeWidthOffset        = 36
+	nvencInitializeHeightOffset       = 40
+	nvencInitializeDARWidthOffset     = 44
+	nvencInitializeDARHeightOffset    = 48
+	nvencInitializeFrameRateNumOffset = 52
+	nvencInitializeFrameRateDenOffset = 56
+	nvencInitializeEnableAsyncOffset  = 60
+	nvencInitializeEnablePTDOffset    = 64
+	nvencInitializeEncodeConfigOffset = 88
+	nvencInitializeMaxWidthOffset     = 96
+	nvencInitializeMaxHeightOffset    = 100
+	nvencInitializeTuningInfoOffset   = 136
+	nvencInitializeBufferFormatOffset = 140
 
-	nvencTuningHighQuality      uint32 = 1
+	nvencTuningHighQuality     uint32 = 1
 	nvencTuningUltraLowLatency uint32 = 3
-	nvencRateControlCBR         uint32 = 2
+	nvencRateControlCBR        uint32 = 2
 
 	nvencRCFlagEnableLookahead uint32 = 1 << 5
 	nvencRCFlagZeroReorder     uint32 = 1 << 9
@@ -199,7 +199,7 @@ func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
 	)
 
 	rcFlags := binary.LittleEndian.Uint32(
-		config.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4],
+		config.Data[nvencConfigRCFlagsOffset : nvencConfigRCFlagsOffset+4],
 	)
 	rcFlags &^= nvencRCFlagEnableLookahead
 	if cfg.DisableLowLatency {
@@ -228,17 +228,17 @@ func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
 		)
 	}
 	binary.LittleEndian.PutUint32(
-		config.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4],
+		config.Data[nvencConfigRCFlagsOffset : nvencConfigRCFlagsOffset+4],
 		rcFlags,
 	)
 
 	hevcFlags := binary.LittleEndian.Uint32(
-		config.Data[nvencConfigHEVCBitfieldOffset:nvencConfigHEVCBitfieldOffset+4],
+		config.Data[nvencConfigHEVCBitfieldOffset : nvencConfigHEVCBitfieldOffset+4],
 	)
 	hevcFlags &^= nvencHEVCChromaMask
 	hevcFlags |= nvencHEVCChroma444 | nvencHEVCRepeatSPSPPS
 	binary.LittleEndian.PutUint32(
-		config.Data[nvencConfigHEVCBitfieldOffset:nvencConfigHEVCBitfieldOffset+4],
+		config.Data[nvencConfigHEVCBitfieldOffset : nvencConfigHEVCBitfieldOffset+4],
 		hevcFlags,
 	)
 	return nil

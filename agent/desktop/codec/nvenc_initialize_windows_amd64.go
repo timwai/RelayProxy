@@ -79,18 +79,18 @@ var (
 )
 
 type nvencConfigBlob struct {
-	Data [nvencConfigSize]byte
 	_    [0]uintptr
+	Data [nvencConfigSize]byte
 }
 
 type nvencPresetConfigBlob struct {
-	Data [nvencPresetConfigSize]byte
 	_    [0]uintptr
+	Data [nvencPresetConfigSize]byte
 }
 
 type nvencInitializeParamsBlob struct {
-	Data [nvencInitializeParamsSize]byte
 	_    [0]uintptr
+	Data [nvencInitializeParamsSize]byte
 }
 
 func nvencVersionWithReservedBit(structVersion uint32) uint32 {

@@ -900,6 +900,16 @@ Windows SendInput / CF_UNICODETEXT
 - 当前仍未把 session opener 挂入通用 `OpenH265444EncoderWithD3D11`，也未打开 production gate；尚缺 encoder initialize、AYUV resource register/map、bitstream encode/lock、sequence header、IDR/reconfigure 实现与真实硬件验证。
 - 下一步：基于该 session 实现 `SequenceHeaderEncoder + D3D11Encoder`，完成一帧 AYUV D3D11 texture 的 register → map → encode → lock bitstream → unmap/unregister 闭环。
 
+### 0.2.72 RD3 NVIDIA NVENC D3D11 Resource + Bitstream Lifecycle
+
+- 新增 NVENC D3D11 external resource ABI：`NV_ENC_REGISTER_RESOURCE`、`NV_ENC_MAP_INPUT_RESOURCE`、`NV_ENC_CREATE_BITSTREAM_BUFFER` 按当前固定的 Video Codec SDK 13.1 布局定义，并增加 Windows amd64 size/offset 测试，降低手写 FFI 漂移风险。
+- NVENC 输入格式固定为 `NV_ENC_BUFFER_FORMAT_AYUV`，resource type 使用 DirectX，usage 使用 input image；注册前继续要求 Relay Desktop 的 `D3D11EncodeFrame` 为 AYUV、有效 texture、正偶数尺寸且 device 与 encoder session 一致。
+- 完成 D3D11 texture `register -> map -> unmap -> unregister` 生命周期；映射结果会再次检查 NVENC 返回的 mapped buffer format，若不是 AYUV 立即解映射并拒绝进入 encode。
+- input resource `Close()` 幂等；如果调用方忘记显式 `Unmap()`，`Close()` 会先 unmap 再 unregister，避免长期保留 mapped/registered resource。
+- 新增 system-memory bitstream output buffer 的 create/destroy 生命周期，为下一步 `NvEncEncodePicture -> NvEncLockBitstream` 提供稳定 output handle。
+- 当前 resource helper 仍只作为 NVENC encoder 内部 building block，尚未挂入 `OpenH265444EncoderWithD3D11`，production gate 保持关闭。
+- 下一步：补 `NV_ENC_INITIALIZE_PARAMS/NV_ENC_CONFIG_HEVC` 初始化，再把 mapped AYUV resource 与 bitstream buffer 接进 `NV_ENC_PIC_PARAMS`，完成第一帧 HEVC 4:4:4 encode + bitstream lock 闭环。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

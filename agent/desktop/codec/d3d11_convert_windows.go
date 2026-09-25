@@ -13,6 +13,7 @@ import (
 
 const (
 	dxgiFormatB8G8R8A8UNorm = 87
+	dxgiFormatAYUV          = 100
 
 	d3d11UsageDefault       = 0
 	d3d11BindRenderTarget   = 0x20
@@ -107,7 +108,9 @@ type d3d11VPStream struct {
 // device. Convert returns a borrowed output resource: callers must synchronously
 // submit it to the encoder before calling Convert again or closing the converter.
 type D3D11NV12Converter struct {
-	cfg D3D11ConvertConfig
+	cfg          D3D11ConvertConfig
+	outputFormat PixelFormat
+	outputDXGI   uint32
 
 	device        unsafe.Pointer
 	context       unsafe.Pointer
@@ -121,11 +124,38 @@ type D3D11NV12Converter struct {
 }
 
 func OpenD3D11NV12Converter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D11NV12Converter, error) {
+	return openD3D11VideoConverter(deviceHandle, cfg, PixelFormatNV12)
+}
+
+func OpenD3D11AYUVConverter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D11NV12Converter, error) {
+	return openD3D11VideoConverter(deviceHandle, cfg, PixelFormatAYUV)
+}
+
+func d3d11OutputDXGI(format PixelFormat) (uint32, bool) {
+	switch format {
+	case PixelFormatNV12:
+		return dxgiFormatNV12, true
+	case PixelFormatAYUV:
+		return dxgiFormatAYUV, true
+	default:
+		return 0, false
+	}
+}
+
+func openD3D11VideoConverter(
+	deviceHandle uintptr,
+	cfg D3D11ConvertConfig,
+	outputFormat PixelFormat,
+) (*D3D11NV12Converter, error) {
 	if deviceHandle == 0 {
 		return nil, fmt.Errorf("%w: D3D11 converter device is nil", ErrEncoderUnavailable)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
+	}
+	outputDXGI, ok := d3d11OutputDXGI(outputFormat)
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported D3D11 converter output %q", ErrEncoderUnavailable, outputFormat)
 	}
 
 	device := unsafe.Pointer(deviceHandle)
@@ -143,9 +173,11 @@ func OpenD3D11NV12Converter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D1
 	}
 
 	converter := &D3D11NV12Converter{
-		cfg:     cfg,
-		device:  device,
-		context: context,
+		cfg:          cfg,
+		outputFormat: outputFormat,
+		outputDXGI:   outputDXGI,
+		device:       device,
+		context:      context,
 	}
 	fail := func(err error) (*D3D11NV12Converter, error) {
 		converter.Close()
@@ -196,7 +228,7 @@ func OpenD3D11NV12Converter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D1
 	if err := converter.requireFormat(dxgiFormatB8G8R8A8UNorm, d3d11VPFormatInput, "BGRA input"); err != nil {
 		return fail(err)
 	}
-	if err := converter.requireFormat(dxgiFormatNV12, d3d11VPFormatOutput, "NV12 output"); err != nil {
+	if err := converter.requireFormat(outputDXGI, d3d11VPFormatOutput, string(outputFormat)+" output"); err != nil {
 		return fail(err)
 	}
 
@@ -219,7 +251,7 @@ func OpenD3D11NV12Converter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D1
 		Height:         uint32(cfg.OutputHeight),
 		MipLevels:      1,
 		ArraySize:      1,
-		Format:         dxgiFormatNV12,
+		Format:         outputDXGI,
 		SampleDesc:     mfD3D11SampleDesc{Count: 1},
 		Usage:          d3d11UsageDefault,
 		BindFlags:      d3d11BindRenderTarget,
@@ -235,9 +267,9 @@ func OpenD3D11NV12Converter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D1
 	)
 	if hresultFailed(hr) || converter.outputTexture == nil {
 		if !hresultFailed(hr) {
-			return fail(errors.New("D3D11 NV12 output texture is nil"))
+			return fail(fmt.Errorf("D3D11 %s output texture is nil", outputFormat))
 		}
-		return fail(hresultError("ID3D11Device.CreateTexture2D(NV12)", hr))
+		return fail(hresultError("ID3D11Device.CreateTexture2D("+string(outputFormat)+")", hr))
 	}
 
 	outputDesc := d3d11VPOutputViewDesc{
@@ -254,9 +286,9 @@ func OpenD3D11NV12Converter(deviceHandle uintptr, cfg D3D11ConvertConfig) (*D3D1
 	)
 	if hresultFailed(hr) || converter.outputView == nil {
 		if !hresultFailed(hr) {
-			return fail(errors.New("D3D11 NV12 video processor output view is nil"))
+			return fail(fmt.Errorf("D3D11 %s video processor output view is nil", outputFormat))
 		}
-		return fail(hresultError("ID3D11VideoDevice.CreateVideoProcessorOutputView(NV12)", hr))
+		return fail(hresultError("ID3D11VideoDevice.CreateVideoProcessorOutputView("+string(outputFormat)+")", hr))
 	}
 
 	comCall(
@@ -389,15 +421,17 @@ func (c *D3D11NV12Converter) Convert(
 		uintptr(unsafe.Pointer(&stream)),
 	)
 	if hresultFailed(hr) {
-		return D3D11EncodeFrame{}, hresultError("ID3D11VideoContext.VideoProcessorBlt(BGRA->NV12)", hr)
+		return D3D11EncodeFrame{}, hresultError("ID3D11VideoContext.VideoProcessorBlt(BGRA->"+string(c.outputFormat)+")", hr)
 	}
 	c.outputFrame++
 
 	return D3D11EncodeFrame{
+		Device:      uintptr(c.device),
 		Resource:    uintptr(c.outputTexture),
 		Subresource: 0,
 		Width:       c.cfg.OutputWidth,
 		Height:      c.cfg.OutputHeight,
+		Format:      c.outputFormat,
 		Timestamp:   timestamp,
 	}, nil
 }

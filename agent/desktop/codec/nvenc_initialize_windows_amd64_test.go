@@ -39,31 +39,31 @@ func TestConfigureNVENCHEVC444LowLatency(t *testing.T) {
 	cfg.BitDepth = 8
 
 	blob := &nvencConfigBlob{}
-	binary.LittleEndian.PutUint32(blob.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4], nvencRCFlagEnableLookahead)
+	binary.LittleEndian.PutUint32(blob.Data[nvencConfigRCFlagsOffset : nvencConfigRCFlagsOffset+4], nvencRCFlagEnableLookahead)
 	if err := configureNVENCHEVC444(blob, cfg); err != nil {
 		t.Fatal(err)
 	}
-	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCRateControlOffset:nvencConfigRCRateControlOffset+4]); got != nvencRateControlCBR {
+	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCRateControlOffset : nvencConfigRCRateControlOffset+4]); got != nvencRateControlCBR {
 		t.Fatalf("rate control=%d", got)
 	}
-	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCAverageBitrateOffset:nvencConfigRCAverageBitrateOffset+4]); got != 18_000_000 {
+	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCAverageBitrateOffset : nvencConfigRCAverageBitrateOffset+4]); got != 18_000_000 {
 		t.Fatalf("average bitrate=%d", got)
 	}
-	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCVBVSizeOffset:nvencConfigRCVBVSizeOffset+4]); got != 300_000 {
+	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCVBVSizeOffset : nvencConfigRCVBVSizeOffset+4]); got != 300_000 {
 		t.Fatalf("VBV size=%d want=300000", got)
 	}
-	flags := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4])
+	flags := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCFlagsOffset : nvencConfigRCFlagsOffset+4])
 	if flags&nvencRCFlagEnableLookahead != 0 || flags&nvencRCFlagZeroReorder == 0 {
 		t.Fatalf("low-latency RC flags=%#x", flags)
 	}
-	hevc := binary.LittleEndian.Uint32(blob.Data[nvencConfigHEVCBitfieldOffset:nvencConfigHEVCBitfieldOffset+4])
+	hevc := binary.LittleEndian.Uint32(blob.Data[nvencConfigHEVCBitfieldOffset : nvencConfigHEVCBitfieldOffset+4])
 	if hevc&nvencHEVCChromaMask != nvencHEVCChroma444 || hevc&nvencHEVCRepeatSPSPPS == 0 {
 		t.Fatalf("HEVC flags=%#x", hevc)
 	}
-	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigFrameIntervalPOffset:nvencConfigFrameIntervalPOffset+4]); got != 1 {
+	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigFrameIntervalPOffset : nvencConfigFrameIntervalPOffset+4]); got != 1 {
 		t.Fatalf("frameIntervalP=%d want=1", got)
 	}
-	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigGOPLengthOffset:nvencConfigGOPLengthOffset+4]); got != 120 {
+	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigGOPLengthOffset : nvencConfigGOPLengthOffset+4]); got != 120 {
 		t.Fatalf("GOP=%d want=120", got)
 	}
 }
@@ -81,25 +81,25 @@ func TestBuildNVENCInitializeParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeVersionOffset:nvencInitializeVersionOffset+4]); got != nvencVersionWithReservedBit(7) {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeVersionOffset : nvencInitializeVersionOffset+4]); got != nvencVersionWithReservedBit(7) {
 		t.Fatalf("init version=%#x", got)
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeWidthOffset:nvencInitializeWidthOffset+4]); got != 1280 {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeWidthOffset : nvencInitializeWidthOffset+4]); got != 1280 {
 		t.Fatalf("width=%d", got)
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeHeightOffset:nvencInitializeHeightOffset+4]); got != 720 {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeHeightOffset : nvencInitializeHeightOffset+4]); got != 720 {
 		t.Fatalf("height=%d", got)
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeEnablePTDOffset:nvencInitializeEnablePTDOffset+4]); got != 1 {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeEnablePTDOffset : nvencInitializeEnablePTDOffset+4]); got != 1 {
 		t.Fatalf("enablePTD=%d", got)
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeTuningInfoOffset:nvencInitializeTuningInfoOffset+4]); got != nvencTuningUltraLowLatency {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeTuningInfoOffset : nvencInitializeTuningInfoOffset+4]); got != nvencTuningUltraLowLatency {
 		t.Fatalf("tuning=%d", got)
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeBufferFormatOffset:nvencInitializeBufferFormatOffset+4]); got != uint32(nvencBufferFormatAYUV) {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeBufferFormatOffset : nvencInitializeBufferFormatOffset+4]); got != uint32(nvencBufferFormatAYUV) {
 		t.Fatalf("buffer format=%#x", got)
 	}
-	if got := binary.LittleEndian.Uint64(params.Data[nvencInitializeEncodeConfigOffset:nvencInitializeEncodeConfigOffset+8]); got != uint64(uintptr(unsafe.Pointer(&config.Data[0]))) {
+	if got := binary.LittleEndian.Uint64(params.Data[nvencInitializeEncodeConfigOffset : nvencInitializeEncodeConfigOffset+8]); got != uint64(uintptr(unsafe.Pointer(&config.Data[0]))) {
 		t.Fatalf("encodeConfig pointer=%#x", got)
 	}
 }

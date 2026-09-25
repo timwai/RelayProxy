@@ -119,13 +119,16 @@ type DesktopGPUCandidateDiagnostics struct {
 	RuntimeAvailable bool   `json:"runtimeAvailable,omitempty"`
 	EncodeRuntime    bool   `json:"encodeRuntime,omitempty"`
 	DecodeRuntime    bool   `json:"decodeRuntime,omitempty"`
-	DeviceProbe      bool   `json:"deviceProbe,omitempty"`
-	DeviceCount      int    `json:"deviceCount,omitempty"`
-	HEVC444Encode    bool   `json:"hevc444Encode,omitempty"`
-	HEVC444Decode    bool   `json:"hevc444Decode,omitempty"`
-	Version          string `json:"version,omitempty"`
-	Implemented      bool   `json:"implemented,omitempty"`
-	Error            string `json:"error,omitempty"`
+	DeviceProbe           bool   `json:"deviceProbe,omitempty"`
+	DeviceCount           int    `json:"deviceCount,omitempty"`
+	EncodeCapabilityKnown bool   `json:"encodeCapabilityKnown,omitempty"`
+	DecodeCapabilityKnown bool   `json:"decodeCapabilityKnown,omitempty"`
+	HEVC444Encode         bool   `json:"hevc444Encode,omitempty"`
+	HEVC444Decode         bool   `json:"hevc444Decode,omitempty"`
+	Version               string `json:"version,omitempty"`
+	Implemented           bool   `json:"implemented,omitempty"`
+	Limitation            string `json:"limitation,omitempty"`
+	Error                 string `json:"error,omitempty"`
 }
 
 func CloneDesktopGPUCandidateDiagnostics(

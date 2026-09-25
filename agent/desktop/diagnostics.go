@@ -141,18 +141,18 @@ type DesktopHEVCValidationSummary struct {
 }
 
 type DesktopGPUValidationSummary struct {
-	ExpectedFormat              string         `json:"expectedFormat,omitempty"`
-	TargetAdvertised            bool           `json:"targetAdvertised"`
-	MatchingSamples             int            `json:"matchingSamples"`
-	HostEncodeZeroCopySamples   int            `json:"hostEncodeZeroCopySamples,omitempty"`
+	ExpectedFormat               string         `json:"expectedFormat,omitempty"`
+	TargetAdvertised             bool           `json:"targetAdvertised"`
+	MatchingSamples              int            `json:"matchingSamples"`
+	HostEncodeZeroCopySamples    int            `json:"hostEncodeZeroCopySamples,omitempty"`
 	ViewerDecodeZeroCopySamples  int            `json:"viewerDecodeZeroCopySamples,omitempty"`
 	ViewerDisplayZeroCopySamples int            `json:"viewerDisplayZeroCopySamples,omitempty"`
 	EndToEndZeroCopySamples      int            `json:"endToEndZeroCopySamples,omitempty"`
-	FallbackSamples             int            `json:"fallbackSamples,omitempty"`
-	CaptureFormats              map[string]int `json:"captureFormats,omitempty"`
-	EncoderBackends             map[string]int `json:"encoderBackends,omitempty"`
-	DecoderBackends             map[string]int `json:"decoderBackends,omitempty"`
-	RenderBackends              map[string]int `json:"renderBackends,omitempty"`
+	FallbackSamples              int            `json:"fallbackSamples,omitempty"`
+	CaptureFormats               map[string]int `json:"captureFormats,omitempty"`
+	EncoderBackends              map[string]int `json:"encoderBackends,omitempty"`
+	DecoderBackends              map[string]int `json:"decoderBackends,omitempty"`
+	RenderBackends               map[string]int `json:"renderBackends,omitempty"`
 }
 
 type DesktopDiagnosticsReport struct {

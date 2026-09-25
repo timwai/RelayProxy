@@ -826,12 +826,17 @@ func NewSystemHost() (*Host, error) {
 	oneVPLProbe := desktopcodec.ProbeOneVPLHEVC444(oneVPLProbeCtx)
 	oneVPLCancel()
 
+	gpuProbeCtx, gpuProbeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	gpuProbe := desktopcodec.ProbeOneVPLD3D11AYUV(gpuProbeCtx, oneVPLProbe)
+	gpuProbeCancel()
+
 	codecCapabilities := []protocol.DesktopCodecCapability{probe.Capability()}
 	hevcCapability, hevcAvailable := desktopcodec.H265Capability(hevcProbe, oneVPLProbe)
 	if hevcAvailable {
 		codecCapabilities = append(codecCapabilities, hevcCapability)
 	}
 	host.SetCodecCapabilities(codecCapabilities)
+	host.SetGPUCapability(desktopcodec.D3D11AYUVGPUCapability(oneVPLProbe, gpuProbe))
 
 	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
 		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
@@ -840,9 +845,17 @@ func NewSystemHost() (*Host, error) {
 		hevcProbe.MediaFoundation, hevcProbe.HardwareEncoderCount, hevcProbe.HardwareDecoderCount,
 		hevcProbe.SoftwareEncoderCount, hevcProbe.SoftwareDecoderCount,
 		hevcProbe.EncodeAvailable() || hevcProbe.DecodeAvailable(), hevcProbe.Error)
-	log.Printf("[Desktop] oneVPL HEVC 4:4:4 probe dispatcher=%t hwRuntime=%t encode=%t decode=%t endToEnd=%t advertised=%t error=%q",
+	log.Printf("[Desktop] oneVPL HEVC 4:4:4 probe dispatcher=%t hwRuntime=%t encode=%t decode=%t systemEnc=%t systemDec=%t d3d11Enc=%t d3d11Dec=%t endToEnd=%t advertised=%t error=%q",
 		oneVPLProbe.DispatcherAvailable, oneVPLProbe.HardwareRuntime,
 		oneVPLProbe.HEVC444Encode, oneVPLProbe.HEVC444Decode,
+		oneVPLProbe.HEVC444SystemEncode, oneVPLProbe.HEVC444SystemDecode,
+		oneVPLProbe.HEVC444D3D11Encode, oneVPLProbe.HEVC444D3D11Decode,
 		oneVPLProbe.HEVC444EndToEnd(), hevcCapability.Chroma444, oneVPLProbe.Error)
+	log.Printf("[Desktop] D3D11 AYUV runtime probe device=%t bgraIn=%t ayuvOut=%t ayuvIn=%t bgraOut=%t onevplEnc=%t onevplDec=%t gpuAdvertised=%t error=%q",
+		gpuProbe.DeviceAvailable, gpuProbe.BGRAInput, gpuProbe.AYUVOutput,
+		gpuProbe.AYUVInput, gpuProbe.BGRAOutput,
+		gpuProbe.OneVPLEncode, gpuProbe.OneVPLDecode,
+		desktopcodec.D3D11AYUVGPUCapability(oneVPLProbe, gpuProbe) != nil,
+		gpuProbe.Error)
 	return host, nil
 }

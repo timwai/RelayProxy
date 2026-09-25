@@ -6,11 +6,15 @@ package codec
 // have both an implemented encoder and decoder path before Chroma444 is exposed
 // to controllers.
 type OneVPLProbe struct {
-	DispatcherAvailable bool
-	HardwareRuntime     bool
-	HEVC444Encode       bool
-	HEVC444Decode       bool
-	Error               string
+	DispatcherAvailable    bool
+	HardwareRuntime        bool
+	HEVC444Encode          bool
+	HEVC444Decode          bool
+	HEVC444SystemEncode    bool
+	HEVC444SystemDecode    bool
+	HEVC444D3D11Encode     bool
+	HEVC444D3D11Decode     bool
+	Error                  string
 }
 
 func (p OneVPLProbe) HEVC444EndToEnd() bool {
@@ -18,4 +22,11 @@ func (p OneVPLProbe) HEVC444EndToEnd() bool {
 		p.HardwareRuntime &&
 		p.HEVC444Encode &&
 		p.HEVC444Decode
+}
+
+func (p OneVPLProbe) HEVC444D3D11EndToEnd() bool {
+	return p.DispatcherAvailable &&
+		p.HardwareRuntime &&
+		p.HEVC444D3D11Encode &&
+		p.HEVC444D3D11Decode
 }

@@ -78,6 +78,7 @@ type DesktopDiagnosticsSummary struct {
 	CaptureFormats          map[string]int                 `json:"captureFormats,omitempty"`
 	EncoderBackends         map[string]int                 `json:"encoderBackends,omitempty"`
 	DecoderBackends         map[string]int                 `json:"decoderBackends,omitempty"`
+	RenderBackends          map[string]int                 `json:"renderBackends,omitempty"`
 	RTTMs                   DesktopDiagnosticMetricSummary `json:"rttMs"`
 	JitterMs                DesktopDiagnosticMetricSummary `json:"jitterMs"`
 	LossPercent             DesktopDiagnosticMetricSummary `json:"lossPercent"`
@@ -136,6 +137,7 @@ type DesktopHEVCValidationSummary struct {
 	CaptureFormats          map[string]int `json:"captureFormats,omitempty"`
 	EncoderBackends         map[string]int `json:"encoderBackends,omitempty"`
 	DecoderBackends         map[string]int `json:"decoderBackends,omitempty"`
+	RenderBackends          map[string]int `json:"renderBackends,omitempty"`
 }
 
 type DesktopGPUValidationSummary struct {
@@ -143,12 +145,14 @@ type DesktopGPUValidationSummary struct {
 	TargetAdvertised            bool           `json:"targetAdvertised"`
 	MatchingSamples             int            `json:"matchingSamples"`
 	HostEncodeZeroCopySamples   int            `json:"hostEncodeZeroCopySamples,omitempty"`
-	ViewerDecodeZeroCopySamples int            `json:"viewerDecodeZeroCopySamples,omitempty"`
-	EndToEndZeroCopySamples     int            `json:"endToEndZeroCopySamples,omitempty"`
+	ViewerDecodeZeroCopySamples  int            `json:"viewerDecodeZeroCopySamples,omitempty"`
+	ViewerDisplayZeroCopySamples int            `json:"viewerDisplayZeroCopySamples,omitempty"`
+	EndToEndZeroCopySamples      int            `json:"endToEndZeroCopySamples,omitempty"`
 	FallbackSamples             int            `json:"fallbackSamples,omitempty"`
 	CaptureFormats              map[string]int `json:"captureFormats,omitempty"`
 	EncoderBackends             map[string]int `json:"encoderBackends,omitempty"`
 	DecoderBackends             map[string]int `json:"decoderBackends,omitempty"`
+	RenderBackends              map[string]int `json:"renderBackends,omitempty"`
 }
 
 type DesktopDiagnosticsReport struct {
@@ -308,6 +312,7 @@ func summarizeDesktopDiagnostics(
 		CaptureFormats:    make(map[string]int),
 		EncoderBackends:   make(map[string]int),
 		DecoderBackends:   make(map[string]int),
+		RenderBackends:    make(map[string]int),
 	}
 	if summary.SessionDurationMs < 0 {
 		summary.SessionDurationMs = 0
@@ -402,6 +407,7 @@ func summarizeDesktopDiagnostics(
 		incrementDiagnosticCount(summary.CaptureFormats, sample.Stats.CaptureFormat)
 		incrementDiagnosticCount(summary.EncoderBackends, sample.Stats.EncoderBackend)
 		incrementDiagnosticCount(summary.DecoderBackends, sample.Stats.DecoderBackend)
+		incrementDiagnosticCount(summary.RenderBackends, sample.Stats.RenderBackend)
 	}
 
 	always := func(DesktopDiagnosticSample, float64) bool { return true }
@@ -549,6 +555,7 @@ func summarizeHEVCValidation(
 		CaptureFormats:  make(map[string]int),
 		EncoderBackends: make(map[string]int),
 		DecoderBackends: make(map[string]int),
+		RenderBackends:  make(map[string]int),
 	}
 	for _, sample := range samples {
 		switch strings.ToLower(strings.TrimSpace(sample.Config.Codec)) {
@@ -564,6 +571,7 @@ func summarizeHEVCValidation(
 			incrementDiagnosticCount(summary.CaptureFormats, sample.Stats.CaptureFormat)
 			incrementDiagnosticCount(summary.EncoderBackends, sample.Stats.EncoderBackend)
 			incrementDiagnosticCount(summary.DecoderBackends, sample.Stats.DecoderBackend)
+			incrementDiagnosticCount(summary.RenderBackends, sample.Stats.RenderBackend)
 		case "h264":
 			summary.H264FallbackSamples++
 		case "jpeg":
@@ -626,6 +634,10 @@ func desktopGPUViewerDecodeZeroCopy(format string, stats protocol.DesktopSession
 	}
 }
 
+func desktopGPUViewerDisplayZeroCopy(stats protocol.DesktopSessionStats) bool {
+	return strings.EqualFold(strings.TrimSpace(stats.RenderBackend), "d3d11-zero-copy")
+}
+
 func summarizeGPUValidation(
 	targetGPU *protocol.DesktopGPUCapability,
 	current protocol.DesktopVideoConfig,
@@ -649,6 +661,7 @@ func summarizeGPUValidation(
 		CaptureFormats:   make(map[string]int),
 		EncoderBackends:  make(map[string]int),
 		DecoderBackends:  make(map[string]int),
+		RenderBackends:   make(map[string]int),
 	}
 	for _, sample := range samples {
 		if desktopGPUFormatForConfig(sample.Config) != expectedFormat {
@@ -658,16 +671,21 @@ func summarizeGPUValidation(
 		incrementDiagnosticCount(summary.CaptureFormats, sample.Stats.CaptureFormat)
 		incrementDiagnosticCount(summary.EncoderBackends, sample.Stats.EncoderBackend)
 		incrementDiagnosticCount(summary.DecoderBackends, sample.Stats.DecoderBackend)
+		incrementDiagnosticCount(summary.RenderBackends, sample.Stats.RenderBackend)
 
 		hostZeroCopy := desktopGPUHostEncodeZeroCopy(expectedFormat, sample.Stats)
-		viewerZeroCopy := desktopGPUViewerDecodeZeroCopy(expectedFormat, sample.Stats)
+		viewerDecodeZeroCopy := desktopGPUViewerDecodeZeroCopy(expectedFormat, sample.Stats)
+		viewerDisplayZeroCopy := desktopGPUViewerDisplayZeroCopy(sample.Stats)
 		if hostZeroCopy {
 			summary.HostEncodeZeroCopySamples++
 		}
-		if viewerZeroCopy {
+		if viewerDecodeZeroCopy {
 			summary.ViewerDecodeZeroCopySamples++
 		}
-		if hostZeroCopy && viewerZeroCopy {
+		if viewerDisplayZeroCopy {
+			summary.ViewerDisplayZeroCopySamples++
+		}
+		if hostZeroCopy && viewerDecodeZeroCopy && viewerDisplayZeroCopy {
 			summary.EndToEndZeroCopySamples++
 		}
 	}

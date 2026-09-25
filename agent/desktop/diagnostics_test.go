@@ -312,7 +312,19 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 		Formats:         []string{"nv12", "ayuv"},
 	}
 	recorder.SetTargetGPUCapability(targetGPU)
+	candidates := []protocol.DesktopGPUCandidateDiagnostics{{
+		Backend:          "nvcodec-hevc444",
+		Vendor:           "nvidia",
+		RuntimeAvailable: true,
+		DecodeRuntime:    true,
+		DeviceProbe:      true,
+		DeviceCount:      1,
+		HEVC444Decode:    true,
+		Implemented:      false,
+	}}
+	recorder.SetTargetGPUCandidates(candidates)
 	targetGPU.Formats[1] = "mutated"
+	candidates[0].Backend = "mutated"
 
 	config := protocol.DesktopVideoConfig{
 		Generation: 1,
@@ -349,6 +361,12 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 		len(report.TargetGPU.Formats) != 2 || report.TargetGPU.Formats[1] != "ayuv" {
 		t.Fatalf("target GPU snapshot=%+v", report.TargetGPU)
 	}
+	if len(report.TargetGPUCandidates) != 1 ||
+		report.TargetGPUCandidates[0].Backend != "nvcodec-hevc444" ||
+		!report.TargetGPUCandidates[0].HEVC444Decode ||
+		report.TargetGPUCandidates[0].Implemented {
+		t.Fatalf("target GPU candidate snapshot=%+v", report.TargetGPUCandidates)
+	}
 	got := report.GPUValidation
 	if got == nil || got.ExpectedFormat != "ayuv" || !got.TargetAdvertised {
 		t.Fatalf("GPU validation identity=%+v", got)
@@ -370,6 +388,7 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 	}
 
 	report.TargetGPU.Formats[0] = "changed"
+	report.TargetGPUCandidates[0].Vendor = "changed"
 	again := recorder.Report(
 		start.Add(2*time.Second),
 		config,
@@ -378,6 +397,9 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 	)
 	if again.TargetGPU == nil || again.TargetGPU.Formats[0] != "nv12" {
 		t.Fatalf("report exposed target GPU snapshot: %+v", again.TargetGPU)
+	}
+	if len(again.TargetGPUCandidates) != 1 || again.TargetGPUCandidates[0].Vendor != "nvidia" {
+		t.Fatalf("report exposed target GPU candidate snapshot: %+v", again.TargetGPUCandidates)
 	}
 }
 
@@ -508,7 +530,7 @@ func TestSessionDiagnosticsReportCarriesCurrentAudio(t *testing.T) {
 	}
 	recorder.Record(start, protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio, desktopadapt.MediaDecision{})
 	report := recorder.Report(start.Add(time.Second), protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio)
-	if report.SchemaVersion != 6 || report.CurrentAudio.Config.Generation != 3 ||
+	if report.SchemaVersion != desktopDiagnosticsSchemaVersion || report.CurrentAudio.Config.Generation != 3 ||
 		report.CurrentAudio.QueueFrames != 2 || len(report.Samples) != 1 ||
 		report.Samples[0].Audio.ReceivedFrames != 7 {
 		t.Fatalf("audio report=%+v", report)

@@ -26,3 +26,25 @@ func TestOneVPLAYUVFourCC(t *testing.T) {
 		t.Fatalf("AYUV FourCC=0x%08x want=0x%08x", oneVPLFourCCAYUV, want)
 	}
 }
+
+
+func TestOneVPLDirectionMemoryFiltersIncludeResourceType(t *testing.T) {
+	filters := oneVPLDirectionMemoryFilters(
+		oneVPLPropHEVCEncoder,
+		oneVPLPropHEVCEncoderMemory,
+		oneVPLPropHEVCEncoderColor,
+		oneVPLResourceDX11Texture,
+	)
+	var memoryFound bool
+	for _, filter := range filters {
+		if filter.name == oneVPLPropHEVCEncoderMemory {
+			memoryFound = true
+			if filter.value != oneVPLResourceDX11Texture {
+				t.Fatalf("memory filter value=%d want=%d", filter.value, oneVPLResourceDX11Texture)
+			}
+		}
+	}
+	if !memoryFound {
+		t.Fatal("oneVPL memory handle filter is missing")
+	}
+}

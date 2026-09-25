@@ -15,6 +15,19 @@ func TestH265444D3D11CUDAAYUVContract(t *testing.T) {
 	}
 }
 
+func TestH265444NVCodecAYUVContract(t *testing.T) {
+	contract := h265444NVCodecAYUVContract()
+	if contract == nil {
+		t.Fatal("NVCodec interop contract is nil")
+	}
+	if contract.Bridge != H265444InteropNVCodec {
+		t.Fatalf("bridge=%q want=%q", contract.Bridge, H265444InteropNVCodec)
+	}
+	if err := contract.Validate(); err != nil {
+		t.Fatalf("valid NVCodec interop contract rejected: %v", err)
+	}
+}
+
 func TestH265444D3D11InteropContractRejectsOwnershipAmbiguity(t *testing.T) {
 	contract := h265444D3D11CUDAAYUVContract()
 	contract.EncoderBorrowsInputResource = false

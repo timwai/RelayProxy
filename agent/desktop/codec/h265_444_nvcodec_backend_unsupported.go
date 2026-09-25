@@ -7,7 +7,7 @@ func platformNVCodecH265444Backend() h265444Backend {
 		name:              H265444BackendNVCodec,
 		productionReady:   false,
 		zeroCopyValidated: false,
-		lifecycle:          h265444SessionLifecycleContract(),
-		interop:            h265444D3D11CUDAAYUVContract(),
+		lifecycle:         h265444SessionLifecycleContract(),
+		interop:           h265444D3D11CUDAAYUVContract(),
 	}
 }

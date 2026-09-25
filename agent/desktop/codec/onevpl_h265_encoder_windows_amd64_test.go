@@ -87,7 +87,6 @@ func TestOneVPLH265KeyFrameDetection(t *testing.T) {
 	}
 }
 
-
 func TestOneVPLHEVC444VideoMemoryParam(t *testing.T) {
 	cfg := DefaultVideoConfig()
 	cfg.Width = 1920

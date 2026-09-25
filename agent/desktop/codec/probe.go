@@ -1,6 +1,10 @@
 package codec
 
-import "relayproxy/internal/protocol"
+import (
+	"strings"
+
+	"relayproxy/internal/protocol"
+)
 
 // H264Probe summarizes the H.264 transforms Media Foundation can expose on the
 // current machine. Counts are retained because some systems register multiple
@@ -103,20 +107,23 @@ func appendDesktopChroma(values []string, chroma string) []string {
 	return append(values, chroma)
 }
 
-// H265Capability combines the established Media Foundation 4:2:0 path with
-// the oneVPL HEVC RExt 4:4:4 path. Because DesktopCodecCapability currently
-// has shared chroma flags rather than direction-specific chroma flags, 4:4:4
-// is advertised only when this machine can both encode and decode it.
-func H265Capability(mf H265Probe, oneVPL OneVPLProbe) (protocol.DesktopCodecCapability, bool) {
+// H265CapabilityWith444Backends combines the established Media Foundation
+// 4:2:0 path with vendor-neutral HEVC 4:4:4 runtime probes. The shared legacy
+// Chroma444 flag remains conservative: it is exposed only when the machine has
+// both an implemented 4:4:4 encode path and an implemented 4:4:4 decode path.
+func H265CapabilityWith444Backends(
+	mf H265Probe,
+	backends []H265444BackendProbe,
+) (protocol.DesktopCodecCapability, bool) {
 	capability := mf.Capability()
 	available := mf.EncodeAvailable() || mf.DecodeAvailable()
 
-	if oneVPL.HEVC444EndToEnd() {
+	if H265444EndToEndAvailable(backends) {
 		capability.Codec = "h265"
 		capability.Encode = true
 		capability.Decode = true
-		// Legacy peers only understand the shared Chroma420 flag. Once the
-		// oneVPL backend makes Encode/Decode both true, keep that legacy flag
+		// Legacy peers only understand the shared Chroma420 flag. Once a
+		// 4:4:4 backend makes Encode/Decode both true, keep that legacy flag
 		// conservative unless Media Foundation also supports both directions.
 		capability.Chroma420 = mf.EncodeAvailable() && mf.DecodeAvailable()
 		capability.Chroma444 = true
@@ -124,12 +131,35 @@ func H265Capability(mf H265Probe, oneVPL OneVPLProbe) (protocol.DesktopCodecCapa
 		capability.DecodeChroma = appendDesktopChroma(capability.DecodeChroma, "444")
 		capability.BitDepth8 = true
 		capability.Hardware = true
-		if capability.Encoder == "" {
-			capability.Encoder = "onevpl-hevc444"
-		} else {
-			capability.Encoder = "media-foundation+onevpl-hevc444"
+
+		encoderBackends := make([]string, 0, len(backends))
+		for _, backend := range backends {
+			if !backend.HardwareRuntime || !backend.Encode || strings.TrimSpace(backend.Backend) == "" {
+				continue
+			}
+			encoderBackends = append(encoderBackends, strings.TrimSpace(backend.Backend))
+		}
+		if len(encoderBackends) > 0 {
+			label := strings.Join(encoderBackends, "+")
+			if capability.Encoder == "" {
+				capability.Encoder = label
+			} else {
+				capability.Encoder += "+" + label
+			}
 		}
 		available = true
 	}
 	return capability, available
+}
+
+// H265Capability preserves the existing oneVPL-facing API while routing
+// capability aggregation through the vendor-neutral backend model.
+func H265Capability(mf H265Probe, oneVPL OneVPLProbe) (protocol.DesktopCodecCapability, bool) {
+	return H265CapabilityWith444Backends(mf, []H265444BackendProbe{{
+		Backend:         H265444BackendOneVPL,
+		HardwareRuntime: oneVPL.DispatcherAvailable && oneVPL.HardwareRuntime,
+		Encode:          oneVPL.HEVC444Encode,
+		Decode:          oneVPL.HEVC444Decode,
+		Error:           oneVPL.Error,
+	}})
 }

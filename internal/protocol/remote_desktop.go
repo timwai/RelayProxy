@@ -114,11 +114,11 @@ func CloneDesktopGPUCapability(capability *DesktopGPUCapability) *DesktopGPUCapa
 // for diagnostics and implementation planning. It MUST NOT participate in
 // codec/backend selection or make a codec/chroma format publicly negotiable.
 type DesktopGPUCandidateDiagnostics struct {
-	Backend          string `json:"backend,omitempty"`
-	Vendor           string `json:"vendor,omitempty"`
-	RuntimeAvailable bool   `json:"runtimeAvailable,omitempty"`
-	EncodeRuntime    bool   `json:"encodeRuntime,omitempty"`
-	DecodeRuntime    bool   `json:"decodeRuntime,omitempty"`
+	Backend               string `json:"backend,omitempty"`
+	Vendor                string `json:"vendor,omitempty"`
+	RuntimeAvailable      bool   `json:"runtimeAvailable,omitempty"`
+	EncodeRuntime         bool   `json:"encodeRuntime,omitempty"`
+	DecodeRuntime         bool   `json:"decodeRuntime,omitempty"`
 	DeviceProbe           bool   `json:"deviceProbe,omitempty"`
 	DeviceCount           int    `json:"deviceCount,omitempty"`
 	EncodeCapabilityKnown bool   `json:"encodeCapabilityKnown,omitempty"`

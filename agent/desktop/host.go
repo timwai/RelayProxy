@@ -165,6 +165,8 @@ type Host struct {
 
 	codecMu   sync.RWMutex
 	codecCaps []protocol.DesktopCodecCapability
+	gpuMu     sync.RWMutex
+	gpuCap    *protocol.DesktopGPUCapability
 
 	sessionMu sync.Mutex
 	closeOnce sync.Once
@@ -244,6 +246,7 @@ func (h *Host) isolatedSessionHost() (*Host, func(), bool, error) {
 		cfg:       h.cfg,
 		audioOpen: h.audioOpen,
 		codecCaps: h.CodecCapabilities(),
+		gpuCap:    h.GPUCapability(),
 	}
 	cleanup := func() {
 		_ = source.Close()
@@ -916,6 +919,24 @@ func (h *Host) CodecCapabilities() []protocol.DesktopCodecCapability {
 	return protocol.CloneDesktopCodecCapabilities(h.codecCaps)
 }
 
+func (h *Host) SetGPUCapability(capability *protocol.DesktopGPUCapability) {
+	if h == nil {
+		return
+	}
+	h.gpuMu.Lock()
+	h.gpuCap = protocol.CloneDesktopGPUCapability(capability)
+	h.gpuMu.Unlock()
+}
+
+func (h *Host) GPUCapability() *protocol.DesktopGPUCapability {
+	if h == nil {
+		return nil
+	}
+	h.gpuMu.RLock()
+	defer h.gpuMu.RUnlock()
+	return protocol.CloneDesktopGPUCapability(h.gpuCap)
+}
+
 func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabilities {
 	if h == nil {
 		return protocol.DesktopCapabilities{}
@@ -927,6 +948,7 @@ func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabili
 		RelayDesktop: true,
 		MultiStream:  multiStream,
 		Codecs:       h.CodecCapabilities(),
+		GPU:          h.GPUCapability(),
 		MaxWidth:     maxJPEGWidth,
 		MaxHeight:    maxJPEGHeight,
 		MaxFPS:       maxJPEGFPS,

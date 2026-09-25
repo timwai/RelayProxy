@@ -142,6 +142,157 @@ func d3d11OutputDXGI(format PixelFormat) (uint32, bool) {
 	}
 }
 
+func ProbeD3D11DisplayFormat(deviceHandle uintptr, cfg D3D11ConvertConfig, inputFormat PixelFormat) error {
+	if deviceHandle == 0 {
+		return fmt.Errorf("%w: D3D11 display probe device is nil", ErrDecoderUnavailable)
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	inputDXGI, ok := d3d11OutputDXGI(inputFormat)
+	if !ok {
+		return fmt.Errorf("%w: unsupported D3D11 display input %q", ErrDecoderUnavailable, inputFormat)
+	}
+
+	device := unsafe.Pointer(deviceHandle)
+	comCall(device, 1) // IUnknown::AddRef; the probe owns this reference.
+	defer releaseIUnknown(device)
+
+	var context unsafe.Pointer
+	comCall(
+		device,
+		40, // ID3D11Device::GetImmediateContext
+		uintptr(unsafe.Pointer(&context)),
+	)
+	if context == nil {
+		return fmt.Errorf("%w: D3D11 display probe returned nil immediate context", ErrDecoderUnavailable)
+	}
+	defer releaseIUnknown(context)
+
+	videoDevice, err := comQueryInterface(device, &iidID3D11VideoDevice)
+	if err != nil {
+		return fmt.Errorf("%w: query ID3D11VideoDevice: %v", ErrDecoderUnavailable, err)
+	}
+	defer releaseIUnknown(videoDevice)
+	videoContext, err := comQueryInterface(context, &iidID3D11VideoContext)
+	if err != nil {
+		return fmt.Errorf("%w: query ID3D11VideoContext: %v", ErrDecoderUnavailable, err)
+	}
+	defer releaseIUnknown(videoContext)
+
+	desc := d3d11VPContentDesc{
+		InputFrameFormat: d3d11VPFrameProgressive,
+		InputFrameRate:   d3d11VPRational{Numerator: uint32(cfg.FPS), Denominator: 1},
+		InputWidth:       uint32(cfg.InputWidth),
+		InputHeight:      uint32(cfg.InputHeight),
+		OutputFrameRate:  d3d11VPRational{Numerator: uint32(cfg.FPS), Denominator: 1},
+		OutputWidth:      uint32(cfg.OutputWidth),
+		OutputHeight:     uint32(cfg.OutputHeight),
+		Usage:            d3d11VPUsageSpeed,
+	}
+	var enumerator unsafe.Pointer
+	hr := comCall(
+		videoDevice,
+		id3d11VideoDeviceCreateEnumerator,
+		uintptr(unsafe.Pointer(&desc)),
+		uintptr(unsafe.Pointer(&enumerator)),
+	)
+	if hresultFailed(hr) || enumerator == nil {
+		if !hresultFailed(hr) {
+			return fmt.Errorf("%w: D3D11 display video processor enumerator is nil", ErrDecoderUnavailable)
+		}
+		return fmt.Errorf("%w: %v", ErrDecoderUnavailable, hresultError("ID3D11VideoDevice.CreateVideoProcessorEnumerator", hr))
+	}
+	defer releaseIUnknown(enumerator)
+
+	requireFormat := func(format, required uint32, label string) error {
+		var support uint32
+		hr := comCall(
+			enumerator,
+			id3d11VPEnumeratorCheckFormat,
+			uintptr(format),
+			uintptr(unsafe.Pointer(&support)),
+		)
+		if hresultFailed(hr) {
+			return hresultError("ID3D11VideoProcessorEnumerator.CheckVideoProcessorFormat("+label+")", hr)
+		}
+		if support&required == 0 {
+			return fmt.Errorf("%w: D3D11 video processor does not support %s", ErrDecoderUnavailable, label)
+		}
+		return nil
+	}
+	if err := requireFormat(inputDXGI, d3d11VPFormatInput, string(inputFormat)+" input"); err != nil {
+		return err
+	}
+	if err := requireFormat(dxgiFormatB8G8R8A8UNorm, d3d11VPFormatOutput, "BGRA output"); err != nil {
+		return err
+	}
+
+	var processor unsafe.Pointer
+	hr = comCall(
+		videoDevice,
+		id3d11VideoDeviceCreateProcessor,
+		uintptr(enumerator),
+		0,
+		uintptr(unsafe.Pointer(&processor)),
+	)
+	if hresultFailed(hr) || processor == nil {
+		if !hresultFailed(hr) {
+			return fmt.Errorf("%w: D3D11 display video processor is nil", ErrDecoderUnavailable)
+		}
+		return fmt.Errorf("%w: %v", ErrDecoderUnavailable, hresultError("ID3D11VideoDevice.CreateVideoProcessor", hr))
+	}
+	defer releaseIUnknown(processor)
+
+	textureDesc := mfD3D11Texture2DDesc{
+		Width:          uint32(cfg.OutputWidth),
+		Height:         uint32(cfg.OutputHeight),
+		MipLevels:      1,
+		ArraySize:      1,
+		Format:         dxgiFormatB8G8R8A8UNorm,
+		SampleDesc:     mfD3D11SampleDesc{Count: 1},
+		Usage:          d3d11UsageDefault,
+		BindFlags:      d3d11BindRenderTarget,
+	}
+	var outputTexture unsafe.Pointer
+	hr = comCall(
+		device,
+		5, // ID3D11Device::CreateTexture2D
+		uintptr(unsafe.Pointer(&textureDesc)),
+		0,
+		uintptr(unsafe.Pointer(&outputTexture)),
+	)
+	if hresultFailed(hr) || outputTexture == nil {
+		if !hresultFailed(hr) {
+			return fmt.Errorf("%w: D3D11 BGRA display probe texture is nil", ErrDecoderUnavailable)
+		}
+		return fmt.Errorf("%w: %v", ErrDecoderUnavailable, hresultError("ID3D11Device.CreateTexture2D(BGRA)", hr))
+	}
+	defer releaseIUnknown(outputTexture)
+
+	outputDesc := d3d11VPOutputViewDesc{
+		ViewDimension: d3d11VPOVTexture2D,
+		ArraySize:     1,
+	}
+	var outputView unsafe.Pointer
+	hr = comCall(
+		videoDevice,
+		id3d11VideoDeviceCreateOutputView,
+		uintptr(outputTexture),
+		uintptr(enumerator),
+		uintptr(unsafe.Pointer(&outputDesc)),
+		uintptr(unsafe.Pointer(&outputView)),
+	)
+	if hresultFailed(hr) || outputView == nil {
+		if !hresultFailed(hr) {
+			return fmt.Errorf("%w: D3D11 BGRA display probe output view is nil", ErrDecoderUnavailable)
+		}
+		return fmt.Errorf("%w: %v", ErrDecoderUnavailable, hresultError("ID3D11VideoDevice.CreateVideoProcessorOutputView(BGRA)", hr))
+	}
+	releaseIUnknown(outputView)
+	return nil
+}
+
 func openD3D11VideoConverter(
 	deviceHandle uintptr,
 	cfg D3D11ConvertConfig,

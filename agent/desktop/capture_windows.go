@@ -797,6 +797,288 @@ func (c *windowsCapture) CaptureCursor(ctx context.Context) (protocol.DesktopCur
 	return state, nil
 }
 
+type windowsGPUFormatProbe struct {
+	Format     string
+	Encode     bool
+	Decode     bool
+	Display    bool
+	EncodeErr  error
+	DecodeErr  error
+	DisplayErr error
+}
+
+func (p windowsGPUFormatProbe) endToEnd() bool {
+	return p.Encode && p.Decode && p.Display
+}
+
+func windowsGPUProbeVideoConfig(frame *D3D11CaptureFrame, chroma desktopcodec.ChromaFormat) (desktopcodec.VideoConfig, error) {
+	if frame == nil || !frame.Valid() {
+		return desktopcodec.VideoConfig{}, desktopcodec.ErrInvalidFrame
+	}
+	cfg := desktopcodec.DefaultVideoConfig()
+	cfg.Width = frame.Width
+	if cfg.Width > 1280 {
+		cfg.Width = 1280
+	}
+	cfg.Height = frame.Height
+	if cfg.Height > 720 {
+		cfg.Height = 720
+	}
+	cfg.Width &^= 1
+	cfg.Height &^= 1
+	cfg.Chroma = chroma
+	cfg.BitDepth = 8
+	return desktopcodec.NormalizeVideoConfig(cfg)
+}
+
+func probeWindowsNV12GPU(ctx context.Context, frame *D3D11CaptureFrame) windowsGPUFormatProbe {
+	result := windowsGPUFormatProbe{Format: string(desktopcodec.PixelFormatNV12)}
+	cfg, err := windowsGPUProbeVideoConfig(frame, desktopcodec.Chroma420)
+	if err != nil {
+		result.EncodeErr, result.DecodeErr, result.DisplayErr = err, err, err
+		return result
+	}
+	convertCfg := desktopcodec.D3D11ConvertConfig{
+		InputWidth:   frame.Width,
+		InputHeight:  frame.Height,
+		OutputWidth:  cfg.Width,
+		OutputHeight: cfg.Height,
+		FPS:          cfg.FPS,
+	}
+	converter, err := desktopcodec.OpenD3D11NV12Converter(frame.Device, convertCfg)
+	if err != nil {
+		result.EncodeErr = err
+	} else {
+		converted, convertErr := converter.Convert(frame.Resource, frame.Subresource, 0)
+		if convertErr != nil {
+			result.EncodeErr = convertErr
+		} else {
+			encoder, encoderErr := desktopcodec.OpenMFH264EncoderWithD3D11(ctx, cfg, true, frame.Device)
+			if encoderErr != nil {
+				result.EncodeErr = encoderErr
+			} else {
+				stats := encoder.Stats()
+				if !stats.Hardware || stats.Backend != "media-foundation-d3d11" {
+					result.EncodeErr = fmt.Errorf("Media Foundation H.264 D3D11 encoder backend=%q hardware=%t", stats.Backend, stats.Hardware)
+				} else if _, encodeErr := encoder.EncodeD3D11(ctx, converted); encodeErr != nil {
+					result.EncodeErr = encodeErr
+				} else {
+					result.Encode = true
+				}
+				_ = encoder.Close()
+			}
+		}
+		_ = converter.Close()
+	}
+
+	decoder, err := desktopcodec.OpenMFH264DecoderWithD3D11(ctx, cfg, true, frame.Device)
+	if err != nil {
+		result.DecodeErr = err
+	} else {
+		backend := decoder.Backend()
+		if !decoder.Hardware() || backend != "media-foundation-d3d11-zero-copy" {
+			result.DecodeErr = fmt.Errorf("Media Foundation H.264 decoder backend=%q hardware=%t", backend, decoder.Hardware())
+		} else {
+			result.Decode = true
+		}
+		_ = decoder.Close()
+	}
+
+	displayCfg := desktopcodec.D3D11ConvertConfig{
+		InputWidth: cfg.Width, InputHeight: cfg.Height,
+		OutputWidth: cfg.Width, OutputHeight: cfg.Height,
+		FPS: cfg.FPS,
+	}
+	if err := desktopcodec.ProbeD3D11DisplayFormat(frame.Device, displayCfg, desktopcodec.PixelFormatNV12); err != nil {
+		result.DisplayErr = err
+	} else {
+		result.Display = true
+	}
+	return result
+}
+
+func probeWindowsAYUVGPU(
+	ctx context.Context,
+	frame *D3D11CaptureFrame,
+	oneVPL desktopcodec.OneVPLProbe,
+) windowsGPUFormatProbe {
+	result := windowsGPUFormatProbe{Format: string(desktopcodec.PixelFormatAYUV)}
+	cfg, err := windowsGPUProbeVideoConfig(frame, desktopcodec.Chroma444)
+	if err != nil {
+		result.EncodeErr, result.DecodeErr, result.DisplayErr = err, err, err
+		return result
+	}
+	if !oneVPL.HEVC444Encode {
+		result.EncodeErr = desktopcodec.ErrEncoderUnavailable
+	} else {
+		convertCfg := desktopcodec.D3D11ConvertConfig{
+			InputWidth:   frame.Width,
+			InputHeight:  frame.Height,
+			OutputWidth:  cfg.Width,
+			OutputHeight: cfg.Height,
+			FPS:          cfg.FPS,
+		}
+		converter, convertErr := desktopcodec.OpenD3D11AYUVConverter(frame.Device, convertCfg)
+		if convertErr != nil {
+			result.EncodeErr = convertErr
+		} else {
+			converted, convertErr := converter.Convert(frame.Resource, frame.Subresource, 0)
+			if convertErr != nil {
+				result.EncodeErr = convertErr
+			} else {
+				encoder, encoderErr := desktopcodec.OpenOneVPLH265EncoderWithD3D11(ctx, cfg, frame.Device)
+				if encoderErr != nil {
+					result.EncodeErr = encoderErr
+				} else {
+					stats := encoder.Stats()
+					d3dEncoder, ok := encoder.(desktopcodec.D3D11Encoder)
+					if !ok || !stats.Hardware || stats.Backend != "onevpl-hevc444-d3d11-zero-copy" {
+						result.EncodeErr = fmt.Errorf("oneVPL HEVC 4:4:4 encoder backend=%q hardware=%t d3d11=%t", stats.Backend, stats.Hardware, ok)
+					} else if _, encodeErr := d3dEncoder.EncodeD3D11(ctx, converted); encodeErr != nil {
+						result.EncodeErr = encodeErr
+					} else {
+						result.Encode = true
+					}
+					_ = encoder.Close()
+				}
+			}
+			_ = converter.Close()
+		}
+	}
+
+	if !oneVPL.HEVC444Decode {
+		result.DecodeErr = desktopcodec.ErrDecoderUnavailable
+	} else if err := desktopcodec.ProbeOneVPLH265DecoderD3D11(ctx, cfg, frame.Device); err != nil {
+		result.DecodeErr = err
+	} else {
+		result.Decode = true
+	}
+
+	displayCfg := desktopcodec.D3D11ConvertConfig{
+		InputWidth: cfg.Width, InputHeight: cfg.Height,
+		OutputWidth: cfg.Width, OutputHeight: cfg.Height,
+		FPS: cfg.FPS,
+	}
+	if err := desktopcodec.ProbeD3D11DisplayFormat(frame.Device, displayCfg, desktopcodec.PixelFormatAYUV); err != nil {
+		result.DisplayErr = err
+	} else {
+		result.Display = true
+	}
+	return result
+}
+
+func captureWindowsGPUProbeFrame(
+	ctx context.Context,
+	source *windowsCapture,
+) (*D3D11CaptureFrame, bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		frame, available, err := source.CaptureD3D11(ctx)
+		if err == nil {
+			if available && frame != nil && frame.Valid() {
+				return frame, true, nil
+			}
+			if frame != nil {
+				frame.Close()
+			}
+			return nil, available, screencapture.ErrNoFrame
+		}
+		if frame != nil {
+			frame.Close()
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		if !errors.Is(err, screencapture.ErrNoFrame) && !errors.Is(err, context.DeadlineExceeded) {
+			return nil, false, err
+		}
+	}
+	if lastErr == nil {
+		lastErr = screencapture.ErrNoFrame
+	}
+	return nil, false, lastErr
+}
+
+func probeWindowsGPUCapability(
+	ctx context.Context,
+	oneVPL desktopcodec.OneVPLProbe,
+) (*protocol.DesktopGPUCapability, []windowsGPUFormatProbe, error) {
+	displays, err := screencapture.Displays(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	hasWGC := windowsWGCAvailable()
+	var failures []error
+	for pass := 0; pass < 2; pass++ {
+		for _, display := range displays {
+			if (pass == 0) != display.Primary {
+				continue
+			}
+			backend := protocol.DesktopCaptureWGC
+			if display.Duplicable() {
+				backend = protocol.DesktopCaptureDXGI
+			} else if !hasWGC {
+				continue
+			}
+			source, sourceErr := newSystemCapture()
+			if sourceErr != nil {
+				failures = append(failures, sourceErr)
+				continue
+			}
+			cfg := DefaultHostConfig()
+			cfg.DisplayID = strconv.FormatUint(display.ID, 10)
+			cfg.CaptureBackend = backend
+			if beginErr := source.BeginSession(ctx, cfg); beginErr != nil {
+				_ = source.Close()
+				failures = append(failures, beginErr)
+				continue
+			}
+			frame, available, captureErr := captureWindowsGPUProbeFrame(ctx, source)
+			if captureErr != nil || !available || frame == nil || !frame.Valid() {
+				if frame != nil {
+					frame.Close()
+				}
+				_ = source.EndSession()
+				_ = source.Close()
+				if captureErr != nil {
+					failures = append(failures, captureErr)
+				}
+				continue
+			}
+
+			results := []windowsGPUFormatProbe{
+				probeWindowsNV12GPU(ctx, frame),
+				probeWindowsAYUVGPU(ctx, frame, oneVPL),
+			}
+			frame.Close()
+			_ = source.EndSession()
+			_ = source.Close()
+
+			formats := make([]string, 0, len(results))
+			for _, result := range results {
+				if result.endToEnd() {
+					formats = append(formats, result.Format)
+				}
+			}
+			if len(formats) == 0 {
+				return nil, results, nil
+			}
+			return &protocol.DesktopGPUCapability{
+				Backend:         "d3d11",
+				EncodeZeroCopy:  true,
+				DecodeZeroCopy:  true,
+				DisplayZeroCopy: true,
+				Formats:         formats,
+			}, results, nil
+		}
+	}
+	if len(failures) > 0 {
+		return nil, nil, errors.Join(failures...)
+	}
+	return nil, nil, nil
+}
+
 func NewSystemHost() (*Host, error) {
 	source, err := newSystemCapture()
 	if err != nil {
@@ -826,12 +1108,17 @@ func NewSystemHost() (*Host, error) {
 	oneVPLProbe := desktopcodec.ProbeOneVPLHEVC444(oneVPLProbeCtx)
 	oneVPLCancel()
 
+	gpuProbeCtx, gpuProbeCancel := context.WithTimeout(context.Background(), 6*time.Second)
+	gpuCapability, gpuFormats, gpuProbeErr := probeWindowsGPUCapability(gpuProbeCtx, oneVPLProbe)
+	gpuProbeCancel()
+
 	codecCapabilities := []protocol.DesktopCodecCapability{probe.Capability()}
 	hevcCapability, hevcAvailable := desktopcodec.H265Capability(hevcProbe, oneVPLProbe)
 	if hevcAvailable {
 		codecCapabilities = append(codecCapabilities, hevcCapability)
 	}
 	host.SetCodecCapabilities(codecCapabilities)
+	host.SetGPUCapability(gpuCapability)
 
 	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
 		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
@@ -844,5 +1131,18 @@ func NewSystemHost() (*Host, error) {
 		oneVPLProbe.DispatcherAvailable, oneVPLProbe.HardwareRuntime,
 		oneVPLProbe.HEVC444Encode, oneVPLProbe.HEVC444Decode,
 		oneVPLProbe.HEVC444EndToEnd(), hevcCapability.Chroma444, oneVPLProbe.Error)
+	for _, gpuFormat := range gpuFormats {
+		log.Printf("[Desktop] D3D11 GPU format probe format=%s encode=%t decode=%t display=%t encodeErr=%v decodeErr=%v displayErr=%v",
+			gpuFormat.Format, gpuFormat.Encode, gpuFormat.Decode, gpuFormat.Display,
+			gpuFormat.EncodeErr, gpuFormat.DecodeErr, gpuFormat.DisplayErr)
+	}
+	if gpuCapability != nil {
+		log.Printf("[Desktop] D3D11 GPU capability encodeZeroCopy=%t decodeZeroCopy=%t displayZeroCopy=%t formats=%v",
+			gpuCapability.EncodeZeroCopy, gpuCapability.DecodeZeroCopy, gpuCapability.DisplayZeroCopy, gpuCapability.Formats)
+	} else if gpuProbeErr != nil {
+		log.Printf("[Desktop] D3D11 GPU runtime probe unavailable: %v", gpuProbeErr)
+	} else {
+		log.Printf("[Desktop] D3D11 GPU runtime probe found no end-to-end zero-copy format")
+	}
 	return host, nil
 }

@@ -264,6 +264,79 @@ func OpenOneVPLH265DecoderWithD3D11(
 	return openOneVPLH265Decoder(ctx, cfg, device)
 }
 
+func ProbeOneVPLH265DecoderD3D11(
+	ctx context.Context,
+	cfg VideoConfig,
+	device uintptr,
+) error {
+	if device == 0 {
+		return fmt.Errorf("%w: D3D11 device is nil", ErrDecoderUnavailable)
+	}
+	desired, _, err := oneVPLHEVC444DecoderDesiredParamForIO(cfg, oneVPLIOPatternOutVideoMemory)
+	if err != nil {
+		return err
+	}
+	base, err := loadOneVPLAPI()
+	if err != nil {
+		return fmt.Errorf("%w: load oneVPL dispatcher: %v", ErrDecoderUnavailable, err)
+	}
+	defer base.Close()
+
+	decoderAPI, err := loadOneVPLH265DecoderAPI(base.module)
+	if err != nil {
+		return fmt.Errorf("%w: resolve oneVPL decoder API: %v", ErrDecoderUnavailable, err)
+	}
+	loader, session, err := createOneVPLH265DecoderSession(ctx, base)
+	if err != nil {
+		return err
+	}
+	defer base.unload(loader)
+	defer base.closeSession(session)
+
+	status, _, _ := syscall.SyscallN(
+		decoderAPI.setHandle,
+		session,
+		oneVPLHandleD3D11Device,
+		device,
+	)
+	if got := oneVPLStatus(status); got != 0 {
+		return fmt.Errorf("%w: MFXVideoCORE_SetHandle(D3D11) returned %d", ErrDecoderUnavailable, got)
+	}
+
+	queryParam := desired
+	status, _, _ = syscall.SyscallN(
+		decoderAPI.query,
+		session,
+		uintptr(unsafe.Pointer(&desired[0])),
+		uintptr(unsafe.Pointer(&queryParam[0])),
+	)
+	runtime.KeepAlive(desired)
+	runtime.KeepAlive(queryParam)
+	queryStatus := oneVPLStatus(status)
+	if !oneVPLStatusOK(queryStatus) ||
+		!oneVPLHEVC444DecoderParamPreservedForIO(&queryParam, oneVPLIOPatternOutVideoMemory) {
+		return fmt.Errorf(
+			"%w: oneVPL HEVC 4:4:4 D3D11 decode query status=%d preserved=%t",
+			ErrDecoderUnavailable,
+			queryStatus,
+			oneVPLHEVC444DecoderParamPreservedForIO(&queryParam, oneVPLIOPatternOutVideoMemory),
+		)
+	}
+
+	status, _, _ = syscall.SyscallN(
+		decoderAPI.init,
+		session,
+		uintptr(unsafe.Pointer(&queryParam[0])),
+	)
+	runtime.KeepAlive(queryParam)
+	initStatus := oneVPLStatus(status)
+	if !oneVPLStatusOK(initStatus) {
+		return fmt.Errorf("%w: MFXVideoDECODE_Init(D3D11) returned %d", ErrDecoderUnavailable, initStatus)
+	}
+	syscall.SyscallN(decoderAPI.closeDecoder, session)
+	return nil
+}
+
 func openOneVPLH265Decoder(
 	ctx context.Context,
 	cfg VideoConfig,

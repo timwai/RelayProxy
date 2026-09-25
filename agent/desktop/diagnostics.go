@@ -156,30 +156,30 @@ type DesktopGPUValidationSummary struct {
 }
 
 type DesktopDiagnosticsReport struct {
-	SchemaVersion     int                                  `json:"schemaVersion"`
-	TargetID          string                               `json:"targetId,omitempty"`
-	Scene             protocol.DesktopScene                `json:"scene,omitempty"`
-	StartedAtUnixMs   int64                                `json:"startedAtUnixMs"`
-	GeneratedAtUnixMs int64                                `json:"generatedAtUnixMs"`
-	SampleIntervalMs  int                                  `json:"sampleIntervalMs"`
-	Options           protocol.RemoteDesktopConnectOptions `json:"options"`
-	CurrentConfig     protocol.DesktopVideoConfig          `json:"currentConfig"`
-	CurrentStats      protocol.DesktopSessionStats         `json:"currentStats"`
-	CurrentAudio      DesktopAudioDiagnostics              `json:"currentAudio"`
-	Summary           DesktopDiagnosticsSummary            `json:"summary"`
-	AudioValidation   *DesktopAudioValidationSummary       `json:"audioValidation,omitempty"`
-	HEVCValidation    *DesktopHEVCValidationSummary        `json:"hevcValidation,omitempty"`
-	TargetGPU           *protocol.DesktopGPUCapability             `json:"targetGpu,omitempty"`
-	TargetGPUCandidates []protocol.DesktopGPUCandidateDiagnostics   `json:"targetGpuCandidates,omitempty"`
-	GPUValidation       *DesktopGPUValidationSummary                 `json:"gpuValidation,omitempty"`
-	Samples           []DesktopDiagnosticSample            `json:"samples"`
+	SchemaVersion       int                                       `json:"schemaVersion"`
+	TargetID            string                                    `json:"targetId,omitempty"`
+	Scene               protocol.DesktopScene                     `json:"scene,omitempty"`
+	StartedAtUnixMs     int64                                     `json:"startedAtUnixMs"`
+	GeneratedAtUnixMs   int64                                     `json:"generatedAtUnixMs"`
+	SampleIntervalMs    int                                       `json:"sampleIntervalMs"`
+	Options             protocol.RemoteDesktopConnectOptions      `json:"options"`
+	CurrentConfig       protocol.DesktopVideoConfig               `json:"currentConfig"`
+	CurrentStats        protocol.DesktopSessionStats              `json:"currentStats"`
+	CurrentAudio        DesktopAudioDiagnostics                   `json:"currentAudio"`
+	Summary             DesktopDiagnosticsSummary                 `json:"summary"`
+	AudioValidation     *DesktopAudioValidationSummary            `json:"audioValidation,omitempty"`
+	HEVCValidation      *DesktopHEVCValidationSummary             `json:"hevcValidation,omitempty"`
+	TargetGPU           *protocol.DesktopGPUCapability            `json:"targetGpu,omitempty"`
+	TargetGPUCandidates []protocol.DesktopGPUCandidateDiagnostics `json:"targetGpuCandidates,omitempty"`
+	GPUValidation       *DesktopGPUValidationSummary              `json:"gpuValidation,omitempty"`
+	Samples             []DesktopDiagnosticSample                 `json:"samples"`
 }
 
 type sessionDiagnosticsRecorder struct {
-	mu        sync.Mutex
-	targetID  string
-	options   protocol.RemoteDesktopConnectOptions
-	started   time.Time
+	mu                  sync.Mutex
+	targetID            string
+	options             protocol.RemoteDesktopConnectOptions
+	started             time.Time
 	targetGPU           *protocol.DesktopGPUCapability
 	targetGPUCandidates []protocol.DesktopGPUCandidateDiagnostics
 	samples             []DesktopDiagnosticSample
@@ -727,22 +727,22 @@ func (r *sessionDiagnosticsRecorder) Report(
 	defer r.mu.Unlock()
 	samples := append([]DesktopDiagnosticSample(nil), r.samples...)
 	return DesktopDiagnosticsReport{
-		SchemaVersion:     desktopDiagnosticsSchemaVersion,
-		TargetID:          r.targetID,
-		Scene:             r.options.Scene,
-		StartedAtUnixMs:   r.started.UnixMilli(),
-		GeneratedAtUnixMs: now.UnixMilli(),
-		SampleIntervalMs:  desktopDiagnosticsIntervalMs,
-		Options:           r.options,
-		CurrentConfig:     config,
-		CurrentStats:      stats,
-		CurrentAudio:      audio,
-		Summary:           summarizeDesktopDiagnostics(r.started, now, samples),
-		AudioValidation:   summarizeAudioValidation(r.options, samples, audio),
-		HEVCValidation:    summarizeHEVCValidation(r.options, samples),
+		SchemaVersion:       desktopDiagnosticsSchemaVersion,
+		TargetID:            r.targetID,
+		Scene:               r.options.Scene,
+		StartedAtUnixMs:     r.started.UnixMilli(),
+		GeneratedAtUnixMs:   now.UnixMilli(),
+		SampleIntervalMs:    desktopDiagnosticsIntervalMs,
+		Options:             r.options,
+		CurrentConfig:       config,
+		CurrentStats:        stats,
+		CurrentAudio:        audio,
+		Summary:             summarizeDesktopDiagnostics(r.started, now, samples),
+		AudioValidation:     summarizeAudioValidation(r.options, samples, audio),
+		HEVCValidation:      summarizeHEVCValidation(r.options, samples),
 		TargetGPU:           protocol.CloneDesktopGPUCapability(r.targetGPU),
 		TargetGPUCandidates: protocol.CloneDesktopGPUCandidateDiagnostics(r.targetGPUCandidates),
 		GPUValidation:       summarizeGPUValidation(r.targetGPU, config, samples),
-		Samples:           samples,
+		Samples:             samples,
 	}
 }

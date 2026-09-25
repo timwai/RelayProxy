@@ -262,11 +262,13 @@ test('external edit after save cannot silently rebase another dirty section', as
 });
 
 
-test('remote desktop GPU capability label reports backend formats and zero-copy directions', () => {
-  const f = fixture();
+test('remote desktop target card reports GPU backend formats and zero-copy directions', async () => {
   const target = {
     deviceId: 'target-gpu',
+    name: 'GPU Host',
+    online: true,
     capabilities: {
+      relayDesktop: true,
       gpu: {
         backend: 'd3d11',
         encodeZeroCopy: true,
@@ -276,10 +278,17 @@ test('remote desktop GPU capability label reports backend formats and zero-copy 
       }
     }
   };
+  const f = fixture({ desktopTargets: [target] });
+  await f.context.refreshRemoteDesktopTargets(false);
+
   assert.equal(
     f.context.remoteDesktopGPUCapabilityLabel(target),
     'GPU D3D11 NV12/AYUV E/D/R'
   );
+  const card = f.get('desktop-targets').children[0];
+  const info = card.children[0];
+  const meta = info.children[1];
+  assert.match(meta.textContent, /GPU D3D11 NV12\/AYUV E\/D\/R/);
 });
 
 test('remote desktop GPU path summary distinguishes E2E and display fallback', async () => {

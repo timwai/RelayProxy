@@ -131,12 +131,12 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 
 func probeAMFH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandidate {
 	probe := H265444RuntimeCandidate{
-		Backend:                "amf-hevc444",
-		Vendor:                 "amd",
-		EncodeCapabilityKnown:  true,
-		HEVC444Encode:          false,
-		Implemented:            false,
-		Limitation:             amfHEVC444EncodeLimitation,
+		Backend:               "amf-hevc444",
+		Vendor:                "amd",
+		EncodeCapabilityKnown: true,
+		HEVC444Encode:         false,
+		Implemented:           false,
+		Limitation:            amfHEVC444EncodeLimitation,
 	}
 	if err := ctx.Err(); err != nil {
 		probe.Error = err.Error()

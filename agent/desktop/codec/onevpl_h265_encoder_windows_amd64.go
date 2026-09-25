@@ -70,6 +70,7 @@ const (
 	oneVPLBitstreamFrameType  = 62
 
 	oneVPLMapWrite                = 0x2
+	oneVPLIOPatternInVideoMemory  = 0x01
 	oneVPLIOPatternInSystemMemory = 0x02
 	oneVPLChromaYUV444            = 3
 	oneVPLPicStructProgressive    = 1
@@ -134,6 +135,16 @@ func oneVPLBitrateFields(targetBitrate int) (multiplier, targetKbps uint16) {
 }
 
 func oneVPLHEVC444VideoParam(cfg VideoConfig) (oneVPLVideoParam, VideoConfig, error) {
+	return oneVPLHEVC444VideoParamForIO(cfg, oneVPLIOPatternInSystemMemory)
+}
+
+func oneVPLHEVC444VideoParamForIO(
+	cfg VideoConfig,
+	ioPattern uint16,
+) (oneVPLVideoParam, VideoConfig, error) {
+	if ioPattern != oneVPLIOPatternInSystemMemory && ioPattern != oneVPLIOPatternInVideoMemory {
+		return oneVPLVideoParam{}, VideoConfig{}, fmt.Errorf("%w: invalid oneVPL encoder IOPattern 0x%x", ErrInvalidVideoConfig, ioPattern)
+	}
 	cfg, err := NormalizeVideoConfig(cfg)
 	if err != nil {
 		return oneVPLVideoParam{}, VideoConfig{}, err
@@ -180,11 +191,15 @@ func oneVPLHEVC444VideoParam(cfg VideoConfig) (oneVPLVideoParam, VideoConfig, er
 	param.putU16(oneVPLVideoParamRateControl, oneVPLRateControlVBR)
 	param.putU16(oneVPLVideoParamTargetKbps, targetKbps)
 	param.putU16(oneVPLVideoParamMaxKbps, targetKbps)
-	param.putU16(oneVPLVideoParamIOPattern, oneVPLIOPatternInSystemMemory)
+	param.putU16(oneVPLVideoParamIOPattern, ioPattern)
 	return param, cfg, nil
 }
 
 func oneVPLHEVC444ParamPreserved(param *oneVPLVideoParam) bool {
+	return oneVPLHEVC444ParamPreservedForIO(param, oneVPLIOPatternInSystemMemory)
+}
+
+func oneVPLHEVC444ParamPreservedForIO(param *oneVPLVideoParam, ioPattern uint16) bool {
 	if param == nil {
 		return false
 	}
@@ -193,7 +208,8 @@ func oneVPLHEVC444ParamPreserved(param *oneVPLVideoParam) bool {
 		param.u32(oneVPLFrameInfoFourCC) == oneVPLFourCCAYUV &&
 		param.u16(oneVPLFrameInfoBitDepthLuma) == 8 &&
 		param.u16(oneVPLFrameInfoBitDepthChroma) == 8 &&
-		param.u16(oneVPLFrameInfoChroma) == oneVPLChromaYUV444
+		param.u16(oneVPLFrameInfoChroma) == oneVPLChromaYUV444 &&
+		param.u16(oneVPLVideoParamIOPattern) == ioPattern
 }
 
 func oneVPLStatusOK(status int32) bool {

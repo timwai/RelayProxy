@@ -13,13 +13,31 @@ const H265444BackendOneVPL = "onevpl-hevc444"
 type H265444BackendProbe struct {
 	Backend         string
 	HardwareRuntime bool
-	Encode          bool
-	Decode          bool
-	Error           string
+
+	// Encode / Decode mean that RelayProxy has at least one implemented path for
+	// the probed hardware direction. The path-specific fields below distinguish
+	// system-memory from D3D11-only backends so global capability advertisement
+	// cannot confuse opener presence with a validated transport path.
+	Encode bool
+	Decode bool
+
+	SystemMemoryEncode bool
+	SystemMemoryDecode bool
+	D3D11Encode        bool
+	D3D11Decode        bool
+	Error              string
+}
+
+func (p H265444BackendProbe) SystemMemoryEndToEnd() bool {
+	return p.Backend != "" && p.HardwareRuntime && p.SystemMemoryEncode && p.SystemMemoryDecode
+}
+
+func (p H265444BackendProbe) D3D11EndToEnd() bool {
+	return p.Backend != "" && p.HardwareRuntime && p.D3D11Encode && p.D3D11Decode
 }
 
 func (p H265444BackendProbe) EndToEnd() bool {
-	return p.Backend != "" && p.HardwareRuntime && p.Encode && p.Decode
+	return p.SystemMemoryEndToEnd() || p.D3D11EndToEnd()
 }
 
 type h265444Backend struct {
@@ -86,15 +104,20 @@ func probeH265444Backends(
 				probe.Backend = backend.name
 			}
 		}
-		// Runtime support alone is not enough to advertise a direction. Keep
-		// capability tied to an implemented RelayProxy opener so a probe-only
-		// vendor integration cannot expose an unusable 4:4:4 session.
-		if backend.openEncoder == nil {
-			probe.Encode = false
-		}
-		if backend.openDecoder == nil {
-			probe.Decode = false
-		}
+		// Runtime support alone is not enough to expose a direction. Preserve the
+		// vendor probe result only when RelayProxy has a concrete opener for at
+		// least one compatible path. D3D11 decode also requires the explicit
+		// device probe hook used by the Host AYUV end-to-end validation.
+		rawEncode := probe.Encode
+		rawDecode := probe.Decode
+		probe.SystemMemoryEncode = rawEncode && backend.openEncoder != nil
+		probe.SystemMemoryDecode = rawDecode && backend.openDecoder != nil
+		probe.D3D11Encode = rawEncode && backend.openEncoderD3D11 != nil
+		probe.D3D11Decode = rawDecode &&
+			backend.openDecoderD3D11 != nil &&
+			backend.probeDecoderD3D11 != nil
+		probe.Encode = probe.SystemMemoryEncode || probe.D3D11Encode
+		probe.Decode = probe.SystemMemoryDecode || probe.D3D11Decode
 		out = append(out, probe)
 	}
 	return out
@@ -118,8 +141,55 @@ func H265444DecodeAvailable(probes []H265444BackendProbe) bool {
 	return false
 }
 
+func H265444SystemMemoryEncodeAvailable(probes []H265444BackendProbe) bool {
+	for _, probe := range probes {
+		if probe.HardwareRuntime && probe.SystemMemoryEncode {
+			return true
+		}
+	}
+	return false
+}
+
+func H265444SystemMemoryDecodeAvailable(probes []H265444BackendProbe) bool {
+	for _, probe := range probes {
+		if probe.HardwareRuntime && probe.SystemMemoryDecode {
+			return true
+		}
+	}
+	return false
+}
+
+func H265444SystemMemoryEndToEndAvailable(probes []H265444BackendProbe) bool {
+	return H265444SystemMemoryEncodeAvailable(probes) &&
+		H265444SystemMemoryDecodeAvailable(probes)
+}
+
+func H265444D3D11EncodeAvailable(probes []H265444BackendProbe) bool {
+	for _, probe := range probes {
+		if probe.HardwareRuntime && probe.D3D11Encode {
+			return true
+		}
+	}
+	return false
+}
+
+func H265444D3D11DecodeAvailable(probes []H265444BackendProbe) bool {
+	for _, probe := range probes {
+		if probe.HardwareRuntime && probe.D3D11Decode {
+			return true
+		}
+	}
+	return false
+}
+
+func H265444D3D11EndToEndAvailable(probes []H265444BackendProbe) bool {
+	return H265444D3D11EncodeAvailable(probes) &&
+		H265444D3D11DecodeAvailable(probes)
+}
+
 func H265444EndToEndAvailable(probes []H265444BackendProbe) bool {
-	return H265444EncodeAvailable(probes) && H265444DecodeAvailable(probes)
+	return H265444SystemMemoryEndToEndAvailable(probes) ||
+		H265444D3D11EndToEndAvailable(probes)
 }
 
 func h265444BackendErrors(unavailable error, errs []error) error {

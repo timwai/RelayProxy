@@ -3,9 +3,9 @@
 package codec
 
 import (
+	"context"
 	"encoding/binary"
 	"testing"
-	"time"
 	"unsafe"
 )
 
@@ -115,5 +115,4 @@ func TestNVENCH265EncoderControlDefaults(t *testing.T) {
 	if !stats.Hardware || stats.Backend != "nvenc-hevc444-d3d11" {
 		t.Fatalf("stats=%+v", stats)
 	}
-	_ = time.Second
 }

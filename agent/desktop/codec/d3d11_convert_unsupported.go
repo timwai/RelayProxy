@@ -10,6 +10,10 @@ func OpenD3D11NV12Converter(uintptr, D3D11ConvertConfig) (*D3D11NV12Converter, e
 	return nil, ErrEncoderUnavailable
 }
 
+func OpenD3D11AYUVConverter(uintptr, D3D11ConvertConfig) (*D3D11NV12Converter, error) {
+	return nil, ErrEncoderUnavailable
+}
+
 func (c *D3D11NV12Converter) Device() uintptr {
 	return 0
 }

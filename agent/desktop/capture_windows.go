@@ -967,6 +967,39 @@ func probeWindowsAYUVGPU(
 	return result
 }
 
+func captureWindowsGPUProbeFrame(
+	ctx context.Context,
+	source *windowsCapture,
+) (*D3D11CaptureFrame, bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		frame, available, err := source.CaptureD3D11(ctx)
+		if err == nil {
+			if available && frame != nil && frame.Valid() {
+				return frame, true, nil
+			}
+			if frame != nil {
+				frame.Close()
+			}
+			return nil, available, screencapture.ErrNoFrame
+		}
+		if frame != nil {
+			frame.Close()
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		if !errors.Is(err, screencapture.ErrNoFrame) && !errors.Is(err, context.DeadlineExceeded) {
+			return nil, false, err
+		}
+	}
+	if lastErr == nil {
+		lastErr = screencapture.ErrNoFrame
+	}
+	return nil, false, lastErr
+}
+
 func probeWindowsGPUCapability(
 	ctx context.Context,
 	oneVPL desktopcodec.OneVPLProbe,
@@ -1001,7 +1034,7 @@ func probeWindowsGPUCapability(
 				failures = append(failures, beginErr)
 				continue
 			}
-			frame, available, captureErr := source.CaptureD3D11(ctx)
+			frame, available, captureErr := captureWindowsGPUProbeFrame(ctx, source)
 			if captureErr != nil || !available || frame == nil || !frame.Valid() {
 				if frame != nil {
 					frame.Close()

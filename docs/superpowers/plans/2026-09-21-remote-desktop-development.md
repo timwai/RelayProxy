@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #117 已合并，merge `9d89ca8ac0d175ab06e828677b58a66332ec2ef0`）
+> 当前开发基线：`main`（PR #118 已合并，merge `eb6e10a1f64c7e12e428a2f420911344a64b791f`；gofmt 修复 `016b34c4867084b21aa88cc651d4513b3c4e65ba`）
 
 ## 0. 当前进度
 
@@ -798,6 +798,20 @@ Windows SendInput / CF_UNICODETEXT
 - 代表实现 PR：#117；merge `9d89ca8ac0d175ab06e828677b58a66332ec2ef0`。
 - 验证：Go CI #993 的 format/vet/full test/race/benchmark 全部通过；UI CI #683 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：把 HEVC 4:4:4 capability / backend 选择从 Intel oneVPL 单实现抽象为 vendor backend registry，在不改变现有 Intel 行为的前提下，为 NVIDIA NVENC / AMD AMF runtime probe 与 codec backend 留出独立入口。
+
+### 0.2.64 RD3 Vendor-Neutral HEVC 4:4:4 Backend Registry（已进入 main）
+
+- 新增 vendor-neutral HEVC 8-bit 4:4:4 backend registry；Intel oneVPL 仍是当前唯一注册实现，现有 Intel 行为和 fallback 语义保持不变。
+- Host 4:4:4 encoder、Native Viewer 4:4:4 decoder、Windows 启动 capability probe、AYUV D3D11 runtime validation 全部改走统一 backend helper，上层业务代码不再直接依赖 oneVPL opener。
+- `H265CapabilityWith444Backends` 可聚合多个 vendor 的 runtime capability，同时保留旧 `H265Capability(mf, oneVPL)` API 兼容现有调用/测试。
+- registry 保持确定性优先级；probe 会保留 backend 名称和失败原因，便于后续比较 NVENC / AMF / oneVPL。
+- 增加 implementation gate：只有 runtime probe 成功且 RelayProxy 已注册对应 encoder / decoder opener，该方向才会进入可用 capability；“驱动/SDK 报告支持”仍不会自动变成用户可选能力。
+- 公共 `Chroma444` 继续保守：本机必须同时存在可用的 4:4:4 encode 与 decode 方向才公开；方向可以来自不同已实现 vendor backend。
+- AYUV diagnostics、GUI E/D/R 状态以及 GPU cursor 判断从 oneVPL 精确字符串改为受控的 hardware `*-d3d11-zero-copy` backend 约定，为未来 NVENC / AMF 接入避免重复修改上层逻辑。
+- 新增 registry priority / name backfill / runtime gate / implementation gate、多 vendor capability 聚合和 vendor-neutral AYUV diagnostics/UI 回归。
+- 代表实现 PR：#118；merge `eb6e10a1f64c7e12e428a2f420911344a64b791f`；gofmt 修复 `016b34c4867084b21aa88cc651d4513b3c4e65ba`。
+- 验证：Go CI #999 的 format/vet/full test/race/benchmark 全部通过；UI CI #689 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：先实现 NVIDIA / AMD 的“candidate runtime probe”与诊断输出，但不注册 public opener、不公开 `Chroma444`；待各自 encode/decode backend 真正落地并通过 D3D11 实测后再加入正式 registry capability。
 
 ### 0.3 本轮进度（2026-09-22）
 

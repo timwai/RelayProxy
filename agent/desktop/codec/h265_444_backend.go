@@ -61,8 +61,15 @@ var h265444BackendRegistry = []h265444Backend{
 // priority order. The result includes unavailable backends so diagnostics can
 // explain why a backend was not selected.
 func ProbeH265444Backends(ctx context.Context) []H265444BackendProbe {
-	out := make([]H265444BackendProbe, 0, len(h265444BackendRegistry))
-	for _, backend := range h265444BackendRegistry {
+	return probeH265444Backends(ctx, h265444BackendRegistry)
+}
+
+func probeH265444Backends(
+	ctx context.Context,
+	backends []h265444Backend,
+) []H265444BackendProbe {
+	out := make([]H265444BackendProbe, 0, len(backends))
+	for _, backend := range backends {
 		if err := ctx.Err(); err != nil {
 			out = append(out, H265444BackendProbe{
 				Backend: backend.name,

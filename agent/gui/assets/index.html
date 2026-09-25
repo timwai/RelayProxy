@@ -1671,11 +1671,12 @@
       var decoderBackend = String(stats.decoderBackend || '').toLowerCase();
       var renderBackend = String(stats.renderBackend || '').toLowerCase();
       var hostZeroCopy = format === 'ayuv'
-        ? captureFormat === 'd3d11-ayuv' && encoderBackend === 'onevpl-hevc444-d3d11-zero-copy'
+        ? captureFormat === 'd3d11-ayuv' && !!stats.encoderHardware &&
+          encoderBackend.endsWith('-d3d11-zero-copy')
         : captureFormat === 'd3d11-nv12' &&
           (encoderBackend === 'media-foundation-d3d11' || encoderBackend === 'media-foundation-hevc-d3d11');
       var decodeZeroCopy = format === 'ayuv'
-        ? decoderBackend === 'onevpl-hevc444-d3d11-zero-copy'
+        ? !!stats.decoderHardware && decoderBackend.endsWith('-d3d11-zero-copy')
         : decoderBackend === 'media-foundation-d3d11-zero-copy';
       var displayZeroCopy = renderBackend === 'd3d11-zero-copy';
       var flags = [

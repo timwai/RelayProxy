@@ -352,13 +352,13 @@ func openNativeDesktopDecoder(
 		if device := native.D3D11Device(); device != 0 &&
 			native.SupportsGPUFormat(desktopgpu.FormatAYUV) &&
 			native.SupportsGPUCursor() {
-			decoder, err := desktopcodec.OpenOneVPLH265DecoderWithD3D11(ctx, decoderConfig, device)
+			decoder, err := desktopcodec.OpenH265444DecoderWithD3D11(ctx, decoderConfig, device)
 			if err == nil {
 				return decoder, nil
 			}
-			log.Printf("[Desktop] oneVPL D3D11 AYUV decode unavailable, falling back to CPU surface: %v", err)
+			log.Printf("[Desktop] HEVC 4:4:4 D3D11 decode unavailable, falling back to CPU surface: %v", err)
 		}
-		return desktopcodec.OpenOneVPLH265Decoder(ctx, decoderConfig)
+		return desktopcodec.OpenH265444Decoder(ctx, decoderConfig)
 	}
 	var (
 		openShared func(context.Context, desktopcodec.VideoConfig, bool, uintptr) (desktopcodec.Decoder, error)
@@ -440,15 +440,10 @@ func (s *nativeDesktopSession) disableGPUCursor() {
 }
 
 func nativeDesktopDecoderUsesGPUCursor(decoder desktopcodec.Decoder) bool {
-	if decoder == nil {
+	if decoder == nil || !decoder.Hardware() {
 		return false
 	}
-	switch decoder.Backend() {
-	case "media-foundation-d3d11-zero-copy", "onevpl-hevc444-d3d11-zero-copy":
-		return true
-	default:
-		return false
-	}
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(decoder.Backend())), "-d3d11-zero-copy")
 }
 
 func (s *nativeDesktopSession) decoderStatus() (string, bool, bool) {

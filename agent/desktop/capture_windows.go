@@ -1131,13 +1131,16 @@ func NewSystemHost() (*Host, error) {
 			RuntimeAvailable: candidate.RuntimeAvailable,
 			EncodeRuntime:    candidate.EncodeRuntime,
 			DecodeRuntime:    candidate.DecodeRuntime,
-			DeviceProbe:      candidate.DeviceProbe,
-			DeviceCount:      candidate.DeviceCount,
-			HEVC444Encode:    candidate.HEVC444Encode,
-			HEVC444Decode:    candidate.HEVC444Decode,
-			Version:          candidate.Version,
-			Implemented:      candidate.Implemented,
-			Error:            candidate.Error,
+			DeviceProbe:           candidate.DeviceProbe,
+			DeviceCount:           candidate.DeviceCount,
+			EncodeCapabilityKnown: candidate.EncodeCapabilityKnown,
+			DecodeCapabilityKnown: candidate.DecodeCapabilityKnown,
+			HEVC444Encode:         candidate.HEVC444Encode,
+			HEVC444Decode:         candidate.HEVC444Decode,
+			Version:               candidate.Version,
+			Implemented:           candidate.Implemented,
+			Limitation:            candidate.Limitation,
+			Error:                 candidate.Error,
 		})
 	}
 	host.SetGPUCandidateDiagnostics(gpuCandidates)
@@ -1156,12 +1159,13 @@ func NewSystemHost() (*Host, error) {
 			backendProbe.EndToEnd(), hevcCapability.Chroma444, backendProbe.Error)
 	}
 	for _, candidate := range h265444Candidates {
-		log.Printf("[Desktop] HEVC 4:4:4 candidate runtime vendor=%s backend=%s runtime=%t encodeRuntime=%t decodeRuntime=%t deviceProbe=%t devices=%d hevc444Encode=%t hevc444Decode=%t version=%q implemented=%t advertised=false error=%q",
+		log.Printf("[Desktop] HEVC 4:4:4 candidate runtime vendor=%s backend=%s runtime=%t encodeRuntime=%t decodeRuntime=%t deviceProbe=%t devices=%d encodeKnown=%t decodeKnown=%t hevc444Encode=%t hevc444Decode=%t version=%q implemented=%t advertised=false limitation=%q error=%q",
 			candidate.Vendor, candidate.Backend, candidate.RuntimeAvailable,
 			candidate.EncodeRuntime, candidate.DecodeRuntime,
 			candidate.DeviceProbe, candidate.DeviceCount,
+			candidate.EncodeCapabilityKnown, candidate.DecodeCapabilityKnown,
 			candidate.HEVC444Encode, candidate.HEVC444Decode,
-			candidate.Version, candidate.Implemented, candidate.Error)
+			candidate.Version, candidate.Implemented, candidate.Limitation, candidate.Error)
 	}
 	for _, gpuFormat := range gpuFormats {
 		log.Printf("[Desktop] D3D11 GPU format probe format=%s encode=%t decode=%t display=%t encodeErr=%v decodeErr=%v displayErr=%v",

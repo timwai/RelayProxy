@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	desktopDiagnosticsSchemaVersion = 5
+	desktopDiagnosticsSchemaVersion = 6
 	desktopDiagnosticsMaxSamples    = 1200
 	desktopDiagnosticsIntervalMs    = 500
 )
@@ -138,6 +138,19 @@ type DesktopHEVCValidationSummary struct {
 	DecoderBackends         map[string]int `json:"decoderBackends,omitempty"`
 }
 
+type DesktopGPUValidationSummary struct {
+	ExpectedFormat              string         `json:"expectedFormat,omitempty"`
+	TargetAdvertised            bool           `json:"targetAdvertised"`
+	MatchingSamples             int            `json:"matchingSamples"`
+	HostEncodeZeroCopySamples   int            `json:"hostEncodeZeroCopySamples,omitempty"`
+	ViewerDecodeZeroCopySamples int            `json:"viewerDecodeZeroCopySamples,omitempty"`
+	EndToEndZeroCopySamples     int            `json:"endToEndZeroCopySamples,omitempty"`
+	FallbackSamples             int            `json:"fallbackSamples,omitempty"`
+	CaptureFormats              map[string]int `json:"captureFormats,omitempty"`
+	EncoderBackends             map[string]int `json:"encoderBackends,omitempty"`
+	DecoderBackends             map[string]int `json:"decoderBackends,omitempty"`
+}
+
 type DesktopDiagnosticsReport struct {
 	SchemaVersion     int                                  `json:"schemaVersion"`
 	TargetID          string                               `json:"targetId,omitempty"`
@@ -152,15 +165,18 @@ type DesktopDiagnosticsReport struct {
 	Summary           DesktopDiagnosticsSummary            `json:"summary"`
 	AudioValidation   *DesktopAudioValidationSummary       `json:"audioValidation,omitempty"`
 	HEVCValidation    *DesktopHEVCValidationSummary        `json:"hevcValidation,omitempty"`
+	TargetGPU         *protocol.DesktopGPUCapability       `json:"targetGpu,omitempty"`
+	GPUValidation     *DesktopGPUValidationSummary         `json:"gpuValidation,omitempty"`
 	Samples           []DesktopDiagnosticSample            `json:"samples"`
 }
 
 type sessionDiagnosticsRecorder struct {
-	mu       sync.Mutex
-	targetID string
-	options  protocol.RemoteDesktopConnectOptions
-	started  time.Time
-	samples  []DesktopDiagnosticSample
+	mu        sync.Mutex
+	targetID  string
+	options   protocol.RemoteDesktopConnectOptions
+	started   time.Time
+	targetGPU *protocol.DesktopGPUCapability
+	samples   []DesktopDiagnosticSample
 }
 
 func newSessionDiagnosticsRecorder(
@@ -177,6 +193,15 @@ func newSessionDiagnosticsRecorder(
 		started:  now,
 		samples:  make([]DesktopDiagnosticSample, 0, desktopDiagnosticsMaxSamples),
 	}
+}
+
+func (r *sessionDiagnosticsRecorder) SetTargetGPUCapability(capability *protocol.DesktopGPUCapability) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.targetGPU = protocol.CloneDesktopGPUCapability(capability)
+	r.mu.Unlock()
 }
 
 func diagnosticAdaptation(decision desktopadapt.MediaDecision) DesktopDiagnosticAdaptation {
@@ -548,6 +573,108 @@ func summarizeHEVCValidation(
 	return summary
 }
 
+func desktopGPUFormatForConfig(config protocol.DesktopVideoConfig) string {
+	switch strings.ToLower(strings.TrimSpace(config.Codec)) {
+	case "h264", "h265":
+	default:
+		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(config.Chroma), string(protocol.DesktopChroma444)) {
+		return "ayuv"
+	}
+	return "nv12"
+}
+
+func desktopGPUFormatAdvertised(capability *protocol.DesktopGPUCapability, format string) bool {
+	if capability == nil || format == "" ||
+		!capability.EncodeZeroCopy || !capability.DecodeZeroCopy || !capability.DisplayZeroCopy {
+		return false
+	}
+	for _, advertised := range capability.Formats {
+		if strings.EqualFold(strings.TrimSpace(advertised), format) {
+			return true
+		}
+	}
+	return false
+}
+
+func desktopGPUHostEncodeZeroCopy(format string, stats protocol.DesktopSessionStats) bool {
+	captureFormat := strings.ToLower(strings.TrimSpace(stats.CaptureFormat))
+	backend := strings.ToLower(strings.TrimSpace(stats.EncoderBackend))
+	switch format {
+	case "ayuv":
+		return captureFormat == "d3d11-ayuv" &&
+			backend == "onevpl-hevc444-d3d11-zero-copy"
+	case "nv12":
+		return captureFormat == "d3d11-nv12" &&
+			(backend == "media-foundation-d3d11" ||
+				backend == "media-foundation-hevc-d3d11")
+	default:
+		return false
+	}
+}
+
+func desktopGPUViewerDecodeZeroCopy(format string, stats protocol.DesktopSessionStats) bool {
+	backend := strings.ToLower(strings.TrimSpace(stats.DecoderBackend))
+	switch format {
+	case "ayuv":
+		return backend == "onevpl-hevc444-d3d11-zero-copy"
+	case "nv12":
+		return backend == "media-foundation-d3d11-zero-copy"
+	default:
+		return false
+	}
+}
+
+func summarizeGPUValidation(
+	targetGPU *protocol.DesktopGPUCapability,
+	current protocol.DesktopVideoConfig,
+	samples []DesktopDiagnosticSample,
+) *DesktopGPUValidationSummary {
+	expectedFormat := desktopGPUFormatForConfig(current)
+	if expectedFormat == "" {
+		for i := len(samples) - 1; i >= 0; i-- {
+			expectedFormat = desktopGPUFormatForConfig(samples[i].Config)
+			if expectedFormat != "" {
+				break
+			}
+		}
+	}
+	if expectedFormat == "" && targetGPU == nil {
+		return nil
+	}
+	summary := &DesktopGPUValidationSummary{
+		ExpectedFormat:   expectedFormat,
+		TargetAdvertised: desktopGPUFormatAdvertised(targetGPU, expectedFormat),
+		CaptureFormats:   make(map[string]int),
+		EncoderBackends:  make(map[string]int),
+		DecoderBackends:  make(map[string]int),
+	}
+	for _, sample := range samples {
+		if desktopGPUFormatForConfig(sample.Config) != expectedFormat {
+			continue
+		}
+		summary.MatchingSamples++
+		incrementDiagnosticCount(summary.CaptureFormats, sample.Stats.CaptureFormat)
+		incrementDiagnosticCount(summary.EncoderBackends, sample.Stats.EncoderBackend)
+		incrementDiagnosticCount(summary.DecoderBackends, sample.Stats.DecoderBackend)
+
+		hostZeroCopy := desktopGPUHostEncodeZeroCopy(expectedFormat, sample.Stats)
+		viewerZeroCopy := desktopGPUViewerDecodeZeroCopy(expectedFormat, sample.Stats)
+		if hostZeroCopy {
+			summary.HostEncodeZeroCopySamples++
+		}
+		if viewerZeroCopy {
+			summary.ViewerDecodeZeroCopySamples++
+		}
+		if hostZeroCopy && viewerZeroCopy {
+			summary.EndToEndZeroCopySamples++
+		}
+	}
+	summary.FallbackSamples = summary.MatchingSamples - summary.EndToEndZeroCopySamples
+	return summary
+}
+
 func (r *sessionDiagnosticsRecorder) Report(
 	now time.Time,
 	config protocol.DesktopVideoConfig,
@@ -577,6 +704,8 @@ func (r *sessionDiagnosticsRecorder) Report(
 		Summary:           summarizeDesktopDiagnostics(r.started, now, samples),
 		AudioValidation:   summarizeAudioValidation(r.options, samples, audio),
 		HEVCValidation:    summarizeHEVCValidation(r.options, samples),
+		TargetGPU:         protocol.CloneDesktopGPUCapability(r.targetGPU),
+		GPUValidation:     summarizeGPUValidation(r.targetGPU, config, samples),
 		Samples:           samples,
 	}
 }

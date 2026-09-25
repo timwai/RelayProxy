@@ -8,6 +8,7 @@ import (
 const (
 	H265444InteropD3D11Native = "d3d11-native"
 	H265444InteropD3D11CUDA   = "d3d11-cuda"
+	H265444InteropNVCodec     = "d3d11-nvcodec"
 )
 
 // H265444BackendLifecycleContract documents ownership rules that every
@@ -98,6 +99,17 @@ func h265444D3D11NativeAYUVContract() *H265444D3D11InteropContract {
 func h265444D3D11CUDAAYUVContract() *H265444D3D11InteropContract {
 	return &H265444D3D11InteropContract{
 		Bridge:                      H265444InteropD3D11CUDA,
+		EncodeInput:                 PixelFormatAYUV,
+		DecodeOutput:                PixelFormatAYUV,
+		RequireSameD3D11Device:      true,
+		EncoderBorrowsInputResource: true,
+		DecoderOwnsOutputUntilClose: true,
+	}
+}
+
+func h265444NVCodecAYUVContract() *H265444D3D11InteropContract {
+	return &H265444D3D11InteropContract{
+		Bridge:                      H265444InteropNVCodec,
 		EncodeInput:                 PixelFormatAYUV,
 		DecodeOutput:                PixelFormatAYUV,
 		RequireSameD3D11Device:      true,

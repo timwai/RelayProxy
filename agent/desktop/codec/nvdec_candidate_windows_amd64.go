@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	nvidiaCUDADriverDLL        = "nvcuda.dll"
-	nvVideoCodecHEVC     int32 = 8
-	nvVideoChroma444     int32 = 3
+	nvidiaCUDADriverDLL       = "nvcuda.dll"
+	nvVideoCodecHEVC    int32 = 8
+	nvVideoChroma444    int32 = 3
 )
 
 // nvcuvidDecodeCaps mirrors CUVIDDECODECAPS from the NVIDIA Video Codec SDK.

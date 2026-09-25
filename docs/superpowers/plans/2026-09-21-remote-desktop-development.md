@@ -889,6 +889,17 @@ Windows SendInput / CF_UNICODETEXT
 - 代表实现 PR：#124。
 - 下一步：实现 NVENC D3D11/CUDA encoder session opener，包括 CUDA device/context 生命周期、D3D11 texture registration/map/unmap、AYUV input、sequence header、IDR/bitrate reconfigure 与完整 Close 清理；完成真实 encode 验证后仍保持 backend 总 gate 关闭，直到 NVDEC + zero-copy round trip 同样通过。
 
+### 0.2.71 RD3 NVIDIA NVENC D3D11 Production Session Lifecycle
+
+- 新增真实 NVENC production session loader：加载 `nvEncodeAPI64.dll`，查询 driver max API version，并严格要求当前固定 ABI 13.1；旧驱动不会进入 production session。
+- production function table 增加完整性校验，要求 initialize、bitstream buffer、register/map/unmap/unregister resource、encode、lock/unlock bitstream、sequence params、reconfigure 与 destroy 等后续编码热路径所需 entry point 全部存在。
+- Windows NVENC session 改为直接使用 `NV_ENC_DEVICE_TYPE_DIRECTX` + Relay Desktop 现有 D3D11 device 打开，不为编码端额外创建 CUDA context。NVIDIA 官方 API 支持 Windows D3D11 device 直接建 session 与注册外部分配的 D3D11 resource。
+- session 打开后再次在该真实 encode session 上确认 HEVC codec 与 YUV444 encode capability；没有真实 4:4:4 capability 时立即关闭，不留下半可用 session。
+- `nvencD3D11Session` 明确拥有 NVENC encoder handle 与 runtime DLL lifetime，但只借用上层 D3D11 device；`Close()` 幂等并保证先 destroy encoder 再卸载 runtime。
+- NVIDIA backend interop 标识从过窄的 `d3d11-cuda` 调整为 `d3d11-nvcodec`：NVENC 输入可以原生注册 D3D11 texture，后续 NVDEC 仍可在同一 adapter/device 边界内通过 CUDA interop 输出。
+- 当前仍未把 session opener 挂入通用 `OpenH265444EncoderWithD3D11`，也未打开 production gate；尚缺 encoder initialize、AYUV resource register/map、bitstream encode/lock、sequence header、IDR/reconfigure 实现与真实硬件验证。
+- 下一步：基于该 session 实现 `SequenceHeaderEncoder + D3D11Encoder`，完成一帧 AYUV D3D11 texture 的 register → map → encode → lock bitstream → unmap/unregister 闭环。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

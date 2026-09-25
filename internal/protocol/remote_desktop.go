@@ -166,6 +166,17 @@ type DesktopCapabilities struct {
 	MaxFPS         int                        `json:"maxFps,omitempty"`
 }
 
+func CloneDesktopCapabilities(capabilities DesktopCapabilities) DesktopCapabilities {
+	cloned := capabilities
+	cloned.Captures = append([]DesktopCaptureCapability(nil), capabilities.Captures...)
+	cloned.Codecs = CloneDesktopCodecCapabilities(capabilities.Codecs)
+	cloned.GPU = CloneDesktopGPUCapability(capabilities.GPU)
+	cloned.GPUCandidates = CloneDesktopGPUCandidateDiagnostics(capabilities.GPUCandidates)
+	cloned.Displays = append([]DesktopDisplayCapability(nil), capabilities.Displays...)
+	cloned.AudioCodecs = append([]string(nil), capabilities.AudioCodecs...)
+	return cloned
+}
+
 // RemoteDesktopTarget is the unified target model used by Agent UI and future
 // Relay Desktop negotiation. Existing RDP targets are adapted into this model.
 type RemoteDesktopTarget struct {
@@ -173,6 +184,18 @@ type RemoteDesktopTarget struct {
 	Name         string              `json:"name"`
 	Online       bool                `json:"online"`
 	Capabilities DesktopCapabilities `json:"capabilities"`
+}
+
+func CloneRemoteDesktopTargets(targets []RemoteDesktopTarget) []RemoteDesktopTarget {
+	if len(targets) == 0 {
+		return nil
+	}
+	cloned := make([]RemoteDesktopTarget, len(targets))
+	for i := range targets {
+		cloned[i] = targets[i]
+		cloned[i].Capabilities = CloneDesktopCapabilities(targets[i].Capabilities)
+	}
+	return cloned
 }
 
 type DesktopResolutionOptions struct {

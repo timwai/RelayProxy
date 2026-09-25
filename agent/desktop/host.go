@@ -165,8 +165,9 @@ type Host struct {
 
 	codecMu   sync.RWMutex
 	codecCaps []protocol.DesktopCodecCapability
-	gpuMu     sync.RWMutex
-	gpuCap    *protocol.DesktopGPUCapability
+	gpuMu         sync.RWMutex
+	gpuCap        *protocol.DesktopGPUCapability
+	gpuCandidates []protocol.DesktopGPUCandidateDiagnostics
 
 	sessionMu sync.Mutex
 	closeOnce sync.Once
@@ -245,8 +246,9 @@ func (h *Host) isolatedSessionHost() (*Host, func(), bool, error) {
 		input:     input,
 		cfg:       h.cfg,
 		audioOpen: h.audioOpen,
-		codecCaps: h.CodecCapabilities(),
-		gpuCap:    h.GPUCapability(),
+		codecCaps:      h.CodecCapabilities(),
+		gpuCap:         h.GPUCapability(),
+		gpuCandidates:  h.GPUCandidateDiagnostics(),
 	}
 	cleanup := func() {
 		_ = source.Close()
@@ -937,6 +939,24 @@ func (h *Host) GPUCapability() *protocol.DesktopGPUCapability {
 	return protocol.CloneDesktopGPUCapability(h.gpuCap)
 }
 
+func (h *Host) SetGPUCandidateDiagnostics(candidates []protocol.DesktopGPUCandidateDiagnostics) {
+	if h == nil {
+		return
+	}
+	h.gpuMu.Lock()
+	h.gpuCandidates = protocol.CloneDesktopGPUCandidateDiagnostics(candidates)
+	h.gpuMu.Unlock()
+}
+
+func (h *Host) GPUCandidateDiagnostics() []protocol.DesktopGPUCandidateDiagnostics {
+	if h == nil {
+		return nil
+	}
+	h.gpuMu.RLock()
+	defer h.gpuMu.RUnlock()
+	return protocol.CloneDesktopGPUCandidateDiagnostics(h.gpuCandidates)
+}
+
 func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabilities {
 	if h == nil {
 		return protocol.DesktopCapabilities{}
@@ -947,8 +967,9 @@ func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabili
 	caps := protocol.DesktopCapabilities{
 		RelayDesktop: true,
 		MultiStream:  multiStream,
-		Codecs:       h.CodecCapabilities(),
-		GPU:          h.GPUCapability(),
+		Codecs:        h.CodecCapabilities(),
+		GPU:           h.GPUCapability(),
+		GPUCandidates: h.GPUCandidateDiagnostics(),
 		MaxWidth:     maxJPEGWidth,
 		MaxHeight:    maxJPEGHeight,
 		MaxFPS:       maxJPEGFPS,

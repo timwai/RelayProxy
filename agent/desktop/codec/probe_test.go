@@ -133,6 +133,77 @@ func TestH265CapabilityDoesNotAdvertisePartialOneVPL444(t *testing.T) {
 	}
 }
 
+func TestH265CapabilityWith444BackendsAggregatesVendorDirections(t *testing.T) {
+	capability, available := H265CapabilityWith444Backends(
+		H265Probe{},
+		[]H265444BackendProbe{
+			{
+				Backend:         "nvenc-hevc444",
+				HardwareRuntime: true,
+				Encode:          true,
+			},
+			{
+				Backend:         "amf-hevc444",
+				HardwareRuntime: true,
+				Decode:          true,
+			},
+		},
+	)
+	if !available || !capability.Encode || !capability.Decode || !capability.Chroma444 {
+		t.Fatalf("split vendor 4:4:4 capability was not aggregated: %+v", capability)
+	}
+	if capability.Encoder != "nvenc-hevc444" {
+		t.Fatalf("encoder label=%q want nvenc-hevc444", capability.Encoder)
+	}
+	if len(capability.EncodeChroma) != 1 || capability.EncodeChroma[0] != "444" ||
+		len(capability.DecodeChroma) != 1 || capability.DecodeChroma[0] != "444" {
+		t.Fatalf("directional 4:4:4 capability=%+v", capability)
+	}
+}
+
+func TestH265CapabilityWith444BackendsRequiresRuntimeAndBothDirections(t *testing.T) {
+	capability, available := H265CapabilityWith444Backends(
+		H265Probe{},
+		[]H265444BackendProbe{
+			{
+				Backend:         "nvenc-hevc444",
+				HardwareRuntime: true,
+				Encode:          true,
+			},
+			{
+				Backend: "amf-hevc444",
+				Decode:  true,
+			},
+		},
+	)
+	if available || capability.Chroma444 || capability.Encode || capability.Decode {
+		t.Fatalf("backend without runtime was advertised: %+v", capability)
+	}
+}
+
+func TestH265CapabilityWith444BackendsMergesEncoderLabels(t *testing.T) {
+	capability, available := H265CapabilityWith444Backends(
+		H265Probe{HardwareEncoderCount: 1, HardwareDecoderCount: 1},
+		[]H265444BackendProbe{
+			{
+				Backend:         "vendor-a-hevc444",
+				HardwareRuntime: true,
+				Encode:          true,
+				Decode:          true,
+			},
+			{
+				Backend:         "vendor-b-hevc444",
+				HardwareRuntime: true,
+				Encode:          true,
+				Decode:          true,
+			},
+		},
+	)
+	if !available || capability.Encoder != "media-foundation+vendor-a-hevc444+vendor-b-hevc444" {
+		t.Fatalf("merged vendor labels=%q capability=%+v", capability.Encoder, capability)
+	}
+}
+
 func TestH265CapabilityPreservesMixedDirectional420WithOneVPL(t *testing.T) {
 	capability, available := H265Capability(
 		H265Probe{HardwareDecoderCount: 1},

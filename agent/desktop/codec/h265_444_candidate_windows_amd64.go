@@ -17,6 +17,11 @@ const (
 	nvEncodeRuntimeDLL = "nvEncodeAPI64.dll"
 	nvDecodeRuntimeDLL = "nvcuvid.dll"
 	amfRuntimeDLL      = "amfrt64.dll"
+
+	// The public AMF HEVC encoder API exposes Main and Main10 profiles only.
+	// 4:4:4 input surfaces (for example AYUV/Y410) do not imply a 4:4:4 HEVC
+	// bitstream profile, so RelayProxy must not advertise HEVC 4:4:4 encode.
+	amfHEVC444EncodeLimitation = "amf_hevc_public_profiles_main_main10_only"
 )
 
 func runtimeCandidateStatus(value uintptr) int32 {
@@ -80,6 +85,7 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 				encodeProbe := probeNVIDIANVENCHEVC444(ctx, createInstance, version)
 				probe.DeviceProbe = encodeProbe.Checked
 				probe.DeviceCount = encodeProbe.DeviceCount
+				probe.EncodeCapabilityKnown = encodeProbe.Checked
 				probe.HEVC444Encode = encodeProbe.HEVC444
 				if encodeProbe.Error != "" {
 					issues = appendCandidateIssue(issues, "NVENC device probe: %s", encodeProbe.Error)
@@ -107,6 +113,7 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 			probe.DecodeRuntime = true
 			deviceProbe := probeNVIDIANVDECHEVC444(ctx, getDecoderCaps)
 			probe.DeviceProbe = probe.DeviceProbe || deviceProbe.Checked
+			probe.DecodeCapabilityKnown = deviceProbe.Checked
 			if deviceProbe.DeviceCount > probe.DeviceCount {
 				probe.DeviceCount = deviceProbe.DeviceCount
 			}
@@ -124,9 +131,12 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 
 func probeAMFH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandidate {
 	probe := H265444RuntimeCandidate{
-		Backend:     "amf-hevc444",
-		Vendor:      "amd",
-		Implemented: false,
+		Backend:                "amf-hevc444",
+		Vendor:                 "amd",
+		EncodeCapabilityKnown:  true,
+		HEVC444Encode:          false,
+		Implemented:            false,
+		Limitation:             amfHEVC444EncodeLimitation,
 	}
 	if err := ctx.Err(); err != nil {
 		probe.Error = err.Error()

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	desktopDiagnosticsSchemaVersion = 7
+	desktopDiagnosticsSchemaVersion = 8
 	desktopDiagnosticsMaxSamples    = 1200
 	desktopDiagnosticsIntervalMs    = 500
 )

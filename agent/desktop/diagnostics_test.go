@@ -8,6 +8,12 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+func TestDesktopDiagnosticsSchemaVersionIncludesCandidateCapabilityState(t *testing.T) {
+	if desktopDiagnosticsSchemaVersion != 8 {
+		t.Fatalf("desktop diagnostics schema=%d want=8", desktopDiagnosticsSchemaVersion)
+	}
+}
+
 func TestSessionDiagnosticsRecorderKeepsBoundedRecentSamples(t *testing.T) {
 	start := time.Unix(100, 0)
 	recorder := newSessionDiagnosticsRecorder("target-a", protocol.RemoteDesktopConnectOptions{

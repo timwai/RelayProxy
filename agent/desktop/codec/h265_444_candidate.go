@@ -18,13 +18,16 @@ type H265444RuntimeCandidate struct {
 	// DeviceProbe means a real vendor device/context capability query completed.
 	// HEVC444Encode / HEVC444Decode are still diagnostics-only until RelayProxy
 	// has corresponding production openers and zero-copy validation.
-	DeviceProbe   bool
-	DeviceCount   int
-	HEVC444Encode bool
-	HEVC444Decode bool
-	Version       string
-	Implemented   bool
-	Error         string
+	DeviceProbe           bool
+	DeviceCount           int
+	EncodeCapabilityKnown bool
+	DecodeCapabilityKnown bool
+	HEVC444Encode         bool
+	HEVC444Decode         bool
+	Version               string
+	Implemented           bool
+	Limitation            string
+	Error                 string
 }
 
 // ProbeH265444RuntimeCandidates returns diagnostic-only vendor runtime probes.

@@ -10,7 +10,8 @@ func TestCloneDesktopCapabilitiesDeepCopiesGPUDetails(t *testing.T) {
 		}},
 		GPU: &DesktopGPUCapability{Backend: "d3d11", Formats: []string{"nv12", "ayuv"}},
 		GPUCandidates: []DesktopGPUCandidateDiagnostics{{
-			Backend: "nvcodec-hevc444", Vendor: "nvidia", DeviceProbe: true, HEVC444Decode: true,
+			Backend: "nvcodec-hevc444", Vendor: "nvidia", DeviceProbe: true,
+			DecodeCapabilityKnown: true, HEVC444Decode: true, Limitation: "test-limit",
 		}},
 		Displays:    []DesktopDisplayCapability{{ID: "display-1", Width: 1920, Height: 1080}},
 		AudioCodecs: []string{DesktopAudioCodecOpus},
@@ -28,6 +29,8 @@ func TestCloneDesktopCapabilitiesDeepCopiesGPUDetails(t *testing.T) {
 		input.Codecs[0].EncodeChroma[0] != "420" ||
 		input.GPU.Formats[0] != "nv12" ||
 		input.GPUCandidates[0].Backend != "nvcodec-hevc444" ||
+		!input.GPUCandidates[0].DecodeCapabilityKnown ||
+		input.GPUCandidates[0].Limitation != "test-limit" ||
 		input.Displays[0].ID != "display-1" ||
 		input.AudioCodecs[0] != DesktopAudioCodecOpus {
 		t.Fatalf("clone aliases source capability: source=%+v clone=%+v", input, got)
@@ -40,6 +43,7 @@ func TestCloneRemoteDesktopTargetsDeepCopiesCapabilities(t *testing.T) {
 		Capabilities: DesktopCapabilities{
 			GPUCandidates: []DesktopGPUCandidateDiagnostics{{
 				Backend: "amf-hevc444", Vendor: "amd", RuntimeAvailable: true,
+				EncodeCapabilityKnown: true, Limitation: "amf_hevc_public_profiles_main_main10_only",
 			}},
 		},
 	}}

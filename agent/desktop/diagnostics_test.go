@@ -297,6 +297,103 @@ func TestSessionDiagnosticsReportSummarizesHEVCValidation(t *testing.T) {
 	}
 }
 
+func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
+	start := time.Unix(350, 0)
+	recorder := newSessionDiagnosticsRecorder("target-gpu", protocol.RemoteDesktopConnectOptions{
+		Backend: protocol.DesktopBackendRelay,
+		Codec:   "h265",
+		Chroma:  protocol.DesktopChroma444,
+	}, start)
+	targetGPU := &protocol.DesktopGPUCapability{
+		Backend:         "d3d11",
+		EncodeZeroCopy:  true,
+		DecodeZeroCopy:  true,
+		DisplayZeroCopy: true,
+		Formats:         []string{"nv12", "ayuv"},
+	}
+	recorder.SetTargetGPUCapability(targetGPU)
+	targetGPU.Formats[1] = "mutated"
+
+	config := protocol.DesktopVideoConfig{
+		Generation: 1,
+		Codec:      "h265",
+		Chroma:     string(protocol.DesktopChroma444),
+		BitDepth:   8,
+		Width:      1920,
+		Height:     1080,
+	}
+	recorder.Record(start, config, protocol.DesktopSessionStats{
+		CaptureFormat:   "d3d11-ayuv",
+		EncoderBackend:  "onevpl-hevc444-d3d11-zero-copy",
+		EncoderHardware: true,
+		DecoderBackend:  "onevpl-hevc444-d3d11-zero-copy",
+		DecoderHardware: true,
+	}, DesktopAudioDiagnostics{}, desktopadapt.MediaDecision{})
+	recorder.Record(start.Add(500*time.Millisecond), config, protocol.DesktopSessionStats{
+		CaptureFormat:   "rgba",
+		EncoderBackend:  "onevpl-hevc444",
+		EncoderHardware: true,
+		DecoderBackend:  "onevpl-hevc444",
+		DecoderHardware: true,
+	}, DesktopAudioDiagnostics{}, desktopadapt.MediaDecision{})
+
+	report := recorder.Report(
+		start.Add(time.Second),
+		config,
+		protocol.DesktopSessionStats{},
+		DesktopAudioDiagnostics{},
+	)
+	if report.TargetGPU == nil || report.TargetGPU.Backend != "d3d11" ||
+		len(report.TargetGPU.Formats) != 2 || report.TargetGPU.Formats[1] != "ayuv" {
+		t.Fatalf("target GPU snapshot=%+v", report.TargetGPU)
+	}
+	got := report.GPUValidation
+	if got == nil || got.ExpectedFormat != "ayuv" || !got.TargetAdvertised {
+		t.Fatalf("GPU validation identity=%+v", got)
+	}
+	if got.MatchingSamples != 2 ||
+		got.HostEncodeZeroCopySamples != 1 ||
+		got.ViewerDecodeZeroCopySamples != 1 ||
+		got.EndToEndZeroCopySamples != 1 ||
+		got.FallbackSamples != 1 {
+		t.Fatalf("GPU validation counts=%+v", got)
+	}
+	if got.CaptureFormats["d3d11-ayuv"] != 1 || got.CaptureFormats["rgba"] != 1 ||
+		got.EncoderBackends["onevpl-hevc444-d3d11-zero-copy"] != 1 ||
+		got.DecoderBackends["onevpl-hevc444-d3d11-zero-copy"] != 1 {
+		t.Fatalf("GPU validation backends=%+v", got)
+	}
+
+	report.TargetGPU.Formats[0] = "changed"
+	again := recorder.Report(
+		start.Add(2*time.Second),
+		config,
+		protocol.DesktopSessionStats{},
+		DesktopAudioDiagnostics{},
+	)
+	if again.TargetGPU == nil || again.TargetGPU.Formats[0] != "nv12" {
+		t.Fatalf("report exposed target GPU snapshot: %+v", again.TargetGPU)
+	}
+}
+
+func TestSummarizeGPUValidationRequiresAllAdvertisedZeroCopyDirections(t *testing.T) {
+	config := protocol.DesktopVideoConfig{
+		Codec:  "h265",
+		Chroma: string(protocol.DesktopChroma444),
+	}
+	capability := &protocol.DesktopGPUCapability{
+		Backend:         "d3d11",
+		EncodeZeroCopy:  true,
+		DecodeZeroCopy:  true,
+		DisplayZeroCopy: false,
+		Formats:         []string{"ayuv"},
+	}
+	got := summarizeGPUValidation(capability, config, nil)
+	if got == nil || got.ExpectedFormat != "ayuv" || got.TargetAdvertised {
+		t.Fatalf("partial target capability must not count as advertised: %+v", got)
+	}
+}
+
 func TestSummarizeDesktopDiagnosticsIncludesAudio(t *testing.T) {
 	start := time.Unix(400, 0)
 	audioConfig := protocol.DesktopAudioConfig{
@@ -372,7 +469,7 @@ func TestSessionDiagnosticsReportCarriesCurrentAudio(t *testing.T) {
 	}
 	recorder.Record(start, protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio, desktopadapt.MediaDecision{})
 	report := recorder.Report(start.Add(time.Second), protocol.DesktopVideoConfig{}, protocol.DesktopSessionStats{}, audio)
-	if report.SchemaVersion != 5 || report.CurrentAudio.Config.Generation != 3 ||
+	if report.SchemaVersion != 6 || report.CurrentAudio.Config.Generation != 3 ||
 		report.CurrentAudio.QueueFrames != 2 || len(report.Samples) != 1 ||
 		report.Samples[0].Audio.ReceivedFrames != 7 {
 		t.Fatalf("audio report=%+v", report)

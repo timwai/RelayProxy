@@ -107,18 +107,22 @@ func appendDesktopChroma(values []string, chroma string) []string {
 	return append(values, chroma)
 }
 
-// H265CapabilityWith444Backends combines the established Media Foundation
-// 4:2:0 path with vendor-neutral HEVC 4:4:4 runtime probes. The shared legacy
-// Chroma444 flag remains conservative: it is exposed only when the machine has
-// both an implemented 4:4:4 encode path and an implemented 4:4:4 decode path.
-func H265CapabilityWith444Backends(
+// H265CapabilityWith444Paths combines the established Media Foundation 4:2:0
+// path with vendor-neutral HEVC 4:4:4 backends. System-memory backends are safe
+// to aggregate directly because their openers can serve the generic H.265
+// pipeline. A D3D11-only backend becomes public only after the Host has
+// validated AYUV encode + decode + display on a real device.
+func H265CapabilityWith444Paths(
 	mf H265Probe,
 	backends []H265444BackendProbe,
+	d3d11EndToEndValidated bool,
 ) (protocol.DesktopCodecCapability, bool) {
 	capability := mf.Capability()
 	available := mf.EncodeAvailable() || mf.DecodeAvailable()
 
-	if H265444EndToEndAvailable(backends) {
+	systemMemory444 := H265444SystemMemoryEndToEndAvailable(backends)
+	d3d11444 := d3d11EndToEndValidated && H265444D3D11EndToEndAvailable(backends)
+	if systemMemory444 || d3d11444 {
 		capability.Codec = "h265"
 		capability.Encode = true
 		capability.Decode = true
@@ -134,7 +138,12 @@ func H265CapabilityWith444Backends(
 
 		encoderBackends := make([]string, 0, len(backends))
 		for _, backend := range backends {
-			if !backend.HardwareRuntime || !backend.Encode || strings.TrimSpace(backend.Backend) == "" {
+			if !backend.HardwareRuntime || strings.TrimSpace(backend.Backend) == "" {
+				continue
+			}
+			contributesSystemMemory := systemMemory444 && backend.SystemMemoryEncode
+			contributesD3D11 := d3d11444 && backend.D3D11Encode
+			if !contributesSystemMemory && !contributesD3D11 {
 				continue
 			}
 			encoderBackends = append(encoderBackends, strings.TrimSpace(backend.Backend))
@@ -152,14 +161,28 @@ func H265CapabilityWith444Backends(
 	return capability, available
 }
 
+// H265CapabilityWith444Backends preserves the existing generic aggregation API.
+// It intentionally treats D3D11-only paths as unvalidated; platform Hosts must
+// call H265CapabilityWith444Paths after their device-level AYUV validation.
+func H265CapabilityWith444Backends(
+	mf H265Probe,
+	backends []H265444BackendProbe,
+) (protocol.DesktopCodecCapability, bool) {
+	return H265CapabilityWith444Paths(mf, backends, false)
+}
+
 // H265Capability preserves the existing oneVPL-facing API while routing
 // capability aggregation through the vendor-neutral backend model.
 func H265Capability(mf H265Probe, oneVPL OneVPLProbe) (protocol.DesktopCodecCapability, bool) {
 	return H265CapabilityWith444Backends(mf, []H265444BackendProbe{{
-		Backend:         H265444BackendOneVPL,
-		HardwareRuntime: oneVPL.DispatcherAvailable && oneVPL.HardwareRuntime,
-		Encode:          oneVPL.HEVC444Encode,
-		Decode:          oneVPL.HEVC444Decode,
-		Error:           oneVPL.Error,
+		Backend:            H265444BackendOneVPL,
+		HardwareRuntime:    oneVPL.DispatcherAvailable && oneVPL.HardwareRuntime,
+		Encode:             oneVPL.HEVC444Encode,
+		Decode:             oneVPL.HEVC444Decode,
+		SystemMemoryEncode: oneVPL.HEVC444Encode,
+		SystemMemoryDecode: oneVPL.HEVC444Decode,
+		D3D11Encode:        oneVPL.HEVC444Encode,
+		D3D11Decode:        oneVPL.HEVC444Decode,
+		Error:              oneVPL.Error,
 	}})
 }

@@ -15,6 +15,13 @@ type H265444RuntimeCandidate struct {
 	// that this GPU supports HEVC 4:4:4 in either direction.
 	EncodeRuntime bool
 	DecodeRuntime bool
+	// DeviceProbe means a real vendor device/context capability query completed.
+	// HEVC444Encode / HEVC444Decode are still diagnostics-only until RelayProxy
+	// has corresponding production openers and zero-copy validation.
+	DeviceProbe   bool
+	DeviceCount   int
+	HEVC444Encode bool
+	HEVC444Decode bool
 	Version       string
 	Implemented   bool
 	Error         string

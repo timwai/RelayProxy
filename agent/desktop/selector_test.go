@@ -42,6 +42,16 @@ func TestSelectBackend(t *testing.T) {
 			target:  protocol.DesktopCapabilities{},
 			wantErr: true,
 		},
+		{
+			name: "diagnostic GPU candidates do not enable a backend",
+			target: protocol.DesktopCapabilities{
+				GPUCandidates: []protocol.DesktopGPUCandidateDiagnostics{{
+					Backend: "nvcodec-hevc444", Vendor: "nvidia",
+					DeviceProbe: true, HEVC444Decode: true,
+				}},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

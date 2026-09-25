@@ -883,7 +883,7 @@ Windows SendInput / CF_UNICODETEXT
 - 定义 backend session 生命周期合约：codec context 与 interop registrations 由 session 持有；`Close()` 必须幂等，并在返回前释放所有 session-owned 资源。
 - 定义 D3D11 zero-copy ownership：encoder 只在单次 `EncodeD3D11` 调用期间借用输入 texture；decoder 输出 surface 由 backend 持有到对应 `DecodedFrame.Close()`。
 - NVIDIA scaffold 使用 `d3d11-cuda` interop contract，输入/输出均固定为 AYUV 8-bit 4:4:4，并要求 capture / codec / viewer 保持在同一 D3D11 device / adapter 边界。
-- Windows amd64 registry 已挂入 `nvcodec-hevc444` candidate probe，复用现有真实 NVENC/NVDEC device capability 结果；但 production opener 仍未挂接。
+- Windows amd64 registry 已挂入 `nvcodec-hevc444` production slot，但不重复执行 NVIDIA device probe；真实 NVENC/NVDEC device capability 继续只由 candidate diagnostics 负责，避免启动期双重探测。production opener 仍未挂接。
 - NVIDIA backend 明确保持 `productionReady=false`、`zeroCopyValidated=false`；因此即使 NVENC/NVDEC capability probe 均为 true，也不会公开 `Chroma444`，也不会被 `OpenH265444*()` 选中。
 - 新增测试固定 production gate、D3D11-only opener、lifecycle ownership、D3D11/CUDA interop ownership 以及 NVCodec 默认关闭行为。
 - 代表实现 PR：#124。

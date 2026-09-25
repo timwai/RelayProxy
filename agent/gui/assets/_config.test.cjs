@@ -52,6 +52,7 @@ function fixture(options = {}) {
       createElement: element, createTextNode(text) { return text; } },
     goGetConfig: async () => { loads++; return JSON.stringify(cfg); },
     goGetStatus: async () => JSON.stringify(options.status || { connected: false }),
+    goGetRemoteDesktopTargets: async () => JSON.stringify(options.desktopTargets || []),
     goSaveConfig: async raw => {
       const payload = JSON.parse(raw);
       saves.push(payload);
@@ -258,4 +259,85 @@ test('external edit after save cannot silently rebase another dirty section', as
   assert.equal(f.get('cfg-server').value, 'draft.example');
   assert.ok(f.buttons.every(button => button.disabled));
   assert.match(f.get('config-state').textContent, /其他操作修改/);
+});
+
+
+test('remote desktop GPU capability label reports backend formats and zero-copy directions', () => {
+  const f = fixture();
+  const target = {
+    deviceId: 'target-gpu',
+    capabilities: {
+      gpu: {
+        backend: 'd3d11',
+        encodeZeroCopy: true,
+        decodeZeroCopy: true,
+        displayZeroCopy: true,
+        formats: ['nv12', 'ayuv']
+      }
+    }
+  };
+  assert.equal(
+    f.context.remoteDesktopGPUCapabilityLabel(target),
+    'GPU D3D11 NV12/AYUV E/D/R'
+  );
+});
+
+test('remote desktop GPU path summary distinguishes E2E and display fallback', async () => {
+  const target = {
+    deviceId: 'target-gpu',
+    online: true,
+    capabilities: {
+      relayDesktop: true,
+      gpu: {
+        backend: 'd3d11',
+        encodeZeroCopy: true,
+        decodeZeroCopy: true,
+        displayZeroCopy: true,
+        formats: ['ayuv']
+      }
+    }
+  };
+  const f = fixture({ desktopTargets: [target] });
+  await f.context.refreshRemoteDesktopTargets(false);
+
+  const status = { targetId: 'target-gpu', codec: 'h265', chroma: '444' };
+  const e2e = {
+    captureFormat: 'd3d11-ayuv',
+    encoderBackend: 'onevpl-hevc444-d3d11-zero-copy',
+    decoderBackend: 'onevpl-hevc444-d3d11-zero-copy',
+    renderBackend: 'd3d11-zero-copy'
+  };
+  assert.equal(
+    f.context.remoteDesktopGPUPathSummary(status, e2e),
+    'GPU AYUV E✓/D✓/R✓'
+  );
+
+  const fallback = { ...e2e, renderBackend: 'cpu-bgra' };
+  assert.equal(
+    f.context.remoteDesktopGPUPathSummary(status, fallback),
+    'GPU AYUV E✓/D✓/R×'
+  );
+});
+
+test('remote desktop GPU path summary marks unadvertised runtime format', async () => {
+  const f = fixture({
+    desktopTargets: [{
+      deviceId: 'target-legacy',
+      online: true,
+      capabilities: { relayDesktop: true }
+    }]
+  });
+  await f.context.refreshRemoteDesktopTargets(false);
+  assert.equal(
+    f.context.remoteDesktopGPUPathSummary(
+      { targetId: 'target-legacy', codec: 'h264', chroma: '420' },
+      {
+        captureFormat: 'd3d11-nv12',
+        encoderBackend: 'media-foundation-d3d11',
+        decoderBackend: 'media-foundation-d3d11-zero-copy',
+        renderBackend: 'd3d11-zero-copy'
+      }
+    ),
+    'GPU NV12 未声明 E✓/D✓/R✓'
+  );
 });

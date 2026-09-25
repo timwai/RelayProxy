@@ -119,6 +119,32 @@ func openNextH265CPUGeneration(
 	return encoder, normalized, sequenceHeader, nextGeneration, nil
 }
 
+func openH265D3D11Converter(
+	device uintptr,
+	inputWidth int,
+	inputHeight int,
+	cfg desktopcodec.VideoConfig,
+) (*desktopcodec.D3D11NV12Converter, error) {
+	convertCfg := desktopcodec.D3D11ConvertConfig{
+		InputWidth:   inputWidth,
+		InputHeight:  inputHeight,
+		OutputWidth:  cfg.Width,
+		OutputHeight: cfg.Height,
+		FPS:          cfg.FPS,
+	}
+	if cfg.Chroma == desktopcodec.Chroma444 {
+		return desktopcodec.OpenD3D11AYUVConverter(device, convertCfg)
+	}
+	return desktopcodec.OpenD3D11NV12Converter(device, convertCfg)
+}
+
+func h265D3D11CaptureFormat(cfg desktopcodec.VideoConfig) string {
+	if cfg.Chroma == desktopcodec.Chroma444 {
+		return "d3d11-ayuv"
+	}
+	return "d3d11-nv12"
+}
+
 func openH265D3D11Generation(
 	ctx context.Context,
 	cfg desktopcodec.VideoConfig,
@@ -138,13 +164,12 @@ func openH265D3D11Generation(
 	if err != nil {
 		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
 	}
-	converter, err := desktopcodec.OpenD3D11NV12Converter(frame.Device, desktopcodec.D3D11ConvertConfig{
-		InputWidth:   frame.Width,
-		InputHeight:  frame.Height,
-		OutputWidth:  normalized.Width,
-		OutputHeight: normalized.Height,
-		FPS:          normalized.FPS,
-	})
+	converter, err := openH265D3D11Converter(
+		frame.Device,
+		frame.Width,
+		frame.Height,
+		normalized,
+	)
 	if err != nil {
 		return nil, nil, nil, desktopcodec.VideoConfig{}, nil, err
 	}
@@ -153,6 +178,9 @@ func openH265D3D11Generation(
 		cfg desktopcodec.VideoConfig,
 		preferHardware bool,
 	) (h265GenerationEncoder, error) {
+		if cfg.Chroma == desktopcodec.Chroma444 {
+			return desktopcodec.OpenOneVPLH265EncoderWithD3D11(ctx, cfg, frame.Device)
+		}
 		return desktopcodec.OpenMFH265EncoderWithD3D11(ctx, cfg, preferHardware, frame.Device)
 	}
 	encoder, normalized, sequenceHeader, err := openH265GenerationEncoder(ctx, normalized, opener)
@@ -308,26 +336,25 @@ func (h *Host) streamH265Frames(
 		gpuInputWidth  int
 		gpuInputHeight int
 	)
-	if videoCfg.Chroma != desktopcodec.Chroma444 {
-		if source, ok := h.source.(D3D11CaptureSource); ok {
-			candidate, available, captureErr := source.CaptureD3D11(ctx)
-			if captureErr != nil {
-				log.Printf("[Desktop] D3D11 capture probe failed, keeping CPU H.265 path: %v", captureErr)
-			} else if available && candidate != nil {
-				encoder, d3dEncoder, d3dConverter, normalizedCfg, sequenceHeader, err =
-					openH265D3D11Generation(ctx, videoCfg, candidate)
-				if err == nil {
-					d3dSource = source
-					firstD3D = candidate
-					gpuEnabled = true
-					gpuInputWidth = candidate.Width
-					gpuInputHeight = candidate.Height
-					log.Printf("[Desktop] H.265 zero-copy path enabled capture=%dx%d encode=%dx%d",
-						candidate.Width, candidate.Height, normalizedCfg.Width, normalizedCfg.Height)
-				} else {
-					candidate.Close()
-					log.Printf("[Desktop] D3D11 H.265 initialization failed, keeping CPU path: %v", err)
-				}
+	if source, ok := h.source.(D3D11CaptureSource); ok {
+		candidate, available, captureErr := source.CaptureD3D11(ctx)
+		if captureErr != nil {
+			log.Printf("[Desktop] D3D11 capture probe failed, keeping CPU H.265 path: %v", captureErr)
+		} else if available && candidate != nil {
+			encoder, d3dEncoder, d3dConverter, normalizedCfg, sequenceHeader, err =
+				openH265D3D11Generation(ctx, videoCfg, candidate)
+			if err == nil {
+				d3dSource = source
+				firstD3D = candidate
+				gpuEnabled = true
+				gpuInputWidth = candidate.Width
+				gpuInputHeight = candidate.Height
+				log.Printf("[Desktop] H.265 zero-copy path enabled capture=%dx%d encode=%dx%d format=%s",
+					candidate.Width, candidate.Height, normalizedCfg.Width, normalizedCfg.Height,
+					h265D3D11CaptureFormat(normalizedCfg))
+			} else {
+				candidate.Close()
+				log.Printf("[Desktop] D3D11 H.265 initialization failed, keeping CPU path: %v", err)
 			}
 		}
 	}
@@ -390,7 +417,7 @@ func (h *Host) streamH265Frames(
 		captureFormat = "bgra-direct"
 	}
 	if gpuEnabled {
-		captureFormat = "d3d11-nv12"
+		captureFormat = h265D3D11CaptureFormat(videoCfg)
 	}
 	needsGenerationKeyFrame := true
 	targetFPS := videoCfg.FPS
@@ -716,7 +743,7 @@ func (h *Host) streamH265Frames(
 				sequenceHeader = nextSequenceHeader
 				gpuInputWidth = frame.Width
 				gpuInputHeight = frame.Height
-				captureFormat = "d3d11-nv12"
+				captureFormat = h265D3D11CaptureFormat(videoCfg)
 				generation = nextGeneration
 				frameID = 1
 				needsGenerationKeyFrame = true
@@ -836,13 +863,11 @@ func (h *Host) streamH265Frames(
 					continue
 				}
 				if frame.Width != gpuInputWidth || frame.Height != gpuInputHeight {
-					nextConverter, convertErr := desktopcodec.OpenD3D11NV12Converter(
+					nextConverter, convertErr := openH265D3D11Converter(
 						frame.Device,
-						desktopcodec.D3D11ConvertConfig{
-							InputWidth: frame.Width, InputHeight: frame.Height,
-							OutputWidth: videoCfg.Width, OutputHeight: videoCfg.Height,
-							FPS: videoCfg.FPS,
-						},
+						frame.Width,
+						frame.Height,
+						videoCfg,
 					)
 					if convertErr != nil {
 						frame.Close()
@@ -869,7 +894,7 @@ func (h *Host) streamH265Frames(
 					}
 					continue
 				}
-				captureFormat = "d3d11-nv12"
+				captureFormat = h265D3D11CaptureFormat(videoCfg)
 				if err := reportStats(time.Now()); err != nil {
 					return err
 				}

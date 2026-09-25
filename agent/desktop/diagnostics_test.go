@@ -328,6 +328,7 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 		EncoderHardware: true,
 		DecoderBackend:  "onevpl-hevc444-d3d11-zero-copy",
 		DecoderHardware: true,
+		RenderBackend:   "d3d11-zero-copy",
 	}, DesktopAudioDiagnostics{}, desktopadapt.MediaDecision{})
 	recorder.Record(start.Add(500*time.Millisecond), config, protocol.DesktopSessionStats{
 		CaptureFormat:   "rgba",
@@ -335,6 +336,7 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 		EncoderHardware: true,
 		DecoderBackend:  "onevpl-hevc444",
 		DecoderHardware: true,
+		RenderBackend:   "cpu-bgra",
 	}, DesktopAudioDiagnostics{}, desktopadapt.MediaDecision{})
 
 	report := recorder.Report(
@@ -354,13 +356,16 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 	if got.MatchingSamples != 2 ||
 		got.HostEncodeZeroCopySamples != 1 ||
 		got.ViewerDecodeZeroCopySamples != 1 ||
+		got.ViewerDisplayZeroCopySamples != 1 ||
 		got.EndToEndZeroCopySamples != 1 ||
 		got.FallbackSamples != 1 {
 		t.Fatalf("GPU validation counts=%+v", got)
 	}
 	if got.CaptureFormats["d3d11-ayuv"] != 1 || got.CaptureFormats["rgba"] != 1 ||
 		got.EncoderBackends["onevpl-hevc444-d3d11-zero-copy"] != 1 ||
-		got.DecoderBackends["onevpl-hevc444-d3d11-zero-copy"] != 1 {
+		got.DecoderBackends["onevpl-hevc444-d3d11-zero-copy"] != 1 ||
+		got.RenderBackends["d3d11-zero-copy"] != 1 ||
+		got.RenderBackends["cpu-bgra"] != 1 {
 		t.Fatalf("GPU validation backends=%+v", got)
 	}
 
@@ -373,6 +378,38 @@ func TestSessionDiagnosticsReportValidatesAYUVZeroCopy(t *testing.T) {
 	)
 	if again.TargetGPU == nil || again.TargetGPU.Formats[0] != "nv12" {
 		t.Fatalf("report exposed target GPU snapshot: %+v", again.TargetGPU)
+	}
+}
+
+func TestSummarizeGPUValidationRequiresActualDisplayZeroCopy(t *testing.T) {
+	config := protocol.DesktopVideoConfig{
+		Codec:  "h265",
+		Chroma: string(protocol.DesktopChroma444),
+	}
+	capability := &protocol.DesktopGPUCapability{
+		Backend:         "d3d11",
+		EncodeZeroCopy:  true,
+		DecodeZeroCopy:  true,
+		DisplayZeroCopy: true,
+		Formats:         []string{"ayuv"},
+	}
+	samples := []DesktopDiagnosticSample{{
+		Config: config,
+		Stats: protocol.DesktopSessionStats{
+			CaptureFormat:   "d3d11-ayuv",
+			EncoderBackend:  "onevpl-hevc444-d3d11-zero-copy",
+			DecoderBackend:  "onevpl-hevc444-d3d11-zero-copy",
+			RenderBackend:   "cpu-bgra",
+		},
+	}}
+	got := summarizeGPUValidation(capability, config, samples)
+	if got == nil || !got.TargetAdvertised ||
+		got.HostEncodeZeroCopySamples != 1 ||
+		got.ViewerDecodeZeroCopySamples != 1 ||
+		got.ViewerDisplayZeroCopySamples != 0 ||
+		got.EndToEndZeroCopySamples != 0 ||
+		got.FallbackSamples != 1 {
+		t.Fatalf("CPU display must prevent end-to-end zero-copy: %+v", got)
 	}
 }
 

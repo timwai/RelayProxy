@@ -10,11 +10,14 @@ type H265444RuntimeCandidate struct {
 	Backend          string
 	Vendor           string
 	RuntimeAvailable bool
-	EncodeRuntime    bool
-	DecodeRuntime    bool
-	Version          string
-	Implemented      bool
-	Error            string
+	// EncodeRuntime / DecodeRuntime mean that the vendor runtime entry points
+	// needed to attempt those integrations are loadable. They are not evidence
+	// that this GPU supports HEVC 4:4:4 in either direction.
+	EncodeRuntime bool
+	DecodeRuntime bool
+	Version       string
+	Implemented   bool
+	Error         string
 }
 
 // ProbeH265444RuntimeCandidates returns diagnostic-only vendor runtime probes.

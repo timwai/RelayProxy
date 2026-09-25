@@ -149,7 +149,7 @@ func probeNVIDIANVDECHEVC444(
 	}
 	runtime.KeepAlive(&deviceCount)
 	if deviceCount <= 0 {
-		result.Checked = true
+		result.Error = "no CUDA devices"
 		return result
 	}
 	result.DeviceCount = int(deviceCount)

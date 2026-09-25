@@ -163,8 +163,8 @@ type Host struct {
 	audioOpen      audioCaptureFactory
 	sessionFactory HostSessionFactory
 
-	codecMu   sync.RWMutex
-	codecCaps []protocol.DesktopCodecCapability
+	codecMu       sync.RWMutex
+	codecCaps     []protocol.DesktopCodecCapability
 	gpuMu         sync.RWMutex
 	gpuCap        *protocol.DesktopGPUCapability
 	gpuCandidates []protocol.DesktopGPUCandidateDiagnostics
@@ -242,13 +242,13 @@ func (h *Host) isolatedSessionHost() (*Host, func(), bool, error) {
 		return nil, nil, true, errors.New("Relay Desktop session factory returned no capture source")
 	}
 	session := &Host{
-		source:    source,
-		input:     input,
-		cfg:       h.cfg,
-		audioOpen: h.audioOpen,
-		codecCaps:      h.CodecCapabilities(),
-		gpuCap:         h.GPUCapability(),
-		gpuCandidates:  h.GPUCandidateDiagnostics(),
+		source:        source,
+		input:         input,
+		cfg:           h.cfg,
+		audioOpen:     h.audioOpen,
+		codecCaps:     h.CodecCapabilities(),
+		gpuCap:        h.GPUCapability(),
+		gpuCandidates: h.GPUCandidateDiagnostics(),
 	}
 	cleanup := func() {
 		_ = source.Close()
@@ -965,14 +965,14 @@ func (h *Host) DesktopCapabilities(ctx context.Context) protocol.DesktopCapabili
 	multiStream := h.sessionFactory != nil
 	h.sessionMu.Unlock()
 	caps := protocol.DesktopCapabilities{
-		RelayDesktop: true,
-		MultiStream:  multiStream,
+		RelayDesktop:  true,
+		MultiStream:   multiStream,
 		Codecs:        h.CodecCapabilities(),
 		GPU:           h.GPUCapability(),
 		GPUCandidates: h.GPUCandidateDiagnostics(),
-		MaxWidth:     maxJPEGWidth,
-		MaxHeight:    maxJPEGHeight,
-		MaxFPS:       maxJPEGFPS,
+		MaxWidth:      maxJPEGWidth,
+		MaxHeight:     maxJPEGHeight,
+		MaxFPS:        maxJPEGFPS,
 	}
 	if _, ok := h.source.(ClipboardEndpoint); ok {
 		caps.Clipboard = true

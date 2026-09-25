@@ -876,6 +876,19 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #1021 全绿；UI CI #711 全绿，含 Windows/macOS desktop package。
 - 下一步：candidate 能力发现阶段已基本闭环。转入 NVIDIA production backend scaffolding：定义 NVENC/NVDEC opener 生命周期、生产 registry gate、资源 ownership 与 D3D11/CUDA interop contract；只有真实 encode/decode + zero-copy 验证完成后才允许 `Implemented=true` 与 `Chroma444` 广告。
 
+### 0.2.70 RD3 NVIDIA NVCodec HEVC 4:4:4 Production Backend Scaffold
+
+- vendor-neutral HEVC 4:4:4 registry 新增显式 production gate：只有 `productionReady=true`、`zeroCopyValidated=true`、生命周期合约有效、D3D11 interop 合约有效并且对应 opener 已实现时，backend 才允许进入 capability / opener 选择。
+- registry 的方向判定改为同时接受 system-memory opener 或 D3D11-only opener，为后续 NVENC/NVDEC 只实现 GPU zero-copy production path 留出正确边界。
+- 定义 backend session 生命周期合约：codec context 与 interop registrations 由 session 持有；`Close()` 必须幂等，并在返回前释放所有 session-owned 资源。
+- 定义 D3D11 zero-copy ownership：encoder 只在单次 `EncodeD3D11` 调用期间借用输入 texture；decoder 输出 surface 由 backend 持有到对应 `DecodedFrame.Close()`。
+- NVIDIA scaffold 使用 `d3d11-cuda` interop contract，输入/输出均固定为 AYUV 8-bit 4:4:4，并要求 capture / codec / viewer 保持在同一 D3D11 device / adapter 边界。
+- Windows amd64 registry 已挂入 `nvcodec-hevc444` production slot，但不重复执行 NVIDIA device probe；真实 NVENC/NVDEC device capability 继续只由 candidate diagnostics 负责，避免启动期双重探测。production opener 仍未挂接。
+- NVIDIA backend 明确保持 `productionReady=false`、`zeroCopyValidated=false`；因此即使 NVENC/NVDEC capability probe 均为 true，也不会公开 `Chroma444`，也不会被 `OpenH265444*()` 选中。
+- 新增测试固定 production gate、D3D11-only opener、lifecycle ownership、D3D11/CUDA interop ownership 以及 NVCodec 默认关闭行为。
+- 代表实现 PR：#124。
+- 下一步：实现 NVENC D3D11/CUDA encoder session opener，包括 CUDA device/context 生命周期、D3D11 texture registration/map/unmap、AYUV input、sequence header、IDR/bitrate reconfigure 与完整 Close 清理；完成真实 encode 验证后仍保持 backend 总 gate 关闭，直到 NVDEC + zero-copy round trip 同样通过。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

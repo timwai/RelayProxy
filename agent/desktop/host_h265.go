@@ -65,7 +65,7 @@ func openPreferredH265GenerationEncoder(
 	preferHardware bool,
 ) (h265GenerationEncoder, error) {
 	if cfg.Chroma == desktopcodec.Chroma444 {
-		return desktopcodec.OpenOneVPLH265Encoder(ctx, cfg)
+		return desktopcodec.OpenH265444Encoder(ctx, cfg)
 	}
 	return openMFH265GenerationEncoder(ctx, cfg, preferHardware)
 }
@@ -179,7 +179,7 @@ func openH265D3D11Generation(
 		preferHardware bool,
 	) (h265GenerationEncoder, error) {
 		if cfg.Chroma == desktopcodec.Chroma444 {
-			return desktopcodec.OpenOneVPLH265EncoderWithD3D11(ctx, cfg, frame.Device)
+			return desktopcodec.OpenH265444EncoderWithD3D11(ctx, cfg, frame.Device)
 		}
 		return desktopcodec.OpenMFH265EncoderWithD3D11(ctx, cfg, preferHardware, frame.Device)
 	}

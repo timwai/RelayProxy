@@ -245,14 +245,14 @@ func ProbeD3D11DisplayFormat(deviceHandle uintptr, cfg D3D11ConvertConfig, input
 	defer releaseIUnknown(processor)
 
 	textureDesc := mfD3D11Texture2DDesc{
-		Width:          uint32(cfg.OutputWidth),
-		Height:         uint32(cfg.OutputHeight),
-		MipLevels:      1,
-		ArraySize:      1,
-		Format:         dxgiFormatB8G8R8A8UNorm,
-		SampleDesc:     mfD3D11SampleDesc{Count: 1},
-		Usage:          d3d11UsageDefault,
-		BindFlags:      d3d11BindRenderTarget,
+		Width:      uint32(cfg.OutputWidth),
+		Height:     uint32(cfg.OutputHeight),
+		MipLevels:  1,
+		ArraySize:  1,
+		Format:     dxgiFormatB8G8R8A8UNorm,
+		SampleDesc: mfD3D11SampleDesc{Count: 1},
+		Usage:      d3d11UsageDefault,
+		BindFlags:  d3d11BindRenderTarget,
 	}
 	var outputTexture unsafe.Pointer
 	hr = comCall(

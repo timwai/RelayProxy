@@ -31,6 +31,9 @@ func TestProbeH265444BackendsPreservesPriorityAndBackfillsName(t *testing.T) {
 					Encode:          true,
 				}
 			},
+			openEncoder: func(context.Context, VideoConfig) (SequenceHeaderEncoder, error) {
+				return nil, ErrEncoderUnavailable
+			},
 		},
 		{
 			name: "vendor-b",
@@ -40,6 +43,9 @@ func TestProbeH265444BackendsPreservesPriorityAndBackfillsName(t *testing.T) {
 					HardwareRuntime: true,
 					Decode:          true,
 				}
+			},
+			openDecoder: func(context.Context, VideoConfig) (Decoder, error) {
+				return nil, ErrDecoderUnavailable
 			},
 		},
 	}
@@ -52,6 +58,22 @@ func TestProbeH265444BackendsPreservesPriorityAndBackfillsName(t *testing.T) {
 	}
 	if got[1].Backend != "vendor-b-runtime" || got[1].Encode || !got[1].Decode {
 		t.Fatalf("second probe=%+v", got[1])
+	}
+}
+
+func TestProbeH265444BackendsDoesNotAdvertiseProbeOnlyImplementation(t *testing.T) {
+	got := probeH265444Backends(context.Background(), []h265444Backend{{
+		name: "probe-only",
+		probe: func(context.Context) H265444BackendProbe {
+			return H265444BackendProbe{
+				HardwareRuntime: true,
+				Encode:          true,
+				Decode:          true,
+			}
+		},
+	}})
+	if len(got) != 1 || got[0].Encode || got[0].Decode || got[0].EndToEnd() {
+		t.Fatalf("probe-only backend was advertised: %+v", got)
 	}
 }
 

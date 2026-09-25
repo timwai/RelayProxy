@@ -313,7 +313,9 @@ test('remote desktop GPU path summary distinguishes E2E and display fallback', a
   const e2e = {
     captureFormat: 'd3d11-ayuv',
     encoderBackend: 'onevpl-hevc444-d3d11-zero-copy',
+    encoderHardware: true,
     decoderBackend: 'onevpl-hevc444-d3d11-zero-copy',
+    decoderHardware: true,
     renderBackend: 'd3d11-zero-copy'
   };
   assert.equal(

@@ -606,13 +606,18 @@ func desktopGPUFormatAdvertised(capability *protocol.DesktopGPUCapability, forma
 	return false
 }
 
+func desktopD3D11ZeroCopyBackend(backend string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(backend)), "-d3d11-zero-copy")
+}
+
 func desktopGPUHostEncodeZeroCopy(format string, stats protocol.DesktopSessionStats) bool {
 	captureFormat := strings.ToLower(strings.TrimSpace(stats.CaptureFormat))
 	backend := strings.ToLower(strings.TrimSpace(stats.EncoderBackend))
 	switch format {
 	case "ayuv":
 		return captureFormat == "d3d11-ayuv" &&
-			backend == "onevpl-hevc444-d3d11-zero-copy"
+			stats.EncoderHardware &&
+			desktopD3D11ZeroCopyBackend(backend)
 	case "nv12":
 		return captureFormat == "d3d11-nv12" &&
 			(backend == "media-foundation-d3d11" ||
@@ -626,7 +631,7 @@ func desktopGPUViewerDecodeZeroCopy(format string, stats protocol.DesktopSession
 	backend := strings.ToLower(strings.TrimSpace(stats.DecoderBackend))
 	switch format {
 	case "ayuv":
-		return backend == "onevpl-hevc444-d3d11-zero-copy"
+		return stats.DecoderHardware && desktopD3D11ZeroCopyBackend(backend)
 	case "nv12":
 		return backend == "media-foundation-d3d11-zero-copy"
 	default:

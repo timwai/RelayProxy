@@ -2,7 +2,10 @@
 
 package codec
 
-import "testing"
+import (
+	"testing"
+	"unsafe"
+)
 
 func TestFormatNVENCMaxSupportedVersion(t *testing.T) {
 	tests := []struct {
@@ -26,5 +29,14 @@ func TestFormatAMFRuntimeVersion(t *testing.T) {
 	}
 	if got := formatAMFRuntimeVersion(0x0001000500020003); got != "0x0001000500020003" {
 		t.Fatalf("AMF version=%q", got)
+	}
+}
+
+func TestNVDECDecodeCapsABI(t *testing.T) {
+	if got := unsafe.Sizeof(nvcuvidDecodeCaps{}); got != 88 {
+		t.Fatalf("CUVIDDECODECAPS size=%d want=88", got)
+	}
+	if nvVideoCodecHEVC != 8 || nvVideoChroma444 != 3 {
+		t.Fatalf("NVDEC enum constants codec=%d chroma=%d", nvVideoCodecHEVC, nvVideoChroma444)
 	}
 }

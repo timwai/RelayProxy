@@ -1138,10 +1138,12 @@ func NewSystemHost() (*Host, error) {
 			backendProbe.EndToEnd(), hevcCapability.Chroma444, backendProbe.Error)
 	}
 	for _, candidate := range h265444Candidates {
-		log.Printf("[Desktop] HEVC 4:4:4 candidate runtime vendor=%s backend=%s runtime=%t encodeRuntime=%t decodeRuntime=%t version=%q implemented=%t advertised=false error=%q",
+		log.Printf("[Desktop] HEVC 4:4:4 candidate runtime vendor=%s backend=%s runtime=%t encodeRuntime=%t decodeRuntime=%t deviceProbe=%t devices=%d hevc444Encode=%t hevc444Decode=%t version=%q implemented=%t advertised=false error=%q",
 			candidate.Vendor, candidate.Backend, candidate.RuntimeAvailable,
-			candidate.EncodeRuntime, candidate.DecodeRuntime, candidate.Version,
-			candidate.Implemented, candidate.Error)
+			candidate.EncodeRuntime, candidate.DecodeRuntime,
+			candidate.DeviceProbe, candidate.DeviceCount,
+			candidate.HEVC444Encode, candidate.HEVC444Decode,
+			candidate.Version, candidate.Implemented, candidate.Error)
 	}
 	for _, gpuFormat := range gpuFormats {
 		log.Printf("[Desktop] D3D11 GPU format probe format=%s encode=%t decode=%t display=%t encodeErr=%v decodeErr=%v displayErr=%v",

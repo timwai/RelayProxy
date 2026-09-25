@@ -1,10 +1,10 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface；当前进入 runtime GPU capability 精确上报与 Intel 双机实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #113 已合并，merge `ef87e16247c419b3cf8bb41d17c7159986318ec9`）
+> 当前开发基线：`main`（PR #115 已合并，merge `dd6d6ce6cd8702869e82625e6326178a2bde44bf`；格式修复 `aeba81bd6c48e057094898ec3f85fcdd66d359d1`）
 
 ## 0. 当前进度
 
@@ -31,7 +31,7 @@
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
 | RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换，PR #58 已把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR，PR #59 已补齐可导出的实机会话诊断时间序列，PR #60 已加入 schema v2 聚合 Summary、percentile 与路径/Generation/ABR/backend 分布统计；RD2 当前进入实机矩阵验证与参数标定阶段 |
-| RD3 HEVC / 4:4:4 GPU | 🧪 代码链已完成，进入实机验证 | H.265 generation-aware Host/Viewer、Intel oneVPL HEVC RExt 8-bit 4:4:4、D3D11 AYUV GPU encode/decode zero-copy 已进入 main；4:4:4 CPU I444 路径继续作为 fallback。下一步精确上报 GPU zero-copy runtime capability，并完成 Intel 双机/驱动矩阵；NVIDIA/AMD 4:4:4 仍需 vendor-native backend |
+| RD3 HEVC / 4:4:4 GPU | 🧪 代码链与 runtime capability 已完成，进入实机验证 | H.265 generation-aware Host/Viewer、Intel oneVPL HEVC RExt 8-bit 4:4:4、D3D11 AYUV GPU encode/decode zero-copy 已进入 main；4:4:4 CPU I444 路径继续作为 fallback。GPU capability 现按真实 D3D11 capture + encode/decode/display 端到端探测精确上报；下一步完成 Intel 双机/驱动矩阵，NVIDIA/AMD 4:4:4 仍需 vendor-native backend |
 
 ### 0.1 已合并主线的关键进度
 
@@ -758,7 +758,20 @@ Windows SendInput / CF_UNICODETEXT
 - D3D11 初始化或运行期失败时继续迁回 oneVPL system-memory I444 generation；4:2:0 H.265 仍使用 Media Foundation，不改变成熟路径。
 - 代表实现 PR：#113；merge `ef87e16247c419b3cf8bb41d17c7159986318ec9`。
 - 验证：最终 Go CI #971 的 format/vet/full test/race/benchmark 全部通过；UI CI #661 的 full regression、Windows desktop package、macOS desktop package 全部通过。
-- 当前剩余：把 `DesktopGPUCapability` 从 schema 变成基于真实 runtime probe 的精确 snapshot；完成 Intel 双机实际 AYUV encode/decode/display 验证；再根据结果决定公开策略与 NVIDIA/AMD 4:4:4 vendor backend。
+- 当前剩余：完成 Intel 双机实际 AYUV encode/decode/display 验证与驱动矩阵；根据实测结果继续校准公开策略，并进入 NVIDIA/AMD 4:4:4 vendor-native backend。
+
+### 0.2.61 RD3 Runtime GPU Capability Snapshot（已进入 main）
+
+- `Host` 新增线程安全的 `DesktopGPUCapability` snapshot 保存/深拷贝；`DesktopCapabilities()` 与 isolated multi-stream Host 会完整继承并上报 GPU capability，不再出现协议已有 `GPU` 字段但登录快照始终为空的情况。
+- Windows runtime probe 不按 GPU 型号或“代码存在”推断 zero-copy。探测会先从真实 DXGI/WGC 会话取得当前 D3D11 capture frame/device，再在同一个 device 上验证后续媒体链。
+- NV12 只有在 BGRA→NV12 VideoProcessor、Media Foundation H.264 D3D11 hardware encode（包含一次真实 `EncodeD3D11`）、D3D11 zero-copy decoder，以及 NV12→BGRA VideoProcessor display 四段均成立时，才进入 `GPU.Formats`。
+- AYUV 只有在 BGRA→AYUV VideoProcessor、oneVPL HEVC RExt 4:4:4 D3D11 encode（包含一次真实 `EncodeD3D11`）、oneVPL D3D11 decoder `Query/Init`，以及 AYUV→BGRA VideoProcessor display 四段均成立时，才进入 `GPU.Formats`。
+- `EncodeZeroCopy / DecodeZeroCopy / DisplayZeroCopy` 仅在至少一个格式完成端到端验证后上报；探测失败保持 `GPU=nil`，避免把 codec 枚举成功、DLL 存在或单段能力误报成整条 zero-copy 能力。
+- D3D11 首帧探测对 `ErrNoFrame` / timeout 做有限重试，避免静态桌面或 capture 刚启动时产生瞬时假阴性；非瞬态错误仍立即退出并记录各格式 encode/decode/display 失败原因。
+- oneVPL D3D11 decoder probe 在 Windows amd64 上真实执行 hardware+D3D11 session、`MFXVideoCORE_SetHandle`、HEVC 4:4:4 video-memory `Query` 与 `Init`；非 Windows / 非 amd64 提供 unavailable stub，保持 ARM64 与其他平台编译兼容。
+- 代表实现 PR：#115；merge `dd6d6ce6cd8702869e82625e6326178a2bde44bf`；随后 `aeba81bd6c48e057094898ec3f85fcdd66d359d1` 修复新增 D3D11 probe 的 gofmt 对齐。
+- 验证：Go CI #978 的 format/vet/full test/race/benchmark 全部通过；UI CI #668 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：在至少两台 Intel Windows 机器与多个驱动版本上完成真实 AYUV encode/decode/display 双机验证，核对 capability snapshot、实际 backend 与 diagnostics 一致性；随后依据矩阵结果进入 NVIDIA NVENC / AMD AMF 4:4:4 vendor-native backend。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -143,3 +143,22 @@ func TestD3D11ConvertConfigValidation(t *testing.T) {
 		t.Fatal("zero converter FPS accepted")
 	}
 }
+
+func TestD3D11EncodeFrameFormats(t *testing.T) {
+	frame := D3D11EncodeFrame{
+		Resource: 1,
+		Width:    1920,
+		Height:   1080,
+	}
+	if got := frame.PixelFormat(); got != PixelFormatNV12 {
+		t.Fatalf("default D3D11 format=%q want NV12", got)
+	}
+	frame.Format = PixelFormatAYUV
+	if err := frame.Validate(); err != nil {
+		t.Fatalf("AYUV D3D11 frame rejected: %v", err)
+	}
+	frame.Format = PixelFormat("unknown")
+	if !errors.Is(frame.Validate(), ErrInvalidFrame) {
+		t.Fatal("unknown D3D11 frame format accepted")
+	}
+}

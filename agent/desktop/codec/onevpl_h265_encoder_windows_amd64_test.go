@@ -8,6 +8,8 @@ import (
 	"unsafe"
 )
 
+var _ D3D11Encoder = (*oneVPLH265Encoder)(nil)
+
 func TestOneVPLHEVC444VideoParamABI(t *testing.T) {
 	cfg := DefaultVideoConfig()
 	cfg.Width = 1920
@@ -82,5 +84,26 @@ func TestOneVPLH265KeyFrameDetection(t *testing.T) {
 	idr := []byte{0, 0, 0, 1, byte(19 << 1), 1, 2, 3}
 	if !oneVPLH265IsKeyFrame(idr, 0) {
 		t.Fatal("HEVC IDR NAL was not treated as a key frame")
+	}
+}
+
+func TestOneVPLHEVC444VideoMemoryParam(t *testing.T) {
+	cfg := DefaultVideoConfig()
+	cfg.Width = 1920
+	cfg.Height = 1080
+	cfg.Chroma = Chroma444
+	cfg.BitDepth = 8
+	param, _, err := oneVPLHEVC444VideoParamForIO(cfg, oneVPLIOPatternInVideoMemory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := param.u16(oneVPLVideoParamIOPattern); got != oneVPLIOPatternInVideoMemory {
+		t.Fatalf("IOPattern=0x%x want video memory", got)
+	}
+	if !oneVPLHEVC444ParamPreservedForIO(&param, oneVPLIOPatternInVideoMemory) {
+		t.Fatal("video-memory HEVC 4:4:4 encoder fields are incomplete")
+	}
+	if oneVPLHEVC444ParamPreserved(&param) {
+		t.Fatal("video-memory params were mistaken for system-memory params")
 	}
 }

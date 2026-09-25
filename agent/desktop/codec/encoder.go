@@ -149,11 +149,20 @@ func (f RawFrame) Validate() error {
 }
 
 type D3D11EncodeFrame struct {
+	Device      uintptr
 	Resource    uintptr
 	Subresource uint32
 	Width       int
 	Height      int
+	Format      PixelFormat
 	Timestamp   time.Duration
+}
+
+func (f D3D11EncodeFrame) PixelFormat() PixelFormat {
+	if f.Format == "" {
+		return PixelFormatNV12
+	}
+	return f.Format
 }
 
 func (f D3D11EncodeFrame) Validate() error {
@@ -162,6 +171,11 @@ func (f D3D11EncodeFrame) Validate() error {
 	}
 	if f.Width <= 0 || f.Height <= 0 || f.Width%2 != 0 || f.Height%2 != 0 {
 		return fmt.Errorf("%w: D3D11 encode frames require positive even dimensions", ErrInvalidFrame)
+	}
+	switch f.PixelFormat() {
+	case PixelFormatNV12, PixelFormatAYUV, PixelFormatP010:
+	default:
+		return fmt.Errorf("%w: unsupported D3D11 encode format %q", ErrInvalidFrame, f.PixelFormat())
 	}
 	return nil
 }

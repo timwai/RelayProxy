@@ -125,6 +125,9 @@ func (e *MFH265Encoder) EncodeD3D11(
 	if frame.Width != e.cfg.Width || frame.Height != e.cfg.Height {
 		return nil, ErrInvalidFrame
 	}
+	if frame.PixelFormat() != PixelFormatNV12 {
+		return nil, fmt.Errorf("%w: Media Foundation D3D11 encoder requires NV12 input", ErrInvalidFrame)
+	}
 	packets, err := e.transform.EncodeD3D11(ctx, frame)
 	if err != nil {
 		return nil, err

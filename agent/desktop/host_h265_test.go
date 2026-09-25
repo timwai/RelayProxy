@@ -133,3 +133,14 @@ func TestH265ValidationSentinelIsPrivateAndExplicit(t *testing.T) {
 		t.Fatalf("validation sentinel leaked into public codec normalizer: %q", got)
 	}
 }
+
+func TestH265D3D11CaptureFormat(t *testing.T) {
+	cfg := desktopcodec.DefaultVideoConfig()
+	if got := h265D3D11CaptureFormat(cfg); got != "d3d11-nv12" {
+		t.Fatalf("420 capture format=%q", got)
+	}
+	cfg.Chroma = desktopcodec.Chroma444
+	if got := h265D3D11CaptureFormat(cfg); got != "d3d11-ayuv" {
+		t.Fatalf("444 capture format=%q", got)
+	}
+}

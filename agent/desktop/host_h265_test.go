@@ -134,7 +134,6 @@ func TestH265ValidationSentinelIsPrivateAndExplicit(t *testing.T) {
 	}
 }
 
-
 func TestH265D3D11CaptureFormat(t *testing.T) {
 	cfg := desktopcodec.DefaultVideoConfig()
 	if got := h265D3D11CaptureFormat(cfg); got != "d3d11-nv12" {

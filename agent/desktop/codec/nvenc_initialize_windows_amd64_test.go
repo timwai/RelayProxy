@@ -39,7 +39,7 @@ func TestConfigureNVENCHEVC444LowLatency(t *testing.T) {
 	cfg.BitDepth = 8
 
 	blob := &nvencConfigBlob{}
-	binary.LittleEndian.PutUint32(blob.Data[nvencConfigRCFlagsOffset : nvencConfigRCFlagsOffset+4], nvencRCFlagEnableLookahead)
+	binary.LittleEndian.PutUint32(blob.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4], nvencRCFlagEnableLookahead)
 	if err := configureNVENCHEVC444(blob, cfg); err != nil {
 		t.Fatal(err)
 	}

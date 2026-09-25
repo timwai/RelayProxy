@@ -1621,6 +1621,70 @@
       });
       return out;
     }
+    function remoteDesktopGPUCapability(target) {
+      var caps = target && target.capabilities ? target.capabilities : {};
+      var gpu = caps && caps.gpu && typeof caps.gpu === 'object' ? caps.gpu : null;
+      return gpu || null;
+    }
+    function remoteDesktopGPUCapabilityLabel(target) {
+      var gpu = remoteDesktopGPUCapability(target);
+      if (!gpu) return '';
+      var backend = String(gpu.backend || '').trim();
+      var formats = Array.isArray(gpu.formats) ? gpu.formats.map(function (format) {
+        return String(format || '').trim().toUpperCase();
+      }).filter(Boolean) : [];
+      var directions = [];
+      if (gpu.encodeZeroCopy) directions.push('E');
+      if (gpu.decodeZeroCopy) directions.push('D');
+      if (gpu.displayZeroCopy) directions.push('R');
+      if (!backend && !formats.length && !directions.length) return '';
+      var parts = ['GPU'];
+      if (backend) parts.push(backend.toUpperCase());
+      if (formats.length) parts.push(formats.join('/'));
+      if (directions.length) parts.push(directions.join('/'));
+      return parts.join(' ');
+    }
+    function remoteDesktopExpectedGPUFormat(status) {
+      status = status || {};
+      var codec = String(status.codec || '').toLowerCase();
+      if (codec !== 'h264' && codec !== 'h265') return '';
+      return String(status.chroma || '').toLowerCase() === '444' ? 'ayuv' : 'nv12';
+    }
+    function remoteDesktopTargetGPUAdvertises(target, format) {
+      var gpu = remoteDesktopGPUCapability(target);
+      format = String(format || '').toLowerCase();
+      if (!gpu || !format || !gpu.encodeZeroCopy || !gpu.decodeZeroCopy || !gpu.displayZeroCopy) return false;
+      var formats = Array.isArray(gpu.formats) ? gpu.formats : [];
+      return formats.some(function (value) {
+        return String(value || '').toLowerCase() === format;
+      });
+    }
+    function remoteDesktopGPUPathSummary(status, stats) {
+      status = status || {};
+      stats = stats || {};
+      var format = remoteDesktopExpectedGPUFormat(status);
+      if (!format) return '';
+      var target = remoteDesktopTargetByID(status.targetId || '');
+      var advertised = remoteDesktopTargetGPUAdvertises(target, format);
+      var captureFormat = String(stats.captureFormat || '').toLowerCase();
+      var encoderBackend = String(stats.encoderBackend || '').toLowerCase();
+      var decoderBackend = String(stats.decoderBackend || '').toLowerCase();
+      var renderBackend = String(stats.renderBackend || '').toLowerCase();
+      var hostZeroCopy = format === 'ayuv'
+        ? captureFormat === 'd3d11-ayuv' && encoderBackend === 'onevpl-hevc444-d3d11-zero-copy'
+        : captureFormat === 'd3d11-nv12' &&
+          (encoderBackend === 'media-foundation-d3d11' || encoderBackend === 'media-foundation-hevc-d3d11');
+      var decodeZeroCopy = format === 'ayuv'
+        ? decoderBackend === 'onevpl-hevc444-d3d11-zero-copy'
+        : decoderBackend === 'media-foundation-d3d11-zero-copy';
+      var displayZeroCopy = renderBackend === 'd3d11-zero-copy';
+      var flags = [
+        'E' + (hostZeroCopy ? '✓' : '×'),
+        'D' + (decodeZeroCopy ? '✓' : '×'),
+        'R' + (displayZeroCopy ? '✓' : '×')
+      ];
+      return 'GPU ' + format.toUpperCase() + (advertised ? '' : ' 未声明') + ' ' + flags.join('/');
+    }
     function remoteDesktopCaptureBackendSupported(targetID, backend) {
       backend = String(backend || 'auto').toLowerCase();
       if (backend === 'auto') return true;
@@ -1799,8 +1863,10 @@
         var mediaCaps = [];
         if (remoteDesktopTargetCanEncodeCodec(target.deviceId, 'h264')) mediaCaps.push('H.264');
         if (remoteDesktopTargetCanEncodeCodec(target.deviceId, 'h265')) mediaCaps.push('H.265');
+        var gpuLabel = remoteDesktopGPUCapabilityLabel(target);
         meta.textContent = (backends.length ? backends.join(' · ') : '无可用 backend') +
-          (mediaCaps.length ? ' · ' + mediaCaps.join('/') : '') + ' · ' + target.deviceId;
+          (mediaCaps.length ? ' · ' + mediaCaps.join('/') : '') +
+          (gpuLabel ? ' · ' + gpuLabel : '') + ' · ' + target.deviceId;
         info.appendChild(title);
         info.appendChild(meta);
 
@@ -2171,6 +2237,9 @@
         if (status.generation) mediaLabel += ' · G' + status.generation;
         parts.push('Media: ' + mediaLabel);
       }
+      var activeTarget = remoteDesktopTargetByID(status.targetId || '');
+      var gpuCapabilityLabel = remoteDesktopGPUCapabilityLabel(activeTarget);
+      if (gpuCapabilityLabel) parts.push(gpuCapabilityLabel);
       if (status.pathTcp) parts.push('TCP: ' + status.pathTcp);
       if (status.pathUdp) parts.push('UDP: ' + status.pathUdp);
       banner.textContent = parts.join(' · ');
@@ -2751,6 +2820,8 @@
 
     window.refreshRemoteDesktopFrame = refreshRemoteDesktopFrame;
     window.toggleDesktopFullscreen = toggleDesktopFullscreen;
+    window.remoteDesktopGPUCapabilityLabel = remoteDesktopGPUCapabilityLabel;
+    window.remoteDesktopGPUPathSummary = remoteDesktopGPUPathSummary;
 
     async function refreshRemoteDesktopTargets(showError) {
       if (!hasFn('goGetRemoteDesktopTargets')) {
@@ -2794,6 +2865,9 @@
       if (stats.encoderBackend) parts.push('Encoder ' + stats.encoderBackend + (stats.encoderHardware ? ' HW' : ' SW'));
       var decoderBackend = stats.decoderBackend || (desktopVideoDecoder ? 'webcodecs' : '');
       if (decoderBackend) parts.push('Decoder ' + decoderBackend + (stats.decoderBackend ? (stats.decoderHardware ? ' HW' : ' SW') : ''));
+      if (stats.renderBackend) parts.push('Render ' + stats.renderBackend);
+      var gpuPathSummary = remoteDesktopGPUPathSummary(status, stats);
+      if (gpuPathSummary) parts.push(gpuPathSummary);
       if (stats.rttMs) parts.push('RTT ' + stats.rttMs.toFixed(1) + ' ms');
       if (stats.jitterMs) parts.push('Jitter ' + stats.jitterMs.toFixed(1) + ' ms');
       parts.push('Loss ' + Number(stats.lossPercent || 0).toFixed(2) + '%');

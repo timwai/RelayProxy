@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #119 已合并，merge `fed484f6e64f79d6a2e681585a026089a137e8ce`）
+> 当前开发基线：`main`（PR #120 已合并，merge `8deed5c5678e4f305069bfa27e827d2dd3fcdceb`；gofmt 修复 `8bc366fd2846c601cc92fddf64dd6f0904f8fe3e`）
 
 ## 0. 当前进度
 
@@ -825,6 +825,18 @@ Windows SendInput / CF_UNICODETEXT
 - 代表实现 PR：#119；merge `fed484f6e64f79d6a2e681585a026089a137e8ce`。
 - 验证：Go CI #1002 的 format/vet/full test/race/benchmark 全部通过；UI CI #692 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：在 candidate 层继续做真实 device/context capability probe。NVIDIA 需要创建受控 CUDA/D3D11 device context 后查询 NVENC HEVC/YUV444 encode caps 与 NVDEC HEVC/4:4:4 decode caps；AMD 需要通过 AMF factory/context 创建 HEVC component 并查询 surface/chroma 支持。即使 probe 成功，仍不注册 public opener，直到实际 encode/decode + D3D11 zero-copy 路径完成。
+
+### 0.2.66 RD3 NVIDIA NVDEC HEVC 4:4:4 Device Capability Probe（已进入 main）
+
+- NVIDIA candidate 从“runtime entry point 可加载”推进到真实设备级 decode capability 查询：Windows amd64 动态加载 `nvcuda.dll`，解析 CUDA Driver API，并枚举本机 CUDA devices。
+- probe 在短生命周期 CUDA context 内调用 `cuvidGetDecoderCaps`，固定查询 HEVC / YUV 4:4:4 / 8-bit；只有真实 device query 返回 `IsSupported` 才设置 candidate `HEVC444Decode=true`。
+- CUDA context 与 OS thread 生命周期绑定：probe 期间锁定 goroutine 到当前线程，结束前显式 `cuCtxSetCurrent(NULL)`，再销毁 context，避免把 CUDA current context 遗留到 Go 线程池。
+- `H265444RuntimeCandidate` 新增 `DeviceProbe`、`DeviceCount`、`HEVC444Encode`、`HEVC444Decode`。这些字段仍然是 diagnostics-only；`Implemented=false` 且 `advertised=false`。
+- 固定 `CUVIDDECODECAPS` ABI size 与 HEVC / 4:4:4 enum 值的 Windows 单测，降低 SDK ABI 手写绑定漂移风险。
+- 本轮只验证 NVDEC decode capability；不会据此注册 production decoder、不会声明 D3D11 zero-copy output，也不会公开 `Chroma444`。
+- 代表实现 PR：#120；merge `8deed5c5678e4f305069bfa27e827d2dd3fcdceb`；gofmt 修复 `8bc366fd2846c601cc92fddf64dd6f0904f8fe3e`。
+- 验证：Go CI #1006 的 format/vet/full test/race/benchmark 全部通过；UI CI #696 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：把 vendor candidate diagnostics 作为机器可读 target snapshot 随远程桌面目标能力传递，并进入 diagnostics JSON；该字段只用于诊断，selector / negotiation 必须完全忽略。之后再实现真实 NVENC HEVC/YUV444 encode-capability probe。
 
 ### 0.3 本轮进度（2026-09-22）
 

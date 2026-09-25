@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #116 已合并，merge `832869f563b4d52b469b65a7783ebb5e62d04541`；格式修复至 `80c6ebf21a0df81b697802ed34ec057aeb138dd4`）
+> 当前开发基线：`main`（PR #117 已合并，merge `9d89ca8ac0d175ab06e828677b58a66332ec2ef0`）
 
 ## 0. 当前进度
 
@@ -786,6 +786,18 @@ Windows SendInput / CF_UNICODETEXT
 - 验证：Go CI #990 的 format/vet/full test/race/benchmark 已通过；UI full regression 已通过；#116 原始合并提交的 Windows/macOS desktop package 均已通过。最新格式修复仅调整 gofmt 空白，不改变运行逻辑。
 - Intel 双机验收条件：目标 `targetGpu.formats` 必须包含 `ayuv` 且 encode/decode/display 三个 zero-copy flag 均为 true；稳定 4:4:4 会话中 `EndToEndZeroCopySamples` 必须持续增长，并且 `FallbackSamples` 不应在正常稳态增长。若发生 runtime fallback，报告必须能明确定位到 encode/decode/display 中的具体断点。
 - 下一步：完成 Intel GPU/driver 双机矩阵；代码侧开始评估 NVIDIA NVENC / AMD AMF 4:4:4 vendor-native backend，并继续保持“runtime probe 成功才公开 capability”的原则。
+
+### 0.2.63 RD3 GPU Zero-Copy GUI Observability（已进入 main）
+
+- 远程桌面目标卡片直接展示登录快照中的 GPU runtime capability，例如 `GPU D3D11 NV12/AYUV E/D/R`；E / D / R 分别代表 encode / decode / render(display) zero-copy。
+- 活动会话 banner 同步展示目标 GPU capability，实测时无需切到日志或导出 JSON 即可确认目标是否声明 NV12 / AYUV。
+- 运行中媒体统计新增实际 `RenderBackend` 展示，并基于当前 codec/chroma 自动推导期望 surface：4:2:0 为 NV12，H.265 4:4:4 为 AYUV。
+- GUI 新增运行时链路摘要：`GPU AYUV E✓/D✓/R✓` 表示 Host encode、Viewer decode、Viewer D3D11 display 三段均命中；任一段回退会显示对应的 ×。
+- 如果运行时实际命中 zero-copy 但目标登录快照没有声明相应 format，会明确显示“未声明”，便于发现 capability probe 与实际运行结果不一致的问题。
+- Node UI 回归覆盖 target card capability 渲染、AYUV E2E、GPU decode 后 CPU display fallback、以及未声明 runtime path。
+- 代表实现 PR：#117；merge `9d89ca8ac0d175ab06e828677b58a66332ec2ef0`。
+- 验证：Go CI #993 的 format/vet/full test/race/benchmark 全部通过；UI CI #683 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：把 HEVC 4:4:4 capability / backend 选择从 Intel oneVPL 单实现抽象为 vendor backend registry，在不改变现有 Intel 行为的前提下，为 NVIDIA NVENC / AMD AMF runtime probe 与 codec backend 留出独立入口。
 
 ### 0.3 本轮进度（2026-09-22）
 

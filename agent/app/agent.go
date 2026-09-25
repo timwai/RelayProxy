@@ -618,7 +618,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	for _, target := range accepted.RDPTargets {
 		a.rdpTargets = append(a.rdpTargets, rdp.Target{DeviceID: target.DeviceID, Name: target.Name, Online: target.Online})
 	}
-	a.remoteDesktopTargets = slices.Clone(accepted.RemoteDesktopTargets)
+	a.remoteDesktopTargets = protocol.CloneRemoteDesktopTargets(accepted.RemoteDesktopTargets)
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
 	a.mu.Unlock()
@@ -1082,7 +1082,7 @@ func modeForApprovedCapabilities(capabilities []string) string {
 // servers that only send RDPTargets remain supported as a Native-RDP fallback.
 func (a *Agent) RemoteDesktopTargets() []protocol.RemoteDesktopTarget {
 	a.mu.RLock()
-	remoteTargets := slices.Clone(a.remoteDesktopTargets)
+	remoteTargets := protocol.CloneRemoteDesktopTargets(a.remoteDesktopTargets)
 	a.mu.RUnlock()
 	if len(remoteTargets) > 0 {
 		return remoteTargets

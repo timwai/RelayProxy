@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	H265444BackendOneVPL = "onevpl-hevc444"
+	H265444BackendOneVPL  = "onevpl-hevc444"
 	H265444BackendNVCodec = "nvcodec-hevc444"
 )
 
@@ -40,10 +40,10 @@ type h265444Backend struct {
 	// A vendor probe can report hardware support before RelayProxy has a safe
 	// production opener. zeroCopyValidated must only be flipped after an
 	// encode/decode round trip using the declared D3D11 interop contract.
-	productionReady  bool
+	productionReady   bool
 	zeroCopyValidated bool
-	lifecycle        *H265444BackendLifecycleContract
-	interop          *H265444D3D11InteropContract
+	lifecycle         *H265444BackendLifecycleContract
+	interop           *H265444D3D11InteropContract
 }
 
 func probeOneVPLH265444Backend(ctx context.Context) H265444BackendProbe {
@@ -68,8 +68,8 @@ var h265444BackendRegistry = []h265444Backend{
 		probeDecoderD3D11: ProbeOneVPLH265DecoderD3D11,
 		productionReady:   true,
 		zeroCopyValidated: true,
-		lifecycle:          h265444SessionLifecycleContract(),
-		interop:            h265444D3D11NativeAYUVContract(),
+		lifecycle:         h265444SessionLifecycleContract(),
+		interop:           h265444D3D11NativeAYUVContract(),
 	},
 	platformNVCodecH265444Backend(),
 }

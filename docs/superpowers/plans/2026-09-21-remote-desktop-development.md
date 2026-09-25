@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #122 已合并，merge `bf65a6f92ee4614a5a95672834e193c45e4ed871`）
+> 当前开发基线：`main`（PR #123 已合并，merge `8d46877291b9ecfc33be0e697c63cc361bc03b4e`；gofmt 修复 `83616916782571fe252e66b2014641d8d2ba7720` / `bd41520e3749a9f2eea5826ff056005f8af9d1a8` / `b491ef8de8d405eedcd9f2e682e3dcd15fdfc7f8`）
 
 ## 0. 当前进度
 
@@ -862,6 +862,19 @@ Windows SendInput / CF_UNICODETEXT
 - 代表实现 PR：#122；merge `bf65a6f92ee4614a5a95672834e193c45e4ed871`。
 - 验证：Go CI #1015 的 format/vet/full test/race/benchmark 全部通过；UI CI #705 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：明确 AMD AMF 的 HEVC 4:4:4 API 能力边界。当前 AMF HEVC public profile 仅 Main/Main10；若没有 FRExt/4:4:4 output profile，candidate 必须明确记录“AMF API 不提供 HEVC 4:4:4 encode”，不能把 AYUV/Y410 等输入 surface 格式误判为 4:4:4 bitstream 支持。
+
+### 0.2.69 RD3 AMD AMF HEVC 4:4:4 Public API Boundary（已进入 main）
+
+- candidate capability 新增 known-state：`EncodeCapabilityKnown` / `DecodeCapabilityKnown`，用于区分“明确支持/不支持”与“尚未有可靠查询方式”。
+- 新增稳定 diagnostics limitation code；AMF encode 当前为 `amf_hevc_public_profiles_main_main10_only`。
+- AMD AMF HEVC encoder public API 仅公开 Main / Main10 profile。虽然 AMF surface API 有 AYUV / Y410 / Y416 等 4:4:4 surface format，但这些是输入/输出 surface 能力，不能等价为 HEVC 4:4:4 bitstream profile。
+- 因此 AMD candidate encode 明确记录：`EncodeCapabilityKnown=true`、`HEVC444Encode=false`、`Implemented=false`，而不是把 false 留成无法区分的 unknown。
+- AMD decode 仍保持 `DecodeCapabilityKnown=false`：AMF decoder `GetOutputCaps()` 可以枚举 output surface formats，但 public decoder API 没有类似 NVDEC `chroma_format` 的压缩 HEVC bitstream chroma capability query。AYUV/Y410 output surface 不能作为 HEVC 4:4:4 decode 证明。
+- 若后续要把 AMD decode 变成 known，需要真实 HEVC 4:4:4 validation stream 解码闭环，或使用能直接返回 bitstream profile/chroma 能力的更底层 AMD 接口。
+- diagnostics schema 由 v7 升级到 v8，target candidate JSON 增加 encode/decode known-state 与 limitation。
+- 代表实现 PR：#123；merge `8d46877291b9ecfc33be0e697c63cc361bc03b4e`；gofmt 修复 `83616916782571fe252e66b2014641d8d2ba7720` / `bd41520e3749a9f2eea5826ff056005f8af9d1a8` / `b491ef8de8d405eedcd9f2e682e3dcd15fdfc7f8`。
+- 验证：Go CI #1021 全绿；UI CI #711 全绿，含 Windows/macOS desktop package。
+- 下一步：candidate 能力发现阶段已基本闭环。转入 NVIDIA production backend scaffolding：定义 NVENC/NVDEC opener 生命周期、生产 registry gate、资源 ownership 与 D3D11/CUDA interop contract；只有真实 encode/decode + zero-copy 验证完成后才允许 `Implemented=true` 与 `Chroma444` 广告。
 
 ### 0.3 本轮进度（2026-09-22）
 

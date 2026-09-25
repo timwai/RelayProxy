@@ -440,15 +440,10 @@ func (s *nativeDesktopSession) disableGPUCursor() {
 }
 
 func nativeDesktopDecoderUsesGPUCursor(decoder desktopcodec.Decoder) bool {
-	if decoder == nil {
+	if decoder == nil || !decoder.Hardware() {
 		return false
 	}
-	switch decoder.Backend() {
-	case "media-foundation-d3d11-zero-copy", "onevpl-hevc444-d3d11-zero-copy":
-		return true
-	default:
-		return false
-	}
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(decoder.Backend())), "-d3d11-zero-copy")
 }
 
 func (s *nativeDesktopSession) decoderStatus() (string, bool, bool) {

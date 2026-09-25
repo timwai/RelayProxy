@@ -15,7 +15,6 @@ func TestH265444D3D11CUDAAYUVContract(t *testing.T) {
 	}
 }
 
-
 func TestH265444NVCodecAYUVContract(t *testing.T) {
 	contract := h265444NVCodecAYUVContract()
 	if contract == nil {

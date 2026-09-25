@@ -14,6 +14,7 @@ func completeNVENCProductionFunctionListForTest() nvEncodeAPIFunctionList {
 		NvEncGetEncodeGUIDCount:     1,
 		NvEncGetEncodeGUIDs:         1,
 		NvEncGetEncodeCaps:          1,
+		NvEncGetEncodePresetConfigEx: 1,
 		NvEncInitializeEncoder:      1,
 		NvEncCreateBitstreamBuffer:  1,
 		NvEncDestroyBitstreamBuffer: 1,

@@ -971,7 +971,7 @@ func (e *oneVPLH265Encoder) Reconfigure(ctx context.Context, cfg VideoConfig) er
 	if e == nil {
 		return ErrEncoderUnavailable
 	}
-	param, cfg, err := oneVPLHEVC444VideoParam(cfg)
+	param, cfg, err := oneVPLHEVC444VideoParamForIO(cfg, e.ioPattern)
 	if err != nil {
 		return err
 	}
@@ -1036,9 +1036,12 @@ func (e *oneVPLH265Encoder) Close() error {
 	loader := e.loader
 	session := e.session
 	closeEncoder := e.api.closeEncoder
+	d3d11Context := e.d3d11Context
 	e.base = nil
 	e.loader = 0
 	e.session = 0
+	e.d3d11Context = nil
+	e.d3d11Device = 0
 	e.mu.Unlock()
 
 	var closeErr error
@@ -1057,5 +1060,6 @@ func (e *oneVPLH265Encoder) Close() error {
 		}
 		base.Close()
 	}
+	releaseIUnknown(d3d11Context)
 	return closeErr
 }

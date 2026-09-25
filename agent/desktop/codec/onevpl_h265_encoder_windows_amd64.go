@@ -224,6 +224,7 @@ type oneVPLH265API struct {
 	closeEncoder uintptr
 	getSurface   uintptr
 	sync         uintptr
+	setHandle    uintptr
 }
 
 func loadOneVPLH265API(module windows.Handle) (oneVPLH265API, error) {
@@ -255,6 +256,9 @@ func loadOneVPLH265API(module windows.Handle) (oneVPLH265API, error) {
 		return oneVPLH265API{}, err
 	}
 	if api.sync, err = resolve("MFXVideoCORE_SyncOperation"); err != nil {
+		return oneVPLH265API{}, err
+	}
+	if api.setHandle, err = resolve("MFXVideoCORE_SetHandle"); err != nil {
 		return oneVPLH265API{}, err
 	}
 	return api, nil
@@ -313,6 +317,9 @@ type oneVPLH265Encoder struct {
 	sequence      []byte
 	stats         EncoderStats
 	closed        bool
+	ioPattern     uint16
+	d3d11Device   uintptr
+	d3d11Context  unsafe.Pointer
 }
 
 func OpenOneVPLH265Encoder(ctx context.Context, cfg VideoConfig) (SequenceHeaderEncoder, error) {

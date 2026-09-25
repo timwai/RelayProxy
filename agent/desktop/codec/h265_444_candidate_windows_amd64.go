@@ -92,14 +92,18 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 		issues = appendCandidateIssue(issues, "%s: %v", nvDecodeRuntimeDLL, err)
 	} else {
 		defer windows.FreeLibrary(decodeModule)
-		if _, procErr := windows.GetProcAddress(decodeModule, "cuvidGetDecoderCaps"); procErr != nil {
+		getDecoderCaps, procErr := windows.GetProcAddress(decodeModule, "cuvidGetDecoderCaps")
+		if procErr != nil {
 			issues = appendCandidateIssue(issues, "%s/cuvidGetDecoderCaps: %v", nvDecodeRuntimeDLL, procErr)
 		} else {
-			// NVIDIA requires a valid CUDA context before cuvidGetDecoderCaps
-			// can safely query codec/chroma support. Candidate diagnostics stop
-			// at entry-point availability until the NVDEC backend owns a CUDA
-			// context and can perform the real HEVC 4:4:4 capability query.
 			probe.DecodeRuntime = true
+			deviceProbe := probeNVIDIANVDECHEVC444(ctx, getDecoderCaps)
+			probe.DeviceProbe = deviceProbe.Checked
+			probe.DeviceCount = deviceProbe.DeviceCount
+			probe.HEVC444Decode = deviceProbe.HEVC444
+			if deviceProbe.Error != "" {
+				issues = appendCandidateIssue(issues, "NVDEC device probe: %s", deviceProbe.Error)
+			}
 		}
 	}
 

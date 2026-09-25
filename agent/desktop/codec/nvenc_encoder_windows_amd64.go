@@ -30,11 +30,11 @@ const (
 	nvencPicBufferFormatOffset    = 64
 	nvencPicPictureStructOffset   = 68
 
-	nvencLockVersionOffset        = 0
-	nvencLockOutputBitstream      = 8
-	nvencLockBitstreamSizeOffset  = 36
-	nvencLockBitstreamPtrOffset   = 56
-	nvencLockPictureTypeOffset    = 64
+	nvencLockVersionOffset       = 0
+	nvencLockOutputBitstream     = 8
+	nvencLockBitstreamSizeOffset = 36
+	nvencLockBitstreamPtrOffset  = 56
+	nvencLockPictureTypeOffset   = 64
 
 	nvencSequenceVersionOffset = 0
 	nvencSequenceInputSize     = 4
@@ -46,10 +46,10 @@ const (
 	nvencPicTypeI   uint32 = 2
 	nvencPicTypeIDR uint32 = 3
 
-	nvencPicFlagForceIDR      uint32 = 0x2
-	nvencPicFlagOutputSPSPPS  uint32 = 0x4
-	nvencSequenceBufferBytes         = 64 * 1024
-	nvencMaxLockedBitstreamBytes     = 64 * 1024 * 1024
+	nvencPicFlagForceIDR         uint32 = 0x2
+	nvencPicFlagOutputSPSPPS     uint32 = 0x4
+	nvencSequenceBufferBytes            = 64 * 1024
+	nvencMaxLockedBitstreamBytes        = 64 * 1024 * 1024
 )
 
 type nvencPicParamsBlob struct {

@@ -1,14 +1,14 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC probe、encoder/decoder core、generation-aware Viewer、Host generation、隐藏端到端验证入口与验证诊断均已合并，H.265 仍待 Intel/NVIDIA/AMD 实机验证后再公开；当前继续推进音频数据面基础。  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface；当前进入 runtime GPU capability 精确上报与 Intel 双机实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #102 已合并，merge `98e508a2847707106a86c78d91ce33c4382381e1`；后续 follow_viewport 直接在 main 继续）
+> 当前开发基线：`main`（PR #113 已合并，merge `ef87e16247c419b3cf8bb41d17c7159986318ec9`）
 
 ## 0. 当前进度
 
-更新时间：**2026-09-24**
+更新时间：**2026-09-25**
 
 | 阶段 / 能力 | 状态 | 当前实现 |
 | --- | --- | --- |
@@ -31,6 +31,7 @@
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
 | RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换，PR #58 已把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR，PR #59 已补齐可导出的实机会话诊断时间序列，PR #60 已加入 schema v2 聚合 Summary、percentile 与路径/Generation/ABR/backend 分布统计；RD2 当前进入实机矩阵验证与参数标定阶段 |
+| RD3 HEVC / 4:4:4 GPU | 🧪 代码链已完成，进入实机验证 | H.265 generation-aware Host/Viewer、Intel oneVPL HEVC RExt 8-bit 4:4:4、D3D11 AYUV GPU encode/decode zero-copy 已进入 main；4:4:4 CPU I444 路径继续作为 fallback。下一步精确上报 GPU zero-copy runtime capability，并完成 Intel 双机/驱动矩阵；NVIDIA/AMD 4:4:4 仍需 vendor-native backend |
 
 ### 0.1 已合并主线的关键进度
 
@@ -732,7 +733,32 @@ Windows SendInput / CF_UNICODETEXT
 - 混合 MF/oneVPL 场景保留方向精度，同时对旧客户端保持保守共享 capability；Host 与 Server session snapshot 对新增嵌套 chroma slice 做深拷贝，避免 capability alias。
 - 代表实现 PR：#107（encoder）、#108（I444 Viewer）、#109（decoder）、#110（runtime capability advertisement）；#110 merge `80dd506`。
 - 验证：PR #110 Go CI #954 的 gofmt / vet / 全量 test / race / benchmark 全部通过；UI CI #644 的 frontend / UI full regression、Windows desktop package、macOS desktop package 全部通过。
-- 当前 4:4:4 路径属于 CPU-surface MVP：Capture → I444/AYUV CPU packing → oneVPL HEVC HW encode → RD/1 → oneVPL HEVC HW decode → I444 CPU readback → BGRA native Viewer。下一步优化为 D3D11 AYUV texture / GPU color conversion / decoder texture zero-copy，去掉两端 CPU packing/readback，并完成 Intel 双机实测矩阵。
+- CPU-surface MVP 仍保留为兼容回退；PR #111–#113 已在其上补齐 D3D11 AYUV GPU 编解码路径。支持条件满足时不再执行两端 CPU packing/readback；实际 Intel GPU/driver 可用性仍必须由 runtime probe 与双机实测确认。
+
+### 0.2.59 RD3 Typed GPU Surface / oneVPL D3D11 Decode（已进入 main）
+
+- 新增共享 GPU frame abstraction：统一携带 backend、D3D11 device/resource/subresource、尺寸与 `NV12 / AYUV / P010 / BGRA` 格式，Native Viewer 新增 `SubmitGPU`，旧 `SubmitD3D11` 保持兼容。
+- 现有 Media Foundation NV12 zero-copy 路径已真实迁移到该 abstraction；D3D11 VideoProcessor renderer 增加 NV12 / AYUV / P010 输入格式映射与 runtime format support 校验，为后续高色彩 surface 共用同一呈现层。
+- GPU frame 增加 retain/release owner 生命周期，避免 oneVPL internal surface 在 Viewer 尚未呈现时被 decoder pool 回收；generation 切换会先清理 Viewer 当前 GPU frame，再关闭旧 decoder。
+- oneVPL HEVC 4:4:4 decoder 新增 video-memory 模式：使用 Native Viewer 自己的 D3D11 device 调用 `MFXVideoCORE_SetHandle`，要求输出 AYUV video-memory surface。
+- 解码 surface 通过 oneVPL native/device handle ABI 直接暴露为 D3D11 AYUV texture，并在 Viewer 持有期间对 mfx surface AddRef/Release；支持时数据链从 `oneVPL decode → Map(read) → I444 → BGRA` 改为 `oneVPL decode → D3D11 AYUV → VideoProcessor → swap chain`。
+- Viewer 只有在同一 D3D11 device、AYUV input support 与 GPU cursor 条件都满足时才选择该路径，否则自动回到现有 system-memory I444 4:4:4 decoder。
+- 协议增加 `DesktopGPUCapability` schema 以及 server snapshot 深拷贝，但本阶段没有因为 schema 存在就无条件上报 zero-copy，避免假能力。
+- 代表实现 PR：#111（GPU abstraction，merge `d96f6ea`）、#112（oneVPL D3D11 AYUV decode，merge `14e24b4`）。
+- 验证：#111 / #112 的 Go format/vet/full test/race/benchmark、UI full regression、Windows/macOS desktop package 均通过；Intel 实机 decode/display zero-copy 仍需 runtime 硬件验证。
+
+### 0.2.60 RD3 oneVPL D3D11 AYUV Encode Zero-Copy（已进入 main）
+
+- `D3D11EncodeFrame` 现在携带 device 与 pixel format；空 format 保持兼容地视为 NV12。Media Foundation H.264/H.265 D3D11 encoder 继续严格只接受 NV12，避免 AYUV surface 被错误送入 4:2:0 MFT。
+- D3D11 VideoProcessor converter 从 NV12-only 扩展为 NV12 / AYUV 两种输出；4:4:4 Host generation 使用 `BGRA capture texture → AYUV texture`，4:2:0 继续使用现有 NV12。
+- oneVPL HEVC 4:4:4 encoder 新增 video-memory 模式，并在 `Init` 前绑定 capture D3D11 device；system-memory I444 模式保持不变作为 fallback。
+- GPU encode 不依赖实验性的 oneVPL surface import API：RelayProxy 先取得 oneVPL 自己分配的 AYUV encode surface，再通过同一 D3D11 immediate context 做 `CopySubresourceRegion`。这能兼容 oneVPL 内部 16 对齐纹理，例如 1920×1080 可见区与 1920×1088 内部分配。
+- 支持条件满足时 Host 数据链变为 `DXGI/WGC D3D11 BGRA → VideoProcessor AYUV → GPU copy → oneVPL HEVC RExt 4:4:4`，不再执行 CPU `BGRA/RGBA → I444` 和 `Map(write)`。
+- H.265 Host GPU probe 不再排除 Chroma444；generation rebuild、捕获几何变化与 runtime resolution change 均根据 chroma 选择 AYUV 或 NV12 converter。Stats/diagnostics 对 4:4:4 GPU 路径标记 `d3d11-ayuv`。
+- D3D11 初始化或运行期失败时继续迁回 oneVPL system-memory I444 generation；4:2:0 H.265 仍使用 Media Foundation，不改变成熟路径。
+- 代表实现 PR：#113；merge `ef87e16247c419b3cf8bb41d17c7159986318ec9`。
+- 验证：最终 Go CI #971 的 format/vet/full test/race/benchmark 全部通过；UI CI #661 的 full regression、Windows desktop package、macOS desktop package 全部通过。
+- 当前剩余：把 `DesktopGPUCapability` 从 schema 变成基于真实 runtime probe 的精确 snapshot；完成 Intel 双机实际 AYUV encode/decode/display 验证；再根据结果决定公开策略与 NVIDIA/AMD 4:4:4 vendor backend。
 
 ### 0.3 本轮进度（2026-09-22）
 

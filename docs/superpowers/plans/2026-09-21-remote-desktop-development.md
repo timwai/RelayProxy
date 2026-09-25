@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #115 已合并，merge `dd6d6ce6cd8702869e82625e6326178a2bde44bf`；格式修复 `aeba81bd6c48e057094898ec3f85fcdd66d359d1`）
+> 当前开发基线：`main`（PR #116 已合并，merge `832869f563b4d52b469b65a7783ebb5e62d04541`；格式修复至 `80c6ebf21a0df81b697802ed34ec057aeb138dd4`）
 
 ## 0. 当前进度
 
@@ -772,6 +772,20 @@ Windows SendInput / CF_UNICODETEXT
 - 代表实现 PR：#115；merge `dd6d6ce6cd8702869e82625e6326178a2bde44bf`；随后 `aeba81bd6c48e057094898ec3f85fcdd66d359d1` 修复新增 D3D11 probe 的 gofmt 对齐。
 - 验证：Go CI #978 的 format/vet/full test/race/benchmark 全部通过；UI CI #668 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：在至少两台 Intel Windows 机器与多个驱动版本上完成真实 AYUV encode/decode/display 双机验证，核对 capability snapshot、实际 backend 与 diagnostics 一致性；随后依据矩阵结果进入 NVIDIA NVENC / AMD AMF 4:4:4 vendor-native backend。
+
+### 0.2.62 RD3 GPU Zero-Copy Diagnostics Validation（已进入 main）
+
+- Diagnostics schema 升级到 v6，并在每个 Relay Desktop session 建立时深拷贝目标端 `DesktopGPUCapability` 为 `targetGpu`；目标重新登录、离线或 capability 变化不会改写已经开始的会话验证基线。
+- 新增 `gpuValidation` 汇总，按当前实际 codec/chroma 推导预期 GPU format：4:2:0 对应 NV12，HEVC 4:4:4 对应 AYUV。
+- Host encode zero-copy、Viewer decode zero-copy、Viewer display zero-copy 分开统计，不再把“decoder 输出 GPU surface”自动等同于“最终 GPU 呈现成功”。
+- `DesktopSessionStats` 新增 `RenderBackend`；Native Viewer GPU surface 成功提交到 D3D11 renderer 时上报 `d3d11-zero-copy`，GPU submit/readback 回退后的 CPU BGRA 呈现上报 `cpu-bgra`。
+- AYUV 只有同一 diagnostics sample 同时满足 `captureFormat=d3d11-ayuv`、`encoderBackend=onevpl-hevc444-d3d11-zero-copy`、`decoderBackend=onevpl-hevc444-d3d11-zero-copy`、`renderBackend=d3d11-zero-copy` 时，才计入 `EndToEndZeroCopySamples`。
+- 新增 `ViewerDisplayZeroCopySamples`、`RenderBackends` 与 `FallbackSamples`；因此 Intel 双机实测可以直接从导出报告区分“目标未声明 / Host encode fallback / Viewer decode fallback / Viewer display fallback”。
+- 修复原生多窗口 Viewer stats 的 session 路由：secondary Viewer 不再把 decoder/render stats 写到 primary session，而是按逻辑 Desktop SessionID 独立上报。
+- 代表实现 PR：#116；merge `832869f563b4d52b469b65a7783ebb5e62d04541`；gofmt 修复至 `80c6ebf21a0df81b697802ed34ec057aeb138dd4`。
+- 验证：Go CI #990 的 format/vet/full test/race/benchmark 已通过；UI full regression 已通过；#116 原始合并提交的 Windows/macOS desktop package 均已通过。最新格式修复仅调整 gofmt 空白，不改变运行逻辑。
+- Intel 双机验收条件：目标 `targetGpu.formats` 必须包含 `ayuv` 且 encode/decode/display 三个 zero-copy flag 均为 true；稳定 4:4:4 会话中 `EndToEndZeroCopySamples` 必须持续增长，并且 `FallbackSamples` 不应在正常稳态增长。若发生 runtime fallback，报告必须能明确定位到 encode/decode/display 中的具体断点。
+- 下一步：完成 Intel GPU/driver 双机矩阵；代码侧开始评估 NVIDIA NVENC / AMD AMF 4:4:4 vendor-native backend，并继续保持“runtime probe 成功才公开 capability”的原则。
 
 ### 0.3 本轮进度（2026-09-22）
 

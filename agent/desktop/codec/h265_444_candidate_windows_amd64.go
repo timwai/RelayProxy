@@ -77,13 +77,21 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 			} else {
 				probe.EncodeRuntime = true
 				probe.Version = formatNVENCMaxSupportedVersion(version)
+				encodeProbe := probeNVIDIANVENCHEVC444(ctx, createInstance, version)
+				probe.DeviceProbe = encodeProbe.Checked
+				probe.DeviceCount = encodeProbe.DeviceCount
+				probe.HEVC444Encode = encodeProbe.HEVC444
+				if encodeProbe.Error != "" {
+					issues = appendCandidateIssue(issues, "NVENC device probe: %s", encodeProbe.Error)
+				}
 			}
 		}
-		_ = createInstance
 	}
 
 	if err := ctx.Err(); err != nil {
-		probe.Error = err.Error()
+		issues = appendCandidateIssue(issues, "%v", err)
+		probe.RuntimeAvailable = probe.EncodeRuntime || probe.DecodeRuntime
+		probe.Error = strings.Join(issues, "; ")
 		return probe
 	}
 
@@ -98,8 +106,10 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 		} else {
 			probe.DecodeRuntime = true
 			deviceProbe := probeNVIDIANVDECHEVC444(ctx, getDecoderCaps)
-			probe.DeviceProbe = deviceProbe.Checked
-			probe.DeviceCount = deviceProbe.DeviceCount
+			probe.DeviceProbe = probe.DeviceProbe || deviceProbe.Checked
+			if deviceProbe.DeviceCount > probe.DeviceCount {
+				probe.DeviceCount = deviceProbe.DeviceCount
+			}
 			probe.HEVC444Decode = deviceProbe.HEVC444
 			if deviceProbe.Error != "" {
 				issues = appendCandidateIssue(issues, "NVDEC device probe: %s", deviceProbe.Error)

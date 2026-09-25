@@ -147,23 +147,23 @@ type DesktopDisplayCapability struct {
 // DesktopCapabilities is the summary safe to expose to a controller before a
 // desktop session starts. Detailed codec negotiation still happens per session.
 type DesktopCapabilities struct {
-	NativeRDP      bool                       `json:"nativeRdp"`
-	RelayDesktop   bool                       `json:"relayDesktop"`
-	Captures       []DesktopCaptureCapability `json:"captures,omitempty"`
-	Codecs         []DesktopCodecCapability   `json:"codecs,omitempty"`
-	GPU            *DesktopGPUCapability              `json:"gpu,omitempty"`
-	GPUCandidates  []DesktopGPUCandidateDiagnostics   `json:"gpuCandidates,omitempty"`
-	Displays       []DesktopDisplayCapability         `json:"displays,omitempty"`
-	Audio          bool                       `json:"audio,omitempty"`
-	AudioCodecs    []string                   `json:"audioCodecs,omitempty"`
-	Clipboard      bool                       `json:"clipboard,omitempty"`
-	MultiMonitor   bool                       `json:"multiMonitor,omitempty"`
-	MultiStream    bool                       `json:"multiStream,omitempty"`
-	HDR            bool                       `json:"hdr,omitempty"`
-	VirtualDisplay bool                       `json:"virtualDisplay,omitempty"`
-	MaxWidth       int                        `json:"maxWidth,omitempty"`
-	MaxHeight      int                        `json:"maxHeight,omitempty"`
-	MaxFPS         int                        `json:"maxFps,omitempty"`
+	NativeRDP      bool                             `json:"nativeRdp"`
+	RelayDesktop   bool                             `json:"relayDesktop"`
+	Captures       []DesktopCaptureCapability       `json:"captures,omitempty"`
+	Codecs         []DesktopCodecCapability         `json:"codecs,omitempty"`
+	GPU            *DesktopGPUCapability            `json:"gpu,omitempty"`
+	GPUCandidates  []DesktopGPUCandidateDiagnostics `json:"gpuCandidates,omitempty"`
+	Displays       []DesktopDisplayCapability       `json:"displays,omitempty"`
+	Audio          bool                             `json:"audio,omitempty"`
+	AudioCodecs    []string                         `json:"audioCodecs,omitempty"`
+	Clipboard      bool                             `json:"clipboard,omitempty"`
+	MultiMonitor   bool                             `json:"multiMonitor,omitempty"`
+	MultiStream    bool                             `json:"multiStream,omitempty"`
+	HDR            bool                             `json:"hdr,omitempty"`
+	VirtualDisplay bool                             `json:"virtualDisplay,omitempty"`
+	MaxWidth       int                              `json:"maxWidth,omitempty"`
+	MaxHeight      int                              `json:"maxHeight,omitempty"`
+	MaxFPS         int                              `json:"maxFps,omitempty"`
 }
 
 func CloneDesktopCapabilities(capabilities DesktopCapabilities) DesktopCapabilities {

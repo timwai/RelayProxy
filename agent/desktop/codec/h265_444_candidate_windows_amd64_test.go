@@ -3,6 +3,7 @@
 package codec
 
 import (
+	"context"
 	"testing"
 	"unsafe"
 )
@@ -95,5 +96,27 @@ func TestNVENCHasGUID(t *testing.T) {
 	}
 	if !nvencHasGUID([]nvencGUID{{Data1: 1}, nvencCodecHEVCGUID}, nvencCodecHEVCGUID) {
 		t.Fatal("HEVC GUID was not found")
+	}
+}
+
+func TestAMFHEVC444EncodeBoundaryIsKnownWithoutRuntimeProbe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	got := probeAMFH265444RuntimeCandidate(ctx)
+	if !got.EncodeCapabilityKnown {
+		t.Fatalf("AMF HEVC 4:4:4 encode boundary must be known: %+v", got)
+	}
+	if got.HEVC444Encode {
+		t.Fatalf("AMF public HEVC API must not advertise 4:4:4 encode: %+v", got)
+	}
+	if got.DecodeCapabilityKnown {
+		t.Fatalf("AMF decode capability is not device-probed yet: %+v", got)
+	}
+	if got.Limitation != amfHEVC444EncodeLimitation {
+		t.Fatalf("AMF limitation=%q want=%q", got.Limitation, amfHEVC444EncodeLimitation)
+	}
+	if got.Implemented {
+		t.Fatalf("AMF candidate unexpectedly implemented: %+v", got)
 	}
 }

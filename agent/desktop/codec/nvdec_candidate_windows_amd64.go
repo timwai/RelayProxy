@@ -52,6 +52,7 @@ type nvidiaCUDADriverAPI struct {
 	cuDeviceGetCount uintptr
 	cuDeviceGet      uintptr
 	cuCtxCreate      uintptr
+	cuCtxSetCurrent  uintptr
 	cuCtxDestroy     uintptr
 }
 
@@ -88,6 +89,9 @@ func loadNVIDIACUDADriverAPI() (*nvidiaCUDADriverAPI, error) {
 	}
 	if api.cuCtxCreate, err = resolveWindowsProc(module, "cuCtxCreate_v2", "cuCtxCreate"); err != nil {
 		return fail(fmt.Errorf("cuCtxCreate: %w", err))
+	}
+	if api.cuCtxSetCurrent, err = resolveWindowsProc(module, "cuCtxSetCurrent"); err != nil {
+		return fail(fmt.Errorf("cuCtxSetCurrent: %w", err))
 	}
 	if api.cuCtxDestroy, err = resolveWindowsProc(module, "cuCtxDestroy_v2", "cuCtxDestroy"); err != nil {
 		return fail(fmt.Errorf("cuCtxDestroy: %w", err))
@@ -191,6 +195,7 @@ func probeNVIDIANVDECHEVC444(
 			cuvidGetDecoderCaps,
 			uintptr(unsafe.Pointer(&caps)),
 		)
+		clearStatus := cudaDriverCall(api.cuCtxSetCurrent, 0)
 		destroyStatus := cudaDriverCall(api.cuCtxDestroy, cudaContext)
 		runtime.KeepAlive(&caps)
 		runtime.KeepAlive(&cudaContext)
@@ -198,6 +203,9 @@ func probeNVIDIANVDECHEVC444(
 		if status != 0 {
 			issues = append(issues, fmt.Sprintf("device %d cuvidGetDecoderCaps returned %d", ordinal, status))
 			continue
+		}
+		if clearStatus != 0 {
+			issues = append(issues, fmt.Sprintf("device %d cuCtxSetCurrent(NULL) returned %d", ordinal, clearStatus))
 		}
 		if destroyStatus != 0 {
 			issues = append(issues, fmt.Sprintf("device %d cuCtxDestroy returned %d", ordinal, destroyStatus))

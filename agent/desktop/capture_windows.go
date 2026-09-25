@@ -811,6 +811,15 @@ func (p windowsGPUFormatProbe) endToEnd() bool {
 	return p.Encode && p.Decode && p.Display
 }
 
+func windowsGPUFormatEndToEnd(probes []windowsGPUFormatProbe, format string) bool {
+	for _, probe := range probes {
+		if probe.Format == format && probe.endToEnd() {
+			return true
+		}
+	}
+	return false
+}
+
 func windowsGPUProbeVideoConfig(frame *D3D11CaptureFrame, chroma desktopcodec.ChromaFormat) (desktopcodec.VideoConfig, error) {
 	if frame == nil || !frame.Valid() {
 		return desktopcodec.VideoConfig{}, desktopcodec.ErrInvalidFrame
@@ -908,7 +917,7 @@ func probeWindowsAYUVGPU(
 		result.EncodeErr, result.DecodeErr, result.DisplayErr = err, err, err
 		return result
 	}
-	if !desktopcodec.H265444EncodeAvailable(backends) {
+	if !desktopcodec.H265444D3D11EncodeAvailable(backends) {
 		result.EncodeErr = desktopcodec.ErrEncoderUnavailable
 	} else {
 		convertCfg := desktopcodec.D3D11ConvertConfig{
@@ -946,7 +955,7 @@ func probeWindowsAYUVGPU(
 		}
 	}
 
-	if !desktopcodec.H265444DecodeAvailable(backends) {
+	if !desktopcodec.H265444D3D11DecodeAvailable(backends) {
 		result.DecodeErr = desktopcodec.ErrDecoderUnavailable
 	} else if err := desktopcodec.ProbeH265444DecoderD3D11(ctx, cfg, frame.Device); err != nil {
 		result.DecodeErr = err
@@ -1117,7 +1126,12 @@ func NewSystemHost() (*Host, error) {
 	gpuProbeCancel()
 
 	codecCapabilities := []protocol.DesktopCodecCapability{probe.Capability()}
-	hevcCapability, hevcAvailable := desktopcodec.H265CapabilityWith444Backends(hevcProbe, h265444Backends)
+	ayuvEndToEnd := windowsGPUFormatEndToEnd(gpuFormats, string(desktopcodec.PixelFormatAYUV))
+	hevcCapability, hevcAvailable := desktopcodec.H265CapabilityWith444Paths(
+		hevcProbe,
+		h265444Backends,
+		ayuvEndToEnd,
+	)
 	if hevcAvailable {
 		codecCapabilities = append(codecCapabilities, hevcCapability)
 	}
@@ -1153,10 +1167,12 @@ func NewSystemHost() (*Host, error) {
 		hevcProbe.SoftwareEncoderCount, hevcProbe.SoftwareDecoderCount,
 		hevcProbe.EncodeAvailable() || hevcProbe.DecodeAvailable(), hevcProbe.Error)
 	for _, backendProbe := range h265444Backends {
-		log.Printf("[Desktop] HEVC 4:4:4 backend probe backend=%s hwRuntime=%t encode=%t decode=%t endToEnd=%t advertised=%t error=%q",
+		log.Printf("[Desktop] HEVC 4:4:4 backend probe backend=%s hwRuntime=%t encode=%t decode=%t systemEncode=%t systemDecode=%t d3d11Encode=%t d3d11Decode=%t endToEnd=%t ayuvValidated=%t advertised=%t error=%q",
 			backendProbe.Backend, backendProbe.HardwareRuntime,
 			backendProbe.Encode, backendProbe.Decode,
-			backendProbe.EndToEnd(), hevcCapability.Chroma444, backendProbe.Error)
+			backendProbe.SystemMemoryEncode, backendProbe.SystemMemoryDecode,
+			backendProbe.D3D11Encode, backendProbe.D3D11Decode,
+			backendProbe.EndToEnd(), ayuvEndToEnd, hevcCapability.Chroma444, backendProbe.Error)
 	}
 	for _, candidate := range h265444Candidates {
 		log.Printf("[Desktop] HEVC 4:4:4 candidate runtime vendor=%s backend=%s runtime=%t encodeRuntime=%t decodeRuntime=%t deviceProbe=%t devices=%d encodeKnown=%t decodeKnown=%t hevc444Encode=%t hevc444Decode=%t version=%q implemented=%t advertised=false limitation=%q error=%q",

@@ -773,6 +773,13 @@ func (s *ControllerSession) Stats() protocol.DesktopSessionStats {
 	return stats
 }
 
+func (s *ControllerSession) SetTargetGPUCapability(capability *protocol.DesktopGPUCapability) {
+	if s == nil || s.diagnostics == nil {
+		return
+	}
+	s.diagnostics.SetTargetGPUCapability(capability)
+}
+
 func (s *ControllerSession) Diagnostics() DesktopDiagnosticsReport {
 	if s == nil || s.diagnostics == nil {
 		return DesktopDiagnosticsReport{}

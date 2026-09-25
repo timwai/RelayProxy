@@ -1108,7 +1108,7 @@ func NewSystemHost() (*Host, error) {
 	h265444Backends := desktopcodec.ProbeH265444Backends(h265444ProbeCtx)
 	h265444Cancel()
 
-	h265444CandidateCtx, h265444CandidateCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	h265444CandidateCtx, h265444CandidateCancel := context.WithTimeout(context.Background(), 6*time.Second)
 	h265444Candidates := desktopcodec.ProbeH265444RuntimeCandidates(h265444CandidateCtx)
 	h265444CandidateCancel()
 

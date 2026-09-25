@@ -86,6 +86,15 @@ func probeH265444Backends(
 				probe.Backend = backend.name
 			}
 		}
+		// Runtime support alone is not enough to advertise a direction. Keep
+		// capability tied to an implemented RelayProxy opener so a probe-only
+		// vendor integration cannot expose an unusable 4:4:4 session.
+		if backend.openEncoder == nil {
+			probe.Encode = false
+		}
+		if backend.openDecoder == nil {
+			probe.Decode = false
+		}
 		out = append(out, probe)
 	}
 	return out

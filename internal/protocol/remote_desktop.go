@@ -110,6 +110,30 @@ func CloneDesktopGPUCapability(capability *DesktopGPUCapability) *DesktopGPUCapa
 	return &cloned
 }
 
+// DesktopGPUCandidateDiagnostics is an authenticated target snapshot used only
+// for diagnostics and implementation planning. It MUST NOT participate in
+// codec/backend selection or make a codec/chroma format publicly negotiable.
+type DesktopGPUCandidateDiagnostics struct {
+	Backend          string `json:"backend,omitempty"`
+	Vendor           string `json:"vendor,omitempty"`
+	RuntimeAvailable bool   `json:"runtimeAvailable,omitempty"`
+	EncodeRuntime    bool   `json:"encodeRuntime,omitempty"`
+	DecodeRuntime    bool   `json:"decodeRuntime,omitempty"`
+	DeviceProbe      bool   `json:"deviceProbe,omitempty"`
+	DeviceCount      int    `json:"deviceCount,omitempty"`
+	HEVC444Encode    bool   `json:"hevc444Encode,omitempty"`
+	HEVC444Decode    bool   `json:"hevc444Decode,omitempty"`
+	Version          string `json:"version,omitempty"`
+	Implemented      bool   `json:"implemented,omitempty"`
+	Error            string `json:"error,omitempty"`
+}
+
+func CloneDesktopGPUCandidateDiagnostics(
+	candidates []DesktopGPUCandidateDiagnostics,
+) []DesktopGPUCandidateDiagnostics {
+	return append([]DesktopGPUCandidateDiagnostics(nil), candidates...)
+}
+
 type DesktopDisplayCapability struct {
 	ID        string `json:"id"`
 	Name      string `json:"name,omitempty"`
@@ -127,8 +151,9 @@ type DesktopCapabilities struct {
 	RelayDesktop   bool                       `json:"relayDesktop"`
 	Captures       []DesktopCaptureCapability `json:"captures,omitempty"`
 	Codecs         []DesktopCodecCapability   `json:"codecs,omitempty"`
-	GPU            *DesktopGPUCapability      `json:"gpu,omitempty"`
-	Displays       []DesktopDisplayCapability `json:"displays,omitempty"`
+	GPU            *DesktopGPUCapability              `json:"gpu,omitempty"`
+	GPUCandidates  []DesktopGPUCandidateDiagnostics   `json:"gpuCandidates,omitempty"`
+	Displays       []DesktopDisplayCapability         `json:"displays,omitempty"`
 	Audio          bool                       `json:"audio,omitempty"`
 	AudioCodecs    []string                   `json:"audioCodecs,omitempty"`
 	Clipboard      bool                       `json:"clipboard,omitempty"`

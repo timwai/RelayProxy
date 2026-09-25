@@ -396,10 +396,12 @@ func TestSummarizeGPUValidationRequiresActualDisplayZeroCopy(t *testing.T) {
 	samples := []DesktopDiagnosticSample{{
 		Config: config,
 		Stats: protocol.DesktopSessionStats{
-			CaptureFormat:  "d3d11-ayuv",
-			EncoderBackend: "onevpl-hevc444-d3d11-zero-copy",
-			DecoderBackend: "onevpl-hevc444-d3d11-zero-copy",
-			RenderBackend:  "cpu-bgra",
+			CaptureFormat:   "d3d11-ayuv",
+			EncoderBackend:  "nvenc-hevc444-d3d11-zero-copy",
+			EncoderHardware: true,
+			DecoderBackend:  "amf-hevc444-d3d11-zero-copy",
+			DecoderHardware: true,
+			RenderBackend:   "cpu-bgra",
 		},
 	}}
 	got := summarizeGPUValidation(capability, config, samples)

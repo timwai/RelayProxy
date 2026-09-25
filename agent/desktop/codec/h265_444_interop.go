@@ -15,10 +15,10 @@ const (
 // and any interop registrations it creates; Close must be safe to call more
 // than once and must release those resources before returning.
 type H265444BackendLifecycleContract struct {
-	SessionOwnsCodecContext      bool
-	SessionOwnsInteropResources  bool
-	CloseIdempotent              bool
-	CloseReleasesOwnedResources  bool
+	SessionOwnsCodecContext     bool
+	SessionOwnsInteropResources bool
+	CloseIdempotent             bool
+	CloseReleasesOwnedResources bool
 }
 
 func (c H265444BackendLifecycleContract) Validate() error {
@@ -45,12 +45,12 @@ func (c H265444BackendLifecycleContract) Validate() error {
 // especially important for D3D11<->CUDA registration where stale registrations
 // can keep textures and CUDA contexts alive after a desktop session ends.
 type H265444D3D11InteropContract struct {
-	Bridge                       string
-	EncodeInput                  PixelFormat
-	DecodeOutput                 PixelFormat
-	RequireSameD3D11Device       bool
-	EncoderBorrowsInputResource  bool
-	DecoderOwnsOutputUntilClose  bool
+	Bridge                      string
+	EncodeInput                 PixelFormat
+	DecodeOutput                PixelFormat
+	RequireSameD3D11Device      bool
+	EncoderBorrowsInputResource bool
+	DecoderOwnsOutputUntilClose bool
 }
 
 func (c H265444D3D11InteropContract) Validate() error {

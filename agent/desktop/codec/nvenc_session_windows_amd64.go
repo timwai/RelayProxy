@@ -26,7 +26,12 @@ type nvencD3D11Session struct {
 	api     nvEncodeAPIFunctionList
 	encoder uintptr
 	device  uintptr
-	closed  bool
+
+	initialized bool
+	videoConfig VideoConfig
+	initConfig  *nvencConfigBlob
+	initParams  *nvencInitializeParamsBlob
+	closed      bool
 }
 
 func validateNVENCProductionFunctionList(api nvEncodeAPIFunctionList) error {
@@ -38,6 +43,7 @@ func validateNVENCProductionFunctionList(api nvEncodeAPIFunctionList) error {
 		{"nvEncGetEncodeGUIDCount", api.NvEncGetEncodeGUIDCount},
 		{"nvEncGetEncodeGUIDs", api.NvEncGetEncodeGUIDs},
 		{"nvEncGetEncodeCaps", api.NvEncGetEncodeCaps},
+		{"nvEncGetEncodePresetConfigEx", api.NvEncGetEncodePresetConfigEx},
 		{"nvEncInitializeEncoder", api.NvEncInitializeEncoder},
 		{"nvEncCreateBitstreamBuffer", api.NvEncCreateBitstreamBuffer},
 		{"nvEncDestroyBitstreamBuffer", api.NvEncDestroyBitstreamBuffer},
@@ -224,6 +230,10 @@ func (s *nvencD3D11Session) Close() error {
 	s.api = nvEncodeAPIFunctionList{}
 	s.encoder = 0
 	s.device = 0
+	s.initialized = false
+	s.videoConfig = VideoConfig{}
+	s.initConfig = nil
+	s.initParams = nil
 	s.mu.Unlock()
 
 	var closeErr error

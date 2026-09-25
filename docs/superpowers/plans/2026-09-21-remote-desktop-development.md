@@ -910,6 +910,19 @@ Windows SendInput / CF_UNICODETEXT
 - 当前 resource helper 仍只作为 NVENC encoder 内部 building block，尚未挂入 `OpenH265444EncoderWithD3D11`，production gate 保持关闭。
 - 下一步：补 `NV_ENC_INITIALIZE_PARAMS/NV_ENC_CONFIG_HEVC` 初始化，再把 mapped AYUV resource 与 bitstream buffer 接进 `NV_ENC_PIC_PARAMS`，完成第一帧 HEVC 4:4:4 encode + bitstream lock 闭环。
 
+### 0.2.73 RD3 NVIDIA NVENC HEVC 4:4:4 Initialization
+
+- 新增 NVENC 13.1 initialization ABI 固定层：`NV_ENC_CONFIG=3584`、`NV_ENC_PRESET_CONFIG=5128`、`NV_ENC_INITIALIZE_PARAMS=1808`，全部强制 8-byte alignment；关键 offset 使用当前 SDK/bindgen layout 固化。
+- 初始化先调用 `nvEncGetEncodePresetConfigEx` 获取 P1 preset，再在 preset 基础上覆盖 Relay Desktop 所需参数，避免手工从零构造整个 3.5KB codec config。
+- HEVC profile 固定为 `NV_ENC_HEVC_PROFILE_FREXT_GUID`，用于 HEVC Main 4:2:2/4:4:4 8/10-bit family；当前 Relay Desktop 仍限定 8-bit 4:4:4。
+- HEVC config 明确设置 `chromaFormatIDC=3` 与 `repeatSPSPPS=1`；IDR/GOP 周期跟随 `KeyframeEvery × FPS`，默认 30 FPS / 2 秒即 60 帧。
+- rate control 使用 CBR，目标码率来自 `VideoConfig.TargetBitrate`；默认低延迟模式关闭 lookahead、禁止 B frame（`frameIntervalP=1`）、开启 zero-reorder，并使用约一帧码率大小的 VBV buffer / initial delay。
+- `DisableLowLatency=true` 时切换到 high-quality tuning，并清除 zero-reorder/single-frame VBV，但仍保持无 B frame，避免当前同步 D3D11 resource 生命周期出现跨帧引用。
+- session 在初始化成功后保留 config/init blob 与规范化 `VideoConfig`，为后续 bitrate reconfigure / sequence header / encode picture 复用；重复相同配置初始化幂等，不同配置返回 rebuild-required。
+- production function table 现在强制要求 `nvEncGetEncodePresetConfigEx`；旧/不完整 runtime 不进入 production initializer。
+- 当前仍未挂入通用 encoder opener，NVCodec production gate 保持关闭。
+- 下一步：实现 `NV_ENC_PIC_PARAMS` + `NV_ENC_LOCK_BITSTREAM` ABI，并把已完成的 AYUV map + bitstream buffer 接入第一帧 `nvEncEncodePicture`，拿到真实 HEVC Annex-B 输出。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

@@ -9,25 +9,26 @@ import (
 )
 
 func completeNVENCProductionFunctionListForTest() nvEncodeAPIFunctionList {
-	return nvEncodeAPIFunctionList{
-		NvEncOpenEncodeSessionEx:    1,
-		NvEncGetEncodeGUIDCount:     1,
-		NvEncGetEncodeGUIDs:         1,
-		NvEncGetEncodeCaps:          1,
-		NvEncInitializeEncoder:      1,
-		NvEncCreateBitstreamBuffer:  1,
-		NvEncDestroyBitstreamBuffer: 1,
-		NvEncRegisterResource:       1,
-		NvEncUnregisterResource:     1,
-		NvEncMapInputResource:       1,
-		NvEncUnmapInputResource:     1,
-		NvEncEncodePicture:          1,
-		NvEncLockBitstream:          1,
-		NvEncUnlockBitstream:        1,
-		NvEncGetSequenceParams:      1,
-		NvEncReconfigureEncoder:     1,
-		NvEncDestroyEncoder:         1,
-	}
+	var api nvEncodeAPIFunctionList
+	api.NvEncOpenEncodeSessionEx = 1
+	api.NvEncGetEncodeGUIDCount = 1
+	api.NvEncGetEncodeGUIDs = 1
+	api.NvEncGetEncodeCaps = 1
+	api.NvEncGetEncodePresetConfigEx = 1
+	api.NvEncInitializeEncoder = 1
+	api.NvEncCreateBitstreamBuffer = 1
+	api.NvEncDestroyBitstreamBuffer = 1
+	api.NvEncRegisterResource = 1
+	api.NvEncUnregisterResource = 1
+	api.NvEncMapInputResource = 1
+	api.NvEncUnmapInputResource = 1
+	api.NvEncEncodePicture = 1
+	api.NvEncLockBitstream = 1
+	api.NvEncUnlockBitstream = 1
+	api.NvEncGetSequenceParams = 1
+	api.NvEncReconfigureEncoder = 1
+	api.NvEncDestroyEncoder = 1
+	return api
 }
 
 func TestValidateNVENCProductionFunctionList(t *testing.T) {

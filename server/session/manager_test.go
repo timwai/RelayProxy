@@ -90,13 +90,17 @@ func TestDesktopCapabilitiesForTargetDoesNotLeakUnusableSnapshot(t *testing.T) {
 		DesktopCapabilities: protocol.DesktopCapabilities{
 			RelayDesktop: true,
 			Displays:     []protocol.DesktopDisplayCapability{{ID: "secret-display", Width: 1920, Height: 1080}},
+			GPUCandidates: []protocol.DesktopGPUCandidateDiagnostics{{
+				Backend: "secret-vendor-runtime", Vendor: "secret-vendor", RuntimeAvailable: true,
+			}},
 		},
 	}
 	got := DesktopCapabilitiesForTarget(sess, true, true)
 	if !got.NativeRDP || !got.RelayDesktop {
 		t.Fatalf("backend authorization flags lost: %+v", got)
 	}
-	if len(got.Displays) != 0 || len(got.Codecs) != 0 || len(got.Captures) != 0 {
+	if len(got.Displays) != 0 || len(got.Codecs) != 0 || len(got.Captures) != 0 ||
+		len(got.GPUCandidates) != 0 || got.GPU != nil {
 		t.Fatalf("dynamic desktop details leaked without current desktop.host grant: %+v", got)
 	}
 

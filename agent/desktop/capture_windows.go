@@ -1075,12 +1075,17 @@ func NewSystemHost() (*Host, error) {
 	oneVPLProbe := desktopcodec.ProbeOneVPLHEVC444(oneVPLProbeCtx)
 	oneVPLCancel()
 
+	gpuProbeCtx, gpuProbeCancel := context.WithTimeout(context.Background(), 6*time.Second)
+	gpuCapability, gpuFormats, gpuProbeErr := probeWindowsGPUCapability(gpuProbeCtx, oneVPLProbe)
+	gpuProbeCancel()
+
 	codecCapabilities := []protocol.DesktopCodecCapability{probe.Capability()}
 	hevcCapability, hevcAvailable := desktopcodec.H265Capability(hevcProbe, oneVPLProbe)
 	if hevcAvailable {
 		codecCapabilities = append(codecCapabilities, hevcCapability)
 	}
 	host.SetCodecCapabilities(codecCapabilities)
+	host.SetGPUCapability(gpuCapability)
 
 	log.Printf("[Desktop] Media Foundation H.264 probe mf=%t hwEnc=%d hwDec=%d swEnc=%d swDec=%d error=%q",
 		probe.MediaFoundation, probe.HardwareEncoderCount, probe.HardwareDecoderCount,
@@ -1093,5 +1098,18 @@ func NewSystemHost() (*Host, error) {
 		oneVPLProbe.DispatcherAvailable, oneVPLProbe.HardwareRuntime,
 		oneVPLProbe.HEVC444Encode, oneVPLProbe.HEVC444Decode,
 		oneVPLProbe.HEVC444EndToEnd(), hevcCapability.Chroma444, oneVPLProbe.Error)
+	for _, gpuFormat := range gpuFormats {
+		log.Printf("[Desktop] D3D11 GPU format probe format=%s encode=%t decode=%t display=%t encodeErr=%v decodeErr=%v displayErr=%v",
+			gpuFormat.Format, gpuFormat.Encode, gpuFormat.Decode, gpuFormat.Display,
+			gpuFormat.EncodeErr, gpuFormat.DecodeErr, gpuFormat.DisplayErr)
+	}
+	if gpuCapability != nil {
+		log.Printf("[Desktop] D3D11 GPU capability encodeZeroCopy=%t decodeZeroCopy=%t displayZeroCopy=%t formats=%v",
+			gpuCapability.EncodeZeroCopy, gpuCapability.DecodeZeroCopy, gpuCapability.DisplayZeroCopy, gpuCapability.Formats)
+	} else if gpuProbeErr != nil {
+		log.Printf("[Desktop] D3D11 GPU runtime probe unavailable: %v", gpuProbeErr)
+	} else {
+		log.Printf("[Desktop] D3D11 GPU runtime probe found no end-to-end zero-copy format")
+	}
 	return host, nil
 }

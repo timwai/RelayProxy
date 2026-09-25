@@ -144,7 +144,6 @@ func TestD3D11ConvertConfigValidation(t *testing.T) {
 	}
 }
 
-
 func TestD3D11EncodeFrameFormats(t *testing.T) {
 	frame := D3D11EncodeFrame{
 		Resource: 1,

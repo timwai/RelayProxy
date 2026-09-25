@@ -1126,11 +1126,11 @@ func NewSystemHost() (*Host, error) {
 	gpuCandidates := make([]protocol.DesktopGPUCandidateDiagnostics, 0, len(h265444Candidates))
 	for _, candidate := range h265444Candidates {
 		gpuCandidates = append(gpuCandidates, protocol.DesktopGPUCandidateDiagnostics{
-			Backend:          candidate.Backend,
-			Vendor:           candidate.Vendor,
-			RuntimeAvailable: candidate.RuntimeAvailable,
-			EncodeRuntime:    candidate.EncodeRuntime,
-			DecodeRuntime:    candidate.DecodeRuntime,
+			Backend:               candidate.Backend,
+			Vendor:                candidate.Vendor,
+			RuntimeAvailable:      candidate.RuntimeAvailable,
+			EncodeRuntime:         candidate.EncodeRuntime,
+			DecodeRuntime:         candidate.DecodeRuntime,
 			DeviceProbe:           candidate.DeviceProbe,
 			DeviceCount:           candidate.DeviceCount,
 			EncodeCapabilityKnown: candidate.EncodeCapabilityKnown,

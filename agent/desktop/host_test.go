@@ -217,6 +217,42 @@ func TestHostSessionFactoryCreatesIsolatedResources(t *testing.T) {
 	}
 }
 
+func TestHostGPUCapabilityIsCopied(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	host, err := NewHost(&testCaptureSource{frame: src}, DefaultHostConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := &protocol.DesktopGPUCapability{
+		Backend:         "d3d11",
+		EncodeZeroCopy:  true,
+		DecodeZeroCopy:  true,
+		DisplayZeroCopy: true,
+		Formats:         []string{"nv12", "ayuv"},
+	}
+	host.SetGPUCapability(input)
+	input.Formats[0] = "mutated"
+
+	first := host.GPUCapability()
+	if first == nil || first.Backend != "d3d11" || len(first.Formats) != 2 || first.Formats[0] != "nv12" {
+		t.Fatalf("host GPU capability mutated through caller: %+v", first)
+	}
+	first.Formats[0] = "changed"
+	second := host.GPUCapability()
+	if second == nil || second.Formats[0] != "nv12" {
+		t.Fatalf("host returned internal GPU capability: %+v", second)
+	}
+
+	caps := host.DesktopCapabilities(context.Background())
+	if caps.GPU == nil || caps.GPU.Backend != "d3d11" || len(caps.GPU.Formats) != 2 {
+		t.Fatalf("desktop capability lost GPU snapshot: %+v", caps.GPU)
+	}
+	caps.GPU.Formats[1] = "changed"
+	if got := host.GPUCapability(); got.Formats[1] != "ayuv" {
+		t.Fatalf("desktop snapshot aliases host GPU capability: %+v", got)
+	}
+}
+
 func TestHostCodecCapabilitiesAreCopied(t *testing.T) {
 	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	host, err := NewHost(&testCaptureSource{frame: src}, DefaultHostConfig())

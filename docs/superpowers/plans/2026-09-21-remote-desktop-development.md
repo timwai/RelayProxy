@@ -887,7 +887,7 @@ Windows SendInput / CF_UNICODETEXT
 - NVIDIA backend 明确保持 `productionReady=false`、`zeroCopyValidated=false`；因此即使 NVENC/NVDEC capability probe 均为 true，也不会公开 `Chroma444`，也不会被 `OpenH265444*()` 选中。
 - 新增测试固定 production gate、D3D11-only opener、lifecycle ownership、D3D11/CUDA interop ownership 以及 NVCodec 默认关闭行为。
 - 代表实现 PR：#124。
-- 下一步：实现 NVENC D3D11/CUDA encoder session opener，包括 CUDA device/context 生命周期、D3D11 texture registration/map/unmap、AYUV input、sequence header、IDR/bitrate reconfigure 与完整 Close 清理；完成真实 encode 验证后仍保持 backend 总 gate 关闭，直到 NVDEC + zero-copy round trip 同样通过。
+- 下一步：实现 NVENC production encoder session opener。编码端优先采用 NVENC 原生 DirectX/D3D11 session + texture registration/map/unmap；CUDA interop 保留给后续确有需要的 NVDEC 路径。完成真实 encode 验证后仍保持 backend 总 gate 关闭，直到 NVDEC + zero-copy round trip 同样通过。
 
 ### 0.2.71 RD3 NVIDIA NVENC D3D11 Production Session Lifecycle
 

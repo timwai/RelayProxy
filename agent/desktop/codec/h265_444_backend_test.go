@@ -10,8 +10,8 @@ func productionTestH265444Backend(name string) h265444Backend {
 		name:              name,
 		productionReady:   true,
 		zeroCopyValidated: true,
-		lifecycle:          h265444SessionLifecycleContract(),
-		interop:            h265444D3D11NativeAYUVContract(),
+		lifecycle:         h265444SessionLifecycleContract(),
+		interop:           h265444D3D11NativeAYUVContract(),
 	}
 }
 

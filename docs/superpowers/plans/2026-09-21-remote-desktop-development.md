@@ -4,7 +4,7 @@
 > 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
-> 当前开发基线：`main`（PR #120 已合并，merge `8deed5c5678e4f305069bfa27e827d2dd3fcdceb`；gofmt 修复 `8bc366fd2846c601cc92fddf64dd6f0904f8fe3e`）
+> 当前开发基线：`main`（PR #122 已合并，merge `bf65a6f92ee4614a5a95672834e193c45e4ed871`）
 
 ## 0. 当前进度
 
@@ -837,6 +837,31 @@ Windows SendInput / CF_UNICODETEXT
 - 代表实现 PR：#120；merge `8deed5c5678e4f305069bfa27e827d2dd3fcdceb`；gofmt 修复 `8bc366fd2846c601cc92fddf64dd6f0904f8fe3e`。
 - 验证：Go CI #1006 的 format/vet/full test/race/benchmark 全部通过；UI CI #696 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
 - 下一步：把 vendor candidate diagnostics 作为机器可读 target snapshot 随远程桌面目标能力传递，并进入 diagnostics JSON；该字段只用于诊断，selector / negotiation 必须完全忽略。之后再实现真实 NVENC HEVC/YUV444 encode-capability probe。
+
+### 0.2.67 RD3 Vendor GPU Candidate Target / Diagnostics Snapshot（已进入 main）
+
+- 新增 protocol 层 diagnostic-only `DesktopGPUCandidateDiagnostics`，把 NVIDIA / AMD candidate runtime/device 结果随认证的 `DesktopCapabilities` 目标快照传递到控制端。
+- candidate 数据链：Host probe -> DeviceHello -> Server authorized target snapshot -> ControllerSession -> diagnostics recorder。
+- diagnostics schema 升级到 v7，导出 `targetGpuCandidates`；会话建立时固化快照，目标端之后重连或 capability 改变不会篡改当前会话的诊断证据。
+- candidate 字段不参与 `SelectBackend`、codec selector 或 HEVC 4:4:4 registry；新增回归明确验证“即使 NVIDIA candidate 报告 HEVC444 decode，也不能凭 candidate 启用 Relay Desktop backend”。
+- Server 继续以当前 `desktop.host` grant 为授权边界；未授权目标的 GPU / candidate / codec / display 动态细节全部剥离。
+- 顺带修复 Remote Desktop target 原有浅拷贝边界：captures、codec chroma slices、GPU formats、GPU candidates、displays、audio codecs 统一走 protocol 深拷贝。
+- 代表实现 PR：#121；merge `cac34f5b4634d999fb8c7479d262d3992245ee64`；gofmt 修复提交 `17bb28f3b7116f62b1cb86a38888999d4f15f7e1` / `65cd58b767676dc5b4506af91b825e4996239d8b` / `e1d3d2c93eec72ad2613e0a8bdd5e59cec7b2cbb`。
+- 验证：Go CI #1013 全绿；UI CI #703 全绿，含 Windows/macOS desktop package。
+
+### 0.2.68 RD3 NVIDIA NVENC HEVC 4:4:4 Device Capability Probe（已进入 main）
+
+- NVIDIA candidate 新增真实 encode device capability：Windows amd64 使用 `NvEncodeAPICreateInstance` 获取完整 NVENC function table，在每个 CUDA device 的短生命周期 context 中调用 `nvEncOpenEncodeSessionEx`。
+- probe 先枚举 encode codec GUID；只有设备公开 HEVC GUID 时，才调用 `nvEncGetEncodeCaps` 查询 `NV_ENC_CAPS_SUPPORT_YUV444_ENCODE`。只有该真实查询成功且返回非零，candidate 才设置 `HEVC444Encode=true`。
+- 动态 ABI 固定到 Video Codec SDK / nv-codec-headers 13.1：API 13.1、function-list struct v2、open-session/caps struct v1、YUV444 caps enum 33、官方 HEVC GUID。
+- Windows 测试固定 `NV_ENCODE_API_FUNCTION_LIST` 2552-byte size、关键 function offset、session/caps struct size、HEVC GUID 与枚举常量，降低手写 FFI ABI 漂移风险。
+- 为避免旧驱动 ABI 猜测，驱动 `NvEncodeAPIGetMaxSupportedVersion` 低于 13.1 时只保留 runtime candidate，并记录 probe ABI 不兼容；不会强行创建设备 session。
+- NVENC 与 NVDEC 的真实查询合并到同一 NVIDIA candidate：`HEVC444Encode` / `HEVC444Decode` 独立记录，`DeviceProbe` 表示至少有一个真实 device/context capability query 完成。
+- candidate probe 总预算由 3 秒提高到 6 秒，容纳 NVENC + NVDEC 双查询；仍然是启动期一次性诊断，不进入媒体热路径。
+- 仍保持 `Implemented=false` / `advertised=false`：没有 NVENC production encoder opener、没有 NVDEC production decoder opener、没有 D3D11/CUDA zero-copy 实测之前，不公开 `Chroma444`。
+- 代表实现 PR：#122；merge `bf65a6f92ee4614a5a95672834e193c45e4ed871`。
+- 验证：Go CI #1015 的 format/vet/full test/race/benchmark 全部通过；UI CI #705 的 frontend/full regression、Windows desktop package、macOS desktop package 全部通过。
+- 下一步：明确 AMD AMF 的 HEVC 4:4:4 API 能力边界。当前 AMF HEVC public profile 仅 Main/Main10；若没有 FRExt/4:4:4 output profile，candidate 必须明确记录“AMF API 不提供 HEVC 4:4:4 encode”，不能把 AYUV/Y410 等输入 surface 格式误判为 4:4:4 bitstream 支持。
 
 ### 0.3 本轮进度（2026-09-22）
 

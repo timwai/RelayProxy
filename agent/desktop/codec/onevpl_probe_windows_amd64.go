@@ -23,6 +23,8 @@ const (
 	oneVPLAccelD3D11       = 0x0300
 	oneVPLVendorIntel      = 0x8086
 
+	oneVPLResourceSystemSurface = 1
+
 	oneVPLErrUnsupported = -3
 	oneVPLErrNotFound    = -9
 )
@@ -38,9 +40,11 @@ const (
 	oneVPLPropVendor = "mfxImplDescription.VendorID"
 
 	oneVPLPropHEVCEncoder      = "mfxImplDescription.mfxEncoderDescription.encoder.CodecID"
+	oneVPLPropHEVCEncoderMemory = "mfxImplDescription.mfxEncoderDescription.encoder.encprofile.encmemdesc.MemHandleType"
 	oneVPLPropHEVCEncoderColor = "mfxImplDescription.mfxEncoderDescription.encoder.encprofile.encmemdesc.ColorFormats"
 
 	oneVPLPropHEVCDecoder      = "mfxImplDescription.mfxDecoderDescription.decoder.CodecID"
+	oneVPLPropHEVCDecoderMemory = "mfxImplDescription.mfxDecoderDescription.decoder.decprofile.decmemdesc.MemHandleType"
 	oneVPLPropHEVCDecoderColor = "mfxImplDescription.mfxDecoderDescription.decoder.decprofile.decmemdesc.ColorFormats"
 )
 
@@ -250,6 +254,16 @@ func oneVPLDirectionFilters(codecProperty, colorProperty string) []oneVPLFilter 
 	return filters
 }
 
+func oneVPLDirectionMemoryFilters(
+	codecProperty string,
+	memoryProperty string,
+	colorProperty string,
+	resourceType uint32,
+) []oneVPLFilter {
+	filters := oneVPLDirectionFilters(codecProperty, colorProperty)
+	return append(filters, oneVPLFilter{name: memoryProperty, value: resourceType})
+}
+
 // ProbeOneVPLHEVC444 asks the oneVPL dispatcher for a hardware D3D11 Intel
 // implementation whose HEVC encoder/decoder advertises AYUV. It does not infer
 // support from GPU model names and does not reserve an encoder session.
@@ -277,23 +291,65 @@ func ProbeOneVPLHEVC444(ctx context.Context) OneVPLProbe {
 		return probe
 	}
 
-	probe.HEVC444Encode, err = oneVPLSessionAvailable(
+	probe.HEVC444SystemEncode, err = oneVPLSessionAvailable(
 		ctx,
 		api,
-		oneVPLDirectionFilters(oneVPLPropHEVCEncoder, oneVPLPropHEVCEncoderColor),
+		oneVPLDirectionMemoryFilters(
+			oneVPLPropHEVCEncoder,
+			oneVPLPropHEVCEncoderMemory,
+			oneVPLPropHEVCEncoderColor,
+			oneVPLResourceSystemSurface,
+		),
+	)
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+	probe.HEVC444D3D11Encode, err = oneVPLSessionAvailable(
+		ctx,
+		api,
+		oneVPLDirectionMemoryFilters(
+			oneVPLPropHEVCEncoder,
+			oneVPLPropHEVCEncoderMemory,
+			oneVPLPropHEVCEncoderColor,
+			oneVPLResourceDX11Texture,
+		),
 	)
 	if err != nil {
 		probe.Error = err.Error()
 		return probe
 	}
 
-	probe.HEVC444Decode, err = oneVPLSessionAvailable(
+	probe.HEVC444SystemDecode, err = oneVPLSessionAvailable(
 		ctx,
 		api,
-		oneVPLDirectionFilters(oneVPLPropHEVCDecoder, oneVPLPropHEVCDecoderColor),
+		oneVPLDirectionMemoryFilters(
+			oneVPLPropHEVCDecoder,
+			oneVPLPropHEVCDecoderMemory,
+			oneVPLPropHEVCDecoderColor,
+			oneVPLResourceSystemSurface,
+		),
 	)
 	if err != nil {
 		probe.Error = err.Error()
+		return probe
 	}
+	probe.HEVC444D3D11Decode, err = oneVPLSessionAvailable(
+		ctx,
+		api,
+		oneVPLDirectionMemoryFilters(
+			oneVPLPropHEVCDecoder,
+			oneVPLPropHEVCDecoderMemory,
+			oneVPLPropHEVCDecoderColor,
+			oneVPLResourceDX11Texture,
+		),
+	)
+	if err != nil {
+		probe.Error = err.Error()
+		return probe
+	}
+
+	probe.HEVC444Encode = probe.HEVC444SystemEncode || probe.HEVC444D3D11Encode
+	probe.HEVC444Decode = probe.HEVC444SystemDecode || probe.HEVC444D3D11Decode
 	return probe
 }

@@ -61,7 +61,7 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 		Handler:           w.authorize(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      40 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	go func() {
@@ -161,6 +161,16 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/select-exit", w.selectExit)
 	mux.HandleFunc("POST /api/autostart", w.setAutostart)
 	mux.HandleFunc("GET /api/connections", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetConnections()) })
+	mux.HandleFunc("GET /api/remote-desktop/diagnostics", func(rw http.ResponseWriter, _ *http.Request) {
+		writeWebJSON(rw, w.bridge.GetRemoteDesktopDiagnostics())
+	})
+	mux.HandleFunc("GET /api/remote-desktop/nvcodec-self-test", func(rw http.ResponseWriter, _ *http.Request) {
+		writeWebJSON(rw, w.bridge.GetRemoteDesktopNVCodecSelfTest())
+	})
+	mux.HandleFunc("POST /api/remote-desktop/nvcodec-self-test", func(rw http.ResponseWriter, _ *http.Request) {
+		report, _ := w.bridge.RunRemoteDesktopNVCodecSelfTest()
+		writeWebJSON(rw, report)
+	})
 	mux.HandleFunc("DELETE /api/connections", func(rw http.ResponseWriter, _ *http.Request) {
 		w.bridge.ClearConnections()
 		writeWebJSON(rw, map[string]bool{"ok": true})
@@ -386,6 +396,9 @@ const webBridgeJS = `(function () {
   window.goSetAutostart = function (enabled) { return json('/api/autostart', 'POST', {enabled:enabled}); };
   window.goOpenConnections = async function () { window.open('/connections', '_blank', 'noopener'); return 'ok'; };
   window.goGetConnections = function () { return request('/api/connections'); };
+  window.goGetRemoteDesktopDiagnostics = function () { return request('/api/remote-desktop/diagnostics'); };
+  window.goGetRemoteDesktopNVCodecSelfTest = function () { return request('/api/remote-desktop/nvcodec-self-test'); };
+  window.goRunRemoteDesktopNVCodecSelfTest = function () { return json('/api/remote-desktop/nvcodec-self-test', 'POST', {}); };
   window.goClearConnections = function () { return request('/api/connections', {method:'DELETE'}); };
   window.goOpenConfigDir = async function () { var out = JSON.parse(await request('/api/config-path')); alert('配置文件：' + out.path); };
   window.goQuit = function () { return json('/api/quit', 'POST', {}); };

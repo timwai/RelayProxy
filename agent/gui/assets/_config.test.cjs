@@ -357,7 +357,10 @@ test('remote desktop GPU path summary marks unadvertised runtime format', async 
 test('remote desktop NVIDIA self-test is manual and attached to diagnostics UI', () => {
   assert.match(html, /id="desktop-nvcodec-self-test-btn"/);
   assert.match(html, /onclick="runRemoteDesktopNVCodecSelfTest\(\)"/);
+  assert.match(html, /id="desktop-nvcodec-qualification-btn"/);
+  assert.match(html, /onclick="runRemoteDesktopNVCodecQualification\(\)"/);
   assert.match(source, /goRunRemoteDesktopNVCodecSelfTest/);
+  assert.match(source, /goRunRemoteDesktopNVCodecQualification/);
   assert.match(source, /goGetRemoteDesktopNVCodecSelfTest/);
   assert.match(source, /goGetRemoteDesktopNVCodecValidation/);
   assert.match(source, /NVIDIA 验证凭证：当前有效/);

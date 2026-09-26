@@ -27,6 +27,10 @@ var (
 		Data1: 0x770aae78, Data2: 0xf26f, Data3: 0x4dba,
 		Data4: [8]byte{0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87},
 	}
+	nvcodecValidationIIDIDXGIDevice = windows.GUID{
+		Data1: 0x54ec77fa, Data2: 0x1377, Data3: 0x44e6,
+		Data4: [8]byte{0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c},
+	}
 )
 
 type nvcodecValidationLUID struct {
@@ -93,7 +97,7 @@ func nvcodecValidationAYUVPattern(width, height int) []byte {
 func createNVCodecValidationD3D11Device() (
 	device unsafe.Pointer,
 	context unsafe.Pointer,
-	adapterName string,
+	identity NVCodecValidationIdentity,
 	err error,
 ) {
 	var factory unsafe.Pointer
@@ -102,10 +106,10 @@ func createNVCodecValidationD3D11Device() (
 		uintptr(unsafe.Pointer(&factory)),
 	)
 	if hresultFailed(hr) {
-		return nil, nil, "", hresultError("CreateDXGIFactory1", hr)
+		return nil, nil, NVCodecValidationIdentity{}, hresultError("CreateDXGIFactory1", hr)
 	}
 	if factory == nil {
-		return nil, nil, "", errors.New("CreateDXGIFactory1 returned nil")
+		return nil, nil, NVCodecValidationIdentity{}, errors.New("CreateDXGIFactory1 returned nil")
 	}
 	defer releaseIUnknown(factory)
 
@@ -166,14 +170,15 @@ func createNVCodecValidationD3D11Device() (
 			uintptr(unsafe.Pointer(&selectedLevel)),
 			uintptr(unsafe.Pointer(&candidateContext)),
 		)
-		releaseIUnknown(adapter)
 		if hresultFailed(createHR) {
+			releaseIUnknown(adapter)
 			lastErr = hresultError("D3D11CreateDevice(NVIDIA)", createHR)
 			releaseIUnknown(candidateContext)
 			releaseIUnknown(candidateDevice)
 			continue
 		}
 		if candidateDevice == nil || candidateContext == nil {
+			releaseIUnknown(adapter)
 			lastErr = errors.New("D3D11CreateDevice(NVIDIA) returned incomplete objects")
 			releaseIUnknown(candidateContext)
 			releaseIUnknown(candidateDevice)
@@ -183,18 +188,57 @@ func createNVCodecValidationD3D11Device() (
 			protected := comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
 			releaseIUnknown(multithread)
 			if protected == 0 {
+				releaseIUnknown(adapter)
 				lastErr = errors.New("ID3D10Multithread.SetMultithreadProtected returned FALSE")
 				releaseIUnknown(candidateContext)
 				releaseIUnknown(candidateDevice)
 				continue
 			}
 		}
-		return candidateDevice, candidateContext, windows.UTF16ToString(desc.Description[:]), nil
+		var driverVersion int64
+		if checkHR := comCall(
+			adapter,
+			9, // IDXGIAdapter::CheckInterfaceSupport
+			uintptr(unsafe.Pointer(&nvcodecValidationIIDIDXGIDevice)),
+			uintptr(unsafe.Pointer(&driverVersion)),
+		); hresultFailed(checkHR) {
+			driverVersion = 0
+		}
+		identity := NVCodecValidationIdentity{
+			Adapter:              windows.UTF16ToString(desc.Description[:]),
+			AdapterVendorID:      desc.VendorID,
+			AdapterDeviceID:      desc.DeviceID,
+			AdapterSubSysID:      desc.SubSysID,
+			AdapterRevision:      desc.Revision,
+			AdapterDriverVersion: uint64(driverVersion),
+		}
+		releaseIUnknown(adapter)
+		return candidateDevice, candidateContext, identity, nil
 	}
 	if lastErr != nil {
-		return nil, nil, "", fmt.Errorf("%w: no usable NVIDIA D3D11 adapter: %v", ErrDecoderUnavailable, lastErr)
+		return nil, nil, NVCodecValidationIdentity{}, fmt.Errorf("%w: no usable NVIDIA D3D11 adapter: %v", ErrDecoderUnavailable, lastErr)
 	}
-	return nil, nil, "", fmt.Errorf("%w: no NVIDIA D3D11 adapter found", ErrDecoderUnavailable)
+	return nil, nil, NVCodecValidationIdentity{}, fmt.Errorf("%w: no NVIDIA D3D11 adapter found", ErrDecoderUnavailable)
+}
+
+func ProbeNVCodecValidationIdentity(ctx context.Context) (NVCodecValidationIdentity, error) {
+	if err := ctx.Err(); err != nil {
+		return NVCodecValidationIdentity{}, err
+	}
+	device, deviceContext, identity, err := createNVCodecValidationD3D11Device()
+	if deviceContext != nil {
+		releaseIUnknown(deviceContext)
+	}
+	if device != nil {
+		releaseIUnknown(device)
+	}
+	if err != nil {
+		return NVCodecValidationIdentity{}, err
+	}
+	if identity.AdapterDriverVersion == 0 {
+		return identity, fmt.Errorf("%w: NVIDIA D3D11 driver version is unavailable", ErrDecoderUnavailable)
+	}
+	return identity, nil
 }
 
 func createNVCodecValidationAYUVTexture(
@@ -389,6 +433,7 @@ func ValidateNVCodecH265444RoundTrip(
 		ReconfiguredBitrate: cfg.TargetBitrate / 2,
 	}
 	defer func() {
+		report.ValidatedAtUnixMs = time.Now().UnixMilli()
 		report.DurationMs = time.Since(started).Milliseconds()
 		if retErr != nil {
 			report.Passed = false
@@ -396,11 +441,16 @@ func ValidateNVCodecH265444RoundTrip(
 		}
 	}()
 
-	device, deviceContext, adapterName, err := createNVCodecValidationD3D11Device()
+	device, deviceContext, identity, err := createNVCodecValidationD3D11Device()
 	if err != nil {
 		return report, err
 	}
-	report.Adapter = adapterName
+	report.Adapter = identity.Adapter
+	report.AdapterVendorID = identity.AdapterVendorID
+	report.AdapterDeviceID = identity.AdapterDeviceID
+	report.AdapterSubSysID = identity.AdapterSubSysID
+	report.AdapterRevision = identity.AdapterRevision
+	report.AdapterDriverVersion = identity.AdapterDriverVersion
 	report.D3D11DeviceCreated = true
 
 	var source unsafe.Pointer

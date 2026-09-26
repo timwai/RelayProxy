@@ -21,6 +21,7 @@
   window.goGetRemoteDesktopDiagnostics = () => invoke('GetRemoteDesktopDiagnostics');
   window.goRunRemoteDesktopNVCodecSelfTest = () => invoke('RunRemoteDesktopNVCodecSelfTest');
   window.goGetRemoteDesktopNVCodecSelfTest = () => invoke('GetRemoteDesktopNVCodecSelfTest');
+  window.goGetRemoteDesktopNVCodecValidation = () => invoke('GetRemoteDesktopNVCodecValidation');
   window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');
   window.goOpenRemoteDesktopNativeViewer = () => invoke('OpenRemoteDesktopNativeViewer');
   window.goOpenRemoteDesktopDisplayWindow = (targetID, displayID) => invoke('OpenRemoteDesktopDisplayWindow', targetID, displayID);

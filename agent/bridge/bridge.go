@@ -43,7 +43,7 @@ type UIBridge struct {
 }
 
 func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
-	return &UIBridge{
+	b := &UIBridge{
 		agent:       agent,
 		configPath:  configPath,
 		writeConfig: config.SaveAgentConfig,
@@ -62,6 +62,11 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 			return startup.SetAutoStart(autoStartName, executable, path, enabled, requireAdmin)
 		},
 	}
+	if receipt, err := loadNVCodecValidationReceipt(configPath); err == nil && receipt != nil {
+		report := receipt.Report
+		b.nvcodecSelfTest = &report
+	}
+	return b
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +143,8 @@ func (b *UIBridge) GetRemoteDesktopAudioDiagnostics() desktop.DesktopAudioDiagno
 
 type RemoteDesktopDiagnosticsReport struct {
 	desktop.DesktopDiagnosticsReport
-	NVCodecSelfTest *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
+	NVCodecSelfTest   *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
+	NVCodecValidation *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
 }
 
 func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport {
@@ -151,6 +157,8 @@ func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport 
 		report.NVCodecSelfTest = &selfTest
 	}
 	b.mu.RUnlock()
+	validation := b.GetRemoteDesktopNVCodecValidation()
+	report.NVCodecValidation = &validation
 	return report
 }
 
@@ -162,6 +170,9 @@ func (b *UIBridge) RunRemoteDesktopNVCodecSelfTest() (desktopcodec.NVCodecH26544
 	b.mu.Lock()
 	b.nvcodecSelfTest = &report
 	b.mu.Unlock()
+	if err == nil && report.Passed {
+		_ = saveNVCodecValidationReceipt(b.configPath, report)
+	}
 	return report, err
 }
 

@@ -206,6 +206,17 @@ func (s *WailsService) GetRemoteDesktopNVCodecSelfTest() (string, error) {
 	return string(data), nil
 }
 
+func (s *WailsService) GetRemoteDesktopNVCodecValidation() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"current":false,"staleReason":"GUI unavailable"}`, nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopNVCodecValidation())
+	if err != nil {
+		return `{"current":false,"staleReason":"failed to encode NVCodec validation status"}`, nil
+	}
+	return string(data), nil
+}
+
 func (s *WailsService) GetRemoteDesktopFrame() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "{}", nil

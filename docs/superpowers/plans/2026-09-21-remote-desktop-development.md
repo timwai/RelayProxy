@@ -1024,6 +1024,20 @@ Windows SendInput / CF_UNICODETEXT
 - 当前仍未将 NVDEC opener 写入 NVIDIA production backend slot，也未把 `productionReady / zeroCopyValidated` 打开。
 - 下一步：增加显式 NVENC→NVDEC round-trip 验证入口，在 NVIDIA Windows 真机上编码 AYUV D3D11 frame、解码回 AYUV texture，并做 GPU/最小 readback 校验、IDR/sequence/bitrate reconfigure 与资源泄漏检查；只有验证通过后才考虑 production gate。
 
+### 0.2.82 RD3 NVIDIA NVENC → NVDEC Explicit Round-Trip Self-Test
+
+- 新增显式 NVIDIA 真机 round-trip 验证入口，正常 Agent 启动不会自动执行；Windows amd64 可运行 `relay-agent.exe --desktop-nvcodec-self-test`，在 singleton、配置加载与网络服务启动之前完成独立 GPU 自检并退出。
+- self-test 不使用“系统默认 GPU”：通过 DXGI 1.1 枚举 adapter，筛选 NVIDIA vendor `0x10DE` 且排除 software adapter，再用该 adapter 显式创建 D3D11 device；后续 NVDEC session 的 `cuD3D11GetDevices` 继续校验同一 device 只映射到一个 CUDA device。
+- 验证源为 640×360 / 30 FPS / HEVC 8-bit 4:4:4 的 AYUV 四象限 pattern；D3D11 texture 直接使用 `DXGI_FORMAT_AYUV` 初始数据，内存布局按 V/U/Y/A，四个象限使用不同 Y/U/V 组合以识别通道交换和空间错位。
+- 编码侧走真实 `OpenNVENCH265EncoderWithD3D11`：验证 sequence header 包含 VPS/SPS/PPS、首帧为 key frame，并记录 packet bytes / encoded frame count。
+- 解码侧走真实 `OpenNVDECH265DecoderWithD3D11`：验证输出为 `Hardware=true + PixelFormatAYUV + 同 D3D11 device` 的 texture，不接受 CPU fallback。
+- 自检增加最小 staging readback：只为验证用途把最终 AYUV texture copy 到 staging texture，并在四个象限中心采样 V/U/Y/A；alpha 必须为 255，Y/U/V 最大误差默认不超过 48。生产 media path 仍保持 GPU-only，不因这个验证 readback 引入 CPU fallback。
+- 动态控制也进入同一次验证：初始 8 Mbps，随后 bitrate-only reconfigure 到 4 Mbps，要求下一 packet 为 key frame 且 NVDEC 继续产生 output；之后显式 `ForceIDR` 再次验证 key frame。
+- self-test 输出结构化 JSON：adapter、resolution/FPS、sequence header bytes、encoded/decoded frame count、D3D11 output/readback、sample count、max channel error、reconfigure/ForceIDR、cleanup 结果与总耗时；失败返回非零 exit code。
+- 非 Windows amd64 提供明确 unsupported stub，保证跨平台构建不受 CLI 入口影响。
+- 本阶段依然**不自动打开 NVIDIA production gate**。round-trip 函数是可重复执行的诊断机制；只有在目标 NVIDIA Windows 真机上实际通过并积累稳定样本后，才允许把 `productionReady / zeroCopyValidated` 改为 true。
+- 下一步：把 self-test JSON 接入 Relay Desktop diagnostics 导出/GUI “GPU 自检”，并在实机记录多轮资源泄漏、显存增长、码率切换、IDR/sequence header 与多 adapter 场景；之后再决定是否开放 NVIDIA backend 自动选择。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

@@ -26,7 +26,8 @@ type nvdecCUDAInteropAPI struct {
 }
 
 type nvdecD3D11AYUVInteropSurface struct {
-	mu sync.Mutex
+	callMu sync.Mutex
+	mu     sync.Mutex
 
 	session          *nvdecD3D11Session
 	api              nvdecCUDAInteropAPI
@@ -221,6 +222,12 @@ func (s *nvdecD3D11AYUVInteropSurface) Map() (uintptr, error) {
 	if s == nil {
 		return 0, ErrDecoderUnavailable
 	}
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
+	return s.mapLocked()
+}
+
+func (s *nvdecD3D11AYUVInteropSurface) mapLocked() (uintptr, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed || s.session == nil || s.graphicsResource == 0 || s.texture == nil {
@@ -274,6 +281,12 @@ func (s *nvdecD3D11AYUVInteropSurface) Unmap() error {
 	if s == nil {
 		return nil
 	}
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
+	return s.unmapLocked()
+}
+
+func (s *nvdecD3D11AYUVInteropSurface) unmapLocked() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.mapped {
@@ -305,6 +318,46 @@ func (s *nvdecD3D11AYUVInteropSurface) Unmap() error {
 	return nil
 }
 
+func (s *nvdecD3D11AYUVInteropSurface) Pack(
+	frame *nvdecMappedFrame,
+	packer *nvdecAYUVPacker,
+) error {
+	if s == nil || frame == nil || packer == nil {
+		return ErrDecoderUnavailable
+	}
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
+
+	mappedArray, err := s.mapLocked()
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	if s.closed || s.session == nil {
+		s.mu.Unlock()
+		_ = s.unmapLocked()
+		return ErrDecoderUnavailable
+	}
+	session := s.session
+	width := s.width
+	height := s.height
+	s.mu.Unlock()
+
+	packer.mu.Lock()
+	packerSession := packer.session
+	packerClosed := packer.closed
+	packer.mu.Unlock()
+	if packerClosed || packerSession != session {
+		packErr := fmt.Errorf("%w: NVDEC AYUV packer session does not match destination", ErrDecoderUnavailable)
+		return errors.Join(packErr, s.unmapLocked())
+	}
+
+	packErr := packer.pack(frame, mappedArray, width, height)
+	unmapErr := s.unmapLocked()
+	return errors.Join(packErr, unmapErr)
+}
+
 func (s *nvdecD3D11AYUVInteropSurface) Texture() uintptr {
 	if s == nil {
 		return 0
@@ -333,6 +386,8 @@ func (s *nvdecD3D11AYUVInteropSurface) Close() error {
 	if s == nil {
 		return nil
 	}
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
 
 	s.mu.Lock()
 	if s.closed {

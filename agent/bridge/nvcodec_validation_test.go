@@ -352,7 +352,6 @@ func TestReplaceNVCodecValidationFileOverwritesExistingTarget(t *testing.T) {
 	}
 }
 
-
 func TestNVCodecValidationNeedsIdentityProbeOnlyForQualifiedCandidate(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	receipt, _ := validNVCodecReceiptForTest(now)

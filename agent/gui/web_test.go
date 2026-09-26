@@ -340,8 +340,10 @@ func TestWebExposesNVCodecSelfTestDiagnosticsBridge(t *testing.T) {
 	for _, want := range []string{
 		"goGetRemoteDesktopDiagnostics",
 		"goGetRemoteDesktopNVCodecSelfTest",
+		"goGetRemoteDesktopNVCodecValidation",
 		"goRunRemoteDesktopNVCodecSelfTest",
 		"/api/remote-desktop/nvcodec-self-test",
+		"/api/remote-desktop/nvcodec-validation",
 	} {
 		if !strings.Contains(bridgeJS.Body.String(), want) {
 			t.Fatalf("web bridge missing %q", want)

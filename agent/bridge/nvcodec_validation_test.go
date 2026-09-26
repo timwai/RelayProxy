@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -142,5 +143,31 @@ func TestNVCodecValidationReceiptPathFollowsConfigDirectory(t *testing.T) {
 	path := nvcodecValidationReceiptPath(configPath)
 	if path != filepath.Join(dir, nvcodecValidationReceiptName) {
 		t.Fatalf("validation receipt path=%q", path)
+	}
+}
+
+
+func TestReplaceNVCodecValidationFileOverwritesExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "receipt.json")
+	tmp := filepath.Join(dir, "receipt.tmp")
+	if err := os.WriteFile(target, []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tmp, []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := replaceNVCodecValidationFile(tmp, target); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "new" {
+		t.Fatalf("target contents=%q want=new", data)
+	}
+	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+		t.Fatalf("temporary receipt still exists: %v", err)
 	}
 }

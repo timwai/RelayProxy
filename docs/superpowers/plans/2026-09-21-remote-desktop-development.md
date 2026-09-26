@@ -936,6 +936,17 @@ Windows SendInput / CF_UNICODETEXT
 - bitrate reconfigure 本阶段仍返回 `ErrEncoderControlUnsupported`；下一阶段单独实现 `NV_ENC_RECONFIGURE_PARAMS`，避免与首帧编码闭环混在同一风险面。
 - 当前 production gate 仍关闭，通用 `OpenH265444EncoderWithD3D11` 仍不会选择 NVENC；需要 Windows NVIDIA 真机 encode 验证以及后续 NVDEC/zero-copy round trip 后才允许打开。
 
+### 0.2.75 RD3 NVIDIA NVENC Bitrate Reconfigure
+
+- 新增 `NV_ENC_RECONFIGURE_PARAMS` ABI：固定 1824 bytes / 8-byte alignment，内嵌当前 SDK 13.1 的 `NV_ENC_INITIALIZE_PARAMS`；version 使用 reserved-bit v2。
+- NVENC encoder 的 `Reconfigure` 现在支持真正的 bitrate-only 动态调整，不再统一返回 unsupported。
+- 重配置边界与现有 oneVPL 路径一致：只允许 `TargetBitrate` 改变；width、height、FPS、keyframe interval、chroma、bit-depth、low-latency mode 任一变化都返回 `ErrEncoderRebuildRequired`。
+- 动态码率仍使用 CBR；重新计算 average/max bitrate 与低延迟单帧 VBV，同时保留原 preset/config 中其他 NVENC 参数。
+- `NvEncReconfigureEncoder` 失败时不修改 session 的 active config；只有驱动返回成功后才原子更新保存的 `VideoConfig`、config blob 与 init blob。
+- 重配置成功后 encoder 设置 pending IDR，下一帧走 `FORCEIDR | OUTPUT_SPSPPS`，确保码率切换后立即建立新的可独立解码边界。
+- 当前仍不开放 resolution/FPS/GOP/tuning 在线重配；这些变化继续走 generation rebuild，避免把尚未真机验证的 NVENC reconfigure 能力暴露到生产路径。
+- production gate 继续关闭；下一步增加 NVIDIA 真机诊断入口，输出 session/init/sequence/first-frame/reconfigure 各阶段结果，然后再进入 NVDEC 4:4:4 zero-copy 解码闭环。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

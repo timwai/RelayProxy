@@ -1064,6 +1064,20 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 build/driver/adapter/TTL/identity-probe failure 的纯逻辑失效测试，以及跨平台 receipt path contract。
 - 下一步：在 Windows NVIDIA 真机积累多轮成功凭证和重复运行资源数据；在这些证据完成前，validation cache 只用于诊断与未来 gate 决策，不参与 backend 自动选择。
 
+### 0.2.85 RD3 NVIDIA NVCodec Multi-Pass Qualification
+
+- NVIDIA validation receipt schema 升级到 v2；单次 round-trip 成功仍作为诊断证据保存，但不再直接标记当前有效资格。
+- 当前资格阈值固定为连续 3 次成功：同一个 clean build revision、同一个 NVIDIA Vendor/Device/SubSystem/Revision、同一个 UMD driver version，且上一轮也是成功时才递增 `qualificationPasses`。
+- 任意一次显式自检失败都会把 `qualificationPasses` 立即清零，并记录 `lastAttemptPassed=false / lastAttemptAt / lastFailure`；最近一次成功 report 仍保留用于历史诊断，但资格状态必须重新从 1/3 开始。
+- build revision、GPU identity 或驱动版本变化时，新成功样本从 1/3 重新开始，不继承旧机器/旧二进制证据。
+- 连续样本之间超过 30 天也不会继续累加；下一次成功重新从 1/3 开始。
+- `current=true` 现在要求：schema v2、最近一次 attempt 成功、成功 report 存在、clean build 与 receipt 完全一致、receipt 未过期、`qualificationPasses >= 3`、当前 NVIDIA adapter/driver identity 与 report 完全一致。
+- identity probe 进一步收窄：未达到 3/3、最近失败、build 已变化、receipt 过期/时间异常时完全不创建 D3D11/NVIDIA probe；只有其余资格条件已经满足、只差确认当前 adapter/driver 时才执行硬件 identity probe。
+- receipt 仍使用同目录临时文件 + fsync + 原子 replace；Windows 使用 `MoveFileEx(REPLACE_EXISTING | WRITE_THROUGH)`，避免重复自检覆盖已有 receipt 时留下半截 JSON。
+- Relay Desktop UI 增加明确的 `资格 1/3 / 2/3 / 3/3` 展示；单次自检成功 toast 同步显示资格进度，历史成功但最近失败时仍明确标记为非当前有效验证。
+- production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。3/3 qualification 只是允许进入下一阶段的必要证据，不会自动改变 backend 选择。
+- 下一步：增加 qualification 批量运行入口与压力验证（多轮 encode/decode/reconfigure/ForceIDR + 资源增长观测），在目标 NVIDIA Windows 主机收集 3/3 及重复运行证据后，再设计 production gate 的显式 opt-in 与回退机制。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

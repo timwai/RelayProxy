@@ -14,16 +14,21 @@ import (
 )
 
 const (
-	nvcodecValidationReceiptSchema = 1
-	nvcodecValidationReceiptName   = ".relayproxy-nvcodec-validation.json"
-	nvcodecValidationMaxAge        = 30 * 24 * time.Hour
+	nvcodecValidationReceiptSchema  = 2
+	nvcodecValidationReceiptName    = ".relayproxy-nvcodec-validation.json"
+	nvcodecValidationMaxAge         = 30 * 24 * time.Hour
+	nvcodecValidationRequiredPasses = 3
 )
 
 type NVCodecValidationReceipt struct {
-	SchemaVersion int                                        `json:"schemaVersion"`
-	BuildRevision string                                     `json:"buildRevision"`
-	SavedAtUnixMs int64                                      `json:"savedAtUnixMs"`
-	Report        desktopcodec.NVCodecH265444RoundTripReport `json:"report"`
+	SchemaVersion       int                                        `json:"schemaVersion"`
+	BuildRevision       string                                     `json:"buildRevision"`
+	SavedAtUnixMs       int64                                      `json:"savedAtUnixMs,omitempty"`
+	QualificationPasses int                                        `json:"qualificationPasses"`
+	LastAttemptPassed   bool                                       `json:"lastAttemptPassed"`
+	LastAttemptAtUnixMs int64                                      `json:"lastAttemptAtUnixMs,omitempty"`
+	LastFailure         string                                     `json:"lastFailure,omitempty"`
+	Report              desktopcodec.NVCodecH265444RoundTripReport `json:"report"`
 }
 
 type NVCodecValidationStatus struct {
@@ -32,6 +37,11 @@ type NVCodecValidationStatus struct {
 	BuildRevision        string                                      `json:"buildRevision,omitempty"`
 	CurrentBuildRevision string                                      `json:"currentBuildRevision,omitempty"`
 	SavedAtUnixMs        int64                                       `json:"savedAtUnixMs,omitempty"`
+	QualificationPasses  int                                         `json:"qualificationPasses"`
+	RequiredPasses       int                                         `json:"requiredPasses"`
+	LastAttemptPassed    bool                                        `json:"lastAttemptPassed"`
+	LastAttemptAtUnixMs  int64                                       `json:"lastAttemptAtUnixMs,omitempty"`
+	LastFailure          string                                      `json:"lastFailure,omitempty"`
 	CurrentIdentity      *desktopcodec.NVCodecValidationIdentity     `json:"currentIdentity,omitempty"`
 	Report               *desktopcodec.NVCodecH265444RoundTripReport `json:"report,omitempty"`
 }
@@ -81,29 +91,99 @@ func loadNVCodecValidationReceipt(configPath string) (*NVCodecValidationReceipt,
 	return &receipt, nil
 }
 
-func saveNVCodecValidationReceipt(
-	configPath string,
+func nvcodecValidationFailure(report desktopcodec.NVCodecH265444RoundTripReport, attemptErr error) string {
+	if attemptErr != nil {
+		return attemptErr.Error()
+	}
+	if message := strings.TrimSpace(report.Error); message != "" {
+		return message
+	}
+	return "NVIDIA GPU 自检未通过"
+}
+
+func nvcodecValidationReportIdentity(
 	report desktopcodec.NVCodecH265444RoundTripReport,
-) error {
-	if !report.Passed {
-		return fmt.Errorf("refuse to persist failed NVCodec validation")
+) desktopcodec.NVCodecValidationIdentity {
+	return desktopcodec.NVCodecValidationIdentity{
+		Adapter:              report.Adapter,
+		AdapterVendorID:      report.AdapterVendorID,
+		AdapterDeviceID:      report.AdapterDeviceID,
+		AdapterSubSysID:      report.AdapterSubSysID,
+		AdapterRevision:      report.AdapterRevision,
+		AdapterDriverVersion: report.AdapterDriverVersion,
 	}
-	if report.AdapterVendorID == 0 || report.AdapterDriverVersion == 0 {
-		return fmt.Errorf("NVCodec validation identity is incomplete")
-	}
-	buildRevision := nvcodecValidationBuildRevision()
+}
+
+func nextNVCodecValidationReceipt(
+	now time.Time,
+	buildRevision string,
+	previous *NVCodecValidationReceipt,
+	report desktopcodec.NVCodecH265444RoundTripReport,
+	attemptErr error,
+) (*NVCodecValidationReceipt, error) {
+	buildRevision = strings.TrimSpace(buildRevision)
 	if buildRevision == "" {
-		return fmt.Errorf("current build has no clean VCS revision")
+		return nil, fmt.Errorf("current build has no clean VCS revision")
 	}
-	path := nvcodecValidationReceiptPath(configPath)
-	if path == "" {
-		return fmt.Errorf("agent configuration path is unavailable")
+	nowUnixMs := now.UnixMilli()
+	if nowUnixMs <= 0 {
+		return nil, fmt.Errorf("current validation time is invalid")
 	}
-	receipt := NVCodecValidationReceipt{
-		SchemaVersion: nvcodecValidationReceiptSchema,
-		BuildRevision: buildRevision,
-		SavedAtUnixMs: time.Now().UnixMilli(),
-		Report:        report,
+
+	if attemptErr != nil || !report.Passed {
+		receipt := &NVCodecValidationReceipt{
+			SchemaVersion:       nvcodecValidationReceiptSchema,
+			BuildRevision:       buildRevision,
+			QualificationPasses: 0,
+			LastAttemptPassed:   false,
+			LastAttemptAtUnixMs: nowUnixMs,
+			LastFailure:         nvcodecValidationFailure(report, attemptErr),
+		}
+		if previous != nil &&
+			previous.SchemaVersion == nvcodecValidationReceiptSchema &&
+			previous.BuildRevision == buildRevision &&
+			previous.Report.Passed {
+			receipt.SavedAtUnixMs = previous.SavedAtUnixMs
+			receipt.Report = previous.Report
+		}
+		return receipt, nil
+	}
+
+	identity := nvcodecValidationReportIdentity(report)
+	if identity.AdapterVendorID == 0 || identity.AdapterDriverVersion == 0 {
+		return nil, fmt.Errorf("NVCodec validation identity is incomplete")
+	}
+
+	passes := 1
+	if previous != nil &&
+		previous.SchemaVersion == nvcodecValidationReceiptSchema &&
+		previous.BuildRevision == buildRevision &&
+		previous.LastAttemptPassed &&
+		previous.QualificationPasses > 0 &&
+		previous.Report.Passed &&
+		identity.MatchesReport(previous.Report) {
+		lastAttempt := time.UnixMilli(previous.LastAttemptAtUnixMs)
+		if previous.LastAttemptAtUnixMs > 0 &&
+			now.Sub(lastAttempt) >= 0 &&
+			now.Sub(lastAttempt) <= nvcodecValidationMaxAge {
+			passes = previous.QualificationPasses + 1
+		}
+	}
+
+	return &NVCodecValidationReceipt{
+		SchemaVersion:       nvcodecValidationReceiptSchema,
+		BuildRevision:       buildRevision,
+		SavedAtUnixMs:       nowUnixMs,
+		QualificationPasses: passes,
+		LastAttemptPassed:   true,
+		LastAttemptAtUnixMs: nowUnixMs,
+		Report:              report,
+	}, nil
+}
+
+func writeNVCodecValidationReceipt(path string, receipt *NVCodecValidationReceipt) error {
+	if receipt == nil {
+		return fmt.Errorf("NVCodec validation receipt is nil")
 	}
 	data, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
@@ -143,6 +223,42 @@ func saveNVCodecValidationReceipt(
 	return nil
 }
 
+func recordNVCodecValidationAttempt(
+	configPath string,
+	report desktopcodec.NVCodecH265444RoundTripReport,
+	attemptErr error,
+) error {
+	buildRevision := nvcodecValidationBuildRevision()
+	if buildRevision == "" {
+		return fmt.Errorf("current build has no clean VCS revision")
+	}
+	path := nvcodecValidationReceiptPath(configPath)
+	if path == "" {
+		return fmt.Errorf("agent configuration path is unavailable")
+	}
+
+	previous, err := loadNVCodecValidationReceipt(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		// A corrupt or unreadable receipt must never block new successful evidence
+		// from replacing it. Treat it as no prior qualification state.
+		previous = nil
+	}
+	if os.IsNotExist(err) {
+		previous = nil
+	}
+	receipt, err := nextNVCodecValidationReceipt(
+		time.Now(),
+		buildRevision,
+		previous,
+		report,
+		attemptErr,
+	)
+	if err != nil {
+		return err
+	}
+	return writeNVCodecValidationReceipt(path, receipt)
+}
+
 func evaluateNVCodecValidationReceipt(
 	now time.Time,
 	currentBuild string,
@@ -152,34 +268,53 @@ func evaluateNVCodecValidationReceipt(
 ) NVCodecValidationStatus {
 	status := NVCodecValidationStatus{
 		CurrentBuildRevision: currentBuild,
+		RequiredPasses:       nvcodecValidationRequiredPasses,
 	}
 	if receipt == nil {
-		status.StaleReason = "尚未保存成功的 NVIDIA GPU 自检凭证"
+		status.StaleReason = "尚未保存 NVIDIA GPU 自检资格凭证"
 		return status
 	}
 	report := receipt.Report
 	status.BuildRevision = receipt.BuildRevision
 	status.SavedAtUnixMs = receipt.SavedAtUnixMs
-	status.Report = &report
+	status.QualificationPasses = receipt.QualificationPasses
+	status.LastAttemptPassed = receipt.LastAttemptPassed
+	status.LastAttemptAtUnixMs = receipt.LastAttemptAtUnixMs
+	status.LastFailure = receipt.LastFailure
+	if report.Passed {
+		status.Report = &report
+	}
 	if identityErr == nil {
 		identity := currentIdentity
 		status.CurrentIdentity = &identity
 	}
+
 	switch {
 	case receipt.SchemaVersion != nvcodecValidationReceiptSchema:
 		status.StaleReason = "验证凭证版本已变化"
+	case !receipt.LastAttemptPassed:
+		status.StaleReason = "最近一次 NVIDIA GPU 自检失败"
+		if receipt.LastFailure != "" {
+			status.StaleReason += "：" + receipt.LastFailure
+		}
 	case !receipt.Report.Passed:
-		status.StaleReason = "保存的 NVIDIA GPU 自检未通过"
+		status.StaleReason = "当前构建尚无成功的 NVIDIA GPU 自检"
+	case currentBuild == "":
+		status.StaleReason = "当前构建没有可验证的 VCS revision"
+	case receipt.BuildRevision != currentBuild:
+		status.StaleReason = "RelayProxy 构建 revision 已变化"
 	case receipt.SavedAtUnixMs <= 0:
 		status.StaleReason = "验证凭证缺少时间"
 	case now.Sub(time.UnixMilli(receipt.SavedAtUnixMs)) < 0:
 		status.StaleReason = "验证凭证时间晚于当前系统时间"
 	case now.Sub(time.UnixMilli(receipt.SavedAtUnixMs)) > nvcodecValidationMaxAge:
 		status.StaleReason = "NVIDIA GPU 自检凭证已超过 30 天"
-	case currentBuild == "":
-		status.StaleReason = "当前构建没有可验证的 VCS revision"
-	case receipt.BuildRevision != currentBuild:
-		status.StaleReason = "RelayProxy 构建 revision 已变化"
+	case receipt.QualificationPasses < nvcodecValidationRequiredPasses:
+		status.StaleReason = fmt.Sprintf(
+			"NVIDIA GPU 资格验证进度 %d/%d，需要连续通过",
+			receipt.QualificationPasses,
+			nvcodecValidationRequiredPasses,
+		)
 	case identityErr != nil:
 		status.StaleReason = "无法确认当前 NVIDIA adapter/driver：" + identityErr.Error()
 	case !currentIdentity.MatchesReport(receipt.Report):
@@ -190,17 +325,39 @@ func evaluateNVCodecValidationReceipt(
 	return status
 }
 
+func nvcodecValidationNeedsIdentityProbe(
+	now time.Time,
+	currentBuild string,
+	receipt *NVCodecValidationReceipt,
+) bool {
+	if receipt == nil ||
+		receipt.SchemaVersion != nvcodecValidationReceiptSchema ||
+		!receipt.LastAttemptPassed ||
+		!receipt.Report.Passed ||
+		receipt.QualificationPasses < nvcodecValidationRequiredPasses ||
+		currentBuild == "" ||
+		receipt.BuildRevision != currentBuild ||
+		receipt.SavedAtUnixMs <= 0 {
+		return false
+	}
+	age := now.Sub(time.UnixMilli(receipt.SavedAtUnixMs))
+	return age >= 0 && age <= nvcodecValidationMaxAge
+}
+
 func (b *UIBridge) GetRemoteDesktopNVCodecValidation() NVCodecValidationStatus {
 	receipt, err := loadNVCodecValidationReceipt(b.configPath)
 	if err != nil && !os.IsNotExist(err) {
-		return NVCodecValidationStatus{StaleReason: err.Error()}
+		return NVCodecValidationStatus{
+			RequiredPasses: nvcodecValidationRequiredPasses,
+			StaleReason:    err.Error(),
+		}
 	}
 	if os.IsNotExist(err) {
 		receipt = nil
 	}
 	now := time.Now()
 	currentBuild := nvcodecValidationBuildRevision()
-	if receipt == nil || currentBuild == "" {
+	if !nvcodecValidationNeedsIdentityProbe(now, currentBuild, receipt) {
 		return evaluateNVCodecValidationReceipt(
 			now,
 			currentBuild,

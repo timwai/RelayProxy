@@ -2579,20 +2579,26 @@
       state.desktopNVCodecValidation = status || null;
       var target = $('desktop-nvcodec-validation-state');
       if (!target) return;
-      if (!status || (!status.report && !status.current)) {
+      if (!status || (!status.report && !status.current && !status.staleReason && !status.lastAttemptAtUnixMs)) {
         target.classList.add('hidden');
         target.textContent = '';
         return;
       }
       var savedAt = Number(status.savedAtUnixMs || 0);
       var age = savedAt ? new Date(savedAt).toLocaleString() : '';
+      var passes = Number(status.qualificationPasses || 0);
+      var required = Number(status.requiredPasses || 3);
+      var qualification = ' · 资格 ' + passes + '/' + required;
       if (status.current) {
-        target.textContent = 'NVIDIA 验证凭证：当前有效' +
+        target.textContent = 'NVIDIA 验证凭证：当前有效' + qualification +
           (age ? ' · 自检 ' + age : '') +
           (status.currentBuildRevision ? ' · build ' + String(status.currentBuildRevision).slice(0, 12) : '');
         target.className = 'text-[11px] leading-5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
       } else {
-        target.textContent = 'NVIDIA 验证凭证：历史记录，不作为当前有效验证' +
+        var prefix = status.report
+          ? 'NVIDIA 验证凭证：历史记录，不作为当前有效验证'
+          : 'NVIDIA 验证资格：尚未完成';
+        target.textContent = prefix + qualification +
           (status.staleReason ? ' · ' + status.staleReason : '') +
           (age ? ' · ' + age : '');
         target.className = 'text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
@@ -2600,11 +2606,15 @@
     }
 
     async function refreshRemoteDesktopNVCodecValidation() {
-      if (!hasFn('goGetRemoteDesktopNVCodecValidation')) return;
+      if (!hasFn('goGetRemoteDesktopNVCodecValidation')) return null;
       try {
         var raw = await call('goGetRemoteDesktopNVCodecValidation');
-        renderRemoteDesktopNVCodecValidation(parseJSONResult(raw, null));
-      } catch (_) {}
+        var status = parseJSONResult(raw, null);
+        renderRemoteDesktopNVCodecValidation(status);
+        return status;
+      } catch (_) {
+        return null;
+      }
     }
 
     async function refreshRemoteDesktopNVCodecSelfTest() {
@@ -2633,10 +2643,13 @@
         var report = parseJSONResult(raw, null);
         if (!report) throw new Error('没有收到 GPU 自检结果');
         renderRemoteDesktopNVCodecSelfTest(report);
-        await refreshRemoteDesktopNVCodecValidation();
+        var validation = await refreshRemoteDesktopNVCodecValidation();
         if (report.passed) {
+          var qualification = validation
+            ? ' · 资格 ' + Number(validation.qualificationPasses || 0) + '/' + Number(validation.requiredPasses || 3)
+            : '';
           toast('NVIDIA GPU 自检通过 · ' + (report.adapter || 'NVIDIA') +
-            ' · 最大像素误差 ' + Number(report.maxChannelError || 0));
+            ' · 最大像素误差 ' + Number(report.maxChannelError || 0) + qualification);
         } else {
           toast('NVIDIA GPU 自检失败：' + (report.error || '未知错误'));
         }

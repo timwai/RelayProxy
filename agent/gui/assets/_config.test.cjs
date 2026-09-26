@@ -362,6 +362,9 @@ test('remote desktop NVIDIA self-test is manual and attached to diagnostics UI',
   assert.match(source, /goGetRemoteDesktopNVCodecValidation/);
   assert.match(source, /NVIDIA 验证凭证：当前有效/);
   assert.match(source, /历史记录，不作为当前有效验证/);
+  assert.match(source, /qualificationPasses/);
+  assert.match(source, /requiredPasses/);
+  assert.match(source, /资格 /);
   assert.match(source, /renderRemoteDesktopNVCodecSelfTest/);
   assert.match(source, /NVIDIA GPU 自检通过/);
   assert.match(source, /NVIDIA GPU 自检失败/);

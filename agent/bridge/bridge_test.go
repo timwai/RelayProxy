@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"relayproxy/agent/app"
+	desktopcodec "relayproxy/agent/desktop/codec"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/config"
@@ -461,5 +462,33 @@ func TestSaveNativeViewerPlacementPreservesOtherConfig(t *testing.T) {
 	}
 	if result.RestartRequired || result.ReloadPending {
 		t.Fatalf("placement-only save should be hot metadata: %+v", result)
+	}
+}
+
+
+func TestRemoteDesktopDiagnosticsIncludesLastNVCodecSelfTest(t *testing.T) {
+	b := newTestBridge(t)
+	b.nvcodecSelfTest = &desktopcodec.NVCodecH265444RoundTripReport{
+		Passed:          true,
+		Backend:         "nvcodec-hevc444",
+		Adapter:         "NVIDIA Test Adapter",
+		EncodedFrames:   3,
+		DecodedFrames:   3,
+		SamplesChecked:  4,
+		MaxChannelError: 7,
+	}
+	report := b.GetRemoteDesktopDiagnostics()
+	if report.NVCodecSelfTest == nil {
+		t.Fatal("diagnostics omitted the last NVCodec self-test")
+	}
+	if !report.NVCodecSelfTest.Passed ||
+		report.NVCodecSelfTest.Adapter != "NVIDIA Test Adapter" ||
+		report.NVCodecSelfTest.MaxChannelError != 7 {
+		t.Fatalf("unexpected NVCodec diagnostics: %+v", report.NVCodecSelfTest)
+	}
+
+	report.NVCodecSelfTest.Adapter = "mutated"
+	if b.GetRemoteDesktopNVCodecSelfTest().Adapter != "NVIDIA Test Adapter" {
+		t.Fatal("diagnostics returned the bridge-owned self-test pointer")
 	}
 }

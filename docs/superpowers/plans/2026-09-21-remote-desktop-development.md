@@ -923,6 +923,19 @@ Windows SendInput / CF_UNICODETEXT
 - 当前仍未挂入通用 encoder opener，NVCodec production gate 保持关闭。
 - 下一步：实现 `NV_ENC_PIC_PARAMS` + `NV_ENC_LOCK_BITSTREAM` ABI，并把已完成的 AYUV map + bitstream buffer 接入第一帧 `nvEncEncodePicture`，拿到真实 HEVC Annex-B 输出。
 
+### 0.2.74 RD3 NVIDIA NVENC HEVC 4:4:4 First D3D11 Frame
+
+- 新增真实 `nvencH265Encoder` 内部实现，并保持独立 opener `OpenNVENCH265EncoderWithD3D11`；当前仍未注册到通用 HEVC 4:4:4 backend，因此不会改变线上选择结果。
+- 增加 `NV_ENC_PIC_PARAMS`（3360 bytes）、`NV_ENC_LOCK_BITSTREAM`（1552 bytes）、`NV_ENC_SEQUENCE_PARAM_PAYLOAD`（1544 bytes）固定 ABI blob，均保持 8-byte alignment，并对关键 size/offset/version 做 Windows 测试。
+- opener 现在完成完整准备链：D3D11 NVENC session → HEVC 4:4:4 initialize → system-memory bitstream buffer → `nvEncGetSequenceParams`；只有拿到包含 VPS/SPS/PPS 的 HEVC sequence header 才返回 encoder。
+- 单帧 GPU 路径完成：AYUV D3D11 texture → register → map → `NvEncEncodePicture` → blocking `NvEncLockBitstream` → copy Annex-B bytes → unlock → unmap/unregister。
+- 默认首帧和显式 `ForceIDR` 使用 `FORCEIDR | OUTPUT_SPSPPS`，并同时通过 NVENC picture type 与 HEVC IRAP NAL type 判断 keyframe；编码流中若再次出现 VPS/SPS/PPS，会刷新 encoder 的 sequence header。
+- output bitstream 增加边界检查：空输出、NULL pointer、超过 64 MiB 的异常返回均拒绝复制，避免手写 FFI 下的无界内存读取。
+- encoder stats 已记录 hardware/backend、frames、bytes、last encode time；raw CPU frame 明确拒绝，只接受同尺寸 AYUV D3D11 frame。
+- `Close()` 顺序固定为先 destroy bitstream buffer、再 destroy NVENC encoder/session/runtime，避免 output buffer 生命周期越过 encoder。
+- bitrate reconfigure 本阶段仍返回 `ErrEncoderControlUnsupported`；下一阶段单独实现 `NV_ENC_RECONFIGURE_PARAMS`，避免与首帧编码闭环混在同一风险面。
+- 当前 production gate 仍关闭，通用 `OpenH265444EncoderWithD3D11` 仍不会选择 NVENC；需要 Windows NVIDIA 真机 encode 验证以及后续 NVDEC/zero-copy round trip 后才允许打开。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

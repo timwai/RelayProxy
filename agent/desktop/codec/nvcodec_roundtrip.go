@@ -1,5 +1,24 @@
 package codec
 
+type NVCodecValidationIdentity struct {
+	Adapter              string `json:"adapter,omitempty"`
+	AdapterVendorID      uint32 `json:"adapterVendorId,omitempty"`
+	AdapterDeviceID      uint32 `json:"adapterDeviceId,omitempty"`
+	AdapterSubSysID      uint32 `json:"adapterSubSysId,omitempty"`
+	AdapterRevision      uint32 `json:"adapterRevision,omitempty"`
+	AdapterDriverVersion uint64 `json:"adapterDriverVersion,omitempty"`
+}
+
+func (i NVCodecValidationIdentity) MatchesReport(report NVCodecH265444RoundTripReport) bool {
+	return i.AdapterVendorID != 0 &&
+		i.AdapterVendorID == report.AdapterVendorID &&
+		i.AdapterDeviceID == report.AdapterDeviceID &&
+		i.AdapterSubSysID == report.AdapterSubSysID &&
+		i.AdapterRevision == report.AdapterRevision &&
+		i.AdapterDriverVersion != 0 &&
+		i.AdapterDriverVersion == report.AdapterDriverVersion
+}
+
 // NVCodecH265444RoundTripReport describes an explicit NVIDIA Windows self-test.
 // It is intentionally separate from normal backend probing: callers must opt in
 // because the test creates GPU resources and performs real encode/decode work.

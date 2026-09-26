@@ -325,3 +325,36 @@ func TestMainWebConnectionsPaneMatchesRealtimeMonitorFeatures(t *testing.T) {
 		}
 	}
 }
+
+
+func TestWebExposesNVCodecSelfTestDiagnosticsBridge(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+
+	bridgeJS := httptest.NewRecorder()
+	handler.ServeHTTP(
+		bridgeJS,
+		httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil),
+	)
+	if bridgeJS.Code != http.StatusOK {
+		t.Fatalf("web bridge status=%d", bridgeJS.Code)
+	}
+	for _, want := range []string{
+		"goGetRemoteDesktopDiagnostics",
+		"goGetRemoteDesktopNVCodecSelfTest",
+		"goRunRemoteDesktopNVCodecSelfTest",
+		"/api/remote-desktop/nvcodec-self-test",
+	} {
+		if !strings.Contains(bridgeJS.Body.String(), want) {
+			t.Fatalf("web bridge missing %q", want)
+		}
+	}
+
+	last := httptest.NewRecorder()
+	handler.ServeHTTP(
+		last,
+		httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/remote-desktop/nvcodec-self-test", nil),
+	)
+	if last.Code != http.StatusOK || strings.TrimSpace(last.Body.String()) != "null" {
+		t.Fatalf("unexpected initial NVCodec self-test response: %d %q", last.Code, last.Body.String())
+	}
+}

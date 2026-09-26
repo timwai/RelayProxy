@@ -1148,6 +1148,17 @@ Windows SendInput / CF_UNICODETEXT
 - production 默认行为仍与之前一致：未显式 opt-in 的用户只使用成熟 oneVPL/H.264 路径。
 - 下一步：补 backend 级 runtime circuit breaker，使已成功打开但在 encode/decode/zero-copy 过程中失败的 NVCodec session 立即熔断本次 canary，并 generation rebuild 到 oneVPL；oneVPL 再失败时进入 H.264，而不是当前 H.265 runtime error 的通用 JPEG fallback。
 
+### 0.2.92 RD3 NVIDIA Runtime Circuit Breaker
+
+- NVCodec canary gate 从单一 bool 拆成 `requested + process-lifetime tripped`；有效状态为 `requested && !tripped`。
+- 当 H.265 D3D11 运行路径的实际 encoder backend 为 `nvenc-hevc444-d3d11` 且 capture/convert/encode zero-copy 链路发生运行时失败时，Host 立即调用 `TripNVCodecCanary`。
+- circuit breaker 一旦触发，本进程后续 H.265 4:4:4 generation/session 都不再选择 NVCodec；重新保存 `nvcodec_canary: true` 也不会绕过熔断，避免坏驱动/资源泄漏进入重试风暴。
+- 当前出错 session 继续复用现有 GPU→CPU H.265 generation migration；4:4:4 CPU opener 不提供 NVENC，因此会落到 oneVPL，保持 HEVC 4:4:4 而不是直接降成 JPEG。
+- diagnostics eligibility 增加 `requested / active / circuitTripped`，便于确认“配置要求 canary”与“运行时实际仍允许 canary”之间的差异。
+- circuit breaker 在进程重启后自然清零，但重新启用仍要经过配置 opt-in + 当前 eligibility；不会持久化一个永久禁用状态。
+- 新增 gate 单测覆盖：首次 trip 关闭 canary、重复 trip 幂等、配置重新 apply 不能绕过当前进程熔断。
+- 下一步：补 Controller/native Viewer 的 NVDEC runtime breaker，使 decoder runtime/AYUV zero-copy failure 同样熔断 NVCodec 并 generation rebuild 到 oneVPL decoder；同时把 canary trip reason/时间写入 diagnostics。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

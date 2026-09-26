@@ -571,6 +571,15 @@ func (h *Host) streamH265Frames(
 		if !gpuEnabled {
 			return cause
 		}
+		failedBackend := ""
+		if encoder != nil {
+			failedBackend = encoder.Stats().Backend
+		}
+		if failedBackend == "nvenc-hevc444-d3d11" {
+			if desktopcodec.TripNVCodecCanary() {
+				log.Printf("[Desktop] NVIDIA NVCodec canary circuit tripped after runtime failure: %v", cause)
+			}
+		}
 		nextEncoder, nextConfig, nextSequenceHeader, nextGeneration, openErr :=
 			openNextH265CPUGeneration(ctx, generation, videoCfg, openPreferredH265GenerationEncoder)
 		if openErr != nil {
@@ -615,8 +624,8 @@ func (h *Host) streamH265Frames(
 			_ = oldConverter.Close()
 		}
 		log.Printf(
-			"[Desktop] H.265 GPU runtime failure migrated to CPU generation=%d encode=%dx%d bitrate=%d cause=%v",
-			generation, videoCfg.Width, videoCfg.Height, videoCfg.TargetBitrate, cause,
+			"[Desktop] H.265 GPU runtime failure migrated backend=%s to CPU generation=%d encode=%dx%d bitrate=%d cause=%v",
+			failedBackend, generation, videoCfg.Width, videoCfg.Height, videoCfg.TargetBitrate, cause,
 		)
 		return nil
 	}

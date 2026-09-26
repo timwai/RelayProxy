@@ -145,8 +145,12 @@ func TestProbeH265444BackendsAllowsD3D11OnlyProductionOpeners(t *testing.T) {
 }
 
 func TestNVCodecCanaryGateDefaultsDisabled(t *testing.T) {
-	SetNVCodecCanaryEnabled(false)
-	t.Cleanup(func() { SetNVCodecCanaryEnabled(false) })
+	nvcodecCanaryRequested.Store(false)
+	nvcodecCanaryTripped.Store(false)
+	t.Cleanup(func() {
+		nvcodecCanaryRequested.Store(false)
+		nvcodecCanaryTripped.Store(false)
+	})
 	if NVCodecCanaryEnabled() {
 		t.Fatal("NVCodec canary unexpectedly enabled")
 	}
@@ -157,9 +161,41 @@ func TestNVCodecCanaryGateDefaultsDisabled(t *testing.T) {
 }
 
 func TestNVCodecCanaryGateCanBeExplicitlyEnabled(t *testing.T) {
+	nvcodecCanaryRequested.Store(false)
+	nvcodecCanaryTripped.Store(false)
 	SetNVCodecCanaryEnabled(true)
-	t.Cleanup(func() { SetNVCodecCanaryEnabled(false) })
+	t.Cleanup(func() {
+		nvcodecCanaryRequested.Store(false)
+		nvcodecCanaryTripped.Store(false)
+	})
 	if !NVCodecCanaryEnabled() {
 		t.Fatal("NVCodec canary opt-in did not enable gate")
+	}
+}
+
+func TestNVCodecCanaryCircuitBreakerDisablesActiveGate(t *testing.T) {
+	nvcodecCanaryRequested.Store(false)
+	nvcodecCanaryTripped.Store(false)
+	SetNVCodecCanaryEnabled(true)
+	t.Cleanup(func() {
+		nvcodecCanaryRequested.Store(false)
+		nvcodecCanaryTripped.Store(false)
+	})
+
+	if !NVCodecCanaryEnabled() {
+		t.Fatal("canary should be active before trip")
+	}
+	if !TripNVCodecCanary() {
+		t.Fatal("first circuit trip was not recorded")
+	}
+	if NVCodecCanaryEnabled() || !NVCodecCanaryCircuitTripped() {
+		t.Fatal("tripped canary remained active")
+	}
+	if TripNVCodecCanary() {
+		t.Fatal("second circuit trip should be idempotent")
+	}
+	SetNVCodecCanaryEnabled(true)
+	if NVCodecCanaryEnabled() {
+		t.Fatal("config reapply bypassed process-lifetime circuit breaker")
 	}
 }

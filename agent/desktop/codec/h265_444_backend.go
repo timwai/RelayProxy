@@ -26,14 +26,28 @@ func (p H265444BackendProbe) EndToEnd() bool {
 	return p.Backend != "" && p.HardwareRuntime && p.Encode && p.Decode
 }
 
-var nvcodecCanaryEnabled atomic.Bool
+var (
+	nvcodecCanaryRequested atomic.Bool
+	nvcodecCanaryTripped   atomic.Bool
+)
 
 func SetNVCodecCanaryEnabled(enabled bool) {
-	nvcodecCanaryEnabled.Store(enabled)
+	nvcodecCanaryRequested.Store(enabled)
 }
 
 func NVCodecCanaryEnabled() bool {
-	return nvcodecCanaryEnabled.Load()
+	return nvcodecCanaryRequested.Load() && !nvcodecCanaryTripped.Load()
+}
+
+func TripNVCodecCanary() bool {
+	if !nvcodecCanaryRequested.Load() {
+		return false
+	}
+	return nvcodecCanaryTripped.CompareAndSwap(false, true)
+}
+
+func NVCodecCanaryCircuitTripped() bool {
+	return nvcodecCanaryTripped.Load()
 }
 
 type h265444Backend struct {

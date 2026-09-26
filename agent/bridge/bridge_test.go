@@ -465,7 +465,6 @@ func TestSaveNativeViewerPlacementPreservesOtherConfig(t *testing.T) {
 	}
 }
 
-
 func TestRemoteDesktopDiagnosticsIncludesLastNVCodecSelfTest(t *testing.T) {
 	b := newTestBridge(t)
 	b.nvcodecSelfTest = &desktopcodec.NVCodecH265444RoundTripReport{

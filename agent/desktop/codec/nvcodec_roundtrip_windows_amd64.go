@@ -14,16 +14,16 @@ import (
 )
 
 const (
-	nvcodecValidationVendorNVIDIA   uint32 = 0x10de
-	nvcodecValidationAdapterSoftware uint32 = 0x2
-	nvcodecValidationDXGINotFound   uint32 = 0x887a0002
-	nvcodecValidationChannelTolerance      = 48
+	nvcodecValidationVendorNVIDIA     uint32 = 0x10de
+	nvcodecValidationAdapterSoftware  uint32 = 0x2
+	nvcodecValidationDXGINotFound     uint32 = 0x887a0002
+	nvcodecValidationChannelTolerance        = 48
 )
 
 var (
-	nvcodecValidationDXGIDLL = windows.NewLazySystemDLL("dxgi.dll")
+	nvcodecValidationDXGIDLL       = windows.NewLazySystemDLL("dxgi.dll")
 	nvcodecValidationCreateFactory = nvcodecValidationDXGIDLL.NewProc("CreateDXGIFactory1")
-	nvcodecValidationIIDFactory1 = windows.GUID{
+	nvcodecValidationIIDFactory1   = windows.GUID{
 		Data1: 0x770aae78, Data2: 0xf26f, Data3: 0x4dba,
 		Data4: [8]byte{0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87},
 	}
@@ -35,21 +35,21 @@ type nvcodecValidationLUID struct {
 }
 
 type nvcodecValidationAdapterDesc1 struct {
-	Description            [128]uint16
-	VendorID               uint32
-	DeviceID               uint32
-	SubSysID               uint32
-	Revision               uint32
-	DedicatedVideoMemory   uintptr
-	DedicatedSystemMemory  uintptr
-	SharedSystemMemory     uintptr
-	AdapterLUID            nvcodecValidationLUID
-	Flags                  uint32
+	Description           [128]uint16
+	VendorID              uint32
+	DeviceID              uint32
+	SubSysID              uint32
+	Revision              uint32
+	DedicatedVideoMemory  uintptr
+	DedicatedSystemMemory uintptr
+	SharedSystemMemory    uintptr
+	AdapterLUID           nvcodecValidationLUID
+	Flags                 uint32
 }
 
 type nvcodecValidationSubresourceData struct {
-	SysMem          unsafe.Pointer
-	SysMemPitch     uint32
+	SysMem           unsafe.Pointer
+	SysMemPitch      uint32
 	SysMemSlicePitch uint32
 }
 

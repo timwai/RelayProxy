@@ -13,9 +13,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/desktop"
+	desktopcodec "relayproxy/agent/desktop/codec"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/routing"
@@ -36,6 +38,8 @@ type UIBridge struct {
 	writeConfig   func(string, *config.AgentConfigFile) error
 	syncAutoStart func(string, bool) (func() error, error)
 	setAutoStart  func(string, bool, bool) error
+
+	nvcodecSelfTest *desktopcodec.NVCodecH265444RoundTripReport
 }
 
 func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
@@ -132,8 +136,43 @@ func (b *UIBridge) GetRemoteDesktopAudioDiagnostics() desktop.DesktopAudioDiagno
 	return b.agent.RemoteDesktopAudioDiagnostics()
 }
 
-func (b *UIBridge) GetRemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
-	return b.agent.RemoteDesktopDiagnostics()
+type RemoteDesktopDiagnosticsReport struct {
+	desktop.DesktopDiagnosticsReport
+	NVCodecSelfTest *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
+}
+
+func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport {
+	report := RemoteDesktopDiagnosticsReport{
+		DesktopDiagnosticsReport: b.agent.RemoteDesktopDiagnostics(),
+	}
+	b.mu.RLock()
+	if b.nvcodecSelfTest != nil {
+		selfTest := *b.nvcodecSelfTest
+		report.NVCodecSelfTest = &selfTest
+	}
+	b.mu.RUnlock()
+	return report
+}
+
+func (b *UIBridge) RunRemoteDesktopNVCodecSelfTest() (desktopcodec.NVCodecH265444RoundTripReport, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	report, err := desktopcodec.ValidateNVCodecH265444RoundTrip(ctx)
+	b.mu.Lock()
+	b.nvcodecSelfTest = &report
+	b.mu.Unlock()
+	return report, err
+}
+
+func (b *UIBridge) GetRemoteDesktopNVCodecSelfTest() *desktopcodec.NVCodecH265444RoundTripReport {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	if b.nvcodecSelfTest == nil {
+		return nil
+	}
+	report := *b.nvcodecSelfTest
+	return &report
 }
 
 func (b *UIBridge) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStats) {

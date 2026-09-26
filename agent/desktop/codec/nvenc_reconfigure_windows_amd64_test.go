@@ -40,10 +40,10 @@ func TestBuildNVENCReconfigureParams(t *testing.T) {
 	if initParams == nil || params == nil {
 		t.Fatal("reconfigure builder returned nil blobs")
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencReconfigureVersionOffset:nvencReconfigureVersionOffset+4]); got != nvencVersionWithReservedBit(2) {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencReconfigureVersionOffset : nvencReconfigureVersionOffset+4]); got != nvencVersionWithReservedBit(2) {
 		t.Fatalf("version=%#x", got)
 	}
-	if got := binary.LittleEndian.Uint32(params.Data[nvencReconfigureFlagsOffset:nvencReconfigureFlagsOffset+4]); got != nvencReconfigureForceIDR {
+	if got := binary.LittleEndian.Uint32(params.Data[nvencReconfigureFlagsOffset : nvencReconfigureFlagsOffset+4]); got != nvencReconfigureForceIDR {
 		t.Fatalf("flags=%#x want=%#x", got, nvencReconfigureForceIDR)
 	}
 	if got := binary.LittleEndian.Uint32(params.Data[nvencReconfigureInitOffset+nvencInitializeWidthOffset : nvencReconfigureInitOffset+nvencInitializeWidthOffset+4]); got != 1920 {

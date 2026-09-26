@@ -136,7 +136,7 @@ func saveNVCodecValidationReceipt(
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close NVCodec validation receipt temp file: %w", err)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if err := replaceNVCodecValidationFile(tmpPath, path); err != nil {
 		return fmt.Errorf("replace NVCodec validation receipt: %w", err)
 	}
 	cleanup = false

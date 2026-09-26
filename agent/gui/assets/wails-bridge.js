@@ -20,6 +20,7 @@
   window.goGetRemoteDesktopAudioDiagnostics = () => invoke('GetRemoteDesktopAudioDiagnostics');
   window.goGetRemoteDesktopDiagnostics = () => invoke('GetRemoteDesktopDiagnostics');
   window.goRunRemoteDesktopNVCodecSelfTest = () => invoke('RunRemoteDesktopNVCodecSelfTest');
+  window.goRunRemoteDesktopNVCodecQualification = () => invoke('RunRemoteDesktopNVCodecQualification');
   window.goGetRemoteDesktopNVCodecSelfTest = () => invoke('GetRemoteDesktopNVCodecSelfTest');
   window.goGetRemoteDesktopNVCodecValidation = () => invoke('GetRemoteDesktopNVCodecValidation');
   window.goGetRemoteDesktopFrame = () => invoke('GetRemoteDesktopFrame');

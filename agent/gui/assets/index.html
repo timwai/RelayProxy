@@ -703,6 +703,7 @@
           </div>
           <div class="flex items-center gap-2">
             <button id="desktop-nvcodec-self-test-btn" type="button" onclick="runRemoteDesktopNVCodecSelfTest()" class="rp-btn hidden" title="在本机 NVIDIA GPU 上运行 NVENC → NVDEC HEVC 4:4:4 D3D11 真机自检">NVIDIA GPU 自检</button>
+            <button id="desktop-nvcodec-qualification-btn" type="button" onclick="runRemoteDesktopNVCodecQualification()" class="rp-btn hidden" title="连续运行 NVIDIA GPU 真机自检，自动补齐当前 build/GPU/driver 的 3/3 资格验证">连续资格验证</button>
             <button id="desktop-diagnostics-export-btn" type="button" onclick="exportRemoteDesktopDiagnostics()" class="rp-btn hidden" title="导出最近约 10 分钟的 Relay Desktop 网络、媒体和 ABR 时间序列">导出诊断</button>
             <button type="button" onclick="refreshRemoteDesktopTargets(true)" class="rp-btn">刷新设备</button>
           </div>
@@ -2625,6 +2626,19 @@
       } catch (_) {}
     }
 
+    function setRemoteDesktopNVCodecValidationBusy(busy, mode) {
+      var selfTest = $('desktop-nvcodec-self-test-btn');
+      var qualification = $('desktop-nvcodec-qualification-btn');
+      if (selfTest) {
+        selfTest.disabled = !!busy;
+        selfTest.textContent = busy && mode === 'self-test' ? 'GPU 自检中…' : 'NVIDIA GPU 自检';
+      }
+      if (qualification) {
+        qualification.disabled = !!busy;
+        qualification.textContent = busy && mode === 'qualification' ? '资格验证中…' : '连续资格验证';
+      }
+    }
+
     async function runRemoteDesktopNVCodecSelfTest() {
       if (!hasFn('goRunRemoteDesktopNVCodecSelfTest')) {
         toast('当前平台不支持 NVIDIA GPU 自检');
@@ -2632,11 +2646,7 @@
       }
       var button = $('desktop-nvcodec-self-test-btn');
       if (button && button.disabled) return;
-      var oldText = button ? button.textContent : '';
-      if (button) {
-        button.disabled = true;
-        button.textContent = 'GPU 自检中…';
-      }
+      setRemoteDesktopNVCodecValidationBusy(true, 'self-test');
       toast('正在执行 NVIDIA NVENC → NVDEC HEVC 4:4:4 真机自检');
       try {
         var raw = await call('goRunRemoteDesktopNVCodecSelfTest');
@@ -2657,13 +2667,48 @@
         renderRemoteDesktopNVCodecSelfTest({ passed:false, backend:'nvcodec-hevc444', error:(err && err.message) || String(err) });
         toast('NVIDIA GPU 自检失败：' + ((err && err.message) || err));
       } finally {
-        if (button) {
-          button.disabled = false;
-          button.textContent = oldText || 'NVIDIA GPU 自检';
-        }
+        setRemoteDesktopNVCodecValidationBusy(false, '');
       }
     }
     window.runRemoteDesktopNVCodecSelfTest = runRemoteDesktopNVCodecSelfTest;
+
+    async function runRemoteDesktopNVCodecQualification() {
+      if (!hasFn('goRunRemoteDesktopNVCodecQualification')) {
+        toast('当前平台不支持 NVIDIA 连续资格验证');
+        return;
+      }
+      var button = $('desktop-nvcodec-qualification-btn');
+      if (button && button.disabled) return;
+      setRemoteDesktopNVCodecValidationBusy(true, 'qualification');
+      toast('正在连续验证 NVIDIA NVENC → NVDEC；达到 3/3 后自动停止');
+      try {
+        var raw = await call('goRunRemoteDesktopNVCodecQualification');
+        var batch = parseJSONResult(raw, null);
+        if (!batch) throw new Error('没有收到资格验证结果');
+        var reports = Array.isArray(batch.reports) ? batch.reports : [];
+        if (reports.length) {
+          renderRemoteDesktopNVCodecSelfTest(reports[reports.length - 1]);
+        }
+        if (batch.validation) {
+          renderRemoteDesktopNVCodecValidation(batch.validation);
+        } else {
+          await refreshRemoteDesktopNVCodecValidation();
+        }
+        if (batch.passed) {
+          toast('NVIDIA 资格验证通过 · ' +
+            Number(batch.finalPasses || 0) + '/' + Number(batch.requiredPasses || 3) +
+            ' · 本次执行 ' + Number(batch.attempts || 0) + ' 轮');
+        } else {
+          toast('NVIDIA 资格验证失败：' + (batch.error || '未知错误'));
+        }
+      } catch (err) {
+        toast('NVIDIA 资格验证失败：' + ((err && err.message) || err));
+        await refreshRemoteDesktopNVCodecValidation();
+      } finally {
+        setRemoteDesktopNVCodecValidationBusy(false, '');
+      }
+    }
+    window.runRemoteDesktopNVCodecQualification = runRemoteDesktopNVCodecQualification;
 
     function desktopDiagnosticsFilename(report) {
       report = report || {};
@@ -3710,6 +3755,9 @@
         $('desktop-nvcodec-self-test-btn').classList.remove('hidden');
         refreshRemoteDesktopNVCodecSelfTest();
         refreshRemoteDesktopNVCodecValidation();
+      }
+      if (hasFn('goRunRemoteDesktopNVCodecQualification') && $('desktop-nvcodec-qualification-btn')) {
+        $('desktop-nvcodec-qualification-btn').classList.remove('hidden');
       }
 
       // Go pushes status every 1.5s; these polls cover the window's first paint.

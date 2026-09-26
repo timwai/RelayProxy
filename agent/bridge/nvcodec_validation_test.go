@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -136,8 +137,10 @@ func TestEvaluateNVCodecValidationReceiptInvalidation(t *testing.T) {
 }
 
 func TestNVCodecValidationReceiptPathFollowsConfigDirectory(t *testing.T) {
-	path := nvcodecValidationReceiptPath("/tmp/relayproxy/relay-agent.yaml")
-	if path != "/tmp/relayproxy/"+nvcodecValidationReceiptName {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "relay-agent.yaml")
+	path := nvcodecValidationReceiptPath(configPath)
+	if path != filepath.Join(dir, nvcodecValidationReceiptName) {
 		t.Fatalf("validation receipt path=%q", path)
 	}
 }

@@ -972,6 +972,19 @@ Windows SendInput / CF_UNICODETEXT
 - 当前仍没有 `Decoder` production opener，也不会返回 `DecodedFrame`；NVIDIA backend 的 `productionReady=false / zeroCopyValidated=false` 不变。
 - 下一步：补 `CUVIDPARSERDISPINFO / CUVIDPROCPARAMS` 与 `cuvidMapVideoFrame64`，拿到 planar YUV444 CUDA output，并实现 CUDA YUV444 → D3D11 AYUV 同 adapter 输出 surface 生命周期。
 
+### 0.2.78 RD3 NVIDIA NVDEC Display Queue + CUDA Frame Map
+
+- 新增 `CUVIDPARSERDISPINFO=24` 与 `CUVIDPROCPARAMS=264` 的 Windows x64 ABI 固定层，并对 timestamp/output_stream 等关键 offset 做测试。
+- display callback 不再只计数：现在复制 NVDEC 给出的 `picture_index / progressive_frame / top_field_first / repeat_first_field / timestamp`，进入有界 display queue；队列上限 32，避免 viewer 停止消费时无限积压。
+- 当前 NVIDIA 4:4:4 路径继续只接受 progressive frame；display callback 若收到 interlaced frame 直接终止该 parser 回调，不把未经验证的 field processing 带入 zero-copy 链路。
+- 新增 `MapNextDisplay`：对 ready picture 调用 `cuvidMapVideoFrame64`，返回内部 `nvdecMappedFrame`，持有 CUDA device pointer、pitch、picture index、输出尺寸与按 10 MHz parser clock 还原的 presentation timestamp。
+- mapped frame 生命周期严格一一对应 `cuvidMapVideoFrame64 / cuvidUnmapVideoFrame64`；显式 `Close()` 幂等，parser `Close()` 也会先统一 unmap 所有仍存活 frame，再 destroy parser/decoder/session。
+- 即使 session/API 在关闭阶段异常，Go 侧 mapped frame 也会立即失效，后续不再暴露旧 CUDA pointer，避免 use-after-free 风险。
+- 修复上一阶段 parser 真机风险：`cuvidCreateDecoder` 现在明确在 `CUvideoctxlock` 边界内执行，匹配 NVIDIA floating CUDA context 的使用要求；CI 只能验证编译，真机初始化行为仍需 NVIDIA Windows 主机确认。
+- 本阶段故意不把 planar YUV444 CUDA pointer 伪装成 `D3D11Surface`。NVDEC 4:4:4 输出是 CUDA YUV444 surface，而 Relay Desktop viewer 的 zero-copy contract 要求 D3D11 AYUV；二者之间仍需 GPU-side pack/interop。
+- production gate 继续保持 `productionReady=false / zeroCopyValidated=false`，通用 decoder opener 仍不会选择 NVDEC。
+- 下一步：创建同 adapter 的 D3D11 AYUV output texture，使用 CUDA-D3D11 graphics interop 注册并映射 texture，再通过 CUDA kernel 将 NVDEC planar YUV444 打包为 AYUV；完成 GPU-only surface 转换后再封装成 `DecodedFrame.D3D11`。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

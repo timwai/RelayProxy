@@ -997,6 +997,20 @@ Windows SendInput / CF_UNICODETEXT
 - production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。
 - 下一步：补 CUDA module/kernel API，加载固定 PTX pack kernel，将 NVDEC planar Y/U/V 8-bit surface 按 pitch/surface height 读取并写入 mapped AYUV `CUarray`；kernel + stream 同步成功后才封装为 `D3D11Surface`。
 
+### 0.2.80 RD3 NVIDIA NVDEC Planar YUV444 → D3D11 AYUV PTX Pack
+
+- 新增 driver-only CUDA pack module，不引入 NVRTC / CUDA Toolkit 运行时依赖；PTX 作为 RelayProxy 内置字符串交给 `nvcuda.dll` 的 `cuModuleLoadData` JIT。
+- kernel API 强制解析 `cuModuleLoadData / cuModuleGetFunction / cuModuleGetSurfRef / cuSurfRefSetArray / cuLaunchKernel / cuCtxSynchronize / cuModuleUnload`，缺任一入口即不进入该路径。
+- pack kernel 固定输入为 NVDEC `cudaVideoSurfaceFormat_YUV444` 的 8-bit planar Y/U/V surface；按 `pitch * surfaceHeight` 计算 U/V plane 起点，并读取三个等尺寸平面。
+- Relay Desktop 的 `DXGI_FORMAT_AYUV` 内存布局固定为 V,U,Y,A，因此 kernel 每像素直接写 `V,U,Y,255`；无颜色空间变换、无 CPU readback，只做 GPU 内存布局转换。
+- 输出继续使用上一阶段映射得到的 D3D11 AYUV `CUarray`；PTX 使用 surface reference + `sust.b.2d.v4.b8` 写入，x 坐标按 CUDA surface 指令要求转换为 byte offset（`x * 4`）。
+- kernel launch 使用 16×16 thread block；grid 按输出尺寸向上取整，越界线程在 PTX 内提前退出。
+- source `nvdecMappedFrame` 在 kernel launch + `cuCtxSynchronize` 全程持有 frame mutex 与所属 NVDEC session 引用，阻止 `cuvidUnmapVideoFrame64` 在 GPU 读取完成前执行。
+- destination interop surface 的 `Map → Pack → Unmap` 与 `Close` 通过独立 call mutex 串行化；pack 成功也必须先 `cuGraphicsUnmapResources`，D3D11 才重新取得 texture 所有权。
+- PTX module/surface reference/function 由 `nvdecAYUVPacker` 生命周期管理，`Close()` 幂等并在 CUDA context lock 内 unload module。
+- 当前仍不返回 production `DecodedFrame`；下一阶段将把成功 pack 的 AYUV texture 封装成有引用计数的 `D3D11Surface`，再实现独立 NVDEC `Decoder` opener 与 NVENC→NVDEC 真机 round trip。
+- NVIDIA backend 的 `productionReady=false / zeroCopyValidated=false` 保持不变。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

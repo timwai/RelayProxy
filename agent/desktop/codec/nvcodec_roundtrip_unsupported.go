@@ -21,7 +21,6 @@ func ValidateNVCodecH265444RoundTrip(
 	return report, err
 }
 
-
 func ProbeNVCodecValidationIdentity(context.Context) (NVCodecValidationIdentity, error) {
 	return NVCodecValidationIdentity{}, fmt.Errorf(
 		"%w: NVIDIA validation identity is only available on Windows amd64",

@@ -20,19 +20,19 @@ const (
 )
 
 type NVCodecValidationReceipt struct {
-	SchemaVersion int                                         `json:"schemaVersion"`
-	BuildRevision string                                      `json:"buildRevision"`
-	SavedAtUnixMs int64                                       `json:"savedAtUnixMs"`
-	Report        desktopcodec.NVCodecH265444RoundTripReport  `json:"report"`
+	SchemaVersion int                                        `json:"schemaVersion"`
+	BuildRevision string                                     `json:"buildRevision"`
+	SavedAtUnixMs int64                                      `json:"savedAtUnixMs"`
+	Report        desktopcodec.NVCodecH265444RoundTripReport `json:"report"`
 }
 
 type NVCodecValidationStatus struct {
-	Current              bool                                `json:"current"`
-	StaleReason          string                              `json:"staleReason,omitempty"`
-	BuildRevision        string                              `json:"buildRevision,omitempty"`
-	CurrentBuildRevision string                              `json:"currentBuildRevision,omitempty"`
-	SavedAtUnixMs        int64                               `json:"savedAtUnixMs,omitempty"`
-	CurrentIdentity      *desktopcodec.NVCodecValidationIdentity `json:"currentIdentity,omitempty"`
+	Current              bool                                        `json:"current"`
+	StaleReason          string                                      `json:"staleReason,omitempty"`
+	BuildRevision        string                                      `json:"buildRevision,omitempty"`
+	CurrentBuildRevision string                                      `json:"currentBuildRevision,omitempty"`
+	SavedAtUnixMs        int64                                       `json:"savedAtUnixMs,omitempty"`
+	CurrentIdentity      *desktopcodec.NVCodecValidationIdentity     `json:"currentIdentity,omitempty"`
 	Report               *desktopcodec.NVCodecH265444RoundTripReport `json:"report,omitempty"`
 }
 

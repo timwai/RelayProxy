@@ -187,6 +187,10 @@ func openNVDECHEVC444D3D11Session(
 		api:         api,
 		d3d11Device: device,
 	}
+	// Ownership transfers to session before CUDA context creation so every
+	// later failure has exactly one cleanup path.
+	cleanupCUDA = false
+	cleanupCuvid = false
 	cleanupSession := true
 	defer func() {
 		if cleanupSession {
@@ -250,8 +254,6 @@ func openNVDECHEVC444D3D11Session(
 	}
 
 	cleanupSession = false
-	cleanupCuvid = false
-	cleanupCUDA = false
 	return session, nil
 }
 

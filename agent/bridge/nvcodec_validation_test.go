@@ -351,3 +351,54 @@ func TestReplaceNVCodecValidationFileOverwritesExistingTarget(t *testing.T) {
 		t.Fatalf("temporary receipt still exists: %v", err)
 	}
 }
+
+
+func TestNVCodecValidationNeedsIdentityProbeOnlyForQualifiedCandidate(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	receipt, _ := validNVCodecReceiptForTest(now)
+	if !nvcodecValidationNeedsIdentityProbe(now, receipt.BuildRevision, receipt) {
+		t.Fatal("fully qualified receipt did not request identity probe")
+	}
+
+	cases := []struct {
+		name  string
+		build string
+		edit  func(*NVCodecValidationReceipt)
+	}{
+		{
+			name:  "build changed",
+			build: "different-build",
+			edit:  func(*NVCodecValidationReceipt) {},
+		},
+		{
+			name:  "incomplete passes",
+			build: receipt.BuildRevision,
+			edit: func(copy *NVCodecValidationReceipt) {
+				copy.QualificationPasses = nvcodecValidationRequiredPasses - 1
+			},
+		},
+		{
+			name:  "last attempt failed",
+			build: receipt.BuildRevision,
+			edit: func(copy *NVCodecValidationReceipt) {
+				copy.LastAttemptPassed = false
+			},
+		},
+		{
+			name:  "expired",
+			build: receipt.BuildRevision,
+			edit: func(copy *NVCodecValidationReceipt) {
+				copy.SavedAtUnixMs = now.Add(-nvcodecValidationMaxAge - time.Minute).UnixMilli()
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			copy := *receipt
+			tc.edit(&copy)
+			if nvcodecValidationNeedsIdentityProbe(now, tc.build, &copy) {
+				t.Fatal("stale/incomplete receipt requested identity probe")
+			}
+		})
+	}
+}

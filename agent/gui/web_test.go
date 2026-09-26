@@ -326,7 +326,6 @@ func TestMainWebConnectionsPaneMatchesRealtimeMonitorFeatures(t *testing.T) {
 	}
 }
 
-
 func TestWebExposesNVCodecSelfTestDiagnosticsBridge(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 

@@ -21,8 +21,8 @@ const (
 	nvdecPacketTimestamp    uint32 = 0x02
 	nvdecPacketEndOfPicture uint32 = 0x08
 
-	nvdecSurfaceFormatYUV444 int32 = 2
-	nvdecDeinterlaceWeave    int32 = 0
+	nvdecSurfaceFormatYUV444 int32  = 2
+	nvdecDeinterlaceWeave    int32  = 0
 	nvdecCreatePreferCUVID   uint32 = 0x04
 
 	nvdecOutputSurfaces uint32 = 2
@@ -87,28 +87,28 @@ type nvdecSourceDataPacket struct {
 }
 
 type nvdecDecodeCreateInfo struct {
-	Width              uint32
-	Height             uint32
-	NumDecodeSurfaces  uint32
-	CodecType          int32
-	ChromaFormat       int32
-	CreationFlags      uint32
-	BitDepthMinus8     uint32
-	IntraDecodeOnly    uint32
-	MaxWidth           uint32
-	MaxHeight          uint32
-	Reserved1          uint32
-	DisplayArea        nvdecRect16
-	OutputFormat       int32
-	DeinterlaceMode    int32
-	TargetWidth        uint32
-	TargetHeight       uint32
-	NumOutputSurfaces  uint32
-	VideoContextLock   uintptr
-	TargetRect         nvdecRect16
-	EnableHistogram    uint32
+	Width               uint32
+	Height              uint32
+	NumDecodeSurfaces   uint32
+	CodecType           int32
+	ChromaFormat        int32
+	CreationFlags       uint32
+	BitDepthMinus8      uint32
+	IntraDecodeOnly     uint32
+	MaxWidth            uint32
+	MaxHeight           uint32
+	Reserved1           uint32
+	DisplayArea         nvdecRect16
+	OutputFormat        int32
+	DeinterlaceMode     int32
+	TargetWidth         uint32
+	TargetHeight        uint32
+	NumOutputSurfaces   uint32
+	VideoContextLock    uintptr
+	TargetRect          nvdecRect16
+	EnableHistogram     uint32
 	EnableDecodeFeature uint32
-	Reserved2          [3]uint32
+	Reserved2           [3]uint32
 }
 
 type nvdecHEVC444Parser struct {

@@ -507,7 +507,9 @@ func ValidateNVCodecH265444RoundTrip(
 	if len(firstDecoded) == 0 {
 		return report, errors.New("NVDEC self-test produced no display frame")
 	}
-	defer closeNVDECDecodedFrames(firstDecoded)
+	defer func() {
+		closeNVDECDecodedFrames(firstDecoded)
+	}()
 
 	frame := &firstDecoded[0]
 	if !frame.Hardware || frame.Format != PixelFormatAYUV || frame.D3D11 == nil {

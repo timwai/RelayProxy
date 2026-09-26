@@ -628,5 +628,8 @@ func (p *nvdecHEVC444Parser) Close() error {
 			closeErr = err
 		}
 	}
+	for _, frame := range mapped {
+		_ = frame.detach()
+	}
 	return closeErr
 }

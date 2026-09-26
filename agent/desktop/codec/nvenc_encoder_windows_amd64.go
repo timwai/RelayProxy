@@ -396,11 +396,32 @@ func (e *nvencH265Encoder) ForceIDR(ctx context.Context) error {
 	return nil
 }
 
-func (e *nvencH265Encoder) Reconfigure(context.Context, VideoConfig) error {
+func (e *nvencH265Encoder) Reconfigure(ctx context.Context, cfg VideoConfig) error {
 	if e == nil {
 		return ErrEncoderUnavailable
 	}
-	return ErrEncoderControlUnsupported
+	normalized, err := NormalizeVideoConfig(cfg)
+	if err != nil {
+		return err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed || e.session == nil {
+		return ErrEncoderUnavailable
+	}
+	if !bitrateOnlyReconfigure(e.cfg, normalized) {
+		return ErrEncoderRebuildRequired
+	}
+	if normalized.TargetBitrate == e.cfg.TargetBitrate {
+		return nil
+	}
+	updated, err := e.session.reconfigureHEVC444Bitrate(ctx, normalized)
+	if err != nil {
+		return err
+	}
+	e.cfg = updated
+	e.forceIDR = true
+	return nil
 }
 
 func (e *nvencH265Encoder) SequenceHeader() []byte {

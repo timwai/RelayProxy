@@ -146,7 +146,6 @@ func TestNVCodecValidationReceiptPathFollowsConfigDirectory(t *testing.T) {
 	}
 }
 
-
 func TestReplaceNVCodecValidationFileOverwritesExistingTarget(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "receipt.json")

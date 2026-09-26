@@ -1011,6 +1011,19 @@ Windows SendInput / CF_UNICODETEXT
 - 当前仍不返回 production `DecodedFrame`；下一阶段将把成功 pack 的 AYUV texture 封装成有引用计数的 `D3D11Surface`，再实现独立 NVDEC `Decoder` opener 与 NVENC→NVDEC 真机 round trip。
 - NVIDIA backend 的 `productionReady=false / zeroCopyValidated=false` 保持不变。
 
+### 0.2.81 RD3 NVIDIA NVDEC Standalone D3D11 Decoder
+
+- 新增独立 `OpenNVDECH265DecoderWithD3D11`，实现通用 `Decoder` 接口，但仍不挂入 `h265444BackendRegistry`；Linux/macOS/非 amd64 提供明确 unavailable stub。
+- decode 主链闭环为：`cuvidParseVideoData → display queue → cuvidMapVideoFrame64 → PTX YUV444→AYUV pack → cuvidUnmapVideoFrame64 → CUDA graphics unregister → D3D11 AYUV DecodedFrame`。
+- 每个输出 texture 在 pack 完成并 `cuCtxSynchronize` 后立即调用 `cuGraphicsUnregisterResource`；返回 viewer 前就与 CUDA/NVDEC session 解耦，因此 decoder/session 可以关闭而不破坏仍在显示队列里的 D3D11 texture。
+- 新增 `nvdecD3D11OutputOwner` 引用计数：DecodedFrame 持有基础引用，viewer 的 `GPUFrame.Retain/Release` 增减额外引用；最后一个引用释放时才关闭 interop surface 并释放其 D3D11 COM 引用。
+- 错误路径会关闭当前 mapped source、destination texture，以及本次 Decode 已累计但尚未返回的所有 frames，避免 partial batch 泄漏。
+- backend 元数据固定为 `nvdec-hevc444-d3d11-zero-copy`，输出格式固定 `PixelFormatAYUV`、`Hardware=true`。
+- parser 新增显式 EOS：`Flush` 先发送 `CUVID_PKT_ENDOFSTREAM` 触发 pending display callback，再按 packer → parser/session 顺序关闭旧组件，并重新创建一套干净 decoder state，保持接口可继续复用。
+- CUDA graphics registration 不跨 frame 生命周期保留；viewer 看到的 texture 是普通同-device D3D11 AYUV resource，后续 renderer 无需知道 CUDA/NVDEC。
+- 当前仍未将 NVDEC opener 写入 NVIDIA production backend slot，也未把 `productionReady / zeroCopyValidated` 打开。
+- 下一步：增加显式 NVENC→NVDEC round-trip 验证入口，在 NVIDIA Windows 真机上编码 AYUV D3D11 frame、解码回 AYUV texture，并做 GPU/最小 readback 校验、IDR/sequence/bitrate reconfigure 与资源泄漏检查；只有验证通过后才考虑 production gate。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

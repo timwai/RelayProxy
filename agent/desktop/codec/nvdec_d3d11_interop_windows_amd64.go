@@ -358,6 +358,54 @@ func (s *nvdecD3D11AYUVInteropSurface) Pack(
 	return errors.Join(packErr, unmapErr)
 }
 
+func (s *nvdecD3D11AYUVInteropSurface) FinalizeForD3D11() error {
+	if s == nil {
+		return ErrDecoderUnavailable
+	}
+	s.callMu.Lock()
+	defer s.callMu.Unlock()
+
+	s.mu.Lock()
+	if s.closed || s.texture == nil {
+		s.mu.Unlock()
+		return ErrDecoderUnavailable
+	}
+	if s.mapped {
+		s.mu.Unlock()
+		return fmt.Errorf("%w: NVDEC AYUV surface is still CUDA-mapped", ErrDecoderUnavailable)
+	}
+	if s.graphicsResource == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	if s.session == nil {
+		s.mu.Unlock()
+		return ErrDecoderUnavailable
+	}
+	session := s.session
+	api := s.api
+	resource := s.graphicsResource
+	s.mu.Unlock()
+
+	if err := session.withCUDAContextLock(func() error {
+		if status := cudaDriverCall(api.GraphicsUnregisterResource, resource); status != 0 {
+			return fmt.Errorf("cuGraphicsUnregisterResource returned %d", status)
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	if s.graphicsResource == resource {
+		s.graphicsResource = 0
+		s.session = nil
+		s.api = nvdecCUDAInteropAPI{}
+	}
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *nvdecD3D11AYUVInteropSurface) Texture() uintptr {
 	if s == nil {
 		return 0

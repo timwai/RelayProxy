@@ -557,6 +557,47 @@ func (p *nvdecHEVC444Parser) Parse(
 	return callbackErr
 }
 
+func (p *nvdecHEVC444Parser) EndOfStream(ctx context.Context) error {
+	if p == nil {
+		return ErrDecoderUnavailable
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	p.callMu.Lock()
+	defer p.callMu.Unlock()
+
+	p.mu.Lock()
+	if p.closed || p.parser == 0 || p.session == nil {
+		p.mu.Unlock()
+		return ErrDecoderUnavailable
+	}
+	parserHandle := p.parser
+	p.callbackErr = nil
+	session := p.session
+	p.mu.Unlock()
+
+	api, err := session.API()
+	if err != nil {
+		return err
+	}
+	packet := nvdecSourceDataPacket{Flags: nvdecPacketEndOfStream}
+	status := cudaDriverCall(
+		api.CuvidParseVideoData,
+		parserHandle,
+		uintptr(unsafe.Pointer(&packet)),
+	)
+	runtime.KeepAlive(&packet)
+	if status != 0 {
+		return fmt.Errorf("%w: cuvidParseVideoData(EOS) returned %d", ErrDecoderUnavailable, status)
+	}
+	p.mu.Lock()
+	callbackErr := p.callbackErr
+	p.mu.Unlock()
+	return callbackErr
+}
+
 func (p *nvdecHEVC444Parser) DecoderCreated() bool {
 	if p == nil {
 		return false

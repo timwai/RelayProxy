@@ -23,7 +23,7 @@ const (
 var (
 	nvcodecValidationDXGIDLL       = windows.NewLazySystemDLL("dxgi.dll")
 	nvcodecValidationCreateFactory = nvcodecValidationDXGIDLL.NewProc("CreateDXGIFactory1")
-	nvcodecValidationIIDFactory1 = windows.GUID{
+	nvcodecValidationIIDFactory1   = windows.GUID{
 		Data1: 0x770aae78, Data2: 0xf26f, Data3: 0x4dba,
 		Data4: [8]byte{0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87},
 	}

@@ -458,15 +458,22 @@ func (p *nvdecHEVC444Parser) handleSequence(formatPtr uintptr) (uint32, error) {
 		return 0, fmt.Errorf("%w: NVDEC coded height=%d exceeds max=%d", ErrDecoderUnavailable, info.Height, caps.MaxHeight)
 	}
 
+	if status := cudaDriverCall(api.CuvidCtxLock, lock, 0); status != 0 {
+		return 0, fmt.Errorf("%w: cuvidCtxLock(create decoder) returned %d", ErrDecoderUnavailable, status)
+	}
 	status := cudaDriverCall(
 		api.CuvidCreateDecoder,
 		uintptr(unsafe.Pointer(&p.decoder)),
 		uintptr(unsafe.Pointer(&info)),
 	)
+	createUnlockStatus := cudaDriverCall(api.CuvidCtxUnlock, lock, 0)
 	runtime.KeepAlive(&info)
 	runtime.KeepAlive(p)
 	if status != 0 || p.decoder == 0 {
 		return 0, fmt.Errorf("%w: cuvidCreateDecoder returned %d", ErrDecoderUnavailable, status)
+	}
+	if createUnlockStatus != 0 {
+		return 0, fmt.Errorf("%w: cuvidCtxUnlock(create decoder) returned %d", ErrDecoderUnavailable, createUnlockStatus)
 	}
 	p.sequenceSeen = true
 	p.surfaceWidth = int(info.TargetWidth)

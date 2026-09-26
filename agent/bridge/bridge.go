@@ -148,6 +148,7 @@ type RemoteDesktopDiagnosticsReport struct {
 	NVCodecSelfTest            *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
 	NVCodecValidation          *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
 	NVCodecStressQualification *NVCodecStressQualificationReport           `json:"nvcodecStressQualification,omitempty"`
+	NVCodecCanaryEligibility    NVCodecCanaryEligibility                    `json:"nvcodecCanaryEligibility"`
 }
 
 func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport {
@@ -162,6 +163,7 @@ func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport 
 	b.mu.RUnlock()
 	validation := b.GetRemoteDesktopNVCodecValidation()
 	report.NVCodecValidation = &validation
+	report.NVCodecCanaryEligibility = b.GetRemoteDesktopNVCodecCanaryEligibility()
 	if receipt, err := loadNVCodecValidationReceipt(b.configPath); err == nil &&
 		receipt != nil && receipt.StressQualification != nil {
 		report.NVCodecStressQualification = cloneNVCodecStressQualificationReport(receipt.StressQualification)

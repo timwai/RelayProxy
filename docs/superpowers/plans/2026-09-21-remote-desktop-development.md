@@ -1127,6 +1127,16 @@ Windows SendInput / CF_UNICODETEXT
 - production selector 仍完全忽略 stress evidence；本轮只补可追溯性，不改变 NVIDIA backend gate。
 - 下一步：在 diagnostics 中增加可机读 canary eligibility summary（current 3/3 + 最近 stress pass + identity/build 一致），再实现显式 opt-in NVIDIA canary gate；任何 runtime open/encode/decode 失败必须立即回退 oneVPL HEVC 4:4:4，若 oneVPL 不可用则继续回退 H.264。
 
+### 0.2.90 RD3 NVIDIA Canary Eligibility Summary
+
+- diagnostics 新增可机读 `nvcodecCanaryEligibility`，它只表达“当前机器是否满足进入 NVIDIA canary 的证据门槛”，不改变 production backend selector。
+- eligibility 必须同时满足：当前 3/3 validation 有效、最近 stress report 通过、至少完成 5 轮、cleanup failure 为 0、stress 最后一轮 adapter/device/driver identity 与当前 receipt 一致。
+- 输出 `eligible / validationCurrent / stressPresent / stressPassed / stressCompletedRounds / stressRequiredRounds / identityConsistent / cleanupStable / reasons`，便于 GUI、diagnostics 和后续 canary gate 复用同一判定。
+- 任意证据缺失、stress 轮数不足、cleanup 异常、identity 不一致都 fail-closed，并给出机器可读前的明确 reasons。
+- 新增纯逻辑回归测试：完整当前证据可进入 eligibility；driver identity 不一致或 cleanup failure 时必须保持 false。
+- production gate 仍关闭；`eligible=true` 不代表 NVCodec 已被选择或启用。
+- 下一步：增加显式用户 opt-in canary 配置与运行时 gate；gate 仅在 eligibility=true 时允许尝试 NVCodec，任何 NVENC/NVDEC open、encode、decode 或 zero-copy failure 都立即回退 oneVPL HEVC 4:4:4，之后再回退 H.264。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

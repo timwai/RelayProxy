@@ -32,6 +32,18 @@ type NVCodecValidationReceipt struct {
 	StressQualification *NVCodecStressQualificationReport          `json:"stressQualification,omitempty"`
 }
 
+type NVCodecCanaryEligibility struct {
+	Eligible             bool     `json:"eligible"`
+	ValidationCurrent    bool     `json:"validationCurrent"`
+	StressPresent        bool     `json:"stressPresent"`
+	StressPassed         bool     `json:"stressPassed"`
+	StressCompletedRounds int     `json:"stressCompletedRounds"`
+	StressRequiredRounds int      `json:"stressRequiredRounds"`
+	IdentityConsistent   bool     `json:"identityConsistent"`
+	CleanupStable        bool     `json:"cleanupStable"`
+	Reasons              []string `json:"reasons,omitempty"`
+}
+
 type NVCodecValidationStatus struct {
 	Current              bool                                        `json:"current"`
 	StaleReason          string                                      `json:"staleReason,omitempty"`
@@ -388,6 +400,77 @@ func nvcodecValidationNeedsIdentityProbe(
 	}
 	age := now.Sub(time.UnixMilli(receipt.SavedAtUnixMs))
 	return age >= 0 && age <= nvcodecValidationMaxAge
+}
+
+func evaluateNVCodecCanaryEligibility(
+	status NVCodecValidationStatus,
+	receipt *NVCodecValidationReceipt,
+) NVCodecCanaryEligibility {
+	result := NVCodecCanaryEligibility{
+		ValidationCurrent:     status.Current,
+		StressRequiredRounds: nvcodecStressQualificationRounds,
+	}
+	if !status.Current {
+		result.Reasons = append(result.Reasons, "current 3/3 validation is not valid")
+	}
+	if receipt == nil || receipt.StressQualification == nil {
+		result.Reasons = append(result.Reasons, "stress qualification evidence is missing")
+		return result
+	}
+
+	stress := receipt.StressQualification
+	result.StressPresent = true
+	result.StressPassed = stress.Passed
+	result.StressCompletedRounds = stress.CompletedRounds
+	result.CleanupStable = stress.CleanupFailures == 0
+	if !stress.Passed {
+		result.Reasons = append(result.Reasons, "latest stress qualification did not pass")
+	}
+	if stress.CompletedRounds < nvcodecStressQualificationRounds {
+		result.Reasons = append(
+			result.Reasons,
+			fmt.Sprintf(
+				"stress qualification completed %d/%d rounds",
+				stress.CompletedRounds,
+				nvcodecStressQualificationRounds,
+			),
+		)
+	}
+	if stress.CleanupFailures != 0 {
+		result.Reasons = append(
+			result.Reasons,
+			fmt.Sprintf("stress qualification reported %d cleanup failures", stress.CleanupFailures),
+		)
+	}
+
+	if len(stress.Reports) > 0 {
+		last := stress.Reports[len(stress.Reports)-1]
+		result.IdentityConsistent = receipt.Report.Passed &&
+			nvcodecValidationReportIdentity(receipt.Report).MatchesReport(last)
+	}
+	if !result.IdentityConsistent {
+		result.Reasons = append(result.Reasons, "stress evidence identity does not match the current receipt")
+	}
+
+	result.Eligible = result.ValidationCurrent &&
+		result.StressPassed &&
+		result.StressCompletedRounds >= nvcodecStressQualificationRounds &&
+		result.CleanupStable &&
+		result.IdentityConsistent
+	return result
+}
+
+func (b *UIBridge) GetRemoteDesktopNVCodecCanaryEligibility() NVCodecCanaryEligibility {
+	status := b.GetRemoteDesktopNVCodecValidation()
+	receipt, err := loadNVCodecValidationReceipt(b.configPath)
+	if err != nil {
+		return NVCodecCanaryEligibility{
+			ValidationCurrent:    status.Current,
+			StressRequiredRounds: nvcodecStressQualificationRounds,
+			Reasons:              []string{err.Error()},
+		}
+	}
+	return evaluateNVCodecCanaryEligibility(status, receipt)
 }
 
 func (b *UIBridge) GetRemoteDesktopNVCodecValidation() NVCodecValidationStatus {

@@ -467,3 +467,58 @@ func TestNVCodecValidationReceiptDropsStressEvidenceWhenAdapterChanges(t *testin
 		t.Fatalf("changed adapter retained stale stress evidence: %+v", next.StressQualification)
 	}
 }
+
+func TestEvaluateNVCodecCanaryEligibilityRequiresCurrentStressEvidence(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	receipt, identity := validNVCodecReceiptForTest(now)
+	receipt.StressQualification = &NVCodecStressQualificationReport{
+		Passed:          true,
+		RequestedRounds: nvcodecStressQualificationRounds,
+		CompletedRounds: nvcodecStressQualificationRounds,
+		CleanupFailures: 0,
+		Reports: []desktopcodec.NVCodecH265444RoundTripReport{
+			receipt.Report,
+		},
+	}
+	status := evaluateNVCodecValidationReceipt(
+		now,
+		receipt.BuildRevision,
+		identity,
+		nil,
+		receipt,
+	)
+	eligibility := evaluateNVCodecCanaryEligibility(status, receipt)
+	if !eligibility.Eligible || !eligibility.IdentityConsistent || !eligibility.CleanupStable {
+		t.Fatalf("valid stress evidence is not canary eligible: %+v", eligibility)
+	}
+}
+
+func TestEvaluateNVCodecCanaryEligibilityFailsClosed(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	receipt, identity := validNVCodecReceiptForTest(now)
+	changed := receipt.Report
+	changed.AdapterDriverVersion++
+	receipt.StressQualification = &NVCodecStressQualificationReport{
+		Passed:          true,
+		RequestedRounds: nvcodecStressQualificationRounds,
+		CompletedRounds: nvcodecStressQualificationRounds,
+		CleanupFailures: 1,
+		Reports: []desktopcodec.NVCodecH265444RoundTripReport{
+			changed,
+		},
+	}
+	status := evaluateNVCodecValidationReceipt(
+		now,
+		receipt.BuildRevision,
+		identity,
+		nil,
+		receipt,
+	)
+	eligibility := evaluateNVCodecCanaryEligibility(status, receipt)
+	if eligibility.Eligible {
+		t.Fatalf("mismatched/unclean stress evidence became eligible: %+v", eligibility)
+	}
+	if eligibility.IdentityConsistent || eligibility.CleanupStable || len(eligibility.Reasons) == 0 {
+		t.Fatalf("fail-closed reasons incomplete: %+v", eligibility)
+	}
+}

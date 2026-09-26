@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/desktop"
+	desktopcodec "relayproxy/agent/desktop/codec"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
 	"relayproxy/internal/config"
@@ -41,6 +43,11 @@ func main() {
 	minimizedFlag := flag.Bool("minimized", false, "Start the desktop window minimized to the system tray")
 	hiddenFlag := flag.Bool("hidden", false, "Alias for --minimized (kept for existing autostart entries)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
+	nvcodecSelfTestFlag := flag.Bool(
+		"desktop-nvcodec-self-test",
+		false,
+		"Run an explicit NVIDIA NVENC/NVDEC HEVC 4:4:4 D3D11 round-trip self-test and exit",
+	)
 
 	var noWebFlag bool
 	flag.BoolVar(&noWebFlag, "no-web", false, "Disable the embedded web management page")
@@ -52,6 +59,24 @@ func main() {
 
 	if *versionFlag {
 		fmt.Printf("relay-agent %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
+	if *nvcodecSelfTestFlag {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		report, testErr := desktopcodec.ValidateNVCodecH265444RoundTrip(ctx)
+		if testErr != nil && report.Error == "" {
+			report.Error = testErr.Error()
+		}
+		payload, marshalErr := json.MarshalIndent(report, "", "  ")
+		if marshalErr != nil {
+			fmt.Fprintf(os.Stderr, "NVCodec self-test result encoding failed: %v\n", marshalErr)
+			os.Exit(1)
+		}
+		fmt.Println(string(payload))
+		if testErr != nil {
+			os.Exit(1)
+		}
 		return
 	}
 

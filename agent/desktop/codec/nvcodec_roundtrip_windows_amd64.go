@@ -27,9 +27,9 @@ var (
 		Data1: 0x770aae78, Data2: 0xf26f, Data3: 0x4dba,
 		Data4: [8]byte{0xa8, 0x29, 0x25, 0x3c, 0x83, 0xd1, 0xb3, 0x87},
 	}
-	nvcodecValidationIIDID3D11Device = windows.GUID{
-		Data1: 0xdb6f6ddb, Data2: 0xac77, Data3: 0x4e88,
-		Data4: [8]byte{0x82, 0x53, 0x81, 0x9d, 0xf9, 0xbb, 0xf1, 0x40},
+	nvcodecValidationIIDIDXGIDevice = windows.GUID{
+		Data1: 0x54ec77fa, Data2: 0x1377, Data3: 0x44e6,
+		Data4: [8]byte{0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c},
 	}
 )
 
@@ -199,7 +199,7 @@ func createNVCodecValidationD3D11Device() (
 		if checkHR := comCall(
 			adapter,
 			9, // IDXGIAdapter::CheckInterfaceSupport
-			uintptr(unsafe.Pointer(&nvcodecValidationIIDID3D11Device)),
+			uintptr(unsafe.Pointer(&nvcodecValidationIIDIDXGIDevice)),
 			uintptr(unsafe.Pointer(&driverVersion)),
 		); hresultFailed(checkHR) {
 			driverVersion = 0

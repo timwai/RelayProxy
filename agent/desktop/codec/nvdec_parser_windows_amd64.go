@@ -126,7 +126,12 @@ type nvdecHEVC444Parser struct {
 	decodeCalls  uint64
 	displayCalls uint64
 	callbackErr  error
-	closed       bool
+
+	surfaceWidth  int
+	surfaceHeight int
+	displayQueue  []nvdecParserDisplayInfo
+	mappedFrames  map[uint64]*nvdecMappedFrame
+	closed        bool
 }
 
 var (
@@ -184,17 +189,15 @@ func nvdecDecodeCallback(userData uintptr, pictureParams uintptr) uintptr {
 	return 1
 }
 
-func nvdecDisplayCallback(userData uintptr, _ uintptr) uintptr {
+func nvdecDisplayCallback(userData uintptr, displayInfo uintptr) uintptr {
 	parser := lookupNVDECParser(userData)
 	if parser == nil {
 		return 0
 	}
-	parser.mu.Lock()
-	defer parser.mu.Unlock()
-	if parser.closed {
+	if err := parser.handleDisplay(displayInfo); err != nil {
+		parser.setCallbackError(err)
 		return 0
 	}
-	parser.displayCalls++
 	return 1
 }
 
@@ -355,9 +358,10 @@ func openNVDECHEVC444Parser(
 		return nil, err
 	}
 	parser := &nvdecHEVC444Parser{
-		session: session,
-		cfg:     normalized,
-		handle:  nextNVDECParserHandle(),
+		session:      session,
+		cfg:          normalized,
+		handle:       nextNVDECParserHandle(),
+		mappedFrames: make(map[uint64]*nvdecMappedFrame),
 	}
 	nvdecParserHandleMap.Store(parser.handle, parser)
 	cleanupHandle := true
@@ -411,6 +415,8 @@ func (p *nvdecHEVC444Parser) handleSequence(formatPtr uintptr) (uint32, error) {
 	}
 	if p.decoder != 0 {
 		p.sequenceSeen = true
+		p.surfaceWidth = int(info.TargetWidth)
+		p.surfaceHeight = int(info.TargetHeight)
 		return surfaces, nil
 	}
 
@@ -463,6 +469,8 @@ func (p *nvdecHEVC444Parser) handleSequence(formatPtr uintptr) (uint32, error) {
 		return 0, fmt.Errorf("%w: cuvidCreateDecoder returned %d", ErrDecoderUnavailable, status)
 	}
 	p.sequenceSeen = true
+	p.surfaceWidth = int(info.TargetWidth)
+	p.surfaceHeight = int(info.TargetHeight)
 	return surfaces, nil
 }
 
@@ -568,10 +576,18 @@ func (p *nvdecHEVC444Parser) Close() error {
 	decoder := p.decoder
 	session := p.session
 	handle := p.handle
+	mapped := make([]*nvdecMappedFrame, 0, len(p.mappedFrames))
+	for _, frame := range p.mappedFrames {
+		mapped = append(mapped, frame)
+	}
 	p.parser = 0
 	p.decoder = 0
 	p.session = nil
 	p.handle = 0
+	p.displayQueue = nil
+	p.mappedFrames = nil
+	p.surfaceWidth = 0
+	p.surfaceHeight = 0
 	p.mu.Unlock()
 
 	nvdecParserHandleMap.Delete(handle)
@@ -580,8 +596,16 @@ func (p *nvdecHEVC444Parser) Close() error {
 	if session != nil {
 		api, apiErr := session.API()
 		if apiErr == nil {
+			for _, frame := range mapped {
+				devicePtr := frame.detach()
+				if devicePtr != 0 && decoder != 0 {
+					if status := cudaDriverCall(api.CuvidUnmapVideoFrame64, decoder, uintptr(devicePtr)); status != 0 && closeErr == nil {
+						closeErr = fmt.Errorf("cuvidUnmapVideoFrame64 returned %d", status)
+					}
+				}
+			}
 			if parserHandle != 0 {
-				if status := cudaDriverCall(api.CuvidDestroyVideoParser, parserHandle); status != 0 {
+				if status := cudaDriverCall(api.CuvidDestroyVideoParser, parserHandle); status != 0 && closeErr == nil {
 					closeErr = fmt.Errorf("cuvidDestroyVideoParser returned %d", status)
 				}
 			}
@@ -590,7 +614,7 @@ func (p *nvdecHEVC444Parser) Close() error {
 					closeErr = fmt.Errorf("cuvidDestroyDecoder returned %d", status)
 				}
 			}
-		} else if parserHandle != 0 || decoder != 0 {
+		} else if parserHandle != 0 || decoder != 0 || len(mapped) > 0 {
 			closeErr = apiErr
 		}
 		if err := session.Close(); err != nil && closeErr == nil {

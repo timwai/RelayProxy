@@ -167,6 +167,9 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/remote-desktop/nvcodec-self-test", func(rw http.ResponseWriter, _ *http.Request) {
 		writeWebJSON(rw, w.bridge.GetRemoteDesktopNVCodecSelfTest())
 	})
+	mux.HandleFunc("GET /api/remote-desktop/nvcodec-validation", func(rw http.ResponseWriter, _ *http.Request) {
+		writeWebJSON(rw, w.bridge.GetRemoteDesktopNVCodecValidation())
+	})
 	mux.HandleFunc("POST /api/remote-desktop/nvcodec-self-test", func(rw http.ResponseWriter, _ *http.Request) {
 		report, _ := w.bridge.RunRemoteDesktopNVCodecSelfTest()
 		writeWebJSON(rw, report)
@@ -398,6 +401,7 @@ const webBridgeJS = `(function () {
   window.goGetConnections = function () { return request('/api/connections'); };
   window.goGetRemoteDesktopDiagnostics = function () { return request('/api/remote-desktop/diagnostics'); };
   window.goGetRemoteDesktopNVCodecSelfTest = function () { return request('/api/remote-desktop/nvcodec-self-test'); };
+  window.goGetRemoteDesktopNVCodecValidation = function () { return request('/api/remote-desktop/nvcodec-validation'); };
   window.goRunRemoteDesktopNVCodecSelfTest = function () { return json('/api/remote-desktop/nvcodec-self-test', 'POST', {}); };
   window.goClearConnections = function () { return request('/api/connections', {method:'DELETE'}); };
   window.goOpenConfigDir = async function () { var out = JSON.parse(await request('/api/config-path')); alert('配置文件：' + out.path); };

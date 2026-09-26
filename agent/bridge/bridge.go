@@ -39,7 +39,8 @@ type UIBridge struct {
 	syncAutoStart func(string, bool) (func() error, error)
 	setAutoStart  func(string, bool, bool) error
 
-	nvcodecSelfTest *desktopcodec.NVCodecH265444RoundTripReport
+	nvcodecValidationMu sync.Mutex
+	nvcodecSelfTest     *desktopcodec.NVCodecH265444RoundTripReport
 }
 
 func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
@@ -163,16 +164,28 @@ func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport 
 	return report
 }
 
-func (b *UIBridge) RunRemoteDesktopNVCodecSelfTest() (desktopcodec.NVCodecH265444RoundTripReport, error) {
+func (b *UIBridge) runRemoteDesktopNVCodecSelfTestLocked() (
+	desktopcodec.NVCodecH265444RoundTripReport,
+	error,
+	error,
+) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	report, err := desktopcodec.ValidateNVCodecH265444RoundTrip(ctx)
+	report, testErr := desktopcodec.ValidateNVCodecH265444RoundTrip(ctx)
 	b.mu.Lock()
 	b.nvcodecSelfTest = &report
 	b.mu.Unlock()
-	_ = recordNVCodecValidationAttempt(b.configPath, report, err)
-	return report, err
+	receiptErr := recordNVCodecValidationAttempt(b.configPath, report, testErr)
+	return report, testErr, receiptErr
+}
+
+func (b *UIBridge) RunRemoteDesktopNVCodecSelfTest() (desktopcodec.NVCodecH265444RoundTripReport, error) {
+	b.nvcodecValidationMu.Lock()
+	defer b.nvcodecValidationMu.Unlock()
+
+	report, testErr, _ := b.runRemoteDesktopNVCodecSelfTestLocked()
+	return report, testErr
 }
 
 func (b *UIBridge) GetRemoteDesktopNVCodecSelfTest() *desktopcodec.NVCodecH265444RoundTripReport {

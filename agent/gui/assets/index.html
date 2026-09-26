@@ -709,6 +709,7 @@
         </div>
 
         <div id="desktop-nvcodec-self-test-result" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border"></div>
+        <div id="desktop-nvcodec-validation-state" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border"></div>
         <div id="desktop-session-banner" class="hidden rp-notice rp-notice-info"></div>
 
         <details class="rp-card p-4" id="desktop-connect-settings">
@@ -1250,7 +1251,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {}, desktopFollowViewport: false, desktopNVCodecSelfTest: null };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {}, desktopFollowViewport: false, desktopNVCodecSelfTest: null, desktopNVCodecValidation: null };
     var desktopFrameSeq = 0, desktopFrameGeneration = 0, desktopFrameBusy = false, desktopInputSeq = 0;
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
@@ -2574,6 +2575,38 @@
         : 'text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
     }
 
+    function renderRemoteDesktopNVCodecValidation(status) {
+      state.desktopNVCodecValidation = status || null;
+      var target = $('desktop-nvcodec-validation-state');
+      if (!target) return;
+      if (!status || (!status.report && !status.current)) {
+        target.classList.add('hidden');
+        target.textContent = '';
+        return;
+      }
+      var savedAt = Number(status.savedAtUnixMs || 0);
+      var age = savedAt ? new Date(savedAt).toLocaleString() : '';
+      if (status.current) {
+        target.textContent = 'NVIDIA 验证凭证：当前有效' +
+          (age ? ' · 自检 ' + age : '') +
+          (status.currentBuildRevision ? ' · build ' + String(status.currentBuildRevision).slice(0, 12) : '');
+        target.className = 'text-[11px] leading-5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
+      } else {
+        target.textContent = 'NVIDIA 验证凭证：历史记录，不作为当前有效验证' +
+          (status.staleReason ? ' · ' + status.staleReason : '') +
+          (age ? ' · ' + age : '');
+        target.className = 'text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
+      }
+    }
+
+    async function refreshRemoteDesktopNVCodecValidation() {
+      if (!hasFn('goGetRemoteDesktopNVCodecValidation')) return;
+      try {
+        var raw = await call('goGetRemoteDesktopNVCodecValidation');
+        renderRemoteDesktopNVCodecValidation(parseJSONResult(raw, null));
+      } catch (_) {}
+    }
+
     async function refreshRemoteDesktopNVCodecSelfTest() {
       if (!hasFn('goGetRemoteDesktopNVCodecSelfTest')) return;
       try {
@@ -2600,6 +2633,7 @@
         var report = parseJSONResult(raw, null);
         if (!report) throw new Error('没有收到 GPU 自检结果');
         renderRemoteDesktopNVCodecSelfTest(report);
+        await refreshRemoteDesktopNVCodecValidation();
         if (report.passed) {
           toast('NVIDIA GPU 自检通过 · ' + (report.adapter || 'NVIDIA') +
             ' · 最大像素误差 ' + Number(report.maxChannelError || 0));
@@ -3662,6 +3696,7 @@
       if (hasFn('goRunRemoteDesktopNVCodecSelfTest') && $('desktop-nvcodec-self-test-btn')) {
         $('desktop-nvcodec-self-test-btn').classList.remove('hidden');
         refreshRemoteDesktopNVCodecSelfTest();
+        refreshRemoteDesktopNVCodecValidation();
       }
 
       // Go pushes status every 1.5s; these polls cover the window's first paint.

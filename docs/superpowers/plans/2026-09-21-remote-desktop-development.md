@@ -1038,6 +1038,18 @@ Windows SendInput / CF_UNICODETEXT
 - 本阶段依然**不自动打开 NVIDIA production gate**。round-trip 函数是可重复执行的诊断机制；只有在目标 NVIDIA Windows 真机上实际通过并积累稳定样本后，才允许把 `productionReady / zeroCopyValidated` 改为 true。
 - 下一步：把 self-test JSON 接入 Relay Desktop diagnostics 导出/GUI “GPU 自检”，并在实机记录多轮资源泄漏、显存增长、码率切换、IDR/sequence header 与多 adapter 场景；之后再决定是否开放 NVIDIA backend 自动选择。
 
+### 0.2.83 RD3 NVIDIA NVCodec Self-Test Diagnostics + GUI
+
+- 将上一阶段的显式 NVENC → NVDEC round-trip 验证接入 Agent UI Bridge；新增 `RunRemoteDesktopNVCodecSelfTest` 与最近一次结果查询，仍然只在用户主动点击/调用时执行，不进入正常 Agent 启动和媒体协商流程。
+- `UIBridge` 保存最近一次 `NVCodecH265444RoundTripReport` 的值副本；现有 Relay Desktop 诊断导出包装增加 `nvcodecSelfTest` 字段，因此同一次 GUI 会话运行 GPU 自检后，“导出诊断”会自动携带 adapter、encode/decode、像素 readback、bitrate reconfigure、IDR、cleanup 与耗时结果。
+- Windows Wails bridge 新增 `goRunRemoteDesktopNVCodecSelfTest / goGetRemoteDesktopNVCodecSelfTest`；Web 管理页新增对应 GET/POST API，并补齐原先浏览器页面缺失的 `goGetRemoteDesktopDiagnostics` bridge。
+- Web self-test 仍受现有 same-origin mutation protection；HTTP write timeout 从 30 秒调整到 40 秒，为内部 30 秒自检 deadline 留出 JSON 响应时间，不改变其他请求的 read/header timeout。
+- Relay Desktop 页头新增“**NVIDIA GPU 自检**”按钮。运行中按钮禁用并显示“GPU 自检中…”，避免用户重复提交；完成后页面保留通过/失败结果条，展示 GPU 名称、编码/解码帧数、像素样本最大误差、动态码率、IDR、cleanup 与耗时。
+- 页面初始化会恢复当前 Agent 实例内最近一次自检结果；自检失败也保留完整报告，不只返回异常字符串，便于定位是 adapter、NVENC、NVDEC、D3D11 output、readback、reconfigure 还是 cleanup 阶段失败。
+- 新增 bridge copy-isolation、Web bridge/API 与前端按钮/状态 contract 回归测试；诊断导出的 self-test 对象不会把内部保存指针暴露给调用方修改。
+- NVIDIA production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。GUI 自检用于收集目标机器真机证据，不因“按钮可运行”自动宣告 production-ready。
+- 下一步：在 NVIDIA Windows 真机执行多轮自检并把 JSON 结果加入实机矩阵；确认不同驱动/GPU、重复运行显存稳定、4:4:4 像素通道正确和动态码率稳定后，再设计持久化 validation cache 与 production gate 开启条件。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

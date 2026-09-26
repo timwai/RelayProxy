@@ -1050,6 +1050,20 @@ Windows SendInput / CF_UNICODETEXT
 - NVIDIA production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。GUI 自检用于收集目标机器真机证据，不因“按钮可运行”自动宣告 production-ready。
 - 下一步：在 NVIDIA Windows 真机执行多轮自检并把 JSON 结果加入实机矩阵；确认不同驱动/GPU、重复运行显存稳定、4:4:4 像素通道正确和动态码率稳定后，再设计持久化 validation cache 与 production gate 开启条件。
 
+### 0.2.84 RD3 NVIDIA NVCodec Validation Receipt Cache
+
+- 在显式 NVENC → NVDEC 真机自检之上新增“验证凭证”层，但**凭证不等于 production gate**；当前 NVIDIA backend 仍保持 `productionReady=false / zeroCopyValidated=false`。
+- round-trip 报告新增 NVIDIA adapter 稳定身份字段：Vendor ID、Device ID、SubSystem ID、Revision、DXGI UMD driver version 与验证时间。
+- 驱动版本通过 `IDXGIAdapter::CheckInterfaceSupport(IID_IDXGIDevice)` 获取。这里刻意不用 `IID_ID3D11Device`：Microsoft 文档明确说明 CheckInterfaceSupport 对 D3D11.x IID 返回 `DXGI_ERROR_UNSUPPORTED`，而 `IDXGIDevice` 可用于取得 UMD version。
+- 只有完整 round-trip `Passed=true`、adapter identity 完整且当前二进制具有干净的 `vcs.revision` 时才写入 `.relayproxy-nvcodec-validation.json`；失败自检绝不覆盖之前的成功凭证。
+- 凭证与 Agent 配置文件放在同一目录，保存 schema、build revision、保存时间与完整 self-test report；Agent 新实例会读取历史成功报告用于诊断展示。
+- 当前有效性采用严格 fail-closed 规则：receipt schema 必须匹配、成功结果必须存在、保存时间不能异常、不能超过 30 天、当前构建必须有干净 VCS revision 且与凭证一致、NVIDIA Vendor/Device/SubSystem/Revision 和 UMD driver version 必须全部一致。
+- 任一条件变化后只保留“历史验证记录”，`current=false` 并给出 stale reason；尤其是 RelayProxy 更新、NVIDIA 驱动升级/回退、显卡更换、dirty/devel build 都不会复用旧验证。
+- 没有凭证或当前 build 本身不可验证时不额外创建 D3D11 device；只有存在可复用候选凭证时才执行轻量 NVIDIA adapter/driver identity probe。
+- Wails/Web 新增 validation status 查询，Relay Desktop GUI 增加“当前有效 / 历史失效”凭证状态条；诊断导出同时包含 `nvcodecSelfTest` 与 `nvcodecValidation`。
+- 新增 build/driver/adapter/TTL/identity-probe failure 的纯逻辑失效测试，以及跨平台 receipt path contract。
+- 下一步：在 Windows NVIDIA 真机积累多轮成功凭证和重复运行资源数据；在这些证据完成前，validation cache 只用于诊断与未来 gate 决策，不参与 backend 自动选择。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

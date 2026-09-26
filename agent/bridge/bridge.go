@@ -62,7 +62,8 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 			return startup.SetAutoStart(autoStartName, executable, path, enabled, requireAdmin)
 		},
 	}
-	if receipt, err := loadNVCodecValidationReceipt(configPath); err == nil && receipt != nil {
+	if receipt, err := loadNVCodecValidationReceipt(configPath); err == nil &&
+		receipt != nil && receipt.Report.Passed {
 		report := receipt.Report
 		b.nvcodecSelfTest = &report
 	}
@@ -170,9 +171,7 @@ func (b *UIBridge) RunRemoteDesktopNVCodecSelfTest() (desktopcodec.NVCodecH26544
 	b.mu.Lock()
 	b.nvcodecSelfTest = &report
 	b.mu.Unlock()
-	if err == nil && report.Passed {
-		_ = saveNVCodecValidationReceipt(b.configPath, report)
-	}
+	_ = recordNVCodecValidationAttempt(b.configPath, report, err)
 	return report, err
 }
 

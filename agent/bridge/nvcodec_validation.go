@@ -171,12 +171,23 @@ func (b *UIBridge) GetRemoteDesktopNVCodecValidation() NVCodecValidationStatus {
 	if os.IsNotExist(err) {
 		receipt = nil
 	}
+	now := time.Now()
+	currentBuild := nvcodecValidationBuildRevision()
+	if receipt == nil || currentBuild == "" {
+		return evaluateNVCodecValidationReceipt(
+			now,
+			currentBuild,
+			desktopcodec.NVCodecValidationIdentity{},
+			nil,
+			receipt,
+		)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	identity, identityErr := desktopcodec.ProbeNVCodecValidationIdentity(ctx)
 	return evaluateNVCodecValidationReceipt(
-		time.Now(),
-		nvcodecValidationBuildRevision(),
+		now,
+		currentBuild,
 		identity,
 		identityErr,
 		receipt,

@@ -29,6 +29,7 @@ type NVCodecValidationReceipt struct {
 	LastAttemptAtUnixMs int64                                      `json:"lastAttemptAtUnixMs,omitempty"`
 	LastFailure         string                                     `json:"lastFailure,omitempty"`
 	Report              desktopcodec.NVCodecH265444RoundTripReport `json:"report"`
+	StressQualification *NVCodecStressQualificationReport          `json:"stressQualification,omitempty"`
 }
 
 type NVCodecValidationStatus struct {
@@ -145,6 +146,7 @@ func nextNVCodecValidationReceipt(
 			previous.Report.Passed {
 			receipt.SavedAtUnixMs = previous.SavedAtUnixMs
 			receipt.Report = previous.Report
+			receipt.StressQualification = cloneNVCodecStressQualificationReport(previous.StressQualification)
 		}
 		return receipt, nil
 	}
@@ -170,7 +172,7 @@ func nextNVCodecValidationReceipt(
 		}
 	}
 
-	return &NVCodecValidationReceipt{
+	receipt := &NVCodecValidationReceipt{
 		SchemaVersion:       nvcodecValidationReceiptSchema,
 		BuildRevision:       buildRevision,
 		SavedAtUnixMs:       nowUnixMs,
@@ -178,7 +180,14 @@ func nextNVCodecValidationReceipt(
 		LastAttemptPassed:   true,
 		LastAttemptAtUnixMs: nowUnixMs,
 		Report:              report,
-	}, nil
+	}
+	if previous != nil &&
+		previous.SchemaVersion == nvcodecValidationReceiptSchema &&
+		previous.BuildRevision == buildRevision &&
+		identity.MatchesReport(previous.Report) {
+		receipt.StressQualification = cloneNVCodecStressQualificationReport(previous.StressQualification)
+	}
+	return receipt, nil
 }
 
 func writeNVCodecValidationReceipt(path string, receipt *NVCodecValidationReceipt) error {
@@ -221,6 +230,43 @@ func writeNVCodecValidationReceipt(path string, receipt *NVCodecValidationReceip
 	}
 	cleanup = false
 	return nil
+}
+
+func cloneNVCodecStressQualificationReport(
+	report *NVCodecStressQualificationReport,
+) *NVCodecStressQualificationReport {
+	if report == nil {
+		return nil
+	}
+	copy := *report
+	copy.Reports = append([]desktopcodec.NVCodecH265444RoundTripReport(nil), report.Reports...)
+	copy.MemoryTrend = append([]NVCodecStressMemorySample(nil), report.MemoryTrend...)
+	return &copy
+}
+
+func recordNVCodecStressQualification(
+	configPath string,
+	stress NVCodecStressQualificationReport,
+) error {
+	buildRevision := nvcodecValidationBuildRevision()
+	if buildRevision == "" {
+		return fmt.Errorf("current build has no clean VCS revision")
+	}
+	path := nvcodecValidationReceiptPath(configPath)
+	if path == "" {
+		return fmt.Errorf("agent configuration path is unavailable")
+	}
+	receipt, err := loadNVCodecValidationReceipt(configPath)
+	if err != nil {
+		return fmt.Errorf("load NVCodec validation receipt for stress evidence: %w", err)
+	}
+	if receipt == nil ||
+		receipt.SchemaVersion != nvcodecValidationReceiptSchema ||
+		receipt.BuildRevision != buildRevision {
+		return fmt.Errorf("NVCodec validation receipt is unavailable for current build")
+	}
+	receipt.StressQualification = cloneNVCodecStressQualificationReport(&stress)
+	return writeNVCodecValidationReceipt(path, receipt)
 }
 
 func recordNVCodecValidationAttempt(

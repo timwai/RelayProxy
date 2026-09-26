@@ -9,12 +9,12 @@ import (
 )
 
 type NVCodecQualificationBatchReport struct {
-	Passed         bool                                         `json:"passed"`
-	AlreadyCurrent bool                                         `json:"alreadyCurrent,omitempty"`
-	Attempts       int                                          `json:"attempts"`
-	InitialPasses  int                                          `json:"initialPasses"`
-	FinalPasses    int                                          `json:"finalPasses"`
-	RequiredPasses int                                          `json:"requiredPasses"`
+	Passed                  bool                                         `json:"passed"`
+	AlreadyCurrent          bool                                         `json:"alreadyCurrent,omitempty"`
+	Attempts                int                                          `json:"attempts"`
+	InitialPasses           int                                          `json:"initialPasses"`
+	FinalPasses             int                                          `json:"finalPasses"`
+	RequiredPasses          int                                          `json:"requiredPasses"`
 	DurationMs              int64                                        `json:"durationMs"`
 	GPUMemoryObserved       bool                                         `json:"gpuMemoryObserved"`
 	MinGPUMemoryBudgetBytes uint64                                       `json:"minGpuMemoryBudgetBytes,omitempty"`
@@ -22,8 +22,8 @@ type NVCodecQualificationBatchReport struct {
 	MaxGPUMemoryGrowthBytes uint64                                       `json:"maxGpuMemoryGrowthBytes,omitempty"`
 	CleanupFailures         int                                          `json:"cleanupFailures,omitempty"`
 	Reports                 []desktopcodec.NVCodecH265444RoundTripReport `json:"reports,omitempty"`
-	Validation     NVCodecValidationStatus                      `json:"validation"`
-	Error          string                                       `json:"error,omitempty"`
+	Validation              NVCodecValidationStatus                      `json:"validation"`
+	Error                   string                                       `json:"error,omitempty"`
 }
 
 func (b *UIBridge) RunRemoteDesktopNVCodecQualification() (
@@ -108,7 +108,6 @@ func (b *UIBridge) RunRemoteDesktopNVCodecQualification() (
 	return report, fmt.Errorf("%s", reason)
 }
 
-
 func (report *NVCodecQualificationBatchReport) observeNVCodecRun(
 	single desktopcodec.NVCodecH265444RoundTripReport,
 ) {
@@ -141,7 +140,6 @@ func (report *NVCodecQualificationBatchReport) observeNVCodecRun(
 	}
 }
 
-
 const nvcodecStressQualificationRounds = 5
 
 type NVCodecStressMemorySample struct {
@@ -157,19 +155,19 @@ type NVCodecStressMemorySample struct {
 }
 
 type NVCodecStressQualificationReport struct {
-	Passed                  bool                          `json:"passed"`
-	RequestedRounds         int                           `json:"requestedRounds"`
-	CompletedRounds         int                           `json:"completedRounds"`
-	DurationMs              int64                         `json:"durationMs"`
-	GPUMemoryObserved       bool                          `json:"gpuMemoryObserved"`
-	MinGPUMemoryBudgetBytes uint64                        `json:"minGpuMemoryBudgetBytes,omitempty"`
-	MaxGPUMemoryPeakBytes   uint64                        `json:"maxGpuMemoryPeakBytes,omitempty"`
-	MaxGPUMemoryGrowthBytes uint64                        `json:"maxGpuMemoryGrowthBytes,omitempty"`
-	CleanupFailures         int                           `json:"cleanupFailures,omitempty"`
-	MemoryTrend             []NVCodecStressMemorySample   `json:"memoryTrend,omitempty"`
+	Passed                  bool                                         `json:"passed"`
+	RequestedRounds         int                                          `json:"requestedRounds"`
+	CompletedRounds         int                                          `json:"completedRounds"`
+	DurationMs              int64                                        `json:"durationMs"`
+	GPUMemoryObserved       bool                                         `json:"gpuMemoryObserved"`
+	MinGPUMemoryBudgetBytes uint64                                       `json:"minGpuMemoryBudgetBytes,omitempty"`
+	MaxGPUMemoryPeakBytes   uint64                                       `json:"maxGpuMemoryPeakBytes,omitempty"`
+	MaxGPUMemoryGrowthBytes uint64                                       `json:"maxGpuMemoryGrowthBytes,omitempty"`
+	CleanupFailures         int                                          `json:"cleanupFailures,omitempty"`
+	MemoryTrend             []NVCodecStressMemorySample                  `json:"memoryTrend,omitempty"`
 	Reports                 []desktopcodec.NVCodecH265444RoundTripReport `json:"reports,omitempty"`
-	Validation              NVCodecValidationStatus       `json:"validation"`
-	Error                   string                        `json:"error,omitempty"`
+	Validation              NVCodecValidationStatus                      `json:"validation"`
+	Error                   string                                       `json:"error,omitempty"`
 }
 
 func (b *UIBridge) RunRemoteDesktopNVCodecStressQualification() (
@@ -183,6 +181,18 @@ func (b *UIBridge) RunRemoteDesktopNVCodecStressQualification() (
 		if retErr != nil {
 			report.Passed = false
 			report.Error = retErr.Error()
+		}
+		if b == nil {
+			return
+		}
+		if persistErr := recordNVCodecStressQualification(b.configPath, report); persistErr != nil {
+			if retErr == nil {
+				retErr = fmt.Errorf("persist NVIDIA stress qualification: %w", persistErr)
+				report.Passed = false
+				report.Error = retErr.Error()
+				return
+			}
+			report.Error = errors.Join(retErr, persistErr).Error()
 		}
 	}()
 

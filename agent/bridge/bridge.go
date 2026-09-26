@@ -145,8 +145,9 @@ func (b *UIBridge) GetRemoteDesktopAudioDiagnostics() desktop.DesktopAudioDiagno
 
 type RemoteDesktopDiagnosticsReport struct {
 	desktop.DesktopDiagnosticsReport
-	NVCodecSelfTest   *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
-	NVCodecValidation *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
+	NVCodecSelfTest            *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
+	NVCodecValidation          *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
+	NVCodecStressQualification *NVCodecStressQualificationReport           `json:"nvcodecStressQualification,omitempty"`
 }
 
 func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport {
@@ -161,6 +162,10 @@ func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport 
 	b.mu.RUnlock()
 	validation := b.GetRemoteDesktopNVCodecValidation()
 	report.NVCodecValidation = &validation
+	if receipt, err := loadNVCodecValidationReceipt(b.configPath); err == nil &&
+		receipt != nil && receipt.StressQualification != nil {
+		report.NVCodecStressQualification = cloneNVCodecStressQualificationReport(receipt.StressQualification)
+	}
 	return report
 }
 

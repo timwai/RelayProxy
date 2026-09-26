@@ -1116,6 +1116,17 @@ Windows SendInput / CF_UNICODETEXT
 - production gate 继续关闭；stress 通过不会自动把 NVIDIA backend 加入 production selector。
 - 下一步：把 stress memory trend 与 qualification receipt/diagnostics 导出持久化，并在 NVIDIA 实机矩阵积累不同 GPU/driver 的多轮结果；随后设计显式 opt-in canary gate、启动前 current-validation 检查以及失败时 oneVPL/H.264 自动回退。
 
+### 0.2.89 RD3 NVIDIA Stress Evidence Persistence
+
+- 现有 `.relayproxy-nvcodec-validation.json` receipt 新增可选 `stressQualification`，不再为 stress 另建第二套状态文件；单次资格、3/3 qualification 与 stress 证据共享同一个 build/GPU/driver 身份边界。
+- stress 完成（成功或失败）后持久化完整 report：5 轮 raw reports、逐轮 `memoryTrend`、最小 budget、最大 peak、最大 cleanup growth、cleanup failure、耗时与最终 validation 状态。
+- 后续普通 NVCodec 自检在 build 与 NVIDIA adapter/driver 身份一致时保留已有 stress evidence；adapter/device/driver 变化后不会把旧 stress 趋势复制到新身份。
+- `RemoteDesktopDiagnosticsReport` 新增 `nvcodecStressQualification`；diagnostics 导出直接从 receipt 读取深拷贝，因此 Agent 重启后仍能带出最近一次压力验证证据。
+- stress evidence 持久化失败不会静默成功：压力验证 API 会返回 persistence error；已有 qualification receipt 本身仍保持原有 fail-closed 语义。
+- 新增 receipt 回归测试，覆盖同身份自检保留 stress evidence，以及 adapter 变化后清除旧 stress evidence。
+- production selector 仍完全忽略 stress evidence；本轮只补可追溯性，不改变 NVIDIA backend gate。
+- 下一步：在 diagnostics 中增加可机读 canary eligibility summary（current 3/3 + 最近 stress pass + identity/build 一致），再实现显式 opt-in NVIDIA canary gate；任何 runtime open/encode/decode 失败必须立即回退 oneVPL HEVC 4:4:4，若 oneVPL 不可用则继续回退 H.264。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

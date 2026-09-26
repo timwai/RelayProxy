@@ -401,3 +401,69 @@ func TestNVCodecValidationNeedsIdentityProbeOnlyForQualifiedCandidate(t *testing
 		})
 	}
 }
+
+func TestNVCodecValidationReceiptPreservesMatchingStressEvidence(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	build := "0123456789abcdef"
+	report := validNVCodecReportForTest(now)
+	previous := &NVCodecValidationReceipt{
+		SchemaVersion:       nvcodecValidationReceiptSchema,
+		BuildRevision:       build,
+		SavedAtUnixMs:       now.Add(-time.Minute).UnixMilli(),
+		QualificationPasses: nvcodecValidationRequiredPasses,
+		LastAttemptPassed:   true,
+		LastAttemptAtUnixMs: now.Add(-time.Minute).UnixMilli(),
+		Report:              report,
+		StressQualification: &NVCodecStressQualificationReport{
+			Passed:          true,
+			RequestedRounds: 5,
+			CompletedRounds: 5,
+			MemoryTrend: []NVCodecStressMemorySample{
+				{Round: 1, Passed: true, BeforeBytes: 100, AfterBytes: 110},
+			},
+		},
+	}
+
+	next, err := nextNVCodecValidationReceipt(now, build, previous, report, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.StressQualification == nil ||
+		next.StressQualification.CompletedRounds != 5 ||
+		len(next.StressQualification.MemoryTrend) != 1 {
+		t.Fatalf("matching qualification discarded stress evidence: %+v", next.StressQualification)
+	}
+	if next.StressQualification == previous.StressQualification {
+		t.Fatal("stress evidence was not cloned")
+	}
+}
+
+func TestNVCodecValidationReceiptDropsStressEvidenceWhenAdapterChanges(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	build := "0123456789abcdef"
+	report := validNVCodecReportForTest(now)
+	previous := &NVCodecValidationReceipt{
+		SchemaVersion:       nvcodecValidationReceiptSchema,
+		BuildRevision:       build,
+		SavedAtUnixMs:       now.Add(-time.Minute).UnixMilli(),
+		QualificationPasses: nvcodecValidationRequiredPasses,
+		LastAttemptPassed:   true,
+		LastAttemptAtUnixMs: now.Add(-time.Minute).UnixMilli(),
+		Report:              report,
+		StressQualification: &NVCodecStressQualificationReport{
+			Passed:          true,
+			RequestedRounds: 5,
+			CompletedRounds: 5,
+		},
+	}
+	changed := report
+	changed.AdapterDeviceID++
+
+	next, err := nextNVCodecValidationReceipt(now, build, previous, changed, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.StressQualification != nil {
+		t.Fatalf("changed adapter retained stale stress evidence: %+v", next.StressQualification)
+	}
+}

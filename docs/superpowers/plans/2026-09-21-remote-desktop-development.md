@@ -985,6 +985,18 @@ Windows SendInput / CF_UNICODETEXT
 - production gate 继续保持 `productionReady=false / zeroCopyValidated=false`，通用 decoder opener 仍不会选择 NVDEC。
 - 下一步：创建同 adapter 的 D3D11 AYUV output texture，使用 CUDA-D3D11 graphics interop 注册并映射 texture，再通过 CUDA kernel 将 NVDEC planar YUV444 打包为 AYUV；完成 GPU-only surface 转换后再封装成 `DecodedFrame.D3D11`。
 
+### 0.2.79 RD3 NVIDIA NVDEC CUDA ↔ D3D11 AYUV Interop Foundation
+
+- 新增 CUDA Driver graphics interop function table：强制解析 `cuGraphicsD3D11RegisterResource`、register/unregister、map/unmap、subresource mapped-array 与 map-flags API；缺任一入口即不进入该 interop 层。
+- 新增 `nvdecD3D11AYUVInteropSurface`：只在 NVDEC session 已绑定的同一个 `ID3D11Device` 上创建 `DXGI_FORMAT_AYUV` texture，不创建第二张跨 adapter 设备。
+- AYUV texture 使用 D3D11 default usage / render-target bind，与现有 Relay Desktop D3D11 video-processor AYUV 路径保持兼容；CUDA registration 使用 `CU_GRAPHICS_REGISTER_FLAGS_SURFACE_LDST`，为后续 GPU kernel surface write 预留能力。
+- graphics resource map flags 使用 write-discard；`Map()` 调 `cuGraphicsMapResources` + `cuGraphicsSubResourceGetMappedArray`，当前只暴露内部 `CUarray` handle，不返回 `DecodedFrame`。
+- 所有 CUDA graphics register/map/unmap/unregister 都通过 session 的 `CUvideoctxlock` 执行；新增 session 内部 `withCUDAContextLock`，并在调用期间持有 session mutex，避免 CUDA context 与 graphics 操作并发销毁。
+- interop surface `Close()` 幂等；若仍处于 mapped 状态，顺序固定为 unmap → unregister → release D3D11 texture。
+- 本阶段没有 CPU readback，也没有把 NVDEC planar YUV444 pointer 伪装成 AYUV；只有 graphics interop 资源基座，纹理内容在 pack kernel 写入前不视为有效帧。
+- production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。
+- 下一步：补 CUDA module/kernel API，加载固定 PTX pack kernel，将 NVDEC planar Y/U/V 8-bit surface 按 pitch/surface height 读取并写入 mapped AYUV `CUarray`；kernel + stream 同步成功后才封装为 `D3D11Surface`。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

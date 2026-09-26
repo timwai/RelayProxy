@@ -17,12 +17,12 @@ const (
 )
 
 type nvdecCUDAInteropAPI struct {
-	GraphicsD3D11RegisterResource       uintptr
-	GraphicsUnregisterResource          uintptr
-	GraphicsMapResources                uintptr
-	GraphicsUnmapResources              uintptr
-	GraphicsSubResourceGetMappedArray   uintptr
-	GraphicsResourceSetMapFlags         uintptr
+	GraphicsD3D11RegisterResource     uintptr
+	GraphicsUnregisterResource        uintptr
+	GraphicsMapResources              uintptr
+	GraphicsUnmapResources            uintptr
+	GraphicsSubResourceGetMappedArray uintptr
+	GraphicsResourceSetMapFlags       uintptr
 }
 
 type nvdecD3D11AYUVInteropSurface struct {

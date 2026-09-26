@@ -108,8 +108,8 @@ func TestNVENCH265EncoderControlDefaults(t *testing.T) {
 	if !encoder.forceIDR {
 		t.Fatal("ForceIDR did not set pending IDR")
 	}
-	if err := encoder.Reconfigure(context.Background(), VideoConfig{}); err != ErrEncoderControlUnsupported {
-		t.Fatalf("Reconfigure error=%v", err)
+	if err := encoder.Reconfigure(context.Background(), VideoConfig{}); err != ErrEncoderUnavailable {
+		t.Fatalf("Reconfigure without session error=%v", err)
 	}
 	stats := encoder.Stats()
 	if !stats.Hardware || stats.Backend != "nvenc-hevc444-d3d11" {

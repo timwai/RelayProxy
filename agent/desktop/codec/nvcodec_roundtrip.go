@@ -7,6 +7,12 @@ type NVCodecH265444RoundTripReport struct {
 	Passed                      bool   `json:"passed"`
 	Backend                     string `json:"backend"`
 	Adapter                     string `json:"adapter,omitempty"`
+	AdapterVendorID             uint32 `json:"adapterVendorId,omitempty"`
+	AdapterDeviceID             uint32 `json:"adapterDeviceId,omitempty"`
+	AdapterSubSysID             uint32 `json:"adapterSubSysId,omitempty"`
+	AdapterRevision             uint32 `json:"adapterRevision,omitempty"`
+	AdapterDriverVersion        uint64 `json:"adapterDriverVersion,omitempty"`
+	ValidatedAtUnixMs           int64  `json:"validatedAtUnixMs,omitempty"`
 	Width                       int    `json:"width"`
 	Height                      int    `json:"height"`
 	FPS                         int    `json:"fps"`

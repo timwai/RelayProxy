@@ -352,3 +352,14 @@ test('remote desktop GPU path summary marks unadvertised runtime format', async 
     'GPU NV12 未声明 E✓/D✓/R✓'
   );
 });
+
+
+test('remote desktop NVIDIA self-test is manual and attached to diagnostics UI', () => {
+  assert.match(html, /id="desktop-nvcodec-self-test-btn"/);
+  assert.match(html, /onclick="runRemoteDesktopNVCodecSelfTest\(\)"/);
+  assert.match(source, /goRunRemoteDesktopNVCodecSelfTest/);
+  assert.match(source, /goGetRemoteDesktopNVCodecSelfTest/);
+  assert.match(source, /renderRemoteDesktopNVCodecSelfTest/);
+  assert.match(source, /NVIDIA GPU 自检通过/);
+  assert.match(source, /NVIDIA GPU 自检失败/);
+});

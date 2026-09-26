@@ -702,11 +702,13 @@
             <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">统一入口自动选择 Native RDP 或 Relay Desktop；Windows Home 可使用内置屏幕串流。</p>
           </div>
           <div class="flex items-center gap-2">
+            <button id="desktop-nvcodec-self-test-btn" type="button" onclick="runRemoteDesktopNVCodecSelfTest()" class="rp-btn hidden" title="在本机 NVIDIA GPU 上运行 NVENC → NVDEC HEVC 4:4:4 D3D11 真机自检">NVIDIA GPU 自检</button>
             <button id="desktop-diagnostics-export-btn" type="button" onclick="exportRemoteDesktopDiagnostics()" class="rp-btn hidden" title="导出最近约 10 分钟的 Relay Desktop 网络、媒体和 ABR 时间序列">导出诊断</button>
             <button type="button" onclick="refreshRemoteDesktopTargets(true)" class="rp-btn">刷新设备</button>
           </div>
         </div>
 
+        <div id="desktop-nvcodec-self-test-result" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border"></div>
         <div id="desktop-session-banner" class="hidden rp-notice rp-notice-info"></div>
 
         <details class="rp-card p-4" id="desktop-connect-settings">
@@ -1248,7 +1250,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {}, desktopFollowViewport: false };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {}, desktopFollowViewport: false, desktopNVCodecSelfTest: null };
     var desktopFrameSeq = 0, desktopFrameGeneration = 0, desktopFrameBusy = false, desktopInputSeq = 0;
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
@@ -2543,6 +2545,79 @@
       }
     }
 
+    function renderRemoteDesktopNVCodecSelfTest(report) {
+      state.desktopNVCodecSelfTest = report || null;
+      var target = $('desktop-nvcodec-self-test-result');
+      if (!target) return;
+      if (!report || (!report.backend && !report.error)) {
+        target.classList.add('hidden');
+        target.textContent = '';
+        return;
+      }
+      var passed = !!report.passed;
+      var parts = [passed ? 'NVIDIA GPU 自检通过' : 'NVIDIA GPU 自检失败'];
+      if (report.adapter) parts.push(String(report.adapter));
+      if (report.encodedFrames != null || report.decodedFrames != null) {
+        parts.push('编码/解码 ' + Number(report.encodedFrames || 0) + '/' + Number(report.decodedFrames || 0) + ' 帧');
+      }
+      if (report.samplesChecked) {
+        parts.push('像素样本 ' + Number(report.samplesChecked) + ' · 最大误差 ' + Number(report.maxChannelError || 0));
+      }
+      if (report.bitrateReconfigureValidated) parts.push('动态码率 ✓');
+      if (report.forceIdrValidated) parts.push('IDR ✓');
+      if (report.cleanupValidated) parts.push('资源回收 ✓');
+      if (report.durationMs != null) parts.push(Number(report.durationMs || 0) + ' ms');
+      if (!passed && report.error) parts.push(String(report.error));
+      target.textContent = parts.join(' · ');
+      target.className = passed
+        ? 'text-[11px] leading-5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+        : 'text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
+    }
+
+    async function refreshRemoteDesktopNVCodecSelfTest() {
+      if (!hasFn('goGetRemoteDesktopNVCodecSelfTest')) return;
+      try {
+        var raw = await call('goGetRemoteDesktopNVCodecSelfTest');
+        renderRemoteDesktopNVCodecSelfTest(parseJSONResult(raw, null));
+      } catch (_) {}
+    }
+
+    async function runRemoteDesktopNVCodecSelfTest() {
+      if (!hasFn('goRunRemoteDesktopNVCodecSelfTest')) {
+        toast('当前平台不支持 NVIDIA GPU 自检');
+        return;
+      }
+      var button = $('desktop-nvcodec-self-test-btn');
+      if (button && button.disabled) return;
+      var oldText = button ? button.textContent : '';
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'GPU 自检中…';
+      }
+      toast('正在执行 NVIDIA NVENC → NVDEC HEVC 4:4:4 真机自检');
+      try {
+        var raw = await call('goRunRemoteDesktopNVCodecSelfTest');
+        var report = parseJSONResult(raw, null);
+        if (!report) throw new Error('没有收到 GPU 自检结果');
+        renderRemoteDesktopNVCodecSelfTest(report);
+        if (report.passed) {
+          toast('NVIDIA GPU 自检通过 · ' + (report.adapter || 'NVIDIA') +
+            ' · 最大像素误差 ' + Number(report.maxChannelError || 0));
+        } else {
+          toast('NVIDIA GPU 自检失败：' + (report.error || '未知错误'));
+        }
+      } catch (err) {
+        renderRemoteDesktopNVCodecSelfTest({ passed:false, backend:'nvcodec-hevc444', error:(err && err.message) || String(err) });
+        toast('NVIDIA GPU 自检失败：' + ((err && err.message) || err));
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = oldText || 'NVIDIA GPU 自检';
+        }
+      }
+    }
+    window.runRemoteDesktopNVCodecSelfTest = runRemoteDesktopNVCodecSelfTest;
+
     function desktopDiagnosticsFilename(report) {
       report = report || {};
       var target = String(report.targetId || 'session').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 48);
@@ -3583,6 +3658,10 @@
       }
       if (hasFn('goGetRemoteDesktopDiagnostics') && $('desktop-diagnostics-export-btn')) {
         $('desktop-diagnostics-export-btn').classList.remove('hidden');
+      }
+      if (hasFn('goRunRemoteDesktopNVCodecSelfTest') && $('desktop-nvcodec-self-test-btn')) {
+        $('desktop-nvcodec-self-test-btn').classList.remove('hidden');
+        refreshRemoteDesktopNVCodecSelfTest();
       }
 
       // Go pushes status every 1.5s; these polls cover the window's first paint.

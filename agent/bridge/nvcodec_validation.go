@@ -110,9 +110,36 @@ func saveNVCodecValidationReceipt(
 		return fmt.Errorf("encode NVCodec validation receipt: %w", err)
 	}
 	data = append(data, '\n')
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write NVCodec validation receipt: %w", err)
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+nvcodecValidationReceiptName+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create NVCodec validation receipt temp file: %w", err)
 	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		_ = tmp.Close()
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if err := tmp.Chmod(0o600); err != nil {
+		return fmt.Errorf("chmod NVCodec validation receipt temp file: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write NVCodec validation receipt temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync NVCodec validation receipt temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close NVCodec validation receipt temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace NVCodec validation receipt: %w", err)
+	}
+	cleanup = false
 	return nil
 }
 

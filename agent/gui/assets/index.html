@@ -2568,6 +2568,18 @@
       if (report.bitrateReconfigureValidated) parts.push('动态码率 ✓');
       if (report.forceIdrValidated) parts.push('IDR ✓');
       if (report.cleanupValidated) parts.push('资源回收 ✓');
+      if (report.gpuMemoryObserved) {
+        var before = Number(report.gpuMemoryBeforeBytes || 0);
+        var after = Number(report.gpuMemoryAfterBytes || 0);
+        var peak = Number(report.gpuMemoryPeakBytes || 0);
+        var growth = Number(report.gpuMemoryGrowthBytes || 0);
+        var memoryText = '显存 ' + formatTrafficBytes(before, false) + ' → ' +
+          formatTrafficBytes(after, false) + ' · 峰值 ' + formatTrafficBytes(peak, false);
+        if (growth) memoryText += ' · Δ ' + (growth > 0 ? '+' : '-') + formatTrafficBytes(Math.abs(growth), false);
+        parts.push(memoryText);
+      } else if (report.gpuMemoryObservationError) {
+        parts.push('显存观测不可用');
+      }
       if (report.durationMs != null) parts.push(Number(report.durationMs || 0) + ' ms');
       if (!passed && report.error) parts.push(String(report.error));
       target.textContent = parts.join(' · ');
@@ -2695,9 +2707,12 @@
           await refreshRemoteDesktopNVCodecValidation();
         }
         if (batch.passed) {
+          var memory = batch.gpuMemoryObserved
+            ? ' · 显存最大变化 ' + formatTrafficBytes(Number(batch.maxGpuMemoryGrowthBytes || 0), false)
+            : '';
           toast('NVIDIA 资格验证通过 · ' +
             Number(batch.finalPasses || 0) + '/' + Number(batch.requiredPasses || 3) +
-            ' · 本次执行 ' + Number(batch.attempts || 0) + ' 轮');
+            ' · 本次执行 ' + Number(batch.attempts || 0) + ' 轮' + memory);
         } else {
           toast('NVIDIA 资格验证失败：' + (batch.error || '未知错误'));
         }

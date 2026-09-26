@@ -452,6 +452,7 @@ func ValidateNVCodecH265444RoundTrip(
 	report.AdapterRevision = identity.AdapterRevision
 	report.AdapterDriverVersion = identity.AdapterDriverVersion
 	report.D3D11DeviceCreated = true
+	observeNVCodecValidationMemory(&report, device, nvcodecMemoryPhaseBefore)
 
 	var source unsafe.Pointer
 	var encoder SequenceHeaderEncoder
@@ -465,6 +466,7 @@ func ValidateNVCodecH265444RoundTrip(
 			cleanupErr = errors.Join(cleanupErr, encoder.Close())
 		}
 		releaseIUnknown(source)
+		observeNVCodecValidationMemory(&report, device, nvcodecMemoryPhaseAfter)
 		releaseIUnknown(deviceContext)
 		releaseIUnknown(device)
 		if cleanupErr == nil {
@@ -502,6 +504,7 @@ func ValidateNVCodecH265444RoundTrip(
 		return report, err
 	}
 	report.DecoderOpened = true
+	observeNVCodecValidationMemory(&report, device, nvcodecMemoryPhaseSample)
 
 	encodeFrame := func(timestamp time.Duration) (EncodedPacket, error) {
 		packets, encodeErr := d3d11Encoder.EncodeD3D11(ctx, D3D11EncodeFrame{
@@ -590,6 +593,7 @@ func ValidateNVCodecH265444RoundTrip(
 	report.SamplesChecked = samples
 	report.MaxChannelError = maxChannelError
 	report.ReadbackValidated = true
+	observeNVCodecValidationMemory(&report, device, nvcodecMemoryPhaseSample)
 	closeNVDECDecodedFrames(firstDecoded)
 	firstDecoded = nil
 
@@ -616,6 +620,7 @@ func ValidateNVCodecH265444RoundTrip(
 	}
 	closeNVDECDecodedFrames(reconfigureFrames)
 	report.BitrateReconfigureValidated = true
+	observeNVCodecValidationMemory(&report, device, nvcodecMemoryPhaseSample)
 
 	if err := encoder.ForceIDR(ctx); err != nil {
 		return report, err
@@ -629,6 +634,7 @@ func ValidateNVCodecH265444RoundTrip(
 		return report, errors.New("NVENC explicit ForceIDR did not produce a key frame")
 	}
 	report.ForceIDRValidated = true
+	observeNVCodecValidationMemory(&report, device, nvcodecMemoryPhaseSample)
 
 	report.Passed = true
 	return report, nil

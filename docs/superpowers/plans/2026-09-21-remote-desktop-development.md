@@ -1092,6 +1092,18 @@ Windows SendInput / CF_UNICODETEXT
 - production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。批量 3/3 只是生成更可靠的资格证据，不会自动启用 NVIDIA backend。
 - 下一步：给 qualification runner 增加 GPU memory/resource stability 观测，重复执行更多轮 encode/decode/reconfigure 并记录前后显存预算/使用量；真机证据稳定后再设计 NVIDIA backend 的显式 opt-in canary gate 与 oneVPL 自动回退。
 
+### 0.2.87 RD3 NVIDIA NVCodec GPU Memory / Resource Stability Observation
+
+- NVCodec round-trip report 新增 DXGI local-segment 显存观测：测试前 usage、测试中 peak、资源清理后 usage、最小 budget 与最终 growth delta。
+- Windows amd64 通过当前 D3D11 device 获取 `IDXGIDevice -> IDXGIAdapter3`，使用 `QueryVideoMemoryInfo(DXGI_MEMORY_SEGMENT_GROUP_LOCAL)`，保证观测对象与实际 NVENC/NVDEC 自检 adapter 一致，不读取“默认 GPU”。
+- 显存观测是诊断信号而不是 codec 成败条件：旧系统/驱动不支持 `IDXGIAdapter3` 或查询失败时只记录 `gpuMemoryObservationError`，不会把已经通过的 NVENC/NVDEC round-trip 改判失败。
+- 在 D3D11 device 创建后、encoder/decoder 打开后、首帧 readback、bitrate reconfigure、ForceIDR 与最终 cleanup 后采样；peak 取整个测试过程可见的最大 local-segment usage。
+- batched qualification report 聚合最小显存 budget、最大 peak、跨轮最大 cleanup growth 以及 cleanup failure 数，方便 NVIDIA 真机连续运行时发现显存持续增长或资源释放异常。
+- GUI 单次自检结果直接显示显存 before → after、peak 与 delta；连续资格验证成功 toast 显示跨轮最大显存变化。
+- 本阶段仍不设置“允许增长阈值”，避免驱动缓存、系统 compositor 与其他 GPU workload 造成误判；先收集多 GPU/驱动实测基线，再决定稳定性 gate。
+- production gate 继续保持关闭，显存稳定性数据仅用于 qualification / diagnostics，不参与自动 backend 选择。
+- 下一步：让 qualification runner 在达到 3/3 后支持显式 stress 模式（额外多轮 encode/decode/reconfigure/ForceIDR），输出每轮显存趋势与资源增长序列；完成 NVIDIA 真机矩阵后再设计 opt-in canary gate 与 oneVPL 自动回退。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

@@ -15,8 +15,13 @@ type NVCodecQualificationBatchReport struct {
 	InitialPasses  int                                          `json:"initialPasses"`
 	FinalPasses    int                                          `json:"finalPasses"`
 	RequiredPasses int                                          `json:"requiredPasses"`
-	DurationMs     int64                                        `json:"durationMs"`
-	Reports        []desktopcodec.NVCodecH265444RoundTripReport `json:"reports,omitempty"`
+	DurationMs              int64                                        `json:"durationMs"`
+	GPUMemoryObserved       bool                                         `json:"gpuMemoryObserved"`
+	MinGPUMemoryBudgetBytes uint64                                       `json:"minGpuMemoryBudgetBytes,omitempty"`
+	MaxGPUMemoryPeakBytes   uint64                                       `json:"maxGpuMemoryPeakBytes,omitempty"`
+	MaxGPUMemoryGrowthBytes uint64                                       `json:"maxGpuMemoryGrowthBytes,omitempty"`
+	CleanupFailures         int                                          `json:"cleanupFailures,omitempty"`
+	Reports                 []desktopcodec.NVCodecH265444RoundTripReport `json:"reports,omitempty"`
 	Validation     NVCodecValidationStatus                      `json:"validation"`
 	Error          string                                       `json:"error,omitempty"`
 }
@@ -56,6 +61,7 @@ func (b *UIBridge) RunRemoteDesktopNVCodecQualification() (
 		single, testErr, receiptErr := b.runRemoteDesktopNVCodecSelfTestLocked()
 		report.Attempts++
 		report.Reports = append(report.Reports, single)
+		report.observeNVCodecRun(single)
 
 		status := b.GetRemoteDesktopNVCodecValidation()
 		report.FinalPasses = status.QualificationPasses
@@ -100,4 +106,37 @@ func (b *UIBridge) RunRemoteDesktopNVCodecQualification() (
 		)
 	}
 	return report, fmt.Errorf("%s", reason)
+}
+
+
+func (report *NVCodecQualificationBatchReport) observeNVCodecRun(
+	single desktopcodec.NVCodecH265444RoundTripReport,
+) {
+	if report == nil {
+		return
+	}
+	if !single.CleanupValidated {
+		report.CleanupFailures++
+	}
+	if !single.GPUMemoryObserved {
+		return
+	}
+	report.GPUMemoryObserved = true
+	if single.GPUMemoryBudgetBytes > 0 &&
+		(report.MinGPUMemoryBudgetBytes == 0 || single.GPUMemoryBudgetBytes < report.MinGPUMemoryBudgetBytes) {
+		report.MinGPUMemoryBudgetBytes = single.GPUMemoryBudgetBytes
+	}
+	if single.GPUMemoryPeakBytes > report.MaxGPUMemoryPeakBytes {
+		report.MaxGPUMemoryPeakBytes = single.GPUMemoryPeakBytes
+	}
+	growth := single.GPUMemoryGrowthBytes
+	var absoluteGrowth uint64
+	if growth < 0 {
+		absoluteGrowth = uint64(-growth)
+	} else {
+		absoluteGrowth = uint64(growth)
+	}
+	if absoluteGrowth > report.MaxGPUMemoryGrowthBytes {
+		report.MaxGPUMemoryGrowthBytes = absoluteGrowth
+	}
 }

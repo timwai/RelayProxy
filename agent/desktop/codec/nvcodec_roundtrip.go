@@ -55,6 +55,13 @@ type NVCodecH265444RoundTripReport struct {
 	ForceIDRValidated           bool   `json:"forceIdrValidated"`
 	ForceIDRPacketKeyFrame      bool   `json:"forceIdrPacketKeyFrame"`
 	CleanupValidated            bool   `json:"cleanupValidated"`
+	GPUMemoryObserved           bool   `json:"gpuMemoryObserved"`
+	GPUMemoryBudgetBytes        uint64 `json:"gpuMemoryBudgetBytes,omitempty"`
+	GPUMemoryBeforeBytes        uint64 `json:"gpuMemoryBeforeBytes,omitempty"`
+	GPUMemoryPeakBytes          uint64 `json:"gpuMemoryPeakBytes,omitempty"`
+	GPUMemoryAfterBytes         uint64 `json:"gpuMemoryAfterBytes,omitempty"`
+	GPUMemoryGrowthBytes        int64  `json:"gpuMemoryGrowthBytes,omitempty"`
+	GPUMemoryObservationError   string `json:"gpuMemoryObservationError,omitempty"`
 	DurationMs                  int64  `json:"durationMs"`
 	Error                       string `json:"error,omitempty"`
 }

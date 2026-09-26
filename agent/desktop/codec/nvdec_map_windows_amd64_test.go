@@ -106,3 +106,47 @@ func TestNVDECMappedFrameDetachIsIdempotent(t *testing.T) {
 		t.Fatal("detached frame still exposes mapped memory")
 	}
 }
+
+func TestNVDECMappedFrameWithMappedDataPinsSessionAndGeometry(t *testing.T) {
+	session := &nvdecD3D11Session{}
+	frame := &nvdecMappedFrame{
+		session:   session,
+		devicePtr: 0x12345678,
+		pitch:     2048,
+		width:     1920,
+		height:    1080,
+	}
+	called := false
+	if err := frame.withMappedData(func(
+		gotSession *nvdecD3D11Session,
+		devicePtr uint64,
+		pitch uint32,
+		width int,
+		height int,
+	) error {
+		called = true
+		if gotSession != session || devicePtr != 0x12345678 || pitch != 2048 ||
+			width != 1920 || height != 1080 {
+			t.Fatalf(
+				"mapped data session=%p ptr=%#x pitch=%d size=%dx%d",
+				gotSession,
+				devicePtr,
+				pitch,
+				width,
+				height,
+			)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("mapped-data callback was not invoked")
+	}
+	_ = frame.detach()
+	if err := frame.withMappedData(func(*nvdecD3D11Session, uint64, uint32, int, int) error {
+		return nil
+	}); err != ErrDecoderUnavailable {
+		t.Fatalf("detached frame error=%v", err)
+	}
+}

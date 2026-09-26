@@ -16,32 +16,32 @@ import (
 const nvdecCUDADeviceListAll uint32 = 0x01
 
 type nvdecFunctionList struct {
-	CuvidGetDecoderCaps       uintptr
-	CuvidCreateDecoder        uintptr
-	CuvidDestroyDecoder       uintptr
-	CuvidDecodePicture        uintptr
-	CuvidMapVideoFrame64      uintptr
-	CuvidUnmapVideoFrame64    uintptr
-	CuvidCreateVideoParser    uintptr
-	CuvidParseVideoData       uintptr
-	CuvidDestroyVideoParser   uintptr
-	CuvidCtxLockCreate        uintptr
-	CuvidCtxLockDestroy       uintptr
-	CuvidCtxLock              uintptr
-	CuvidCtxUnlock            uintptr
+	CuvidGetDecoderCaps     uintptr
+	CuvidCreateDecoder      uintptr
+	CuvidDestroyDecoder     uintptr
+	CuvidDecodePicture      uintptr
+	CuvidMapVideoFrame64    uintptr
+	CuvidUnmapVideoFrame64  uintptr
+	CuvidCreateVideoParser  uintptr
+	CuvidParseVideoData     uintptr
+	CuvidDestroyVideoParser uintptr
+	CuvidCtxLockCreate      uintptr
+	CuvidCtxLockDestroy     uintptr
+	CuvidCtxLock            uintptr
+	CuvidCtxUnlock          uintptr
 }
 
 type nvdecD3D11Session struct {
 	mu sync.Mutex
 
-	cuda          *nvidiaCUDADriverAPI
-	cuvidModule   windows.Handle
-	api           nvdecFunctionList
-	cudaContext   uintptr
-	videoCtxLock  uintptr
-	cudaDevice    int32
-	d3d11Device   uintptr
-	closed        bool
+	cuda         *nvidiaCUDADriverAPI
+	cuvidModule  windows.Handle
+	api          nvdecFunctionList
+	cudaContext  uintptr
+	videoCtxLock uintptr
+	cudaDevice   int32
+	d3d11Device  uintptr
+	closed       bool
 }
 
 func loadNVDECFunctionList(module windows.Handle) (nvdecFunctionList, error) {

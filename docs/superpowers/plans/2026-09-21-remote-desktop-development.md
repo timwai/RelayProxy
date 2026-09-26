@@ -959,6 +959,19 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 function-table 缺失检测与 Close 幂等测试；Windows CI 只验证 ABI/编译边界，真机 CUDA/NVDEC runtime 仍需 NVIDIA 主机执行。
 - 下一步：补 `CUVIDPARSERPARAMS / CUVIDSOURCEDATAPACKET / CUVIDDECODECREATEINFO` ABI，完成 HEVC 4:4:4 parser sequence callback → `cuvidCreateDecoder`，随后再接 decode/map 与 D3D11 AYUV 输出。
 
+### 0.2.77 RD3 NVIDIA NVDEC HEVC 4:4:4 Parser + Decoder Create
+
+- 固定 Windows x64 NVDEC parser/decode-create ABI：`CUVIDPARSERPARAMS=136`、`CUVIDSOURCEDATAPACKET=24`、`CUVIDEOFORMAT=64`、`CUVIDDECODECREATEINFO=112`；特别按 Windows ABI 的 32-bit `unsigned long` 建模，避免误用 Linux 下 64-bit `unsigned long` 的 32/176-byte packet/create-info 布局。
+- 新增 NVDEC parser callback handle registry：传给 `pUserData` 的是 RelayProxy 自己分配的整数 handle，而不是长期保留 Go heap pointer；sequence/decode/display callback 通过 `sync.Map` 找回 parser owner。
+- parser 使用 HEVC codec、10 MHz timestamp clock、零 display delay；callback 与 `cuvidParseVideoData` 保持同步调用边界，`Parse` 与 `Close` 通过独立 call mutex 串行化，避免 parser destroy 与 callback 并发。
+- sequence callback 严格验证 codec=HEVC、chroma=4:4:4、8-bit、progressive、有效 coded/display dimensions，且 display size 必须与当前 `VideoConfig` generation 一致；格式变化不在本阶段静默重配。
+- sequence callback 在创建 decoder 前重新调用 `cuvidGetDecoderCaps`，检查 HEVC 8-bit 4:4:4 支持和 max width/height；decoder output 固定为 `cudaVideoSurfaceFormat_YUV444`，progressive 使用 weave，decode path 选择 `cudaVideoCreate_PreferCUVID`。
+- `CUVIDDECODECREATEINFO` 绑定上一阶段创建的 `CUvideoctxlock`；parser 返回 sequence 所需 DPB surface 数给 NVDEC，以覆盖初始 parser surface hint。
+- decode callback 不需要在 Go 侧复制巨大的 `CUVIDPICPARAMS` ABI，直接把 NVDEC callback 给出的 opaque pointer 传回 `cuvidDecodePicture`；display callback 当前只记录 ready-frame 事件，尚未 map/copy/interop 输出 surface。
+- parser/decoder/session 关闭顺序固定为 parser → decoder → NVDEC session；callback registry 会在 destroy 前移除，`Close()` 保持幂等。
+- 当前仍没有 `Decoder` production opener，也不会返回 `DecodedFrame`；NVIDIA backend 的 `productionReady=false / zeroCopyValidated=false` 不变。
+- 下一步：补 `CUVIDPARSERDISPINFO / CUVIDPROCPARAMS` 与 `cuvidMapVideoFrame64`，拿到 planar YUV444 CUDA output，并实现 CUDA YUV444 → D3D11 AYUV 同 adapter 输出 surface 生命周期。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

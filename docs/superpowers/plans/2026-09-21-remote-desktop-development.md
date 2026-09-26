@@ -1104,6 +1104,18 @@ Windows SendInput / CF_UNICODETEXT
 - production gate 继续保持关闭，显存稳定性数据仅用于 qualification / diagnostics，不参与自动 backend 选择。
 - 下一步：让 qualification runner 在达到 3/3 后支持显式 stress 模式（额外多轮 encode/decode/reconfigure/ForceIDR），输出每轮显存趋势与资源增长序列；完成 NVIDIA 真机矩阵后再设计 opt-in canary gate 与 oneVPL 自动回退。
 
+### 0.2.88 RD3 NVIDIA NVCodec Stress Qualification
+
+- 在现有 3/3 qualification 之上新增显式 stress qualification；只有当前 build / NVIDIA adapter / driver 的验证凭证仍为 `current=true` 时允许启动。
+- stress 默认额外执行 5 轮完整 NVENC → NVDEC HEVC 4:4:4 D3D11 round-trip；每轮均包含 AYUV 输入、sequence header、首帧 IDR、NVDEC AYUV zero-copy 输出、像素 readback、bitrate reconfigure、ForceIDR 和 cleanup。
+- 任一轮 codec、自检凭证写入或当前 identity 校验失败立即停止；最近一次失败会继续触发现有 qualification fail-closed 语义，不保留“历史 3/3”作为当前有效状态。
+- stress report 输出 `requestedRounds / completedRounds / reports / memoryTrend`；`memoryTrend` 为每轮记录 budget、before、peak、after、growth、duration、cleanup 状态。
+- 聚合层同时输出最小显存 budget、最大显存 peak、跨轮最大绝对 cleanup growth 与 cleanup failure 次数；当前仍只采集证据，不设置硬阈值。
+- Wails / Agent Web 新增独立 stress endpoint 与 binding；Relay Desktop 页面新增“稳定性压力验证”，未达到当前 3/3 时按钮保持禁用。
+- 单次、资格、stress 三类 GPU 验证继续共用 `nvcodecValidationMu`，避免同时运行多个 NVENC/NVDEC session 争用同一 GPU。
+- production gate 继续关闭；stress 通过不会自动把 NVIDIA backend 加入 production selector。
+- 下一步：把 stress memory trend 与 qualification receipt/diagnostics 导出持久化，并在 NVIDIA 实机矩阵积累不同 GPU/driver 的多轮结果；随后设计显式 opt-in canary gate、启动前 current-validation 检查以及失败时 oneVPL/H.264 自动回退。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

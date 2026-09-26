@@ -704,6 +704,7 @@
           <div class="flex items-center gap-2">
             <button id="desktop-nvcodec-self-test-btn" type="button" onclick="runRemoteDesktopNVCodecSelfTest()" class="rp-btn hidden" title="在本机 NVIDIA GPU 上运行 NVENC → NVDEC HEVC 4:4:4 D3D11 真机自检">NVIDIA GPU 自检</button>
             <button id="desktop-nvcodec-qualification-btn" type="button" onclick="runRemoteDesktopNVCodecQualification()" class="rp-btn hidden" title="连续运行 NVIDIA GPU 真机自检，自动补齐当前 build/GPU/driver 的 3/3 资格验证">连续资格验证</button>
+            <button id="desktop-nvcodec-stress-btn" type="button" onclick="runRemoteDesktopNVCodecStressQualification()" class="rp-btn hidden" title="资格达到 3/3 后额外运行 5 轮 NVENC/NVDEC 压力验证并记录逐轮显存趋势">稳定性压力验证</button>
             <button id="desktop-diagnostics-export-btn" type="button" onclick="exportRemoteDesktopDiagnostics()" class="rp-btn hidden" title="导出最近约 10 分钟的 Relay Desktop 网络、媒体和 ABR 时间序列">导出诊断</button>
             <button type="button" onclick="refreshRemoteDesktopTargets(true)" class="rp-btn">刷新设备</button>
           </div>
@@ -2616,6 +2617,13 @@
           (age ? ' · ' + age : '');
         target.className = 'text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
       }
+      var stressButton = $('desktop-nvcodec-stress-btn');
+      if (stressButton) {
+        stressButton.disabled = !status.current;
+        stressButton.title = status.current
+          ? '当前 3/3 资格有效；额外运行 5 轮 NVENC/NVDEC 并记录显存趋势'
+          : '需要先完成当前 build/GPU/driver 的 3/3 连续资格验证';
+      }
     }
 
     async function refreshRemoteDesktopNVCodecValidation() {
@@ -2641,6 +2649,7 @@
     function setRemoteDesktopNVCodecValidationBusy(busy, mode) {
       var selfTest = $('desktop-nvcodec-self-test-btn');
       var qualification = $('desktop-nvcodec-qualification-btn');
+      var stress = $('desktop-nvcodec-stress-btn');
       if (selfTest) {
         selfTest.disabled = !!busy;
         selfTest.textContent = busy && mode === 'self-test' ? 'GPU 自检中…' : 'NVIDIA GPU 自检';
@@ -2648,6 +2657,10 @@
       if (qualification) {
         qualification.disabled = !!busy;
         qualification.textContent = busy && mode === 'qualification' ? '资格验证中…' : '连续资格验证';
+      }
+      if (stress) {
+        stress.disabled = !!busy || !(state.desktopNVCodecValidation && state.desktopNVCodecValidation.current);
+        stress.textContent = busy && mode === 'stress' ? '压力验证中…' : '稳定性压力验证';
       }
     }
 
@@ -2724,6 +2737,49 @@
       }
     }
     window.runRemoteDesktopNVCodecQualification = runRemoteDesktopNVCodecQualification;
+
+    async function runRemoteDesktopNVCodecStressQualification() {
+      if (!hasFn('goRunRemoteDesktopNVCodecStressQualification')) {
+        toast('当前平台不支持 NVIDIA 稳定性压力验证');
+        return;
+      }
+      var button = $('desktop-nvcodec-stress-btn');
+      if (button && button.disabled) {
+        toast('请先完成 NVIDIA 3/3 连续资格验证');
+        return;
+      }
+      setRemoteDesktopNVCodecValidationBusy(true, 'stress');
+      toast('正在执行 5 轮 NVIDIA NVENC → NVDEC 稳定性压力验证');
+      try {
+        var raw = await call('goRunRemoteDesktopNVCodecStressQualification');
+        var stress = parseJSONResult(raw, null);
+        if (!stress) throw new Error('没有收到压力验证结果');
+        var reports = Array.isArray(stress.reports) ? stress.reports : [];
+        if (reports.length) renderRemoteDesktopNVCodecSelfTest(reports[reports.length - 1]);
+        if (stress.validation) renderRemoteDesktopNVCodecValidation(stress.validation);
+        else await refreshRemoteDesktopNVCodecValidation();
+
+        var growth = stress.gpuMemoryObserved
+          ? ' · 最大显存变化 ' + formatTrafficBytes(Number(stress.maxGpuMemoryGrowthBytes || 0), false)
+          : '';
+        var cleanup = Number(stress.cleanupFailures || 0)
+          ? ' · 资源回收异常 ' + Number(stress.cleanupFailures || 0) + ' 次'
+          : ' · 资源回收正常';
+        if (stress.passed) {
+          toast('NVIDIA 稳定性压力验证通过 · ' +
+            Number(stress.completedRounds || 0) + '/' + Number(stress.requestedRounds || 5) +
+            ' 轮' + growth + cleanup);
+        } else {
+          toast('NVIDIA 稳定性压力验证失败：' + (stress.error || '未知错误'));
+        }
+      } catch (err) {
+        toast('NVIDIA 稳定性压力验证失败：' + ((err && err.message) || err));
+        await refreshRemoteDesktopNVCodecValidation();
+      } finally {
+        setRemoteDesktopNVCodecValidationBusy(false, '');
+      }
+    }
+    window.runRemoteDesktopNVCodecStressQualification = runRemoteDesktopNVCodecStressQualification;
 
     function desktopDiagnosticsFilename(report) {
       report = report || {};
@@ -3773,6 +3829,10 @@
       }
       if (hasFn('goRunRemoteDesktopNVCodecQualification') && $('desktop-nvcodec-qualification-btn')) {
         $('desktop-nvcodec-qualification-btn').classList.remove('hidden');
+      }
+      if (hasFn('goRunRemoteDesktopNVCodecStressQualification') && $('desktop-nvcodec-stress-btn')) {
+        $('desktop-nvcodec-stress-btn').classList.remove('hidden');
+        $('desktop-nvcodec-stress-btn').disabled = !(state.desktopNVCodecValidation && state.desktopNVCodecValidation.current);
       }
 
       // Go pushes status every 1.5s; these polls cover the window's first paint.

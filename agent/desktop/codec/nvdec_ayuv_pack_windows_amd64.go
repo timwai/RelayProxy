@@ -15,7 +15,7 @@ const (
 	nvdecAYUVPackBlockX uint32 = 16
 	nvdecAYUVPackBlockY uint32 = 16
 
-	nvdecAYUVPackKernelName = "relay_nvdec_yuv444_to_ayuv"
+	nvdecAYUVPackKernelName  = "relay_nvdec_yuv444_to_ayuv"
 	nvdecAYUVPackSurfaceName = "relay_nvdec_ayuv_surface"
 )
 

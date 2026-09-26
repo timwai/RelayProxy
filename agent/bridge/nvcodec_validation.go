@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	nvcodecValidationReceiptSchema   = 2
-	nvcodecValidationReceiptName     = ".relayproxy-nvcodec-validation.json"
-	nvcodecValidationMaxAge          = 30 * 24 * time.Hour
-	nvcodecValidationRequiredPasses  = 3
+	nvcodecValidationReceiptSchema  = 2
+	nvcodecValidationReceiptName    = ".relayproxy-nvcodec-validation.json"
+	nvcodecValidationMaxAge         = 30 * 24 * time.Hour
+	nvcodecValidationRequiredPasses = 3
 )
 
 type NVCodecValidationReceipt struct {

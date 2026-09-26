@@ -9,16 +9,16 @@ import (
 )
 
 type NVCodecQualificationBatchReport struct {
-	Passed          bool                                         `json:"passed"`
-	AlreadyCurrent  bool                                         `json:"alreadyCurrent,omitempty"`
-	Attempts        int                                          `json:"attempts"`
-	InitialPasses   int                                          `json:"initialPasses"`
-	FinalPasses     int                                          `json:"finalPasses"`
-	RequiredPasses  int                                          `json:"requiredPasses"`
-	DurationMs      int64                                        `json:"durationMs"`
-	Reports         []desktopcodec.NVCodecH265444RoundTripReport `json:"reports,omitempty"`
-	Validation      NVCodecValidationStatus                      `json:"validation"`
-	Error           string                                       `json:"error,omitempty"`
+	Passed         bool                                         `json:"passed"`
+	AlreadyCurrent bool                                         `json:"alreadyCurrent,omitempty"`
+	Attempts       int                                          `json:"attempts"`
+	InitialPasses  int                                          `json:"initialPasses"`
+	FinalPasses    int                                          `json:"finalPasses"`
+	RequiredPasses int                                          `json:"requiredPasses"`
+	DurationMs     int64                                        `json:"durationMs"`
+	Reports        []desktopcodec.NVCodecH265444RoundTripReport `json:"reports,omitempty"`
+	Validation     NVCodecValidationStatus                      `json:"validation"`
+	Error          string                                       `json:"error,omitempty"`
 }
 
 func (b *UIBridge) RunRemoteDesktopNVCodecQualification() (

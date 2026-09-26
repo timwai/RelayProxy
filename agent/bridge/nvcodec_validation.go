@@ -299,22 +299,22 @@ func evaluateNVCodecValidationReceipt(
 		}
 	case !receipt.Report.Passed:
 		status.StaleReason = "当前构建尚无成功的 NVIDIA GPU 自检"
-	case receipt.QualificationPasses < nvcodecValidationRequiredPasses:
-		status.StaleReason = fmt.Sprintf(
-			"NVIDIA GPU 资格验证进度 %d/%d，需要连续通过",
-			receipt.QualificationPasses,
-			nvcodecValidationRequiredPasses,
-		)
+	case currentBuild == "":
+		status.StaleReason = "当前构建没有可验证的 VCS revision"
+	case receipt.BuildRevision != currentBuild:
+		status.StaleReason = "RelayProxy 构建 revision 已变化"
 	case receipt.SavedAtUnixMs <= 0:
 		status.StaleReason = "验证凭证缺少时间"
 	case now.Sub(time.UnixMilli(receipt.SavedAtUnixMs)) < 0:
 		status.StaleReason = "验证凭证时间晚于当前系统时间"
 	case now.Sub(time.UnixMilli(receipt.SavedAtUnixMs)) > nvcodecValidationMaxAge:
 		status.StaleReason = "NVIDIA GPU 自检凭证已超过 30 天"
-	case currentBuild == "":
-		status.StaleReason = "当前构建没有可验证的 VCS revision"
-	case receipt.BuildRevision != currentBuild:
-		status.StaleReason = "RelayProxy 构建 revision 已变化"
+	case receipt.QualificationPasses < nvcodecValidationRequiredPasses:
+		status.StaleReason = fmt.Sprintf(
+			"NVIDIA GPU 资格验证进度 %d/%d，需要连续通过",
+			receipt.QualificationPasses,
+			nvcodecValidationRequiredPasses,
+		)
 	case identityErr != nil:
 		status.StaleReason = "无法确认当前 NVIDIA adapter/driver：" + identityErr.Error()
 	case !currentIdentity.MatchesReport(receipt.Report):
@@ -323,6 +323,25 @@ func evaluateNVCodecValidationReceipt(
 		status.Current = true
 	}
 	return status
+}
+
+func nvcodecValidationNeedsIdentityProbe(
+	now time.Time,
+	currentBuild string,
+	receipt *NVCodecValidationReceipt,
+) bool {
+	if receipt == nil ||
+		receipt.SchemaVersion != nvcodecValidationReceiptSchema ||
+		!receipt.LastAttemptPassed ||
+		!receipt.Report.Passed ||
+		receipt.QualificationPasses < nvcodecValidationRequiredPasses ||
+		currentBuild == "" ||
+		receipt.BuildRevision != currentBuild ||
+		receipt.SavedAtUnixMs <= 0 {
+		return false
+	}
+	age := now.Sub(time.UnixMilli(receipt.SavedAtUnixMs))
+	return age >= 0 && age <= nvcodecValidationMaxAge
 }
 
 func (b *UIBridge) GetRemoteDesktopNVCodecValidation() NVCodecValidationStatus {
@@ -338,7 +357,7 @@ func (b *UIBridge) GetRemoteDesktopNVCodecValidation() NVCodecValidationStatus {
 	}
 	now := time.Now()
 	currentBuild := nvcodecValidationBuildRevision()
-	if receipt == nil || currentBuild == "" {
+	if !nvcodecValidationNeedsIdentityProbe(now, currentBuild, receipt) {
 		return evaluateNVCodecValidationReceipt(
 			now,
 			currentBuild,

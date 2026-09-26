@@ -1137,6 +1137,17 @@ Windows SendInput / CF_UNICODETEXT
 - production gate 仍关闭；`eligible=true` 不代表 NVCodec 已被选择或启用。
 - 下一步：增加显式用户 opt-in canary 配置与运行时 gate；gate 仅在 eligibility=true 时允许尝试 NVCodec，任何 NVENC/NVDEC open、encode、decode 或 zero-copy failure 都立即回退 oneVPL HEVC 4:4:4，之后再回退 H.264。
 
+### 0.2.91 RD3 NVIDIA Explicit Opt-in Canary Gate
+
+- Agent 配置新增 `gui.nvcodec_canary`，默认 false；只有用户显式设置 true 才可能启用 NVIDIA canary。
+- canary gate 实际启用条件为 `config opt-in && nvcodecCanaryEligibility.eligible`；任何一侧不满足都将进程级 NVCodec selector gate 关闭。
+- HEVC 4:4:4 registry 调整为“NVCodec canary → oneVPL stable”优先级；NVCodec disabled 时完全跳过，enabled 时先尝试 NVENC/NVDEC D3D11 opener。
+- NVIDIA platform backend 正式接入现有 NVENC D3D11 encoder 与 NVDEC D3D11 decoder opener，并使用真实 NVIDIA runtime/device capability probe；只有 canary gate 打开时才参与公开 probe/selector。
+- NVCodec opener 初始化失败不会中断 H.265 4:4:4：通用 registry 会继续尝试 oneVPL，保持稳定 fallback。
+- 保存/重新读取 Agent 配置后会重新计算 eligibility 并同步 gate；build/GPU/driver/stress 证据失效时，即使配置仍为 true，NVCodec 也会自动关闭。
+- production 默认行为仍与之前一致：未显式 opt-in 的用户只使用成熟 oneVPL/H.264 路径。
+- 下一步：补 backend 级 runtime circuit breaker，使已成功打开但在 encode/decode/zero-copy 过程中失败的 NVCodec session 立即熔断本次 canary，并 generation rebuild 到 oneVPL；oneVPL 再失败时进入 H.264，而不是当前 H.265 runtime error 的通用 JPEG fallback。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

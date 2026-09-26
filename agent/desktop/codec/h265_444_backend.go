@@ -3,6 +3,7 @@ package codec
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 )
 
 const (
@@ -25,8 +26,19 @@ func (p H265444BackendProbe) EndToEnd() bool {
 	return p.Backend != "" && p.HardwareRuntime && p.Encode && p.Decode
 }
 
+var nvcodecCanaryEnabled atomic.Bool
+
+func SetNVCodecCanaryEnabled(enabled bool) {
+	nvcodecCanaryEnabled.Store(enabled)
+}
+
+func NVCodecCanaryEnabled() bool {
+	return nvcodecCanaryEnabled.Load()
+}
+
 type h265444Backend struct {
-	name string
+	name    string
+	enabled func() bool
 
 	probe func(context.Context) H265444BackendProbe
 
@@ -58,6 +70,7 @@ func probeOneVPLH265444Backend(ctx context.Context) H265444BackendProbe {
 }
 
 var h265444BackendRegistry = []h265444Backend{
+	platformNVCodecH265444Backend(),
 	{
 		name:              H265444BackendOneVPL,
 		probe:             probeOneVPLH265444Backend,
@@ -71,7 +84,6 @@ var h265444BackendRegistry = []h265444Backend{
 		lifecycle:         h265444SessionLifecycleContract(),
 		interop:           h265444D3D11NativeAYUVContract(),
 	},
-	platformNVCodecH265444Backend(),
 }
 
 // ProbeH265444Backends probes every registered vendor backend in deterministic
@@ -107,6 +119,17 @@ func probeH265444Backends(
 		// capability tied to a production-validated RelayProxy backend and an
 		// implemented opener so a probe-only vendor integration cannot expose
 		// an unusable 4:4:4 session.
+		if backend.enabled != nil && !backend.enabled() {
+			probe.Encode = false
+			probe.Decode = false
+			if probe.Error == "" {
+				probe.Error = "backend is disabled by canary gate"
+			} else {
+				probe.Error += "; backend is disabled by canary gate"
+			}
+			out = append(out, probe)
+			continue
+		}
 		if gateErr := backend.productionGateError(); gateErr != nil {
 			probe.Encode = false
 			probe.Decode = false
@@ -165,7 +188,7 @@ func OpenH265444Encoder(ctx context.Context, cfg VideoConfig) (SequenceHeaderEnc
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if backend.productionGateError() != nil || backend.openEncoder == nil {
+		if (backend.enabled != nil && !backend.enabled()) || backend.productionGateError() != nil || backend.openEncoder == nil {
 			continue
 		}
 		encoder, err := backend.openEncoder(ctx, cfg)
@@ -189,7 +212,7 @@ func OpenH265444EncoderWithD3D11(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if backend.productionGateError() != nil || backend.openEncoderD3D11 == nil {
+		if (backend.enabled != nil && !backend.enabled()) || backend.productionGateError() != nil || backend.openEncoderD3D11 == nil {
 			continue
 		}
 		encoder, err := backend.openEncoderD3D11(ctx, cfg, device)
@@ -209,7 +232,7 @@ func OpenH265444Decoder(ctx context.Context, cfg VideoConfig) (Decoder, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if backend.productionGateError() != nil || backend.openDecoder == nil {
+		if (backend.enabled != nil && !backend.enabled()) || backend.productionGateError() != nil || backend.openDecoder == nil {
 			continue
 		}
 		decoder, err := backend.openDecoder(ctx, cfg)
@@ -233,7 +256,7 @@ func OpenH265444DecoderWithD3D11(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if backend.productionGateError() != nil || backend.openDecoderD3D11 == nil {
+		if (backend.enabled != nil && !backend.enabled()) || backend.productionGateError() != nil || backend.openDecoderD3D11 == nil {
 			continue
 		}
 		decoder, err := backend.openDecoderD3D11(ctx, cfg, device)
@@ -257,7 +280,7 @@ func ProbeH265444DecoderD3D11(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if backend.productionGateError() != nil || backend.probeDecoderD3D11 == nil {
+		if (backend.enabled != nil && !backend.enabled()) || backend.productionGateError() != nil || backend.probeDecoderD3D11 == nil {
 			continue
 		}
 		if err := backend.probeDecoderD3D11(ctx, cfg, device); err == nil {

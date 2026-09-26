@@ -119,6 +119,9 @@ func h265444NVCodecAYUVContract() *H265444D3D11InteropContract {
 }
 
 func (b h265444Backend) productionGateError() error {
+	if b.enabled != nil && !b.enabled() {
+		return errors.New("backend is disabled by canary gate")
+	}
 	if !b.productionReady {
 		return errors.New("production backend is not implemented")
 	}

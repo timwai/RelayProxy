@@ -143,3 +143,23 @@ func TestProbeH265444BackendsAllowsD3D11OnlyProductionOpeners(t *testing.T) {
 		t.Fatalf("D3D11-only production backend was rejected: %+v", got)
 	}
 }
+
+func TestNVCodecCanaryGateDefaultsDisabled(t *testing.T) {
+	SetNVCodecCanaryEnabled(false)
+	t.Cleanup(func() { SetNVCodecCanaryEnabled(false) })
+	if NVCodecCanaryEnabled() {
+		t.Fatal("NVCodec canary unexpectedly enabled")
+	}
+	backend := platformNVCodecH265444Backend()
+	if backend.enabled == nil || backend.enabled() {
+		t.Fatal("platform NVCodec backend ignored disabled canary gate")
+	}
+}
+
+func TestNVCodecCanaryGateCanBeExplicitlyEnabled(t *testing.T) {
+	SetNVCodecCanaryEnabled(true)
+	t.Cleanup(func() { SetNVCodecCanaryEnabled(false) })
+	if !NVCodecCanaryEnabled() {
+		t.Fatal("NVCodec canary opt-in did not enable gate")
+	}
+}

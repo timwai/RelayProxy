@@ -68,6 +68,7 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 		report := receipt.Report
 		b.nvcodecSelfTest = &report
 	}
+	b.syncNVCodecCanaryGateFromConfig()
 	return b
 }
 
@@ -464,6 +465,7 @@ type ConfigUpdate struct {
 		StartMinimized *bool                      `json:"startMinimized"`
 		Theme          *string                    `json:"theme"`
 		NativeViewer   *config.GUIWindowPlacement `json:"nativeViewer"`
+		NVCodecCanary  *bool                      `json:"nvcodecCanary"`
 	} `json:"gui"`
 }
 
@@ -652,6 +654,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.GUI.NativeViewer != nil {
 		cfg.GUI.NativeViewer = *in.GUI.NativeViewer
 	}
+	if in.GUI.NVCodecCanary != nil {
+		cfg.GUI.NVCodecCanary = *in.GUI.NVCodecCanary
+	}
 
 	if err := config.NormalizeAgentConfig(cfg); err != nil {
 		return nil, fmt.Errorf("配置校验失败: %w", err)
@@ -692,6 +697,7 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		return nil, fmt.Errorf("配置已保存在磁盘，但应用失败: %w", err)
 	}
 	b.agent.SelectExit(cfg.Proxy.DefaultExitID)
+	b.syncNVCodecCanaryGate(cfg)
 	state := b.configState(cfg, revision)
 	message := "配置已保存，规则已应用。"
 	if reload {
@@ -848,4 +854,27 @@ func (b *UIBridge) SetAutoStart(enable bool) error {
 // Close terminates the agent
 func (b *UIBridge) Close() error {
 	return b.agent.Close()
+}
+
+
+func (b *UIBridge) syncNVCodecCanaryGateFromConfig() {
+	if b == nil {
+		desktopcodec.SetNVCodecCanaryEnabled(false)
+		return
+	}
+	cfg, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		desktopcodec.SetNVCodecCanaryEnabled(false)
+		return
+	}
+	b.syncNVCodecCanaryGate(cfg)
+}
+
+func (b *UIBridge) syncNVCodecCanaryGate(cfg *config.AgentConfigFile) {
+	if cfg == nil || !cfg.GUI.NVCodecCanary {
+		desktopcodec.SetNVCodecCanaryEnabled(false)
+		return
+	}
+	eligibility := b.GetRemoteDesktopNVCodecCanaryEligibility()
+	desktopcodec.SetNVCodecCanaryEnabled(eligibility.Eligible)
 }

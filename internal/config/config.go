@@ -137,6 +137,7 @@ type AgentConfigFile struct {
 		StartMinimized bool               `yaml:"start_minimized"`  // Default: false — boot straight into the tray
 		Theme          string             `yaml:"theme"`            // "dark", "light", or "system"
 		NativeViewer   GUIWindowPlacement `yaml:"native_viewer,omitempty"`
+		NVCodecCanary  bool               `yaml:"nvcodec_canary,omitempty"`
 	} `yaml:"gui"`
 
 	Web struct {

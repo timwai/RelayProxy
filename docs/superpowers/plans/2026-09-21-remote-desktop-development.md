@@ -1078,6 +1078,20 @@ Windows SendInput / CF_UNICODETEXT
 - production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。3/3 qualification 只是允许进入下一阶段的必要证据，不会自动改变 backend 选择。
 - 下一步：增加 qualification 批量运行入口与压力验证（多轮 encode/decode/reconfigure/ForceIDR + 资源增长观测），在目标 NVIDIA Windows 主机收集 3/3 及重复运行证据后，再设计 production gate 的显式 opt-in 与回退机制。
 
+### 0.2.86 RD3 NVIDIA NVCodec Batched Qualification Runner
+
+- 新增批量 qualification runner，用于在 NVIDIA Windows 真机上自动补齐 v2 receipt 的 3/3 连续验证，不再要求手工点击单次自检三次。
+- runner 是“补齐”而不是固定执行 3 次：已有 current 资格时直接返回；已有 2/3 时最多只执行 1 次；0/3 时最多执行 3 次，并在每轮后重新读取 receipt 状态，达到 `current=true` 即立即停止。
+- 每轮仍调用完整真实 round-trip：NVIDIA D3D11 adapter → NVENC HEVC 4:4:4 → NVDEC → CUDA YUV444→AYUV pack → D3D11 staging sample readback → bitrate reconfigure → ForceIDR → cleanup。
+- 任一轮 codec self-test 失败立即停止；v2 receipt 会同步把 qualification 清零。若 round-trip 本身成功但 receipt 无法可靠写入（例如 dirty/no-VCS build、文件写入失败），批量资格验证也返回失败，不会把“GPU 功能成功”和“资格证据成功持久化”混为一谈。
+- 若达到 3/3 但最终 NVIDIA adapter/driver identity probe 仍失败，runner 立即返回 fail-closed 状态，不继续重复昂贵 round-trip。
+- UIBridge 新增独立 `nvcodecValidationMu`：单次自检与批量 runner 共用同一把 mutex，避免 Wails/Web 同时触发多个 NVENC/NVDEC 测试并发争用同一 GPU。
+- Wails 与 Web 新增 `RunRemoteDesktopNVCodecQualification` / `POST /api/remote-desktop/nvcodec-qualification`；Relay Desktop 增加“连续资格验证”按钮。
+- UI 运行期间同时禁用“单次 GPU 自检”和“连续资格验证”两个按钮；完成后展示最终资格进度、本次实际执行轮数，并继续保留最后一轮单次 self-test 的像素/IDR/资源回收明细。
+- batch report 记录 `initialPasses / finalPasses / requiredPasses / attempts / reports / validation / duration / error`，便于后续诊断导出与真机矩阵收集。
+- production gate 继续保持 `productionReady=false / zeroCopyValidated=false`。批量 3/3 只是生成更可靠的资格证据，不会自动启用 NVIDIA backend。
+- 下一步：给 qualification runner 增加 GPU memory/resource stability 观测，重复执行更多轮 encode/decode/reconfigure 并记录前后显存预算/使用量；真机证据稳定后再设计 NVIDIA backend 的显式 opt-in canary gate 与 oneVPL 自动回退。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

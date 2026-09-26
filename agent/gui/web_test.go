@@ -342,8 +342,10 @@ func TestWebExposesNVCodecSelfTestDiagnosticsBridge(t *testing.T) {
 		"goGetRemoteDesktopNVCodecSelfTest",
 		"goGetRemoteDesktopNVCodecValidation",
 		"goRunRemoteDesktopNVCodecSelfTest",
+		"goRunRemoteDesktopNVCodecQualification",
 		"/api/remote-desktop/nvcodec-self-test",
 		"/api/remote-desktop/nvcodec-validation",
+		"/api/remote-desktop/nvcodec-qualification",
 	} {
 		if !strings.Contains(bridgeJS.Body.String(), want) {
 			t.Fatalf("web bridge missing %q", want)

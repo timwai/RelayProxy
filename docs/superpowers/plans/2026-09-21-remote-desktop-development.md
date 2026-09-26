@@ -947,6 +947,18 @@ Windows SendInput / CF_UNICODETEXT
 - 当前仍不开放 resolution/FPS/GOP/tuning 在线重配；这些变化继续走 generation rebuild，避免把尚未真机验证的 NVENC reconfigure 能力暴露到生产路径。
 - production gate 继续关闭；下一步增加 NVIDIA 真机诊断入口，输出 session/init/sequence/first-frame/reconfigure 各阶段结果，然后再进入 NVDEC 4:4:4 zero-copy 解码闭环。
 
+### 0.2.76 RD3 NVIDIA NVDEC D3D11/CUDA Session Foundation
+
+- 新增 NVDEC session 基座，继续保持 production gate 关闭；本阶段只解决 D3D11 adapter 到 CUDA/NVDEC runtime 的可靠绑定与生命周期，不提前暴露 decoder。
+- Windows amd64 运行时链固定为 `nvcuda.dll + nvcuvid.dll`；NVDEC function table 强制包含 decoder caps/create/destroy/decode/map/unmap、video parser create/parse/destroy，以及 CUVID context lock create/destroy/lock/unlock。
+- D3D11 与 CUDA 设备绑定改用当前 CUDA Driver API 的 `cuD3D11GetDevices(..., CU_D3D11_DEVICE_LIST_ALL)`，直接从 session 的 `ID3D11Device` 获取 CUDA device，避免依赖 GPU 型号或独立枚举顺序。
+- zero-copy session 当前要求一个 D3D11 device 精确映射到一个 CUDA device；多 GPU / linked-adapter 返回 unavailable，不在未验证条件下猜测 primary device。
+- CUDA context 创建后立即创建 `CUvideoctxlock`，为后续 NVDEC parser callback / decoder surface 映射提供 NVIDIA 推荐的 floating-context 同步边界；session 返回前清除当前线程 CUDA context。
+- CUDA context 是线程相关状态：创建、清理均使用 `runtime.LockOSThread`；后续实际 decode/map 阶段也必须在 context lock + current-context 规则内执行。
+- session `Close()` 幂等，清理顺序为 context lock → CUDA context → `nvcuvid.dll` → CUDA driver module；初始化中途失败也只有一条资源所有权清理路径，避免 DLL/context 双释放。
+- 新增 function-table 缺失检测与 Close 幂等测试；Windows CI 只验证 ABI/编译边界，真机 CUDA/NVDEC runtime 仍需 NVIDIA 主机执行。
+- 下一步：补 `CUVIDPARSERPARAMS / CUVIDSOURCEDATAPACKET / CUVIDDECODECREATEINFO` ABI，完成 HEVC 4:4:4 parser sequence callback → `cuvidCreateDecoder`，随后再接 decode/map 与 D3D11 AYUV 输出。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

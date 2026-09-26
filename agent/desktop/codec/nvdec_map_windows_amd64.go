@@ -44,6 +44,7 @@ type nvdecMappedFrame struct {
 	mu sync.Mutex
 
 	parser       *nvdecHEVC444Parser
+	session      *nvdecD3D11Session
 	devicePtr    uint64
 	pitch        uint32
 	pictureIndex int32
@@ -167,6 +168,7 @@ func (p *nvdecHEVC444Parser) MapNextDisplay(
 
 	frame := &nvdecMappedFrame{
 		parser:       p,
+		session:      session,
 		devicePtr:    devicePtr,
 		pitch:        pitch,
 		pictureIndex: info.PictureIndex,
@@ -191,6 +193,21 @@ func (p *nvdecHEVC444Parser) MapNextDisplay(
 	p.mappedFrames[devicePtr] = frame
 	p.mu.Unlock()
 	return frame, true, nil
+}
+
+func (f *nvdecMappedFrame) withMappedData(
+	fn func(*nvdecD3D11Session, uint64, uint32, int, int) error,
+) error {
+	if f == nil || fn == nil {
+		return ErrDecoderUnavailable
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed || f.session == nil || f.devicePtr == 0 || f.pitch == 0 ||
+		f.width <= 0 || f.height <= 0 {
+		return ErrDecoderUnavailable
+	}
+	return fn(f.session, f.devicePtr, f.pitch, f.width, f.height)
 }
 
 func (f *nvdecMappedFrame) DevicePointer() uint64 {
@@ -253,6 +270,7 @@ func (f *nvdecMappedFrame) detach() uint64 {
 	f.closed = true
 	devicePtr := f.devicePtr
 	f.parser = nil
+	f.session = nil
 	f.devicePtr = 0
 	f.pitch = 0
 	f.width = 0

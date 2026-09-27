@@ -712,20 +712,24 @@ func windowsNetworkServiceRecoveryState() (enabled, known bool) {
 	if err != nil {
 		return false, false
 	}
-	if len(actions) < 3 {
-		return false, true
-	}
-	want := []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}
-	for i := range want {
-		if actions[i].Type != mgr.ServiceRestart || actions[i].Delay != want[i] {
-			return false, true
-		}
-	}
 	onNonCrash, err := service.RecoveryActionsOnNonCrashFailures()
 	if err != nil {
 		return false, false
 	}
-	return onNonCrash, true
+	return matchesWindowsNetworkServiceRecovery(actions, onNonCrash), true
+}
+
+func matchesWindowsNetworkServiceRecovery(actions []mgr.RecoveryAction, onNonCrash bool) bool {
+	if !onNonCrash || len(actions) < 3 {
+		return false
+	}
+	want := []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}
+	for i := range want {
+		if actions[i].Type != mgr.ServiceRestart || actions[i].Delay != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func RepairPlatformService() error {

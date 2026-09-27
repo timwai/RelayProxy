@@ -131,42 +131,41 @@ func TestCompoundTargetRuleDoesNotRequireProcessIdentity(t *testing.T) {
 	}
 }
 
-
 func TestCompoundProcessAndTargetCanMatchIndependently(t *testing.T) {
 	tests := []struct {
-		name   string
-		rule   Rule
-		flow   Flow
-		match  bool
+		name  string
+		rule  Rule
+		flow  Flow
+		match bool
 	}{
 		{
-			name: "process only",
-			rule: Rule{Name: "process-only", Enabled: true, Processes: []string{"chrome.exe"}, Action: ActionProxy},
-			flow: Flow{Process: `C:\Program Files\Google\Chrome\chrome.exe`, IP: "203.0.113.10", Port: 12345, Protocol: "tcp"},
+			name:  "process only",
+			rule:  Rule{Name: "process-only", Enabled: true, Processes: []string{"chrome.exe"}, Action: ActionProxy},
+			flow:  Flow{Process: `C:\Program Files\Google\Chrome\chrome.exe`, IP: "203.0.113.10", Port: 12345, Protocol: "tcp"},
 			match: true,
 		},
 		{
-			name: "target only",
-			rule: Rule{Name: "target-only", Enabled: true, Targets: []string{"192.168.50.0/24"}, Action: ActionProxy},
-			flow: Flow{Process: "", IP: "192.168.50.20", Port: 445, Protocol: "tcp"},
+			name:  "target only",
+			rule:  Rule{Name: "target-only", Enabled: true, Targets: []string{"192.168.50.0/24"}, Action: ActionProxy},
+			flow:  Flow{Process: "", IP: "192.168.50.20", Port: 445, Protocol: "tcp"},
 			match: true,
 		},
 		{
-			name: "process and target",
-			rule: Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
-			flow: Flow{Process: "chrome.exe", IP: "203.0.113.10", Port: 443, Protocol: "tcp"},
+			name:  "process and target",
+			rule:  Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
+			flow:  Flow{Process: "chrome.exe", IP: "203.0.113.10", Port: 443, Protocol: "tcp"},
 			match: true,
 		},
 		{
-			name: "combined process mismatch",
-			rule: Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
-			flow: Flow{Process: "firefox.exe", IP: "203.0.113.10", Port: 443, Protocol: "tcp"},
+			name:  "combined process mismatch",
+			rule:  Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
+			flow:  Flow{Process: "firefox.exe", IP: "203.0.113.10", Port: 443, Protocol: "tcp"},
 			match: false,
 		},
 		{
-			name: "combined target mismatch",
-			rule: Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
-			flow: Flow{Process: "chrome.exe", IP: "203.0.113.11", Port: 443, Protocol: "tcp"},
+			name:  "combined target mismatch",
+			rule:  Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
+			flow:  Flow{Process: "chrome.exe", IP: "203.0.113.11", Port: 443, Protocol: "tcp"},
 			match: false,
 		},
 	}

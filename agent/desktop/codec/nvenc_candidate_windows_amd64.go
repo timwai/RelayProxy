@@ -17,6 +17,11 @@ const (
 	nvencAPIVersion             = nvencAPIMajorVersion | (nvencAPIMinorVersion << 24)
 	nvencMaxVersionCode         = (nvencAPIMajorVersion << 4) | nvencAPIMinorVersion
 
+	nvencLegacyAPIMajorVersion uint32 = 9
+	nvencLegacyAPIMinorVersion uint32 = 1
+	nvencLegacyAPIVersion             = nvencLegacyAPIMajorVersion | (nvencLegacyAPIMinorVersion << 24)
+	nvencLegacyMaxVersionCode         = (nvencLegacyAPIMajorVersion << 4) | nvencLegacyAPIMinorVersion
+
 	nvencDeviceTypeCUDA          int32 = 1
 	nvencCapsSupportYUV444Encode int32 = 33
 )
@@ -112,8 +117,22 @@ type nvidiaNVENCDeviceProbe struct {
 	Error       string
 }
 
+func nvencStructVersionFor(apiVersion, structVersion uint32) uint32 {
+	return apiVersion | (structVersion << 16) | (0x7 << 28)
+}
+
 func nvencStructVersion(structVersion uint32) uint32 {
-	return nvencAPIVersion | (structVersion << 16) | (0x7 << 28)
+	return nvencStructVersionFor(nvencAPIVersion, structVersion)
+}
+
+func nvencAPIVersionForDriver(maxSupportedVersion uint32) (uint32, bool) {
+	if maxSupportedVersion >= nvencMaxVersionCode {
+		return nvencAPIVersion, false
+	}
+	if maxSupportedVersion >= nvencLegacyMaxVersionCode {
+		return nvencLegacyAPIVersion, true
+	}
+	return 0, false
 }
 
 func nvencCall(proc uintptr, args ...uintptr) int32 {
@@ -121,12 +140,12 @@ func nvencCall(proc uintptr, args ...uintptr) int32 {
 	return runtimeCandidateStatus(status)
 }
 
-func createNVENCFunctionList(createInstance uintptr) (nvEncodeAPIFunctionList, error) {
+func createNVENCFunctionListFor(createInstance uintptr, apiVersion uint32) (nvEncodeAPIFunctionList, error) {
 	if createInstance == 0 {
 		return nvEncodeAPIFunctionList{}, fmt.Errorf("NvEncodeAPICreateInstance is unavailable")
 	}
 	api := nvEncodeAPIFunctionList{
-		Version: nvencStructVersion(2),
+		Version: nvencStructVersionFor(apiVersion, 2),
 	}
 	status := nvencCall(createInstance, uintptr(unsafe.Pointer(&api)))
 	runtime.KeepAlive(&api)
@@ -148,6 +167,10 @@ func createNVENCFunctionList(createInstance uintptr) (nvEncodeAPIFunctionList, e
 	return api, nil
 }
 
+func createNVENCFunctionList(createInstance uintptr) (nvEncodeAPIFunctionList, error) {
+	return createNVENCFunctionListFor(createInstance, nvencAPIVersion)
+}
+
 func nvencHasGUID(guids []nvencGUID, target nvencGUID) bool {
 	for _, guid := range guids {
 		if guid == target {
@@ -157,7 +180,7 @@ func nvencHasGUID(guids []nvencGUID, target nvencGUID) bool {
 	return false
 }
 
-func probeNVENCHEVC444OnSession(api nvEncodeAPIFunctionList, encoder uintptr) (bool, bool, error) {
+func probeNVENCHEVC444OnSession(api nvEncodeAPIFunctionList, encoder uintptr, apiVersion uint32) (bool, bool, error) {
 	var guidCount uint32
 	if status := nvencCall(
 		api.NvEncGetEncodeGUIDCount,
@@ -195,7 +218,7 @@ func probeNVENCHEVC444OnSession(api nvEncodeAPIFunctionList, encoder uintptr) (b
 	}
 
 	caps := nvencCapsParam{
-		Version:     nvencStructVersion(1),
+		Version:     nvencStructVersionFor(apiVersion, 1),
 		CapsToQuery: nvencCapsSupportYUV444Encode,
 	}
 	var supported int32
@@ -231,19 +254,17 @@ func probeNVIDIANVENCHEVC444(
 		return result
 	}
 
-	// The function-list ABI used here is pinned to nv-codec-headers 13.1.
-	// Do not present a newer structure version to an older driver: retaining a
-	// runtime-only candidate is safer than guessing cross-version ABI layout.
-	if maxSupportedVersion < nvencMaxVersionCode {
+	apiVersion, _ := nvencAPIVersionForDriver(maxSupportedVersion)
+	if apiVersion == 0 {
 		result.Error = fmt.Sprintf(
-			"NVENC driver API %s is older than candidate probe ABI %d.%d",
+			"NVENC driver API %s is older than minimum supported ABI %d.%d",
 			formatNVENCMaxSupportedVersion(maxSupportedVersion),
-			nvencAPIMajorVersion, nvencAPIMinorVersion,
+			nvencLegacyAPIMajorVersion, nvencLegacyAPIMinorVersion,
 		)
 		return result
 	}
 
-	nvencAPI, err := createNVENCFunctionList(createInstance)
+	nvencAPI, err := createNVENCFunctionListFor(createInstance, apiVersion)
 	if err != nil {
 		result.Error = err.Error()
 		return result
@@ -308,10 +329,10 @@ func probeNVIDIANVENCHEVC444(
 		}
 
 		params := nvencOpenEncodeSessionExParams{
-			Version:    nvencStructVersion(1),
+			Version:    nvencStructVersionFor(apiVersion, 1),
 			DeviceType: nvencDeviceTypeCUDA,
 			Device:     cudaContext,
-			APIVersion: nvencAPIVersion,
+			APIVersion: apiVersion,
 		}
 		var encoder uintptr
 		openStatus := nvencCall(
@@ -328,7 +349,7 @@ func probeNVIDIANVENCHEVC444(
 			queryErr  error
 		)
 		if openStatus == 0 && encoder != 0 {
-			checked, supported, queryErr = probeNVENCHEVC444OnSession(nvencAPI, encoder)
+			checked, supported, queryErr = probeNVENCHEVC444OnSession(nvencAPI, encoder, apiVersion)
 			if destroyStatus := nvencCall(nvencAPI.NvEncDestroyEncoder, encoder); destroyStatus != 0 {
 				issues = append(issues, fmt.Sprintf("device %d nvEncDestroyEncoder returned %d", ordinal, destroyStatus))
 			}

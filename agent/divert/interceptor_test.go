@@ -173,23 +173,42 @@ func TestInterceptorDirectRejectAndMetadataFailure(t *testing.T) {
 			}
 		})
 	}
-	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionProxy}})
+	i, device := newTestInterceptor(t, Options{
+		Config: Config{DefaultAction: ActionReject},
+		SharedPolicy: func(flow Flow) Decision {
+			if flow.IP == "198.51.100.20" && flow.Port == 445 {
+				return Decision{Action: ActionDirect, Rule: "smb-target"}
+			}
+			return Decision{Action: ActionReject, Rule: "fallback"}
+		},
+	})
 	i.lookup = func(Protocol, netip.AddrPort, netip.AddrPort) (packetProcess, error) {
-		return packetProcess{}, errors.New("unknown PID")
+		return packetProcess{}, errors.New("OWNER_PID not ready")
 	}
-	if err := i.handlePacket(interceptedSYN(false), packetMetadata{outbound: true}); err == nil {
-		t.Fatal("TCP without process identity accepted")
+	smb := interceptedSYN(false)
+	smbPacket, err := parseIPPacket(smb)
+	if err != nil {
+		t.Fatal(err)
 	}
-	reset := expectInterceptedPacket(t, device)
-	if reset.meta.outbound {
-		t.Fatal("unknown TCP escaped")
+	binary.BigEndian.PutUint16(smb[smbPacket.TransportOffset+2:], 445)
+	packetTestSetChecksums(smb, smbPacket.TransportOffset, ProtoTCP)
+	if err := i.handlePacket(append([]byte(nil), smb...), packetMetadata{outbound: true}); err != nil {
+		t.Fatal(err)
 	}
-	udp, _ := packetTestFixture(false, ProtoUDP, []byte("secret"), false)
-	if err := i.handlePacket(udp, packetMetadata{outbound: true}); err == nil {
-		t.Fatal("UDP without process identity accepted")
+	released := expectInterceptedPacket(t, device)
+	if !released.meta.outbound || !bytes.Equal(released.data, smb) {
+		t.Fatal("SMB target rule was blocked by missing process identity")
 	}
-	if len(device.sent) != 0 {
-		t.Fatal("unknown UDP escaped")
+
+	udp, udpOffset := packetTestFixture(false, ProtoUDP, []byte("secret"), false)
+	binary.BigEndian.PutUint16(udp[udpOffset+2:], 445)
+	packetTestSetChecksums(udp, udpOffset, ProtoUDP)
+	if err := i.handlePacket(append([]byte(nil), udp...), packetMetadata{outbound: true}); err != nil {
+		t.Fatal(err)
+	}
+	released = expectInterceptedPacket(t, device)
+	if !released.meta.outbound || !bytes.Equal(released.data, udp) {
+		t.Fatal("target-only UDP rule was blocked by missing process identity")
 	}
 }
 

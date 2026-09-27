@@ -4,11 +4,14 @@ package divert
 
 import (
 	"encoding/binary"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
 	"syscall"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -182,4 +185,81 @@ func TestWinDivertNativeFilter(t *testing.T) {
 	}
 	runtime.KeepAlive(relayFilter)
 	runtime.KeepAlive(filter)
+}
+
+
+func TestWinDivertLiveBrokerStyleReinjection(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("WinDivert live test requires Windows amd64")
+	}
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("WinDivert live test requires an elevated Windows runner")
+	}
+
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.LocalAddr().(*net.UDPAddr).Port
+
+	handle, err := openTrustedWinDivert(fmt.Sprintf("outbound and loopback and udp.DstPort == %d", port))
+	if err != nil {
+		t.Skipf("WinDivert driver unavailable on runner: %v", err)
+	}
+	defer handle.Close()
+
+	pump := make(chan error, 1)
+	go func() {
+		buffer := make([]byte, 40+65535)
+		n, captured, err := handle.Recv(buffer)
+		if err != nil {
+			pump <- err
+			return
+		}
+		packet, err := parseIPPacket(buffer[:n])
+		if err != nil {
+			pump <- err
+			return
+		}
+		repairPacketChecksums(packet)
+
+		// Mirror the SYSTEM broker: do not reuse capture-only state. Rebuild
+		// only direction and interface metadata and let windivertHandle.Send
+		// calculate native checksums before injection.
+		var inject windivertAddress
+		inject.setOutbound(captured.outbound())
+		inject.setIfIndex(captured.ifIndex(), captured.subIfIndex())
+		pump <- handle.Send(buffer[:n], inject)
+	}()
+
+	client, err := net.DialUDP("udp4", nil, listener.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	payload := []byte("relayproxy-windivert-live")
+	if _, err := client.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := listener.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, 128)
+	n, _, err := listener.ReadFromUDP(got)
+	if err != nil {
+		t.Fatalf("reinjected UDP did not reach Windows socket: %v", err)
+	}
+	if string(got[:n]) != string(payload) {
+		t.Fatalf("payload=%q want=%q", got[:n], payload)
+	}
+	select {
+	case err := <-pump:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WinDivert reinjection pump did not finish")
+	}
 }

@@ -56,6 +56,18 @@ func TestValidateNVENCProductionFunctionListLegacy91(t *testing.T) {
 	}
 }
 
+func TestNVENCAPIVersionForDriver(t *testing.T) {
+	if api, legacy := nvencAPIVersionForDriver(nvencMaxVersionCode); api != nvencAPIVersion || legacy {
+		t.Fatalf("modern driver selected api=%#x legacy=%v", api, legacy)
+	}
+	if api, legacy := nvencAPIVersionForDriver(nvencLegacyMaxVersionCode); api != nvencLegacyAPIVersion || !legacy {
+		t.Fatalf("9.1 driver selected api=%#x legacy=%v", api, legacy)
+	}
+	if api, legacy := nvencAPIVersionForDriver(0x90); api != 0 || legacy {
+		t.Fatalf("too-old driver selected api=%#x legacy=%v", api, legacy)
+	}
+}
+
 func TestOpenNVENCHEVC444D3D11SessionRejectsNilDeviceBeforeRuntimeLoad(t *testing.T) {
 	_, err := openNVENCHEVC444D3D11Session(context.Background(), 0)
 	if !errors.Is(err, ErrEncoderUnavailable) {

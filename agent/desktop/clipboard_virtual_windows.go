@@ -22,8 +22,8 @@ const (
 	windowsVirtualClipboardFileGroupFormat = "FileGroupDescriptorW"
 	windowsVirtualClipboardContentsFormat  = "FileContents"
 
-	windowsTymedHGlobal = 1
-	windowsTymedIStream = 4
+	windowsTymedHGlobal    = 1
+	windowsTymedIStream    = 4
 	windowsDVAspectContent = 1
 
 	windowsFDAttributes = 0x00000004
@@ -31,7 +31,7 @@ const (
 
 	windowsFileAttributeDirectory = 0x00000010
 
-	windowsVirtualDescriptorBytes    = 592
+	windowsVirtualDescriptorBytes     = 592
 	windowsVirtualDescriptorNameUTF16 = 260
 	maxWindowsVirtualDescriptors      = 4096
 )
@@ -40,13 +40,13 @@ var (
 	virtualClipboardUser32DLL = windows.NewLazySystemDLL("user32.dll")
 	virtualClipboardOle32DLL  = windows.NewLazySystemDLL("ole32.dll")
 
-	procRegisterClipboardFormatW        = virtualClipboardUser32DLL.NewProc("RegisterClipboardFormatW")
-	procIsClipboardFormatAvailable      = virtualClipboardUser32DLL.NewProc("IsClipboardFormatAvailable")
-	procGetClipboardSequenceNumber      = virtualClipboardUser32DLL.NewProc("GetClipboardSequenceNumber")
-	procOleInitialize                   = virtualClipboardOle32DLL.NewProc("OleInitialize")
-	procOleUninitialize                 = virtualClipboardOle32DLL.NewProc("OleUninitialize")
-	procOleGetClipboard                 = virtualClipboardOle32DLL.NewProc("OleGetClipboard")
-	procReleaseStgMedium                = virtualClipboardOle32DLL.NewProc("ReleaseStgMedium")
+	procRegisterClipboardFormatW   = virtualClipboardUser32DLL.NewProc("RegisterClipboardFormatW")
+	procIsClipboardFormatAvailable = virtualClipboardUser32DLL.NewProc("IsClipboardFormatAvailable")
+	procGetClipboardSequenceNumber = virtualClipboardUser32DLL.NewProc("GetClipboardSequenceNumber")
+	procOleInitialize              = virtualClipboardOle32DLL.NewProc("OleInitialize")
+	procOleUninitialize            = virtualClipboardOle32DLL.NewProc("OleUninitialize")
+	procOleGetClipboard            = virtualClipboardOle32DLL.NewProc("OleGetClipboard")
+	procReleaseStgMedium           = virtualClipboardOle32DLL.NewProc("ReleaseStgMedium")
 )
 
 type windowsFormatEtc struct {

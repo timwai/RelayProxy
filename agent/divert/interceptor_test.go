@@ -25,6 +25,7 @@ type testPacketDevice struct {
 	sent     chan capturedTestPacket
 	done     chan struct{}
 	once     sync.Once
+	failSend atomic.Bool
 }
 
 func newTestPacketDevice() *testPacketDevice {
@@ -39,6 +40,9 @@ func (d *testPacketDevice) Receive(buffer []byte) (int, packetMetadata, error) {
 	}
 }
 func (d *testPacketDevice) Send(data []byte, meta packetMetadata) error {
+	if d.failSend.Load() {
+		return errors.New("forced packet injection failure")
+	}
 	select {
 	case <-d.done:
 		return net.ErrClosed
@@ -465,9 +469,7 @@ func TestInterceptorFailsOpenForUnclassifiablePacket(t *testing.T) {
 func TestInterceptorDisablesCaptureAfterInjectionFailure(t *testing.T) {
 	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionDirect}})
 	i.running.Store(true)
-	if err := device.Close(); err != nil {
-		t.Fatal(err)
-	}
+	device.failSend.Store(true)
 	data, _ := packetTestFixture(false, ProtoUDP, []byte("payload"), false)
 	err := i.handlePacket(data, packetMetadata{outbound: true})
 	if !errors.Is(err, errPacketInjection) {

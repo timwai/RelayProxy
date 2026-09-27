@@ -531,7 +531,7 @@ func EnsurePlatformService() error {
 		return nil
 	}
 	if windows.GetCurrentProcessToken().IsElevated() {
-		return installWindowsNetworkService()
+		return installWindowsNetworkService("")
 	}
 	return runElevatedNetworkServiceHelper(networkServiceHelperInstall)
 }
@@ -562,13 +562,13 @@ func windowsNetworkServiceState() (installed, running bool, err error) {
 	return true, status.State == svc.Running, nil
 }
 
-func RunWindowsNetworkServiceHelper(action string) error {
+func RunWindowsNetworkServiceHelper(action, allowedSID string) error {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		return errors.New("RelayProxy Network Service 安装程序未获得管理员权限")
 	}
 	switch strings.TrimSpace(action) {
 	case networkServiceHelperInstall:
-		return installWindowsNetworkService()
+		return installWindowsNetworkService(allowedSID)
 	case networkServiceHelperRemove:
 		return removeWindowsNetworkService()
 	default:
@@ -576,7 +576,15 @@ func RunWindowsNetworkServiceHelper(action string) error {
 	}
 }
 
-func installWindowsNetworkService() error {
+func currentWindowsUserSID() (string, error) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return "", err
+	}
+	return user.User.Sid.String(), nil
+}
+
+func installWindowsNetworkService(allowedSID string) error {
 	executable, err := os.Executable()
 	if err != nil {
 		return err
@@ -585,11 +593,16 @@ func installWindowsNetworkService() error {
 	if err != nil {
 		return err
 	}
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
-		return err
+	allowedSID = strings.TrimSpace(allowedSID)
+	if allowedSID == "" {
+		allowedSID, err = currentWindowsUserSID()
+		if err != nil {
+			return err
+		}
 	}
-	allowedSID := user.User.Sid.String()
+	if _, err := windows.StringToSid(allowedSID); err != nil {
+		return fmt.Errorf("Network Service 允许用户 SID 无效: %w", err)
+	}
 	binaryPath := syscall.EscapeArg(executable) +
 		" --" + networkServiceModeFlagName +
 		" --" + networkServiceSIDFlagName + "=" + allowedSID
@@ -709,12 +722,23 @@ func runElevatedNetworkServiceHelper(action string) error {
 	if err != nil {
 		return err
 	}
+	allowedSID := ""
+	if action == networkServiceHelperInstall {
+		allowedSID, err = currentWindowsUserSID()
+		if err != nil {
+			return err
+		}
+	}
 	verb, _ := windows.UTF16PtrFromString("runas")
 	file, err := windows.UTF16PtrFromString(executable)
 	if err != nil {
 		return err
 	}
-	parameters, err := windows.UTF16PtrFromString("--" + networkServiceHelperFlagName + "=" + action)
+	parametersText := "--" + networkServiceHelperFlagName + "=" + action
+	if allowedSID != "" {
+		parametersText += " --" + networkServiceSIDFlagName + "=" + allowedSID
+	}
+	parameters, err := windows.UTF16PtrFromString(parametersText)
 	if err != nil {
 		return err
 	}

@@ -710,6 +710,26 @@
           </div>
         </div>
 
+        <div id="desktop-nvcodec-canary-panel" class="hidden rp-card p-4 space-y-3">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">NVIDIA NVCodec Canary</div>
+              <div id="desktop-nvcodec-canary-summary" class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">尚未读取状态</div>
+            </div>
+            <span id="desktop-nvcodec-canary-badge" class="text-[10px] font-semibold px-2 py-1 rounded-full border border-slate-200 dark:border-slate-700">未启用</span>
+          </div>
+          <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
+            <div class="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2"><div class="text-[10px] text-slate-500 dark:text-slate-400">用户请求</div><div id="desktop-nvcodec-requested" class="text-[12px] font-medium mt-0.5">—</div></div>
+            <div class="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2"><div class="text-[10px] text-slate-500 dark:text-slate-400">资格状态</div><div id="desktop-nvcodec-eligible" class="text-[12px] font-medium mt-0.5">—</div></div>
+            <div class="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2"><div class="text-[10px] text-slate-500 dark:text-slate-400">当前生效</div><div id="desktop-nvcodec-active" class="text-[12px] font-medium mt-0.5">—</div></div>
+            <div class="rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2"><div class="text-[10px] text-slate-500 dark:text-slate-400">熔断状态</div><div id="desktop-nvcodec-tripped" class="text-[12px] font-medium mt-0.5">—</div></div>
+          </div>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-2 text-[11px]">
+            <div class="rounded-md bg-slate-50 dark:bg-slate-900/50 px-3 py-2"><span class="text-slate-500 dark:text-slate-400">资格验证：</span><span id="desktop-nvcodec-qualification-progress">0/3</span></div>
+            <div class="rounded-md bg-slate-50 dark:bg-slate-900/50 px-3 py-2"><span class="text-slate-500 dark:text-slate-400">压力验证：</span><span id="desktop-nvcodec-stress-progress">0/5</span></div>
+          </div>
+          <div id="desktop-nvcodec-canary-reasons" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"></div>
+        </div>
         <div id="desktop-nvcodec-self-test-result" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border"></div>
         <div id="desktop-nvcodec-validation-state" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border"></div>
         <div id="desktop-session-banner" class="hidden rp-notice rp-notice-info"></div>
@@ -1263,7 +1283,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {}, desktopFollowViewport: false, desktopNVCodecSelfTest: null, desktopNVCodecValidation: null };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, desktopTargets: [], desktopStatus: null, desktopDisplaySelections: {}, desktopFollowViewport: false, desktopNVCodecSelfTest: null, desktopNVCodecValidation: null, desktopNVCodecDiagnostics: null };
     var desktopFrameSeq = 0, desktopFrameGeneration = 0, desktopFrameBusy = false, desktopInputSeq = 0;
     var desktopMovePending = null, desktopMoveTimer = null, desktopInputErrorAt = 0;
     var desktopPressedKeys = {}, desktopPressedButtons = {};
@@ -2728,6 +2748,8 @@
           renderRemoteDesktopNVCodecValidation(batch.validation);
         } else {
           await refreshRemoteDesktopNVCodecValidation();
+          await refreshRemoteDesktopNVCodecCanary();
+        await refreshRemoteDesktopNVCodecCanary();
         }
         if (batch.passed) {
           var memory = batch.gpuMemoryObserved
@@ -2742,6 +2764,7 @@
       } catch (err) {
         toast('NVIDIA 资格验证失败：' + ((err && err.message) || err));
         await refreshRemoteDesktopNVCodecValidation();
+        await refreshRemoteDesktopNVCodecCanary();
       } finally {
         setRemoteDesktopNVCodecValidationBusy(false, '');
       }
@@ -2785,11 +2808,97 @@
       } catch (err) {
         toast('NVIDIA 稳定性压力验证失败：' + ((err && err.message) || err));
         await refreshRemoteDesktopNVCodecValidation();
+        await refreshRemoteDesktopNVCodecCanary();
       } finally {
         setRemoteDesktopNVCodecValidationBusy(false, '');
       }
     }
     window.runRemoteDesktopNVCodecStressQualification = runRemoteDesktopNVCodecStressQualification;
+
+    function renderRemoteDesktopNVCodecCanary(report) {
+      state.desktopNVCodecDiagnostics = report || null;
+      var panel = $('desktop-nvcodec-canary-panel');
+      if (!panel) return;
+      var gate = report && report.nvcodecCanaryEligibility ? report.nvcodecCanaryEligibility : null;
+      if (!gate) {
+        panel.classList.add('hidden');
+        return;
+      }
+      panel.classList.remove('hidden');
+
+      var requested = !!gate.requested;
+      var eligible = !!gate.eligible;
+      var active = !!gate.active;
+      var tripped = !!gate.circuitTripped;
+      $('desktop-nvcodec-requested').textContent = requested ? '已请求' : '未请求';
+      $('desktop-nvcodec-eligible').textContent = eligible ? '已满足' : '未满足';
+      $('desktop-nvcodec-active').textContent = active ? '运行中' : '未生效';
+      $('desktop-nvcodec-tripped').textContent = tripped ? '已熔断' : '正常';
+
+      var validation = report.nvcodecValidation || {};
+      var passes = Number(validation.qualificationPasses || 0);
+      var requiredPasses = Number(validation.requiredPasses || 3);
+      $('desktop-nvcodec-qualification-progress').textContent =
+        Math.min(passes, requiredPasses) + '/' + requiredPasses +
+        (validation.current ? ' · 当前有效' : '');
+
+      var stress = report.nvcodecStressQualification || {};
+      var completed = Number(stress.completedRounds || gate.stressCompletedRounds || 0);
+      var requiredStress = Number(gate.stressRequiredRounds || stress.requestedRounds || 5);
+      $('desktop-nvcodec-stress-progress').textContent =
+        Math.min(completed, requiredStress) + '/' + requiredStress +
+        (stress.passed || gate.stressPassed ? ' · 通过' : '');
+
+      var badge = $('desktop-nvcodec-canary-badge');
+      var summary = $('desktop-nvcodec-canary-summary');
+      if (tripped) {
+        badge.textContent = '已熔断';
+        badge.className = 'text-[10px] font-semibold px-2 py-1 rounded-full border border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300';
+        summary.textContent = 'Canary 已在当前进程熔断；重启前不会重新启用 NVCodec。';
+      } else if (active) {
+        badge.textContent = 'ACTIVE';
+        badge.className = 'text-[10px] font-semibold px-2 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300';
+        summary.textContent = '用户已请求且资格证据有效，NVCodec 当前进入生产候选链。';
+      } else if (requested && !eligible) {
+        badge.textContent = '等待资格';
+        badge.className = 'text-[10px] font-semibold px-2 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
+        summary.textContent = '用户已请求，但 qualification/stress 证据尚未满足，因此不会启用 NVCodec。';
+      } else if (eligible) {
+        badge.textContent = '可启用';
+        badge.className = 'text-[10px] font-semibold px-2 py-1 rounded-full border border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300';
+        summary.textContent = '资格证据已满足；在客户端设置中开启 Canary 后才会启用。';
+      } else {
+        badge.textContent = '未启用';
+        badge.className = 'text-[10px] font-semibold px-2 py-1 rounded-full border border-slate-200 text-slate-600 dark:border-slate-700 dark:text-slate-300';
+        summary.textContent = 'Canary 默认关闭，NVCodec 不参与生产 backend 选择。';
+      }
+
+      var reasons = Array.isArray(gate.reasons) ? gate.reasons.slice() : [];
+      if (tripped && gate.circuitTripReason) {
+        var when = Number(gate.circuitTrippedAtUnixMs || 0);
+        reasons.unshift('运行时熔断' + (when ? ' · ' + new Date(when).toLocaleString() : '') + '：' + gate.circuitTripReason);
+      }
+      var reasonsEl = $('desktop-nvcodec-canary-reasons');
+      if (reasons.length) {
+        reasonsEl.textContent = reasons.join(' · ');
+        reasonsEl.classList.remove('hidden');
+      } else {
+        reasonsEl.textContent = '';
+        reasonsEl.classList.add('hidden');
+      }
+    }
+
+    async function refreshRemoteDesktopNVCodecCanary() {
+      if (!hasFn('goGetRemoteDesktopDiagnostics')) return null;
+      try {
+        var raw = await call('goGetRemoteDesktopDiagnostics');
+        var report = parseJSONResult(raw, null);
+        renderRemoteDesktopNVCodecCanary(report);
+        return report;
+      } catch (_) {
+        return null;
+      }
+    }
 
     function desktopDiagnosticsFilename(report) {
       report = report || {};
@@ -2807,6 +2916,7 @@
       try {
         var raw = await call('goGetRemoteDesktopDiagnostics');
         var report = parseJSONResult(raw, null);
+        renderRemoteDesktopNVCodecCanary(report);
         if (!report || !report.schemaVersion) {
           toast('还没有可导出的 Relay Desktop 诊断数据');
           return;
@@ -3841,6 +3951,7 @@
         $('desktop-nvcodec-self-test-btn').classList.remove('hidden');
         refreshRemoteDesktopNVCodecSelfTest();
         refreshRemoteDesktopNVCodecValidation();
+        refreshRemoteDesktopNVCodecCanary();
       }
       if (hasFn('goRunRemoteDesktopNVCodecQualification') && $('desktop-nvcodec-qualification-btn')) {
         $('desktop-nvcodec-qualification-btn').classList.remove('hidden');
@@ -3860,6 +3971,7 @@
           refreshRemoteDesktopStatus(false);
           refreshRemoteDesktopStats();
           refreshRemoteDesktopAudioStats();
+          refreshRemoteDesktopNVCodecCanary();
         }
       }, 2000);
       setInterval(refreshRemoteDesktopFrame, 100);

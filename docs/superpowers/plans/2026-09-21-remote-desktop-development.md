@@ -1196,6 +1196,15 @@ Windows SendInput / CF_UNICODETEXT
 - 修正程序设置保存时 theme 使用 `cfg-theme-mode`，避免仅修改 Canary 开关时意外把 system 主题写成 light/dark。
 - 下一步：在远程桌面页直接展示 requested / eligible / active / tripped 与拒绝原因，形成 NVIDIA 真机验证操作面板。
 
+### 0.2.97 RD3 NVIDIA Canary Verification Panel
+
+- 远程桌面页新增 NVIDIA NVCodec Canary 状态面板，直接展示 `requested / eligible / active / tripped` 四态。
+- 同步显示 3/3 qualification 与 5-round stress 进度；资格已满足但未 opt-in、已 opt-in 但资格不足、ACTIVE、runtime trip 均有独立状态提示。
+- runtime trip 时展示首次熔断时间和 `circuitTripReason`；资格不足时展示 eligibility reasons，无需反复查看原始 diagnostics JSON。
+- 面板复用现有 `GetRemoteDesktopDiagnostics`，不建立第二套状态源；进入远程桌面页周期刷新，自检/资格验证/压力验证及 diagnostics 导出后同步刷新。
+- 下一步进入 Windows NVIDIA 真机的 3/3 → stress → canary → NVENC/NVDEC 故障注入验证。
+
+
 
 ### 0.3 本轮进度（2026-09-22）
 

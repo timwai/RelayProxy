@@ -400,6 +400,7 @@ class MainActivity : Activity() {
         currentDeviceId = deviceId
         val uptimeMs = obj.optLong("serviceUptimeMs", 0)
         val error = obj.optString("lastError", "")
+        val activeNetwork = obj.optString("activeNetwork", "")
 
         when (state) {
             "CONNECTED" -> {
@@ -440,8 +441,11 @@ class MainActivity : Activity() {
         val config = store.load()
         infoServer.text = config.serverAddress.ifBlank { "未配置" }
         infoDevice.text = config.deviceName.ifBlank { "RelayProxy Android" }
-        infoNetworkMode.text = networkModeLabel(config.networkMode)
-        infoActiveNetwork.text = activeNetworkLabel(config.networkMode)
+        infoNetworkMode.text = networkModeLabel(
+            config.networkMode,
+            config.autoNetworkSwitch,
+        )
+        infoActiveNetwork.text = activeNetworkLabel(activeNetwork)
         infoApproval.text = approvalLabel(approval)
         infoExitPermission.text = if (approved) "已授权" else "未授权"
         infoUptime.text = formatDuration(uptimeMs)
@@ -512,15 +516,19 @@ class MainActivity : Activity() {
         return value.chunked(16).joinToString("\n")
     }
 
-    private fun networkModeLabel(mode: String): String = when (mode) {
-        NetworkBinder.MODE_WIFI -> "仅 Wi-Fi"
-        NetworkBinder.MODE_CELLULAR -> "仅移动数据"
+    private fun networkModeLabel(mode: String, autoSwitch: Boolean): String = when (mode) {
+        NetworkBinder.MODE_WIFI ->
+            if (autoSwitch) "Wi-Fi 优先 · 自动切换" else "仅 Wi-Fi"
+        NetworkBinder.MODE_CELLULAR ->
+            if (autoSwitch) "移动数据优先 · 自动切换" else "仅移动数据"
         else -> "自动选择"
     }
 
-    private fun activeNetworkLabel(mode: String): String {
-        if (mode == NetworkBinder.MODE_WIFI) return "Wi-Fi"
-        if (mode == NetworkBinder.MODE_CELLULAR) return "移动数据"
+    private fun activeNetworkLabel(activeMode: String): String {
+        when (activeMode) {
+            NetworkBinder.MODE_WIFI -> return "Wi-Fi"
+            NetworkBinder.MODE_CELLULAR -> return "移动数据"
+        }
 
         val connectivity = getSystemService(ConnectivityManager::class.java)
         val network = connectivity.activeNetwork ?: return "未连接"

@@ -244,6 +244,34 @@ func (s *WailsService) SelectExit(exitID string) (string, error) {
 	return okResult, nil
 }
 
+func (s *WailsService) GetNetworkServiceStatus() (string, error) {
+	data, err := json.Marshal(divert.GetPlatformServiceStatus())
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) RepairNetworkService() (string, error) {
+	if err := divert.RepairPlatformService(); err != nil {
+		log.Printf("[GUI] 修复 Network Service 失败: %v", err)
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{"ok": true, "message": "Network Service 已安装/修复并启动"})
+	return string(data), nil
+}
+
+func (s *WailsService) UninstallNetworkService() (string, error) {
+	if err := divert.UninstallPlatformService(); err != nil {
+		log.Printf("[GUI] 卸载 Network Service 失败: %v", err)
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{"ok": true, "message": "Network Service 已卸载"})
+	return string(data), nil
+}
+
 func (s *WailsService) SetAutostart(enabled bool) (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil

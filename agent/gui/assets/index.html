@@ -1732,7 +1732,7 @@
     async function uninstallNetworkService() {
       if (!hasFn('goUninstallNetworkService')) return;
       var warning = state.cfg && state.cfg.networkMode === 'divert'
-        ? '当前配置仍启用了系统透明代理。卸载服务会立即中断透明代理；下次手动启用/修复时可以重新安装。确定卸载吗？'
+        ? '卸载服务会同时关闭已保存的系统透明代理配置，并立即中断当前透明代理；重新启用时可再次安装。确定卸载吗？'
         : '确定卸载 RelayProxy Network Service 吗？';
       if (!confirm(warning)) return;
       var button = $('network-service-uninstall');
@@ -1740,6 +1740,7 @@
       try {
         var result = mutationResult(await call('goUninstallNetworkService'));
         toast((result && result.message) || (result && result.ok ? 'Network Service 已卸载' : 'Network Service 卸载失败'));
+        await loadConfig({ savedGroups: ['proxy'] });
         await refreshNetworkServiceStatus();
         await refreshStatus();
       } finally { if (button) button.disabled = false; }

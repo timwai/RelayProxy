@@ -524,22 +524,10 @@ class MainActivity : Activity() {
         else -> "自动选择"
     }
 
-    private fun activeNetworkLabel(activeMode: String): String {
-        when (activeMode) {
-            NetworkBinder.MODE_WIFI -> return "Wi-Fi"
-            NetworkBinder.MODE_CELLULAR -> return "移动数据"
-        }
-
-        val connectivity = getSystemService(ConnectivityManager::class.java)
-        val network = connectivity.activeNetwork ?: return "未连接"
-        val capabilities = connectivity.getNetworkCapabilities(network) ?: return "未知"
-        return when {
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "移动数据"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "以太网"
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
-            else -> "其他"
-        }
+    private fun activeNetworkLabel(activeMode: String): String = when (activeMode) {
+        NetworkBinder.MODE_WIFI -> "Wi-Fi"
+        NetworkBinder.MODE_CELLULAR -> "移动数据"
+        else -> "未连接"
     }
 
     private fun approvalLabel(value: String): String = when (value) {

@@ -204,6 +204,11 @@ class NetworkBinder(context: Context) {
         }
         val selected = preferred ?: fallback
 
+        // Rebind first. When Wi-Fi has just recovered this prevents the
+        // cellular request from being released before the process has moved
+        // back to Wi-Fi.
+        switchTo(selected)
+
         if (preferredMode == MODE_WIFI && automaticSwitch) {
             if (preferred == null) {
                 // Bring cellular up only while Wi-Fi is actually unavailable
@@ -215,8 +220,6 @@ class NetworkBinder(context: Context) {
                 releaseCellularRequest()
             }
         }
-
-        switchTo(selected)
     }
 
     private fun switchTo(candidate: Candidate?) {

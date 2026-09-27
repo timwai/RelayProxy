@@ -523,7 +523,6 @@ func TestPolicyPublicationLockOnlyGuardsClassification(t *testing.T) {
 	}
 }
 
-
 func TestClassificationFailsProxyOpenUntilRelayReady(t *testing.T) {
 	ready := false
 	server := newTestServer(t, Options{

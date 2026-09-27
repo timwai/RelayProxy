@@ -102,7 +102,7 @@ func (s *nvencD3D11Session) registerAYUVD3D11Input(frame D3D11EncodeFrame) (*nve
 	}
 
 	params := nvencRegisterResource{
-		Version:            nvencStructVersion(5),
+		Version:            nvencStructVersionFor(s.apiVersion, map[bool]uint32{true: 3, false: 5}[s.legacyABI]),
 		ResourceType:       nvencInputResourceTypeDirectX,
 		Width:              uint32(frame.Width),
 		Height:             uint32(frame.Height),
@@ -152,7 +152,7 @@ func (r *nvencD3D11InputResource) Map() (uintptr, int32, error) {
 		return 0, 0, ErrEncoderUnavailable
 	}
 	params := nvencMapInputResource{
-		Version:            nvencStructVersion(4),
+		Version:            nvencStructVersionFor(s.apiVersion, 4),
 		RegisteredResource: r.registered,
 	}
 	status := nvencCall(
@@ -254,7 +254,7 @@ func (s *nvencD3D11Session) createBitstreamBuffer() (*nvencBitstreamBuffer, erro
 		return nil, ErrEncoderUnavailable
 	}
 	params := nvencCreateBitstreamBuffer{
-		Version: nvencStructVersion(1),
+		Version: nvencStructVersionFor(s.apiVersion, 1),
 	}
 	status := nvencCall(
 		s.api.NvEncCreateBitstreamBuffer,

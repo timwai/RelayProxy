@@ -62,10 +62,12 @@ func TestWindowsDesktopCapabilitySnapshot(t *testing.T) {
 	source := []screencapture.Display{
 		{
 			ID: 10, DeviceName: `\\.\DISPLAY1`, PixelWidth: 1920, PixelHeight: 1080,
+			DPI: 96, Bounds: screencapture.Rect{X: 0, Y: 0, W: 1920, H: 1080},
 			Primary: true, AdapterIndex: 0, OutputIndex: 0,
 		},
 		{
 			ID: 20, DeviceName: `\\.\DISPLAY2`, PixelWidth: 2560, PixelHeight: 1440,
+			DPI: 144, Bounds: screencapture.Rect{X: -2560, Y: -360, W: 2560, H: 1440},
 			AdapterIndex: -1, OutputIndex: -1,
 		},
 	}
@@ -83,7 +85,8 @@ func TestWindowsDesktopCapabilitySnapshot(t *testing.T) {
 	if displays[0].ID != "10" || !displays[0].Primary || displays[0].Width != 1920 || displays[0].Height != 1080 {
 		t.Fatalf("primary display=%+v", displays[0])
 	}
-	if displays[1].ID != "20" || displays[1].Width != 2560 || displays[1].Height != 1440 {
+	if displays[1].ID != "20" || displays[1].Width != 2560 || displays[1].Height != 1440 ||
+		displays[1].X != -2560 || displays[1].Y != -360 || displays[1].DPI != 144 || displays[1].Scale != 1.5 {
 		t.Fatalf("secondary display=%+v", displays[1])
 	}
 }

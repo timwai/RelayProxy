@@ -138,13 +138,17 @@ func CloneDesktopGPUCandidateDiagnostics(
 }
 
 type DesktopDisplayCapability struct {
-	ID        string `json:"id"`
-	Name      string `json:"name,omitempty"`
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	RefreshHz int    `json:"refreshHz,omitempty"`
-	Primary   bool   `json:"primary,omitempty"`
-	HDR       bool   `json:"hdr,omitempty"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name,omitempty"`
+	X         int     `json:"x,omitempty"`
+	Y         int     `json:"y,omitempty"`
+	Width     int     `json:"width"`
+	Height    int     `json:"height"`
+	DPI       int     `json:"dpi,omitempty"`
+	Scale     float64 `json:"scale,omitempty"`
+	RefreshHz int     `json:"refreshHz,omitempty"`
+	Primary   bool    `json:"primary,omitempty"`
+	HDR       bool    `json:"hdr,omitempty"`
 }
 
 // DesktopCapabilities is the summary safe to expose to a controller before a

@@ -1234,6 +1234,14 @@ Windows SendInput / CF_UNICODETEXT
 - Intel 真机建议至少保持稳定 4:4:4 会话 30–60 秒后导出 diagnostics，再执行：
   `./scripts/analyze-desktop-gpu.ps1 <json> -RequireTargetAYUV -RequireIntelOneVPL -RequireEndToEndZeroCopy -RequireNoFallback -MinEndToEndSamples 20`。
 
+### 0.2.101 RD3 Multi-Display Topology Diagnostics
+
+- `DesktopDisplayCapability` 新增 `x / y / dpi / scale`，Windows capability snapshot 直接透传 EnumDisplayMonitors 的虚拟桌面坐标、effective DPI 与 scale，不再只保留宽高。
+- 负坐标、多行/上下布局与混合 DPI 因此成为协议和 diagnostics 的可机读事实；显示器 ID 仍是 session-lifetime HMONITOR，不持久化。
+- `RemoteDesktopDiagnosticsReport` 新增 `desktopSessions`，一次导出即可记录所有活动多窗口 session 的 `sessionId / displayId / displaysReady / displays`，secondary viewer 不再需要单独截图留证。
+- 下一步用分析脚本比较热插拔前后两个 diagnostics JSON，并校验多窗口是否绑定不同 DisplayID、实时 topology 是否 ready，以及负坐标/混合 DPI 是否被完整保留。
+
+
 
 
 

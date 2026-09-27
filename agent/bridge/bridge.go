@@ -174,6 +174,7 @@ func nvcodecRuntimeDiagnosticEvents(
 
 type RemoteDesktopDiagnosticsReport struct {
 	desktop.DesktopDiagnosticsReport
+	DesktopSessions            []protocol.RemoteDesktopStatus                 `json:"desktopSessions,omitempty"`
 	NVCodecSelfTest            *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
 	NVCodecValidation          *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
 	NVCodecStressQualification *NVCodecStressQualificationReport           `json:"nvcodecStressQualification,omitempty"`
@@ -184,6 +185,7 @@ type RemoteDesktopDiagnosticsReport struct {
 func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport {
 	report := RemoteDesktopDiagnosticsReport{
 		DesktopDiagnosticsReport: b.agent.RemoteDesktopDiagnostics(),
+		DesktopSessions:          b.agent.RemoteDesktopStatuses(),
 	}
 	b.mu.RLock()
 	if b.nvcodecSelfTest != nil {

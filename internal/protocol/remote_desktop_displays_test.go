@@ -58,3 +58,21 @@ func TestCloneDesktopGPUCapabilityDeepCopiesFormats(t *testing.T) {
 		t.Fatalf("GPU capability clone aliases original: original=%+v cloned=%+v", original, cloned)
 	}
 }
+
+func TestDesktopDisplayCapabilitySerializesTopologyMetadata(t *testing.T) {
+	display := DesktopDisplayCapability{
+		ID: "2", Name: "Secondary", X: -2560, Y: -360,
+		Width: 2560, Height: 1440, DPI: 144, Scale: 1.5,
+	}
+	data, err := json.Marshal(display)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"x":-2560`, `"y":-360`, `"dpi":144`, `"scale":1.5`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("display topology JSON %s missing %s", data, want)
+		}
+	}
+}

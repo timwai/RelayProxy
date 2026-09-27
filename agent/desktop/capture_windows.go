@@ -186,8 +186,12 @@ func windowsDesktopCapabilitySnapshot(displays []screencapture.Display, hasWGC b
 		out = append(out, protocol.DesktopDisplayCapability{
 			ID:      strconv.FormatUint(display.ID, 10),
 			Name:    display.DeviceName,
+			X:       display.Bounds.X,
+			Y:       display.Bounds.Y,
 			Width:   display.PixelWidth,
 			Height:  display.PixelHeight,
+			DPI:     display.DPI,
+			Scale:   display.Scale(),
 			Primary: display.Primary,
 		})
 	}

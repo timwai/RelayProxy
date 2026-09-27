@@ -762,14 +762,17 @@ func RepairPlatformService() error {
 	return runElevatedNetworkServiceHelper(networkServiceHelperInstall)
 }
 
-func UninstallPlatformService() error {
+func UninstallPlatformService() (NetworkServiceUninstallResult, error) {
 	if runtime.GOARCH != "amd64" {
-		return nil
+		return NetworkServiceUninstallResult{}, nil
 	}
 	if windows.GetCurrentProcessToken().IsElevated() {
 		return removeWindowsNetworkService()
 	}
-	return runElevatedNetworkServiceHelper(networkServiceHelperRemove)
+	if err := runElevatedNetworkServiceHelper(networkServiceHelperRemove); err != nil {
+		return NetworkServiceUninstallResult{}, err
+	}
+	return detectWindowsDeferredCleanup()
 }
 
 func windowsNetworkServiceState() (installed, running bool, binaryPath string, pid uint32, err error) {
@@ -885,7 +888,8 @@ func RunWindowsNetworkServiceHelper(action, allowedSID string) error {
 	case networkServiceHelperInstall:
 		return installWindowsNetworkService(allowedSID)
 	case networkServiceHelperRemove:
-		return removeWindowsNetworkService()
+		_, err := removeWindowsNetworkService()
+		return err
 	default:
 		return fmt.Errorf("未知的 Network Service 操作 %q", action)
 	}
@@ -920,7 +924,7 @@ func installWindowsNetworkService(allowedSID string) error {
 
 	manager, err := mgr.Connect()
 	if err != nil {
-		return fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
+		return NetworkServiceUninstallResult{}, fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
 	}
 	defer manager.Disconnect()
 
@@ -993,7 +997,7 @@ func installWindowsNetworkService(allowedSID string) error {
 	return nil
 }
 
-func removeWindowsNetworkService() error {
+func removeWindowsNetworkService() (NetworkServiceUninstallResult, error) {
 	manager, err := mgr.Connect()
 	if err != nil {
 		return fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
@@ -1006,41 +1010,42 @@ func removeWindowsNetworkService() error {
 		status, queryErr := service.Query()
 		if queryErr != nil {
 			_ = service.Close()
-			return fmt.Errorf("查询 RelayProxy Network Service 状态失败: %w", queryErr)
+			return NetworkServiceUninstallResult{}, fmt.Errorf("查询 RelayProxy Network Service 状态失败: %w", queryErr)
 		}
 		if status.State != svc.Stopped {
 			if _, controlErr := service.Control(svc.Stop); controlErr != nil &&
 				!errors.Is(controlErr, windows.ERROR_SERVICE_NOT_ACTIVE) {
 				_ = service.Close()
-				return fmt.Errorf("停止 RelayProxy Network Service 失败: %w", controlErr)
+				return NetworkServiceUninstallResult{}, fmt.Errorf("停止 RelayProxy Network Service 失败: %w", controlErr)
 			}
 			if waitErr := waitWindowsServiceState(service, svc.Stopped, 15*time.Second); waitErr != nil {
 				_ = service.Close()
-				return waitErr
+				return NetworkServiceUninstallResult{}, waitErr
 			}
 		}
 		deleteErr := service.Delete()
 		closeErr := service.Close()
 		if deleteErr != nil && !errors.Is(deleteErr, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
-			return fmt.Errorf("删除 RelayProxy Network Service 失败: %w", deleteErr)
+			return NetworkServiceUninstallResult{}, fmt.Errorf("删除 RelayProxy Network Service 失败: %w", deleteErr)
 		}
 		if closeErr != nil {
-			return fmt.Errorf("关闭 RelayProxy Network Service 句柄失败: %w", closeErr)
+			return NetworkServiceUninstallResult{}, fmt.Errorf("关闭 RelayProxy Network Service 句柄失败: %w", closeErr)
 		}
 		if err := waitWindowsServiceDeleted(manager, 15*time.Second); err != nil {
-			return err
+			return NetworkServiceUninstallResult{}, err
 		}
 	case errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST):
 		// The SCM entry may already be gone while an earlier uninstall left
 		// ProgramData artifacts behind. Cleanup must still run.
 	default:
-		return fmt.Errorf("打开 RelayProxy Network Service 失败: %w", openErr)
+		return NetworkServiceUninstallResult{}, fmt.Errorf("打开 RelayProxy Network Service 失败: %w", openErr)
 	}
 
-	if err := cleanupWindowsNetworkServiceArtifacts(); err != nil {
-		return err
+	result, err := cleanupWindowsNetworkServiceArtifacts()
+	if err != nil {
+		return NetworkServiceUninstallResult{}, err
 	}
-	return nil
+	return result, nil
 }
 
 func waitWindowsServiceDeleted(manager *mgr.Mgr, timeout time.Duration) error {
@@ -1063,10 +1068,10 @@ func waitWindowsServiceDeleted(manager *mgr.Mgr, timeout time.Duration) error {
 	return errors.New("RelayProxy Network Service 已标记删除，但未在超时内从 SCM 完全消失")
 }
 
-func cleanupWindowsNetworkServiceArtifacts() error {
+func cleanupWindowsNetworkServiceArtifacts() (NetworkServiceUninstallResult, error) {
 	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
 	if err != nil {
-		return fmt.Errorf("获取 ProgramData 路径失败: %w", err)
+		return NetworkServiceUninstallResult{}, fmt.Errorf("获取 ProgramData 路径失败: %w", err)
 	}
 
 	// The staged broker executable must be removable immediately once SCM and
@@ -1074,7 +1079,7 @@ func cleanupWindowsNetworkServiceArtifacts() error {
 	// failure rather than silently reporting success.
 	serviceRoot := filepath.Join(programData, "RelayProxy-Network-Service")
 	if err := removeWindowsTreeWithRetry(serviceRoot, 5*time.Second); err != nil {
-		return fmt.Errorf("删除 Network Service 程序目录失败 %s: %w", serviceRoot, err)
+		return NetworkServiceUninstallResult{}, fmt.Errorf("删除 Network Service 程序目录失败 %s: %w", serviceRoot, err)
 	}
 
 	// WinDivert runtime belongs to the privileged transparent-proxy component.
@@ -1084,11 +1089,25 @@ func cleanupWindowsNetworkServiceArtifacts() error {
 	winDivertRoot := filepath.Join(programData, "RelayProxy-WinDivert")
 	if err := removeWindowsTreeWithRetry(winDivertRoot, 5*time.Second); err != nil {
 		if scheduleErr := scheduleWindowsTreeDeleteOnReboot(winDivertRoot); scheduleErr != nil {
-			return fmt.Errorf("删除 WinDivert 运行目录失败 %s: %v；安排重启后删除也失败: %w", winDivertRoot, err, scheduleErr)
+			return NetworkServiceUninstallResult{}, fmt.Errorf("删除 WinDivert 运行目录失败 %s: %v；安排重启后删除也失败: %w", winDivertRoot, err, scheduleErr)
 		}
-		return fmt.Errorf("Network Service 已完全卸载；WinDivert 目录仍被 Windows 占用，已安排在下次重启后删除: %s", winDivertRoot)
+		return NetworkServiceUninstallResult{RebootCleanup: true, CleanupPath: winDivertRoot}, nil
 	}
-	return nil
+	return NetworkServiceUninstallResult{}, nil
+}
+
+func detectWindowsDeferredCleanup() (NetworkServiceUninstallResult, error) {
+	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil {
+		return NetworkServiceUninstallResult{}, err
+	}
+	winDivertRoot := filepath.Join(programData, "RelayProxy-WinDivert")
+	if _, err := os.Stat(winDivertRoot); err == nil {
+		return NetworkServiceUninstallResult{RebootCleanup: true, CleanupPath: winDivertRoot}, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return NetworkServiceUninstallResult{}, err
+	}
+	return NetworkServiceUninstallResult{}, nil
 }
 
 func removeWindowsTreeWithRetry(path string, timeout time.Duration) error {

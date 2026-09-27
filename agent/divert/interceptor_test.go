@@ -449,7 +449,6 @@ func TestInterceptorAcceptedTCPUsesOriginalRoute(t *testing.T) {
 	}
 }
 
-
 func TestInterceptorFailsOpenForUnclassifiablePacket(t *testing.T) {
 	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionProxy}})
 	raw := []byte{0x45, 0x00, 0x00}

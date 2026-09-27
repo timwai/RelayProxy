@@ -24,6 +24,25 @@ func TestFormatNVENCMaxSupportedVersion(t *testing.T) {
 	}
 }
 
+func TestNVENCStatusNames(t *testing.T) {
+	tests := []struct {
+		status int32
+		want   string
+	}{
+		{status: 0, want: "NV_ENC_SUCCESS (0)"},
+		{status: 1, want: "NV_ENC_ERR_NO_ENCODE_DEVICE (1)"},
+		{status: 2, want: "NV_ENC_ERR_UNSUPPORTED_DEVICE (2)"},
+		{status: 3, want: "NV_ENC_ERR_INVALID_ENCODERDEVICE (3)"},
+		{status: 4, want: "NV_ENC_ERR_INVALID_DEVICE (4)"},
+		{status: 99, want: "NVENC_STATUS_99 (99)"},
+	}
+	for _, test := range tests {
+		if got := formatNVENCStatus(test.status); got != test.want {
+			t.Fatalf("formatNVENCStatus(%d)=%q want=%q", test.status, got, test.want)
+		}
+	}
+}
+
 func TestFormatAMFRuntimeVersion(t *testing.T) {
 	if got := formatAMFRuntimeVersion(0); got != "" {
 		t.Fatalf("zero AMF version=%q", got)

@@ -27,6 +27,9 @@ type nvencD3D11Session struct {
 	encoder uintptr
 	device  uintptr
 
+	apiVersion uint32
+	legacyABI  bool
+
 	initialized bool
 	videoConfig VideoConfig
 	initConfig  *nvencConfigBlob
@@ -34,7 +37,7 @@ type nvencD3D11Session struct {
 	closed      bool
 }
 
-func validateNVENCProductionFunctionList(api nvEncodeAPIFunctionList) error {
+func validateNVENCProductionFunctionList(api nvEncodeAPIFunctionList, legacy bool) error {
 	required := []struct {
 		name string
 		proc uintptr
@@ -43,7 +46,6 @@ func validateNVENCProductionFunctionList(api nvEncodeAPIFunctionList) error {
 		{"nvEncGetEncodeGUIDCount", api.NvEncGetEncodeGUIDCount},
 		{"nvEncGetEncodeGUIDs", api.NvEncGetEncodeGUIDs},
 		{"nvEncGetEncodeCaps", api.NvEncGetEncodeCaps},
-		{"nvEncGetEncodePresetConfigEx", api.NvEncGetEncodePresetConfigEx},
 		{"nvEncInitializeEncoder", api.NvEncInitializeEncoder},
 		{"nvEncCreateBitstreamBuffer", api.NvEncCreateBitstreamBuffer},
 		{"nvEncDestroyBitstreamBuffer", api.NvEncDestroyBitstreamBuffer},
@@ -58,6 +60,17 @@ func validateNVENCProductionFunctionList(api nvEncodeAPIFunctionList) error {
 		{"nvEncReconfigureEncoder", api.NvEncReconfigureEncoder},
 		{"nvEncDestroyEncoder", api.NvEncDestroyEncoder},
 	}
+	if legacy {
+		required = append(required, struct {
+			name string
+			proc uintptr
+		}{"nvEncGetEncodePresetConfig", api.NvEncGetEncodePresetConfig})
+	} else {
+		required = append(required, struct {
+			name string
+			proc uintptr
+		}{"nvEncGetEncodePresetConfigEx", api.NvEncGetEncodePresetConfigEx})
+	}
 	for _, entry := range required {
 		if entry.proc == 0 {
 			return fmt.Errorf("%s is unavailable", entry.name)
@@ -66,14 +79,14 @@ func validateNVENCProductionFunctionList(api nvEncodeAPIFunctionList) error {
 	return nil
 }
 
-func loadNVENCProductionAPI() (windows.Handle, nvEncodeAPIFunctionList, error) {
+func loadNVENCProductionAPI() (windows.Handle, nvEncodeAPIFunctionList, uint32, bool, error) {
 	module, err := windows.LoadLibrary(nvEncodeRuntimeDLL)
 	if err != nil {
-		return 0, nvEncodeAPIFunctionList{}, fmt.Errorf("%s: %w", nvEncodeRuntimeDLL, err)
+		return 0, nvEncodeAPIFunctionList{}, 0, false, fmt.Errorf("%s: %w", nvEncodeRuntimeDLL, err)
 	}
-	fail := func(err error) (windows.Handle, nvEncodeAPIFunctionList, error) {
+	fail := func(err error) (windows.Handle, nvEncodeAPIFunctionList, uint32, bool, error) {
 		_ = windows.FreeLibrary(module)
-		return 0, nvEncodeAPIFunctionList{}, err
+		return 0, nvEncodeAPIFunctionList{}, 0, false, err
 	}
 
 	getVersion, err := windows.GetProcAddress(module, "NvEncodeAPIGetMaxSupportedVersion")
@@ -94,23 +107,24 @@ func loadNVENCProductionAPI() (windows.Handle, nvEncodeAPIFunctionList, error) {
 	if got := runtimeCandidateStatus(status); got != 0 {
 		return fail(fmt.Errorf("NvEncodeAPIGetMaxSupportedVersion returned %d", got))
 	}
-	if maxSupportedVersion < nvencMaxVersionCode {
+	apiVersion, legacy := nvencAPIVersionForDriver(maxSupportedVersion)
+	if apiVersion == 0 {
 		return fail(fmt.Errorf(
-			"NVENC driver API %s is older than required ABI %d.%d",
+			"NVENC driver API %s is older than minimum supported ABI %d.%d",
 			formatNVENCMaxSupportedVersion(maxSupportedVersion),
-			nvencAPIMajorVersion,
-			nvencAPIMinorVersion,
+			nvencLegacyAPIMajorVersion,
+			nvencLegacyAPIMinorVersion,
 		))
 	}
 
-	api, err := createNVENCFunctionList(createInstance)
+	api, err := createNVENCFunctionListFor(createInstance, apiVersion)
 	if err != nil {
 		return fail(err)
 	}
-	if err := validateNVENCProductionFunctionList(api); err != nil {
+	if err := validateNVENCProductionFunctionList(api, legacy); err != nil {
 		return fail(err)
 	}
-	return module, api, nil
+	return module, api, apiVersion, legacy, nil
 }
 
 func openNVENCHEVC444D3D11Session(
@@ -124,14 +138,16 @@ func openNVENCHEVC444D3D11Session(
 		return nil, fmt.Errorf("%w: NVENC D3D11 device is nil", ErrEncoderUnavailable)
 	}
 
-	module, api, err := loadNVENCProductionAPI()
+	module, api, apiVersion, legacy, err := loadNVENCProductionAPI()
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrEncoderUnavailable, err)
 	}
 	session := &nvencD3D11Session{
-		module: module,
-		api:    api,
-		device: device,
+		module:     module,
+		api:        api,
+		device:     device,
+		apiVersion: apiVersion,
+		legacyABI:  legacy,
 	}
 	cleanup := true
 	defer func() {
@@ -141,10 +157,10 @@ func openNVENCHEVC444D3D11Session(
 	}()
 
 	params := nvencOpenEncodeSessionExParams{
-		Version:    nvencStructVersion(1),
+		Version:    nvencStructVersionFor(apiVersion, 1),
 		DeviceType: nvencDeviceTypeDirectX,
 		Device:     device,
-		APIVersion: nvencAPIVersion,
+		APIVersion: apiVersion,
 	}
 	status := nvencCall(
 		api.NvEncOpenEncodeSessionEx,
@@ -161,7 +177,7 @@ func openNVENCHEVC444D3D11Session(
 		)
 	}
 
-	checked, supported, err := probeNVENCHEVC444OnSession(api, session.encoder)
+	checked, supported, err := probeNVENCHEVC444OnSession(api, session.encoder, apiVersion)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrEncoderUnavailable, err)
 	}
@@ -229,6 +245,8 @@ func (s *nvencD3D11Session) Close() error {
 	s.module = 0
 	s.api = nvEncodeAPIFunctionList{}
 	s.encoder = 0
+	s.apiVersion = 0
+	s.legacyABI = false
 	s.device = 0
 	s.initialized = false
 	s.videoConfig = VideoConfig{}

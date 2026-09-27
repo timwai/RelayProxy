@@ -63,7 +63,7 @@ func main() {
 		return
 	}
 	if *networkServiceHelperFlag != "" {
-		if err := divert.RunWindowsNetworkServiceHelper(*networkServiceHelperFlag); err != nil {
+		if err := divert.RunWindowsNetworkServiceHelper(*networkServiceHelperFlag, *networkServiceSIDFlag); err != nil {
 			log.Printf("[NetworkService] helper failed: %v", err)
 			os.Exit(1)
 		}

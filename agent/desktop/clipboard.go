@@ -199,6 +199,15 @@ func (s *clipboardSyncState) IsCurrentContent(content protocol.DesktopClipboardS
 	return s.initialized && clipboardContentEqual(s.content, content)
 }
 
+func (s *clipboardSyncState) IsCurrentFiles(paths []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.initialized || s.content.Kind != protocol.DesktopClipboardKindFiles {
+		return false
+	}
+	return clipboardFilePathsKey(s.content.LocalPaths) == clipboardFilePathsKey(paths)
+}
+
 func (s *clipboardSyncState) Seed(text string) {
 	content, _ := validateClipboardContent(protocol.DesktopClipboardState{
 		Kind: protocol.DesktopClipboardKindText, Text: text,
@@ -263,6 +272,10 @@ func (h *Host) streamClipboard(ctx context.Context, conn *desktopmedia.MediaConn
 				paths, fileErr := fileEndpoint.ClipboardFiles(ctx)
 				if fileErr == nil && len(paths) > 0 {
 					key := clipboardFilePathsKey(paths)
+					if state.IsCurrentFiles(paths) {
+						lastFileKey = key
+						continue
+					}
 					if key != lastFileKey {
 						content, sendErr := sendClipboardFiles(ctx, conn, paths)
 						if sendErr != nil {

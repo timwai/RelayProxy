@@ -163,11 +163,12 @@ func sendClipboardFiles(ctx context.Context, conn *desktopmedia.MediaConn, paths
 }
 
 type clipboardFileReceiver struct {
-	transferID string
-	dir        string
-	files      []protocol.DesktopClipboardFile
-	handles    []*os.File
-	offsets    []int64
+	transferID  string
+	dir         string
+	completedDir string
+	files       []protocol.DesktopClipboardFile
+	handles     []*os.File
+	offsets     []int64
 }
 
 func (r *clipboardFileReceiver) reset() {
@@ -179,7 +180,23 @@ func (r *clipboardFileReceiver) reset() {
 	if r.dir != "" {
 		_ = os.RemoveAll(r.dir)
 	}
-	*r = clipboardFileReceiver{}
+	r.transferID = ""
+	r.dir = ""
+	r.files = nil
+	r.handles = nil
+	r.offsets = nil
+}
+
+func (r *clipboardFileReceiver) cleanupCompleted() {
+	if r.completedDir != "" {
+		_ = os.RemoveAll(r.completedDir)
+		r.completedDir = ""
+	}
+}
+
+func (r *clipboardFileReceiver) close() {
+	r.reset()
+	r.cleanupCompleted()
 }
 
 func (r *clipboardFileReceiver) offer(offer protocol.DesktopClipboardFileOffer) error {
@@ -289,11 +306,16 @@ func (r *clipboardFileReceiver) done(done protocol.DesktopClipboardFileDone) (pr
 		Files:      append([]protocol.DesktopClipboardFile(nil), r.files...),
 		LocalPaths: paths,
 	}
+	oldCompleted := r.completedDir
+	r.completedDir = r.dir
 	r.transferID = ""
 	r.dir = ""
 	r.files = nil
 	r.handles = nil
 	r.offsets = nil
+	if oldCompleted != "" && oldCompleted != r.completedDir {
+		_ = os.RemoveAll(oldCompleted)
+	}
 	return state, nil
 }
 

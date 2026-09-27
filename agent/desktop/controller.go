@@ -113,7 +113,7 @@ func StartControllerWithOptions(
 
 func (s *ControllerSession) controlLoop(ctx context.Context) {
 	var fileReceiver clipboardFileReceiver
-	defer fileReceiver.reset()
+	defer fileReceiver.close()
 	for {
 		message, err := s.conn.ReceiveSessionMessage(ctx)
 		if err != nil {

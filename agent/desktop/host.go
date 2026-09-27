@@ -587,7 +587,7 @@ func (h *Host) readSessionControlLoop(
 	var lastInputSequence uint64
 	var lastClipboardSequence uint64
 	var fileReceiver clipboardFileReceiver
-	defer fileReceiver.reset()
+	defer fileReceiver.close()
 	for {
 		message, err := conn.ReceiveSessionMessage(ctx)
 		if err != nil {

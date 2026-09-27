@@ -224,7 +224,17 @@ func H265444DecodeAvailable(probes []H265444BackendProbe) bool {
 }
 
 func H265444EndToEndAvailable(probes []H265444BackendProbe) bool {
-	return H265444EncodeAvailable(probes) && H265444DecodeAvailable(probes)
+	// A public 4:4:4 capability is only usable when one concrete backend can
+	// perform both directions. Do not combine encode support from one vendor
+	// with decode support from another: the negotiated session selects a single
+	// backend/interop contract and split capabilities cannot form a working
+	// end-to-end path.
+	for _, probe := range probes {
+		if probe.EndToEnd() {
+			return true
+		}
+	}
+	return false
 }
 
 func h265444BackendErrors(unavailable error, errs []error) error {

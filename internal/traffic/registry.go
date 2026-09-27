@@ -24,17 +24,17 @@ type Metadata struct {
 	ProcessName    string   `json:"process_name"`
 	ProcessAliases []string `json:"process_aliases,omitempty"`
 	Services       []string `json:"services,omitempty"`
-	Source       string `json:"source"`
-	Host         string `json:"host"`
-	DomainSource string `json:"domain_source"` // requested, dns, or unknown
-	IP           string `json:"ip"`
-	Port         uint16 `json:"port"`
-	Protocol     string `json:"protocol"`
-	Entry        string `json:"entry"`
-	Action       string `json:"action"`
-	Rule         string `json:"rule"`
-	ExitID       string `json:"exit_id"`
-	Accounting   string `json:"accounting"` // stream payload or observed packet payload
+	Source         string   `json:"source"`
+	Host           string   `json:"host"`
+	DomainSource   string   `json:"domain_source"` // requested, dns, or unknown
+	IP             string   `json:"ip"`
+	Port           uint16   `json:"port"`
+	Protocol       string   `json:"protocol"`
+	Entry          string   `json:"entry"`
+	Action         string   `json:"action"`
+	Rule           string   `json:"rule"`
+	ExitID         string   `json:"exit_id"`
+	Accounting     string   `json:"accounting"` // stream payload or observed packet payload
 }
 
 type Connection struct {

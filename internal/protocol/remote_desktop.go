@@ -335,7 +335,10 @@ const (
 	DesktopSessionAudioControl = "audio_control"
 	DesktopSessionIDRRequest   = "idr_request"
 	DesktopSessionCursor       = "cursor"
-	DesktopSessionClipboard    = "clipboard"
+	DesktopSessionClipboard          = "clipboard"
+	DesktopSessionClipboardFileOffer = "clipboard_file_offer"
+	DesktopSessionClipboardFileChunk = "clipboard_file_chunk"
+	DesktopSessionClipboardFileDone  = "clipboard_file_done"
 	DesktopSessionPing         = "ping"
 	DesktopSessionPong         = "pong"
 	DesktopSessionStatsReport  = "stats"
@@ -350,7 +353,10 @@ type DesktopSessionMessage struct {
 	AudioConfig  *DesktopAudioConfig        `json:"audioConfig,omitempty"`
 	AudioControl *DesktopAudioControl       `json:"audioControl,omitempty"`
 	Cursor       *DesktopCursorState        `json:"cursor,omitempty"`
-	Clipboard    *DesktopClipboardState     `json:"clipboard,omitempty"`
+	Clipboard          *DesktopClipboardState     `json:"clipboard,omitempty"`
+	ClipboardFileOffer *DesktopClipboardFileOffer `json:"clipboardFileOffer,omitempty"`
+	ClipboardFileChunk *DesktopClipboardFileChunk `json:"clipboardFileChunk,omitempty"`
+	ClipboardFileDone  *DesktopClipboardFileDone  `json:"clipboardFileDone,omitempty"`
 	Probe        *DesktopSessionProbe       `json:"probe,omitempty"`
 	Stats        *DesktopSessionStats       `json:"stats,omitempty"`
 	Displays     []DesktopDisplayCapability `json:"displays,omitempty"`
@@ -384,15 +390,41 @@ const (
 )
 
 const (
-	DesktopClipboardKindText = "text"
-	DesktopClipboardKindPNG  = "png"
+	DesktopClipboardKindText  = "text"
+	DesktopClipboardKindPNG   = "png"
+	DesktopClipboardKindFiles = "files"
 )
 
 type DesktopClipboardState struct {
-	Sequence uint64 `json:"sequence"`
-	Kind     string `json:"kind,omitempty"`
-	Text     string `json:"text,omitempty"`
-	PNG      []byte `json:"png,omitempty"`
+	Sequence   uint64                 `json:"sequence"`
+	Kind       string                 `json:"kind,omitempty"`
+	Text       string                 `json:"text,omitempty"`
+	PNG        []byte                 `json:"png,omitempty"`
+	TransferID string                 `json:"transferId,omitempty"`
+	Files      []DesktopClipboardFile `json:"files,omitempty"`
+	LocalPaths []string               `json:"-"`
+}
+
+type DesktopClipboardFile struct {
+	Name   string `json:"name"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256,omitempty"`
+}
+
+type DesktopClipboardFileOffer struct {
+	TransferID string                 `json:"transferId"`
+	Files      []DesktopClipboardFile `json:"files"`
+}
+
+type DesktopClipboardFileChunk struct {
+	TransferID string `json:"transferId"`
+	FileIndex  int    `json:"fileIndex"`
+	Offset     int64  `json:"offset"`
+	Data       []byte `json:"data"`
+}
+
+type DesktopClipboardFileDone struct {
+	TransferID string `json:"transferId"`
 }
 
 type DesktopCursorState struct {

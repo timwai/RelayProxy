@@ -18,6 +18,7 @@ import (
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
+	"relayproxy/agent/divert"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
@@ -42,6 +43,9 @@ func main() {
 	hiddenFlag := flag.Bool("hidden", false, "Alias for --minimized (kept for existing autostart entries)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
 	startupHelperFlag := flag.String(startup.HelperFlagName(), "", "Internal Windows startup helper action")
+	networkServiceFlag := flag.Bool(divert.NetworkServiceModeFlagName(), false, "Internal Windows network service mode")
+	networkServiceSIDFlag := flag.String(divert.NetworkServiceSIDFlagName(), "", "Internal Windows network service allowed SID")
+	networkServiceHelperFlag := flag.String(divert.NetworkServiceHelperFlagName(), "", "Internal Windows network service helper action")
 
 	var noWebFlag bool
 	flag.BoolVar(&noWebFlag, "no-web", false, "Disable the embedded web management page")
@@ -50,6 +54,21 @@ func main() {
 	webListenFlag := flag.String("web-listen", "", "Override the web management listen address")
 
 	flag.Parse()
+
+	if *networkServiceFlag {
+		if err := divert.RunWindowsNetworkService(*networkServiceSIDFlag); err != nil {
+			log.Printf("[NetworkService] %v", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *networkServiceHelperFlag != "" {
+		if err := divert.RunWindowsNetworkServiceHelper(*networkServiceHelperFlag); err != nil {
+			log.Printf("[NetworkService] helper failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *startupHelperFlag != "" {
 		if err := startup.RunElevatedHelper(*startupHelperFlag, "RelayProxy Agent", *configPath); err != nil {

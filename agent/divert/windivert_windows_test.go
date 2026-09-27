@@ -187,7 +187,6 @@ func TestWinDivertNativeFilter(t *testing.T) {
 	runtime.KeepAlive(filter)
 }
 
-
 func TestWinDivertLiveBrokerStyleReinjection(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("WinDivert live test requires Windows amd64")

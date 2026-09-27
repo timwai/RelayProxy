@@ -57,7 +57,53 @@ func TestNegotiateRemoteDesktopVideoRejectsH265WithoutLocalDecoder(t *testing.T)
 	}
 }
 
-func TestNegotiateRemoteDesktopVideoKeepsAutoOnEstablishedCodecPath(t *testing.T) {
+func TestNegotiateRemoteDesktopVideoAutoPrefersH265WhenBothSidesSupport420(t *testing.T) {
+	target := videoTarget(
+		protocol.DesktopCodecCapability{Codec: "h264", Encode: true, Chroma420: true},
+		protocol.DesktopCodecCapability{Codec: "h265", Encode: true, Chroma420: true},
+	)
+	local := []protocol.DesktopCodecCapability{
+		{Codec: "h264", Decode: true, Chroma420: true},
+		{Codec: "h265", Decode: true, Chroma420: true},
+	}
+	options, err := negotiateRemoteDesktopVideo(
+		target,
+		local,
+		protocol.RemoteDesktopConnectOptions{Codec: "auto"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Codec != "h265" {
+		t.Fatalf("auto codec=%q want h265", options.Codec)
+	}
+}
+
+func TestNegotiateRemoteDesktopVideoAutoFallsBackToH264WithoutH265EndToEnd420(t *testing.T) {
+	target := videoTarget(
+		protocol.DesktopCodecCapability{
+			Codec: "h265", Encode: true, Chroma420: true, EncodeChroma: []string{"444"},
+		},
+		protocol.DesktopCodecCapability{Codec: "h264", Encode: true, Chroma420: true},
+	)
+	local := []protocol.DesktopCodecCapability{
+		{Codec: "h265", Decode: true, Chroma420: true, DecodeChroma: []string{"420"}},
+		{Codec: "h264", Decode: true, Chroma420: true},
+	}
+	options, err := negotiateRemoteDesktopVideo(
+		target,
+		local,
+		protocol.RemoteDesktopConnectOptions{Codec: "auto"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Codec != "h264" {
+		t.Fatalf("auto codec=%q want h264", options.Codec)
+	}
+}
+
+func TestNegotiateRemoteDesktopVideoAutoFallsBackToJPEGWithoutShared420Codec(t *testing.T) {
 	options, err := negotiateRemoteDesktopVideo(
 		videoTarget(),
 		nil,
@@ -66,8 +112,8 @@ func TestNegotiateRemoteDesktopVideoKeepsAutoOnEstablishedCodecPath(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.Codec != "auto" {
-		t.Fatalf("auto codec=%q", options.Codec)
+	if options.Codec != "jpeg" {
+		t.Fatalf("auto codec=%q want jpeg", options.Codec)
 	}
 }
 

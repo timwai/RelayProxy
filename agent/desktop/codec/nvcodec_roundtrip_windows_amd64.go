@@ -425,7 +425,7 @@ func probeNVDECValidationCapabilities(ctx context.Context) nvidiaNVDECDeviceProb
 		result.Error = fmt.Sprintf("%s/cuvidGetDecoderCaps: %v", nvDecodeRuntimeDLL, err)
 		return result
 	}
-	return probeNVIDIANVDECHEVC444(ctx, getDecoderCaps)
+	return probeNVIDIANVDEC(ctx, getDecoderCaps)
 }
 
 func ValidateNVCodecH265444RoundTrip(

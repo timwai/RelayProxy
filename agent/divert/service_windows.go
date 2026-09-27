@@ -48,7 +48,7 @@ const (
 	networkFrameHeaderBytes  = 24
 	networkFrameMaxPayload   = 1 << 20
 
-	pipeAccessDuplex       = 0x00000003
+	pipeAccessDuplex        = 0x00000003
 	pipeRejectRemoteClients = 0x00000008
 
 	shellExecuteNoCloseProcess = 0x00000040

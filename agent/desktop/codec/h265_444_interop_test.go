@@ -57,15 +57,30 @@ func TestH265444BackendLifecycleContract(t *testing.T) {
 	}
 }
 
-func TestNVCodecBackendStaysProductionDisabled(t *testing.T) {
+func TestNVCodecBackendProductionGateMatchesPlatform(t *testing.T) {
+	resetNVCodecCanaryForTest()
+	t.Cleanup(resetNVCodecCanaryForTest)
+
 	backend := platformNVCodecH265444Backend()
 	if backend.name != H265444BackendNVCodec {
 		t.Fatalf("backend name=%q", backend.name)
 	}
-	if backend.productionReady || backend.zeroCopyValidated {
-		t.Fatalf("NVCodec scaffold unexpectedly enabled: %+v", backend)
+	if !backend.productionReady {
+		if backend.productionGateError() == nil {
+			t.Fatal("unsupported NVCodec backend did not remain behind the production gate")
+		}
+		return
+	}
+	if !backend.zeroCopyValidated {
+		t.Fatal("production NVCodec backend is missing zero-copy validation")
+	}
+	if backend.enabled == nil {
+		t.Fatal("production NVCodec backend is missing canary gate")
+	}
+	if backend.enabled() {
+		t.Fatal("production NVCodec backend is active without explicit canary opt-in")
 	}
 	if backend.productionGateError() == nil {
-		t.Fatal("NVCodec scaffold did not remain behind the production gate")
+		t.Fatal("disabled NVCodec canary unexpectedly passed the production gate")
 	}
 }

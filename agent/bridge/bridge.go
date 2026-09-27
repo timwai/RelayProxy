@@ -156,7 +156,7 @@ type RemoteDesktopDiagnosticsReport struct {
 	NVCodecSelfTest            *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
 	NVCodecValidation          *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
 	NVCodecStressQualification *NVCodecStressQualificationReport           `json:"nvcodecStressQualification,omitempty"`
-	NVCodecCanaryEligibility    NVCodecCanaryEligibility                    `json:"nvcodecCanaryEligibility"`
+	NVCodecCanaryEligibility   NVCodecCanaryEligibility                    `json:"nvcodecCanaryEligibility"`
 	RuntimeEvents              []RemoteDesktopDiagnosticEvent              `json:"runtimeEvents,omitempty"`
 }
 
@@ -879,7 +879,6 @@ func (b *UIBridge) SetAutoStart(enable bool) error {
 func (b *UIBridge) Close() error {
 	return b.agent.Close()
 }
-
 
 func (b *UIBridge) syncNVCodecCanaryGateFromConfig() {
 	if b == nil {

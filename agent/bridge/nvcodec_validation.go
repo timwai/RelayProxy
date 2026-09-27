@@ -33,20 +33,20 @@ type NVCodecValidationReceipt struct {
 }
 
 type NVCodecCanaryEligibility struct {
-	Eligible             bool     `json:"eligible"`
-	Requested            bool     `json:"requested"`
-	Active               bool     `json:"active"`
+	Eligible               bool     `json:"eligible"`
+	Requested              bool     `json:"requested"`
+	Active                 bool     `json:"active"`
 	CircuitTripped         bool     `json:"circuitTripped"`
 	CircuitTrippedAtUnixMs int64    `json:"circuitTrippedAtUnixMs,omitempty"`
 	CircuitTripReason      string   `json:"circuitTripReason,omitempty"`
 	ValidationCurrent      bool     `json:"validationCurrent"`
-	StressPresent        bool     `json:"stressPresent"`
-	StressPassed         bool     `json:"stressPassed"`
-	StressCompletedRounds int     `json:"stressCompletedRounds"`
-	StressRequiredRounds int      `json:"stressRequiredRounds"`
-	IdentityConsistent   bool     `json:"identityConsistent"`
-	CleanupStable        bool     `json:"cleanupStable"`
-	Reasons              []string `json:"reasons,omitempty"`
+	StressPresent          bool     `json:"stressPresent"`
+	StressPassed           bool     `json:"stressPassed"`
+	StressCompletedRounds  int      `json:"stressCompletedRounds"`
+	StressRequiredRounds   int      `json:"stressRequiredRounds"`
+	IdentityConsistent     bool     `json:"identityConsistent"`
+	CleanupStable          bool     `json:"cleanupStable"`
+	Reasons                []string `json:"reasons,omitempty"`
 }
 
 type NVCodecValidationStatus struct {
@@ -413,7 +413,7 @@ func evaluateNVCodecCanaryEligibility(
 ) NVCodecCanaryEligibility {
 	trippedAt, tripReason := desktopcodec.NVCodecCanaryTripDetails()
 	result := NVCodecCanaryEligibility{
-		ValidationCurrent:       status.Current,
+		ValidationCurrent:      status.Current,
 		StressRequiredRounds:   nvcodecStressQualificationRounds,
 		Requested:              desktopcodec.NVCodecCanaryEnabled() || desktopcodec.NVCodecCanaryCircuitTripped(),
 		Active:                 desktopcodec.NVCodecCanaryEnabled(),

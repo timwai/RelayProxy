@@ -161,8 +161,17 @@ func TestNVCodecCanaryGateDefaultsDisabled(t *testing.T) {
 		t.Fatal("NVCodec canary unexpectedly enabled")
 	}
 	backend := platformNVCodecH265444Backend()
-	if backend.enabled == nil || backend.enabled() {
-		t.Fatal("platform NVCodec backend ignored disabled canary gate")
+	if backend.productionReady {
+		if backend.enabled == nil {
+			t.Fatal("production NVCodec backend is missing canary gate")
+		}
+		if backend.enabled() {
+			t.Fatal("production NVCodec backend ignored disabled canary gate")
+		}
+		return
+	}
+	if backend.productionGateError() == nil {
+		t.Fatal("unsupported NVCodec backend was not rejected by production gate")
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"sort"
+	"strings"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -17,8 +19,10 @@ import (
 )
 
 type processIdentity struct {
-	PID  uint32
-	Path string
+	PID      uint32
+	Path     string
+	Aliases  []string
+	Services []string
 }
 
 var (
@@ -116,11 +120,26 @@ func lookupPacketProcess(proto Protocol, source, destination netip.AddrPort) (pr
 	if err != nil {
 		return processIdentity{}, err
 	}
+	services := windowsServiceNamesForPID(pid)
+	aliases := []string(nil)
+	if pid == windowsSystemPID {
+		services = []string{"System"}
+		aliases = []string{"service:System"}
+	} else if len(services) == 1 {
+		aliases = []string{"service:" + services[0]}
+	}
 	path, err := api.processPath(pid)
 	if err != nil {
-		return processIdentity{}, err
+		if len(services) == 0 {
+			return processIdentity{}, err
+		}
+		if len(services) == 1 {
+			path = "service:" + services[0]
+		} else {
+			path = "service-host:" + strings.Join(services, ",")
+		}
 	}
-	return processIdentity{PID: pid, Path: path}, nil
+	return processIdentity{PID: pid, Path: path, Aliases: aliases, Services: services}, nil
 }
 
 // readProcessTable bounds both allocation and retries while connections change
@@ -259,6 +278,66 @@ func matchProcessEndpoint(row []byte, family uint32, addressOffset, portOffset i
 	// candidates so different owners produce an ambiguity error. A wildcard
 	// binding with scope zero accepts every interface.
 	return !endpoint.hasScope || scope == endpoint.scope || (anyAddress && scope == 0)
+}
+
+func windowsServiceNamesForPID(pid uint32) []string {
+	if pid == 0 {
+		return nil
+	}
+	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ENUMERATE_SERVICE)
+	if err != nil {
+		return nil
+	}
+	defer windows.CloseServiceHandle(manager)
+
+	var buffer []byte
+	for {
+		var bytesNeeded, servicesReturned, resume uint32
+		var pointer *byte
+		if len(buffer) > 0 {
+			pointer = &buffer[0]
+		}
+		err = windows.EnumServicesStatusEx(
+			manager,
+			windows.SC_ENUM_PROCESS_INFO,
+			windows.SERVICE_WIN32,
+			windows.SERVICE_STATE_ALL,
+			pointer,
+			uint32(len(buffer)),
+			&bytesNeeded,
+			&servicesReturned,
+			&resume,
+			nil,
+		)
+		if errors.Is(err, windows.ERROR_MORE_DATA) {
+			if bytesNeeded == 0 || bytesNeeded > maxProcessTableSize {
+				return nil
+			}
+			buffer = make([]byte, bytesNeeded)
+			continue
+		}
+		if err != nil || servicesReturned == 0 || len(buffer) == 0 {
+			return nil
+		}
+		entries := unsafe.Slice(
+			(*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buffer[0])),
+			int(servicesReturned),
+		)
+		names := make([]string, 0, 2)
+		for _, entry := range entries {
+			if entry.ServiceStatusProcess.ProcessId != pid {
+				continue
+			}
+			name := strings.TrimSpace(windows.UTF16PtrToString(entry.ServiceName))
+			if name != "" {
+				names = append(names, name)
+			}
+		}
+		sort.Slice(names, func(i, j int) bool {
+			return strings.ToLower(names[i]) < strings.ToLower(names[j])
+		})
+		return names
+	}
 }
 
 func (api *processWindowsAPI) processPath(pid uint32) (string, error) {

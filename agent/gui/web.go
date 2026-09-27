@@ -170,6 +170,24 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/remote-desktop/nvcodec-validation", func(rw http.ResponseWriter, _ *http.Request) {
 		writeWebJSON(rw, w.bridge.GetRemoteDesktopNVCodecValidation())
 	})
+	mux.HandleFunc("GET /api/remote-desktop/nvcodec-fault-injection", func(rw http.ResponseWriter, _ *http.Request) {
+		writeWebJSON(rw, w.bridge.GetRemoteDesktopNVCodecFaultInjection())
+	})
+	mux.HandleFunc("POST /api/remote-desktop/nvcodec-fault-injection", func(rw http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Stage string `json:"stage"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&payload); err != nil {
+			http.Error(rw, "invalid NVCodec fault injection payload", http.StatusBadRequest)
+			return
+		}
+		status, err := w.bridge.ArmRemoteDesktopNVCodecFaultInjection(payload.Stage)
+		if err != nil {
+			http.Error(rw, err.Error(), http.StatusBadRequest)
+			return
+		}
+		writeWebJSON(rw, status)
+	})
 	mux.HandleFunc("POST /api/remote-desktop/nvcodec-self-test", func(rw http.ResponseWriter, _ *http.Request) {
 		report, _ := w.bridge.RunRemoteDesktopNVCodecSelfTest()
 		writeWebJSON(rw, report)
@@ -410,6 +428,8 @@ const webBridgeJS = `(function () {
   window.goGetRemoteDesktopDiagnostics = function () { return request('/api/remote-desktop/diagnostics'); };
   window.goGetRemoteDesktopNVCodecSelfTest = function () { return request('/api/remote-desktop/nvcodec-self-test'); };
   window.goGetRemoteDesktopNVCodecValidation = function () { return request('/api/remote-desktop/nvcodec-validation'); };
+  window.goGetRemoteDesktopNVCodecFaultInjection = function () { return request('/api/remote-desktop/nvcodec-fault-injection'); };
+  window.goArmRemoteDesktopNVCodecFaultInjection = function (stage) { return json('/api/remote-desktop/nvcodec-fault-injection', 'POST', {stage:stage}); };
   window.goRunRemoteDesktopNVCodecSelfTest = function () { return json('/api/remote-desktop/nvcodec-self-test', 'POST', {}); };
   window.goRunRemoteDesktopNVCodecQualification = function () { return json('/api/remote-desktop/nvcodec-qualification', 'POST', {}); };
   window.goRunRemoteDesktopNVCodecStressQualification = function () { return json('/api/remote-desktop/nvcodec-stress-qualification', 'POST', {}); };

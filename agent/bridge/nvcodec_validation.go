@@ -186,6 +186,9 @@ func nextNVCodecValidationReceipt(
 			now.Sub(lastAttempt) >= 0 &&
 			now.Sub(lastAttempt) <= nvcodecValidationMaxAge {
 			passes = previous.QualificationPasses + 1
+			if passes > nvcodecValidationRequiredPasses {
+				passes = nvcodecValidationRequiredPasses
+			}
 		}
 	}
 

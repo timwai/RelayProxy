@@ -539,3 +539,25 @@ func TestEvaluateNVCodecCanaryEligibilityReportsRequestedButInactiveWithoutEvide
 		t.Fatalf("ineligible requested canary became active: %+v", eligibility)
 	}
 }
+
+func TestNVCodecValidationReceiptCapsQualificationPasses(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	build := "0123456789abcdef"
+	report := validNVCodecReportForTest(now)
+	previous := &NVCodecValidationReceipt{
+		SchemaVersion:       nvcodecValidationReceiptSchema,
+		BuildRevision:       build,
+		SavedAtUnixMs:       now.Add(-time.Minute).UnixMilli(),
+		QualificationPasses: nvcodecValidationRequiredPasses,
+		LastAttemptPassed:   true,
+		LastAttemptAtUnixMs: now.Add(-time.Minute).UnixMilli(),
+		Report:              report,
+	}
+	next, err := nextNVCodecValidationReceipt(now, build, previous, report, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.QualificationPasses != nvcodecValidationRequiredPasses {
+		t.Fatalf("qualification=%d want=%d", next.QualificationPasses, nvcodecValidationRequiredPasses)
+	}
+}

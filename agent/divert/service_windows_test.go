@@ -8,6 +8,9 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/windows/svc/mgr"
 )
 
 func TestNetworkFrameRoundTrip(t *testing.T) {
@@ -89,5 +92,33 @@ func TestRunWindowsNetworkServiceHelperRejectsUnknownActionBeforeMutation(t *tes
 	// the action contract without touching SCM state on the CI host.
 	if networkServiceHelperInstall == networkServiceHelperRemove {
 		t.Fatal(errors.New("network service helper actions collide"))
+	}
+}
+
+
+func TestMatchesWindowsNetworkServiceRecovery(t *testing.T) {
+	valid := []mgr.RecoveryAction{
+		{Type: mgr.ServiceRestart, Delay: time.Second},
+		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
+	}
+	if !matchesWindowsNetworkServiceRecovery(valid, true) {
+		t.Fatal("expected configured recovery policy to match")
+	}
+	if matchesWindowsNetworkServiceRecovery(valid, false) {
+		t.Fatal("non-crash recovery flag is required")
+	}
+	if matchesWindowsNetworkServiceRecovery(valid[:2], true) {
+		t.Fatal("incomplete recovery policy was accepted")
+	}
+	wrong := append([]mgr.RecoveryAction(nil), valid...)
+	wrong[1].Delay = 2 * time.Second
+	if matchesWindowsNetworkServiceRecovery(wrong, true) {
+		t.Fatal("wrong recovery delay was accepted")
+	}
+	wrong = append([]mgr.RecoveryAction(nil), valid...)
+	wrong[2].Type = mgr.NoAction
+	if matchesWindowsNetworkServiceRecovery(wrong, true) {
+		t.Fatal("wrong recovery action was accepted")
 	}
 }

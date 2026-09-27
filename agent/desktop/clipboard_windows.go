@@ -3,9 +3,14 @@
 package desktop
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"time"
 	"unsafe"
 
@@ -129,4 +134,230 @@ func (c *windowsCapture) SetClipboardText(ctx context.Context, text string) erro
 		return errors.New("Windows desktop capture is unavailable")
 	}
 	return writeWindowsClipboardText(ctx, text)
+}
+
+const (
+	maxWindowsClipboardDIBBytes = 64 << 20
+	maxWindowsClipboardPixels   = 16 * 1024 * 1024
+)
+
+func readWindowsClipboardDIB(ctx context.Context) ([]byte, error) {
+	if !win.IsClipboardFormatAvailable(win.CF_DIB) {
+		return nil, ErrClipboardImageUnavailable
+	}
+	if err := openWindowsClipboard(ctx); err != nil {
+		return nil, err
+	}
+	defer win.CloseClipboard()
+
+	handle := win.GetClipboardData(win.CF_DIB)
+	if handle == 0 {
+		return nil, errors.New("GetClipboardData(CF_DIB) failed")
+	}
+	size := globalMemorySize(handle)
+	if size < 40 {
+		return nil, errors.New("Windows clipboard DIB is too small")
+	}
+	if size > maxWindowsClipboardDIBBytes {
+		return nil, fmt.Errorf("Windows clipboard DIB is too large: %d bytes", size)
+	}
+	ptr := win.GlobalLock(win.HGLOBAL(handle))
+	if ptr == nil {
+		return nil, errors.New("GlobalLock clipboard DIB failed")
+	}
+	defer win.GlobalUnlock(win.HGLOBAL(handle))
+
+	raw := unsafe.Slice((*byte)(ptr), int(size))
+	out := make([]byte, len(raw))
+	copy(out, raw)
+	return out, nil
+}
+
+func decodeWindowsClipboardDIB(raw []byte) (image.Image, error) {
+	if len(raw) < 40 {
+		return nil, errors.New("clipboard DIB header is truncated")
+	}
+	headerSize := int(binary.LittleEndian.Uint32(raw[0:4]))
+	if headerSize < 40 || headerSize > len(raw) {
+		return nil, fmt.Errorf("unsupported clipboard DIB header size %d", headerSize)
+	}
+	width := int(int32(binary.LittleEndian.Uint32(raw[4:8])))
+	signedHeight := int(int32(binary.LittleEndian.Uint32(raw[8:12])))
+	planes := binary.LittleEndian.Uint16(raw[12:14])
+	bitCount := int(binary.LittleEndian.Uint16(raw[14:16]))
+	compression := binary.LittleEndian.Uint32(raw[16:20])
+	if planes != 1 || width <= 0 || signedHeight == 0 {
+		return nil, errors.New("invalid clipboard DIB dimensions")
+	}
+	if compression != 0 {
+		return nil, fmt.Errorf("unsupported clipboard DIB compression %d", compression)
+	}
+	if bitCount != 24 && bitCount != 32 {
+		return nil, fmt.Errorf("unsupported clipboard DIB bit depth %d", bitCount)
+	}
+	height := signedHeight
+	topDown := false
+	if height < 0 {
+		height = -height
+		topDown = true
+	}
+	if height <= 0 || width > 16384 || height > 16384 || width*height > maxWindowsClipboardPixels {
+		return nil, fmt.Errorf("clipboard DIB dimensions %dx%d exceed limits", width, height)
+	}
+	rowBytes := ((width*bitCount + 31) / 32) * 4
+	needed := headerSize + rowBytes*height
+	if rowBytes <= 0 || needed > len(raw) {
+		return nil, errors.New("clipboard DIB pixel data is truncated")
+	}
+
+	dst := image.NewRGBA(image.Rect(0, 0, width, height))
+	for y := 0; y < height; y++ {
+		srcY := y
+		if !topDown {
+			srcY = height - 1 - y
+		}
+		row := raw[headerSize+srcY*rowBytes : headerSize+(srcY+1)*rowBytes]
+		for x := 0; x < width; x++ {
+			off := x * (bitCount / 8)
+			b, g, rr := row[off], row[off+1], row[off+2]
+			a := byte(255)
+			if bitCount == 32 && row[off+3] != 0 {
+				a = row[off+3]
+			}
+			dst.SetRGBA(x, y, color.RGBA{R: rr, G: g, B: b, A: a})
+		}
+	}
+	return dst, nil
+}
+
+func encodeWindowsClipboardDIB(src image.Image) ([]byte, error) {
+	if src == nil {
+		return nil, errors.New("clipboard image is nil")
+	}
+	bounds := src.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width <= 0 || height <= 0 || width > 16384 || height > 16384 || width*height > maxWindowsClipboardPixels {
+		return nil, fmt.Errorf("clipboard image dimensions %dx%d exceed limits", width, height)
+	}
+	rowBytes := width * 4
+	raw := make([]byte, 40+rowBytes*height)
+	binary.LittleEndian.PutUint32(raw[0:4], 40)
+	binary.LittleEndian.PutUint32(raw[4:8], uint32(int32(width)))
+	binary.LittleEndian.PutUint32(raw[8:12], uint32(int32(height)))
+	binary.LittleEndian.PutUint16(raw[12:14], 1)
+	binary.LittleEndian.PutUint16(raw[14:16], 32)
+	binary.LittleEndian.PutUint32(raw[20:24], uint32(rowBytes*height))
+	for y := 0; y < height; y++ {
+		dstY := height - 1 - y
+		row := raw[40+dstY*rowBytes : 40+(dstY+1)*rowBytes]
+		for x := 0; x < width; x++ {
+			rr, g, b, a := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			off := x * 4
+			row[off] = byte(b >> 8)
+			row[off+1] = byte(g >> 8)
+			row[off+2] = byte(rr >> 8)
+			row[off+3] = byte(a >> 8)
+		}
+	}
+	return raw, nil
+}
+
+func readWindowsClipboardContent(ctx context.Context) (protocol.DesktopClipboardState, error) {
+	if win.IsClipboardFormatAvailable(win.CF_UNICODETEXT) {
+		text, err := readWindowsClipboardText(ctx)
+		if err == nil {
+			return validateClipboardContent(protocol.DesktopClipboardState{
+				Kind: protocol.DesktopClipboardKindText,
+				Text: text,
+			})
+		}
+		if !errors.Is(err, ErrClipboardTextUnavailable) {
+			return protocol.DesktopClipboardState{}, err
+		}
+	}
+	raw, err := readWindowsClipboardDIB(ctx)
+	if err != nil {
+		return protocol.DesktopClipboardState{}, err
+	}
+	img, err := decodeWindowsClipboardDIB(raw)
+	if err != nil {
+		return protocol.DesktopClipboardState{}, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return protocol.DesktopClipboardState{}, err
+	}
+	return validateClipboardContent(protocol.DesktopClipboardState{
+		Kind: protocol.DesktopClipboardKindPNG,
+		PNG:  buf.Bytes(),
+	})
+}
+
+func writeWindowsClipboardContent(ctx context.Context, content protocol.DesktopClipboardState) error {
+	content, err := validateClipboardContent(content)
+	if err != nil {
+		return err
+	}
+	if content.Kind == protocol.DesktopClipboardKindText {
+		return writeWindowsClipboardText(ctx, content.Text)
+	}
+	img, err := png.Decode(bytes.NewReader(content.PNG))
+	if err != nil {
+		return err
+	}
+	raw, err := encodeWindowsClipboardDIB(img)
+	if err != nil {
+		return err
+	}
+	memory := win.GlobalAlloc(win.GMEM_MOVEABLE|win.GMEM_ZEROINIT, uintptr(len(raw)))
+	if memory == 0 {
+		return errors.New("GlobalAlloc clipboard DIB failed")
+	}
+	owned := true
+	defer func() {
+		if owned {
+			win.GlobalFree(memory)
+		}
+	}()
+	ptr := win.GlobalLock(memory)
+	if ptr == nil {
+		return errors.New("GlobalLock clipboard DIB write buffer failed")
+	}
+	copy(unsafe.Slice((*byte)(ptr), len(raw)), raw)
+	win.GlobalUnlock(memory)
+
+	if err := openWindowsClipboard(ctx); err != nil {
+		return err
+	}
+	defer win.CloseClipboard()
+	if !win.EmptyClipboard() {
+		return errors.New("EmptyClipboard failed")
+	}
+	if win.SetClipboardData(win.CF_DIB, win.HANDLE(memory)) == 0 {
+		return errors.New("SetClipboardData(CF_DIB) failed")
+	}
+	owned = false
+	return nil
+}
+
+func ReadWindowsClipboardContent(ctx context.Context) (protocol.DesktopClipboardState, error) {
+	return readWindowsClipboardContent(ctx)
+}
+
+func WriteWindowsClipboardContent(ctx context.Context, content protocol.DesktopClipboardState) error {
+	return writeWindowsClipboardContent(ctx, content)
+}
+
+func (c *windowsCapture) ClipboardContent(ctx context.Context) (protocol.DesktopClipboardState, error) {
+	if c == nil {
+		return protocol.DesktopClipboardState{}, errors.New("Windows desktop capture is unavailable")
+	}
+	return readWindowsClipboardContent(ctx)
+}
+
+func (c *windowsCapture) SetClipboardContent(ctx context.Context, content protocol.DesktopClipboardState) error {
+	if c == nil {
+		return errors.New("Windows desktop capture is unavailable")
+	}
+	return writeWindowsClipboardContent(ctx, content)
 }

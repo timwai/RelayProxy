@@ -253,3 +253,50 @@ func TestNVCodecCanaryRequestedEligibleActiveStates(t *testing.T) {
 		t.Fatal("tripped canary remained active")
 	}
 }
+
+func TestNVCodecFaultInjectionIsOptInAndOneShot(t *testing.T) {
+	nvcodecFaultInjection.Store(nvcodecFaultNone)
+	t.Setenv(NVCodecFaultInjectionEnv, "")
+	t.Cleanup(func() { nvcodecFaultInjection.Store(nvcodecFaultNone) })
+
+	if NVCodecFaultInjectionAllowed() {
+		t.Fatal("fault injection unexpectedly enabled")
+	}
+	if _, err := ArmNVCodecFaultInjection("encode"); err == nil {
+		t.Fatal("fault injection armed without explicit environment opt-in")
+	}
+
+	t.Setenv(NVCodecFaultInjectionEnv, "1")
+	status, err := ArmNVCodecFaultInjection("nvenc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Allowed || status.PendingStage != "encode" {
+		t.Fatalf("status=%+v", status)
+	}
+	if !ConsumeNVCodecFaultInjection("encode") {
+		t.Fatal("armed encode fault was not consumed")
+	}
+	if ConsumeNVCodecFaultInjection("encode") {
+		t.Fatal("one-shot encode fault fired twice")
+	}
+	if state := NVCodecFaultInjectionState(); state.PendingStage != "" {
+		t.Fatalf("consumed fault remained pending: %+v", state)
+	}
+}
+
+func TestNVCodecFaultInjectionStagesDoNotCrossConsume(t *testing.T) {
+	nvcodecFaultInjection.Store(nvcodecFaultNone)
+	t.Setenv(NVCodecFaultInjectionEnv, "true")
+	t.Cleanup(func() { nvcodecFaultInjection.Store(nvcodecFaultNone) })
+
+	if _, err := ArmNVCodecFaultInjection("decode"); err != nil {
+		t.Fatal(err)
+	}
+	if ConsumeNVCodecFaultInjection("encode") {
+		t.Fatal("encode consumed a decode fault")
+	}
+	if !ConsumeNVCodecFaultInjection("decode") {
+		t.Fatal("decode fault was not consumed")
+	}
+}

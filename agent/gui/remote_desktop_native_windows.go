@@ -879,7 +879,14 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		}
 
 		decodeStarted := time.Now()
-		decoded, err := s.decoder.Decode(ctx, frame.Data, time.Duration(frame.Timestamp)*time.Microsecond)
+		var decoded []desktopcodec.DecodedFrame
+		var err error
+		if nativeDesktopDecoderIsNVDEC(s.decoder) &&
+			desktopcodec.ConsumeNVCodecFaultInjection("decode") {
+			err = errors.New("injected NVDEC decode failure")
+		} else {
+			decoded, err = s.decoder.Decode(ctx, frame.Data, time.Duration(frame.Timestamp)*time.Microsecond)
+		}
 		decodeElapsed := time.Since(decodeStarted)
 		if err != nil {
 			if nativeDesktopDecoderIsNVDEC(s.decoder) {

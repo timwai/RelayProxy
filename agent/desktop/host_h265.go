@@ -486,6 +486,10 @@ func (h *Host) streamH265Frames(
 				lastIDR = now
 			}
 		}
+		if encoder.Stats().Backend == "nvenc-hevc444-d3d11" &&
+			desktopcodec.ConsumeNVCodecFaultInjection("encode") {
+			return errors.New("injected NVENC runtime failure")
+		}
 		packets, err := d3dEncoder.EncodeD3D11(ctx, converted)
 		if err != nil {
 			return err

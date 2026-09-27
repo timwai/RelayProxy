@@ -7,6 +7,7 @@ type NetworkServiceStatus struct {
 	Ready           bool   `json:"ready"`
 	VersionMatch    bool   `json:"versionMatch"`
 	RecoveryEnabled bool   `json:"recoveryEnabled"`
+	RecoveryKnown   bool   `json:"recoveryKnown"`
 	PID             uint32 `json:"pid,omitempty"`
 	BinaryPath      string `json:"binaryPath,omitempty"`
 	State           string `json:"state"`

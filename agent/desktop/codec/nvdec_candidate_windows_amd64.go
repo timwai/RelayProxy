@@ -119,7 +119,7 @@ func cudaDriverCall(proc uintptr, args ...uintptr) int32 {
 	return runtimeCandidateStatus(status)
 }
 
-func probeNVIDIANVDECHEVC444(
+func probeNVIDIANVDEC(
 	ctx context.Context,
 	cuvidGetDecoderCaps uintptr,
 ) nvidiaNVDECDeviceProbe {

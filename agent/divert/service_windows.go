@@ -720,10 +720,10 @@ func windowsNetworkServiceRecoveryState() (enabled, known bool) {
 }
 
 func matchesWindowsNetworkServiceRecovery(actions []mgr.RecoveryAction, onNonCrash bool) bool {
-	if !onNonCrash || len(actions) < 3 {
+	want := []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}
+	if !onNonCrash || len(actions) != len(want) {
 		return false
 	}
-	want := []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}
 	for i := range want {
 		if actions[i].Type != mgr.ServiceRestart || actions[i].Delay != want[i] {
 			return false

@@ -1255,6 +1255,22 @@ Windows SendInput / CF_UNICODETEXT
   4. 同时打开两个独立显示器窗口，要求 multiple sessions + unique session displays。
   5. 保存 before.json，拔插/禁用一块屏幕后保存 after.json，要求 topology changed + live topology。
 
+### 0.2.103 RD2 Network / P2P / ABR Validation Script
+
+- 新增 `scripts/analyze-desktop-network.ps1`，直接读取 diagnostics Summary 的 RTT / Jitter / Loss / SendQueue / ReceiveFPS / bitrate 分位数，以及 PathSwitches / ABRChanges / ResolutionChanges / GenerationChanges / DroppedFrames。
+- 路径分布会把 `udp_p2p / direct` 归为 direct 样本，把 `relay / quic` 归为 Relay 样本；可通过 `RequireP2PObserved / RequireRelayObserved` 验证预期路径是否真的出现。
+- 支持按实机矩阵传入可配置门槛：`MaxP95RTTMs / MaxP95JitterMs / MaxP95LossPercent / MaxP95QueueDelayMs / MinP50ReceiveFPS`。
+- 支持 `MaxPathSwitches / MaxPathSwitchesPerMinute / MaxResolutionChanges / MaxGenerationChanges / MaxDroppedFrames`，用于发现路径振荡、分辨率抖动和恢复过度重建。
+- `RequireABRActivity` 用于明确的弱网注入场景，要求 ABR 至少发生一次动作；健康 LAN 基线不应使用该开关。
+- 本脚本**不内置生产阈值**：所有门槛默认关闭，先采集 LAN / NAT / IPv6 / Relay-only / Wi-Fi 实机数据，再根据分布确定生产参数，保持现有“不用纯模拟直接改权重”的原则。
+- Windows UI CI 增加脚本 parser syntax 检查。
+- 推荐先保存四类基线：
+  1. LAN/P2P：要求 P2P observed，并记录 p50/p95。
+  2. Relay-only：要求 Relay observed，记录 Relay 基线。
+  3. Wi-Fi/弱网：要求 ABR activity，并限制 path switch rate，确认不振荡。
+  4. 带宽骤降/恢复：比较 ABRReasons、resolution/generation changes 与 dropped frames，再决定是否调整 production threshold。
+
+
 
 
 

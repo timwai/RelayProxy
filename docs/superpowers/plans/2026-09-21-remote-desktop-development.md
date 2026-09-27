@@ -25,7 +25,7 @@
 | 键盘 / 鼠标输入 | ✅ 已合并 main | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
 | 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ✅ 已合并 main | Windows Host 以 60 Hz 独立采集位置/可见性，形状仅在 HCURSOR 变化时生成 PNG；可靠 session stream 传输，Controller 缓存形状，Wails Viewer 在视频表面本地叠加；PR #31 merge commit `f7101025c98fe1c09547a3a1203d20a6f3b6b888` |
-| 剪贴板 | ✅ 文本 + PNG 图片已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本与 PNG 图片；Windows 使用 CF_UNICODETEXT / CF_DIB，本地 DIB 与 wire PNG 转换；连接时仅建立基线不互相覆盖，后续变化按序号传播并做回环去重；文件剪贴板/拖拽仍待后续实现 |
+| 剪贴板 | ✅ 文本 + PNG 图片 + 文件已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本、PNG 图片与 Windows 文件剪贴板；Windows 使用 CF_UNICODETEXT / CF_DIB / CF_HDROP。文件内容通过独立 chunk 消息传输并校验 SHA-256，不进入普通 1 MiB clipboard JSON；GUI 直接拖拽文件到 Viewer 的交互手势仍待实现 |
 | DXGI / WGC Capture | ✅ 指定显示器链路已合并 main | PR #53 已打通 capability 驱动的 per-target 选屏、session-local `DisplayID`、单屏 DXGI/GDI Auto 捕获、光标局部坐标与 Windows `SendInput` 虚拟桌面坐标映射；未指定显示器时继续保留原虚拟桌面行为 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
@@ -1279,7 +1279,7 @@ Windows SendInput / CF_UNICODETEXT
 - rich clipboard 优先走新 Wails API；若新 binding 不存在，前端自动退回旧文本 API，保持升级兼容。
 - 图片和文本都复用现有 sequence + content dedupe，远端写入后不会被本地 250 ms polling 回传形成循环。
 - 回归覆盖 legacy text 兼容、PNG validation/size gate/deep copy、PNG dedupe，以及 Windows DIB pixel round-trip。
-- 仍未完成：文件剪贴板（CF_HDROP/virtual file）与拖拽传输；这部分需要独立文件传输通道，不应塞进 1 MiB control JSON。
+- 后续增强：文件剪贴板已完成；仍未完成的是 GUI 直接把文件拖入 Viewer 的交互手势，以及 virtual-file/目录递归传输。
 
 
 
@@ -1289,6 +1289,18 @@ Windows SendInput / CF_UNICODETEXT
 
 
 
+
+### 0.2.105 RD3 File Clipboard Transport
+
+- Relay Desktop 新增 `clipboard_file_offer / clipboard_file_chunk / clipboard_file_done` 三类可靠控制消息，文件内容不再尝试塞入普通 clipboard state。
+- 单个 raw chunk 固定最大 384 KiB，经过 JSON base64 后仍低于现有 1 MiB control frame 上限；单文件最大 256 MiB，单次最多 32 个文件，总量最大 512 MiB。
+- offer 只携带 basename / size / SHA-256；远端绝不接受发送端目录路径。接收端仅在 `relayproxy-clipboard-*` 临时目录创建文件，并要求 chunk offset 严格顺序、不得越过声明大小。
+- complete 前逐文件重新计算 SHA-256；任意 size/hash/offset/路径错误都会丢弃本次 transfer，不发布到系统剪贴板。
+- Windows `CF_HDROP` 已双向接入：Controller 和 Host 都能从资源管理器复制普通文件，经 Relay Desktop 传输后在另一端直接粘贴。
+- Host watcher 仍保持连接建立只做 baseline；远端写入文件 clipboard 后通过 `clipboardSyncState` 路径去重，避免 staged 文件再次被 watcher 回传形成 echo loop。
+- Receiver 只保留最新一批 completed staging；下一批文件成功完成后删除上一批。Session 断开时最后一批 staged 文件继续保留 1 小时后清理，避免断开瞬间让用户剪贴板路径失效。
+- 当前仅接受 regular file；目录、shell virtual file、云盘占位符和 GUI drag/drop 手势不在本阶段范围内。
+- 回归覆盖路径穿越拒绝、分片 offset/size 边界、SHA-256 round-trip、跨平台 session 编译以及 Windows CF_HDROP build path。
 
 ### 0.3 本轮进度（2026-09-22）
 

@@ -11,6 +11,8 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"os"
+	"path/filepath"
 	"time"
 	"unsafe"
 
@@ -22,8 +24,12 @@ import (
 
 var (
 	clipboardKernel32DLL = windows.NewLazySystemDLL("kernel32.dll")
+	clipboardShell32DLL  = windows.NewLazySystemDLL("shell32.dll")
 	procGlobalSize       = clipboardKernel32DLL.NewProc("GlobalSize")
+	procDragQueryFileW   = clipboardShell32DLL.NewProc("DragQueryFileW")
 )
+
+const windowsClipboardFormatHDrop = 15
 
 func openWindowsClipboard(ctx context.Context) error {
 	var lastErr error
@@ -262,7 +268,138 @@ func encodeWindowsClipboardDIB(src image.Image) ([]byte, error) {
 	return raw, nil
 }
 
+func readWindowsClipboardFiles(ctx context.Context) ([]string, error) {
+	if !win.IsClipboardFormatAvailable(windowsClipboardFormatHDrop) {
+		return nil, ErrClipboardFilesUnavailable
+	}
+	if err := openWindowsClipboard(ctx); err != nil {
+		return nil, err
+	}
+	defer win.CloseClipboard()
+	handle := win.GetClipboardData(windowsClipboardFormatHDrop)
+	if handle == 0 {
+		return nil, errors.New("GetClipboardData(CF_HDROP) failed")
+	}
+	count, _, _ := procDragQueryFileW.Call(uintptr(handle), ^uintptr(0), 0, 0)
+	if count == 0 {
+		return nil, ErrClipboardFilesUnavailable
+	}
+	if count > maxDesktopClipboardFiles {
+		return nil, fmt.Errorf("clipboard contains %d files; maximum is %d", count, maxDesktopClipboardFiles)
+	}
+	paths := make([]string, 0, int(count))
+	for i := uintptr(0); i < count; i++ {
+		length, _, _ := procDragQueryFileW.Call(uintptr(handle), i, 0, 0)
+		if length == 0 || length > 32767 {
+			return nil, errors.New("invalid CF_HDROP file path length")
+		}
+		buf := make([]uint16, int(length)+1)
+		got, _, _ := procDragQueryFileW.Call(
+			uintptr(handle), i, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)),
+		)
+		if got != length {
+			return nil, errors.New("DragQueryFileW returned a truncated path")
+		}
+		path := windows.UTF16ToString(buf)
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("clipboard path %q is not a regular file", path)
+		}
+		paths = append(paths, path)
+	}
+	return paths, nil
+}
+
+func writeWindowsClipboardFiles(ctx context.Context, paths []string) error {
+	if len(paths) == 0 || len(paths) > maxDesktopClipboardFiles {
+		return fmt.Errorf("clipboard file count must be 1..%d", maxDesktopClipboardFiles)
+	}
+	var units []uint16
+	for _, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(absolute)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("clipboard path %q is not a regular file", absolute)
+		}
+		encoded, err := windows.UTF16FromString(absolute)
+		if err != nil {
+			return err
+		}
+		units = append(units, encoded...)
+	}
+	units = append(units, 0)
+
+	const dropFilesHeaderBytes = 20
+	totalBytes := dropFilesHeaderBytes + len(units)*2
+	memory := win.GlobalAlloc(win.GMEM_MOVEABLE|win.GMEM_ZEROINIT, uintptr(totalBytes))
+	if memory == 0 {
+		return errors.New("GlobalAlloc CF_HDROP failed")
+	}
+	owned := true
+	defer func() {
+		if owned {
+			win.GlobalFree(memory)
+		}
+	}()
+	ptr := win.GlobalLock(memory)
+	if ptr == nil {
+		return errors.New("GlobalLock CF_HDROP failed")
+	}
+	raw := unsafe.Slice((*byte)(ptr), totalBytes)
+	binary.LittleEndian.PutUint32(raw[0:4], dropFilesHeaderBytes)
+	binary.LittleEndian.PutUint32(raw[16:20], 1)
+	dst := unsafe.Slice((*uint16)(unsafe.Pointer(uintptr(ptr)+dropFilesHeaderBytes)), len(units))
+	copy(dst, units)
+	win.GlobalUnlock(memory)
+
+	if err := openWindowsClipboard(ctx); err != nil {
+		return err
+	}
+	defer win.CloseClipboard()
+	if !win.EmptyClipboard() {
+		return errors.New("EmptyClipboard failed")
+	}
+	if win.SetClipboardData(windowsClipboardFormatHDrop, win.HANDLE(memory)) == 0 {
+		return errors.New("SetClipboardData(CF_HDROP) failed")
+	}
+	owned = false
+	return nil
+}
+
 func readWindowsClipboardContent(ctx context.Context) (protocol.DesktopClipboardState, error) {
+	if win.IsClipboardFormatAvailable(windowsClipboardFormatHDrop) {
+		paths, err := readWindowsClipboardFiles(ctx)
+		if err == nil {
+			files := make([]protocol.DesktopClipboardFile, 0, len(paths))
+			for _, path := range paths {
+				info, statErr := os.Stat(path)
+				if statErr != nil {
+					return protocol.DesktopClipboardState{}, statErr
+				}
+				files = append(files, protocol.DesktopClipboardFile{
+					Name: filepath.Base(path),
+					Size: info.Size(),
+				})
+			}
+			return protocol.DesktopClipboardState{
+				Kind:       protocol.DesktopClipboardKindFiles,
+				Files:      files,
+				LocalPaths: paths,
+			}, nil
+		}
+		if !errors.Is(err, ErrClipboardFilesUnavailable) {
+			return protocol.DesktopClipboardState{}, err
+		}
+	}
 	if win.IsClipboardFormatAvailable(win.CF_UNICODETEXT) {
 		text, err := readWindowsClipboardText(ctx)
 		if err == nil {
@@ -300,6 +437,9 @@ func writeWindowsClipboardContent(ctx context.Context, content protocol.DesktopC
 	}
 	if content.Kind == protocol.DesktopClipboardKindText {
 		return writeWindowsClipboardText(ctx, content.Text)
+	}
+	if content.Kind == protocol.DesktopClipboardKindFiles {
+		return writeWindowsClipboardFiles(ctx, content.LocalPaths)
 	}
 	img, err := png.Decode(bytes.NewReader(content.PNG))
 	if err != nil {
@@ -348,6 +488,14 @@ func WriteWindowsClipboardContent(ctx context.Context, content protocol.DesktopC
 	return writeWindowsClipboardContent(ctx, content)
 }
 
+func ReadWindowsClipboardFiles(ctx context.Context) ([]string, error) {
+	return readWindowsClipboardFiles(ctx)
+}
+
+func WriteWindowsClipboardFiles(ctx context.Context, paths []string) error {
+	return writeWindowsClipboardFiles(ctx, paths)
+}
+
 func (c *windowsCapture) ClipboardContent(ctx context.Context) (protocol.DesktopClipboardState, error) {
 	if c == nil {
 		return protocol.DesktopClipboardState{}, errors.New("Windows desktop capture is unavailable")
@@ -360,4 +508,18 @@ func (c *windowsCapture) SetClipboardContent(ctx context.Context, content protoc
 		return errors.New("Windows desktop capture is unavailable")
 	}
 	return writeWindowsClipboardContent(ctx, content)
+}
+
+func (c *windowsCapture) ClipboardFiles(ctx context.Context) ([]string, error) {
+	if c == nil {
+		return nil, errors.New("Windows desktop capture is unavailable")
+	}
+	return readWindowsClipboardFiles(ctx)
+}
+
+func (c *windowsCapture) SetClipboardFiles(ctx context.Context, paths []string) error {
+	if c == nil {
+		return errors.New("Windows desktop capture is unavailable")
+	}
+	return writeWindowsClipboardFiles(ctx, paths)
 }

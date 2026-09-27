@@ -314,6 +314,10 @@ func (b *UIBridge) SendRemoteDesktopClipboardContent(content protocol.DesktopCli
 	return b.agent.SendRemoteDesktopClipboardContent(content)
 }
 
+func (b *UIBridge) SendRemoteDesktopClipboardFiles(paths []string) error {
+	return b.agent.SendRemoteDesktopClipboardFiles(paths)
+}
+
 func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	return b.agent.SendRemoteDesktopInput(event)
 }

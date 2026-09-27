@@ -64,6 +64,12 @@ const (
 )
 
 var (
+	nvencPresetLowLatencyHQGUID = nvencGUID{
+		Data1: 0xc5f733b9,
+		Data2: 0xea97,
+		Data3: 0x4cf9,
+		Data4: [8]byte{0xbe, 0xc2, 0xbf, 0x78, 0xa7, 0x4f, 0xd1, 0x05},
+	}
 	nvencPresetP1GUID = nvencGUID{
 		Data1: 0xfc0a8d3e,
 		Data2: 0x45f8,
@@ -93,8 +99,12 @@ type nvencInitializeParamsBlob struct {
 	Data [nvencInitializeParamsSize]byte
 }
 
+func nvencVersionWithReservedBitFor(apiVersion, structVersion uint32) uint32 {
+	return nvencStructVersionFor(apiVersion, structVersion) | 1<<31
+}
+
 func nvencVersionWithReservedBit(structVersion uint32) uint32 {
-	return nvencStructVersion(structVersion) | 1<<31
+	return nvencVersionWithReservedBitFor(nvencAPIVersion, structVersion)
 }
 
 func putNVENCGUID(dst []byte, offset int, guid nvencGUID) {
@@ -119,15 +129,21 @@ func nvencTuningForConfig(cfg VideoConfig) uint32 {
 	return nvencTuningUltraLowLatency
 }
 
-func prepareNVENCPresetConfig() *nvencPresetConfigBlob {
+func prepareNVENCPresetConfig(apiVersion uint32, legacy bool) *nvencPresetConfigBlob {
 	preset := &nvencPresetConfigBlob{}
+	presetVersion := uint32(5)
+	configVersion := uint32(9)
+	if legacy {
+		presetVersion = 4
+		configVersion = 7
+	}
 	binary.LittleEndian.PutUint32(
 		preset.Data[0:4],
-		nvencVersionWithReservedBit(5),
+		nvencVersionWithReservedBitFor(apiVersion, presetVersion),
 	)
 	binary.LittleEndian.PutUint32(
 		preset.Data[nvencPresetConfigConfigOffset:nvencPresetConfigConfigOffset+4],
-		nvencVersionWithReservedBit(9),
+		nvencVersionWithReservedBitFor(apiVersion, configVersion),
 	)
 	return preset
 }
@@ -144,7 +160,7 @@ func configFromNVENCPreset(preset *nvencPresetConfigBlob) *nvencConfigBlob {
 	return cfg
 }
 
-func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
+func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig, apiVersion uint32, legacy bool) error {
 	if config == nil {
 		return ErrEncoderUnavailable
 	}
@@ -157,9 +173,13 @@ func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
 	}
 	cfg = normalized
 
+	configVersion := uint32(9)
+	if legacy {
+		configVersion = 7
+	}
 	binary.LittleEndian.PutUint32(
 		config.Data[nvencConfigVersionOffset:nvencConfigVersionOffset+4],
-		nvencVersionWithReservedBit(9),
+		nvencVersionWithReservedBitFor(apiVersion, configVersion),
 	)
 	putNVENCGUID(config.Data[:], nvencConfigProfileGUIDOffset, nvencHEVCFRExtGUID)
 
@@ -179,7 +199,7 @@ func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
 
 	binary.LittleEndian.PutUint32(
 		config.Data[nvencConfigRCParamsOffset:nvencConfigRCParamsOffset+4],
-		nvencStructVersion(1),
+		nvencStructVersionFor(apiVersion, 1),
 	)
 	binary.LittleEndian.PutUint32(
 		config.Data[nvencConfigRCRateControlOffset:nvencConfigRCRateControlOffset+4],
@@ -247,6 +267,8 @@ func configureNVENCHEVC444(config *nvencConfigBlob, cfg VideoConfig) error {
 func buildNVENCInitializeParams(
 	config *nvencConfigBlob,
 	cfg VideoConfig,
+	apiVersion uint32,
+	legacy bool,
 ) (*nvencInitializeParamsBlob, error) {
 	if config == nil {
 		return nil, ErrEncoderUnavailable
@@ -261,12 +283,18 @@ func buildNVENCInitializeParams(
 	cfg = normalized
 
 	params := &nvencInitializeParamsBlob{}
+	initVersion := uint32(7)
+	presetGUID := nvencPresetP1GUID
+	if legacy {
+		initVersion = 5
+		presetGUID = nvencPresetLowLatencyHQGUID
+	}
 	binary.LittleEndian.PutUint32(
 		params.Data[nvencInitializeVersionOffset:nvencInitializeVersionOffset+4],
-		nvencVersionWithReservedBit(7),
+		nvencVersionWithReservedBitFor(apiVersion, initVersion),
 	)
 	putNVENCGUID(params.Data[:], nvencInitializeEncodeGUIDOffset, nvencCodecHEVCGUID)
-	putNVENCGUID(params.Data[:], nvencInitializePresetGUIDOffset, nvencPresetP1GUID)
+	putNVENCGUID(params.Data[:], nvencInitializePresetGUIDOffset, presetGUID)
 	binary.LittleEndian.PutUint32(params.Data[nvencInitializeWidthOffset:nvencInitializeWidthOffset+4], uint32(cfg.Width))
 	binary.LittleEndian.PutUint32(params.Data[nvencInitializeHeightOffset:nvencInitializeHeightOffset+4], uint32(cfg.Height))
 	binary.LittleEndian.PutUint32(params.Data[nvencInitializeDARWidthOffset:nvencInitializeDARWidthOffset+4], uint32(cfg.Width))
@@ -281,8 +309,10 @@ func buildNVENCInitializeParams(
 	)
 	binary.LittleEndian.PutUint32(params.Data[nvencInitializeMaxWidthOffset:nvencInitializeMaxWidthOffset+4], uint32(cfg.Width))
 	binary.LittleEndian.PutUint32(params.Data[nvencInitializeMaxHeightOffset:nvencInitializeMaxHeightOffset+4], uint32(cfg.Height))
-	binary.LittleEndian.PutUint32(params.Data[nvencInitializeTuningInfoOffset:nvencInitializeTuningInfoOffset+4], nvencTuningForConfig(cfg))
-	binary.LittleEndian.PutUint32(params.Data[nvencInitializeBufferFormatOffset:nvencInitializeBufferFormatOffset+4], uint32(nvencBufferFormatAYUV))
+	if !legacy {
+		binary.LittleEndian.PutUint32(params.Data[nvencInitializeTuningInfoOffset:nvencInitializeTuningInfoOffset+4], nvencTuningForConfig(cfg))
+		binary.LittleEndian.PutUint32(params.Data[nvencInitializeBufferFormatOffset:nvencInitializeBufferFormatOffset+4], uint32(nvencBufferFormatAYUV))
+	}
 	return params, nil
 }
 
@@ -315,33 +345,47 @@ func (s *nvencD3D11Session) initializeHEVC444(
 		}
 		return VideoConfig{}, ErrEncoderRebuildRequired
 	}
-	if s.api.NvEncGetEncodePresetConfigEx == 0 {
-		return VideoConfig{}, fmt.Errorf("%w: nvEncGetEncodePresetConfigEx is unavailable", ErrEncoderUnavailable)
-	}
-
-	preset := prepareNVENCPresetConfig()
+	preset := prepareNVENCPresetConfig(s.apiVersion, s.legacyABI)
 	hevcGUID := nvencCodecHEVCGUID
 	presetGUID := nvencPresetP1GUID
-	status := nvencCall(
-		s.api.NvEncGetEncodePresetConfigEx,
-		s.encoder,
-		uintptr(unsafe.Pointer(&hevcGUID)),
-		uintptr(unsafe.Pointer(&presetGUID)),
-		uintptr(nvencTuningForConfig(normalized)),
-		uintptr(unsafe.Pointer(&preset.Data[0])),
-	)
+	var status int32
+	if s.legacyABI {
+		if s.api.NvEncGetEncodePresetConfig == 0 {
+			return VideoConfig{}, fmt.Errorf("%w: nvEncGetEncodePresetConfig is unavailable", ErrEncoderUnavailable)
+		}
+		presetGUID = nvencPresetLowLatencyHQGUID
+		status = nvencCall(
+			s.api.NvEncGetEncodePresetConfig,
+			s.encoder,
+			uintptr(unsafe.Pointer(&hevcGUID)),
+			uintptr(unsafe.Pointer(&presetGUID)),
+			uintptr(unsafe.Pointer(&preset.Data[0])),
+		)
+	} else {
+		if s.api.NvEncGetEncodePresetConfigEx == 0 {
+			return VideoConfig{}, fmt.Errorf("%w: nvEncGetEncodePresetConfigEx is unavailable", ErrEncoderUnavailable)
+		}
+		status = nvencCall(
+			s.api.NvEncGetEncodePresetConfigEx,
+			s.encoder,
+			uintptr(unsafe.Pointer(&hevcGUID)),
+			uintptr(unsafe.Pointer(&presetGUID)),
+			uintptr(nvencTuningForConfig(normalized)),
+			uintptr(unsafe.Pointer(&preset.Data[0])),
+		)
+	}
 	runtime.KeepAlive(&hevcGUID)
 	runtime.KeepAlive(&presetGUID)
 	runtime.KeepAlive(preset)
 	if status != 0 {
-		return VideoConfig{}, fmt.Errorf("%w: nvEncGetEncodePresetConfigEx returned %d", ErrEncoderUnavailable, status)
+		return VideoConfig{}, fmt.Errorf("%w: NVENC preset config query returned %d", ErrEncoderUnavailable, status)
 	}
 
 	config := configFromNVENCPreset(preset)
-	if err := configureNVENCHEVC444(config, normalized); err != nil {
+	if err := configureNVENCHEVC444(config, normalized, s.apiVersion, s.legacyABI); err != nil {
 		return VideoConfig{}, err
 	}
-	params, err := buildNVENCInitializeParams(config, normalized)
+	params, err := buildNVENCInitializeParams(config, normalized, s.apiVersion, s.legacyABI)
 	if err != nil {
 		return VideoConfig{}, err
 	}

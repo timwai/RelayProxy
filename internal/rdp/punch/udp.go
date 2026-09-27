@@ -24,11 +24,24 @@ type UDPResult struct {
 	RemoteAddr *net.UDPAddr
 	SessionID  uint64
 	Key        []byte
+	Domain     secure.Domain
 }
 
 // Punch races all validated UDP candidates on one socket and returns the
 // authenticated peer address. The caller owns conn after a successful return.
 func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.RDPCandidate, sessionID uint64, key []byte, timeout time.Duration) (*UDPResult, error) {
+	return PunchWithDomain(ctx, conn, candidates, sessionID, key, timeout, secure.DomainRDP)
+}
+
+func PunchWithDomain(
+	ctx context.Context,
+	conn *net.UDPConn,
+	candidates []protocol.RDPCandidate,
+	sessionID uint64,
+	key []byte,
+	timeout time.Duration,
+	domain secure.Domain,
+) (*UDPResult, error) {
 	if conn == nil || sessionID == 0 || len(key) < 16 {
 		return nil, errors.New("invalid RDP UDP punch session")
 	}
@@ -63,7 +76,10 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.RDPCand
 	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
 		return nil, err
 	}
-	request := secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}.Encode(key)
+	request, err := (secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}).EncodeWithDomain(key, domain)
+	if err != nil {
+		return nil, err
+	}
 	nextSend := time.Time{}
 	buffer := make([]byte, 1500)
 	for {
@@ -82,10 +98,13 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.RDPCand
 		n, remote, err := conn.ReadFromUDPAddrPort(buffer)
 		if err == nil {
 			remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
-			packet, decodeErr := secure.DecodePunchPacket(buffer[:n], key)
+			packet, decodeErr := secure.DecodePunchPacketWithDomain(buffer[:n], key, domain)
 			if decodeErr == nil && packet.Type == secure.PunchAck && packet.SessionID == sessionID && packet.Nonce == nonce {
 				_ = conn.SetReadDeadline(time.Time{})
-				return &UDPResult{Conn: conn, RemoteAddr: net.UDPAddrFromAddrPort(remote), SessionID: sessionID, Key: append([]byte(nil), key...)}, nil
+				return &UDPResult{
+					Conn: conn, RemoteAddr: net.UDPAddrFromAddrPort(remote), SessionID: sessionID,
+					Key: append([]byte(nil), key...), Domain: domain,
+				}, nil
 			}
 		} else {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
@@ -120,11 +139,31 @@ func DecodePunch(raw []byte, key []byte) (secure.PunchPacket, error) {
 	return secure.DecodePunchPacket(raw, key)
 }
 
+func DecodePunchWithDomain(raw []byte, key []byte, domain secure.Domain) (secure.PunchPacket, error) {
+	return secure.DecodePunchPacketWithDomain(raw, key, domain)
+}
+
 func WritePunchAck(conn *net.UDPConn, addr *net.UDPAddr, request secure.PunchPacket, key []byte) error {
+	return WritePunchAckWithDomain(conn, addr, request, key, secure.DomainRDP)
+}
+
+func WritePunchAckWithDomain(
+	conn *net.UDPConn,
+	addr *net.UDPAddr,
+	request secure.PunchPacket,
+	key []byte,
+	domain secure.Domain,
+) error {
 	if request.Type != secure.PunchRequest && request.Type != secure.PunchKeep {
 		return errors.New("not a punch request or keepalive")
 	}
-	_, err := conn.WriteToUDP(secure.PunchPacket{Type: secure.PunchAck, SessionID: request.SessionID, Nonce: request.Nonce}.Encode(key), addr)
+	packet, err := (secure.PunchPacket{
+		Type: secure.PunchAck, SessionID: request.SessionID, Nonce: request.Nonce,
+	}).EncodeWithDomain(key, domain)
+	if err != nil {
+		return err
+	}
+	_, err = conn.WriteToUDP(packet, addr)
 	return err
 }
 
@@ -137,6 +176,7 @@ type PacketConn struct {
 	remotePort netip.AddrPort
 	sessionID  uint64
 	key        []byte
+	domain     secure.Domain
 	encode     *secure.DataCodec
 	decode     *secure.DataCodec
 	readMu     sync.Mutex
@@ -148,21 +188,36 @@ type PacketConn struct {
 	readFrame  []byte
 	readWire   []byte
 	writeWire  []byte
+
+	probeMu       sync.Mutex
+	probeSent     map[uint64]time.Time
+	probeObserver func(time.Duration)
 }
 
 func NewPacketConn(result *UDPResult) (*PacketConn, error) {
 	return newPacketConn(result, punchKeepInterval)
 }
 
+// NewPacketConnWithKeepalive creates the authenticated UDP association with a
+// caller-selected keepalive/probe interval. Relay Desktop uses a shorter
+// interval than Native RDP so path RTT/Jitter can feed its switching policy.
+func NewPacketConnWithKeepalive(result *UDPResult, keepInterval time.Duration) (*PacketConn, error) {
+	return newPacketConn(result, keepInterval)
+}
+
 func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, error) {
 	if result == nil || result.Conn == nil || result.RemoteAddr == nil {
 		return nil, errors.New("invalid RDP UDP result")
 	}
-	encode, err := secure.NewDataCodec(result.SessionID, result.Key)
+	domain := result.Domain
+	if domain == "" {
+		domain = secure.DomainRDP
+	}
+	encode, err := secure.NewDataCodecWithDomain(result.SessionID, result.Key, domain)
 	if err != nil {
 		return nil, err
 	}
-	decode, err := secure.NewDataCodec(result.SessionID, result.Key)
+	decode, err := secure.NewDataCodecWithDomain(result.SessionID, result.Key, domain)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +232,7 @@ func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, 
 		remotePort: remotePort,
 		sessionID:  result.SessionID,
 		key:        append([]byte(nil), result.Key...),
+		domain:     domain,
 		encode:     encode,
 		decode:     decode,
 		done:       make(chan struct{}),
@@ -184,11 +240,64 @@ func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, 
 		readFrame:  make([]byte, protocol.UDPFragmentHeaderSize+protocol.UDPFragmentPayload),
 		readWire:   make([]byte, secure.MaxDataPayload+dataWireOverhead),
 		writeWire:  make([]byte, secure.MaxDataPayload+dataWireOverhead),
+		probeSent:  make(map[uint64]time.Time),
 	}
 	if keepInterval > 0 {
 		go c.keepaliveLoop(keepInterval)
 	}
 	return c, nil
+}
+
+func (c *PacketConn) SetProbeObserver(observer func(time.Duration)) {
+	if c == nil {
+		return
+	}
+	c.probeMu.Lock()
+	c.probeObserver = observer
+	c.probeMu.Unlock()
+}
+
+func (c *PacketConn) rememberProbe(nonce uint64, sentAt time.Time) {
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	// A missing peer must not grow the pending-probe map forever. The normal
+	// desktop interval is one second, so entries older than one minute are no
+	// longer useful for path quality.
+	for id, sent := range c.probeSent {
+		if sentAt.Sub(sent) > time.Minute {
+			delete(c.probeSent, id)
+		}
+	}
+	if len(c.probeSent) >= 64 {
+		for id := range c.probeSent {
+			delete(c.probeSent, id)
+		}
+	}
+	c.probeSent[nonce] = sentAt
+}
+
+func (c *PacketConn) forgetProbe(nonce uint64) {
+	c.probeMu.Lock()
+	delete(c.probeSent, nonce)
+	c.probeMu.Unlock()
+}
+
+func (c *PacketConn) observeProbeAck(nonce uint64, receivedAt time.Time) {
+	c.probeMu.Lock()
+	sentAt, ok := c.probeSent[nonce]
+	if ok {
+		delete(c.probeSent, nonce)
+	}
+	observer := c.probeObserver
+	c.probeMu.Unlock()
+	if !ok || observer == nil {
+		return
+	}
+	rtt := receivedAt.Sub(sentAt)
+	if rtt < 0 {
+		return
+	}
+	observer(rtt)
 }
 
 func (c *PacketConn) keepaliveLoop(interval time.Duration) {
@@ -204,8 +313,16 @@ func (c *PacketConn) keepaliveLoop(interval time.Duration) {
 			return
 		case <-ticker.C:
 			nonce++
-			packet := secure.PunchPacket{Type: secure.PunchKeep, SessionID: c.sessionID, Nonce: nonce}.Encode(c.key)
+			packet, err := (secure.PunchPacket{
+				Type: secure.PunchKeep, SessionID: c.sessionID, Nonce: nonce,
+			}).EncodeWithDomain(c.key, c.domain)
+			if err != nil {
+				return
+			}
+			sentAt := time.Now()
+			c.rememberProbe(nonce, sentAt)
 			if _, err := c.conn.WriteToUDPAddrPort(packet, c.remotePort); err != nil {
+				c.forgetProbe(nonce)
 				return
 			}
 		}
@@ -223,6 +340,14 @@ func (c *PacketConn) ReadFrom(buffer []byte) (int, net.Addr, error) {
 		}
 		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
 		if remote != c.remotePort {
+			continue
+		}
+		// Keepalive acknowledgements share this authenticated direct UDP socket.
+		// Consume them before media decoding so they measure the exact P2P path
+		// without becoming visible to the application datagram stream.
+		if packet, punchErr := secure.DecodePunchPacketWithDomain(wire[:n], c.key, c.domain); punchErr == nil &&
+			packet.Type == secure.PunchAck && packet.SessionID == c.sessionID {
+			c.observeProbeAck(packet.Nonce, time.Now())
 			continue
 		}
 		decoded, err := c.decode.DecodeTo(wire[:n], c.readFrame)

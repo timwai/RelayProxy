@@ -1,0 +1,1309 @@
+# RelayProxy Remote Desktop 开发实施文档
+
+> 日期：2026-09-21  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 Stats、scene-aware bitrate/FPS/resolution ABR、Relay Desktop P2P、路径切换、弱网硬化、指定显示器、generation-aware H.264 热切换、诊断 Summary、Host BGRA fast path 与 Capture backend policy 均已合并 main；当前分支拆分 Host H.264 Convert/Codec 耗时，为 GPU zero-copy 优化建立可量化基线  
+> 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
+> 基线：main 分支，现有 RDP M1–M5 已完成  
+> 当前开发基线：`main`（PR #63 已合并，merge `64f565ac850f25b22f5ceef60a65eb0e71962495`）
+
+## 0. 当前进度
+
+更新时间：**2026-09-22**
+
+| 阶段 / 能力 | 状态 | 当前实现 |
+| --- | --- | --- |
+| RD0 Remote Desktop 统一模型 | ✅ 已完成 | `RemoteDesktopTarget`、`DesktopCapabilities`、统一 Connect/Disconnect/Status API 已落地 |
+| RD0 GUI 统一入口 | ✅ 已完成 | Agent GUI 已提供“远程桌面”设备列表，不再要求用户手填 RDP Target ID |
+| Native RDP 兼容 | ✅ 保持可用 | 原有 mstsc、RDP P2P / Relay、3389 目标链路继续保留 |
+| Desktop 独立授权 | ✅ 已合并 main | `desktop.controller / desktop.host` 与 Native RDP 独立鉴权；Windows Home 不再要求存在 `rdp_services` / 3389 才能成为 Relay Desktop 目标 |
+| Remote Desktop 目标发现 | ✅ 已合并 main | Welcome 同时支持兼容 `RDPTargets` 与新的 `RemoteDesktopTargets` |
+| RD/1 媒体协议 | ✅ 已完成基础层 | 二进制媒体头、分片、重组、独立 Desktop Datagram association 已实现 |
+| Server 双跳媒体 Relay | ✅ 已合并 main | Controller ↔ Relay ↔ Target 使用 QUIC Datagram 转发，媒体不进入 JSON |
+| Windows Host 可视 MVP | ✅ 已合并 main | GDI 捕获虚拟桌面 + CPU JPEG；支持按会话选择画质、最高 4K/30 FPS 安全上限与 JPEG 软码率约束 |
+| Controller Viewer MVP | ✅ 已合并 main | Controller 重组 JPEG 帧，Wails GUI 内置实时预览、全屏和键鼠控制 |
+| Windows Home 完整“看到并操作”链路 | ✅ 已合并 main | PR #21 已合并，main merge commit `50610f16a9d1e8c8ac4d24a014e1b302775614d0`；Go/UI/Windows/macOS CI 通过 |
+| 键盘 / 鼠标输入 | ✅ 已合并 main | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
+| 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
+| 光标 | ✅ 已合并 main | Windows Host 以 60 Hz 独立采集位置/可见性，形状仅在 HCURSOR 变化时生成 PNG；可靠 session stream 传输，Controller 缓存形状，Wails Viewer 在视频表面本地叠加；PR #31 merge commit `f7101025c98fe1c09547a3a1203d20a6f3b6b888` |
+| 剪贴板 | ✅ 已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本；连接时仅建立基线不互相覆盖，后续变化按序号传播并做回环去重；GUI 可关闭同步，文件/图片暂不传输；PR #32 merge commit `010b8f5abc1408e3c824ebdaf13e943cf003dcc1` |
+| DXGI / WGC Capture | ✅ 指定显示器链路已合并 main | PR #53 已打通 capability 驱动的 per-target 选屏、session-local `DisplayID`、单屏 DXGI/GDI Auto 捕获、光标局部坐标与 Windows `SendInput` 虚拟桌面坐标映射；未指定显示器时继续保留原虚拟桌面行为 |
+| H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
+| H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
+| 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
+| RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换，PR #58 已把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR，PR #59 已补齐可导出的实机会话诊断时间序列，PR #60 已加入 schema v2 聚合 Summary、percentile 与路径/Generation/ABR/backend 分布统计；RD2 当前进入实机矩阵验证与参数标定阶段 |
+
+### 0.1 已合并主线的关键进度
+
+- RD2 send-queue ABR 拥塞闭环已通过 PR #47 合并到 `main`（merge `35a69ac6b1900ad2a53a6c6718c5d8cc4e902354`）：H.264 与 JPEG Host 媒体发送路径现在测量每次 `Send()` 阻塞时间并以 EWMA 上报 `SendQueueDelayMs`；Controller ABR 新增 mild/normal/severe queue congestion 分级，在带宽下降导致发送队列堆积但尚未形成明显丢包时即可快速降码率，稳定恢复仍需要连续健康窗口。transport shim 新增运行中 `SetProfile`，可在同一 UDP socket 上切换限速/延迟阶段；同时增加带宽骤降/恢复、queue-delay 阻止过早恢复、真实媒体 Send 阻塞测量，以及 clean/lossy/queued/near-equal 默认路径评分标定测试。Go CI、UI 全量回归、Windows/macOS Desktop package 均通过。
+- RD2 确定性弱网 transport shim 已通过 PR #46 合并到 `main`（merge `c8ba2163a708c51d4232a3da0c40f660c069e91e`）：新增 `internal/testnetem` 的 `net.PacketConn` 包装层，可配置固定 delay、jitter、随机丢包、周期性 burst loss 与写侧带宽限速，并通过固定 seed 重现相同网络序列；新增稳定 P2P 晋升、瞬时劣化恢复、持续劣化回退、路径不可用立即 failover 等路径切换场景；`desktop_media` 的认证 `PunchKeep/PunchAck` RTT 测试也实际经过 25 ms impairment shim，验证 direct-path probe 能观测到弱网层引入的延迟。Go CI、UI 全量回归、Windows/macOS Desktop package 均通过。
+- RD2 direct-path RTT/Jitter 探针已通过 PR #44 合并到 `main`（merge `bd241b1daf7a60396559002b6a87d303938e6b81`）：不新增 wire message，而是在现有 `desktop_media` 安全域内复用认证 `PunchKeep/PunchAck`；Controller 的 P2P `PacketConn` 以 1 秒 cadence 发 probe，ACK 在媒体解码前被消费并计算真实直连 RTT，Session 以 EWMA 维护 RTT/Jitter。Relay 基线仍使用 Relay session probe，P2P 只使用直连 socket 指标，两者不再混用。Native RDP 保留原 10 秒 keepalive 行为。Go CI、UI 全量回归、Windows/macOS Desktop package 均通过。
+- RD2 路径评分与切换滞回已通过 PR #43 合并到 `main`（merge `275f78d717befb5aafa241db915fc1dfc2c8d915`）：新增集中式 `PathScorePolicy` 与 `PathSwitchGate`，把 RTT/Jitter/Loss/QueueDelay/Relay penalty 权重和升级阈值统一收口到可测试策略结构；当前运行时只使用可明确归因到媒体路径的丢包与 Host send-queue delay，避免把可靠 Relay 控制流上的 RTT/Jitter 错当作 P2P 指标。Controller 在切到 `udp_p2p` 前保存 Relay 媒体质量基线，P2P 连续劣化超过滞回窗口会主动降级回 Relay；路径变化会请求 H.264 IDR，且主动降级继续复用原有 P2P 指数退避恢复。Go CI、UI 全量回归、Windows/macOS Desktop package 均通过。
+- RD2 P2P 恢复硬化已通过 PR #42 合并到 `main`（merge `7bde35595f2cc3103b56d40dc0eab8f6347f926b`）：Controller 不再只尝试一次直连；首次 punch 失败或 `udp_p2p` 运行中丢失后继续使用 QUIC Datagram Relay，并按 2/4/8/16/30 秒上限退避自动重试，不重建 Desktop Session。短时抖动保留退避历史，直连连续稳定 20 秒后再清零；Controller Session 关闭会立即结束重试 worker。Go CI 与 UI CI（Windows/macOS）全部通过。
+- RD2 Relay Desktop P2P 已通过 PR #39 合并到 `main`（merge `00c547e6e643664d34ec479c9ce4b9be4559baa2`），Go CI / UI CI 全部通过：新增独立 `desktop_media` P2P purpose，复用既有 rendezvous、候选发现、UDP punch、HMAC 与 replay protection；Controller 先建立 Relay Desktop 基线会话，再后台打洞并把视频 Datagram 热切到 `udp_p2p`；可靠 session stream 继续走 Relay，直连失败或关闭后自动回退 QUIC Datagram Relay。Target 侧按服务端写入的 `ClientDeviceID` 精确绑定媒体会话，并限制 Desktop P2P lease 不能打开 Native RDP TCP/3389，避免跨 purpose 权限复用。
+- RD2 bitrate-only ABR 已通过 PR #38 合并到 `main`（merge `0cfb166c6a8df29579db07a0f7b377f17bec437d`）：500 ms 网络窗口基于丢包/Jitter/异常 RTT/新增 dropped frame 快速降码率，稳定窗口后缓慢恢复；用户设置码率保持为上限，Media Foundation H.264 通过 `ICodecAPI MeanBitRate` 热更新，无需重建 Encoder。
+- RD2 Stats 基础已通过 PR #37 合并到 `main`（merge `f29cca17aeef2e104f240b397c3e00db92282f0d`）：Controller 聚合 RTT/Jitter/丢包/接收码率与帧率，Host 上报 Capture/Encode 指标，Native Viewer 上报 Decode/Render FPS 与耗时。
+- GPU 光标合成已通过 PR #36 合并到 `main`：amd64 优先使用第二个 BGRA VideoProcessor stream 在 GPU 叠加远端光标；能力不足和 ARM64 自动回退 CPU 光标合成。
+- 零拷贝视频呈现已通过 PR #35 合并到 `main`（merge `afcb5a8b71d800a6812301ed17ec1a299dfdbd04`）：Viewer 与 MF Decoder 共用 D3D11 device，DXGI NV12 surface 由 VideoProcessor 直接转换并呈现到 swap chain，保留 staging/CPU 回退。
+- D3D11-aware / DXVA 解码已通过 PR #34 合并到 `main`（merge `9abb7fdd9b5c966fb0da3b988f9efc65db832a70`）：支持异步 Decoder MFT、`IMFDXGIDeviceManager` 和 DXGI NV12 surface，并在协商失败时安全回退系统内存硬解/软解。
+- 原生 D3D11 Viewer 第一版已通过 PR #33 合并到 `main`（merge `9dcce5255ca7c49bb6e81bba6a0147b7d04980d4`）：Controller H.264 帧不再必须经过 JS/Base64/WebCodecs，可直接由 Go 侧 Media Foundation 解码并交给独立 Win32/D3D11 窗口显示；原生键鼠和独立远端光标也已接通。
+- Unicode 文本剪贴板已通过 PR #32 合并到 `main`：可靠 session stream 双向同步 CF_UNICODETEXT，连接时建立基线，后续按序号传播并避免回环。
+- 独立光标通道已通过 PR #31 合并到 `main`：Windows 光标位置/可见性与形状脱离视频帧传输，Viewer 本地叠加并按 hotspot 缩放定位。
+- H.264 Datagram 丢包恢复已通过 PR #30 合并到 `main`：FrameID 缺口或 WebCodecs 解码失败会停止消费依赖帧并经可靠控制流请求 IDR，恢复到新 keyframe 后继续播放。
+- RD/1 原生 QUIC Datagram 媒体 association 已进入 `main`。
+- Relay Desktop 媒体双跳 Relay 已进入 `main`。
+- Relay Desktop 授权已从 Native RDP 中拆分，`desktop.controller / desktop.host` 已进入 `main`。
+- Windows Home 类型目标可以仅凭 `desktop.host` 被发现和授权，不要求本机 RDP Host 或 `127.0.0.1:3389`。
+- 上述授权模型合并后的主线提交为 `a044e70dc93ab10b94c6ebe289a880c45a2cf2b4`。
+
+### 0.2 当前开发状态
+
+当前 Windows 可交互 MVP 与 RD1 高性能媒体链路均已进入 `main`；RD2 的 Stats、bitrate-only ABR、P2P 媒体直连、运行期自动恢复以及路径评分/切换滞回也已合并。当前不再以旧的 `feature/relay-desktop-windows-mvp` 为开发基线，后续工作从最新 `main` 拉分支继续。
+
+当前已完成的端到端路径：
+
+```text
+Windows Host
+  ↓
+DXGI Desktop Duplication（不可用时 GDI）
+  ↓
+Media Foundation H.264（不可用时 JPEG）
+  ↓
+RD/1 Datagram
+  ├─ 优先：authenticated UDP P2P（desktop_media / udp_p2p）
+  └─ 回退：QUIC Datagram → Relay Server → QUIC Datagram
+  ↓
+Controller reassembly / H.264 loss recovery
+  ↓
+Native Win32 Viewer
+  ↓
+Media Foundation H.264 decode → DXGI NV12 surface → D3D11 VideoProcessor → swap chain
+  ↘ 独立光标：amd64 优先第二 BGRA VideoProcessor stream；不支持时 CPU 合成
+  ↘ 不支持共享 surface 时回退 NV12/BGRA CPU 路径
+  ↕ reliable session stream 始终经 Relay
+keyboard / mouse / cursor / clipboard / ping-pong / ABR control / stats
+  ↓
+Windows SendInput / CF_UNICODETEXT
+```
+
+该 JPEG 路径现在作为可运行的功能基线保留；后续 Capture / Codec / Viewer 可以独立替换，不需要重做授权、Relay Datagram 与输入控制链路。
+
+### 0.2.1 指定显示器链路（已合并 PR #53）
+
+- GUI 在每个支持 Relay Desktop 且上报多显示器的目标卡片上提供显示器选择器；默认“全部显示器”保持原虚拟桌面行为，不改变既有用户路径。
+- `RemoteDesktopConnectOptions.DisplayID` 现在进入 session-local `HostConfig`，不会修改 Host 全局默认设置，也不会跨会话残留。
+- Windows Host 每次会话重新枚举显示器并按 session-scoped HMONITOR ID 校验目标；显式选屏失败时直接报错，不会静默回退到其他显示器或整个虚拟桌面。
+- 指定显示器通过 `screencapture.CaptureDisplay + BackendAuto` 捕获：DXGI Desktop Duplication 可用时优先使用，不可用时由 capture 层回退单显示器 GDI。
+- Cursor channel 使用所选显示器 `Bounds` 生成局部坐标；光标位于其他屏幕时标记为不可见，Viewer 不会把其他屏幕的指针叠到当前画面。
+- Windows `SendInput` 将 Viewer 的单屏归一化坐标重新映射到整个 virtual desktop 的绝对坐标，覆盖左侧负 X、副屏右侧及主屏上方负 Y 等布局。
+- `DesktopVideoConfig.DisplayID` 与 `RemoteDesktopStatus.DisplayID/DisplayName` 回显当前会话选择，GUI session banner 可直接确认实机正在控制哪块屏幕。
+- Windows 单测覆盖 session-scoped DisplayID、默认多屏虚拟桌面、左右双屏与负 Y 坐标映射；GUI 回归覆盖 capability 驱动的 per-target selector 与状态展示。
+
+### 0.2.2 Scene 策略 GUI（已合并 PR #54）
+
+- `DesktopScene` 与 scene-aware FPS ABR 已在 PR #51 落地，但此前 GUI 始终固定发送 `scene: auto`，用户无法选择 Gaming / Performance 的保帧率策略。
+- PR #54 在 Remote Desktop 连接设置中新增“场景”：自动、办公、性能、游戏、画质，并直接透传现有 `RemoteDesktopConnectOptions.Scene`，不新增协议字段。
+- Gaming / Performance 继续使用 negotiated FPS 作为 adaptive minimum，只通过 bitrate 应对拥塞；Office / Auto / Quality 在持续 severe pressure 下可降低采集 FPS。
+- 连接摘要显示所选场景，设置帮助文字明确说明场景只影响自适应取舍，避免与“画质”预设混淆。
+
+### 0.2.3 实机媒体链路诊断（已合并 PR #55）
+
+- `RemoteDesktopStatus` 回显当前 negotiated `generation / codec / width / height / fps`，GUI 会话横幅可直接确认当前实际媒体配置。
+- Host `DesktopSessionStats` 新增 `CaptureBackend / EncoderBackend / EncoderHardware`：Windows 单屏链路可区分 DXGI / GDI，H.264 可区分 Media Foundation 硬件或软件 MFT，JPEG fallback 明确标记 `jpeg-go`。
+- 原生 D3D11 Viewer 通过现有 viewer stats 回报 `DecoderBackend / DecoderHardware`；Controller 聚合时保留 Host 诊断并叠加 Viewer 诊断，不互相覆盖。
+- GUI 网络统计条现在同时显示 Path、Capture、Encoder(HW/SW)、Decoder(HW/SW)、RTT/Jitter/Loss、Queue、Dropped、吞吐和各阶段 FPS/耗时；WebCodecs fallback 在本地 decoder 活跃时标记为 `webcodecs`。
+- 该诊断闭环用于后续 LAN / IPv4 NAT / IPv6 / Relay-only / Wi-Fi 抖动，以及 Intel / NVIDIA / AMD 实机矩阵，避免只根据 FPS 或日志猜测实际媒体路径。
+- PR #55 不启用动态分辨率 ABR：Media Foundation 编码器对尺寸变化返回 `ErrEncoderRebuildRequired`；本轮 generation 分支先解决 Controller / WebCodecs / Native Viewer 的安全 generation 边界和 decoder rebuild，再进入 Host encoder rebuild 与尺寸 ABR。
+
+### 0.2.4 Generation-aware 媒体切换基础（已合并 PR #56）
+
+- 本地 `RemoteDesktopFrame / FrameSnapshot` 现在携带 RD/1 `Generation`，Viewer 不再只用可重复的 `FrameID` 识别帧。
+- Controller 只允许媒体帧使用相同 generation 的 `DesktopVideoConfig`：旧 generation 的迟到 Datagram、以及新 generation 配置到达前抢跑的 Datagram 都会被丢弃，避免用错误尺寸/Codec 配置解释帧。
+- 新 generation 配置生效时清空上一 generation 的 latest frame，并重置 H.264 recovery；一旦会话已进入非零 generation，迟到的 generation=0 / 更旧配置不会覆盖当前配置。
+- WebCodecs Viewer 以 `(codec, generation)` 作为 decoder 生命周期边界；generation 改变即关闭旧 decoder，新 decoder 在收到 keyframe 前不接受 delta frame，并通过可靠控制流请求 IDR。
+- 原生 Win32/D3D11 Viewer 在同尺寸 generation 变化时重建 Media Foundation Decoder；尺寸变化时先创建新的 D3D11 Viewer + 对应 Decoder，全部成功后再原子切换并关闭旧 pipeline，避免先拆现有画面再尝试恢复。
+- Native Viewer 的 frame 去重改为 `(generation, sequence)`；因此新 generation 从 FrameID=1 重新编号也不会被上一 generation 的序号误判为重复。
+- Windows 单测覆盖 generation/尺寸变化的 native rebuild 判定；Controller 单测覆盖 stale/future generation 拒绝、latest frame 清理和配置单调性；GUI 回归覆盖 WebCodecs generation reset / keyframe gate。
+- PR #56 不主动发送尺寸 ABR 控制，只建立安全切换语义；当前分支继续完成 Host H.264 Encoder rebuild、可靠 VideoConfig 发布和新 generation keyframe。
+
+### 0.2.5 H.264 运行期分辨率 Generation（已合并 PR #57）
+
+- `DesktopVideoControl` 新增可选 `TargetWidth / TargetHeight`；仅 H.264 Relay Desktop 会话允许运行期切换，JPEG 和 Native RDP 不进入该路径。
+- `DesktopVideoConfig / RemoteDesktopStatus` 新增 `MaxWidth / MaxHeight`，区分“当前实际编码尺寸”和“本次会话允许恢复到的分辨率上限”；Controller 会在发送控制消息前按 negotiated ceiling 拒绝越界请求。
+- Host 收到尺寸控制后先重新 Capture，并使用目标宽高作为最大边界按源屏幕比例计算真实偶数尺寸，因此 16:10、超宽屏不会被强制拉伸成 16:9。
+- 新尺寸先创建新的 Media Foundation H.264 Encoder 并请求 IDR；只有新 Encoder 创建成功、可靠 `VideoConfig(generation+1)` 发送成功后，才替换旧 Encoder。
+- 新 generation 的 `FrameID` 从 1 重新开始，但 Generation 单调递增；Host 在首个 keyframe 产生前不发送任何 delta frame，Viewer 可从该 generation 独立恢复。
+- 分辨率 generation 切换保留现有 ABR Controller 状态：只要 Codec、协商 FPS 和 bitrate ceiling 未变，就不会因尺寸变化清空 bitrate/FPS pressure/recovery 历史。
+- H.264 运行期失败后的 JPEG fallback 同样保持 Generation 单调递增，例如 G2 H.264 失败后使用 G3 JPEG，避免被 Controller 的 stale-config 防护正确拒绝后造成黑屏。
+- Wails Viewer 顶部新增“运行中分辨率”选择器；只在 Relay Desktop + H.264 时显示，并根据 `MaxWidth / MaxHeight` 禁用超出本次会话上限的档位。会话横幅同步显示实际尺寸与 `G<n>`，便于实机验证 Encoder / Decoder rebuild。
+- PR #57 先提供用户手动运行期切换用于验证；当前分支继续把分辨率档位接入 scene-aware ABR，并为降档/升档增加更长的 pressure/recovery hysteresis。
+
+### 0.2.6 Scene-aware Adaptive Resolution（已合并 PR #58）
+
+- ABR 新增独立 resolution state：默认从 100% 开始，使用 100% → 75% → 50% 档位；Quality 场景最低保持 75%，Office / Auto / Gaming / Performance 最低可到 50%。
+- 对已经很小的会话，`AdaptiveMinResolutionScale` 会根据 H.264 320×180 最小尺寸自动抬高分辨率下限，避免请求不可编码尺寸。
+- 降档顺序保持保守：码率仍按 500 ms 网络窗口立即响应；只有 severe queue / severe loss / severe jitter / 持续 dropped frame 且码率已经降到约 ceiling 的 45% 以下后，resolution pressure 才开始累计。
+- 默认 resolution downshift hold 为 8 个 500 ms 窗口；达到 hold 后每次只降一档，避免一次弱网事件直接从 100% 跳到 50%。Gaming / Performance 仍保持 negotiated FPS，但在持续严重压力下允许用分辨率换实时性。
+- 恢复顺序严格串行：先按现有 StableWindows 慢恢复 bitrate → 再按 FPSRecoveryWindows 恢复 FPS → 两者均回到上限后，resolution 还需额外 16 个健康窗口才允许 50% → 75% → 100% 逐档恢复。
+- `MediaDecision` 只有在 resolution tier 真正变化时设置 `ResolutionChanged`；Controller 仅在该标志为真时发送 `TargetWidth / TargetHeight`，普通 bitrate/FPS ABR 不会触发 Media Foundation Encoder rebuild。
+- 新 `VideoConfig` 到达后会根据 `Width/Height` 相对 `MaxWidth/MaxHeight` 反向同步 ABR resolution scale，因此用户手动切到 720p 后，自动策略不会误以为仍处于 100% 而在拥塞时反向升档。
+- H.264 `MaxWidth / MaxHeight` 现在使用本次会话实际最高编码尺寸，而不是用户输入的矩形上限；例如 16:10 源在 1920×1080 bound 下实际 ceiling 为 1728×1080，从而 75% / 50% 档位能按真实纵横比稳定缩放。
+- Viewer 的运行中分辨率选择器新增动态“最高”项，可精确恢复到 1728×1080 等非标准 negotiated ceiling。
+- 新测试覆盖：短时 severe pressure 不降分辨率、完整 hold 后 100→75、第二个 hold 后 75→50、Quality 75% 下限、Gaming 保 FPS/降尺寸、恢复顺序、手动 generation scale 同步，以及 ABR control 只在 tier change 时携带尺寸字段。
+
+### 0.2.7 可导出实机会话诊断（已合并 PR #59）
+
+- Controller 新增 session-local diagnostics recorder，默认每 500 ms 记录一条样本，固定最多 1200 条，即保留最近约 10 分钟；使用有界环形缓冲，长时间会话不会无限增长内存。
+- 诊断样本使用独立的短窗口统计，而不是 GUI `Snapshot()` 的全会话累计平均：记录窗口 RX bitrate / RX FPS / packet loss，并叠加当前 RTT、Jitter、Host Send Queue Delay、Dropped Frames、Capture/Encode/Decode/Render 指标。
+- 每条样本同时保存当时的 `DesktopVideoConfig`（Generation / Codec / 当前分辨率 / ceiling / FPS / bitrate）和本轮 ABR decision（reason、目标 bitrate/FPS、resolution scale、是否触发 generation rebuild），可直接回看网络变化与自适应动作的因果时间线。
+- Path 切换会重置 diagnostics 短窗口基线，避免第一条 `udp_p2p` 样本混入上一条 Relay 路径的 bytes/loss，反向切换同理。
+- 报告额外保留 scene、连接 options、当前 config/stats；不包含 session token、剪贴板正文、键盘输入或视频帧内容。
+- Agent 在 Relay Desktop 断开时保存最后一份 diagnostics report，因此测试结束后再点击导出仍可取到本次会话数据。
+- Wails 新增 `GetRemoteDesktopDiagnostics`，Remote Desktop 页面增加“导出诊断”按钮，直接保存带 schemaVersion 的 JSON；文件名包含目标 ID 与生成时间，便于多机矩阵归档。
+- 新测试覆盖 500 ms window bitrate/FPS/loss、diagnostics 与 ABR loss window 相互独立、1200 样本有界保留、报告副本隔离，以及 GUI/Wails 导出绑定。
+
+### 0.2.8 诊断聚合 Summary（已合并 PR #60）
+
+- Diagnostics schema 升级到 v2，在原始 500 ms samples 之外新增 `summary`，用于不同网络、设备和 GPU 样本的直接比较。
+- Summary 为 RTT、Jitter、Loss、Send Queue Delay、Actual Bitrate、Receive/Decode/Render FPS、Capture/Encode/Decode/Render latency 计算 `min / avg / p50 / p95 / max`；不可用的 RTT/阶段耗时不会以 0 污染 percentile。
+- 汇总 `PathSwitches / GenerationChanges / ABRChanges / ResolutionChanges / DroppedFrames`，可以直接量化一次会话中路径振荡、Encoder/Decoder rebuild 与画质降档频率。
+- 同时统计 `Paths / Codecs / Resolutions / CaptureBackends / EncoderBackends / DecoderBackends / ABRReasons` 的样本分布，以及硬件编码/解码样本数，方便确认 Intel / NVIDIA / AMD 或 WebCodecs/JPEG fallback 的真实执行路径。
+- Summary 保留 `SessionDurationMs` 与实际 `SampleSpanMs`，避免把短测试与长测试直接按样本数误比较。
+- Percentile 使用确定性的 nearest-rank 计算；原始 samples 继续保留，因此需要更复杂统计时仍可离线重算。
+- 新测试固定 p50/p95、路径/Generation/ABR/Resolution 事件计数、backend/codec/resolution 分布和不可用值过滤行为。
+
+### 0.2.9 Host BGRA Fast Path（已合并 PR #62）
+
+- Windows `go-mswin/screencapture` 的 DXGI Desktop Duplication / GDI stream 原生输出均为 top-down BGRA，并保留真实 stride；此前 Relay Desktop 会先逐像素复制/交换为 RGBA，再由 Media Foundation H.264 路径逐像素转 NV12。
+- Encoder `RawFrame` 新增 `PixelFormatBGRA`，`BGRAtoNV12` 可直接消费带 padding RowPitch 的 BGRA，BT.709 limited-range 转换结果与现有 RGBA 路径保持一致。
+- `windowsCapture` 新增可选 borrowed raw capture 接口：像素只借用到下一次 `CaptureRaw / Capture / Close`；Host 同步完成 NV12 转换后才请求下一帧，不跨帧持有底层 DXGI/GDI buffer。
+- H.264 在捕获原生尺寸不需要缩放时直接走 `BGRA → NV12 → Media Foundation Encoder`，省掉一遍全帧 BGRA→RGBA staging；当用户设置较低最大分辨率或 ABR 降分辨率时，仍自动回退现有 RGBA scale 路径。
+- 分辨率恢复到本次会话最高尺寸后会再次尝试 BGRA direct fast path；因此 resolution ABR 不会永久关闭该优化。
+- 原 RGBA/JPEG 路径保留 DXGI idle-frame cache：静止桌面不会因为本轮重构反复复制同一 staging texture。
+- `DesktopSessionStats.CaptureFormat` / diagnostics `CaptureFormats` 新增 `bgra-direct` 与 `rgba` 可观察值；Viewer 实时统计显示 `Capture dxgi/bgra-direct` 等实际链路。
+- Capture backend 改为每次 stats 上报时读取当前 backend，因此 DXGI 运行期失败转 GDI 后，GUI/diagnostics 不再错误保留 `dxgi` 标签。
+- 本轮仍然是 CPU BGRA→NV12；最终目标依旧是 `D3D11 texture → GPU scale/color convert → NV12 surface → hardware encoder`。当前 capture dependency 只提供 DXGI Desktop Duplication / GDI，WGC 需要后续单独实现 WinRT capture backend 或替换/扩展 capture 层。
+
+### 0.2.10 Capture Backend Policy（已合并 PR #63）
+
+- `RemoteDesktopConnectOptions` 新增 `CaptureBackend`：`auto / dxgi / gdi / wgc`；`wgc` 先作为 wire/API 预留值，当前 Windows Host 明确返回“未实现”，不会静默当成 Auto。
+- `HostConfig` 把 capture preference 保持为 session-local，不修改 Host 全局默认；Diagnostics 导出的连接 options 会自然记录请求值，便于同一机器做 DXGI/GDI A/B。
+- `auto` 保持现有行为：单屏/指定屏幕优先 `screencapture.BackendAuto`，必要时回退虚拟桌面 GDI。
+- 显式 `dxgi` 映射到 Desktop Duplication 并采用 strict policy：初始化失败、显示器枚举失败都直接结束会话，不允许偷偷切 GDI。
+- 多显示器“全部显示器”当前依赖 virtual desktop GDI；因此显式 DXGI 必须选择具体显示器。该约束在 Host 侧强制，不依赖 GUI 正确性。
+- 显式 `gdi` 固定 GDI；选择具体显示器时使用 per-display GDI stream，未选具体显示器时允许 virtual desktop GDI。
+- GUI 连接设置新增“采集：自动 / DXGI / GDI”，连接摘要显示显式 Capture backend；帮助文字明确该选项主要用于实机矩阵和问题定位。
+- 当前 capability snapshot 继续只公布真实可用的 GDI/DXGI；在 WinRT WGC backend 真正实现之前 GUI 不提供 WGC 选项。
+- 测试覆盖协议→HostConfig 透传、空值归一到 Auto、DXGI/GDI/WGC 映射、strict backend 识别和 DXGI concrete-display 约束。
+
+### 0.2.11 Host Convert / Codec Timing（当前分支）
+
+- Media Foundation H.264 的既有 `EncodeMs` 保持历史语义：从 `Encode()` 进入到 MFT 输出完成的总耗时，不改变既有性能预算和诊断兼容性。
+- `EncoderStats` 新增 `LastConvertTime`，单独测量 `frameToNV12` 阶段；BGRA direct、RGBA scale fallback 与未来 NV12/GPU surface 路径都可使用同一指标比较。
+- Host Stats 新增 `ConvertMs` 与 `CodecMs`。`CodecMs` 由 `EncodeMs - ConvertMs` 派生并 clamp 到 0，因此 MFT 部分和像素转换部分可以分别观察。
+- Viewer 网络统计同时显示 `Convert / Codec / Encode total`，实机跑 DXGI 与 GDI A/B 时可直接判断 CPU 像素转换是否为主要瓶颈。
+- Diagnostics Summary 增加 ConvertMs / CodecMs 的 min / avg / p50 / p95 / max；配合 `CaptureFormats` 可直接比较 `bgra-direct` 与 `rgba` 缩放路径。
+- 本轮不改变 ABR：Convert/Codec timing 只做 observability，不作为网络拥塞输入，避免 CPU/GPU 性能波动被误当作链路带宽问题。
+- 下一步可用这些实机数据判断何时值得进入真正的 `D3D11 texture → GPU NV12 → hardware encoder`，以及 GPU conversion 应优先覆盖 native-size 还是 scaled resolution 路径。
+
+### 0.3 本轮进度（2026-09-22）
+
+本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：
+
+- PR #43：路径评分与切换滞回，merge `275f78d717befb5aafa241db915fc1dfc2c8d915`。
+- PR #44：真实 direct-path RTT/Jitter 探针，merge `bd241b1daf7a60396559002b6a87d303938e6b81`。
+- PR #46：确定性弱网 transport shim 与路径切换场景测试，merge `c8ba2163a708c51d4232a3da0c40f660c069e91e`。
+- PR #47：send-queue ABR 拥塞闭环与默认路径策略场景标定，merge `35a69ac6b1900ad2a53a6c6718c5d8cc4e902354`。
+
+已完成：
+
+- 集中式 `PathScorePolicy` 与 `PathSwitchGate`，统一管理 RTT、Jitter、Loss、Send Queue Delay、Relay penalty、升级 margin、稳定窗口和紧急切换阈值。
+- 每次 Relay ↔ P2P 切换重置媒体路径本地 packet-order 边界，避免跨路径 Sequence 跳变被误判为大规模丢包。
+- P2P 切换前保存 Relay 媒体质量基线；`udp_p2p` 激活后持续比较路径质量，并在连续劣化超过滞回窗口时主动降级回 Relay。
+- 主动降级继续复用 2/4/8/16/30 秒有界指数退避与 20 秒稳定窗口。
+- Relay → P2P 和 P2P → Relay 切换都会触发 H.264 IDR 恢复。
+- direct-path RTT/Jitter 不再借用可靠 Relay 控制流：复用现有认证 `PunchKeep/PunchAck`，在同一 `udp_p2p` socket 上直接测量。
+- `desktop_media` direct probe cadence 为 1 秒；Native RDP 保持原 10 秒 keepalive，不改变原 RDP 行为。
+- `PunchAck` 在媒体 datagram 解码前被内部消费，不会泄漏给 RD/1 Reassembler。
+- P2P Session 维护 RTT/Jitter EWMA；路径评分器现在可以同时使用真实 P2P RTT、Jitter、媒体丢包和 Host send-queue delay。
+- Relay 基线使用 Relay session probe；P2P 使用 direct socket probe，明确隔离两个测量域。
+- 增加认证 direct RTT、RTT/Jitter 平滑、评分滞回与 path-boundary 统计测试。
+- 新增确定性 Datagram transport shim：delay、jitter、随机丢包、burst loss、写侧 bandwidth limit 均可独立配置，固定 seed 可复现相同场景。
+- 新增 Relay → P2P 稳定晋升、瞬时 P2P 劣化后取消回退、持续 P2P 劣化后回退 Relay、P2P 不可用立即 failover 等确定性策略测试。
+- 新增真实 `desktop_media` probe + impairment 集成测试，验证 `PunchKeep/PunchAck` RTT 观测包含网络 shim 注入的延迟。
+- H.264 与 JPEG Host 发送路径新增媒体 `Send()` 阻塞时间 EWMA，并通过 Stats 上报真实 `SendQueueDelayMs`；此前字段存在但 Host 未实际填充的问题已修复。
+- bitrate-only ABR 新增 send-queue 拥塞输入：30/60/120 ms 分别进入 mild/normal/severe queue 降级档，避免限速场景必须等到丢包后才响应。
+- queue delay 超过稳定阈值时阻止码率恢复；链路恢复健康后仍沿用连续稳定窗口慢速升码率，避免带宽反复抖动。
+- transport shim 新增运行时 `SetProfile`，可在不重建 UDP socket 的前提下切换带宽/时延/丢包阶段，并重新开始固定 seed 的确定性序列。
+- 新增媒体发送阻塞实测单测，以及带宽骤降/恢复 ABR 场景；同时用 clean direct、lossy direct、queued direct、near-equal paths 固化当前默认 `PathScorePolicy` 行为。
+
+验证结果：
+
+```text
+Go CI
+  ✓ gofmt
+  ✓ go vet
+  ✓ go test ./...
+  ✓ race core data path
+  ✓ benchmark smoke
+
+UI CI
+  ✓ frontend / UI full regression
+  ✓ Windows desktop packages
+  ✓ macOS desktop packages
+```
+
+下一轮重点：
+
+1. ✅ 组合弱网确定性场景、stale-frame/drop 实时性保护、bitrate/FPS/resolution 三层 ABR、generation-aware Encoder/Decoder rebuild 与可导出 diagnostics schema v2 均已进入 `main`。
+2. 使用“导出诊断”完成同 LAN、IPv4 NAT、IPv6、Relay-only、Wi-Fi 抖动等实机矩阵；每次测试保留 raw 500 ms samples 与 Summary，重点比较 p50/p95 RTT/Jitter/Loss/Queue、DroppedFrames、PathSwitches、GenerationChanges、ABRChanges 与 ResolutionChanges。
+3. 完成 Intel / NVIDIA / AMD 编码与解码路径验证，并通过 `CaptureBackends / EncoderBackends / DecoderBackends`、硬件样本数确认实际媒体链路，而不是仅依据日志或 FPS 推测。
+4. 在真实样本完成前保持当前 `PathScorePolicy`、ABR pressure/recovery window 和 P2P retry/path-switch 默认参数，不用纯模拟结果直接改生产权重。
+5. 根据实机诊断 Summary 对 ABR 阈值、resolution hold、PathScorePolicy 权重、upgrade/emergency margin 与 P2P retry/path-switch 参数做定向校准，并继续用确定性弱网场景防止回归。
+
+### 0.3.1 组合弱网联动验证（本轮新增）
+
+- `internal/testnetem` 增加组合 profile 确定性测试：30 ms 基线延迟、±12 ms jitter、18% random loss、周期 burst loss 与 12 KB/s 写侧限速同时启用，并验证固定 seed 下 drop/delay/queue 序列可重复。
+- `agent/desktop/path_policy_scenario_test.go` 增加 ABR 与路径切换联动场景：短时组合劣化立即触发 bitrate 降级，但不会绕过 `PathSwitchGate`；健康窗口会取消 fallback probation，ABR 仍按稳定窗口慢恢复。
+- 持续组合劣化必须经过完整 `UpgradeHold` 才从 `udp_p2p` 回退 Relay；回退后的健康 direct path 也必须重新经历 promotion hold，防止 P2P / Relay 来回振荡。
+- 该轮只固化现有默认参数行为，不因纯模拟结果调整生产权重；权重调整继续等待跨 NAT / Wi-Fi 实机数据。
+
+- Viewer 网络统计条现已补充媒体 Path、Send Queue Delay、Dropped Frames、Capture/Encode 耗时，便于跨 NAT / Wi-Fi 实机验证时直接观察拥塞与 stale-frame 行为。
+
+### 0.3.2 Scene-aware Adaptive FPS（已合并 PR #51）
+
+- `DesktopVideoControl` 新增向后兼容的 `TargetFPS` 字段；Host 只调整采集 ticker，不重建 H.264 Encoder、不改变 resolution/generation。
+- Office / Auto / Quality 只有在 severe queue、持续 stale/drop、严重丢包或严重 jitter 连续多个 500 ms 窗口后才降低采集 FPS，避免单次抖动造成画面节拍变化。
+- Gaming / Performance 的 adaptive minimum FPS 等于 negotiated FPS，因此 ABR 继续只降码率，不牺牲高帧率交互目标。
+- 网络恢复时先把 bitrate 按既有稳定窗口逐步恢复到上限；之后再用更长的稳定窗口慢速恢复 FPS，避免 bitrate 与 FPS 同时上冲重新制造队列积压。
+- Host Stats 新增 `TargetFPS`，Viewer 网络统计条同步展示目标 FPS，方便实机校准 pressure/recovery window。
+
+### 0.3.3 在线 Host Capability Snapshot（已合并 PR #52）
+
+- Agent 握手的 `DeviceHello` 新增可选 `DesktopCapabilities` 快照；只有本次实例实际装载 Relay Desktop Host 时才上报，不改变数据库中的管理员授权模型。
+- Windows Host 在握手时重新枚举当前显示器，把会话级 HMONITOR ID、设备名、像素尺寸、主屏标记以及 GDI / DXGI capture backend 汇总到 `Displays / Captures`；显示器 ID 明确不持久化，布局变化或重连后重新获取。
+- Media Foundation H.264 codec 能力、Host 最大分辨率/FPS、Clipboard 等现有能力一并进入同一 snapshot，为 Controller 在连接前展示真实能力提供数据源。
+- Server 不把动态显示器/GPU 信息写入数据库；Gateway 只把快照保存在当前认证 `DeviceSession`，避免离线后继续暴露过期硬件状态。
+- Controller 获取 `RemoteDesktopTargets` 时仍先通过数据库验证所有权、显式 grant 与 backend 权限；只有目标当前在线且该认证 Session 的有效 grant 仍包含 `desktop.host`，才合并显示器/codec/capture 等动态详情。
+- Server 返回动态切片前再次复制，避免认证快照被 Controller 侧 DTO 修改；没有当前 `desktop.host` grant 或仅允许 Native RDP 时不会泄露显示器详情。
+- 该能力快照是后续 GUI 显示器下拉框、`DisplayID` 选屏、选中显示器 DXGI/GDI Capture、光标/输入坐标几何校正的基础层。
+
+### 0.4 当前实现与最终设计的差异
+
+为了优先验证 Windows Home 的端到端链路，RD1 中间增加了一个功能验证阶段：
+
+```text
+当前验证：
+DXGI Desktop Duplication（不可用时 GDI）→ 原生尺寸优先 BGRA direct → CPU NV12（缩放时回退 RGBA）→ Media Foundation H.264
+→ RD/1 QUIC Datagram → WebCodecs Canvas
+↘ H.264 不可用时自动回退 JPEG
+
+最终目标：
+DXGI / WGC → D3D11 texture → GPU convert → H.264 HW encoder
+→ RD/1 → H.264 HW decoder → D3D11 native viewer
+```
+
+GDI + JPEG 不改变最终设计方向，只用于验证以下基础设施已经正确工作：
+
+- Windows Home 不依赖 RDP Host 的授权和目标发现。
+- Host Capture → Encoder → Packetizer 的生命周期。
+- RD/1 QUIC Datagram 数据面。
+- Server 双跳媒体 Relay。
+- Controller 分片重组。
+- GUI Session 状态与 Viewer 展示。
+- Viewer → Relay → Host 的键盘/鼠标可靠控制链路与 Windows `SendInput` 注入。
+
+在这条验证链路通过 CI 和 Windows 实机验证后，再替换 Capture / Codec / Viewer，而不重新改动授权和 Relay 协议层。
+
+## 1. 开发策略
+
+本项目采用“先抽象、再打通、后优化”的顺序，不允许一开始同时引入 H.265、AV1、HDR、虚拟显示器等高风险能力。
+
+固定原则：
+
+1. 每个阶段结束都必须保持现有 RDP 可用。
+2. Relay Desktop 首先完成 Relay-only 可靠路径，再接 P2P。
+3. 第一版只要求 H.264。
+4. 视频不能依赖单一可靠 TCP 流。
+5. Viewer 使用原生渲染窗口，不在主 WebView2 中承担最终媒体渲染。
+6. 每个性能优化都必须有指标，禁止“感觉更快”。
+7. 所有协议字段从第一版带版本和 capability，避免后续为 H.265/AV1/HDR 再断代。
+8. 优先复用现有身份、设备审批、grant、session、tunnel、P2P 候选与审计能力。
+
+## 2. 开发里程碑
+
+```text
+RD0  Remote Desktop 抽象 + GUI                         ✅ 已完成
+RD1  Windows Relay Desktop Relay-only MVP                ✅ 已完成
+RD2  P2P + ABR + 性能统计                                🧪 direct probe + transport shim + queue ABR 闭环已完成，组合弱网 / 实机验证中
+RD3  H.265 / 4:4:4 / 音频 / 多显示器                    ⏳ 未开始
+RD4  AV1 / HDR / 虚拟显示器 / 高刷 / FEC                ⏳ 未开始
+```
+
+RD0、RD1、RD2 是首个可发布版本的范围。
+
+## 3. RD0：Remote Desktop 抽象
+
+### 3.1 新增协议模型
+
+新增：
+
+```text
+internal/protocol/remote_desktop.go
+internal/desktop/capability.go
+internal/desktop/stats.go
+```
+
+核心结构：
+
+```go
+type DesktopBackend string
+
+const (
+    DesktopBackendAuto  DesktopBackend = "auto"
+    DesktopBackendRDP   DesktopBackend = "rdp"
+    DesktopBackendRelay DesktopBackend = "relay"
+)
+
+type RemoteDesktopTarget struct {
+    DeviceID     string
+    Name         string
+    Online       bool
+    Capabilities DesktopCapabilities
+}
+
+type ConnectOptions struct {
+    Backend    DesktopBackend
+    Scene      string
+    Quality    string
+    Resolution ResolutionOptions
+    FPS        int
+    MaxBitrate int
+}
+```
+
+序列化字段采用现有项目的 JSON 命名风格；不要在多个 package 重复定义 Target。
+
+### 3.2 Agent Manager
+
+新增：
+
+```text
+agent/desktop/manager.go
+agent/desktop/selector.go
+agent/desktop/session.go
+```
+
+接口：
+
+```go
+type Backend interface {
+    Name() string
+    Available(target RemoteDesktopTarget) bool
+    Connect(ctx context.Context, target RemoteDesktopTarget, options ConnectOptions) (Session, error)
+}
+
+type Session interface {
+    ID() string
+    Backend() string
+    Stats() SessionStats
+    Close() error
+}
+```
+
+Manager 职责：
+
+- 获取服务端下发目标。
+- 合并 Native RDP 与 Relay Desktop capability。
+- 选择 backend。
+- 管理当前 active session。
+- 对 GUI 暴露统一状态。
+- 不实现具体视频或 RDP 数据面。
+
+### 3.3 封装现有 RDP
+
+不要立刻搬动现有 `agent/rdp`。
+
+新增轻量适配：
+
+```text
+agent/desktop/backend/rdp/backend.go
+```
+
+内部调用现有：
+
+```go
+Agent.ConnectRDP(targetID, true)
+Agent.DisconnectRDP()
+Agent.RDPTargets()
+```
+
+RD0 完成后 GUI 不再直接绑定 `ConnectRDP`。
+
+### 3.4 新 Bridge API
+
+`agent/bridge/bridge.go` 新增：
+
+```go
+GetRemoteDesktopTargets()
+ConnectRemoteDesktop(targetID string, options ...)
+DisconnectRemoteDesktop()
+GetRemoteDesktopStatus()
+```
+
+旧接口先保留：
+
+```go
+GetRDPTargets()
+ConnectRDP()
+DisconnectRDP()
+```
+
+标记为内部兼容路径，等新 GUI 和测试稳定后再决定是否删除。
+
+### 3.5 GUI
+
+修改：
+
+```text
+agent/gui/assets/index.html
+agent/gui/... bindings
+```
+
+首页新增“远程设备”。
+
+每行：
+
+```text
+名称
+在线状态
+路径/延迟（有数据时）
+能力提示
+[远程桌面]
+```
+
+点击默认直接连接，不先弹高级设置。
+
+增加连接设置弹窗或侧栏，但只在用户主动打开“连接设置”时出现：
+
+```text
+场景
+协议
+画质
+分辨率
+FPS
+```
+
+### 3.6 RD0 验收
+
+- Windows Agent GUI 能列出授权目标。
+- 点击 Windows Pro 目标仍能启动现有 mstsc。
+- GUI 不再出现“RDP 目标 ID”输入。
+- backend auto selector 有单测。
+- 现有 RDP P2P/Relay 测试全部不回归。
+
+## 4. Capability 上报与服务端
+
+### 4.1 Capability 消息
+
+在 Agent Welcome/状态更新机制中扩展 Remote Desktop capabilities。
+
+建议区分：
+
+```text
+静态能力：
+codec/capture/decoder/max resolution
+
+动态状态：
+RDP listening
+display list
+encoder availability
+```
+
+静态能力只在连接/变化时发送，动态状态可 debounce 后更新。
+
+### 4.2 Server 目标模型
+
+Server 不需要理解每个 Encoder 细节，只负责透传允许公开给 Controller 的 capability 摘要。
+
+新增/扩展目标响应：
+
+```text
+deviceId
+name
+online
+desktopControllerAllowed
+desktopHostAllowed
+nativeRdpAvailable
+relayDesktopAvailable
+relayDesktopSummary
+```
+
+详细 codec negotiation 在 Session 建立后由双方完成，避免 Welcome 过度膨胀。
+
+### 4.3 授权迁移
+
+过渡期策略：
+
+```text
+已有 rdp.connect grant
+    ↓
+允许 Native RDP
+
+新增 desktop.connect grant
+    ↓
+允许统一 Remote Desktop
+```
+
+首个版本可采用服务端兼容映射：
+
+- desktop.connect 存在：允许所有批准 backend。
+- 只有旧 rdp.connect：只允许 Native RDP。
+- 不自动把旧 RDP grant 扩大为 Relay Desktop 控制权限。
+
+这一点避免升级后权限被静默放大。
+
+## 5. RD1：Relay Desktop Session 骨架
+
+新增：
+
+```text
+agent/desktop/backend/relay/
+  backend.go
+  host.go
+  controller.go
+  session.go
+
+server/desktop/
+  coordinator.go
+  lease.go
+  signaling.go
+
+internal/protocol/remote_desktop.go
+```
+
+Session 建立流程：
+
+```text
+Controller
+  ↓ DESKTOP_CONNECT_REQUEST
+Server authorization
+  ↓
+Target notify
+  ↓ capability exchange
+Server returns session lease/token
+  ↓
+Transport establish
+  ↓
+Media/control channels ready
+  ↓
+Viewer opens
+```
+
+MVP 先只使用 Relay QUIC 路径，P2P 在 RD2 接入。
+
+## 6. Wire Protocol
+
+协议消息建议：
+
+```text
+DESKTOP_CAPS
+DESKTOP_CONNECT_REQUEST
+DESKTOP_CONNECT_NOTIFY
+DESKTOP_CONNECT_RESPONSE
+DESKTOP_CONFIG
+DESKTOP_CONFIG_ACK
+DESKTOP_STATS
+DESKTOP_IDR_REQUEST
+DESKTOP_PATH_CHANGE
+DESKTOP_LEASE_RENEW
+DESKTOP_SESSION_CLOSE
+```
+
+媒体不是 JSON。
+
+### 6.1 Media Packet Header
+
+二进制头最少包含：
+
+```text
+version
+packet_type
+session_id
+stream_id
+generation
+sequence
+frame_id
+fragment_index
+fragment_count
+timestamp
+flags
+payload_length
+```
+
+flags：
+
+```text
+KEYFRAME
+CONFIG
+END_OF_FRAME
+CURSOR
+AUDIO
+```
+
+安全层可复用现有 P2P session token 派生机制，但必须使用新的 domain separation，不能直接复用 RDP payload MAC 字符串。
+
+### 6.2 Generation
+
+以下变化必须递增 generation：
+
+- codec 变化。
+- 分辨率变化。
+- bit depth/chroma 变化。
+- encoder 重建。
+
+Viewer 收到新 generation 的 CONFIG 后：
+
+1. flush decoder；
+2. 应用新参数；
+3. 等待 IDR；
+4. 丢弃旧 generation 数据。
+
+## 7. Windows Capture
+
+### 7.1 MVP 路径
+
+目录：
+
+```text
+agent/desktop/capture/windows/
+  capture.go
+  dxgi.go
+  cursor.go
+```
+
+接口：
+
+```go
+type Capturer interface {
+    Start(ctx context.Context, displayID string) error
+    NextFrame(ctx context.Context) (*Frame, error)
+    Close() error
+}
+```
+
+Frame 不应默认持有 CPU BGRA slice。定义抽象 surface：
+
+```go
+type Frame struct {
+    Width      int
+    Height     int
+    Timestamp  int64
+    DirtyRects []Rect
+    Moves      []MoveRect
+    Surface    Surface
+}
+```
+
+Windows 实现的 Surface 指向 D3D11 texture/handle。
+
+### 7.2 DXGI
+
+MVP 使用 Desktop Duplication API：
+
+- 枚举 Adapter/Output。
+- DuplicateOutput。
+- AcquireNextFrame。
+- 获取 dirty rect / move rect。
+- 获取 PointerPosition / PointerShape。
+- ReleaseFrame。
+
+必须处理：
+
+- DXGI_ERROR_ACCESS_LOST。
+- 分辨率变化。
+- 锁屏/切用户。
+- 显示器拔插。
+- RDP session 导致的 output 状态变化。
+
+Access lost 不能导致 Agent 崩溃，应重建 capturer。
+
+### 7.3 WGC
+
+RD1 可只定义接口，RD2/RD3 再完成 WGC fallback。
+
+## 8. Windows Encoder
+
+### 8.1 MVP
+
+目录：
+
+```text
+agent/desktop/codec/windows/
+  encoder.go
+  mf_h264.go
+  device.go
+```
+
+接口：
+
+```go
+type Encoder interface {
+    Configure(VideoConfig) error
+    Encode(ctx context.Context, frame *Frame) ([]EncodedPacket, error)
+    ForceIDR() error
+    Reconfigure(VideoConfig) error
+    Stats() EncoderStats
+    Close() error
+}
+```
+
+MVP 使用 Media Foundation H.264 Encoder，优先选择 Hardware MFT。
+
+启动时探测：
+
+```text
+hardware H.264 encoder
+hardware H.264 decoder
+max resolution
+supported profile
+low latency flags
+```
+
+### 8.2 实现边界
+
+首选通过 Go + Windows API 封装完成。
+
+如果 D3D11 / Media Foundation 的 COM interop 在 Go 中导致大量不安全代码或稳定性风险，允许引入一个很薄的 Windows native shim，但必须满足：
+
+- shim 只负责 capture/codec/render API。
+- Session、网络、授权、ABR 保持 Go。
+- API 使用显式 handle/lifetime。
+- 不在 shim 中再造网络线程。
+- 构建脚本可重复构建。
+- 依赖许可证清晰。
+
+不要直接把 Sunshine 源码嵌入项目。
+
+### 8.3 Software Fallback
+
+MVP 可允许 software fallback 用于功能验证，但发布默认必须优先硬件。
+
+software 路径如果无法达到 1080p60，不应阻止产品可用，应自动降低 FPS/分辨率并在状态中显示。
+
+## 9. Packetizer 与发送
+
+目录：
+
+```text
+agent/desktop/transport/
+  packetizer.go
+  sender.go
+  receiver.go
+  channel.go
+```
+
+MVP 视频：
+
+```text
+H.264 access unit
+  ↓
+按 MTU 分片
+  ↓
+QUIC Datagram
+```
+
+目标 payload size 根据 tunnel 当前安全 MTU 计算，不写死以太网 1500。
+
+发送策略：
+
+- 不在队列中堆积过时 P-frame。
+- 新 frame 到来时，如果旧非关键 frame 仍大面积积压，允许丢弃旧 frame。
+- Keyframe/CONFIG 有更高优先级。
+- 输入 channel 永远不等待视频队列清空。
+
+## 10. Viewer
+
+目录：
+
+```text
+agent/desktop/viewer/windows/
+  window.go
+  decoder.go
+  renderer.go
+  input.go
+  overlay.go
+```
+
+### 10.1 Viewer Window
+
+使用独立 Win32/D3D11 window。
+
+功能：
+
+- 无边框/普通窗口。
+- 全屏。
+- DPI aware。
+- 正确处理 aspect ratio。
+- 鼠标捕获/释放。
+- overlay 自动隐藏。
+
+### 10.2 Decoder
+
+MVP Media Foundation H.264 hardware decoder。
+
+Decoder 输入：
+
+```text
+CONFIG
+IDR/P frame
+```
+
+输出尽量保留 GPU surface，避免下载 CPU 后再上传。
+
+### 10.3 Renderer
+
+D3D11 swap chain：
+
+```text
+decoder surface
+  ↓
+scale/convert if needed
+  ↓
+swap chain
+```
+
+需要记录：
+
+```text
+decode_ms
+render_ms
+present_ms
+```
+
+## 11. Input
+
+目录：
+
+```text
+agent/desktop/input/windows/
+  injector.go
+  keyboard.go
+  mouse.go
+```
+
+Wire 消息：
+
+```text
+KEY_DOWN
+KEY_UP
+MOUSE_MOVE
+MOUSE_BUTTON
+MOUSE_WHEEL
+```
+
+规则：
+
+- 键盘/Button 走可靠高优先级 stream。
+- Mouse move 可使用 Datagram；带 sequence，Host 只处理最新坐标。
+- 坐标使用规范化绝对坐标或明确 display coordinate，避免分辨率变化后漂移。
+- Viewer 失焦时释放所有本地记录的 pressed keys，防止粘键。
+- Host Session Close 时释放可能残留的 modifier。
+
+## 12. Cursor
+
+Host 独立上报：
+
+```text
+position
+visible
+shape_id
+hotspot
+shape bitmap（shape 变化时）
+```
+
+Viewer 本地绘制。
+
+不要把 cursor 永久烘焙进视频。
+
+调试模式可以支持“host rendered cursor”用于问题排查，但不是默认路径。
+
+## 13. Clipboard
+
+RD1：
+
+- UTF-8 / Unicode text。
+- 双向。
+- 会话级 enable/disable。
+- 防止循环同步：clipboard content 带 origin/change id。
+
+RD3 后续：
+
+- 图片。
+- 文件列表。
+- 大内容分块。
+
+## 14. RD2：P2P
+
+不要再复制一份 RDP P2P。
+
+重构方向：
+
+```text
+现有 agent/rdp/p2p
+         ↓
+抽象公共 candidate / punch / secure / path
+         ↓
+RDP backend 和 Relay Desktop 共用
+```
+
+允许分两步：
+
+1. Relay Desktop 暂时调用现有候选/协调代码的适配层。
+2. 测试稳定后再移动到通用 `internal/path` / `agent/path`。
+
+严禁在重构和功能首通阶段同时改变打洞算法。
+
+## 15. Path Manager
+
+接口：
+
+```go
+type Path interface {
+    Name() string
+    SendDatagram([]byte) error
+    OpenReliable(ctx context.Context, channel string) (io.ReadWriteCloser, error)
+    Metrics() PathMetrics
+    Close() error
+}
+```
+
+候选：
+
+```text
+lan
+p2p-v4
+p2p-v6
+relay-quic
+relay-tcp-control-only
+```
+
+评分示意：
+
+```text
+score =
+  rtt_ms * W1 +
+  loss_pct * W2 +
+  jitter_ms * W3 +
+  queue_ms * W4 +
+  relay_penalty
+```
+
+不要把常数散落在代码里，集中到策略结构并可测试。
+
+切换：
+
+- 新路径连续优于当前路径一段时间才升级。
+- 当前路径严重恶化时快速降级。
+- 路径切换不关闭 Desktop Session。
+- 切换后强制统计 event；必要时请求 IDR。
+
+## 16. RD2：ABR
+
+目录：
+
+```text
+agent/desktop/adapt/
+  estimator.go
+  controller.go
+  content.go
+  presets.go
+```
+
+状态：
+
+```go
+type NetworkEstimate struct {
+    DeliveryRate int64
+    RTT          time.Duration
+    Jitter       time.Duration
+    Loss         float64
+    QueueDelay   time.Duration
+}
+
+type MediaDecision struct {
+    Width        int
+    Height       int
+    FPS          int
+    TargetBitrate int
+    ForceIDR     bool
+}
+```
+
+### 16.1 控制周期
+
+建议：
+
+- transport metrics：100–250ms。
+- media decision：250–500ms。
+- resolution 改变设置最小间隔，例如 3–5s。
+- bitrate 可更快变化。
+- FPS 变化介于两者之间。
+
+### 16.2 降级顺序
+
+默认 desktop：
+
+```text
+降低 motion FPS
+→ 降低 target bitrate
+→ 降 encode resolution
+→ 增大 QP/降低 chroma（未来）
+```
+
+gaming：
+
+```text
+保持 FPS
+→ 降 bitrate
+→ 降 resolution
+```
+
+因此 ABR 必须接收 scene。
+
+## 17. Quality Presets
+
+实现为参数边界而非固定值：
+
+```go
+type QualityPreset struct {
+    MinBitrate int
+    MaxBitrate int
+    MaxFPS     int
+    MaxWidth   int
+    MaxHeight  int
+    Prefer444  bool
+    PreferHDR  bool
+}
+```
+
+GUI 预设：
+
+```text
+自动
+流畅
+均衡
+高清
+极致
+```
+
+“自动”可以根据 Viewer 分辨率、Host GPU、路径和场景选择 preset baseline。
+
+## 18. Stats 与 Overlay
+
+统一：
+
+```text
+internal/desktop/stats.go
+```
+
+Host、Viewer 分别维护本地 stats；Controller 聚合展示。
+
+至少：
+
+```text
+FPS capture/encode/decode/render
+target/actual bitrate
+RTT/jitter/loss
+delivery rate
+capture/encode/decode/render ms
+send queue delay
+dropped frames
+IDR count
+path
+backend
+codec
+resolution
+```
+
+不要每帧通过 Server 上报。
+
+Viewer overlay 本地 1s 聚合刷新。
+
+## 19. Native RDP Backend 改造
+
+RD0 后继续使用现有：
+
+```text
+127.0.0.1:auto → RDP P2P/Relay → target 127.0.0.1:3389
+```
+
+增强项：
+
+1. Target capability 实时包含 nativeRdpAvailable。
+2. `ConnectRemoteDesktop` 根据策略选择它。
+3. 未来生成临时 `.rdp` 文件控制：
+   - width/height。
+   - fullscreen。
+   - multimon。
+   - smart sizing。
+4. Native RDP 的画质/码率不复用 Relay Desktop encoder 参数。
+
+## 20. GUI 状态模型
+
+Remote Desktop 状态：
+
+```text
+idle
+preparing
+authorizing
+negotiating
+connecting
+connected
+reconnecting
+closing
+failed
+```
+
+附加：
+
+```text
+backend
+path
+target
+error_code
+error_message
+stats
+```
+
+前端不得解析日志文本判断状态。
+
+## 21. 错误码
+
+新增稳定错误码：
+
+```text
+DESKTOP_NOT_AUTHORIZED
+DESKTOP_TARGET_OFFLINE
+DESKTOP_BACKEND_UNAVAILABLE
+DESKTOP_NATIVE_RDP_UNAVAILABLE
+DESKTOP_CAPTURE_FAILED
+DESKTOP_ENCODER_UNAVAILABLE
+DESKTOP_DECODER_UNAVAILABLE
+DESKTOP_TRANSPORT_FAILED
+DESKTOP_SESSION_EXPIRED
+DESKTOP_PROTOCOL_MISMATCH
+DESKTOP_RECONFIGURE_FAILED
+```
+
+错误消息用于用户展示，业务逻辑只匹配 code。
+
+## 22. 配置
+
+Agent 用户配置第一版：
+
+```yaml
+remote_desktop:
+  enabled: true
+  protocol: auto
+  scene: auto
+  quality: auto
+
+  relay:
+    codec: auto
+    resolution:
+      mode: follow_viewport
+      max_width: 3840
+      max_height: 2160
+    fps:
+      max: 60
+    bitrate:
+      mode: adaptive
+      min: 1000000
+      max: 30000000
+```
+
+默认值留在 RuntimeConfig，不强制全部写回 YAML。
+
+高级内部参数（ABR gain、path score 权重等）不要第一版暴露到 GUI/YAML。
+
+## 23. 测试计划
+
+### 23.1 单元测试
+
+必须覆盖：
+
+```text
+backend selector
+capability intersection
+quality preset
+ABR hysteresis
+path scoring
+path switch hysteresis
+packet fragmentation/reassembly
+generation rollover
+sequence/replay rejection
+input coordinate mapping
+clipboard loop prevention
+```
+
+### 23.2 模拟网络测试
+
+增加可测试的 NetEm/transport shim，模拟：
+
+```text
+RTT 20 / 50 / 100 / 200 ms
+loss 0 / 0.5 / 2 / 5 / 10 %
+jitter
+bandwidth 2 / 5 / 10 / 20 / 50 Mbps
+突发丢包
+带宽突然下降/恢复
+```
+
+验收 ABR：
+
+- 不持续积压。
+- 降码率快速。
+- 恢复缓慢稳定。
+- 不频繁改变分辨率。
+- 输入 channel 延迟不跟视频 queue 一起飙升。
+
+### 23.3 Windows 实机矩阵
+
+至少：
+
+```text
+Windows 11 Home
+Windows 11 Pro
+Intel iGPU
+NVIDIA GPU
+AMD GPU
+单显示器
+双显示器
+1080p
+1440p
+4K
+```
+
+网络：
+
+```text
+同 LAN
+IPv4 NAT
+IPv6
+只可 Relay
+UDP 丢包
+Wi-Fi 抖动
+```
+
+### 23.4 回归
+
+每阶段：
+
+```bash
+go test ./... -count=1
+go vet ./...
+```
+
+Windows 构建：
+
+```powershell

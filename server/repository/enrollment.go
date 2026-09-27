@@ -532,6 +532,7 @@ func filterApprovedCapabilities(selected, requested []string) []string {
 	allowed := map[string]bool{
 		"proxy.client": true, "proxy.exit": true, "rdp.controller": true,
 		"rdp.host": true, "rdp.public": true,
+		"desktop.controller": true, "desktop.host": true,
 	}
 	out := make([]string, 0, len(selected))
 	for _, capability := range normalizeCapabilities(selected) {
@@ -549,13 +550,12 @@ func validateCapabilityDependencies(capabilities []string) error {
 	return nil
 }
 
-// syncOwnerRDPGrants keeps the first M2 access model deliberately simple: an
-// administrator-approved device can reach other RDP-capable devices assigned
-// to the same owner. The explicit rows make the authorization matrix visible
-// and leave room for per-target grants in the next milestone.
+// syncOwnerRDPGrants maintains the explicit desktop Controller -> Target
+// matrix shared by Native RDP and Relay Desktop. Each backend still verifies
+// its own endpoint capabilities when a connection is opened.
 func syncOwnerRDPGrants(tx *sql.Tx, ownerID, newDeviceID string, newCapabilities []string, reviewerID string, now time.Time) error {
-	newController := slices.Contains(newCapabilities, "rdp.controller")
-	newTarget := slices.Contains(newCapabilities, "rdp.host")
+	newController := slices.Contains(newCapabilities, "rdp.controller") || slices.Contains(newCapabilities, "desktop.controller")
+	newTarget := slices.Contains(newCapabilities, "rdp.host") || slices.Contains(newCapabilities, "desktop.host")
 	rows, err := tx.Query(`SELECT id, approved_capabilities FROM devices WHERE owner_user_id = ? AND approval_state = 'approved' AND id <> ?`, ownerID, newDeviceID)
 	if err != nil {
 		return err
@@ -582,12 +582,12 @@ func syncOwnerRDPGrants(tx *sql.Tx, ownerID, newDeviceID string, newCapabilities
 		return err
 	}
 	for _, item := range devices {
-		if newController && slices.Contains(item.caps, "rdp.host") {
+		if newController && (slices.Contains(item.caps, "rdp.host") || slices.Contains(item.caps, "desktop.host")) {
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO rdp_access_grants (controller_device_id, target_device_id, granted_by, created_at) VALUES (?, ?, ?, ?)`, newDeviceID, item.id, reviewerID, now); err != nil {
 				return err
 			}
 		}
-		if newTarget && slices.Contains(item.caps, "rdp.controller") {
+		if newTarget && (slices.Contains(item.caps, "rdp.controller") || slices.Contains(item.caps, "desktop.controller")) {
 			if _, err := tx.Exec(`INSERT OR IGNORE INTO rdp_access_grants (controller_device_id, target_device_id, granted_by, created_at) VALUES (?, ?, ?, ?)`, item.id, newDeviceID, reviewerID, now); err != nil {
 				return err
 			}

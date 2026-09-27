@@ -13,6 +13,8 @@ import (
 	"net"
 	"testing"
 	"time"
+
+	"github.com/hashicorp/yamux"
 )
 
 // generateSelfSignedCert generates an in-memory TLS certificate for testing
@@ -49,43 +51,35 @@ func generateSelfSignedCert(t *testing.T) tls.Certificate {
 
 func TestTLSTunnelMultiplexing(t *testing.T) {
 	cert := generateSelfSignedCert(t)
-	tlsServerConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
-	defer listener.Close()
+	clientRaw, serverRaw := net.Pipe()
+	clientTLS := tls.Client(clientRaw, &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13})
+	serverTLS := tls.Server(serverRaw, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
 
-	serverAddr := listener.Addr().String()
-
-	// Server accept goroutine
 	serverErrCh := make(chan error, 1)
+	serverReady := make(chan struct{}, 1)
 	go func() {
-		rawConn, err := listener.Accept()
-		if err != nil {
+		if err := serverTLS.HandshakeContext(ctx); err != nil {
 			serverErrCh <- err
 			return
 		}
-		tlsConn := tls.Server(rawConn, tlsServerConfig)
-		session, err := ServerTLS(tlsConn, nil)
+		session, err := ServerTLS(serverTLS, nil)
 		if err != nil {
 			serverErrCh <- err
 			return
 		}
 		defer session.Close()
+		serverReady <- struct{}{}
 
-		// Accept a stream
-		stream, err := session.AcceptStream(context.Background())
+		stream, err := session.AcceptStream(ctx)
 		if err != nil {
 			serverErrCh <- err
 			return
 		}
 		defer stream.Close()
 
-		// Echo data back
 		buf := make([]byte, 1024)
 		n, err := stream.Read(buf)
 		if err != nil {
@@ -96,15 +90,23 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 		serverErrCh <- err
 	}()
 
-	// Client connect
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	clientSession, err := DialTLS(ctx, serverAddr, &tls.Config{InsecureSkipVerify: true}, nil)
-	if err != nil {
-		t.Fatalf("DialTLS failed: %v", err)
+	if err := clientTLS.HandshakeContext(ctx); err != nil {
+		t.Fatalf("client TLS handshake failed: %v", err)
 	}
+	clientMux, err := yamux.Client(clientTLS, DefaultYAMUXConfig())
+	if err != nil {
+		t.Fatalf("yamux client init failed: %v", err)
+	}
+	clientSession := NewTLSSession(clientTLS, clientMux)
 	defer clientSession.Close()
+
+	select {
+	case <-serverReady:
+	case err := <-serverErrCh:
+		t.Fatalf("server setup failed: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("server setup timed out: %v", ctx.Err())
+	}
 
 	clientStream, err := clientSession.OpenStream(ctx)
 	if err != nil {
@@ -122,11 +124,9 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clientStream.Read failed: %v", err)
 	}
-
 	if string(reply[:n]) != testMsg {
 		t.Fatalf("expected %s, got %s", testMsg, string(reply[:n]))
 	}
-
 	if err := <-serverErrCh; err != nil {
 		t.Fatalf("server encountered error: %v", err)
 	}

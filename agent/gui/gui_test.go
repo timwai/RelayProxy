@@ -50,6 +50,8 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goSelectExit",
 		"goSetAutostart",
 		"goSetTheme",
+		"goSetRemoteDesktopResolution",
+		"goGetRemoteDesktopDiagnostics",
 	} {
 		if !strings.Contains(script, "window."+name) {
 			t.Fatalf("Wails bridge missing %s", name)
@@ -125,6 +127,173 @@ func TestSettingsDoNotHideManualLaunch(t *testing.T) {
 	} {
 		if strings.Contains(page, forbidden) {
 			t.Fatalf("settings still expose manual start-minimized behavior %q", forbidden)
+		}
+	}
+}
+
+func TestRemoteDesktopStatsExposeRealtimeCongestionSignals(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"stats.path || status.pathUdp || 'relay'",
+		"'Queue ' + Number(stats.sendQueueDelayMs || 0).toFixed(1) + ' ms'",
+		"'Dropped ' + Number(stats.droppedFrames || 0)",
+		"'Capture ' + stats.captureMs.toFixed(1) + ' ms'",
+		"'Convert ' + stats.convertMs.toFixed(1) + ' ms'",
+		"'Codec ' + stats.codecMs.toFixed(1) + ' ms'",
+		"'Encode total ' + stats.encodeMs.toFixed(1) + ' ms'",
+		"'Target FPS ' + Number(stats.targetFps)",
+		"var captureLabel = stats.captureBackend",
+		"captureLabel += '/' + stats.captureFormat",
+		"'Capture ' + captureLabel",
+		"'Encoder ' + stats.encoderBackend + (stats.encoderHardware ? ' HW' : ' SW')",
+		"stats.decoderBackend || (desktopVideoDecoder ? 'webcodecs' : '')",
+		"'Media: ' + mediaLabel",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop stats UI missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopDisplaySelectionUsesAdvertisedTargetDisplays(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"desktopDisplaySelections: {}",
+		"function remoteDesktopDisplaySelection(targetID)",
+		"displayId: remoteDesktopDisplaySelection(targetID)",
+		"Array.isArray(caps.displays)",
+		"allDisplays.textContent = '全部显示器'",
+		"state.desktopDisplaySelections[target.deviceId] = displaySelect.value",
+		"remoteDesktopConnectOptions(targetID)",
+		"status.displayName || status.displayId",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop display selection UI missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopSceneSelectorFeedsAdaptivePolicy(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-opt-scene"`,
+		`<option value="office">办公</option>`,
+		`<option value="performance">性能</option>`,
+		`<option value="gaming">游戏</option>`,
+		`<option value="quality">画质</option>`,
+		`var scene = $('desktop-opt-scene') ? $('desktop-opt-scene').value : 'auto';`,
+		`scene: scene || 'auto'`,
+		`游戏 / 性能优先保持协商帧率`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop scene selector missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopWebCodecsTracksMediaGeneration(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"desktopFrameGeneration = 0",
+		"desktopVideoGeneration = 0",
+		"desktopVideoNeedsKeyFrame = true",
+		"ensureDesktopVideoDecoder(codec, generation)",
+		"desktopVideoGeneration === generation",
+		"ensureDesktopVideoDecoder(frame.codec || 'avc1.42E01F', frame.generation)",
+		"frameGeneration === desktopFrameGeneration",
+		"if (desktopVideoNeedsKeyFrame && !frame.keyFrame)",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop generation-aware WebCodecs path missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopRuntimeResolutionSwitcher(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-runtime-resolution-wrap"`,
+		`id="desktop-runtime-resolution"`,
+		`id="desktop-runtime-resolution-apply"`,
+		`id="desktop-runtime-resolution-max"`,
+		"function updateDesktopRuntimeResolutionControl(status)",
+		"status.codec === 'h264'",
+		"status.maxWidth || status.width || 0",
+		"status.maxHeight || status.height || 0",
+		"option.disabled = !!(maxWidth && maxHeight && (width > maxWidth || height > maxHeight))",
+		"async function setRemoteDesktopResolution()",
+		"call('goSetRemoteDesktopResolution', width, height)",
+		"value === 'max'",
+		"'最高 ' + maxWidth + '×' + maxHeight",
+		"等待新媒体 Generation",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop runtime resolution UI missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopDiagnosticsExport(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-diagnostics-export-btn"`,
+		"async function exportRemoteDesktopDiagnostics()",
+		"call('goGetRemoteDesktopDiagnostics')",
+		"desktopDiagnosticsFilename(report)",
+		"new Blob([payload], { type:'application/json;charset=utf-8' })",
+		"link.download = desktopDiagnosticsFilename(report)",
+		"URL.createObjectURL(blob)",
+		"URL.revokeObjectURL(url)",
+		"最近约 10 分钟",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop diagnostics export missing %q", want)
+		}
+	}
+}
+
+func TestRemoteDesktopCaptureBackendSelector(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="desktop-opt-capture"`,
+		`<option value="dxgi">DXGI</option>`,
+		`<option value="gdi">GDI</option>`,
+		`var captureBackend = $('desktop-opt-capture') ? $('desktop-opt-capture').value : 'auto';`,
+		`captureBackend: captureBackend || 'auto'`,
+		`parts.push('Capture ' + options.captureBackend.toUpperCase())`,
+		`显式 DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端`,
+		`强制 DXGI 时请先选择具体显示器`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("remote desktop capture backend selector missing %q", want)
 		}
 	}
 }

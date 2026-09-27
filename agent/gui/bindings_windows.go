@@ -10,6 +10,7 @@ import (
 
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/divert"
+	"relayproxy/internal/protocol"
 )
 
 const okResult = "ok"
@@ -51,6 +52,212 @@ func (s *WailsService) GetStatus() (string, error) {
 		return "{}", nil
 	}
 	return s.owner.statusJSON(), nil
+}
+
+func (s *WailsService) GetRemoteDesktopTargets() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "[]", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopTargets())
+	if err != nil {
+		return "[]", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) ConnectRemoteDesktop(targetID string, rawOptions string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	var options protocol.RemoteDesktopConnectOptions
+	if strings.TrimSpace(rawOptions) != "" {
+		if err := json.Unmarshal([]byte(rawOptions), &options); err != nil {
+			data, _ := json.Marshal(map[string]any{"ok": false, "message": "invalid remote desktop options: " + err.Error()})
+			return string(data), nil
+		}
+	}
+	s.owner.stopNativeDesktopViewer()
+	session, err := s.owner.bridge.ConnectRemoteDesktop(targetID, options)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{"ok": true, "session": session})
+	return string(data), nil
+}
+
+func (s *WailsService) DisconnectRemoteDesktop() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	s.owner.stopNativeDesktopViewer()
+	s.owner.bridge.DisconnectRemoteDesktop()
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) OpenRemoteDesktopNativeViewer() (string, error) {
+	if s == nil || s.owner == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	result, err := s.owner.openNativeDesktopViewer()
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(result)
+	return string(data), nil
+}
+
+func (s *WailsService) CloseRemoteDesktopNativeViewer() (string, error) {
+	if s == nil || s.owner == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	s.owner.stopNativeDesktopViewer()
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) GetRemoteDesktopNativeViewerStatus() (string, error) {
+	if s == nil || s.owner == nil {
+		return `{"open":false}`, nil
+	}
+	data, _ := json.Marshal(s.owner.nativeDesktopViewerStatus())
+	return string(data), nil
+}
+
+func (s *WailsService) GetRemoteDesktopStatus() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"state":"idle"}`, nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopStatus())
+	if err != nil {
+		return `{"state":"idle"}`, nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) GetRemoteDesktopStats() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopStats())
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) GetRemoteDesktopDiagnostics() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopDiagnostics())
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) GetRemoteDesktopFrame() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopFrame())
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) GetRemoteDesktopCursor(knownCursorID string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopCursor(knownCursorID))
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) GetRemoteDesktopClipboard(knownSequence uint64) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopClipboard(knownSequence))
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) SendRemoteDesktopClipboard(text string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if err := s.owner.bridge.SendRemoteDesktopClipboard(text); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) GetClipboardText() (string, error) {
+	if s == nil || s.owner == nil || s.owner.app == nil {
+		return "", nil
+	}
+	text, ok := s.owner.app.Clipboard.Text()
+	if !ok {
+		return "", nil
+	}
+	return text, nil
+}
+
+func (s *WailsService) SetClipboardText(text string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.app == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if !s.owner.app.Clipboard.SetText(text) {
+		return `{"ok":false,"message":"clipboard unavailable"}`, nil
+	}
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) SendRemoteDesktopInput(rawEvent string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	var event protocol.DesktopInputEvent
+	if err := json.Unmarshal([]byte(rawEvent), &event); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": "invalid remote desktop input: " + err.Error()})
+		return string(data), nil
+	}
+	if err := s.owner.bridge.SendRemoteDesktopInput(event); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) SetRemoteDesktopResolution(width, height int) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if err := s.owner.bridge.SetRemoteDesktopResolution(width, height); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) RequestRemoteDesktopIDR() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if err := s.owner.bridge.RequestRemoteDesktopIDR(); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
 }
 
 func (s *WailsService) GetLogs() (string, error) {

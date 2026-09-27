@@ -9,11 +9,13 @@ import (
 const (
 	DeviceProtocolVersion = 3
 
-	CapabilityProxyClient = "proxy.client"
-	CapabilityProxyExit   = "proxy.exit"
-	CapabilityRDPClient   = "rdp.controller"
-	CapabilityRDPHost     = "rdp.host"
-	CapabilityRDPPublic   = "rdp.public"
+	CapabilityProxyClient       = "proxy.client"
+	CapabilityProxyExit         = "proxy.exit"
+	CapabilityRDPClient         = "rdp.controller"
+	CapabilityRDPHost           = "rdp.host"
+	CapabilityRDPPublic         = "rdp.public"
+	CapabilityDesktopController = "desktop.controller"
+	CapabilityDesktopHost       = "desktop.host"
 
 	ErrCodeApprovalPending  = "APPROVAL_PENDING"
 	ErrCodeDeviceRejected   = "DEVICE_REJECTED"
@@ -31,16 +33,17 @@ type RDPTarget struct {
 }
 
 type DeviceHello struct {
-	ProtocolVersion       int      `json:"protocolVersion"`
-	InstallationID        string   `json:"installationId"`
-	PublicKey             []byte   `json:"publicKey"`
-	ClientNonce           []byte   `json:"clientNonce"`
-	DeviceName            string   `json:"deviceName"`
-	Platform              string   `json:"platform"`
-	Arch                  string   `json:"arch"`
-	ClientVersion         string   `json:"clientVersion"`
-	RequestedCapabilities []string `json:"requestedCapabilities"`
-	TransportCapabilities []string `json:"transportCapabilities,omitempty"`
+	ProtocolVersion       int                  `json:"protocolVersion"`
+	InstallationID        string               `json:"installationId"`
+	PublicKey             []byte               `json:"publicKey"`
+	ClientNonce           []byte               `json:"clientNonce"`
+	DeviceName            string               `json:"deviceName"`
+	Platform              string               `json:"platform"`
+	Arch                  string               `json:"arch"`
+	ClientVersion         string               `json:"clientVersion"`
+	RequestedCapabilities []string             `json:"requestedCapabilities"`
+	TransportCapabilities []string             `json:"transportCapabilities,omitempty"`
+	DesktopCapabilities   *DesktopCapabilities `json:"desktopCapabilities,omitempty"`
 }
 
 type AuthChallenge struct {
@@ -57,21 +60,22 @@ type AuthProof struct {
 }
 
 type DeviceAccepted struct {
-	Success               bool        `json:"success"`
-	State                 string      `json:"state"`
-	DeviceID              string      `json:"deviceId,omitempty"`
-	ApprovedCapabilities  []string    `json:"approvedCapabilities,omitempty"`
-	RDPTargets            []RDPTarget `json:"rdpTargets,omitempty"`
-	RendezvousAddress     string      `json:"rendezvousAddress,omitempty"`
-	RDPLeaseSec           int         `json:"rdpLeaseSec,omitempty"`
-	SessionID             string      `json:"sessionId,omitempty"`
-	HeartbeatSec          int         `json:"heartbeat,omitempty"`
-	MaxConnections        int         `json:"maxConnections,omitempty"`
-	ServerTime            int64       `json:"serverTime"`
-	RetryAfterSec         int         `json:"retryAfterSec,omitempty"`
-	TransportCapabilities []string    `json:"transportCapabilities,omitempty"`
-	ErrorCode             string      `json:"errorCode,omitempty"`
-	ErrorMessage          string      `json:"errorMessage,omitempty"`
+	Success               bool                  `json:"success"`
+	State                 string                `json:"state"`
+	DeviceID              string                `json:"deviceId,omitempty"`
+	ApprovedCapabilities  []string              `json:"approvedCapabilities,omitempty"`
+	RDPTargets            []RDPTarget           `json:"rdpTargets,omitempty"`
+	RemoteDesktopTargets  []RemoteDesktopTarget `json:"remoteDesktopTargets,omitempty"`
+	RendezvousAddress     string                `json:"rendezvousAddress,omitempty"`
+	RDPLeaseSec           int                   `json:"rdpLeaseSec,omitempty"`
+	SessionID             string                `json:"sessionId,omitempty"`
+	HeartbeatSec          int                   `json:"heartbeat,omitempty"`
+	MaxConnections        int                   `json:"maxConnections,omitempty"`
+	ServerTime            int64                 `json:"serverTime"`
+	RetryAfterSec         int                   `json:"retryAfterSec,omitempty"`
+	TransportCapabilities []string              `json:"transportCapabilities,omitempty"`
+	ErrorCode             string                `json:"errorCode,omitempty"`
+	ErrorMessage          string                `json:"errorMessage,omitempty"`
 }
 
 // DeviceAuthPayload returns an unambiguous length-prefixed signature payload.

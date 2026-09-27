@@ -14,11 +14,13 @@ import (
 	"sync"
 
 	"relayproxy/agent/app"
+	"relayproxy/agent/desktop"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
+	"relayproxy/internal/protocol"
 )
 
 const autoStartName = "RelayProxy Agent"
@@ -76,6 +78,62 @@ func (b *UIBridge) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, err
 
 func (b *UIBridge) DisconnectRDP() {
 	b.agent.DisconnectRDP()
+}
+
+func (b *UIBridge) GetRemoteDesktopTargets() []protocol.RemoteDesktopTarget {
+	return b.agent.RemoteDesktopTargets()
+}
+
+func (b *UIBridge) ConnectRemoteDesktop(targetID string, options protocol.RemoteDesktopConnectOptions) (protocol.RemoteDesktopSessionInfo, error) {
+	return b.agent.ConnectRemoteDesktop(strings.TrimSpace(targetID), options)
+}
+
+func (b *UIBridge) DisconnectRemoteDesktop() {
+	b.agent.DisconnectRemoteDesktop()
+}
+
+func (b *UIBridge) GetRemoteDesktopStatus() protocol.RemoteDesktopStatus {
+	return b.agent.RemoteDesktopStatus()
+}
+
+func (b *UIBridge) GetRemoteDesktopStats() protocol.DesktopSessionStats {
+	return b.agent.RemoteDesktopStats()
+}
+
+func (b *UIBridge) GetRemoteDesktopDiagnostics() desktop.DesktopDiagnosticsReport {
+	return b.agent.RemoteDesktopDiagnostics()
+}
+
+func (b *UIBridge) ReportRemoteDesktopViewerStats(stats protocol.DesktopSessionStats) {
+	b.agent.ReportRemoteDesktopViewerStats(stats)
+}
+
+func (b *UIBridge) GetRemoteDesktopFrame() protocol.RemoteDesktopFrame {
+	return b.agent.RemoteDesktopFrame()
+}
+
+func (b *UIBridge) GetRemoteDesktopCursor(knownCursorID string) protocol.DesktopCursorState {
+	return b.agent.RemoteDesktopCursor(strings.TrimSpace(knownCursorID))
+}
+
+func (b *UIBridge) GetRemoteDesktopClipboard(knownSequence uint64) protocol.DesktopClipboardState {
+	return b.agent.RemoteDesktopClipboard(knownSequence)
+}
+
+func (b *UIBridge) SendRemoteDesktopClipboard(text string) error {
+	return b.agent.SendRemoteDesktopClipboard(text)
+}
+
+func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
+	return b.agent.SendRemoteDesktopInput(event)
+}
+
+func (b *UIBridge) SetRemoteDesktopResolution(width, height int) error {
+	return b.agent.SetRemoteDesktopResolution(width, height)
+}
+
+func (b *UIBridge) RequestRemoteDesktopIDR() error {
+	return b.agent.RequestRemoteDesktopIDR()
 }
 
 // GetLogs returns recent running logs

@@ -16,6 +16,8 @@ import (
 
 const nvencDeviceTypeDirectX int32 = 0
 
+var ErrNVENCUnsupportedDevice = errors.New("NVENC unsupported device")
+
 // nvencD3D11Session owns the NVENC codec session and the loaded encode runtime.
 // The D3D11 device itself is borrowed from Relay Desktop and must remain alive
 // until Close returns.
@@ -169,6 +171,15 @@ func openNVENCHEVC444D3D11Session(
 	)
 	runtime.KeepAlive(&params)
 	runtime.KeepAlive(device)
+	if status == 2 {
+		return nil, errors.Join(
+			ErrEncoderUnavailable,
+			fmt.Errorf(
+				"%w: NVIDIA adapter does not expose NVENC hardware encoding (NV_ENC_ERR_UNSUPPORTED_DEVICE=2)",
+				ErrNVENCUnsupportedDevice,
+			),
+		)
+	}
 	if status != 0 || session.encoder == 0 {
 		return nil, fmt.Errorf(
 			"%w: nvEncOpenEncodeSessionEx(D3D11) returned %d",

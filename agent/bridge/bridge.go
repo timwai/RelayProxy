@@ -236,6 +236,12 @@ func (b *UIBridge) RunRemoteDesktopNVCodecSelfTest() (desktopcodec.NVCodecH26544
 	defer b.nvcodecValidationMu.Unlock()
 
 	report, testErr, _ := b.runRemoteDesktopNVCodecSelfTestLocked()
+	if report.Unsupported {
+		// Unsupported NVENC hardware is a capability result, not an execution
+		// failure. Return the report normally so the GUI can still show NVDEC
+		// capabilities discovered independently.
+		return report, nil
+	}
 	return report, testErr
 }
 

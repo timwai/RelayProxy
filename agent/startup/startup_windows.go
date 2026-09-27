@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
@@ -17,7 +18,40 @@ import (
 
 const runKeyPath = `Software\Microsoft\Windows\CurrentVersion\Run`
 
+const (
+	startupHelperFlagName = "relayproxy-startup-helper"
+	startupHelperInstall  = "install"
+	startupHelperRemove   = "remove"
+
+	shellExecuteMaskNoCloseProcess = 0x00000040
+	shellExecuteMaskNoAsync        = 0x00000100
+	shellShowHidden                = 0
+)
+
 var startupMu sync.Mutex
+
+type shellExecuteInfo struct {
+	Size       uint32
+	Mask       uint32
+	Window     uintptr
+	Verb       *uint16
+	File       *uint16
+	Parameters *uint16
+	Directory  *uint16
+	Show       int32
+	Instance   uintptr
+	IDList     uintptr
+	Class      *uint16
+	ClassKey   windows.Handle
+	HotKey     uint32
+	Icon       windows.Handle
+	Process    windows.Handle
+}
+
+var (
+	startupShell32          = windows.NewLazySystemDLL("shell32.dll")
+	procShellExecuteExW     = startupShell32.NewProc("ShellExecuteExW")
+)
 
 type autoStartState struct {
 	command string
@@ -49,7 +83,22 @@ func SetAutoStart(appName, exePath, configPath string, enable, requireAdmin bool
 	if err != nil {
 		return err
 	}
-	_, err = applyAutoStart(store, before, desired, windows.GetCurrentProcessToken().IsElevated())
+	elevated := windows.GetCurrentProcessToken().IsElevated()
+	if !elevated && !sameAutoStart(before, desired) {
+		switch {
+		case desired.taskXML != "":
+			return runElevatedAutoStartHelper(configPath, startupHelperInstall)
+		case before.taskXML != "":
+			if err := runElevatedAutoStartHelper(configPath, startupHelperRemove); err != nil {
+				return err
+			}
+			if desired.command != "" {
+				return store.writeCommand(desired.command)
+			}
+			return nil
+		}
+	}
+	_, err = applyAutoStart(store, before, desired, elevated)
 	return err
 }
 
@@ -74,7 +123,21 @@ func SyncAutoStart(appName, exePath, configPath string, requireAdmin bool) (func
 	if err != nil {
 		return nil, err
 	}
-	rollback, err := applyAutoStart(store, before, desired, windows.GetCurrentProcessToken().IsElevated())
+	elevated := windows.GetCurrentProcessToken().IsElevated()
+	if !elevated && before.taskXML == "" && desired.taskXML != "" {
+		if err := runElevatedAutoStartHelper(configPath, startupHelperInstall); err != nil {
+			return nil, err
+		}
+		beforeCommand := before.command
+		return func() error {
+			startupMu.Lock()
+			defer startupMu.Unlock()
+			removeErr := runElevatedAutoStartHelper(configPath, startupHelperRemove)
+			restoreErr := store.writeCommand(beforeCommand)
+			return errors.Join(removeErr, restoreErr)
+		}, nil
+	}
+	rollback, err := applyAutoStart(store, before, desired, elevated)
 	if rollback == nil || err != nil {
 		return nil, err
 	}
@@ -255,3 +318,92 @@ func (s *windowsAutoStartStore) writeTask(definition string) error {
 func (s *windowsAutoStartStore) deleteTask() error { return deleteLogonTask(s.taskName) }
 
 func ExePath() (string, error) { return os.Executable() }
+
+
+func HelperFlagName() string { return startupHelperFlagName }
+
+func RunElevatedHelper(action, appName, configPath string) error {
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		return errors.New("管理员自启动辅助进程未获得提升权限")
+	}
+	if action != startupHelperInstall && action != startupHelperRemove {
+		return fmt.Errorf("未知的自启动辅助操作 %q", action)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	enable := action == startupHelperInstall
+	return SetAutoStart(appName, executable, configPath, enable, enable)
+}
+
+func runElevatedAutoStartHelper(configPath, action string) error {
+	if action != startupHelperInstall && action != startupHelperRemove {
+		return fmt.Errorf("未知的自启动辅助操作 %q", action)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	executable, err = filepath.Abs(executable)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(configPath) != "" {
+		configPath, err = filepath.Abs(configPath)
+		if err != nil {
+			return err
+		}
+	}
+	verb, _ := windows.UTF16PtrFromString("runas")
+	file, err := windows.UTF16PtrFromString(executable)
+	if err != nil {
+		return err
+	}
+	parameters := "--" + startupHelperFlagName + "=" + action
+	if configPath != "" {
+		parameters += " --config " + syscall.EscapeArg(configPath)
+	}
+	params, err := windows.UTF16PtrFromString(parameters)
+	if err != nil {
+		return err
+	}
+	directory, err := windows.UTF16PtrFromString(filepath.Dir(executable))
+	if err != nil {
+		return err
+	}
+	info := shellExecuteInfo{
+		Size:       uint32(unsafe.Sizeof(shellExecuteInfo{})),
+		Mask:       shellExecuteMaskNoCloseProcess | shellExecuteMaskNoAsync,
+		Verb:       verb,
+		File:       file,
+		Parameters: params,
+		Directory:  directory,
+		Show:       shellShowHidden,
+	}
+	ok, _, callErr := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&info)))
+	if ok == 0 {
+		if errors.Is(callErr, windows.ERROR_CANCELLED) {
+			return errors.New("已取消管理员授权，透明代理自启动未设置")
+		}
+		if callErr != nil && callErr != windows.ERROR_SUCCESS {
+			return fmt.Errorf("请求管理员权限失败: %w", callErr)
+		}
+		return errors.New("请求管理员权限失败")
+	}
+	if info.Process == 0 {
+		return errors.New("管理员自启动辅助进程未返回进程句柄")
+	}
+	defer windows.CloseHandle(info.Process)
+	if _, err := windows.WaitForSingleObject(info.Process, windows.INFINITE); err != nil {
+		return fmt.Errorf("等待管理员自启动辅助进程失败: %w", err)
+	}
+	var exitCode uint32
+	if err := windows.GetExitCodeProcess(info.Process, &exitCode); err != nil {
+		return fmt.Errorf("读取管理员自启动辅助进程结果失败: %w", err)
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("管理员自启动辅助进程失败，退出码 %d", exitCode)
+	}
+	return nil
+}

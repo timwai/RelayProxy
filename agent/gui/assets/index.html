@@ -1700,7 +1700,9 @@
       stateEl.className = tone;
       $('network-service-message').textContent = status.message || '';
       $('network-service-pid').textContent = status.pid ? String(status.pid) : '—';
-      $('network-service-recovery').textContent = status.recoveryEnabled ? '已启用 · 1s / 5s / 15s' : '未确认';
+      $('network-service-recovery').textContent = status.recoveryKnown
+        ? (status.recoveryEnabled ? '已启用 · 1s / 5s / 15s' : '未配置 / 不完整')
+        : '无法确认（权限受限）';
       $('network-service-path').textContent = status.binaryPath || '—';
       var uninstall = $('network-service-uninstall');
       if (uninstall) uninstall.disabled = !status.installed;

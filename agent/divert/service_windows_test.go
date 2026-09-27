@@ -144,3 +144,23 @@ func TestRemoveWindowsTreeWithRetryRemovesOrphanedArtifacts(t *testing.T) {
 		t.Fatalf("orphaned ProgramData tree still exists: %v", err)
 	}
 }
+
+
+func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
+	got, err := normalizeWindowsTransparentFirewallPorts([]uint16{45001, 45002, 45001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != 45001 || got[1] != 45002 {
+		t.Fatalf("ports=%v", got)
+	}
+	for _, invalid := range [][]uint16{
+		nil,
+		{0},
+		{1, 2, 3, 4, 5},
+	} {
+		if _, err := normalizeWindowsTransparentFirewallPorts(invalid); err == nil {
+			t.Fatalf("invalid ports accepted: %v", invalid)
+		}
+	}
+}

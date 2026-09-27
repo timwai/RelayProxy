@@ -11,3 +11,11 @@ func RunWindowsNetworkServiceHelper(string, string) error { return nil }
 func EnsurePlatformService() error                        { return nil }
 func WindowsNetworkServiceInstalled() bool                { return false }
 func PlatformServiceReady() bool                          { return true }
+
+
+func GetPlatformServiceStatus() NetworkServiceStatus {
+	return NetworkServiceStatus{Supported: false, State: "unsupported"}
+}
+
+func RepairPlatformService() error    { return nil }
+func UninstallPlatformService() error { return nil }

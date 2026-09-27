@@ -27,19 +27,21 @@ const autoStartName = "RelayProxy Agent"
 // Agent core. It is the only package the GUI talks to, so the UI never reaches
 // into the agent's internals directly.
 type UIBridge struct {
-	agent         *app.Agent
-	configPath    string
-	mu            sync.RWMutex
-	writeConfig   func(string, *config.AgentConfigFile) error
-	syncAutoStart func(string, bool) (func() error, error)
-	setAutoStart  func(string, bool, bool) error
+	agent                *app.Agent
+	configPath           string
+	mu                   sync.RWMutex
+	writeConfig          func(string, *config.AgentConfigFile) error
+	ensureDivertService  func() error
+	syncAutoStart        func(string, bool) (func() error, error)
+	setAutoStart         func(string, bool, bool) error
 }
 
 func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 	return &UIBridge{
-		agent:       agent,
-		configPath:  configPath,
-		writeConfig: config.SaveAgentConfig,
+		agent:               agent,
+		configPath:          configPath,
+		writeConfig:         config.SaveAgentConfig,
+		ensureDivertService: divert.EnsurePlatformService,
 		syncAutoStart: func(path string, requireAdmin bool) (func() error, error) {
 			executable, err := os.Executable()
 			if err != nil {
@@ -424,6 +426,11 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		return nil, fmt.Errorf("配置校验失败: %w", err)
 	}
 	if cfg.Network.Mode == "divert" {
+		if b.ensureDivertService != nil {
+			if err := b.ensureDivertService(); err != nil {
+				return nil, fmt.Errorf("无法准备 RelayProxy Network Service，配置未保存: %w", err)
+			}
+		}
 		if err := divert.Preflight(cfg.DivertConfig()); err != nil {
 			return nil, fmt.Errorf("无法启用系统透明代理，配置未保存: %w", err)
 		}
@@ -435,7 +442,11 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	var rollbackAutoStart func() error
 	if in.Network.Mode != nil || (reload && cfg.Network.Mode != b.agent.Config().NetworkMode) {
-		rollbackAutoStart, err = b.syncAutoStart(path, cfg.Network.Mode == "divert")
+		// WinDivert now runs in the machine-wide SYSTEM packet broker. The GUI
+		// and Agent themselves stay unprivileged, so login startup is always a
+		// normal per-user Run entry. SyncAutoStart also migrates any legacy
+		// highest-privilege task back to the ordinary entry.
+		rollbackAutoStart, err = b.syncAutoStart(path, false)
 		if err != nil {
 			return nil, fmt.Errorf("更新开机自启权限失败: %w", err)
 		}
@@ -593,19 +604,13 @@ func (b *UIBridge) IsAutoStart() bool {
 	return startup.IsAutoStartEnabled(autoStartName)
 }
 
-// SetAutoStart follows the saved mode, including changes awaiting a restart.
+// SetAutoStart configures the ordinary per-user login entry. Transparent
+// interception no longer elevates the GUI/Agent; the SYSTEM packet broker owns
+// WinDivert and is installed separately when transparent mode is enabled.
 func (b *UIBridge) SetAutoStart(enable bool) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	requireAdmin := false
-	if enable {
-		cfg, err := config.LoadAgentConfig(b.configPath)
-		if err != nil {
-			return fmt.Errorf("读取自启动配置失败: %w", err)
-		}
-		requireAdmin = cfg.Network.Mode == "divert"
-	}
-	return b.setAutoStart(b.configPath, enable, requireAdmin)
+	return b.setAutoStart(b.configPath, enable, false)
 }
 
 // ---------------------------------------------------------------------------

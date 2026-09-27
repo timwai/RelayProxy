@@ -183,6 +183,32 @@ func (s *WailsService) GetRemoteDesktopDiagnostics() (string, error) {
 	return string(data), nil
 }
 
+func (s *WailsService) GetRemoteDesktopNVCodecFaultInjection() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"allowed":false}`, nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopNVCodecFaultInjection())
+	if err != nil {
+		return `{"allowed":false}`, nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) ArmRemoteDesktopNVCodecFaultInjection(stage string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"allowed":false}`, nil
+	}
+	status, err := s.owner.bridge.ArmRemoteDesktopNVCodecFaultInjection(stage)
+	if err != nil {
+		return "", err
+	}
+	data, marshalErr := json.Marshal(status)
+	if marshalErr != nil {
+		return "", marshalErr
+	}
+	return string(data), nil
+}
+
 func (s *WailsService) RunRemoteDesktopNVCodecSelfTest() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"passed":false,"error":"GUI unavailable"}`, nil

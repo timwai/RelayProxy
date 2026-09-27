@@ -1204,6 +1204,17 @@ Windows SendInput / CF_UNICODETEXT
 - 面板复用现有 `GetRemoteDesktopDiagnostics`，不建立第二套状态源；进入远程桌面页周期刷新，自检/资格验证/压力验证及 diagnostics 导出后同步刷新。
 - 下一步进入 Windows NVIDIA 真机的 3/3 → stress → canary → NVENC/NVDEC 故障注入验证。
 
+### 0.2.98 RD3 Controlled NVCodec Fault Injection
+
+- 新增一次性 NVCodec fault injection，用于 Windows NVIDIA 真机验证现有 runtime breaker，而不是伪造 diagnostics。
+- 默认完全禁用；只有在启动 RelayProxy 前显式设置 `RELAYPROXY_NV_CODEC_FAULT_INJECTION=1`，Bridge 才允许 arm，GUI 才显示“注入 NVENC/NVDEC 故障”按钮。
+- encode 注入只会在当前真实 backend 为 `nvenc-hevc444-d3d11` 时消费，并返回一次人为 runtime error；随后复用现有 Host 熔断 + oneVPL H.265 generation migration。
+- decode 注入只会在 Native Viewer 当前真实 decoder 为 `nvdec-*` 时消费；随后复用现有 NVDEC breaker、decoder rebuild 与 IDR 恢复流程。
+- 注入是 process-local one-shot；未命中对应 backend 时保持 pending，命中一次后自动清空。encode/decode 不会交叉消费。
+- GUI 面板会显示当前 pending stage；环境变量未开启时控制区完全隐藏。
+- 下一步：在 NVIDIA Windows 真机执行完整故障注入矩阵，并导出 diagnostics 作为资格证据。
+
+
 
 
 ### 0.3 本轮进度（2026-09-22）

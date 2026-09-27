@@ -19,6 +19,8 @@
   window.goGetRemoteDesktopStats = () => invoke('GetRemoteDesktopStats');
   window.goGetRemoteDesktopAudioDiagnostics = () => invoke('GetRemoteDesktopAudioDiagnostics');
   window.goGetRemoteDesktopDiagnostics = () => invoke('GetRemoteDesktopDiagnostics');
+  window.goGetRemoteDesktopNVCodecFaultInjection = () => invoke('GetRemoteDesktopNVCodecFaultInjection');
+  window.goArmRemoteDesktopNVCodecFaultInjection = stage => invoke('ArmRemoteDesktopNVCodecFaultInjection', stage || '');
   window.goRunRemoteDesktopNVCodecSelfTest = () => invoke('RunRemoteDesktopNVCodecSelfTest');
   window.goRunRemoteDesktopNVCodecQualification = () => invoke('RunRemoteDesktopNVCodecQualification');
   window.goRunRemoteDesktopNVCodecStressQualification = () => invoke('RunRemoteDesktopNVCodecStressQualification');

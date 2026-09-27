@@ -221,6 +221,14 @@ func (b *UIBridge) runRemoteDesktopNVCodecSelfTestLocked() (
 	return report, testErr, receiptErr
 }
 
+func (b *UIBridge) GetRemoteDesktopNVCodecFaultInjection() desktopcodec.NVCodecFaultInjectionStatus {
+	return desktopcodec.NVCodecFaultInjectionState()
+}
+
+func (b *UIBridge) ArmRemoteDesktopNVCodecFaultInjection(stage string) (desktopcodec.NVCodecFaultInjectionStatus, error) {
+	return desktopcodec.ArmNVCodecFaultInjection(stage)
+}
+
 func (b *UIBridge) RunRemoteDesktopNVCodecSelfTest() (desktopcodec.NVCodecH265444RoundTripReport, error) {
 	b.nvcodecValidationMu.Lock()
 	defer b.nvcodecValidationMu.Unlock()

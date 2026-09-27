@@ -729,6 +729,18 @@
             <div class="rounded-md bg-slate-50 dark:bg-slate-900/50 px-3 py-2"><span class="text-slate-500 dark:text-slate-400">压力验证：</span><span id="desktop-nvcodec-stress-progress">0/5</span></div>
           </div>
           <div id="desktop-nvcodec-canary-reasons" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"></div>
+          <div id="desktop-nvcodec-fault-controls" class="hidden border-t border-slate-200 dark:border-slate-700 pt-3">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div class="text-[11px] font-medium text-slate-700 dark:text-slate-200">故障注入 · 本机验证专用</div>
+                <div id="desktop-nvcodec-fault-state" class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">未挂起故障</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" class="rp-btn" onclick="armRemoteDesktopNVCodecFault('encode')">注入 NVENC 故障</button>
+                <button type="button" class="rp-btn" onclick="armRemoteDesktopNVCodecFault('decode')">注入 NVDEC 故障</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div id="desktop-nvcodec-self-test-result" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border"></div>
         <div id="desktop-nvcodec-validation-state" class="hidden text-[11px] leading-5 px-3 py-2 rounded-md border"></div>
@@ -2900,6 +2912,45 @@
       }
     }
 
+    async function refreshRemoteDesktopNVCodecFaultInjection() {
+      var controls = $('desktop-nvcodec-fault-controls');
+      if (!controls || !hasFn('goGetRemoteDesktopNVCodecFaultInjection')) return null;
+      try {
+        var raw = await call('goGetRemoteDesktopNVCodecFaultInjection');
+        var status = parseJSONResult(raw, null);
+        if (!status || !status.allowed) {
+          controls.classList.add('hidden');
+          return status;
+        }
+        controls.classList.remove('hidden');
+        var pending = status.pendingStage || '';
+        $('desktop-nvcodec-fault-state').textContent = pending
+          ? '已挂起一次性 ' + (pending === 'encode' ? 'NVENC encode' : 'NVDEC decode') + ' 故障，等待下一次真实 NVCodec 调用'
+          : '未挂起故障';
+        return status;
+      } catch (_) {
+        controls.classList.add('hidden');
+        return null;
+      }
+    }
+
+    async function armRemoteDesktopNVCodecFault(stage) {
+      if (!hasFn('goArmRemoteDesktopNVCodecFaultInjection')) {
+        toast('当前界面不支持 NVCodec 故障注入');
+        return;
+      }
+      try {
+        var raw = await call('goArmRemoteDesktopNVCodecFaultInjection', stage);
+        var status = parseJSONResult(raw, null);
+        await refreshRemoteDesktopNVCodecFaultInjection();
+        toast('已挂起一次性 ' + (stage === 'encode' ? 'NVENC' : 'NVDEC') + ' 故障；下一次真实调用将触发 canary 熔断');
+        return status;
+      } catch (err) {
+        toast('NVCodec 故障注入失败：' + (err && err.message ? err.message : err));
+      }
+    }
+    window.armRemoteDesktopNVCodecFault = armRemoteDesktopNVCodecFault;
+
     function desktopDiagnosticsFilename(report) {
       report = report || {};
       var target = String(report.targetId || 'session').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 48);
@@ -3952,6 +4003,7 @@
         refreshRemoteDesktopNVCodecSelfTest();
         refreshRemoteDesktopNVCodecValidation();
         refreshRemoteDesktopNVCodecCanary();
+        refreshRemoteDesktopNVCodecFaultInjection();
       }
       if (hasFn('goRunRemoteDesktopNVCodecQualification') && $('desktop-nvcodec-qualification-btn')) {
         $('desktop-nvcodec-qualification-btn').classList.remove('hidden');
@@ -3972,6 +4024,7 @@
           refreshRemoteDesktopStats();
           refreshRemoteDesktopAudioStats();
           refreshRemoteDesktopNVCodecCanary();
+          refreshRemoteDesktopNVCodecFaultInjection();
         }
       }, 2000);
       setInterval(refreshRemoteDesktopFrame, 100);

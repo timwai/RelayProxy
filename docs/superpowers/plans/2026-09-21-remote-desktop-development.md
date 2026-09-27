@@ -1187,6 +1187,16 @@ Windows SendInput / CF_UNICODETEXT
 - 这些测试不依赖 NVIDIA 硬件，可在 Linux/macOS/Windows CI 持续保护 canary fallback 状态机。
 - 下一步仍是 Windows NVIDIA 真机验证：3/3 qualification → 5-round stress → canary opt-in → NVENC/NVDEC 故障注入 → oneVPL/H.264 fallback 与 diagnostics 导出核验。
 
+### 0.2.96 RD3 Canary Requested / Eligible / Active State Split
+
+- NVCodec canary gate 拆成独立的 `requested / eligible / tripped` 状态；`active = requested && eligible && !tripped`。
+- `requested` 现在严格表示用户配置 `gui.nvcodec_canary`，即使 qualification/stress 尚未满足也不会被抹掉。
+- process-lifetime circuit breaker 不清除 requested/eligible，只关闭 active，diagnostics 可以明确区分“用户要求启用”和“实际启用”。
+- Windows GUI 设置页新增实验性 `NVIDIA NVCodec Canary` 开关；默认关闭，未满足当前 build/GPU/driver 的 3/3 + 5-round stress 时即使勾选也不会启用生产 NVENC/NVDEC。
+- 修正程序设置保存时 theme 使用 `cfg-theme-mode`，避免仅修改 Canary 开关时意外把 system 主题写成 light/dark。
+- 下一步：在远程桌面页直接展示 requested / eligible / active / tripped 与拒绝原因，形成 NVIDIA 真机验证操作面板。
+
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

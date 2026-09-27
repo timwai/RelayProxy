@@ -1182,6 +1182,16 @@
                 <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
               </label>
             </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">NVIDIA NVCodec Canary</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">实验功能。只有当前 build/GPU/driver 已完成 3/3 资格验证和 5 轮压力验证时才会实际启用；运行异常会自动熔断。</div>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="cfg-nvcodec-canary" class="sr-only peer">
+                <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
+              </label>
+            </div>
           </div>
         </div>
 
@@ -1276,7 +1286,7 @@
       network: ['cfg-network-excludes'],
       share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
       exit: ['cfg-exit-id'],
-      preferences: ['cfg-min-tray','cfg-theme-mode']
+      preferences: ['cfg-min-tray','cfg-theme-mode','cfg-nvcodec-canary']
     };
     var groupNames = {connection:'连接与身份',proxy:'本地代理',routing:'路由分流',network:'透明排除',share:'出口共享',exit:'选择出口',preferences:'程序设置'};
     function snapshotGroup(group) {
@@ -3363,6 +3373,7 @@
       $('cfg-acl-cidrs').value = (cfg.accessCidrs || []).join('\n');
       $('cfg-autostart').checked = !!cfg.isAutostart;
       $('cfg-min-tray').checked = cfg.minimizeToTray !== false;
+      $('cfg-nvcodec-canary').checked = !!cfg.nvcodecCanary;
 
       applyTheme(cfg.theme || 'system', false);
       var notices = [];
@@ -3472,7 +3483,11 @@
         return { network: { excludeProcesses: splitRuleList($('cfg-network-excludes').value) } };
       case 'exit': return { proxy: { defaultExitId: $('cfg-exit-id').value.trim() } };
       case 'preferences':
-        return { gui: { theme: $('cfg-theme-light').checked ? 'light' : 'dark', minimizeToTray: $('cfg-min-tray').checked } };
+        return { gui: {
+          theme: $('cfg-theme-mode').value || 'system',
+          minimizeToTray: $('cfg-min-tray').checked,
+          nvcodecCanary: $('cfg-nvcodec-canary').checked
+        } };
       default: return {};
       }
     }

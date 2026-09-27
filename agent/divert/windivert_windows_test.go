@@ -294,6 +294,7 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 
 	stop := make(chan struct{})
 	pumpDone := make(chan error, 1)
+	progress := make(chan string, 16)
 	go func() {
 		buffer := make([]byte, 40+65535)
 		var originalSource netip.AddrPort
@@ -307,6 +308,10 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 					pumpDone <- err
 				}
 				return
+			}
+			select {
+			case progress <- "captured":
+			default:
 			}
 			packet, err := parseIPPacket(buffer[:n])
 			if err != nil {
@@ -349,6 +354,10 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 				pumpDone <- err
 				return
 			}
+			select {
+			case progress <- "injected":
+			default:
+			}
 		}
 	}()
 
@@ -368,32 +377,35 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 	}()
 
 	var client, proxy net.Conn
+	lastProgress := "none"
 	deadline := time.NewTimer(7 * time.Second)
 	defer deadline.Stop()
 	for client == nil || proxy == nil {
 		select {
+		case stage := <-progress:
+			lastProgress = stage
 		case result := <-dialDone:
 			if result.err != nil {
 				close(stop)
 				_ = handle.Shutdown()
-				t.Fatalf("reflected client dial failed before listener=%v: %v", proxy != nil, result.err)
+				t.Fatalf("reflected client dial failed before listener=%v progress=%s: %v", proxy != nil, lastProgress, result.err)
 			}
 			client = result.conn
 		case result := <-acceptDone:
 			if result.err != nil {
 				close(stop)
 				_ = handle.Shutdown()
-				t.Fatalf("transparent listener accept failed before client=%v: %v", client != nil, result.err)
+				t.Fatalf("transparent listener accept failed before client=%v progress=%s: %v", client != nil, lastProgress, result.err)
 			}
 			proxy = result.conn
 		case err := <-pumpDone:
 			close(stop)
 			_ = handle.Shutdown()
-			t.Fatalf("WinDivert reflection pump stopped before handshake (client=%v listener=%v): %v", client != nil, proxy != nil, err)
+			t.Fatalf("WinDivert reflection pump stopped before handshake (client=%v listener=%v progress=%s): %v", client != nil, proxy != nil, lastProgress, err)
 		case <-deadline.C:
 			close(stop)
 			_ = handle.Shutdown()
-			t.Fatalf("live TCP reflection handshake timed out (client=%v listener=%v)", client != nil, proxy != nil)
+			t.Fatalf("live TCP reflection handshake timed out (client=%v listener=%v progress=%s)", client != nil, proxy != nil, lastProgress)
 		}
 	}
 	defer client.Close()

@@ -17,7 +17,7 @@ func TestNetworkFrameRoundTrip(t *testing.T) {
 	var buffer bytes.Buffer
 	want := networkFrame{
 		kind:       networkFrameCapture,
-		flags:      networkFrameFlagOutbound,
+		flags:      networkFrameFlagOutbound | (1 << 21) | (1 << 22) | (1 << 23),
 		ifIndex:    17,
 		subIfIndex: 23,
 		payload:    []byte{0x45, 0x00, 0x00, 0x14},
@@ -123,5 +123,23 @@ func TestMatchesWindowsNetworkServiceRecovery(t *testing.T) {
 	wrong[2].Type = mgr.NoAction
 	if matchesWindowsNetworkServiceRecovery(wrong, true) {
 		t.Fatal("wrong recovery action was accepted")
+	}
+}
+
+
+func TestNetworkFramePreservesWinDivertFlags(t *testing.T) {
+	var buffer bytes.Buffer
+	const rawFlags = uint32((1 << 1) | (1 << 8) | networkFrameFlagOutbound | (1 << 20) | (1 << 23))
+	if err := writeNetworkFrame(&buffer, nil, networkFrame{
+		kind: networkFrameCapture, flags: rawFlags, ifIndex: 7, subIfIndex: 9,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readNetworkFrame(&buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.flags != rawFlags {
+		t.Fatalf("flags=%#x want=%#x", got.flags, rawFlags)
 	}
 }

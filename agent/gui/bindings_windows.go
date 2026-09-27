@@ -270,7 +270,8 @@ func (s *WailsService) UninstallNetworkService() (string, error) {
 	// Ask for elevation and remove the privileged component first. A cancelled
 	// UAC prompt must not silently alter the user's saved transparent-proxy
 	// configuration.
-	if err := divert.UninstallPlatformService(); err != nil {
+	uninstallResult, err := divert.UninstallPlatformService()
+	if err != nil {
 		log.Printf("[GUI] 卸载 Network Service 失败: %v", err)
 		data, _ := json.Marshal(map[string]any{"ok": false, "message": "卸载服务失败，透明代理配置保持不变：" + err.Error()})
 		return string(data), nil
@@ -289,9 +290,15 @@ func (s *WailsService) UninstallNetworkService() (string, error) {
 		})
 		return string(data), nil
 	}
+	message := "Network Service 已完全卸载，系统透明代理配置已关闭"
+	if uninstallResult.RebootCleanup {
+		message = "Network Service 已从 SCM 卸载；部分 ProgramData 文件仍被 Windows 占用，已安排重启后删除：" + uninstallResult.CleanupPath
+	}
 	data, _ := json.Marshal(map[string]any{
-		"ok":      true,
-		"message": "Network Service 已卸载，系统透明代理配置已关闭；重启客户端后完成运行状态切换",
+		"ok":            true,
+		"message":       message,
+		"rebootCleanup": uninstallResult.RebootCleanup,
+		"cleanupPath":   uninstallResult.CleanupPath,
 	})
 	return string(data), nil
 }

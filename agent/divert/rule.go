@@ -48,15 +48,17 @@ type Config struct {
 
 // Flow is one connection/datagram subject to matching.
 type Flow struct {
-	Process      string // OS process identity, never inferred from a network-layer packet buffer
-	ProcessID    uint32
-	Host         string // requested or DNS-associated hostname if known, else empty
-	DomainSource string
-	SourceIP     string
-	SourcePort   uint16
-	IP           string // original destination IP
-	Port         uint16 // original destination port
-	Protocol     Protocol
+	Process        string // OS process identity, never inferred from a network-layer packet buffer
+	ProcessID      uint32
+	ProcessAliases []string // safe alternate identities, e.g. service:Dnscache when one service owns the PID
+	Services       []string // Windows services hosted by this PID; shared hosts are telemetry-only
+	Host           string   // requested or DNS-associated hostname if known, else empty
+	DomainSource   string
+	SourceIP       string
+	SourcePort     uint16
+	IP             string // original destination IP
+	Port           uint16 // original destination port
+	Protocol       Protocol
 }
 
 // Decision is the match result.

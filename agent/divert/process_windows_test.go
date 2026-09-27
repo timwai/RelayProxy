@@ -347,6 +347,55 @@ func TestProcessImageChild(t *testing.T) {
 	}
 }
 
+func TestWindowsProcessIdentityServiceAliases(t *testing.T) {
+	t.Run("unique service keeps image and safe alias", func(t *testing.T) {
+		got, err := windowsProcessIdentity(1234, `C:\Windows\System32\svchost.exe`, nil, []string{"Dnscache"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Path != `C:\Windows\System32\svchost.exe` || len(got.Aliases) != 1 || got.Aliases[0] != "service:Dnscache" ||
+			len(got.Services) != 1 || got.Services[0] != "Dnscache" {
+			t.Fatalf("identity=%+v", got)
+		}
+	})
+
+	t.Run("shared service host exposes services without unsafe alias", func(t *testing.T) {
+		got, err := windowsProcessIdentity(2345, `C:\Windows\System32\svchost.exe`, nil, []string{"Dnscache", "NlaSvc"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Aliases) != 0 || len(got.Services) != 2 {
+			t.Fatalf("shared host identity=%+v", got)
+		}
+	})
+
+	t.Run("protected unique service falls back to service identity", func(t *testing.T) {
+		got, err := windowsProcessIdentity(3456, "", windows.ERROR_ACCESS_DENIED, []string{"TrustedInstaller"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Path != "service:TrustedInstaller" || len(got.Aliases) != 1 || got.Aliases[0] != "service:TrustedInstaller" {
+			t.Fatalf("protected service identity=%+v", got)
+		}
+	})
+
+	t.Run("protected shared host remains explicit and non-specific", func(t *testing.T) {
+		got, err := windowsProcessIdentity(4567, "", windows.ERROR_ACCESS_DENIED, []string{"AlphaSvc", "BetaSvc"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Path != "service-host:AlphaSvc,BetaSvc" || len(got.Aliases) != 0 {
+			t.Fatalf("protected shared host identity=%+v", got)
+		}
+	})
+
+	t.Run("unidentified protected process still fails closed", func(t *testing.T) {
+		if _, err := windowsProcessIdentity(5678, "", windows.ERROR_ACCESS_DENIED, nil); !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			t.Fatalf("error=%v", err)
+		}
+	})
+}
+
 func TestProcessImagePathSystemPID4(t *testing.T) {
 	api := &processWindowsAPI{}
 	path, err := api.processPath(windowsSystemPID)

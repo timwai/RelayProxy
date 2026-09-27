@@ -529,7 +529,7 @@ func EnsurePlatformService() error {
 		return nil
 	}
 	expected, expectedErr := expectedWindowsNetworkServiceExecutable()
-	installed, running, binaryPath, stateErr := windowsNetworkServiceState()
+	installed, running, binaryPath, _, stateErr := windowsNetworkServiceState()
 	if expectedErr == nil && stateErr == nil && installed && running &&
 		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected)) {
 		return nil
@@ -541,38 +541,103 @@ func EnsurePlatformService() error {
 }
 
 func WindowsNetworkServiceInstalled() bool {
-	installed, _, _, err := windowsNetworkServiceState()
+	installed, _, _, _, err := windowsNetworkServiceState()
 	return err == nil && installed
 }
 
 func PlatformServiceReady() bool {
 	expected, expectedErr := expectedWindowsNetworkServiceExecutable()
-	installed, running, binaryPath, stateErr := windowsNetworkServiceState()
+	installed, running, binaryPath, _, stateErr := windowsNetworkServiceState()
 	return expectedErr == nil && stateErr == nil && installed && running &&
 		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected))
 }
 
-func windowsNetworkServiceState() (installed, running bool, binaryPath string, err error) {
+func GetPlatformServiceStatus() NetworkServiceStatus {
+	status := NetworkServiceStatus{Supported: runtime.GOARCH == "amd64", State: "unsupported"}
+	if runtime.GOARCH != "amd64" {
+		status.Message = "Windows ARM64 暂不支持 WinDivert Network Service"
+		return status
+	}
+	installed, running, binaryPath, pid, err := windowsNetworkServiceState()
+	status.Installed = installed
+	status.Running = running
+	status.BinaryPath = binaryPath
+	status.PID = pid
+	if err != nil {
+		status.State = "error"
+		status.Message = err.Error()
+		return status
+	}
+	expected, expectedErr := expectedWindowsNetworkServiceExecutable()
+	status.VersionMatch = expectedErr == nil && installed &&
+		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected))
+	status.Ready = installed && running && status.VersionMatch
+	status.RecoveryEnabled = installed && status.VersionMatch
+	switch {
+	case !installed:
+		status.State = "not_installed"
+		status.Message = "Network Service 尚未安装"
+	case !status.VersionMatch:
+		status.State = "needs_repair"
+		status.Message = "Network Service 版本与当前客户端不一致"
+	case !running:
+		status.State = "stopped"
+		status.Message = "Network Service 已安装但未运行"
+	default:
+		status.State = "running"
+		status.Message = "Network Service 运行正常"
+	}
+	return status
+}
+
+func RepairPlatformService() error {
+	if runtime.GOARCH != "amd64" {
+		return errors.New("当前 Windows 架构不支持 RelayProxy Network Service")
+	}
+	if windows.GetCurrentProcessToken().IsElevated() {
+		return installWindowsNetworkService("")
+	}
+	return runElevatedNetworkServiceHelper(networkServiceHelperInstall)
+}
+
+func UninstallPlatformService() error {
+	if runtime.GOARCH != "amd64" {
+		return nil
+	}
+	if windows.GetCurrentProcessToken().IsElevated() {
+		return removeWindowsNetworkService()
+	}
+	return runElevatedNetworkServiceHelper(networkServiceHelperRemove)
+}
+
+func windowsNetworkServiceState() (installed, running bool, binaryPath string, pid uint32, err error) {
 	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
-		return false, false, "", err
+		return false, false, "", 0, err
 	}
 	defer windows.CloseServiceHandle(manager)
 	name, err := windows.UTF16PtrFromString(windowsNetworkServiceName)
 	if err != nil {
-		return false, false, "", err
+		return false, false, "", 0, err
 	}
 	service, err := windows.OpenService(manager, name, windows.SERVICE_QUERY_STATUS)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		return false, false, "", nil
+		return false, false, "", 0, nil
 	}
 	if err != nil {
-		return false, false, "", err
+		return false, false, "", 0, err
 	}
 	defer windows.CloseServiceHandle(service)
-	var status windows.SERVICE_STATUS
-	if err := windows.QueryServiceStatus(service, &status); err != nil {
-		return true, false, "", err
+	var status windows.SERVICE_STATUS_PROCESS
+	var needed uint32
+	if err := windows.QueryServiceStatusEx(
+		service,
+		windows.SC_STATUS_PROCESS_INFO,
+		(*byte)(unsafe.Pointer(&status)),
+		uint32(unsafe.Sizeof(status)),
+		&needed,
+	); err != nil {
+		return true, false, "", 0, err
 	}
 
 	// The Service Control Manager query above intentionally uses read-only
@@ -588,7 +653,7 @@ func windowsNetworkServiceState() (installed, running bool, binaryPath string, e
 		binaryPath, _, _ = key.GetStringValue("ImagePath")
 		_ = key.Close()
 	}
-	return true, status.CurrentState == windows.SERVICE_RUNNING, binaryPath, nil
+	return true, status.CurrentState == windows.SERVICE_RUNNING, binaryPath, status.ProcessId, nil
 }
 
 func expectedWindowsNetworkServiceExecutable() (string, error) {
@@ -735,6 +800,18 @@ func installWindowsNetworkService(allowedSID string) error {
 	}
 	defer service.Close()
 
+	recovery := []mgr.RecoveryAction{
+		{Type: mgr.ServiceRestart, Delay: 1 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
+		{Type: mgr.ServiceRestart, Delay: 15 * time.Second},
+	}
+	if err := service.SetRecoveryActions(recovery, 24*60*60); err != nil {
+		return fmt.Errorf("配置 RelayProxy Network Service 崩溃恢复失败: %w", err)
+	}
+	if err := service.SetRecoveryActionsOnNonCrashFailures(true); err != nil {
+		return fmt.Errorf("配置 RelayProxy Network Service 非正常退出恢复失败: %w", err)
+	}
+
 	status, err := service.Query()
 	if err != nil {
 		return err
@@ -771,6 +848,9 @@ func removeWindowsNetworkService() error {
 	}
 	if err := service.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
 		return fmt.Errorf("删除 RelayProxy Network Service 失败: %w", err)
+	}
+	if programData, pathErr := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0); pathErr == nil {
+		_ = os.RemoveAll(filepath.Join(programData, "RelayProxy-Network-Service"))
 	}
 	return nil
 }

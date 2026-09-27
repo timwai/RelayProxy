@@ -354,6 +354,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		a.divertSrv, err = divert.New(divert.Options{
 			Config: cfg.DivertConfig, Dialer: a.rawDialer, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
+			ProxyReady: func() bool {
+				return a.handshakeOK.Load()
+			},
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
 				d := engine.DecideFlow(routing.Flow{Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
 				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired}

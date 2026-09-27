@@ -565,7 +565,7 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 viewport 比例/上限/最小尺寸、ABR grow gate、resolution mode 状态以及 GUI viewport binding 回归测试。
 - 主线 CI 调整：`UI CI` 现在也在 `main` push 上执行 Windows/macOS desktop package；Go/UI 的 gofmt 检查改为仓库全量文件，消除连续直接提交 main 时 `origin/main...HEAD` shallow merge-base 竞态。
 - Windows/macOS desktop package、Linux UI scope/full regression 已验证通过；功能提交从 `4ef0a1a` 延续至本轮 main。
-- 下一步：Native Viewer 仍会在媒体尺寸 generation 改变时重建 D3D11 Viewer pipeline；后续可继续把 renderer 改造成同一 HWND 内 resize/reconfigure，减少动态分辨率切换时的窗口重建闪烁。H.265 正式公开仍等待 Intel/NVIDIA/AMD 实机验证。
+- Native Viewer 已在同一 HWND 内执行 D3D11 swap-chain resize/reconfigure，不再因媒体尺寸 generation 改变重建窗口；0.2.108 进一步把新 decoder 初始化前移到 resize 之前，缩短可见空帧窗口并强化失败回滚。
 
 ### 0.2.47 RD3 Native Viewer In-place Generation Reconfigure（已进入 main）
 
@@ -1323,6 +1323,16 @@ Windows SendInput / CF_UNICODETEXT
 - 接收端仅在 RelayProxy staging 根目录内 `MkdirAll` 并创建声明文件；完成后仍逐文件 SHA-256 校验，再将顶层文件/目录路径作为 `CF_HDROP` 发布。
 - legacy file-only offer 仍兼容：没有 `roots` 时只接受 flat basename 文件，不允许借旧格式注入 nested path。
 - AMD HEVC 4:4:4 同期收口：官方 AMF HEVC encoder profile 只有 Main/Main10，因此 AMD encode candidate 保持 known=false-support / limitation，不伪造 FRExt/4:4:4 production backend；Intel/NVIDIA 实机矩阵继续作为当前 HEVC 4:4:4 发布验证重点。
+
+### 0.2.108 RD3 Native Viewer Generation Transition
+
+- Windows Native Viewer 的动态分辨率 / codec generation 切换继续保持同一 HWND，不创建新 Viewer 窗口。
+- generation rebuild 顺序由“先 ResizeBuffers、再打开 decoder”调整为“先在现有 D3D11 device 上准备新 decoder、成功后再执行短暂 ResizeBuffers、最后原子切换 decoder”。
+- 新 decoder 初始化失败时不再触碰当前 swap chain，旧 decoder、旧尺寸和旧画面继续有效；避免驱动初始化失败把 Viewer 提前清空。
+- Viewer `applyReconfigure` 不再在调用 renderer resize 之前清除 latest frame；只有 resize 成功后才释放旧 latest frame，因此 renderer 内部 rollback 成功时仍保留旧 frame 状态。
+- resize 失败会立即关闭刚准备的新 decoder，session generation / decoder / dimensions 保持原值。
+- Windows 单测固定关键顺序：成功路径为 `open decoder → resize → clear old frame → close old decoder`；失败路径为 `open decoder → resize failure → close new decoder`，且旧 pipeline 不变。
+- 该优化不改变 Host ABR、codec negotiation、H.265 canary 或跨平台 Viewer 行为，只缩短 Windows generation 切换的可见空窗并改善失败恢复。
 
 ### 0.3 本轮进度（2026-09-22）
 

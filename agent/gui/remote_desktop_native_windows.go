@@ -89,6 +89,7 @@ type nativeDesktopSession struct {
 	mediaMu         sync.RWMutex
 	viewer          desktopviewer.Native
 	decoder         desktopcodec.Decoder
+	decoderOpener   nativeDesktopDecoderOpener
 	inputCh         chan protocol.DesktopInputEvent
 	viewportCh      chan desktopviewer.Viewport
 	title           string
@@ -317,6 +318,16 @@ func absInt(value int) int {
 	return value
 }
 
+type nativeDesktopDecoderOpener func(
+	context.Context,
+	desktopviewer.Native,
+	string,
+	string,
+	int,
+	int,
+	int,
+) (desktopcodec.Decoder, error)
+
 func openNativeDesktopDecoder(
 	ctx context.Context,
 	native desktopviewer.Native,
@@ -483,23 +494,23 @@ func (s *nativeDesktopSession) rebuildMediaPipeline(ctx context.Context, frame p
 		return errors.New("native Relay Desktop viewer is unavailable")
 	}
 
-	if !sameSize {
-		if err := currentViewer.Reconfigure(frame.Width, frame.Height); err != nil {
-			return fmt.Errorf("reconfigure D3D11 viewer for generation %d: %w", frame.Generation, err)
-		}
+	opener := s.decoderOpener
+	if opener == nil {
+		opener = openNativeDesktopDecoder
 	}
-	nextDecoder, err := openNativeDesktopDecoder(
+	nextDecoder, err := opener(
 		ctx, currentViewer, codec,
 		nativeDesktopFrameChroma(frame), nativeDesktopFrameBitDepth(frame),
 		frame.Width, frame.Height,
 	)
 	if err != nil {
-		if !sameSize {
-			if rollbackErr := currentViewer.Reconfigure(oldWidth, oldHeight); rollbackErr != nil {
-				log.Printf("[Desktop] native viewer rollback to %dx%d failed after decoder error: %v", oldWidth, oldHeight, rollbackErr)
-			}
-		}
 		return fmt.Errorf("reopen %s decoder for generation %d: %w", codec, frame.Generation, err)
+	}
+	if !sameSize {
+		if err := currentViewer.Reconfigure(frame.Width, frame.Height); err != nil {
+			_ = nextDecoder.Close()
+			return fmt.Errorf("reconfigure D3D11 viewer for generation %d: %w", frame.Generation, err)
+		}
 	}
 
 	s.mediaMu.Lock()

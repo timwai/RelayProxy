@@ -676,9 +676,9 @@ func (v *windowsViewer) applyReconfigure() {
 			if v.renderer == nil {
 				err = ErrUnavailable
 			} else {
-				v.clearLatestFrame()
 				err = v.renderer.Reconfigure(request.width, request.height)
 				if err == nil {
+					v.clearLatestFrame()
 					v.media.Store(packViewport(request.width, request.height))
 					v.layoutRenderWindow()
 				}

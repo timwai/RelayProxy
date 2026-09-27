@@ -500,11 +500,10 @@ func TestInterceptorDisablesCaptureAfterInjectionFailure(t *testing.T) {
 	}
 }
 
-
 func TestPrivateDNSPacketSupportsTCPAndUDP(t *testing.T) {
 	for _, protocol := range []Protocol{ProtoTCP, ProtoUDP} {
 		packet := ipPacket{
-			Protocol: protocol,
+			Protocol:    protocol,
 			Destination: netip.MustParseAddrPort("10.0.0.53:53"),
 		}
 		if !privateDNSPacket(packet) {

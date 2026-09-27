@@ -133,7 +133,7 @@ func TestInterceptorTCPRestoresBothEndpointsAndFreezesPolicy(t *testing.T) {
 	}
 }
 
-func TestInterceptorReusedPortDoesNotReuseVirtualEndpoint(t *testing.T) {
+func TestInterceptorReusedPortReplacesReflectedEndpoint(t *testing.T) {
 	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionProxy}})
 	first := interceptedSYN(false)
 	p, _ := parseIPPacket(first)
@@ -143,17 +143,18 @@ func TestInterceptorReusedPortDoesNotReuseVirtualEndpoint(t *testing.T) {
 	}
 	old := expectInterceptedPacket(t, device)
 	oldPacket, _ := parseIPPacket(old.data)
+
 	binary.BigEndian.PutUint32(first[p.TransportOffset+4:], p.TCPSequence+100)
 	if err := i.handlePacket(first, meta); err != nil {
 		t.Fatal(err)
 	}
 	current := expectInterceptedPacket(t, device)
 	currentPacket, _ := parseIPPacket(current.data)
-	if currentPacket.Source == oldPacket.Source {
-		t.Fatal("reused client tuple shared a virtual TCP endpoint")
+	if currentPacket.Source != oldPacket.Source {
+		t.Fatal("streamdump reflection did not preserve the client source port")
 	}
-	if len(i.reverse) != 2 {
-		t.Fatal("old endpoint was not quarantined")
+	if len(i.reverse) != 1 {
+		t.Fatalf("stale reflected endpoint remained after tuple reuse: %d", len(i.reverse))
 	}
 }
 

@@ -19,6 +19,7 @@ import (
 var (
 	ErrClipboardTextUnavailable  = errors.New("text clipboard unavailable")
 	ErrClipboardImageUnavailable = errors.New("image clipboard unavailable")
+	ErrClipboardFilesUnavailable = errors.New("file clipboard unavailable")
 )
 
 type ClipboardEndpoint interface {
@@ -29,6 +30,11 @@ type ClipboardEndpoint interface {
 type ClipboardContentEndpoint interface {
 	ClipboardContent(context.Context) (protocol.DesktopClipboardState, error)
 	SetClipboardContent(context.Context, protocol.DesktopClipboardState) error
+}
+
+type ClipboardFileEndpoint interface {
+	ClipboardFiles(context.Context) ([]string, error)
+	SetClipboardFiles(context.Context, []string) error
 }
 
 type clipboardSyncState struct {
@@ -84,6 +90,33 @@ func validateClipboardContent(content protocol.DesktopClipboardState) (protocol.
 		content.Kind = protocol.DesktopClipboardKindPNG
 		content.Text = ""
 		content.PNG = append([]byte(nil), content.PNG...)
+		content.TransferID = ""
+		content.Files = nil
+		content.LocalPaths = nil
+	case protocol.DesktopClipboardKindFiles:
+		if len(content.Files) == 0 || len(content.Files) > maxDesktopClipboardFiles {
+			return protocol.DesktopClipboardState{}, fmt.Errorf("clipboard file count must be 1..%d", maxDesktopClipboardFiles)
+		}
+		var total int64
+		for i := range content.Files {
+			name, err := safeClipboardFileName(content.Files[i].Name)
+			if err != nil {
+				return protocol.DesktopClipboardState{}, err
+			}
+			content.Files[i].Name = name
+			if content.Files[i].Size < 0 || content.Files[i].Size > maxDesktopClipboardFileBytes {
+				return protocol.DesktopClipboardState{}, fmt.Errorf("clipboard file %q exceeds size limit", name)
+			}
+			total += content.Files[i].Size
+			if total > maxDesktopClipboardTransferBytes {
+				return protocol.DesktopClipboardState{}, errors.New("clipboard transfer exceeds total size limit")
+			}
+		}
+		content.Kind = protocol.DesktopClipboardKindFiles
+		content.Text = ""
+		content.PNG = nil
+		content.Files = append([]protocol.DesktopClipboardFile(nil), content.Files...)
+		content.LocalPaths = append([]string(nil), content.LocalPaths...)
 	default:
 		return protocol.DesktopClipboardState{}, fmt.Errorf("unsupported clipboard kind %q", content.Kind)
 	}
@@ -92,11 +125,22 @@ func validateClipboardContent(content protocol.DesktopClipboardState) (protocol.
 
 func cloneClipboardContent(content protocol.DesktopClipboardState) protocol.DesktopClipboardState {
 	content.PNG = append([]byte(nil), content.PNG...)
+	content.Files = append([]protocol.DesktopClipboardFile(nil), content.Files...)
+	content.LocalPaths = append([]string(nil), content.LocalPaths...)
 	return content
 }
 
 func clipboardContentEqual(a, b protocol.DesktopClipboardState) bool {
-	return a.Kind == b.Kind && a.Text == b.Text && bytes.Equal(a.PNG, b.PNG)
+	if a.Kind != b.Kind || a.Text != b.Text || !bytes.Equal(a.PNG, b.PNG) ||
+		a.TransferID != b.TransferID || len(a.Files) != len(b.Files) {
+		return false
+	}
+	for i := range a.Files {
+		if a.Files[i] != b.Files[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func readClipboardContent(ctx context.Context, endpoint ClipboardEndpoint) (protocol.DesktopClipboardState, error) {

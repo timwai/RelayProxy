@@ -144,3 +144,63 @@ func TestH265D3D11CaptureFormat(t *testing.T) {
 		t.Fatalf("444 capture format=%q", got)
 	}
 }
+
+func TestPrepareH265H264FallbackAdvancesRuntimeGenerationAndNormalizesChroma(t *testing.T) {
+	cfg := HostConfig{
+		Chroma:   desktopcodec.Chroma444,
+		BitDepth: 10,
+	}
+	cause := errors.New("oneVPL HEVC runtime failed")
+	next, generation, runtimeErr, err := prepareH265H264Fallback(
+		cfg,
+		3,
+		&h265RuntimeError{Generation: 6, Err: cause},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtimeErr == nil || !errors.Is(runtimeErr, cause) {
+		t.Fatalf("runtime error=%+v", runtimeErr)
+	}
+	if generation != 7 {
+		t.Fatalf("generation=%d want=7", generation)
+	}
+	if next.Chroma != desktopcodec.Chroma420 || next.BitDepth != 8 {
+		t.Fatalf("H.264 fallback config=%+v", next)
+	}
+}
+
+func TestPrepareH265H264FallbackKeepsGenerationForUnavailableSession(t *testing.T) {
+	cfg := HostConfig{
+		Chroma:   desktopcodec.Chroma444,
+		BitDepth: 8,
+	}
+	next, generation, runtimeErr, err := prepareH265H264Fallback(
+		cfg,
+		4,
+		desktopcodec.ErrEncoderUnavailable,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtimeErr != nil {
+		t.Fatalf("unexpected runtime error=%+v", runtimeErr)
+	}
+	if generation != 4 {
+		t.Fatalf("generation=%d want=4", generation)
+	}
+	if next.Chroma != desktopcodec.Chroma420 || next.BitDepth != 8 {
+		t.Fatalf("H.264 fallback config=%+v", next)
+	}
+}
+
+func TestPrepareH265H264FallbackRejectsGenerationOverflow(t *testing.T) {
+	_, _, _, err := prepareH265H264Fallback(
+		HostConfig{Chroma: desktopcodec.Chroma444, BitDepth: 8},
+		1,
+		&h265RuntimeError{Generation: ^uint32(0), Err: errors.New("failed")},
+	)
+	if err == nil {
+		t.Fatal("generation overflow was accepted")
+	}
+}

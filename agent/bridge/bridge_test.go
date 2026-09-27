@@ -491,3 +491,67 @@ func TestRemoteDesktopDiagnosticsIncludesLastNVCodecSelfTest(t *testing.T) {
 		t.Fatal("diagnostics returned the bridge-owned self-test pointer")
 	}
 }
+
+func TestNVCodecRuntimeDiagnosticEvents(t *testing.T) {
+	tests := []struct {
+		name       string
+		eligibility NVCodecCanaryEligibility
+		wantStage  string
+		wantCount  int
+	}{
+		{
+			name: "not tripped",
+			eligibility: NVCodecCanaryEligibility{},
+			wantCount: 0,
+		},
+		{
+			name: "encoder",
+			eligibility: NVCodecCanaryEligibility{
+				CircuitTripped: true,
+				CircuitTrippedAtUnixMs: 1234,
+				CircuitTripReason: "NVENC runtime failure: device lost",
+			},
+			wantStage: "encode",
+			wantCount: 1,
+		},
+		{
+			name: "decoder",
+			eligibility: NVCodecCanaryEligibility{
+				CircuitTripped: true,
+				CircuitTrippedAtUnixMs: 5678,
+				CircuitTripReason: "NVDEC decode failure: device lost",
+			},
+			wantStage: "decode",
+			wantCount: 1,
+		},
+		{
+			name: "generic",
+			eligibility: NVCodecCanaryEligibility{
+				CircuitTripped: true,
+				CircuitTrippedAtUnixMs: 9999,
+				CircuitTripReason: "NVCodec runtime failure",
+			},
+			wantStage: "nvcodec",
+			wantCount: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := nvcodecRuntimeDiagnosticEvents(tt.eligibility)
+			if len(events) != tt.wantCount {
+				t.Fatalf("events=%+v wantCount=%d", events, tt.wantCount)
+			}
+			if tt.wantCount == 0 {
+				return
+			}
+			event := events[0]
+			if event.Kind != "nvcodec_canary_trip" || event.Stage != tt.wantStage {
+				t.Fatalf("event=%+v", event)
+			}
+			if event.AtUnixMs != tt.eligibility.CircuitTrippedAtUnixMs ||
+				event.Reason != tt.eligibility.CircuitTripReason {
+				t.Fatalf("event metadata=%+v", event)
+			}
+		})
+	}
+}

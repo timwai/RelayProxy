@@ -272,6 +272,24 @@ func (h *Host) switchSessionDisplay(
 	return next, nil
 }
 
+func prepareH265H264Fallback(
+	cfg HostConfig,
+	generation uint32,
+	err error,
+) (HostConfig, uint32, *h265RuntimeError, error) {
+	var runtimeErr *h265RuntimeError
+	if errors.As(err, &runtimeErr) {
+		nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
+		if generationErr != nil {
+			return cfg, generation, runtimeErr, generationErr
+		}
+		generation = nextGeneration
+	}
+	cfg.Chroma = desktopcodec.Chroma420
+	cfg.BitDepth = 8
+	return cfg, generation, runtimeErr, nil
+}
+
 func (h *Host) streamSessionFrames(
 	ctx context.Context,
 	conn *desktopmedia.MediaConn,
@@ -349,21 +367,16 @@ func (h *Host) streamSessionFrames(
 					cfg.DisplayID, generation)
 				continue
 			}
-			if errors.As(err, &runtimeErr) {
-				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
-				if generationErr != nil {
-					return generationErr
-				}
-				generation = nextGeneration
-				preference = "h264"
-				cfg.Chroma = desktopcodec.Chroma420
-				cfg.BitDepth = 8
+			var fallbackErr error
+			cfg, generation, runtimeErr, fallbackErr = prepareH265H264Fallback(cfg, generation, err)
+			if fallbackErr != nil {
+				return fallbackErr
+			}
+			preference = "h264"
+			if runtimeErr != nil {
 				log.Printf("[Desktop] H.265 runtime failed at generation=%d, falling back to H.264 generation=%d: %v",
 					runtimeErr.Generation, generation, runtimeErr.Err)
 			} else {
-				preference = "h264"
-				cfg.Chroma = desktopcodec.Chroma420
-				cfg.BitDepth = 8
 				log.Printf("[Desktop] H.265 session unavailable, falling back to H.264: %v", err)
 			}
 			break
@@ -404,21 +417,16 @@ func (h *Host) streamSessionFrames(
 					cfg.DisplayID, generation)
 				continue
 			}
-			if errors.As(err, &runtimeErr) {
-				nextGeneration, generationErr := nextDesktopMediaGeneration(runtimeErr.Generation)
-				if generationErr != nil {
-					return generationErr
-				}
-				generation = nextGeneration
-				preference = "h264"
-				cfg.Chroma = desktopcodec.Chroma420
-				cfg.BitDepth = 8
+			var fallbackErr error
+			cfg, generation, runtimeErr, fallbackErr = prepareH265H264Fallback(cfg, generation, err)
+			if fallbackErr != nil {
+				return fallbackErr
+			}
+			preference = "h264"
+			if runtimeErr != nil {
 				log.Printf("[Desktop] H.265 validation runtime failed at generation=%d, falling back to H.264 generation=%d: %v",
 					runtimeErr.Generation, generation, runtimeErr.Err)
 			} else {
-				preference = "h264"
-				cfg.Chroma = desktopcodec.Chroma420
-				cfg.BitDepth = 8
 				log.Printf("[Desktop] H.265 validation session unavailable, falling back to H.264: %v", err)
 			}
 			break

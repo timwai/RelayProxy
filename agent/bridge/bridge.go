@@ -151,6 +151,27 @@ type RemoteDesktopDiagnosticEvent struct {
 	Reason   string `json:"reason,omitempty"`
 }
 
+func nvcodecRuntimeDiagnosticEvents(
+	eligibility NVCodecCanaryEligibility,
+) []RemoteDesktopDiagnosticEvent {
+	if !eligibility.CircuitTripped {
+		return nil
+	}
+	stage := "nvcodec"
+	switch {
+	case strings.HasPrefix(eligibility.CircuitTripReason, "NVENC"):
+		stage = "encode"
+	case strings.HasPrefix(eligibility.CircuitTripReason, "NVDEC"):
+		stage = "decode"
+	}
+	return []RemoteDesktopDiagnosticEvent{{
+		AtUnixMs: eligibility.CircuitTrippedAtUnixMs,
+		Kind:     "nvcodec_canary_trip",
+		Stage:    stage,
+		Reason:   eligibility.CircuitTripReason,
+	}}
+}
+
 type RemoteDesktopDiagnosticsReport struct {
 	desktop.DesktopDiagnosticsReport
 	NVCodecSelfTest            *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
@@ -173,22 +194,10 @@ func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport 
 	validation := b.GetRemoteDesktopNVCodecValidation()
 	report.NVCodecValidation = &validation
 	report.NVCodecCanaryEligibility = b.GetRemoteDesktopNVCodecCanaryEligibility()
-	if report.NVCodecCanaryEligibility.CircuitTripped {
-		stage := "nvcodec"
-		reason := report.NVCodecCanaryEligibility.CircuitTripReason
-		switch {
-		case strings.HasPrefix(reason, "NVENC"):
-			stage = "encode"
-		case strings.HasPrefix(reason, "NVDEC"):
-			stage = "decode"
-		}
-		report.RuntimeEvents = append(report.RuntimeEvents, RemoteDesktopDiagnosticEvent{
-			AtUnixMs: report.NVCodecCanaryEligibility.CircuitTrippedAtUnixMs,
-			Kind:     "nvcodec_canary_trip",
-			Stage:    stage,
-			Reason:   reason,
-		})
-	}
+	report.RuntimeEvents = append(
+		report.RuntimeEvents,
+		nvcodecRuntimeDiagnosticEvents(report.NVCodecCanaryEligibility)...,
+	)
 	if receipt, err := loadNVCodecValidationReceipt(b.configPath); err == nil &&
 		receipt != nil && receipt.StressQualification != nil {
 		report.NVCodecStressQualification = cloneNVCodecStressQualificationReport(receipt.StressQualification)

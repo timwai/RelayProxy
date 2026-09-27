@@ -1179,6 +1179,14 @@ Windows SendInput / CF_UNICODETEXT
 - 当前稳定降级链明确为：NVCodec canary runtime failure → oneVPL HEVC 4:4:4 generation migration；若 H.265 最终仍不可用 → H.264 4:2:0；只有 H.264 自身也不可用/运行失败时才进入 JPEG。
 - 下一步：增加针对 NVCodec→oneVPL→H.264 fallback 的集成测试与 diagnostics event 测试，并在 Windows NVIDIA 真机跑一次完整 3/3 + stress + canary 故障注入验证。
 
+### 0.2.95 RD3 Canary Fallback Regression Coverage
+
+- 将 H.265 → H.264 fallback 参数切换抽成 `prepareH265H264Fallback`，普通 HEVC 会话和 validation 会话共用同一逻辑，减少两条路径行为漂移。
+- 回归测试覆盖：H.265 runtime error 使用错误携带的 generation 递增；4:4:4/高 bit-depth 明确归一化到 H.264 4:2:0/8-bit；session unavailable 保持当前 generation；generation overflow fail closed。
+- NVCodec diagnostics runtime event 抽成纯函数 `nvcodecRuntimeDiagnosticEvents`，测试覆盖未熔断、NVENC/encode、NVDEC/decode、generic nvcodec 四种事件分类。
+- 这些测试不依赖 NVIDIA 硬件，可在 Linux/macOS/Windows CI 持续保护 canary fallback 状态机。
+- 下一步仍是 Windows NVIDIA 真机验证：3/3 qualification → 5-round stress → canary opt-in → NVENC/NVDEC 故障注入 → oneVPL/H.264 fallback 与 diagnostics 导出核验。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -65,10 +66,14 @@ type networkFrame struct {
 }
 
 type windowsServicePacketDevice struct {
-	file      *os.File
-	writeMu   sync.Mutex
-	closeOnce sync.Once
-	closeErr  error
+	filter      string
+	fileMu      sync.RWMutex
+	reconnectMu sync.Mutex
+	file        *os.File
+	writeMu     sync.Mutex
+	closed      atomic.Bool
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 type windowsNetworkServiceHandler struct {
@@ -410,14 +415,14 @@ func readNetworkFrame(reader io.Reader) (networkFrame, error) {
 	return frame, nil
 }
 
-func openWindowsServicePacketDevice(filter string) (*windowsServicePacketDevice, error) {
+func connectWindowsServicePipe(filter string) (*os.File, error) {
 	name, err := windows.UTF16PtrFromString(windowsNetworkPipeName)
 	if err != nil {
 		return nil, err
 	}
 	var handle windows.Handle
 	var lastErr error
-	for attempt := 0; attempt < 20; attempt++ {
+	for attempt := 0; attempt < 100; attempt++ {
 		handle, lastErr = windows.CreateFile(
 			name,
 			windows.GENERIC_READ|windows.GENERIC_WRITE,
@@ -433,7 +438,7 @@ func openWindowsServicePacketDevice(filter string) (*windowsServicePacketDevice,
 		if !errors.Is(lastErr, windows.ERROR_PIPE_BUSY) && !errors.Is(lastErr, windows.ERROR_FILE_NOT_FOUND) {
 			return nil, lastErr
 		}
-		time.Sleep(50 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	if lastErr != nil {
 		return nil, lastErr
@@ -443,70 +448,157 @@ func openWindowsServicePacketDevice(filter string) (*windowsServicePacketDevice,
 		_ = windows.CloseHandle(handle)
 		return nil, errors.New("无法打开 RelayProxy Network Service 管道")
 	}
-	device := &windowsServicePacketDevice{file: file}
-	if err := writeNetworkFrame(file, &device.writeMu, networkFrame{kind: networkFrameHello, payload: []byte(filter)}); err != nil {
-		_ = device.Close()
+	if err := writeNetworkFrame(file, nil, networkFrame{kind: networkFrameHello, payload: []byte(filter)}); err != nil {
+		_ = file.Close()
 		return nil, err
 	}
 	reply, err := readNetworkFrame(file)
 	if err != nil {
-		_ = device.Close()
+		_ = file.Close()
 		return nil, err
 	}
 	switch reply.kind {
 	case networkFrameReady:
-		return device, nil
+		return file, nil
 	case networkFrameError:
-		_ = device.Close()
+		_ = file.Close()
 		return nil, errors.New(strings.TrimSpace(string(reply.payload)))
 	default:
-		_ = device.Close()
+		_ = file.Close()
 		return nil, fmt.Errorf("RelayProxy Network Service 返回未知握手帧 %d", reply.kind)
 	}
 }
 
-func (d *windowsServicePacketDevice) Receive(buffer []byte) (int, packetMetadata, error) {
-	if d == nil || d.file == nil {
-		return 0, packetMetadata{}, errors.New("RelayProxy Network Service packet device is closed")
-	}
-	frame, err := readNetworkFrame(d.file)
+func openWindowsServicePacketDevice(filter string) (*windowsServicePacketDevice, error) {
+	file, err := connectWindowsServicePipe(filter)
 	if err != nil {
-		return 0, packetMetadata{}, err
+		return nil, err
 	}
-	if frame.kind == networkFrameError {
-		return 0, packetMetadata{}, errors.New(strings.TrimSpace(string(frame.payload)))
+	return &windowsServicePacketDevice{filter: filter, file: file}, nil
+}
+
+func (d *windowsServicePacketDevice) currentFile() *os.File {
+	if d == nil {
+		return nil
 	}
-	if frame.kind != networkFrameCapture {
-		return 0, packetMetadata{}, fmt.Errorf("RelayProxy Network Service returned unexpected frame %d", frame.kind)
+	d.fileMu.RLock()
+	file := d.file
+	d.fileMu.RUnlock()
+	return file
+}
+
+func (d *windowsServicePacketDevice) reconnect(expected *os.File) error {
+	if d == nil || d.closed.Load() {
+		return netClosedError()
 	}
-	if len(frame.payload) > len(buffer) {
-		return 0, packetMetadata{}, fmt.Errorf("captured packet %d exceeds receive buffer %d", len(frame.payload), len(buffer))
+	d.reconnectMu.Lock()
+	defer d.reconnectMu.Unlock()
+	if d.closed.Load() {
+		return netClosedError()
 	}
-	copy(buffer, frame.payload)
-	outbound := frame.flags&networkFrameFlagOutbound != 0
-	return len(frame.payload), packetMetadata{
-		outbound:         outbound,
-		capturedOutbound: outbound,
-		ifIndex:          frame.ifIndex,
-		subIfIndex:       frame.subIfIndex,
-	}, nil
+	if current := d.currentFile(); current != nil && current != expected {
+		return nil
+	}
+	d.fileMu.Lock()
+	if d.file == expected && d.file != nil {
+		_ = d.file.Close()
+		d.file = nil
+	}
+	d.fileMu.Unlock()
+
+	deadline := time.Now().Add(20 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		if d.closed.Load() {
+			return netClosedError()
+		}
+		file, err := connectWindowsServicePipe(d.filter)
+		if err == nil {
+			d.fileMu.Lock()
+			if d.closed.Load() {
+				d.fileMu.Unlock()
+				_ = file.Close()
+				return netClosedError()
+			}
+			d.file = file
+			d.fileMu.Unlock()
+			return nil
+		}
+		lastErr = err
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("RelayProxy Network Service 自动重连失败: %w", lastErr)
+}
+
+func (d *windowsServicePacketDevice) Receive(buffer []byte) (int, packetMetadata, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		file := d.currentFile()
+		if file == nil {
+			return 0, packetMetadata{}, errors.New("RelayProxy Network Service packet device is closed")
+		}
+		frame, err := readNetworkFrame(file)
+		if err != nil {
+			if attempt == 0 && !d.closed.Load() {
+				if reconnectErr := d.reconnect(file); reconnectErr == nil {
+					continue
+				} else {
+					return 0, packetMetadata{}, errors.Join(err, reconnectErr)
+				}
+			}
+			return 0, packetMetadata{}, err
+		}
+		if frame.kind == networkFrameError {
+			return 0, packetMetadata{}, errors.New(strings.TrimSpace(string(frame.payload)))
+		}
+		if frame.kind != networkFrameCapture {
+			return 0, packetMetadata{}, fmt.Errorf("RelayProxy Network Service returned unexpected frame %d", frame.kind)
+		}
+		if len(frame.payload) > len(buffer) {
+			return 0, packetMetadata{}, fmt.Errorf("captured packet %d exceeds receive buffer %d", len(frame.payload), len(buffer))
+		}
+		copy(buffer, frame.payload)
+		outbound := frame.flags&networkFrameFlagOutbound != 0
+		return len(frame.payload), packetMetadata{
+			outbound:         outbound,
+			capturedOutbound: outbound,
+			ifIndex:          frame.ifIndex,
+			subIfIndex:       frame.subIfIndex,
+		}, nil
+	}
+	return 0, packetMetadata{}, errors.New("RelayProxy Network Service receive retry exhausted")
 }
 
 func (d *windowsServicePacketDevice) Send(packet []byte, meta packetMetadata) error {
-	if d == nil || d.file == nil {
-		return errors.New("RelayProxy Network Service packet device is closed")
-	}
 	flags := uint32(0)
 	if meta.outbound {
 		flags |= networkFrameFlagOutbound
 	}
-	return writeNetworkFrame(d.file, &d.writeMu, networkFrame{
+	frame := networkFrame{
 		kind:       networkFrameInject,
 		flags:      flags,
 		ifIndex:    meta.ifIndex,
 		subIfIndex: meta.subIfIndex,
 		payload:    packet,
-	})
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		file := d.currentFile()
+		if file == nil {
+			return errors.New("RelayProxy Network Service packet device is closed")
+		}
+		err := writeNetworkFrame(file, &d.writeMu, frame)
+		if err == nil {
+			return nil
+		}
+		if attempt == 0 && !d.closed.Load() {
+			if reconnectErr := d.reconnect(file); reconnectErr == nil {
+				continue
+			} else {
+				return errors.Join(err, reconnectErr)
+			}
+		}
+		return err
+	}
+	return errors.New("RelayProxy Network Service send retry exhausted")
 }
 
 func (d *windowsServicePacketDevice) Shutdown() error { return d.Close() }
@@ -516,10 +608,13 @@ func (d *windowsServicePacketDevice) Close() error {
 		return nil
 	}
 	d.closeOnce.Do(func() {
+		d.closed.Store(true)
+		d.fileMu.Lock()
 		if d.file != nil {
 			d.closeErr = d.file.Close()
 			d.file = nil
 		}
+		d.fileMu.Unlock()
 	})
 	return d.closeErr
 }

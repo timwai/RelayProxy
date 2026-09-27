@@ -546,8 +546,10 @@ func WindowsNetworkServiceInstalled() bool {
 }
 
 func PlatformServiceReady() bool {
-	installed, running, _, err := windowsNetworkServiceState()
-	return err == nil && installed && running
+	expected, expectedErr := expectedWindowsNetworkServiceExecutable()
+	installed, running, binaryPath, stateErr := windowsNetworkServiceState()
+	return expectedErr == nil && stateErr == nil && installed && running &&
+		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected))
 }
 
 func windowsNetworkServiceState() (installed, running bool, binaryPath string, err error) {

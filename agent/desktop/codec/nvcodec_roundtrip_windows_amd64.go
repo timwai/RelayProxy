@@ -408,6 +408,26 @@ func readNVCodecValidationAYUVSamples(
 	return samples, maxError, nil
 }
 
+func probeNVDECValidationCapabilities(ctx context.Context) nvidiaNVDECDeviceProbe {
+	result := nvidiaNVDECDeviceProbe{}
+	if err := ctx.Err(); err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	module, err := windows.LoadLibrary(nvDecodeRuntimeDLL)
+	if err != nil {
+		result.Error = fmt.Sprintf("load %s: %v", nvDecodeRuntimeDLL, err)
+		return result
+	}
+	defer windows.FreeLibrary(module)
+	getDecoderCaps, err := windows.GetProcAddress(module, "cuvidGetDecoderCaps")
+	if err != nil {
+		result.Error = fmt.Sprintf("%s/cuvidGetDecoderCaps: %v", nvDecodeRuntimeDLL, err)
+		return result
+	}
+	return probeNVIDIANVDECHEVC444(ctx, getDecoderCaps)
+}
+
 func ValidateNVCodecH265444RoundTrip(
 	ctx context.Context,
 ) (report NVCodecH265444RoundTripReport, retErr error) {
@@ -449,6 +469,20 @@ func ValidateNVCodecH265444RoundTrip(
 	report.AdapterRevision = identity.AdapterRevision
 	report.AdapterDriverVersion = identity.AdapterDriverVersion
 	report.D3D11DeviceCreated = true
+
+	// Probe decoder capabilities independently from NVENC. This is important
+	// for adapters such as GeForce MX350 where NVDEC may be available while
+	// NVENC hardware encoding is not exposed.
+	nvdecProbe := probeNVDECValidationCapabilities(ctx)
+	report.NVDECProbeChecked = nvdecProbe.Checked
+	report.NVDECDeviceCount = nvdecProbe.DeviceCount
+	report.NVDECH264Known = nvdecProbe.H264Known
+	report.NVDECH264Supported = nvdecProbe.H264
+	report.NVDECHEVC420Known = nvdecProbe.HEVC420Known
+	report.NVDECHEVC420Supported = nvdecProbe.HEVC420
+	report.NVDECHEVC444Known = nvdecProbe.HEVC444Known
+	report.NVDECHEVC444Supported = nvdecProbe.HEVC444
+	report.NVDECProbeError = nvdecProbe.Error
 	observeNVCodecValidationMemory(&report, device, nvcodecMemoryPhaseBefore)
 
 	var source unsafe.Pointer

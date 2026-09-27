@@ -44,7 +44,7 @@ func safeClipboardFileName(name string) (string, error) {
 	if name == "" || name == "." || name == ".." {
 		return "", errors.New("clipboard file name is empty")
 	}
-	if filepath.Base(name) != name || strings.ContainsAny(name, "/\") {
+	if filepath.Base(name) != name || strings.ContainsAny(name, "/\\") {
 		return "", fmt.Errorf("clipboard file name %q contains path separators", name)
 	}
 	if strings.ContainsRune(name, 0) {
@@ -54,7 +54,7 @@ func safeClipboardFileName(name string) (string, error) {
 }
 
 func safeClipboardRelativePath(value string) (string, error) {
-	value = strings.TrimSpace(strings.ReplaceAll(value, "\", "/"))
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
 	if value == "" || strings.HasPrefix(value, "/") {
 		return "", errors.New("clipboard relative path is empty or absolute")
 	}

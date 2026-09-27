@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"syscall"
@@ -279,6 +280,22 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 	}
 	defer listener.Close()
 	proxyPort := uint16(listener.Addr().(*net.TCPAddr).Port)
+	firewallRule := fmt.Sprintf("RelayProxy-WinDivert-Live-%d", proxyPort)
+	addFirewall := exec.Command(
+		"netsh", "advfirewall", "firewall", "add", "rule",
+		"name="+firewallRule, "dir=in", "action=allow",
+		"protocol=TCP", fmt.Sprintf("localport=%d", proxyPort),
+	)
+	if output, err := addFirewall.CombinedOutput(); err != nil {
+		t.Logf("temporary firewall allow rule unavailable: %v: %s", err, output)
+	} else {
+		t.Cleanup(func() {
+			_ = exec.Command(
+				"netsh", "advfirewall", "firewall", "delete", "rule",
+				"name="+firewallRule,
+			).Run()
+		})
+	}
 	fakeIP := netip.MustParseAddr("198.51.100.20")
 	const fakePort uint16 = 443
 

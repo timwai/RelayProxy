@@ -91,7 +91,7 @@ func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	// Ordinary inbound traffic must remain in the Windows network stack; using a
 	// catch-all inbound handle turns every download packet into a mandatory
 	// userspace reinjection and can blackhole the whole host if metadata differs.
-	outbound := "(outbound and !loopback and (tcp or udp or fragment)"
+	outbound := "(outbound and !loopback and (tcp or udp)"
 	for _, clause := range windowsRelayBypassClauses(guard) {
 		outbound += " and " + clause
 	}

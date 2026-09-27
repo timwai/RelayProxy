@@ -87,7 +87,12 @@ func matchProcess(pattern, process string) bool {
 }
 
 func (c compoundRule) matches(r Rule, f Flow) bool {
-	if len(r.Processes) > 0 && !slices.ContainsFunc(r.Processes, func(p string) bool { return matchProcess(p, f.Process) }) {
+	if len(r.Processes) > 0 && !slices.ContainsFunc(r.Processes, func(p string) bool {
+		if matchProcess(p, f.Process) {
+			return true
+		}
+		return slices.ContainsFunc(f.ProcessAliases, func(alias string) bool { return matchProcess(p, alias) })
+	}) {
 		return false
 	}
 	if len(r.Protocols) > 0 && !slices.ContainsFunc(r.Protocols, func(p string) bool { return p == "*" || strings.EqualFold(p, f.Protocol) }) {

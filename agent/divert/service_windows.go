@@ -666,8 +666,10 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	expected, expectedErr := expectedWindowsNetworkServiceExecutable()
 	status.VersionMatch = expectedErr == nil && installed &&
 		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected))
-	status.Ready = installed && running && status.VersionMatch
-	status.RecoveryEnabled = installed && status.VersionMatch
+	if installed {
+		status.RecoveryEnabled = windowsNetworkServiceRecoveryEnabled()
+	}
+	status.Ready = installed && running && status.VersionMatch && status.RecoveryEnabled
 	switch {
 	case !installed:
 		status.State = "not_installed"
@@ -675,6 +677,9 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	case !status.VersionMatch:
 		status.State = "needs_repair"
 		status.Message = "Network Service 版本与当前客户端不一致"
+	case !status.RecoveryEnabled:
+		status.State = "needs_repair"
+		status.Message = "Network Service 自动恢复策略缺失或不完整"
 	case !running:
 		status.State = "stopped"
 		status.Message = "Network Service 已安装但未运行"
@@ -683,6 +688,37 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 		status.Message = "Network Service 运行正常"
 	}
 	return status
+}
+
+func windowsNetworkServiceRecoveryEnabled() bool {
+	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
+	if err != nil {
+		return false
+	}
+	defer windows.CloseServiceHandle(manager)
+	name, err := windows.UTF16PtrFromString(windowsNetworkServiceName)
+	if err != nil {
+		return false
+	}
+	handle, err := windows.OpenService(manager, name, windows.SERVICE_QUERY_CONFIG)
+	if err != nil {
+		return false
+	}
+	service := &mgr.Service{Name: windowsNetworkServiceName, Handle: handle}
+	defer service.Close()
+
+	actions, err := service.RecoveryActions()
+	if err != nil || len(actions) < 3 {
+		return false
+	}
+	want := []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}
+	for i := range want {
+		if actions[i].Type != mgr.ServiceRestart || actions[i].Delay != want[i] {
+			return false
+		}
+	}
+	enabled, err := service.RecoveryActionsOnNonCrashFailures()
+	return err == nil && enabled
 }
 
 func RepairPlatformService() error {

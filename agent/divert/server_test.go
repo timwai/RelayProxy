@@ -465,21 +465,31 @@ func TestCloseUnblocksActiveUDPReader(t *testing.T) {
 	}
 }
 
-func TestClassificationRejectsMissingMetadataAndNeverDialsDirect(t *testing.T) {
-	server := newTestServer(t, Options{Config: Config{DefaultAction: ActionDirect}})
-	bad := testFlow(ProtoUDP, nil)
-	bad.Process = ""
-	if _, err := server.ClassifyFlow(bad); err == nil {
-		t.Fatal("missing process identity accepted")
+func TestClassificationAllowsMissingProcessButRejectsIncompleteTuple(t *testing.T) {
+	server := newTestServer(t, Options{
+		Config: Config{DefaultAction: ActionReject},
+		SharedPolicy: func(flow Flow) Decision {
+			if flow.IP == "203.0.113.10" && flow.Port == 443 {
+				return Decision{Action: ActionDirect, Rule: "target-only"}
+			}
+			return Decision{Action: ActionReject, Rule: "fallback"}
+		},
+	})
+	unknown := testFlow(ProtoUDP, nil)
+	unknown.Process = ""
+	unknown.ProcessID = 0
+	route, err := server.ClassifyFlow(unknown)
+	if err != nil {
+		t.Fatal(err)
 	}
-	bad = testFlow(ProtoUDP, nil)
+	if route.Decision().Action != ActionDirect || route.Decision().Rule != "target-only" {
+		t.Fatalf("target-only rule did not classify unknown process: %+v", route.Decision())
+	}
+
+	bad := testFlow(ProtoUDP, nil)
 	bad.SourceIP = ""
 	if _, err := server.ClassifyFlow(bad); err == nil {
 		t.Fatal("incomplete five-tuple accepted")
-	}
-	route, err := server.ClassifyFlow(testFlow(ProtoUDP, nil))
-	if err != nil {
-		t.Fatal(err)
 	}
 	if err := server.ForwardUDP(context.Background(), route, nil, func(context.Context, FlowKey, []byte) error { return nil }); !errors.Is(err, ErrNotProxyFlow) {
 		t.Fatalf("DIRECT flow was re-dialed: %v", err)

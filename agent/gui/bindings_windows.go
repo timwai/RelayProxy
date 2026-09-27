@@ -263,12 +263,29 @@ func (s *WailsService) RepairNetworkService() (string, error) {
 }
 
 func (s *WailsService) UninstallNetworkService() (string, error) {
-	if err := divert.UninstallPlatformService(); err != nil {
-		log.Printf("[GUI] 卸载 Network Service 失败: %v", err)
-		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": "GUI 尚未连接到 Agent"})
 		return string(data), nil
 	}
-	data, _ := json.Marshal(map[string]any{"ok": true, "message": "Network Service 已卸载"})
+	// Make uninstall durable. Leaving network.mode=divert saved would cause the
+	// next interactive GUI launch to reinstall the broker immediately.
+	disabled := ""
+	var update bridge.ConfigUpdate
+	update.Network.Mode = &disabled
+	if _, err := s.owner.bridge.SaveConfig(update); err != nil {
+		log.Printf("[GUI] 关闭透明代理配置失败，取消卸载 Network Service: %v", err)
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": "关闭透明代理配置失败：" + err.Error()})
+		return string(data), nil
+	}
+	if err := divert.UninstallPlatformService(); err != nil {
+		log.Printf("[GUI] 卸载 Network Service 失败: %v", err)
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": "透明代理配置已关闭，但卸载服务失败：" + err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{
+		"ok":      true,
+		"message": "Network Service 已卸载，系统透明代理配置已关闭；重启客户端后完成运行状态切换",
+	})
 	return string(data), nil
 }
 

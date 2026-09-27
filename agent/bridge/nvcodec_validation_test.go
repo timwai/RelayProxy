@@ -562,7 +562,6 @@ func TestNVCodecValidationReceiptCapsQualificationPasses(t *testing.T) {
 	}
 }
 
-
 func TestNVCodecValidationExecutableRevisionIsContentBound(t *testing.T) {
 	dir := t.TempDir()
 	first := filepath.Join(dir, "relay-agent-a.exe")
@@ -622,7 +621,6 @@ func TestNextNVCodecValidationReceiptAcceptsLocalBuildIdentity(t *testing.T) {
 		t.Fatalf("local build receipt=%+v", receipt)
 	}
 }
-
 
 func TestGetRemoteDesktopNVCodecCanaryEligibilityTreatsMissingReceiptAsEmptyState(t *testing.T) {
 	dir := t.TempDir()

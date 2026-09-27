@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -69,7 +70,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	}
 	port4 := listeners[0].Addr().(*net.TCPAddr).Port
 	port6 := listeners[1].Addr().(*net.TCPAddr).Port
-	filter := windowsInterceptFilter(port4, port6)
+	filter := windowsInterceptFilter(port4, port6, s.guard)
 	device, err := openWindowsPacketDevice(filter)
 	if err != nil {
 		for _, listener := range listeners {
@@ -85,9 +86,68 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	return i, nil
 }
 
-func windowsInterceptFilter(port4, port6 int) string {
-	// Inbound observation supplies DIRECT download counters and DNS responses.
-	// The adapter passes ordinary inbound packets through and protects reflection
-	// listeners explicitly. This handle's own injections bypass capture.
-	return fmt.Sprintf("(outbound and !loopback and (tcp or udp or fragment)) or (inbound and !loopback and (tcp or udp or fragment)) or (inbound and tcp and (tcp.DstPort == %d or tcp.DstPort == %d))", port4, port6)
+func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
+	// Only take ownership of outbound traffic that requires a routing decision.
+	// Ordinary inbound traffic must remain in the Windows network stack; using a
+	// catch-all inbound handle turns every download packet into a mandatory
+	// userspace reinjection and can blackhole the whole host if metadata differs.
+	outbound := "(outbound and !loopback and (tcp or udp or fragment)"
+	if bypass := windowsRelayBypassFilter(guard); bypass != "" {
+		outbound += " and !(" + bypass + ")"
+	}
+	outbound += ")"
+
+	// Listener-directed inbound packets are reserved for the transparent TCP
+	// reflection path. Real Internet inbound packets are otherwise untouched.
+	reflection := fmt.Sprintf("(inbound and !loopback and tcp and (tcp.DstPort == %d or tcp.DstPort == %d))", port4, port6)
+	return outbound + " or " + reflection
+}
+
+func windowsRelayBypassFilter(guard LoopGuard) string {
+	if len(guard.RelayIPs) == 0 || len(guard.RelayPorts) == 0 {
+		return ""
+	}
+	ports := make([]string, 0, len(guard.RelayPorts))
+	seenPorts := make(map[int]struct{}, len(guard.RelayPorts))
+	for _, port := range guard.RelayPorts {
+		if port <= 0 || port > 65535 {
+			continue
+		}
+		if _, ok := seenPorts[port]; ok {
+			continue
+		}
+		seenPorts[port] = struct{}{}
+		ports = append(ports, fmt.Sprintf("%d", port))
+	}
+	if len(ports) == 0 {
+		return ""
+	}
+	tcpPorts := make([]string, 0, len(ports))
+	udpPorts := make([]string, 0, len(ports))
+	for _, port := range ports {
+		tcpPorts = append(tcpPorts, "tcp.DstPort == "+port)
+		udpPorts = append(udpPorts, "udp.DstPort == "+port)
+	}
+	transport := "(fragment or (tcp and (" + strings.Join(tcpPorts, " or ") + ")) or (udp and (" + strings.Join(udpPorts, " or ") + ")))"
+
+	terms := make([]string, 0, len(guard.RelayIPs))
+	seenIPs := make(map[string]struct{}, len(guard.RelayIPs))
+	for _, value := range guard.RelayIPs {
+		addr, err := netip.ParseAddr(strings.TrimSpace(value))
+		if err != nil {
+			continue
+		}
+		addr = addr.Unmap()
+		key := addr.String()
+		if _, ok := seenIPs[key]; ok {
+			continue
+		}
+		seenIPs[key] = struct{}{}
+		if addr.Is4() {
+			terms = append(terms, "(ip and ip.DstAddr == "+key+" and "+transport+")")
+		} else {
+			terms = append(terms, "(ipv6 and ipv6.DstAddr == "+key+" and "+transport+")")
+		}
+	}
+	return strings.Join(terms, " or ")
 }

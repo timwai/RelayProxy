@@ -1,9 +1,11 @@
 package desktop
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image/png"
 	"log"
 	"strings"
 	"sync"
@@ -14,17 +16,25 @@ import (
 	"relayproxy/internal/protocol"
 )
 
-var ErrClipboardTextUnavailable = errors.New("text clipboard unavailable")
+var (
+	ErrClipboardTextUnavailable  = errors.New("text clipboard unavailable")
+	ErrClipboardImageUnavailable = errors.New("image clipboard unavailable")
+)
 
 type ClipboardEndpoint interface {
 	ClipboardText(context.Context) (string, error)
 	SetClipboardText(context.Context, string) error
 }
 
+type ClipboardContentEndpoint interface {
+	ClipboardContent(context.Context) (protocol.DesktopClipboardState, error)
+	SetClipboardContent(context.Context, protocol.DesktopClipboardState) error
+}
+
 type clipboardSyncState struct {
 	mu          sync.Mutex
 	initialized bool
-	text        string
+	content     protocol.DesktopClipboardState
 }
 
 func validateClipboardText(text string) (string, error) {
@@ -40,28 +50,130 @@ func validateClipboardText(text string) (string, error) {
 	return text, nil
 }
 
-func (s *clipboardSyncState) Seed(text string) {
+func validateClipboardContent(content protocol.DesktopClipboardState) (protocol.DesktopClipboardState, error) {
+	content.Sequence = 0
+	kind := strings.ToLower(strings.TrimSpace(content.Kind))
+	if kind == "" {
+		if len(content.PNG) > 0 {
+			kind = protocol.DesktopClipboardKindPNG
+		} else {
+			kind = protocol.DesktopClipboardKindText
+		}
+	}
+	switch kind {
+	case protocol.DesktopClipboardKindText:
+		text, err := validateClipboardText(content.Text)
+		if err != nil {
+			return protocol.DesktopClipboardState{}, err
+		}
+		content.Kind = protocol.DesktopClipboardKindText
+		content.Text = text
+		content.PNG = nil
+	case protocol.DesktopClipboardKindPNG:
+		if len(content.PNG) == 0 {
+			return protocol.DesktopClipboardState{}, errors.New("clipboard PNG payload is empty")
+		}
+		if len(content.PNG) > protocol.MaxDesktopClipboardImageBytes {
+			return protocol.DesktopClipboardState{}, fmt.Errorf(
+				"clipboard PNG exceeds %d bytes", protocol.MaxDesktopClipboardImageBytes,
+			)
+		}
+		if _, err := png.DecodeConfig(bytes.NewReader(content.PNG)); err != nil {
+			return protocol.DesktopClipboardState{}, fmt.Errorf("invalid clipboard PNG: %w", err)
+		}
+		content.Kind = protocol.DesktopClipboardKindPNG
+		content.Text = ""
+		content.PNG = append([]byte(nil), content.PNG...)
+	default:
+		return protocol.DesktopClipboardState{}, fmt.Errorf("unsupported clipboard kind %q", content.Kind)
+	}
+	return content, nil
+}
+
+func cloneClipboardContent(content protocol.DesktopClipboardState) protocol.DesktopClipboardState {
+	content.PNG = append([]byte(nil), content.PNG...)
+	return content
+}
+
+func clipboardContentEqual(a, b protocol.DesktopClipboardState) bool {
+	return a.Kind == b.Kind && a.Text == b.Text && bytes.Equal(a.PNG, b.PNG)
+}
+
+func readClipboardContent(ctx context.Context, endpoint ClipboardEndpoint) (protocol.DesktopClipboardState, error) {
+	if rich, ok := endpoint.(ClipboardContentEndpoint); ok {
+		content, err := rich.ClipboardContent(ctx)
+		if err != nil {
+			return protocol.DesktopClipboardState{}, err
+		}
+		return validateClipboardContent(content)
+	}
+	text, err := endpoint.ClipboardText(ctx)
+	if err != nil {
+		return protocol.DesktopClipboardState{}, err
+	}
+	return validateClipboardContent(protocol.DesktopClipboardState{
+		Kind: protocol.DesktopClipboardKindText,
+		Text: text,
+	})
+}
+
+func writeClipboardContent(ctx context.Context, endpoint ClipboardEndpoint, content protocol.DesktopClipboardState) error {
+	content, err := validateClipboardContent(content)
+	if err != nil {
+		return err
+	}
+	if rich, ok := endpoint.(ClipboardContentEndpoint); ok {
+		return rich.SetClipboardContent(ctx, content)
+	}
+	if content.Kind != protocol.DesktopClipboardKindText {
+		return ErrClipboardImageUnavailable
+	}
+	return endpoint.SetClipboardText(ctx, content.Text)
+}
+
+func (s *clipboardSyncState) SeedContent(content protocol.DesktopClipboardState) {
 	s.mu.Lock()
 	s.initialized = true
-	s.text = text
+	s.content = cloneClipboardContent(content)
 	s.mu.Unlock()
 }
 
-func (s *clipboardSyncState) Changed(text string) bool {
+func (s *clipboardSyncState) ChangedContent(content protocol.DesktopClipboardState) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.initialized && s.text == text {
+	if s.initialized && clipboardContentEqual(s.content, content) {
 		return false
 	}
 	s.initialized = true
-	s.text = text
+	s.content = cloneClipboardContent(content)
 	return true
 }
 
-func (s *clipboardSyncState) IsCurrent(text string) bool {
+func (s *clipboardSyncState) IsCurrentContent(content protocol.DesktopClipboardState) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.initialized && s.text == text
+	return s.initialized && clipboardContentEqual(s.content, content)
+}
+
+func (s *clipboardSyncState) Seed(text string) {
+	content, _ := validateClipboardContent(protocol.DesktopClipboardState{
+		Kind: protocol.DesktopClipboardKindText, Text: text,
+	})
+	s.SeedContent(content)
+}
+
+func (s *clipboardSyncState) Changed(text string) bool {
+	content, _ := validateClipboardContent(protocol.DesktopClipboardState{
+		Kind: protocol.DesktopClipboardKindText, Text: text,
+	})
+	return s.ChangedContent(content)
+}
+
+func (s *clipboardSyncState) IsCurrent(text string) bool {
+	content, _ := validateClipboardContent(protocol.DesktopClipboardState{
+		Kind: protocol.DesktopClipboardKindText, Text: text,
+	})
+	return s.IsCurrentContent(content)
 }
 
 func clipboardEnabled(options protocol.RemoteDesktopConnectOptions) bool {
@@ -73,12 +185,11 @@ func (h *Host) streamClipboard(ctx context.Context, conn *desktopmedia.MediaConn
 		return errors.New("desktop clipboard endpoint is unavailable")
 	}
 
-	seed, err := endpoint.ClipboardText(ctx)
+	seed, err := readClipboardContent(ctx, endpoint)
 	if err == nil {
-		if seed, err = validateClipboardText(seed); err == nil {
-			state.Seed(seed)
-		}
-	} else if !errors.Is(err, ErrClipboardTextUnavailable) && ctx.Err() == nil {
+		state.SeedContent(seed)
+	} else if !errors.Is(err, ErrClipboardTextUnavailable) &&
+		!errors.Is(err, ErrClipboardImageUnavailable) && ctx.Err() == nil {
 		log.Printf("[Desktop] initial clipboard read failed: %v", err)
 	}
 
@@ -90,9 +201,9 @@ func (h *Host) streamClipboard(ctx context.Context, conn *desktopmedia.MediaConn
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			text, err := endpoint.ClipboardText(ctx)
+			content, err := readClipboardContent(ctx, endpoint)
 			if err != nil {
-				if errors.Is(err, ErrClipboardTextUnavailable) {
+				if errors.Is(err, ErrClipboardTextUnavailable) || errors.Is(err, ErrClipboardImageUnavailable) {
 					continue
 				}
 				if ctx.Err() != nil {
@@ -101,21 +212,14 @@ func (h *Host) streamClipboard(ctx context.Context, conn *desktopmedia.MediaConn
 				log.Printf("[Desktop] clipboard read failed: %v", err)
 				continue
 			}
-			text, err = validateClipboardText(text)
-			if err != nil {
-				log.Printf("[Desktop] clipboard text ignored: %v", err)
-				continue
-			}
-			if !state.Changed(text) {
+			if !state.ChangedContent(content) {
 				continue
 			}
 			sequence++
+			content.Sequence = sequence
 			if err := conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
-				Type: protocol.DesktopSessionClipboard,
-				Clipboard: &protocol.DesktopClipboardState{
-					Sequence: sequence,
-					Text:     text,
-				},
+				Type:      protocol.DesktopSessionClipboard,
+				Clipboard: &content,
 			}); err != nil {
 				return err
 			}

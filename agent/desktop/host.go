@@ -694,19 +694,19 @@ func (h *Host) readSessionControlLoop(
 				}
 				lastClipboardSequence = update.Sequence
 			}
-			text, err := validateClipboardText(update.Text)
+			content, err := validateClipboardContent(update)
 			if err != nil {
 				log.Printf("[Desktop] remote clipboard ignored: %v", err)
 				continue
 			}
-			if clipboardState.IsCurrent(text) {
+			if clipboardState.IsCurrentContent(content) {
 				continue
 			}
-			if err := clipboard.SetClipboardText(ctx, text); err != nil {
+			if err := writeClipboardContent(ctx, clipboard, content); err != nil {
 				log.Printf("[Desktop] apply remote clipboard failed: %v", err)
 				continue
 			}
-			clipboardState.Seed(text)
+			clipboardState.SeedContent(content)
 
 		default:
 			return errors.New("invalid Relay Desktop session control message")

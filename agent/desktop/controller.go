@@ -160,13 +160,12 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			if message.Clipboard == nil {
 				continue
 			}
-			clipboard := *message.Clipboard
-			text, err := validateClipboardText(clipboard.Text)
+			clipboard, err := validateClipboardContent(*message.Clipboard)
 			if err != nil {
 				log.Printf("[Desktop] remote clipboard update ignored: %v", err)
 				continue
 			}
-			clipboard.Text = text
+			clipboard.Sequence = message.Clipboard.Sequence
 			s.mu.Lock()
 			if clipboard.Sequence > s.latestClipboard.Sequence {
 				s.latestClipboard = clipboard
@@ -904,24 +903,28 @@ func (s *ControllerSession) SendInput(ctx context.Context, event protocol.Deskto
 	})
 }
 
-func (s *ControllerSession) SendClipboard(ctx context.Context, text string) error {
+func (s *ControllerSession) SendClipboardContent(ctx context.Context, content protocol.DesktopClipboardState) error {
 	if s == nil || !s.Active() {
 		return errors.New("Relay Desktop session is not active")
 	}
-	text, err := validateClipboardText(text)
+	content, err := validateClipboardContent(content)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	s.clipboardSendSeq++
-	sequence := s.clipboardSendSeq
+	content.Sequence = s.clipboardSendSeq
 	s.mu.Unlock()
 	return s.conn.SendSessionMessage(ctx, protocol.DesktopSessionMessage{
-		Type: protocol.DesktopSessionClipboard,
-		Clipboard: &protocol.DesktopClipboardState{
-			Sequence: sequence,
-			Text:     text,
-		},
+		Type:      protocol.DesktopSessionClipboard,
+		Clipboard: &content,
+	})
+}
+
+func (s *ControllerSession) SendClipboard(ctx context.Context, text string) error {
+	return s.SendClipboardContent(ctx, protocol.DesktopClipboardState{
+		Kind: protocol.DesktopClipboardKindText,
+		Text: text,
 	})
 }
 

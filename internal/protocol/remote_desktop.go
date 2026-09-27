@@ -378,11 +378,21 @@ type DesktopSessionProbe struct {
 	SentAtUS int64  `json:"sentAtUs"`
 }
 
-const MaxDesktopClipboardBytes = 1 << 20
+const (
+	MaxDesktopClipboardBytes      = 1 << 20
+	MaxDesktopClipboardImageBytes = 640 << 10
+)
+
+const (
+	DesktopClipboardKindText = "text"
+	DesktopClipboardKindPNG  = "png"
+)
 
 type DesktopClipboardState struct {
 	Sequence uint64 `json:"sequence"`
-	Text     string `json:"text"`
+	Kind     string `json:"kind,omitempty"`
+	Text     string `json:"text,omitempty"`
+	PNG      []byte `json:"png,omitempty"`
 }
 
 type DesktopCursorState struct {

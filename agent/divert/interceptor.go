@@ -351,6 +351,9 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		// A reused client port gets a fresh virtual port. The old reverse map
 		// stays quarantined so delayed FIN/RST cannot reach the new connection.
 		delete(i.tcp, key)
+		if flow.translated.Source.IsValid() {
+			delete(i.reverse, flow.translated)
+		}
 		flow.finished = time.Now()
 		flow.route.traffic.Finish("closed", nil)
 		if flow.conn != nil {

@@ -13,6 +13,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -301,12 +302,8 @@ func readWindowsClipboardFiles(ctx context.Context) ([]string, error) {
 			return nil, errors.New("DragQueryFileW returned a truncated path")
 		}
 		path := windows.UTF16ToString(buf)
-		info, err := os.Stat(path)
-		if err != nil {
-			return nil, err
-		}
-		if !info.Mode().IsRegular() && !info.IsDir() {
-			return nil, fmt.Errorf("clipboard path %q is neither a regular file nor directory", path)
+		if strings.TrimSpace(path) == "" {
+			return nil, errors.New("CF_HDROP contains an empty file path")
 		}
 		paths = append(paths, path)
 	}

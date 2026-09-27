@@ -469,7 +469,7 @@ func TestClassificationAllowsMissingProcessButRejectsIncompleteTuple(t *testing.
 	server := newTestServer(t, Options{
 		Config: Config{DefaultAction: ActionReject},
 		SharedPolicy: func(flow Flow) Decision {
-			if flow.IP == "203.0.113.10" && flow.Port == 443 {
+			if flow.IP == "192.0.2.10" && flow.Port == 443 {
 				return Decision{Action: ActionDirect, Rule: "target-only"}
 			}
 			return Decision{Action: ActionReject, Rule: "fallback"}

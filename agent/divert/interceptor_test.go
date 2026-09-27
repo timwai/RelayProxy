@@ -448,3 +448,36 @@ func TestInterceptorAcceptedTCPUsesOriginalRoute(t *testing.T) {
 		t.Fatal("interceptor close left an accepted connection open")
 	}
 }
+
+
+func TestInterceptorFailsOpenForUnclassifiablePacket(t *testing.T) {
+	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionProxy}})
+	raw := []byte{0x45, 0x00, 0x00}
+	meta := packetMetadata{outbound: true, ifIndex: 7, subIfIndex: 9}
+	if err := i.handlePacket(append([]byte(nil), raw...), meta); err != nil {
+		t.Fatal(err)
+	}
+	got := expectInterceptedPacket(t, device)
+	if !bytes.Equal(got.data, raw) || !got.meta.outbound || got.meta.ifIndex != meta.ifIndex || got.meta.subIfIndex != meta.subIfIndex {
+		t.Fatalf("unclassifiable packet was not restored unchanged: %+v", got)
+	}
+}
+
+func TestInterceptorDisablesCaptureAfterInjectionFailure(t *testing.T) {
+	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionDirect}})
+	i.running.Store(true)
+	if err := device.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := packetTestFixture(false, ProtoUDP, []byte("payload"), false)
+	err := i.handlePacket(data, packetMetadata{outbound: true})
+	if !errors.Is(err, errPacketInjection) {
+		t.Fatalf("injection failure not classified: %v", err)
+	}
+	if !i.disableOnInjectionError(err) {
+		t.Fatal("injection failure did not trigger fail-open shutdown")
+	}
+	if i.Running() {
+		t.Fatal("interceptor remained running after injection failure")
+	}
+}

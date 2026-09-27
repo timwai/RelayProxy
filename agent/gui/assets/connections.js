@@ -41,12 +41,31 @@
     if (title) td.title = title;
     row.appendChild(td); return td;
   }
+  function serviceNames(record) {
+    return Array.isArray(record && record.services) ? record.services.filter(Boolean) : [];
+  }
+  function identityPrimary(record) {
+    const services = serviceNames(record);
+    if (services.length === 1 && Array.isArray(record.process_aliases) && record.process_aliases.length) {
+      return services[0] + ' · Windows 服务';
+    }
+    return record.process_name || record.process || '未知进程';
+  }
+  function identitySecondary(record) {
+    const parts = [];
+    if (record.pid) parts.push('PID ' + record.pid);
+    const services = serviceNames(record);
+    if (services.length > 1) parts.push('服务: ' + services.join(', '));
+    else if (services.length === 1 && !(Array.isArray(record.process_aliases) && record.process_aliases.length)) parts.push('服务: ' + services[0]);
+    return parts.join(' · ') || '未识别 / 远程客户端';
+  }
+
   function renderDetails(rows) {
     const record = rows.find(row => row.id === selected);
     $('details').hidden = !record;
     if (!record) return;
     const values = [
-      ['进程',record.process || '未识别'],['本地端点',record.source || '未知'],['目标',record.host || record.ip || '未知'],
+      ['进程',record.process || '未识别'],['Windows 服务',serviceNames(record).join(', ') || '—'],['进程别名',(record.process_aliases || []).join(', ') || '—'],['本地端点',record.source || '未知'],['目标',record.host || record.ip || '未知'],
       ['目标 IP',record.ip || '由出口解析，未返回 IP'],['域名来源',record.domain_source === 'requested' ? '应用请求' : record.domain_source === 'dns' ? 'DNS 应答关联' : '未知'],['出口',record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地')],
       ['命中规则',ruleNames[record.rule] || record.rule || '未命名规则'],['开始时间',new Date(record.started_at).toLocaleString()],['计数方式',record.accounting === 'packet' ? '数据包载荷（含重传）' : '传输载荷']
     ];
@@ -60,7 +79,7 @@
     const rows = snapshot.connections.filter(row => {
       if (state !== 'all' && row.state !== state) return false;
       if (protocol && row.protocol !== protocol || action && row.action !== action) return false;
-      return !query || [row.process,row.process_name,row.pid,row.host,row.ip,row.port,row.rule,row.source].some(value => text(value).toLowerCase().includes(query));
+      return !query || [row.process,row.process_name,row.process_aliases,row.services,row.pid,row.host,row.ip,row.port,row.rule,row.source].some(value => text(value).toLowerCase().includes(query));
     });
     rows.sort((a,b) => {
       const x = sortValue(a,sort), y = sortValue(b,sort);
@@ -72,7 +91,7 @@
     rows.slice(page*pageSize,(page+1)*pageSize).forEach(record => {
       const row = document.createElement('tr'); row.dataset.id = record.id; row.tabIndex = 0;
       row.setAttribute('aria-selected',String(selected === record.id));
-      cell(row,record.process_name || '未知进程',record.pid ? 'PID '+record.pid : '未识别 / 远程客户端','identity',record.process);
+      cell(row,identityPrimary(record),identitySecondary(record),'identity',record.process);
       cell(row,record.host || record.ip || '未知目标',record.host ? (record.ip || 'IP 由出口解析') + (record.domain_source === 'dns' ? ' · DNS 关联' : '') : '域名未知','destination',record.host || record.ip);
       cell(row,record.port || '—'); cell(row,text(record.protocol).toUpperCase(),entries[record.entry] || record.entry);
       cell(row,actions[record.action] || record.action,ruleNames[record.rule] || record.rule || '未命名规则');

@@ -18,6 +18,9 @@
   window.goSaveConfig = raw => invoke('SaveConfig', raw);
   window.goReloadConfig = () => invoke('ReloadConfig');
   window.goSelectExit = exitID => invoke('SelectExit', exitID);
+  window.goGetNetworkServiceStatus = () => invoke('GetNetworkServiceStatus');
+  window.goRepairNetworkService = () => invoke('RepairNetworkService');
+  window.goUninstallNetworkService = () => invoke('UninstallNetworkService');
   window.goSetAutostart = enabled => invoke('SetAutostart', enabled);
   window.goSetTheme = theme => invoke('SetTheme', theme);
   window.goCopyClipboard = text => invoke('CopyClipboard', text);

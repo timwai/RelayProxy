@@ -33,7 +33,7 @@ func TestClipboardFileReceiverRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	var receiver clipboardFileReceiver
-	t.Cleanup(receiver.reset)
+	t.Cleanup(receiver.close)
 	if err := receiver.offer(offer); err != nil {
 		t.Fatal(err)
 	}

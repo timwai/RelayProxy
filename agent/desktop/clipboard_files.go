@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	desktopmedia "relayproxy/internal/desktop"
 	"relayproxy/internal/protocol"
@@ -196,7 +197,14 @@ func (r *clipboardFileReceiver) cleanupCompleted() {
 
 func (r *clipboardFileReceiver) close() {
 	r.reset()
-	r.cleanupCompleted()
+	if r.completedDir == "" {
+		return
+	}
+	dir := r.completedDir
+	r.completedDir = ""
+	time.AfterFunc(time.Hour, func() {
+		_ = os.RemoveAll(dir)
+	})
 }
 
 func (r *clipboardFileReceiver) offer(offer protocol.DesktopClipboardFileOffer) error {

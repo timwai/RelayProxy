@@ -996,29 +996,158 @@ func installWindowsNetworkService(allowedSID string) error {
 func removeWindowsNetworkService() error {
 	manager, err := mgr.Connect()
 	if err != nil {
-		return err
+		return fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
 	}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(windowsNetworkServiceName)
-	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+
+	service, openErr := manager.OpenService(windowsNetworkServiceName)
+	switch {
+	case openErr == nil:
+		status, queryErr := service.Query()
+		if queryErr != nil {
+			_ = service.Close()
+			return fmt.Errorf("查询 RelayProxy Network Service 状态失败: %w", queryErr)
+		}
+		if status.State != svc.Stopped {
+			if _, controlErr := service.Control(svc.Stop); controlErr != nil &&
+				!errors.Is(controlErr, windows.ERROR_SERVICE_NOT_ACTIVE) {
+				_ = service.Close()
+				return fmt.Errorf("停止 RelayProxy Network Service 失败: %w", controlErr)
+			}
+			if waitErr := waitWindowsServiceState(service, svc.Stopped, 15*time.Second); waitErr != nil {
+				_ = service.Close()
+				return waitErr
+			}
+		}
+		deleteErr := service.Delete()
+		closeErr := service.Close()
+		if deleteErr != nil && !errors.Is(deleteErr, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			return fmt.Errorf("删除 RelayProxy Network Service 失败: %w", deleteErr)
+		}
+		if closeErr != nil {
+			return fmt.Errorf("关闭 RelayProxy Network Service 句柄失败: %w", closeErr)
+		}
+		if err := waitWindowsServiceDeleted(manager, 15*time.Second); err != nil {
+			return err
+		}
+	case errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST):
+		// The SCM entry may already be gone while an earlier uninstall left
+		// ProgramData artifacts behind. Cleanup must still run.
+	default:
+		return fmt.Errorf("打开 RelayProxy Network Service 失败: %w", openErr)
+	}
+
+	if err := cleanupWindowsNetworkServiceArtifacts(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func waitWindowsServiceDeleted(manager *mgr.Mgr, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		service, err := manager.OpenService(windowsNetworkServiceName)
+		switch {
+		case err == nil:
+			_ = service.Close()
+		case errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST):
+			return nil
+		case errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE):
+			// SCM has accepted deletion but another handle/process still owns
+			// the service object. Wait until it really disappears.
+		default:
+			return fmt.Errorf("确认 RelayProxy Network Service 删除状态失败: %w", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return errors.New("RelayProxy Network Service 已标记删除，但未在超时内从 SCM 完全消失")
+}
+
+func cleanupWindowsNetworkServiceArtifacts() error {
+	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil {
+		return fmt.Errorf("获取 ProgramData 路径失败: %w", err)
+	}
+
+	// The staged broker executable must be removable immediately once SCM and
+	// the service process are gone. Treat a leftover broker as uninstall
+	// failure rather than silently reporting success.
+	serviceRoot := filepath.Join(programData, "RelayProxy-Network-Service")
+	if err := removeWindowsTreeWithRetry(serviceRoot, 5*time.Second); err != nil {
+		return fmt.Errorf("删除 Network Service 程序目录失败 %s: %w", serviceRoot, err)
+	}
+
+	// WinDivert runtime belongs to the privileged transparent-proxy component.
+	// Usually it can also be removed immediately. If the kernel still has a
+	// runtime file mapped, schedule the remaining tree for deletion at reboot
+	// and report that fact instead of swallowing the error.
+	winDivertRoot := filepath.Join(programData, "RelayProxy-WinDivert")
+	if err := removeWindowsTreeWithRetry(winDivertRoot, 5*time.Second); err != nil {
+		if scheduleErr := scheduleWindowsTreeDeleteOnReboot(winDivertRoot); scheduleErr != nil {
+			return fmt.Errorf("删除 WinDivert 运行目录失败 %s: %v；安排重启后删除也失败: %w", winDivertRoot, err, scheduleErr)
+		}
+		return fmt.Errorf("Network Service 已完全卸载；WinDivert 目录仍被 Windows 占用，已安排在下次重启后删除: %s", winDivertRoot)
+	}
+	return nil
+}
+
+func removeWindowsTreeWithRetry(path string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for {
+		lastErr = os.RemoveAll(path)
+		if lastErr == nil {
+			if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+				return nil
+			} else if err != nil {
+				lastErr = err
+			} else {
+				lastErr = errors.New("目录仍然存在")
+			}
+		}
+		if time.Now().After(deadline) {
+			return lastErr
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func scheduleWindowsTreeDeleteOnReboot(root string) error {
+	info, err := os.Stat(root)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer service.Close()
-	status, _ := service.Query()
-	if status.State != svc.Stopped {
-		_, _ = service.Control(svc.Stop)
-		_ = waitWindowsServiceState(service, svc.Stopped, 10*time.Second)
+	if !info.IsDir() {
+		return scheduleWindowsPathDeleteOnReboot(root)
 	}
-	if err := service.Delete(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
-		return fmt.Errorf("删除 RelayProxy Network Service 失败: %w", err)
+	var paths []string
+	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	if programData, pathErr := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0); pathErr == nil {
-		_ = os.RemoveAll(filepath.Join(programData, "RelayProxy-Network-Service"))
+	for index := len(paths) - 1; index >= 0; index-- {
+		if err := scheduleWindowsPathDeleteOnReboot(paths[index]); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func scheduleWindowsPathDeleteOnReboot(path string) error {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	return windows.MoveFileEx(name, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
 
 func waitWindowsServiceState(service *mgr.Service, wanted svc.State, timeout time.Duration) error {

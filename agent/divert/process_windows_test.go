@@ -347,6 +347,17 @@ func TestProcessImageChild(t *testing.T) {
 	}
 }
 
+func TestProcessImagePathSystemPID4(t *testing.T) {
+	api := &processWindowsAPI{}
+	path, err := api.processPath(windowsSystemPID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != windowsSystemProcessName {
+		t.Fatalf("System path=%q want=%q", path, windowsSystemProcessName)
+	}
+}
+
 func TestProcessImagePath(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {

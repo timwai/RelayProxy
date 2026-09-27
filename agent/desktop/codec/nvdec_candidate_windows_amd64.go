@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	nvidiaCUDADriverDLL       = "nvcuda.dll"
-	nvVideoCodecHEVC    int32 = 8
-	nvVideoChroma444    int32 = 3
+	nvidiaCUDADriverDLL         = "nvcuda.dll"
+	nvVideoCodecH264      int32 = 4
+	nvVideoCodecHEVC      int32 = 8
+	nvVideoChroma420      int32 = 1
+	nvVideoChroma444      int32 = 3
 )
 
 // nvcuvidDecodeCaps mirrors CUVIDDECODECAPS from the NVIDIA Video Codec SDK.
@@ -39,10 +41,15 @@ type nvcuvidDecodeCaps struct {
 }
 
 type nvidiaNVDECDeviceProbe struct {
-	Checked     bool
-	DeviceCount int
-	HEVC444     bool
-	Error       string
+	Checked      bool
+	DeviceCount  int
+	H264Known    bool
+	H264         bool
+	HEVC420Known bool
+	HEVC420      bool
+	HEVC444Known bool
+	HEVC444      bool
+	Error        string
 }
 
 type nvidiaCUDADriverAPI struct {
@@ -186,24 +193,32 @@ func probeNVIDIANVDECHEVC444(
 			continue
 		}
 
-		caps := nvcuvidDecodeCaps{
-			CodecType:      nvVideoCodecHEVC,
-			ChromaFormat:   nvVideoChroma444,
-			BitDepthMinus8: 0,
+		query := func(codecType, chromaFormat int32, label string) (known bool, supported bool) {
+			caps := nvcuvidDecodeCaps{
+				CodecType:      codecType,
+				ChromaFormat:   chromaFormat,
+				BitDepthMinus8: 0,
+			}
+			status := cudaDriverCall(
+				cuvidGetDecoderCaps,
+				uintptr(unsafe.Pointer(&caps)),
+			)
+			runtime.KeepAlive(&caps)
+			if status != 0 {
+				issues = append(issues, fmt.Sprintf("device %d cuvidGetDecoderCaps(%s) returned %d", ordinal, label, status))
+				return false, false
+			}
+			return true, caps.IsSupported != 0
 		}
-		status := cudaDriverCall(
-			cuvidGetDecoderCaps,
-			uintptr(unsafe.Pointer(&caps)),
-		)
+
+		h264Known, h264 := query(nvVideoCodecH264, nvVideoChroma420, "H264 4:2:0")
+		hevc420Known, hevc420 := query(nvVideoCodecHEVC, nvVideoChroma420, "HEVC 4:2:0")
+		hevc444Known, hevc444 := query(nvVideoCodecHEVC, nvVideoChroma444, "HEVC 4:4:4")
+
 		clearStatus := cudaDriverCall(api.cuCtxSetCurrent, 0)
 		destroyStatus := cudaDriverCall(api.cuCtxDestroy, cudaContext)
-		runtime.KeepAlive(&caps)
 		runtime.KeepAlive(&cudaContext)
 
-		if status != 0 {
-			issues = append(issues, fmt.Sprintf("device %d cuvidGetDecoderCaps returned %d", ordinal, status))
-			continue
-		}
 		if clearStatus != 0 {
 			issues = append(issues, fmt.Sprintf("device %d cuCtxSetCurrent(NULL) returned %d", ordinal, clearStatus))
 		}
@@ -211,10 +226,15 @@ func probeNVIDIANVDECHEVC444(
 			issues = append(issues, fmt.Sprintf("device %d cuCtxDestroy returned %d", ordinal, destroyStatus))
 		}
 
-		result.Checked = true
-		if caps.IsSupported != 0 {
-			result.HEVC444 = true
+		if h264Known || hevc420Known || hevc444Known {
+			result.Checked = true
 		}
+		result.H264Known = result.H264Known || h264Known
+		result.H264 = result.H264 || h264
+		result.HEVC420Known = result.HEVC420Known || hevc420Known
+		result.HEVC420 = result.HEVC420 || hevc420
+		result.HEVC444Known = result.HEVC444Known || hevc444Known
+		result.HEVC444 = result.HEVC444 || hevc444
 	}
 
 	result.Error = strings.Join(issues, "; ")

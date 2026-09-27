@@ -301,9 +301,13 @@ func serveWindowsNetworkSession(file *os.File) error {
 				captureDone <- err
 				return
 			}
+			flags := uint32(0)
+			if addr.outbound() {
+				flags |= networkFrameFlagOutbound
+			}
 			frame := networkFrame{
 				kind:       networkFrameCapture,
-				flags:      addr.Flags,
+				flags:      flags,
 				ifIndex:    addr.ifIndex(),
 				subIfIndex: addr.subIfIndex(),
 				payload:    append([]byte(nil), buffer[:n]...),
@@ -327,7 +331,7 @@ func serveWindowsNetworkSession(file *os.File) error {
 			<-captureDone
 			return fmt.Errorf("RelayProxy Network Service 收到未知数据帧 %d", frame.kind)
 		}
-		addr := windivertAddress{Flags: frame.flags}
+		var addr windivertAddress
 		addr.setOutbound(frame.flags&networkFrameFlagOutbound != 0)
 		addr.setIfIndex(frame.ifIndex, frame.subIfIndex)
 		addr.setChecksums(len(frame.payload) > 0 && frame.payload[0]>>4 == 6)
@@ -559,15 +563,13 @@ func (d *windowsServicePacketDevice) Receive(buffer []byte) (int, packetMetadata
 			capturedOutbound: outbound,
 			ifIndex:          frame.ifIndex,
 			subIfIndex:       frame.subIfIndex,
-			platformToken:    frame.flags,
 		}, nil
 	}
 	return 0, packetMetadata{}, errors.New("RelayProxy Network Service receive retry exhausted")
 }
 
 func (d *windowsServicePacketDevice) Send(packet []byte, meta packetMetadata) error {
-	flags, _ := meta.platformToken.(uint32)
-	flags &^= networkFrameFlagOutbound
+	flags := uint32(0)
 	if meta.outbound {
 		flags |= networkFrameFlagOutbound
 	}

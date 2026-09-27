@@ -459,8 +459,7 @@ func materializeWindowsVirtualClipboard(
 	}
 
 	var totalBytes int64
-	fileIndex := 0
-	for _, descriptor := range descriptors {
+	for descriptorIndex, descriptor := range descriptors {
 		target := filepath.Join(dir, filepath.FromSlash(descriptor.RelativePath))
 		relativeCheck, err := filepath.Rel(dir, target)
 		if err != nil || relativeCheck == ".." || strings.HasPrefix(relativeCheck, ".."+string(os.PathSeparator)) {
@@ -485,7 +484,7 @@ func materializeWindowsVirtualClipboard(
 		if descriptor.HasSize && descriptor.DeclaredSize == 0 {
 			err = file.Close()
 		} else {
-			err = copyWindowsVirtualDescriptorContent(ctx, object, contentsFormat, fileIndex, file, &totalBytes)
+			err = copyWindowsVirtualDescriptorContent(ctx, object, contentsFormat, descriptorIndex, file, &totalBytes)
 			closeErr := file.Close()
 			if err == nil {
 				err = closeErr
@@ -494,7 +493,6 @@ func materializeWindowsVirtualClipboard(
 		if err != nil {
 			return nil, "", fmt.Errorf("stage virtual clipboard file %q: %w", descriptor.RelativePath, err)
 		}
-		fileIndex++
 	}
 
 	paths := make([]string, 0, len(roots))

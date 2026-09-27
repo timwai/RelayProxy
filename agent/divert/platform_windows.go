@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+
+	"golang.org/x/sys/windows"
 )
 
 func platformCapabilities() Capabilities {
@@ -36,6 +38,20 @@ func (d *windowsPacketDevice) Send(packet []byte, meta packetMetadata) error {
 func (d *windowsPacketDevice) Shutdown() error { return d.handle.Shutdown() }
 func (d *windowsPacketDevice) Close() error    { return d.handle.Close() }
 
+func openWindowsPacketDevice(filter string) (packetDevice, error) {
+	if device, err := openWindowsServicePacketDevice(filter); err == nil {
+		return device, nil
+	}
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		return nil, fmt.Errorf("RelayProxy Network Service 未运行；请重新启用系统透明代理以完成一次管理员安装")
+	}
+	handle, err := openWinDivert(filter)
+	if err != nil {
+		return nil, err
+	}
+	return &windowsPacketDevice{handle: handle}, nil
+}
+
 func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	if err := prepareLoopGuard(s); err != nil {
 		return nil, err
@@ -54,14 +70,14 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	port4 := listeners[0].Addr().(*net.TCPAddr).Port
 	port6 := listeners[1].Addr().(*net.TCPAddr).Port
 	filter := windowsInterceptFilter(port4, port6)
-	handle, err := openWinDivert(filter)
+	device, err := openWindowsPacketDevice(filter)
 	if err != nil {
 		for _, listener := range listeners {
 			_ = listener.Close()
 		}
 		return nil, err
 	}
-	i := newPacketInterceptor(s, &windowsPacketDevice{handle: handle}, listeners, func(protocol Protocol, source, destination netip.AddrPort) (packetProcess, error) {
+	i := newPacketInterceptor(s, device, listeners, func(protocol Protocol, source, destination netip.AddrPort) (packetProcess, error) {
 		process, err := lookupPacketProcess(protocol, source, destination)
 		return packetProcess{pid: process.PID, path: process.Path}, err
 	})

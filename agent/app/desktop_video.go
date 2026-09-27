@@ -65,6 +65,42 @@ func desktopCodecSupportsChroma(
 	}
 }
 
+func desktopCodecSupportsRelayDirection(
+	capabilities []protocol.DesktopCodecCapability,
+	codec string,
+	chroma protocol.DesktopChroma,
+	encode bool,
+) bool {
+	capability, ok := desktopCodecCapability(capabilities, codec)
+	if !ok {
+		return false
+	}
+	if encode {
+		if !capability.Encode {
+			return false
+		}
+	} else if !capability.Decode {
+		return false
+	}
+	return desktopCodecSupportsChroma(capability, chroma, encode)
+}
+
+func resolveAutoRemoteDesktopCodec(
+	targetCapabilities []protocol.DesktopCodecCapability,
+	localCapabilities []protocol.DesktopCodecCapability,
+) string {
+	for _, codec := range []string{"h265", "h264"} {
+		if desktopCodecSupportsRelayDirection(
+			targetCapabilities, codec, protocol.DesktopChroma420, true,
+		) && desktopCodecSupportsRelayDirection(
+			localCapabilities, codec, protocol.DesktopChroma420, false,
+		) {
+			return codec
+		}
+	}
+	return "jpeg"
+}
+
 func negotiateRemoteDesktopVideo(
 	target protocol.RemoteDesktopTarget,
 	localCapabilities []protocol.DesktopCodecCapability,
@@ -84,6 +120,9 @@ func negotiateRemoteDesktopVideo(
 	}
 
 	preference := desktopcodec.NormalizeCodecPreference(raw)
+	if preference == "auto" && chroma != protocol.DesktopChroma444 {
+		preference = resolveAutoRemoteDesktopCodec(target.Capabilities.Codecs, localCapabilities)
+	}
 	options.Codec = preference
 
 	if preference == "h265" {

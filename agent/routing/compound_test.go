@@ -108,3 +108,26 @@ func TestCompoundProcessAliasMatching(t *testing.T) {
 		t.Fatalf("shared host guessed a missing service alias: %+v", got)
 	}
 }
+
+
+func TestCompoundTargetRuleDoesNotRequireProcessIdentity(t *testing.T) {
+	engine, err := NewEngine(Config{Mode: ModeRule, DefaultAction: ActionReject, Rules: []Rule{{
+		Name: "SMB target", Enabled: true,
+		Targets: []string{"198.51.100.20"}, Ports: []string{"445"}, Protocols: []string{"tcp"},
+		Action: ActionProxy, ExitID: "lan-exit",
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := Flow{Process: "", IP: "198.51.100.20", Port: 445, Protocol: "tcp"}
+	got := engine.DecideFlow(flow)
+	if !got.Matched || got.Action != ActionProxy || got.Rule != "SMB target" || got.ExitID != "lan-exit" {
+		t.Fatalf("target-only rule required a process identity: %+v", got)
+	}
+
+	withProcess := Flow{Process: "System", IP: "198.51.100.20", Port: 445, Protocol: "tcp"}
+	got = engine.DecideFlow(withProcess)
+	if !got.Matched || got.Action != ActionProxy {
+		t.Fatalf("target-only rule changed when process metadata appeared: %+v", got)
+	}
+}

@@ -37,9 +37,9 @@ type Flow struct {
 	Process        string
 	ProcessAliases []string
 	Host           string
-	IP       string
-	Port     uint16
-	Protocol string
+	IP             string
+	Port           uint16
+	Protocol       string
 }
 
 type Decision struct {

@@ -126,7 +126,6 @@ func TestMatchesWindowsNetworkServiceRecovery(t *testing.T) {
 	}
 }
 
-
 func TestNetworkFramePreservesWinDivertFlags(t *testing.T) {
 	var buffer bytes.Buffer
 	const rawFlags = uint32((1 << 1) | (1 << 8) | networkFrameFlagOutbound | (1 << 20) | (1 << 23))

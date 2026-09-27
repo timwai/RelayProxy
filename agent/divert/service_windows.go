@@ -18,6 +18,7 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -550,28 +551,42 @@ func PlatformServiceReady() bool {
 }
 
 func windowsNetworkServiceState() (installed, running bool, binaryPath string, err error) {
-	manager, err := mgr.Connect()
+	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return false, false, "", err
 	}
-	defer manager.Disconnect()
-	service, err := manager.OpenService(windowsNetworkServiceName)
+	defer windows.CloseServiceHandle(manager)
+	name, err := windows.UTF16PtrFromString(windowsNetworkServiceName)
+	if err != nil {
+		return false, false, "", err
+	}
+	service, err := windows.OpenService(manager, name, windows.SERVICE_QUERY_STATUS)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return false, false, "", nil
 	}
 	if err != nil {
 		return false, false, "", err
 	}
-	defer service.Close()
-	config, err := service.Config()
-	if err != nil {
+	defer windows.CloseServiceHandle(service)
+	var status windows.SERVICE_STATUS
+	if err := windows.QueryServiceStatus(service, &status); err != nil {
 		return true, false, "", err
 	}
-	status, err := service.Query()
-	if err != nil {
-		return true, false, config.BinaryPathName, err
+
+	// The Service Control Manager query above intentionally uses read-only
+	// access so ordinary users can check readiness without UAC. ImagePath is
+	// read separately from HKLM; failure to read it only means EnsurePlatformService
+	// cannot prove that the installed broker matches the current executable.
+	key, keyErr := registry.OpenKey(
+		registry.LOCAL_MACHINE,
+		`SYSTEM\CurrentControlSet\Services\`+windowsNetworkServiceName,
+		registry.QUERY_VALUE,
+	)
+	if keyErr == nil {
+		binaryPath, _, _ = key.GetStringValue("ImagePath")
+		_ = key.Close()
 	}
-	return true, status.State == svc.Running, config.BinaryPathName, nil
+	return true, status.CurrentState == windows.SERVICE_RUNNING, binaryPath, nil
 }
 
 func expectedWindowsNetworkServiceExecutable() (string, error) {

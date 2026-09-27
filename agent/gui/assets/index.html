@@ -1888,7 +1888,7 @@
         if (protocol && row.protocol !== protocol) return false;
         if (action && row.action !== action) return false;
         if (!search) return true;
-        return [row.process, row.process_name, row.pid, row.host, row.ip, row.port, row.rule, row.source].some(function (value) {
+        return [row.process, row.process_name, row.process_aliases, row.services, row.pid, row.host, row.ip, row.port, row.rule, row.source].some(function (value) {
           return String(value == null ? '' : value).toLowerCase().indexOf(search) >= 0;
         });
       });
@@ -1902,7 +1902,11 @@
       rows.slice(0, 300).forEach(function (record) {
         var tr = document.createElement('tr');
         var values = [
-          (record.process_name || record.process || '未知进程') + (record.pid ? ' · PID ' + record.pid : ''),
+          ((Array.isArray(record.services) && record.services.length === 1 && Array.isArray(record.process_aliases) && record.process_aliases.length)
+            ? record.services[0] + ' · Windows 服务'
+            : (record.process_name || record.process || '未知进程')) +
+            (record.pid ? ' · PID ' + record.pid : '') +
+            ((Array.isArray(record.services) && record.services.length > 1) ? ' · 服务 ' + record.services.join(', ') : ''),
           (record.host || record.ip || '未知目标') + (record.port ? ':' + record.port : ''),
           String(record.protocol || '').toUpperCase(),
           record.action || '—',

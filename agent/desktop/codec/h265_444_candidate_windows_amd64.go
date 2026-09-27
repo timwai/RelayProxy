@@ -111,7 +111,7 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 			issues = appendCandidateIssue(issues, "%s/cuvidGetDecoderCaps: %v", nvDecodeRuntimeDLL, procErr)
 		} else {
 			probe.DecodeRuntime = true
-			deviceProbe := probeNVIDIANVDECHEVC444(ctx, getDecoderCaps)
+			deviceProbe := probeNVIDIANVDEC(ctx, getDecoderCaps)
 			probe.DeviceProbe = probe.DeviceProbe || deviceProbe.Checked
 			probe.DecodeCapabilityKnown = deviceProbe.HEVC444Known
 			if deviceProbe.DeviceCount > probe.DeviceCount {

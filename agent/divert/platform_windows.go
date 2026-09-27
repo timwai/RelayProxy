@@ -93,7 +93,7 @@ func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	// userspace reinjection and can blackhole the whole host if metadata differs.
 	outbound := "(outbound and !loopback and (tcp or udp or fragment)"
 	if bypass := windowsRelayBypassFilter(guard); bypass != "" {
-		outbound += " and !(" + bypass + ")"
+		outbound += " and not (" + bypass + ")"
 	}
 	outbound += ")"
 

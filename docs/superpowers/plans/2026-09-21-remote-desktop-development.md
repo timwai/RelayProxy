@@ -1334,6 +1334,15 @@ Windows SendInput / CF_UNICODETEXT
 - Windows 单测固定关键顺序：成功路径为 `open decoder → resize → clear old frame → close old decoder`；失败路径为 `open decoder → resize failure → close new decoder`，且旧 pipeline 不变。
 - 该优化不改变 Host ABR、codec negotiation、H.265 canary 或跨平台 Viewer 行为，只缩短 Windows generation 切换的可见空窗并改善失败恢复。
 
+### 0.2.109 RD3 Auto Codec Negotiation
+
+- Relay Desktop `codec=auto` 不再直接落到旧 JPEG 路径；Controller 在建立媒体会话前根据目标端 encode 与本机 decode 的真实能力解析为具体 codec。
+- 自动优先级固定为 `H.265 4:2:0 → H.264 4:2:0 → JPEG`；只有目标端和本机都明确上报对应方向的 4:2:0 能力时才会选择 H.265/H.264。
+- `encodeChroma/decodeChroma` 存在时优先使用方向性能力，旧 `Chroma420` 仅作为兼容回退，避免单向 4:4:4 能力被误判成可用的 4:2:0。
+- 显式 `h265`、`h264`、`jpeg` 行为保持不变；内部 `h265-validation` sentinel 仍绕过公开自动协商，用于诊断 H.265 fallback。
+- `auto + 4:4:4` 仍拒绝，继续要求用户显式选择 H.264 或 H.265，避免在色彩采样要求下进行隐式 codec 降级。
+- 新增回归测试覆盖：双方支持时 auto 选 H.265、H.265 方向能力不完整时回退 H.264、没有共享视频 codec 时回退 JPEG。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

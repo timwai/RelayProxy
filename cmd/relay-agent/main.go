@@ -169,6 +169,25 @@ func main() {
 		log.Printf("[Agent] network.mode=divert is unavailable on Windows %s; starting with SOCKS5/HTTP only", runtime.GOARCH)
 		networkMode = ""
 	}
+	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" && networkMode == "divert" {
+		switch {
+		case divert.PlatformServiceReady():
+			log.Println("[Agent] RelayProxy Network Service is ready; transparent proxy will run without GUI elevation")
+		case wantGUI && !startMinimized:
+			if err := divert.EnsurePlatformService(); err != nil {
+				// Keep the desktop usable after a cancelled/failed UAC prompt.
+				// The saved configuration remains "divert", so the UI still
+				// shows that a restart/repair is required.
+				log.Printf("[Agent] RelayProxy Network Service unavailable: %v; starting without transparent interception", err)
+				networkMode = ""
+			}
+		case startMinimized:
+			// Login startup must never produce a surprise UAC prompt. The
+			// service is installed once from an interactive settings change.
+			log.Println("[Agent] RelayProxy Network Service is not ready; skipping transparent interception during login startup")
+			networkMode = ""
+		}
+	}
 
 	identityPath := filepath.Join(filepath.Dir(*configPath), "device-identity.json")
 	deviceIdentity, err := deviceidentity.LoadOrCreate(identityPath)

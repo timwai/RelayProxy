@@ -25,7 +25,7 @@
 | 键盘 / 鼠标输入 | ✅ 已合并 main | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
 | 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ✅ 已合并 main | Windows Host 以 60 Hz 独立采集位置/可见性，形状仅在 HCURSOR 变化时生成 PNG；可靠 session stream 传输，Controller 缓存形状，Wails Viewer 在视频表面本地叠加；PR #31 merge commit `f7101025c98fe1c09547a3a1203d20a6f3b6b888` |
-| 剪贴板 | ✅ 已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本；连接时仅建立基线不互相覆盖，后续变化按序号传播并做回环去重；GUI 可关闭同步，文件/图片暂不传输；PR #32 merge commit `010b8f5abc1408e3c824ebdaf13e943cf003dcc1` |
+| 剪贴板 | ✅ 文本 + PNG 图片已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本与 PNG 图片；Windows 使用 CF_UNICODETEXT / CF_DIB，本地 DIB 与 wire PNG 转换；连接时仅建立基线不互相覆盖，后续变化按序号传播并做回环去重；文件剪贴板/拖拽仍待后续实现 |
 | DXGI / WGC Capture | ✅ 指定显示器链路已合并 main | PR #53 已打通 capability 驱动的 per-target 选屏、session-local `DisplayID`、单屏 DXGI/GDI Auto 捕获、光标局部坐标与 Windows `SendInput` 虚拟桌面坐标映射；未指定显示器时继续保留原虚拟桌面行为 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
@@ -1269,6 +1269,18 @@ Windows SendInput / CF_UNICODETEXT
   2. Relay-only：要求 Relay observed，记录 Relay 基线。
   3. Wi-Fi/弱网：要求 ABR activity，并限制 path switch rate，确认不振荡。
   4. 带宽骤降/恢复：比较 ABRReasons、resolution/generation changes 与 dropped frames，再决定是否调整 production threshold。
+
+### 0.2.104 RD3 PNG Clipboard Sync
+
+- Relay Desktop clipboard wire state 从 legacy `text` 扩展为向后兼容的 `kind=text|png`；旧端只发送 `text` 时仍自动归一为文本。
+- Windows Host 与 Wails Controller 均新增 `CF_DIB ↔ PNG` 转换，因此 Windows 截图、浏览器/图片应用复制的 bitmap 可以双向同步，不再局限于 Unicode 文本。
+- PNG wire payload 上限固定为 640 KiB。原因是 reliable session control 使用 1 MiB JSON frame，而 Go JSON 的 `[]byte` 会 base64 膨胀；超限图片明确拒绝，不让超大 clipboard 打断桌面控制流。
+- 本地 DIB 解码支持 24/32-bit BI_RGB、top-down/bottom-up，限制最多约 16M pixels / 64 MiB DIB，防止异常 clipboard allocation。
+- rich clipboard 优先走新 Wails API；若新 binding 不存在，前端自动退回旧文本 API，保持升级兼容。
+- 图片和文本都复用现有 sequence + content dedupe，远端写入后不会被本地 250 ms polling 回传形成循环。
+- 回归覆盖 legacy text 兼容、PNG validation/size gate/deep copy、PNG dedupe，以及 Windows DIB pixel round-trip。
+- 仍未完成：文件剪贴板（CF_HDROP/virtual file）与拖拽传输；这部分需要独立文件传输通道，不应塞进 1 MiB control JSON。
+
 
 
 

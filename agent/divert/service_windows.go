@@ -1000,7 +1000,7 @@ func installWindowsNetworkService(allowedSID string) error {
 func removeWindowsNetworkService() (NetworkServiceUninstallResult, error) {
 	manager, err := mgr.Connect()
 	if err != nil {
-		return fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
+		return NetworkServiceUninstallResult{}, fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
 	}
 	defer manager.Disconnect()
 
@@ -1078,34 +1078,60 @@ func cleanupWindowsNetworkServiceArtifacts() (NetworkServiceUninstallResult, err
 	// the service process are gone. Treat a leftover broker as uninstall
 	// failure rather than silently reporting success.
 	serviceRoot := filepath.Join(programData, "RelayProxy-Network-Service")
+	winDivertRoot := filepath.Join(programData, "RelayProxy-WinDivert")
+	var deferred []string
+
 	if err := removeWindowsTreeWithRetry(serviceRoot, 5*time.Second); err != nil {
-		return NetworkServiceUninstallResult{}, fmt.Errorf("删除 Network Service 程序目录失败 %s: %w", serviceRoot, err)
+		if scheduleErr := scheduleWindowsTreeDeleteOnReboot(serviceRoot); scheduleErr != nil {
+			return NetworkServiceUninstallResult{}, fmt.Errorf("删除 Network Service 程序目录失败 %s: %v；安排重启后删除也失败: %w", serviceRoot, err, scheduleErr)
+		}
+		deferred = append(deferred, serviceRoot)
 	}
 
 	// WinDivert runtime belongs to the privileged transparent-proxy component.
 	// Usually it can also be removed immediately. If the kernel still has a
-	// runtime file mapped, schedule the remaining tree for deletion at reboot
-	// and report that fact instead of swallowing the error.
-	winDivertRoot := filepath.Join(programData, "RelayProxy-WinDivert")
+	// runtime file mapped, schedule the remaining tree for deletion at reboot.
 	if err := removeWindowsTreeWithRetry(winDivertRoot, 5*time.Second); err != nil {
 		if scheduleErr := scheduleWindowsTreeDeleteOnReboot(winDivertRoot); scheduleErr != nil {
 			return NetworkServiceUninstallResult{}, fmt.Errorf("删除 WinDivert 运行目录失败 %s: %v；安排重启后删除也失败: %w", winDivertRoot, err, scheduleErr)
 		}
-		return NetworkServiceUninstallResult{RebootCleanup: true, CleanupPath: winDivertRoot}, nil
+		deferred = append(deferred, winDivertRoot)
+	}
+	if len(deferred) != 0 {
+		return NetworkServiceUninstallResult{RebootCleanup: true, CleanupPath: strings.Join(deferred, "; ")}, nil
 	}
 	return NetworkServiceUninstallResult{}, nil
 }
 
 func detectWindowsDeferredCleanup() (NetworkServiceUninstallResult, error) {
+	installed, _, _, _, stateErr := windowsNetworkServiceState()
+	if stateErr != nil {
+		return NetworkServiceUninstallResult{}, fmt.Errorf("验证 Network Service 卸载状态失败: %w", stateErr)
+	}
+	if installed {
+		return NetworkServiceUninstallResult{}, errors.New("Network Service helper 已退出，但 SCM 服务项仍然存在")
+	}
+
 	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
 	if err != nil {
 		return NetworkServiceUninstallResult{}, err
 	}
-	winDivertRoot := filepath.Join(programData, "RelayProxy-WinDivert")
-	if _, err := os.Stat(winDivertRoot); err == nil {
-		return NetworkServiceUninstallResult{RebootCleanup: true, CleanupPath: winDivertRoot}, nil
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return NetworkServiceUninstallResult{}, err
+	var remaining []string
+	for _, root := range []string{
+		filepath.Join(programData, "RelayProxy-Network-Service"),
+		filepath.Join(programData, "RelayProxy-WinDivert"),
+	} {
+		if _, statErr := os.Stat(root); statErr == nil {
+			remaining = append(remaining, root)
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return NetworkServiceUninstallResult{}, statErr
+		}
+	}
+	if len(remaining) != 0 {
+		return NetworkServiceUninstallResult{
+			RebootCleanup: true,
+			CleanupPath:   strings.Join(remaining, "; "),
+		}, nil
 	}
 	return NetworkServiceUninstallResult{}, nil
 }

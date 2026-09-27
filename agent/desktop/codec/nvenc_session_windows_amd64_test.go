@@ -14,6 +14,7 @@ func completeNVENCProductionFunctionListForTest() nvEncodeAPIFunctionList {
 	api.NvEncGetEncodeGUIDCount = 1
 	api.NvEncGetEncodeGUIDs = 1
 	api.NvEncGetEncodeCaps = 1
+	api.NvEncGetEncodePresetConfig = 1
 	api.NvEncGetEncodePresetConfigEx = 1
 	api.NvEncInitializeEncoder = 1
 	api.NvEncCreateBitstreamBuffer = 1
@@ -33,13 +34,25 @@ func completeNVENCProductionFunctionListForTest() nvEncodeAPIFunctionList {
 
 func TestValidateNVENCProductionFunctionList(t *testing.T) {
 	api := completeNVENCProductionFunctionListForTest()
-	if err := validateNVENCProductionFunctionList(api); err != nil {
+	if err := validateNVENCProductionFunctionList(api, false); err != nil {
 		t.Fatalf("complete production table rejected: %v", err)
 	}
 
 	api.NvEncRegisterResource = 0
-	if err := validateNVENCProductionFunctionList(api); err == nil {
+	if err := validateNVENCProductionFunctionList(api, false); err == nil {
 		t.Fatal("production table without resource registration was accepted")
+	}
+}
+
+func TestValidateNVENCProductionFunctionListLegacy91(t *testing.T) {
+	api := completeNVENCProductionFunctionListForTest()
+	api.NvEncGetEncodePresetConfigEx = 0
+	if err := validateNVENCProductionFunctionList(api, true); err != nil {
+		t.Fatalf("legacy production table rejected: %v", err)
+	}
+	api.NvEncGetEncodePresetConfig = 0
+	if err := validateNVENCProductionFunctionList(api, true); err == nil {
+		t.Fatal("legacy production table without nvEncGetEncodePresetConfig was accepted")
 	}
 }
 

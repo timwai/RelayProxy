@@ -376,6 +376,7 @@ func copyWindowsVirtualDescriptorContent(
 ) error {
 	var lastErr error
 	for _, tymed := range []uint32{windowsTymedIStream, windowsTymedHGlobal} {
+		totalBefore := *totalBytes
 		medium, err := getWindowsDataObjectMedium(object, windowsFormatEtc{
 			CFFormat: contentsFormat,
 			DWAspect: windowsDVAspectContent,
@@ -404,6 +405,7 @@ func copyWindowsVirtualDescriptorContent(
 			return nil
 		}
 		lastErr = err
+		*totalBytes = totalBefore
 		if _, seekErr := file.Seek(0, 0); seekErr == nil {
 			_ = file.Truncate(0)
 		}
@@ -584,18 +586,19 @@ func (c *windowsCapture) readClipboardFilesWithVirtual(ctx context.Context) ([]s
 
 	c.clearVirtualClipboardCacheLocked()
 	paths, dir, err := readWindowsVirtualClipboardFiles(ctx)
-	c.virtualClipboardSequence = sequence
 	if err != nil {
 		if errors.Is(err, ErrClipboardFilesUnavailable) {
+			c.virtualClipboardSequence = sequence
 			return nil, ErrClipboardFilesUnavailable
 		}
 		return nil, err
 	}
 	if current := windowsClipboardSequenceNumber(); sequence != 0 && current != 0 && current != sequence {
 		_ = os.RemoveAll(dir)
-		c.virtualClipboardSequence = current
+		c.virtualClipboardSequence = 0
 		return nil, ErrClipboardFilesUnavailable
 	}
+	c.virtualClipboardSequence = sequence
 	c.virtualClipboardDir = dir
 	c.virtualClipboardPaths = append([]string(nil), paths...)
 	return append([]string(nil), paths...), nil

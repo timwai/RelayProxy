@@ -1241,6 +1241,21 @@ Windows SendInput / CF_UNICODETEXT
 - `RemoteDesktopDiagnosticsReport` 新增 `desktopSessions`，一次导出即可记录所有活动多窗口 session 的 `sessionId / displayId / displaysReady / displays`，secondary viewer 不再需要单独截图留证。
 - 下一步用分析脚本比较热插拔前后两个 diagnostics JSON，并校验多窗口是否绑定不同 DisplayID、实时 topology 是否 ready，以及负坐标/混合 DPI 是否被完整保留。
 
+### 0.2.102 RD3 Multi-Display Validation Script
+
+- 新增 `scripts/analyze-desktop-displays.ps1`，读取 diagnostics 的 `desktopSessions[].displays`，打印每块显示器的虚拟桌面坐标、像素尺寸、DPI、scale、primary 状态，以及每个活动 session 的 DisplayID/path。
+- 验收开关包括：`RequireMultipleDisplays / RequireNegativeCoordinates / RequireMixedDPI / RequireLiveTopology / RequireMultipleSessions / RequireUniqueSessionDisplays`。
+- 可使用 `-BeforePath <before.json> -RequireTopologyChanged` 比较热插拔前后的 topology fingerprint；fingerprint 不依赖临时 HMONITOR ID，而使用 name + 坐标 + 尺寸 + DPI + scale。
+- 多窗口验收要求至少两个 display-bound session 且 DisplayID 唯一，直接验证 secondary viewer 没有错误复用 primary display。
+- Windows UI CI 增加该脚本 parser syntax 检查。
+- 推荐矩阵：
+  1. 左侧副屏（负 X）+ 主屏，导出 diagnostics 并要求 negative coordinates。
+  2. 上方副屏（负 Y）+ 主屏，重复验证。
+  3. 两块不同缩放比例显示器，要求 mixed DPI。
+  4. 同时打开两个独立显示器窗口，要求 multiple sessions + unique session displays。
+  5. 保存 before.json，拔插/禁用一块屏幕后保存 after.json，要求 topology changed + live topology。
+
+
 
 
 

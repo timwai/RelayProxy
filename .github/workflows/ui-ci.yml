@@ -82,6 +82,7 @@ jobs:
             'scripts\build.ps1',
             'scripts\analyze-desktop-audio.ps1',
             'scripts\analyze-desktop-gpu.ps1',
+            'scripts\analyze-desktop-displays.ps1',
             'scripts\validate-nvcodec-canary.ps1'
           )
           foreach ($script in $scripts) {

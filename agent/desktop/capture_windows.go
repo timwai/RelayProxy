@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/png"
 	"log"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -141,8 +142,9 @@ func (c *gdiCapture) Close() error {
 // cursor channel. The current stream adapter implements DXGI/GDI; WGC can plug
 // into the same contract without changing Host media code.
 type windowsCapture struct {
-	mu       sync.Mutex
-	cursorMu sync.Mutex
+	mu          sync.Mutex
+	cursorMu    sync.Mutex
+	clipboardMu sync.Mutex
 
 	gdi             *gdiCapture
 	stream          windowsFrameStream
@@ -158,6 +160,10 @@ type windowsCapture struct {
 	cursorHeight   int
 	cursorHotspotX int
 	cursorHotspotY int
+
+	virtualClipboardSequence uint32
+	virtualClipboardDir      string
+	virtualClipboardPaths    []string
 }
 
 func newSystemCapture() (*windowsCapture, error) {
@@ -555,6 +561,17 @@ func (c *windowsCapture) Close() error {
 	gdi := c.gdi
 	c.gdi = nil
 	c.mu.Unlock()
+
+	c.clipboardMu.Lock()
+	virtualClipboardDir := c.virtualClipboardDir
+	c.virtualClipboardDir = ""
+	c.virtualClipboardPaths = nil
+	c.virtualClipboardSequence = 0
+	c.clipboardMu.Unlock()
+	if virtualClipboardDir != "" {
+		_ = os.RemoveAll(virtualClipboardDir)
+	}
+
 	if gdi != nil {
 		return gdi.Close()
 	}

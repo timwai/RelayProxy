@@ -12,7 +12,6 @@ func EnsurePlatformService() error                        { return nil }
 func WindowsNetworkServiceInstalled() bool                { return false }
 func PlatformServiceReady() bool                          { return true }
 
-
 func GetPlatformServiceStatus() NetworkServiceStatus {
 	return NetworkServiceStatus{Supported: false, State: "unsupported"}
 }

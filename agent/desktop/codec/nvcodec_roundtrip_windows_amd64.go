@@ -185,15 +185,12 @@ func createNVCodecValidationD3D11Device() (
 			continue
 		}
 		if multithread, queryErr := comQueryInterface(candidateDevice, &iidID3D10Multithread); queryErr == nil {
-			protected := comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
+			// SetMultithreadProtected returns the PREVIOUS protection state, not
+			// a success flag. FALSE is therefore expected on the first enable.
+			// Treat QueryInterface success as sufficient and enable protection
+			// without rejecting otherwise valid NVIDIA adapters.
+			_ = comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
 			releaseIUnknown(multithread)
-			if protected == 0 {
-				releaseIUnknown(adapter)
-				lastErr = errors.New("ID3D10Multithread.SetMultithreadProtected returned FALSE")
-				releaseIUnknown(candidateContext)
-				releaseIUnknown(candidateDevice)
-				continue
-			}
 		}
 		var driverVersion int64
 		if checkHR := comCall(

@@ -79,7 +79,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	}
 	i := newPacketInterceptor(s, device, listeners, func(protocol Protocol, source, destination netip.AddrPort) (packetProcess, error) {
 		process, err := lookupPacketProcess(protocol, source, destination)
-		return packetProcess{pid: process.PID, path: process.Path}, err
+		return packetProcess{pid: process.PID, path: process.Path, aliases: process.Aliases, services: process.Services}, err
 	})
 	i.start()
 	return i, nil

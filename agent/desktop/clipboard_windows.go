@@ -524,7 +524,7 @@ func (c *windowsCapture) ClipboardFiles(ctx context.Context) ([]string, error) {
 	if c == nil {
 		return nil, errors.New("Windows desktop capture is unavailable")
 	}
-	return readWindowsClipboardFiles(ctx)
+	return c.readClipboardFilesWithVirtual(ctx)
 }
 
 func (c *windowsCapture) SetClipboardFiles(ctx context.Context, paths []string) error {

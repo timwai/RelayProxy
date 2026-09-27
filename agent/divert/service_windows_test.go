@@ -145,7 +145,6 @@ func TestNetworkFramePreservesWinDivertFlags(t *testing.T) {
 	}
 }
 
-
 func TestRemoveWindowsTreeWithRetryRemovesOrphanedArtifacts(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "RelayProxy-Network-Service")
 	nested := filepath.Join(root, "deadbeef")

@@ -522,3 +522,54 @@ func TestPolicyPublicationLockOnlyGuardsClassification(t *testing.T) {
 		t.Fatal("classification did not resume")
 	}
 }
+
+
+func TestClassificationFailsProxyOpenUntilRelayReady(t *testing.T) {
+	ready := false
+	server := newTestServer(t, Options{
+		Config:     Config{DefaultAction: ActionProxy},
+		ProxyReady: func() bool { return ready },
+	})
+	flow := testFlow(ProtoTCP, nil)
+
+	route, err := server.ClassifyFlow(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := route.Decision(); got.Action != ActionDirect || got.Rule != "relay-unavailable" {
+		t.Fatalf("unready relay blackholed PROXY flow: %+v", got)
+	}
+
+	ready = true
+	route, err = server.ClassifyFlow(Flow{
+		Process: "browser.exe", ProcessID: 424242,
+		SourceIP: "127.0.0.1", SourcePort: 42001,
+		IP: "192.0.2.10", Port: 443, Protocol: ProtoTCP,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := route.Decision(); got.Action != ActionProxy {
+		t.Fatalf("ready relay did not restore PROXY: %+v", got)
+	}
+}
+
+func TestClassificationPreservesRejectWhenRelayUnavailable(t *testing.T) {
+	server := newTestServer(t, Options{
+		Config: Config{
+			DefaultAction: ActionDirect,
+			Rules: []Rule{{
+				Name: "blocked", Enabled: true, Process: "*",
+				CIDRs: []string{"192.0.2.10"}, Action: ActionReject,
+			}},
+		},
+		ProxyReady: func() bool { return false },
+	})
+	route, err := server.ClassifyFlow(testFlow(ProtoTCP, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := route.Decision(); got.Action != ActionReject || got.Rule != "blocked" {
+		t.Fatalf("unready relay weakened REJECT: %+v", got)
+	}
+}

@@ -537,5 +537,5 @@ func clipboardFilePathsKey(paths []string) string {
 		}
 		normalized = append(normalized, filepath.Clean(absolute))
 	}
-	return strings.Join(normalized, " ")
+	return strings.Join(normalized, "\x00")
 }

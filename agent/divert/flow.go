@@ -70,7 +70,6 @@ func validateFlow(flow Flow) (Flow, FlowKey, error) {
 	}, nil
 }
 
-
 func cleanIdentityList(values []string) []string {
 	out := make([]string, 0, len(values))
 	seen := make(map[string]struct{}, len(values))

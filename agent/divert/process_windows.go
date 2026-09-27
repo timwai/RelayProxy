@@ -13,6 +13,7 @@ import (
 	"strings"
 	"strconv"
 	"sync"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -40,6 +41,14 @@ const (
 	maxProcessTableSize = 64 << 20
 	processTableTries   = 5
 )
+
+var windowsServicePIDCache struct {
+	sync.Mutex
+	expires time.Time
+	byPID   map[uint32][]string
+}
+
+const windowsServicePIDCacheTTL = 2 * time.Second
 
 type processWindowsAPI struct {
 	tcp   *windows.LazyProc
@@ -284,9 +293,28 @@ func windowsServiceNamesForPID(pid uint32) []string {
 	if pid == 0 {
 		return nil
 	}
+	now := time.Now()
+	windowsServicePIDCache.Lock()
+	if windowsServicePIDCache.byPID != nil && now.Before(windowsServicePIDCache.expires) {
+		names := append([]string(nil), windowsServicePIDCache.byPID[pid]...)
+		windowsServicePIDCache.Unlock()
+		return names
+	}
+	windowsServicePIDCache.Unlock()
+
+	byPID := enumerateWindowsServicesByPID()
+	windowsServicePIDCache.Lock()
+	windowsServicePIDCache.byPID = byPID
+	windowsServicePIDCache.expires = now.Add(windowsServicePIDCacheTTL)
+	names := append([]string(nil), byPID[pid]...)
+	windowsServicePIDCache.Unlock()
+	return names
+}
+
+func enumerateWindowsServicesByPID() map[uint32][]string {
 	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_ENUMERATE_SERVICE)
 	if err != nil {
-		return nil
+		return map[uint32][]string{}
 	}
 	defer windows.CloseServiceHandle(manager)
 
@@ -311,32 +339,35 @@ func windowsServiceNamesForPID(pid uint32) []string {
 		)
 		if errors.Is(err, windows.ERROR_MORE_DATA) {
 			if bytesNeeded == 0 || bytesNeeded > maxProcessTableSize {
-				return nil
+				return map[uint32][]string{}
 			}
 			buffer = make([]byte, bytesNeeded)
 			continue
 		}
 		if err != nil || servicesReturned == 0 || len(buffer) == 0 {
-			return nil
+			return map[uint32][]string{}
 		}
 		entries := unsafe.Slice(
 			(*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buffer[0])),
 			int(servicesReturned),
 		)
-		names := make([]string, 0, 2)
+		byPID := make(map[uint32][]string)
 		for _, entry := range entries {
-			if entry.ServiceStatusProcess.ProcessId != pid {
+			pid := entry.ServiceStatusProcess.ProcessId
+			if pid == 0 {
 				continue
 			}
 			name := strings.TrimSpace(windows.UTF16PtrToString(entry.ServiceName))
 			if name != "" {
-				names = append(names, name)
+				byPID[pid] = append(byPID[pid], name)
 			}
 		}
-		sort.Slice(names, func(i, j int) bool {
-			return strings.ToLower(names[i]) < strings.ToLower(names[j])
-		})
-		return names
+		for pid := range byPID {
+			sort.Slice(byPID[pid], func(i, j int) bool {
+				return strings.ToLower(byPID[pid][i]) < strings.ToLower(byPID[pid][j])
+			})
+		}
+		return byPID
 	}
 }
 

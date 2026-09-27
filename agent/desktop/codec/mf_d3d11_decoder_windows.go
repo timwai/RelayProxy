@@ -103,11 +103,10 @@ func finishMFDecoderD3D11(device, context unsafe.Pointer) (*mfDecoderD3D11, erro
 
 	multithread, err := comQueryInterface(device, &iidID3D10Multithread)
 	if err == nil {
-		protected := comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
+		// The return value is the previous protection state, not success.
+		// FALSE on the first enable is normal.
+		_ = comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
 		releaseIUnknown(multithread)
-		if protected == 0 {
-			return fail(errors.New("ID3D10Multithread.SetMultithreadProtected returned FALSE"))
-		}
 	}
 
 	hr, _, _ := procMFCreateDXGIDeviceManager.Call(

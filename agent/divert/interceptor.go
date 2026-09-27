@@ -190,8 +190,7 @@ func (i *packetInterceptor) receive() {
 		if err != nil {
 			if i.ctx.Err() == nil {
 				i.report(fmt.Errorf("interception stopped: %w", err))
-				i.running.Store(false)
-				go i.server.Close()
+				i.failOpen()
 			}
 			return
 		}
@@ -227,7 +226,10 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	}
 	packet, err := parseIPPacket(data)
 	if err != nil {
-		return err // Never leak an unclassifiable packet through a PROXY rule.
+		// WinDivert has already removed the packet from the network path. If
+		// RelayProxy cannot safely classify it, restore the original packet
+		// instead of blackholing the host.
+		return i.inject(data, meta)
 	}
 	if packet.Protocol == ProtoTCP {
 		if port := i.ports[packet.Source.Addr().Is6()]; port != 0 && packet.Source.Port() == port {
@@ -472,15 +474,24 @@ func (i *packetInterceptor) inject(packet []byte, meta packetMetadata) error {
 	return nil
 }
 
+func (i *packetInterceptor) failOpen() {
+	i.running.Store(false)
+	go func() {
+		// Close the device first so WinDivert releases the host network even if
+		// the Server has not yet published this interceptor during startup.
+		i.Close()
+		_ = i.server.Close()
+	}()
+}
+
 func (i *packetInterceptor) disableOnInjectionError(err error) bool {
 	if err == nil || !errors.Is(err, errPacketInjection) || i.ctx.Err() != nil {
 		return false
 	}
 	// Once reinjection fails, continuing to capture packets can blackhole the
-	// entire host. Tear down the interceptor so WinDivert releases the network
-	// path; the Agent and Relay session remain alive.
-	i.running.Store(false)
-	go i.server.Close()
+	// entire host. Release WinDivert immediately; the outer Agent and Relay
+	// session continue running and the UI reports DivertRunning=false.
+	i.failOpen()
 	return true
 }
 

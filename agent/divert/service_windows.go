@@ -667,9 +667,10 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	status.VersionMatch = expectedErr == nil && installed &&
 		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected))
 	if installed {
-		status.RecoveryEnabled = windowsNetworkServiceRecoveryEnabled()
+		status.RecoveryEnabled, status.RecoveryKnown = windowsNetworkServiceRecoveryState()
 	}
-	status.Ready = installed && running && status.VersionMatch && status.RecoveryEnabled
+	status.Ready = installed && running && status.VersionMatch &&
+		(!status.RecoveryKnown || status.RecoveryEnabled)
 	switch {
 	case !installed:
 		status.State = "not_installed"
@@ -677,7 +678,7 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	case !status.VersionMatch:
 		status.State = "needs_repair"
 		status.Message = "Network Service 版本与当前客户端不一致"
-	case !status.RecoveryEnabled:
+	case status.RecoveryKnown && !status.RecoveryEnabled:
 		status.State = "needs_repair"
 		status.Message = "Network Service 自动恢复策略缺失或不完整"
 	case !running:
@@ -690,35 +691,41 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	return status
 }
 
-func windowsNetworkServiceRecoveryEnabled() bool {
+func windowsNetworkServiceRecoveryState() (enabled, known bool) {
 	manager, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
-		return false
+		return false, false
 	}
 	defer windows.CloseServiceHandle(manager)
 	name, err := windows.UTF16PtrFromString(windowsNetworkServiceName)
 	if err != nil {
-		return false
+		return false, false
 	}
 	handle, err := windows.OpenService(manager, name, windows.SERVICE_QUERY_CONFIG)
 	if err != nil {
-		return false
+		return false, false
 	}
 	service := &mgr.Service{Name: windowsNetworkServiceName, Handle: handle}
 	defer service.Close()
 
 	actions, err := service.RecoveryActions()
-	if err != nil || len(actions) < 3 {
-		return false
+	if err != nil {
+		return false, false
+	}
+	if len(actions) < 3 {
+		return false, true
 	}
 	want := []time.Duration{1 * time.Second, 5 * time.Second, 15 * time.Second}
 	for i := range want {
 		if actions[i].Type != mgr.ServiceRestart || actions[i].Delay != want[i] {
-			return false
+			return false, true
 		}
 	}
-	enabled, err := service.RecoveryActionsOnNonCrashFailures()
-	return err == nil && enabled
+	onNonCrash, err := service.RecoveryActionsOnNonCrashFailures()
+	if err != nil {
+		return false, false
+	}
+	return onNonCrash, true
 }
 
 func RepairPlatformService() error {

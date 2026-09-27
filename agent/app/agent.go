@@ -532,6 +532,14 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
 	a.mu.Unlock()
+
+	if a.divertSrv != nil && !a.divertSrv.Running() {
+		if err := a.divertSrv.Start(); err != nil {
+			// Transparent proxy startup is best-effort. Never sacrifice the
+			// host's ordinary networking because interception cannot be armed.
+			log.Printf("[Agent] Transparent proxy not armed: %v", err)
+		}
+	}
 	log.Printf("[Agent] Device approved. SessionID: %s, Heartbeat: %ds", accepted.SessionID, accepted.HeartbeatSec)
 
 	var p2pManager *rdpp2p.Manager
@@ -742,12 +750,9 @@ func (a *Agent) Start() (err error) {
 			_ = a.closeRuntime()
 		}
 	}()
-	// Preflight interception before opening listeners or taking ownership of traffic.
-	if a.divertSrv != nil {
-		if err := a.divertSrv.Start(); err != nil {
-			return fmt.Errorf("failed to start divert network: %w", err)
-		}
-	}
+	// Do not take ownership of system traffic before the Relay session is
+	// authenticated. SOCKS/HTTP listeners may start immediately, while the
+	// transparent interceptor is armed lazily after handshake readiness.
 	getExit := func() string {
 		if ptr := a.selectedExit.Load(); ptr != nil {
 			return *ptr

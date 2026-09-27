@@ -164,12 +164,12 @@ func sendClipboardFiles(ctx context.Context, conn *desktopmedia.MediaConn, paths
 }
 
 type clipboardFileReceiver struct {
-	transferID  string
-	dir         string
+	transferID   string
+	dir          string
 	completedDir string
-	files       []protocol.DesktopClipboardFile
-	handles     []*os.File
-	offsets     []int64
+	files        []protocol.DesktopClipboardFile
+	handles      []*os.File
+	offsets      []int64
 }
 
 func (r *clipboardFileReceiver) reset() {

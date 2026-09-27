@@ -130,17 +130,24 @@ func lookupPacketProcess(proto Protocol, source, destination netip.AddrPort) (pr
 		return processIdentity{}, err
 	}
 	services := windowsServiceNamesForPID(pid)
+	path, pathErr := api.processPath(pid)
+	return windowsProcessIdentity(pid, path, pathErr, services)
+}
+
+func windowsProcessIdentity(pid uint32, path string, pathErr error, services []string) (processIdentity, error) {
+	services = append([]string(nil), services...)
 	aliases := []string(nil)
 	if pid == windowsSystemPID {
 		services = []string{"System"}
 		aliases = []string{"service:System"}
+		path = windowsSystemProcessName
+		pathErr = nil
 	} else if len(services) == 1 {
 		aliases = []string{"service:" + services[0]}
 	}
-	path, err := api.processPath(pid)
-	if err != nil {
+	if pathErr != nil {
 		if len(services) == 0 {
-			return processIdentity{}, err
+			return processIdentity{}, pathErr
 		}
 		if len(services) == 1 {
 			path = "service:" + services[0]

@@ -88,3 +88,23 @@ func TestCompoundValidationFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+func TestCompoundProcessAliasMatching(t *testing.T) {
+	engine, err := NewEngine(Config{Mode: ModeRule, DefaultAction: ActionReject, Rules: []Rule{{
+		Name: "windows dns service", Enabled: true, Processes: []string{"service:Dnscache"}, Action: ActionProxy,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unique := Flow{
+		Process:        `C:\Windows\System32\svchost.exe`,
+		ProcessAliases: []string{"service:Dnscache"},
+	}
+	if got := engine.DecideFlow(unique); !got.Matched || got.Action != ActionProxy {
+		t.Fatalf("service alias did not match shared routing: %+v", got)
+	}
+	shared := Flow{Process: `C:\Windows\System32\svchost.exe`}
+	if got := engine.DecideFlow(shared); got.Matched || got.Action != ActionReject {
+		t.Fatalf("shared host guessed a missing service alias: %+v", got)
+	}
+}

@@ -355,12 +355,16 @@ func (h *Host) streamSessionFrames(
 					return generationErr
 				}
 				generation = nextGeneration
-				preference = "jpeg"
-				log.Printf("[Desktop] H.265 runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
+				preference = "h264"
+				cfg.Chroma = desktopcodec.Chroma420
+				cfg.BitDepth = 8
+				log.Printf("[Desktop] H.265 runtime failed at generation=%d, falling back to H.264 generation=%d: %v",
 					runtimeErr.Generation, generation, runtimeErr.Err)
 			} else {
 				preference = "h264"
-				log.Printf("[Desktop] H.265 session unavailable, falling back to H.264/JPEG: %v", err)
+				cfg.Chroma = desktopcodec.Chroma420
+				cfg.BitDepth = 8
+				log.Printf("[Desktop] H.265 session unavailable, falling back to H.264: %v", err)
 			}
 			break
 		}
@@ -406,12 +410,16 @@ func (h *Host) streamSessionFrames(
 					return generationErr
 				}
 				generation = nextGeneration
-				preference = "jpeg"
-				log.Printf("[Desktop] H.265 validation runtime failed at generation=%d, falling back to JPEG generation=%d: %v",
+				preference = "h264"
+				cfg.Chroma = desktopcodec.Chroma420
+				cfg.BitDepth = 8
+				log.Printf("[Desktop] H.265 validation runtime failed at generation=%d, falling back to H.264 generation=%d: %v",
 					runtimeErr.Generation, generation, runtimeErr.Err)
 			} else {
 				preference = "h264"
-				log.Printf("[Desktop] H.265 validation session unavailable, falling back to H.264/JPEG: %v", err)
+				cfg.Chroma = desktopcodec.Chroma420
+				cfg.BitDepth = 8
+				log.Printf("[Desktop] H.265 validation session unavailable, falling back to H.264: %v", err)
 			}
 			break
 		}

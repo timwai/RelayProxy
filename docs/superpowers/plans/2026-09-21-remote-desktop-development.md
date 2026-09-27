@@ -1170,6 +1170,15 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 circuit breaker 元数据单测，验证首次 trip 的时间和根因可读取。
 - 下一步：把 canary runtime trip 事件写入可导出的 diagnostics timeline，并完善 H.265 fallback 层级：NVCodec → oneVPL → H.264，移除 H.265 runtime error 当前仍可能进入 JPEG 的旧兜底。
 
+### 0.2.94 RD3 Canary Runtime Timeline + Deterministic Fallback
+
+- Remote Desktop diagnostics 新增 `runtimeEvents`；当前 NVCodec canary 首次熔断会导出 `nvcodec_canary_trip` 事件，包含 `atUnixMs / stage / reason`。
+- 事件 stage 根据根因区分 `encode`（NVENC）、`decode`（NVDEC）或通用 `nvcodec`，与现有 `circuitTrippedAtUnixMs / circuitTripReason` 保持一致。
+- H.265 普通会话与 validation 会话的 runtime error 不再直接切 JPEG：generation 递增后统一进入 H.264 fallback。
+- 从 HEVC 4:4:4 降到 H.264 时显式把 HostConfig 切换为 4:2:0 / 8-bit，避免把 HEVC 4:4:4 chroma 配置错误传入 H.264 encoder。
+- 当前稳定降级链明确为：NVCodec canary runtime failure → oneVPL HEVC 4:4:4 generation migration；若 H.265 最终仍不可用 → H.264 4:2:0；只有 H.264 自身也不可用/运行失败时才进入 JPEG。
+- 下一步：增加针对 NVCodec→oneVPL→H.264 fallback 的集成测试与 diagnostics event 测试，并在 Windows NVIDIA 真机跑一次完整 3/3 + stress + canary 故障注入验证。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

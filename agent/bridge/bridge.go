@@ -144,12 +144,20 @@ func (b *UIBridge) GetRemoteDesktopAudioDiagnostics() desktop.DesktopAudioDiagno
 	return b.agent.RemoteDesktopAudioDiagnostics()
 }
 
+type RemoteDesktopDiagnosticEvent struct {
+	AtUnixMs int64  `json:"atUnixMs"`
+	Kind     string `json:"kind"`
+	Stage    string `json:"stage,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+}
+
 type RemoteDesktopDiagnosticsReport struct {
 	desktop.DesktopDiagnosticsReport
 	NVCodecSelfTest            *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
 	NVCodecValidation          *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
 	NVCodecStressQualification *NVCodecStressQualificationReport           `json:"nvcodecStressQualification,omitempty"`
 	NVCodecCanaryEligibility    NVCodecCanaryEligibility                    `json:"nvcodecCanaryEligibility"`
+	RuntimeEvents              []RemoteDesktopDiagnosticEvent              `json:"runtimeEvents,omitempty"`
 }
 
 func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport {
@@ -165,6 +173,22 @@ func (b *UIBridge) GetRemoteDesktopDiagnostics() RemoteDesktopDiagnosticsReport 
 	validation := b.GetRemoteDesktopNVCodecValidation()
 	report.NVCodecValidation = &validation
 	report.NVCodecCanaryEligibility = b.GetRemoteDesktopNVCodecCanaryEligibility()
+	if report.NVCodecCanaryEligibility.CircuitTripped {
+		stage := "nvcodec"
+		reason := report.NVCodecCanaryEligibility.CircuitTripReason
+		switch {
+		case strings.HasPrefix(reason, "NVENC"):
+			stage = "encode"
+		case strings.HasPrefix(reason, "NVDEC"):
+			stage = "decode"
+		}
+		report.RuntimeEvents = append(report.RuntimeEvents, RemoteDesktopDiagnosticEvent{
+			AtUnixMs: report.NVCodecCanaryEligibility.CircuitTrippedAtUnixMs,
+			Kind:     "nvcodec_canary_trip",
+			Stage:    stage,
+			Reason:   reason,
+		})
+	}
 	if receipt, err := loadNVCodecValidationReceipt(b.configPath); err == nil &&
 		receipt != nil && receipt.StressQualification != nil {
 		report.NVCodecStressQualification = cloneNVCodecStressQualificationReport(receipt.StressQualification)

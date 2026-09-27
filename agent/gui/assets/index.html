@@ -1868,7 +1868,7 @@
         }
         parts.push(displayName);
       }
-      if (options.clipboard) parts.push('文本剪贴板');
+      if (options.clipboard) parts.push('剪贴板');
       return parts.length ? parts.join(' · ') : '自动画质';
     }
     function renderRemoteDesktopTargets() {
@@ -2389,43 +2389,84 @@
         toast(message);
       }
     }
+    function normalizeDesktopClipboardContent(value) {
+      var content = value;
+      if (typeof content === 'string') content = parseJSONResult(content, null);
+      if (!content || typeof content !== 'object') return null;
+      var kind = String(content.kind || (content.png ? 'png' : 'text')).toLowerCase();
+      if (kind === 'png' && content.png) return {kind:'png', png:String(content.png)};
+      if (kind === 'text') return {kind:'text', text:String(content.text == null ? '' : content.text)};
+      return null;
+    }
+    function desktopClipboardFingerprint(content) {
+      if (!content) return '';
+      return content.kind === 'png' ? 'png:' + content.png : 'text:' + content.text;
+    }
     async function refreshRemoteDesktopClipboard() {
       if (desktopClipboardBusy || !desktopClipboardEnabled()) return;
-      if (!hasFn('goGetRemoteDesktopClipboard') || !hasFn('goSendRemoteDesktopClipboard') ||
-          !hasFn('goGetClipboardText') || !hasFn('goSetClipboardText')) return;
+      if (!hasFn('goGetRemoteDesktopClipboard')) return;
+      var rich = hasFn('goSendRemoteDesktopClipboardContent') &&
+                 hasFn('goGetClipboardContent') && hasFn('goSetClipboardContent');
+      var legacy = hasFn('goSendRemoteDesktopClipboard') &&
+                   hasFn('goGetClipboardText') && hasFn('goSetClipboardText');
+      if (!rich && !legacy) return;
       var status = state.desktopStatus || {};
       if (status.state !== 'connected' || status.backend !== 'relay') return;
 
       desktopClipboardBusy = true;
       try {
         if (!desktopClipboardReady) {
-          var initialLocal = await call('goGetClipboardText');
-          desktopClipboardLocal = String(initialLocal == null ? '' : initialLocal);
+          if (rich) {
+            desktopClipboardLocal = desktopClipboardFingerprint(
+              normalizeDesktopClipboardContent(await call('goGetClipboardContent')));
+          } else {
+            var initialLocal = await call('goGetClipboardText');
+            desktopClipboardLocal = 'text:' + String(initialLocal == null ? '' : initialLocal);
+          }
           desktopClipboardReady = true;
         }
 
         var rawRemote = await call('goGetRemoteDesktopClipboard', desktopClipboardSeq);
-        var remote = parseJSONResult(rawRemote, null);
-        if (remote && remote.sequence && remote.sequence !== desktopClipboardSeq) {
-          var remoteText = String(remote.text == null ? '' : remote.text);
-          if (remoteText !== desktopClipboardLocal) {
-            var setResult = mutationResult(await call('goSetClipboardText', remoteText));
+        var remote = normalizeDesktopClipboardContent(parseJSONResult(rawRemote, null));
+        var parsedRemote = parseJSONResult(rawRemote, null);
+        if (parsedRemote && parsedRemote.sequence && parsedRemote.sequence !== desktopClipboardSeq && remote) {
+          var remoteFingerprint = desktopClipboardFingerprint(remote);
+          if (remoteFingerprint !== desktopClipboardLocal) {
+            var setResult;
+            if (rich) {
+              setResult = mutationResult(await call('goSetClipboardContent', JSON.stringify(remote)));
+            } else if (remote.kind === 'text') {
+              setResult = mutationResult(await call('goSetClipboardText', remote.text));
+            }
             if (setResult && setResult.ok === false) {
               throw new Error(setResult.message || '写入本地剪贴板失败');
             }
-            desktopClipboardLocal = remoteText;
+            if (rich || remote.kind === 'text') desktopClipboardLocal = remoteFingerprint;
           }
-          desktopClipboardSeq = remote.sequence;
+          desktopClipboardSeq = parsedRemote.sequence;
         }
 
-        var localTextRaw = await call('goGetClipboardText');
-        var localText = String(localTextRaw == null ? '' : localTextRaw);
-        if (localText !== desktopClipboardLocal) {
-          var sendResult = mutationResult(await call('goSendRemoteDesktopClipboard', localText));
-          if (sendResult && sendResult.ok === false) {
-            throw new Error(sendResult.message || '发送远程剪贴板失败');
+        if (rich) {
+          var local = normalizeDesktopClipboardContent(await call('goGetClipboardContent'));
+          var localFingerprint = desktopClipboardFingerprint(local);
+          if (local && localFingerprint !== desktopClipboardLocal) {
+            var sendResult = mutationResult(await call('goSendRemoteDesktopClipboardContent', JSON.stringify(local)));
+            if (sendResult && sendResult.ok === false) {
+              throw new Error(sendResult.message || '发送远程剪贴板失败');
+            }
+            desktopClipboardLocal = localFingerprint;
           }
-          desktopClipboardLocal = localText;
+        } else {
+          var localTextRaw = await call('goGetClipboardText');
+          var localText = String(localTextRaw == null ? '' : localTextRaw);
+          var localTextFingerprint = 'text:' + localText;
+          if (localTextFingerprint !== desktopClipboardLocal) {
+            var legacyResult = mutationResult(await call('goSendRemoteDesktopClipboard', localText));
+            if (legacyResult && legacyResult.ok === false) {
+              throw new Error(legacyResult.message || '发送远程剪贴板失败');
+            }
+            desktopClipboardLocal = localTextFingerprint;
+          }
         }
       } catch (err) {
         reportDesktopClipboardError('剪贴板同步失败：' + (err && err.message ? err.message : err));

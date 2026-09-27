@@ -3,13 +3,16 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
+	"time"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"relayproxy/agent/bridge"
+	"relayproxy/agent/desktop"
 	"relayproxy/agent/divert"
 	"relayproxy/internal/protocol"
 )
@@ -300,11 +303,54 @@ func (s *WailsService) GetRemoteDesktopClipboard(knownSequence uint64) (string, 
 	return string(data), nil
 }
 
+func (s *WailsService) SendRemoteDesktopClipboardContent(raw string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	var content protocol.DesktopClipboardState
+	if err := json.Unmarshal([]byte(raw), &content); err != nil {
+		return `{"ok":false,"message":"invalid clipboard payload"}`, nil
+	}
+	if err := s.owner.bridge.SendRemoteDesktopClipboardContent(content); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
 func (s *WailsService) SendRemoteDesktopClipboard(text string) (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil
 	}
 	if err := s.owner.bridge.SendRemoteDesktopClipboard(text); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
+}
+
+func (s *WailsService) GetClipboardContent() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	content, err := desktop.ReadWindowsClipboardContent(ctx)
+	if err != nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(content)
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) SetClipboardContent(raw string) (string, error) {
+	var content protocol.DesktopClipboardState
+	if err := json.Unmarshal([]byte(raw), &content); err != nil {
+		return `{"ok":false,"message":"invalid clipboard payload"}`, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := desktop.WriteWindowsClipboardContent(ctx, content); err != nil {
 		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
 		return string(data), nil
 	}

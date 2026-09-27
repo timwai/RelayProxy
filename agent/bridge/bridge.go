@@ -310,6 +310,10 @@ func (b *UIBridge) SendRemoteDesktopClipboard(text string) error {
 	return b.agent.SendRemoteDesktopClipboard(text)
 }
 
+func (b *UIBridge) SendRemoteDesktopClipboardContent(content protocol.DesktopClipboardState) error {
+	return b.agent.SendRemoteDesktopClipboardContent(content)
+}
+
 func (b *UIBridge) SendRemoteDesktopInput(event protocol.DesktopInputEvent) error {
 	return b.agent.SendRemoteDesktopInput(event)
 }

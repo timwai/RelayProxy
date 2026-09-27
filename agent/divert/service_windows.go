@@ -798,7 +798,7 @@ func windowsNetworkServiceState() (installed, running bool, binaryPath string, p
 	return true, status.CurrentState == windows.SERVICE_RUNNING, binaryPath, status.ProcessId, nil
 }
 
-func expectedWindowsNetworkServiceExecutable() (string, error) {
+var expectedWindowsNetworkServiceExecutableOnce = sync.OnceValues(func() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -818,6 +818,10 @@ func expectedWindowsNetworkServiceExecutable() (string, error) {
 	}
 	directory := filepath.Join(programData, "RelayProxy-Network-Service", fmt.Sprintf("%x", sum[:8]))
 	return filepath.Join(directory, "RelayProxyNetwork.exe"), nil
+})
+
+func expectedWindowsNetworkServiceExecutable() (string, error) {
+	return expectedWindowsNetworkServiceExecutableOnce()
 }
 
 func stageWindowsNetworkServiceExecutable() (string, error) {

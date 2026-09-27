@@ -27,13 +27,13 @@ const autoStartName = "RelayProxy Agent"
 // Agent core. It is the only package the GUI talks to, so the UI never reaches
 // into the agent's internals directly.
 type UIBridge struct {
-	agent                *app.Agent
-	configPath           string
-	mu                   sync.RWMutex
-	writeConfig          func(string, *config.AgentConfigFile) error
-	ensureDivertService  func() error
-	syncAutoStart        func(string, bool) (func() error, error)
-	setAutoStart         func(string, bool, bool) error
+	agent               *app.Agent
+	configPath          string
+	mu                  sync.RWMutex
+	writeConfig         func(string, *config.AgentConfigFile) error
+	ensureDivertService func() error
+	syncAutoStart       func(string, bool) (func() error, error)
+	setAutoStart        func(string, bool, bool) error
 }
 
 func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {

@@ -282,10 +282,6 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 	proxyPort := uint16(listener.Addr().(*net.TCPAddr).Port)
 	fakeIP := netip.MustParseAddr("198.51.100.20")
 	const fakePort uint16 = 443
-	virtualPort := uint16(43010)
-	if virtualPort == proxyPort {
-		virtualPort++
-	}
 
 	filter := fmt.Sprintf(
 		"outbound and tcp and ((ip.DstAddr == %s and tcp.DstPort == %d) or tcp.SrcPort == %d)",
@@ -325,7 +321,7 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 				}
 				if err := rewriteIPPacket(
 					buffer[:n],
-					netip.AddrPortFrom(fakeIP, virtualPort),
+					netip.AddrPortFrom(fakeIP, packet.Source.Port()),
 					netip.AddrPortFrom(packet.Source.Addr(), proxyPort),
 				); err != nil {
 					pumpDone <- err

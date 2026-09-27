@@ -38,29 +38,33 @@ type rebuildTestViewer struct {
 	reconfigureErr error
 }
 
-func (v *rebuildTestViewer) Submit(desktopviewer.Frame) error                 { return nil }
-func (v *rebuildTestViewer) SubmitGPU(desktopgpu.Frame) error                 { return nil }
-func (v *rebuildTestViewer) SubmitD3D11(desktopviewer.D3D11Frame) error       { return nil }
+func (v *rebuildTestViewer) Submit(desktopviewer.Frame) error           { return nil }
+func (v *rebuildTestViewer) SubmitGPU(desktopgpu.Frame) error           { return nil }
+func (v *rebuildTestViewer) SubmitD3D11(desktopviewer.D3D11Frame) error { return nil }
 func (v *rebuildTestViewer) ClearFrame() {
 	if v.calls != nil {
 		*v.calls = append(*v.calls, "clear")
 	}
 }
-func (v *rebuildTestViewer) D3D11Device() uintptr                             { return 1 }
-func (v *rebuildTestViewer) SupportsGPUFormat(desktopgpu.Format) bool         { return true }
-func (v *rebuildTestViewer) SupportsGPUCursor() bool                          { return false }
-func (v *rebuildTestViewer) SetCursor(desktopviewer.CursorOverlay) error      { return nil }
+func (v *rebuildTestViewer) D3D11Device() uintptr                        { return 1 }
+func (v *rebuildTestViewer) SupportsGPUFormat(desktopgpu.Format) bool    { return true }
+func (v *rebuildTestViewer) SupportsGPUCursor() bool                     { return false }
+func (v *rebuildTestViewer) SetCursor(desktopviewer.CursorOverlay) error { return nil }
 func (v *rebuildTestViewer) Reconfigure(width, height int) error {
 	if v.calls != nil {
 		*v.calls = append(*v.calls, "resize")
 	}
 	return v.reconfigureErr
 }
-func (v *rebuildTestViewer) Viewport() desktopviewer.Viewport                 { return desktopviewer.Viewport{Width: 1280, Height: 720} }
-func (v *rebuildTestViewer) WindowPlacement() desktopviewer.WindowPlacement   { return desktopviewer.WindowPlacement{} }
-func (v *rebuildTestViewer) Focus()                                           {}
-func (v *rebuildTestViewer) Done() <-chan struct{}                            { return make(chan struct{}) }
-func (v *rebuildTestViewer) Close() error                                     { return nil }
+func (v *rebuildTestViewer) Viewport() desktopviewer.Viewport {
+	return desktopviewer.Viewport{Width: 1280, Height: 720}
+}
+func (v *rebuildTestViewer) WindowPlacement() desktopviewer.WindowPlacement {
+	return desktopviewer.WindowPlacement{}
+}
+func (v *rebuildTestViewer) Focus()                {}
+func (v *rebuildTestViewer) Done() <-chan struct{} { return make(chan struct{}) }
+func (v *rebuildTestViewer) Close() error          { return nil }
 
 func TestNativeDesktopRebuildPreparesDecoderBeforeResize(t *testing.T) {
 	var calls []string

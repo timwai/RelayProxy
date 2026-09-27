@@ -49,7 +49,6 @@ func TestNVCodecValidationIdentityRequiresDriverVersion(t *testing.T) {
 	}
 }
 
-
 func TestNVCodecReportCarriesStandaloneNVDECCapabilities(t *testing.T) {
 	report := NVCodecH265444RoundTripReport{
 		Unsupported:           true,

@@ -2,12 +2,15 @@ package bridge
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	desktopcodec "relayproxy/agent/desktop/codec"
@@ -64,25 +67,59 @@ type NVCodecValidationStatus struct {
 	Report               *desktopcodec.NVCodecH265444RoundTripReport `json:"report,omitempty"`
 }
 
+var (
+	nvcodecBuildRevisionOnce sync.Once
+	nvcodecBuildRevision     string
+)
+
+func nvcodecValidationExecutableRevision(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("executable path is empty")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("local-sha256:%x", hash.Sum(nil)), nil
+}
+
 func nvcodecValidationBuildRevision() string {
-	info, ok := debug.ReadBuildInfo()
-	if !ok || info == nil {
-		return ""
-	}
-	revision := ""
-	modified := false
-	for _, setting := range info.Settings {
-		switch setting.Key {
-		case "vcs.revision":
-			revision = strings.TrimSpace(setting.Value)
-		case "vcs.modified":
-			modified = strings.EqualFold(strings.TrimSpace(setting.Value), "true")
+	nvcodecBuildRevisionOnce.Do(func() {
+		if info, ok := debug.ReadBuildInfo(); ok && info != nil {
+			revision := ""
+			modified := false
+			for _, setting := range info.Settings {
+				switch setting.Key {
+				case "vcs.revision":
+					revision = strings.TrimSpace(setting.Value)
+				case "vcs.modified":
+					modified = strings.EqualFold(strings.TrimSpace(setting.Value), "true")
+				}
+			}
+			if revision != "" && !modified {
+				nvcodecBuildRevision = revision
+				return
+			}
 		}
-	}
-	if modified {
-		return ""
-	}
-	return revision
+
+		// Local builds frequently have no embedded VCS metadata (or are built
+		// from a dirty worktree). Bind validation to the exact executable bytes
+		// instead of rejecting the build. Rebuilding changes the SHA-256 and
+		// therefore invalidates old qualification evidence automatically.
+		if executable, err := os.Executable(); err == nil {
+			if revision, hashErr := nvcodecValidationExecutableRevision(executable); hashErr == nil {
+				nvcodecBuildRevision = revision
+			}
+		}
+	})
+	return nvcodecBuildRevision
 }
 
 func nvcodecValidationReceiptPath(configPath string) string {
@@ -141,7 +178,7 @@ func nextNVCodecValidationReceipt(
 ) (*NVCodecValidationReceipt, error) {
 	buildRevision = strings.TrimSpace(buildRevision)
 	if buildRevision == "" {
-		return nil, fmt.Errorf("current build has no clean VCS revision")
+		return nil, fmt.Errorf("current build identity is unavailable")
 	}
 	nowUnixMs := now.UnixMilli()
 	if nowUnixMs <= 0 {
@@ -270,7 +307,7 @@ func recordNVCodecStressQualification(
 ) error {
 	buildRevision := nvcodecValidationBuildRevision()
 	if buildRevision == "" {
-		return fmt.Errorf("current build has no clean VCS revision")
+		return fmt.Errorf("current build identity is unavailable")
 	}
 	path := nvcodecValidationReceiptPath(configPath)
 	if path == "" {
@@ -296,7 +333,7 @@ func recordNVCodecValidationAttempt(
 ) error {
 	buildRevision := nvcodecValidationBuildRevision()
 	if buildRevision == "" {
-		return fmt.Errorf("current build has no clean VCS revision")
+		return fmt.Errorf("current build identity is unavailable")
 	}
 	path := nvcodecValidationReceiptPath(configPath)
 	if path == "" {
@@ -366,7 +403,7 @@ func evaluateNVCodecValidationReceipt(
 	case !receipt.Report.Passed:
 		status.StaleReason = "当前构建尚无成功的 NVIDIA GPU 自检"
 	case currentBuild == "":
-		status.StaleReason = "当前构建没有可验证的 VCS revision"
+		status.StaleReason = "当前构建 identity 不可用"
 	case receipt.BuildRevision != currentBuild:
 		status.StaleReason = "RelayProxy 构建 revision 已变化"
 	case receipt.SavedAtUnixMs <= 0:

@@ -19,6 +19,7 @@ func TestTransparentAndManualShareWildcardSelectors(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
+	a.handshakeOK.Store(true)
 	for i, target := range []struct{ host, ip string }{
 		{"api.example.test", "198.51.100.8"},
 		{"", "203.0.113.10"},
@@ -46,6 +47,7 @@ func TestTransparentAndManualUseOnePolicyAndFreezeLiveDecisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer a.Close()
+	a.handshakeOK.Store(true)
 	f := divert.Flow{Process: "browser.exe", ProcessID: 424242, Host: "api.example.test", DomainSource: "dns", SourceIP: "192.0.2.10", SourcePort: 54000, IP: "203.0.113.10", Port: 443, Protocol: divert.ProtoTCP}
 	classified, err := a.divertSrv.ClassifyFlow(f)
 	if err != nil {

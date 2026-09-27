@@ -426,13 +426,13 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		return nil, fmt.Errorf("配置校验失败: %w", err)
 	}
 	if cfg.Network.Mode == "divert" {
+		if err := divert.Preflight(cfg.DivertConfig()); err != nil {
+			return nil, fmt.Errorf("无法启用系统透明代理，配置未保存: %w", err)
+		}
 		if b.ensureDivertService != nil {
 			if err := b.ensureDivertService(); err != nil {
 				return nil, fmt.Errorf("无法准备 RelayProxy Network Service，配置未保存: %w", err)
 			}
-		}
-		if err := divert.Preflight(cfg.DivertConfig()); err != nil {
-			return nil, fmt.Errorf("无法启用系统透明代理，配置未保存: %w", err)
 		}
 	}
 	if b.agent.Config().NetworkMode == "divert" {

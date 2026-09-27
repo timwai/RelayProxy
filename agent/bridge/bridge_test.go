@@ -58,7 +58,9 @@ func newTestBridge(t *testing.T) *UIBridge {
 	// publication without proxy listeners, relay connections or interception.
 	t.Cleanup(func() { _ = agent.Close() })
 	b := NewUIBridge(agent, path)
-	// Configuration tests never change the developer's login entries/tasks.
+	// Configuration tests never install services or change the developer's
+	// login entries/tasks.
+	b.ensureDivertService = func() error { return nil }
 	b.syncAutoStart = func(string, bool) (func() error, error) { return nil, nil }
 	b.setAutoStart = func(string, bool, bool) error { return nil }
 	return b
@@ -104,7 +106,7 @@ func TestConfigWriteFailureRollsBackStartupMigration(t *testing.T) {
 	}
 }
 
-func TestAutoStartUsesSavedTransparentModeBeforeRestart(t *testing.T) {
+func TestAutoStartStaysUnprivilegedWithSavedTransparentMode(t *testing.T) {
 	b := newTestBridge(t)
 	cfg, err := config.LoadAgentConfig(b.configPath)
 	if err != nil {
@@ -117,8 +119,8 @@ func TestAutoStartUsesSavedTransparentModeBeforeRestart(t *testing.T) {
 	called := false
 	b.setAutoStart = func(path string, enabled, requireAdmin bool) error {
 		called = true
-		if path != b.configPath || !enabled || !requireAdmin {
-			t.Fatal("autostart did not use the saved transparent-proxy mode")
+		if path != b.configPath || !enabled || requireAdmin {
+			t.Fatal("transparent mode incorrectly elevated the GUI autostart entry")
 		}
 		return nil
 	}

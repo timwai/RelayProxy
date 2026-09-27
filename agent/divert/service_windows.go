@@ -924,7 +924,7 @@ func installWindowsNetworkService(allowedSID string) error {
 
 	manager, err := mgr.Connect()
 	if err != nil {
-		return NetworkServiceUninstallResult{}, fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
+		return fmt.Errorf("连接 Windows Service Control Manager 失败: %w", err)
 	}
 	defer manager.Disconnect()
 

@@ -56,8 +56,15 @@ func TestNVDECDecodeCapsABI(t *testing.T) {
 	if got := unsafe.Sizeof(nvcuvidDecodeCaps{}); got != 88 {
 		t.Fatalf("CUVIDDECODECAPS size=%d want=88", got)
 	}
-	if nvVideoCodecHEVC != 8 || nvVideoChroma444 != 3 {
-		t.Fatalf("NVDEC enum constants codec=%d chroma=%d", nvVideoCodecHEVC, nvVideoChroma444)
+	if nvVideoCodecH264 != 4 || nvVideoCodecHEVC != 8 ||
+		nvVideoChroma420 != 1 || nvVideoChroma444 != 3 {
+		t.Fatalf(
+			"NVDEC enum constants h264=%d hevc=%d 420=%d 444=%d",
+			nvVideoCodecH264,
+			nvVideoCodecHEVC,
+			nvVideoChroma420,
+			nvVideoChroma444,
+		)
 	}
 }
 

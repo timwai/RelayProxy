@@ -67,9 +67,8 @@ func (e *Engine) MatchWith(f Flow, shared func(Flow) Decision) Decision {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	proc := strings.TrimSpace(f.Process)
 	for _, ex := range e.cfg.ExcludeProcesses {
-		if matchProcess(ex, proc) {
+		if matchFlowProcess(ex, f) {
 			return Decision{Action: ActionDirect, Rule: "exclude"}
 		}
 	}
@@ -86,7 +85,7 @@ func (e *Engine) MatchWith(f Flow, shared func(Flow) Decision) Decision {
 		if !r.Enabled {
 			continue
 		}
-		if !matchProcess(r.Process, proc) {
+		if !matchFlowProcess(r.Process, f) {
 			continue
 		}
 		if !matchProtocols(r.Protocols, proto) {
@@ -109,6 +108,18 @@ func (e *Engine) MatchWith(f Flow, shared func(Flow) Decision) Decision {
 	}
 
 	return Decision{Action: e.cfg.DefaultAction, Rule: "default"}
+}
+
+func matchFlowProcess(pattern string, flow Flow) bool {
+	if matchProcess(pattern, flow.Process) {
+		return true
+	}
+	for _, alias := range flow.ProcessAliases {
+		if matchProcess(pattern, alias) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchProtocols(list []string, proto Protocol) bool {

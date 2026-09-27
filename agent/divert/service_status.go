@@ -15,3 +15,9 @@ type NetworkServiceStatus struct {
 	State           string `json:"state"`
 	Message         string `json:"message,omitempty"`
 }
+
+
+type NetworkServiceUninstallResult struct {
+	RebootCleanup bool   `json:"rebootCleanup"`
+	CleanupPath   string `json:"cleanupPath,omitempty"`
+}

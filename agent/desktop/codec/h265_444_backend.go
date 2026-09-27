@@ -31,18 +31,38 @@ func (p H265444BackendProbe) EndToEnd() bool {
 
 var (
 	nvcodecCanaryRequested  atomic.Bool
+	nvcodecCanaryEligible   atomic.Bool
 	nvcodecCanaryTripped    atomic.Bool
 	nvcodecCanaryTripAt     atomic.Int64
 	nvcodecCanaryTripMu     sync.RWMutex
 	nvcodecCanaryTripReason string
 )
 
+func SetNVCodecCanaryRequested(requested bool) {
+	nvcodecCanaryRequested.Store(requested)
+}
+
+func SetNVCodecCanaryEligible(eligible bool) {
+	nvcodecCanaryEligible.Store(eligible)
+}
+
+func NVCodecCanaryRequested() bool {
+	return nvcodecCanaryRequested.Load()
+}
+
+func NVCodecCanaryEligible() bool {
+	return nvcodecCanaryEligible.Load()
+}
+
 func SetNVCodecCanaryEnabled(enabled bool) {
-	nvcodecCanaryRequested.Store(enabled)
+	SetNVCodecCanaryRequested(enabled)
+	SetNVCodecCanaryEligible(enabled)
 }
 
 func NVCodecCanaryEnabled() bool {
-	return nvcodecCanaryRequested.Load() && !nvcodecCanaryTripped.Load()
+	return nvcodecCanaryRequested.Load() &&
+		nvcodecCanaryEligible.Load() &&
+		!nvcodecCanaryTripped.Load()
 }
 
 func TripNVCodecCanary(reason string) bool {

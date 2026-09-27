@@ -415,7 +415,7 @@ func evaluateNVCodecCanaryEligibility(
 	result := NVCodecCanaryEligibility{
 		ValidationCurrent:      status.Current,
 		StressRequiredRounds:   nvcodecStressQualificationRounds,
-		Requested:              desktopcodec.NVCodecCanaryEnabled() || desktopcodec.NVCodecCanaryCircuitTripped(),
+		Requested:              desktopcodec.NVCodecCanaryRequested(),
 		Active:                 desktopcodec.NVCodecCanaryEnabled(),
 		CircuitTripped:         desktopcodec.NVCodecCanaryCircuitTripped(),
 		CircuitTrippedAtUnixMs: trippedAt,

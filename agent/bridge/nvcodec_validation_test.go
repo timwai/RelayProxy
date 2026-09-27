@@ -522,3 +522,20 @@ func TestEvaluateNVCodecCanaryEligibilityFailsClosed(t *testing.T) {
 		t.Fatalf("fail-closed reasons incomplete: %+v", eligibility)
 	}
 }
+
+func TestEvaluateNVCodecCanaryEligibilityReportsRequestedButInactiveWithoutEvidence(t *testing.T) {
+	desktopcodec.SetNVCodecCanaryRequested(true)
+	desktopcodec.SetNVCodecCanaryEligible(false)
+	t.Cleanup(func() {
+		desktopcodec.SetNVCodecCanaryRequested(false)
+		desktopcodec.SetNVCodecCanaryEligible(false)
+	})
+
+	eligibility := evaluateNVCodecCanaryEligibility(NVCodecValidationStatus{}, nil)
+	if !eligibility.Requested {
+		t.Fatal("explicit canary request was lost")
+	}
+	if eligibility.Active || eligibility.Eligible {
+		t.Fatalf("ineligible requested canary became active: %+v", eligibility)
+	}
+}

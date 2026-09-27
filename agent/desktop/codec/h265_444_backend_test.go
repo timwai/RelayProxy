@@ -147,6 +147,7 @@ func TestProbeH265444BackendsAllowsD3D11OnlyProductionOpeners(t *testing.T) {
 
 func resetNVCodecCanaryForTest() {
 	nvcodecCanaryRequested.Store(false)
+	nvcodecCanaryEligible.Store(false)
 	nvcodecCanaryTripped.Store(false)
 	nvcodecCanaryTripAt.Store(0)
 	nvcodecCanaryTripMu.Lock()
@@ -222,5 +223,33 @@ func TestNVCodecCanaryCircuitBreakerRecordsReasonAndTime(t *testing.T) {
 	}
 	if reason != "NVDEC decode failure: device lost" {
 		t.Fatalf("trip reason=%q", reason)
+	}
+}
+
+func TestNVCodecCanaryRequestedEligibleActiveStates(t *testing.T) {
+	resetNVCodecCanaryForTest()
+	t.Cleanup(resetNVCodecCanaryForTest)
+
+	SetNVCodecCanaryRequested(true)
+	if !NVCodecCanaryRequested() {
+		t.Fatal("requested state was not retained")
+	}
+	if NVCodecCanaryEligible() || NVCodecCanaryEnabled() {
+		t.Fatal("requested canary became active without eligibility")
+	}
+
+	SetNVCodecCanaryEligible(true)
+	if !NVCodecCanaryEligible() || !NVCodecCanaryEnabled() {
+		t.Fatal("requested and eligible canary did not become active")
+	}
+
+	if !TripNVCodecCanary("test trip") {
+		t.Fatal("active canary did not trip")
+	}
+	if !NVCodecCanaryRequested() || !NVCodecCanaryEligible() {
+		t.Fatal("trip erased requested or eligible state")
+	}
+	if NVCodecCanaryEnabled() {
+		t.Fatal("tripped canary remained active")
 	}
 }

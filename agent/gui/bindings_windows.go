@@ -427,6 +427,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		MinimizeToTray      bool                `json:"minimizeToTray"`
 		StartMinimized      bool                `json:"startMinimized"`
 		Theme               string              `json:"theme"`
+		NVCodecCanary       bool                `json:"nvcodecCanary"`
 		Version             string              `json:"version"`
 		Routing             any                 `json:"routing"`
 		Network             any                 `json:"network"`
@@ -457,6 +458,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized,
 		Theme:          cfg.GUI.Theme,
+		NVCodecCanary:  cfg.GUI.NVCodecCanary,
 		Version:        Version,
 		Network: map[string]any{
 			"mode":              cfg.Network.Mode,

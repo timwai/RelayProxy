@@ -891,22 +891,26 @@ func (b *UIBridge) Close() error {
 
 func (b *UIBridge) syncNVCodecCanaryGateFromConfig() {
 	if b == nil {
-		desktopcodec.SetNVCodecCanaryEnabled(false)
+		desktopcodec.SetNVCodecCanaryRequested(false)
+		desktopcodec.SetNVCodecCanaryEligible(false)
 		return
 	}
 	cfg, err := config.LoadAgentConfig(b.configPath)
 	if err != nil {
-		desktopcodec.SetNVCodecCanaryEnabled(false)
+		desktopcodec.SetNVCodecCanaryRequested(false)
+		desktopcodec.SetNVCodecCanaryEligible(false)
 		return
 	}
 	b.syncNVCodecCanaryGate(cfg)
 }
 
 func (b *UIBridge) syncNVCodecCanaryGate(cfg *config.AgentConfigFile) {
-	if cfg == nil || !cfg.GUI.NVCodecCanary {
-		desktopcodec.SetNVCodecCanaryEnabled(false)
+	requested := cfg != nil && cfg.GUI.NVCodecCanary
+	desktopcodec.SetNVCodecCanaryRequested(requested)
+	if !requested {
+		desktopcodec.SetNVCodecCanaryEligible(false)
 		return
 	}
 	eligibility := b.GetRemoteDesktopNVCodecCanaryEligibility()
-	desktopcodec.SetNVCodecCanaryEnabled(eligibility.Eligible)
+	desktopcodec.SetNVCodecCanaryEligible(eligibility.Eligible)
 }

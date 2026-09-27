@@ -2670,6 +2670,16 @@
       if (report.encodedFrames != null || report.decodedFrames != null) {
         parts.push('编码/解码 ' + Number(report.encodedFrames || 0) + '/' + Number(report.decodedFrames || 0) + ' 帧');
       }
+      if (report.nvdecProbeChecked || report.nvdecH264Known || report.nvdecHevc420Known || report.nvdecHevc444Known) {
+        var nvdecState = function (known, supported) {
+          return !known ? '未知' : (supported ? '✓' : '不支持');
+        };
+        parts.push('NVDEC H.264 ' + nvdecState(!!report.nvdecH264Known, !!report.nvdecH264Supported));
+        parts.push('NVDEC HEVC 4:2:0 ' + nvdecState(!!report.nvdecHevc420Known, !!report.nvdecHevc420Supported));
+        parts.push('NVDEC HEVC 4:4:4 ' + nvdecState(!!report.nvdecHevc444Known, !!report.nvdecHevc444Supported));
+      } else if (report.nvdecProbeError) {
+        parts.push('NVDEC 能力探测不可用');
+      }
       if (report.samplesChecked) {
         parts.push('像素样本 ' + Number(report.samplesChecked) + ' · 最大误差 ' + Number(report.maxChannelError || 0));
       }
@@ -2691,6 +2701,9 @@
       if (report.durationMs != null) parts.push(Number(report.durationMs || 0) + ' ms');
       if (unsupported) {
         parts.push(report.unsupportedReason || '当前 NVIDIA GPU 未暴露 NVENC 硬件编码');
+        if (report.nvdecH264Supported || report.nvdecHevc420Supported || report.nvdecHevc444Supported) {
+          parts.push('NVDEC 解码能力仍可独立使用');
+        }
         parts.push('Relay Desktop 将使用 Media Foundation / Quick Sync / CPU 编码路径');
       } else if (!passed && report.error) {
         parts.push(String(report.error));

@@ -55,8 +55,10 @@ type packetMetadata struct {
 }
 
 type packetProcess struct {
-	pid  uint32
-	path string
+	pid      uint32
+	path     string
+	aliases  []string
+	services []string
 }
 
 type processLookup func(Protocol, netip.AddrPort, netip.AddrPort) (packetProcess, error)
@@ -298,9 +300,14 @@ func relayDNSPacket(p ipPacket, relayHost string) bool {
 }
 
 func packetFlow(p ipPacket, process packetProcess) Flow {
-	return Flow{Process: process.path, ProcessID: process.pid, Protocol: p.Protocol,
+	return Flow{
+		Process: process.path, ProcessID: process.pid,
+		ProcessAliases: append([]string(nil), process.aliases...),
+		Services:       append([]string(nil), process.services...),
+		Protocol: p.Protocol,
 		SourceIP: p.Source.Addr().String(), SourcePort: p.Source.Port(),
-		IP: p.Destination.Addr().String(), Port: p.Destination.Port()}
+		IP: p.Destination.Addr().String(), Port: p.Destination.Port(),
+	}
 }
 
 func flowQueue(key FlowKey, count int) int {

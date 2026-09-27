@@ -24,7 +24,7 @@ func platformCapabilities() Capabilities {
 }
 
 type windowsPacketDevice struct {
-	handle          *windivertHandle
+	handle         *windivertHandle
 	removeFirewall bool
 }
 

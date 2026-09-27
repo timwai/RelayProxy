@@ -366,8 +366,25 @@ func TestInterceptorRelayDNSAndSelfBypassFullFlowTable(t *testing.T) {
 	data, offset = packetTestFixture(false, ProtoUDP, query, false)
 	binary.BigEndian.PutUint16(data[offset+2:], 53)
 	data[offset+8+13] = 'x'
+	privateDNS, err := parseIPPacket(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rewriteIPPacket(data, privateDNS.Source, netip.MustParseAddrPort("192.168.1.1:53")); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.handlePacket(data, packetMetadata{outbound: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !expectInterceptedPacket(t, device).meta.outbound {
+		t.Fatal("private system DNS was sent through the remote exit")
+	}
+
+	data, offset = packetTestFixture(false, ProtoUDP, query, false)
+	binary.BigEndian.PutUint16(data[offset+2:], 53)
+	data[offset+8+13] = 'x'
 	if err := i.handlePacket(data, packetMetadata{outbound: true}); err == nil {
-		t.Fatal("unrelated DNS was allowed to bypass policy")
+		t.Fatal("public unrelated DNS was allowed to bypass policy")
 	}
 }
 
@@ -480,5 +497,22 @@ func TestInterceptorDisablesCaptureAfterInjectionFailure(t *testing.T) {
 	}
 	if i.Running() {
 		t.Fatal("interceptor remained running after injection failure")
+	}
+}
+
+
+func TestPrivateDNSPacketSupportsTCPAndUDP(t *testing.T) {
+	for _, protocol := range []Protocol{ProtoTCP, ProtoUDP} {
+		packet := ipPacket{
+			Protocol: protocol,
+			Destination: netip.MustParseAddrPort("10.0.0.53:53"),
+		}
+		if !privateDNSPacket(packet) {
+			t.Fatalf("private DNS not bypassed for %s", protocol)
+		}
+		packet.Destination = netip.MustParseAddrPort("8.8.8.8:53")
+		if privateDNSPacket(packet) {
+			t.Fatalf("public DNS bypassed for %s", protocol)
+		}
 	}
 }

@@ -30,17 +30,17 @@ class SettingsActivity : Activity() {
     private lateinit var tlsEnabled: Switch
     private lateinit var insecureTls: Switch
     private lateinit var allowPrivate: Switch
+    private lateinit var autoNetworkSwitch: Switch
     private val networkModeTabs = mutableListOf<TextView>()
     private var selectedNetworkModeIndex = 0
 
     private val transportValues = listOf("auto", "quic_only", "tcp_only")
     private val transportLabels = listOf("自动选择", "仅 QUIC", "仅 TCP/TLS")
     private val networkModeValues = listOf(
-        NetworkBinder.MODE_AUTO,
-        NetworkBinder.MODE_CELLULAR,
         NetworkBinder.MODE_WIFI,
+        NetworkBinder.MODE_CELLULAR,
     )
-    private val networkModeLabels = listOf("自动选择", "仅移动数据", "仅 Wi-Fi")
+    private val networkModeLabels = listOf("Wi-Fi 优先", "移动数据优先")
 
     private val bg = Color.rgb(246, 248, 252)
     private val surface = Color.WHITE
@@ -110,17 +110,27 @@ class SettingsActivity : Activity() {
         root.addView(connection, topMargin(14))
 
         val policy = card()
-        addSectionHeader(policy, "出口策略", "控制加密、出口网络和私网访问范围。")
+        addSectionHeader(policy, "出口策略", "选择首选出口网络，并配置自动故障切换。")
         tlsEnabled = Switch(this)
         insecureTls = Switch(this)
         allowPrivate = Switch(this)
+        autoNetworkSwitch = Switch(this)
 
         policy.addView(switchRow("启用 TLS", "推荐开启。", tlsEnabled), topMargin(14))
         policy.addView(divider(), topMargin(10))
         policy.addView(switchRow("允许自签名证书", "仅用于可信的自建服务端。", insecureTls), topMargin(10))
         policy.addView(divider(), topMargin(10))
 
-        policy.addView(labeled("出口网络", buildNetworkModeTabs()), topMargin(12))
+        policy.addView(labeled("首选出口网络", buildNetworkModeTabs()), topMargin(12))
+        policy.addView(divider(), topMargin(10))
+        policy.addView(
+            switchRow(
+                "自动切换网络",
+                "首选网络无互联网时切换到备用网络，恢复后自动切回。",
+                autoNetworkSwitch,
+            ),
+            topMargin(10),
+        )
         policy.addView(divider(), topMargin(10))
         policy.addView(switchRow("允许访问出口侧私网", "开启后可访问手机所在局域网。", allowPrivate), topMargin(10))
         root.addView(policy, topMargin(14))
@@ -168,8 +178,9 @@ class SettingsActivity : Activity() {
             insecureTls = insecureTls.isChecked,
             allowPrivateNetwork = allowPrivate.isChecked,
             networkMode = networkModeValues.getOrElse(selectedNetworkModeIndex) {
-                NetworkBinder.MODE_AUTO
+                NetworkBinder.MODE_WIFI
             },
+            autoNetworkSwitch = autoNetworkSwitch.isChecked,
         )
         if (config.serverAddress.isBlank()) {
             server.error = "必须填写 Server 地址"
@@ -191,6 +202,7 @@ class SettingsActivity : Activity() {
         tlsEnabled.isChecked = cfg.tlsEnabled
         insecureTls.isChecked = cfg.insecureTls
         allowPrivate.isChecked = cfg.allowPrivateNetwork
+        autoNetworkSwitch.isChecked = cfg.autoNetworkSwitch
         selectNetworkMode(networkModeValues.indexOf(cfg.networkMode).coerceAtLeast(0))
     }
 

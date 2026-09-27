@@ -622,3 +622,20 @@ func TestNextNVCodecValidationReceiptAcceptsLocalBuildIdentity(t *testing.T) {
 		t.Fatalf("local build receipt=%+v", receipt)
 	}
 }
+
+
+func TestGetRemoteDesktopNVCodecCanaryEligibilityTreatsMissingReceiptAsEmptyState(t *testing.T) {
+	dir := t.TempDir()
+	bridge := &UIBridge{configPath: filepath.Join(dir, "relay-agent.yaml")}
+
+	eligibility := bridge.GetRemoteDesktopNVCodecCanaryEligibility()
+	for _, reason := range eligibility.Reasons {
+		if strings.Contains(strings.ToLower(reason), "cannot find the file") ||
+			strings.Contains(strings.ToLower(reason), "no such file") {
+			t.Fatalf("missing receipt leaked filesystem error: %+v", eligibility)
+		}
+	}
+	if len(eligibility.Reasons) == 0 {
+		t.Fatalf("missing receipt should explain why canary is not eligible: %+v", eligibility)
+	}
+}

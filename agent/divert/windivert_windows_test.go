@@ -5,7 +5,9 @@ package divert
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -260,5 +262,178 @@ func TestWinDivertLiveBrokerStyleReinjection(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("WinDivert reinjection pump did not finish")
+	}
+}
+
+
+func TestWinDivertLiveTCPReflection(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("WinDivert live TCP test requires Windows amd64")
+	}
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("WinDivert live TCP test requires an elevated Windows runner")
+	}
+
+	listener, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4zero})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	proxyPort := uint16(listener.Addr().(*net.TCPAddr).Port)
+	fakeIP := netip.MustParseAddr("198.51.100.20")
+	const fakePort uint16 = 443
+	virtualPort := uint16(43010)
+	if virtualPort == proxyPort {
+		virtualPort++
+	}
+
+	filter := fmt.Sprintf(
+		"outbound and tcp and ((ip.DstAddr == %s and tcp.DstPort == %d) or tcp.SrcPort == %d)",
+		fakeIP, fakePort, proxyPort,
+	)
+	handle, err := openTrustedWinDivert(filter)
+	if err != nil {
+		t.Skipf("WinDivert driver unavailable on runner: %v", err)
+	}
+	defer handle.Close()
+
+	stop := make(chan struct{})
+	pumpDone := make(chan error, 1)
+	go func() {
+		buffer := make([]byte, 40+65535)
+		var originalSource netip.AddrPort
+		for {
+			n, address, err := handle.Recv(buffer)
+			if err != nil {
+				select {
+				case <-stop:
+					pumpDone <- nil
+				default:
+					pumpDone <- err
+				}
+				return
+			}
+			packet, err := parseIPPacket(buffer[:n])
+			if err != nil {
+				pumpDone <- err
+				return
+			}
+			switch {
+			case packet.Destination.Addr() == fakeIP && packet.Destination.Port() == fakePort:
+				if !originalSource.IsValid() {
+					originalSource = packet.Source
+				}
+				if err := rewriteIPPacket(
+					buffer[:n],
+					netip.AddrPortFrom(fakeIP, virtualPort),
+					netip.AddrPortFrom(packet.Source.Addr(), proxyPort),
+				); err != nil {
+					pumpDone <- err
+					return
+				}
+				address.setOutbound(false)
+			case packet.Source.Port() == proxyPort:
+				if !originalSource.IsValid() {
+					pumpDone <- fmt.Errorf("proxy response arrived before original TCP source was learned")
+					return
+				}
+				if err := rewriteIPPacket(
+					buffer[:n],
+					netip.AddrPortFrom(fakeIP, fakePort),
+					originalSource,
+				); err != nil {
+					pumpDone <- err
+					return
+				}
+				address.setOutbound(false)
+			default:
+				pumpDone <- fmt.Errorf("unexpected live TCP packet %s -> %s", packet.Source, packet.Destination)
+				return
+			}
+			if err := handle.Send(buffer[:n], address); err != nil {
+				pumpDone <- err
+				return
+			}
+		}
+	}()
+
+	type dialResult struct {
+		conn net.Conn
+		err  error
+	}
+	dialDone := make(chan dialResult, 1)
+	go func() {
+		conn, err := net.DialTimeout("tcp4", net.JoinHostPort(fakeIP.String(), "443"), 5*time.Second)
+		dialDone <- dialResult{conn: conn, err: err}
+	}()
+	acceptDone := make(chan dialResult, 1)
+	go func() {
+		conn, err := listener.Accept()
+		acceptDone <- dialResult{conn: conn, err: err}
+	}()
+
+	var client, proxy net.Conn
+	select {
+	case result := <-dialDone:
+		if result.err != nil {
+			close(stop)
+			_ = handle.Shutdown()
+			t.Fatalf("reflected client dial failed: %v", result.err)
+		}
+		client = result.conn
+	case <-time.After(7 * time.Second):
+		close(stop)
+		_ = handle.Shutdown()
+		t.Fatal("reflected client dial timed out")
+	}
+	defer client.Close()
+
+	select {
+	case result := <-acceptDone:
+		if result.err != nil {
+			close(stop)
+			_ = handle.Shutdown()
+			t.Fatalf("transparent listener accept failed: %v", result.err)
+		}
+		proxy = result.conn
+	case <-time.After(7 * time.Second):
+		close(stop)
+		_ = handle.Shutdown()
+		t.Fatal("transparent listener did not receive reflected TCP connection")
+	}
+	defer proxy.Close()
+	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = proxy.SetDeadline(time.Now().Add(5 * time.Second))
+
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	request := make([]byte, 4)
+	if _, err := io.ReadFull(proxy, request); err != nil {
+		t.Fatalf("proxy did not receive reflected TCP payload: %v", err)
+	}
+	if string(request) != "ping" {
+		t.Fatalf("request=%q", request)
+	}
+	if _, err := proxy.Write([]byte("pong")); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, 4)
+	if _, err := io.ReadFull(client, reply); err != nil {
+		t.Fatalf("client did not receive reflected TCP reply: %v", err)
+	}
+	if string(reply) != "pong" {
+		t.Fatalf("reply=%q", reply)
+	}
+
+	close(stop)
+	_ = handle.Shutdown()
+	select {
+	case err := <-pumpDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("live TCP reflection pump did not stop")
 	}
 }

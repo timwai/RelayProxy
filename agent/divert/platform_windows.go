@@ -3,6 +3,7 @@
 package divert
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -22,7 +23,10 @@ func platformCapabilities() Capabilities {
 	return caps
 }
 
-type windowsPacketDevice struct{ handle *windivertHandle }
+type windowsPacketDevice struct {
+	handle          *windivertHandle
+	removeFirewall bool
+}
 
 func (d *windowsPacketDevice) Receive(buffer []byte) (int, packetMetadata, error) {
 	n, addr, err := d.handle.Recv(buffer)
@@ -36,20 +40,33 @@ func (d *windowsPacketDevice) Send(packet []byte, meta packetMetadata) error {
 	return d.handle.Send(packet, addr)
 }
 func (d *windowsPacketDevice) Shutdown() error { return d.handle.Shutdown() }
-func (d *windowsPacketDevice) Close() error    { return d.handle.Close() }
+func (d *windowsPacketDevice) Close() error {
+	if d == nil {
+		return nil
+	}
+	err := d.handle.Close()
+	if d.removeFirewall {
+		err = errors.Join(err, removeWindowsTransparentFirewallRule())
+	}
+	return err
+}
 
-func openWindowsPacketDevice(filter string) (packetDevice, error) {
-	if device, err := openWindowsServicePacketDevice(filter); err == nil {
+func openWindowsPacketDevice(filter string, tcpPorts []uint16) (packetDevice, error) {
+	if device, err := openWindowsServicePacketDevice(filter, tcpPorts); err == nil {
 		return device, nil
 	}
 	if !windows.GetCurrentProcessToken().IsElevated() {
-		return nil, fmt.Errorf("RelayProxy Network Service 未运行；请重新启用系统透明代理以完成一次管理员安装")
+		return nil, fmt.Errorf("RelayProxy Network Service 未运行或无法配置 Windows Firewall；请在 Network Service 中执行安装/修复")
+	}
+	if err := installWindowsTransparentFirewallRule(tcpPorts); err != nil {
+		return nil, fmt.Errorf("配置透明代理 Windows Firewall 入站规则失败: %w", err)
 	}
 	handle, err := openWinDivert(filter)
 	if err != nil {
+		_ = removeWindowsTransparentFirewallRule()
 		return nil, err
 	}
-	return &windowsPacketDevice{handle: handle}, nil
+	return &windowsPacketDevice{handle: handle, removeFirewall: true}, nil
 }
 
 func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
@@ -70,7 +87,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	port4 := listeners[0].Addr().(*net.TCPAddr).Port
 	port6 := listeners[1].Addr().(*net.TCPAddr).Port
 	filter := windowsInterceptFilter(port4, port6, s.guard)
-	device, err := openWindowsPacketDevice(filter)
+	device, err := openWindowsPacketDevice(filter, []uint16{uint16(port4), uint16(port6)})
 	if err != nil {
 		for _, listener := range listeners {
 			_ = listener.Close()

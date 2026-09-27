@@ -24,6 +24,8 @@ func (i NVCodecValidationIdentity) MatchesReport(report NVCodecH265444RoundTripR
 // because the test creates GPU resources and performs real encode/decode work.
 type NVCodecH265444RoundTripReport struct {
 	Passed                      bool   `json:"passed"`
+	Unsupported                 bool   `json:"unsupported,omitempty"`
+	UnsupportedReason           string `json:"unsupportedReason,omitempty"`
 	Backend                     string `json:"backend"`
 	Adapter                     string `json:"adapter,omitempty"`
 	AdapterVendorID             uint32 `json:"adapterVendorId,omitempty"`

@@ -110,6 +110,26 @@ func TestParseWindowsVirtualClipboardDescriptorsRejectsOversizedFile(t *testing.
 	}
 }
 
+func TestParseWindowsVirtualClipboardDescriptorsRejectsWindowsAbsolutePath(t *testing.T) {
+	raw := testWindowsVirtualDescriptorGroup(
+		testWindowsVirtualDescriptor("C:\\escape.txt", false, true, 1),
+	)
+	if _, err := parseWindowsVirtualClipboardDescriptors(raw); err == nil {
+		t.Fatal("absolute Windows virtual clipboard path was accepted")
+	}
+}
+
+func TestParseWindowsVirtualClipboardDescriptorsRejectsDeclaredTransferOverflow(t *testing.T) {
+	raw := testWindowsVirtualDescriptorGroup(
+		testWindowsVirtualDescriptor("a.bin", false, true, uint64(maxDesktopClipboardFileBytes)),
+		testWindowsVirtualDescriptor("b.bin", false, true, uint64(maxDesktopClipboardFileBytes)),
+		testWindowsVirtualDescriptor("c.bin", false, true, 1),
+	)
+	if _, err := parseWindowsVirtualClipboardDescriptors(raw); err == nil {
+		t.Fatal("oversized declared virtual clipboard transfer was accepted")
+	}
+}
+
 func TestMaterializeWindowsVirtualClipboardZeroLengthFiles(t *testing.T) {
 	descriptors := []windowsVirtualClipboardDescriptor{
 		{RelativePath: "folder", Directory: true},

@@ -5,7 +5,7 @@ Android 第一阶段只实现 **网络出口节点**：手机加入 RelayProxy �
 ## 架构
 
 - `mobile/androidcore`：Go + gomobile。直接复用 RelayProxy 的设备认证、QUIC/TLS+yamux、出口 ACL、TCP/UDP 转发协议；`-javapkg com.relayproxy.core` 生成的 Java 包为 `com.relayproxy.core.androidcore`。
-- `android/app`：Kotlin 原生 UI + 前台 Service。负责配置、生命周期、通知和可选的蜂窝网络进程绑定。
+- `android/app`：Kotlin 原生 UI + 前台 Service。负责配置、生命周期、通知，以及 Wi-Fi / 蜂窝首选网络绑定与自动故障切换。
 - Android 不创建 `VpnService`，第一期不是“把 Android 自己的流量送进 RelayProxy”，而是“把 Android 当作出口”。
 
 ## 一键打包 APK（Windows）
@@ -151,12 +151,16 @@ APK 输出：
 3. 点击“启动网络共享”。
 4. 第一次连接后，在 Relay Server 设备管理中批准该 Android 设备，并授予 `proxy.exit`。
 5. Android 状态显示“已连接 / 已授权”后，即可被其他 RelayProxy 客户端选作网络出口。
-6. 勾选“仅使用移动数据作为出口”时，应用通过 Android `ConnectivityManager.bindProcessToNetwork` 将 Relay 隧道和出口连接固定到蜂窝网络。
+6. 在“首选出口网络”中选择“Wi-Fi 优先”或“移动数据优先”。关闭“自动切换网络”时，Relay 隧道固定使用所选网络。
+7. 开启“自动切换网络”后：
+   - Wi-Fi 优先：Wi-Fi 具有已验证互联网连接时使用 Wi-Fi；Wi-Fi 断开或无互联网时自动切换到蜂窝，Wi-Fi 恢复后自动切回。
+   - 移动数据优先：蜂窝网络可用时优先使用蜂窝；蜂窝不可用时自动切换到 Wi-Fi，蜂窝恢复后自动切回。
+8. 每次实际出口网络发生变化时，Android 客户端会重新绑定进程网络并重建 Relay 隧道，避免旧连接继续停留在失效链路上。
 
 ## 第一阶段边界
 
 - 支持 TCP。
 - 支持 UDP；QUIC 隧道可使用 RelayProxy 原生 UDP datagram，TLS/yamux 走 UDP stream 兼容模式。
-- 支持自动重连和设备挑战签名认证。
+- 支持自动重连、Wi-Fi / 蜂窝故障切换和设备挑战签名认证。
 - 支持公网目标；私网目标默认关闭，可在 UI 显式开启。
 - 暂不提供流量统计图、分应用规则、SIM 卡选择、热点控制、Android 本机 VPN/透明代理入口。

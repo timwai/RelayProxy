@@ -296,11 +296,33 @@ func (s *WailsService) GetRemoteDesktopClipboard(knownSequence uint64) (string, 
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "{}", nil
 	}
-	data, err := json.Marshal(s.owner.bridge.GetRemoteDesktopClipboard(knownSequence))
+	content := s.owner.bridge.GetRemoteDesktopClipboard(knownSequence)
+	data, err := json.Marshal(struct {
+		protocol.DesktopClipboardState
+		LocalPaths []string `json:"localPaths,omitempty"`
+	}{
+		DesktopClipboardState: content,
+		LocalPaths:            append([]string(nil), content.LocalPaths...),
+	})
 	if err != nil {
 		return "{}", nil
 	}
 	return string(data), nil
+}
+
+func (s *WailsService) SendRemoteDesktopClipboardFiles(raw string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	var paths []string
+	if err := json.Unmarshal([]byte(raw), &paths); err != nil {
+		return `{"ok":false,"message":"invalid clipboard file list"}`, nil
+	}
+	if err := s.owner.bridge.SendRemoteDesktopClipboardFiles(paths); err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	return `{"ok":true}`, nil
 }
 
 func (s *WailsService) SendRemoteDesktopClipboardContent(raw string) (string, error) {
@@ -336,7 +358,13 @@ func (s *WailsService) GetClipboardContent() (string, error) {
 	if err != nil {
 		return "{}", nil
 	}
-	data, err := json.Marshal(content)
+	data, err := json.Marshal(struct {
+		protocol.DesktopClipboardState
+		LocalPaths []string `json:"localPaths,omitempty"`
+	}{
+		DesktopClipboardState: content,
+		LocalPaths:            append([]string(nil), content.LocalPaths...),
+	})
 	if err != nil {
 		return "{}", nil
 	}
@@ -344,10 +372,15 @@ func (s *WailsService) GetClipboardContent() (string, error) {
 }
 
 func (s *WailsService) SetClipboardContent(raw string) (string, error) {
-	var content protocol.DesktopClipboardState
-	if err := json.Unmarshal([]byte(raw), &content); err != nil {
+	var payload struct {
+		protocol.DesktopClipboardState
+		LocalPaths []string `json:"localPaths,omitempty"`
+	}
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
 		return `{"ok":false,"message":"invalid clipboard payload"}`, nil
 	}
+	content := payload.DesktopClipboardState
+	content.LocalPaths = append([]string(nil), payload.LocalPaths...)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	if err := desktop.WriteWindowsClipboardContent(ctx, content); err != nil {

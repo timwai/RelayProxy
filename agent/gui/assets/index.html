@@ -2395,18 +2395,30 @@
       if (!content || typeof content !== 'object') return null;
       var kind = String(content.kind || (content.png ? 'png' : 'text')).toLowerCase();
       if (kind === 'png' && content.png) return {kind:'png', png:String(content.png)};
+      if (kind === 'files') {
+        var paths = Array.isArray(content.localPaths) ? content.localPaths.map(String) : [];
+        var files = Array.isArray(content.files) ? content.files : [];
+        if (!paths.length || !files.length) return null;
+        return {kind:'files', localPaths:paths, files:files};
+      }
       if (kind === 'text') return {kind:'text', text:String(content.text == null ? '' : content.text)};
       return null;
     }
     function desktopClipboardFingerprint(content) {
       if (!content) return '';
-      return content.kind === 'png' ? 'png:' + content.png : 'text:' + content.text;
+      if (content.kind === 'png') return 'png:' + content.png;
+      if (content.kind === 'files') {
+        return 'files:' + content.localPaths.join('\u0000') + ':' +
+          content.files.map(function (f) { return String(f.name || '') + ':' + String(f.size || 0); }).join('|');
+      }
+      return 'text:' + content.text;
     }
     async function refreshRemoteDesktopClipboard() {
       if (desktopClipboardBusy || !desktopClipboardEnabled()) return;
       if (!hasFn('goGetRemoteDesktopClipboard')) return;
       var rich = hasFn('goSendRemoteDesktopClipboardContent') &&
                  hasFn('goGetClipboardContent') && hasFn('goSetClipboardContent');
+      var richFiles = rich && hasFn('goSendRemoteDesktopClipboardFiles');
       var legacy = hasFn('goSendRemoteDesktopClipboard') &&
                    hasFn('goGetClipboardText') && hasFn('goSetClipboardText');
       if (!rich && !legacy) return;
@@ -2450,7 +2462,13 @@
           var local = normalizeDesktopClipboardContent(await call('goGetClipboardContent'));
           var localFingerprint = desktopClipboardFingerprint(local);
           if (local && localFingerprint !== desktopClipboardLocal) {
-            var sendResult = mutationResult(await call('goSendRemoteDesktopClipboardContent', JSON.stringify(local)));
+            var sendResult;
+            if (local.kind === 'files') {
+              if (!richFiles) return;
+              sendResult = mutationResult(await call('goSendRemoteDesktopClipboardFiles', JSON.stringify(local.localPaths)));
+            } else {
+              sendResult = mutationResult(await call('goSendRemoteDesktopClipboardContent', JSON.stringify(local)));
+            }
             if (sendResult && sendResult.ok === false) {
               throw new Error(sendResult.message || '发送远程剪贴板失败');
             }

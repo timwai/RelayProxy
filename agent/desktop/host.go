@@ -586,6 +586,8 @@ func (h *Host) readSessionControlLoop(
 ) error {
 	var lastInputSequence uint64
 	var lastClipboardSequence uint64
+	var fileReceiver clipboardFileReceiver
+	defer fileReceiver.reset()
 	for {
 		message, err := conn.ReceiveSessionMessage(ctx)
 		if err != nil {
@@ -704,6 +706,45 @@ func (h *Host) readSessionControlLoop(
 			}
 			if err := writeClipboardContent(ctx, clipboard, content); err != nil {
 				log.Printf("[Desktop] apply remote clipboard failed: %v", err)
+				continue
+			}
+			clipboardState.SeedContent(content)
+
+		case protocol.DesktopSessionClipboardFileOffer:
+			if message.ClipboardFileOffer == nil || !syncClipboard {
+				continue
+			}
+			if err := fileReceiver.offer(*message.ClipboardFileOffer); err != nil {
+				fileReceiver.reset()
+				log.Printf("[Desktop] clipboard file offer rejected: %v", err)
+			}
+
+		case protocol.DesktopSessionClipboardFileChunk:
+			if message.ClipboardFileChunk == nil || !syncClipboard {
+				continue
+			}
+			if err := fileReceiver.chunk(*message.ClipboardFileChunk); err != nil {
+				fileReceiver.reset()
+				log.Printf("[Desktop] clipboard file chunk rejected: %v", err)
+			}
+
+		case protocol.DesktopSessionClipboardFileDone:
+			if message.ClipboardFileDone == nil || !syncClipboard || clipboard == nil || clipboardState == nil {
+				continue
+			}
+			content, err := fileReceiver.done(*message.ClipboardFileDone)
+			if err != nil {
+				fileReceiver.reset()
+				log.Printf("[Desktop] clipboard file transfer rejected: %v", err)
+				continue
+			}
+			fileClipboard, ok := clipboard.(ClipboardFileEndpoint)
+			if !ok {
+				log.Printf("[Desktop] remote file clipboard ignored: endpoint does not support files")
+				continue
+			}
+			if err := fileClipboard.SetClipboardFiles(ctx, content.LocalPaths); err != nil {
+				log.Printf("[Desktop] apply remote file clipboard failed: %v", err)
 				continue
 			}
 			clipboardState.SeedContent(content)

@@ -1426,6 +1426,18 @@ func (a *Agent) SendRemoteDesktopClipboardContent(content protocol.DesktopClipbo
 	return session.SendClipboardContent(ctx, content)
 }
 
+func (a *Agent) SendRemoteDesktopClipboardFiles(paths []string) error {
+	a.mu.RLock()
+	session := a.desktopConnection
+	a.mu.RUnlock()
+	if session == nil || !session.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	return session.SendClipboardFiles(ctx, paths)
+}
+
 func (a *Agent) SendRemoteDesktopClipboard(text string) error {
 	a.mu.RLock()
 	session := a.desktopConnection

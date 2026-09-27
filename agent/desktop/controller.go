@@ -112,6 +112,8 @@ func StartControllerWithOptions(
 }
 
 func (s *ControllerSession) controlLoop(ctx context.Context) {
+	var fileReceiver clipboardFileReceiver
+	defer fileReceiver.reset()
 	for {
 		message, err := s.conn.ReceiveSessionMessage(ctx)
 		if err != nil {
@@ -170,6 +172,42 @@ func (s *ControllerSession) controlLoop(ctx context.Context) {
 			if clipboard.Sequence > s.latestClipboard.Sequence {
 				s.latestClipboard = clipboard
 			}
+			s.mu.Unlock()
+
+		case protocol.DesktopSessionClipboardFileOffer:
+			if message.ClipboardFileOffer == nil {
+				continue
+			}
+			if err := fileReceiver.offer(*message.ClipboardFileOffer); err != nil {
+				fileReceiver.reset()
+				log.Printf("[Desktop] clipboard file offer rejected: %v", err)
+			}
+
+		case protocol.DesktopSessionClipboardFileChunk:
+			if message.ClipboardFileChunk == nil {
+				continue
+			}
+			if err := fileReceiver.chunk(*message.ClipboardFileChunk); err != nil {
+				fileReceiver.reset()
+				log.Printf("[Desktop] clipboard file chunk rejected: %v", err)
+			}
+
+		case protocol.DesktopSessionClipboardFileDone:
+			if message.ClipboardFileDone == nil {
+				continue
+			}
+			clipboard, err := fileReceiver.done(*message.ClipboardFileDone)
+			if err != nil {
+				fileReceiver.reset()
+				log.Printf("[Desktop] clipboard file transfer rejected: %v", err)
+				continue
+			}
+			s.mu.Lock()
+			clipboard.Sequence = s.latestClipboard.Sequence + 1
+			if clipboard.Sequence == 0 {
+				clipboard.Sequence = 1
+			}
+			s.latestClipboard = clipboard
 			s.mu.Unlock()
 
 		case protocol.DesktopSessionPong:
@@ -926,6 +964,14 @@ func (s *ControllerSession) SendClipboard(ctx context.Context, text string) erro
 		Kind: protocol.DesktopClipboardKindText,
 		Text: text,
 	})
+}
+
+func (s *ControllerSession) SendClipboardFiles(ctx context.Context, paths []string) error {
+	if s == nil || !s.Active() {
+		return errors.New("Relay Desktop session is not active")
+	}
+	_, err := sendClipboardFiles(ctx, s.conn, paths)
+	return err
 }
 
 func (s *ControllerSession) LatestClipboard(knownSequence uint64) (protocol.DesktopClipboardState, bool) {

@@ -17,3 +17,10 @@ func AutoStartCommand(appName string) string {
 func IsAutoStartEnabled(appName string) bool {
 	return false
 }
+
+
+func HelperFlagName() string { return "relayproxy-startup-helper" }
+
+func RunElevatedHelper(action, appName, configPath string) error {
+	return nil
+}

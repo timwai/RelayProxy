@@ -8,17 +8,19 @@ Windows x64 的 `relay-agent-gui.exe` 和 `relay-agent.exe` 已内嵌官方 WinD
 
 > Windows ARM64 产物不包含 x64 WinDivert，因此不支持系统透明代理，但仍可使用 Agent、SOCKS5/HTTP 和本地 Web 管理页。ARM64 桌面窗口还需要安装匹配的 Microsoft Edge WebView2 Runtime；缺失时程序会提示并回退到 Web 管理页。
 
-1. 将 `relay-agent-gui.exe` 放在固定位置。无需手动下载或携带 WinDivert DLL/驱动目录。
-2. 以管理员身份运行 `relay-agent-gui.exe`，完成服务器与出口配置。
-3. 在“本地代理服务 → 系统透明代理”中启用并保存，退出后仍以管理员身份启动。命令行对应 `network.mode: divert`。
+1. 将 `relay-agent-gui.exe` 放在固定位置。日常启动不需要管理员权限，也无需手动下载 WinDivert。
+2. 在“本地代理服务 → 系统透明代理”中首次启用并保存。客户端会弹出一次 UAC，用于安装/更新 `RelayProxy Network Service`。
+3. UAC 完成后，GUI/Agent 继续以当前普通用户身份运行；透明代理的数据包捕获和注入由 LocalSystem 网络服务承担。
 4. 打开“路由分流”，选择“按规则分流”，填写组合规则并保存。规则更新影响新建 TCP 连接及新的 UDP 关联，已建立的连接保留原决定。
 5. 点击左侧“实时连接 ↗”打开独立窗口，按进程、PID、域名/IP、端口、协议、动作或规则筛选，查看双向速率、累计流量和连接详情。
 
-界面根据实际权限和内嵌依赖显示启用条件。Windows 仍需要从磁盘加载 DLL 与 `.sys` 驱动：首次真正启动透明代理时，客户端将经过 SHA256 校验的原版文件、许可证与来源说明释放到 `%ProgramData%\RelayProxy-WinDivert\2.2.2-<校验前缀>\`，之后校验复用，损坏时重新释放。这个目录只允许 Administrators 和 SYSTEM 写入，不要求 EXE 所在目录可写。
+`RelayProxy Network Service` 只负责 WinDivert 收包和注入，不建立第二条 Relay 会话，也不读取路由规则。普通 Agent 仍负责进程识别、规则判断、Relay 隧道和实时连接统计；Agent 与 SYSTEM 服务之间通过只允许 SYSTEM、Administrators 和安装用户访问的本机命名管道交换报文。
 
-普通启动和查看设置不释放或加载驱动。缺少管理员权限时会在安装拦截前失败；WinDivert 打开失败会关闭已经创建的本地监听，不会把配置显示成已运行。
+为避免把用户目录中的可替换程序以 SYSTEM 身份长期运行，安装程序会把当前客户端复制到 `%ProgramData%\RelayProxy-Network-Service\<程序校验前缀>\RelayProxyNetwork.exe`。目录仅允许 Administrators 和 SYSTEM 写入。SYSTEM 服务也不会加载 EXE 旁的第三方 WinDivert DLL，而是只释放并加载内嵌、校验过的 WinDivert 2.2.2 到 `%ProgramData%\RelayProxy-WinDivert\...`。
 
-如需替换动态库，可将兼容的 `WinDivert.dll` 与 `WinDivert64.sys` 一起放在 EXE 旁或其 `windivert` 子目录，这些外置文件优先于内嵌版本。
+普通启动和开机自启都不需要管理员 token。只有首次安装/客户端升级需要更新 Network Service 时才会请求一次 UAC。如果用户取消 UAC，GUI 仍会正常启动，但本次不会启用系统透明代理。管理员直接运行旧模式仍保留 WinDivert 直连回退，主要用于兼容和诊断。
+
+外置 `WinDivert.dll` / `WinDivert64.sys` 仅用于管理员直接运行的兼容路径；LocalSystem Network Service 永远使用内嵌可信版本。
 
 ## 组合路由规则
 
@@ -71,13 +73,11 @@ SOCKS5/HTTP 的进程归属来自本机客户端至代理监听端口的实际 T
 
 ## 登录后自动启用
 
-以管理员身份启动客户端，保存启用“系统透明代理”，然后在设置中打开“开机自动启动”。如果此前已经开启普通自启动，保存透明代理设置会自动升级已有的自启动项。
+首次启用透明代理时完成一次 Network Service 安装后，“开机自动启动”始终使用当前用户的普通登录项启动 GUI/Agent，不再因为 `network.mode=divert` 创建最高权限 GUI 任务，也不会在每次登录时弹 UAC。
 
-透明代理模式使用当前用户的 Windows 登录计划任务，以最高权限启动到托盘，不保存密码。首次设置后，下次登录无需再次点击 UAC。该方式要求当前账户具有管理员权限；普通标准用户账户不会因此获得管理员权限。
+`RelayProxy Network Service` 是自动启动的 LocalSystem Windows Service，可在用户登录前准备好 WinDivert broker。用户登录后，普通 Agent 连接本机命名管道并开始透明代理。旧版本已经创建的最高权限登录任务会在后续配置保存/自启动同步时迁移回普通用户登录项。
 
-任务在登录后延迟 10 秒启动，不受电池模式或默认三天运行时限影响；启动失败时每分钟重试一次，最多三次。这里的“自启动”指用户登录后运行，不是登录前的系统服务。EXE 移动后需要重新设置自启动路径。
-
-关闭透明代理并保存时，已启用的自启动会恢复为普通登录项；关闭“开机自动启动”会移除两种启动项。创建或移除管理员任务需在管理员会话操作。更新自启动或写入配置失败时会报告错误并恢复原设置。
+登录自启路径明确禁止主动弹 UAC：如果 Network Service 缺失、停止或版本与当前客户端不匹配，本次登录会先以 SOCKS5/HTTP 等非透明能力启动，并记录需要修复 Network Service；用户随后手动打开客户端并保存透明代理设置即可完成一次 UAC 修复。
 
 ## 构建
 
@@ -88,7 +88,7 @@ SOCKS5/HTTP 的进程归属来自本机客户端至代理监听端口的实际 T
 - 支持 IPv4/IPv6 TCP 与 UDP；UDP 最大负载为 65507 字节。
 - 本进程、中继端点、中继域名的 DNS 查询和本机代理入口强制直连，避免重捕获形成循环。本机、组播、广播和链路本地流量不经隧道。
 - 开启前已经建立的 TCP 连接继续使用原路径。需要让目标应用重新建立连接。
-- 不从网络层数据猜测 PID；通过 Windows TCP/UDP OWNER_PID 表取得归属。无法确定或存在多个 PID 时拒绝该流，并记录错误。
+- 不从网络层数据猜测 PID；通过 Windows TCP/UDP OWNER_PID 表取得归属。PID 4 直接映射为稳定的 `System` 身份，不再尝试 `OpenProcess(4)`，因此 System/内核服务拥有的 TCP/UDP 流量可参与透明代理规则。其他无法确定或存在多个 PID 的流仍拒绝并记录错误。
 - 域名条件仅在存在请求域名或有效 DNS 关联时匹配，见上方说明。
 - 不支持原始 IP 分片重组、源路由、IPsec AH/ESP 和 IPv6 jumbogram；无法分类的出站报文丢弃并记录原因。普通入站报文继续交给 Windows 处理，捕获范围的扩大不会阻断它们；透明重定向监听端口仍阻止外来连接。
 - Linux 使用 NFQUEUE/iptables，macOS 使用签名后的 Network Extension；部署前提与验收方法分别见 `linux-transparent-proxy.md` 和 `../agent/divert/macos/README.md`。

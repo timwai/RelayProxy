@@ -133,7 +133,7 @@ func TestH265CapabilityDoesNotAdvertisePartialOneVPL444(t *testing.T) {
 	}
 }
 
-func TestH265CapabilityWith444BackendsAggregatesVendorDirections(t *testing.T) {
+func TestH265CapabilityWith444BackendsDoesNotCombineSplitVendorDirections(t *testing.T) {
 	capability, available := H265CapabilityWith444Backends(
 		H265Probe{},
 		[]H265444BackendProbe{
@@ -143,21 +143,17 @@ func TestH265CapabilityWith444BackendsAggregatesVendorDirections(t *testing.T) {
 				Encode:          true,
 			},
 			{
-				Backend:         "amf-hevc444",
+				Backend:         "onevpl-hevc444",
 				HardwareRuntime: true,
 				Decode:          true,
 			},
 		},
 	)
-	if !available || !capability.Encode || !capability.Decode || !capability.Chroma444 {
-		t.Fatalf("split vendor 4:4:4 capability was not aggregated: %+v", capability)
+	if available || capability.Encode || capability.Decode || capability.Chroma444 {
+		t.Fatalf("split-backend 4:4:4 capability was incorrectly advertised: %+v", capability)
 	}
-	if capability.Encoder != "nvenc-hevc444" {
-		t.Fatalf("encoder label=%q want nvenc-hevc444", capability.Encoder)
-	}
-	if len(capability.EncodeChroma) != 1 || capability.EncodeChroma[0] != "444" ||
-		len(capability.DecodeChroma) != 1 || capability.DecodeChroma[0] != "444" {
-		t.Fatalf("directional 4:4:4 capability=%+v", capability)
+	if len(capability.EncodeChroma) != 0 || len(capability.DecodeChroma) != 0 {
+		t.Fatalf("split-backend directional 4:4:4 leaked into capability: %+v", capability)
 	}
 }
 

@@ -265,7 +265,6 @@ func TestWinDivertLiveBrokerStyleReinjection(t *testing.T) {
 	}
 }
 
-
 func TestWinDivertLiveTCPReflection(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("WinDivert live TCP test requires Windows amd64")

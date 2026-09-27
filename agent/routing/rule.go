@@ -34,8 +34,9 @@ type Rule struct {
 // Flow contains only observed metadata. An unknown process or hostname stays
 // empty and cannot satisfy a condition that requires it.
 type Flow struct {
-	Process  string
-	Host     string
+	Process        string
+	ProcessAliases []string
+	Host           string
 	IP       string
 	Port     uint16
 	Protocol string

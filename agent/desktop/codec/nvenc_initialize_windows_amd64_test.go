@@ -40,7 +40,7 @@ func TestConfigureNVENCHEVC444LowLatency(t *testing.T) {
 
 	blob := &nvencConfigBlob{}
 	binary.LittleEndian.PutUint32(blob.Data[nvencConfigRCFlagsOffset:nvencConfigRCFlagsOffset+4], nvencRCFlagEnableLookahead)
-	if err := configureNVENCHEVC444(blob, cfg); err != nil {
+	if err := configureNVENCHEVC444(blob, cfg, nvencAPIVersion, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := binary.LittleEndian.Uint32(blob.Data[nvencConfigRCRateControlOffset : nvencConfigRCRateControlOffset+4]); got != nvencRateControlCBR {
@@ -77,7 +77,7 @@ func TestBuildNVENCInitializeParams(t *testing.T) {
 	cfg.BitDepth = 8
 	config := &nvencConfigBlob{}
 
-	params, err := buildNVENCInitializeParams(config, cfg)
+	params, err := buildNVENCInitializeParams(config, cfg, nvencAPIVersion, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +104,33 @@ func TestBuildNVENCInitializeParams(t *testing.T) {
 	}
 }
 
+func TestBuildNVENCInitializeParamsLegacy91(t *testing.T) {
+	cfg := DefaultVideoConfig()
+	cfg.Width = 1280
+	cfg.Height = 720
+	cfg.FPS = 30
+	cfg.Chroma = Chroma444
+	cfg.BitDepth = 8
+	config := &nvencConfigBlob{}
+
+	params, err := buildNVENCInitializeParams(config, cfg, nvencLegacyAPIVersion, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeVersionOffset : nvencInitializeVersionOffset+4]); got != nvencVersionWithReservedBitFor(nvencLegacyAPIVersion, 5) {
+		t.Fatalf("legacy init version=%#x", got)
+	}
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeTuningInfoOffset : nvencInitializeTuningInfoOffset+4]); got != 0 {
+		t.Fatalf("legacy tuning field must stay zero, got=%d", got)
+	}
+	if got := binary.LittleEndian.Uint32(params.Data[nvencInitializeBufferFormatOffset : nvencInitializeBufferFormatOffset+4]); got != 0 {
+		t.Fatalf("legacy buffer format field must stay zero, got=%#x", got)
+	}
+}
+
 func TestConfigureNVENCHEVC444Rejects420(t *testing.T) {
 	cfg := DefaultVideoConfig()
-	if err := configureNVENCHEVC444(&nvencConfigBlob{}, cfg); err == nil {
+	if err := configureNVENCHEVC444(&nvencConfigBlob{}, cfg, nvencAPIVersion, false); err == nil {
 		t.Fatal("4:2:0 config was accepted by NVENC HEVC 4:4:4 initializer")
 	}
 }

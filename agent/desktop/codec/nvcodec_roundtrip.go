@@ -48,6 +48,15 @@ type NVCodecH265444RoundTripReport struct {
 	FirstPacketKeyFrame         bool   `json:"firstPacketKeyFrame"`
 	DecoderOpened               bool   `json:"decoderOpened"`
 	DecodedFrames               int    `json:"decodedFrames"`
+	NVDECProbeChecked           bool   `json:"nvdecProbeChecked,omitempty"`
+	NVDECDeviceCount            int    `json:"nvdecDeviceCount,omitempty"`
+	NVDECH264Known              bool   `json:"nvdecH264Known,omitempty"`
+	NVDECH264Supported          bool   `json:"nvdecH264Supported,omitempty"`
+	NVDECHEVC420Known           bool   `json:"nvdecHevc420Known,omitempty"`
+	NVDECHEVC420Supported       bool   `json:"nvdecHevc420Supported,omitempty"`
+	NVDECHEVC444Known           bool   `json:"nvdecHevc444Known,omitempty"`
+	NVDECHEVC444Supported       bool   `json:"nvdecHevc444Supported,omitempty"`
+	NVDECProbeError             string `json:"nvdecProbeError,omitempty"`
 	D3D11OutputValidated        bool   `json:"d3d11OutputValidated"`
 	ReadbackValidated           bool   `json:"readbackValidated"`
 	SamplesChecked              int    `json:"samplesChecked"`

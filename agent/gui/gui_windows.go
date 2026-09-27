@@ -166,8 +166,28 @@ func Run(b *bridge.UIBridge, opts Options) error {
 		InitialPosition:            application.WindowCentered,
 		DefaultContextMenuDisabled: true,
 		DevToolsEnabled:            false,
+		EnableFileDrop:             true,
 	})
 	a.window = window
+
+	window.OnWindowEvent(events.Common.WindowFilesDropped, func(event *application.WindowEvent) {
+		details := event.Context().DropTargetDetails()
+		if details.ElementID != "desktop-viewer-stage" {
+			return
+		}
+		paths := append([]string(nil), event.Context().DroppedFiles()...)
+		if len(paths) == 0 {
+			return
+		}
+		go func() {
+			if err := a.bridge.SendRemoteDesktopClipboardFiles(paths); err != nil {
+				log.Printf("[GUI] Relay Desktop file drop send failed: %v", err)
+				a.eval("window.onRemoteDesktopFileDropResult && window.onRemoteDesktopFileDropResult(false, " + jsonString(err.Error()) + ")")
+				return
+			}
+			a.eval("window.onRemoteDesktopFileDropResult && window.onRemoteDesktopFileDropResult(true, " + fmt.Sprintf("%d", len(paths)) + ")")
+		}()
+	})
 
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		if a.forceExit.Load() {

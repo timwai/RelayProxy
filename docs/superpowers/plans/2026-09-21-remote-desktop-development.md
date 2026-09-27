@@ -25,7 +25,7 @@
 | 键盘 / 鼠标输入 | ✅ 已合并 main | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
 | 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ✅ 已合并 main | Windows Host 以 60 Hz 独立采集位置/可见性，形状仅在 HCURSOR 变化时生成 PNG；可靠 session stream 传输，Controller 缓存形状，Wails Viewer 在视频表面本地叠加；PR #31 merge commit `f7101025c98fe1c09547a3a1203d20a6f3b6b888` |
-| 剪贴板 | ✅ 文本 + PNG 图片 + 文件已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本、PNG 图片与 Windows 文件剪贴板；Windows 使用 CF_UNICODETEXT / CF_DIB / CF_HDROP。文件内容通过独立 chunk 消息传输并校验 SHA-256，不进入普通 1 MiB clipboard JSON；GUI 直接拖拽文件到 Viewer 的交互手势仍待实现 |
+| 剪贴板 | ✅ 文本 + PNG 图片 + 文件 + Viewer 拖拽已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本、PNG 图片与 Windows 文件剪贴板；Windows 使用 CF_UNICODETEXT / CF_DIB / CF_HDROP。文件内容通过独立 chunk 消息传输并校验 SHA-256；Windows Wails Viewer 支持直接拖放普通文件发送到远端剪贴板 |
 | DXGI / WGC Capture | ✅ 指定显示器链路已合并 main | PR #53 已打通 capability 驱动的 per-target 选屏、session-local `DisplayID`、单屏 DXGI/GDI Auto 捕获、光标局部坐标与 Windows `SendInput` 虚拟桌面坐标映射；未指定显示器时继续保留原虚拟桌面行为 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
@@ -1301,6 +1301,16 @@ Windows SendInput / CF_UNICODETEXT
 - Receiver 只保留最新一批 completed staging；下一批文件成功完成后删除上一批。Session 断开时最后一批 staged 文件继续保留 1 小时后清理，避免断开瞬间让用户剪贴板路径失效。
 - 当前仅接受 regular file；目录、shell virtual file、云盘占位符和 GUI drag/drop 手势不在本阶段范围内。
 - 回归覆盖路径穿越拒绝、分片 offset/size 边界、SHA-256 round-trip、跨平台 session 编译以及 Windows CF_HDROP build path。
+
+### 0.2.106 RD3 Viewer File Drop
+
+- Windows Wails 主窗口启用 `EnableFileDrop`，Relay Desktop 画面容器增加 `data-file-drop-target`。
+- 使用 Wails v3 原生 `WindowFilesDropped` 事件获取操作系统提供的绝对路径，不依赖浏览器 HTML5 File 对象。
+- 只接受落在 `desktop-viewer-stage` 的文件；其他 GUI 区域的外部拖放忽略，避免误操作。
+- Drop 后复用 `SendRemoteDesktopClipboardFiles`，因此继续继承 regular-file、数量/大小上限、basename-only、SHA-256、严格 chunk offset 与 staging 安全策略。
+- Viewer 拖入时显示原生 drop-target hover overlay；发送成功/失败由 GUI toast 明确反馈。
+- 目录和 shell virtual file 仍按底层文件剪贴板策略拒绝，不做隐式递归。
+- Wails v3 的 file drop 默认关闭，本实现显式打开；页面 drop zone 只有原生桌面窗口生效，浏览器 Agent Web 不会获得本地绝对路径。
 
 ### 0.3 本轮进度（2026-09-22）
 

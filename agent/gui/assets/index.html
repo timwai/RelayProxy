@@ -872,7 +872,10 @@
               <button type="button" onclick="toggleDesktopFullscreen()" class="rp-btn">全屏</button>
             </div>
           </div>
-          <div id="desktop-viewer-stage" class="relative bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
+          <div id="desktop-viewer-stage" data-file-drop-target class="relative bg-black flex items-center justify-center min-h-[280px] max-h-[70vh] overflow-hidden">
+            <div id="desktop-file-drop-overlay" class="hidden pointer-events-none absolute inset-0 z-30 items-center justify-center bg-slate-950/75 text-white text-sm font-semibold">
+              拖放文件到这里发送到远端
+            </div>
             <img id="desktop-viewer-image" alt="远程桌面画面" tabindex="0" class="block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default" draggable="false">
             <canvas id="desktop-viewer-canvas" tabindex="0" class="hidden block max-w-full max-h-[70vh] object-contain select-none outline-none cursor-default"></canvas>
             <img id="desktop-viewer-cursor" alt="" class="hidden pointer-events-none absolute z-10 max-w-none select-none" draggable="false">
@@ -3476,6 +3479,13 @@
     }
     window.refreshRemoteDesktopTargets = refreshRemoteDesktopTargets;
     window.refreshRemoteDesktopStatus = refreshRemoteDesktopStatus;
+    window.onRemoteDesktopFileDropResult = function (ok, value) {
+      if (ok) {
+        toast('已发送 ' + Number(value || 0) + ' 个文件到远端剪贴板');
+      } else {
+        toast('文件发送失败：' + String(value || '未知错误'));
+      }
+    };
     window.connectRemoteDesktop = connectRemoteDesktop;
     window.disconnectRemoteDesktop = disconnectRemoteDesktop;
 

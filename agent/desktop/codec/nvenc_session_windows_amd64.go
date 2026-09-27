@@ -175,16 +175,17 @@ func openNVENCHEVC444D3D11Session(
 		return nil, errors.Join(
 			ErrEncoderUnavailable,
 			fmt.Errorf(
-				"%w: NVIDIA adapter does not expose NVENC hardware encoding (NV_ENC_ERR_UNSUPPORTED_DEVICE=2)",
+				"%w: NVIDIA adapter does not expose NVENC hardware encoding (%s)",
 				ErrNVENCUnsupportedDevice,
+				formatNVENCStatus(status),
 			),
 		)
 	}
 	if status != 0 || session.encoder == 0 {
 		return nil, fmt.Errorf(
-			"%w: nvEncOpenEncodeSessionEx(D3D11) returned %d",
+			"%w: nvEncOpenEncodeSessionEx(D3D11) returned %s",
 			ErrEncoderUnavailable,
-			status,
+			formatNVENCStatus(status),
 		)
 	}
 

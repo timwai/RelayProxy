@@ -182,6 +182,7 @@ func parseWindowsVirtualClipboardDescriptors(raw []byte) ([]windowsVirtualClipbo
 	descriptors := make([]windowsVirtualClipboardDescriptor, 0, count)
 	seen := make(map[string]struct{}, count)
 	fileCount := 0
+	var declaredTotal uint64
 	for index := 0; index < count; index++ {
 		offset := 4 + index*windowsVirtualDescriptorBytes
 		item := raw[offset : offset+windowsVirtualDescriptorBytes]
@@ -202,6 +203,10 @@ func parseWindowsVirtualClipboardDescriptors(raw []byte) ([]windowsVirtualClipbo
 			name = strings.TrimRight(name, "\\/")
 		}
 		name = strings.ReplaceAll(name, "\\", "/")
+		localName := filepath.FromSlash(name)
+		if filepath.IsAbs(localName) || filepath.VolumeName(localName) != "" {
+			return nil, fmt.Errorf("virtual clipboard descriptor %d contains an absolute path %q", index, name)
+		}
 		relative, err := safeClipboardRelativePath(name)
 		if err != nil {
 			return nil, fmt.Errorf("virtual clipboard descriptor %d: %w", index, err)
@@ -223,6 +228,12 @@ func parseWindowsVirtualClipboardDescriptors(raw []byte) ([]windowsVirtualClipbo
 			descriptor.DeclaredSize = high<<32 | low
 			if !directory && descriptor.DeclaredSize > maxDesktopClipboardFileBytes {
 				return nil, fmt.Errorf("virtual clipboard file %q exceeds %d bytes", relative, maxDesktopClipboardFileBytes)
+			}
+			if !directory {
+				declaredTotal += descriptor.DeclaredSize
+				if declaredTotal > maxDesktopClipboardTransferBytes {
+					return nil, fmt.Errorf("virtual clipboard declared size exceeds %d bytes", maxDesktopClipboardTransferBytes)
+				}
 			}
 		}
 		if !directory {

@@ -110,6 +110,10 @@ func TestMatchesWindowsNetworkServiceRecovery(t *testing.T) {
 	if matchesWindowsNetworkServiceRecovery(valid[:2], true) {
 		t.Fatal("incomplete recovery policy was accepted")
 	}
+	extra := append(append([]mgr.RecoveryAction(nil), valid...), mgr.RecoveryAction{Type: mgr.NoAction})
+	if matchesWindowsNetworkServiceRecovery(extra, true) {
+		t.Fatal("unexpected extra recovery action was accepted")
+	}
 	wrong := append([]mgr.RecoveryAction(nil), valid...)
 	wrong[1].Delay = 2 * time.Second
 	if matchesWindowsNetworkServiceRecovery(wrong, true) {

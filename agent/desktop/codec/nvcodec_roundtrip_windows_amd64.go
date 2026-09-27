@@ -483,6 +483,10 @@ func ValidateNVCodecH265444RoundTrip(
 
 	encoder, err = OpenNVENCH265EncoderWithD3D11(ctx, cfg, uintptr(device))
 	if err != nil {
+		if errors.Is(err, ErrNVENCUnsupportedDevice) {
+			report.Unsupported = true
+			report.UnsupportedReason = "NVIDIA adapter does not expose NVENC hardware encoding"
+		}
 		return report, err
 	}
 	report.EncoderOpened = true

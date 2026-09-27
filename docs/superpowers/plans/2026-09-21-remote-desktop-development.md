@@ -1159,6 +1159,17 @@ Windows SendInput / CF_UNICODETEXT
 - 新增 gate 单测覆盖：首次 trip 关闭 canary、重复 trip 幂等、配置重新 apply 不能绕过当前进程熔断。
 - 下一步：补 Controller/native Viewer 的 NVDEC runtime breaker，使 decoder runtime/AYUV zero-copy failure 同样熔断 NVCodec 并 generation rebuild 到 oneVPL decoder；同时把 canary trip reason/时间写入 diagnostics。
 
+### 0.2.93 RD3 NVDEC Viewer Circuit Breaker + Trip Diagnostics
+
+- Native Viewer 对 NVDEC 解码侧增加与 Host/NVENC 对称的 runtime breaker：当前 decoder backend 以 `nvdec-` 开头时，Decode 失败会立即熔断 NVCodec canary。
+- NVDEC decode failure 熔断后不退出 Viewer：直接在当前 media generation 上重建 decoder；由于进程级 NVCodec gate 已关闭，HEVC 4:4:4 decoder selector 会继续落到 oneVPL，并请求新的 IDR 恢复解码。
+- AYUV D3D11 zero-copy SubmitGPU 失败同样视为 NVDEC canary runtime failure：记录原因、熔断 gate，并重建 oneVPL decoder；避免此前 AYUV submit error 直接终止 native viewer。
+- circuit breaker 新增首次 trip 时间与原因：`TripNVCodecCanary(reason)` 只记录第一次故障，后续重复错误不会覆盖根因。
+- diagnostics `nvcodecCanaryEligibility` 增加 `circuitTrippedAtUnixMs / circuitTripReason`，便于定位是 NVENC encode、NVDEC decode 还是 AYUV zero-copy render 导致 canary 被熔断。
+- trip reason/time 只保留进程生命周期；Agent 重启后清空，再次启用仍需 opt-in + 当前 qualification/stress eligibility。
+- 新增 circuit breaker 元数据单测，验证首次 trip 的时间和根因可读取。
+- 下一步：把 canary runtime trip 事件写入可导出的 diagnostics timeline，并完善 H.265 fallback 层级：NVCodec → oneVPL → H.264，移除 H.265 runtime error 当前仍可能进入 JPEG 的旧兜底。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

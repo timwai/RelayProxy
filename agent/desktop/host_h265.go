@@ -576,7 +576,8 @@ func (h *Host) streamH265Frames(
 			failedBackend = encoder.Stats().Backend
 		}
 		if failedBackend == "nvenc-hevc444-d3d11" {
-			if desktopcodec.TripNVCodecCanary() {
+			reason := fmt.Sprintf("NVENC runtime failure: %v", cause)
+			if desktopcodec.TripNVCodecCanary(reason) {
 				log.Printf("[Desktop] NVIDIA NVCodec canary circuit tripped after runtime failure: %v", cause)
 			}
 		}

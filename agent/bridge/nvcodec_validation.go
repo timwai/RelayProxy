@@ -36,8 +36,10 @@ type NVCodecCanaryEligibility struct {
 	Eligible             bool     `json:"eligible"`
 	Requested            bool     `json:"requested"`
 	Active               bool     `json:"active"`
-	CircuitTripped       bool     `json:"circuitTripped"`
-	ValidationCurrent    bool     `json:"validationCurrent"`
+	CircuitTripped         bool     `json:"circuitTripped"`
+	CircuitTrippedAtUnixMs int64    `json:"circuitTrippedAtUnixMs,omitempty"`
+	CircuitTripReason      string   `json:"circuitTripReason,omitempty"`
+	ValidationCurrent      bool     `json:"validationCurrent"`
 	StressPresent        bool     `json:"stressPresent"`
 	StressPassed         bool     `json:"stressPassed"`
 	StressCompletedRounds int     `json:"stressCompletedRounds"`
@@ -409,12 +411,15 @@ func evaluateNVCodecCanaryEligibility(
 	status NVCodecValidationStatus,
 	receipt *NVCodecValidationReceipt,
 ) NVCodecCanaryEligibility {
+	trippedAt, tripReason := desktopcodec.NVCodecCanaryTripDetails()
 	result := NVCodecCanaryEligibility{
-		ValidationCurrent:     status.Current,
-		StressRequiredRounds: nvcodecStressQualificationRounds,
-		Requested:            desktopcodec.NVCodecCanaryEnabled() || desktopcodec.NVCodecCanaryCircuitTripped(),
-		Active:               desktopcodec.NVCodecCanaryEnabled(),
-		CircuitTripped:       desktopcodec.NVCodecCanaryCircuitTripped(),
+		ValidationCurrent:       status.Current,
+		StressRequiredRounds:   nvcodecStressQualificationRounds,
+		Requested:              desktopcodec.NVCodecCanaryEnabled() || desktopcodec.NVCodecCanaryCircuitTripped(),
+		Active:                 desktopcodec.NVCodecCanaryEnabled(),
+		CircuitTripped:         desktopcodec.NVCodecCanaryCircuitTripped(),
+		CircuitTrippedAtUnixMs: trippedAt,
+		CircuitTripReason:      tripReason,
 	}
 	if !status.Current {
 		result.Reasons = append(result.Reasons, "current 3/3 validation is not valid")

@@ -3,6 +3,7 @@ package codec
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 func productionTestH265444Backend(name string) h265444Backend {
@@ -144,13 +145,18 @@ func TestProbeH265444BackendsAllowsD3D11OnlyProductionOpeners(t *testing.T) {
 	}
 }
 
-func TestNVCodecCanaryGateDefaultsDisabled(t *testing.T) {
+func resetNVCodecCanaryForTest() {
 	nvcodecCanaryRequested.Store(false)
 	nvcodecCanaryTripped.Store(false)
-	t.Cleanup(func() {
-		nvcodecCanaryRequested.Store(false)
-		nvcodecCanaryTripped.Store(false)
-	})
+	nvcodecCanaryTripAt.Store(0)
+	nvcodecCanaryTripMu.Lock()
+	nvcodecCanaryTripReason = ""
+	nvcodecCanaryTripMu.Unlock()
+}
+
+func TestNVCodecCanaryGateDefaultsDisabled(t *testing.T) {
+	resetNVCodecCanaryForTest()
+	t.Cleanup(resetNVCodecCanaryForTest)
 	if NVCodecCanaryEnabled() {
 		t.Fatal("NVCodec canary unexpectedly enabled")
 	}
@@ -161,41 +167,51 @@ func TestNVCodecCanaryGateDefaultsDisabled(t *testing.T) {
 }
 
 func TestNVCodecCanaryGateCanBeExplicitlyEnabled(t *testing.T) {
-	nvcodecCanaryRequested.Store(false)
-	nvcodecCanaryTripped.Store(false)
+	resetNVCodecCanaryForTest()
 	SetNVCodecCanaryEnabled(true)
-	t.Cleanup(func() {
-		nvcodecCanaryRequested.Store(false)
-		nvcodecCanaryTripped.Store(false)
-	})
+	t.Cleanup(resetNVCodecCanaryForTest)
 	if !NVCodecCanaryEnabled() {
 		t.Fatal("NVCodec canary opt-in did not enable gate")
 	}
 }
 
 func TestNVCodecCanaryCircuitBreakerDisablesActiveGate(t *testing.T) {
-	nvcodecCanaryRequested.Store(false)
-	nvcodecCanaryTripped.Store(false)
+	resetNVCodecCanaryForTest()
 	SetNVCodecCanaryEnabled(true)
-	t.Cleanup(func() {
-		nvcodecCanaryRequested.Store(false)
-		nvcodecCanaryTripped.Store(false)
-	})
+	t.Cleanup(resetNVCodecCanaryForTest)
 
 	if !NVCodecCanaryEnabled() {
 		t.Fatal("canary should be active before trip")
 	}
-	if !TripNVCodecCanary() {
+	if !TripNVCodecCanary("test runtime failure") {
 		t.Fatal("first circuit trip was not recorded")
 	}
 	if NVCodecCanaryEnabled() || !NVCodecCanaryCircuitTripped() {
 		t.Fatal("tripped canary remained active")
 	}
-	if TripNVCodecCanary() {
+	if TripNVCodecCanary("second failure") {
 		t.Fatal("second circuit trip should be idempotent")
 	}
 	SetNVCodecCanaryEnabled(true)
 	if NVCodecCanaryEnabled() {
 		t.Fatal("config reapply bypassed process-lifetime circuit breaker")
+	}
+}
+
+func TestNVCodecCanaryCircuitBreakerRecordsReasonAndTime(t *testing.T) {
+	resetNVCodecCanaryForTest()
+	SetNVCodecCanaryEnabled(true)
+	t.Cleanup(resetNVCodecCanaryForTest)
+
+	before := time.Now().Add(-time.Second).UnixMilli()
+	if !TripNVCodecCanary("NVDEC decode failure: device lost") {
+		t.Fatal("circuit trip was not recorded")
+	}
+	at, reason := NVCodecCanaryTripDetails()
+	if at < before {
+		t.Fatalf("trip time=%d before lower bound=%d", at, before)
+	}
+	if reason != "NVDEC decode failure: device lost" {
+		t.Fatalf("trip reason=%q", reason)
 	}
 }

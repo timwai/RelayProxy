@@ -3,7 +3,10 @@ package codec
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -27,8 +30,11 @@ func (p H265444BackendProbe) EndToEnd() bool {
 }
 
 var (
-	nvcodecCanaryRequested atomic.Bool
-	nvcodecCanaryTripped   atomic.Bool
+	nvcodecCanaryRequested  atomic.Bool
+	nvcodecCanaryTripped    atomic.Bool
+	nvcodecCanaryTripAt     atomic.Int64
+	nvcodecCanaryTripMu     sync.RWMutex
+	nvcodecCanaryTripReason string
 )
 
 func SetNVCodecCanaryEnabled(enabled bool) {
@@ -39,15 +45,30 @@ func NVCodecCanaryEnabled() bool {
 	return nvcodecCanaryRequested.Load() && !nvcodecCanaryTripped.Load()
 }
 
-func TripNVCodecCanary() bool {
+func TripNVCodecCanary(reason string) bool {
 	if !nvcodecCanaryRequested.Load() {
 		return false
 	}
-	return nvcodecCanaryTripped.CompareAndSwap(false, true)
+	if !nvcodecCanaryTripped.CompareAndSwap(false, true) {
+		return false
+	}
+	nvcodecCanaryTripAt.Store(time.Now().UnixMilli())
+	nvcodecCanaryTripMu.Lock()
+	nvcodecCanaryTripReason = strings.TrimSpace(reason)
+	nvcodecCanaryTripMu.Unlock()
+	return true
 }
 
 func NVCodecCanaryCircuitTripped() bool {
 	return nvcodecCanaryTripped.Load()
+}
+
+func NVCodecCanaryTripDetails() (int64, string) {
+	at := nvcodecCanaryTripAt.Load()
+	nvcodecCanaryTripMu.RLock()
+	reason := nvcodecCanaryTripReason
+	nvcodecCanaryTripMu.RUnlock()
+	return at, reason
 }
 
 type h265444Backend struct {

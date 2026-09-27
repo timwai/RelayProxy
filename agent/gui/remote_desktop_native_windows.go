@@ -439,6 +439,13 @@ func (s *nativeDesktopSession) disableGPUCursor() {
 	s.mediaMu.Unlock()
 }
 
+func nativeDesktopDecoderIsNVDEC(decoder desktopcodec.Decoder) bool {
+	if decoder == nil {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(decoder.Backend())), "nvdec-")
+}
+
 func nativeDesktopDecoderUsesGPUCursor(decoder desktopcodec.Decoder) bool {
 	if decoder == nil || !decoder.Hardware() {
 		return false
@@ -875,6 +882,24 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 		decoded, err := s.decoder.Decode(ctx, frame.Data, time.Duration(frame.Timestamp)*time.Microsecond)
 		decodeElapsed := time.Since(decodeStarted)
 		if err != nil {
+			if nativeDesktopDecoderIsNVDEC(s.decoder) {
+				reason := fmt.Sprintf("NVDEC decode failure: %v", err)
+				if desktopcodec.TripNVCodecCanary(reason) {
+					log.Printf("[Desktop] NVIDIA NVCodec canary circuit tripped after NVDEC decode failure: %v", err)
+				}
+				if rebuildErr := s.rebuildMediaPipeline(ctx, frame); rebuildErr != nil {
+					log.Printf("[Desktop] native viewer NVDEC fallback rebuild failed: %v", rebuildErr)
+				} else {
+					log.Printf("[Desktop] native viewer migrated NVDEC to decoder=%s after runtime failure", s.decoder.Backend())
+					if time.Since(lastRecovery) >= 500*time.Millisecond {
+						lastRecovery = time.Now()
+						_ = s.requestIDR(owner)
+					}
+					converted = nil
+					perf = newNativeViewerPerf(time.Now())
+					continue
+				}
+			}
 			if time.Since(lastRecovery) >= 500*time.Millisecond {
 				lastRecovery = time.Now()
 				if requestErr := s.requestIDR(owner); requestErr != nil {
@@ -937,6 +962,12 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 						}
 						if err != nil {
 							if decodedFrame.Format == desktopcodec.PixelFormatAYUV {
+								if nativeDesktopDecoderIsNVDEC(s.decoder) {
+									reason := fmt.Sprintf("NVDEC AYUV zero-copy submit failure: %v", err)
+									if desktopcodec.TripNVCodecCanary(reason) {
+										log.Printf("[Desktop] NVIDIA NVCodec canary circuit tripped after AYUV zero-copy submit failure: %v", err)
+									}
+								}
 								log.Printf("[Desktop] zero-copy AYUV submit failed: %v", err)
 								return
 							}
@@ -994,6 +1025,20 @@ func (s *nativeDesktopSession) run(ctx context.Context, owner *appWindow) {
 				}
 			}()
 			if err != nil {
+				if nativeDesktopDecoderIsNVDEC(s.decoder) && decoded[i].Format == desktopcodec.PixelFormatAYUV {
+					if rebuildErr := s.rebuildMediaPipeline(ctx, frame); rebuildErr != nil {
+						log.Printf("[Desktop] native viewer NVDEC AYUV fallback rebuild failed: %v", rebuildErr)
+						return
+					}
+					log.Printf("[Desktop] native viewer migrated NVDEC AYUV path to decoder=%s", s.decoder.Backend())
+					converted = nil
+					perf = newNativeViewerPerf(time.Now())
+					if time.Since(lastRecovery) >= 500*time.Millisecond {
+						lastRecovery = time.Now()
+						_ = s.requestIDR(owner)
+					}
+					break
+				}
 				return
 			}
 		}

@@ -92,8 +92,8 @@ func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	// catch-all inbound handle turns every download packet into a mandatory
 	// userspace reinjection and can blackhole the whole host if metadata differs.
 	outbound := "(outbound and !loopback and (tcp or udp or fragment)"
-	if bypass := windowsRelayBypassFilter(guard); bypass != "" {
-		outbound += " and not (" + bypass + ")"
+	for _, clause := range windowsRelayBypassClauses(guard) {
+		outbound += " and " + clause
 	}
 	outbound += ")"
 
@@ -103,35 +103,9 @@ func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	return outbound + " or " + reflection
 }
 
-func windowsRelayBypassFilter(guard LoopGuard) string {
-	if len(guard.RelayIPs) == 0 || len(guard.RelayPorts) == 0 {
-		return ""
-	}
-	ports := make([]string, 0, len(guard.RelayPorts))
-	seenPorts := make(map[int]struct{}, len(guard.RelayPorts))
-	for _, port := range guard.RelayPorts {
-		if port <= 0 || port > 65535 {
-			continue
-		}
-		if _, ok := seenPorts[port]; ok {
-			continue
-		}
-		seenPorts[port] = struct{}{}
-		ports = append(ports, fmt.Sprintf("%d", port))
-	}
-	if len(ports) == 0 {
-		return ""
-	}
-	tcpPorts := make([]string, 0, len(ports))
-	udpPorts := make([]string, 0, len(ports))
-	for _, port := range ports {
-		tcpPorts = append(tcpPorts, "tcp.DstPort == "+port)
-		udpPorts = append(udpPorts, "udp.DstPort == "+port)
-	}
-	transport := "(fragment or (tcp and (" + strings.Join(tcpPorts, " or ") + ")) or (udp and (" + strings.Join(udpPorts, " or ") + ")))"
-
-	terms := make([]string, 0, len(guard.RelayIPs))
-	seenIPs := make(map[string]struct{}, len(guard.RelayIPs))
+func windowsRelayBypassClauses(guard LoopGuard) []string {
+	clauses := make([]string, 0, len(guard.RelayIPs))
+	seen := make(map[string]struct{}, len(guard.RelayIPs))
 	for _, value := range guard.RelayIPs {
 		addr, err := netip.ParseAddr(strings.TrimSpace(value))
 		if err != nil {
@@ -139,15 +113,20 @@ func windowsRelayBypassFilter(guard LoopGuard) string {
 		}
 		addr = addr.Unmap()
 		key := addr.String()
-		if _, ok := seenIPs[key]; ok {
+		if _, ok := seen[key]; ok {
 			continue
 		}
-		seenIPs[key] = struct{}{}
+		seen[key] = struct{}{}
+
+		// Exclude the complete Relay server address, not just one port. The Relay
+		// control/data plane must never depend on the transparent proxy it keeps
+		// alive. Applying ! only to WinDivert's boolean family field avoids the
+		// unsupported negation of a compound expression.
 		if addr.Is4() {
-			terms = append(terms, "(ip and ip.DstAddr == "+key+" and "+transport+")")
+			clauses = append(clauses, "(!ip or ip.DstAddr != "+key+")")
 		} else {
-			terms = append(terms, "(ipv6 and ipv6.DstAddr == "+key+" and "+transport+")")
+			clauses = append(clauses, "(!ipv6 or ipv6.DstAddr != "+key+")")
 		}
 	}
-	return strings.Join(terms, " or ")
+	return clauses
 }

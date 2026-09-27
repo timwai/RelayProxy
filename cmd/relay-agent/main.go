@@ -20,6 +20,7 @@ import (
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
+	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
 	"relayproxy/internal/deviceidentity"
 )
@@ -40,6 +41,7 @@ func main() {
 	minimizedFlag := flag.Bool("minimized", false, "Start the desktop window minimized to the system tray")
 	hiddenFlag := flag.Bool("hidden", false, "Alias for --minimized (kept for existing autostart entries)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
+	startupHelperFlag := flag.String(startup.HelperFlagName(), "", "Internal Windows startup helper action")
 
 	var noWebFlag bool
 	flag.BoolVar(&noWebFlag, "no-web", false, "Disable the embedded web management page")
@@ -48,6 +50,14 @@ func main() {
 	webListenFlag := flag.String("web-listen", "", "Override the web management listen address")
 
 	flag.Parse()
+
+	if *startupHelperFlag != "" {
+		if err := startup.RunElevatedHelper(*startupHelperFlag, "RelayProxy Agent", *configPath); err != nil {
+			log.Printf("[Startup] Elevated autostart helper failed: %v", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *versionFlag {
 		fmt.Printf("relay-agent %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)

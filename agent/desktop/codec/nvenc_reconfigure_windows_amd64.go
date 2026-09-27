@@ -29,8 +29,10 @@ func buildNVENCReconfigureParams(
 	config *nvencConfigBlob,
 	cfg VideoConfig,
 	forceIDR bool,
+	apiVersion uint32,
+	legacy bool,
 ) (*nvencInitializeParamsBlob, *nvencReconfigureParamsBlob, error) {
-	initParams, err := buildNVENCInitializeParams(config, cfg)
+	initParams, err := buildNVENCInitializeParams(config, cfg, apiVersion, legacy)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -38,7 +40,7 @@ func buildNVENCReconfigureParams(
 	params := &nvencReconfigureParamsBlob{}
 	binary.LittleEndian.PutUint32(
 		params.Data[nvencReconfigureVersionOffset:nvencReconfigureVersionOffset+4],
-		nvencVersionWithReservedBit(2),
+		nvencVersionWithReservedBitFor(apiVersion, map[bool]uint32{true: 1, false: 2}[legacy]),
 	)
 	copy(
 		params.Data[nvencReconfigureInitOffset:nvencReconfigureInitOffset+nvencInitializeParamsSize],
@@ -88,10 +90,10 @@ func (s *nvencD3D11Session) reconfigureHEVC444Bitrate(
 
 	config := &nvencConfigBlob{}
 	copy(config.Data[:], s.initConfig.Data[:])
-	if err := configureNVENCHEVC444(config, normalized); err != nil {
+	if err := configureNVENCHEVC444(config, normalized, s.apiVersion, s.legacyABI); err != nil {
 		return VideoConfig{}, err
 	}
-	initParams, reconfigureParams, err := buildNVENCReconfigureParams(config, normalized, false)
+	initParams, reconfigureParams, err := buildNVENCReconfigureParams(config, normalized, false, s.apiVersion, s.legacyABI)
 	if err != nil {
 		return VideoConfig{}, err
 	}

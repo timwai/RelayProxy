@@ -1214,6 +1214,16 @@ Windows SendInput / CF_UNICODETEXT
 - GUI 面板会显示当前 pending stage；环境变量未开启时控制区完全隐藏。
 - 下一步：在 NVIDIA Windows 真机执行完整故障注入矩阵，并导出 diagnostics 作为资格证据。
 
+### 0.2.99 RD3 NVIDIA Validation Automation
+
+- 新增 `scripts/validate-nvcodec-canary.ps1`，通过 Agent Web API 自动执行 NVIDIA 3/3 qualification、5-round stress 与 canary eligibility 检查。
+- 脚本支持 `Prepare / Status / ArmNVENC / ArmNVDEC`；故障注入仍要求 Agent 启动前显式设置 `RELAYPROXY_NV_CODEC_FAULT_INJECTION=1`。
+- Agent Web 已增加 fault-injection GET/POST API，并继续经过现有 Host/same-origin mutation 防护；浏览器 Web UI 与 Wails GUI 共用 Bridge 状态。
+- validation receipt 的 `qualificationPasses` 封顶为 3；stress 继续执行真实 round-trip，但不会把资格计数从 3 累加到 8。
+- Windows UI CI 增加验证脚本的 PowerShell parser syntax 检查。
+- 推荐真机流程：`Prepare → GUI 开启 Canary → Status 确认 ACTIVE → ArmNVENC → 导出 diagnostics → 重启 → ACTIVE → ArmNVDEC → 导出 diagnostics`。
+
+
 
 
 

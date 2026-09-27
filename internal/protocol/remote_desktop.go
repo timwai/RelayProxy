@@ -329,38 +329,38 @@ type DesktopInputEvent struct {
 }
 
 const (
-	DesktopSessionInput        = "input"
-	DesktopSessionVideoConfig  = "video_config"
-	DesktopSessionAudioConfig  = "audio_config"
-	DesktopSessionAudioControl = "audio_control"
-	DesktopSessionIDRRequest   = "idr_request"
-	DesktopSessionCursor       = "cursor"
+	DesktopSessionInput              = "input"
+	DesktopSessionVideoConfig        = "video_config"
+	DesktopSessionAudioConfig        = "audio_config"
+	DesktopSessionAudioControl       = "audio_control"
+	DesktopSessionIDRRequest         = "idr_request"
+	DesktopSessionCursor             = "cursor"
 	DesktopSessionClipboard          = "clipboard"
 	DesktopSessionClipboardFileOffer = "clipboard_file_offer"
 	DesktopSessionClipboardFileChunk = "clipboard_file_chunk"
 	DesktopSessionClipboardFileDone  = "clipboard_file_done"
-	DesktopSessionPing         = "ping"
-	DesktopSessionPong         = "pong"
-	DesktopSessionStatsReport  = "stats"
-	DesktopSessionDisplays     = "displays"
-	DesktopSessionVideoControl = "video_control"
+	DesktopSessionPing               = "ping"
+	DesktopSessionPong               = "pong"
+	DesktopSessionStatsReport        = "stats"
+	DesktopSessionDisplays           = "displays"
+	DesktopSessionVideoControl       = "video_control"
 )
 
 type DesktopSessionMessage struct {
-	Type         string                     `json:"type"`
-	Input        *DesktopInputEvent         `json:"input,omitempty"`
-	VideoConfig  *DesktopVideoConfig        `json:"videoConfig,omitempty"`
-	AudioConfig  *DesktopAudioConfig        `json:"audioConfig,omitempty"`
-	AudioControl *DesktopAudioControl       `json:"audioControl,omitempty"`
-	Cursor       *DesktopCursorState        `json:"cursor,omitempty"`
+	Type               string                     `json:"type"`
+	Input              *DesktopInputEvent         `json:"input,omitempty"`
+	VideoConfig        *DesktopVideoConfig        `json:"videoConfig,omitempty"`
+	AudioConfig        *DesktopAudioConfig        `json:"audioConfig,omitempty"`
+	AudioControl       *DesktopAudioControl       `json:"audioControl,omitempty"`
+	Cursor             *DesktopCursorState        `json:"cursor,omitempty"`
 	Clipboard          *DesktopClipboardState     `json:"clipboard,omitempty"`
 	ClipboardFileOffer *DesktopClipboardFileOffer `json:"clipboardFileOffer,omitempty"`
 	ClipboardFileChunk *DesktopClipboardFileChunk `json:"clipboardFileChunk,omitempty"`
 	ClipboardFileDone  *DesktopClipboardFileDone  `json:"clipboardFileDone,omitempty"`
-	Probe        *DesktopSessionProbe       `json:"probe,omitempty"`
-	Stats        *DesktopSessionStats       `json:"stats,omitempty"`
-	Displays     []DesktopDisplayCapability `json:"displays,omitempty"`
-	VideoControl *DesktopVideoControl       `json:"videoControl,omitempty"`
+	Probe              *DesktopSessionProbe       `json:"probe,omitempty"`
+	Stats              *DesktopSessionStats       `json:"stats,omitempty"`
+	Displays           []DesktopDisplayCapability `json:"displays,omitempty"`
+	VideoControl       *DesktopVideoControl       `json:"videoControl,omitempty"`
 }
 
 const (

@@ -72,7 +72,7 @@ func TestClipboardFileReceiverRejectsTraversalAndOffsets(t *testing.T) {
 	t.Cleanup(receiver.reset)
 	err := receiver.offer(protocol.DesktopClipboardFileOffer{
 		TransferID: "0123456789abcdef",
-		Files: []protocol.DesktopClipboardFile{{Name: "../evil.txt", Size: 1, SHA256: strings.Repeat("0", 64)}},
+		Files:      []protocol.DesktopClipboardFile{{Name: "../evil.txt", Size: 1, SHA256: strings.Repeat("0", 64)}},
 	})
 	if err == nil {
 		t.Fatal("path traversal offer accepted")

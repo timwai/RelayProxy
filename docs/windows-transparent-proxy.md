@@ -75,7 +75,7 @@ SOCKS5/HTTP 的进程归属来自本机客户端至代理监听端口的实际 T
 
 Windows GUI 的“系统透明代理”区域会显示 `RelayProxy Network Service` 的安装状态、运行状态、服务 PID、当前 broker 程序路径和自动恢复状态。状态分为“未安装 / 已停止 / 需要修复 / 运行中”；客户端升级后如果 broker 二进制版本与当前客户端不一致，会显示“需要修复”。
 
-“安装 / 修复服务”会请求一次 UAC，重新发布受保护的 broker 程序、更新 Windows Service 配置并启动服务。“卸载服务”同样通过一次 UAC 停止并删除 `RelayProxyNetwork` 服务，同时清理 `%ProgramData%\RelayProxy-Network-Service\` 下的 broker 程序；WinDivert 的受保护运行库目录保留，供管理员直连诊断路径复用。
+“安装 / 修复服务”会请求一次 UAC，重新发布受保护的 broker 程序、更新 Windows Service 配置并启动服务。“卸载服务”会先关闭已保存的 `network.mode=divert`，再通过一次 UAC 停止并删除 `RelayProxyNetwork` 服务，同时清理 `%ProgramData%\RelayProxy-Network-Service\` 下的 broker 程序；因此下次启动不会自动把刚卸载的服务重新安装。WinDivert 的受保护运行库目录保留，供管理员直连诊断路径复用。
 
 服务安装/修复时会配置 Windows SCM 故障恢复：异常退出后依次在 1 秒、5 秒、15 秒后自动重启，24 小时后重置失败计数。Agent 侧的命名管道 packet device 同时支持自动重新握手；因此 broker 被 SCM 拉起后，透明代理无需重启整个 GUI/Agent 即可恢复。手工“停止服务”或“卸载服务”属于正常停止，不会被故障恢复策略强行拉起。
 

@@ -5,10 +5,12 @@ package divert
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -26,8 +28,9 @@ import (
 
 const (
 	windowsNetworkServiceName        = "RelayProxyNetwork"
-	windowsNetworkServiceDisplayName = "RelayProxy Network Service"
-	windowsNetworkPipeName           = `\\.\pipe\RelayProxyNetwork-v2`
+	windowsNetworkServiceDisplayName    = "RelayProxy Network Service"
+	windowsNetworkPipeName              = `\\.\pipe\RelayProxyNetwork-v3`
+	windowsTransparentFirewallRuleName = "RelayProxy Transparent Proxy"
 
 	networkServiceModeFlagName   = "relayproxy-network-service"
 	networkServiceSIDFlagName    = "relayproxy-network-service-sid"
@@ -37,7 +40,7 @@ const (
 	networkServiceHelperRemove  = "remove"
 
 	networkPipeMagic   = 0x31504e52 // "RNP1" little-endian
-	networkPipeVersion = 2
+	networkPipeVersion = 3
 
 	networkFrameHello   = 1
 	networkFrameReady   = 2
@@ -65,8 +68,14 @@ type networkFrame struct {
 	payload    []byte
 }
 
+type networkHello struct {
+	Filter   string   `json:"filter"`
+	TCPPorts []uint16 `json:"tcpPorts"`
+}
+
 type windowsServicePacketDevice struct {
 	filter      string
+	tcpPorts    []uint16
 	fileMu      sync.RWMutex
 	reconnectMu sync.Mutex
 	file        *os.File
@@ -275,12 +284,30 @@ func serveWindowsNetworkSession(file *os.File) error {
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte("expected hello frame")})
 		return errors.New("RelayProxy Network Service 收到无效握手")
 	}
-	filter := strings.TrimSpace(string(hello.payload))
-	if filter == "" {
+	var request networkHello
+	if err := json.Unmarshal(hello.payload, &request); err != nil {
+		message := "invalid Network Service hello payload"
+		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(message)})
+		return fmt.Errorf("%s: %w", message, err)
+	}
+	request.Filter = strings.TrimSpace(request.Filter)
+	if request.Filter == "" {
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte("empty WinDivert filter")})
 		return errors.New("RelayProxy Network Service 收到空 WinDivert 过滤器")
 	}
-	handle, err := openTrustedWinDivert(filter)
+	ports, err := normalizeWindowsTransparentFirewallPorts(request.TCPPorts)
+	if err != nil {
+		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(err.Error())})
+		return err
+	}
+	if err := installWindowsTransparentFirewallRule(ports); err != nil {
+		message := "配置透明代理 Windows Firewall 入站规则失败: " + err.Error()
+		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(message)})
+		return errors.New(message)
+	}
+	defer removeWindowsTransparentFirewallRule()
+
+	handle, err := openTrustedWinDivert(request.Filter)
 	if err != nil {
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(err.Error())})
 		return err
@@ -346,6 +373,90 @@ func serveWindowsNetworkSession(file *os.File) error {
 		default:
 		}
 	}
+}
+
+func normalizeWindowsTransparentFirewallPorts(input []uint16) ([]uint16, error) {
+	if len(input) == 0 || len(input) > 4 {
+		return nil, errors.New("透明代理 Windows Firewall 端口数量无效")
+	}
+	seen := make(map[uint16]struct{}, len(input))
+	ports := make([]uint16, 0, len(input))
+	for _, port := range input {
+		if port == 0 {
+			return nil, errors.New("透明代理 Windows Firewall 端口不能为 0")
+		}
+		if _, ok := seen[port]; ok {
+			continue
+		}
+		seen[port] = struct{}{}
+		ports = append(ports, port)
+	}
+	if len(ports) == 0 {
+		return nil, errors.New("透明代理 Windows Firewall 端口为空")
+	}
+	return ports, nil
+}
+
+func windowsNetshPath() (string, error) {
+	systemRoot := strings.TrimSpace(os.Getenv("SystemRoot"))
+	if systemRoot == "" {
+		return "", errors.New("SystemRoot 环境变量为空")
+	}
+	path := filepath.Join(systemRoot, "System32", "netsh.exe")
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("netsh.exe 不是普通文件: %s", path)
+	}
+	return path, nil
+}
+
+func runWindowsNetsh(args ...string) error {
+	path, err := windowsNetshPath()
+	if err != nil {
+		return err
+	}
+	command := exec.Command(path, args...)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := command.CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			return err
+		}
+		return fmt.Errorf("%w: %s", err, message)
+	}
+	return nil
+}
+
+func removeWindowsTransparentFirewallRule() error {
+	return runWindowsNetsh(
+		"advfirewall", "firewall", "delete", "rule",
+		"name="+windowsTransparentFirewallRuleName,
+	)
+}
+
+func installWindowsTransparentFirewallRule(input []uint16) error {
+	ports, err := normalizeWindowsTransparentFirewallPorts(input)
+	if err != nil {
+		return err
+	}
+	// A single broker session is supported. Delete a stale rule left by an
+	// unclean service termination before publishing the current random ports.
+	_ = removeWindowsTransparentFirewallRule()
+	values := make([]string, 0, len(ports))
+	for _, port := range ports {
+		values = append(values, fmt.Sprintf("%d", port))
+	}
+	return runWindowsNetsh(
+		"advfirewall", "firewall", "add", "rule",
+		"name="+windowsTransparentFirewallRuleName,
+		"dir=in", "action=allow", "protocol=TCP",
+		"localport="+strings.Join(values, ","),
+		"profile=any", "edge=no",
+	)
 }
 
 func writeNetworkFrame(writer io.Writer, mu *sync.Mutex, frame networkFrame) error {
@@ -414,7 +525,7 @@ func readNetworkFrame(reader io.Reader) (networkFrame, error) {
 	return frame, nil
 }
 
-func connectWindowsServicePipe(filter string) (*os.File, error) {
+func connectWindowsServicePipe(filter string, tcpPorts []uint16) (*os.File, error) {
 	name, err := windows.UTF16PtrFromString(windowsNetworkPipeName)
 	if err != nil {
 		return nil, err
@@ -447,7 +558,12 @@ func connectWindowsServicePipe(filter string) (*os.File, error) {
 		_ = windows.CloseHandle(handle)
 		return nil, errors.New("无法打开 RelayProxy Network Service 管道")
 	}
-	if err := writeNetworkFrame(file, nil, networkFrame{kind: networkFrameHello, payload: []byte(filter)}); err != nil {
+	helloPayload, err := json.Marshal(networkHello{Filter: filter, TCPPorts: tcpPorts})
+	if err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if err := writeNetworkFrame(file, nil, networkFrame{kind: networkFrameHello, payload: helloPayload}); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
@@ -468,12 +584,13 @@ func connectWindowsServicePipe(filter string) (*os.File, error) {
 	}
 }
 
-func openWindowsServicePacketDevice(filter string) (*windowsServicePacketDevice, error) {
-	file, err := connectWindowsServicePipe(filter)
+func openWindowsServicePacketDevice(filter string, tcpPorts []uint16) (*windowsServicePacketDevice, error) {
+	ports := append([]uint16(nil), tcpPorts...)
+	file, err := connectWindowsServicePipe(filter, ports)
 	if err != nil {
 		return nil, err
 	}
-	return &windowsServicePacketDevice{filter: filter, file: file}, nil
+	return &windowsServicePacketDevice{filter: filter, tcpPorts: ports, file: file}, nil
 }
 
 func (d *windowsServicePacketDevice) currentFile() *os.File {
@@ -511,7 +628,7 @@ func (d *windowsServicePacketDevice) reconnect(expected *os.File) error {
 		if d.closed.Load() {
 			return netClosedError()
 		}
-		file, err := connectWindowsServicePipe(d.filter)
+		file, err := connectWindowsServicePipe(d.filter, d.tcpPorts)
 		if err == nil {
 			d.fileMu.Lock()
 			if d.closed.Load() {
@@ -1070,6 +1187,9 @@ func waitWindowsServiceDeleted(manager *mgr.Mgr, timeout time.Duration) error {
 }
 
 func cleanupWindowsNetworkServiceArtifacts() (NetworkServiceUninstallResult, error) {
+	if err := removeWindowsTransparentFirewallRule(); err != nil {
+		return NetworkServiceUninstallResult{}, fmt.Errorf("删除 RelayProxy Windows Firewall 规则失败: %w", err)
+	}
 	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
 	if err != nil {
 		return NetworkServiceUninstallResult{}, fmt.Errorf("获取 ProgramData 路径失败: %w", err)

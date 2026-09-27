@@ -137,6 +137,24 @@ func SyncAutoStart(appName, exePath, configPath string, requireAdmin bool) (func
 			return errors.Join(removeErr, restoreErr)
 		}, nil
 	}
+	if !elevated && before.taskXML != "" && desired.taskXML == "" {
+		if err := runElevatedAutoStartHelper(configPath, startupHelperRemove); err != nil {
+			return nil, err
+		}
+		if err := store.writeCommand(desired.command); err != nil {
+			// Best-effort restore of the managed elevated task if publishing the
+			// ordinary Run entry fails.
+			restoreErr := runElevatedAutoStartHelper(configPath, startupHelperInstall)
+			return nil, errors.Join(err, restoreErr)
+		}
+		return func() error {
+			startupMu.Lock()
+			defer startupMu.Unlock()
+			removeErr := store.writeCommand("")
+			restoreErr := runElevatedAutoStartHelper(configPath, startupHelperInstall)
+			return errors.Join(removeErr, restoreErr)
+		}, nil
+	}
 	rollback, err := applyAutoStart(store, before, desired, elevated)
 	if rollback == nil || err != nil {
 		return nil, err

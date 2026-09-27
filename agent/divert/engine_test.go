@@ -84,3 +84,30 @@ func requireEngine(t *testing.T, cfg Config) *Engine {
 	}
 	return engine
 }
+
+func TestEngineMatchesSafeProcessAliases(t *testing.T) {
+	engine, err := NewEngine(Config{
+		DefaultAction: ActionReject,
+		Rules: []Rule{
+			{Name: "dns service", Enabled: true, Process: "service:Dnscache", Action: ActionProxy},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unique := Flow{
+		Process:        `C:\Windows\System32\svchost.exe`,
+		ProcessAliases: []string{"service:Dnscache"},
+		Services:       []string{"Dnscache"},
+	}
+	if got := engine.Match(unique); got.Action != ActionProxy || got.Rule != "dns service" {
+		t.Fatalf("unique service alias did not match: %+v", got)
+	}
+	shared := Flow{
+		Process:  `C:\Windows\System32\svchost.exe`,
+		Services: []string{"Dnscache", "NlaSvc"},
+	}
+	if got := engine.Match(shared); got.Action != ActionReject {
+		t.Fatalf("shared service host guessed a service identity: %+v", got)
+	}
+}

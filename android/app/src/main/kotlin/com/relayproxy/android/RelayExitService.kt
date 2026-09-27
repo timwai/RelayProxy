@@ -67,11 +67,13 @@ class RelayExitService : Service() {
     private var core: Client? = null
     private var networkBinder: NetworkBinder? = null
     private var lastNotificationText: String? = null
+    @Volatile
+    private var activeNetworkMode: String? = null
 
     private val refresh = object : Runnable {
         override fun run() {
             core?.let {
-                status = runCatching { it.statusJSON() }
+                status = runCatching { decorateStatus(it.statusJSON()) }
                     .getOrElse { errorStatus(it.message ?: "读取状态失败") }
             }
             updateNotificationIfChanged()
@@ -122,6 +124,7 @@ class RelayExitService : Service() {
             activeInstance = null
         }
         networkBinder?.release()
+        activeNetworkMode = null
         val running = core
         core = null
         runCatching { running?.stop() }
@@ -151,7 +154,11 @@ class RelayExitService : Service() {
             NetworkBinder.MODE_CELLULAR -> "移动数据"
             else -> "可用"
         }
-        status = waitingStatus("等待${networkLabel}网络")
+        status = if (config.autoNetworkSwitch) {
+            waitingStatus("等待可用网络（" + networkLabel + "优先）")
+        } else {
+            waitingStatus("等待" + networkLabel + "网络")
+        }
         updateNotificationIfChanged(force = true)
         scheduleRefresh(WAITING_REFRESH_MS)
 
@@ -159,20 +166,26 @@ class RelayExitService : Service() {
         networkBinder = binder
         binder.bind(
             mode = config.networkMode,
-            onAvailable = {
+            autoSwitch = config.autoNetworkSwitch,
+            onAvailable = { activeMode ->
+                activeNetworkMode = activeMode
                 startCore(config)
                 requestRefreshSoon()
             },
             onLost = {
+                activeNetworkMode = null
                 stopCoreOnly()
-                status = if (config.networkMode == NetworkBinder.MODE_AUTO) {
+                status = if (config.autoNetworkSwitch) {
+                    waitingStatus("网络不可用，正在自动切换")
+                } else if (config.networkMode == NetworkBinder.MODE_AUTO) {
                     waitingStatus("网络已变化，正在重新连接")
                 } else {
-                    waitingStatus("${networkLabel}断开，等待恢复")
+                    waitingStatus(networkLabel + "断开，等待恢复")
                 }
                 requestRefreshSoon()
             },
             onError = { message ->
+                activeNetworkMode = null
                 stopCoreOnly()
                 status = errorStatus(message)
                 requestRefreshSoon()
@@ -189,7 +202,7 @@ class RelayExitService : Service() {
                     val client = Androidcore.newClient(config.coreJson(), identity.absolutePath)
                     client.start()
                     core = client
-                    status = client.statusJSON()
+                    status = decorateStatus(client.statusJSON())
                 } catch (t: Throwable) {
                     status = errorStatus(t.message ?: t.javaClass.simpleName)
                 }
@@ -218,6 +231,7 @@ class RelayExitService : Service() {
         }
         val binder = networkBinder
         networkBinder = null
+        activeNetworkMode = null
         executor.execute {
             runCatching { old?.stop() }
             runCatching { binder?.release() }
@@ -317,6 +331,17 @@ class RelayExitService : Service() {
             handler.postDelayed(refresh, delayMs)
         }
     }
+
+    private fun decorateStatus(raw: String): String = runCatching {
+        val obj = JSONObject(raw)
+        val activeMode = activeNetworkMode
+        if (activeMode.isNullOrBlank()) {
+            obj.remove("activeNetwork")
+        } else {
+            obj.put("activeNetwork", activeMode)
+        }
+        obj.toString()
+    }.getOrElse { raw }
 
     private fun errorStatus(message: String): String = JSONObject()
         .put("connectionState", "ERROR")

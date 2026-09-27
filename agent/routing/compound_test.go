@@ -109,7 +109,6 @@ func TestCompoundProcessAliasMatching(t *testing.T) {
 	}
 }
 
-
 func TestCompoundTargetRuleDoesNotRequireProcessIdentity(t *testing.T) {
 	engine, err := NewEngine(Config{Mode: ModeRule, DefaultAction: ActionReject, Rules: []Rule{{
 		Name: "SMB target", Enabled: true,

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -90,21 +89,11 @@ func WindowsPlatformReadiness() error {
 	if runtime.GOARCH != "amd64" {
 		return errors.New("系统透明代理目前需要 Windows x64 客户端")
 	}
-	var failures []string
-	if !windows.GetCurrentProcessToken().IsElevated() {
-		failures = append(failures, "请以管理员身份重新启动客户端")
-	}
 	executable, err := os.Executable()
 	if err == nil {
 		err = winDivertDependencies(executable)
 	}
-	if err != nil {
-		failures = append(failures, err.Error())
-	}
-	if len(failures) != 0 {
-		return errors.New(strings.Join(failures, "；"))
-	}
-	return nil
+	return err
 }
 
 func loadWinDivert() (*windivertAPI, error) {
@@ -141,6 +130,9 @@ func loadWinDivert() (*windivertAPI, error) {
 func openWinDivert(filter string) (*windivertHandle, error) {
 	if err := WindowsPlatformReadiness(); err != nil {
 		return nil, err
+	}
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		return nil, errors.New("启动系统透明代理需要管理员权限；请使用已注册的透明代理自启动任务，或以管理员身份重启客户端")
 	}
 	// The native parameter is const char*, not Windows' usual UTF-16 string.
 	filterBytes, err := syscall.BytePtrFromString(filter)

@@ -112,11 +112,10 @@ func TestEngineMatchesSafeProcessAliases(t *testing.T) {
 	}
 }
 
-
 func TestEngineProcessAndAddressConditionsAreIndependent(t *testing.T) {
 	processOnly := requireEngine(t, Config{
 		DefaultAction: ActionReject,
-		Rules: []Rule{{Name: "process-only", Enabled: true, Process: "chrome.exe", Action: ActionProxy}},
+		Rules:         []Rule{{Name: "process-only", Enabled: true, Process: "chrome.exe", Action: ActionProxy}},
 	})
 	if got := processOnly.Match(Flow{Process: "chrome.exe", IP: "198.51.100.10", Port: 80, Protocol: ProtoTCP}); got.Action != ActionProxy {
 		t.Fatalf("process-only rule missed: %+v", got)
@@ -124,7 +123,7 @@ func TestEngineProcessAndAddressConditionsAreIndependent(t *testing.T) {
 
 	addressOnly := requireEngine(t, Config{
 		DefaultAction: ActionReject,
-		Rules: []Rule{{Name: "address-only", Enabled: true, CIDRs: []string{"192.168.50.0/24"}, Action: ActionProxy}},
+		Rules:         []Rule{{Name: "address-only", Enabled: true, CIDRs: []string{"192.168.50.0/24"}, Action: ActionProxy}},
 	})
 	if got := addressOnly.Match(Flow{Process: "", IP: "192.168.50.20", Port: 445, Protocol: ProtoTCP}); got.Action != ActionProxy {
 		t.Fatalf("address-only rule required process identity: %+v", got)
@@ -132,7 +131,7 @@ func TestEngineProcessAndAddressConditionsAreIndependent(t *testing.T) {
 
 	combined := requireEngine(t, Config{
 		DefaultAction: ActionReject,
-		Rules: []Rule{{Name: "combined", Enabled: true, Process: "chrome.exe", CIDRs: []string{"203.0.113.10"}, Action: ActionProxy}},
+		Rules:         []Rule{{Name: "combined", Enabled: true, Process: "chrome.exe", CIDRs: []string{"203.0.113.10"}, Action: ActionProxy}},
 	})
 	if got := combined.Match(Flow{Process: "chrome.exe", IP: "203.0.113.10", Port: 443, Protocol: ProtoTCP}); got.Action != ActionProxy {
 		t.Fatalf("combined rule missed: %+v", got)

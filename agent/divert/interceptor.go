@@ -304,8 +304,8 @@ func packetFlow(p ipPacket, process packetProcess) Flow {
 		Process: process.path, ProcessID: process.pid,
 		ProcessAliases: append([]string(nil), process.aliases...),
 		Services:       append([]string(nil), process.services...),
-		Protocol: p.Protocol,
-		SourceIP: p.Source.Addr().String(), SourcePort: p.Source.Port(),
+		Protocol:       p.Protocol,
+		SourceIP:       p.Source.Addr().String(), SourcePort: p.Source.Port(),
 		IP: p.Destination.Addr().String(), Port: p.Destination.Port(),
 	}
 }

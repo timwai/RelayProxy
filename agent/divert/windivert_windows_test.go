@@ -137,6 +137,16 @@ func TestWinDivertNativeFilter(t *testing.T) {
 			if got != 0 {
 				t.Fatalf("native filter intercepted ordinary inbound %s ipv6=%v", protocol, ipv6)
 			}
+			if protocol == ProtoUDP {
+				dnsData := append([]byte(nil), data...)
+				_, dnsOffset := packetTestFixture(ipv6, ProtoUDP, nil, false)
+				binary.BigEndian.PutUint16(dnsData[dnsOffset:dnsOffset+2], 53)
+				got, _, _ = syscall.SyscallN(evaluate, uintptr(unsafe.Pointer(filter)), uintptr(unsafe.Pointer(&dnsData[0])), uintptr(len(dnsData)), uintptr(unsafe.Pointer(&inbound)))
+				if got == 0 {
+					t.Fatalf("native filter skipped inbound DNS response ipv6=%v", ipv6)
+				}
+				runtime.KeepAlive(dnsData)
+			}
 
 			address.Flags |= 1 << 18
 			got, _, _ = syscall.SyscallN(evaluate, uintptr(unsafe.Pointer(filter)), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(unsafe.Pointer(&address)))

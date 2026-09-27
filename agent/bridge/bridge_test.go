@@ -494,22 +494,22 @@ func TestRemoteDesktopDiagnosticsIncludesLastNVCodecSelfTest(t *testing.T) {
 
 func TestNVCodecRuntimeDiagnosticEvents(t *testing.T) {
 	tests := []struct {
-		name       string
+		name        string
 		eligibility NVCodecCanaryEligibility
-		wantStage  string
-		wantCount  int
+		wantStage   string
+		wantCount   int
 	}{
 		{
-			name: "not tripped",
+			name:        "not tripped",
 			eligibility: NVCodecCanaryEligibility{},
-			wantCount: 0,
+			wantCount:   0,
 		},
 		{
 			name: "encoder",
 			eligibility: NVCodecCanaryEligibility{
-				CircuitTripped: true,
+				CircuitTripped:         true,
 				CircuitTrippedAtUnixMs: 1234,
-				CircuitTripReason: "NVENC runtime failure: device lost",
+				CircuitTripReason:      "NVENC runtime failure: device lost",
 			},
 			wantStage: "encode",
 			wantCount: 1,
@@ -517,9 +517,9 @@ func TestNVCodecRuntimeDiagnosticEvents(t *testing.T) {
 		{
 			name: "decoder",
 			eligibility: NVCodecCanaryEligibility{
-				CircuitTripped: true,
+				CircuitTripped:         true,
 				CircuitTrippedAtUnixMs: 5678,
-				CircuitTripReason: "NVDEC decode failure: device lost",
+				CircuitTripReason:      "NVDEC decode failure: device lost",
 			},
 			wantStage: "decode",
 			wantCount: 1,
@@ -527,9 +527,9 @@ func TestNVCodecRuntimeDiagnosticEvents(t *testing.T) {
 		{
 			name: "generic",
 			eligibility: NVCodecCanaryEligibility{
-				CircuitTripped: true,
+				CircuitTripped:         true,
 				CircuitTrippedAtUnixMs: 9999,
-				CircuitTripReason: "NVCodec runtime failure",
+				CircuitTripReason:      "NVCodec runtime failure",
 			},
 			wantStage: "nvcodec",
 			wantCount: 1,

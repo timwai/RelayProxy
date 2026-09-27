@@ -123,7 +123,7 @@ func (s *nvencD3D11Session) sequenceHeader() ([]byte, error) {
 	params := &nvencSequenceParamBlob{}
 	binary.LittleEndian.PutUint32(
 		params.Data[nvencSequenceVersionOffset:nvencSequenceVersionOffset+4],
-		nvencStructVersion(1),
+		nvencStructVersionFor(s.apiVersion, 1),
 	)
 	binary.LittleEndian.PutUint32(
 		params.Data[nvencSequenceInputSize:nvencSequenceInputSize+4],
@@ -278,7 +278,7 @@ func (e *nvencH265Encoder) EncodeD3D11(
 	params := &nvencPicParamsBlob{}
 	binary.LittleEndian.PutUint32(
 		params.Data[nvencPicVersionOffset:nvencPicVersionOffset+4],
-		nvencVersionWithReservedBit(7),
+		nvencVersionWithReservedBitFor(e.session.apiVersion, map[bool]uint32{true: 4, false: 7}[e.session.legacyABI]),
 	)
 	binary.LittleEndian.PutUint32(params.Data[nvencPicInputWidthOffset:nvencPicInputWidthOffset+4], uint32(frame.Width))
 	binary.LittleEndian.PutUint32(params.Data[nvencPicInputHeightOffset:nvencPicInputHeightOffset+4], uint32(frame.Height))
@@ -318,7 +318,7 @@ func (e *nvencH265Encoder) EncodeD3D11(
 	lock := &nvencLockBitstreamBlob{}
 	binary.LittleEndian.PutUint32(
 		lock.Data[nvencLockVersionOffset:nvencLockVersionOffset+4],
-		nvencVersionWithReservedBit(2),
+		nvencVersionWithReservedBitFor(e.session.apiVersion, map[bool]uint32{true: 1, false: 2}[e.session.legacyABI]),
 	)
 	binary.LittleEndian.PutUint64(
 		lock.Data[nvencLockOutputBitstream:nvencLockOutputBitstream+8],

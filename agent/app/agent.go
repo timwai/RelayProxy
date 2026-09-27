@@ -355,7 +355,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			Config: cfg.DivertConfig, Dialer: a.rawDialer, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
-				d := engine.DecideFlow(routing.Flow{Process: flow.Process, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
+				d := engine.DecideFlow(routing.Flow{Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
 				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired}
 			},
 		})

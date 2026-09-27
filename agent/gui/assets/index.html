@@ -835,7 +835,7 @@
               </button>
             </div>
             
-            <p class="config-help mb-2">同一栏多个值任选其一，不同栏同时满足；逗号分隔，留空或 * 表示任意。进程可填名称或完整路径，目标可填域名、IPv4/IPv6 或 CIDR 网段。</p>
+            <p class="config-help mb-2">进程和目标地址都可独立匹配：只填进程时按进程匹配，只填目标时按域名/IP/CIDR 匹配；两者都填写时需同时满足。每栏多个值任选其一，留空或 * 表示不限制该栏。</p>
             <p class="config-help mb-3">进程名、域名和 IP 均支持前后通配：* 匹配任意长度，? 匹配单个字符。例如 chrome*、*example*、192.168.*、*.1、2001:db8:*。</p>
             <div class="routing-rule-table-shell">
               <table class="routing-rule-table" id="routing-rules-table">
@@ -1088,8 +1088,8 @@
           <div class="routing-modal-field full"><label for="routing-rule-name">规则名称</label><input id="routing-rule-name" type="text" maxlength="80" autocomplete="off" placeholder="例如：浏览器走代理"></div>
           <div class="routing-modal-field"><span class="routing-modal-label">规则状态</span><label class="routing-modal-check"><input id="routing-rule-enabled" type="checkbox"><span><strong>启用此规则</strong><small>停用后保留配置，但不参与匹配。</small></span></label></div>
           <div class="routing-modal-field"><label for="routing-rule-protocol">协议</label><select id="routing-rule-protocol"><option value="any">TCP + UDP</option><option value="tcp">TCP</option><option value="udp">UDP</option></select><small>TCP + UDP 表示不限制协议。</small></div>
-          <div class="routing-modal-field"><label for="routing-rule-processes">进程名称或路径</label><textarea id="routing-rule-processes" placeholder="chrome.exe&#10;C:\Apps\tool.exe"></textarea><small>每行或逗号分隔；支持 * 和 ?。留空表示任意进程。</small></div>
-          <div class="routing-modal-field"><label for="routing-rule-targets">域名 / IP / CIDR</label><textarea id="routing-rule-targets" placeholder="*.example.com&#10;192.168.*&#10;10.0.0.0/8"></textarea><small>域名、IPv4/IPv6 与 CIDR 可混合；留空表示任意目标。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-processes">进程名称或路径</label><textarea id="routing-rule-processes" placeholder="chrome.exe&#10;C:\Apps\tool.exe"></textarea><small>可单独作为匹配条件；每行或逗号分隔，支持 * 和 ?。留空表示不限制进程。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-targets">域名 / IP / CIDR</label><textarea id="routing-rule-targets" placeholder="*.example.com&#10;192.168.*&#10;10.0.0.0/8"></textarea><small>可单独作为匹配条件；域名、IPv4/IPv6 与 CIDR 可混合。留空表示不限制目标。</small></div>
           <div class="routing-modal-field"><label for="routing-rule-ports">目标端口</label><textarea id="routing-rule-ports" placeholder="80&#10;443&#10;8000-9000"></textarea><small>支持单端口和端口范围；留空表示任意端口。</small></div>
           <div class="routing-modal-field"><label for="routing-rule-action">匹配动作</label><select id="routing-rule-action" onchange="updateRoutingEditorDependencies()"><option value="PROXY">PROXY · 走代理</option><option value="DIRECT">DIRECT · 本地直连</option><option value="REJECT">REJECT · 阻断连接</option></select><small>第一条启用且匹配的规则决定动作。</small></div>
           <div class="routing-modal-field"><label for="routing-rule-exit">指定出口 ID</label><input id="routing-rule-exit" type="text" autocomplete="off" placeholder="留空使用当前出口"><small>仅 PROXY 动作可指定出口。</small></div>

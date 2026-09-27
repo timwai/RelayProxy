@@ -46,9 +46,6 @@ func validateFlow(flow Flow) (Flow, FlowKey, error) {
 	if flow.Protocol != ProtoTCP && flow.Protocol != ProtoUDP {
 		return Flow{}, FlowKey{}, fmt.Errorf("divert: unsupported flow protocol %q", flow.Protocol)
 	}
-	if strings.TrimSpace(flow.Process) == "" {
-		return Flow{}, FlowKey{}, errors.New("divert: original process identity is required")
-	}
 	source, err := netip.ParseAddr(flow.SourceIP)
 	if err != nil || source.IsUnspecified() || flow.SourcePort == 0 {
 		return Flow{}, FlowKey{}, errors.New("divert: valid original source IP and port are required")

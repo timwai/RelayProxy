@@ -10,3 +10,4 @@ func RunWindowsNetworkService(string) error       { return nil }
 func RunWindowsNetworkServiceHelper(string, string) error { return nil }
 func EnsurePlatformService() error                { return nil }
 func WindowsNetworkServiceInstalled() bool        { return false }
+func PlatformServiceReady() bool                  { return true }

@@ -174,7 +174,7 @@ func nvcodecRuntimeDiagnosticEvents(
 
 type RemoteDesktopDiagnosticsReport struct {
 	desktop.DesktopDiagnosticsReport
-	DesktopSessions            []protocol.RemoteDesktopStatus                 `json:"desktopSessions,omitempty"`
+	DesktopSessions            []protocol.RemoteDesktopStatus              `json:"desktopSessions,omitempty"`
 	NVCodecSelfTest            *desktopcodec.NVCodecH265444RoundTripReport `json:"nvcodecSelfTest,omitempty"`
 	NVCodecValidation          *NVCodecValidationStatus                    `json:"nvcodecValidation,omitempty"`
 	NVCodecStressQualification *NVCodecStressQualificationReport           `json:"nvcodecStressQualification,omitempty"`

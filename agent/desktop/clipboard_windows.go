@@ -284,8 +284,8 @@ func readWindowsClipboardFiles(ctx context.Context) ([]string, error) {
 	if count == 0 {
 		return nil, ErrClipboardFilesUnavailable
 	}
-	if count > maxDesktopClipboardFiles {
-		return nil, fmt.Errorf("clipboard contains %d files; maximum is %d", count, maxDesktopClipboardFiles)
+	if count > maxDesktopClipboardRoots {
+		return nil, fmt.Errorf("clipboard contains %d top-level items; maximum is %d", count, maxDesktopClipboardRoots)
 	}
 	paths := make([]string, 0, int(count))
 	for i := uintptr(0); i < count; i++ {
@@ -305,8 +305,8 @@ func readWindowsClipboardFiles(ctx context.Context) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !info.Mode().IsRegular() {
-			return nil, fmt.Errorf("clipboard path %q is not a regular file", path)
+		if !info.Mode().IsRegular() && !info.IsDir() {
+			return nil, fmt.Errorf("clipboard path %q is neither a regular file nor directory", path)
 		}
 		paths = append(paths, path)
 	}
@@ -314,8 +314,8 @@ func readWindowsClipboardFiles(ctx context.Context) ([]string, error) {
 }
 
 func writeWindowsClipboardFiles(ctx context.Context, paths []string) error {
-	if len(paths) == 0 || len(paths) > maxDesktopClipboardFiles {
-		return fmt.Errorf("clipboard file count must be 1..%d", maxDesktopClipboardFiles)
+	if len(paths) == 0 || len(paths) > maxDesktopClipboardRoots {
+		return fmt.Errorf("clipboard root count must be 1..%d", maxDesktopClipboardRoots)
 	}
 	var units []uint16
 	for _, path := range paths {
@@ -327,8 +327,8 @@ func writeWindowsClipboardFiles(ctx context.Context, paths []string) error {
 		if err != nil {
 			return err
 		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("clipboard path %q is not a regular file", absolute)
+		if !info.Mode().IsRegular() && !info.IsDir() {
+			return fmt.Errorf("clipboard path %q is neither a regular file nor directory", absolute)
 		}
 		encoded, err := windows.UTF16FromString(absolute)
 		if err != nil {
@@ -379,19 +379,29 @@ func readWindowsClipboardContent(ctx context.Context) (protocol.DesktopClipboard
 	if win.IsClipboardFormatAvailable(windowsClipboardFormatHDrop) {
 		paths, err := readWindowsClipboardFiles(ctx)
 		if err == nil {
+			roots := make([]protocol.DesktopClipboardRoot, 0, len(paths))
 			files := make([]protocol.DesktopClipboardFile, 0, len(paths))
-			for _, path := range paths {
-				info, statErr := os.Stat(path)
+			for _, clipboardPath := range paths {
+				info, statErr := os.Stat(clipboardPath)
 				if statErr != nil {
 					return protocol.DesktopClipboardState{}, statErr
 				}
-				files = append(files, protocol.DesktopClipboardFile{
-					Name: filepath.Base(path),
-					Size: info.Size(),
+				name := filepath.Base(clipboardPath)
+				roots = append(roots, protocol.DesktopClipboardRoot{
+					Name:      name,
+					Directory: info.IsDir(),
 				})
+				if info.Mode().IsRegular() {
+					files = append(files, protocol.DesktopClipboardFile{
+						Name: name,
+						Path: name,
+						Size: info.Size(),
+					})
+				}
 			}
 			return protocol.DesktopClipboardState{
 				Kind:       protocol.DesktopClipboardKindFiles,
+				Roots:      roots,
 				Files:      files,
 				LocalPaths: paths,
 			}, nil

@@ -837,7 +837,7 @@
             <span>同步文本剪贴板</span>
           </label>
           <div class="text-[10px] leading-5 text-slate-500 dark:text-slate-400 mt-2">
-            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；连接后也可在预览工具栏直接切换显示器，不需要断开重连。连接前的显示器列表来自目标登录快照；连接后 Host 会自动推送实时显示器列表，热插拔、分辨率或主屏变化会自动刷新当前会话下拉框。目标上报 MultiStream 时，可为具体显示器打开独立原生窗口；每个并发桌面流可独立在 Relay Datagram 与 P2P 之间升级/回退，关闭独立窗口会自动释放对应媒体会话。自动模式仍优先成熟的 H.264 8-bit 4:2:0 路径（WebCodecs 不可用时使用 JPEG）；4:4:4 仅在目标编码和本机解码均明确上报 Chroma444 时允许连接，当前 Windows 内置 Media Foundation H.264/H.265 仍保持 4:2:0，不会伪装成 4:4:4。H.265 / HEVC 目前需要显式选择、目标上报 Encode、本机上报 Decode，并使用原生 Viewer 播放。采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 / H.265 均使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板仅同步 Unicode 文本，不传输文件或图片。Windows RDP 使用系统自身的重定向策略。
+            设置仅作用于下一次连接。场景用于自适应策略：游戏 / 性能优先保持协商帧率，办公 / 自动 / 画质在持续严重拥塞时可降低采集 FPS 以保持实时性。多显示器 Relay Desktop 目标可在设备卡片中选择“全部显示器”或指定屏幕；连接后也可在预览工具栏直接切换显示器，不需要断开重连。连接前的显示器列表来自目标登录快照；连接后 Host 会自动推送实时显示器列表，热插拔、分辨率或主屏变化会自动刷新当前会话下拉框。目标上报 MultiStream 时，可为具体显示器打开独立原生窗口；每个并发桌面流可独立在 Relay Datagram 与 P2P 之间升级/回退，关闭独立窗口会自动释放对应媒体会话。自动模式仍优先成熟的 H.264 8-bit 4:2:0 路径（WebCodecs 不可用时使用 JPEG）；4:4:4 仅在目标编码和本机解码均明确上报 Chroma444 时允许连接，当前 Windows 内置 Media Foundation H.264/H.265 仍保持 4:2:0，不会伪装成 4:4:4。H.265 / HEVC 目前需要显式选择、目标上报 Encode、本机上报 Decode，并使用原生 Viewer 播放。采集后端按目标上报能力动态显示，WGC 仅在目标 Windows 运行时确认支持时出现。采集“自动”按 DXGI → WGC → GDI 顺序选择：优先 Desktop Duplication，DXGI 不可用时尝试 WGC，最后回退 GDI；显式 WGC/DXGI/GDI 用于实机 A/B 验证且不会静默切换到另一后端；多屏“全部显示器”目前需要 GDI，强制 WGC/DXGI 时请先选择具体显示器。H.264 / H.265 均使用 ABR 动态码率，连接设置中的码率作为上限。Relay Desktop 剪贴板支持 Unicode 文本、PNG 图片、普通文件和目录；目录会递归传输普通文件，符号链接与 virtual file 仍拒绝。Windows RDP 使用系统自身的重定向策略。
           </div>
         </details>
 
@@ -893,7 +893,7 @@
         <div class="rp-card p-4">
           <div class="text-[12px] font-semibold text-slate-800 dark:text-slate-100">自动模式</div>
           <div class="text-[11px] leading-6 text-slate-500 dark:text-slate-400 mt-1">
-            自动模式会根据目标能力选择 backend：Relay Desktop 继续优先 H.264 + Media Foundation，并在 WebCodecs 不可用时保留 JPEG 兼容路径。H.265 / HEVC 已可显式选择，但在 Intel / NVIDIA / AMD 双机验证完成前不会成为自动默认；Windows Home 不依赖系统 RDP 服务。
+            自动模式会根据目标能力选择 backend：Relay Desktop 继续优先 H.264 + Media Foundation，并在 WebCodecs 不可用时保留 JPEG 兼容路径。H.265 / HEVC 已可显式选择，但在 Intel / NVIDIA 实机矩阵稳定前不会成为自动默认；AMD AMF 公共 HEVC API 当前没有 4:4:4 profile，因此不作为默认策略阻塞项；Windows Home 不依赖系统 RDP 服务。
           </div>
         </div>
       </section>
@@ -2400,9 +2400,10 @@
       if (kind === 'png' && content.png) return {kind:'png', png:String(content.png)};
       if (kind === 'files') {
         var paths = Array.isArray(content.localPaths) ? content.localPaths.map(String) : [];
+        var roots = Array.isArray(content.roots) ? content.roots : [];
         var files = Array.isArray(content.files) ? content.files : [];
-        if (!paths.length || !files.length) return null;
-        return {kind:'files', localPaths:paths, files:files};
+        if (!paths.length || (!files.length && !roots.length)) return null;
+        return {kind:'files', localPaths:paths, roots:roots, files:files};
       }
       if (kind === 'text') return {kind:'text', text:String(content.text == null ? '' : content.text)};
       return null;
@@ -2412,7 +2413,8 @@
       if (content.kind === 'png') return 'png:' + content.png;
       if (content.kind === 'files') {
         return 'files:' + content.localPaths.join('\u0000') + ':' +
-          content.files.map(function (f) { return String(f.name || '') + ':' + String(f.size || 0); }).join('|');
+          (content.roots || []).map(function (r) { return String(r.name || '') + ':' + (!!r.directory); }).join('|') + ':' +
+          content.files.map(function (f) { return String(f.path || f.name || '') + ':' + String(f.size || 0); }).join('|');
       }
       return 'text:' + content.text;
     }

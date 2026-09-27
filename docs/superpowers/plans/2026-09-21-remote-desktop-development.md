@@ -1,7 +1,7 @@
 # RelayProxy Remote Desktop 开发实施文档
 
 > 日期：2026-09-21  
-> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，4:4:4 编解码两端均已接入 D3D11 AYUV GPU surface，runtime GPU capability 已改为真实 D3D11 / codec 运行时探测并精确上报；当前进入 Intel 双机/驱动矩阵实测，NVIDIA / AMD 4:4:4 vendor-native 路径仍待实现。  
+> 状态：实施中 — RD0 / RD1 已完成；RD2 P2P / ABR / 弱网 / 诊断 / WGC / D3D11 zero-copy 主链已完成；RD3 HEVC 4:2:0 与 Intel oneVPL HEVC 4:4:4 已形成完整代码链，NVIDIA NVCodec 已进入显式 canary；当前继续 Intel/NVIDIA 实机矩阵。AMD AMF 公共 HEVC API 仅公开 Main/Main10，没有可用于 RelayProxy 4:4:4 bitstream 的 profile，因此 AMD 4:4:4 encoder 不再作为当前 release blocker。  
 > 对应设计：`docs/superpowers/specs/2026-09-21-remote-desktop-design.md`  
 > 基线：main 分支，现有 RDP M1–M5 已完成  
 > 当前开发基线：`main`（PR #123 已合并，merge `8d46877291b9ecfc33be0e697c63cc361bc03b4e`；gofmt 修复 `83616916782571fe252e66b2014641d8d2ba7720` / `bd41520e3749a9f2eea5826ff056005f8af9d1a8` / `b491ef8de8d405eedcd9f2e682e3dcd15fdfc7f8`）
@@ -25,13 +25,13 @@
 | 键盘 / 鼠标输入 | ✅ 已合并 main | Viewer 采集键盘、绝对鼠标、按键与滚轮；可靠控制流经 Relay 转发，Host 使用 `SendInput`，失焦/断线主动释放按键 |
 | 分辨率 / FPS / 画质 / 码率控制 | ✅ JPEG MVP 已完成 | GUI 连接设置透传到 Host；preset + fixed/native resolution + FPS + JPEG 软码率预算，H.264 阶段替换为真正 rate control |
 | 光标 | ✅ 已合并 main | Windows Host 以 60 Hz 独立采集位置/可见性，形状仅在 HCURSOR 变化时生成 PNG；可靠 session stream 传输，Controller 缓存形状，Wails Viewer 在视频表面本地叠加；PR #31 merge commit `f7101025c98fe1c09547a3a1203d20a6f3b6b888` |
-| 剪贴板 | ✅ 文本 + PNG 图片 + 文件 + Viewer 拖拽已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本、PNG 图片与 Windows 文件剪贴板；Windows 使用 CF_UNICODETEXT / CF_DIB / CF_HDROP。文件内容通过独立 chunk 消息传输并校验 SHA-256；Windows Wails Viewer 支持直接拖放普通文件发送到远端剪贴板 |
+| 剪贴板 | ✅ 文本 + PNG 图片 + 文件/目录 + Viewer 拖拽已合并 main | Relay Desktop 可靠 session stream 双向同步 Unicode 文本、PNG 图片与 Windows CF_HDROP；普通目录按安全相对路径递归展开，文件内容使用独立 chunk + SHA-256，接收端重建 staging 目录树；Viewer 可直接拖放文件或目录 |
 | DXGI / WGC Capture | ✅ 指定显示器链路已合并 main | PR #53 已打通 capability 驱动的 per-target 选屏、session-local `DisplayID`、单屏 DXGI/GDI Auto 捕获、光标局部坐标与 Windows `SendInput` 虚拟桌面坐标映射；未指定显示器时继续保留原虚拟桌面行为 |
 | H.264 硬件编解码 | ✅ 端到端已合并 main | DXGI/GDI Capture → Media Foundation H.264 → RD/1 Datagram → Controller → WebCodecs Canvas 已贯通；硬件/软件 MFT、异步事件、ForceIDR、动态码率均已接入，并保留 JPEG fallback |
 | H.264 Datagram 丢包恢复 | ✅ 已合并 main | Controller 检测 FrameID 缺口后停止提交 delta frame，经可靠 session stream 请求 IDR；WebCodecs 解码错误/队列过载也触发同一恢复流程；PR #30 merge commit `b9a074cc338dbfeb92acd570313bc243398ac888` |
 | 原生 D3D11 Viewer | ✅ RD1 高性能链路已完成 | PR #33 原生 Viewer、PR #34 DXVA、PR #35 零拷贝视频、PR #36 GPU 光标均已合并；能力不足时保留 CPU/WebCodecs/JPEG 回退 |
 | RD2 P2P / ABR / Stats | 🧪 核心能力已合并，进入验证/硬化 | Stats、码率 + scene-aware FPS ABR、Relay Desktop P2P、stale-frame/drop 与组合弱网验证已进入 main。PR #42–#47 完成 P2P 自动恢复、路径评分/滞回、direct RTT/Jitter、确定性 NetEm 与 send-queue ABR；PR #48 增加过期采样丢弃；PR #49 固化组合弱网下 ABR + path switch 联动；PR #50 补齐 Viewer 拥塞指标；PR #51 在持续严重压力下为 Office/Auto/Quality 动态降低采集 FPS，Gaming/Performance 保持 negotiated FPS，并在链路恢复后先恢复 bitrate、再慢恢复 FPS。PR #52 已补在线 Host capability snapshot / 显示器枚举，PR #53 已完成指定显示器捕获与输入/光标坐标映射，PR #54 已把 scene-aware ABR 场景选择开放到 GUI，PR #55 已补齐 negotiated media 与 Capture / Encoder / Decoder 实际 backend 诊断，PR #56 已完成 generation-aware Viewer rebuild，PR #57 已完成 Host Encoder generation rebuild 与运行期分辨率热切换，PR #58 已把 100% / 75% / 50% resolution tiers 接入 scene-aware ABR，PR #59 已补齐可导出的实机会话诊断时间序列，PR #60 已加入 schema v2 聚合 Summary、percentile 与路径/Generation/ABR/backend 分布统计；RD2 当前进入实机矩阵验证与参数标定阶段 |
-| RD3 HEVC / 4:4:4 GPU | 🧪 代码链与 runtime capability 已完成，进入实机验证 | H.265 generation-aware Host/Viewer、Intel oneVPL HEVC RExt 8-bit 4:4:4、D3D11 AYUV GPU encode/decode zero-copy 已进入 main；4:4:4 CPU I444 路径继续作为 fallback。GPU capability 现按真实 D3D11 capture + encode/decode/display 端到端探测精确上报；下一步完成 Intel 双机/驱动矩阵，NVIDIA/AMD 4:4:4 仍需 vendor-native backend |
+| RD3 HEVC / 4:4:4 GPU | 🧪 Intel stable + NVIDIA canary，进入实机验证 | Intel oneVPL HEVC RExt 4:4:4 与 D3D11 AYUV zero-copy 已进入 main；NVIDIA NVENC/NVDEC production canary 已有资格/压力/熔断链。AMD AMF public HEVC profile 仅 Main/Main10，当前不声明 4:4:4 encode，也不再作为 release blocker |
 
 ### 0.1 已合并主线的关键进度
 
@@ -1279,7 +1279,7 @@ Windows SendInput / CF_UNICODETEXT
 - rich clipboard 优先走新 Wails API；若新 binding 不存在，前端自动退回旧文本 API，保持升级兼容。
 - 图片和文本都复用现有 sequence + content dedupe，远端写入后不会被本地 250 ms polling 回传形成循环。
 - 回归覆盖 legacy text 兼容、PNG validation/size gate/deep copy、PNG dedupe，以及 Windows DIB pixel round-trip。
-- 后续增强：文件剪贴板已完成；仍未完成的是 GUI 直接把文件拖入 Viewer 的交互手势，以及 virtual-file/目录递归传输。
+- 后续增强：文本、PNG、普通文件、Viewer drag/drop 与目录递归均已覆盖；仍未完成的是 Windows shell virtual-file / 云盘占位文件。
 
 
 
@@ -1299,7 +1299,7 @@ Windows SendInput / CF_UNICODETEXT
 - Windows `CF_HDROP` 已双向接入：Controller 和 Host 都能从资源管理器复制普通文件，经 Relay Desktop 传输后在另一端直接粘贴。
 - Host watcher 仍保持连接建立只做 baseline；远端写入文件 clipboard 后通过 `clipboardSyncState` 路径去重，避免 staged 文件再次被 watcher 回传形成 echo loop。
 - Receiver 只保留最新一批 completed staging；下一批文件成功完成后删除上一批。Session 断开时最后一批 staged 文件继续保留 1 小时后清理，避免断开瞬间让用户剪贴板路径失效。
-- 当前仅接受 regular file；目录、shell virtual file、云盘占位符和 GUI drag/drop 手势不在本阶段范围内。
+- 本阶段最初仅接受 regular file；后续 0.2.107 已加入目录递归。shell virtual file / 云盘占位符仍明确拒绝。
 - 回归覆盖路径穿越拒绝、分片 offset/size 边界、SHA-256 round-trip、跨平台 session 编译以及 Windows CF_HDROP build path。
 
 ### 0.2.106 RD3 Viewer File Drop
@@ -1309,8 +1309,20 @@ Windows SendInput / CF_UNICODETEXT
 - 只接受落在 `desktop-viewer-stage` 的文件；其他 GUI 区域的外部拖放忽略，避免误操作。
 - Drop 后复用 `SendRemoteDesktopClipboardFiles`，因此继续继承 regular-file、数量/大小上限、basename-only、SHA-256、严格 chunk offset 与 staging 安全策略。
 - Viewer 拖入时显示原生 drop-target hover overlay；发送成功/失败由 GUI toast 明确反馈。
-- 目录和 shell virtual file 仍按底层文件剪贴板策略拒绝，不做隐式递归。
+- shell virtual file 仍按底层策略拒绝；普通目录由 0.2.107 按安全相对路径显式递归展开。
 - Wails v3 的 file drop 默认关闭，本实现显式打开；页面 drop zone 只有原生桌面窗口生效，浏览器 Agent Web 不会获得本地绝对路径。
+
+### 0.2.107 RD3 Recursive Directory Clipboard
+
+- Windows `CF_HDROP` 与 Wails Viewer file-drop 现在接受普通文件或目录作为顶层 root；顶层仍最多 32 项。
+- 目录只在真正发送时递归展开，GUI 的 250 ms clipboard polling 只读取 root/name/type/size 等轻量元数据，不对整个目录反复 hash。
+- wire offer 新增 `roots[]`，每个普通文件新增安全的 slash-separated `path`；发送端绝不传绝对目录。顶层目录可为空，接收端仍会重建空目录。
+- 递归展开最多 2048 个普通文件；单文件 256 MiB、单次总量 512 MiB、chunk 384 KiB 的既有限制保持不变。
+- 所有相对路径逐 segment 校验；拒绝绝对路径、空 segment、`.`、`..`、路径穿越、重复 root/relative path。
+- 发送端使用 `Lstat/Walk`，顶层或目录内部遇到 symlink、socket/device 等非 regular entry 都 fail closed，不跟随链接逃出 root。
+- 接收端仅在 RelayProxy staging 根目录内 `MkdirAll` 并创建声明文件；完成后仍逐文件 SHA-256 校验，再将顶层文件/目录路径作为 `CF_HDROP` 发布。
+- legacy file-only offer 仍兼容：没有 `roots` 时只接受 flat basename 文件，不允许借旧格式注入 nested path。
+- AMD HEVC 4:4:4 同期收口：官方 AMF HEVC encoder profile 只有 Main/Main10，因此 AMD encode candidate 保持 known=false-support / limitation，不伪造 FRExt/4:4:4 production backend；Intel/NVIDIA 实机矩阵继续作为当前 HEVC 4:4:4 发布验证重点。
 
 ### 0.3 本轮进度（2026-09-22）
 

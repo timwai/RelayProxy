@@ -49,8 +49,8 @@ type shellExecuteInfo struct {
 }
 
 var (
-	startupShell32          = windows.NewLazySystemDLL("shell32.dll")
-	procShellExecuteExW     = startupShell32.NewProc("ShellExecuteExW")
+	startupShell32      = windows.NewLazySystemDLL("shell32.dll")
+	procShellExecuteExW = startupShell32.NewProc("ShellExecuteExW")
 )
 
 type autoStartState struct {
@@ -318,7 +318,6 @@ func (s *windowsAutoStartStore) writeTask(definition string) error {
 func (s *windowsAutoStartStore) deleteTask() error { return deleteLogonTask(s.taskName) }
 
 func ExePath() (string, error) { return os.Executable() }
-
 
 func HelperFlagName() string { return startupHelperFlagName }
 

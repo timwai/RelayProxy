@@ -561,3 +561,64 @@ func TestNVCodecValidationReceiptCapsQualificationPasses(t *testing.T) {
 		t.Fatalf("qualification=%d want=%d", next.QualificationPasses, nvcodecValidationRequiredPasses)
 	}
 }
+
+
+func TestNVCodecValidationExecutableRevisionIsContentBound(t *testing.T) {
+	dir := t.TempDir()
+	first := filepath.Join(dir, "relay-agent-a.exe")
+	second := filepath.Join(dir, "relay-agent-b.exe")
+
+	if err := os.WriteFile(first, []byte("same-binary-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("same-binary-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	firstRevision, err := nvcodecValidationExecutableRevision(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRevision, err := nvcodecValidationExecutableRevision(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(firstRevision, "local-sha256:") {
+		t.Fatalf("revision=%q missing local-sha256 prefix", firstRevision)
+	}
+	if firstRevision != secondRevision {
+		t.Fatalf("same executable content produced different revisions: %q != %q", firstRevision, secondRevision)
+	}
+
+	if err := os.WriteFile(second, []byte("different-binary-content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	changedRevision, err := nvcodecValidationExecutableRevision(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changedRevision == firstRevision {
+		t.Fatalf("changed executable content retained revision %q", changedRevision)
+	}
+}
+
+func TestNextNVCodecValidationReceiptAcceptsLocalBuildIdentity(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	report := validNVCodecReportForTest(now)
+	receipt, err := nextNVCodecValidationReceipt(
+		now,
+		"local-sha256:0123456789abcdef",
+		nil,
+		report,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.BuildRevision != "local-sha256:0123456789abcdef" {
+		t.Fatalf("build revision=%q", receipt.BuildRevision)
+	}
+	if receipt.QualificationPasses != 1 || !receipt.LastAttemptPassed {
+		t.Fatalf("local build receipt=%+v", receipt)
+	}
+}

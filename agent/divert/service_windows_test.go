@@ -145,7 +145,6 @@ func TestRemoveWindowsTreeWithRetryRemovesOrphanedArtifacts(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
 	got, err := normalizeWindowsTransparentFirewallPorts([]uint16{45001, 45002, 45001})
 	if err != nil {

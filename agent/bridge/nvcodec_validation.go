@@ -514,6 +514,12 @@ func evaluateNVCodecCanaryEligibility(
 func (b *UIBridge) GetRemoteDesktopNVCodecCanaryEligibility() NVCodecCanaryEligibility {
 	status := b.GetRemoteDesktopNVCodecValidation()
 	receipt, err := loadNVCodecValidationReceipt(b.configPath)
+	if os.IsNotExist(err) {
+		// A missing receipt is the normal state before the first successful
+		// qualification attempt. Treat it as "no evidence yet", not an I/O error.
+		receipt = nil
+		err = nil
+	}
 	if err != nil {
 		return NVCodecCanaryEligibility{
 			ValidationCurrent:    status.Current,

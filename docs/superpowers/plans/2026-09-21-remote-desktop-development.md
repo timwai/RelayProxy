@@ -1343,6 +1343,18 @@ Windows SendInput / CF_UNICODETEXT
 - `auto + 4:4:4` 仍拒绝，继续要求用户显式选择 H.264 或 H.265，避免在色彩采样要求下进行隐式 codec 降级。
 - 新增回归测试覆盖：双方支持时 auto 选 H.265、H.265 方向能力不完整时回退 H.264、没有共享视频 codec 时回退 JPEG。
 
+### 0.2.110 RD3 Windows Virtual Clipboard Files
+
+- Windows 文件剪贴板在现有 `CF_HDROP` 之外新增 OLE 虚拟文件读取路径，识别 `FileGroupDescriptorW` + `FileContents`，覆盖 Outlook 附件、Explorer/Shell 虚拟对象以及没有真实磁盘路径的数据对象。
+- 虚拟文件只在 `CF_HDROP` 不可用时启用；普通本地文件路径保持原快速路径。
+- OLE 读取固定在锁定 OS thread 的 STA/OLE apartment 中执行，并在同一线程释放 `IDataObject` / `STGMEDIUM`，避免 COM apartment 生命周期错配。
+- `FileContents` 支持 `TYMED_ISTREAM` 与 `TYMED_HGLOBAL`；按原 descriptor `lindex` 读取，目录 descriptor 不会导致后续文件索引错位。
+- 虚拟内容先物化到 RelayProxy 私有临时目录，再复用已有文件传输链路，因此继续继承 32 roots、2048 files、256 MiB 单文件、512 MiB 单次总量、SHA-256、384 KiB chunk 与接收端路径校验。
+- descriptor 名称继续经过安全相对路径校验，拒绝 `..`、绝对路径、重复路径与 root 文件/目录冲突；目录与零字节文件均可安全物化。
+- Windows clipboard sequence 用于缓存当前虚拟对象，避免 250 ms polling 重复下载/物化同一份虚拟数据；瞬时 OLE 失败不会被永久缓存，clipboard 变化时会自动清理旧 staging。
+- `CF_HDROP` 路径读取阶段不再提前 `os.Stat`，真正的文件类型/大小校验与打开延后到传输计划阶段，改善 OneDrive Files On-Demand 等云盘占位文件的兼容性。
+- 新增 Windows 单测覆盖 descriptor 解析、嵌套路径、大小上限、case-insensitive 重复、路径穿越、零长度文件物化和 root 文件/目录冲突。
+
 ### 0.3 本轮进度（2026-09-22）
 
 本轮继续完成四项 RD2 网络路径与自适应能力，并全部合并到 `main`：

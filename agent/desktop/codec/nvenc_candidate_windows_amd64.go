@@ -135,6 +135,27 @@ func nvencAPIVersionForDriver(maxSupportedVersion uint32) (uint32, bool) {
 	return 0, false
 }
 
+func nvencStatusName(status int32) string {
+	switch status {
+	case 0:
+		return "NV_ENC_SUCCESS"
+	case 1:
+		return "NV_ENC_ERR_NO_ENCODE_DEVICE"
+	case 2:
+		return "NV_ENC_ERR_UNSUPPORTED_DEVICE"
+	case 3:
+		return "NV_ENC_ERR_INVALID_ENCODERDEVICE"
+	case 4:
+		return "NV_ENC_ERR_INVALID_DEVICE"
+	default:
+		return fmt.Sprintf("NVENC_STATUS_%d", status)
+	}
+}
+
+func formatNVENCStatus(status int32) string {
+	return fmt.Sprintf("%s (%d)", nvencStatusName(status), status)
+}
+
 func nvencCall(proc uintptr, args ...uintptr) int32 {
 	status, _, _ := syscall.SyscallN(proc, args...)
 	return runtimeCandidateStatus(status)
@@ -150,7 +171,7 @@ func createNVENCFunctionListFor(createInstance uintptr, apiVersion uint32) (nvEn
 	status := nvencCall(createInstance, uintptr(unsafe.Pointer(&api)))
 	runtime.KeepAlive(&api)
 	if status != 0 {
-		return nvEncodeAPIFunctionList{}, fmt.Errorf("NvEncodeAPICreateInstance returned %d", status)
+		return nvEncodeAPIFunctionList{}, fmt.Errorf("NvEncodeAPICreateInstance returned %s", formatNVENCStatus(status))
 	}
 	switch {
 	case api.NvEncOpenEncodeSessionEx == 0:
@@ -187,7 +208,7 @@ func probeNVENCHEVC444OnSession(api nvEncodeAPIFunctionList, encoder uintptr, ap
 		encoder,
 		uintptr(unsafe.Pointer(&guidCount)),
 	); status != 0 {
-		return false, false, fmt.Errorf("nvEncGetEncodeGUIDCount returned %d", status)
+		return false, false, fmt.Errorf("nvEncGetEncodeGUIDCount returned %s", formatNVENCStatus(status))
 	}
 	runtime.KeepAlive(&guidCount)
 	if guidCount == 0 {
@@ -206,7 +227,7 @@ func probeNVENCHEVC444OnSession(api nvEncodeAPIFunctionList, encoder uintptr, ap
 		uintptr(guidCount),
 		uintptr(unsafe.Pointer(&actual)),
 	); status != 0 {
-		return false, false, fmt.Errorf("nvEncGetEncodeGUIDs returned %d", status)
+		return false, false, fmt.Errorf("nvEncGetEncodeGUIDs returned %s", formatNVENCStatus(status))
 	}
 	runtime.KeepAlive(guids)
 	runtime.KeepAlive(&actual)
@@ -238,7 +259,7 @@ func probeNVENCHEVC444OnSession(api nvEncodeAPIFunctionList, encoder uintptr, ap
 	runtime.KeepAlive(&caps)
 	runtime.KeepAlive(&supported)
 	if status != 0 {
-		return false, false, fmt.Errorf("nvEncGetEncodeCaps(YUV444) returned %d", status)
+		return false, false, fmt.Errorf("nvEncGetEncodeCaps(YUV444) returned %s", formatNVENCStatus(status))
 	}
 	return true, supported != 0, nil
 }
@@ -351,10 +372,10 @@ func probeNVIDIANVENCHEVC444(
 		if openStatus == 0 && encoder != 0 {
 			checked, supported, queryErr = probeNVENCHEVC444OnSession(nvencAPI, encoder, apiVersion)
 			if destroyStatus := nvencCall(nvencAPI.NvEncDestroyEncoder, encoder); destroyStatus != 0 {
-				issues = append(issues, fmt.Sprintf("device %d nvEncDestroyEncoder returned %d", ordinal, destroyStatus))
+				issues = append(issues, fmt.Sprintf("device %d nvEncDestroyEncoder returned %s", ordinal, formatNVENCStatus(destroyStatus)))
 			}
 		} else {
-			issues = append(issues, fmt.Sprintf("device %d nvEncOpenEncodeSessionEx returned %d", ordinal, openStatus))
+			issues = append(issues, fmt.Sprintf("device %d nvEncOpenEncodeSessionEx returned %s", ordinal, formatNVENCStatus(openStatus)))
 		}
 
 		clearStatus := cudaDriverCall(cudaAPI.cuCtxSetCurrent, 0)

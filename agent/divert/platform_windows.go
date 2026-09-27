@@ -97,10 +97,13 @@ func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	}
 	outbound += ")"
 
-	// Listener-directed inbound packets are reserved for the transparent TCP
-	// reflection path. Real Internet inbound packets are otherwise untouched.
+	// Keep ordinary inbound traffic in the Windows stack. Only the transparent
+	// TCP reflection path and DNS responses used for hostname attribution are
+	// observed. This preserves domain rules without making all downloads depend
+	// on userspace reinjection.
 	reflection := fmt.Sprintf("(inbound and !loopback and tcp and (tcp.DstPort == %d or tcp.DstPort == %d))", port4, port6)
-	return outbound + " or " + reflection
+	dnsResponse := "(inbound and !loopback and udp and udp.SrcPort == 53)"
+	return outbound + " or " + reflection + " or " + dnsResponse
 }
 
 func windowsRelayBypassClauses(guard LoopGuard) []string {

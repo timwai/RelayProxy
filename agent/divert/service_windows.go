@@ -27,9 +27,9 @@ import (
 )
 
 const (
-	windowsNetworkServiceName        = "RelayProxyNetwork"
-	windowsNetworkServiceDisplayName    = "RelayProxy Network Service"
-	windowsNetworkPipeName              = `\\.\pipe\RelayProxyNetwork-v3`
+	windowsNetworkServiceName          = "RelayProxyNetwork"
+	windowsNetworkServiceDisplayName   = "RelayProxy Network Service"
+	windowsNetworkPipeName             = `\\.\pipe\RelayProxyNetwork-v3`
 	windowsTransparentFirewallRuleName = "RelayProxy Transparent Proxy"
 
 	networkServiceModeFlagName   = "relayproxy-network-service"

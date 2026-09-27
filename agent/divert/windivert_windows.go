@@ -108,6 +108,18 @@ func loadWinDivert() (*windivertAPI, error) {
 			return nil, err
 		}
 	}
+	return loadWinDivertPath(path)
+}
+
+func loadTrustedWinDivert() (*windivertAPI, error) {
+	path, err := extractEmbeddedWinDivert()
+	if err != nil {
+		return nil, err
+	}
+	return loadWinDivertPath(path)
+}
+
+func loadWinDivertPath(path string) (*windivertAPI, error) {
 	// Never search the current directory or PATH for a privileged DLL.
 	dll, err := windows.LoadLibraryEx(path, 0, windows.LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|windows.LOAD_LIBRARY_SEARCH_SYSTEM32)
 	if err != nil {
@@ -128,18 +140,26 @@ func loadWinDivert() (*windivertAPI, error) {
 }
 
 func openWinDivert(filter string) (*windivertHandle, error) {
+	return openWinDivertWithLoader(filter, loadWinDivert)
+}
+
+func openTrustedWinDivert(filter string) (*windivertHandle, error) {
+	return openWinDivertWithLoader(filter, loadTrustedWinDivert)
+}
+
+func openWinDivertWithLoader(filter string, loader func() (*windivertAPI, error)) (*windivertHandle, error) {
 	if err := WindowsPlatformReadiness(); err != nil {
 		return nil, err
 	}
 	if !windows.GetCurrentProcessToken().IsElevated() {
-		return nil, errors.New("启动系统透明代理需要管理员权限；请使用已注册的透明代理自启动任务，或以管理员身份重启客户端")
+		return nil, errors.New("启动系统透明代理需要管理员权限；请使用 RelayProxy Network Service，或以管理员身份重启客户端")
 	}
 	// The native parameter is const char*, not Windows' usual UTF-16 string.
 	filterBytes, err := syscall.BytePtrFromString(filter)
 	if err != nil {
 		return nil, fmt.Errorf("invalid WinDivert filter: %w", err)
 	}
-	api, err := loadWinDivert()
+	api, err := loader()
 	if err != nil {
 		return nil, err
 	}

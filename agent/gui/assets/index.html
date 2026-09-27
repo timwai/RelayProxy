@@ -2712,6 +2712,12 @@
       target.className = passed
         ? 'text-[11px] leading-5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
         : 'text-[11px] leading-5 px-3 py-2 rounded-md border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300';
+
+      var qualificationButton = $('desktop-nvcodec-qualification-btn');
+      if (qualificationButton && unsupported) {
+        qualificationButton.disabled = true;
+        qualificationButton.title = '当前 NVIDIA GPU 不支持 NVENC，无法进行 NVENC/NVDEC 资格验证';
+      }
     }
 
     function renderRemoteDesktopNVCodecValidation(status) {

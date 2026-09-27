@@ -95,7 +95,6 @@ func TestRunWindowsNetworkServiceHelperRejectsUnknownActionBeforeMutation(t *tes
 	}
 }
 
-
 func TestMatchesWindowsNetworkServiceRecovery(t *testing.T) {
 	valid := []mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: time.Second},

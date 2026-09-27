@@ -368,34 +368,35 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 	}()
 
 	var client, proxy net.Conn
-	select {
-	case result := <-dialDone:
-		if result.err != nil {
+	deadline := time.NewTimer(7 * time.Second)
+	defer deadline.Stop()
+	for client == nil || proxy == nil {
+		select {
+		case result := <-dialDone:
+			if result.err != nil {
+				close(stop)
+				_ = handle.Shutdown()
+				t.Fatalf("reflected client dial failed before listener=%v: %v", proxy != nil, result.err)
+			}
+			client = result.conn
+		case result := <-acceptDone:
+			if result.err != nil {
+				close(stop)
+				_ = handle.Shutdown()
+				t.Fatalf("transparent listener accept failed before client=%v: %v", client != nil, result.err)
+			}
+			proxy = result.conn
+		case err := <-pumpDone:
 			close(stop)
 			_ = handle.Shutdown()
-			t.Fatalf("reflected client dial failed: %v", result.err)
+			t.Fatalf("WinDivert reflection pump stopped before handshake (client=%v listener=%v): %v", client != nil, proxy != nil, err)
+		case <-deadline.C:
+			close(stop)
+			_ = handle.Shutdown()
+			t.Fatalf("live TCP reflection handshake timed out (client=%v listener=%v)", client != nil, proxy != nil)
 		}
-		client = result.conn
-	case <-time.After(7 * time.Second):
-		close(stop)
-		_ = handle.Shutdown()
-		t.Fatal("reflected client dial timed out")
 	}
 	defer client.Close()
-
-	select {
-	case result := <-acceptDone:
-		if result.err != nil {
-			close(stop)
-			_ = handle.Shutdown()
-			t.Fatalf("transparent listener accept failed: %v", result.err)
-		}
-		proxy = result.conn
-	case <-time.After(7 * time.Second):
-		close(stop)
-		_ = handle.Shutdown()
-		t.Fatal("transparent listener did not receive reflected TCP connection")
-	}
 	defer proxy.Close()
 	_ = client.SetDeadline(time.Now().Add(5 * time.Second))
 	_ = proxy.SetDeadline(time.Now().Add(5 * time.Second))

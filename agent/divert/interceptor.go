@@ -233,9 +233,13 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	if packet.Protocol == ProtoTCP {
 		return i.outboundTCP(packet, meta)
 	}
-	process, err := i.lookup(packet.Protocol, packet.Source, packet.Destination)
-	if err != nil {
-		return fmt.Errorf("UDP process lookup for %s: %w", packet.Source, err)
+	process, lookupErr := i.lookup(packet.Protocol, packet.Source, packet.Destination)
+	if lookupErr != nil {
+		// Process attribution is supplemental metadata, not a prerequisite for
+		// target-based policy. Windows kernel/service traffic (notably SMB) can
+		// appear in WinDivert before OWNER_PID tables expose a stable owner.
+		// Keep the original five-tuple and classify by target/port/protocol.
+		process = packetProcess{}
 	}
 	flow := i.flowMetadata(packet, process)
 	if i.server.guard.MustDirectFlow(flow) {
@@ -344,10 +348,11 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 			// TCP sessions established before activation cannot be migrated.
 			return i.sendPacket(p, meta)
 		}
-		process, err := i.lookup(ProtoTCP, p.Source, p.Destination)
-		if err != nil {
-			_ = i.rejectTCP(p, meta)
-			return fmt.Errorf("TCP process lookup for %s: %w", p.Source, err)
+		process, lookupErr := i.lookup(ProtoTCP, p.Source, p.Destination)
+		if lookupErr != nil {
+			// Do not reject a SYN only because process attribution is not ready.
+			// Target-only rules must still handle System/SMB/service traffic.
+			process = packetProcess{}
 		}
 		metadata := i.flowMetadata(p, process)
 		if i.server.guard.MustDirectFlow(metadata) {

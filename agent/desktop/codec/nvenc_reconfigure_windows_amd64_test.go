@@ -30,10 +30,10 @@ func TestBuildNVENCReconfigureParams(t *testing.T) {
 	cfg.BitDepth = 8
 
 	config := &nvencConfigBlob{}
-	if err := configureNVENCHEVC444(config, cfg); err != nil {
+	if err := configureNVENCHEVC444(config, cfg, nvencAPIVersion, false); err != nil {
 		t.Fatal(err)
 	}
-	initParams, params, err := buildNVENCReconfigureParams(config, cfg, true)
+	initParams, params, err := buildNVENCReconfigureParams(config, cfg, true, nvencAPIVersion, false)
 	if err != nil {
 		t.Fatal(err)
 	}

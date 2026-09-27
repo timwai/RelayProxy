@@ -60,10 +60,31 @@ func validateFlow(flow Flow) (Flow, FlowKey, error) {
 	source, destination = source.Unmap(), destination.Unmap()
 	flow.SourceIP, flow.IP = source.String(), destination.String()
 	flow.Process = strings.TrimSpace(flow.Process)
+	flow.ProcessAliases = cleanIdentityList(flow.ProcessAliases)
+	flow.Services = cleanIdentityList(flow.Services)
 	flow.Host = strings.TrimSpace(flow.Host)
 	return flow, FlowKey{
 		Protocol:    flow.Protocol,
 		Source:      netip.AddrPortFrom(source, flow.SourcePort),
 		Destination: netip.AddrPortFrom(destination, flow.Port),
 	}, nil
+}
+
+
+func cleanIdentityList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }

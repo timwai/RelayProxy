@@ -117,7 +117,7 @@ func newPacketInterceptor(s *Server, device packetDevice, listeners []net.Listen
 		server: s, device: device, listeners: listeners, lookup: lookup,
 		ctx: ctx, cancel: cancel, tcp: make(map[FlowKey]*tcpRedirect),
 		reverse: make(map[FlowKey]*tcpRedirect),
-		ports: make(map[bool]uint16), udpQueues: make([]chan interceptedUDP, 8),
+		ports:   make(map[bool]uint16), udpQueues: make([]chan interceptedUDP, 8),
 		dns: newDNSAssociations(),
 	}
 	for _, listener := range listeners {

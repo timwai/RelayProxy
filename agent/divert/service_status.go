@@ -4,6 +4,8 @@ type NetworkServiceStatus struct {
 	Supported       bool   `json:"supported"`
 	Installed       bool   `json:"installed"`
 	Running         bool   `json:"running"`
+	AutoStart       bool   `json:"autoStart"`
+	AutoStartKnown  bool   `json:"autoStartKnown"`
 	Ready           bool   `json:"ready"`
 	VersionMatch    bool   `json:"versionMatch"`
 	RecoveryEnabled bool   `json:"recoveryEnabled"`

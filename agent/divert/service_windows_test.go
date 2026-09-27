@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -140,5 +142,23 @@ func TestNetworkFramePreservesWinDivertFlags(t *testing.T) {
 	}
 	if got.flags != rawFlags {
 		t.Fatalf("flags=%#x want=%#x", got.flags, rawFlags)
+	}
+}
+
+
+func TestRemoveWindowsTreeWithRetryRemovesOrphanedArtifacts(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "RelayProxy-Network-Service")
+	nested := filepath.Join(root, "deadbeef")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "RelayProxyNetwork.exe"), []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeWindowsTreeWithRetry(root, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(root); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphaned ProgramData tree still exists: %v", err)
 	}
 }

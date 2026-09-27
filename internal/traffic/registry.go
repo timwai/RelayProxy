@@ -19,9 +19,11 @@ const (
 )
 
 type Metadata struct {
-	ProcessID    uint32 `json:"pid"`
-	Process      string `json:"process"`
-	ProcessName  string `json:"process_name"`
+	ProcessID      uint32   `json:"pid"`
+	Process        string   `json:"process"`
+	ProcessName    string   `json:"process_name"`
+	ProcessAliases []string `json:"process_aliases,omitempty"`
+	Services       []string `json:"services,omitempty"`
 	Source       string `json:"source"`
 	Host         string `json:"host"`
 	DomainSource string `json:"domain_source"` // requested, dns, or unknown

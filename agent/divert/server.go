@@ -244,6 +244,7 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 			accounting = "packet"
 		}
 		route.traffic = s.opts.Traffic.Start(traffic.Metadata{ProcessID: flow.ProcessID, Process: flow.Process,
+			ProcessAliases: flow.ProcessAliases, Services: flow.Services,
 			Source: key.Source.String(), Host: flow.Host, DomainSource: flow.DomainSource, IP: flow.IP, Port: flow.Port,
 			Protocol: string(flow.Protocol), Entry: "transparent", Action: string(decision.Action), Rule: decision.Rule,
 			ExitID: exitID, Accounting: accounting})

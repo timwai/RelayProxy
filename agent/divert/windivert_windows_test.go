@@ -108,7 +108,9 @@ func TestWinDivertNativeFilter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	filter, err := syscall.BytePtrFromString(windowsInterceptFilter(45001, 45002))
+	filter, err := syscall.BytePtrFromString(windowsInterceptFilter(45001, 45002, LoopGuard{
+		RelayIPs: []string{"203.0.113.9", "2001:db8:ffff::9"}, RelayPorts: []int{443},
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +129,15 @@ func TestWinDivertNativeFilter(t *testing.T) {
 			if got == 0 {
 				t.Fatalf("native filter skipped %s ipv6=%v", protocol, ipv6)
 			}
+
+			inbound := windivertAddress{}
+			inbound.setOutbound(false)
+			inbound.setChecksums(ipv6)
+			got, _, _ = syscall.SyscallN(evaluate, uintptr(unsafe.Pointer(filter)), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(unsafe.Pointer(&inbound)))
+			if got != 0 {
+				t.Fatalf("native filter intercepted ordinary inbound %s ipv6=%v", protocol, ipv6)
+			}
+
 			address.Flags |= 1 << 18
 			got, _, _ = syscall.SyscallN(evaluate, uintptr(unsafe.Pointer(filter)), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(unsafe.Pointer(&address)))
 			if got != 0 {
@@ -135,5 +146,30 @@ func TestWinDivertNativeFilter(t *testing.T) {
 			runtime.KeepAlive(data)
 		}
 	}
+	relayFilter, err := syscall.BytePtrFromString(windowsInterceptFilter(45001, 45002, LoopGuard{
+		RelayIPs: []string{"198.51.100.20", "2001:db8:2::20"}, RelayPorts: []int{443},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	position = 0
+	ok, _, callErr = syscall.SyscallN(compile, uintptr(unsafe.Pointer(relayFilter)), 0, 0, 0, 0, uintptr(unsafe.Pointer(&position)))
+	if ok == 0 {
+		t.Fatalf("native relay-bypass filter rejected at byte %d: %v", position, callErr)
+	}
+	for _, ipv6 := range []bool{false, true} {
+		for _, protocol := range []Protocol{ProtoTCP, ProtoUDP} {
+			data, _ := packetTestFixture(ipv6, protocol, nil, false)
+			address := windivertAddress{}
+			address.setOutbound(true)
+			address.setChecksums(ipv6)
+			got, _, _ := syscall.SyscallN(evaluate, uintptr(unsafe.Pointer(relayFilter)), uintptr(unsafe.Pointer(&data[0])), uintptr(len(data)), uintptr(unsafe.Pointer(&address)))
+			if got != 0 {
+				t.Fatalf("native filter intercepted Relay %s ipv6=%v", protocol, ipv6)
+			}
+			runtime.KeepAlive(data)
+		}
+	}
+	runtime.KeepAlive(relayFilter)
 	runtime.KeepAlive(filter)
 }

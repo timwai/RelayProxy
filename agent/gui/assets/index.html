@@ -779,6 +779,7 @@
               </div>
               <div class="grid grid-cols-2 gap-2 text-[10px] text-slate-500 dark:text-slate-400">
                 <div>PID：<span id="network-service-pid" class="mono text-slate-700 dark:text-slate-200">—</span></div>
+                <div>开机启动：<span id="network-service-autostart" class="text-slate-700 dark:text-slate-200">—</span></div>
                 <div>自动恢复：<span id="network-service-recovery" class="text-slate-700 dark:text-slate-200">—</span></div>
                 <div class="col-span-2">程序：<span id="network-service-path" class="mono select-text break-all text-slate-700 dark:text-slate-200">—</span></div>
               </div>
@@ -1700,6 +1701,9 @@
       stateEl.className = tone;
       $('network-service-message').textContent = status.message || '';
       $('network-service-pid').textContent = status.pid ? String(status.pid) : '—';
+      $('network-service-autostart').textContent = status.autoStartKnown
+        ? (status.autoStart ? 'Automatic' : '非 Automatic')
+        : '无法确认';
       $('network-service-recovery').textContent = status.recoveryKnown
         ? (status.recoveryEnabled ? '已启用 · 1s / 5s / 15s' : '未配置 / 不完整')
         : '无法确认（权限受限）';

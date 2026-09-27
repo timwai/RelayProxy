@@ -3,6 +3,7 @@
 package divert
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -273,7 +274,7 @@ func serveWindowsNetworkSession(file *os.File) error {
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte("empty WinDivert filter")})
 		return errors.New("RelayProxy Network Service 收到空 WinDivert 过滤器")
 	}
-	handle, err := openWinDivert(filter)
+	handle, err := openTrustedWinDivert(filter)
 	if err != nil {
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(err.Error())})
 		return err
@@ -526,8 +527,10 @@ func EnsurePlatformService() error {
 	if runtime.GOARCH != "amd64" {
 		return nil
 	}
-	installed, running, err := windowsNetworkServiceState()
-	if err == nil && installed && running {
+	expected, expectedErr := expectedWindowsNetworkServiceExecutable()
+	installed, running, binaryPath, stateErr := windowsNetworkServiceState()
+	if expectedErr == nil && stateErr == nil && installed && running &&
+		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected)) {
 		return nil
 	}
 	if windows.GetCurrentProcessToken().IsElevated() {
@@ -537,29 +540,93 @@ func EnsurePlatformService() error {
 }
 
 func WindowsNetworkServiceInstalled() bool {
-	installed, _, err := windowsNetworkServiceState()
+	installed, _, _, err := windowsNetworkServiceState()
 	return err == nil && installed
 }
 
-func windowsNetworkServiceState() (installed, running bool, err error) {
+func PlatformServiceReady() bool {
+	installed, running, _, err := windowsNetworkServiceState()
+	return err == nil && installed && running
+}
+
+func windowsNetworkServiceState() (installed, running bool, binaryPath string, err error) {
 	manager, err := mgr.Connect()
 	if err != nil {
-		return false, false, err
+		return false, false, "", err
 	}
 	defer manager.Disconnect()
 	service, err := manager.OpenService(windowsNetworkServiceName)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		return false, false, nil
+		return false, false, "", nil
 	}
 	if err != nil {
-		return false, false, err
+		return false, false, "", err
 	}
 	defer service.Close()
+	config, err := service.Config()
+	if err != nil {
+		return true, false, "", err
+	}
 	status, err := service.Query()
 	if err != nil {
-		return true, false, err
+		return true, false, config.BinaryPathName, err
 	}
-	return true, status.State == svc.Running, nil
+	return true, status.State == svc.Running, config.BinaryPathName, nil
+}
+
+func expectedWindowsNetworkServiceExecutable() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	executable, err = filepath.Abs(executable)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(executable)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil {
+		return "", err
+	}
+	directory := filepath.Join(programData, "RelayProxy-Network-Service", fmt.Sprintf("%x", sum[:8]))
+	return filepath.Join(directory, "RelayProxyNetwork.exe"), nil
+}
+
+func stageWindowsNetworkServiceExecutable() (string, error) {
+	source, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	source, err = filepath.Abs(source)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil {
+		return "", err
+	}
+	root := filepath.Join(programData, "RelayProxy-Network-Service")
+	if err := ensureWinDivertDirectory(root); err != nil {
+		return "", fmt.Errorf("保护 Network Service 根目录失败: %w", err)
+	}
+	directory := filepath.Join(root, fmt.Sprintf("%x", sum[:8]))
+	if err := ensureWinDivertDirectory(directory); err != nil {
+		return "", fmt.Errorf("保护 Network Service 版本目录失败: %w", err)
+	}
+	target := filepath.Join(directory, "RelayProxyNetwork.exe")
+	if err := writeWinDivertFile(target, data); err != nil {
+		return "", fmt.Errorf("安装 Network Service 可执行文件失败: %w", err)
+	}
+	return target, nil
 }
 
 func RunWindowsNetworkServiceHelper(action, allowedSID string) error {
@@ -585,11 +652,7 @@ func currentWindowsUserSID() (string, error) {
 }
 
 func installWindowsNetworkService(allowedSID string) error {
-	executable, err := os.Executable()
-	if err != nil {
-		return err
-	}
-	executable, err = filepath.Abs(executable)
+	executable, err := stageWindowsNetworkServiceExecutable()
 	if err != nil {
 		return err
 	}

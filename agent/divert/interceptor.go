@@ -98,7 +98,6 @@ type packetInterceptor struct {
 	mu        sync.Mutex
 	tcp       map[FlowKey]*tcpRedirect
 	reverse   map[FlowKey]*tcpRedirect
-	nextPort  uint16
 	ports     map[bool]uint16 // false: IPv4, true: IPv6
 	udpQueues []chan interceptedUDP
 	logMu     sync.Mutex
@@ -117,7 +116,7 @@ func newPacketInterceptor(s *Server, device packetDevice, listeners []net.Listen
 	i := &packetInterceptor{
 		server: s, device: device, listeners: listeners, lookup: lookup,
 		ctx: ctx, cancel: cancel, tcp: make(map[FlowKey]*tcpRedirect),
-		reverse: make(map[FlowKey]*tcpRedirect), nextPort: 10000,
+		reverse: make(map[FlowKey]*tcpRedirect),
 		ports: make(map[bool]uint16), udpQueues: make([]chan interceptedUDP, 8),
 		dns: newDNSAssociations(),
 	}
@@ -428,20 +427,24 @@ func (i *packetInterceptor) registerTCP(route *ClassifiedFlow, sequence uint32, 
 		if port == 0 {
 			return nil, errors.New("no TCP interceptor for address family")
 		}
-		for attempts := 0; ; attempts++ {
-			if attempts >= 64512 {
-				return nil, ErrFlowCapacity
-			}
-			i.nextPort++
-			if i.nextPort < 1024 {
-				i.nextPort = 1024
-			}
-			flow.translated = FlowKey{Protocol: ProtoTCP,
-				Source:      netip.AddrPortFrom(flow.original.Destination.Addr(), i.nextPort),
-				Destination: netip.AddrPortFrom(flow.original.Source.Addr(), port)}
-			if i.reverse[flow.translated] == nil {
-				break
-			}
+		// Match WinDivert's streamdump reflection model exactly: swap the IP
+		// endpoints, preserve the client's original source port, and only
+		// replace the destination port with the local transparent listener.
+		// The resulting reflected four-tuple is already unique because it
+		// contains the original remote IP plus the client's source IP/port.
+		flow.translated = FlowKey{
+			Protocol: ProtoTCP,
+			Source: netip.AddrPortFrom(
+				flow.original.Destination.Addr(),
+				flow.original.Source.Port(),
+			),
+			Destination: netip.AddrPortFrom(
+				flow.original.Source.Addr(),
+				port,
+			),
+		}
+		if existing := i.reverse[flow.translated]; existing != nil && existing != flow {
+			return nil, ErrFlowCapacity
 		}
 		i.reverse[flow.translated] = flow
 	}

@@ -667,9 +667,11 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	status.VersionMatch = expectedErr == nil && installed &&
 		strings.Contains(strings.ToLower(binaryPath), strings.ToLower(expected))
 	if installed {
+		status.AutoStart, status.AutoStartKnown = windowsNetworkServiceAutoStartState()
 		status.RecoveryEnabled, status.RecoveryKnown = windowsNetworkServiceRecoveryState()
 	}
 	status.Ready = installed && running && status.VersionMatch &&
+		(!status.AutoStartKnown || status.AutoStart) &&
 		(!status.RecoveryKnown || status.RecoveryEnabled)
 	switch {
 	case !installed:
@@ -678,6 +680,9 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	case !status.VersionMatch:
 		status.State = "needs_repair"
 		status.Message = "Network Service 版本与当前客户端不一致"
+	case status.AutoStartKnown && !status.AutoStart:
+		status.State = "needs_repair"
+		status.Message = "Network Service 未配置为开机自动启动"
 	case status.RecoveryKnown && !status.RecoveryEnabled:
 		status.State = "needs_repair"
 		status.Message = "Network Service 自动恢复策略缺失或不完整"
@@ -689,6 +694,23 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 		status.Message = "Network Service 运行正常"
 	}
 	return status
+}
+
+func windowsNetworkServiceAutoStartState() (enabled, known bool) {
+	key, err := registry.OpenKey(
+		registry.LOCAL_MACHINE,
+		`SYSTEM\CurrentControlSet\Services\`+windowsNetworkServiceName,
+		registry.QUERY_VALUE,
+	)
+	if err != nil {
+		return false, false
+	}
+	defer key.Close()
+	start, _, err := key.GetIntegerValue("Start")
+	if err != nil {
+		return false, false
+	}
+	return start == uint64(windows.SERVICE_AUTO_START), true
 }
 
 func windowsNetworkServiceRecoveryState() (enabled, known bool) {

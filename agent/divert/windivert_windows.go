@@ -47,9 +47,16 @@ func (a *windivertAddress) setChecksums(ipv6 bool) {
 	a.Flags |= (1 << 21) | (1 << 22) | (1 << 23)
 }
 
+func (a *windivertAddress) prepareForSend(ipv6 bool) {
+	a.Flags &^= (1 << 20) | (1 << 21) | (1 << 22) | (1 << 23)
+	if ipv6 {
+		a.Flags |= 1 << 20
+	}
+}
+
 type windivertAPI struct {
-	dll                               windows.Handle
-	open, recv, send, shutdown, close uintptr
+	dll                                          windows.Handle
+	open, recv, send, shutdown, close, checksums uintptr
 }
 
 type windivertHandle struct {
@@ -129,6 +136,7 @@ func loadWinDivertPath(path string) (*windivertAPI, error) {
 	for name, target := range map[string]*uintptr{
 		"WinDivertOpen": &api.open, "WinDivertRecv": &api.recv,
 		"WinDivertSend": &api.send, "WinDivertShutdown": &api.shutdown, "WinDivertClose": &api.close,
+		"WinDivertHelperCalcChecksums": &api.checksums,
 	} {
 		*target, err = windows.GetProcAddress(dll, name)
 		if err != nil {
@@ -210,6 +218,19 @@ func (h *windivertHandle) Send(packet []byte, address windivertAddress) error {
 	if h.closed.Load() {
 		return netClosedError()
 	}
+
+	address.prepareForSend(packet[0]>>4 == 6)
+	ok, _, checksumErr := syscall.SyscallN(
+		h.api.checksums,
+		uintptr(unsafe.Pointer(&packet[0])),
+		uintptr(len(packet)),
+		uintptr(unsafe.Pointer(&address)),
+		0,
+	)
+	if ok == 0 {
+		return fmt.Errorf("WinDivert checksum calculation failed: %w", nativeWinDivertError(checksumErr))
+	}
+
 	var length uint32
 	ok, _, err := syscall.SyscallN(h.api.send, uintptr(h.handle), uintptr(unsafe.Pointer(&packet[0])), uintptr(len(packet)), uintptr(unsafe.Pointer(&length)), uintptr(unsafe.Pointer(&address)))
 	runtime.KeepAlive(packet)

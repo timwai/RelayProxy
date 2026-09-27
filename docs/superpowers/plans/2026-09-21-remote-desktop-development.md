@@ -1223,6 +1223,18 @@ Windows SendInput / CF_UNICODETEXT
 - Windows UI CI 增加验证脚本的 PowerShell parser syntax 检查。
 - 推荐真机流程：`Prepare → GUI 开启 Canary → Status 确认 ACTIVE → ArmNVENC → 导出 diagnostics → 重启 → ACTIVE → ArmNVDEC → 导出 diagnostics`。
 
+### 0.2.100 RD3 Intel oneVPL Diagnostics Gate
+
+- 新增 `scripts/analyze-desktop-gpu.ps1`，直接读取 Relay Desktop schema v8 diagnostics 的 `targetGpu / gpuValidation`，用于 Intel oneVPL HEVC 4:4:4 双机验收。
+- `-RequireTargetAYUV` 要求目标明确声明 AYUV，且 capability 的 encode/decode/display zero-copy 三段均为 true。
+- `-RequireIntelOneVPL` 要求实际样本命中 `onevpl-hevc444-d3d11-zero-copy` encoder/decoder，同时必须观察到 D3D11 zero-copy renderer，不能仅依据 Hardware=true 判定。
+- `-RequireEndToEndZeroCopy` 可设置最少 E2E 样本数；`-RequireNoFallback` 要求稳定窗口内 `fallbackSamples=0`。
+- 脚本会打印 capture/encoder/decoder/render backend 分布，便于不同 Intel GPU / driver 结果直接归档比较。
+- Windows UI CI 增加脚本 parser syntax 检查。
+- Intel 真机建议至少保持稳定 4:4:4 会话 30–60 秒后导出 diagnostics，再执行：
+  `./scripts/analyze-desktop-gpu.ps1 <json> -RequireTargetAYUV -RequireIntelOneVPL -RequireEndToEndZeroCopy -RequireNoFallback -MinEndToEndSamples 20`。
+
+
 
 
 

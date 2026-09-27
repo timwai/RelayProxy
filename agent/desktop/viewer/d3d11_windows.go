@@ -385,9 +385,9 @@ func protectD3D11Multithread(device unsafe.Pointer) error {
 		return err
 	}
 	defer releaseCOM(multithread)
-	if comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1) == 0 {
-		return fmt.Errorf("%w: ID3D10Multithread.SetMultithreadProtected returned FALSE", ErrUnavailable)
-	}
+	// SetMultithreadProtected returns whether protection was enabled before
+	// this call. A FALSE return on first enable is expected and is not failure.
+	_ = comCall(multithread, id3d10MultithreadSetMultithreadProtected, 1)
 	return nil
 }
 

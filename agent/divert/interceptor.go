@@ -24,6 +24,8 @@ type packetDevice interface {
 	Close() error
 }
 
+var errPacketInjection = errors.New("divert: packet injection failed")
+
 // packetFinalizer is implemented by capture mechanisms, such as Linux
 // NFQUEUE, that retain the original packet until userspace supplies a verdict.
 // The finalizer is deliberately optional: WinDivert removes a packet at
@@ -208,8 +210,13 @@ func (i *packetInterceptor) receive() {
 		if finalizer, ok := i.device.(packetFinalizer); ok {
 			finalizeErr = finalizer.Finalize(meta)
 		}
-		if err := errors.Join(handleErr, finalizeErr); err != nil {
-			i.report(err)
+		joinedErr := errors.Join(handleErr, finalizeErr)
+		if i.disableOnInjectionError(handleErr) {
+			i.report(joinedErr)
+			return
+		}
+		if joinedErr != nil {
+			i.report(joinedErr)
 		}
 	}
 }
@@ -392,7 +399,7 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 			return err
 		}
 		meta.outbound = false
-		return i.device.Send(p.Bytes, meta)
+		return i.inject(p.Bytes, meta)
 	default:
 		return errors.New("invalid TCP interception action")
 	}
@@ -446,7 +453,7 @@ func (i *packetInterceptor) returnTCP(p ipPacket, meta packetMetadata) error {
 	if err := rewriteIPPacket(p.Bytes, flow.original.Destination, flow.original.Source); err != nil {
 		return err
 	}
-	return i.device.Send(p.Bytes, flow.replyMeta)
+	return i.inject(p.Bytes, flow.replyMeta)
 }
 
 func (i *packetInterceptor) rejectTCP(p ipPacket, meta packetMetadata) error {
@@ -455,7 +462,26 @@ func (i *packetInterceptor) rejectTCP(p ipPacket, meta packetMetadata) error {
 		return err
 	}
 	meta.outbound = false
-	return i.device.Send(response, meta)
+	return i.inject(response, meta)
+}
+
+func (i *packetInterceptor) inject(packet []byte, meta packetMetadata) error {
+	if err := i.device.Send(packet, meta); err != nil {
+		return fmt.Errorf("%w: %v", errPacketInjection, err)
+	}
+	return nil
+}
+
+func (i *packetInterceptor) disableOnInjectionError(err error) bool {
+	if err == nil || !errors.Is(err, errPacketInjection) || i.ctx.Err() != nil {
+		return false
+	}
+	// Once reinjection fails, continuing to capture packets can blackhole the
+	// entire host. Tear down the interceptor so WinDivert releases the network
+	// path; the Agent and Relay session remain alive.
+	i.running.Store(false)
+	go i.server.Close()
+	return true
 }
 
 func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) error {
@@ -470,7 +496,7 @@ func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) err
 	}
 	// Outbound captures can contain hardware-offloaded, unfinished checksums.
 	repairPacketChecksums(packet)
-	if err := i.device.Send(packet.Bytes, meta); err != nil {
+	if err := i.inject(packet.Bytes, meta); err != nil {
 		return err
 	}
 	if meta.outbound && packet.Protocol == ProtoUDP {
@@ -497,12 +523,16 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 				if err != nil {
 					return err
 				}
-				if err := i.device.Send(response, meta); err != nil {
+				if err := i.inject(response, meta); err != nil {
 					return err
 				}
 				i.dns.response(key.Destination, key.Source, payload)
 				return nil
 			})
+			if i.disableOnInjectionError(err) {
+				i.report(err)
+				return
+			}
 			i.report(err)
 		}
 	}

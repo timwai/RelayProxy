@@ -26,6 +26,8 @@ Windows x64 的 `relay-agent-gui.exe` 和 `relay-agent.exe` 已内嵌官方 WinD
 
 不同字段同时满足（AND）；同一字段的多个值任选其一（OR）。按从上到下的顺序使用第一条匹配的启用规则，未命中时使用 `routing.default_action`。空列表或 `*` 不限制该字段；四个字段全空时匹配所有连接。
 
+**进程条件是可选条件，不是透明代理的前置条件。** 如果规则只填写目标 IP/CIDR、端口或协议，即使 Windows 在该数据包到达时暂时无法从 OWNER_PID 表解析出进程（例如 SMB/445、System 或部分受保护服务的早期 SYN），仍会使用原始目标五元组执行规则。只有规则显式填写了进程条件时，才要求该连接具备可匹配的进程身份。
+
 ```yaml
 routing:
   mode: rule

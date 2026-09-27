@@ -33,7 +33,6 @@ func (d *windowsPacketDevice) Send(packet []byte, meta packetMetadata) error {
 	var addr windivertAddress
 	addr.setOutbound(meta.outbound)
 	addr.setIfIndex(meta.ifIndex, meta.subIfIndex)
-	addr.setChecksums(len(packet) > 0 && packet[0]>>4 == 6)
 	return d.handle.Send(packet, addr)
 }
 func (d *windowsPacketDevice) Shutdown() error { return d.handle.Shutdown() }

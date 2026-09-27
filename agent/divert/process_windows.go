@@ -28,6 +28,9 @@ var (
 )
 
 const (
+	windowsSystemPID         = 4
+	windowsSystemProcessName = "System"
+
 	tcpTableOwnerPIDAll = 5
 	udpTableOwnerPID    = 1
 	maxProcessTableSize = 64 << 20
@@ -259,6 +262,14 @@ func matchProcessEndpoint(row []byte, family uint32, addressOffset, portOffset i
 }
 
 func (api *processWindowsAPI) processPath(pid uint32) (string, error) {
+	if pid == windowsSystemPID {
+		// PID 4 is the Windows kernel System process. Opening it with
+		// PROCESS_QUERY_LIMITED_INFORMATION is intentionally denied on many
+		// systems, but the OWNER_PID tables still legitimately attribute TCP/UDP
+		// sockets to it. Treat it as a stable synthetic process identity so
+		// transparent proxy rules can match and proxy System-owned traffic.
+		return windowsSystemProcessName, nil
+	}
 	if pid == uint32(os.Getpid()) {
 		return os.Executable()
 	}

@@ -2665,7 +2665,13 @@
       }
       var passed = !!report.passed;
       var unsupported = !!report.unsupported;
-      var parts = [unsupported ? 'NVIDIA NVCodec 不支持' : (passed ? 'NVIDIA GPU 自检通过' : 'NVIDIA GPU 自检失败')];
+      var noNVDEC = !!report.nvdecH264Known && !report.nvdecH264Supported &&
+        !!report.nvdecHevc420Known && !report.nvdecHevc420Supported &&
+        !!report.nvdecHevc444Known && !report.nvdecHevc444Supported;
+      var noNvidiaVideoCodec = unsupported && noNVDEC;
+      var parts = [noNvidiaVideoCodec
+        ? 'NVIDIA 视频编解码硬件不可用'
+        : (unsupported ? 'NVIDIA NVCodec 不支持' : (passed ? 'NVIDIA GPU 自检通过' : 'NVIDIA GPU 自检失败'))];
       if (report.adapter) parts.push(String(report.adapter));
       if (report.encodedFrames != null || report.decodedFrames != null) {
         parts.push('编码/解码 ' + Number(report.encodedFrames || 0) + '/' + Number(report.decodedFrames || 0) + ' 帧');
@@ -2701,7 +2707,10 @@
       if (report.durationMs != null) parts.push(Number(report.durationMs || 0) + ' ms');
       if (unsupported) {
         parts.push(report.unsupportedReason || '当前 NVIDIA GPU 未暴露 NVENC 硬件编码');
-        if (report.nvdecH264Supported || report.nvdecHevc420Supported || report.nvdecHevc444Supported) {
+        if (noNvidiaVideoCodec) {
+          parts.push('当前 NVIDIA GPU 同时未暴露 NVDEC 视频解码硬件');
+          parts.push('该 GPU 仍可用于 D3D11 / CUDA / 图形渲染，不参与视频编解码');
+        } else if (report.nvdecH264Supported || report.nvdecHevc420Supported || report.nvdecHevc444Supported) {
           parts.push('NVDEC 解码能力仍可独立使用');
         }
         parts.push('Relay Desktop 将使用 Media Foundation / Quick Sync / CPU 编码路径');
@@ -2815,7 +2824,12 @@
         renderRemoteDesktopNVCodecSelfTest(report);
         var validation = await refreshRemoteDesktopNVCodecValidation();
         if (report.unsupported) {
-          toast('当前 NVIDIA GPU 不支持 NVENC；已跳过 NVCodec 资格验证，Relay Desktop 将使用其他编码路径');
+          var allDecodeUnsupported = !!report.nvdecH264Known && !report.nvdecH264Supported &&
+            !!report.nvdecHevc420Known && !report.nvdecHevc420Supported &&
+            !!report.nvdecHevc444Known && !report.nvdecHevc444Supported;
+          toast(allDecodeUnsupported
+            ? '当前 NVIDIA GPU 不提供 NVENC/NVDEC；Relay Desktop 将使用 Media Foundation / Quick Sync / CPU'
+            : '当前 NVIDIA GPU 不支持 NVENC；已跳过 NVCodec 资格验证，Relay Desktop 将使用其他编码路径');
         } else if (report.passed) {
           var qualification = validation
             ? ' · 资格 ' + Number(validation.qualificationPasses || 0) + '/' + Number(validation.requiredPasses || 3)

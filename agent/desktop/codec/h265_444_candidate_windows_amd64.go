@@ -113,7 +113,7 @@ func probeNVIDIAH265444RuntimeCandidate(ctx context.Context) H265444RuntimeCandi
 			probe.DecodeRuntime = true
 			deviceProbe := probeNVIDIANVDECHEVC444(ctx, getDecoderCaps)
 			probe.DeviceProbe = probe.DeviceProbe || deviceProbe.Checked
-			probe.DecodeCapabilityKnown = deviceProbe.Checked
+			probe.DecodeCapabilityKnown = deviceProbe.HEVC444Known
 			if deviceProbe.DeviceCount > probe.DeviceCount {
 				probe.DeviceCount = deviceProbe.DeviceCount
 			}

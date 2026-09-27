@@ -334,7 +334,6 @@ func serveWindowsNetworkSession(file *os.File) error {
 		var addr windivertAddress
 		addr.setOutbound(frame.flags&networkFrameFlagOutbound != 0)
 		addr.setIfIndex(frame.ifIndex, frame.subIfIndex)
-		addr.setChecksums(len(frame.payload) > 0 && frame.payload[0]>>4 == 6)
 		if err := handle.Send(frame.payload, addr); err != nil {
 			_ = handle.Shutdown()
 			<-captureDone

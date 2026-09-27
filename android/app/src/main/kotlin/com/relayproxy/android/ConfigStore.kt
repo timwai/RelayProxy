@@ -14,7 +14,8 @@ data class ExitConfig(
     val tlsEnabled: Boolean = true,
     val insecureTls: Boolean = false,
     val allowPrivateNetwork: Boolean = false,
-    val networkMode: String = NetworkBinder.MODE_AUTO,
+    val networkMode: String = NetworkBinder.MODE_WIFI,
+    val autoNetworkSwitch: Boolean = true,
 ) {
     fun coreJson(): String = JSONObject()
         .put("serverAddress", serverAddress.trim())
@@ -52,12 +53,29 @@ class ConfigStore(private val context: Context) {
 
     fun load(): ExitConfig {
         val savedNetworkMode = prefs.getString("networkMode", null)
-        val migratedNetworkMode = savedNetworkMode ?: if (
-            prefs.getBoolean("cellularOnly", false)
-        ) {
-            NetworkBinder.MODE_CELLULAR
-        } else {
-            NetworkBinder.MODE_AUTO
+        val legacyCellularOnly = prefs.getBoolean("cellularOnly", false)
+
+        // MODE_AUTO was the old "follow Android default network" behavior.
+        // Migrate it to Wi-Fi preferred + automatic fallback, which keeps the
+        // expected Wi-Fi-first behavior while adding deterministic failover.
+        val resolvedNetworkMode = when (savedNetworkMode) {
+            NetworkBinder.MODE_WIFI -> NetworkBinder.MODE_WIFI
+            NetworkBinder.MODE_CELLULAR -> NetworkBinder.MODE_CELLULAR
+            else -> if (legacyCellularOnly) {
+                NetworkBinder.MODE_CELLULAR
+            } else {
+                NetworkBinder.MODE_WIFI
+            }
+        }
+        val resolvedAutoNetworkSwitch = when {
+            prefs.contains("autoNetworkSwitch") ->
+                prefs.getBoolean("autoNetworkSwitch", true)
+            savedNetworkMode == NetworkBinder.MODE_AUTO ->
+                true
+            savedNetworkMode == null && !legacyCellularOnly ->
+                true
+            else ->
+                false
         }
 
         val savedDeviceName = prefs.getString("deviceName", null)?.trim().orEmpty()
@@ -78,7 +96,8 @@ class ConfigStore(private val context: Context) {
             tlsEnabled = prefs.getBoolean("tlsEnabled", true),
             insecureTls = prefs.getBoolean("insecureTls", false),
             allowPrivateNetwork = prefs.getBoolean("allowPrivateNetwork", false),
-            networkMode = migratedNetworkMode,
+            networkMode = resolvedNetworkMode,
+            autoNetworkSwitch = resolvedAutoNetworkSwitch,
         )
     }
 
@@ -93,6 +112,7 @@ class ConfigStore(private val context: Context) {
             .putBoolean("insecureTls", config.insecureTls)
             .putBoolean("allowPrivateNetwork", config.allowPrivateNetwork)
             .putString("networkMode", config.networkMode)
+            .putBoolean("autoNetworkSwitch", config.autoNetworkSwitch)
             .remove("cellularOnly")
             .apply()
     }

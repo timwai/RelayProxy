@@ -229,12 +229,26 @@ func (h *Host) streamClipboard(ctx context.Context, conn *desktopmedia.MediaConn
 		return errors.New("desktop clipboard endpoint is unavailable")
 	}
 
-	seed, err := readClipboardContent(ctx, endpoint)
-	if err == nil {
-		state.SeedContent(seed)
-	} else if !errors.Is(err, ErrClipboardTextUnavailable) &&
-		!errors.Is(err, ErrClipboardImageUnavailable) && ctx.Err() == nil {
-		log.Printf("[Desktop] initial clipboard read failed: %v", err)
+	var fileEndpoint ClipboardFileEndpoint
+	var lastFileKey string
+	if candidate, ok := endpoint.(ClipboardFileEndpoint); ok {
+		fileEndpoint = candidate
+		if paths, fileErr := fileEndpoint.ClipboardFiles(ctx); fileErr == nil && len(paths) > 0 {
+			lastFileKey = clipboardFilePathsKey(paths)
+		} else if fileErr != nil && !errors.Is(fileErr, ErrClipboardFilesUnavailable) && ctx.Err() == nil {
+			log.Printf("[Desktop] initial file clipboard read failed: %v", fileErr)
+		}
+	}
+
+	if lastFileKey == "" {
+		seed, err := readClipboardContent(ctx, endpoint)
+		if err == nil {
+			state.SeedContent(seed)
+		} else if !errors.Is(err, ErrClipboardTextUnavailable) &&
+			!errors.Is(err, ErrClipboardImageUnavailable) &&
+			!errors.Is(err, ErrClipboardFilesUnavailable) && ctx.Err() == nil {
+			log.Printf("[Desktop] initial clipboard read failed: %v", err)
+		}
 	}
 
 	ticker := time.NewTicker(250 * time.Millisecond)
@@ -245,6 +259,31 @@ func (h *Host) streamClipboard(ctx context.Context, conn *desktopmedia.MediaConn
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
+			if fileEndpoint != nil {
+				paths, fileErr := fileEndpoint.ClipboardFiles(ctx)
+				if fileErr == nil && len(paths) > 0 {
+					key := clipboardFilePathsKey(paths)
+					if key != lastFileKey {
+						content, sendErr := sendClipboardFiles(ctx, conn, paths)
+						if sendErr != nil {
+							log.Printf("[Desktop] file clipboard send failed: %v", sendErr)
+						} else {
+							lastFileKey = key
+							state.SeedContent(content)
+						}
+					}
+					continue
+				}
+				if fileErr != nil && !errors.Is(fileErr, ErrClipboardFilesUnavailable) {
+					if ctx.Err() != nil {
+						return ctx.Err()
+					}
+					log.Printf("[Desktop] file clipboard read failed: %v", fileErr)
+					continue
+				}
+				lastFileKey = ""
+			}
+
 			content, err := readClipboardContent(ctx, endpoint)
 			if err != nil {
 				if errors.Is(err, ErrClipboardTextUnavailable) || errors.Is(err, ErrClipboardImageUnavailable) {

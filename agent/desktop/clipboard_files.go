@@ -296,3 +296,18 @@ func (r *clipboardFileReceiver) done(done protocol.DesktopClipboardFileDone) (pr
 	r.offsets = nil
 	return state, nil
 }
+
+func clipboardFilePathsKey(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	normalized := make([]string, 0, len(paths))
+	for _, path := range paths {
+		absolute, err := filepath.Abs(path)
+		if err != nil {
+			absolute = path
+		}
+		normalized = append(normalized, filepath.Clean(absolute))
+	}
+	return strings.Join(normalized, "\x00")
+}

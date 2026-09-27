@@ -168,3 +168,18 @@ func TestClearRecentPreservesActiveConnectionsAndTrafficTotals(t *testing.T) {
 		t.Fatalf("active connection did not enter fresh history after clear: %+v", final)
 	}
 }
+
+func TestRegistryPreservesServiceProcessMetadata(t *testing.T) {
+	r := NewRegistry(0, 0)
+	r.Start(Metadata{
+		ProcessID:      1234,
+		Process:        `C:\Windows\System32\svchost.exe`,
+		ProcessAliases: []string{"service:Dnscache"},
+		Services:       []string{"Dnscache"},
+	}).Finish("closed", nil)
+	row := r.Snapshot().Connections[0]
+	if row.ProcessName != "svchost.exe" || len(row.ProcessAliases) != 1 || row.ProcessAliases[0] != "service:Dnscache" ||
+		len(row.Services) != 1 || row.Services[0] != "Dnscache" {
+		t.Fatalf("service metadata=%+v", row.Metadata)
+	}
+}

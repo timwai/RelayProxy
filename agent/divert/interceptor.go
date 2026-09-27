@@ -236,7 +236,7 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 			return i.returnTCP(packet, meta)
 		}
 	}
-	if localOnlyPacket(packet) || relayDNSPacket(packet, i.server.guard.RelayHost) {
+	if localOnlyPacket(packet) || privateDNSPacket(packet) || relayDNSPacket(packet, i.server.guard.RelayHost) {
 		return i.sendPacket(packet, meta)
 	}
 	if packet.Protocol == ProtoTCP {
@@ -293,6 +293,14 @@ func localOnlyPacket(p ipPacket) bool {
 		}
 	}
 	return false
+}
+
+func privateDNSPacket(p ipPacket) bool {
+	if (p.Protocol != ProtoUDP && p.Protocol != ProtoTCP) || p.Destination.Port() != 53 {
+		return false
+	}
+	addr := p.Destination.Addr().Unmap()
+	return addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast()
 }
 
 // Windows can send GetAddrInfo DNS queries from the DNS service's PID rather

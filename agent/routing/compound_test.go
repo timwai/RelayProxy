@@ -130,3 +130,56 @@ func TestCompoundTargetRuleDoesNotRequireProcessIdentity(t *testing.T) {
 		t.Fatalf("target-only rule changed when process metadata appeared: %+v", got)
 	}
 }
+
+
+func TestCompoundProcessAndTargetCanMatchIndependently(t *testing.T) {
+	tests := []struct {
+		name   string
+		rule   Rule
+		flow   Flow
+		match  bool
+	}{
+		{
+			name: "process only",
+			rule: Rule{Name: "process-only", Enabled: true, Processes: []string{"chrome.exe"}, Action: ActionProxy},
+			flow: Flow{Process: `C:\Program Files\Google\Chrome\chrome.exe`, IP: "203.0.113.10", Port: 12345, Protocol: "tcp"},
+			match: true,
+		},
+		{
+			name: "target only",
+			rule: Rule{Name: "target-only", Enabled: true, Targets: []string{"192.168.50.0/24"}, Action: ActionProxy},
+			flow: Flow{Process: "", IP: "192.168.50.20", Port: 445, Protocol: "tcp"},
+			match: true,
+		},
+		{
+			name: "process and target",
+			rule: Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
+			flow: Flow{Process: "chrome.exe", IP: "203.0.113.10", Port: 443, Protocol: "tcp"},
+			match: true,
+		},
+		{
+			name: "combined process mismatch",
+			rule: Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
+			flow: Flow{Process: "firefox.exe", IP: "203.0.113.10", Port: 443, Protocol: "tcp"},
+			match: false,
+		},
+		{
+			name: "combined target mismatch",
+			rule: Rule{Name: "combined", Enabled: true, Processes: []string{"chrome.exe"}, Targets: []string{"203.0.113.10"}, Action: ActionProxy},
+			flow: Flow{Process: "chrome.exe", IP: "203.0.113.11", Port: 443, Protocol: "tcp"},
+			match: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			engine, err := NewEngine(Config{Mode: ModeRule, DefaultAction: ActionReject, Rules: []Rule{test.rule}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := engine.DecideFlow(test.flow)
+			if got.Matched != test.match {
+				t.Fatalf("decision=%+v flow=%+v", got, test.flow)
+			}
+		})
+	}
+}

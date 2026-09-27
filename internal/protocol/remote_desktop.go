@@ -401,19 +401,27 @@ type DesktopClipboardState struct {
 	Text       string                 `json:"text,omitempty"`
 	PNG        []byte                 `json:"png,omitempty"`
 	TransferID string                 `json:"transferId,omitempty"`
+	Roots      []DesktopClipboardRoot `json:"roots,omitempty"`
 	Files      []DesktopClipboardFile `json:"files,omitempty"`
 	LocalPaths []string               `json:"-"`
 }
 
+type DesktopClipboardRoot struct {
+	Name      string `json:"name"`
+	Directory bool   `json:"directory,omitempty"`
+}
+
 type DesktopClipboardFile struct {
 	Name   string `json:"name"`
+	Path   string `json:"path,omitempty"`
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256,omitempty"`
 }
 
 type DesktopClipboardFileOffer struct {
 	TransferID string                 `json:"transferId"`
-	Files      []DesktopClipboardFile `json:"files"`
+	Roots      []DesktopClipboardRoot `json:"roots,omitempty"`
+	Files      []DesktopClipboardFile `json:"files,omitempty"`
 }
 
 type DesktopClipboardFileChunk struct {

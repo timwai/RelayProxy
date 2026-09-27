@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image/png"
 	"log"
+	pathpkg "path"
 	"strings"
 	"sync"
 	"time"
@@ -94,18 +95,36 @@ func validateClipboardContent(content protocol.DesktopClipboardState) (protocol.
 		content.Files = nil
 		content.LocalPaths = nil
 	case protocol.DesktopClipboardKindFiles:
-		if len(content.Files) == 0 || len(content.Files) > maxDesktopClipboardFiles {
-			return protocol.DesktopClipboardState{}, fmt.Errorf("clipboard file count must be 1..%d", maxDesktopClipboardFiles)
+		if len(content.Roots) == 0 && len(content.Files) == 0 && len(content.LocalPaths) == 0 {
+			return protocol.DesktopClipboardState{}, errors.New("clipboard file content is empty")
 		}
-		var total int64
-		for i := range content.Files {
-			name, err := safeClipboardFileName(content.Files[i].Name)
+		if len(content.Roots) > maxDesktopClipboardRoots {
+			return protocol.DesktopClipboardState{}, fmt.Errorf("clipboard root count exceeds %d", maxDesktopClipboardRoots)
+		}
+		if len(content.Files) > maxDesktopClipboardFiles {
+			return protocol.DesktopClipboardState{}, fmt.Errorf("clipboard file count exceeds %d", maxDesktopClipboardFiles)
+		}
+		for i := range content.Roots {
+			name, err := safeClipboardFileName(content.Roots[i].Name)
 			if err != nil {
 				return protocol.DesktopClipboardState{}, err
 			}
-			content.Files[i].Name = name
+			content.Roots[i].Name = name
+		}
+		var total int64
+		for i := range content.Files {
+			relative := content.Files[i].Path
+			if relative == "" {
+				relative = content.Files[i].Name
+			}
+			relative, err := safeClipboardRelativePath(relative)
+			if err != nil {
+				return protocol.DesktopClipboardState{}, err
+			}
+			content.Files[i].Path = relative
+			content.Files[i].Name = pathpkg.Base(relative)
 			if content.Files[i].Size < 0 || content.Files[i].Size > maxDesktopClipboardFileBytes {
-				return protocol.DesktopClipboardState{}, fmt.Errorf("clipboard file %q exceeds size limit", name)
+				return protocol.DesktopClipboardState{}, fmt.Errorf("clipboard file %q exceeds size limit", relative)
 			}
 			total += content.Files[i].Size
 			if total > maxDesktopClipboardTransferBytes {
@@ -115,6 +134,7 @@ func validateClipboardContent(content protocol.DesktopClipboardState) (protocol.
 		content.Kind = protocol.DesktopClipboardKindFiles
 		content.Text = ""
 		content.PNG = nil
+		content.Roots = append([]protocol.DesktopClipboardRoot(nil), content.Roots...)
 		content.Files = append([]protocol.DesktopClipboardFile(nil), content.Files...)
 		content.LocalPaths = append([]string(nil), content.LocalPaths...)
 	default:
@@ -125,6 +145,7 @@ func validateClipboardContent(content protocol.DesktopClipboardState) (protocol.
 
 func cloneClipboardContent(content protocol.DesktopClipboardState) protocol.DesktopClipboardState {
 	content.PNG = append([]byte(nil), content.PNG...)
+	content.Roots = append([]protocol.DesktopClipboardRoot(nil), content.Roots...)
 	content.Files = append([]protocol.DesktopClipboardFile(nil), content.Files...)
 	content.LocalPaths = append([]string(nil), content.LocalPaths...)
 	return content
@@ -132,8 +153,13 @@ func cloneClipboardContent(content protocol.DesktopClipboardState) protocol.Desk
 
 func clipboardContentEqual(a, b protocol.DesktopClipboardState) bool {
 	if a.Kind != b.Kind || a.Text != b.Text || !bytes.Equal(a.PNG, b.PNG) ||
-		a.TransferID != b.TransferID || len(a.Files) != len(b.Files) {
+		a.TransferID != b.TransferID || len(a.Roots) != len(b.Roots) || len(a.Files) != len(b.Files) {
 		return false
+	}
+	for i := range a.Roots {
+		if a.Roots[i] != b.Roots[i] {
+			return false
+		}
 	}
 	for i := range a.Files {
 		if a.Files[i] != b.Files[i] {

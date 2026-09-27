@@ -2664,7 +2664,8 @@
         return;
       }
       var passed = !!report.passed;
-      var parts = [passed ? 'NVIDIA GPU 自检通过' : 'NVIDIA GPU 自检失败'];
+      var unsupported = !!report.unsupported;
+      var parts = [unsupported ? 'NVIDIA NVCodec 不支持' : (passed ? 'NVIDIA GPU 自检通过' : 'NVIDIA GPU 自检失败')];
       if (report.adapter) parts.push(String(report.adapter));
       if (report.encodedFrames != null || report.decodedFrames != null) {
         parts.push('编码/解码 ' + Number(report.encodedFrames || 0) + '/' + Number(report.decodedFrames || 0) + ' 帧');
@@ -2688,7 +2689,12 @@
         parts.push('显存观测不可用');
       }
       if (report.durationMs != null) parts.push(Number(report.durationMs || 0) + ' ms');
-      if (!passed && report.error) parts.push(String(report.error));
+      if (unsupported) {
+        parts.push(report.unsupportedReason || '当前 NVIDIA GPU 未暴露 NVENC 硬件编码');
+        parts.push('Relay Desktop 将使用 Media Foundation / Quick Sync / CPU 编码路径');
+      } else if (!passed && report.error) {
+        parts.push(String(report.error));
+      }
       target.textContent = parts.join(' · ');
       target.className = passed
         ? 'text-[11px] leading-5 px-3 py-2 rounded-md border border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
@@ -2761,8 +2767,12 @@
         selfTest.textContent = busy && mode === 'self-test' ? 'GPU 自检中…' : 'NVIDIA GPU 自检';
       }
       if (qualification) {
-        qualification.disabled = !!busy;
+        var nvcodecUnsupported = !!(state.desktopNVCodecSelfTest && state.desktopNVCodecSelfTest.unsupported);
+        qualification.disabled = !!busy || nvcodecUnsupported;
         qualification.textContent = busy && mode === 'qualification' ? '资格验证中…' : '连续资格验证';
+        qualification.title = nvcodecUnsupported
+          ? '当前 NVIDIA GPU 不支持 NVENC，无法进行 NVENC/NVDEC 资格验证'
+          : '连续运行 NVIDIA GPU 真机自检，自动补齐当前 build/GPU/driver 的 3/3 资格验证';
       }
       if (stress) {
         stress.disabled = !!busy || !(state.desktopNVCodecValidation && state.desktopNVCodecValidation.current);
@@ -2785,7 +2795,9 @@
         if (!report) throw new Error('没有收到 GPU 自检结果');
         renderRemoteDesktopNVCodecSelfTest(report);
         var validation = await refreshRemoteDesktopNVCodecValidation();
-        if (report.passed) {
+        if (report.unsupported) {
+          toast('当前 NVIDIA GPU 不支持 NVENC；已跳过 NVCodec 资格验证，Relay Desktop 将使用其他编码路径');
+        } else if (report.passed) {
           var qualification = validation
             ? ' · 资格 ' + Number(validation.qualificationPasses || 0) + '/' + Number(validation.requiredPasses || 3)
             : '';

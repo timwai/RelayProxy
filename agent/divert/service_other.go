@@ -16,5 +16,7 @@ func GetPlatformServiceStatus() NetworkServiceStatus {
 	return NetworkServiceStatus{Supported: false, State: "unsupported"}
 }
 
-func RepairPlatformService() error    { return nil }
-func UninstallPlatformService() error { return nil }
+func RepairPlatformService() error { return nil }
+func UninstallPlatformService() (NetworkServiceUninstallResult, error) {
+	return NetworkServiceUninstallResult{}, nil
+}

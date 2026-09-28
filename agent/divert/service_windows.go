@@ -42,9 +42,9 @@ const (
 	networkPipeMagic   = 0x31504e52 // "RNP1" little-endian
 	networkPipeVersion = 4
 
-	networkFrameHello   = 1
-	networkFrameReady   = 2
-	networkFrameError   = 3
+	networkFrameHello    = 1
+	networkFrameReady    = 2
+	networkFrameError    = 3
 	networkFrameCapture  = 4
 	networkFrameInject   = 5
 	networkFrameComplete = 6

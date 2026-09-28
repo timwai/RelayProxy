@@ -189,8 +189,9 @@ type AgentStatus struct {
 	HTTPRunning   bool   `json:"httpRunning"`
 	ExitRunning   bool   `json:"exitRunning"`
 	NetworkMode   string `json:"networkMode"`
-	DivertRunning bool   `json:"divertRunning"`
-	ActiveStreams int64  `json:"activeStreams"`
+	DivertRunning     bool               `json:"divertRunning"`
+	DivertDiagnostics divert.Diagnostics `json:"divertDiagnostics"`
+	ActiveStreams     int64              `json:"activeStreams"`
 	ApprovalState string `json:"approvalState"`
 	RDPListenAddr string `json:"rdpListenAddr,omitempty"`
 	RDPTargetID   string `json:"rdpTargetId,omitempty"`
@@ -864,6 +865,9 @@ func (a *Agent) Status() AgentStatus {
 		}
 	}
 	st.DivertRunning = divertSrv != nil && divertSrv.Running()
+	if divertSrv != nil {
+		st.DivertDiagnostics = divertSrv.Diagnostics()
+	}
 	if state := a.approvalState.Load(); state != nil {
 		st.ApprovalState = *state
 	}

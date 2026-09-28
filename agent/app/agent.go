@@ -219,6 +219,8 @@ type Agent struct {
 	socksServer   *socks5.Server
 	httpServer    *httpproxy.Server
 	divertSrv     *divert.Server
+	divertStage   atomic.Pointer[string]
+	divertError   atomic.Pointer[string]
 	ctrlStream    tunnel.TunnelStream
 	readySession  tunnel.TunnelSession
 	epoch         uint64

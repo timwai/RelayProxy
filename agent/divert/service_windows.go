@@ -53,6 +53,11 @@ const (
 	networkFrameHeaderBytes  = 24
 	networkFrameMaxPayload   = 1 << 20
 
+	windowsServiceCaptureReady        = 1
+	windowsServiceCaptureReconnecting = 2
+	windowsServiceCaptureActive       = 3
+	windowsServiceCaptureClosed       = 4
+
 	pipeAccessDuplex        = 0x00000003
 	pipeRejectRemoteClients = 0x00000008
 
@@ -82,6 +87,8 @@ type windowsServicePacketDevice struct {
 	file        *os.File
 	writeMu     sync.Mutex
 	closed      atomic.Bool
+	captureState atomic.Uint32
+	reconnects   atomic.Uint64
 	closeOnce   sync.Once
 	closeErr    error
 }
@@ -619,7 +626,31 @@ func openWindowsServicePacketDevice(filter string, tcpPorts []uint16) (*windowsS
 	if err != nil {
 		return nil, err
 	}
-	return &windowsServicePacketDevice{filter: filter, tcpPorts: ports, file: file}, nil
+	device := &windowsServicePacketDevice{filter: filter, tcpPorts: ports, file: file}
+	device.captureState.Store(windowsServiceCaptureReady)
+	return device, nil
+}
+
+func (d *windowsServicePacketDevice) PacketDeviceDiagnostics() packetDeviceDiagnostics {
+	if d == nil {
+		return packetDeviceDiagnostics{Backend: "windows-network-service", State: "closed"}
+	}
+	state := "unknown"
+	switch d.captureState.Load() {
+	case windowsServiceCaptureReady:
+		state = "waiting_first_capture"
+	case windowsServiceCaptureReconnecting:
+		state = "reconnecting"
+	case windowsServiceCaptureActive:
+		state = "capturing"
+	case windowsServiceCaptureClosed:
+		state = "closed"
+	}
+	return packetDeviceDiagnostics{
+		Backend:    "windows-network-service",
+		State:      state,
+		Reconnects: d.reconnects.Load(),
+	}
 }
 
 func (d *windowsServicePacketDevice) currentFile() *os.File {
@@ -636,6 +667,8 @@ func (d *windowsServicePacketDevice) reconnect(expected *os.File) error {
 	if d == nil || d.closed.Load() {
 		return netClosedError()
 	}
+	d.captureState.Store(windowsServiceCaptureReconnecting)
+	d.reconnects.Add(1)
 	d.reconnectMu.Lock()
 	defer d.reconnectMu.Unlock()
 	if d.closed.Load() {
@@ -667,6 +700,7 @@ func (d *windowsServicePacketDevice) reconnect(expected *os.File) error {
 			}
 			d.file = file
 			d.fileMu.Unlock()
+			d.captureState.Store(windowsServiceCaptureReady)
 			return nil
 		}
 		lastErr = err
@@ -702,6 +736,7 @@ func (d *windowsServicePacketDevice) Receive(buffer []byte) (int, packetMetadata
 			return 0, packetMetadata{}, fmt.Errorf("captured packet %d exceeds receive buffer %d", len(frame.payload), len(buffer))
 		}
 		copy(buffer, frame.payload)
+		d.captureState.Store(windowsServiceCaptureActive)
 		outbound := frame.flags&networkFrameFlagOutbound != 0
 		return len(frame.payload), packetMetadata{
 			outbound:         outbound,
@@ -751,6 +786,7 @@ func (d *windowsServicePacketDevice) Close() error {
 	}
 	d.closeOnce.Do(func() {
 		d.closed.Store(true)
+		d.captureState.Store(windowsServiceCaptureClosed)
 		d.fileMu.Lock()
 		if d.file != nil {
 			d.closeErr = d.file.Close()

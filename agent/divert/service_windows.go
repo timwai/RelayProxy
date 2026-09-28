@@ -80,17 +80,17 @@ type networkHello struct {
 }
 
 type windowsServicePacketDevice struct {
-	filter      string
-	tcpPorts    []uint16
-	fileMu      sync.RWMutex
-	reconnectMu sync.Mutex
-	file        *os.File
-	writeMu     sync.Mutex
-	closed      atomic.Bool
+	filter       string
+	tcpPorts     []uint16
+	fileMu       sync.RWMutex
+	reconnectMu  sync.Mutex
+	file         *os.File
+	writeMu      sync.Mutex
+	closed       atomic.Bool
 	captureState atomic.Uint32
 	reconnects   atomic.Uint64
-	closeOnce   sync.Once
-	closeErr    error
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 type windowsNetworkServiceHandler struct {

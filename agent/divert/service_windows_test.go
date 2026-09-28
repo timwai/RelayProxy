@@ -6,12 +6,16 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
 
@@ -161,5 +165,126 @@ func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
 		if _, err := normalizeWindowsTransparentFirewallPorts(invalid); err == nil {
 			t.Fatalf("invalid ports accepted: %v", invalid)
 		}
+	}
+}
+
+
+func TestWindowsNetworkBrokerLiveNamedPipeRoundTrip(t *testing.T) {
+	if runtime.GOARCH != "amd64" {
+		t.Skip("WinDivert broker live test requires Windows amd64")
+	}
+	if !windows.GetCurrentProcessToken().IsElevated() {
+		t.Skip("WinDivert broker live test requires an elevated Windows runner")
+	}
+
+	sid, err := currentWindowsUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeName := fmt.Sprintf(`\\.\pipe\RelayProxyNetwork-test-%d`, os.Getpid())
+	broker := &windowsNetworkBroker{
+		allowedSID: sid,
+		pipeName:   pipeName,
+		stop:       make(chan struct{}),
+		pipe:       windows.InvalidHandle,
+	}
+	brokerDone := make(chan error, 1)
+	go func() { brokerDone <- broker.serve() }()
+	defer func() {
+		broker.close()
+		select {
+		case <-brokerDone:
+		case <-time.After(5 * time.Second):
+			t.Error("test broker did not stop")
+		}
+	}()
+
+	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	port := listener.LocalAddr().(*net.UDPAddr).Port
+
+	var file *os.File
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		file, err = connectWindowsServicePipeNamed(
+			pipeName,
+			fmt.Sprintf("outbound and loopback and udp.DstPort == %d", port),
+			[]uint16{uint16(port)},
+		)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("connect test broker: %v", err)
+	}
+	defer file.Close()
+
+	client, err := net.DialUDP("udp4", nil, listener.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	payload := []byte("relayproxy-broker-v4")
+	if _, err := client.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+
+	frameCh := make(chan networkFrame, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		frame, readErr := readNetworkFrame(file)
+		if readErr != nil {
+			errCh <- readErr
+			return
+		}
+		frameCh <- frame
+	}()
+
+	var captured networkFrame
+	select {
+	case captured = <-frameCh:
+	case err := <-errCh:
+		t.Fatalf("read capture frame: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("broker did not deliver captured packet over named pipe")
+	}
+	if captured.kind != networkFrameCapture {
+		t.Fatalf("frame kind=%d want capture", captured.kind)
+	}
+	packet, err := parseIPPacket(captured.payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if packet.Protocol != ProtoUDP || packet.Destination.Port() != uint16(port) {
+		t.Fatalf("unexpected captured packet: %+v", packet)
+	}
+	if err := writeNetworkFrame(file, nil, networkFrame{
+		kind:       networkFrameInject,
+		flags:      captured.flags,
+		ifIndex:    captured.ifIndex,
+		subIfIndex: captured.subIfIndex,
+		payload:    captured.payload,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeNetworkFrame(file, nil, networkFrame{kind: networkFrameComplete}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := listener.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]byte, 128)
+	n, _, err := listener.ReadFromUDP(got)
+	if err != nil {
+		t.Fatalf("reinjected broker UDP did not reach socket: %v", err)
+	}
+	if string(got[:n]) != string(payload) {
+		t.Fatalf("payload=%q want=%q", got[:n], payload)
 	}
 }

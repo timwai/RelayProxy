@@ -379,7 +379,6 @@ func serveWindowsNetworkSession(file *os.File) error {
 	nextCapture:
 	}
 }
-}
 
 func normalizeWindowsTransparentFirewallPorts(input []uint16) ([]uint16, error) {
 	if len(input) == 0 || len(input) > 4 {

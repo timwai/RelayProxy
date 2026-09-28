@@ -24,6 +24,16 @@ type packetDevice interface {
 	Close() error
 }
 
+type packetDeviceDiagnostics struct {
+	Backend    string
+	State      string
+	Reconnects uint64
+}
+
+type packetDeviceDiagnosticsProvider interface {
+	PacketDeviceDiagnostics() packetDeviceDiagnostics
+}
+
 var errPacketInjection = errors.New("divert: packet injection failed")
 
 // packetFinalizer is implemented by capture mechanisms, such as Linux
@@ -98,6 +108,9 @@ type Diagnostics struct {
 	Accepted       uint64 `json:"accepted"`
 	Injected       uint64 `json:"injected"`
 	InjectionError uint64 `json:"injectionError"`
+	CaptureBackend string `json:"captureBackend,omitempty"`
+	CaptureState   string `json:"captureState,omitempty"`
+	Reconnects     uint64 `json:"reconnects,omitempty"`
 	LastError      string `json:"lastError,omitempty"`
 }
 
@@ -186,6 +199,12 @@ func (i *packetInterceptor) Diagnostics() Diagnostics {
 		Parsed: i.parsed.Load(), Classified: i.classified.Load(), Direct: i.direct.Load(),
 		Proxy: i.proxy.Load(), Reject: i.reject.Load(), Reflected: i.reflected.Load(),
 		Accepted: i.accepted.Load(), Injected: i.injected.Load(), InjectionError: i.injectionError.Load(),
+	}
+	if provider, ok := i.device.(packetDeviceDiagnosticsProvider); ok {
+		device := provider.PacketDeviceDiagnostics()
+		out.CaptureBackend = device.Backend
+		out.CaptureState = device.State
+		out.Reconnects = device.Reconnects
 	}
 	if value := i.lastError.Load(); value != nil {
 		out.LastError = *value

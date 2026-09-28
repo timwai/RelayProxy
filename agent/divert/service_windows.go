@@ -244,6 +244,26 @@ func (b *windowsNetworkBroker) clearPipe(pipe windows.Handle) {
 func (b *windowsNetworkBroker) close() {
 	b.stopOnce.Do(func() {
 		close(b.stop)
+
+		// Wake a synchronous ConnectNamedPipe before closing the server handle.
+		// CloseHandle alone is not guaranteed to promptly release a blocking
+		// synchronous connect issued by another goroutine/thread.
+		name, err := windows.UTF16PtrFromString(b.networkPipeName())
+		if err == nil {
+			client, openErr := windows.CreateFile(
+				name,
+				windows.GENERIC_READ|windows.GENERIC_WRITE,
+				0,
+				nil,
+				windows.OPEN_EXISTING,
+				windows.FILE_ATTRIBUTE_NORMAL,
+				0,
+			)
+			if openErr == nil {
+				_ = windows.CloseHandle(client)
+			}
+		}
+
 		b.mu.Lock()
 		pipe := b.pipe
 		b.pipe = windows.InvalidHandle

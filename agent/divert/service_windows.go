@@ -29,7 +29,7 @@ import (
 const (
 	windowsNetworkServiceName          = "RelayProxyNetwork"
 	windowsNetworkServiceDisplayName   = "RelayProxy Network Service"
-	windowsNetworkPipeName             = `\\.\pipe\RelayProxyNetwork-v3`
+	windowsNetworkPipeName             = `\\.\pipe\RelayProxyNetwork-v4`
 	windowsTransparentFirewallRuleName = "RelayProxy Transparent Proxy"
 
 	networkServiceModeFlagName   = "relayproxy-network-service"
@@ -40,13 +40,14 @@ const (
 	networkServiceHelperRemove  = "remove"
 
 	networkPipeMagic   = 0x31504e52 // "RNP1" little-endian
-	networkPipeVersion = 3
+	networkPipeVersion = 4
 
 	networkFrameHello   = 1
 	networkFrameReady   = 2
 	networkFrameError   = 3
-	networkFrameCapture = 4
-	networkFrameInject  = 5
+	networkFrameCapture  = 4
+	networkFrameInject   = 5
+	networkFrameComplete = 6
 
 	networkFrameFlagOutbound = 1 << 17
 	networkFrameHeaderBytes  = 24
@@ -319,60 +320,53 @@ func serveWindowsNetworkSession(file *os.File) error {
 		return err
 	}
 
-	captureDone := make(chan error, 1)
-	go func() {
-		buffer := make([]byte, 40+65535)
-		for {
-			n, addr, err := handle.Recv(buffer)
-			if err != nil {
-				captureDone <- err
-				return
-			}
-			flags := uint32(0)
-			if addr.outbound() {
-				flags |= networkFrameFlagOutbound
-			}
-			frame := networkFrame{
-				kind:       networkFrameCapture,
-				flags:      flags,
-				ifIndex:    addr.ifIndex(),
-				subIfIndex: addr.subIfIndex(),
-				payload:    append([]byte(nil), buffer[:n]...),
-			}
-			if err := writeNetworkFrame(file, &writeMu, frame); err != nil {
-				captureDone <- err
-				return
-			}
-		}
-	}()
-
+	// This pipe is intentionally synchronous. Never block on ReadFile while a
+	// second goroutine tries to WriteFile on the same handle: that can deadlock
+	// a full-duplex named pipe and blackhole every packet already diverted from
+	// the host. Process one capture transaction at a time instead:
+	//   Recv -> Capture -> zero/more Inject -> Complete -> next Recv.
+	buffer := make([]byte, 40+65535)
 	for {
-		frame, err := readNetworkFrame(file)
+		n, captured, err := handle.Recv(buffer)
 		if err != nil {
-			_ = handle.Shutdown()
-			<-captureDone
 			return err
 		}
-		if frame.kind != networkFrameInject {
-			_ = handle.Shutdown()
-			<-captureDone
-			return fmt.Errorf("RelayProxy Network Service 收到未知数据帧 %d", frame.kind)
+		flags := uint32(0)
+		if captured.outbound() {
+			flags |= networkFrameFlagOutbound
 		}
-		var addr windivertAddress
-		addr.setOutbound(frame.flags&networkFrameFlagOutbound != 0)
-		addr.setIfIndex(frame.ifIndex, frame.subIfIndex)
-		if err := handle.Send(frame.payload, addr); err != nil {
-			_ = handle.Shutdown()
-			<-captureDone
+		if err := writeNetworkFrame(file, &writeMu, networkFrame{
+			kind:       networkFrameCapture,
+			flags:      flags,
+			ifIndex:    captured.ifIndex(),
+			subIfIndex: captured.subIfIndex(),
+			payload:    append([]byte(nil), buffer[:n]...),
+		}); err != nil {
 			return err
 		}
 
-		select {
-		case err := <-captureDone:
-			return err
-		default:
+		for {
+			frame, err := readNetworkFrame(file)
+			if err != nil {
+				return err
+			}
+			switch frame.kind {
+			case networkFrameInject:
+				var addr windivertAddress
+				addr.setOutbound(frame.flags&networkFrameFlagOutbound != 0)
+				addr.setIfIndex(frame.ifIndex, frame.subIfIndex)
+				if err := handle.Send(frame.payload, addr); err != nil {
+					return err
+				}
+			case networkFrameComplete:
+				goto nextCapture
+			default:
+				return fmt.Errorf("RelayProxy Network Service 收到未知事务帧 %d", frame.kind)
+			}
 		}
+	nextCapture:
 	}
+}
 }
 
 func normalizeWindowsTransparentFirewallPorts(input []uint16) ([]uint16, error) {
@@ -684,37 +678,34 @@ func (d *windowsServicePacketDevice) Receive(buffer []byte) (int, packetMetadata
 	return 0, packetMetadata{}, errors.New("RelayProxy Network Service receive retry exhausted")
 }
 
+func (d *windowsServicePacketDevice) writeTransactionFrame(frame networkFrame) error {
+	file := d.currentFile()
+	if file == nil {
+		return errors.New("RelayProxy Network Service packet device is closed")
+	}
+	// A capture transaction belongs to the current pipe instance. Never retry an
+	// Inject/Complete frame on a freshly reconnected session: the new broker is
+	// waiting for a different capture and replaying the old verdict would
+	// desynchronize the protocol.
+	return writeNetworkFrame(file, &d.writeMu, frame)
+}
+
 func (d *windowsServicePacketDevice) Send(packet []byte, meta packetMetadata) error {
 	flags := uint32(0)
 	if meta.outbound {
 		flags |= networkFrameFlagOutbound
 	}
-	frame := networkFrame{
+	return d.writeTransactionFrame(networkFrame{
 		kind:       networkFrameInject,
 		flags:      flags,
 		ifIndex:    meta.ifIndex,
 		subIfIndex: meta.subIfIndex,
 		payload:    packet,
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		file := d.currentFile()
-		if file == nil {
-			return errors.New("RelayProxy Network Service packet device is closed")
-		}
-		err := writeNetworkFrame(file, &d.writeMu, frame)
-		if err == nil {
-			return nil
-		}
-		if attempt == 0 && !d.closed.Load() {
-			if reconnectErr := d.reconnect(file); reconnectErr == nil {
-				continue
-			} else {
-				return errors.Join(err, reconnectErr)
-			}
-		}
-		return err
-	}
-	return errors.New("RelayProxy Network Service send retry exhausted")
+	})
+}
+
+func (d *windowsServicePacketDevice) Finalize(packetMetadata) error {
+	return d.writeTransactionFrame(networkFrame{kind: networkFrameComplete})
 }
 
 func (d *windowsServicePacketDevice) Shutdown() error { return d.Close() }

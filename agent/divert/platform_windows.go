@@ -41,6 +41,13 @@ func (d *windowsPacketDevice) Send(packet []byte, meta packetMetadata) error {
 	return d.handle.Send(packet, addr)
 }
 func (d *windowsPacketDevice) Shutdown() error { return d.handle.Shutdown() }
+func (d *windowsPacketDevice) PacketDeviceDiagnostics() packetDeviceDiagnostics {
+	state := "ready"
+	if d == nil || d.handle == nil || d.handle.closed.Load() {
+		state = "closed"
+	}
+	return packetDeviceDiagnostics{Backend: "windivert-direct", State: state}
+}
 func (d *windowsPacketDevice) Close() error {
 	if d == nil {
 		return nil

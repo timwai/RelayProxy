@@ -5,6 +5,7 @@ package divert
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"strings"
@@ -87,6 +88,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	port4 := listeners[0].Addr().(*net.TCPAddr).Port
 	port6 := listeners[1].Addr().(*net.TCPAddr).Port
 	filter := windowsInterceptFilter(port4, port6, s.guard)
+	log.Printf("[divert] Windows interceptor starting: tcp4=%d tcp6=%d relayIPs=%v filter=%s", port4, port6, s.guard.RelayIPs, filter)
 	device, err := openWindowsPacketDevice(filter, []uint16{uint16(port4), uint16(port6)})
 	if err != nil {
 		for _, listener := range listeners {

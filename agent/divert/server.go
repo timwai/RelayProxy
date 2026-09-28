@@ -183,6 +183,19 @@ func (s *Server) ListenAddr() string {
 	return s.interceptor.ListenAddr()
 }
 
+func (s *Server) Diagnostics() Diagnostics {
+	s.mu.Lock()
+	interceptor := s.interceptor
+	s.mu.Unlock()
+	if interceptor == nil {
+		return Diagnostics{}
+	}
+	if source, ok := interceptor.(interface{ Diagnostics() Diagnostics }); ok {
+		return source.Diagnostics()
+	}
+	return Diagnostics{}
+}
+
 // UDP is intercepted as datagrams; it does not expose a local proxy socket.
 func (s *Server) UDPListenAddr() string { return "" }
 

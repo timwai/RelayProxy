@@ -190,6 +190,8 @@ type AgentStatus struct {
 	ExitRunning       bool               `json:"exitRunning"`
 	NetworkMode       string             `json:"networkMode"`
 	DivertRunning     bool               `json:"divertRunning"`
+	DivertStage       string             `json:"divertStage"`
+	DivertError       string             `json:"divertError,omitempty"`
 	DivertDiagnostics divert.Diagnostics `json:"divertDiagnostics"`
 	ActiveStreams     int64              `json:"activeStreams"`
 	ApprovalState     string             `json:"approvalState"`
@@ -239,6 +241,18 @@ type Agent struct {
 	lifecycleMu   sync.Mutex
 	closeOnce     sync.Once
 	closeErr      error
+}
+
+func (a *Agent) setDivertStage(stage string, err error) {
+	stageValue := strings.TrimSpace(stage)
+	a.divertStage.Store(&stageValue)
+	if err == nil {
+		a.divertError.Store(nil)
+		return
+	}
+	message := err.Error()
+	a.divertError.Store(&message)
+	log.Printf("[divert] stage=%s error=%v", stageValue, err)
 }
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
@@ -316,6 +330,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Agent{cfg: cfg, ctx: ctx, cancel: cancel, routingEngine: engine, traffic: traffic.NewRegistry(0, 0)}
+	a.setDivertStage("disabled", nil)
 	a.rawDialer = client.NewTunnelDialer(func() tunnel.TunnelSession {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
@@ -368,6 +383,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			_ = a.tunnelMgr.Close()
 			return nil, fmt.Errorf("invalid divert configuration: %w", err)
 		}
+		a.setDivertStage("waiting_relay", nil)
 	}
 	return a, nil
 }
@@ -535,10 +551,16 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.mu.Unlock()
 
 	if a.divertSrv != nil && !a.divertSrv.Running() {
+		a.setDivertStage("starting", nil)
+		log.Printf("[divert] stage=starting relay_ready=true")
 		if err := a.divertSrv.Start(); err != nil {
 			// Transparent proxy startup is best-effort. Never sacrifice the
 			// host's ordinary networking because interception cannot be armed.
+			a.setDivertStage("error", err)
 			log.Printf("[Agent] Transparent proxy not armed: %v", err)
+		} else {
+			a.setDivertStage("running", nil)
+			log.Printf("[divert] stage=running")
 		}
 	}
 	log.Printf("[Agent] Device approved. SessionID: %s, Heartbeat: %ds", accepted.SessionID, accepted.HeartbeatSec)
@@ -865,6 +887,12 @@ func (a *Agent) Status() AgentStatus {
 		}
 	}
 	st.DivertRunning = divertSrv != nil && divertSrv.Running()
+	if stage := a.divertStage.Load(); stage != nil {
+		st.DivertStage = *stage
+	}
+	if divertErr := a.divertError.Load(); divertErr != nil {
+		st.DivertError = *divertErr
+	}
 	if divertSrv != nil {
 		st.DivertDiagnostics = divertSrv.Diagnostics()
 	}

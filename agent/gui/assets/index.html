@@ -1471,7 +1471,7 @@
       if ($('divert-diagnostics-stage')) {
         $('divert-diagnostics-stage').textContent = '阶段：' + (st.divertStage || 'unknown') + (st.divertRunning ? ' · 运行中' : '');
       }
-            if ($('divert-diagnostics-backend')) {
+      if ($('divert-diagnostics-backend')) {
         var captureStateNames = {
           waiting_first_capture: '等待首包',
           capturing: '正在抓包',
@@ -1488,7 +1488,7 @@
         var captureText = captureStateNames[dd.captureState] || dd.captureState || '—';
         $('divert-diagnostics-backend').textContent = '抓包后端：' + backendText + ' · ' + captureText + (dd.reconnects ? ' · 重连 ' + dd.reconnects : '');
       }
-if ($('divert-diagnostics-counts')) {
+      if ($('divert-diagnostics-counts')) {
         $('divert-diagnostics-counts').textContent = '抓包 ' + (dd.captured || 0) + ' · 出站 ' + (dd.outbound || 0) + ' · 入站 ' + (dd.inbound || 0) + ' · 分类 ' + (dd.classified || 0) + ' · DIRECT ' + (dd.direct || 0) + ' · PROXY ' + (dd.proxy || 0) + ' · REJECT ' + (dd.reject || 0);
       }
       if ($('divert-diagnostics-flow')) {

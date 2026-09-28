@@ -189,14 +189,7 @@ func TestWindowsNetworkBrokerLiveNamedPipeRoundTrip(t *testing.T) {
 	}
 	brokerDone := make(chan error, 1)
 	go func() { brokerDone <- broker.serve() }()
-	defer func() {
-		broker.close()
-		select {
-		case <-brokerDone:
-		case <-time.After(5 * time.Second):
-			t.Error("test broker did not stop")
-		}
-	}()
+	defer broker.close()
 
 	listener, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
@@ -285,5 +278,16 @@ func TestWindowsNetworkBrokerLiveNamedPipeRoundTrip(t *testing.T) {
 	}
 	if string(got[:n]) != string(payload) {
 		t.Fatalf("payload=%q want=%q", got[:n], payload)
+	}
+
+	// After Complete the broker is intentionally back in WinDivertRecv waiting
+	// for the next packet. Stop the pipe, then send one final matching datagram
+	// to wake Recv so the session can observe the closed pipe and exit cleanly.
+	broker.close()
+	_, _ = client.Write([]byte("wake"))
+	select {
+	case <-brokerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("test broker did not stop after wake packet")
 	}
 }

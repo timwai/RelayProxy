@@ -168,7 +168,6 @@ func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
 	}
 }
 
-
 func TestWindowsNetworkBrokerLiveNamedPipeRoundTrip(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("WinDivert broker live test requires Windows amd64")

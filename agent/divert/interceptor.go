@@ -290,6 +290,7 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		}
 	}
 	if localOnlyPacket(packet) || privateDNSPacket(packet) || relayDNSPacket(packet, i.server.guard.RelayHost) {
+		i.direct.Add(1)
 		return i.sendPacket(packet, meta)
 	}
 	if packet.Protocol == ProtoTCP {
@@ -305,6 +306,7 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	}
 	flow := i.flowMetadata(packet, process)
 	if i.server.guard.MustDirectFlow(flow) {
+		i.direct.Add(1)
 		return i.sendPacket(packet, meta)
 	}
 	route, err := i.server.ClassifyFlow(flow)
@@ -433,12 +435,22 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		}
 		metadata := i.flowMetadata(p, process)
 		if i.server.guard.MustDirectFlow(metadata) {
+			i.direct.Add(1)
 			return i.sendPacket(p, meta)
 		}
 		route, err := i.server.ClassifyFlow(metadata)
 		if err != nil {
 			_ = i.rejectTCP(p, meta)
 			return err
+		}
+		i.classified.Add(1)
+		switch route.Decision().Action {
+		case ActionDirect:
+			i.direct.Add(1)
+		case ActionProxy:
+			i.proxy.Add(1)
+		case ActionReject:
+			i.reject.Add(1)
 		}
 		i.mu.Lock()
 		flow, err = i.registerTCP(route, p.TCPSequence, meta)

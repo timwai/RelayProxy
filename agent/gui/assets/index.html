@@ -789,6 +789,7 @@
               </div>
               <div id="divert-diagnostics" class="pt-2 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-500 dark:text-slate-400 space-y-1">
                 <div class="font-medium text-slate-700 dark:text-slate-200">透明代理数据面</div>
+                <div id="divert-diagnostics-stage" class="mono">阶段：—</div>
                 <div id="divert-diagnostics-counts" class="mono break-all">抓包 0 · 分类 0 · DIRECT 0 · PROXY 0 · REJECT 0</div>
                 <div id="divert-diagnostics-flow" class="mono break-all">反射 0 · Accept 0 · 注入 0 · 注入失败 0</div>
                 <div id="divert-diagnostics-error" class="text-rose-600 dark:text-rose-400 hidden"></div>
@@ -1466,6 +1467,9 @@
       markLeg('tun', st.divertRunning);
       $('home-tun').textContent = st.divertRunning ? '按进程代理 TCP / UDP' : '未运行';
       var dd = st.divertDiagnostics || {};
+      if ($('divert-diagnostics-stage')) {
+        $('divert-diagnostics-stage').textContent = '阶段：' + (st.divertStage || 'unknown') + (st.divertRunning ? ' · 运行中' : '');
+      }
       if ($('divert-diagnostics-counts')) {
         $('divert-diagnostics-counts').textContent = '抓包 ' + (dd.captured || 0) + ' · 出站 ' + (dd.outbound || 0) + ' · 入站 ' + (dd.inbound || 0) + ' · 分类 ' + (dd.classified || 0) + ' · DIRECT ' + (dd.direct || 0) + ' · PROXY ' + (dd.proxy || 0) + ' · REJECT ' + (dd.reject || 0);
       }
@@ -1473,8 +1477,9 @@
         $('divert-diagnostics-flow').textContent = '反射 ' + (dd.reflected || 0) + ' · Accept ' + (dd.accepted || 0) + ' · 注入 ' + (dd.injected || 0) + ' · 注入失败 ' + (dd.injectionError || 0);
       }
       if ($('divert-diagnostics-error')) {
-        $('divert-diagnostics-error').textContent = dd.lastError || '';
-        $('divert-diagnostics-error').classList.toggle('hidden', !dd.lastError);
+        var divertError = st.divertError || dd.lastError || '';
+        $('divert-diagnostics-error').textContent = divertError;
+        $('divert-diagnostics-error').classList.toggle('hidden', !divertError);
       }
       updateFieldDependencies();
     }

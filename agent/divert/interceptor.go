@@ -132,6 +132,7 @@ type packetInterceptor struct {
 	injected       atomic.Uint64
 	injectionError atomic.Uint64
 	lastError      atomic.Pointer[string]
+	firstCaptureLogged atomic.Bool
 }
 
 type systemInterceptor interface {
@@ -244,6 +245,9 @@ func (i *packetInterceptor) receive() {
 			return
 		}
 		i.captured.Add(1)
+		if i.firstCaptureLogged.CompareAndSwap(false, true) {
+			log.Printf("[divert] first captured packet: outbound=%v bytes=%d if=%d/%d", meta.outbound, len(data), meta.ifIndex, meta.subIfIndex)
+		}
 		if meta.outbound {
 			i.outboundCount.Add(1)
 		} else {

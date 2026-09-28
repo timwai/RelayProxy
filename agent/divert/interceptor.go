@@ -102,35 +102,35 @@ type Diagnostics struct {
 }
 
 type packetInterceptor struct {
-	server         *Server
-	device         packetDevice
-	listeners      []net.Listener
-	lookup         processLookup
-	ctx            context.Context
-	cancel         context.CancelFunc
-	running        atomic.Bool
-	closeOnce      sync.Once
-	wg             sync.WaitGroup
-	mu             sync.Mutex
-	tcp            map[FlowKey]*tcpRedirect
-	reverse        map[FlowKey]*tcpRedirect
-	ports          map[bool]uint16 // false: IPv4, true: IPv6
-	udpQueues      []chan interceptedUDP
-	logMu          sync.Mutex
-	lastLog        time.Time
-	dns            *dnsAssociations
-	captured       atomic.Uint64
-	outboundCount  atomic.Uint64
-	inboundCount   atomic.Uint64
-	parsed         atomic.Uint64
-	classified     atomic.Uint64
-	direct         atomic.Uint64
-	proxy          atomic.Uint64
-	reject         atomic.Uint64
-	reflected      atomic.Uint64
-	accepted       atomic.Uint64
-	injected       atomic.Uint64
-	injectionError atomic.Uint64
+	server             *Server
+	device             packetDevice
+	listeners          []net.Listener
+	lookup             processLookup
+	ctx                context.Context
+	cancel             context.CancelFunc
+	running            atomic.Bool
+	closeOnce          sync.Once
+	wg                 sync.WaitGroup
+	mu                 sync.Mutex
+	tcp                map[FlowKey]*tcpRedirect
+	reverse            map[FlowKey]*tcpRedirect
+	ports              map[bool]uint16 // false: IPv4, true: IPv6
+	udpQueues          []chan interceptedUDP
+	logMu              sync.Mutex
+	lastLog            time.Time
+	dns                *dnsAssociations
+	captured           atomic.Uint64
+	outboundCount      atomic.Uint64
+	inboundCount       atomic.Uint64
+	parsed             atomic.Uint64
+	classified         atomic.Uint64
+	direct             atomic.Uint64
+	proxy              atomic.Uint64
+	reject             atomic.Uint64
+	reflected          atomic.Uint64
+	accepted           atomic.Uint64
+	injected           atomic.Uint64
+	injectionError     atomic.Uint64
 	lastError          atomic.Pointer[string]
 	firstCaptureLogged atomic.Bool
 }

@@ -131,7 +131,7 @@ type packetInterceptor struct {
 	accepted       atomic.Uint64
 	injected       atomic.Uint64
 	injectionError atomic.Uint64
-	lastError      atomic.Pointer[string]
+	lastError          atomic.Pointer[string]
 	firstCaptureLogged atomic.Bool
 }
 

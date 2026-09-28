@@ -92,6 +92,7 @@ type windowsNetworkServiceHandler struct {
 
 type windowsNetworkBroker struct {
 	allowedSID string
+	pipeName   string
 	stopOnce   sync.Once
 	stop       chan struct{}
 	mu         sync.Mutex
@@ -167,6 +168,13 @@ func (h *windowsNetworkServiceHandler) Execute(_ []string, requests <-chan svc.C
 	}
 }
 
+func (b *windowsNetworkBroker) networkPipeName() string {
+	if b != nil && strings.TrimSpace(b.pipeName) != "" {
+		return b.pipeName
+	}
+	return windowsNetworkPipeName
+}
+
 func (b *windowsNetworkBroker) serve() error {
 	for {
 		select {
@@ -175,7 +183,7 @@ func (b *windowsNetworkBroker) serve() error {
 		default:
 		}
 
-		pipe, err := createWindowsNetworkPipe(b.allowedSID)
+		pipe, err := createWindowsNetworkPipeNamed(b.networkPipeName(), b.allowedSID)
 		if err != nil {
 			select {
 			case <-b.stop:
@@ -197,7 +205,7 @@ func (b *windowsNetworkBroker) serve() error {
 			}
 		}
 
-		file := os.NewFile(uintptr(pipe), windowsNetworkPipeName)
+		file := os.NewFile(uintptr(pipe), b.networkPipeName())
 		if file == nil {
 			b.clearPipe(pipe)
 			_ = windows.CloseHandle(pipe)
@@ -247,12 +255,16 @@ func (b *windowsNetworkBroker) close() {
 }
 
 func createWindowsNetworkPipe(allowedSID string) (windows.Handle, error) {
+	return createWindowsNetworkPipeNamed(windowsNetworkPipeName, allowedSID)
+}
+
+func createWindowsNetworkPipeNamed(pipeName, allowedSID string) (windows.Handle, error) {
 	sddl := fmt.Sprintf("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;%s)", allowedSID)
 	descriptor, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return windows.InvalidHandle, fmt.Errorf("创建 Network Service 管道 ACL 失败: %w", err)
 	}
-	name, err := windows.UTF16PtrFromString(windowsNetworkPipeName)
+	name, err := windows.UTF16PtrFromString(pipeName)
 	if err != nil {
 		return windows.InvalidHandle, err
 	}
@@ -520,7 +532,11 @@ func readNetworkFrame(reader io.Reader) (networkFrame, error) {
 }
 
 func connectWindowsServicePipe(filter string, tcpPorts []uint16) (*os.File, error) {
-	name, err := windows.UTF16PtrFromString(windowsNetworkPipeName)
+	return connectWindowsServicePipeNamed(windowsNetworkPipeName, filter, tcpPorts)
+}
+
+func connectWindowsServicePipeNamed(pipeName, filter string, tcpPorts []uint16) (*os.File, error) {
+	name, err := windows.UTF16PtrFromString(pipeName)
 	if err != nil {
 		return nil, err
 	}
@@ -547,7 +563,7 @@ func connectWindowsServicePipe(filter string, tcpPorts []uint16) (*os.File, erro
 	if lastErr != nil {
 		return nil, lastErr
 	}
-	file := os.NewFile(uintptr(handle), windowsNetworkPipeName)
+	file := os.NewFile(uintptr(handle), pipeName)
 	if file == nil {
 		_ = windows.CloseHandle(handle)
 		return nil, errors.New("无法打开 RelayProxy Network Service 管道")

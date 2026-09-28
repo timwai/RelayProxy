@@ -85,6 +85,22 @@ type interceptedUDP struct {
 	meta    packetMetadata
 }
 
+type Diagnostics struct {
+	Captured       uint64 `json:"captured"`
+	Outbound       uint64 `json:"outbound"`
+	Inbound        uint64 `json:"inbound"`
+	Parsed         uint64 `json:"parsed"`
+	Classified     uint64 `json:"classified"`
+	Direct         uint64 `json:"direct"`
+	Proxy          uint64 `json:"proxy"`
+	Reject         uint64 `json:"reject"`
+	Reflected      uint64 `json:"reflected"`
+	Accepted       uint64 `json:"accepted"`
+	Injected       uint64 `json:"injected"`
+	InjectionError uint64 `json:"injectionError"`
+	LastError      string `json:"lastError,omitempty"`
+}
+
 type packetInterceptor struct {
 	server    *Server
 	device    packetDevice
@@ -103,6 +119,19 @@ type packetInterceptor struct {
 	logMu     sync.Mutex
 	lastLog   time.Time
 	dns       *dnsAssociations
+	captured       atomic.Uint64
+	outboundCount  atomic.Uint64
+	inboundCount   atomic.Uint64
+	parsed         atomic.Uint64
+	classified     atomic.Uint64
+	direct         atomic.Uint64
+	proxy          atomic.Uint64
+	reject         atomic.Uint64
+	reflected      atomic.Uint64
+	accepted       atomic.Uint64
+	injected       atomic.Uint64
+	injectionError atomic.Uint64
+	lastError      atomic.Pointer[string]
 }
 
 type systemInterceptor interface {
@@ -147,6 +176,22 @@ func (i *packetInterceptor) start() {
 
 func (i *packetInterceptor) Running() bool { return i != nil && i.running.Load() }
 
+func (i *packetInterceptor) Diagnostics() Diagnostics {
+	if i == nil {
+		return Diagnostics{}
+	}
+	out := Diagnostics{
+		Captured: i.captured.Load(), Outbound: i.outboundCount.Load(), Inbound: i.inboundCount.Load(),
+		Parsed: i.parsed.Load(), Classified: i.classified.Load(), Direct: i.direct.Load(),
+		Proxy: i.proxy.Load(), Reject: i.reject.Load(), Reflected: i.reflected.Load(),
+		Accepted: i.accepted.Load(), Injected: i.injected.Load(), InjectionError: i.injectionError.Load(),
+	}
+	if value := i.lastError.Load(); value != nil {
+		out.LastError = *value
+	}
+	return out
+}
+
 func (i *packetInterceptor) ListenAddr() string {
 	if i == nil || len(i.listeners) == 0 {
 		return ""
@@ -158,6 +203,8 @@ func (i *packetInterceptor) report(err error) {
 	if err == nil || i.ctx.Err() != nil {
 		return
 	}
+	message := err.Error()
+	i.lastError.Store(&message)
 	i.logMu.Lock()
 	defer i.logMu.Unlock()
 	if time.Since(i.lastLog) >= time.Second {
@@ -196,6 +243,12 @@ func (i *packetInterceptor) receive() {
 		if i.ctx.Err() != nil {
 			return
 		}
+		i.captured.Add(1)
+		if meta.outbound {
+			i.outboundCount.Add(1)
+		} else {
+			i.inboundCount.Add(1)
+		}
 		if len(data) == 0 {
 			i.report(errors.New("invalid captured packet length"))
 			if finalizer, ok := i.device.(packetFinalizer); ok {
@@ -230,6 +283,7 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		// instead of blackholing the host.
 		return i.inject(data, meta)
 	}
+	i.parsed.Add(1)
 	if packet.Protocol == ProtoTCP {
 		if port := i.ports[packet.Source.Addr().Is6()]; port != 0 && packet.Source.Port() == port {
 			return i.returnTCP(packet, meta)
@@ -257,8 +311,10 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	if err != nil {
 		return err
 	}
+	i.classified.Add(1)
 	switch route.Decision().Action {
 	case ActionDirect:
+		i.direct.Add(1)
 		err := i.sendPacket(packet, meta)
 		if err == nil {
 			route.traffic.Activate()
@@ -266,8 +322,10 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		}
 		return err
 	case ActionReject:
+		i.reject.Add(1)
 		return nil
 	case ActionProxy:
+		i.proxy.Add(1)
 		// Hashing the whole tuple keeps each association ordered while a slow
 		// tunnel dial cannot block the packet capture loop or TCP handshakes.
 		queue := i.udpQueues[flowQueue(route.Key(), len(i.udpQueues))]
@@ -450,6 +508,7 @@ func (i *packetInterceptor) registerTCP(route *ClassifiedFlow, sequence uint32, 
 			return nil, ErrFlowCapacity
 		}
 		i.reverse[flow.translated] = flow
+		i.reflected.Add(1)
 	}
 	i.tcp[flow.original] = flow
 	return flow, nil
@@ -483,8 +542,10 @@ func (i *packetInterceptor) rejectTCP(p ipPacket, meta packetMetadata) error {
 
 func (i *packetInterceptor) inject(packet []byte, meta packetMetadata) error {
 	if err := i.device.Send(packet, meta); err != nil {
+		i.injectionError.Add(1)
 		return fmt.Errorf("%w: %v", errPacketInjection, err)
 	}
+	i.injected.Add(1)
 	return nil
 }
 
@@ -585,6 +646,7 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 			continue
 		}
 		flow.accepted, flow.conn = true, conn
+		i.accepted.Add(1)
 		i.wg.Add(1)
 		i.mu.Unlock()
 		go func() {

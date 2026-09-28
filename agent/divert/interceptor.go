@@ -102,23 +102,23 @@ type Diagnostics struct {
 }
 
 type packetInterceptor struct {
-	server    *Server
-	device    packetDevice
-	listeners []net.Listener
-	lookup    processLookup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	running   atomic.Bool
-	closeOnce sync.Once
-	wg        sync.WaitGroup
-	mu        sync.Mutex
-	tcp       map[FlowKey]*tcpRedirect
-	reverse   map[FlowKey]*tcpRedirect
-	ports     map[bool]uint16 // false: IPv4, true: IPv6
-	udpQueues []chan interceptedUDP
-	logMu     sync.Mutex
-	lastLog   time.Time
-	dns       *dnsAssociations
+	server         *Server
+	device         packetDevice
+	listeners      []net.Listener
+	lookup         processLookup
+	ctx            context.Context
+	cancel         context.CancelFunc
+	running        atomic.Bool
+	closeOnce      sync.Once
+	wg             sync.WaitGroup
+	mu             sync.Mutex
+	tcp            map[FlowKey]*tcpRedirect
+	reverse        map[FlowKey]*tcpRedirect
+	ports          map[bool]uint16 // false: IPv4, true: IPv6
+	udpQueues      []chan interceptedUDP
+	logMu          sync.Mutex
+	lastLog        time.Time
+	dns            *dnsAssociations
 	captured       atomic.Uint64
 	outboundCount  atomic.Uint64
 	inboundCount   atomic.Uint64

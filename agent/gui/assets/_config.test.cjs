@@ -37,6 +37,7 @@ function fixture(options = {}) {
     routing: { mode: 'direct', default_action: 'REJECT', rules: [{ name: 'existing', enabled: true, processes:['browser.exe'], targets:['example.test','192.0.2.0/24'], ports:['443'], protocols:['tcp','udp'], action: 'PROXY', datagram_required: true }] },
     networkMode: '', networkCapabilities: { unavailable_reason: 'interceptor unavailable', hostnames: false },
     network: { mode: '', exclude_processes: ['trusted.exe'] },
+    exitUpstream: { mode: 'direct', address: '', username: '', password: '' },
     runtime: { networkMode: '', socks5: { listen: '127.0.0.1', port: 1080 }, http: { listen: '127.0.0.1', port: 8080 } },
     restartRequired: false, restartFields: [], reloadPending: false,
     ...options.config
@@ -77,6 +78,7 @@ function fixture(options = {}) {
       if (payload.exit) {
         if ('enabled' in payload.exit) cfg.exitEnabled = payload.exit.enabled;
         for (const key of ['allowInternet','allowPrivateNetwork','allowLoopback']) if (key in payload.exit) cfg[key] = payload.exit[key];
+        if (payload.exit.upstream) cfg.exitUpstream = { ...payload.exit.upstream };
         if (payload.exit.access) { cfg.accessMode = payload.exit.access.mode; cfg.accessDomains = payload.exit.access.domains; cfg.accessCidrs = payload.exit.access.cidrs; }
       }
       if (payload.gui) Object.assign(cfg, payload.gui);
@@ -134,6 +136,22 @@ test('client-only server grant does not lock local exit sharing configuration', 
   assert.match(f.get('share-role-hint').textContent, /服务端/);
   assert.equal(await f.context.saveShare(), true);
   assert.equal(f.saves[0].exit.enabled, true);
+});
+
+test('exit sharing saves a SOCKS5 upstream proxy without changing target ACLs', async () => {
+  const f = fixture();
+  await f.context.refreshAll();
+  f.get('cfg-exit-upstream-mode').value = 'socks5';
+  f.context.updateFieldDependencies();
+  assert.equal(f.get('cfg-exit-upstream-address').disabled, false);
+  f.get('cfg-exit-upstream-address').value = '127.0.0.1:1088';
+  f.get('cfg-exit-upstream-username').value = 'relay';
+  f.get('cfg-exit-upstream-password').value = 'secret';
+  assert.equal(await f.context.saveShare(), true);
+  assert.deepEqual(f.saves[0].exit.upstream, {
+    mode: 'socks5', address: '127.0.0.1:1088', username: 'relay', password: 'secret'
+  });
+  assert.equal(f.saves[0].exit.access.mode, '');
 });
 
 test('running endpoints remain separate from saved settings and pending restart', async () => {

@@ -13,6 +13,8 @@ func TestInvalidReloadPreservesPolicy(t *testing.T) {
 		{Name: "reverse range", Ports: []string{"443-80"}, Action: ActionDirect},
 		{Name: "bad match", Protocols: []string{"unknown"}, Action: ActionDirect},
 		{Name: "bad action", Action: "ALLOW"},
+		{Name: "handled proxy", Action: ActionProxy, HandleDirect: true},
+		{Name: "handled direct datagram", Action: ActionDirect, HandleDirect: true, DatagramRequired: true},
 	} {
 		t.Run(rule.Name, func(t *testing.T) {
 			if err := engine.Reload(Config{Mode: ModeRule, DefaultAction: ActionDirect, Rules: []Rule{rule}}); err == nil {

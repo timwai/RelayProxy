@@ -126,7 +126,7 @@ func dialProxyTCP(ctx context.Context, cfg UpstreamConfig) (net.Conn, error) {
 	}
 	td := tls.Dialer{
 		NetDialer: &d,
-		Config: &tls.Config{MinVersion: tls.VersionTLS12, ServerName: strings.Trim(host, "[]")},
+		Config:    &tls.Config{MinVersion: tls.VersionTLS12, ServerName: strings.Trim(host, "[]")},
 	}
 	return td.DialContext(ctx, "tcp", cfg.Address)
 }
@@ -457,21 +457,34 @@ func parseSOCKS5UDPAddress(packet []byte, offset int) (int, netip.AddrPort, erro
 	var raw []byte
 	switch atyp {
 	case 0x01:
-		if offset+4+2 > len(packet) { return 0, netip.AddrPort{}, io.ErrUnexpectedEOF }
-		raw = packet[offset:offset+4]
+		if offset+4+2 > len(packet) {
+			return 0, netip.AddrPort{}, io.ErrUnexpectedEOF
+		}
+		raw = packet[offset : offset+4]
 		offset += 4
 	case 0x04:
-		if offset+16+2 > len(packet) { return 0, netip.AddrPort{}, io.ErrUnexpectedEOF }
-		raw = packet[offset:offset+16]
+		if offset+16+2 > len(packet) {
+			return 0, netip.AddrPort{}, io.ErrUnexpectedEOF
+		}
+		raw = packet[offset : offset+16]
 		offset += 16
 	case 0x03:
-		if offset >= len(packet) { return 0, netip.AddrPort{}, io.ErrUnexpectedEOF }
-		n := int(packet[offset]); offset++
-		if offset+n+2 > len(packet) { return 0, netip.AddrPort{}, io.ErrUnexpectedEOF }
-		host := string(packet[offset:offset+n]); offset += n
-		port := uint16(packet[offset])<<8 | uint16(packet[offset+1]); offset += 2
+		if offset >= len(packet) {
+			return 0, netip.AddrPort{}, io.ErrUnexpectedEOF
+		}
+		n := int(packet[offset])
+		offset++
+		if offset+n+2 > len(packet) {
+			return 0, netip.AddrPort{}, io.ErrUnexpectedEOF
+		}
+		host := string(packet[offset : offset+n])
+		offset += n
+		port := uint16(packet[offset])<<8 | uint16(packet[offset+1])
+		offset += 2
 		ips, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", host)
-		if err != nil || len(ips) == 0 { return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: %w", host, err) }
+		if err != nil || len(ips) == 0 {
+			return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: %w", host, err)
+		}
 		return offset, netip.AddrPortFrom(ips[0].Unmap(), port), nil
 	default:
 		return 0, netip.AddrPort{}, fmt.Errorf("unsupported SOCKS5 UDP address type 0x%02x", atyp)
@@ -479,7 +492,9 @@ func parseSOCKS5UDPAddress(packet []byte, offset int) (int, netip.AddrPort, erro
 	port := uint16(packet[offset])<<8 | uint16(packet[offset+1])
 	offset += 2
 	addr, ok := netip.AddrFromSlice(raw)
-	if !ok { return 0, netip.AddrPort{}, errors.New("invalid SOCKS5 UDP address") }
+	if !ok {
+		return 0, netip.AddrPort{}, errors.New("invalid SOCKS5 UDP address")
+	}
 	return offset, netip.AddrPortFrom(addr.Unmap(), port), nil
 }
 
@@ -490,6 +505,6 @@ func (c *socks5UDPConn) Close() error {
 }
 func (c *socks5UDPConn) LocalAddr() net.Addr                { return c.udp.LocalAddr() }
 func (c *socks5UDPConn) RemoteAddr() net.Addr               { return net.UDPAddrFromAddrPort(c.target) }
-func (c *socks5UDPConn) SetDeadline(t time.Time) error       { return c.udp.SetDeadline(t) }
-func (c *socks5UDPConn) SetReadDeadline(t time.Time) error   { return c.udp.SetReadDeadline(t) }
-func (c *socks5UDPConn) SetWriteDeadline(t time.Time) error  { return c.udp.SetWriteDeadline(t) }
+func (c *socks5UDPConn) SetDeadline(t time.Time) error      { return c.udp.SetDeadline(t) }
+func (c *socks5UDPConn) SetReadDeadline(t time.Time) error  { return c.udp.SetReadDeadline(t) }
+func (c *socks5UDPConn) SetWriteDeadline(t time.Time) error { return c.udp.SetWriteDeadline(t) }

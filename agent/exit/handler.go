@@ -27,6 +27,7 @@ var udpPipeBufferPool = sync.Pool{
 type HandlerConfig struct {
 	ACLChecker     *acl.Checker
 	ConnectTimeout time.Duration
+	Upstream       UpstreamConfig
 }
 
 type Handler struct {
@@ -42,6 +43,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
+	cfg.Upstream = cfg.Upstream.normalized()
 	return &Handler{cfg: cfg, resolver: newDNSCache(defaultDNSCacheTTL, defaultDNSCacheEntries)}
 }
 
@@ -172,7 +174,7 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		}
 	}
 
-	targetConn, lastErr := dialTCPIPs(dialCtx, ips, req.Port)
+	targetConn, remoteTarget, lastErr := h.dialTCP(dialCtx, ips, req.Port)
 
 	if targetConn == nil {
 		log.Printf("[ExitHandler] Dial to %s failed: %v", req.Host, lastErr)
@@ -194,7 +196,7 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 	resp := protocol.OpenTCPResponse{
 		RequestID: req.RequestID,
 		Success:   true,
-		RemoteIP:  targetConn.RemoteAddr().String(),
+		RemoteIP:  remoteTarget,
 	}
 	if err := protocol.WriteJSON(stream, resp); err != nil {
 		log.Printf("[ExitHandler] Failed to write success response: %v", err)
@@ -298,7 +300,7 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 		dialHost = ips[0].String()
 	}
 
-	raddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(dialHost, strconv.Itoa(int(req.Port))))
+	targetAddr, err := netip.ParseAddrPort(net.JoinHostPort(dialHost, strconv.Itoa(int(req.Port))))
 	if err != nil {
 		_ = protocol.WriteJSON(stream, protocol.OpenUDPResponse{
 			RequestID:    req.RequestID,
@@ -309,10 +311,9 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 		return
 	}
 
-	var d net.Dialer
-	c, err := d.DialContext(dialCtx, "udp", raddr.String())
+	targetConn, err := h.dialUDP(dialCtx, targetAddr)
 	if err != nil {
-		log.Printf("[ExitHandler] UDP dial to %s failed: %v", req.Host, err)
+		log.Printf("[ExitHandler] UDP dial to %s via %s failed: %v", req.Host, h.cfg.Upstream.Mode, err)
 		_ = protocol.WriteJSON(stream, protocol.OpenUDPResponse{
 			RequestID:    req.RequestID,
 			Success:      false,
@@ -321,24 +322,15 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 		})
 		return
 	}
-	defer c.Close()
-
-	udpConn, ok := c.(*net.UDPConn)
-	if !ok {
-		_ = protocol.WriteJSON(stream, protocol.OpenUDPResponse{
-			RequestID:    req.RequestID,
-			Success:      false,
-			ErrorCode:    protocol.ErrCodeInternalError,
-			ErrorMessage: "udp dial did not return *UDPConn",
-		})
-		return
+	defer targetConn.Close()
+	if udpConn, ok := targetConn.(*net.UDPConn); ok {
+		tunnel.TuneUDPConn(udpConn)
 	}
-	tunnel.TuneUDPConn(udpConn)
 
 	resp := protocol.OpenUDPResponse{
 		RequestID: req.RequestID,
 		Success:   true,
-		RemoteIP:  udpConn.RemoteAddr().String(),
+		RemoteIP:  targetAddr.String(),
 		Mode:      protocol.UDPModeStream,
 	}
 	var datagrams *tunnel.DatagramChannel
@@ -362,14 +354,14 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 
 	var pc net.PacketConn
 	if datagrams != nil {
-		pc = tunnel.NewUDPDatagramConn(datagrams, stream, udpConn.RemoteAddr())
+		pc = tunnel.NewUDPDatagramConn(datagrams, stream, targetConn.RemoteAddr())
 	} else {
-		pc = tunnel.NewUDPStreamConn(stream, udpConn.RemoteAddr())
+		pc = tunnel.NewUDPStreamConn(stream, targetConn.RemoteAddr())
 	}
-	h.pipeUDP(ctx, pc, udpConn)
+	h.pipeUDP(ctx, pc, targetConn)
 }
 
-func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn *net.UDPConn) {
+func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn net.Conn) {
 	var once sync.Once
 	stop := func() { once.Do(func() { _ = pc.Close(); _ = conn.Close() }) }
 	defer stop()

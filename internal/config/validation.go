@@ -56,10 +56,7 @@ func (c *AgentConfigFile) ExitPolicy() acl.Policy {
 }
 
 func (c *AgentConfigFile) DivertConfig() divert.Config {
-	return divert.Config{
-		Mode: c.Network.Mode, ExcludeProcesses: c.Network.ExcludeProcesses,
-		HandleDirectConnections: c.Network.HandleDirectConnections,
-	}
+	return divert.Config{Mode: c.Network.Mode, ExcludeProcesses: c.Network.ExcludeProcesses}
 }
 
 func validateAccess(p acl.Policy) error {
@@ -82,6 +79,9 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Mode = strings.ToUpper(strings.TrimSpace(c.Mode))
 	c.Transport.Mode = strings.ToLower(strings.TrimSpace(c.Transport.Mode))
 	c.Network.Mode = strings.ToLower(strings.TrimSpace(c.Network.Mode))
+	// The short-lived global handle_direct_connections setting was replaced by
+	// per-routing-rule handle_direct. Keep accepting old files, then drop it.
+	c.Network.HandleDirectConnections = nil
 	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))
 	c.Routing.Mode = routing.Mode(strings.ToLower(strings.TrimSpace(string(c.Routing.Mode))))
 	c.Routing.DefaultAction = routing.Action(strings.ToUpper(strings.TrimSpace(string(c.Routing.DefaultAction))))
@@ -187,7 +187,6 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.GUI.Enabled = cloneBool(c.GUI.Enabled)
 	out.GUI.MinimizeToTray = cloneBool(c.GUI.MinimizeToTray)
 	out.Web.Enabled = cloneBool(c.Web.Enabled)
-	out.Network.HandleDirectConnections = cloneBool(c.Network.HandleDirectConnections)
 	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
 	out.Routing = routing.CloneConfig(c.Routing)

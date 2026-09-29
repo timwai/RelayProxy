@@ -227,8 +227,8 @@ type ConfigUpdate struct {
 		} `json:"access"`
 	} `json:"exit"`
 	Network struct {
-		Mode                    *string   `json:"mode"` // "" (off) | "divert"
-		ExcludeProcesses        *[]string `json:"excludeProcesses"`
+		Mode             *string   `json:"mode"` // "" (off) | "divert"
+		ExcludeProcesses *[]string `json:"excludeProcesses"`
 	} `json:"network"`
 	Routing *RoutingConfigUpdate `json:"routing"`
 	GUI     struct {

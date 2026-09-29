@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -409,12 +408,3 @@ func TestValidateUpstreamConfig(t *testing.T) {
 	}
 }
 
-func addrPortParts(addr netip.AddrPort) (net.IP, uint16) {
-	return net.ParseIP(addr.Addr().String()), addr.Port()
-}
-
-func unusedPort(addr net.Addr) uint16 {
-	_, raw, _ := net.SplitHostPort(addr.String())
-	n, _ := strconv.Atoi(raw)
-	return uint16(n)
-}

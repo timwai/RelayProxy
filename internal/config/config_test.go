@@ -96,26 +96,16 @@ func TestExitUpstreamDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("valid SOCKS5 upstream rejected: %v", err)
 	}
 
-	for name, mutate := range map[string]func(){
-		"bad mode": func() { cfg.Exit.Upstream.Mode = "wireguard" },
-		"missing port": func() { cfg.Exit.Upstream.Mode = "http"; cfg.Exit.Upstream.Address = "proxy.example" },
-	} {
-		t.Run(name, func(t *testing.T) {
-			copy := *cfg
-			copy.Exit = cfg.Exit
-			mutateCopy := copy
-			_ = mutateCopy
-		})
-	}
-	bad := *cfg
-	bad.Exit.Upstream.Mode = "wireguard"
-	if err := NormalizeAgentConfig(&bad); err == nil {
+	badMode := *cfg
+	badMode.Exit.Upstream.Mode = "wireguard"
+	if err := NormalizeAgentConfig(&badMode); err == nil {
 		t.Fatal("invalid upstream mode accepted")
 	}
-	bad = *cfg
-	bad.Exit.Upstream.Mode = "http"
-	bad.Exit.Upstream.Address = "proxy.example"
-	if err := NormalizeAgentConfig(&bad); err == nil {
+
+	badAddress := *cfg
+	badAddress.Exit.Upstream.Mode = "http"
+	badAddress.Exit.Upstream.Address = "proxy.example"
+	if err := NormalizeAgentConfig(&badAddress); err == nil {
 		t.Fatal("upstream without port accepted")
 	}
 }

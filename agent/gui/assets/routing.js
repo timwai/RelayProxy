@@ -24,7 +24,8 @@ function normalizeRoutingRule(rule) {
     protocols: [],
     action: 'PROXY',
     exit_id: '',
-    datagram_required: false
+    datagram_required: false,
+    handle_direct: false
   }, rule || {});
   ['processes', 'targets', 'ports', 'protocols'].forEach(field => {
     normalized[field] = Array.isArray(normalized[field]) ? normalized[field] : [];
@@ -88,6 +89,7 @@ function createRuleRow(rule, index) {
   const name = String(rule.name || '').trim() || '未命名规则';
   const exit = String(rule.exit_id || '').trim();
   const datagram = !!rule.datagram_required;
+  const handleDirect = rule.action === 'DIRECT' && !!rule.handle_direct;
 
   row.innerHTML = `
     <td class="routing-rule-main">
@@ -108,6 +110,7 @@ function createRuleRow(rule, index) {
       <span class="${ruleActionClass(rule.action)}">${escapeHTML(ruleActionLabel(rule.action))}</span>
       ${exit ? '<span class="routing-exit mono" title="' + escapeHTML(exit) + '">出口 ' + escapeHTML(exit) + '</span>' : '<span class="routing-exit">当前出口</span>'}
       ${datagram ? '<span class="routing-datagram">UDP 原生数据报</span>' : ''}
+      ${handleDirect ? '<span class="routing-datagram">RelayProxy 处理直连</span>' : ''}
     </td>
     <td class="routing-ops-cell">
       <div class="routing-order-buttons">
@@ -140,6 +143,8 @@ function routingEditorElements() {
     exit: $('routing-rule-exit'),
     datagram: $('routing-rule-datagram'),
     datagramWrap: $('routing-rule-datagram-wrap'),
+    handleDirect: $('routing-rule-handle-direct'),
+    handleDirectWrap: $('routing-rule-direct-wrap'),
     save: $('routing-rule-save')
   };
 }
@@ -170,6 +175,7 @@ function openRuleEditor(index) {
   el.action.value = rule.action || 'PROXY';
   el.exit.value = rule.exit_id || '';
   el.datagram.checked = !!rule.datagram_required;
+  el.handleDirect.checked = !!rule.handle_direct;
 
   updateRoutingEditorDependencies();
   el.modal.classList.remove('hidden');
@@ -189,9 +195,12 @@ function updateRoutingEditorDependencies() {
   const el = routingEditorElements();
   if (!el.action) return;
   const proxy = el.action.value === 'PROXY';
+  const direct = el.action.value === 'DIRECT';
   el.exit.disabled = !proxy;
   el.datagram.disabled = !proxy;
   el.datagramWrap.classList.toggle('is-disabled', !proxy);
+  el.handleDirect.disabled = !direct;
+  el.handleDirectWrap.classList.toggle('is-disabled', !direct);
 }
 
 function saveRuleEditor() {
@@ -214,7 +223,8 @@ function saveRuleEditor() {
     protocols: el.protocol.value === 'any' ? [] : [el.protocol.value],
     action: el.action.value,
     exit_id: el.action.value === 'PROXY' ? el.exit.value.trim() : '',
-    datagram_required: el.action.value === 'PROXY' && el.datagram.checked
+    datagram_required: el.action.value === 'PROXY' && el.datagram.checked,
+    handle_direct: el.action.value === 'DIRECT' && el.handleDirect.checked
   });
 
   if (routingRuleEditorIndex >= 0 && routingRuleEditorIndex < routingRules.length) {
@@ -265,7 +275,7 @@ async function saveRouting() {
       rules: routingRules
     },
     network: {
-      handleDirectConnections: $('cfg-handle-direct').checked,\n      excludeProcesses: splitRuleList($('cfg-network-excludes').value)
+      excludeProcesses: splitRuleList($('cfg-network-excludes').value)
     }
   }, '组合路由规则已应用，新连接使用新规则');
 }

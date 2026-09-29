@@ -56,7 +56,10 @@ func (c *AgentConfigFile) ExitPolicy() acl.Policy {
 }
 
 func (c *AgentConfigFile) DivertConfig() divert.Config {
-	return divert.Config{Mode: c.Network.Mode, ExcludeProcesses: c.Network.ExcludeProcesses}
+	return divert.Config{
+		Mode: c.Network.Mode, ExcludeProcesses: c.Network.ExcludeProcesses,
+		HandleDirectConnections: c.Network.HandleDirectConnections,
+	}
 }
 
 func validateAccess(p acl.Policy) error {
@@ -184,6 +187,7 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.GUI.Enabled = cloneBool(c.GUI.Enabled)
 	out.GUI.MinimizeToTray = cloneBool(c.GUI.MinimizeToTray)
 	out.Web.Enabled = cloneBool(c.Web.Enabled)
+	out.Network.HandleDirectConnections = cloneBool(c.Network.HandleDirectConnections)
 	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
 	out.Routing = routing.CloneConfig(c.Routing)

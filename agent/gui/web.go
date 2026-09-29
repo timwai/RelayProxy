@@ -317,7 +317,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		AccessDomains, AccessCIDRs, RestartFields                                   []string
 		SOCKS5, HTTP                                                                proxyLeg
 		IsAutostart, MinimizeToTray, StartMinimized, RestartRequired, ReloadPending bool
-		Routing, Network, Runtime                                                   any
+		Routing, Network, Runtime, ExitUpstream                                     any
 		NetworkCapabilities                                                         divert.Capabilities
 		Revision                                                                    string
 	}{
@@ -329,6 +329,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		DefaultExitID: cfg.Proxy.DefaultExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
 		AllowInternet: cfg.Exit.AllowInternet, AllowPrivate: cfg.Exit.AllowPrivateNetwork, AllowLoopback: cfg.Exit.AllowLoopback,
 		AccessMode: cfg.Exit.Access.Mode, AccessDomains: cfg.Exit.Access.Domains, AccessCIDRs: cfg.Exit.Access.CIDRs,
+		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password},
 		NetworkMode: cfg.Network.Mode, IsAutostart: b.IsAutoStart(), MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized, Theme: cfg.GUI.Theme, Version: Version,
 		Network:             map[string]any{"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses},
@@ -351,6 +352,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,
+		"exitUpstream": payload.ExitUpstream,
 		"networkMode": payload.NetworkMode, "isAutostart": payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
 		"routing": payload.Routing, "network": payload.Network, "networkCapabilities": payload.NetworkCapabilities,

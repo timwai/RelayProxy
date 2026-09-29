@@ -17,10 +17,6 @@ func ValidateConfig(cfg Config) error {
 }
 
 func cloneConfig(cfg Config) Config {
-	if cfg.HandleDirectConnections != nil {
-		value := *cfg.HandleDirectConnections
-		cfg.HandleDirectConnections = &value
-	}
 	cfg.ExcludeProcesses = slices.Clone(cfg.ExcludeProcesses)
 	cfg.Rules = slices.Clone(cfg.Rules)
 	for i := range cfg.Rules {
@@ -56,6 +52,12 @@ func validatedConfig(cfg Config) (Config, error) {
 		}
 		if r.Action, err = normalizeAction(r.Action, cfg.DefaultAction); err != nil {
 			return Config{}, fmt.Errorf("%s.action: %w", prefix, err)
+		}
+		if r.HandleDirect && r.Action != ActionDirect {
+			return Config{}, fmt.Errorf("%s.handle_direct: only valid for DIRECT", prefix)
+		}
+		if r.HandleDirect && r.DatagramRequired {
+			return Config{}, fmt.Errorf("%s.handle_direct: cannot require relay datagrams", prefix)
 		}
 		for j, proto := range r.Protocols {
 			proto = strings.ToLower(strings.TrimSpace(proto))

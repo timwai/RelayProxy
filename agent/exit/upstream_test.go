@@ -410,4 +410,3 @@ func TestValidateUpstreamConfig(t *testing.T) {
 		}
 	}
 }
-

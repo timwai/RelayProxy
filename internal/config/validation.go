@@ -157,6 +157,16 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 		if err != nil || port < 1 || port > 65535 {
 			return fmt.Errorf("exit.upstream.address 端口必须在 1-65535 之间")
 		}
+		if isLoopbackHost(host) {
+			socksEnabled := c.Proxy.SOCKS5.Enabled == nil || *c.Proxy.SOCKS5.Enabled
+			httpEnabled := c.Proxy.HTTP.Enabled == nil || *c.Proxy.HTTP.Enabled
+			if socksEnabled && port == c.Proxy.SOCKS5.Port && localListenerCoversLoopback(c.Proxy.SOCKS5.Listen) {
+				return fmt.Errorf("exit.upstream.address 不能指向 RelayProxy 自己的 SOCKS5 监听端口")
+			}
+			if httpEnabled && port == c.Proxy.HTTP.Port && localListenerCoversLoopback(c.Proxy.HTTP.Listen) {
+				return fmt.Errorf("exit.upstream.address 不能指向 RelayProxy 自己的 HTTP 监听端口")
+			}
+		}
 	default:
 		return fmt.Errorf("exit.upstream.mode 必须是 direct / socks5 / http / https")
 	}
@@ -213,6 +223,11 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.Routing = routing.CloneConfig(c.Routing)
 	out.Network.ExcludeProcesses = slices.Clone(c.Network.ExcludeProcesses)
 	return &out
+}
+
+func localListenerCoversLoopback(host string) bool {
+	host = strings.TrimSpace(host)
+	return host == "0.0.0.0" || host == "::" || isLoopbackHost(host)
 }
 
 func isLoopbackHost(host string) bool {

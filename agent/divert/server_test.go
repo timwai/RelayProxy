@@ -76,12 +76,11 @@ func tcpPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
 	return client, server
 }
 
-func TestDirectTelemetryCanBeDisabledAndReloaded(t *testing.T) {
+func TestHandledDirectCreatesTelemetryWhileBypassDirectDoesNot(t *testing.T) {
 	registry := traffic.NewRegistry(0, 0)
-	disabled := false
 	server := newTestServer(t, Options{
 		Traffic: registry,
-		Config:  Config{DefaultAction: ActionDirect, HandleDirectConnections: &disabled},
+		Config:  Config{DefaultAction: ActionDirect},
 	})
 
 	flow := testFlow(ProtoTCP, nil)
@@ -89,18 +88,16 @@ func TestDirectTelemetryCanBeDisabledAndReloaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if route.Decision().Action != ActionDirect {
-		t.Fatalf("action=%s", route.Decision().Action)
+	if route.Decision().Action != ActionDirect || route.Decision().HandleDirect {
+		t.Fatalf("bypass decision=%+v", route.Decision())
 	}
 	if route.traffic != nil {
-		t.Fatal("DIRECT telemetry record created while handling is disabled")
-	}
-	if snapshot := registry.Snapshot(); snapshot.Total != 0 || len(snapshot.Connections) != 0 {
-		t.Fatalf("disabled DIRECT leaked into telemetry: %+v", snapshot)
+		t.Fatal("bypass DIRECT unexpectedly created telemetry")
 	}
 
-	enabled := true
-	if err := server.ReloadRules(Config{DefaultAction: ActionDirect, HandleDirectConnections: &enabled}); err != nil {
+	if err := server.ReloadRules(Config{DefaultAction: ActionDirect, Rules: []Rule{{
+		Name: "handled", Enabled: true, Process: "browser.exe", Action: ActionDirect, HandleDirect: true,
+	}}}); err != nil {
 		t.Fatal(err)
 	}
 	flow.SourcePort++
@@ -108,11 +105,11 @@ func TestDirectTelemetryCanBeDisabledAndReloaded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if route.traffic == nil {
-		t.Fatal("DIRECT telemetry record missing after enabling handling")
+	if !route.Decision().HandleDirect || route.traffic == nil {
+		t.Fatalf("handled DIRECT not retained: decision=%+v traffic=%v", route.Decision(), route.traffic)
 	}
 	if snapshot := registry.Snapshot(); snapshot.Total != 1 || len(snapshot.Connections) != 1 || snapshot.Connections[0].Action != string(ActionDirect) {
-		t.Fatalf("enabled DIRECT telemetry=%+v", snapshot)
+		t.Fatalf("handled DIRECT telemetry=%+v", snapshot)
 	}
 }
 

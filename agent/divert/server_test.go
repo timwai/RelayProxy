@@ -81,7 +81,7 @@ func TestDirectTelemetryCanBeDisabledAndReloaded(t *testing.T) {
 	disabled := false
 	server := newTestServer(t, Options{
 		Traffic: registry,
-		Config: Config{DefaultAction: ActionDirect, HandleDirectConnections: &disabled},
+		Config:  Config{DefaultAction: ActionDirect, HandleDirectConnections: &disabled},
 	})
 
 	flow := testFlow(ProtoTCP, nil)

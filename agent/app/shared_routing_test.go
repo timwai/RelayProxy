@@ -59,6 +59,7 @@ func TestTransparentAndManualUseOnePolicyAndFreezeLiveDecisions(t *testing.T) {
 	}
 	next := a.Config()
 	next.Routing.Rules[0].Action = routing.ActionDirect
+	next.Routing.Rules[0].HandleDirect = true
 	if err := a.ApplyPolicies(next.Routing, next.DivertConfig); err != nil {
 		t.Fatal(err)
 	}
@@ -70,8 +71,8 @@ func TestTransparentAndManualUseOnePolicyAndFreezeLiveDecisions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Decision().Action != divert.ActionDirect {
-		t.Fatal("new flow did not use shared reload")
+	if updated.Decision().Action != divert.ActionDirect || !updated.Decision().HandleDirect {
+		t.Fatalf("new flow did not use shared handled DIRECT reload: %+v", updated.Decision())
 	}
 	next = a.Config()
 	next.DivertConfig.ExcludeProcesses = []string{"browser.exe"}

@@ -183,6 +183,10 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.AllowInternet = c.AllowInternet
 	res.Exit.AllowPrivateNetwork = c.AllowPrivateNet
 	res.Exit.AllowLoopback = c.AllowLoopback
+	res.Exit.Upstream.Mode = c.ExitUpstream.Mode
+	res.Exit.Upstream.Address = c.ExitUpstream.Address
+	res.Exit.Upstream.Username = c.ExitUpstream.Username
+	res.Exit.Upstream.Password = c.ExitUpstream.Password
 	res.Exit.Access.Mode = c.AccessMode
 	res.Exit.Access.Domains = c.AccessDomains
 	res.Exit.Access.CIDRs = c.AccessCIDRs
@@ -220,6 +224,12 @@ type ConfigUpdate struct {
 		AllowInternet       *bool `json:"allowInternet"`
 		AllowPrivateNetwork *bool `json:"allowPrivateNetwork"`
 		AllowLoopback       *bool `json:"allowLoopback"`
+		Upstream            struct {
+			Mode     *string `json:"mode"`
+			Address  *string `json:"address"`
+			Username *string `json:"username"`
+			Password *string `json:"password"`
+		} `json:"upstream"`
 		Access              struct {
 			Mode    *string   `json:"mode"`    // "" (off) | "allow" | "deny"
 			Domains *[]string `json:"domains"` // glob / .suffix / exact, one per line
@@ -353,6 +363,18 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.Exit.AllowLoopback != nil {
 		cfg.Exit.AllowLoopback = *in.Exit.AllowLoopback
+	}
+	if in.Exit.Upstream.Mode != nil {
+		cfg.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(*in.Exit.Upstream.Mode))
+	}
+	if in.Exit.Upstream.Address != nil {
+		cfg.Exit.Upstream.Address = strings.TrimSpace(*in.Exit.Upstream.Address)
+	}
+	if in.Exit.Upstream.Username != nil {
+		cfg.Exit.Upstream.Username = strings.TrimSpace(*in.Exit.Upstream.Username)
+	}
+	if in.Exit.Upstream.Password != nil {
+		cfg.Exit.Upstream.Password = *in.Exit.Upstream.Password
 	}
 	if in.Exit.Access.Mode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*in.Exit.Access.Mode))
@@ -501,6 +523,8 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
 		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"私网访问": c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
+		"出口上游模式": c.Exit.Upstream.Mode, "出口上游地址": c.Exit.Upstream.Address,
+		"出口上游用户名": c.Exit.Upstream.Username, "出口上游密码": c.Exit.Upstream.Password,
 		"访问控制模式": c.Exit.Access.Mode, "访问域名": strings.Join(c.Exit.Access.Domains, "\n"),
 		"访问地址": strings.Join(c.Exit.Access.CIDRs, "\n"), "透明代理开关": c.Network.Mode,
 	}

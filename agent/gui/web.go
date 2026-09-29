@@ -331,10 +331,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		AccessMode: cfg.Exit.Access.Mode, AccessDomains: cfg.Exit.Access.Domains, AccessCIDRs: cfg.Exit.Access.CIDRs,
 		NetworkMode: cfg.Network.Mode, IsAutostart: b.IsAutoStart(), MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized, Theme: cfg.GUI.Theme, Version: Version,
-		Network: map[string]any{
-			"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses,
-			"handle_direct_connections": cfg.HandlesDirectConnections(),
-		},
+		Network: map[string]any{"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses},
 		NetworkCapabilities: divert.PlatformCapabilities(), Revision: state.Revision,
 		RestartRequired: state.RestartRequired, RestartFields: state.RestartFields, ReloadPending: state.ReloadPending,
 		Routing: map[string]any{"mode": cfg.Routing.Mode, "default_action": cfg.Routing.DefaultAction, "rules": cfg.Routing.Rules},

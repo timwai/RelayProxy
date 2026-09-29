@@ -13,7 +13,7 @@ var (
 	ErrClosed            = errors.New("divert server is closed")
 	ErrFlowCapacity      = errors.New("divert flow capacity reached")
 	ErrAssociationClosed = errors.New("divert UDP association is closed")
-	ErrNotProxyFlow      = errors.New("divert: the platform must release DIRECT flows and drop REJECT flows")
+	ErrNotProxyFlow      = errors.New("divert: only PROXY or handled DIRECT flows may enter userspace forwarding")
 )
 
 // FlowKey includes the complete original five-tuple, never the redirected
@@ -25,8 +25,9 @@ type FlowKey struct {
 }
 
 // ClassifiedFlow is an immutable policy result belonging to one Server.
-// Platform adapters classify before interception, release DIRECT unchanged,
-// drop REJECT, and pass only PROXY flows to ForwardTCP/ForwardUDP. A TCP token
+// Platform adapters classify before interception, release ordinary DIRECT
+// unchanged, drop REJECT, and pass PROXY plus handled DIRECT flows to
+// ForwardTCP/ForwardUDP. A TCP token
 // is consumed once. A UDP token is reused until its association expires.
 type ClassifiedFlow struct {
 	owner    *Server

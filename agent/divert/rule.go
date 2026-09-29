@@ -36,22 +36,16 @@ type Rule struct {
 	ExitID    string   `yaml:"exit_id" json:"exit_id"`
 	// DatagramRequired forbids reliable stream fallback for PROXY UDP flows.
 	DatagramRequired bool `yaml:"datagram_required,omitempty" json:"datagram_required,omitempty"`
+	// HandleDirect keeps DIRECT local but lets RelayProxy own the socket and relay bytes.
+	HandleDirect bool `yaml:"handle_direct,omitempty" json:"handle_direct,omitempty"`
 }
 
 // Config is the divert network configuration.
 type Config struct {
-	Mode                    string   `yaml:"mode" json:"mode"` // "" | divert
-	DefaultAction           Action   `yaml:"default_action" json:"default_action"`
-	ExcludeProcesses        []string `yaml:"exclude_processes" json:"exclude_processes"`
-	HandleDirectConnections *bool    `yaml:"handle_direct_connections,omitempty" json:"handle_direct_connections,omitempty"`
-	Rules                   []Rule   `yaml:"rules" json:"rules"`
-}
-
-// HandlesDirectConnections reports whether DIRECT flows should be retained in
-// connection telemetry. Nil preserves the historical behavior for programmatic
-// callers; normalized agent configuration supplies an explicit value.
-func (c Config) HandlesDirectConnections() bool {
-	return c.HandleDirectConnections == nil || *c.HandleDirectConnections
+	Mode             string   `yaml:"mode" json:"mode"` // "" | divert
+	DefaultAction    Action   `yaml:"default_action" json:"default_action"`
+	ExcludeProcesses []string `yaml:"exclude_processes" json:"exclude_processes"`
+	Rules            []Rule   `yaml:"rules" json:"rules"`
 }
 
 // Flow is one connection/datagram subject to matching.
@@ -75,6 +69,7 @@ type Decision struct {
 	ExitID           string
 	Rule             string // matched rule name, or "default" / "exclude"
 	DatagramRequired bool   `yaml:"datagram_required,omitempty" json:"datagram_required,omitempty"`
+	HandleDirect     bool   `yaml:"handle_direct,omitempty" json:"handle_direct,omitempty"`
 }
 
 func processBasename(p string) string {

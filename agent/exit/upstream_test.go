@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"sync"
 	"testing"
 	"time"
 )
@@ -72,11 +71,13 @@ func TestHTTPUpstreamCarriesTCPWithBasicAuth(t *testing.T) {
 			proxyErr <- err
 			return
 		}
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); _, _ = io.Copy(upstream, reader) }()
-		go func() { defer wg.Done(); _, _ = io.Copy(conn, upstream) }()
-		wg.Wait()
+		copyDone := make(chan struct{}, 2)
+		go func() { _, _ = io.Copy(upstream, reader); copyDone <- struct{}{} }()
+		go func() { _, _ = io.Copy(conn, upstream); copyDone <- struct{}{} }()
+		<-copyDone
+		_ = upstream.Close()
+		_ = conn.Close()
+		<-copyDone
 		proxyErr <- nil
 	}()
 
@@ -218,11 +219,13 @@ func TestSOCKS5UpstreamCarriesTCP(t *testing.T) {
 			done <- err
 			return
 		}
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); _, _ = io.Copy(upstream, conn) }()
-		go func() { defer wg.Done(); _, _ = io.Copy(conn, upstream) }()
-		wg.Wait()
+		copyDone := make(chan struct{}, 2)
+		go func() { _, _ = io.Copy(upstream, conn); copyDone <- struct{}{} }()
+		go func() { _, _ = io.Copy(conn, upstream); copyDone <- struct{}{} }()
+		<-copyDone
+		_ = upstream.Close()
+		_ = conn.Close()
+		<-copyDone
 		done <- nil
 	}()
 

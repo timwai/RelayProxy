@@ -110,7 +110,7 @@ type AgentConfigFile struct {
 			Username string `yaml:"username,omitempty"`
 			Password string `yaml:"password,omitempty"`
 		} `yaml:"upstream"`
-		Access              struct {
+		Access struct {
 			// Mode is "" (no gate), "allow" (whitelist) or "deny" (blacklist).
 			Mode    string   `yaml:"mode"`
 			Domains []string `yaml:"domains"` // domain patterns: glob (*/?), ".suffix", exact

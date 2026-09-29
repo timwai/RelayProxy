@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"relayproxy/internal/traffic"
 )
 
 type testDialer struct {

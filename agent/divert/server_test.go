@@ -76,6 +76,46 @@ func tcpPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
 	return client, server
 }
 
+func TestDirectTelemetryCanBeDisabledAndReloaded(t *testing.T) {
+	registry := traffic.NewRegistry(0, 0)
+	disabled := false
+	server := newTestServer(t, Options{
+		Traffic: registry,
+		Config: Config{DefaultAction: ActionDirect, HandleDirectConnections: &disabled},
+	})
+
+	flow := testFlow(ProtoTCP, nil)
+	route, err := server.ClassifyFlow(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.Decision().Action != ActionDirect {
+		t.Fatalf("action=%s", route.Decision().Action)
+	}
+	if route.traffic != nil {
+		t.Fatal("DIRECT telemetry record created while handling is disabled")
+	}
+	if snapshot := registry.Snapshot(); snapshot.Total != 0 || len(snapshot.Connections) != 0 {
+		t.Fatalf("disabled DIRECT leaked into telemetry: %+v", snapshot)
+	}
+
+	enabled := true
+	if err := server.ReloadRules(Config{DefaultAction: ActionDirect, HandleDirectConnections: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	flow.SourcePort++
+	route, err = server.ClassifyFlow(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if route.traffic == nil {
+		t.Fatal("DIRECT telemetry record missing after enabling handling")
+	}
+	if snapshot := registry.Snapshot(); snapshot.Total != 1 || len(snapshot.Connections) != 1 || snapshot.Connections[0].Action != string(ActionDirect) {
+		t.Fatalf("enabled DIRECT telemetry=%+v", snapshot)
+	}
+}
+
 func TestTCPUsesOneFrozenDecisionAndPreservesHalfClose(t *testing.T) {
 	client, intercepted := tcpPair(t)
 	upstream, target := tcpPair(t)

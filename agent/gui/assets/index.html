@@ -908,6 +908,13 @@
             <label><input id="cfg-exit-loopback" type="checkbox"><span><strong>回环地址</strong><small>本机的本地服务</small></span></label>
           </div>
           <p class="config-help">请求需同时满足这里的本地权限与服务端访问规则。</p>
+          <div class="config-grid">
+            <div class="config-field"><label for="cfg-exit-upstream-mode">出口网络</label><select id="cfg-exit-upstream-mode" onchange="updateFieldDependencies()"><option value="direct">本机直连</option><option value="socks5">SOCKS5 代理</option><option value="http">HTTP CONNECT 代理</option><option value="https">HTTPS CONNECT 代理</option></select><small>指定远程设备经本机 Exit 后如何继续访问目标。</small></div>
+            <div class="config-field"><label for="cfg-exit-upstream-address">上游代理地址</label><input id="cfg-exit-upstream-address" class="mono" type="text" autocomplete="off" placeholder="127.0.0.1:1080"><small>代理模式填写 host:port；本机直连时忽略。</small></div>
+            <div class="config-field"><label for="cfg-exit-upstream-username">代理用户名</label><input id="cfg-exit-upstream-username" type="text" autocomplete="off" placeholder="可选"><small>SOCKS5 用户名密码或 HTTP Basic 认证。</small></div>
+            <div class="config-field"><label for="cfg-exit-upstream-password">代理密码</label><input id="cfg-exit-upstream-password" type="password" autocomplete="new-password" placeholder="可选"><small>仅保存在本机配置文件中。</small></div>
+          </div>
+          <p id="exit-upstream-hint" class="config-help">SOCKS5 支持 TCP 与 UDP；HTTP/HTTPS CONNECT 仅支持 TCP，UDP 会明确拒绝而不会绕过代理直连。</p>
           <details class="config-advanced"><summary>域名与 IP 访问规则 <span>高级设置</span></summary>
             <div class="config-field"><label for="cfg-acl-mode">匹配模式</label><select id="cfg-acl-mode"><option value="">不附加域名 / IP 筛选</option><option value="allow">允许列表 · 仅允许匹配的目标</option><option value="deny">拒绝列表 · 阻止匹配的目标</option></select></div>
             <div class="config-grid">
@@ -1132,7 +1139,7 @@
       proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on'],
       routing: ['cfg-routing-mode','cfg-routing-default'],
       network: ['cfg-network-excludes'],
-      share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
+      share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-exit-upstream-mode','cfg-exit-upstream-address','cfg-exit-upstream-username','cfg-exit-upstream-password','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
       exit: ['cfg-exit-id'],
       preferences: ['cfg-min-tray','cfg-theme-mode']
     };
@@ -1184,7 +1191,12 @@
       var caps = state.cfg.networkCapabilities || {};
       $('cfg-tun-on').disabled = locked || (!networkReady(caps) && !$('cfg-tun-on').checked);
       $('cfg-exit-on').disabled = locked;
-      ['cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'].forEach(function (id) { $(id).disabled = locked || !$('cfg-exit-on').checked; });
+      ['cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-exit-upstream-mode','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'].forEach(function (id) { $(id).disabled = locked || !$('cfg-exit-on').checked; });
+      var exitProxy = $('cfg-exit-upstream-mode').value !== 'direct';
+      ['cfg-exit-upstream-address','cfg-exit-upstream-username','cfg-exit-upstream-password'].forEach(function (id) { $(id).disabled = locked || !$('cfg-exit-on').checked || !exitProxy; });
+      $('exit-upstream-hint').textContent = $('cfg-exit-upstream-mode').value === 'socks5'
+        ? 'SOCKS5 出口支持 TCP 与 UDP（UDP ASSOCIATE）。'
+        : exitProxy ? 'HTTP/HTTPS CONNECT 出口仅支持 TCP；UDP 会明确失败，不会回退本机直连。' : '远程流量直接使用本机默认网络访问目标。';
       $('cfg-quic-port').disabled = locked || !tls || $('cfg-transport').value === 'tcp_only';
       $('cfg-tcp-port').disabled = locked || (tls && $('cfg-transport').value === 'quic_only');
       $('cfg-routing-default').disabled = locked || $('cfg-routing-mode').value !== 'rule';

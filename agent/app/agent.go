@@ -133,6 +133,7 @@ type AgentConfig struct {
 	HTTPListen      string // "127.0.0.1:8080"
 	DefaultExitID   string
 	ExitEnabled     *bool
+	ExitUpstream    exit.UpstreamConfig
 	RDPEnabled      *bool
 	RDPAddress      string // target-local RDP service, default 127.0.0.1:3389
 	AllowInternet   bool
@@ -308,6 +309,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
+	if err := exit.ValidateUpstreamConfig(cfg.ExitUpstream); err != nil {
+		return nil, fmt.Errorf("invalid exit upstream: %w", err)
+	}
 
 	engine, err := routing.NewEngine(cfg.Routing)
 	if err != nil {
@@ -349,7 +353,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
-		a.exitHandler = exit.NewHandler(exit.HandlerConfig{ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout})
+		a.exitHandler = exit.NewHandler(exit.HandlerConfig{ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream})
 	}
 	var tunnelTLS *tls.Config
 	if !cfg.PlainTCP {

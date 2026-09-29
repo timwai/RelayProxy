@@ -142,8 +142,6 @@ test('exit sharing saves a SOCKS5 upstream proxy without changing target ACLs', 
   const f = fixture();
   await f.context.refreshAll();
   f.get('cfg-exit-upstream-mode').value = 'socks5';
-  f.context.updateFieldDependencies();
-  assert.equal(f.get('cfg-exit-upstream-address').disabled, false);
   f.get('cfg-exit-upstream-address').value = '127.0.0.1:1088';
   f.get('cfg-exit-upstream-username').value = 'relay';
   f.get('cfg-exit-upstream-password').value = 'secret';

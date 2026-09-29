@@ -53,9 +53,10 @@ func (open darwinOpenFlow) destination() (netip.AddrPort, error) {
 }
 
 type darwinFlowDecision struct {
-	Action Action `json:"action"`
-	ExitID string `json:"exit_id,omitempty"`
-	Reason string `json:"reason,omitempty"`
+	Action       Action `json:"action"`
+	ExitID       string `json:"exit_id,omitempty"`
+	Reason       string `json:"reason,omitempty"`
+	HandleDirect bool   `json:"handle_direct,omitempty"`
 }
 
 func readDarwinFrame(reader io.Reader) (byte, []byte, error) {

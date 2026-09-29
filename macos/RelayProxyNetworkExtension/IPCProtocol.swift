@@ -34,6 +34,7 @@ struct IPCDecision: Codable {
     let action: String
     let exit_id: String?
     let reason: String?
+    let handle_direct: Bool?
 }
 
 enum IPCError: Error {

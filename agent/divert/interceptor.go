@@ -340,12 +340,19 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	switch route.Decision().Action {
 	case ActionDirect:
 		i.direct.Add(1)
-		err := i.sendPacket(packet, meta)
-		if err == nil {
-			route.traffic.Activate()
-			route.traffic.AddUpload(len(packet.Payload))
+		if !route.Decision().HandleDirect {
+			return i.sendPacket(packet, meta)
 		}
-		return err
+		queue := i.udpQueues[flowQueue(route.Key(), len(i.udpQueues))]
+		job := interceptedUDP{route: route, payload: append([]byte(nil), packet.Payload...), meta: meta}
+		select {
+		case queue <- job:
+			return nil
+		case <-i.ctx.Done():
+			return i.ctx.Err()
+		default:
+			return errors.New("UDP interception queue is full; datagram dropped")
+		}
 	case ActionReject:
 		i.reject.Add(1)
 		return nil
@@ -492,6 +499,13 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 	i.mu.Unlock()
 	switch flow.route.Decision().Action {
 	case ActionDirect:
+		if flow.route.Decision().HandleDirect {
+			if err := rewriteIPPacket(p.Bytes, flow.translated.Source, flow.translated.Destination); err != nil {
+				return err
+			}
+			meta.outbound = false
+			return i.inject(p.Bytes, meta)
+		}
 		err := i.sendPacket(p, meta)
 		if err == nil {
 			i.trackDirectTCP(flow, p, true)
@@ -518,7 +532,8 @@ func (i *packetInterceptor) registerTCP(route *ClassifiedFlow, sequence uint32, 
 	}
 	meta.outbound = false
 	flow := &tcpRedirect{route: route, original: route.Key(), sequence: sequence, lastSeen: time.Now(), replyMeta: meta}
-	if route.Decision().Action == ActionProxy {
+	decision := route.Decision()
+	if decision.Action == ActionProxy || (decision.Action == ActionDirect && decision.HandleDirect) {
 		port := i.ports[flow.original.Source.Addr().Is6()]
 		if port == 0 {
 			return nil, errors.New("no TCP interceptor for address family")
@@ -720,7 +735,8 @@ func (i *packetInterceptor) sweepTCP() {
 			i.sweepDirectTCP(now)
 			i.mu.Lock()
 			for key, flow := range i.tcp {
-				if flow.route.Decision().Action == ActionDirect && flow.finished.IsZero() {
+				decision := flow.route.Decision()
+				if decision.Action == ActionDirect && !decision.HandleDirect && flow.finished.IsZero() {
 					continue
 				}
 				if (!flow.finished.IsZero() && now.Sub(flow.finished) > 2*time.Minute) ||

@@ -19,6 +19,7 @@ import (
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/divert"
+	"relayproxy/agent/exit"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
@@ -221,7 +222,11 @@ func main() {
 		HTTPEnabled:     cfgFile.Proxy.HTTP.Enabled,
 		HTTPListen:      httpListen,
 		DefaultExitID:   cfgFile.Proxy.DefaultExitID,
-		ExitEnabled:     cfgFile.Exit.Enabled,
+		ExitEnabled: cfgFile.Exit.Enabled,
+		ExitUpstream: exit.UpstreamConfig{
+			Mode: cfgFile.Exit.Upstream.Mode, Address: cfgFile.Exit.Upstream.Address,
+			Username: cfgFile.Exit.Upstream.Username, Password: cfgFile.Exit.Upstream.Password,
+		},
 		RDPEnabled:      cfgFile.RDP.Enabled,
 		RDPAddress:      cfgFile.RDP.Address,
 		AllowInternet:   cfgFile.Exit.AllowInternet,

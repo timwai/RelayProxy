@@ -41,6 +41,11 @@ func (c UpstreamConfig) normalized() UpstreamConfig {
 	return c
 }
 
+// NormalizeUpstreamConfig returns the canonical exit egress settings.
+func NormalizeUpstreamConfig(c UpstreamConfig) UpstreamConfig {
+	return c.normalized()
+}
+
 // ValidateUpstreamConfig validates exit egress proxy settings for programmatic callers.
 func ValidateUpstreamConfig(c UpstreamConfig) error {
 	return c.validate()

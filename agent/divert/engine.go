@@ -57,14 +57,6 @@ func (e *Engine) Config() Config {
 	return cloneConfig(e.cfg)
 }
 
-// HandlesDirectConnections reads the telemetry policy without cloning the full
-// rule set on every classified flow.
-func (e *Engine) HandlesDirectConnections() bool {
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	return e.cfg.HandlesDirectConnections()
-}
-
 // Match returns the divert decision for a flow.
 func (e *Engine) Match(f Flow) Decision {
 	return e.MatchWith(f, nil)
@@ -112,7 +104,7 @@ func (e *Engine) MatchWith(f Flow, shared func(Flow) Decision) Decision {
 		if action == "" {
 			action = e.cfg.DefaultAction
 		}
-		return Decision{Action: action, ExitID: r.ExitID, Rule: r.Name, DatagramRequired: r.DatagramRequired}
+		return Decision{Action: action, ExitID: r.ExitID, Rule: r.Name, DatagramRequired: r.DatagramRequired, HandleDirect: r.HandleDirect}
 	}
 
 	return Decision{Action: e.cfg.DefaultAction, Rule: "default"}

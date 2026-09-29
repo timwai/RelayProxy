@@ -117,7 +117,7 @@ type AgentConfigFile struct {
 		// WinDivert / iptables / Network Extension). Legacy "tun" is rejected.
 		Mode                    string   `yaml:"mode"`
 		ExcludeProcesses        []string `yaml:"exclude_processes"`
-		HandleDirectConnections *bool    `yaml:"handle_direct_connections,omitempty"`
+		HandleDirectConnections *bool    `yaml:"handle_direct_connections,omitempty"` // deprecated; accepted then ignored
 	} `yaml:"network"`
 
 	GUI struct {
@@ -361,11 +361,6 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	if cfg.Network.ExcludeProcesses == nil {
 		cfg.Network.ExcludeProcesses = []string{"relayproxy", "relayproxy.exe", "RelayProxy.exe"}
 	}
-	if cfg.Network.HandleDirectConnections == nil {
-		// Match Proxifier-style behavior: DIRECT remains a local connection, but
-		// it does not fill connection telemetry unless the user opts in.
-		cfg.Network.HandleDirectConnections = BoolPtr(false)
-	}
 	if cfg.Exit.Access.Domains == nil {
 		cfg.Exit.Access.Domains = []string{}
 	}
@@ -414,12 +409,6 @@ func (c *AgentConfigFile) IsWebEnabled() bool {
 		return *c.Web.Enabled
 	}
 	return true
-}
-
-// HandlesDirectConnections reports whether transparent DIRECT flows should be
-// shown and accounted in the connection monitor.
-func (c *AgentConfigFile) HandlesDirectConnections() bool {
-	return c.Network.HandleDirectConnections != nil && *c.Network.HandleDirectConnections
 }
 
 func BoolPtr(v bool) *bool {

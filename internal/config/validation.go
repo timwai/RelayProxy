@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -83,6 +84,9 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	// per-routing-rule handle_direct. Keep accepting old files, then drop it.
 	c.Network.HandleDirectConnections = nil
 	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))
+	c.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Upstream.Mode))
+	c.Exit.Upstream.Address = strings.TrimSpace(c.Exit.Upstream.Address)
+	c.Exit.Upstream.Username = strings.TrimSpace(c.Exit.Upstream.Username)
 	c.Routing.Mode = routing.Mode(strings.ToLower(strings.TrimSpace(string(c.Routing.Mode))))
 	c.Routing.DefaultAction = routing.Action(strings.ToUpper(strings.TrimSpace(string(c.Routing.DefaultAction))))
 	c.GUI.Theme = strings.ToLower(strings.TrimSpace(c.GUI.Theme))
@@ -141,6 +145,23 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c.Mode != "EXIT" && (c.Proxy.SOCKS5.Enabled == nil || *c.Proxy.SOCKS5.Enabled) && (c.Proxy.HTTP.Enabled == nil || *c.Proxy.HTTP.Enabled) &&
 		listenAddressesOverlap(net.JoinHostPort(c.Proxy.SOCKS5.Listen, fmt.Sprint(c.Proxy.SOCKS5.Port)), net.JoinHostPort(c.Proxy.HTTP.Listen, fmt.Sprint(c.Proxy.HTTP.Port))) {
 		return fmt.Errorf("SOCKS5 与 HTTP 代理的监听地址和端口冲突，请使用不同端口")
+	}
+	switch c.Exit.Upstream.Mode {
+	case "direct":
+	case "socks5", "http", "https":
+		host, rawPort, err := net.SplitHostPort(c.Exit.Upstream.Address)
+		if err != nil || strings.TrimSpace(host) == "" {
+			return fmt.Errorf("exit.upstream.address 必须是 host:port")
+		}
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("exit.upstream.address 端口必须在 1-65535 之间")
+		}
+	default:
+		return fmt.Errorf("exit.upstream.mode 必须是 direct / socks5 / http / https")
+	}
+	if len(c.Exit.Upstream.Username) > 255 || len(c.Exit.Upstream.Password) > 255 {
+		return fmt.Errorf("exit.upstream 用户名和密码长度不能超过 255")
 	}
 	if err := validateAccess(c.ExitPolicy()); err != nil {
 		return fmt.Errorf("exit.access: %w", err)

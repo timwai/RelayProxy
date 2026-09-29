@@ -309,6 +309,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
+	cfg.ExitUpstream = exit.NormalizeUpstreamConfig(cfg.ExitUpstream)
 	if err := exit.ValidateUpstreamConfig(cfg.ExitUpstream); err != nil {
 		return nil, fmt.Errorf("invalid exit upstream: %w", err)
 	}

@@ -109,6 +109,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		AccessMode          string              `json:"accessMode"`
 		AccessDomains       []string            `json:"accessDomains"`
 		AccessCIDRs         []string            `json:"accessCidrs"`
+		ExitUpstream        any                 `json:"exitUpstream"`
 		NetworkMode         string              `json:"networkMode"`
 		IsAutostart         bool                `json:"isAutostart"`
 		MinimizeToTray      bool                `json:"minimizeToTray"`
@@ -139,6 +140,10 @@ func (s *WailsService) GetConfig() (string, error) {
 		AccessMode:     cfg.Exit.Access.Mode,
 		AccessDomains:  cfg.Exit.Access.Domains,
 		AccessCIDRs:    cfg.Exit.Access.CIDRs,
+		ExitUpstream: map[string]any{
+			"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address,
+			"username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password,
+		},
 		NetworkMode:    cfg.Network.Mode,
 		IsAutostart:    a.bridge.IsAutoStart(),
 		MinimizeToTray: cfg.IsMinimizeToTray(),

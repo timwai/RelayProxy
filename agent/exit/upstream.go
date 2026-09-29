@@ -41,6 +41,11 @@ func (c UpstreamConfig) normalized() UpstreamConfig {
 	return c
 }
 
+// ValidateUpstreamConfig validates exit egress proxy settings for programmatic callers.
+func ValidateUpstreamConfig(c UpstreamConfig) error {
+	return c.validate()
+}
+
 func (c UpstreamConfig) validate() error {
 	c = c.normalized()
 	switch c.Mode {

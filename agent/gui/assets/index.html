@@ -852,13 +852,13 @@
                 <tbody id="routing-rules-body"><!-- Read-only rows injected by routing.js --></tbody>
               </table>
             </div>
-            <p id="routing-mode-hint" class="config-help"></p><p class="text-[12px] text-slate-500 dark:text-slate-400 mt-2">“UDP 必须使用原生数据报”仅影响 PROXY UDP；勾选后会拒绝 TLS 隧道和不支持数据报的旧出口，不回退到可靠流传输。</p>
+            <p id="routing-mode-hint" class="config-help"></p><p class="text-[12px] text-slate-500 dark:text-slate-400 mt-2">“由 RelayProxy 处理直连”仅影响系统透明代理的 DIRECT：开启后由 RelayProxy 本机建立目标连接；关闭时快速放行。UDP 原生数据报要求仅影响 PROXY。</p>
           </div>
         </div>
-        <details id="network-advanced" class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 config-advanced"><summary>透明代理高级设置</summary>\n          <label class="config-switch-line mt-3"><span><strong>处理直连连接</strong><small>开启后在实时连接中记录 DIRECT，并统计其上传/下载流量；关闭不影响本机直连。</small></span><input id="cfg-handle-direct" type="checkbox"></label>
+        <details id="network-advanced" class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 config-advanced"><summary>透明代理排除进程</summary>
           <label for="cfg-network-excludes" class="block text-[12px] mb-2 mt-3">始终直连的进程（每行一个；优先于上方规则）</label>
           <textarea id="cfg-network-excludes" rows="2" class="mono w-full text-[12px] p-2 bg-slate-50 dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded" placeholder="可选，如 updater.exe"></textarea>
-          <p class="config-help">本程序及中继连接自动直连。点击“保存并应用规则”同时保存这些设置。</p>
+          <p class="config-help">本程序及中继连接自动直连。点击“保存并应用规则”同时保存此列表。</p>
         </details>
         <p class="config-help">透明代理通过捕获的 DNS 应答关联域名；加密 DNS、缓存命中和共享 IP 可能只能识别 IP。没有可靠关联时，域名条件不会命中。SOCKS5/HTTP 使用应用请求的域名；本机进程可识别时参与进程匹配。</p>
       </section>
@@ -1100,6 +1100,7 @@
           <div class="routing-modal-field"><label for="routing-rule-targets">域名 / IP / CIDR</label><textarea id="routing-rule-targets" placeholder="*.example.com&#10;192.168.*&#10;10.0.0.0/8"></textarea><small>可单独作为匹配条件；域名、IPv4/IPv6 与 CIDR 可混合。留空表示不限制目标。</small></div>
           <div class="routing-modal-field"><label for="routing-rule-ports">目标端口</label><textarea id="routing-rule-ports" placeholder="80&#10;443&#10;8000-9000"></textarea><small>支持单端口和端口范围；留空表示任意端口。</small></div>
           <div class="routing-modal-field"><label for="routing-rule-action">匹配动作</label><select id="routing-rule-action" onchange="updateRoutingEditorDependencies()"><option value="PROXY">PROXY · 走代理</option><option value="DIRECT">DIRECT · 本地直连</option><option value="REJECT">REJECT · 阻断连接</option></select><small>第一条启用且匹配的规则决定动作。</small></div>
+          <div class="routing-modal-field"><span class="routing-modal-label">DIRECT 处理方式</span><label id="routing-rule-direct-wrap" class="routing-modal-check"><input id="routing-rule-handle-direct" type="checkbox"><span><strong>由 RelayProxy 处理直连</strong><small>仍从本机出口访问目标，但 TCP/UDP 连接由 RelayProxy 建立和转发，并进入实时连接监控。</small></span></label></div>
           <div class="routing-modal-field"><label for="routing-rule-exit">指定出口 ID</label><input id="routing-rule-exit" type="text" autocomplete="off" placeholder="留空使用当前出口"><small>仅 PROXY 动作可指定出口。</small></div>
           <div class="routing-modal-field"><span class="routing-modal-label">UDP 代理要求</span><label id="routing-rule-datagram-wrap" class="routing-modal-check"><input id="routing-rule-datagram" type="checkbox"><span><strong>必须使用原生数据报</strong><small>不支持数据报时拒绝，不回退到可靠流。</small></span></label></div>
         </div>
@@ -1130,7 +1131,7 @@
       connection: ['cfg-server','cfg-device-name','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport'],
       proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on'],
       routing: ['cfg-routing-mode','cfg-routing-default'],
-      network: ['cfg-handle-direct','cfg-network-excludes'],
+      network: ['cfg-network-excludes'],
       share: ['cfg-exit-on','cfg-exit-internet','cfg-exit-private','cfg-exit-loopback','cfg-acl-mode','cfg-acl-domains','cfg-acl-cidrs'],
       exit: ['cfg-exit-id'],
       preferences: ['cfg-min-tray','cfg-theme-mode']
@@ -1552,7 +1553,7 @@
       $('cfg-routing-default').value = cfg.routing.default_action;
       renderRoutingRules(cfg.routing.rules);
       var network = cfg.network || {};
-      $('cfg-handle-direct').checked = network.handle_direct_connections === true;\n      $('cfg-network-excludes').value = (network.exclude_processes || []).join('\n');
+      $('cfg-network-excludes').value = (network.exclude_processes || []).join('\n');
 
       var activeSocks = running.socks5 || socks, activeHTTP = running.http || http;
       var socksAddr = hostPort(activeSocks.listen || '127.0.0.1', activeSocks.port || 1080);
@@ -1682,7 +1683,7 @@
       case 'routing':
         return { routing: { mode: $('cfg-routing-mode').value, default_action: $('cfg-routing-default').value, rules: routingRules } };
       case 'network':
-        return { network: { handleDirectConnections: $('cfg-handle-direct').checked, excludeProcesses: splitRuleList($('cfg-network-excludes').value) } };
+        return { network: { excludeProcesses: splitRuleList($('cfg-network-excludes').value) } };
       case 'exit': return { proxy: { defaultExitId: $('cfg-exit-id').value.trim() } };
       case 'preferences':
         return { gui: { theme: $('cfg-theme-light').checked ? 'light' : 'dark', minimizeToTray: $('cfg-min-tray').checked } };

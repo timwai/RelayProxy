@@ -188,6 +188,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.Access.CIDRs = c.AccessCIDRs
 	res.Network.Mode = c.NetworkMode
 	res.Network.ExcludeProcesses = c.DivertConfig.ExcludeProcesses
+	res.Network.HandleDirectConnections = c.DivertConfig.HandleDirectConnections
 	res.Routing = c.Routing
 	return res
 }
@@ -227,8 +228,9 @@ type ConfigUpdate struct {
 		} `json:"access"`
 	} `json:"exit"`
 	Network struct {
-		Mode             *string   `json:"mode"` // "" (off) | "divert"
-		ExcludeProcesses *[]string `json:"excludeProcesses"`
+		Mode                    *string   `json:"mode"` // "" (off) | "divert"
+		ExcludeProcesses        *[]string `json:"excludeProcesses"`
+		HandleDirectConnections *bool     `json:"handleDirectConnections"`
 	} `json:"network"`
 	Routing *RoutingConfigUpdate `json:"routing"`
 	GUI     struct {
@@ -383,6 +385,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.Network.ExcludeProcesses != nil {
 		cfg.Network.ExcludeProcesses = cleanLines(*in.Network.ExcludeProcesses)
+	}
+	if in.Network.HandleDirectConnections != nil {
+		cfg.Network.HandleDirectConnections = config.BoolPtr(*in.Network.HandleDirectConnections)
 	}
 
 	if in.Routing != nil {

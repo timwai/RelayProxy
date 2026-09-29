@@ -113,6 +113,74 @@ func TestHandledDirectCreatesTelemetryWhileBypassDirectDoesNot(t *testing.T) {
 	}
 }
 
+func TestHandledDirectTCPUsesLocalSocket(t *testing.T) {
+	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	client, intercepted := tcpPair(t)
+	target := listener.Addr().(*net.TCPAddr)
+	registry := traffic.NewRegistry(0, 0)
+	server := newTestServer(t, Options{
+		Traffic: registry,
+		Config: Config{DefaultAction: ActionReject, Rules: []Rule{{
+			Name: "handled", Enabled: true, Process: "browser.exe", Action: ActionDirect, HandleDirect: true,
+		}}},
+	})
+
+	flow := testFlow(ProtoTCP, nil)
+	flow.IP, flow.Port = target.IP.String(), uint16(target.Port)
+	route, err := server.ClassifyFlow(flow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !route.Decision().HandleDirect {
+		t.Fatalf("decision=%+v", route.Decision())
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- server.ForwardTCP(context.Background(), route, intercepted) }()
+	upstream, err := listener.AcceptTCP()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer upstream.Close()
+	_ = upstream.SetDeadline(time.Now().Add(5 * time.Second))
+
+	request := []byte("handled-direct-request")
+	if _, err := client.Write(request); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(upstream)
+	if err != nil || !bytes.Equal(got, request) {
+		t.Fatalf("target read=%q err=%v", got, err)
+	}
+
+	reply := []byte("handled-direct-reply")
+	if _, err := upstream.Write(reply); err != nil {
+		t.Fatal(err)
+	}
+	if err := upstream.CloseWrite(); err != nil {
+		t.Fatal(err)
+	}
+	got, err = io.ReadAll(client)
+	if err != nil || !bytes.Equal(got, reply) {
+		t.Fatalf("client read=%q err=%v", got, err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	snapshot := registry.Snapshot()
+	if snapshot.Total != 1 || len(snapshot.Connections) != 1 || snapshot.Connections[0].Action != string(ActionDirect) {
+		t.Fatalf("telemetry=%+v", snapshot)
+	}
+}
+
 func TestTCPUsesOneFrozenDecisionAndPreservesHalfClose(t *testing.T) {
 	client, intercepted := tcpPair(t)
 	upstream, target := tcpPair(t)

@@ -10,7 +10,7 @@ import (
 	"relayproxy/internal/traffic"
 )
 
-func TestInboundPassThroughAndDirectTCPTraffic(t *testing.T) {
+func TestInboundPassThroughAndBypassDirectTCP(t *testing.T) {
 	for _, ipv6 := range []bool{false, true} {
 		t.Run(map[bool]string{false: "ipv4", true: "ipv6"}[ipv6], func(t *testing.T) {
 			stats := traffic.NewRegistry(0, 0)
@@ -43,16 +43,17 @@ func TestInboundPassThroughAndDirectTCPTraffic(t *testing.T) {
 			send("hello", true, 0x18)
 			send("welcome", false, 0x18)
 			s := stats.Snapshot()
-			if s.Active != 1 || s.Upload != 5 || s.Download != 7 || s.Connections[0].Accounting != "packet" {
-				t.Fatalf("DIRECT counters: %+v", s)
+			if s.Total != 0 || s.Active != 0 || len(s.Connections) != 0 || s.Upload != 0 || s.Download != 0 {
+				t.Fatalf("bypass DIRECT leaked into telemetry: %+v", s)
 			}
+			key := FlowKey{Protocol: ProtoTCP, Source: original.Source, Destination: original.Destination}
 			send("", true, 0x11)
-			if stats.Snapshot().Active != 1 {
+			if flow := i.tcp[key]; flow == nil || !flow.finished.IsZero() {
 				t.Fatal("TCP half-close finalized early")
 			}
 			send("", false, 0x11)
-			if stats.Snapshot().Active != 0 {
-				t.Fatal("completed TCP still active")
+			if flow := i.tcp[key]; flow == nil || flow.finished.IsZero() {
+				t.Fatal("completed bypass DIRECT TCP was not marked finished")
 			}
 		})
 	}
@@ -76,8 +77,8 @@ func TestInboundUDPAndUnrelatedPacketsPassThrough(t *testing.T) {
 	}
 	expectInterceptedPacket(t, device)
 	s := stats.Snapshot()
-	if s.Upload != 7 || s.Download != 8 || s.Active != 1 {
-		t.Fatalf("UDP direct counters: %+v", s)
+	if s.Total != 0 || s.Active != 0 || len(s.Connections) != 0 || s.Upload != 0 || s.Download != 0 {
+		t.Fatalf("bypass UDP DIRECT leaked into telemetry: %+v", s)
 	}
 	unrelated := interceptedSYN(false)
 	if err := i.handlePacket(unrelated, packetMetadata{}); err != nil {
@@ -92,8 +93,8 @@ func TestInboundUDPAndUnrelatedPacketsPassThrough(t *testing.T) {
 		t.Fatal("normal inbound fragment was altered")
 	}
 	i.server.Close()
-	if stats.Snapshot().Active != 0 {
-		t.Fatal("UDP record outlived server")
+	if stats.Snapshot().Total != 0 {
+		t.Fatal("bypass UDP DIRECT created telemetry during shutdown")
 	}
 }
 
@@ -156,14 +157,17 @@ func TestIdleDirectConnectionRemainsWhileOSOwnsIt(t *testing.T) {
 	now := time.Now()
 	i.tcp[key].lastSeen = now.Add(-3 * time.Minute)
 	i.sweepDirectTCP(now)
-	if stats.Snapshot().Active != 1 {
-		t.Fatal("quiet owned socket expired")
+	if i.tcp[key] == nil {
+		t.Fatal("quiet OS-owned bypass DIRECT socket expired")
 	}
 	i.lookup = func(Protocol, netip.AddrPort, netip.AddrPort) (packetProcess, error) {
 		return packetProcess{pid: 99, path: "different.exe"}, nil
 	}
 	i.sweepDirectTCP(now)
-	if stats.Snapshot().Active != 0 {
-		t.Fatal("reused socket kept stale process telemetry")
+	if i.tcp[key] != nil {
+		t.Fatal("reused socket kept stale bypass DIRECT flow state")
+	}
+	if stats.Snapshot().Total != 0 {
+		t.Fatal("bypass DIRECT flow unexpectedly entered telemetry")
 	}
 }

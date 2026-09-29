@@ -179,6 +179,24 @@ test('native UDP requirement is read-only in the list and edited through the mod
   assert.equal(f.saves[0].routing.rules[0].datagram_required, false);
 });
 
+test('DIRECT handling is configured per rule and shown in the read-only list', async () => {
+  const f = fixture();
+  await f.context.refreshAll();
+  f.context.editRuleRow(0);
+  f.get('routing-rule-action').value = 'DIRECT';
+  f.context.updateRoutingEditorDependencies();
+  assert.equal(f.get('routing-rule-handle-direct').disabled, false);
+  f.get('routing-rule-handle-direct').checked = true;
+  f.context.saveRuleEditor();
+
+  const row = f.get('routing-rules-body').children[0].innerHTML;
+  assert.match(row, /RelayProxy 处理直连/);
+  await f.context.saveRouting();
+  assert.equal(f.saves[0].routing.rules[0].action, 'DIRECT');
+  assert.equal(f.saves[0].routing.rules[0].handle_direct, true);
+  assert.equal(f.saves[0].routing.rules[0].datagram_required, false);
+});
+
 test('validation failure is shown without reporting success or discarding edits', async () => {
   const f = fixture({ rejectSave: true });
   await f.context.refreshAll();

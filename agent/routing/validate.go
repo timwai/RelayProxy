@@ -18,6 +18,12 @@ func ValidateConfig(cfg Config) error {
 		if !validAction(rule.Action) {
 			return fmt.Errorf("routing.rules[%d] (%q): invalid action %q", i, rule.Name, rule.Action)
 		}
+		if rule.HandleDirect && rule.Action != ActionDirect {
+			return fmt.Errorf("routing.rules[%d] (%q): handle_direct is only valid for DIRECT", i, rule.Name)
+		}
+		if rule.HandleDirect && rule.DatagramRequired {
+			return fmt.Errorf("routing.rules[%d] (%q): handle_direct cannot require relay datagrams", i, rule.Name)
+		}
 		if err := validateCompound(rule); err != nil {
 			return fmt.Errorf("routing.rules[%d] (%q): %w", i, rule.Name, err)
 		}

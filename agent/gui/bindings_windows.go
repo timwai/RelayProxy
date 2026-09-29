@@ -146,9 +146,8 @@ func (s *WailsService) GetConfig() (string, error) {
 		Theme:          cfg.GUI.Theme,
 		Version:        Version,
 		Network: map[string]any{
-			"mode":                      cfg.Network.Mode,
-			"exclude_processes":         cfg.Network.ExcludeProcesses,
-			"handle_direct_connections": cfg.HandlesDirectConnections(),
+			"mode":              cfg.Network.Mode,
+			"exclude_processes": cfg.Network.ExcludeProcesses,
 		},
 		NetworkCapabilities: divert.PlatformCapabilities(),
 		Revision:            state.Revision,

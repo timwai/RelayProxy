@@ -89,7 +89,7 @@ func TestExitUpstreamDefaultsAndValidation(t *testing.T) {
 	}
 
 	cfg.Exit.Upstream.Mode = "socks5"
-	cfg.Exit.Upstream.Address = "127.0.0.1:1080"
+	cfg.Exit.Upstream.Address = "127.0.0.1:7890"
 	cfg.Exit.Upstream.Username = "user"
 	cfg.Exit.Upstream.Password = "secret"
 	if err := NormalizeAgentConfig(cfg); err != nil {
@@ -107,6 +107,13 @@ func TestExitUpstreamDefaultsAndValidation(t *testing.T) {
 	badAddress.Exit.Upstream.Address = "proxy.example"
 	if err := NormalizeAgentConfig(&badAddress); err == nil {
 		t.Fatal("upstream without port accepted")
+	}
+
+	selfLoop := *cfg
+	selfLoop.Exit.Upstream.Mode = "socks5"
+	selfLoop.Exit.Upstream.Address = "127.0.0.1:1080"
+	if err := NormalizeAgentConfig(&selfLoop); err == nil {
+		t.Fatal("exit upstream accepted RelayProxy's own SOCKS5 listener")
 	}
 }
 

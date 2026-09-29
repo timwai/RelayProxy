@@ -246,6 +246,24 @@ func TestEngine_Rules(t *testing.T) {
 	}
 }
 
+func TestEngineCarriesHandledDirectDecision(t *testing.T) {
+	engine, err := NewEngine(Config{
+		Mode:          ModeRule,
+		DefaultAction: ActionReject,
+		Rules: []Rule{{
+			Name: "handled direct", Enabled: true, Processes: []string{"browser.exe"},
+			Action: ActionDirect, HandleDirect: true,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := engine.DecideFlow(Flow{Process: "browser.exe", Host: "example.com", Port: 443, Protocol: "tcp"})
+	if decision.Action != ActionDirect || !decision.HandleDirect || decision.Rule != "handled direct" {
+		t.Fatalf("decision=%+v", decision)
+	}
+}
+
 func TestEngine_Reload(t *testing.T) {
 	cfg1 := Config{
 		Mode:          "rule",

@@ -337,8 +337,11 @@ func readSOCKS5Address(r io.Reader, atyp byte) (netip.AddrPort, error) {
 			return netip.AddrPort{}, err
 		}
 		ips, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", string(name))
-		if err != nil || len(ips) == 0 {
+		if err != nil {
 			return netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 bound host %q: %w", string(name), err)
+		}
+		if len(ips) == 0 {
+			return netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 bound host %q: no addresses", string(name))
 		}
 		return netip.AddrPortFrom(ips[0].Unmap(), uint16(port[0])<<8|uint16(port[1])), nil
 	default:
@@ -391,8 +394,11 @@ func dialSOCKS5UDP(ctx context.Context, cfg UpstreamConfig, target netip.AddrPor
 		ip, parseErr := netip.ParseAddr(strings.Trim(host, "[]"))
 		if parseErr != nil {
 			ips, lookupErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if lookupErr != nil || len(ips) == 0 {
+			if lookupErr != nil {
 				return nil, fmt.Errorf("resolve SOCKS5 UDP relay host: %w", lookupErr)
+			}
+			if len(ips) == 0 {
+				return nil, errors.New("resolve SOCKS5 UDP relay host: no addresses")
 			}
 			ip = ips[0]
 		}
@@ -487,8 +493,11 @@ func parseSOCKS5UDPAddress(packet []byte, offset int) (int, netip.AddrPort, erro
 		port := uint16(packet[offset])<<8 | uint16(packet[offset+1])
 		offset += 2
 		ips, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", host)
-		if err != nil || len(ips) == 0 {
+		if err != nil {
 			return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: %w", host, err)
+		}
+		if len(ips) == 0 {
+			return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: no addresses", host)
 		}
 		return offset, netip.AddrPortFrom(ips[0].Unmap(), port), nil
 	default:

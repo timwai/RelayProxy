@@ -67,7 +67,7 @@ func (e *Engine) DecideFlow(flow Flow) Decision {
 	}
 	for i, rule := range e.config.Rules {
 		if rule.Enabled && e.compound[i].matches(rule, flow) {
-			return Decision{Action: rule.Action, ExitID: rule.ExitID, DatagramRequired: rule.DatagramRequired, Rule: rule.Name, Matched: true}
+			return Decision{Action: rule.Action, ExitID: rule.ExitID, DatagramRequired: rule.DatagramRequired, HandleDirect: rule.HandleDirect, Rule: rule.Name, Matched: true}
 		}
 	}
 	return Decision{Action: e.config.DefaultAction, Rule: "default"}

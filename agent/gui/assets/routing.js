@@ -265,7 +265,7 @@ async function saveRouting() {
       rules: routingRules
     },
     network: {
-      excludeProcesses: splitRuleList($('cfg-network-excludes').value)
+      handleDirectConnections: $('cfg-handle-direct').checked,\n      excludeProcesses: splitRuleList($('cfg-network-excludes').value)
     }
   }, '组合路由规则已应用，新连接使用新规则');
 }

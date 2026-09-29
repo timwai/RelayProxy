@@ -327,13 +327,13 @@ func (i *darwinInterceptor) handleTCP(conn *net.UnixConn, open darwinOpenFlow) e
 		return err
 	}
 	decision := route.Decision()
-	if err := writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: decision.Action, ExitID: decision.ExitID, Reason: decision.Rule}); err != nil {
+	if err := writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: decision.Action, ExitID: decision.ExitID, Reason: decision.Rule, HandleDirect: decision.HandleDirect}); err != nil {
 		return err
 	}
-	if decision.Action != ActionProxy {
-		return nil
+	if decision.Action == ActionProxy || (decision.Action == ActionDirect && decision.HandleDirect) {
+		return i.server.ForwardTCP(i.ctx, route, conn)
 	}
-	return i.server.ForwardTCP(i.ctx, route, conn)
+	return nil
 }
 
 func (i *darwinInterceptor) handleUDP(conn *net.UnixConn, open darwinOpenFlow) error {
@@ -365,6 +365,12 @@ func (i *darwinInterceptor) handleUDP(conn *net.UnixConn, open darwinOpenFlow) e
 				return err
 			}
 		case ActionDirect:
+			if route.Decision().HandleDirect {
+				if err := i.server.ForwardUDP(i.ctx, route, datagram, respond); err != nil {
+					return err
+				}
+				continue
+			}
 			writeMu.Lock()
 			err = writeDarwinFrame(conn, darwinFrameUDPDirect, payload)
 			writeMu.Unlock()

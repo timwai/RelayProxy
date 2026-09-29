@@ -230,7 +230,7 @@ type ConfigUpdate struct {
 			Username *string `json:"username"`
 			Password *string `json:"password"`
 		} `json:"upstream"`
-		Access              struct {
+		Access struct {
 			Mode    *string   `json:"mode"`    // "" (off) | "allow" | "deny"
 			Domains *[]string `json:"domains"` // glob / .suffix / exact, one per line
 			CIDRs   *[]string `json:"cidrs"`   // CIDR / single IP / range, one per line

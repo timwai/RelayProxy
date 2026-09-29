@@ -255,7 +255,7 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 		decision.ExitID = s.opts.DefaultExitID()
 	}
 	route := &ClassifiedFlow{owner: s, key: key, flow: flow, decision: decision}
-	if !guarded && (decision.Action != ActionDirect || s.engine.Config().HandlesDirectConnections()) {
+	if !guarded && (decision.Action != ActionDirect || s.engine.HandlesDirectConnections()) {
 		exitID := decision.ExitID
 		if decision.Action != ActionProxy {
 			exitID = ""

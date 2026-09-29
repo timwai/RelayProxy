@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"relayproxy/internal/traffic"
+	"strconv"
 	"slices"
 	"strings"
 	"sync"
@@ -255,20 +256,16 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 		decision.ExitID = s.opts.DefaultExitID()
 	}
 	route := &ClassifiedFlow{owner: s, key: key, flow: flow, decision: decision}
-	if !guarded && (decision.Action != ActionDirect || s.engine.HandlesDirectConnections()) {
+	if !guarded && (decision.Action != ActionDirect || decision.HandleDirect) {
 		exitID := decision.ExitID
 		if decision.Action != ActionProxy {
 			exitID = ""
-		}
-		accounting := "stream"
-		if decision.Action == ActionDirect {
-			accounting = "packet"
 		}
 		route.traffic = s.opts.Traffic.Start(traffic.Metadata{ProcessID: flow.ProcessID, Process: flow.Process,
 			ProcessAliases: flow.ProcessAliases, Services: flow.Services,
 			Source: key.Source.String(), Host: flow.Host, DomainSource: flow.DomainSource, IP: flow.IP, Port: flow.Port,
 			Protocol: string(flow.Protocol), Entry: "transparent", Action: string(decision.Action), Rule: decision.Rule,
-			ExitID: exitID, Accounting: accounting})
+			ExitID: exitID, Accounting: "stream"})
 		if decision.Action == ActionReject {
 			route.traffic.Finish("rejected", nil)
 		}
@@ -286,8 +283,9 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	return route, nil
 }
 
-// ForwardTCP consumes a previously classified PROXY flow and owns downstream.
-// It never rematches policy or turns a DIRECT decision into a new intercepted dial.
+// ForwardTCP consumes a previously classified PROXY or handled DIRECT flow and
+// owns downstream. A handled DIRECT flow stays local: RelayProxy opens the
+// target socket itself instead of using the relay tunnel.
 func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstream net.Conn) error {
 	if downstream == nil {
 		return errors.New("divert: TCP connection required")
@@ -296,7 +294,7 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 	if route == nil || route.owner != s || route.key.Protocol != ProtoTCP {
 		return errors.New("divert: invalid TCP classification")
 	}
-	if route.decision.Action != ActionProxy {
+	if route.decision.Action != ActionProxy && !(route.decision.Action == ActionDirect && route.decision.HandleDirect) {
 		return ErrNotProxyFlow
 	}
 	if !route.used.CompareAndSwap(false, true) {
@@ -328,7 +326,13 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 	defer stop()
 	defer cancel()
 	dialCtx, dialCancel := context.WithTimeout(flowCtx, s.opts.DialTimeout)
-	upstream, err := s.dialer.DialTCP(dialCtx, route.decision.ExitID, route.flow.IP, route.flow.Port)
+	var upstream net.Conn
+	var err error
+	if route.decision.Action == ActionDirect {
+		upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(route.flow.IP, strconv.Itoa(int(route.flow.Port))))
+	} else {
+		upstream, err = s.dialer.DialTCP(dialCtx, route.decision.ExitID, route.flow.IP, route.flow.Port)
+	}
 	dialCancel()
 	if err != nil {
 		route.traffic.Finish("failed", err)

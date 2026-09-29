@@ -1583,6 +1583,11 @@
       $('cfg-exit-internet').checked = !!cfg.allowInternet;
       $('cfg-exit-private').checked = !!cfg.allowPrivateNetwork;
       $('cfg-exit-loopback').checked = !!cfg.allowLoopback;
+      var exitUpstream = cfg.exitUpstream || {};
+      $('cfg-exit-upstream-mode').value = exitUpstream.mode || 'direct';
+      $('cfg-exit-upstream-address').value = exitUpstream.address || '';
+      $('cfg-exit-upstream-username').value = exitUpstream.username || '';
+      $('cfg-exit-upstream-password').value = exitUpstream.password || '';
       $('cfg-acl-mode').value = cfg.accessMode || '';
       $('cfg-acl-domains').value = (cfg.accessDomains || []).join('\n');
       $('cfg-acl-cidrs').value = (cfg.accessCidrs || []).join('\n');
@@ -1691,7 +1696,10 @@
       case 'proxy':
         return { proxy: { socks5Enabled: $('cfg-socks-on').checked, socks5Listen: hostValue('cfg-socks-listen','SOCKS5 地址'), socks5Port: portValue('cfg-socks-port','SOCKS5 端口'), httpEnabled: $('cfg-http-on').checked, httpListen: hostValue('cfg-http-listen','HTTP 地址'), httpPort: portValue('cfg-http-port','HTTP 端口') }, network: { mode: $('cfg-tun-on').checked ? 'divert' : '' } };
       case 'share':
-        return { exit: { enabled: $('cfg-exit-on').checked, allowInternet: $('cfg-exit-internet').checked, allowPrivateNetwork: $('cfg-exit-private').checked, allowLoopback: $('cfg-exit-loopback').checked, access: { mode: $('cfg-acl-mode').value, domains: splitLines($('cfg-acl-domains').value), cidrs: splitLines($('cfg-acl-cidrs').value) } } };
+        var upstreamMode = $('cfg-exit-upstream-mode').value || 'direct';
+        var upstreamAddress = $('cfg-exit-upstream-address').value.trim();
+        if (upstreamMode !== 'direct' && !upstreamAddress) fieldError('cfg-exit-upstream-address', '代理出口必须填写上游代理地址 host:port');
+        return { exit: { enabled: $('cfg-exit-on').checked, allowInternet: $('cfg-exit-internet').checked, allowPrivateNetwork: $('cfg-exit-private').checked, allowLoopback: $('cfg-exit-loopback').checked, upstream: { mode: upstreamMode, address: upstreamAddress, username: $('cfg-exit-upstream-username').value.trim(), password: $('cfg-exit-upstream-password').value }, access: { mode: $('cfg-acl-mode').value, domains: splitLines($('cfg-acl-domains').value), cidrs: splitLines($('cfg-acl-cidrs').value) } } };
       case 'routing':
         return { routing: { mode: $('cfg-routing-mode').value, default_action: $('cfg-routing-default').value, rules: routingRules } };
       case 'network':

@@ -52,7 +52,7 @@ func (s *Server) ForwardUDP(ctx context.Context, route *ClassifiedFlow, payload 
 	if route == nil || route.owner != s || route.key.Protocol != ProtoUDP || route.udp == nil {
 		return errors.New("divert: invalid UDP classification")
 	}
-	if route.decision.Action != ActionProxy {
+	if route.decision.Action != ActionProxy && !(route.decision.Action == ActionDirect && route.decision.HandleDirect) {
 		return ErrNotProxyFlow
 	}
 	if len(payload) > maxUDPPayload {
@@ -166,7 +166,18 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 	dialCtx, cancel := context.WithTimeout(a.ctx, s.opts.DialTimeout)
 	var pc net.PacketConn
 	var err error
-	if a.route.decision.DatagramRequired {
+	if a.route.decision.Action == ActionDirect {
+		var conn net.Conn
+		conn, err = (&net.Dialer{}).DialContext(dialCtx, "udp", net.JoinHostPort(a.route.flow.IP, fmt.Sprint(a.route.flow.Port)))
+		if err == nil {
+			var ok bool
+			pc, ok = conn.(*net.UDPConn)
+			if !ok {
+				_ = conn.Close()
+				err = errors.New("divert: direct UDP dial did not return UDPConn")
+			}
+		}
+	} else if a.route.decision.DatagramRequired {
 		if dialer, ok := s.dialer.(proxy.UDPOptionsDialer); ok {
 			pc, err = dialer.DialUDPWithOptions(dialCtx, a.route.decision.ExitID, a.route.flow.IP, a.route.flow.Port, proxy.UDPDialOptions{DatagramRequired: true})
 		} else {

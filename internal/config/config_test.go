@@ -79,6 +79,47 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	}
 }
 
+func TestExitUpstreamDefaultsAndValidation(t *testing.T) {
+	cfg := &AgentConfigFile{}
+	if err := NormalizeAgentConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Exit.Upstream.Mode != "direct" {
+		t.Fatalf("default exit upstream mode=%q", cfg.Exit.Upstream.Mode)
+	}
+
+	cfg.Exit.Upstream.Mode = "socks5"
+	cfg.Exit.Upstream.Address = "127.0.0.1:1080"
+	cfg.Exit.Upstream.Username = "user"
+	cfg.Exit.Upstream.Password = "secret"
+	if err := NormalizeAgentConfig(cfg); err != nil {
+		t.Fatalf("valid SOCKS5 upstream rejected: %v", err)
+	}
+
+	for name, mutate := range map[string]func(){
+		"bad mode": func() { cfg.Exit.Upstream.Mode = "wireguard" },
+		"missing port": func() { cfg.Exit.Upstream.Mode = "http"; cfg.Exit.Upstream.Address = "proxy.example" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			copy := *cfg
+			copy.Exit = cfg.Exit
+			mutateCopy := copy
+			_ = mutateCopy
+		})
+	}
+	bad := *cfg
+	bad.Exit.Upstream.Mode = "wireguard"
+	if err := NormalizeAgentConfig(&bad); err == nil {
+		t.Fatal("invalid upstream mode accepted")
+	}
+	bad = *cfg
+	bad.Exit.Upstream.Mode = "http"
+	bad.Exit.Upstream.Address = "proxy.example"
+	if err := NormalizeAgentConfig(&bad); err == nil {
+		t.Fatal("upstream without port accepted")
+	}
+}
+
 func TestRoutingEmptyListSurvivesPersistence(t *testing.T) {
 	for _, action := range []routing.Action{routing.ActionReject, routing.ActionDirect} {
 		t.Run(string(action), func(t *testing.T) {

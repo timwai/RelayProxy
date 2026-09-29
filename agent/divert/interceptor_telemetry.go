@@ -34,18 +34,24 @@ func (i *packetInterceptor) inboundPacket(data []byte, meta packetMetadata) erro
 		i.mu.Lock()
 		flow := i.tcp[key]
 		i.mu.Unlock()
-		if flow != nil && flow.route.Decision().Action == ActionDirect {
-			i.trackDirectTCP(flow, p, false)
+		if flow != nil {
+			decision := flow.route.Decision()
+			if decision.Action == ActionDirect && !decision.HandleDirect {
+				i.trackDirectTCP(flow, p, false)
+			}
 		}
 		return nil
 	}
 	i.dns.response(p.Source, p.Destination, p.Payload)
 	i.server.mu.Lock()
 	association := i.server.udp[key]
-	if association != nil && association.route.Decision().Action == ActionDirect {
-		association.touch(time.Now())
-		association.route.traffic.Activate()
-		association.route.traffic.AddDownload(len(p.Payload))
+	if association != nil {
+		decision := association.route.Decision()
+		if decision.Action == ActionDirect && !decision.HandleDirect {
+			association.touch(time.Now())
+			association.route.traffic.Activate()
+			association.route.traffic.AddDownload(len(p.Payload))
+		}
 	}
 	i.server.mu.Unlock()
 	return nil
@@ -90,7 +96,8 @@ func (i *packetInterceptor) sweepDirectTCP(now time.Time) {
 	var candidates []candidate
 	i.mu.Lock()
 	for key, flow := range i.tcp {
-		if flow.route.Decision().Action == ActionDirect && flow.finished.IsZero() && now.Sub(flow.lastSeen) > 2*time.Minute {
+		decision := flow.route.Decision()
+		if decision.Action == ActionDirect && !decision.HandleDirect && flow.finished.IsZero() && now.Sub(flow.lastSeen) > 2*time.Minute {
 			candidates = append(candidates, candidate{key, flow, flow.lastSeen})
 		}
 	}

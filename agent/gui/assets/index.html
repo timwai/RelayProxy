@@ -910,7 +910,7 @@
           <p class="config-help">请求需同时满足这里的本地权限与服务端访问规则。</p>
           <div class="config-grid">
             <div class="config-field"><label for="cfg-exit-upstream-mode">出口网络</label><select id="cfg-exit-upstream-mode" onchange="updateFieldDependencies()"><option value="direct">本机直连</option><option value="socks5">SOCKS5 代理</option><option value="http">HTTP CONNECT 代理</option><option value="https">HTTPS CONNECT 代理</option></select><small>指定远程设备经本机 Exit 后如何继续访问目标。</small></div>
-            <div class="config-field"><label for="cfg-exit-upstream-address">上游代理地址</label><input id="cfg-exit-upstream-address" class="mono" type="text" autocomplete="off" placeholder="127.0.0.1:1080"><small>代理模式填写 host:port；本机直连时忽略。</small></div>
+            <div class="config-field"><label for="cfg-exit-upstream-address">上游代理地址</label><input id="cfg-exit-upstream-address" class="mono" type="text" autocomplete="off" placeholder="proxy.example.com:1080"><small>代理模式填写 host:port；本机直连时忽略。</small></div>
             <div class="config-field"><label for="cfg-exit-upstream-username">代理用户名</label><input id="cfg-exit-upstream-username" type="text" autocomplete="off" placeholder="可选"><small>SOCKS5 用户名密码或 HTTP Basic 认证。</small></div>
             <div class="config-field"><label for="cfg-exit-upstream-password">代理密码</label><input id="cfg-exit-upstream-password" type="password" autocomplete="new-password" placeholder="可选"><small>仅保存在本机配置文件中。</small></div>
           </div>

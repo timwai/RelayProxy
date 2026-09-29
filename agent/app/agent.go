@@ -1350,10 +1350,6 @@ func cloneAgentConfig(cfg AgentConfig) AgentConfig {
 	cfg.SOCKS5Enabled, cfg.HTTPEnabled, cfg.ExitEnabled, cfg.RDPEnabled = cloneBool(cfg.SOCKS5Enabled), cloneBool(cfg.HTTPEnabled), cloneBool(cfg.ExitEnabled), cloneBool(cfg.RDPEnabled)
 	cfg.AccessDomains, cfg.AccessCIDRs = slices.Clone(cfg.AccessDomains), slices.Clone(cfg.AccessCIDRs)
 	cfg.Routing = routing.CloneConfig(cfg.Routing)
-	if cfg.DivertConfig.HandleDirectConnections != nil {
-		value := *cfg.DivertConfig.HandleDirectConnections
-		cfg.DivertConfig.HandleDirectConnections = &value
-	}
 	cfg.DivertConfig.ExcludeProcesses = slices.Clone(cfg.DivertConfig.ExcludeProcesses)
 	cfg.DivertConfig.Rules = slices.Clone(cfg.DivertConfig.Rules)
 	for i := range cfg.DivertConfig.Rules {

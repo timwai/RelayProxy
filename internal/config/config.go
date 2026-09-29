@@ -104,6 +104,12 @@ type AgentConfigFile struct {
 		AllowInternet       bool  `yaml:"allow_internet"`
 		AllowPrivateNetwork bool  `yaml:"allow_private_network"`
 		AllowLoopback       bool  `yaml:"allow_loopback"`
+		Upstream            struct {
+			Mode     string `yaml:"mode"` // direct | socks5 | http | https
+			Address  string `yaml:"address"`
+			Username string `yaml:"username,omitempty"`
+			Password string `yaml:"password,omitempty"`
+		} `yaml:"upstream"`
 		Access              struct {
 			// Mode is "" (no gate), "allow" (whitelist) or "deny" (blacklist).
 			Mode    string   `yaml:"mode"`
@@ -360,6 +366,9 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	}
 	if cfg.Network.ExcludeProcesses == nil {
 		cfg.Network.ExcludeProcesses = []string{"relayproxy", "relayproxy.exe", "RelayProxy.exe"}
+	}
+	if cfg.Exit.Upstream.Mode == "" {
+		cfg.Exit.Upstream.Mode = "direct"
 	}
 	if cfg.Exit.Access.Domains == nil {
 		cfg.Exit.Access.Domains = []string{}

@@ -278,6 +278,45 @@ func connectedUDPDialer(calls *atomic.Int32) *testDialer {
 	}}
 }
 
+func TestHandledDirectUDPUsesLocalSocket(t *testing.T) {
+	target, _ := udpReplyServer(t, 1)
+	registry := traffic.NewRegistry(0, 0)
+	server := newTestServer(t, Options{
+		Traffic: registry,
+		Config: Config{DefaultAction: ActionReject, Rules: []Rule{{
+			Name: "handled", Enabled: true, Process: "browser.exe", Action: ActionDirect, HandleDirect: true,
+		}}},
+	})
+	route, err := server.ClassifyFlow(testFlow(ProtoUDP, target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !route.Decision().HandleDirect {
+		t.Fatalf("decision=%+v", route.Decision())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	replies := make(chan string, 1)
+	if err := server.ForwardUDP(ctx, route, []byte("hello"), func(_ context.Context, _ FlowKey, payload []byte) error {
+		replies <- string(payload)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case reply := <-replies:
+		if reply != "hello/0" {
+			t.Fatalf("reply=%q", reply)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for handled DIRECT UDP reply")
+	}
+	snapshot := registry.Snapshot()
+	if snapshot.Total != 1 || len(snapshot.Connections) != 1 || snapshot.Connections[0].Action != string(ActionDirect) {
+		t.Fatalf("telemetry=%+v", snapshot)
+	}
+}
+
 func TestUDPReusesAssociationAndForwardsAllReplies(t *testing.T) {
 	target, observations := udpReplyServer(t, 2)
 	var calls atomic.Int32

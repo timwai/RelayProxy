@@ -228,6 +228,11 @@ private final class TCPFlowHandler {
                 if let error { self?.close(error); return }
                 self?.pumpApplicationToIPC(); self?.pumpIPCToApplication()
             }
+        case "DIRECT" where decision.handle_direct == true:
+            flow.open(withLocalEndpoint: nil) { [weak self] error in
+                if let error { self?.close(error); return }
+                self?.pumpApplicationToIPC(); self?.pumpIPCToApplication()
+            }
         case "DIRECT":
             ipc?.cancel(); ipc = nil
             let upstream = NWConnection(to: destination, using: .tcp)

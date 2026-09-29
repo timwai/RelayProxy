@@ -25,6 +25,7 @@ type Rule struct {
 	Action           Action   `yaml:"action"  json:"action"`                      // What to do on match
 	ExitID           string   `yaml:"exit_id,omitempty" json:"exit_id,omitempty"` // Optional: specific exit node (PROXY only)
 	DatagramRequired bool     `yaml:"datagram_required,omitempty" json:"datagram_required,omitempty"`
+	HandleDirect     bool     `yaml:"handle_direct,omitempty" json:"handle_direct,omitempty"` // DIRECT only: RelayProxy owns the local egress connection
 	Processes        []string `yaml:"processes,omitempty" json:"processes,omitempty"`
 	Targets          []string `yaml:"targets,omitempty" json:"targets,omitempty"` // domain/IP glob, exact IP or CIDR
 	Ports            []string `yaml:"ports,omitempty" json:"ports,omitempty"`
@@ -46,6 +47,7 @@ type Decision struct {
 	Action           Action
 	ExitID           string
 	DatagramRequired bool
+	HandleDirect     bool
 	Rule             string
 	Matched          bool
 }

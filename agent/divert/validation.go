@@ -17,6 +17,10 @@ func ValidateConfig(cfg Config) error {
 }
 
 func cloneConfig(cfg Config) Config {
+	if cfg.HandleDirectConnections != nil {
+		value := *cfg.HandleDirectConnections
+		cfg.HandleDirectConnections = &value
+	}
 	cfg.ExcludeProcesses = slices.Clone(cfg.ExcludeProcesses)
 	cfg.Rules = slices.Clone(cfg.Rules)
 	for i := range cfg.Rules {

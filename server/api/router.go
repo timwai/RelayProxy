@@ -330,26 +330,37 @@ func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	type deliveryResult struct {
+		index       int
+		status      string
+		error       string
+		deliveredAt *time.Time
+	}
+	results := make(chan deliveryResult, len(message.Deliveries))
 	for i := range message.Deliveries {
-		delivery := &message.Deliveries[i]
-		sess, online := r.sessions.Get(delivery.DeviceID)
-		if !online {
-			delivery.Status = "offline"
-			delivery.Error = "device is offline"
-			_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, delivery.Status, delivery.Error, nil)
-			continue
-		}
-		if err := r.pushMessage(sess, message); err != nil {
-			delivery.Status = "failed"
-			delivery.Error = err.Error()
-			_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, delivery.Status, delivery.Error, nil)
-			continue
-		}
-		now := time.Now().UTC()
-		delivery.Status = "delivered"
-		delivery.Error = ""
-		delivery.DeliveredAt = &now
-		_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, delivery.Status, "", &now)
+		i := i
+		go func() {
+			delivery := message.Deliveries[i]
+			sess, online := r.sessions.Get(delivery.DeviceID)
+			if !online {
+				results <- deliveryResult{index: i, status: "offline", error: "device is offline"}
+				return
+			}
+			if err := r.pushMessage(sess, message); err != nil {
+				results <- deliveryResult{index: i, status: "failed", error: err.Error()}
+				return
+			}
+			now := time.Now().UTC()
+			results <- deliveryResult{index: i, status: "delivered", deliveredAt: &now}
+		}()
+	}
+	for range message.Deliveries {
+		result := <-results
+		delivery := &message.Deliveries[result.index]
+		delivery.Status = result.status
+		delivery.Error = result.error
+		delivery.DeliveredAt = result.deliveredAt
+		_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, result.status, result.error, result.deliveredAt)
 	}
 	writeJSON(w, http.StatusOK, message)
 }

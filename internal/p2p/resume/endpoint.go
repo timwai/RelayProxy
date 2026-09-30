@@ -244,6 +244,22 @@ func (e *Endpoint) CloseWrite() error {
 	return e.sendBuffered(frame)
 }
 
+func (e *Endpoint) Abort(err error) {
+	if e == nil {
+		return
+	}
+	e.fail(err)
+}
+
+func (e *Endpoint) Closed() bool {
+	if e == nil {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.closed
+}
+
 func (e *Endpoint) Close() error {
 	if e == nil {
 		return nil

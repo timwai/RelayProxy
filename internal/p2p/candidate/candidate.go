@@ -24,8 +24,8 @@ const (
 )
 
 var (
-	ErrInvalidCandidate = errors.New("invalid RDP network candidate")
-	ErrProbeUnavailable = errors.New("RDP reflexive candidate probe unavailable")
+	ErrInvalidCandidate = errors.New("invalid P2P network candidate")
+	ErrProbeUnavailable = errors.New("P2P reflexive candidate probe unavailable")
 )
 
 // Validate normalizes and de-duplicates candidates.  Hostnames, unspecified,
@@ -34,7 +34,7 @@ var (
 // addresses.
 func Validate(input []protocol.P2PCandidate) ([]protocol.P2PCandidate, error) {
 	if len(input) > MaxCandidates {
-		return nil, fmt.Errorf("at most %d RDP candidates are allowed", MaxCandidates)
+		return nil, fmt.Errorf("at most %d P2P candidates are allowed", MaxCandidates)
 	}
 	seen := make(map[string]struct{}, len(input))
 	result := make([]protocol.P2PCandidate, 0, len(input))
@@ -46,7 +46,7 @@ func Validate(input []protocol.P2PCandidate) ([]protocol.P2PCandidate, error) {
 			return nil, fmt.Errorf("%w: unsupported candidate type %q", ErrInvalidCandidate, item.Type)
 		}
 		addr, err := netip.ParseAddrPort(item.Address)
-		if err != nil || addr.Port() == 0 || addr.Addr().IsUnspecified() || addr.Addr().IsMulticast() || addr.Addr().IsLinkLocalUnicast() {
+		if err != nil || addr.Port() == 0 || addr.Addr().IsUnspecified() || addr.Addr().IsLoopback() || addr.Addr().IsMulticast() || addr.Addr().IsLinkLocalUnicast() {
 			return nil, fmt.Errorf("%w: address %q", ErrInvalidCandidate, item.Address)
 		}
 		addr = netip.AddrPortFrom(addr.Addr().Unmap(), addr.Port())

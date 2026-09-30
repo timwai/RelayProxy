@@ -17,6 +17,7 @@ func TestValidateCandidates(t *testing.T) {
 	for _, invalid := range []protocol.RDPCandidate{
 		{Protocol: "tcp", Type: "lan", Address: "example.com:3389"},
 		{Protocol: "udp", Type: "lan", Address: "0.0.0.0:3389"},
+		{Protocol: "udp", Type: "reflexive", Address: "127.0.0.1:3389"},
 		{Protocol: "tcp", Type: "lan", Address: "192.0.2.10:0"},
 	} {
 		if _, err := Validate([]protocol.RDPCandidate{invalid}); err == nil {

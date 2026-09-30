@@ -164,7 +164,6 @@ func TestResumeRegistryCapacityAndDuplicateProtection(t *testing.T) {
 	}
 }
 
-
 func TestLogicalResumeTargetSurvivesTransportRebind(t *testing.T) {
 	registry := newResumeRegistry(80*time.Millisecond, 4)
 	targetExit, targetPeer := net.Pipe()

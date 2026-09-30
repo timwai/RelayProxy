@@ -1084,6 +1084,13 @@ func currentWindowsUserSID() (string, error) {
 }
 
 func installWindowsNetworkService(allowedSID string) error {
+	// A previous uninstall may have scheduled locked versioned files for deletion
+	// at reboot. Cancel RelayProxy-owned pending deletes before publishing a new
+	// service so a repair/install performed immediately after uninstall remains
+	// durable across the next reboot.
+	if err := clearWindowsRelayProxyPendingDeletes(); err != nil {
+		return fmt.Errorf("清理 Network Service 待删除记录失败: %w", err)
+	}
 	executable, err := stageWindowsNetworkServiceExecutable()
 	if err != nil {
 		return err
@@ -1108,45 +1115,9 @@ func installWindowsNetworkService(allowedSID string) error {
 	}
 	defer manager.Disconnect()
 
-	service, err := manager.OpenService(windowsNetworkServiceName)
-	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		service, err = manager.CreateService(
-			windowsNetworkServiceName,
-			executable,
-			mgr.Config{
-				DisplayName: windowsNetworkServiceDisplayName,
-				Description: "Privileged WinDivert packet broker for RelayProxy transparent proxy",
-				StartType:   mgr.StartAutomatic,
-			},
-			"--"+networkServiceModeFlagName,
-			"--"+networkServiceSIDFlagName+"="+allowedSID,
-		)
-		if err != nil {
-			return fmt.Errorf("安装 RelayProxy Network Service 失败: %w", err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("打开 RelayProxy Network Service 失败: %w", err)
-	} else {
-		current, configErr := service.Config()
-		if configErr != nil {
-			service.Close()
-			return configErr
-		}
-		if current.BinaryPathName != binaryPath || current.StartType != mgr.StartAutomatic {
-			status, _ := service.Query()
-			if status.State != svc.Stopped {
-				_, _ = service.Control(svc.Stop)
-				_ = waitWindowsServiceState(service, svc.Stopped, 10*time.Second)
-			}
-			current.BinaryPathName = binaryPath
-			current.StartType = mgr.StartAutomatic
-			current.DisplayName = windowsNetworkServiceDisplayName
-			current.Description = "Privileged WinDivert packet broker for RelayProxy transparent proxy"
-			if err := service.UpdateConfig(current); err != nil {
-				service.Close()
-				return fmt.Errorf("更新 RelayProxy Network Service 失败: %w", err)
-			}
-		}
+	service, err := openOrCreateWindowsNetworkService(manager, executable, binaryPath, allowedSID)
+	if err != nil {
+		return err
 	}
 	defer service.Close()
 
@@ -1175,6 +1146,182 @@ func installWindowsNetworkService(allowedSID string) error {
 		return err
 	}
 	return nil
+}
+
+func openOrCreateWindowsNetworkService(manager *mgr.Mgr, executable, binaryPath, allowedSID string) (*mgr.Service, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		service, err := manager.OpenService(windowsNetworkServiceName)
+		if errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			if waitErr := waitWindowsServiceDeleted(manager, 20*time.Second); waitErr != nil {
+				return nil, fmt.Errorf("等待旧 RelayProxy Network Service 删除完成失败: %w", waitErr)
+			}
+			continue
+		}
+		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			service, err = manager.CreateService(
+				windowsNetworkServiceName,
+				executable,
+				mgr.Config{
+					DisplayName: windowsNetworkServiceDisplayName,
+					Description: "Privileged WinDivert packet broker for RelayProxy transparent proxy",
+					StartType:   mgr.StartAutomatic,
+				},
+				"--"+networkServiceModeFlagName,
+				"--"+networkServiceSIDFlagName+"="+allowedSID,
+			)
+			if errors.Is(err, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+				if waitErr := waitWindowsServiceDeleted(manager, 20*time.Second); waitErr != nil {
+					return nil, fmt.Errorf("等待旧 RelayProxy Network Service 删除完成失败: %w", waitErr)
+				}
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("安装 RelayProxy Network Service 失败: %w", err)
+			}
+			return service, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("打开 RelayProxy Network Service 失败: %w", err)
+		}
+
+		current, configErr := service.Config()
+		if errors.Is(configErr, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			_ = service.Close()
+			if waitErr := waitWindowsServiceDeleted(manager, 20*time.Second); waitErr != nil {
+				return nil, fmt.Errorf("等待旧 RelayProxy Network Service 删除完成失败: %w", waitErr)
+			}
+			continue
+		}
+		if configErr != nil {
+			_ = service.Close()
+			return nil, fmt.Errorf("读取 RelayProxy Network Service 配置失败: %w", configErr)
+		}
+		if current.BinaryPathName == binaryPath && current.StartType == mgr.StartAutomatic {
+			return service, nil
+		}
+
+		status, queryErr := service.Query()
+		if queryErr != nil {
+			_ = service.Close()
+			return nil, fmt.Errorf("查询 RelayProxy Network Service 状态失败: %w", queryErr)
+		}
+		if status.State != svc.Stopped {
+			if _, controlErr := service.Control(svc.Stop); controlErr != nil &&
+				!errors.Is(controlErr, windows.ERROR_SERVICE_NOT_ACTIVE) {
+				_ = service.Close()
+				return nil, fmt.Errorf("停止旧 RelayProxy Network Service 失败: %w", controlErr)
+			}
+			if waitErr := waitWindowsServiceState(service, svc.Stopped, 20*time.Second); waitErr != nil {
+				_ = service.Close()
+				return nil, fmt.Errorf("等待旧 RelayProxy Network Service 停止失败: %w", waitErr)
+			}
+		}
+
+		current.BinaryPathName = binaryPath
+		current.StartType = mgr.StartAutomatic
+		current.DisplayName = windowsNetworkServiceDisplayName
+		current.Description = "Privileged WinDivert packet broker for RelayProxy transparent proxy"
+		if updateErr := service.UpdateConfig(current); errors.Is(updateErr, windows.ERROR_SERVICE_MARKED_FOR_DELETE) {
+			_ = service.Close()
+			if waitErr := waitWindowsServiceDeleted(manager, 20*time.Second); waitErr != nil {
+				return nil, fmt.Errorf("等待旧 RelayProxy Network Service 删除完成失败: %w", waitErr)
+			}
+			continue
+		} else if updateErr != nil {
+			_ = service.Close()
+			return nil, fmt.Errorf("更新 RelayProxy Network Service 失败: %w", updateErr)
+		}
+		return service, nil
+	}
+	return nil, errors.New("RelayProxy Network Service 处于删除/重建竞争状态，请稍后重试")
+}
+
+func clearWindowsRelayProxyPendingDeletes() error {
+	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil {
+		return err
+	}
+	roots := []string{
+		filepath.Join(programData, "RelayProxy-Network-Service"),
+		filepath.Join(programData, "RelayProxy-WinDivert"),
+	}
+	key, err := registry.OpenKey(
+		registry.LOCAL_MACHINE,
+		`SYSTEM\CurrentControlSet\Control\Session Manager`,
+		registry.QUERY_VALUE|registry.SET_VALUE,
+	)
+	if err != nil {
+		return err
+	}
+	defer key.Close()
+
+	values, _, err := key.GetStringsValue("PendingFileRenameOperations")
+	if errors.Is(err, windows.ERROR_FILE_NOT_FOUND) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	filtered, changed := filterWindowsPendingFileOperations(values, roots)
+	if !changed {
+		return nil
+	}
+	if len(filtered) == 0 {
+		return key.DeleteValue("PendingFileRenameOperations")
+	}
+	return key.SetStringsValue("PendingFileRenameOperations", filtered)
+}
+
+func filterWindowsPendingFileOperations(values, roots []string) ([]string, bool) {
+	normalizedRoots := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if normalized := normalizeWindowsPendingPath(root); normalized != "" {
+			normalizedRoots = append(normalizedRoots, normalized)
+		}
+	}
+	matchesRelayProxy := func(value string) bool {
+		value = normalizeWindowsPendingPath(value)
+		if value == "" {
+			return false
+		}
+		for _, root := range normalizedRoots {
+			if value == root || strings.HasPrefix(value, root+string(filepath.Separator)) {
+				return true
+			}
+		}
+		return false
+	}
+
+	filtered := make([]string, 0, len(values))
+	changed := false
+	for index := 0; index < len(values); {
+		source := values[index]
+		destination := ""
+		if index+1 < len(values) {
+			destination = values[index+1]
+		}
+		if matchesRelayProxy(source) || matchesRelayProxy(destination) {
+			changed = true
+		} else {
+			filtered = append(filtered, source)
+			if index+1 < len(values) {
+				filtered = append(filtered, destination)
+			}
+		}
+		index += 2
+	}
+	return filtered, changed
+}
+
+func normalizeWindowsPendingPath(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimPrefix(value, `\??\`)
+	value = strings.TrimPrefix(value, `\\?\`)
+	value = filepath.Clean(value)
+	if value == "." {
+		return ""
+	}
+	return strings.ToLower(value)
 }
 
 func removeWindowsNetworkService() (NetworkServiceUninstallResult, error) {

@@ -160,7 +160,6 @@ func TestAdminListenerDoesNotServePublicPush(t *testing.T) {
 	}
 }
 
-
 func TestChannelCustomVerificationAndRouting(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()

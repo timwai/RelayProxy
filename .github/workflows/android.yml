@@ -1,5 +1,9 @@
 name: Android Client
 
+concurrency:
+  group: android-client-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
+
 on:
   workflow_dispatch:
   push:

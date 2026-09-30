@@ -197,12 +197,9 @@ func (m *Manager) EnsureClient(exitDeviceID string) {
 		return
 	}
 	m.mu.Lock()
-	if failure, exists := m.cooldowns[exitDeviceID]; exists {
-		if time.Now().Before(failure.until) {
-			m.mu.Unlock()
-			return
-		}
-		delete(m.cooldowns, exitDeviceID)
+	if failure, exists := m.cooldowns[exitDeviceID]; exists && time.Now().Before(failure.until) {
+		m.mu.Unlock()
+		return
 	}
 	if _, exists := m.starting[exitDeviceID]; exists {
 		m.mu.Unlock()
@@ -224,7 +221,9 @@ func (m *Manager) EnsureClient(exitDeviceID string) {
 	go func() {
 		ctx, cancel := context.WithTimeout(m.ctx, 12*time.Second)
 		defer cancel()
-		_, _ = m.StartClient(ctx, exitDeviceID)
+		if _, err := m.StartClient(ctx, exitDeviceID); err != nil {
+			m.recordFailure(exitDeviceID, err.Error())
+		}
 		m.mu.Lock()
 		delete(m.starting, exitDeviceID)
 		m.mu.Unlock()
@@ -812,12 +811,16 @@ func (s *Session) watchDirect(direct *directp2p.QUICSession) {
 	s.direct = nil
 	s.state = StateDegraded
 	s.lastError = "P2P QUIC session closed"
+	clientRole := s.clientRole
 	endpoint := s.endpoint
 	s.endpoint = nil
 	s.mu.Unlock()
 	_ = direct.Close()
 	if endpoint != nil {
 		_ = endpoint.Close()
+	}
+	if clientRole {
+		s.manager.recordFailure(s.ExitDeviceID, "P2P QUIC session closed")
 	}
 	s.reportPath("", "quic_session_closed")
 }
@@ -917,7 +920,6 @@ func validateRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {
 	return &copy, nil
 }
 
-
 func (m *Manager) recordFailure(exitDeviceID, reason string) {
 	if m == nil || exitDeviceID == "" {
 		return
@@ -1012,11 +1014,6 @@ func (m *Manager) reapIdleLoop() {
 				if now.Sub(last) >= m.idleTimeout {
 					delete(m.sessions, id)
 					stale = append(stale, item)
-				}
-			}
-			for exitID, failure := range m.cooldowns {
-				if !now.Before(failure.until) {
-					delete(m.cooldowns, exitID)
 				}
 			}
 			m.mu.Unlock()

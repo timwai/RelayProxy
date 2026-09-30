@@ -441,7 +441,6 @@ p2p:
 	}
 }
 
-
 func TestAgentP2PSettingsValidateAndPersist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	cfg := &AgentConfigFile{}
@@ -466,11 +465,11 @@ func TestAgentP2PSettingsValidateAndPersist(t *testing.T) {
 	}
 
 	for name, mutate := range map[string]func(*AgentConfigFile){
-		"mode": func(c *AgentConfigFile) { c.P2P.Mode = "magic" },
+		"mode":          func(c *AgentConfigFile) { c.P2P.Mode = "magic" },
 		"punch timeout": func(c *AgentConfigFile) { c.P2P.PunchTimeoutMs = 10 },
-		"keepalive": func(c *AgentConfigFile) { c.P2P.KeepaliveSec = 1 },
-		"idle timeout": func(c *AgentConfigFile) { c.P2P.IdleTimeoutSec = 5 },
-		"max sessions": func(c *AgentConfigFile) { c.P2P.MaxExitSessions = 0; c.P2P.Mode = "auto" },
+		"keepalive":     func(c *AgentConfigFile) { c.P2P.KeepaliveSec = 1 },
+		"idle timeout":  func(c *AgentConfigFile) { c.P2P.IdleTimeoutSec = 5 },
+		"max sessions":  func(c *AgentConfigFile) { c.P2P.MaxExitSessions = 0; c.P2P.Mode = "auto" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			bad := *loaded

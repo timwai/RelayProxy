@@ -305,7 +305,6 @@ func TestUDPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	}
 }
 
-
 func TestDirectPathPolicyModes(t *testing.T) {
 	relay := &namedSession{name: "relay"}
 	direct := &namedSession{name: "direct"}

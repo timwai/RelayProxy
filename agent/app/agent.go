@@ -699,9 +699,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		proxyP2PManager = proxyp2p.NewQUICManagerWithOptions(ctx, func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
 			return a.sendP2PControlRequest(controlCtx, sess, message)
 		}, accepted.P2PRendezvousAddress, lease, proxyp2p.QUICManagerOptions{
-			PunchTimeout: cfg.P2PPunchTimeout,
-			KeepAlive: cfg.P2PKeepalive,
-			IdleTimeout: cfg.P2PIdleTimeout,
+			PunchTimeout:    cfg.P2PPunchTimeout,
+			KeepAlive:       cfg.P2PKeepalive,
+			IdleTimeout:     cfg.P2PIdleTimeout,
 			MaxExitSessions: cfg.P2PMaxSessions,
 		})
 		keepManager := false

@@ -195,7 +195,6 @@ func TestPathStatusPrefersReadyAndHidesSensitiveDetails(t *testing.T) {
 	}
 }
 
-
 func TestCooldownSuppressesRepeatedClientAttempts(t *testing.T) {
 	var calls atomic.Int32
 	manager := NewManager(context.Background(), func(context.Context, protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {

@@ -172,7 +172,6 @@ func TestTunnelDialerPrefersReadyDirectPathAndWarmsMissingPath(t *testing.T) {
 	}
 }
 
-
 type scriptedStream struct {
 	read        bytes.Buffer
 	failWriteAt int32
@@ -203,10 +202,10 @@ func (s *scriptedStream) Close() error {
 	return nil
 }
 
-func (s *scriptedStream) CloseWrite() error                  { return nil }
-func (s *scriptedStream) SetDeadline(time.Time) error        { return nil }
-func (s *scriptedStream) SetReadDeadline(time.Time) error    { return nil }
-func (s *scriptedStream) SetWriteDeadline(time.Time) error   { return nil }
+func (s *scriptedStream) CloseWrite() error                { return nil }
+func (s *scriptedStream) SetDeadline(time.Time) error      { return nil }
+func (s *scriptedStream) SetReadDeadline(time.Time) error  { return nil }
+func (s *scriptedStream) SetWriteDeadline(time.Time) error { return nil }
 
 type scriptedSession struct {
 	factory func() tunnel.TunnelStream
@@ -231,10 +230,14 @@ func (s *scriptedSession) AcceptStream(context.Context) (tunnel.TunnelStream, er
 }
 
 func (s *scriptedSession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
-func (s *scriptedSession) RemoteAddr() net.Addr            { return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 2), Port: 443} }
-func (s *scriptedSession) LocalAddr() net.Addr             { return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 40000} }
-func (s *scriptedSession) Close() error                    { return nil }
-func (s *scriptedSession) Done() <-chan struct{}           { return s.done }
+func (s *scriptedSession) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 2), Port: 443}
+}
+func (s *scriptedSession) LocalAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 40000}
+}
+func (s *scriptedSession) Close() error          { return nil }
+func (s *scriptedSession) Done() <-chan struct{} { return s.done }
 
 func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	direct := newScriptedSession(func() tunnel.TunnelStream {

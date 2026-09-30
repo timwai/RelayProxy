@@ -27,6 +27,7 @@ type QUICOptions struct {
 // The embedded RelayProxy session keeps the existing stream/datagram interface.
 type QUICSession struct {
 	*tunnel.QUICSession
+	conn      *quic.Conn
 	transport *quic.Transport
 	closeOnce sync.Once
 	closeErr  error
@@ -64,7 +65,7 @@ func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, ident
 	}
 	session := tunnel.NewQUICSession(qconn)
 	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
-	return &QUICSession{QUICSession: session, transport: transport}, nil
+	return &QUICSession{QUICSession: session, conn: qconn, transport: transport}, nil
 }
 
 func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIdentity, expectedPeerFingerprint string, options ...QUICOptions) (*QUICSession, error) {
@@ -92,7 +93,21 @@ func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIden
 	_ = listener.Close()
 	session := tunnel.NewQUICSession(qconn)
 	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
-	return &QUICSession{QUICSession: session, transport: transport}, nil
+	return &QUICSession{QUICSession: session, conn: qconn, transport: transport}, nil
+}
+
+type QUICStats struct {
+	RTT           time.Duration
+	BytesSent     uint64
+	BytesReceived uint64
+}
+
+func (s *QUICSession) Stats() QUICStats {
+	if s == nil || s.conn == nil {
+		return QUICStats{}
+	}
+	stats := s.conn.ConnectionStats()
+	return QUICStats{RTT: stats.SmoothedRTT, BytesSent: stats.BytesSent, BytesReceived: stats.BytesReceived}
 }
 
 func (s *QUICSession) Close() error {

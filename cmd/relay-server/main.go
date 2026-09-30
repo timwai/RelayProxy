@@ -314,8 +314,10 @@ func main() {
 			out := make([]api.P2PSessionRuntimeStatus, 0, len(snapshots))
 			peer := func(report serverp2p.PeerReport) api.P2PPeerRuntimeReport {
 				return api.P2PPeerRuntimeReport{
-					Path: report.Path, Reason: report.Reason, ActiveStreams: report.ActiveStreams,
-					BytesUp: report.BytesUp, BytesDown: report.BytesDown, UpdatedAt: report.UpdatedAt,
+					Path: report.Path, Reason: report.Reason, RTTMs: report.RTTMs,
+					CandidateSummary: report.CandidateSummary, FallbackCount: report.FallbackCount,
+					ActiveStreams: report.ActiveStreams, BytesUp: report.BytesUp,
+					BytesDown: report.BytesDown, UpdatedAt: report.UpdatedAt,
 				}
 			}
 			for _, item := range snapshots {

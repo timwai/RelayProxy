@@ -27,9 +27,11 @@ const (
 	maxActiveSessions        = 4096
 	maxConnectsPerMinute     = 120
 	connectRateWindow        = time.Minute
-	maxFingerprintLength     = 256
-	maxReportReasonLength    = 512
-	maxReportedActiveStreams = 1000000
+	maxFingerprintLength      = 256
+	maxReportReasonLength     = 512
+	maxCandidateSummaryLength = 256
+	maxReportedRTTMs          = int64(600000)
+	maxReportedActiveStreams  = 1000000
 )
 
 type AuthorizeFunc func(clientDeviceID, exitDeviceID string) (bool, error)
@@ -50,12 +52,15 @@ type Session struct {
 }
 
 type PeerReport struct {
-	Path          string
-	Reason        string
-	ActiveStreams int
-	BytesUp       uint64
-	BytesDown     uint64
-	UpdatedAt     time.Time
+	Path             string
+	Reason           string
+	RTTMs            int64
+	CandidateSummary string
+	FallbackCount    uint64
+	ActiveStreams    int
+	BytesUp          uint64
+	BytesDown        uint64
+	UpdatedAt        time.Time
 }
 
 type SessionSnapshot struct {
@@ -477,6 +482,13 @@ func (c *Coordinator) pathReport(device *session.DeviceSession, message protocol
 	if message.ActiveStreams < 0 || message.ActiveStreams > maxReportedActiveStreams {
 		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P active stream count")
 	}
+	if message.RTTMs < 0 || message.RTTMs > maxReportedRTTMs {
+		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P RTT")
+	}
+	message.CandidateSummary = strings.TrimSpace(message.CandidateSummary)
+	if len(message.CandidateSummary) > maxCandidateSummaryLength || strings.ContainsAny(message.CandidateSummary, "\r\n\t") {
+		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P candidate summary")
+	}
 	reason := strings.TrimSpace(message.Reason)
 	if len(reason) > maxReportReasonLength || strings.ContainsAny(reason, "\r\n\t") {
 		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P path report reason")
@@ -495,8 +507,9 @@ func (c *Coordinator) pathReport(device *session.DeviceSession, message protocol
 		return p2pError("SESSION_TOKEN_INVALID", "P2P session token is invalid")
 	}
 	report := PeerReport{
-		Path: message.Path, Reason: reason, ActiveStreams: message.ActiveStreams,
-		BytesUp: message.BytesUp, BytesDown: message.BytesDown, UpdatedAt: now,
+		Path: message.Path, Reason: reason, RTTMs: message.RTTMs,
+		CandidateSummary: message.CandidateSummary, FallbackCount: message.FallbackCount,
+		ActiveStreams: message.ActiveStreams, BytesUp: message.BytesUp, BytesDown: message.BytesDown, UpdatedAt: now,
 	}
 	if device.DeviceID == item.ClientDeviceID {
 		item.ClientReport = report

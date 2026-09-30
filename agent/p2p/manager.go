@@ -54,6 +54,7 @@ type Manager struct {
 	sessions  map[uint64]*Session
 	starting  map[string]struct{}
 	cooldowns map[string]failureState
+	fallbacks map[string]uint64
 	ready     chan *Session
 	closed    atomic.Bool
 }
@@ -82,6 +83,7 @@ type Session struct {
 	ExpiresAt atomic.Int64
 
 	mu              sync.RWMutex
+	localCandidates []protocol.P2PCandidate
 	peerCandidates  []protocol.P2PCandidate
 	peerFingerprint string
 	relayPolicy     *acl.Policy
@@ -97,25 +99,35 @@ type Session struct {
 }
 
 type Snapshot struct {
-	ID              uint64
-	ClientDeviceID  string
-	ExitDeviceID    string
-	ExpiresAt       int64
-	PeerCandidates  []protocol.P2PCandidate
-	PeerFingerprint string
-	State           State
-	Path            string
-	Error           string
+	ID               uint64
+	ClientDeviceID   string
+	ExitDeviceID     string
+	ExpiresAt        int64
+	PeerCandidates   []protocol.P2PCandidate
+	PeerFingerprint  string
+	State            State
+	Path             string
+	Error            string
+	RTTMs            int64
+	CandidateSummary string
+	FallbackCount    uint64
+	BytesUp          uint64
+	BytesDown        uint64
 }
 
 type PathStatus struct {
-	SessionID      uint64
-	ClientDeviceID string
-	ExitDeviceID   string
-	ExpiresAt      int64
-	State          State
-	Path           string
-	Error          string
+	SessionID       uint64
+	ClientDeviceID  string
+	ExitDeviceID    string
+	ExpiresAt       int64
+	State           State
+	Path            string
+	Error           string
+	RTTMs           int64
+	CandidateSummary string
+	FallbackCount   uint64
+	BytesUp         uint64
+	BytesDown       uint64
 }
 
 // NewManager builds a signaling-only manager. It remains useful in tests and
@@ -132,7 +144,7 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 		ctx: ctx, cancel: cancel, send: send, local: local, lease: lease,
 		punchTimeout: 1200 * time.Millisecond, keepAlive: 10 * time.Second, idleTimeout: 120 * time.Second, maxExitSessions: 4,
 		sessions: make(map[uint64]*Session), starting: make(map[string]struct{}), cooldowns: make(map[string]failureState),
-		ready: make(chan *Session, 1024),
+		fallbacks: make(map[string]uint64), ready: make(chan *Session, 1024),
 	}
 }
 
@@ -280,6 +292,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	}
 	item.mu.Lock()
 	item.clientRole = true
+	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
 	item.lastUsed.Store(time.Now().UnixMilli())
 	item.mu.Unlock()
 	item.setState(StateRendezvous, "")
@@ -351,6 +364,9 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 		}
 		return
 	}
+	item.mu.Lock()
+	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
+	item.mu.Unlock()
 	item.setPeer(message.Candidates, message.PeerFingerprint)
 	policy := message.RelayPolicy
 	if m.endpointFactory != nil {
@@ -475,15 +491,20 @@ func (m *Manager) PathStatus(exitDeviceID string) (PathStatus, bool) {
 			SessionID: snapshot.ID, ClientDeviceID: snapshot.ClientDeviceID,
 			ExitDeviceID: snapshot.ExitDeviceID, ExpiresAt: snapshot.ExpiresAt,
 			State: snapshot.State, Path: snapshot.Path, Error: snapshot.Error,
+			RTTMs: snapshot.RTTMs, CandidateSummary: snapshot.CandidateSummary,
+			FallbackCount: snapshot.FallbackCount, BytesUp: snapshot.BytesUp, BytesDown: snapshot.BytesDown,
 		}
 	}
 	m.mu.Lock()
 	failure, cooling := m.cooldowns[exitDeviceID]
 	m.mu.Unlock()
 	if cooling && time.Now().Before(failure.until) && (bestRank < 0 || bestRank <= pathStateRank(StateDegraded)) {
+		m.mu.Lock()
+		fallbacks := m.fallbacks[exitDeviceID]
+		m.mu.Unlock()
 		return PathStatus{
 			ExitDeviceID: exitDeviceID, State: StateCooldown,
-			Error: failure.reason,
+			Error: failure.reason, FallbackCount: fallbacks,
 		}, true
 	}
 	return best, bestRank >= 0
@@ -578,17 +599,30 @@ func (s *Session) Snapshot() Snapshot {
 	if s == nil {
 		return Snapshot{}
 	}
+	var fallbackCount uint64
+	if s.manager != nil {
+		s.manager.mu.Lock()
+		fallbackCount = s.manager.fallbacks[s.ExitDeviceID]
+		s.manager.mu.Unlock()
+	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	path := ""
-	if s.state == StateReady {
+	var stats directp2p.QUICStats
+	if s.state == StateReady && s.direct != nil {
 		path = protocol.P2PPathDirectQUIC
+		stats = s.direct.Stats()
 	}
-	return Snapshot{
+	local := append([]protocol.P2PCandidate(nil), s.localCandidates...)
+	peer := append([]protocol.P2PCandidate(nil), s.peerCandidates...)
+	out := Snapshot{
 		ID: s.ID, ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
-		ExpiresAt: s.ExpiresAt.Load(), PeerCandidates: append([]protocol.P2PCandidate(nil), s.peerCandidates...),
+		ExpiresAt: s.ExpiresAt.Load(), PeerCandidates: peer,
 		PeerFingerprint: s.peerFingerprint, State: s.state, Path: path, Error: s.lastError,
+		RTTMs: stats.RTT.Milliseconds(), CandidateSummary: summarizeCandidates(local, peer),
+		FallbackCount: fallbackCount, BytesUp: stats.BytesSent, BytesDown: stats.BytesReceived,
 	}
+	s.mu.RUnlock()
+	return out
 }
 
 func (s *Session) State() State {
@@ -831,6 +865,7 @@ func (s *Session) reportPath(path, reason string) {
 	if s == nil || s.manager == nil || s.manager.send == nil {
 		return
 	}
+	snapshot := s.Snapshot()
 	go func() {
 		ctx, cancel := context.WithTimeout(s.manager.ctx, 3*time.Second)
 		defer cancel()
@@ -838,6 +873,8 @@ func (s *Session) reportPath(path, reason string) {
 			Type: protocol.P2PControlPathReport, SessionID: s.ID,
 			ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
 			SessionToken: append([]byte(nil), s.Token...), Path: path, Reason: reason,
+			RTTMs: snapshot.RTTMs, CandidateSummary: snapshot.CandidateSummary,
+			FallbackCount: snapshot.FallbackCount, BytesUp: snapshot.BytesUp, BytesDown: snapshot.BytesDown,
 		})
 	}()
 }
@@ -875,6 +912,9 @@ func (s *Session) renewLoop() {
 			}
 			if response.Type == protocol.P2PControlLeaseAck && response.LeaseExpiresAt > 0 {
 				s.ExpiresAt.Store(response.LeaseExpiresAt)
+			}
+			if s.State() == StateReady {
+				s.reportPath(protocol.P2PPathDirectQUIC, "")
 			}
 		}
 	}
@@ -920,6 +960,44 @@ func validateRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {
 	copy.AccessHosts = append([]string(nil), normalized.AccessHosts...)
 	copy.AccessCIDRs = append([]string(nil), normalized.AccessCIDRs...)
 	return &copy, nil
+}
+
+func (m *Manager) NoteFallback(exitDeviceID string) {
+	if m == nil || exitDeviceID == "" {
+		return
+	}
+	m.mu.Lock()
+	m.fallbacks[exitDeviceID]++
+	items := make([]*Session, 0, len(m.sessions))
+	for _, candidate := range m.sessions {
+		if candidate.ExitDeviceID == exitDeviceID {
+			items = append(items, candidate)
+		}
+	}
+	m.mu.Unlock()
+	for _, item := range items {
+		if item.State() == StateReady {
+			item.reportPath(protocol.P2PPathDirectQUIC, "")
+			return
+		}
+	}
+}
+
+func summarizeCandidates(local, peer []protocol.P2PCandidate) string {
+	count := func(items []protocol.P2PCandidate) (lan, reflexive int) {
+		for _, item := range items {
+			switch item.Type {
+			case "lan":
+				lan++
+			case "reflexive":
+				reflexive++
+			}
+		}
+		return
+	}
+	localLAN, localReflexive := count(local)
+	peerLAN, peerReflexive := count(peer)
+	return fmt.Sprintf("local:lan=%d,reflexive=%d;peer:lan=%d,reflexive=%d", localLAN, localReflexive, peerLAN, peerReflexive)
 }
 
 func (m *Manager) recordFailure(exitDeviceID, reason string) {

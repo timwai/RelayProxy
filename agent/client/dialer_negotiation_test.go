@@ -248,6 +248,12 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	})
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
 	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
+	var fallbacks atomic.Int32
+	dialer.ConfigureDirectMetrics(func(exitID string) {
+		if exitID == "exit" {
+			fallbacks.Add(1)
+		}
+	})
 
 	conn, err := dialer.DialTCP(context.Background(), "exit", "example.com", 443)
 	if err != nil {
@@ -256,6 +262,9 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	_ = conn.Close()
 	if direct.opens.Load() != 1 || relay.opens.Load() != 1 {
 		t.Fatalf("unexpected attempts direct=%d relay=%d", direct.opens.Load(), relay.opens.Load())
+	}
+	if fallbacks.Load() != 1 {
+		t.Fatalf("fallback metric=%d, want 1", fallbacks.Load())
 	}
 }
 
@@ -342,6 +351,8 @@ func TestDirectFallbackCanBeDisabled(t *testing.T) {
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
 	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
 	dialer.ConfigureDirectPolicy("auto", false)
+	var fallbacks atomic.Int32
+	dialer.ConfigureDirectMetrics(func(string) { fallbacks.Add(1) })
 
 	conn, err := dialer.DialTCP(context.Background(), "exit", "example.com", 443)
 	if conn != nil {
@@ -353,5 +364,8 @@ func TestDirectFallbackCanBeDisabled(t *testing.T) {
 	}
 	if relay.opens.Load() != 0 {
 		t.Fatalf("disabled fallback opened Relay %d time(s)", relay.opens.Load())
+	}
+	if fallbacks.Load() != 0 {
+		t.Fatalf("disabled fallback metric=%d, want 0", fallbacks.Load())
 	}
 }

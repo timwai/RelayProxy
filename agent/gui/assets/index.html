@@ -1217,6 +1217,11 @@
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
+    function formatBytes(value) {
+      var n = Math.max(0, Number(value) || 0), units = ['B','KiB','MiB','GiB','TiB'], i = 0;
+      while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+      return (i ? n.toFixed(1) : String(Math.round(n))) + ' ' + units[i];
+    }
     window.$ = $;
     function hasFn(name) { return typeof window[name] === 'function'; }
     function networkReady(caps) {
@@ -1569,7 +1574,12 @@
       else if (p2pState === 'PUNCHING' || p2pState === 'RENDEZVOUS' || p2pState === 'QUIC_HANDSHAKE') p2pDetail = '后台建立直连中；应用连接不会等待。';
       else if (!up) p2pDetail = 'Relay 未连接，P2P 控制面不可用。';
       else p2pDetail = st.selectedExit ? '等待直连就绪，当前使用 Relay。' : '选择 Exit 后可在后台预热 P2P。';
-      $('home-p2p-detail').textContent = p2pDetail;
+      var p2pMetrics = [];
+      if (st.p2pRttMs > 0) p2pMetrics.push('RTT ' + st.p2pRttMs + ' ms');
+      if ((st.p2pBytesUp || 0) > 0 || (st.p2pBytesDown || 0) > 0) p2pMetrics.push('↑ ' + formatBytes(st.p2pBytesUp || 0) + ' ↓ ' + formatBytes(st.p2pBytesDown || 0));
+      if ((st.p2pFallbackCount || 0) > 0) p2pMetrics.push('fallback ' + st.p2pFallbackCount + ' 次');
+      if (st.p2pCandidateSummary) p2pMetrics.push(st.p2pCandidateSummary);
+      $('home-p2p-detail').textContent = p2pDetail + (p2pMetrics.length ? ' · ' + p2pMetrics.join(' · ') : '');
 
       var devId = st.deviceId || '';
       var approval = st.approvalState || (up ? 'approved' : 'connecting');

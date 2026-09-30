@@ -41,6 +41,9 @@ type P2PControlMessage struct {
 	RendezvousAddress string         `json:"rendezvousAddress,omitempty"`
 	LeaseSec          int            `json:"leaseSec,omitempty"`
 	Path              string         `json:"path,omitempty"`
+	RTTMs             int64          `json:"rttMs,omitempty"`
+	CandidateSummary  string         `json:"candidateSummary,omitempty"`
+	FallbackCount     uint64         `json:"fallbackCount,omitempty"`
 	ActiveStreams     int            `json:"activeStreams,omitempty"`
 	BytesUp           uint64         `json:"bytesUp,omitempty"`
 	BytesDown         uint64         `json:"bytesDown,omitempty"`

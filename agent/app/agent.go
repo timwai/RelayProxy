@@ -225,11 +225,16 @@ type AgentStatus struct {
 	RDPUDPReason      string             `json:"rdpUdpReason,omitempty"`
 	RDPPathTCP        string             `json:"rdpPathTcp,omitempty"`
 	RDPPathUDP        string             `json:"rdpPathUdp,omitempty"`
-	P2PState          string             `json:"p2pState,omitempty"`
-	P2PPath           string             `json:"p2pPath,omitempty"`
-	P2PError          string             `json:"p2pError,omitempty"`
-	P2PSessionID      uint64             `json:"p2pSessionId,omitempty"`
-	P2PExitID         string             `json:"p2pExitId,omitempty"`
+	P2PState            string             `json:"p2pState,omitempty"`
+	P2PPath             string             `json:"p2pPath,omitempty"`
+	P2PError            string             `json:"p2pError,omitempty"`
+	P2PSessionID        uint64             `json:"p2pSessionId,omitempty"`
+	P2PExitID           string             `json:"p2pExitId,omitempty"`
+	P2PRTTMs            int64              `json:"p2pRttMs,omitempty"`
+	P2PCandidateSummary string             `json:"p2pCandidateSummary,omitempty"`
+	P2PFallbackCount    uint64             `json:"p2pFallbackCount,omitempty"`
+	P2PBytesUp          uint64             `json:"p2pBytesUp,omitempty"`
+	P2PBytesDown        uint64             `json:"p2pBytesDown,omitempty"`
 }
 
 // ErrRestartRequired means a saved startup setting has not changed the running
@@ -422,6 +427,14 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			}
 		},
 	)
+	a.rawDialer.ConfigureDirectMetrics(func(exitDeviceID string) {
+		a.mu.RLock()
+		manager := a.proxyP2P
+		a.mu.RUnlock()
+		if manager != nil {
+			manager.NoteFallback(exitDeviceID)
+		}
+	})
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
@@ -1182,6 +1195,11 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PError = path.Error
 			st.P2PSessionID = path.SessionID
 			st.P2PExitID = path.ExitDeviceID
+			st.P2PRTTMs = path.RTTMs
+			st.P2PCandidateSummary = path.CandidateSummary
+			st.P2PFallbackCount = path.FallbackCount
+			st.P2PBytesUp = path.BytesUp
+			st.P2PBytesDown = path.BytesDown
 		} else {
 			st.P2PState = "IDLE"
 		}

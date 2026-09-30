@@ -202,7 +202,8 @@ func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
 	}
 	response := coordinator.pathReport(client, protocol.P2PControlMessage{
 		SessionID: ack.SessionID, SessionToken: ack.SessionToken,
-		Path: protocol.P2PPathDirectQUIC, ActiveStreams: 3, BytesUp: 100, BytesDown: 200,
+		Path: protocol.P2PPathDirectQUIC, RTTMs: 18, CandidateSummary: "local:lan=1,reflexive=1;peer:lan=1,reflexive=0",
+		FallbackCount: 2, ActiveStreams: 3, BytesUp: 100, BytesDown: 200,
 	})
 	if response.Type != protocol.P2PControlLeaseAck {
 		t.Fatalf("client path report rejected: %#v", response)
@@ -219,7 +220,9 @@ func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
 	if !ok {
 		t.Fatal("missing P2P session snapshot")
 	}
-	if snapshot.ClientReport.Path != protocol.P2PPathDirectQUIC || snapshot.ClientReport.ActiveStreams != 3 ||
+	if snapshot.ClientReport.Path != protocol.P2PPathDirectQUIC || snapshot.ClientReport.RTTMs != 18 ||
+		snapshot.ClientReport.CandidateSummary != "local:lan=1,reflexive=1;peer:lan=1,reflexive=0" ||
+		snapshot.ClientReport.FallbackCount != 2 || snapshot.ClientReport.ActiveStreams != 3 ||
 		snapshot.ClientReport.BytesUp != 100 || snapshot.ClientReport.BytesDown != 200 || snapshot.ClientReport.UpdatedAt.IsZero() {
 		t.Fatalf("unexpected client report: %#v", snapshot.ClientReport)
 	}
@@ -234,5 +237,19 @@ func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
 	})
 	if rejected.Type != protocol.P2PControlError || rejected.ErrorCode != protocol.ErrCodeInvalidRequest {
 		t.Fatalf("invalid path report accepted: %#v", rejected)
+	}
+	rejected = coordinator.pathReport(client, protocol.P2PControlMessage{
+		SessionID: ack.SessionID, SessionToken: ack.SessionToken,
+		Path: protocol.P2PPathDirectQUIC, RTTMs: 700000,
+	})
+	if rejected.Type != protocol.P2PControlError || rejected.ErrorCode != protocol.ErrCodeInvalidRequest {
+		t.Fatalf("invalid RTT accepted: %#v", rejected)
+	}
+	rejected = coordinator.pathReport(client, protocol.P2PControlMessage{
+		SessionID: ack.SessionID, SessionToken: ack.SessionToken,
+		Path: protocol.P2PPathDirectQUIC, CandidateSummary: "lan=1\n192.0.2.10:1234",
+	})
+	if rejected.Type != protocol.P2PControlError || rejected.ErrorCode != protocol.ErrCodeInvalidRequest {
+		t.Fatalf("invalid candidate summary accepted: %#v", rejected)
 	}
 }

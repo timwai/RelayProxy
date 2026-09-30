@@ -34,6 +34,7 @@ type TunnelDialer struct {
 	ensureDirect   func(exitDeviceID string)
 	directMode     string
 	directFallback bool
+	noteFallback   func(exitDeviceID string)
 }
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
@@ -60,6 +61,21 @@ func (d *TunnelDialer) ConfigureDirectPolicy(mode string, fallback bool) {
 	d.directMu.Lock()
 	d.directMode, d.directFallback = mode, fallback
 	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) ConfigureDirectMetrics(noteFallback func(exitDeviceID string)) {
+	d.directMu.Lock()
+	d.noteFallback = noteFallback
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) recordFallback(exitDeviceID string) {
+	d.directMu.RLock()
+	note := d.noteFallback
+	d.directMu.RUnlock()
+	if note != nil {
+		note(exitDeviceID)
+	}
 }
 
 func (d *TunnelDialer) directFallbackEnabled() bool {
@@ -152,6 +168,7 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	if relay == nil || relay == sess {
 		return nil, err
 	}
+	d.recordFallback(exitNodeID)
 	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port)
 }
 
@@ -243,9 +260,10 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
 	if opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(sess) {
-		if direct && d.getTunnel != nil {
+		if direct && d.getTunnel != nil && d.directFallbackEnabled() {
 			relay := d.getTunnel()
 			if relay != nil && tunnel.PeerSupportsDatagrams(relay) {
+				d.recordFallback(exitNodeID)
 				sess, direct = relay, false
 			}
 		}
@@ -262,6 +280,7 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 	if relay == nil || relay == sess || (opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(relay)) {
 		return nil, err
 	}
+	d.recordFallback(exitNodeID)
 	return d.dialUDPOnSession(ctx, relay, exitNodeID, host, port, opts)
 }
 

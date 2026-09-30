@@ -238,13 +238,19 @@
   function p2pReportHTML(report) {
     report = report || {};
     const names = {p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
+    const parts = [];
+    if (report.rttMs > 0) parts.push('RTT ' + esc(report.rttMs) + ' ms');
+    if ((report.bytesUp || 0) > 0 || (report.bytesDown || 0) > 0) parts.push('↑ ' + bytes(report.bytesUp) + ' ↓ ' + bytes(report.bytesDown));
+    if ((report.fallbackCount || 0) > 0) parts.push('fallback ' + esc(report.fallbackCount));
+    if (report.candidateSummary) parts.push(esc(report.candidateSummary));
+    const detail = parts.length ? '<small>' + parts.join(' · ') + '</small>' : '';
     if (report.path) {
       const label = names[report.path] || report.path;
       return badge(label, report.path === 'p2p_quic' ? 'success' : 'transport') +
-        (report.reason ? '<small>' + esc(report.reason) + '</small>' : '');
+        (report.reason ? '<small>' + esc(report.reason) + '</small>' : '') + detail;
     }
-    if (report.reason) return badge('已降级', 'warning-badge') + '<small>' + esc(report.reason) + '</small>';
-    return '<span class="muted">等待报告</span>';
+    if (report.reason) return badge('已降级', 'warning-badge') + '<small>' + esc(report.reason) + '</small>' + detail;
+    return detail || '<span class="muted">等待报告</span>';
   }
   function renderP2PSessions() {
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? (device.name || id) : id; };

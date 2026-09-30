@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -292,5 +293,22 @@ func TestFailedDirectSessionIsRemovedAndClosedOnServer(t *testing.T) {
 	status, ok := manager.PathStatus("exit")
 	if !ok || status.State != StateCooldown {
 		t.Fatalf("failed client path did not enter cooldown: %#v ok=%v", status, ok)
+	}
+}
+
+
+func TestCandidateSummaryIsCountOnly(t *testing.T) {
+	summary := summarizeCandidates(
+		[]protocol.P2PCandidate{
+			{Protocol: "udp", Type: "lan", Address: "192.0.2.10:1000"},
+			{Protocol: "udp", Type: "reflexive", Address: "198.51.100.10:2000"},
+		},
+		[]protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.20:3000"}},
+	)
+	if summary != "local:lan=1,reflexive=1;peer:lan=1,reflexive=0" {
+		t.Fatalf("unexpected summary %q", summary)
+	}
+	if strings.Contains(summary, "192.0.2.10") || strings.Contains(summary, "198.51.100.10") {
+		t.Fatalf("candidate address leaked into summary: %q", summary)
 	}
 }

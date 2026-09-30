@@ -106,9 +106,9 @@ func TestDeviceOwnershipAcrossManagementAndViews(t *testing.T) {
 	}
 	dashboard := apiRequest(router, ownerCookie, http.MethodGet, "/api/v1/dashboard")
 	var stats struct {
-		OnlineDevices int
-		OnlineExits   int
-		TodayUpload   int64
+		OnlineDevices     int
+		OnlineExits       int
+		TodayUpload       int64
 		TodayDownload     int64
 		ActiveP2PSessions int
 	}

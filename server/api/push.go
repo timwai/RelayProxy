@@ -109,12 +109,12 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 	}
 
 	message := &repository.MessageRecord{
-		ChannelID: channel.ID,
-		Title: title,
-		Content: content,
-		Source: source,
+		ChannelID:        channel.ID,
+		Title:            title,
+		Content:          content,
+		Source:           source,
 		VerificationCode: messageutil.ExtractVerificationCode(content),
-		CreatedAt: time.Now().UTC(),
+		CreatedAt:        time.Now().UTC(),
 	}
 	if err := h.db.CreateMessage(message, targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist message")
@@ -175,20 +175,20 @@ func (h *PublicPushHandler) pushMessage(sess *session.DeviceSession, message *re
 	defer stop()
 	_ = stream.SetDeadline(time.Now().Add(6 * time.Second))
 	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
-		Magic: protocol.MagicHeader,
-		Version: protocol.CurrentVersion,
-		Type: protocol.FrameTypePushMessage,
+		Magic:     protocol.MagicHeader,
+		Version:   protocol.CurrentVersion,
+		Type:      protocol.FrameTypePushMessage,
 		RequestID: message.ID,
 	}); err != nil {
 		return err
 	}
 	wire := protocol.PushMessage{
-		ID: message.ID,
-		Title: message.Title,
-		Content: message.Content,
+		ID:               message.ID,
+		Title:            message.Title,
+		Content:          message.Content,
 		VerificationCode: message.VerificationCode,
-		Source: message.Source,
-		CreatedAt: message.CreatedAt.UnixMilli(),
+		Source:           message.Source,
+		CreatedAt:        message.CreatedAt.UnixMilli(),
 	}
 	if err := protocol.WriteJSON(stream, wire); err != nil {
 		return err

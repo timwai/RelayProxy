@@ -236,18 +236,6 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		return p2pError(protocol.ErrCodeAccessDenied, "client is not authorized for this exit")
 	}
 
-	now := time.Now()
-	c.mu.Lock()
-	if !c.allowConnectLocked(client.DeviceID, now) {
-		c.mu.Unlock()
-		return p2pError(protocol.ErrCodeRateLimited, "too many P2P session requests")
-	}
-	if len(c.active) >= maxActiveSessions || c.sessionCounts[client.DeviceID] >= c.maxPerDevice || c.sessionCounts[exit.DeviceID] >= c.maxPerDevice {
-		c.mu.Unlock()
-		return p2pError(protocol.ErrCodeConnectionLimit, "P2P session capacity reached")
-	}
-	c.mu.Unlock()
-
 	id, err := randomID()
 	if err != nil {
 		return p2pError(protocol.ErrCodeInternalError, "failed to allocate P2P session")
@@ -261,7 +249,16 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		Token: append([]byte(nil), token...), ClientCandidates: append([]protocol.P2PCandidate(nil), validated...),
 		ClientFingerprint: message.CertFingerprint, ExpiresAt: time.Now().Add(c.lease),
 	}
+	now := time.Now()
 	c.mu.Lock()
+	if !c.allowConnectLocked(client.DeviceID, now) {
+		c.mu.Unlock()
+		return p2pError(protocol.ErrCodeRateLimited, "too many P2P session requests")
+	}
+	if len(c.active) >= maxActiveSessions || c.sessionCounts[client.DeviceID] >= c.maxPerDevice || c.sessionCounts[exit.DeviceID] >= c.maxPerDevice {
+		c.mu.Unlock()
+		return p2pError(protocol.ErrCodeConnectionLimit, "P2P session capacity reached")
+	}
 	if _, exists := c.active[id]; exists {
 		c.mu.Unlock()
 		return p2pError(protocol.ErrCodeInternalError, "P2P session id collision")

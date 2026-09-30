@@ -24,7 +24,7 @@ func TestSharedTCPPortServesHTTPAndRelayTunnel(t *testing.T) {
 	}
 	sessions := session.NewManager()
 	gateway := NewGateway(GatewayConfig{
-		TCPAddr: "127.0.0.1:0",
+		TCPAddr:   "127.0.0.1:0",
 		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
 		PublicHTTPHandler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.URL.Path != "/api/v1/push/test" {
@@ -38,8 +38,8 @@ func TestSharedTCPPortServesHTTPAndRelayTunnel(t *testing.T) {
 		ServerInstanceID: "shared-port-test",
 		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{
-				State: "approved",
-				DeviceID: "shared-client",
+				State:                "approved",
+				DeviceID:             "shared-client",
 				ApprovedCapabilities: []string{protocol.CapabilityProxyClient},
 			}, nil
 		},

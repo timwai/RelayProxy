@@ -174,6 +174,8 @@ func main() {
 	})
 	router.SetRDPControlHandler(coordinator.HandleControl)
 
+	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
+
 	// 5. Start Tunnel Gateway (QUIC + TLS; QUIC requires TLS)
 	quicAddr := cfg.Server.QUIC.Listen
 	if !cfg.IsTLSEnabled() {
@@ -182,8 +184,9 @@ func main() {
 	gw := gateway.NewGateway(gateway.GatewayConfig{
 		TCPAddr:          cfg.Server.TLS.Listen,
 		QUICAddr:         quicAddr,
-		TLSConfig:        tunnelTLSConfig(cfg, tlsConfig),
-		ServerInstanceID: serverInstanceID,
+		TLSConfig:         tunnelTLSConfig(cfg, tlsConfig),
+		PublicHTTPHandler: publicPushHandler,
+		ServerInstanceID:  serverInstanceID,
 		AuthorizeDevice: func(fingerprint string, hello protocol.DeviceHello) (gateway.DeviceAuthorization, error) {
 			decision, err := db.ObserveDeviceIdentity(repository.DeviceIdentityObservation{
 				Fingerprint: fingerprint, InstallationID: hello.InstallationID, PublicKey: hello.PublicKey,

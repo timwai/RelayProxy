@@ -100,7 +100,7 @@ func TestCoordinatorRevokesLeaseWhenAuthorizationChanges(t *testing.T) {
 	c := NewCoordinator(manager, func(string, string) (bool, error) { return allowed, nil }, time.Minute, "", 8)
 
 	var delivered []protocol.P2PControlMessage
-	c.send = func(*session.DeviceSession, msg protocol.P2PControlMessage) error {
+	c.send = func(_ *session.DeviceSession, msg protocol.P2PControlMessage) error {
 		delivered = append(delivered, msg)
 		return nil
 	}

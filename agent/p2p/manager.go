@@ -614,9 +614,11 @@ func (s *Session) Snapshot() Snapshot {
 		RTT:       time.Duration(s.lastRTTMs) * time.Millisecond,
 		BytesSent: s.lastBytesUp, BytesReceived: s.lastBytesDown,
 	}
-	if s.state == StateReady && s.direct != nil {
+	if s.state == StateReady {
 		path = protocol.P2PPathDirectQUIC
-		stats = s.direct.Stats()
+		if s.direct != nil {
+			stats = s.direct.Stats()
+		}
 	}
 	local := append([]protocol.P2PCandidate(nil), s.localCandidates...)
 	peer := append([]protocol.P2PCandidate(nil), s.peerCandidates...)

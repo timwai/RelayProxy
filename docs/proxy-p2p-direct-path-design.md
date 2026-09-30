@@ -1,8 +1,10 @@
 # RelayProxy Proxy P2P Direct Path Design
 
-> Status: Design
+> Status: Implementation in progress
 >
 > Target branch: `main`
+>
+> Development branch: `feat/proxy-p2p-direct-path`
 >
 > Scope: RelayProxy proxy traffic between Client Agent and Exit Agent
 >
@@ -1485,15 +1487,19 @@ Add:
 
 ### Phase 8 - Optimization
 
-Future work:
+Progress as of 2026-09-30:
 
-- IPv6 direct path
-- OS network-change detection
-- smarter cooldown
-- LRU session management
-- Android battery-aware behavior
-- path scoring
-- optional stream migration
+- [x] IPv6 candidate discovery and dual-stack UDP punching
+- [x] OS network-change detection and automatic P2P invalidation/retry
+- [x] exponential cooldown after repeated direct-path failures
+- [x] LRU session management for ready Client/Exit P2P sessions
+- [ ] Android battery-aware behavior
+- [ ] path scoring
+- [ ] optional stream migration
+
+The IPv6 implementation keeps Relay as the fallback. Mixed IPv4/IPv6 candidate
+sets continue racing even when the local socket cannot use one address family,
+so an unsupported family does not abort an otherwise usable direct path.
 
 ---
 

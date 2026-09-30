@@ -30,6 +30,7 @@ type UIBridge struct {
 	agent               *app.Agent
 	configPath          string
 	mu                  sync.RWMutex
+	messageTap          func(app.Message)
 	writeConfig         func(string, *config.AgentConfigFile) error
 	ensureDivertService func() error
 	syncAutoStart       func(string, bool) (func() error, error)
@@ -37,7 +38,7 @@ type UIBridge struct {
 }
 
 func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
-	return &UIBridge{
+	b := &UIBridge{
 		agent:               agent,
 		configPath:          configPath,
 		writeConfig:         config.SaveAgentConfig,
@@ -57,6 +58,19 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 			return startup.SetAutoStart(autoStartName, executable, path, enabled, requireAdmin)
 		},
 	}
+	b.loadMessageHistory()
+	agent.SetMessageTap(func(message app.Message) {
+		if err := b.persistMessageHistory(); err != nil {
+			fmt.Printf("[Message] 保存本地消息历史失败: %v\n", err)
+		}
+		b.mu.RLock()
+		tap := b.messageTap
+		b.mu.RUnlock()
+		if tap != nil {
+			tap(message)
+		}
+	})
+	return b
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +107,66 @@ func (b *UIBridge) ClearLogs() {
 // SetLogTap registers a live log listener (used to push lines into the UI).
 func (b *UIBridge) SetLogTap(tap func(app.LogEntry)) {
 	app.GlobalLogBuffer.SetTap(tap)
+}
+
+// GetMessages returns the most recent messages received by this device.
+func (b *UIBridge) GetMessages(limit int) []app.Message {
+	return b.agent.Messages(limit)
+}
+
+// ClearMessages clears only this device's local message history.
+func (b *UIBridge) ClearMessages() {
+	b.agent.ClearMessages()
+	_ = b.persistMessageHistory()
+}
+
+// SetMessageTap registers the native GUI listener used for live popup/history updates.
+func (b *UIBridge) SetMessageTap(tap func(app.Message)) {
+	b.mu.Lock()
+	b.messageTap = tap
+	b.mu.Unlock()
+}
+
+func (b *UIBridge) messageHistoryPath() string {
+	path := b.rawConfigPath()
+	if path == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(path), "message-history.json")
+}
+
+func (b *UIBridge) loadMessageHistory() {
+	path := b.messageHistoryPath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var messages []app.Message
+	if json.Unmarshal(data, &messages) == nil {
+		b.agent.RestoreMessages(messages)
+	}
+}
+
+func (b *UIBridge) persistMessageHistory() error {
+	path := b.messageHistoryPath()
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(b.agent.Messages(500), "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // ---------------------------------------------------------------------------

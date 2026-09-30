@@ -17,12 +17,12 @@ func createMessageTestDevice(t *testing.T, router *Router, suffix string) *repos
 		t.Fatal(err)
 	}
 	pending, err := router.db.ObserveDeviceIdentity(repository.DeviceIdentityObservation{
-		Fingerprint: "msg-fp-" + suffix,
-		InstallationID: "msg-install-" + suffix,
-		PublicKey: []byte("msg-key-" + suffix),
-		DeviceName: "Message-" + suffix,
-		Platform: "windows",
-		Arch: "amd64",
+		Fingerprint:           "msg-fp-" + suffix,
+		InstallationID:        "msg-install-" + suffix,
+		PublicKey:             []byte("msg-key-" + suffix),
+		DeviceName:            "Message-" + suffix,
+		Platform:              "windows",
+		Arch:                  "amd64",
 		RequestedCapabilities: []string{"proxy.client"},
 	})
 	if err != nil {
@@ -41,8 +41,8 @@ func TestChannelPushGETAndPOST(t *testing.T) {
 
 	device := createMessageTestDevice(t, router, "A")
 	channel := &repository.MessageChannel{
-		ID: "login-code",
-		Name: "登录验证码",
+		ID:        "login-code",
+		Name:      "登录验证码",
 		DeviceIDs: []string{device.ID},
 	}
 	if err := router.db.CreateMessageChannel(channel); err != nil {
@@ -110,9 +110,9 @@ func TestChannelAllDevicesAndCRUD(t *testing.T) {
 	}
 
 	updateBody, _ := json.Marshal(map[string]any{
-		"name": "仅 A",
+		"name":       "仅 A",
 		"allDevices": false,
-		"deviceIds": []string{a.ID},
+		"deviceIds":  []string{a.ID},
 	})
 	updateReq := httptest.NewRequest(http.MethodPut, "/api/v1/message-channels/all", bytes.NewReader(updateBody))
 	updateReq.AddCookie(adminCookie)

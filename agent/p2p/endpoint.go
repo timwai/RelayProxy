@@ -189,4 +189,3 @@ func CurrentNetworkSignature() string {
 	sum := sha256.Sum256([]byte(strings.Join(values, "\n")))
 	return hex.EncodeToString(sum[:16])
 }
-

@@ -19,6 +19,7 @@ const (
 	FrameTypeOpenRDPUDP  FrameType = 0x0B
 	FrameTypeRDPControl  FrameType = 0x0C
 	FrameTypePushMessage FrameType = 0x0D
+	FrameTypeP2PControl   FrameType = 0x0E
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

@@ -14,6 +14,31 @@ import (
 	"relayproxy/internal/tunnel"
 )
 
+func sharedTCPConfig(base *tls.Config, enableHTTP bool) *tls.Config {
+	if base == nil {
+		return nil
+	}
+	config := base.Clone()
+	if config.MinVersion < tls.VersionTLS13 {
+		config.MinVersion = tls.VersionTLS13
+	}
+	if !enableHTTP {
+		return config
+	}
+	config.NextProtos = appendUniqueProtocol(config.NextProtos, tunnel.TCPALPN)
+	config.NextProtos = appendUniqueProtocol(config.NextProtos, "http/1.1")
+	return config
+}
+
+func appendUniqueProtocol(protocols []string, protocol string) []string {
+	for _, current := range protocols {
+		if current == protocol {
+			return protocols
+		}
+	}
+	return append(protocols, protocol)
+}
+
 // HTTPHandler is intentionally the small net/http surface the gateway needs.
 // It keeps the public push API independent from the Admin Web listener.
 type HTTPHandler interface {

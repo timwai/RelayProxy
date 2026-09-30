@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
 	"relayproxy/internal/tunnel"
@@ -36,6 +37,8 @@ type TunnelDialer struct {
 	directFallback    bool
 	noteFallback      func(exitDeviceID string)
 	noteDirectFailure func(exitDeviceID, reason string)
+	streamResume      bool
+	resumeReplayLimit int
 }
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
@@ -74,6 +77,19 @@ func (d *TunnelDialer) ConfigureDirectFailure(noteFailure func(exitDeviceID, rea
 	d.directMu.Lock()
 	d.noteDirectFailure = noteFailure
 	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) ConfigureStreamResume(enabled bool, replayLimit int) {
+	d.directMu.Lock()
+	d.streamResume = enabled
+	d.resumeReplayLimit = replayLimit
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) streamResumeConfig() (bool, int) {
+	d.directMu.RLock()
+	defer d.directMu.RUnlock()
+	return d.streamResume, d.resumeReplayLimit
 }
 
 func (d *TunnelDialer) recordDirectFailure(exitDeviceID string, err error) {
@@ -215,6 +231,26 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 	}
 
 	reqID := d.nextRequestID()
+	var resumeState *p2presume.StreamState
+	var resumeWire *protocol.TCPResumeBinding
+	if enabled, replayLimit := d.streamResumeConfig(); enabled {
+		resumeState, err = p2presume.NewRandomStreamState(replayLimit)
+		if err != nil {
+			_ = stream.Close()
+			return nil, err
+		}
+		binding, bindErr := resumeState.Binding(p2presume.BindOpen, 1)
+		if bindErr != nil {
+			_ = stream.Close()
+			return nil, bindErr
+		}
+		resumeWire, bindErr = p2presume.BindingToProtocol(binding, protocol.TCPResumeModeOpen)
+		if bindErr != nil {
+			_ = stream.Close()
+			return nil, bindErr
+		}
+	}
+
 	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
 		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeOpenTCP,
 		RequestID: reqID, ExitDeviceID: exitNodeID,
@@ -223,7 +259,7 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 		return nil, fmt.Errorf("failed to write stream header: %w", err)
 	}
 	if err := protocol.WriteJSON(stream, protocol.OpenTCPRequest{
-		RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000,
+		RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000, Resume: resumeWire,
 	}); err != nil {
 		_ = stream.Close()
 		return nil, fmt.Errorf("failed to write open request: %w", err)
@@ -260,6 +296,25 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 		remoteAddr = &net.TCPAddr{IP: ip, Port: int(port)}
 	} else {
 		remoteAddr = proxyAddr{net: "tcp", addr: net.JoinHostPort(host, strconv.Itoa(int(port)))}
+	}
+
+	if resumeState != nil && resp.Resume != nil {
+		peer, err := p2presume.ResponseBindingFromProtocol(resp.Resume)
+		if err != nil || peer.Generation != 1 || peer.Identity != resumeState.Identity() ||
+			peer.SendOffset != 0 || peer.ReceiveOffset != 0 {
+			_ = stream.Close()
+			return nil, fmt.Errorf("invalid resumable TCP open response")
+		}
+		endpoint, err := p2presume.NewEndpoint(resumeState)
+		if err != nil {
+			_ = stream.Close()
+			return nil, err
+		}
+		if err := endpoint.Bind(stream, 1); err != nil {
+			_ = endpoint.Close()
+			return nil, err
+		}
+		return newResumableTCPConn(d, endpoint, resumeState, exitNodeID, host, port, localAddr, remoteAddr), nil
 	}
 	return tunnel.NewNetConnAdapter(stream, localAddr, remoteAddr), nil
 }

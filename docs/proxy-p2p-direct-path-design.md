@@ -974,9 +974,11 @@ Battery-aware behavior:
   forced through Relay
 
 The generic Agent exposes `SetP2PPowerConstrained(bool)` for platform lifecycle
-integration. The Android client currently lives on the separate
-`feature/android-client-exit` branch, so its PowerManager / screen-state glue
-must be connected when that branch is rebased or merged with this P2P work.
+integration. The Android exit client is now integrated into this branch and
+exposes the same policy through gomobile. Its foreground service enables the
+low-power profile when Android Power Saver or device-idle mode is active, when
+the screen is not interactive, or when the selected exit network is cellular.
+The profile is relaxed automatically when those conditions clear.
 
 ---
 
@@ -1512,7 +1514,7 @@ Progress as of 2026-09-30:
 - [x] exponential cooldown after repeated direct-path failures
 - [x] LRU session management for ready Client/Exit P2P sessions
 - [x] battery-aware P2P core profile
-- [ ] Android lifecycle/power-saver wiring after Android branch integration
+- [x] Android lifecycle/power-saver/cellular-network wiring
 - [x] candidate path scoring with bounded RTT preference
 - [ ] optional stream migration
 

@@ -1,11 +1,11 @@
 # RelayProxy Android
 
-Android 第一阶段只实现 **网络出口节点**：手机加入 RelayProxy 后，其他已授权客户端可以把 TCP/UDP 流量经 Relay Server 转发到手机，再由手机当前网络访问目标。
+Android 第一阶段实现 **网络出口节点**：手机加入 RelayProxy 后，其他已授权客户端可以把 TCP/UDP 流量发送到手机。控制与授权始终经过 Relay Server；数据面在条件允许时使用 P2P QUIC 直连，失败或不可用时自动回退 Relay。
 
 ## 架构
 
-- `mobile/androidcore`：Go + gomobile。直接复用 RelayProxy 的设备认证、QUIC/TLS+yamux、出口 ACL、TCP/UDP 转发协议；`-javapkg com.relayproxy.core` 生成的 Java 包为 `com.relayproxy.core.androidcore`。
-- `android/app`：Kotlin 原生 UI + 前台 Service。负责配置、生命周期、通知，以及 Wi-Fi / 蜂窝首选网络绑定与自动故障切换。
+- `mobile/androidcore`：Go + gomobile。直接复用 RelayProxy 的设备认证、QUIC/TLS+yamux、出口 ACL、TCP/UDP 转发协议和 Proxy P2P Manager；`-javapkg com.relayproxy.core` 生成的 Java 包为 `com.relayproxy.core.androidcore`。
+- `android/app`：Kotlin 原生 UI + 前台 Service。负责配置、生命周期、通知、Wi-Fi / 蜂窝首选网络绑定与自动故障切换，并把 Power Saver、Doze、息屏和蜂窝网络状态映射为 P2P 低功耗策略。
 - Android 不创建 `VpnService`，第一期不是“把 Android 自己的流量送进 RelayProxy”，而是“把 Android 当作出口”。
 
 ## 一键打包 APK（Windows）
@@ -156,6 +156,15 @@ APK 输出：
    - Wi-Fi 优先：Wi-Fi 具有已验证互联网连接时使用 Wi-Fi；Wi-Fi 断开或无互联网时自动切换到蜂窝，Wi-Fi 恢复后自动切回。
    - 移动数据优先：蜂窝网络可用时优先使用蜂窝；蜂窝不可用时自动切换到 Wi-Fi，蜂窝恢复后自动切回。
 8. 每次实际出口网络发生变化时，Android 客户端会重新绑定进程网络并重建 Relay 隧道，避免旧连接继续停留在失效链路上。
+
+## P2P 与省电策略
+
+- Android Exit 会声明 `proxy_p2p_v1`，Relay Server 仅负责候选交换、租约和授权，直连数据不经过 Server。
+- P2P 不可用、打洞失败、租约失效或进入冷却时，新连接会继续使用 Relay，不影响出口可用性。
+- 首页会显示当前 P2P 状态、Direct Path 类型、RTT 和 P2P 电源策略。
+- 屏幕关闭、Android Power Saver、Device Idle/Doze 或当前出口为蜂窝网络时自动进入省电模式。
+- 省电模式关闭周期性 P2P QUIC keepalive、缩短空闲直连生命周期，并避免保留多余直连 Session；有真实业务时仍允许建立 P2P。
+- Wi-Fi 恢复、设备重新交互或省电状态解除后自动恢复标准 P2P 策略。
 
 ## 第一阶段边界
 

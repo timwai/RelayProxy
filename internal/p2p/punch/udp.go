@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"relayproxy/internal/protocol"
-	"relayproxy/internal/rdp/secure"
+	"relayproxy/internal/p2p/secure"
 )
 
 const dataWireOverhead = 24 + 16

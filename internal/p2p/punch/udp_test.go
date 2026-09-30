@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"relayproxy/internal/rdp/secure"
+	"relayproxy/internal/p2p/secure"
 )
 
 func TestPacketConnSendsAuthenticatedKeepalive(t *testing.T) {

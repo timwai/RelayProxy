@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"relayproxy/internal/protocol"
-	"relayproxy/internal/rdp/candidate"
+	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/repository"
 	"relayproxy/server/session"

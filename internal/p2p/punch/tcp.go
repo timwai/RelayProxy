@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"relayproxy/internal/protocol"
-	"relayproxy/internal/rdp/secure"
+	"relayproxy/internal/p2p/secure"
 )
 
 const tcpPacketSize = 40
@@ -22,7 +22,7 @@ type tcpDialResult struct {
 	err  error
 }
 
-// LookupKey resolves a server-side in-memory RDP session token.
+// LookupKey resolves a server-side in-memory P2P session token.
 type LookupKey func(sessionID uint64) ([]byte, bool)
 
 func Dial(ctx context.Context, candidates []protocol.RDPCandidate, sessionID uint64, key []byte, timeout time.Duration) (net.Conn, error) {

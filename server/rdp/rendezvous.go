@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"relayproxy/internal/rdp/candidate"
+	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/tunnel"
 )
 

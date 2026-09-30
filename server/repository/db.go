@@ -707,6 +707,10 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 	}
 	query += ` ORDER BY m.created_at DESC LIMIT ?`
 	args = append(args, limit)
+	return db.listMessagesQuery(query, args, limit)
+}
+
+func (db *DB) listMessagesQuery(query string, args []any, limit int) ([]*MessageRecord, error) {
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -753,6 +757,58 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 		deliveryRows.Close()
 	}
 	return messages, nil
+}
+
+func (db *DB) ListMessagesByChannel(ownerID, channelID string, limit int) ([]*MessageRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return db.ListMessages(ownerID, limit)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	query := `SELECT m.id, COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
+		COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
+		FROM messages m WHERE m.channel_id = ?`
+	args := []any{channelID}
+	if ownerID != "" {
+		query += ` AND EXISTS (
+			SELECT 1 FROM message_deliveries md
+			JOIN devices d ON d.id = md.device_id
+			WHERE md.message_id = m.id AND d.owner_user_id = ?
+		)`
+		args = append(args, ownerID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT ?`
+	args = append(args, limit)
+	return db.listMessagesQuery(query, args, limit)
+}
+
+func (db *DB) DeleteMessage(id string) (bool, error) {
+	result, err := db.Exec(`DELETE FROM messages WHERE id = ?`, strings.TrimSpace(id))
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+func (db *DB) DeleteMessages(channelID string) (int64, error) {
+	channelID = strings.TrimSpace(channelID)
+	query := `DELETE FROM messages`
+	var args []any
+	if channelID != "" {
+		query += ` WHERE channel_id = ?`
+		args = append(args, channelID)
+	}
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 // User model

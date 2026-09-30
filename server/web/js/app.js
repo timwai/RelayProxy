@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], messages: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, deviceBusy: false, enrollmentBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], messages: [], channels: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -235,6 +235,116 @@
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };
     $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td></tr>').join('') : emptyRow(6, '当前没有活跃流', '设备发起代理连接后会显示在这里');
   }
+  function channelPushURL(id) {
+    return location.origin + '/api/v1/push/' + encodeURIComponent(id || '');
+  }
+  function channelDeviceLabel(channel) {
+    if (channel.allDevices) return '全部已批准设备';
+    const ids = Array.isArray(channel.deviceIds) ? channel.deviceIds : [];
+    const names = ids.map(id => {
+      const device = state.devices.find(item => item.id === id);
+      return device ? (device.name || id) : id;
+    });
+    return names.length ? names.join('、') : '未绑定设备';
+  }
+  function renderChannels() {
+    const host = $('channel-list');
+    if (!host) return;
+    $('channel-count').textContent = state.channels.length;
+    if (!state.channels.length) {
+      host.innerHTML = '<div class="channel-empty"><strong>还没有推送渠道</strong><span>创建渠道后，外部系统只需要调用渠道 URL，不需要传设备 ID。</span></div>';
+      return;
+    }
+    host.innerHTML = state.channels.map(channel => {
+      const url = channelPushURL(channel.id);
+      const target = channel.allDevices ? '<span class="badge success">全部设备</span>' : '<span class="badge neutral">' + esc((channel.deviceIds || []).length) + ' 台设备</span>';
+      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div>' + target + '</div><p>' + esc(channelDeviceLabel(channel)) + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
+    }).join('');
+  }
+  function renderChannelDevices(selected) {
+    const selectedSet = new Set(selected || []);
+    const host = $('channel-devices');
+    const devices = state.devices.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), 'zh-CN'));
+    host.innerHTML = devices.length ? devices.map(device => {
+      const checked = selectedSet.has(device.id);
+      const status = device.approvalState === 'approved' ? (device.status === 'online' ? '在线' : '离线') : '已撤销';
+      return '<label class="channel-device-option"><input type="checkbox" value="' + esc(device.id) + '"' + (checked ? ' checked' : '') + '><span><strong>' + esc(device.name || device.id) + '</strong><small class="mono">' + esc(device.id) + ' · ' + esc(status) + '</small></span></label>';
+    }).join('') : '<div class="channel-empty"><span>还没有可绑定设备</span></div>';
+    updateChannelDeviceState();
+  }
+  function updateChannelDeviceState() {
+    const allDevices = $('channel-all-devices').checked;
+    $('channel-device-section').hidden = allDevices;
+    const selected = all('#channel-devices input:checked');
+    $('channel-device-count').textContent = selected.length + ' 台';
+    const id = $('channel-id').value.trim();
+    $('channel-url-preview').textContent = id ? channelPushURL(id) : location.origin + '/api/v1/push/{保存后生成的渠道ID}';
+  }
+  function openChannel(id) {
+    const channel = id ? state.channels.find(item => item.id === id) : null;
+    state.selectedChannel = channel || null;
+    $('channel-dialog-title').textContent = channel ? '编辑推送渠道' : '新建推送渠道';
+    $('channel-name').value = channel ? channel.name : '';
+    $('channel-id').value = channel ? channel.id : '';
+    $('channel-id').disabled = !!channel;
+    $('channel-all-devices').checked = channel ? !!channel.allDevices : false;
+    $('channel-delete').hidden = !channel;
+    renderChannelDevices(channel ? channel.deviceIds : []);
+    errorAt('channel-error', '');
+    updateChannelDeviceState();
+    $('channel-dialog').showModal();
+    setTimeout(() => $('channel-name').focus(), 0);
+  }
+  async function saveChannel(event) {
+    event.preventDefault();
+    if (state.channelBusy) return;
+    const allDevices = $('channel-all-devices').checked;
+    const deviceIds = allDevices ? [] : all('#channel-devices input:checked').map(input => input.value);
+    const body = {
+      name: $('channel-name').value.trim(),
+      allDevices,
+      deviceIds
+    };
+    if (!state.selectedChannel) body.id = $('channel-id').value.trim();
+    state.channelBusy = true;
+    all('#channel-dialog button, #channel-dialog input').forEach(el => { el.disabled = true; });
+    errorAt('channel-error', '');
+    try {
+      if (state.selectedChannel) {
+        await api('/message-channels/' + encodeURIComponent(state.selectedChannel.id), { method: 'PUT', body: JSON.stringify(body) });
+      } else {
+        await api('/message-channels', { method: 'POST', body: JSON.stringify(body) });
+      }
+      $('channel-dialog').close();
+      toast(state.selectedChannel ? '渠道已更新' : '渠道已创建');
+      state.selectedChannel = null;
+      await refresh(true);
+    } catch (err) {
+      errorAt('channel-error', err.message);
+    } finally {
+      state.channelBusy = false;
+      all('#channel-dialog button, #channel-dialog input').forEach(el => { el.disabled = false; });
+      $('channel-id').disabled = !!state.selectedChannel;
+    }
+  }
+  async function deleteChannel() {
+    if (state.channelBusy || !state.selectedChannel) return;
+    const channel = state.selectedChannel;
+    if (!confirm('删除渠道「' + channel.name + '」？删除后该渠道 URL 将立即失效。')) return;
+    state.channelBusy = true;
+    try {
+      await api('/message-channels/' + encodeURIComponent(channel.id), { method: 'DELETE' });
+      $('channel-dialog').close();
+      state.selectedChannel = null;
+      toast('渠道已删除');
+      await refresh(true);
+    } catch (err) {
+      errorAt('channel-error', err.message);
+    } finally {
+      state.channelBusy = false;
+    }
+  }
+
   function renderMessages() {
     if (!$('messages-body')) { return; }
     const needle = ($('message-search') && $('message-search').value || '').trim().toLowerCase();
@@ -248,7 +358,7 @@
       if (status && !deliveries.some(delivery => delivery.status === status)) return false;
       if (!needle) return true;
       return [
-        message.title, message.content, message.source, code,
+        message.title, message.content, message.source, message.channelId, code,
         ...deliveries.flatMap(delivery => [delivery.deviceName, delivery.deviceId, delivery.status])
       ].join(' ').toLowerCase().includes(needle);
     });
@@ -264,8 +374,8 @@
         return '<div class="message-delivery"><span><strong>' + esc(delivery.deviceName || delivery.deviceId) + '</strong><small class="mono">' + esc(delivery.deviceId) + '</small></span>' + badge(label, tone) + error + '</div>';
       }).join('') : '<span class="muted">—</span>';
       const codeHTML = code ? '<div class="message-code"><span class="mono">' + esc(code) + '</span><button type="button" class="small-button" data-copy-message-code="' + esc(code) + '">复制</button></div>' : '<span class="muted">—</span>';
-      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || 'webhook') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td></tr>';
-    }).join('') : emptyRow(4, '暂无匹配消息', 'Webhook 推送后会显示在这里');
+      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || '渠道推送') + (message.channelId ? ' · ' + esc(message.channelId) : '') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td></tr>';
+    }).join('') : emptyRow(4, '暂无匹配消息', '渠道推送后会显示在这里');
   }
 
   function renderIngress() {
@@ -320,10 +430,13 @@
     ];
     if (user.role === 'admin') {
       jobs.push(['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]);
+      jobs.push(['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }]);
       jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); }]);
     } else {
       state.enrollments = [];
+      state.channels = [];
       renderEnrollments();
+      renderChannels();
     }
     if (user.role === 'admin' && !state.dirty && !state.saving) {
       jobs.push(['settings', '/server/config', data => {
@@ -347,6 +460,7 @@
     renderRuntime();
     renderSessions();
     renderMessages();
+    renderChannels();
     renderIngress();
     if (manual && !errors.length) { toast(state.dirty ? '数据已刷新，未保存的配置已保留' : '数据已刷新'); }
   }
@@ -664,6 +778,22 @@
   $('exits-grid').addEventListener('click', event => { const button = event.target.closest('[data-copy-exit]'); if (button) copy(button.dataset.copyExit); });
   ['message-search', 'message-kind', 'message-status'].forEach(id => $(id).addEventListener('input', renderMessages));
   $('messages-refresh').addEventListener('click', () => refresh(true));
+  $('channel-create').addEventListener('click', () => openChannel(''));
+  $('channel-form').addEventListener('submit', saveChannel);
+  $('channel-delete').addEventListener('click', deleteChannel);
+  $('channel-all-devices').addEventListener('change', updateChannelDeviceState);
+  $('channel-id').addEventListener('input', updateChannelDeviceState);
+  $('channel-devices').addEventListener('change', updateChannelDeviceState);
+  $('channel-copy-url').addEventListener('click', () => {
+    const id = $('channel-id').value.trim();
+    if (id) copy(channelPushURL(id));
+  });
+  $('channel-list').addEventListener('click', event => {
+    const copyButton = event.target.closest('[data-channel-copy]');
+    const editButton = event.target.closest('[data-channel-edit]');
+    if (copyButton) copy(channelPushURL(copyButton.dataset.channelCopy));
+    if (editButton) openChannel(editButton.dataset.channelEdit);
+  });
   $('messages-body').addEventListener('click', event => {
     const button = event.target.closest('[data-copy-message-code]');
     if (button) { copy(button.dataset.copyMessageCode); toast('验证码已复制'); }

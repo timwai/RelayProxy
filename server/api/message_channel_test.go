@@ -270,3 +270,103 @@ func TestChannelRejectsInvalidCustomRules(t *testing.T) {
 		})
 	}
 }
+
+
+func TestServerMessagesFilterAndClearByChannel(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	public := NewPublicPushHandler(router.sessions, router.db)
+	device := createMessageTestDevice(t, router, "CLEAR")
+
+	for _, channel := range []*repository.MessageChannel{
+		{ID: "clear-a", Name: "渠道 A", DeviceIDs: []string{device.ID}},
+		{ID: "clear-b", Name: "渠道 B", DeviceIDs: []string{device.ID}},
+	} {
+		if err := router.db.CreateMessageChannel(channel); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	push := func(channel, message string) repository.MessageRecord {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/push/"+channel+"?message="+url.QueryEscape(message), nil)
+		rec := httptest.NewRecorder()
+		public.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("push %s returned %d: %s", channel, rec.Code, rec.Body.String())
+		}
+		var record repository.MessageRecord
+		if err := json.Unmarshal(rec.Body.Bytes(), &record); err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+
+	a := push("clear-a", "渠道 A 消息")
+	b := push("clear-b", "渠道 B 消息")
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/messages?channelId=clear-a&limit=500", nil)
+	listReq.AddCookie(adminCookie)
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list channel messages returned %d: %s", listRec.Code, listRec.Body.String())
+	}
+	var listed []repository.MessageRecord
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != a.ID || listed[0].ChannelID != "clear-a" {
+		t.Fatalf("unexpected channel list: %+v", listed)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/messages/"+b.ID, nil)
+	deleteReq.AddCookie(adminCookie)
+	deleteRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete message returned %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	_ = push("clear-b", "渠道 B 保留消息")
+	clearReq := httptest.NewRequest(http.MethodDelete, "/api/v1/messages?channelId=clear-a", nil)
+	clearReq.AddCookie(adminCookie)
+	clearRec := httptest.NewRecorder()
+	router.ServeHTTP(clearRec, clearReq)
+	if clearRec.Code != http.StatusOK {
+		t.Fatalf("clear channel returned %d: %s", clearRec.Code, clearRec.Body.String())
+	}
+	var clearResult struct {
+		Deleted int64 `json:"deleted"`
+	}
+	if err := json.Unmarshal(clearRec.Body.Bytes(), &clearResult); err != nil {
+		t.Fatal(err)
+	}
+	if clearResult.Deleted != 1 {
+		t.Fatalf("cleared %d messages, want 1", clearResult.Deleted)
+	}
+
+	allReq := httptest.NewRequest(http.MethodGet, "/api/v1/messages?limit=500", nil)
+	allReq.AddCookie(adminCookie)
+	allRec := httptest.NewRecorder()
+	router.ServeHTTP(allRec, allReq)
+	if allRec.Code != http.StatusOK {
+		t.Fatalf("list all messages returned %d: %s", allRec.Code, allRec.Body.String())
+	}
+	listed = nil
+	if err := json.Unmarshal(allRec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ChannelID != "clear-b" {
+		t.Fatalf("unexpected remaining messages: %+v", listed)
+	}
+
+	clearAllReq := httptest.NewRequest(http.MethodDelete, "/api/v1/messages", nil)
+	clearAllReq.AddCookie(adminCookie)
+	clearAllRec := httptest.NewRecorder()
+	router.ServeHTTP(clearAllRec, clearAllReq)
+	if clearAllRec.Code != http.StatusOK {
+		t.Fatalf("clear all returned %d: %s", clearAllRec.Code, clearAllRec.Body.String())
+	}
+}

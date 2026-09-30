@@ -129,6 +129,11 @@ button.action:active{transform:scale(.98)}
       window.dismiss();
     },seconds*1000);
   }
+  function updateQueueBadge(){
+    var badge=document.getElementById('queue');
+    badge.textContent=queue.length ? '+'+queue.length : '';
+    badge.classList.toggle('show',queue.length>0);
+  }
   function render(message){
     current=message;
     document.getElementById('popup-title').textContent=message.title||'收到新的验证码';
@@ -138,16 +143,14 @@ button.action:active{transform:scale(.98)}
     document.getElementById('time').textContent=fmtTime(message.createdAt);
     document.getElementById('copy-label').textContent='复制验证码';
     document.getElementById('copy').classList.remove('copied');
-    var badge=document.getElementById('queue');
-    badge.textContent=queue.length ? '+'+queue.length : '';
-    badge.classList.toggle('show',queue.length>0);
+    updateQueueBadge();
     startAutoDismiss();
   }
   window.enqueueVerification=function(message){
     if(!message||!message.verificationCode) return;
     if(current && current.id===message.id) { render(message); return; }
     if(queue.some(function(item){return item.id===message.id})) return;
-    if(current){ queue.push(message); render(current); return; }
+    if(current){ queue.push(message); updateQueueBadge(); return; }
     render(message);
   };
   window.seedVerification=function(message){ if(message&&message.verificationCode&&!current) render(message); };

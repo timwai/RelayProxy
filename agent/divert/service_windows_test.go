@@ -149,6 +149,57 @@ func TestRemoveWindowsTreeWithRetryRemovesOrphanedArtifacts(t *testing.T) {
 	}
 }
 
+func TestFilterWindowsPendingFileOperationsRemovesRelayProxyPaths(t *testing.T) {
+	roots := []string{
+		`C:\ProgramData\RelayProxy-Network-Service`,
+		`C:\ProgramData\RelayProxy-WinDivert`,
+	}
+	values := []string{
+		`\??\C:\ProgramData\RelayProxy-Network-Service\deadbeef\RelayProxyNetwork.exe`, "",
+		`\??\C:\Windows\Temp\keep.tmp`, "",
+		`\??\C:\ProgramData\RelayProxy-WinDivert\2.2-deadbeef\WinDivert64.sys`, "",
+	}
+	got, changed := filterWindowsPendingFileOperations(values, roots)
+	if !changed {
+		t.Fatal("expected RelayProxy pending deletes to be removed")
+	}
+	want := []string{`\??\C:\Windows\Temp\keep.tmp`, ""}
+	if len(got) != len(want) {
+		t.Fatalf("filtered=%q want=%q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("filtered[%d]=%q want=%q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFilterWindowsPendingFileOperationsMatchesRootAndCaseInsensitive(t *testing.T) {
+	roots := []string{`C:\ProgramData\RelayProxy-Network-Service`}
+	values := []string{
+		`\??\c:\programdata\relayproxy-network-service`, "",
+		`\??\C:\ProgramData\Other\file.tmp`, "",
+	}
+	got, changed := filterWindowsPendingFileOperations(values, roots)
+	if !changed {
+		t.Fatal("expected exact RelayProxy root pending delete to be removed")
+	}
+	if len(got) != 2 || !strings.Contains(strings.ToLower(got[0]), `\programdata\other\`) {
+		t.Fatalf("unexpected filtered operations: %q", got)
+	}
+}
+
+func TestFilterWindowsPendingFileOperationsLeavesUnrelatedEntries(t *testing.T) {
+	values := []string{`\??\C:\Windows\Temp\keep.tmp`, ""}
+	got, changed := filterWindowsPendingFileOperations(values, []string{`C:\ProgramData\RelayProxy-Network-Service`})
+	if changed {
+		t.Fatal("unrelated pending operation was changed")
+	}
+	if len(got) != len(values) || got[0] != values[0] || got[1] != values[1] {
+		t.Fatalf("filtered=%q want=%q", got, values)
+	}
+}
+
 func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
 	got, err := normalizeWindowsTransparentFirewallPorts([]uint16{45001, 45002, 45001})
 	if err != nil {

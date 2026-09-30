@@ -39,6 +39,7 @@ function fixture(options = {}) {
     network: { mode: '', exclude_processes: ['trusted.exe'] },
     exitUpstream: { mode: 'direct', address: '', username: '', password: '' },
     runtime: { networkMode: '', socks5: { listen: '127.0.0.1', port: 1080 }, http: { listen: '127.0.0.1', port: 8080 } },
+    verificationPopupTimeoutSec: 15,
     restartRequired: false, restartFields: [], reloadPending: false,
     ...options.config
   };
@@ -125,6 +126,24 @@ test('failed or incomplete configuration loads cannot save defaults', async () =
   assert.equal(f.saves.length, 0);
   assert.ok(f.buttons.every(button => button.disabled));
   assert.match(f.get('config-state').textContent, /invalid YAML/);
+});
+
+test('verification popup timeout loads and saves immediately', async () => {
+  const f = fixture({ config: { verificationPopupTimeoutSec: 27 } });
+  await f.context.refreshAll();
+  assert.equal(f.get('cfg-verification-timeout').value, 27);
+  f.get('cfg-verification-timeout').value = '8';
+  await f.context.onVerificationTimeoutChange(f.get('cfg-verification-timeout'));
+  assert.equal(f.saves.length, 1);
+  assert.equal(f.saves[0].gui.verificationPopupTimeoutSec, 8);
+});
+
+test('verification popup timeout accepts zero as disabled', async () => {
+  const f = fixture();
+  await f.context.refreshAll();
+  f.get('cfg-verification-timeout').value = '0';
+  await f.context.onVerificationTimeoutChange(f.get('cfg-verification-timeout'));
+  assert.equal(f.saves[0].gui.verificationPopupTimeoutSec, 0);
 });
 
 test('client-only server grant does not lock local exit sharing configuration', async () => {

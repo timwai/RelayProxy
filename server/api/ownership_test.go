@@ -59,7 +59,8 @@ func TestDeviceOwnershipAcrossManagementAndViews(t *testing.T) {
 	seed("own-client", owner.ID, "CLIENT")
 	seed("own-exit", owner.ID, "EXIT")
 	seed("other-exit", other.ID, "EXIT")
-	for _, pair := range []struct{ id, mode string }{{"own-client", "CLIENT"}, {"own-exit", "EXIT"}, {"other-exit", "EXIT"}} {
+	seed("other-client", other.ID, "CLIENT")
+	for _, pair := range []struct{ id, mode string }{{"own-client", "CLIENT"}, {"own-exit", "EXIT"}, {"other-client", "CLIENT"}, {"other-exit", "EXIT"}} {
 		caps := []string{"proxy.client"}
 		if pair.mode == "EXIT" {
 			caps = []string{"proxy.exit"}
@@ -67,6 +68,13 @@ func TestDeviceOwnershipAcrossManagementAndViews(t *testing.T) {
 		sess := &session.DeviceSession{DeviceID: pair.id, DeviceName: pair.id, Mode: pair.mode, Grants: caps}
 		sess.ActiveStreams.Store(1)
 		router.sessions.Register(sess)
+	}
+	router.p2pSessions = func() []P2PSessionRuntimeStatus {
+		now := time.Now()
+		return []P2PSessionRuntimeStatus{
+			{SessionID: 1, ClientDeviceID: "own-client", ExitDeviceID: "own-exit", LeaseExpiresAt: now.Add(time.Minute), Answered: true, ClientReport: P2PPeerRuntimeReport{Path: "p2p_quic"}},
+			{SessionID: 2, ClientDeviceID: "other-client", ExitDeviceID: "other-exit", LeaseExpiresAt: now.Add(time.Minute), Answered: true, ClientReport: P2PPeerRuntimeReport{Path: "p2p_quic"}},
+		}
 	}
 	for _, record := range []struct {
 		owner string
@@ -79,7 +87,7 @@ func TestDeviceOwnershipAcrossManagementAndViews(t *testing.T) {
 		}
 	}
 	for path, want := range map[string]int{
-		"/api/v1/devices": 2, "/api/v1/exits": 1, "/api/v1/sessions/active": 2,
+		"/api/v1/devices": 2, "/api/v1/exits": 1, "/api/v1/sessions/active": 2, "/api/v1/p2p/sessions": 1,
 	} {
 		t.Run(path, func(t *testing.T) {
 			response := apiRequest(router, ownerCookie, http.MethodGet, path)
@@ -101,12 +109,13 @@ func TestDeviceOwnershipAcrossManagementAndViews(t *testing.T) {
 		OnlineDevices int
 		OnlineExits   int
 		TodayUpload   int64
-		TodayDownload int64
+		TodayDownload     int64
+		ActiveP2PSessions int
 	}
 	if err := json.Unmarshal(dashboard.Body.Bytes(), &stats); err != nil {
 		t.Fatal(err)
 	}
-	if dashboard.Code != http.StatusOK || stats.OnlineDevices != 2 || stats.OnlineExits != 1 || stats.TodayUpload != 7 || stats.TodayDownload != 7 {
+	if dashboard.Code != http.StatusOK || stats.OnlineDevices != 2 || stats.OnlineExits != 1 || stats.TodayUpload != 7 || stats.TodayDownload != 7 || stats.ActiveP2PSessions != 1 {
 		t.Fatalf("dashboard exposes global totals: %s", dashboard.Body.String())
 	}
 

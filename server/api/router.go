@@ -40,6 +40,7 @@ type Router struct {
 	onRDPIngressChanged          func(string)
 	onRDPIngressReload           func(string) error
 	onRDPIngressStatus           func(string) RDPIngressRuntimeStatus
+	p2pSessions                  func() []P2PSessionRuntimeStatus
 	rdpIngressEnabled            func() bool
 	rdpIngressPortStart          int
 	rdpIngressPortEnd            int
@@ -55,6 +56,25 @@ type RDPIngressRuntimeStatus struct {
 	TCPListening bool
 	UDPListening bool
 	ActiveUDP    int
+}
+
+type P2PPeerRuntimeReport struct {
+	Path          string    `json:"path,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	ActiveStreams int       `json:"activeStreams,omitempty"`
+	BytesUp       uint64    `json:"bytesUp,omitempty"`
+	BytesDown     uint64    `json:"bytesDown,omitempty"`
+	UpdatedAt     time.Time `json:"updatedAt,omitempty"`
+}
+
+type P2PSessionRuntimeStatus struct {
+	SessionID      uint64               `json:"sessionId"`
+	ClientDeviceID string               `json:"clientDeviceId"`
+	ExitDeviceID   string               `json:"exitDeviceId"`
+	LeaseExpiresAt time.Time            `json:"leaseExpiresAt"`
+	Answered       bool                 `json:"answered"`
+	ClientReport   P2PPeerRuntimeReport `json:"clientReport"`
+	ExitReport     P2PPeerRuntimeReport `json:"exitReport"`
 }
 
 func NewRouter(authService *service.AuthService, deviceService *service.DeviceService, sessions *session.Manager, db *repository.DB, options ...RouterOption) *Router {
@@ -103,6 +123,10 @@ func WithRDPIngressReload(fn func(string) error) RouterOption {
 // coupling the API package to the concrete ingress manager implementation.
 func WithRDPIngressStatus(fn func(string) RDPIngressRuntimeStatus) RouterOption {
 	return func(r *Router) { r.onRDPIngressStatus = fn }
+}
+
+func WithP2PSessions(fn func() []P2PSessionRuntimeStatus) RouterOption {
+	return func(r *Router) { r.p2pSessions = fn }
 }
 
 // WithRDPIngressEnabled lets the API reject allocations while the process
@@ -214,6 +238,7 @@ func (r *Router) registerRoutes() {
 	// Dashboard & Sessions
 	r.mux.HandleFunc("GET /api/v1/dashboard", r.requireAuth(r.handleDashboard))
 	r.mux.HandleFunc("GET /api/v1/sessions/active", r.requireAuth(r.handleActiveSessions))
+	r.mux.HandleFunc("GET /api/v1/p2p/sessions", r.requireAuth(r.handleP2PSessions))
 	r.mux.HandleFunc("GET /api/v1/server/config", r.requireAuth(r.requireAdmin(r.handleGetServerConfig)))
 	r.mux.HandleFunc("PUT /api/v1/server/config", r.requireAuth(r.requireAdmin(r.handleSaveServerConfig)))
 
@@ -847,6 +872,8 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	p2pSessions := r.visibleP2PSessions(req)
+
 	exitInfos := make([]map[string]any, 0, len(exits))
 	for _, e := range exits {
 		exitInfos = append(exitInfos, map[string]any{
@@ -861,6 +888,7 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 		"onlineDevices":     len(devices),
 		"onlineExits":       len(exits),
 		"activeConnections": totalConns,
+		"activeP2PSessions": len(p2pSessions),
 		"todayUpload":       todayUp,
 		"todayDownload":     todayDown,
 		"exitNodes":         exitInfos,
@@ -1323,6 +1351,25 @@ func containsString(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func (r *Router) visibleP2PSessions(req *http.Request) []P2PSessionRuntimeStatus {
+	if r.p2pSessions == nil {
+		return []P2PSessionRuntimeStatus{}
+	}
+	all := r.p2pSessions()
+	visible := make([]P2PSessionRuntimeStatus, 0, len(all))
+	for _, item := range all {
+		if !r.deviceVisibleToRequest(req, item.ClientDeviceID) || !r.deviceVisibleToRequest(req, item.ExitDeviceID) {
+			continue
+		}
+		visible = append(visible, item)
+	}
+	return visible
+}
+
+func (r *Router) handleP2PSessions(w http.ResponseWriter, req *http.Request) {
+	writeJSON(w, http.StatusOK, r.visibleP2PSessions(req))
 }
 
 func (r *Router) handleActiveSessions(w http.ResponseWriter, req *http.Request) {

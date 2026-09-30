@@ -94,6 +94,7 @@
           <article class="stat rp-stat"><span>在线设备</span><strong id="stat-devices">—</strong><small id="stat-total">正在读取设备</small></article>
           <article class="stat rp-stat"><span>在线出口</span><strong id="stat-exits">—</strong><small>可用的出口会话</small></article>
           <article class="stat rp-stat"><span>活跃流</span><strong id="stat-streams">—</strong><small>所有可见设备合计</small></article>
+          <article class="stat rp-stat"><span>P2P 会话</span><strong id="stat-p2p">—</strong><small>当前直连协商 / 活跃会话</small></article>
           <article class="stat rp-stat"><span>今日已结算流量</span><strong id="stat-traffic">—</strong><small id="stat-traffic-detail">按连接审计记录统计</small></article>
         </div>
         <div class="overview-grid">
@@ -114,6 +115,10 @@
       <section id="page-sessions" class="page" hidden>
         <div class="page-heading"><div><p class="eyebrow">LIVE SESSIONS</p><h1>实时连接</h1><p class="muted">按设备显示正在处理的流；传输量为本次设备会话累计。</p></div></div>
         <article class="panel rp-card"><div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>设备</th><th>角色</th><th>选定出口</th><th>传输</th><th>活跃流</th><th>上传 / 下载</th></tr></thead><tbody id="sessions-body"></tbody></table></div></article>
+        <article class="panel rp-card">
+          <div class="panel-heading rp-card-heading"><div><h2>P2P Direct Path</h2><small>仅展示脱敏后的路径报告和租约状态</small></div><span id="p2p-session-count" class="badge neutral">0</span></div>
+          <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>Client → Exit</th><th>状态</th><th>Client 路径</th><th>Exit 路径</th><th>Lease 到期</th></tr></thead><tbody id="p2p-sessions-body"></tbody></table></div>
+        </article>
       </section>
       <section id="page-messages" class="page" hidden>
         <div class="page-heading">

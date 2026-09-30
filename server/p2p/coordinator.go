@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -139,6 +140,29 @@ func (c *Coordinator) Snapshot(id uint64) (SessionSnapshot, bool) {
 		ExpiresAt: item.ExpiresAt, Answered: item.Answered,
 		ClientReport: item.ClientReport, ExitReport: item.ExitReport,
 	}, true
+}
+
+func (c *Coordinator) Snapshots() []SessionSnapshot {
+	if c == nil {
+		return []SessionSnapshot{}
+	}
+	c.mu.Lock()
+	out := make([]SessionSnapshot, 0, len(c.active))
+	for _, item := range c.active {
+		out = append(out, SessionSnapshot{
+			ID: item.ID, ClientDeviceID: item.ClientDeviceID, ExitDeviceID: item.ExitDeviceID,
+			ExpiresAt: item.ExpiresAt, Answered: item.Answered,
+			ClientReport: item.ClientReport, ExitReport: item.ExitReport,
+		})
+	}
+	c.mu.Unlock()
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ExpiresAt.Equal(out[j].ExpiresAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].ExpiresAt.Before(out[j].ExpiresAt)
+	})
+	return out
 }
 
 func (c *Coordinator) Start(ctx context.Context) {

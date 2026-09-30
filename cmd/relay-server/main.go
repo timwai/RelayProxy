@@ -306,6 +306,27 @@ func main() {
 			}
 			ingress.CloseDevice(deviceID)
 		}),
+		api.WithP2PSessions(func() []api.P2PSessionRuntimeStatus {
+			if proxyP2PCoordinator == nil {
+				return []api.P2PSessionRuntimeStatus{}
+			}
+			snapshots := proxyP2PCoordinator.Snapshots()
+			out := make([]api.P2PSessionRuntimeStatus, 0, len(snapshots))
+			peer := func(report serverp2p.PeerReport) api.P2PPeerRuntimeReport {
+				return api.P2PPeerRuntimeReport{
+					Path: report.Path, Reason: report.Reason, ActiveStreams: report.ActiveStreams,
+					BytesUp: report.BytesUp, BytesDown: report.BytesDown, UpdatedAt: report.UpdatedAt,
+				}
+			}
+			for _, item := range snapshots {
+				out = append(out, api.P2PSessionRuntimeStatus{
+					SessionID: item.ID, ClientDeviceID: item.ClientDeviceID, ExitDeviceID: item.ExitDeviceID,
+					LeaseExpiresAt: item.ExpiresAt, Answered: item.Answered,
+					ClientReport: peer(item.ClientReport), ExitReport: peer(item.ExitReport),
+				})
+			}
+			return out
+		}),
 		api.WithRDPIngressEnabled(ingress.Enabled),
 		api.WithRDPIngressReload(func(string) error { return ingress.Reload() }),
 		api.WithRDPIngressStatus(func(id string) api.RDPIngressRuntimeStatus {

@@ -99,7 +99,7 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 				// Prefer native IPv6 over an IPv4 NAT path when both are available.
 				udpPriority, tcpPriority = 1100, 1000
 			}
-			appendCandidate := func(protocolName string, port, priority int) {
+			appendCandidate := func(protocolName string, port int, priority uint32) {
 				if port <= 0 || port > 65535 {
 					return
 				}

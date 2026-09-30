@@ -149,6 +149,17 @@ func TestStreamStateReplaysFINUntilAcknowledged(t *testing.T) {
 	if len(replay) != 2 || replay[1].Type != FrameFIN {
 		t.Fatalf("unacknowledged FIN was not replayed: %#v", replay)
 	}
+	// The original DATA and FIN arrived, but their ACK was lost. Replaying both
+	// after a rebind must be idempotent.
+	for _, frame := range replay {
+		fresh, _, err := receiver.Handle(frame)
+		if err != nil {
+			t.Fatalf("replay after FIN failed for %+v: %v", frame, err)
+		}
+		if len(fresh) != 0 {
+			t.Fatalf("replay after FIN duplicated %q", fresh)
+		}
+	}
 
 	ack, err := receiver.AckFrame()
 	if err != nil {

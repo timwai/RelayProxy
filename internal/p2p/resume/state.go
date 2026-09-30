@@ -131,7 +131,15 @@ func (s *StreamState) Handle(frame Frame) ([]byte, uint64, error) {
 	switch frame.Type {
 	case FrameData:
 		if s.remoteFIN {
-			return nil, s.receive.Expected(), ErrFrame
+			expected := s.receive.Expected()
+			if uint64(len(frame.Payload)) > ^uint64(0)-frame.Seq {
+				return nil, expected, ErrFrame
+			}
+			// After FIN, only a fully duplicate replay from before the FIN is
+			// valid. New bytes would violate TCP half-close ordering.
+			if frame.Seq+uint64(len(frame.Payload)) > expected {
+				return nil, expected, ErrFrame
+			}
 		}
 		fresh, receiveAck, err := s.receive.Accept(frame.Seq, frame.Payload)
 		if err != nil {

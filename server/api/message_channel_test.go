@@ -40,6 +40,7 @@ func TestChannelPushGETAndPOST(t *testing.T) {
 	defer cleanup()
 
 	device := createMessageTestDevice(t, router, "A")
+	public := NewPublicPushHandler(router.sessions, router.db)
 	channel := &repository.MessageChannel{
 		ID:        "login-code",
 		Name:      "登录验证码",
@@ -51,7 +52,7 @@ func TestChannelPushGETAndPOST(t *testing.T) {
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/push/login-code?message=验证码%20482931", nil)
 	getRec := httptest.NewRecorder()
-	router.ServeHTTP(getRec, getReq)
+	public.ServeHTTP(getRec, getReq)
 	if getRec.Code != http.StatusOK {
 		t.Fatalf("GET push returned %d: %s", getRec.Code, getRec.Body.String())
 	}
@@ -69,7 +70,7 @@ func TestChannelPushGETAndPOST(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"title": "通知", "message": "维护开始"})
 	postReq := httptest.NewRequest(http.MethodPost, "/api/v1/push/login-code", bytes.NewReader(body))
 	postRec := httptest.NewRecorder()
-	router.ServeHTTP(postRec, postReq)
+	public.ServeHTTP(postRec, postReq)
 	if postRec.Code != http.StatusOK {
 		t.Fatalf("POST push returned %d: %s", postRec.Code, postRec.Body.String())
 	}
@@ -79,6 +80,7 @@ func TestChannelAllDevicesAndCRUD(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()
 	adminCookie := loginAdmin(t, router)
+	public := NewPublicPushHandler(router.sessions, router.db)
 	a := createMessageTestDevice(t, router, "ALL-A")
 	b := createMessageTestDevice(t, router, "ALL-B")
 
@@ -93,7 +95,7 @@ func TestChannelAllDevicesAndCRUD(t *testing.T) {
 
 	pushReq := httptest.NewRequest(http.MethodGet, "/api/v1/push/all?message=hello", nil)
 	pushRec := httptest.NewRecorder()
-	router.ServeHTTP(pushRec, pushReq)
+	public.ServeHTTP(pushRec, pushReq)
 	if pushRec.Code != http.StatusOK {
 		t.Fatalf("push returned %d: %s", pushRec.Code, pushRec.Body.String())
 	}
@@ -143,5 +145,17 @@ func TestChannelRequiresTargets(t *testing.T) {
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+
+func TestAdminListenerDoesNotServePublicPush(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/push/missing?message=hello", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("admin push route returned %d: %s", response.Code, response.Body.String())
 	}
 }

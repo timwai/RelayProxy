@@ -246,6 +246,29 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 		return
 	}
 
+	if req.Resume != nil {
+		if !proxyStreamResumeNegotiated(clientSession, exitSession) {
+			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+				RequestID:    req.RequestID,
+				Success:      false,
+				ErrorCode:    protocol.ErrCodeInvalidRequest,
+				ErrorMessage: "resumable TCP stream capability was not negotiated",
+			})
+			r.emitAudit(baseAudit("RESUME_NOT_NEGOTIATED", protocol.ErrCodeInvalidRequest, ""))
+			return
+		}
+		if err := validateTCPResumeBinding(req.Resume); err != nil {
+			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+				RequestID:    req.RequestID,
+				Success:      false,
+				ErrorCode:    protocol.ErrCodeInvalidRequest,
+				ErrorMessage: err.Error(),
+			})
+			r.emitAudit(baseAudit("RESUME_INVALID", protocol.ErrCodeInvalidRequest, ""))
+			return
+		}
+	}
+
 	// Bind the Relay's own policy, replacing any policy supplied by the client.
 	relayPolicy, policyErr := r.targetPolicy(ctx, exitSession, req.Host, req.Port, "tcp")
 	req.RelayPolicy = relayPolicy
@@ -740,4 +763,30 @@ wait:
 	stop()
 	wg.Wait()
 	return up, down
+}
+
+
+func proxyStreamResumeNegotiated(client, exit *session.DeviceSession) bool {
+	return client != nil && exit != nil &&
+		hasCapability(client, protocol.CapabilityProxyStreamResume) &&
+		hasCapability(exit, protocol.CapabilityProxyStreamResume)
+}
+
+func validateTCPResumeBinding(binding *protocol.TCPResumeBinding) error {
+	if binding == nil {
+		return errors.New("missing resumable TCP binding")
+	}
+	if binding.Mode != protocol.TCPResumeModeOpen && binding.Mode != protocol.TCPResumeModeRebind {
+		return errors.New("invalid resumable TCP mode")
+	}
+	if len(binding.StreamID) != protocol.TCPResumeStreamIDSize {
+		return errors.New("invalid resumable TCP stream id")
+	}
+	if len(binding.Token) != protocol.TCPResumeTokenSize {
+		return errors.New("invalid resumable TCP token")
+	}
+	if binding.Generation == 0 {
+		return errors.New("invalid resumable TCP generation")
+	}
+	return nil
 }

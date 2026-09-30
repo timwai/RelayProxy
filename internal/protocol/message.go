@@ -32,22 +32,43 @@ type StreamHeader struct {
 	ExitDeviceID   string    `json:"exitDeviceId"`
 }
 
-// OpenTCPRequest is sent from Client -> Relay -> Exit to request a TCP connection
-type OpenTCPRequest struct {
-	RequestID   string      `json:"requestId"`
-	Host        string      `json:"host"`
-	Port        uint16      `json:"port"`
-	TimeoutMs   int         `json:"timeout"` // Timeout in milliseconds
-	RelayPolicy *acl.Policy `json:"relayPolicy,omitempty"`
+const (
+	TCPResumeModeOpen   = "open"
+	TCPResumeModeRebind = "rebind"
+
+	TCPResumeStreamIDSize = 16
+	TCPResumeTokenSize    = 32
+)
+
+// TCPResumeBinding is an optional OpenTCP extension used only after both peers
+// negotiated CapabilityProxyStreamResume. Token is never persisted or logged.
+type TCPResumeBinding struct {
+	Mode          string `json:"mode"`
+	StreamID      []byte `json:"streamId"`
+	Token         []byte `json:"token"`
+	Generation    uint64 `json:"generation"`
+	SendOffset    uint64 `json:"sendOffset"`
+	ReceiveOffset uint64 `json:"receiveOffset"`
 }
 
-// OpenTCPResponse is returned from Exit -> Relay -> Client
+// OpenTCPRequest is sent from Client -> Relay -> Exit to request a TCP connection.
+type OpenTCPRequest struct {
+	RequestID   string            `json:"requestId"`
+	Host        string            `json:"host"`
+	Port        uint16            `json:"port"`
+	TimeoutMs   int               `json:"timeout"` // Timeout in milliseconds
+	RelayPolicy *acl.Policy       `json:"relayPolicy,omitempty"`
+	Resume      *TCPResumeBinding `json:"resume,omitempty"`
+}
+
+// OpenTCPResponse is returned from Exit -> Relay -> Client.
 type OpenTCPResponse struct {
-	RequestID    string `json:"requestId"`
-	Success      bool   `json:"success"`
-	RemoteIP     string `json:"remoteIp,omitempty"`
-	ErrorCode    string `json:"errorCode,omitempty"`
-	ErrorMessage string `json:"errorMessage,omitempty"`
+	RequestID    string            `json:"requestId"`
+	Success      bool              `json:"success"`
+	RemoteIP     string            `json:"remoteIp,omitempty"`
+	ErrorCode    string            `json:"errorCode,omitempty"`
+	ErrorMessage string            `json:"errorMessage,omitempty"`
+	Resume       *TCPResumeBinding `json:"resume,omitempty"`
 }
 
 // OpenUDPRequest is sent from Client -> Relay -> Exit to request a UDP association

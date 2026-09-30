@@ -72,7 +72,7 @@ func TestManagersExchangeOfferAndAnswer(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	snapshot := clientSession.Snapshot()
-	if snapshot.State != StateReady || snapshot.PeerFingerprint != "sha256:exit" || len(snapshot.PeerCandidates) != 1 {
+	if snapshot.State != StateRendezvous || snapshot.PeerFingerprint != "sha256:exit" || len(snapshot.PeerCandidates) != 1 {
 		t.Fatalf("client signaling session not ready: %#v", snapshot)
 	}
 	exitSession, ok := exit.Session(42)
@@ -80,7 +80,7 @@ func TestManagersExchangeOfferAndAnswer(t *testing.T) {
 		t.Fatal("exit signaling session was not created")
 	}
 	exitSnapshot := exitSession.Snapshot()
-	if exitSnapshot.State != StateReady || exitSnapshot.PeerFingerprint != "sha256:client" {
+	if exitSnapshot.State != StateRendezvous || exitSnapshot.PeerFingerprint != "sha256:client" {
 		t.Fatalf("exit signaling session not ready: %#v", exitSnapshot)
 	}
 }
@@ -102,5 +102,20 @@ func TestRevokeClosesLocalSession(t *testing.T) {
 	}
 	if item.Snapshot().State != StateClosed {
 		t.Fatalf("revoked session state=%s", item.Snapshot().State)
+	}
+}
+
+
+func TestReadyForExitIgnoresSignalingOnlySession(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	token := []byte("0123456789abcdef0123456789abcdef")
+	item := manager.newSession(88, "client", "exit", token, time.Now().Add(time.Minute).UnixMilli())
+	if item == nil {
+		t.Fatal("failed to create signaling session")
+	}
+	item.setState(StateRendezvous, "")
+	if _, ok := manager.ReadyForExit("exit"); ok {
+		t.Fatal("signaling-only session was exposed as a ready direct tunnel")
 	}
 }

@@ -1,10 +1,11 @@
-// Package p2p implements proxy direct-path signaling on the Agent.
-// It intentionally does not own the QUIC data path yet: Phase 3 injects the
-// local UDP candidates and ephemeral TLS identity through LocalDescription.
+// Package p2p implements the proxy direct path between a Client Agent and an
+// Exit Agent. The Relay remains the authenticated control plane and fallback
+// data path; a session is READY only after UDP punching and pinned QUIC succeed.
 package p2p
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"net"
@@ -12,18 +13,26 @@ import (
 	"sync/atomic"
 	"time"
 
+	directp2p "relayproxy/internal/p2p"
+	"relayproxy/internal/p2p/punch"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 )
 
 type ControlSender func(context.Context, protocol.P2PControlMessage) (protocol.P2PControlMessage, error)
 type LocalDescription func() ([]protocol.P2PCandidate, string, error)
+type EndpointFactory func() *Endpoint
 
 type State string
 
 const (
-	StatePending State = "PENDING"
-	StateReady   State = "READY"
-	StateClosed  State = "CLOSED"
+	StateDiscovering   State = "DISCOVERING"
+	StateRendezvous    State = "RENDEZVOUS"
+	StatePunching      State = "PUNCHING"
+	StateQUICHandshake State = "QUIC_HANDSHAKE"
+	StateReady         State = "READY"
+	StateDegraded      State = "DEGRADED"
+	StateClosed        State = "CLOSED"
 )
 
 type Manager struct {
@@ -32,6 +41,9 @@ type Manager struct {
 	send   ControlSender
 	local  LocalDescription
 	lease  time.Duration
+
+	endpointFactory EndpointFactory
+	punchTimeout    time.Duration
 
 	mu       sync.Mutex
 	sessions map[uint64]*Session
@@ -52,6 +64,10 @@ type Session struct {
 	peerCandidates  []protocol.P2PCandidate
 	peerFingerprint string
 	state           State
+	lastError       string
+	endpoint        *Endpoint
+	direct          *directp2p.QUICSession
+	establishing    bool
 	closed          chan struct{}
 	closeOnce       sync.Once
 }
@@ -64,8 +80,12 @@ type Snapshot struct {
 	PeerCandidates  []protocol.P2PCandidate
 	PeerFingerprint string
 	State           State
+	Path            string
+	Error           string
 }
 
+// NewManager builds a signaling-only manager. It remains useful in tests and
+// for capability negotiation before the direct transport is enabled.
 func NewManager(parent context.Context, send ControlSender, local LocalDescription, lease time.Duration) *Manager {
 	if parent == nil {
 		parent = context.Background()
@@ -74,7 +94,22 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 		lease = 60 * time.Second
 	}
 	ctx, cancel := context.WithCancel(parent)
-	return &Manager{ctx: ctx, cancel: cancel, send: send, local: local, lease: lease, sessions: make(map[uint64]*Session)}
+	return &Manager{
+		ctx: ctx, cancel: cancel, send: send, local: local, lease: lease,
+		punchTimeout: 1200 * time.Millisecond, sessions: make(map[uint64]*Session),
+	}
+}
+
+// NewQUICManager builds the production manager. Each Client/Exit pair receives
+// a dedicated Endpoint so candidate discovery, punching and QUIC all use the
+// exact same UDP socket and NAT mapping.
+func NewQUICManager(parent context.Context, send ControlSender, rendezvous string, lease, punchTimeout time.Duration) *Manager {
+	m := NewManager(parent, send, nil, lease)
+	if punchTimeout > 0 {
+		m.punchTimeout = punchTimeout
+	}
+	m.endpointFactory = func() *Endpoint { return NewEndpoint(rendezvous) }
+	return m
 }
 
 func (m *Manager) Close() error {
@@ -96,7 +131,7 @@ func (m *Manager) Close() error {
 }
 
 func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Session, error) {
-	if m == nil || m.send == nil || m.local == nil {
+	if m == nil || m.send == nil || (m.local == nil && m.endpointFactory == nil) {
 		return nil, errors.New("proxy P2P manager is not configured")
 	}
 	if m.closed.Load() {
@@ -105,30 +140,45 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	if exitDeviceID == "" {
 		return nil, errors.New("exit device id is required")
 	}
-	candidates, fingerprint, err := m.local()
+	m.pruneExit(exitDeviceID)
+
+	candidates, fingerprint, endpoint, err := m.prepareLocal(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if fingerprint == "" {
-		return nil, errors.New("ephemeral certificate fingerprint is required")
 	}
 	response, err := m.send(ctx, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectRequest, ExitDeviceID: exitDeviceID,
 		Candidates: append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
 	})
 	if err != nil {
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
 		return nil, err
 	}
 	if response.Type == protocol.P2PControlError {
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
 		return nil, fmt.Errorf("P2P connect rejected: [%s] %s", response.ErrorCode, response.ErrorMessage)
 	}
 	if response.Type != protocol.P2PControlLeaseAck || response.SessionID == 0 || len(response.SessionToken) < 16 {
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
 		return nil, errors.New("P2P coordinator returned an incomplete session")
 	}
-	item := m.newSession(response.SessionID, response.ClientDeviceID, response.ExitDeviceID, response.SessionToken, response.LeaseExpiresAt)
+	item := m.newSessionWithEndpoint(
+		response.SessionID, response.ClientDeviceID, response.ExitDeviceID,
+		response.SessionToken, response.LeaseExpiresAt, endpoint,
+	)
 	if item == nil {
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
 		return nil, net.ErrClosed
 	}
+	item.setState(StateRendezvous, "")
 	return item, nil
 }
 
@@ -147,9 +197,14 @@ func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
 		item := m.sessions[message.SessionID]
 		m.mu.Unlock()
 		if item != nil && item.matchesToken(message.SessionToken) {
-			item.setPeer(message.Candidates, message.PeerFingerprint, StateReady)
+			item.setPeer(message.Candidates, message.PeerFingerprint)
 			if message.LeaseExpiresAt > 0 {
 				item.ExpiresAt.Store(message.LeaseExpiresAt)
+			}
+			if item.hasEndpoint() {
+				go item.establish(true)
+			} else {
+				item.setState(StateRendezvous, "")
 			}
 		}
 	case protocol.P2PControlCandidateUpdate:
@@ -157,7 +212,7 @@ func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
 		item := m.sessions[message.SessionID]
 		m.mu.Unlock()
 		if item != nil && item.matchesToken(message.SessionToken) {
-			item.setPeer(message.Candidates, "", "")
+			item.setPeer(message.Candidates, "")
 			if message.LeaseExpiresAt > 0 {
 				item.ExpiresAt.Store(message.LeaseExpiresAt)
 			}
@@ -175,18 +230,26 @@ func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
 }
 
 func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
-	if m.local == nil || m.send == nil || m.closed.Load() {
+	if m.send == nil || m.closed.Load() || (m.local == nil && m.endpointFactory == nil) {
 		return
 	}
-	candidates, fingerprint, err := m.local()
-	if err != nil || fingerprint == "" {
+	candidates, fingerprint, endpoint, err := m.prepareLocal(m.ctx)
+	if err != nil {
 		return
 	}
-	item := m.newSession(message.SessionID, message.ClientDeviceID, message.ExitDeviceID, message.SessionToken, message.LeaseExpiresAt)
+	item := m.newSessionWithEndpoint(
+		message.SessionID, message.ClientDeviceID, message.ExitDeviceID,
+		message.SessionToken, message.LeaseExpiresAt, endpoint,
+	)
 	if item == nil {
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
 		return
 	}
-	item.setPeer(message.Candidates, message.PeerFingerprint, StatePending)
+	item.setPeer(message.Candidates, message.PeerFingerprint)
+	item.setState(StateRendezvous, "")
+
 	ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
 	response, err := m.send(ctx, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectAnswer, SessionID: message.SessionID,
@@ -202,7 +265,39 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 	if response.Type == protocol.P2PControlLeaseAck && response.LeaseExpiresAt > 0 {
 		item.ExpiresAt.Store(response.LeaseExpiresAt)
 	}
-	item.setState(StateReady)
+	if item.hasEndpoint() {
+		go item.establish(false)
+	}
+}
+
+func (m *Manager) prepareLocal(ctx context.Context) ([]protocol.P2PCandidate, string, *Endpoint, error) {
+	if m.endpointFactory != nil {
+		endpoint := m.endpointFactory()
+		if endpoint == nil {
+			return nil, "", nil, errors.New("P2P endpoint factory returned nil")
+		}
+		if err := endpoint.Start(ctx); err != nil {
+			_ = endpoint.Close()
+			return nil, "", nil, err
+		}
+		candidates, fingerprint, err := endpoint.Description()
+		if err != nil {
+			_ = endpoint.Close()
+			return nil, "", nil, err
+		}
+		return candidates, fingerprint, endpoint, nil
+	}
+	if m.local == nil {
+		return nil, "", nil, errors.New("P2P local description is unavailable")
+	}
+	candidates, fingerprint, err := m.local()
+	if err != nil {
+		return nil, "", nil, err
+	}
+	if len(candidates) == 0 || fingerprint == "" {
+		return nil, "", nil, errors.New("P2P local description is incomplete")
+	}
+	return candidates, fingerprint, nil, nil
 }
 
 func (m *Manager) Session(id uint64) (*Session, bool) {
@@ -215,7 +310,33 @@ func (m *Manager) Session(id uint64) (*Session, bool) {
 	return item, ok
 }
 
+// ReadyForExit returns a usable direct tunnel only after punching, the QUIC
+// handshake and certificate fingerprint verification all succeeded.
+func (m *Manager) ReadyForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+	if m == nil || exitDeviceID == "" {
+		return nil, false
+	}
+	m.mu.Lock()
+	items := make([]*Session, 0, len(m.sessions))
+	for _, item := range m.sessions {
+		if item.ExitDeviceID == exitDeviceID {
+			items = append(items, item)
+		}
+	}
+	m.mu.Unlock()
+	for _, item := range items {
+		if direct, ok := item.Tunnel(); ok {
+			return direct, true
+		}
+	}
+	return nil, false
+}
+
 func (m *Manager) newSession(id uint64, clientDeviceID, exitDeviceID string, token []byte, expires int64) *Session {
+	return m.newSessionWithEndpoint(id, clientDeviceID, exitDeviceID, token, expires, nil)
+}
+
+func (m *Manager) newSessionWithEndpoint(id uint64, clientDeviceID, exitDeviceID string, token []byte, expires int64, endpoint *Endpoint) *Session {
 	if id == 0 || len(token) < 16 {
 		return nil
 	}
@@ -224,7 +345,8 @@ func (m *Manager) newSession(id uint64, clientDeviceID, exitDeviceID string, tok
 	}
 	item := &Session{
 		manager: m, ID: id, ClientDeviceID: clientDeviceID, ExitDeviceID: exitDeviceID,
-		Token: append([]byte(nil), token...), state: StatePending, closed: make(chan struct{}),
+		Token: append([]byte(nil), token...), state: StateRendezvous, endpoint: endpoint,
+		closed: make(chan struct{}),
 	}
 	item.ExpiresAt.Store(expires)
 	m.mu.Lock()
@@ -232,11 +354,12 @@ func (m *Manager) newSession(id uint64, clientDeviceID, exitDeviceID string, tok
 		m.mu.Unlock()
 		return nil
 	}
-	if old := m.sessions[id]; old != nil {
-		old.closeLocal()
-	}
+	old := m.sessions[id]
 	m.sessions[id] = item
 	m.mu.Unlock()
+	if old != nil {
+		old.closeLocal()
+	}
 	go item.renewLoop()
 	return item
 }
@@ -251,46 +374,225 @@ func (m *Manager) remove(id uint64) {
 	}
 }
 
+func (m *Manager) pruneExit(exitDeviceID string) {
+	m.mu.Lock()
+	var stale []*Session
+	for id, item := range m.sessions {
+		if item.ExitDeviceID != exitDeviceID {
+			continue
+		}
+		state := item.State()
+		if state == StateDegraded || state == StateClosed {
+			delete(m.sessions, id)
+			stale = append(stale, item)
+		}
+	}
+	m.mu.Unlock()
+	for _, item := range stale {
+		item.closeLocal()
+	}
+}
+
 func (s *Session) Snapshot() Snapshot {
 	if s == nil {
 		return Snapshot{}
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	path := ""
+	if s.state == StateReady {
+		path = protocol.P2PPathDirectQUIC
+	}
 	return Snapshot{
 		ID: s.ID, ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
 		ExpiresAt: s.ExpiresAt.Load(), PeerCandidates: append([]protocol.P2PCandidate(nil), s.peerCandidates...),
-		PeerFingerprint: s.peerFingerprint, State: s.state,
+		PeerFingerprint: s.peerFingerprint, State: s.state, Path: path, Error: s.lastError,
 	}
 }
 
-func (s *Session) setPeer(candidates []protocol.P2PCandidate, fingerprint string, state State) {
+func (s *Session) State() State {
+	if s == nil {
+		return StateClosed
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.state
+}
+
+func (s *Session) Tunnel() (tunnel.TunnelSession, bool) {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.state != StateReady || s.direct == nil {
+		return nil, false
+	}
+	return s.direct, true
+}
+
+func (s *Session) setPeer(candidates []protocol.P2PCandidate, fingerprint string) {
 	s.mu.Lock()
 	s.peerCandidates = append([]protocol.P2PCandidate(nil), candidates...)
 	if fingerprint != "" {
 		s.peerFingerprint = fingerprint
 	}
-	if state != "" {
-		s.state = state
-	}
 	s.mu.Unlock()
 }
 
-func (s *Session) setState(state State) {
+func (s *Session) setState(state State, reason string) {
 	s.mu.Lock()
 	s.state = state
+	s.lastError = reason
 	s.mu.Unlock()
+}
+
+func (s *Session) hasEndpoint() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.endpoint != nil
 }
 
 func (s *Session) matchesToken(token []byte) bool {
 	if s == nil || len(token) != len(s.Token) {
 		return false
 	}
-	var diff byte
-	for i := range token {
-		diff |= token[i] ^ s.Token[i]
+	return subtle.ConstantTimeCompare(token, s.Token) == 1
+}
+
+func (s *Session) establish(clientRole bool) {
+	if s == nil || s.manager == nil {
+		return
 	}
-	return diff == 0
+	s.mu.Lock()
+	if s.state == StateClosed || s.establishing || s.direct != nil || s.endpoint == nil {
+		s.mu.Unlock()
+		return
+	}
+	if len(s.peerCandidates) == 0 || s.peerFingerprint == "" {
+		s.mu.Unlock()
+		return
+	}
+	s.establishing = true
+	s.state = StatePunching
+	s.lastError = ""
+	endpoint := s.endpoint
+	candidates := append([]protocol.P2PCandidate(nil), s.peerCandidates...)
+	fingerprint := s.peerFingerprint
+	s.mu.Unlock()
+
+	conn, err := endpoint.UDPConn()
+	if err != nil {
+		s.failDirect(err)
+		return
+	}
+	identity, err := endpoint.Identity()
+	if err != nil {
+		s.failDirect(err)
+		return
+	}
+	timeout := s.manager.punchTimeout
+	if timeout <= 0 {
+		timeout = 1200 * time.Millisecond
+	}
+	ctx, cancel := context.WithTimeout(s.manager.ctx, timeout+8*time.Second)
+	defer cancel()
+	result, err := punch.Punch(ctx, conn, candidates, s.ID, s.Token, timeout)
+	if err != nil {
+		s.failDirect(err)
+		return
+	}
+
+	s.setState(StateQUICHandshake, "")
+	var direct *directp2p.QUICSession
+	if clientRole {
+		direct, err = directp2p.DialQUIC(ctx, result.Conn, result.RemoteAddr, identity, fingerprint)
+	} else {
+		direct, err = directp2p.AcceptQUIC(ctx, result.Conn, identity, fingerprint)
+	}
+	if err != nil {
+		s.failDirect(err)
+		return
+	}
+
+	s.mu.Lock()
+	if s.state == StateClosed {
+		s.establishing = false
+		s.mu.Unlock()
+		_ = direct.Close()
+		return
+	}
+	s.direct = direct
+	s.establishing = false
+	s.state = StateReady
+	s.lastError = ""
+	s.mu.Unlock()
+	s.reportPath(protocol.P2PPathDirectQUIC, "")
+	go s.watchDirect(direct)
+}
+
+func (s *Session) failDirect(err error) {
+	reason := "direct path failed"
+	if err != nil {
+		reason = err.Error()
+	}
+	s.mu.Lock()
+	if s.state != StateClosed {
+		s.state = StateDegraded
+		s.lastError = reason
+	}
+	s.establishing = false
+	endpoint := s.endpoint
+	s.endpoint = nil
+	s.mu.Unlock()
+	if endpoint != nil {
+		_ = endpoint.Close()
+	}
+	s.reportPath("", reason)
+}
+
+func (s *Session) watchDirect(direct *directp2p.QUICSession) {
+	if direct == nil {
+		return
+	}
+	select {
+	case <-s.closed:
+		return
+	case <-s.manager.ctx.Done():
+		return
+	case <-direct.Done():
+	}
+	s.mu.Lock()
+	if s.direct != direct || s.state == StateClosed {
+		s.mu.Unlock()
+		return
+	}
+	s.direct = nil
+	s.state = StateDegraded
+	s.lastError = "P2P QUIC session closed"
+	endpoint := s.endpoint
+	s.endpoint = nil
+	s.mu.Unlock()
+	_ = direct.Close()
+	if endpoint != nil {
+		_ = endpoint.Close()
+	}
+	s.reportPath("", "quic_session_closed")
+}
+
+func (s *Session) reportPath(path, reason string) {
+	if s == nil || s.manager == nil || s.manager.send == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(s.manager.ctx, 3*time.Second)
+		defer cancel()
+		_, _ = s.manager.send(ctx, protocol.P2PControlMessage{
+			Type: protocol.P2PControlPathReport, SessionID: s.ID,
+			ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
+			SessionToken: append([]byte(nil), s.Token...), Path: path, Reason: reason,
+		})
+	}()
 }
 
 func (s *Session) renewLoop() {
@@ -336,7 +638,20 @@ func (s *Session) closeLocal() {
 		return
 	}
 	s.closeOnce.Do(func() {
-		s.setState(StateClosed)
+		s.mu.Lock()
+		s.state = StateClosed
+		s.establishing = false
+		direct := s.direct
+		endpoint := s.endpoint
+		s.direct = nil
+		s.endpoint = nil
+		s.mu.Unlock()
 		close(s.closed)
+		if direct != nil {
+			_ = direct.Close()
+		}
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
 	})
 }

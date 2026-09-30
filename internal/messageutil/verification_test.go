@@ -15,6 +15,9 @@ func TestExtractVerificationCode(t *testing.T) {
 		{"code before keyword", "839214 是您的验证码，请勿向他人透露。", "839214"},
 		{"english otp", "Your OTP code is 7712. It expires in 5 minutes.", "7712"},
 		{"nearest number wins", "订单 20260930，登录验证码 654321，金额 100 元。", "654321"},
+		{"dynamic secret", "512360是您的4A系统动态密钥，请遵守法规，严禁非法使用客户信息，系统将记录审计您的操作行为【中国移动】 &#x20;", "512360"},
+		{"eip addon code", "【四川移动管信系统】您的EIP登录附加码是：G931，在当日有效。https\://m.scmcc.com.cn/m/aumC", "G931"},
+		{"mixed code", "您的认证码为 A7K9P2，请勿泄露。", "A7K9P2"},
 		{"no semantics", "订单号 482931 已支付，金额 99 元。", ""},
 		{"long number rejected", "验证码 13800138000，请核对。", ""},
 		{"keyword too far", "验证码：" + strings.Repeat("说明", 30) + " 123456", ""},
@@ -25,5 +28,53 @@ func TestExtractVerificationCode(t *testing.T) {
 				t.Fatalf("ExtractVerificationCode(%q) = %q, want %q", tc.text, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestExtractVerificationCodeWithRules(t *testing.T) {
+	rules := []VerificationRule{
+		{
+			Name:        "vendor token",
+			Keywords:    []string{"访问口令"},
+			Pattern:     `TOKEN-([A-Z0-9]{5})`,
+			MaxDistance: 80,
+		},
+	}
+	text := "供应商通知：访问口令 TOKEN-X7P31，请在十分钟内使用。"
+	if got := ExtractVerificationCodeWithRules(text, true, rules); got != "X7P31" {
+		t.Fatalf("custom rule = %q, want X7P31", got)
+	}
+}
+
+func TestExtractVerificationCodeWithPatternOnlyRule(t *testing.T) {
+	rules := []VerificationRule{{
+		Name:    "embedded",
+		Pattern: `AUTH#([A-Z0-9]{4})`,
+	}}
+	if got := ExtractVerificationCodeWithRules("message AUTH#Q91Z done", false, rules); got != "Q91Z" {
+		t.Fatalf("pattern-only rule = %q, want Q91Z", got)
+	}
+}
+
+func TestCustomRulesPrecedeDefault(t *testing.T) {
+	rules := []VerificationRule{{
+		Name:     "preferred",
+		Keywords: []string{"验证码"},
+		Pattern:  `[A-Z][0-9]{3}`,
+	}}
+	if got := ExtractVerificationCodeWithRules("验证码 G931，备用验证码 482931", true, rules); got != "G931" {
+		t.Fatalf("custom precedence = %q, want G931", got)
+	}
+}
+
+func TestValidateVerificationRule(t *testing.T) {
+	if err := ValidateVerificationRule(VerificationRule{Name: "bad", Pattern: "("}); err == nil {
+		t.Fatal("invalid regexp accepted")
+	}
+	if err := ValidateVerificationRule(VerificationRule{Name: "empty"}); err == nil {
+		t.Fatal("empty rule accepted")
+	}
+	if err := ValidateVerificationRule(VerificationRule{Name: "ok", Keywords: []string{"附加码"}}); err != nil {
+		t.Fatalf("valid keyword rule rejected: %v", err)
 	}
 }

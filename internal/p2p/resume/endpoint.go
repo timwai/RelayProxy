@@ -50,13 +50,13 @@ func NewEndpoint(state *StreamState) (*Endpoint, error) {
 		return nil, ErrBinding
 	}
 	return &Endpoint{
-		state:    state,
-		inbound:  newStreamBuffer(512 << 10),
-		change:   make(chan struct{}),
-		genDone:  make(map[uint64]chan struct{}),
+		state:     state,
+		inbound:   newStreamBuffer(512 << 10),
+		change:    make(chan struct{}),
+		genDone:   make(map[uint64]chan struct{}),
 		genClosed: make(map[uint64]bool),
-		losses:   make(chan TransportLoss, 8),
-		progress: make(chan struct{}, 1),
+		losses:    make(chan TransportLoss, 8),
+		progress:  make(chan struct{}, 1),
 	}, nil
 }
 

@@ -38,6 +38,9 @@ type GatewayConfig struct {
 	HeartbeatSec            int
 	RendezvousAddress       string
 	RDPLeaseSec             int
+	P2PEnabled              bool
+	P2PRendezvousAddress    string
+	P2PLeaseSec             int
 	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
 }
 
@@ -457,6 +460,9 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	if tunnel.SupportsDatagrams(sess) {
 		capabilities = append(capabilities, protocol.UDPModeDatagram)
 	}
+	if g.cfg.P2PEnabled {
+		capabilities = append(capabilities, protocol.CapabilityProxyP2P)
+	}
 	sessionID := "sess_" + uuid.New().String()
 	welcome := protocol.DeviceAccepted{
 		State:                 "approved",
@@ -471,6 +477,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		TransportCapabilities: capabilities,
 		RendezvousAddress:     g.cfg.RendezvousAddress,
 		RDPLeaseSec:           g.cfg.RDPLeaseSec,
+		P2PRendezvousAddress:  g.cfg.P2PRendezvousAddress,
+		P2PLeaseSec:           g.cfg.P2PLeaseSec,
 	}
 
 	deviceSession := &session.DeviceSession{

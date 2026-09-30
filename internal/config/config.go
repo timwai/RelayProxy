@@ -55,6 +55,14 @@ type ServerConfig struct {
 		} `yaml:"ingress"`
 	} `yaml:"rdp"`
 
+	P2P struct {
+		Enabled              *bool  `yaml:"enabled"`
+		RendezvousListen     string `yaml:"rendezvous_listen"`
+		RendezvousAdvertise  string `yaml:"rendezvous_advertise"`
+		LeaseSec             int    `yaml:"lease_sec"`
+		MaxSessionsPerDevice int    `yaml:"max_sessions_per_device"`
+	} `yaml:"p2p"`
+
 	Logging struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
@@ -222,6 +230,15 @@ func applyServerDefaults(cfg *ServerConfig) {
 	}
 	if cfg.RDP.Ingress.Enabled == nil {
 		cfg.RDP.Ingress.Enabled = BoolPtr(false)
+	}
+	if cfg.P2P.Enabled == nil {
+		cfg.P2P.Enabled = BoolPtr(true)
+	}
+	if cfg.P2P.LeaseSec == 0 {
+		cfg.P2P.LeaseSec = 60
+	}
+	if cfg.P2P.MaxSessionsPerDevice == 0 {
+		cfg.P2P.MaxSessionsPerDevice = 8
 	}
 	if cfg.RelayACL == nil {
 		cfg.RelayACL = &RelayACLConfig{}

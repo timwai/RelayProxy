@@ -28,6 +28,7 @@ type StreamRouter struct {
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
 	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
+	p2pControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	onAudit           func(audit *repository.ConnectionAudit)
 }
 
@@ -43,6 +44,13 @@ func (r *StreamRouter) SetRDPChecker(fn func(controllerDeviceID, targetDeviceID 
 // signaling frames.
 func (r *StreamRouter) SetRDPControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
 	r.rdpControlHandler = fn
+}
+
+// SetP2PControlHandler installs proxy direct-path signaling. Routing remains
+// unchanged: this handler only coordinates the transport to an already
+// selected Exit.
+func (r *StreamRouter) SetP2PControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
+	r.p2pControlHandler = fn
 }
 
 func NewStreamRouter(
@@ -158,6 +166,11 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	case protocol.FrameTypeRDPControl:
 		if r.rdpControlHandler != nil && (containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) || containsCapability(clientSession.Grants, protocol.CapabilityRDPHost)) {
 			r.rdpControlHandler(ctx, clientStream, clientSession)
+		}
+	case protocol.FrameTypeP2PControl:
+		if r.p2pControlHandler != nil && containsCapability(clientSession.Capabilities, protocol.CapabilityProxyP2P) &&
+			(containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) || containsCapability(clientSession.Grants, protocol.CapabilityProxyExit)) {
+			r.p2pControlHandler(ctx, clientStream, clientSession)
 		}
 	default:
 		log.Printf("[StreamRouter] Unsupported FrameType %d from device %s", header.Type, clientSession.DeviceID)

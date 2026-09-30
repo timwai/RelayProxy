@@ -63,8 +63,9 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	if err := NormalizeServerConfig(server); err != nil {
 		t.Fatal(err)
 	}
-	if server.Server.TLSEnabled == nil || !*server.Server.TLSEnabled || server.RDP.Ingress.Enabled == nil || *server.RDP.Ingress.Enabled {
-		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled)
+	if server.Server.TLSEnabled == nil || !*server.Server.TLSEnabled || server.RDP.Ingress.Enabled == nil || *server.RDP.Ingress.Enabled ||
+		server.P2P.Enabled == nil || !*server.P2P.Enabled || server.P2P.LeaseSec != 60 || server.P2P.MaxSessionsPerDevice != 8 {
+		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v p2p=%+v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled, server.P2P)
 	}
 	serverPath := filepath.Join(t.TempDir(), "server.yaml")
 	if err := SaveServerConfig(serverPath, server); err != nil {
@@ -393,5 +394,29 @@ func TestAgentThemeAllowsSystem(t *testing.T) {
 	cfg.GUI.Theme = "system"
 	if err := NormalizeAgentConfig(cfg); err != nil {
 		t.Fatalf("system theme rejected: %v", err)
+	}
+}
+
+
+func TestServerConfigLoadsP2PSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	data := `p2p:
+  enabled: true
+  rendezvous_listen: ":3479"
+  rendezvous_advertise: "relay.example.com:3479"
+  lease_sec: 45
+  max_sessions_per_device: 12
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("P2P server config was rejected: %v", err)
+	}
+	if cfg.P2P.Enabled == nil || !*cfg.P2P.Enabled || cfg.P2P.RendezvousListen != ":3479" ||
+		cfg.P2P.RendezvousAdvertise != "relay.example.com:3479" || cfg.P2P.LeaseSec != 45 ||
+		cfg.P2P.MaxSessionsPerDevice != 12 {
+		t.Fatalf("P2P settings were not loaded: %+v", cfg.P2P)
 	}
 }

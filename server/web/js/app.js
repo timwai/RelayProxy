@@ -235,8 +235,22 @@
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };
     $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td></tr>').join('') : emptyRow(6, '当前没有活跃流', '设备发起代理连接后会显示在这里');
   }
+  function relayPushOrigin() {
+    const tunnel = state.settings && state.settings.runtime && state.settings.runtime.tunnel;
+    if (!tunnel || !tunnel.tcpListen) return '';
+    const match = /^(?:\[[^\]]+\]|[^:]*):(\d{1,5})$/.exec(String(tunnel.tcpListen).trim());
+    if (!match) return '';
+    const port = Number(match[1]);
+    let host = location.hostname;
+    if (host.includes(':') && !host.startsWith('[')) host = '[' + host + ']';
+    const secure = !!tunnel.tlsEnabled;
+    const scheme = secure ? 'https://' : 'http://';
+    const suffix = (secure && port === 443) || (!secure && port === 80) ? '' : ':' + port;
+    return scheme + host + suffix;
+  }
   function channelPushURL(id) {
-    return location.origin + '/api/v1/push/' + encodeURIComponent(id || '');
+    const origin = relayPushOrigin();
+    return (origin || '中继地址读取中') + '/api/v1/push/' + encodeURIComponent(id || '');
   }
   function channelDeviceLabel(channel) {
     if (channel.allDevices) return '全部已批准设备';
@@ -278,7 +292,7 @@
     const selected = all('#channel-devices input:checked');
     $('channel-device-count').textContent = selected.length + ' 台';
     const id = $('channel-id').value.trim();
-    $('channel-url-preview').textContent = id ? channelPushURL(id) : location.origin + '/api/v1/push/{保存后生成的渠道ID}';
+    $('channel-url-preview').textContent = id ? channelPushURL(id) : (relayPushOrigin() || '中继地址读取中') + '/api/v1/push/{保存后生成的渠道ID}';
   }
   function openChannel(id) {
     const channel = id ? state.channels.find(item => item.id === id) : null;
@@ -786,7 +800,7 @@
   $('channel-devices').addEventListener('change', updateChannelDeviceState);
   $('channel-copy-url').addEventListener('click', () => {
     const id = $('channel-id').value.trim();
-    if (id) copy(channelPushURL(id));
+    if (id && relayPushOrigin()) copy(channelPushURL(id));
   });
   $('channel-list').addEventListener('click', event => {
     const copyButton = event.target.closest('[data-channel-copy]');

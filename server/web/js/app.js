@@ -271,8 +271,12 @@
     }
     host.innerHTML = state.channels.map(channel => {
       const url = channelPushURL(channel.id);
-      const target = channel.allDevices ? '<span class="badge success">全部设备</span>' : '<span class="badge neutral">' + esc((channel.deviceIds || []).length) + ' 台设备</span>';
-      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div>' + target + '</div><p>' + esc(channelDeviceLabel(channel)) + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
+      const fallback = channel.allDevices ? '<span class="badge success">兜底：全部设备</span>' : '<span class="badge neutral">兜底：' + esc((channel.deviceIds || []).length) + ' 台</span>';
+      const routeCount = (channel.routeRules || []).length;
+      const customCount = (channel.verificationRules || []).length;
+      const ruleBadges = (routeCount ? '<span class="badge transport">分流 ' + esc(routeCount) + '</span>' : '') +
+        (customCount ? '<span class="badge transport">识别 ' + esc(customCount) + '</span>' : '');
+      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
     }).join('');
   }
   function renderChannelDevices(selected) {
@@ -285,6 +289,89 @@
       return '<label class="channel-device-option"><input type="checkbox" value="' + esc(device.id) + '"' + (checked ? ' checked' : '') + '><span><strong>' + esc(device.name || device.id) + '</strong><small class="mono">' + esc(device.id) + ' · ' + esc(status) + '</small></span></label>';
     }).join('') : '<div class="channel-empty"><span>还没有可绑定设备</span></div>';
     updateChannelDeviceState();
+  }
+  function routeDeviceOptions(selected) {
+    const selectedSet = new Set(selected || []);
+    return state.devices.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), 'zh-CN')).map(device => {
+      const status = device.approvalState === 'approved' ? (device.status === 'online' ? '在线' : '离线') : '已撤销';
+      return '<option value="' + esc(device.id) + '"' + (selectedSet.has(device.id) ? ' selected' : '') + '>' + esc((device.name || device.id) + ' · ' + status) + '</option>';
+    }).join('');
+  }
+  function verificationRuleHTML(rule = {}, index = 0) {
+    const keywords = Array.isArray(rule.keywords) ? rule.keywords.join(', ') : '';
+    const distance = Number(rule.maxDistance) > 0 ? Number(rule.maxDistance) : 64;
+    return '<article class="channel-rule-card" data-verification-rule><div class="channel-rule-card-head"><strong>自定义识别规则 ' + (index + 1) + '</strong><button type="button" class="small-button danger" data-verification-remove>删除</button></div><div class="channel-rule-grid">' +
+      '<label>名称<input data-verification-name maxlength="80" value="' + esc(rule.name || '') + '" placeholder="例如：四川移动附加码"></label>' +
+      '<label>最大距离（字符附近）<input data-verification-distance type="number" min="0" max="1024" value="' + esc(distance) + '"></label>' +
+      '<label class="wide">关键词（逗号分隔）<input data-verification-keywords value="' + esc(keywords) + '" placeholder="附加码, 动态密钥, 登录口令"></label>' +
+      '<label class="wide">验证码正则<input data-verification-pattern class="mono" maxlength="500" value="' + esc(rule.pattern || '') + '" placeholder="例如：([A-Z0-9]{4,8})；留空使用默认候选格式"></label>' +
+      '</div><label class="channel-rule-check"><input data-verification-case type="checkbox"' + (rule.caseSensitive ? ' checked' : '') + '>区分大小写</label><p class="channel-fallback-note">正则含捕获组时返回第一个捕获组；没有捕获组时返回整个匹配。</p></article>';
+  }
+  function routeRuleHTML(rule = {}, index = 0) {
+    const matchType = rule.matchType === 'regex' ? 'regex' : 'contains';
+    return '<article class="channel-rule-card" data-route-rule><div class="channel-rule-card-head"><strong>分流规则 ' + (index + 1) + '</strong><button type="button" class="small-button danger" data-route-remove>删除</button></div><div class="channel-rule-grid">' +
+      '<label>名称<input data-route-name maxlength="120" value="' + esc(rule.name || '') + '" placeholder="例如：4A 系统"></label>' +
+      '<label>匹配方式<select data-route-type><option value="contains"' + (matchType === 'contains' ? ' selected' : '') + '>包含文本</option><option value="regex"' + (matchType === 'regex' ? ' selected' : '') + '>正则表达式</option></select></label>' +
+      '<label class="wide">匹配内容<input data-route-pattern class="mono" maxlength="500" value="' + esc(rule.pattern || '') + '" placeholder="例如：4A系统 或 四川移动.*EIP"></label>' +
+      '<label class="wide">目标设备<select data-route-devices class="channel-route-devices" multiple>' + routeDeviceOptions(rule.deviceIds || []) + '</select></label>' +
+      '</div><label class="channel-rule-check"><input data-route-case type="checkbox"' + (rule.caseSensitive ? ' checked' : '') + '>区分大小写</label>' +
+      '<label class="channel-rule-check"><input data-route-all type="checkbox"' + (rule.allDevices ? ' checked' : '') + '>命中后推送到全部已批准设备</label></article>';
+  }
+  function renderChannelRules(channel) {
+    const verificationRules = channel && Array.isArray(channel.verificationRules) ? channel.verificationRules : [];
+    const routeRules = channel && Array.isArray(channel.routeRules) ? channel.routeRules : [];
+    $('channel-use-default-verification').checked = !channel || channel.useDefaultVerification !== false;
+    $('channel-verification-rules').innerHTML = verificationRules.length ? verificationRules.map(verificationRuleHTML).join('') : '<div class="channel-rule-empty">没有自定义规则，将使用默认验证码识别。</div>';
+    $('channel-route-rules').innerHTML = routeRules.length ? routeRules.map(routeRuleHTML).join('') : '<div class="channel-rule-empty">没有内容分流，消息会直接推送到上方兜底设备。</div>';
+    syncRouteRuleDeviceStates();
+  }
+  function addVerificationRule(rule = {}) {
+    const host = $('channel-verification-rules');
+    if (host.querySelector('.channel-rule-empty')) host.innerHTML = '';
+    const index = host.querySelectorAll('[data-verification-rule]').length;
+    host.insertAdjacentHTML('beforeend', verificationRuleHTML(rule, index));
+  }
+  function addRouteRule(rule = {}) {
+    const host = $('channel-route-rules');
+    if (host.querySelector('.channel-rule-empty')) host.innerHTML = '';
+    const index = host.querySelectorAll('[data-route-rule]').length;
+    host.insertAdjacentHTML('beforeend', routeRuleHTML(rule, index));
+    syncRouteRuleDeviceStates();
+  }
+  function renumberChannelRules() {
+    all('#channel-verification-rules [data-verification-rule]').forEach((card, index) => { const title = card.querySelector('.channel-rule-card-head strong'); if (title) title.textContent = '自定义识别规则 ' + (index + 1); });
+    all('#channel-route-rules [data-route-rule]').forEach((card, index) => { const title = card.querySelector('.channel-rule-card-head strong'); if (title) title.textContent = '分流规则 ' + (index + 1); });
+    if (!$('channel-verification-rules').children.length) $('channel-verification-rules').innerHTML = '<div class="channel-rule-empty">没有自定义规则，将使用默认验证码识别。</div>';
+    if (!$('channel-route-rules').children.length) $('channel-route-rules').innerHTML = '<div class="channel-rule-empty">没有内容分流，消息会直接推送到上方兜底设备。</div>';
+  }
+  function syncRouteRuleDeviceStates() {
+    all('#channel-route-rules [data-route-rule]').forEach(card => {
+      const allDevices = card.querySelector('[data-route-all]').checked;
+      const select = card.querySelector('[data-route-devices]');
+      if (select) select.disabled = allDevices || state.channelBusy;
+    });
+  }
+  function readVerificationRules() {
+    return all('#channel-verification-rules [data-verification-rule]').map(card => ({
+      name: card.querySelector('[data-verification-name]').value.trim(),
+      keywords: card.querySelector('[data-verification-keywords]').value.split(/[,，\n]+/).map(value => value.trim()).filter(Boolean),
+      pattern: card.querySelector('[data-verification-pattern]').value.trim(),
+      maxDistance: Number(card.querySelector('[data-verification-distance]').value) || 0,
+      caseSensitive: card.querySelector('[data-verification-case]').checked
+    }));
+  }
+  function readRouteRules() {
+    return all('#channel-route-rules [data-route-rule]').map(card => {
+      const allDevices = card.querySelector('[data-route-all]').checked;
+      return {
+        name: card.querySelector('[data-route-name]').value.trim(),
+        matchType: card.querySelector('[data-route-type]').value,
+        pattern: card.querySelector('[data-route-pattern]').value.trim(),
+        caseSensitive: card.querySelector('[data-route-case]').checked,
+        allDevices,
+        deviceIds: allDevices ? [] : Array.from(card.querySelector('[data-route-devices]').selectedOptions).map(option => option.value)
+      };
+    });
   }
   function updateChannelDeviceState() {
     const allDevices = $('channel-all-devices').checked;
@@ -304,6 +391,7 @@
     $('channel-all-devices').checked = channel ? !!channel.allDevices : false;
     $('channel-delete').hidden = !channel;
     renderChannelDevices(channel ? channel.deviceIds : []);
+    renderChannelRules(channel);
     errorAt('channel-error', '');
     updateChannelDeviceState();
     $('channel-dialog').showModal();
@@ -317,11 +405,22 @@
     const body = {
       name: $('channel-name').value.trim(),
       allDevices,
-      deviceIds
+      deviceIds,
+      useDefaultVerification: $('channel-use-default-verification').checked,
+      verificationRules: readVerificationRules(),
+      routeRules: readRouteRules()
     };
+    if (!body.useDefaultVerification && !body.verificationRules.length) {
+      errorAt('channel-error', '请启用默认验证码识别，或至少添加一条自定义识别规则。');
+      return;
+    }
+    if (!allDevices && !deviceIds.length && !body.routeRules.length) {
+      errorAt('channel-error', '请选择兜底设备、启用全部设备，或至少添加一条内容分流规则。');
+      return;
+    }
     if (!state.selectedChannel) body.id = $('channel-id').value.trim();
     state.channelBusy = true;
-    all('#channel-dialog button, #channel-dialog input').forEach(el => { el.disabled = true; });
+    all('#channel-dialog button, #channel-dialog input, #channel-dialog select, #channel-dialog textarea').forEach(el => { el.disabled = true; });
     errorAt('channel-error', '');
     try {
       if (state.selectedChannel) {
@@ -337,11 +436,13 @@
       errorAt('channel-error', err.message);
     } finally {
       state.channelBusy = false;
-      all('#channel-dialog button, #channel-dialog input').forEach(el => { el.disabled = false; });
+      all('#channel-dialog button, #channel-dialog input, #channel-dialog select, #channel-dialog textarea').forEach(el => { el.disabled = false; });
       $('channel-id').disabled = !!state.selectedChannel;
+      syncRouteRuleDeviceStates();
     }
   }
-  async function deleteChannel() {
+
+    async function deleteChannel() {
     if (state.channelBusy || !state.selectedChannel) return;
     const channel = state.selectedChannel;
     if (!confirm('删除渠道「' + channel.name + '」？删除后该渠道 URL 将立即失效。')) return;
@@ -372,7 +473,7 @@
       if (status && !deliveries.some(delivery => delivery.status === status)) return false;
       if (!needle) return true;
       return [
-        message.title, message.content, message.source, message.channelId, code,
+        message.title, message.content, message.source, message.channelId, message.routeRule, code,
         ...deliveries.flatMap(delivery => [delivery.deviceName, delivery.deviceId, delivery.status])
       ].join(' ').toLowerCase().includes(needle);
     });
@@ -388,7 +489,7 @@
         return '<div class="message-delivery"><span><strong>' + esc(delivery.deviceName || delivery.deviceId) + '</strong><small class="mono">' + esc(delivery.deviceId) + '</small></span>' + badge(label, tone) + error + '</div>';
       }).join('') : '<span class="muted">—</span>';
       const codeHTML = code ? '<div class="message-code"><span class="mono">' + esc(code) + '</span><button type="button" class="small-button" data-copy-message-code="' + esc(code) + '">复制</button></div>' : '<span class="muted">—</span>';
-      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || '渠道推送') + (message.channelId ? ' · ' + esc(message.channelId) : '') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td></tr>';
+      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || '渠道推送') + (message.channelId ? ' · ' + esc(message.channelId) : '') + (message.routeRule ? ' · 分流：' + esc(message.routeRule) : '') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td></tr>';
     }).join('') : emptyRow(4, '暂无匹配消息', '渠道推送后会显示在这里');
   }
 
@@ -798,6 +899,19 @@
   $('channel-all-devices').addEventListener('change', updateChannelDeviceState);
   $('channel-id').addEventListener('input', updateChannelDeviceState);
   $('channel-devices').addEventListener('change', updateChannelDeviceState);
+  $('channel-verification-add').addEventListener('click', () => addVerificationRule());
+  $('channel-route-add').addEventListener('click', () => addRouteRule());
+  $('channel-verification-rules').addEventListener('click', event => {
+    const button = event.target.closest('[data-verification-remove]');
+    if (button) { button.closest('[data-verification-rule]').remove(); renumberChannelRules(); }
+  });
+  $('channel-route-rules').addEventListener('click', event => {
+    const button = event.target.closest('[data-route-remove]');
+    if (button) { button.closest('[data-route-rule]').remove(); renumberChannelRules(); }
+  });
+  $('channel-route-rules').addEventListener('change', event => {
+    if (event.target.matches('[data-route-all]')) syncRouteRuleDeviceStates();
+  });
   $('channel-copy-url').addEventListener('click', () => {
     const id = $('channel-id').value.trim();
     if (id && relayPushOrigin()) copy(channelPushURL(id));

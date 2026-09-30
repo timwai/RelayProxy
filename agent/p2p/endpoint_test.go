@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"encoding/hex"
 	"context"
 	"encoding/binary"
 	"net"
@@ -71,5 +72,16 @@ func TestEndpointUsesSameSocketForReflexiveDiscovery(t *testing.T) {
 	}
 	if !foundReflexive {
 		t.Fatalf("reflexive candidate did not preserve endpoint socket port %d: %#v", localPort, candidates)
+	}
+}
+
+
+func TestCurrentNetworkSignatureIsOpaque(t *testing.T) {
+	signature := CurrentNetworkSignature()
+	if len(signature) != 32 {
+		t.Fatalf("network signature length=%d, want 32", len(signature))
+	}
+	if _, err := hex.DecodeString(signature); err != nil {
+		t.Fatalf("network signature is not hex: %q", signature)
 	}
 }

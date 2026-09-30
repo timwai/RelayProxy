@@ -311,3 +311,63 @@ func TestCandidateSummaryIsCountOnly(t *testing.T) {
 		t.Fatalf("candidate address leaked into summary: %q", summary)
 	}
 }
+
+
+func TestNetworkChangeInvalidatesSessionsAndCooldown(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	token := []byte("0123456789abcdef0123456789abcdef")
+	item := manager.newSession(700, "client", "exit", token, time.Now().Add(time.Minute).UnixMilli())
+	if item == nil {
+		t.Fatal("failed to create session")
+	}
+	item.mu.Lock()
+	item.clientRole = true
+	item.state = StateReady
+	item.mu.Unlock()
+	manager.recordFailure("exit", "old network failed")
+	manager.mu.Lock()
+	manager.starting["exit"] = 99
+	manager.mu.Unlock()
+	before := manager.networkEpoch.Load()
+
+	manager.invalidateNetwork()
+
+	if manager.networkEpoch.Load() != before+1 {
+		t.Fatalf("network epoch=%d, want %d", manager.networkEpoch.Load(), before+1)
+	}
+	if _, ok := manager.Session(item.ID); ok {
+		t.Fatal("network change kept stale P2P session")
+	}
+	manager.mu.Lock()
+	cooldowns, starting := len(manager.cooldowns), len(manager.starting)
+	manager.mu.Unlock()
+	if cooldowns != 0 || starting != 0 {
+		t.Fatalf("network change left cooldowns=%d starting=%d", cooldowns, starting)
+	}
+	select {
+	case <-item.closed:
+	default:
+		t.Fatal("network change did not close stale session")
+	}
+}
+
+func TestNetworkWatcherDetectsSignatureChange(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	var signature atomic.Value
+	signature.Store("network-a")
+	manager.networkSignature = func() string { return signature.Load().(string) }
+	manager.networkCheckInterval = 5 * time.Millisecond
+	manager.networkSig = "network-a"
+	go manager.watchNetworkLoop()
+
+	signature.Store("network-b")
+	deadline := time.Now().Add(time.Second)
+	for manager.networkEpoch.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if manager.networkEpoch.Load() == 0 {
+		t.Fatal("network signature change was not detected")
+	}
+}

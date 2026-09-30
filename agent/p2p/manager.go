@@ -44,19 +44,24 @@ type Manager struct {
 	local  LocalDescription
 	lease  time.Duration
 
-	endpointFactory EndpointFactory
-	punchTimeout    time.Duration
-	keepAlive       time.Duration
-	idleTimeout     time.Duration
-	maxExitSessions int
+	endpointFactory      EndpointFactory
+	punchTimeout         time.Duration
+	keepAlive            time.Duration
+	idleTimeout          time.Duration
+	maxExitSessions      int
+	networkCheckInterval time.Duration
+	networkSignature     func() string
 
-	mu        sync.Mutex
-	sessions  map[uint64]*Session
-	starting  map[string]struct{}
-	cooldowns map[string]failureState
-	fallbacks map[string]uint64
-	ready     chan *Session
-	closed    atomic.Bool
+	mu         sync.Mutex
+	sessions   map[uint64]*Session
+	starting   map[string]uint64
+	cooldowns  map[string]failureState
+	fallbacks  map[string]uint64
+	networkSig string
+	ready      chan *Session
+	closed     atomic.Bool
+	attemptSeq atomic.Uint64
+	networkEpoch atomic.Uint64
 }
 
 type failureState struct {
@@ -66,10 +71,12 @@ type failureState struct {
 }
 
 type QUICManagerOptions struct {
-	PunchTimeout    time.Duration
-	KeepAlive       time.Duration
-	IdleTimeout     time.Duration
-	MaxExitSessions int
+	PunchTimeout         time.Duration
+	KeepAlive            time.Duration
+	IdleTimeout          time.Duration
+	MaxExitSessions      int
+	NetworkCheckInterval time.Duration
+	NetworkSignature     func() string
 }
 
 type Session struct {
@@ -146,7 +153,8 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 	return &Manager{
 		ctx: ctx, cancel: cancel, send: send, local: local, lease: lease,
 		punchTimeout: 1200 * time.Millisecond, keepAlive: 10 * time.Second, idleTimeout: 120 * time.Second, maxExitSessions: 4,
-		sessions: make(map[uint64]*Session), starting: make(map[string]struct{}), cooldowns: make(map[string]failureState),
+		networkCheckInterval: 10 * time.Second, networkSignature: CurrentNetworkSignature,
+		sessions: make(map[uint64]*Session), starting: make(map[string]uint64), cooldowns: make(map[string]failureState),
 		fallbacks: make(map[string]uint64), ready: make(chan *Session, 1024),
 	}
 }
@@ -172,8 +180,18 @@ func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rende
 	if options.MaxExitSessions > 0 {
 		m.maxExitSessions = options.MaxExitSessions
 	}
+	if options.NetworkCheckInterval > 0 {
+		m.networkCheckInterval = options.NetworkCheckInterval
+	}
+	if options.NetworkSignature != nil {
+		m.networkSignature = options.NetworkSignature
+	}
+	if m.networkSignature != nil {
+		m.networkSig = m.networkSignature()
+	}
 	m.endpointFactory = func() *Endpoint { return NewEndpoint(rendezvous) }
 	go m.reapIdleLoop()
+	go m.watchNetworkLoop()
 	return m
 }
 
@@ -230,17 +248,26 @@ func (m *Manager) EnsureClient(exitDeviceID string) {
 			return
 		}
 	}
-	m.starting[exitDeviceID] = struct{}{}
+	attemptID := m.attemptSeq.Add(1)
+	m.starting[exitDeviceID] = attemptID
+	epoch := m.networkEpoch.Load()
 	m.mu.Unlock()
 
 	go func() {
 		ctx, cancel := context.WithTimeout(m.ctx, 12*time.Second)
 		defer cancel()
-		if _, err := m.StartClient(ctx, exitDeviceID); err != nil {
+		item, err := m.StartClient(ctx, exitDeviceID)
+		if epoch != m.networkEpoch.Load() {
+			if item != nil {
+				m.removeFailedSession(item, "network_changed")
+			}
+		} else if err != nil {
 			m.recordFailure(exitDeviceID, err.Error())
 		}
 		m.mu.Lock()
-		delete(m.starting, exitDeviceID)
+		if current, ok := m.starting[exitDeviceID]; ok && current == attemptID {
+			delete(m.starting, exitDeviceID)
+		}
 		m.mu.Unlock()
 	}()
 }
@@ -1010,6 +1037,74 @@ func summarizeCandidates(local, peer []protocol.P2PCandidate) string {
 	localLAN, localReflexive := count(local)
 	peerLAN, peerReflexive := count(peer)
 	return fmt.Sprintf("local:lan=%d,reflexive=%d;peer:lan=%d,reflexive=%d", localLAN, localReflexive, peerLAN, peerReflexive)
+}
+
+func (m *Manager) watchNetworkLoop() {
+	if m == nil || m.networkSignature == nil || m.networkCheckInterval <= 0 {
+		return
+	}
+	ticker := time.NewTicker(m.networkCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-ticker.C:
+			current := m.networkSignature()
+			m.mu.Lock()
+			previous := m.networkSig
+			if previous == "" {
+				m.networkSig = current
+				m.mu.Unlock()
+				continue
+			}
+			changed := current != "" && current != previous
+			if changed {
+				m.networkSig = current
+			}
+			m.mu.Unlock()
+			if changed {
+				m.invalidateNetwork()
+			}
+		}
+	}
+}
+
+func (m *Manager) invalidateNetwork() {
+	if m == nil || m.closed.Load() {
+		return
+	}
+	m.networkEpoch.Add(1)
+	m.mu.Lock()
+	items := make([]*Session, 0, len(m.sessions))
+	for _, item := range m.sessions {
+		items = append(items, item)
+	}
+	retry := make(map[string]struct{})
+	for exitID := range m.cooldowns {
+		if exitID != "" {
+			retry[exitID] = struct{}{}
+		}
+	}
+	m.sessions = make(map[uint64]*Session)
+	m.cooldowns = make(map[string]failureState)
+	m.starting = make(map[string]uint64)
+	m.mu.Unlock()
+
+	for _, item := range items {
+		item.mu.RLock()
+		clientRole, exitID := item.clientRole, item.ExitDeviceID
+		item.mu.RUnlock()
+		if clientRole && exitID != "" {
+			retry[exitID] = struct{}{}
+		}
+		m.closeAndNotify(item, "network_changed")
+	}
+	if m.send != nil && (m.local != nil || m.endpointFactory != nil) {
+		for exitID := range retry {
+			m.EnsureClient(exitID)
+		}
+	}
 }
 
 func (m *Manager) recordFailure(exitDeviceID, reason string) {

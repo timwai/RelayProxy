@@ -1,6 +1,9 @@
 package messageutil
 
-import (\n\t"strings"\n\t"testing"\n)
+import (
+	"strings"
+	"testing"
+)
 
 func TestExtractVerificationCode(t *testing.T) {
 	tests := []struct {
@@ -14,7 +17,7 @@ func TestExtractVerificationCode(t *testing.T) {
 		{"nearest number wins", "订单 20260930，登录验证码 654321，金额 100 元。", "654321"},
 		{"no semantics", "订单号 482931 已支付，金额 99 元。", ""},
 		{"long number rejected", "验证码 13800138000，请核对。", ""},
-		{"keyword too far", "验证码："+strings.Repeat("说明", 30)+" 123456", ""},
+		{"keyword too far", "验证码：" + strings.Repeat("说明", 30) + " 123456", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

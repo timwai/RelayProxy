@@ -54,15 +54,15 @@ type Manager struct {
 	networkCheckInterval time.Duration
 	networkSignature     func() string
 
-	mu           sync.Mutex
-	sessions     map[uint64]*Session
-	starting     map[string]uint64
-	cooldowns    map[string]failureState
-	fallbacks    map[string]uint64
-	networkSig   string
-	ready        chan *Session
-	closed       atomic.Bool
-	attemptSeq   atomic.Uint64
+	mu               sync.Mutex
+	sessions         map[uint64]*Session
+	starting         map[string]uint64
+	cooldowns        map[string]failureState
+	fallbacks        map[string]uint64
+	networkSig       string
+	ready            chan *Session
+	closed           atomic.Bool
+	attemptSeq       atomic.Uint64
 	networkEpoch     atomic.Uint64
 	powerConstrained atomic.Bool
 }
@@ -1202,7 +1202,7 @@ func (m *Manager) directQUICOptions() directp2p.QUICOptions {
 	}
 	if m.powerConstrained.Load() {
 		return directp2p.QUICOptions{
-			MaxIdleTimeout: m.effectiveIdleTimeout(),
+			MaxIdleTimeout:   m.effectiveIdleTimeout(),
 			DisableKeepAlive: true,
 		}
 	}

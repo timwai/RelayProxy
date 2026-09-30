@@ -28,7 +28,7 @@ type UDPResult struct {
 
 // Punch races all validated UDP candidates on one socket and returns the
 // authenticated peer address. The caller owns conn after a successful return.
-func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.RDPCandidate, sessionID uint64, key []byte, timeout time.Duration) (*UDPResult, error) {
+func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration) (*UDPResult, error) {
 	if conn == nil || sessionID == 0 || len(key) < 16 {
 		return nil, errors.New("invalid RDP UDP punch session")
 	}

@@ -32,12 +32,12 @@ var (
 // loopback, multicast and link-local addresses are deliberately excluded from
 // the advertised public path; LAN discovery advertises only usable interface
 // addresses.
-func Validate(input []protocol.RDPCandidate) ([]protocol.RDPCandidate, error) {
+func Validate(input []protocol.P2PCandidate) ([]protocol.P2PCandidate, error) {
 	if len(input) > MaxCandidates {
 		return nil, fmt.Errorf("at most %d RDP candidates are allowed", MaxCandidates)
 	}
 	seen := make(map[string]struct{}, len(input))
-	result := make([]protocol.RDPCandidate, 0, len(input))
+	result := make([]protocol.P2PCandidate, 0, len(input))
 	for _, item := range input {
 		if item.Protocol != "tcp" && item.Protocol != "udp" {
 			return nil, fmt.Errorf("%w: unsupported protocol %q", ErrInvalidCandidate, item.Protocol)
@@ -70,8 +70,8 @@ func Validate(input []protocol.RDPCandidate) ([]protocol.RDPCandidate, error) {
 // Discover returns interface addresses for the local TCP and UDP listeners.
 // The caller may pass the actual bound ports (including different ports) so
 // the candidate is never an arbitrary forwarding destination.
-func Discover(udpPort, tcpPort int) []protocol.RDPCandidate {
-	result := make([]protocol.RDPCandidate, 0, MaxCandidates)
+func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
+	result := make([]protocol.P2PCandidate, 0, MaxCandidates)
 	interfaces, _ := net.Interfaces()
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
@@ -94,10 +94,10 @@ func Discover(udpPort, tcpPort int) []protocol.RDPCandidate {
 				continue
 			}
 			if udpPort > 0 {
-				result = append(result, protocol.RDPCandidate{Protocol: "udp", Type: "lan", Address: netip.AddrPortFrom(ip, uint16(udpPort)).String(), Priority: 1000})
+				result = append(result, protocol.P2PCandidate{Protocol: "udp", Type: "lan", Address: netip.AddrPortFrom(ip, uint16(udpPort)).String(), Priority: 1000})
 			}
 			if tcpPort > 0 {
-				result = append(result, protocol.RDPCandidate{Protocol: "tcp", Type: "lan", Address: netip.AddrPortFrom(ip, uint16(tcpPort)).String(), Priority: 900})
+				result = append(result, protocol.P2PCandidate{Protocol: "tcp", Type: "lan", Address: netip.AddrPortFrom(ip, uint16(tcpPort)).String(), Priority: 900})
 			}
 			if len(result) >= MaxCandidates {
 				return result[:MaxCandidates]
@@ -110,17 +110,17 @@ func Discover(udpPort, tcpPort int) []protocol.RDPCandidate {
 // ProbeReflexive asks the server's UDP rendezvous socket to report the source
 // address it observed.  A short deadline and a nonce prevent stale responses
 // from being mistaken for the current endpoint.
-func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string) (protocol.RDPCandidate, error) {
+func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string) (protocol.P2PCandidate, error) {
 	if conn == nil || rendezvous == "" || (protocolName != "udp" && protocolName != "tcp") {
-		return protocol.RDPCandidate{}, ErrProbeUnavailable
+		return protocol.P2PCandidate{}, ErrProbeUnavailable
 	}
 	remote, err := net.ResolveUDPAddr("udp", rendezvous)
 	if err != nil {
-		return protocol.RDPCandidate{}, err
+		return protocol.P2PCandidate{}, err
 	}
 	var nonce uint64
 	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
-		return protocol.RDPCandidate{}, err
+		return protocol.P2PCandidate{}, err
 	}
 	request := make([]byte, 16)
 	binary.BigEndian.PutUint32(request[0:4], ProbeMagic)
@@ -133,13 +133,13 @@ func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, p
 	defer conn.SetReadDeadline(time.Time{})
 	_ = conn.SetReadDeadline(deadline)
 	if _, err := conn.WriteToUDP(request, remote); err != nil {
-		return protocol.RDPCandidate{}, err
+		return protocol.P2PCandidate{}, err
 	}
 	buffer := make([]byte, 64)
 	for {
 		n, _, err := conn.ReadFromUDP(buffer)
 		if err != nil {
-			return protocol.RDPCandidate{}, err
+			return protocol.P2PCandidate{}, err
 		}
 		if n != 32 || binary.BigEndian.Uint32(buffer[0:4]) != ProbeMagic || buffer[4] != ProbeVersion || binary.BigEndian.Uint64(buffer[8:16]) != nonce {
 			continue
@@ -147,14 +147,14 @@ func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, p
 		ip, ok := netip.AddrFromSlice(buffer[16:32])
 		ip = ip.Unmap()
 		if !ok || !ip.IsValid() || ip.IsUnspecified() {
-			return protocol.RDPCandidate{}, ErrProbeUnavailable
+			return protocol.P2PCandidate{}, ErrProbeUnavailable
 		}
 		// The source port is returned in the lower two bytes of the response.
 		port := binary.BigEndian.Uint16(buffer[6:8])
 		if port == 0 {
-			return protocol.RDPCandidate{}, ErrProbeUnavailable
+			return protocol.P2PCandidate{}, ErrProbeUnavailable
 		}
 		_ = conn.SetReadDeadline(time.Time{})
-		return protocol.RDPCandidate{Protocol: protocolName, Type: "reflexive", Address: netip.AddrPortFrom(ip, port).String(), Priority: 800}, nil
+		return protocol.P2PCandidate{Protocol: protocolName, Type: "reflexive", Address: netip.AddrPortFrom(ip, port).String(), Priority: 800}, nil
 	}
 }

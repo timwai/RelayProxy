@@ -25,7 +25,7 @@ type tcpDialResult struct {
 // LookupKey resolves a server-side in-memory P2P session token.
 type LookupKey func(sessionID uint64) ([]byte, bool)
 
-func Dial(ctx context.Context, candidates []protocol.RDPCandidate, sessionID uint64, key []byte, timeout time.Duration) (net.Conn, error) {
+func Dial(ctx context.Context, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration) (net.Conn, error) {
 	if sessionID == 0 || len(key) < 16 {
 		return nil, errors.New("invalid RDP TCP punch session")
 	}

@@ -130,9 +130,9 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 	}
 
 	message := &repository.MessageRecord{
-		ChannelID:        channel.ID,
-		Title:            title,
-		Content:          content,
+		ChannelID: channel.ID,
+		Title:     title,
+		Content:   content,
 		Source:    source,
 		RouteRule: routeRuleName,
 		VerificationCode: messageutil.ExtractVerificationCodeWithRules(

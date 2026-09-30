@@ -27,6 +27,7 @@ type GatewayConfig struct {
 	TCPAddr                 string // e.g. ":443"
 	QUICAddr                string // e.g. ":443"
 	TLSConfig               *tls.Config
+	PublicHTTPHandler       HTTPHandler
 	ServerInstanceID        string
 	AuthorizeDevice         func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
 	RecheckDevice           func(fingerprint, deviceID string) bool
@@ -74,6 +75,7 @@ type Gateway struct {
 	sessions     *session.Manager
 	router       *StreamRouter
 	tcpListener  net.Listener
+	tcpTLSConfig *tls.Config
 	quicListener *quic.Listener
 	closed       atomic.Bool
 	activeConns  atomic.Int64
@@ -128,6 +130,7 @@ func (g *Gateway) Start() error {
 	if g.cfg.TLSConfig != nil {
 		g.cfg.TLSConfig = g.cfg.TLSConfig.Clone()
 		g.cfg.TLSConfig.MinVersion = tls.VersionTLS13
+		g.tcpTLSConfig = sharedTCPConfig(g.cfg.TLSConfig, g.cfg.PublicHTTPHandler != nil)
 	}
 
 	// 1. Start TCP / TLS Listener
@@ -144,9 +147,7 @@ func (g *Gateway) Start() error {
 	// 2. Start QUIC Listener
 	if g.cfg.QUICAddr != "" {
 		quicTLS := g.cfg.TLSConfig.Clone()
-		if len(quicTLS.NextProtos) == 0 {
-			quicTLS.NextProtos = []string{"relayproxy-quic"}
-		}
+		quicTLS.NextProtos = []string{"relayproxy-quic"}
 		quicCfg := tunnel.DefaultQUICConfig()
 		ql, err := quic.ListenAddr(g.cfg.QUICAddr, quicTLS, quicCfg)
 		if err != nil {
@@ -277,22 +278,36 @@ func (g *Gateway) serveTCP() {
 			defer c.Close()
 
 			var sessionConn net.Conn = c
-			if g.cfg.TLSConfig != nil {
-				tlsConn := tls.Server(c, g.cfg.TLSConfig)
+			negotiatedProtocol := ""
+			if g.tcpTLSConfig != nil {
+				tlsConn := tls.Server(c, g.tcpTLSConfig)
 				handshakeCtx, cancel := context.WithTimeout(g.ctx, g.cfg.HandshakeTimeout)
 				err := tlsConn.HandshakeContext(handshakeCtx)
 				cancel()
 				if err != nil {
-					_ = c.Close()
 					return
 				}
+				negotiatedProtocol = tlsConn.ConnectionState().NegotiatedProtocol
 				sessionConn = tlsConn
+			}
+
+			if g.cfg.PublicHTTPHandler != nil {
+				classifiedConn, isHTTP, err := classifySharedTCP(sessionConn, negotiatedProtocol, g.cfg.HandshakeTimeout)
+				if err != nil {
+					return
+				}
+				sessionConn = classifiedConn
+				if isHTTP {
+					if err := serveSharedHTTPConnection(g.ctx, sessionConn, g.cfg.PublicHTTPHandler); err != nil && !g.closed.Load() {
+						log.Printf("[Gateway] Public HTTP request from %s failed: %v", c.RemoteAddr(), err)
+					}
+					return
+				}
 			}
 
 			session, err := tunnel.ServerTLS(sessionConn, nil)
 			if err != nil {
 				log.Printf("[Gateway] TLS session init failed: %v", err)
-				_ = sessionConn.Close()
 				return
 			}
 			g.handleSession(session)

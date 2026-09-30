@@ -2,12 +2,13 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, deviceBusy: false, enrollmentBusy: false, passwordSaving: false };
-  const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
+  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], messages: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, deviceBusy: false, enrollmentBusy: false, passwordSaving: false };
+  const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
     devices: [{ page: 'devices', label: '设备管理' }, { page: 'exits', label: '出口节点' }],
     connections: [{ page: 'sessions', label: '活跃会话' }],
+    messages: [{ page: 'messages', label: '消息历史' }],
     rdp: [{ page: 'rdp-ingress', label: '公网入口', admin: true }],
     settings: [
       { page: 'settings', label: '管理访问', admin: true, settingsTab: 'admin' },
@@ -17,7 +18,7 @@
       { page: 'settings', label: 'ACL', admin: true, settingsTab: 'acl' }
     ]
   };
-  const pageSections = { overview:'overview', devices:'devices', exits:'devices', sessions:'connections', 'rdp-ingress':'rdp', settings:'settings' };
+  const pageSections = { overview:'overview', devices:'devices', exits:'devices', sessions:'connections', messages:'messages', 'rdp-ingress':'rdp', settings:'settings' };
   const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', rdp: 'RDP 公网入口', database: '数据库' };
   const roleNames = { CLIENT: '客户端', EXIT: '出口节点', BOTH: '客户端 + 出口' };
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
@@ -234,6 +235,39 @@
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };
     $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td></tr>').join('') : emptyRow(6, '当前没有活跃流', '设备发起代理连接后会显示在这里');
   }
+  function renderMessages() {
+    if (!$('messages-body')) { return; }
+    const needle = ($('message-search') && $('message-search').value || '').trim().toLowerCase();
+    const kind = $('message-kind') ? $('message-kind').value : '';
+    const status = $('message-status') ? $('message-status').value : '';
+    const filtered = state.messages.filter(message => {
+      const code = String(message.verificationCode || '');
+      const deliveries = Array.isArray(message.deliveries) ? message.deliveries : [];
+      if (kind === 'code' && !code) return false;
+      if (kind === 'normal' && code) return false;
+      if (status && !deliveries.some(delivery => delivery.status === status)) return false;
+      if (!needle) return true;
+      return [
+        message.title, message.content, message.source, code,
+        ...deliveries.flatMap(delivery => [delivery.deviceName, delivery.deviceId, delivery.status])
+      ].join(' ').toLowerCase().includes(needle);
+    });
+    $('nav-message-count').textContent = state.messages.length;
+    $('message-summary').textContent = '显示 ' + filtered.length + ' / ' + state.messages.length + ' 条';
+    $('messages-body').innerHTML = filtered.length ? filtered.map(message => {
+      const code = String(message.verificationCode || '').trim();
+      const deliveries = Array.isArray(message.deliveries) ? message.deliveries : [];
+      const deliveryHTML = deliveries.length ? deliveries.map(delivery => {
+        const tone = delivery.status === 'delivered' ? 'success' : delivery.status === 'failed' ? 'warning-badge' : delivery.status === 'offline' ? 'neutral' : 'transport';
+        const label = delivery.status === 'delivered' ? '已送达' : delivery.status === 'failed' ? '失败' : delivery.status === 'offline' ? '离线' : '等待';
+        const error = delivery.error ? '<small title="' + esc(delivery.error) + '">' + esc(delivery.error) + '</small>' : '';
+        return '<div class="message-delivery"><span><strong>' + esc(delivery.deviceName || delivery.deviceId) + '</strong><small class="mono">' + esc(delivery.deviceId) + '</small></span>' + badge(label, tone) + error + '</div>';
+      }).join('') : '<span class="muted">—</span>';
+      const codeHTML = code ? '<div class="message-code"><span class="mono">' + esc(code) + '</span><button type="button" class="small-button" data-copy-message-code="' + esc(code) + '">复制</button></div>' : '<span class="muted">—</span>';
+      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || 'webhook') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td></tr>';
+    }).join('') : emptyRow(4, '暂无匹配消息', 'Webhook 推送后会显示在这里');
+  }
+
   function renderIngress() {
     if (!$('rdp-ingress-body')) { return; }
     const runtimeIngress = state.settings && state.settings.runtime && state.settings.runtime.rdpIngress;
@@ -281,7 +315,8 @@
       }],
       ['devices', '/devices', data => { state.devices = data; renderDevices(); }],
       ['exits', '/exits', data => { state.exits = data; renderExits(); }],
-      ['sessions', '/sessions/active', data => { state.sessions = data; renderSessions(); }]
+      ['sessions', '/sessions/active', data => { state.sessions = data; renderSessions(); }],
+      ['messages', '/messages?limit=200', data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }]
     ];
     if (user.role === 'admin') {
       jobs.push(['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]);
@@ -311,6 +346,7 @@
     if (!errors.length) { $('last-refresh').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
     renderRuntime();
     renderSessions();
+    renderMessages();
     renderIngress();
     if (manual && !errors.length) { toast(state.dirty ? '数据已刷新，未保存的配置已保留' : '数据已刷新'); }
   }
@@ -626,6 +662,12 @@
     if (reject) rejectEnrollment(reject.dataset.enrollmentReject);
   });
   $('exits-grid').addEventListener('click', event => { const button = event.target.closest('[data-copy-exit]'); if (button) copy(button.dataset.copyExit); });
+  ['message-search', 'message-kind', 'message-status'].forEach(id => $(id).addEventListener('input', renderMessages));
+  $('messages-refresh').addEventListener('click', () => refresh(true));
+  $('messages-body').addEventListener('click', event => {
+    const button = event.target.closest('[data-copy-message-code]');
+    if (button) { copy(button.dataset.copyMessageCode); toast('验证码已复制'); }
+  });
   $('refresh-enrollments').addEventListener('click', () => refresh(true));
   $('copy-admin-url').addEventListener('click', () => copy(managementURL($('admin-listen').value, $('admin-protocol').value === 'true')));
   $('device-revoke').addEventListener('click', revokeDevice);

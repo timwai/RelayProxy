@@ -16,7 +16,7 @@ func TestExtractVerificationCode(t *testing.T) {
 		{"english otp", "Your OTP code is 7712. It expires in 5 minutes.", "7712"},
 		{"nearest number wins", "订单 20260930，登录验证码 654321，金额 100 元。", "654321"},
 		{"dynamic secret", "512360是您的4A系统动态密钥，请遵守法规，严禁非法使用客户信息，系统将记录审计您的操作行为【中国移动】 &#x20;", "512360"},
-		{"eip addon code", "【四川移动管信系统】您的EIP登录附加码是：G931，在当日有效。https\://m.scmcc.com.cn/m/aumC", "G931"},
+		{"eip addon code", "【四川移动管信系统】您的EIP登录附加码是：G931，在当日有效。https://m.scmcc.com.cn/m/aumC", "G931"},
 		{"mixed code", "您的认证码为 A7K9P2，请勿泄露。", "A7K9P2"},
 		{"no semantics", "订单号 482931 已支付，金额 99 元。", ""},
 		{"long number rejected", "验证码 13800138000，请核对。", ""},

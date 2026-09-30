@@ -142,6 +142,9 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c.GUI.Theme != "dark" && c.GUI.Theme != "light" && c.GUI.Theme != "system" {
 		return fmt.Errorf("gui.theme 必须是 dark / light / system")
 	}
+	if timeout := c.VerificationPopupTimeout(); timeout < 0 || timeout > 3600 {
+		return fmt.Errorf("gui.verification_popup_timeout_sec 必须在 0-3600 之间")
+	}
 	if c.Mode != "EXIT" && (c.Proxy.SOCKS5.Enabled == nil || *c.Proxy.SOCKS5.Enabled) && (c.Proxy.HTTP.Enabled == nil || *c.Proxy.HTTP.Enabled) &&
 		listenAddressesOverlap(net.JoinHostPort(c.Proxy.SOCKS5.Listen, fmt.Sprint(c.Proxy.SOCKS5.Port)), net.JoinHostPort(c.Proxy.HTTP.Listen, fmt.Sprint(c.Proxy.HTTP.Port))) {
 		return fmt.Errorf("SOCKS5 与 HTTP 代理的监听地址和端口冲突，请使用不同端口")
@@ -217,6 +220,10 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.RDP.Enabled = cloneBool(c.RDP.Enabled)
 	out.GUI.Enabled = cloneBool(c.GUI.Enabled)
 	out.GUI.MinimizeToTray = cloneBool(c.GUI.MinimizeToTray)
+	if c.GUI.VerificationPopupTimeoutSec != nil {
+		value := *c.GUI.VerificationPopupTimeoutSec
+		out.GUI.VerificationPopupTimeoutSec = &value
+	}
 	out.Web.Enabled = cloneBool(c.Web.Enabled)
 	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)

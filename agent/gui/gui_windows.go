@@ -34,7 +34,7 @@ var (
 	activeApp atomic.Pointer[appWindow]
 	showMsgID uint32
 
-	verificationDWMAPI              = windows.NewLazySystemDLL("dwmapi.dll")
+	verificationDWMAPI                = windows.NewLazySystemDLL("dwmapi.dll")
 	verificationDWMSetWindowAttribute = verificationDWMAPI.NewProc("DwmSetWindowAttribute")
 )
 

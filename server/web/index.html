@@ -17,11 +17,13 @@
     .channel-card p{margin:9px 0;color:var(--rp-muted);font-size:9px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .channel-url{padding:7px 8px;border:1px solid var(--rp-border);border-radius:7px;background:var(--rp-surface);overflow:hidden}.channel-url code{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px}
     .channel-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:9px}.channel-empty{grid-column:1/-1;padding:24px 14px;text-align:center;color:var(--rp-muted)}.channel-empty strong,.channel-empty span{display:block}
-    #channel-dialog{width:min(560px,calc(100vw - 32px))}.channel-device-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:220px;overflow:auto;padding:1px}
+    #channel-dialog{width:min(760px,calc(100vw - 32px));max-height:min(92vh,900px);overflow:auto}.channel-device-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:220px;overflow:auto;padding:1px}
     .channel-device-option{display:flex;align-items:flex-start;gap:8px;margin:0;padding:9px;border:1px solid var(--rp-border);border-radius:8px;background:var(--rp-surface-soft);cursor:pointer}
     .channel-device-option input{margin:2px 0 0;padding:0}.channel-device-option span{min-width:0}.channel-device-option strong,.channel-device-option small{display:block;overflow:hidden;text-overflow:ellipsis}.channel-device-option small{margin-top:2px;font-size:8px;color:var(--rp-subtle)}
     .channel-all-row{margin:16px 0 14px}.channel-url-preview{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;margin-top:14px;padding:8px 9px;border:1px solid var(--rp-border);border-radius:8px;background:var(--rp-surface-soft)}.channel-url-preview code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px}
-    @media(max-width:600px){.channel-grid,.channel-device-list{grid-template-columns:1fr}.channel-url-preview{grid-template-columns:1fr}}
+    .channel-rule-section{margin-top:16px;padding-top:14px;border-top:1px solid var(--rp-border)}.channel-rule-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.channel-rule-heading h3{margin:0;font-size:11px}.channel-rule-heading p{margin:2px 0 0;color:var(--rp-muted);font-size:8px}
+    .channel-rule-list{display:grid;gap:9px;margin-top:9px}.channel-rule-card{padding:10px;border:1px solid var(--rp-border);border-radius:9px;background:var(--rp-surface-soft)}.channel-rule-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.channel-rule-card-head strong{font-size:9px}.channel-rule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.channel-rule-grid .wide{grid-column:1/-1}.channel-rule-grid label{margin:0}.channel-rule-grid input,.channel-rule-grid select{width:100%}.channel-rule-check{display:flex;align-items:center;gap:7px;margin-top:7px;font-size:8px}.channel-rule-check input{width:auto}.channel-route-devices{min-height:82px}.channel-rule-empty{padding:12px;text-align:center;border:1px dashed var(--rp-border);border-radius:8px;color:var(--rp-muted);font-size:8px}.channel-fallback-note{margin:7px 0 0;color:var(--rp-muted);font-size:8px}
+    @media(max-width:600px){.channel-grid,.channel-device-list,.channel-rule-grid{grid-template-columns:1fr}.channel-rule-grid .wide{grid-column:auto}.channel-url-preview{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -149,11 +151,24 @@
     <label for="channel-name">渠道名称</label><input id="channel-name" required maxlength="120" placeholder="例如：登录验证码">
     <label for="channel-id">渠道 ID</label><input id="channel-id" class="mono" maxlength="80" placeholder="留空自动生成，例如 login-code">
     <small>仅允许字母、数字、点、短横线和下划线。</small>
-    <label class="switch-row channel-all-row"><input id="channel-all-devices" type="checkbox"><span><strong>绑定全部设备</strong><small>每次推送时动态选择当前所有已批准设备，新设备也会自动加入。</small></span></label>
+    <label class="switch-row channel-all-row"><input id="channel-all-devices" type="checkbox"><span><strong>默认推送到全部设备</strong><small>没有命中分流规则时，动态选择当前所有已批准设备，新设备也会自动加入。</small></span></label>
     <div id="channel-device-section">
-      <div class="capability-editor-heading"><h3>绑定设备</h3><span id="channel-device-count">0 台</span></div>
+      <div class="capability-editor-heading"><h3>默认 / 兜底设备</h3><span id="channel-device-count">0 台</span></div>
       <div id="channel-devices" class="channel-device-list"></div>
+      <p class="channel-fallback-note">配置了内容分流规则后，这里可以留空；消息未命中任何规则且没有兜底设备时会拒绝推送。</p>
     </div>
+
+    <section class="channel-rule-section">
+      <div class="channel-rule-heading"><div><h3>验证码识别</h3><p>先执行自定义规则，再执行默认规则；支持数字和字母数字组合。</p></div><button id="channel-verification-add" type="button" class="small-button">+ 自定义规则</button></div>
+      <label class="switch-row"><input id="channel-use-default-verification" type="checkbox" checked><span><strong>启用默认识别规则</strong><small>包含“验证码 / 动态密钥 / 附加码 / OTP”等语义，默认识别 4–8 位且至少含一个数字的字母数字码。</small></span></label>
+      <div id="channel-verification-rules" class="channel-rule-list"></div>
+    </section>
+
+    <section class="channel-rule-section">
+      <div class="channel-rule-heading"><div><h3>内容分流</h3><p>按配置顺序匹配正文，第一条命中规则决定目标设备；未命中时走上方兜底设备。</p></div><button id="channel-route-add" type="button" class="small-button">+ 分流规则</button></div>
+      <div id="channel-route-rules" class="channel-rule-list"></div>
+    </section>
+
     <div class="channel-url-preview"><span>推送地址</span><code id="channel-url-preview" class="mono"></code><button id="channel-copy-url" type="button" class="small-button">复制</button></div>
     <p id="channel-error" class="form-error" role="alert" hidden></p>
     <div class="device-actions"><button id="channel-delete" type="button" class="danger" hidden>删除渠道</button><button type="submit" class="primary rp-btn rp-btn-primary">保存渠道</button></div>

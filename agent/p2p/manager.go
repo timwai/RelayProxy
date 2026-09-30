@@ -119,18 +119,18 @@ type Snapshot struct {
 }
 
 type PathStatus struct {
-	SessionID	uint64
-	ClientDeviceID	string
-	ExitDeviceID	string
-	ExpiresAt	int64
-	State	State
-	Path	string
-	Error	string
-	RTTMs	int64
-	CandidateSummary	string
-	FallbackCount	uint64
-	BytesUp	uint64
-	BytesDown	uint64
+	SessionID        uint64
+	ClientDeviceID   string
+	ExitDeviceID     string
+	ExpiresAt        int64
+	State            State
+	Path             string
+	Error            string
+	RTTMs            int64
+	CandidateSummary string
+	FallbackCount    uint64
+	BytesUp          uint64
+	BytesDown        uint64
 }
 
 // NewManager builds a signaling-only manager. It remains useful in tests and
@@ -611,7 +611,7 @@ func (s *Session) Snapshot() Snapshot {
 	s.mu.RLock()
 	path := ""
 	stats := directp2p.QUICStats{
-		RTT: time.Duration(s.lastRTTMs) * time.Millisecond,
+		RTT:       time.Duration(s.lastRTTMs) * time.Millisecond,
 		BytesSent: s.lastBytesUp, BytesReceived: s.lastBytesDown,
 	}
 	if s.state == StateReady && s.direct != nil {

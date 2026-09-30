@@ -788,7 +788,6 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 	}
 }
 
-
 // Messages returns the newest local push-message history in receive order.
 func (a *Agent) Messages(limit int) []Message {
 	return a.messages.Get(limit)

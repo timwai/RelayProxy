@@ -142,41 +142,43 @@ func (e *Endpoint) Bind(transport Transport, generation uint64) error {
 	}
 	e.signalLocked()
 	e.mu.Unlock()
+	e.writeMu.Unlock()
 
 	if old != nil && old != transport {
 		_ = old.Close()
 	}
 
+	// Start reading immediately so two peers can bind concurrently even when
+	// both have replay data waiting to cross the new transport.
+	go e.readLoop(transport, generation)
+	go e.activateTransport(transport, generation)
+	return nil
+}
+
+func (e *Endpoint) activateTransport(transport Transport, generation uint64) {
+	e.writeMu.Lock()
+	defer e.writeMu.Unlock()
+
+	e.mu.Lock()
+	current := !e.closed && e.transport == transport && e.generation == generation
+	e.mu.Unlock()
+	if !current {
+		return
+	}
+
 	for _, frame := range e.state.ReplayFrames() {
 		if err := WriteFrame(transport, frame); err != nil {
-			e.mu.Lock()
-			if e.transport == transport && e.generation == generation {
-				e.transport = nil
-				e.ready = false
-				e.signalLocked()
-			}
-			e.mu.Unlock()
-			e.writeMu.Unlock()
-			_ = transport.Close()
-			e.reportLoss(generation, err)
-			return err
+			e.loseTransport(transport, generation, err)
+			return
 		}
 	}
 
 	e.mu.Lock()
-	if e.closed || e.transport != transport || e.generation != generation {
-		e.mu.Unlock()
-		e.writeMu.Unlock()
-		_ = transport.Close()
-		return net.ErrClosed
+	if !e.closed && e.transport == transport && e.generation == generation {
+		e.ready = true
+		e.signalLocked()
 	}
-	e.ready = true
-	e.signalLocked()
 	e.mu.Unlock()
-	e.writeMu.Unlock()
-
-	go e.readLoop(transport, generation)
-	return nil
 }
 
 func (e *Endpoint) Read(p []byte) (int, error) {
@@ -294,7 +296,7 @@ func (e *Endpoint) sendBuffered(frame Frame) error {
 func (e *Endpoint) sendControlCurrent(transport Transport, generation uint64, frame Frame) {
 	e.writeMu.Lock()
 	e.mu.Lock()
-	current := !e.closed && e.ready && e.transport == transport && e.generation == generation
+	current := !e.closed && e.transport == transport && e.generation == generation
 	e.mu.Unlock()
 	if !current {
 		e.writeMu.Unlock()

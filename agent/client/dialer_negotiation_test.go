@@ -13,6 +13,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"

@@ -235,10 +235,13 @@ type channelPushRequest struct {
 }
 
 type messageChannelRequest struct {
-	ID         string   `json:"id,omitempty"`
-	Name       string   `json:"name"`
-	AllDevices bool     `json:"allDevices"`
-	DeviceIDs  []string `json:"deviceIds,omitempty"`
+	ID                     string                         `json:"id,omitempty"`
+	Name                   string                         `json:"name"`
+	AllDevices             bool                           `json:"allDevices"`
+	DeviceIDs              []string                       `json:"deviceIds,omitempty"`
+	UseDefaultVerification *bool                          `json:"useDefaultVerification,omitempty"`
+	VerificationRules      *[]repository.VerificationRule `json:"verificationRules,omitempty"`
+	RouteRules             *[]repository.MessageRouteRule `json:"routeRules,omitempty"`
 }
 
 func validMessageChannelID(value string) bool {
@@ -268,45 +271,88 @@ func normalizeChannelDeviceIDs(ids []string) []string {
 	return out
 }
 
-func (r *Router) validateChannelRequest(w http.ResponseWriter, body *messageChannelRequest, existingID string) bool {
+func (r *Router) channelFromRequest(w http.ResponseWriter, body *messageChannelRequest, existing *repository.MessageChannel) (*repository.MessageChannel, bool) {
 	body.Name = strings.TrimSpace(body.Name)
 	body.ID = strings.TrimSpace(body.ID)
 	body.DeviceIDs = normalizeChannelDeviceIDs(body.DeviceIDs)
-	if existingID != "" {
-		body.ID = existingID
+
+	channel := &repository.MessageChannel{
+		ID:                     body.ID,
+		Name:                   body.Name,
+		AllDevices:             body.AllDevices,
+		DeviceIDs:              body.DeviceIDs,
+		UseDefaultVerification: true,
 	}
-	if body.Name == "" || len(body.Name) > 120 {
+	if existing != nil {
+		channel.ID = existing.ID
+		channel.UseDefaultVerification = existing.UseDefaultVerification
+		channel.VerificationRules = append([]repository.VerificationRule(nil), existing.VerificationRules...)
+		channel.RouteRules = append([]repository.MessageRouteRule(nil), existing.RouteRules...)
+	}
+	if body.UseDefaultVerification != nil {
+		channel.UseDefaultVerification = *body.UseDefaultVerification
+	}
+	if body.VerificationRules != nil {
+		channel.VerificationRules = append([]repository.VerificationRule(nil), (*body.VerificationRules)...)
+	}
+	if body.RouteRules != nil {
+		channel.RouteRules = append([]repository.MessageRouteRule(nil), (*body.RouteRules)...)
+	}
+
+	if channel.Name == "" || len(channel.Name) > 120 {
 		writeError(w, http.StatusBadRequest, "channel name must contain 1-120 characters")
-		return false
+		return nil, false
 	}
-	if body.ID != "" && !validMessageChannelID(body.ID) {
+	if channel.ID != "" && !validMessageChannelID(channel.ID) {
 		writeError(w, http.StatusBadRequest, "channel id may contain only letters, numbers, dot, dash and underscore")
-		return false
+		return nil, false
 	}
-	if !body.AllDevices && len(body.DeviceIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "select at least one device or enable allDevices")
-		return false
-	}
-	if len(body.DeviceIDs) > 256 {
+	if len(channel.DeviceIDs) > 256 {
 		writeError(w, http.StatusBadRequest, "too many devices in channel")
-		return false
+		return nil, false
 	}
+
 	devices, err := r.db.ListDevicesForOwner("")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load devices")
-		return false
+		return nil, false
 	}
 	known := make(map[string]bool, len(devices))
 	for _, device := range devices {
 		known[device.ID] = true
 	}
-	for _, id := range body.DeviceIDs {
+	for _, id := range channel.DeviceIDs {
 		if !known[id] {
 			writeError(w, http.StatusBadRequest, "unknown device: "+id)
-			return false
+			return nil, false
 		}
 	}
-	return true
+
+	verificationRules, err := normalizeVerificationRules(channel.VerificationRules)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	channel.VerificationRules = verificationRules
+	routeRules, err := normalizeRouteRules(channel.RouteRules, known)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return nil, false
+	}
+	channel.RouteRules = routeRules
+
+	if !channel.UseDefaultVerification && len(channel.VerificationRules) == 0 {
+		writeError(w, http.StatusBadRequest, "enable default verification recognition or add at least one custom verification rule")
+		return nil, false
+	}
+	if channel.AllDevices {
+		channel.DeviceIDs = nil
+	}
+	if !channel.AllDevices && len(channel.DeviceIDs) == 0 && len(channel.RouteRules) == 0 {
+		writeError(w, http.StatusBadRequest, "select fallback devices, enable allDevices, or add routing rules")
+		return nil, false
+	}
+	return channel, true
 }
 
 func (r *Router) handleListMessageChannels(w http.ResponseWriter, _ *http.Request) {
@@ -324,11 +370,9 @@ func (r *Router) handleCreateMessageChannel(w http.ResponseWriter, req *http.Req
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if !r.validateChannelRequest(w, &body, "") {
+	channel, ok := r.channelFromRequest(w, &body, nil)
+	if !ok {
 		return
-	}
-	channel := &repository.MessageChannel{
-		ID: body.ID, Name: body.Name, AllDevices: body.AllDevices, DeviceIDs: body.DeviceIDs,
 	}
 	if err := r.db.CreateMessageChannel(channel); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -352,10 +396,7 @@ func (r *Router) handleUpdateMessageChannel(w http.ResponseWriter, req *http.Req
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if !r.validateChannelRequest(w, &body, id) {
-		return
-	}
-	channel, err := r.db.GetMessageChannel(id)
+	existing, err := r.db.GetMessageChannel(id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
@@ -364,9 +405,10 @@ func (r *Router) handleUpdateMessageChannel(w http.ResponseWriter, req *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to load channel")
 		return
 	}
-	channel.Name = body.Name
-	channel.AllDevices = body.AllDevices
-	channel.DeviceIDs = body.DeviceIDs
+	channel, ok := r.channelFromRequest(w, &body, existing)
+	if !ok {
+		return
+	}
 	if err := r.db.UpdateMessageChannel(channel); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

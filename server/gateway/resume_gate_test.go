@@ -56,3 +56,35 @@ func TestValidateTCPResumeBinding(t *testing.T) {
 		})
 	}
 }
+
+
+func TestNormalizeTCPResumeBindingDowngradesOnlyInitialOpen(t *testing.T) {
+	open := &protocol.TCPResumeBinding{
+		Mode:       protocol.TCPResumeModeOpen,
+		StreamID:   make([]byte, protocol.TCPResumeStreamIDSize),
+		Token:      make([]byte, protocol.TCPResumeTokenSize),
+		Generation: 1,
+	}
+	got, err := normalizeTCPResumeBinding(open, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatal("initial open was not downgraded for a legacy Exit")
+	}
+
+	rebind := *open
+	rebind.Mode = protocol.TCPResumeModeRebind
+	rebind.Generation = 2
+	if got, err := normalizeTCPResumeBinding(&rebind, false); err == nil || got != nil {
+		t.Fatalf("unnegotiated rebind got=%v err=%v", got, err)
+	}
+
+	got, err = normalizeTCPResumeBinding(open, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != open {
+		t.Fatal("negotiated resume binding was unexpectedly replaced")
+	}
+}

@@ -247,17 +247,9 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 	}
 
 	if req.Resume != nil {
-		if !proxyStreamResumeNegotiated(clientSession, exitSession) {
-			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
-				RequestID:    req.RequestID,
-				Success:      false,
-				ErrorCode:    protocol.ErrCodeInvalidRequest,
-				ErrorMessage: "resumable TCP stream capability was not negotiated",
-			})
-			r.emitAudit(baseAudit("RESUME_NOT_NEGOTIATED", protocol.ErrCodeInvalidRequest, ""))
-			return
-		}
-		if err := validateTCPResumeBinding(req.Resume); err != nil {
+		var err error
+		req.Resume, err = normalizeTCPResumeBinding(req.Resume, proxyStreamResumeNegotiated(clientSession, exitSession))
+		if err != nil {
 			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
 				RequestID:    req.RequestID,
 				Success:      false,
@@ -769,6 +761,31 @@ func proxyStreamResumeNegotiated(client, exit *session.DeviceSession) bool {
 	return client != nil && exit != nil &&
 		hasCapability(client, protocol.CapabilityProxyStreamResume) &&
 		hasCapability(exit, protocol.CapabilityProxyStreamResume)
+}
+
+func normalizeTCPResumeBinding(binding *protocol.TCPResumeBinding, negotiated bool) (*protocol.TCPResumeBinding, error) {
+	if binding == nil {
+		return nil, nil
+	}
+	switch binding.Mode {
+	case protocol.TCPResumeModeOpen:
+		if !negotiated {
+			// Mixed-version compatibility: a new Client may optimistically
+			// request resume while the selected Exit is older. Strip only the
+			// initial-open extension and preserve the legacy TCP connection.
+			return nil, nil
+		}
+	case protocol.TCPResumeModeRebind:
+		if !negotiated {
+			return nil, errors.New("resumable TCP rebind capability was not negotiated")
+		}
+	default:
+		return nil, errors.New("invalid resumable TCP mode")
+	}
+	if err := validateTCPResumeBinding(binding); err != nil {
+		return nil, err
+	}
+	return binding, nil
 }
 
 func validateTCPResumeBinding(binding *protocol.TCPResumeBinding) error {

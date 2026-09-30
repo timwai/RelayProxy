@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net"
@@ -25,8 +26,7 @@ type TransportLoss struct {
 type Endpoint struct {
 	state *StreamState
 
-	readR *io.PipeReader
-	readW *io.PipeWriter
+	inbound *streamBuffer
 
 	appWriteMu sync.Mutex
 	writeMu    sync.Mutex
@@ -46,11 +46,9 @@ func NewEndpoint(state *StreamState) (*Endpoint, error) {
 	if state == nil || !state.Identity().Valid() {
 		return nil, ErrBinding
 	}
-	r, w := io.Pipe()
 	return &Endpoint{
 		state:    state,
-		readR:    r,
-		readW:    w,
+		inbound:  newStreamBuffer(512 << 10),
 		change:   make(chan struct{}),
 		losses:   make(chan TransportLoss, 8),
 		progress: make(chan struct{}, 1),
@@ -148,7 +146,7 @@ func (e *Endpoint) Read(p []byte) (int, error) {
 	if e == nil {
 		return 0, net.ErrClosed
 	}
-	return e.readR.Read(p)
+	return e.inbound.Read(p)
 }
 
 // Write accepts bytes into the logical stream. Once a chunk enters the replay
@@ -226,8 +224,7 @@ func (e *Endpoint) Close() error {
 	if transport != nil {
 		_ = transport.Close()
 	}
-	_ = e.readW.CloseWithError(net.ErrClosed)
-	_ = e.readR.Close()
+	e.inbound.CloseWithError(net.ErrClosed)
 	e.notifyProgress()
 	return nil
 }
@@ -296,7 +293,7 @@ func (e *Endpoint) readLoop(transport Transport, generation uint64) {
 			}
 			e.sendControlCurrent(transport, generation, ack)
 			if len(fresh) > 0 {
-				if _, err := e.readW.Write(fresh); err != nil {
+				if err := e.inbound.Write(fresh); err != nil {
 					return
 				}
 			}
@@ -307,7 +304,7 @@ func (e *Endpoint) readLoop(transport Transport, generation uint64) {
 				return
 			}
 			e.sendControlCurrent(transport, generation, ack)
-			_ = e.readW.Close()
+			e.inbound.CloseWithError(nil)
 			return
 		case FrameRST:
 			e.fail(net.ErrClosed)
@@ -395,7 +392,7 @@ func (e *Endpoint) fail(err error) {
 	if transport != nil {
 		_ = transport.Close()
 	}
-	_ = e.readW.CloseWithError(err)
+	e.inbound.CloseWithError(err)
 	e.notifyProgress()
 }
 
@@ -416,4 +413,76 @@ func (e *Endpoint) notifyProgress() {
 func (e *Endpoint) signalLocked() {
 	close(e.change)
 	e.change = make(chan struct{})
+}
+
+
+type streamBuffer struct {
+	mu     sync.Mutex
+	cond   *sync.Cond
+	buf    bytes.Buffer
+	limit  int
+	closed bool
+	err    error
+}
+
+func newStreamBuffer(limit int) *streamBuffer {
+	if limit <= 0 {
+		limit = 512 << 10
+	}
+	b := &streamBuffer{limit: limit}
+	b.cond = sync.NewCond(&b.mu)
+	return b
+}
+
+func (b *streamBuffer) Write(p []byte) error {
+	if b == nil || len(p) == 0 {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for !b.closed && b.buf.Len()+len(p) > b.limit {
+		b.cond.Wait()
+	}
+	if b.closed {
+		if b.err != nil {
+			return b.err
+		}
+		return io.ErrClosedPipe
+	}
+	_, _ = b.buf.Write(p)
+	b.cond.Broadcast()
+	return nil
+}
+
+func (b *streamBuffer) Read(p []byte) (int, error) {
+	if b == nil {
+		return 0, net.ErrClosed
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for b.buf.Len() == 0 && !b.closed {
+		b.cond.Wait()
+	}
+	if b.buf.Len() > 0 {
+		n, _ := b.buf.Read(p)
+		b.cond.Broadcast()
+		return n, nil
+	}
+	if b.err != nil {
+		return 0, b.err
+	}
+	return 0, io.EOF
+}
+
+func (b *streamBuffer) CloseWithError(err error) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	if !b.closed {
+		b.closed = true
+		b.err = err
+	}
+	b.cond.Broadcast()
+	b.mu.Unlock()
 }

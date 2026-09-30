@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -45,7 +44,6 @@ type Router struct {
 	rdpIngressPortStart          int
 	rdpIngressPortEnd            int
 	serverInfo                   ServerInfo
-	webhookToken                 string
 }
 
 type RouterOption func(*Router)
@@ -78,12 +76,6 @@ func NewRouter(authService *service.AuthService, deviceService *service.DeviceSe
 
 // WithDeviceRevoked lets runtime services tear down short-lived direct paths
 // before the session manager closes the authenticated tunnel.
-// WithWebhookToken enables the external message webhook. An empty token keeps
-// the endpoint disabled instead of exposing unauthenticated message delivery.
-func WithWebhookToken(token string) RouterOption {
-	return func(r *Router) { r.webhookToken = strings.TrimSpace(token) }
-}
-
 func WithDeviceRevoked(fn func(string)) RouterOption {
 	return func(r *Router) { r.onDeviceRevoked = fn }
 }
@@ -145,7 +137,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	if strings.HasPrefix(req.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !validMutationOrigin(req) {
+		publicPush := strings.HasPrefix(req.URL.Path, "/api/v1/push/")
+		if !publicPush && req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !validMutationOrigin(req) {
 			writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
 			return
 		}
@@ -189,10 +182,15 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/auth/me", r.requireAuth(r.handleMe))
 	r.mux.HandleFunc("PUT /api/v1/auth/password", r.requireAuth(r.handleChangePassword))
 
-	// Message APIs. Webhook authentication is independent from the browser
-	// session so external automation can push notifications safely.
-	r.mux.HandleFunc("POST /api/v1/webhook/messages", r.handleWebhookMessage)
+	// Message channels are configured from the authenticated Server console.
+	// The public push endpoint intentionally uses only the channel ID in the URL.
+	r.mux.HandleFunc("GET /api/v1/push/{channelID}", r.handleChannelPush)
+	r.mux.HandleFunc("POST /api/v1/push/{channelID}", r.handleChannelPush)
 	r.mux.HandleFunc("GET /api/v1/messages", r.requireAuth(r.handleListMessages))
+	r.mux.HandleFunc("GET /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleListMessageChannels)))
+	r.mux.HandleFunc("POST /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleCreateMessageChannel)))
+	r.mux.HandleFunc("PUT /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateMessageChannel)))
+	r.mux.HandleFunc("DELETE /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteMessageChannel)))
 
 	// Device APIs
 	r.mux.HandleFunc("GET /api/v1/devices", r.requireAuth(r.handleListDevices))
@@ -232,36 +230,206 @@ func (r *Router) registerRoutes() {
 	})
 }
 
-type webhookMessageRequest struct {
-	DeviceID  string   `json:"deviceId,omitempty"`
-	DeviceIDs []string `json:"deviceIds,omitempty"`
-	Title     string   `json:"title,omitempty"`
-	Message   string   `json:"message,omitempty"`
-	Content   string   `json:"content,omitempty"`
-	Source    string   `json:"source,omitempty"`
+type channelPushRequest struct {
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message,omitempty"`
+	Content string `json:"content,omitempty"`
+	Source  string `json:"source,omitempty"`
 }
 
-func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) {
-	if r.webhookToken == "" {
-		writeError(w, http.StatusServiceUnavailable, "message webhook is not configured")
-		return
-	}
-	provided := strings.TrimSpace(req.Header.Get("Authorization"))
-	if strings.HasPrefix(strings.ToLower(provided), "bearer ") {
-		provided = strings.TrimSpace(provided[len("Bearer "):])
-	} else {
-		provided = strings.TrimSpace(req.Header.Get("X-Relay-Webhook-Token"))
-	}
-	if len(provided) != len(r.webhookToken) || subtle.ConstantTimeCompare([]byte(provided), []byte(r.webhookToken)) != 1 {
-		writeError(w, http.StatusUnauthorized, "invalid webhook token")
-		return
-	}
+type messageChannelRequest struct {
+	ID         string   `json:"id,omitempty"`
+	Name       string   `json:"name"`
+	AllDevices bool     `json:"allDevices"`
+	DeviceIDs  []string `json:"deviceIds,omitempty"`
+}
 
-	var body webhookMessageRequest
+func validMessageChannelID(value string) bool {
+	if len(value) < 1 || len(value) > 80 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func normalizeChannelDeviceIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
+}
+
+func (r *Router) validateChannelRequest(w http.ResponseWriter, body *messageChannelRequest, existingID string) bool {
+	body.Name = strings.TrimSpace(body.Name)
+	body.ID = strings.TrimSpace(body.ID)
+	body.DeviceIDs = normalizeChannelDeviceIDs(body.DeviceIDs)
+	if existingID != "" {
+		body.ID = existingID
+	}
+	if body.Name == "" || len(body.Name) > 120 {
+		writeError(w, http.StatusBadRequest, "channel name must contain 1-120 characters")
+		return false
+	}
+	if body.ID != "" && !validMessageChannelID(body.ID) {
+		writeError(w, http.StatusBadRequest, "channel id may contain only letters, numbers, dot, dash and underscore")
+		return false
+	}
+	if !body.AllDevices && len(body.DeviceIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "select at least one device or enable allDevices")
+		return false
+	}
+	if len(body.DeviceIDs) > 256 {
+		writeError(w, http.StatusBadRequest, "too many devices in channel")
+		return false
+	}
+	devices, err := r.db.ListDevicesForOwner("")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load devices")
+		return false
+	}
+	known := make(map[string]bool, len(devices))
+	for _, device := range devices {
+		known[device.ID] = true
+	}
+	for _, id := range body.DeviceIDs {
+		if !known[id] {
+			writeError(w, http.StatusBadRequest, "unknown device: "+id)
+			return false
+		}
+	}
+	return true
+}
+
+func (r *Router) handleListMessageChannels(w http.ResponseWriter, _ *http.Request) {
+	channels, err := r.db.ListMessageChannels()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load message channels")
+		return
+	}
+	writeJSON(w, http.StatusOK, channels)
+}
+
+func (r *Router) handleCreateMessageChannel(w http.ResponseWriter, req *http.Request) {
+	var body messageChannelRequest
 	if err := decodeJSON(w, req, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if !r.validateChannelRequest(w, &body, "") {
+		return
+	}
+	channel := &repository.MessageChannel{
+		ID: body.ID, Name: body.Name, AllDevices: body.AllDevices, DeviceIDs: body.DeviceIDs,
+	}
+	if err := r.db.CreateMessageChannel(channel); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			writeError(w, http.StatusConflict, "channel id already exists")
+		} else {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusCreated, channel)
+}
+
+func (r *Router) handleUpdateMessageChannel(w http.ResponseWriter, req *http.Request) {
+	id := strings.TrimSpace(req.PathValue("id"))
+	if !validMessageChannelID(id) {
+		writeError(w, http.StatusBadRequest, "invalid channel id")
+		return
+	}
+	var body messageChannelRequest
+	if err := decodeJSON(w, req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !r.validateChannelRequest(w, &body, id) {
+		return
+	}
+	channel, err := r.db.GetMessageChannel(id)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load channel")
+		return
+	}
+	channel.Name = body.Name
+	channel.AllDevices = body.AllDevices
+	channel.DeviceIDs = body.DeviceIDs
+	if err := r.db.UpdateMessageChannel(channel); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, channel)
+}
+
+func (r *Router) handleDeleteMessageChannel(w http.ResponseWriter, req *http.Request) {
+	id := strings.TrimSpace(req.PathValue("id"))
+	if err := r.db.DeleteMessageChannel(id); errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete channel")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "deleted"})
+}
+
+func (r *Router) handleChannelPush(w http.ResponseWriter, req *http.Request) {
+	channelID := strings.TrimSpace(req.PathValue("channelID"))
+	if !validMessageChannelID(channelID) {
+		writeError(w, http.StatusBadRequest, "invalid channel id")
+		return
+	}
+	channel, targets, err := r.db.ResolveMessageChannelTargets(channelID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve channel")
+		return
+	}
+	if len(targets) == 0 {
+		writeError(w, http.StatusConflict, "channel has no approved target devices")
+		return
+	}
+
+	var body channelPushRequest
+	if req.Method == http.MethodPost && req.ContentLength != 0 {
+		if err := decodeJSON(w, req, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	query := req.URL.Query()
+	if strings.TrimSpace(body.Title) == "" {
+		body.Title = query.Get("title")
+	}
+	if strings.TrimSpace(body.Message) == "" {
+		body.Message = query.Get("message")
+	}
+	if strings.TrimSpace(body.Content) == "" {
+		body.Content = query.Get("content")
+	}
+	if strings.TrimSpace(body.Source) == "" {
+		body.Source = query.Get("source")
+	}
+
 	content := strings.TrimSpace(body.Message)
 	if content == "" {
 		content = strings.TrimSpace(body.Content)
@@ -280,48 +448,15 @@ func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) 
 	}
 	source := strings.TrimSpace(body.Source)
 	if source == "" {
-		source = "webhook"
+		source = channel.Name
 	}
 	if len(source) > 120 {
 		writeError(w, http.StatusBadRequest, "source is too long")
 		return
 	}
 
-	ids := make([]string, 0, len(body.DeviceIDs)+1)
-	seen := make(map[string]bool)
-	for _, id := range append([]string{body.DeviceID}, body.DeviceIDs...) {
-		id = strings.TrimSpace(id)
-		if id != "" && !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
-	if len(ids) == 0 || len(ids) > 64 {
-		writeError(w, http.StatusBadRequest, "specify between 1 and 64 target devices")
-		return
-	}
-
-	devices, err := r.db.ListDevicesForOwner("")
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load target devices")
-		return
-	}
-	byID := make(map[string]*repository.Device, len(devices))
-	for _, device := range devices {
-		byID[device.ID] = device
-	}
-	targets := make([]*repository.Device, 0, len(ids))
-	for _, id := range ids {
-		device := byID[id]
-		if device == nil || device.ApprovalState != "approved" {
-			writeError(w, http.StatusBadRequest, "target device is not approved: "+id)
-			return
-		}
-		targets = append(targets, device)
-	}
-
 	message := &repository.MessageRecord{
-		Title: title, Content: content, Source: source,
+		ChannelID: channel.ID, Title: title, Content: content, Source: source,
 		VerificationCode: messageutil.ExtractVerificationCode(content),
 		CreatedAt:        time.Now().UTC(),
 	}
@@ -329,7 +464,11 @@ func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to persist message")
 		return
 	}
+	r.deliverMessage(message)
+	writeJSON(w, http.StatusOK, message)
+}
 
+func (r *Router) deliverMessage(message *repository.MessageRecord) {
 	type deliveryResult struct {
 		index       int
 		status      string
@@ -362,7 +501,6 @@ func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) 
 		delivery.DeliveredAt = result.deliveredAt
 		_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, result.status, result.error, result.deliveredAt)
 	}
-	writeJSON(w, http.StatusOK, message)
 }
 
 func (r *Router) pushMessage(sess *session.DeviceSession, message *repository.MessageRecord) error {

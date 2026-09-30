@@ -9,29 +9,29 @@
 <style>
 :root{color-scheme:light dark;font-family:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI",sans-serif}
 *{box-sizing:border-box}
-html,body{width:100%;height:100%;margin:0;background:transparent;overflow:hidden}
-body{display:grid;place-items:center;padding:18px;-webkit-font-smoothing:antialiased}
+html,body{width:100%;height:100%;margin:0;background:transparent!important;overflow:hidden}
+html{background-color:transparent!important}
+body{display:grid;place-items:center;padding:22px;-webkit-font-smoothing:antialiased;isolation:isolate}
 .card{
   position:relative;width:100%;height:100%;overflow:hidden;border-radius:28px;
-  border:1px solid rgba(255,255,255,.55);
+  border:1px solid rgba(255,255,255,.62);
   background:
-    radial-gradient(circle at 14% 5%,rgba(45,212,191,.19),transparent 34%),
-    radial-gradient(circle at 94% 88%,rgba(59,130,246,.13),transparent 38%),
-    rgba(247,250,252,.94);
+    radial-gradient(circle at 14% 5%,rgba(45,212,191,.16),transparent 34%),
+    radial-gradient(circle at 94% 88%,rgba(59,130,246,.11),transparent 38%),
+    rgba(247,250,252,.985);
   color:#13202d;
-  box-shadow:0 28px 80px rgba(15,23,42,.28),0 2px 8px rgba(15,23,42,.10);
-  backdrop-filter:blur(30px) saturate(1.25);
-  animation:enter .34s cubic-bezier(.2,.9,.25,1);
+  box-shadow:0 8px 18px rgba(15,23,42,.16),0 1px 3px rgba(15,23,42,.10);
+  animation:enter .30s cubic-bezier(.2,.9,.25,1);
 }
 @media(prefers-color-scheme:dark){
- .card{border-color:rgba(255,255,255,.12);background:
-   radial-gradient(circle at 14% 5%,rgba(45,212,191,.18),transparent 34%),
-   radial-gradient(circle at 94% 88%,rgba(59,130,246,.14),transparent 38%),
-   rgba(15,23,34,.96);color:#f5f9fc;box-shadow:0 30px 90px rgba(0,0,0,.48),0 2px 8px rgba(0,0,0,.28)}
+ .card{border-color:rgba(255,255,255,.13);background:
+   radial-gradient(circle at 14% 5%,rgba(45,212,191,.16),transparent 34%),
+   radial-gradient(circle at 94% 88%,rgba(59,130,246,.12),transparent 38%),
+   rgba(15,23,34,.985);color:#f5f9fc;box-shadow:0 8px 18px rgba(0,0,0,.32),0 1px 3px rgba(0,0,0,.24)}
  .sub,.meta,.content{color:#9aabbc}.code-shell{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.10)}
  .ghost{background:rgba(255,255,255,.06);color:#d5e1ea;border-color:rgba(255,255,255,.09)}
 }
-.glow{position:absolute;width:180px;height:180px;border-radius:50%;filter:blur(45px);opacity:.25;pointer-events:none}
+.glow{position:absolute;width:150px;height:150px;border-radius:50%;filter:blur(34px);opacity:.18;pointer-events:none}
 .glow.one{left:-58px;top:-64px;background:#2dd4bf}.glow.two{right:-70px;bottom:-85px;background:#60a5fa}
 .top{display:flex;align-items:flex-start;justify-content:space-between;padding:24px 25px 0}
 .identity{display:flex;align-items:center;gap:11px}

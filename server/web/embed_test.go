@@ -5,6 +5,22 @@ import (
 	"testing"
 )
 
+func TestServerConsoleHidesAuthViewsUntilSessionCheck(t *testing.T) {
+	data, err := EmbeddedFiles.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		`id="login-view" class="login-view" hidden`,
+		`id="app-view" class="app-shell rp-shell" hidden`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("server console auth view must start hidden: missing %q", want)
+		}
+	}
+}
+
 func TestConsoleUsesUnifiedPersonalNavigation(t *testing.T) {
 	data, err := EmbeddedFiles.ReadFile("index.html")
 	if err != nil {

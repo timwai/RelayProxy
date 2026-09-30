@@ -16,6 +16,7 @@
   <symbol id="i-device" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></symbol>
   <symbol id="i-exit" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></symbol>
   <symbol id="i-activity" viewBox="0 0 24 24"><path d="M4 20V9m8 11V4m8 16v-7"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
   <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M5 16a8 8 0 0 0 13 2"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
@@ -41,6 +42,7 @@
     <nav aria-label="管理导航">
       <a href="#overview" data-section="overview"><svg><use href="#i-grid"/></svg><span>概览</span></a>
       <a href="#devices" data-section="devices"><svg><use href="#i-device"/></svg><span>设备</span><b id="nav-device-count">0</b></a>
+      <a href="#messages" data-section="messages"><svg><use href="#i-message"/></svg><span>消息</span><b id="nav-message-count">0</b></a>
       <a href="#sessions" data-section="connections"><svg><use href="#i-activity"/></svg><span>连接</span></a>
       <a href="#rdp-ingress" data-section="rdp" data-admin><svg><use href="#i-device"/></svg><span>RDP</span></a>
       <a href="#settings" data-section="settings" data-admin><svg><use href="#i-settings"/></svg><span>设置</span><i id="settings-dot" hidden></i></a>
@@ -80,6 +82,24 @@
         <div class="page-heading"><div><p class="eyebrow">LIVE SESSIONS</p><h1>实时连接</h1><p class="muted">按设备显示正在处理的流；传输量为本次设备会话累计。</p></div></div>
         <article class="panel rp-card"><div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>设备</th><th>角色</th><th>选定出口</th><th>传输</th><th>活跃流</th><th>上传 / 下载</th></tr></thead><tbody id="sessions-body"></tbody></table></div></article>
       </section>
+      <section id="page-messages" class="page" hidden>
+        <div class="page-heading">
+          <div><p class="eyebrow">MESSAGE CENTER</p><h1>消息历史</h1><p class="muted">Webhook 消息、验证码识别结果和每台目标设备的投递状态。</p></div>
+          <button id="messages-refresh" type="button" class="rp-btn">刷新消息</button>
+        </div>
+        <div class="panel rp-card">
+          <div class="toolbar">
+            <input id="message-search" type="search" placeholder="搜索标题、内容、来源、设备或验证码">
+            <select id="message-kind"><option value="">全部类型</option><option value="code">验证码</option><option value="normal">普通消息</option></select>
+            <select id="message-status"><option value="">全部状态</option><option value="delivered">已送达</option><option value="offline">设备离线</option><option value="failed">投递失败</option><option value="pending">等待投递</option></select>
+            <span id="message-summary" class="muted">正在读取消息</span>
+          </div>
+          <div class="message-table-wrap">
+            <table class="message-table"><thead><tr><th>时间 / 来源</th><th>消息</th><th>验证码</th><th>目标设备 / 状态</th></tr></thead><tbody id="messages-body"></tbody></table>
+          </div>
+        </div>
+      </section>
+
       <section id="page-rdp-ingress" class="page" hidden>
         <div class="page-heading"><div><p class="eyebrow">RDP PUBLIC INGRESS</p><h1>RDP 公网入口</h1><p class="muted">默认关闭；每个入口固定一个 TCP/UDP 端口，并由目标设备的公网能力、来源 CIDR、过期时间和速率共同约束。</p></div></div>
         <article class="panel rp-card rdp-ingress-panel"><div class="panel rp-card-heading"><h2>创建受控入口</h2><span class="badge warning-badge">默认关闭</span></div><p id="rdp-ingress-global-hint" class="field-hint"></p><form id="rdp-ingress-form" class="rdp-ingress-form"><div class="form-grid three"><div><label for="rdp-ingress-target">目标设备</label><select id="rdp-ingress-target" required></select></div><div><label for="rdp-ingress-port">监听端口（可留空自动分配）</label><input id="rdp-ingress-port" type="number" min="1" max="65535" placeholder="自动分配"></div><div><label for="rdp-ingress-rate">每来源 IP 每分钟上限</label><input id="rdp-ingress-rate" type="number" min="1" max="100000" value="120" required></div></div><div class="form-grid"><div><label for="rdp-ingress-cidrs">来源 CIDR（每行一条）</label><textarea id="rdp-ingress-cidrs" rows="4" class="mono" placeholder="203.0.113.0/24"></textarea><small>留空表示 IPv4/IPv6 全部来源；生产环境建议填写固定办公出口网段。</small></div><div><label for="rdp-ingress-expires">过期时间（可选）</label><input id="rdp-ingress-expires" type="datetime-local"><small>到期后立即拒绝新连接，已建立的连接由入口服务关闭。</small></div></div><p id="rdp-ingress-error" class="form-error" role="alert" hidden></p><div class="button-row"><button type="submit" class="primary rp-btn rp-btn-primary">创建入口</button></div></form></article>

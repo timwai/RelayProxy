@@ -79,6 +79,43 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	}
 }
 
+func TestVerificationPopupTimeoutDefaultsAndExplicitZero(t *testing.T) {
+	cfg := &AgentConfigFile{}
+	if err := NormalizeAgentConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.VerificationPopupTimeout(); got != 15 {
+		t.Fatalf("default verification popup timeout=%d, want 15", got)
+	}
+
+	zero := 0
+	cfg.GUI.VerificationPopupTimeoutSec = &zero
+	if err := NormalizeAgentConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.VerificationPopupTimeout(); got != 0 {
+		t.Fatalf("explicit zero timeout=%d, want 0", got)
+	}
+
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.VerificationPopupTimeout(); got != 0 {
+		t.Fatalf("persisted zero timeout=%d, want 0", got)
+	}
+
+	tooLarge := 3601
+	loaded.GUI.VerificationPopupTimeoutSec = &tooLarge
+	if err := NormalizeAgentConfig(loaded); err == nil {
+		t.Fatal("verification popup timeout above 3600 accepted")
+	}
+}
+
 func TestExitUpstreamDefaultsAndValidation(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	if err := NormalizeAgentConfig(cfg); err != nil {

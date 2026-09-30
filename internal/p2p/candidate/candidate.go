@@ -94,7 +94,7 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 			if !ip.IsValid() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 				continue
 			}
-			udpPriority, tcpPriority := 1000, 900
+			udpPriority, tcpPriority := uint32(1000), uint32(900)
 			if ip.Is6() {
 				// Prefer native IPv6 over an IPv4 NAT path when both are available.
 				udpPriority, tcpPriority = 1100, 1000

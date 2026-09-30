@@ -148,7 +148,6 @@ func TestChannelRequiresTargets(t *testing.T) {
 	}
 }
 
-
 func TestAdminListenerDoesNotServePublicPush(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()

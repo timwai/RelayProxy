@@ -255,12 +255,10 @@
     @media(prefers-reduced-motion:reduce) { .live-dot{animation:none;} }
   
     /* Reference restore: Agent shell and density. */
-    .rp-reference-top{height:56px;min-height:56px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 18px;border-bottom:1px solid var(--rp-border);background:color-mix(in srgb,var(--rp-surface) 92%,transparent);backdrop-filter:blur(16px);z-index:8}
-    .rp-reference-crumb{display:flex;align-items:center;gap:8px;color:var(--rp-muted);font-size:10px;min-width:0}
+    .rp-reference-top{height:52px;min-height:52px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 22px;border-bottom:1px solid var(--rp-border);background:color-mix(in srgb,var(--rp-surface) 92%,transparent);backdrop-filter:blur(16px);z-index:8}
+    .rp-reference-crumb{display:flex;align-items:center;gap:8px;color:var(--rp-muted);font-size:13px;min-width:0}
     .rp-reference-crumb b{color:var(--rp-text);font-weight:650}
-    .rp-reference-command{width:min(340px,34vw);height:30px;border:1px solid var(--rp-border);background:var(--rp-surface-soft);border-radius:8px;display:flex;align-items:center;gap:7px;padding:0 8px;color:var(--rp-subtle);font-size:9px}
-    .rp-reference-command kbd{margin-left:auto;border:1px solid var(--rp-border);background:var(--rp-surface);border-radius:5px;padding:1px 5px;font:8px var(--rp-mono)}
-    .rp-reference-actions{display:flex;align-items:center;gap:6px}
+    .rp-reference-actions{display:flex;align-items:center;gap:8px}
     .btn-primary,.rp-btn-primary{background:var(--rp-text)!important;border-color:var(--rp-text)!important;color:var(--rp-surface)!important}
     .btn-primary:hover:not(:disabled),.rp-btn-primary:hover:not(:disabled){background:color-mix(in srgb,var(--rp-text) 88%,var(--rp-muted))!important;border-color:transparent!important}
     .rp-sidebar{padding:11px 9px!important;gap:8px}
@@ -298,7 +296,6 @@
     .toggle-knob{width:13px!important;height:13px!important}
     .peer:checked~.toggle-track .toggle-knob{transform:translateX(15px)!important}
     #secondary-tabs{margin-bottom:0!important}
-    @media(max-width:900px){.rp-reference-command{display:none}}
     @media(max-width:760px){
       /* Keep the desktop navigation readable. High-DPI WebView2 windows can
          report a CSS viewport below this breakpoint even at normal startup size. */
@@ -349,21 +346,23 @@
     .rp-table th{font-size:10px!important;line-height:1.35}
     .rp-table td{font-size:12px!important;line-height:1.45}
     .rp-reference-crumb{font-size:12px!important}
-    .rp-reference-command{font-size:11px!important}
-    .rp-reference-command kbd{font-size:10px!important}
     .rp-reference-actions{flex:0 0 auto}
 
     #tab-pane-home>div:first-child h1,
     #tab-pane-proxy>div:first-child h1,
+    #tab-pane-messages>div:first-child h1,
     #tab-pane-logs>div:first-child h1,
     #tab-pane-connections>div:first-child h1,
     #tab-pane-settings>div:first-child h1,
+    #tab-pane-pair>div:first-child h1,
     .config-page-heading h1{font-size:21px!important;line-height:1.25!important;letter-spacing:-.025em!important}
     #tab-pane-home>div:first-child p,
     #tab-pane-proxy>div:first-child p,
+    #tab-pane-messages>div:first-child p,
     #tab-pane-logs>div:first-child p,
     #tab-pane-connections>div:first-child p,
     #tab-pane-settings>div:first-child p,
+    #tab-pane-pair>div:first-child p,
     .config-page-heading p{font-size:12px!important;line-height:1.55!important}
 
     .config-pill{font-size:10px!important}
@@ -410,7 +409,6 @@
 
     .rp-reference-top{min-width:0}
     .rp-reference-crumb{flex:0 1 auto;min-width:0;white-space:nowrap}
-    .rp-reference-command{flex:0 1 340px;min-width:170px}
     #secondary-tabs{max-width:100%;overflow-x:auto;scrollbar-width:thin}
     .tab-pane{min-width:0}
     #tab-pane-home>div:first-child,
@@ -439,6 +437,18 @@
       .config-actions{align-items:flex-start}
     }
 
+      /* shell-cleanup-v2 */
+    #secondary-tabs-wrap{padding-top:12px}
+    #secondary-tabs{margin-bottom:0!important}
+    .tab-pane{padding-top:16px!important}
+    .rp-reference-actions .rp-btn{min-height:34px;padding:7px 12px}
+    .rp-reference-actions .rp-badge{font-size:11px!important;padding:4px 8px}
+    @media(max-width:980px){
+      .rp-reference-top{padding-left:18px!important;padding-right:18px!important}
+    }
+    @media(max-width:860px){
+      .rp-reference-top{padding-left:14px!important;padding-right:14px!important}
+    }
   </style>
 </head>
 <body class="rp-shell text-slate-900 dark:text-slate-100 h-screen w-screen flex flex-col">
@@ -570,7 +580,6 @@
 
       <header class="rp-reference-top">
         <div class="rp-reference-crumb"><b id="agent-section-label">概览</b></div>
-        <div class="rp-reference-command">⌕ <span>搜索设置或命令</span><kbd>Ctrl K</kbd></div>
         <div class="rp-reference-actions"><span class="rp-badge rp-badge-success">Agent</span><button type="button" onclick="reloadConfig()" class="rp-btn">重载配置</button></div>
       </header>
 

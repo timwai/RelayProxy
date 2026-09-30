@@ -34,6 +34,8 @@ class MainActivity : Activity() {
     private lateinit var infoDevice: TextView
     private lateinit var infoNetworkMode: TextView
     private lateinit var infoActiveNetwork: TextView
+    private lateinit var infoP2PPath: TextView
+    private lateinit var infoPowerMode: TextView
     private lateinit var infoApproval: TextView
     private lateinit var infoExitPermission: TextView
     private lateinit var infoUptime: TextView
@@ -246,6 +248,8 @@ class MainActivity : Activity() {
         infoDevice = infoRow(card, "设备名称")
         infoNetworkMode = infoRow(card, "出口网络")
         infoActiveNetwork = infoRow(card, "当前网络")
+        infoP2PPath = infoRow(card, "P2P 直连")
+        infoPowerMode = infoRow(card, "P2P 电源策略")
         infoApproval = infoRow(card, "设备审批")
         infoExitPermission = infoRow(card, "出口权限")
         infoUptime = infoRow(card, "运行时长")
@@ -399,6 +403,10 @@ class MainActivity : Activity() {
         val uptimeMs = obj.optLong("serviceUptimeMs", 0)
         val error = obj.optString("lastError", "")
         val activeNetwork = obj.optString("activeNetwork", "")
+        val p2pState = obj.optString("p2pState", "")
+        val p2pPath = obj.optString("p2pPath", "")
+        val p2pRttMs = obj.optLong("p2pRttMs", 0)
+        val powerConstrained = obj.optBoolean("powerConstrained", false)
 
         when (state) {
             "CONNECTED" -> {
@@ -444,6 +452,8 @@ class MainActivity : Activity() {
             config.autoNetworkSwitch,
         )
         infoActiveNetwork.text = activeNetworkLabel(activeNetwork)
+        infoP2PPath.text = p2pPathLabel(p2pState, p2pPath, p2pRttMs)
+        infoPowerMode.text = if (powerConstrained) "省电" else "标准"
         infoApproval.text = approvalLabel(approval)
         infoExitPermission.text = if (approved) "已授权" else "未授权"
         infoUptime.text = formatDuration(uptimeMs)
@@ -526,6 +536,23 @@ class MainActivity : Activity() {
         NetworkBinder.MODE_WIFI -> "Wi-Fi"
         NetworkBinder.MODE_CELLULAR -> "移动数据"
         else -> "未连接"
+    }
+
+    private fun p2pPathLabel(state: String, path: String, rttMs: Long): String {
+        if (state.isBlank()) return "等待直连"
+        if (state == "READY" && path == "p2p_quic") {
+            return if (rttMs > 0) "P2P QUIC · ${rttMs} ms" else "P2P QUIC"
+        }
+        return when (state) {
+            "DISCOVERING" -> "发现候选"
+            "RENDEZVOUS" -> "候选交换"
+            "PUNCHING" -> "UDP 打洞"
+            "QUIC_HANDSHAKE" -> "QUIC 握手"
+            "COOLDOWN" -> "冷却中 · Relay 回退"
+            "DEGRADED" -> "Relay 回退"
+            "CLOSED" -> "已关闭"
+            else -> state
+        }
     }
 
     private fun approvalLabel(value: String): String = when (value) {

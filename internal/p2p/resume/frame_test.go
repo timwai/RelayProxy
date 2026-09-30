@@ -8,7 +8,7 @@ import (
 
 func TestFrameRoundTrip(t *testing.T) {
 	var wire bytes.Buffer
-	want := Frame{Type: FrameData, Seq: 42, Ack: 17, Payload: []byte("relayproxy")}
+	want := Frame{Type: FrameData, Flags: FlagFINAck, Seq: 42, Ack: 17, Payload: []byte("relayproxy")}
 	if err := WriteFrame(&wire, want); err != nil {
 		t.Fatal(err)
 	}
@@ -128,5 +128,22 @@ func TestWriteFrameHandlesShortWrites(t *testing.T) {
 	}
 	if got.Seq != want.Seq || got.Ack != want.Ack || !bytes.Equal(got.Payload, want.Payload) {
 		t.Fatalf("short-write round trip mismatch: got=%+v want=%+v", got, want)
+	}
+}
+
+func TestFrameRejectsUnknownFlagsAndReservedBytes(t *testing.T) {
+	var wire bytes.Buffer
+	if err := WriteFrame(&wire, Frame{Type: FrameAck, Flags: 1 << 15}); !errors.Is(err, ErrFrame) {
+		t.Fatalf("unknown write flags error=%v", err)
+	}
+
+	wire.Reset()
+	if err := WriteFrame(&wire, Frame{Type: FrameAck}); err != nil {
+		t.Fatal(err)
+	}
+	raw := wire.Bytes()
+	raw[28] = 1
+	if _, err := ReadFrame(bytes.NewReader(raw)); !errors.Is(err, ErrFrame) {
+		t.Fatalf("non-zero reserved byte error=%v", err)
 	}
 }

@@ -115,3 +115,72 @@ func TestStreamStateBindingCapturesOffsets(t *testing.T) {
 		t.Fatalf("unexpected binding offsets: %+v", binding)
 	}
 }
+
+func TestStreamStateReplaysFINUntilAcknowledged(t *testing.T) {
+	identity, err := NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sender, _ := NewStreamState(identity, 1024)
+	receiver, _ := NewStreamState(identity, 1024)
+
+	data, err := sender.Data([]byte("payload"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := receiver.Handle(data); err != nil {
+		t.Fatal(err)
+	}
+	fin, err := sender.FIN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fin.Seq != uint64(len("payload")) {
+		t.Fatalf("FIN seq=%d", fin.Seq)
+	}
+	if _, _, err := receiver.Handle(fin); err != nil {
+		t.Fatal(err)
+	}
+	if !receiver.RemoteFIN() {
+		t.Fatal("receiver did not record remote FIN")
+	}
+
+	replay := sender.ReplayFrames()
+	if len(replay) != 2 || replay[1].Type != FrameFIN {
+		t.Fatalf("unacknowledged FIN was not replayed: %#v", replay)
+	}
+
+	ack, err := receiver.AckFrame()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ack.Flags&FlagFINAck == 0 || ack.Ack != uint64(len("payload")) {
+		t.Fatalf("FIN ACK missing: %+v", ack)
+	}
+	if _, _, err := sender.Handle(ack); err != nil {
+		t.Fatal(err)
+	}
+	if !sender.LocalFINAcknowledged() {
+		t.Fatal("sender did not record FIN acknowledgement")
+	}
+	if replay := sender.ReplayFrames(); len(replay) != 0 {
+		t.Fatalf("acknowledged DATA/FIN still replayed: %#v", replay)
+	}
+	if _, err := sender.Data([]byte("after-fin")); !errors.Is(err, ErrFrame) {
+		t.Fatalf("data after FIN error=%v", err)
+	}
+}
+
+func TestStreamStateRejectsFINBeforeMissingData(t *testing.T) {
+	state, err := NewRandomStreamState(1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = state.Handle(Frame{Type: FrameFIN, Seq: 5})
+	if !errors.Is(err, ErrSequenceGap) {
+		t.Fatalf("early FIN error=%v", err)
+	}
+	if state.RemoteFIN() {
+		t.Fatal("early FIN closed receive side")
+	}
+}

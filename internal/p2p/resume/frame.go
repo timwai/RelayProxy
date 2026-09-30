@@ -25,6 +25,10 @@ const (
 	FrameAck  FrameType = 2
 	FrameFIN  FrameType = 3
 	FrameRST  FrameType = 4
+
+	// FlagFINAck acknowledges that the peer's FIN at Ack was accepted.
+	FlagFINAck uint16 = 1 << 0
+	knownFlags        = FlagFINAck
 )
 
 var (
@@ -37,6 +41,7 @@ var (
 // acknowledged frame can be replayed without changing the logical stream.
 type Frame struct {
 	Type    FrameType
+	Flags   uint16
 	Seq     uint64
 	Ack     uint64
 	Payload []byte
@@ -48,6 +53,9 @@ func WriteFrame(w io.Writer, frame Frame) error {
 	}
 	if len(frame.Payload) > MaxPayload {
 		return ErrPayloadSize
+	}
+	if frame.Flags & ^knownFlags != 0 {
+		return fmt.Errorf("%w: flags %#x", ErrFrame, frame.Flags)
 	}
 	switch frame.Type {
 	case FrameData:
@@ -65,6 +73,7 @@ func WriteFrame(w io.Writer, frame Frame) error {
 	binary.BigEndian.PutUint32(header[0:4], Magic)
 	header[4] = Version
 	header[5] = byte(frame.Type)
+	binary.BigEndian.PutUint16(header[6:8], frame.Flags)
 	binary.BigEndian.PutUint64(header[8:16], frame.Seq)
 	binary.BigEndian.PutUint64(header[16:24], frame.Ack)
 	binary.BigEndian.PutUint32(header[24:28], uint32(len(frame.Payload)))
@@ -82,13 +91,18 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	if _, err := io.ReadFull(r, header[:]); err != nil {
 		return Frame{}, err
 	}
-	if binary.BigEndian.Uint32(header[0:4]) != Magic || header[4] != Version {
+	if binary.BigEndian.Uint32(header[0:4]) != Magic || header[4] != Version ||
+		header[28] != 0 || header[29] != 0 || header[30] != 0 || header[31] != 0 {
 		return Frame{}, ErrFrame
 	}
 	frame := Frame{
-		Type: FrameType(header[5]),
-		Seq:  binary.BigEndian.Uint64(header[8:16]),
-		Ack:  binary.BigEndian.Uint64(header[16:24]),
+		Type:  FrameType(header[5]),
+		Flags: binary.BigEndian.Uint16(header[6:8]),
+		Seq:   binary.BigEndian.Uint64(header[8:16]),
+		Ack:   binary.BigEndian.Uint64(header[16:24]),
+	}
+	if frame.Flags & ^knownFlags != 0 {
+		return Frame{}, ErrFrame
 	}
 	n := binary.BigEndian.Uint32(header[24:28])
 	if n > MaxPayload {

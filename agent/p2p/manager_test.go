@@ -296,7 +296,6 @@ func TestFailedDirectSessionIsRemovedAndClosedOnServer(t *testing.T) {
 	}
 }
 
-
 func TestCandidateSummaryIsCountOnly(t *testing.T) {
 	summary := summarizeCandidates(
 		[]protocol.P2PCandidate{

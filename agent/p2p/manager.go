@@ -93,6 +93,9 @@ type Session struct {
 	direct          *directp2p.QUICSession
 	establishing    bool
 	clientRole      bool
+	lastRTTMs       int64
+	lastBytesUp     uint64
+	lastBytesDown   uint64
 	lastUsed        atomic.Int64
 	closed          chan struct{}
 	closeOnce       sync.Once
@@ -116,18 +119,18 @@ type Snapshot struct {
 }
 
 type PathStatus struct {
-	SessionID       uint64
-	ClientDeviceID  string
-	ExitDeviceID    string
-	ExpiresAt       int64
-	State           State
-	Path            string
-	Error           string
-	RTTMs           int64
-	CandidateSummary string
-	FallbackCount   uint64
-	BytesUp         uint64
-	BytesDown       uint64
+	SessionID	uint64
+	ClientDeviceID	string
+	ExitDeviceID	string
+	ExpiresAt	int64
+	State	State
+	Path	string
+	Error	string
+	RTTMs	int64
+	CandidateSummary	string
+	FallbackCount	uint64
+	BytesUp	uint64
+	BytesDown	uint64
 }
 
 // NewManager builds a signaling-only manager. It remains useful in tests and
@@ -607,7 +610,10 @@ func (s *Session) Snapshot() Snapshot {
 	}
 	s.mu.RLock()
 	path := ""
-	var stats directp2p.QUICStats
+	stats := directp2p.QUICStats{
+		RTT: time.Duration(s.lastRTTMs) * time.Millisecond,
+		BytesSent: s.lastBytesUp, BytesReceived: s.lastBytesDown,
+	}
 	if s.state == StateReady && s.direct != nil {
 		path = protocol.P2PPathDirectQUIC
 		stats = s.direct.Stats()
@@ -838,11 +844,15 @@ func (s *Session) watchDirect(direct *directp2p.QUICSession) {
 		return
 	case <-direct.Done():
 	}
+	stats := direct.Stats()
 	s.mu.Lock()
 	if s.direct != direct || s.state == StateClosed {
 		s.mu.Unlock()
 		return
 	}
+	s.lastRTTMs = stats.RTT.Milliseconds()
+	s.lastBytesUp = stats.BytesSent
+	s.lastBytesDown = stats.BytesReceived
 	s.direct = nil
 	s.state = StateDegraded
 	s.lastError = "P2P QUIC session closed"

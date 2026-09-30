@@ -20,18 +20,18 @@ import (
 )
 
 const (
-	DefaultLease             = 60 * time.Second
-	MinLease                 = 15 * time.Second
-	MaxLease                 = 5 * time.Minute
-	DefaultMaxSessions       = 8
-	maxActiveSessions        = 4096
-	maxConnectsPerMinute     = 120
-	connectRateWindow        = time.Minute
-	maxFingerprintLength      = 256
-	maxReportReasonLength     = 512
-	maxCandidateSummaryLength = 256
-	maxReportedRTTMs          = int64(600000)
-	maxReportedActiveStreams  = 1000000
+	DefaultLease	= 60 * time.Second
+	MinLease	= 15 * time.Second
+	MaxLease	= 5 * time.Minute
+	DefaultMaxSessions	= 8
+	maxActiveSessions	= 4096
+	maxConnectsPerMinute	= 120
+	connectRateWindow	= time.Minute
+	maxFingerprintLength	= 256
+	maxReportReasonLength	= 512
+	maxCandidateSummaryLength	= 256
+	maxReportedRTTMs	= int64(600000)
+	maxReportedActiveStreams	= 1000000
 )
 
 type AuthorizeFunc func(clientDeviceID, exitDeviceID string) (bool, error)
@@ -472,6 +472,28 @@ func (c *Coordinator) renew(device *session.DeviceSession, message protocol.P2PC
 	return protocol.P2PControlMessage{Type: protocol.P2PControlLeaseAck, SessionID: item.ID, LeaseExpiresAt: expires}
 }
 
+func validCandidateSummary(summary string) bool {
+	if summary == "" {
+		return true
+	}
+	if len(summary) > maxCandidateSummaryLength || strings.ContainsAny(summary, "\r\n\t") {
+		return false
+	}
+	var localLAN, localReflexive, peerLAN, peerReflexive int
+	n, err := fmt.Sscanf(summary, "local:lan=%d,reflexive=%d;peer:lan=%d,reflexive=%d",
+		&localLAN, &localReflexive, &peerLAN, &peerReflexive)
+	if err != nil || n != 4 {
+		return false
+	}
+	for _, count := range []int{localLAN, localReflexive, peerLAN, peerReflexive} {
+		if count < 0 || count > 16 {
+			return false
+		}
+	}
+	return summary == fmt.Sprintf("local:lan=%d,reflexive=%d;peer:lan=%d,reflexive=%d",
+		localLAN, localReflexive, peerLAN, peerReflexive)
+}
+
 func (c *Coordinator) pathReport(device *session.DeviceSession, message protocol.P2PControlMessage) protocol.P2PControlMessage {
 	if device == nil {
 		return p2pError("SESSION_TOKEN_INVALID", "P2P session token is invalid")
@@ -486,7 +508,7 @@ func (c *Coordinator) pathReport(device *session.DeviceSession, message protocol
 		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P RTT")
 	}
 	message.CandidateSummary = strings.TrimSpace(message.CandidateSummary)
-	if len(message.CandidateSummary) > maxCandidateSummaryLength || strings.ContainsAny(message.CandidateSummary, "\r\n\t") {
+	if !validCandidateSummary(message.CandidateSummary) {
 		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P candidate summary")
 	}
 	reason := strings.TrimSpace(message.Reason)

@@ -201,7 +201,7 @@ func Run(b *bridge.UIBridge, opts Options) error {
 		Name:                       "verification",
 		Title:                      "RelayProxy 验证码",
 		Width:                      520,
-		Height:                     350,
+		Height:                     390,
 		URL:                        "/verification.html",
 		Hidden:                     true,
 		Frameless:                  true,

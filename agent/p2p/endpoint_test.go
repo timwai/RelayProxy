@@ -1,9 +1,9 @@
 package p2p
 
 import (
-	"encoding/hex"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"net"
 	"net/netip"
 	"testing"
@@ -74,7 +74,6 @@ func TestEndpointUsesSameSocketForReflexiveDiscovery(t *testing.T) {
 		t.Fatalf("reflexive candidate did not preserve endpoint socket port %d: %#v", localPort, candidates)
 	}
 }
-
 
 func TestCurrentNetworkSignatureIsOpaque(t *testing.T) {
 	signature := CurrentNetworkSignature()

@@ -52,15 +52,15 @@ type Manager struct {
 	networkCheckInterval time.Duration
 	networkSignature     func() string
 
-	mu         sync.Mutex
-	sessions   map[uint64]*Session
-	starting   map[string]uint64
-	cooldowns  map[string]failureState
-	fallbacks  map[string]uint64
-	networkSig string
-	ready      chan *Session
-	closed     atomic.Bool
-	attemptSeq atomic.Uint64
+	mu           sync.Mutex
+	sessions     map[uint64]*Session
+	starting     map[string]uint64
+	cooldowns    map[string]failureState
+	fallbacks    map[string]uint64
+	networkSig   string
+	ready        chan *Session
+	closed       atomic.Bool
+	attemptSeq   atomic.Uint64
 	networkEpoch atomic.Uint64
 }
 
@@ -1074,8 +1074,8 @@ func (m *Manager) invalidateNetwork() {
 	if m == nil || m.closed.Load() {
 		return
 	}
-	m.networkEpoch.Add(1)
 	m.mu.Lock()
+	m.networkEpoch.Add(1)
 	items := make([]*Session, 0, len(m.sessions))
 	for _, item := range m.sessions {
 		items = append(items, item)

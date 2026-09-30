@@ -312,7 +312,6 @@ func TestCandidateSummaryIsCountOnly(t *testing.T) {
 	}
 }
 
-
 func TestNetworkChangeInvalidatesSessionsAndCooldown(t *testing.T) {
 	manager := NewManager(context.Background(), nil, nil, time.Minute)
 	defer manager.Close()

@@ -302,6 +302,7 @@ func (db *DB) ensureMessageSchema() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS messages (
 			id VARCHAR(64) PRIMARY KEY,
+			channel_id VARCHAR(80),
 			title VARCHAR(200) NOT NULL,
 			content TEXT NOT NULL,
 			verification_code VARCHAR(64),
@@ -318,15 +319,238 @@ func (db *DB) ensureMessageSchema() error {
 			PRIMARY KEY(message_id, device_id),
 			FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS message_channels (
+			id VARCHAR(80) PRIMARY KEY,
+			name VARCHAR(120) NOT NULL,
+			all_devices BOOLEAN NOT NULL DEFAULT FALSE,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS message_channel_devices (
+			channel_id VARCHAR(80) NOT NULL,
+			device_id VARCHAR(36) NOT NULL,
+			PRIMARY KEY(channel_id, device_id),
+			FOREIGN KEY(channel_id) REFERENCES message_channels(id) ON DELETE CASCADE,
+			FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_deliveries_device ON message_deliveries(device_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_channel_devices_device ON message_channel_devices(device_id)`,
 	}
 	for _, query := range queries {
 		if _, err := db.Exec(query); err != nil {
 			return err
 		}
 	}
+	if err := db.ensureSQLiteColumn("messages", "channel_id", "VARCHAR(80)"); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (db *DB) ensureSQLiteColumn(table, column, definition string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, kind string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if found {
+		return nil
+	}
+	_, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition)
+	return err
+}
+
+type MessageChannel struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	AllDevices bool      `json:"allDevices"`
+	DeviceIDs  []string  `json:"deviceIds"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
+	if channel == nil {
+		return errors.New("channel is required")
+	}
+	if channel.ID == "" {
+		channel.ID = "ch_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
+	}
+	now := time.Now().UTC()
+	channel.CreatedAt = now
+	channel.UpdatedAt = now
+	return db.saveMessageChannel(channel, true)
+}
+
+func (db *DB) UpdateMessageChannel(channel *MessageChannel) error {
+	if channel == nil || channel.ID == "" {
+		return errors.New("channel id is required")
+	}
+	channel.UpdatedAt = time.Now().UTC()
+	return db.saveMessageChannel(channel, false)
+}
+
+func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if create {
+		if _, err := tx.Exec(`INSERT INTO message_channels (id, name, all_devices, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?)`, channel.ID, channel.Name, channel.AllDevices, channel.CreatedAt, channel.UpdatedAt); err != nil {
+			return err
+		}
+	} else {
+		result, err := tx.Exec(`UPDATE message_channels SET name = ?, all_devices = ?, updated_at = ? WHERE id = ?`,
+			channel.Name, channel.AllDevices, channel.UpdatedAt, channel.ID)
+		if err != nil {
+			return err
+		}
+		if rows, err := result.RowsAffected(); err != nil {
+			return err
+		} else if rows != 1 {
+			return sql.ErrNoRows
+		}
+		if _, err := tx.Exec(`DELETE FROM message_channel_devices WHERE channel_id = ?`, channel.ID); err != nil {
+			return err
+		}
+	}
+	if !channel.AllDevices {
+		seen := make(map[string]bool, len(channel.DeviceIDs))
+		for _, deviceID := range channel.DeviceIDs {
+			deviceID = strings.TrimSpace(deviceID)
+			if deviceID == "" || seen[deviceID] {
+				continue
+			}
+			seen[deviceID] = true
+			if _, err := tx.Exec(`INSERT INTO message_channel_devices (channel_id, device_id) VALUES (?, ?)`, channel.ID, deviceID); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+func (db *DB) DeleteMessageChannel(id string) error {
+	result, err := db.Exec(`DELETE FROM message_channels WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (db *DB) GetMessageChannel(id string) (*MessageChannel, error) {
+	channel := &MessageChannel{}
+	if err := db.QueryRow(`SELECT id, name, all_devices, created_at, updated_at
+		FROM message_channels WHERE id = ?`, id).Scan(
+		&channel.ID, &channel.Name, &channel.AllDevices, &channel.CreatedAt, &channel.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if !channel.AllDevices {
+		rows, err := db.Query(`SELECT device_id FROM message_channel_devices WHERE channel_id = ? ORDER BY device_id`, id)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var deviceID string
+			if err := rows.Scan(&deviceID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			channel.DeviceIDs = append(channel.DeviceIDs, deviceID)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return channel, nil
+}
+
+func (db *DB) ListMessageChannels() ([]*MessageChannel, error) {
+	rows, err := db.Query(`SELECT id FROM message_channels ORDER BY created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	channels := make([]*MessageChannel, 0, len(ids))
+	for _, id := range ids {
+		channel, err := db.GetMessageChannel(id)
+		if err != nil {
+			return nil, err
+		}
+		channels = append(channels, channel)
+	}
+	return channels, nil
+}
+
+func (db *DB) ResolveMessageChannelTargets(id string) (*MessageChannel, []*Device, error) {
+	channel, err := db.GetMessageChannel(id)
+	if err != nil {
+		return nil, nil, err
+	}
+	devices, err := db.ListDevicesForOwner("")
+	if err != nil {
+		return nil, nil, err
+	}
+	selected := make(map[string]bool, len(channel.DeviceIDs))
+	for _, deviceID := range channel.DeviceIDs {
+		selected[deviceID] = true
+	}
+	targets := make([]*Device, 0, len(devices))
+	for _, device := range devices {
+		if device.ApprovalState != "approved" {
+			continue
+		}
+		if channel.AllDevices || selected[device.ID] {
+			targets = append(targets, device)
+		}
+	}
+	return channel, targets, nil
 }
 
 type MessageDelivery struct {
@@ -339,6 +563,7 @@ type MessageDelivery struct {
 
 type MessageRecord struct {
 	ID               string            `json:"id"`
+	ChannelID        string            `json:"channelId,omitempty"`
 	Title            string            `json:"title"`
 	Content          string            `json:"content"`
 	VerificationCode string            `json:"verificationCode,omitempty"`
@@ -362,8 +587,8 @@ func (db *DB) CreateMessage(message *MessageRecord, targets []*Device) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO messages (id, title, content, verification_code, source, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`, message.ID, message.Title, message.Content, nullableString(message.VerificationCode), nullableString(message.Source), message.CreatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO messages (id, channel_id, title, content, verification_code, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, message.ID, nullableString(message.ChannelID), message.Title, message.Content, nullableString(message.VerificationCode), nullableString(message.Source), message.CreatedAt); err != nil {
 		return err
 	}
 	message.Deliveries = make([]MessageDelivery, 0, len(targets))
@@ -399,7 +624,7 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 	if limit > 500 {
 		limit = 500
 	}
-	query := `SELECT m.id, m.title, m.content, COALESCE(m.verification_code, ''), COALESCE(m.source, ''), m.created_at
+	query := `SELECT m.id, COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m`
 	args := make([]any, 0, 2)
 	if ownerID != "" {
@@ -419,7 +644,7 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 	messages := make([]*MessageRecord, 0, limit)
 	for rows.Next() {
 		message := &MessageRecord{}
-		if err := rows.Scan(&message.ID, &message.Title, &message.Content, &message.VerificationCode, &message.Source, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ChannelID, &message.Title, &message.Content, &message.VerificationCode, &message.Source, &message.CreatedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}

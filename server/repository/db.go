@@ -306,6 +306,7 @@ func (db *DB) ensureMessageSchema() error {
 			title VARCHAR(200) NOT NULL,
 			content TEXT NOT NULL,
 			verification_code VARCHAR(64),
+			route_rule VARCHAR(120),
 			source VARCHAR(120),
 			created_at TIMESTAMP NOT NULL
 		)`,
@@ -323,6 +324,9 @@ func (db *DB) ensureMessageSchema() error {
 			id VARCHAR(80) PRIMARY KEY,
 			name VARCHAR(120) NOT NULL,
 			all_devices BOOLEAN NOT NULL DEFAULT FALSE,
+			use_default_verification BOOLEAN NOT NULL DEFAULT TRUE,
+			verification_rules TEXT NOT NULL DEFAULT '[]',
+			route_rules TEXT NOT NULL DEFAULT '[]',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
 		)`,
@@ -343,6 +347,18 @@ func (db *DB) ensureMessageSchema() error {
 		}
 	}
 	if err := db.ensureSQLiteColumn("messages", "channel_id", "VARCHAR(80)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "route_rule", "VARCHAR(120)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("message_channels", "use_default_verification", "BOOLEAN NOT NULL DEFAULT TRUE"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("message_channels", "verification_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("message_channels", "route_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 	return nil
@@ -379,13 +395,33 @@ func (db *DB) ensureSQLiteColumn(table, column, definition string) error {
 	return err
 }
 
+type VerificationRule struct {
+	Name          string   `json:"name,omitempty"`
+	Keywords      []string `json:"keywords,omitempty"`
+	Pattern       string   `json:"pattern,omitempty"`
+	MaxDistance   int      `json:"maxDistance,omitempty"`
+	CaseSensitive bool     `json:"caseSensitive,omitempty"`
+}
+
+type MessageRouteRule struct {
+	Name          string   `json:"name"`
+	MatchType     string   `json:"matchType"`
+	Pattern       string   `json:"pattern"`
+	CaseSensitive bool     `json:"caseSensitive,omitempty"`
+	AllDevices    bool     `json:"allDevices"`
+	DeviceIDs     []string `json:"deviceIds,omitempty"`
+}
+
 type MessageChannel struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	AllDevices bool      `json:"allDevices"`
-	DeviceIDs  []string  `json:"deviceIds"`
-	CreatedAt  time.Time `json:"createdAt"`
-	UpdatedAt  time.Time `json:"updatedAt"`
+	ID                     string             `json:"id"`
+	Name                   string             `json:"name"`
+	AllDevices             bool               `json:"allDevices"`
+	DeviceIDs              []string           `json:"deviceIds"`
+	UseDefaultVerification bool               `json:"useDefaultVerification"`
+	VerificationRules      []VerificationRule `json:"verificationRules,omitempty"`
+	RouteRules             []MessageRouteRule `json:"routeRules,omitempty"`
+	CreatedAt              time.Time          `json:"createdAt"`
+	UpdatedAt              time.Time          `json:"updatedAt"`
 }
 
 func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
@@ -394,6 +430,9 @@ func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
 	}
 	if channel.ID == "" {
 		channel.ID = "ch_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
+	}
+	if !channel.UseDefaultVerification && len(channel.VerificationRules) == 0 {
+		channel.UseDefaultVerification = true
 	}
 	now := time.Now().UTC()
 	channel.CreatedAt = now
@@ -416,14 +455,28 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 	}
 	defer tx.Rollback()
 
+	verificationRules, err := json.Marshal(channel.VerificationRules)
+	if err != nil {
+		return err
+	}
+	routeRules, err := json.Marshal(channel.RouteRules)
+	if err != nil {
+		return err
+	}
+
 	if create {
-		if _, err := tx.Exec(`INSERT INTO message_channels (id, name, all_devices, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?)`, channel.ID, channel.Name, channel.AllDevices, channel.CreatedAt, channel.UpdatedAt); err != nil {
+		if _, err := tx.Exec(`INSERT INTO message_channels
+			(id, name, all_devices, use_default_verification, verification_rules, route_rules, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			channel.ID, channel.Name, channel.AllDevices, channel.UseDefaultVerification,
+			string(verificationRules), string(routeRules), channel.CreatedAt, channel.UpdatedAt); err != nil {
 			return err
 		}
 	} else {
-		result, err := tx.Exec(`UPDATE message_channels SET name = ?, all_devices = ?, updated_at = ? WHERE id = ?`,
-			channel.Name, channel.AllDevices, channel.UpdatedAt, channel.ID)
+		result, err := tx.Exec(`UPDATE message_channels
+			SET name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, route_rules = ?, updated_at = ?
+			WHERE id = ?`,
+			channel.Name, channel.AllDevices, channel.UseDefaultVerification, string(verificationRules), string(routeRules), channel.UpdatedAt, channel.ID)
 		if err != nil {
 			return err
 		}
@@ -469,11 +522,20 @@ func (db *DB) DeleteMessageChannel(id string) error {
 
 func (db *DB) GetMessageChannel(id string) (*MessageChannel, error) {
 	channel := &MessageChannel{}
-	if err := db.QueryRow(`SELECT id, name, all_devices, created_at, updated_at
+	var verificationRules, routeRules string
+	if err := db.QueryRow(`SELECT id, name, all_devices, use_default_verification,
+		COALESCE(verification_rules, '[]'), COALESCE(route_rules, '[]'), created_at, updated_at
 		FROM message_channels WHERE id = ?`, id).Scan(
-		&channel.ID, &channel.Name, &channel.AllDevices, &channel.CreatedAt, &channel.UpdatedAt,
+		&channel.ID, &channel.Name, &channel.AllDevices, &channel.UseDefaultVerification,
+		&verificationRules, &routeRules, &channel.CreatedAt, &channel.UpdatedAt,
 	); err != nil {
 		return nil, err
+	}
+	if err := json.Unmarshal([]byte(verificationRules), &channel.VerificationRules); err != nil {
+		return nil, fmt.Errorf("decode verification rules for channel %s: %w", id, err)
+	}
+	if err := json.Unmarshal([]byte(routeRules), &channel.RouteRules); err != nil {
+		return nil, fmt.Errorf("decode route rules for channel %s: %w", id, err)
 	}
 	if !channel.AllDevices {
 		rows, err := db.Query(`SELECT device_id FROM message_channel_devices WHERE channel_id = ? ORDER BY device_id`, id)
@@ -533,12 +595,17 @@ func (db *DB) ResolveMessageChannelTargets(id string) (*MessageChannel, []*Devic
 	if err != nil {
 		return nil, nil, err
 	}
+	targets, err := db.ResolveMessageTargets(channel.AllDevices, channel.DeviceIDs)
+	return channel, targets, err
+}
+
+func (db *DB) ResolveMessageTargets(allDevices bool, deviceIDs []string) ([]*Device, error) {
 	devices, err := db.ListDevicesForOwner("")
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	selected := make(map[string]bool, len(channel.DeviceIDs))
-	for _, deviceID := range channel.DeviceIDs {
+	selected := make(map[string]bool, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
 		selected[deviceID] = true
 	}
 	targets := make([]*Device, 0, len(devices))
@@ -546,11 +613,11 @@ func (db *DB) ResolveMessageChannelTargets(id string) (*MessageChannel, []*Devic
 		if device.ApprovalState != "approved" {
 			continue
 		}
-		if channel.AllDevices || selected[device.ID] {
+		if allDevices || selected[device.ID] {
 			targets = append(targets, device)
 		}
 	}
-	return channel, targets, nil
+	return targets, nil
 }
 
 type MessageDelivery struct {
@@ -567,6 +634,7 @@ type MessageRecord struct {
 	Title            string            `json:"title"`
 	Content          string            `json:"content"`
 	VerificationCode string            `json:"verificationCode,omitempty"`
+	RouteRule        string            `json:"routeRule,omitempty"`
 	Source           string            `json:"source,omitempty"`
 	CreatedAt        time.Time         `json:"createdAt"`
 	Deliveries       []MessageDelivery `json:"deliveries"`
@@ -587,8 +655,9 @@ func (db *DB) CreateMessage(message *MessageRecord, targets []*Device) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO messages (id, channel_id, title, content, verification_code, source, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`, message.ID, nullableString(message.ChannelID), message.Title, message.Content, nullableString(message.VerificationCode), nullableString(message.Source), message.CreatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO messages (id, channel_id, title, content, verification_code, route_rule, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, nullableString(message.ChannelID), message.Title, message.Content,
+		nullableString(message.VerificationCode), nullableString(message.RouteRule), nullableString(message.Source), message.CreatedAt); err != nil {
 		return err
 	}
 	message.Deliveries = make([]MessageDelivery, 0, len(targets))
@@ -624,7 +693,8 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 	if limit > 500 {
 		limit = 500
 	}
-	query := `SELECT m.id, COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''), COALESCE(m.source, ''), m.created_at
+	query := `SELECT m.id, COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
+		COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m`
 	args := make([]any, 0, 2)
 	if ownerID != "" {
@@ -644,7 +714,8 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 	messages := make([]*MessageRecord, 0, limit)
 	for rows.Next() {
 		message := &MessageRecord{}
-		if err := rows.Scan(&message.ID, &message.ChannelID, &message.Title, &message.Content, &message.VerificationCode, &message.Source, &message.CreatedAt); err != nil {
+		if err := rows.Scan(&message.ID, &message.ChannelID, &message.Title, &message.Content,
+			&message.VerificationCode, &message.RouteRule, &message.Source, &message.CreatedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}

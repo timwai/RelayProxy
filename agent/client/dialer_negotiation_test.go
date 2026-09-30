@@ -250,14 +250,22 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
 	var fallbacks atomic.Int32
 	var failures atomic.Int32
+	var callbackOrder []string
+	var callbackMu sync.Mutex
 	dialer.ConfigureDirectMetrics(func(exitID string) {
 		if exitID == "exit" {
 			fallbacks.Add(1)
+			callbackMu.Lock()
+			callbackOrder = append(callbackOrder, "fallback")
+			callbackMu.Unlock()
 		}
 	})
 	dialer.ConfigureDirectFailure(func(exitID, reason string) {
 		if exitID == "exit" && reason != "" {
 			failures.Add(1)
+			callbackMu.Lock()
+			callbackOrder = append(callbackOrder, "failure")
+			callbackMu.Unlock()
 		}
 	})
 
@@ -274,6 +282,12 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	}
 	if failures.Load() != 1 {
 		t.Fatalf("direct failure callback=%d, want 1", failures.Load())
+	}
+	callbackMu.Lock()
+	gotOrder := append([]string(nil), callbackOrder...)
+	callbackMu.Unlock()
+	if len(gotOrder) != 2 || gotOrder[0] != "fallback" || gotOrder[1] != "failure" {
+		t.Fatalf("callback order=%v, want [fallback failure]", gotOrder)
 	}
 }
 

@@ -181,17 +181,22 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	}
 	conn, err := d.dialTCPOnSession(ctx, sess, exitNodeID, host, port)
 	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
-	if retryableDirectFailure {
-		d.recordDirectFailure(exitNodeID, err)
-	}
-	if err == nil || !retryableDirectFailure || d.getTunnel == nil || !d.directFallbackEnabled() {
+	if err == nil || !retryableDirectFailure {
 		return conn, err
+	}
+	if d.getTunnel == nil || !d.directFallbackEnabled() {
+		d.recordDirectFailure(exitNodeID, err)
+		return nil, err
 	}
 	relay := d.getTunnel()
 	if relay == nil || relay == sess {
+		d.recordDirectFailure(exitNodeID, err)
 		return nil, err
 	}
+	// Count the fallback while the READY session still exists so the path report
+	// includes the increment, then quarantine that broken direct path.
 	d.recordFallback(exitNodeID)
+	d.recordDirectFailure(exitNodeID, err)
 	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port)
 }
 
@@ -297,17 +302,20 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 
 	conn, err := d.dialUDPOnSession(ctx, sess, exitNodeID, host, port, opts)
 	retryableDirectFailure := direct && retryableDirectUDPHandshakeError(ctx, err)
-	if retryableDirectFailure {
-		d.recordDirectFailure(exitNodeID, err)
-	}
-	if err == nil || !retryableDirectFailure || d.getTunnel == nil || !d.directFallbackEnabled() {
+	if err == nil || !retryableDirectFailure {
 		return conn, err
+	}
+	if d.getTunnel == nil || !d.directFallbackEnabled() {
+		d.recordDirectFailure(exitNodeID, err)
+		return nil, err
 	}
 	relay := d.getTunnel()
 	if relay == nil || relay == sess || (opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(relay)) {
+		d.recordDirectFailure(exitNodeID, err)
 		return nil, err
 	}
 	d.recordFallback(exitNodeID)
+	d.recordDirectFailure(exitNodeID, err)
 	return d.dialUDPOnSession(ctx, relay, exitNodeID, host, port, opts)
 }
 

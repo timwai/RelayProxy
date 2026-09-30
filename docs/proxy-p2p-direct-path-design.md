@@ -1024,18 +1024,32 @@ repunch
 
 ## 25. Existing TCP Connections During P2P Failure
 
-Version 1 should not attempt transparent stream migration.
+RelayProxy now performs **safe pre-stream failover** before returning a new
+connection to the application. If a READY P2P session fails while opening the
+QUIC stream, writing the OpenTCP/OpenUDP request, or reading its response, the
+Client:
 
-If an active P2P QUIC session dies:
+```text
+1. records the P2P -> Relay fallback
+2. quarantines/removes the broken READY P2P session
+3. enters the existing P2P cooldown
+4. retries the new connection through Relay
+```
+
+ACL/business errors are not treated as transport failures and are never retried
+through Relay to bypass Exit policy.
+
+This is intentionally different from migrating an already-established byte
+stream. If a P2P QUIC session dies after application bytes have been exchanged:
 
 ```text
 existing TCP streams -> fail/reset
 new connections      -> Relay
 ```
 
-Most applications will retry automatically.
-
-Seamless live TCP migration requires an additional overlay stream layer and is intentionally out of scope for the first version.
+Transparent migration of an active TCP byte stream remains optional future
+work. It requires stable logical stream IDs plus sequence/ack/replay semantics
+so RelayProxy cannot duplicate or lose bytes when rebinding the target socket.
 
 ---
 
@@ -1516,7 +1530,8 @@ Progress as of 2026-09-30:
 - [x] battery-aware P2P core profile
 - [x] Android lifecycle/power-saver/cellular-network wiring
 - [x] candidate path scoring with bounded RTT preference
-- [ ] optional stream migration
+- [x] pre-stream transport failover + broken-path quarantine
+- [ ] live established-stream migration
 
 The IPv6 implementation keeps Relay as the fallback. Mixed IPv4/IPv6 candidate
 sets continue racing even when the local socket cannot use one address family,
@@ -1713,4 +1728,3 @@ Local Network       Select Exit
 The key rule remains:
 
 > Routing chooses the Exit. P2P only changes the path used to reach that Exit.
-

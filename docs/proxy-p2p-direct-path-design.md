@@ -1494,12 +1494,19 @@ Progress as of 2026-09-30:
 - [x] exponential cooldown after repeated direct-path failures
 - [x] LRU session management for ready Client/Exit P2P sessions
 - [ ] Android battery-aware behavior
-- [ ] path scoring
+- [x] candidate path scoring with bounded RTT preference
 - [ ] optional stream migration
 
 The IPv6 implementation keeps Relay as the fallback. Mixed IPv4/IPv6 candidate
 sets continue racing even when the local socket cannot use one address family,
 so an unsupported family does not abort an otherwise usable direct path.
+
+Path scoring follows the preferred order of reachable private/LAN candidates,
+native IPv6 and reflexive UDP, while using observed punch latency to choose
+between candidates in the same class. A short selection window avoids delaying
+Relay fallback or direct-path establishment for a slow preferred candidate.
+Punch request/ack state is tracked per remote address so two different
+candidates cannot be combined into a false successful path.
 
 ---
 

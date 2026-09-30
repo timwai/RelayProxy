@@ -127,6 +127,8 @@ type networkShellExecuteInfo struct {
 var (
 	networkShell32      = windows.NewLazySystemDLL("shell32.dll")
 	networkShellExecute = networkShell32.NewProc("ShellExecuteExW")
+
+	windowsNetworkServiceOperationMu sync.Mutex
 )
 
 func NetworkServiceModeFlagName() string   { return networkServiceModeFlagName }
@@ -798,6 +800,8 @@ func (d *windowsServicePacketDevice) Close() error {
 }
 
 func EnsurePlatformService() error {
+	windowsNetworkServiceOperationMu.Lock()
+	defer windowsNetworkServiceOperationMu.Unlock()
 	if runtime.GOARCH != "amd64" {
 		return nil
 	}
@@ -933,6 +937,8 @@ func matchesWindowsNetworkServiceRecovery(actions []mgr.RecoveryAction, onNonCra
 }
 
 func RepairPlatformService() error {
+	windowsNetworkServiceOperationMu.Lock()
+	defer windowsNetworkServiceOperationMu.Unlock()
 	if runtime.GOARCH != "amd64" {
 		return errors.New("当前 Windows 架构不支持 RelayProxy Network Service")
 	}
@@ -943,6 +949,8 @@ func RepairPlatformService() error {
 }
 
 func UninstallPlatformService() (NetworkServiceUninstallResult, error) {
+	windowsNetworkServiceOperationMu.Lock()
+	defer windowsNetworkServiceOperationMu.Unlock()
 	if runtime.GOARCH != "amd64" {
 		return NetworkServiceUninstallResult{}, nil
 	}

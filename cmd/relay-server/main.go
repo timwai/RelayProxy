@@ -133,6 +133,7 @@ func main() {
 			time.Duration(cfg.P2P.LeaseSec)*time.Second,
 			p2pRendezvousAddress,
 			cfg.P2P.MaxSessionsPerDevice,
+			relayACL.Policy(),
 		)
 		proxyP2PCoordinator.Start(context.Background())
 		defer proxyP2PCoordinator.Close()
@@ -212,6 +213,11 @@ func main() {
 	if !cfg.IsTLSEnabled() {
 		quicAddr = "" // QUIC requires TLS 1.3, disable when plaintext
 	}
+	p2pLeaseSec := 0
+	if proxyP2PCoordinator != nil {
+		p2pLeaseSec = proxyP2PCoordinator.LeaseSeconds()
+	}
+
 	gw := gateway.NewGateway(gateway.GatewayConfig{
 		TCPAddr:           cfg.Server.TLS.Listen,
 		QUICAddr:          quicAddr,
@@ -251,7 +257,7 @@ func main() {
 		RDPLeaseSec:             rdpCoordinator.LeaseSeconds(),
 		P2PEnabled:              proxyP2PCoordinator != nil,
 		P2PRendezvousAddress:    p2pRendezvousAddress,
-		P2PLeaseSec:             func() int { if proxyP2PCoordinator != nil { return proxyP2PCoordinator.LeaseSeconds() }; return 0 }(),
+		P2PLeaseSec:             p2pLeaseSec,
 	}, sessionMgr, router)
 
 	if err := gw.Start(); err != nil {

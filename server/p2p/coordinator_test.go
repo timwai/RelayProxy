@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/session"
 )
@@ -147,5 +148,40 @@ func TestCoordinatorRejectsNonUDPCandidates(t *testing.T) {
 	})
 	if response.Type != protocol.P2PControlError || response.ErrorCode != "INVALID_CANDIDATES" {
 		t.Fatalf("unexpected response: %#v", response)
+	}
+}
+
+
+func TestCoordinatorBindsRelayPolicyToExitOffer(t *testing.T) {
+	manager := session.NewManager()
+	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)
+	exit := newTestDevice("exit", "owner", protocol.CapabilityProxyExit)
+	manager.Register(client)
+	manager.Register(exit)
+	policy := acl.Policy{
+		ID: "relay_acl", AllowInternet: true,
+		AccessMode: acl.AccessModeDeny, AccessHosts: []string{"blocked.example"},
+	}
+	c := NewCoordinator(manager, func(string, string) (bool, error) { return true, nil }, time.Minute, "", 8, policy)
+	var offer protocol.P2PControlMessage
+	c.send = func(device *session.DeviceSession, msg protocol.P2PControlMessage) error {
+		if device.DeviceID == "exit" {
+			offer = msg
+		}
+		return nil
+	}
+	response := c.connect(client, protocol.P2PControlMessage{
+		ExitDeviceID: "exit", CertFingerprint: "sha256:client",
+		Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:1234"}},
+	})
+	if response.Type != protocol.P2PControlLeaseAck {
+		t.Fatalf("connect failed: %#v", response)
+	}
+	if offer.Type != protocol.P2PControlConnectOffer || offer.RelayPolicy == nil {
+		t.Fatalf("relay policy missing from exit offer: %#v", offer)
+	}
+	if offer.RelayPolicy.AccessMode != acl.AccessModeDeny || len(offer.RelayPolicy.AccessHosts) != 1 ||
+		offer.RelayPolicy.AccessHosts[0] != "blocked.example" {
+		t.Fatalf("unexpected relay policy: %#v", offer.RelayPolicy)
 	}
 }

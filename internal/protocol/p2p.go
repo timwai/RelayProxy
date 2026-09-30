@@ -1,5 +1,7 @@
 package protocol
 
+import "relayproxy/internal/acl"
+
 const (
 	// CapabilityProxyP2P is advertised as a transport capability. The server
 	// only coordinates a direct proxy path when both authenticated peers
@@ -34,6 +36,7 @@ type P2PControlMessage struct {
 	Candidates        []P2PCandidate `json:"candidates,omitempty"`
 	CertFingerprint   string         `json:"certFingerprint,omitempty"`
 	PeerFingerprint   string         `json:"peerFingerprint,omitempty"`
+	RelayPolicy       *acl.Policy    `json:"relayPolicy,omitempty"`
 	LeaseExpiresAt    int64          `json:"leaseExpiresAt,omitempty"`
 	RendezvousAddress string         `json:"rendezvousAddress,omitempty"`
 	LeaseSec          int            `json:"leaseSec,omitempty"`

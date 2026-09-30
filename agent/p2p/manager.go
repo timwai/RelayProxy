@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"relayproxy/internal/acl"
 	directp2p "relayproxy/internal/p2p"
 	"relayproxy/internal/p2p/punch"
 	"relayproxy/internal/protocol"
@@ -63,6 +64,7 @@ type Session struct {
 	mu              sync.RWMutex
 	peerCandidates  []protocol.P2PCandidate
 	peerFingerprint string
+	relayPolicy      *acl.Policy
 	state           State
 	lastError       string
 	endpoint        *Endpoint
@@ -248,6 +250,7 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 		return
 	}
 	item.setPeer(message.Candidates, message.PeerFingerprint)
+	item.setRelayPolicy(message.RelayPolicy)
 	item.setState(StateRendezvous, "")
 
 	ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
@@ -438,6 +441,36 @@ func (s *Session) setPeer(candidates []protocol.P2PCandidate, fingerprint string
 		s.peerFingerprint = fingerprint
 	}
 	s.mu.Unlock()
+}
+
+func (s *Session) setRelayPolicy(policy *acl.Policy) {
+	s.mu.Lock()
+	if policy == nil {
+		s.relayPolicy = nil
+	} else {
+		copy := *policy
+		copy.Rules = append([]acl.Rule(nil), policy.Rules...)
+		copy.AccessHosts = append([]string(nil), policy.AccessHosts...)
+		copy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+		s.relayPolicy = &copy
+	}
+	s.mu.Unlock()
+}
+
+func (s *Session) RelayPolicy() *acl.Policy {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.relayPolicy == nil {
+		return nil
+	}
+	copy := *s.relayPolicy
+	copy.Rules = append([]acl.Rule(nil), s.relayPolicy.Rules...)
+	copy.AccessHosts = append([]string(nil), s.relayPolicy.AccessHosts...)
+	copy.AccessCIDRs = append([]string(nil), s.relayPolicy.AccessCIDRs...)
+	return &copy
 }
 
 func (s *Session) setState(state State, reason string) {

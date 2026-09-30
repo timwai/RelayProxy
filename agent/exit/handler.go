@@ -91,6 +91,9 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		log.Printf("[ExitHandler] Failed to read OpenTCPRequest: %v", err)
 		return
 	}
+	if policy := boundRelayPolicy(ctx); policy != nil {
+		req.RelayPolicy = policy
+	}
 
 	checker, err := h.aclForRequest(req.RelayPolicy)
 	if err != nil {
@@ -216,6 +219,9 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 	if err := protocol.ReadJSON(stream, &req); err != nil {
 		log.Printf("[ExitHandler] Failed to read OpenUDPRequest: %v", err)
 		return
+	}
+	if policy := boundRelayPolicy(ctx); policy != nil {
+		req.RelayPolicy = policy
 	}
 	if req.Mode != "" && req.Mode != protocol.UDPModeStream && req.Mode != protocol.UDPModeDatagram {
 		_ = protocol.WriteJSON(stream, protocol.OpenUDPResponse{RequestID: req.RequestID, ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "unsupported UDP mode"})

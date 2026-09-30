@@ -132,3 +132,22 @@ func TestCompiledRelayACLCacheReusesVerifiedPolicy(t *testing.T) {
 		t.Fatalf("stale fingerprint accepted changed policy on cache miss: %v", err)
 	}
 }
+
+
+func TestBoundRelayPolicyIsIndependentCopy(t *testing.T) {
+	original := &acl.Policy{
+		ID: "relay_acl", AllowInternet: true,
+		AccessMode: acl.AccessModeDeny, AccessHosts: []string{"blocked.example"},
+	}
+	ctx := BindRelayPolicy(context.Background(), original)
+	original.AccessHosts[0] = "mutated.example"
+	bound := boundRelayPolicy(ctx)
+	if bound == nil || len(bound.AccessHosts) != 1 || bound.AccessHosts[0] != "blocked.example" {
+		t.Fatalf("bound policy was mutated by caller: %#v", bound)
+	}
+	bound.AccessHosts[0] = "changed-again.example"
+	second := boundRelayPolicy(ctx)
+	if second.AccessHosts[0] != "blocked.example" {
+		t.Fatalf("bound policy leaked mutable slices: %#v", second)
+	}
+}

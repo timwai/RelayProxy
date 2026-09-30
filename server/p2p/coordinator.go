@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"relayproxy/internal/acl"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -54,6 +55,7 @@ type Coordinator struct {
 	lease             time.Duration
 	rendezvousAddress string
 	maxPerDevice      int
+	relayPolicy       *acl.Policy
 
 	mu             sync.Mutex
 	active         map[uint64]*Session
@@ -64,7 +66,7 @@ type Coordinator struct {
 	send           func(*session.DeviceSession, protocol.P2PControlMessage) error
 }
 
-func NewCoordinator(sessions *session.Manager, authorize AuthorizeFunc, lease time.Duration, rendezvousAddress string, maxPerDevice int) *Coordinator {
+func NewCoordinator(sessions *session.Manager, authorize AuthorizeFunc, lease time.Duration, rendezvousAddress string, maxPerDevice int, relayPolicies ...acl.Policy) *Coordinator {
 	if lease <= 0 {
 		lease = DefaultLease
 	}
@@ -82,6 +84,10 @@ func NewCoordinator(sessions *session.Manager, authorize AuthorizeFunc, lease ti
 		rendezvousAddress: rendezvousAddress, maxPerDevice: maxPerDevice,
 		active: make(map[uint64]*Session), sessionCounts: make(map[string]int),
 		connectWindows: make(map[string]connectWindow),
+	}
+	if len(relayPolicies) > 0 {
+		policy := clonePolicy(relayPolicies[0])
+		c.relayPolicy = &policy
 	}
 	c.send = c.notify
 	return c
@@ -273,7 +279,7 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		Type: protocol.P2PControlConnectOffer, SessionID: id,
 		ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		SessionToken: append([]byte(nil), token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
-		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
+		CertFingerprint: fingerprint, PeerFingerprint: fingerprint, RelayPolicy: c.policyCopy(),
 		LeaseExpiresAt: item.ExpiresAt.UnixMilli(), RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(exit, offer); err != nil {
@@ -631,4 +637,20 @@ func hasCapability(values []string, wanted string) bool {
 
 func p2pError(code, message string) protocol.P2PControlMessage {
 	return protocol.P2PControlMessage{Type: protocol.P2PControlError, ErrorCode: code, ErrorMessage: message}
+}
+
+
+func (c *Coordinator) policyCopy() *acl.Policy {
+	if c == nil || c.relayPolicy == nil {
+		return nil
+	}
+	policy := clonePolicy(*c.relayPolicy)
+	return &policy
+}
+
+func clonePolicy(policy acl.Policy) acl.Policy {
+	policy.Rules = append([]acl.Rule(nil), policy.Rules...)
+	policy.AccessHosts = append([]string(nil), policy.AccessHosts...)
+	policy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+	return policy
 }

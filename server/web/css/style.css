@@ -261,6 +261,8 @@ html.dark .brand-mark,html[data-theme="dark"] .brand-mark{background:var(--rp-te
   .eyebrow{font-size:11px;letter-spacing:1.7px;margin-bottom:9px}
   .text-link{font-size:13px}
   .small-button{font-size:13px;padding:7px 11px}
+  .rp-tabs{min-height:46px;padding:6px;margin-bottom:18px}
+  .rp-tab{font-size:13px;padding:8px 13px;min-height:34px}
 
   .sidebar{padding:28px 17px 17px}
   .brand{font-size:20px;gap:12px;padding:0 10px 34px}

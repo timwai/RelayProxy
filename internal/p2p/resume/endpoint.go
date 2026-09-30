@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 )
 
 // Transport is one replaceable ordered byte stream carrying resumable Frames.
@@ -37,6 +38,8 @@ type Endpoint struct {
 	ready      bool
 	closed     bool
 	change     chan struct{}
+	genDone    map[uint64]chan struct{}
+	genClosed  map[uint64]bool
 
 	losses   chan TransportLoss
 	progress chan struct{}
@@ -50,6 +53,8 @@ func NewEndpoint(state *StreamState) (*Endpoint, error) {
 		state:    state,
 		inbound:  newStreamBuffer(512 << 10),
 		change:   make(chan struct{}),
+		genDone:  make(map[uint64]chan struct{}),
+		genClosed: make(map[uint64]bool),
 		losses:   make(chan TransportLoss, 8),
 		progress: make(chan struct{}, 1),
 	}, nil
@@ -78,6 +83,26 @@ func (e *Endpoint) Generation() uint64 {
 	return e.generation
 }
 
+func (e *Endpoint) GenerationDone(generation uint64) <-chan struct{} {
+	if e == nil || generation == 0 {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if ch, ok := e.genDone[generation]; ok {
+		return ch
+	}
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
+func (e *Endpoint) SetDeadline(time.Time) error      { return nil }
+func (e *Endpoint) SetReadDeadline(time.Time) error  { return nil }
+func (e *Endpoint) SetWriteDeadline(time.Time) error { return nil }
+
 // Bind installs a strictly newer transport. Replay is written before ready is
 // published, so fresh application bytes can never overtake unacknowledged data.
 func (e *Endpoint) Bind(transport Transport, generation uint64) error {
@@ -100,9 +125,21 @@ func (e *Endpoint) Bind(transport Transport, generation uint64) error {
 		return ErrBinding
 	}
 	old := e.transport
+	oldGeneration := e.generation
+	if old != nil && oldGeneration != 0 {
+		e.closeGenerationLocked(oldGeneration)
+	}
 	e.transport = transport
 	e.generation = generation
 	e.ready = false
+	e.genDone[generation] = make(chan struct{})
+	e.genClosed[generation] = false
+	for g := range e.genDone {
+		if g+8 < generation && e.genClosed[g] {
+			delete(e.genDone, g)
+			delete(e.genClosed, g)
+		}
+	}
 	e.signalLocked()
 	e.mu.Unlock()
 
@@ -218,6 +255,7 @@ func (e *Endpoint) Close() error {
 	transport := e.transport
 	e.transport = nil
 	e.ready = false
+	e.closeGenerationLocked(e.generation)
 	e.signalLocked()
 	e.mu.Unlock()
 
@@ -368,6 +406,7 @@ func (e *Endpoint) loseTransport(transport Transport, generation uint64, err err
 	}
 	e.transport = nil
 	e.ready = false
+	e.closeGenerationLocked(generation)
 	e.signalLocked()
 	e.mu.Unlock()
 	_ = transport.Close()
@@ -387,6 +426,7 @@ func (e *Endpoint) fail(err error) {
 	transport := e.transport
 	e.transport = nil
 	e.ready = false
+	e.closeGenerationLocked(e.generation)
 	e.signalLocked()
 	e.mu.Unlock()
 	if transport != nil {
@@ -413,6 +453,19 @@ func (e *Endpoint) notifyProgress() {
 func (e *Endpoint) signalLocked() {
 	close(e.change)
 	e.change = make(chan struct{})
+}
+
+func (e *Endpoint) closeGenerationLocked(generation uint64) {
+	if generation == 0 || e.genClosed[generation] {
+		return
+	}
+	ch, ok := e.genDone[generation]
+	if !ok {
+		ch = make(chan struct{})
+		e.genDone[generation] = ch
+	}
+	close(ch)
+	e.genClosed[generation] = true
 }
 
 type streamBuffer struct {

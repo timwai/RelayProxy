@@ -56,6 +56,17 @@ func TestExtractVerificationCodeWithPatternOnlyRule(t *testing.T) {
 	}
 }
 
+func TestCustomRuleAllowsLetterOnlyCode(t *testing.T) {
+	rules := []VerificationRule{{
+		Name:     "letter-only",
+		Keywords: []string{"授权码"},
+		Pattern:  `([A-Z]{5})`,
+	}}
+	if got := ExtractVerificationCodeWithRules("您的授权码是 QWERT，请妥善保管。", false, rules); got != "QWERT" {
+		t.Fatalf("letter-only custom code = %q, want QWERT", got)
+	}
+}
+
 func TestCustomRulesPrecedeDefault(t *testing.T) {
 	rules := []VerificationRule{{
 		Name:     "preferred",

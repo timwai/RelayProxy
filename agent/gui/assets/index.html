@@ -1805,6 +1805,15 @@
       if (repair) repair.textContent = status.ready ? '检查 / 修复服务' : (status.installed ? '修复并启动服务' : '安装服务');
     }
 
+    var networkServiceBusy = false;
+    function setNetworkServiceBusy(busy) {
+      networkServiceBusy = !!busy;
+      var repair = $('network-service-repair');
+      var uninstall = $('network-service-uninstall');
+      if (repair) repair.disabled = networkServiceBusy;
+      if (uninstall) uninstall.disabled = networkServiceBusy;
+    }
+
     async function refreshNetworkServiceStatus() {
       var card = $('network-service-card');
       if (!card) return;
@@ -1816,31 +1825,29 @@
     }
 
     async function repairNetworkService() {
-      if (!hasFn('goRepairNetworkService')) return;
-      var button = $('network-service-repair');
-      if (button) button.disabled = true;
+      if (!hasFn('goRepairNetworkService') || networkServiceBusy) return;
+      setNetworkServiceBusy(true);
       try {
         var result = mutationResult(await call('goRepairNetworkService'));
         toast((result && result.message) || (result && result.ok ? 'Network Service 已修复' : 'Network Service 修复失败'));
         await refreshNetworkServiceStatus();
-      } finally { if (button) button.disabled = false; }
+      } finally { setNetworkServiceBusy(false); }
     }
 
     async function uninstallNetworkService() {
-      if (!hasFn('goUninstallNetworkService')) return;
+      if (!hasFn('goUninstallNetworkService') || networkServiceBusy) return;
       var warning = state.cfg && state.cfg.networkMode === 'divert'
         ? '卸载服务会同时关闭已保存的系统透明代理配置，并立即中断当前透明代理；重新启用时可再次安装。确定卸载吗？'
         : '确定卸载 RelayProxy Network Service 吗？';
       if (!confirm(warning)) return;
-      var button = $('network-service-uninstall');
-      if (button) button.disabled = true;
+      setNetworkServiceBusy(true);
       try {
         var result = mutationResult(await call('goUninstallNetworkService'));
         toast((result && result.message) || (result && result.ok ? 'Network Service 已卸载' : 'Network Service 卸载失败'));
         await loadConfig({ savedGroups: ['proxy'] });
         await refreshNetworkServiceStatus();
         await refreshStatus();
-      } finally { if (button) button.disabled = false; }
+      } finally { setNetworkServiceBusy(false); }
     }
     window.refreshNetworkServiceStatus = refreshNetworkServiceStatus;
     window.repairNetworkService = repairNetworkService;

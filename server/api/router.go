@@ -313,7 +313,7 @@ func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) 
 	targets := make([]*repository.Device, 0, len(ids))
 	for _, id := range ids {
 		device := byID[id]
-		if device == nil || device.ApprovalState != repository.EnrollmentApproved {
+		if device == nil || device.ApprovalState != "approved" {
 			writeError(w, http.StatusBadRequest, "target device is not approved: "+id)
 			return
 		}

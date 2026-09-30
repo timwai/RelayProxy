@@ -72,6 +72,7 @@ func Validate(input []protocol.P2PCandidate) ([]protocol.P2PCandidate, error) {
 // the candidate is never an arbitrary forwarding destination.
 func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 	result := make([]protocol.P2PCandidate, 0, MaxCandidates)
+	seen := make(map[string]struct{})
 	interfaces, _ := net.Interfaces()
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
@@ -90,19 +91,38 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 					ip = parsed.Unmap()
 				}
 			}
-			if !ip.IsValid() || !ip.Is4() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+			if !ip.IsValid() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 				continue
 			}
-			if udpPort > 0 {
-				result = append(result, protocol.P2PCandidate{Protocol: "udp", Type: "lan", Address: netip.AddrPortFrom(ip, uint16(udpPort)).String(), Priority: 1000})
+			udpPriority, tcpPriority := 1000, 900
+			if ip.Is6() {
+				// Prefer native IPv6 over an IPv4 NAT path when both are available.
+				udpPriority, tcpPriority = 1100, 1000
 			}
-			if tcpPort > 0 {
-				result = append(result, protocol.P2PCandidate{Protocol: "tcp", Type: "lan", Address: netip.AddrPortFrom(ip, uint16(tcpPort)).String(), Priority: 900})
+			appendCandidate := func(protocolName string, port, priority int) {
+				if port <= 0 || port > 65535 {
+					return
+				}
+				address := netip.AddrPortFrom(ip, uint16(port)).String()
+				key := protocolName + ":" + address
+				if _, ok := seen[key]; ok {
+					return
+				}
+				seen[key] = struct{}{}
+				result = append(result, protocol.P2PCandidate{Protocol: protocolName, Type: "lan", Address: address, Priority: priority})
 			}
-			if len(result) >= MaxCandidates {
-				return result[:MaxCandidates]
-			}
+			appendCandidate("udp", udpPort, udpPriority)
+			appendCandidate("tcp", tcpPort, tcpPriority)
 		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Priority != result[j].Priority {
+			return result[i].Priority > result[j].Priority
+		}
+		return result[i].Address < result[j].Address
+	})
+	if len(result) > MaxCandidates {
+		result = result[:MaxCandidates]
 	}
 	return result
 }

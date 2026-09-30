@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -162,6 +163,88 @@ func TestPunchIsSymmetric(t *testing.T) {
 		}
 		if item.value == nil || item.value.RemoteAddr == nil || item.value.SessionID != 99 {
 			t.Fatalf("%s returned incomplete punch result: %#v", name, item.value)
+		}
+	}
+}
+
+
+func TestSendAllKeepsRacingWhenOneAddressFamilyFails(t *testing.T) {
+	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer receiver.Close()
+	sender, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sender.Close()
+
+	port := receiver.LocalAddr().(*net.UDPAddr).Port
+	addresses := []netip.AddrPort{
+		netip.AddrPortFrom(netip.IPv6Loopback(), uint16(port)),
+		netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), uint16(port)),
+	}
+	payload := []byte("candidate-race")
+	if err := sendAll(sender, payload, addresses); err != nil {
+		t.Fatalf("mixed-family send aborted before usable candidate: %v", err)
+	}
+
+	_ = receiver.SetReadDeadline(time.Now().Add(time.Second))
+	buffer := make([]byte, 64)
+	n, _, err := receiver.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buffer[:n], payload) {
+		t.Fatalf("unexpected payload %q", buffer[:n])
+	}
+}
+
+func TestPunchIsSymmetricOverIPv6(t *testing.T) {
+	left, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6loopback, Port: 0})
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable: %v", err)
+	}
+	defer left.Close()
+	right, err := net.ListenUDP("udp6", &net.UDPAddr{IP: net.IPv6loopback, Port: 0})
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable: %v", err)
+	}
+	defer right.Close()
+
+	key := []byte("0123456789abcdef0123456789abcdef")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	type result struct {
+		value *UDPResult
+		err   error
+	}
+	leftCh := make(chan result, 1)
+	rightCh := make(chan result, 1)
+	go func() {
+		value, punchErr := Punch(ctx, left, []protocol.P2PCandidate{{
+			Protocol: "udp", Type: "lan", Address: right.LocalAddr().String(),
+		}}, 100, key, time.Second)
+		leftCh <- result{value: value, err: punchErr}
+	}()
+	go func() {
+		value, punchErr := Punch(ctx, right, []protocol.P2PCandidate{{
+			Protocol: "udp", Type: "lan", Address: left.LocalAddr().String(),
+		}}, 100, key, time.Second)
+		rightCh <- result{value: value, err: punchErr}
+	}()
+
+	for name, ch := range map[string]<-chan result{"left": leftCh, "right": rightCh} {
+		item := <-ch
+		if item.err != nil {
+			t.Fatalf("%s IPv6 symmetric punch failed: %v", name, item.err)
+		}
+		if item.value == nil || item.value.RemoteAddr == nil || item.value.SessionID != 100 {
+			t.Fatalf("%s returned incomplete IPv6 punch result: %#v", name, item.value)
+		}
+		if item.value.RemoteAddr.IP.To4() != nil {
+			t.Fatalf("%s unexpectedly used IPv4 remote: %v", name, item.value.RemoteAddr)
 		}
 	}
 }

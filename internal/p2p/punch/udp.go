@@ -132,12 +132,25 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 }
 
 func sendAll(conn *net.UDPConn, packet []byte, addresses []netip.AddrPort) error {
+	var lastErr error
+	sent := 0
 	for _, address := range addresses {
 		if _, err := conn.WriteToUDPAddrPort(packet, address); err != nil {
-			return err
+			// Mixed IPv4/IPv6 candidate sets are expected. A socket may reject
+			// one family on a platform without dual-stack support, but another
+			// candidate can still succeed and must be allowed to race.
+			lastErr = err
+			continue
 		}
+		sent++
 	}
-	return nil
+	if sent > 0 {
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return errors.New("no usable P2P UDP candidates")
 }
 
 // DecodePunch extracts and authenticates a punch packet received on a shared

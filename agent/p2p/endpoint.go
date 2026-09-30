@@ -53,13 +53,16 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	// Use Go's wildcard "udp" listener so supported platforms get one dual-stack
+	// socket. Candidate discovery, punching and QUIC must all keep this exact
+	// socket to preserve the NAT mapping.
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
 	if err != nil {
 		return err
 	}
 	tunnel.TuneUDPConn(conn)
 	port := conn.LocalAddr().(*net.UDPAddr).Port
-	discovered := filterIPv4UDPCandidates(candidate.Discover(port, 0))
+	discovered := candidate.Discover(port, 0)
 	if e.rendezvous != "" {
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		reflexive, probeErr := candidate.ProbeReflexive(probeCtx, e.rendezvous, conn, "udp")
@@ -69,7 +72,7 @@ func (e *Endpoint) Start(ctx context.Context) error {
 		}
 	}
 	if validated, validateErr := candidate.Validate(discovered); validateErr == nil {
-		discovered = filterIPv4UDPCandidates(validated)
+		discovered = validated
 	}
 
 	e.mu.Lock()
@@ -187,17 +190,3 @@ func CurrentNetworkSignature() string {
 	return hex.EncodeToString(sum[:16])
 }
 
-func filterIPv4UDPCandidates(input []protocol.P2PCandidate) []protocol.P2PCandidate {
-	result := make([]protocol.P2PCandidate, 0, len(input))
-	for _, item := range input {
-		if item.Protocol != "udp" {
-			continue
-		}
-		address, err := netip.ParseAddrPort(item.Address)
-		if err != nil || !address.Addr().Unmap().Is4() {
-			continue
-		}
-		result = append(result, item)
-	}
-	return result
-}

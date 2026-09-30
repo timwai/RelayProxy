@@ -13,6 +13,9 @@
   window.goClearConnections = () => invoke('ClearConnections');
   window.goGetStatus = () => invoke('GetStatus');
   window.goGetLogs = () => invoke('GetLogs');
+  window.goGetMessages = () => invoke('GetMessages');
+  window.goClearMessages = () => invoke('ClearMessages');
+  window.goHideVerificationPopup = () => invoke('HideVerificationPopup');
   window.goClearLogs = () => invoke('ClearLogs');
   window.goGetConfig = () => invoke('GetConfig');
   window.goSaveConfig = raw => invoke('SaveConfig', raw);

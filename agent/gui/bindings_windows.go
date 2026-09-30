@@ -115,39 +115,39 @@ func (s *WailsService) GetConfig() (string, error) {
 		Port    int    `json:"port"`
 	}
 	payload := struct {
-		ConfigPath          string              `json:"configPath"`
-		ServerAddress       string              `json:"serverAddress"`
-		QUICPort            int                 `json:"quicPort"`
-		TCPPort             int                 `json:"tcpPort"`
-		TLSEnabled          bool                `json:"tlsEnabled"`
-		DeviceName          string              `json:"deviceName"`
-		Transport           string              `json:"transport"`
-		SOCKS5              proxyLeg            `json:"socks5"`
-		HTTP                proxyLeg            `json:"http"`
-		DefaultExitID       string              `json:"defaultExitId"`
-		ExitEnabled         bool                `json:"exitEnabled"`
-		AllowInternet       bool                `json:"allowInternet"`
-		AllowPrivate        bool                `json:"allowPrivateNetwork"`
-		AllowLoopback       bool                `json:"allowLoopback"`
-		AccessMode          string              `json:"accessMode"`
-		AccessDomains       []string            `json:"accessDomains"`
-		AccessCIDRs         []string            `json:"accessCidrs"`
-		ExitUpstream        any                 `json:"exitUpstream"`
-		NetworkMode         string              `json:"networkMode"`
-		IsAutostart         bool                `json:"isAutostart"`
-		MinimizeToTray               bool                `json:"minimizeToTray"`
-		StartMinimized               bool                `json:"startMinimized"`
-		Theme                        string              `json:"theme"`
+		ConfigPath                  string              `json:"configPath"`
+		ServerAddress               string              `json:"serverAddress"`
+		QUICPort                    int                 `json:"quicPort"`
+		TCPPort                     int                 `json:"tcpPort"`
+		TLSEnabled                  bool                `json:"tlsEnabled"`
+		DeviceName                  string              `json:"deviceName"`
+		Transport                   string              `json:"transport"`
+		SOCKS5                      proxyLeg            `json:"socks5"`
+		HTTP                        proxyLeg            `json:"http"`
+		DefaultExitID               string              `json:"defaultExitId"`
+		ExitEnabled                 bool                `json:"exitEnabled"`
+		AllowInternet               bool                `json:"allowInternet"`
+		AllowPrivate                bool                `json:"allowPrivateNetwork"`
+		AllowLoopback               bool                `json:"allowLoopback"`
+		AccessMode                  string              `json:"accessMode"`
+		AccessDomains               []string            `json:"accessDomains"`
+		AccessCIDRs                 []string            `json:"accessCidrs"`
+		ExitUpstream                any                 `json:"exitUpstream"`
+		NetworkMode                 string              `json:"networkMode"`
+		IsAutostart                 bool                `json:"isAutostart"`
+		MinimizeToTray              bool                `json:"minimizeToTray"`
+		StartMinimized              bool                `json:"startMinimized"`
+		Theme                       string              `json:"theme"`
 		VerificationPopupTimeoutSec int                 `json:"verificationPopupTimeoutSec"`
-		Version             string              `json:"version"`
-		Routing             any                 `json:"routing"`
-		Network             any                 `json:"network"`
-		NetworkCapabilities divert.Capabilities `json:"networkCapabilities"`
-		Runtime             any                 `json:"runtime"`
-		Revision            string              `json:"revision"`
-		RestartRequired     bool                `json:"restartRequired"`
-		RestartFields       []string            `json:"restartFields"`
-		ReloadPending       bool                `json:"reloadPending"`
+		Version                     string              `json:"version"`
+		Routing                     any                 `json:"routing"`
+		Network                     any                 `json:"network"`
+		NetworkCapabilities         divert.Capabilities `json:"networkCapabilities"`
+		Runtime                     any                 `json:"runtime"`
+		Revision                    string              `json:"revision"`
+		RestartRequired             bool                `json:"restartRequired"`
+		RestartFields               []string            `json:"restartFields"`
+		ReloadPending               bool                `json:"reloadPending"`
 	}{
 		ConfigPath:    a.bridge.ConfigPath(),
 		ServerAddress: cfg.Server.Address,
@@ -168,13 +168,13 @@ func (s *WailsService) GetConfig() (string, error) {
 			"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address,
 			"username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password,
 		},
-		NetworkMode:    cfg.Network.Mode,
-		IsAutostart:    a.bridge.IsAutoStart(),
-		MinimizeToTray:               cfg.IsMinimizeToTray(),
-		StartMinimized:               cfg.GUI.StartMinimized,
-		Theme:                        cfg.GUI.Theme,
+		NetworkMode:                 cfg.Network.Mode,
+		IsAutostart:                 a.bridge.IsAutoStart(),
+		MinimizeToTray:              cfg.IsMinimizeToTray(),
+		StartMinimized:              cfg.GUI.StartMinimized,
+		Theme:                       cfg.GUI.Theme,
 		VerificationPopupTimeoutSec: cfg.VerificationPopupTimeout(),
-		Version:        Version,
+		Version:                     Version,
 		Network: map[string]any{
 			"mode":              cfg.Network.Mode,
 			"exclude_processes": cfg.Network.ExcludeProcesses,

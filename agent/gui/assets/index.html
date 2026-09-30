@@ -1081,6 +1081,16 @@
                 <span class="toggle-track w-9 h-5 rounded-full flex items-center px-0.5"><span class="toggle-knob w-4 h-4 rounded-full bg-white shadow-sm"></span></span>
               </label>
             </div>
+            <div class="flex items-center justify-between gap-4 px-4 py-2.5">
+              <div class="min-w-0">
+                <div class="text-[13px] font-medium text-slate-800 dark:text-slate-100">验证码弹窗自动关闭</div>
+                <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">验证码弹出后倒计时自动消失；默认 15 秒，填写 0 表示不自动关闭</div>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <input id="cfg-verification-timeout" type="number" min="0" max="3600" step="1" value="15" onchange="onVerificationTimeoutChange(this)" class="rp-input w-[84px] text-right" aria-label="验证码弹窗自动关闭秒数">
+                <span class="text-[12px] text-slate-500 dark:text-slate-400">秒</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1623,6 +1633,7 @@
       $('cfg-acl-cidrs').value = (cfg.accessCidrs || []).join('\n');
       $('cfg-autostart').checked = !!cfg.isAutostart;
       $('cfg-min-tray').checked = cfg.minimizeToTray !== false;
+      $('cfg-verification-timeout').value = Number.isInteger(cfg.verificationPopupTimeoutSec) ? cfg.verificationPopupTimeoutSec : 15;
 
       applyTheme(cfg.theme || 'system', false);
       var notices = [];
@@ -1871,6 +1882,18 @@
         if (!ok && state.cfg) { el.checked = state.cfg.minimizeToTray !== false; markDrafts(); }
       });
     }
+    function onVerificationTimeoutChange(el) {
+      var raw = String(el.value).trim();
+      var seconds = Number(raw);
+      if (!/^\d+$/.test(raw) || !Number.isInteger(seconds) || seconds < 0 || seconds > 3600) {
+        toast('验证码弹窗时间必须是 0–3600 秒的整数');
+        el.value = state.cfg && Number.isInteger(state.cfg.verificationPopupTimeoutSec) ? state.cfg.verificationPopupTimeoutSec : 15;
+        return;
+      }
+      save({ gui: { verificationPopupTimeoutSec: seconds } }, seconds === 0 ? '验证码弹窗将保持显示直到手动关闭' : '验证码弹窗将在 ' + seconds + ' 秒后自动关闭').then(function (ok) {
+        if (!ok && state.cfg) el.value = Number.isInteger(state.cfg.verificationPopupTimeoutSec) ? state.cfg.verificationPopupTimeoutSec : 15;
+      });
+    }
     function openConfigDir() { call('goOpenConfigDir'); }
     async function doRestart() {
       var dirty = dirtyGroups(true).length;
@@ -1895,6 +1918,7 @@
     }
     window.onToggleAutostart = onToggleAutostart;
     window.onToggleMinTray = onToggleMinTray;
+    window.onVerificationTimeoutChange = onVerificationTimeoutChange;
     window.openConfigDir = openConfigDir;
     window.doRestart = doRestart;
     window.doQuit = doQuit;

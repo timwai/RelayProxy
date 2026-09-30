@@ -35,10 +35,6 @@ func NewPublicPushHandler(sessions *session.Manager, db *repository.DB) *PublicP
 func (h *PublicPushHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "no-store")
-	if req.URL.Path == "/health" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		return
-	}
 	h.mux.ServeHTTP(w, req)
 }
 

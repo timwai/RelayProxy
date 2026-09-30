@@ -89,7 +89,9 @@ func TestPunchedSocketCarriesPinnedQUIC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer stream.Close()
+	if clientSession.ActiveStreams() != 1 {
+		t.Fatalf("client active streams=%d, want 1", clientSession.ActiveStreams())
+	}
 	if _, err := stream.Write([]byte("relayproxy-p2p")); err != nil {
 		t.Fatal(err)
 	}
@@ -97,13 +99,24 @@ func TestPunchedSocketCarriesPinnedQUIC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer accepted.Close()
+	if exitSession.ActiveStreams() != 1 {
+		t.Fatalf("exit active streams=%d, want 1", exitSession.ActiveStreams())
+	}
 	buffer := make([]byte, len("relayproxy-p2p"))
 	if _, err := io.ReadFull(accepted, buffer); err != nil {
 		t.Fatal(err)
 	}
 	if string(buffer) != "relayproxy-p2p" {
 		t.Fatalf("unexpected QUIC payload %q", buffer)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := accepted.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if clientSession.ActiveStreams() != 0 || exitSession.ActiveStreams() != 0 {
+		t.Fatalf("active streams after close: client=%d exit=%d", clientSession.ActiveStreams(), exitSession.ActiveStreams())
 	}
 }
 

@@ -323,7 +323,7 @@ func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) 
 	message := &repository.MessageRecord{
 		Title: title, Content: content, Source: source,
 		VerificationCode: messageutil.ExtractVerificationCode(content),
-		CreatedAt: time.Now().UTC(),
+		CreatedAt:        time.Now().UTC(),
 	}
 	if err := r.db.CreateMessage(message, targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist message")

@@ -69,6 +69,10 @@ func OpenDB(driver, dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("db migration failed: %w", err)
 	}
+	if err := wrapper.ensureMessageSchema(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("message schema migration failed: %w", err)
+	}
 
 	return wrapper, nil
 }
@@ -292,6 +296,167 @@ func (db *DB) migrate() error {
 	}
 	log.Printf("[DB] Initialized database generation %s schema %d", SchemaGeneration, SchemaVersion)
 	return nil
+}
+
+func (db *DB) ensureMessageSchema() error {
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS messages (
+			id VARCHAR(64) PRIMARY KEY,
+			title VARCHAR(200) NOT NULL,
+			content TEXT NOT NULL,
+			verification_code VARCHAR(64),
+			source VARCHAR(120),
+			created_at TIMESTAMP NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS message_deliveries (
+			message_id VARCHAR(64) NOT NULL,
+			device_id VARCHAR(36) NOT NULL,
+			device_name VARCHAR(100) NOT NULL,
+			status VARCHAR(20) NOT NULL,
+			error TEXT,
+			delivered_at TIMESTAMP,
+			PRIMARY KEY(message_id, device_id),
+			FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_deliveries_device ON message_deliveries(device_id, status)`,
+	}
+	for _, query := range queries {
+		if _, err := db.Exec(query); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type MessageDelivery struct {
+	DeviceID    string     `json:"deviceId"`
+	DeviceName  string     `json:"deviceName"`
+	Status      string     `json:"status"`
+	Error       string     `json:"error,omitempty"`
+	DeliveredAt *time.Time `json:"deliveredAt,omitempty"`
+}
+
+type MessageRecord struct {
+	ID               string            `json:"id"`
+	Title            string            `json:"title"`
+	Content          string            `json:"content"`
+	VerificationCode string            `json:"verificationCode,omitempty"`
+	Source           string            `json:"source,omitempty"`
+	CreatedAt        time.Time         `json:"createdAt"`
+	Deliveries       []MessageDelivery `json:"deliveries"`
+}
+
+func (db *DB) CreateMessage(message *MessageRecord, targets []*Device) error {
+	if message == nil {
+		return errors.New("message is required")
+	}
+	if message.ID == "" {
+		message.ID = "msg_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	}
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now().UTC()
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO messages (id, title, content, verification_code, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`, message.ID, message.Title, message.Content, nullableString(message.VerificationCode), nullableString(message.Source), message.CreatedAt); err != nil {
+		return err
+	}
+	message.Deliveries = make([]MessageDelivery, 0, len(targets))
+	for _, target := range targets {
+		if target == nil {
+			continue
+		}
+		if _, err := tx.Exec(`INSERT INTO message_deliveries (message_id, device_id, device_name, status, error, delivered_at)
+			VALUES (?, ?, ?, ?, NULL, NULL)`, message.ID, target.ID, target.Name, "pending"); err != nil {
+			return err
+		}
+		message.Deliveries = append(message.Deliveries, MessageDelivery{DeviceID: target.ID, DeviceName: target.Name, Status: "pending"})
+	}
+	return tx.Commit()
+}
+
+func (db *DB) UpdateMessageDelivery(messageID, deviceID, status, errorMessage string, deliveredAt *time.Time) error {
+	var delivered any
+	if deliveredAt != nil {
+		delivered = deliveredAt.UTC()
+	}
+	_, err := db.Exec(`UPDATE message_deliveries
+		SET status = ?, error = ?, delivered_at = ?
+		WHERE message_id = ? AND device_id = ?`,
+		status, nullableString(errorMessage), delivered, messageID, deviceID)
+	return err
+}
+
+func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	query := `SELECT m.id, m.title, m.content, COALESCE(m.verification_code, ''), COALESCE(m.source, ''), m.created_at
+		FROM messages m`
+	args := make([]any, 0, 2)
+	if ownerID != "" {
+		query += ` WHERE EXISTS (
+			SELECT 1 FROM message_deliveries md
+			JOIN devices d ON d.id = md.device_id
+			WHERE md.message_id = m.id AND d.owner_user_id = ?
+		)`
+		args = append(args, ownerID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]*MessageRecord, 0, limit)
+	for rows.Next() {
+		message := &MessageRecord{}
+		if err := rows.Scan(&message.ID, &message.Title, &message.Content, &message.VerificationCode, &message.Source, &message.CreatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		messages = append(messages, message)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	for _, message := range messages {
+		deliveryRows, err := db.Query(`SELECT device_id, device_name, status, COALESCE(error, ''), delivered_at
+			FROM message_deliveries WHERE message_id = ? ORDER BY device_name, device_id`, message.ID)
+		if err != nil {
+			return nil, err
+		}
+		for deliveryRows.Next() {
+			var delivery MessageDelivery
+			var delivered sql.NullTime
+			if err := deliveryRows.Scan(&delivery.DeviceID, &delivery.DeviceName, &delivery.Status, &delivery.Error, &delivered); err != nil {
+				deliveryRows.Close()
+				return nil, err
+			}
+			if delivered.Valid {
+				value := delivered.Time
+				delivery.DeliveredAt = &value
+			}
+			message.Deliveries = append(message.Deliveries, delivery)
+		}
+		if err := deliveryRows.Err(); err != nil {
+			deliveryRows.Close()
+			return nil, err
+		}
+		deliveryRows.Close()
+	}
+	return messages, nil
 }
 
 // User model

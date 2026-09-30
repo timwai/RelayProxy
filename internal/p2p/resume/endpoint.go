@@ -415,7 +415,6 @@ func (e *Endpoint) signalLocked() {
 	e.change = make(chan struct{})
 }
 
-
 type streamBuffer struct {
 	mu     sync.Mutex
 	cond   *sync.Cond

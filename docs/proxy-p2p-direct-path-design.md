@@ -960,6 +960,24 @@ Keepalive responsibilities:
 - detect dead paths
 - detect network rebinding
 
+Battery-aware behavior:
+
+- normal mode keeps the configured P2P keepalive and idle timeout
+- power-constrained mode suppresses default-Exit prewarming
+- power-constrained mode retains at most one cached Client -> Exit P2P session
+- newly established power-constrained QUIC paths disable periodic keepalive and
+  use a shorter idle timeout so Android does not keep waking the radio only to
+  preserve an unused NAT mapping
+- the idle reaper never closes a session with active QUIC streams
+- reactive P2P attempts are still allowed while power-constrained, so active
+  application traffic can obtain a direct path instead of being permanently
+  forced through Relay
+
+The generic Agent exposes `SetP2PPowerConstrained(bool)` for platform lifecycle
+integration. The Android client currently lives on the separate
+`feature/android-client-exit` branch, so its PowerManager / screen-state glue
+must be connected when that branch is rebased or merged with this P2P work.
+
 ---
 
 ## 24. Failure Cache and Cooldown
@@ -1493,7 +1511,8 @@ Progress as of 2026-09-30:
 - [x] OS network-change detection and automatic P2P invalidation/retry
 - [x] exponential cooldown after repeated direct-path failures
 - [x] LRU session management for ready Client/Exit P2P sessions
-- [ ] Android battery-aware behavior
+- [x] battery-aware P2P core profile
+- [ ] Android lifecycle/power-saver wiring after Android branch integration
 - [x] candidate path scoring with bounded RTT preference
 - [ ] optional stream migration
 

@@ -19,8 +19,8 @@ import (
 const QUICALPN = "relayproxy-p2p-v1"
 
 type QUICOptions struct {
-	KeepAlivePeriod time.Duration
-	MaxIdleTimeout  time.Duration
+	KeepAlivePeriod  time.Duration
+	MaxIdleTimeout   time.Duration
 	DisableKeepAlive bool
 }
 

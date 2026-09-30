@@ -814,6 +814,21 @@ Server 的 **消息** 页面可以配置推送渠道。每个渠道包含：
 
 外部系统不需要传设备 ID，也不需要 Token，只需要把 **渠道 ID 拼在 URL 中**。
 
+推送 HTTP 接口监听在 **中继 TCP 端口**（`server.tls.listen`），不是 Admin Web 的 `server.admin.listen`。同一个 TCP 端口会自动区分 RelayProxy yamux 隧道与 HTTP 请求；QUIC / UDP 中继保持原协议不变。
+
+例如中继配置为：
+
+```yaml
+server:
+  tls_enabled: true
+  tls:
+    listen: ":443"
+  admin:
+    listen: ":8443"
+```
+
+则推送使用 `https://relay.example.com/api/v1/push/{channelId}`，而不是管理端口 `:8443`。如果中继 TCP 监听 `:21000`，则使用 `https://relay.example.com:21000/api/v1/push/{channelId}`。关闭中继 TLS 时，协议对应改为 `http://`。
+
 ### GET
 
 ```text
@@ -823,7 +838,7 @@ GET /api/v1/push/{channelId}?message=您的验证码为482931&title=登录验证
 例如：
 
 ```bash
-curl "http://relay.example.com:20001/api/v1/push/login-code?message=%E6%82%A8%E7%9A%84%E9%AA%8C%E8%AF%81%E7%A0%81%E4%B8%BA482931&title=%E7%99%BB%E5%BD%95%E9%AA%8C%E8%AF%81%E7%A0%81"
+curl "https://relay.example.com/api/v1/push/login-code?message=%E6%82%A8%E7%9A%84%E9%AA%8C%E8%AF%81%E7%A0%81%E4%B8%BA482931&title=%E7%99%BB%E5%BD%95%E9%AA%8C%E8%AF%81%E7%A0%81"
 ```
 
 GET 支持以下查询参数：

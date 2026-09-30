@@ -204,6 +204,11 @@ type AgentStatus struct {
 	RDPUDPReason      string             `json:"rdpUdpReason,omitempty"`
 	RDPPathTCP        string             `json:"rdpPathTcp,omitempty"`
 	RDPPathUDP        string             `json:"rdpPathUdp,omitempty"`
+	P2PState          string             `json:"p2pState,omitempty"`
+	P2PPath           string             `json:"p2pPath,omitempty"`
+	P2PError          string             `json:"p2pError,omitempty"`
+	P2PSessionID      uint64             `json:"p2pSessionId,omitempty"`
+	P2PExitID         string             `json:"p2pExitId,omitempty"`
 }
 
 // ErrRestartRequired means a saved startup setting has not changed the running
@@ -1059,7 +1064,7 @@ func (a *Agent) Status() AgentStatus {
 		ExitRunning:   a.started && a.exitHandler != nil,
 		NetworkMode:   a.cfg.NetworkMode, LatencyMs: a.latencyMs.Load(),
 	}
-	sess, handler, divertSrv := a.readySession, a.exitHandler, a.divertSrv
+	sess, handler, divertSrv, proxyP2P := a.readySession, a.exitHandler, a.divertSrv, a.proxyP2P
 	if a.rdpConnection != nil {
 		st.RDPListenAddr = a.rdpConnection.ListenAddr
 		st.RDPTargetID = a.rdpConnection.Target.DeviceID
@@ -1107,6 +1112,25 @@ func (a *Agent) Status() AgentStatus {
 		case <-sess.Done():
 			st.Connected = false
 		default:
+		}
+	}
+	if proxyP2P != nil {
+		if path, ok := proxyP2P.PathStatus(st.SelectedExit); ok {
+			st.P2PState = string(path.State)
+			st.P2PPath = path.Path
+			st.P2PError = path.Error
+			st.P2PSessionID = path.SessionID
+			st.P2PExitID = path.ExitDeviceID
+		} else {
+			st.P2PState = "IDLE"
+		}
+	}
+	if st.P2PState != "" && st.P2PPath == "" && st.Connected {
+		switch st.Transport {
+		case string(tunnel.TransportQUIC):
+			st.P2PPath = protocol.P2PPathRelayQUIC
+		case string(tunnel.TransportTLS):
+			st.P2PPath = protocol.P2PPathRelayTLS
 		}
 	}
 	if st.RDPListenAddr != "" && !st.RDPUDPEnabled {

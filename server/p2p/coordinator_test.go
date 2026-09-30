@@ -183,3 +183,57 @@ func TestCoordinatorBindsRelayPolicyToExitOffer(t *testing.T) {
 		t.Fatalf("unexpected relay policy: %#v", offer.RelayPolicy)
 	}
 }
+
+
+func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
+	manager := session.NewManager()
+	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)
+	exit := newTestDevice("exit", "owner", protocol.CapabilityProxyExit)
+	manager.Register(client)
+	manager.Register(exit)
+	coordinator := NewCoordinator(manager, func(string, string) (bool, error) { return true, nil }, time.Minute, "", 8)
+	coordinator.send = func(*session.DeviceSession, protocol.P2PControlMessage) error { return nil }
+
+	ack := coordinator.connect(client, protocol.P2PControlMessage{
+		ExitDeviceID: "exit", CertFingerprint: "sha256:client",
+		Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:1234"}},
+	})
+	if ack.Type != protocol.P2PControlLeaseAck {
+		t.Fatalf("connect failed: %#v", ack)
+	}
+	response := coordinator.pathReport(client, protocol.P2PControlMessage{
+		SessionID: ack.SessionID, SessionToken: ack.SessionToken,
+		Path: protocol.P2PPathDirectQUIC, ActiveStreams: 3, BytesUp: 100, BytesDown: 200,
+	})
+	if response.Type != protocol.P2PControlLeaseAck {
+		t.Fatalf("client path report rejected: %#v", response)
+	}
+	response = coordinator.pathReport(exit, protocol.P2PControlMessage{
+		SessionID: ack.SessionID, SessionToken: ack.SessionToken,
+		Path: protocol.P2PPathDirectQUIC, Reason: "healthy", ActiveStreams: 2, BytesUp: 80, BytesDown: 90,
+	})
+	if response.Type != protocol.P2PControlLeaseAck {
+		t.Fatalf("exit path report rejected: %#v", response)
+	}
+
+	snapshot, ok := coordinator.Snapshot(ack.SessionID)
+	if !ok {
+		t.Fatal("missing P2P session snapshot")
+	}
+	if snapshot.ClientReport.Path != protocol.P2PPathDirectQUIC || snapshot.ClientReport.ActiveStreams != 3 ||
+		snapshot.ClientReport.BytesUp != 100 || snapshot.ClientReport.BytesDown != 200 || snapshot.ClientReport.UpdatedAt.IsZero() {
+		t.Fatalf("unexpected client report: %#v", snapshot.ClientReport)
+	}
+	if snapshot.ExitReport.Path != protocol.P2PPathDirectQUIC || snapshot.ExitReport.Reason != "healthy" ||
+		snapshot.ExitReport.ActiveStreams != 2 || snapshot.ExitReport.UpdatedAt.IsZero() {
+		t.Fatalf("unexpected exit report: %#v", snapshot.ExitReport)
+	}
+
+	rejected := coordinator.pathReport(client, protocol.P2PControlMessage{
+		SessionID: ack.SessionID, SessionToken: ack.SessionToken,
+		Path: protocol.P2PPathDirectQUIC, Reason: "bad\nreason",
+	})
+	if rejected.Type != protocol.P2PControlError || rejected.ErrorCode != protocol.ErrCodeInvalidRequest {
+		t.Fatalf("invalid path report accepted: %#v", rejected)
+	}
+}

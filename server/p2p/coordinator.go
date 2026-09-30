@@ -26,7 +26,9 @@ const (
 	maxActiveSessions    = 4096
 	maxConnectsPerMinute = 120
 	connectRateWindow    = time.Minute
-	maxFingerprintLength = 256
+	maxFingerprintLength     = 256
+	maxReportReasonLength     = 512
+	maxReportedActiveStreams  = 1000000
 )
 
 type AuthorizeFunc func(clientDeviceID, exitDeviceID string) (bool, error)
@@ -42,6 +44,27 @@ type Session struct {
 	ExitFingerprint   string
 	ExpiresAt         time.Time
 	Answered          bool
+	ClientReport      PeerReport
+	ExitReport        PeerReport
+}
+
+type PeerReport struct {
+	Path          string
+	Reason        string
+	ActiveStreams int
+	BytesUp       uint64
+	BytesDown     uint64
+	UpdatedAt     time.Time
+}
+
+type SessionSnapshot struct {
+	ID             uint64
+	ClientDeviceID string
+	ExitDeviceID   string
+	ExpiresAt      time.Time
+	Answered       bool
+	ClientReport   PeerReport
+	ExitReport     PeerReport
 }
 
 type connectWindow struct {
@@ -99,6 +122,23 @@ func (c *Coordinator) ActiveSessions() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return len(c.active)
+}
+
+func (c *Coordinator) Snapshot(id uint64) (SessionSnapshot, bool) {
+	if c == nil {
+		return SessionSnapshot{}, false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	item := c.active[id]
+	if item == nil {
+		return SessionSnapshot{}, false
+	}
+	return SessionSnapshot{
+		ID: item.ID, ClientDeviceID: item.ClientDeviceID, ExitDeviceID: item.ExitDeviceID,
+		ExpiresAt: item.ExpiresAt, Answered: item.Answered,
+		ClientReport: item.ClientReport, ExitReport: item.ExitReport,
+	}, true
 }
 
 func (c *Coordinator) Start(ctx context.Context) {
@@ -404,12 +444,42 @@ func (c *Coordinator) renew(device *session.DeviceSession, message protocol.P2PC
 }
 
 func (c *Coordinator) pathReport(device *session.DeviceSession, message protocol.P2PControlMessage) protocol.P2PControlMessage {
+	if device == nil {
+		return p2pError("SESSION_TOKEN_INVALID", "P2P session token is invalid")
+	}
 	if message.Path != "" && message.Path != protocol.P2PPathDirectQUIC && message.Path != protocol.P2PPathRelayQUIC && message.Path != protocol.P2PPathRelayTLS {
 		return p2pError(protocol.ErrCodeInvalidRequest, "unsupported P2P path")
 	}
-	if !c.validPeer(device.DeviceID, message.SessionID, message.SessionToken) {
+	if message.ActiveStreams < 0 || message.ActiveStreams > maxReportedActiveStreams {
+		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P active stream count")
+	}
+	reason := strings.TrimSpace(message.Reason)
+	if len(reason) > maxReportReasonLength || strings.ContainsAny(reason, "\r\n\t") {
+		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P path report reason")
+	}
+
+	now := time.Now()
+	c.mu.Lock()
+	item := c.active[message.SessionID]
+	if item == nil || !now.Before(item.ExpiresAt) ||
+		(device.DeviceID != item.ClientDeviceID && device.DeviceID != item.ExitDeviceID) ||
+		!bytes.Equal(message.SessionToken, item.Token) {
+		if item != nil && !now.Before(item.ExpiresAt) {
+			c.removeLocked(message.SessionID)
+		}
+		c.mu.Unlock()
 		return p2pError("SESSION_TOKEN_INVALID", "P2P session token is invalid")
 	}
+	report := PeerReport{
+		Path: message.Path, Reason: reason, ActiveStreams: message.ActiveStreams,
+		BytesUp: message.BytesUp, BytesDown: message.BytesDown, UpdatedAt: now,
+	}
+	if device.DeviceID == item.ClientDeviceID {
+		item.ClientReport = report
+	} else {
+		item.ExitReport = report
+	}
+	c.mu.Unlock()
 	return protocol.P2PControlMessage{Type: protocol.P2PControlLeaseAck, SessionID: message.SessionID}
 }
 

@@ -88,6 +88,16 @@ type Snapshot struct {
 	Error           string
 }
 
+type PathStatus struct {
+	SessionID      uint64
+	ClientDeviceID string
+	ExitDeviceID   string
+	ExpiresAt      int64
+	State          State
+	Path           string
+	Error          string
+}
+
 // NewManager builds a signaling-only manager. It remains useful in tests and
 // for capability negotiation before the direct transport is enabled.
 func NewManager(parent context.Context, send ControlSender, local LocalDescription, lease time.Duration) *Manager {
@@ -389,6 +399,60 @@ func (m *Manager) ReadyForExit(exitDeviceID string) (tunnel.TunnelSession, bool)
 		}
 	}
 	return nil, false
+}
+
+// PathStatus returns a sanitized snapshot for UI/diagnostics. It intentionally
+// excludes candidates, certificate fingerprints and session tokens.
+func (m *Manager) PathStatus(exitDeviceID string) (PathStatus, bool) {
+	if m == nil {
+		return PathStatus{}, false
+	}
+	m.mu.Lock()
+	items := make([]*Session, 0, len(m.sessions))
+	for _, item := range m.sessions {
+		if exitDeviceID == "" || item.ExitDeviceID == exitDeviceID {
+			items = append(items, item)
+		}
+	}
+	m.mu.Unlock()
+
+	var best PathStatus
+	bestRank := -1
+	for _, item := range items {
+		snapshot := item.Snapshot()
+		rank := pathStateRank(snapshot.State)
+		if rank < bestRank || (rank == bestRank && snapshot.ExpiresAt <= best.ExpiresAt) {
+			continue
+		}
+		bestRank = rank
+		best = PathStatus{
+			SessionID: snapshot.ID, ClientDeviceID: snapshot.ClientDeviceID,
+			ExitDeviceID: snapshot.ExitDeviceID, ExpiresAt: snapshot.ExpiresAt,
+			State: snapshot.State, Path: snapshot.Path, Error: snapshot.Error,
+		}
+	}
+	return best, bestRank >= 0
+}
+
+func pathStateRank(state State) int {
+	switch state {
+	case StateReady:
+		return 6
+	case StateQUICHandshake:
+		return 5
+	case StatePunching:
+		return 4
+	case StateRendezvous:
+		return 3
+	case StateDiscovering:
+		return 2
+	case StateDegraded:
+		return 1
+	case StateClosed:
+		return 0
+	default:
+		return -1
+	}
 }
 
 func (m *Manager) newSession(id uint64, clientDeviceID, exitDeviceID string, token []byte, expires int64) *Session {

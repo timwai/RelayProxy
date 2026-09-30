@@ -168,3 +168,29 @@ func TestValidateRelayPolicyRequiresServerFingerprint(t *testing.T) {
 		t.Fatal("tampered Relay policy was accepted")
 	}
 }
+
+
+func TestPathStatusPrefersReadyAndHidesSensitiveDetails(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	token := []byte("0123456789abcdef0123456789abcdef")
+	degraded := manager.newSession(101, "client", "exit", token, time.Now().Add(time.Minute).UnixMilli())
+	ready := manager.newSession(102, "client", "exit", token, time.Now().Add(2*time.Minute).UnixMilli())
+	if degraded == nil || ready == nil {
+		t.Fatal("failed to create test sessions")
+	}
+	degraded.setState(StateDegraded, "punch timeout")
+	ready.setState(StateReady, "")
+	ready.setPeer([]protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:1234"}}, "sha256:peer")
+
+	status, ok := manager.PathStatus("exit")
+	if !ok {
+		t.Fatal("missing path status")
+	}
+	if status.SessionID != 102 || status.State != StateReady || status.Path != protocol.P2PPathDirectQUIC {
+		t.Fatalf("unexpected path status: %#v", status)
+	}
+	if status.Error != "" {
+		t.Fatalf("ready path exposed unexpected error: %q", status.Error)
+	}
+}

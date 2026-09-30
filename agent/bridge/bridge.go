@@ -166,6 +166,13 @@ func (b *UIBridge) persistMessageHistory() error {
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
+	// os.Rename does not reliably replace an existing destination on Windows.
+	// Remove the old snapshot first; the temporary file keeps partial writes out
+	// of the history path.
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		_ = os.Remove(tmp)
+		return err
+	}
 	return os.Rename(tmp, path)
 }
 

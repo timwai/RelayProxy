@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"relayproxy/internal/acl"
+	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -29,8 +30,10 @@ type HandlerConfig struct {
 	ACLChecker        *acl.Checker
 	ConnectTimeout    time.Duration
 	Upstream          UpstreamConfig
+	ResumeEnabled     bool
 	ResumeGrace       time.Duration
 	ResumeMaxSessions int
+	ResumeReplayLimit int
 }
 
 type Handler struct {
@@ -107,6 +110,28 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 	}
 	if policy := boundRelayPolicy(ctx); policy != nil {
 		req.RelayPolicy = policy
+	}
+	if req.Resume != nil {
+		if !h.cfg.ResumeEnabled {
+			_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+				RequestID:    req.RequestID,
+				ErrorCode:    protocol.ErrCodeInvalidRequest,
+				ErrorMessage: "resumable TCP is not enabled on this Exit",
+			})
+			return
+		}
+		if req.Resume.Mode == protocol.TCPResumeModeRebind {
+			h.handleTCPResumeRebind(ctx, stream, req)
+			return
+		}
+		if req.Resume.Mode != protocol.TCPResumeModeOpen {
+			_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+				RequestID:    req.RequestID,
+				ErrorCode:    protocol.ErrCodeInvalidRequest,
+				ErrorMessage: "invalid resumable TCP mode",
+			})
+			return
+		}
 	}
 
 	checker, err := h.aclForRequest(req.RelayPolicy)
@@ -208,8 +233,13 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		})
 		return
 	}
-	defer targetConn.Close()
 	tunnel.TuneTCPConn(targetConn)
+
+	if req.Resume != nil {
+		h.handleTCPResumeOpen(stream, req, targetConn, remoteTarget)
+		return
+	}
+	defer targetConn.Close()
 
 	resp := protocol.OpenTCPResponse{
 		RequestID: req.RequestID,
@@ -226,6 +256,143 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 	defer h.activeStreams.Add(-1)
 
 	tunnel.Pipe(ctx, stream, targetConn, 5*time.Minute, nil)
+}
+
+func (h *Handler) handleTCPResumeOpen(
+	stream tunnel.TunnelStream,
+	req protocol.OpenTCPRequest,
+	targetConn net.Conn,
+	remoteTarget string,
+) {
+	peer, err := p2presume.RequestBindingFromProtocol(req.Resume)
+	if err != nil || peer.Generation != 1 || peer.SendOffset != 0 || peer.ReceiveOffset != 0 {
+		_ = targetConn.Close()
+		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+			RequestID:    req.RequestID,
+			ErrorCode:    protocol.ErrCodeInvalidRequest,
+			ErrorMessage: "invalid initial resumable TCP binding",
+		})
+		return
+	}
+
+	local := p2presume.Binding{
+		Type:       p2presume.BindAck,
+		Identity:   peer.Identity,
+		Generation: 1,
+	}
+	h.activeStreams.Add(1)
+	session, err := h.resume.registerLogical(
+		local,
+		targetConn,
+		remoteTarget,
+		h.cfg.ResumeReplayLimit,
+		func() { h.activeStreams.Add(-1) },
+	)
+	if err != nil {
+		h.activeStreams.Add(-1)
+		_ = targetConn.Close()
+		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+			RequestID:    req.RequestID,
+			ErrorCode:    protocol.ErrCodeStreamOpenFailed,
+			ErrorMessage: "failed to register resumable TCP session",
+		})
+		return
+	}
+
+	local, err = session.localBinding()
+	if err != nil {
+		h.resume.remove(peer.Identity.ID)
+		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+			RequestID:    req.RequestID,
+			ErrorCode:    protocol.ErrCodeStreamOpenFailed,
+			ErrorMessage: "resumable TCP session closed during setup",
+		})
+		return
+	}
+	wire, err := p2presume.BindingToProtocol(local, protocol.TCPResumeModeOpen)
+	if err != nil {
+		h.resume.remove(peer.Identity.ID)
+		return
+	}
+	if err := protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+		RequestID: req.RequestID,
+		Success:   true,
+		RemoteIP:  remoteTarget,
+		Resume:    wire,
+	}); err != nil {
+		h.resume.remove(peer.Identity.ID)
+		return
+	}
+	_ = stream.SetDeadline(time.Time{})
+
+	done, err := session.bindTransport(stream, local.Generation)
+	if err != nil {
+		h.resume.remove(peer.Identity.ID)
+		return
+	}
+	<-done
+}
+
+func (h *Handler) handleTCPResumeRebind(
+	ctx context.Context,
+	stream tunnel.TunnelStream,
+	req protocol.OpenTCPRequest,
+) {
+	peer, err := p2presume.RequestBindingFromProtocol(req.Resume)
+	if err != nil || req.Resume.Mode != protocol.TCPResumeModeRebind {
+		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+			RequestID:    req.RequestID,
+			ErrorCode:    protocol.ErrCodeInvalidRequest,
+			ErrorMessage: "invalid resumable TCP rebind",
+		})
+		return
+	}
+	session, err := h.resume.rebind(peer)
+	if err != nil {
+		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+			RequestID:    req.RequestID,
+			ErrorCode:    protocol.ErrCodeStreamOpenFailed,
+			ErrorMessage: "resumable TCP session is unavailable",
+		})
+		return
+	}
+
+	local, err := session.localBinding()
+	if err != nil {
+		return
+	}
+	recoveryArmed := true
+	defer func() {
+		if recoveryArmed {
+			_ = session.detach(local)
+		}
+	}()
+
+	wire, err := p2presume.BindingToProtocol(local, protocol.TCPResumeModeRebind)
+	if err != nil {
+		return
+	}
+	if err := protocol.WriteJSON(stream, protocol.OpenTCPResponse{
+		RequestID: req.RequestID,
+		Success:   true,
+		RemoteIP:  session.remoteAddress(),
+		Resume:    wire,
+	}); err != nil {
+		return
+	}
+	_ = stream.SetDeadline(time.Time{})
+
+	done, err := session.bindTransport(stream, local.Generation)
+	if err != nil {
+		return
+	}
+	recoveryArmed = false
+	select {
+	case <-done:
+	case <-ctx.Done():
+		_ = stream.Close()
+		<-done
+	}
 }
 
 func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream) {

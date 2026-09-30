@@ -197,7 +197,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	}
 	response, err := m.send(ctx, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectRequest, ExitDeviceID: exitDeviceID,
-		Candidates:   append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
+		Candidates: append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
 	})
 	if err != nil {
 		if endpoint != nil {
@@ -314,7 +314,7 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 		Type: protocol.P2PControlConnectAnswer, SessionID: message.SessionID,
 		ClientDeviceID: message.ClientDeviceID, ExitDeviceID: message.ExitDeviceID,
 		SessionToken: append([]byte(nil), message.SessionToken...),
-		Candidates: append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
+		Candidates:   append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
 	})
 	cancel()
 	if err != nil || response.Type == protocol.P2PControlError {

@@ -213,10 +213,11 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 	if message.ExitDeviceID == "" || message.ExitDeviceID == client.DeviceID {
 		return p2pError(protocol.ErrCodeInvalidRequest, "exit device id is required")
 	}
-	if err := validateFingerprint(message.CertFingerprint); err != nil {
+	fingerprint, err := normalizeFingerprint(message.CertFingerprint)
+	if err != nil {
 		return p2pError(protocol.ErrCodeInvalidRequest, err.Error())
 	}
-	validated, err := candidate.Validate(message.Candidates)
+	validated, err := validateProxyCandidates(message.Candidates)
 	if err != nil {
 		return p2pError("INVALID_CANDIDATES", err.Error())
 	}
@@ -247,7 +248,7 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 	item := &Session{
 		ID: id, ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		Token: append([]byte(nil), token...), ClientCandidates: append([]protocol.P2PCandidate(nil), validated...),
-		ClientFingerprint: message.CertFingerprint, ExpiresAt: time.Now().Add(c.lease),
+		ClientFingerprint: fingerprint, ExpiresAt: time.Now().Add(c.lease),
 	}
 	now := time.Now()
 	c.mu.Lock()
@@ -272,7 +273,7 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		Type: protocol.P2PControlConnectOffer, SessionID: id,
 		ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		SessionToken: append([]byte(nil), token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
-		CertFingerprint: message.CertFingerprint, PeerFingerprint: message.CertFingerprint,
+		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
 		LeaseExpiresAt: item.ExpiresAt.UnixMilli(), RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(exit, offer); err != nil {
@@ -293,10 +294,11 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 	if !supports(exit, protocol.CapabilityProxyExit) || !hasCapability(exit.Capabilities, protocol.CapabilityProxyP2P) {
 		return p2pError(protocol.ErrCodeAccessDenied, "device is not an eligible P2P exit")
 	}
-	if err := validateFingerprint(message.CertFingerprint); err != nil {
+	fingerprint, err := normalizeFingerprint(message.CertFingerprint)
+	if err != nil {
 		return p2pError(protocol.ErrCodeInvalidRequest, err.Error())
 	}
-	validated, err := candidate.Validate(message.Candidates)
+	validated, err := validateProxyCandidates(message.Candidates)
 	if err != nil {
 		return p2pError("INVALID_CANDIDATES", err.Error())
 	}
@@ -318,7 +320,7 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 		return p2pError("SESSION_NOT_FOUND", "P2P session is no longer active")
 	}
 	current.ExitCandidates = append([]protocol.P2PCandidate(nil), validated...)
-	current.ExitFingerprint = message.CertFingerprint
+	current.ExitFingerprint = fingerprint
 	current.Answered = true
 	expires := current.ExpiresAt.UnixMilli()
 	c.mu.Unlock()
@@ -327,7 +329,7 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 		Type: protocol.P2PControlConnectAnswer, SessionID: item.ID,
 		ClientDeviceID: item.ClientDeviceID, ExitDeviceID: item.ExitDeviceID,
 		SessionToken: append([]byte(nil), item.Token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
-		CertFingerprint: message.CertFingerprint, PeerFingerprint: message.CertFingerprint,
+		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
 		LeaseExpiresAt: expires, RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(client, answer); err != nil {
@@ -337,7 +339,7 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 }
 
 func (c *Coordinator) candidateUpdate(device *session.DeviceSession, message protocol.P2PControlMessage) protocol.P2PControlMessage {
-	validated, err := candidate.Validate(message.Candidates)
+	validated, err := validateProxyCandidates(message.Candidates)
 	if err != nil {
 		return p2pError("INVALID_CANDIDATES", err.Error())
 	}
@@ -587,15 +589,31 @@ func randomID() (uint64, error) {
 	return id, nil
 }
 
-func validateFingerprint(value string) error {
+func normalizeFingerprint(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return errors.New("ephemeral certificate fingerprint is required")
+		return "", errors.New("ephemeral certificate fingerprint is required")
 	}
 	if len(value) > maxFingerprintLength || strings.ContainsAny(value, "\r\n\t") {
-		return errors.New("invalid ephemeral certificate fingerprint")
+		return "", errors.New("invalid ephemeral certificate fingerprint")
 	}
-	return nil
+	return value, nil
+}
+
+func validateProxyCandidates(input []protocol.P2PCandidate) ([]protocol.P2PCandidate, error) {
+	validated, err := candidate.Validate(input)
+	if err != nil {
+		return nil, err
+	}
+	if len(validated) == 0 {
+		return nil, errors.New("at least one UDP candidate is required")
+	}
+	for _, item := range validated {
+		if item.Protocol != "udp" {
+			return nil, errors.New("proxy P2P v1 only supports UDP candidates")
+		}
+	}
+	return validated, nil
 }
 
 func supports(device *session.DeviceSession, grant string) bool {

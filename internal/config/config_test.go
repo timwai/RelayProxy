@@ -420,3 +420,20 @@ func TestServerConfigLoadsP2PSettings(t *testing.T) {
 		t.Fatalf("P2P settings were not loaded: %+v", cfg.P2P)
 	}
 }
+
+
+func TestServerConfigRejectsSharedRendezvousSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	data := `rdp:
+  rendezvous_listen: ":3478"
+p2p:
+  enabled: true
+  rendezvous_listen: ":3478"
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadServerConfig(path); err == nil {
+		t.Fatal("shared RDP/P2P rendezvous socket was accepted")
+	}
+}

@@ -128,3 +128,24 @@ func TestCoordinatorRevokesLeaseWhenAuthorizationChanges(t *testing.T) {
 		t.Fatalf("revoke notification not delivered: %#v", delivered)
 	}
 }
+
+
+func TestCoordinatorRejectsNonUDPCandidates(t *testing.T) {
+	manager := session.NewManager()
+	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)
+	exit := newTestDevice("exit", "owner", protocol.CapabilityProxyExit)
+	manager.Register(client)
+	manager.Register(exit)
+	c := NewCoordinator(manager, func(string, string) (bool, error) { return true, nil }, time.Minute, "", 8)
+	c.send = func(*session.DeviceSession, protocol.P2PControlMessage) error {
+		t.Fatal("invalid candidate must not be forwarded")
+		return nil
+	}
+	response := c.connect(client, protocol.P2PControlMessage{
+		ExitDeviceID: "exit", CertFingerprint: "sha256:client",
+		Candidates: []protocol.P2PCandidate{{Protocol: "tcp", Type: "lan", Address: "192.0.2.10:1234"}},
+	})
+	if response.Type != protocol.P2PControlError || response.ErrorCode != "INVALID_CANDIDATES" {
+		t.Fatalf("unexpected response: %#v", response)
+	}
+}

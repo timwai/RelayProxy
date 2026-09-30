@@ -87,6 +87,10 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	if c.P2P.MaxSessionsPerDevice < 1 || c.P2P.MaxSessionsPerDevice > 1024 {
 		return errors.New("p2p.max_sessions_per_device 必须在 1-1024 之间")
 	}
+	if c.P2P.Enabled != nil && *c.P2P.Enabled && c.P2P.RendezvousListen != "" && c.RDP.RendezvousListen != "" &&
+		listenAddressesOverlap(c.P2P.RendezvousListen, c.RDP.RendezvousListen) {
+		return errors.New("p2p.rendezvous_listen 与 rdp.rendezvous_listen 不能监听同一 UDP 地址与端口")
+	}
 	if c.RDP.Ingress.PortStart < 1 || c.RDP.Ingress.PortStart > 65535 || c.RDP.Ingress.PortEnd < c.RDP.Ingress.PortStart || c.RDP.Ingress.PortEnd > 65535 {
 		return errors.New("rdp.ingress 的端口范围无效")
 	}

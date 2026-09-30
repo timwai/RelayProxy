@@ -182,8 +182,8 @@ func main() {
 		quicAddr = "" // QUIC requires TLS 1.3, disable when plaintext
 	}
 	gw := gateway.NewGateway(gateway.GatewayConfig{
-		TCPAddr:          cfg.Server.TLS.Listen,
-		QUICAddr:         quicAddr,
+		TCPAddr:           cfg.Server.TLS.Listen,
+		QUICAddr:          quicAddr,
 		TLSConfig:         tunnelTLSConfig(cfg, tlsConfig),
 		PublicHTTPHandler: publicPushHandler,
 		ServerInstanceID:  serverInstanceID,

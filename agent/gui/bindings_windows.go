@@ -53,6 +53,29 @@ func (s *WailsService) GetStatus() (string, error) {
 	return s.owner.statusJSON(), nil
 }
 
+func (s *WailsService) GetMessages() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "[]", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetMessages(500))
+	if err != nil {
+		return "[]", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) ClearMessages() {
+	if s != nil && s.owner != nil && s.owner.bridge != nil {
+		s.owner.bridge.ClearMessages()
+	}
+}
+
+func (s *WailsService) HideVerificationPopup() {
+	if s != nil && s.owner != nil {
+		s.owner.hideVerificationPopup()
+	}
+}
+
 func (s *WailsService) GetLogs() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil

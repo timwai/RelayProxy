@@ -50,7 +50,7 @@ func (i Identity) Valid() bool {
 }
 
 func (i Identity) VerifyToken(token []byte) bool {
-	return len(token) == TokenSize && subtle.ConstantTimeCompare(i.Token[:], token) == 1
+	return i.Valid() && len(token) == TokenSize && subtle.ConstantTimeCompare(i.Token[:], token) == 1
 }
 
 // Binding is exchanged before framed stream data. Generation must increase for

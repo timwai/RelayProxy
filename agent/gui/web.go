@@ -148,6 +148,11 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
 	mux.HandleFunc("GET /api/logs", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetLogs(500)) })
+	mux.HandleFunc("GET /api/messages", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetMessages(500)) })
+	mux.HandleFunc("DELETE /api/messages", func(rw http.ResponseWriter, _ *http.Request) {
+		w.bridge.ClearMessages()
+		writeWebJSON(rw, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("DELETE /api/logs", func(rw http.ResponseWriter, _ *http.Request) {
 		w.bridge.ClearLogs()
 		writeWebJSON(rw, map[string]bool{"ok": true})
@@ -381,6 +386,8 @@ const webBridgeJS = `(function () {
   window.goGetStatus = function () { return request('/api/status'); };
   window.goGetLogs = function () { return request('/api/logs'); };
   window.goClearLogs = function () { return request('/api/logs', {method:'DELETE'}); };
+  window.goGetMessages = function () { return request('/api/messages'); };
+  window.goClearMessages = function () { return request('/api/messages', {method:'DELETE'}); };
   window.goGetConfig = function () { return request('/api/config'); };
   window.goSaveConfig = function (raw) { return request('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:raw}); };
   window.goReloadConfig = function () { return json('/api/reload', 'POST', {}); };

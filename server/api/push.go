@@ -44,17 +44,13 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		writeError(w, http.StatusBadRequest, "invalid channel id")
 		return
 	}
-	channel, targets, err := h.db.ResolveMessageChannelTargets(channelID)
+	channel, err := h.db.GetMessageChannel(channelID)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve channel")
-		return
-	}
-	if len(targets) == 0 {
-		writeError(w, http.StatusConflict, "channel has no approved target devices")
+		writeError(w, http.StatusInternalServerError, "failed to load channel")
 		return
 	}
 
@@ -104,13 +100,45 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		return
 	}
 
+	allDevices := channel.AllDevices
+	deviceIDs := channel.DeviceIDs
+	routeRuleName := ""
+	matchedRoute, err := matchRouteRule(content, channel.RouteRules)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to evaluate channel routing rules")
+		return
+	}
+	if matchedRoute != nil {
+		allDevices = matchedRoute.AllDevices
+		deviceIDs = matchedRoute.DeviceIDs
+		routeRuleName = matchedRoute.Name
+	}
+	targets, err := h.db.ResolveMessageTargets(allDevices, deviceIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve target devices")
+		return
+	}
+	if len(targets) == 0 {
+		if matchedRoute != nil {
+			writeError(w, http.StatusConflict, "matched routing rule has no approved target devices")
+		} else if len(channel.RouteRules) > 0 {
+			writeError(w, http.StatusConflict, "message matched no routing rule and channel has no fallback target devices")
+		} else {
+			writeError(w, http.StatusConflict, "channel has no approved target devices")
+		}
+		return
+	}
+
 	message := &repository.MessageRecord{
 		ChannelID:        channel.ID,
 		Title:            title,
 		Content:          content,
-		Source:           source,
-		VerificationCode: messageutil.ExtractVerificationCode(content),
-		CreatedAt:        time.Now().UTC(),
+		Source:    source,
+		RouteRule: routeRuleName,
+		VerificationCode: messageutil.ExtractVerificationCodeWithRules(
+			content, channel.UseDefaultVerification, messageutilVerificationRules(channel.VerificationRules),
+		),
+		CreatedAt: time.Now().UTC(),
 	}
 	if err := h.db.CreateMessage(message, targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist message")

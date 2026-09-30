@@ -765,7 +765,6 @@ wait:
 	return up, down
 }
 
-
 func proxyStreamResumeNegotiated(client, exit *session.DeviceSession) bool {
 	return client != nil && exit != nil &&
 		hasCapability(client, protocol.CapabilityProxyStreamResume) &&

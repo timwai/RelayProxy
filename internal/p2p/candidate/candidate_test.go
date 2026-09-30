@@ -1,6 +1,7 @@
 package candidate
 
 import (
+	"net/netip"
 	"testing"
 
 	"relayproxy/internal/protocol"
@@ -28,5 +29,29 @@ func TestValidateCandidates(t *testing.T) {
 		if _, err := Validate([]protocol.RDPCandidate{invalid}); err == nil {
 			t.Fatalf("invalid candidate accepted: %#v", invalid)
 		}
+	}
+}
+
+
+func TestDiscoveryPriorityMatchesDirectPathPreference(t *testing.T) {
+	privateIPv4 := netip.MustParseAddr("192.168.1.10")
+	privateIPv6 := netip.MustParseAddr("fd00::10")
+	publicIPv6 := netip.MustParseAddr("2001:db8::10")
+	publicIPv4 := netip.MustParseAddr("198.51.100.10")
+
+	if got := discoveryPriority(privateIPv4, "udp"); got != 1200 {
+		t.Fatalf("private IPv4 UDP priority=%d, want 1200", got)
+	}
+	if got := discoveryPriority(privateIPv6, "udp"); got != 1200 {
+		t.Fatalf("private IPv6 UDP priority=%d, want 1200", got)
+	}
+	if got := discoveryPriority(publicIPv6, "udp"); got != 1100 {
+		t.Fatalf("public IPv6 UDP priority=%d, want 1100", got)
+	}
+	if got := discoveryPriority(publicIPv4, "udp"); got != 1000 {
+		t.Fatalf("public IPv4 UDP priority=%d, want 1000", got)
+	}
+	if got := discoveryPriority(privateIPv4, "tcp"); got != 1100 {
+		t.Fatalf("private IPv4 TCP priority=%d, want 1100", got)
 	}
 }

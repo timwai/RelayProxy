@@ -94,12 +94,7 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 			if !ip.IsValid() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 				continue
 			}
-			udpPriority, tcpPriority := uint32(1000), uint32(900)
-			if ip.Is6() {
-				// Prefer native IPv6 over an IPv4 NAT path when both are available.
-				udpPriority, tcpPriority = 1100, 1000
-			}
-			appendCandidate := func(protocolName string, port int, priority uint32) {
+			appendCandidate := func(protocolName string, port int) {
 				if port <= 0 || port > 65535 {
 					return
 				}
@@ -109,10 +104,13 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 					return
 				}
 				seen[key] = struct{}{}
-				result = append(result, protocol.P2PCandidate{Protocol: protocolName, Type: "lan", Address: address, Priority: priority})
+				result = append(result, protocol.P2PCandidate{
+					Protocol: protocolName, Type: "lan", Address: address,
+					Priority: discoveryPriority(ip, protocolName),
+				})
 			}
-			appendCandidate("udp", udpPort, udpPriority)
-			appendCandidate("tcp", tcpPort, tcpPriority)
+			appendCandidate("udp", udpPort)
+			appendCandidate("tcp", tcpPort)
 		}
 	}
 	sort.SliceStable(result, func(i, j int) bool {
@@ -125,6 +123,22 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 		result = result[:MaxCandidates]
 	}
 	return result
+}
+
+func discoveryPriority(ip netip.Addr, protocolName string) uint32 {
+	priority := uint32(1000)
+	switch {
+	case ip.IsPrivate():
+		// Private IPv4 and IPv6 ULA candidates are the best same-LAN hints.
+		priority = 1200
+	case ip.Is6():
+		// Native global IPv6 avoids NAT while remaining below a reachable LAN path.
+		priority = 1100
+	}
+	if protocolName == "tcp" && priority >= 100 {
+		priority -= 100
+	}
+	return priority
 }
 
 // ProbeReflexive asks the server's UDP rendezvous socket to report the source

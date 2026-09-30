@@ -18,12 +18,24 @@ import (
 
 const dataWireOverhead = 24 + 16
 const punchKeepInterval = 10 * time.Second
+const punchSelectionWindow = 120 * time.Millisecond
+const candidatePriorityRTTWeight = int64(2)
 
 type UDPResult struct {
-	Conn       *net.UDPConn
-	RemoteAddr *net.UDPAddr
-	SessionID  uint64
-	Key        []byte
+	Conn              *net.UDPConn
+	RemoteAddr        *net.UDPAddr
+	SessionID         uint64
+	Key               []byte
+	CandidatePriority uint32
+	PunchRTT          time.Duration
+}
+
+type punchObservation struct {
+	priority       uint32
+	gotAck         bool
+	sawPeerRequest bool
+	ready          bool
+	rtt            time.Duration
 }
 
 // Punch races all validated UDP candidates on one socket and returns the
@@ -41,7 +53,7 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 	}
 	defer conn.SetReadDeadline(time.Time{})
 	addresses := make([]netip.AddrPort, 0, len(candidates))
-	seen := make(map[netip.AddrPort]struct{}, len(candidates))
+	observations := make(map[netip.AddrPort]*punchObservation, len(candidates))
 	for _, candidate := range candidates {
 		if candidate.Protocol != "udp" {
 			continue
@@ -50,11 +62,16 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 		if err != nil {
 			continue
 		}
-		if _, ok := seen[address]; ok {
+		address = netip.AddrPortFrom(address.Addr().Unmap(), address.Port())
+		observation, exists := observations[address]
+		if !exists {
+			observations[address] = &punchObservation{priority: candidate.Priority}
+			addresses = append(addresses, address)
 			continue
 		}
-		seen[address] = struct{}{}
-		addresses = append(addresses, address)
+		if candidate.Priority > observation.priority {
+			observation.priority = candidate.Priority
+		}
 	}
 	if len(addresses) == 0 {
 		return nil, errors.New("no usable P2P UDP candidates")
@@ -64,17 +81,25 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 		return nil, err
 	}
 	request := secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}.Encode(key)
+	started := time.Now()
 	nextSend := time.Time{}
 	buffer := make([]byte, 1500)
-	var gotAck bool
-	var sawPeerRequest bool
-	var successRemote netip.AddrPort
 	var settleUntil time.Time
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		now := time.Now()
-		if !settleUntil.IsZero() && !now.Before(settleUntil) {
-			_ = conn.SetReadDeadline(time.Time{})
-			return &UDPResult{Conn: conn, RemoteAddr: net.UDPAddrFromAddrPort(successRemote), SessionID: sessionID, Key: append([]byte(nil), key...)}, nil
+		if (!settleUntil.IsZero() && !now.Before(settleUntil)) || !now.Before(deadline) {
+			if remote, observation, ok := bestPunchObservation(observations); ok {
+				_ = conn.SetReadDeadline(time.Time{})
+				return &UDPResult{
+					Conn: conn, RemoteAddr: net.UDPAddrFromAddrPort(remote),
+					SessionID: sessionID, Key: append([]byte(nil), key...),
+					CandidatePriority: observation.priority, PunchRTT: observation.rtt,
+				}, nil
+			}
+			return nil, fmt.Errorf("P2P UDP punch timeout after %s", timeout)
 		}
 		if nextSend.IsZero() || !now.Before(nextSend) {
 			if err := sendAll(conn, request, addresses); err != nil {
@@ -91,44 +116,74 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 		}
 		_ = conn.SetReadDeadline(readDeadline)
 		n, remote, err := conn.ReadFromUDPAddrPort(buffer)
-		if err == nil {
-			remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
-			packet, decodeErr := secure.DecodePunchPacket(buffer[:n], key)
-			if decodeErr == nil && packet.SessionID == sessionID {
-				switch packet.Type {
-				case secure.PunchRequest, secure.PunchKeep:
-					sawPeerRequest = true
-					successRemote = remote
-					ack := secure.PunchPacket{Type: secure.PunchAck, SessionID: sessionID, Nonce: packet.Nonce}.Encode(key)
-					_, _ = conn.WriteToUDPAddrPort(ack, remote)
-				case secure.PunchAck:
-					if packet.Nonce == nonce {
-						gotAck = true
-						successRemote = remote
-					}
-				}
-				if gotAck && sawPeerRequest && settleUntil.IsZero() {
-					settleUntil = time.Now().Add(120 * time.Millisecond)
-					if deadline.Before(settleUntil) {
-						settleUntil = deadline
-					}
-				}
-			}
-		} else {
+		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				if time.Now().Before(deadline) {
-					continue
-				}
-				return nil, fmt.Errorf("P2P UDP punch timeout: %w", err)
+				continue
 			}
 			return nil, err
 		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
+		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
+		packet, decodeErr := secure.DecodePunchPacket(buffer[:n], key)
+		if decodeErr != nil || packet.SessionID != sessionID {
+			continue
+		}
+		observation := observations[remote]
+		if observation == nil {
+			// A valid authenticated peer can appear from a mapping that differs
+			// from rendezvous. Keep it usable, but below advertised candidates.
+			observation = &punchObservation{}
+			observations[remote] = observation
+		}
+		switch packet.Type {
+		case secure.PunchRequest, secure.PunchKeep:
+			observation.sawPeerRequest = true
+			ack := secure.PunchPacket{Type: secure.PunchAck, SessionID: sessionID, Nonce: packet.Nonce}.Encode(key)
+			_, _ = conn.WriteToUDPAddrPort(ack, remote)
+		case secure.PunchAck:
+			if packet.Nonce == nonce {
+				observation.gotAck = true
+			}
+		}
+		if observation.gotAck && observation.sawPeerRequest && !observation.ready {
+			observation.ready = true
+			observation.rtt = time.Since(started)
+			if settleUntil.IsZero() {
+				settleUntil = time.Now().Add(punchSelectionWindow)
+				if deadline.Before(settleUntil) {
+					settleUntil = deadline
+				}
+			}
 		}
 	}
+}
+
+func candidateScore(priority uint32, rtt time.Duration) int64 {
+	latencyMs := rtt.Milliseconds()
+	if latencyMs < 0 {
+		latencyMs = 0
+	}
+	if latencyMs > 1000 {
+		latencyMs = 1000
+	}
+	return int64(priority)*candidatePriorityRTTWeight - latencyMs
+}
+
+func bestPunchObservation(observations map[netip.AddrPort]*punchObservation) (netip.AddrPort, *punchObservation, bool) {
+	var bestAddr netip.AddrPort
+	var best *punchObservation
+	var bestScore int64
+	for address, observation := range observations {
+		if observation == nil || !observation.ready {
+			continue
+		}
+		score := candidateScore(observation.priority, observation.rtt)
+		if best == nil || score > bestScore ||
+			(score == bestScore && (observation.rtt < best.rtt ||
+				(observation.rtt == best.rtt && address.String() < bestAddr.String()))) {
+			bestAddr, best, bestScore = address, observation, score
+		}
+	}
+	return bestAddr, best, best != nil
 }
 
 func sendAll(conn *net.UDPConn, packet []byte, addresses []netip.AddrPort) error {

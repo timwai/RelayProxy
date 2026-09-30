@@ -247,3 +247,41 @@ func TestPunchIsSymmetricOverIPv6(t *testing.T) {
 		}
 	}
 }
+
+
+func TestCandidateScoreBalancesPreferenceAndLatency(t *testing.T) {
+	highPriority := candidateScore(1200, 80*time.Millisecond)
+	lowerPriority := candidateScore(1100, 5*time.Millisecond)
+	if highPriority <= lowerPriority {
+		t.Fatalf("preferred LAN path score=%d, IPv6 score=%d", highPriority, lowerPriority)
+	}
+
+	fast := candidateScore(1100, 10*time.Millisecond)
+	slow := candidateScore(1100, 70*time.Millisecond)
+	if fast <= slow {
+		t.Fatalf("same-class lower RTT was not preferred: fast=%d slow=%d", fast, slow)
+	}
+}
+
+func TestBestPunchObservationDoesNotMixHandshakeAcrossCandidates(t *testing.T) {
+	left := netip.MustParseAddrPort("192.0.2.10:5000")
+	right := netip.MustParseAddrPort("198.51.100.10:5000")
+	observations := map[netip.AddrPort]*punchObservation{
+		left:  {priority: 1200, gotAck: true, rtt: 10 * time.Millisecond},
+		right: {priority: 800, sawPeerRequest: true, rtt: 10 * time.Millisecond},
+	}
+	if _, _, ok := bestPunchObservation(observations); ok {
+		t.Fatal("split punch handshake across two candidates was treated as viable")
+	}
+
+	observations[left].sawPeerRequest = true
+	observations[left].ready = true
+	observations[left].rtt = 40 * time.Millisecond
+	observations[right].gotAck = true
+	observations[right].ready = true
+	observations[right].rtt = 5 * time.Millisecond
+	selected, _, ok := bestPunchObservation(observations)
+	if !ok || selected != left {
+		t.Fatalf("selected candidate=%v ok=%v, want preferred LAN %v", selected, ok, left)
+	}
+}

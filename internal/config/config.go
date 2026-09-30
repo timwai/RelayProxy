@@ -127,10 +127,11 @@ type AgentConfigFile struct {
 	} `yaml:"network"`
 
 	GUI struct {
-		Enabled        *bool  `yaml:"enabled"`          // Default: true — launch the desktop window on start
-		MinimizeToTray *bool  `yaml:"minimize_to_tray"` // Default: true — closing the window hides to the tray
-		StartMinimized bool   `yaml:"start_minimized"`  // Default: false — boot straight into the tray
-		Theme          string `yaml:"theme"`            // "dark", "light", or "system"
+		Enabled                     *bool  `yaml:"enabled"`                       // Default: true — launch the desktop window on start
+		MinimizeToTray              *bool  `yaml:"minimize_to_tray"`              // Default: true — closing the window hides to the tray
+		StartMinimized              bool   `yaml:"start_minimized"`               // Default: false — boot straight into the tray
+		Theme                       string `yaml:"theme"`                         // "dark", "light", or "system"
+		VerificationPopupTimeoutSec *int   `yaml:"verification_popup_timeout_sec"` // Default: 15; 0 disables automatic dismissal
 	} `yaml:"gui"`
 
 	Web struct {
@@ -340,6 +341,10 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	if cfg.GUI.Theme == "" {
 		cfg.GUI.Theme = "system"
 	}
+	if cfg.GUI.VerificationPopupTimeoutSec == nil {
+		value := 15
+		cfg.GUI.VerificationPopupTimeoutSec = &value
+	}
 	if cfg.Web.Listen == "" {
 		cfg.Web.Listen = "127.0.0.1"
 	}
@@ -409,6 +414,15 @@ func (c *AgentConfigFile) IsMinimizeToTray() bool {
 		return *c.GUI.MinimizeToTray
 	}
 	return true
+}
+
+// VerificationPopupTimeout returns the configured verification-code popup
+// lifetime in seconds. Zero explicitly disables automatic dismissal.
+func (c *AgentConfigFile) VerificationPopupTimeout() int {
+	if c.GUI.VerificationPopupTimeoutSec == nil {
+		return 15
+	}
+	return *c.GUI.VerificationPopupTimeoutSec
 }
 
 // IsWebEnabled reports whether the embedded management page should be served.

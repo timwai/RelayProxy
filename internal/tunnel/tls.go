@@ -12,6 +12,8 @@ import (
 	"github.com/hashicorp/yamux"
 )
 
+const TCPALPN = "relayproxy-tcp"
+
 // YAMUXStreamAdapter adapts yamux.Stream to TunnelStream
 type YAMUXStreamAdapter struct {
 	*yamux.Stream
@@ -138,6 +140,9 @@ func DialTLS(ctx context.Context, targetAddr string, tlsConfig *tls.Config, yamu
 		tlsConfig = tlsConfig.Clone()
 		if tlsConfig.MinVersion < tls.VersionTLS13 {
 			tlsConfig.MinVersion = tls.VersionTLS13
+		}
+		if !containsTLSProtocol(tlsConfig.NextProtos, TCPALPN) {
+			tlsConfig.NextProtos = append([]string{TCPALPN}, tlsConfig.NextProtos...)
 		}
 		if tlsConfig.ServerName == "" {
 			host, _, err := net.SplitHostPort(targetAddr)
@@ -309,4 +314,14 @@ func (s *TLSSession) Close() error {
 
 func (s *TLSSession) Done() <-chan struct{} {
 	return s.session.CloseChan()
+}
+
+
+func containsTLSProtocol(protocols []string, expected string) bool {
+	for _, protocol := range protocols {
+		if protocol == expected {
+			return true
+		}
+	}
+	return false
 }

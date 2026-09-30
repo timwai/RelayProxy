@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing/fstest"
 	"time"
+	"unsafe"
 
 	"github.com/lxn/win"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -32,6 +33,9 @@ const windowClass = "WailsWebviewWindow"
 var (
 	activeApp atomic.Pointer[appWindow]
 	showMsgID uint32
+
+	verificationDWMAPI              = windows.NewLazySystemDLL("dwmapi.dll")
+	verificationDWMSetWindowAttribute = verificationDWMAPI.NewProc("DwmSetWindowAttribute")
 )
 
 type appWindow struct {
@@ -56,6 +60,33 @@ type appWindow struct {
 	monitor   *application.WebviewWindow
 
 	verification *application.WebviewWindow
+}
+
+func disableVerificationNativeFrame() {
+	class, classErr := windows.UTF16PtrFromString(windowClass)
+	title, titleErr := windows.UTF16PtrFromString("RelayProxy 验证码")
+	if classErr != nil || titleErr != nil {
+		return
+	}
+	hwnd := win.FindWindow(class, title)
+	if hwnd == 0 {
+		return
+	}
+
+	// Frameless + transparent WebView2 windows can still receive a rectangular
+	// DWM non-client shadow. Disable only that native frame; the HTML card owns
+	// its rounded border and small inset-safe shadow.
+	const (
+		dwmwaNCRenderingPolicy = 2
+		dwmncrpDisabled        = 1
+	)
+	policy := uint32(dwmncrpDisabled)
+	_, _, _ = verificationDWMSetWindowAttribute.Call(
+		uintptr(hwnd),
+		uintptr(dwmwaNCRenderingPolicy),
+		uintptr(unsafe.Pointer(&policy)),
+		unsafe.Sizeof(policy),
+	)
 }
 
 func systemPrefersDark() bool {
@@ -405,6 +436,7 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	popup := a.verification
 	popup.Center()
 	popup.Show()
+	disableVerificationNativeFrame()
 	popup.ExecJS("window.enqueueVerification && window.enqueueVerification(" + payload + ")")
 	// A message may arrive during the hidden WebView's first paint. Retrying is
 	// harmless because the popup page deduplicates by message ID.

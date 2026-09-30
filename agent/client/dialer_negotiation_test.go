@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -9,7 +10,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
+	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -165,5 +169,135 @@ func TestTunnelDialerPrefersReadyDirectPathAndWarmsMissingPath(t *testing.T) {
 	}
 	if ensureCalls != 1 {
 		t.Fatalf("empty Exit unexpectedly started P2P: ensure calls=%d", ensureCalls)
+	}
+}
+
+
+type scriptedStream struct {
+	read        bytes.Buffer
+	failWriteAt int32
+	writes      atomic.Int32
+	closed      atomic.Bool
+}
+
+func responseStream(value any) *scriptedStream {
+	stream := &scriptedStream{}
+	_ = protocol.WriteJSON(&stream.read, value)
+	return stream
+}
+
+func (s *scriptedStream) Read(p []byte) (int, error) {
+	return s.read.Read(p)
+}
+
+func (s *scriptedStream) Write(p []byte) (int, error) {
+	count := s.writes.Add(1)
+	if s.failWriteAt > 0 && count == s.failWriteAt {
+		return 0, io.ErrClosedPipe
+	}
+	return len(p), nil
+}
+
+func (s *scriptedStream) Close() error {
+	s.closed.Store(true)
+	return nil
+}
+
+func (s *scriptedStream) CloseWrite() error                  { return nil }
+func (s *scriptedStream) SetDeadline(time.Time) error        { return nil }
+func (s *scriptedStream) SetReadDeadline(time.Time) error    { return nil }
+func (s *scriptedStream) SetWriteDeadline(time.Time) error   { return nil }
+
+type scriptedSession struct {
+	factory func() tunnel.TunnelStream
+	opens   atomic.Int32
+	done    chan struct{}
+}
+
+func newScriptedSession(factory func() tunnel.TunnelStream) *scriptedSession {
+	return &scriptedSession{factory: factory, done: make(chan struct{})}
+}
+
+func (s *scriptedSession) OpenStream(context.Context) (tunnel.TunnelStream, error) {
+	s.opens.Add(1)
+	if s.factory == nil {
+		return nil, errors.New("no stream factory")
+	}
+	return s.factory(), nil
+}
+
+func (s *scriptedSession) AcceptStream(context.Context) (tunnel.TunnelStream, error) {
+	return nil, errors.New("not supported")
+}
+
+func (s *scriptedSession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
+func (s *scriptedSession) RemoteAddr() net.Addr            { return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 2), Port: 443} }
+func (s *scriptedSession) LocalAddr() net.Addr             { return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 40000} }
+func (s *scriptedSession) Close() error                    { return nil }
+func (s *scriptedSession) Done() <-chan struct{}           { return s.done }
+
+func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
+	direct := newScriptedSession(func() tunnel.TunnelStream {
+		return &scriptedStream{failWriteAt: 2}
+	})
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenTCPResponse{Success: true, RemoteIP: "203.0.113.10"})
+	})
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
+
+	conn, err := dialer.DialTCP(context.Background(), "exit", "example.com", 443)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	if direct.opens.Load() != 1 || relay.opens.Load() != 1 {
+		t.Fatalf("unexpected attempts direct=%d relay=%d", direct.opens.Load(), relay.opens.Load())
+	}
+}
+
+func TestTCPDirectBusinessErrorDoesNotRetryRelay(t *testing.T) {
+	direct := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenTCPResponse{
+			Success: false, ErrorCode: protocol.ErrCodeACLDenied, ErrorMessage: "blocked",
+		})
+	})
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenTCPResponse{Success: true})
+	})
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
+
+	conn, err := dialer.DialTCP(context.Background(), "exit", "blocked.example", 443)
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("business error unexpectedly returned a connection")
+	}
+	var relayErr *protocol.RelayError
+	if !errors.As(err, &relayErr) || relayErr.Code != protocol.ErrCodeACLDenied {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if relay.opens.Load() != 0 {
+		t.Fatalf("business error retried Relay %d time(s)", relay.opens.Load())
+	}
+}
+
+func TestUDPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
+	direct := newScriptedSession(func() tunnel.TunnelStream {
+		return &scriptedStream{failWriteAt: 2}
+	})
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenUDPResponse{Success: true, Mode: protocol.UDPModeStream})
+	})
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
+
+	conn, err := dialer.DialUDP(context.Background(), "exit", "203.0.113.53", 53)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+	if direct.opens.Load() != 1 || relay.opens.Load() != 1 {
+		t.Fatalf("unexpected attempts direct=%d relay=%d", direct.opens.Load(), relay.opens.Load())
 	}
 }

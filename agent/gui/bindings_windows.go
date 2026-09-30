@@ -135,9 +135,10 @@ func (s *WailsService) GetConfig() (string, error) {
 		ExitUpstream        any                 `json:"exitUpstream"`
 		NetworkMode         string              `json:"networkMode"`
 		IsAutostart         bool                `json:"isAutostart"`
-		MinimizeToTray      bool                `json:"minimizeToTray"`
-		StartMinimized      bool                `json:"startMinimized"`
-		Theme               string              `json:"theme"`
+		MinimizeToTray               bool                `json:"minimizeToTray"`
+		StartMinimized               bool                `json:"startMinimized"`
+		Theme                        string              `json:"theme"`
+		VerificationPopupTimeoutSec int                 `json:"verificationPopupTimeoutSec"`
 		Version             string              `json:"version"`
 		Routing             any                 `json:"routing"`
 		Network             any                 `json:"network"`
@@ -169,9 +170,10 @@ func (s *WailsService) GetConfig() (string, error) {
 		},
 		NetworkMode:    cfg.Network.Mode,
 		IsAutostart:    a.bridge.IsAutoStart(),
-		MinimizeToTray: cfg.IsMinimizeToTray(),
-		StartMinimized: cfg.GUI.StartMinimized,
-		Theme:          cfg.GUI.Theme,
+		MinimizeToTray:               cfg.IsMinimizeToTray(),
+		StartMinimized:               cfg.GUI.StartMinimized,
+		Theme:                        cfg.GUI.Theme,
+		VerificationPopupTimeoutSec: cfg.VerificationPopupTimeout(),
 		Version:        Version,
 		Network: map[string]any{
 			"mode":              cfg.Network.Mode,
@@ -244,6 +246,9 @@ func (s *WailsService) SaveConfig(raw string) (string, error) {
 		s.owner.minimizeTray = *in.GUI.MinimizeToTray
 		s.owner.mu.Unlock()
 	}
+	if in.GUI.VerificationPopupTimeoutSec != nil {
+		s.owner.setVerificationPopupTimeout(*in.GUI.VerificationPopupTimeoutSec)
+	}
 	return saveResponse(res, nil), nil
 }
 
@@ -258,6 +263,7 @@ func (s *WailsService) ReloadConfig() (string, error) {
 		s.owner.minimizeTray = cfg.IsMinimizeToTray()
 		s.owner.mu.Unlock()
 		s.owner.applyThemeMode(cfg.GUI.Theme)
+		s.owner.setVerificationPopupTimeout(cfg.VerificationPopupTimeout())
 	}
 	return saveResponse(res, err), nil
 }

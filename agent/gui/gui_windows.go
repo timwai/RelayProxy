@@ -54,6 +54,8 @@ type appWindow struct {
 
 	monitorMu sync.Mutex
 	monitor   *application.WebviewWindow
+
+	verification *application.WebviewWindow
 }
 
 func systemPrefersDark() bool {
@@ -164,6 +166,27 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	})
 	a.window = window
 
+	verification := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:                       "verification",
+		Title:                      "RelayProxy 验证码",
+		Width:                      520,
+		Height:                     350,
+		URL:                        "/verification.html",
+		Hidden:                     true,
+		Frameless:                  true,
+		DisableResize:              true,
+		AlwaysOnTop:                true,
+		InitialPosition:            application.WindowCentered,
+		BackgroundType:             application.BackgroundTypeTransparent,
+		DefaultContextMenuDisabled: true,
+		DevToolsEnabled:            false,
+	})
+	a.verification = verification
+	verification.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		event.Cancel()
+		verification.Hide()
+	})
+
 	window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		if a.forceExit.Load() {
 			return
@@ -187,6 +210,8 @@ func Run(b *bridge.UIBridge, opts Options) error {
 
 	attachLogTap(b, a)
 	defer detachLogTap(b)
+	b.SetMessageTap(func(message agentapp.Message) { a.pushMessage(message) })
+	defer b.SetMessageTap(nil)
 	a.pushStatusLoop()
 	defer a.stopStatusLoop()
 
@@ -231,6 +256,10 @@ func buildWailsAssets(opts Options) (string, string, fstest.MapFS, error) {
 	if err != nil {
 		return "", "", nil, err
 	}
+	verificationHTML, err := assets.ReadFile("assets/verification.html")
+	if err != nil {
+		return "", "", nil, err
+	}
 	baseCSS, err := webui.ReadAsset("base.css")
 	if err != nil {
 		return "", "", nil, err
@@ -269,6 +298,7 @@ func buildWailsAssets(opts Options) (string, string, fstest.MapFS, error) {
 		"routing.js":      &fstest.MapFile{Data: routing, Mode: 0o444},
 		"connections.js":  &fstest.MapFile{Data: connectionsJS, Mode: 0o444},
 		"wails-bridge.js": &fstest.MapFile{Data: bridgeJS, Mode: 0o444},
+		"verification.html": &fstest.MapFile{Data: verificationHTML, Mode: 0o444},
 		"ui/base.css":     &fstest.MapFile{Data: baseCSS, Mode: 0o444},
 		"ui/theme.js":     &fstest.MapFile{Data: themeJS, Mode: 0o444},
 	}
@@ -360,6 +390,35 @@ func (a *appWindow) applyThemeMode(mode string) {
 
 func (a *appWindow) pushLog(line string) {
 	a.eval("window.onGoLog && window.onGoLog(" + jsonString(line) + ")")
+}
+
+func (a *appWindow) pushMessage(message agentapp.Message) {
+	data, err := json.Marshal(message)
+	if err != nil {
+		return
+	}
+	payload := string(data)
+	a.eval("window.onRelayMessage && window.onRelayMessage(" + payload + ")")
+	if strings.TrimSpace(message.VerificationCode) == "" || a.verification == nil {
+		return
+	}
+	popup := a.verification
+	popup.Center()
+	popup.Show()
+	popup.ExecJS("window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+	// A message may arrive during the hidden WebView's first paint. Retrying is
+	// harmless because the popup page deduplicates by message ID.
+	time.AfterFunc(250*time.Millisecond, func() {
+		if a.verification == popup {
+			popup.ExecJS("window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+		}
+	})
+}
+
+func (a *appWindow) hideVerificationPopup() {
+	if a != nil && a.verification != nil {
+		a.verification.Hide()
+	}
 }
 
 func (a *appWindow) applyTheme(dark bool) {

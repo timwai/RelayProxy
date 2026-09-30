@@ -1631,8 +1631,9 @@ func (a *Agent) closeRuntime() error {
 		a.readySession = nil
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
 		rdpSession, rdpP2P, proxyP2P := a.rdpSession, a.rdpP2P, a.proxyP2P
+		exitHandler := a.exitHandler
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
-		a.rdpSession, a.rdpP2P, a.proxyP2P = nil, nil, nil
+		a.rdpSession, a.rdpP2P, a.proxyP2P, a.exitHandler = nil, nil, nil, nil
 		a.rdpTargets = nil
 		a.cancel()
 		a.mu.Unlock()
@@ -1660,6 +1661,9 @@ func (a *Agent) closeRuntime() error {
 		}
 		if proxyP2P != nil {
 			errs = append(errs, proxyP2P.Close())
+		}
+		if exitHandler != nil {
+			errs = append(errs, exitHandler.Close())
 		}
 		if a.tunnelMgr != nil {
 			errs = append(errs, a.tunnelMgr.Close())

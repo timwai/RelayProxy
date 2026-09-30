@@ -224,9 +224,10 @@ func (c *Client) Stop() error {
 	c.mu.Unlock()
 
 	c.cancel()
-	err := c.manager.Close()
+	managerErr := c.manager.Close()
+	handlerErr := c.handler.Close()
 	c.wg.Wait()
-	return err
+	return errors.Join(managerErr, handlerErr)
 }
 
 // SetPowerConstrained switches Proxy P2P into its mobile battery-aware profile.

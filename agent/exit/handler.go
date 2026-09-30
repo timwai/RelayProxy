@@ -26,14 +26,17 @@ var udpPipeBufferPool = sync.Pool{
 }
 
 type HandlerConfig struct {
-	ACLChecker     *acl.Checker
-	ConnectTimeout time.Duration
-	Upstream       UpstreamConfig
+	ACLChecker        *acl.Checker
+	ConnectTimeout    time.Duration
+	Upstream          UpstreamConfig
+	ResumeGrace       time.Duration
+	ResumeMaxSessions int
 }
 
 type Handler struct {
 	cfg              HandlerConfig
 	resolver         *dnsCache
+	resume           *resumeRegistry
 	activeStreams    atomic.Int64
 	relayACLMu       sync.Mutex
 	relayACLCacheKey string
@@ -45,7 +48,18 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
 	cfg.Upstream = cfg.Upstream.normalized()
-	return &Handler{cfg: cfg, resolver: newDNSCache(defaultDNSCacheTTL, defaultDNSCacheEntries)}
+	return &Handler{
+		cfg:      cfg,
+		resolver: newDNSCache(defaultDNSCacheTTL, defaultDNSCacheEntries),
+		resume:   newResumeRegistry(cfg.ResumeGrace, cfg.ResumeMaxSessions),
+	}
+}
+
+func (h *Handler) Close() error {
+	if h != nil && h.resume != nil {
+		h.resume.closeAll()
+	}
+	return nil
 }
 
 func (h *Handler) ActiveStreams() int64 {

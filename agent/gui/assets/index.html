@@ -532,6 +532,10 @@
         <button onclick="switchSection('proxy')" id="section-btn-proxy" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>代理与路由</span>
         </button>
+        <button onclick="switchSection('messages')" id="section-btn-messages" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-key"/></svg><span>消息</span>
+          <span id="message-nav-dot" class="hidden ml-auto w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+        </button>
         <button onclick="switchSection('monitor')" id="section-btn-monitor" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-terminal"/></svg><span>监控</span>
         </button>
@@ -953,6 +957,30 @@
         </div>
       </section>
 
+      <!-- ============ 消息中心 ============ -->
+      <section id="tab-pane-messages" class="tab-pane tab-flex hidden h-full flex-col px-6 py-4">
+        <div class="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">消息中心</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">查看推送到本设备的通知与验证码。验证码可以一键复制。</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span id="message-count" class="rp-badge">0 条</span>
+            <button type="button" onclick="refreshMessages(true)" class="rp-btn">刷新</button>
+            <button type="button" onclick="clearMessages()" class="rp-btn">清空历史</button>
+          </div>
+        </div>
+        <div class="rp-toolbar mb-3">
+          <input id="message-search" type="search" placeholder="搜索标题、内容、来源或验证码" class="rp-input flex-1" oninput="renderMessages()">
+          <select id="message-kind" class="rp-select w-[150px]" onchange="renderMessages()">
+            <option value="">全部消息</option><option value="code">仅验证码</option><option value="normal">普通消息</option>
+          </select>
+        </div>
+        <div id="message-list" class="rp-scroll flex-1 min-h-0 overflow-y-auto space-y-2 pr-1">
+          <div class="rp-card p-5 text-center text-[12px] text-slate-500 dark:text-slate-400">正在读取消息…</div>
+        </div>
+      </section>
+
       <!-- ============ 运行日志 ============ -->
       <section id="tab-pane-logs" class="tab-pane tab-flex hidden h-full flex-col px-6 py-4">
         <div class="flex items-start justify-between gap-4 mb-3">
@@ -1290,7 +1318,7 @@
     window.toggleTheme = toggleTheme;
 
     /* ---------- navigation ---------- */
-    var sectionLabels = {home:'概览',network:'网络',proxy:'代理与路由',monitor:'监控',settings:'设置'};
+    var sectionLabels = {home:'概览',network:'网络',proxy:'代理与路由',messages:'消息',monitor:'监控',settings:'设置'};
     var sectionTabs = {
       home: [{ id:'home', label:'运行概览' }],
       network: [
@@ -1303,6 +1331,7 @@
         { id:'routing', label:'路由分流' },
         { id:'share', label:'出口共享' }
       ],
+      messages: [{ id:'messages', label:'消息中心' }],
       monitor: [
         { id:'logs', label:'运行日志' },
         { id:'connections', label:'实时连接' }
@@ -1311,7 +1340,7 @@
     };
     var tabSections = {
       home:'home', connection:'network', exit:'network', pair:'network',
-      proxy:'proxy', routing:'proxy', share:'proxy', logs:'monitor', connections:'monitor', settings:'settings'
+      proxy:'proxy', routing:'proxy', share:'proxy', messages:'messages', logs:'monitor', connections:'monitor', settings:'settings'
     };
     state.section = state.section || 'home';
     var navigationKey = 'relayproxy-agent-navigation';
@@ -1401,6 +1430,7 @@
         if (activeTab) activeTab.focus({ preventScroll: true });
       }
       rememberNavigation();
+      if (id === 'messages') refreshMessages(true);
       if (id === 'logs') refreshLogs();
       if (id === 'connections') refreshConnectionsInline(true);
     }
@@ -1865,6 +1895,69 @@
     // Called from the tray menu when login-startup settings change.
     window.syncAutostart = function (enabled) { $('cfg-autostart').checked = !!enabled; };
 
+    /* ---------- messages ---------- */
+    var localMessages = [];
+    function messageTime(value) {
+      var d = new Date(Number(value) || value || Date.now());
+      return Number.isFinite(d.getTime()) ? d.toLocaleString('zh-CN', {hour12:false}) : '未知时间';
+    }
+    function renderMessages() {
+      var host = $('message-list');
+      if (!host) return;
+      var needle = (($('message-search') && $('message-search').value) || '').trim().toLowerCase();
+      var kind = ($('message-kind') && $('message-kind').value) || '';
+      var items = localMessages.slice().reverse().filter(function (message) {
+        var hasCode = !!String(message.verificationCode || '').trim();
+        if (kind === 'code' && !hasCode) return false;
+        if (kind === 'normal' && hasCode) return false;
+        if (!needle) return true;
+        return [message.title,message.content,message.source,message.verificationCode].join(' ').toLowerCase().indexOf(needle) >= 0;
+      });
+      if ($('message-count')) $('message-count').textContent = localMessages.length + ' 条';
+      if (!items.length) {
+        host.innerHTML = '<div class="rp-card p-7 text-center"><div class="text-[13px] font-medium text-slate-700 dark:text-slate-200">暂无匹配消息</div><div class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Server 推送到本设备的消息会保存在这里。</div></div>';
+        return;
+      }
+      host.innerHTML = items.map(function (message) {
+        var code = String(message.verificationCode || '').trim();
+        var codeBlock = code ? '<div class="flex items-center gap-2 shrink-0"><span class="mono text-[19px] tracking-[.16em] font-semibold text-emerald-700 dark:text-emerald-300">'+htmlEscape(code)+'</span><button type="button" class="rp-btn px-2.5 py-1.5" data-copy-code="'+htmlEscape(code)+'">复制</button></div>' : '';
+        return '<article class="rp-card px-4 py-3.5"><div class="flex gap-4 items-start justify-between"><div class="min-w-0 flex-1"><div class="flex items-center gap-2 flex-wrap"><strong class="text-[13px] text-slate-900 dark:text-slate-100">'+htmlEscape(message.title || 'RelayProxy 消息')+'</strong>'+(code?'<span class="rp-badge rp-badge-success">验证码</span>':'<span class="rp-badge">通知</span>')+'</div><div class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">'+htmlEscape(message.source || 'webhook')+' · '+htmlEscape(messageTime(message.createdAt))+'</div><p class="text-[12px] leading-6 text-slate-600 dark:text-slate-300 mt-2 whitespace-pre-wrap break-words select-text">'+htmlEscape(message.content || '')+'</p></div>'+codeBlock+'</div></article>';
+      }).join('');
+      host.querySelectorAll('[data-copy-code]').forEach(function (button) {
+        button.addEventListener('click', function () { copyText(button.dataset.copyCode, '验证码'); });
+      });
+    }
+    async function refreshMessages(showError) {
+      if (!hasFn('goGetMessages')) return;
+      try {
+        var raw = await call('goGetMessages');
+        localMessages = JSON.parse(raw || '[]') || [];
+        if (!Array.isArray(localMessages)) localMessages = [];
+        renderMessages();
+      } catch (err) {
+        if (showError) toast('读取消息失败：' + err.message);
+      }
+    }
+    async function clearMessages() {
+      if (!hasFn('goClearMessages')) return;
+      if (localMessages.length && !confirm('清空本设备的消息历史？')) return;
+      await call('goClearMessages');
+      localMessages = [];
+      renderMessages();
+      toast('本地消息历史已清空');
+    }
+    window.refreshMessages = refreshMessages;
+    window.renderMessages = renderMessages;
+    window.clearMessages = clearMessages;
+    window.onRelayMessage = function (message) {
+      if (!message || !message.id) return;
+      var index = localMessages.findIndex(function (item) { return item.id === message.id; });
+      if (index >= 0) localMessages[index] = message; else localMessages.push(message);
+      if (localMessages.length > 500) localMessages = localMessages.slice(-500);
+      if ($('message-nav-dot')) $('message-nav-dot').classList.remove('hidden');
+      renderMessages();
+    };
+
     /* ---------- logs ---------- */
     function logTone(line) {
       if (/error|failed|失败|rejected|invalid|fatal|refused|超时|timeout/i.test(line)) { return 'text-rose-400'; }
@@ -2109,6 +2202,7 @@
       loadConfig();
       refreshStatus();
       refreshLogs();
+      refreshMessages(false);
       refreshNetworkServiceStatus();
 
       // The browser management page shares this HTML with the native Windows
@@ -2121,6 +2215,7 @@
       setInterval(refreshNetworkServiceStatus, 5000);
       setInterval(function () {
         // Poll only monitoring panes that are visible.
+        if (!$('tab-pane-messages').classList.contains('hidden')) { refreshMessages(false); }
         if (!$('tab-pane-logs').classList.contains('hidden')) { refreshLogs(); }
         if (!$('tab-pane-connections').classList.contains('hidden')) { refreshConnectionsInline(false); }
       }, 2000);

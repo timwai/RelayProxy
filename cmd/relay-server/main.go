@@ -246,6 +246,7 @@ func main() {
 	}
 	apiRouter := api.NewRouter(authService, deviceService, sessionMgr, db,
 		api.WithServerSettings(settings, tlsConfig),
+		api.WithWebhookToken(os.Getenv("RELAY_WEBHOOK_TOKEN")),
 		api.WithDeviceAuthorizationChanged(func(deviceID string) { coordinator.CloseDevice(deviceID); ingress.Reload() }),
 		api.WithDeviceRevoked(func(deviceID string) { coordinator.CloseDevice(deviceID); ingress.CloseDevice(deviceID) }),
 		api.WithRDPIngressEnabled(ingress.Enabled),

@@ -168,6 +168,7 @@ flowchart LR
 - 管理密码修改。
 - 在线修改服务配置。
 - 删除、撤销设备。
+- Webhook 消息推送、验证码提取与消息投递历史。
 
 ### Relay Agent
 
@@ -188,6 +189,7 @@ flowchart LR
 - Windows Wails 原生 GUI。
 - 本地 Web 管理页面。
 - 系统托盘和开机自启。
+- 消息历史、验证码中央弹窗与一键复制。
 
 ---
 
@@ -799,6 +801,73 @@ Server Admin Web 用于：
 - 修改服务配置。
 - 修改管理员密码。
 - 查看流量统计。
+
+## 11.1 Webhook 消息与验证码
+
+Server 提供消息 Webhook，可把一条通知定向推送到一个或多个已批准设备。Server 会自动识别常见中文 / 英文验证码语义，并把验证码作为结构化字段下发；普通通知同样可以推送。
+
+Webhook 默认关闭。启动 Server 前设置独立 Token：
+
+### Linux / macOS
+
+```bash
+export RELAY_WEBHOOK_TOKEN='replace-with-a-long-random-token'
+./relay-server -config ./relay-server.yaml
+```
+
+### Windows PowerShell
+
+```powershell
+$env:RELAY_WEBHOOK_TOKEN = "replace-with-a-long-random-token"
+.\relay-server.exe -config .\relay-server.yaml
+```
+
+接口：
+
+```text
+POST /api/v1/webhook/messages
+Authorization: Bearer <RELAY_WEBHOOK_TOKEN>
+Content-Type: application/json
+```
+
+推送到单个设备：
+
+```json
+{
+  "deviceId": "DEVICE_ID",
+  "title": "登录验证码",
+  "message": "您的登录验证码为 482931，5 分钟内有效",
+  "source": "sms-gateway"
+}
+```
+
+推送到多个设备：
+
+```json
+{
+  "deviceIds": ["DEVICE_A", "DEVICE_B"],
+  "title": "登录验证码",
+  "message": "您的登录验证码为 482931，5 分钟内有效",
+  "source": "sms-gateway"
+}
+```
+
+也可以使用 `content` 代替 `message`。单次最多指定 64 个设备；重复设备 ID 会自动去重。
+
+Server 会先持久化消息，再并行投递到在线设备，并记录每个目标的状态：
+
+- `delivered`：Agent 已确认接收。
+- `offline`：目标设备当前离线。
+- `failed`：在线但投递失败。
+- `pending`：等待投递状态更新。
+
+Server Web 的 **消息** 页面可以查看全局消息历史、验证码和每个设备的投递结果。Agent GUI 的 **消息** 页面保存本设备最近收到的消息，并支持搜索、筛选和复制验证码。
+
+Windows GUI 收到验证码时会显示独立的屏幕中央悬浮卡片；主窗口即使缩到托盘也可以显示。连续收到多个验证码时会进入弹窗队列，用户可逐个复制或稍后处理。
+
+> Webhook Token 与 Admin Web 登录会话相互独立。不要把 `RELAY_WEBHOOK_TOKEN` 写入前端代码、公开脚本或日志。
+
+---
 
 设备支持两个不同操作：
 

@@ -10,6 +10,7 @@ import (
 	"relayproxy/internal/p2p/punch"
 	"relayproxy/internal/p2p/secure"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 )
 
 func TestPunchedSocketCarriesPinnedQUIC(t *testing.T) {
@@ -80,6 +81,9 @@ func TestPunchedSocketCarriesPinnedQUIC(t *testing.T) {
 	case exitSession = <-serverCh:
 	}
 	defer exitSession.Close()
+	if !tunnel.PeerSupportsDatagrams(clientSession.QUICSession) || !tunnel.PeerSupportsDatagrams(exitSession.QUICSession) {
+		t.Fatal("direct QUIC session did not advertise native UDP datagram support")
+	}
 
 	stream, err := clientSession.OpenStream(ctx)
 	if err != nil {

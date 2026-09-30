@@ -48,6 +48,8 @@ type Manager struct {
 
 	mu       sync.Mutex
 	sessions map[uint64]*Session
+	starting map[string]struct{}
+	ready    chan *Session
 	closed   atomic.Bool
 }
 
@@ -99,6 +101,7 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 	return &Manager{
 		ctx: ctx, cancel: cancel, send: send, local: local, lease: lease,
 		punchTimeout: 1200 * time.Millisecond, sessions: make(map[uint64]*Session),
+		starting: make(map[string]struct{}), ready: make(chan *Session, 1024),
 	}
 }
 
@@ -130,6 +133,50 @@ func (m *Manager) Close() error {
 		item.closeLocal()
 	}
 	return nil
+}
+
+// ReadySessions emits sessions after UDP punching, fingerprint verification and
+// the direct QUIC handshake have all succeeded.
+func (m *Manager) ReadySessions() <-chan *Session {
+	if m == nil {
+		return nil
+	}
+	return m.ready
+}
+
+// EnsureClient starts at most one in-flight direct-path attempt for an Exit.
+// Callers should not wait for it: the current connection can use Relay while
+// the P2P path is prepared for subsequent flows.
+func (m *Manager) EnsureClient(exitDeviceID string) {
+	if m == nil || exitDeviceID == "" || m.closed.Load() {
+		return
+	}
+	m.mu.Lock()
+	if _, exists := m.starting[exitDeviceID]; exists {
+		m.mu.Unlock()
+		return
+	}
+	for _, item := range m.sessions {
+		if item.ExitDeviceID != exitDeviceID {
+			continue
+		}
+		switch item.State() {
+		case StateDiscovering, StateRendezvous, StatePunching, StateQUICHandshake, StateReady:
+			m.mu.Unlock()
+			return
+		}
+	}
+	m.starting[exitDeviceID] = struct{}{}
+	m.mu.Unlock()
+
+	go func() {
+		ctx, cancel := context.WithTimeout(m.ctx, 12*time.Second)
+		defer cancel()
+		_, _ = m.StartClient(ctx, exitDeviceID)
+		m.mu.Lock()
+		delete(m.starting, exitDeviceID)
+		m.mu.Unlock()
+	}()
 }
 
 func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Session, error) {
@@ -250,7 +297,16 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 		return
 	}
 	item.setPeer(message.Candidates, message.PeerFingerprint)
-	item.setRelayPolicy(message.RelayPolicy)
+	policy := message.RelayPolicy
+	if m.endpointFactory != nil {
+		var policyErr error
+		policy, policyErr = validateRelayPolicy(policy)
+		if policyErr != nil {
+			m.remove(message.SessionID)
+			return
+		}
+	}
+	item.setRelayPolicy(policy)
 	item.setState(StateRendezvous, "")
 
 	ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
@@ -428,10 +484,10 @@ func (s *Session) Tunnel() (tunnel.TunnelSession, bool) {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.state != StateReady || s.direct == nil {
+	if s.state != StateReady || s.direct == nil || s.direct.QUICSession == nil {
 		return nil, false
 	}
-	return s.direct, true
+	return s.direct.QUICSession, true
 }
 
 func (s *Session) setPeer(candidates []protocol.P2PCandidate, fingerprint string) {
@@ -561,6 +617,25 @@ func (s *Session) establish(clientRole bool) {
 	s.lastError = ""
 	s.mu.Unlock()
 	s.reportPath(protocol.P2PPathDirectQUIC, "")
+	select {
+	case s.manager.ready <- s:
+	default:
+		s.mu.Lock()
+		if s.direct == direct && s.state != StateClosed {
+			s.direct = nil
+			s.state = StateDegraded
+			s.lastError = "P2P ready queue is full"
+		}
+		endpoint := s.endpoint
+		s.endpoint = nil
+		s.mu.Unlock()
+		_ = direct.Close()
+		if endpoint != nil {
+			_ = endpoint.Close()
+		}
+		s.reportPath("", "ready_queue_full")
+		return
+	}
 	go s.watchDirect(direct)
 }
 
@@ -687,4 +762,24 @@ func (s *Session) closeLocal() {
 			_ = endpoint.Close()
 		}
 	})
+}
+
+
+func validateRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {
+	if policy == nil || policy.Fingerprint == "" {
+		return nil, errors.New("P2P connect offer is missing the server Relay ACL")
+	}
+	checker, err := acl.NewChecker(*policy)
+	if err != nil {
+		return nil, fmt.Errorf("invalid P2P Relay ACL: %w", err)
+	}
+	normalized := checker.Policy()
+	if normalized.Fingerprint != policy.Fingerprint {
+		return nil, errors.New("P2P Relay ACL fingerprint mismatch")
+	}
+	copy := normalized
+	copy.Rules = append([]acl.Rule(nil), normalized.Rules...)
+	copy.AccessHosts = append([]string(nil), normalized.AccessHosts...)
+	copy.AccessCIDRs = append([]string(nil), normalized.AccessCIDRs...)
+	return &copy, nil
 }

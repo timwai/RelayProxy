@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -26,6 +27,10 @@ type TunnelDialer struct {
 	getClientID   func() string
 	defaultExitID atomic.Pointer[string]
 	requestSeq    atomic.Uint64
+
+	directMu     sync.RWMutex
+	getDirect    func(exitDeviceID string) (tunnel.TunnelSession, bool)
+	ensureDirect func(exitDeviceID string)
 }
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
@@ -33,6 +38,62 @@ func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() s
 		getTunnel:   getTunnel,
 		getClientID: getClientID,
 	}
+}
+
+// ConfigureDirectPath installs optional Client -> Exit P2P lookup hooks. When
+// no READY direct path exists, normal Relay traffic proceeds immediately while
+// ensureDirect prepares a path for later flows.
+func (d *TunnelDialer) ConfigureDirectPath(
+	get func(exitDeviceID string) (tunnel.TunnelSession, bool),
+	ensure func(exitDeviceID string),
+) {
+	d.directMu.Lock()
+	d.getDirect = get
+	d.ensureDirect = ensure
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+	if exitDeviceID != "" {
+		d.directMu.RLock()
+		getDirect, ensureDirect := d.getDirect, d.ensureDirect
+		d.directMu.RUnlock()
+		if getDirect != nil {
+			if session, ok := getDirect(exitDeviceID); ok && session != nil {
+				return session, true
+			}
+		}
+		if ensureDirect != nil {
+			ensureDirect(exitDeviceID)
+		}
+	}
+	if d.getTunnel == nil {
+		return nil, false
+	}
+	return d.getTunnel(), false
+}
+
+func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string) (tunnel.TunnelSession, tunnel.TunnelStream, bool, error) {
+	session, direct := d.sessionForExit(exitDeviceID)
+	if session == nil {
+		return nil, nil, false, fmt.Errorf("tunnel is not connected")
+	}
+	stream, err := session.OpenStream(ctx)
+	if err == nil {
+		return session, stream, direct, nil
+	}
+	if !direct || d.getTunnel == nil {
+		return nil, nil, direct, err
+	}
+	relay := d.getTunnel()
+	if relay == nil || relay == session {
+		return nil, nil, direct, err
+	}
+	stream, relayErr := relay.OpenStream(ctx)
+	if relayErr != nil {
+		return nil, nil, false, fmt.Errorf("direct stream failed: %v; relay fallback failed: %w", err, relayErr)
+	}
+	return relay, stream, false, nil
 }
 
 func (d *TunnelDialer) SetDefaultExitID(exitID string) {
@@ -56,18 +117,17 @@ func (d *TunnelDialer) nextRequestIDWithPrefix(prefix string) string {
 }
 
 func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host string, port uint16) (net.Conn, error) {
-	sess := d.getTunnel()
-	if sess == nil {
-		return nil, fmt.Errorf("tunnel is not connected")
-	}
-
 	if exitNodeID == "" {
 		exitNodeID = d.GetDefaultExitID()
 	}
 	// Empty exitNodeID is allowed: relay auto-selects when exactly one authorized exit is online (P3-1).
+	// P2P requires an explicit Exit ID, so auto-selected Relay traffic remains
+	// on the Relay path until the selected Exit becomes explicit.
 
-	// 1. Open stream on tunnel session
-	stream, err := sess.OpenStream(ctx)
+	// 1. Prefer an already READY direct path. Establishment is never on the
+	// critical path: when unavailable, sessionForExit triggers it asynchronously
+	// and this connection opens through Relay immediately.
+	sess, stream, _, err := d.openProxyStream(ctx, exitNodeID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
 	}
@@ -154,19 +214,33 @@ func (d *TunnelDialer) DialUDP(ctx context.Context, exitNodeID string, host stri
 }
 
 func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string, host string, port uint16, opts UDPDialOptions) (net.PacketConn, error) {
-	sess := d.getTunnel()
-	if sess == nil {
-		return nil, fmt.Errorf("tunnel is not connected")
-	}
-	if opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(sess) {
-		return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required but the client tunnel does not support them")
-	}
-
 	if exitNodeID == "" {
 		exitNodeID = d.GetDefaultExitID()
 	}
 
+	sess, direct := d.sessionForExit(exitNodeID)
+	if sess == nil {
+		return nil, fmt.Errorf("tunnel is not connected")
+	}
+	if opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(sess) {
+		if direct && d.getTunnel != nil {
+			relay := d.getTunnel()
+			if relay != nil && tunnel.PeerSupportsDatagrams(relay) {
+				sess, direct = relay, false
+			}
+		}
+		if !tunnel.PeerSupportsDatagrams(sess) {
+			return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required but the selected tunnel does not support them")
+		}
+	}
 	stream, err := sess.OpenStream(ctx)
+	if err != nil && direct && d.getTunnel != nil {
+		relay := d.getTunnel()
+		if relay != nil && relay != sess && (!opts.DatagramRequired || tunnel.PeerSupportsDatagrams(relay)) {
+			sess = relay
+			stream, err = relay.OpenStream(ctx)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
 	}

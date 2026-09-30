@@ -126,3 +126,45 @@ func TestDatagramRequiredRejectsUnsupportedClientTunnel(t *testing.T) {
 		t.Fatalf("unsupported client tunnel: conn=%v err=%v", pc, err)
 	}
 }
+
+
+type namedSession struct {
+	tunnel.TunnelSession
+	name string
+}
+
+func TestTunnelDialerPrefersReadyDirectPathAndWarmsMissingPath(t *testing.T) {
+	relay := &namedSession{name: "relay"}
+	direct := &namedSession{name: "direct"}
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	ensureCalls := 0
+	dialer.ConfigureDirectPath(func(exitID string) (tunnel.TunnelSession, bool) {
+		if exitID == "exit-ready" {
+			return direct, true
+		}
+		return nil, false
+	}, func(exitID string) {
+		if exitID != "" {
+			ensureCalls++
+		}
+	})
+
+	session, isDirect := dialer.sessionForExit("exit-ready")
+	if session != direct || !isDirect {
+		t.Fatalf("ready direct path not selected: session=%v direct=%v", session, isDirect)
+	}
+	session, isDirect = dialer.sessionForExit("exit-cold")
+	if session != relay || isDirect {
+		t.Fatalf("cold path did not fall back to Relay: session=%v direct=%v", session, isDirect)
+	}
+	if ensureCalls != 1 {
+		t.Fatalf("ensure calls=%d, want 1", ensureCalls)
+	}
+	session, isDirect = dialer.sessionForExit("")
+	if session != relay || isDirect {
+		t.Fatalf("auto-selected Exit should stay on Relay: session=%v direct=%v", session, isDirect)
+	}
+	if ensureCalls != 1 {
+		t.Fatalf("empty Exit unexpectedly started P2P: ensure calls=%d", ensureCalls)
+	}
+}

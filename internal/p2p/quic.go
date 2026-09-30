@@ -12,6 +12,7 @@ import (
 
 	"github.com/quic-go/quic-go"
 	"relayproxy/internal/p2p/secure"
+	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
 
@@ -48,7 +49,9 @@ func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, ident
 		_ = transport.Close()
 		return nil, fmt.Errorf("P2P QUIC dial failed: %w", err)
 	}
-	return &QUICSession{QUICSession: tunnel.NewQUICSession(qconn), transport: transport}, nil
+	session := tunnel.NewQUICSession(qconn)
+	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
+	return &QUICSession{QUICSession: session, transport: transport}, nil
 }
 
 func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIdentity, expectedPeerFingerprint string) (*QUICSession, error) {
@@ -74,7 +77,9 @@ func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIden
 	// One Endpoint belongs to one Client/Exit P2P session. Stop accepting
 	// additional connections while preserving the accepted connection.
 	_ = listener.Close()
-	return &QUICSession{QUICSession: tunnel.NewQUICSession(qconn), transport: transport}, nil
+	session := tunnel.NewQUICSession(qconn)
+	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
+	return &QUICSession{QUICSession: session, transport: transport}, nil
 }
 
 func (s *QUICSession) Close() error {

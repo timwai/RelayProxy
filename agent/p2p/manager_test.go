@@ -3,9 +3,11 @@ package p2p
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 )
 
@@ -117,5 +119,54 @@ func TestReadyForExitIgnoresSignalingOnlySession(t *testing.T) {
 	item.setState(StateRendezvous, "")
 	if _, ok := manager.ReadyForExit("exit"); ok {
 		t.Fatal("signaling-only session was exposed as a ready direct tunnel")
+	}
+}
+
+
+func TestEnsureClientDeduplicatesInFlightAttempt(t *testing.T) {
+	var calls atomic.Int32
+	manager := NewManager(context.Background(), func(context.Context, protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		calls.Add(1)
+		return protocol.P2PControlMessage{
+			Type: protocol.P2PControlLeaseAck, SessionID: 91, ClientDeviceID: "client", ExitDeviceID: "exit",
+			SessionToken: []byte("0123456789abcdef0123456789abcdef"), LeaseExpiresAt: time.Now().Add(time.Minute).UnixMilli(),
+		}, nil
+	}, testDescription("192.0.2.10:51000", "sha256:client"), time.Minute)
+	defer manager.Close()
+
+	manager.EnsureClient("exit")
+	manager.EnsureClient("exit")
+	deadline := time.Now().Add(time.Second)
+	for calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("connect attempts=%d, want 1", got)
+	}
+}
+
+func TestValidateRelayPolicyRequiresServerFingerprint(t *testing.T) {
+	if _, err := validateRelayPolicy(&acl.Policy{AllowInternet: true}); err == nil {
+		t.Fatal("Relay policy without fingerprint was accepted")
+	}
+	checker, err := acl.NewChecker(acl.Policy{
+		ID: "relay_acl", AllowInternet: true,
+		AccessMode: acl.AccessModeDeny, AccessHosts: []string{"blocked.example"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := checker.Policy()
+	validated, err := validateRelayPolicy(&policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.Fingerprint != policy.Fingerprint || len(validated.AccessHosts) != 1 || validated.AccessHosts[0] != "blocked.example" {
+		t.Fatalf("unexpected validated policy: %#v", validated)
+	}
+	tampered := policy
+	tampered.AccessHosts = []string{"other.example"}
+	if _, err := validateRelayPolicy(&tampered); err == nil {
+		t.Fatal("tampered Relay policy was accepted")
 	}
 }

@@ -20,6 +20,7 @@ import (
 	"relayproxy/agent/client"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
+	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/agent/rdp"
 	rdpp2p "relayproxy/agent/rdp/p2p"
 	"relayproxy/agent/routing"
@@ -236,6 +237,7 @@ type Agent struct {
 	rdpConnection *rdp.Connection
 	rdpP2P        *rdpp2p.Manager
 	rdpSession    *rdpp2p.Session
+	proxyP2P      *proxyp2p.Manager
 	closed        atomic.Bool
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -351,6 +353,27 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		defer a.mu.RUnlock()
 		return a.cfg.DeviceID
 	})
+	a.rawDialer.ConfigureDirectPath(
+		func(exitDeviceID string) (tunnel.TunnelSession, bool) {
+			a.mu.RLock()
+			manager := a.proxyP2P
+			closed := a.closed.Load()
+			a.mu.RUnlock()
+			if closed || manager == nil {
+				return nil, false
+			}
+			return manager.ReadyForExit(exitDeviceID)
+		},
+		func(exitDeviceID string) {
+			a.mu.RLock()
+			manager := a.proxyP2P
+			ready := a.handshakeOK.Load()
+			a.mu.RUnlock()
+			if ready && manager != nil {
+				manager.EnsureClient(exitDeviceID)
+			}
+		},
+	)
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
@@ -415,9 +438,11 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	oldControl := a.ctrlStream
 	oldRDP := a.rdpConnection
 	oldP2P := a.rdpP2P
+	oldProxyP2P := a.proxyP2P
 	a.ctrlStream = nil
 	a.rdpConnection = nil
 	a.rdpP2P = nil
+	a.proxyP2P = nil
 	a.rdpSession = nil
 	a.rdpTargets = nil
 	if newState != tunnel.StateConnected || sess == nil {
@@ -430,6 +455,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 		}
 		if oldP2P != nil {
 			_ = oldP2P.Close()
+		}
+		if oldProxyP2P != nil {
+			_ = oldProxyP2P.Close()
 		}
 		return
 	}
@@ -444,6 +472,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	}
 	if oldP2P != nil {
 		_ = oldP2P.Close()
+	}
+	if oldProxyP2P != nil {
+		_ = oldProxyP2P.Close()
 	}
 	go func() {
 		defer a.wg.Done()
@@ -486,7 +517,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}); err != nil {
 		return fmt.Errorf("write control header: %w", err)
 	}
-	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream}
+	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilityProxyP2P}
 	if tunnel.SupportsDatagrams(sess) {
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
 	}
@@ -605,6 +636,30 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		}
 	}
 
+	var proxyP2PManager *proxyp2p.Manager
+	if slices.Contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) &&
+		(slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyClient) ||
+			slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)) {
+		lease := time.Duration(accepted.P2PLeaseSec) * time.Second
+		if lease <= 0 {
+			lease = 60 * time.Second
+		}
+		proxyP2PManager = proxyp2p.NewQUICManager(ctx, func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+			return a.sendP2PControlRequest(controlCtx, sess, message)
+		}, accepted.P2PRendezvousAddress, lease, 1200*time.Millisecond)
+		keepManager := false
+		a.mu.Lock()
+		if a.epoch == epoch && a.readySession == sess {
+			a.proxyP2P = proxyP2PManager
+			keepManager = true
+		}
+		a.mu.Unlock()
+		if !keepManager {
+			_ = proxyP2PManager.Close()
+			proxyP2PManager = nil
+		}
+	}
+
 	var workers sync.WaitGroup
 	workers.Add(1)
 	go func() {
@@ -623,16 +678,27 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 				return handler
 			}
 			return nil
-		}(), allowRDP, cfg.RDPAddress, accepted.MaxConnections, p2pManager, &workers)
+		}(), allowRDP, cfg.RDPAddress, accepted.MaxConnections, p2pManager, proxyP2PManager, &workers)
 	}()
+	if proxyP2PManager != nil && allowExit {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			a.serveProxyP2PExit(ctx, proxyP2PManager, handler, accepted.MaxConnections)
+		}()
+	}
 	select {
 	case <-ctx.Done():
 	case <-sess.Done():
 	}
 	cancel()
 	_ = sess.Close()
+	if proxyP2PManager != nil {
+		_ = proxyP2PManager.Close()
+	}
 	workers.Wait()
 	a.clearRDPState(sess, epoch)
+	a.clearProxyP2PState(sess, epoch, proxyP2PManager)
 	return nil
 }
 
@@ -703,7 +769,39 @@ func (a *Agent) sendRDPControlRequest(ctx context.Context, sess tunnel.TunnelSes
 	return response, nil
 }
 
-func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, workers *sync.WaitGroup) {
+// sendP2PControlRequest keeps proxy P2P signaling on the authenticated Relay
+// session. Direct QUIC never carries authorization or rendezvous control.
+func (a *Agent) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSession, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+	if sess == nil {
+		return protocol.P2PControlMessage{}, errors.New("relay session is unavailable")
+	}
+	stream, err := sess.OpenStream(ctx)
+	if err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	defer stream.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = stream.SetDeadline(deadline)
+	} else {
+		_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
+	}
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeP2PControl,
+		RequestID: fmt.Sprintf("p2p_ctl_%d", time.Now().UnixNano()), ExitDeviceID: message.ExitDeviceID,
+	}); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	if err := protocol.WriteJSON(stream, message); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	var response protocol.P2PControlMessage
+	if err := protocol.ReadJSON(stream, &response); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	return response, nil
+}
+
+func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, proxyP2PManager *proxyp2p.Manager, workers *sync.WaitGroup) {
 	if maxStreams <= 0 {
 		maxStreams = 1024
 	}
@@ -774,6 +872,19 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			}()
 			continue
 		}
+		if header.Type == protocol.FrameTypeP2PControl && proxyP2PManager != nil {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				defer stream.Close()
+				var message protocol.P2PControlMessage
+				if err := protocol.ReadJSON(stream, &message); err == nil {
+					proxyP2PManager.HandleControl(message)
+				}
+			}()
+			continue
+		}
 		if handler == nil {
 			admitted.Add(-1)
 			_ = stream.Close()
@@ -784,6 +895,77 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			defer workers.Done()
 			defer admitted.Add(-1)
 			handler.HandleStreamWithHeader(ctx, stream, header)
+		}()
+	}
+}
+
+func (a *Agent) serveProxyP2PExit(ctx context.Context, manager *proxyp2p.Manager, handler *exit.Handler, maxStreams int) {
+	if manager == nil || handler == nil {
+		return
+	}
+	var sessions sync.WaitGroup
+	defer sessions.Wait()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case p2pSession := <-manager.ReadySessions():
+			if p2pSession == nil {
+				continue
+			}
+			policy := p2pSession.RelayPolicy()
+			if policy == nil {
+				// Client-side READY sessions also arrive on this channel when the
+				// Agent has BOTH grants. Only Exit-side offers carry server ACL.
+				continue
+			}
+			direct, ok := p2pSession.Tunnel()
+			if !ok || direct == nil {
+				continue
+			}
+			sessions.Add(1)
+			go func() {
+				defer sessions.Done()
+				a.acceptProxyP2PExitSession(ctx, direct, handler, policy, maxStreams)
+			}()
+		}
+	}
+}
+
+func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, relayPolicy *acl.Policy, maxStreams int) {
+	if sess == nil || handler == nil || relayPolicy == nil {
+		return
+	}
+	if maxStreams <= 0 {
+		maxStreams = 1024
+	}
+	sem := make(chan struct{}, maxStreams)
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	boundCtx := exit.BindRelayPolicy(ctx, relayPolicy)
+	for {
+		stream, err := sess.AcceptStream(ctx)
+		if err != nil {
+			return
+		}
+		select {
+		case sem <- struct{}{}:
+		default:
+			_ = stream.Close()
+			continue
+		}
+		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
+		header, err := protocol.ReadStreamHeader(stream)
+		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP) {
+			<-sem
+			_ = stream.Close()
+			continue
+		}
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			defer func() { <-sem }()
+			handler.HandleStreamWithHeader(boundCtx, stream, header)
 		}()
 	}
 }
@@ -1263,6 +1445,18 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	}
 }
 
+func (a *Agent) clearProxyP2PState(sess tunnel.TunnelSession, epoch uint64, manager *proxyp2p.Manager) {
+	if manager == nil {
+		return
+	}
+	a.mu.Lock()
+	if a.epoch == epoch && a.readySession == sess && a.proxyP2P == manager {
+		a.proxyP2P = nil
+	}
+	a.mu.Unlock()
+	_ = manager.Close()
+}
+
 func (a *Agent) setApprovalState(state string) {
 	copy := state
 	a.approvalState.Store(&copy)
@@ -1310,9 +1504,9 @@ func (a *Agent) closeRuntime() error {
 		a.handshakeOK.Store(false)
 		a.readySession = nil
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
-		rdpSession, rdpP2P := a.rdpSession, a.rdpP2P
+		rdpSession, rdpP2P, proxyP2P := a.rdpSession, a.rdpP2P, a.proxyP2P
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
-		a.rdpSession, a.rdpP2P = nil, nil
+		a.rdpSession, a.rdpP2P, a.proxyP2P = nil, nil, nil
 		a.rdpTargets = nil
 		a.cancel()
 		a.mu.Unlock()
@@ -1337,6 +1531,9 @@ func (a *Agent) closeRuntime() error {
 		}
 		if rdpP2P != nil {
 			errs = append(errs, rdpP2P.Close())
+		}
+		if proxyP2P != nil {
+			errs = append(errs, proxyP2P.Close())
 		}
 		if a.tunnelMgr != nil {
 			errs = append(errs, a.tunnelMgr.Close())

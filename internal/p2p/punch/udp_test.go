@@ -2,11 +2,13 @@ package punch
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"testing"
 	"time"
 
 	"relayproxy/internal/p2p/secure"
+	"relayproxy/internal/protocol"
 )
 
 func TestPacketConnSendsAuthenticatedKeepalive(t *testing.T) {
@@ -116,5 +118,51 @@ func TestPacketConnRoundTripsLargeDatagram(t *testing.T) {
 	}
 	if n != len(payload) || !bytes.Equal(got[:n], payload) {
 		t.Fatalf("large datagram mismatch: n=%d want=%d", n, len(payload))
+	}
+}
+
+
+func TestPunchIsSymmetric(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	left, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer left.Close()
+	right, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer right.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	type result struct {
+		value *UDPResult
+		err   error
+	}
+	leftCh := make(chan result, 1)
+	rightCh := make(chan result, 1)
+	go func() {
+		value, punchErr := Punch(ctx, left, []protocol.P2PCandidate{{
+			Protocol: "udp", Type: "lan", Address: right.LocalAddr().String(),
+		}}, 99, key, time.Second)
+		leftCh <- result{value: value, err: punchErr}
+	}()
+	go func() {
+		value, punchErr := Punch(ctx, right, []protocol.P2PCandidate{{
+			Protocol: "udp", Type: "lan", Address: left.LocalAddr().String(),
+		}}, 99, key, time.Second)
+		rightCh <- result{value: value, err: punchErr}
+	}()
+
+	for name, ch := range map[string]<-chan result{"left": leftCh, "right": rightCh} {
+		item := <-ch
+		if item.err != nil {
+			t.Fatalf("%s symmetric punch failed: %v", name, item.err)
+		}
+		if item.value == nil || item.value.RemoteAddr == nil || item.value.SessionID != 99 {
+			t.Fatalf("%s returned incomplete punch result: %#v", name, item.value)
+		}
 	}
 }

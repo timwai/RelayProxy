@@ -235,3 +235,115 @@ html.dark .brand-mark,html[data-theme="dark"] .brand-mark{background:var(--rp-te
 .message-delivery strong{font-size:9px}.message-delivery small{font-size:8px;color:var(--rp-subtle)}
 .message-delivery>small{grid-column:1/-1;white-space:normal;overflow-wrap:anywhere;color:var(--rp-danger)}
 @media(max-width:600px){.message-table{min-width:760px}.message-table th:nth-child(2){width:32%}.message-table th:nth-child(4){width:35%}}
+
+
+/* server-typography-v2 */
+/*
+ * Desktop readability pass.
+ * The server console is information-dense, but its previous 8-12px type scale
+ * was too small on 1080p/2K desktop displays. Keep mobile density unchanged
+ * while giving desktop navigation, cards, tables and forms a 13-16px baseline.
+ */
+@media(min-width:851px){
+  :root{
+    --rp-sidebar-width:228px;
+    --rp-control-height:40px;
+    font-size:16px;
+  }
+  body{font-size:15px;line-height:1.6}
+
+  h1{font-size:30px;line-height:1.25;letter-spacing:-.7px}
+  h2{font-size:18px}
+  h3{font-size:16px}
+  label{font-size:14px}
+  small{font-size:12.5px}
+  .muted{font-size:14px}
+  .eyebrow{font-size:11px;letter-spacing:1.7px;margin-bottom:9px}
+  .text-link{font-size:13px}
+  .small-button{font-size:13px;padding:7px 11px}
+
+  .sidebar{padding:28px 17px 17px}
+  .brand{font-size:20px;gap:12px;padding:0 10px 34px}
+  .brand small{font-size:11px;letter-spacing:1.2px}
+  .nav-label{font-size:11px;letter-spacing:1.5px;padding:0 15px;margin:13px 0 8px}
+  .sidebar nav{gap:7px}
+  .sidebar nav a{font-size:14px;gap:12px;padding:13px 14px;min-height:46px}
+  .sidebar nav a svg{width:20px;height:20px}
+  .sidebar nav a b{font-size:11px;min-width:24px;padding:2px 7px}
+  .sidebar-bottom{padding:21px 6px 4px}
+  .avatar{width:34px;height:34px;font-size:13px}
+  .user-info strong{font-size:13px}
+  .user-info small{font-size:11px}
+  .account-password,.logout-button{font-size:12px}
+
+  .topbar{height:72px;padding:0 34px;font-size:13px}
+  .origin{font-size:12px}
+  .server-command-box{font-size:13px}
+  .rp-theme-control button{font-size:12px;padding:6px 9px}
+  .content{padding:34px 34px;max-width:1540px}
+  .page-heading{margin-bottom:28px}
+  .page-heading .muted{margin-top:8px}
+  .page-heading .primary,.page-heading button{font-size:14px;min-height:40px;padding:9px 15px}
+  .app-footer{max-width:1540px;padding-left:34px;padding-right:34px;font-size:11px}
+
+  .stats-grid{gap:18px;margin-bottom:24px}
+  .stat{padding:22px 24px;min-height:122px}
+  .stat>span{font-size:13px}
+  .stat>strong{font-size:34px;margin:10px 0 4px}
+  .stat small{font-size:12px;line-height:1.55}
+
+  .overview-grid{gap:22px;margin-bottom:24px}
+  .panel-heading,.rp-card-heading{padding:19px 22px}
+  .panel-heading h2,.rp-card-heading h2{font-size:16px}
+  .panel-footer,.rp-card-footer{font-size:12px;padding:13px 22px}
+  .badge,.rp-badge{font-size:11px;padding:4px 9px}
+  .detail-list{padding:0 22px 17px}
+  .detail-row{font-size:13px;padding:10px 0}
+  .quick-actions{padding:0 22px 16px}
+  .quick-actions>a,.quick-actions>button{padding:13px 0;gap:13px}
+  .quick-actions strong{font-size:13px}
+  .quick-actions small{font-size:12px;line-height:1.5}
+  .action-icon{width:37px;height:37px}
+
+  table,.rp-table{font-size:13px}
+  th,.rp-table th{font-size:12px;padding:13px 22px}
+  td,.rp-table td{padding:17px 22px}
+  .device-name{font-size:13px}
+  .device-id{font-size:11px;margin-top:4px;line-height:1.45}
+  .empty{font-size:14px;padding:54px 24px!important}
+  .empty strong{font-size:16px}
+
+  .toolbar,.rp-toolbar{padding:18px 22px;gap:11px}
+  .toolbar input,.toolbar select,.rp-toolbar input,.rp-toolbar select{font-size:13px;min-height:40px}
+  .toolbar>span{font-size:12px}
+
+  input,select,textarea{font-size:14px;padding:10px 12px;min-height:40px}
+  button,.rp-btn{font-size:13px}
+  .notice{font-size:13px}
+  .notice strong{font-size:13px}
+  .form-error{font-size:13px}
+  .settings-panel{padding:27px}
+  .section-heading h2{font-size:17px}
+  .section-heading p{font-size:13px}
+  .section-number{font-size:14px;width:38px;height:38px}
+  .form-grid small{font-size:12px}
+  .form-grid input,.form-grid select,.form-grid textarea{font-size:14px}
+  .address-preview{font-size:12px}
+  .address-preview code{font-size:13px}
+  .switch-row strong{font-size:13px}
+  .switch-row small{font-size:12px}
+  .advanced summary{font-size:13px}
+  .advanced summary>span{font-size:12px}
+  .field-hint{font-size:12px}
+  .permission strong{font-size:13px}
+  .permission small{font-size:11px}
+  .certificate-summary{font-size:13px}
+  .certificate-summary .mono{font-size:11px}
+  .save-bar strong{font-size:13px}
+  .save-bar small{font-size:11px}
+  dialog .detail-row{font-size:13px}
+  .device-actions button{font-size:13px}
+  .toast{font-size:13px}
+
+  .login-origin{font-size:12px}
+}

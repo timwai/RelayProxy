@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"relayproxy/server/repository"
@@ -156,5 +157,117 @@ func TestAdminListenerDoesNotServePublicPush(t *testing.T) {
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusNotFound {
 		t.Fatalf("admin push route returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
+
+func TestChannelCustomVerificationAndRouting(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	public := NewPublicPushHandler(router.sessions, router.db)
+	a := createMessageTestDevice(t, router, "ROUTE-A")
+	b := createMessageTestDevice(t, router, "ROUTE-B")
+
+	useDefault := true
+	verificationRules := []repository.VerificationRule{{
+		Name: "供应商访问密令", Keywords: []string{"访问密令"},
+		Pattern: `ID-([A-Z0-9]{4})`, MaxDistance: 64,
+	}}
+	routeRules := []repository.MessageRouteRule{
+		{Name: "系统 A", MatchType: "contains", Pattern: "系统A", DeviceIDs: []string{a.ID}},
+		{Name: "系统 B", MatchType: "regex", Pattern: "系统B|业务B", DeviceIDs: []string{b.ID}},
+	}
+	createBody, _ := json.Marshal(messageChannelRequest{
+		ID: "routed", Name: "分流渠道",
+		UseDefaultVerification: &useDefault,
+		VerificationRules:      &verificationRules,
+		RouteRules:             &routeRules,
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels", bytes.NewReader(createBody))
+	createReq.AddCookie(adminCookie)
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create routed channel returned %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	pushA := httptest.NewRequest(http.MethodGet,
+		"/api/v1/push/routed?message="+url.QueryEscape("系统A访问密令 ID-X7P3，请及时处理"), nil)
+	recA := httptest.NewRecorder()
+	public.ServeHTTP(recA, pushA)
+	if recA.Code != http.StatusOK {
+		t.Fatalf("route A push returned %d: %s", recA.Code, recA.Body.String())
+	}
+	var messageA repository.MessageRecord
+	if err := json.Unmarshal(recA.Body.Bytes(), &messageA); err != nil {
+		t.Fatal(err)
+	}
+	if messageA.VerificationCode != "X7P3" || messageA.RouteRule != "系统 A" {
+		t.Fatalf("unexpected route A message: %+v", messageA)
+	}
+	if len(messageA.Deliveries) != 1 || messageA.Deliveries[0].DeviceID != a.ID {
+		t.Fatalf("route A targets = %+v", messageA.Deliveries)
+	}
+
+	pushB := httptest.NewRequest(http.MethodGet,
+		"/api/v1/push/routed?message="+url.QueryEscape("业务B通知：您的附加码是 G931"), nil)
+	recB := httptest.NewRecorder()
+	public.ServeHTTP(recB, pushB)
+	if recB.Code != http.StatusOK {
+		t.Fatalf("route B push returned %d: %s", recB.Code, recB.Body.String())
+	}
+	var messageB repository.MessageRecord
+	if err := json.Unmarshal(recB.Body.Bytes(), &messageB); err != nil {
+		t.Fatal(err)
+	}
+	if messageB.VerificationCode != "G931" || messageB.RouteRule != "系统 B" {
+		t.Fatalf("unexpected route B message: %+v", messageB)
+	}
+	if len(messageB.Deliveries) != 1 || messageB.Deliveries[0].DeviceID != b.ID {
+		t.Fatalf("route B targets = %+v", messageB.Deliveries)
+	}
+
+	noMatch := httptest.NewRequest(http.MethodGet,
+		"/api/v1/push/routed?message="+url.QueryEscape("系统C普通通知"), nil)
+	noMatchRec := httptest.NewRecorder()
+	public.ServeHTTP(noMatchRec, noMatch)
+	if noMatchRec.Code != http.StatusConflict {
+		t.Fatalf("unmatched routed push = %d: %s", noMatchRec.Code, noMatchRec.Body.String())
+	}
+}
+
+func TestChannelRejectsInvalidCustomRules(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	device := createMessageTestDevice(t, router, "INVALID-RULE")
+
+	useDefault := true
+	verificationRules := []repository.VerificationRule{{Name: "bad", Pattern: "("}}
+	routeRules := []repository.MessageRouteRule{{
+		Name: "bad route", MatchType: "regex", Pattern: "(",
+		DeviceIDs: []string{device.ID},
+	}}
+	for name, body := range map[string]messageChannelRequest{
+		"verification": {
+			ID: "bad-verification", Name: "bad", DeviceIDs: []string{device.ID},
+			UseDefaultVerification: &useDefault, VerificationRules: &verificationRules,
+		},
+		"routing": {
+			ID: "bad-routing", Name: "bad", DeviceIDs: []string{device.ID},
+			UseDefaultVerification: &useDefault, RouteRules: &routeRules,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels", bytes.NewReader(raw))
+			req.AddCookie(adminCookie)
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, req)
+			if rec.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

@@ -83,7 +83,7 @@ button.action:active{transform:scale(.98)}
     <div class="sub" id="source">RelayProxy 消息</div>
     <div class="code-shell">
       <div id="code" class="code">••••••</div>
-      <div class="meta"><span id="time">刚刚</span><span class="dot">•</span><span>一键复制后即可使用</span></div>
+      <div class="meta"><span id="time">刚刚</span><span class="dot">•</span><span id="countdown">15 秒后自动关闭</span></div>
     </div>
     <div id="content" class="content"></div>
     <div class="actions">
@@ -99,11 +99,35 @@ button.action:active{transform:scale(.98)}
 </article>
 <script>
 (function(){
-  var queue=[], current=null;
+  var queue=[], current=null, timeoutSeconds=15, dismissTimer=null, countdownTimer=null;
   function fmtTime(ms){
     var d=new Date(Number(ms)||Date.now());
     if(!Number.isFinite(d.getTime())) return '刚刚';
     return d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
+  }
+  function stopAutoDismiss(){
+    if(dismissTimer){ clearTimeout(dismissTimer); dismissTimer=null; }
+    if(countdownTimer){ clearInterval(countdownTimer); countdownTimer=null; }
+  }
+  function startAutoDismiss(){
+    stopAutoDismiss();
+    var label=document.getElementById('countdown');
+    var seconds=Math.max(0,Math.floor(Number(timeoutSeconds)||0));
+    if(seconds===0){
+      label.textContent='自动关闭已关闭';
+      return;
+    }
+    var deadline=Date.now()+seconds*1000;
+    function update(){
+      var left=Math.max(0,Math.ceil((deadline-Date.now())/1000));
+      label.textContent=left>0 ? left+' 秒后自动关闭' : '正在关闭…';
+    }
+    update();
+    countdownTimer=setInterval(update,250);
+    dismissTimer=setTimeout(function(){
+      stopAutoDismiss();
+      window.dismiss();
+    },seconds*1000);
   }
   function render(message){
     current=message;
@@ -117,6 +141,7 @@ button.action:active{transform:scale(.98)}
     var badge=document.getElementById('queue');
     badge.textContent=queue.length ? '+'+queue.length : '';
     badge.classList.toggle('show',queue.length>0);
+    startAutoDismiss();
   }
   window.enqueueVerification=function(message){
     if(!message||!message.verificationCode) return;
@@ -126,13 +151,21 @@ button.action:active{transform:scale(.98)}
     render(message);
   };
   window.seedVerification=function(message){ if(message&&message.verificationCode&&!current) render(message); };
+  window.setVerificationTimeout=function(seconds){
+    seconds=Number(seconds);
+    if(!Number.isFinite(seconds)) return;
+    timeoutSeconds=Math.max(0,Math.min(3600,Math.floor(seconds)));
+    if(current) startAutoDismiss();
+  };
   window.dismiss=function(){
+    stopAutoDismiss();
     if(queue.length){ render(queue.shift()); return; }
     current=null;
     if(window.goHideVerificationPopup) window.goHideVerificationPopup();
   };
   window.copyCode=async function(){
     if(!current||!current.verificationCode) return;
+    stopAutoDismiss();
     try{
       if(window.goCopyClipboard) await window.goCopyClipboard(current.verificationCode);
       else if(navigator.clipboard) await navigator.clipboard.writeText(current.verificationCode);

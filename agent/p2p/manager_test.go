@@ -256,3 +256,40 @@ func TestClientSessionLimitEvictsLeastRecentlyUsed(t *testing.T) {
 		t.Fatal("kept P2P session was evicted")
 	}
 }
+
+func TestFailedDirectSessionIsRemovedAndClosedOnServer(t *testing.T) {
+	closed := make(chan protocol.P2PControlMessage, 1)
+	manager := NewManager(context.Background(), func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		if message.Type == protocol.P2PControlClose {
+			closed <- message
+		}
+		return protocol.P2PControlMessage{Type: protocol.P2PControlLeaseAck, SessionID: message.SessionID}, nil
+	}, nil, time.Minute)
+	defer manager.Close()
+
+	token := []byte("0123456789abcdef0123456789abcdef")
+	item := manager.newSession(501, "client", "exit", token, time.Now().Add(time.Minute).UnixMilli())
+	if item == nil {
+		t.Fatal("failed to create session")
+	}
+	item.mu.Lock()
+	item.clientRole = true
+	item.mu.Unlock()
+
+	item.failDirect(errors.New("punch timeout"))
+	if _, ok := manager.Session(item.ID); ok {
+		t.Fatal("failed P2P session remains registered")
+	}
+	select {
+	case message := <-closed:
+		if message.SessionID != item.ID || message.Reason != "punch timeout" {
+			t.Fatalf("unexpected close message: %#v", message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server P2P close was not sent")
+	}
+	status, ok := manager.PathStatus("exit")
+	if !ok || status.State != StateCooldown {
+		t.Fatalf("failed client path did not enter cooldown: %#v ok=%v", status, ok)
+	}
+}

@@ -790,6 +790,7 @@ func (s *Session) failDirect(err error) {
 		s.manager.recordFailure(s.ExitDeviceID, reason)
 	}
 	s.reportPath("", reason)
+	s.manager.removeFailedSession(s, reason)
 }
 
 func (s *Session) watchDirect(direct *directp2p.QUICSession) {
@@ -823,6 +824,7 @@ func (s *Session) watchDirect(direct *directp2p.QUICSession) {
 		s.manager.recordFailure(s.ExitDeviceID, "P2P QUIC session closed")
 	}
 	s.reportPath("", "quic_session_closed")
+	s.manager.removeFailedSession(s, "quic_session_closed")
 }
 
 func (s *Session) reportPath(path, reason string) {
@@ -1042,4 +1044,19 @@ func (m *Manager) closeAndNotify(item *Session, reason string) {
 		defer cancel()
 		_, _ = m.send(ctx, message)
 	}()
+}
+
+func (m *Manager) removeFailedSession(item *Session, reason string) {
+	if m == nil || item == nil {
+		return
+	}
+	m.mu.Lock()
+	current := m.sessions[item.ID]
+	if current == item {
+		delete(m.sessions, item.ID)
+	}
+	m.mu.Unlock()
+	if current == item {
+		m.closeAndNotify(item, reason)
+	}
 }

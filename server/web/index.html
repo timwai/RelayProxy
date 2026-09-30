@@ -23,6 +23,7 @@
     .channel-all-row{margin:16px 0 14px}.channel-url-preview{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;margin-top:14px;padding:8px 9px;border:1px solid var(--rp-border);border-radius:8px;background:var(--rp-surface-soft)}.channel-url-preview code{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:8px}
     .channel-rule-section{margin-top:16px;padding-top:14px;border-top:1px solid var(--rp-border)}.channel-rule-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}.channel-rule-heading h3{margin:0;font-size:11px}.channel-rule-heading p{margin:2px 0 0;color:var(--rp-muted);font-size:8px}
     .channel-rule-list{display:grid;gap:9px;margin-top:9px}.channel-rule-card{padding:10px;border:1px solid var(--rp-border);border-radius:9px;background:var(--rp-surface-soft)}.channel-rule-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.channel-rule-card-head strong{font-size:9px}.channel-rule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.channel-rule-grid .wide{grid-column:1/-1}.channel-rule-grid label{margin:0}.channel-rule-grid input,.channel-rule-grid select{width:100%}.channel-rule-check{display:flex;align-items:center;gap:7px;margin-top:7px;font-size:8px}.channel-rule-check input{width:auto}.channel-route-devices{min-height:82px}.channel-rule-empty{padding:12px;text-align:center;border:1px dashed var(--rp-border);border-radius:8px;color:var(--rp-muted);font-size:8px}.channel-fallback-note{margin:7px 0 0;color:var(--rp-muted);font-size:8px}
+    .message-channel-context{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 12px 10px;padding:10px 12px;border:1px solid var(--rp-border);border-radius:9px;background:var(--rp-surface-soft)}.message-channel-context>div{min-width:0}.message-channel-context strong,.message-channel-context small{display:block}.message-channel-context small{margin-top:2px;color:var(--rp-muted)}.message-channel-context .button-row{flex-shrink:0}
     @media(max-width:600px){.channel-grid,.channel-device-list,.channel-rule-grid{grid-template-columns:1fr}.channel-rule-grid .wide{grid-column:auto}.channel-url-preview{grid-template-columns:1fr}}
   </style>
 </head>
@@ -102,13 +103,17 @@
       <section id="page-messages" class="page" hidden>
         <div class="page-heading">
           <div><p class="eyebrow">MESSAGE CENTER</p><h1>消息与推送渠道</h1><p class="muted">渠道决定消息推送到哪些设备；外部系统只需要使用渠道 ID。</p></div>
-          <div class="button-row"><button id="channel-create" type="button" data-admin class="primary rp-btn rp-btn-primary">新建渠道</button><button id="messages-refresh" type="button" class="rp-btn">刷新</button></div>
+          <div class="button-row"><button id="channel-create" type="button" data-admin class="primary rp-btn rp-btn-primary">新建渠道</button><button id="messages-clear" type="button" data-admin class="danger rp-btn">清空全部消息</button><button id="messages-refresh" type="button" class="rp-btn">刷新</button></div>
         </div>
         <article class="panel rp-card channel-panel" data-admin>
           <div class="panel-heading"><div><h2>推送渠道</h2><small>公开接口：GET / POST · /api/v1/push/{channelId}</small></div><span id="channel-count" class="badge neutral">0</span></div>
           <div id="channel-list" class="channel-grid"></div>
         </article>
         <div class="panel rp-card">
+          <div id="message-channel-context" class="message-channel-context" hidden>
+            <div><strong id="message-channel-title">渠道消息</strong><small id="message-channel-id" class="mono"></small></div>
+            <div class="button-row"><button id="messages-back-all" type="button" class="small-button rp-btn">← 全部消息</button><button id="messages-clear-channel" type="button" data-admin class="small-button danger rp-btn">清空此渠道</button></div>
+          </div>
           <div class="toolbar">
             <input id="message-search" type="search" placeholder="搜索标题、内容、来源、设备或验证码">
             <select id="message-kind"><option value="">全部类型</option><option value="code">验证码</option><option value="normal">普通消息</option></select>
@@ -116,7 +121,7 @@
             <span id="message-summary" class="muted">正在读取消息</span>
           </div>
           <div class="message-table-wrap">
-            <table class="message-table"><thead><tr><th>时间 / 来源</th><th>消息</th><th>验证码</th><th>目标设备 / 状态</th></tr></thead><tbody id="messages-body"></tbody></table>
+            <table class="message-table"><thead><tr><th>时间 / 来源</th><th>消息</th><th>验证码</th><th>目标设备 / 状态</th><th class="right">操作</th></tr></thead><tbody id="messages-body"></tbody></table>
           </div>
         </div>
       </section>

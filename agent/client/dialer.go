@@ -33,8 +33,9 @@ type TunnelDialer struct {
 	getDirect      func(exitDeviceID string) (tunnel.TunnelSession, bool)
 	ensureDirect   func(exitDeviceID string)
 	directMode     string
-	directFallback bool
-	noteFallback   func(exitDeviceID string)
+	directFallback    bool
+	noteFallback      func(exitDeviceID string)
+	noteDirectFailure func(exitDeviceID, reason string)
 }
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
@@ -67,6 +68,24 @@ func (d *TunnelDialer) ConfigureDirectMetrics(noteFallback func(exitDeviceID str
 	d.directMu.Lock()
 	d.noteFallback = noteFallback
 	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) ConfigureDirectFailure(noteFailure func(exitDeviceID, reason string)) {
+	d.directMu.Lock()
+	d.noteDirectFailure = noteFailure
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) recordDirectFailure(exitDeviceID string, err error) {
+	if exitDeviceID == "" || err == nil {
+		return
+	}
+	d.directMu.RLock()
+	note := d.noteDirectFailure
+	d.directMu.RUnlock()
+	if note != nil {
+		note(exitDeviceID, err.Error())
+	}
 }
 
 func (d *TunnelDialer) recordFallback(exitDeviceID string) {
@@ -161,7 +180,11 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
 	conn, err := d.dialTCPOnSession(ctx, sess, exitNodeID, host, port)
-	if err == nil || !direct || !retryableDirectHandshakeError(ctx, err) || d.getTunnel == nil || !d.directFallbackEnabled() {
+	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
+	if retryableDirectFailure {
+		d.recordDirectFailure(exitNodeID, err)
+	}
+	if err == nil || !retryableDirectFailure || d.getTunnel == nil || !d.directFallbackEnabled() {
 		return conn, err
 	}
 	relay := d.getTunnel()
@@ -273,7 +296,11 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 	}
 
 	conn, err := d.dialUDPOnSession(ctx, sess, exitNodeID, host, port, opts)
-	if err == nil || !direct || d.getTunnel == nil || !d.directFallbackEnabled() || !retryableDirectUDPHandshakeError(ctx, err) {
+	retryableDirectFailure := direct && retryableDirectUDPHandshakeError(ctx, err)
+	if retryableDirectFailure {
+		d.recordDirectFailure(exitNodeID, err)
+	}
+	if err == nil || !retryableDirectFailure || d.getTunnel == nil || !d.directFallbackEnabled() {
 		return conn, err
 	}
 	relay := d.getTunnel()

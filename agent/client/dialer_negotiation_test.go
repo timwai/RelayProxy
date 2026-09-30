@@ -249,9 +249,15 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
 	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
 	var fallbacks atomic.Int32
+	var failures atomic.Int32
 	dialer.ConfigureDirectMetrics(func(exitID string) {
 		if exitID == "exit" {
 			fallbacks.Add(1)
+		}
+	})
+	dialer.ConfigureDirectFailure(func(exitID, reason string) {
+		if exitID == "exit" && reason != "" {
+			failures.Add(1)
 		}
 	})
 
@@ -266,6 +272,9 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	if fallbacks.Load() != 1 {
 		t.Fatalf("fallback metric=%d, want 1", fallbacks.Load())
 	}
+	if failures.Load() != 1 {
+		t.Fatalf("direct failure callback=%d, want 1", failures.Load())
+	}
 }
 
 func TestTCPDirectBusinessErrorDoesNotRetryRelay(t *testing.T) {
@@ -279,6 +288,8 @@ func TestTCPDirectBusinessErrorDoesNotRetryRelay(t *testing.T) {
 	})
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
 	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
+	var failures atomic.Int32
+	dialer.ConfigureDirectFailure(func(string, string) { failures.Add(1) })
 
 	conn, err := dialer.DialTCP(context.Background(), "exit", "blocked.example", 443)
 	if conn != nil {
@@ -291,6 +302,9 @@ func TestTCPDirectBusinessErrorDoesNotRetryRelay(t *testing.T) {
 	}
 	if relay.opens.Load() != 0 {
 		t.Fatalf("business error retried Relay %d time(s)", relay.opens.Load())
+	}
+	if failures.Load() != 0 {
+		t.Fatalf("business error invalidated direct path %d time(s)", failures.Load())
 	}
 }
 

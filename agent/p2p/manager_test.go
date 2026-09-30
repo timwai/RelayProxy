@@ -428,3 +428,27 @@ func TestPowerConstrainedProfileShrinksSessionCache(t *testing.T) {
 		t.Fatalf("unexpected low-power QUIC options: %#v", options)
 	}
 }
+
+func TestFailReadyForExitRemovesBrokenPathAndStartsCooldown(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	token := []byte("0123456789abcdef0123456789abcdef")
+	item := manager.newSession(991, "client", "exit", token, time.Now().Add(time.Minute).UnixMilli())
+	if item == nil {
+		t.Fatal("failed to create test session")
+	}
+	item.mu.Lock()
+	item.clientRole = true
+	item.state = StateReady
+	item.mu.Unlock()
+
+	manager.FailReadyForExit("exit", "direct stream open failed")
+
+	if _, ok := manager.Session(item.ID); ok {
+		t.Fatal("broken READY session remains registered")
+	}
+	status, ok := manager.PathStatus("exit")
+	if !ok || status.State != StateCooldown || status.Error != "direct stream open failed" {
+		t.Fatalf("unexpected failed-path status: %#v ok=%v", status, ok)
+	}
+}

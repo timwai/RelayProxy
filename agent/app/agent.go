@@ -435,6 +435,14 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			manager.NoteFallback(exitDeviceID)
 		}
 	})
+	a.rawDialer.ConfigureDirectFailure(func(exitDeviceID, reason string) {
+		a.mu.RLock()
+		manager := a.proxyP2P
+		a.mu.RUnlock()
+		if manager != nil {
+			manager.FailReadyForExit(exitDeviceID, reason)
+		}
+	})
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)

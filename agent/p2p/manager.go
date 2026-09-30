@@ -887,9 +887,20 @@ func (s *Session) failDirect(err error) {
 	}
 	s.establishing = false
 	clientRole := s.clientRole
+	direct := s.direct
 	endpoint := s.endpoint
+	s.direct = nil
 	s.endpoint = nil
+	if direct != nil {
+		stats := direct.Stats()
+		s.lastRTTMs = stats.RTT.Milliseconds()
+		s.lastBytesUp = stats.BytesSent
+		s.lastBytesDown = stats.BytesReceived
+	}
 	s.mu.Unlock()
+	if direct != nil {
+		_ = direct.Close()
+	}
 	if endpoint != nil {
 		_ = endpoint.Close()
 	}
@@ -1037,6 +1048,32 @@ func validateRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {
 	copy.AccessHosts = append([]string(nil), normalized.AccessHosts...)
 	copy.AccessCIDRs = append([]string(nil), normalized.AccessCIDRs...)
 	return &copy, nil
+}
+
+// FailReadyForExit invalidates a client-side READY path after the dialer
+// observes a transport-level stream establishment failure. Business/ACL errors
+// are filtered by the dialer and never reach this method.
+func (m *Manager) FailReadyForExit(exitDeviceID, reason string) {
+	if m == nil || exitDeviceID == "" {
+		return
+	}
+	if reason == "" {
+		reason = "P2P direct stream failed"
+	}
+	m.mu.Lock()
+	items := make([]*Session, 0, len(m.sessions))
+	for _, item := range m.sessions {
+		item.mu.RLock()
+		clientRole, state := item.clientRole, item.state
+		item.mu.RUnlock()
+		if item.ExitDeviceID == exitDeviceID && clientRole && state == StateReady {
+			items = append(items, item)
+		}
+	}
+	m.mu.Unlock()
+	for _, item := range items {
+		item.failDirect(errors.New(reason))
+	}
 }
 
 func (m *Manager) NoteFallback(exitDeviceID string) {

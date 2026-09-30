@@ -49,6 +49,8 @@ type Manager struct {
 	keepAlive            time.Duration
 	idleTimeout          time.Duration
 	maxExitSessions      int
+	lowPowerIdleTimeout  time.Duration
+	lowPowerMaxSessions  int
 	networkCheckInterval time.Duration
 	networkSignature     func() string
 
@@ -61,7 +63,8 @@ type Manager struct {
 	ready        chan *Session
 	closed       atomic.Bool
 	attemptSeq   atomic.Uint64
-	networkEpoch atomic.Uint64
+	networkEpoch     atomic.Uint64
+	powerConstrained atomic.Bool
 }
 
 type failureState struct {
@@ -75,6 +78,8 @@ type QUICManagerOptions struct {
 	KeepAlive            time.Duration
 	IdleTimeout          time.Duration
 	MaxExitSessions      int
+	LowPowerIdleTimeout  time.Duration
+	LowPowerMaxSessions  int
 	NetworkCheckInterval time.Duration
 	NetworkSignature     func() string
 }
@@ -153,6 +158,7 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 	return &Manager{
 		ctx: ctx, cancel: cancel, send: send, local: local, lease: lease,
 		punchTimeout: 1200 * time.Millisecond, keepAlive: 10 * time.Second, idleTimeout: 120 * time.Second, maxExitSessions: 4,
+		lowPowerIdleTimeout: 60 * time.Second, lowPowerMaxSessions: 1,
 		networkCheckInterval: 10 * time.Second, networkSignature: CurrentNetworkSignature,
 		sessions: make(map[uint64]*Session), starting: make(map[string]uint64), cooldowns: make(map[string]failureState),
 		fallbacks: make(map[string]uint64), ready: make(chan *Session, 1024),
@@ -179,6 +185,12 @@ func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rende
 	}
 	if options.MaxExitSessions > 0 {
 		m.maxExitSessions = options.MaxExitSessions
+	}
+	if options.LowPowerIdleTimeout > 0 {
+		m.lowPowerIdleTimeout = options.LowPowerIdleTimeout
+	}
+	if options.LowPowerMaxSessions > 0 {
+		m.lowPowerMaxSessions = options.LowPowerMaxSessions
 	}
 	if options.NetworkCheckInterval > 0 {
 		m.networkCheckInterval = options.NetworkCheckInterval
@@ -220,6 +232,32 @@ func (m *Manager) ReadySessions() <-chan *Session {
 		return nil
 	}
 	return m.ready
+}
+
+// PrewarmClient prepares a direct path only when the device is not in a
+// power-constrained mode. Reactive attempts should use EnsureClient instead.
+func (m *Manager) PrewarmClient(exitDeviceID string) {
+	if m == nil || m.powerConstrained.Load() {
+		return
+	}
+	m.EnsureClient(exitDeviceID)
+}
+
+// SetPowerConstrained enables the battery-aware profile used by mobile clients.
+// Existing active streams are preserved; idle sessions are reaped by the normal
+// lifecycle loop and new QUIC paths stop sending periodic keepalives.
+func (m *Manager) SetPowerConstrained(constrained bool) {
+	if m == nil || m.closed.Load() {
+		return
+	}
+	previous := m.powerConstrained.Swap(constrained)
+	if constrained && !previous {
+		m.enforceClientLimit(0)
+	}
+}
+
+func (m *Manager) PowerConstrained() bool {
+	return m != nil && m.powerConstrained.Load()
 }
 
 // EnsureClient starts at most one in-flight direct-path attempt for an Exit.
@@ -785,7 +823,7 @@ func (s *Session) establish(clientRole bool) {
 
 	s.setState(StateQUICHandshake, "")
 	var direct *directp2p.QUICSession
-	quicOptions := directp2p.QUICOptions{KeepAlivePeriod: s.manager.keepAlive, MaxIdleTimeout: s.manager.idleTimeout}
+	quicOptions := s.manager.directQUICOptions()
 	if clientRole {
 		direct, err = directp2p.DialQUIC(ctx, result.Conn, result.RemoteAddr, identity, fingerprint, quicOptions)
 	} else {
@@ -1138,8 +1176,42 @@ func (m *Manager) resetFailure(exitDeviceID string) {
 	m.mu.Unlock()
 }
 
+func (m *Manager) effectiveClientLimit() int {
+	if m == nil {
+		return 0
+	}
+	if m.powerConstrained.Load() && m.lowPowerMaxSessions > 0 {
+		return m.lowPowerMaxSessions
+	}
+	return m.maxExitSessions
+}
+
+func (m *Manager) effectiveIdleTimeout() time.Duration {
+	if m == nil {
+		return 0
+	}
+	if m.powerConstrained.Load() && m.lowPowerIdleTimeout > 0 {
+		return m.lowPowerIdleTimeout
+	}
+	return m.idleTimeout
+}
+
+func (m *Manager) directQUICOptions() directp2p.QUICOptions {
+	if m == nil {
+		return directp2p.QUICOptions{}
+	}
+	if m.powerConstrained.Load() {
+		return directp2p.QUICOptions{
+			MaxIdleTimeout: m.effectiveIdleTimeout(),
+			DisableKeepAlive: true,
+		}
+	}
+	return directp2p.QUICOptions{KeepAlivePeriod: m.keepAlive, MaxIdleTimeout: m.idleTimeout}
+}
+
 func (m *Manager) enforceClientLimit(keepID uint64) {
-	if m == nil || m.maxExitSessions <= 0 {
+	limit := m.effectiveClientLimit()
+	if m == nil || limit <= 0 {
 		return
 	}
 	for {
@@ -1163,7 +1235,7 @@ func (m *Manager) enforceClientLimit(keepID uint64) {
 				oldest, oldestUsed = item, used
 			}
 		}
-		if count <= m.maxExitSessions || oldest == nil {
+		if count <= limit || oldest == nil {
 			m.mu.Unlock()
 			return
 		}
@@ -1175,8 +1247,12 @@ func (m *Manager) enforceClientLimit(keepID uint64) {
 
 func (m *Manager) reapIdleLoop() {
 	interval := 10 * time.Second
-	if m.idleTimeout > 0 && m.idleTimeout/4 < interval {
-		interval = m.idleTimeout / 4
+	shortestIdle := m.idleTimeout
+	if m.lowPowerIdleTimeout > 0 && (shortestIdle <= 0 || m.lowPowerIdleTimeout < shortestIdle) {
+		shortestIdle = m.lowPowerIdleTimeout
+	}
+	if shortestIdle > 0 && shortestIdle/4 < interval {
+		interval = shortestIdle / 4
 	}
 	if interval < time.Second {
 		interval = time.Second
@@ -1189,16 +1265,26 @@ func (m *Manager) reapIdleLoop() {
 			return
 		case now := <-ticker.C:
 			var stale []*Session
+			idleTimeout := m.effectiveIdleTimeout()
+			powerConstrained := m.powerConstrained.Load()
 			m.mu.Lock()
 			for id, item := range m.sessions {
 				item.mu.RLock()
-				clientRole, state := item.clientRole, item.state
+				clientRole, state, direct := item.clientRole, item.state, item.direct
 				item.mu.RUnlock()
-				if !clientRole || state != StateReady || m.idleTimeout <= 0 {
+				if state != StateReady || idleTimeout <= 0 {
+					continue
+				}
+				// Desktop Exit sessions are retained normally. In constrained mode,
+				// both roles may discard an idle path to eliminate NAT keepalive cost.
+				if !clientRole && !powerConstrained {
+					continue
+				}
+				if direct != nil && direct.ActiveStreams() > 0 {
 					continue
 				}
 				last := time.UnixMilli(item.lastUsed.Load())
-				if now.Sub(last) >= m.idleTimeout {
+				if now.Sub(last) >= idleTimeout {
 					delete(m.sessions, id)
 					stale = append(stale, item)
 				}

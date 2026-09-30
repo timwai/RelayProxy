@@ -21,6 +21,7 @@ const QUICALPN = "relayproxy-p2p-v1"
 type QUICOptions struct {
 	KeepAlivePeriod time.Duration
 	MaxIdleTimeout  time.Duration
+	DisableKeepAlive bool
 }
 
 // QUICSession owns the quic-go Transport that took over the punched UDP socket.
@@ -38,7 +39,9 @@ func DirectQUICConfig(options ...QUICOptions) *quic.Config {
 	config.KeepAlivePeriod = 10 * time.Second
 	config.MaxIdleTimeout = 120 * time.Second
 	if len(options) > 0 {
-		if options[0].KeepAlivePeriod > 0 {
+		if options[0].DisableKeepAlive {
+			config.KeepAlivePeriod = 0
+		} else if options[0].KeepAlivePeriod > 0 {
 			config.KeepAlivePeriod = options[0].KeepAlivePeriod
 		}
 		if options[0].MaxIdleTimeout > 0 {

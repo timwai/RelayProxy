@@ -119,3 +119,13 @@ func TestQUICRejectsUnexpectedFingerprint(t *testing.T) {
 		t.Fatal("server TLS accepted empty peer fingerprint")
 	}
 }
+
+func TestDirectQUICLowPowerProfileDisablesKeepalive(t *testing.T) {
+	config := DirectQUICConfig(QUICOptions{DisableKeepAlive: true, MaxIdleTimeout: 45 * time.Second})
+	if config.KeepAlivePeriod != 0 {
+		t.Fatalf("low-power keepalive=%s, want disabled", config.KeepAlivePeriod)
+	}
+	if config.MaxIdleTimeout != 45*time.Second {
+		t.Fatalf("low-power idle timeout=%s, want 45s", config.MaxIdleTimeout)
+	}
+}

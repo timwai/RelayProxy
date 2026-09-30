@@ -370,3 +370,61 @@ func TestNetworkWatcherDetectsSignatureChange(t *testing.T) {
 		t.Fatal("network signature change was not detected")
 	}
 }
+
+func TestPowerConstrainedSuppressesPrewarmButAllowsReactiveAttempt(t *testing.T) {
+	var calls atomic.Int32
+	manager := NewManager(context.Background(), func(context.Context, protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		calls.Add(1)
+		return protocol.P2PControlMessage{
+			Type: protocol.P2PControlLeaseAck, SessionID: 901, ClientDeviceID: "client", ExitDeviceID: "exit",
+			SessionToken: []byte("0123456789abcdef0123456789abcdef"), LeaseExpiresAt: time.Now().Add(time.Minute).UnixMilli(),
+		}, nil
+	}, testDescription("192.0.2.10:51000", "sha256:client"), time.Minute)
+	defer manager.Close()
+
+	manager.SetPowerConstrained(true)
+	manager.PrewarmClient("exit")
+	time.Sleep(20 * time.Millisecond)
+	if calls.Load() != 0 {
+		t.Fatalf("power-constrained prewarm made %d attempt(s)", calls.Load())
+	}
+
+	manager.EnsureClient("exit")
+	deadline := time.Now().Add(time.Second)
+	for calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("reactive P2P attempts=%d, want 1", calls.Load())
+	}
+}
+
+func TestPowerConstrainedProfileShrinksSessionCache(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	manager.maxExitSessions = 4
+	manager.lowPowerMaxSessions = 1
+	manager.lowPowerIdleTimeout = 45 * time.Second
+
+	token := []byte("0123456789abcdef0123456789abcdef")
+	for id := uint64(1); id <= 3; id++ {
+		item := manager.newSession(id, "client", fmt.Sprintf("exit-%d", id), token, time.Now().Add(time.Minute).UnixMilli())
+		item.mu.Lock()
+		item.clientRole = true
+		item.state = StateReady
+		item.mu.Unlock()
+		item.lastUsed.Store(int64(id))
+	}
+	manager.SetPowerConstrained(true)
+
+	manager.mu.Lock()
+	remaining := len(manager.sessions)
+	manager.mu.Unlock()
+	if remaining != 1 {
+		t.Fatalf("low-power session cache=%d, want 1", remaining)
+	}
+	options := manager.directQUICOptions()
+	if !options.DisableKeepAlive || options.MaxIdleTimeout != 45*time.Second {
+		t.Fatalf("unexpected low-power QUIC options: %#v", options)
+	}
+}

@@ -729,7 +729,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 			proxyP2PManager = nil
 		} else if slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyClient) &&
 			strings.TrimSpace(cfg.DefaultExitID) != "" {
-			proxyP2PManager.EnsureClient(cfg.DefaultExitID)
+			proxyP2PManager.PrewarmClient(cfg.DefaultExitID)
 		}
 	}
 
@@ -1545,6 +1545,21 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	}
 	if p2pManager != nil {
 		_ = p2pManager.Close()
+	}
+}
+
+// SetP2PPowerConstrained switches the active direct-path manager to its mobile
+// battery-aware profile. Android lifecycle code can call this without
+// rebuilding the Relay tunnel.
+func (a *Agent) SetP2PPowerConstrained(constrained bool) {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	manager := a.proxyP2P
+	a.mu.RUnlock()
+	if manager != nil {
+		manager.SetPowerConstrained(constrained)
 	}
 }
 

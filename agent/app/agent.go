@@ -137,6 +137,13 @@ type AgentConfig struct {
 	ExitUpstream    exit.UpstreamConfig
 	RDPEnabled      *bool
 	RDPAddress      string // target-local RDP service, default 127.0.0.1:3389
+	P2PEnabled      *bool
+	P2PMode         string
+	P2PPunchTimeout time.Duration
+	P2PKeepalive    time.Duration
+	P2PIdleTimeout  time.Duration
+	P2PMaxSessions  int
+	P2PFallback     *bool
 	AllowInternet   bool
 	AllowPrivateNet bool
 	AllowLoopback   bool     // Allow localhost/loopback for testing
@@ -175,6 +182,20 @@ func (c AgentConfig) IsExitEnabled() bool {
 func (c AgentConfig) IsRDPEnabled() bool {
 	if c.RDPEnabled != nil {
 		return *c.RDPEnabled
+	}
+	return true
+}
+
+func (c AgentConfig) IsP2PEnabled() bool {
+	if c.P2PEnabled != nil {
+		return *c.P2PEnabled
+	}
+	return true
+}
+
+func (c AgentConfig) IsP2PFallbackEnabled() bool {
+	if c.P2PFallback != nil {
+		return *c.P2PFallback
 	}
 	return true
 }
@@ -311,6 +332,27 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if strings.TrimSpace(cfg.RDPAddress) == "" {
 		cfg.RDPAddress = "127.0.0.1:3389"
 	}
+	cfg.P2PMode = strings.ToLower(strings.TrimSpace(cfg.P2PMode))
+	if cfg.P2PMode == "" {
+		cfg.P2PMode = "auto"
+	}
+	switch cfg.P2PMode {
+	case "auto", "relay_only", "p2p_only":
+	default:
+		return nil, fmt.Errorf("invalid P2P mode %q", cfg.P2PMode)
+	}
+	if cfg.P2PPunchTimeout <= 0 {
+		cfg.P2PPunchTimeout = 1200 * time.Millisecond
+	}
+	if cfg.P2PKeepalive <= 0 {
+		cfg.P2PKeepalive = 10 * time.Second
+	}
+	if cfg.P2PIdleTimeout <= 0 {
+		cfg.P2PIdleTimeout = 120 * time.Second
+	}
+	if cfg.P2PMaxSessions <= 0 {
+		cfg.P2PMaxSessions = 4
+	}
 	if cfg.ConnectTimeout < 0 {
 		return nil, errors.New("connect timeout must not be negative")
 	}
@@ -358,6 +400,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		defer a.mu.RUnlock()
 		return a.cfg.DeviceID
 	})
+	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	a.rawDialer.ConfigureDirectPath(
 		func(exitDeviceID string) (tunnel.TunnelSession, bool) {
 			a.mu.RLock()
@@ -522,7 +565,10 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}); err != nil {
 		return fmt.Errorf("write control header: %w", err)
 	}
-	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilityProxyP2P}
+	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream}
+	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
+		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P)
+	}
 	if tunnel.SupportsDatagrams(sess) {
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
 	}
@@ -642,16 +688,22 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 
 	var proxyP2PManager *proxyp2p.Manager
-	if slices.Contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) &&
+	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" &&
+		slices.Contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) &&
 		(slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyClient) ||
 			slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)) {
 		lease := time.Duration(accepted.P2PLeaseSec) * time.Second
 		if lease <= 0 {
 			lease = 60 * time.Second
 		}
-		proxyP2PManager = proxyp2p.NewQUICManager(ctx, func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		proxyP2PManager = proxyp2p.NewQUICManagerWithOptions(ctx, func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
 			return a.sendP2PControlRequest(controlCtx, sess, message)
-		}, accepted.P2PRendezvousAddress, lease, 1200*time.Millisecond)
+		}, accepted.P2PRendezvousAddress, lease, proxyp2p.QUICManagerOptions{
+			PunchTimeout: cfg.P2PPunchTimeout,
+			KeepAlive: cfg.P2PKeepalive,
+			IdleTimeout: cfg.P2PIdleTimeout,
+			MaxExitSessions: cfg.P2PMaxSessions,
+		})
 		keepManager := false
 		a.mu.Lock()
 		if a.epoch == epoch && a.readySession == sess {
@@ -662,6 +714,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		if !keepManager {
 			_ = proxyP2PManager.Close()
 			proxyP2PManager = nil
+		} else if slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyClient) &&
+			strings.TrimSpace(cfg.DefaultExitID) != "" {
+			proxyP2PManager.EnsureClient(cfg.DefaultExitID)
 		}
 	}
 
@@ -1052,7 +1107,13 @@ func (a *Agent) SelectExit(exitID string) {
 	a.cfg.DefaultExitID = exitID
 	a.selectedExit.Store(&exitID)
 	a.dialer.SetDefaultExitID(exitID)
+	manager := a.proxyP2P
+	ready := a.handshakeOK.Load()
+	mode := a.cfg.P2PMode
 	a.mu.Unlock()
+	if ready && manager != nil && mode != "relay_only" && strings.TrimSpace(exitID) != "" {
+		manager.EnsureClient(exitID)
+	}
 }
 
 func (a *Agent) Status() AgentStatus {
@@ -1618,6 +1679,7 @@ func cloneAgentConfig(cfg AgentConfig) AgentConfig {
 		return &value
 	}
 	cfg.SOCKS5Enabled, cfg.HTTPEnabled, cfg.ExitEnabled, cfg.RDPEnabled = cloneBool(cfg.SOCKS5Enabled), cloneBool(cfg.HTTPEnabled), cloneBool(cfg.ExitEnabled), cloneBool(cfg.RDPEnabled)
+	cfg.P2PEnabled, cfg.P2PFallback = cloneBool(cfg.P2PEnabled), cloneBool(cfg.P2PFallback)
 	cfg.AccessDomains, cfg.AccessCIDRs = slices.Clone(cfg.AccessDomains), slices.Clone(cfg.AccessCIDRs)
 	cfg.Routing = routing.CloneConfig(cfg.Routing)
 	cfg.DivertConfig.ExcludeProcesses = slices.Clone(cfg.DivertConfig.ExcludeProcesses)

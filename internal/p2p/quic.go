@@ -18,6 +18,11 @@ import (
 
 const QUICALPN = "relayproxy-p2p-v1"
 
+type QUICOptions struct {
+	KeepAlivePeriod time.Duration
+	MaxIdleTimeout  time.Duration
+}
+
 // QUICSession owns the quic-go Transport that took over the punched UDP socket.
 // The embedded RelayProxy session keeps the existing stream/datagram interface.
 type QUICSession struct {
@@ -27,15 +32,23 @@ type QUICSession struct {
 	closeErr  error
 }
 
-func DirectQUICConfig() *quic.Config {
+func DirectQUICConfig(options ...QUICOptions) *quic.Config {
 	config := tunnel.DefaultQUICConfig()
 	config.KeepAlivePeriod = 10 * time.Second
 	config.MaxIdleTimeout = 120 * time.Second
+	if len(options) > 0 {
+		if options[0].KeepAlivePeriod > 0 {
+			config.KeepAlivePeriod = options[0].KeepAlivePeriod
+		}
+		if options[0].MaxIdleTimeout > 0 {
+			config.MaxIdleTimeout = options[0].MaxIdleTimeout
+		}
+	}
 	config.EnableDatagrams = true
 	return config
 }
 
-func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, identity *secure.TLSIdentity, expectedPeerFingerprint string) (*QUICSession, error) {
+func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, identity *secure.TLSIdentity, expectedPeerFingerprint string, options ...QUICOptions) (*QUICSession, error) {
 	if conn == nil || remote == nil || identity == nil {
 		return nil, errors.New("P2P QUIC dial requires a punched socket, peer address and TLS identity")
 	}
@@ -44,7 +57,7 @@ func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, ident
 		return nil, err
 	}
 	transport := &quic.Transport{Conn: conn}
-	qconn, err := transport.Dial(ctx, remote, tlsConfig, DirectQUICConfig())
+	qconn, err := transport.Dial(ctx, remote, tlsConfig, DirectQUICConfig(options...))
 	if err != nil {
 		_ = transport.Close()
 		return nil, fmt.Errorf("P2P QUIC dial failed: %w", err)
@@ -54,7 +67,7 @@ func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, ident
 	return &QUICSession{QUICSession: session, transport: transport}, nil
 }
 
-func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIdentity, expectedPeerFingerprint string) (*QUICSession, error) {
+func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIdentity, expectedPeerFingerprint string, options ...QUICOptions) (*QUICSession, error) {
 	if conn == nil || identity == nil {
 		return nil, errors.New("P2P QUIC listen requires a punched socket and TLS identity")
 	}
@@ -63,7 +76,7 @@ func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIden
 		return nil, err
 	}
 	transport := &quic.Transport{Conn: conn}
-	listener, err := transport.Listen(tlsConfig, DirectQUICConfig())
+	listener, err := transport.Listen(tlsConfig, DirectQUICConfig(options...))
 	if err != nil {
 		_ = transport.Close()
 		return nil, fmt.Errorf("P2P QUIC listen failed: %w", err)

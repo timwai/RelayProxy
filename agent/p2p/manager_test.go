@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -191,5 +192,68 @@ func TestPathStatusPrefersReadyAndHidesSensitiveDetails(t *testing.T) {
 	}
 	if status.Error != "" {
 		t.Fatalf("ready path exposed unexpected error: %q", status.Error)
+	}
+}
+
+
+func TestCooldownSuppressesRepeatedClientAttempts(t *testing.T) {
+	var calls atomic.Int32
+	manager := NewManager(context.Background(), func(context.Context, protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		calls.Add(1)
+		return protocol.P2PControlMessage{}, nil
+	}, testDescription("192.0.2.10:51000", "sha256:client"), time.Minute)
+	defer manager.Close()
+
+	manager.recordFailure("exit", "punch timeout")
+	manager.EnsureClient("exit")
+	time.Sleep(20 * time.Millisecond)
+	if calls.Load() != 0 {
+		t.Fatalf("cooldown allowed %d connect attempt(s)", calls.Load())
+	}
+	status, ok := manager.PathStatus("exit")
+	if !ok || status.State != StateCooldown || status.Error != "punch timeout" {
+		t.Fatalf("unexpected cooldown status: %#v ok=%v", status, ok)
+	}
+
+	manager.mu.Lock()
+	failure := manager.cooldowns["exit"]
+	failure.until = time.Now().Add(-time.Millisecond)
+	manager.cooldowns["exit"] = failure
+	manager.mu.Unlock()
+	manager.EnsureClient("exit")
+	deadline := time.Now().Add(time.Second)
+	for calls.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expired cooldown attempts=%d, want 1", calls.Load())
+	}
+}
+
+func TestClientSessionLimitEvictsLeastRecentlyUsed(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	manager.maxExitSessions = 2
+	token := []byte("0123456789abcdef0123456789abcdef")
+	for id := uint64(1); id <= 3; id++ {
+		item := manager.newSession(id, "client", fmt.Sprintf("exit-%d", id), token, time.Now().Add(time.Minute).UnixMilli())
+		if item == nil {
+			t.Fatalf("failed to create session %d", id)
+		}
+		item.mu.Lock()
+		item.clientRole = true
+		item.state = StateReady
+		item.mu.Unlock()
+		item.lastUsed.Store(int64(id))
+	}
+	manager.enforceClientLimit(3)
+	if _, ok := manager.Session(1); ok {
+		t.Fatal("least recently used P2P session was not evicted")
+	}
+	if _, ok := manager.Session(2); !ok {
+		t.Fatal("newer P2P session was evicted")
+	}
+	if _, ok := manager.Session(3); !ok {
+		t.Fatal("kept P2P session was evicted")
 	}
 }

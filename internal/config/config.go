@@ -105,6 +105,16 @@ type AgentConfigFile struct {
 		Address string `yaml:"address"` // target-local RDP service; defaults to 127.0.0.1:3389
 	} `yaml:"rdp"`
 
+	P2P struct {
+		Enabled         *bool  `yaml:"enabled"`
+		Mode            string `yaml:"mode"` // auto | relay_only | p2p_only
+		PunchTimeoutMs  int    `yaml:"punch_timeout_ms"`
+		KeepaliveSec    int    `yaml:"keepalive_sec"`
+		IdleTimeoutSec  int    `yaml:"idle_timeout_sec"`
+		MaxExitSessions int    `yaml:"max_exit_sessions"`
+		Fallback        *bool  `yaml:"fallback"`
+	} `yaml:"p2p"`
+
 	Routing routing.Config `yaml:"routing"` // 新增路由配置
 
 	Exit struct {
@@ -355,6 +365,21 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	if cfg.RDP.Address == "" {
 		cfg.RDP.Address = "127.0.0.1:3389"
 	}
+	if cfg.P2P.Mode == "" {
+		cfg.P2P.Mode = "auto"
+	}
+	if cfg.P2P.PunchTimeoutMs == 0 {
+		cfg.P2P.PunchTimeoutMs = 1200
+	}
+	if cfg.P2P.KeepaliveSec == 0 {
+		cfg.P2P.KeepaliveSec = 10
+	}
+	if cfg.P2P.IdleTimeoutSec == 0 {
+		cfg.P2P.IdleTimeoutSec = 120
+	}
+	if cfg.P2P.MaxExitSessions == 0 {
+		cfg.P2P.MaxExitSessions = 4
+	}
 	if cfg.GUI.Theme == "" {
 		cfg.GUI.Theme = "system"
 	}
@@ -377,6 +402,8 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 		&cfg.Proxy.SOCKS5.Enabled,
 		&cfg.Proxy.HTTP.Enabled,
 		&cfg.RDP.Enabled,
+		&cfg.P2P.Enabled,
+		&cfg.P2P.Fallback,
 		&cfg.Exit.Enabled,
 		&cfg.GUI.Enabled,
 		&cfg.GUI.MinimizeToTray,

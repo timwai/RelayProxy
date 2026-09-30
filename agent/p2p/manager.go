@@ -33,6 +33,7 @@ const (
 	StateQUICHandshake State = "QUIC_HANDSHAKE"
 	StateReady         State = "READY"
 	StateDegraded      State = "DEGRADED"
+	StateCooldown      State = "COOLDOWN"
 	StateClosed        State = "CLOSED"
 )
 
@@ -45,12 +46,29 @@ type Manager struct {
 
 	endpointFactory EndpointFactory
 	punchTimeout    time.Duration
+	keepAlive       time.Duration
+	idleTimeout     time.Duration
+	maxExitSessions int
 
-	mu       sync.Mutex
-	sessions map[uint64]*Session
-	starting map[string]struct{}
-	ready    chan *Session
-	closed   atomic.Bool
+	mu        sync.Mutex
+	sessions  map[uint64]*Session
+	starting  map[string]struct{}
+	cooldowns map[string]failureState
+	ready     chan *Session
+	closed    atomic.Bool
+}
+
+type failureState struct {
+	count  int
+	until  time.Time
+	reason string
+}
+
+type QUICManagerOptions struct {
+	PunchTimeout    time.Duration
+	KeepAlive       time.Duration
+	IdleTimeout     time.Duration
+	MaxExitSessions int
 }
 
 type Session struct {
@@ -72,6 +90,8 @@ type Session struct {
 	endpoint        *Endpoint
 	direct          *directp2p.QUICSession
 	establishing    bool
+	clientRole      bool
+	lastUsed        atomic.Int64
 	closed          chan struct{}
 	closeOnce       sync.Once
 }
@@ -110,8 +130,9 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 	ctx, cancel := context.WithCancel(parent)
 	return &Manager{
 		ctx: ctx, cancel: cancel, send: send, local: local, lease: lease,
-		punchTimeout: 1200 * time.Millisecond, sessions: make(map[uint64]*Session),
-		starting: make(map[string]struct{}), ready: make(chan *Session, 1024),
+		punchTimeout: 1200 * time.Millisecond, keepAlive: 10 * time.Second, idleTimeout: 120 * time.Second, maxExitSessions: 4,
+		sessions: make(map[uint64]*Session), starting: make(map[string]struct{}), cooldowns: make(map[string]failureState),
+		ready: make(chan *Session, 1024),
 	}
 }
 
@@ -119,11 +140,25 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 // a dedicated Endpoint so candidate discovery, punching and QUIC all use the
 // exact same UDP socket and NAT mapping.
 func NewQUICManager(parent context.Context, send ControlSender, rendezvous string, lease, punchTimeout time.Duration) *Manager {
+	return NewQUICManagerWithOptions(parent, send, rendezvous, lease, QUICManagerOptions{PunchTimeout: punchTimeout})
+}
+
+func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rendezvous string, lease time.Duration, options QUICManagerOptions) *Manager {
 	m := NewManager(parent, send, nil, lease)
-	if punchTimeout > 0 {
-		m.punchTimeout = punchTimeout
+	if options.PunchTimeout > 0 {
+		m.punchTimeout = options.PunchTimeout
+	}
+	if options.KeepAlive > 0 {
+		m.keepAlive = options.KeepAlive
+	}
+	if options.IdleTimeout > 0 {
+		m.idleTimeout = options.IdleTimeout
+	}
+	if options.MaxExitSessions > 0 {
+		m.maxExitSessions = options.MaxExitSessions
 	}
 	m.endpointFactory = func() *Endpoint { return NewEndpoint(rendezvous) }
+	go m.reapIdleLoop()
 	return m
 }
 
@@ -162,6 +197,13 @@ func (m *Manager) EnsureClient(exitDeviceID string) {
 		return
 	}
 	m.mu.Lock()
+	if failure, exists := m.cooldowns[exitDeviceID]; exists {
+		if time.Now().Before(failure.until) {
+			m.mu.Unlock()
+			return
+		}
+		delete(m.cooldowns, exitDeviceID)
+	}
 	if _, exists := m.starting[exitDeviceID]; exists {
 		m.mu.Unlock()
 		return
@@ -237,6 +279,10 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 		}
 		return nil, net.ErrClosed
 	}
+	item.mu.Lock()
+	item.clientRole = true
+	item.lastUsed.Store(time.Now().UnixMilli())
+	item.mu.Unlock()
 	item.setState(StateRendezvous, "")
 	return item, nil
 }
@@ -395,6 +441,7 @@ func (m *Manager) ReadyForExit(exitDeviceID string) (tunnel.TunnelSession, bool)
 	m.mu.Unlock()
 	for _, item := range items {
 		if direct, ok := item.Tunnel(); ok {
+			item.lastUsed.Store(time.Now().UnixMilli())
 			return direct, true
 		}
 	}
@@ -431,6 +478,15 @@ func (m *Manager) PathStatus(exitDeviceID string) (PathStatus, bool) {
 			State: snapshot.State, Path: snapshot.Path, Error: snapshot.Error,
 		}
 	}
+	m.mu.Lock()
+	failure, cooling := m.cooldowns[exitDeviceID]
+	m.mu.Unlock()
+	if cooling && time.Now().Before(failure.until) && (bestRank < 0 || bestRank <= pathStateRank(StateDegraded)) {
+		return PathStatus{
+			ExitDeviceID: exitDeviceID, State: StateCooldown,
+			Error: failure.reason,
+		}, true
+	}
 	return best, bestRank >= 0
 }
 
@@ -447,6 +503,8 @@ func pathStateRank(state State) int {
 	case StateDiscovering:
 		return 2
 	case StateDegraded:
+		return 2
+	case StateCooldown:
 		return 1
 	case StateClosed:
 		return 0
@@ -472,6 +530,7 @@ func (m *Manager) newSessionWithEndpoint(id uint64, clientDeviceID, exitDeviceID
 		closed: make(chan struct{}),
 	}
 	item.ExpiresAt.Store(expires)
+	item.lastUsed.Store(time.Now().UnixMilli())
 	m.mu.Lock()
 	if m.closed.Load() {
 		m.mu.Unlock()
@@ -658,10 +717,11 @@ func (s *Session) establish(clientRole bool) {
 
 	s.setState(StateQUICHandshake, "")
 	var direct *directp2p.QUICSession
+	quicOptions := directp2p.QUICOptions{KeepAlivePeriod: s.manager.keepAlive, MaxIdleTimeout: s.manager.idleTimeout}
 	if clientRole {
-		direct, err = directp2p.DialQUIC(ctx, result.Conn, result.RemoteAddr, identity, fingerprint)
+		direct, err = directp2p.DialQUIC(ctx, result.Conn, result.RemoteAddr, identity, fingerprint, quicOptions)
 	} else {
-		direct, err = directp2p.AcceptQUIC(ctx, result.Conn, identity, fingerprint)
+		direct, err = directp2p.AcceptQUIC(ctx, result.Conn, identity, fingerprint, quicOptions)
 	}
 	if err != nil {
 		s.failDirect(err)
@@ -677,9 +737,15 @@ func (s *Session) establish(clientRole bool) {
 	}
 	s.direct = direct
 	s.establishing = false
+	s.clientRole = clientRole
+	s.lastUsed.Store(time.Now().UnixMilli())
 	s.state = StateReady
 	s.lastError = ""
 	s.mu.Unlock()
+	if clientRole {
+		s.manager.resetFailure(s.ExitDeviceID)
+		s.manager.enforceClientLimit(s.ID)
+	}
 	s.reportPath(protocol.P2PPathDirectQUIC, "")
 	select {
 	case s.manager.ready <- s:
@@ -714,11 +780,15 @@ func (s *Session) failDirect(err error) {
 		s.lastError = reason
 	}
 	s.establishing = false
+	clientRole := s.clientRole
 	endpoint := s.endpoint
 	s.endpoint = nil
 	s.mu.Unlock()
 	if endpoint != nil {
 		_ = endpoint.Close()
+	}
+	if clientRole {
+		s.manager.recordFailure(s.ExitDeviceID, reason)
 	}
 	s.reportPath("", reason)
 }
@@ -845,4 +915,134 @@ func validateRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {
 	copy.AccessHosts = append([]string(nil), normalized.AccessHosts...)
 	copy.AccessCIDRs = append([]string(nil), normalized.AccessCIDRs...)
 	return &copy, nil
+}
+
+
+func (m *Manager) recordFailure(exitDeviceID, reason string) {
+	if m == nil || exitDeviceID == "" {
+		return
+	}
+	m.mu.Lock()
+	state := m.cooldowns[exitDeviceID]
+	state.count++
+	switch state.count {
+	case 1:
+		state.until = time.Now().Add(5 * time.Second)
+	case 2:
+		state.until = time.Now().Add(30 * time.Second)
+	case 3:
+		state.until = time.Now().Add(2 * time.Minute)
+	default:
+		state.until = time.Now().Add(10 * time.Minute)
+	}
+	state.reason = reason
+	m.cooldowns[exitDeviceID] = state
+	m.mu.Unlock()
+}
+
+func (m *Manager) resetFailure(exitDeviceID string) {
+	if m == nil || exitDeviceID == "" {
+		return
+	}
+	m.mu.Lock()
+	delete(m.cooldowns, exitDeviceID)
+	m.mu.Unlock()
+}
+
+func (m *Manager) enforceClientLimit(keepID uint64) {
+	if m == nil || m.maxExitSessions <= 0 {
+		return
+	}
+	for {
+		m.mu.Lock()
+		count := 0
+		var oldest *Session
+		var oldestUsed int64
+		for _, item := range m.sessions {
+			item.mu.RLock()
+			clientRole, state := item.clientRole, item.state
+			item.mu.RUnlock()
+			if !clientRole || state != StateReady {
+				continue
+			}
+			count++
+			used := item.lastUsed.Load()
+			if item.ID == keepID {
+				continue
+			}
+			if oldest == nil || used < oldestUsed {
+				oldest, oldestUsed = item, used
+			}
+		}
+		if count <= m.maxExitSessions || oldest == nil {
+			m.mu.Unlock()
+			return
+		}
+		delete(m.sessions, oldest.ID)
+		m.mu.Unlock()
+		m.closeAndNotify(oldest, "lru_evicted")
+	}
+}
+
+func (m *Manager) reapIdleLoop() {
+	interval := 10 * time.Second
+	if m.idleTimeout > 0 && m.idleTimeout/4 < interval {
+		interval = m.idleTimeout / 4
+	}
+	if interval < time.Second {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		case now := <-ticker.C:
+			var stale []*Session
+			m.mu.Lock()
+			for id, item := range m.sessions {
+				item.mu.RLock()
+				clientRole, state := item.clientRole, item.state
+				item.mu.RUnlock()
+				if !clientRole || state != StateReady || m.idleTimeout <= 0 {
+					continue
+				}
+				last := time.UnixMilli(item.lastUsed.Load())
+				if now.Sub(last) >= m.idleTimeout {
+					delete(m.sessions, id)
+					stale = append(stale, item)
+				}
+			}
+			for exitID, failure := range m.cooldowns {
+				if !now.Before(failure.until) {
+					delete(m.cooldowns, exitID)
+				}
+			}
+			m.mu.Unlock()
+			for _, item := range stale {
+				m.closeAndNotify(item, "idle_timeout")
+			}
+		}
+	}
+}
+
+func (m *Manager) closeAndNotify(item *Session, reason string) {
+	if item == nil {
+		return
+	}
+	message := protocol.P2PControlMessage{
+		Type: protocol.P2PControlClose, SessionID: item.ID,
+		ClientDeviceID: item.ClientDeviceID, ExitDeviceID: item.ExitDeviceID,
+		SessionToken: append([]byte(nil), item.Token...), Reason: reason,
+	}
+	item.closeLocal()
+	if m.send == nil || m.closed.Load() {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(m.ctx, 3*time.Second)
+		defer cancel()
+		_, _ = m.send(ctx, message)
+	}()
 }

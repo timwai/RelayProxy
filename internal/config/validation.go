@@ -79,6 +79,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Server.Address = strings.TrimSpace(c.Server.Address)
 	c.Mode = strings.ToUpper(strings.TrimSpace(c.Mode))
 	c.Transport.Mode = strings.ToLower(strings.TrimSpace(c.Transport.Mode))
+	c.P2P.Mode = strings.ToLower(strings.TrimSpace(c.P2P.Mode))
 	c.Network.Mode = strings.ToLower(strings.TrimSpace(c.Network.Mode))
 	// The short-lived global handle_direct_connections setting was replaced by
 	// per-routing-rule handle_direct. Keep accepting old files, then drop it.
@@ -110,6 +111,23 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	case "auto", "quic_only", "tcp_only":
 	default:
 		return fmt.Errorf("transport.mode 必须是 auto / quic_only / tcp_only")
+	}
+	switch c.P2P.Mode {
+	case "auto", "relay_only", "p2p_only":
+	default:
+		return fmt.Errorf("p2p.mode 必须是 auto / relay_only / p2p_only")
+	}
+	if c.P2P.PunchTimeoutMs < 100 || c.P2P.PunchTimeoutMs > 10000 {
+		return fmt.Errorf("p2p.punch_timeout_ms 必须在 100-10000 之间")
+	}
+	if c.P2P.KeepaliveSec < 5 || c.P2P.KeepaliveSec > 60 {
+		return fmt.Errorf("p2p.keepalive_sec 必须在 5-60 之间")
+	}
+	if c.P2P.IdleTimeoutSec < 30 || c.P2P.IdleTimeoutSec > 3600 {
+		return fmt.Errorf("p2p.idle_timeout_sec 必须在 30-3600 之间")
+	}
+	if c.P2P.MaxExitSessions < 1 || c.P2P.MaxExitSessions > 32 {
+		return fmt.Errorf("p2p.max_exit_sessions 必须在 1-32 之间")
 	}
 	for _, item := range []struct {
 		name string
@@ -218,6 +236,8 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.Proxy.HTTP.Enabled = cloneBool(c.Proxy.HTTP.Enabled)
 	out.Exit.Enabled = cloneBool(c.Exit.Enabled)
 	out.RDP.Enabled = cloneBool(c.RDP.Enabled)
+	out.P2P.Enabled = cloneBool(c.P2P.Enabled)
+	out.P2P.Fallback = cloneBool(c.P2P.Fallback)
 	out.GUI.Enabled = cloneBool(c.GUI.Enabled)
 	out.GUI.MinimizeToTray = cloneBool(c.GUI.MinimizeToTray)
 	if c.GUI.VerificationPopupTimeoutSec != nil {

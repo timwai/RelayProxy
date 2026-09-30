@@ -304,3 +304,55 @@ func TestUDPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 		t.Fatalf("unexpected attempts direct=%d relay=%d", direct.opens.Load(), relay.opens.Load())
 	}
 }
+
+
+func TestDirectPathPolicyModes(t *testing.T) {
+	relay := &namedSession{name: "relay"}
+	direct := &namedSession{name: "direct"}
+
+	t.Run("relay_only", func(t *testing.T) {
+		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+		var ensure atomic.Int32
+		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, func(string) { ensure.Add(1) })
+		dialer.ConfigureDirectPolicy("relay_only", true)
+		session, isDirect := dialer.sessionForExit("exit")
+		if session != relay || isDirect || ensure.Load() != 0 {
+			t.Fatalf("relay_only selected session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		}
+	})
+
+	t.Run("p2p_only_cold", func(t *testing.T) {
+		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+		var ensure atomic.Int32
+		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return nil, false }, func(string) { ensure.Add(1) })
+		dialer.ConfigureDirectPolicy("p2p_only", false)
+		session, isDirect := dialer.sessionForExit("exit")
+		if session != nil || isDirect || ensure.Load() != 1 {
+			t.Fatalf("p2p_only cold session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		}
+	})
+}
+
+func TestDirectFallbackCanBeDisabled(t *testing.T) {
+	direct := newScriptedSession(func() tunnel.TunnelStream {
+		return &scriptedStream{failWriteAt: 2}
+	})
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenTCPResponse{Success: true})
+	})
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
+	dialer.ConfigureDirectPolicy("auto", false)
+
+	conn, err := dialer.DialTCP(context.Background(), "exit", "example.com", 443)
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("disabled fallback unexpectedly returned Relay connection")
+	}
+	if err == nil {
+		t.Fatal("disabled fallback unexpectedly swallowed direct transport failure")
+	}
+	if relay.opens.Load() != 0 {
+		t.Fatalf("disabled fallback opened Relay %d time(s)", relay.opens.Load())
+	}
+}

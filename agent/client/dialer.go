@@ -29,15 +29,17 @@ type TunnelDialer struct {
 	defaultExitID atomic.Pointer[string]
 	requestSeq    atomic.Uint64
 
-	directMu     sync.RWMutex
-	getDirect    func(exitDeviceID string) (tunnel.TunnelSession, bool)
-	ensureDirect func(exitDeviceID string)
+	directMu       sync.RWMutex
+	getDirect      func(exitDeviceID string) (tunnel.TunnelSession, bool)
+	ensureDirect   func(exitDeviceID string)
+	directMode     string
+	directFallback bool
 }
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
 	return &TunnelDialer{
-		getTunnel:   getTunnel,
-		getClientID: getClientID,
+		getTunnel: getTunnel, getClientID: getClientID,
+		directMode: "auto", directFallback: true,
 	}
 }
 
@@ -54,11 +56,24 @@ func (d *TunnelDialer) ConfigureDirectPath(
 	d.directMu.Unlock()
 }
 
+func (d *TunnelDialer) ConfigureDirectPolicy(mode string, fallback bool) {
+	d.directMu.Lock()
+	d.directMode, d.directFallback = mode, fallback
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) directFallbackEnabled() bool {
+	d.directMu.RLock()
+	defer d.directMu.RUnlock()
+	return d.directMode != "p2p_only" && d.directFallback
+}
+
 func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
-	if exitDeviceID != "" {
-		d.directMu.RLock()
-		getDirect, ensureDirect := d.getDirect, d.ensureDirect
-		d.directMu.RUnlock()
+	d.directMu.RLock()
+	getDirect, ensureDirect := d.getDirect, d.ensureDirect
+	mode := d.directMode
+	d.directMu.RUnlock()
+	if mode != "relay_only" && exitDeviceID != "" {
 		if getDirect != nil {
 			if session, ok := getDirect(exitDeviceID); ok && session != nil {
 				return session, true
@@ -66,6 +81,9 @@ func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession
 		}
 		if ensureDirect != nil {
 			ensureDirect(exitDeviceID)
+		}
+		if mode == "p2p_only" {
+			return nil, false
 		}
 	}
 	if d.getTunnel == nil {
@@ -127,7 +145,7 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
 	conn, err := d.dialTCPOnSession(ctx, sess, exitNodeID, host, port)
-	if err == nil || !direct || !retryableDirectHandshakeError(ctx, err) || d.getTunnel == nil {
+	if err == nil || !direct || !retryableDirectHandshakeError(ctx, err) || d.getTunnel == nil || !d.directFallbackEnabled() {
 		return conn, err
 	}
 	relay := d.getTunnel()
@@ -237,7 +255,7 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 	}
 
 	conn, err := d.dialUDPOnSession(ctx, sess, exitNodeID, host, port, opts)
-	if err == nil || !direct || d.getTunnel == nil || !retryableDirectUDPHandshakeError(ctx, err) {
+	if err == nil || !direct || d.getTunnel == nil || !d.directFallbackEnabled() || !retryableDirectUDPHandshakeError(ctx, err) {
 		return conn, err
 	}
 	relay := d.getTunnel()

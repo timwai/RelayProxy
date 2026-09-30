@@ -2,3 +2,15 @@
 # 首次连接会自动生成本机身份；管理员在服务端控制台批准后自动上线。
 server:
   address: relay.example.com
+
+# P2P 直连默认自动启用：首个连接立即走 Relay，后台建立直连；
+# 后续连接优先复用 P2P QUIC。relay_only 可完全关闭直连尝试。
+p2p:
+  enabled: true
+  mode: auto
+  punch_timeout_ms: 1200
+  keepalive_sec: 10
+  idle_timeout_sec: 120
+  max_exit_sessions: 4
+  fallback: true
+

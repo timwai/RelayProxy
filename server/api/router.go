@@ -184,6 +184,8 @@ func (r *Router) registerRoutes() {
 	// Message channels are configured from the authenticated Server console.
 	// Public pushes are served on the relay TCP/TLS port, not the Admin listener.
 	r.mux.HandleFunc("GET /api/v1/messages", r.requireAuth(r.handleListMessages))
+	r.mux.HandleFunc("DELETE /api/v1/messages", r.requireAuth(r.requireAdmin(r.handleClearMessages)))
+	r.mux.HandleFunc("DELETE /api/v1/messages/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteMessage)))
 	r.mux.HandleFunc("GET /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleListMessageChannels)))
 	r.mux.HandleFunc("POST /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleCreateMessageChannel)))
 	r.mux.HandleFunc("PUT /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateMessageChannel)))
@@ -593,12 +595,69 @@ func (r *Router) handleListMessages(w http.ResponseWriter, req *http.Request) {
 		}
 		limit = value
 	}
-	messages, err := r.db.ListMessages(requestOwner(req), limit)
+	channelID := strings.TrimSpace(req.URL.Query().Get("channelId"))
+	if channelID != "" && !validMessageChannelID(channelID) {
+		writeError(w, http.StatusBadRequest, "invalid channel id")
+		return
+	}
+	var (
+		messages []*repository.MessageRecord
+		err      error
+	)
+	if channelID == "" {
+		messages, err = r.db.ListMessages(requestOwner(req), limit)
+	} else {
+		messages, err = r.db.ListMessagesByChannel(requestOwner(req), channelID, limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load messages")
 		return
 	}
 	writeJSON(w, http.StatusOK, messages)
+}
+
+func (r *Router) handleClearMessages(w http.ResponseWriter, req *http.Request) {
+	channelID := strings.TrimSpace(req.URL.Query().Get("channelId"))
+	if channelID != "" {
+		if !validMessageChannelID(channelID) {
+			writeError(w, http.StatusBadRequest, "invalid channel id")
+			return
+		}
+		if _, err := r.db.GetMessageChannel(channelID); errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "channel not found")
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load channel")
+			return
+		}
+	}
+	deleted, err := r.db.DeleteMessages(channelID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear messages")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"deleted":   deleted,
+		"channelId": channelID,
+	})
+}
+
+func (r *Router) handleDeleteMessage(w http.ResponseWriter, req *http.Request) {
+	id := strings.TrimSpace(req.PathValue("id"))
+	if id == "" || len(id) > 80 {
+		writeError(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+	deleted, err := r.db.DeleteMessage(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete message")
+		return
+	}
+	if !deleted {
+		writeError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "deleted"})
 }
 
 // Auth Middleware

@@ -294,13 +294,13 @@ func buildWailsAssets(opts Options) (string, string, fstest.MapFS, error) {
 	}
 
 	files := fstest.MapFS{
-		"tailwind.js":     &fstest.MapFile{Data: tailwind, Mode: 0o444},
-		"routing.js":      &fstest.MapFile{Data: routing, Mode: 0o444},
-		"connections.js":  &fstest.MapFile{Data: connectionsJS, Mode: 0o444},
-		"wails-bridge.js": &fstest.MapFile{Data: bridgeJS, Mode: 0o444},
+		"tailwind.js":       &fstest.MapFile{Data: tailwind, Mode: 0o444},
+		"routing.js":        &fstest.MapFile{Data: routing, Mode: 0o444},
+		"connections.js":    &fstest.MapFile{Data: connectionsJS, Mode: 0o444},
+		"wails-bridge.js":   &fstest.MapFile{Data: bridgeJS, Mode: 0o444},
 		"verification.html": &fstest.MapFile{Data: verificationHTML, Mode: 0o444},
-		"ui/base.css":     &fstest.MapFile{Data: baseCSS, Mode: 0o444},
-		"ui/theme.js":     &fstest.MapFile{Data: themeJS, Mode: 0o444},
+		"ui/base.css":       &fstest.MapFile{Data: baseCSS, Mode: 0o444},
+		"ui/theme.js":       &fstest.MapFile{Data: themeJS, Mode: 0o444},
 	}
 	return mainHTML, connectionsHTML, files, nil
 }

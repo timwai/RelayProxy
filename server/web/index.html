@@ -25,6 +25,22 @@
     .channel-rule-list{display:grid;gap:9px;margin-top:9px}.channel-rule-card{padding:10px;border:1px solid var(--rp-border);border-radius:9px;background:var(--rp-surface-soft)}.channel-rule-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}.channel-rule-card-head strong{font-size:9px}.channel-rule-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.channel-rule-grid .wide{grid-column:1/-1}.channel-rule-grid label{margin:0}.channel-rule-grid input,.channel-rule-grid select{width:100%}.channel-rule-check{display:flex;align-items:center;gap:7px;margin-top:7px;font-size:8px}.channel-rule-check input{width:auto}.channel-route-devices{min-height:82px}.channel-rule-empty{padding:12px;text-align:center;border:1px dashed var(--rp-border);border-radius:8px;color:var(--rp-muted);font-size:8px}.channel-fallback-note{margin:7px 0 0;color:var(--rp-muted);font-size:8px}
     .message-channel-context{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 12px 10px;padding:10px 12px;border:1px solid var(--rp-border);border-radius:9px;background:var(--rp-surface-soft)}.message-channel-context>div{min-width:0}.message-channel-context strong,.message-channel-context small{display:block}.message-channel-context small{margin-top:2px;color:var(--rp-muted)}.message-channel-context .button-row{flex-shrink:0}
     @media(max-width:600px){.channel-grid,.channel-device-list,.channel-rule-grid{grid-template-columns:1fr}.channel-rule-grid .wide{grid-column:auto}.channel-url-preview{grid-template-columns:1fr}}
+    @media(min-width:851px){
+      .channel-grid{grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px;padding:0 18px 18px}
+      .channel-card{padding:16px;border-radius:10px}
+      .channel-card strong{font-size:13px}
+      .channel-card-head code{font-size:11px;margin-top:4px}
+      .channel-card p{font-size:12px;margin:11px 0}
+      .channel-url{padding:9px 10px}.channel-url code{font-size:11px}
+      .channel-actions{gap:8px;margin-top:12px}
+      .channel-device-option{gap:10px;padding:11px}
+      .channel-device-option small{font-size:11px}
+      .channel-url-preview{padding:10px 11px}.channel-url-preview code{font-size:11px}
+      .channel-rule-heading h3{font-size:14px}.channel-rule-heading p{font-size:12px}
+      .channel-rule-card{padding:13px}.channel-rule-card-head strong{font-size:13px}
+      .channel-rule-grid{gap:10px}.channel-rule-check,.channel-rule-empty,.channel-fallback-note{font-size:12px}
+      .message-channel-context{margin:0 18px 14px;padding:12px 14px}
+    }
   </style>
 </head>
 <body>

@@ -167,7 +167,6 @@ func TestPunchIsSymmetric(t *testing.T) {
 	}
 }
 
-
 func TestSendAllKeepsRacingWhenOneAddressFamilyFails(t *testing.T) {
 	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
 	if err != nil {

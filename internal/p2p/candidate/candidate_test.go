@@ -32,7 +32,6 @@ func TestValidateCandidates(t *testing.T) {
 	}
 }
 
-
 func TestDiscoveryPriorityMatchesDirectPathPreference(t *testing.T) {
 	privateIPv4 := netip.MustParseAddr("192.168.1.10")
 	privateIPv6 := netip.MustParseAddr("fd00::10")

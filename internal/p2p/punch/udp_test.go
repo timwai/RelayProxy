@@ -248,7 +248,6 @@ func TestPunchIsSymmetricOverIPv6(t *testing.T) {
 	}
 }
 
-
 func TestCandidateScoreBalancesPreferenceAndLatency(t *testing.T) {
 	highPriority := candidateScore(1200, 80*time.Millisecond)
 	lowerPriority := candidateScore(1100, 5*time.Millisecond)

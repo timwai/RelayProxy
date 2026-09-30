@@ -163,4 +163,3 @@ func filterIPv4UDPCandidates(input []protocol.P2PCandidate) []protocol.P2PCandid
 	}
 	return result
 }
-

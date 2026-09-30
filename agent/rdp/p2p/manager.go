@@ -14,10 +14,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"relayproxy/internal/protocol"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/punch"
 	"relayproxy/internal/p2p/secure"
+	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
 

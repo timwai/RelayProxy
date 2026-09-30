@@ -88,7 +88,6 @@ func (a *requestACL) CheckIPProtocol(ctx context.Context, ip net.IP, port uint16
 	return nil
 }
 
-
 type relayPolicyContextKey struct{}
 
 // BindRelayPolicy binds the server-authoritative Relay ACL to a direct P2P

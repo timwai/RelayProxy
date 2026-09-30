@@ -66,7 +66,7 @@ type Session struct {
 	mu              sync.RWMutex
 	peerCandidates  []protocol.P2PCandidate
 	peerFingerprint string
-	relayPolicy      *acl.Policy
+	relayPolicy     *acl.Policy
 	state           State
 	lastError       string
 	endpoint        *Endpoint
@@ -197,7 +197,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	}
 	response, err := m.send(ctx, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectRequest, ExitDeviceID: exitDeviceID,
-		Candidates: append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
+		Candidates:   append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
 	})
 	if err != nil {
 		if endpoint != nil {
@@ -763,7 +763,6 @@ func (s *Session) closeLocal() {
 		}
 	})
 }
-
 
 func validateRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {
 	if policy == nil || policy.Fingerprint == "" {

@@ -16,9 +16,9 @@ const (
 
 var (
 	ErrInvalidPacket = p2psecure.ErrInvalidPacket
-	ErrBadMAC         = p2psecure.ErrBadMAC
-	ErrReplay         = p2psecure.ErrReplay
-	ErrShortBuffer    = p2psecure.ErrShortBuffer
+	ErrBadMAC        = p2psecure.ErrBadMAC
+	ErrReplay        = p2psecure.ErrReplay
+	ErrShortBuffer   = p2psecure.ErrShortBuffer
 
 	DecodePunchPacket = p2psecure.DecodePunchPacket
 	NewDataCodec      = p2psecure.NewDataCodec

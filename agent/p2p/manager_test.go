@@ -107,7 +107,6 @@ func TestRevokeClosesLocalSession(t *testing.T) {
 	}
 }
 
-
 func TestReadyForExitIgnoresSignalingOnlySession(t *testing.T) {
 	manager := NewManager(context.Background(), nil, nil, time.Minute)
 	defer manager.Close()
@@ -121,7 +120,6 @@ func TestReadyForExitIgnoresSignalingOnlySession(t *testing.T) {
 		t.Fatal("signaling-only session was exposed as a ready direct tunnel")
 	}
 }
-
 
 func TestEnsureClientDeduplicatesInFlightAttempt(t *testing.T) {
 	var calls atomic.Int32

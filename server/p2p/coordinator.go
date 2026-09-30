@@ -19,14 +19,14 @@ import (
 )
 
 const (
-	DefaultLease             = 60 * time.Second
-	MinLease                 = 15 * time.Second
-	MaxLease                 = 5 * time.Minute
-	DefaultMaxSessions       = 8
-	maxActiveSessions        = 4096
-	maxConnectsPerMinute     = 120
-	connectRateWindow        = time.Minute
-	maxFingerprintLength     = 256
+	DefaultLease         = 60 * time.Second
+	MinLease             = 15 * time.Second
+	MaxLease             = 5 * time.Minute
+	DefaultMaxSessions   = 8
+	maxActiveSessions    = 4096
+	maxConnectsPerMinute = 120
+	connectRateWindow    = time.Minute
+	maxFingerprintLength = 256
 )
 
 type AuthorizeFunc func(clientDeviceID, exitDeviceID string) (bool, error)
@@ -638,7 +638,6 @@ func hasCapability(values []string, wanted string) bool {
 func p2pError(code, message string) protocol.P2PControlMessage {
 	return protocol.P2PControlMessage{Type: protocol.P2PControlError, ErrorCode: code, ErrorMessage: message}
 }
-
 
 func (c *Coordinator) policyCopy() *acl.Policy {
 	if c == nil || c.relayPolicy == nil {

@@ -133,7 +133,6 @@ func TestCompiledRelayACLCacheReusesVerifiedPolicy(t *testing.T) {
 	}
 }
 
-
 func TestBoundRelayPolicyIsIndependentCopy(t *testing.T) {
 	original := &acl.Policy{
 		ID: "relay_acl", AllowInternet: true,

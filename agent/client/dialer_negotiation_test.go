@@ -127,7 +127,6 @@ func TestDatagramRequiredRejectsUnsupportedClientTunnel(t *testing.T) {
 	}
 }
 
-
 type namedSession struct {
 	tunnel.TunnelSession
 	name string

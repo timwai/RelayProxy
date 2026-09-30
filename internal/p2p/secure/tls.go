@@ -31,12 +31,12 @@ func GenerateEphemeralIdentity() (*TLSIdentity, error) {
 	}
 	now := time.Now()
 	template := &x509.Certificate{
-		SerialNumber: serial,
-		Subject: pkix.Name{CommonName: "RelayProxy P2P Ephemeral"},
-		NotBefore: now.Add(-time.Minute),
-		NotAfter:  now.Add(2 * time.Hour),
-		KeyUsage: x509.KeyUsageDigitalSignature,
-		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: "RelayProxy P2P Ephemeral"},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(2 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, publicKey, privateKey)

@@ -40,7 +40,7 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	ack := c.connect(client, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectRequest, ExitDeviceID: exit.DeviceID,
 		CertFingerprint: "sha256:client",
-		Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:52133", Priority: 100}},
+		Candidates:      []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:52133", Priority: 100}},
 	})
 	if ack.Type != protocol.P2PControlLeaseAck || ack.SessionID == 0 || len(ack.SessionToken) != 32 {
 		t.Fatalf("unexpected connect ack: %#v", ack)
@@ -56,7 +56,7 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	answerAck := c.answer(exit, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectAnswer, SessionID: offer.SessionID, SessionToken: offer.SessionToken,
 		CertFingerprint: "sha256:exit",
-		Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "reflexive", Address: "198.51.100.2:41001", Priority: 10}},
+		Candidates:      []protocol.P2PCandidate{{Protocol: "udp", Type: "reflexive", Address: "198.51.100.2:41001", Priority: 10}},
 	})
 	if answerAck.Type != protocol.P2PControlLeaseAck {
 		t.Fatalf("unexpected answer ack: %#v", answerAck)
@@ -130,7 +130,6 @@ func TestCoordinatorRevokesLeaseWhenAuthorizationChanges(t *testing.T) {
 	}
 }
 
-
 func TestCoordinatorRejectsNonUDPCandidates(t *testing.T) {
 	manager := session.NewManager()
 	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)
@@ -150,7 +149,6 @@ func TestCoordinatorRejectsNonUDPCandidates(t *testing.T) {
 		t.Fatalf("unexpected response: %#v", response)
 	}
 }
-
 
 func TestCoordinatorBindsRelayPolicyToExitOffer(t *testing.T) {
 	manager := session.NewManager()

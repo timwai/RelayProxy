@@ -397,7 +397,6 @@ func TestAgentThemeAllowsSystem(t *testing.T) {
 	}
 }
 
-
 func TestServerConfigLoadsP2PSettings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.yaml")
 	data := `p2p:
@@ -420,7 +419,6 @@ func TestServerConfigLoadsP2PSettings(t *testing.T) {
 		t.Fatalf("P2P settings were not loaded: %+v", cfg.P2P)
 	}
 }
-
 
 func TestServerConfigRejectsSharedRendezvousSocket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.yaml")

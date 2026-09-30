@@ -6,8 +6,8 @@ import p2pcandidate "relayproxy/internal/p2p/candidate"
 
 const (
 	MaxCandidates = p2pcandidate.MaxCandidates
-	ProbeMagic     = p2pcandidate.ProbeMagic
-	ProbeVersion   = p2pcandidate.ProbeVersion
+	ProbeMagic    = p2pcandidate.ProbeMagic
+	ProbeVersion  = p2pcandidate.ProbeVersion
 )
 
 var (

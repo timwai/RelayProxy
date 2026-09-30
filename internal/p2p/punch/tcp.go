@@ -11,8 +11,8 @@ import (
 	"net/netip"
 	"time"
 
-	"relayproxy/internal/protocol"
 	"relayproxy/internal/p2p/secure"
+	"relayproxy/internal/protocol"
 )
 
 const tcpPacketSize = 40

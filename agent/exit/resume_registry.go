@@ -1,12 +1,14 @@
 package exit
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
 	"time"
 
 	p2presume "relayproxy/internal/p2p/resume"
+	"relayproxy/internal/tunnel"
 )
 
 var (
@@ -19,6 +21,7 @@ var (
 const (
 	defaultResumeGrace       = 15 * time.Second
 	defaultResumeMaxSessions = 256
+	defaultResumeReplayLimit = 2 << 20
 )
 
 type resumeRegistry struct {
@@ -33,12 +36,21 @@ type resumeTargetSession struct {
 	identity p2presume.Identity
 	target   net.Conn
 
-	mu         sync.Mutex
-	generation uint64
-	local      p2presume.Binding
-	detachedAt time.Time
-	timer      *time.Timer
-	closed     bool
+	mu           sync.Mutex
+	generation   uint64
+	local        p2presume.Binding
+	detachedAt   time.Time
+	timer        *time.Timer
+	closed       bool
+	state        *p2presume.StreamState
+	endpoint     *p2presume.Endpoint
+	ctx          context.Context
+	cancel       context.CancelFunc
+	remoteTarget string
+	onDone       func()
+
+	startOnce  sync.Once
+	finishOnce sync.Once
 }
 
 func newResumeRegistry(grace time.Duration, maxSessions int) *resumeRegistry {
@@ -82,6 +94,42 @@ func (r *resumeRegistry) register(local p2presume.Binding, target net.Conn) (*re
 	return s, nil
 }
 
+func (r *resumeRegistry) registerLogical(
+	local p2presume.Binding,
+	target net.Conn,
+	remoteTarget string,
+	replayLimit int,
+	onDone func(),
+) (*resumeTargetSession, error) {
+	if replayLimit <= 0 {
+		replayLimit = defaultResumeReplayLimit
+	}
+	state, err := p2presume.NewStreamState(local.Identity, replayLimit)
+	if err != nil {
+		return nil, err
+	}
+	endpoint, err := p2presume.NewEndpoint(state)
+	if err != nil {
+		return nil, err
+	}
+	s, err := r.register(local, target)
+	if err != nil {
+		_ = endpoint.Close()
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.state = state
+	s.endpoint = endpoint
+	s.ctx = ctx
+	s.cancel = cancel
+	s.remoteTarget = remoteTarget
+	s.onDone = onDone
+	s.mu.Unlock()
+	s.startLogicalBridge()
+	return s, nil
+}
+
 func (r *resumeRegistry) get(id [p2presume.StreamIDSize]byte) (*resumeTargetSession, bool) {
 	if r == nil {
 		return nil, false
@@ -110,11 +158,18 @@ func (r *resumeRegistry) rebind(peer p2presume.Binding) (*resumeTargetSession, e
 		return nil, errResumeSessionClosed
 	}
 	current := s.local
+	if s.state != nil {
+		if latest, err := s.state.Binding(p2presume.BindAck, s.generation); err == nil {
+			current = latest
+		}
+	}
 	current.Generation = s.generation
 	if err := p2presume.ValidateRebind(current, peer); err != nil {
 		return nil, err
 	}
 	s.generation = peer.Generation
+	s.local = current
+	s.local.Generation = peer.Generation
 	s.detachedAt = time.Time{}
 	if s.timer != nil {
 		s.timer.Stop()
@@ -165,6 +220,107 @@ func (s *resumeTargetSession) detach(local p2presume.Binding) error {
 	return nil
 }
 
+func (s *resumeTargetSession) startLogicalBridge() {
+	if s == nil {
+		return
+	}
+	s.startOnce.Do(func() {
+		go s.watchTransportLoss()
+		go func() {
+			s.mu.Lock()
+			ctx, endpoint, target := s.ctx, s.endpoint, s.target
+			s.mu.Unlock()
+			if ctx == nil || endpoint == nil || target == nil {
+				s.finish()
+				return
+			}
+			tunnel.Pipe(ctx, endpoint, target, defaultStreamIdleTimeout, nil)
+			if s.registry != nil {
+				s.registry.remove(s.identity.ID)
+			} else {
+				s.closeTarget()
+			}
+			s.finish()
+		}()
+	})
+}
+
+func (s *resumeTargetSession) watchTransportLoss() {
+	s.mu.Lock()
+	ctx, endpoint, state := s.ctx, s.endpoint, s.state
+	s.mu.Unlock()
+	if ctx == nil || endpoint == nil || state == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case loss := <-endpoint.Losses():
+			local, err := state.Binding(p2presume.BindAck, loss.Generation)
+			if err != nil {
+				continue
+			}
+			_ = s.detach(local)
+		}
+	}
+}
+
+func (s *resumeTargetSession) bindTransport(transport tunnel.TunnelStream, generation uint64) (<-chan struct{}, error) {
+	if s == nil || transport == nil || generation == 0 {
+		return nil, p2presume.ErrBinding
+	}
+	s.mu.Lock()
+	if s.closed || s.endpoint == nil || generation != s.generation {
+		s.mu.Unlock()
+		return nil, errResumeSessionClosed
+	}
+	endpoint := s.endpoint
+	s.mu.Unlock()
+	if err := endpoint.Bind(transport, generation); err != nil {
+		return nil, err
+	}
+	return endpoint.GenerationDone(generation), nil
+}
+
+func (s *resumeTargetSession) localBinding() (p2presume.Binding, error) {
+	if s == nil {
+		return p2presume.Binding{}, errResumeSessionNotFound
+	}
+	s.mu.Lock()
+	if s.closed || s.state == nil {
+		s.mu.Unlock()
+		return p2presume.Binding{}, errResumeSessionClosed
+	}
+	state, generation := s.state, s.generation
+	s.mu.Unlock()
+	return state.Binding(p2presume.BindAck, generation)
+}
+
+func (s *resumeTargetSession) remoteAddress() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.remoteTarget
+}
+
+func (s *resumeTargetSession) finish() {
+	if s == nil {
+		return
+	}
+	s.finishOnce.Do(func() {
+		s.mu.Lock()
+		onDone := s.onDone
+		s.onDone = nil
+		s.mu.Unlock()
+		if onDone != nil {
+			onDone()
+		}
+	})
+}
+
 func (r *resumeRegistry) expire(id [p2presume.StreamIDSize]byte, generation uint64) {
 	if r == nil {
 		return
@@ -182,18 +338,20 @@ func (r *resumeRegistry) expire(id [p2presume.StreamIDSize]byte, generation uint
 		r.mu.Unlock()
 		return
 	}
-	// Mark the session unusable first, but keep it registered until the target
-	// socket is actually closed. This makes len()==0 a strict resource-release
-	// boundary rather than racing asynchronous Close().
 	s.closed = true
-	target := s.target
-	s.target = nil
-	s.timer = nil
+	target, endpoint, cancel := s.target, s.endpoint, s.cancel
+	s.target, s.endpoint, s.cancel, s.timer = nil, nil, nil, nil
 	s.mu.Unlock()
 	r.mu.Unlock()
 
+	if endpoint != nil {
+		_ = endpoint.Close()
+	}
 	if target != nil {
 		_ = target.Close()
+	}
+	if cancel != nil {
+		cancel()
 	}
 
 	r.mu.Lock()
@@ -201,6 +359,7 @@ func (r *resumeRegistry) expire(id [p2presume.StreamIDSize]byte, generation uint
 		delete(r.sessions, id)
 	}
 	r.mu.Unlock()
+	s.finish()
 }
 
 func (r *resumeRegistry) remove(id [p2presume.StreamIDSize]byte) {
@@ -215,6 +374,7 @@ func (r *resumeRegistry) remove(id [p2presume.StreamIDSize]byte) {
 	r.mu.Unlock()
 	if s != nil {
 		s.closeTarget()
+		s.finish()
 	}
 }
 
@@ -231,6 +391,7 @@ func (r *resumeRegistry) closeAll() {
 	r.mu.Unlock()
 	for _, s := range items {
 		s.closeTarget()
+		s.finish()
 	}
 }
 
@@ -257,11 +418,17 @@ func (s *resumeTargetSession) closeTarget() {
 		s.timer.Stop()
 		s.timer = nil
 	}
-	target := s.target
-	s.target = nil
+	target, endpoint, cancel := s.target, s.endpoint, s.cancel
+	s.target, s.endpoint, s.cancel = nil, nil, nil
 	s.mu.Unlock()
+	if endpoint != nil {
+		_ = endpoint.Close()
+	}
 	if target != nil {
 		_ = target.Close()
+	}
+	if cancel != nil {
+		cancel()
 	}
 }
 

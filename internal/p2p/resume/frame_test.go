@@ -21,6 +21,21 @@ func TestFrameRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFramePreserves64BitAck(t *testing.T) {
+	var wire bytes.Buffer
+	want := Frame{Type: FrameAck, Seq: 1 << 40, Ack: (1 << 40) + 123}
+	if err := WriteFrame(&wire, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFrame(&wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Seq != want.Seq || got.Ack != want.Ack {
+		t.Fatalf("64-bit offsets truncated: got=%+v want=%+v", got, want)
+	}
+}
+
 func TestFrameRejectsOversizedPayload(t *testing.T) {
 	var wire bytes.Buffer
 	err := WriteFrame(&wire, Frame{Type: FrameData, Payload: make([]byte, MaxPayload+1)})
@@ -86,5 +101,32 @@ func TestReceiverDeduplicatesReplayAndRejectsGap(t *testing.T) {
 	}
 	if _, ack, err = receiver.Accept(12, []byte("!")); !errors.Is(err, ErrSequenceGap) || ack != 11 {
 		t.Fatalf("gap ack=%d err=%v", ack, err)
+	}
+}
+
+type shortWriter struct {
+	max int
+	buf bytes.Buffer
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) > w.max {
+		p = p[:w.max]
+	}
+	return w.buf.Write(p)
+}
+
+func TestWriteFrameHandlesShortWrites(t *testing.T) {
+	writer := &shortWriter{max: 3}
+	want := Frame{Type: FrameData, Seq: 9, Ack: 7, Payload: []byte("short-write-safe")}
+	if err := WriteFrame(writer, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadFrame(&writer.buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Seq != want.Seq || got.Ack != want.Ack || !bytes.Equal(got.Payload, want.Payload) {
+		t.Fatalf("short-write round trip mismatch: got=%+v want=%+v", got, want)
 	}
 }

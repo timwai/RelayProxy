@@ -43,6 +43,9 @@ func (b *ReplayBuffer) Append(payload []byte) (uint64, error) {
 	if b.buffered+len(payload) > b.limit {
 		return 0, ErrReplayLimit
 	}
+	if uint64(len(payload)) > ^uint64(0)-b.next {
+		return 0, ErrFrame
+	}
 	seq := b.next
 	copyPayload := append([]byte(nil), payload...)
 	b.segments = append(b.segments, segment{seq: seq, data: copyPayload})
@@ -143,6 +146,9 @@ func (r *Receiver) Accept(seq uint64, payload []byte) ([]byte, uint64, error) {
 	defer r.mu.Unlock()
 	if seq > r.expected {
 		return nil, r.expected, ErrSequenceGap
+	}
+	if uint64(len(payload)) > ^uint64(0)-seq {
+		return nil, r.expected, ErrFrame
 	}
 	end := seq + uint64(len(payload))
 	if end <= r.expected {

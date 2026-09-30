@@ -13,7 +13,7 @@ import (
 const (
 	Magic      uint32 = 0x52505352 // "RPSR"
 	Version    byte   = 1
-	HeaderSize        = 24
+	HeaderSize        = 32
 
 	MaxPayload = 32 << 10
 )
@@ -66,19 +66,12 @@ func WriteFrame(w io.Writer, frame Frame) error {
 	header[4] = Version
 	header[5] = byte(frame.Type)
 	binary.BigEndian.PutUint64(header[8:16], frame.Seq)
-	binary.BigEndian.PutUint32(header[16:20], uint32(len(frame.Payload)))
-	binary.BigEndian.PutUint32(header[20:24], uint32(frame.Ack))
-	if frame.Ack > uint64(^uint32(0)) {
-		return fmt.Errorf("%w: ack offset exceeds v1 range", ErrFrame)
-	}
-	if _, err := w.Write(header[:]); err != nil {
+	binary.BigEndian.PutUint64(header[16:24], frame.Ack)
+	binary.BigEndian.PutUint32(header[24:28], uint32(len(frame.Payload)))
+	if err := writeAll(w, header[:]); err != nil {
 		return err
 	}
-	if len(frame.Payload) == 0 {
-		return nil
-	}
-	_, err := w.Write(frame.Payload)
-	return err
+	return writeAll(w, frame.Payload)
 }
 
 func ReadFrame(r io.Reader) (Frame, error) {
@@ -95,9 +88,9 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	frame := Frame{
 		Type: FrameType(header[5]),
 		Seq:  binary.BigEndian.Uint64(header[8:16]),
-		Ack:  uint64(binary.BigEndian.Uint32(header[20:24])),
+		Ack:  binary.BigEndian.Uint64(header[16:24]),
 	}
-	n := binary.BigEndian.Uint32(header[16:20])
+	n := binary.BigEndian.Uint32(header[24:28])
 	if n > MaxPayload {
 		return Frame{}, ErrPayloadSize
 	}
@@ -120,4 +113,20 @@ func ReadFrame(r io.Reader) (Frame, error) {
 		}
 	}
 	return frame, nil
+}
+
+func writeAll(w io.Writer, payload []byte) error {
+	for len(payload) > 0 {
+		n, err := w.Write(payload)
+		if n > 0 {
+			payload = payload[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
 }

@@ -29,10 +29,10 @@ type TunnelDialer struct {
 	defaultExitID atomic.Pointer[string]
 	requestSeq    atomic.Uint64
 
-	directMu       sync.RWMutex
-	getDirect      func(exitDeviceID string) (tunnel.TunnelSession, bool)
-	ensureDirect   func(exitDeviceID string)
-	directMode     string
+	directMu          sync.RWMutex
+	getDirect         func(exitDeviceID string) (tunnel.TunnelSession, bool)
+	ensureDirect      func(exitDeviceID string)
+	directMode        string
 	directFallback    bool
 	noteFallback      func(exitDeviceID string)
 	noteDirectFailure func(exitDeviceID, reason string)

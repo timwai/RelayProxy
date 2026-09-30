@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], messages: [], channels: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], messages: [], channels: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -276,7 +276,7 @@
       const customCount = (channel.verificationRules || []).length;
       const ruleBadges = (routeCount ? '<span class="badge transport">分流 ' + esc(routeCount) + '</span>' : '') +
         (customCount ? '<span class="badge transport">识别 ' + esc(customCount) + '</span>' : '');
-      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
+      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-messages="' + esc(channel.id) + '">查看消息</button><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
     }).join('');
   }
   function renderChannelDevices(selected) {
@@ -451,6 +451,7 @@
       await api('/message-channels/' + encodeURIComponent(channel.id), { method: 'DELETE' });
       $('channel-dialog').close();
       state.selectedChannel = null;
+      if (state.messageChannel === channel.id) state.messageChannel = '';
       toast('渠道已删除');
       await refresh(true);
     } catch (err) {
@@ -460,8 +461,68 @@
     }
   }
 
+  function selectedMessageChannel() {
+    return state.messageChannel ? state.channels.find(channel => channel.id === state.messageChannel) || null : null;
+  }
+  function messageListPath() {
+    const channel = state.messageChannel ? '&channelId=' + encodeURIComponent(state.messageChannel) : '';
+    return '/messages?limit=500' + channel;
+  }
+  async function showChannelMessages(id) {
+    if (!id || state.refreshing) return;
+    state.messageChannel = id;
+    $('message-search').value = '';
+    $('message-kind').value = '';
+    $('message-status').value = '';
+    await refresh(true);
+  }
+  async function showAllMessages() {
+    if (!state.messageChannel || state.refreshing) return;
+    state.messageChannel = '';
+    $('message-search').value = '';
+    $('message-kind').value = '';
+    $('message-status').value = '';
+    await refresh(true);
+  }
+  async function clearServerMessages(channelID = '') {
+    if (!state.user || state.user.role !== 'admin') return;
+    const channel = channelID ? state.channels.find(item => item.id === channelID) : null;
+    const label = channelID ? '渠道「' + (channel ? channel.name : channelID) + '」的全部消息' : '服务端全部消息';
+    if (!confirm('确定清空' + label + '？此操作会同时删除对应投递记录，且不可恢复。')) return;
+    try {
+      const query = channelID ? '?channelId=' + encodeURIComponent(channelID) : '';
+      const result = await api('/messages' + query, { method: 'DELETE' });
+      toast('已清除 ' + (Number(result.deleted) || 0) + ' 条消息');
+      await refresh(true);
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+  async function deleteServerMessage(id) {
+    if (!id || !state.user || state.user.role !== 'admin') return;
+    if (!confirm('删除这条消息？对应设备投递记录也会一并删除。')) return;
+    try {
+      await api('/messages/' + encodeURIComponent(id), { method: 'DELETE' });
+      toast('消息已删除');
+      await refresh(true);
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
   function renderMessages() {
     if (!$('messages-body')) { return; }
+    const selectedChannel = selectedMessageChannel();
+    const context = $('message-channel-context');
+    if (context) {
+      context.hidden = !state.messageChannel;
+      if (state.messageChannel) {
+        $('message-channel-title').textContent = selectedChannel ? selectedChannel.name + ' · 消息' : '渠道消息';
+        $('message-channel-id').textContent = state.messageChannel;
+      }
+    }
+    if ($('messages-clear')) $('messages-clear').hidden = !state.user || state.user.role !== 'admin';
+    if ($('messages-clear-channel')) $('messages-clear-channel').hidden = !state.user || state.user.role !== 'admin';
     const needle = ($('message-search') && $('message-search').value || '').trim().toLowerCase();
     const kind = $('message-kind') ? $('message-kind').value : '';
     const status = $('message-status') ? $('message-status').value : '';
@@ -489,8 +550,9 @@
         return '<div class="message-delivery"><span><strong>' + esc(delivery.deviceName || delivery.deviceId) + '</strong><small class="mono">' + esc(delivery.deviceId) + '</small></span>' + badge(label, tone) + error + '</div>';
       }).join('') : '<span class="muted">—</span>';
       const codeHTML = code ? '<div class="message-code"><span class="mono">' + esc(code) + '</span><button type="button" class="small-button" data-copy-message-code="' + esc(code) + '">复制</button></div>' : '<span class="muted">—</span>';
-      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || '渠道推送') + (message.channelId ? ' · ' + esc(message.channelId) : '') + (message.routeRule ? ' · 分流：' + esc(message.routeRule) : '') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td></tr>';
-    }).join('') : emptyRow(4, '暂无匹配消息', '渠道推送后会显示在这里');
+      const actionHTML = state.user && state.user.role === 'admin' ? '<button type="button" class="small-button danger" data-delete-message="' + esc(message.id) + '">删除</button>' : '<span class="muted">—</span>';
+      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || '渠道推送') + (message.channelId ? ' · ' + esc(message.channelId) : '') + (message.routeRule ? ' · 分流：' + esc(message.routeRule) : '') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td><td class="right">' + actionHTML + '</td></tr>';
+    }).join('') : emptyRow(5, '暂无匹配消息', state.messageChannel ? '这个渠道还没有消息' : '渠道推送后会显示在这里');
   }
 
   function renderIngress() {
@@ -541,7 +603,7 @@
       ['devices', '/devices', data => { state.devices = data; renderDevices(); }],
       ['exits', '/exits', data => { state.exits = data; renderExits(); }],
       ['sessions', '/sessions/active', data => { state.sessions = data; renderSessions(); }],
-      ['messages', '/messages?limit=200', data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }]
+      ['messages', messageListPath(), data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }]
     ];
     if (user.role === 'admin') {
       jobs.push(['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]);
@@ -893,6 +955,9 @@
   $('exits-grid').addEventListener('click', event => { const button = event.target.closest('[data-copy-exit]'); if (button) copy(button.dataset.copyExit); });
   ['message-search', 'message-kind', 'message-status'].forEach(id => $(id).addEventListener('input', renderMessages));
   $('messages-refresh').addEventListener('click', () => refresh(true));
+  $('messages-clear').addEventListener('click', () => clearServerMessages(''));
+  $('messages-back-all').addEventListener('click', showAllMessages);
+  $('messages-clear-channel').addEventListener('click', () => clearServerMessages(state.messageChannel));
   $('channel-create').addEventListener('click', () => openChannel(''));
   $('channel-form').addEventListener('submit', saveChannel);
   $('channel-delete').addEventListener('click', deleteChannel);
@@ -917,14 +982,18 @@
     if (id && relayPushOrigin()) copy(channelPushURL(id));
   });
   $('channel-list').addEventListener('click', event => {
+    const messagesButton = event.target.closest('[data-channel-messages]');
     const copyButton = event.target.closest('[data-channel-copy]');
     const editButton = event.target.closest('[data-channel-edit]');
+    if (messagesButton) showChannelMessages(messagesButton.dataset.channelMessages);
     if (copyButton) copy(channelPushURL(copyButton.dataset.channelCopy));
     if (editButton) openChannel(editButton.dataset.channelEdit);
   });
   $('messages-body').addEventListener('click', event => {
-    const button = event.target.closest('[data-copy-message-code]');
-    if (button) { copy(button.dataset.copyMessageCode); toast('验证码已复制'); }
+    const copyButton = event.target.closest('[data-copy-message-code]');
+    const deleteButton = event.target.closest('[data-delete-message]');
+    if (copyButton) { copy(copyButton.dataset.copyMessageCode); toast('验证码已复制'); }
+    if (deleteButton) deleteServerMessage(deleteButton.dataset.deleteMessage);
   });
   $('refresh-enrollments').addEventListener('click', () => refresh(true));
   $('copy-admin-url').addEventListener('click', () => copy(managementURL($('admin-listen').value, $('admin-protocol').value === 'true')));

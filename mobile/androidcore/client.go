@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"relayproxy/agent/exit"
+	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/protocol"
@@ -35,15 +36,22 @@ type clientConfig struct {
 }
 
 type statusSnapshot struct {
-	ConnectionState string `json:"connectionState"`
-	ApprovalState   string `json:"approvalState"`
-	DeviceID        string `json:"deviceId,omitempty"`
-	DeviceName      string `json:"deviceName"`
-	Transport       string `json:"transport,omitempty"`
-	ExitApproved    bool   `json:"exitApproved"`
-	ActiveStreams   int64  `json:"activeStreams"`
-	LatencyMs       int64  `json:"latencyMs"`
-	LastError       string `json:"lastError,omitempty"`
+	ConnectionState    string `json:"connectionState"`
+	ApprovalState      string `json:"approvalState"`
+	DeviceID           string `json:"deviceId,omitempty"`
+	DeviceName         string `json:"deviceName"`
+	Transport          string `json:"transport,omitempty"`
+	ExitApproved       bool   `json:"exitApproved"`
+	ActiveStreams      int64  `json:"activeStreams"`
+	LatencyMs          int64  `json:"latencyMs"`
+	PowerConstrained   bool   `json:"powerConstrained"`
+	P2PState           string `json:"p2pState,omitempty"`
+	P2PPath            string `json:"p2pPath,omitempty"`
+	P2PRTTMs           int64  `json:"p2pRttMs,omitempty"`
+	P2PCandidateSummary string `json:"p2pCandidateSummary,omitempty"`
+	P2PBytesUp         uint64 `json:"p2pBytesUp,omitempty"`
+	P2PBytesDown       uint64 `json:"p2pBytesDown,omitempty"`
+	LastError          string `json:"lastError,omitempty"`
 }
 
 // Client is the small gomobile-facing wrapper for the Android exit node.
@@ -57,10 +65,12 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu      sync.RWMutex
-	status  statusSnapshot
-	started bool
-	closed  bool
+	mu               sync.RWMutex
+	status           statusSnapshot
+	started          bool
+	closed           bool
+	powerConstrained bool
+	proxyP2P         *proxyp2p.Manager
 
 	wg sync.WaitGroup
 }
@@ -219,12 +229,43 @@ func (c *Client) Stop() error {
 	return err
 }
 
+// SetPowerConstrained switches Proxy P2P into its mobile battery-aware profile.
+// It is safe to call before Start and while the Relay session is connected.
+func (c *Client) SetPowerConstrained(constrained bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.powerConstrained = constrained
+	manager := c.proxyP2P
+	c.mu.Unlock()
+	if manager != nil {
+		manager.SetPowerConstrained(constrained)
+	}
+}
+
 // StatusJSON returns a stable JSON snapshot for the Android UI.
 func (c *Client) StatusJSON() string {
 	c.mu.RLock()
 	s := c.status
+	s.PowerConstrained = c.powerConstrained
+	manager := c.proxyP2P
 	c.mu.RUnlock()
 	s.ActiveStreams = c.handler.ActiveStreams()
+	if manager != nil {
+		if path, ok := manager.PathStatus(""); ok {
+			s.P2PState = string(path.State)
+			s.P2PPath = path.Path
+			s.P2PRTTMs = path.RTTMs
+			s.P2PCandidateSummary = path.CandidateSummary
+			s.P2PBytesUp = path.BytesUp
+			s.P2PBytesDown = path.BytesDown
+		}
+	}
 	data, err := json.Marshal(s)
 	if err != nil {
 		return `{"connectionState":"ERROR","lastError":"status encoding failed"}`
@@ -297,7 +338,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		return fmt.Errorf("write control header: %w", err)
 	}
 
-	transportCaps := []string{"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL}
+	transportCaps := []string{"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL, protocol.CapabilityProxyP2P}
 	if *c.cfg.TLSEnabled {
 		transportCaps = append(transportCaps, "tls", "quic")
 	}
@@ -374,7 +415,50 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	c.status.ConnectionState = string(tunnel.StateConnected)
 	c.status.Transport = string(sess.Transport())
 	c.status.LastError = ""
+	powerConstrained := c.powerConstrained
 	c.mu.Unlock()
+
+	var proxyP2PManager *proxyp2p.Manager
+	if exitApproved && contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) {
+		lease := time.Duration(accepted.P2PLeaseSec) * time.Second
+		if lease <= 0 {
+			lease = 60 * time.Second
+		}
+		proxyP2PManager = proxyp2p.NewQUICManagerWithOptions(
+			ctx,
+			func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+				return c.sendP2PControlRequest(controlCtx, sess, message)
+			},
+			accepted.P2PRendezvousAddress,
+			lease,
+			proxyp2p.QUICManagerOptions{
+				PunchTimeout:        1200 * time.Millisecond,
+				KeepAlive:           10 * time.Second,
+				IdleTimeout:         120 * time.Second,
+				MaxExitSessions:     1,
+				LowPowerIdleTimeout: 60 * time.Second,
+				LowPowerMaxSessions: 1,
+			},
+		)
+		proxyP2PManager.SetPowerConstrained(powerConstrained)
+		c.mu.Lock()
+		if !c.closed && c.manager.Session() == sess {
+			c.proxyP2P = proxyP2PManager
+		} else {
+			c.mu.Unlock()
+			_ = proxyP2PManager.Close()
+			return errors.New("session superseded while enabling proxy P2P")
+		}
+		c.mu.Unlock()
+		defer func() {
+			c.mu.Lock()
+			if c.proxyP2P == proxyP2PManager {
+				c.proxyP2P = nil
+			}
+			c.mu.Unlock()
+			_ = proxyP2PManager.Close()
+		}()
+	}
 
 	var workers sync.WaitGroup
 	workers.Add(1)
@@ -386,8 +470,15 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			c.acceptExitStreams(ctx, sess, accepted.MaxConnections, &workers)
+			c.acceptExitStreams(ctx, sess, accepted.MaxConnections, proxyP2PManager, &workers)
 		}()
+		if proxyP2PManager != nil {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				c.serveProxyP2PExit(ctx, proxyP2PManager, accepted.MaxConnections)
+			}()
+		}
 	}
 
 	select {
@@ -398,6 +489,38 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	_ = sess.Close()
 	workers.Wait()
 	return nil
+}
+
+// sendP2PControlRequest keeps rendezvous, lease and authorization signaling on
+// the authenticated Relay tunnel. Direct QUIC is data-plane only.
+func (c *Client) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSession, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+	if sess == nil {
+		return protocol.P2PControlMessage{}, errors.New("relay session is unavailable")
+	}
+	stream, err := sess.OpenStream(ctx)
+	if err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	defer stream.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = stream.SetDeadline(deadline)
+	} else {
+		_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
+	}
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeP2PControl,
+		RequestID: fmt.Sprintf("android_p2p_ctl_%d", time.Now().UnixNano()), ExitDeviceID: message.ExitDeviceID,
+	}); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	if err := protocol.WriteJSON(stream, message); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	var response protocol.P2PControlMessage
+	if err := protocol.ReadJSON(stream, &response); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	return response, nil
 }
 
 func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, sess tunnel.TunnelSession, heartbeatSec int) {
@@ -435,7 +558,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 	}
 }
 
-func (c *Client) acceptExitStreams(ctx context.Context, sess tunnel.TunnelSession, maxConnections int, workers *sync.WaitGroup) {
+func (c *Client) acceptExitStreams(ctx context.Context, sess tunnel.TunnelSession, maxConnections int, p2pManager *proxyp2p.Manager, workers *sync.WaitGroup) {
 	if maxConnections <= 0 {
 		maxConnections = 256
 	}
@@ -466,6 +589,14 @@ func (c *Client) acceptExitStreams(ctx context.Context, sess tunnel.TunnelSessio
 				_ = s.Close()
 				return
 			}
+			if header.Type == protocol.FrameTypeP2PControl && p2pManager != nil {
+				defer s.Close()
+				var message protocol.P2PControlMessage
+				if err := protocol.ReadJSON(s, &message); err == nil {
+					p2pManager.HandleControl(message)
+				}
+				return
+			}
 			switch header.Type {
 			case protocol.FrameTypeOpenTCP, protocol.FrameTypeOpenUDP:
 				c.handler.HandleStreamWithHeader(ctx, s, header)
@@ -473,6 +604,79 @@ func (c *Client) acceptExitStreams(ctx context.Context, sess tunnel.TunnelSessio
 				_ = s.Close()
 			}
 		}(stream)
+	}
+}
+
+func (c *Client) serveProxyP2PExit(ctx context.Context, manager *proxyp2p.Manager, maxStreams int) {
+	if manager == nil {
+		return
+	}
+	var sessions sync.WaitGroup
+	defer sessions.Wait()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case p2pSession := <-manager.ReadySessions():
+			if p2pSession == nil {
+				continue
+			}
+			policy := p2pSession.RelayPolicy()
+			if policy == nil {
+				continue
+			}
+			direct, ok := p2pSession.Tunnel()
+			if !ok || direct == nil {
+				continue
+			}
+			sessions.Add(1)
+			go func() {
+				defer sessions.Done()
+				c.acceptProxyP2PExitSession(ctx, direct, policy, maxStreams)
+			}()
+		}
+	}
+}
+
+func (c *Client) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.TunnelSession, relayPolicy *acl.Policy, maxStreams int) {
+	if sess == nil || relayPolicy == nil {
+		return
+	}
+	if maxStreams <= 0 {
+		maxStreams = 256
+	}
+	if maxStreams > 2048 {
+		maxStreams = 2048
+	}
+	admission := make(chan struct{}, maxStreams)
+	boundCtx := exit.BindRelayPolicy(ctx, relayPolicy)
+	var workers sync.WaitGroup
+	defer workers.Wait()
+
+	for {
+		stream, err := sess.AcceptStream(ctx)
+		if err != nil {
+			return
+		}
+		select {
+		case admission <- struct{}{}:
+		default:
+			_ = stream.Close()
+			continue
+		}
+		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
+		header, err := protocol.ReadStreamHeader(stream)
+		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP) {
+			<-admission
+			_ = stream.Close()
+			continue
+		}
+		workers.Add(1)
+		go func(s tunnel.TunnelStream, h *protocol.StreamHeader) {
+			defer workers.Done()
+			defer func() { <-admission }()
+			c.handler.HandleStreamWithHeader(boundCtx, s, h)
+		}(stream, header)
 	}
 }
 

@@ -5,10 +5,15 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import com.relayproxy.core.androidcore.Androidcore
 import com.relayproxy.core.androidcore.Client
@@ -67,8 +72,18 @@ class RelayExitService : Service() {
     private var core: Client? = null
     private var networkBinder: NetworkBinder? = null
     private var lastNotificationText: String? = null
+    private lateinit var powerManager: PowerManager
+    private var powerReceiverRegistered = false
+
     @Volatile
     private var activeNetworkMode: String? = null
+
+    private val powerStateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            applyP2PPowerProfile()
+            requestRefreshSoon()
+        }
+    }
 
     private val refresh = object : Runnable {
         override fun run() {
@@ -87,6 +102,8 @@ class RelayExitService : Service() {
     override fun onCreate() {
         super.onCreate()
         activeInstance = this
+        powerManager = getSystemService(PowerManager::class.java)
+        registerPowerStateReceiver()
         createNotificationChannel()
     }
 
@@ -120,6 +137,7 @@ class RelayExitService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refresh)
+        unregisterPowerStateReceiver()
         if (activeInstance === this) {
             activeInstance = null
         }
@@ -170,6 +188,7 @@ class RelayExitService : Service() {
             onAvailable = { activeMode ->
                 activeNetworkMode = activeMode
                 startCore(config)
+                applyP2PPowerProfile()
                 requestRefreshSoon()
             },
             onLost = {
@@ -200,6 +219,7 @@ class RelayExitService : Service() {
                 try {
                     val identity = File(filesDir, "relayproxy/device-identity.json")
                     val client = Androidcore.newClient(config.coreJson(), identity.absolutePath)
+                    client.setPowerConstrained(shouldUseP2PLowPowerProfile())
                     client.start()
                     core = client
                     status = decorateStatus(client.statusJSON())
@@ -246,6 +266,40 @@ class RelayExitService : Service() {
                 stopSelf()
             }
         }
+    }
+
+    private fun registerPowerStateReceiver() {
+        if (powerReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+            addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(powerStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(powerStateReceiver, filter)
+        }
+        powerReceiverRegistered = true
+    }
+
+    private fun unregisterPowerStateReceiver() {
+        if (!powerReceiverRegistered) return
+        powerReceiverRegistered = false
+        runCatching { unregisterReceiver(powerStateReceiver) }
+    }
+
+    private fun shouldUseP2PLowPowerProfile(): Boolean =
+        powerManager.isPowerSaveMode ||
+            powerManager.isDeviceIdleMode ||
+            !powerManager.isInteractive ||
+            activeNetworkMode == NetworkBinder.MODE_CELLULAR
+
+    private fun applyP2PPowerProfile() {
+        val constrained = shouldUseP2PLowPowerProfile()
+        core?.setPowerConstrained(constrained)
     }
 
     private fun createNotificationChannel() {
@@ -340,6 +394,7 @@ class RelayExitService : Service() {
         } else {
             obj.put("activeNetwork", activeMode)
         }
+        obj.put("powerConstrained", shouldUseP2PLowPowerProfile())
         obj.toString()
     }.getOrElse { raw }
 

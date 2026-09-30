@@ -316,7 +316,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 	}
 	payload := struct {
 		ConfigPath, ServerAddress, DeviceName, Transport, DefaultExitID             string
-		QUICPort, TCPPort                                                           int
+		QUICPort, TCPPort, VerificationPopupTimeoutSec                              int
 		TLSEnabled, ExitEnabled, AllowInternet, AllowPrivate, AllowLoopback         bool
 		AccessMode, NetworkMode, Theme, Version                                     string
 		AccessDomains, AccessCIDRs, RestartFields                                   []string
@@ -337,6 +337,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password},
 		NetworkMode:  cfg.Network.Mode, IsAutostart: b.IsAutoStart(), MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized, Theme: cfg.GUI.Theme, Version: Version,
+		VerificationPopupTimeoutSec: cfg.VerificationPopupTimeout(),
 		Network:             map[string]any{"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses},
 		NetworkCapabilities: divert.PlatformCapabilities(), Revision: state.Revision,
 		RestartRequired: state.RestartRequired, RestartFields: state.RestartFields, ReloadPending: state.ReloadPending,
@@ -360,6 +361,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"exitUpstream": payload.ExitUpstream,
 		"networkMode":  payload.NetworkMode, "isAutostart": payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
+		"verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,
 		"routing": payload.Routing, "network": payload.Network, "networkCapabilities": payload.NetworkCapabilities,
 		"runtime": payload.Runtime, "revision": payload.Revision, "restartRequired": payload.RestartRequired,
 		"restartFields": payload.RestartFields, "reloadPending": payload.ReloadPending,

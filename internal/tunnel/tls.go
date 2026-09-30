@@ -316,7 +316,6 @@ func (s *TLSSession) Done() <-chan struct{} {
 	return s.session.CloseChan()
 }
 
-
 func containsTLSProtocol(protocols []string, expected string) bool {
 	for _, protocol := range protocols {
 		if protocol == expected {

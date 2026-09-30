@@ -137,8 +137,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	if strings.HasPrefix(req.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		publicPush := strings.HasPrefix(req.URL.Path, "/api/v1/push/")
-		if !publicPush && req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !validMutationOrigin(req) {
+		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !validMutationOrigin(req) {
 			writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
 			return
 		}
@@ -183,9 +182,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("PUT /api/v1/auth/password", r.requireAuth(r.handleChangePassword))
 
 	// Message channels are configured from the authenticated Server console.
-	// The public push endpoint intentionally uses only the channel ID in the URL.
-	r.mux.HandleFunc("GET /api/v1/push/{channelID}", r.handleChannelPush)
-	r.mux.HandleFunc("POST /api/v1/push/{channelID}", r.handleChannelPush)
+	// Public pushes are served on the relay TCP/TLS port, not the Admin listener.
 	r.mux.HandleFunc("GET /api/v1/messages", r.requireAuth(r.handleListMessages))
 	r.mux.HandleFunc("GET /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleListMessageChannels)))
 	r.mux.HandleFunc("POST /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleCreateMessageChannel)))

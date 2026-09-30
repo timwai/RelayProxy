@@ -434,17 +434,33 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 		return
 	}
 	popup := a.verification
+	timeout := a.bridge.GetConfig().VerificationPopupTimeout()
 	popup.Center()
 	popup.Show()
 	disableVerificationNativeFrame()
-	popup.ExecJS("window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+	popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
+		"window.enqueueVerification && window.enqueueVerification(" + payload + ")")
 	// A message may arrive during the hidden WebView's first paint. Retrying is
 	// harmless because the popup page deduplicates by message ID.
 	time.AfterFunc(250*time.Millisecond, func() {
 		if a.verification == popup {
-			popup.ExecJS("window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+			popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
+				"window.enqueueVerification && window.enqueueVerification(" + payload + ")")
 		}
 	})
+}
+
+func (a *appWindow) setVerificationPopupTimeout(seconds int) {
+	if a == nil || a.verification == nil {
+		return
+	}
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds > 3600 {
+		seconds = 3600
+	}
+	a.verification.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d)", seconds))
 }
 
 func (a *appWindow) hideVerificationPopup() {

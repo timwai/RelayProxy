@@ -19,16 +19,16 @@ import (
 )
 
 const (
-	DefaultLease         = 60 * time.Second
-	MinLease             = 15 * time.Second
-	MaxLease             = 5 * time.Minute
-	DefaultMaxSessions   = 8
-	maxActiveSessions    = 4096
-	maxConnectsPerMinute = 120
-	connectRateWindow    = time.Minute
+	DefaultLease             = 60 * time.Second
+	MinLease                 = 15 * time.Second
+	MaxLease                 = 5 * time.Minute
+	DefaultMaxSessions       = 8
+	maxActiveSessions        = 4096
+	maxConnectsPerMinute     = 120
+	connectRateWindow        = time.Minute
 	maxFingerprintLength     = 256
-	maxReportReasonLength     = 512
-	maxReportedActiveStreams  = 1000000
+	maxReportReasonLength    = 512
+	maxReportedActiveStreams = 1000000
 )
 
 type AuthorizeFunc func(clientDeviceID, exitDeviceID string) (bool, error)

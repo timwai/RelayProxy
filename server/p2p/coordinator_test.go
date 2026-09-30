@@ -184,7 +184,6 @@ func TestCoordinatorBindsRelayPolicyToExitOffer(t *testing.T) {
 	}
 }
 
-
 func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
 	manager := session.NewManager()
 	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)

@@ -169,7 +169,6 @@ func TestValidateRelayPolicyRequiresServerFingerprint(t *testing.T) {
 	}
 }
 
-
 func TestPathStatusPrefersReadyAndHidesSensitiveDetails(t *testing.T) {
 	manager := NewManager(context.Background(), nil, nil, time.Minute)
 	defer manager.Close()

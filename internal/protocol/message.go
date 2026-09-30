@@ -18,6 +18,7 @@ const (
 	FrameTypeOpenRDP     FrameType = 0x0A
 	FrameTypeOpenRDPUDP  FrameType = 0x0B
 	FrameTypeRDPControl  FrameType = 0x0C
+	FrameTypePushMessage FrameType = 0x0D
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream
@@ -133,6 +134,24 @@ const (
 	UDPModeDatagram     = "udp_datagram_v1"
 	CapabilityTargetACL = "target_acl_v1"
 )
+
+// PushMessage is a server-originated notification delivered to one Agent.
+// CreatedAt is Unix milliseconds so future non-Go clients can consume it.
+type PushMessage struct {
+	ID               string `json:"id"`
+	Title            string `json:"title"`
+	Content          string `json:"content"`
+	VerificationCode string `json:"verificationCode,omitempty"`
+	Source           string `json:"source,omitempty"`
+	CreatedAt        int64  `json:"createdAt"`
+}
+
+// PushMessageReceipt is returned only after the Agent accepted the message.
+type PushMessageReceipt struct {
+	MessageID string `json:"messageId"`
+	Received  bool   `json:"received"`
+	Error     string `json:"error,omitempty"`
+}
 
 // PingMessage for heartbeat
 type PingMessage struct {

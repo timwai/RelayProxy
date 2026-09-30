@@ -322,7 +322,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		AccessDomains, AccessCIDRs, RestartFields                                   []string
 		SOCKS5, HTTP                                                                proxyLeg
 		IsAutostart, MinimizeToTray, StartMinimized, RestartRequired, ReloadPending bool
-		Routing, Network, Runtime, ExitUpstream                                     any
+		Routing, Network, Runtime, ExitUpstream, P2P                                any
 		NetworkCapabilities                                                         divert.Capabilities
 		Revision                                                                    string
 	}{
@@ -335,6 +335,12 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		AllowInternet: cfg.Exit.AllowInternet, AllowPrivate: cfg.Exit.AllowPrivateNetwork, AllowLoopback: cfg.Exit.AllowLoopback,
 		AccessMode: cfg.Exit.Access.Mode, AccessDomains: cfg.Exit.Access.Domains, AccessCIDRs: cfg.Exit.Access.CIDRs,
 		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password},
+		P2P: map[string]any{
+			"enabled": cfg.P2P.Enabled == nil || *cfg.P2P.Enabled, "mode": cfg.P2P.Mode,
+			"punchTimeoutMs": cfg.P2P.PunchTimeoutMs, "keepaliveSec": cfg.P2P.KeepaliveSec,
+			"idleTimeoutSec": cfg.P2P.IdleTimeoutSec, "maxExitSessions": cfg.P2P.MaxExitSessions,
+			"fallback": cfg.P2P.Fallback == nil || *cfg.P2P.Fallback,
+		},
 		NetworkMode:  cfg.Network.Mode, IsAutostart: b.IsAutoStart(), MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized, Theme: cfg.GUI.Theme, Version: Version,
 		VerificationPopupTimeoutSec: cfg.VerificationPopupTimeout(),
@@ -345,6 +351,12 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
 			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(),
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,
+			"p2p": map[string]any{
+				"enabled": state.Runtime.P2P.Enabled == nil || *state.Runtime.P2P.Enabled, "mode": state.Runtime.P2P.Mode,
+				"punchTimeoutMs": state.Runtime.P2P.PunchTimeoutMs, "keepaliveSec": state.Runtime.P2P.KeepaliveSec,
+				"idleTimeoutSec": state.Runtime.P2P.IdleTimeoutSec, "maxExitSessions": state.Runtime.P2P.MaxExitSessions,
+				"fallback": state.Runtime.P2P.Fallback == nil || *state.Runtime.P2P.Fallback,
+			},
 			"socks5": proxyLeg{state.Runtime.Proxy.SOCKS5.Enabled == nil || *state.Runtime.Proxy.SOCKS5.Enabled, state.Runtime.Proxy.SOCKS5.Listen, state.Runtime.Proxy.SOCKS5.Port},
 			"http":   proxyLeg{state.Runtime.Proxy.HTTP.Enabled == nil || *state.Runtime.Proxy.HTTP.Enabled, state.Runtime.Proxy.HTTP.Listen, state.Runtime.Proxy.HTTP.Port}},
 	}
@@ -358,7 +370,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,
-		"exitUpstream": payload.ExitUpstream,
+		"exitUpstream": payload.ExitUpstream, "p2p": payload.P2P,
 		"networkMode":  payload.NetworkMode, "isAutostart": payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
 		"verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,

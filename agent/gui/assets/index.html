@@ -655,6 +655,23 @@
           </div>
         </div>
 
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg px-4 py-3">
+          <div class="flex items-center justify-between gap-4">
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <svg class="icon-sm text-emerald-500" viewBox="0 0 24 24"><use href="#i-bolt"/></svg>
+                <span class="text-[12px] font-semibold text-slate-700 dark:text-slate-200">P2P Direct Path</span>
+                <span id="home-p2p-state" class="rp-badge">IDLE</span>
+              </div>
+              <div id="home-p2p-detail" class="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">等待选择出口或建立直连。</div>
+            </div>
+            <div class="text-right shrink-0">
+              <div class="text-[10px] text-slate-400 dark:text-slate-500">当前路径</div>
+              <div id="home-p2p-path" class="mono text-[13px] font-semibold text-slate-700 dark:text-slate-200 mt-0.5">—</div>
+            </div>
+          </div>
+        </div>
+
         <div>
           <h2 class="rp-section-title">本地代理监听</h2>
           <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg divide-y divide-slate-200 dark:divide-slate-700/60">
@@ -712,6 +729,26 @@
             <div class="config-field"><label for="cfg-tcp-port">TCP 端口</label><input id="cfg-tcp-port" class="mono" type="number" min="1" max="65535" inputmode="numeric"></div>
           </div>
           <details class="config-advanced"><summary>隧道加密 <span>高级设置</span></summary><label class="config-check"><input id="cfg-tls-on" type="checkbox"><span>使用 TLS 加密隧道</span></label><p id="connection-tls-hint" class="config-help">独立于管理 HTTP / HTTPS。RDP UDP 需要 TLS + QUIC，且服务端 UDP 端口必须可达。</p></details>
+        </div>
+        <div class="config-card rp-card">
+          <div class="config-section-title"><span>03</span><div><h2>P2P Direct Path</h2><p>路由仍选择原 Exit；P2P 只改变到该 Exit 的传输路径，失败可回退 Relay。</p></div></div>
+          <div class="config-switch-line">
+            <div><strong>启用 P2P 直连</strong><small>自动模式下首个连接不等待打洞，后台建立直连供后续连接复用。</small></div>
+            <label class="config-check"><input id="cfg-p2p-enabled" type="checkbox"><span>启用</span></label>
+          </div>
+          <div class="config-grid">
+            <div class="config-field"><label for="cfg-p2p-mode">路径模式</label><select id="cfg-p2p-mode"><option value="auto">自动 · P2P READY 优先，否则 Relay</option><option value="relay_only">仅 Relay · 不尝试 P2P</option><option value="p2p_only">仅 P2P · 无 READY 直连时失败</option></select></div>
+            <div class="config-field"><label for="cfg-p2p-fallback">P2P 失败回退</label><select id="cfg-p2p-fallback"><option value="true">允许回退 Relay</option><option value="false">不回退 Relay</option></select></div>
+          </div>
+          <details class="config-advanced"><summary>直连高级参数 <span>通常无需修改</span></summary>
+            <div class="config-grid">
+              <div class="config-field"><label for="cfg-p2p-punch-timeout">打洞超时 / ms</label><input id="cfg-p2p-punch-timeout" type="number" min="100" max="10000" inputmode="numeric"></div>
+              <div class="config-field"><label for="cfg-p2p-keepalive">Keepalive / 秒</label><input id="cfg-p2p-keepalive" type="number" min="5" max="60" inputmode="numeric"></div>
+              <div class="config-field"><label for="cfg-p2p-idle-timeout">空闲回收 / 秒</label><input id="cfg-p2p-idle-timeout" type="number" min="30" max="3600" inputmode="numeric"></div>
+              <div class="config-field"><label for="cfg-p2p-max-sessions">最多 Exit 会话</label><input id="cfg-p2p-max-sessions" type="number" min="1" max="32" inputmode="numeric"></div>
+            </div>
+            <p class="config-help">连续失败按 5 秒、30 秒、2 分钟、10 分钟进入冷却；网络变化自动重置将在后续优化阶段加入。</p>
+          </details>
         </div>
         <div class="config-actions"><span id="connection-runtime" class="config-help mono"></span><div><button data-config-write disabled onclick="saveServer()" class="btn-primary rp-btn rp-btn-primary config-small">保存连接设置</button></div></div>
       </section>
@@ -1186,7 +1223,7 @@
       return !!(caps && !caps.unavailable_reason && caps.tcp && caps.udp && caps.ipv6 && caps.process_identity && caps.original_destination && caps.reply_injection && caps.loop_bypass);
     }
     var groupFields = {
-      connection: ['cfg-server','cfg-device-name','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport'],
+      connection: ['cfg-server','cfg-device-name','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport','cfg-p2p-enabled','cfg-p2p-mode','cfg-p2p-fallback','cfg-p2p-punch-timeout','cfg-p2p-keepalive','cfg-p2p-idle-timeout','cfg-p2p-max-sessions'],
       proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on'],
       routing: ['cfg-routing-mode','cfg-routing-default'],
       network: ['cfg-network-excludes'],
@@ -1520,6 +1557,19 @@
       $('home-exit').textContent = st.selectedExit || '未指定';
       $('exit-current').textContent = st.selectedExit || '未指定';
       $('home-streams').textContent = st.activeStreams || 0;
+      var p2pStateNames = {IDLE:'空闲',DISCOVERING:'发现地址',RENDEZVOUS:'协商中',PUNCHING:'打洞中',QUIC_HANDSHAKE:'QUIC 握手',READY:'已直连',DEGRADED:'已降级',COOLDOWN:'冷却中',CLOSED:'已关闭'};
+      var p2pPathNames = {p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
+      var p2pState = st.p2pState || (up ? 'IDLE' : 'CLOSED');
+      $('home-p2p-state').textContent = p2pStateNames[p2pState] || p2pState;
+      $('home-p2p-path').textContent = p2pPathNames[st.p2pPath] || st.p2pPath || (up ? (st.transport === 'quic' ? 'Relay QUIC' : 'Relay TLS') : '—');
+      var p2pDetail = '';
+      if (st.p2pError) p2pDetail = st.p2pError + ' · 当前连接可使用 Relay 回退';
+      else if (p2pState === 'READY') p2pDetail = '已与 Exit 建立端到端 QUIC，后续代理连接优先走直连。';
+      else if (p2pState === 'COOLDOWN') p2pDetail = '直连失败后暂缓重试，期间新连接直接使用 Relay。';
+      else if (p2pState === 'PUNCHING' || p2pState === 'RENDEZVOUS' || p2pState === 'QUIC_HANDSHAKE') p2pDetail = '后台建立直连中；应用连接不会等待。';
+      else if (!up) p2pDetail = 'Relay 未连接，P2P 控制面不可用。';
+      else p2pDetail = st.selectedExit ? '等待直连就绪，当前使用 Relay。' : '选择 Exit 后可在后台预热 P2P。';
+      $('home-p2p-detail').textContent = p2pDetail;
 
       var devId = st.deviceId || '';
       var approval = st.approvalState || (up ? 'approved' : 'connecting');
@@ -1596,6 +1646,14 @@
       $('cfg-quic-port').value = cfg.quicPort || '';
       $('cfg-tcp-port').value = cfg.tcpPort || '';
       $('cfg-transport').value = cfg.transport || 'auto';
+      var p2p = cfg.p2p || {};
+      $('cfg-p2p-enabled').checked = p2p.enabled !== false;
+      $('cfg-p2p-mode').value = p2p.mode || 'auto';
+      $('cfg-p2p-fallback').value = p2p.fallback === false ? 'false' : 'true';
+      $('cfg-p2p-punch-timeout').value = p2p.punchTimeoutMs || 1200;
+      $('cfg-p2p-keepalive').value = p2p.keepaliveSec || 10;
+      $('cfg-p2p-idle-timeout').value = p2p.idleTimeoutSec || 120;
+      $('cfg-p2p-max-sessions').value = p2p.maxExitSessions || 4;
 
       var socks = cfg.socks5 || {}, http = cfg.http || {};
       $('cfg-socks-on').checked = socks.enabled !== false;
@@ -1737,6 +1795,11 @@
       if (!/^\d+$/.test(raw) || !Number.isInteger(n) || n < 1 || n > 65535) fieldError(id, label + '必须是 1–65535 的整数');
       return n;
     }
+    function boundedIntValue(id, label, min, max) {
+      var raw = String($(id).value).trim(), n = Number(raw);
+      if (!/^\d+$/.test(raw) || !Number.isInteger(n) || n < min || n > max) fieldError(id, label + '必须是 ' + min + '–' + max + ' 的整数');
+      return n;
+    }
     function hostValue(id, label) {
       var host = $(id).value.trim().replace(/^\[([^\]]+)\]$/, '$1');
       if (!host || /[\s/\\]/.test(host) || (host.indexOf(':') >= 0 && host.split(':').length < 3)) fieldError(id, label + '请填写主机名或 IP，协议和端口请分开填写');
@@ -1746,7 +1809,20 @@
       switch (group) {
       case 'connection':
         if (!$('cfg-tls-on').checked && $('cfg-transport').value === 'quic_only') fieldError('cfg-transport', 'QUIC 需要开启隧道 TLS');
-        return { server: { address: hostValue('cfg-server', '服务器'), quicPort: portValue('cfg-quic-port','QUIC 端口'), tcpPort: portValue('cfg-tcp-port','TCP 端口'), tlsEnabled: $('cfg-tls-on').checked }, device: { name: $('cfg-device-name').value.trim() }, transport: $('cfg-tls-on').checked ? $('cfg-transport').value : 'tcp_only' };
+        return {
+          server: { address: hostValue('cfg-server', '服务器'), quicPort: portValue('cfg-quic-port','QUIC 端口'), tcpPort: portValue('cfg-tcp-port','TCP 端口'), tlsEnabled: $('cfg-tls-on').checked },
+          device: { name: $('cfg-device-name').value.trim() },
+          transport: $('cfg-tls-on').checked ? $('cfg-transport').value : 'tcp_only',
+          p2p: {
+            enabled: $('cfg-p2p-enabled').checked,
+            mode: $('cfg-p2p-mode').value,
+            fallback: $('cfg-p2p-fallback').value !== 'false',
+            punchTimeoutMs: boundedIntValue('cfg-p2p-punch-timeout','P2P 打洞超时',100,10000),
+            keepaliveSec: boundedIntValue('cfg-p2p-keepalive','P2P Keepalive',5,60),
+            idleTimeoutSec: boundedIntValue('cfg-p2p-idle-timeout','P2P 空闲超时',30,3600),
+            maxExitSessions: boundedIntValue('cfg-p2p-max-sessions','P2P Exit 会话上限',1,32)
+          }
+        };
       case 'proxy':
         return { proxy: { socks5Enabled: $('cfg-socks-on').checked, socks5Listen: hostValue('cfg-socks-listen','SOCKS5 地址'), socks5Port: portValue('cfg-socks-port','SOCKS5 端口'), httpEnabled: $('cfg-http-on').checked, httpListen: hostValue('cfg-http-listen','HTTP 地址'), httpPort: portValue('cfg-http-port','HTTP 端口') }, network: { mode: $('cfg-tun-on').checked ? 'divert' : '' } };
       case 'share':

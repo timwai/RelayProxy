@@ -127,10 +127,10 @@ type AgentConfigFile struct {
 	} `yaml:"network"`
 
 	GUI struct {
-		Enabled                     *bool  `yaml:"enabled"`                       // Default: true — launch the desktop window on start
-		MinimizeToTray              *bool  `yaml:"minimize_to_tray"`              // Default: true — closing the window hides to the tray
-		StartMinimized              bool   `yaml:"start_minimized"`               // Default: false — boot straight into the tray
-		Theme                       string `yaml:"theme"`                         // "dark", "light", or "system"
+		Enabled                     *bool  `yaml:"enabled"`                        // Default: true — launch the desktop window on start
+		MinimizeToTray              *bool  `yaml:"minimize_to_tray"`               // Default: true — closing the window hides to the tray
+		StartMinimized              bool   `yaml:"start_minimized"`                // Default: false — boot straight into the tray
+		Theme                       string `yaml:"theme"`                          // "dark", "light", or "system"
 		VerificationPopupTimeoutSec *int   `yaml:"verification_popup_timeout_sec"` // Default: 15; 0 disables automatic dismissal
 	} `yaml:"gui"`
 
@@ -418,7 +418,7 @@ func (c *AgentConfigFile) IsMinimizeToTray() bool {
 
 // VerificationPopupTimeout returns the configured verification-code popup
 // lifetime in seconds. Zero explicitly disables automatic dismissal.
-func (c *AgentConfigFile) VerificationPopupTimeout() int {
+func (c AgentConfigFile) VerificationPopupTimeout() int {
 	if c.GUI.VerificationPopupTimeoutSec == nil {
 		return 15
 	}

@@ -19,9 +19,10 @@ var (
 )
 
 const (
-	defaultResumeGrace       = 15 * time.Second
-	defaultResumeMaxSessions = 256
-	defaultResumeReplayLimit = 2 << 20
+	defaultResumeGrace             = 15 * time.Second
+	defaultResumeMaxSessions       = 256
+	defaultResumeReplayLimit       = 2 << 20
+	defaultResumeTargetIdleTimeout = 5 * time.Minute
 )
 
 type resumeRegistry struct {
@@ -237,7 +238,7 @@ func (s *resumeTargetSession) startLogicalBridge() {
 				s.finish()
 				return
 			}
-			tunnel.Pipe(ctx, endpoint, target, defaultStreamIdleTimeout, nil)
+			tunnel.Pipe(ctx, endpoint, target, defaultResumeTargetIdleTimeout, nil)
 			if s.registry != nil {
 				s.registry.remove(s.identity.ID)
 			} else {

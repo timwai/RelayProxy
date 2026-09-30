@@ -271,7 +271,6 @@ func TestChannelRejectsInvalidCustomRules(t *testing.T) {
 	}
 }
 
-
 func TestServerMessagesFilterAndClearByChannel(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()

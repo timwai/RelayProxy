@@ -323,10 +323,11 @@ type ConfigUpdate struct {
 	} `json:"network"`
 	Routing *RoutingConfigUpdate `json:"routing"`
 	GUI     struct {
-		Enabled        *bool   `json:"enabled"`
-		MinimizeToTray *bool   `json:"minimizeToTray"`
-		StartMinimized *bool   `json:"startMinimized"`
-		Theme          *string `json:"theme"`
+		Enabled                     *bool   `json:"enabled"`
+		MinimizeToTray              *bool   `json:"minimizeToTray"`
+		StartMinimized              *bool   `json:"startMinimized"`
+		Theme                       *string `json:"theme"`
+		VerificationPopupTimeoutSec *int    `json:"verificationPopupTimeoutSec"`
 	} `json:"gui"`
 }
 
@@ -523,6 +524,10 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.GUI.Theme != nil {
 		cfg.GUI.Theme = strings.ToLower(strings.TrimSpace(*in.GUI.Theme))
+	}
+	if in.GUI.VerificationPopupTimeoutSec != nil {
+		value := *in.GUI.VerificationPopupTimeoutSec
+		cfg.GUI.VerificationPopupTimeoutSec = &value
 	}
 
 	if err := config.NormalizeAgentConfig(cfg); err != nil {

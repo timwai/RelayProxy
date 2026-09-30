@@ -2,6 +2,7 @@ package exit
 
 import (
 	"errors"
+	"io"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -160,5 +161,158 @@ func TestResumeRegistryCapacityAndDuplicateProtection(t *testing.T) {
 	other := newResumeBinding(t, p2presume.BindAck, 1, 0, 0)
 	if _, err := registry.register(other, a2); !errors.Is(err, errResumeSessionCapacity) {
 		t.Fatalf("capacity error=%v", err)
+	}
+}
+
+
+func TestLogicalResumeTargetSurvivesTransportRebind(t *testing.T) {
+	registry := newResumeRegistry(80*time.Millisecond, 4)
+	targetExit, targetPeer := net.Pipe()
+	defer targetPeer.Close()
+
+	identity, err := p2presume.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := p2presume.Binding{
+		Type:       p2presume.BindAck,
+		Identity:   identity,
+		Generation: 1,
+	}
+	var doneCalls atomic.Int32
+	session, err := registry.registerLogical(local, targetExit, "target", 1024, func() {
+		doneCalls.Add(1)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	echoDone := make(chan struct{})
+	go func() {
+		defer close(echoDone)
+		buf := make([]byte, 64)
+		for {
+			n, err := targetPeer.Read(buf)
+			if n > 0 {
+				if _, writeErr := targetPeer.Write(buf[:n]); writeErr != nil {
+					return
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+
+	clientState, err := p2presume.NewStreamState(identity, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := p2presume.NewEndpoint(clientState)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	clientTransport1, exitTransport1 := net.Pipe()
+	done1, err := session.bindTransport(pipeTunnelStream{Conn: exitTransport1}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Bind(clientTransport1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.Write([]byte("first")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, len("first"))
+	if _, err := io.ReadFull(client, buf); err != nil {
+		t.Fatal(err)
+	}
+	if string(buf) != "first" {
+		t.Fatalf("first echo=%q", buf)
+	}
+
+	_ = clientTransport1.Close()
+	select {
+	case <-done1:
+	case <-time.After(time.Second):
+		t.Fatal("first transport generation did not end")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		session.mu.Lock()
+		detached := !session.detachedAt.IsZero()
+		session.mu.Unlock()
+		if detached {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Exit session did not enter recovery grace")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	peerRebind, err := clientState.Binding(p2presume.BindOpen, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rebound, err := registry.rebind(peerRebind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebound != session {
+		t.Fatal("rebind replaced logical target session")
+	}
+	exitBinding, err := session.localBinding()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientLocal, err := clientState.Binding(p2presume.BindAck, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p2presume.ValidateRebind(clientLocal, exitBinding); err != nil {
+		t.Fatalf("client rejected Exit rebind offsets: %v", err)
+	}
+
+	clientTransport2, exitTransport2 := net.Pipe()
+	if _, err := session.bindTransport(pipeTunnelStream{Conn: exitTransport2}, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Bind(clientTransport2, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := client.Write([]byte("second")); err != nil {
+		t.Fatal(err)
+	}
+	buf = make([]byte, len("second"))
+	if _, err := io.ReadFull(client, buf); err != nil {
+		t.Fatal(err)
+	}
+	if string(buf) != "second" {
+		t.Fatalf("second echo=%q", buf)
+	}
+
+	// Closing only the client transport is recoverable; the target remains
+	// registered until the grace period expires.
+	_ = client.Close()
+	deadline = time.Now().Add(time.Second)
+	for registry.len() != 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if registry.len() != 0 {
+		t.Fatal("logical target was not released after recovery grace")
+	}
+	select {
+	case <-echoDone:
+	case <-time.After(time.Second):
+		t.Fatal("target socket remained open after session expiry")
+	}
+	if doneCalls.Load() != 1 {
+		t.Fatalf("logical session completion callbacks=%d, want 1", doneCalls.Load())
 	}
 }

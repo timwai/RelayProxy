@@ -101,6 +101,9 @@ func (r *resumeRegistry) registerLogical(
 	replayLimit int,
 	onDone func(),
 ) (*resumeTargetSession, error) {
+	if local.SendOffset != 0 || local.ReceiveOffset != 0 {
+		return nil, p2presume.ErrBinding
+	}
 	if replayLimit <= 0 {
 		replayLimit = defaultResumeReplayLimit
 	}

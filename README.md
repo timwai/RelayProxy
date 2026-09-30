@@ -802,70 +802,78 @@ Server Admin Web 用于：
 - 修改管理员密码。
 - 查看流量统计。
 
-## 11.1 Webhook 消息与验证码
+## 11.1 推送渠道与验证码
 
-Server 提供消息 Webhook，可把一条通知定向推送到一个或多个已批准设备。Server 会自动识别常见中文 / 英文验证码语义，并把验证码作为结构化字段下发；普通通知同样可以推送。
+Server 的 **消息** 页面可以配置推送渠道。每个渠道包含：
 
-Webhook 默认关闭。启动 Server 前设置独立 Token：
+- 渠道名称。
+- 渠道 ID。
+- 绑定指定设备，或绑定“全部设备”。
 
-### Linux / macOS
+绑定“全部设备”时，每次推送都会动态选择当前所有已批准设备，因此之后新增并批准的设备也会自动进入该渠道。
 
-```bash
-export RELAY_WEBHOOK_TOKEN='replace-with-a-long-random-token'
-./relay-server -config ./relay-server.yaml
-```
+外部系统不需要传设备 ID，也不需要 Token，只需要把 **渠道 ID 拼在 URL 中**。
 
-### Windows PowerShell
-
-```powershell
-$env:RELAY_WEBHOOK_TOKEN = "replace-with-a-long-random-token"
-.\relay-server.exe -config .\relay-server.yaml
-```
-
-接口：
+### GET
 
 ```text
-POST /api/v1/webhook/messages
-Authorization: Bearer <RELAY_WEBHOOK_TOKEN>
+GET /api/v1/push/{channelId}?message=您的验证码为482931&title=登录验证码
+```
+
+例如：
+
+```bash
+curl "http://relay.example.com:20001/api/v1/push/login-code?message=%E6%82%A8%E7%9A%84%E9%AA%8C%E8%AF%81%E7%A0%81%E4%B8%BA482931&title=%E7%99%BB%E5%BD%95%E9%AA%8C%E8%AF%81%E7%A0%81"
+```
+
+GET 支持以下查询参数：
+
+- `message`：消息正文。
+- `content`：可代替 `message`。
+- `title`：可选标题。
+- `source`：可选来源。
+
+### POST
+
+```text
+POST /api/v1/push/{channelId}
 Content-Type: application/json
 ```
 
-推送到单个设备：
+示例：
 
 ```json
 {
-  "deviceId": "DEVICE_ID",
   "title": "登录验证码",
   "message": "您的登录验证码为 482931，5 分钟内有效",
   "source": "sms-gateway"
 }
 ```
 
-推送到多个设备：
+POST 同样支持 `content` 代替 `message`，并且也可以从 URL 查询参数读取未在 JSON 中提供的字段。
 
-```json
-{
-  "deviceIds": ["DEVICE_A", "DEVICE_B"],
-  "title": "登录验证码",
-  "message": "您的登录验证码为 482931，5 分钟内有效",
-  "source": "sms-gateway"
-}
-```
+Server 收到请求后会：
 
-也可以使用 `content` 代替 `message`。单次最多指定 64 个设备；重复设备 ID 会自动去重。
+1. 根据 URL 中的渠道 ID 读取渠道。
+2. 根据渠道配置解析目标设备。
+3. 自动识别常见中文 / 英文验证码。
+4. 持久化消息历史。
+5. 并行推送到渠道中的在线设备。
+6. 记录每个设备的投递状态。
 
-Server 会先持久化消息，再并行投递到在线设备，并记录每个目标的状态：
+投递状态：
 
 - `delivered`：Agent 已确认接收。
 - `offline`：目标设备当前离线。
 - `failed`：在线但投递失败。
 - `pending`：等待投递状态更新。
 
-Server Web 的 **消息** 页面可以查看全局消息历史、验证码和每个设备的投递结果。Agent GUI 的 **消息** 页面保存本设备最近收到的消息，并支持搜索、筛选和复制验证码。
+Server Web 的 **消息** 页面可以管理渠道、复制渠道推送地址，并查看消息历史、验证码、渠道 ID 和每台设备的投递结果。Agent GUI 的 **消息** 页面保存本设备最近收到的消息，并支持搜索、筛选和复制验证码。
 
 Windows GUI 收到验证码时会显示独立的屏幕中央悬浮卡片；主窗口即使缩到托盘也可以显示。连续收到多个验证码时会进入弹窗队列，用户可逐个复制或稍后处理。
 
-> Webhook Token 与 Admin Web 登录会话相互独立。不要把 `RELAY_WEBHOOK_TOKEN` 写入前端代码、公开脚本或日志。
+> 推送接口按渠道 ID 直接公开调用，不做 Token 校验。公网部署时，渠道 URL 应按你的网络边界和暴露范围管理。
+
 
 ---
 

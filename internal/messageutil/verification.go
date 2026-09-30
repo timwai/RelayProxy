@@ -91,7 +91,7 @@ func extractDefault(text string) string {
 	if len(keywords) == 0 {
 		return ""
 	}
-	return bestCandidate(text, defaultVerificationCode, keywords, 64, true)
+	return bestCandidate(text, defaultVerificationCode, keywords, 64, true, true)
 }
 
 func extractWithRule(text string, rule VerificationRule) (string, bool) {
@@ -99,6 +99,7 @@ func extractWithRule(text string, rule VerificationRule) (string, bool) {
 		return "", false
 	}
 	pattern := strings.TrimSpace(rule.Pattern)
+	explicitPattern := pattern != ""
 	if pattern == "" {
 		pattern = `[A-Za-z0-9]{4,8}`
 	}
@@ -118,7 +119,7 @@ func extractWithRule(text string, rule VerificationRule) (string, bool) {
 				continue
 			}
 			code := text[start:end]
-			if validCodeCandidate(code) {
+			if validCodeCandidate(code, !explicitPattern) {
 				return code, true
 			}
 		}
@@ -133,11 +134,11 @@ func extractWithRule(text string, rule VerificationRule) (string, bool) {
 	if maxDistance <= 0 {
 		maxDistance = 64
 	}
-	code := bestCandidate(text, candidateRE, keywordIndexes, maxDistance, false)
+	code := bestCandidate(text, candidateRE, keywordIndexes, maxDistance, false, !explicitPattern)
 	return code, code != ""
 }
 
-func bestCandidate(text string, candidateRE *regexp.Regexp, keywords [][]int, maxDistance int, preferCommonLengths bool) string {
+func bestCandidate(text string, candidateRE *regexp.Regexp, keywords [][]int, maxDistance int, preferCommonLengths, requireDigit bool) string {
 	type candidate struct {
 		value string
 		start int
@@ -150,7 +151,7 @@ func bestCandidate(text string, candidateRE *regexp.Regexp, keywords [][]int, ma
 			continue
 		}
 		value := text[start:end]
-		if !validCodeCandidate(value) {
+		if !validCodeCandidate(value, requireDigit) {
 			continue
 		}
 		score := -1 << 30
@@ -256,13 +257,16 @@ func intervalDistance(startA, endA, startB, endB int) int {
 	}
 }
 
-func validCodeCandidate(value string) bool {
-	if len(value) < 4 || len(value) > 64 {
+func validCodeCandidate(value string, requireDigit bool) bool {
+	if len(value) == 0 || len(value) > 64 || strings.TrimSpace(value) != value {
 		return false
 	}
-	// Default and keyword-only rules require at least one digit. This avoids
-	// common words such as "code" becoming OTPs while still accepting G931.
-	return containsASCIIDigit(value)
+	if requireDigit && len(value) < 4 {
+		return false
+	}
+	// Default and keyword-only rules require at least one digit. Explicit custom
+	// regexes are trusted to define their own shape, including pure-letter codes.
+	return !requireDigit || containsASCIIDigit(value)
 }
 
 func containsASCIIDigit(value string) bool {

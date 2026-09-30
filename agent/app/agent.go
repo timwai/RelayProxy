@@ -216,6 +216,7 @@ type Agent struct {
 	rawDialer     *client.TunnelDialer
 	routingEngine *routing.Engine
 	traffic       *traffic.Registry
+	messages      *MessageBuffer
 	exitHandler   *exit.Handler
 	socksServer   *socks5.Server
 	httpServer    *httpproxy.Server
@@ -336,7 +337,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("invalid exit ACL: %w", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	a := &Agent{cfg: cfg, ctx: ctx, cancel: cancel, routingEngine: engine, traffic: traffic.NewRegistry(0, 0)}
+	a := &Agent{cfg: cfg, ctx: ctx, cancel: cancel, routingEngine: engine, traffic: traffic.NewRegistry(0, 0), messages: NewMessageBuffer(defaultMessageHistorySize)}
 	a.setDivertStage("disabled", nil)
 	a.rawDialer = client.NewTunnelDialer(func() tunnel.TunnelSession {
 		a.mu.RLock()
@@ -612,13 +613,18 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}()
 	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
 	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
-	if allowExit || allowRDP || p2pManager != nil {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			a.acceptIncomingStreams(ctx, sess, handler, allowRDP, cfg.RDPAddress, accepted.MaxConnections, p2pManager, &workers)
-		}()
-	}
+	// Every approved Agent accepts server-originated message streams, including
+	// CLIENT-only devices that do not expose proxy-exit or RDP services.
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		a.acceptIncomingStreams(ctx, sess, func() *exit.Handler {
+			if allowExit {
+				return handler
+			}
+			return nil
+		}(), allowRDP, cfg.RDPAddress, accepted.MaxConnections, p2pManager, &workers)
+	}()
 	select {
 	case <-ctx.Done():
 	case <-sess.Done():
@@ -722,6 +728,27 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			_ = stream.Close()
 			continue
 		}
+		if header.Type == protocol.FrameTypePushMessage {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				defer stream.Close()
+				var message protocol.PushMessage
+				if err := protocol.ReadJSON(stream, &message); err != nil {
+					_ = protocol.WriteJSON(stream, protocol.PushMessageReceipt{MessageID: message.ID, Received: false, Error: err.Error()})
+					return
+				}
+				if message.ID == "" || strings.TrimSpace(message.Content) == "" {
+					_ = protocol.WriteJSON(stream, protocol.PushMessageReceipt{MessageID: message.ID, Received: false, Error: "invalid message"})
+					return
+				}
+				a.messages.Add(message)
+				log.Printf("[Message] received id=%s source=%s verification=%v", message.ID, message.Source, message.VerificationCode != "")
+				_ = protocol.WriteJSON(stream, protocol.PushMessageReceipt{MessageID: message.ID, Received: true})
+			}()
+			continue
+		}
 		if (header.Type == protocol.FrameTypeOpenRDP || header.Type == protocol.FrameTypeOpenRDPUDP) && allowRDP {
 			workers.Add(1)
 			go func() {
@@ -759,6 +786,24 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			handler.HandleStreamWithHeader(ctx, stream, header)
 		}()
 	}
+}
+
+
+// Messages returns the newest local push-message history in receive order.
+func (a *Agent) Messages(limit int) []Message {
+	return a.messages.Get(limit)
+}
+
+func (a *Agent) ClearMessages() {
+	a.messages.Clear()
+}
+
+func (a *Agent) RestoreMessages(messages []Message) {
+	a.messages.Restore(messages)
+}
+
+func (a *Agent) SetMessageTap(tap func(Message)) {
+	a.messages.SetTap(tap)
 }
 
 // Start prepares local services independently of the availability of an exit.

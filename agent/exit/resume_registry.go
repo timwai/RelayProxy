@@ -182,16 +182,25 @@ func (r *resumeRegistry) expire(id [p2presume.StreamIDSize]byte, generation uint
 		r.mu.Unlock()
 		return
 	}
-	delete(r.sessions, id)
+	// Mark the session unusable first, but keep it registered until the target
+	// socket is actually closed. This makes len()==0 a strict resource-release
+	// boundary rather than racing asynchronous Close().
 	s.closed = true
 	target := s.target
 	s.target = nil
 	s.timer = nil
 	s.mu.Unlock()
 	r.mu.Unlock()
+
 	if target != nil {
 		_ = target.Close()
 	}
+
+	r.mu.Lock()
+	if r.sessions[id] == s {
+		delete(r.sessions, id)
+	}
+	r.mu.Unlock()
 }
 
 func (r *resumeRegistry) remove(id [p2presume.StreamIDSize]byte) {

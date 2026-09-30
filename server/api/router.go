@@ -2,16 +2,20 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"relayproxy/internal/config"
+	"relayproxy/internal/messageutil"
+	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/internal/webui"
 	"relayproxy/server/repository"
@@ -41,6 +45,7 @@ type Router struct {
 	rdpIngressPortStart          int
 	rdpIngressPortEnd            int
 	serverInfo                   ServerInfo
+	webhookToken                 string
 }
 
 type RouterOption func(*Router)
@@ -73,6 +78,12 @@ func NewRouter(authService *service.AuthService, deviceService *service.DeviceSe
 
 // WithDeviceRevoked lets runtime services tear down short-lived direct paths
 // before the session manager closes the authenticated tunnel.
+// WithWebhookToken enables the external message webhook. An empty token keeps
+// the endpoint disabled instead of exposing unauthenticated message delivery.
+func WithWebhookToken(token string) RouterOption {
+	return func(r *Router) { r.webhookToken = strings.TrimSpace(token) }
+}
+
 func WithDeviceRevoked(fn func(string)) RouterOption {
 	return func(r *Router) { r.onDeviceRevoked = fn }
 }
@@ -178,6 +189,11 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/auth/me", r.requireAuth(r.handleMe))
 	r.mux.HandleFunc("PUT /api/v1/auth/password", r.requireAuth(r.handleChangePassword))
 
+	// Message APIs. Webhook authentication is independent from the browser
+	// session so external automation can push notifications safely.
+	r.mux.HandleFunc("POST /api/v1/webhook/messages", r.handleWebhookMessage)
+	r.mux.HandleFunc("GET /api/v1/messages", r.requireAuth(r.handleListMessages))
+
 	// Device APIs
 	r.mux.HandleFunc("GET /api/v1/devices", r.requireAuth(r.handleListDevices))
 	r.mux.HandleFunc("GET /api/v1/enrollments", r.requireAuth(r.requireAdmin(r.handleListEnrollments)))
@@ -214,6 +230,187 @@ func (r *Router) registerRoutes() {
 		}
 		webHandler.ServeHTTP(w, req)
 	})
+}
+
+type webhookMessageRequest struct {
+	DeviceID  string   `json:"deviceId,omitempty"`
+	DeviceIDs []string `json:"deviceIds,omitempty"`
+	Title     string   `json:"title,omitempty"`
+	Message   string   `json:"message,omitempty"`
+	Content   string   `json:"content,omitempty"`
+	Source    string   `json:"source,omitempty"`
+}
+
+func (r *Router) handleWebhookMessage(w http.ResponseWriter, req *http.Request) {
+	if r.webhookToken == "" {
+		writeError(w, http.StatusServiceUnavailable, "message webhook is not configured")
+		return
+	}
+	provided := strings.TrimSpace(req.Header.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(provided), "bearer ") {
+		provided = strings.TrimSpace(provided[len("Bearer "):])
+	} else {
+		provided = strings.TrimSpace(req.Header.Get("X-Relay-Webhook-Token"))
+	}
+	if len(provided) != len(r.webhookToken) || subtle.ConstantTimeCompare([]byte(provided), []byte(r.webhookToken)) != 1 {
+		writeError(w, http.StatusUnauthorized, "invalid webhook token")
+		return
+	}
+
+	var body webhookMessageRequest
+	if err := decodeJSON(w, req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	content := strings.TrimSpace(body.Message)
+	if content == "" {
+		content = strings.TrimSpace(body.Content)
+	}
+	if content == "" || len(content) > 12000 {
+		writeError(w, http.StatusBadRequest, "message must contain 1-12000 characters")
+		return
+	}
+	title := strings.TrimSpace(body.Title)
+	if title == "" {
+		title = "RelayProxy 消息"
+	}
+	if len(title) > 200 {
+		writeError(w, http.StatusBadRequest, "title is too long")
+		return
+	}
+	source := strings.TrimSpace(body.Source)
+	if source == "" {
+		source = "webhook"
+	}
+	if len(source) > 120 {
+		writeError(w, http.StatusBadRequest, "source is too long")
+		return
+	}
+
+	ids := make([]string, 0, len(body.DeviceIDs)+1)
+	seen := make(map[string]bool)
+	for _, id := range append([]string{body.DeviceID}, body.DeviceIDs...) {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 || len(ids) > 64 {
+		writeError(w, http.StatusBadRequest, "specify between 1 and 64 target devices")
+		return
+	}
+
+	devices, err := r.db.ListDevicesForOwner("")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load target devices")
+		return
+	}
+	byID := make(map[string]*repository.Device, len(devices))
+	for _, device := range devices {
+		byID[device.ID] = device
+	}
+	targets := make([]*repository.Device, 0, len(ids))
+	for _, id := range ids {
+		device := byID[id]
+		if device == nil || device.ApprovalState != repository.EnrollmentApproved {
+			writeError(w, http.StatusBadRequest, "target device is not approved: "+id)
+			return
+		}
+		targets = append(targets, device)
+	}
+
+	message := &repository.MessageRecord{
+		Title: title, Content: content, Source: source,
+		VerificationCode: messageutil.ExtractVerificationCode(content),
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := r.db.CreateMessage(message, targets); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist message")
+		return
+	}
+
+	for i := range message.Deliveries {
+		delivery := &message.Deliveries[i]
+		sess, online := r.sessions.Get(delivery.DeviceID)
+		if !online {
+			delivery.Status = "offline"
+			delivery.Error = "device is offline"
+			_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, delivery.Status, delivery.Error, nil)
+			continue
+		}
+		if err := r.pushMessage(sess, message); err != nil {
+			delivery.Status = "failed"
+			delivery.Error = err.Error()
+			_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, delivery.Status, delivery.Error, nil)
+			continue
+		}
+		now := time.Now().UTC()
+		delivery.Status = "delivered"
+		delivery.Error = ""
+		delivery.DeliveredAt = &now
+		_ = r.db.UpdateMessageDelivery(message.ID, delivery.DeviceID, delivery.Status, "", &now)
+	}
+	writeJSON(w, http.StatusOK, message)
+}
+
+func (r *Router) pushMessage(sess *session.DeviceSession, message *repository.MessageRecord) error {
+	if sess == nil || sess.Tunnel == nil {
+		return errors.New("device session is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	stream, err := sess.Tunnel.OpenStream(ctx)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	stop := tunnel.InterruptOnCancel(ctx, stream)
+	defer stop()
+	_ = stream.SetDeadline(time.Now().Add(6 * time.Second))
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion,
+		Type: protocol.FrameTypePushMessage, RequestID: message.ID,
+	}); err != nil {
+		return err
+	}
+	wire := protocol.PushMessage{
+		ID: message.ID, Title: message.Title, Content: message.Content,
+		VerificationCode: message.VerificationCode, Source: message.Source,
+		CreatedAt: message.CreatedAt.UnixMilli(),
+	}
+	if err := protocol.WriteJSON(stream, wire); err != nil {
+		return err
+	}
+	var receipt protocol.PushMessageReceipt
+	if err := protocol.ReadJSON(stream, &receipt); err != nil {
+		return err
+	}
+	if receipt.MessageID != message.ID || !receipt.Received {
+		if receipt.Error != "" {
+			return errors.New(receipt.Error)
+		}
+		return errors.New("agent did not acknowledge message")
+	}
+	return nil
+}
+
+func (r *Router) handleListMessages(w http.ResponseWriter, req *http.Request) {
+	limit := 100
+	if raw := strings.TrimSpace(req.URL.Query().Get("limit")); raw != "" {
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 1 || value > 500 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 500")
+			return
+		}
+		limit = value
+	}
+	messages, err := r.db.ListMessages(requestOwner(req), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load messages")
+		return
+	}
+	writeJSON(w, http.StatusOK, messages)
 }
 
 // Auth Middleware

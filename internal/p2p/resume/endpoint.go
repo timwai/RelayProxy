@@ -302,15 +302,11 @@ func (e *Endpoint) Close() error {
 		return nil
 	}
 
-	// Do not take appWriteMu here. A Write may legitimately hold it while
-	// waiting for a replacement transport; Close must be able to mark the
-	// endpoint closed and wake that writer. writeMu is sufficient to serialize
-	// the final logical RST against transport writes.
-	e.writeMu.Lock()
+	// Close must never wait behind a Write that is itself waiting for recovery.
+	// Publish the terminal state first so blocked writers wake immediately.
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
-		e.writeMu.Unlock()
 		return nil
 	}
 	transport := e.transport
@@ -321,22 +317,23 @@ func (e *Endpoint) Close() error {
 	e.closeGenerationLocked(e.generation)
 	e.signalLocked()
 	e.mu.Unlock()
+	e.notifyProgress()
 
-	if transport != nil && ready {
+	// A logical RST is best effort. If another writer currently owns writeMu,
+	// closing the transport is preferable to blocking Close indefinitely.
+	if transport != nil && ready && e.writeMu.TryLock() {
 		if deadlineTransport, ok := transport.(interface{ SetWriteDeadline(time.Time) error }); ok {
 			_ = deadlineTransport.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
 		}
 		if frame, err := e.state.RST(); err == nil {
 			_ = WriteFrame(transport, frame)
 		}
+		e.writeMu.Unlock()
 	}
-	e.writeMu.Unlock()
-
 	if transport != nil {
 		_ = transport.Close()
 	}
 	e.inbound.CloseWithError(net.ErrClosed)
-	e.notifyProgress()
 	return nil
 }
 

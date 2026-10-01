@@ -19,6 +19,7 @@ const (
 	FrameTypeOpenRDPUDP  FrameType = 0x0B
 	FrameTypeRDPControl  FrameType = 0x0C
 	FrameTypePushMessage FrameType = 0x0D
+	FrameTypeP2PControl  FrameType = 0x0E
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream
@@ -31,22 +32,43 @@ type StreamHeader struct {
 	ExitDeviceID   string    `json:"exitDeviceId"`
 }
 
-// OpenTCPRequest is sent from Client -> Relay -> Exit to request a TCP connection
-type OpenTCPRequest struct {
-	RequestID   string      `json:"requestId"`
-	Host        string      `json:"host"`
-	Port        uint16      `json:"port"`
-	TimeoutMs   int         `json:"timeout"` // Timeout in milliseconds
-	RelayPolicy *acl.Policy `json:"relayPolicy,omitempty"`
+const (
+	TCPResumeModeOpen   = "open"
+	TCPResumeModeRebind = "rebind"
+
+	TCPResumeStreamIDSize = 16
+	TCPResumeTokenSize    = 32
+)
+
+// TCPResumeBinding is an optional OpenTCP extension used only after both peers
+// negotiated CapabilityProxyStreamResume. Token is never persisted or logged.
+type TCPResumeBinding struct {
+	Mode          string `json:"mode"`
+	StreamID      []byte `json:"streamId"`
+	Token         []byte `json:"token"`
+	Generation    uint64 `json:"generation"`
+	SendOffset    uint64 `json:"sendOffset"`
+	ReceiveOffset uint64 `json:"receiveOffset"`
 }
 
-// OpenTCPResponse is returned from Exit -> Relay -> Client
+// OpenTCPRequest is sent from Client -> Relay -> Exit to request a TCP connection.
+type OpenTCPRequest struct {
+	RequestID   string            `json:"requestId"`
+	Host        string            `json:"host"`
+	Port        uint16            `json:"port"`
+	TimeoutMs   int               `json:"timeout"` // Timeout in milliseconds
+	RelayPolicy *acl.Policy       `json:"relayPolicy,omitempty"`
+	Resume      *TCPResumeBinding `json:"resume,omitempty"`
+}
+
+// OpenTCPResponse is returned from Exit -> Relay -> Client.
 type OpenTCPResponse struct {
-	RequestID    string `json:"requestId"`
-	Success      bool   `json:"success"`
-	RemoteIP     string `json:"remoteIp,omitempty"`
-	ErrorCode    string `json:"errorCode,omitempty"`
-	ErrorMessage string `json:"errorMessage,omitempty"`
+	RequestID    string            `json:"requestId"`
+	Success      bool              `json:"success"`
+	RemoteIP     string            `json:"remoteIp,omitempty"`
+	ErrorCode    string            `json:"errorCode,omitempty"`
+	ErrorMessage string            `json:"errorMessage,omitempty"`
+	Resume       *TCPResumeBinding `json:"resume,omitempty"`
 }
 
 // OpenUDPRequest is sent from Client -> Relay -> Exit to request a UDP association
@@ -99,15 +121,19 @@ const (
 	RDPControlError           = "error"
 )
 
-// RDPCandidate describes one protocol-specific endpoint. The address is an
-// IP literal plus port; hostnames, unspecified and multicast addresses are
-// rejected before the candidate reaches the signaling layer.
-type RDPCandidate struct {
+// P2PCandidate describes one protocol-specific direct-path endpoint. The
+// address is an IP literal plus port; hostnames, unspecified and multicast
+// addresses are rejected before the candidate reaches the signaling layer.
+type P2PCandidate struct {
 	Protocol string `json:"protocol"` // tcp or udp
 	Type     string `json:"type"`     // lan or reflexive
 	Address  string `json:"address"`
 	Priority uint32 `json:"priority"`
 }
+
+// RDPCandidate remains an alias so the existing RDP control protocol keeps
+// source and wire compatibility while sharing the generic P2P candidate type.
+type RDPCandidate = P2PCandidate
 
 // RDPControlMessage binds signaling to a server-issued session. Device IDs in
 // requests are advisory only; the server derives the controller from the

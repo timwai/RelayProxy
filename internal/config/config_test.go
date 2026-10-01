@@ -36,6 +36,7 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	for name, value := range map[string]*bool{
 		"server TLS": agent.Server.TLSEnabled, "SOCKS5": agent.Proxy.SOCKS5.Enabled,
 		"HTTP": agent.Proxy.HTTP.Enabled, "RDP": agent.RDP.Enabled,
+		"P2P": agent.P2P.Enabled, "P2P fallback": agent.P2P.Fallback,
 		"exit": agent.Exit.Enabled, "GUI": agent.GUI.Enabled,
 		"minimize to tray": agent.GUI.MinimizeToTray, "web": agent.Web.Enabled,
 	} {
@@ -45,6 +46,10 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	}
 	if agent.Exit.Access.Domains == nil || agent.Exit.Access.CIDRs == nil {
 		t.Fatal("agent access-list defaults must be concrete empty lists")
+	}
+	if agent.P2P.Mode != "auto" || agent.P2P.PunchTimeoutMs != 1200 || agent.P2P.KeepaliveSec != 10 ||
+		agent.P2P.IdleTimeoutSec != 120 || agent.P2P.MaxExitSessions != 4 {
+		t.Fatalf("unexpected P2P defaults: %+v", agent.P2P)
 	}
 
 	agentPath := filepath.Join(t.TempDir(), "agent.yaml")
@@ -63,8 +68,9 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	if err := NormalizeServerConfig(server); err != nil {
 		t.Fatal(err)
 	}
-	if server.Server.TLSEnabled == nil || !*server.Server.TLSEnabled || server.RDP.Ingress.Enabled == nil || *server.RDP.Ingress.Enabled {
-		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled)
+	if server.Server.TLSEnabled == nil || !*server.Server.TLSEnabled || server.RDP.Ingress.Enabled == nil || *server.RDP.Ingress.Enabled ||
+		server.P2P.Enabled == nil || !*server.P2P.Enabled || server.P2P.LeaseSec != 60 || server.P2P.MaxSessionsPerDevice != 8 {
+		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v p2p=%+v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled, server.P2P)
 	}
 	serverPath := filepath.Join(t.TempDir(), "server.yaml")
 	if err := SaveServerConfig(serverPath, server); err != nil {
@@ -393,5 +399,87 @@ func TestAgentThemeAllowsSystem(t *testing.T) {
 	cfg.GUI.Theme = "system"
 	if err := NormalizeAgentConfig(cfg); err != nil {
 		t.Fatalf("system theme rejected: %v", err)
+	}
+}
+
+func TestServerConfigLoadsP2PSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	data := `p2p:
+  enabled: true
+  rendezvous_listen: ":3479"
+  rendezvous_advertise: "relay.example.com:3479"
+  lease_sec: 45
+  max_sessions_per_device: 12
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatalf("P2P server config was rejected: %v", err)
+	}
+	if cfg.P2P.Enabled == nil || !*cfg.P2P.Enabled || cfg.P2P.RendezvousListen != ":3479" ||
+		cfg.P2P.RendezvousAdvertise != "relay.example.com:3479" || cfg.P2P.LeaseSec != 45 ||
+		cfg.P2P.MaxSessionsPerDevice != 12 {
+		t.Fatalf("P2P settings were not loaded: %+v", cfg.P2P)
+	}
+}
+
+func TestServerConfigRejectsSharedRendezvousSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	data := `rdp:
+  rendezvous_listen: ":3478"
+p2p:
+  enabled: true
+  rendezvous_listen: ":3478"
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadServerConfig(path); err == nil {
+		t.Fatal("shared RDP/P2P rendezvous socket was accepted")
+	}
+}
+
+func TestAgentP2PSettingsValidateAndPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	cfg := &AgentConfigFile{}
+	cfg.P2P.Mode = "p2p_only"
+	cfg.P2P.PunchTimeoutMs = 800
+	cfg.P2P.KeepaliveSec = 15
+	cfg.P2P.IdleTimeoutSec = 180
+	cfg.P2P.MaxExitSessions = 6
+	cfg.P2P.Enabled = BoolPtr(true)
+	cfg.P2P.Fallback = BoolPtr(false)
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.P2P.Mode != "p2p_only" || loaded.P2P.PunchTimeoutMs != 800 ||
+		loaded.P2P.KeepaliveSec != 15 || loaded.P2P.IdleTimeoutSec != 180 ||
+		loaded.P2P.MaxExitSessions != 6 || loaded.P2P.Fallback == nil || *loaded.P2P.Fallback {
+		t.Fatalf("P2P settings changed after persistence: %+v", loaded.P2P)
+	}
+
+	for name, mutate := range map[string]func(*AgentConfigFile){
+		"mode":          func(c *AgentConfigFile) { c.P2P.Mode = "magic" },
+		"punch timeout": func(c *AgentConfigFile) { c.P2P.PunchTimeoutMs = 10 },
+		"keepalive":     func(c *AgentConfigFile) { c.P2P.KeepaliveSec = 1 },
+		"idle timeout":  func(c *AgentConfigFile) { c.P2P.IdleTimeoutSec = 5 },
+		"max sessions":  func(c *AgentConfigFile) { c.P2P.MaxExitSessions = 0; c.P2P.Mode = "auto" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := *loaded
+			mutate(&bad)
+			if name == "max sessions" {
+				bad.P2P.MaxExitSessions = 33
+			}
+			if err := ValidateAgentConfig(&bad); err == nil {
+				t.Fatalf("invalid P2P %s accepted", name)
+			}
+		})
 	}
 }

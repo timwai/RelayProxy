@@ -47,6 +47,18 @@ func NormalizeServerConfig(c *ServerConfig) error {
 			return fmt.Errorf("rdp.rendezvous_advertise: %w", err)
 		}
 	}
+	c.P2P.RendezvousListen = strings.TrimSpace(c.P2P.RendezvousListen)
+	if c.P2P.RendezvousListen != "" {
+		if err := validateListen(c.P2P.RendezvousListen); err != nil {
+			return fmt.Errorf("p2p.rendezvous_listen: %w", err)
+		}
+	}
+	c.P2P.RendezvousAdvertise = strings.TrimSpace(c.P2P.RendezvousAdvertise)
+	if c.P2P.RendezvousAdvertise != "" {
+		if err := validateRendezvousAdvertise(c.P2P.RendezvousAdvertise); err != nil {
+			return fmt.Errorf("p2p.rendezvous_advertise: %w", err)
+		}
+	}
 	c.RDP.Ingress.Listen = strings.TrimSpace(c.RDP.Ingress.Listen)
 	for i, raw := range c.RDP.Ingress.SourceCIDRs {
 		c.RDP.Ingress.SourceCIDRs[i] = strings.TrimSpace(raw)
@@ -68,6 +80,16 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	}
 	if c.RDP.LeaseSec < 15 || c.RDP.LeaseSec > 300 {
 		return errors.New("rdp.lease_sec 必须在 15-300 秒之间")
+	}
+	if c.P2P.LeaseSec < 15 || c.P2P.LeaseSec > 300 {
+		return errors.New("p2p.lease_sec 必须在 15-300 秒之间")
+	}
+	if c.P2P.MaxSessionsPerDevice < 1 || c.P2P.MaxSessionsPerDevice > 1024 {
+		return errors.New("p2p.max_sessions_per_device 必须在 1-1024 之间")
+	}
+	if c.P2P.Enabled != nil && *c.P2P.Enabled && c.P2P.RendezvousListen != "" && c.RDP.RendezvousListen != "" &&
+		listenAddressesOverlap(c.P2P.RendezvousListen, c.RDP.RendezvousListen) {
+		return errors.New("p2p.rendezvous_listen 与 rdp.rendezvous_listen 不能监听同一 UDP 地址与端口")
 	}
 	if c.RDP.Ingress.PortStart < 1 || c.RDP.Ingress.PortStart > 65535 || c.RDP.Ingress.PortEnd < c.RDP.Ingress.PortStart || c.RDP.Ingress.PortEnd > 65535 {
 		return errors.New("rdp.ingress 的端口范围无效")
@@ -169,6 +191,9 @@ func CloneServerConfig(c *ServerConfig) *ServerConfig {
 	}
 	if c.RDP.Ingress.Enabled != nil {
 		out.RDP.Ingress.Enabled = BoolPtr(*c.RDP.Ingress.Enabled)
+	}
+	if c.P2P.Enabled != nil {
+		out.P2P.Enabled = BoolPtr(*c.P2P.Enabled)
 	}
 	out.RDP.Ingress.SourceCIDRs = slices.Clone(c.RDP.Ingress.SourceCIDRs)
 	if c.RelayACL != nil {
@@ -301,6 +326,7 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"tunnel.heartbeat_sec": c.Tunnel.HeartbeatSec, "tunnel.max_connections": c.Tunnel.MaxConnections,
 			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "relay_acl": policy,
 			"rdp":      c.RDP,
+			"p2p":      c.P2P,
 			"database": c.Database,
 		}
 	}

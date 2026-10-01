@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
@@ -49,9 +50,8 @@ func generateSelfSignedCert(t *testing.T) tls.Certificate {
 
 func TestTLSTunnelMultiplexing(t *testing.T) {
 	cert := generateSelfSignedCert(t)
-	tlsServerConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -59,76 +59,140 @@ func TestTLSTunnelMultiplexing(t *testing.T) {
 	}
 	defer listener.Close()
 
-	serverAddr := listener.Addr().String()
-
-	// Server accept goroutine
+	const streamCount = 4
+	testMsg := []byte("hello relayproxy stream")
 	serverErrCh := make(chan error, 1)
+	serverReady := make(chan struct{}, 1)
+	clientDone := make(chan struct{})
 	go func() {
 		rawConn, err := listener.Accept()
 		if err != nil {
 			serverErrCh <- err
 			return
 		}
-		tlsConn := tls.Server(rawConn, tlsServerConfig)
-		session, err := ServerTLS(tlsConn, nil)
+		serverTLS := tls.Server(rawConn, &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+		})
+		if err := serverTLS.HandshakeContext(ctx); err != nil {
+			_ = rawConn.Close()
+			serverErrCh <- err
+			return
+		}
+		session, err := ServerTLS(serverTLS, nil)
 		if err != nil {
+			_ = rawConn.Close()
 			serverErrCh <- err
 			return
 		}
 		defer session.Close()
+		serverReady <- struct{}{}
 
-		// Accept a stream
-		stream, err := session.AcceptStream(context.Background())
-		if err != nil {
-			serverErrCh <- err
-			return
+		streams := make([]TunnelStream, 0, streamCount)
+		for i := 0; i < streamCount; i++ {
+			stream, err := session.AcceptStream(ctx)
+			if err != nil {
+				serverErrCh <- fmt.Errorf("accept stream %d: %w", i, err)
+				return
+			}
+			streams = append(streams, stream)
 		}
-		defer stream.Close()
+		defer func() {
+			for _, stream := range streams {
+				_ = stream.Close()
+			}
+		}()
 
-		// Echo data back
-		buf := make([]byte, 1024)
-		n, err := stream.Read(buf)
-		if err != nil {
-			serverErrCh <- err
-			return
+		buf := make([]byte, len(testMsg))
+		for i, stream := range streams {
+			if _, err := io.ReadFull(stream, buf); err != nil {
+				serverErrCh <- fmt.Errorf("read stream %d: %w", i, err)
+				return
+			}
+			if _, err := stream.Write(buf); err != nil {
+				serverErrCh <- fmt.Errorf("write stream %d: %w", i, err)
+				return
+			}
 		}
-		_, err = stream.Write(buf[:n])
-		serverErrCh <- err
+
+		// Writing the final echo only queues bytes into yamux. Do not close the
+		// server session until the client confirms it consumed every reply;
+		// otherwise the deferred session.Close can race the last client write/read
+		// and surface a spurious "session shutdown".
+		select {
+		case <-clientDone:
+			serverErrCh <- nil
+		case <-ctx.Done():
+			serverErrCh <- ctx.Err()
+		}
 	}()
 
-	// Client connect
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	clientSession, err := DialTLS(ctx, serverAddr, &tls.Config{InsecureSkipVerify: true}, nil)
+	clientSession, err := DialTLS(ctx, listener.Addr().String(), &tls.Config{
+		InsecureSkipVerify: true,
+		MinVersion:         tls.VersionTLS13,
+	}, nil)
 	if err != nil {
 		t.Fatalf("DialTLS failed: %v", err)
 	}
 	defer clientSession.Close()
 
-	clientStream, err := clientSession.OpenStream(ctx)
-	if err != nil {
-		t.Fatalf("OpenStream failed: %v", err)
-	}
-	defer clientStream.Close()
-
-	testMsg := "hello relayproxy stream"
-	if _, err := clientStream.Write([]byte(testMsg)); err != nil {
-		t.Fatalf("clientStream.Write failed: %v", err)
+	select {
+	case <-serverReady:
+	case err := <-serverErrCh:
+		t.Fatalf("server setup failed: %v", err)
+	case <-ctx.Done():
+		t.Fatalf("server setup timed out: %v", ctx.Err())
 	}
 
-	reply := make([]byte, 1024)
-	n, err := io.ReadAtLeast(clientStream, reply, len(testMsg))
-	if err != nil {
-		t.Fatalf("clientStream.Read failed: %v", err)
+	streams := make([]TunnelStream, 0, streamCount)
+	for i := 0; i < streamCount; i++ {
+		stream, err := clientSession.OpenStream(ctx)
+		if err != nil {
+			t.Fatalf("OpenStream %d failed: %v", i, err)
+		}
+		streams = append(streams, stream)
 	}
+	defer func() {
+		for _, stream := range streams {
+			_ = stream.Close()
+		}
+	}()
 
-	if string(reply[:n]) != testMsg {
-		t.Fatalf("expected %s, got %s", testMsg, string(reply[:n]))
+	for i, stream := range streams {
+		if err := stream.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatalf("SetDeadline stream %d failed: %v", i, err)
+		}
+		if _, err := stream.Write(testMsg); err != nil {
+			select {
+			case serverErr := <-serverErrCh:
+				t.Fatalf("client stream %d write failed: %v; server: %v", i, err, serverErr)
+			default:
+				t.Fatalf("client stream %d write failed: %v", i, err)
+			}
+		}
+
+		reply := make([]byte, len(testMsg))
+		if _, err := io.ReadFull(stream, reply); err != nil {
+			select {
+			case serverErr := <-serverErrCh:
+				t.Fatalf("client stream %d read failed: %v; server: %v", i, err, serverErr)
+			default:
+				t.Fatalf("client stream %d read failed: %v", i, err)
+			}
+		}
+		if string(reply) != string(testMsg) {
+			t.Fatalf("stream %d expected %q, got %q", i, testMsg, reply)
+		}
 	}
+	close(clientDone)
 
-	if err := <-serverErrCh; err != nil {
-		t.Fatalf("server encountered error: %v", err)
+	select {
+	case err := <-serverErrCh:
+		if err != nil {
+			t.Fatalf("server encountered error: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("server echo timed out: %v", ctx.Err())
 	}
 }
 
@@ -198,5 +262,22 @@ func TestDefaultYAMUXConfigMatchesRelayStreamCapacity(t *testing.T) {
 	}
 	if cfg.AcceptBacklog < 1024 {
 		t.Fatalf("AcceptBacklog=%d is below the Relay default per-device stream capacity", cfg.AcceptBacklog)
+	}
+}
+
+func TestDefaultQUICConfigKeepAlivePeriod(t *testing.T) {
+	cfg := DefaultQUICConfig()
+	if cfg.KeepAlivePeriod != 0 {
+		t.Fatalf("KeepAlivePeriod = %v, want disabled", cfg.KeepAlivePeriod)
+	}
+	if cfg.MaxIdleTimeout != 120*time.Second {
+		t.Fatalf("MaxIdleTimeout = %v, want 120s", cfg.MaxIdleTimeout)
+	}
+}
+
+func TestDefaultYAMUXConfigDisablesRedundantKeepAlive(t *testing.T) {
+	cfg := DefaultYAMUXConfig()
+	if cfg.EnableKeepAlive {
+		t.Fatal("yamux keepalive must stay disabled; Relay control heartbeat owns liveness")
 	}
 }

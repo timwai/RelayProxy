@@ -19,6 +19,8 @@ const (
 	ModeAuto     Mode = "auto"
 	ModeQUICOnly Mode = "quic_only"
 	ModeTCPOnly  Mode = "tcp_only"
+
+	defaultAutoFallbackDelay = 250 * time.Millisecond
 )
 
 type State string
@@ -32,13 +34,14 @@ const (
 )
 
 type ManagerConfig struct {
-	ServerAddress  string        // e.g. "1.2.3.4" or "relay.example.com"
-	QUICPort       int           // default 443
-	TCPPort        int           // default 443
-	Mode           Mode          // auto, quic_only, tcp_only
-	TLSConfig      *tls.Config   // TLS configuration
-	PlainTCP       bool          // Explicitly disable TLS; a nil TLSConfig alone uses secure defaults.
-	ConnectTimeout time.Duration // default 10s
+	ServerAddress     string        // e.g. "1.2.3.4" or "relay.example.com"
+	QUICPort          int           // default 443
+	TCPPort           int           // default 443
+	Mode              Mode          // auto, quic_only, tcp_only
+	TLSConfig         *tls.Config   // TLS configuration
+	PlainTCP          bool          // Explicitly disable TLS; a nil TLSConfig alone uses secure defaults.
+	ConnectTimeout    time.Duration // default 10s
+	AutoFallbackDelay time.Duration // delay before racing TCP against an in-flight QUIC attempt
 }
 
 type TunnelManager struct {
@@ -68,6 +71,9 @@ func NewTunnelManager(cfg ManagerConfig, onState func(oldState, newState State, 
 	}
 	if cfg.ConnectTimeout <= 0 {
 		cfg.ConnectTimeout = 10 * time.Second
+	}
+	if cfg.AutoFallbackDelay <= 0 {
+		cfg.AutoFallbackDelay = defaultAutoFallbackDelay
 	}
 	if cfg.PlainTCP {
 		cfg.TLSConfig = nil
@@ -193,62 +199,139 @@ func (m *TunnelManager) Connect(ctx context.Context) (TunnelSession, error) {
 
 	var session TunnelSession
 	var err error
-	var quicErr error
-
-	// 1. Try QUIC if ModeAuto or ModeQUICOnly
-	if m.cfg.TLSConfig != nil && (m.cfg.Mode == ModeAuto || m.cfg.Mode == ModeQUICOnly) {
-		budget := m.cfg.ConnectTimeout
-		if m.cfg.Mode == ModeAuto {
-			budget = min(budget/2, 4*time.Second)
-			if deadline, ok := ctx.Deadline(); ok {
-				budget = min(budget, time.Until(deadline)/2)
-			}
-		}
-		dialCtx, dialCancel := context.WithTimeout(ctx, budget)
-		quicCfg := DefaultQUICConfig()
-		session, err = DialQUIC(dialCtx, quicAddr, m.cfg.TLSConfig, quicCfg)
+	switch m.cfg.Mode {
+	case ModeQUICOnly:
+		dialCtx, dialCancel := context.WithTimeout(ctx, m.cfg.ConnectTimeout)
+		session, err = DialQUIC(dialCtx, quicAddr, m.cfg.TLSConfig, DefaultQUICConfig())
 		dialCancel()
-
-		if err == nil {
-			if ctx.Err() != nil {
-				_ = session.Close()
-				return nil, ctx.Err()
-			}
-			if !m.setState(StateConnected, session) {
-				return nil, net.ErrClosed
-			}
-			return session, nil
+		if err != nil {
+			log.Printf("[TunnelManager] QUIC connection to %s failed: %v", quicAddr, err)
+			err = fmt.Errorf("quic connection failed: %w", err)
 		}
-		log.Printf("[TunnelManager] QUIC connection to %s failed: %v", quicAddr, err)
-		quicErr = fmt.Errorf("QUIC: %w", err)
-
-		if m.cfg.Mode == ModeQUICOnly {
-			m.setState(StateDisconnected, nil)
-			return nil, fmt.Errorf("quic connection failed: %w", err)
-		}
-	}
-
-	// 2. Fallback to TLS + yamux if ModeAuto or ModeTCPOnly
-	if m.cfg.Mode == ModeAuto || m.cfg.Mode == ModeTCPOnly {
+	case ModeTCPOnly:
 		dialCtx, dialCancel := context.WithTimeout(ctx, m.cfg.ConnectTimeout)
 		session, err = DialTLS(dialCtx, tcpAddr, m.cfg.TLSConfig, nil)
 		dialCancel()
-
-		if err == nil {
-			if ctx.Err() != nil {
-				_ = session.Close()
-				return nil, ctx.Err()
-			}
-			if !m.setState(StateConnected, session) {
-				return nil, net.ErrClosed
-			}
-			return session, nil
+		if err != nil {
+			log.Printf("[TunnelManager] TLS connection to %s failed: %v", tcpAddr, err)
 		}
-		log.Printf("[TunnelManager] TLS connection to %s failed: %v", tcpAddr, err)
+	case ModeAuto:
+		if m.cfg.TLSConfig == nil {
+			dialCtx, dialCancel := context.WithTimeout(ctx, m.cfg.ConnectTimeout)
+			session, err = DialTLS(dialCtx, tcpAddr, nil, nil)
+			dialCancel()
+		} else {
+			session, err = m.dialAuto(ctx, quicAddr, tcpAddr)
+		}
+	default:
+		err = fmt.Errorf("unsupported tunnel mode %q", m.cfg.Mode)
 	}
 
-	m.setState(StateDisconnected, nil)
-	return nil, fmt.Errorf("all transport connection attempts failed: %w", errors.Join(quicErr, err))
+	if err != nil {
+		m.setState(StateDisconnected, nil)
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		_ = session.Close()
+		m.setState(StateDisconnected, nil)
+		return nil, ctx.Err()
+	}
+	if !m.setState(StateConnected, session) {
+		return nil, net.ErrClosed
+	}
+	return session, nil
+}
+
+type transportDialResult struct {
+	transport TransportType
+	session   TunnelSession
+	err       error
+}
+
+func closeLateTransportResults(results <-chan transportDialResult, count int) {
+	for range count {
+		result := <-results
+		if result.err == nil && result.session != nil {
+			_ = result.session.Close()
+		}
+	}
+}
+
+// dialAuto gives QUIC a short head start, then races TLS/TCP when QUIC is
+// still pending. A fast QUIC failure starts TCP immediately. The first
+// successful transport wins and the losing attempt is canceled and closed.
+func (m *TunnelManager) dialAuto(ctx context.Context, quicAddr, tcpAddr string) (TunnelSession, error) {
+	dialCtx, cancel := context.WithTimeout(ctx, m.cfg.ConnectTimeout)
+	results := make(chan transportDialResult, 2)
+	start := func(transport TransportType, dial func(context.Context) (TunnelSession, error)) {
+		go func() {
+			session, err := dial(dialCtx)
+			results <- transportDialResult{transport: transport, session: session, err: err}
+		}()
+	}
+
+	start(TransportQUIC, func(attemptCtx context.Context) (TunnelSession, error) {
+		return DialQUIC(attemptCtx, quicAddr, m.cfg.TLSConfig, DefaultQUICConfig())
+	})
+	pending := 1
+	tcpStarted := false
+	startTCP := func() {
+		if tcpStarted {
+			return
+		}
+		tcpStarted = true
+		pending++
+		start(TransportTLS, func(attemptCtx context.Context) (TunnelSession, error) {
+			return DialTLS(attemptCtx, tcpAddr, m.cfg.TLSConfig, nil)
+		})
+	}
+
+	timer := time.NewTimer(m.cfg.AutoFallbackDelay)
+	defer timer.Stop()
+	fallbackReady := timer.C
+	var quicErr, tcpErr error
+	for pending > 0 {
+		select {
+		case result := <-results:
+			pending--
+			if result.err == nil {
+				cancel()
+				if pending > 0 {
+					go closeLateTransportResults(results, pending)
+				}
+				return result.session, nil
+			}
+			switch result.transport {
+			case TransportQUIC:
+				quicErr = fmt.Errorf("QUIC: %w", result.err)
+				log.Printf("[TunnelManager] QUIC connection to %s failed: %v", quicAddr, result.err)
+				if !tcpStarted {
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					fallbackReady = nil
+					startTCP()
+				}
+			case TransportTLS:
+				tcpErr = fmt.Errorf("TLS: %w", result.err)
+				log.Printf("[TunnelManager] TLS connection to %s failed: %v", tcpAddr, result.err)
+			}
+		case <-fallbackReady:
+			fallbackReady = nil
+			startTCP()
+		case <-dialCtx.Done():
+			cancel()
+			if pending > 0 {
+				go closeLateTransportResults(results, pending)
+			}
+			return nil, fmt.Errorf("all transport connection attempts failed: %w", errors.Join(quicErr, tcpErr, dialCtx.Err()))
+		}
+	}
+	cancel()
+	return nil, fmt.Errorf("all transport connection attempts failed: %w", errors.Join(quicErr, tcpErr))
 }
 
 // StartAutoReconnect runs the background reconnect loop

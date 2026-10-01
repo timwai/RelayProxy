@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], messages: [], channels: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -234,6 +234,33 @@
   function renderSessions() {
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };
     $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td></tr>').join('') : emptyRow(6, '当前没有活跃流', '设备发起代理连接后会显示在这里');
+  }
+  function p2pReportHTML(report) {
+    report = report || {};
+    const names = {p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
+    const parts = [];
+    if (report.rttMs > 0) parts.push('RTT ' + esc(report.rttMs) + ' ms');
+    if ((report.bytesUp || 0) > 0 || (report.bytesDown || 0) > 0) parts.push('↑ ' + bytes(report.bytesUp) + ' ↓ ' + bytes(report.bytesDown));
+    if ((report.fallbackCount || 0) > 0) parts.push('fallback ' + esc(report.fallbackCount));
+    if (report.candidateSummary) parts.push(esc(report.candidateSummary));
+    const detail = parts.length ? '<small>' + parts.join(' · ') + '</small>' : '';
+    if (report.path) {
+      const label = names[report.path] || report.path;
+      return badge(label, report.path === 'p2p_quic' ? 'success' : 'transport') +
+        (report.reason ? '<small>' + esc(report.reason) + '</small>' : '') + detail;
+    }
+    if (report.reason) return badge('已降级', 'warning-badge') + '<small>' + esc(report.reason) + '</small>' + detail;
+    return detail || '<span class="muted">等待报告</span>';
+  }
+  function renderP2PSessions() {
+    const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? (device.name || id) : id; };
+    $('p2p-session-count').textContent = state.p2pSessions.length;
+    $('p2p-sessions-body').innerHTML = state.p2pSessions.length ? state.p2pSessions.map(s => {
+      const client = nameFor(s.clientDeviceId), exit = nameFor(s.exitDeviceId);
+      const ready = s.clientReport && s.clientReport.path === 'p2p_quic' && s.exitReport && s.exitReport.path === 'p2p_quic';
+      const status = ready ? badge('DIRECT', 'success') : s.answered ? badge('已应答', 'transport') : badge('协商中', 'neutral');
+      return '<tr><td><span class="device-name">' + esc(client) + ' → ' + esc(exit) + '</span><span class="device-id mono">' + esc(s.clientDeviceId) + ' → ' + esc(s.exitDeviceId) + '</span></td><td>' + status + '</td><td>' + p2pReportHTML(s.clientReport) + '</td><td>' + p2pReportHTML(s.exitReport) + '</td><td class="muted">' + esc(date(s.leaseExpiresAt)) + '</td></tr>';
+    }).join('') : emptyRow(5, '当前没有 P2P 会话', 'Client 选择支持 P2P 的 Exit 后会在后台建立直连');
   }
   function relayPushOrigin() {
     const tunnel = state.settings && state.settings.runtime && state.settings.runtime.tunnel;
@@ -585,6 +612,11 @@
       const cert = state.settings.info.certificate;
       $('certificate-summary').innerHTML = cert ? '<strong>' + esc(cert.dnsNames.length ? cert.dnsNames.join(' · ') : cert.subject) + '</strong><br>签发者：' + esc(cert.issuer) + '<br>有效期：' + esc(date(cert.notBefore)) + ' — ' + esc(date(cert.notAfter)) + '<div class="mono">SHA256 ' + esc(cert.sha256) + '</div>' : '当前进程没有加载 TLS 证书。';
     }
+    if (state.nativeUdp) {
+      const udp = state.nativeUdp;
+      rows.push(['Native UDP', (udp.associations || 0) + ' 个关联 · 队列 ' + bytes(udp.queueBytes) + ' · 重组 ' + bytes(udp.reassemblyBytes)]);
+      rows.push(['UDP 过载丢弃', '队列 ' + (udp.queueDrops || 0) + ' · 重组 ' + (udp.reassemblyDrops || 0) + ' · 关联拒绝 ' + (udp.associationRejects || 0)]);
+    }
     $('network-summary').innerHTML = details(rows);
   }
   async function refresh(manual = false) {
@@ -594,15 +626,18 @@
     const user = state.user, editVersion = state.editVersion;
     const jobs = [
       ['dashboard', '/dashboard', data => {
+        state.nativeUdp = data.nativeUdp || null;
         $('stat-devices').textContent = data.onlineDevices;
         $('stat-exits').textContent = data.onlineExits;
         $('stat-streams').textContent = data.activeConnections;
+        $('stat-p2p').textContent = data.activeP2PSessions || 0;
         $('stat-traffic').textContent = bytes(data.todayUpload + data.todayDownload);
         $('stat-traffic-detail').textContent = '↑ ' + bytes(data.todayUpload) + '  ↓ ' + bytes(data.todayDownload);
       }],
       ['devices', '/devices', data => { state.devices = data; renderDevices(); }],
       ['exits', '/exits', data => { state.exits = data; renderExits(); }],
       ['sessions', '/sessions/active', data => { state.sessions = data; renderSessions(); }],
+      ['p2pSessions', '/p2p/sessions', data => { state.p2pSessions = Array.isArray(data) ? data : []; renderP2PSessions(); }],
       ['messages', messageListPath(), data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }]
     ];
     if (user.role === 'admin') {
@@ -636,6 +671,7 @@
     if (!errors.length) { $('last-refresh').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
     renderRuntime();
     renderSessions();
+    renderP2PSessions();
     renderMessages();
     renderChannels();
     renderIngress();

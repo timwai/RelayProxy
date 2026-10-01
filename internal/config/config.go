@@ -55,6 +55,14 @@ type ServerConfig struct {
 		} `yaml:"ingress"`
 	} `yaml:"rdp"`
 
+	P2P struct {
+		Enabled              *bool  `yaml:"enabled"`
+		RendezvousListen     string `yaml:"rendezvous_listen"`
+		RendezvousAdvertise  string `yaml:"rendezvous_advertise"`
+		LeaseSec             int    `yaml:"lease_sec"`
+		MaxSessionsPerDevice int    `yaml:"max_sessions_per_device"`
+	} `yaml:"p2p"`
+
 	Logging struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
@@ -96,6 +104,16 @@ type AgentConfigFile struct {
 		Enabled *bool  `yaml:"enabled"`
 		Address string `yaml:"address"` // target-local RDP service; defaults to 127.0.0.1:3389
 	} `yaml:"rdp"`
+
+	P2P struct {
+		Enabled         *bool  `yaml:"enabled"`
+		Mode            string `yaml:"mode"` // auto | relay_only | p2p_only
+		PunchTimeoutMs  int    `yaml:"punch_timeout_ms"`
+		KeepaliveSec    int    `yaml:"keepalive_sec"`
+		IdleTimeoutSec  int    `yaml:"idle_timeout_sec"`
+		MaxExitSessions int    `yaml:"max_exit_sessions"`
+		Fallback        *bool  `yaml:"fallback"`
+	} `yaml:"p2p"`
 
 	Routing routing.Config `yaml:"routing"` // 新增路由配置
 
@@ -223,6 +241,15 @@ func applyServerDefaults(cfg *ServerConfig) {
 	if cfg.RDP.Ingress.Enabled == nil {
 		cfg.RDP.Ingress.Enabled = BoolPtr(false)
 	}
+	if cfg.P2P.Enabled == nil {
+		cfg.P2P.Enabled = BoolPtr(true)
+	}
+	if cfg.P2P.LeaseSec == 0 {
+		cfg.P2P.LeaseSec = 60
+	}
+	if cfg.P2P.MaxSessionsPerDevice == 0 {
+		cfg.P2P.MaxSessionsPerDevice = 8
+	}
 	if cfg.RelayACL == nil {
 		cfg.RelayACL = &RelayACLConfig{}
 	}
@@ -338,6 +365,21 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	if cfg.RDP.Address == "" {
 		cfg.RDP.Address = "127.0.0.1:3389"
 	}
+	if cfg.P2P.Mode == "" {
+		cfg.P2P.Mode = "auto"
+	}
+	if cfg.P2P.PunchTimeoutMs == 0 {
+		cfg.P2P.PunchTimeoutMs = 1200
+	}
+	if cfg.P2P.KeepaliveSec == 0 {
+		cfg.P2P.KeepaliveSec = 10
+	}
+	if cfg.P2P.IdleTimeoutSec == 0 {
+		cfg.P2P.IdleTimeoutSec = 120
+	}
+	if cfg.P2P.MaxExitSessions == 0 {
+		cfg.P2P.MaxExitSessions = 4
+	}
 	if cfg.GUI.Theme == "" {
 		cfg.GUI.Theme = "system"
 	}
@@ -360,6 +402,8 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 		&cfg.Proxy.SOCKS5.Enabled,
 		&cfg.Proxy.HTTP.Enabled,
 		&cfg.RDP.Enabled,
+		&cfg.P2P.Enabled,
+		&cfg.P2P.Fallback,
 		&cfg.Exit.Enabled,
 		&cfg.GUI.Enabled,
 		&cfg.GUI.MinimizeToTray,

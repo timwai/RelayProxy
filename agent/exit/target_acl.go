@@ -87,3 +87,34 @@ func (a *requestACL) CheckIPProtocol(ctx context.Context, ip net.IP, port uint16
 	}
 	return nil
 }
+
+type relayPolicyContextKey struct{}
+
+// BindRelayPolicy binds the server-authoritative Relay ACL to a direct P2P
+// stream. The Exit handler always prefers this trusted context value over any
+// RelayPolicy supplied by the peer in OpenTCP/OpenUDP.
+func BindRelayPolicy(ctx context.Context, policy *acl.Policy) context.Context {
+	if policy == nil {
+		return ctx
+	}
+	copy := *policy
+	copy.Rules = append([]acl.Rule(nil), policy.Rules...)
+	copy.AccessHosts = append([]string(nil), policy.AccessHosts...)
+	copy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+	return context.WithValue(ctx, relayPolicyContextKey{}, &copy)
+}
+
+func boundRelayPolicy(ctx context.Context) *acl.Policy {
+	if ctx == nil {
+		return nil
+	}
+	policy, _ := ctx.Value(relayPolicyContextKey{}).(*acl.Policy)
+	if policy == nil {
+		return nil
+	}
+	copy := *policy
+	copy.Rules = append([]acl.Rule(nil), policy.Rules...)
+	copy.AccessHosts = append([]string(nil), policy.AccessHosts...)
+	copy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+	return &copy
+}

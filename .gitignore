@@ -42,8 +42,17 @@ relayproxy.db
 *~
 .DS_Store
 Thumbs.db
+/macos/*.xcodeproj/
+/macos/DerivedData/
 
 # Local agent/task metadata
 .superpowers/
 .workbuddy/
 .smoke/
+
+
+# Android / Gradle / gomobile
+/android/.gradle/
+/android/**/build/
+/android/local.properties
+/android/app/libs/*.aar

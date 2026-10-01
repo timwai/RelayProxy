@@ -11,14 +11,13 @@ targets:
     type: application
     platform: macOS
     sources: [RelayProxyMacHost]
-    info:
-      path: RelayProxyMacHost/Info.plist
-    entitlements:
-      path: RelayProxyMacHost/RelayProxyMacHost.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.relayproxy.agent.extension-manager
         CODE_SIGN_STYLE: Manual
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: RelayProxyMacHost/Info.plist
+        CODE_SIGN_ENTITLEMENTS: RelayProxyMacHost/RelayProxyMacHost.entitlements
     dependencies:
       - target: RelayProxyNetworkExtension
         embed: true
@@ -29,14 +28,13 @@ targets:
     type: system-extension
     platform: macOS
     sources: [RelayProxyNetworkExtension]
-    info:
-      path: RelayProxyNetworkExtension/Info.plist
-    entitlements:
-      path: RelayProxyNetworkExtension/RelayProxyNetworkExtension.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.relayproxy.agent.network-extension
         CODE_SIGN_STYLE: Manual
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: RelayProxyNetworkExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: RelayProxyNetworkExtension/RelayProxyNetworkExtension.entitlements
     dependencies:
       - sdk: NetworkExtension.framework
       - sdk: Network.framework

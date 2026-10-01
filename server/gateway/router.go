@@ -28,6 +28,7 @@ type StreamRouter struct {
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
 	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
+	p2pControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	onAudit           func(audit *repository.ConnectionAudit)
 }
 
@@ -43,6 +44,13 @@ func (r *StreamRouter) SetRDPChecker(fn func(controllerDeviceID, targetDeviceID 
 // signaling frames.
 func (r *StreamRouter) SetRDPControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
 	r.rdpControlHandler = fn
+}
+
+// SetP2PControlHandler installs proxy direct-path signaling. Routing remains
+// unchanged: this handler only coordinates the transport to an already
+// selected Exit.
+func (r *StreamRouter) SetP2PControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
+	r.p2pControlHandler = fn
 }
 
 func NewStreamRouter(
@@ -159,6 +167,11 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 		if r.rdpControlHandler != nil && (containsCapability(clientSession.Grants, protocol.CapabilityRDPClient) || containsCapability(clientSession.Grants, protocol.CapabilityRDPHost)) {
 			r.rdpControlHandler(ctx, clientStream, clientSession)
 		}
+	case protocol.FrameTypeP2PControl:
+		if r.p2pControlHandler != nil && containsCapability(clientSession.Capabilities, protocol.CapabilityProxyP2P) &&
+			(containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) || containsCapability(clientSession.Grants, protocol.CapabilityProxyExit)) {
+			r.p2pControlHandler(ctx, clientStream, clientSession)
+		}
 	default:
 		log.Printf("[StreamRouter] Unsupported FrameType %d from device %s", header.Type, clientSession.DeviceID)
 	}
@@ -231,6 +244,21 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 		})
 		r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
 		return
+	}
+
+	if req.Resume != nil {
+		var err error
+		req.Resume, err = normalizeTCPResumeBinding(req.Resume, proxyStreamResumeNegotiated(clientSession, exitSession))
+		if err != nil {
+			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+				RequestID:    req.RequestID,
+				Success:      false,
+				ErrorCode:    protocol.ErrCodeInvalidRequest,
+				ErrorMessage: err.Error(),
+			})
+			r.emitAudit(baseAudit("RESUME_INVALID", protocol.ErrCodeInvalidRequest, ""))
+			return
+		}
 	}
 
 	// Bind the Relay's own policy, replacing any policy supplied by the client.
@@ -727,4 +755,54 @@ wait:
 	stop()
 	wg.Wait()
 	return up, down
+}
+
+func proxyStreamResumeNegotiated(client, exit *session.DeviceSession) bool {
+	return client != nil && exit != nil &&
+		hasCapability(client, protocol.CapabilityProxyStreamResume) &&
+		hasCapability(exit, protocol.CapabilityProxyStreamResume)
+}
+
+func normalizeTCPResumeBinding(binding *protocol.TCPResumeBinding, negotiated bool) (*protocol.TCPResumeBinding, error) {
+	if binding == nil {
+		return nil, nil
+	}
+	switch binding.Mode {
+	case protocol.TCPResumeModeOpen:
+		if !negotiated {
+			// Mixed-version compatibility: a new Client may optimistically
+			// request resume while the selected Exit is older. Strip only the
+			// initial-open extension and preserve the legacy TCP connection.
+			return nil, nil
+		}
+	case protocol.TCPResumeModeRebind:
+		if !negotiated {
+			return nil, errors.New("resumable TCP rebind capability was not negotiated")
+		}
+	default:
+		return nil, errors.New("invalid resumable TCP mode")
+	}
+	if err := validateTCPResumeBinding(binding); err != nil {
+		return nil, err
+	}
+	return binding, nil
+}
+
+func validateTCPResumeBinding(binding *protocol.TCPResumeBinding) error {
+	if binding == nil {
+		return errors.New("missing resumable TCP binding")
+	}
+	if binding.Mode != protocol.TCPResumeModeOpen && binding.Mode != protocol.TCPResumeModeRebind {
+		return errors.New("invalid resumable TCP mode")
+	}
+	if len(binding.StreamID) != protocol.TCPResumeStreamIDSize {
+		return errors.New("invalid resumable TCP stream id")
+	}
+	if len(binding.Token) != protocol.TCPResumeTokenSize {
+		return errors.New("invalid resumable TCP token")
+	}
+	if binding.Generation == 0 {
+		return errors.New("invalid resumable TCP generation")
+	}
+	return nil
 }

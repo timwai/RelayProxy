@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/divert"
@@ -261,6 +262,13 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.Enabled = c.ExitEnabled
 	res.RDP.Enabled = c.RDPEnabled
 	res.RDP.Address = c.RDPAddress
+	res.P2P.Enabled = c.P2PEnabled
+	res.P2P.Mode = c.P2PMode
+	res.P2P.PunchTimeoutMs = int(c.P2PPunchTimeout / time.Millisecond)
+	res.P2P.KeepaliveSec = int(c.P2PKeepalive / time.Second)
+	res.P2P.IdleTimeoutSec = int(c.P2PIdleTimeout / time.Second)
+	res.P2P.MaxExitSessions = c.P2PMaxSessions
+	res.P2P.Fallback = c.P2PFallback
 	res.Exit.AllowInternet = c.AllowInternet
 	res.Exit.AllowPrivateNetwork = c.AllowPrivateNet
 	res.Exit.AllowLoopback = c.AllowLoopback
@@ -291,7 +299,16 @@ type ConfigUpdate struct {
 		Name *string `json:"name"`
 	} `json:"device"`
 	Transport *string `json:"transport"`
-	Proxy     struct {
+	P2P       struct {
+		Enabled         *bool   `json:"enabled"`
+		Mode            *string `json:"mode"`
+		PunchTimeoutMs  *int    `json:"punchTimeoutMs"`
+		KeepaliveSec    *int    `json:"keepaliveSec"`
+		IdleTimeoutSec  *int    `json:"idleTimeoutSec"`
+		MaxExitSessions *int    `json:"maxExitSessions"`
+		Fallback        *bool   `json:"fallback"`
+	} `json:"p2p"`
+	Proxy struct {
 		SOCKS5Enabled *bool   `json:"socks5Enabled"`
 		SOCKS5Listen  *string `json:"socks5Listen"`
 		SOCKS5Port    *int    `json:"socks5Port"`
@@ -404,6 +421,34 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		default:
 			return nil, fmt.Errorf("传输模式必须是 auto / quic_only / tcp_only")
 		}
+	}
+
+	if in.P2P.Enabled != nil {
+		cfg.P2P.Enabled = config.BoolPtr(*in.P2P.Enabled)
+	}
+	if in.P2P.Mode != nil {
+		mode := strings.ToLower(strings.TrimSpace(*in.P2P.Mode))
+		switch mode {
+		case "auto", "relay_only", "p2p_only":
+			cfg.P2P.Mode = mode
+		default:
+			return nil, fmt.Errorf("P2P 模式必须是 auto / relay_only / p2p_only")
+		}
+	}
+	if in.P2P.PunchTimeoutMs != nil {
+		cfg.P2P.PunchTimeoutMs = *in.P2P.PunchTimeoutMs
+	}
+	if in.P2P.KeepaliveSec != nil {
+		cfg.P2P.KeepaliveSec = *in.P2P.KeepaliveSec
+	}
+	if in.P2P.IdleTimeoutSec != nil {
+		cfg.P2P.IdleTimeoutSec = *in.P2P.IdleTimeoutSec
+	}
+	if in.P2P.MaxExitSessions != nil {
+		cfg.P2P.MaxExitSessions = *in.P2P.MaxExitSessions
+	}
+	if in.P2P.Fallback != nil {
+		cfg.P2P.Fallback = config.BoolPtr(*in.P2P.Fallback)
 	}
 
 	if in.Proxy.SOCKS5Enabled != nil {
@@ -604,7 +649,11 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 	return map[string]any{
 		"中继地址": c.Server.Address, "QUIC 端口": c.Server.QUICPort, "TCP 端口": c.Server.TCPPort,
 		"设备名称": name, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(),
-		"SOCKS5 开关": enabled(c.Proxy.SOCKS5.Enabled), "SOCKS5 地址": c.Proxy.SOCKS5.Listen,
+		"P2P 开关": enabled(c.P2P.Enabled), "P2P 模式": c.P2P.Mode,
+		"P2P 打洞超时": c.P2P.PunchTimeoutMs, "P2P Keepalive": c.P2P.KeepaliveSec,
+		"P2P 空闲超时": c.P2P.IdleTimeoutSec, "P2P 会话上限": c.P2P.MaxExitSessions,
+		"P2P Relay 回退": enabled(c.P2P.Fallback),
+		"SOCKS5 开关":    enabled(c.Proxy.SOCKS5.Enabled), "SOCKS5 地址": c.Proxy.SOCKS5.Listen,
 		"SOCKS5 端口": c.Proxy.SOCKS5.Port, "HTTP 开关": enabled(c.Proxy.HTTP.Enabled),
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
 		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,

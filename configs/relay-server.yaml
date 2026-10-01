@@ -34,6 +34,17 @@ rdp:
     source_cidrs: []
     rate_limit_per_minute: 120
 
+
+
+# Proxy P2P direct path control/rendezvous. Payload traffic still falls back to
+# Relay until the Client/Exit P2P QUIC data path is ready.
+p2p:
+  enabled: true
+  rendezvous_listen: ""       # 例如 :3479；可与 RDP 使用不同 UDP 端口
+  rendezvous_advertise: ""    # 例如 relay.example.com:3479
+  lease_sec: 60
+  max_sessions_per_device: 8
+
 # 中央目标权限与出口本地策略取交集。
 # 公司内网/VPN 出口需在两处显式允许 private_network。
 relay_acl:

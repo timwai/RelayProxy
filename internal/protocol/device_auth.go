@@ -64,6 +64,8 @@ type DeviceAccepted struct {
 	RDPTargets            []RDPTarget `json:"rdpTargets,omitempty"`
 	RendezvousAddress     string      `json:"rendezvousAddress,omitempty"`
 	RDPLeaseSec           int         `json:"rdpLeaseSec,omitempty"`
+	P2PRendezvousAddress  string      `json:"p2pRendezvousAddress,omitempty"`
+	P2PLeaseSec           int         `json:"p2pLeaseSec,omitempty"`
 	SessionID             string      `json:"sessionId,omitempty"`
 	HeartbeatSec          int         `json:"heartbeat,omitempty"`
 	MaxConnections        int         `json:"maxConnections,omitempty"`

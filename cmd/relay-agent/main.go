@@ -229,6 +229,13 @@ func main() {
 		},
 		RDPEnabled:      cfgFile.RDP.Enabled,
 		RDPAddress:      cfgFile.RDP.Address,
+		P2PEnabled:      cfgFile.P2P.Enabled,
+		P2PMode:         cfgFile.P2P.Mode,
+		P2PPunchTimeout: time.Duration(cfgFile.P2P.PunchTimeoutMs) * time.Millisecond,
+		P2PKeepalive:    time.Duration(cfgFile.P2P.KeepaliveSec) * time.Second,
+		P2PIdleTimeout:  time.Duration(cfgFile.P2P.IdleTimeoutSec) * time.Second,
+		P2PMaxSessions:  cfgFile.P2P.MaxExitSessions,
+		P2PFallback:     cfgFile.P2P.Fallback,
 		AllowInternet:   cfgFile.Exit.AllowInternet,
 		AllowPrivateNet: cfgFile.Exit.AllowPrivateNetwork,
 		AllowLoopback:   cfgFile.Exit.AllowLoopback,
@@ -289,7 +296,9 @@ func main() {
 	// The window owns the process lifetime: closing it (or choosing 退出 from the
 	// tray) shuts the agent down. gui.Run blocks until then.
 	if wantGUI && cfgFile.IsGUIEnabled() {
+		webURL := ""
 		if webServer != nil {
+			webURL = "http://" + webServer.Addr() + "/"
 			go func() {
 				<-webServer.Done()
 				gui.RequestQuit()
@@ -300,6 +309,7 @@ func main() {
 			StartMinimized: startMinimized,
 			MinimizeToTray: cfgFile.IsMinimizeToTray(),
 			Theme:          cfgFile.GUI.Theme,
+			WebURL:         webURL,
 			// Keep the native window title stable. The single-instance activation
 			// path uses it to find a window that may currently be hidden in the tray.
 			Title: gui.DefaultWindowTitle,

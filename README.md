@@ -1324,6 +1324,10 @@ chmod +x scripts/build.sh
 VERSION=1.0.0 ./scripts/build.sh
 ```
 
+在 macOS 构建机上，`RelayProxy.app` 会使用系统 Swift 编译器生成原生 AppKit/WKWebView 窗口，并在应用包内启动 `relay-agent`。从 Linux 或 Windows 交叉构建 macOS 包时，会保留浏览器管理页作为兼容回退。
+
+本地测试构建默认使用 ad-hoc 签名。正式分发时可设置 `MACOS_CODESIGN_IDENTITY="Developer ID Application: ..."` 生成 Hardened Runtime 签名，并在发布前按 Apple 要求完成 notarization。
+
 构建脚本会生成跨平台产物、配置文件和 SHA256 校验清单。
 
 主要产物：

@@ -50,6 +50,10 @@ type Options struct {
 	Theme string
 	// Title is the window title.
 	Title string
+	// WebURL is the effective address of the already-running local management
+	// server. macOS uses it when opening the browser fallback so command-line
+	// listen/port overrides cannot send the user to the saved, stale address.
+	WebURL string
 	// Width and Height size the window; zero selects sensible defaults.
 	Width  int
 	Height int

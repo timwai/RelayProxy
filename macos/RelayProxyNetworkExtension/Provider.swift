@@ -1,5 +1,4 @@
 import Foundation
-import Network
 import NetworkExtension
 
 final class Provider: NETransparentProxyProvider {
@@ -159,10 +158,30 @@ final class Provider: NETransparentProxyProvider {
 }
 
 private func endpointParts(_ endpoint: NWEndpoint?) -> (String, UInt16)? {
+    guard let hostEndpoint = endpoint as? NWHostEndpoint,
+          let port = UInt16(hostEndpoint.port),
+          IPv4Address(hostEndpoint.hostname) != nil || IPv6Address(hostEndpoint.hostname) != nil else {
+        return nil
+    }
+    return (hostEndpoint.hostname, port)
+}
+
+private func transportEndpoint(host: String, port: UInt16) -> Network.NWEndpoint? {
+    let endpointHost: Network.NWEndpoint.Host
+    if let address = IPv4Address(host) {
+        endpointHost = .ipv4(address)
+    } else if let address = IPv6Address(host) {
+        endpointHost = .ipv6(address)
+    } else {
+        return nil
+    }
+    guard let endpointPort = Network.NWEndpoint.Port(rawValue: port) else { return nil }
+    return .hostPort(host: endpointHost, port: endpointPort)
+}
+
+private func flowEndpoint(_ endpoint: Network.NWEndpoint) -> NWEndpoint? {
     guard case let .hostPort(host, port) = endpoint else { return nil }
-    let value = String(describing: host)
-	guard IPv4Address(value) != nil || IPv6Address(value) != nil else { return nil }
-	return (value, port.rawValue)
+    return NWHostEndpoint(hostname: String(describing: host), port: String(port.rawValue))
 }
 
 private func flowIdentity(_ flow: NEAppProxyFlow) -> String {
@@ -197,7 +216,8 @@ private final class TCPFlowHandler {
 
     func start() {
 		let remoteEndpoint = flow.remoteEndpoint
-		guard let destination = endpointParts(remoteEndpoint) else {
+		guard let destination = endpointParts(remoteEndpoint),
+		      let directDestination = transportEndpoint(host: destination.0, port: destination.1) else {
             close(IPCError.invalidEndpoint); return
         }
 		let source = syntheticTCPSource(flow, destinationIP: destination.0)
@@ -212,12 +232,12 @@ private final class TCPFlowHandler {
 									process: flowIdentity(self.flow), hostname: self.flow.remoteHostname)
             connection.sendJSON(.open, open) { error in
                 if let error { self.close(error); return }
-				connection.receiveFrame { decision in self.handleDecision(decision, destination: remoteEndpoint) }
+				connection.receiveFrame { decision in self.handleDecision(decision, destination: directDestination) }
             }
         }
     }
 
-    private func handleDecision(_ result: Result<(IPCFrameKind, Data), Error>, destination: NWEndpoint) {
+    private func handleDecision(_ result: Result<(IPCFrameKind, Data), Error>, destination: Network.NWEndpoint) {
         guard case .success(let frame) = result, frame.0 == .decision,
               let decision = try? JSONDecoder().decode(IPCDecision.self, from: frame.1) else {
             close(IPCError.invalidFrame); return
@@ -340,17 +360,24 @@ private final class UDPFlowHandler {
     }
 
     private func readApplication() {
-        flow.readDatagrams { [weak self] datagrams, endpoints, error in
+        flow.readDatagrams { [weak self] (datagrams: [Data]?, endpoints: [NWEndpoint]?, error: Error?) in
             guard let self else { return }
             if let error { self.close(error); return }
             guard let datagrams, let endpoints, datagrams.count == endpoints.count else {
                 self.close(IPCError.invalidEndpoint); return
             }
-			self.sendDatagrams(datagrams, endpoints: endpoints, index: 0)
+			let transportEndpoints = endpoints.compactMap { endpoint -> Network.NWEndpoint? in
+				guard let parts = endpointParts(endpoint) else { return nil }
+				return transportEndpoint(host: parts.0, port: parts.1)
+			}
+			guard transportEndpoints.count == endpoints.count else {
+				self.close(IPCError.invalidEndpoint); return
+			}
+			self.sendDatagrams(datagrams, endpoints: transportEndpoints, index: 0)
         }
     }
 
-	private func sendDatagrams(_ datagrams: [Data], endpoints: [NWEndpoint], index: Int) {
+	private func sendDatagrams(_ datagrams: [Data], endpoints: [Network.NWEndpoint], index: Int) {
 		guard index < datagrams.count else { readApplication(); return }
 		guard let ipc else { close(IPCError.connectionFailed("IPC unavailable")); return }
 		let datagram = IPCEndpointDatagram(endpoint: endpoints[index], payload: datagrams[index])
@@ -374,7 +401,10 @@ private final class UDPFlowHandler {
             }
             switch frame.0 {
             case .udpReply:
-                self.flow.writeDatagrams([datagram.payload], sentBy: [datagram.endpoint]) { error in
+				guard let endpoint = flowEndpoint(datagram.endpoint) else {
+					self.close(IPCError.invalidEndpoint); return
+				}
+				self.flow.writeDatagrams([datagram.payload], sentBy: [endpoint]) { error in
                     if let error { self.close(error) }
                 }
             case .udpDirect:
@@ -407,12 +437,15 @@ private final class UDPFlowHandler {
         })
     }
 
-    private func receiveDirect(_ connection: NWConnection, endpoint: NWEndpoint) {
+    private func receiveDirect(_ connection: NWConnection, endpoint: Network.NWEndpoint) {
         connection.receiveMessage { [weak self, weak connection] data, _, _, error in
             guard let self, let connection else { return }
             if let error { self.close(error); return }
             if let data {
-                self.flow.writeDatagrams([data], sentBy: [endpoint]) { error in
+				guard let source = flowEndpoint(endpoint) else {
+					self.close(IPCError.invalidEndpoint); return
+				}
+				self.flow.writeDatagrams([data], sentBy: [source]) { error in
                     if let error { self.close(error) }
                 }
             }

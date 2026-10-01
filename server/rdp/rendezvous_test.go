@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"relayproxy/internal/rdp/candidate"
+	"relayproxy/internal/p2p/candidate"
 )
 
 func TestRendezvousReportsObservedUDPEndpoint(t *testing.T) {

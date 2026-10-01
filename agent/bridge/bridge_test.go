@@ -253,6 +253,43 @@ func TestRestartStateTracksAppliedSettingsAcrossSaves(t *testing.T) {
 	}
 }
 
+func TestP2PConfigSaveRequiresRestart(t *testing.T) {
+	b := newTestBridge(t)
+	var in ConfigUpdate
+	in.P2P.Enabled = ptr(false)
+	in.P2P.Mode = ptr("relay_only")
+	in.P2P.PunchTimeoutMs = ptr(900)
+	in.P2P.KeepaliveSec = ptr(15)
+	in.P2P.IdleTimeoutSec = ptr(180)
+	in.P2P.MaxExitSessions = ptr(6)
+	in.P2P.Fallback = ptr(false)
+
+	result, err := b.SaveConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RestartRequired {
+		t.Fatal("P2P startup settings were applied without restart")
+	}
+	cfg, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.P2P.Enabled == nil || *cfg.P2P.Enabled || cfg.P2P.Mode != "relay_only" ||
+		cfg.P2P.PunchTimeoutMs != 900 || cfg.P2P.KeepaliveSec != 15 ||
+		cfg.P2P.IdleTimeoutSec != 180 || cfg.P2P.MaxExitSessions != 6 ||
+		cfg.P2P.Fallback == nil || *cfg.P2P.Fallback {
+		t.Fatalf("saved P2P config mismatch: %+v", cfg.P2P)
+	}
+	state, err := b.GetConfigState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.RestartRequired || state.Runtime.P2P.Mode != "auto" || state.Config.P2P.Mode != "relay_only" {
+		t.Fatalf("desired/runtime P2P state mismatch: desired=%+v runtime=%+v", state.Config.P2P, state.Runtime.P2P)
+	}
+}
+
 func TestStaleRevisionRejectsExternalEdit(t *testing.T) {
 	b := newTestBridge(t)
 	state, err := b.GetConfigState()

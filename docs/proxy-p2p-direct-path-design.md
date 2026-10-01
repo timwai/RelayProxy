@@ -1,8 +1,10 @@
 # RelayProxy Proxy P2P Direct Path Design
 
-> Status: Design
+> Status: Implementation in progress
 >
 > Target branch: `main`
+>
+> Development branch: `feat/proxy-p2p-direct-path`
 >
 > Scope: RelayProxy proxy traffic between Client Agent and Exit Agent
 >
@@ -250,7 +252,7 @@ Why QUIC:
 - Multiple TCP flows can share one QUIC session.
 - UDP proxy traffic can use QUIC DATAGRAM.
 - TLS 1.3 security is already built into QUIC.
-- Connection migration and keepalive are available for future optimization.
+- Keepalive and idle management are implemented; established TCP fallback uses the resumable logical-stream overlay instead of relying on QUIC connection migration.
 
 One Exit should normally have one long-lived P2P QUIC session:
 
@@ -958,6 +960,26 @@ Keepalive responsibilities:
 - detect dead paths
 - detect network rebinding
 
+Battery-aware behavior:
+
+- normal mode keeps the configured P2P keepalive and idle timeout
+- power-constrained mode suppresses default-Exit prewarming
+- power-constrained mode retains at most one cached Client -> Exit P2P session
+- newly established power-constrained QUIC paths disable periodic keepalive and
+  use a shorter idle timeout so Android does not keep waking the radio only to
+  preserve an unused NAT mapping
+- the idle reaper never closes a session with active QUIC streams
+- reactive P2P attempts are still allowed while power-constrained, so active
+  application traffic can obtain a direct path instead of being permanently
+  forced through Relay
+
+The generic Agent exposes `SetP2PPowerConstrained(bool)` for platform lifecycle
+integration. The Android exit client is now integrated into this branch and
+exposes the same policy through gomobile. Its foreground service enables the
+low-power profile when Android Power Saver or device-idle mode is active, when
+the screen is not interactive, or when the selected exit network is cellular.
+The profile is relaxed automatically when those conditions clear.
+
 ---
 
 ## 24. Failure Cache and Cooldown
@@ -1002,18 +1024,55 @@ repunch
 
 ## 25. Existing TCP Connections During P2P Failure
 
-Version 1 should not attempt transparent stream migration.
-
-If an active P2P QUIC session dies:
+RelayProxy now performs **safe pre-stream failover** before returning a new
+connection to the application. If a READY P2P session fails while opening the
+QUIC stream, writing the OpenTCP/OpenUDP request, or reading its response, the
+Client:
 
 ```text
-existing TCP streams -> fail/reset
-new connections      -> Relay
+1. records the P2P -> Relay fallback
+2. quarantines/removes the broken READY P2P session
+3. enters the existing P2P cooldown
+4. retries the new connection through Relay
 ```
 
-Most applications will retry automatically.
+ACL/business errors are not treated as transport failures and are never retried
+through Relay to bypass Exit policy.
 
-Seamless live TCP migration requires an additional overlay stream layer and is intentionally out of scope for the first version.
+Established TCP streams now have a capability-gated recovery path. When both
+authenticated peers advertise `proxy_stream_resume_v1`, a direct P2P TCP stream
+uses a logical stream ID, byte-offset ACKs and bounded replay. If the P2P QUIC
+transport dies after application bytes have been exchanged:
+
+```text
+negotiated resumable TCP stream -> rebind through Relay
+legacy / unsupported TCP stream -> fail/reset
+new connections                 -> Relay
+```
+
+The Exit retains the original target socket during a bounded recovery grace
+period, so a successful rebind does not redial the destination and does not
+change the remote TCP session. Replay is de-duplicated by byte offset before
+bytes are exposed to the application.
+
+This Version 1 migration is deliberately one-way: `P2P -> Relay` on direct-path
+loss. Relay-originated streams remain the legacy raw stream format and are not
+migrated back to P2P mid-flow. This keeps normal Relay traffic free of resume
+framing/replay overhead and preserves mixed-version compatibility.
+
+The production gate is stricter than merely advertising the capability:
+
+- the Server derives peer capabilities from authenticated DeviceSession state;
+- the capability is attached to the concrete P2P QUIC session;
+- the Client enables resume only in automatic mode with Relay fallback enabled;
+- the Exit keeps resumable target sessions in a bounded registry;
+- resumable frame ACKs use a coalesced writer so simultaneous full-duplex DATA
+  cannot deadlock both peers on control writes;
+- a detached Exit session accepts an authenticated idempotent retry of its
+  current generation, covering a lost rebind response without permitting an
+  active or older generation to take ownership;
+- normal Close sends a logical reset, while half-close uses replayable FIN/ACK;
+- logical read/write deadlines continue to follow `net.Conn` semantics.
 
 ---
 
@@ -1485,15 +1544,28 @@ Add:
 
 ### Phase 8 - Optimization
 
-Future work:
+Progress as of 2026-10-01:
 
-- IPv6 direct path
-- OS network-change detection
-- smarter cooldown
-- LRU session management
-- Android battery-aware behavior
-- path scoring
-- optional stream migration
+- [x] IPv6 candidate discovery and dual-stack UDP punching
+- [x] OS network-change detection and automatic P2P invalidation/retry
+- [x] exponential cooldown after repeated direct-path failures
+- [x] LRU session management for ready Client/Exit P2P sessions
+- [x] battery-aware P2P core profile
+- [x] Android lifecycle/power-saver/cellular-network wiring
+- [x] candidate path scoring with bounded RTT preference
+- [x] pre-stream transport failover + broken-path quarantine
+- [x] live established TCP stream migration from P2P to Relay
+
+The IPv6 implementation keeps Relay as the fallback. Mixed IPv4/IPv6 candidate
+sets continue racing even when the local socket cannot use one address family,
+so an unsupported family does not abort an otherwise usable direct path.
+
+Path scoring follows the preferred order of reachable private/LAN candidates,
+native IPv6 and reflexive UDP, while using observed punch latency to choose
+between candidates in the same class. A short selection window avoids delaying
+Relay fallback or direct-path establishment for a slow preferred candidate.
+Punch request/ack state is tracked per remote address so two different
+candidates cannot be combined into a false successful path.
 
 ---
 
@@ -1601,7 +1673,7 @@ Existing routing configuration must not require migration.
 
 The first version explicitly does not include:
 
-- seamless migration of active TCP streams
+- arbitrary bidirectional live migration between Relay and P2P mid-flow
 - TCP NAT hole punching
 - independent operation without Relay Server control plane
 - persistent P2P credentials
@@ -1679,4 +1751,3 @@ Local Network       Select Exit
 The key rule remains:
 
 > Routing chooses the Exit. P2P only changes the path used to reach that Exit.
-

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"relayproxy/agent/bridge"
 )
@@ -16,13 +17,36 @@ import (
 // management surface is loopback-only and uses the same HTML/components as the
 // Windows WebView2 client. The caller keeps the Agent process alive headlessly
 // after ErrExternalUI is returned.
-func Run(b *bridge.UIBridge, _ Options) error {
+func Run(b *bridge.UIBridge, opts Options) error {
 	if b == nil {
 		return fmt.Errorf("macOS UI: bridge is nil")
 	}
+	url := managementURL(b, opts)
+	if url == "" {
+		return fmt.Errorf("macOS UI requires the local web management page to be enabled")
+	}
+	if err := exec.Command("open", url).Start(); err != nil {
+		return fmt.Errorf("open macOS management UI: %w", err)
+	}
+	log.Printf("[GUI] macOS 管理界面已打开: %s", url)
+	return ErrExternalUI
+}
+
+func managementURL(b *bridge.UIBridge, opts Options) string {
+	url := strings.TrimSpace(opts.WebURL)
+	if url != "" {
+		if !strings.HasSuffix(url, "/") {
+			url += "/"
+		}
+		return url
+	}
+	return savedManagementURL(b)
+}
+
+func savedManagementURL(b *bridge.UIBridge) string {
 	cfg := b.GetConfig()
 	if !cfg.IsWebEnabled() {
-		return fmt.Errorf("macOS UI requires the local web management page to be enabled")
+		return ""
 	}
 	host := cfg.Web.Listen
 	if host == "" || host == "0.0.0.0" {
@@ -31,12 +55,7 @@ func Run(b *bridge.UIBridge, _ Options) error {
 	if host == "::" {
 		host = "::1"
 	}
-	url := "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Web.Port)) + "/"
-	if err := exec.Command("open", url).Start(); err != nil {
-		return fmt.Errorf("open macOS management UI: %w", err)
-	}
-	log.Printf("[GUI] macOS 管理界面已打开: %s", url)
-	return ErrExternalUI
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(cfg.Web.Port)) + "/"
 }
 
 func ShowStartupError(err error, fallbackURL string) {

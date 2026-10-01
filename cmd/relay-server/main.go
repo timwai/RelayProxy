@@ -21,6 +21,7 @@ import (
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
 	"relayproxy/server/gateway"
+	serverp2p "relayproxy/server/p2p"
 	serverrdp "relayproxy/server/rdp"
 	"relayproxy/server/repository"
 	"relayproxy/server/service"
@@ -106,9 +107,37 @@ func main() {
 			rendezvousAddress = net.JoinHostPort(host, port)
 		}
 	}
-	coordinator := serverrdp.NewCoordinator(sessionMgr, db, time.Duration(cfg.RDP.LeaseSec)*time.Second, rendezvousAddress)
-	coordinator.Start(context.Background())
-	defer coordinator.Close()
+	rdpCoordinator := serverrdp.NewCoordinator(sessionMgr, db, time.Duration(cfg.RDP.LeaseSec)*time.Second, rendezvousAddress)
+	rdpCoordinator.Start(context.Background())
+	defer rdpCoordinator.Close()
+
+	var proxyP2PCoordinator *serverp2p.Coordinator
+	p2pRendezvousAddress := ""
+	if cfg.P2P.Enabled != nil && *cfg.P2P.Enabled {
+		proxyRendezvous, startErr := serverp2p.StartRendezvous(context.Background(), cfg.P2P.RendezvousListen, 120)
+		if startErr != nil {
+			log.Fatalf("[P2P] Failed to start rendezvous: %v", startErr)
+		}
+		if proxyRendezvous != nil {
+			defer proxyRendezvous.Close()
+		}
+		p2pRendezvousAddress = cfg.P2P.RendezvousAdvertise
+		if p2pRendezvousAddress == "" && cfg.P2P.RendezvousListen != "" {
+			if host, port, splitErr := net.SplitHostPort(cfg.P2P.RendezvousListen); splitErr == nil && host != "" && host != "0.0.0.0" && host != "::" {
+				p2pRendezvousAddress = net.JoinHostPort(host, port)
+			}
+		}
+		proxyP2PCoordinator = serverp2p.NewCoordinator(
+			sessionMgr,
+			db.AuthorizeClientExit,
+			time.Duration(cfg.P2P.LeaseSec)*time.Second,
+			p2pRendezvousAddress,
+			cfg.P2P.MaxSessionsPerDevice,
+			relayACL.Policy(),
+		)
+		proxyP2PCoordinator.Start(context.Background())
+		defer proxyP2PCoordinator.Close()
+	}
 
 	// Async audit writer (N5): bounded channel + background insert
 	auditCh := make(chan *repository.ConnectionAudit, 2048)
@@ -172,7 +201,10 @@ func main() {
 	router.SetRDPChecker(func(controllerDeviceID, targetDeviceID string) (bool, error) {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
-	router.SetRDPControlHandler(coordinator.HandleControl)
+	router.SetRDPControlHandler(rdpCoordinator.HandleControl)
+	if proxyP2PCoordinator != nil {
+		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)
+	}
 
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
 
@@ -181,6 +213,11 @@ func main() {
 	if !cfg.IsTLSEnabled() {
 		quicAddr = "" // QUIC requires TLS 1.3, disable when plaintext
 	}
+	p2pLeaseSec := 0
+	if proxyP2PCoordinator != nil {
+		p2pLeaseSec = proxyP2PCoordinator.LeaseSeconds()
+	}
+
 	gw := gateway.NewGateway(gateway.GatewayConfig{
 		TCPAddr:           cfg.Server.TLS.Listen,
 		QUICAddr:          quicAddr,
@@ -208,13 +245,19 @@ func main() {
 		},
 		OnDeviceDisconnected: func(deviceID string) {
 			_ = db.UpdateDeviceLastSeen(deviceID)
-			coordinator.CloseDevice(deviceID)
+			rdpCoordinator.CloseDevice(deviceID)
+			if proxyP2PCoordinator != nil {
+				proxyP2PCoordinator.CloseDevice(deviceID)
+			}
 		},
 		MaxConnections:          cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
 		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,
 		RendezvousAddress:       rendezvousAddress,
-		RDPLeaseSec:             coordinator.LeaseSeconds(),
+		RDPLeaseSec:             rdpCoordinator.LeaseSeconds(),
+		P2PEnabled:              proxyP2PCoordinator != nil,
+		P2PRendezvousAddress:    p2pRendezvousAddress,
+		P2PLeaseSec:             p2pLeaseSec,
 	}, sessionMgr, router)
 
 	if err := gw.Start(); err != nil {
@@ -249,8 +292,43 @@ func main() {
 	}
 	apiRouter := api.NewRouter(authService, deviceService, sessionMgr, db,
 		api.WithServerSettings(settings, tlsConfig),
-		api.WithDeviceAuthorizationChanged(func(deviceID string) { coordinator.CloseDevice(deviceID); ingress.Reload() }),
-		api.WithDeviceRevoked(func(deviceID string) { coordinator.CloseDevice(deviceID); ingress.CloseDevice(deviceID) }),
+		api.WithDeviceAuthorizationChanged(func(deviceID string) {
+			rdpCoordinator.CloseDevice(deviceID)
+			if proxyP2PCoordinator != nil {
+				proxyP2PCoordinator.RevokeDevice(deviceID)
+			}
+			ingress.Reload()
+		}),
+		api.WithDeviceRevoked(func(deviceID string) {
+			rdpCoordinator.CloseDevice(deviceID)
+			if proxyP2PCoordinator != nil {
+				proxyP2PCoordinator.RevokeDevice(deviceID)
+			}
+			ingress.CloseDevice(deviceID)
+		}),
+		api.WithP2PSessions(func() []api.P2PSessionRuntimeStatus {
+			if proxyP2PCoordinator == nil {
+				return []api.P2PSessionRuntimeStatus{}
+			}
+			snapshots := proxyP2PCoordinator.Snapshots()
+			out := make([]api.P2PSessionRuntimeStatus, 0, len(snapshots))
+			peer := func(report serverp2p.PeerReport) api.P2PPeerRuntimeReport {
+				return api.P2PPeerRuntimeReport{
+					Path: report.Path, Reason: report.Reason, RTTMs: report.RTTMs,
+					CandidateSummary: report.CandidateSummary, FallbackCount: report.FallbackCount,
+					ActiveStreams: report.ActiveStreams, BytesUp: report.BytesUp,
+					BytesDown: report.BytesDown, UpdatedAt: report.UpdatedAt,
+				}
+			}
+			for _, item := range snapshots {
+				out = append(out, api.P2PSessionRuntimeStatus{
+					SessionID: item.ID, ClientDeviceID: item.ClientDeviceID, ExitDeviceID: item.ExitDeviceID,
+					LeaseExpiresAt: item.ExpiresAt, Answered: item.Answered,
+					ClientReport: peer(item.ClientReport), ExitReport: peer(item.ExitReport),
+				})
+			}
+			return out
+		}),
 		api.WithRDPIngressEnabled(ingress.Enabled),
 		api.WithRDPIngressReload(func(string) error { return ingress.Reload() }),
 		api.WithRDPIngressStatus(func(id string) api.RDPIngressRuntimeStatus {

@@ -57,6 +57,9 @@ func (s *QUICStreamAdapter) Close() error {
 		s.deadlineMu.Unlock()
 		return nil
 	}
+	if s.session != nil {
+		s.session.activeStreams.Add(-1)
+	}
 	// Wake a concurrent writer before serializing the graceful write FIN.
 	// Bytes accepted by earlier successful writes remain queued for delivery.
 	s.Stream.CancelRead(0)
@@ -94,16 +97,23 @@ func (s *QUICStreamAdapter) SetWriteDeadline(t time.Time) error {
 
 // Abort forcibly resets both directions of the stream.
 func (s *QUICStreamAdapter) Abort() {
-	s.closed.Store(true)
+	if s.closed.Swap(true) {
+		return
+	}
+	if s.session != nil {
+		s.session.activeStreams.Add(-1)
+	}
 	s.Stream.CancelRead(0)
 	s.Stream.CancelWrite(0)
 }
 
 // QUICSession implements TunnelSession using quic-go
 type QUICSession struct {
-	conn          *quic.Conn
-	datagrams     *datagramMux
-	peerDatagrams atomic.Bool
+	conn             *quic.Conn
+	datagrams        *datagramMux
+	peerDatagrams    atomic.Bool
+	peerStreamResume atomic.Bool
+	activeStreams    atomic.Int64
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -111,8 +121,11 @@ type QUICSession struct {
 // stream/connection caps still bound peer-controlled memory growth.
 func DefaultQUICConfig() *quic.Config {
 	return &quic.Config{
-		MaxIdleTimeout:                 60 * time.Second,
-		KeepAlivePeriod:                15 * time.Second,
+		// RelayProxy has an authenticated application-layer Ping/Pong heartbeat.
+		// Keep transport-level keepalive disabled to avoid duplicate idle packets
+		// and radio wakeups, especially on mobile exits.
+		MaxIdleTimeout:                 120 * time.Second,
+		KeepAlivePeriod:                0,
 		InitialStreamReceiveWindow:     4 << 20,
 		MaxStreamReceiveWindow:         32 << 20,
 		InitialConnectionReceiveWindow: 16 << 20,
@@ -167,6 +180,7 @@ func (s *QUICSession) OpenStream(ctx context.Context) (TunnelStream, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.activeStreams.Add(1)
 	return &QUICStreamAdapter{Stream: stream, session: s}, nil
 }
 
@@ -175,7 +189,15 @@ func (s *QUICSession) AcceptStream(ctx context.Context) (TunnelStream, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.activeStreams.Add(1)
 	return &QUICStreamAdapter{Stream: stream, session: s}, nil
+}
+
+func (s *QUICSession) ActiveStreams() int64 {
+	if s == nil {
+		return 0
+	}
+	return s.activeStreams.Load()
 }
 
 func (s *QUICSession) Transport() TransportType {

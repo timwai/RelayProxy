@@ -26,12 +26,12 @@ type datagramBudget struct {
 // A frame transferred to the QUIC transport or to its caller is no longer
 // queued here; QUIC and operating-system transport buffers are separate.
 type DatagramUsage struct {
-	Associations       int64
-	QueueBytes         int64
-	ReassemblyBytes    int64
-	AssociationRejects uint64
-	QueueDrops         uint64
-	ReassemblyDrops    uint64
+	Associations       int64  `json:"associations"`
+	QueueBytes         int64  `json:"queueBytes"`
+	ReassemblyBytes    int64  `json:"reassemblyBytes"`
+	AssociationRejects uint64 `json:"associationRejects"`
+	QueueDrops         uint64 `json:"queueDrops"`
+	ReassemblyDrops    uint64 `json:"reassemblyDrops"`
 }
 
 func NativeUDPUsage() DatagramUsage { return processDatagramBudget.usage() }

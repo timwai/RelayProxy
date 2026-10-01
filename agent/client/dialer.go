@@ -2,12 +2,15 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
+	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
 	"relayproxy/internal/tunnel"
@@ -26,13 +29,175 @@ type TunnelDialer struct {
 	getClientID   func() string
 	defaultExitID atomic.Pointer[string]
 	requestSeq    atomic.Uint64
+
+	directMu             sync.RWMutex
+	getDirect            func(exitDeviceID string) (tunnel.TunnelSession, bool)
+	ensureDirect         func(exitDeviceID string)
+	directMode           string
+	directFallback       bool
+	noteFallback         func(exitDeviceID string)
+	noteDirectFailure    func(exitDeviceID, reason string)
+	streamResume         bool
+	resumeReplayLimit    int
+	directAttemptTimeout time.Duration
 }
+
+const defaultDirectAttemptTimeout = 2 * time.Second
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
 	return &TunnelDialer{
-		getTunnel:   getTunnel,
-		getClientID: getClientID,
+		getTunnel: getTunnel, getClientID: getClientID,
+		directMode: "auto", directFallback: true,
+		directAttemptTimeout: defaultDirectAttemptTimeout,
 	}
+}
+
+// ConfigureDirectPath installs optional Client -> Exit P2P lookup hooks. When
+// no READY direct path exists, normal Relay traffic proceeds immediately while
+// ensureDirect prepares a path for later flows.
+func (d *TunnelDialer) ConfigureDirectPath(
+	get func(exitDeviceID string) (tunnel.TunnelSession, bool),
+	ensure func(exitDeviceID string),
+) {
+	d.directMu.Lock()
+	d.getDirect = get
+	d.ensureDirect = ensure
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) ConfigureDirectPolicy(mode string, fallback bool) {
+	d.directMu.Lock()
+	d.directMode, d.directFallback = mode, fallback
+	d.directMu.Unlock()
+}
+
+// ConfigureDirectAttemptTimeout bounds a READY direct-path handshake when
+// Relay fallback is enabled. The caller's original context is retained for
+// the fallback, so a stale P2P session cannot consume the entire deadline.
+func (d *TunnelDialer) ConfigureDirectAttemptTimeout(timeout time.Duration) {
+	d.directMu.Lock()
+	if timeout <= 0 {
+		timeout = defaultDirectAttemptTimeout
+	}
+	d.directAttemptTimeout = timeout
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) ConfigureDirectMetrics(noteFallback func(exitDeviceID string)) {
+	d.directMu.Lock()
+	d.noteFallback = noteFallback
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) ConfigureDirectFailure(noteFailure func(exitDeviceID, reason string)) {
+	d.directMu.Lock()
+	d.noteDirectFailure = noteFailure
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) ConfigureStreamResume(enabled bool, replayLimit int) {
+	d.directMu.Lock()
+	d.streamResume = enabled
+	d.resumeReplayLimit = replayLimit
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) streamResumeConfig() (bool, int) {
+	d.directMu.RLock()
+	defer d.directMu.RUnlock()
+	return d.streamResume, d.resumeReplayLimit
+}
+
+func (d *TunnelDialer) recordDirectFailure(exitDeviceID string, err error) {
+	if exitDeviceID == "" || err == nil {
+		return
+	}
+	d.directMu.RLock()
+	note := d.noteDirectFailure
+	d.directMu.RUnlock()
+	if note != nil {
+		note(exitDeviceID, err.Error())
+	}
+}
+
+func (d *TunnelDialer) recordFallback(exitDeviceID string) {
+	d.directMu.RLock()
+	note := d.noteFallback
+	d.directMu.RUnlock()
+	if note != nil {
+		note(exitDeviceID)
+	}
+}
+
+func (d *TunnelDialer) directFallbackEnabled() bool {
+	d.directMu.RLock()
+	defer d.directMu.RUnlock()
+	return d.directMode != "p2p_only" && d.directFallback
+}
+
+func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Context, context.CancelFunc) {
+	d.directMu.RLock()
+	timeout := d.directAttemptTimeout
+	d.directMu.RUnlock()
+	if timeout <= 0 {
+		timeout = defaultDirectAttemptTimeout
+	}
+	if deadline, ok := parent.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return context.WithCancel(parent)
+		}
+		// Reserve at least half of the caller's remaining budget for Relay.
+		timeout = min(timeout, remaining/2)
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
+func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+	d.directMu.RLock()
+	getDirect, ensureDirect := d.getDirect, d.ensureDirect
+	mode := d.directMode
+	d.directMu.RUnlock()
+	if mode != "relay_only" && exitDeviceID != "" {
+		if getDirect != nil {
+			if session, ok := getDirect(exitDeviceID); ok && session != nil {
+				return session, true
+			}
+		}
+		if ensureDirect != nil {
+			ensureDirect(exitDeviceID)
+		}
+		if mode == "p2p_only" {
+			return nil, false
+		}
+	}
+	if d.getTunnel == nil {
+		return nil, false
+	}
+	return d.getTunnel(), false
+}
+
+func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string) (tunnel.TunnelSession, tunnel.TunnelStream, bool, error) {
+	session, direct := d.sessionForExit(exitDeviceID)
+	if session == nil {
+		return nil, nil, false, fmt.Errorf("tunnel is not connected")
+	}
+	stream, err := session.OpenStream(ctx)
+	if err == nil {
+		return session, stream, direct, nil
+	}
+	if !direct || d.getTunnel == nil {
+		return nil, nil, direct, err
+	}
+	relay := d.getTunnel()
+	if relay == nil || relay == session {
+		return nil, nil, direct, err
+	}
+	stream, relayErr := relay.OpenStream(ctx)
+	if relayErr != nil {
+		return nil, nil, false, fmt.Errorf("direct stream failed: %v; relay fallback failed: %w", err, relayErr)
+	}
+	return relay, stream, false, nil
 }
 
 func (d *TunnelDialer) SetDefaultExitID(exitID string) {
@@ -56,17 +221,42 @@ func (d *TunnelDialer) nextRequestIDWithPrefix(prefix string) string {
 }
 
 func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host string, port uint16) (net.Conn, error) {
-	sess := d.getTunnel()
-	if sess == nil {
-		return nil, fmt.Errorf("tunnel is not connected")
-	}
-
 	if exitNodeID == "" {
 		exitNodeID = d.GetDefaultExitID()
 	}
-	// Empty exitNodeID is allowed: relay auto-selects when exactly one authorized exit is online (P3-1).
 
-	// 1. Open stream on tunnel session
+	sess, direct := d.sessionForExit(exitNodeID)
+	if sess == nil {
+		return nil, fmt.Errorf("tunnel is not connected")
+	}
+	allowResume := direct && tunnel.PeerSupportsStreamResume(sess)
+	attemptCtx, cancelAttempt := ctx, func() {}
+	if direct && d.directFallbackEnabled() {
+		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
+	}
+	conn, err := d.dialTCPOnSession(attemptCtx, sess, exitNodeID, host, port, allowResume)
+	cancelAttempt()
+	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
+	if err == nil || !retryableDirectFailure {
+		return conn, err
+	}
+	if d.getTunnel == nil || !d.directFallbackEnabled() {
+		d.recordDirectFailure(exitNodeID, err)
+		return nil, err
+	}
+	relay := d.getTunnel()
+	if relay == nil || relay == sess {
+		d.recordDirectFailure(exitNodeID, err)
+		return nil, err
+	}
+	// Count the fallback while the READY session still exists so the path report
+	// includes the increment, then quarantine that broken direct path.
+	d.recordFallback(exitNodeID)
+	d.recordDirectFailure(exitNodeID, err)
+	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port, false)
+}
+
+func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, allowResume bool) (net.Conn, error) {
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
@@ -81,41 +271,47 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	}
 
 	reqID := d.nextRequestID()
-
-	// 2. Write StreamHeader
-	header := &protocol.StreamHeader{
-		Magic:        protocol.MagicHeader,
-		Version:      protocol.CurrentVersion,
-		Type:         protocol.FrameTypeOpenTCP,
-		RequestID:    reqID,
-		ExitDeviceID: exitNodeID,
+	var resumeState *p2presume.StreamState
+	var resumeWire *protocol.TCPResumeBinding
+	if enabled, replayLimit := d.streamResumeConfig(); enabled && allowResume {
+		resumeState, err = p2presume.NewRandomStreamState(replayLimit)
+		if err != nil {
+			_ = stream.Close()
+			return nil, err
+		}
+		binding, bindErr := resumeState.Binding(p2presume.BindOpen, 1)
+		if bindErr != nil {
+			_ = stream.Close()
+			return nil, bindErr
+		}
+		resumeWire, bindErr = p2presume.BindingToProtocol(binding, protocol.TCPResumeModeOpen)
+		if bindErr != nil {
+			_ = stream.Close()
+			return nil, bindErr
+		}
 	}
-	if err := protocol.WriteStreamHeader(stream, header); err != nil {
-		stream.Close()
+
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeOpenTCP,
+		RequestID: reqID, ExitDeviceID: exitNodeID,
+	}); err != nil {
+		_ = stream.Close()
 		return nil, fmt.Errorf("failed to write stream header: %w", err)
 	}
-
-	// 3. Write OpenTCPRequest
-	req := protocol.OpenTCPRequest{
-		RequestID: reqID,
-		Host:      host,
-		Port:      port,
-		TimeoutMs: 10000,
-	}
-	if err := protocol.WriteJSON(stream, req); err != nil {
-		stream.Close()
+	if err := protocol.WriteJSON(stream, protocol.OpenTCPRequest{
+		RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000, Resume: resumeWire,
+	}); err != nil {
+		_ = stream.Close()
 		return nil, fmt.Errorf("failed to write open request: %w", err)
 	}
 
-	// 4. Read OpenTCPResponse
 	var resp protocol.OpenTCPResponse
 	if err := protocol.ReadJSON(stream, &resp); err != nil {
-		stream.Close()
+		_ = stream.Close()
 		return nil, fmt.Errorf("failed to read open response: %w", err)
 	}
-
 	if !resp.Success {
-		stream.Close()
+		_ = stream.Close()
 		code := resp.ErrorCode
 		if code == "" {
 			code = protocol.ErrCodeInternalError
@@ -127,7 +323,6 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		return nil, protocol.NewRelayError(code, msg)
 	}
 
-	// Clear handshake deadline for raw proxy data transfer
 	stopCancel()
 	if err := ctx.Err(); err != nil {
 		_ = stream.Close()
@@ -135,7 +330,6 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	}
 	_ = stream.SetDeadline(time.Time{})
 
-	// 5. Wrap stream in net.Conn adapter without local DNS resolution
 	localAddr := sess.LocalAddr()
 	var remoteAddr net.Addr
 	if ip := net.ParseIP(host); ip != nil {
@@ -144,7 +338,33 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		remoteAddr = proxyAddr{net: "tcp", addr: net.JoinHostPort(host, strconv.Itoa(int(port)))}
 	}
 
+	if resumeState != nil && resp.Resume != nil {
+		peer, err := p2presume.ResponseBindingFromProtocol(resp.Resume)
+		if err != nil || peer.Generation != 1 || peer.Identity != resumeState.Identity() ||
+			peer.SendOffset != 0 || peer.ReceiveOffset != 0 {
+			_ = stream.Close()
+			return nil, fmt.Errorf("invalid resumable TCP open response")
+		}
+		endpoint, err := p2presume.NewEndpoint(resumeState)
+		if err != nil {
+			_ = stream.Close()
+			return nil, err
+		}
+		if err := endpoint.Bind(stream, 1); err != nil {
+			_ = endpoint.Close()
+			return nil, err
+		}
+		return newResumableTCPConn(d, endpoint, resumeState, exitNodeID, host, port, localAddr, remoteAddr), nil
+	}
 	return tunnel.NewNetConnAdapter(stream, localAddr, remoteAddr), nil
+}
+
+func retryableDirectHandshakeError(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var relayErr *protocol.RelayError
+	return !errors.As(err, &relayErr)
 }
 
 type UDPDialOptions = proxy.UDPDialOptions
@@ -154,24 +374,70 @@ func (d *TunnelDialer) DialUDP(ctx context.Context, exitNodeID string, host stri
 }
 
 func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string, host string, port uint16, opts UDPDialOptions) (net.PacketConn, error) {
-	sess := d.getTunnel()
-	if sess == nil {
-		return nil, fmt.Errorf("tunnel is not connected")
-	}
-	if opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(sess) {
-		return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required but the client tunnel does not support them")
-	}
-
 	if exitNodeID == "" {
 		exitNodeID = d.GetDefaultExitID()
 	}
 
+	sess, direct := d.sessionForExit(exitNodeID)
+	if sess == nil {
+		return nil, fmt.Errorf("tunnel is not connected")
+	}
+	if opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(sess) {
+		if direct && d.getTunnel != nil && d.directFallbackEnabled() {
+			relay := d.getTunnel()
+			if relay != nil && tunnel.PeerSupportsDatagrams(relay) {
+				d.recordFallback(exitNodeID)
+				sess, direct = relay, false
+			}
+		}
+		if !tunnel.PeerSupportsDatagrams(sess) {
+			return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required but the selected tunnel does not support them")
+		}
+	}
+
+	attemptCtx, cancelAttempt := ctx, func() {}
+	if direct && d.directFallbackEnabled() {
+		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
+	}
+	conn, err := d.dialUDPOnSession(attemptCtx, sess, exitNodeID, host, port, opts)
+	cancelAttempt()
+	retryableDirectFailure := direct && retryableDirectUDPHandshakeError(ctx, err)
+	if err == nil || !retryableDirectFailure {
+		return conn, err
+	}
+	if d.getTunnel == nil || !d.directFallbackEnabled() {
+		d.recordDirectFailure(exitNodeID, err)
+		return nil, err
+	}
+	relay := d.getTunnel()
+	if relay == nil || relay == sess || (opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(relay)) {
+		d.recordDirectFailure(exitNodeID, err)
+		return nil, err
+	}
+	d.recordFallback(exitNodeID)
+	d.recordDirectFailure(exitNodeID, err)
+	return d.dialUDPOnSession(ctx, relay, exitNodeID, host, port, opts)
+}
+
+func retryableDirectUDPHandshakeError(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	var relayErr *protocol.RelayError
+	if !errors.As(err, &relayErr) {
+		return true
+	}
+	return relayErr.Code == protocol.ErrCodeDatagramRequired
+}
+
+func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, opts UDPDialOptions) (net.PacketConn, error) {
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
 	}
 	stopCancel := tunnel.InterruptOnCancel(ctx, stream)
 	defer stopCancel()
+
 	var datagrams *tunnel.DatagramChannel
 	if tunnel.PeerSupportsDatagrams(sess) {
 		datagrams, err = tunnel.OpenDatagramChannel(sess, 0)
@@ -194,44 +460,34 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 	}
 
 	reqID := d.nextRequestID()
-
-	header := &protocol.StreamHeader{
-		Magic:        protocol.MagicHeader,
-		Version:      protocol.CurrentVersion,
-		Type:         protocol.FrameTypeOpenUDP,
-		RequestID:    reqID,
-		ExitDeviceID: exitNodeID,
-	}
-	if err := protocol.WriteStreamHeader(stream, header); err != nil {
-		stream.Close()
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeOpenUDP,
+		RequestID: reqID, ExitDeviceID: exitNodeID,
+	}); err != nil {
+		_ = stream.Close()
 		return nil, fmt.Errorf("failed to write stream header: %w", err)
 	}
 
 	req := protocol.OpenUDPRequest{
-		RequestID:        reqID,
-		Host:             host,
-		Port:             port,
-		TimeoutMs:        10000,
-		Mode:             protocol.UDPModeStream,
-		DatagramRequired: opts.DatagramRequired,
+		RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000,
+		Mode: protocol.UDPModeStream, DatagramRequired: opts.DatagramRequired,
 	}
 	if datagrams != nil {
 		req.Mode = protocol.UDPModeDatagram
 		req.AssociationID = datagrams.ID
 	}
 	if err := protocol.WriteJSON(stream, req); err != nil {
-		stream.Close()
+		_ = stream.Close()
 		return nil, fmt.Errorf("failed to write open request: %w", err)
 	}
 
 	var resp protocol.OpenUDPResponse
 	if err := protocol.ReadJSON(stream, &resp); err != nil {
-		stream.Close()
+		_ = stream.Close()
 		return nil, fmt.Errorf("failed to read open response: %w", err)
 	}
-
 	if !resp.Success {
-		stream.Close()
+		_ = stream.Close()
 		code := resp.ErrorCode
 		if code == "" {
 			code = protocol.ErrCodeInternalError
@@ -242,11 +498,11 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		}
 		return nil, protocol.NewRelayError(code, msg)
 	}
-
 	if opts.DatagramRequired && resp.Mode != protocol.UDPModeDatagram {
 		_ = stream.Close()
-		return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required but the relay selected reliable stream fallback")
+		return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required but the selected tunnel downgraded to reliable stream mode")
 	}
+
 	stopCancel()
 	if err := ctx.Err(); err != nil {
 		_ = stream.Close()

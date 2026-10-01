@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 
 	"relayproxy/internal/acl"
 )
@@ -98,9 +99,14 @@ func BindRelayPolicy(ctx context.Context, policy *acl.Policy) context.Context {
 		return ctx
 	}
 	copy := *policy
-	copy.Rules = append([]acl.Rule(nil), policy.Rules...)
-	copy.AccessHosts = append([]string(nil), policy.AccessHosts...)
-	copy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+	// Preserve nil-vs-empty slice representation exactly. The relay ACL
+	// fingerprint is computed from the serialized policy, where nil encodes as
+	// null and an empty non-nil slice encodes as []. append(nil, empty...) would
+	// collapse [] into nil and make an unchanged authenticated policy fail its
+	// own fingerprint verification on the server-local exit path.
+	copy.Rules = slices.Clone(policy.Rules)
+	copy.AccessHosts = slices.Clone(policy.AccessHosts)
+	copy.AccessCIDRs = slices.Clone(policy.AccessCIDRs)
 	return context.WithValue(ctx, relayPolicyContextKey{}, &copy)
 }
 
@@ -113,8 +119,8 @@ func boundRelayPolicy(ctx context.Context) *acl.Policy {
 		return nil
 	}
 	copy := *policy
-	copy.Rules = append([]acl.Rule(nil), policy.Rules...)
-	copy.AccessHosts = append([]string(nil), policy.AccessHosts...)
-	copy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+	copy.Rules = slices.Clone(policy.Rules)
+	copy.AccessHosts = slices.Clone(policy.AccessHosts)
+	copy.AccessCIDRs = slices.Clone(policy.AccessCIDRs)
 	return &copy
 }

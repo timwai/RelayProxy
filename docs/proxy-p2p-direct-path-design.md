@@ -1039,17 +1039,35 @@ Client:
 ACL/business errors are not treated as transport failures and are never retried
 through Relay to bypass Exit policy.
 
-This is intentionally different from migrating an already-established byte
-stream. If a P2P QUIC session dies after application bytes have been exchanged:
+Established TCP streams now have a capability-gated recovery path. When both
+authenticated peers advertise `proxy_stream_resume_v1`, a direct P2P TCP stream
+uses a logical stream ID, byte-offset ACKs and bounded replay. If the P2P QUIC
+transport dies after application bytes have been exchanged:
 
 ```text
-existing TCP streams -> fail/reset
-new connections      -> Relay
+negotiated resumable TCP stream -> rebind through Relay
+legacy / unsupported TCP stream -> fail/reset
+new connections                 -> Relay
 ```
 
-Transparent migration of an active TCP byte stream remains optional future
-work. It requires stable logical stream IDs plus sequence/ack/replay semantics
-so RelayProxy cannot duplicate or lose bytes when rebinding the target socket.
+The Exit retains the original target socket during a bounded recovery grace
+period, so a successful rebind does not redial the destination and does not
+change the remote TCP session. Replay is de-duplicated by byte offset before
+bytes are exposed to the application.
+
+This Version 1 migration is deliberately one-way: `P2P -> Relay` on direct-path
+loss. Relay-originated streams remain the legacy raw stream format and are not
+migrated back to P2P mid-flow. This keeps normal Relay traffic free of resume
+framing/replay overhead and preserves mixed-version compatibility.
+
+The production gate is stricter than merely advertising the capability:
+
+- the Server derives peer capabilities from authenticated DeviceSession state;
+- the capability is attached to the concrete P2P QUIC session;
+- the Client enables resume only in automatic mode with Relay fallback enabled;
+- the Exit keeps resumable target sessions in a bounded registry;
+- normal Close sends a logical reset, while half-close uses replayable FIN/ACK;
+- logical read/write deadlines continue to follow `net.Conn` semantics.
 
 ---
 
@@ -1521,7 +1539,7 @@ Add:
 
 ### Phase 8 - Optimization
 
-Progress as of 2026-09-30:
+Progress as of 2026-10-01:
 
 - [x] IPv6 candidate discovery and dual-stack UDP punching
 - [x] OS network-change detection and automatic P2P invalidation/retry
@@ -1531,7 +1549,7 @@ Progress as of 2026-09-30:
 - [x] Android lifecycle/power-saver/cellular-network wiring
 - [x] candidate path scoring with bounded RTT preference
 - [x] pre-stream transport failover + broken-path quarantine
-- [ ] live established-stream migration
+- [x] live established TCP stream migration from P2P to Relay
 
 The IPv6 implementation keeps Relay as the fallback. Mixed IPv4/IPv6 candidate
 sets continue racing even when the local socket cannot use one address family,
@@ -1650,7 +1668,7 @@ Existing routing configuration must not require migration.
 
 The first version explicitly does not include:
 
-- seamless migration of active TCP streams
+- arbitrary bidirectional live migration between Relay and P2P mid-flow
 - TCP NAT hole punching
 - independent operation without Relay Server control plane
 - persistent P2P credentials

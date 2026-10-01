@@ -23,10 +23,11 @@ func resolveConfigPath(requested string, explicit bool) (string, error) {
 	return defaultConfigPath()
 }
 
-// Windows keeps mutable settings with the user, independent of installation
-// directory, shortcut working directory, or which agent executable is used.
+// Desktop platforms keep mutable settings with the user, independent of the
+// installation directory, Finder/shortcut working directory, or which agent
+// executable is used.
 func defaultConfigPath() (string, error) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("get user home directory: %w", err)

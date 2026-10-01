@@ -29,3 +29,5 @@ open RelayProxyMac.xcodeproj
 任一条件不满足时，`Preflight` 返回 `ErrPlatformNotReady`，不会把能力伪装为可用。`RELAYPROXY_NE_SOCKET`、`RELAYPROXY_NE_TOKEN_FILE` 仅用于签名测试环境；`RELAYPROXY_NE_SKIP_STATUS=1` 可跳过 `systemextensionsctl` 状态检查，不应在发行包中设置。
 
 在 macOS 上执行 `scripts/build.sh` 时，只要系统提供 `swiftc`，常规 `RelayProxy.app` 就会包含原生 AppKit/WKWebView 桌面窗口；从其他平台交叉构建时仍回退为浏览器打开本地管理页。两种方式复用同一套管理页面和配对流程。macOS Network Extension 的签名、安装与系统批准仍必须先由 `RelayProxyMacHost.app` 完成。
+
+从 Finder 启动 `RelayProxy.app` 时，Agent 的默认配置保存在 `~/.relayproxy/relay-agent.yaml`，不依赖应用所在目录或 Finder 分配的工作目录。命令行传入 `--config` 时仍使用指定路径。

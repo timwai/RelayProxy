@@ -31,7 +31,7 @@ import (
 var Version = "1.0.0"
 
 func main() {
-	configPath := flag.String("config", "", "Path to configuration file (Windows default: %USERPROFILE%\\.relayproxy\\relay-agent.yaml)")
+	configPath := flag.String("config", "", "Path to configuration file (Windows/macOS default: ~/.relayproxy/relay-agent.yaml)")
 	serverFlag := flag.String("server", "", "Override server address")
 	exitFlag := flag.String("exit", "", "Default exit node ID (omit to auto-select when exactly one exit is online)")
 	socksFlag := flag.String("socks5", "", "Override SOCKS5 listen address")

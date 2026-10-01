@@ -7,10 +7,12 @@
   <key>CFBundlePackageType</key><string>SYSX</string>
   <key>CFBundleShortVersionString</key><string>1.0.0</string>
   <key>CFBundleVersion</key><string>1</string>
-  <key>NSExtension</key>
+  <key>NetworkExtension</key>
   <dict>
-    <key>NSExtensionPointIdentifier</key><string>com.apple.networkextension.app-proxy</string>
-    <key>NSExtensionPrincipalClass</key><string>$(PRODUCT_MODULE_NAME).Provider</string>
+    <key>NEProviderClasses</key>
+    <dict>
+      <key>com.apple.networkextension.app-proxy</key><string>$(PRODUCT_MODULE_NAME).Provider</string>
+    </dict>
   </dict>
 </dict>
 </plist>

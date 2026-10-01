@@ -45,6 +45,21 @@ p2p:
   lease_sec: 60
   max_sessions_per_device: 8
 
+# Relay Server 本机也可以作为网络出口。默认关闭；开启后客户端使用
+# exitDeviceId=server 即可明确选择服务端出口。
+exit:
+  enabled: false
+  allow_internet: true
+  allow_private_network: false
+  allow_loopback: false
+  upstream:
+    mode: direct             # direct | socks5 | http | https
+    address: ""              # 非 direct 时填写 host:port
+  access:
+    mode: ""
+    domains: []
+    cidrs: []
+
 # 中央目标权限与出口本地策略取交集。
 # 公司内网/VPN 出口需在两处显式允许 private_network。
 relay_acl:

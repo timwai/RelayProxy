@@ -863,9 +863,11 @@ func (s *Session) establish(clientRole bool) {
 		return
 	}
 	if direct.QUICSession != nil {
-		// Capabilities come from the authenticated Relay coordinator and are
-		// attached to this concrete P2P QUIC session before it becomes READY.
-		tunnel.SetPeerCapabilities(direct.QUICSession, s.peerCapabilitiesSnapshot())
+		// Native datagrams are a property of the direct QUIC transport itself.
+		// Overlay capabilities are server-authoritative and are added without
+		// clearing the already-negotiated datagram capability.
+		caps := append([]string{protocol.UDPModeDatagram}, s.peerCapabilitiesSnapshot()...)
+		tunnel.SetPeerCapabilities(direct.QUICSession, caps)
 	}
 
 	s.mu.Lock()

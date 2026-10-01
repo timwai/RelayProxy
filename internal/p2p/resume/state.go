@@ -101,6 +101,18 @@ func (s *StreamState) AckFrame() (Frame, error) {
 	return Frame{Type: FrameAck, Flags: flags, Ack: ack}, nil
 }
 
+// RST terminates the logical stream immediately. Unlike transport loss, a
+// logical reset must not leave the Exit target socket retained for rebind.
+func (s *StreamState) RST() (Frame, error) {
+	if s == nil {
+		return Frame{}, ErrFrame
+	}
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	ack, flags := s.receiveState()
+	return Frame{Type: FrameRST, Flags: flags, Seq: s.send.Next(), Ack: ack}, nil
+}
+
 // Handle applies a peer frame to the logical stream. ACK offsets are validated
 // before receive state is mutated, so an impossible acknowledgement cannot
 // advance one half of the state and then fail the other half.

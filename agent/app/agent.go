@@ -452,7 +452,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		a.exitHandler = exit.NewHandler(exit.HandlerConfig{
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
 			ResumeEnabled: cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
-			ResumeGrace: 15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: 512 << 10,
+			ResumeGrace:   15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: 512 << 10,
 		})
 	}
 	var tunnelTLS *tls.Config

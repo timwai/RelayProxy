@@ -10,6 +10,7 @@ import (
 	agentexit "relayproxy/agent/exit"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"
 )
 
@@ -97,6 +98,79 @@ func TestServerExitRoutesTCPWithoutDeviceSession(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("server-exit TCP stream did not stop")
+	}
+}
+
+func TestServerExitRoutesUDPWithStreamFallback(t *testing.T) {
+	handler, relay := newServerExitTestHandler(t)
+	router := NewStreamRouter(session.NewManager(), relay, nil, nil)
+	router.SetLocalExit(handler)
+
+	udpServer, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udpServer.Close()
+	go func() {
+		buf := make([]byte, 2048)
+		n, peer, err := udpServer.ReadFromUDP(buf)
+		if err != nil {
+			return
+		}
+		_, _ = udpServer.WriteToUDP(buf[:n], peer)
+	}()
+
+	left, right := net.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		router.HandleClientStream(ctx, &policyTestStream{left}, &session.DeviceSession{
+			DeviceID: "client", Grants: []string{protocol.CapabilityProxyClient},
+		})
+		close(done)
+	}()
+
+	port := uint16(udpServer.LocalAddr().(*net.UDPAddr).Port)
+	_ = right.SetDeadline(time.Now().Add(3 * time.Second))
+	if err := protocol.WriteStreamHeader(right, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeOpenUDP,
+		RequestID: "server-exit-udp", ExitDeviceID: protocol.ServerExitDeviceID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteJSON(right, protocol.OpenUDPRequest{
+		RequestID: "server-exit-udp", Host: "127.0.0.1", Port: port, TimeoutMs: 1000,
+		Mode: protocol.UDPModeDatagram,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var response protocol.OpenUDPResponse
+	if err := protocol.ReadJSON(right, &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Success || response.Mode != protocol.UDPModeStream || response.AssociationID != 0 {
+		t.Fatalf("unexpected server UDP negotiation: %+v", response)
+	}
+
+	packetConn := tunnel.NewUDPStreamConn(&policyTestStream{right}, udpServer.LocalAddr())
+	if _, err := packetConn.WriteTo([]byte("ping"), nil); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 16)
+	n, _, err := packetConn.ReadFrom(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(buf[:n]) != "ping" {
+		t.Fatalf("UDP echo=%q, want ping", buf[:n])
+	}
+	_ = packetConn.Close()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server-exit UDP stream did not stop")
 	}
 }
 

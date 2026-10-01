@@ -20,6 +20,8 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	manager := session.NewManager()
 	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)
 	exit := newTestDevice("exit", "owner", protocol.CapabilityProxyExit)
+	client.Capabilities = append(client.Capabilities, protocol.CapabilityProxyStreamResume)
+	exit.Capabilities = append(exit.Capabilities, protocol.CapabilityProxyStreamResume)
 	manager.Register(client)
 	manager.Register(exit)
 
@@ -45,12 +47,18 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	if ack.Type != protocol.P2PControlLeaseAck || ack.SessionID == 0 || len(ack.SessionToken) != 32 {
 		t.Fatalf("unexpected connect ack: %#v", ack)
 	}
+	if !hasCapability(ack.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
+		t.Fatalf("authenticated exit capability missing from client ack: %#v", ack.PeerCapabilities)
+	}
 	if len(deliveries) != 1 || deliveries[0].device != exit.DeviceID || deliveries[0].msg.Type != protocol.P2PControlConnectOffer {
 		t.Fatalf("offer was not delivered to exit: %#v", deliveries)
 	}
 	offer := deliveries[0].msg
 	if offer.PeerFingerprint != "sha256:client" || offer.RendezvousAddress != "relay.example.com:3478" {
 		t.Fatalf("unexpected offer: %#v", offer)
+	}
+	if !hasCapability(offer.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
+		t.Fatalf("authenticated client capability missing from exit offer: %#v", offer.PeerCapabilities)
 	}
 
 	answerAck := c.answer(exit, protocol.P2PControlMessage{
@@ -66,6 +74,9 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	}
 	if deliveries[1].msg.PeerFingerprint != "sha256:exit" {
 		t.Fatalf("exit fingerprint not forwarded: %#v", deliveries[1].msg)
+	}
+	if !hasCapability(deliveries[1].msg.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
+		t.Fatalf("authenticated exit capability missing from answer: %#v", deliveries[1].msg.PeerCapabilities)
 	}
 }
 

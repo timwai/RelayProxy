@@ -52,6 +52,7 @@ func (s *handlerSession) AcceptStream(context.Context) (tunnel.TunnelStream, err
 }
 
 func (s *handlerSession) Transport() tunnel.TransportType { return tunnel.TransportQUIC }
+func (s *handlerSession) PeerSupportsStreamResume() bool { return true }
 func (s *handlerSession) RemoteAddr() net.Addr {
 	return &net.TCPAddr{IP: net.IPv4(192, 0, 2, 2), Port: 443}
 }

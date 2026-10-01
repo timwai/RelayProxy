@@ -168,7 +168,7 @@ func (r *resumeRegistry) rebind(peer p2presume.Binding) (*resumeTargetSession, e
 		}
 	}
 	current.Generation = s.generation
-	if err := p2presume.ValidateRebind(current, peer); err != nil {
+	if err := p2presume.ValidateRebindRequest(current, peer); err != nil {
 		return nil, err
 	}
 	s.generation = peer.Generation

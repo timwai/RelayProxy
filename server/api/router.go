@@ -41,6 +41,7 @@ type Router struct {
 	onRDPIngressReload           func(string) error
 	onRDPIngressStatus           func(string) RDPIngressRuntimeStatus
 	p2pSessions                  func() []P2PSessionRuntimeStatus
+	serverExitStatus             func() ServerExitRuntimeStatus
 	rdpIngressEnabled            func() bool
 	rdpIngressPortStart          int
 	rdpIngressPortEnd            int
@@ -78,6 +79,11 @@ type P2PSessionRuntimeStatus struct {
 	Answered       bool                 `json:"answered"`
 	ClientReport   P2PPeerRuntimeReport `json:"clientReport"`
 	ExitReport     P2PPeerRuntimeReport `json:"exitReport"`
+}
+
+type ServerExitRuntimeStatus struct {
+	Enabled       bool  `json:"enabled"`
+	ActiveStreams int64 `json:"activeStreams"`
 }
 
 func NewRouter(authService *service.AuthService, deviceService *service.DeviceService, sessions *session.Manager, db *repository.DB, options ...RouterOption) *Router {
@@ -130,6 +136,17 @@ func WithRDPIngressStatus(fn func(string) RDPIngressRuntimeStatus) RouterOption 
 
 func WithP2PSessions(fn func() []P2PSessionRuntimeStatus) RouterOption {
 	return func(r *Router) { r.p2pSessions = fn }
+}
+
+func WithServerExitStatus(fn func() ServerExitRuntimeStatus) RouterOption {
+	return func(r *Router) { r.serverExitStatus = fn }
+}
+
+func (r *Router) currentServerExitStatus() ServerExitRuntimeStatus {
+	if r.serverExitStatus == nil {
+		return ServerExitRuntimeStatus{}
+	}
+	return r.serverExitStatus()
 }
 
 // WithRDPIngressEnabled lets the API reject allocations while the process
@@ -876,8 +893,19 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 	}
 
 	p2pSessions := r.visibleP2PSessions(req)
+	serverExit := r.currentServerExitStatus()
 
-	exitInfos := make([]map[string]any, 0, len(exits))
+	exitCapacity := len(exits)
+	if serverExit.Enabled {
+		exitCapacity++
+	}
+	exitInfos := make([]map[string]any, 0, exitCapacity)
+	if serverExit.Enabled {
+		exitInfos = append(exitInfos, map[string]any{
+			"deviceId": protocol.ServerExitDeviceID, "deviceName": "Relay Server",
+			"transport": "local", "activeStreams": serverExit.ActiveStreams,
+		})
+	}
 	for _, e := range exits {
 		exitInfos = append(exitInfos, map[string]any{
 			"deviceId":      e.DeviceID,
@@ -887,9 +915,13 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
+	onlineExits := len(exits)
+	if serverExit.Enabled {
+		onlineExits++
+	}
 	response := map[string]any{
 		"onlineDevices":     len(devices),
-		"onlineExits":       len(exits),
+		"onlineExits":       onlineExits,
 		"activeConnections": totalConns,
 		"activeP2PSessions": len(p2pSessions),
 		"todayUpload":       todayUp,
@@ -1091,7 +1123,18 @@ func (r *Router) handleListExits(w http.ResponseWriter, req *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load exits")
 		return
 	}
-	res := make([]map[string]any, 0, len(exits))
+	serverExit := r.currentServerExitStatus()
+	capacity := len(exits)
+	if serverExit.Enabled {
+		capacity++
+	}
+	res := make([]map[string]any, 0, capacity)
+	if serverExit.Enabled {
+		res = append(res, map[string]any{
+			"deviceId": protocol.ServerExitDeviceID, "deviceName": "Relay Server",
+			"transport": "local", "activeStreams": serverExit.ActiveStreams, "online": true,
+		})
+	}
 	for _, e := range exits {
 		if !e.IsExit() {
 			continue

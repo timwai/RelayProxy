@@ -152,7 +152,11 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 	c := &Client{
 		cfg:      cfg,
 		identity: identity,
-		handler:  exit.NewHandler(exit.HandlerConfig{ACLChecker: checker, ConnectTimeout: 10 * time.Second}),
+		handler: exit.NewHandler(exit.HandlerConfig{
+			ACLChecker: checker, ConnectTimeout: 10 * time.Second,
+			ResumeEnabled: true, ResumeGrace: 15 * time.Second,
+			ResumeMaxSessions: 64, ResumeReplayLimit: 256 << 10,
+		}),
 		ctx:      ctx,
 		cancel:   cancel,
 		status: statusSnapshot{
@@ -339,7 +343,10 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		return fmt.Errorf("write control header: %w", err)
 	}
 
-	transportCaps := []string{"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL, protocol.CapabilityProxyP2P}
+	transportCaps := []string{
+		"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL,
+		protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume,
+	}
 	if *c.cfg.TLSEnabled {
 		transportCaps = append(transportCaps, "tls", "quic")
 	}

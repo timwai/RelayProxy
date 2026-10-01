@@ -229,7 +229,6 @@ func (s *resumeTargetSession) startLogicalBridge() {
 		return
 	}
 	s.startOnce.Do(func() {
-		go s.watchTransportLoss()
 		go func() {
 			s.mu.Lock()
 			ctx, endpoint, target := s.ctx, s.endpoint, s.target
@@ -249,42 +248,51 @@ func (s *resumeTargetSession) startLogicalBridge() {
 	})
 }
 
-func (s *resumeTargetSession) watchTransportLoss() {
-	s.mu.Lock()
-	ctx, endpoint, state := s.ctx, s.endpoint, s.state
-	s.mu.Unlock()
-	if ctx == nil || endpoint == nil || state == nil {
-		return
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case loss := <-endpoint.Losses():
-			local, err := state.Binding(p2presume.BindAck, loss.Generation)
-			if err != nil {
-				continue
-			}
-			_ = s.detach(local)
-		}
-	}
-}
-
 func (s *resumeTargetSession) bindTransport(transport tunnel.TunnelStream, generation uint64) (<-chan struct{}, error) {
 	if s == nil || transport == nil || generation == 0 {
 		return nil, p2presume.ErrBinding
 	}
 	s.mu.Lock()
-	if s.closed || s.endpoint == nil || generation != s.generation {
+	if s.closed || s.endpoint == nil || s.state == nil || generation != s.generation {
 		s.mu.Unlock()
 		return nil, errResumeSessionClosed
 	}
-	endpoint := s.endpoint
+	endpoint, state, ctx := s.endpoint, s.state, s.ctx
 	s.mu.Unlock()
 	if err := endpoint.Bind(transport, generation); err != nil {
 		return nil, err
 	}
-	return endpoint.GenerationDone(generation), nil
+	done := endpoint.GenerationDone(generation)
+	go s.detachWhenGenerationEnds(ctx, state, generation, done)
+	return done, nil
+}
+
+func (s *resumeTargetSession) detachWhenGenerationEnds(
+	ctx context.Context,
+	state *p2presume.StreamState,
+	generation uint64,
+	done <-chan struct{},
+) {
+	if s == nil || state == nil || generation == 0 || done == nil {
+		return
+	}
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case <-done:
+		}
+	} else {
+		<-done
+	}
+	local, err := state.Binding(p2presume.BindAck, generation)
+	if err != nil {
+		return
+	}
+	// detach validates that this is still the current generation. If a newer
+	// transport replaced the old one intentionally, the stale generation is
+	// ignored instead of starting a recovery timer.
+	_ = s.detach(local)
 }
 
 func (s *resumeTargetSession) localBinding() (p2presume.Binding, error) {

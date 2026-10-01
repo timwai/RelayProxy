@@ -33,29 +33,29 @@ const (
 // Relay control plane. SessionToken and certificate fingerprints are ephemeral
 // and must never be persisted or logged.
 type P2PControlMessage struct {
-	Type              string         `json:"type"`
-	SessionID         uint64         `json:"sessionId,omitempty"`
-	ClientDeviceID    string         `json:"clientDeviceId,omitempty"`
-	ExitDeviceID      string         `json:"exitDeviceId,omitempty"`
-	SessionToken      []byte         `json:"sessionToken,omitempty"`
-	Candidates        []P2PCandidate `json:"candidates,omitempty"`
-	CertFingerprint   string         `json:"certFingerprint,omitempty"`
-	PeerFingerprint   string         `json:"peerFingerprint,omitempty"`
+	Type            string         `json:"type"`
+	SessionID       uint64         `json:"sessionId,omitempty"`
+	ClientDeviceID  string         `json:"clientDeviceId,omitempty"`
+	ExitDeviceID    string         `json:"exitDeviceId,omitempty"`
+	SessionToken    []byte         `json:"sessionToken,omitempty"`
+	Candidates      []P2PCandidate `json:"candidates,omitempty"`
+	CertFingerprint string         `json:"certFingerprint,omitempty"`
+	PeerFingerprint string         `json:"peerFingerprint,omitempty"`
 	// PeerCapabilities are injected by the authenticated Relay coordinator.
 	// Peers must never trust capabilities echoed from the remote P2P endpoint.
-	PeerCapabilities  []string       `json:"peerCapabilities,omitempty"`
-	RelayPolicy       *acl.Policy    `json:"relayPolicy,omitempty"`
-	LeaseExpiresAt    int64          `json:"leaseExpiresAt,omitempty"`
-	RendezvousAddress string         `json:"rendezvousAddress,omitempty"`
-	LeaseSec          int            `json:"leaseSec,omitempty"`
-	Path              string         `json:"path,omitempty"`
-	RTTMs             int64          `json:"rttMs,omitempty"`
-	CandidateSummary  string         `json:"candidateSummary,omitempty"`
-	FallbackCount     uint64         `json:"fallbackCount,omitempty"`
-	ActiveStreams     int            `json:"activeStreams,omitempty"`
-	BytesUp           uint64         `json:"bytesUp,omitempty"`
-	BytesDown         uint64         `json:"bytesDown,omitempty"`
-	Reason            string         `json:"reason,omitempty"`
-	ErrorCode         string         `json:"errorCode,omitempty"`
-	ErrorMessage      string         `json:"errorMessage,omitempty"`
+	PeerCapabilities  []string    `json:"peerCapabilities,omitempty"`
+	RelayPolicy       *acl.Policy `json:"relayPolicy,omitempty"`
+	LeaseExpiresAt    int64       `json:"leaseExpiresAt,omitempty"`
+	RendezvousAddress string      `json:"rendezvousAddress,omitempty"`
+	LeaseSec          int         `json:"leaseSec,omitempty"`
+	Path              string      `json:"path,omitempty"`
+	RTTMs             int64       `json:"rttMs,omitempty"`
+	CandidateSummary  string      `json:"candidateSummary,omitempty"`
+	FallbackCount     uint64      `json:"fallbackCount,omitempty"`
+	ActiveStreams     int         `json:"activeStreams,omitempty"`
+	BytesUp           uint64      `json:"bytesUp,omitempty"`
+	BytesDown         uint64      `json:"bytesDown,omitempty"`
+	Reason            string      `json:"reason,omitempty"`
+	ErrorCode         string      `json:"errorCode,omitempty"`
+	ErrorMessage      string      `json:"errorMessage,omitempty"`
 }

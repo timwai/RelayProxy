@@ -489,6 +489,6 @@ for final_apk in "${FINAL_APKS[@]}"; do
   printf ' APK:    %s\n' "$final_apk"
   printf ' Size:   %s MB\n' "$SIZE_MB"
   printf ' SHA256: %s\n' "$SHA256"
-  printf '--------------------------------------------------\n'
+  printf '%s\n' '--------------------------------------------------'
 done
 printf '==================================================\033[0m\n'

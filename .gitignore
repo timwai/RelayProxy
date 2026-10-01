@@ -56,3 +56,4 @@ Thumbs.db
 /android/**/build/
 /android/local.properties
 /android/app/libs/*.aar
+/android/app/libs/*-sources.jar

@@ -362,7 +362,7 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		Type: protocol.P2PControlLeaseAck, SessionID: id,
 		ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		SessionToken: append([]byte(nil), token...), LeaseExpiresAt: item.ExpiresAt.UnixMilli(),
-		PeerCapabilities: peerP2PCapabilities(exit),
+		PeerCapabilities:  peerP2PCapabilities(exit),
 		RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 }
@@ -408,7 +408,7 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 		SessionToken: append([]byte(nil), item.Token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
 		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
 		PeerCapabilities: peerP2PCapabilities(exit),
-		LeaseExpiresAt: expires, RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
+		LeaseExpiresAt:   expires, RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(client, answer); err != nil {
 		return p2pError("CLIENT_NOTIFY_FAILED", "failed to deliver P2P answer to client")

@@ -113,6 +113,57 @@ func TestEndpointSurvivesTransportRebind(t *testing.T) {
 	}
 }
 
+func TestEndpointFullDuplexDataDoesNotDeadlockOnACK(t *testing.T) {
+	left, right := newEndpointPair(t, 1024)
+	bindEndpointPair(t, left, right, 1)
+
+	leftWrite := make(chan error, 1)
+	rightWrite := make(chan error, 1)
+	go func() {
+		_, err := left.Write([]byte("from-left"))
+		leftWrite <- err
+	}()
+	go func() {
+		_, err := right.Write([]byte("from-right"))
+		rightWrite <- err
+	}()
+
+	for name, result := range map[string]<-chan error{
+		"left":  leftWrite,
+		"right": rightWrite,
+	} {
+		select {
+		case err := <-result:
+			if err != nil {
+				t.Fatalf("%s write failed: %v", name, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s write deadlocked during simultaneous ACK", name)
+		}
+	}
+
+	leftPayload := make([]byte, len("from-right"))
+	if _, err := io.ReadFull(left, leftPayload); err != nil {
+		t.Fatal(err)
+	}
+	rightPayload := make([]byte, len("from-left"))
+	if _, err := io.ReadFull(right, rightPayload); err != nil {
+		t.Fatal(err)
+	}
+	if string(leftPayload) != "from-right" || string(rightPayload) != "from-left" {
+		t.Fatalf("full-duplex payloads left=%q right=%q", leftPayload, rightPayload)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for (left.State().BufferedReplayBytes() != 0 || right.State().BufferedReplayBytes() != 0) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if left.State().BufferedReplayBytes() != 0 || right.State().BufferedReplayBytes() != 0 {
+		t.Fatalf("ACKs did not drain replay buffers: left=%d right=%d",
+			left.State().BufferedReplayBytes(), right.State().BufferedReplayBytes())
+	}
+}
+
 func TestEndpointPreservesHalfClose(t *testing.T) {
 	left, right := newEndpointPair(t, 1024)
 	bindEndpointPair(t, left, right, 1)
@@ -156,6 +207,40 @@ func TestEndpointRejectsStaleGeneration(t *testing.T) {
 	defer d.Close()
 	if err := left.Bind(c, 2); err != ErrBinding {
 		t.Fatalf("stale bind error=%v", err)
+	}
+}
+
+func TestEndpointRetryBindRequiresLostCurrentGeneration(t *testing.T) {
+	left, _ := newEndpointPair(t, 1024)
+	first, firstPeer := net.Pipe()
+	if err := left.Bind(first, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstPeer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-left.Losses():
+	case <-time.After(time.Second):
+		t.Fatal("endpoint did not observe the first transport loss")
+	}
+
+	retry, retryPeer := net.Pipe()
+	defer retryPeer.Close()
+	if err := left.RetryBind(retry, 1); err != nil {
+		t.Fatalf("current generation retry failed: %v", err)
+	}
+
+	duplicate, duplicatePeer := net.Pipe()
+	defer duplicatePeer.Close()
+	if err := left.RetryBind(duplicate, 1); !errors.Is(err, ErrBinding) {
+		t.Fatalf("active generation retry error=%v", err)
+	}
+
+	future, futurePeer := net.Pipe()
+	defer futurePeer.Close()
+	if err := left.RetryBind(future, 2); !errors.Is(err, ErrBinding) {
+		t.Fatalf("future generation retry error=%v", err)
 	}
 }
 

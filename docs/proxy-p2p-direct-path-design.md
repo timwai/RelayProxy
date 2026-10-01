@@ -1066,6 +1066,11 @@ The production gate is stricter than merely advertising the capability:
 - the capability is attached to the concrete P2P QUIC session;
 - the Client enables resume only in automatic mode with Relay fallback enabled;
 - the Exit keeps resumable target sessions in a bounded registry;
+- resumable frame ACKs use a coalesced writer so simultaneous full-duplex DATA
+  cannot deadlock both peers on control writes;
+- a detached Exit session accepts an authenticated idempotent retry of its
+  current generation, covering a lost rebind response without permitting an
+  active or older generation to take ownership;
 - normal Close sends a logical reset, while half-close uses replayable FIN/ACK;
 - logical read/write deadlines continue to follow `net.Conn` semantics.
 

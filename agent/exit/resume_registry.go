@@ -145,21 +145,23 @@ func (r *resumeRegistry) get(id [p2presume.StreamIDSize]byte) (*resumeTargetSess
 }
 
 // rebind authenticates a peer's replacement transport and advances the
-// generation. The current local offsets are retained until detach publishes a
-// newer local Binding. This keeps peer claims separate from Exit-owned state.
-func (r *resumeRegistry) rebind(peer p2presume.Binding) (*resumeTargetSession, error) {
+// generation. When the current generation is already detached, the same
+// generation may be retried idempotently: the prior rebind response may have
+// been lost after the Exit committed it. The current local offsets are retained
+// until detach publishes a newer local Binding.
+func (r *resumeRegistry) rebind(peer p2presume.Binding) (*resumeTargetSession, bool, error) {
 	if r == nil || peer.Type != p2presume.BindOpen || !peer.Identity.Valid() || peer.Generation == 0 {
-		return nil, p2presume.ErrBinding
+		return nil, false, p2presume.ErrBinding
 	}
 	s, ok := r.get(peer.Identity.ID)
 	if !ok {
-		return nil, errResumeSessionNotFound
+		return nil, false, errResumeSessionNotFound
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
-		return nil, errResumeSessionClosed
+		return nil, false, errResumeSessionClosed
 	}
 	current := s.local
 	if s.state != nil {
@@ -168,18 +170,28 @@ func (r *resumeRegistry) rebind(peer p2presume.Binding) (*resumeTargetSession, e
 		}
 	}
 	current.Generation = s.generation
-	if err := p2presume.ValidateRebindRequest(current, peer); err != nil {
-		return nil, err
+	retry := peer.Generation == s.generation
+	if retry {
+		if s.detachedAt.IsZero() {
+			return nil, false, p2presume.ErrBinding
+		}
+		if err := p2presume.ValidateRebindRetryRequest(current, peer); err != nil {
+			return nil, false, err
+		}
+	} else {
+		if err := p2presume.ValidateRebindRequest(current, peer); err != nil {
+			return nil, false, err
+		}
+		s.generation = peer.Generation
+		s.local = current
+		s.local.Generation = peer.Generation
 	}
-	s.generation = peer.Generation
-	s.local = current
-	s.local.Generation = peer.Generation
 	s.detachedAt = time.Time{}
 	if s.timer != nil {
 		s.timer.Stop()
 		s.timer = nil
 	}
-	return s, nil
+	return s, retry, nil
 }
 
 // detach publishes the Exit-side byte offsets for the just-lost transport and
@@ -249,6 +261,14 @@ func (s *resumeTargetSession) startLogicalBridge() {
 }
 
 func (s *resumeTargetSession) bindTransport(transport tunnel.TunnelStream, generation uint64) (<-chan struct{}, error) {
+	return s.bindTransportMode(transport, generation, false)
+}
+
+func (s *resumeTargetSession) retryTransport(transport tunnel.TunnelStream, generation uint64) (<-chan struct{}, error) {
+	return s.bindTransportMode(transport, generation, true)
+}
+
+func (s *resumeTargetSession) bindTransportMode(transport tunnel.TunnelStream, generation uint64, retry bool) (<-chan struct{}, error) {
 	if s == nil || transport == nil || generation == 0 {
 		return nil, p2presume.ErrBinding
 	}
@@ -259,7 +279,13 @@ func (s *resumeTargetSession) bindTransport(transport tunnel.TunnelStream, gener
 	}
 	endpoint, state, ctx := s.endpoint, s.state, s.ctx
 	s.mu.Unlock()
-	if err := endpoint.Bind(transport, generation); err != nil {
+	var err error
+	if retry {
+		err = endpoint.RetryBind(transport, generation)
+	} else {
+		err = endpoint.Bind(transport, generation)
+	}
+	if err != nil {
 		return nil, err
 	}
 	done := endpoint.GenerationDone(generation)

@@ -58,9 +58,12 @@ func TestResumeRegistryRetainsTargetAcrossDetachAndRebind(t *testing.T) {
 		SendOffset:    80,
 		ReceiveOffset: 100,
 	}
-	rebound, err := registry.rebind(peer)
+	rebound, retry, err := registry.rebind(peer)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if retry {
+		t.Fatal("new generation was classified as a retry")
 	}
 	if rebound != session || session.currentGeneration() != 2 {
 		t.Fatal("rebind did not preserve logical target session")
@@ -96,10 +99,10 @@ func TestResumeRegistryRejectsStaleAndWrongTokenRebind(t *testing.T) {
 	}
 
 	stale := p2presume.Binding{
-		Type: p2presume.BindOpen, Identity: local.Identity, Generation: 5,
+		Type: p2presume.BindOpen, Identity: local.Identity, Generation: 4,
 		SendOffset: 10, ReceiveOffset: 20,
 	}
-	if _, err := registry.rebind(stale); !errors.Is(err, p2presume.ErrBinding) {
+	if _, _, err := registry.rebind(stale); !errors.Is(err, p2presume.ErrBinding) {
 		t.Fatalf("stale generation error=%v", err)
 	}
 
@@ -110,8 +113,129 @@ func TestResumeRegistryRejectsStaleAndWrongTokenRebind(t *testing.T) {
 	wrongToken := stale
 	wrongToken.Generation = 6
 	wrongToken.Identity.Token = wrongIdentity.Token
-	if _, err := registry.rebind(wrongToken); !errors.Is(err, p2presume.ErrBinding) {
+	if _, _, err := registry.rebind(wrongToken); !errors.Is(err, p2presume.ErrBinding) {
 		t.Fatalf("wrong token error=%v", err)
+	}
+}
+
+func TestResumeRegistryRetriesDetachedCurrentGeneration(t *testing.T) {
+	registry := newResumeRegistry(time.Second, 4)
+	defer registry.closeAll()
+	a, b := net.Pipe()
+	defer b.Close()
+	local := newResumeBinding(t, p2presume.BindAck, 1, 100, 80)
+	session, err := registry.register(local, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.detach(local); err != nil {
+		t.Fatal(err)
+	}
+
+	peer := p2presume.Binding{
+		Type: p2presume.BindOpen, Identity: local.Identity, Generation: 2,
+		SendOffset: 80, ReceiveOffset: 100,
+	}
+	if _, retry, err := registry.rebind(peer); err != nil || retry {
+		t.Fatalf("initial rebind retry=%v err=%v", retry, err)
+	}
+	if _, _, err := registry.rebind(peer); !errors.Is(err, p2presume.ErrBinding) {
+		t.Fatalf("active current-generation retry error=%v", err)
+	}
+
+	local.Generation = 2
+	if err := session.detach(local); err != nil {
+		t.Fatal(err)
+	}
+	rebound, retry, err := registry.rebind(peer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rebound != session || !retry || session.currentGeneration() != 2 {
+		t.Fatalf("detached retry session=%p want=%p retry=%v generation=%d",
+			rebound, session, retry, session.currentGeneration())
+	}
+}
+
+func TestLogicalResumeRetryRebindsDetachedCurrentGeneration(t *testing.T) {
+	registry := newResumeRegistry(time.Second, 4)
+	defer registry.closeAll()
+	targetExit, targetPeer := net.Pipe()
+	defer targetPeer.Close()
+
+	identity, err := p2presume.NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := p2presume.Binding{Type: p2presume.BindAck, Identity: identity, Generation: 1}
+	session, err := registry.registerLogical(local, targetExit, "target", 1024, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client1, exit1 := net.Pipe()
+	done1, err := session.bindTransport(pipeTunnelStream{Conn: exit1}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client1.Close()
+	select {
+	case <-done1:
+	case <-time.After(time.Second):
+		t.Fatal("initial generation did not detach")
+	}
+	waitResumeSessionDetached(t, session)
+
+	peer := p2presume.Binding{Type: p2presume.BindOpen, Identity: identity, Generation: 2}
+	if _, retry, err := registry.rebind(peer); err != nil || retry {
+		t.Fatalf("new generation retry=%v err=%v", retry, err)
+	}
+	client2, exit2 := net.Pipe()
+	done2, err := session.bindTransport(pipeTunnelStream{Conn: exit2}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = client2.Close()
+	select {
+	case <-done2:
+	case <-time.After(time.Second):
+		t.Fatal("committed rebind generation did not detach")
+	}
+	waitResumeSessionDetached(t, session)
+
+	if _, retry, err := registry.rebind(peer); err != nil || !retry {
+		t.Fatalf("detached generation retry=%v err=%v", retry, err)
+	}
+	clientRetry, exitRetry := net.Pipe()
+	doneRetry, err := session.retryTransport(pipeTunnelStream{Conn: exitRetry}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if session.currentGeneration() != 2 {
+		t.Fatalf("retry advanced generation to %d", session.currentGeneration())
+	}
+	_ = clientRetry.Close()
+	select {
+	case <-doneRetry:
+	case <-time.After(time.Second):
+		t.Fatal("retried generation did not detach")
+	}
+}
+
+func waitResumeSessionDetached(t *testing.T, session *resumeTargetSession) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		session.mu.Lock()
+		detached := !session.detachedAt.IsZero()
+		session.mu.Unlock()
+		if detached {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("resume session did not enter recovery grace")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -258,9 +382,12 @@ func TestLogicalResumeTargetSurvivesTransportRebind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rebound, err := registry.rebind(peerRebind)
+	rebound, retry, err := registry.rebind(peerRebind)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if retry {
+		t.Fatal("new logical generation was classified as a retry")
 	}
 	if rebound != session {
 		t.Fatal("rebind replaced logical target session")

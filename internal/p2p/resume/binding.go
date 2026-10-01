@@ -148,3 +148,19 @@ func ValidateRebindResponse(current, next Binding) error {
 	}
 	return ValidateRebind(current, next)
 }
+
+// ValidateRebindRetryRequest accepts an idempotent retry of the current
+// generation after the Exit has observed that generation's transport close.
+// The caller is responsible for proving that no transport for the generation
+// is still active before using this narrower validation path.
+func ValidateRebindRetryRequest(current, next Binding) error {
+	if current.Type != BindAck || next.Type != BindOpen {
+		return fmt.Errorf("%w: invalid rebind retry direction", ErrBinding)
+	}
+	if current.Generation == 0 || next.Generation != current.Generation {
+		return fmt.Errorf("%w: mismatched retry generation", ErrBinding)
+	}
+	previous := current
+	previous.Generation--
+	return ValidateRebind(previous, next)
+}

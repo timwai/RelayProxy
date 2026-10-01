@@ -347,7 +347,7 @@ func (h *Handler) handleTCPResumeRebind(
 		})
 		return
 	}
-	session, err := h.resume.rebind(peer)
+	session, retry, err := h.resume.rebind(peer)
 	if err != nil {
 		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
 			RequestID:    req.RequestID,
@@ -382,7 +382,12 @@ func (h *Handler) handleTCPResumeRebind(
 	}
 	_ = stream.SetDeadline(time.Time{})
 
-	done, err := session.bindTransport(stream, local.Generation)
+	var done <-chan struct{}
+	if retry {
+		done, err = session.retryTransport(stream, local.Generation)
+	} else {
+		done, err = session.bindTransport(stream, local.Generation)
+	}
 	if err != nil {
 		return
 	}

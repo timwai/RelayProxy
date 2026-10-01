@@ -124,6 +124,40 @@ func TestValidateRebindRejectsWrongIdentityAndToken(t *testing.T) {
 	}
 }
 
+func TestValidateRebindRetryRequestRequiresCurrentGeneration(t *testing.T) {
+	identity, err := NewIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := Binding{
+		Type: BindAck, Identity: identity, Generation: 2,
+		SendOffset: 100, ReceiveOffset: 80,
+	}
+	retry := Binding{
+		Type: BindOpen, Identity: identity, Generation: 2,
+		SendOffset: 80, ReceiveOffset: 100,
+	}
+	if err := ValidateRebindRetryRequest(current, retry); err != nil {
+		t.Fatalf("valid retry rejected: %v", err)
+	}
+
+	wrongGeneration := retry
+	wrongGeneration.Generation = 3
+	if err := ValidateRebindRetryRequest(current, wrongGeneration); !errors.Is(err, ErrBinding) {
+		t.Fatalf("future retry generation error=%v", err)
+	}
+	rollback := retry
+	rollback.SendOffset = 79
+	if err := ValidateRebindRetryRequest(current, rollback); !errors.Is(err, ErrBinding) {
+		t.Fatalf("retry send rollback error=%v", err)
+	}
+	impossibleAck := retry
+	impossibleAck.ReceiveOffset = 101
+	if err := ValidateRebindRetryRequest(current, impossibleAck); !errors.Is(err, ErrBinding) {
+		t.Fatalf("retry impossible ack error=%v", err)
+	}
+}
+
 func TestIdentityRejectsZeroValues(t *testing.T) {
 	var identity Identity
 	if identity.Valid() {

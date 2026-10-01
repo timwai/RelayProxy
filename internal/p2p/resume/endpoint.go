@@ -45,13 +45,16 @@ type Endpoint struct {
 
 	losses   chan TransportLoss
 	progress chan struct{}
+	acks     chan struct{}
+	done     chan struct{}
+	doneOnce sync.Once
 }
 
 func NewEndpoint(state *StreamState) (*Endpoint, error) {
 	if state == nil || !state.Identity().Valid() {
 		return nil, ErrBinding
 	}
-	return &Endpoint{
+	endpoint := &Endpoint{
 		state:     state,
 		inbound:   newStreamBuffer(512 << 10),
 		change:    make(chan struct{}),
@@ -59,7 +62,11 @@ func NewEndpoint(state *StreamState) (*Endpoint, error) {
 		genClosed: make(map[uint64]bool),
 		losses:    make(chan TransportLoss, 8),
 		progress:  make(chan struct{}, 1),
-	}, nil
+		acks:      make(chan struct{}, 1),
+		done:      make(chan struct{}),
+	}
+	go endpoint.ackLoop()
+	return endpoint, nil
 }
 
 func (e *Endpoint) State() *StreamState {
@@ -134,6 +141,17 @@ func (e *Endpoint) SetWriteDeadline(deadline time.Time) error {
 // Bind installs a strictly newer transport. Replay is written before ready is
 // published, so fresh application bytes can never overtake unacknowledged data.
 func (e *Endpoint) Bind(transport Transport, generation uint64) error {
+	return e.bind(transport, generation, false)
+}
+
+// RetryBind reinstalls the current generation after its transport was lost
+// during rebind negotiation. Normal recovery must use Bind with a newer
+// generation; this method exists only for an authenticated idempotent retry.
+func (e *Endpoint) RetryBind(transport Transport, generation uint64) error {
+	return e.bind(transport, generation, true)
+}
+
+func (e *Endpoint) bind(transport Transport, generation uint64, retry bool) error {
 	if e == nil || transport == nil || generation == 0 {
 		return ErrBinding
 	}
@@ -146,7 +164,11 @@ func (e *Endpoint) Bind(transport Transport, generation uint64) error {
 		_ = transport.Close()
 		return net.ErrClosed
 	}
-	if generation <= e.generation {
+	invalidGeneration := generation <= e.generation
+	if retry {
+		invalidGeneration = generation != e.generation || e.transport != nil
+	}
+	if invalidGeneration {
 		e.mu.Unlock()
 		e.writeMu.Unlock()
 		_ = transport.Close()
@@ -334,6 +356,7 @@ func (e *Endpoint) Close() error {
 		_ = transport.Close()
 	}
 	e.inbound.CloseWithError(net.ErrClosed)
+	e.stopBackground()
 	return nil
 }
 
@@ -377,6 +400,48 @@ func (e *Endpoint) sendControlCurrent(transport Transport, generation uint64, fr
 	}
 }
 
+// queueAck keeps frame reads independent from control-frame writes. A
+// synchronous ACK write can deadlock a full-duplex stream when both peers read
+// DATA at the same time and then both block writing ACKs. The single-slot queue
+// coalesces bursts; ackLoop always snapshots the newest receive offset.
+func (e *Endpoint) queueAck() {
+	if e == nil {
+		return
+	}
+	select {
+	case e.acks <- struct{}{}:
+	default:
+	}
+}
+
+func (e *Endpoint) ackLoop() {
+	for {
+		select {
+		case <-e.done:
+			return
+		case <-e.acks:
+		}
+
+		e.mu.Lock()
+		if e.closed {
+			e.mu.Unlock()
+			return
+		}
+		transport, generation := e.transport, e.generation
+		e.mu.Unlock()
+		if transport == nil || generation == 0 {
+			continue
+		}
+
+		ack, err := e.state.AckFrame()
+		if err != nil {
+			e.fail(err)
+			return
+		}
+		e.sendControlCurrent(transport, generation, ack)
+	}
+}
+
 func (e *Endpoint) readLoop(transport Transport, generation uint64) {
 	for {
 		frame, err := ReadFrame(transport)
@@ -394,24 +459,14 @@ func (e *Endpoint) readLoop(transport Transport, generation uint64) {
 
 		switch frame.Type {
 		case FrameData:
-			ack, err := e.state.AckFrame()
-			if err != nil {
-				e.fail(err)
-				return
-			}
-			e.sendControlCurrent(transport, generation, ack)
+			e.queueAck()
 			if len(fresh) > 0 {
 				if err := e.inbound.Write(fresh); err != nil {
 					return
 				}
 			}
 		case FrameFIN:
-			ack, err := e.state.AckFrame()
-			if err != nil {
-				e.fail(err)
-				return
-			}
-			e.sendControlCurrent(transport, generation, ack)
+			e.queueAck()
 			e.inbound.CloseWithError(nil)
 			return
 		case FrameRST:
@@ -574,6 +629,14 @@ func (e *Endpoint) fail(err error) {
 	}
 	e.inbound.CloseWithError(err)
 	e.notifyProgress()
+	e.stopBackground()
+}
+
+func (e *Endpoint) stopBackground() {
+	if e == nil {
+		return
+	}
+	e.doneOnce.Do(func() { close(e.done) })
 }
 
 func (e *Endpoint) reportLoss(generation uint64, err error) {

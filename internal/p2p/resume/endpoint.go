@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -33,11 +34,12 @@ type Endpoint struct {
 	writeMu    sync.Mutex
 
 	mu         sync.Mutex
-	transport  Transport
-	generation uint64
-	ready      bool
-	closed     bool
-	change     chan struct{}
+	transport     Transport
+	generation    uint64
+	ready         bool
+	closed        bool
+	writeDeadline time.Time
+	change        chan struct{}
 	genDone    map[uint64]chan struct{}
 	genClosed  map[uint64]bool
 
@@ -99,9 +101,35 @@ func (e *Endpoint) GenerationDone(generation uint64) <-chan struct{} {
 	return ch
 }
 
-func (e *Endpoint) SetDeadline(time.Time) error      { return nil }
-func (e *Endpoint) SetReadDeadline(time.Time) error  { return nil }
-func (e *Endpoint) SetWriteDeadline(time.Time) error { return nil }
+func (e *Endpoint) SetDeadline(deadline time.Time) error {
+	if err := e.SetReadDeadline(deadline); err != nil {
+		return err
+	}
+	return e.SetWriteDeadline(deadline)
+}
+
+func (e *Endpoint) SetReadDeadline(deadline time.Time) error {
+	if e == nil || e.inbound == nil {
+		return net.ErrClosed
+	}
+	return e.inbound.SetDeadline(deadline)
+}
+
+func (e *Endpoint) SetWriteDeadline(deadline time.Time) error {
+	if e == nil {
+		return net.ErrClosed
+	}
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		return net.ErrClosed
+	}
+	e.writeDeadline = deadline
+	e.signalLocked()
+	e.mu.Unlock()
+	e.notifyProgress()
+	return nil
+}
 
 // Bind installs a strictly newer transport. Replay is written before ready is
 // published, so fresh application bytes can never overtake unacknowledged data.
@@ -264,18 +292,44 @@ func (e *Endpoint) Close() error {
 	if e == nil {
 		return nil
 	}
+
+	// Serialize normal close with application writes and emit a logical RST
+	// before tearing down the replaceable transport. The peer can then close
+	// the retained target immediately instead of mistaking Close for path loss.
+	e.appWriteMu.Lock()
+	e.writeMu.Lock()
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
+		e.writeMu.Unlock()
+		e.appWriteMu.Unlock()
+		return nil
+	}
+	transport := e.transport
+	ready := e.ready
+	e.mu.Unlock()
+	if transport != nil && ready {
+		if frame, err := e.state.RST(); err == nil {
+			_ = WriteFrame(transport, frame)
+		}
+	}
+
+	e.mu.Lock()
+	if e.closed {
+		e.mu.Unlock()
+		e.writeMu.Unlock()
+		e.appWriteMu.Unlock()
 		return nil
 	}
 	e.closed = true
-	transport := e.transport
+	transport = e.transport
 	e.transport = nil
 	e.ready = false
 	e.closeGenerationLocked(e.generation)
 	e.signalLocked()
 	e.mu.Unlock()
+	e.writeMu.Unlock()
+	e.appWriteMu.Unlock()
 
 	if transport != nil {
 		_ = transport.Close()
@@ -377,6 +431,11 @@ func (e *Endpoint) waitTransport() (Transport, uint64, error) {
 			e.mu.Unlock()
 			return nil, 0, net.ErrClosed
 		}
+		deadline := e.writeDeadline
+		if deadlineExpired(deadline) {
+			e.mu.Unlock()
+			return nil, 0, os.ErrDeadlineExceeded
+		}
 		if e.ready && e.transport != nil {
 			transport, generation := e.transport, e.generation
 			e.mu.Unlock()
@@ -384,7 +443,9 @@ func (e *Endpoint) waitTransport() (Transport, uint64, error) {
 		}
 		change := e.change
 		e.mu.Unlock()
-		<-change
+		if err := waitUntil(change, deadline); err != nil {
+			return nil, 0, err
+		}
 	}
 }
 
@@ -395,21 +456,63 @@ func (e *Endpoint) waitProgress() error {
 			e.mu.Unlock()
 			return net.ErrClosed
 		}
+		deadline := e.writeDeadline
+		if deadlineExpired(deadline) {
+			e.mu.Unlock()
+			return os.ErrDeadlineExceeded
+		}
+		change := e.change
 		e.mu.Unlock()
+
 		select {
 		case <-e.progress:
 			return nil
 		default:
 		}
-
-		e.mu.Lock()
-		change := e.change
-		e.mu.Unlock()
+		if deadline.IsZero() {
+			select {
+			case <-e.progress:
+				return nil
+			case <-change:
+			}
+			continue
+		}
+		timer := time.NewTimer(time.Until(deadline))
 		select {
 		case <-e.progress:
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return nil
 		case <-change:
+			if !timer.Stop() {
+				<-timer.C
+			}
+		case <-timer.C:
+			return os.ErrDeadlineExceeded
 		}
+	}
+}
+
+func deadlineExpired(deadline time.Time) bool {
+	return !deadline.IsZero() && !time.Now().Before(deadline)
+}
+
+func waitUntil(ch <-chan struct{}, deadline time.Time) error {
+	if deadline.IsZero() {
+		<-ch
+		return nil
+	}
+	if deadlineExpired(deadline) {
+		return os.ErrDeadlineExceeded
+	}
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+	select {
+	case <-ch:
+		return nil
+	case <-timer.C:
+		return os.ErrDeadlineExceeded
 	}
 }
 
@@ -487,12 +590,13 @@ func (e *Endpoint) closeGenerationLocked(generation uint64) {
 }
 
 type streamBuffer struct {
-	mu     sync.Mutex
-	cond   *sync.Cond
-	buf    bytes.Buffer
-	limit  int
-	closed bool
-	err    error
+	mu       sync.Mutex
+	cond     *sync.Cond
+	buf      bytes.Buffer
+	limit    int
+	closed   bool
+	err      error
+	deadline time.Time
 }
 
 func newStreamBuffer(limit int) *streamBuffer {
@@ -531,7 +635,21 @@ func (b *streamBuffer) Read(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for b.buf.Len() == 0 && !b.closed {
+		if deadlineExpired(b.deadline) {
+			return 0, os.ErrDeadlineExceeded
+		}
+		if b.deadline.IsZero() {
+			b.cond.Wait()
+			continue
+		}
+		deadline := b.deadline
+		timer := time.AfterFunc(time.Until(deadline), func() {
+			b.mu.Lock()
+			b.cond.Broadcast()
+			b.mu.Unlock()
+		})
 		b.cond.Wait()
+		_ = timer.Stop()
 	}
 	if b.buf.Len() > 0 {
 		n, _ := b.buf.Read(p)
@@ -542,6 +660,21 @@ func (b *streamBuffer) Read(p []byte) (int, error) {
 		return 0, b.err
 	}
 	return 0, io.EOF
+}
+
+func (b *streamBuffer) SetDeadline(deadline time.Time) error {
+	if b == nil {
+		return net.ErrClosed
+	}
+	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		return net.ErrClosed
+	}
+	b.deadline = deadline
+	b.cond.Broadcast()
+	b.mu.Unlock()
+	return nil
 }
 
 func (b *streamBuffer) CloseWithError(err error) {

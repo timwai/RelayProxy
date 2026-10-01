@@ -8,9 +8,9 @@ const (
 	// advertise it and retain their normal proxy client/exit grants.
 	CapabilityProxyP2P = "proxy_p2p_v1"
 
-	// CapabilityProxyStreamResume is reserved for the resumable TCP overlay.
-	// Do not advertise it until both Client and Exit support logical-stream
-	// rebinding, replay and target-socket retention end to end.
+	// CapabilityProxyStreamResume enables the resumable TCP overlay used by
+	// established P2P streams. It is effective only when the authenticated Relay
+	// confirms that both Client and Exit advertise it for the concrete P2P session.
 	CapabilityProxyStreamResume = "proxy_stream_resume_v1"
 
 	P2PControlConnectRequest  = "connect_request"

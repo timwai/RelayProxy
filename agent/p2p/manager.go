@@ -96,9 +96,10 @@ type Session struct {
 
 	mu              sync.RWMutex
 	localCandidates []protocol.P2PCandidate
-	peerCandidates  []protocol.P2PCandidate
-	peerFingerprint string
-	relayPolicy     *acl.Policy
+	peerCandidates   []protocol.P2PCandidate
+	peerFingerprint  string
+	peerCapabilities []string
+	relayPolicy      *acl.Policy
 	state           State
 	lastError       string
 	endpoint        *Endpoint
@@ -363,6 +364,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
 	item.lastUsed.Store(time.Now().UnixMilli())
 	item.mu.Unlock()
+	item.setPeerCapabilities(response.PeerCapabilities)
 	item.setState(StateRendezvous, "")
 	return item, nil
 }
@@ -383,6 +385,7 @@ func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
 		m.mu.Unlock()
 		if item != nil && item.matchesToken(message.SessionToken) {
 			item.setPeer(message.Candidates, message.PeerFingerprint)
+			item.setPeerCapabilities(message.PeerCapabilities)
 			if message.LeaseExpiresAt > 0 {
 				item.ExpiresAt.Store(message.LeaseExpiresAt)
 			}
@@ -436,6 +439,7 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
 	item.mu.Unlock()
 	item.setPeer(message.Candidates, message.PeerFingerprint)
+	item.setPeerCapabilities(message.PeerCapabilities)
 	policy := message.RelayPolicy
 	if m.endpointFactory != nil {
 		var policyErr error
@@ -728,6 +732,31 @@ func (s *Session) setPeer(candidates []protocol.P2PCandidate, fingerprint string
 	s.mu.Unlock()
 }
 
+func (s *Session) setPeerCapabilities(values []string) {
+	if s == nil {
+		return
+	}
+	caps := make([]string, 0, 1)
+	for _, value := range values {
+		if value == protocol.CapabilityProxyStreamResume {
+			caps = append(caps, value)
+			break
+		}
+	}
+	s.mu.Lock()
+	s.peerCapabilities = caps
+	s.mu.Unlock()
+}
+
+func (s *Session) peerCapabilitiesSnapshot() []string {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]string(nil), s.peerCapabilities...)
+}
+
 func (s *Session) setRelayPolicy(policy *acl.Policy) {
 	s.mu.Lock()
 	if policy == nil {
@@ -832,6 +861,11 @@ func (s *Session) establish(clientRole bool) {
 	if err != nil {
 		s.failDirect(err)
 		return
+	}
+	if direct.QUICSession != nil {
+		// Capabilities come from the authenticated Relay coordinator and are
+		// attached to this concrete P2P QUIC session before it becomes READY.
+		tunnel.SetPeerCapabilities(direct.QUICSession, s.peerCapabilitiesSnapshot())
 	}
 
 	s.mu.Lock()

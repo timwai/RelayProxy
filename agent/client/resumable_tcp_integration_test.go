@@ -155,6 +155,9 @@ func TestResumableTCPDirectLossRecoversThroughRelayWithoutRedialingTarget(t *tes
 	}, nil)
 	dialer.ConfigureDirectPolicy("auto", true)
 	dialer.ConfigureStreamResume(true, 256<<10)
+	var fallbacks, directFailures atomic.Int32
+	dialer.ConfigureDirectMetrics(func(string) { fallbacks.Add(1) })
+	dialer.ConfigureDirectFailure(func(string, string) { directFailures.Add(1) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -208,5 +211,42 @@ func TestResumableTCPDirectLossRecoversThroughRelayWithoutRedialingTarget(t *tes
 	}
 	if targetAccepts.Load() != 1 {
 		t.Fatalf("target was redialed during migration: accepts=%d", targetAccepts.Load())
+	}
+	if fallbacks.Load() != 1 || directFailures.Load() != 1 {
+		t.Fatalf("after P2P loss fallbacks=%d directFailures=%d, want 1/1", fallbacks.Load(), directFailures.Load())
+	}
+
+	// A later Relay stream loss should rebind the same logical stream again,
+	// without redialing the target or counting a second P2P fallback.
+	relay.closeActive(t)
+	third := []byte("after-relay-rebind-again")
+	writeDone = make(chan error, 1)
+	go func() {
+		_, err := conn.Write(third)
+		writeDone <- err
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			t.Fatalf("write after Relay loss: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("write did not recover after Relay stream loss")
+	}
+	got = make([]byte, len(third))
+	if _, err := io.ReadFull(conn, got); err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(third) {
+		t.Fatalf("third echo=%q want=%q", got, third)
+	}
+	if targetAccepts.Load() != 1 {
+		t.Fatalf("target was redialed during repeated recovery: accepts=%d", targetAccepts.Load())
+	}
+	if relay.opens.Load() < 2 {
+		t.Fatalf("Relay rebind opens=%d, want at least 2", relay.opens.Load())
+	}
+	if fallbacks.Load() != 1 || directFailures.Load() != 1 {
+		t.Fatalf("Relay recovery inflated P2P metrics: fallbacks=%d directFailures=%d", fallbacks.Load(), directFailures.Load())
 	}
 }

@@ -1,6 +1,6 @@
 // Package resume contains the transport-independent framing primitives used by
-// resumable proxy streams. The capability is intentionally not advertised until
-// both Client and Exit can rebind an established logical TCP stream.
+// resumable proxy streams. Activation is capability-gated per authenticated
+// Client/Exit pair and per concrete P2P QUIC session.
 package resume
 
 import (

@@ -240,6 +240,16 @@ func (s *scriptedSession) LocalAddr() net.Addr {
 func (s *scriptedSession) Close() error          { return nil }
 func (s *scriptedSession) Done() <-chan struct{} { return s.done }
 
+type blockingOpenSession struct {
+	*scriptedSession
+}
+
+func (s *blockingOpenSession) OpenStream(ctx context.Context) (tunnel.TunnelStream, error) {
+	s.opens.Add(1)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
 func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	direct := newScriptedSession(func() tunnel.TunnelStream {
 		return &scriptedStream{failWriteAt: 2}
@@ -289,6 +299,67 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	callbackMu.Unlock()
 	if len(gotOrder) != 2 || gotOrder[0] != "fallback" || gotOrder[1] != "failure" {
 		t.Fatalf("callback order=%v, want [fallback failure]", gotOrder)
+	}
+}
+
+func TestDirectAttemptTimeoutPreservesRelayFallbackBudget(t *testing.T) {
+	tests := []struct {
+		name string
+		dial func(*TunnelDialer, context.Context) error
+		resp func() tunnel.TunnelStream
+	}{
+		{
+			name: "tcp",
+			dial: func(d *TunnelDialer, ctx context.Context) error {
+				conn, err := d.DialTCP(ctx, "exit", "example.com", 443)
+				if conn != nil {
+					_ = conn.Close()
+				}
+				return err
+			},
+			resp: func() tunnel.TunnelStream {
+				return responseStream(protocol.OpenTCPResponse{Success: true, RemoteIP: "203.0.113.10"})
+			},
+		},
+		{
+			name: "udp",
+			dial: func(d *TunnelDialer, ctx context.Context) error {
+				conn, err := d.DialUDP(ctx, "exit", "203.0.113.53", 53)
+				if conn != nil {
+					_ = conn.Close()
+				}
+				return err
+			},
+			resp: func() tunnel.TunnelStream {
+				return responseStream(protocol.OpenUDPResponse{Success: true, Mode: protocol.UDPModeStream})
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			direct := &blockingOpenSession{scriptedSession: newScriptedSession(nil)}
+			relay := newScriptedSession(tc.resp)
+			dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+			dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, nil)
+			dialer.ConfigureDirectAttemptTimeout(25 * time.Millisecond)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer cancel()
+			started := time.Now()
+			if err := tc.dial(dialer, ctx); err != nil {
+				t.Fatal(err)
+			}
+			if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+				t.Fatalf("Relay fallback consumed too much of the caller budget: %v", elapsed)
+			}
+			if ctx.Err() != nil {
+				t.Fatalf("Relay fallback exhausted caller context: %v", ctx.Err())
+			}
+			if direct.opens.Load() != 1 || relay.opens.Load() != 1 {
+				t.Fatalf("unexpected attempts direct=%d relay=%d", direct.opens.Load(), relay.opens.Load())
+			}
+		})
 	}
 }
 

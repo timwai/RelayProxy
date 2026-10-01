@@ -34,13 +34,22 @@ func TestManagerAutoRetainsTLSFallbackBudget(t *testing.T) {
 		}
 		accepted <- s
 	}()
-	m := NewTunnelManager(ManagerConfig{ServerAddress: "127.0.0.1", QUICPort: blackhole.LocalAddr().(*net.UDPAddr).Port, TCPPort: l.Addr().(*net.TCPAddr).Port, Mode: ModeAuto, TLSConfig: &tls.Config{InsecureSkipVerify: true}, ConnectTimeout: 800 * time.Millisecond}, nil)
+	m := NewTunnelManager(ManagerConfig{
+		ServerAddress: "127.0.0.1", QUICPort: blackhole.LocalAddr().(*net.UDPAddr).Port,
+		TCPPort: l.Addr().(*net.TCPAddr).Port, Mode: ModeAuto,
+		TLSConfig: &tls.Config{InsecureSkipVerify: true}, ConnectTimeout: 4 * time.Second,
+		AutoFallbackDelay: 25 * time.Millisecond,
+	}, nil)
 	defer m.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
+	started := time.Now()
 	s, err := m.Connect(ctx)
 	if err != nil {
 		t.Fatalf("fallback lost its budget: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 1500*time.Millisecond {
+		t.Fatalf("TCP fallback waited for the QUIC timeout: %v", elapsed)
 	}
 	if s.Transport() != TransportTLS {
 		t.Fatalf("transport=%s", s.Transport())

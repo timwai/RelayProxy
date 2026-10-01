@@ -36,6 +36,7 @@ class MainActivity : Activity() {
     private lateinit var infoActiveNetwork: TextView
     private lateinit var infoP2PPath: TextView
     private lateinit var infoPowerMode: TextView
+    private lateinit var infoNativeUDP: TextView
     private lateinit var infoApproval: TextView
     private lateinit var infoExitPermission: TextView
     private lateinit var infoUptime: TextView
@@ -250,6 +251,7 @@ class MainActivity : Activity() {
         infoActiveNetwork = infoRow(card, "当前网络")
         infoP2PPath = infoRow(card, "P2P 直连")
         infoPowerMode = infoRow(card, "P2P 电源策略")
+        infoNativeUDP = infoRow(card, "UDP 过载丢弃")
         infoApproval = infoRow(card, "设备审批")
         infoExitPermission = infoRow(card, "出口权限")
         infoUptime = infoRow(card, "运行时长")
@@ -407,6 +409,7 @@ class MainActivity : Activity() {
         val p2pPath = obj.optString("p2pPath", "")
         val p2pRttMs = obj.optLong("p2pRttMs", 0)
         val powerConstrained = obj.optBoolean("powerConstrained", false)
+        val nativeUdp = obj.optJSONObject("nativeUdp")
 
         when (state) {
             "CONNECTED" -> {
@@ -454,6 +457,9 @@ class MainActivity : Activity() {
         infoActiveNetwork.text = activeNetworkLabel(activeNetwork)
         infoP2PPath.text = p2pPathLabel(p2pState, p2pPath, p2pRttMs)
         infoPowerMode.text = if (powerConstrained) "省电" else "标准"
+        infoNativeUDP.text = nativeUdp?.let {
+            "队列 ${it.optLong("queueDrops", 0)} · 重组 ${it.optLong("reassemblyDrops", 0)} · 关联 ${it.optLong("associationRejects", 0)}"
+        } ?: "—"
         infoApproval.text = approvalLabel(approval)
         infoExitPermission.text = if (approved) "已授权" else "未授权"
         infoUptime.text = formatDuration(uptimeMs)

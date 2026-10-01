@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -612,6 +612,11 @@
       const cert = state.settings.info.certificate;
       $('certificate-summary').innerHTML = cert ? '<strong>' + esc(cert.dnsNames.length ? cert.dnsNames.join(' · ') : cert.subject) + '</strong><br>签发者：' + esc(cert.issuer) + '<br>有效期：' + esc(date(cert.notBefore)) + ' — ' + esc(date(cert.notAfter)) + '<div class="mono">SHA256 ' + esc(cert.sha256) + '</div>' : '当前进程没有加载 TLS 证书。';
     }
+    if (state.nativeUdp) {
+      const udp = state.nativeUdp;
+      rows.push(['Native UDP', (udp.associations || 0) + ' 个关联 · 队列 ' + bytes(udp.queueBytes) + ' · 重组 ' + bytes(udp.reassemblyBytes)]);
+      rows.push(['UDP 过载丢弃', '队列 ' + (udp.queueDrops || 0) + ' · 重组 ' + (udp.reassemblyDrops || 0) + ' · 关联拒绝 ' + (udp.associationRejects || 0)]);
+    }
     $('network-summary').innerHTML = details(rows);
   }
   async function refresh(manual = false) {
@@ -621,6 +626,7 @@
     const user = state.user, editVersion = state.editVersion;
     const jobs = [
       ['dashboard', '/dashboard', data => {
+        state.nativeUdp = data.nativeUdp || null;
         $('stat-devices').textContent = data.onlineDevices;
         $('stat-exits').textContent = data.onlineExits;
         $('stat-streams').textContent = data.activeConnections;

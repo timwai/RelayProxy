@@ -30,21 +30,25 @@ type TunnelDialer struct {
 	defaultExitID atomic.Pointer[string]
 	requestSeq    atomic.Uint64
 
-	directMu          sync.RWMutex
-	getDirect         func(exitDeviceID string) (tunnel.TunnelSession, bool)
-	ensureDirect      func(exitDeviceID string)
-	directMode        string
-	directFallback    bool
-	noteFallback      func(exitDeviceID string)
-	noteDirectFailure func(exitDeviceID, reason string)
-	streamResume      bool
-	resumeReplayLimit int
+	directMu             sync.RWMutex
+	getDirect            func(exitDeviceID string) (tunnel.TunnelSession, bool)
+	ensureDirect         func(exitDeviceID string)
+	directMode           string
+	directFallback       bool
+	noteFallback         func(exitDeviceID string)
+	noteDirectFailure    func(exitDeviceID, reason string)
+	streamResume         bool
+	resumeReplayLimit    int
+	directAttemptTimeout time.Duration
 }
+
+const defaultDirectAttemptTimeout = 2 * time.Second
 
 func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() string) *TunnelDialer {
 	return &TunnelDialer{
 		getTunnel: getTunnel, getClientID: getClientID,
 		directMode: "auto", directFallback: true,
+		directAttemptTimeout: defaultDirectAttemptTimeout,
 	}
 }
 
@@ -64,6 +68,18 @@ func (d *TunnelDialer) ConfigureDirectPath(
 func (d *TunnelDialer) ConfigureDirectPolicy(mode string, fallback bool) {
 	d.directMu.Lock()
 	d.directMode, d.directFallback = mode, fallback
+	d.directMu.Unlock()
+}
+
+// ConfigureDirectAttemptTimeout bounds a READY direct-path handshake when
+// Relay fallback is enabled. The caller's original context is retained for
+// the fallback, so a stale P2P session cannot consume the entire deadline.
+func (d *TunnelDialer) ConfigureDirectAttemptTimeout(timeout time.Duration) {
+	d.directMu.Lock()
+	if timeout <= 0 {
+		timeout = defaultDirectAttemptTimeout
+	}
+	d.directAttemptTimeout = timeout
 	d.directMu.Unlock()
 }
 
@@ -117,6 +133,24 @@ func (d *TunnelDialer) directFallbackEnabled() bool {
 	d.directMu.RLock()
 	defer d.directMu.RUnlock()
 	return d.directMode != "p2p_only" && d.directFallback
+}
+
+func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Context, context.CancelFunc) {
+	d.directMu.RLock()
+	timeout := d.directAttemptTimeout
+	d.directMu.RUnlock()
+	if timeout <= 0 {
+		timeout = defaultDirectAttemptTimeout
+	}
+	if deadline, ok := parent.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return context.WithCancel(parent)
+		}
+		// Reserve at least half of the caller's remaining budget for Relay.
+		timeout = min(timeout, remaining/2)
+	}
+	return context.WithTimeout(parent, timeout)
 }
 
 func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
@@ -196,7 +230,12 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
 	allowResume := direct && tunnel.PeerSupportsStreamResume(sess)
-	conn, err := d.dialTCPOnSession(ctx, sess, exitNodeID, host, port, allowResume)
+	attemptCtx, cancelAttempt := ctx, func() {}
+	if direct && d.directFallbackEnabled() {
+		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
+	}
+	conn, err := d.dialTCPOnSession(attemptCtx, sess, exitNodeID, host, port, allowResume)
+	cancelAttempt()
 	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
 		return conn, err
@@ -356,7 +395,12 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		}
 	}
 
-	conn, err := d.dialUDPOnSession(ctx, sess, exitNodeID, host, port, opts)
+	attemptCtx, cancelAttempt := ctx, func() {}
+	if direct && d.directFallbackEnabled() {
+		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
+	}
+	conn, err := d.dialUDPOnSession(attemptCtx, sess, exitNodeID, host, port, opts)
+	cancelAttempt()
 	retryableDirectFailure := direct && retryableDirectUDPHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
 		return conn, err

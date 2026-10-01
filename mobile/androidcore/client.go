@@ -36,22 +36,23 @@ type clientConfig struct {
 }
 
 type statusSnapshot struct {
-	ConnectionState     string `json:"connectionState"`
-	ApprovalState       string `json:"approvalState"`
-	DeviceID            string `json:"deviceId,omitempty"`
-	DeviceName          string `json:"deviceName"`
-	Transport           string `json:"transport,omitempty"`
-	ExitApproved        bool   `json:"exitApproved"`
-	ActiveStreams       int64  `json:"activeStreams"`
-	LatencyMs           int64  `json:"latencyMs"`
-	PowerConstrained    bool   `json:"powerConstrained"`
-	P2PState            string `json:"p2pState,omitempty"`
-	P2PPath             string `json:"p2pPath,omitempty"`
-	P2PRTTMs            int64  `json:"p2pRttMs,omitempty"`
-	P2PCandidateSummary string `json:"p2pCandidateSummary,omitempty"`
-	P2PBytesUp          uint64 `json:"p2pBytesUp,omitempty"`
-	P2PBytesDown        uint64 `json:"p2pBytesDown,omitempty"`
-	LastError           string `json:"lastError,omitempty"`
+	ConnectionState     string               `json:"connectionState"`
+	ApprovalState       string               `json:"approvalState"`
+	DeviceID            string               `json:"deviceId,omitempty"`
+	DeviceName          string               `json:"deviceName"`
+	Transport           string               `json:"transport,omitempty"`
+	ExitApproved        bool                 `json:"exitApproved"`
+	ActiveStreams       int64                `json:"activeStreams"`
+	LatencyMs           int64                `json:"latencyMs"`
+	PowerConstrained    bool                 `json:"powerConstrained"`
+	P2PState            string               `json:"p2pState,omitempty"`
+	P2PPath             string               `json:"p2pPath,omitempty"`
+	P2PRTTMs            int64                `json:"p2pRttMs,omitempty"`
+	P2PCandidateSummary string               `json:"p2pCandidateSummary,omitempty"`
+	P2PBytesUp          uint64               `json:"p2pBytesUp,omitempty"`
+	P2PBytesDown        uint64               `json:"p2pBytesDown,omitempty"`
+	NativeUDP           tunnel.DatagramUsage `json:"nativeUdp"`
+	LastError           string               `json:"lastError,omitempty"`
 }
 
 // Client is the small gomobile-facing wrapper for the Android exit node.
@@ -261,6 +262,7 @@ func (c *Client) StatusJSON() string {
 	manager := c.proxyP2P
 	c.mu.RUnlock()
 	s.ActiveStreams = c.handler.ActiveStreams()
+	s.NativeUDP = tunnel.NativeUDPUsage()
 	if manager != nil {
 		if path, ok := manager.PathStatus(""); ok {
 			s.P2PState = string(path.State)

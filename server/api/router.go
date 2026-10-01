@@ -887,7 +887,7 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
+	response := map[string]any{
 		"onlineDevices":     len(devices),
 		"onlineExits":       len(exits),
 		"activeConnections": totalConns,
@@ -895,7 +895,11 @@ func (r *Router) handleDashboard(w http.ResponseWriter, req *http.Request) {
 		"todayUpload":       todayUp,
 		"todayDownload":     todayDown,
 		"exitNodes":         exitInfos,
-	})
+	}
+	if requestOwner(req) == "" {
+		response["nativeUdp"] = tunnel.NativeUDPUsage()
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (r *Router) handleListDevices(w http.ResponseWriter, req *http.Request) {

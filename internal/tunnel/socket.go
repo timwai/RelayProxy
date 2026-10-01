@@ -9,7 +9,6 @@ const (
 	// Screen updates arrive as short UDP bursts. Four MiB gives the application
 	// enough time to drain them before the OS starts discarding datagrams.
 	udpSocketBufferBytes = 4 << 20
-	tcpSocketBufferBytes = 256 << 10
 )
 
 // TuneUDPConn raises kernel queues so short bursts do not turn into packet
@@ -24,7 +23,9 @@ func TuneUDPConn(conn *net.UDPConn) {
 }
 
 // TuneTCPConn applies the low-latency settings shared by tunnel and ingress
-// sockets. It is safe to call for non-TCP connections.
+// sockets. Read and write buffers intentionally stay at the operating-system
+// defaults so kernels such as Linux can autotune them for high-BDP paths. It is
+// safe to call for non-TCP connections.
 func TuneTCPConn(conn net.Conn) {
 	tcp, ok := conn.(*net.TCPConn)
 	if !ok || tcp == nil {
@@ -33,6 +34,4 @@ func TuneTCPConn(conn net.Conn) {
 	_ = tcp.SetNoDelay(true)
 	_ = tcp.SetKeepAlive(true)
 	_ = tcp.SetKeepAlivePeriod(30 * time.Second)
-	_ = tcp.SetReadBuffer(tcpSocketBufferBytes)
-	_ = tcp.SetWriteBuffer(tcpSocketBufferBytes)
 }

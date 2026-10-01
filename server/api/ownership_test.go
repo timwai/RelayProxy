@@ -118,6 +118,18 @@ func TestDeviceOwnershipAcrossManagementAndViews(t *testing.T) {
 	if dashboard.Code != http.StatusOK || stats.OnlineDevices != 2 || stats.OnlineExits != 1 || stats.TodayUpload != 7 || stats.TodayDownload != 7 || stats.ActiveP2PSessions != 1 {
 		t.Fatalf("dashboard exposes global totals: %s", dashboard.Body.String())
 	}
+	var dashboardFields map[string]json.RawMessage
+	if err := json.Unmarshal(dashboard.Body.Bytes(), &dashboardFields); err != nil || dashboardFields["nativeUdp"] != nil {
+		t.Fatalf("user dashboard exposes process-wide native UDP telemetry: %s", dashboard.Body.String())
+	}
+	adminDashboard := apiRequest(router, adminCookie, http.MethodGet, "/api/v1/dashboard")
+	if adminDashboard.Code != http.StatusOK || json.Unmarshal(adminDashboard.Body.Bytes(), &dashboardFields) != nil || dashboardFields["nativeUdp"] == nil {
+		t.Fatalf("admin dashboard omits native UDP telemetry: %s", adminDashboard.Body.String())
+	}
+	var udpFields map[string]json.RawMessage
+	if err := json.Unmarshal(dashboardFields["nativeUdp"], &udpFields); err != nil || udpFields["queueDrops"] == nil || udpFields["reassemblyDrops"] == nil || udpFields["associationRejects"] == nil {
+		t.Fatalf("dashboard native UDP telemetry is incomplete: %s", dashboardFields["nativeUdp"])
+	}
 
 	seed("revoke-target", other.ID, "EXIT")
 	if response := apiRequest(router, ownerCookie, http.MethodPost, "/api/v1/devices/revoke-target/revoke"); response.Code != http.StatusForbidden {

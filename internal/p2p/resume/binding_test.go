@@ -54,6 +54,23 @@ func TestValidateRebindRejectsStaleOrImpossibleState(t *testing.T) {
 		t.Fatalf("stale generation error=%v", err)
 	}
 
+	skipped := valid
+	skipped.Generation = 5
+	if err := ValidateRebind(current, skipped); !errors.Is(err, ErrBinding) {
+		t.Fatalf("skipped generation error=%v", err)
+	}
+
+	wrongCurrentType := current
+	wrongCurrentType.Type = BindOpen
+	if err := ValidateRebind(wrongCurrentType, valid); !errors.Is(err, ErrBinding) {
+		t.Fatalf("wrong current bind type error=%v", err)
+	}
+	wrongNextType := valid
+	wrongNextType.Type = BindAck
+	if err := ValidateRebind(current, wrongNextType); !errors.Is(err, ErrBinding) {
+		t.Fatalf("wrong next bind type error=%v", err)
+	}
+
 	rollback := valid
 	rollback.SendOffset = 79
 	if err := ValidateRebind(current, rollback); !errors.Is(err, ErrBinding) {

@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	agentexit "relayproxy/agent/exit"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -23,6 +24,7 @@ var (
 
 type StreamRouter struct {
 	sessions          *session.Manager
+	localExit         *agentexit.Handler
 	aclChecker        *acl.Checker
 	relayPolicy       *acl.Policy
 	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
@@ -51,6 +53,12 @@ func (r *StreamRouter) SetRDPControlHandler(fn func(context.Context, tunnel.Tunn
 // selected Exit.
 func (r *StreamRouter) SetP2PControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
 	r.p2pControlHandler = fn
+}
+
+// SetLocalExit enables the Relay process itself as an egress node. The
+// reserved protocol.ServerExitDeviceID selects this path explicitly.
+func (r *StreamRouter) SetLocalExit(handler *agentexit.Handler) {
+	r.localExit = handler
 }
 
 func NewStreamRouter(
@@ -95,47 +103,70 @@ func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool,
 	return true, nil
 }
 
-// resolveExitSession returns an online exit session.
-// Empty exitDeviceID triggers auto-select when exactly one authorized exit is online (P3-1).
-func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDeviceID string) (*session.DeviceSession, error) {
+// resolveExitSession returns an online exit. A nil session with local=true
+// represents the Relay process itself. Empty exitDeviceID auto-selects only
+// when exactly one authorized device exit or server exit is available.
+func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDeviceID string) (*session.DeviceSession, bool, error) {
 	if exitDeviceID != "" {
+		if exitDeviceID == protocol.ServerExitDeviceID {
+			if r.localExit == nil {
+				return nil, false, errExitOffline
+			}
+			return nil, true, nil
+		}
 		exitSession, exists := r.sessions.Get(exitDeviceID)
 		if !exists || !exitSession.IsExit() {
-			return nil, errExitOffline
+			return nil, false, errExitOffline
 		}
-		return exitSession, nil
+		return exitSession, false, nil
 	}
 
 	if client != nil && client.OwnerUserID != "" {
-		candidate, count := r.sessions.UniqueExitForOwner(client.OwnerUserID)
+		exits := r.sessions.GetExitsForOwner(client.OwnerUserID)
+		count := len(exits)
+		if r.localExit != nil {
+			count++
+		}
 		switch count {
 		case 0:
-			return nil, errNoExitOnline
+			return nil, false, errNoExitOnline
 		case 1:
-			return candidate, nil
+			if r.localExit != nil {
+				return nil, true, nil
+			}
+			return exits[0], false, nil
 		default:
-			return nil, errMultipleExits
+			return nil, false, errMultipleExits
 		}
 	}
 
 	exits := r.sessions.GetExits()
 	var candidate *session.DeviceSession
 	count := 0
+	local := false
+	if r.localExit != nil {
+		count = 1
+		local = true
+	}
 	for _, e := range exits {
 		ok, err := r.authorizeExit(client, e)
 		if err != nil || !ok {
 			continue
 		}
 		candidate = e
+		local = false
 		count++
 		if count > 1 {
-			return nil, errMultipleExits
+			return nil, false, errMultipleExits
 		}
 	}
 	if count == 0 {
-		return nil, errNoExitOnline
+		return nil, false, errNoExitOnline
 	}
-	return candidate, nil
+	if local {
+		return nil, true, nil
+	}
+	return candidate, false, nil
 }
 
 // HandleClientStream processes a new stream opened by a Client

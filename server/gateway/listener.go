@@ -461,7 +461,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		capabilities = append(capabilities, protocol.UDPModeDatagram)
 	}
 	if g.cfg.P2PEnabled {
-		capabilities = append(capabilities, protocol.CapabilityProxyP2P)
+		capabilities = append(capabilities, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
 	sessionID := "sess_" + uuid.New().String()
 	welcome := protocol.DeviceAccepted{

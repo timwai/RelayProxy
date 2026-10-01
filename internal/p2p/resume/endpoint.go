@@ -33,15 +33,15 @@ type Endpoint struct {
 	appWriteMu sync.Mutex
 	writeMu    sync.Mutex
 
-	mu         sync.Mutex
+	mu            sync.Mutex
 	transport     Transport
 	generation    uint64
 	ready         bool
 	closed        bool
 	writeDeadline time.Time
 	change        chan struct{}
-	genDone    map[uint64]chan struct{}
-	genClosed  map[uint64]bool
+	genDone       map[uint64]chan struct{}
+	genClosed     map[uint64]bool
 
 	losses   chan TransportLoss
 	progress chan struct{}
@@ -318,6 +318,9 @@ func (e *Endpoint) Close() error {
 	ready := e.ready
 	e.mu.Unlock()
 	if transport != nil && ready {
+		if deadlineTransport, ok := transport.(interface{ SetWriteDeadline(time.Time) error }); ok {
+			_ = deadlineTransport.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
+		}
 		if frame, err := e.state.RST(); err == nil {
 			_ = WriteFrame(transport, frame)
 		}
@@ -490,12 +493,18 @@ func (e *Endpoint) waitProgress() error {
 		select {
 		case <-e.progress:
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			return nil
 		case <-change:
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 		case <-timer.C:
 			return os.ErrDeadlineExceeded

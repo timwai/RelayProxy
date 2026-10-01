@@ -348,7 +348,8 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		Type: protocol.P2PControlConnectOffer, SessionID: id,
 		ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		SessionToken: append([]byte(nil), token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
-		CertFingerprint: fingerprint, PeerFingerprint: fingerprint, RelayPolicy: c.policyCopy(),
+		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
+		PeerCapabilities: peerP2PCapabilities(client), RelayPolicy: c.policyCopy(),
 		LeaseExpiresAt: item.ExpiresAt.UnixMilli(), RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(exit, offer); err != nil {
@@ -361,6 +362,7 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		Type: protocol.P2PControlLeaseAck, SessionID: id,
 		ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		SessionToken: append([]byte(nil), token...), LeaseExpiresAt: item.ExpiresAt.UnixMilli(),
+		PeerCapabilities: peerP2PCapabilities(exit),
 		RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 }
@@ -405,6 +407,7 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 		ClientDeviceID: item.ClientDeviceID, ExitDeviceID: item.ExitDeviceID,
 		SessionToken: append([]byte(nil), item.Token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
 		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
+		PeerCapabilities: peerP2PCapabilities(exit),
 		LeaseExpiresAt: expires, RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(client, answer); err != nil {
@@ -762,6 +765,20 @@ func hasCapability(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+// peerP2PCapabilities publishes only capabilities that affect the direct
+// Client <-> Exit data path. Values are derived from the authenticated device
+// session, never from peer-provided P2P control payloads.
+func peerP2PCapabilities(device *session.DeviceSession) []string {
+	if device == nil {
+		return nil
+	}
+	caps := make([]string, 0, 1)
+	if hasCapability(device.Capabilities, protocol.CapabilityProxyStreamResume) {
+		caps = append(caps, protocol.CapabilityProxyStreamResume)
+	}
+	return caps
 }
 
 func p2pError(code, message string) protocol.P2PControlMessage {

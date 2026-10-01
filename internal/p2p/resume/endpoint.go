@@ -302,21 +302,26 @@ func (e *Endpoint) Close() error {
 		return nil
 	}
 
-	// Serialize normal close with application writes and emit a logical RST
-	// before tearing down the replaceable transport. The peer can then close
-	// the retained target immediately instead of mistaking Close for path loss.
-	e.appWriteMu.Lock()
+	// Do not take appWriteMu here. A Write may legitimately hold it while
+	// waiting for a replacement transport; Close must be able to mark the
+	// endpoint closed and wake that writer. writeMu is sufficient to serialize
+	// the final logical RST against transport writes.
 	e.writeMu.Lock()
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
 		e.writeMu.Unlock()
-		e.appWriteMu.Unlock()
 		return nil
 	}
 	transport := e.transport
 	ready := e.ready
+	e.closed = true
+	e.transport = nil
+	e.ready = false
+	e.closeGenerationLocked(e.generation)
+	e.signalLocked()
 	e.mu.Unlock()
+
 	if transport != nil && ready {
 		if deadlineTransport, ok := transport.(interface{ SetWriteDeadline(time.Time) error }); ok {
 			_ = deadlineTransport.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
@@ -325,23 +330,7 @@ func (e *Endpoint) Close() error {
 			_ = WriteFrame(transport, frame)
 		}
 	}
-
-	e.mu.Lock()
-	if e.closed {
-		e.mu.Unlock()
-		e.writeMu.Unlock()
-		e.appWriteMu.Unlock()
-		return nil
-	}
-	e.closed = true
-	transport = e.transport
-	e.transport = nil
-	e.ready = false
-	e.closeGenerationLocked(e.generation)
-	e.signalLocked()
-	e.mu.Unlock()
 	e.writeMu.Unlock()
-	e.appWriteMu.Unlock()
 
 	if transport != nil {
 		_ = transport.Close()

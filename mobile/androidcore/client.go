@@ -157,8 +157,8 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 			ResumeEnabled: true, ResumeGrace: 15 * time.Second,
 			ResumeMaxSessions: 64, ResumeReplayLimit: 256 << 10,
 		}),
-		ctx:      ctx,
-		cancel:   cancel,
+		ctx:    ctx,
+		cancel: cancel,
 		status: statusSnapshot{
 			ConnectionState: string(tunnel.StateDisconnected),
 			ApprovalState:   "unknown",

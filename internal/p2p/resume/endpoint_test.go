@@ -1,8 +1,10 @@
 package resume
 
 import (
+	"errors"
 	"io"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
@@ -175,5 +177,67 @@ func TestEndpointCloseWakesBlockedWrite(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("blocked write did not wake on close")
+	}
+}
+
+func TestEndpointReadDeadline(t *testing.T) {
+	left, _ := newEndpointPair(t, 1024)
+	if err := left.SetReadDeadline(time.Now().Add(20 * time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	var one [1]byte
+	if n, err := left.Read(one[:]); n != 0 || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("read deadline n=%d err=%v", n, err)
+	}
+}
+
+func TestEndpointExpiredWriteDeadlineDoesNotQueueData(t *testing.T) {
+	left, _ := newEndpointPair(t, 1024)
+	if err := left.SetWriteDeadline(time.Now().Add(-time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := left.Write([]byte("late")); n != 0 || !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("write deadline n=%d err=%v", n, err)
+	}
+	if got := left.State().BufferedReplayBytes(); got != 0 {
+		t.Fatalf("expired write queued %d replay bytes", got)
+	}
+}
+
+func TestEndpointCloseSendsLogicalReset(t *testing.T) {
+	left, right := newEndpointPair(t, 1024)
+	bindEndpointPair(t, left, right, 1)
+
+	if _, err := left.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	var first [1]byte
+	if _, err := io.ReadFull(right, first[:]); err != nil {
+		t.Fatal(err)
+	}
+	if err := left.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		var one [1]byte
+		_, err := right.Read(one[:])
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("peer read returned nil after logical reset")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("logical reset did not close peer endpoint")
+	}
+	deadline := time.Now().Add(time.Second)
+	for !right.Closed() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !right.Closed() {
+		t.Fatal("peer endpoint remained open after logical reset")
 	}
 }

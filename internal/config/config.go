@@ -63,6 +63,22 @@ type ServerConfig struct {
 		MaxSessionsPerDevice int    `yaml:"max_sessions_per_device"`
 	} `yaml:"p2p"`
 
+	// Exit lets the Relay server itself act as a network egress node. It is
+	// disabled by default so existing deployments keep their current routing.
+	Exit struct {
+		Enabled             *bool `yaml:"enabled"`
+		AllowInternet       *bool `yaml:"allow_internet"`
+		AllowPrivateNetwork bool  `yaml:"allow_private_network"`
+		AllowLoopback       bool  `yaml:"allow_loopback"`
+		Upstream            struct {
+			Mode     string `yaml:"mode"`
+			Address  string `yaml:"address"`
+			Username string `yaml:"username,omitempty"`
+			Password string `yaml:"password,omitempty"`
+		} `yaml:"upstream"`
+		Access AccessConfig `yaml:"access"`
+	} `yaml:"exit"`
+
 	Logging struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
@@ -249,6 +265,21 @@ func applyServerDefaults(cfg *ServerConfig) {
 	}
 	if cfg.P2P.MaxSessionsPerDevice == 0 {
 		cfg.P2P.MaxSessionsPerDevice = 8
+	}
+	if cfg.Exit.Enabled == nil {
+		cfg.Exit.Enabled = BoolPtr(false)
+	}
+	if cfg.Exit.AllowInternet == nil {
+		cfg.Exit.AllowInternet = BoolPtr(true)
+	}
+	if cfg.Exit.Upstream.Mode == "" {
+		cfg.Exit.Upstream.Mode = "direct"
+	}
+	if cfg.Exit.Access.Domains == nil {
+		cfg.Exit.Access.Domains = []string{}
+	}
+	if cfg.Exit.Access.CIDRs == nil {
+		cfg.Exit.Access.CIDRs = []string{}
 	}
 	if cfg.RelayACL == nil {
 		cfg.RelayACL = &RelayACLConfig{}

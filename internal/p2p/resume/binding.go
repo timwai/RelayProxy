@@ -114,14 +114,17 @@ func ReadBinding(r io.Reader) (Binding, error) {
 }
 
 func ValidateRebind(current, next Binding) error {
+	if current.Type != BindAck || next.Type != BindOpen {
+		return fmt.Errorf("%w: invalid rebind direction", ErrBinding)
+	}
 	if current.Identity.ID != next.Identity.ID {
 		return fmt.Errorf("%w: stream id mismatch", ErrBinding)
 	}
 	if !current.Identity.VerifyToken(next.Identity.Token[:]) {
 		return fmt.Errorf("%w: token mismatch", ErrBinding)
 	}
-	if next.Generation <= current.Generation {
-		return fmt.Errorf("%w: stale generation", ErrBinding)
+	if current.Generation == ^uint64(0) || next.Generation != current.Generation+1 {
+		return fmt.Errorf("%w: non-consecutive generation", ErrBinding)
 	}
 	if next.SendOffset < current.ReceiveOffset {
 		return fmt.Errorf("%w: peer send offset rolled back", ErrBinding)

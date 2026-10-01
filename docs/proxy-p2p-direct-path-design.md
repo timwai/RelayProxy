@@ -252,7 +252,7 @@ Why QUIC:
 - Multiple TCP flows can share one QUIC session.
 - UDP proxy traffic can use QUIC DATAGRAM.
 - TLS 1.3 security is already built into QUIC.
-- Connection migration and keepalive are available for future optimization.
+- Keepalive and idle management are implemented; established TCP fallback uses the resumable logical-stream overlay instead of relying on QUIC connection migration.
 
 One Exit should normally have one long-lived P2P QUIC session:
 

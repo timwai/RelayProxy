@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, OSSystemExtensionReque
             provider.providerBundleIdentifier = self.extensionIdentifier
             provider.serverAddress = "RelayProxy local Agent"
             manager.localizedDescription = "RelayProxy 透明代理"
-            manager.providerProtocol = provider
+            manager.protocolConfiguration = provider
             manager.isEnabled = true
             manager.saveToPreferences { error in
                 if let error { self.present(error); return }

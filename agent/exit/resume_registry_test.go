@@ -273,7 +273,7 @@ func TestLogicalResumeTargetSurvivesTransportRebind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p2presume.ValidateRebind(clientLocal, exitBinding); err != nil {
+	if err := p2presume.ValidateRebindResponse(clientLocal, exitBinding); err != nil {
 		t.Fatalf("client rejected Exit rebind offsets: %v", err)
 	}
 

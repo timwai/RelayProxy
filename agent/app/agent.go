@@ -406,6 +406,8 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		return a.cfg.DeviceID
 	})
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
+	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
+	a.rawDialer.ConfigureStreamResume(resumeClient, 512<<10)
 	a.rawDialer.ConfigureDirectPath(
 		func(exitDeviceID string) (tunnel.TunnelSession, bool) {
 			a.mu.RLock()
@@ -447,7 +449,11 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
-		a.exitHandler = exit.NewHandler(exit.HandlerConfig{ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream})
+		a.exitHandler = exit.NewHandler(exit.HandlerConfig{
+			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
+			ResumeEnabled: cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
+			ResumeGrace: 15 * time.Second, ResumeReplayLimit: 512 << 10,
+		})
 	}
 	var tunnelTLS *tls.Config
 	if !cfg.PlainTCP {
@@ -588,7 +594,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream}
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
-		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P)
+		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
 	if tunnel.SupportsDatagrams(sess) {
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)

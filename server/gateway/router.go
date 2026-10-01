@@ -499,7 +499,7 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 	}
 
 	exitDeviceID := header.ExitDeviceID
-	exitSession, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
+	exitSession, localExit, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
 	if resolveErr != nil {
 		code := protocol.ErrCodeExitOffline
 		msg := resolveErr.Error()
@@ -516,19 +516,76 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 		r.emitAudit(baseAudit("EXIT_RESOLVE_FAILED", code, ""))
 		return
 	}
-	exitDeviceID = exitSession.DeviceID
+	if localExit {
+		exitDeviceID = protocol.ServerExitDeviceID
+	} else {
+		exitDeviceID = exitSession.DeviceID
+	}
 	header.ExitDeviceID = exitDeviceID
 
-	authorized, authErr := r.authorizeExit(clientSession, exitSession)
-	if authErr != nil || !authorized {
-		log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
-		_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
-			RequestID:    req.RequestID,
-			Success:      false,
-			ErrorCode:    protocol.ErrCodeACLDenied,
-			ErrorMessage: "Client is not authorized to access this exit node",
+	if !localExit {
+		authorized, authErr := r.authorizeExit(clientSession, exitSession)
+		if authErr != nil || !authorized {
+			log.Printf("[StreamRouter] Unauthorized UDP access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
+			_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+				RequestID:    req.RequestID,
+				Success:      false,
+				ErrorCode:    protocol.ErrCodeACLDenied,
+				ErrorMessage: "Client is not authorized to access this exit node",
+			})
+			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
+			return
+		}
+	}
+
+	if localExit {
+		if req.DatagramRequired {
+			_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+				RequestID: req.RequestID, ErrorCode: protocol.ErrCodeDatagramRequired,
+				ErrorMessage: "native UDP datagrams are not available on the server exit",
+			})
+			r.emitAudit(baseAudit("UDP_NEGOTIATION_FAILED", protocol.ErrCodeDatagramRequired, ""))
+			return
+		}
+		// The local egress socket is attached directly to this client stream.
+		// Optional native-datagram requests therefore fall back to the established
+		// UDP stream framing instead of creating a second tunnel association.
+		req.Mode = protocol.UDPModeStream
+		req.AssociationID = 0
+		localCtx := agentexit.BindRelayPolicy(ctx, r.relayPolicy)
+		targetConn, remoteTarget, openErr := r.localExit.OpenUDP(localCtx, req)
+		if openErr != nil {
+			code, message := relayErrorDetails(openErr)
+			_ = protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+				RequestID: req.RequestID, Success: false, ErrorCode: code, ErrorMessage: message,
+			})
+			r.emitAudit(baseAudit("EXIT_DIAL_FAILED", code, ""))
+			return
+		}
+		defer targetConn.Close()
+		if err := protocol.WriteJSON(clientStream, protocol.OpenUDPResponse{
+			RequestID: req.RequestID, Success: true, RemoteIP: remoteTarget, Mode: protocol.UDPModeStream,
+		}); err != nil {
+			return
+		}
+		_ = clientStream.SetDeadline(time.Time{})
+
+		startTime := time.Now()
+		clientSession.ActiveStreams.Add(1)
+		activeExitID := exitDeviceID
+		clientSession.ActiveExitID.Store(&activeExitID)
+		bytesUp, bytesDown := r.localExit.PipeUDPStream(ctx, clientStream, targetConn)
+		clientSession.BytesUp.Add(bytesUp)
+		clientSession.BytesDown.Add(bytesDown)
+		if clientSession.ActiveStreams.Add(-1) <= 0 {
+			clientSession.ActiveExitID.CompareAndSwap(&activeExitID, nil)
+		}
+		r.emitAudit(&repository.ConnectionAudit{
+			UserID: clientSession.OwnerUserID, ClientDeviceID: clientSession.DeviceID,
+			ExitDeviceID: exitDeviceID, Protocol: "udp", TargetHost: req.Host, TargetPort: int(req.Port),
+			ResolvedIP: remoteTarget, StartedAt: startTime, EndedAt: time.Now(),
+			BytesUp: bytesUp, BytesDown: bytesDown, Result: "SUCCESS",
 		})
-		r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
 		return
 	}
 

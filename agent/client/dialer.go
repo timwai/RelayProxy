@@ -195,7 +195,8 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
-	conn, err := d.dialTCPOnSession(ctx, sess, exitNodeID, host, port)
+	allowResume := direct && tunnel.PeerSupportsStreamResume(sess)
+	conn, err := d.dialTCPOnSession(ctx, sess, exitNodeID, host, port, allowResume)
 	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
 		return conn, err
@@ -213,10 +214,10 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	// includes the increment, then quarantine that broken direct path.
 	d.recordFallback(exitNodeID)
 	d.recordDirectFailure(exitNodeID, err)
-	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port)
+	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port, false)
 }
 
-func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16) (net.Conn, error) {
+func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, allowResume bool) (net.Conn, error) {
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
@@ -233,7 +234,7 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 	reqID := d.nextRequestID()
 	var resumeState *p2presume.StreamState
 	var resumeWire *protocol.TCPResumeBinding
-	if enabled, replayLimit := d.streamResumeConfig(); enabled {
+	if enabled, replayLimit := d.streamResumeConfig(); enabled && allowResume {
 		resumeState, err = p2presume.NewRandomStreamState(replayLimit)
 		if err != nil {
 			_ = stream.Close()

@@ -16,7 +16,10 @@ import (
 
 func newServerExitTestHandler(t *testing.T) (*agentexit.Handler, *acl.Checker) {
 	t.Helper()
-	policy := acl.Policy{AllowInternet: true, AllowLoopback: true}
+	policy := acl.Policy{
+		AllowInternet: true, AllowLoopback: true,
+		Rules: []acl.Rule{}, AccessHosts: []string{}, AccessCIDRs: []string{},
+	}
 	local, err := acl.NewChecker(policy)
 	if err != nil {
 		t.Fatal(err)

@@ -133,6 +133,32 @@ func TestCompiledRelayACLCacheReusesVerifiedPolicy(t *testing.T) {
 	}
 }
 
+func TestBoundRelayPolicyPreservesFingerprintWithEmptySlices(t *testing.T) {
+	compiled, err := acl.NewChecker(acl.Policy{
+		ID: "relay_acl", AllowInternet: true,
+		Rules: []acl.Rule{}, AccessHosts: []string{}, AccessCIDRs: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := compiled.Policy()
+	if policy.Fingerprint == "" {
+		t.Fatal("compiled policy has no fingerprint")
+	}
+	ctx := BindRelayPolicy(context.Background(), &policy)
+	bound := boundRelayPolicy(ctx)
+	if bound == nil {
+		t.Fatal("bound policy missing")
+	}
+	if bound.Rules == nil || bound.AccessHosts == nil || bound.AccessCIDRs == nil {
+		t.Fatalf("empty slice representation was lost: %#v", bound)
+	}
+	h := NewHandler(HandlerConfig{})
+	if _, err := h.compiledRelayACL(bound); err != nil {
+		t.Fatalf("unchanged bound policy failed fingerprint verification: %v", err)
+	}
+}
+
 func TestBoundRelayPolicyIsIndependentCopy(t *testing.T) {
 	original := &acl.Policy{
 		ID: "relay_acl", AllowInternet: true,

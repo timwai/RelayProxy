@@ -57,7 +57,6 @@ func TestValidateTCPResumeBinding(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeTCPResumeBindingDowngradesOnlyInitialOpen(t *testing.T) {
 	open := &protocol.TCPResumeBinding{
 		Mode:       protocol.TCPResumeModeOpen,

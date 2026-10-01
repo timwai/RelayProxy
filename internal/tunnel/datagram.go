@@ -61,19 +61,38 @@ func SupportsDatagrams(sess TunnelSession) bool {
 
 func SetPeerCapabilities(sess TunnelSession, caps []string) {
 	if s, ok := sess.(*QUICSession); ok {
-		enabled := false
+		datagrams, streamResume := false, false
 		for _, cap := range caps {
-			if cap == protocol.UDPModeDatagram {
-				enabled = true
+			switch cap {
+			case protocol.UDPModeDatagram:
+				datagrams = true
+			case protocol.CapabilityProxyStreamResume:
+				streamResume = true
 			}
 		}
-		s.peerDatagrams.Store(enabled)
+		s.peerDatagrams.Store(datagrams)
+		s.peerStreamResume.Store(streamResume)
 	}
 }
 
 func PeerSupportsDatagrams(sess TunnelSession) bool {
 	s, ok := sess.(*QUICSession)
 	return ok && SupportsDatagrams(sess) && s.peerDatagrams.Load()
+}
+
+// PeerSupportsStreamResume is intentionally interface-aware so transport test
+// doubles can exercise the same negotiation gate without constructing QUIC.
+func PeerSupportsStreamResume(sess TunnelSession) bool {
+	if sess == nil {
+		return false
+	}
+	if s, ok := sess.(*QUICSession); ok {
+		return s.peerStreamResume.Load()
+	}
+	if s, ok := sess.(interface{ PeerSupportsStreamResume() bool }); ok {
+		return s.PeerSupportsStreamResume()
+	}
+	return false
 }
 
 func StreamSession(stream TunnelStream) TunnelSession {

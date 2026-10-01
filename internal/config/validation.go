@@ -48,6 +48,25 @@ func (c *ServerConfig) RelayPolicy() acl.Policy {
 	return p
 }
 
+// ServerExitPolicy is the local egress policy enforced when the Relay server
+// itself is selected as the network exit.
+func (c *ServerConfig) ServerExitPolicy() acl.Policy {
+	allowInternet := true
+	if c.Exit.AllowInternet != nil {
+		allowInternet = *c.Exit.AllowInternet
+	}
+	return acl.Policy{
+		ID:                  "server_exit_acl",
+		Name:                "Server exit policy",
+		AllowInternet:       allowInternet,
+		AllowPrivateNetwork: c.Exit.AllowPrivateNetwork,
+		AllowLoopback:       c.Exit.AllowLoopback,
+		AccessMode:          acl.AccessMode(strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))),
+		AccessHosts:         slices.Clone(c.Exit.Access.Domains),
+		AccessCIDRs:         slices.Clone(c.Exit.Access.CIDRs),
+	}
+}
+
 func (c *AgentConfigFile) ExitPolicy() acl.Policy {
 	return acl.Policy{
 		AllowInternet: c.Exit.AllowInternet, AllowPrivateNetwork: c.Exit.AllowPrivateNetwork,

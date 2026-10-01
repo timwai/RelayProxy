@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	agentexit "relayproxy/agent/exit"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/config"
 	"relayproxy/internal/protocol"
@@ -93,6 +94,26 @@ func main() {
 	relayACL, err := acl.NewChecker(cfg.RelayPolicy())
 	if err != nil {
 		log.Fatalf("[ACL] Invalid relay policy: %v", err)
+	}
+
+	var serverExit *agentexit.Handler
+	if cfg.Exit.Enabled != nil && *cfg.Exit.Enabled {
+		serverExitACL, err := acl.NewChecker(cfg.ServerExitPolicy())
+		if err != nil {
+			log.Fatalf("[Exit] Invalid server exit policy: %v", err)
+		}
+		upstream := agentexit.UpstreamConfig{
+			Mode: cfg.Exit.Upstream.Mode, Address: cfg.Exit.Upstream.Address,
+			Username: cfg.Exit.Upstream.Username, Password: cfg.Exit.Upstream.Password,
+		}
+		if err := agentexit.ValidateUpstreamConfig(upstream); err != nil {
+			log.Fatalf("[Exit] Invalid server exit upstream: %v", err)
+		}
+		serverExit = agentexit.NewHandler(agentexit.HandlerConfig{
+			ACLChecker: serverExitACL, ConnectTimeout: 10 * time.Second, Upstream: upstream,
+		})
+		defer serverExit.Close()
+		log.Printf("[Exit] Server network exit enabled: id=%s upstream=%s", protocol.ServerExitDeviceID, cfg.Exit.Upstream.Mode)
 	}
 	rendezvous, err := serverrdp.StartRendezvous(context.Background(), cfg.RDP.RendezvousListen, cfg.RDP.Ingress.RateLimitPerMin)
 	if err != nil {
@@ -198,6 +219,9 @@ func main() {
 			}
 		},
 	)
+	if serverExit != nil {
+		router.SetLocalExit(serverExit)
+	}
 	router.SetRDPChecker(func(controllerDeviceID, targetDeviceID string) (bool, error) {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
@@ -292,6 +316,12 @@ func main() {
 	}
 	apiRouter := api.NewRouter(authService, deviceService, sessionMgr, db,
 		api.WithServerSettings(settings, tlsConfig),
+		api.WithServerExitStatus(func() api.ServerExitRuntimeStatus {
+			if serverExit == nil {
+				return api.ServerExitRuntimeStatus{}
+			}
+			return api.ServerExitRuntimeStatus{Enabled: true, ActiveStreams: serverExit.ActiveStreams()}
+		}),
 		api.WithDeviceAuthorizationChanged(func(deviceID string) {
 			rdpCoordinator.CloseDevice(deviceID)
 			if proxyP2PCoordinator != nil {

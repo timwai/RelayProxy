@@ -72,6 +72,10 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 		server.P2P.Enabled == nil || !*server.P2P.Enabled || server.P2P.LeaseSec != 60 || server.P2P.MaxSessionsPerDevice != 8 {
 		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v p2p=%+v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled, server.P2P)
 	}
+	if server.Exit.Enabled == nil || *server.Exit.Enabled || server.Exit.AllowInternet == nil || !*server.Exit.AllowInternet ||
+		server.Exit.Upstream.Mode != "direct" || server.Exit.Access.Domains == nil || server.Exit.Access.CIDRs == nil {
+		t.Fatalf("unexpected server exit defaults: %+v", server.Exit)
+	}
 	serverPath := filepath.Join(t.TempDir(), "server.yaml")
 	if err := SaveServerConfig(serverPath, server); err != nil {
 		t.Fatal(err)

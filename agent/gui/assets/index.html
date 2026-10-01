@@ -928,7 +928,7 @@
           <div>
             <label for="cfg-exit-id" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">出口设备 ID</label>
             <div class="flex items-center gap-2.5">
-              <input id="cfg-exit-id" type="text" placeholder="dev_xxxxxxxx（留空则不指定）" autocomplete="off"
+              <input id="cfg-exit-id" type="text" placeholder="dev_xxxxxxxx 或 server（留空则不指定）" autocomplete="off"
                      class="mono flex-1 text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
               <button data-config-write disabled onclick="applyExit()" class="btn-primary rp-btn rp-btn-primary px-4 py-2 rounded-md text-[13px] font-semibold shrink-0">应用切换</button>
             </div>
@@ -943,7 +943,7 @@
           <div class="flex items-start gap-2.5">
             <svg class="icon-lg text-slate-400 mt-0.5" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
             <div class="text-[12px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              出口设备 ID 可在服务端管理后台的设备列表中查看。
+              出口 ID 可在服务端管理后台的“出口节点”页面复制；Relay Server 本机出口固定为 server。
               切换出口会立即生效并写入配置文件，无需重启客户端。
             </div>
           </div>

@@ -9,6 +9,8 @@
 //	assets/brand/icon.ico            multi-size Windows icon (application, title bar, tray)
 //	assets/brand/icon-<size>.png     common PNG sizes
 //	assets/brand/logo.png            full-size logo for docs / README
+//	assets/brand/app-icon-rounded.png white rounded-square macOS application icon
+//	assets/brand/RelayProxy.icns     multi-size macOS application icon
 //	agent/gui/assets/icon.ico        icon embedded in the desktop GUI binary
 //	agent/gui/assets/icon.png        logo shown inside the desktop GUI
 //	server/web/favicon.ico           Admin console favicon
@@ -24,6 +26,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/png"
 	"os"
@@ -97,6 +100,18 @@ func main() {
 
 	// --- Full-size logo keeps the original framing, not the tight crop ---
 	writePNG(filepath.Join(brandDir, "logo.png"), toRGBA(src))
+
+	// --- macOS application icon ---
+	// Keep the platform icon separate from the transparent brand mark used by
+	// Windows and the web console. Finder and the Dock get an explicit white,
+	// rounded-square tile while the original mark stays unchanged elsewhere.
+	appIcon := roundedApplicationIcon(glyph, 1024)
+	writePNG(filepath.Join(brandDir, "app-icon-rounded.png"), appIcon)
+	icns, err := buildICNS(appIcon)
+	if err != nil {
+		fatal(err)
+	}
+	writeFile(filepath.Join(brandDir, "RelayProxy.icns"), icns)
 
 	// --- Desktop GUI assets ---
 	writePNG(filepath.Join(guiAssets, "icon.png"), resizeBox(glyph, 256))
@@ -319,6 +334,111 @@ func toRGBA(src image.Image) *image.RGBA {
 	dst := image.NewRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
 	draw.Draw(dst, dst.Bounds(), src, b.Min, draw.Src)
 	return dst
+}
+
+// roundedApplicationIcon places the existing mark on a white rounded-square
+// tile. The tile is rendered at 4x and downsampled so its corners and subtle
+// border remain smooth at Finder and Dock sizes.
+func roundedApplicationIcon(glyph image.Image, size int) *image.RGBA {
+	const supersample = 4
+	hiSize := size * supersample
+	plate := image.NewRGBA(image.Rect(0, 0, hiSize, hiSize))
+	margin := hiSize * 5 / 100
+	border := hiSize * 8 / 1000
+	radius := hiSize * 22 / 100
+
+	outer := color.RGBA{R: 0xe2, G: 0xe8, B: 0xf0, A: 0xff}
+	inner := color.RGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
+	fillRoundedRect(plate, margin, margin, hiSize-margin, hiSize-margin, radius, outer)
+	fillRoundedRect(plate, margin+border, margin+border, hiSize-margin-border, hiSize-margin-border, radius-border, inner)
+
+	icon := resizeBox(plate, size)
+	markSize := size * 66 / 100
+	mark := resizeBox(glyph, markSize)
+	markRect := image.Rect((size-markSize)/2, (size-markSize)/2, (size+markSize)/2, (size+markSize)/2)
+	draw.Draw(icon, markRect, mark, mark.Bounds().Min, draw.Over)
+	return icon
+}
+
+func fillRoundedRect(dst *image.RGBA, minX, minY, maxX, maxY, radius int, fill color.RGBA) {
+	if radius <= 0 || minX >= maxX || minY >= maxY {
+		return
+	}
+	left, right := float64(minX+radius), float64(maxX-radius)
+	top, bottom := float64(minY+radius), float64(maxY-radius)
+	radiusSquared := float64(radius * radius)
+	for y := minY; y < maxY; y++ {
+		py := float64(y) + 0.5
+		for x := minX; x < maxX; x++ {
+			px := float64(x) + 0.5
+			cx := px
+			if cx < left {
+				cx = left
+			} else if cx > right {
+				cx = right
+			}
+			cy := py
+			if cy < top {
+				cy = top
+			} else if cy > bottom {
+				cy = bottom
+			}
+			dx, dy := px-cx, py-cy
+			if dx*dx+dy*dy <= radiusSquared {
+				dst.SetRGBA(x, y, fill)
+			}
+		}
+	}
+}
+
+var icnsFrames = []struct {
+	typeCode string
+	size     int
+}{
+	{"icp4", 16},
+	{"icp5", 32},
+	{"icp6", 64},
+	{"ic07", 128},
+	{"ic08", 256},
+	{"ic09", 512},
+	{"ic10", 1024},
+	{"ic11", 32},
+	{"ic12", 64},
+	{"ic13", 256},
+	{"ic14", 512},
+}
+
+// buildICNS uses PNG-backed modern ICNS entries so the generator remains
+// cross-platform and does not depend on Apple's iconutil.
+func buildICNS(src image.Image) ([]byte, error) {
+	var body bytes.Buffer
+	for _, frame := range icnsFrames {
+		var payload bytes.Buffer
+		if err := png.Encode(&payload, resizeBox(src, frame.size)); err != nil {
+			return nil, err
+		}
+		if _, err := body.WriteString(frame.typeCode); err != nil {
+			return nil, err
+		}
+		if err := binary.Write(&body, binary.BigEndian, uint32(payload.Len()+8)); err != nil {
+			return nil, err
+		}
+		if _, err := body.Write(payload.Bytes()); err != nil {
+			return nil, err
+		}
+	}
+
+	var result bytes.Buffer
+	if _, err := result.WriteString("icns"); err != nil {
+		return nil, err
+	}
+	if err := binary.Write(&result, binary.BigEndian, uint32(body.Len()+8)); err != nil {
+		return nil, err
+	}
+	if _, err := result.Write(body.Bytes()); err != nil {
+		return nil, err
+	}
+	return result.Bytes(), nil
 }
 
 // encodeICODIB writes a classic 32-bit BGRA DIB frame. LoadImage and

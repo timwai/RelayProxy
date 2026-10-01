@@ -152,7 +152,8 @@ try {
         New-Item -ItemType Directory -Path $macOSDir -Force | Out-Null
         New-Item -ItemType Directory -Path $resources -Force | Out-Null
         Copy-Item (Join-Path $dir "relay-agent") (Join-Path $macOSDir "RelayProxy") -Force
-        Copy-Item (Join-Path $Root "assets\brand\logo.png") (Join-Path $resources "logo.png") -Force
+        Copy-Item (Join-Path $Root "assets\brand\app-icon-rounded.png") (Join-Path $resources "AppIcon.png") -Force
+        Copy-Item (Join-Path $Root "assets\brand\RelayProxy.icns") (Join-Path $resources "RelayProxy.icns") -Force
 
         $plist = @"
 <?xml version="1.0" encoding="UTF-8"?>
@@ -163,6 +164,7 @@ try {
   <key>CFBundleDisplayName</key><string>RelayProxy</string>
   <key>CFBundleExecutable</key><string>RelayProxy</string>
   <key>CFBundleIdentifier</key><string>com.relayproxy.agent</string>
+  <key>CFBundleIconFile</key><string>RelayProxy.icns</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>RelayProxy</string>
   <key>CFBundlePackageType</key><string>APPL</string>

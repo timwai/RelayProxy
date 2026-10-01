@@ -128,7 +128,8 @@ package_macos_app() {
     cp "$dir/relay-agent" "$contents/MacOS/RelayProxy"
   fi
   chmod +x "$contents/MacOS/RelayProxy"
-  cp "$ROOT/assets/brand/logo.png" "$contents/Resources/logo.png"
+  cp "$ROOT/assets/brand/app-icon-rounded.png" "$contents/Resources/AppIcon.png"
+  cp "$ROOT/assets/brand/RelayProxy.icns" "$contents/Resources/RelayProxy.icns"
   cat > "$contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -138,6 +139,7 @@ package_macos_app() {
   <key>CFBundleDisplayName</key><string>RelayProxy</string>
   <key>CFBundleExecutable</key><string>RelayProxy</string>
   <key>CFBundleIdentifier</key><string>com.relayproxy.agent</string>
+  <key>CFBundleIconFile</key><string>RelayProxy.icns</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>RelayProxy</string>
   <key>CFBundlePackageType</key><string>APPL</string>

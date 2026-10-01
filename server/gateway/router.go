@@ -242,7 +242,7 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 
 	// 1. Resolve exit: explicit ID, or auto-pick when exactly one authorized exit is online (P3-1)
 	exitDeviceID := header.ExitDeviceID
-	exitSession, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
+	exitSession, localExit, resolveErr := r.resolveExitSession(clientSession, exitDeviceID)
 	if resolveErr != nil {
 		code := protocol.ErrCodeExitOffline
 		msg := resolveErr.Error()
@@ -259,27 +259,35 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 		r.emitAudit(baseAudit("EXIT_RESOLVE_FAILED", code, ""))
 		return
 	}
-	exitDeviceID = exitSession.DeviceID
+	if localExit {
+		exitDeviceID = protocol.ServerExitDeviceID
+	} else {
+		exitDeviceID = exitSession.DeviceID
+	}
 	header.ExitDeviceID = exitDeviceID
 
-	// 2. Validate Client -> Exit authorization (P0-2)
-	// (auto-select already filtered by auth; explicit ID still needs the check)
-	authorized, authErr := r.authorizeExit(clientSession, exitSession)
-	if authErr != nil || !authorized {
-		log.Printf("[StreamRouter] Unauthorized access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
-		_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
-			RequestID:    req.RequestID,
-			Success:      false,
-			ErrorCode:    protocol.ErrCodeACLDenied,
-			ErrorMessage: "Client is not authorized to access this exit node",
-		})
-		r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
-		return
+	// 2. Validate Client -> device Exit authorization (P0-2). The server-local
+	// exit is a process-level service guarded by the client's proxy.client grant
+	// plus the Relay and server-exit ACLs.
+	if !localExit {
+		authorized, authErr := r.authorizeExit(clientSession, exitSession)
+		if authErr != nil || !authorized {
+			log.Printf("[StreamRouter] Unauthorized access: client %s -> exit %s", clientSession.DeviceID, exitDeviceID)
+			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+				RequestID:    req.RequestID,
+				Success:      false,
+				ErrorCode:    protocol.ErrCodeACLDenied,
+				ErrorMessage: "Client is not authorized to access this exit node",
+			})
+			r.emitAudit(baseAudit("UNAUTHORIZED", protocol.ErrCodeACLDenied, ""))
+			return
+		}
 	}
 
 	if req.Resume != nil {
 		var err error
-		req.Resume, err = normalizeTCPResumeBinding(req.Resume, proxyStreamResumeNegotiated(clientSession, exitSession))
+		negotiatedResume := !localExit && proxyStreamResumeNegotiated(clientSession, exitSession)
+		req.Resume, err = normalizeTCPResumeBinding(req.Resume, negotiatedResume)
 		if err != nil {
 			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
 				RequestID:    req.RequestID,
@@ -290,6 +298,46 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 			r.emitAudit(baseAudit("RESUME_INVALID", protocol.ErrCodeInvalidRequest, ""))
 			return
 		}
+	}
+
+	if localExit {
+		// Bind the same immutable Relay ACL used for remote exits. OpenTCP then
+		// intersects it with the server exit's local policy before and after DNS.
+		localCtx := agentexit.BindRelayPolicy(ctx, r.relayPolicy)
+		targetConn, remoteTarget, openErr := r.localExit.OpenTCP(localCtx, req)
+		if openErr != nil {
+			code, message := relayErrorDetails(openErr)
+			_ = protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+				RequestID: req.RequestID, Success: false, ErrorCode: code, ErrorMessage: message,
+			})
+			r.emitAudit(baseAudit("EXIT_DIAL_FAILED", code, ""))
+			return
+		}
+		defer targetConn.Close()
+		if err := protocol.WriteJSON(clientStream, protocol.OpenTCPResponse{
+			RequestID: req.RequestID, Success: true, RemoteIP: remoteTarget,
+		}); err != nil {
+			return
+		}
+		_ = clientStream.SetDeadline(time.Time{})
+
+		startTime := time.Now()
+		clientSession.ActiveStreams.Add(1)
+		activeExitID := exitDeviceID
+		clientSession.ActiveExitID.Store(&activeExitID)
+		bytesUp, bytesDown := r.localExit.PipeTCP(ctx, clientStream, targetConn)
+		clientSession.BytesUp.Add(bytesUp)
+		clientSession.BytesDown.Add(bytesDown)
+		if clientSession.ActiveStreams.Add(-1) <= 0 {
+			clientSession.ActiveExitID.CompareAndSwap(&activeExitID, nil)
+		}
+		r.emitAudit(&repository.ConnectionAudit{
+			UserID: clientSession.OwnerUserID, ClientDeviceID: clientSession.DeviceID,
+			ExitDeviceID: exitDeviceID, Protocol: "tcp", TargetHost: req.Host, TargetPort: int(req.Port),
+			ResolvedIP: remoteTarget, StartedAt: startTime, EndedAt: time.Now(),
+			BytesUp: bytesUp, BytesDown: bytesDown, Result: "SUCCESS",
+		})
+		return
 	}
 
 	// Bind the Relay's own policy, replacing any policy supplied by the client.
@@ -660,6 +708,17 @@ func (r *StreamRouter) handleOpenUDP(ctx context.Context, header *protocol.Strea
 		BytesDown:      bytesDown,
 		Result:         "SUCCESS",
 	})
+}
+
+func relayErrorDetails(err error) (string, string) {
+	if err == nil {
+		return protocol.ErrCodeInternalError, "unknown exit error"
+	}
+	var relayErr *protocol.RelayError
+	if errors.As(err, &relayErr) {
+		return relayErr.Code, relayErr.Message
+	}
+	return protocol.ErrCodeInternalError, err.Error()
 }
 
 // defaultStreamIdleTimeout recycles half-closed / stalled proxy streams (P2-2).

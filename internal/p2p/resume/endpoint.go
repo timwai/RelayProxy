@@ -232,6 +232,9 @@ func (e *Endpoint) Write(p []byte) (int, error) {
 
 	written := 0
 	for written < len(p) {
+		if err := e.checkWriteDeadline(); err != nil {
+			return written, err
+		}
 		end := min(written+MaxPayload, len(p))
 		chunk := p[written:end]
 
@@ -250,6 +253,12 @@ func (e *Endpoint) Write(p []byte) (int, error) {
 			}
 		}
 		if err := e.sendBuffered(frame); err != nil {
+			if errors.Is(err, os.ErrDeadlineExceeded) {
+				// The chunk is already retained in the logical replay buffer, so
+				// report it as accepted even though the current transport could
+				// not flush it before the deadline. A later rebind may replay it.
+				written = end
+			}
 			return written, err
 		}
 		written = end
@@ -492,6 +501,21 @@ func (e *Endpoint) waitProgress() error {
 			return os.ErrDeadlineExceeded
 		}
 	}
+}
+
+func (e *Endpoint) checkWriteDeadline() error {
+	if e == nil {
+		return net.ErrClosed
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return net.ErrClosed
+	}
+	if deadlineExpired(e.writeDeadline) {
+		return os.ErrDeadlineExceeded
+	}
+	return nil
 }
 
 func deadlineExpired(deadline time.Time) bool {

@@ -110,6 +110,12 @@ func (c *resumableTCPConn) recoveryLoop() {
 			if loss.Generation != c.endpoint.Generation() {
 				continue
 			}
+			// Generation 1 is the original P2P stream. Quarantine that READY
+			// path on an abrupt transport loss so new flows don't keep selecting
+			// a direct session that just failed an established stream.
+			if loss.Generation == 1 {
+				c.dialer.recordDirectFailure(c.exitID, fmt.Errorf("established direct stream lost: %w", loss.Err))
+			}
 			if !c.dialer.directFallbackEnabled() {
 				c.endpoint.Abort(fmt.Errorf("resumable TCP transport lost with Relay fallback disabled: %w", loss.Err))
 				return
@@ -146,7 +152,12 @@ func (c *resumableTCPConn) recoverViaRelay(lostGeneration uint64) error {
 		}
 		if relay != nil {
 			if err := c.tryRelayRebind(ctx, relay, lostGeneration, nextGeneration); err == nil {
-				c.dialer.recordFallback(c.exitID)
+				// Only generation 1 represents P2P -> Relay fallback. Later
+				// generations are Relay -> Relay recovery and must not inflate the
+				// P2P fallback metric.
+				if lostGeneration == 1 {
+					c.dialer.recordFallback(c.exitID)
+				}
 				return nil
 			} else {
 				lastErr = err

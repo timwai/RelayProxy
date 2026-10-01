@@ -94,24 +94,24 @@ type Session struct {
 
 	ExpiresAt atomic.Int64
 
-	mu              sync.RWMutex
-	localCandidates []protocol.P2PCandidate
+	mu               sync.RWMutex
+	localCandidates  []protocol.P2PCandidate
 	peerCandidates   []protocol.P2PCandidate
 	peerFingerprint  string
 	peerCapabilities []string
 	relayPolicy      *acl.Policy
-	state           State
-	lastError       string
-	endpoint        *Endpoint
-	direct          *directp2p.QUICSession
-	establishing    bool
-	clientRole      bool
-	lastRTTMs       int64
-	lastBytesUp     uint64
-	lastBytesDown   uint64
-	lastUsed        atomic.Int64
-	closed          chan struct{}
-	closeOnce       sync.Once
+	state            State
+	lastError        string
+	endpoint         *Endpoint
+	direct           *directp2p.QUICSession
+	establishing     bool
+	clientRole       bool
+	lastRTTMs        int64
+	lastBytesUp      uint64
+	lastBytesDown    uint64
+	lastUsed         atomic.Int64
+	closed           chan struct{}
+	closeOnce        sync.Once
 }
 
 type Snapshot struct {

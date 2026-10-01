@@ -41,6 +41,9 @@ type P2PControlMessage struct {
 	Candidates        []P2PCandidate `json:"candidates,omitempty"`
 	CertFingerprint   string         `json:"certFingerprint,omitempty"`
 	PeerFingerprint   string         `json:"peerFingerprint,omitempty"`
+	// PeerCapabilities are injected by the authenticated Relay coordinator.
+	// Peers must never trust capabilities echoed from the remote P2P endpoint.
+	PeerCapabilities  []string       `json:"peerCapabilities,omitempty"`
 	RelayPolicy       *acl.Policy    `json:"relayPolicy,omitempty"`
 	LeaseExpiresAt    int64          `json:"leaseExpiresAt,omitempty"`
 	RendezvousAddress string         `json:"rendezvousAddress,omitempty"`

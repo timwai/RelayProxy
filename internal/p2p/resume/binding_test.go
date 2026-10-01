@@ -60,15 +60,32 @@ func TestValidateRebindRejectsStaleOrImpossibleState(t *testing.T) {
 		t.Fatalf("skipped generation error=%v", err)
 	}
 
+	if err := ValidateRebindRequest(current, valid); err != nil {
+		t.Fatalf("valid rebind request rejected: %v", err)
+	}
+	response := valid
+	response.Type = BindAck
+	if err := ValidateRebindResponse(current, response); err != nil {
+		t.Fatalf("valid rebind response rejected: %v", err)
+	}
+
 	wrongCurrentType := current
 	wrongCurrentType.Type = BindOpen
-	if err := ValidateRebind(wrongCurrentType, valid); !errors.Is(err, ErrBinding) {
-		t.Fatalf("wrong current bind type error=%v", err)
+	if err := ValidateRebindRequest(wrongCurrentType, valid); !errors.Is(err, ErrBinding) {
+		t.Fatalf("wrong request current bind type error=%v", err)
 	}
-	wrongNextType := valid
-	wrongNextType.Type = BindAck
-	if err := ValidateRebind(current, wrongNextType); !errors.Is(err, ErrBinding) {
-		t.Fatalf("wrong next bind type error=%v", err)
+	if err := ValidateRebindResponse(wrongCurrentType, response); !errors.Is(err, ErrBinding) {
+		t.Fatalf("wrong response current bind type error=%v", err)
+	}
+	wrongRequestType := valid
+	wrongRequestType.Type = BindAck
+	if err := ValidateRebindRequest(current, wrongRequestType); !errors.Is(err, ErrBinding) {
+		t.Fatalf("wrong rebind request type error=%v", err)
+	}
+	wrongResponseType := response
+	wrongResponseType.Type = BindOpen
+	if err := ValidateRebindResponse(current, wrongResponseType); !errors.Is(err, ErrBinding) {
+		t.Fatalf("wrong rebind response type error=%v", err)
 	}
 
 	rollback := valid

@@ -59,6 +59,10 @@ func NormalizeServerConfig(c *ServerConfig) error {
 			return fmt.Errorf("p2p.rendezvous_advertise: %w", err)
 		}
 	}
+	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))
+	c.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Upstream.Mode))
+	c.Exit.Upstream.Address = strings.TrimSpace(c.Exit.Upstream.Address)
+	c.Exit.Upstream.Username = strings.TrimSpace(c.Exit.Upstream.Username)
 	c.RDP.Ingress.Listen = strings.TrimSpace(c.RDP.Ingress.Listen)
 	for i, raw := range c.RDP.Ingress.SourceCIDRs {
 		c.RDP.Ingress.SourceCIDRs[i] = strings.TrimSpace(raw)
@@ -86,6 +90,26 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	}
 	if c.P2P.MaxSessionsPerDevice < 1 || c.P2P.MaxSessionsPerDevice > 1024 {
 		return errors.New("p2p.max_sessions_per_device 必须在 1-1024 之间")
+	}
+	switch c.Exit.Upstream.Mode {
+	case "direct":
+	case "socks5", "http", "https":
+		host, rawPort, err := net.SplitHostPort(c.Exit.Upstream.Address)
+		if err != nil || strings.TrimSpace(host) == "" {
+			return errors.New("exit.upstream.address 必须是 host:port")
+		}
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return errors.New("exit.upstream.address 端口必须在 1-65535 之间")
+		}
+	default:
+		return errors.New("exit.upstream.mode 必须是 direct / socks5 / http / https")
+	}
+	if len(c.Exit.Upstream.Username) > 255 || len(c.Exit.Upstream.Password) > 255 {
+		return errors.New("exit.upstream 用户名和密码长度不能超过 255")
+	}
+	if err := validateAccess(c.ServerExitPolicy()); err != nil {
+		return fmt.Errorf("exit.access: %w", err)
 	}
 	if c.P2P.Enabled != nil && *c.P2P.Enabled && c.P2P.RendezvousListen != "" && c.RDP.RendezvousListen != "" &&
 		listenAddressesOverlap(c.P2P.RendezvousListen, c.RDP.RendezvousListen) {
@@ -195,6 +219,14 @@ func CloneServerConfig(c *ServerConfig) *ServerConfig {
 	if c.P2P.Enabled != nil {
 		out.P2P.Enabled = BoolPtr(*c.P2P.Enabled)
 	}
+	if c.Exit.Enabled != nil {
+		out.Exit.Enabled = BoolPtr(*c.Exit.Enabled)
+	}
+	if c.Exit.AllowInternet != nil {
+		out.Exit.AllowInternet = BoolPtr(*c.Exit.AllowInternet)
+	}
+	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
+	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
 	out.RDP.Ingress.SourceCIDRs = slices.Clone(c.RDP.Ingress.SourceCIDRs)
 	if c.RelayACL != nil {
 		policy := *c.RelayACL
@@ -327,6 +359,7 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "relay_acl": policy,
 			"rdp":      c.RDP,
 			"p2p":      c.P2P,
+			"exit":     c.Exit,
 			"database": c.Database,
 		}
 	}

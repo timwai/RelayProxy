@@ -154,6 +154,14 @@ func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Con
 }
 
 func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+	// The reserved server exit lives inside the Relay process, not behind an
+	// authenticated peer session, so there is no direct P2P path to establish.
+	if exitDeviceID == protocol.ServerExitDeviceID {
+		if d.getTunnel == nil {
+			return nil, false
+		}
+		return d.getTunnel(), false
+	}
 	d.directMu.RLock()
 	getDirect, ensureDirect := d.getDirect, d.ensureDirect
 	mode := d.directMode

@@ -13,6 +13,7 @@ on:
       - "server/api/**"
       - "internal/webui/**"
       - "internal/config/**"
+      - "macos/**"
       - ".github/workflows/ui-ci.yml"
       - "scripts/build.sh"
 
@@ -89,3 +90,27 @@ jobs:
           }
       - name: Test desktop packages
         run: go test ./agent/divert ./agent/gui ./cmd/relay-agent -count=1
+      - name: Build macOS desktop shell and Network Extension
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install xcodegen
+          (
+            cd macos
+            xcodegen generate
+          )
+          swiftc -swift-version 5 -O \
+            -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
+            -target "$(uname -m)-apple-macos11.0" \
+            -framework AppKit -framework WebKit \
+            macos/RelayProxyDesktop/AppDelegate.swift \
+            macos/RelayProxyDesktop/main.swift \
+            -o "$RUNNER_TEMP/RelayProxyDesktop"
+          xcodebuild \
+            -project macos/RelayProxyMac.xcodeproj \
+            -scheme RelayProxyMacHost \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/RelayProxyDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build

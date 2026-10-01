@@ -78,14 +78,55 @@ build_one darwin arm64 ./cmd/relay-server "$OUT_DIR/darwin-arm64/relay-server"
 show_syso
 trap - EXIT
 
+build_macos_desktop_launcher() {
+  local arch="$1" out="$2"
+  [[ "$(uname -s)" == "Darwin" ]] || return 1
+  command -v swiftc >/dev/null 2>&1 || return 1
+  command -v xcrun >/dev/null 2>&1 || return 1
+
+  if [[ "$arch" == "universal" ]]; then
+    local amd64_launcher="$OUT_DIR/darwin-amd64/RelayProxy.app/Contents/MacOS/RelayProxy"
+    local arm64_launcher="$OUT_DIR/darwin-arm64/RelayProxy.app/Contents/MacOS/RelayProxy"
+    local amd64_marker="$OUT_DIR/darwin-amd64/RelayProxy.app/Contents/Resources/native-desktop-shell"
+    local arm64_marker="$OUT_DIR/darwin-arm64/RelayProxy.app/Contents/Resources/native-desktop-shell"
+    [[ -f "$amd64_launcher" && -f "$arm64_launcher" && -f "$amd64_marker" && -f "$arm64_marker" ]] || return 1
+    lipo -create "$amd64_launcher" "$arm64_launcher" -output "$out"
+    return 0
+  fi
+
+  local target
+  case "$arch" in
+    amd64) target="x86_64-apple-macos11.0" ;;
+    arm64) target="arm64-apple-macos11.0" ;;
+    *) return 1 ;;
+  esac
+  local sdk
+  sdk="$(xcrun --sdk macosx --show-sdk-path)"
+  swiftc -swift-version 5 -O \
+    -sdk "$sdk" -target "$target" \
+    -framework AppKit -framework WebKit \
+    "$ROOT/macos/RelayProxyDesktop/AppDelegate.swift" \
+    "$ROOT/macos/RelayProxyDesktop/main.swift" \
+    -o "$out"
+}
+
 package_macos_app() {
   local arch="$1"
   local dir="$OUT_DIR/darwin-$arch"
   local app="$dir/RelayProxy.app"
   local contents="$app/Contents"
   echo "[PACKAGE] darwin/$arch  RelayProxy.app"
+  rm -rf "$app"
   mkdir -p "$contents/MacOS" "$contents/Resources"
-  cp "$dir/relay-agent" "$contents/MacOS/RelayProxy"
+  if build_macos_desktop_launcher "$arch" "$contents/MacOS/RelayProxy"; then
+    cp "$dir/relay-agent" "$contents/Resources/relay-agent"
+    chmod +x "$contents/Resources/relay-agent"
+    touch "$contents/Resources/native-desktop-shell"
+    echo "  Native AppKit/WKWebView desktop shell enabled"
+  else
+    echo "  Native desktop compiler unavailable; using browser-launching Agent executable"
+    cp "$dir/relay-agent" "$contents/MacOS/RelayProxy"
+  fi
   chmod +x "$contents/MacOS/RelayProxy"
   cp "$ROOT/assets/brand/logo.png" "$contents/Resources/logo.png"
   cat > "$contents/Info.plist" <<EOF
@@ -104,9 +145,23 @@ package_macos_app() {
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key>
+  <dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict>
 </plist>
 EOF
+  if [[ "$(uname -s)" == "Darwin" ]] && command -v codesign >/dev/null 2>&1; then
+    local identity="${MACOS_CODESIGN_IDENTITY:--}"
+    local sign_args=(--force --sign "$identity")
+    if [[ "$identity" != "-" ]]; then
+      sign_args+=(--options runtime --timestamp)
+    fi
+    if [[ -f "$contents/Resources/relay-agent" ]]; then
+      codesign "${sign_args[@]}" "$contents/Resources/relay-agent"
+    fi
+    codesign "${sign_args[@]}" "$contents/MacOS/RelayProxy"
+    codesign "${sign_args[@]}" "$app"
+  fi
 }
 
 package_macos_app amd64

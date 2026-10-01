@@ -4,6 +4,7 @@
 
 - `RelayProxyNetworkExtension`：`NETransparentProxyProvider`，处理 TCP/UDP、IPv4/IPv6、DIRECT/PROXY/REJECT；
 - `RelayProxyMacHost`：安装/升级 System Extension、创建 App Group IPC token，并启用透明代理配置；
+- `RelayProxy.app`：使用 AppKit + WKWebView 的原生桌面窗口，启动包内的 `relay-agent` 并显示本地管理页；
 - Go `platform_darwin.go`：校验扩展状态和 Unix peer UID/token，经唯一的 `Server.ClassifyFlow` 决策；PROXY TCP 直接把 Unix stream 交给 `ForwardTCP`，UDP 使用有长度上限的二进制 datagram frame 交给 `ForwardUDP`。
 
 IPC 位于 App Group `group.com.relayproxy.shared`。TCP 数据不加逐包 JSON framing；UDP 地址使用紧凑的 4/16 字节二进制编码，两端分段写入 frame，避免 header、endpoint 与 payload 的整包拼接复制。Provider 对 UDP 批次实施逐报文发送完成背压，防止慢链路产生无界发送缓存；认证控制连接保持常驻，不做周期性重连轮询。
@@ -27,4 +28,4 @@ open RelayProxyMac.xcodeproj
 
 任一条件不满足时，`Preflight` 返回 `ErrPlatformNotReady`，不会把能力伪装为可用。`RELAYPROXY_NE_SOCKET`、`RELAYPROXY_NE_TOKEN_FILE` 仅用于签名测试环境；`RELAYPROXY_NE_SKIP_STATUS=1` 可跳过 `systemextensionsctl` 状态检查，不应在发行包中设置。
 
-无原生 Agent 窗口时，浏览器打开 `http://127.0.0.1:9090/` 即可使用与 Windows GUI 相同的管理页面和配对流程。macOS Network Extension 的签名、安装与系统批准仍必须先由 `RelayProxyMacHost.app` 完成。
+在 macOS 上执行 `scripts/build.sh` 时，只要系统提供 `swiftc`，常规 `RelayProxy.app` 就会包含原生 AppKit/WKWebView 桌面窗口；从其他平台交叉构建时仍回退为浏览器打开本地管理页。两种方式复用同一套管理页面和配对流程。macOS Network Extension 的签名、安装与系统批准仍必须先由 `RelayProxyMacHost.app` 完成。

@@ -1,7 +1,7 @@
 import AppKit
 import CryptoKit
 import NetworkExtension
-import OSSystemExtension
+import SystemExtensions
 
 @main
 final class AppDelegate: NSObject, NSApplicationDelegate, OSSystemExtensionRequestDelegate {

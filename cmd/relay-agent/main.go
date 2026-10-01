@@ -296,7 +296,9 @@ func main() {
 	// The window owns the process lifetime: closing it (or choosing 退出 from the
 	// tray) shuts the agent down. gui.Run blocks until then.
 	if wantGUI && cfgFile.IsGUIEnabled() {
+		webURL := ""
 		if webServer != nil {
+			webURL = "http://" + webServer.Addr() + "/"
 			go func() {
 				<-webServer.Done()
 				gui.RequestQuit()
@@ -307,6 +309,7 @@ func main() {
 			StartMinimized: startMinimized,
 			MinimizeToTray: cfgFile.IsMinimizeToTray(),
 			Theme:          cfgFile.GUI.Theme,
+			WebURL:         webURL,
 			// Keep the native window title stable. The single-instance activation
 			// path uses it to find a window that may currently be hidden in the tray.
 			Title: gui.DefaultWindowTitle,

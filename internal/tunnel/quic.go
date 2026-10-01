@@ -109,10 +109,11 @@ func (s *QUICStreamAdapter) Abort() {
 
 // QUICSession implements TunnelSession using quic-go
 type QUICSession struct {
-	conn          *quic.Conn
-	datagrams     *datagramMux
-	peerDatagrams atomic.Bool
-	activeStreams atomic.Int64
+	conn             *quic.Conn
+	datagrams        *datagramMux
+	peerDatagrams    atomic.Bool
+	peerStreamResume atomic.Bool
+	activeStreams    atomic.Int64
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The

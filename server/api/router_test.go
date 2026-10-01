@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/repository"
 	"relayproxy/server/service"
@@ -42,6 +43,45 @@ func loginAdmin(t *testing.T, router *Router) *http.Cookie {
 	}
 	t.Fatal("session cookie missing")
 	return nil
+}
+
+func TestServerExitAppearsInExitAndDashboardAPIs(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	WithServerExitStatus(func() ServerExitRuntimeStatus {
+		return ServerExitRuntimeStatus{Enabled: true, ActiveStreams: 3}
+	})(router)
+	admin := loginAdmin(t, router)
+
+	exitsReq := httptest.NewRequest(http.MethodGet, "/api/v1/exits", nil)
+	exitsReq.AddCookie(admin)
+	exitsRec := httptest.NewRecorder()
+	router.ServeHTTP(exitsRec, exitsReq)
+	if exitsRec.Code != http.StatusOK {
+		t.Fatalf("list exits failed: %d %s", exitsRec.Code, exitsRec.Body.String())
+	}
+	var exits []map[string]any
+	if err := json.Unmarshal(exitsRec.Body.Bytes(), &exits); err != nil {
+		t.Fatal(err)
+	}
+	if len(exits) != 1 || exits[0]["deviceId"] != protocol.ServerExitDeviceID || exits[0]["transport"] != "local" || exits[0]["activeStreams"] != float64(3) {
+		t.Fatalf("server exit missing from API: %+v", exits)
+	}
+
+	dashboardReq := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard", nil)
+	dashboardReq.AddCookie(admin)
+	dashboardRec := httptest.NewRecorder()
+	router.ServeHTTP(dashboardRec, dashboardReq)
+	if dashboardRec.Code != http.StatusOK {
+		t.Fatalf("dashboard failed: %d %s", dashboardRec.Code, dashboardRec.Body.String())
+	}
+	var dashboard map[string]any
+	if err := json.Unmarshal(dashboardRec.Body.Bytes(), &dashboard); err != nil {
+		t.Fatal(err)
+	}
+	if dashboard["onlineExits"] != float64(1) {
+		t.Fatalf("dashboard server exit count=%v, want 1", dashboard["onlineExits"])
+	}
 }
 
 func TestEnrollmentApprovalAPI(t *testing.T) {

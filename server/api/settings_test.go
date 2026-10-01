@@ -132,6 +132,14 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	want.Tunnel.HeartbeatSec = 30
 	want.RelayACL.AccessMode = "allow"
 	want.RelayACL.Domains = []string{" example.org ", "example.org"}
+	want.ServerExit.Enabled = true
+	want.ServerExit.AllowInternet = true
+	want.ServerExit.AllowPrivateNetwork = true
+	want.ServerExit.AllowLoopback = false
+	want.ServerExit.UpstreamMode = "direct"
+	want.ServerExit.AccessMode = "deny"
+	want.ServerExit.Domains = []string{" blocked.example ", "blocked.example"}
+	want.ServerExit.CIDRs = []string{" 203.0.113.9/32 ", "203.0.113.9/32"}
 	want.RDPIngress.Enabled = true
 	want.RDPIngress.Listen = "127.0.0.1:0"
 	want.RDPIngress.PortStart = 34000
@@ -147,7 +155,12 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &saved) != nil {
 		t.Fatalf("save failed: %d %s", rec.Code, rec.Body.String())
 	}
-	if saved.Config.Admin.TLSEnabled || !saved.Config.Tunnel.TLSEnabled || !saved.Runtime.Admin.TLSEnabled || !saved.RestartRequired || len(saved.Config.RelayACL.Domains) != 1 || !saved.Config.RDPIngress.Enabled || saved.Config.RDPIngress.Listen != "127.0.0.1:0" || len(saved.Config.RDPIngress.SourceCIDRs) != 1 {
+	if saved.Config.Admin.TLSEnabled || !saved.Config.Tunnel.TLSEnabled || !saved.Runtime.Admin.TLSEnabled || !saved.RestartRequired ||
+		len(saved.Config.RelayACL.Domains) != 1 || !saved.Config.ServerExit.Enabled || !saved.Config.ServerExit.AllowPrivateNetwork ||
+		saved.Config.ServerExit.UpstreamMode != "direct" || saved.Config.ServerExit.AccessMode != "deny" ||
+		len(saved.Config.ServerExit.Domains) != 1 || len(saved.Config.ServerExit.CIDRs) != 1 ||
+		saved.Runtime.ServerExit.Enabled || !saved.Config.RDPIngress.Enabled || saved.Config.RDPIngress.Listen != "127.0.0.1:0" ||
+		len(saved.Config.RDPIngress.SourceCIDRs) != 1 {
 		t.Fatalf("invalid saved/runtime response: %+v", saved)
 	}
 	if rec = submit(request, ""); rec.Code != http.StatusConflict {
@@ -171,7 +184,12 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 		t.Fatal("failed settings request overwrote the file")
 	}
 	loaded, err := config.LoadServerConfig(saved.ConfigPath)
-	if err != nil || loaded.IsAdminTLSEnabled() || !loaded.IsTLSEnabled() || loaded.Tunnel.HeartbeatSec != 30 || loaded.RDP.Ingress.Enabled == nil || !*loaded.RDP.Ingress.Enabled || loaded.RDP.Ingress.Listen != "127.0.0.1:0" || loaded.RDP.Ingress.PortStart != 34000 || loaded.RDP.Ingress.PortEnd != 34100 {
+	if err != nil || loaded.IsAdminTLSEnabled() || !loaded.IsTLSEnabled() || loaded.Tunnel.HeartbeatSec != 30 ||
+		loaded.Exit.Enabled == nil || !*loaded.Exit.Enabled || loaded.Exit.AllowInternet == nil || !*loaded.Exit.AllowInternet ||
+		!loaded.Exit.AllowPrivateNetwork || loaded.Exit.Upstream.Mode != "direct" || loaded.Exit.Access.Mode != "deny" ||
+		len(loaded.Exit.Access.Domains) != 1 || len(loaded.Exit.Access.CIDRs) != 1 ||
+		loaded.RDP.Ingress.Enabled == nil || !*loaded.RDP.Ingress.Enabled || loaded.RDP.Ingress.Listen != "127.0.0.1:0" ||
+		loaded.RDP.Ingress.PortStart != 34000 || loaded.RDP.Ingress.PortEnd != 34100 {
 		t.Fatalf("saved configuration did not round-trip: %v", err)
 	}
 }

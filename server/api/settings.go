@@ -46,6 +46,20 @@ type RelayACLSettings struct {
 	CIDRs               []string `json:"cidrs"`
 }
 
+type ServerExitSettings struct {
+	Enabled             bool     `json:"enabled"`
+	AllowInternet       bool     `json:"allowInternet"`
+	AllowPrivateNetwork bool     `json:"allowPrivateNetwork"`
+	AllowLoopback       bool     `json:"allowLoopback"`
+	UpstreamMode        string   `json:"upstreamMode"`
+	UpstreamAddress     string   `json:"upstreamAddress"`
+	UpstreamUsername    string   `json:"upstreamUsername"`
+	UpstreamPassword    string   `json:"upstreamPassword"`
+	AccessMode          string   `json:"accessMode"`
+	Domains             []string `json:"domains"`
+	CIDRs               []string `json:"cidrs"`
+}
+
 type RDPIngressSettings struct {
 	Enabled         bool     `json:"enabled"`
 	Listen          string   `json:"listen"`
@@ -60,6 +74,7 @@ type ServerEditableConfig struct {
 	Tunnel      TunnelSettings      `json:"tunnel"`
 	Certificate CertificateSettings `json:"certificate"`
 	RelayACL    RelayACLSettings    `json:"relayACL"`
+	ServerExit  ServerExitSettings  `json:"serverExit"`
 	RDPIngress  RDPIngressSettings  `json:"rdpIngress"`
 }
 
@@ -112,6 +127,8 @@ func (r *Router) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 
 func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 	p := c.RelayPolicy()
+	exitPolicy := c.ServerExitPolicy()
+	exitEnabled := c.Exit.Enabled != nil && *c.Exit.Enabled
 	ingressEnabled := c.RDP.Ingress.Enabled != nil && *c.RDP.Ingress.Enabled
 	return ServerEditableConfig{
 		Admin: AdminSettings{c.Server.Admin.Listen, c.IsAdminTLSEnabled()},
@@ -120,6 +137,14 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 		Certificate: CertificateSettings{c.Server.CertFile, c.Server.KeyFile},
 		RelayACL: RelayACLSettings{p.AllowInternet, p.AllowPrivateNetwork, p.AllowLoopback,
 			string(p.AccessMode), append([]string{}, p.AccessHosts...), append([]string{}, p.AccessCIDRs...)},
+		ServerExit: ServerExitSettings{
+			Enabled: exitEnabled, AllowInternet: exitPolicy.AllowInternet,
+			AllowPrivateNetwork: exitPolicy.AllowPrivateNetwork, AllowLoopback: exitPolicy.AllowLoopback,
+			UpstreamMode: c.Exit.Upstream.Mode, UpstreamAddress: c.Exit.Upstream.Address,
+			UpstreamUsername: c.Exit.Upstream.Username, UpstreamPassword: c.Exit.Upstream.Password,
+			AccessMode: string(exitPolicy.AccessMode), Domains: append([]string{}, exitPolicy.AccessHosts...),
+			CIDRs: append([]string{}, exitPolicy.AccessCIDRs...),
+		},
 		RDPIngress: RDPIngressSettings{ingressEnabled, c.RDP.Ingress.Listen, c.RDP.Ingress.PortStart,
 			c.RDP.Ingress.PortEnd, append([]string{}, c.RDP.Ingress.SourceCIDRs...), c.RDP.Ingress.RateLimitPerMin},
 	}
@@ -149,6 +174,17 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 		Access: config.AccessConfig{Mode: strings.ToLower(strings.TrimSpace(c.RelayACL.AccessMode)),
 			Domains: cleanSettingLines(c.RelayACL.Domains), CIDRs: cleanSettingLines(c.RelayACL.CIDRs)},
 	}
+	target.Exit.Enabled = config.BoolPtr(c.ServerExit.Enabled)
+	target.Exit.AllowInternet = config.BoolPtr(c.ServerExit.AllowInternet)
+	target.Exit.AllowPrivateNetwork = c.ServerExit.AllowPrivateNetwork
+	target.Exit.AllowLoopback = c.ServerExit.AllowLoopback
+	target.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.ServerExit.UpstreamMode))
+	target.Exit.Upstream.Address = strings.TrimSpace(c.ServerExit.UpstreamAddress)
+	target.Exit.Upstream.Username = strings.TrimSpace(c.ServerExit.UpstreamUsername)
+	target.Exit.Upstream.Password = c.ServerExit.UpstreamPassword
+	target.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.ServerExit.AccessMode))
+	target.Exit.Access.Domains = cleanSettingLines(c.ServerExit.Domains)
+	target.Exit.Access.CIDRs = cleanSettingLines(c.ServerExit.CIDRs)
 	target.RDP.Ingress.Enabled = config.BoolPtr(c.RDPIngress.Enabled)
 	target.RDP.Ingress.Listen = strings.TrimSpace(c.RDPIngress.Listen)
 	target.RDP.Ingress.PortStart = c.RDPIngress.PortStart

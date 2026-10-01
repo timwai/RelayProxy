@@ -14,12 +14,13 @@
       { page: 'settings', label: '管理访问', admin: true, settingsTab: 'admin' },
       { page: 'settings', label: '隧道', admin: true, settingsTab: 'tunnel' },
       { page: 'settings', label: 'RDP', admin: true, settingsTab: 'rdp' },
+      { page: 'settings', label: 'Server 出口', admin: true, settingsTab: 'exit' },
       { page: 'settings', label: '证书', admin: true, settingsTab: 'certificate' },
       { page: 'settings', label: 'ACL', admin: true, settingsTab: 'acl' }
     ]
   };
   const pageSections = { overview:'overview', devices:'devices', exits:'devices', sessions:'connections', messages:'messages', 'rdp-ingress':'rdp', settings:'settings' };
-  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', rdp: 'RDP 公网入口', database: '数据库' };
+  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', rdp: 'RDP 公网入口', database: '数据库' };
   const roleNames = { CLIENT: '客户端', EXIT: '出口节点', BOTH: '客户端 + 出口' };
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
   const capabilityNames = { 'proxy.client': '代理客户端', 'proxy.exit': '出口节点', 'rdp.controller': 'RDP 控制端', 'rdp.host': 'RDP 主机', 'rdp.public': 'RDP 公网入口' };
@@ -608,6 +609,7 @@
       const runtime = state.settings.runtime;
       rows.push(['TCP 隧道', (runtime.tunnel.tlsEnabled ? 'TLS · ' : 'TCP · ') + runtime.tunnel.tcpListen]);
       rows.push(['QUIC 隧道', runtime.tunnel.tlsEnabled ? runtime.tunnel.quicListen : '未启用']);
+      rows.push(['Server 出口', runtime.serverExit && runtime.serverExit.enabled ? '已启用 · ID server · ' + String(runtime.serverExit.upstreamMode || 'direct').toUpperCase() : '未启用']);
       rows.push(['启动时间', date(state.settings.info.startedAt)]);
       const cert = state.settings.info.certificate;
       $('certificate-summary').innerHTML = cert ? '<strong>' + esc(cert.dnsNames.length ? cert.dnsNames.join(' · ') : cert.subject) + '</strong><br>签发者：' + esc(cert.issuer) + '<br>有效期：' + esc(date(cert.notBefore)) + ' — ' + esc(date(cert.notAfter)) + '<div class="mono">SHA256 ' + esc(cert.sha256) + '</div>' : '当前进程没有加载 TLS 证书。';
@@ -678,7 +680,7 @@
     if (manual && !errors.length) { toast(state.dirty ? '数据已刷新，未保存的配置已保留' : '数据已刷新'); }
   }
   function readSettingsForm() {
-    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, rdpIngress: {} };
+    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, serverExit: {}, rdpIngress: {} };
     all('[data-setting]').forEach(el => {
       const [group, key] = el.dataset.setting.split('.');
       let value = el.type === 'checkbox' ? el.checked : el.value.trim();
@@ -744,6 +746,15 @@
     $('quic-listen').disabled = !cfg.tunnel.tlsEnabled;
     $('tunnel-tls-help').textContent = cfg.tunnel.tlsEnabled ? '开启后同时提供加密 TCP 和 QUIC 隧道。' : '当前将仅提供明文 TCP 隧道，QUIC 关闭。';
     $('acl-mode-hint').textContent = cfg.relayACL.accessMode === 'allow' ? '允许列表为空时，所有目标都会被拒绝。匹配目标仍需满足上方互联网 / 私网 / 回环权限。' : cfg.relayACL.accessMode === 'deny' ? '拒绝列表匹配项会被拦截；其余目标仍需满足上方权限。' : '域名和 IP 列表暂不参与筛选，保留内容便于下次启用。上方网络权限仍然有效。';
+    const serverExitEnabled = !!cfg.serverExit.enabled;
+    const serverExitProxy = cfg.serverExit.upstreamMode && cfg.serverExit.upstreamMode !== 'direct';
+    ['server-exit-internet','server-exit-private','server-exit-loopback','server-exit-upstream-mode','server-exit-access-mode','server-exit-domains','server-exit-cidrs'].forEach(id => { $(id).disabled = !serverExitEnabled; });
+    ['server-exit-upstream-address','server-exit-upstream-username','server-exit-upstream-password'].forEach(id => { $(id).disabled = !serverExitEnabled || !serverExitProxy; });
+    $('server-exit-hint').textContent = !serverExitEnabled
+      ? '当前运行时不提供 server 出口。启用并保存后必须重启 relay-server。'
+      : serverExitProxy
+        ? '保存后重启生效。客户端将出口 ID 设置为 server；流量由 Server 经 ' + String(cfg.serverExit.upstreamMode).toUpperCase() + ' 上游访问目标。'
+        : '保存后重启生效。客户端将出口 ID 设置为 server；流量直接使用 relay-server 所在主机的网络出口。';
   }
   async function saveSettings(event) {
     event.preventDefault();

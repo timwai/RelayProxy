@@ -258,7 +258,7 @@ func (c *resumableTCPConn) tryRelayRebind(
 	if err != nil || peer.Generation != nextGeneration {
 		return p2presume.ErrBinding
 	}
-	if err := p2presume.ValidateRebind(current, peer); err != nil {
+	if err := p2presume.ValidateRebindResponse(current, peer); err != nil {
 		return err
 	}
 

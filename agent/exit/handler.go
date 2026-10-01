@@ -554,7 +554,7 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 	h.pipeUDP(ctx, pc, targetConn)
 }
 
-func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn net.Conn) {
+func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn net.Conn) (up, down int64) {
 	var once sync.Once
 	stop := func() { once.Do(func() { _ = pc.Close(); _ = conn.Close() }) }
 	defer stop()
@@ -562,6 +562,7 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn net.Conn)
 	defer stopCancel()
 
 	var activitySeq atomic.Uint64
+	var bytesUp, bytesDown atomic.Int64
 	finished := make(chan struct{}, 2)
 	_ = conn.SetDeadline(time.Now().Add(udpIdleTimeout))
 
@@ -576,7 +577,11 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn net.Conn)
 				return
 			}
 			activitySeq.Add(1)
-			if _, err := conn.Write(buf[:n]); err != nil {
+			nw, err := conn.Write(buf[:n])
+			if nw > 0 {
+				bytesUp.Add(int64(nw))
+			}
+			if err != nil || nw != n {
 				return
 			}
 		}
@@ -598,7 +603,11 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn net.Conn)
 				continue
 			}
 			activitySeq.Add(1)
-			if _, err := pc.WriteTo(buf[:n], nil); err != nil {
+			nw, err := pc.WriteTo(buf[:n], nil)
+			if nw > 0 {
+				bytesDown.Add(int64(nw))
+			}
+			if err != nil || nw != n {
 				return
 			}
 		}
@@ -621,6 +630,7 @@ func (h *Handler) pipeUDP(ctx context.Context, pc net.PacketConn, conn net.Conn)
 			}
 		}
 	}
+	return bytesUp.Load(), bytesDown.Load()
 }
 
 func isConnRefused(err error) bool {

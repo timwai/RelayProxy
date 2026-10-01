@@ -113,10 +113,10 @@ func ReadBinding(r io.Reader) (Binding, error) {
 	return binding, nil
 }
 
+// ValidateRebind validates the shared identity, generation and byte-offset
+// invariants for a replacement transport. Callers that know whether they are
+// validating a request or response should use the direction-specific wrappers.
 func ValidateRebind(current, next Binding) error {
-	if current.Type != BindAck || next.Type != BindOpen {
-		return fmt.Errorf("%w: invalid rebind direction", ErrBinding)
-	}
 	if current.Identity.ID != next.Identity.ID {
 		return fmt.Errorf("%w: stream id mismatch", ErrBinding)
 	}
@@ -133,4 +133,18 @@ func ValidateRebind(current, next Binding) error {
 		return fmt.Errorf("%w: peer acknowledged unsent bytes", ErrBinding)
 	}
 	return nil
+}
+
+func ValidateRebindRequest(current, next Binding) error {
+	if current.Type != BindAck || next.Type != BindOpen {
+		return fmt.Errorf("%w: invalid rebind request direction", ErrBinding)
+	}
+	return ValidateRebind(current, next)
+}
+
+func ValidateRebindResponse(current, next Binding) error {
+	if current.Type != BindAck || next.Type != BindAck {
+		return fmt.Errorf("%w: invalid rebind response direction", ErrBinding)
+	}
+	return ValidateRebind(current, next)
 }

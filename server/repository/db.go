@@ -73,6 +73,10 @@ func OpenDB(driver, dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("message schema migration failed: %w", err)
 	}
+	if err := wrapper.ensureExplicitRDPGrantModel(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("RDP authorization migration failed: %w", err)
+	}
 
 	return wrapper, nil
 }

@@ -188,6 +188,102 @@ func TestApprovedIdentityRegistersBeforeAcceptance(t *testing.T) {
 	}
 }
 
+func TestApprovedIdentityReceivesAuthorizedRDPTargets(t *testing.T) {
+	gateway := testGateway(t, time.Second, nil, func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+		return DeviceAuthorization{
+			State: "approved", DeviceID: "controller",
+			ApprovedCapabilities: []string{protocol.CapabilityRDPClient},
+			RDPTargets:           []protocol.RDPTarget{{DeviceID: "target", Name: "Office PC", Online: true}},
+		}, nil
+	})
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := dialTestGateway(t, gateway)
+	control := openTestStream(t, sess)
+	writeControlHeader(t, control)
+	accepted := authenticateTestDevice(t, control, identity)
+	if !accepted.Success || len(accepted.RDPTargets) != 1 || accepted.RDPTargets[0].DeviceID != "target" || !accepted.RDPTargets[0].Online {
+		t.Fatalf("authorized RDP inventory was not sent: %+v", accepted)
+	}
+}
+
+func TestHeartbeatRefreshesAuthorizedRDPTargets(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	var mu sync.Mutex
+	targets := []protocol.RDPTarget{{DeviceID: "target", Name: "Office PC", Online: true}}
+	heartbeats := make(chan string, 2)
+	gateway := NewGateway(GatewayConfig{
+		TCPAddr: "127.0.0.1:0", TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout: time.Second, ServerInstanceID: "test-server",
+		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+			return DeviceAuthorization{State: "approved", DeviceID: "controller", ApprovedCapabilities: []string{protocol.CapabilityRDPClient}}, nil
+		},
+		RecheckDevice: func(string, string) bool { return true },
+		ListRDPTargets: func(controllerID string) ([]protocol.RDPTarget, error) {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]protocol.RDPTarget(nil), targets...), nil
+		},
+		OnDeviceHeartbeat: func(deviceID string) { heartbeats <- deviceID },
+	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gateway.Close() })
+
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := dialTestGateway(t, gateway)
+	control := openTestStream(t, sess)
+	writeControlHeader(t, control)
+	if accepted := authenticateTestDevice(t, control, identity); !accepted.Success {
+		t.Fatalf("unexpected approval failure: %+v", accepted)
+	}
+
+	readTargets := func() []protocol.RDPTarget {
+		t.Helper()
+		if err := protocol.WriteJSON(control, protocol.PingMessage{Timestamp: time.Now().UnixMilli()}); err != nil {
+			t.Fatal(err)
+		}
+		var pong protocol.PongMessage
+		if err := protocol.ReadJSON(control, &pong); err != nil {
+			t.Fatal(err)
+		}
+		if pong.RDPTargets == nil {
+			t.Fatal("RDP target refresh was omitted")
+		}
+		return *pong.RDPTargets
+	}
+
+	if got := readTargets(); len(got) != 1 || got[0].DeviceID != "target" || !got[0].Online {
+		t.Fatalf("first refresh = %+v", got)
+	}
+	mu.Lock()
+	targets = []protocol.RDPTarget{}
+	mu.Unlock()
+	if got := readTargets(); len(got) != 0 {
+		t.Fatalf("revoked targets were retained: %+v", got)
+	}
+	for range 2 {
+		select {
+		case got := <-heartbeats:
+			if got != "controller" {
+				t.Fatalf("heartbeat callback device = %q", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("heartbeat callback was not invoked")
+		}
+	}
+}
+
 func TestProxyStreamWithoutClientCapabilityReturnsAccessDenied(t *testing.T) {
 	gateway := testGateway(t, time.Second, nil, func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
 		return DeviceAuthorization{

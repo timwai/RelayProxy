@@ -208,8 +208,31 @@ func TestRDPApprovalCreatesOwnerScopedTargetGrant(t *testing.T) {
 	if err != nil || len(targets) != 1 || targets[0].DeviceID != target.ID || targets[0].Port != 3389 {
 		t.Fatalf("unexpected RDP targets: %+v err=%v", targets, err)
 	}
+	decision, err := db.ObserveDeviceIdentity(DeviceIdentityObservation{
+		Fingerprint: "controller-fingerprint", InstallationID: "controller-fingerprint-install",
+		PublicKey: []byte("controller-fingerprint-key"), DeviceName: "Controller",
+		RequestedCapabilities: []string{"rdp.controller"},
+	})
+	if err != nil || len(decision.RDPTargets) != 1 || decision.RDPTargets[0].DeviceID != target.ID {
+		t.Fatalf("approved RDP targets were not returned during authentication: decision=%+v err=%v", decision, err)
+	}
 	if ok, err := db.AuthorizeRDP(controller.ID, target.ID); err != nil || !ok {
 		t.Fatalf("RDP authorization failed: ok=%v err=%v", ok, err)
+	}
+	if _, err := db.Exec(`UPDATE devices SET approved_capabilities = ? WHERE id = ?`, `[]`, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := db.ListRDPTargetsForController(controller.ID); err != nil || len(targets) != 0 {
+		t.Fatalf("target without rdp.host remained visible: targets=%+v err=%v", targets, err)
+	}
+	if _, err := db.Exec(`UPDATE devices SET approved_capabilities = ? WHERE id = ?`, `["rdp.host"]`, target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE devices SET approved_capabilities = ? WHERE id = ?`, `[]`, controller.ID); err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := db.ListRDPTargetsForController(controller.ID); err != nil || len(targets) != 0 {
+		t.Fatalf("device without rdp.controller received inventory: targets=%+v err=%v", targets, err)
 	}
 }
 

@@ -28,24 +28,25 @@ const (
 var ErrDatagramsUnsupported = errors.New("native UDP datagrams are not supported by this session")
 var ErrDatagramLimit = errors.New("UDP association capacity reached")
 
-var datagramPacketPool sync.Pool
+var datagramPacketPool = sync.Pool{
+	New: func() any { return new([maxPooledDatagramPacket]byte) },
+}
 
 func acquireDatagramPacket(n int) []byte {
 	if n <= maxPooledDatagramPacket {
-		if value := datagramPacketPool.Get(); value != nil {
-			if packet, ok := value.([]byte); ok && cap(packet) >= n {
-				return packet[:n]
-			}
-		}
+		packet := datagramPacketPool.Get().(*[maxPooledDatagramPacket]byte)
+		return packet[:n]
 	}
 	return make([]byte, n)
 }
 
 func releaseDatagramPacket(packet []byte) {
-	if cap(packet) == 0 || cap(packet) > maxPooledDatagramPacket {
+	// Only buffers created by acquireDatagramPacket have this exact capacity.
+	// Received quic-go buffers may be smaller and remain owned by the runtime.
+	if cap(packet) != maxPooledDatagramPacket {
 		return
 	}
-	datagramPacketPool.Put(packet[:0])
+	datagramPacketPool.Put((*[maxPooledDatagramPacket]byte)(packet[:maxPooledDatagramPacket]))
 }
 
 // SupportsDatagrams is a negotiated QUIC transport capability. Application
@@ -136,13 +137,12 @@ type datagramMux struct {
 	closeOnce       sync.Once
 	done            chan struct{}
 	send            chan queuedDatagram
-	sendReady       chan struct{}
 	wg              sync.WaitGroup
 	reassemblyBytes atomic.Int64
 }
 
 func newDatagramMux(s *QUICSession) *datagramMux {
-	m := &datagramMux{session: s, ctx: s.conn.Context(), budget: processDatagramBudget, channels: make(map[uint64]*DatagramChannel), done: make(chan struct{}), send: make(chan queuedDatagram, datagramSendQueueSize), sendReady: make(chan struct{}, 1)}
+	m := &datagramMux{session: s, ctx: s.conn.Context(), budget: processDatagramBudget, channels: make(map[uint64]*DatagramChannel), done: make(chan struct{}), send: make(chan queuedDatagram, datagramSendQueueSize)}
 	// Drain even unregistered datagrams. A session must not retain an unread
 	// native receive queue merely because it has no active associations.
 	m.wg.Add(3)
@@ -259,7 +259,23 @@ func (m *datagramMux) sendLoop() {
 	defer m.wg.Done()
 	defer m.close()
 	for {
-		if job, ok := m.takeSend(); ok {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-m.done:
+			return
+		case job := <-m.send:
+			// A dequeued packet is no longer retained by Relay's application
+			// queue. Synchronize the reservation release with Close, which drains
+			// the same queue while holding mux.mu.
+			m.mu.RLock()
+			closed := m.closed || m.ctx.Err() != nil
+			m.budget.releaseQueue(len(job.packet))
+			m.mu.RUnlock()
+			if closed {
+				releaseDatagramPacket(job.packet)
+				return
+			}
 			select {
 			case <-job.channel.done:
 				releaseDatagramPacket(job.packet)
@@ -273,14 +289,6 @@ func (m *datagramMux) sendLoop() {
 				_ = job.channel.Close()
 			}
 			releaseDatagramPacket(job.packet)
-			continue
-		}
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-m.done:
-			return
-		case <-m.sendReady:
 		}
 	}
 }
@@ -338,20 +346,28 @@ func (c *DatagramChannel) sendFrame(frame []byte) error {
 }
 
 func (c *DatagramChannel) sendFragment(packetID uint32, total uint16, index, count uint8, payload []byte) error {
-	n := protocol.UDPFragmentHeaderSize + len(payload)
-	return c.enqueueFrameParts(n, func(frame []byte) {
-		binary.BigEndian.PutUint32(frame[:4], packetID)
-		binary.BigEndian.PutUint16(frame[4:6], total)
-		frame[6], frame[7] = index, count
-		copy(frame[protocol.UDPFragmentHeaderSize:], payload)
-	})
+	b := c.preparePacket(protocol.UDPFragmentHeaderSize + len(payload))
+	if b == nil {
+		return nil
+	}
+	frame := b[datagramEnvelopeSize:]
+	binary.BigEndian.PutUint32(frame[:4], packetID)
+	binary.BigEndian.PutUint16(frame[4:6], total)
+	frame[6], frame[7] = index, count
+	copy(frame[protocol.UDPFragmentHeaderSize:], payload)
+	return c.queuePreparedPacket(b)
 }
 
 func (c *DatagramChannel) enqueueFrame(frame []byte) error {
-	return c.enqueueFrameParts(len(frame), func(dst []byte) { copy(dst, frame) })
+	b := c.preparePacket(len(frame))
+	if b == nil {
+		return nil
+	}
+	copy(b[datagramEnvelopeSize:], frame)
+	return c.queuePreparedPacket(b)
 }
 
-func (c *DatagramChannel) enqueueFrameParts(frameSize int, fill func([]byte)) error {
+func (c *DatagramChannel) preparePacket(frameSize int) []byte {
 	n := datagramEnvelopeSize + frameSize
 	if !c.mux.budget.reserveQueue(n) {
 		return nil // UDP overload is loss, not a switch to reliable transport.
@@ -361,8 +377,7 @@ func (c *DatagramChannel) enqueueFrameParts(frameSize int, fill func([]byte)) er
 	b := acquireDatagramPacket(n)
 	b[0], b[1], b[2] = 'R', 'U', 1
 	binary.BigEndian.PutUint64(b[3:11], c.ID)
-	fill(b[datagramEnvelopeSize:])
-	return c.queuePreparedPacket(b)
+	return b
 }
 
 func (c *DatagramChannel) queuePreparedPacket(packet []byte) error {
@@ -376,10 +391,6 @@ func (c *DatagramChannel) queuePreparedPacket(packet []byte) error {
 	}
 	select {
 	case c.mux.send <- queuedDatagram{channel: c, packet: packet}:
-		select {
-		case c.mux.sendReady <- struct{}{}:
-		default:
-		}
 	default:
 		// Datagram transport is deliberately lossy. Under animation bursts,
 		// discard the oldest queued frame so the freshest screen update gets a
@@ -393,10 +404,6 @@ func (c *DatagramChannel) queuePreparedPacket(packet []byte) error {
 		}
 		select {
 		case c.mux.send <- queuedDatagram{channel: c, packet: packet}:
-			select {
-			case c.mux.sendReady <- struct{}{}:
-			default:
-			}
 		default:
 			c.mux.budget.releaseQueue(n)
 			c.mux.budget.queueDrops.Add(1)

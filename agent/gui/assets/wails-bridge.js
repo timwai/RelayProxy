@@ -12,6 +12,9 @@
   window.goGetConnections = () => invoke('GetConnections');
   window.goClearConnections = () => invoke('ClearConnections');
   window.goGetStatus = () => invoke('GetStatus');
+  window.goGetRDPTargets = () => invoke('GetRDPTargets');
+  window.goConnectRDP = (targetID, autoLaunch) => invoke('ConnectRDP', targetID, autoLaunch);
+  window.goDisconnectRDP = () => invoke('DisconnectRDP');
   window.goGetLogs = () => invoke('GetLogs');
   window.goGetMessages = () => invoke('GetMessages');
   window.goClearMessages = () => invoke('ClearMessages');

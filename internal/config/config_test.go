@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"relayproxy/agent/routing"
@@ -378,7 +379,7 @@ func TestApplyAgentDefaultsFillsEmptyRouting(t *testing.T) {
 	}
 }
 
-func TestWebManagementDefaultsAndRemoteListenAllowed(t *testing.T) {
+func TestWebManagementDefaultsAndRemoteListenAllowsEmptyToken(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	if err := NormalizeAgentConfig(cfg); err != nil {
 		t.Fatal(err)
@@ -389,12 +390,20 @@ func TestWebManagementDefaultsAndRemoteListenAllowed(t *testing.T) {
 	if cfg.GUI.Theme != "system" {
 		t.Fatalf("default GUI theme = %q, want system", cfg.GUI.Theme)
 	}
-	cfg.Web.Token = "legacy-value-is-ignored"
-	for _, listen := range []string{"0.0.0.0", "::", "192.0.2.10"} {
+	for _, listen := range []string{"0.0.0.0", "::", "192.168.1.10"} {
 		cfg.Web.Listen = listen
+		cfg.Web.Token = ""
 		if err := NormalizeAgentConfig(cfg); err != nil {
-			t.Fatalf("web.listen %q was rejected: %v", listen, err)
+			t.Fatalf("web.listen %q without token was rejected: %v", listen, err)
 		}
+	}
+	cfg.Web.Token = strings.Repeat("t", 31)
+	if err := NormalizeAgentConfig(cfg); err == nil {
+		t.Fatal("short non-empty web.token was accepted")
+	}
+	cfg.Web.Token += "t"
+	if err := NormalizeAgentConfig(cfg); err != nil {
+		t.Fatalf("32-byte web.token rejected: %v", err)
 	}
 }
 

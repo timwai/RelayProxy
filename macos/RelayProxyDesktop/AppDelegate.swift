@@ -1,7 +1,8 @@
 import AppKit
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    private let lifecycleMessageName = "relayproxyLifecycle"
     private let outputQueue = DispatchQueue(label: "com.relayproxy.desktop.agent-output")
     private var outputBuffer = Data()
     private var agent: Process?
@@ -10,19 +11,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private var startupTimeout: DispatchWorkItem?
     private var window: NSWindow!
     private var webView: WKWebView!
+    private var statusItem: NSStatusItem!
+    private var agentStateItem: NSMenuItem!
+    private var reloadItem: NSMenuItem!
+    private var copyAddressItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         configureMenu()
         configureWindow()
+        configureStatusItem()
         startAgent()
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showWindow(nil)
+        return true
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         startupTimeout?.cancel()
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: lifecycleMessageName)
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         if let agent, agent.isRunning {
             agent.terminate()
@@ -37,8 +54,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
+        configuration.userContentController.add(self, name: lifecycleMessageName)
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
+        webView.uiDelegate = self
 
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
@@ -79,8 +98,148 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         NSApp.mainMenu = mainMenu
     }
 
+    private func configureStatusItem() {
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem.button {
+            let symbols = ["point.3.connected.trianglepath.dotted", "network"]
+            let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            if let image = symbols.compactMap({ NSImage(systemSymbolName: $0, accessibilityDescription: "RelayProxy") }).first?
+                .withSymbolConfiguration(configuration) {
+                image.isTemplate = true
+                button.image = image
+            } else {
+                button.title = "RP"
+            }
+            button.imageScaling = .scaleProportionallyDown
+            button.toolTip = "RelayProxy"
+            button.setAccessibilityLabel("RelayProxy")
+        }
+
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let titleItem = NSMenuItem()
+        titleItem.attributedTitle = NSAttributedString(
+            string: "RelayProxy",
+            attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .semibold)]
+        )
+        titleItem.isEnabled = false
+        menu.addItem(titleItem)
+
+        agentStateItem = NSMenuItem(title: "Agent 正在启动…", action: nil, keyEquivalent: "")
+        agentStateItem.isEnabled = false
+        menu.addItem(agentStateItem)
+        menu.addItem(.separator())
+
+        let showItem = NSMenuItem(title: "打开控制台", action: #selector(showWindow(_:)), keyEquivalent: "o")
+        showItem.target = self
+        showItem.image = menuImage("macwindow")
+        menu.addItem(showItem)
+
+        reloadItem = NSMenuItem(title: "刷新管理界面", action: #selector(reloadManagementPage(_:)), keyEquivalent: "r")
+        reloadItem.target = self
+        reloadItem.image = menuImage("arrow.clockwise")
+        reloadItem.isEnabled = false
+        menu.addItem(reloadItem)
+
+        copyAddressItem = NSMenuItem(title: "复制管理地址", action: #selector(copyManagementAddress(_:)), keyEquivalent: "")
+        copyAddressItem.target = self
+        copyAddressItem.image = menuImage("doc.on.doc")
+        copyAddressItem.isEnabled = false
+        menu.addItem(copyAddressItem)
+
+        menu.addItem(.separator())
+
+        let aboutItem = NSMenuItem(title: "关于 RelayProxy", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        aboutItem.target = NSApp
+        aboutItem.image = menuImage("info.circle")
+        menu.addItem(aboutItem)
+
+        menu.addItem(.separator())
+        let quitItem = NSMenuItem(title: "退出 RelayProxy", action: #selector(quitApplication(_:)), keyEquivalent: "q")
+        quitItem.target = self
+        quitItem.image = menuImage("power")
+        menu.addItem(quitItem)
+        statusItem.menu = menu
+    }
+
+    private func menuImage(_ systemName: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: systemName, accessibilityDescription: nil)
+        image?.isTemplate = true
+        return image
+    }
+
+    private func updateAgentState(_ title: String, symbol: String, tooltip: String) {
+        agentStateItem?.title = title
+        agentStateItem?.image = menuImage(symbol)
+        statusItem?.button?.toolTip = tooltip
+    }
+
+    @objc private func showWindow(_ sender: Any?) {
+        if window.isMiniaturized {
+            window.deminiaturize(sender)
+        }
+        window.makeKeyAndOrderFront(sender)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func reloadManagementPage(_ sender: Any?) {
+        guard let managementURL else { return }
+        webView.load(URLRequest(url: managementURL, cachePolicy: .reloadIgnoringLocalCacheData))
+        showWindow(sender)
+    }
+
+    @objc private func copyManagementAddress(_ sender: Any?) {
+        guard let managementURL else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(managementURL.absoluteString, forType: .string)
+    }
+
+    @objc private func quitApplication(_ sender: Any?) {
+        NSApp.terminate(sender)
+    }
+
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.name == lifecycleMessageName,
+              message.webView === webView,
+              message.frameInfo.isMainFrame,
+              let action = message.body as? String,
+              action == "quit" else { return }
+        quitApplication(nil)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptConfirmPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping (Bool) -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "RelayProxy"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "确定")
+        alert.addButton(withTitle: "取消")
+        completionHandler(alert.runModal() == .alertFirstButtonReturn)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        runJavaScriptAlertPanelWithMessage message: String,
+        initiatedByFrame frame: WKFrameInfo,
+        completionHandler: @escaping () -> Void
+    ) {
+        let alert = NSAlert()
+        alert.messageText = "RelayProxy"
+        alert.informativeText = message
+        alert.addButton(withTitle: "确定")
+        alert.runModal()
+        completionHandler()
+    }
+
     private func startAgent() {
         guard let executable = bundledAgentURL() else {
+            updateAgentState("Agent 不可用", symbol: "exclamationmark.circle", tooltip: "RelayProxy · 缺少 relay-agent")
             showStatus(title: "无法启动 RelayProxy", detail: "应用包中缺少 relay-agent。请重新构建或安装完整的 RelayProxy.app。")
             return
         }
@@ -104,8 +263,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             try process.run()
             agent = process
             outputPipe = pipe
+            updateAgentState("Agent 正在连接…", symbol: "circle.dotted", tooltip: "RelayProxy · Agent 正在连接")
             let timeout = DispatchWorkItem { [weak self] in
                 guard let self, self.managementURL == nil, process.isRunning else { return }
+                self.updateAgentState("管理界面不可用", symbol: "exclamationmark.circle", tooltip: "RelayProxy · 管理界面未启动")
                 self.showStatus(
                     title: "本地管理界面未启动",
                     detail: "请确认配置中的 Web 管理功能已启用，且监听端口未被其他程序占用。"
@@ -115,6 +276,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: timeout)
         } catch {
             pipe.fileHandleForReading.readabilityHandler = nil
+            updateAgentState("Agent 启动失败", symbol: "exclamationmark.circle", tooltip: "RelayProxy · Agent 启动失败")
             showStatus(title: "无法启动 RelayProxy", detail: error.localizedDescription)
         }
     }
@@ -162,6 +324,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             guard let self, self.managementURL == nil else { return }
             self.startupTimeout?.cancel()
             self.managementURL = url
+            self.reloadItem.isEnabled = true
+            self.copyAddressItem.isEnabled = true
+            self.updateAgentState("Agent 正常运行", symbol: "checkmark.circle", tooltip: "RelayProxy · Agent 正常运行")
             self.webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
         }
     }
@@ -169,10 +334,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private func agentDidTerminate(_ process: Process) {
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         startupTimeout?.cancel()
-        if managementURL != nil {
+        agent = nil
+        reloadItem?.isEnabled = false
+        copyAddressItem?.isEnabled = false
+        if managementURL != nil && process.terminationStatus == 0 {
             NSApp.terminate(nil)
             return
         }
+        managementURL = nil
+        updateAgentState("Agent 已停止", symbol: "exclamationmark.circle", tooltip: "RelayProxy · Agent 已停止")
         let detail = process.terminationStatus == 0
             ? "另一个 RelayProxy 实例可能已在运行。请先退出旧实例后重试。"
             : "relay-agent 已退出，状态码：\(process.terminationStatus)。请从终端启动以查看完整诊断。"

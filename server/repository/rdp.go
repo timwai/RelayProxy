@@ -23,7 +23,15 @@ func (db *DB) ListRDPTargetsForController(controllerID string) ([]*RDPTarget, er
 	if controllerID == "" {
 		return nil, errors.New("controller device id is required")
 	}
-	rows, err := db.Query(`SELECT target.id, target.name, target.last_seen_at, service.id, service.target_port, service.updated_at
+	var controllerCaps string
+	if err := db.QueryRow(`SELECT approved_capabilities FROM devices WHERE id = ? AND approval_state = 'approved'`, controllerID).Scan(&controllerCaps); err != nil {
+		return nil, err
+	}
+	if !hasCapabilityJSON(controllerCaps, "rdp.controller") {
+		return []*RDPTarget{}, nil
+	}
+	rows, err := db.Query(`SELECT target.id, target.name, target.last_seen_at, target.approved_capabilities,
+		service.id, service.target_port, service.updated_at
 		FROM rdp_access_grants access
 		JOIN devices controller ON controller.id = access.controller_device_id
 		JOIN devices target ON target.id = access.target_device_id
@@ -42,8 +50,12 @@ func (db *DB) ListRDPTargetsForController(controllerID string) ([]*RDPTarget, er
 	for rows.Next() {
 		item := &RDPTarget{}
 		var lastSeen sql.NullTime
-		if err := rows.Scan(&item.DeviceID, &item.Name, &lastSeen, &item.Service, &item.Port, &item.Updated); err != nil {
+		var targetCaps string
+		if err := rows.Scan(&item.DeviceID, &item.Name, &lastSeen, &targetCaps, &item.Service, &item.Port, &item.Updated); err != nil {
 			return nil, err
+		}
+		if !hasCapabilityJSON(targetCaps, "rdp.host") {
+			continue
 		}
 		item.Online = lastSeen.Valid && time.Since(lastSeen.Time) <= 2*time.Minute
 		result = append(result, item)

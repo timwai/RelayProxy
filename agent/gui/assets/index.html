@@ -543,6 +543,9 @@
         <button onclick="switchSection('network')" id="section-btn-network" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-server"/></svg><span>网络</span>
         </button>
+        <button onclick="switchSection('rdp')" id="section-btn-rdp" aria-selected="false" class="nav-item rp-nav-item">
+          <svg class="icon" viewBox="0 0 24 24"><use href="#i-link"/></svg><span>远程桌面</span>
+        </button>
         <button onclick="switchSection('proxy')" id="section-btn-proxy" aria-selected="false" class="nav-item rp-nav-item">
           <svg class="icon" viewBox="0 0 24 24"><use href="#i-plug"/></svg><span>代理与路由</span>
         </button>
@@ -1007,6 +1010,47 @@
         </div>
       </section>
 
+      <!-- ============ 远程桌面 ============ -->
+      <section id="tab-pane-rdp" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">远程桌面</h1>
+            <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">仅显示服务端授权给本设备的 RDP 主机；连接时优先尝试 P2P，失败后自动回退 Relay。</p>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span id="rdp-target-count" class="rp-badge">0 台</span>
+            <button type="button" onclick="refreshRDPTargets(true)" class="rp-btn">刷新</button>
+          </div>
+        </div>
+
+        <div id="rdp-active-card" class="hidden card rp-card bg-white dark:bg-slate-800/50 border border-emerald-300 dark:border-emerald-500/40 rounded-lg p-4 space-y-3">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500 live-dot"></span><strong id="rdp-active-name" class="text-[14px]">RDP 已就绪</strong></div>
+              <div id="rdp-active-id" class="mono text-[11px] text-slate-500 dark:text-slate-400 mt-1"></div>
+            </div>
+            <button type="button" onclick="disconnectRDP()" class="rp-btn">断开</button>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">本地入口</div><div class="flex items-center gap-2 mt-1"><span id="rdp-listen-address" class="mono text-[13px] font-semibold">—</span><button type="button" onclick="copyText($('rdp-listen-address').textContent,'RDP 地址')" class="rp-btn">复制</button></div></div>
+            <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">TCP 路径</div><div id="rdp-path-tcp" class="text-[13px] font-semibold mt-1">—</div></div>
+            <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">UDP 路径</div><div id="rdp-path-udp" class="text-[13px] font-semibold mt-1">—</div><div id="rdp-udp-state" class="text-[11px] text-slate-500 dark:text-slate-400 mt-1"></div></div>
+          </div>
+        </div>
+
+        <div id="rdp-idle-card" class="rp-notice">
+          <svg class="icon-lg text-slate-400" viewBox="0 0 24 24"><use href="#i-link"/></svg>
+          <div><div class="text-[13px] font-medium">尚未启动 RDP 连接</div><div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">选择在线设备后将创建本机回环入口；Windows 桌面端会自动打开 mstsc。</div></div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between gap-3 mb-2"><h2 class="text-[13px] font-semibold">服务端已授权设备</h2><span class="text-[11px] text-slate-500 dark:text-slate-400">未授权设备不会下发到 Agent</span></div>
+          <div id="rdp-targets" class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+            <div class="rp-card p-5 text-center text-[12px] text-slate-500 dark:text-slate-400">正在读取授权设备…</div>
+          </div>
+        </div>
+      </section>
+
       <!-- ============ 消息中心 ============ -->
       <section id="tab-pane-messages" class="tab-pane tab-flex hidden h-full flex-col px-6 py-4">
         <div class="flex items-start justify-between gap-4 mb-3">
@@ -1171,7 +1215,7 @@
         <div class="card rp-card bg-white dark:bg-slate-800/50 border border-rose-300 dark:border-rose-500/40 rounded-lg p-4">
           <div class="text-[13px] font-medium text-rose-600 dark:text-rose-400">退出客户端</div>
           <div class="text-[12px] text-slate-500 dark:text-slate-400 mt-1">停止本地代理、断开中继隧道并关闭客户端。</div>
-          <button onclick="doQuit()" class="mt-3 px-4 py-2 rounded-md text-[13px] font-semibold bg-rose-600 text-white hover:bg-rose-700 flex items-center gap-1.5">
+          <button id="quit-button" onclick="doQuit()" class="mt-3 px-4 py-2 rounded-md text-[13px] font-semibold bg-rose-600 text-white hover:bg-rose-700 flex items-center gap-1.5">
             <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-power"/></svg>退出 RelayProxy
           </button>
         </div>
@@ -1213,7 +1257,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {} };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, rdpTargets: [], rdpBusyTarget: '', rdpRefreshing: false };
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1383,7 +1427,7 @@
     window.toggleTheme = toggleTheme;
 
     /* ---------- navigation ---------- */
-    var sectionLabels = {home:'概览',network:'网络',proxy:'代理与路由',messages:'消息',monitor:'监控',settings:'设置'};
+    var sectionLabels = {home:'概览',network:'网络',rdp:'远程桌面',proxy:'代理与路由',messages:'消息',monitor:'监控',settings:'设置'};
     var sectionTabs = {
       home: [{ id:'home', label:'运行概览' }],
       network: [
@@ -1391,6 +1435,7 @@
         { id:'exit', label:'选择出口' },
         { id:'pair', label:'服务端审批' }
       ],
+      rdp: [{ id:'rdp', label:'授权设备' }],
       proxy: [
         { id:'proxy', label:'本地代理' },
         { id:'routing', label:'路由分流' },
@@ -1404,7 +1449,7 @@
       settings: [{ id:'settings', label:'程序设置' }]
     };
     var tabSections = {
-      home:'home', connection:'network', exit:'network', pair:'network',
+      home:'home', connection:'network', exit:'network', pair:'network', rdp:'rdp',
       proxy:'proxy', routing:'proxy', share:'proxy', messages:'messages', logs:'monitor', connections:'monitor', settings:'settings'
     };
     state.section = state.section || 'home';
@@ -1496,6 +1541,7 @@
       }
       rememberNavigation();
       if (id === 'messages') refreshMessages(true);
+      if (id === 'rdp') refreshRDPTargets(true);
       if (id === 'logs') refreshLogs();
       if (id === 'connections') refreshConnectionsInline(true);
     }
@@ -1625,6 +1671,7 @@
         $('divert-diagnostics-error').textContent = divertError;
         $('divert-diagnostics-error').classList.toggle('hidden', !divertError);
       }
+      renderRDPStatus(st);
       updateFieldDependencies();
     }
 
@@ -1641,6 +1688,85 @@
       el.className = 'text-[12px] font-medium shrink-0 ' +
         (running ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400');
     }
+
+    function rdpPathLabel(path, protocol) {
+      var names = {tcp_p2p:'P2P TCP 直连', udp_p2p:'P2P UDP 直连', relay:'Relay 中继', disabled:'未启用'};
+      return names[path] || path || (protocol === 'udp' ? '等待连接' : 'Relay 中继');
+    }
+    function renderRDPStatus(st) {
+      if (!$('rdp-active-card')) return;
+      var active = !!(st && st.rdpListenAddr);
+      $('rdp-active-card').classList.toggle('hidden', !active);
+      $('rdp-idle-card').classList.toggle('hidden', active);
+      if (active) {
+        var target = state.rdpTargets.find(function (item) { return item.deviceId === st.rdpTargetId; });
+        $('rdp-active-name').textContent = (target && target.name) || 'RDP 已就绪';
+        $('rdp-active-id').textContent = st.rdpTargetId || '';
+        $('rdp-listen-address').textContent = st.rdpListenAddr;
+        $('rdp-path-tcp').textContent = rdpPathLabel(st.rdpPathTcp, 'tcp');
+        $('rdp-path-udp').textContent = rdpPathLabel(st.rdpPathUdp, 'udp');
+        $('rdp-udp-state').textContent = st.rdpUdpReason || (st.rdpUdpActive ? 'UDP 正在转发' : st.rdpUdpEnabled ? '等待 mstsc 发起 UDP' : '当前连接仅使用 TCP');
+      }
+      renderRDPTargets();
+    }
+    function renderRDPTargets() {
+      var host = $('rdp-targets');
+      if (!host) return;
+      var targets = Array.isArray(state.rdpTargets) ? state.rdpTargets : [];
+      $('rdp-target-count').textContent = targets.length + ' 台';
+      if (!targets.length) {
+        host.innerHTML = '<div class="rp-card p-5 text-center text-[12px] text-slate-500 dark:text-slate-400 xl:col-span-2">服务端尚未授权可连接的 RDP 设备。请让管理员为本机批准 rdp.controller，并为目标批准 rdp.host。</div>';
+        return;
+      }
+      var activeID = state.status && state.status.rdpTargetId;
+      host.innerHTML = targets.map(function (target) {
+        var active = activeID === target.deviceId;
+        var disabled = !target.online || !!state.rdpBusyTarget || active;
+        var label = active ? '已连接' : state.rdpBusyTarget === target.deviceId ? '连接中…' : target.online ? '一键连接' : '离线';
+        return '<div class="rp-card p-4 flex items-center justify-between gap-4">' +
+          '<div class="min-w-0"><div class="flex items-center gap-2"><span class="w-2 h-2 rounded-full ' + (target.online ? 'bg-emerald-500' : 'bg-slate-400') + '"></span><strong class="text-[13px] truncate">' + htmlEscape(target.name || target.deviceId) + '</strong><span class="rp-badge ' + (target.online ? 'rp-badge-success' : '') + '">' + (target.online ? '在线' : '离线') + '</span></div>' +
+          '<div class="mono text-[11px] text-slate-500 dark:text-slate-400 mt-1 truncate">' + htmlEscape(target.deviceId) + '</div></div>' +
+          '<button type="button" class="rp-btn rp-btn-primary shrink-0" data-rdp-target="' + htmlEscape(target.deviceId) + '" ' + (disabled ? 'disabled' : '') + '>' + label + '</button></div>';
+      }).join('');
+    }
+    async function refreshRDPTargets(showError) {
+      if (state.rdpRefreshing || !hasFn('goGetRDPTargets')) return;
+      state.rdpRefreshing = true;
+      try {
+        var raw = await call('goGetRDPTargets');
+        var targets = typeof raw === 'string' ? JSON.parse(raw || '[]') : raw;
+        state.rdpTargets = Array.isArray(targets) ? targets : [];
+        renderRDPTargets();
+        renderRDPStatus(state.status || {});
+      } catch (err) {
+        if (showError) toast('读取 RDP 授权设备失败：' + err.message);
+      } finally {
+        state.rdpRefreshing = false;
+      }
+    }
+    async function connectRDP(targetID) {
+      if (!targetID || state.rdpBusyTarget) return;
+      state.rdpBusyTarget = targetID;
+      renderRDPTargets();
+      try {
+        var result = mutationResult(await call('goConnectRDP', targetID, true));
+        if (!result || !result.ok) { toast((result && result.message) || 'RDP 连接失败'); return; }
+        await refreshStatus();
+        toast('RDP 本地入口已建立，正在优先尝试 P2P');
+      } finally {
+        state.rdpBusyTarget = '';
+        renderRDPTargets();
+      }
+    }
+    async function disconnectRDP() {
+      var result = mutationResult(await call('goDisconnectRDP'));
+      if (!result || !result.ok) { toast((result && result.message) || '断开 RDP 失败'); return; }
+      await refreshStatus();
+      toast('RDP 连接已断开');
+    }
+    window.refreshRDPTargets = refreshRDPTargets;
+    window.connectRDP = connectRDP;
+    window.disconnectRDP = disconnectRDP;
     window.onGoStatus = function (st) { if (st) { renderStatus(st); } };
 
     /* ---------- config rendering ---------- */
@@ -2011,9 +2137,29 @@
         if (button) { button.disabled = false; }
       }
     }
-    function doQuit() {
+    async function doQuit() {
       if (!confirm((dirtyGroups(true).length ? '还有未保存的输入。' : '') + '确定退出 RelayProxy 客户端吗？本地代理将立即中断。')) { return; }
-      call('goQuit');
+      var button = $('quit-button');
+      var originalButtonHTML = button ? button.innerHTML : '';
+      if (button) { button.disabled = true; button.textContent = '正在退出…'; }
+      var lifecycle = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.relayproxyLifecycle;
+      if (lifecycle) {
+        lifecycle.postMessage('quit');
+        return;
+      }
+      var raw = await call('goQuit');
+      if (raw !== null) {
+        var result = mutationResult(raw);
+        if (result && result.ok === false) {
+          if (button) { button.disabled = false; button.innerHTML = originalButtonHTML; }
+          toast(result.message || '退出客户端失败');
+          return;
+        }
+      } else {
+        if (button) { button.disabled = false; button.innerHTML = originalButtonHTML; }
+        toast('退出客户端失败');
+        return;
+      }
     }
     window.onToggleAutostart = onToggleAutostart;
     window.onToggleMinTray = onToggleMinTray;
@@ -2326,6 +2472,10 @@
       document.addEventListener('keydown', function (event) {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); window.saveAllChanges(); }
       });
+      if ($('rdp-targets')) $('rdp-targets').addEventListener('click', function (event) {
+        var button = event.target.closest('[data-rdp-target]');
+        if (button && !button.disabled) connectRDP(button.dataset.rdpTarget);
+      });
       if (window.addEventListener) window.addEventListener('beforeunload', function (event) {
         if (dirtyGroups(true).length || state.saving) { event.preventDefault(); event.returnValue = ''; }
       });
@@ -2346,6 +2496,7 @@
       setInterval(function () {
         // Poll only monitoring panes that are visible.
         if (!$('tab-pane-messages').classList.contains('hidden')) { refreshMessages(false); }
+        if (!$('tab-pane-rdp').classList.contains('hidden')) { refreshRDPTargets(false); }
         if (!$('tab-pane-logs').classList.contains('hidden')) { refreshLogs(); }
         if (!$('tab-pane-connections').classList.contains('hidden')) { refreshConnectionsInline(false); }
       }, 2000);

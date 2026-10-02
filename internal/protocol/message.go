@@ -187,6 +187,9 @@ type PingMessage struct {
 // PongMessage for heartbeat response
 type PongMessage struct {
 	Timestamp int64 `json:"timestamp"`
+	// Nil means this server does not provide an inventory refresh. A non-nil
+	// empty slice explicitly revokes every previously advertised target.
+	RDPTargets *[]RDPTarget `json:"rdpTargets,omitempty"`
 }
 
 // GoAwayMessage notifies graceful shutdown

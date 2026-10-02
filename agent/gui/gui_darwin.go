@@ -14,22 +14,30 @@ import (
 )
 
 // Run opens the local Agent console using the system browser on macOS. The web
-// management surface is loopback-only and uses the same HTML/components as the
-// Windows WebView2 client. The caller keeps the Agent process alive headlessly
-// after ErrExternalUI is returned.
+// management surface uses the same HTML/components as the Windows WebView2
+// client. The caller keeps the Agent process alive headlessly after
+// ErrExternalUI is returned.
 func Run(b *bridge.UIBridge, opts Options) error {
 	if b == nil {
 		return fmt.Errorf("macOS UI: bridge is nil")
 	}
-	url := managementURL(b, opts)
-	if url == "" {
+	managementAddr := managementURL(b, opts)
+	if managementAddr == "" {
 		return fmt.Errorf("macOS UI requires the local web management page to be enabled")
 	}
-	if err := exec.Command("open", url).Start(); err != nil {
+	if err := exec.Command("open", managementAddr).Start(); err != nil {
 		return fmt.Errorf("open macOS management UI: %w", err)
 	}
-	log.Printf("[GUI] macOS 管理界面已打开: %s", url)
+	log.Printf("[GUI] macOS 管理界面已打开: %s", managementURLForLog(managementAddr))
 	return ErrExternalUI
+}
+
+func managementURLForLog(value string) string {
+	redacted := redactManagementURL(value)
+	if redacted == "" {
+		return "<invalid management URL>"
+	}
+	return redacted
 }
 
 func managementURL(b *bridge.UIBridge, opts Options) string {

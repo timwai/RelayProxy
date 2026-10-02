@@ -40,23 +40,33 @@ var (
 )
 
 const (
-	passwordMinLength = 8
-	passwordMaxLength = 128
+	passwordMinLength   = 8
+	passwordMaxLength   = 128
+	argonMaxMemory      = 256 * 1024
+	argonMaxIterations  = 10
+	argonMaxParallelism = 16
+	argonMinSaltLen     = 8
+	argonMaxSaltLen     = 64
+	argonMinKeyLen      = 16
+	argonMaxKeyLen      = 64
+	maxPasswordOps      = 4
 )
 
 type AuthService struct {
-	db       *repository.DB
-	sessions map[string]SessionEntry // sessionToken -> SessionEntry
-	mu       sync.RWMutex
-	loginMu  sync.Mutex
-	logins   map[string]*loginAttempt // key: username|ip
+	db            *repository.DB
+	sessions      map[string]SessionEntry // sessionToken -> SessionEntry
+	mu            sync.RWMutex
+	loginMu       sync.Mutex
+	logins        map[string]*loginAttempt // key: username|ip
+	passwordSlots chan struct{}
 }
 
 func NewAuthService(db *repository.DB) *AuthService {
 	s := &AuthService{
-		db:       db,
-		sessions: make(map[string]SessionEntry),
-		logins:   make(map[string]*loginAttempt),
+		db:            db,
+		sessions:      make(map[string]SessionEntry),
+		logins:        make(map[string]*loginAttempt),
+		passwordSlots: make(chan struct{}, maxPasswordOps),
 	}
 	s.ensureAdmin()
 	return s
@@ -124,7 +134,11 @@ func (s *AuthService) LoginFrom(username, password, clientIP string) (string, *r
 		return "", nil, ErrInvalidCredentials
 	}
 
+	if !s.acquirePasswordSlot() {
+		return "", nil, ErrRateLimited
+	}
 	match, err := VerifyPassword(password, u.PasswordHash)
+	s.releasePasswordSlot()
 	if err != nil || !match {
 		s.recordLoginFailure(userKey)
 		if clientIP != "" {
@@ -203,6 +217,10 @@ func (s *AuthService) ChangePassword(token, currentPassword, newPassword string)
 	if err != nil {
 		return fmt.Errorf("load password: %w", err)
 	}
+	if !s.acquirePasswordSlot() {
+		return ErrRateLimited
+	}
+	defer s.releasePasswordSlot()
 	match, err := VerifyPassword(currentPassword, hash)
 	if err != nil {
 		return fmt.Errorf("verify current password: %w", err)
@@ -241,6 +259,19 @@ func (s *AuthService) ChangePassword(token, currentPassword, newPassword string)
 	}
 	s.clearLoginFailures(rateKey)
 	return nil
+}
+
+func (s *AuthService) acquirePasswordSlot() bool {
+	select {
+	case s.passwordSlots <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *AuthService) releasePasswordSlot() {
+	<-s.passwordSlots
 }
 
 const (
@@ -358,27 +389,47 @@ func HashPassword(password string) (string, error) {
 }
 
 func VerifyPassword(password, encodedHash string) (bool, error) {
+	if len(encodedHash) == 0 || len(encodedHash) > 512 {
+		return false, errors.New("invalid hash length")
+	}
 	parts := strings.Split(encodedHash, "$")
-	if len(parts) != 6 {
+	if len(parts) != 6 || parts[0] != "" || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return false, errors.New("invalid hash format")
 	}
 
 	var mem uint32
 	var iter uint32
 	var par uint8
-	_, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &mem, &iter, &par)
-	if err != nil {
-		return false, err
+	n, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &mem, &iter, &par)
+	if err != nil || n != 3 || parts[3] != fmt.Sprintf("m=%d,t=%d,p=%d", mem, iter, par) {
+		return false, errors.New("invalid Argon2 parameters")
+	}
+	if mem == 0 || mem > argonMaxMemory || iter == 0 || iter > argonMaxIterations || par == 0 || par > argonMaxParallelism {
+		return false, errors.New("Argon2 parameters are outside the supported range")
 	}
 
+	if len(parts[4]) < base64.RawStdEncoding.EncodedLen(argonMinSaltLen) ||
+		len(parts[4]) > base64.RawStdEncoding.EncodedLen(argonMaxSaltLen) {
+		return false, errors.New("invalid Argon2 salt length")
+	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
 		return false, err
 	}
+	if len(salt) < argonMinSaltLen || len(salt) > argonMaxSaltLen {
+		return false, errors.New("invalid Argon2 salt length")
+	}
 
+	if len(parts[5]) < base64.RawStdEncoding.EncodedLen(argonMinKeyLen) ||
+		len(parts[5]) > base64.RawStdEncoding.EncodedLen(argonMaxKeyLen) {
+		return false, errors.New("invalid Argon2 key length")
+	}
 	expectedHash, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return false, err
+	}
+	if len(expectedHash) < argonMinKeyLen || len(expectedHash) > argonMaxKeyLen {
+		return false, errors.New("invalid Argon2 key length")
 	}
 
 	calculatedHash := argon2.IDKey([]byte(password), salt, iter, mem, par, uint32(len(expectedHash)))

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"relayproxy/internal/protocol"
@@ -16,22 +17,25 @@ const UDPIdleTimeout = 60 * time.Second
 // UDPStreamConn retains datagram boundaries on the legacy reliable transport.
 // Deadlines are caller-owned; idle expiry is shared by both directions.
 type UDPStreamConn struct {
-	stream                                    DeadlineStream
-	remote                                    net.Addr
-	readMu, writeMu                           sync.Mutex
-	mu                                        sync.Mutex
-	closed                                    bool
-	readDeadline, writeDeadline, lastActivity time.Time
-	idleTimer                                 *time.Timer
-	header                                    [4]byte
-	headerN, payloadN                         int
-	payload                                   []byte
-	writeBuf                                  []byte
+	stream                      DeadlineStream
+	remote                      net.Addr
+	readMu, writeMu             sync.Mutex
+	mu                          sync.Mutex
+	closed                      bool
+	readDeadline, writeDeadline time.Time
+	activityOrigin              time.Time
+	// Elapsed monotonic time since activityOrigin; -1 prevents activity from
+	// reviving an expired or explicitly closed stream.
+	lastActivityNanos atomic.Int64
+	idleTimer         *time.Timer
+	header            [4]byte
+	headerN, payloadN int
+	payload           []byte
+	writeBuf          []byte
 }
 
 func NewUDPStreamConn(stream DeadlineStream, remote net.Addr) *UDPStreamConn {
-	now := time.Now()
-	c := &UDPStreamConn{stream: stream, remote: remote, lastActivity: now}
+	c := &UDPStreamConn{stream: stream, remote: remote, activityOrigin: time.Now()}
 	c.idleTimer = time.AfterFunc(UDPIdleTimeout, c.expire)
 	c.applyDeadlinesLocked()
 	return c
@@ -51,11 +55,19 @@ func (c *UDPStreamConn) expire() {
 		c.mu.Unlock()
 		return
 	}
-	remaining := time.Until(c.lastActivity.Add(UDPIdleTimeout))
-	if remaining > 0 {
-		c.idleTimer.Reset(remaining)
-		c.mu.Unlock()
-		return
+	for {
+		lastActivity := c.lastActivityNanos.Load()
+		remaining := UDPIdleTimeout - (time.Since(c.activityOrigin) - time.Duration(lastActivity))
+		if remaining > 0 {
+			c.idleTimer.Reset(remaining)
+			c.mu.Unlock()
+			return
+		}
+		// Close only if no packet has refreshed activity since the check.
+		// Unlike two loads, CAS also covers a refresh just before closing.
+		if c.lastActivityNanos.CompareAndSwap(lastActivity, -1) {
+			break
+		}
 	}
 	c.closed = true
 	_ = c.stream.SetDeadline(time.Now())
@@ -64,13 +76,19 @@ func (c *UDPStreamConn) expire() {
 }
 
 func (c *UDPStreamConn) touch() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return
+	// Do not reset the timer on every packet. When it fires, expire checks this
+	// timestamp and reschedules itself for the remaining idle interval. This
+	// keeps the packet hot path free of mutexes and runtime timer-heap updates.
+	now := time.Since(c.activityOrigin).Nanoseconds()
+	for {
+		previous := c.lastActivityNanos.Load()
+		if previous < 0 || now <= previous {
+			return
+		}
+		if c.lastActivityNanos.CompareAndSwap(previous, now) {
+			return
+		}
 	}
-	c.lastActivity = time.Now()
-	c.idleTimer.Reset(UDPIdleTimeout)
 }
 
 func (c *UDPStreamConn) ReadFrom(p []byte) (int, net.Addr, error) {
@@ -149,6 +167,7 @@ func (c *UDPStreamConn) Close() error {
 		return nil
 	}
 	c.closed = true
+	c.lastActivityNanos.Store(-1)
 	c.idleTimer.Stop()
 	_ = c.stream.SetDeadline(time.Now())
 	c.mu.Unlock()

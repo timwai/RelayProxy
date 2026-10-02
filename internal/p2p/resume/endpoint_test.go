@@ -1,6 +1,7 @@
 package resume
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net"
@@ -8,6 +9,30 @@ import (
 	"testing"
 	"time"
 )
+
+func TestEndpointBuffersConsecutiveFrames(t *testing.T) {
+	left, right := newEndpointPair(t, 512<<10)
+	bindEndpointPair(t, left, right, 1)
+	_ = left.SetDeadline(time.Now().Add(3 * time.Second))
+	_ = right.SetDeadline(time.Now().Add(3 * time.Second))
+	var want []byte
+	for i, size := range []int{17, MaxPayload, 3, MaxPayload, 1024} {
+		payload := bytes.Repeat([]byte{byte(i + 1)}, size)
+		want = append(want, payload...)
+		if _, err := left.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Delay application reads until several differently sized frames have
+	// crossed the same decoder, so reused storage cannot hide corruption.
+	got := make([]byte, len(want))
+	if _, err := io.ReadFull(right, got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatal("buffered frames were overwritten by later payloads")
+	}
+}
 
 func newEndpointPair(t *testing.T, replayLimit int) (*Endpoint, *Endpoint) {
 	t.Helper()

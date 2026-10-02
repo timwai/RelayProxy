@@ -34,6 +34,53 @@ func passwordTestLogin(t *testing.T, s *AuthService, username, password string) 
 	return token, user
 }
 
+func TestVerifyPasswordRejectsUnsafeArgon2Parameters(t *testing.T) {
+	valid, err := HashPassword(originalTestPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := VerifyPassword(originalTestPassword, valid); err != nil || !ok {
+		t.Fatalf("valid hash rejected: ok=%v err=%v", ok, err)
+	}
+
+	parts := strings.Split(valid, "$")
+	if len(parts) != 6 {
+		t.Fatalf("unexpected test hash format: %q", valid)
+	}
+	tests := map[string]string{
+		"wrong algorithm":  strings.Replace(valid, "$argon2id$", "$argon2i$", 1),
+		"wrong version":    strings.Replace(valid, "$v=19$", "$v=16$", 1),
+		"zero iterations":  strings.Replace(valid, "t=3", "t=0", 1),
+		"zero parallelism": strings.Replace(valid, "p=2", "p=0", 1),
+		"excessive memory": strings.Replace(valid, "m=65536", "m=4294967295", 1),
+		"oversized hash":   strings.Repeat("x", 513),
+		"short salt":       strings.Join([]string{"", parts[1], parts[2], parts[3], "YQ", parts[5]}, "$"),
+		"short key":        strings.Join([]string{"", parts[1], parts[2], parts[3], parts[4], "YQ"}, "$"),
+	}
+	for name, encoded := range tests {
+		t.Run(name, func(t *testing.T) {
+			if ok, err := VerifyPassword(originalTestPassword, encoded); err == nil || ok {
+				t.Fatalf("unsafe hash accepted: ok=%v err=%v", ok, err)
+			}
+		})
+	}
+}
+
+func TestLoginRejectsWhenPasswordVerificationCapacityIsExhausted(t *testing.T) {
+	s, _ := passwordTestService(t)
+	for range maxPasswordOps {
+		s.passwordSlots <- struct{}{}
+	}
+	defer func() {
+		for range maxPasswordOps {
+			<-s.passwordSlots
+		}
+	}()
+	if _, _, err := s.Login("admin", originalTestPassword); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("login was not bounded while all password slots were occupied: %v", err)
+	}
+}
+
 func TestChangePasswordPersistsAndRevokesOnlyAccountSessions(t *testing.T) {
 	s, path := passwordTestService(t)
 	first, original := passwordTestLogin(t, s, "admin", originalTestPassword)

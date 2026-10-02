@@ -278,6 +278,7 @@ func main() {
 		webServer, err = gui.StartWeb(uiBridge, gui.WebOptions{
 			Listen: cfgFile.Web.Listen,
 			Port:   cfgFile.Web.Port,
+			Token:  cfgFile.Web.Token,
 		})
 		if err != nil {
 			log.Fatalf("[Web] Failed to start management page: %v", err)
@@ -298,7 +299,7 @@ func main() {
 	if wantGUI && cfgFile.IsGUIEnabled() {
 		webURL := ""
 		if webServer != nil {
-			webURL = "http://" + webServer.Addr() + "/"
+			webURL = webServer.BrowserURL()
 			go func() {
 				<-webServer.Done()
 				gui.RequestQuit()
@@ -325,7 +326,7 @@ func main() {
 		default:
 			fallbackURL := ""
 			if webServer != nil {
-				fallbackURL = "http://" + webServer.Addr() + "/"
+				fallbackURL = webServer.BrowserURL()
 			}
 			gui.ShowStartupError(err, fallbackURL)
 			log.Printf("[Agent] Desktop UI failed: %v; continuing in headless mode", err)

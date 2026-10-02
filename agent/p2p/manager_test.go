@@ -199,6 +199,41 @@ func TestValidateRelayPolicyRequiresServerFingerprint(t *testing.T) {
 	}
 }
 
+func TestRelayPolicyCopiesPreserveFingerprintWithEmptySlices(t *testing.T) {
+	checker, err := acl.NewChecker(acl.Policy{
+		ID: "relay_acl", AllowInternet: true,
+		Rules: []acl.Rule{}, AccessHosts: []string{}, AccessCIDRs: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := checker.Policy()
+	validated, err := validateRelayPolicy(&policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validated.Rules == nil || validated.AccessHosts == nil || validated.AccessCIDRs == nil {
+		t.Fatalf("validated policy lost empty slices: %#v", validated)
+	}
+
+	session := &Session{}
+	session.setRelayPolicy(validated)
+	copied := session.RelayPolicy()
+	if copied == nil {
+		t.Fatal("session relay policy copy is missing")
+	}
+	if copied.Rules == nil || copied.AccessHosts == nil || copied.AccessCIDRs == nil {
+		t.Fatalf("session policy copy lost empty slices: %#v", copied)
+	}
+	verified, err := acl.NewChecker(*copied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verified.Policy().Fingerprint != copied.Fingerprint {
+		t.Fatalf("relay policy fingerprint changed during session copy: %q != %q", verified.Policy().Fingerprint, copied.Fingerprint)
+	}
+}
+
 func TestPathStatusPrefersReadyAndHidesSensitiveDetails(t *testing.T) {
 	manager := NewManager(context.Background(), nil, nil, time.Minute)
 	defer manager.Close()

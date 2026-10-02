@@ -10,11 +10,23 @@ package gui
 import (
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
 )
+
+func redactManagementURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return ""
+	}
+	query := parsed.Query()
+	query.Del("token")
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
 
 // ErrUnsupported is returned by Run on platforms without a desktop window.
 var ErrUnsupported = errors.New("native desktop GUI is unavailable on this platform")

@@ -5,6 +5,48 @@ import (
 	"testing"
 )
 
+func TestReceiveAPIsReturnOwnedPayload(t *testing.T) {
+	state, err := NewRandomStreamState(1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receiver Receiver
+	for name, accept := range map[string]func([]byte) ([]byte, uint64, error){
+		"receiver": func(p []byte) ([]byte, uint64, error) { return receiver.Accept(0, p) },
+		"state": func(p []byte) ([]byte, uint64, error) {
+			return state.Handle(Frame{Type: FrameData, Payload: p})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			payload := []byte("owned")
+			fresh, ack, err := accept(payload)
+			if err != nil || ack != uint64(len(payload)) {
+				t.Fatalf("ack=%d err=%v", ack, err)
+			}
+			clear(payload)
+			if string(fresh) != "owned" {
+				t.Fatalf("caller-owned data changed with input: %q", fresh)
+			}
+		})
+	}
+}
+
+func TestStreamStateDataDoesNotExposeReplayStorage(t *testing.T) {
+	state, err := NewRandomStreamState(1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame, err := state.Data([]byte("replay-safe"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(frame.Payload)
+	replay := state.ReplayFrames()
+	if len(replay) != 1 || string(replay[0].Payload) != "replay-safe" {
+		t.Fatalf("public frame mutated replay storage: %#v", replay)
+	}
+}
+
 func TestStreamStateReplayDoesNotDuplicateDeliveredBytes(t *testing.T) {
 	identity, err := NewIdentity()
 	if err != nil {

@@ -37,6 +37,7 @@ RelayProxy 由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。A
 | 🛡️ 集中授权 | 所有新设备先进入待审批，再由 Server 授予能力 |
 | 🖥️ 图形化管理 | Windows Wails GUI + Agent 本地 Web + Server Admin Web |
 | 📊 运行监控 | 查看在线设备、活动会话、实时连接、日志和流量 |
+| 🖥️ 一键远程桌面 | Agent GUI 只展示后台授权的 RDP 主机，P2P 优先并自动回退 Relay |
 | 🔐 受控 RDP 入口 | 为指定设备创建带来源限制、限速和过期时间的入口 |
 
 ## 一图看懂
@@ -101,7 +102,7 @@ Server 不会因为 Agent 声明了某项能力就自动授权。新安装的 Ag
 - [Windows 系统透明代理](#9-windows-系统透明代理)
 - [Agent GUI / Web](#10-agent-gui-与本地-web-管理)
 - [Server Web](#11-server-web-管理)
-- [RDP 公网入口](#12-rdp-公网入口)
+- [RDP 连接](#12-rdp-连接)
 - [TLS 与 QUIC](#13-tls-与-quic)
 - [完整配置](#14-agent-完整配置示例)
 - [命令行](#15-agent-命令行)
@@ -385,6 +386,7 @@ Agent 首次连接 Server 时不会自动获得访问权限。
 | --- | --- |
 | Client | 允许设备通过其他出口访问网络 |
 | Exit | 允许其他设备使用本机作为出口 |
+| RDP Controller | 允许本机查看后台授权的 RDP 主机并发起连接 |
 | RDP Host | 允许本机提供 RDP 目标服务 |
 | RDP Public | 允许为该设备创建公网 RDP 入口 |
 
@@ -756,12 +758,6 @@ Agent 默认同时启动：
 http://127.0.0.1:9090
 ```
 
-它只允许监听 loopback 地址，不能设置为：
-
-```text
-0.0.0.0
-```
-
 可通过配置修改：
 
 ```yaml
@@ -770,6 +766,27 @@ web:
   listen: 127.0.0.1
   port: 9090
 ```
+
+局域网监听也可以不配置令牌。例如：
+
+```yaml
+web:
+  enabled: true
+  listen: 0.0.0.0
+  port: 9090
+```
+
+此时局域网中任何能访问该端口的设备都可以读取和修改 Agent 配置，请仅在受信网络中使用。若需要鉴权，可以选择配置至少 32 字节的随机令牌：
+
+```yaml
+web:
+  enabled: true
+  listen: 0.0.0.0
+  port: 9090
+  token: "请替换为至少 32 字节的高强度随机值"
+```
+
+配置令牌后，首次访问使用 `http://<Agent-IP>:9090/?token=<令牌>`；验证后令牌会从地址栏移除并保存到 HttpOnly Cookie。内置 Web 服务使用 HTTP，建议只在受信网络、VPN 或受保护的反向代理后开放，避免管理数据或令牌被窃听。
 
 也可以关闭：
 
@@ -1009,7 +1026,24 @@ Windows GUI 收到验证码时会显示独立的屏幕中央悬浮卡片；主�
 
 ---
 
-# 12. RDP 公网入口
+# 12. RDP 连接
+
+## 12.1 Agent GUI 一键连接
+
+Agent GUI 的「远程桌面」页只使用 Server 下发的授权清单，不接受任意设备 ID 或目标地址。部署步骤：
+
+1. 在 Server Web 为发起连接的设备批准 `RDP Controller`。
+2. 为被连接设备批准 `RDP Host`，并确保两台设备属于同一所有者。
+3. 在 Agent GUI 打开「远程桌面」，在线目标会显示「一键连接」。
+4. Windows 桌面端建立本机回环入口后会自动打开 `mstsc`；其他平台可复制页面显示的本地入口交给 RDP 客户端。
+
+连接同时支持 TCP 与 UDP。Agent 优先协商 P2P 直连；直连不可用时自动回退到已认证的 Relay 数据面。页面会显示实际的 TCP / UDP 路径和 UDP 状态。
+
+授权清单和在线状态会随隧道心跳刷新。管理员撤销 controller/host 能力或设备关系后，目标会从列表移除，正在使用该目标的本地 RDP 入口也会关闭。即使 Agent 尚未收到下一次刷新，Server 在每次 RDP 数据流建立时仍会重新执行授权检查。
+
+目标 Agent 默认连接本机 `127.0.0.1:3389`。目标地址不会下发给 controller，因此 RDP 授权不能被转换成任意端口转发。跨 NAT 使用 P2P 时建议配置 Server 的 `rdp.rendezvous_listen` 与可访问的 `rdp.rendezvous_advertise`。
+
+## 12.2 Server 公网入口
 
 RelayProxy 可以由 Server 为已经授权的 RDP Host 创建受控公网入口。
 

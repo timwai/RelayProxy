@@ -279,6 +279,7 @@ type Agent struct {
 	lifecycleMu   sync.Mutex
 	closeOnce     sync.Once
 	closeErr      error
+	rdpConnectMu  sync.Mutex
 }
 
 func (a *Agent) setDivertStage(stage string, err error) {
@@ -660,10 +661,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	a.cfg.DeviceID = accepted.DeviceID
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
-	a.rdpTargets = make([]rdp.Target, 0, len(accepted.RDPTargets))
-	for _, target := range accepted.RDPTargets {
-		a.rdpTargets = append(a.rdpTargets, rdp.Target{DeviceID: target.DeviceID, Name: target.Name, Online: target.Online})
-	}
+	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
 	a.mu.Unlock()
@@ -805,9 +803,9 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 		case <-ticker.C:
 			start := time.Now()
 			_ = ctrl.SetDeadline(start.Add(5 * time.Second))
+			var pong protocol.PongMessage
 			err := protocol.WriteJSON(ctrl, protocol.PingMessage{Timestamp: start.UnixMilli()})
 			if err == nil {
-				var pong protocol.PongMessage
 				err = protocol.ReadJSON(ctrl, &pong)
 			}
 			if err != nil {
@@ -818,12 +816,51 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 				return
 			}
 			_ = ctrl.SetDeadline(time.Time{})
+			if pong.RDPTargets != nil {
+				a.refreshRDPTargets(sess, epoch, *pong.RDPTargets)
+			}
 			a.mu.RLock()
 			if a.epoch == epoch && a.readySession == sess {
 				a.latencyMs.Store(time.Since(start).Milliseconds())
 			}
 			a.mu.RUnlock()
 		}
+	}
+}
+
+func rdpTargetsFromProtocol(targets []protocol.RDPTarget) []rdp.Target {
+	result := make([]rdp.Target, 0, len(targets))
+	for _, target := range targets {
+		if strings.TrimSpace(target.DeviceID) == "" {
+			continue
+		}
+		result = append(result, rdp.Target{DeviceID: target.DeviceID, Name: target.Name, Online: target.Online})
+	}
+	return result
+}
+
+func (a *Agent) refreshRDPTargets(sess tunnel.TunnelSession, epoch uint64, targets []protocol.RDPTarget) {
+	refreshed := rdpTargetsFromProtocol(targets)
+	a.mu.Lock()
+	if a.epoch != epoch || a.readySession != sess {
+		a.mu.Unlock()
+		return
+	}
+	a.rdpTargets = refreshed
+	if a.rdpConnection == nil || slices.ContainsFunc(refreshed, func(target rdp.Target) bool {
+		return target.DeviceID == a.rdpConnection.Target.DeviceID
+	}) {
+		a.mu.Unlock()
+		return
+	}
+	connection := a.rdpConnection
+	p2pSession := a.rdpSession
+	a.rdpConnection = nil
+	a.rdpSession = nil
+	a.mu.Unlock()
+	_ = connection.Close()
+	if p2pSession != nil {
+		_ = p2pSession.Close()
 	}
 }
 
@@ -1277,13 +1314,16 @@ func modeForApprovedCapabilities(capabilities []string) string {
 func (a *Agent) RDPTargets() []rdp.Target {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return slices.Clone(a.rdpTargets)
+	return append([]rdp.Target{}, a.rdpTargets...)
 }
 
 // ConnectRDP starts the loopback TCP/UDP listener for one approved target.
 // The server remains the authority: this method only accepts IDs from the
 // current server-provided target list.
 func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error) {
+	a.rdpConnectMu.Lock()
+	defer a.rdpConnectMu.Unlock()
+
 	a.mu.Lock()
 	if a.closed.Load() || !a.handshakeOK.Load() || a.readySession == nil {
 		a.mu.Unlock()
@@ -1299,6 +1339,10 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 	if target.DeviceID == "" {
 		a.mu.Unlock()
 		return rdp.Target{}, errors.New("RDP target is not approved")
+	}
+	if !target.Online {
+		a.mu.Unlock()
+		return rdp.Target{}, errors.New("RDP target is offline")
 	}
 	old := a.rdpConnection
 	oldP2P := a.rdpSession
@@ -1365,11 +1409,17 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 		return rdp.Target{}, err
 	}
 	a.mu.Lock()
-	if a.closed.Load() || a.readySession != sess || !a.handshakeOK.Load() {
+	stillApproved := slices.ContainsFunc(a.rdpTargets, func(candidate rdp.Target) bool {
+		return candidate.DeviceID == targetID
+	})
+	if a.closed.Load() || a.readySession != sess || !a.handshakeOK.Load() || !stillApproved {
 		a.mu.Unlock()
 		_ = conn.Close()
 		if directSession != nil {
 			_ = directSession.Close()
+		}
+		if !stillApproved {
+			return rdp.Target{}, errors.New("RDP target authorization changed while connecting")
 		}
 		return rdp.Target{}, errors.New("relay session ended while starting RDP")
 	}
@@ -1525,6 +1575,9 @@ func dialRDPUDPHappy(ctx context.Context, direct, relay func(context.Context) (n
 }
 
 func (a *Agent) DisconnectRDP() {
+	a.rdpConnectMu.Lock()
+	defer a.rdpConnectMu.Unlock()
+
 	a.mu.Lock()
 	conn := a.rdpConnection
 	p2pSession := a.rdpSession

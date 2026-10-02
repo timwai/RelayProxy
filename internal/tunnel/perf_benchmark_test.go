@@ -71,6 +71,29 @@ func BenchmarkPipe1MiBIdleTimeout(b *testing.B) {
 	}
 }
 
+type benchmarkDiscardStream struct{}
+
+func (benchmarkDiscardStream) Read([]byte) (int, error)         { return 0, io.EOF }
+func (benchmarkDiscardStream) Write(p []byte) (int, error)      { return len(p), nil }
+func (benchmarkDiscardStream) Close() error                     { return nil }
+func (benchmarkDiscardStream) SetDeadline(time.Time) error      { return nil }
+func (benchmarkDiscardStream) SetReadDeadline(time.Time) error  { return nil }
+func (benchmarkDiscardStream) SetWriteDeadline(time.Time) error { return nil }
+
+func BenchmarkUDPStreamWrite1200B(b *testing.B) {
+	conn := NewUDPStreamConn(benchmarkDiscardStream{}, &net.UDPAddr{})
+	b.Cleanup(func() { _ = conn.Close() })
+	payload := make([]byte, 1200)
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		if _, err := conn.WriteTo(payload, nil); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkYAMUXOpenStreamParallel(b *testing.B) {
 	clientConn, serverConn := net.Pipe()
 	clientMux, err := yamux.Client(clientConn, DefaultYAMUXConfig())

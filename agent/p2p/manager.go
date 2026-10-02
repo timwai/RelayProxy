@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -766,9 +767,9 @@ func (s *Session) setRelayPolicy(policy *acl.Policy) {
 		s.relayPolicy = nil
 	} else {
 		copy := *policy
-		copy.Rules = append([]acl.Rule(nil), policy.Rules...)
-		copy.AccessHosts = append([]string(nil), policy.AccessHosts...)
-		copy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+		copy.Rules = slices.Clone(policy.Rules)
+		copy.AccessHosts = slices.Clone(policy.AccessHosts)
+		copy.AccessCIDRs = slices.Clone(policy.AccessCIDRs)
 		s.relayPolicy = &copy
 	}
 	s.mu.Unlock()
@@ -784,9 +785,9 @@ func (s *Session) RelayPolicy() *acl.Policy {
 		return nil
 	}
 	copy := *s.relayPolicy
-	copy.Rules = append([]acl.Rule(nil), s.relayPolicy.Rules...)
-	copy.AccessHosts = append([]string(nil), s.relayPolicy.AccessHosts...)
-	copy.AccessCIDRs = append([]string(nil), s.relayPolicy.AccessCIDRs...)
+	copy.Rules = slices.Clone(s.relayPolicy.Rules)
+	copy.AccessHosts = slices.Clone(s.relayPolicy.AccessHosts)
+	copy.AccessCIDRs = slices.Clone(s.relayPolicy.AccessCIDRs)
 	return &copy
 }
 
@@ -1083,9 +1084,9 @@ func validateRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {
 		return nil, errors.New("P2P Relay ACL fingerprint mismatch")
 	}
 	copy := normalized
-	copy.Rules = append([]acl.Rule(nil), normalized.Rules...)
-	copy.AccessHosts = append([]string(nil), normalized.AccessHosts...)
-	copy.AccessCIDRs = append([]string(nil), normalized.AccessCIDRs...)
+	copy.Rules = slices.Clone(normalized.Rules)
+	copy.AccessHosts = slices.Clone(normalized.AccessHosts)
+	copy.AccessCIDRs = slices.Clone(normalized.AccessCIDRs)
 	return &copy, nil
 }
 

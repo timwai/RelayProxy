@@ -172,7 +172,7 @@ type AgentConfigFile struct {
 		Enabled *bool  `yaml:"enabled"`
 		Listen  string `yaml:"listen"`
 		Port    int    `yaml:"port"`
-		Token   string `yaml:"token,omitempty"` // Deprecated: accepted for old configs, ignored; Agent web UI is loopback-only
+		Token   string `yaml:"token,omitempty"` // Optional; when set, must contain at least 32 bytes
 	} `yaml:"web"`
 
 	Logging struct {

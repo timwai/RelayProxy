@@ -32,6 +32,7 @@ type Endpoint struct {
 
 	appWriteMu sync.Mutex
 	writeMu    sync.Mutex
+	writer     frameWriter // guarded by writeMu
 
 	mu            sync.Mutex
 	transport     Transport
@@ -217,7 +218,7 @@ func (e *Endpoint) activateTransport(transport Transport, generation uint64) {
 	}
 
 	for _, frame := range e.state.ReplayFrames() {
-		if err := WriteFrame(transport, frame); err != nil {
+		if err := e.writer.Write(transport, frame); err != nil {
 			e.loseTransport(transport, generation, err)
 			return
 		}
@@ -263,7 +264,7 @@ func (e *Endpoint) Write(p []byte) (int, error) {
 		var frame Frame
 		for {
 			var err error
-			frame, err = e.state.Data(chunk)
+			frame, err = e.state.dataRetained(chunk)
 			if err == nil {
 				break
 			}
@@ -348,7 +349,7 @@ func (e *Endpoint) Close() error {
 			_ = deadlineTransport.SetWriteDeadline(time.Now().Add(250 * time.Millisecond))
 		}
 		if frame, err := e.state.RST(); err == nil {
-			_ = WriteFrame(transport, frame)
+			_ = e.writer.Write(transport, frame)
 		}
 		e.writeMu.Unlock()
 	}
@@ -375,7 +376,7 @@ func (e *Endpoint) sendBuffered(frame Frame) error {
 			e.writeMu.Unlock()
 			continue
 		}
-		err = WriteFrame(transport, frame)
+		err = e.writer.Write(transport, frame)
 		e.writeMu.Unlock()
 		if err == nil {
 			return nil
@@ -393,7 +394,7 @@ func (e *Endpoint) sendControlCurrent(transport Transport, generation uint64, fr
 		e.writeMu.Unlock()
 		return
 	}
-	err := WriteFrame(transport, frame)
+	err := e.writer.Write(transport, frame)
 	e.writeMu.Unlock()
 	if err != nil {
 		e.loseTransport(transport, generation, err)
@@ -443,14 +444,15 @@ func (e *Endpoint) ackLoop() {
 }
 
 func (e *Endpoint) readLoop(transport Transport, generation uint64) {
+	var reader frameReader
 	for {
-		frame, err := ReadFrame(transport)
+		frame, err := reader.Read(transport)
 		if err != nil {
 			e.loseTransport(transport, generation, err)
 			return
 		}
 
-		fresh, _, err := e.state.Handle(frame)
+		fresh, _, err := e.state.handleBorrowed(frame)
 		if err != nil {
 			e.fail(err)
 			return

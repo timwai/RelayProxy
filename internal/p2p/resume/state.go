@@ -47,7 +47,7 @@ func (s *StreamState) Identity() Identity {
 func (s *StreamState) receiveState() (ack uint64, flags uint16) {
 	s.recvMu.Lock()
 	defer s.recvMu.Unlock()
-	ack = s.receive.Expected()
+	ack = s.receive.expected
 	if s.remoteFIN {
 		flags |= FlagFINAck
 	}
@@ -58,6 +58,19 @@ func (s *StreamState) receiveState() (ack uint64, flags uint16) {
 // bytes to the transport if this returns an error, otherwise replay safety
 // would be lost.
 func (s *StreamState) Data(payload []byte) (Frame, error) {
+	frame, err := s.dataRetained(payload)
+	if err != nil {
+		return Frame{}, err
+	}
+	// Data is a public state API, so keep the returned frame independent from
+	// replay storage. Endpoint.Write uses dataRetained directly and never
+	// exposes the shared immutable payload to its caller.
+	frame.Payload = append([]byte(nil), frame.Payload...)
+	frame.wire = nil
+	return frame, nil
+}
+
+func (s *StreamState) dataRetained(payload []byte) (Frame, error) {
 	if s == nil {
 		return Frame{}, ErrFrame
 	}
@@ -66,7 +79,7 @@ func (s *StreamState) Data(payload []byte) (Frame, error) {
 	if s.localFIN {
 		return Frame{}, ErrFrame
 	}
-	seq, err := s.send.Append(payload)
+	seq, retained, wire, err := s.send.appendRetainedLocked(payload)
 	if err != nil {
 		return Frame{}, err
 	}
@@ -76,7 +89,8 @@ func (s *StreamState) Data(payload []byte) (Frame, error) {
 		Flags:   flags,
 		Seq:     seq,
 		Ack:     ack,
-		Payload: append([]byte(nil), payload...),
+		Payload: retained,
+		wire:    wire,
 	}, nil
 }
 
@@ -90,7 +104,7 @@ func (s *StreamState) FIN() (Frame, error) {
 	defer s.sendMu.Unlock()
 	s.localFIN = true
 	ack, flags := s.receiveState()
-	return Frame{Type: FrameFIN, Flags: flags, Seq: s.send.Next(), Ack: ack}, nil
+	return Frame{Type: FrameFIN, Flags: flags, Seq: s.send.next, Ack: ack}, nil
 }
 
 func (s *StreamState) AckFrame() (Frame, error) {
@@ -110,28 +124,35 @@ func (s *StreamState) RST() (Frame, error) {
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
 	ack, flags := s.receiveState()
-	return Frame{Type: FrameRST, Flags: flags, Seq: s.send.Next(), Ack: ack}, nil
+	return Frame{Type: FrameRST, Flags: flags, Seq: s.send.next, Ack: ack}, nil
 }
 
 // Handle applies a peer frame to the logical stream. ACK offsets are validated
 // before receive state is mutated, so an impossible acknowledgement cannot
 // advance one half of the state and then fail the other half.
 func (s *StreamState) Handle(frame Frame) ([]byte, uint64, error) {
+	fresh, ack, err := s.handleBorrowed(frame)
+	return append([]byte(nil), fresh...), ack, err
+}
+
+// handleBorrowed leaves fresh bytes in frame.Payload. The endpoint copies them
+// into its bounded inbound buffer before the transport reader reuses storage.
+func (s *StreamState) handleBorrowed(frame Frame) ([]byte, uint64, error) {
 	if s == nil || frame.Flags & ^knownFlags != 0 {
 		return nil, 0, ErrFrame
 	}
 
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
-	if frame.Ack > s.send.Next() {
+	if frame.Ack > s.send.next {
 		return nil, s.currentReceiveOffset(), ErrFrame
 	}
 	if frame.Flags&FlagFINAck != 0 {
-		if !s.localFIN || frame.Ack != s.send.Next() {
+		if !s.localFIN || frame.Ack != s.send.next {
 			return nil, s.currentReceiveOffset(), ErrFrame
 		}
 	}
-	if err := s.send.Ack(frame.Ack); err != nil {
+	if err := s.send.ackLocked(frame.Ack); err != nil {
 		return nil, s.currentReceiveOffset(), err
 	}
 	if frame.Flags&FlagFINAck != 0 {
@@ -143,7 +164,7 @@ func (s *StreamState) Handle(frame Frame) ([]byte, uint64, error) {
 	switch frame.Type {
 	case FrameData:
 		if s.remoteFIN {
-			expected := s.receive.Expected()
+			expected := s.receive.expected
 			if uint64(len(frame.Payload)) > ^uint64(0)-frame.Seq {
 				return nil, expected, ErrFrame
 			}
@@ -153,13 +174,13 @@ func (s *StreamState) Handle(frame Frame) ([]byte, uint64, error) {
 				return nil, expected, ErrFrame
 			}
 		}
-		fresh, receiveAck, err := s.receive.Accept(frame.Seq, frame.Payload)
+		fresh, receiveAck, err := s.receive.acceptBorrowedLocked(frame.Seq, frame.Payload)
 		if err != nil {
 			return nil, receiveAck, err
 		}
 		return fresh, receiveAck, nil
 	case FrameFIN:
-		expected := s.receive.Expected()
+		expected := s.receive.expected
 		if frame.Seq > expected {
 			return nil, expected, ErrSequenceGap
 		}
@@ -170,23 +191,23 @@ func (s *StreamState) Handle(frame Frame) ([]byte, uint64, error) {
 		return nil, expected, nil
 	case FrameAck:
 		if len(frame.Payload) != 0 {
-			return nil, s.receive.Expected(), ErrFrame
+			return nil, s.receive.expected, ErrFrame
 		}
-		return nil, s.receive.Expected(), nil
+		return nil, s.receive.expected, nil
 	case FrameRST:
 		if len(frame.Payload) != 0 {
-			return nil, s.receive.Expected(), ErrFrame
+			return nil, s.receive.expected, ErrFrame
 		}
-		return nil, s.receive.Expected(), nil
+		return nil, s.receive.expected, nil
 	default:
-		return nil, s.receive.Expected(), ErrFrame
+		return nil, s.receive.expected, ErrFrame
 	}
 }
 
 func (s *StreamState) currentReceiveOffset() uint64 {
 	s.recvMu.Lock()
 	defer s.recvMu.Unlock()
-	return s.receive.Expected()
+	return s.receive.expected
 }
 
 // ReplayFrames snapshots all bytes not yet acknowledged by the peer. Every
@@ -199,14 +220,14 @@ func (s *StreamState) ReplayFrames() []Frame {
 	}
 	s.sendMu.Lock()
 	defer s.sendMu.Unlock()
-	frames := s.send.Snapshot()
+	frames := s.send.snapshotLocked()
 	ack, flags := s.receiveState()
 	for i := range frames {
 		frames[i].Ack = ack
 		frames[i].Flags = flags
 	}
 	if s.localFIN && !s.localFINAck {
-		frames = append(frames, Frame{Type: FrameFIN, Flags: flags, Seq: s.send.Next(), Ack: ack})
+		frames = append(frames, Frame{Type: FrameFIN, Flags: flags, Seq: s.send.next, Ack: ack})
 	}
 	return frames
 }
@@ -222,7 +243,7 @@ func (s *StreamState) Binding(kind BindType, generation uint64) (Binding, error)
 		Type:          kind,
 		Identity:      s.identity,
 		Generation:    generation,
-		SendOffset:    s.send.Next(),
+		SendOffset:    s.send.next,
 		ReceiveOffset: receiveOffset,
 	}, nil
 }
@@ -231,7 +252,9 @@ func (s *StreamState) BufferedReplayBytes() int {
 	if s == nil {
 		return 0
 	}
-	return s.send.Buffered()
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+	return s.send.buffered
 }
 
 func (s *StreamState) LocalFINAcknowledged() bool {

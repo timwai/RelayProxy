@@ -257,14 +257,26 @@ func main() {
 			if err != nil {
 				return gateway.DeviceAuthorization{}, err
 			}
-			authorized := gateway.DeviceAuthorization{State: decision.State, DeviceID: decision.DeviceID,
-				OwnerUserID: decision.OwnerUserID, ApprovedCapabilities: decision.ApprovedCapabilities}
-			return authorized, nil
+			authorization := gatewayAuthorization(decision)
+			refreshRDPTargetOnlineState(authorization.RDPTargets, sessionMgr)
+			return authorization, nil
 		},
 		RecheckDevice: func(fingerprint, deviceID string) bool {
 			return db.IsDeviceIdentityApproved(fingerprint, deviceID)
 		},
+		ListRDPTargets: func(controllerID string) ([]protocol.RDPTarget, error) {
+			targets, err := db.ListRDPTargetsForController(controllerID)
+			if err != nil {
+				return nil, err
+			}
+			result := protocolRDPTargets(targets)
+			refreshRDPTargetOnlineState(result, sessionMgr)
+			return result, nil
+		},
 		OnDeviceConnected: func(deviceID string) {
+			_ = db.UpdateDeviceLastSeen(deviceID)
+		},
+		OnDeviceHeartbeat: func(deviceID string) {
 			_ = db.UpdateDeviceLastSeen(deviceID)
 		},
 		OnDeviceDisconnected: func(deviceID string) {
@@ -409,6 +421,52 @@ func main() {
 
 	log.Println("[Server] RelayProxy Server stopped.")
 	fmt.Println("Bye!")
+}
+
+func gatewayAuthorization(decision *repository.DeviceAuthorization) gateway.DeviceAuthorization {
+	if decision == nil {
+		return gateway.DeviceAuthorization{}
+	}
+	authorized := gateway.DeviceAuthorization{
+		State: decision.State, DeviceID: decision.DeviceID, OwnerUserID: decision.OwnerUserID,
+		ApprovedCapabilities: append([]string(nil), decision.ApprovedCapabilities...),
+		RDPTargets:           protocolRDPTargets(decision.RDPTargets),
+	}
+	return authorized
+}
+
+func protocolRDPTargets(targets []*repository.RDPTarget) []protocol.RDPTarget {
+	result := make([]protocol.RDPTarget, 0, len(targets))
+	for _, target := range targets {
+		if target == nil || target.DeviceID == "" {
+			continue
+		}
+		result = append(result, protocol.RDPTarget{
+			DeviceID: target.DeviceID,
+			Name:     target.Name,
+			Online:   target.Online,
+		})
+	}
+	return result
+}
+
+func refreshRDPTargetOnlineState(targets []protocol.RDPTarget, sessions *session.Manager) {
+	if sessions == nil {
+		return
+	}
+	for index := range targets {
+		device, online := sessions.Get(targets[index].DeviceID)
+		targets[index].Online = online && device != nil && containsString(device.Grants, protocol.CapabilityRDPHost)
+	}
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func sqliteDSNIsMemory(dsn string) bool {

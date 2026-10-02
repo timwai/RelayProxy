@@ -195,6 +195,32 @@ func TestCoordinatorBindsRelayPolicyToExitOffer(t *testing.T) {
 	}
 }
 
+func TestCoordinatorPreservesRelayPolicyFingerprintWithEmptySlices(t *testing.T) {
+	checker, err := acl.NewChecker(acl.Policy{
+		ID: "relay_acl", AllowInternet: true,
+		Rules: []acl.Rule{}, AccessHosts: []string{}, AccessCIDRs: []string{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := checker.Policy()
+	c := NewCoordinator(nil, nil, time.Minute, "", 8, policy)
+	copied := c.policyCopy()
+	if copied == nil {
+		t.Fatal("relay policy copy is missing")
+	}
+	if copied.Rules == nil || copied.AccessHosts == nil || copied.AccessCIDRs == nil {
+		t.Fatalf("empty slice representation was lost: %#v", copied)
+	}
+	verified, err := acl.NewChecker(*copied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verified.Policy().Fingerprint != copied.Fingerprint {
+		t.Fatalf("relay policy fingerprint changed during copy: %q != %q", verified.Policy().Fingerprint, copied.Fingerprint)
+	}
+}
+
 func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
 	manager := session.NewManager()
 	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)

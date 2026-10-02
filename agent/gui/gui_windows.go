@@ -620,7 +620,9 @@ func ShowStartupError(err error, fallbackURL string) {
 	}
 	message := "RelayProxy 桌面界面无法启动。\n\n原因：" + err.Error()
 	if fallbackURL != "" {
-		message += "\n\nAgent 仍会继续运行，请在浏览器打开：\n" + fallbackURL
+		if redactedURL := redactManagementURL(fallbackURL); redactedURL != "" {
+			message += "\n\nAgent 仍会继续运行，请在浏览器打开：\n" + redactedURL
+		}
 	}
 	text, textErr := windows.UTF16PtrFromString(message)
 	title, titleErr := windows.UTF16PtrFromString("RelayProxy")

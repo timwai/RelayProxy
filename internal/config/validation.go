@@ -176,6 +176,12 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c.Web.Port < 1 || c.Web.Port > 65535 {
 		return fmt.Errorf("web.port 必须在 1-65535 之间")
 	}
+	if c.IsWebEnabled() {
+		token := strings.TrimSpace(c.Web.Token)
+		if token != "" && len(token) < 32 {
+			return fmt.Errorf("web.token 必须留空或至少包含 32 字节")
+		}
+	}
 	if c.GUI.Theme != "dark" && c.GUI.Theme != "light" && c.GUI.Theme != "system" {
 		return fmt.Errorf("gui.theme 必须是 dark / light / system")
 	}

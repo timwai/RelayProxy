@@ -45,9 +45,25 @@ type Frame struct {
 	Seq     uint64
 	Ack     uint64
 	Payload []byte
+	wire    []byte // optional HeaderSize-byte prefix followed by Payload
 }
 
 func WriteFrame(w io.Writer, frame Frame) error {
+	var header [HeaderSize]byte
+	return writeFrame(w, frame, header[:])
+}
+
+// frameWriter reuses one header buffer. It must be serialized by its owner;
+// Endpoint does so with writeMu for data, replay and control frames alike.
+type frameWriter struct {
+	header [HeaderSize]byte
+}
+
+func (writer *frameWriter) Write(w io.Writer, frame Frame) error {
+	return writeFrame(w, frame, writer.header[:])
+}
+
+func writeFrame(w io.Writer, frame Frame, header []byte) error {
 	if w == nil {
 		return fmt.Errorf("%w: nil writer", ErrFrame)
 	}
@@ -69,7 +85,10 @@ func WriteFrame(w io.Writer, frame Frame) error {
 	default:
 		return fmt.Errorf("%w: type %d", ErrFrame, frame.Type)
 	}
-	var header [HeaderSize]byte
+	combined := len(frame.Payload) > 0 && len(frame.wire) == HeaderSize+len(frame.Payload)
+	if combined {
+		header = frame.wire[:HeaderSize]
+	}
 	binary.BigEndian.PutUint32(header[0:4], Magic)
 	header[4] = Version
 	header[5] = byte(frame.Type)
@@ -77,18 +96,41 @@ func WriteFrame(w io.Writer, frame Frame) error {
 	binary.BigEndian.PutUint64(header[8:16], frame.Seq)
 	binary.BigEndian.PutUint64(header[16:24], frame.Ack)
 	binary.BigEndian.PutUint32(header[24:28], uint32(len(frame.Payload)))
-	if err := writeAll(w, header[:]); err != nil {
+	if combined {
+		return writeAll(w, frame.wire)
+	}
+	if err := writeAll(w, header); err != nil {
 		return err
 	}
 	return writeAll(w, frame.Payload)
 }
 
 func ReadFrame(r io.Reader) (Frame, error) {
+	var header [HeaderSize]byte
+	return readFrame(r, header[:], nil)
+}
+
+// frameReader is owned by a single transport read loop. Payloads are valid only
+// until the next Read; callers must consume or copy them before reading again.
+// The public ReadFrame never reuses storage, keeping its payload caller-owned.
+type frameReader struct {
+	header  [HeaderSize]byte
+	payload []byte
+}
+
+func (reader *frameReader) Read(r io.Reader) (Frame, error) {
+	frame, err := readFrame(r, reader.header[:], reader.payload)
+	if err == nil && len(frame.Payload) > 0 {
+		reader.payload = frame.Payload
+	}
+	return frame, err
+}
+
+func readFrame(r io.Reader, header, payload []byte) (Frame, error) {
 	if r == nil {
 		return Frame{}, fmt.Errorf("%w: nil reader", ErrFrame)
 	}
-	var header [HeaderSize]byte
-	if _, err := io.ReadFull(r, header[:]); err != nil {
+	if _, err := io.ReadFull(r, header); err != nil {
 		return Frame{}, err
 	}
 	if binary.BigEndian.Uint32(header[0:4]) != Magic || header[4] != Version ||
@@ -121,7 +163,10 @@ func ReadFrame(r io.Reader) (Frame, error) {
 		return Frame{}, ErrFrame
 	}
 	if n > 0 {
-		frame.Payload = make([]byte, int(n))
+		if cap(payload) < int(n) {
+			payload = make([]byte, int(n))
+		}
+		frame.Payload = payload[:int(n)]
 		if _, err := io.ReadFull(r, frame.Payload); err != nil {
 			return Frame{}, err
 		}

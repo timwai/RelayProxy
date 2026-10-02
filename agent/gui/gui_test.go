@@ -40,6 +40,7 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goGetConfig",
 		"goGetConnections",
 		"goGetLogs",
+		"goGetRDPTargets",
 		"goGetStatus",
 		"goOpenConfigDir",
 		"goOpenConnections",
@@ -48,6 +49,8 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goRestart",
 		"goSaveConfig",
 		"goSelectExit",
+		"goConnectRDP",
+		"goDisconnectRDP",
 		"goSetAutostart",
 		"goSetTheme",
 	} {

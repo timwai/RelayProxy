@@ -31,7 +31,9 @@ type GatewayConfig struct {
 	ServerInstanceID        string
 	AuthorizeDevice         func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
 	RecheckDevice           func(fingerprint, deviceID string) bool
+	ListRDPTargets          func(controllerID string) ([]protocol.RDPTarget, error)
 	OnDeviceConnected       func(deviceID string)
+	OnDeviceHeartbeat       func(deviceID string)
 	OnDeviceDisconnected    func(deviceID string)
 	MaxConnections          int // global tunnel connection limit
 	MaxConnectionsPerDevice int // per-device concurrent streams (also sent in Welcome)
@@ -663,12 +665,26 @@ func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 			return
 		}
 		dev.TouchHeartbeat()
+		if g.cfg.OnDeviceHeartbeat != nil {
+			g.cfg.OnDeviceHeartbeat(dev.DeviceID)
+		}
+
+		pong := protocol.PongMessage{Timestamp: time.Now().Unix()}
+		if containsCapability(dev.Grants, protocol.CapabilityRDPClient) && g.cfg.ListRDPTargets != nil {
+			targets, err := g.cfg.ListRDPTargets(dev.DeviceID)
+			if err != nil {
+				log.Printf("[Gateway] Refresh RDP targets for %s: %v", dev.DeviceID, err)
+			} else {
+				if targets == nil {
+					targets = []protocol.RDPTarget{}
+				}
+				pong.RDPTargets = &targets
+			}
+		}
 
 		// Respond with Pong
 		_ = dev.ControlStream.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		if err := protocol.WriteJSON(dev.ControlStream, protocol.PongMessage{
-			Timestamp: time.Now().Unix(),
-		}); err != nil {
+		if err := protocol.WriteJSON(dev.ControlStream, pong); err != nil {
 			return
 		}
 	}

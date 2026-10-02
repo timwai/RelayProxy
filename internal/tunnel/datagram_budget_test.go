@@ -16,7 +16,7 @@ import (
 func budgetMux(t *testing.T, budget *datagramBudget) *datagramMux {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
-	m := &datagramMux{ctx: ctx, budget: budget, channels: make(map[uint64]*DatagramChannel), done: make(chan struct{}), send: make(chan queuedDatagram, datagramSendQueueSize), sendReady: make(chan struct{}, 1)}
+	m := &datagramMux{ctx: ctx, budget: budget, channels: make(map[uint64]*DatagramChannel), done: make(chan struct{}), send: make(chan queuedDatagram, datagramSendQueueSize)}
 	t.Cleanup(func() { cancel(); m.close() })
 	return m
 }

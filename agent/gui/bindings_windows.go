@@ -53,6 +53,33 @@ func (s *WailsService) GetStatus() (string, error) {
 	return s.owner.statusJSON(), nil
 }
 
+func (s *WailsService) GetRDPTargets() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "[]", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetRDPTargets())
+	if err != nil {
+		return "[]", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) ConnectRDP(targetID string, autoLaunch bool) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	target, err := s.owner.bridge.ConnectRDP(targetID, autoLaunch)
+	return rdpActionResponse(map[string]any{"target": target}, err), nil
+}
+
+func (s *WailsService) DisconnectRDP() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	s.owner.bridge.DisconnectRDP()
+	return rdpActionResponse(nil, nil), nil
+}
+
 func (s *WailsService) GetMessages() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil
@@ -422,5 +449,18 @@ func saveResponse(res *bridge.SaveResult, err error) string {
 		return `{"ok":false,"message":"GUI unavailable"}`
 	}
 	data, _ := json.Marshal(res)
+	return string(data)
+}
+
+func rdpActionResponse(value map[string]any, err error) string {
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data)
+	}
+	if value == nil {
+		value = make(map[string]any)
+	}
+	value["ok"] = true
+	data, _ := json.Marshal(value)
 	return string(data)
 }

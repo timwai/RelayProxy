@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/hashicorp/yamux"
@@ -184,6 +185,70 @@ func TestUDPStreamCallerDeadlinesAndPartialFrame(t *testing.T) {
 		_ = c.SetWriteDeadline(time.Now().Add(20 * time.Millisecond))
 		if _, err := c.WriteTo([]byte("ping"), nil); !errors.Is(err, os.ErrDeadlineExceeded) {
 			t.Fatalf("write: %v", err)
+		}
+	})
+}
+
+func TestUDPStreamIdleExpiryRechecksLastActivity(t *testing.T) {
+	a, b := net.Pipe()
+	defer b.Close()
+	c := NewUDPStreamConn(a, &net.UDPAddr{})
+	defer c.Close()
+	// Simulate a stream older than the idle limit, then receive fresh activity.
+	c.activityOrigin = time.Now().Add(-2 * UDPIdleTimeout)
+
+	c.touch()
+	c.expire()
+	c.mu.Lock()
+	closedAfterActivity := c.closed
+	c.mu.Unlock()
+	c.lastActivityNanos.Store(0)
+	if closedAfterActivity {
+		t.Fatal("active UDP stream expired")
+	}
+
+	c.expire()
+	c.mu.Lock()
+	closedAfterIdle := c.closed
+	c.mu.Unlock()
+	if !closedAfterIdle {
+		t.Fatal("idle UDP stream remained open")
+	}
+	if _, err := b.Write([]byte("expired")); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("idle expiry did not close the transport: %v", err)
+	}
+	c.touch()
+	if c.lastActivityNanos.Load() != -1 {
+		t.Fatal("late activity revived an expired stream")
+	}
+}
+
+func TestUDPStreamIdleTimerUsesLatestActivity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		a, b := net.Pipe()
+		defer b.Close()
+		c := NewUDPStreamConn(a, &net.UDPAddr{})
+		defer c.Close()
+		start := time.Now()
+		time.Sleep(UDPIdleTimeout / 2)
+		written := make(chan error, 1)
+		go func() {
+			_, err := c.WriteTo([]byte("ping"), nil)
+			written <- err
+		}()
+		var frame [8]byte
+		if _, err := io.ReadFull(b, frame[:]); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-written; err != nil {
+			t.Fatal(err)
+		}
+		var one [1]byte
+		if _, err := b.Read(one[:]); !errors.Is(err, io.EOF) {
+			t.Fatalf("idle peer read: %v", err)
+		}
+		if elapsed := time.Since(start); elapsed != UDPIdleTimeout+UDPIdleTimeout/2 {
+			t.Fatalf("idle expiry after %v, want %v", elapsed, UDPIdleTimeout+UDPIdleTimeout/2)
 		}
 	})
 }

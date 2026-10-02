@@ -47,8 +47,12 @@ func newWebTestBridge(t *testing.T) *bridge.UIBridge {
 	return bridge.NewUIBridge(agent, path)
 }
 
-func webTestHandler(b *bridge.UIBridge, loopback bool) (*WebServer, http.Handler) {
-	w := &WebServer{bridge: b, loopback: loopback, done: make(chan struct{})}
+func webTestHandler(b *bridge.UIBridge, loopback bool, tokens ...string) (*WebServer, http.Handler) {
+	token := ""
+	if len(tokens) > 0 {
+		token = tokens[0]
+	}
+	w := &WebServer{bridge: b, token: token, loopback: loopback, done: make(chan struct{})}
 	mux := http.NewServeMux()
 	w.registerRoutes(mux)
 	return w, w.authorize(mux)
@@ -126,36 +130,42 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
-func TestWebManagementDoesNotExposeRDPTargetInventory(t *testing.T) {
+func TestWebManagementExposesServerAuthorizedRDPTargetActions(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
 	body := page.Body.String()
-	for _, forbidden := range []string{"section-btn-rdp", "tab-pane-rdp", "rdp-targets", "goConnectRDP", "goGetRDPTargets"} {
-		if strings.Contains(body, forbidden) {
-			t.Fatalf("Agent management page still exposes RDP inventory hook %q", forbidden)
+	for _, want := range []string{"section-btn-rdp", "tab-pane-rdp", "rdp-targets", "goConnectRDP", "goGetRDPTargets", "P2P TCP 直连"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Agent management page missing RDP inventory hook %q", want)
 		}
 	}
 
 	bridgeJS := httptest.NewRecorder()
 	handler.ServeHTTP(bridgeJS, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
-	for _, forbidden := range []string{"goGetRDPTargets", "goConnectRDP", "goDisconnectRDP", "/api/rdp/targets", "/api/rdp/connect", "/api/rdp/disconnect"} {
-		if strings.Contains(bridgeJS.Body.String(), forbidden) {
-			t.Fatalf("Agent web bridge still exposes RDP inventory hook %q", forbidden)
+	for _, want := range []string{"goGetRDPTargets", "goConnectRDP", "goDisconnectRDP", "/api/rdp/targets", "/api/rdp/connect", "/api/rdp/disconnect"} {
+		if !strings.Contains(bridgeJS.Body.String(), want) {
+			t.Fatalf("Agent web bridge missing RDP inventory hook %q", want)
 		}
 	}
 
-	for _, path := range []string{"/api/rdp/targets", "/api/rdp/connect", "/api/rdp/disconnect"} {
-		method := http.MethodGet
-		if path != "/api/rdp/targets" {
-			method = http.MethodPost
-		}
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, httptest.NewRequest(method, "http://127.0.0.1"+path, strings.NewReader("{}")))
-		if rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
-			t.Fatalf("removed Agent RDP endpoint %s returned %d", path, rec.Code)
-		}
+	targets := httptest.NewRecorder()
+	handler.ServeHTTP(targets, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/rdp/targets", nil))
+	if targets.Code != http.StatusOK || strings.TrimSpace(targets.Body.String()) != "[]" {
+		t.Fatalf("unapproved RDP inventory response = %d %q", targets.Code, targets.Body.String())
+	}
+
+	connect := httptest.NewRecorder()
+	handler.ServeHTTP(connect, httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/rdp/connect", strings.NewReader(`{"targetId":"not-authorized","autoLaunch":true}`)))
+	if connect.Code != http.StatusBadRequest || !strings.Contains(connect.Body.String(), "not approved") {
+		t.Fatalf("unauthorized RDP connect response = %d %q", connect.Code, connect.Body.String())
+	}
+
+	disconnect := httptest.NewRecorder()
+	handler.ServeHTTP(disconnect, httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/rdp/disconnect", strings.NewReader(`{}`)))
+	if disconnect.Code != http.StatusOK {
+		t.Fatalf("RDP disconnect response = %d %q", disconnect.Code, disconnect.Body.String())
 	}
 }
 
@@ -182,12 +192,19 @@ func TestWebManagementLoadsSharedFoundationBeforePageStyles(t *testing.T) {
 
 func TestWebRejectsCrossOriginMutation(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
-	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/reload", bytes.NewReader([]byte("{}")))
-	request.Header.Set("Origin", "http://evil.test")
-	forbidden := httptest.NewRecorder()
-	handler.ServeHTTP(forbidden, request)
-	if forbidden.Code != http.StatusForbidden {
-		t.Fatalf("cross-origin mutation status = %d", forbidden.Code)
+	for _, origin := range []string{
+		"http://evil.test",
+		"custom://127.0.0.1",
+		"http://user@127.0.0.1",
+		"http://127.0.0.1/path",
+	} {
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/reload", bytes.NewReader([]byte("{}")))
+		request.Header.Set("Origin", origin)
+		forbidden := httptest.NewRecorder()
+		handler.ServeHTTP(forbidden, request)
+		if forbidden.Code != http.StatusForbidden {
+			t.Errorf("cross-origin mutation %q status = %d", origin, forbidden.Code)
+		}
 	}
 }
 
@@ -230,7 +247,7 @@ func TestWebConfigMutationAndQuit(t *testing.T) {
 	}
 }
 
-func TestWebAcceptsNonLoopbackListener(t *testing.T) {
+func TestWebAllowsNonLoopbackListenerWithoutToken(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -240,13 +257,70 @@ func TestWebAcceptsNonLoopbackListener(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, err := StartWeb(newWebTestBridge(t), WebOptions{
+		Listen: "0.0.0.0", Port: port, Token: strings.Repeat("t", 31),
+	}); err == nil {
+		t.Fatal("non-loopback Agent web listener accepted a short non-empty token")
+	}
+
 	server, err := StartWeb(newWebTestBridge(t), WebOptions{Listen: "0.0.0.0", Port: port})
 	if err != nil {
-		t.Fatalf("non-loopback Agent web listener was rejected: %v", err)
+		t.Fatalf("non-loopback Agent web listener without token was rejected: %v", err)
 	}
 	t.Cleanup(func() { _ = server.Close(context.Background()) })
 	if server.loopback {
 		t.Fatal("0.0.0.0 listener was incorrectly marked as loopback")
+	}
+	if browserURL := server.BrowserURL(); (!strings.HasPrefix(browserURL, "http://127.0.0.1:") && !strings.HasPrefix(browserURL, "http://[::1]:")) ||
+		strings.Contains(browserURL, "token=") {
+		t.Fatalf("unexpected unauthenticated browser URL: %q", browserURL)
+	}
+}
+
+func TestWebOptionalTokenProtectsRemoteManagement(t *testing.T) {
+	_, openHandler := webTestHandler(newWebTestBridge(t), false)
+	openRequest := httptest.NewRequest(http.MethodGet, "http://agent.test/api/status", nil)
+	openResponse := httptest.NewRecorder()
+	openHandler.ServeHTTP(openResponse, openRequest)
+	if openResponse.Code != http.StatusOK {
+		t.Fatalf("token-free remote request status = %d", openResponse.Code)
+	}
+
+	token := strings.Repeat("t", 32)
+	_, handler := webTestHandler(newWebTestBridge(t), false, token)
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "http://agent.test/api/config", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated remote request status = %d", unauthorized.Code)
+	}
+
+	loginRequest := httptest.NewRequest(http.MethodGet, "http://agent.test/?token="+token, nil)
+	login := httptest.NewRecorder()
+	handler.ServeHTTP(login, loginRequest)
+	if login.Code != http.StatusSeeOther || login.Header().Get("Location") != "/" {
+		t.Fatalf("token exchange response = %d location=%q", login.Code, login.Header().Get("Location"))
+	}
+	response := login.Result()
+	if len(response.Cookies()) != 1 || response.Cookies()[0].Name != webAuthCookie || !response.Cookies()[0].HttpOnly ||
+		response.Cookies()[0].SameSite != http.SameSiteStrictMode || response.Cookies()[0].Value == token {
+		t.Fatalf("token exchange did not issue the protected cookie: %#v", response.Cookies())
+	}
+
+	authorizedRequest := httptest.NewRequest(http.MethodGet, "http://agent.test/api/config", nil)
+	authorizedRequest.AddCookie(response.Cookies()[0])
+	authorized := httptest.NewRecorder()
+	handler.ServeHTTP(authorized, authorizedRequest)
+	if authorized.Code != http.StatusOK {
+		t.Fatalf("cookie-authenticated remote request status = %d", authorized.Code)
+	}
+
+	bearerRequest := httptest.NewRequest(http.MethodGet, "http://agent.test/api/status", nil)
+	bearerRequest.Header.Set("Authorization", "Bearer "+token)
+	bearer := httptest.NewRecorder()
+	handler.ServeHTTP(bearer, bearerRequest)
+	if bearer.Code != http.StatusOK {
+		t.Fatalf("bearer-authenticated remote request status = %d", bearer.Code)
 	}
 }
 

@@ -113,7 +113,17 @@ func (db *DB) ObserveDeviceIdentity(observation DeviceIdentityObservation) (*Dev
 			if err := tx.Commit(); err != nil {
 				return nil, err
 			}
-			return &DeviceAuthorization{State: state, DeviceID: deviceID.String, OwnerUserID: owner.String, ApprovedCapabilities: effective}, nil
+			authorization := &DeviceAuthorization{
+				State: state, DeviceID: deviceID.String, OwnerUserID: owner.String,
+				ApprovedCapabilities: effective,
+			}
+			if slices.Contains(effective, "rdp.controller") {
+				authorization.RDPTargets, err = db.ListRDPTargetsForController(deviceID.String)
+				if err != nil {
+					return nil, fmt.Errorf("list approved RDP targets: %w", err)
+				}
+			}
+			return authorization, nil
 		case EnrollmentRejected, EnrollmentRevoked:
 			if err := tx.Commit(); err != nil {
 				return nil, err

@@ -2,6 +2,9 @@ package gui
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,10 +24,13 @@ import (
 	"relayproxy/internal/webui"
 )
 
+const webAuthCookie = "relayproxy_agent_web"
+
 // WebOptions configures the browser-accessible copy of the desktop UI.
 type WebOptions struct {
 	Listen string
 	Port   int
+	Token  string
 }
 
 // WebServer owns the browser management listener. Done is closed when the user
@@ -33,6 +39,7 @@ type WebServer struct {
 	server   *http.Server
 	listener net.Listener
 	bridge   *bridge.UIBridge
+	token    string
 	loopback bool
 	done     chan struct{}
 	doneOnce sync.Once
@@ -50,11 +57,15 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 		return nil, fmt.Errorf("invalid web management port %d", opts.Port)
 	}
 	loopback := webLoopbackHost(host)
+	token := strings.TrimSpace(opts.Token)
+	if token != "" && len(token) < 32 {
+		return nil, errors.New("web.token must be empty or at least 32 bytes")
+	}
 	listener, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(opts.Port)))
 	if err != nil {
 		return nil, fmt.Errorf("start web management listener: %w", err)
 	}
-	w := &WebServer{listener: listener, bridge: b, loopback: loopback, done: make(chan struct{})}
+	w := &WebServer{listener: listener, bridge: b, token: token, loopback: loopback, done: make(chan struct{})}
 	mux := http.NewServeMux()
 	w.registerRoutes(mux)
 	w.server = &http.Server{
@@ -76,6 +87,31 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 func (w *WebServer) Addr() string          { return w.listener.Addr().String() }
 func (w *WebServer) Done() <-chan struct{} { return w.done }
 
+// BrowserURL returns a local URL suitable for opening the management page.
+// Wildcard listener addresses are mapped to loopback; when authentication is
+// enabled, the one-time query parameter is immediately exchanged for an
+// HttpOnly cookie and removed by a redirect.
+func (w *WebServer) BrowserURL() string {
+	host, port, err := net.SplitHostPort(w.Addr())
+	if err != nil {
+		return ""
+	}
+	if addr, parseErr := netip.ParseAddr(host); parseErr == nil && addr.IsUnspecified() {
+		if addr.Is6() {
+			host = "::1"
+		} else {
+			host = "127.0.0.1"
+		}
+	}
+	u := &url.URL{Scheme: "http", Host: net.JoinHostPort(host, port), Path: "/"}
+	if w.token != "" {
+		query := u.Query()
+		query.Set("token", w.token)
+		u.RawQuery = query.Encode()
+	}
+	return u.String()
+}
+
 func (w *WebServer) Close(ctx context.Context) error {
 	if w == nil || w.server == nil {
 		return nil
@@ -92,6 +128,24 @@ func (w *WebServer) authorize(next http.Handler) http.Handler {
 			http.Error(rw, "invalid Host for loopback management listener", http.StatusForbidden)
 			return
 		}
+		if w.token != "" {
+			if supplied := r.URL.Query().Get("token"); secureEqual(supplied, w.token) {
+				http.SetCookie(rw, &http.Cookie{
+					Name: webAuthCookie, Value: webCookieValue(w.token), Path: "/", HttpOnly: true,
+					SameSite: http.SameSiteStrictMode,
+				})
+				clean := *r.URL
+				query := clean.Query()
+				query.Del("token")
+				clean.RawQuery = query.Encode()
+				http.Redirect(rw, r, clean.RequestURI(), http.StatusSeeOther)
+				return
+			}
+			if !w.authorized(r) {
+				http.Error(rw, "unauthorized; open /?token=<web.token> once", http.StatusUnauthorized)
+				return
+			}
+		}
 		if isMutation(r.Method) && !sameOrigin(r) {
 			http.Error(rw, "cross-origin request rejected", http.StatusForbidden)
 			return
@@ -100,17 +154,39 @@ func (w *WebServer) authorize(next http.Handler) http.Handler {
 	})
 }
 
+func (w *WebServer) authorized(r *http.Request) bool {
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if strings.HasPrefix(strings.ToLower(auth), "bearer ") && secureEqual(strings.TrimSpace(auth[7:]), w.token) {
+		return true
+	}
+	cookie, err := r.Cookie(webAuthCookie)
+	return err == nil && secureEqual(cookie.Value, webCookieValue(w.token))
+}
+
+func webCookieValue(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func secureEqual(a, b string) bool {
+	return len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
 func isMutation(method string) bool {
 	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
 }
 
 func sameOrigin(r *http.Request) bool {
+	if strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site") {
+		return false
+	}
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
 	if origin == "" {
 		return true
 	}
 	u, err := url.Parse(origin)
-	return err == nil && strings.EqualFold(u.Host, r.Host)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && strings.EqualFold(u.Host, r.Host) &&
+		u.User == nil && u.Path == "" && u.RawQuery == "" && u.Fragment == ""
 }
 
 func webLoopbackHost(host string) bool {
@@ -147,6 +223,12 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
+	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
+	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
+	mux.HandleFunc("POST /api/rdp/disconnect", func(rw http.ResponseWriter, _ *http.Request) {
+		w.bridge.DisconnectRDP()
+		writeWebJSON(rw, map[string]bool{"ok": true})
+	})
 	mux.HandleFunc("GET /api/logs", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetLogs(500)) })
 	mux.HandleFunc("GET /api/messages", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetMessages(500)) })
 	mux.HandleFunc("DELETE /api/messages", func(rw http.ResponseWriter, _ *http.Request) {
@@ -249,6 +331,22 @@ func (w *WebServer) selectExit(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeWebJSON(rw, map[string]bool{"ok": true})
+}
+
+func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TargetID   string `json:"targetId"`
+		AutoLaunch bool   `json:"autoLaunch"`
+	}
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	target, err := w.bridge.ConnectRDP(in.TargetID, in.AutoLaunch)
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, map[string]any{"ok": true, "target": target})
 }
 
 func (w *WebServer) setAutostart(rw http.ResponseWriter, r *http.Request) {
@@ -398,6 +496,9 @@ const webBridgeJS = `(function () {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
   window.goGetStatus = function () { return request('/api/status'); };
+  window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
+  window.goConnectRDP = function (targetId, autoLaunch) { return json('/api/rdp/connect', 'POST', {targetId:targetId, autoLaunch:!!autoLaunch}); };
+  window.goDisconnectRDP = function () { return json('/api/rdp/disconnect', 'POST', {}); };
   window.goGetLogs = function () { return request('/api/logs'); };
   window.goClearLogs = function () { return request('/api/logs', {method:'DELETE'}); };
   window.goGetMessages = function () { return request('/api/messages'); };

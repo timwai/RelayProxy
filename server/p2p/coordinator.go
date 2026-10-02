@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -794,8 +795,8 @@ func (c *Coordinator) policyCopy() *acl.Policy {
 }
 
 func clonePolicy(policy acl.Policy) acl.Policy {
-	policy.Rules = append([]acl.Rule(nil), policy.Rules...)
-	policy.AccessHosts = append([]string(nil), policy.AccessHosts...)
-	policy.AccessCIDRs = append([]string(nil), policy.AccessCIDRs...)
+	policy.Rules = slices.Clone(policy.Rules)
+	policy.AccessHosts = slices.Clone(policy.AccessHosts)
+	policy.AccessCIDRs = slices.Clone(policy.AccessCIDRs)
 	return policy
 }

@@ -261,6 +261,73 @@ func TestRDPRequiresExplicitPerTargetGrant(t *testing.T) {
 	}
 }
 
+func TestExplicitRDPGrantMigrationClearsLegacyRowsOnlyOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rdp-migration.db")
+	db, err := OpenDB("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := &User{Username: "admin", PasswordHash: "hash", Role: "admin", Status: "active"}
+	if err := db.CreateUser(admin); err != nil {
+		t.Fatal(err)
+	}
+	approve := func(fingerprint, name string, capabilities []string) *Device {
+		t.Helper()
+		pending, err := db.ObserveDeviceIdentity(DeviceIdentityObservation{
+			Fingerprint: fingerprint, InstallationID: fingerprint + "-install", PublicKey: []byte(fingerprint + "-key"),
+			DeviceName: name, RequestedCapabilities: capabilities,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		device, err := db.ApproveEnrollment(pending.RequestID, admin.ID, capabilities)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return device
+	}
+	controller := approve("migration-controller", "Migration Controller", []string{"rdp.controller"})
+	target := approve("migration-target", "Migration Target", []string{"rdp.host"})
+
+	// Simulate a database created by the previous release: the old code inserted
+	// same-owner grants and had no explicit-grant migration marker.
+	if _, err := db.Exec(`INSERT INTO rdp_access_grants (controller_device_id, target_device_id, granted_by, created_at) VALUES (?, ?, ?, ?)`,
+		controller.ID, target.ID, admin.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM authorization_audit WHERE action = 'rdp.explicit_grants.v1'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = OpenDB("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targets, err := db.ListRDPTargetsForController(controller.ID); err != nil || len(targets) != 0 {
+		t.Fatalf("legacy automatic grants survived explicit-grant migration: targets=%+v err=%v", targets, err)
+	}
+	if _, err := db.ReplaceRDPTargetGrants(controller.ID, admin.ID, []string{target.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The migration marker must prevent later restarts from deleting grants that
+	// were explicitly created by an administrator.
+	db, err = OpenDB("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if targets, err := db.ListRDPTargetsForController(controller.ID); err != nil || len(targets) != 1 || targets[0].DeviceID != target.ID {
+		t.Fatalf("explicit grant did not survive restart: targets=%+v err=%v", targets, err)
+	}
+}
+
 func TestUpdateDeviceCapabilitiesReconcilesRDPResources(t *testing.T) {
 	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "capabilities.db"))
 	if err != nil {

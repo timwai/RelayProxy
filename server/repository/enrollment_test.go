@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewDatabaseGenerationAndEnrollmentApproval(t *testing.T) {

@@ -249,6 +249,7 @@ func (r *Router) registerRoutes() {
 	// RDP APIs. The controller/target matrix is server-owned; this endpoint
 	// only exposes targets already granted to the authenticated user's devices.
 	r.mux.HandleFunc("GET /api/v1/rdp/targets", r.requireAuth(r.handleListRDPTargets))
+	r.mux.HandleFunc("PUT /api/v1/devices/{id}/rdp-targets", r.requireAuth(r.requireAdmin(r.handleReplaceRDPTargets)))
 	r.mux.HandleFunc("GET /api/v1/rdp/ingress", r.requireAuth(r.handleListRDPIngress))
 	r.mux.HandleFunc("POST /api/v1/rdp/ingress", r.requireAuth(r.requireAdmin(r.handleCreateRDPIngress)))
 	r.mux.HandleFunc("POST /api/v1/rdp/ingress/{id}/enable", r.requireAuth(r.requireAdmin(r.handleEnableRDPIngress)))
@@ -1200,6 +1201,28 @@ func (r *Router) handleListRDPTargets(w http.ResponseWriter, req *http.Request) 
 		result = append(result, map[string]any{"controllerId": device.ID, "controllerName": device.Name, "targets": targets})
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (r *Router) handleReplaceRDPTargets(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		TargetDeviceIDs []string `json:"targetDeviceIds"`
+	}
+	if err := decodeJSON(w, req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	actor, _ := req.Context().Value(userContextKey).(string)
+	controllerID := strings.TrimSpace(req.PathValue("id"))
+	targets, err := r.db.ReplaceRDPTargetGrants(controllerID, actor, body.TargetDeviceIDs)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "RDP controller not found")
+		} else {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"controllerId": controllerID, "targets": targets})
 }
 
 func (r *Router) handleListRDPIngress(w http.ResponseWriter, req *http.Request) {

@@ -233,6 +233,93 @@ func TestUpdateDeviceCapabilitiesAPI(t *testing.T) {
 	}
 }
 
+func TestRDPExplicitTargetGrantAPI(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	adminUser, err := router.db.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	approve := func(fingerprint, name string, capabilities []string) *repository.Device {
+		t.Helper()
+		pending, err := router.db.ObserveDeviceIdentity(repository.DeviceIdentityObservation{
+			Fingerprint: fingerprint, InstallationID: fingerprint + "-install", PublicKey: []byte(fingerprint + "-key"),
+			DeviceName: name, Platform: "windows", Arch: "amd64", RequestedCapabilities: capabilities,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		device, err := router.db.ApproveEnrollment(pending.RequestID, adminUser.ID, capabilities)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return device
+	}
+	controller := approve("rdp-controller-api", "Controller", []string{"rdp.controller"})
+	first := approve("rdp-target-a-api", "Target A", []string{"rdp.host"})
+	second := approve("rdp-target-b-api", "Target B", []string{"rdp.host"})
+
+	getTargets := func() []repository.RDPTarget {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/rdp/targets?controllerId="+controller.ID, nil)
+		req.AddCookie(adminCookie)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list RDP targets failed: %d %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Targets []repository.RDPTarget `json:"targets"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Targets
+	}
+	if targets := getTargets(); len(targets) != 0 {
+		t.Fatalf("same-owner RDP hosts were visible before explicit grant: %+v", targets)
+	}
+
+	put := func(ids []string) []repository.RDPTarget {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"targetDeviceIds": ids})
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/devices/"+controller.ID+"/rdp-targets", bytes.NewReader(body))
+		req.AddCookie(adminCookie)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("replace RDP grants failed: %d %s", rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Targets []repository.RDPTarget `json:"targets"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Targets
+	}
+	if targets := put([]string{first.ID}); len(targets) != 1 || targets[0].DeviceID != first.ID {
+		t.Fatalf("target A grant response=%+v", targets)
+	}
+	if targets := getTargets(); len(targets) != 1 || targets[0].DeviceID != first.ID {
+		t.Fatalf("target A was not the only visible host: %+v", targets)
+	}
+	if ok, err := router.db.AuthorizeRDP(controller.ID, second.ID); err != nil || ok {
+		t.Fatalf("unselected target B became connectable: ok=%v err=%v", ok, err)
+	}
+
+	if targets := put([]string{second.ID}); len(targets) != 1 || targets[0].DeviceID != second.ID {
+		t.Fatalf("target B replacement response=%+v", targets)
+	}
+	if ok, err := router.db.AuthorizeRDP(controller.ID, first.ID); err != nil || ok {
+		t.Fatalf("removed target A remained connectable: ok=%v err=%v", ok, err)
+	}
+	if ok, err := router.db.AuthorizeRDP(controller.ID, second.ID); err != nil || !ok {
+		t.Fatalf("selected target B was not connectable: ok=%v err=%v", ok, err)
+	}
+}
+
 func TestRDPIngressCreationRejectsDisabledManager(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()

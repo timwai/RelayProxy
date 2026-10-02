@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewDatabaseGenerationAndEnrollmentApproval(t *testing.T) {
@@ -173,7 +174,7 @@ func TestApprovedIdentityRefreshesRequestedCapabilitiesAndScopesSessionGrants(t 
 	}
 }
 
-func TestRDPApprovalCreatesOwnerScopedTargetGrant(t *testing.T) {
+func TestRDPRequiresExplicitPerTargetGrant(t *testing.T) {
 	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "rdp.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -199,40 +200,132 @@ func TestRDPApprovalCreatesOwnerScopedTargetGrant(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	targetRequest := observe("target-fingerprint", "Target", []string{"rdp.host"})
-	target, err := db.ApproveEnrollment(targetRequest.ID, admin.ID, []string{"rdp.host"})
+	firstRequest := observe("target-a-fingerprint", "Target A", []string{"rdp.host"})
+	first, err := db.ApproveEnrollment(firstRequest.ID, admin.ID, []string{"rdp.host"})
 	if err != nil {
 		t.Fatal(err)
 	}
+	secondRequest := observe("target-b-fingerprint", "Target B", []string{"rdp.host"})
+	second, err := db.ApproveEnrollment(secondRequest.ID, admin.ID, []string{"rdp.host"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Same-owner RDP devices must not become visible or connectable just because
+	// their capabilities were approved.
 	targets, err := db.ListRDPTargetsForController(controller.ID)
-	if err != nil || len(targets) != 1 || targets[0].DeviceID != target.ID || targets[0].Port != 3389 {
-		t.Fatalf("unexpected RDP targets: %+v err=%v", targets, err)
+	if err != nil || len(targets) != 0 {
+		t.Fatalf("ungranted RDP hosts leaked into controller inventory: %+v err=%v", targets, err)
+	}
+	if ok, err := db.AuthorizeRDP(controller.ID, first.ID); err != nil || ok {
+		t.Fatalf("ungranted target A was authorized: ok=%v err=%v", ok, err)
+	}
+	if ok, err := db.AuthorizeRDP(controller.ID, second.ID); err != nil || ok {
+		t.Fatalf("ungranted target B was authorized: ok=%v err=%v", ok, err)
+	}
+
+	targets, err = db.ReplaceRDPTargetGrants(controller.ID, admin.ID, []string{first.ID})
+	if err != nil || len(targets) != 1 || targets[0].DeviceID != first.ID || targets[0].Port != 3389 {
+		t.Fatalf("explicit target A grant was not applied: %+v err=%v", targets, err)
+	}
+	if ok, err := db.AuthorizeRDP(controller.ID, first.ID); err != nil || !ok {
+		t.Fatalf("explicit target A authorization failed: ok=%v err=%v", ok, err)
+	}
+	if ok, err := db.AuthorizeRDP(controller.ID, second.ID); err != nil || ok {
+		t.Fatalf("target B became authorized without a grant: ok=%v err=%v", ok, err)
 	}
 	decision, err := db.ObserveDeviceIdentity(DeviceIdentityObservation{
 		Fingerprint: "controller-fingerprint", InstallationID: "controller-fingerprint-install",
 		PublicKey: []byte("controller-fingerprint-key"), DeviceName: "Controller",
 		RequestedCapabilities: []string{"rdp.controller"},
 	})
-	if err != nil || len(decision.RDPTargets) != 1 || decision.RDPTargets[0].DeviceID != target.ID {
-		t.Fatalf("approved RDP targets were not returned during authentication: decision=%+v err=%v", decision, err)
+	if err != nil || len(decision.RDPTargets) != 1 || decision.RDPTargets[0].DeviceID != first.ID {
+		t.Fatalf("authentication leaked targets outside explicit grant: decision=%+v err=%v", decision, err)
 	}
-	if ok, err := db.AuthorizeRDP(controller.ID, target.ID); err != nil || !ok {
-		t.Fatalf("RDP authorization failed: ok=%v err=%v", ok, err)
+
+	targets, err = db.ReplaceRDPTargetGrants(controller.ID, admin.ID, []string{second.ID})
+	if err != nil || len(targets) != 1 || targets[0].DeviceID != second.ID {
+		t.Fatalf("replacement grant did not select only target B: %+v err=%v", targets, err)
 	}
-	if _, err := db.Exec(`UPDATE devices SET approved_capabilities = ? WHERE id = ?`, `[]`, target.ID); err != nil {
+	if ok, err := db.AuthorizeRDP(controller.ID, first.ID); err != nil || ok {
+		t.Fatalf("removed target A grant remained active: ok=%v err=%v", ok, err)
+	}
+	if ok, err := db.AuthorizeRDP(controller.ID, second.ID); err != nil || !ok {
+		t.Fatalf("replacement target B grant was not active: ok=%v err=%v", ok, err)
+	}
+
+	if _, err := db.ReplaceRDPTargetGrants(controller.ID, admin.ID, nil); err != nil {
 		t.Fatal(err)
 	}
 	if targets, err := db.ListRDPTargetsForController(controller.ID); err != nil || len(targets) != 0 {
-		t.Fatalf("target without rdp.host remained visible: targets=%+v err=%v", targets, err)
+		t.Fatalf("empty explicit grant set was not default-deny: targets=%+v err=%v", targets, err)
 	}
-	if _, err := db.Exec(`UPDATE devices SET approved_capabilities = ? WHERE id = ?`, `["rdp.host"]`, target.ID); err != nil {
+}
+
+func TestExplicitRDPGrantMigrationClearsLegacyRowsOnlyOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "rdp-migration.db")
+	db, err := OpenDB("sqlite", path)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE devices SET approved_capabilities = ? WHERE id = ?`, `[]`, controller.ID); err != nil {
+	admin := &User{Username: "admin", PasswordHash: "hash", Role: "admin", Status: "active"}
+	if err := db.CreateUser(admin); err != nil {
+		t.Fatal(err)
+	}
+	approve := func(fingerprint, name string, capabilities []string) *Device {
+		t.Helper()
+		pending, err := db.ObserveDeviceIdentity(DeviceIdentityObservation{
+			Fingerprint: fingerprint, InstallationID: fingerprint + "-install", PublicKey: []byte(fingerprint + "-key"),
+			DeviceName: name, RequestedCapabilities: capabilities,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		device, err := db.ApproveEnrollment(pending.RequestID, admin.ID, capabilities)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return device
+	}
+	controller := approve("migration-controller", "Migration Controller", []string{"rdp.controller"})
+	target := approve("migration-target", "Migration Target", []string{"rdp.host"})
+
+	// Simulate a database created by the previous release: the old code inserted
+	// same-owner grants and had no explicit-grant migration marker.
+	if _, err := db.Exec(`INSERT INTO rdp_access_grants (controller_device_id, target_device_id, granted_by, created_at) VALUES (?, ?, ?, ?)`,
+		controller.ID, target.ID, admin.ID, time.Now().UTC()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DELETE FROM server_migrations WHERE name = 'rdp.explicit_grants.v1'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = OpenDB("sqlite", path)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if targets, err := db.ListRDPTargetsForController(controller.ID); err != nil || len(targets) != 0 {
-		t.Fatalf("device without rdp.controller received inventory: targets=%+v err=%v", targets, err)
+		t.Fatalf("legacy automatic grants survived explicit-grant migration: targets=%+v err=%v", targets, err)
+	}
+	if _, err := db.ReplaceRDPTargetGrants(controller.ID, admin.ID, []string{target.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The migration marker must prevent later restarts from deleting grants that
+	// were explicitly created by an administrator.
+	db, err = OpenDB("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if targets, err := db.ListRDPTargetsForController(controller.ID); err != nil || len(targets) != 1 || targets[0].DeviceID != target.ID {
+		t.Fatalf("explicit grant did not survive restart: targets=%+v err=%v", targets, err)
 	}
 }
 

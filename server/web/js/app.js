@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -778,6 +778,59 @@
       updateSettingState();
     }
   }
+  function renderDeviceRDPTargets(device, grantedIDs) {
+    const granted = new Set(grantedIDs || []);
+    const candidates = state.devices.filter(item => item.id !== device.id && item.approvalState === 'approved' && item.ownerUserId === device.ownerUserId && (item.approvedCapabilities || []).includes('rdp.host'));
+    $('device-rdp-target-count').textContent = granted.size + ' / ' + candidates.length + ' 台已授权';
+    $('device-rdp-targets').innerHTML = candidates.length ? candidates.map(item => {
+      const checked = granted.has(item.id) ? ' checked' : '';
+      const availability = item.status === 'online' ? '在线' : '离线';
+      return '<label class="capability-option"><input type="checkbox" data-rdp-target value="' + esc(item.id) + '"' + checked + '><span><strong>' + esc(item.name || item.id) + '</strong><small>' + esc(item.id) + ' · ' + availability + '</small></span></label>';
+    }).join('') : '<p class="field-hint">当前没有同一所有者下已批准的 RDP 主机。先给目标设备启用“RDP 主机”能力，再在这里授权。</p>';
+  }
+
+  async function loadDeviceRDPTargets(device) {
+    const editor = $('device-rdp-access-editor');
+    const eligible = !!state.user && state.user.role === 'admin' && device.approvalState === 'approved' && (device.approvedCapabilities || []).includes('rdp.controller');
+    editor.hidden = !eligible;
+    if (!eligible) {
+      $('device-rdp-targets').innerHTML = '';
+      $('device-rdp-target-count').textContent = '0 台已授权';
+      return;
+    }
+    $('device-rdp-targets').innerHTML = '<p class="field-hint">正在读取 Server RDP 授权…</p>';
+    $('device-rdp-targets-save').disabled = true;
+    errorAt('device-rdp-target-error', '');
+    try {
+      const data = await api('/rdp/targets?controllerId=' + encodeURIComponent(device.id));
+      if (!state.selectedDevice || state.selectedDevice.id !== device.id || !$('device-dialog').open) return;
+      renderDeviceRDPTargets(device, (data.targets || []).map(item => item.deviceId));
+    } catch (err) {
+      if (state.selectedDevice && state.selectedDevice.id === device.id) errorAt('device-rdp-target-error', err.message);
+    } finally {
+      if (state.selectedDevice && state.selectedDevice.id === device.id) $('device-rdp-targets-save').disabled = false;
+    }
+  }
+
+  async function saveDeviceRDPTargets() {
+    if (state.deviceBusy || state.rdpTargetBusy || !state.selectedDevice) return;
+    const device = state.selectedDevice;
+    const targetDeviceIds = all('#device-rdp-targets [data-rdp-target]:checked').map(input => input.value);
+    state.rdpTargetBusy = true;
+    all('#device-dialog button').forEach(button => { button.disabled = true; });
+    errorAt('device-rdp-target-error', '');
+    try {
+      const data = await api('/devices/' + encodeURIComponent(device.id) + '/rdp-targets', { method: 'PUT', body: JSON.stringify({ targetDeviceIds }) });
+      if (state.selectedDevice && state.selectedDevice.id === device.id) renderDeviceRDPTargets(device, (data.targets || []).map(item => item.deviceId));
+      toast('RDP 设备授权已更新；Agent 将在下一次心跳刷新可连接列表');
+    } catch (err) {
+      errorAt('device-rdp-target-error', err.message);
+    } finally {
+      state.rdpTargetBusy = false;
+      all('#device-dialog button').forEach(button => { button.disabled = false; });
+    }
+  }
+
   function openDevice(id) {
     const device = state.devices.find(d => d.id === id);
     if (!device) { return; }
@@ -792,7 +845,10 @@
     $('device-delete').hidden = !state.user || state.user.role !== 'admin';
     errorAt('device-action-error', '');
     errorAt('device-capability-error', '');
+    errorAt('device-rdp-target-error', '');
+    $('device-rdp-access-editor').hidden = true;
     $('device-dialog').showModal();
+    loadDeviceRDPTargets(device);
   }
   function openEnrollment(id) {
     const item = state.enrollments.find(entry => entry.id === id);
@@ -1047,11 +1103,12 @@
   $('device-revoke').addEventListener('click', revokeDevice);
   $('device-delete').addEventListener('click', deleteDevice);
   $('device-capabilities-save').addEventListener('click', saveDeviceCapabilities);
+  $('device-rdp-targets-save').addEventListener('click', saveDeviceRDPTargets);
   $('enrollment-approve').addEventListener('click', approveEnrollment);
   $('enrollment-reject').addEventListener('click', () => { if (state.selectedEnrollment) rejectEnrollment(state.selectedEnrollment.id); });
   bindCapabilityDependencies('device-capabilities');
   bindCapabilityDependencies('enrollment-capabilities');
-  $('device-dialog').addEventListener('cancel', event => { if (state.deviceBusy) event.preventDefault(); });
+  $('device-dialog').addEventListener('cancel', event => { if (state.deviceBusy || state.rdpTargetBusy) event.preventDefault(); });
   $('settings-form').addEventListener('submit', saveSettings);
   $('rdp-ingress-form').addEventListener('submit', createRDPIngress);
   $('rdp-ingress-refresh').addEventListener('click', () => refresh(true));

@@ -299,9 +299,6 @@ func (db *DB) ApproveEnrollment(requestID, reviewerID string, capabilities []str
 			return nil, err
 		}
 	}
-	if err := syncOwnerRDPGrants(tx, reviewerID, device.ID, approved, reviewerID, now); err != nil {
-		return nil, err
-	}
 	if err := insertAuthorizationAudit(tx, "device.approve", reviewerID, "device", device.ID,
 		map[string]any{"enrollmentId": requestID, "fingerprint": request.Fingerprint, "capabilities": approved}, now); err != nil {
 		return nil, err
@@ -361,6 +358,9 @@ func (db *DB) RevokeDevice(deviceID, reviewerID, reason string) error {
 		return errors.New("approved device not found")
 	}
 	if _, err := tx.Exec(`UPDATE device_identities SET status = ?, updated_at = ? WHERE device_id = ?`, EnrollmentRevoked, now, deviceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM rdp_access_grants WHERE controller_device_id = ? OR target_device_id = ?`, deviceID, deviceID); err != nil {
 		return err
 	}
 	if err := insertAuthorizationAudit(tx, "device.revoke", reviewerID, "device", deviceID,
@@ -485,12 +485,16 @@ func (db *DB) UpdateDeviceCapabilities(deviceID, reviewerID string, capabilities
 	}
 
 	ownerID := owner.String
-	if _, err := tx.Exec(`DELETE FROM rdp_access_grants
-		WHERE controller_device_id = ? OR target_device_id = ?`, deviceID, deviceID); err != nil {
-		return nil, err
+	// Explicit RDP grants survive unrelated capability edits. Only remove the
+	// direction that became impossible when a controller/host capability is
+	// revoked; new relationships must always be granted from the Server UI/API.
+	if !slices.Contains(approved, "rdp.controller") {
+		if _, err := tx.Exec(`DELETE FROM rdp_access_grants WHERE controller_device_id = ?`, deviceID); err != nil {
+			return nil, err
+		}
 	}
-	if ownerID != "" {
-		if err := syncOwnerRDPGrants(tx, ownerID, deviceID, approved, reviewerID, now); err != nil {
+	if !slices.Contains(approved, "rdp.host") {
+		if _, err := tx.Exec(`DELETE FROM rdp_access_grants WHERE target_device_id = ?`, deviceID); err != nil {
 			return nil, err
 		}
 	}
@@ -555,53 +559,6 @@ func filterApprovedCapabilities(selected, requested []string) []string {
 func validateCapabilityDependencies(capabilities []string) error {
 	if slices.Contains(capabilities, "rdp.public") && !slices.Contains(capabilities, "rdp.host") {
 		return errors.New("rdp.public requires rdp.host")
-	}
-	return nil
-}
-
-// syncOwnerRDPGrants keeps the first M2 access model deliberately simple: an
-// administrator-approved device can reach other RDP-capable devices assigned
-// to the same owner. The explicit rows make the authorization matrix visible
-// and leave room for per-target grants in the next milestone.
-func syncOwnerRDPGrants(tx *sql.Tx, ownerID, newDeviceID string, newCapabilities []string, reviewerID string, now time.Time) error {
-	newController := slices.Contains(newCapabilities, "rdp.controller")
-	newTarget := slices.Contains(newCapabilities, "rdp.host")
-	rows, err := tx.Query(`SELECT id, approved_capabilities FROM devices WHERE owner_user_id = ? AND approval_state = 'approved' AND id <> ?`, ownerID, newDeviceID)
-	if err != nil {
-		return err
-	}
-	type existing struct {
-		id   string
-		caps []string
-	}
-	var devices []existing
-	for rows.Next() {
-		var id, raw string
-		if err := rows.Scan(&id, &raw); err != nil {
-			_ = rows.Close()
-			return err
-		}
-		caps, err := decodeCapabilities(raw)
-		if err != nil {
-			_ = rows.Close()
-			return err
-		}
-		devices = append(devices, existing{id: id, caps: caps})
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, item := range devices {
-		if newController && slices.Contains(item.caps, "rdp.host") {
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO rdp_access_grants (controller_device_id, target_device_id, granted_by, created_at) VALUES (?, ?, ?, ?)`, newDeviceID, item.id, reviewerID, now); err != nil {
-				return err
-			}
-		}
-		if newTarget && slices.Contains(item.caps, "rdp.controller") {
-			if _, err := tx.Exec(`INSERT OR IGNORE INTO rdp_access_grants (controller_device_id, target_device_id, granted_by, created_at) VALUES (?, ?, ?, ?)`, item.id, newDeviceID, reviewerID, now); err != nil {
-				return err
-			}
-		}
 	}
 	return nil
 }

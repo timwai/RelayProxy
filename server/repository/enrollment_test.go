@@ -296,7 +296,7 @@ func TestExplicitRDPGrantMigrationClearsLegacyRowsOnlyOnce(t *testing.T) {
 		controller.ID, target.ID, admin.ID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`DELETE FROM authorization_audit WHERE action = 'rdp.explicit_grants.v1'`); err != nil {
+	if _, err := db.Exec(`DELETE FROM server_migrations WHERE name = 'rdp.explicit_grants.v1'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

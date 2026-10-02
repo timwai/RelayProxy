@@ -76,9 +76,14 @@ func (db *DB) ensureExplicitRDPGrantModel() error {
 	}
 	defer tx.Rollback()
 
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS server_migrations (
+		name VARCHAR(100) PRIMARY KEY,
+		applied_at TIMESTAMP NOT NULL
+	)`); err != nil {
+		return err
+	}
 	var migrated int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM authorization_audit
-		WHERE action = 'rdp.explicit_grants.v1' AND target_type = 'system' AND target_id = 'rdp_access_grants'`).Scan(&migrated); err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM server_migrations WHERE name = 'rdp.explicit_grants.v1'`).Scan(&migrated); err != nil {
 		return err
 	}
 	if migrated > 0 {
@@ -88,6 +93,9 @@ func (db *DB) ensureExplicitRDPGrantModel() error {
 		return err
 	}
 	now := time.Now().UTC()
+	if _, err := tx.Exec(`INSERT INTO server_migrations (name, applied_at) VALUES ('rdp.explicit_grants.v1', ?)`, now); err != nil {
+		return err
+	}
 	if err := insertAuthorizationAudit(tx, "rdp.explicit_grants.v1", "system", "system", "rdp_access_grants",
 		map[string]any{"mode": "explicit", "default": "deny"}, now); err != nil {
 		return err

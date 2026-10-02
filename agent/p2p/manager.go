@@ -265,7 +265,10 @@ func (m *Manager) PowerConstrained() bool {
 // Callers should not wait for it: the current connection can use Relay while
 // the P2P path is prepared for subsequent flows.
 func (m *Manager) EnsureClient(exitDeviceID string) {
-	if m == nil || exitDeviceID == "" || m.closed.Load() {
+	// The Relay server exit is local to the control-plane process and has no
+	// peer Agent to punch or authenticate. Keep it on the Relay tunnel without
+	// creating a doomed P2P attempt or cooldown entry.
+	if m == nil || exitDeviceID == "" || exitDeviceID == protocol.ServerExitDeviceID || m.closed.Load() {
 		return
 	}
 	m.mu.Lock()

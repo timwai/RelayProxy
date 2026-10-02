@@ -146,6 +146,33 @@ func TestEnsureClientDeduplicatesInFlightAttempt(t *testing.T) {
 	}
 }
 
+func TestEnsureClientIgnoresServerExit(t *testing.T) {
+	called := make(chan struct{}, 1)
+	release := make(chan struct{})
+	manager := NewManager(context.Background(), func(context.Context, protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		called <- struct{}{}
+		<-release
+		return protocol.P2PControlMessage{}, errors.New("server exit must not enter P2P signaling")
+	}, testDescription("192.0.2.10:51000", "sha256:client"), time.Minute)
+	defer manager.Close()
+	defer close(release)
+
+	manager.EnsureClient(protocol.ServerExitDeviceID)
+
+	select {
+	case <-called:
+		t.Fatal("server exit triggered P2P signaling")
+	default:
+	}
+	manager.mu.Lock()
+	_, starting := manager.starting[protocol.ServerExitDeviceID]
+	_, coolingDown := manager.cooldowns[protocol.ServerExitDeviceID]
+	manager.mu.Unlock()
+	if starting || coolingDown {
+		t.Fatalf("server exit entered P2P state: starting=%v cooldown=%v", starting, coolingDown)
+	}
+}
+
 func TestValidateRelayPolicyRequiresServerFingerprint(t *testing.T) {
 	if _, err := validateRelayPolicy(&acl.Policy{AllowInternet: true}); err == nil {
 		t.Fatal("Relay policy without fingerprint was accepted")

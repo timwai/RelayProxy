@@ -418,6 +418,17 @@ func TestDirectPathPolicyModes(t *testing.T) {
 	relay := &namedSession{name: "relay"}
 	direct := &namedSession{name: "direct"}
 
+	t.Run("server_exit_always_uses_relay", func(t *testing.T) {
+		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+		var ensure atomic.Int32
+		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, func(string) { ensure.Add(1) })
+		dialer.ConfigureDirectPolicy("p2p_only", false)
+		session, isDirect := dialer.sessionForExit(protocol.ServerExitDeviceID)
+		if session != relay || isDirect || ensure.Load() != 0 {
+			t.Fatalf("server exit selected session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		}
+	})
+
 	t.Run("relay_only", func(t *testing.T) {
 		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
 		var ensure atomic.Int32

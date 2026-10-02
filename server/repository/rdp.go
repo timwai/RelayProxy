@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -61,6 +63,90 @@ func (db *DB) ListRDPTargetsForController(controllerID string) ([]*RDPTarget, er
 		result = append(result, item)
 	}
 	return result, rows.Err()
+}
+
+// ReplaceRDPTargetGrants atomically replaces the explicit RDP target set for
+// one controller. An empty target list is valid and means the controller may
+// not discover or connect to any RDP host.
+func (db *DB) ReplaceRDPTargetGrants(controllerID, reviewerID string, targetIDs []string) ([]*RDPTarget, error) {
+	controllerID = strings.TrimSpace(controllerID)
+	reviewerID = strings.TrimSpace(reviewerID)
+	if controllerID == "" || reviewerID == "" {
+		return nil, errors.New("controller device id and reviewer id are required")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var controllerOwner sql.NullString
+	var controllerCaps string
+	if err := tx.QueryRow(`SELECT owner_user_id, approved_capabilities FROM devices
+		WHERE id = ? AND approval_state = 'approved'`, controllerID).Scan(&controllerOwner, &controllerCaps); err != nil {
+		return nil, err
+	}
+	if !controllerOwner.Valid || strings.TrimSpace(controllerOwner.String) == "" {
+		return nil, errors.New("RDP controller has no owner")
+	}
+	if !hasCapabilityJSON(controllerCaps, "rdp.controller") {
+		return nil, errors.New("device is not approved as an RDP controller")
+	}
+
+	normalized := make([]string, 0, len(targetIDs))
+	seen := make(map[string]struct{}, len(targetIDs))
+	for _, raw := range targetIDs {
+		targetID := strings.TrimSpace(raw)
+		if targetID == "" {
+			continue
+		}
+		if targetID == controllerID {
+			return nil, errors.New("an RDP controller cannot target itself")
+		}
+		if _, exists := seen[targetID]; exists {
+			continue
+		}
+		seen[targetID] = struct{}{}
+
+		var targetOwner sql.NullString
+		var targetCaps string
+		var serviceEnabled int
+		err := tx.QueryRow(`SELECT target.owner_user_id, target.approved_capabilities,
+			CASE WHEN EXISTS (SELECT 1 FROM rdp_services service WHERE service.device_id = target.id AND service.enabled = TRUE) THEN 1 ELSE 0 END
+			FROM devices target WHERE target.id = ? AND target.approval_state = 'approved'`, targetID).
+			Scan(&targetOwner, &targetCaps, &serviceEnabled)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("RDP target %q was not found", targetID)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !targetOwner.Valid || targetOwner.String != controllerOwner.String || !hasCapabilityJSON(targetCaps, "rdp.host") || serviceEnabled != 1 {
+			return nil, fmt.Errorf("RDP target %q is not an available host for this controller", targetID)
+		}
+		normalized = append(normalized, targetID)
+	}
+
+	if _, err := tx.Exec(`DELETE FROM rdp_access_grants WHERE controller_device_id = ?`, controllerID); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	for _, targetID := range normalized {
+		if _, err := tx.Exec(`INSERT INTO rdp_access_grants
+			(controller_device_id, target_device_id, granted_by, created_at) VALUES (?, ?, ?, ?)`,
+			controllerID, targetID, reviewerID, now); err != nil {
+			return nil, err
+		}
+	}
+	if err := insertAuthorizationAudit(tx, "rdp.targets.replace", reviewerID, "device", controllerID,
+		map[string]any{"targetDeviceIds": normalized}, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return db.ListRDPTargetsForController(controllerID)
 }
 
 // AuthorizeRDP is the only server-side admission check for a controller to

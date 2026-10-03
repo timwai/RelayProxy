@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], identities: [], identityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -436,6 +436,133 @@
     }
   }
 
+
+  function syncServerExitGrantIdentityOptions() {
+    if (!$('server-exit-grant-identity')) { return; }
+    const current = $('server-exit-grant-identity').value;
+    const editingID = $('server-exit-grant-id').value;
+    const editing = state.systemIdentityGrants.find(item => item.id === editingID);
+    const selected = editing ? editing.granteeIdentityId : current;
+    const granted = new Set(state.systemIdentityGrants.filter(item => item.id !== editingID).map(item => item.granteeIdentityId));
+    $('server-exit-grant-identity').innerHTML = '<option value="">请选择身份</option>' + state.identities.map(identity => {
+      const disabled = granted.has(identity.id);
+      const suffix = identity.status === 'active' ? '' : ' · 已禁用';
+      return '<option value="' + esc(identity.id) + '"' + (disabled ? ' disabled' : '') + '>' + esc(identity.name + suffix) + '</option>';
+    }).join('');
+    if (selected && state.identities.some(identity => identity.id === selected)) {
+      $('server-exit-grant-identity').value = selected;
+    }
+  }
+
+  function renderSystemIdentityGrants() {
+    if (!$('server-exit-grants-body')) { return; }
+    const grants = state.systemIdentityGrants.filter(item => item.resourceId === 'server');
+    $('server-exit-grant-count').textContent = grants.length + ' 个身份';
+    const now = Date.now();
+    $('server-exit-grants-body').innerHTML = grants.length ? grants.map(item => {
+      const expired = item.expiresAt && Date.parse(item.expiresAt) <= now;
+      const expiry = item.expiresAt ? esc(date(item.expiresAt)) + (expired ? ' ' + badge('已过期', 'warning-badge') : '') : '<span class="muted">永不过期</span>';
+      return '<tr><td><span class="device-name">' + esc(item.granteeIdentityName || item.granteeIdentityId) + '</span><span class="device-id mono">' + esc(item.granteeIdentityId) + '</span></td>' +
+        '<td>Proxy 出口</td><td class="muted">' + expiry + '</td><td class="mono">' + esc(item.revision) + '</td>' +
+        '<td class="right"><button type="button" class="small-button" data-server-exit-grant-edit="' + esc(item.id) + '">编辑</button> <button type="button" class="small-button danger" data-server-exit-grant-delete="' + esc(item.id) + '">删除</button></td></tr>';
+    }).join('') : emptyRow(5, '尚未授权 v4 身份', '启用 Server Exit 后，在这里选择允许使用它的身份');
+    syncServerExitGrantIdentityOptions();
+  }
+
+  function resetServerExitGrantForm() {
+    if (!$('server-exit-grant-id')) { return; }
+    $('server-exit-grant-id').value = '';
+    $('server-exit-grant-revision').value = '';
+    $('server-exit-grant-identity').value = '';
+    $('server-exit-grant-identity').disabled = false;
+    $('server-exit-grant-expires').value = '';
+    $('server-exit-grant-save').textContent = '授权身份';
+    $('server-exit-grant-cancel').hidden = true;
+    errorAt('server-exit-grant-error', '');
+    syncServerExitGrantIdentityOptions();
+  }
+
+  function editServerExitGrant(id) {
+    const item = state.systemIdentityGrants.find(grant => grant.id === id && grant.resourceId === 'server');
+    if (!item || state.systemIdentityGrantBusy) { return; }
+    $('server-exit-grant-id').value = item.id;
+    $('server-exit-grant-revision').value = item.revision;
+    $('server-exit-grant-identity').value = item.granteeIdentityId;
+    $('server-exit-grant-identity').disabled = false;
+    $('server-exit-grant-expires').value = localDateTimeValue(item.expiresAt);
+    $('server-exit-grant-save').textContent = '保存授权';
+    $('server-exit-grant-cancel').hidden = false;
+    errorAt('server-exit-grant-error', '');
+    syncServerExitGrantIdentityOptions();
+  }
+
+  async function saveServerExitGrant() {
+    if (state.systemIdentityGrantBusy) { return; }
+    const id = $('server-exit-grant-id').value;
+    const granteeIdentityId = $('server-exit-grant-identity').value;
+    if (!granteeIdentityId) {
+      errorAt('server-exit-grant-error', '请选择被授权身份');
+      return;
+    }
+    const expiresRaw = $('server-exit-grant-expires').value;
+    let expiresAt = '';
+    if (expiresRaw) {
+      const parsed = new Date(expiresRaw);
+      if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+        errorAt('server-exit-grant-error', '过期时间必须晚于当前时间');
+        return;
+      }
+      expiresAt = parsed.toISOString();
+    }
+
+    state.systemIdentityGrantBusy = true;
+    $('server-exit-grant-save').disabled = true;
+    $('server-exit-grant-cancel').disabled = true;
+    errorAt('server-exit-grant-error', '');
+    try {
+      if (id) {
+        const payload = {
+          granteeIdentityId,
+          features: ['proxy.use'],
+          revision: Number($('server-exit-grant-revision').value) || 0
+        };
+        if (expiresAt) { payload.expiresAt = expiresAt; } else { payload.clearExpiresAt = true; }
+        await api('/system-identity-grants/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(payload) });
+        toast('Server Exit 身份授权已更新；相关在线设备将重新认证');
+      } else {
+        await api('/system-identity-grants', {
+          method: 'POST',
+          body: JSON.stringify({ resourceId: 'server', granteeIdentityId, features: ['proxy.use'], expiresAt })
+        });
+        toast('Server Exit 已授权给该身份；相关在线设备将重新认证');
+      }
+      resetServerExitGrantForm();
+      await refresh(true);
+    } catch (err) {
+      errorAt('server-exit-grant-error', err.status === 409 ? err.message + '，请刷新后重试' : err.message);
+    } finally {
+      state.systemIdentityGrantBusy = false;
+      $('server-exit-grant-save').disabled = false;
+      $('server-exit-grant-cancel').disabled = false;
+    }
+  }
+
+  async function deleteServerExitGrant(id) {
+    const item = state.systemIdentityGrants.find(grant => grant.id === id && grant.resourceId === 'server');
+    if (!item || state.systemIdentityGrantBusy || !confirm('删除此 Server Exit 身份授权？该身份下设备将立即失去 server 出口权限。')) { return; }
+    state.systemIdentityGrantBusy = true;
+    errorAt('server-exit-grant-error', '');
+    try {
+      await api('/system-identity-grants/' + encodeURIComponent(item.id) + '?revision=' + encodeURIComponent(item.revision), { method: 'DELETE' });
+      if ($('server-exit-grant-id').value === item.id) { resetServerExitGrantForm(); }
+      toast('Server Exit 身份授权已删除；相关在线设备将重新认证');
+      await refresh(true);
+    } catch (err) {
+      errorAt('server-exit-grant-error', err.status === 409 ? err.message + '，请刷新后重试' : err.message);
+    } finally {
+      state.systemIdentityGrantBusy = false;
+    }
+  }
 
   async function createIdentity(event) {
     event.preventDefault();
@@ -1050,16 +1177,19 @@
     if (user.role === 'admin') {
       jobs.push(['identities', '/identities', data => { state.identities = Array.isArray(data) ? data : []; renderIdentities(); }]);
       jobs.push(['identityGrants', '/device-identity-grants', data => { state.identityGrants = Array.isArray(data) ? data : []; renderIdentityGrants(); }]);
+      jobs.push(['systemIdentityGrants', '/system-identity-grants?resourceId=server', data => { state.systemIdentityGrants = Array.isArray(data) ? data : []; renderSystemIdentityGrants(); }]);
       jobs.push(['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]);
       jobs.push(['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }]);
       jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); }]);
     } else {
       state.identities = [];
       state.identityGrants = [];
+      state.systemIdentityGrants = [];
       state.enrollments = [];
       state.channels = [];
       renderIdentities();
       renderIdentityGrants();
+      renderSystemIdentityGrants();
       renderEnrollments();
       renderChannels();
     }
@@ -1085,6 +1215,7 @@
     renderRuntime();
     renderIdentityGrants();
     syncIdentityGrantFormOptions();
+    renderSystemIdentityGrants();
     renderSessions();
     renderP2PSessions();
     renderMessages();
@@ -1561,10 +1692,19 @@
   $('identity-create-capabilities').innerHTML = capabilityOptionsHTML(capabilityOrder, ['proxy.client']);
   bindCapabilityDependencies('identity-create-capabilities');
   resetIdentityGrantForm();
+  resetServerExitGrantForm();
   bindCapabilityDependencies('identity-capabilities');
   bindCapabilityDependencies('device-capabilities');
   bindCapabilityDependencies('enrollment-capabilities');
   $('device-dialog').addEventListener('cancel', event => { if (state.deviceBusy || state.rdpTargetBusy) event.preventDefault(); });
+  $('server-exit-grant-save').addEventListener('click', saveServerExitGrant);
+  $('server-exit-grant-cancel').addEventListener('click', resetServerExitGrantForm);
+  $('server-exit-grants-body').addEventListener('click', event => {
+    const edit = event.target.closest('[data-server-exit-grant-edit]');
+    const remove = event.target.closest('[data-server-exit-grant-delete]');
+    if (edit) { editServerExitGrant(edit.dataset.serverExitGrantEdit); }
+    if (remove) { deleteServerExitGrant(remove.dataset.serverExitGrantDelete); }
+  });
   $('settings-form').addEventListener('submit', saveSettings);
   $('rdp-ingress-form').addEventListener('submit', createRDPIngress);
   $('rdp-ingress-refresh').addEventListener('click', () => refresh(true));

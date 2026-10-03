@@ -24,6 +24,7 @@ import (
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
+	"relayproxy/internal/credentialstore"
 	"relayproxy/internal/deviceidentity"
 )
 
@@ -207,12 +208,20 @@ func main() {
 		httpListen = *httpFlag
 	}
 
+	accessKey := strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY"))
+	if accessKey == "" {
+		accessKey, err = credentialstore.LoadAccessKey(credentialstore.PathForConfig(*configPath))
+		if err != nil {
+			log.Fatalf("[Identity] Failed to load access-key credential: %v", err)
+		}
+	}
+
 	agentCfg := app.AgentConfig{
 		Identity: deviceIdentity,
 		// The identity access key is intentionally not part of relay-agent.yaml
-		// or UI status/export surfaces. A protected credential store will replace
-		// this bootstrap environment source when the settings UI lands.
-		AccessKey:     strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")),
+		// or UI status/export surfaces. Environment remains an explicit operator
+		// override; normal desktop configuration uses the protected credential store.
+		AccessKey:     accessKey,
 		DeviceName:    cfgFile.Device.Name,
 		ServerAddress: cfgFile.Server.Address,
 		QUICPort:      cfgFile.Server.QUICPort,

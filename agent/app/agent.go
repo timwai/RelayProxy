@@ -274,6 +274,7 @@ type Agent struct {
 	approvedMode   string
 	identityName   string
 	policyRevision int64
+	proxyExits     []protocol.ProxyExit
 	rdpTargets     []rdp.Target
 	rdpConnection  *rdp.Connection
 	rdpP2P         *rdpp2p.Manager
@@ -531,6 +532,7 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	a.proxyP2P = nil
 	a.rdpSession = nil
 	a.rdpTargets = nil
+	a.proxyExits = nil
 	if newState != tunnel.StateConnected || sess == nil {
 		a.mu.Unlock()
 		if oldControl != nil {
@@ -678,6 +680,11 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
+	if accepted.ProxyExits != nil {
+		a.proxyExits = proxyExitsFromProtocol(*accepted.ProxyExits)
+	} else {
+		a.proxyExits = nil
+	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
 	a.mu.Unlock()
@@ -843,6 +850,9 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 			if pong.RDPTargets != nil {
 				a.refreshRDPTargets(sess, epoch, *pong.RDPTargets)
 			}
+			if pong.ProxyExits != nil {
+				a.refreshProxyExits(sess, epoch, *pong.ProxyExits)
+			}
 			a.mu.RLock()
 			if a.epoch == epoch && a.readySession == sess {
 				a.latencyMs.Store(time.Since(start).Milliseconds())
@@ -850,6 +860,33 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 			a.mu.RUnlock()
 		}
 	}
+}
+
+func proxyExitsFromProtocol(exits []protocol.ProxyExit) []protocol.ProxyExit {
+	result := make([]protocol.ProxyExit, 0, len(exits))
+	seen := make(map[string]bool, len(exits))
+	for _, exit := range exits {
+		exit.DeviceID = strings.TrimSpace(exit.DeviceID)
+		if exit.DeviceID == "" || seen[exit.DeviceID] {
+			continue
+		}
+		seen[exit.DeviceID] = true
+		if strings.TrimSpace(exit.Name) == "" {
+			exit.Name = exit.DeviceID
+		}
+		result = append(result, exit)
+	}
+	return result
+}
+
+func (a *Agent) refreshProxyExits(sess tunnel.TunnelSession, epoch uint64, exits []protocol.ProxyExit) {
+	refreshed := proxyExitsFromProtocol(exits)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.epoch != epoch || a.readySession != sess {
+		return
+	}
+	a.proxyExits = refreshed
 }
 
 func rdpTargetsFromProtocol(targets []protocol.RDPTarget) []rdp.Target {
@@ -1333,6 +1370,16 @@ func modeForApprovedCapabilities(capabilities []string) string {
 	default:
 		return ""
 	}
+}
+
+// ProxyExits returns the server-approved exit inventory received during the
+// last authenticated session. The configured selected exit is intentionally
+// kept separate so a revoked/deleted exit remains visible to the UI as a stale
+// selection instead of silently changing routing behavior.
+func (a *Agent) ProxyExits() []protocol.ProxyExit {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return append([]protocol.ProxyExit(nil), a.proxyExits...)
 }
 
 // RDPTargets returns the server-approved target list received during the last

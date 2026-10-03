@@ -156,3 +156,57 @@ func TestDeviceIdentityGrantAPIRejectsSameIdentity(t *testing.T) {
 		t.Fatalf("same-identity grant returned %d: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestDeviceIdentityMoveRefreshesAffectedIdentities(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+
+	source, err := router.db.CreateIdentity("Move Source", "admin", []string{"proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := router.db.CreateIdentity("Move Destination", "admin", []string{"proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantee, err := router.db.CreateIdentity("Move Grantee", "admin", []string{"proxy.client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedGrantAPIDevice(t, router.db, "move-api-target", source.ID, []string{"proxy.exit"})
+	grant, err := router.db.CreateDeviceIdentityGrant(
+		"move-api-target", grantee.ID, "admin", []string{repository.GrantFeatureProxyUse}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	refreshed := map[string]int{}
+	router.onIdentityAuthorizationChanged = func(identityID, accessKeyID string) {
+		if accessKeyID != "" {
+			t.Fatalf("identity move unexpectedly scoped refresh to access key %q", accessKeyID)
+		}
+		refreshed[identityID]++
+	}
+
+	body, _ := json.Marshal(map[string]string{"identityId": destination.ID})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/devices/move-api-target/identity", bytes.NewReader(body))
+	req.AddCookie(adminCookie)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("move device identity failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := router.db.GetDeviceIdentityGrant(grant.ID); err == nil {
+		t.Fatal("identity move left the target share in the database")
+	}
+	for _, identityID := range []string{source.ID, destination.ID, grantee.ID} {
+		if refreshed[identityID] != 1 {
+			t.Fatalf("identity %s refresh count=%d want=1; all=%v", identityID, refreshed[identityID], refreshed)
+		}
+	}
+	if len(refreshed) != 3 {
+		t.Fatalf("unexpected identity refresh set: %v", refreshed)
+	}
+}

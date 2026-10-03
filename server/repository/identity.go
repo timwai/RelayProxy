@@ -668,6 +668,31 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 	if observation.Fingerprint == "" || observation.InstallationID == "" || len(observation.PublicKey) == 0 {
 		return nil, errors.New("incomplete device identity")
 	}
+	now := time.Now().UTC()
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	// The challenge snapshot can outlive a key revocation or policy update.
+	// Re-read both in the same transaction that enrolls/updates the device.
+	var policy string
+	err = tx.QueryRow(`SELECT i.name, i.capabilities, i.policy_revision
+		FROM identity_access_keys k JOIN identities i ON i.id = k.identity_id
+		WHERE k.id = ? AND k.identity_id = ? AND k.key_digest = ?
+		  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)
+		  AND i.status = ?`, access.KeyID, access.IdentityID, access.KeyDigest,
+		now, IdentityStatusActive).Scan(&access.IdentityName, &policy, &access.PolicyRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrInvalidIdentityAccessKey
+	}
+	if err != nil {
+		return nil, err
+	}
+	access.Capabilities, err = decodeCapabilities(policy)
+	if err != nil {
+		return nil, err
+	}
 	effective := intersectIdentityCapabilities(access.Capabilities, observation.RequestedCapabilities)
 	if len(effective) == 0 {
 		return nil, errors.New("identity policy does not allow any requested capability")
@@ -683,13 +708,6 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 	if err != nil {
 		return nil, err
 	}
-
-	now := time.Now().UTC()
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
 
 	var existingDeviceID sql.NullString
 	var existingInstallation string
@@ -883,8 +901,8 @@ func ensureIdentityRDPService(tx *sql.Tx, deviceID, deviceName string, capabilit
 // state under the session manager authorization gate.
 func (db *DB) IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, keyID string) bool {
 	now := time.Now().UTC()
-	var count int
-	err := db.QueryRow(`SELECT COUNT(*)
+	var deviceCaps, identityCaps string
+	err := db.QueryRow(`SELECT d.approved_capabilities, i.capabilities
 		FROM device_identities di
 		JOIN devices d ON d.id = di.device_id
 		JOIN identities i ON i.id = d.identity_id
@@ -894,8 +912,16 @@ func (db *DB) IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, keyI
 		  AND i.status = ? AND k.id = ? AND k.revoked_at IS NULL
 		  AND (k.expires_at IS NULL OR k.expires_at > ?)`,
 		fingerprint, deviceID, EnrollmentApproved, EnrollmentApproved,
-		identityID, IdentityStatusActive, keyID, now).Scan(&count)
-	return err == nil && count == 1
+		identityID, IdentityStatusActive, keyID, now).Scan(&deviceCaps, &identityCaps)
+	if err != nil {
+		return false
+	}
+	approved, err := decodeCapabilities(deviceCaps)
+	if err != nil {
+		return false
+	}
+	allowed, err := decodeCapabilities(identityCaps)
+	return err == nil && len(intersectIdentityCapabilities(allowed, approved)) == len(approved)
 }
 
 func intersectIdentityCapabilities(identityCapabilities, requested []string) []string {

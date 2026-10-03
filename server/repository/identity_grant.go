@@ -500,15 +500,18 @@ func (db *DB) authorizeIdentityDeviceFeature(clientDeviceID, targetDeviceID, fea
 	}
 	var clientIdentity, targetIdentity, clientStatus, targetStatus sql.NullString
 	var clientCaps, targetCaps string
+	var clientIdentityCaps, targetIdentityCaps sql.NullString
 	err := db.QueryRow(`SELECT client.identity_id, client.approved_capabilities, client_identity.status,
-		target.identity_id, target.approved_capabilities, target_identity.status
+		target.identity_id, target.approved_capabilities, target_identity.status,
+		client_identity.capabilities, target_identity.capabilities
 		FROM devices client
 		JOIN devices target ON target.id = ?
 		LEFT JOIN identities client_identity ON client_identity.id = client.identity_id
 		LEFT JOIN identities target_identity ON target_identity.id = target.identity_id
 		WHERE client.id = ? AND client.approval_state = 'approved' AND target.approval_state = 'approved'`,
 		targetDeviceID, clientDeviceID).Scan(
-		&clientIdentity, &clientCaps, &clientStatus, &targetIdentity, &targetCaps, &targetStatus)
+		&clientIdentity, &clientCaps, &clientStatus, &targetIdentity, &targetCaps, &targetStatus,
+		&clientIdentityCaps, &targetIdentityCaps)
 	if err != nil {
 		return false, false, err
 	}
@@ -525,11 +528,13 @@ func (db *DB) authorizeIdentityDeviceFeature(clientDeviceID, targetDeviceID, fea
 
 	switch feature {
 	case GrantFeatureProxyUse:
-		if !hasCapabilityJSON(clientCaps, "proxy.client") || !hasCapabilityJSON(targetCaps, "proxy.exit") {
+		if !hasCapabilityJSON(clientCaps, "proxy.client") || !hasCapabilityJSON(targetCaps, "proxy.exit") ||
+			!hasCapabilityJSON(clientIdentityCaps.String, "proxy.client") || !hasCapabilityJSON(targetIdentityCaps.String, "proxy.exit") {
 			return true, false, nil
 		}
 	case GrantFeatureRDPConnect:
-		if !hasCapabilityJSON(clientCaps, "rdp.controller") || !hasCapabilityJSON(targetCaps, "rdp.host") {
+		if !hasCapabilityJSON(clientCaps, "rdp.controller") || !hasCapabilityJSON(targetCaps, "rdp.host") ||
+			!hasCapabilityJSON(clientIdentityCaps.String, "rdp.controller") || !hasCapabilityJSON(targetIdentityCaps.String, "rdp.host") {
 			return true, false, nil
 		}
 	default:

@@ -432,6 +432,13 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	var identityAccess IdentityAccessAuthorization
 	if hello.ProtocolVersion == protocol.IdentityDeviceProtocolVersion {
+		if g.cfg.TLSConfig == nil {
+			writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
+				Success: false, State: "rejected", ErrorCode: protocol.ErrCodeAccessKeyInvalid,
+				ErrorMessage: "identity access keys require TLS", ServerTime: time.Now().Unix(),
+			})
+			return
+		}
 		if hello.AccessKey == "" || g.cfg.ResolveIdentityAccessKey == nil || g.cfg.AuthorizeIdentityDevice == nil {
 			writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 				Success: false, State: "rejected", ServerTime: time.Now().Unix(),

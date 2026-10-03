@@ -305,6 +305,9 @@ func (a *Agent) setDivertStage(stage string, err error) {
 }
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
+	if strings.TrimSpace(cfg.AccessKey) != "" && (cfg.PlainTCP || cfg.InsecureTLS) {
+		return nil, errors.New("identity access keys require TLS with server certificate verification")
+	}
 	cfg = cloneAgentConfig(cfg)
 	if cfg.Identity == nil {
 		var err error

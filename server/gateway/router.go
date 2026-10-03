@@ -92,12 +92,11 @@ func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool,
 	if client == nil || exit == nil {
 		return false, nil
 	}
-	// v4 identity snapshots are authoritative for same-identity access. Unequal
-	// identities intentionally fall through to the policy checker so M2 can add
-	// explicit cross-identity grants without changing every data path again.
-	if client.IdentityID != "" && exit.IdentityID != "" {
-		if client.IdentityID == exit.IdentityID {
-			return true, nil
+	// v4 peers use live policy so disabled identities and narrowed capabilities
+	// take effect before their control sessions finish disconnecting.
+	if client.IdentityID != "" || exit.IdentityID != "" {
+		if client.IdentityID == "" || exit.IdentityID == "" {
+			return false, nil
 		}
 		if r.authChecker != nil {
 			return r.authChecker(client.DeviceID, exit.DeviceID)

@@ -231,7 +231,7 @@ func TestServerExitV4AutoSelectionDetectsAmbiguity(t *testing.T) {
 		Grants: []string{protocol.CapabilityProxyExit},
 	})
 	router := NewStreamRouter(manager, relay, func(clientDeviceID, exitDeviceID string) (bool, error) {
-		return clientDeviceID == "identity-client" && exitDeviceID == protocol.ServerExitDeviceID, nil
+		return clientDeviceID == "identity-client" && (exitDeviceID == protocol.ServerExitDeviceID || exitDeviceID == "identity-device-exit"), nil
 	}, nil)
 	router.SetLocalExit(handler)
 	client := &session.DeviceSession{DeviceID: "identity-client", IdentityID: "idn_client"}

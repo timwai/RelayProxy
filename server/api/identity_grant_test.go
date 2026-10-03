@@ -115,6 +115,16 @@ func TestDeviceIdentityGrantAdminAPILifecycle(t *testing.T) {
 	if staleRec.Code != http.StatusConflict {
 		t.Fatalf("stale grant update returned %d: %s", staleRec.Code, staleRec.Body.String())
 	}
+	for _, method := range []string{http.MethodPatch, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/api/v1/device-identity-grants/"+grant.ID,
+			bytes.NewReader([]byte(`{"features":["proxy.use"]}`)))
+		req.AddCookie(adminCookie)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s without revision: %d %s", method, rec.Code, rec.Body.String())
+		}
+	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete,
 		"/api/v1/device-identity-grants/"+grant.ID+"?revision=2", nil)
@@ -129,6 +139,14 @@ func TestDeviceIdentityGrantAdminAPILifecycle(t *testing.T) {
 	}
 	if len(callbacks) != 3 {
 		t.Fatalf("delete callback count=%d want=3", len(callbacks))
+	}
+	repeatedReq := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/device-identity-grants/"+grant.ID+"?revision=2", nil)
+	repeatedReq.AddCookie(adminCookie)
+	repeatedRec := httptest.NewRecorder()
+	router.ServeHTTP(repeatedRec, repeatedReq)
+	if repeatedRec.Code != http.StatusOK || len(callbacks) != 3 {
+		t.Fatalf("repeated delete: %d %s callbacks=%d", repeatedRec.Code, repeatedRec.Body.String(), len(callbacks))
 	}
 }
 

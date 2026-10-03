@@ -92,6 +92,10 @@ func (r *Router) handleUpdateDeviceIdentityGrant(w http.ResponseWriter, req *htt
 		writeError(w, http.StatusBadRequest, "at least one grant field must be changed")
 		return
 	}
+	if body.Revision < 1 {
+		writeError(w, http.StatusBadRequest, "revision must be a positive integer")
+		return
+	}
 	current, err := r.db.GetDeviceIdentityGrant(req.PathValue("id"))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -141,22 +145,19 @@ func (r *Router) handleUpdateDeviceIdentityGrant(w http.ResponseWriter, req *htt
 }
 
 func (r *Router) handleDeleteDeviceIdentityGrant(w http.ResponseWriter, req *http.Request) {
+	revision, err := strconv.ParseInt(strings.TrimSpace(req.URL.Query().Get("revision")), 10, 64)
+	if err != nil || revision < 1 {
+		writeError(w, http.StatusBadRequest, "revision must be a positive integer")
+		return
+	}
 	current, err := r.db.GetDeviceIdentityGrant(req.PathValue("id"))
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "device identity grant not found")
+			writeJSON(w, http.StatusOK, map[string]any{"id": req.PathValue("id"), "deleted": false})
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to load device identity grant")
 		}
 		return
-	}
-	revision := int64(0)
-	if raw := strings.TrimSpace(req.URL.Query().Get("revision")); raw != "" {
-		revision, err = strconv.ParseInt(raw, 10, 64)
-		if err != nil || revision < 1 {
-			writeError(w, http.StatusBadRequest, "revision must be a positive integer")
-			return
-		}
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
 	deleted, err := r.db.DeleteDeviceIdentityGrant(current.ID, actor, revision)

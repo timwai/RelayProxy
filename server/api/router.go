@@ -38,7 +38,7 @@ type Router struct {
 	onDeviceRevoked                func(string)
 	onDeviceAuthorizationChanged   func(string)
 	onIdentityAuthorizationChanged func(identityID, accessKeyID string)
-	onDeviceIdentityGrantChanged     func(targetDeviceID, granteeIdentityID string)
+	onDeviceIdentityGrantChanged   func(targetDeviceID, granteeIdentityID string)
 	onRDPIngressChanged            func(string)
 	onRDPIngressReload             func(string) error
 	onRDPIngressStatus             func(string) RDPIngressRuntimeStatus

@@ -14,6 +14,7 @@
   window.goGetStatus = () => invoke('GetStatus');
   window.goGetDiagnostics = () => invoke('GetDiagnostics');
   window.goRunSpeedTest = (exitID, durationSeconds) => invoke('RunSpeedTest', exitID, durationSeconds);
+  window.goGetProxyExits = () => invoke('GetProxyExits');
   window.goGetRDPTargets = () => invoke('GetRDPTargets');
   window.goConnectRDP = (targetID, autoLaunch) => invoke('ConnectRDP', targetID, autoLaunch);
   window.goDisconnectRDP = () => invoke('DisconnectRDP');

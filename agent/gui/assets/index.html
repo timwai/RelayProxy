@@ -944,12 +944,14 @@
 
         <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-3">
           <div>
-            <label for="cfg-exit-id" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">出口设备 ID</label>
+            <label for="cfg-exit-id" class="block text-[12px] font-medium text-slate-600 dark:text-slate-300 mb-1.5">默认出口</label>
             <div class="flex items-center gap-2.5">
-              <input id="cfg-exit-id" type="text" placeholder="dev_xxxxxxxx 或 server（留空则不指定）" autocomplete="off"
-                     class="mono flex-1 text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+              <select id="cfg-exit-id" class="mono flex-1 text-[13px] px-3 py-2 bg-slate-50 dark:bg-slate-900/70 border border-slate-300 dark:border-slate-700 rounded-md focus:border-emerald-500">
+                <option value="">自动选择 · 仅一个已授权在线出口时生效</option>
+              </select>
               <button data-config-write disabled onclick="applyExit()" class="btn-primary rp-btn rp-btn-primary px-4 py-2 rounded-md text-[13px] font-semibold shrink-0">应用切换</button>
             </div>
+            <p id="exit-inventory-hint" class="config-help mt-1.5">正在读取服务端授权出口…</p>
           </div>
           <div class="flex items-center justify-between gap-3 pt-2 border-t border-slate-200 dark:border-slate-700/60">
             <span class="text-[12px] text-slate-500 dark:text-slate-400">当前生效出口</span>
@@ -960,7 +962,7 @@
         <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-3">
           <div><h2 class="text-[13px] font-semibold text-slate-800 dark:text-slate-100">出口上下行测速</h2><p class="config-help mt-1">直接测试本机到指定出口的实际路径，不访问出口后的互联网或局域网服务。</p></div>
           <div class="grid grid-cols-1 md:grid-cols-[1fr_120px_auto] gap-2.5 items-end">
-            <div><label for="speed-test-exit" class="block text-[12px] mb-1.5">测速出口 ID</label><input id="speed-test-exit" class="mono rp-input w-full" type="text" placeholder="dev_xxxxxxxx 或 server"></div>
+            <div><label for="speed-test-exit" class="block text-[12px] mb-1.5">测速出口</label><select id="speed-test-exit" class="mono rp-select w-full"><option value="">跟随默认出口 / 自动选择</option></select></div>
             <div><label for="speed-test-duration" class="block text-[12px] mb-1.5">每方向时长</label><select id="speed-test-duration" class="rp-select w-full"><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
             <button id="speed-test-start" type="button" onclick="runExitSpeedTest()" class="rp-btn rp-btn-primary">开始测速</button>
           </div>
@@ -971,8 +973,8 @@
           <div class="flex items-start gap-2.5">
             <svg class="icon-lg text-slate-400 mt-0.5" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
             <div class="text-[12px] text-slate-500 dark:text-slate-400 leading-relaxed">
-              出口 ID 可在服务端管理后台的“出口节点”页面复制；Relay Server 本机出口固定为 server。
-              切换出口会立即生效并写入配置文件，无需重启客户端。
+              候选来自当前认证会话的服务端授权清单，仅显示同身份或管理员明确共享的出口。
+              如果原选择后来被撤销或删除，会保留为“不可用旧选择”提示，不会静默改选其他出口或 DIRECT。
             </div>
           </div>
         </div>
@@ -1267,7 +1269,7 @@
           <div class="routing-modal-field"><label for="routing-rule-ports">目标端口</label><textarea id="routing-rule-ports" placeholder="80&#10;443&#10;8000-9000"></textarea><small>支持单端口和端口范围；留空表示任意端口。</small></div>
           <div class="routing-modal-field"><label for="routing-rule-action">匹配动作</label><select id="routing-rule-action" onchange="updateRoutingEditorDependencies()"><option value="PROXY">PROXY · 走代理</option><option value="DIRECT">DIRECT · 本地直连</option><option value="REJECT">REJECT · 阻断连接</option></select><small>第一条启用且匹配的规则决定动作。</small></div>
           <div class="routing-modal-field"><span class="routing-modal-label">DIRECT 处理方式</span><label id="routing-rule-direct-wrap" class="routing-modal-check"><input id="routing-rule-handle-direct" type="checkbox"><span><strong>由 RelayProxy 处理直连</strong><small>仍从本机出口访问目标，但 TCP/UDP 连接由 RelayProxy 建立和转发，并进入实时连接监控。</small></span></label></div>
-          <div class="routing-modal-field"><label for="routing-rule-exit">指定出口 ID</label><input id="routing-rule-exit" type="text" autocomplete="off" placeholder="留空使用当前出口"><small>仅 PROXY 动作可指定出口。</small></div>
+          <div class="routing-modal-field"><label for="routing-rule-exit">指定出口</label><select id="routing-rule-exit"><option value="">跟随默认出口</option></select><small>仅 PROXY 动作可指定出口；候选来自服务端授权清单。</small></div>
           <div class="routing-modal-field"><span class="routing-modal-label">UDP 代理要求</span><label id="routing-rule-datagram-wrap" class="routing-modal-check"><input id="routing-rule-datagram" type="checkbox"><span><strong>必须使用原生数据报</strong><small>不支持数据报时拒绝，不回退到可靠流。</small></span></label></div>
         </div>
       </div>
@@ -1284,7 +1286,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, rdpTargets: [], rdpBusyTarget: '', rdpRefreshing: false };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, proxyExits: [], proxyExitsRefreshing: false, rdpTargets: [], rdpBusyTarget: '', rdpRefreshing: false };
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1610,6 +1612,92 @@
     window.addrOf = addrOf;
     window.copyText = copyText;
 
+    function proxyExitSourceLabel(source) {
+      if (source === 'same_identity') return '同身份';
+      if (source === 'explicit') return '显式授权';
+      if (source === 'legacy') return 'Legacy';
+      return '';
+    }
+    function proxyExitDisplayName(exitID) {
+      exitID = String(exitID || '').trim();
+      if (!exitID) return '自动选择';
+      var item = state.proxyExits.find(function (candidate) { return candidate.deviceId === exitID; });
+      if (!item) return exitID + ' · 已不可用';
+      var parts = [item.name || item.deviceId];
+      if (item.identityName) parts.push(item.identityName);
+      if (!item.online) parts.push('离线');
+      return parts.join(' · ');
+    }
+    function proxyExitOptionLabel(item) {
+      var parts = [item.name || item.deviceId];
+      if (item.identityName) parts.push(item.identityName);
+      parts.push(item.online ? '在线' : '离线');
+      var source = proxyExitSourceLabel(item.authorizationSource);
+      if (source) parts.push(source);
+      return parts.join(' · ');
+    }
+    function fillProxyExitSelect(select, selectedValue, emptyLabel) {
+      if (!select) return;
+      selectedValue = String(selectedValue || '').trim();
+      var options = [{value:'', label:emptyLabel || '自动选择'}];
+      state.proxyExits.forEach(function (item) {
+        if (!item || !item.deviceId) return;
+        options.push({value:item.deviceId, label:proxyExitOptionLabel(item), disabled:item.online === false});
+      });
+      if (selectedValue && !state.proxyExits.some(function (item) { return item.deviceId === selectedValue; })) {
+        options.push({value:selectedValue, label:selectedValue + ' · 已撤销、删除或当前不可用', disabled:true});
+      }
+      select.replaceChildren();
+      options.forEach(function (item) {
+        var option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = item.label;
+        option.disabled = !!item.disabled;
+        select.appendChild(option);
+      });
+      select.value = selectedValue;
+      if (select.value !== selectedValue) select.value = '';
+    }
+    function syncProxyExitSelectors() {
+      var defaultSelect = $('cfg-exit-id');
+      var defaultValue = defaultSelect ? defaultSelect.value : (state.cfg && state.cfg.defaultExitId) || '';
+      fillProxyExitSelect(defaultSelect, defaultValue, '自动选择 · 仅一个已授权在线出口时生效');
+
+      var speedSelect = $('speed-test-exit');
+      var speedValue = speedSelect ? speedSelect.value : '';
+      fillProxyExitSelect(speedSelect, speedValue, '跟随默认出口 / 自动选择');
+
+      if (typeof window.syncRoutingExitOptions === 'function') window.syncRoutingExitOptions();
+
+      var hint = $('exit-inventory-hint');
+      if (hint) {
+        if (!state.status || !state.status.connected) hint.textContent = 'Relay 未连接，暂时无法确认服务端授权出口。';
+        else if (!state.proxyExits.length) hint.textContent = '当前没有可用的已授权出口；控制隧道仍可保持连接。';
+        else hint.textContent = '服务端已下发 ' + state.proxyExits.length + ' 个授权出口；名称变化不会影响保存的稳定设备 ID。';
+      }
+      if (state.status) {
+        $('home-exit').textContent = state.status.selectedExit ? proxyExitDisplayName(state.status.selectedExit) : '自动选择';
+        $('exit-current').textContent = state.status.selectedExit ? proxyExitDisplayName(state.status.selectedExit) : '自动选择';
+      }
+    }
+    async function refreshProxyExits(showError) {
+      if (state.proxyExitsRefreshing || !hasFn('goGetProxyExits')) return;
+      state.proxyExitsRefreshing = true;
+      try {
+        var raw = await call('goGetProxyExits');
+        var exits = typeof raw === 'string' ? JSON.parse(raw || '[]') : raw;
+        state.proxyExits = Array.isArray(exits) ? exits : [];
+        syncProxyExitSelectors();
+      } catch (err) {
+        if (showError) toast('读取授权出口失败：' + err.message);
+      } finally {
+        state.proxyExitsRefreshing = false;
+      }
+    }
+    window.fillProxyExitSelect = fillProxyExitSelect;
+    window.proxyExitDisplayName = proxyExitDisplayName;
+    window.refreshProxyExits = refreshProxyExits;
+
     /* ---------- status rendering ---------- */
     function renderStatus(st) {
       state.status = st;
@@ -1632,8 +1720,8 @@
       $('home-latency').textContent = up && st.latency > 0 ? st.latency + ' ms' : '-- ms';
       $('home-latency').className = 'mono text-[16px] font-semibold mt-1.5 ' +
         (up ? 'text-slate-800 dark:text-slate-100' : 'text-slate-400 dark:text-slate-500');
-      $('home-exit').textContent = st.selectedExit || '未指定';
-      $('exit-current').textContent = st.selectedExit || '未指定';
+      $('home-exit').textContent = st.selectedExit ? proxyExitDisplayName(st.selectedExit) : '自动选择';
+      $('exit-current').textContent = st.selectedExit ? proxyExitDisplayName(st.selectedExit) : '自动选择';
       $('home-streams').textContent = st.activeStreams || 0;
       var p2pStateNames = {IDLE:'空闲',DISCOVERING:'发现地址',RENDEZVOUS:'协商中',PUNCHING:'打洞中',QUIC_HANDSHAKE:'QUIC 握手',READY:'已直连',DEGRADED:'已降级',COOLDOWN:'冷却中',CLOSED:'已关闭'};
       var p2pPathNames = {p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
@@ -1929,8 +2017,8 @@
       $('proxy-http-cmd').textContent = $('quick-http').textContent;
       $('connection-runtime').textContent = '运行配置：' + (running.serverAddress || cfg.serverAddress || '—') + ' · ' + (running.transport || cfg.transport || 'auto');
 
-      $('cfg-exit-id').value = cfg.defaultExitId || '';
-      if ($('speed-test-exit') && !$('speed-test-exit').value) $('speed-test-exit').value = cfg.defaultExitId || '';
+      fillProxyExitSelect($('cfg-exit-id'), cfg.defaultExitId || '', '自动选择 · 仅一个已授权在线出口时生效');
+      if ($('speed-test-exit') && !$('speed-test-exit').value) fillProxyExitSelect($('speed-test-exit'), '', '跟随默认出口 / 自动选择');
       $('cfg-exit-on').checked = cfg.exitEnabled !== false;
       $('cfg-exit-internet').checked = !!cfg.allowInternet;
       $('cfg-exit-private').checked = !!cfg.allowPrivateNetwork;
@@ -2588,6 +2676,7 @@
       var raw = await call('goGetStatus');
       if (!raw) { return; }
       try { renderStatus(JSON.parse(raw)); } catch (err) { /* ignore */ }
+      await refreshProxyExits(false);
     }
     async function refreshAll() {
       if (state.saving) return;
@@ -2644,6 +2733,7 @@
       });
       loadConfig();
       refreshCredentialState(false);
+      refreshProxyExits(false);
       refreshStatus();
       refreshLogs();
       refreshMessages(false);

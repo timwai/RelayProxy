@@ -35,6 +35,10 @@ type DeviceAuthorization struct {
 	RequestID            string
 	DeviceID             string
 	OwnerUserID          string
+	IdentityID           string
+	IdentityName         string
+	AccessKeyID          string
+	PolicyRevision       int64
 	ApprovedCapabilities []string
 	RDPTargets           []*RDPTarget
 }

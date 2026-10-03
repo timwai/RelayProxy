@@ -114,9 +114,26 @@ func (db *DB) ensureIdentityAccessSchema() error {
 			FOREIGN KEY(identity_id) REFERENCES identities(id) ON DELETE CASCADE,
 			FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS device_identity_grants (
+			id VARCHAR(64) PRIMARY KEY,
+			target_device_id VARCHAR(36) NOT NULL,
+			grantee_identity_id VARCHAR(64) NOT NULL,
+			features TEXT NOT NULL,
+			expires_at TIMESTAMP,
+			revision BIGINT NOT NULL DEFAULT 1,
+			created_by VARCHAR(36) NOT NULL,
+			updated_by VARCHAR(36) NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			UNIQUE(target_device_id, grantee_identity_id),
+			FOREIGN KEY(target_device_id) REFERENCES devices(id) ON DELETE CASCADE,
+			FOREIGN KEY(grantee_identity_id) REFERENCES identities(id) ON DELETE CASCADE
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_identity_keys_identity ON identity_access_keys(identity_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_identity_keys_digest ON identity_access_keys(key_digest)`,
 		`CREATE INDEX IF NOT EXISTS idx_identity_memberships_user ON identity_memberships(user_id, identity_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_device_identity_grants_target ON device_identity_grants(target_device_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_device_identity_grants_grantee ON device_identity_grants(grantee_identity_id, target_device_id)`,
 	}
 	for _, query := range queries {
 		if _, err := db.Exec(query); err != nil {

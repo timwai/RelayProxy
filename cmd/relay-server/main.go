@@ -341,15 +341,18 @@ func main() {
 				}
 				result = append(result, protocol.ProxyExit{DeviceID: exit.DeviceID, Name: name, Online: true})
 			}
-			// The server exit is a system resource and has no device identity.
-			// Keep legacy visibility until the dedicated system-resource grant
-			// model is introduced; never leak it into a v4 identity inventory.
-			if serverExit != nil && identityID == "" {
-				result = append(result, protocol.ProxyExit{
-					DeviceID: protocol.ServerExitDeviceID,
-					Name:     "Relay Server",
-					Online:   true,
-				})
+			if serverExit != nil {
+				authorized, err := db.AuthorizeClientExit(clientID, protocol.ServerExitDeviceID)
+				if err != nil {
+					return nil, err
+				}
+				if authorized {
+					result = append(result, protocol.ProxyExit{
+						DeviceID: protocol.ServerExitDeviceID,
+						Name:     "Relay Server",
+						Online:   true,
+					})
+				}
 			}
 			sort.Slice(result, func(i, j int) bool {
 				if result[i].Name == result[j].Name {

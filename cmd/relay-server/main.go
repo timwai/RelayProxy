@@ -402,7 +402,7 @@ func main() {
 					}
 					result = append(result, protocol.ProxyExit{
 						DeviceID: protocol.ServerExitDeviceID,
-						Name: "Relay Server", IdentityName: "系统资源",
+						Name:     "Relay Server", IdentityName: "系统资源",
 						AuthorizationSource: source, Online: true,
 					})
 				}

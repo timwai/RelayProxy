@@ -68,6 +68,9 @@ func (r *Router) handleUpdateIdentity(w http.ResponseWriter, req *http.Request) 
 		}
 		return
 	}
+	if r.onIdentityAuthorizationChanged != nil {
+		r.onIdentityAuthorizationChanged(item.ID, "")
+	}
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -135,6 +138,9 @@ func (r *Router) handleRevokeIdentityAccessKey(w http.ResponseWriter, req *http.
 		}
 		return
 	}
+	if r.onIdentityAuthorizationChanged != nil {
+		r.onIdentityAuthorizationChanged(req.PathValue("id"), req.PathValue("keyId"))
+	}
 	writeJSON(w, http.StatusOK, map[string]string{
 		"id": req.PathValue("keyId"), "status": "revoked",
 	})
@@ -149,7 +155,13 @@ func (r *Router) handleSetDeviceIdentity(w http.ResponseWriter, req *http.Reques
 		return
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
-	item, err := r.db.SetDeviceIdentity(req.PathValue("id"), body.IdentityID, actor)
+	deviceID := req.PathValue("id")
+	var item *repository.DeviceIdentitySummary
+	err := r.sessions.ChangeDeviceAuthorization(deviceID, true, func() error {
+		var changeErr error
+		item, changeErr = r.db.SetDeviceIdentity(deviceID, body.IdentityID, actor)
+		return changeErr
+	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "device or identity not found")
@@ -157,6 +169,9 @@ func (r *Router) handleSetDeviceIdentity(w http.ResponseWriter, req *http.Reques
 			writeError(w, http.StatusBadRequest, err.Error())
 		}
 		return
+	}
+	if r.onDeviceAuthorizationChanged != nil {
+		r.onDeviceAuthorizationChanged(deviceID)
 	}
 	writeJSON(w, http.StatusOK, item)
 }

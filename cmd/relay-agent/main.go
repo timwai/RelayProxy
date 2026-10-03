@@ -208,7 +208,7 @@ func main() {
 	}
 
 	agentCfg := app.AgentConfig{
-		Identity:      deviceIdentity,
+		Identity: deviceIdentity,
 		// The identity access key is intentionally not part of relay-agent.yaml
 		// or UI status/export surfaces. A protected credential store will replace
 		// this bootstrap environment source when the settings UI lands.

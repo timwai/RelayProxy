@@ -122,6 +122,9 @@ func init() {
 
 type AgentConfig struct {
 	Identity        *deviceidentity.Identity
+	// AccessKey is a runtime-only credential. It must come from a protected
+	// secret source and is never included in AgentStatus or diagnostics.
+	AccessKey       string
 	DeviceID        string
 	DeviceName      string
 	ServerAddress   string
@@ -208,6 +211,8 @@ type AgentStatus struct {
 	LatencyMs           int64                      `json:"latency"`
 	DeviceID            string                     `json:"deviceId"`
 	DeviceName          string                     `json:"deviceName"`
+	IdentityName        string                     `json:"identityName,omitempty"`
+	PolicyRevision      int64                      `json:"policyRevision,omitempty"`
 	Mode                string                     `json:"mode"`
 	SelectedExit        string                     `json:"selectedExit"`
 	SOCKS5Running       bool                       `json:"socks5Running"`
@@ -266,7 +271,9 @@ type Agent struct {
 	latencyMs     atomic.Int64
 	handshakeOK   atomic.Bool
 	approvalState atomic.Pointer[string]
-	approvedMode  string
+	approvedMode   string
+	identityName   string
+	policyRevision int64
 	rdpTargets    []rdp.Target
 	rdpConnection *rdp.Connection
 	rdpP2P        *rdpp2p.Manager
@@ -618,8 +625,13 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if _, err := rand.Read(clientNonce); err != nil {
 		return fmt.Errorf("generate client nonce: %w", err)
 	}
+	protocolVersion := protocol.LegacyDeviceProtocolVersion
+	if strings.TrimSpace(cfg.AccessKey) != "" {
+		protocolVersion = protocol.IdentityDeviceProtocolVersion
+	}
 	hello := protocol.DeviceHello{
-		ProtocolVersion: protocol.DeviceProtocolVersion,
+		ProtocolVersion: protocolVersion,
+		AccessKey:       strings.TrimSpace(cfg.AccessKey),
 		InstallationID:  cfg.Identity.InstallationID,
 		PublicKey:       append([]byte(nil), cfg.Identity.PublicKey...),
 		ClientNonce:     clientNonce, DeviceName: cfg.DeviceName, Platform: runtime.GOOS,
@@ -633,7 +645,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if err := protocol.ReadJSON(ctrl, &challenge); err != nil {
 		return fmt.Errorf("read authentication challenge: %w", err)
 	}
-	if challenge.ProtocolVersion != protocol.DeviceProtocolVersion || challenge.ChallengeID == "" ||
+	if challenge.ProtocolVersion != protocolVersion || challenge.ChallengeID == "" ||
 		challenge.ServerInstanceID == "" || len(challenge.ServerNonce) != 32 || time.Now().Unix() > challenge.ExpiresAt {
 		return errors.New("server returned an invalid authentication challenge")
 	}
@@ -662,6 +674,8 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		return errors.New("session superseded during authentication")
 	}
 	a.cfg.DeviceID = accepted.DeviceID
+	a.identityName = accepted.IdentityName
+	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	a.ctrlStream, a.readySession = ctrl, sess
@@ -1194,7 +1208,8 @@ func (a *Agent) SelectExit(exitID string) {
 func (a *Agent) Status() AgentStatus {
 	a.mu.RLock()
 	st := AgentStatus{
-		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName, Mode: a.approvedMode,
+		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName,
+		IdentityName: a.identityName, PolicyRevision: a.policyRevision, Mode: a.approvedMode,
 		SOCKS5Running: a.started && a.socksServer != nil,
 		HTTPRunning:   a.started && a.httpServer != nil,
 		ExitRunning:   a.started && a.exitHandler != nil,

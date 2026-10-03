@@ -7,6 +7,7 @@ import org.json.JSONObject
 
 data class ExitConfig(
     val serverAddress: String = "",
+    val accessKey: String = "",
     val deviceName: String = "RelayProxy Android",
     val quicPort: Int = 443,
     val tcpPort: Int = 443,
@@ -35,6 +36,7 @@ data class ExitConfig(
         val coreClientEnabled = clientEnabled || vpnEnabled
         return JSONObject()
             .put("serverAddress", serverAddress.trim())
+            .put("accessKey", accessKey.trim())
             .put("deviceName", deviceName.trim())
             .put("quicPort", quicPort)
             .put("tcpPort", tcpPort)
@@ -134,6 +136,7 @@ class ConfigStore(private val context: Context) {
 
         return ExitConfig(
             serverAddress = prefs.getString("serverAddress", "") ?: "",
+            accessKey = SecretStore(context).accessKey(),
             deviceName = resolvedDeviceName,
             quicPort = prefs.getInt("quicPort", 443),
             tcpPort = prefs.getInt("tcpPort", 443),
@@ -173,6 +176,7 @@ class ConfigStore(private val context: Context) {
     }
 
     fun save(config: ExitConfig) {
+        SecretStore(context).setAccessKey(config.accessKey)
         prefs.edit()
             .putString("serverAddress", config.serverAddress.trim())
             .putString("deviceName", config.deviceName.trim())
@@ -194,7 +198,7 @@ class ConfigStore(private val context: Context) {
             .putString("vpnAppMode", config.vpnAppMode)
             .putStringSet("vpnPackages", config.vpnPackages.toSet())
             .putString("vpnDnsServers", config.vpnDnsServers.joinToString(","))
-            .putInt("configVersion", 2)
+            .putInt("configVersion", 3)
             .remove("cellularOnly")
             .remove("vpnManagingRelay")
             .apply()

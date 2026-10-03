@@ -421,6 +421,23 @@ func main() {
 			}
 			ingress.Reload()
 		}),
+		api.WithIdentityAuthorizationChanged(func(identityID, accessKeyID string) {
+			for _, active := range sessionMgr.List() {
+				if active == nil || active.IdentityID != identityID {
+					continue
+				}
+				if accessKeyID != "" && active.AccessKeyID != accessKeyID {
+					continue
+				}
+				deviceID := active.DeviceID
+				rdpCoordinator.CloseDevice(deviceID)
+				if proxyP2PCoordinator != nil {
+					proxyP2PCoordinator.RevokeDevice(deviceID)
+				}
+				_ = sessionMgr.ChangeDeviceAuthorization(deviceID, true, func() error { return nil })
+			}
+			ingress.Reload()
+		}),
 		api.WithDeviceRevoked(func(deviceID string) {
 			rdpCoordinator.CloseDevice(deviceID)
 			if proxyP2PCoordinator != nil {

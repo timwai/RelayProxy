@@ -275,6 +275,22 @@ class RelayExitService : Service() {
             startRelay()
             return
         }
+        val running = core
+        if (running != null && previous.copy(routing = config.routing, defaultExitId = config.defaultExitId) == config) {
+            val result = runCatching {
+                running.setRoutingConfig(config.routing.toJson(
+                    forCore = true,
+                    rejectUnknownApplications = config.vpnEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+                ).toString())
+                running.setDefaultExit(config.defaultExitId)
+            }
+            if (result.isFailure) {
+                relayConfig = previous
+                status = errorStatus(result.exceptionOrNull()?.message ?: "更新分流规则失败")
+            }
+            requestRefreshSoon()
+            return
+        }
         stopCoreOnly()
         if (activeNetworkMode != null) {
             startCore(config)

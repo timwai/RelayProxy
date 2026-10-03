@@ -34,6 +34,7 @@ data class RoutingConfig(
     val mode: String = "global_proxy",
     val defaultAction: String = "PROXY",
     val rules: List<RoutingRuleConfig> = emptyList(),
+    val revision: Long = 0,
 ) {
     fun toJson(
         forCore: Boolean = false,
@@ -41,6 +42,7 @@ data class RoutingConfig(
     ): JSONObject = JSONObject()
         .put("mode", mode)
         .put("default_action", defaultAction)
+        .put("revision", if (forCore) null else revision)
         .put("rules", JSONArray().apply {
             if (forCore && rejectUnknownApplications && rules.any {
                     it.enabled && it.applications.isNotEmpty()
@@ -88,6 +90,7 @@ data class RoutingConfig(
                     mode = json.optString("mode", "global_proxy"),
                     defaultAction = json.optString("default_action", "PROXY"),
                     rules = rules,
+                    revision = json.optLong("revision", 0),
                 )
             }.getOrDefault(RoutingConfig())
         }
@@ -319,18 +322,21 @@ class ConfigStore(private val context: Context) {
             .putString("vpnAppMode", config.vpnAppMode)
             .putStringSet("vpnPackages", config.vpnPackages.toSet())
             .putString("vpnDnsServers", config.vpnDnsServers.joinToString(","))
-            .putString("routing", config.routing.toJson().toString())
             .putInt("configVersion", 4)
             .remove("cellularOnly")
             .remove("vpnManagingRelay")
             .apply()
     }
 
-    fun saveRouting(routing: RoutingConfig) {
+    fun saveRouting(routing: RoutingConfig): RoutingConfig = synchronized(routingLock) {
+        val current = RoutingConfig.fromJson(prefs.getString("routing", null))
+        check(routing.revision == current.revision) { "规则已在其他页面修改，请返回列表后重新编辑" }
+        val updated = routing.copy(revision = current.revision + 1)
         prefs.edit()
-            .putString("routing", routing.toJson().toString())
+            .putString("routing", updated.toJson().toString())
             .putInt("configVersion", 4)
             .apply()
+        updated
     }
 
     fun isDesiredRunning(): Boolean = prefs.getBoolean("desiredRunning", false)
@@ -343,6 +349,10 @@ class ConfigStore(private val context: Context) {
 
     fun setVpnDesiredRunning(running: Boolean) {
         prefs.edit().putBoolean("vpnDesiredRunning", running).apply()
+    }
+
+    companion object {
+        private val routingLock = Any()
     }
 
 }

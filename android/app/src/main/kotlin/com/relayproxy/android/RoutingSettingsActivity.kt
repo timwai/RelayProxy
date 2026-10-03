@@ -18,11 +18,13 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import com.relayproxy.core.androidcore.Androidcore
 
 class RoutingSettingsActivity : Activity() {
     private lateinit var mode: Spinner
     private lateinit var defaultAction: Spinner
     private var config = RoutingConfig()
+    private var draft: RoutingConfig? = null
 
     private val modeValues = listOf("global_proxy", "rule", "direct")
     private val modeLabels = listOf("全局代理", "按规则分流", "全局直连")
@@ -39,12 +41,33 @@ class RoutingSettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         configureWindow()
+        draft = savedInstanceState?.getString("routingDraft")?.let(RoutingConfig::fromJson)
     }
 
     override fun onResume() {
         super.onResume()
-        config = ConfigStore(this).load().routing
+        config = draft ?: ConfigStore(this).load().routing
         setContentView(buildUi())
+    }
+
+    override fun onPause() {
+        captureDraft()
+        super.onPause()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        captureDraft()
+        draft?.let { outState.putString("routingDraft", it.toJson().toString()) }
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun captureDraft() {
+        if (!::mode.isInitialized) return
+        val current = config.copy(
+            mode = modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" },
+            defaultAction = actionValues.getOrElse(defaultAction.selectedItemPosition) { "PROXY" },
+        )
+        if (current != config) draft = current
     }
 
     private fun configureWindow() {
@@ -111,7 +134,7 @@ class RoutingSettingsActivity : Activity() {
             setTextColor(brandColor)
             background = rounded(Color.WHITE, 14, Color.rgb(191, 219, 254))
             setOnClickListener {
-                persistPolicy(showToast = false)
+                if (!persistPolicy(showToast = false)) return@setOnClickListener
                 startActivity(Intent(this@RoutingSettingsActivity, RoutingRuleActivity::class.java))
             }
         }, buttonParams(16))
@@ -159,6 +182,7 @@ class RoutingSettingsActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
         }
         actions.addView(textAction("编辑") {
+            if (!persistPolicy(showToast = false)) return@textAction
             startActivity(
                 Intent(this@RoutingSettingsActivity, RoutingRuleActivity::class.java)
                     .putExtra(RoutingRuleActivity.EXTRA_RULE_ID, rule.id)
@@ -171,21 +195,21 @@ class RoutingSettingsActivity : Activity() {
         addView(actions)
     }
 
-    private fun persistPolicy(showToast: Boolean) {
+    private fun persistPolicy(showToast: Boolean): Boolean {
         val updated = config.copy(
             mode = modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" },
             defaultAction = actionValues.getOrElse(defaultAction.selectedItemPosition) { "PROXY" },
         )
-        save(updated)
+        if (!save(updated)) return false
         if (showToast) Toast.makeText(this, "分流设置已保存", Toast.LENGTH_SHORT).show()
+        return true
     }
 
     private fun duplicateRule(index: Int) {
         val source = config.rules.getOrNull(index) ?: return
         val rules = config.rules.toMutableList()
         rules.add(index + 1, source.copy(id = java.util.UUID.randomUUID().toString(), name = "${source.name} 副本"))
-        save(config.copy(rules = rules))
-        recreate()
+        if (save(config.copy(rules = rules))) recreate()
     }
 
     private fun moveRule(index: Int, offset: Int) {
@@ -194,8 +218,7 @@ class RoutingSettingsActivity : Activity() {
         val rules = config.rules.toMutableList()
         val item = rules.removeAt(index)
         rules.add(target, item)
-        save(config.copy(rules = rules))
-        recreate()
+        if (save(config.copy(rules = rules))) recreate()
     }
 
     private fun confirmDelete(index: Int) {
@@ -205,16 +228,30 @@ class RoutingSettingsActivity : Activity() {
             .setMessage("确定删除“${rule.name}”吗？")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
-                save(config.copy(rules = config.rules.filterIndexed { i, _ -> i != index }))
-                recreate()
+                if (save(config.copy(rules = config.rules.filterIndexed { i, _ -> i != index }))) recreate()
             }
             .show()
     }
 
-    private fun save(updated: RoutingConfig) {
-        config = updated
-        ConfigStore(this).saveRouting(updated)
+    private fun save(updated: RoutingConfig): Boolean {
+        val next = updated.copy(
+            mode = modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" },
+            defaultAction = actionValues.getOrElse(defaultAction.selectedItemPosition) { "PROXY" },
+        )
+        val error = runCatching {
+            require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+                next.rules.none { it.enabled && it.applications.isNotEmpty() }
+            ) { "Android 8/9 不能启用包含应用条件的规则" }
+            Androidcore.validateRoutingConfig(next.toJson(forCore = true).toString())
+            config = ConfigStore(this).saveRouting(next)
+            draft = null
+        }.exceptionOrNull()
+        if (error != null) {
+            Toast.makeText(this, error.message ?: "保存规则失败", Toast.LENGTH_LONG).show()
+            return false
+        }
         reconfigureRuntime()
+        return true
     }
 
     private fun reconfigureRuntime() {
@@ -223,10 +260,6 @@ class RoutingSettingsActivity : Activity() {
         if (store.isDesiredRunning() || store.isVpnDesiredRunning() || current.clientEnabled) {
             val relay = Intent(this, RelayExitService::class.java).setAction(RelayExitService.ACTION_RECONFIGURE)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay) else startService(relay)
-        }
-        if (store.isVpnDesiredRunning()) {
-            val vpn = Intent(this, RelayVpnService::class.java).setAction(RelayVpnService.ACTION_RECONFIGURE)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(vpn) else startService(vpn)
         }
     }
 

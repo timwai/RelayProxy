@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
@@ -71,12 +72,16 @@
                 android:value="Persistent RelayProxy exit and local proxy runtime" />
         </service>
 
+        <!-- VPN user consent satisfies systemExempted eligibility. AGP 8.7 lint
+             only models the alarm-permission alternative; no alarm is used.
+             https://developer.android.com/develop/background-work/services/fgs/service-types#system-exempted -->
         <service
             android:name=".RelayVpnService"
             android:exported="true"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:stopWithTask="false"
-            android:foregroundServiceType="systemExempted">
+            android:foregroundServiceType="systemExempted"
+            tools:ignore="ForegroundServicePermission">
             <meta-data
                 android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
                 android:value="false" />

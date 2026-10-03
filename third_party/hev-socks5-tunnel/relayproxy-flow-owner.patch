@@ -54,7 +54,7 @@ diff --git a/src/hev-jni.c b/src/hev-jni.c
 +
 +    if (env)
 +        return env;
-+    res = (*java_vm)->AttachCurrentThread (java_vm, (void **)&env, NULL);
++    res = (*java_vm)->AttachCurrentThread (java_vm, &env, NULL);
 +    if (res != JNI_OK)
 +        return NULL;
 +    pthread_setspecific (current_jni_env, env);
@@ -147,7 +147,7 @@ diff --git a/src/hev-socks5-session.h b/src/hev-socks5-session.h
 diff --git a/src/hev-socks5-session.c b/src/hev-socks5-session.c
 --- a/src/hev-socks5-session.c
 +++ b/src/hev-socks5-session.c
-@@ -20,12 +20,16 @@ hev_socks5_session_run (HevSocks5Session *self)
+@@ -20,11 +20,15 @@ hev_socks5_session_run (HevSocks5Session *self)
  {
      HevSocks5SessionIface *iface;
 +    HevSocks5SessionData *data;
@@ -275,7 +275,7 @@ diff --git a/src/hev-socks5-tunnel.c b/src/hev-socks5-tunnel.c
  
  #include "hev-socks5-tunnel.h"
  
-@@ -71,6 +74,28 @@ static HevTask *task_lwip_timer;
+@@ -71,5 +74,27 @@ static HevTask *task_lwip_timer;
  static HevList session_set;
  
 +#ifdef ANDROID
@@ -321,8 +321,8 @@ diff --git a/src/hev-socks5-tunnel.c b/src/hev-socks5-tunnel.c
      }
 +
 +#ifdef ANDROID
-+    set_flow_owner (HEV_SOCKS5_SESSION (udp), 17, addr, port,
-+                    &pcb->local_ip, pcb->local_port);
++    set_flow_owner (HEV_SOCKS5_SESSION (udp), 17, &pcb->remote_ip,
++                    pcb->remote_port, addr, port);
 +#endif
  
      stack_size = hev_config_get_misc_task_stack_size ();

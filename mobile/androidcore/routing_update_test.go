@@ -1,0 +1,97 @@
+package androidcore
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"relayproxy/agent/routing"
+)
+
+func TestRoutingUpdateKeepsExistingTCPAndRejectsNewFlows(t *testing.T) {
+	c, err := NewClient(`{"serverAddress":"relay.example.com","routing":{"mode":"direct"}}`, filepath.Join(t.TempDir(), "identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Stop()
+	l, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		peer, err := l.Accept()
+		if err == nil {
+			defer peer.Close()
+			io.Copy(peer, peer)
+		}
+	}()
+	port := uint16(l.Addr().(*net.TCPAddr).Port)
+	conn, err := c.routingDialer.DialTCP(context.Background(), "", "127.0.0.1", port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(time.Second))
+	if err := c.SetRoutingConfig(`{"mode":"rule","default_action":"REJECT"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 5)
+	if _, err := io.ReadFull(conn, buf); err != nil || string(buf) != "hello" {
+		t.Fatal("existing flow interrupted", err)
+	}
+	if _, err := c.routingDialer.DialTCP(context.Background(), "", "127.0.0.1", port); err == nil {
+		t.Fatal("new flow ignored reject")
+	}
+	if err := c.SetRoutingConfig(`{"mode":"invalid"}`); err == nil {
+		t.Fatal("invalid update accepted")
+	}
+	if d := c.routingDialer.Engine().Decide("example.com", 443); d.Action != routing.ActionReject {
+		t.Fatalf("invalid update lost policy: %+v", d)
+	}
+	var status statusSnapshot
+	if err := json.Unmarshal([]byte(c.StatusJSON()), &status); err != nil || status.RoutingMode != routing.ModeRule {
+		t.Fatal(status, err)
+	}
+}
+
+func TestVPNAuthenticationAndPackageGroups(t *testing.T) {
+	c := &Client{cfg: clientConfig{VPNProxyToken: "private-secret"}}
+	for _, test := range []struct {
+		user, pass string
+		ok         bool
+	}{
+		{"com.app.one|com.app.two", "private-secret", true},
+		{"android", "private-secret", true},
+		{androidUnknownProcess, "private-secret", true},
+		{"com.app.one", "bad", false},
+		{"com..app", "private-secret", false},
+		{"com.1bad", "private-secret", false},
+		{strings.Repeat("com.app|", 17) + "com.app", "private-secret", false},
+	} {
+		process, aliases, ok := c.authenticateVPNProxy(test.user, test.pass)
+		if ok != test.ok {
+			t.Fatalf("%s: %v", test.user, ok)
+		}
+		if test.user == "com.app.one|com.app.two" && (process != "com.app.one" || len(aliases) != 1 || aliases[0] != "com.app.two") {
+			t.Fatal(process, aliases)
+		}
+	}
+}
+
+func TestIdentityKeyRequiresVerifiedTLS(t *testing.T) {
+	for _, settings := range []string{`"tlsEnabled":false`, `"insecureTLS":true`} {
+		_, err := normalizeConfig(`{"serverAddress":"relay.example.com","accessKey":"rpk_test",` + settings + `}`)
+		if err == nil || !strings.Contains(err.Error(), "certificate verification") {
+			t.Fatalf("unsafe credential transport: %v", err)
+		}
+	}
+}

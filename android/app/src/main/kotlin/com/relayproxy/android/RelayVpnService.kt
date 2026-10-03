@@ -37,7 +37,6 @@ class RelayVpnService : VpnService() {
         private const val MAPPED_DNS_NETWORK = "198.19.0.0"
         private const val MAPPED_DNS_NETMASK = "255.255.0.0"
         private const val UNKNOWN_APPLICATION = "__android_unknown__"
-        private const val MAX_PACKAGES_PER_UID = 16
 
         @Volatile
         private var status = JSONObject().put("vpnState", "STOPPED").toString()
@@ -346,21 +345,9 @@ class RelayVpnService : VpnService() {
             )
         }.getOrDefault(-1)
         if (uid < 0 || uid == applicationInfo.uid) return UNKNOWN_APPLICATION
-        val packages = packageManager.getPackagesForUid(uid)
-            .orEmpty()
-            .map(String::trim)
-            .filter(String::isNotBlank)
-            .distinct()
-            .sorted()
-            .take(MAX_PACKAGES_PER_UID)
-        if (packages.isEmpty()) return UNKNOWN_APPLICATION
-        val result = StringBuilder()
-        for (item in packages) {
-            val extra = if (result.isEmpty()) item else "|$item"
-            if (result.length + extra.length > 240) break
-            result.append(extra)
-        }
-        return result.toString().ifBlank { UNKNOWN_APPLICATION }
+        return runCatching {
+            FlowOwnerIdentity.encode(packageManager.getPackagesForUid(uid).orEmpty().toList())
+        }.getOrDefault(UNKNOWN_APPLICATION)
     }
 
     private fun startRelayService(action: String) {
@@ -382,10 +369,8 @@ class RelayVpnService : VpnService() {
             }
             val relayReady = runCatching {
                 val relay = JSONObject(RelayExitService.statusJson())
-                val proxyState = relay.optString("proxyState")
                 relay.optString("connectionState") == "CONNECTED" &&
-                    relay.optBoolean("clientApproved", false) &&
-                    (proxyState == "ready" || proxyState == "legacy")
+                    relay.optBoolean("clientApproved", false)
             }.getOrDefault(false)
             if (!relayReady) {
                 SystemClock.sleep(250)
@@ -477,7 +462,7 @@ class RelayVpnService : VpnService() {
         runCatching {
             if (TProxyService.TProxyIsRunning()) TProxyService.TProxyStopService()
         }
-        TProxyService.setFlowOwnerResolver(null)
+        runCatching { TProxyService.setFlowOwnerResolver(null) }
         val old = tun
         tun = null
         runCatching { old?.close() }

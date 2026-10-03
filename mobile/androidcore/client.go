@@ -186,6 +186,9 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		enabled := true
 		cfg.TLSEnabled = &enabled
 	}
+	if cfg.AccessKey != "" && (!*cfg.TLSEnabled || cfg.InsecureTLS) {
+		return cfg, errors.New("identity access keys require TLS with server certificate verification")
+	}
 	if cfg.AllowInternet == nil {
 		enabled := true
 		cfg.AllowInternet = &enabled
@@ -554,17 +557,42 @@ func (c *Client) authenticateVPNProxy(username, password string) (string, []stri
 }
 
 func validAndroidPackage(value string) bool {
-	if value == "" || len(value) > 200 || !strings.Contains(value, ".") {
+	if value == "" || len(value) > 200 {
 		return false
 	}
-	for _, char := range value {
-		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '.' || char == '_' {
-			continue
+	for _, segment := range strings.Split(value, ".") {
+		if segment == "" || !((segment[0] >= 'a' && segment[0] <= 'z') || (segment[0] >= 'A' && segment[0] <= 'Z')) {
+			return false
 		}
-		return false
+		for _, char := range segment {
+			if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+				(char >= '0' && char <= '9') || char == '_' {
+				continue
+			}
+			return false
+		}
 	}
 	return true
+}
+
+// SetRoutingConfig atomically changes rules for new flows. Existing streams
+// retain their route and the relay/TUN runtime stays alive.
+func (c *Client) SetRoutingConfig(configJSON string) error {
+	var cfg routing.Config
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return fmt.Errorf("decode routing config: %w", err)
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.routingDialer == nil {
+		return errors.New("routing runtime is unavailable")
+	}
+	if err := c.routingDialer.Engine().Reload(cfg); err != nil {
+		return err
+	}
+	c.cfg.Routing = c.routingDialer.Engine().Config()
+	c.status.RoutingMode = c.cfg.Routing.Mode
+	return nil
 }
 
 // SetDefaultExit selects the Relay exit used by new local proxy requests.

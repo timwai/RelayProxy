@@ -41,11 +41,11 @@ class SecretStore(context: Context) {
         prefs.edit().putString(KEY_ACCESS_KEY, encrypt(normalized)).apply()
     }
 
-    fun vpnProxyToken(): String {
+    fun vpnProxyToken(): String = synchronized(vpnTokenLock) {
         val encoded = prefs.getString(KEY_VPN_PROXY_TOKEN, null)?.trim().orEmpty()
         if (encoded.isNotBlank()) {
             val current = runCatching { decrypt(encoded) }.getOrNull()
-            if (!current.isNullOrBlank()) return current
+            if (!current.isNullOrBlank()) return@synchronized current
         }
         val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
         val token = Base64.encodeToString(
@@ -53,7 +53,7 @@ class SecretStore(context: Context) {
             Base64.NO_WRAP or Base64.NO_PADDING or Base64.URL_SAFE,
         )
         prefs.edit().putString(KEY_VPN_PROXY_TOKEN, encrypt(token)).apply()
-        return token
+        token
     }
 
     private fun encrypt(value: String): String {
@@ -100,6 +100,7 @@ class SecretStore(context: Context) {
     }
 
     companion object {
+        private val vpnTokenLock = Any()
         private const val PREFS_NAME = "relayproxy_android_secrets"
         private const val KEY_ACCESS_KEY = "identityAccessKey"
         private const val KEY_VPN_PROXY_TOKEN = "vpnProxyToken"

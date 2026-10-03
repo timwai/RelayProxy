@@ -58,11 +58,19 @@ class RoutingRuleActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         configureWindow()
-        routing = ConfigStore(this).load().routing
+        routing = savedInstanceState?.getString("routingSnapshot")?.let(RoutingConfig::fromJson)
+            ?: ConfigStore(this).load().routing
         val id = intent.getStringExtra(EXTRA_RULE_ID).orEmpty()
         original = routing.rules.firstOrNull { it.id == id }
         setContentView(buildUi())
-        loadRule(original ?: RoutingRuleConfig(id = UUID.randomUUID().toString()))
+        val draft = savedInstanceState?.getString("ruleDraft")?.let(RoutingConfig::fromJson)?.rules?.firstOrNull()
+        loadRule(draft ?: original ?: RoutingRuleConfig(id = UUID.randomUUID().toString()))
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("routingSnapshot", routing.toJson().toString())
+        outState.putString("ruleDraft", RoutingConfig(rules = listOf(readRule())).toJson().toString())
     }
 
     @Deprecated("Deprecated Android activity result API retained for API 26 compatibility")
@@ -98,7 +106,7 @@ class RoutingRuleActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "目标、端口和协议同时满足时命中；每行可填写一个目标或端口范围。"
+            text = "应用、目标、端口和协议同时满足时命中；每行可填写一个目标或端口范围。"
             textSize = 12.5f
             setTextColor(mutedColor)
             setPadding(0, dp(5), 0, dp(12))
@@ -156,7 +164,7 @@ class RoutingRuleActivity : Activity() {
             text = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 "Android 8/9 支持当前非应用规则；按应用分流需要 Android 10 或更高版本。"
             } else {
-                "应用条件仅识别进入 RelayProxy VPN 的流量；显式连接本机 SOCKS5/HTTP 时不推测调用应用。"
+                "应用条件仅适用于 VPN 范围内的流量；共享 UID 按应用组匹配。按规则分流且启用应用条件时，无法识别归属的连接会被拒绝。本机 SOCKS5/HTTP 不识别应用。"
             }
             textSize = 11.5f
             setTextColor(mutedColor)
@@ -276,25 +284,13 @@ class RoutingRuleActivity : Activity() {
             ports.requestFocus()
             return
         }
-        val selectedAction = actionValues.getOrElse(action.selectedItemPosition) { "PROXY" }
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
             enabled.isChecked && selectedApplications.isNotEmpty()
         ) {
             Toast.makeText(this, "Android 8/9 不能启用包含应用条件的规则", Toast.LENGTH_LONG).show()
             return
         }
-        val current = original ?: RoutingRuleConfig(id = UUID.randomUUID().toString())
-        val updated = current.copy(
-            name = ruleName,
-            enabled = enabled.isChecked,
-            action = selectedAction,
-            exitId = if (selectedAction == "PROXY") exitIds.getOrElse(exit.selectedItemPosition) { "" } else "",
-            applications = selectedApplications.sorted(),
-            targets = targetValues,
-            ports = portValues,
-            protocols = protocolValues.getOrElse(protocol.selectedItemPosition) { "" }
-                .takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
-        )
+        val updated = readRule()
         val rules = routing.rules.toMutableList()
         val index = rules.indexOfFirst { it.id == updated.id }
         if (index >= 0) rules[index] = updated else rules += updated
@@ -310,10 +306,30 @@ class RoutingRuleActivity : Activity() {
             ).show()
             return
         }
-        ConfigStore(this).saveRouting(next)
+        val saveError = runCatching { ConfigStore(this).saveRouting(next) }.exceptionOrNull()
+        if (saveError != null) {
+            Toast.makeText(this, saveError.message, Toast.LENGTH_LONG).show()
+            return
+        }
         reconfigureRuntime()
         Toast.makeText(this, "规则已保存", Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    private fun readRule(): RoutingRuleConfig {
+        val current = original ?: RoutingRuleConfig(id = UUID.randomUUID().toString())
+        val selectedAction = actionValues.getOrElse(action.selectedItemPosition) { "PROXY" }
+        return current.copy(
+            name = name.text.toString(),
+            enabled = enabled.isChecked,
+            action = selectedAction,
+            exitId = if (selectedAction == "PROXY") exitIds.getOrElse(exit.selectedItemPosition) { "" } else "",
+            applications = selectedApplications.sorted(),
+            targets = splitValues(targets.text.toString()),
+            ports = splitValues(ports.text.toString()),
+            protocols = protocolValues.getOrElse(protocol.selectedItemPosition) { "" }
+                .takeIf(String::isNotBlank)?.let(::listOf).orEmpty(),
+        )
     }
 
     private fun reconfigureRuntime() {
@@ -324,12 +340,6 @@ class RoutingRuleActivity : Activity() {
                 .setAction(RelayExitService.ACTION_RECONFIGURE)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay)
             else startService(relay)
-        }
-        if (store.isVpnDesiredRunning()) {
-            val vpn = android.content.Intent(this, RelayVpnService::class.java)
-                .setAction(RelayVpnService.ACTION_RECONFIGURE)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(vpn)
-            else startService(vpn)
         }
     }
 

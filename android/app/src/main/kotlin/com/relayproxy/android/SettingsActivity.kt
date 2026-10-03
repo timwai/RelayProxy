@@ -348,6 +348,12 @@ class SettingsActivity : Activity() {
             accessKey.requestFocus()
             return
         }
+        if (section == SECTION_CONNECTION && config.accessKey.isNotBlank() &&
+            (!config.tlsEnabled || config.insecureTls)
+        ) {
+            Toast.makeText(this, "接入密钥需要开启 TLS 并校验服务器证书", Toast.LENGTH_LONG).show()
+            return
+        }
         if (section == SECTION_PROXY && config.clientEnabled && !config.socks5Enabled && !config.httpEnabled) {
             Toast.makeText(this, "启用本机代理时至少选择 SOCKS5 或 HTTP", Toast.LENGTH_SHORT).show()
             return
@@ -438,7 +444,7 @@ class SettingsActivity : Activity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay)
             else startService(relay)
         }
-        if (store.isVpnDesiredRunning()) {
+        if (store.isVpnDesiredRunning() && section != SECTION_EXIT) {
             val vpn = Intent(this, RelayVpnService::class.java)
                 .setAction(RelayVpnService.ACTION_RECONFIGURE)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(vpn)

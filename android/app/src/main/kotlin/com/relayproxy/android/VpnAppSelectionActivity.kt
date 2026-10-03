@@ -33,11 +33,17 @@ class VpnAppSelectionActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         @Suppress("DEPRECATION")
-        selected += intent.getStringArrayListExtra(EXTRA_SELECTED).orEmpty()
+        selected += (savedInstanceState?.getStringArrayList(EXTRA_SELECTED)
+            ?: intent.getStringArrayListExtra(EXTRA_SELECTED)).orEmpty()
             .filter { it != packageName }
         entries = loadApps()
         setContentView(buildUi())
         renderApps("")
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putStringArrayList(EXTRA_SELECTED, ArrayList(selected))
     }
 
     private fun loadApps(): List<AppEntry> {
@@ -56,7 +62,7 @@ class VpnAppSelectionActivity : Activity() {
             val label = runCatching {
                 @Suppress("DEPRECATION")
                 packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
-            }.getOrDefault(pkg)
+            }.getOrDefault("$pkg（已卸载或不可见）")
             launchable += AppEntry(label, pkg)
         }
         return launchable.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })

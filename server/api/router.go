@@ -29,24 +29,24 @@ const userContextKey contextKey = "user_id"
 const principalContextKey contextKey = "principal"
 
 type Router struct {
-	authService                  *service.AuthService
-	deviceService                *service.DeviceService
-	sessions                     *session.Manager
-	db                           *repository.DB
-	mux                          *http.ServeMux
-	settings                     *config.ServerSettings
-	onDeviceRevoked              func(string)
-	onDeviceAuthorizationChanged func(string)
+	authService                    *service.AuthService
+	deviceService                  *service.DeviceService
+	sessions                       *session.Manager
+	db                             *repository.DB
+	mux                            *http.ServeMux
+	settings                       *config.ServerSettings
+	onDeviceRevoked                func(string)
+	onDeviceAuthorizationChanged   func(string)
 	onIdentityAuthorizationChanged func(identityID, accessKeyID string)
-	onRDPIngressChanged          func(string)
-	onRDPIngressReload           func(string) error
-	onRDPIngressStatus           func(string) RDPIngressRuntimeStatus
-	p2pSessions                  func() []P2PSessionRuntimeStatus
-	serverExitStatus             func() ServerExitRuntimeStatus
-	rdpIngressEnabled            func() bool
-	rdpIngressPortStart          int
-	rdpIngressPortEnd            int
-	serverInfo                   ServerInfo
+	onRDPIngressChanged            func(string)
+	onRDPIngressReload             func(string) error
+	onRDPIngressStatus             func(string) RDPIngressRuntimeStatus
+	p2pSessions                    func() []P2PSessionRuntimeStatus
+	serverExitStatus               func() ServerExitRuntimeStatus
+	rdpIngressEnabled              func() bool
+	rdpIngressPortStart            int
+	rdpIngressPortEnd              int
+	serverInfo                     ServerInfo
 }
 
 type RouterOption func(*Router)
@@ -122,7 +122,6 @@ func WithDeviceAuthorizationChanged(fn func(string)) RouterOption {
 func WithIdentityAuthorizationChanged(fn func(identityID, accessKeyID string)) RouterOption {
 	return func(r *Router) { r.onIdentityAuthorizationChanged = fn }
 }
-
 
 func WithRDPIngressChanged(fn func(string)) RouterOption {
 	return func(r *Router) { r.onRDPIngressChanged = fn }

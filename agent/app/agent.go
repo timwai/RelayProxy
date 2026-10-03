@@ -1379,7 +1379,7 @@ func modeForApprovedCapabilities(capabilities []string) string {
 func (a *Agent) ProxyExits() []protocol.ProxyExit {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	return append([]protocol.ProxyExit(nil), a.proxyExits...)
+	return append([]protocol.ProxyExit{}, a.proxyExits...)
 }
 
 // RDPTargets returns the server-approved target list received during the last

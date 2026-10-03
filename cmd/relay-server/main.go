@@ -314,7 +314,10 @@ func main() {
 		ListProxyExits: func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error) {
 			var exits []*session.DeviceSession
 			if identityID != "" {
-				exits = sessionMgr.GetExitsForIdentity(identityID)
+				// v4 inventory is authorization-derived rather than limited to
+				// the same identity, so newly granted cross-identity exits appear
+				// on the next authentication/heartbeat refresh.
+				exits = sessionMgr.GetExits()
 			} else {
 				exits = sessionMgr.GetExitsForOwner(ownerUserID)
 			}
@@ -323,7 +326,7 @@ func main() {
 				if exit == nil || exit.DeviceID == "" || exit.DeviceID == clientID {
 					continue
 				}
-				if identityID == "" && ownerUserID == "" {
+				if identityID != "" || ownerUserID == "" {
 					authorized, err := db.AuthorizeClientExit(clientID, exit.DeviceID)
 					if err != nil {
 						return nil, err
@@ -338,7 +341,10 @@ func main() {
 				}
 				result = append(result, protocol.ProxyExit{DeviceID: exit.DeviceID, Name: name, Online: true})
 			}
-			if serverExit != nil {
+			// The server exit is a system resource and has no device identity.
+			// Keep legacy visibility until the dedicated system-resource grant
+			// model is introduced; never leak it into a v4 identity inventory.
+			if serverExit != nil && identityID == "" {
 				result = append(result, protocol.ProxyExit{
 					DeviceID: protocol.ServerExitDeviceID,
 					Name:     "Relay Server",

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -206,5 +207,45 @@ func TestDeviceIdentityGrantExpiryAndTargetCapabilityValidation(t *testing.T) {
 	_, allowed, err = db.authorizeIdentityDeviceFeature("limited-client", "limited-target", GrantFeatureProxyUse)
 	if err != nil || allowed {
 		t.Fatalf("disabled grantee identity authorized access = allowed:%v err:%v", allowed, err)
+	}
+}
+
+func TestDeviceIdentityMoveRevokesTargetShares(t *testing.T) {
+	db := openIdentityTestDB(t)
+	source, err := db.CreateIdentity("Source Identity", "admin", []string{"proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination, err := db.CreateIdentity("Destination Identity", "admin", []string{"proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantee, err := db.CreateIdentity("Shared Client Identity", "admin", []string{"proxy.client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seedIdentityGrantDevice(t, db, "moving-target", "Moving Target", source.ID, []string{"proxy.exit"})
+	seedIdentityGrantDevice(t, db, "moving-client", "Moving Client", grantee.ID, []string{"proxy.client"})
+	grant, err := db.CreateDeviceIdentityGrant("moving-target", grantee.ID, "admin", []string{GrantFeatureProxyUse}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed, err := db.AuthorizeClientExit("moving-client", "moving-target"); err != nil || !allowed {
+		t.Fatalf("grant did not authorize before identity move: allowed=%v err=%v", allowed, err)
+	}
+
+	summary, err := db.SetDeviceIdentity("moving-target", destination.ID, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.IdentityID != destination.ID {
+		t.Fatalf("target identity move failed: %+v", summary)
+	}
+	if _, err := db.GetDeviceIdentityGrant(grant.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("target share survived identity move: %v", err)
+	}
+	if allowed, err := db.AuthorizeClientExit("moving-client", "moving-target"); err != nil || allowed {
+		t.Fatalf("old grantee retained access after target identity move: allowed=%v err=%v", allowed, err)
 	}
 }

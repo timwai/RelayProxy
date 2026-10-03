@@ -13,6 +13,7 @@ import (
 type DeviceSession struct {
 	DeviceID      string
 	DeviceName    string
+	Fingerprint   string   // verified installation public-key fingerprint
 	OwnerUserID   string   // legacy authenticated ownership snapshot
 	IdentityID    string   // v4 server-derived connection identity
 	IdentityName  string   // display-only identity name snapshot

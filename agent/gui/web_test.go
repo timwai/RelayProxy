@@ -130,6 +130,38 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
+func TestWebManagementExposesServerAuthorizedProxyExitInventory(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+
+	page := httptest.NewRecorder()
+	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
+	body := page.Body.String()
+	for _, want := range []string{
+		`id="cfg-exit-id"`, `<select id="cfg-exit-id"`,
+		`id="speed-test-exit"`, `<select id="speed-test-exit"`,
+		`id="routing-rule-exit"`, `<select id="routing-rule-exit"`,
+		"goGetProxyExits", "fillProxyExitSelect", "已撤销、删除或当前不可用",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Agent management page missing proxy exit inventory hook %q", want)
+		}
+	}
+
+	bridgeJS := httptest.NewRecorder()
+	handler.ServeHTTP(bridgeJS, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
+	for _, want := range []string{"goGetProxyExits", "/api/proxy/exits"} {
+		if !strings.Contains(bridgeJS.Body.String(), want) {
+			t.Fatalf("Agent web bridge missing proxy exit inventory hook %q", want)
+		}
+	}
+
+	exits := httptest.NewRecorder()
+	handler.ServeHTTP(exits, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/proxy/exits", nil))
+	if exits.Code != http.StatusOK || strings.TrimSpace(exits.Body.String()) != "[]" {
+		t.Fatalf("empty proxy exit inventory response = %d %q", exits.Code, exits.Body.String())
+	}
+}
+
 func TestWebManagementExposesServerAuthorizedRDPTargetActions(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 

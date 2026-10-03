@@ -262,6 +262,10 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/device-identity-grants", r.requireAuth(r.requireAdmin(r.handleCreateDeviceIdentityGrant)))
 	r.mux.HandleFunc("PATCH /api/v1/device-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateDeviceIdentityGrant)))
 	r.mux.HandleFunc("DELETE /api/v1/device-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteDeviceIdentityGrant)))
+	r.mux.HandleFunc("GET /api/v1/system-identity-grants", r.requireAuth(r.requireAdmin(r.handleListSystemIdentityGrants)))
+	r.mux.HandleFunc("POST /api/v1/system-identity-grants", r.requireAuth(r.requireAdmin(r.handleCreateSystemIdentityGrant)))
+	r.mux.HandleFunc("PATCH /api/v1/system-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateSystemIdentityGrant)))
+	r.mux.HandleFunc("DELETE /api/v1/system-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteSystemIdentityGrant)))
 
 	// Device APIs
 	r.mux.HandleFunc("GET /api/v1/devices", r.requireAuth(r.handleListDevices))

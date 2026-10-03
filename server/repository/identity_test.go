@@ -104,9 +104,9 @@ func TestIdentityRevisionDisableAndDeviceAssignment(t *testing.T) {
 	device := &Device{
 		ID: "dev_identity_test", Name: "Identity Test",
 		Fingerprint: "identity-test-fingerprint", InstallationID: "identity-test-install",
-		ApprovalState: EnrollmentApproved,
+		ApprovalState:         EnrollmentApproved,
 		RequestedCapabilities: []string{"proxy.client"},
-		ApprovedCapabilities: []string{"proxy.client"},
+		ApprovedCapabilities:  []string{"proxy.client"},
 	}
 	if err := db.UpsertDevice(device); err != nil {
 		t.Fatal(err)

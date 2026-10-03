@@ -713,12 +713,27 @@
       </section>
 
       <section id="tab-pane-connection" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
-        <div class="config-page-heading"><div><p class="config-eyebrow">CONNECTION</p><h1>连接与身份</h1><p class="config-help">只需填写服务器地址；安装身份会自动生成并安全保存在本机。</p></div><span class="config-pill">连接设置需重启</span></div>
+        <div class="config-page-heading"><div><p class="config-eyebrow">CONNECTION</p><h1>连接与身份</h1><p class="config-help">填写服务器地址和接入密钥即可；身份由 Server 根据密钥确定，安装私钥由客户端自动管理。</p></div><span class="config-pill">连接设置需重启</span></div>
         <div class="config-card rp-card">
           <div class="config-section-title"><span>01</span><div><h2>服务器与设备</h2><p>服务器填写主机名或 IP；端口在下方单独设置。</p></div></div>
           <div class="config-grid">
             <div class="config-field"><label for="cfg-server">中继服务器</label><input id="cfg-server" class="mono" autocomplete="off" placeholder="relay.example.com 或 192.168.1.10"></div>
             <div class="config-field"><label for="cfg-device-name">本机名称</label><input id="cfg-device-name" autocomplete="off" placeholder="如：办公室电脑"></div>
+          </div>
+          <div class="config-grid">
+            <div class="config-field">
+              <label for="cfg-access-key">身份接入密钥</label>
+              <input id="cfg-access-key" class="mono" type="password" autocomplete="new-password" placeholder="rpk_...（已保存的密钥不会回显）">
+              <small id="access-key-state" class="config-help">正在读取凭据状态…</small>
+            </div>
+            <div class="config-field">
+              <label>凭据操作</label>
+              <div class="button-row">
+                <button id="access-key-save" type="button" class="btn-primary rp-btn rp-btn-primary config-small" onclick="saveAccessKey()">保存 / 替换密钥</button>
+                <button id="access-key-clear" type="button" class="config-secondary rp-btn config-small" onclick="clearAccessKey()">清除密钥</button>
+              </div>
+              <small class="config-help">密钥单独保存在受保护的凭据存储中，不写入 relay-agent.yaml、日志或状态接口。</small>
+            </div>
           </div>
           <div class="config-grid">
             <div class="config-field"><label for="cfg-transport">传输方式</label><select id="cfg-transport"><option value="auto">自动 · 优先 QUIC，失败回退 TLS</option><option value="quic_only">仅 QUIC · 使用 UDP 通道</option><option value="tcp_only">仅 TCP · 适合 UDP 受限网络</option></select></div>
@@ -1781,6 +1796,83 @@
     window.disconnectRDP = disconnectRDP;
     window.onGoStatus = function (st) { if (st) { renderStatus(st); } };
 
+    /* ---------- identity access credential ---------- */
+    var credentialBusy = false;
+    function renderCredentialState(value) {
+      value = value || {};
+      var status = $('access-key-state'), saveButton = $('access-key-save'), clearButton = $('access-key-clear');
+      if (!status) return;
+      if (value.managedExternally) {
+        status.textContent = '已由 RELAYPROXY_ACCESS_KEY 环境变量提供；本地凭据编辑已锁定。';
+      } else if (value.configured) {
+        status.textContent = value.restartRequired ? '已配置新接入密钥 · 重启客户端后生效' : '接入密钥已配置并正在使用';
+      } else {
+        status.textContent = value.restartRequired ? '本地接入密钥已清除 · 重启后回到 Legacy v3 接入' : '尚未配置接入密钥 · 当前使用迁移期 Legacy v3';
+      }
+      if (saveButton) saveButton.disabled = credentialBusy || !!value.managedExternally;
+      if (clearButton) clearButton.disabled = credentialBusy || !!value.managedExternally || !value.configured;
+    }
+    async function refreshCredentialState(showError) {
+      if (!hasFn('goGetCredentialState')) {
+        renderCredentialState({ configured:false, managedExternally:false, restartRequired:false });
+        return;
+      }
+      try {
+        var raw = await call('goGetCredentialState');
+        var value = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
+        if (value && value.ok === false) throw new Error(value.message || '读取接入密钥状态失败');
+        renderCredentialState(value);
+      } catch (err) {
+        if ($('access-key-state')) $('access-key-state').textContent = '凭据状态读取失败';
+        if (showError) toast('读取接入密钥状态失败：' + err.message);
+      }
+    }
+    async function saveAccessKey() {
+      if (credentialBusy || !hasFn('goSetAccessKey')) return;
+      var input = $('cfg-access-key'), value = (input.value || '').trim();
+      if (!value || value.indexOf('rpk_') !== 0) {
+        input.setAttribute('aria-invalid', 'true');
+        input.focus();
+        toast('请输入 Server 签发的 rpk_ 接入密钥');
+        return;
+      }
+      credentialBusy = true;
+      try {
+        var raw = await call('goSetAccessKey', value);
+        var result = mutationResult(raw);
+        if (!result || !result.ok) throw new Error((result && result.message) || '保存接入密钥失败');
+        input.value = '';
+        input.removeAttribute('aria-invalid');
+        renderCredentialState(result.state || { configured:true, restartRequired:true });
+        toast('接入密钥已安全保存，重启客户端后生效');
+      } catch (err) {
+        toast('保存接入密钥失败：' + err.message);
+      } finally {
+        credentialBusy = false;
+        await refreshCredentialState(false);
+      }
+    }
+    async function clearAccessKey() {
+      if (credentialBusy || !hasFn('goClearAccessKey') || !confirm('清除本机接入密钥？重启后将无法使用 v4 身份自动接入，除非重新配置密钥。')) return;
+      credentialBusy = true;
+      try {
+        var raw = await call('goClearAccessKey');
+        var result = mutationResult(raw);
+        if (!result || !result.ok) throw new Error((result && result.message) || '清除接入密钥失败');
+        $('cfg-access-key').value = '';
+        renderCredentialState(result.state || { configured:false, restartRequired:true });
+        toast('接入密钥已清除，重启客户端后生效');
+      } catch (err) {
+        toast('清除接入密钥失败：' + err.message);
+      } finally {
+        credentialBusy = false;
+        await refreshCredentialState(false);
+      }
+    }
+    window.saveAccessKey = saveAccessKey;
+    window.clearAccessKey = clearAccessKey;
+    window.refreshCredentialState = refreshCredentialState;
+
     /* ---------- config rendering ---------- */
     function renderConfig(cfg) {
       if (!cfg || cfg.configError) { throw new Error((cfg && cfg.configError) || '配置为空'); }
@@ -2501,6 +2593,7 @@
       if (state.saving) return;
       if (dirtyGroups(true).length) { await refreshStatus(); toast('运行状态已刷新，未保存输入已保留。需要重读文件时请先放弃修改。'); return; }
       var loaded = await loadConfig();
+      await refreshCredentialState(false);
       await refreshStatus();
       if (loaded) { toast('已刷新表单；运行规则未改变'); }
     }
@@ -2550,6 +2643,7 @@
         if (dirtyGroups(true).length || state.saving) { event.preventDefault(); event.returnValue = ''; }
       });
       loadConfig();
+      refreshCredentialState(false);
       refreshStatus();
       refreshLogs();
       refreshMessages(false);

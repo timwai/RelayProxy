@@ -12,13 +12,13 @@ import (
 )
 
 const (
-	GrantFeatureProxyUse  = "proxy.use"
+	GrantFeatureProxyUse   = "proxy.use"
 	GrantFeatureRDPConnect = "rdp.connect"
 )
 
 var (
-	ErrDeviceIdentityGrantExists    = errors.New("device identity grant already exists")
-	ErrDeviceIdentityGrantRevision  = errors.New("device identity grant revision conflict")
+	ErrDeviceIdentityGrantExists   = errors.New("device identity grant already exists")
+	ErrDeviceIdentityGrantRevision = errors.New("device identity grant revision conflict")
 )
 
 type DeviceIdentityGrant struct {
@@ -391,7 +391,7 @@ func (db *DB) UpdateDeviceIdentityGrant(id, actor string, update DeviceIdentityG
 	if err := insertAuthorizationAudit(tx, "device_identity_grant.update", actor, "device_identity_grant", id,
 		map[string]any{
 			"before": map[string]any{"granteeIdentityId": currentGrantee, "features": currentFeatures, "revision": currentRevision},
-			"after": map[string]any{"granteeIdentityId": nextGrantee, "features": nextFeatures, "expiresAt": nextExpires, "revision": nextRevision},
+			"after":  map[string]any{"granteeIdentityId": nextGrantee, "features": nextFeatures, "expiresAt": nextExpires, "revision": nextRevision},
 		}, now); err != nil {
 		return nil, err
 	}

@@ -30,6 +30,7 @@ const clientVersion = "android-0.2.0"
 
 type clientConfig struct {
 	ServerAddress       string `json:"serverAddress"`
+	AccessKey           string `json:"accessKey"`
 	DeviceName          string `json:"deviceName"`
 	QUICPort            int    `json:"quicPort"`
 	TCPPort             int    `json:"tcpPort"`
@@ -54,6 +55,8 @@ type statusSnapshot struct {
 	ApprovalState       string               `json:"approvalState"`
 	DeviceID            string               `json:"deviceId,omitempty"`
 	DeviceName          string               `json:"deviceName"`
+	IdentityName        string               `json:"identityName,omitempty"`
+	PolicyRevision      int64                `json:"policyRevision,omitempty"`
 	Transport           string               `json:"transport,omitempty"`
 	ExitApproved        bool                 `json:"exitApproved"`
 	ClientApproved      bool                 `json:"clientApproved"`
@@ -121,6 +124,7 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		return cfg, fmt.Errorf("decode config: %w", err)
 	}
 	cfg.ServerAddress = strings.TrimSpace(cfg.ServerAddress)
+	cfg.AccessKey = strings.TrimSpace(cfg.AccessKey)
 	if cfg.ServerAddress == "" {
 		return cfg, errors.New("serverAddress is required")
 	}
@@ -616,8 +620,13 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if _, err := rand.Read(clientNonce); err != nil {
 		return fmt.Errorf("generate client nonce: %w", err)
 	}
+	protocolVersion := protocol.LegacyDeviceProtocolVersion
+	if c.cfg.AccessKey != "" {
+		protocolVersion = protocol.IdentityDeviceProtocolVersion
+	}
 	hello := protocol.DeviceHello{
-		ProtocolVersion:       protocol.DeviceProtocolVersion,
+		ProtocolVersion:       protocolVersion,
+		AccessKey:             c.cfg.AccessKey,
 		InstallationID:        c.identity.InstallationID,
 		PublicKey:             append([]byte(nil), c.identity.PublicKey...),
 		ClientNonce:           clientNonce,
@@ -636,7 +645,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if err := protocol.ReadJSON(ctrl, &challenge); err != nil {
 		return fmt.Errorf("read authentication challenge: %w", err)
 	}
-	if challenge.ProtocolVersion != protocol.DeviceProtocolVersion ||
+	if challenge.ProtocolVersion != protocolVersion ||
 		challenge.ChallengeID == "" ||
 		challenge.ServerInstanceID == "" ||
 		len(challenge.ServerNonce) != 32 ||
@@ -657,6 +666,10 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	}
 	c.mu.Lock()
 	c.status.ApprovalState = accepted.State
+	if accepted.Success {
+		c.status.IdentityName = accepted.IdentityName
+		c.status.PolicyRevision = accepted.PolicyRevision
+	}
 	c.mu.Unlock()
 	if !accepted.Success {
 		return fmt.Errorf("server rejected connection: [%s] %s", accepted.ErrorCode, accepted.ErrorMessage)

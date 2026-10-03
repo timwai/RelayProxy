@@ -49,7 +49,7 @@ type ProxyExit struct {
 }
 
 type DeviceHello struct {
-	ProtocolVersion       int      `json:"protocolVersion"`
+	ProtocolVersion int `json:"protocolVersion"`
 	// AccessKey is present only in v4. The server resolves identity from this
 	// credential; clients never submit or choose an identity ID.
 	AccessKey             string   `json:"accessKey,omitempty"`

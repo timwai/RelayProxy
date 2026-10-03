@@ -32,6 +32,7 @@ type GatewayConfig struct {
 	AuthorizeDevice         func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
 	RecheckDevice           func(fingerprint, deviceID string) bool
 	ListRDPTargets          func(controllerID string) ([]protocol.RDPTarget, error)
+	ListProxyExits          func(clientID, ownerUserID string) ([]protocol.ProxyExit, error)
 	OnDeviceConnected       func(deviceID string)
 	OnDeviceHeartbeat       func(deviceID string)
 	OnDeviceDisconnected    func(deviceID string)
@@ -468,6 +469,18 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	if g.cfg.P2PEnabled {
 		capabilities = append(capabilities, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
+	var proxyExits *[]protocol.ProxyExit
+	if containsCapability(authorization.ApprovedCapabilities, protocol.CapabilityProxyClient) && g.cfg.ListProxyExits != nil {
+		exits, err := g.cfg.ListProxyExits(authorization.DeviceID, authorization.OwnerUserID)
+		if err != nil {
+			log.Printf("[Gateway] List proxy exits for %s: %v", authorization.DeviceID, err)
+		} else {
+			if exits == nil {
+				exits = []protocol.ProxyExit{}
+			}
+			proxyExits = &exits
+		}
+	}
 	sessionID := "sess_" + uuid.New().String()
 	heartbeatSec := g.heartbeatForDevice(hello, authorization.ApprovedCapabilities)
 	welcome := protocol.DeviceAccepted{
@@ -475,6 +488,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		DeviceID:              authorization.DeviceID,
 		ApprovedCapabilities:  authorization.ApprovedCapabilities,
 		RDPTargets:            authorization.RDPTargets,
+		ProxyExits:            proxyExits,
 		SessionID:             sessionID,
 		HeartbeatSec:          heartbeatSec,
 		MaxConnections:        g.cfg.MaxConnectionsPerDevice,
@@ -679,6 +693,17 @@ func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 					targets = []protocol.RDPTarget{}
 				}
 				pong.RDPTargets = &targets
+			}
+		}
+		if containsCapability(dev.Grants, protocol.CapabilityProxyClient) && g.cfg.ListProxyExits != nil {
+			exits, err := g.cfg.ListProxyExits(dev.DeviceID, dev.OwnerUserID)
+			if err != nil {
+				log.Printf("[Gateway] Refresh proxy exits for %s: %v", dev.DeviceID, err)
+			} else {
+				if exits == nil {
+					exits = []protocol.ProxyExit{}
+				}
+				pong.ProxyExits = &exits
 			}
 		}
 

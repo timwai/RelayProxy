@@ -16,19 +16,50 @@ data class ExitConfig(
     val allowPrivateNetwork: Boolean = false,
     val networkMode: String = NetworkBinder.MODE_WIFI,
     val autoNetworkSwitch: Boolean = true,
+    val exitEnabled: Boolean = false,
+    val clientEnabled: Boolean = false,
+    val socks5Enabled: Boolean = true,
+    val httpEnabled: Boolean = false,
+    val defaultExitId: String = "",
+    val socks5Port: Int = 1080,
+    val httpPort: Int = 8080,
+    val proxyP2pEnabled: Boolean = true,
+    val vpnEnabled: Boolean = false,
+    val vpnSocks5Port: Int = 1081,
+    val vpnAppMode: String = VPN_APP_MODE_ALL,
+    val vpnPackages: Set<String> = emptySet(),
+    val vpnDnsServers: List<String> = listOf("1.1.1.1", "8.8.8.8"),
 ) {
-    fun coreJson(): String = JSONObject()
-        .put("serverAddress", serverAddress.trim())
-        .put("deviceName", deviceName.trim())
-        .put("quicPort", quicPort)
-        .put("tcpPort", tcpPort)
-        .put("transportMode", transportMode)
-        .put("tlsEnabled", tlsEnabled)
-        .put("insecureTLS", insecureTls)
-        .put("allowInternet", true)
-        .put("allowPrivateNetwork", allowPrivateNetwork)
-        .put("allowLoopback", false)
-        .toString()
+    fun coreJson(): String {
+        val localSocksEnabled = clientEnabled && socks5Enabled
+        val coreClientEnabled = clientEnabled || vpnEnabled
+        return JSONObject()
+            .put("serverAddress", serverAddress.trim())
+            .put("deviceName", deviceName.trim())
+            .put("quicPort", quicPort)
+            .put("tcpPort", tcpPort)
+            .put("transportMode", transportMode)
+            .put("tlsEnabled", tlsEnabled)
+            .put("insecureTLS", insecureTls)
+            .put("allowInternet", true)
+            .put("allowPrivateNetwork", allowPrivateNetwork)
+            .put("allowLoopback", false)
+            .put("exitEnabled", exitEnabled)
+            .put("clientEnabled", coreClientEnabled)
+            .put("socks5Enabled", localSocksEnabled || vpnEnabled)
+            .put("httpEnabled", clientEnabled && httpEnabled)
+            .put("proxyP2pEnabled", proxyP2pEnabled)
+            .put("defaultExitId", defaultExitId.trim())
+            .put("socks5Listen", "127.0.0.1:${if (localSocksEnabled) socks5Port else vpnSocks5Port}")
+            .put("httpListen", "127.0.0.1:$httpPort")
+            .toString()
+    }
+
+    companion object {
+        const val VPN_APP_MODE_ALL = "all"
+        const val VPN_APP_MODE_INCLUDE = "include"
+        const val VPN_APP_MODE_EXCLUDE = "exclude"
+    }
 }
 
 class ConfigStore(private val context: Context) {
@@ -87,6 +118,20 @@ class ConfigStore(private val context: Context) {
             savedDeviceName
         }
 
+        val clientEnabled = prefs.getBoolean("clientEnabled", false)
+        val socks5Enabled = prefs.getBoolean("socks5Enabled", true)
+        val httpEnabled = prefs.getBoolean("httpEnabled", false)
+        val socks5Port = prefs.getInt("socks5Port", 1080)
+        val httpPort = prefs.getInt("httpPort", 8080)
+        val reservedPorts = buildSet {
+            if (clientEnabled && socks5Enabled) add(socks5Port)
+            if (clientEnabled && httpEnabled) add(httpPort)
+        }
+        var vpnSocks5Port = 1081
+        while (vpnSocks5Port in reservedPorts && vpnSocks5Port < 65535) {
+            vpnSocks5Port++
+        }
+
         return ExitConfig(
             serverAddress = prefs.getString("serverAddress", "") ?: "",
             deviceName = resolvedDeviceName,
@@ -98,6 +143,32 @@ class ConfigStore(private val context: Context) {
             allowPrivateNetwork = prefs.getBoolean("allowPrivateNetwork", false),
             networkMode = resolvedNetworkMode,
             autoNetworkSwitch = resolvedAutoNetworkSwitch,
+            exitEnabled = isDesiredRunning(),
+            clientEnabled = clientEnabled,
+            socks5Enabled = socks5Enabled,
+            httpEnabled = httpEnabled,
+            defaultExitId = prefs.getString("defaultExitId", "") ?: "",
+            socks5Port = socks5Port,
+            httpPort = httpPort,
+            proxyP2pEnabled = prefs.getBoolean("proxyP2pEnabled", true),
+            vpnEnabled = isVpnDesiredRunning(),
+            vpnSocks5Port = vpnSocks5Port,
+            vpnAppMode = when (prefs.getString("vpnAppMode", ExitConfig.VPN_APP_MODE_ALL)) {
+                ExitConfig.VPN_APP_MODE_INCLUDE -> ExitConfig.VPN_APP_MODE_INCLUDE
+                ExitConfig.VPN_APP_MODE_EXCLUDE -> ExitConfig.VPN_APP_MODE_EXCLUDE
+                else -> ExitConfig.VPN_APP_MODE_ALL
+            },
+            vpnPackages = prefs.getStringSet("vpnPackages", emptySet())
+                ?.map(String::trim)
+                ?.filter(String::isNotBlank)
+                ?.toSet()
+                .orEmpty(),
+            vpnDnsServers = prefs.getString("vpnDnsServers", "1.1.1.1,8.8.8.8")
+                .orEmpty()
+                .split(',', '\n', ';', ' ')
+                .map(String::trim)
+                .filter(String::isNotBlank)
+                .distinct(),
         )
     }
 
@@ -113,7 +184,19 @@ class ConfigStore(private val context: Context) {
             .putBoolean("allowPrivateNetwork", config.allowPrivateNetwork)
             .putString("networkMode", config.networkMode)
             .putBoolean("autoNetworkSwitch", config.autoNetworkSwitch)
+            .putBoolean("clientEnabled", config.clientEnabled)
+            .putBoolean("socks5Enabled", config.socks5Enabled)
+            .putBoolean("httpEnabled", config.httpEnabled)
+            .putString("defaultExitId", config.defaultExitId.trim())
+            .putInt("socks5Port", config.socks5Port)
+            .putInt("httpPort", config.httpPort)
+            .putBoolean("proxyP2pEnabled", config.proxyP2pEnabled)
+            .putString("vpnAppMode", config.vpnAppMode)
+            .putStringSet("vpnPackages", config.vpnPackages.toSet())
+            .putString("vpnDnsServers", config.vpnDnsServers.joinToString(","))
+            .putInt("configVersion", 2)
             .remove("cellularOnly")
+            .remove("vpnManagingRelay")
             .apply()
     }
 
@@ -122,4 +205,11 @@ class ConfigStore(private val context: Context) {
     fun setDesiredRunning(running: Boolean) {
         prefs.edit().putBoolean("desiredRunning", running).apply()
     }
+
+    fun isVpnDesiredRunning(): Boolean = prefs.getBoolean("vpnDesiredRunning", false)
+
+    fun setVpnDesiredRunning(running: Boolean) {
+        prefs.edit().putBoolean("vpnDesiredRunning", running).apply()
+    }
+
 }

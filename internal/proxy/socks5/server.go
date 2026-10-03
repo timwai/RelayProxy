@@ -29,7 +29,8 @@ const (
 	AuthMethodNone         = 0x00
 	AuthMethodNoAcceptable = 0xFF
 
-	CmdConnect = 0x01
+	CmdConnect      = 0x01
+	CmdUDPAssociate = 0x03
 
 	AtypIPv4   = 0x01
 	AtypDomain = 0x03
@@ -52,17 +53,18 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	cfg       ServerConfig
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.Mutex
-	listener  net.Listener
-	starting  bool
-	closed    bool
-	conns     map[net.Conn]struct{}
-	workers   sync.WaitGroup
-	closeOnce sync.Once
-	closeErr  error
+	cfg         ServerConfig
+	ctx         context.Context
+	cancel      context.CancelFunc
+	mu          sync.Mutex
+	listener    net.Listener
+	starting    bool
+	closed      bool
+	conns       map[net.Conn]struct{}
+	packetConns map[net.PacketConn]struct{}
+	workers     sync.WaitGroup
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 func NewServer(cfg ServerConfig) *Server {
@@ -70,7 +72,10 @@ func NewServer(cfg ServerConfig) *Server {
 		cfg.ListenAddr = "127.0.0.1:1080"
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Server{cfg: cfg, ctx: ctx, cancel: cancel, conns: make(map[net.Conn]struct{})}
+	return &Server{
+		cfg: cfg, ctx: ctx, cancel: cancel,
+		conns: make(map[net.Conn]struct{}), packetConns: make(map[net.PacketConn]struct{}),
+	}
 }
 
 func (s *Server) Start() error {
@@ -135,6 +140,10 @@ func (s *Server) Close() error {
 		for conn := range s.conns {
 			conns = append(conns, conn)
 		}
+		packetConns := make([]net.PacketConn, 0, len(s.packetConns))
+		for conn := range s.packetConns {
+			packetConns = append(packetConns, conn)
+		}
 		s.mu.Unlock()
 
 		s.cancel()
@@ -144,6 +153,9 @@ func (s *Server) Close() error {
 			}
 		}
 		for _, conn := range conns {
+			_ = conn.Close()
+		}
+		for _, conn := range packetConns {
 			_ = conn.Close()
 		}
 		s.workers.Wait()
@@ -247,10 +259,13 @@ func (s *Server) handleConn(conn net.Conn) error {
 	if reqHeader[0] != Version5 {
 		return fmt.Errorf("invalid socks version in request: %d", reqHeader[0])
 	}
+	if reqHeader[2] != 0 {
+		return fmt.Errorf("invalid socks reserved byte: %d", reqHeader[2])
+	}
 	cmd := reqHeader[1]
 	atyp := reqHeader[3]
 
-	if cmd != CmdConnect {
+	if cmd != CmdConnect && cmd != CmdUDPAssociate {
 		s.sendReply(conn, RepCmdNotSupport, "0.0.0.0", 0)
 		return fmt.Errorf("unsupported command: %d", cmd)
 	}
@@ -291,6 +306,13 @@ func (s *Server) handleConn(conn net.Conn) error {
 		return err
 	}
 	port := binary.BigEndian.Uint16(portBuf)
+	if host == "" || (cmd == CmdConnect && port == 0) {
+		_ = s.sendReply(conn, RepAddrNotSupport, "0.0.0.0", 0)
+		return errors.New("invalid SOCKS5 destination")
+	}
+	if cmd == CmdUDPAssociate {
+		return s.handleUDPAssociate(conn, host, port)
+	}
 
 	exitID := ""
 	if s.cfg.GetExitNodeID != nil {
@@ -364,12 +386,13 @@ func (s *Server) sendReply(conn net.Conn, rep byte, bndAddr string, bndPort uint
 	}
 	ip4 := ip.To4()
 
-	resp := make([]byte, 0, 10)
-	resp = append(resp, Version5, rep, 0x00, AtypIPv4)
+	resp := make([]byte, 0, 22)
 	if ip4 != nil {
+		resp = append(resp, Version5, rep, 0x00, AtypIPv4)
 		resp = append(resp, ip4...)
 	} else {
-		resp = append(resp, net.IPv4zero...)
+		resp = append(resp, Version5, rep, 0x00, AtypIPv6)
+		resp = append(resp, ip.To16()...)
 	}
 	var portBytes [2]byte
 	binary.BigEndian.PutUint16(portBytes[:], bndPort)
@@ -377,6 +400,377 @@ func (s *Server) sendReply(conn net.Conn, rep byte, bndAddr string, bndPort uint
 
 	_, err := conn.Write(resp)
 	return err
+}
+
+const (
+	maxUDPTargetsPerAssociation = 64
+	udpTargetIdleTimeout        = 2 * time.Minute
+	udpTargetSweepInterval      = 30 * time.Second
+)
+
+type udpTarget struct {
+	key      string
+	host     string
+	port     uint16
+	conn     net.PacketConn
+	lastUsed time.Time
+}
+
+type udpAssociation struct {
+	server     *Server
+	conn       *net.UDPConn
+	ctx        context.Context
+	cancel     context.CancelFunc
+	control    net.Conn
+	clientMu   sync.RWMutex
+	clientAddr *net.UDPAddr
+	mu         sync.Mutex
+	targets    map[string]*udpTarget
+	closed     bool
+	workers    sync.WaitGroup
+}
+
+func (s *Server) handleUDPAssociate(control net.Conn, requestedHost string, requestedPort uint16) error {
+	peer, ok := control.RemoteAddr().(*net.TCPAddr)
+	if !ok || peer.IP == nil || !peer.IP.IsLoopback() {
+		s.sendReply(control, RepNotAllowed, "0.0.0.0", 0)
+		return errors.New("SOCKS5 UDP association is only allowed from loopback clients")
+	}
+	if requestedIP := net.ParseIP(requestedHost); requestedIP != nil && !requestedIP.IsUnspecified() && !requestedIP.Equal(peer.IP) {
+		s.sendReply(control, RepNotAllowed, "0.0.0.0", 0)
+		return errors.New("SOCKS5 UDP client address does not match TCP peer")
+	}
+	if s.cfg.Dialer == nil {
+		s.sendReply(control, RepGeneralFailure, "0.0.0.0", 0)
+		return errors.New("tunnel dialer not configured")
+	}
+
+	listenIP := peer.IP
+	if local, ok := control.LocalAddr().(*net.TCPAddr); ok && local.IP != nil && local.IP.IsLoopback() {
+		listenIP = local.IP
+	}
+	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: listenIP})
+	if err != nil {
+		s.sendReply(control, RepGeneralFailure, "0.0.0.0", 0)
+		return fmt.Errorf("start SOCKS5 UDP relay: %w", err)
+	}
+	if !s.trackPacketConn(udpConn) {
+		_ = udpConn.Close()
+		return net.ErrClosed
+	}
+	defer s.releasePacketConn(udpConn)
+	defer udpConn.Close()
+
+	bound := udpConn.LocalAddr().(*net.UDPAddr)
+	if err := s.sendReply(control, RepSuccess, bound.IP.String(), uint16(bound.Port)); err != nil {
+		return err
+	}
+	_ = control.SetDeadline(time.Time{})
+
+	ctx, cancel := context.WithCancel(s.ctx)
+	association := &udpAssociation{
+		server: s, conn: udpConn, ctx: ctx, cancel: cancel,
+		control: control, targets: make(map[string]*udpTarget),
+	}
+	association.workers.Add(1)
+	go association.reapIdleTargets()
+	controlDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, control)
+		close(controlDone)
+		_ = udpConn.Close()
+	}()
+
+	buf := make([]byte, 65535)
+	for {
+		n, source, readErr := udpConn.ReadFromUDP(buf)
+		if readErr != nil {
+			break
+		}
+		if source == nil || !source.IP.Equal(peer.IP) {
+			continue
+		}
+		association.clientMu.Lock()
+		if association.clientAddr == nil {
+			if requestedPort != 0 && int(requestedPort) != source.Port {
+				association.clientMu.Unlock()
+				continue
+			}
+			association.clientAddr = cloneUDPAddr(source)
+		} else if !sameUDPAddr(association.clientAddr, source) {
+			association.clientMu.Unlock()
+			continue
+		}
+		association.clientMu.Unlock()
+
+		host, port, payload, parseErr := decodeUDPDatagram(buf[:n])
+		if parseErr != nil || port == 0 {
+			continue
+		}
+		_ = association.forward(host, port, payload)
+	}
+	association.close()
+	select {
+	case <-controlDone:
+	case <-s.ctx.Done():
+	}
+	return nil
+}
+
+func (s *Server) trackPacketConn(conn net.PacketConn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.packetConns[conn] = struct{}{}
+	return true
+}
+
+func (s *Server) releasePacketConn(conn net.PacketConn) {
+	s.mu.Lock()
+	delete(s.packetConns, conn)
+	s.mu.Unlock()
+}
+
+func (a *udpAssociation) forward(host string, port uint16, payload []byte) error {
+	key := net.JoinHostPort(host, strconv.Itoa(int(port)))
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return net.ErrClosed
+	}
+	target := a.targets[key]
+	if target != nil {
+		target.lastUsed = time.Now()
+		a.mu.Unlock()
+		_, err := target.conn.WriteTo(payload, nil)
+		if err != nil {
+			a.removeTarget(target)
+			_ = target.conn.Close()
+		}
+		return err
+	}
+	var evicted net.PacketConn
+	if len(a.targets) >= maxUDPTargetsPerAssociation {
+		var oldest *udpTarget
+		for _, candidate := range a.targets {
+			if oldest == nil || candidate.lastUsed.Before(oldest.lastUsed) {
+				oldest = candidate
+			}
+		}
+		if oldest != nil {
+			delete(a.targets, oldest.key)
+			evicted = oldest.conn
+		}
+	}
+	a.mu.Unlock()
+	if evicted != nil {
+		_ = evicted.Close()
+	}
+
+	exitID := ""
+	if a.server.cfg.GetExitNodeID != nil {
+		exitID = a.server.cfg.GetExitNodeID()
+	}
+	conn, err := a.server.cfg.Dialer.DialUDP(proxy.WithClientConn(a.ctx, "socks5-udp", a.control), exitID, host, port)
+	if err != nil {
+		return err
+	}
+	target = &udpTarget{key: key, host: host, port: port, conn: conn, lastUsed: time.Now()}
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		_ = conn.Close()
+		return net.ErrClosed
+	}
+	if existing := a.targets[key]; existing != nil {
+		existing.lastUsed = time.Now()
+		a.mu.Unlock()
+		_ = conn.Close()
+		target = existing
+	} else {
+		a.targets[key] = target
+		a.workers.Add(1)
+		go a.readTarget(target)
+		a.mu.Unlock()
+	}
+	_, err = target.conn.WriteTo(payload, nil)
+	if err != nil {
+		a.removeTarget(target)
+		_ = target.conn.Close()
+	}
+	return err
+}
+
+func (a *udpAssociation) readTarget(target *udpTarget) {
+	defer a.workers.Done()
+	buf := make([]byte, 65535)
+	for {
+		n, _, err := target.conn.ReadFrom(buf)
+		if err != nil {
+			a.removeTarget(target)
+			_ = target.conn.Close()
+			return
+		}
+		packet, err := encodeUDPDatagram(target.host, target.port, buf[:n])
+		if err != nil {
+			continue
+		}
+		a.clientMu.RLock()
+		client := cloneUDPAddr(a.clientAddr)
+		a.clientMu.RUnlock()
+		if client == nil {
+			continue
+		}
+		_, _ = a.conn.WriteToUDP(packet, client)
+		a.mu.Lock()
+		if current := a.targets[target.key]; current == target {
+			current.lastUsed = time.Now()
+		}
+		a.mu.Unlock()
+	}
+}
+
+func (a *udpAssociation) removeTarget(target *udpTarget) {
+	a.mu.Lock()
+	if current := a.targets[target.key]; current == target {
+		delete(a.targets, target.key)
+	}
+	a.mu.Unlock()
+}
+
+func (a *udpAssociation) reapIdleTargets() {
+	defer a.workers.Done()
+	ticker := time.NewTicker(udpTargetSweepInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-a.ctx.Done():
+			return
+		case now := <-ticker.C:
+			var stale []net.PacketConn
+			a.mu.Lock()
+			if a.closed {
+				a.mu.Unlock()
+				return
+			}
+			for key, target := range a.targets {
+				if now.Sub(target.lastUsed) >= udpTargetIdleTimeout {
+					delete(a.targets, key)
+					stale = append(stale, target.conn)
+				}
+			}
+			a.mu.Unlock()
+			for _, conn := range stale {
+				_ = conn.Close()
+			}
+		}
+	}
+}
+
+func (a *udpAssociation) close() {
+	a.cancel()
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return
+	}
+	a.closed = true
+	conns := make([]net.PacketConn, 0, len(a.targets))
+	for _, target := range a.targets {
+		conns = append(conns, target.conn)
+	}
+	a.targets = nil
+	a.mu.Unlock()
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+	a.workers.Wait()
+}
+
+func decodeUDPDatagram(packet []byte) (string, uint16, []byte, error) {
+	if len(packet) < 4 || packet[0] != 0 || packet[1] != 0 || packet[2] != 0 {
+		return "", 0, nil, errors.New("unsupported SOCKS5 UDP fragmentation or header")
+	}
+	reader := strings.NewReader(string(packet[4:]))
+	host, err := readAddress(reader, packet[3])
+	if err != nil {
+		return "", 0, nil, err
+	}
+	var portBytes [2]byte
+	if _, err := io.ReadFull(reader, portBytes[:]); err != nil {
+		return "", 0, nil, err
+	}
+	consumed := len(packet) - reader.Len()
+	return host, binary.BigEndian.Uint16(portBytes[:]), packet[consumed:], nil
+}
+
+func readAddress(reader io.Reader, atyp byte) (string, error) {
+	switch atyp {
+	case AtypIPv4:
+		ip := make([]byte, net.IPv4len)
+		if _, err := io.ReadFull(reader, ip); err != nil {
+			return "", err
+		}
+		return net.IP(ip).String(), nil
+	case AtypIPv6:
+		ip := make([]byte, net.IPv6len)
+		if _, err := io.ReadFull(reader, ip); err != nil {
+			return "", err
+		}
+		return net.IP(ip).String(), nil
+	case AtypDomain:
+		var length [1]byte
+		if _, err := io.ReadFull(reader, length[:]); err != nil {
+			return "", err
+		}
+		name := make([]byte, int(length[0]))
+		if _, err := io.ReadFull(reader, name); err != nil {
+			return "", err
+		}
+		if len(name) == 0 {
+			return "", errors.New("empty SOCKS5 UDP destination")
+		}
+		return string(name), nil
+	default:
+		return "", fmt.Errorf("unsupported SOCKS5 UDP address type: %d", atyp)
+	}
+}
+
+func encodeUDPDatagram(host string, port uint16, payload []byte) ([]byte, error) {
+	packet := []byte{0, 0, 0}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip4 := ip.To4(); ip4 != nil {
+			packet = append(packet, AtypIPv4)
+			packet = append(packet, ip4...)
+		} else {
+			packet = append(packet, AtypIPv6)
+			packet = append(packet, ip.To16()...)
+		}
+	} else {
+		if len(host) == 0 || len(host) > 255 {
+			return nil, errors.New("SOCKS5 UDP destination name is too long")
+		}
+		packet = append(packet, AtypDomain, byte(len(host)))
+		packet = append(packet, host...)
+	}
+	var portBytes [2]byte
+	binary.BigEndian.PutUint16(portBytes[:], port)
+	packet = append(packet, portBytes[:]...)
+	packet = append(packet, payload...)
+	return packet, nil
+}
+
+func cloneUDPAddr(addr *net.UDPAddr) *net.UDPAddr {
+	if addr == nil {
+		return nil
+	}
+	return &net.UDPAddr{IP: append(net.IP(nil), addr.IP...), Port: addr.Port, Zone: addr.Zone}
+}
+
+func sameUDPAddr(a, b *net.UDPAddr) bool {
+	return a != nil && b != nil && a.Port == b.Port && a.Zone == b.Zone && a.IP.Equal(b.IP)
 }
 
 func (s *Server) pipe(c1, c2 net.Conn) {

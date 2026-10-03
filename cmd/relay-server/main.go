@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -271,6 +272,43 @@ func main() {
 			}
 			result := protocolRDPTargets(targets)
 			refreshRDPTargetOnlineState(result, sessionMgr)
+			return result, nil
+		},
+		ListProxyExits: func(clientID, ownerUserID string) ([]protocol.ProxyExit, error) {
+			exits := sessionMgr.GetExitsForOwner(ownerUserID)
+			result := make([]protocol.ProxyExit, 0, len(exits)+1)
+			for _, exit := range exits {
+				if exit == nil || exit.DeviceID == "" || exit.DeviceID == clientID {
+					continue
+				}
+				if ownerUserID == "" {
+					authorized, err := db.AuthorizeClientExit(clientID, exit.DeviceID)
+					if err != nil {
+						return nil, err
+					}
+					if !authorized {
+						continue
+					}
+				}
+				name := strings.TrimSpace(exit.DeviceName)
+				if name == "" {
+					name = exit.DeviceID
+				}
+				result = append(result, protocol.ProxyExit{DeviceID: exit.DeviceID, Name: name, Online: true})
+			}
+			if serverExit != nil {
+				result = append(result, protocol.ProxyExit{
+					DeviceID: protocol.ServerExitDeviceID,
+					Name:     "Relay Server",
+					Online:   true,
+				})
+			}
+			sort.Slice(result, func(i, j int) bool {
+				if result[i].Name == result[j].Name {
+					return result[i].DeviceID < result[j].DeviceID
+				}
+				return result[i].Name < result[j].Name
+			})
 			return result, nil
 		},
 		OnDeviceConnected: func(deviceID string) {

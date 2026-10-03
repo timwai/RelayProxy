@@ -12,6 +12,11 @@ class NetworkBinder(context: Context) {
         const val MODE_AUTO = "auto"
         const val MODE_CELLULAR = "cellular"
         const val MODE_WIFI = "wifi"
+
+        @Volatile
+        private var processNetwork: Network? = null
+
+        fun currentProcessNetwork(): Network? = processNetwork
     }
 
     private data class Candidate(
@@ -30,11 +35,13 @@ class NetworkBinder(context: Context) {
     private var boundNetwork: Network? = null
     private var preferredMode: String = MODE_WIFI
     private var automaticSwitch = false
+    private var released = false
 
     private var availableCallback: ((String) -> Unit)? = null
     private var lostCallback: (() -> Unit)? = null
     private var errorCallback: ((String) -> Unit)? = null
 
+    @Synchronized
     fun bind(
         mode: String,
         autoSwitch: Boolean,
@@ -42,6 +49,7 @@ class NetworkBinder(context: Context) {
         onLost: () -> Unit,
         onError: (String) -> Unit,
     ) {
+        if (released) return
         if (callbacks.isNotEmpty() || cellularRequestCallback != null) return
 
         preferredMode = when (mode) {
@@ -88,22 +96,11 @@ class NetworkBinder(context: Context) {
     private fun bindLegacyDefaultNetwork() {
         val cb = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
-                val previous = boundNetwork
-                if (previous == network) return
-
-                boundNetwork = network
-                val activeMode = detectMode(network)
-                if (previous != null && previous != network) {
-                    lostCallback?.invoke()
-                }
-                availableCallback?.invoke(activeMode)
+                handleLegacyAvailable(network)
             }
 
             override fun onLost(network: Network) {
-                if (boundNetwork == network) {
-                    boundNetwork = null
-                    lostCallback?.invoke()
-                }
+                handleLegacyLost(network)
             }
         }
 
@@ -114,6 +111,29 @@ class NetworkBinder(context: Context) {
             callbacks.remove(cb)
             throw t
         }
+    }
+
+    @Synchronized
+    private fun handleLegacyAvailable(network: Network) {
+        if (released) return
+        val previous = boundNetwork
+        if (previous == network) return
+
+        boundNetwork = network
+        processNetwork = network
+        val activeMode = detectMode(network)
+        if (previous != null && previous != network) {
+            lostCallback?.invoke()
+        }
+        availableCallback?.invoke(activeMode)
+    }
+
+    @Synchronized
+    private fun handleLegacyLost(network: Network) {
+        if (released || boundNetwork != network) return
+        boundNetwork = null
+        processNetwork = null
+        lostCallback?.invoke()
     }
 
     private fun registerTransportObserver(mode: String) {
@@ -149,7 +169,9 @@ class NetworkBinder(context: Context) {
         }
     }
 
+    @Synchronized
     private fun seedExistingNetworks() {
+        if (released) return
         connectivity.allNetworks.forEach { network ->
             val capabilities = connectivity.getNetworkCapabilities(network) ?: return@forEach
             val mode = when {
@@ -174,6 +196,7 @@ class NetworkBinder(context: Context) {
         mode: String,
         capabilities: NetworkCapabilities? = connectivity.getNetworkCapabilities(network),
     ) {
+        if (released) return
         candidates[network] = Candidate(
             network = network,
             mode = mode,
@@ -184,13 +207,14 @@ class NetworkBinder(context: Context) {
 
     @Synchronized
     private fun removeCandidate(network: Network) {
+        if (released) return
         candidates.remove(network)
         reevaluate()
     }
 
     @Synchronized
     private fun reevaluate() {
-        if (preferredMode == MODE_AUTO) return
+        if (released || preferredMode == MODE_AUTO) return
 
         val preferred = candidates.values.firstOrNull {
             it.mode == preferredMode && it.validated
@@ -228,6 +252,7 @@ class NetworkBinder(context: Context) {
         if (candidate == null) {
             if (previous != null) {
                 boundNetwork = null
+                processNetwork = null
                 connectivity.bindProcessToNetwork(null)
                 lostCallback?.invoke()
             }
@@ -244,6 +269,7 @@ class NetworkBinder(context: Context) {
         }
 
         boundNetwork = candidate.network
+        processNetwork = candidate.network
 
         // Recreate the Relay tunnel whenever the selected path changes so all
         // sockets immediately use the new network instead of waiting for an
@@ -314,6 +340,8 @@ class NetworkBinder(context: Context) {
 
     @Synchronized
     fun release() {
+        if (released) return
+        released = true
         connectivity.bindProcessToNetwork(null)
 
         releaseCellularRequest()
@@ -323,6 +351,7 @@ class NetworkBinder(context: Context) {
         callbacks.clear()
         candidates.clear()
         boundNetwork = null
+        processNetwork = null
 
         availableCallback = null
         lostCallback = null

@@ -1,6 +1,7 @@
 package com.relayproxy.android
 
 import android.app.Activity
+import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -12,6 +13,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -31,6 +33,18 @@ class SettingsActivity : Activity() {
     private lateinit var insecureTls: Switch
     private lateinit var allowPrivate: Switch
     private lateinit var autoNetworkSwitch: Switch
+    private lateinit var clientEnabled: Switch
+    private lateinit var socks5Enabled: Switch
+    private lateinit var httpEnabled: Switch
+    private lateinit var proxyP2pEnabled: Switch
+    private lateinit var defaultExitId: EditText
+    private lateinit var exitSelection: Spinner
+    private lateinit var socks5Port: EditText
+    private lateinit var httpPort: EditText
+    private lateinit var vpnAppMode: Spinner
+    private lateinit var vpnDnsServers: EditText
+    private lateinit var vpnAppsSummary: TextView
+    private val selectedVpnPackages = linkedSetOf<String>()
     private val networkModeTabs = mutableListOf<TextView>()
     private var selectedNetworkModeIndex = 0
 
@@ -41,6 +55,16 @@ class SettingsActivity : Activity() {
         NetworkBinder.MODE_CELLULAR,
     )
     private val networkModeLabels = listOf("Wi-Fi 优先", "移动数据优先")
+    private val vpnAppModeValues = listOf(
+        ExitConfig.VPN_APP_MODE_ALL,
+        ExitConfig.VPN_APP_MODE_INCLUDE,
+        ExitConfig.VPN_APP_MODE_EXCLUDE,
+    )
+    private val vpnAppModeLabels = listOf("全部应用", "仅选中应用", "排除选中应用")
+
+    companion object {
+        private const val REQUEST_VPN_APPS = 2401
+    }
 
     private val bg = Color.rgb(246, 248, 252)
     private val surface = Color.WHITE
@@ -54,6 +78,17 @@ class SettingsActivity : Activity() {
         configureWindow()
         setContentView(buildUi())
         loadConfig()
+    }
+
+    @Deprecated("Deprecated Android activity result API retained for API 26 compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_VPN_APPS || resultCode != RESULT_OK) return
+        selectedVpnPackages.clear()
+        selectedVpnPackages += data?.getStringArrayListExtra(VpnAppSelectionActivity.EXTRA_SELECTED)
+            .orEmpty()
+            .filter { it != packageName }
+        updateVpnAppsSummary()
     }
 
     private fun configureWindow() {
@@ -135,6 +170,79 @@ class SettingsActivity : Activity() {
         policy.addView(switchRow("允许访问出口侧私网", "开启后可访问手机所在局域网。", allowPrivate), topMargin(10))
         root.addView(policy, topMargin(14))
 
+        val client = card()
+        addSectionHeader(client, "代理客户端", "本机代理只监听回环地址；使用服务端授权的 Relay 出口。")
+        clientEnabled = Switch(this)
+        socks5Enabled = Switch(this)
+        httpEnabled = Switch(this)
+        proxyP2pEnabled = Switch(this)
+        client.addView(
+            switchRow("启用本机代理", "允许本机应用连接 SOCKS5 或 HTTP 代理。", clientEnabled),
+            topMargin(14),
+        )
+        client.addView(divider(), topMargin(10))
+        client.addView(switchRow("SOCKS5 代理", "同时提供 TCP 与 UDP 转发。", socks5Enabled), topMargin(10))
+        client.addView(divider(), topMargin(10))
+        client.addView(switchRow("HTTP / HTTPS 代理", "支持 HTTP 请求与 HTTPS CONNECT。", httpEnabled), topMargin(10))
+        client.addView(divider(), topMargin(10))
+        client.addView(
+            switchRow("优先 P2P 直连", "直连失败时自动回退 Relay。", proxyP2pEnabled),
+            topMargin(10),
+        )
+
+        socks5Port = numberField("1080")
+        httpPort = numberField("8080")
+        val proxyPorts = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(
+                labeled("SOCKS5 端口", socks5Port),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+            addView(View(this@SettingsActivity), LinearLayout.LayoutParams(dp(10), 1))
+            addView(
+                labeled("HTTP 端口", httpPort),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+            )
+        }
+        client.addView(proxyPorts, topMargin(12))
+        defaultExitId = styledField("留空由服务端选择")
+        exitSelection = Spinner(this).apply {
+            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            setPadding(dp(12), 0, dp(10), 0)
+            minimumHeight = dp(50)
+        }
+        client.addView(labeled("已发现的在线出口", exitSelection), topMargin(12))
+        client.addView(labeled("首选出口设备 ID", defaultExitId), topMargin(12))
+        root.addView(client, topMargin(14))
+
+        val vpn = card()
+        addSectionHeader(vpn, "VPN 范围与 DNS", "设置接入 VPN 的应用，DNS 查询同样经过所选出口。")
+        vpnAppMode = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@SettingsActivity,
+                android.R.layout.simple_spinner_item,
+                vpnAppModeLabels,
+            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            setPadding(dp(12), 0, dp(10), 0)
+            minimumHeight = dp(50)
+        }
+        vpn.addView(labeled("应用范围", vpnAppMode), topMargin(14))
+        vpnAppsSummary = TextView(this).apply {
+            textSize = 12.5f
+            setTextColor(ink)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            setOnClickListener { openVpnAppSelection() }
+        }
+        vpn.addView(labeled("选择应用（点击编辑）", vpnAppsSummary), topMargin(12))
+        vpnDnsServers = styledField("1.1.1.1, 8.8.8.8").apply {
+            setSingleLine(false)
+            minLines = 2
+        }
+        vpn.addView(labeled("DNS 服务器（IP，以逗号分隔）", vpnDnsServers), topMargin(12))
+        root.addView(vpn, topMargin(14))
+
         root.addView(Button(this).apply {
             text = "保存设置"
             textSize = 15f
@@ -148,9 +256,10 @@ class SettingsActivity : Activity() {
             dp(52)
         ).apply { topMargin = dp(16) })
 
-        if (ConfigStore(this).isDesiredRunning()) {
+        val runningStore = ConfigStore(this)
+        if (runningStore.isDesiredRunning() || runningStore.isVpnDesiredRunning() || runningStore.load().clientEnabled) {
             root.addView(TextView(this).apply {
-                text = "服务正在后台运行。修改设置后请在首页停止并重新启动，使新配置生效。"
+                text = "服务正在后台运行。保存后会自动重建连接和 VPN，使新配置生效。"
                 textSize = 12f
                 setTextColor(muted)
                 gravity = Gravity.CENTER
@@ -181,13 +290,54 @@ class SettingsActivity : Activity() {
                 NetworkBinder.MODE_WIFI
             },
             autoNetworkSwitch = autoNetworkSwitch.isChecked,
+            clientEnabled = clientEnabled.isChecked,
+            socks5Enabled = socks5Enabled.isChecked,
+            httpEnabled = httpEnabled.isChecked,
+            proxyP2pEnabled = proxyP2pEnabled.isChecked,
+            defaultExitId = defaultExitId.text.toString().trim(),
+            socks5Port = socks5Port.text.toString().toIntOrNull() ?: 1080,
+            httpPort = httpPort.text.toString().toIntOrNull() ?: 8080,
+            vpnAppMode = vpnAppModeValues.getOrElse(vpnAppMode.selectedItemPosition) {
+                ExitConfig.VPN_APP_MODE_ALL
+            },
+            vpnPackages = selectedVpnPackages.toSet(),
+            vpnDnsServers = parseDnsServers(vpnDnsServers.text.toString()),
         )
         if (config.serverAddress.isBlank()) {
             server.error = "必须填写 Server 地址"
             server.requestFocus()
             return
         }
-        ConfigStore(this).save(config)
+        if (config.clientEnabled && !config.socks5Enabled && !config.httpEnabled) {
+            Toast.makeText(this, "启用本机代理时至少选择 SOCKS5 或 HTTP", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if ((config.clientEnabled && config.socks5Enabled && config.socks5Port !in 1..65535) ||
+            (config.clientEnabled && config.httpEnabled && config.httpPort !in 1..65535)
+        ) {
+            Toast.makeText(this, "代理端口必须在 1 到 65535 之间", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (config.clientEnabled && config.socks5Enabled && config.httpEnabled &&
+            config.socks5Port == config.httpPort
+        ) {
+            Toast.makeText(this, "SOCKS5 与 HTTP 不能使用相同端口", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (config.vpnAppMode == ExitConfig.VPN_APP_MODE_INCLUDE && config.vpnPackages.isEmpty()) {
+            Toast.makeText(this, "仅选中应用模式至少需要选择一个应用", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (config.vpnDnsServers.isEmpty() || config.vpnDnsServers.any { !isNumericAddress(it) }) {
+            vpnDnsServers.error = "请填写有效的 IPv4 或 IPv6 DNS 地址"
+            vpnDnsServers.requestFocus()
+            return
+        }
+        val store = ConfigStore(this)
+        val coreWasDesired = store.isDesiredRunning() ||
+            store.isVpnDesiredRunning() || store.load().clientEnabled
+        store.save(config)
+        applyRunningConfiguration(store, config, coreWasDesired)
         Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
         finish()
     }
@@ -203,7 +353,114 @@ class SettingsActivity : Activity() {
         insecureTls.isChecked = cfg.insecureTls
         allowPrivate.isChecked = cfg.allowPrivateNetwork
         autoNetworkSwitch.isChecked = cfg.autoNetworkSwitch
+        clientEnabled.isChecked = cfg.clientEnabled
+        socks5Enabled.isChecked = cfg.socks5Enabled
+        httpEnabled.isChecked = cfg.httpEnabled
+        proxyP2pEnabled.isChecked = cfg.proxyP2pEnabled
+        defaultExitId.setText(cfg.defaultExitId)
+        socks5Port.setText(cfg.socks5Port.toString())
+        httpPort.setText(cfg.httpPort.toString())
+        vpnAppMode.setSelection(vpnAppModeValues.indexOf(cfg.vpnAppMode).coerceAtLeast(0))
+        selectedVpnPackages.clear()
+        selectedVpnPackages += cfg.vpnPackages
+        vpnDnsServers.setText(cfg.vpnDnsServers.joinToString(", "))
+        updateVpnAppsSummary()
+        populateProxyExits(cfg.defaultExitId)
         selectNetworkMode(networkModeValues.indexOf(cfg.networkMode).coerceAtLeast(0))
+    }
+
+    private fun openVpnAppSelection() {
+        val intent = Intent(this, VpnAppSelectionActivity::class.java)
+            .putStringArrayListExtra(
+                VpnAppSelectionActivity.EXTRA_SELECTED,
+                ArrayList(selectedVpnPackages),
+            )
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, REQUEST_VPN_APPS)
+    }
+
+    private fun updateVpnAppsSummary() {
+        vpnAppsSummary.text = if (selectedVpnPackages.isEmpty()) {
+            "尚未选择应用"
+        } else {
+            "已选择 ${selectedVpnPackages.size} 个应用\n" +
+                selectedVpnPackages.sorted().take(3).joinToString("\n") +
+                if (selectedVpnPackages.size > 3) "\n…" else ""
+        }
+    }
+
+    private fun parseDnsServers(raw: String): List<String> = raw
+        .split(',', '\n', ';', ' ')
+        .map(String::trim)
+        .filter(String::isNotBlank)
+        .distinct()
+
+    private fun isNumericAddress(value: String): Boolean {
+        if (value.any { !(it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == '.' || it == ':') }) {
+            return false
+        }
+        return runCatching { java.net.InetAddress.getByName(value) }.isSuccess
+    }
+
+    private fun applyRunningConfiguration(
+        store: ConfigStore,
+        config: ExitConfig,
+        coreWasDesired: Boolean,
+    ) {
+        if (coreWasDesired || store.isDesiredRunning() || store.isVpnDesiredRunning() || config.clientEnabled) {
+            val relay = Intent(this, RelayExitService::class.java)
+                .setAction(RelayExitService.ACTION_RECONFIGURE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay)
+            else startService(relay)
+        }
+        if (store.isVpnDesiredRunning()) {
+            val vpn = Intent(this, RelayVpnService::class.java)
+                .setAction(RelayVpnService.ACTION_RECONFIGURE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(vpn)
+            else startService(vpn)
+        }
+    }
+
+    private fun populateProxyExits(selectedExitId: String) {
+        val exitIds = mutableListOf("")
+        val labels = mutableListOf("自动选择（仅一个可用出口时）")
+        val status = runCatching { org.json.JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val available = status?.optJSONArray("proxyExits")
+        if (available != null) {
+            for (index in 0 until available.length()) {
+                val exit = available.optJSONObject(index) ?: continue
+                val id = exit.optString("deviceId").trim()
+                if (id.isBlank() || id in exitIds) continue
+                val name = exit.optString("name").ifBlank { id }
+                val online = exit.optBoolean("online", false)
+                exitIds += id
+                labels += "$name · ${if (online) "在线" else "离线"}"
+            }
+        }
+        if (selectedExitId.isNotBlank() && selectedExitId !in exitIds) {
+            exitIds += selectedExitId
+            labels += "固定出口 ${selectedExitId.take(12)} · 当前未发现"
+        }
+
+        exitSelection.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            labels,
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        exitSelection.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long,
+            ) {
+                defaultExitId.setText(exitIds.getOrElse(position) { "" })
+            }
+        }
+        val selectedIndex = exitIds.indexOf(selectedExitId).coerceAtLeast(0)
+        exitSelection.setSelection(selectedIndex, false)
     }
 
     private fun buildNetworkModeTabs(): View {

@@ -375,7 +375,7 @@ try {
 
     Write-Step "Build gomobile AAR"
     New-Item -ItemType Directory -Path (Split-Path -Parent $AarPath) -Force | Out-Null
-    Invoke-Checked $gomobile "bind" "-target=android" "-androidapi" "26" "-javapkg" "com.relayproxy.core" "-o" $AarPath "./mobile/androidcore"
+    Invoke-Checked $gomobile "bind" "-target=android/arm,android/arm64" "-androidapi" "26" "-javapkg" "com.relayproxy.core" "-ldflags=-linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" "-o" $AarPath "./mobile/androidcore"
 
     if (-not (Test-Path -LiteralPath $AarPath)) {
         throw "gomobile did not produce $AarPath"

@@ -436,6 +436,7 @@ build_one_arch() {
     -target="$gomobile_target" \
     -androidapi "$ANDROID_API" \
     -javapkg com.relayproxy.core \
+    -ldflags "-linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" \
     -o "$AAR_PATH" \
     ./mobile/androidcore
 

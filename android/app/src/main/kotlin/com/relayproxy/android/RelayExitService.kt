@@ -25,6 +25,7 @@ class RelayExitService : Service() {
     companion object {
         const val ACTION_START = "com.relayproxy.android.START"
         const val ACTION_STOP = "com.relayproxy.android.STOP"
+        const val ACTION_RECONFIGURE = "com.relayproxy.android.RECONFIGURE"
         private const val CHANNEL_ID = "relayproxy_exit"
         private const val NOTIFICATION_ID = 1001
 
@@ -69,11 +70,21 @@ class RelayExitService : Service() {
 
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
+    @Volatile
     private var core: Client? = null
+
+    @Volatile
+    private var relayConfig: ExitConfig? = null
+
+    @Volatile
     private var networkBinder: NetworkBinder? = null
     private var lastNotificationText: String? = null
     private lateinit var powerManager: PowerManager
     private var powerReceiverRegistered = false
+    private var coreGeneration = 0L
+
+    @Volatile
+    private var destroyed = false
 
     @Volatile
     private var activeNetworkMode: String? = null
@@ -112,17 +123,27 @@ class RelayExitService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 store.setDesiredRunning(false)
-                stopRelay()
+                if (shouldRunCore(store)) reconfigureRelay() else stopRelay(startId)
             }
             ACTION_START -> {
                 store.setDesiredRunning(true)
                 if (serviceStartedAtElapsed == 0L) {
                     serviceStartedAtElapsed = SystemClock.elapsedRealtime()
                 }
-                startRelay()
+                if (core != null || networkBinder != null) reconfigureRelay() else startRelay()
+            }
+            ACTION_RECONFIGURE -> {
+                if (shouldRunCore(store)) {
+                    if (serviceStartedAtElapsed == 0L) {
+                        serviceStartedAtElapsed = SystemClock.elapsedRealtime()
+                    }
+                    reconfigureRelay()
+                } else {
+                    stopRelay(startId)
+                }
             }
             else -> {
-                if (store.isDesiredRunning()) {
+                if (shouldRunCore(store)) {
                     if (serviceStartedAtElapsed == 0L) {
                         serviceStartedAtElapsed = SystemClock.elapsedRealtime()
                     }
@@ -141,16 +162,27 @@ class RelayExitService : Service() {
         if (activeInstance === this) {
             activeInstance = null
         }
+        destroyed = true
+        val old = synchronized(this) {
+            coreGeneration++
+            val value = core
+            core = null
+            value
+        }
         networkBinder?.release()
+        networkBinder = null
         activeNetworkMode = null
-        val running = core
-        core = null
-        runCatching { running?.stop() }
-        executor.shutdownNow()
+        executeCoreTask { runCatching { old?.stop() } }
+        executor.shutdown()
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun shouldRunCore(store: ConfigStore): Boolean {
+        val config = store.load()
+        return store.isDesiredRunning() || store.isVpnDesiredRunning() || config.clientEnabled
+    }
 
     private fun startRelay() {
         val startingText = "正在启动"
@@ -160,6 +192,7 @@ class RelayExitService : Service() {
         if (core != null || networkBinder != null) return
 
         val config = ConfigStore(this).load()
+        relayConfig = config
         if (config.serverAddress.isBlank()) {
             status = errorStatus("请先填写 Relay Server 地址")
             updateNotificationIfChanged(force = true)
@@ -185,14 +218,18 @@ class RelayExitService : Service() {
         binder.bind(
             mode = config.networkMode,
             autoSwitch = config.autoNetworkSwitch,
-            onAvailable = { activeMode ->
+            onAvailable = onAvailable@{ activeMode ->
+                if (networkBinder !== binder || destroyed) return@onAvailable
                 activeNetworkMode = activeMode
-                startCore(config)
+                RelayVpnService.updateUnderlyingNetwork(this, NetworkBinder.currentProcessNetwork())
+                startCore(relayConfig ?: config)
                 applyP2PPowerProfile()
                 requestRefreshSoon()
             },
-            onLost = {
+            onLost = onLost@{
+                if (networkBinder !== binder || destroyed) return@onLost
                 activeNetworkMode = null
+                RelayVpnService.updateUnderlyingNetwork(this, NetworkBinder.currentProcessNetwork())
                 stopCoreOnly()
                 status = if (config.autoNetworkSwitch) {
                     waitingStatus("网络不可用，正在自动切换")
@@ -203,7 +240,8 @@ class RelayExitService : Service() {
                 }
                 requestRefreshSoon()
             },
-            onError = { message ->
+            onError = onError@{ message ->
+                if (networkBinder !== binder || destroyed) return@onError
                 activeNetworkMode = null
                 stopCoreOnly()
                 status = errorStatus(message)
@@ -212,18 +250,74 @@ class RelayExitService : Service() {
         )
     }
 
+    private fun reconfigureRelay() {
+        val config = ConfigStore(this).load()
+        val previous = relayConfig
+        relayConfig = config
+        if (config.serverAddress.isBlank()) {
+            stopCoreOnly()
+            status = errorStatus("请先填写 Relay Server 地址")
+            requestRefreshSoon()
+            return
+        }
+        if (networkBinder == null) {
+            startRelay()
+            return
+        }
+        if (previous == null || previous.networkMode != config.networkMode ||
+            previous.autoNetworkSwitch != config.autoNetworkSwitch
+        ) {
+            stopCoreOnly()
+            val oldBinder = networkBinder
+            networkBinder = null
+            oldBinder?.release()
+            activeNetworkMode = null
+            startRelay()
+            return
+        }
+        stopCoreOnly()
+        if (activeNetworkMode != null) {
+            startCore(config)
+        }
+    }
+
     private fun startCore(config: ExitConfig) {
-        executor.execute {
-            synchronized(this) {
-                if (core != null) return@execute
-                try {
-                    val identity = File(filesDir, "relayproxy/device-identity.json")
-                    val client = Androidcore.newClient(config.coreJson(), identity.absolutePath)
-                    client.setPowerConstrained(shouldUseP2PLowPowerProfile())
-                    client.start()
-                    core = client
-                    status = decorateStatus(client.statusJSON())
-                } catch (t: Throwable) {
+        val generation = synchronized(this) {
+            if (destroyed || core != null) return
+            coreGeneration
+        }
+        executeCoreTask {
+            val shouldStart = synchronized(this) {
+                !destroyed && generation == coreGeneration && core == null
+            }
+            if (!shouldStart) return@executeCoreTask
+
+            var client: Client? = null
+            try {
+                val identity = File(filesDir, "relayproxy/device-identity.json")
+                val created = Androidcore.newClient(config.coreJson(), identity.absolutePath)
+                client = created
+                created.setPowerConstrained(shouldUseP2PLowPowerProfile())
+                created.start()
+                val accepted = synchronized(this) {
+                    if (!destroyed && generation == coreGeneration && core == null) {
+                        core = created
+                        true
+                    } else {
+                        false
+                    }
+                }
+                if (!accepted) {
+                    runCatching { created.stop() }
+                    return@executeCoreTask
+                }
+                status = decorateStatus(created.statusJSON())
+            } catch (t: Throwable) {
+                runCatching { client?.stop() }
+                synchronized(this) {
+                    if (core === client) core = null
+                }
+                if (isCurrentCoreGeneration(generation)) {
                     status = errorStatus(t.message ?: t.javaClass.simpleName)
                 }
             }
@@ -233,39 +327,50 @@ class RelayExitService : Service() {
 
     private fun stopCoreOnly() {
         val old = synchronized(this) {
+            coreGeneration++
             val value = core
             core = null
             value
         }
-        executor.execute {
-            runCatching { old?.stop() }
-        }
+        executeCoreTask { runCatching { old?.stop() } }
     }
 
-    private fun stopRelay() {
+    private fun stopRelay(startId: Int) {
         handler.removeCallbacks(refresh)
-        val old = synchronized(this) {
+        val (old, generation) = synchronized(this) {
+            coreGeneration++
             val value = core
             core = null
-            value
+            value to coreGeneration
         }
         val binder = networkBinder
         networkBinder = null
         activeNetworkMode = null
-        executor.execute {
+        runCatching { binder?.release() }
+        executeCoreTask {
             runCatching { old?.stop() }
-            runCatching { binder?.release() }
-            status = JSONObject()
-                .put("connectionState", "STOPPED")
-                .put("approvalState", "unknown")
-                .toString()
-            serviceStartedAtElapsed = 0
-            lastNotificationText = null
             handler.post {
+                if (!isCurrentCoreGeneration(generation) || shouldRunCore(ConfigStore(this))) {
+                    return@post
+                }
+                status = JSONObject()
+                    .put("connectionState", "STOPPED")
+                    .put("approvalState", "unknown")
+                    .toString()
+                serviceStartedAtElapsed = 0
+                lastNotificationText = null
                 stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                stopSelfResult(startId)
             }
         }
+    }
+
+    private fun isCurrentCoreGeneration(generation: Long): Boolean = synchronized(this) {
+        !destroyed && generation == coreGeneration
+    }
+
+    private fun executeCoreTask(task: () -> Unit) {
+        runCatching { executor.execute(task) }
     }
 
     private fun registerPowerStateReceiver() {
@@ -307,7 +412,7 @@ class RelayExitService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "RelayProxy 网络出口",
+                "RelayProxy 网络服务",
                 NotificationManager.IMPORTANCE_LOW,
             )
         )
@@ -323,7 +428,7 @@ class RelayExitService : Service() {
         )
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_stat_relayproxy)
-            .setContentTitle("RelayProxy 网络出口")
+            .setContentTitle("RelayProxy 网络服务")
             .setContentText(text)
             .setContentIntent(openApp)
             .setOngoing(true)
@@ -335,7 +440,9 @@ class RelayExitService : Service() {
         val obj = runCatching { JSONObject(status) }.getOrNull()
         val state = obj?.optString("connectionState", "UNKNOWN") ?: "UNKNOWN"
         val approval = obj?.optString("approvalState", "unknown") ?: "unknown"
-        val streams = obj?.optLong("activeStreams", 0) ?: 0
+        val streams = (obj?.optLong("activeStreams", 0) ?: 0) +
+            (obj?.optLong("proxyActiveTcp", 0) ?: 0) +
+            (obj?.optLong("proxyActiveUdp", 0) ?: 0)
         val text = when {
             state == "CONNECTED" && approval == "approved" && streams > 0 ->
                 "已连接 · 活跃连接 $streams"
@@ -362,7 +469,9 @@ class RelayExitService : Service() {
 
         val obj = runCatching { JSONObject(status) }.getOrNull()
         val state = obj?.optString("connectionState", "UNKNOWN") ?: "UNKNOWN"
-        val streams = obj?.optLong("activeStreams", 0) ?: 0
+        val streams = (obj?.optLong("activeStreams", 0) ?: 0) +
+            (obj?.optLong("proxyActiveTcp", 0) ?: 0) +
+            (obj?.optLong("proxyActiveUdp", 0) ?: 0)
         return when (state) {
             "CONNECTING" -> CONNECTING_REFRESH_MS
             "CONNECTED" -> if (streams > 0) ACTIVE_REFRESH_MS else IDLE_REFRESH_MS

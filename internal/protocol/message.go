@@ -190,6 +190,9 @@ type PongMessage struct {
 	// Nil means this server does not provide an inventory refresh. A non-nil
 	// empty slice explicitly revokes every previously advertised target.
 	RDPTargets *[]RDPTarget `json:"rdpTargets,omitempty"`
+	// Nil means this server does not provide an exit inventory refresh. A
+	// non-nil empty slice explicitly removes every previously advertised exit.
+	ProxyExits *[]ProxyExit `json:"proxyExits,omitempty"`
 }
 
 // GoAwayMessage notifies graceful shutdown

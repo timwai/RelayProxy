@@ -1,12 +1,14 @@
 # RelayProxy Android
 
-Android 第一阶段实现 **网络出口节点**：手机加入 RelayProxy 后，其他已授权客户端可以把 TCP/UDP 流量发送到手机。控制与授权始终经过 Relay Server；数据面在条件允许时使用 P2P QUIC 直连，失败或不可用时自动回退 Relay。
+Android 支持作为 **Relay 网络出口**，也支持作为 **代理客户端**：本机应用可连接回环 SOCKS5 / HTTP 代理；可选启用 Android VPN，将其他应用的 TCP/UDP 流量转发到已授权出口。控制与授权经过 Relay Server。代理客户端与出口端都支持 P2P QUIC；未建立直连或直连失败时，新连接自动使用 Relay。
 
 ## 架构
 
-- `mobile/androidcore`：Go + gomobile。直接复用 RelayProxy 的设备认证、QUIC/TLS+yamux、出口 ACL、TCP/UDP 转发协议和 Proxy P2P Manager；`-javapkg com.relayproxy.core` 生成的 Java 包为 `com.relayproxy.core.androidcore`。
-- `android/app`：Kotlin 原生 UI + 前台 Service。负责配置、生命周期、通知、Wi-Fi / 蜂窝首选网络绑定与自动故障切换，并把 Power Saver、Doze、息屏和蜂窝网络状态映射为 P2P 低功耗策略。
-- Android 不创建 `VpnService`，第一期不是“把 Android 自己的流量送进 RelayProxy”，而是“把 Android 当作出口”。
+- `mobile/androidcore`：Go + gomobile。复用设备认证、QUIC/TLS+yamux、`TunnelDialer`、TCP/UDP 转发与出口 ACL；同一个 Core 提供出口服务及经过 `proxy.client` 授权的本机代理入口。`-javapkg com.relayproxy.core` 生成的 Java 包为 `com.relayproxy.core.androidcore`。
+- `android/app`：Kotlin 原生 UI + 前台 Service。`RelayExitService` 持有唯一 Go Core；`RelayVpnService` 管理 VPN 授权、TUN fd 和前台通知，启动时复用或重建该 Core。
+- VPN 使用 `VpnService` + 固定版本 `hev-socks5-tunnel`，将 IPv4/IPv6 默认路由送入回环 SOCKS5。RelayProxy 自身应用从 VPN 路由中排除，避免隧道回环。
+- VPN 可选择全部应用、仅选中应用或排除选中应用；配置的 DNS 服务器地址随默认路由经代理出口访问。当前物理网络同步给 Android VPN，Wi-Fi / 蜂窝切换时共享 Core 会重连。
+- SOCKS5 UDP ASSOCIATE 按目标维护有界 UDP association；HTTP 代理支持普通 HTTP 与 HTTPS CONNECT。所有本机代理仅绑定回环地址。
 
 ## 一键打包 APK（Windows）
 
@@ -36,7 +38,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-android.ps1
 
 `dist/android/`
 
-Windows 脚本默认构建 Release，并签名为 `RelayProxy-Android-release.apk`（未配置 `RELAY_ANDROID_*` 时使用本机 debug 密钥）。如需 Debug，可执行 `./scripts/build-android.ps1 -Configuration Debug`。正式发布请设置：
+Windows 脚本默认构建同时包含 `armeabi-v7a` 与 `arm64-v8a` 的 Release APK，并签名为 `RelayProxy-Android-release.apk`（未配置 `RELAY_ANDROID_*` 时使用本机 debug 密钥）。如需 Debug，可执行 `./scripts/build-android.ps1 -Configuration Debug`。正式发布请设置：
 
 ```powershell
 $env:RELAY_ANDROID_KEYSTORE="D:\keys\relayproxy.jks"
@@ -46,7 +48,7 @@ $env:RELAY_ANDROID_KEY_PASSWORD="your-key-password"
 .\scripts\build-android.ps1 -Configuration Release -Clean
 ```
 
-脚本会自动完成 gomobile AAR 构建、Android SDK/NDK 检查、Gradle 8.9 获取、APK 构建、Release 签名（配置签名时）以及 SHA256 输出。构建期间为 gomobile 临时加入的 Go tool 依赖会在结束后恢复，不会永久修改 `go.mod` / `go.sum`。
+脚本会自动完成 gomobile AAR 构建、Android SDK/NDK 检查、Gradle 8.9 获取、Hev TUN 引擎构建、APK 构建、Release 签名（配置签名时）以及 SHA256 输出。Gradle 会检查打包的每个 `.so` 是否使用 16 KB ELF LOAD 对齐。构建期间为 gomobile 临时加入的 Go tool 依赖会在结束后恢复，不会永久修改 `go.mod` / `go.sum`。
 
 ## 一键打包 APK（Mac mini M4 / Apple Silicon）
 
@@ -122,6 +124,8 @@ export RELAY_ANDROID_KEY_PASSWORD="your-key-password"
 
 脚本会自动识别默认 Android SDK 路径 `$HOME/Library/Android/sdk`、Apple Silicon Homebrew JDK 17、Android SDK 35、Build Tools 35.0.0、NDK 27.2.12479018，并在本机没有 Gradle 时下载 Gradle 8.9。每个 ABI 都会单独重建 gomobile AAR 和 Android APK，避免不同架构之间复用旧的 Native Library。
 
+构建脚本会从上游固定下载 `hev-socks5-tunnel 2.18.0` 源码，并在校验 SHA-256 后为 `arm64-v8a` 和 `armeabi-v7a` 编译 API 26 原生库。许可证及校验信息见 [third_party/hev-socks5-tunnel](../third_party/hev-socks5-tunnel/README.md)。
+
 ## 构建
 
 需要 Go 1.27.1、Android SDK 35、JDK 17、Gradle 8.9 和 gomobile。
@@ -134,6 +138,7 @@ gomobile init
 mkdir -p android/app/libs
 gomobile bind -target=android -androidapi 26 \
   -javapkg com.relayproxy.core \
+  -ldflags '-linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384' \
   -o android/app/libs/mobilecore.aar \
   ./mobile/androidcore
 
@@ -148,28 +153,34 @@ APK 输出：
 
 1. 安装 APK，填写 Relay Server 域名/IP。
 2. TLS 默认开启，端口默认 QUIC 443 / TCP 443，传输默认 `auto`。
-3. 点击“启动网络共享”。
-4. 第一次连接后，在 Relay Server 设备管理中批准该 Android 设备，并授予 `proxy.exit`。
-5. Android 状态显示“已连接 / 已授权”后，即可被其他 RelayProxy 客户端选作网络出口。
-6. 在“首选出口网络”中选择“Wi-Fi 优先”或“移动数据优先”。关闭“自动切换网络”时，Relay 隧道固定使用所选网络。
-7. 开启“自动切换网络”后：
+3. 在“代理客户端”设置中选择是否开放本机 SOCKS5、HTTP 入口，并选择一个在线出口；出口 ID 也可手动填写。空白表示交给服务端处理，只有一个可用出口时会自动选择。
+4. 点击“启动”会运行 Relay 服务。首次连接后，在 Relay Server 设备管理中批准 Android 设备；出口模式需授予 `proxy.exit`，本机代理或 VPN 需另外授予 `proxy.client`。
+5. 显式代理应用时，SOCKS5 默认地址为 `127.0.0.1:1080`，HTTP 默认地址为 `127.0.0.1:8080`。保存新端口后，运行中的 Relay 服务会自动重建。
+6. 在设置中选择 VPN 应用范围和 DNS 地址。点击独立的“启动 VPN”按钮，首次使用需在 Android 系统弹窗中授权。VPN 接管范围内应用的 IPv4/IPv6 默认流量；即使关闭用户 SOCKS5 开关，Core 仍会为 TUN 建立一个内部回环 SOCKS5 入口。RelayProxy 自身流量排除在 VPN 外。
+7. 在“首选出口网络”中选择“Wi-Fi 优先”或“移动数据优先”。关闭“自动切换网络”时，Relay 隧道固定使用所选网络。
+8. 开启“自动切换网络”后：
    - Wi-Fi 优先：Wi-Fi 具有已验证互联网连接时使用 Wi-Fi；Wi-Fi 断开或无互联网时自动切换到蜂窝，Wi-Fi 恢复后自动切回。
    - 移动数据优先：蜂窝网络可用时优先使用蜂窝；蜂窝不可用时自动切换到 Wi-Fi，蜂窝恢复后自动切回。
-8. 每次实际出口网络发生变化时，Android 客户端会重新绑定进程网络并重建 Relay 隧道，避免旧连接继续停留在失效链路上。
+9. 每次实际出口网络发生变化时，Android 客户端会重新绑定进程网络并重建 Relay 隧道，避免旧连接继续停留在失效链路上。
+
+VPN、网络出口和本机代理使用三个独立运行意图，共享一个 Go Core 和 Relay 会话。关闭其中一项不会中断仍启用的其他功能。首页显示授权、实际 Relay/P2P 路径、本机代理流量与 VPN TUN 流量。设置保存后，运行中的 Core 和 VPN 会自动重建以应用新配置。
 
 ## P2P 与省电策略
 
-- Android Exit 会声明 `proxy_p2p_v1`，Relay Server 仅负责候选交换、租约和授权，直连数据不经过 Server。
+- Android Exit 和代理客户端都会按设置声明 `proxy_p2p_v1`。Relay Server 仅负责候选交换、租约和授权，直连数据不经过 Server。
 - P2P 不可用、打洞失败、租约失效或进入冷却时，新连接会继续使用 Relay，不影响出口可用性。
 - 首页会显示当前 P2P 状态、Direct Path 类型、RTT 和 P2P 电源策略。
 - 屏幕关闭、Android Power Saver、Device Idle/Doze 或当前出口为蜂窝网络时自动进入省电模式。
 - 省电模式关闭周期性 P2P QUIC keepalive、缩短空闲直连生命周期，并避免保留多余直连 Session；有真实业务时仍允许建立 P2P。
 - Wi-Fi 恢复、设备重新交互或省电状态解除后自动恢复标准 P2P 策略。
 
-## 第一阶段边界
+## 当前实现边界
 
 - 支持 TCP。
 - 支持 UDP；QUIC 隧道可使用 RelayProxy 原生 UDP datagram，TLS/yamux 走 UDP stream 兼容模式。
 - 支持自动重连、Wi-Fi / 蜂窝故障切换和设备挑战签名认证。
 - 支持公网目标；私网目标默认关闭，可在 UI 显式开启。
-- 暂不提供流量统计图、分应用规则、SIM 卡选择、热点控制、Android 本机 VPN/透明代理入口。
+- VPN 支持全局、仅选中应用和排除选中应用三种范围；RelayProxy 自身包始终排除。应用卸载后会在下次建立 TUN 时跳过；“仅选中”模式如果没有任何仍可用的应用会拒绝启动并提示重新选择。
+- Android 真机上的 VPN、系统 Private DNS、IPv6-only/DNS64、长时稳定性和功耗尚未完成端到端验证；APK 构建通过不等于这些运行场景已验收。
+- 首页提供会话级累计代理字节数与 TUN 统计；当前不保存跨进程历史，也不提供统计图。
+- 暂不提供按应用选择不同出口、复杂域名分流、Fake-IP、HTTPS 解密、远端 ICMP、Always-on / 系统级断网保护、SIM 卡选择及热点流量接管。

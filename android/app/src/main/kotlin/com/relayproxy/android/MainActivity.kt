@@ -8,6 +8,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -35,14 +36,28 @@ class MainActivity : Activity() {
     private lateinit var infoNetworkMode: TextView
     private lateinit var infoActiveNetwork: TextView
     private lateinit var infoP2PPath: TextView
+    private lateinit var infoProxyExit: TextView
+    private lateinit var infoProxyPath: TextView
     private lateinit var infoPowerMode: TextView
     private lateinit var infoNativeUDP: TextView
     private lateinit var infoApproval: TextView
     private lateinit var infoExitPermission: TextView
+    private lateinit var infoClientPermission: TextView
+    private lateinit var infoLocalProxy: TextView
+    private lateinit var infoVpn: TextView
+    private lateinit var infoTraffic: TextView
+    private lateinit var infoVpnTraffic: TextView
+    private lateinit var infoVpnScope: TextView
+    private lateinit var infoVpnDns: TextView
     private lateinit var infoUptime: TextView
     private lateinit var infoDeviceId: TextView
     private var currentDeviceId: String = ""
     private lateinit var toggleButton: Button
+    private lateinit var vpnButton: Button
+
+    companion object {
+        private const val REQUEST_VPN_PERMISSION = 1401
+    }
 
     private val bg = Color.rgb(246, 248, 252)
     private val surface = Color.WHITE
@@ -84,6 +99,17 @@ class MainActivity : Activity() {
         RelayExitService.setUiVisible(false)
         handler.removeCallbacks(pollStatus)
         super.onPause()
+    }
+
+    @Deprecated("Deprecated in Android API; retained for VPN consent result compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_VPN_PERMISSION) return
+        if (resultCode == RESULT_OK) {
+            startVpnService()
+        } else {
+            android.widget.Toast.makeText(this, "未授予 VPN 权限", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun configureWindow() {
@@ -154,7 +180,7 @@ class MainActivity : Activity() {
         top.addView(LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply {
-                text = "出口状态"
+                text = "服务状态"
                 textSize = 12f
                 setTextColor(Color.rgb(148, 163, 184))
             })
@@ -250,10 +276,19 @@ class MainActivity : Activity() {
         infoNetworkMode = infoRow(card, "出口网络")
         infoActiveNetwork = infoRow(card, "当前网络")
         infoP2PPath = infoRow(card, "P2P 直连")
+        infoProxyExit = infoRow(card, "代理出口")
+        infoProxyPath = infoRow(card, "当前代理路径")
         infoPowerMode = infoRow(card, "P2P 电源策略")
         infoNativeUDP = infoRow(card, "UDP 过载丢弃")
         infoApproval = infoRow(card, "设备审批")
         infoExitPermission = infoRow(card, "出口权限")
+        infoClientPermission = infoRow(card, "代理客户端授权")
+        infoLocalProxy = infoRow(card, "本机代理")
+        infoVpn = infoRow(card, "VPN 代理")
+        infoTraffic = infoRow(card, "代理流量")
+        infoVpnTraffic = infoRow(card, "VPN TUN 流量")
+        infoVpnScope = infoRow(card, "VPN 应用范围")
+        infoVpnDns = infoRow(card, "VPN DNS")
         infoUptime = infoRow(card, "运行时长")
         infoDeviceId = deviceIdRow(card)
 
@@ -355,7 +390,28 @@ class MainActivity : Activity() {
             background = rounded(brand, 14)
             setOnClickListener { toggleRelay() }
         }
-        return toggleButton
+        vpnButton = Button(this).apply {
+            text = "启动 VPN"
+            textSize = 14f
+            setTextColor(brand)
+            setTypeface(typeface, Typeface.BOLD)
+            setAllCaps(false)
+            background = rounded(Color.WHITE, 14, Color.rgb(191, 219, 254))
+            setOnClickListener { toggleVpn() }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(
+                toggleButton,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f),
+            )
+            addView(
+                vpnButton,
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f).apply {
+                    leftMargin = dp(10)
+                },
+            )
+        }
     }
 
     private fun toggleRelay() {
@@ -368,6 +424,40 @@ class MainActivity : Activity() {
         } else {
             startRelay()
         }
+    }
+
+    private fun toggleVpn() {
+        val store = ConfigStore(this)
+        if (store.isVpnDesiredRunning()) {
+            stopVpnService()
+            return
+        }
+        val config = store.load()
+        if (config.serverAddress.isBlank()) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+            return
+        }
+        val consent = VpnService.prepare(this)
+        if (consent != null) {
+            startActivityForResult(consent, REQUEST_VPN_PERMISSION)
+        } else {
+            startVpnService()
+        }
+    }
+
+    private fun startVpnService() {
+        val intent = Intent(this, RelayVpnService::class.java).setAction(RelayVpnService.ACTION_START)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
+    private fun stopVpnService() {
+        ConfigStore(this).setVpnDesiredRunning(false)
+        val intent = Intent(this, RelayVpnService::class.java).setAction(RelayVpnService.ACTION_STOP)
+        runCatching { startService(intent) }
     }
 
     private fun startRelay() {
@@ -400,6 +490,7 @@ class MainActivity : Activity() {
         val streams = obj.optLong("activeStreams", 0)
         val latency = obj.optLong("latencyMs", 0)
         val approved = obj.optBoolean("exitApproved", false)
+        val clientApproved = obj.optBoolean("clientApproved", false)
         val deviceId = obj.optString("deviceId", "")
         currentDeviceId = deviceId
         val uptimeMs = obj.optLong("serviceUptimeMs", 0)
@@ -408,13 +499,26 @@ class MainActivity : Activity() {
         val p2pState = obj.optString("p2pState", "")
         val p2pPath = obj.optString("p2pPath", "")
         val p2pRttMs = obj.optLong("p2pRttMs", 0)
+        val proxyState = obj.optString("proxyState", "")
+        val proxyError = obj.optString("proxyError", "")
+        val selectedExit = obj.optString("selectedExit", "")
         val powerConstrained = obj.optBoolean("powerConstrained", false)
         val nativeUdp = obj.optJSONObject("nativeUdp")
+        val proxyActiveTcp = obj.optLong("proxyActiveTcp", 0)
+        val proxyActiveUdp = obj.optLong("proxyActiveUdp", 0)
+        val proxyBytesUp = obj.optLong("proxyBytesUp", 0)
+        val proxyBytesDown = obj.optLong("proxyBytesDown", 0)
+        val ready = approved || clientApproved
 
         when (state) {
             "CONNECTED" -> {
-                statusSummary.text = if (approved) "网络出口已就绪" else "已连接，等待授权"
-                if (approved) {
+                statusSummary.text = when {
+                    approved && clientApproved -> "出口与代理均已就绪"
+                    clientApproved -> "代理客户端已就绪"
+                    approved -> "网络出口已就绪"
+                    else -> "已连接，等待授权"
+                }
+                if (ready) {
                     updateChip("运行中", success, successSoft)
                 } else {
                     updateChip("待审批", warning, warningSoft)
@@ -443,7 +547,7 @@ class MainActivity : Activity() {
         }
 
         statusTransport.text = transportValue.ifBlank { "—" }
-        statusStreams.text = streams.toString()
+        statusStreams.text = (streams + proxyActiveTcp + proxyActiveUdp).toString()
         statusLatency.text = if (latency > 0) "$latency ms" else "—"
 
         val store = ConfigStore(this)
@@ -455,36 +559,118 @@ class MainActivity : Activity() {
             config.autoNetworkSwitch,
         )
         infoActiveNetwork.text = activeNetworkLabel(activeNetwork)
-        infoP2PPath.text = p2pPathLabel(p2pState, p2pPath, p2pRttMs)
+        infoP2PPath.text = if (config.proxyP2pEnabled) {
+            p2pPathLabel(p2pState, p2pPath, p2pRttMs)
+        } else {
+            "已关闭 · Relay"
+        }
+        infoProxyExit.text = proxyExitLabel(obj, selectedExit, proxyState)
+        infoProxyPath.text = when {
+            p2pState == "READY" && p2pPath == "p2p_quic" -> "P2P QUIC"
+            state == "CONNECTED" && transportValue.isNotBlank() -> "Relay · $transportValue"
+            else -> "—"
+        }
         infoPowerMode.text = if (powerConstrained) "省电" else "标准"
         infoNativeUDP.text = nativeUdp?.let {
             "队列 ${it.optLong("queueDrops", 0)} · 重组 ${it.optLong("reassemblyDrops", 0)} · 关联 ${it.optLong("associationRejects", 0)}"
         } ?: "—"
         infoApproval.text = approvalLabel(approval)
-        infoExitPermission.text = if (approved) "已授权" else "未授权"
+        infoExitPermission.text = when {
+            !config.exitEnabled -> "未启用"
+            approved -> "已授权"
+            state == "CONNECTED" -> "等待服务端授权"
+            else -> "等待连接"
+        }
+        infoClientPermission.text = when {
+            !config.clientEnabled && !store.isVpnDesiredRunning() -> "未启用"
+            clientApproved -> "已授权"
+            state == "CONNECTED" -> "等待服务端授权"
+            else -> "等待连接"
+        }
+        infoLocalProxy.text = if (config.clientEnabled) {
+            buildList {
+                if (config.socks5Enabled) add("SOCKS5 127.0.0.1:${config.socks5Port}")
+                if (config.httpEnabled) add("HTTP 127.0.0.1:${config.httpPort}")
+            }.joinToString(" · ").ifBlank { "未启用" }
+        } else {
+            "未启用"
+        }
+        val vpn = runCatching { JSONObject(RelayVpnService.statusJson()) }.getOrNull()
+        val vpnState = vpn?.optString("vpnState", "STOPPED") ?: "STOPPED"
+        infoVpn.text = when (vpnState) {
+            "RUNNING" -> "运行中"
+            "STARTING" -> "启动中"
+            "ERROR" -> vpn?.optString("detail", "启动失败") ?: "启动失败"
+            else -> "已停止"
+        }
+        infoTraffic.text = "↑ ${formatBytes(proxyBytesUp)} · ↓ ${formatBytes(proxyBytesDown)}"
+        val tunTx = vpn?.optLong("tunTxBytes", 0) ?: 0
+        val tunRx = vpn?.optLong("tunRxBytes", 0) ?: 0
+        infoVpnTraffic.text = if (tunTx > 0 || tunRx > 0) {
+            "TX ${formatBytes(tunTx)} · RX ${formatBytes(tunRx)}"
+        } else {
+            "—"
+        }
+        infoVpnScope.text = when (config.vpnAppMode) {
+            ExitConfig.VPN_APP_MODE_INCLUDE -> "仅 ${config.vpnPackages.size} 个应用"
+            ExitConfig.VPN_APP_MODE_EXCLUDE -> "排除 ${config.vpnPackages.size} 个应用"
+            else -> "全部应用"
+        }
+        infoVpnDns.text = config.vpnDnsServers.joinToString(", ").ifBlank { "未配置" }
         infoUptime.text = formatDuration(uptimeMs)
         infoDeviceId.text = formatDeviceId(deviceId)
-        applyStateTheme(state, approved, approval)
+        applyStateTheme(state, ready, approval)
 
         val desiredRunning = store.isDesiredRunning()
         if (desiredRunning) {
-            toggleButton.text = "停止"
+            toggleButton.text = "停止出口"
             toggleButton.setTextColor(danger)
             toggleButton.background = rounded(surface, 14, Color.rgb(254, 202, 202))
         } else {
-            toggleButton.text = "启动"
+            toggleButton.text = "启动出口"
             toggleButton.setTextColor(Color.WHITE)
             toggleButton.background = rounded(brand, 14)
         }
 
+        val vpnDesired = store.isVpnDesiredRunning()
+        vpnButton.text = if (vpnDesired) "停止 VPN" else "启动 VPN"
+        vpnButton.setTextColor(if (vpnDesired) danger else brand)
+        vpnButton.background = if (vpnDesired) {
+            rounded(surface, 14, Color.rgb(254, 202, 202))
+        } else {
+            rounded(Color.WHITE, 14, Color.rgb(191, 219, 254))
+        }
+
         statusDetail.text = when {
             error.isNotBlank() -> error
+            proxyError.isNotBlank() && (config.clientEnabled || vpnDesired) -> proxyError
             approval == "pending" -> "设备等待服务端审批"
             approval == "rejected" -> "设备审批已拒绝"
-            state == "CONNECTED" && approved -> "后台常驻运行中"
+            state == "CONNECTED" && ready -> "后台常驻运行中"
             state == "STOPPED" -> "点击启动后可退出 App，服务继续后台运行"
             else -> "审批：$approval"
         }
+    }
+
+    private fun proxyExitLabel(status: JSONObject, selectedExit: String, proxyState: String): String {
+        if (selectedExit.isBlank()) {
+            return when (proxyState) {
+                "exit_required" -> "需要选择出口"
+                "no_exit" -> "无可用出口"
+                "not_authorized" -> "等待授权"
+                else -> "自动"
+            }
+        }
+        val exits = status.optJSONArray("proxyExits")
+        if (exits != null) {
+            for (index in 0 until exits.length()) {
+                val item = exits.optJSONObject(index) ?: continue
+                if (item.optString("deviceId") == selectedExit) {
+                    return item.optString("name").ifBlank { selectedExit.take(12) }
+                }
+            }
+        }
+        return selectedExit.take(12)
     }
 
     private fun applyStateTheme(state: String, approved: Boolean, approval: String) {
@@ -579,6 +765,18 @@ class MainActivity : Activity() {
             minutes > 0 -> minutes.toString() + "分 " + seconds + "秒"
             else -> seconds.toString() + "秒"
         }
+    }
+
+    private fun formatBytes(value: Long): String {
+        if (value <= 0) return "0 B"
+        val units = arrayOf("B", "KB", "MB", "GB", "TB")
+        var amount = value.toDouble()
+        var unit = 0
+        while (amount >= 1024 && unit < units.lastIndex) {
+            amount /= 1024
+            unit++
+        }
+        return if (unit == 0) "$value ${units[unit]}" else "%.1f %s".format(amount, units[unit])
     }
 
     private fun metric(label: String): Pair<LinearLayout, TextView> {

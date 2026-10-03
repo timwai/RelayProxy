@@ -30,6 +30,14 @@ type RDPTarget struct {
 	Online   bool   `json:"online"`
 }
 
+// ProxyExit is the client-visible, online exit inventory. Authorization is
+// checked again by the gateway for every opened stream.
+type ProxyExit struct {
+	DeviceID string `json:"deviceId"`
+	Name     string `json:"name"`
+	Online   bool   `json:"online"`
+}
+
 type DeviceHello struct {
 	ProtocolVersion       int      `json:"protocolVersion"`
 	InstallationID        string   `json:"installationId"`
@@ -57,23 +65,24 @@ type AuthProof struct {
 }
 
 type DeviceAccepted struct {
-	Success               bool        `json:"success"`
-	State                 string      `json:"state"`
-	DeviceID              string      `json:"deviceId,omitempty"`
-	ApprovedCapabilities  []string    `json:"approvedCapabilities,omitempty"`
-	RDPTargets            []RDPTarget `json:"rdpTargets,omitempty"`
-	RendezvousAddress     string      `json:"rendezvousAddress,omitempty"`
-	RDPLeaseSec           int         `json:"rdpLeaseSec,omitempty"`
-	P2PRendezvousAddress  string      `json:"p2pRendezvousAddress,omitempty"`
-	P2PLeaseSec           int         `json:"p2pLeaseSec,omitempty"`
-	SessionID             string      `json:"sessionId,omitempty"`
-	HeartbeatSec          int         `json:"heartbeat,omitempty"`
-	MaxConnections        int         `json:"maxConnections,omitempty"`
-	ServerTime            int64       `json:"serverTime"`
-	RetryAfterSec         int         `json:"retryAfterSec,omitempty"`
-	TransportCapabilities []string    `json:"transportCapabilities,omitempty"`
-	ErrorCode             string      `json:"errorCode,omitempty"`
-	ErrorMessage          string      `json:"errorMessage,omitempty"`
+	Success               bool         `json:"success"`
+	State                 string       `json:"state"`
+	DeviceID              string       `json:"deviceId,omitempty"`
+	ApprovedCapabilities  []string     `json:"approvedCapabilities,omitempty"`
+	RDPTargets            []RDPTarget  `json:"rdpTargets,omitempty"`
+	ProxyExits            *[]ProxyExit `json:"proxyExits,omitempty"`
+	RendezvousAddress     string       `json:"rendezvousAddress,omitempty"`
+	RDPLeaseSec           int          `json:"rdpLeaseSec,omitempty"`
+	P2PRendezvousAddress  string       `json:"p2pRendezvousAddress,omitempty"`
+	P2PLeaseSec           int          `json:"p2pLeaseSec,omitempty"`
+	SessionID             string       `json:"sessionId,omitempty"`
+	HeartbeatSec          int          `json:"heartbeat,omitempty"`
+	MaxConnections        int          `json:"maxConnections,omitempty"`
+	ServerTime            int64        `json:"serverTime"`
+	RetryAfterSec         int          `json:"retryAfterSec,omitempty"`
+	TransportCapabilities []string     `json:"transportCapabilities,omitempty"`
+	ErrorCode             string       `json:"errorCode,omitempty"`
+	ErrorMessage          string       `json:"errorMessage,omitempty"`
 }
 
 // DeviceAuthPayload returns an unambiguous length-prefixed signature payload.

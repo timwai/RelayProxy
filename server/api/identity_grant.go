@@ -12,10 +12,10 @@ import (
 )
 
 type deviceIdentityGrantRequest struct {
-	TargetDeviceID    string    `json:"targetDeviceId"`
-	GranteeIdentityID string    `json:"granteeIdentityId"`
-	Features          []string  `json:"features"`
-	ExpiresAt         string    `json:"expiresAt,omitempty"`
+	TargetDeviceID    string   `json:"targetDeviceId"`
+	GranteeIdentityID string   `json:"granteeIdentityId"`
+	Features          []string `json:"features"`
+	ExpiresAt         string   `json:"expiresAt,omitempty"`
 }
 
 type deviceIdentityGrantUpdateRequest struct {

@@ -14,9 +14,9 @@ func seedGrantAPIDevice(t *testing.T, db *repository.DB, id, identityID string, 
 	t.Helper()
 	device := &repository.Device{
 		ID: id, Name: id, Fingerprint: "fp-" + id, InstallationID: "install-" + id,
-		ApprovalState: repository.EnrollmentApproved,
+		ApprovalState:         repository.EnrollmentApproved,
 		RequestedCapabilities: append([]string(nil), capabilities...),
-		ApprovedCapabilities: append([]string(nil), capabilities...),
+		ApprovedCapabilities:  append([]string(nil), capabilities...),
 	}
 	if err := db.UpsertDevice(device); err != nil {
 		t.Fatal(err)
@@ -47,9 +47,9 @@ func TestDeviceIdentityGrantAdminAPILifecycle(t *testing.T) {
 	}
 
 	createBody, _ := json.Marshal(map[string]any{
-		"targetDeviceId": "grant-api-target",
+		"targetDeviceId":    "grant-api-target",
 		"granteeIdentityId": granteeIdentity.ID,
-		"features": []string{repository.GrantFeatureProxyUse},
+		"features":          []string{repository.GrantFeatureProxyUse},
 	})
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/device-identity-grants", bytes.NewReader(createBody))
 	createReq.AddCookie(adminCookie)
@@ -144,9 +144,9 @@ func TestDeviceIdentityGrantAPIRejectsSameIdentity(t *testing.T) {
 	seedGrantAPIDevice(t, router.db, "same-grant-target", identity.ID, []string{"proxy.exit"})
 
 	body, _ := json.Marshal(map[string]any{
-		"targetDeviceId": "same-grant-target",
+		"targetDeviceId":    "same-grant-target",
 		"granteeIdentityId": identity.ID,
-		"features": []string{repository.GrantFeatureProxyUse},
+		"features":          []string{repository.GrantFeatureProxyUse},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/device-identity-grants", bytes.NewReader(body))
 	req.AddCookie(adminCookie)

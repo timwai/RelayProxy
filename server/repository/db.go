@@ -1010,11 +1010,20 @@ func (db *DB) UpdateDeviceLastSeen(deviceID string) error {
 }
 
 func (db *DB) AuthorizeClientExit(clientDeviceID, exitDeviceID string) (bool, error) {
-	if clientDeviceID == "" || exitDeviceID == "" {
+	if clientDeviceID == "" || exitDeviceID == "" || clientDeviceID == exitDeviceID {
 		return false, nil
 	}
+	managed, allowed, err := db.authorizeIdentityDeviceFeature(clientDeviceID, exitDeviceID, GrantFeatureProxyUse)
+	if err != nil {
+		return false, err
+	}
+	if managed {
+		return allowed, nil
+	}
+
+	// Legacy v3 behavior remains same-owner during the migration window.
 	var clientOwner, exitOwner sql.NullString
-	err := db.QueryRow(`SELECT owner_user_id FROM devices WHERE id = ? AND approval_state = 'approved'`, clientDeviceID).Scan(&clientOwner)
+	err = db.QueryRow(`SELECT owner_user_id FROM devices WHERE id = ? AND approval_state = 'approved'`, clientDeviceID).Scan(&clientOwner)
 	if err != nil {
 		return false, err
 	}
@@ -1022,10 +1031,8 @@ func (db *DB) AuthorizeClientExit(clientDeviceID, exitDeviceID string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	if clientOwner.Valid && exitOwner.Valid && clientOwner.String != "" && clientOwner.String == exitOwner.String {
-		return true, nil
-	}
-	return false, nil
+	return clientOwner.Valid && exitOwner.Valid &&
+		clientOwner.String != "" && clientOwner.String == exitOwner.String, nil
 }
 
 type ConnectionAudit struct {

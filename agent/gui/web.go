@@ -332,12 +332,20 @@ func (w *WebServer) setCredential(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, err := w.bridge.SetAccessKey(in.AccessKey)
-	writeWebMutation(rw, state, err)
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, map[string]any{"ok": true, "state": state})
 }
 
 func (w *WebServer) clearCredential(rw http.ResponseWriter, _ *http.Request) {
 	state, err := w.bridge.ClearAccessKey()
-	writeWebMutation(rw, state, err)
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, map[string]any{"ok": true, "state": state})
 }
 
 func (w *WebServer) reloadConfig(rw http.ResponseWriter, _ *http.Request) {

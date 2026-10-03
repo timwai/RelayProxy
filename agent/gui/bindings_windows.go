@@ -148,6 +148,45 @@ func (s *WailsService) ClearLogs() {
 	}
 }
 
+func (s *WailsService) GetCredentialState() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"configured":false,"source":"none","managedExternally":false,"restartRequired":false}`, nil
+	}
+	state, err := s.owner.bridge.GetAccessKeyState()
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(state)
+	return string(data), nil
+}
+
+func (s *WailsService) SetAccessKey(accessKey string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	state, err := s.owner.bridge.SetAccessKey(accessKey)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{"ok": true, "state": state})
+	return string(data), nil
+}
+
+func (s *WailsService) ClearAccessKey() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	state, err := s.owner.bridge.ClearAccessKey()
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{"ok": true, "state": state})
+	return string(data), nil
+}
+
 func (s *WailsService) GetConfig() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "{}", nil

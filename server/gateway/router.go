@@ -120,10 +120,20 @@ func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool,
 func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDeviceID string) (*session.DeviceSession, bool, error) {
 	if exitDeviceID != "" {
 		if exitDeviceID == protocol.ServerExitDeviceID {
-			if r.localExit == nil || client != nil && client.IdentityID != "" {
-				// The Relay server is a system resource, not a device with an empty
-				// identity. v4 requires an explicit system-resource grant (M2).
+			if r.localExit == nil {
 				return nil, false, errExitOffline
+			}
+			if client != nil && client.IdentityID != "" {
+				if r.authChecker == nil {
+					return nil, false, errExitOffline
+				}
+				allowed, err := r.authChecker(client.DeviceID, protocol.ServerExitDeviceID)
+				if err != nil {
+					return nil, false, err
+				}
+				if !allowed {
+					return nil, false, errExitOffline
+				}
 			}
 			return nil, true, nil
 		}
@@ -137,6 +147,17 @@ func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDev
 	if client != nil && client.IdentityID != "" {
 		var candidate *session.DeviceSession
 		count := 0
+		local := false
+		if r.localExit != nil && r.authChecker != nil {
+			allowed, err := r.authChecker(client.DeviceID, protocol.ServerExitDeviceID)
+			if err != nil {
+				return nil, false, err
+			}
+			if allowed {
+				count = 1
+				local = true
+			}
+		}
 		for _, exit := range r.sessions.GetExits() {
 			if exit == nil || exit.DeviceID == client.DeviceID {
 				continue
@@ -158,6 +179,9 @@ func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDev
 		case 0:
 			return nil, false, errNoExitOnline
 		case 1:
+			if local {
+				return nil, true, nil
+			}
 			return candidate, false, nil
 		default:
 			return nil, false, errMultipleExits

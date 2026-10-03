@@ -38,6 +38,7 @@ type Router struct {
 	onDeviceRevoked                func(string)
 	onDeviceAuthorizationChanged   func(string)
 	onIdentityAuthorizationChanged func(identityID, accessKeyID string)
+	onDeviceIdentityGrantChanged     func(targetDeviceID, granteeIdentityID string)
 	onRDPIngressChanged            func(string)
 	onRDPIngressReload             func(string) error
 	onRDPIngressStatus             func(string) RDPIngressRuntimeStatus
@@ -121,6 +122,10 @@ func WithDeviceAuthorizationChanged(fn func(string)) RouterOption {
 // accessKeyID is empty for identity-wide policy/status changes.
 func WithIdentityAuthorizationChanged(fn func(identityID, accessKeyID string)) RouterOption {
 	return func(r *Router) { r.onIdentityAuthorizationChanged = fn }
+}
+
+func WithDeviceIdentityGrantChanged(fn func(targetDeviceID, granteeIdentityID string)) RouterOption {
+	return func(r *Router) { r.onDeviceIdentityGrantChanged = fn }
 }
 
 func WithRDPIngressChanged(fn func(string)) RouterOption {
@@ -250,6 +255,13 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/identities/{id}/access-keys", r.requireAuth(r.requireAdmin(r.handleListIdentityAccessKeys)))
 	r.mux.HandleFunc("POST /api/v1/identities/{id}/access-keys", r.requireAuth(r.requireAdmin(r.handleIssueIdentityAccessKey)))
 	r.mux.HandleFunc("DELETE /api/v1/identities/{id}/access-keys/{keyId}", r.requireAuth(r.requireAdmin(r.handleRevokeIdentityAccessKey)))
+
+	// Cross-identity authorization. Grants are always device -> identity and
+	// feature-scoped; same-identity access remains implicit.
+	r.mux.HandleFunc("GET /api/v1/device-identity-grants", r.requireAuth(r.requireAdmin(r.handleListDeviceIdentityGrants)))
+	r.mux.HandleFunc("POST /api/v1/device-identity-grants", r.requireAuth(r.requireAdmin(r.handleCreateDeviceIdentityGrant)))
+	r.mux.HandleFunc("PATCH /api/v1/device-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateDeviceIdentityGrant)))
+	r.mux.HandleFunc("DELETE /api/v1/device-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteDeviceIdentityGrant)))
 
 	// Device APIs
 	r.mux.HandleFunc("GET /api/v1/devices", r.requireAuth(r.handleListDevices))

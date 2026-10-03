@@ -88,6 +88,7 @@ function createRuleRow(rule, index) {
 
   const name = String(rule.name || '').trim() || '未命名规则';
   const exit = String(rule.exit_id || '').trim();
+  const exitLabel = exit && typeof window.proxyExitDisplayName === 'function' ? window.proxyExitDisplayName(exit) : exit;
   const datagram = !!rule.datagram_required;
   const handleDirect = rule.action === 'DIRECT' && !!rule.handle_direct;
 
@@ -108,7 +109,7 @@ function createRuleRow(rule, index) {
     <td class="routing-protocol-cell"><span class="routing-protocol mono">${escapeHTML(ruleProtocolLabel(rule))}</span></td>
     <td class="routing-action-cell">
       <span class="${ruleActionClass(rule.action)}">${escapeHTML(ruleActionLabel(rule.action))}</span>
-      ${exit ? '<span class="routing-exit mono" title="' + escapeHTML(exit) + '">出口 ' + escapeHTML(exit) + '</span>' : '<span class="routing-exit">当前出口</span>'}
+      ${exit ? '<span class="routing-exit mono" title="' + escapeHTML(exit) + '">出口 ' + escapeHTML(exitLabel) + '</span>' : '<span class="routing-exit">跟随默认出口</span>'}
       ${datagram ? '<span class="routing-datagram">UDP 原生数据报</span>' : ''}
       ${handleDirect ? '<span class="routing-datagram">RelayProxy 处理直连</span>' : ''}
     </td>
@@ -173,7 +174,11 @@ function openRuleEditor(index) {
   el.ports.value = (rule.ports || []).join('\n');
   el.protocol.value = protocols.length === 1 && protocols[0] !== '*' ? protocols[0] : 'any';
   el.action.value = rule.action || 'PROXY';
-  el.exit.value = rule.exit_id || '';
+  if (typeof window.fillProxyExitSelect === 'function') {
+    window.fillProxyExitSelect(el.exit, rule.exit_id || '', '跟随默认出口');
+  } else {
+    el.exit.value = rule.exit_id || '';
+  }
   el.datagram.checked = !!rule.datagram_required;
   el.handleDirect.checked = !!rule.handle_direct;
 
@@ -300,6 +305,13 @@ window.openRuleEditor = openRuleEditor;
 window.closeRuleEditor = closeRuleEditor;
 window.saveRuleEditor = saveRuleEditor;
 window.updateRoutingEditorDependencies = updateRoutingEditorDependencies;
+window.syncRoutingExitOptions = function () {
+  const el = routingEditorElements();
+  if (!el.exit || typeof window.fillProxyExitSelect !== 'function') return;
+  const current = el.exit.value || '';
+  window.fillProxyExitSelect(el.exit, current, '跟随默认出口');
+  renderRoutingRules(routingRules);
+};
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && $('routing-rule-modal') && !$('routing-rule-modal').classList.contains('hidden')) {

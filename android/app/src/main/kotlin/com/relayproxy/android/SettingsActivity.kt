@@ -42,7 +42,6 @@ class SettingsActivity : Activity() {
     private lateinit var socks5Port: EditText
     private lateinit var httpPort: EditText
     private lateinit var vpnAppMode: Spinner
-    private lateinit var vpnDnsServers: EditText
     private lateinit var vpnAppsSummary: TextView
     private val selectedVpnPackages = linkedSetOf<String>()
     private val networkModeTabs = mutableListOf<TextView>()
@@ -216,7 +215,11 @@ class SettingsActivity : Activity() {
         root.addView(client, topMargin(14))
 
         val vpn = card()
-        addSectionHeader(vpn, "VPN 范围与 DNS", "设置接入 VPN 的应用，DNS 查询同样经过所选出口。")
+        addSectionHeader(
+            vpn,
+            "VPN 范围与 DNS",
+            "DNS 使用 Mapped DNS，在 VPN 内保留域名并交给所选出口解析，避免明文 DNS 被污染或劫持。",
+        )
         vpnAppMode = Spinner(this).apply {
             adapter = ArrayAdapter(
                 this@SettingsActivity,
@@ -236,11 +239,16 @@ class SettingsActivity : Activity() {
             setOnClickListener { openVpnAppSelection() }
         }
         vpn.addView(labeled("选择应用（点击编辑）", vpnAppsSummary), topMargin(12))
-        vpnDnsServers = styledField("1.1.1.1, 8.8.8.8").apply {
-            setSingleLine(false)
-            minLines = 2
-        }
-        vpn.addView(labeled("DNS 服务器（IP，以逗号分隔）", vpnDnsServers), topMargin(12))
+        vpn.addView(
+            TextView(this).apply {
+                text = "Mapped DNS 已启用\n系统 DNS 查询会在 VPN 内转换为域名，再由所选出口解析。"
+                textSize = 12.5f
+                setTextColor(ink)
+                setPadding(dp(12), dp(12), dp(12), dp(12))
+                background = rounded(Color.rgb(248, 250, 252), 13, line)
+            },
+            topMargin(12),
+        )
         root.addView(vpn, topMargin(14))
 
         root.addView(Button(this).apply {
@@ -301,7 +309,6 @@ class SettingsActivity : Activity() {
                 ExitConfig.VPN_APP_MODE_ALL
             },
             vpnPackages = selectedVpnPackages.toSet(),
-            vpnDnsServers = parseDnsServers(vpnDnsServers.text.toString()),
         )
         if (config.serverAddress.isBlank()) {
             server.error = "必须填写 Server 地址"
@@ -326,11 +333,6 @@ class SettingsActivity : Activity() {
         }
         if (config.vpnAppMode == ExitConfig.VPN_APP_MODE_INCLUDE && config.vpnPackages.isEmpty()) {
             Toast.makeText(this, "仅选中应用模式至少需要选择一个应用", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (config.vpnDnsServers.isEmpty() || config.vpnDnsServers.any { !isNumericAddress(it) }) {
-            vpnDnsServers.error = "请填写有效的 IPv4 或 IPv6 DNS 地址"
-            vpnDnsServers.requestFocus()
             return
         }
         val store = ConfigStore(this)
@@ -363,7 +365,6 @@ class SettingsActivity : Activity() {
         vpnAppMode.setSelection(vpnAppModeValues.indexOf(cfg.vpnAppMode).coerceAtLeast(0))
         selectedVpnPackages.clear()
         selectedVpnPackages += cfg.vpnPackages
-        vpnDnsServers.setText(cfg.vpnDnsServers.joinToString(", "))
         updateVpnAppsSummary()
         populateProxyExits(cfg.defaultExitId)
         selectNetworkMode(networkModeValues.indexOf(cfg.networkMode).coerceAtLeast(0))
@@ -387,19 +388,6 @@ class SettingsActivity : Activity() {
                 selectedVpnPackages.sorted().take(3).joinToString("\n") +
                 if (selectedVpnPackages.size > 3) "\n…" else ""
         }
-    }
-
-    private fun parseDnsServers(raw: String): List<String> = raw
-        .split(',', '\n', ';', ' ')
-        .map(String::trim)
-        .filter(String::isNotBlank)
-        .distinct()
-
-    private fun isNumericAddress(value: String): Boolean {
-        if (value.any { !(it.isDigit() || it in 'a'..'f' || it in 'A'..'F' || it == '.' || it == ':') }) {
-            return false
-        }
-        return runCatching { java.net.InetAddress.getByName(value) }.isSuccess
     }
 
     private fun applyRunningConfiguration(

@@ -18,15 +18,34 @@ import (
 	agentclient "relayproxy/agent/client"
 	"relayproxy/agent/exit"
 	proxyp2p "relayproxy/agent/p2p"
+	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/proxy"
 	"relayproxy/internal/proxy/httpproxy"
 	"relayproxy/internal/proxy/socks5"
+	"relayproxy/internal/traffic"
 	"relayproxy/internal/tunnel"
 )
 
 const clientVersion = "android-0.2.0"
+
+// ValidateRoutingConfig checks settings with the same parser used by NewClient.
+// Gomobile exposes a non-nil error to Kotlin as an exception.
+func ValidateRoutingConfig(configJSON string) error {
+	var cfg routing.Config
+	if strings.TrimSpace(configJSON) == "" {
+		configJSON = "{}"
+	}
+	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+		return fmt.Errorf("decode routing config: %w", err)
+	}
+	if err := routing.ValidateConfig(cfg); err != nil {
+		return fmt.Errorf("invalid routing config: %w", err)
+	}
+	return nil
+}
 
 type clientConfig struct {
 	ServerAddress       string `json:"serverAddress"`
@@ -48,6 +67,7 @@ type clientConfig struct {
 	DefaultExitID       string `json:"defaultExitId"`
 	SOCKS5Listen        string `json:"socks5Listen"`
 	HTTPListen          string `json:"httpListen"`
+	Routing             routing.Config `json:"routing"`
 }
 
 type statusSnapshot struct {
@@ -80,6 +100,7 @@ type statusSnapshot struct {
 	ProxyBytesUp        uint64               `json:"proxyBytesUp"`
 	ProxyBytesDown      uint64               `json:"proxyBytesDown"`
 	NativeUDP           tunnel.DatagramUsage `json:"nativeUdp"`
+	RoutingMode         routing.Mode         `json:"routingMode"`
 	LastError           string               `json:"lastError,omitempty"`
 }
 
@@ -102,6 +123,8 @@ type Client struct {
 	powerConstrained bool
 	proxyP2P         *proxyp2p.Manager
 	proxyDialer      *agentclient.TunnelDialer
+	routingDialer    *routing.RoutingDialer
+	traffic          *traffic.Registry
 	clientApproved   atomic.Bool
 	socksServer      *socks5.Server
 	httpServer       *httpproxy.Server
@@ -198,6 +221,11 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	if !*cfg.TLSEnabled && cfg.TransportMode == string(tunnel.ModeQUICOnly) {
 		return cfg, errors.New("quic_only requires TLS")
 	}
+	engine, err := routing.NewEngine(cfg.Routing)
+	if err != nil {
+		return cfg, fmt.Errorf("invalid routing config: %w", err)
+	}
+	cfg.Routing = engine.Config()
 	return cfg, nil
 }
 
@@ -239,6 +267,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 			ApprovalState:   "unknown",
 			DeviceName:      cfg.DeviceName,
 			SelectedExit:    cfg.DefaultExitID,
+			RoutingMode:     cfg.Routing.Mode,
 		},
 	}
 
@@ -314,6 +343,14 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 		}
 	})
 	c.proxyDialer.SetDefaultExitID(cfg.DefaultExitID)
+	routingEngine, err := routing.NewEngine(cfg.Routing)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build routing engine: %w", err)
+	}
+	c.traffic = traffic.NewRegistry(1024, 256)
+	c.routingDialer = routing.NewRoutingDialer(routingEngine, c.proxyDialer)
+	c.routingDialer.Traffic = c.traffic
 	return c, nil
 }
 
@@ -353,7 +390,11 @@ func (c *Client) Start() error {
 		}
 	}()
 
-	countedDialer := &proxyStatsDialer{base: c.proxyDialer, owner: c}
+	var clientDialer proxy.TunnelDialer = c.proxyDialer
+	if c.routingDialer != nil {
+		clientDialer = c.routingDialer
+	}
+	countedDialer := &proxyStatsDialer{base: clientDialer, owner: c}
 	var socks *socks5.Server
 	var http *httpproxy.Server
 	if c.cfg.ClientEnabled && *c.cfg.SOCKS5Enabled {
@@ -464,6 +505,9 @@ func (c *Client) SetDefaultExit(exitID string) {
 	manager := c.proxyP2P
 	c.mu.Unlock()
 	c.proxyDialer.SetDefaultExitID(exitID)
+	if c.routingDialer != nil {
+		c.routingDialer.SetDefaultExitID(exitID)
+	}
 	if exitID != "" && exitID != protocol.ServerExitDeviceID && manager != nil && c.clientApproved.Load() {
 		manager.EnsureClient(exitID)
 	}

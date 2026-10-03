@@ -64,6 +64,16 @@ class SettingsActivity : Activity() {
 
     companion object {
         private const val REQUEST_VPN_APPS = 2401
+        const val EXTRA_SECTION = "section"
+        const val SECTION_CONNECTION = "connection"
+        const val SECTION_EXIT = "exit"
+        const val SECTION_PROXY = "proxy"
+        const val SECTION_VPN = "vpn"
+        const val SECTION_NETWORK = "network"
+    }
+
+    private val section: String by lazy {
+        intent.getStringExtra(EXTRA_SECTION) ?: SECTION_CONNECTION
     }
 
     private val bg = Color.rgb(246, 248, 252)
@@ -146,7 +156,7 @@ class SettingsActivity : Activity() {
             )
         }
         connection.addView(ports, topMargin(12))
-        root.addView(connection, topMargin(14))
+        addSectionCard(root, SECTION_CONNECTION, connection)
 
         val policy = card()
         addSectionHeader(policy, "出口策略", "选择首选出口网络，并配置自动故障切换。")
@@ -155,10 +165,9 @@ class SettingsActivity : Activity() {
         allowPrivate = Switch(this)
         autoNetworkSwitch = Switch(this)
 
-        policy.addView(switchRow("启用 TLS", "推荐开启。", tlsEnabled), topMargin(14))
-        policy.addView(divider(), topMargin(10))
-        policy.addView(switchRow("允许自签名证书", "仅用于可信的自建服务端。", insecureTls), topMargin(10))
-        policy.addView(divider(), topMargin(10))
+        connection.addView(switchRow("启用 TLS", "推荐开启。", tlsEnabled), topMargin(14))
+        connection.addView(divider(), topMargin(10))
+        connection.addView(switchRow("允许自签名证书", "仅用于可信的自建服务端。", insecureTls), topMargin(10))
 
         policy.addView(labeled("首选出口网络", buildNetworkModeTabs()), topMargin(12))
         policy.addView(divider(), topMargin(10))
@@ -172,7 +181,7 @@ class SettingsActivity : Activity() {
         )
         policy.addView(divider(), topMargin(10))
         policy.addView(switchRow("允许访问出口侧私网", "开启后可访问手机所在局域网。", allowPrivate), topMargin(10))
-        root.addView(policy, topMargin(14))
+        addSectionCard(root, SECTION_NETWORK, policy)
 
         val client = card()
         addSectionHeader(client, "代理客户端", "本机代理只监听回环地址；使用服务端授权的 Relay 出口。")
@@ -209,15 +218,19 @@ class SettingsActivity : Activity() {
             )
         }
         client.addView(proxyPorts, topMargin(12))
+        addSectionCard(root, SECTION_PROXY, client)
+
+        val exit = card()
+        addSectionHeader(exit, "出口选择", "从当前身份可用及跨身份授权的出口中选择默认设备。")
         defaultExitId = styledField("留空由服务端选择")
         exitSelection = Spinner(this).apply {
             background = rounded(Color.rgb(248, 250, 252), 13, line)
             setPadding(dp(12), 0, dp(10), 0)
             minimumHeight = dp(50)
         }
-        client.addView(labeled("已发现的在线出口", exitSelection), topMargin(12))
-        client.addView(labeled("首选出口设备 ID", defaultExitId), topMargin(12))
-        root.addView(client, topMargin(14))
+        exit.addView(labeled("已授权出口", exitSelection), topMargin(14))
+        exit.addView(labeled("首选出口设备 ID", defaultExitId), topMargin(12))
+        addSectionCard(root, SECTION_EXIT, exit)
 
         val vpn = card()
         addSectionHeader(
@@ -254,7 +267,7 @@ class SettingsActivity : Activity() {
             },
             topMargin(12),
         )
-        root.addView(vpn, topMargin(14))
+        addSectionCard(root, SECTION_VPN, vpn)
 
         root.addView(Button(this).apply {
             text = "保存设置"
@@ -288,71 +301,83 @@ class SettingsActivity : Activity() {
     }
 
     private fun saveAndClose() {
-        val config = ExitConfig(
-            serverAddress = server.text.toString().trim(),
-            accessKey = accessKey.text.toString().trim(),
-            deviceName = deviceName.text.toString().trim().ifBlank {
-                ConfigStore(this).defaultDeviceName()
-            },
-            quicPort = quicPort.text.toString().toIntOrNull() ?: 443,
-            tcpPort = tcpPort.text.toString().toIntOrNull() ?: 443,
-            transportMode = transportValues.getOrElse(transport.selectedItemPosition) { "auto" },
-            tlsEnabled = tlsEnabled.isChecked,
-            insecureTls = insecureTls.isChecked,
-            allowPrivateNetwork = allowPrivate.isChecked,
-            networkMode = networkModeValues.getOrElse(selectedNetworkModeIndex) {
-                NetworkBinder.MODE_WIFI
-            },
-            autoNetworkSwitch = autoNetworkSwitch.isChecked,
-            clientEnabled = clientEnabled.isChecked,
-            socks5Enabled = socks5Enabled.isChecked,
-            httpEnabled = httpEnabled.isChecked,
-            proxyP2pEnabled = proxyP2pEnabled.isChecked,
-            defaultExitId = defaultExitId.text.toString().trim(),
-            socks5Port = socks5Port.text.toString().toIntOrNull() ?: 1080,
-            httpPort = httpPort.text.toString().toIntOrNull() ?: 8080,
-            vpnAppMode = vpnAppModeValues.getOrElse(vpnAppMode.selectedItemPosition) {
-                ExitConfig.VPN_APP_MODE_ALL
-            },
-            vpnPackages = selectedVpnPackages.toSet(),
-        )
-        if (config.serverAddress.isBlank()) {
+        val store = ConfigStore(this)
+        val current = store.load()
+        val config = when (section) {
+            SECTION_CONNECTION -> current.copy(
+                serverAddress = server.text.toString().trim(),
+                accessKey = accessKey.text.toString().trim(),
+                deviceName = deviceName.text.toString().trim().ifBlank { store.defaultDeviceName() },
+                quicPort = quicPort.text.toString().toIntOrNull() ?: 443,
+                tcpPort = tcpPort.text.toString().toIntOrNull() ?: 443,
+                transportMode = transportValues.getOrElse(transport.selectedItemPosition) { "auto" },
+                tlsEnabled = tlsEnabled.isChecked,
+                insecureTls = insecureTls.isChecked,
+            )
+            SECTION_NETWORK -> current.copy(
+                allowPrivateNetwork = allowPrivate.isChecked,
+                networkMode = networkModeValues.getOrElse(selectedNetworkModeIndex) {
+                    NetworkBinder.MODE_WIFI
+                },
+                autoNetworkSwitch = autoNetworkSwitch.isChecked,
+            )
+            SECTION_PROXY -> current.copy(
+                clientEnabled = clientEnabled.isChecked,
+                socks5Enabled = socks5Enabled.isChecked,
+                httpEnabled = httpEnabled.isChecked,
+                proxyP2pEnabled = proxyP2pEnabled.isChecked,
+                socks5Port = socks5Port.text.toString().toIntOrNull() ?: 1080,
+                httpPort = httpPort.text.toString().toIntOrNull() ?: 8080,
+            )
+            SECTION_EXIT -> current.copy(defaultExitId = defaultExitId.text.toString().trim())
+            SECTION_VPN -> current.copy(
+                vpnAppMode = vpnAppModeValues.getOrElse(vpnAppMode.selectedItemPosition) {
+                    ExitConfig.VPN_APP_MODE_ALL
+                },
+                vpnPackages = selectedVpnPackages.toSet(),
+            )
+            else -> current
+        }
+        if (section == SECTION_CONNECTION && config.serverAddress.isBlank()) {
             server.error = "必须填写 Server 地址"
             server.requestFocus()
             return
         }
-        if (config.accessKey.isNotBlank() && !config.accessKey.startsWith("rpk_")) {
+        if (section == SECTION_CONNECTION && config.accessKey.isNotBlank() && !config.accessKey.startsWith("rpk_")) {
             accessKey.error = "接入密钥格式不正确"
             accessKey.requestFocus()
             return
         }
-        if (config.clientEnabled && !config.socks5Enabled && !config.httpEnabled) {
+        if (section == SECTION_PROXY && config.clientEnabled && !config.socks5Enabled && !config.httpEnabled) {
             Toast.makeText(this, "启用本机代理时至少选择 SOCKS5 或 HTTP", Toast.LENGTH_SHORT).show()
             return
         }
-        if ((config.clientEnabled && config.socks5Enabled && config.socks5Port !in 1..65535) ||
+        if (section == SECTION_PROXY && ((config.clientEnabled && config.socks5Enabled && config.socks5Port !in 1..65535) ||
             (config.clientEnabled && config.httpEnabled && config.httpPort !in 1..65535)
-        ) {
+        )) {
             Toast.makeText(this, "代理端口必须在 1 到 65535 之间", Toast.LENGTH_SHORT).show()
             return
         }
-        if (config.clientEnabled && config.socks5Enabled && config.httpEnabled &&
+        if (section == SECTION_PROXY && config.clientEnabled && config.socks5Enabled && config.httpEnabled &&
             config.socks5Port == config.httpPort
         ) {
             Toast.makeText(this, "SOCKS5 与 HTTP 不能使用相同端口", Toast.LENGTH_SHORT).show()
             return
         }
-        if (config.vpnAppMode == ExitConfig.VPN_APP_MODE_INCLUDE && config.vpnPackages.isEmpty()) {
+        if (section == SECTION_VPN && config.vpnAppMode == ExitConfig.VPN_APP_MODE_INCLUDE && config.vpnPackages.isEmpty()) {
             Toast.makeText(this, "仅选中应用模式至少需要选择一个应用", Toast.LENGTH_SHORT).show()
             return
         }
-        val store = ConfigStore(this)
         val coreWasDesired = store.isDesiredRunning() ||
-            store.isVpnDesiredRunning() || store.load().clientEnabled
+            store.isVpnDesiredRunning() || current.clientEnabled
         store.save(config)
         applyRunningConfiguration(store, config, coreWasDesired)
         Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
         finish()
+    }
+
+    private fun addSectionCard(root: LinearLayout, cardSection: String, view: View) {
+        if (section == cardSection) root.addView(view, topMargin(14))
     }
 
     private fun loadConfig() {

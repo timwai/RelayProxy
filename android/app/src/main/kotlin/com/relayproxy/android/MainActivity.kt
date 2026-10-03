@@ -205,7 +205,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
             setPadding(dp(10), dp(6), dp(2), dp(6))
             setOnClickListener {
-                startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                startActivity(Intent(this@MainActivity, SettingsHomeActivity::class.java))
             }
         })
         card.addView(top)
@@ -266,7 +266,7 @@ class MainActivity : Activity() {
                 setTypeface(typeface, Typeface.BOLD)
                 setPadding(dp(10), dp(5), 0, dp(5))
                 setOnClickListener {
-                    startActivity(Intent(this@MainActivity, SettingsActivity::class.java))
+                    startActivity(Intent(this@MainActivity, SettingsHomeActivity::class.java))
                 }
             })
         })
@@ -434,7 +434,10 @@ class MainActivity : Activity() {
         }
         val config = store.load()
         if (config.serverAddress.isBlank()) {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(
+                Intent(this, SettingsActivity::class.java)
+                    .putExtra(SettingsActivity.EXTRA_SECTION, SettingsActivity.SECTION_CONNECTION)
+            )
             return
         }
         val consent = VpnService.prepare(this)
@@ -463,7 +466,10 @@ class MainActivity : Activity() {
     private fun startRelay() {
         val config = ConfigStore(this).load()
         if (config.serverAddress.isBlank()) {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(
+                Intent(this, SettingsActivity::class.java)
+                    .putExtra(SettingsActivity.EXTRA_SECTION, SettingsActivity.SECTION_CONNECTION)
+            )
             return
         }
 

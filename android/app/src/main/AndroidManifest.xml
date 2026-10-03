@@ -27,6 +27,18 @@
             android:exported="false" />
 
         <activity
+            android:name=".SettingsHomeActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".RoutingSettingsActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".RoutingRuleActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".VpnAppSelectionActivity"
             android:exported="false" />
 

@@ -3,7 +3,94 @@ package com.relayproxy.android
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
+import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
+
+data class RoutingRuleConfig(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "新规则",
+    val enabled: Boolean = true,
+    val action: String = "PROXY",
+    val exitId: String = "",
+    val applications: List<String> = emptyList(),
+    val targets: List<String> = emptyList(),
+    val ports: List<String> = emptyList(),
+    val protocols: List<String> = emptyList(),
+) {
+    fun toJson(forCore: Boolean): JSONObject = JSONObject()
+        .put("id", if (forCore) null else id)
+        .put("name", name.trim())
+        .put("enabled", enabled)
+        .put("action", action)
+        .put("exit_id", exitId.trim())
+        .put(if (forCore) "processes" else "applications", applications.toJsonArray())
+        .put("targets", targets.toJsonArray())
+        .put("ports", ports.toJsonArray())
+        .put("protocols", protocols.toJsonArray())
+}
+
+data class RoutingConfig(
+    val mode: String = "global_proxy",
+    val defaultAction: String = "PROXY",
+    val rules: List<RoutingRuleConfig> = emptyList(),
+) {
+    fun toJson(forCore: Boolean = false): JSONObject = JSONObject()
+        .put("mode", mode)
+        .put("default_action", defaultAction)
+        .put("rules", JSONArray().apply {
+            rules.forEach { put(it.toJson(forCore)) }
+        })
+
+    companion object {
+        fun fromJson(raw: String?): RoutingConfig {
+            if (raw.isNullOrBlank()) return RoutingConfig()
+            return runCatching {
+                val json = JSONObject(raw)
+                val rulesJson = json.optJSONArray("rules") ?: JSONArray()
+                val rules = buildList {
+                    for (index in 0 until rulesJson.length()) {
+                        val item = rulesJson.optJSONObject(index) ?: continue
+                        add(
+                            RoutingRuleConfig(
+                                id = item.optString("id").ifBlank { UUID.randomUUID().toString() },
+                                name = item.optString("name", "规则 ${index + 1}"),
+                                enabled = item.optBoolean("enabled", true),
+                                action = item.optString("action", "PROXY"),
+                                exitId = item.optString("exit_id"),
+                                applications = item.stringList("applications").ifEmpty {
+                                    item.stringList("processes")
+                                },
+                                targets = item.stringList("targets"),
+                                ports = item.stringList("ports"),
+                                protocols = item.stringList("protocols"),
+                            )
+                        )
+                    }
+                }
+                RoutingConfig(
+                    mode = json.optString("mode", "global_proxy"),
+                    defaultAction = json.optString("default_action", "PROXY"),
+                    rules = rules,
+                )
+            }.getOrDefault(RoutingConfig())
+        }
+    }
+}
+
+private fun List<String>.toJsonArray() = JSONArray().also { array ->
+    forEach { array.put(it) }
+}
+
+private fun JSONObject.stringList(name: String): List<String> {
+    val array = optJSONArray(name) ?: return emptyList()
+    return buildList {
+        for (index in 0 until array.length()) {
+            val value = array.optString(index).trim()
+            if (value.isNotBlank()) add(value)
+        }
+    }.distinct()
+}
 
 data class ExitConfig(
     val serverAddress: String = "",
@@ -30,6 +117,7 @@ data class ExitConfig(
     val vpnAppMode: String = VPN_APP_MODE_ALL,
     val vpnPackages: Set<String> = emptySet(),
     val vpnDnsServers: List<String> = listOf("1.1.1.1", "8.8.8.8"),
+    val routing: RoutingConfig = RoutingConfig(),
 ) {
     fun coreJson(): String {
         val localSocksEnabled = clientEnabled && socks5Enabled
@@ -54,6 +142,7 @@ data class ExitConfig(
             .put("defaultExitId", defaultExitId.trim())
             .put("socks5Listen", "127.0.0.1:${if (localSocksEnabled) socks5Port else vpnSocks5Port}")
             .put("httpListen", "127.0.0.1:$httpPort")
+            .put("routing", routing.toJson(forCore = true))
             .toString()
     }
 
@@ -172,6 +261,7 @@ class ConfigStore(private val context: Context) {
                 .map(String::trim)
                 .filter(String::isNotBlank)
                 .distinct(),
+            routing = RoutingConfig.fromJson(prefs.getString("routing", null)),
         )
     }
 
@@ -198,9 +288,17 @@ class ConfigStore(private val context: Context) {
             .putString("vpnAppMode", config.vpnAppMode)
             .putStringSet("vpnPackages", config.vpnPackages.toSet())
             .putString("vpnDnsServers", config.vpnDnsServers.joinToString(","))
-            .putInt("configVersion", 3)
+            .putString("routing", config.routing.toJson().toString())
+            .putInt("configVersion", 4)
             .remove("cellularOnly")
             .remove("vpnManagingRelay")
+            .apply()
+    }
+
+    fun saveRouting(routing: RoutingConfig) {
+        prefs.edit()
+            .putString("routing", routing.toJson().toString())
+            .putInt("configVersion", 4)
             .apply()
     }
 

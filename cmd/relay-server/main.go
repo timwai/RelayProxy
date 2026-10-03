@@ -444,6 +444,25 @@ func main() {
 			}
 			ingress.Reload()
 		}),
+		api.WithDeviceIdentityGrantChanged(func(targetDeviceID, granteeIdentityID string) {
+			// M2 first release deliberately invalidates the grantee identity's
+			// authenticated tunnels after any grant mutation. This is broader
+			// than feature-specific stream teardown, but it makes additions,
+			// edits, expiry changes and revocations visible immediately and
+			// prevents existing Relay streams from retaining stale authority.
+			deviceIDs := sessionMgr.InvalidateIdentity(granteeIdentityID)
+			for _, deviceID := range deviceIDs {
+				rdpCoordinator.CloseDevice(deviceID)
+				if proxyP2PCoordinator != nil {
+					proxyP2PCoordinator.RevokeDevice(deviceID)
+				}
+			}
+			// A target can itself be an active controller/client. Do not close
+			// its main tunnel; its peer-side direct paths are revalidated on
+			// candidate updates/renewal and the grantee side has been revoked.
+			_ = targetDeviceID
+			ingress.Reload()
+		}),
 		api.WithDeviceRevoked(func(deviceID string) {
 			rdpCoordinator.CloseDevice(deviceID)
 			if proxyP2PCoordinator != nil {

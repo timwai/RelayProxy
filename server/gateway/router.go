@@ -92,16 +92,26 @@ func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool,
 	if client == nil || exit == nil {
 		return false, nil
 	}
-	// Ownership is loaded as part of the authenticated session snapshot.
-	// Authorization changes invalidate that session, so matching owners can be
-	// checked without SQLite on every data stream.
+	// v4 identity snapshots are authoritative for same-identity access. Unequal
+	// identities intentionally fall through to the policy checker so M2 can add
+	// explicit cross-identity grants without changing every data path again.
+	if client.IdentityID != "" && exit.IdentityID != "" {
+		if client.IdentityID == exit.IdentityID {
+			return true, nil
+		}
+		if r.authChecker != nil {
+			return r.authChecker(client.DeviceID, exit.DeviceID)
+		}
+		return false, nil
+	}
+	// Legacy v3 sessions retain owner-based behavior during migration.
 	if client.OwnerUserID != "" && exit.OwnerUserID != "" {
 		return client.OwnerUserID == exit.OwnerUserID, nil
 	}
 	if r.authChecker != nil {
 		return r.authChecker(client.DeviceID, exit.DeviceID)
 	}
-	return true, nil
+	return false, nil
 }
 
 // resolveExitSession returns an online exit. A nil session with local=true
@@ -110,7 +120,9 @@ func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool,
 func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDeviceID string) (*session.DeviceSession, bool, error) {
 	if exitDeviceID != "" {
 		if exitDeviceID == protocol.ServerExitDeviceID {
-			if r.localExit == nil {
+			if r.localExit == nil || client != nil && client.IdentityID != "" {
+				// The Relay server is a system resource, not a device with an empty
+				// identity. v4 requires an explicit system-resource grant (M2).
 				return nil, false, errExitOffline
 			}
 			return nil, true, nil
@@ -120,6 +132,18 @@ func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDev
 			return nil, false, errExitOffline
 		}
 		return exitSession, false, nil
+	}
+
+	if client != nil && client.IdentityID != "" {
+		exits := r.sessions.GetExitsForIdentity(client.IdentityID)
+		switch len(exits) {
+		case 0:
+			return nil, false, errNoExitOnline
+		case 1:
+			return exits[0], false, nil
+		default:
+			return nil, false, errMultipleExits
+		}
 	}
 
 	if client != nil && client.OwnerUserID != "" {

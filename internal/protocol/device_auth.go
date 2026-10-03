@@ -7,7 +7,15 @@ import (
 )
 
 const (
-	DeviceProtocolVersion = 3
+	// LegacyDeviceProtocolVersion is the administrator-approved v3 enrollment
+	// protocol. It remains available during the controlled identity migration.
+	LegacyDeviceProtocolVersion = 3
+	// IdentityDeviceProtocolVersion authenticates a server-issued identity
+	// access key in addition to the installation Ed25519 identity.
+	IdentityDeviceProtocolVersion = 4
+	// DeviceProtocolVersion remains the legacy default until client settings
+	// have an access key. Clients explicitly select v4 when AccessKey is set.
+	DeviceProtocolVersion = LegacyDeviceProtocolVersion
 
 	CapabilityProxyClient = "proxy.client"
 	CapabilityProxyExit   = "proxy.exit"
@@ -19,6 +27,8 @@ const (
 	ErrCodeDeviceRejected   = "DEVICE_REJECTED"
 	ErrCodeDeviceRevoked    = "DEVICE_REVOKED"
 	ErrCodeProtocolMismatch = "PROTOCOL_MISMATCH"
+	ErrCodeAccessKeyInvalid = "ACCESS_KEY_INVALID"
+	ErrCodeIdentityConflict = "IDENTITY_CONFLICT"
 )
 
 // RDPTarget is the server-approved target list sent to an RDP controller. The
@@ -40,6 +50,9 @@ type ProxyExit struct {
 
 type DeviceHello struct {
 	ProtocolVersion       int      `json:"protocolVersion"`
+	// AccessKey is present only in v4. The server resolves identity from this
+	// credential; clients never submit or choose an identity ID.
+	AccessKey             string   `json:"accessKey,omitempty"`
 	InstallationID        string   `json:"installationId"`
 	PublicKey             []byte   `json:"publicKey"`
 	ClientNonce           []byte   `json:"clientNonce"`
@@ -68,6 +81,8 @@ type DeviceAccepted struct {
 	Success               bool         `json:"success"`
 	State                 string       `json:"state"`
 	DeviceID              string       `json:"deviceId,omitempty"`
+	IdentityName          string       `json:"identityName,omitempty"`
+	PolicyRevision        int64        `json:"policyRevision,omitempty"`
 	ApprovedCapabilities  []string     `json:"approvedCapabilities,omitempty"`
 	RDPTargets            []RDPTarget  `json:"rdpTargets,omitempty"`
 	ProxyExits            *[]ProxyExit `json:"proxyExits,omitempty"`
@@ -98,6 +113,20 @@ func DeviceAuthPayload(hello DeviceHello, challenge AuthChallenge) []byte {
 	writeAuthField(&out, []byte(hello.InstallationID))
 	keyHash := sha256.Sum256(hello.PublicKey)
 	writeAuthField(&out, keyHash[:])
+	if hello.ProtocolVersion >= IdentityDeviceProtocolVersion {
+		// Bind the credential without signing or logging the plaintext twice.
+		// The server has already resolved the key before issuing the challenge.
+		accessKeyHash := sha256.Sum256([]byte(hello.AccessKey))
+		writeAuthField(&out, accessKeyHash[:])
+		_ = binary.Write(&out, binary.BigEndian, uint32(len(hello.RequestedCapabilities)))
+		for _, capability := range hello.RequestedCapabilities {
+			writeAuthField(&out, []byte(capability))
+		}
+		_ = binary.Write(&out, binary.BigEndian, uint32(len(hello.TransportCapabilities)))
+		for _, capability := range hello.TransportCapabilities {
+			writeAuthField(&out, []byte(capability))
+		}
+	}
 	return out.Bytes()
 }
 

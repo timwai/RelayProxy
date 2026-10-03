@@ -209,6 +209,10 @@ func main() {
 
 	agentCfg := app.AgentConfig{
 		Identity:      deviceIdentity,
+		// The identity access key is intentionally not part of relay-agent.yaml
+		// or UI status/export surfaces. A protected credential store will replace
+		// this bootstrap environment source when the settings UI lands.
+		AccessKey:     strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")),
 		DeviceName:    cfgFile.Device.Name,
 		ServerAddress: cfgFile.Server.Address,
 		QUICPort:      cfgFile.Server.QUICPort,

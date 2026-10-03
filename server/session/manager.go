@@ -13,7 +13,11 @@ import (
 type DeviceSession struct {
 	DeviceID      string
 	DeviceName    string
-	OwnerUserID   string   // authenticated ownership snapshot; invalidated by authorization changes
+	OwnerUserID   string   // legacy authenticated ownership snapshot
+	IdentityID    string   // v4 server-derived connection identity
+	IdentityName  string   // display-only identity name snapshot
+	AccessKeyID   string   // exact v4 key used by this authenticated session
+	PolicyRevision int64   // identity policy revision at authentication time
 	Mode          string   // "CLIENT", "EXIT", "BOTH"
 	Capabilities  []string // authenticated transport/protocol features
 	Grants        []string // server-approved product capabilities
@@ -86,14 +90,16 @@ type Manager struct {
 	sessions        map[string]*DeviceSession
 	exits           map[string]*DeviceSession
 	exitsByOwner    map[string]map[string]*DeviceSession
+	exitsByIdentity map[string]map[string]*DeviceSession
 	authorizationMu sync.Mutex
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		sessions:     make(map[string]*DeviceSession),
-		exits:        make(map[string]*DeviceSession),
-		exitsByOwner: make(map[string]map[string]*DeviceSession),
+		sessions:        make(map[string]*DeviceSession),
+		exits:           make(map[string]*DeviceSession),
+		exitsByOwner:    make(map[string]map[string]*DeviceSession),
+		exitsByIdentity: make(map[string]map[string]*DeviceSession),
 	}
 }
 
@@ -125,15 +131,22 @@ func (m *Manager) indexExitLocked(sess *DeviceSession) {
 		return
 	}
 	m.exits[sess.DeviceID] = sess
-	if sess.OwnerUserID == "" {
-		return
+	if sess.OwnerUserID != "" {
+		bucket := m.exitsByOwner[sess.OwnerUserID]
+		if bucket == nil {
+			bucket = make(map[string]*DeviceSession)
+			m.exitsByOwner[sess.OwnerUserID] = bucket
+		}
+		bucket[sess.DeviceID] = sess
 	}
-	bucket := m.exitsByOwner[sess.OwnerUserID]
-	if bucket == nil {
-		bucket = make(map[string]*DeviceSession)
-		m.exitsByOwner[sess.OwnerUserID] = bucket
+	if sess.IdentityID != "" {
+		bucket := m.exitsByIdentity[sess.IdentityID]
+		if bucket == nil {
+			bucket = make(map[string]*DeviceSession)
+			m.exitsByIdentity[sess.IdentityID] = bucket
+		}
+		bucket[sess.DeviceID] = sess
 	}
-	bucket[sess.DeviceID] = sess
 }
 
 func (m *Manager) unindexExitLocked(sess *DeviceSession) {
@@ -141,13 +154,20 @@ func (m *Manager) unindexExitLocked(sess *DeviceSession) {
 		return
 	}
 	delete(m.exits, sess.DeviceID)
-	if sess.OwnerUserID == "" {
-		return
+	if sess.OwnerUserID != "" {
+		if bucket := m.exitsByOwner[sess.OwnerUserID]; bucket != nil {
+			delete(bucket, sess.DeviceID)
+			if len(bucket) == 0 {
+				delete(m.exitsByOwner, sess.OwnerUserID)
+			}
+		}
 	}
-	if bucket := m.exitsByOwner[sess.OwnerUserID]; bucket != nil {
-		delete(bucket, sess.DeviceID)
-		if len(bucket) == 0 {
-			delete(m.exitsByOwner, sess.OwnerUserID)
+	if sess.IdentityID != "" {
+		if bucket := m.exitsByIdentity[sess.IdentityID]; bucket != nil {
+			delete(bucket, sess.DeviceID)
+			if len(bucket) == 0 {
+				delete(m.exitsByIdentity, sess.IdentityID)
+			}
 		}
 	}
 }
@@ -306,6 +326,23 @@ func (m *Manager) GetExitsForOwner(ownerUserID string) []*DeviceSession {
 	return res
 }
 
+// GetExitsForIdentity returns only exits authenticated under the same v4
+// connection identity. Cross-identity grants are layered on top in M2.
+func (m *Manager) GetExitsForIdentity(identityID string) []*DeviceSession {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if identityID == "" {
+		return []*DeviceSession{}
+	}
+	bucket := m.exitsByIdentity[identityID]
+	res := make([]*DeviceSession, 0, len(bucket))
+	for _, s := range bucket {
+		res = append(res, s)
+	}
+	return res
+}
+
+
 // UniqueExitForOwner is the allocation-free fast path used by auto-routing.
 // The count lets callers distinguish no exit, exactly one, and ambiguity.
 func (m *Manager) UniqueExitForOwner(ownerUserID string) (*DeviceSession, int) {
@@ -336,6 +373,7 @@ func (m *Manager) CloseAll() {
 	m.sessions = make(map[string]*DeviceSession)
 	m.exits = make(map[string]*DeviceSession)
 	m.exitsByOwner = make(map[string]map[string]*DeviceSession)
+	m.exitsByIdentity = make(map[string]map[string]*DeviceSession)
 	m.mu.Unlock()
 
 	for _, t := range toClose {

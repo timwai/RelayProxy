@@ -184,7 +184,7 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 			err = protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "divert: native UDP datagrams are required but the dialer does not support required datagram options")
 		}
 	} else {
-		pc, err = s.dialer.DialUDP(dialCtx, a.route.decision.ExitID, a.route.flow.IP, a.route.flow.Port)
+		pc, err = s.dialer.DialUDP(dialCtx, a.route.decision.ExitID, proxyDialTarget(a.route.flow), a.route.flow.Port)
 	}
 	cancel()
 	a.mu.Lock()

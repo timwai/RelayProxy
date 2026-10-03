@@ -2,7 +2,6 @@ package api
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -163,7 +162,3 @@ func (r *Router) handleDeleteSystemIdentityGrant(w http.ResponseWriter, req *htt
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": current.ID, "deleted": deleted})
 }
-
-// Keep encoding/json referenced here so decode behavior stays consistent with
-// the sibling grant handler even if request parsing is later inlined.
-var _ = json.Valid

@@ -156,8 +156,24 @@ func (r *Router) handleSetDeviceIdentity(w http.ResponseWriter, req *http.Reques
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
 	deviceID := req.PathValue("id")
+
+	previous, err := r.db.GetDeviceIdentitySummary(deviceID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "device not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to load device identity")
+		}
+		return
+	}
+	previousGrants, err := r.db.ListDeviceIdentityGrants(deviceID, "", "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load device identity grants")
+		return
+	}
+
 	var item *repository.DeviceIdentitySummary
-	err := r.sessions.ChangeDeviceAuthorization(deviceID, true, func() error {
+	err = r.sessions.ChangeDeviceAuthorization(deviceID, true, func() error {
 		var changeErr error
 		item, changeErr = r.db.SetDeviceIdentity(deviceID, body.IdentityID, actor)
 		return changeErr
@@ -172,6 +188,27 @@ func (r *Router) handleSetDeviceIdentity(w http.ResponseWriter, req *http.Reques
 	}
 	if r.onDeviceAuthorizationChanged != nil {
 		r.onDeviceAuthorizationChanged(deviceID)
+	}
+
+	if item != nil && previous.IdentityID != item.IdentityID && r.onIdentityAuthorizationChanged != nil {
+		// Moving a target changes same-identity access on both sides and also
+		// deletes its explicit cross-identity shares. Invalidate every affected
+		// identity so resource inventories and live paths are refreshed now.
+		affected := map[string]bool{}
+		if previous.IdentityID != "" {
+			affected[previous.IdentityID] = true
+		}
+		if item.IdentityID != "" {
+			affected[item.IdentityID] = true
+		}
+		for _, grant := range previousGrants {
+			if grant != nil && grant.GranteeIdentityID != "" {
+				affected[grant.GranteeIdentityID] = true
+			}
+		}
+		for identityID := range affected {
+			r.onIdentityAuthorizationChanged(identityID, "")
+		}
 	}
 	writeJSON(w, http.StatusOK, item)
 }

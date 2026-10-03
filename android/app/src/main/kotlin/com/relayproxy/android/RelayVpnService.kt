@@ -30,6 +30,9 @@ class RelayVpnService : VpnService() {
         private const val EXTRA_UNDERLYING_NETWORK = "underlyingNetwork"
         private const val CHANNEL_ID = "relayproxy_vpn"
         private const val NOTIFICATION_ID = 1002
+        private const val MAPPED_DNS_ADDRESS = "198.18.0.2"
+        private const val MAPPED_DNS_NETWORK = "198.19.0.0"
+        private const val MAPPED_DNS_NETMASK = "255.255.0.0"
 
         @Volatile
         private var status = JSONObject().put("vpnState", "STOPPED").toString()
@@ -248,6 +251,12 @@ class RelayVpnService : VpnService() {
               address: 127.0.0.1
               port: $proxyPort
               udp: 'udp'
+            mapdns:
+              address: $MAPPED_DNS_ADDRESS
+              port: 53
+              network: $MAPPED_DNS_NETWORK
+              netmask: $MAPPED_DNS_NETMASK
+              cache-size: 10000
             """.trimIndent() + "\n"
         )
 
@@ -266,7 +275,11 @@ class RelayVpnService : VpnService() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             )
-        config.vpnDnsServers.forEach(builder::addDnsServer)
+        // Use hev-socks5-tunnel Mapped DNS instead of sending plaintext DNS
+        // queries from the selected exit to public UDP/53 resolvers. Mapped DNS
+        // preserves the original hostname and hands it to the RelayProxy SOCKS5
+        // server, so the selected exit resolves the target on its own network.
+        builder.addDnsServer(MAPPED_DNS_ADDRESS)
         applyApplicationScope(builder, config)
         NetworkBinder.currentProcessNetwork()?.let { builder.setUnderlyingNetworks(arrayOf(it)) }
         val descriptor = builder.establish() ?: error("Android 没有建立 VPN 接口")

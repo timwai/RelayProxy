@@ -30,9 +30,12 @@ type GatewayConfig struct {
 	PublicHTTPHandler       HTTPHandler
 	ServerInstanceID        string
 	AuthorizeDevice         func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
+	ResolveIdentityAccessKey func(accessKey string) (IdentityAccessAuthorization, error)
+	AuthorizeIdentityDevice func(fingerprint string, hello protocol.DeviceHello, identity IdentityAccessAuthorization) (DeviceAuthorization, error)
 	RecheckDevice           func(fingerprint, deviceID string) bool
+	RecheckIdentityDevice   func(fingerprint, deviceID, identityID, accessKeyID string) bool
 	ListRDPTargets          func(controllerID string) ([]protocol.RDPTarget, error)
-	ListProxyExits          func(clientID, ownerUserID string) ([]protocol.ProxyExit, error)
+	ListProxyExits          func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error)
 	OnDeviceConnected       func(deviceID string)
 	OnDeviceHeartbeat       func(deviceID string)
 	OnDeviceDisconnected    func(deviceID string)
@@ -47,10 +50,23 @@ type GatewayConfig struct {
 	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
 }
 
+type IdentityAccessAuthorization struct {
+	KeyID          string
+	KeyDigest      string
+	IdentityID     string
+	IdentityName   string
+	Capabilities   []string
+	PolicyRevision int64
+}
+
 type DeviceAuthorization struct {
 	State                string
 	DeviceID             string
 	OwnerUserID          string
+	IdentityID           string
+	IdentityName         string
+	AccessKeyID          string
+	PolicyRevision       int64
 	ApprovedCapabilities []string
 	RDPTargets           []protocol.RDPTarget
 }
@@ -392,7 +408,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		})
 		return
 	}
-	if hello.ProtocolVersion != protocol.DeviceProtocolVersion {
+	if hello.ProtocolVersion != protocol.LegacyDeviceProtocolVersion &&
+		hello.ProtocolVersion != protocol.IdentityDeviceProtocolVersion {
 		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeProtocolMismatch, ErrorMessage: "unsupported device protocol version",
@@ -413,12 +430,31 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		})
 		return
 	}
+	var identityAccess IdentityAccessAuthorization
+	if hello.ProtocolVersion == protocol.IdentityDeviceProtocolVersion {
+		if hello.AccessKey == "" || g.cfg.ResolveIdentityAccessKey == nil || g.cfg.AuthorizeIdentityDevice == nil {
+			writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
+				Success: false, State: "rejected", ServerTime: time.Now().Unix(),
+				ErrorCode: protocol.ErrCodeAccessKeyInvalid, ErrorMessage: "identity access key is required",
+			})
+			return
+		}
+		var err error
+		identityAccess, err = g.cfg.ResolveIdentityAccessKey(hello.AccessKey)
+		if err != nil || identityAccess.KeyID == "" || identityAccess.IdentityID == "" {
+			writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
+				Success: false, State: "rejected", ServerTime: time.Now().Unix(),
+				ErrorCode: protocol.ErrCodeAccessKeyInvalid, ErrorMessage: "identity access key is invalid or inactive",
+			})
+			return
+		}
+	}
 	serverNonce := make([]byte, 32)
 	if _, err := rand.Read(serverNonce); err != nil {
 		return
 	}
 	challenge := protocol.AuthChallenge{
-		ProtocolVersion: protocol.DeviceProtocolVersion, ChallengeID: uuid.NewString(),
+		ProtocolVersion: hello.ProtocolVersion, ChallengeID: uuid.NewString(),
 		ServerInstanceID: g.cfg.ServerInstanceID, ServerNonce: serverNonce,
 		ExpiresAt: time.Now().Add(30 * time.Second).Unix(),
 	}
@@ -437,12 +473,24 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	keyHash := sha256.Sum256(hello.PublicKey)
 	fingerprint := hex.EncodeToString(keyHash[:])
-	authorization, err := g.cfg.AuthorizeDevice(fingerprint, hello)
+	var authorization DeviceAuthorization
+	if hello.ProtocolVersion == protocol.IdentityDeviceProtocolVersion {
+		authorization, err = g.cfg.AuthorizeIdentityDevice(fingerprint, hello, identityAccess)
+	} else {
+		authorization, err = g.cfg.AuthorizeDevice(fingerprint, hello)
+	}
 	if err != nil {
 		log.Printf("[Gateway] Failed to resolve device approval for %s: %v", fingerprint, err)
 		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeInternalError, ErrorMessage: "failed to resolve device approval",
+		})
+		return
+	}
+	if authorization.State == "identity_conflict" {
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
+			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
+			ErrorCode: protocol.ErrCodeIdentityConflict, ErrorMessage: "device identity assignment conflicts with the access key",
 		})
 		return
 	}
@@ -471,7 +519,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	var proxyExits *[]protocol.ProxyExit
 	if containsCapability(authorization.ApprovedCapabilities, protocol.CapabilityProxyClient) && g.cfg.ListProxyExits != nil {
-		exits, err := g.cfg.ListProxyExits(authorization.DeviceID, authorization.OwnerUserID)
+		exits, err := g.cfg.ListProxyExits(authorization.DeviceID, authorization.OwnerUserID, authorization.IdentityID)
 		if err != nil {
 			log.Printf("[Gateway] List proxy exits for %s: %v", authorization.DeviceID, err)
 		} else {
@@ -486,6 +534,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	welcome := protocol.DeviceAccepted{
 		State:                 "approved",
 		DeviceID:              authorization.DeviceID,
+		IdentityName:          authorization.IdentityName,
+		PolicyRevision:        authorization.PolicyRevision,
 		ApprovedCapabilities:  authorization.ApprovedCapabilities,
 		RDPTargets:            authorization.RDPTargets,
 		ProxyExits:            proxyExits,
@@ -504,8 +554,12 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	deviceSession := &session.DeviceSession{
 		DeviceID:      authorization.DeviceID,
 		DeviceName:    hello.DeviceName,
-		OwnerUserID:   authorization.OwnerUserID,
-		Mode:          modeForCapabilities(authorization.ApprovedCapabilities),
+		OwnerUserID:    authorization.OwnerUserID,
+		IdentityID:     authorization.IdentityID,
+		IdentityName:   authorization.IdentityName,
+		AccessKeyID:    authorization.AccessKeyID,
+		PolicyRevision: authorization.PolicyRevision,
+		Mode:           modeForCapabilities(authorization.ApprovedCapabilities),
 		Capabilities:  hello.TransportCapabilities,
 		Grants:        authorization.ApprovedCapabilities,
 		Transport:     sess.Transport(),
@@ -521,6 +575,10 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		return
 	}
 	registered := g.sessions.RegisterAuthenticated(deviceSession, func() bool {
+		if hello.ProtocolVersion == protocol.IdentityDeviceProtocolVersion {
+			return g.cfg.RecheckIdentityDevice != nil &&
+				g.cfg.RecheckIdentityDevice(fingerprint, authorization.DeviceID, authorization.IdentityID, authorization.AccessKeyID)
+		}
 		return g.cfg.RecheckDevice == nil || g.cfg.RecheckDevice(fingerprint, authorization.DeviceID)
 	})
 	g.mu.Unlock()

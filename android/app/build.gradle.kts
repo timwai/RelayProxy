@@ -34,9 +34,15 @@ android {
         versionCode = 2
         versionName = "0.2.0"
 
-        if (!relayAbi.isNullOrBlank()) {
-            ndk {
+        ndk {
+            if (!relayAbi.isNullOrBlank()) {
                 abiFilters += relayAbi
+            } else {
+                // RelayProxy Android ships the two ARM ABIs used by the
+                // supported phone builds. Filtering here also prevents the
+                // gomobile AAR's development x86/x86_64 libraries from being
+                // packaged and incorrectly treated as release artifacts.
+                abiFilters += listOf("arm64-v8a", "armeabi-v7a")
             }
         }
     }

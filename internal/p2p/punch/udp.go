@@ -41,6 +41,18 @@ type punchObservation struct {
 // Punch races all validated UDP candidates on one socket and returns the
 // authenticated peer address. The caller owns conn after a successful return.
 func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration) (*UDPResult, error) {
+	return punch(ctx, conn, candidates, sessionID, key, timeout, true)
+}
+
+// PunchResponder dials a passive authenticated responder, such as an RDP
+// target. Its ACK of our nonce proves round-trip reachability; it need not send
+// a request of its own. Symmetric QUIC peers must continue to use Punch so both
+// sides finish their handshake before either starts reading QUIC packets.
+func PunchResponder(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration) (*UDPResult, error) {
+	return punch(ctx, conn, candidates, sessionID, key, timeout, false)
+}
+
+func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration, symmetric bool) (*UDPResult, error) {
 	if conn == nil || sessionID == 0 || len(key) < 16 {
 		return nil, errors.New("invalid P2P UDP punch session")
 	}
@@ -144,7 +156,7 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 				observation.gotAck = true
 			}
 		}
-		if observation.gotAck && observation.sawPeerRequest && !observation.ready {
+		if observation.gotAck && (!symmetric || observation.sawPeerRequest) && !observation.ready {
 			observation.ready = true
 			observation.rtt = time.Since(started)
 			if settleUntil.IsZero() {
@@ -152,6 +164,12 @@ func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 				if deadline.Before(settleUntil) {
 					settleUntil = deadline
 				}
+			}
+			// A sole advertised responder leaves no alternative to compare.
+			// Avoid the selection delay for this common LAN RDP case, but keep
+			// the window for symmetric peers and multiple candidate addresses.
+			if !symmetric && len(addresses) == 1 && remote == addresses[0] {
+				settleUntil = time.Now()
 			}
 		}
 	}

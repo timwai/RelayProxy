@@ -465,7 +465,7 @@ func (m *Manager) startTargetUDP(item *Session) (err error) {
 			return net.ErrClosed
 		default:
 		}
-		item.publishCandidates("udp", udpCandidates)
+		item.publishCandidates(m.ctx, "udp", udpCandidates)
 	}
 	go m.targetUDPReadLoop(item)
 	go m.targetUDPLocalReadLoop(item)
@@ -614,7 +614,7 @@ func (s *Session) setCandidates(raw []protocol.RDPCandidate, forward bool) {
 // publishCandidates updates this Agent's advertised endpoints without
 // overwriting the peer candidates already received for the same lease. This
 // matters for controller UDP: each local association has its own NAT mapping.
-func (s *Session) publishCandidates(protocolName string, raw []protocol.RDPCandidate) {
+func (s *Session) publishCandidates(parent context.Context, protocolName string, raw []protocol.RDPCandidate) {
 	validated, err := candidate.Validate(raw)
 	if err != nil || len(validated) == 0 {
 		return
@@ -634,7 +634,7 @@ func (s *Session) publishCandidates(protocolName string, raw []protocol.RDPCandi
 	if s.manager.send == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	_, _ = s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlCandidateUpdate, SessionID: s.ID, ControllerID: controllerID, TargetID: targetID, SessionToken: token, Candidates: merged})
 	cancel()
 }
@@ -643,6 +643,9 @@ func (s *Session) candidateList(ctx context.Context, protocolName string) []prot
 	deadline := time.NewTimer(1500 * time.Millisecond)
 	defer deadline.Stop()
 	for {
+		if ctx.Err() != nil {
+			return nil
+		}
 		s.mu.Lock()
 		result := make([]protocol.RDPCandidate, 0)
 		for _, item := range s.candidates {
@@ -657,6 +660,8 @@ func (s *Session) candidateList(ctx context.Context, protocolName string) []prot
 		}
 		select {
 		case <-ctx.Done():
+			return nil
+		case <-s.closed:
 			return nil
 		case <-deadline.C:
 			return nil
@@ -686,6 +691,9 @@ func (s *Session) DialTCP(ctx context.Context) (net.Conn, error) {
 func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 	candidates := s.candidateList(ctx, "udp")
 	if len(candidates) == 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, errors.New("RDP UDP direct candidates unavailable")
 	}
 	// Each controller association gets its own socket. Sharing the manager's
@@ -696,13 +704,26 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 	if err != nil {
 		return nil, err
 	}
+	keepConn := false
+	defer func() {
+		if !keepConn {
+			_ = conn.Close()
+		}
+	}()
+	// Losing the relay race must also interrupt a blocked probe or punch read.
+	// Stop and join the callback before handing the winning socket to callers.
+	stopCancel := tunnel.InterruptOnCancel(ctx, conn)
+	defer stopCancel()
 	tunnel.TuneUDPConn(conn)
 	// The controller's registration socket is not the socket used for this
 	// association. Publish the actual bound port before punching so the target
 	// can validate and reply to the same NAT mapping.
 	localCandidates := candidate.Discover(conn.LocalAddr().(*net.UDPAddr).Port, 0)
 	if len(localCandidates) > 0 {
-		s.publishCandidates("udp", localCandidates)
+		s.publishCandidates(ctx, "udp", localCandidates)
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	s.manager.mu.Lock()
 	rendezvous := s.manager.rendezvous
@@ -711,24 +732,33 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		if reflexive, probeErr := candidate.ProbeReflexive(probeCtx, rendezvous, conn, "udp"); probeErr == nil {
 			localCandidates = append(localCandidates, reflexive)
-			s.publishCandidates("udp", localCandidates)
+			s.publishCandidates(ctx, "udp", localCandidates)
 		}
 		cancel()
 	}
-	result, err := punch.Punch(ctx, conn, candidates, s.ID, s.Token, 1200*time.Millisecond)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result, err := punch.PunchResponder(ctx, conn, candidates, s.ID, s.Token, 1200*time.Millisecond)
 	if err != nil {
-		_ = conn.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, err
+	}
+	stopCancel()
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	packetConn, err := punch.NewPacketConn(result)
 	if err != nil {
-		_ = conn.Close()
 		return nil, err
 	}
 	trackedPacket := s.trackPacketConn(packetConn)
 	if trackedPacket == nil {
 		return nil, net.ErrClosed
 	}
+	keepConn = true
 	s.pathUDP.Store("udp_p2p")
 	return trackedPacket, nil
 }

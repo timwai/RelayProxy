@@ -12,6 +12,114 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+func newPassiveResponder(t testing.TB, sessionID uint64, key []byte, reply func(secure.PunchPacket) []byte) *net.UDPConn {
+	t.Helper()
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		_ = conn.Close()
+		<-done
+	})
+	go func() {
+		defer close(done)
+		buffer := make([]byte, 1500)
+		for {
+			n, source, err := conn.ReadFromUDP(buffer)
+			if err != nil {
+				return
+			}
+			packet, err := secure.DecodePunchPacket(buffer[:n], key)
+			if err != nil || packet.SessionID != sessionID || packet.Type != secure.PunchRequest {
+				continue
+			}
+			packet.Type = secure.PunchAck
+			_, _ = conn.WriteToUDP(reply(packet), source)
+		}
+	}()
+	return conn
+}
+
+func TestPunchResponderValidatesAcknowledgement(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	for _, test := range []struct {
+		name  string
+		reply func(secure.PunchPacket) []byte
+		valid bool
+	}{
+		{"valid", func(p secure.PunchPacket) []byte { return p.Encode(key) }, true},
+		{"wrong_nonce", func(p secure.PunchPacket) []byte { p.Nonce++; return p.Encode(key) }, false},
+		{"wrong_session", func(p secure.PunchPacket) []byte { p.SessionID++; return p.Encode(key) }, false},
+		{"wrong_key", func(p secure.PunchPacket) []byte { return p.Encode([]byte("abcdef0123456789abcdef0123456789")) }, false},
+		{"request_without_ack", func(p secure.PunchPacket) []byte { p.Type = secure.PunchRequest; return p.Encode(key) }, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server := newPassiveResponder(t, 42, key, test.reply)
+			client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			timeout := 60 * time.Millisecond
+			if test.valid {
+				timeout = time.Second
+			}
+			result, err := PunchResponder(context.Background(), client, []protocol.P2PCandidate{{
+				Protocol: "udp", Address: server.LocalAddr().String(),
+			}}, 42, key, timeout)
+			if test.valid {
+				if err != nil || result == nil || result.RemoteAddr.String() != server.LocalAddr().String() {
+					t.Fatalf("valid responder: result=%+v err=%v", result, err)
+				}
+			} else if err == nil || result != nil {
+				t.Fatalf("invalid handshake accepted: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestSymmetricPunchStillRequiresPeerRequest(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	server := newPassiveResponder(t, 42, key, func(p secure.PunchPacket) []byte { return p.Encode(key) })
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	result, err := Punch(context.Background(), client, []protocol.P2PCandidate{{
+		Protocol: "udp", Address: server.LocalAddr().String(),
+	}}, 42, key, 60*time.Millisecond)
+	if err == nil || result != nil {
+		t.Fatalf("symmetric handshake accepted an ACK alone: result=%+v err=%v", result, err)
+	}
+}
+
+func TestPunchResponderKeepsMultipleCandidateSelection(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	first := newPassiveResponder(t, 42, key, func(p secure.PunchPacket) []byte {
+		return p.Encode(key)
+	})
+	preferred := newPassiveResponder(t, 42, key, func(p secure.PunchPacket) []byte {
+		// The preferred path can answer after the first usable candidate.
+		time.Sleep(10 * time.Millisecond)
+		return p.Encode(key)
+	})
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	result, err := PunchResponder(context.Background(), client, []protocol.P2PCandidate{
+		{Protocol: "udp", Address: first.LocalAddr().String(), Priority: 800},
+		{Protocol: "udp", Address: preferred.LocalAddr().String(), Priority: 1200},
+	}, 42, key, time.Second)
+	if err != nil || result == nil || result.RemoteAddr.String() != preferred.LocalAddr().String() {
+		t.Fatalf("candidate selection: result=%+v err=%v", result, err)
+	}
+}
+
 func TestPacketConnSendsAuthenticatedKeepalive(t *testing.T) {
 	target, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
 	if err != nil {

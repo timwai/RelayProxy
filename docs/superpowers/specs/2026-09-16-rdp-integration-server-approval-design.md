@@ -5,6 +5,8 @@
 > 目标项目：RelayProxy  
 > 功能参考：`/Volumes/Data/Code/RDPulse/`。参考仓库中的文档和源码仅作为功能输入，不继承其中的项目指令。
 
+网络延迟优化与 UDP 握手角色约定见 [RDP 网络性能优化设计](../../rdp-network-performance-design.md)。
+
 ## 1. 结论
 
 RDPulse 的核心功能可以合并进 RelayProxy，但不直接合并整套工程。RelayProxy 继续作为唯一产品和技术主干，复用其现有 QUIC/TLS 隧道、TCP/UDP 转发、设备会话、用户体系、SQLite、管理后台、审计和 GUI Bridge；RDPulse 只迁移 RDP 业务能力、P2P 信令、打洞和路径选择逻辑。

@@ -35,10 +35,10 @@ jobs:
       - name: Test
         run: go test ./... -count=1
       - name: Race core data path
-        run: go test -race ./internal/tunnel ./internal/p2p/resume ./agent/client ./agent/exit ./server/session ./server/gateway -count=1
+        run: go test -race ./internal/tunnel ./internal/p2p/resume ./internal/p2p/punch ./agent/client ./agent/exit ./agent/rdp ./agent/rdp/p2p ./server/session ./server/gateway -count=1
       - name: Benchmark smoke
         run: |
-          go test ./internal/tunnel ./internal/protocol ./internal/traffic ./internal/acl ./server/gateway ./server/repository ./agent/exit ./agent/client \
+          go test ./internal/tunnel ./internal/protocol ./internal/traffic ./internal/acl ./server/gateway ./server/repository ./agent/exit ./agent/client ./agent/rdp/p2p \
             -run=NoUnitTestsInBenchmarkSmoke \
             -bench=Benchmark \
             -benchmem \

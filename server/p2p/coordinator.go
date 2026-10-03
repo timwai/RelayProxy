@@ -588,6 +588,15 @@ func (c *Coordinator) authorizedPair(client, exit *session.DeviceSession) (bool,
 	if client == nil || exit == nil || client.DeviceID == exit.DeviceID {
 		return false, nil
 	}
+	if client.IdentityID != "" && exit.IdentityID != "" {
+		if client.IdentityID == exit.IdentityID {
+			return true, nil
+		}
+		if c.authorize != nil {
+			return c.authorize(client.DeviceID, exit.DeviceID)
+		}
+		return false, nil
+	}
 	if client.OwnerUserID != "" && exit.OwnerUserID != "" && client.OwnerUserID != exit.OwnerUserID {
 		return false, nil
 	}

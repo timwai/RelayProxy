@@ -135,12 +135,30 @@ func (r *StreamRouter) resolveExitSession(client *session.DeviceSession, exitDev
 	}
 
 	if client != nil && client.IdentityID != "" {
-		exits := r.sessions.GetExitsForIdentity(client.IdentityID)
-		switch len(exits) {
+		var candidate *session.DeviceSession
+		count := 0
+		for _, exit := range r.sessions.GetExits() {
+			if exit == nil || exit.DeviceID == client.DeviceID {
+				continue
+			}
+			allowed, err := r.authorizeExit(client, exit)
+			if err != nil {
+				return nil, false, err
+			}
+			if !allowed {
+				continue
+			}
+			candidate = exit
+			count++
+			if count > 1 {
+				return nil, false, errMultipleExits
+			}
+		}
+		switch count {
 		case 0:
 			return nil, false, errNoExitOnline
 		case 1:
-			return exits[0], false, nil
+			return candidate, false, nil
 		default:
 			return nil, false, errMultipleExits
 		}

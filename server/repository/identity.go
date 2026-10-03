@@ -67,7 +67,7 @@ type IdentityAccessAuthorization struct {
 	KeyDigest      string
 	IdentityID     string
 	IdentityName   string
-	Capabilities  []string
+	Capabilities   []string
 	PolicyRevision int64
 }
 
@@ -294,7 +294,7 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	if err := insertAuthorizationAudit(tx, "identity.update", actor, "identity", id,
 		map[string]any{
 			"before": map[string]any{"name": current.Name, "status": current.Status, "capabilities": current.Capabilities, "policyRevision": current.PolicyRevision},
-			"after": map[string]any{"name": nextName, "status": nextStatus, "capabilities": nextCapabilities, "policyRevision": nextRevision},
+			"after":  map[string]any{"name": nextName, "status": nextStatus, "capabilities": nextCapabilities, "policyRevision": nextRevision},
 		}, now); err != nil {
 		return nil, err
 	}
@@ -584,7 +584,6 @@ func normalizeIdentityCapabilities(input []string) ([]string, error) {
 	}
 	return result, nil
 }
-
 
 // ObserveIdentityDevice auto-enrolls a v4 device after its identity access key
 // and Ed25519 proof have been validated by the gateway. Identity is derived

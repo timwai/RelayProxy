@@ -191,12 +191,11 @@ func (b *UIBridge) ConfigPath() string {
 	return p
 }
 
-
 type AccessKeyState struct {
-	Configured       bool   `json:"configured"`
-	Source           string `json:"source"`
-	ManagedExternally bool  `json:"managedExternally"`
-	RestartRequired  bool   `json:"restartRequired"`
+	Configured        bool   `json:"configured"`
+	Source            string `json:"source"`
+	ManagedExternally bool   `json:"managedExternally"`
+	RestartRequired   bool   `json:"restartRequired"`
 }
 
 // GetAccessKeyState exposes only credential metadata. The plaintext access key

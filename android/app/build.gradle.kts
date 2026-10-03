@@ -7,10 +7,14 @@ val relayAbi = providers.gradleProperty("relayAbi").orNull
 val generatedHevLibs = layout.buildDirectory.dir("generated/hev-jniLibs")
 val hevBuildScript = rootProject.projectDir.resolve("../scripts/build-hev-android.sh")
 val hevBuildScriptPs1 = rootProject.projectDir.resolve("../scripts/build-hev-android.ps1")
+val hevFlowOwnerPatch = rootProject.projectDir.resolve(
+    "../third_party/hev-socks5-tunnel/relayproxy-flow-owner.patch"
+)
 val buildHevAndroidNative = tasks.register<Exec>("buildHevAndroidNative") {
     val windows = System.getProperty("os.name").lowercase().contains("windows")
     val script = if (windows) hevBuildScriptPs1 else hevBuildScript
     inputs.file(script)
+    inputs.file(hevFlowOwnerPatch)
     outputs.dir(generatedHevLibs)
     environment("HEV_ANDROID_LIBS_OUT", generatedHevLibs.get().asFile.absolutePath)
     if (windows) {

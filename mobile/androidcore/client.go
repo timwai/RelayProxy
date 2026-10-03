@@ -3,6 +3,7 @@ package androidcore
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,7 @@ import (
 )
 
 const clientVersion = "android-0.2.0"
+const androidUnknownProcess = "__android_unknown__"
 
 // ValidateRoutingConfig checks settings with the same parser used by NewClient.
 // Gomobile exposes a non-nil error to Kotlin as an exception.
@@ -48,26 +50,29 @@ func ValidateRoutingConfig(configJSON string) error {
 }
 
 type clientConfig struct {
-	ServerAddress       string `json:"serverAddress"`
-	AccessKey           string `json:"accessKey"`
-	DeviceName          string `json:"deviceName"`
-	QUICPort            int    `json:"quicPort"`
-	TCPPort             int    `json:"tcpPort"`
-	TransportMode       string `json:"transportMode"`
-	TLSEnabled          *bool  `json:"tlsEnabled"`
-	InsecureTLS         bool   `json:"insecureTLS"`
-	AllowInternet       *bool  `json:"allowInternet"`
-	AllowPrivateNetwork bool   `json:"allowPrivateNetwork"`
-	AllowLoopback       bool   `json:"allowLoopback"`
-	ExitEnabled         *bool  `json:"exitEnabled"`
-	ClientEnabled       bool   `json:"clientEnabled"`
-	SOCKS5Enabled       *bool  `json:"socks5Enabled"`
-	HTTPEnabled         *bool  `json:"httpEnabled"`
-	ProxyP2PEnabled     *bool  `json:"proxyP2pEnabled"`
-	DefaultExitID       string `json:"defaultExitId"`
-	SOCKS5Listen        string `json:"socks5Listen"`
-	HTTPListen          string `json:"httpListen"`
+	ServerAddress       string         `json:"serverAddress"`
+	AccessKey           string         `json:"accessKey"`
+	DeviceName          string         `json:"deviceName"`
+	QUICPort            int            `json:"quicPort"`
+	TCPPort             int            `json:"tcpPort"`
+	TransportMode       string         `json:"transportMode"`
+	TLSEnabled          *bool          `json:"tlsEnabled"`
+	InsecureTLS         bool           `json:"insecureTLS"`
+	AllowInternet       *bool          `json:"allowInternet"`
+	AllowPrivateNetwork bool           `json:"allowPrivateNetwork"`
+	AllowLoopback       bool           `json:"allowLoopback"`
+	ExitEnabled         *bool          `json:"exitEnabled"`
+	ClientEnabled       bool           `json:"clientEnabled"`
+	SOCKS5Enabled       *bool          `json:"socks5Enabled"`
+	HTTPEnabled         *bool          `json:"httpEnabled"`
+	ProxyP2PEnabled     *bool          `json:"proxyP2pEnabled"`
+	DefaultExitID       string         `json:"defaultExitId"`
+	SOCKS5Listen        string         `json:"socks5Listen"`
+	HTTPListen          string         `json:"httpListen"`
 	Routing             routing.Config `json:"routing"`
+	VPNProxyEnabled     bool           `json:"vpnProxyEnabled"`
+	VPNProxyListen      string         `json:"vpnProxyListen"`
+	VPNProxyToken       string         `json:"vpnProxyToken"`
 }
 
 type statusSnapshot struct {
@@ -127,6 +132,7 @@ type Client struct {
 	traffic          *traffic.Registry
 	clientApproved   atomic.Bool
 	socksServer      *socks5.Server
+	vpnSocksServer   *socks5.Server
 	httpServer       *httpproxy.Server
 	proxyActiveTCP   atomic.Int64
 	proxyActiveUDP   atomic.Int64
@@ -203,8 +209,8 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		enabled := true
 		cfg.ProxyP2PEnabled = &enabled
 	}
-	if cfg.ClientEnabled && !*cfg.SOCKS5Enabled && !*cfg.HTTPEnabled {
-		return cfg, errors.New("clientEnabled requires SOCKS5 or HTTP proxy to be enabled")
+	if cfg.ClientEnabled && !*cfg.SOCKS5Enabled && !*cfg.HTTPEnabled && !cfg.VPNProxyEnabled {
+		return cfg, errors.New("clientEnabled requires a local proxy listener")
 	}
 	cfg.DefaultExitID = strings.TrimSpace(cfg.DefaultExitID)
 	cfg.SOCKS5Listen = strings.TrimSpace(cfg.SOCKS5Listen)
@@ -215,8 +221,24 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	if cfg.HTTPListen == "" {
 		cfg.HTTPListen = "127.0.0.1:8080"
 	}
-	if !loopbackListenAddress(cfg.SOCKS5Listen) || !loopbackListenAddress(cfg.HTTPListen) {
+	cfg.VPNProxyListen = strings.TrimSpace(cfg.VPNProxyListen)
+	if cfg.VPNProxyListen == "" {
+		cfg.VPNProxyListen = "127.0.0.1:1081"
+	}
+	if !loopbackListenAddress(cfg.SOCKS5Listen) || !loopbackListenAddress(cfg.HTTPListen) ||
+		!loopbackListenAddress(cfg.VPNProxyListen) {
 		return cfg, errors.New("Android local proxy listeners must use a loopback address")
+	}
+	if cfg.VPNProxyEnabled {
+		if strings.TrimSpace(cfg.VPNProxyToken) == "" {
+			return cfg, errors.New("vpnProxyToken is required when the VPN proxy is enabled")
+		}
+		if *cfg.SOCKS5Enabled && cfg.SOCKS5Listen == cfg.VPNProxyListen {
+			return cfg, errors.New("VPN and user SOCKS5 listeners must use different addresses")
+		}
+		if *cfg.HTTPEnabled && cfg.HTTPListen == cfg.VPNProxyListen {
+			return cfg, errors.New("VPN SOCKS5 and user HTTP listeners must use different addresses")
+		}
 	}
 	if !*cfg.TLSEnabled && cfg.TransportMode == string(tunnel.ModeQUICOnly) {
 		return cfg, errors.New("quic_only requires TLS")
@@ -396,6 +418,7 @@ func (c *Client) Start() error {
 	}
 	countedDialer := &proxyStatsDialer{base: clientDialer, owner: c}
 	var socks *socks5.Server
+	var vpnSocks *socks5.Server
 	var http *httpproxy.Server
 	if c.cfg.ClientEnabled && *c.cfg.SOCKS5Enabled {
 		socks = socks5.NewServer(socks5.ServerConfig{
@@ -406,6 +429,19 @@ func (c *Client) Start() error {
 			return fmt.Errorf("start SOCKS5 listener: %w", err)
 		}
 	}
+	if c.cfg.ClientEnabled && c.cfg.VPNProxyEnabled {
+		vpnSocks = socks5.NewServer(socks5.ServerConfig{
+			ListenAddr: c.cfg.VPNProxyListen, GetExitNodeID: c.proxyDialer.GetDefaultExitID,
+			Dialer: countedDialer, Authenticate: c.authenticateVPNProxy,
+		})
+		if err := vpnSocks.Start(); err != nil {
+			if socks != nil {
+				_ = socks.Close()
+			}
+			c.setLastError(err)
+			return fmt.Errorf("start VPN SOCKS5 listener: %w", err)
+		}
+	}
 	if c.cfg.ClientEnabled && *c.cfg.HTTPEnabled {
 		http = httpproxy.NewServer(httpproxy.ServerConfig{
 			ListenAddr: c.cfg.HTTPListen, GetExitNodeID: c.proxyDialer.GetDefaultExitID, Dialer: countedDialer,
@@ -413,6 +449,9 @@ func (c *Client) Start() error {
 		if err := http.Start(); err != nil {
 			if socks != nil {
 				_ = socks.Close()
+			}
+			if vpnSocks != nil {
+				_ = vpnSocks.Close()
 			}
 			c.setLastError(err)
 			return fmt.Errorf("start HTTP proxy listener: %w", err)
@@ -425,13 +464,16 @@ func (c *Client) Start() error {
 		if socks != nil {
 			_ = socks.Close()
 		}
+		if vpnSocks != nil {
+			_ = vpnSocks.Close()
+		}
 		if http != nil {
 			_ = http.Close()
 		}
 		return errors.New("client is closed")
 	}
-	c.socksServer, c.httpServer = socks, http
-	if c.cfg.ClientEnabled && socks == nil && http == nil {
+	c.socksServer, c.vpnSocksServer, c.httpServer = socks, vpnSocks, http
+	if c.cfg.ClientEnabled && socks == nil && vpnSocks == nil && http == nil {
 		c.starting = false
 		c.mu.Unlock()
 		return errors.New("no Android local proxy listener is enabled")
@@ -466,14 +508,17 @@ func (c *Client) Stop() error {
 	c.closed = true
 	c.status.ConnectionState = string(tunnel.StateClosed)
 	c.clientApproved.Store(false)
-	socksServer, httpServer := c.socksServer, c.httpServer
-	c.socksServer, c.httpServer = nil, nil
+	socksServer, vpnSocksServer, httpServer := c.socksServer, c.vpnSocksServer, c.httpServer
+	c.socksServer, c.vpnSocksServer, c.httpServer = nil, nil, nil
 	c.mu.Unlock()
 
 	c.cancel()
 	var proxyErr error
 	if socksServer != nil {
 		proxyErr = errors.Join(proxyErr, socksServer.Close())
+	}
+	if vpnSocksServer != nil {
+		proxyErr = errors.Join(proxyErr, vpnSocksServer.Close())
 	}
 	if httpServer != nil {
 		proxyErr = errors.Join(proxyErr, httpServer.Close())
@@ -482,6 +527,44 @@ func (c *Client) Stop() error {
 	handlerErr := c.handler.Close()
 	c.wg.Wait()
 	return errors.Join(proxyErr, managerErr, handlerErr)
+}
+
+func (c *Client) authenticateVPNProxy(username, password string) (string, []string, bool) {
+	if subtle.ConstantTimeCompare([]byte(password), []byte(c.cfg.VPNProxyToken)) != 1 {
+		return "", nil, false
+	}
+	parts := strings.Split(username, "|")
+	if len(parts) == 0 || len(parts) > 16 {
+		return "", nil, false
+	}
+	packages := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != androidUnknownProcess && !validAndroidPackage(part) {
+			return "", nil, false
+		}
+		if !contains(packages, part) {
+			packages = append(packages, part)
+		}
+	}
+	if len(packages) == 0 {
+		return "", nil, false
+	}
+	return packages[0], packages[1:], true
+}
+
+func validAndroidPackage(value string) bool {
+	if value == "" || len(value) > 200 || !strings.Contains(value, ".") {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '.' || char == '_' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // SetDefaultExit selects the Relay exit used by new local proxy requests.

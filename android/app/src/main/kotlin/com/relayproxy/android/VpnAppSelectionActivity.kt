@@ -19,6 +19,8 @@ import android.widget.TextView
 class VpnAppSelectionActivity : Activity() {
     companion object {
         const val EXTRA_SELECTED = "vpnSelectedPackages"
+        const val EXTRA_TITLE = "selectionTitle"
+        const val EXTRA_SUBTITLE = "selectionSubtitle"
     }
 
     private data class AppEntry(val label: String, val packageName: String)
@@ -67,13 +69,14 @@ class VpnAppSelectionActivity : Activity() {
             setBackgroundColor(Color.rgb(246, 248, 252))
         }
         root.addView(TextView(this).apply {
-            text = "选择 VPN 应用"
+            text = intent.getStringExtra(EXTRA_TITLE) ?: "选择 VPN 应用"
             textSize = 21f
             setTextColor(Color.rgb(15, 23, 42))
             setTypeface(typeface, Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "这里选择的应用会配合设置页中的“仅选中”或“排除选中”模式使用。"
+            text = intent.getStringExtra(EXTRA_SUBTITLE)
+                ?: "这里选择的应用会配合设置页中的“仅选中”或“排除选中”模式使用。"
             textSize = 12.5f
             setTextColor(Color.rgb(100, 116, 139))
             setPadding(0, dp(5), 0, dp(12))

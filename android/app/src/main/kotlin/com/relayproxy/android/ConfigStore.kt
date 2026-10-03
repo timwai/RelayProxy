@@ -35,10 +35,26 @@ data class RoutingConfig(
     val defaultAction: String = "PROXY",
     val rules: List<RoutingRuleConfig> = emptyList(),
 ) {
-    fun toJson(forCore: Boolean = false): JSONObject = JSONObject()
+    fun toJson(
+        forCore: Boolean = false,
+        rejectUnknownApplications: Boolean = false,
+    ): JSONObject = JSONObject()
         .put("mode", mode)
         .put("default_action", defaultAction)
         .put("rules", JSONArray().apply {
+            if (forCore && rejectUnknownApplications && rules.any {
+                    it.enabled && it.applications.isNotEmpty()
+                }
+            ) {
+                put(
+                    RoutingRuleConfig(
+                        id = "android-unknown-application",
+                        name = "未知应用保护",
+                        action = "REJECT",
+                        applications = listOf(ANDROID_UNKNOWN_PROCESS),
+                    ).toJson(forCore = true)
+                )
+            }
             rules.forEach { put(it.toJson(forCore)) }
         })
 
@@ -117,9 +133,14 @@ data class ExitConfig(
     val vpnAppMode: String = VPN_APP_MODE_ALL,
     val vpnPackages: Set<String> = emptySet(),
     val vpnDnsServers: List<String> = listOf("1.1.1.1", "8.8.8.8"),
+    val vpnProxyToken: String = "",
     val routing: RoutingConfig = RoutingConfig(),
 ) {
     fun coreJson(): String {
+        require(
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+                routing.rules.none { it.enabled && it.applications.isNotEmpty() }
+        ) { "Android 8/9 不能启用包含应用条件的分流规则" }
         val localSocksEnabled = clientEnabled && socks5Enabled
         val coreClientEnabled = clientEnabled || vpnEnabled
         return JSONObject()
@@ -136,13 +157,22 @@ data class ExitConfig(
             .put("allowLoopback", false)
             .put("exitEnabled", exitEnabled)
             .put("clientEnabled", coreClientEnabled)
-            .put("socks5Enabled", localSocksEnabled || vpnEnabled)
+            .put("socks5Enabled", localSocksEnabled)
             .put("httpEnabled", clientEnabled && httpEnabled)
             .put("proxyP2pEnabled", proxyP2pEnabled)
             .put("defaultExitId", defaultExitId.trim())
-            .put("socks5Listen", "127.0.0.1:${if (localSocksEnabled) socks5Port else vpnSocks5Port}")
+            .put("socks5Listen", "127.0.0.1:$socks5Port")
             .put("httpListen", "127.0.0.1:$httpPort")
-            .put("routing", routing.toJson(forCore = true))
+            .put("vpnProxyEnabled", vpnEnabled)
+            .put("vpnProxyListen", "127.0.0.1:$vpnSocks5Port")
+            .put("vpnProxyToken", vpnProxyToken)
+            .put(
+                "routing",
+                routing.toJson(
+                    forCore = true,
+                    rejectUnknownApplications = vpnEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q,
+                )
+            )
             .toString()
     }
 
@@ -261,6 +291,7 @@ class ConfigStore(private val context: Context) {
                 .map(String::trim)
                 .filter(String::isNotBlank)
                 .distinct(),
+            vpnProxyToken = SecretStore(context).vpnProxyToken(),
             routing = RoutingConfig.fromJson(prefs.getString("routing", null)),
         )
     }
@@ -315,3 +346,5 @@ class ConfigStore(private val context: Context) {
     }
 
 }
+
+private const val ANDROID_UNKNOWN_PROCESS = "__android_unknown__"

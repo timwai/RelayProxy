@@ -6,8 +6,9 @@ Android 支持作为 **Relay 网络出口**，也支持作为 **代理客户端*
 
 - `mobile/androidcore`：Go + gomobile。复用设备认证、QUIC/TLS+yamux、`TunnelDialer`、TCP/UDP 转发与出口 ACL；同一个 Core 提供出口服务及经过 `proxy.client` 授权的本机代理入口。`-javapkg com.relayproxy.core` 生成的 Java 包为 `com.relayproxy.core.androidcore`。
 - `android/app`：Kotlin 原生 UI + 前台 Service。`RelayExitService` 持有唯一 Go Core；`RelayVpnService` 管理 VPN 授权、TUN fd 和前台通知，启动时复用或重建该 Core。
-- VPN 使用 `VpnService` + 固定版本 `hev-socks5-tunnel`，将 IPv4/IPv6 默认路由送入回环 SOCKS5。RelayProxy 自身应用从 VPN 路由中排除，避免隧道回环。
+- VPN 使用 `VpnService` + 固定版本 `hev-socks5-tunnel`，将 IPv4/IPv6 默认路由送入独立且需要认证的内部回环 SOCKS5。RelayProxy 自身应用从 VPN 路由中排除，避免隧道回环。
 - VPN 可选择全部应用、仅选中应用或排除选中应用；DNS 使用 hev-socks5-tunnel Mapped DNS，在 TUN 内返回 Fake-IP，并在建立 SOCKS5 连接时恢复为原始域名交给所选出口解析，避免把明文 UDP/53 DNS 暴露给出口网络。当前物理网络同步给 Android VPN，Wi-Fi / 蜂窝切换时共享 Core 会重连。
+- Android 10+ 会根据原始 TCP/UDP 四元组查询连接 UID，把共享 UID 映射为包名组，再交给共用路由引擎匹配应用、目标、端口和协议条件。Android 8/9 保留非应用规则，并拒绝启用含应用条件的规则。
 - SOCKS5 UDP ASSOCIATE 按目标维护有界 UDP association；HTTP 代理支持普通 HTTP 与 HTTPS CONNECT。所有本机代理仅绑定回环地址。
 
 ## 一键打包 APK（Windows）
@@ -151,12 +152,12 @@ APK 输出：
 
 ## 使用
 
-1. 安装 APK，填写 Relay Server 域名/IP。
+1. 安装 APK，在“连接与身份”中填写 Relay Server 域名/IP、服务端签发的接入密钥和设备名称；客户端不填写身份 ID，服务端由密钥确定身份。
 2. TLS 默认开启，端口默认 QUIC 443 / TCP 443，传输默认 `auto`。
-3. 在“代理客户端”设置中选择是否开放本机 SOCKS5、HTTP 入口，并选择一个在线出口；出口 ID 也可手动填写。空白表示交给服务端处理，只有一个可用出口时会自动选择。
-4. 点击“启动”会运行 Relay 服务。首次连接后，在 Relay Server 设备管理中批准 Android 设备；出口模式需授予 `proxy.exit`，本机代理或 VPN 需另外授予 `proxy.client`。
+3. 从设置目录分别进入“出口选择”“分流规则”“VPN 与应用范围”或“本机代理”。出口和每条代理规则都可从已授权设备下拉选择；空白表示跟随默认出口，只有一个可用出口时会自动选择。
+4. 点击“启动”会运行 Relay 服务。有效接入密钥会让新设备自动加入对应身份；同身份使用出口无需逐设备审批。出口设备仍需启用 `proxy.exit`，本机代理或 VPN 需要 `proxy.client`；跨身份出口由服务端管理员把目标设备授权给当前身份。
 5. 显式代理应用时，SOCKS5 默认地址为 `127.0.0.1:1080`，HTTP 默认地址为 `127.0.0.1:8080`。保存新端口后，运行中的 Relay 服务会自动重建。
-6. 在设置中选择 VPN 应用范围。VPN DNS 默认启用 Mapped DNS，不再要求手动配置公网 DNS。点击独立的“启动 VPN”按钮，首次使用需在 Android 系统弹窗中授权。VPN 接管范围内应用的 IPv4/IPv6 默认流量；即使关闭用户 SOCKS5 开关，Core 仍会为 TUN 建立一个内部回环 SOCKS5 入口。RelayProxy 自身流量排除在 VPN 外。
+6. 在设置中选择 VPN 应用范围，并在“分流规则”中配置应用、IP/CIDR、域名、端口、协议、动作和出口。VPN DNS 默认启用 Mapped DNS，不再要求手动配置公网 DNS。点击独立的“启动 VPN”按钮，首次使用需在 Android 系统弹窗中授权。VPN 接管范围内应用的 IPv4/IPv6 默认流量；即使关闭用户 SOCKS5 开关，Core 仍会为 TUN 建立一个使用 Keystore 密钥认证的内部回环 SOCKS5 入口。RelayProxy 自身流量排除在 VPN 外。
 7. 在“首选出口网络”中选择“Wi-Fi 优先”或“移动数据优先”。关闭“自动切换网络”时，Relay 隧道固定使用所选网络。
 8. 开启“自动切换网络”后：
    - Wi-Fi 优先：Wi-Fi 具有已验证互联网连接时使用 Wi-Fi；Wi-Fi 断开或无互联网时自动切换到蜂窝，Wi-Fi 恢复后自动切回。
@@ -181,6 +182,6 @@ VPN、网络出口和本机代理使用三个独立运行意图，共享一个 G
 - 支持自动重连、Wi-Fi / 蜂窝故障切换和设备挑战签名认证。
 - 支持公网目标；私网目标默认关闭，可在 UI 显式开启。
 - VPN 支持全局、仅选中应用和排除选中应用三种范围；RelayProxy 自身包始终排除。应用卸载后会在下次建立 TUN 时跳过；“仅选中”模式如果没有任何仍可用的应用会拒绝启动并提示重新选择。
-- Android 真机上的 VPN、系统 Private DNS、IPv6-only/DNS64、长时稳定性和功耗尚未完成端到端验证；APK 构建通过不等于这些运行场景已验收。当前依赖的 hev-socks5-tunnel Mapped DNS 主要合成 IPv4 A 记录，IPv6-only 域名仍需要后续专项兼容。
+- Android 10+ 已接入按应用分流代码链路，Android 8/9 仅支持非应用规则。双应用同目标、UDP、共享 UID、未知 UID、系统 Private DNS、IPv6-only/DNS64、长时稳定性和功耗尚未完成真机端到端验证；当前依赖的 hev-socks5-tunnel Mapped DNS 主要合成 IPv4 A 记录，IPv6-only 域名仍需要后续专项兼容。
 - 首页提供会话级累计代理字节数与 TUN 统计；当前不保存跨进程历史，也不提供统计图。
-- 暂不提供按应用选择不同出口、复杂域名分流、Fake-IP、HTTPS 解密、远端 ICMP、Always-on / 系统级断网保护、SIM 卡选择及热点流量接管。
+- 尚未实现域名解析后的真实 IP/CIDR 二次匹配，也不提供 HTTPS 解密、远端 ICMP、Always-on / 系统级断网保护、SIM 卡选择及热点流量接管。

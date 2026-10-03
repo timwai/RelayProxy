@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.Context
+import android.net.ConnectivityManager
 import android.net.Network
 import android.net.VpnService
 import android.os.Build
@@ -14,9 +15,11 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.system.OsConstants
 import hev.htproxy.TProxyService
 import org.json.JSONObject
 import java.io.File
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.Executors
@@ -33,6 +36,8 @@ class RelayVpnService : VpnService() {
         private const val MAPPED_DNS_ADDRESS = "198.18.0.2"
         private const val MAPPED_DNS_NETWORK = "198.19.0.0"
         private const val MAPPED_DNS_NETMASK = "255.255.0.0"
+        private const val UNKNOWN_APPLICATION = "__android_unknown__"
+        private const val MAX_PACKAGES_PER_UID = 16
 
         @Volatile
         private var status = JSONObject().put("vpnState", "STOPPED").toString()
@@ -219,11 +224,7 @@ class RelayVpnService : VpnService() {
             "VPN 已取消启动"
         }
         require(config.serverAddress.isNotBlank()) { "请先填写 Relay Server 地址" }
-        val proxyPort = if (config.clientEnabled && config.socks5Enabled) {
-            config.socks5Port
-        } else {
-            config.vpnSocks5Port
-        }
+        val proxyPort = config.vpnSocks5Port
 
         startRelayService(RelayExitService.ACTION_RECONFIGURE)
 
@@ -250,6 +251,8 @@ class RelayVpnService : VpnService() {
             socks5:
               address: 127.0.0.1
               port: $proxyPort
+              username: '$UNKNOWN_APPLICATION'
+              password: '${config.vpnProxyToken}'
               udp: 'udp'
             mapdns:
               address: $MAPPED_DNS_ADDRESS
@@ -289,7 +292,17 @@ class RelayVpnService : VpnService() {
             return
         }
         tun = descriptor
+        TProxyService.setFlowOwnerResolver { protocol, sourceAddress, sourcePort, destinationAddress, destinationPort ->
+            resolveFlowOwner(
+                protocol,
+                sourceAddress,
+                sourcePort,
+                destinationAddress,
+                destinationPort,
+            )
+        }
         if (!TProxyService.TProxyStartService(configFile.absolutePath, descriptor.fd)) {
+            TProxyService.setFlowOwnerResolver(null)
             tun = null
             descriptor.close()
             error("启动 SOCKS5 VPN 转发失败")
@@ -311,6 +324,43 @@ class RelayVpnService : VpnService() {
         )
         updateTunnelStats()
         handler.post(nativeMonitor)
+    }
+
+    private fun resolveFlowOwner(
+        protocol: Int,
+        sourceAddress: String,
+        sourcePort: Int,
+        destinationAddress: String,
+        destinationPort: Int,
+    ): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return UNKNOWN_APPLICATION
+        if (protocol != OsConstants.IPPROTO_TCP && protocol != OsConstants.IPPROTO_UDP) {
+            return UNKNOWN_APPLICATION
+        }
+        val uid = runCatching {
+            val connectivity = getSystemService(ConnectivityManager::class.java)
+            connectivity.getConnectionOwnerUid(
+                protocol,
+                InetSocketAddress(InetAddress.getByName(sourceAddress), sourcePort),
+                InetSocketAddress(InetAddress.getByName(destinationAddress), destinationPort),
+            )
+        }.getOrDefault(-1)
+        if (uid < 0 || uid == applicationInfo.uid) return UNKNOWN_APPLICATION
+        val packages = packageManager.getPackagesForUid(uid)
+            .orEmpty()
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .distinct()
+            .sorted()
+            .take(MAX_PACKAGES_PER_UID)
+        if (packages.isEmpty()) return UNKNOWN_APPLICATION
+        val result = StringBuilder()
+        for (item in packages) {
+            val extra = if (result.isEmpty()) item else "|$item"
+            if (result.length + extra.length > 240) break
+            result.append(extra)
+        }
+        return result.toString().ifBlank { UNKNOWN_APPLICATION }
     }
 
     private fun startRelayService(action: String) {
@@ -427,6 +477,7 @@ class RelayVpnService : VpnService() {
         runCatching {
             if (TProxyService.TProxyIsRunning()) TProxyService.TProxyStopService()
         }
+        TProxyService.setFlowOwnerResolver(null)
         val old = tun
         tun = null
         runCatching { old?.close() }

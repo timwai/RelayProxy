@@ -53,9 +53,15 @@ func (d *RoutingDialer) decideFlow(flow Flow) Decision {
 
 func (d *RoutingDialer) begin(ctx context.Context, exitID, host string, port uint16, protocol string) (Decision, *traffic.Record) {
 	info := proxy.ClientFromContext(ctx)
-	flow := Flow{Host: host, Port: port, Protocol: protocol}
+	flow := Flow{
+		Process:        info.Process,
+		ProcessAliases: append([]string(nil), info.ProcessAliases...),
+		Host:           host,
+		Port:           port,
+		Protocol:       protocol,
+	}
 	var pid uint32
-	if d.LookupProcess != nil && info.Source.IsValid() && info.Local.IsValid() {
+	if flow.Process == "" && d.LookupProcess != nil && info.Source.IsValid() && info.Local.IsValid() {
 		if id, process, err := d.LookupProcess(protocol, info.Source, info.Local); err == nil {
 			pid, flow.Process = id, process
 		}

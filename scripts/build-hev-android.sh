@@ -24,6 +24,7 @@ CACHE_ROOT="${XDG_CACHE_HOME:-${TMPDIR:-/tmp}}/relayproxy-hev/${VERSION}"
 WORK_DIR="$CACHE_ROOT/build"
 SOURCE_DIR="$WORK_DIR/hev-socks5-tunnel-${VERSION}"
 ARCHIVE_PATH="$CACHE_ROOT/$ARCHIVE"
+PATCH_PATH="$ROOT/third_party/hev-socks5-tunnel/relayproxy-flow-owner.patch"
 mkdir -p "$CACHE_ROOT"
 
 if [[ ! -f "$ARCHIVE_PATH" ]] || [[ "$(shasum -a 256 "$ARCHIVE_PATH" | awk '{print $1}')" != "$SHA256" ]]; then
@@ -43,6 +44,19 @@ tar -xJf "$ARCHIVE_PATH" -C "$WORK_DIR"
   echo "hev-socks5-tunnel source archive has an unexpected layout" >&2
   exit 1
 }
+command -v git >/dev/null 2>&1 || {
+  echo "git is required to apply the RelayProxy hev flow-owner patch" >&2
+  exit 1
+}
+[[ -f "$PATCH_PATH" ]] || {
+  echo "Missing RelayProxy hev patch: $PATCH_PATH" >&2
+  exit 1
+}
+(
+  cd "$SOURCE_DIR"
+  git apply --no-index --check "$PATCH_PATH"
+  git apply --no-index "$PATCH_PATH"
+)
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
 

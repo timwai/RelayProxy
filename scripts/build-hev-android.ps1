@@ -27,6 +27,7 @@ $CacheRoot = Join-Path ([System.IO.Path]::GetTempPath()) "relayproxy-hev\$Versio
 $WorkDir = Join-Path $CacheRoot "build"
 $SourceDir = Join-Path $WorkDir "hev-socks5-tunnel-$Version"
 $ArchivePath = Join-Path $CacheRoot $Archive
+$PatchPath = Join-Path $RepoRoot "third_party\hev-socks5-tunnel\relayproxy-flow-owner.patch"
 New-Item -ItemType Directory -Path $CacheRoot -Force | Out-Null
 
 $ActualHash = if (Test-Path -LiteralPath $ArchivePath) {
@@ -50,6 +51,21 @@ New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
 & tar.exe -xf $ArchivePath -C $WorkDir
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath (Join-Path $SourceDir "Android.mk"))) {
     throw "hev-socks5-tunnel source archive has an unexpected layout."
+}
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    throw "git is required to apply the RelayProxy hev flow-owner patch."
+}
+if (-not (Test-Path -LiteralPath $PatchPath)) {
+    throw "Missing RelayProxy hev patch: $PatchPath"
+}
+Push-Location $SourceDir
+try {
+    & git apply --no-index --check $PatchPath
+    if ($LASTEXITCODE -ne 0) { throw "RelayProxy hev patch check failed." }
+    & git apply --no-index $PatchPath
+    if ($LASTEXITCODE -ne 0) { throw "RelayProxy hev patch failed." }
+} finally {
+    Pop-Location
 }
 if (Test-Path -LiteralPath $OutputDir) {
     Remove-Item -LiteralPath $OutputDir -Recurse -Force

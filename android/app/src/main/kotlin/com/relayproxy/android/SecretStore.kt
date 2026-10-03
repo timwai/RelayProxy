@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
+import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -40,13 +41,27 @@ class SecretStore(context: Context) {
         prefs.edit().putString(KEY_ACCESS_KEY, encrypt(normalized)).apply()
     }
 
+    fun vpnProxyToken(): String {
+        val encoded = prefs.getString(KEY_VPN_PROXY_TOKEN, null)?.trim().orEmpty()
+        if (encoded.isNotBlank()) {
+            val current = runCatching { decrypt(encoded) }.getOrNull()
+            if (!current.isNullOrBlank()) return current
+        }
+        val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val token = Base64.encodeToString(
+            bytes,
+            Base64.NO_WRAP or Base64.NO_PADDING or Base64.URL_SAFE,
+        )
+        prefs.edit().putString(KEY_VPN_PROXY_TOKEN, encrypt(token)).apply()
+        return token
+    }
+
     private fun encrypt(value: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         val ciphertext = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
         // Keep the format simple so migration is independent of Java object
         // serialization: [iv length][iv][ciphertext+GCM tag].
-        // makes migration independent of Java object serialization.
         val packed = ByteArray(1 + cipher.iv.size + ciphertext.size)
         packed[0] = cipher.iv.size.toByte()
         System.arraycopy(cipher.iv, 0, packed, 1, cipher.iv.size)
@@ -87,6 +102,7 @@ class SecretStore(context: Context) {
     companion object {
         private const val PREFS_NAME = "relayproxy_android_secrets"
         private const val KEY_ACCESS_KEY = "identityAccessKey"
+        private const val KEY_VPN_PROXY_TOKEN = "vpnProxyToken"
         private const val KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "relayproxy.identity.access.v1"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"

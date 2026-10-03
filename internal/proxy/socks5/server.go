@@ -27,6 +27,7 @@ const (
 	Version5 = 0x05
 
 	AuthMethodNone         = 0x00
+	AuthMethodUserPassword = 0x02
 	AuthMethodNoAcceptable = 0xFF
 
 	CmdConnect      = 0x01
@@ -50,6 +51,9 @@ type ServerConfig struct {
 	ListenAddr    string // e.g. "127.0.0.1:1080"
 	GetExitNodeID func() string
 	Dialer        proxy.TunnelDialer
+	// Authenticate enables RFC 1929 username/password auth. The returned
+	// process metadata is trusted only after this callback accepts the pair.
+	Authenticate func(username, password string) (process string, aliases []string, ok bool)
 }
 
 type Server struct {
@@ -228,23 +232,29 @@ func (s *Server) handleConn(conn net.Conn) error {
 		return err
 	}
 
-	// We support AuthMethodNone
-	hasNoAuth := false
-	for _, m := range methods {
-		if m == AuthMethodNone {
-			hasNoAuth = true
-			break
+	var process string
+	var processAliases []string
+	if s.cfg.Authenticate != nil {
+		if !containsByte(methods, AuthMethodUserPassword) {
+			_, _ = conn.Write([]byte{Version5, AuthMethodNoAcceptable})
+			return errors.New("username/password authentication is required")
 		}
-	}
-
-	if !hasNoAuth {
-		_, _ = conn.Write([]byte{Version5, AuthMethodNoAcceptable})
-		return errors.New("no acceptable auth methods")
-	}
-
-	// Reply with AuthMethodNone
-	if _, err := conn.Write([]byte{Version5, AuthMethodNone}); err != nil {
-		return err
+		if _, err := conn.Write([]byte{Version5, AuthMethodUserPassword}); err != nil {
+			return err
+		}
+		var err error
+		process, processAliases, err = s.authenticate(conn)
+		if err != nil {
+			return err
+		}
+	} else {
+		if !containsByte(methods, AuthMethodNone) {
+			_, _ = conn.Write([]byte{Version5, AuthMethodNoAcceptable})
+			return errors.New("no acceptable auth methods")
+		}
+		if _, err := conn.Write([]byte{Version5, AuthMethodNone}); err != nil {
+			return err
+		}
 	}
 
 	// 2. Request details
@@ -311,7 +321,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 		return errors.New("invalid SOCKS5 destination")
 	}
 	if cmd == CmdUDPAssociate {
-		return s.handleUDPAssociate(conn, host, port)
+		return s.handleUDPAssociate(conn, host, port, process, processAliases)
 	}
 
 	exitID := ""
@@ -326,6 +336,7 @@ func (s *Server) handleConn(conn net.Conn) error {
 
 	// 3. Dial target via tunnel dialer
 	dialCtx := proxy.WithClientConn(s.ctx, "socks5", conn)
+	dialCtx = proxy.WithClientProcess(dialCtx, process, processAliases)
 	targetConn, err := s.cfg.Dialer.DialTCP(dialCtx, exitID, host, port)
 	if err != nil {
 		if s.ctx.Err() != nil {
@@ -379,6 +390,51 @@ func (s *Server) handleConn(conn net.Conn) error {
 	return nil
 }
 
+func containsByte(values []byte, want byte) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) authenticate(conn net.Conn) (string, []string, error) {
+	header := make([]byte, 2)
+	if _, err := io.ReadFull(conn, header); err != nil {
+		return "", nil, err
+	}
+	if header[0] != 0x01 || header[1] == 0 {
+		_, _ = conn.Write([]byte{0x01, 0x01})
+		return "", nil, errors.New("invalid username/password authentication request")
+	}
+	usernameBytes := make([]byte, int(header[1]))
+	if _, err := io.ReadFull(conn, usernameBytes); err != nil {
+		return "", nil, err
+	}
+	length := []byte{0}
+	if _, err := io.ReadFull(conn, length); err != nil {
+		return "", nil, err
+	}
+	if length[0] == 0 {
+		_, _ = conn.Write([]byte{0x01, 0x01})
+		return "", nil, errors.New("empty SOCKS5 password")
+	}
+	passwordBytes := make([]byte, int(length[0]))
+	if _, err := io.ReadFull(conn, passwordBytes); err != nil {
+		return "", nil, err
+	}
+	process, aliases, ok := s.cfg.Authenticate(string(usernameBytes), string(passwordBytes))
+	if !ok {
+		_, _ = conn.Write([]byte{0x01, 0x01})
+		return "", nil, errors.New("SOCKS5 authentication rejected")
+	}
+	if _, err := conn.Write([]byte{0x01, 0x00}); err != nil {
+		return "", nil, err
+	}
+	return process, aliases, nil
+}
+
 func (s *Server) sendReply(conn net.Conn, rep byte, bndAddr string, bndPort uint16) error {
 	ip := net.ParseIP(bndAddr)
 	if ip == nil {
@@ -430,7 +486,13 @@ type udpAssociation struct {
 	workers    sync.WaitGroup
 }
 
-func (s *Server) handleUDPAssociate(control net.Conn, requestedHost string, requestedPort uint16) error {
+func (s *Server) handleUDPAssociate(
+	control net.Conn,
+	requestedHost string,
+	requestedPort uint16,
+	process string,
+	processAliases []string,
+) error {
 	peer, ok := control.RemoteAddr().(*net.TCPAddr)
 	if !ok || peer.IP == nil || !peer.IP.IsLoopback() {
 		s.sendReply(control, RepNotAllowed, "0.0.0.0", 0)
@@ -467,7 +529,9 @@ func (s *Server) handleUDPAssociate(control net.Conn, requestedHost string, requ
 	}
 	_ = control.SetDeadline(time.Time{})
 
-	ctx, cancel := context.WithCancel(s.ctx)
+	ctx := proxy.WithClientConn(s.ctx, "socks5-udp", control)
+	ctx = proxy.WithClientProcess(ctx, process, processAliases)
+	ctx, cancel := context.WithCancel(ctx)
 	association := &udpAssociation{
 		server: s, conn: udpConn, ctx: ctx, cancel: cancel,
 		control: control, targets: make(map[string]*udpTarget),
@@ -573,7 +637,7 @@ func (a *udpAssociation) forward(host string, port uint16, payload []byte) error
 	if a.server.cfg.GetExitNodeID != nil {
 		exitID = a.server.cfg.GetExitNodeID()
 	}
-	conn, err := a.server.cfg.Dialer.DialUDP(proxy.WithClientConn(a.ctx, "socks5-udp", a.control), exitID, host, port)
+	conn, err := a.server.cfg.Dialer.DialUDP(a.ctx, exitID, host, port)
 	if err != nil {
 		return err
 	}

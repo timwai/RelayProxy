@@ -1,6 +1,7 @@
 package com.relayproxy.android
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -10,6 +11,7 @@ import android.text.InputType
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -25,18 +27,22 @@ import java.util.UUID
 class RoutingRuleActivity : Activity() {
     companion object {
         const val EXTRA_RULE_ID = "routingRuleId"
+        private const val REQUEST_APPLICATIONS = 3401
     }
 
     private lateinit var name: EditText
     private lateinit var enabled: Switch
+    private lateinit var applicationsSummary: TextView
     private lateinit var targets: EditText
     private lateinit var ports: EditText
     private lateinit var protocol: Spinner
     private lateinit var action: Spinner
     private lateinit var exit: Spinner
+    private lateinit var exitContainer: View
     private var exitIds = listOf("")
     private var original: RoutingRuleConfig? = null
     private var routing = RoutingConfig()
+    private val selectedApplications = linkedSetOf<String>()
 
     private val protocolValues = listOf("", "tcp", "udp")
     private val protocolLabels = listOf("全部", "TCP", "UDP")
@@ -57,6 +63,17 @@ class RoutingRuleActivity : Activity() {
         original = routing.rules.firstOrNull { it.id == id }
         setContentView(buildUi())
         loadRule(original ?: RoutingRuleConfig(id = UUID.randomUUID().toString()))
+    }
+
+    @Deprecated("Deprecated Android activity result API retained for API 26 compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_APPLICATIONS || resultCode != RESULT_OK) return
+        selectedApplications.clear()
+        selectedApplications += data?.getStringArrayListExtra(VpnAppSelectionActivity.EXTRA_SELECTED)
+            .orEmpty()
+            .filter { it != packageName }
+        updateApplicationsSummary()
     }
 
     private fun configureWindow() {
@@ -97,6 +114,19 @@ class RoutingRuleActivity : Activity() {
         enabled = Switch(this).apply { text = "启用此规则" }
         card.addView(enabled, topMargin(10))
 
+        applicationsSummary = TextView(this).apply {
+            textSize = 12.5f
+            setTextColor(inkColor)
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            background = rounded(Color.rgb(248, 250, 252), 12, lineColor)
+            isEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+            alpha = if (isEnabled) 1f else 0.55f
+            setOnClickListener {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) openApplicationSelection()
+            }
+        }
+        card.addView(labeled("应用（Android 10+）", applicationsSummary), topMargin(12))
+
         targets = field("例如：10.0.0.0/8\n*.example.com", multiline = true)
         card.addView(labeled("IP、CIDR 或域名", targets), topMargin(12))
         ports = field("例如：80\n443\n8000-9000", multiline = true)
@@ -106,12 +136,27 @@ class RoutingRuleActivity : Activity() {
         action = spinner(actionLabels)
         card.addView(labeled("动作", action), topMargin(12))
         exit = spinner(listOf("跟随默认出口"))
-        card.addView(labeled("代理出口", exit), topMargin(12))
+        exitContainer = labeled("代理出口", exit)
+        card.addView(exitContainer, topMargin(12))
+        action.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long,
+            ) {
+                exitContainer.visibility = if (
+                    actionValues.getOrElse(position) { "PROXY" } == "PROXY"
+                ) View.VISIBLE else View.GONE
+            }
+        }
         card.addView(TextView(this).apply {
-            text = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                "应用条件将在 VPN 原始流归属链路接通后开放；当前页面保存 IP、域名、端口与协议规则。"
-            } else {
+            text = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 "Android 8/9 支持当前非应用规则；按应用分流需要 Android 10 或更高版本。"
+            } else {
+                "应用条件仅识别进入 RelayProxy VPN 的流量；显式连接本机 SOCKS5/HTTP 时不推测调用应用。"
             }
             textSize = 11.5f
             setTextColor(mutedColor)
@@ -139,6 +184,9 @@ class RoutingRuleActivity : Activity() {
     private fun loadRule(rule: RoutingRuleConfig) {
         name.setText(rule.name)
         enabled.isChecked = rule.enabled
+        selectedApplications.clear()
+        selectedApplications += rule.applications
+        updateApplicationsSummary()
         targets.setText(rule.targets.joinToString("\n"))
         ports.setText(rule.ports.joinToString("\n"))
         val protocolValue = when {
@@ -148,6 +196,33 @@ class RoutingRuleActivity : Activity() {
         protocol.setSelection(protocolValues.indexOf(protocolValue).coerceAtLeast(0), false)
         action.setSelection(actionValues.indexOf(rule.action).coerceAtLeast(0), false)
         populateExits(rule.exitId)
+    }
+
+    private fun openApplicationSelection() {
+        val intent = Intent(this, VpnAppSelectionActivity::class.java)
+            .putStringArrayListExtra(
+                VpnAppSelectionActivity.EXTRA_SELECTED,
+                ArrayList(selectedApplications),
+            )
+            .putExtra(VpnAppSelectionActivity.EXTRA_TITLE, "选择规则应用")
+            .putExtra(
+                VpnAppSelectionActivity.EXTRA_SUBTITLE,
+                "同一 UID 对应多个包名时会作为同一应用组匹配；应用条件只适用于 VPN 流量。",
+            )
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, REQUEST_APPLICATIONS)
+    }
+
+    private fun updateApplicationsSummary() {
+        applicationsSummary.text = when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q && selectedApplications.isNotEmpty() ->
+                "当前系统不支持此规则中的 ${selectedApplications.size} 个应用条件"
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.Q -> "当前系统不支持按应用分流"
+            selectedApplications.isEmpty() -> "未选择应用（匹配全部应用）"
+            else -> "已选择 ${selectedApplications.size} 个应用\n" +
+                selectedApplications.sorted().take(3).joinToString("\n") +
+                if (selectedApplications.size > 3) "\n…" else ""
+        }
     }
 
     private fun populateExits(selectedExitId: String) {
@@ -202,12 +277,19 @@ class RoutingRuleActivity : Activity() {
             return
         }
         val selectedAction = actionValues.getOrElse(action.selectedItemPosition) { "PROXY" }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            enabled.isChecked && selectedApplications.isNotEmpty()
+        ) {
+            Toast.makeText(this, "Android 8/9 不能启用包含应用条件的规则", Toast.LENGTH_LONG).show()
+            return
+        }
         val current = original ?: RoutingRuleConfig(id = UUID.randomUUID().toString())
         val updated = current.copy(
             name = ruleName,
             enabled = enabled.isChecked,
             action = selectedAction,
             exitId = if (selectedAction == "PROXY") exitIds.getOrElse(exit.selectedItemPosition) { "" } else "",
+            applications = selectedApplications.sorted(),
             targets = targetValues,
             ports = portValues,
             protocols = protocolValues.getOrElse(protocol.selectedItemPosition) { "" }

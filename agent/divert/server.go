@@ -113,6 +113,18 @@ func New(opts Options) (*Server, error) {
 	}, nil
 }
 
+func proxyDialTarget(flow Flow) string {
+	host := strings.TrimSuffix(strings.TrimSpace(flow.Host), ".")
+	// A transparent packet only carries an IP destination. Use a hostname for
+	// remote PROXY dialing only when it came from RelayProxy's conservative DNS
+	// association tracker. Ambiguous/shared-IP associations deliberately leave
+	// Host empty, and DIRECT flows continue using the original destination IP.
+	if flow.DomainSource == "dns" && host != "" && net.ParseIP(host) == nil {
+		return host
+	}
+	return flow.IP
+}
+
 func appendUnique(in []string, add ...string) []string {
 	seen := make(map[string]struct{})
 	out := make([]string, 0, len(in)+len(add))
@@ -331,7 +343,7 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 	if route.decision.Action == ActionDirect {
 		upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(route.flow.IP, strconv.Itoa(int(route.flow.Port))))
 	} else {
-		upstream, err = s.dialer.DialTCP(dialCtx, route.decision.ExitID, route.flow.IP, route.flow.Port)
+		upstream, err = s.dialer.DialTCP(dialCtx, route.decision.ExitID, proxyDialTarget(route.flow), route.flow.Port)
 	}
 	dialCancel()
 	if err != nil {

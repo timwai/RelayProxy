@@ -10,9 +10,9 @@ func seedIdentityGrantDevice(t *testing.T, db *DB, id, name, identityID string, 
 	t.Helper()
 	device := &Device{
 		ID: id, Name: name, Fingerprint: "fp-" + id, InstallationID: "install-" + id,
-		ApprovalState: EnrollmentApproved,
+		ApprovalState:         EnrollmentApproved,
 		RequestedCapabilities: append([]string(nil), capabilities...),
-		ApprovedCapabilities: append([]string(nil), capabilities...),
+		ApprovedCapabilities:  append([]string(nil), capabilities...),
 	}
 	if err := db.UpsertDevice(device); err != nil {
 		t.Fatal(err)

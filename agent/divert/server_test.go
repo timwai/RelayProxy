@@ -56,6 +56,24 @@ func testFlow(protocol Protocol, target *net.UDPAddr) Flow {
 	return flow
 }
 
+func TestProxyDialTargetUsesOnlyObservedDNSHost(t *testing.T) {
+	flow := testFlow(ProtoTCP, nil)
+	flow.Host = "example.com."
+	flow.DomainSource = "dns"
+	if got := proxyDialTarget(flow); got != "example.com" {
+		t.Fatalf("DNS-associated target=%q", got)
+	}
+	flow.DomainSource = ""
+	if got := proxyDialTarget(flow); got != flow.IP {
+		t.Fatalf("untrusted host replaced original IP: %q", got)
+	}
+	flow.DomainSource = "dns"
+	flow.Host = "203.0.113.9"
+	if got := proxyDialTarget(flow); got != flow.IP {
+		t.Fatalf("IP-shaped host replaced original IP: %q", got)
+	}
+}
+
 func tcpPair(t *testing.T) (*net.TCPConn, *net.TCPConn) {
 	t.Helper()
 	listener, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
@@ -86,6 +104,8 @@ func TestHandledDirectCreatesTelemetryWhileBypassDirectDoesNot(t *testing.T) {
 	})
 
 	flow := testFlow(ProtoTCP, nil)
+	flow.Host = "example.com"
+	flow.DomainSource = "dns"
 	route, err := server.ClassifyFlow(flow)
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +209,7 @@ func TestTCPUsesOneFrozenDecisionAndPreservesHalfClose(t *testing.T) {
 	var calls atomic.Int32
 	dialer := &testDialer{tcp: func(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
 		calls.Add(1)
-		if exit != "exit-a" || host != "192.0.2.10" || port != 443 {
+		if exit != "exit-a" || host != "example.com" || port != 443 {
 			return nil, fmt.Errorf("lost flow metadata: exit=%s host=%s port=%d", exit, host, port)
 		}
 		return upstream, nil

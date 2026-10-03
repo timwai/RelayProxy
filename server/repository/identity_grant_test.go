@@ -20,6 +20,20 @@ func seedIdentityGrantDevice(t *testing.T, db *DB, id, name, identityID string, 
 	if _, err := db.SetDeviceIdentity(id, identityID, "admin"); err != nil {
 		t.Fatal(err)
 	}
+	if containsCapabilityValue(capabilities, "rdp.host") {
+		tx, err := db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now().UTC()
+		if err := ensureIdentityRDPService(tx, id, name, capabilities, now); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestDeviceIdentityGrantLifecycleAndAuthorization(t *testing.T) {
@@ -48,12 +62,37 @@ func TestDeviceIdentityGrantLifecycleAndAuthorization(t *testing.T) {
 		t.Fatalf("same-identity proxy access = managed:%v allowed:%v err:%v", managed, allowed, err)
 	}
 
+	if allowed, err := db.AuthorizeClientExit("same-client", "target"); err != nil || !allowed {
+		t.Fatalf("same-identity exported proxy authorization = allowed:%v err:%v", allowed, err)
+	}
+	if allowed, err := db.AuthorizeRDP("same-client", "target"); err != nil || !allowed {
+		t.Fatalf("same-identity exported RDP authorization = allowed:%v err:%v", allowed, err)
+	}
+	sameTargets, err := db.ListRDPTargetsForController("same-client")
+	if err != nil || len(sameTargets) != 1 || sameTargets[0].DeviceID != "target" {
+		t.Fatalf("same-identity RDP target list = %+v err:%v", sameTargets, err)
+	}
+	if allowed, err := db.AuthorizeClientExit("grantee-client", "target"); err != nil || allowed {
+		t.Fatalf("ungranted cross-identity proxy authorization = allowed:%v err:%v", allowed, err)
+	}
+
 	grant, err := db.CreateDeviceIdentityGrant("target", grantee.ID, "admin", []string{GrantFeatureProxyUse}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if grant.Revision != 1 || len(grant.Features) != 1 || grant.Features[0] != GrantFeatureProxyUse {
 		t.Fatalf("unexpected grant: %+v", grant)
+	}
+
+	if allowed, err := db.AuthorizeClientExit("grantee-client", "target"); err != nil || !allowed {
+		t.Fatalf("exported cross-identity proxy authorization = allowed:%v err:%v", allowed, err)
+	}
+	if allowed, err := db.AuthorizeRDP("grantee-client", "target"); err != nil || allowed {
+		t.Fatalf("proxy-only grant unexpectedly authorized RDP = allowed:%v err:%v", allowed, err)
+	}
+	granteeTargets, err := db.ListRDPTargetsForController("grantee-client")
+	if err != nil || len(granteeTargets) != 0 {
+		t.Fatalf("proxy-only grant leaked RDP target = %+v err:%v", granteeTargets, err)
 	}
 	if _, err := db.CreateDeviceIdentityGrant("target", grantee.ID, "admin", []string{GrantFeatureProxyUse}, nil); !errors.Is(err, ErrDeviceIdentityGrantExists) {
 		t.Fatalf("duplicate grant accepted: %v", err)
@@ -85,6 +124,14 @@ func TestDeviceIdentityGrantLifecycleAndAuthorization(t *testing.T) {
 	if updated.Revision != 2 || len(updated.Features) != 2 {
 		t.Fatalf("unexpected updated grant: %+v", updated)
 	}
+
+	if allowed, err := db.AuthorizeRDP("grantee-client", "target"); err != nil || !allowed {
+		t.Fatalf("exported cross-identity RDP authorization = allowed:%v err:%v", allowed, err)
+	}
+	granteeTargets, err = db.ListRDPTargetsForController("grantee-client")
+	if err != nil || len(granteeTargets) != 1 || granteeTargets[0].DeviceID != "target" {
+		t.Fatalf("cross-identity RDP target list = %+v err:%v", granteeTargets, err)
+	}
 	_, allowed, err = db.authorizeIdentityDeviceFeature("grantee-client", "target", GrantFeatureRDPConnect)
 	if err != nil || !allowed {
 		t.Fatalf("RDP grant not applied = allowed:%v err:%v", allowed, err)
@@ -109,6 +156,17 @@ func TestDeviceIdentityGrantLifecycleAndAuthorization(t *testing.T) {
 	_, allowed, err = db.authorizeIdentityDeviceFeature("grantee-client", "target", GrantFeatureProxyUse)
 	if err != nil || allowed {
 		t.Fatalf("deleted grant still authorizes = allowed:%v err:%v", allowed, err)
+	}
+
+	if allowed, err := db.AuthorizeClientExit("grantee-client", "target"); err != nil || allowed {
+		t.Fatalf("deleted grant still authorizes exported proxy path = allowed:%v err:%v", allowed, err)
+	}
+	if allowed, err := db.AuthorizeRDP("grantee-client", "target"); err != nil || allowed {
+		t.Fatalf("deleted grant still authorizes exported RDP path = allowed:%v err:%v", allowed, err)
+	}
+	granteeTargets, err = db.ListRDPTargetsForController("grantee-client")
+	if err != nil || len(granteeTargets) != 0 {
+		t.Fatalf("deleted grant still visible in RDP target list = %+v err:%v", granteeTargets, err)
 	}
 }
 

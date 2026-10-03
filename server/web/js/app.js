@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], identities: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], identities: [], identityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -26,6 +26,7 @@
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
   const capabilityNames = { 'proxy.client': '代理客户端', 'proxy.exit': '出口节点', 'rdp.controller': 'RDP 控制端', 'rdp.host': 'RDP 主机', 'rdp.public': 'RDP 公网入口' };
   const capabilityDescriptions = { 'proxy.client': '通过其他已授权出口转发本机流量', 'proxy.exit': '接收其他设备的代理转发请求', 'rdp.controller': '发起到已授权 RDP 主机的远程桌面连接', 'rdp.host': '向其他已授权设备提供本机 RDP 服务', 'rdp.public': '允许服务端为本机 RDP 分配公网入口' };
+  const identityGrantFeatureNames = { 'proxy.use': 'Proxy 出口', 'rdp.connect': 'RDP 连接' };
   const settingsSubtabKey = 'relayproxy-server-settings-tab';
   const validSettingsSubtabs = new Set(sectionPages.settings.map(item => item.settingsTab).filter(Boolean));
   let settingsSubtab = (() => {
@@ -227,7 +228,214 @@
     const data = await api('/identities');
     state.identities = Array.isArray(data) ? data : [];
     renderIdentities();
+    syncIdentityGrantFormOptions();
   }
+
+  function localDateTimeValue(value) {
+    if (!value) { return ''; }
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) { return ''; }
+    const local = new Date(parsed.getTime() - parsed.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  }
+
+  function identityGrantTargetCandidates() {
+    return state.devices.filter(device => {
+      const capabilities = device.approvedCapabilities || [];
+      return device.approvalState === 'approved' && device.identityId &&
+        (capabilities.includes('proxy.exit') || capabilities.includes('rdp.host'));
+    });
+  }
+
+  function syncIdentityGrantCapabilities() {
+    if (!$('identity-grant-target')) { return; }
+    const target = state.devices.find(device => device.id === $('identity-grant-target').value);
+    const granteeID = $('identity-grant-grantee').value;
+    const capabilities = target ? target.approvedCapabilities || [] : [];
+    const proxy = $('identity-grant-proxy');
+    const rdp = $('identity-grant-rdp');
+    proxy.disabled = !target || !capabilities.includes('proxy.exit');
+    rdp.disabled = !target || !capabilities.includes('rdp.host');
+    if (proxy.disabled) { proxy.checked = false; }
+    if (rdp.disabled) { rdp.checked = false; }
+
+    all('#identity-grant-grantee option').forEach(option => {
+      option.disabled = !!target && option.value === target.identityId;
+    });
+    if (target && granteeID && granteeID === target.identityId) {
+      errorAt('identity-grant-error', '同身份访问自动允许，不需要创建显式授权');
+    } else if (!$('identity-grant-error').dataset.serverError) {
+      errorAt('identity-grant-error', '');
+    }
+  }
+
+  function syncIdentityGrantFormOptions() {
+    if (!$('identity-grant-target') || !$('identity-grant-grantee')) { return; }
+    const editingID = $('identity-grant-id').value;
+    const editing = state.identityGrants.find(item => item.id === editingID);
+    const targetValue = editing ? editing.targetDeviceId : $('identity-grant-target').value;
+    const granteeValue = editing ? editing.granteeIdentityId : $('identity-grant-grantee').value;
+    const targets = identityGrantTargetCandidates();
+
+    $('identity-grant-target').innerHTML = '<option value="">请选择目标设备</option>' + targets.map(device => {
+      const caps = device.approvedCapabilities || [];
+      const services = [];
+      if (caps.includes('proxy.exit')) { services.push('Proxy Exit'); }
+      if (caps.includes('rdp.host')) { services.push('RDP Host'); }
+      const owner = device.identityName || device.identityId;
+      return '<option value="' + esc(device.id) + '">' + esc((device.name || device.id) + ' · ' + owner + ' · ' + services.join(' / ')) + '</option>';
+    }).join('');
+
+    $('identity-grant-grantee').innerHTML = '<option value="">请选择被授权身份</option>' + state.identities.map(identity => {
+      const suffix = identity.status === 'active' ? '' : ' · 已禁用';
+      return '<option value="' + esc(identity.id) + '">' + esc(identity.name + suffix) + '</option>';
+    }).join('');
+
+    if (targetValue && targets.some(item => item.id === targetValue)) { $('identity-grant-target').value = targetValue; }
+    if (granteeValue && state.identities.some(item => item.id === granteeValue)) { $('identity-grant-grantee').value = granteeValue; }
+    $('identity-grant-target').disabled = !!editing;
+    syncIdentityGrantCapabilities();
+  }
+
+  function renderIdentityGrants() {
+    if (!$('identity-grants-body')) { return; }
+    $('identity-grant-count').textContent = state.identityGrants.length;
+    const now = Date.now();
+    $('identity-grants-body').innerHTML = state.identityGrants.length ? state.identityGrants.map(item => {
+      const features = (item.features || []).map(feature => identityGrantFeatureNames[feature] || feature).join('、') || '—';
+      const expired = item.expiresAt && Date.parse(item.expiresAt) <= now;
+      const expiry = item.expiresAt ? esc(date(item.expiresAt)) + (expired ? ' ' + badge('已过期', 'warning-badge') : '') : '<span class="muted">永不过期</span>';
+      return '<tr>' +
+        '<td><span class="device-name">' + esc(item.targetDeviceName || item.targetDeviceId) + '</span><span class="device-id mono">' + esc(item.targetDeviceId) + '</span><small>' + esc(item.targetIdentityName || item.targetIdentityId) + '</small></td>' +
+        '<td><span class="device-name">' + esc(item.granteeIdentityName || item.granteeIdentityId) + '</span><span class="device-id mono">' + esc(item.granteeIdentityId) + '</span></td>' +
+        '<td>' + esc(features) + '</td><td class="muted">' + expiry + '</td><td class="mono">' + esc(item.revision) + '</td>' +
+        '<td class="right"><button type="button" class="small-button" data-identity-grant-edit="' + esc(item.id) + '">编辑</button> <button type="button" class="small-button danger" data-identity-grant-delete="' + esc(item.id) + '">删除</button></td></tr>';
+    }).join('') : emptyRow(6, '尚未配置跨身份授权', '同身份设备自动互通；只有确实需要跨身份访问时才添加授权');
+    syncIdentityGrantFormOptions();
+  }
+
+  async function refreshIdentityGrants() {
+    if (!state.user || state.user.role !== 'admin') { return; }
+    const data = await api('/device-identity-grants');
+    state.identityGrants = Array.isArray(data) ? data : [];
+    renderIdentityGrants();
+  }
+
+  function resetIdentityGrantForm() {
+    if (!$('identity-grant-form')) { return; }
+    $('identity-grant-id').value = '';
+    $('identity-grant-revision').value = '';
+    $('identity-grant-target').disabled = false;
+    $('identity-grant-target').value = '';
+    $('identity-grant-grantee').value = '';
+    $('identity-grant-proxy').checked = false;
+    $('identity-grant-rdp').checked = false;
+    $('identity-grant-expires').value = '';
+    $('identity-grant-mode').value = '新建授权';
+    $('identity-grant-submit').textContent = '创建授权';
+    $('identity-grant-cancel').hidden = true;
+    delete $('identity-grant-error').dataset.serverError;
+    errorAt('identity-grant-error', '');
+    syncIdentityGrantFormOptions();
+  }
+
+  function editIdentityGrant(id) {
+    const item = state.identityGrants.find(grant => grant.id === id);
+    if (!item || state.identityGrantBusy) { return; }
+    $('identity-grant-id').value = item.id;
+    $('identity-grant-revision').value = item.revision;
+    $('identity-grant-target').value = item.targetDeviceId;
+    $('identity-grant-grantee').value = item.granteeIdentityId;
+    $('identity-grant-proxy').checked = (item.features || []).includes('proxy.use');
+    $('identity-grant-rdp').checked = (item.features || []).includes('rdp.connect');
+    $('identity-grant-expires').value = localDateTimeValue(item.expiresAt);
+    $('identity-grant-mode').value = '编辑授权 · rev ' + item.revision;
+    $('identity-grant-submit').textContent = '保存授权';
+    $('identity-grant-cancel').hidden = false;
+    delete $('identity-grant-error').dataset.serverError;
+    errorAt('identity-grant-error', '');
+    syncIdentityGrantFormOptions();
+    $('identity-grant-form').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  async function submitIdentityGrant(event) {
+    event.preventDefault();
+    if (state.identityGrantBusy) { return; }
+    const id = $('identity-grant-id').value;
+    const targetDeviceId = $('identity-grant-target').value;
+    const granteeIdentityId = $('identity-grant-grantee').value;
+    const target = state.devices.find(device => device.id === targetDeviceId);
+    const features = [];
+    if ($('identity-grant-proxy').checked) { features.push('proxy.use'); }
+    if ($('identity-grant-rdp').checked) { features.push('rdp.connect'); }
+
+    delete $('identity-grant-error').dataset.serverError;
+    errorAt('identity-grant-error', '');
+    if (!targetDeviceId || !granteeIdentityId) { errorAt('identity-grant-error', '请选择目标设备和被授权身份'); return; }
+    if (target && target.identityId === granteeIdentityId) { errorAt('identity-grant-error', '同身份访问自动允许，不需要显式授权'); return; }
+    if (!features.length) { errorAt('identity-grant-error', '至少选择一个授权功能'); return; }
+
+    const expiresRaw = $('identity-grant-expires').value;
+    let expiresAt = '';
+    if (expiresRaw) {
+      const parsed = new Date(expiresRaw);
+      if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+        errorAt('identity-grant-error', '过期时间必须晚于当前时间');
+        return;
+      }
+      expiresAt = parsed.toISOString();
+    }
+
+    state.identityGrantBusy = true;
+    $('identity-grant-submit').disabled = true;
+    $('identity-grant-cancel').disabled = true;
+    try {
+      if (id) {
+        const payload = {
+          granteeIdentityId,
+          features,
+          revision: Number($('identity-grant-revision').value) || 0
+        };
+        if (expiresAt) { payload.expiresAt = expiresAt; } else { payload.clearExpiresAt = true; }
+        await api('/device-identity-grants/' + encodeURIComponent(id), { method: 'PATCH', body: JSON.stringify(payload) });
+        toast('跨身份授权已更新；被授权身份的在线设备将重新认证');
+      } else {
+        await api('/device-identity-grants', {
+          method: 'POST',
+          body: JSON.stringify({ targetDeviceId, granteeIdentityId, features, expiresAt })
+        });
+        toast('跨身份授权已创建；被授权身份的在线设备将重新认证');
+      }
+      resetIdentityGrantForm();
+      await refresh(true);
+    } catch (err) {
+      $('identity-grant-error').dataset.serverError = 'true';
+      errorAt('identity-grant-error', err.status === 409 ? err.message + '，请刷新后重试' : err.message);
+    } finally {
+      state.identityGrantBusy = false;
+      $('identity-grant-submit').disabled = false;
+      $('identity-grant-cancel').disabled = false;
+    }
+  }
+
+  async function deleteIdentityGrant(id) {
+    const item = state.identityGrants.find(grant => grant.id === id);
+    if (!item || state.identityGrantBusy || !confirm('删除此跨身份授权？现有 Relay/P2P/RDP 访问将按最新策略重新校验。')) { return; }
+    state.identityGrantBusy = true;
+    errorAt('identity-grant-error', '');
+    try {
+      await api('/device-identity-grants/' + encodeURIComponent(item.id) + '?revision=' + encodeURIComponent(item.revision), { method: 'DELETE' });
+      if ($('identity-grant-id').value === item.id) { resetIdentityGrantForm(); }
+      toast('跨身份授权已删除；被授权身份的在线设备将重新认证');
+      await refresh(true);
+    } catch (err) {
+      $('identity-grant-error').dataset.serverError = 'true';
+      errorAt('identity-grant-error', err.status === 409 ? err.message + '，请刷新后重试' : err.message);
+    } finally {
+      state.identityGrantBusy = false;
+    }
+  }
+
 
   async function createIdentity(event) {
     event.preventDefault();
@@ -841,14 +1049,17 @@
     ];
     if (user.role === 'admin') {
       jobs.push(['identities', '/identities', data => { state.identities = Array.isArray(data) ? data : []; renderIdentities(); }]);
+      jobs.push(['identityGrants', '/device-identity-grants', data => { state.identityGrants = Array.isArray(data) ? data : []; renderIdentityGrants(); }]);
       jobs.push(['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]);
       jobs.push(['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }]);
       jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); }]);
     } else {
       state.identities = [];
+      state.identityGrants = [];
       state.enrollments = [];
       state.channels = [];
       renderIdentities();
+      renderIdentityGrants();
       renderEnrollments();
       renderChannels();
     }
@@ -872,6 +1083,8 @@
     $('service-state').className = 'badge ' + (errors.length ? 'warning-badge' : 'success');
     if (!errors.length) { $('last-refresh').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }); }
     renderRuntime();
+    renderIdentityGrants();
+    syncIdentityGrantFormOptions();
     renderSessions();
     renderP2PSessions();
     renderMessages();
@@ -1306,6 +1519,24 @@
     if (button) openIdentity(button.dataset.identityManage);
   });
   $('identity-save').addEventListener('click', saveIdentity);
+  $('identity-grant-form').addEventListener('submit', submitIdentityGrant);
+  $('identity-grant-cancel').addEventListener('click', resetIdentityGrantForm);
+  $('identity-grant-target').addEventListener('change', () => {
+    delete $('identity-grant-error').dataset.serverError;
+    errorAt('identity-grant-error', '');
+    syncIdentityGrantCapabilities();
+  });
+  $('identity-grant-grantee').addEventListener('change', () => {
+    delete $('identity-grant-error').dataset.serverError;
+    errorAt('identity-grant-error', '');
+    syncIdentityGrantCapabilities();
+  });
+  $('identity-grants-body').addEventListener('click', event => {
+    const edit = event.target.closest('[data-identity-grant-edit]');
+    const remove = event.target.closest('[data-identity-grant-delete]');
+    if (edit) { editIdentityGrant(edit.dataset.identityGrantEdit); }
+    if (remove) { deleteIdentityGrant(remove.dataset.identityGrantDelete); }
+  });
   $('identity-key-issue').addEventListener('click', issueIdentityKey);
   $('identity-keys-body').addEventListener('click', event => {
     const button = event.target.closest('[data-identity-key-revoke]');
@@ -1329,6 +1560,7 @@
   $('enrollment-reject').addEventListener('click', () => { if (state.selectedEnrollment) rejectEnrollment(state.selectedEnrollment.id); });
   $('identity-create-capabilities').innerHTML = capabilityOptionsHTML(capabilityOrder, ['proxy.client']);
   bindCapabilityDependencies('identity-create-capabilities');
+  resetIdentityGrantForm();
   bindCapabilityDependencies('identity-capabilities');
   bindCapabilityDependencies('device-capabilities');
   bindCapabilityDependencies('enrollment-capabilities');

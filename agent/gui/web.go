@@ -246,6 +246,9 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 		_, _ = rw.Write([]byte(webConfigJSON(w.bridge)))
 	})
 	mux.HandleFunc("PUT /api/config", w.saveConfig)
+	mux.HandleFunc("GET /api/credential", w.getCredential)
+	mux.HandleFunc("PUT /api/credential", w.setCredential)
+	mux.HandleFunc("DELETE /api/credential", w.clearCredential)
 	mux.HandleFunc("POST /api/reload", w.reloadConfig)
 	mux.HandleFunc("POST /api/select-exit", w.selectExit)
 	mux.HandleFunc("POST /api/autostart", w.setAutostart)
@@ -314,6 +317,27 @@ func (w *WebServer) saveConfig(rw http.ResponseWriter, r *http.Request) {
 	}
 	res, err := w.bridge.SaveConfig(in)
 	writeWebMutation(rw, res, err)
+}
+
+func (w *WebServer) getCredential(rw http.ResponseWriter, _ *http.Request) {
+	state, err := w.bridge.GetAccessKeyState()
+	writeWebMutation(rw, state, err)
+}
+
+func (w *WebServer) setCredential(rw http.ResponseWriter, r *http.Request) {
+	var in struct {
+		AccessKey string `json:"accessKey"`
+	}
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	state, err := w.bridge.SetAccessKey(in.AccessKey)
+	writeWebMutation(rw, state, err)
+}
+
+func (w *WebServer) clearCredential(rw http.ResponseWriter, _ *http.Request) {
+	state, err := w.bridge.ClearAccessKey()
+	writeWebMutation(rw, state, err)
 }
 
 func (w *WebServer) reloadConfig(rw http.ResponseWriter, _ *http.Request) {
@@ -525,6 +549,9 @@ const webBridgeJS = `(function () {
   window.goClearMessages = function () { return request('/api/messages', {method:'DELETE'}); };
   window.goGetConfig = function () { return request('/api/config'); };
   window.goSaveConfig = function (raw) { return request('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:raw}); };
+  window.goGetCredentialState = function () { return request('/api/credential'); };
+  window.goSetAccessKey = function (accessKey) { return json('/api/credential', 'PUT', {accessKey:accessKey}); };
+  window.goClearAccessKey = function () { return request('/api/credential', {method:'DELETE'}); };
   window.goReloadConfig = function () { return json('/api/reload', 'POST', {}); };
   window.goSelectExit = async function (exitId) { await json('/api/select-exit', 'POST', {exitId:exitId}); return 'ok'; };
   window.goSetAutostart = function (enabled) { return json('/api/autostart', 'POST', {enabled:enabled}); };

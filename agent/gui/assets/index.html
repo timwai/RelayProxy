@@ -621,8 +621,8 @@
         <div id="unpaired-banner" class="hidden rp-notice rp-notice-warning">
           <svg class="icon-lg text-amber-500" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
           <div class="min-w-0 flex-1">
-            <div class="text-[13px] font-medium text-amber-700 dark:text-amber-300">等待服务端审批</div>
-            <div id="approval-help" class="text-[12px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">客户端会自动提交安装身份，请管理员在服务端控制台批准。</div>
+            <div class="text-[13px] font-medium text-amber-700 dark:text-amber-300">身份接入未完成</div>
+            <div id="approval-help" class="text-[12px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">请配置服务端签发的身份接入密钥。</div>
           </div>
           <button onclick="switchTab('connection')" class="btn-primary rp-btn rp-btn-primary px-3 py-1.5 rounded-md text-[12px] font-semibold shrink-0">配置连接</button>
         </div>
@@ -1007,14 +1007,14 @@
             </div><p id="share-acl-hint" class="config-help"></p>
           </details>
         </div>
-        <div class="config-actions"><span class="config-help">本机开关决定是否申请并承载出口能力；最终权限仍由服务端管理员批准。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary rp-btn rp-btn-primary config-small">保存出口设置</button></div>
+        <div class="config-actions"><span class="config-help">本机开关决定是否申请并承载出口能力；最终权限受所属身份的能力策略约束。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary rp-btn rp-btn-primary config-small">保存出口设置</button></div>
       </section>
 
-      <!-- ============ 服务端审批 ============ -->
+      <!-- ============ 身份接入 ============ -->
       <section id="tab-pane-pair" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
         <div>
-          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">服务端审批</h1>
-          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">无需配对码或设备令牌。客户端连接后自动提交申请，由服务端管理员审批。</p>
+          <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">身份接入</h1>
+          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">无需填写身份 ID。服务端通过接入密钥确定身份，并自动登记当前设备。</p>
         </div>
 
         <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
@@ -1026,13 +1026,13 @@
                 <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-copy"/></svg>
               </button>
             </div>
-            <div id="pair-approval-state" class="text-[12px] text-slate-500 dark:text-slate-400 mt-1.5">正在连接服务器并提交身份申请…</div>
+            <div id="pair-approval-state" class="text-[12px] text-slate-500 dark:text-slate-400 mt-1.5">正在使用身份接入密钥连接服务器…</div>
           </div>
 
           <div class="pt-3 border-t border-slate-200 dark:border-slate-700/60 text-[12px] text-slate-500 dark:text-slate-400 space-y-2">
-            <p>1. 在「连接与身份」填写服务器地址并保存。</p>
-            <p>2. 客户端会自动重连并提交本机公钥指纹。</p>
-            <p>3. 管理员在服务端控制台批准后，客户端自动上线。</p>
+            <p>1. 管理员在服务端创建身份并签发接入密钥。</p>
+            <p>2. 在「连接与身份」填写服务器地址和接入密钥并保存。</p>
+            <p>3. 客户端验证密钥后自动登记到对应身份并上线。</p>
           </div>
         </div>
       </section>
@@ -1366,11 +1366,11 @@
       $('cfg-quic-port').disabled = locked || !tls || $('cfg-transport').value === 'tcp_only';
       $('cfg-tcp-port').disabled = locked || (tls && $('cfg-transport').value === 'quic_only');
       $('cfg-routing-default').disabled = locked || $('cfg-routing-mode').value !== 'rule';
-      $('connection-tls-hint').textContent = tls ? '隧道使用 TLS 加密并验证系统信任链；RDP UDP 还要求服务端 QUIC 的 UDP 端口可达。' : '隧道将使用明文 TCP，QUIC 和 RDP UDP 不可用。';
-      $('connection-role-hint').textContent = approvedMode ? '服务端当前授权：' + (approvedMode === 'BOTH' ? '客户端 + 出口' : approvedMode === 'EXIT' ? '出口节点' : '客户端') + '。能力调整由服务端管理员审批。' : '尚未取得服务端授权；本机会声明所启用的能力，最终由服务端管理员审批。';
-      $('share-role-hint').textContent = exitApproved ? '服务端已授权出口能力；下方本机权限决定允许转发的目标范围。' : approvedMode === 'CLIENT' ? '服务端当前仅授权客户端能力。仍可配置并启用本机出口，保存后重启客户端，并请管理员在服务端为此设备开启出口能力。' : '可预先配置本机出口；保存后重启客户端，并由服务端管理员批准出口能力后生效。';
+      $('connection-tls-hint').textContent = tls ? '隧道使用 TLS 加密并验证系统信任链；RDP UDP 还要求服务端 QUIC 的 UDP 端口可达。' : '身份接入密钥要求已验证的 TLS；关闭 TLS 后设备无法接入。';
+      $('connection-role-hint').textContent = approvedMode ? '服务端当前能力：' + (approvedMode === 'BOTH' ? '客户端 + 出口' : approvedMode === 'EXIT' ? '出口节点' : '客户端') + '。能力范围由所属身份策略决定。' : '尚未取得设备能力；本机会声明所启用的能力，服务端按所属身份策略授予。';
+      $('share-role-hint').textContent = exitApproved ? '所属身份允许出口能力；下方本机权限决定允许转发的目标范围。' : approvedMode === 'CLIENT' ? '所属身份当前仅允许客户端能力。可先保存本机出口配置，再由管理员为该身份开启出口能力。' : '可预先配置本机出口；管理员为所属身份开启出口能力后生效。';
       $('proxy-role-hint').classList.toggle('hidden', !approvedMode || clientApproved);
-      $('proxy-role-hint').textContent = '服务端当前仅授权出口能力。本地代理设置会保留，但代理流量需要管理员同时批准客户端能力。';
+      $('proxy-role-hint').textContent = '所属身份当前仅允许出口能力。本地代理设置会保留，但代理流量还需要客户端能力。';
       $('proxy-scope-hint').textContent = $('cfg-socks-listen').value === '0.0.0.0' || $('cfg-http-listen').value === '0.0.0.0' ? '所有网卡可访问；本地代理不提供密码认证。' : '监听本机地址时，其他设备无法访问这些端口。';
       var aclMode = $('cfg-acl-mode').value;
       $('share-acl-hint').textContent = aclMode === 'allow' ? '允许列表为空时拒绝所有目标。命中列表仍需满足上方网络权限。' : aclMode === 'deny' ? '命中列表的目标会被拒绝，其余目标仍需满足上方网络权限。' : '列表暂不参与筛选，内容会保留；互联网、私网和回环开关仍有效。';
@@ -1462,7 +1462,7 @@
       network: [
         { id:'connection', label:'连接与身份' },
         { id:'exit', label:'选择出口' },
-        { id:'pair', label:'服务端审批' }
+        { id:'pair', label:'身份接入' }
       ],
       rdp: [{ id:'rdp', label:'授权设备' }],
       proxy: [
@@ -1744,9 +1744,9 @@
 
       var devId = st.deviceId || '';
       var approval = st.approvalState || (up ? 'approved' : 'connecting');
-      $('home-device-id').textContent = devId || (approval === 'pending' ? '待审批' : approval === 'rejected' ? '已拒绝' : approval === 'revoked' ? '已撤销' : '正在连接');
+      $('home-device-id').textContent = devId || (approval === 'pending' ? '历史待迁移' : approval === 'rejected' ? '已拒绝' : approval === 'revoked' ? '已撤销' : '正在连接');
       $('pair-current-id').textContent = $('home-device-id').textContent;
-      $('pair-approval-state').textContent = approval === 'approved' ? '服务端已批准，设备可以正常连接。' : approval === 'pending' ? '申请已提交，请等待服务端管理员批准。' : approval === 'rejected' ? '服务端已拒绝此安装身份。' : approval === 'revoked' ? '服务端已撤销此设备授权。' : '正在连接服务器并提交身份申请…';
+      $('pair-approval-state').textContent = approval === 'approved' ? '身份密钥已验证，设备已登记并可以正常连接。' : approval === 'pending' ? '这是升级前的历史申请，需要管理员先完成身份迁移。' : approval === 'rejected' ? '服务端已拒绝此安装身份。' : approval === 'revoked' ? '服务端已撤销此设备授权。' : '正在使用身份接入密钥连接服务器…';
       $('approval-help').textContent = $('pair-approval-state').textContent;
       $('unpaired-banner').classList.toggle('hidden', approval === 'approved');
 
@@ -1895,7 +1895,7 @@
       } else if (value.configured) {
         status.textContent = value.restartRequired ? '已配置新接入密钥 · 重启客户端后生效' : '接入密钥已配置并正在使用';
       } else {
-        status.textContent = value.restartRequired ? '本地接入密钥已清除 · 重启后回到 Legacy v3 接入' : '尚未配置接入密钥 · 当前使用迁移期 Legacy v3';
+        status.textContent = value.restartRequired ? '本地接入密钥已清除 · 重启后将无法连接 Server' : '尚未配置接入密钥 · Server 会拒绝连接';
       }
       if (saveButton) saveButton.disabled = credentialBusy || !!value.managedExternally;
       if (clearButton) clearButton.disabled = credentialBusy || !!value.managedExternally || !value.configured;
@@ -1941,7 +1941,7 @@
       }
     }
     async function clearAccessKey() {
-      if (credentialBusy || !hasFn('goClearAccessKey') || !confirm('清除本机接入密钥？重启后将无法使用 v4 身份自动接入，除非重新配置密钥。')) return;
+      if (credentialBusy || !hasFn('goClearAccessKey') || !confirm('清除本机接入密钥？重启后 Server 会拒绝此设备，重新配置有效密钥后才能连接。')) return;
       credentialBusy = true;
       try {
         var raw = await call('goClearAccessKey');
@@ -1949,7 +1949,7 @@
         if (!result || !result.ok) throw new Error((result && result.message) || '清除接入密钥失败');
         $('cfg-access-key').value = '';
         renderCredentialState(result.state || { configured:false, restartRequired:true });
-        toast('接入密钥已清除，重启客户端后生效');
+        toast('接入密钥已清除；重启后设备将保持离线，直到配置新密钥');
       } catch (err) {
         toast('清除接入密钥失败：' + err.message);
       } finally {

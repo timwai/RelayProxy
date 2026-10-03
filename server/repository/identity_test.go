@@ -126,11 +126,85 @@ func TestIdentityRevisionDisableAndDeviceAssignment(t *testing.T) {
 		t.Fatalf("unexpected identity devices: %+v", ids)
 	}
 
-	cleared, err := db.SetDeviceIdentity(device.ID, "", "admin")
+	if _, err := db.SetDeviceIdentity(device.ID, "", "admin"); err == nil {
+		t.Fatal("identity assignment was cleared even though all devices require an identity")
+	}
+	unchanged, err := db.GetDeviceIdentitySummary(device.ID)
+	if err != nil || unchanged.IdentityID != identity.ID {
+		t.Fatalf("failed clear changed identity assignment: %+v %v", unchanged, err)
+	}
+}
+
+func TestHistoricalDeviceMigrationReusesDeviceAndRejectsWrongIdentityKey(t *testing.T) {
+	db := openIdentityTestDB(t)
+	admin := &User{Username: "migration-admin", PasswordHash: "hash", Role: "admin", Status: "active"}
+	if err := db.CreateUser(admin); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := db.CreateIdentity("Historical Owner", admin.ID, []string{"proxy.client"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cleared.IdentityID != "" || cleared.IdentityName != "" {
-		t.Fatalf("identity assignment was not cleared: %+v", cleared)
+	issued, err := db.IssueIdentityAccessKey(identity.ID, admin.ID, "migration", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "historical-fingerprint", InstallationID: "historical-installation",
+		PublicKey: []byte("historical-public-key"), DeviceName: "Historical Device",
+		RequestedCapabilities: []string{"proxy.client", "proxy.exit"},
+	}
+	pending, err := db.ObserveDeviceIdentity(observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	historical, err := db.ApproveEnrollment(pending.RequestID, admin.ID, []string{"proxy.client", "proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if historical.OwnerUserID != admin.ID {
+		t.Fatalf("legacy owner was not recorded: %+v", historical)
+	}
+	if _, err := db.SetDeviceIdentity(historical.ID, identity.ID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	var capabilitiesRaw string
+	if err := db.QueryRow(`SELECT approved_capabilities FROM devices WHERE id = ?`, historical.ID).Scan(&capabilitiesRaw); err != nil {
+		t.Fatal(err)
+	}
+	capabilities, err := decodeCapabilities(capabilitiesRaw)
+	if err != nil || len(capabilities) != 1 || capabilities[0] != "proxy.client" {
+		t.Fatalf("migration did not intersect historical capabilities with identity policy: %v %v", capabilities, err)
+	}
+	access, err := db.ResolveIdentityAccessKey(issued.AccessKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := db.ObserveIdentityDevice(*access, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated.DeviceID != historical.ID || migrated.IdentityID != identity.ID {
+		t.Fatalf("historical device was duplicated or assigned incorrectly: %+v", migrated)
+	}
+	var deviceCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM devices WHERE public_key_fingerprint = ?`, observation.Fingerprint).Scan(&deviceCount); err != nil || deviceCount != 1 {
+		t.Fatalf("migration created duplicate devices: count=%d err=%v", deviceCount, err)
+	}
+
+	other, err := db.CreateIdentity("Other Owner", admin.ID, []string{"proxy.client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherKey, err := db.IssueIdentityAccessKey(other.ID, admin.ID, "wrong identity", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherAccess, err := db.ResolveIdentityAccessKey(otherKey.AccessKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ObserveIdentityDevice(*otherAccess, observation); !errors.Is(err, ErrDeviceIdentityConflict) {
+		t.Fatalf("historical device accepted a key for another identity: %v", err)
 	}
 }

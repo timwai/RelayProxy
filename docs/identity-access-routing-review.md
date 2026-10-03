@@ -1,6 +1,6 @@
 # 身份授权与 Android 分流自审记录
 
-日期：2026-10-03。审查起点：`889912a`。对应 [实施规划](identity-access-routing-plan.md)。
+日期：2026-10-03，历史设备迁移补充审查：2026-10-04。审查起点：`889912a`。对应 [实施规划](identity-access-routing-plan.md)。
 
 修复提交：`3f1246e`（身份授权与凭据传输）、`52692b4`（Android 归属、规则更新与回归）。
 
@@ -17,6 +17,7 @@
 | P1 | v4 与 legacy 设备可能因为旧 owner 相同而被 Relay/P2P 快速路径放行；同身份快照也绕过实时策略 | 混合身份模式直接拒绝；v4 同身份和跨身份都调用实时策略 | `server/gateway/identity_boundary_test.go`、`server/p2p/identity_boundary_test.go` 覆盖双向混合模式及策略撤销 |
 | P1 | challenge 与设备登记之间撤销密钥、到期、禁用身份或收紧能力，登记仍使用旧快照 | 在登记事务内重读凭据和身份策略；登记门禁及代理/RDP 功能判断检查当前身份能力 | `server/repository/identity_admission_test.go` 覆盖四种 challenge 变更、无残留设备、策略收紧与两类功能拒绝 |
 | P1 | 身份接入密钥可与明文 TCP/跳过证书验证配置组合，失去凭据传输保护 | Agent/移动核心拒绝此配置，Android 保存前校验；服务端无 TLS 时拒绝 v4 接入 | `agent/app/identity_transport_test.go`、移动核心 `TestIdentityKeyRequiresVerifiedTLS`；Go 全量回归 |
+| P1 | 历史已批准设备仍可通过 v3 连接，并以审批管理员 `owner_user_id` 参与旧授权；该字段不等于连接身份 | Gateway 默认统一拒绝 v3；管理页显示、筛选并编辑设备身份归属，迁移时复用原设备 ID、按身份策略收敛能力且禁止清空归属 | Gateway 默认旧协议拒绝测试；仓储迁移测试覆盖原设备复用、能力交集及错误身份密钥拒绝；管理 API 覆盖禁止清空身份 |
 | P1 | 共享 UID 包名组被截断后可能漏掉本应命中的规则；系统 `android` 包也会被错误拒绝 | 超限/无效组整体标为未知，保留完整合法组；Kotlin/Go 包名校验保持一致并支持 `android` | Kotlin 三项单元测试；移动核心包名组认证测试 |
 | P2 | 修改规则或默认出口会重建 Core/TUN，中断存量连接；无默认出口还会阻止显式出口/DIRECT 规则启动 VPN | 热更新移动规则引擎与默认出口；VPN 就绪检查依赖控制连接、能力和内部监听 | 移动核心真实 TCP 回环测试：旧连接仍可收发、新连接执行 REJECT、无效更新保留旧策略 |
 | P2 | 规则页旧快照可覆盖其他页保存，规则编辑/应用选择在旋转后丢失草稿；部分列表操作未校验完整配置 | 单独保存规则并使用 revision 拒绝过期编辑；通用设置保存不再写规则；保存前统一校验，保存/恢复规则及应用草稿 | Kotlin 编译、lint；UI 生命周期和多窗口操作仍需设备验收 |

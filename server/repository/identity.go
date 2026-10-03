@@ -506,8 +506,8 @@ func (db *DB) ResolveIdentityAccessKey(accessKey string) (*IdentityAccessAuthori
 
 func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIdentitySummary, error) {
 	deviceID, identityID, actor = strings.TrimSpace(deviceID), strings.TrimSpace(identityID), strings.TrimSpace(actor)
-	if deviceID == "" || actor == "" {
-		return nil, errors.New("device id and actor are required")
+	if deviceID == "" || identityID == "" || actor == "" {
+		return nil, errors.New("device id, identity id and actor are required")
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -516,17 +516,33 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 	defer tx.Rollback()
 
 	var current sql.NullString
-	if err := tx.QueryRow(`SELECT identity_id FROM devices WHERE id = ?`, deviceID).Scan(&current); err != nil {
+	var deviceName, currentCapabilitiesRaw string
+	if err := tx.QueryRow(`SELECT identity_id, name, approved_capabilities FROM devices WHERE id = ?`, deviceID).
+		Scan(&current, &deviceName, &currentCapabilitiesRaw); err != nil {
 		return nil, err
 	}
-	if identityID != "" {
-		var exists int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM identities WHERE id = ?`, identityID).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if exists != 1 {
-			return nil, sql.ErrNoRows
-		}
+	var identityCapabilitiesRaw string
+	if err := tx.QueryRow(`SELECT capabilities FROM identities WHERE id = ?`, identityID).Scan(&identityCapabilitiesRaw); err != nil {
+		return nil, err
+	}
+	currentCapabilities, err := decodeCapabilities(currentCapabilitiesRaw)
+	if err != nil {
+		return nil, err
+	}
+	identityCapabilities, err := decodeCapabilities(identityCapabilitiesRaw)
+	if err != nil {
+		return nil, err
+	}
+	effectiveCapabilities := intersectIdentityCapabilities(identityCapabilities, currentCapabilities)
+	if len(effectiveCapabilities) == 0 {
+		return nil, errors.New("identity policy does not allow any capability currently approved for this device")
+	}
+	if err := validateCapabilityDependencies(effectiveCapabilities); err != nil {
+		return nil, err
+	}
+	effectiveCapabilitiesRaw, err := encodeCapabilities(effectiveCapabilities)
+	if err != nil {
+		return nil, err
 	}
 	if current.String != identityID || current.Valid != (identityID != "") {
 		now := time.Now().UTC()
@@ -570,12 +586,21 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 			}
 		}
 
-		if _, err := tx.Exec(`UPDATE devices SET identity_id = ?, updated_at = ? WHERE id = ?`,
-			nullableString(identityID), now, deviceID); err != nil {
+		if _, err := tx.Exec(`UPDATE devices SET identity_id = ?, approved_capabilities = ?, updated_at = ? WHERE id = ?`,
+			identityID, effectiveCapabilitiesRaw, now, deviceID); err != nil {
+			return nil, err
+		}
+		if err := replaceIdentityDeviceGrants(tx, deviceID, identityID, effectiveCapabilities, now); err != nil {
+			return nil, err
+		}
+		if err := ensureIdentityRDPService(tx, deviceID, deviceName, effectiveCapabilities, now); err != nil {
 			return nil, err
 		}
 		if err := insertAuthorizationAudit(tx, "device.identity.update", actor, "device", deviceID,
-			map[string]any{"before": current.String, "after": identityID}, now); err != nil {
+			map[string]any{
+				"before": current.String, "after": identityID,
+				"capabilitiesBefore": currentCapabilities, "capabilitiesAfter": effectiveCapabilities,
+			}, now); err != nil {
 			return nil, err
 		}
 	}

@@ -1024,7 +1024,8 @@ func (db *DB) AuthorizeClientExit(clientDeviceID, exitDeviceID string) (bool, er
 		return allowed, nil
 	}
 
-	// Legacy v3 behavior remains same-owner during the migration window.
+	// Preserve the old same-owner decision for migration tooling and tests.
+	// Identity-only production sessions never authorize through this branch.
 	var clientOwner, exitOwner sql.NullString
 	err = db.QueryRow(`SELECT owner_user_id FROM devices WHERE id = ? AND approval_state = 'approved'`, clientDeviceID).Scan(&clientOwner)
 	if err != nil {

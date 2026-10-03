@@ -103,7 +103,8 @@ func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool,
 		}
 		return false, nil
 	}
-	// Legacy v3 sessions retain owner-based behavior during migration.
+	// This fallback is unreachable from the identity-only production Gateway.
+	// It remains for controlled legacy data migration and compatibility tests.
 	if client.OwnerUserID != "" && exit.OwnerUserID != "" {
 		return client.OwnerUserID == exit.OwnerUserID, nil
 	}

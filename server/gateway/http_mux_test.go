@@ -34,8 +34,9 @@ func TestSharedTCPPortServesHTTPAndRelayTunnel(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		}),
-		HandshakeTimeout: time.Second,
-		ServerInstanceID: "shared-port-test",
+		HandshakeTimeout:      time.Second,
+		ServerInstanceID:      "shared-port-test",
+		AllowLegacyDeviceAuth: true,
 		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{
 				State:                "approved",

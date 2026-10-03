@@ -151,8 +151,8 @@ test('client-only server grant does not lock local exit sharing configuration', 
   await f.context.refreshAll();
   assert.equal(f.get('cfg-exit-on').disabled, false);
   assert.equal(f.get('cfg-exit-internet').disabled, false);
-  assert.match(f.get('share-role-hint').textContent, /仅授权客户端能力/);
-  assert.match(f.get('share-role-hint').textContent, /服务端/);
+  assert.match(f.get('share-role-hint').textContent, /所属身份当前仅允许客户端能力/);
+  assert.match(f.get('share-role-hint').textContent, /管理员.*身份.*出口能力/);
   assert.equal(await f.context.saveShare(), true);
   assert.equal(f.saves[0].exit.enabled, true);
 });

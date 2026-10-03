@@ -17,12 +17,12 @@
   ·
   <code>规则分流</code>
   ·
-  <code>设备审批</code>
+  <code>身份密钥</code>
   ·
   <code>Admin Web</code>
 </p>
 
-RelayProxy 由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。Agent 可以作为本地代理客户端，也可以作为出口节点；Server 负责设备身份审批、权限控制、会话协调、流量中继、设备管理和 Web 管理。
+RelayProxy 由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。Agent 可以作为本地代理客户端，也可以作为出口节点；Server 通过接入密钥识别连接身份，并负责权限控制、会话协调、流量中继、设备管理和 Web 管理。
 
 > 适合自建、受信任环境。公网部署时请启用 TLS、设置强管理密码、限制防火墙端口，并谨慎开放私网、回环地址和 RDP 入口。
 
@@ -34,7 +34,7 @@ RelayProxy 由一个中心 **Relay Server** 和多个 **Relay Agent** 组成。A
 | 🏢 内网 / VPN 访问 | 通过处于公司 LAN 或 VPN 中的 Exit Agent 访问内部资源 |
 | 🧭 多出口切换 | 在 Home / Office / Cloud 等多个出口之间切换 |
 | 🔀 按规则分流 | 按进程、域名/IP、端口和协议选择 DIRECT / PROXY / REJECT |
-| 🛡️ 集中授权 | 所有新设备先进入待审批，再由 Server 授予能力 |
+| 🛡️ 身份授权 | 设备凭密钥自动归入身份；同身份直接使用，跨身份按设备和功能授权 |
 | 🖥️ 图形化管理 | Windows Wails GUI + Agent 本地 Web + Server Admin Web |
 | 📊 运行监控 | 查看在线设备、活动会话、实时连接、日志和流量 |
 | 🖥️ 一键远程桌面 | Agent GUI 只展示后台授权的 RDP 主机，P2P 优先并自动回退 Relay |
@@ -47,8 +47,8 @@ flowchart TB
     U["用户 / 应用<br/>Browser · CLI · App"] --> A1["Agent A<br/>Client"]
     A1 -->|"SOCKS5 / HTTP / 规则分流"| S["Relay Server"]
 
-    S -->|"设备审批"| ADM["Admin Web"]
-    ADM -->|"授予 Client / Exit 等能力"| S
+    S -->|"身份与设备策略"| ADM["Admin Web"]
+    ADM -->|"签发密钥 / 配置跨身份授权"| S
 
     S -->|"TCP / QUIC 隧道"| A2["Agent B<br/>Exit"]
     S -->|"TCP / QUIC 隧道"| A3["Agent C<br/>Client + Exit"]
@@ -79,16 +79,14 @@ sequenceDiagram
     participant S as Relay Server
     participant W as Admin Web
 
-    A->>S: 首次连接 + 安装身份
-    S-->>A: pending
-    W->>S: 查看待审批设备
-    W->>S: 批准所需能力
-    S-->>A: 断开旧会话 / 等待重连
-    A->>S: 自动重连
-    S-->>A: approved + 已授权能力
+    W->>S: 创建身份并配置能力范围
+    S-->>W: 签发一次性显示的接入密钥
+    W-->>A: 安全配置接入密钥
+    A->>S: 密钥 + 安装公钥挑战证明
+    S-->>A: 自动登记到密钥对应身份 + 有效能力
 ```
 
-Server 不会因为 Agent 声明了某项能力就自动授权。新安装的 Agent 首次连接后进入 **待审批**，管理员必须在 Server Web 控制台中明确批准其能力。
+Agent 不填写身份 ID。Server 从有效接入密钥确定身份，并把设备声明的能力限制在该身份的能力范围内。同一身份的设备可直接使用彼此提供的出口和 RDP；其他身份只有获得“指定设备 → 指定身份”的对应功能授权后才能使用。升级前的历史设备不会按旧审批管理员自动归属，必须由管理员显式指定身份并在客户端配置匹配的密钥。
 
 ## 文档导航
 
@@ -158,7 +156,7 @@ flowchart LR
 - QUIC 隧道。
 - TLS 加密。
 - SQLite 持久化。
-- 设备身份与审批。
+- 身份、接入密钥与设备归属。
 - 设备能力授权。
 - 在线设备与会话管理。
 - 出口节点管理。
@@ -215,19 +213,19 @@ Windows ARM64 仍然可以正常使用 Relay 隧道、SOCKS5、HTTP、本地 Web
 
 ```mermaid
 flowchart LR
-    S1["① 启动 Server"] --> S2["② 启动 Agent"]
-    S2 --> S3["③ Server 审批设备"]
-    S3 --> S4["④ 批准 Client / Exit 能力"]
-    S4 --> S5["⑤ Agent 自动重连"]
+    S1["① 启动 Server"] --> S2["② 创建身份并签发密钥"]
+    S2 --> S3["③ 配置 Agent"]
+    S3 --> S4["④ 启动 Agent"]
+    S4 --> S5["⑤ 自动登记到身份"]
     S5 --> S6["⑥ 使用 SOCKS5 / HTTP"]
 ```
 
-测试配置使用明文 TCP。确认功能正常后，公网或跨网络部署请切换到 TLS。
+身份接入密钥只能通过已验证的 TLS 发送。下面假设 `relay.example.com` 已解析到 Server，证书由系统信任；局域网自建 CA 时，需要先把 CA 安装到 Agent 的系统信任库，并使用证书中匹配的主机名。
 
 假设：
 
 ```text
-Relay Server: 192.168.1.10
+Relay Server: relay.example.com
 Tunnel Port:  20000
 Admin Port:   20001
 ```
@@ -240,7 +238,7 @@ Admin Port:   20001
 # relay-server.yaml
 
 server:
-  tls_enabled: false
+  tls_enabled: true
 
   quic:
     listen: ":20000"
@@ -252,8 +250,8 @@ server:
     listen: ":20001"
     tls_enabled: false
 
-  cert_file: ""
-  key_file: ""
+  cert_file: "cert/server.crt"
+  key_file: "cert/server.key"
 
 database:
   driver: sqlite
@@ -312,7 +310,7 @@ $env:RELAY_ADMIN_PASSWORD = "change-this-password"
 然后访问：
 
 ```text
-http://192.168.1.10:20001
+http://relay.example.com:20001
 ```
 
 默认管理员账号：
@@ -327,16 +325,30 @@ admin
 
 ---
 
-## 4.2 配置第一个 Agent
+## 4.2 创建身份并签发接入密钥
+
+登录 Server 管理页面，在「身份管理」创建身份并勾选该身份允许使用的能力，然后签发接入密钥。密钥原文只显示一次，请立即保存到要加入该身份的 Agent；同一身份可以签发多把密钥并独立撤销。
+
+常见能力用途：
+
+| 能力 | 作用 |
+| --- | --- |
+| Client | 允许设备通过其他出口访问网络 |
+| Exit | 允许其他设备使用本机作为出口 |
+| RDP Controller | 允许本机查看已授权的 RDP 主机并发起连接 |
+| RDP Host | 允许本机提供 RDP 目标服务 |
+| RDP Public | 允许为该设备创建公网 RDP 入口 |
+
+## 4.3 配置第一个 Agent
 
 创建：
 
 ```yaml
 server:
-  address: 192.168.1.10
+  address: relay.example.com
   tcp_port: 20000
   quic_port: 20000
-  tls_enabled: false
+  tls_enabled: true
 
 device:
   name: My-PC
@@ -351,9 +363,12 @@ Windows GUI 可以直接启动：
 .\relay-agent-gui.exe
 ```
 
-命令行：
+在「连接与身份」中保存刚签发的接入密钥。密钥存入受保护的本地凭据文件，不写入 `relay-agent.yaml`，也不会出现在状态接口和普通配置导出中。
+
+命令行运行时通过环境变量提供密钥：
 
 ```powershell
+$env:RELAYPROXY_ACCESS_KEY = "rpk_请替换为签发的密钥"
 .\relay-agent.exe --no-gui --config .\relay-agent.yaml
 ```
 
@@ -362,35 +377,11 @@ Linux：
 ```bash
 chmod +x relay-agent
 
+export RELAYPROXY_ACCESS_KEY='rpk_请替换为签发的密钥'
 ./relay-agent --no-gui --config ./relay-agent.yaml
 ```
 
-Agent 首次连接 Server 时不会自动获得访问权限。
-
----
-
-## 4.3 在 Server 批准设备
-
-打开 Server 管理页面：
-
-```text
-设备管理
-→ 待审批申请
-→ 选择设备
-→ 批准需要的能力
-```
-
-常见能力用途：
-
-| 能力 | 作用 |
-| --- | --- |
-| Client | 允许设备通过其他出口访问网络 |
-| Exit | 允许其他设备使用本机作为出口 |
-| RDP Controller | 允许本机查看后台授权的 RDP 主机并发起连接 |
-| RDP Host | 允许本机提供 RDP 目标服务 |
-| RDP Public | 允许为该设备创建公网 RDP 入口 |
-
-批准后 Agent 会自动重新连接。
+Agent 使用密钥连接后会自动登记到对应身份。设备请求的能力仍受身份能力范围限制；密钥指向其他身份、已撤销、已过期，或设备已绑定到另一身份时，连接都会被拒绝。
 
 ---
 
@@ -722,7 +713,7 @@ Windows ARM64 当前建议使用 SOCKS5 / HTTP 模式。
 | --- | --- |
 | 🖥️ Windows Wails GUI | 日常配置、出口切换、路由规则、实时连接、日志 |
 | 🌐 Agent 本地 Web | 无桌面环境或浏览器管理，默认仅回环访问 |
-| 🛠️ Server Admin Web | 设备审批、能力授权、出口与会话、RDP 入口、服务配置 |
+| 🛠️ Server Admin Web | 身份与密钥、设备归属、跨身份授权、出口与会话、RDP 入口、服务配置 |
 
 ## Windows GUI
 
@@ -812,8 +803,9 @@ Server Admin Web 用于：
 - 查看在线设备。
 - 查看出口节点。
 - 查看活跃会话。
-- 审批新设备。
-- 修改设备能力。
+- 创建身份、配置能力范围并签发或撤销接入密钥。
+- 迁移历史设备的身份归属。
+- 管理指定设备对指定身份的代理与 RDP 授权。
 - 撤销设备。
 - 删除设备。
 - 管理 RDP 公网入口。
@@ -1009,7 +1001,7 @@ Windows GUI 收到验证码时会显示独立的屏幕中央悬浮卡片；主�
 
 - 立即断开当前连接。
 - 保留设备身份。
-- 该安装身份不能直接重新申请。
+- 即使仍持有有效身份密钥，该安装身份也不能自动恢复。
 
 ### 删除
 
@@ -1023,8 +1015,8 @@ Windows GUI 收到验证码时会显示独立的屏幕中央悬浮卡片；主�
 - 删除设备记录。
 - 删除相关授权。
 - 删除相关 RDP 关系。
-- 删除之前的审批身份。
-- 客户端再次连接时重新进入待审批。
+- 删除安装身份记录。
+- 客户端随后可凭有效身份密钥自动重新登记。
 
 ---
 
@@ -1034,14 +1026,14 @@ Windows GUI 收到验证码时会显示独立的屏幕中央悬浮卡片；主�
 
 Agent GUI 的「远程桌面」页只使用 Server 下发的授权清单，不接受任意设备 ID 或目标地址。部署步骤：
 
-1. 在 Server Web 为发起连接的设备批准 `RDP Controller`。
-2. 为被连接设备批准 `RDP Host`，并确保两台设备属于同一所有者。
+1. 在 Server Web 为发起方身份启用 `RDP Controller`。
+2. 为被连接方身份启用 `RDP Host`。同身份设备可直接连接；跨身份时，在目标设备的身份授权中向发起方身份勾选 `RDP`。
 3. 在 Agent GUI 打开「远程桌面」，在线目标会显示「一键连接」。
 4. Windows 桌面端建立本机回环入口后会自动打开 `mstsc`；其他平台可复制页面显示的本地入口交给 RDP 客户端。
 
 连接同时支持 TCP 与 UDP。Agent 优先协商 P2P 直连；直连不可用时自动回退到已认证的 Relay 数据面。页面会显示实际的 TCP / UDP 路径和 UDP 状态。
 
-授权清单和在线状态会随隧道心跳刷新。管理员撤销 controller/host 能力或设备关系后，目标会从列表移除，正在使用该目标的本地 RDP 入口也会关闭。即使 Agent 尚未收到下一次刷新，Server 在每次 RDP 数据流建立时仍会重新执行授权检查。
+授权清单和在线状态会随隧道心跳刷新。管理员收紧身份能力、删除跨身份授权或关闭目标服务后，目标会从列表移除，正在使用该目标的本地 RDP 入口也会关闭。即使 Agent 尚未收到下一次刷新，Server 在每次 RDP 数据流建立时仍会重新执行授权检查。
 
 目标 Agent 默认连接本机 `127.0.0.1:3389`。目标地址不会下发给 controller，因此 RDP 授权不能被转换成任意端口转发。跨 NAT 使用 P2P 时建议配置 Server 的 `rdp.rendezvous_listen` 与可访问的 `rdp.rendezvous_advertise`。
 
@@ -1485,18 +1477,19 @@ RelayProxy/
 
 # 20. 常见问题
 
-## Agent 一直显示“等待服务端审批”
+## Agent 提示“身份接入未完成”
 
-这是正常的首次连接流程。
+检查客户端是否已经配置 Server 签发的有效身份接入密钥。接入密钥要求 TLS 且不能与跳过证书验证同时使用。
 
-进入 Server Web：
+历史设备升级时还需要在 Server Web 完成显式归属：
 
 ```text
 设备管理
-→ 待审批申请
+→ 待迁移
+→ 分配身份
 ```
 
-批准对应设备。
+然后在客户端配置该身份签发的密钥。旧记录中的审批管理员仅用于历史审计，不会自动成为连接身份。
 
 ---
 
@@ -1596,15 +1589,15 @@ allow_loopback: true
 
 ---
 
-## 删除设备后为什么又出现在待审批列表
+## 删除设备后为什么又自动出现
 
 这是预期行为。
 
-删除表示彻底忘记这台设备的审批身份。
+删除表示清除当前设备记录、安装身份和相关授权。
 
-客户端再次连接时会被视为新的待审批安装。
+只要客户端仍持有有效身份密钥，再次连接时就会自动登记到该密钥对应的身份。
 
-如果希望禁止该安装身份继续重新申请，请使用：
+如果希望禁止该安装身份重新登记，请使用：
 
 ```text
 撤销设备授权

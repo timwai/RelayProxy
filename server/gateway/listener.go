@@ -24,11 +24,15 @@ import (
 )
 
 type GatewayConfig struct {
-	TCPAddr                  string // e.g. ":443"
-	QUICAddr                 string // e.g. ":443"
-	TLSConfig                *tls.Config
-	PublicHTTPHandler        HTTPHandler
-	ServerInstanceID         string
+	TCPAddr           string // e.g. ":443"
+	QUICAddr          string // e.g. ":443"
+	TLSConfig         *tls.Config
+	PublicHTTPHandler HTTPHandler
+	ServerInstanceID  string
+	// AllowLegacyDeviceAuth exists for compatibility tests and controlled data
+	// migration tooling. Its zero value keeps the Gateway identity-only: every
+	// device session must use a server-issued identity access key.
+	AllowLegacyDeviceAuth    bool
 	AuthorizeDevice          func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
 	ResolveIdentityAccessKey func(accessKey string) (IdentityAccessAuthorization, error)
 	AuthorizeIdentityDevice  func(fingerprint string, hello protocol.DeviceHello, identity IdentityAccessAuthorization) (DeviceAuthorization, error)
@@ -413,6 +417,14 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
 			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
 			ErrorCode: protocol.ErrCodeProtocolMismatch, ErrorMessage: "unsupported device protocol version",
+		})
+		return
+	}
+	if !g.cfg.AllowLegacyDeviceAuth && hello.ProtocolVersion != protocol.IdentityDeviceProtocolVersion {
+		writeDeviceRejection(ctrlStream, protocol.DeviceAccepted{
+			Success: false, State: "rejected", ServerTime: time.Now().Unix(),
+			ErrorCode:    protocol.ErrCodeAccessKeyInvalid,
+			ErrorMessage: "identity access key is required; assign this device to an identity and upgrade its client configuration",
 		})
 		return
 	}

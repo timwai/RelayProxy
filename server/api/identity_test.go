@@ -91,6 +91,15 @@ func TestIdentityAdminAPIsAndDeviceAssignment(t *testing.T) {
 		t.Fatalf("unexpected assignment: %+v", assignment)
 	}
 
+	clearReq := httptest.NewRequest(http.MethodPut, "/api/v1/devices/"+device.ID+"/identity",
+		bytes.NewReader([]byte(`{"identityId":""}`)))
+	clearReq.AddCookie(adminCookie)
+	clearRec := httptest.NewRecorder()
+	router.ServeHTTP(clearRec, clearReq)
+	if clearRec.Code != http.StatusBadRequest {
+		t.Fatalf("clearing required identity returned %d: %s", clearRec.Code, clearRec.Body.String())
+	}
+
 	devicesReq := httptest.NewRequest(http.MethodGet, "/api/v1/devices", nil)
 	devicesReq.AddCookie(adminCookie)
 	devicesRec := httptest.NewRecorder()

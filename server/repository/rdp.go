@@ -83,7 +83,8 @@ func (db *DB) ListRDPTargetsForController(controllerID string) ([]*RDPTarget, er
 		return result, nil
 	}
 
-	// Legacy v3 devices retain explicit per-controller grants during migration.
+	// Preserve old per-controller grants as migration data. Identity-only
+	// production sessions never authorize through this branch.
 	rows, err := db.Query(`SELECT target.id, target.name, target.last_seen_at, target.approved_capabilities,
 		service.id, service.target_port, service.updated_at
 		FROM rdp_access_grants access
@@ -268,7 +269,8 @@ func (db *DB) AuthorizeRDP(controllerID, targetID string) (bool, error) {
 		return serviceEnabled > 0, nil
 	}
 
-	// Legacy v3 behavior remains explicit, same-owner, per controller/target.
+	// Preserve the old same-owner decision for migration tooling and tests.
+	// Identity-only production sessions never authorize through this branch.
 	var controllerOwner, targetOwner sql.NullString
 	var controllerCaps, targetCaps string
 	var serviceEnabled int

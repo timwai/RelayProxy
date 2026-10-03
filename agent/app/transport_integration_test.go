@@ -34,8 +34,9 @@ func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Chec
 	}, nil)
 	gateway := gateway.NewGateway(gateway.GatewayConfig{
 		TCPAddr: "127.0.0.1:0", QUICAddr: "127.0.0.1:0",
-		TLSConfig:        &tls.Config{Certificates: []tls.Certificate{certificate}},
-		ServerInstanceID: "transport-test",
+		TLSConfig:             &tls.Config{Certificates: []tls.Certificate{certificate}},
+		ServerInstanceID:      "transport-test",
+		AllowLegacyDeviceAuth: true,
 		AuthorizeDevice: func(_ string, hello protocol.DeviceHello) (gateway.DeviceAuthorization, error) {
 			deviceID := "client"
 			caps := []string{protocol.CapabilityProxyClient}

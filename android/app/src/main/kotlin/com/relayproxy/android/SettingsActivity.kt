@@ -343,6 +343,11 @@ class SettingsActivity : Activity() {
             server.requestFocus()
             return
         }
+        if (section == SECTION_CONNECTION && config.accessKey.isBlank()) {
+            accessKey.error = "必须填写身份接入密钥"
+            accessKey.requestFocus()
+            return
+        }
         if (section == SECTION_CONNECTION && config.accessKey.isNotBlank() && !config.accessKey.startsWith("rpk_")) {
             accessKey.error = "接入密钥格式不正确"
             accessKey.requestFocus()

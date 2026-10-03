@@ -1,5 +1,6 @@
-# 客户端只需填写服务端地址。端口、TLS、传输方式和本地代理均使用安全默认值。
-# 首次连接会自动生成本机身份；管理员在服务端控制台批准后自动上线。
+# 客户端填写服务端地址，并通过 GUI 受保护凭据存储或
+# RELAYPROXY_ACCESS_KEY 环境变量配置身份接入密钥。密钥不写入本文件。
+# 首次连接会自动生成安装身份，并登记到接入密钥对应的服务端身份。
 server:
   address: relay.example.com
 
@@ -13,4 +14,3 @@ p2p:
   idle_timeout_sec: 120
   max_exit_sessions: 4
   fallback: true
-

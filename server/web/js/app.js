@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -178,7 +178,7 @@
     document.title = titles[page] + ' · RelayProxy';
   }
   function badge(text, tone = 'neutral') { return '<span class="badge ' + tone + '">' + esc(text) + '</span>'; }
-  function deviceState(device) { return device.approvalState === 'revoked' ? badge('已撤销', 'warning-badge') : device.status === 'online' ? badge('在线', 'success') : badge('离线'); }
+  function deviceState(device) { return device.approvalState === 'revoked' ? badge('已撤销', 'warning-badge') : !device.identityId ? badge('待迁移', 'warning-badge') : device.status === 'online' ? badge('在线', 'success') : badge('离线'); }
   function transport(value) { return value ? badge(String(value).toUpperCase(), 'transport') : '<span class="muted">—</span>'; }
   function nameCell(name, id) { return '<span class="device-name">' + esc(name || '未命名设备') + '</span><span class="device-id mono">' + esc(id) + '</span>'; }
   function emptyRow(cols, title, subtitle) { return '<tr><td colspan="' + cols + '" class="empty"><strong>' + esc(title) + '</strong>' + esc(subtitle || '') + '</td></tr>'; }
@@ -707,10 +707,23 @@
   function renderDevices() {
     const needle = $('device-search').value.trim().toLowerCase();
     const mode = $('device-mode').value, status = $('device-status').value;
-    const filtered = state.devices.filter(d => (!needle || (d.name + ' ' + d.id).toLowerCase().includes(needle)) && (!mode || d.deviceMode === mode) && (!status || (status === 'disabled' ? d.approvalState === 'revoked' : d.approvalState === 'approved' && d.status === status)));
-    $('devices-body').innerHTML = filtered.length ? filtered.map(d => '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '<small>' + esc([d.platform, d.arch].filter(Boolean).join(' / ')) + '</small></td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td><td class="right"><button class="small-button" data-manage="' + esc(d.id) + '">管理</button></td></tr>').join('') : emptyRow(6, state.devices.length ? '没有匹配的设备' : '还没有已授权设备', state.devices.length ? '调整搜索或筛选条件' : '启动客户端并连接此服务器，申请会自动出现');
+    const filtered = state.devices.filter(d => {
+      const matchesSearch = !needle || (d.name + ' ' + d.id + ' ' + (d.identityName || '') + ' ' + (d.identityId || '')).toLowerCase().includes(needle);
+      const matchesMode = !mode || d.deviceMode === mode;
+      const matchesStatus = !status || (status === 'disabled'
+        ? d.approvalState === 'revoked'
+        : status === 'migration'
+          ? d.approvalState === 'approved' && !d.identityId
+          : d.approvalState === 'approved' && !!d.identityId && d.status === status);
+      return matchesSearch && matchesMode && matchesStatus;
+    });
+    $('devices-body').innerHTML = filtered.length ? filtered.map(d => {
+      const identity = d.identityId ? '<span class="device-name">' + esc(d.identityName || d.identityId) + '</span><span class="device-id mono">' + esc(d.identityId) + '</span>' : '<span class="muted">未分配身份</span>';
+      const assign = state.user && state.user.role === 'admin' ? ' <button class="small-button" data-assign-identity="' + esc(d.id) + '">' + (d.identityId ? '更改归属' : '分配身份') + '</button>' : '';
+      return '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + identity + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '<small>' + esc([d.platform, d.arch].filter(Boolean).join(' / ')) + '</small></td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td><td class="right"><button class="small-button" data-manage="' + esc(d.id) + '">管理</button>' + assign + '</td></tr>';
+    }).join('') : emptyRow(7, state.devices.length ? '没有匹配的设备' : '还没有已授权设备', state.devices.length ? '调整搜索或筛选条件' : '配置身份接入密钥后，设备会自动登记到对应身份');
     const recent = state.devices.slice().sort((a, b) => (b.status === 'online') - (a.status === 'online') || (Date.parse(b.lastSeenAt) || 0) - (Date.parse(a.lastSeenAt) || 0)).slice(0, 5);
-    $('overview-devices').innerHTML = recent.length ? recent.map(d => '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '</td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td></tr>').join('') : emptyRow(5, '连接你的第一台设备', '客户端连接后在设备管理中审批');
+    $('overview-devices').innerHTML = recent.length ? recent.map(d => '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '</td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td></tr>').join('') : emptyRow(5, '连接你的第一台设备', '先创建身份并在客户端配置接入密钥');
     $('nav-device-count').textContent = state.devices.length;
     $('stat-total').textContent = '共 ' + state.devices.length + ' 台已注册设备';
     $('device-filter-count').textContent = filtered.length + ' / ' + state.devices.length + ' 台设备';
@@ -722,7 +735,7 @@
       const requested = item.requestedCapabilities || [];
       const caps = orderedCapabilities(requested).map(capability => capabilityNames[capability] || capability).join('、') || '未声明';
       return '<tr><td><span class="device-name">' + esc(item.deviceName || '未命名设备') + '</span><span class="device-id mono">' + esc(item.fingerprint.slice(0, 16)) + '…</span></td><td>' + esc([item.platform, item.arch, item.clientVersion].filter(Boolean).join(' / ') || '—') + '</td><td>' + esc(caps) + '</td><td><small>' + esc(date(item.firstSeenAt)) + '<br>' + esc(date(item.lastSeenAt)) + '</small></td><td class="right"><button class="small-button primary" data-enrollment-manage="' + esc(item.id) + '">审批能力</button> <button class="small-button" data-enrollment-reject="' + esc(item.id) + '">拒绝</button></td></tr>';
-    }).join('') : emptyRow(5, '没有待审批申请', '客户端连接后会自动出现在这里');
+    }).join('') : emptyRow(5, '没有历史待审批记录', '新设备会凭有效身份密钥自动登记');
   }
   function renderExits() {
     $('exits-grid').innerHTML = state.exits.length ? state.exits.map(e => '<article class="panel exit-card"><div class="exit-header"><div><h3>' + esc(e.deviceName || '未命名出口') + '</h3><span class="device-id mono">' + esc(e.deviceId) + '</span></div>' + badge('在线', 'success') + '</div><div class="detail-list">' + details([['传输方式', String(e.transport || '—').toUpperCase()], ['活跃流', e.activeStreams], ['目标权限', '服务端与出口本地共同限制']]) + '</div><button data-copy-exit="' + esc(e.deviceId) + '">复制出口 ID</button></article>').join('') : '<div class="panel empty"><strong>暂无在线出口</strong>将已配对设备设为「出口」或「客户端 + 出口」，并开启出口服务。</div>';
@@ -1288,7 +1301,7 @@
     $('copy-admin-url').disabled = !preview;
     $('listen-hint').textContent = cfg.admin.listen.startsWith('127.') || cfg.admin.listen.startsWith('[::1]') ? '当前地址仅允许从服务端本机访问。' : '监听所有接口时，预览使用你当前访问的主机名或 IP。更改协议或端口后，请在重启完成后使用新地址。';
     $('quic-listen').disabled = !cfg.tunnel.tlsEnabled;
-    $('tunnel-tls-help').textContent = cfg.tunnel.tlsEnabled ? '开启后同时提供加密 TCP 和 QUIC 隧道。' : '当前将仅提供明文 TCP 隧道，QUIC 关闭。';
+    $('tunnel-tls-help').textContent = cfg.tunnel.tlsEnabled ? '开启后同时提供加密 TCP 和 QUIC 隧道。' : '身份接入密钥要求 TLS；关闭后设备无法连接，QUIC 也会关闭。';
     $('acl-mode-hint').textContent = cfg.relayACL.accessMode === 'allow' ? '允许列表为空时，所有目标都会被拒绝。匹配目标仍需满足上方互联网 / 私网 / 回环权限。' : cfg.relayACL.accessMode === 'deny' ? '拒绝列表匹配项会被拦截；其余目标仍需满足上方权限。' : '域名和 IP 列表暂不参与筛选，保留内容便于下次启用。上方网络权限仍然有效。';
     const serverExitEnabled = !!cfg.serverExit.enabled;
     const serverExitProxy = cfg.serverExit.upstreamMode && cfg.serverExit.upstreamMode !== 'direct';
@@ -1330,12 +1343,13 @@
       const checked = granted.has(item.id) ? ' checked' : '';
       const availability = item.status === 'online' ? '在线' : '离线';
       return '<label class="capability-option"><input type="checkbox" data-rdp-target value="' + esc(item.id) + '"' + checked + '><span><strong>' + esc(item.name || item.id) + '</strong><small>' + esc(item.id) + ' · ' + availability + '</small></span></label>';
-    }).join('') : '<p class="field-hint">当前没有同一所有者下已批准的 RDP 主机。先给目标设备启用“RDP 主机”能力，再在这里授权。</p>';
+    }).join('') : '<p class="field-hint">当前没有可供迁移参考的历史 RDP 关系。</p>';
   }
 
   async function loadDeviceRDPTargets(device) {
     const editor = $('device-rdp-access-editor');
-    const eligible = !!state.user && state.user.role === 'admin' && device.approvalState === 'approved' && (device.approvedCapabilities || []).includes('rdp.controller');
+    const eligible = !!state.user && state.user.role === 'admin' && !device.identityId &&
+      device.approvalState === 'approved' && (device.approvedCapabilities || []).includes('rdp.controller');
     editor.hidden = !eligible;
     if (!eligible) {
       $('device-rdp-targets').innerHTML = '';
@@ -1375,6 +1389,57 @@
     }
   }
 
+  function openDeviceIdentity(id) {
+    const device = state.devices.find(item => item.id === id);
+    if (!device || !state.user || state.user.role !== 'admin') return;
+    state.selectedDevice = device;
+    $('device-identity-title').textContent = device.identityId ? '更改设备身份归属' : '迁移历史设备';
+    $('device-identity-summary').textContent = (device.name || device.id) + ' · ' + device.id;
+    $('device-identity-select').innerHTML = '<option value="">请选择身份</option>' + state.identities.map(identity => {
+      const suffix = identity.status === 'active' ? '' : ' · 已禁用';
+      return '<option value="' + esc(identity.id) + '">' + esc(identity.name + suffix) + '</option>';
+    }).join('');
+    $('device-identity-select').value = device.identityId || '';
+    errorAt('device-identity-error', '');
+    $('device-identity-dialog').showModal();
+  }
+
+  async function saveDeviceIdentity() {
+    if (state.identityAssignmentBusy || !state.selectedDevice) return;
+    const device = state.selectedDevice;
+    const identityId = $('device-identity-select').value;
+    const identity = state.identities.find(item => item.id === identityId);
+    if (!identity) {
+      errorAt('device-identity-error', '请选择设备所属身份。');
+      return;
+    }
+    if (device.identityId === identityId) {
+      $('device-identity-dialog').close();
+      return;
+    }
+    const impact = device.identityId
+      ? '更改归属会立即断开设备，并删除以该设备为目标的跨身份授权。'
+      : '分配后，该设备只能使用此身份签发的接入密钥重连。';
+    if (!confirm('将设备「' + (device.name || device.id) + '」归属到身份「' + identity.name + '」？\n\n' + impact)) return;
+    state.identityAssignmentBusy = true;
+    all('#device-identity-dialog button, #device-identity-dialog select').forEach(item => { item.disabled = true; });
+    errorAt('device-identity-error', '');
+    try {
+      await api('/devices/' + encodeURIComponent(device.id) + '/identity', {
+        method: 'PUT', body: JSON.stringify({ identityId })
+      });
+      state.selectedDevice = null;
+      $('device-identity-dialog').close();
+      toast('设备身份归属已保存；请在客户端配置该身份的接入密钥');
+      await refresh(true);
+    } catch (err) {
+      errorAt('device-identity-error', err.message);
+    } finally {
+      state.identityAssignmentBusy = false;
+      all('#device-identity-dialog button, #device-identity-dialog select').forEach(item => { item.disabled = false; });
+    }
+  }
+
   function openDevice(id) {
     const device = state.devices.find(d => d.id === id);
     if (!device) { return; }
@@ -1382,7 +1447,7 @@
     const requested = device.requestedCapabilities && device.requestedCapabilities.length ? device.requestedCapabilities : device.approvedCapabilities;
     const approved = device.approvedCapabilities || [];
     $('device-title').textContent = device.name || '未命名设备';
-    $('device-details').innerHTML = details([['设备 ID', device.id], ['角色', roleNames[device.deviceMode] || device.deviceMode], ['系统', [device.platform, device.arch].filter(Boolean).join(' / ') || '—'], ['客户端版本', device.clientVersion || '—'], ['授权状态', device.approvalState === 'approved' ? '已授权' : '已撤销'], ['当前能力', orderedCapabilities(approved).map(capability => capabilityNames[capability] || capability).join('、') || '无'], ['RDP UDP', device.rdpUdpReady ? 'QUIC Datagram 可用' : '不可用（需 QUIC 隧道）'], ['最近在线', date(device.lastSeenAt)]]);
+    $('device-details').innerHTML = details([['设备 ID', device.id], ['身份归属', device.identityName || device.identityId || '未分配（旧设备不可连接）'], ['角色', roleNames[device.deviceMode] || device.deviceMode], ['系统', [device.platform, device.arch].filter(Boolean).join(' / ') || '—'], ['客户端版本', device.clientVersion || '—'], ['授权状态', device.approvalState === 'approved' ? '已授权' : '已撤销'], ['当前能力', orderedCapabilities(approved).map(capability => capabilityNames[capability] || capability).join('、') || '无'], ['RDP UDP', device.rdpUdpReady ? 'QUIC Datagram 可用' : '不可用（需 QUIC 隧道）'], ['最近在线', date(device.lastSeenAt)]]);
     $('device-capabilities').innerHTML = capabilityOptionsHTML(requested, approved);
     $('device-capability-editor').hidden = !state.user || state.user.role !== 'admin' || device.approvalState !== 'approved';
     $('device-revoke').hidden = device.approvalState !== 'approved' || !state.user || state.user.role !== 'admin';
@@ -1424,7 +1489,7 @@
     if (state.deviceBusy || !state.selectedDevice) { return; }
     const device = state.selectedDevice;
     const label = device.name || device.id;
-    if (!confirm('永久删除设备「' + label + '」？\n\n这会立即断开当前连接，并清除该设备的授权、RDP 关系和安装身份。该客户端下次连接时会重新进入待审批。')) { return; }
+    if (!confirm('永久删除设备「' + label + '」？\n\n这会立即断开当前连接，并清除该设备的授权、RDP 关系和安装身份。客户端下次可凭有效身份密钥自动重新登记。')) { return; }
     state.deviceBusy = true;
     all('#device-dialog button').forEach(button => { button.disabled = true; });
     errorAt('device-action-error', '');
@@ -1432,7 +1497,7 @@
       await api('/devices/' + encodeURIComponent(device.id), { method: 'DELETE' });
       state.selectedDevice = null;
       $('device-dialog').close();
-      toast('设备已删除；再次连接时需要重新审批');
+      toast('设备已删除；可凭有效身份密钥重新登记');
       await refresh(true);
     } catch (err) { errorAt('device-action-error', err.message); }
     finally { state.deviceBusy = false; all('#device-dialog button').forEach(button => { button.disabled = false; }); }
@@ -1593,7 +1658,12 @@
   $('capture-diagnostics').addEventListener('click', captureDiagnostics);
   window.addEventListener('hashchange', navigate);
   ['device-search', 'device-status', 'device-mode'].forEach(id => $(id).addEventListener('input', renderDevices));
-  $('devices-body').addEventListener('click', event => { const button = event.target.closest('[data-manage]'); if (button) openDevice(button.dataset.manage); });
+  $('devices-body').addEventListener('click', event => {
+    const assign = event.target.closest('[data-assign-identity]');
+    const manage = event.target.closest('[data-manage]');
+    if (assign) openDeviceIdentity(assign.dataset.assignIdentity);
+    else if (manage) openDevice(manage.dataset.manage);
+  });
   $('enrollments-body').addEventListener('click', event => {
     const manage = event.target.closest('[data-enrollment-manage]');
     const reject = event.target.closest('[data-enrollment-reject]');
@@ -1685,6 +1755,14 @@
   $('copy-admin-url').addEventListener('click', () => copy(managementURL($('admin-listen').value, $('admin-protocol').value === 'true')));
   $('device-revoke').addEventListener('click', revokeDevice);
   $('device-delete').addEventListener('click', deleteDevice);
+  $('device-identity-save').addEventListener('click', saveDeviceIdentity);
+  $('device-identity-dialog').addEventListener('cancel', event => { if (state.identityAssignmentBusy) event.preventDefault(); });
+  $('device-identity-dialog').addEventListener('close', () => {
+    if (!state.identityAssignmentBusy) {
+      state.selectedDevice = null;
+      errorAt('device-identity-error', '');
+    }
+  });
   $('device-capabilities-save').addEventListener('click', saveDeviceCapabilities);
   $('device-rdp-targets-save').addEventListener('click', saveDeviceRDPTargets);
   $('enrollment-approve').addEventListener('click', approveEnrollment);

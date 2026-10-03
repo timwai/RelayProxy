@@ -392,8 +392,9 @@ func (db *DB) HasActiveSystemIdentityGrant(resourceID, granteeIdentityID, featur
 	return false, rows.Err()
 }
 
-// AuthorizeServerExit preserves the legacy v3 behavior for approved proxy
-// clients while requiring an explicit resource -> identity grant for v4.
+// AuthorizeServerExit requires an explicit resource -> identity grant for
+// identity sessions. The owner fallback is retained only for old data
+// migration tooling and compatibility tests; production rejects v3 sessions.
 func (db *DB) AuthorizeServerExit(clientDeviceID string) (bool, error) {
 	clientDeviceID = strings.TrimSpace(clientDeviceID)
 	if clientDeviceID == "" {

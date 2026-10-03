@@ -34,7 +34,8 @@ func testGateway(t *testing.T, timeout time.Duration, onAudit func(*repository.C
 	gateway := NewGateway(GatewayConfig{
 		TCPAddr: "127.0.0.1:0", TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
 		HandshakeTimeout: timeout, ServerInstanceID: "test-server", AuthorizeDevice: authorizer,
-		RecheckDevice: func(string, string) bool { return true },
+		AllowLegacyDeviceAuth: true,
+		RecheckDevice:         func(string, string) bool { return true },
 	}, sessions, NewStreamRouter(sessions, nil, nil, onAudit))
 	if err := gateway.Start(); err != nil {
 		t.Fatal(err)
@@ -174,6 +175,36 @@ func TestInvalidDeviceProofCannotRegister(t *testing.T) {
 	}
 }
 
+func TestIdentityRequiredRejectsLegacyProtocolBeforeChallenge(t *testing.T) {
+	gateway := testGateway(t, time.Second, nil)
+	gateway.cfg.AllowLegacyDeviceAuth = false
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := dialTestGateway(t, gateway)
+	control := openTestStream(t, sess)
+	writeControlHeader(t, control)
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteJSON(control, protocol.DeviceHello{
+		ProtocolVersion: protocol.LegacyDeviceProtocolVersion,
+		InstallationID:  identity.InstallationID, PublicKey: identity.PublicKey,
+		ClientNonce: nonce, RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var rejected protocol.DeviceAccepted
+	if err := protocol.ReadJSON(control, &rejected); err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Success || rejected.ErrorCode != protocol.ErrCodeAccessKeyInvalid || len(gateway.sessions.List()) != 0 {
+		t.Fatalf("legacy protocol was not rejected for identity-only server: %+v", rejected)
+	}
+}
+
 func TestApprovedIdentityRegistersBeforeAcceptance(t *testing.T) {
 	gateway := testGateway(t, time.Second, nil)
 	identity, _ := deviceidentity.Generate()
@@ -222,6 +253,7 @@ func TestHeartbeatRefreshesAuthorizedRDPTargets(t *testing.T) {
 	gateway := NewGateway(GatewayConfig{
 		TCPAddr: "127.0.0.1:0", TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
 		HandshakeTimeout: time.Second, ServerInstanceID: "test-server",
+		AllowLegacyDeviceAuth: true,
 		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{State: "approved", DeviceID: "controller", ApprovedCapabilities: []string{protocol.CapabilityRDPClient}}, nil
 		},

@@ -53,6 +53,7 @@ Thumbs.db
 
 # Android / Gradle / gomobile
 /android/.gradle/
+/android/.kotlin/
 /android/**/build/
 /android/local.properties
 /android/app/libs/*.aar

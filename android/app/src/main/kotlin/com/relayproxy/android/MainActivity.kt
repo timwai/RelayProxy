@@ -280,7 +280,7 @@ class MainActivity : Activity() {
         infoProxyPath = infoRow(card, "当前代理路径")
         infoPowerMode = infoRow(card, "P2P 电源策略")
         infoNativeUDP = infoRow(card, "UDP 过载丢弃")
-        infoApproval = infoRow(card, "设备审批")
+        infoApproval = infoRow(card, "设备接入")
         infoExitPermission = infoRow(card, "出口权限")
         infoClientPermission = infoRow(card, "代理客户端授权")
         infoLocalProxy = infoRow(card, "本机代理")
@@ -522,12 +522,12 @@ class MainActivity : Activity() {
                     approved && clientApproved -> "出口与代理均已就绪"
                     clientApproved -> "代理客户端已就绪"
                     approved -> "网络出口已就绪"
-                    else -> "已连接，等待授权"
+                    else -> "已连接，能力受限"
                 }
                 if (ready) {
                     updateChip("运行中", success, successSoft)
                 } else {
-                    updateChip("待审批", warning, warningSoft)
+                    updateChip("能力受限", warning, warningSoft)
                 }
             }
             "CONNECTING" -> {
@@ -650,11 +650,11 @@ class MainActivity : Activity() {
         statusDetail.text = when {
             error.isNotBlank() -> error
             proxyError.isNotBlank() && (config.clientEnabled || vpnDesired) -> proxyError
-            approval == "pending" -> "设备等待服务端审批"
-            approval == "rejected" -> "设备审批已拒绝"
+            approval == "pending" -> "历史设备等待身份迁移"
+            approval == "rejected" -> "设备接入已拒绝"
             state == "CONNECTED" && ready -> "后台常驻运行中"
             state == "STOPPED" -> "点击启动后可退出 App，服务继续后台运行"
-            else -> "审批：$approval"
+            else -> "接入状态：$approval"
         }
     }
 
@@ -754,8 +754,8 @@ class MainActivity : Activity() {
     }
 
     private fun approvalLabel(value: String): String = when (value) {
-        "approved" -> "已批准"
-        "pending" -> "等待审批"
+        "approved" -> "已接入"
+        "pending" -> "历史待迁移"
         "rejected" -> "已拒绝"
         else -> "未知"
     }

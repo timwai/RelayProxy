@@ -7,14 +7,15 @@ import (
 )
 
 const (
-	// LegacyDeviceProtocolVersion is the administrator-approved v3 enrollment
-	// protocol. It remains available during the controlled identity migration.
+	// LegacyDeviceProtocolVersion is the former administrator-approved v3
+	// enrollment protocol. Current production servers reject it; the constant
+	// remains so upgraded clients receive a framed migration error.
 	LegacyDeviceProtocolVersion = 3
 	// IdentityDeviceProtocolVersion authenticates a server-issued identity
 	// access key in addition to the installation Ed25519 identity.
 	IdentityDeviceProtocolVersion = 4
-	// DeviceProtocolVersion remains the legacy default until client settings
-	// have an access key. Clients explicitly select v4 when AccessKey is set.
+	// DeviceProtocolVersion remains the value sent by a client without an access
+	// key so the server can return a precise identity-migration error.
 	DeviceProtocolVersion = LegacyDeviceProtocolVersion
 
 	CapabilityProxyClient = "proxy.client"

@@ -17,12 +17,11 @@ func TestDeviceAuthPayloadBindsChallengeAndIdentity(t *testing.T) {
 	}
 }
 
-
 func TestDeviceAuthPayloadV4BindsAccessKeyAndCapabilities(t *testing.T) {
 	hello := DeviceHello{
 		ProtocolVersion: IdentityDeviceProtocolVersion,
-		AccessKey: "rpk_test_key",
-		InstallationID: "install", PublicKey: []byte("key"), ClientNonce: []byte("client"),
+		AccessKey:       "rpk_test_key",
+		InstallationID:  "install", PublicKey: []byte("key"), ClientNonce: []byte("client"),
 		RequestedCapabilities: []string{CapabilityProxyClient, CapabilityProxyExit},
 		TransportCapabilities: []string{UDPModeStream},
 	}
@@ -49,7 +48,7 @@ func TestDeviceAuthPayloadV4BindsAccessKeyAndCapabilities(t *testing.T) {
 func TestDeviceAuthPayloadV3KeepsLegacyWireSemantics(t *testing.T) {
 	hello := DeviceHello{
 		ProtocolVersion: LegacyDeviceProtocolVersion,
-		InstallationID: "install", PublicKey: []byte("key"), ClientNonce: []byte("client"),
+		InstallationID:  "install", PublicKey: []byte("key"), ClientNonce: []byte("client"),
 		RequestedCapabilities: []string{CapabilityProxyClient},
 	}
 	challenge := AuthChallenge{ProtocolVersion: LegacyDeviceProtocolVersion, ServerInstanceID: "server", ServerNonce: []byte("server-nonce")}

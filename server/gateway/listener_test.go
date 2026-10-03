@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/json"
 	"net"
 	"sync"
 	"testing"
@@ -250,7 +251,9 @@ func TestHeartbeatRefreshesAuthorizedRDPTargets(t *testing.T) {
 
 	readTargets := func() []protocol.RDPTarget {
 		t.Helper()
-		if err := protocol.WriteJSON(control, protocol.PingMessage{Timestamp: time.Now().UnixMilli()}); err != nil {
+		if err := protocol.WriteJSON(control, protocol.PingMessage{
+			Timestamp: time.Now().UnixMilli(), Diagnostics: json.RawMessage(`{"status":{"mode":"CLIENT"}}`),
+		}); err != nil {
 			t.Fatal(err)
 		}
 		var pong protocol.PongMessage
@@ -265,6 +268,13 @@ func TestHeartbeatRefreshesAuthorizedRDPTargets(t *testing.T) {
 
 	if got := readTargets(); len(got) != 1 || got[0].DeviceID != "target" || !got[0].Online {
 		t.Fatalf("first refresh = %+v", got)
+	}
+	device, ok := sessions.Get("controller")
+	if !ok {
+		t.Fatal("controller session was not registered")
+	}
+	if diagnostics := device.DiagnosticsSnapshot(); diagnostics == nil || string(diagnostics.Payload) != `{"status":{"mode":"CLIENT"}}` {
+		t.Fatalf("heartbeat diagnostics were not stored: %+v", diagnostics)
 	}
 	mu.Lock()
 	targets = []protocol.RDPTarget{}

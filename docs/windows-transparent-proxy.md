@@ -75,6 +75,26 @@ SOCKS5/HTTP 的进程归属来自本机客户端至代理监听端口的实际 T
 
 关闭监控窗口会隐藏并复用窗口，关闭客户端会同时结束它。未观察到的域名与出口解析的目标 IP 保持未知，不用中继服务器的地址代替目标地址。
 
+### 通用连接性能诊断
+
+TCP 代理连接的详情和 `/api/connections` 返回 `path` 字段，记录该连接最近成功绑定的实际路径：`p2p_quic` 为直达出口 Agent，`relay_quic` / `relay_tls` 为客户端经对应传输连接中继。中继路径标签不描述中继到出口的第二段链路；未采集到路径时省略字段。可恢复 TCP 从 P2P 回退中继后，字段随成功重绑定更新；连接结束后保留最后记录的路径。
+
+使用 `auto` 时，P2P 尚未就绪的连接可先走中继；P2P 就绪只影响后续新连接，已有中继 TCP 不会自动迁移到直连。连接的 `exit_id` 是规则实际选中的出口，可能覆盖全局选择；顶部状态中的 `p2pPath` 不能代替某条规则下的连接路径。
+
+排查任意目标时，在问题流量持续传输期间找到对应的 `state=active` 记录，按目标 IP、端口、进程或规则筛选，并对比 `source`、`exit_id`、`rule`、`path` 及双向速率。相同规则与出口不代表相同传输路径，单凭源端口改变也不能证明速度差异由 P2P 引起。连接列表同时覆盖 TCP 与 UDP；下面的逐阶段读写等待统计适用于 TCP 数据泵。
+
+透明 TCP 连接的 `download_io` 可以进一步区分下载转发所处阶段：`read_ms` 是读取上游隧道的累计耗时，`write_ms` 是写入本机应用连接的累计耗时，包括尚未返回的调用；`phase` 为当前的 `read` / `write` / `idle`。两次采样之间的差值比累计值更有意义。`read_bytes` / `write_bytes` 分别表示从隧道读出、被本机 socket 写调用接收的字节，不代表应用已经处理或落盘。空闲 TCP 连接也会长期停在 `read`，所以必须在问题流量持续传输时分析；读取耗时高不能单独区分网络、出口设备与目标服务的瓶颈，写入耗时高也可能涉及本机调度或应用读取。
+
+`/api/status` 的 `tunnelDiagnostics` 同时提供客户端中继连接的本地/远端地址与 QUIC RTT、会话累计收发字节和包数。`sent_packets_lost` / `sent_bytes_lost` 只描述本端发送方向，不能用于断言反方向无丢包；撤销误判时计数可以下降。该统计覆盖整个中继会话，不只某一条业务流，也不覆盖中继到出口的第二段。字段含义依据 [quic-go ConnectionStats](https://pkg.go.dev/github.com/quic-go/quic-go@v0.62.0#ConnectionStats)。
+
+Windows 客户端的“实时连接”页面提供“采集 30 秒诊断”。采集期间保持待排查的上传、下载或交互流量，客户端每秒记录完整运行状态、本机隧道统计和吞吐最高的活跃连接，完成后直接下载 JSON。也可以读取 `/api/diagnostics` 获取单次快照。报告中的连接记录包含目标、协议、规则、实际路径、吞吐与 TCP `download_io`，不绑定具体端口或应用。
+
+出口 Agent 会为任意普通 TCP 和可恢复 TCP 同时记录数据桥接状态。`exit.active_tcp[]` 带有目标主机、端口和远端地址；`target_to_tunnel` 表示目标服务到客户端的下载方向，`tunnel_to_target` 表示上传方向。每个方向包含当前 `phase`、累计读写时间、调用次数和字节数。`target_to_tunnel.read_ms` 持续增长表示在等待目标服务供数，`write_ms` 持续增长表示数据已经从目标读出但写入隧道受阻。Agent 通过已有心跳把这些快照送到中继。
+
+中继管理页面的“实时连接”提供“采集 30 秒诊断”，每秒保存中继侧活跃会话统计，并合并客户端与出口 Agent 最近一次心跳诊断，完成后下载一份 JSON。`/api/v1/sessions/active` 同样返回 `connectedAt`、`sampledAt`、`tunnelDiagnostics` 和 `peerDiagnostics`，并沿用管理登录与设备所有权过滤。Agent 心跳报告存在活跃连接时，即使数据实际走 P2P 而没有经过 Relay 数据面，也会纳入采集。`peerDiagnostics.receivedAt` 是设备快照到达中继的时间；默认心跳间隔下，30 秒报告通常包含至少两次设备侧更新。中继 QUIC 的发送计数表示中继发往该设备的方向，设备 QUIC 的发送计数表示设备发往中继的方向。`connectedAt` 变化表示设备重连，两组差值只能在同一连接代内比较。
+
+“出口节点选择”页面提供按出口 ID 的上下行测速。每个方向可选择 3、5 或 10 秒，使用专用受认证测试流直接测量客户端到该出口 Agent 的实际路径；测速不访问出口后的目标网络。结果同时显示 Mbps、MB/s 和 `p2p_quic`、`relay_quic` 或 `relay_tls` 路径。远端出口必须在线、已授权并支持测速能力；`server` 可测试 Relay Server 本机出口。
+
 ## Network Service 管理与恢复
 
 Windows GUI 的“系统透明代理”区域会显示 `RelayProxy Network Service` 的安装状态、运行状态、服务 PID、当前 broker 程序路径和自动恢复状态。状态分为“未安装 / 已停止 / 需要修复 / 运行中”；客户端升级后如果 broker 二进制版本与当前客户端不一致，会显示“需要修复”。

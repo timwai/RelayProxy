@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,45 @@ type DeviceSession struct {
 	ActiveExitID  atomic.Pointer[string]
 	BytesUp       atomic.Int64
 	BytesDown     atomic.Int64
+	Diagnostics   atomic.Pointer[DeviceDiagnostics]
+}
+
+type DeviceDiagnostics struct {
+	ReceivedAt time.Time       `json:"receivedAt"`
+	Payload    json.RawMessage `json:"payload"`
+	Active     bool            `json:"-"`
+}
+
+func diagnosticPayloadActive(payload json.RawMessage) bool {
+	var state struct {
+		Status struct {
+			ActiveStreams int64 `json:"activeStreams"`
+		} `json:"status"`
+		Connections []json.RawMessage `json:"connections"`
+		Exit        *struct {
+			ActiveTCP []json.RawMessage `json:"active_tcp"`
+		} `json:"exit"`
+	}
+	if json.Unmarshal(payload, &state) != nil {
+		return false
+	}
+	return state.Status.ActiveStreams > 0 || len(state.Connections) > 0 || state.Exit != nil && len(state.Exit.ActiveTCP) > 0
+}
+
+func (s *DeviceSession) SetDiagnostics(payload json.RawMessage) {
+	if len(payload) == 0 || len(payload) > 256*1024 || !json.Valid(payload) {
+		return
+	}
+	copy := append(json.RawMessage(nil), payload...)
+	s.Diagnostics.Store(&DeviceDiagnostics{ReceivedAt: time.Now(), Payload: copy, Active: diagnosticPayloadActive(copy)})
+}
+
+func (s *DeviceSession) DiagnosticsSnapshot() *DeviceDiagnostics {
+	current := s.Diagnostics.Load()
+	if current == nil {
+		return nil
+	}
+	return &DeviceDiagnostics{ReceivedAt: current.ReceivedAt, Payload: append(json.RawMessage(nil), current.Payload...), Active: current.Active}
 }
 
 func (s *DeviceSession) IsExit() bool {

@@ -369,7 +369,7 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 		delete(s.connections, upstream)
 		s.mu.Unlock()
 	}()
-	err = bidirectionalCopy(flowCtx, downstream, upstream)
+	err = bidirectionalCopy(flowCtx, downstream, upstream, route.traffic)
 	if err != nil {
 		route.traffic.Finish("failed", err)
 	}
@@ -417,16 +417,21 @@ func (s *Server) Close() error {
 	return nil
 }
 
-func bidirectionalCopy(ctx context.Context, a, b net.Conn) error {
+func bidirectionalCopy(ctx context.Context, a, b net.Conn, record *traffic.Record) error {
 	stop := context.AfterFunc(ctx, func() {
 		_ = a.Close()
 		_ = b.Close()
 	})
 	defer stop()
 	results := make(chan error, 2)
-	copyOne := func(dst, src net.Conn) {
+	copyOne := func(dst, src net.Conn, download bool) {
 		bufp := tcpCopyBufferPool.Get().(*[tcpCopyBufferSize]byte)
-		_, err := io.CopyBuffer(dst, src, bufp[:])
+		var err error
+		if download {
+			_, err = traffic.CopyDownload(dst, src, bufp[:], record)
+		} else {
+			_, err = io.CopyBuffer(dst, src, bufp[:])
+		}
 		tcpCopyBufferPool.Put(bufp)
 		if err == nil {
 			if half, ok := dst.(interface{ CloseWrite() error }); ok {
@@ -437,8 +442,8 @@ func bidirectionalCopy(ctx context.Context, a, b net.Conn) error {
 		}
 		results <- err
 	}
-	go copyOne(a, b)
-	go copyOne(b, a)
+	go copyOne(a, b, true)
+	go copyOne(b, a, false)
 	first := <-results
 	if first != nil {
 		_ = a.Close()

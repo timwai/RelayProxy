@@ -462,7 +462,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 
 	// 3. The server-selected grant controls runtime capabilities.
 	tunnel.SetPeerCapabilities(sess, hello.TransportCapabilities)
-	capabilities := []string{protocol.UDPModeStream}
+	capabilities := []string{protocol.UDPModeStream, protocol.CapabilitySpeedTest}
 	if tunnel.SupportsDatagrams(sess) {
 		capabilities = append(capabilities, protocol.UDPModeDatagram)
 	}
@@ -679,6 +679,7 @@ func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 			return
 		}
 		dev.TouchHeartbeat()
+		dev.SetDiagnostics(ping.Diagnostics)
 		if g.cfg.OnDeviceHeartbeat != nil {
 			g.cfg.OnDeviceHeartbeat(dev.DeviceID)
 		}

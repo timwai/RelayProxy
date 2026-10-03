@@ -9,6 +9,7 @@ import (
 	"time"
 
 	p2presume "relayproxy/internal/p2p/resume"
+	"relayproxy/internal/tunnel"
 )
 
 type trackedConn struct {
@@ -168,7 +169,7 @@ func TestLogicalResumeRetryRebindsDetachedCurrentGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	local := p2presume.Binding{Type: p2presume.BindAck, Identity: identity, Generation: 1}
-	session, err := registry.registerLogical(local, targetExit, "target", 1024, nil)
+	session, err := registry.registerLogical(local, targetExit, "target", 1024, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +304,8 @@ func TestLogicalResumeTargetSurvivesTransportRebind(t *testing.T) {
 		Generation: 1,
 	}
 	var doneCalls atomic.Int32
-	session, err := registry.registerLogical(local, targetExit, "target", 1024, func() {
+	metrics := &tunnel.PipeMetrics{}
+	session, err := registry.registerLogical(local, targetExit, "target", 1024, metrics, func() {
 		doneCalls.Add(1)
 	})
 	if err != nil {
@@ -421,6 +423,10 @@ func TestLogicalResumeTargetSurvivesTransportRebind(t *testing.T) {
 	}
 	if string(buf) != "second" {
 		t.Fatalf("second echo=%q", buf)
+	}
+	pipe := metrics.Snapshot()
+	if pipe.Up.ReadBytes < uint64(len("firstsecond")) || pipe.Down.ReadBytes < uint64(len("firstsecond")) {
+		t.Fatalf("logical bridge metrics missed resumed traffic: %+v", pipe)
 	}
 
 	// Closing only the client transport is recoverable; the target remains

@@ -39,16 +39,18 @@ type Metadata struct {
 
 type Connection struct {
 	Metadata
-	ID           uint64     `json:"id"`
-	State        string     `json:"state"`
-	Error        string     `json:"error,omitempty"`
-	StartedAt    time.Time  `json:"started_at"`
-	EndedAt      *time.Time `json:"ended_at,omitempty"`
-	Duration     float64    `json:"duration"`
-	Upload       uint64     `json:"upload"`
-	Download     uint64     `json:"download"`
-	UploadRate   float64    `json:"upload_rate"`
-	DownloadRate float64    `json:"download_rate"`
+	ID           uint64      `json:"id"`
+	State        string      `json:"state"`
+	Path         string      `json:"path,omitempty"` // last bound TCP proxy path; absent when unknown
+	Error        string      `json:"error,omitempty"`
+	StartedAt    time.Time   `json:"started_at"`
+	EndedAt      *time.Time  `json:"ended_at,omitempty"`
+	Duration     float64     `json:"duration"`
+	Upload       uint64      `json:"upload"`
+	Download     uint64      `json:"download"`
+	UploadRate   float64     `json:"upload_rate"`
+	DownloadRate float64     `json:"download_rate"`
+	DownloadIO   *DownloadIO `json:"download_io,omitempty"`
 }
 
 type Snapshot struct {
@@ -119,6 +121,22 @@ type Record struct {
 	pendingUp, pendingDown atomic.Uint64
 	finished               bool
 	listed                 bool
+	pathSource             proxyPathSource
+	downloadIO             *downloadObserver
+}
+
+// Implementations must be nonblocking and safe for concurrent reads during
+// transport recovery. Retain them only while the connection is active.
+type proxyPathSource interface {
+	ProxyPath() string
+}
+
+func (r *Record) setPathSource(source proxyPathSource) {
+	r.registry.mu.Lock()
+	defer r.registry.mu.Unlock()
+	if !r.finished {
+		r.pathSource = source
+	}
 }
 
 func NewRegistry(maxActive, maxRecent int) *Registry {
@@ -248,6 +266,10 @@ func (r *Record) Finish(state string, err error) {
 	}
 	now := registry.now()
 	r.flushRatesLocked(now)
+	if r.pathSource != nil {
+		r.connection.Path = r.pathSource.ProxyPath()
+		r.pathSource = nil // History must not retain a connection or its dialer.
+	}
 	r.finished = true
 	if state == "" {
 		state = "closed"
@@ -309,6 +331,12 @@ func (r *Registry) Snapshot() Snapshot {
 	s.UploadRate, s.DownloadRate = r.meter.rates(now)
 	appendRecord := func(record *Record) {
 		c := record.connection
+		if record.pathSource != nil {
+			c.Path = record.pathSource.ProxyPath()
+		}
+		if record.downloadIO != nil {
+			c.DownloadIO = record.downloadIO.Snapshot()
+		}
 		end := now
 		if c.EndedAt != nil {
 			end = *c.EndedAt

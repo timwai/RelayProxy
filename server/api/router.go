@@ -1452,21 +1452,27 @@ func (r *Router) handleActiveSessions(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	res := make([]map[string]any, 0)
+	sampledAt := time.Now().UTC()
 	for _, d := range devices {
-		if d.ActiveStreams.Load() > 0 {
+		peerDiagnostics := d.DiagnosticsSnapshot()
+		if d.ActiveStreams.Load() > 0 || (peerDiagnostics != nil && peerDiagnostics.Active) {
 			exitID := ""
 			if ptr := d.ActiveExitID.Load(); ptr != nil {
 				exitID = *ptr
 			}
 			res = append(res, map[string]any{
-				"clientDeviceId":   d.DeviceID,
-				"clientDeviceName": d.DeviceName,
-				"exitDeviceId":     exitID,
-				"mode":             d.Mode,
-				"transport":        string(d.Transport),
-				"activeStreams":    d.ActiveStreams.Load(),
-				"bytesUp":          d.BytesUp.Load(),
-				"bytesDown":        d.BytesDown.Load(),
+				"clientDeviceId":    d.DeviceID,
+				"clientDeviceName":  d.DeviceName,
+				"exitDeviceId":      exitID,
+				"mode":              d.Mode,
+				"transport":         string(d.Transport),
+				"activeStreams":     d.ActiveStreams.Load(),
+				"bytesUp":           d.BytesUp.Load(),
+				"bytesDown":         d.BytesDown.Load(),
+				"connectedAt":       d.ConnectedAt,
+				"sampledAt":         sampledAt,
+				"tunnelDiagnostics": tunnel.DiagnoseSession(d.Tunnel),
+				"peerDiagnostics":   peerDiagnostics,
 			})
 		}
 	}

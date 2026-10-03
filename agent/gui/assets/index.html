@@ -942,6 +942,16 @@
           </div>
         </div>
 
+        <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-3">
+          <div><h2 class="text-[13px] font-semibold text-slate-800 dark:text-slate-100">出口上下行测速</h2><p class="config-help mt-1">直接测试本机到指定出口的实际路径，不访问出口后的互联网或局域网服务。</p></div>
+          <div class="grid grid-cols-1 md:grid-cols-[1fr_120px_auto] gap-2.5 items-end">
+            <div><label for="speed-test-exit" class="block text-[12px] mb-1.5">测速出口 ID</label><input id="speed-test-exit" class="mono rp-input w-full" type="text" placeholder="dev_xxxxxxxx 或 server"></div>
+            <div><label for="speed-test-duration" class="block text-[12px] mb-1.5">每方向时长</label><select id="speed-test-duration" class="rp-select w-full"><option value="3">3 秒</option><option value="5">5 秒</option><option value="10">10 秒</option></select></div>
+            <button id="speed-test-start" type="button" onclick="runExitSpeedTest()" class="rp-btn rp-btn-primary">开始测速</button>
+          </div>
+          <div id="speed-test-result" class="rp-notice hidden text-[12px]"></div>
+        </div>
+
         <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4">
           <div class="flex items-start gap-2.5">
             <svg class="icon-lg text-slate-400 mt-0.5" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
@@ -1105,10 +1115,12 @@
           </div>
           <div class="flex items-center gap-2 shrink-0">
             <span id="inline-conn-live" class="rp-badge rp-badge-success">实时更新</span>
+            <button id="agent-diagnostic-capture" type="button" onclick="captureAgentDiagnostics()" class="rp-btn">采集 30 秒诊断</button>
             <button type="button" onclick="refreshConnectionsInline(true)" class="rp-btn">刷新</button>
             <button type="button" onclick="clearConnectionsInline()" class="rp-btn" title="清空已结束连接历史，保留活跃连接">清空历史</button>
           </div>
         </div>
+        <div id="agent-diagnostic-progress" class="rp-notice hidden mb-3 text-[12px]"></div>
         <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-3">
           <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">活跃连接</div><div id="inline-conn-active" class="mono text-[20px] font-semibold mt-1">0</div></div>
           <div class="rp-card p-3"><div class="text-[11px] text-slate-500 dark:text-slate-400">上传速率</div><div id="inline-conn-up-rate" class="mono text-[20px] font-semibold mt-1">0 B/s</div></div>
@@ -1826,6 +1838,7 @@
       $('connection-runtime').textContent = '运行配置：' + (running.serverAddress || cfg.serverAddress || '—') + ' · ' + (running.transport || cfg.transport || 'auto');
 
       $('cfg-exit-id').value = cfg.defaultExitId || '';
+      if ($('speed-test-exit') && !$('speed-test-exit').value) $('speed-test-exit').value = cfg.defaultExitId || '';
       $('cfg-exit-on').checked = cfg.exitEnabled !== false;
       $('cfg-exit-internet').checked = !!cfg.allowInternet;
       $('cfg-exit-private').checked = !!cfg.allowPrivateNetwork;
@@ -1984,7 +1997,29 @@
     function saveShare() { return saveGroup('share','出口设置已保存'); }
     function saveServer() { return saveGroup('connection','连接设置已保存'); }
     async function applyExit() { if (await saveGroup('exit','出口选择已应用')) refreshStatus(); }
-    window.saveProxy = saveProxy; window.saveShare = saveShare; window.saveServer = saveServer; window.applyExit = applyExit;
+    var speedTestBusy = false;
+    async function runExitSpeedTest() {
+      if (speedTestBusy || !hasFn('goRunSpeedTest')) return;
+      var exitID = $('speed-test-exit').value.trim() || $('cfg-exit-id').value.trim();
+      var duration = Number($('speed-test-duration').value) || 3;
+      var button = $('speed-test-start'), output = $('speed-test-result');
+      speedTestBusy = true; button.disabled = true; output.classList.remove('hidden');
+      output.textContent = '正在测试上行和下行，每个方向 ' + duration + ' 秒…';
+      try {
+        var payload = mutationResult(await call('goRunSpeedTest', exitID, duration));
+        if (!payload.ok) throw new Error(payload.message || '测速失败');
+        var result = payload.result || {}, up = result.upload || {}, down = result.download || {};
+        output.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' +
+          '<div><strong>上行</strong><div class="mono text-[18px] mt-1">' + (Number(up.megabitsPerSecond) || 0).toFixed(2) + ' Mbps</div><small>' + formatTrafficBytes(up.bytesPerSecond, true) + ' · ' + (up.path || '未知路径') + '</small></div>' +
+          '<div><strong>下行</strong><div class="mono text-[18px] mt-1">' + (Number(down.megabitsPerSecond) || 0).toFixed(2) + ' Mbps</div><small>' + formatTrafficBytes(down.bytesPerSecond, true) + ' · ' + (down.path || '未知路径') + '</small></div></div>';
+        toast('出口测速完成');
+      } catch (err) {
+        output.textContent = '测速失败：' + err.message;
+      } finally {
+        speedTestBusy = false; button.disabled = false;
+      }
+    }
+    window.saveProxy = saveProxy; window.saveShare = saveShare; window.saveServer = saveServer; window.applyExit = applyExit; window.runExitSpeedTest = runExitSpeedTest;
     window.saveAllChanges = async function () {
       var groups = dirtyGroups(), payload = {};
       if (!groups.length) { toast('没有未保存的配置'); return false; }
@@ -2333,7 +2368,7 @@
         if (protocol && row.protocol !== protocol) return false;
         if (action && row.action !== action) return false;
         if (!search) return true;
-        return [row.process, row.process_name, row.process_aliases, row.services, row.pid, row.host, row.ip, row.port, row.rule, row.source].some(function (value) {
+        return [row.process, row.process_name, row.process_aliases, row.services, row.pid, row.host, row.ip, row.port, row.rule, row.source, row.exit_id, row.path].some(function (value) {
           return String(value == null ? '' : value).toLowerCase().indexOf(search) >= 0;
         });
       });
@@ -2355,7 +2390,7 @@
           (record.host || record.ip || '未知目标') + (record.port ? ':' + record.port : ''),
           String(record.protocol || '').toUpperCase(),
           record.action || '—',
-          record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地'),
+          (record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地')) + (record.path ? ' · ' + record.path : ''),
           formatTrafficBytes(record.upload_rate, true),
           formatTrafficBytes(record.download_rate, true)
         ];
@@ -2420,6 +2455,41 @@
     }
     window.refreshConnectionsInline = refreshConnectionsInline;
     window.renderConnectionsInline = renderConnectionsInline;
+
+    var agentDiagnosticCaptureBusy = false;
+    function downloadAgentDiagnostics(filename, report) {
+      var blob = new Blob([JSON.stringify(report, null, 2)], {type:'application/json'});
+      var url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+    async function captureAgentDiagnostics() {
+      if (agentDiagnosticCaptureBusy || !hasFn('goGetDiagnostics')) { return; }
+      var button = $('agent-diagnostic-capture'), progress = $('agent-diagnostic-progress');
+      agentDiagnosticCaptureBusy = true;
+      if (button) button.disabled = true;
+      if (progress) progress.classList.remove('hidden');
+      var report = {schemaVersion:1, source:'relayproxy-agent', startedAt:new Date().toISOString(), durationSeconds:30, samples:[]};
+      try {
+        for (var i = 0; i <= 30; i++) {
+          if (progress) progress.textContent = '正在采集本机诊断：' + i + ' / 30 秒。请保持问题流量持续传输。';
+          var raw = await call('goGetDiagnostics');
+          report.samples.push(typeof raw === 'string' ? JSON.parse(raw) : raw);
+          if (i < 30) await new Promise(function (resolve) { setTimeout(resolve, 1000); });
+        }
+        report.finishedAt = new Date().toISOString();
+        var stamp = report.startedAt.replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
+        downloadAgentDiagnostics('relay-agent-diagnostics-' + stamp + '.json', report);
+        if (progress) progress.textContent = '诊断报告已下载。';
+        toast('本机诊断采集完成');
+      } catch (err) {
+        if (progress) progress.textContent = '诊断采集失败：' + err.message;
+      } finally {
+        agentDiagnosticCaptureBusy = false;
+        if (button) button.disabled = false;
+      }
+    }
+    window.captureAgentDiagnostics = captureAgentDiagnostics;
 
     /* ---------- polling ---------- */
     async function refreshStatus() {

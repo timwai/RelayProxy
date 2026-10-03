@@ -28,6 +28,12 @@ type DeadlineStream interface {
 // Pipe preserves normal EOF half-closes, but aborts both directions on an I/O
 // error, cancellation or idle timeout. It waits for both pumps before returning.
 func Pipe(ctx context.Context, left, right DeadlineStream, idle time.Duration, transferred func(up bool, n int)) (up, down int64) {
+	return PipeWithMetrics(ctx, left, right, idle, transferred, nil)
+}
+
+// PipeWithMetrics is Pipe with a concurrency-safe live snapshot of both copy
+// pumps. Up is left-to-right; Down is right-to-left.
+func PipeWithMetrics(ctx context.Context, left, right DeadlineStream, idle time.Duration, transferred func(up bool, n int), metrics *PipeMetrics) (up, down int64) {
 	var once sync.Once
 	stop := func() { once.Do(func() { _ = left.Close(); _ = right.Close() }) }
 	defer stop()
@@ -81,10 +87,22 @@ func Pipe(ctx context.Context, left, right DeadlineStream, idle time.Duration, t
 		defer flushTransfer()
 
 		for {
+			if metrics != nil {
+				metrics.begin(upward, "read")
+			}
 			n, er := src.Read(buf)
+			if metrics != nil {
+				metrics.end(upward, n)
+			}
 			if n > 0 {
 				refresh()
+				if metrics != nil {
+					metrics.begin(upward, "write")
+				}
 				nw, ew := dst.Write(buf[:n])
+				if metrics != nil {
+					metrics.end(upward, nw)
+				}
 				total += int64(nw)
 				if nw > 0 && transferred != nil {
 					pendingTransfer += nw

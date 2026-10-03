@@ -39,6 +39,8 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goCopyClipboard",
 		"goGetConfig",
 		"goGetConnections",
+		"goGetDiagnostics",
+		"goRunSpeedTest",
 		"goGetLogs",
 		"goGetRDPTargets",
 		"goGetStatus",

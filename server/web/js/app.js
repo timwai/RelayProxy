@@ -234,7 +234,44 @@
   }
   function renderSessions() {
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };
-    $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td></tr>').join('') : emptyRow(6, '当前没有活跃流', '设备发起代理连接后会显示在这里');
+    $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => {
+      const relay = s.tunnelDiagnostics && s.tunnelDiagnostics.quic;
+      const peer = s.peerDiagnostics && s.peerDiagnostics.payload;
+      const peerQuic = peer && peer.status && peer.status.tunnelDiagnostics && peer.status.tunnelDiagnostics.quic;
+      const diagnostic = relay ? '<span class="mono">Relay RTT ' + esc(relay.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(relay.sent_packets_lost || 0) + '</span>' +
+        (peerQuic ? '<small>设备 RTT ' + esc(peerQuic.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(peerQuic.sent_packets_lost || 0) + '</small>' : '<small>等待设备心跳诊断</small>') : '<span class="muted">当前传输无 QUIC 统计</span>';
+      return '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td><td>' + diagnostic + '</td></tr>';
+    }).join('') : emptyRow(7, '当前没有活跃流', '设备发起代理连接后会显示在这里');
+  }
+
+  function downloadJSON(filename, value) {
+    const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob), link = document.createElement('a');
+    link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function captureDiagnostics() {
+    const button = $('capture-diagnostics'), progress = $('diagnostic-progress');
+    if (!button || button.disabled) return;
+    button.disabled = true; progress.hidden = false;
+    const report = { schemaVersion: 1, startedAt: new Date().toISOString(), durationSeconds: 30, samples: [] };
+    try {
+      for (let i = 0; i <= 30; i++) {
+        progress.textContent = '正在采集三端诊断：' + i + ' / 30 秒。请保持问题流量持续传输。';
+        report.samples.push({ collectedAt: new Date().toISOString(), sessions: await api('/sessions/active') });
+        if (i < 30) await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      report.finishedAt = new Date().toISOString();
+      const stamp = report.startedAt.replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-');
+      downloadJSON('relay-diagnostics-' + stamp + '.json', report);
+      progress.textContent = '诊断报告已下载。';
+      toast('三端诊断采集完成');
+    } catch (error) {
+      progress.textContent = '诊断采集失败：' + error.message;
+    } finally {
+      button.disabled = false;
+    }
   }
   function p2pReportHTML(report) {
     report = report || {};
@@ -1046,6 +1083,7 @@
   $('logout').addEventListener('click', logout);
   $('logout-mobile').addEventListener('click', logout);
   $('refresh').addEventListener('click', () => refresh(true));
+  $('capture-diagnostics').addEventListener('click', captureDiagnostics);
   window.addEventListener('hashchange', navigate);
   ['device-search', 'device-status', 'device-mode'].forEach(id => $(id).addEventListener('input', renderDevices));
   $('devices-body').addEventListener('click', event => { const button = event.target.closest('[data-manage]'); if (button) openDevice(button.dataset.manage); });

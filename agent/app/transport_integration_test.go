@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"relayproxy/agent/client"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
@@ -181,6 +182,17 @@ func TestRelayTransportMatrix(t *testing.T) {
 				if err := <-tcpDone; err != nil {
 					t.Fatal(err)
 				}
+				diagnostics := clientAgent.Status().TunnelDiagnostics
+				if diagnostics == nil || diagnostics.Local == "" || diagnostics.Remote == "" {
+					t.Fatalf("missing relay endpoint diagnostics: %+v", diagnostics)
+				}
+				if clientMode == "quic_only" {
+					if diagnostics.QUIC == nil || diagnostics.QUIC.BytesReceived == 0 || diagnostics.QUIC.PacketsSent == 0 {
+						t.Fatalf("missing live QUIC counters: %+v", diagnostics.QUIC)
+					}
+				} else if diagnostics.QUIC != nil {
+					t.Fatal("TCP session reported QUIC counters")
+				}
 
 				udpTarget, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 				if err != nil {
@@ -253,6 +265,35 @@ func TestRelayTransportMatrix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestExitSpeedTestMeasuresBothRelayDirections(t *testing.T) {
+	for _, tc := range []struct{ mode, path string }{
+		{"quic_only", protocol.P2PPathRelayQUIC},
+		{"tcp_only", protocol.P2PPathRelayTLS},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			central, err := acl.NewChecker(acl.Policy{AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			clientAgent, _, _ := startRelayPair(t, tc.mode, tc.mode, central)
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			result, err := clientAgent.RunSpeedTest(ctx, "exit", 500*time.Millisecond)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for name, direction := range map[string]client.SpeedTestDirectionResult{"upload": result.Upload, "download": result.Download} {
+				if direction.Bytes == 0 || direction.DurationMS < 400 || direction.BytesPerSecond <= 0 || direction.Megabits <= 0 {
+					t.Fatalf("%s speed test missing measurement: %+v", name, direction)
+				}
+				if direction.Path != tc.path {
+					t.Fatalf("%s path = %q, want %q", name, direction.Path, tc.path)
+				}
+			}
+		})
 	}
 }
 

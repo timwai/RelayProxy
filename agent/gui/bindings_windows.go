@@ -53,6 +53,33 @@ func (s *WailsService) GetStatus() (string, error) {
 	return s.owner.statusJSON(), nil
 }
 
+func (s *WailsService) GetDiagnostics() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetDiagnostics())
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
+func (s *WailsService) RunSpeedTest(exitID string, durationSeconds int) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	result, err := s.owner.bridge.RunSpeedTest(exitID, durationSeconds)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, err := json.Marshal(map[string]any{"ok": true, "result": result})
+	if err != nil {
+		return `{"ok":false,"message":"failed to encode speed test result"}`, nil
+	}
+	return string(data), nil
+}
+
 func (s *WailsService) GetRDPTargets() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil

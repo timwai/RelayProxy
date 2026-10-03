@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -83,6 +84,52 @@ func TestConcurrentTrafficAccounting(t *testing.T) {
 }
 
 type partialConn struct{ closed, halfClosed bool }
+
+type pathTestConn struct {
+	partialConn
+	path atomic.Value
+}
+
+func (c *pathTestConn) ProxyPath() string { return c.path.Load().(string) }
+
+func TestConnectionPathTracksRecoveryAndFreezesHistory(t *testing.T) {
+	r := NewRegistry(2, 2)
+	record := r.Start(Metadata{Action: "PROXY"})
+	raw := &pathTestConn{}
+	raw.path.Store("p2p_quic")
+	c := WrapConn(raw, record)
+	if got := r.Snapshot().Connections[0].Path; got != "p2p_quic" {
+		t.Fatalf("initial path = %q", got)
+	}
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 1000 {
+			raw.path.Store("relay_quic")
+		}
+	})
+	for range 100 {
+		r.Snapshot()
+	}
+	wg.Wait()
+	if got := r.Snapshot().Connections[0].Path; got != "relay_quic" {
+		t.Fatalf("recovered path = %q", got)
+	}
+	// Finishing must capture even a change that has not been sampled yet.
+	raw.path.Store("relay_tls")
+	_ = c.Close()
+	raw.path.Store("p2p_quic")
+	if got := r.Snapshot().Connections[0].Path; got != "relay_tls" {
+		t.Fatalf("historical path changed: %q", got)
+	}
+	if record.pathSource != nil {
+		t.Fatal("history retained the underlying connection")
+	}
+	other := WrapConn(&partialConn{}, r.Start(Metadata{}))
+	defer other.Close()
+	if got := r.Snapshot().Connections[0].Path; got != "" {
+		t.Fatalf("unknown path = %q, want empty", got)
+	}
+}
 
 func (c *partialConn) Read(p []byte) (int, error)     { return copy(p, "last"), io.EOF }
 func (c *partialConn) Write(p []byte) (int, error)    { return min(len(p), 3), io.ErrShortWrite }

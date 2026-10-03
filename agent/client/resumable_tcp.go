@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	p2presume "relayproxy/internal/p2p/resume"
@@ -29,6 +30,7 @@ type resumableTCPConn struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	closeOnce sync.Once
+	path      atomic.Value // string: most recently bound transport path
 }
 
 func newResumableTCPConn(
@@ -38,6 +40,7 @@ func newResumableTCPConn(
 	exitID, host string,
 	port uint16,
 	localAddr, remoteAddr net.Addr,
+	path string,
 ) net.Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	conn := &resumableTCPConn{
@@ -46,9 +49,12 @@ func newResumableTCPConn(
 		localAddr: localAddr, remoteAddr: remoteAddr,
 		ctx: ctx, cancel: cancel,
 	}
+	conn.path.Store(path)
 	go conn.recoveryLoop()
 	return conn
 }
+
+func (c *resumableTCPConn) ProxyPath() string { return c.path.Load().(string) }
 
 func (c *resumableTCPConn) Read(p []byte) (int, error) {
 	if c == nil || c.endpoint == nil {
@@ -267,6 +273,7 @@ func (c *resumableTCPConn) tryRelayRebind(
 	if err := c.endpoint.Bind(stream, nextGeneration); err != nil {
 		return err
 	}
+	c.path.Store(tcpSessionPath(relay, false))
 	owned = false
 	return nil
 }

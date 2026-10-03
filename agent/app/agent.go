@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -201,41 +202,42 @@ func (c AgentConfig) IsP2PFallbackEnabled() bool {
 }
 
 type AgentStatus struct {
-	Connected           bool                 `json:"connected"`
-	Transport           string               `json:"transport"`
-	LatencyMs           int64                `json:"latency"`
-	DeviceID            string               `json:"deviceId"`
-	DeviceName          string               `json:"deviceName"`
-	Mode                string               `json:"mode"`
-	SelectedExit        string               `json:"selectedExit"`
-	SOCKS5Running       bool                 `json:"socks5Running"`
-	HTTPRunning         bool                 `json:"httpRunning"`
-	ExitRunning         bool                 `json:"exitRunning"`
-	NetworkMode         string               `json:"networkMode"`
-	DivertRunning       bool                 `json:"divertRunning"`
-	DivertStage         string               `json:"divertStage"`
-	DivertError         string               `json:"divertError,omitempty"`
-	DivertDiagnostics   divert.Diagnostics   `json:"divertDiagnostics"`
-	ActiveStreams       int64                `json:"activeStreams"`
-	ApprovalState       string               `json:"approvalState"`
-	RDPListenAddr       string               `json:"rdpListenAddr,omitempty"`
-	RDPTargetID         string               `json:"rdpTargetId,omitempty"`
-	RDPUDPEnabled       bool                 `json:"rdpUdpEnabled"`
-	RDPUDPActive        bool                 `json:"rdpUdpActive"`
-	RDPUDPReason        string               `json:"rdpUdpReason,omitempty"`
-	RDPPathTCP          string               `json:"rdpPathTcp,omitempty"`
-	RDPPathUDP          string               `json:"rdpPathUdp,omitempty"`
-	P2PState            string               `json:"p2pState,omitempty"`
-	P2PPath             string               `json:"p2pPath,omitempty"`
-	P2PError            string               `json:"p2pError,omitempty"`
-	P2PSessionID        uint64               `json:"p2pSessionId,omitempty"`
-	P2PExitID           string               `json:"p2pExitId,omitempty"`
-	P2PRTTMs            int64                `json:"p2pRttMs,omitempty"`
-	P2PCandidateSummary string               `json:"p2pCandidateSummary,omitempty"`
-	P2PFallbackCount    uint64               `json:"p2pFallbackCount,omitempty"`
-	P2PBytesUp          uint64               `json:"p2pBytesUp,omitempty"`
-	P2PBytesDown        uint64               `json:"p2pBytesDown,omitempty"`
-	NativeUDP           tunnel.DatagramUsage `json:"nativeUdp"`
+	Connected           bool                       `json:"connected"`
+	Transport           string                     `json:"transport"`
+	TunnelDiagnostics   *tunnel.SessionDiagnostics `json:"tunnelDiagnostics,omitempty"`
+	LatencyMs           int64                      `json:"latency"`
+	DeviceID            string                     `json:"deviceId"`
+	DeviceName          string                     `json:"deviceName"`
+	Mode                string                     `json:"mode"`
+	SelectedExit        string                     `json:"selectedExit"`
+	SOCKS5Running       bool                       `json:"socks5Running"`
+	HTTPRunning         bool                       `json:"httpRunning"`
+	ExitRunning         bool                       `json:"exitRunning"`
+	NetworkMode         string                     `json:"networkMode"`
+	DivertRunning       bool                       `json:"divertRunning"`
+	DivertStage         string                     `json:"divertStage"`
+	DivertError         string                     `json:"divertError,omitempty"`
+	DivertDiagnostics   divert.Diagnostics         `json:"divertDiagnostics"`
+	ActiveStreams       int64                      `json:"activeStreams"`
+	ApprovalState       string                     `json:"approvalState"`
+	RDPListenAddr       string                     `json:"rdpListenAddr,omitempty"`
+	RDPTargetID         string                     `json:"rdpTargetId,omitempty"`
+	RDPUDPEnabled       bool                       `json:"rdpUdpEnabled"`
+	RDPUDPActive        bool                       `json:"rdpUdpActive"`
+	RDPUDPReason        string                     `json:"rdpUdpReason,omitempty"`
+	RDPPathTCP          string                     `json:"rdpPathTcp,omitempty"`
+	RDPPathUDP          string                     `json:"rdpPathUdp,omitempty"`
+	P2PState            string                     `json:"p2pState,omitempty"`
+	P2PPath             string                     `json:"p2pPath,omitempty"`
+	P2PError            string                     `json:"p2pError,omitempty"`
+	P2PSessionID        uint64                     `json:"p2pSessionId,omitempty"`
+	P2PExitID           string                     `json:"p2pExitId,omitempty"`
+	P2PRTTMs            int64                      `json:"p2pRttMs,omitempty"`
+	P2PCandidateSummary string                     `json:"p2pCandidateSummary,omitempty"`
+	P2PFallbackCount    uint64                     `json:"p2pFallbackCount,omitempty"`
+	P2PBytesUp          uint64                     `json:"p2pBytesUp,omitempty"`
+	P2PBytesDown        uint64                     `json:"p2pBytesDown,omitempty"`
+	NativeUDP           tunnel.DatagramUsage       `json:"nativeUdp"`
 }
 
 // ErrRestartRequired means a saved startup setting has not changed the running
@@ -594,7 +596,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}); err != nil {
 		return fmt.Errorf("write control header: %w", err)
 	}
-	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream}
+	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilitySpeedTest}
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
@@ -804,7 +806,15 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 			start := time.Now()
 			_ = ctrl.SetDeadline(start.Add(5 * time.Second))
 			var pong protocol.PongMessage
-			err := protocol.WriteJSON(ctrl, protocol.PingMessage{Timestamp: start.UnixMilli()})
+			diagnostics, marshalErr := json.Marshal(a.Diagnostics())
+			if marshalErr != nil {
+				log.Printf("[Agent] Encode diagnostics failed: %v", marshalErr)
+				diagnostics = nil
+			} else if len(diagnostics) > 256*1024 {
+				log.Printf("[Agent] Diagnostics snapshot omitted: %d bytes exceeds 256 KiB", len(diagnostics))
+				diagnostics = nil
+			}
+			err := protocol.WriteJSON(ctrl, protocol.PingMessage{Timestamp: start.UnixMilli(), Diagnostics: diagnostics})
 			if err == nil {
 				err = protocol.ReadJSON(ctrl, &pong)
 			}
@@ -1081,7 +1091,7 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 		}
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 		header, err := protocol.ReadStreamHeader(stream)
-		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP) {
+		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
 			<-sem
 			_ = stream.Close()
 			continue
@@ -1235,6 +1245,7 @@ func (a *Agent) Status() AgentStatus {
 	}
 	if sess != nil {
 		st.Transport = string(sess.Transport())
+		st.TunnelDiagnostics = tunnel.DiagnoseSession(sess)
 		select {
 		case <-sess.Done():
 			st.Connected = false

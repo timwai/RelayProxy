@@ -1,8 +1,12 @@
 package session
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"testing"
 
-import "relayproxy/internal/protocol"
+	"relayproxy/internal/protocol"
+)
 
 func TestUnregisterReportsCurrentGenerationOnly(t *testing.T) {
 	m := NewManager()
@@ -42,5 +46,36 @@ func TestIsExitRequiresCapability(t *testing.T) {
 				t.Fatalf("IsExit()=%v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestDeviceDiagnosticsValidateAndClonePayload(t *testing.T) {
+	session := &DeviceSession{}
+	payload := json.RawMessage(`{"sampledAt":"2026-10-03T00:00:00Z","mode":"BOTH"}`)
+	session.SetDiagnostics(payload)
+	payload[2] = 'X'
+
+	first := session.DiagnosticsSnapshot()
+	if first == nil || !json.Valid(first.Payload) || bytes.Contains(first.Payload, []byte("XampledAt")) {
+		t.Fatalf("stored diagnostics aliases caller payload: %s", first.Payload)
+	}
+	first.Payload[2] = 'Y'
+	second := session.DiagnosticsSnapshot()
+	if bytes.Contains(second.Payload, []byte("YampledAt")) {
+		t.Fatal("diagnostics snapshot aliases stored payload")
+	}
+	if second.Active {
+		t.Fatal("inactive diagnostics were marked active")
+	}
+	session.SetDiagnostics(json.RawMessage(`{"connections":[{"state":"active"}]}`))
+	if active := session.DiagnosticsSnapshot(); active == nil || !active.Active {
+		t.Fatalf("active peer connection was not detected: %+v", active)
+	}
+	session.SetDiagnostics(second.Payload)
+
+	session.SetDiagnostics(json.RawMessage(`{invalid`))
+	session.SetDiagnostics(bytes.Repeat([]byte(" "), 256*1024+1))
+	if got := session.DiagnosticsSnapshot(); got == nil || !bytes.Equal(got.Payload, second.Payload) {
+		t.Fatalf("invalid or oversized payload replaced last valid diagnostics: %+v", got)
 	}
 }

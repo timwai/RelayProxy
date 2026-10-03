@@ -11,6 +11,7 @@ import (
 	agentexit "relayproxy/agent/exit"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/speedtest"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/repository"
 	"relayproxy/server/session"
@@ -190,6 +191,8 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 		r.handleOpenTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenUDP:
 		r.handleOpenUDP(ctx, header, clientStream, clientSession, handshakeDeadline)
+	case protocol.FrameTypeSpeedTest:
+		r.handleSpeedTest(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenRDP:
 		r.handleOpenRDPTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenRDPUDP:
@@ -206,6 +209,87 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	default:
 		log.Printf("[StreamRouter] Unsupported FrameType %d from device %s", header.Type, clientSession.DeviceID)
 	}
+}
+
+func (r *StreamRouter) handleSpeedTest(ctx context.Context, header *protocol.StreamHeader, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession, handshakeDeadline time.Time) {
+	var req protocol.SpeedTestRequest
+	if err := protocol.ReadJSON(clientStream, &req); err != nil {
+		_ = speedtest.WriteError(clientStream, header.RequestID, protocol.ErrCodeInvalidRequest, err)
+		return
+	}
+	if !containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) || !hasCapability(clientSession, protocol.CapabilitySpeedTest) {
+		_ = speedtest.WriteError(clientStream, req.RequestID, protocol.ErrCodeAccessDenied, errors.New("speed test capability is not available"))
+		return
+	}
+	if _, err := speedtest.Validate(req); err != nil {
+		_ = speedtest.WriteError(clientStream, req.RequestID, protocol.ErrCodeInvalidRequest, err)
+		return
+	}
+
+	exitSession, localExit, err := r.resolveExitSession(clientSession, header.ExitDeviceID)
+	if err != nil {
+		_ = speedtest.WriteError(clientStream, req.RequestID, protocol.ErrCodeExitOffline, err)
+		return
+	}
+	if localExit {
+		header.ExitDeviceID = protocol.ServerExitDeviceID
+		clientSession.ActiveStreams.Add(1)
+		activeExitID := header.ExitDeviceID
+		clientSession.ActiveExitID.Store(&activeExitID)
+		measurement, serveErr := speedtest.Serve(clientStream, req)
+		if req.Direction == protocol.SpeedTestUpload {
+			clientSession.BytesUp.Add(int64(measurement.Bytes))
+		} else {
+			clientSession.BytesDown.Add(int64(measurement.Bytes))
+		}
+		if clientSession.ActiveStreams.Add(-1) <= 0 {
+			clientSession.ActiveExitID.CompareAndSwap(&activeExitID, nil)
+		}
+		if serveErr != nil {
+			log.Printf("[SpeedTest] server exit failed for %s: %v", clientSession.DeviceID, serveErr)
+		}
+		return
+	}
+
+	header.ExitDeviceID = exitSession.DeviceID
+	authorized, authErr := r.authorizeExit(clientSession, exitSession)
+	if authErr != nil || !authorized {
+		_ = speedtest.WriteError(clientStream, req.RequestID, protocol.ErrCodeAccessDenied, errors.New("client is not authorized to access this exit node"))
+		return
+	}
+	if !hasCapability(exitSession, protocol.CapabilitySpeedTest) {
+		_ = speedtest.WriteError(clientStream, req.RequestID, protocol.ErrCodeInvalidRequest, errors.New("selected exit does not support speed tests"))
+		return
+	}
+
+	openCtx, cancel := context.WithDeadline(ctx, handshakeDeadline)
+	defer cancel()
+	exitStream, err := exitSession.Tunnel.OpenStream(openCtx)
+	if err != nil {
+		_ = speedtest.WriteError(clientStream, req.RequestID, protocol.ErrCodeStreamOpenFailed, err)
+		return
+	}
+	defer exitStream.Close()
+	_ = exitStream.SetDeadline(handshakeDeadline)
+	if err := protocol.WriteStreamHeader(exitStream, header); err == nil {
+		err = protocol.WriteJSON(exitStream, req)
+	}
+	if err != nil {
+		_ = speedtest.WriteError(clientStream, req.RequestID, protocol.ErrCodeStreamOpenFailed, err)
+		return
+	}
+	_ = clientStream.SetDeadline(time.Time{})
+	_ = exitStream.SetDeadline(time.Time{})
+	clientSession.ActiveStreams.Add(1)
+	exitSession.ActiveStreams.Add(1)
+	activeExitID := &exitSession.DeviceID
+	clientSession.ActiveExitID.Store(activeExitID)
+	bytesUp, bytesDown := r.pipeStreams(ctx, clientStream, exitStream, clientSession, exitSession)
+	if clientSession.ActiveStreams.Add(-1) <= 0 {
+		clientSession.ActiveExitID.CompareAndSwap(activeExitID, nil)
+	}
+	exitSession.ActiveStreams.Add(-1)
+	log.Printf("[SpeedTest] %s -> %s direction=%s up=%d down=%d", clientSession.DeviceID, exitSession.DeviceID, req.Direction, bytesUp, bytesDown)
 }
 
 func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.StreamHeader, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession, handshakeDeadline time.Time) {

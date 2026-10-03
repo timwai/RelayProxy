@@ -17,6 +17,7 @@ import (
 	"relayproxy/internal/acl"
 	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/speedtest"
 	"relayproxy/internal/tunnel"
 )
 
@@ -44,6 +45,9 @@ type Handler struct {
 	relayACLMu       sync.Mutex
 	relayACLCacheKey string
 	relayACLCache    *acl.Checker
+	diagnosticsMu    sync.Mutex
+	diagnosticsNext  uint64
+	diagnosticsTCP   map[uint64]*TCPDiagnostic
 }
 
 func NewHandler(cfg HandlerConfig) *Handler {
@@ -52,9 +56,10 @@ func NewHandler(cfg HandlerConfig) *Handler {
 	}
 	cfg.Upstream = cfg.Upstream.normalized()
 	return &Handler{
-		cfg:      cfg,
-		resolver: newDNSCache(defaultDNSCacheTTL, defaultDNSCacheEntries),
-		resume:   newResumeRegistry(cfg.ResumeGrace, cfg.ResumeMaxSessions),
+		cfg:            cfg,
+		resolver:       newDNSCache(defaultDNSCacheTTL, defaultDNSCacheEntries),
+		resume:         newResumeRegistry(cfg.ResumeGrace, cfg.ResumeMaxSessions),
+		diagnosticsTCP: make(map[uint64]*TCPDiagnostic),
 	}
 }
 
@@ -97,9 +102,22 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 		h.handleOpenTCP(ctx, stream)
 	case protocol.FrameTypeOpenUDP:
 		h.handleOpenUDP(ctx, stream)
+	case protocol.FrameTypeSpeedTest:
+		h.handleSpeedTest(stream)
 	default:
 		log.Printf("[ExitHandler] Unsupported frame type: %d", header.Type)
 	}
+}
+
+func (h *Handler) handleSpeedTest(stream tunnel.TunnelStream) {
+	var req protocol.SpeedTestRequest
+	if err := protocol.ReadJSON(stream, &req); err != nil {
+		_ = speedtest.WriteError(stream, "", protocol.ErrCodeInvalidRequest, err)
+		return
+	}
+	h.activeStreams.Add(1)
+	defer h.activeStreams.Add(-1)
+	_, _ = speedtest.Serve(stream, req)
 }
 
 func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream) {
@@ -255,7 +273,10 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 	h.activeStreams.Add(1)
 	defer h.activeStreams.Add(-1)
 
-	tunnel.Pipe(ctx, stream, targetConn, 5*time.Minute, nil)
+	metrics := &tunnel.PipeMetrics{}
+	diagnosticID := h.beginTCPDiagnostic(req.Host, req.Port, remoteTarget, metrics)
+	defer h.endTCPDiagnostic(diagnosticID)
+	tunnel.PipeWithMetrics(ctx, stream, targetConn, 5*time.Minute, nil, metrics)
 }
 
 func (h *Handler) handleTCPResumeOpen(
@@ -280,16 +301,23 @@ func (h *Handler) handleTCPResumeOpen(
 		Identity:   peer.Identity,
 		Generation: 1,
 	}
+	metrics := &tunnel.PipeMetrics{}
+	diagnosticID := h.beginTCPDiagnostic(req.Host, req.Port, remoteTarget, metrics)
 	h.activeStreams.Add(1)
 	session, err := h.resume.registerLogical(
 		local,
 		targetConn,
 		remoteTarget,
 		h.cfg.ResumeReplayLimit,
-		func() { h.activeStreams.Add(-1) },
+		metrics,
+		func() {
+			h.activeStreams.Add(-1)
+			h.endTCPDiagnostic(diagnosticID)
+		},
 	)
 	if err != nil {
 		h.activeStreams.Add(-1)
+		h.endTCPDiagnostic(diagnosticID)
 		_ = targetConn.Close()
 		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{
 			RequestID:    req.RequestID,

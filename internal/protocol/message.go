@@ -1,6 +1,10 @@
 package protocol
 
-import "relayproxy/internal/acl"
+import (
+	"encoding/json"
+
+	"relayproxy/internal/acl"
+)
 
 // FrameType identifies the kind of stream or message frame
 type FrameType uint8
@@ -20,6 +24,7 @@ const (
 	FrameTypeRDPControl  FrameType = 0x0C
 	FrameTypePushMessage FrameType = 0x0D
 	FrameTypeP2PControl  FrameType = 0x0E
+	FrameTypeSpeedTest   FrameType = 0x0F
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream
@@ -92,6 +97,31 @@ type OpenUDPResponse struct {
 	ErrorMessage  string `json:"errorMessage,omitempty"`
 	Mode          string `json:"mode,omitempty"`
 	AssociationID uint64 `json:"associationId,omitempty"`
+}
+
+const (
+	SpeedTestUpload   = "upload"
+	SpeedTestDownload = "download"
+)
+
+// SpeedTestRequest opens a bounded data stream between a client and one
+// authorized exit. It never connects to an external target.
+type SpeedTestRequest struct {
+	RequestID  string `json:"requestId"`
+	Direction  string `json:"direction"`
+	DurationMS int    `json:"durationMs"`
+}
+
+type SpeedTestResponse struct {
+	RequestID    string `json:"requestId"`
+	Success      bool   `json:"success"`
+	ErrorCode    string `json:"errorCode,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
+type SpeedTestComplete struct {
+	Bytes      uint64  `json:"bytes"`
+	DurationMS float64 `json:"durationMs"`
 }
 
 // OpenRDPRequest contains no host or port by design. The relay resolves the
@@ -181,7 +211,8 @@ type PushMessageReceipt struct {
 
 // PingMessage for heartbeat
 type PingMessage struct {
-	Timestamp int64 `json:"timestamp"`
+	Timestamp   int64           `json:"timestamp"`
+	Diagnostics json.RawMessage `json:"diagnostics,omitempty"`
 }
 
 // PongMessage for heartbeat response

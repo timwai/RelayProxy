@@ -242,7 +242,7 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	if direct && d.directFallbackEnabled() {
 		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
 	}
-	conn, err := d.dialTCPOnSession(attemptCtx, sess, exitNodeID, host, port, allowResume)
+	conn, err := d.dialTCPOnSession(attemptCtx, sess, exitNodeID, host, port, allowResume, tcpSessionPath(sess, direct))
 	cancelAttempt()
 	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
@@ -261,10 +261,10 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	// includes the increment, then quarantine that broken direct path.
 	d.recordFallback(exitNodeID)
 	d.recordDirectFailure(exitNodeID, err)
-	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port, false)
+	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port, false, tcpSessionPath(relay, false))
 }
 
-func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, allowResume bool) (net.Conn, error) {
+func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, allowResume bool, path string) (net.Conn, error) {
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
@@ -362,9 +362,12 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 			_ = endpoint.Close()
 			return nil, err
 		}
-		return newResumableTCPConn(d, endpoint, resumeState, exitNodeID, host, port, localAddr, remoteAddr), nil
+		return newResumableTCPConn(d, endpoint, resumeState, exitNodeID, host, port, localAddr, remoteAddr, path), nil
 	}
-	return tunnel.NewNetConnAdapter(stream, localAddr, remoteAddr), nil
+	return &tcpPathConn{
+		NetConnAdapter: &tunnel.NetConnAdapter{Stream: stream, LocalAddrVal: localAddr, RemoteAddrVal: remoteAddr},
+		path:           path,
+	}, nil
 }
 
 func retryableDirectHandshakeError(ctx context.Context, err error) bool {

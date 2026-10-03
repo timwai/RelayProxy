@@ -17,6 +17,9 @@ func WrapConn(c net.Conn, record *Record) net.Conn {
 	if record == nil {
 		return c
 	}
+	if source, ok := c.(proxyPathSource); ok {
+		record.setPathSource(source)
+	}
 	record.Activate()
 	return &conn{Conn: c, record: record}
 }

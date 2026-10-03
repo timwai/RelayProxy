@@ -67,6 +67,7 @@
     const values = [
       ['进程',record.process || '未识别'],['Windows 服务',serviceNames(record).join(', ') || '—'],['进程别名',(record.process_aliases || []).join(', ') || '—'],['本地端点',record.source || '未知'],['目标',record.host || record.ip || '未知'],
       ['目标 IP',record.ip || '由出口解析，未返回 IP'],['域名来源',record.domain_source === 'requested' ? '应用请求' : record.domain_source === 'dns' ? 'DNS 应答关联' : '未知'],['出口',record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地')],
+      ['传输路径',record.path || '未记录'],
       ['命中规则',ruleNames[record.rule] || record.rule || '未命名规则'],['开始时间',new Date(record.started_at).toLocaleString()],['计数方式',record.accounting === 'packet' ? '数据包载荷（含重传）' : '传输载荷']
     ];
     $('details-grid').replaceChildren();
@@ -79,7 +80,7 @@
     const rows = snapshot.connections.filter(row => {
       if (state !== 'all' && row.state !== state) return false;
       if (protocol && row.protocol !== protocol || action && row.action !== action) return false;
-      return !query || [row.process,row.process_name,row.process_aliases,row.services,row.pid,row.host,row.ip,row.port,row.rule,row.source].some(value => text(value).toLowerCase().includes(query));
+      return !query || [row.process,row.process_name,row.process_aliases,row.services,row.pid,row.host,row.ip,row.port,row.rule,row.source,row.exit_id,row.path].some(value => text(value).toLowerCase().includes(query));
     });
     rows.sort((a,b) => {
       const x = sortValue(a,sort), y = sortValue(b,sort);

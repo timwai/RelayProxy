@@ -202,6 +202,7 @@ func TestHandledDirectTCPUsesLocalSocket(t *testing.T) {
 }
 
 func TestTCPUsesOneFrozenDecisionAndPreservesHalfClose(t *testing.T) {
+	registry := traffic.NewRegistry(4, 4)
 	client, intercepted := tcpPair(t)
 	upstream, target := tcpPair(t)
 	var calls atomic.Int32
@@ -212,7 +213,7 @@ func TestTCPUsesOneFrozenDecisionAndPreservesHalfClose(t *testing.T) {
 		}
 		return upstream, nil
 	}}
-	server := newTestServer(t, Options{Dialer: dialer, Config: Config{DefaultAction: ActionDirect,
+	server := newTestServer(t, Options{Dialer: dialer, Traffic: registry, Config: Config{DefaultAction: ActionDirect,
 		Rules: []Rule{{Enabled: true, Process: "browser.exe", Action: ActionProxy, ExitID: "exit-a"}}}})
 	flow := testFlow(ProtoTCP, nil)
 	flow.Host = "example.com"
@@ -255,6 +256,16 @@ func TestTCPUsesOneFrozenDecisionAndPreservesHalfClose(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("dial count=%d", calls.Load())
+	}
+	var download *traffic.Connection
+	for _, connection := range registry.Snapshot().Connections {
+		if connection.Action == string(ActionProxy) {
+			copy := connection
+			download = &copy
+		}
+	}
+	if download == nil || download.DownloadIO == nil || download.DownloadIO.WriteBytes != uint64(len(reply)) || download.Download != uint64(len(reply)) {
+		t.Fatalf("missing download diagnostics or duplicated accounting: %+v", download)
 	}
 }
 

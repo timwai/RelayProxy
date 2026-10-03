@@ -113,8 +113,9 @@
         <div class="notice subtle rp-notice">实际目标访问权限始终受服务端规则限制；设备出口还受对应客户端本地规则限制，Server Exit 则使用服务端 exit 配置。</div><div id="exits-grid" class="exits-grid"></div>
       </section>
       <section id="page-sessions" class="page" hidden>
-        <div class="page-heading"><div><p class="eyebrow">LIVE SESSIONS</p><h1>实时连接</h1><p class="muted">按设备显示正在处理的流；传输量为本次设备会话累计。</p></div></div>
-        <article class="panel rp-card"><div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>设备</th><th>角色</th><th>选定出口</th><th>传输</th><th>活跃流</th><th>上传 / 下载</th></tr></thead><tbody id="sessions-body"></tbody></table></div></article>
+        <div class="page-heading"><div><p class="eyebrow">LIVE SESSIONS</p><h1>实时连接</h1><p class="muted">按设备显示正在处理的流；传输量为本次设备会话累计。</p></div><button id="capture-diagnostics" type="button">采集 30 秒诊断</button></div>
+        <div id="diagnostic-progress" class="notice subtle" hidden></div>
+        <article class="panel rp-card"><div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>设备</th><th>角色</th><th>选定出口</th><th>传输</th><th>活跃流</th><th>上传 / 下载</th><th>诊断</th></tr></thead><tbody id="sessions-body"></tbody></table></div></article>
         <article class="panel rp-card">
           <div class="panel-heading rp-card-heading"><div><h2>P2P Direct Path</h2><small>仅展示脱敏后的路径报告和租约状态</small></div><span id="p2p-session-count" class="badge neutral">0</span></div>
           <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>Client → Exit</th><th>状态</th><th>Client 路径</th><th>Exit 路径</th><th>Lease 到期</th></tr></thead><tbody id="p2p-sessions-body"></tbody></table></div>

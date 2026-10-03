@@ -12,6 +12,7 @@ const (
 	// established P2P streams. It is effective only when the authenticated Relay
 	// confirms that both Client and Exit advertise it for the concrete P2P session.
 	CapabilityProxyStreamResume = "proxy_stream_resume_v1"
+	CapabilitySpeedTest         = "speed_test_v1"
 
 	P2PControlConnectRequest  = "connect_request"
 	P2PControlConnectOffer    = "connect_offer"

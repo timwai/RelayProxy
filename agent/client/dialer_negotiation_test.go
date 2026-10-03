@@ -288,6 +288,7 @@ func TestTCPDirectHandshakeTransportFailureFallsBackToRelay(t *testing.T) {
 	if direct.opens.Load() != 1 || relay.opens.Load() != 1 {
 		t.Fatalf("unexpected attempts direct=%d relay=%d", direct.opens.Load(), relay.opens.Load())
 	}
+	requireTCPPath(t, conn, protocol.P2PPathRelayTLS)
 	if fallbacks.Load() != 1 {
 		t.Fatalf("fallback metric=%d, want 1", fallbacks.Load())
 	}

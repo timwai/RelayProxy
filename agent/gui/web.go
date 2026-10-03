@@ -223,6 +223,8 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
+	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
+	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
 	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
 	mux.HandleFunc("POST /api/rdp/disconnect", func(rw http.ResponseWriter, _ *http.Request) {
@@ -347,6 +349,22 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeWebJSON(rw, map[string]any{"ok": true, "target": target})
+}
+
+func (w *WebServer) runSpeedTest(rw http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ExitID          string `json:"exitId"`
+		DurationSeconds int    `json:"durationSeconds"`
+	}
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	result, err := w.bridge.RunSpeedTest(in.ExitID, in.DurationSeconds)
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, map[string]any{"ok": true, "result": result})
 }
 
 func (w *WebServer) setAutostart(rw http.ResponseWriter, r *http.Request) {
@@ -496,6 +514,8 @@ const webBridgeJS = `(function () {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
   window.goGetStatus = function () { return request('/api/status'); };
+  window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
+  window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
   window.goConnectRDP = function (targetId, autoLaunch) { return json('/api/rdp/connect', 'POST', {targetId:targetId, autoLaunch:!!autoLaunch}); };
   window.goDisconnectRDP = function () { return json('/api/rdp/disconnect', 'POST', {}); };

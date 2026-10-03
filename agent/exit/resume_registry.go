@@ -49,6 +49,7 @@ type resumeTargetSession struct {
 	cancel       context.CancelFunc
 	remoteTarget string
 	onDone       func()
+	pipeMetrics  *tunnel.PipeMetrics
 
 	startOnce  sync.Once
 	finishOnce sync.Once
@@ -100,6 +101,7 @@ func (r *resumeRegistry) registerLogical(
 	target net.Conn,
 	remoteTarget string,
 	replayLimit int,
+	pipeMetrics *tunnel.PipeMetrics,
 	onDone func(),
 ) (*resumeTargetSession, error) {
 	if local.SendOffset != 0 || local.ReceiveOffset != 0 {
@@ -129,6 +131,7 @@ func (r *resumeRegistry) registerLogical(
 	s.cancel = cancel
 	s.remoteTarget = remoteTarget
 	s.onDone = onDone
+	s.pipeMetrics = pipeMetrics
 	s.mu.Unlock()
 	s.startLogicalBridge()
 	return s, nil
@@ -249,7 +252,7 @@ func (s *resumeTargetSession) startLogicalBridge() {
 				s.finish()
 				return
 			}
-			tunnel.Pipe(ctx, endpoint, target, defaultResumeTargetIdleTimeout, nil)
+			tunnel.PipeWithMetrics(ctx, endpoint, target, defaultResumeTargetIdleTimeout, nil, s.pipeMetrics)
 			if s.registry != nil {
 				s.registry.remove(s.identity.ID)
 			} else {

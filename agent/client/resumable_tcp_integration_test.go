@@ -11,6 +11,8 @@ import (
 	"time"
 
 	exitpkg "relayproxy/agent/exit"
+	"relayproxy/internal/protocol"
+	"relayproxy/internal/traffic"
 	"relayproxy/internal/tunnel"
 )
 
@@ -166,6 +168,13 @@ func TestResumableTCPDirectLossRecoversThroughRelayWithoutRedialingTarget(t *tes
 		t.Fatal(err)
 	}
 	defer conn.Close()
+	requireTCPPath(t, conn, protocol.P2PPathDirectQUIC)
+	registry := traffic.NewRegistry(2, 2)
+	conn = traffic.WrapConn(conn, registry.Start(traffic.Metadata{Protocol: "tcp", Action: "PROXY", ExitID: "exit"}))
+	defer conn.Close()
+	if got := registry.Snapshot().Connections[0].Path; got != protocol.P2PPathDirectQUIC {
+		t.Fatalf("initial recorded path = %q", got)
+	}
 
 	first := []byte("before-direct-loss")
 	if _, err := conn.Write(first); err != nil {
@@ -208,6 +217,13 @@ func TestResumableTCPDirectLossRecoversThroughRelayWithoutRedialingTarget(t *tes
 	}
 	if relay.opens.Load() == 0 {
 		t.Fatal("Relay was not used for recovery")
+	}
+	pathDeadline := time.Now().Add(time.Second)
+	for registry.Snapshot().Connections[0].Path != protocol.P2PPathRelayQUIC {
+		if time.Now().After(pathDeadline) {
+			t.Fatal("connection record did not follow the successful Relay rebind")
+		}
+		time.Sleep(time.Millisecond)
 	}
 	if targetAccepts.Load() != 1 {
 		t.Fatalf("target was redialed during migration: accepts=%d", targetAccepts.Load())

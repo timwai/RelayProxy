@@ -75,6 +75,7 @@
     <nav aria-label="管理导航">
       <a href="#overview" data-section="overview"><svg><use href="#i-grid"/></svg><span>概览</span></a>
       <a href="#devices" data-section="devices"><svg><use href="#i-device"/></svg><span>设备</span><b id="nav-device-count">0</b></a>
+      <a href="#identities" data-section="identities" data-admin><svg><use href="#i-device"/></svg><span>身份</span><b id="nav-identity-count">0</b></a>
       <a href="#messages" data-section="messages"><svg><use href="#i-message"/></svg><span>消息</span><b id="nav-message-count">0</b></a>
       <a href="#sessions" data-section="connections"><svg><use href="#i-activity"/></svg><span>连接</span></a>
       <a href="#rdp-ingress" data-section="rdp" data-admin><svg><use href="#i-device"/></svg><span>RDP</span></a>
@@ -108,7 +109,24 @@
         <article class="panel rp-card" data-admin><div class="panel-heading rp-card-heading"><h2>待审批申请</h2><span id="enrollment-count" class="badge neutral">0</span></div><div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>设备</th><th>系统</th><th>申请能力</th><th>首次 / 最近申请</th><th class="right">操作</th></tr></thead><tbody id="enrollments-body"></tbody></table></div></article>
         <article class="panel rp-card"><div class="toolbar rp-toolbar"><input id="device-search" type="search" placeholder="搜索设备名称或 ID" aria-label="搜索设备"><select id="device-status" aria-label="设备状态"><option value="">所有状态</option><option value="online">在线</option><option value="offline">离线</option><option value="disabled">已禁用</option></select><select id="device-mode" aria-label="设备角色"><option value="">所有角色</option><option value="CLIENT">客户端</option><option value="EXIT">出口节点</option><option value="BOTH">客户端 + 出口</option></select><span id="device-filter-count" class="muted"></span></div><div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>设备</th><th>角色 / 系统</th><th>状态</th><th>传输</th><th>最近在线</th><th class="right">操作</th></tr></thead><tbody id="devices-body"></tbody></table></div></article>
       </section>
-      <section id="page-exits" class="page" hidden>
+            <section id="page-identities" class="page" hidden data-admin>
+        <div class="page-heading"><div><p class="eyebrow">IDENTITIES</p><h1>身份与接入密钥</h1><p class="muted">客户端只填写接入密钥；服务端由密钥确定唯一身份。密钥原文仅在签发时显示一次。</p></div><button id="identity-refresh" type="button" class="rp-btn"><svg><use href="#i-refresh"/></svg>刷新</button></div>
+        <article class="panel rp-card">
+          <div class="panel-heading rp-card-heading"><div><h2>创建身份</h2><small>身份能力决定该身份下设备可申请的最大能力范围</small></div></div>
+          <form id="identity-create-form">
+            <div class="form-grid"><div><label for="identity-create-name">身份名称</label><input id="identity-create-name" maxlength="100" required placeholder="例如：研发组 / 张三"></div><div><label>状态</label><input value="创建后立即启用" disabled></div></div>
+            <div class="capability-editor-heading"><h3>允许能力</h3><span>至少选择一项</span></div>
+            <div id="identity-create-capabilities" class="capability-list"></div>
+            <p id="identity-create-error" class="form-error" role="alert" hidden></p>
+            <div class="button-row"><button id="identity-create-submit" type="submit" class="primary rp-btn rp-btn-primary">创建身份</button></div>
+          </form>
+        </article>
+        <article class="panel rp-card">
+          <div class="panel-heading rp-card-heading"><div><h2>身份列表</h2><small>禁用身份会使其全部接入密钥和在线会话失效</small></div><span id="identity-count" class="badge neutral">0</span></div>
+          <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>身份</th><th>状态</th><th>能力</th><th>策略版本</th><th>更新时间</th><th class="right">操作</th></tr></thead><tbody id="identities-body"></tbody></table></div>
+        </article>
+      </section>
+<section id="page-exits" class="page" hidden>
         <div class="page-heading"><div><p class="eyebrow">EXIT NODES</p><h1>出口节点</h1><p class="muted">展示当前在线的设备出口，以及已启用的 Relay Server 本机出口。</p></div></div>
         <div class="notice subtle rp-notice">实际目标访问权限始终受服务端规则限制；设备出口还受对应客户端本地规则限制，Server Exit 则使用服务端 exit 配置。</div><div id="exits-grid" class="exits-grid"></div>
       </section>
@@ -209,6 +227,30 @@
 </dialog>
 <dialog id="enrollment-dialog"><form method="dialog" class="dialog-close"><button aria-label="关闭">×</button></form><p class="eyebrow">ENROLLMENT</p><h2 id="enrollment-title"></h2><p id="enrollment-summary" class="muted"></p><div id="enrollment-capabilities" class="capability-list"></div><p class="field-hint">可一次批准多项能力。服务端只会授予客户端本次连接声明过的能力。</p><p id="enrollment-capability-error" class="form-error" role="alert" hidden></p><div class="device-actions"><button id="enrollment-reject" class="danger">拒绝申请</button><button id="enrollment-approve" class="primary rp-btn rp-btn-primary">批准选中能力</button></div></dialog>
 <dialog id="device-dialog"><form method="dialog" class="dialog-close"><button aria-label="关闭">×</button></form><p class="eyebrow">DEVICE</p><h2 id="device-title"></h2><div class="detail-list" id="device-details"></div><section id="device-capability-editor" data-admin class="capability-editor"><div class="capability-editor-heading"><h3>授权能力</h3><span>可多选</span></div><p class="field-hint">修改后会立即断开设备连接，并在下次连接时应用新授权。至少保留一项能力；全部停用请撤销设备授权。</p><div id="device-capabilities" class="capability-list"></div><p id="device-capability-error" class="form-error" role="alert" hidden></p><div class="device-actions"><button id="device-capabilities-save" class="primary rp-btn rp-btn-primary">保存授权</button></div></section><section id="device-rdp-access-editor" data-admin class="capability-editor" hidden><div class="capability-editor-heading"><h3>RDP 可连接设备</h3><span id="device-rdp-target-count">0 台已授权</span></div><p class="field-hint">仅勾选的 RDP 主机会下发给此 Agent。未授权设备不会出现在 Agent 的一键连接列表，也无法通过 Server 建立 RDP 会话。</p><div id="device-rdp-targets" class="capability-list"></div><p id="device-rdp-target-error" class="form-error" role="alert" hidden></p><div class="device-actions"><button id="device-rdp-targets-save" class="primary rp-btn rp-btn-primary">保存 RDP 授权</button></div></section><div class="device-actions"><button id="device-revoke" data-admin class="danger">撤销设备授权</button><button id="device-delete" data-admin class="danger">删除设备</button></div><p class="field-hint">撤销会保留安装身份并禁止再次申请；删除会清除设备和审批身份，下次连接时可重新申请。</p><p id="device-action-error" class="form-error" role="alert" hidden></p></dialog>
+<dialog id="identity-dialog" aria-labelledby="identity-dialog-title">
+  <form method="dialog" class="dialog-close"><button aria-label="关闭身份配置">×</button></form>
+  <p class="eyebrow">IDENTITY</p><h2 id="identity-dialog-title">身份配置</h2>
+  <p id="identity-dialog-summary" class="muted"></p>
+  <div class="form-grid"><div><label for="identity-name">身份名称</label><input id="identity-name" maxlength="100" required></div><div><label for="identity-status">状态</label><select id="identity-status"><option value="active">启用</option><option value="disabled">禁用</option></select></div></div>
+  <div class="capability-editor-heading"><h3>允许能力</h3><span id="identity-policy-revision">策略版本 —</span></div>
+  <div id="identity-capabilities" class="capability-list"></div>
+  <p id="identity-error" class="form-error" role="alert" hidden></p>
+  <div class="button-row"><button id="identity-save" type="button" class="primary rp-btn rp-btn-primary">保存身份</button></div>
+  <section class="capability-editor">
+    <div class="capability-editor-heading"><h3>接入密钥</h3><span>原文只显示一次</span></div>
+    <div class="form-grid"><div><label for="identity-key-label">备注</label><input id="identity-key-label" maxlength="100" placeholder="例如：Android 手机"></div><div><label for="identity-key-expires">过期时间（可选）</label><input id="identity-key-expires" type="datetime-local"></div></div>
+    <div class="button-row"><button id="identity-key-issue" type="button" class="primary rp-btn rp-btn-primary">签发新密钥</button></div>
+    <p id="identity-key-error" class="form-error" role="alert" hidden></p>
+    <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>备注 / ID</th><th>创建时间</th><th>过期时间</th><th>最近使用</th><th>状态</th><th class="right">操作</th></tr></thead><tbody id="identity-keys-body"></tbody></table></div>
+  </section>
+</dialog>
+<dialog id="issued-key-dialog" aria-labelledby="issued-key-title">
+  <form method="dialog" class="dialog-close"><button aria-label="关闭接入密钥">×</button></form>
+  <p class="eyebrow">ACCESS KEY</p><h2 id="issued-key-title">接入密钥已签发</h2>
+  <p class="muted">这是唯一一次显示密钥原文。复制并保存到目标客户端后关闭此窗口。</p>
+  <div class="address-preview"><span>接入密钥</span><code id="issued-access-key" class="mono"></code><button id="issued-key-copy" type="button" class="small-button rp-btn">复制</button></div>
+  <p class="field-hint">客户端不需要填写身份 ID；Relay Server 会根据此密钥确定身份。</p>
+</dialog>
 <dialog id="password-dialog" aria-labelledby="password-title" aria-describedby="password-help">
   <form method="dialog" class="dialog-close"><button aria-label="关闭修改密码">×</button></form>
   <p class="eyebrow">ACCOUNT</p><h2 id="password-title">修改管理密码</h2>

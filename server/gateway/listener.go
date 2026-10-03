@@ -554,6 +554,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	deviceSession := &session.DeviceSession{
 		DeviceID:      authorization.DeviceID,
 		DeviceName:    hello.DeviceName,
+		Fingerprint:   fingerprint,
 		OwnerUserID:    authorization.OwnerUserID,
 		IdentityID:     authorization.IdentityID,
 		IdentityName:   authorization.IdentityName,
@@ -736,6 +737,13 @@ func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 		if err := protocol.ReadJSON(dev.ControlStream, &ping); err != nil {
 			return
 		}
+		if dev.IdentityID != "" {
+			if g.cfg.RecheckIdentityDevice == nil ||
+				!g.cfg.RecheckIdentityDevice(dev.Fingerprint, dev.DeviceID, dev.IdentityID, dev.AccessKeyID) {
+				log.Printf("[Gateway] Identity authorization expired or was revoked: device=%s identity=%s", dev.DeviceID, dev.IdentityID)
+				return
+			}
+		}
 		dev.TouchHeartbeat()
 		dev.SetDiagnostics(ping.Diagnostics)
 		if g.cfg.OnDeviceHeartbeat != nil {
@@ -755,7 +763,7 @@ func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 			}
 		}
 		if containsCapability(dev.Grants, protocol.CapabilityProxyClient) && g.cfg.ListProxyExits != nil {
-			exits, err := g.cfg.ListProxyExits(dev.DeviceID, dev.OwnerUserID)
+			exits, err := g.cfg.ListProxyExits(dev.DeviceID, dev.OwnerUserID, dev.IdentityID)
 			if err != nil {
 				log.Printf("[Gateway] Refresh proxy exits for %s: %v", dev.DeviceID, err)
 			} else {

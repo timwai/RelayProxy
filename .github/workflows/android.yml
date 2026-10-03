@@ -76,8 +76,13 @@ jobs:
       - name: Build mobile core AAR
         run: |
           mkdir -p android/app/libs
-          gomobile bind -target=android -androidapi 26 \
+          # Match the production build: RelayProxy Android ships only ARM32
+          # and ARM64, and external linking pins ELF LOAD segments to 16 KB.
+          # Generating x86/x86_64 here made Gradle validate development-only
+          # gomobile libraries that are not part of our supported APKs.
+          gomobile bind -target=android/arm,android/arm64 -androidapi 26 \
             -javapkg com.relayproxy.core \
+            -ldflags="-linkmode=external -extldflags=-Wl,-z,max-page-size=16384,-z,common-page-size=16384" \
             -o android/app/libs/mobilecore.aar \
             ./mobile/androidcore
 

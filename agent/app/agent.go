@@ -121,7 +121,7 @@ func init() {
 }
 
 type AgentConfig struct {
-	Identity        *deviceidentity.Identity
+	Identity *deviceidentity.Identity
 	// AccessKey is a runtime-only credential. It must come from a protected
 	// secret source and is never included in AgentStatus or diagnostics.
 	AccessKey       string
@@ -250,45 +250,45 @@ type AgentStatus struct {
 var ErrRestartRequired = errors.New("agent role change requires restart")
 
 type Agent struct {
-	cfg           AgentConfig
-	tunnelMgr     *tunnel.TunnelManager
-	dialer        *routing.RoutingDialer
-	rawDialer     *client.TunnelDialer
-	routingEngine *routing.Engine
-	traffic       *traffic.Registry
-	messages      *MessageBuffer
-	exitHandler   *exit.Handler
-	socksServer   *socks5.Server
-	httpServer    *httpproxy.Server
-	divertSrv     *divert.Server
-	divertStage   atomic.Pointer[string]
-	divertError   atomic.Pointer[string]
-	ctrlStream    tunnel.TunnelStream
-	readySession  tunnel.TunnelSession
-	epoch         uint64
-	started       bool
-	selectedExit  atomic.Pointer[string]
-	latencyMs     atomic.Int64
-	handshakeOK   atomic.Bool
-	approvalState atomic.Pointer[string]
+	cfg            AgentConfig
+	tunnelMgr      *tunnel.TunnelManager
+	dialer         *routing.RoutingDialer
+	rawDialer      *client.TunnelDialer
+	routingEngine  *routing.Engine
+	traffic        *traffic.Registry
+	messages       *MessageBuffer
+	exitHandler    *exit.Handler
+	socksServer    *socks5.Server
+	httpServer     *httpproxy.Server
+	divertSrv      *divert.Server
+	divertStage    atomic.Pointer[string]
+	divertError    atomic.Pointer[string]
+	ctrlStream     tunnel.TunnelStream
+	readySession   tunnel.TunnelSession
+	epoch          uint64
+	started        bool
+	selectedExit   atomic.Pointer[string]
+	latencyMs      atomic.Int64
+	handshakeOK    atomic.Bool
+	approvalState  atomic.Pointer[string]
 	approvedMode   string
 	identityName   string
 	policyRevision int64
-	rdpTargets    []rdp.Target
-	rdpConnection *rdp.Connection
-	rdpP2P        *rdpp2p.Manager
-	rdpSession    *rdpp2p.Session
-	proxyP2P      *proxyp2p.Manager
-	closed        atomic.Bool
-	ctx           context.Context
-	cancel        context.CancelFunc
-	wg            sync.WaitGroup
-	mu            sync.RWMutex
-	policyMu      sync.RWMutex
-	lifecycleMu   sync.Mutex
-	closeOnce     sync.Once
-	closeErr      error
-	rdpConnectMu  sync.Mutex
+	rdpTargets     []rdp.Target
+	rdpConnection  *rdp.Connection
+	rdpP2P         *rdpp2p.Manager
+	rdpSession     *rdpp2p.Session
+	proxyP2P       *proxyp2p.Manager
+	closed         atomic.Bool
+	ctx            context.Context
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	mu             sync.RWMutex
+	policyMu       sync.RWMutex
+	lifecycleMu    sync.Mutex
+	closeOnce      sync.Once
+	closeErr       error
+	rdpConnectMu   sync.Mutex
 }
 
 func (a *Agent) setDivertStage(stage string, err error) {

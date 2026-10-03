@@ -378,7 +378,17 @@ func main() {
 				if name == "" {
 					name = exit.DeviceID
 				}
-				result = append(result, protocol.ProxyExit{DeviceID: exit.DeviceID, Name: name, Online: true})
+				source := "legacy"
+				if identityID != "" {
+					source = "explicit"
+					if exit.IdentityID == identityID {
+						source = "same_identity"
+					}
+				}
+				result = append(result, protocol.ProxyExit{
+					DeviceID: exit.DeviceID, Name: name, IdentityName: exit.IdentityName,
+					AuthorizationSource: source, Online: true,
+				})
 			}
 			if serverExit != nil {
 				authorized, err := db.AuthorizeClientExit(clientID, protocol.ServerExitDeviceID)
@@ -386,10 +396,14 @@ func main() {
 					return nil, err
 				}
 				if authorized {
+					source := "legacy"
+					if identityID != "" {
+						source = "explicit"
+					}
 					result = append(result, protocol.ProxyExit{
 						DeviceID: protocol.ServerExitDeviceID,
-						Name:     "Relay Server",
-						Online:   true,
+						Name: "Relay Server", IdentityName: "系统资源",
+						AuthorizationSource: source, Online: true,
 					})
 				}
 			}

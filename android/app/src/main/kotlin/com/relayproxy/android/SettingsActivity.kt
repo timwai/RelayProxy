@@ -25,6 +25,7 @@ import android.widget.Toast
 
 class SettingsActivity : Activity() {
     private lateinit var server: EditText
+    private lateinit var accessKey: EditText
     private lateinit var deviceName: EditText
     private lateinit var quicPort: EditText
     private lateinit var tcpPort: EditText
@@ -111,6 +112,10 @@ class SettingsActivity : Activity() {
         addSectionHeader(connection, "连接设置", "配置 Relay Server 和传输参数。")
         server = styledField("relay.example.com")
         connection.addView(labeled("Relay Server", server), topMargin(16))
+        accessKey = styledField("rpk_...").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        connection.addView(labeled("接入密钥", accessKey), topMargin(12))
         deviceName = styledField(ConfigStore(this).defaultDeviceName())
         connection.addView(labeled("设备名称", deviceName), topMargin(12))
 
@@ -285,6 +290,7 @@ class SettingsActivity : Activity() {
     private fun saveAndClose() {
         val config = ExitConfig(
             serverAddress = server.text.toString().trim(),
+            accessKey = accessKey.text.toString().trim(),
             deviceName = deviceName.text.toString().trim().ifBlank {
                 ConfigStore(this).defaultDeviceName()
             },
@@ -313,6 +319,11 @@ class SettingsActivity : Activity() {
         if (config.serverAddress.isBlank()) {
             server.error = "必须填写 Server 地址"
             server.requestFocus()
+            return
+        }
+        if (config.accessKey.isNotBlank() && !config.accessKey.startsWith("rpk_")) {
+            accessKey.error = "接入密钥格式不正确"
+            accessKey.requestFocus()
             return
         }
         if (config.clientEnabled && !config.socks5Enabled && !config.httpEnabled) {
@@ -347,6 +358,7 @@ class SettingsActivity : Activity() {
     private fun loadConfig() {
         val cfg = ConfigStore(this).load()
         server.setText(cfg.serverAddress)
+        accessKey.setText(cfg.accessKey)
         deviceName.setText(cfg.deviceName)
         quicPort.setText(cfg.quicPort.toString())
         tcpPort.setText(cfg.tcpPort.toString())

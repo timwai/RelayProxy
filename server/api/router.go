@@ -235,8 +235,18 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("PUT /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateMessageChannel)))
 	r.mux.HandleFunc("DELETE /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteMessageChannel)))
 
+	// Identity APIs. Identity IDs appear only in the authenticated admin plane;
+	// Agents authenticate with an access key and never choose their own identity.
+	r.mux.HandleFunc("GET /api/v1/identities", r.requireAuth(r.requireAdmin(r.handleListIdentities)))
+	r.mux.HandleFunc("POST /api/v1/identities", r.requireAuth(r.requireAdmin(r.handleCreateIdentity)))
+	r.mux.HandleFunc("PATCH /api/v1/identities/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateIdentity)))
+	r.mux.HandleFunc("GET /api/v1/identities/{id}/access-keys", r.requireAuth(r.requireAdmin(r.handleListIdentityAccessKeys)))
+	r.mux.HandleFunc("POST /api/v1/identities/{id}/access-keys", r.requireAuth(r.requireAdmin(r.handleIssueIdentityAccessKey)))
+	r.mux.HandleFunc("DELETE /api/v1/identities/{id}/access-keys/{keyId}", r.requireAuth(r.requireAdmin(r.handleRevokeIdentityAccessKey)))
+
 	// Device APIs
 	r.mux.HandleFunc("GET /api/v1/devices", r.requireAuth(r.handleListDevices))
+	r.mux.HandleFunc("PUT /api/v1/devices/{id}/identity", r.requireAuth(r.requireAdmin(r.handleSetDeviceIdentity)))
 	r.mux.HandleFunc("GET /api/v1/enrollments", r.requireAuth(r.requireAdmin(r.handleListEnrollments)))
 	r.mux.HandleFunc("POST /api/v1/enrollments/{id}/approve", r.requireAuth(r.requireAdmin(r.handleApproveEnrollment)))
 	r.mux.HandleFunc("POST /api/v1/enrollments/{id}/reject", r.requireAuth(r.requireAdmin(r.handleRejectEnrollment)))
@@ -957,9 +967,18 @@ func (r *Router) handleListDevices(w http.ResponseWriter, req *http.Request) {
 			status = "online"
 		}
 
+		identity, err := r.db.GetDeviceIdentitySummary(d.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load device identity")
+			return
+		}
+
 		res = append(res, map[string]any{
 			"id":                    d.ID,
 			"name":                  d.Name,
+			"identityId":            identity.IdentityID,
+			"identityName":          identity.IdentityName,
+			"identityStatus":        identity.IdentityStatus,
 			"deviceMode":            d.DeviceMode,
 			"platform":              d.Platform,
 			"arch":                  d.Arch,

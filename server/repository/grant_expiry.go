@@ -30,7 +30,7 @@ func (db *DB) ExpireIdentityGrants(now time.Time) ([]string, error) {
 	}
 	type deviceGrant struct {
 		id, targetDeviceID, granteeIdentityID, raw string
-		revision                             int64
+		revision                                   int64
 	}
 	expiredDevices := make([]deviceGrant, 0)
 	for deviceRows.Next() {
@@ -83,7 +83,7 @@ func (db *DB) ExpireIdentityGrants(now time.Time) ([]string, error) {
 	}
 	type systemGrant struct {
 		id, resourceID, granteeIdentityID, raw string
-		revision                         int64
+		revision                               int64
 	}
 	expiredSystems := make([]systemGrant, 0)
 	for systemRows.Next() {

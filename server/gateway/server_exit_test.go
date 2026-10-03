@@ -195,3 +195,48 @@ func TestServerExitParticipatesInAutoSelectionAmbiguity(t *testing.T) {
 		t.Fatalf("explicit server exit resolved session=%v local=%v err=%v", exitSession, local, err)
 	}
 }
+
+func TestServerExitRequiresExplicitV4Authorization(t *testing.T) {
+	handler, relay := newServerExitTestHandler(t)
+	allowed := false
+	router := NewStreamRouter(session.NewManager(), relay, func(clientDeviceID, exitDeviceID string) (bool, error) {
+		return allowed && clientDeviceID == "identity-client" && exitDeviceID == protocol.ServerExitDeviceID, nil
+	}, nil)
+	router.SetLocalExit(handler)
+	client := &session.DeviceSession{DeviceID: "identity-client", IdentityID: "idn_client"}
+
+	if _, _, err := router.resolveExitSession(client, protocol.ServerExitDeviceID); err != errExitOffline {
+		t.Fatalf("unauthorized explicit server exit error=%v, want %v", err, errExitOffline)
+	}
+	if _, _, err := router.resolveExitSession(client, ""); err != errNoExitOnline {
+		t.Fatalf("unauthorized auto server exit error=%v, want %v", err, errNoExitOnline)
+	}
+
+	allowed = true
+	exitSession, local, err := router.resolveExitSession(client, protocol.ServerExitDeviceID)
+	if err != nil || !local || exitSession != nil {
+		t.Fatalf("authorized explicit server exit resolved session=%v local=%v err=%v", exitSession, local, err)
+	}
+	exitSession, local, err = router.resolveExitSession(client, "")
+	if err != nil || !local || exitSession != nil {
+		t.Fatalf("authorized auto server exit resolved session=%v local=%v err=%v", exitSession, local, err)
+	}
+}
+
+func TestServerExitV4AutoSelectionDetectsAmbiguity(t *testing.T) {
+	handler, relay := newServerExitTestHandler(t)
+	manager := session.NewManager()
+	manager.Register(&session.DeviceSession{
+		DeviceID: "identity-device-exit", IdentityID: "idn_client",
+		Grants: []string{protocol.CapabilityProxyExit},
+	})
+	router := NewStreamRouter(manager, relay, func(clientDeviceID, exitDeviceID string) (bool, error) {
+		return clientDeviceID == "identity-client" && exitDeviceID == protocol.ServerExitDeviceID, nil
+	}, nil)
+	router.SetLocalExit(handler)
+	client := &session.DeviceSession{DeviceID: "identity-client", IdentityID: "idn_client"}
+
+	if _, _, err := router.resolveExitSession(client, ""); err != errMultipleExits {
+		t.Fatalf("v4 auto-select error=%v, want %v", err, errMultipleExits)
+	}
+}

@@ -20,6 +20,7 @@ import (
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
+	"relayproxy/internal/credentialstore"
 )
 
 const autoStartName = "RelayProxy Agent"
@@ -188,6 +189,62 @@ func (b *UIBridge) ConfigPath() string {
 		return "(未指定)"
 	}
 	return p
+}
+
+
+type AccessKeyState struct {
+	Configured       bool   `json:"configured"`
+	Source           string `json:"source"`
+	ManagedExternally bool  `json:"managedExternally"`
+	RestartRequired  bool   `json:"restartRequired"`
+}
+
+// GetAccessKeyState exposes only credential metadata. The plaintext access key
+// never enters config/status JSON and cannot be read back through the UI bridge.
+func (b *UIBridge) GetAccessKeyState() (AccessKeyState, error) {
+	runtimeKey := strings.TrimSpace(b.agent.Config().AccessKey)
+	if strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")) != "" {
+		return AccessKeyState{
+			Configured: true, Source: "environment", ManagedExternally: true,
+			RestartRequired: false,
+		}, nil
+	}
+	path := credentialstore.PathForConfig(b.rawConfigPath())
+	stored, err := credentialstore.LoadAccessKey(path)
+	if err != nil {
+		return AccessKeyState{}, err
+	}
+	return AccessKeyState{
+		Configured: stored != "", Source: map[bool]string{true: "store", false: "none"}[stored != ""],
+		RestartRequired: stored != runtimeKey,
+	}, nil
+}
+
+// SetAccessKey replaces the protected credential used on the next process
+// start. Existing authenticated sessions are intentionally not mutated in place.
+func (b *UIBridge) SetAccessKey(accessKey string) (AccessKeyState, error) {
+	if strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")) != "" {
+		return AccessKeyState{}, errors.New("RELAYPROXY_ACCESS_KEY 环境变量正在覆盖本地凭据，请先移除该环境变量")
+	}
+	path := credentialstore.PathForConfig(b.rawConfigPath())
+	if path == "" {
+		return AccessKeyState{}, errors.New("未指定配置文件，无法确定凭据存储位置")
+	}
+	if err := credentialstore.SaveAccessKey(path, accessKey); err != nil {
+		return AccessKeyState{}, err
+	}
+	return b.GetAccessKeyState()
+}
+
+func (b *UIBridge) ClearAccessKey() (AccessKeyState, error) {
+	if strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")) != "" {
+		return AccessKeyState{}, errors.New("RELAYPROXY_ACCESS_KEY 环境变量正在覆盖本地凭据，请先移除该环境变量")
+	}
+	path := credentialstore.PathForConfig(b.rawConfigPath())
+	if err := credentialstore.ClearAccessKey(path); err != nil {
+		return AccessKeyState{}, err
+	}
+	return b.GetAccessKeyState()
 }
 
 // rawConfigPath returns the absolute config path, or "" when none was given.

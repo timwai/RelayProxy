@@ -17,11 +17,11 @@ import (
 	"relayproxy/agent/app"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/rdp"
-	"relayproxy/internal/protocol"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
 	"relayproxy/internal/credentialstore"
+	"relayproxy/internal/protocol"
 )
 
 const autoStartName = "RelayProxy Agent"

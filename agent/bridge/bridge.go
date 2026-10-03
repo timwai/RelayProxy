@@ -17,6 +17,7 @@ import (
 	"relayproxy/agent/app"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/rdp"
+	"relayproxy/internal/protocol"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
@@ -82,6 +83,10 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 // GetStatus returns the current agent runtime state
 func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()
+}
+
+func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {
+	return b.agent.ProxyExits()
 }
 
 func (b *UIBridge) GetRDPTargets() []rdp.Target {

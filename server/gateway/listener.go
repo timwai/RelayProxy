@@ -24,30 +24,30 @@ import (
 )
 
 type GatewayConfig struct {
-	TCPAddr                 string // e.g. ":443"
-	QUICAddr                string // e.g. ":443"
-	TLSConfig               *tls.Config
-	PublicHTTPHandler       HTTPHandler
-	ServerInstanceID        string
-	AuthorizeDevice         func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
+	TCPAddr                  string // e.g. ":443"
+	QUICAddr                 string // e.g. ":443"
+	TLSConfig                *tls.Config
+	PublicHTTPHandler        HTTPHandler
+	ServerInstanceID         string
+	AuthorizeDevice          func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
 	ResolveIdentityAccessKey func(accessKey string) (IdentityAccessAuthorization, error)
-	AuthorizeIdentityDevice func(fingerprint string, hello protocol.DeviceHello, identity IdentityAccessAuthorization) (DeviceAuthorization, error)
-	RecheckDevice           func(fingerprint, deviceID string) bool
-	RecheckIdentityDevice   func(fingerprint, deviceID, identityID, accessKeyID string) bool
-	ListRDPTargets          func(controllerID string) ([]protocol.RDPTarget, error)
-	ListProxyExits          func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error)
-	OnDeviceConnected       func(deviceID string)
-	OnDeviceHeartbeat       func(deviceID string)
-	OnDeviceDisconnected    func(deviceID string)
-	MaxConnections          int // global tunnel connection limit
-	MaxConnectionsPerDevice int // per-device concurrent streams (also sent in Welcome)
-	HeartbeatSec            int
-	RendezvousAddress       string
-	RDPLeaseSec             int
-	P2PEnabled              bool
-	P2PRendezvousAddress    string
-	P2PLeaseSec             int
-	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
+	AuthorizeIdentityDevice  func(fingerprint string, hello protocol.DeviceHello, identity IdentityAccessAuthorization) (DeviceAuthorization, error)
+	RecheckDevice            func(fingerprint, deviceID string) bool
+	RecheckIdentityDevice    func(fingerprint, deviceID, identityID, accessKeyID string) bool
+	ListRDPTargets           func(controllerID string) ([]protocol.RDPTarget, error)
+	ListProxyExits           func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error)
+	OnDeviceConnected        func(deviceID string)
+	OnDeviceHeartbeat        func(deviceID string)
+	OnDeviceDisconnected     func(deviceID string)
+	MaxConnections           int // global tunnel connection limit
+	MaxConnectionsPerDevice  int // per-device concurrent streams (also sent in Welcome)
+	HeartbeatSec             int
+	RendezvousAddress        string
+	RDPLeaseSec              int
+	P2PEnabled               bool
+	P2PRendezvousAddress     string
+	P2PLeaseSec              int
+	HandshakeTimeout         time.Duration // covers control stream/header/Hello/Welcome
 }
 
 type IdentityAccessAuthorization struct {
@@ -552,22 +552,22 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 
 	deviceSession := &session.DeviceSession{
-		DeviceID:      authorization.DeviceID,
-		DeviceName:    hello.DeviceName,
-		Fingerprint:   fingerprint,
+		DeviceID:       authorization.DeviceID,
+		DeviceName:     hello.DeviceName,
+		Fingerprint:    fingerprint,
 		OwnerUserID:    authorization.OwnerUserID,
 		IdentityID:     authorization.IdentityID,
 		IdentityName:   authorization.IdentityName,
 		AccessKeyID:    authorization.AccessKeyID,
 		PolicyRevision: authorization.PolicyRevision,
 		Mode:           modeForCapabilities(authorization.ApprovedCapabilities),
-		Capabilities:  hello.TransportCapabilities,
-		Grants:        authorization.ApprovedCapabilities,
-		Transport:     sess.Transport(),
-		Tunnel:        sess,
-		ControlStream: ctrlStream,
-		ConnectedAt:   time.Now(),
-		HeartbeatSec:  heartbeatSec,
+		Capabilities:   hello.TransportCapabilities,
+		Grants:         authorization.ApprovedCapabilities,
+		Transport:      sess.Transport(),
+		Tunnel:         sess,
+		ControlStream:  ctrlStream,
+		ConnectedAt:    time.Now(),
+		HeartbeatSec:   heartbeatSec,
 	}
 
 	g.mu.Lock()

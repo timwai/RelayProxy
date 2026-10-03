@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - feat/proxy-p2p-direct-path
     paths:
       - "android/**"

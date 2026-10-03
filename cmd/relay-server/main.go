@@ -262,8 +262,44 @@ func main() {
 			refreshRDPTargetOnlineState(authorization.RDPTargets, sessionMgr)
 			return authorization, nil
 		},
+		ResolveIdentityAccessKey: func(accessKey string) (gateway.IdentityAccessAuthorization, error) {
+			resolved, err := db.ResolveIdentityAccessKey(accessKey)
+			if err != nil {
+				return gateway.IdentityAccessAuthorization{}, err
+			}
+			return gateway.IdentityAccessAuthorization{
+				KeyID: resolved.KeyID, KeyDigest: resolved.KeyDigest,
+				IdentityID: resolved.IdentityID, IdentityName: resolved.IdentityName,
+				Capabilities: append([]string(nil), resolved.Capabilities...),
+				PolicyRevision: resolved.PolicyRevision,
+			}, nil
+		},
+		AuthorizeIdentityDevice: func(fingerprint string, hello protocol.DeviceHello, identity gateway.IdentityAccessAuthorization) (gateway.DeviceAuthorization, error) {
+			decision, err := db.ObserveIdentityDevice(repository.IdentityAccessAuthorization{
+				KeyID: identity.KeyID, KeyDigest: identity.KeyDigest,
+				IdentityID: identity.IdentityID, IdentityName: identity.IdentityName,
+				Capabilities: append([]string(nil), identity.Capabilities...),
+				PolicyRevision: identity.PolicyRevision,
+			}, repository.DeviceIdentityObservation{
+				Fingerprint: fingerprint, InstallationID: hello.InstallationID, PublicKey: hello.PublicKey,
+				DeviceName: hello.DeviceName, Platform: hello.Platform, Arch: hello.Arch,
+				ClientVersion: hello.ClientVersion, RequestedCapabilities: hello.RequestedCapabilities,
+			})
+			if errors.Is(err, repository.ErrDeviceIdentityConflict) {
+				return gateway.DeviceAuthorization{State: "identity_conflict"}, nil
+			}
+			if err != nil {
+				return gateway.DeviceAuthorization{}, err
+			}
+			authorization := gatewayAuthorization(decision)
+			refreshRDPTargetOnlineState(authorization.RDPTargets, sessionMgr)
+			return authorization, nil
+		},
 		RecheckDevice: func(fingerprint, deviceID string) bool {
 			return db.IsDeviceIdentityApproved(fingerprint, deviceID)
+		},
+		RecheckIdentityDevice: func(fingerprint, deviceID, identityID, accessKeyID string) bool {
+			return db.IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, accessKeyID)
 		},
 		ListRDPTargets: func(controllerID string) ([]protocol.RDPTarget, error) {
 			targets, err := db.ListRDPTargetsForController(controllerID)
@@ -274,14 +310,19 @@ func main() {
 			refreshRDPTargetOnlineState(result, sessionMgr)
 			return result, nil
 		},
-		ListProxyExits: func(clientID, ownerUserID string) ([]protocol.ProxyExit, error) {
-			exits := sessionMgr.GetExitsForOwner(ownerUserID)
+		ListProxyExits: func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error) {
+			var exits []*session.DeviceSession
+			if identityID != "" {
+				exits = sessionMgr.GetExitsForIdentity(identityID)
+			} else {
+				exits = sessionMgr.GetExitsForOwner(ownerUserID)
+			}
 			result := make([]protocol.ProxyExit, 0, len(exits)+1)
 			for _, exit := range exits {
 				if exit == nil || exit.DeviceID == "" || exit.DeviceID == clientID {
 					continue
 				}
-				if ownerUserID == "" {
+				if identityID == "" && ownerUserID == "" {
 					authorized, err := db.AuthorizeClientExit(clientID, exit.DeviceID)
 					if err != nil {
 						return nil, err
@@ -467,6 +508,8 @@ func gatewayAuthorization(decision *repository.DeviceAuthorization) gateway.Devi
 	}
 	authorized := gateway.DeviceAuthorization{
 		State: decision.State, DeviceID: decision.DeviceID, OwnerUserID: decision.OwnerUserID,
+		IdentityID: decision.IdentityID, IdentityName: decision.IdentityName,
+		AccessKeyID: decision.AccessKeyID, PolicyRevision: decision.PolicyRevision,
 		ApprovedCapabilities: append([]string(nil), decision.ApprovedCapabilities...),
 		RDPTargets:           protocolRDPTargets(decision.RDPTargets),
 	}

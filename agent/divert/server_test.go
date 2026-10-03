@@ -104,8 +104,6 @@ func TestHandledDirectCreatesTelemetryWhileBypassDirectDoesNot(t *testing.T) {
 	})
 
 	flow := testFlow(ProtoTCP, nil)
-	flow.Host = "example.com"
-	flow.DomainSource = "dns"
 	route, err := server.ClassifyFlow(flow)
 	if err != nil {
 		t.Fatal(err)
@@ -217,6 +215,8 @@ func TestTCPUsesOneFrozenDecisionAndPreservesHalfClose(t *testing.T) {
 	server := newTestServer(t, Options{Dialer: dialer, Config: Config{DefaultAction: ActionDirect,
 		Rules: []Rule{{Enabled: true, Process: "browser.exe", Action: ActionProxy, ExitID: "exit-a"}}}})
 	flow := testFlow(ProtoTCP, nil)
+	flow.Host = "example.com"
+	flow.DomainSource = "dns"
 	route, err := server.ClassifyFlow(flow)
 	if err != nil {
 		t.Fatal(err)

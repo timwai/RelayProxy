@@ -584,3 +584,282 @@ func normalizeIdentityCapabilities(input []string) ([]string, error) {
 	}
 	return result, nil
 }
+
+
+// ObserveIdentityDevice auto-enrolls a v4 device after its identity access key
+// and Ed25519 proof have been validated by the gateway. Identity is derived
+// exclusively from the server-side access-key record.
+func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observation DeviceIdentityObservation) (*DeviceAuthorization, error) {
+	if access.IdentityID == "" || access.KeyID == "" {
+		return nil, ErrInvalidIdentityAccessKey
+	}
+	if observation.Fingerprint == "" || observation.InstallationID == "" || len(observation.PublicKey) == 0 {
+		return nil, errors.New("incomplete device identity")
+	}
+	effective := intersectIdentityCapabilities(access.Capabilities, observation.RequestedCapabilities)
+	if len(effective) == 0 {
+		return nil, errors.New("identity policy does not allow any requested capability")
+	}
+	if err := validateCapabilityDependencies(effective); err != nil {
+		return nil, err
+	}
+	requestedRaw, err := encodeCapabilities(observation.RequestedCapabilities)
+	if err != nil {
+		return nil, err
+	}
+	approvedRaw, err := encodeCapabilities(effective)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var existingDeviceID sql.NullString
+	var existingInstallation string
+	var existingPublicKey []byte
+	var identityState string
+	err = tx.QueryRow(`SELECT device_id, installation_id, public_key, status
+		FROM device_identities WHERE fingerprint = ?`, observation.Fingerprint).
+		Scan(&existingDeviceID, &existingInstallation, &existingPublicKey, &identityState)
+	switch {
+	case err == nil:
+		if existingInstallation != observation.InstallationID || !bytesEqual(existingPublicKey, observation.PublicKey) {
+			return nil, errors.New("device identity metadata does not match its first observation")
+		}
+		switch identityState {
+		case EnrollmentRevoked:
+			return &DeviceAuthorization{State: EnrollmentRevoked, DeviceID: existingDeviceID.String}, nil
+		case EnrollmentRejected:
+			return &DeviceAuthorization{State: EnrollmentRejected, DeviceID: existingDeviceID.String}, nil
+		case EnrollmentApproved:
+			if !existingDeviceID.Valid || existingDeviceID.String == "" {
+				return nil, errors.New("approved identity has no device")
+			}
+			var boundIdentity sql.NullString
+			var approvalState string
+			if err := tx.QueryRow(`SELECT identity_id, approval_state FROM devices WHERE id = ?`,
+				existingDeviceID.String).Scan(&boundIdentity, &approvalState); err != nil {
+				return nil, err
+			}
+			if approvalState == EnrollmentRevoked {
+				return &DeviceAuthorization{State: EnrollmentRevoked, DeviceID: existingDeviceID.String}, nil
+			}
+			if !boundIdentity.Valid || boundIdentity.String == "" || boundIdentity.String != access.IdentityID {
+				return nil, ErrDeviceIdentityConflict
+			}
+			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, approvedRaw, effective, now); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+			return db.identityDeviceAuthorization(existingDeviceID.String, access, effective)
+		case EnrollmentPending:
+			// A previously pending legacy observation may become an automatic
+			// v4 enrollment only because possession of a valid identity key is
+			// now proven. Rejected/revoked observations are never resurrected.
+		default:
+			return nil, fmt.Errorf("unsupported device identity state %q", identityState)
+		}
+	case errors.Is(err, sql.ErrNoRows):
+		// First observation is created below.
+	default:
+		return nil, err
+	}
+
+	deviceID := "dev_" + uuid.NewString()
+	if _, err := tx.Exec(`INSERT INTO devices
+		(id, owner_user_id, identity_id, name, public_key_fingerprint, installation_id,
+		 platform, arch, client_version, approval_state, requested_capabilities,
+		 approved_capabilities, created_at, updated_at)
+		VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		deviceID, access.IdentityID, fallbackDeviceName(observation.DeviceName), observation.Fingerprint,
+		observation.InstallationID, observation.Platform, observation.Arch, observation.ClientVersion,
+		EnrollmentApproved, requestedRaw, approvedRaw, now, now); err != nil {
+		return nil, err
+	}
+	if err == nil && identityState == EnrollmentPending {
+		result, err := tx.Exec(`UPDATE device_identities SET device_id = ?, status = ?, updated_at = ?
+			WHERE fingerprint = ? AND status = ?`,
+			deviceID, EnrollmentApproved, now, observation.Fingerprint, EnrollmentPending)
+		if err != nil {
+			return nil, err
+		}
+		if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+			if err != nil {
+				return nil, err
+			}
+			return nil, errors.New("pending identity changed during automatic enrollment")
+		}
+		if _, err := tx.Exec(`UPDATE device_enrollment_requests
+			SET state = ?, reviewed_at = ?, reviewed_by = ?, rejection_reason = ''
+			WHERE fingerprint = ? AND state = ?`,
+			EnrollmentApproved, now, "identity:"+access.IdentityID, observation.Fingerprint, EnrollmentPending); err != nil {
+			return nil, err
+		}
+	} else {
+		if _, err := tx.Exec(`INSERT INTO device_identities
+			(fingerprint, device_id, installation_id, public_key, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			observation.Fingerprint, deviceID, observation.InstallationID, observation.PublicKey,
+			EnrollmentApproved, now, now); err != nil {
+			return nil, err
+		}
+	}
+	if err := replaceIdentityDeviceGrants(tx, deviceID, access.IdentityID, effective, now); err != nil {
+		return nil, err
+	}
+	if err := ensureIdentityRDPService(tx, deviceID, fallbackDeviceName(observation.DeviceName), effective, now); err != nil {
+		return nil, err
+	}
+	if err := insertAuthorizationAudit(tx, "device.identity.auto_enroll", "identity:"+access.IdentityID, "device", deviceID,
+		map[string]any{"identityId": access.IdentityID, "accessKeyId": access.KeyID, "capabilities": effective}, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return db.identityDeviceAuthorization(deviceID, access, effective)
+}
+
+var ErrDeviceIdentityConflict = errors.New("device is already bound to another or legacy identity")
+
+func (db *DB) identityDeviceAuthorization(deviceID string, access IdentityAccessAuthorization, effective []string) (*DeviceAuthorization, error) {
+	authorization := &DeviceAuthorization{
+		State: EnrollmentApproved, DeviceID: deviceID,
+		IdentityID: access.IdentityID, IdentityName: access.IdentityName,
+		AccessKeyID: access.KeyID, PolicyRevision: access.PolicyRevision,
+		ApprovedCapabilities: append([]string(nil), effective...),
+	}
+	if containsCapabilityValue(effective, "rdp.controller") {
+		targets, err := db.ListRDPTargetsForController(deviceID)
+		if err != nil {
+			return nil, err
+		}
+		authorization.RDPTargets = targets
+	}
+	return authorization, nil
+}
+
+func updateIdentityManagedDevice(tx *sql.Tx, deviceID string, observation DeviceIdentityObservation, requestedRaw, approvedRaw string, effective []string, now time.Time) error {
+	if _, err := tx.Exec(`UPDATE devices SET name = ?, platform = ?, arch = ?, client_version = ?,
+		requested_capabilities = ?, approved_capabilities = ?, updated_at = ?
+		WHERE id = ? AND approval_state = ?`,
+		fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
+		observation.ClientVersion, requestedRaw, approvedRaw, now, deviceID, EnrollmentApproved); err != nil {
+		return err
+	}
+	var identityID string
+	if err := tx.QueryRow(`SELECT identity_id FROM devices WHERE id = ?`, deviceID).Scan(&identityID); err != nil {
+		return err
+	}
+	if err := replaceIdentityDeviceGrants(tx, deviceID, identityID, effective, now); err != nil {
+		return err
+	}
+	return ensureIdentityRDPService(tx, deviceID, fallbackDeviceName(observation.DeviceName), effective, now)
+}
+
+func replaceIdentityDeviceGrants(tx *sql.Tx, deviceID, identityID string, capabilities []string, now time.Time) error {
+	if _, err := tx.Exec(`DELETE FROM device_grants WHERE device_id = ?`, deviceID); err != nil {
+		return err
+	}
+	for _, capability := range capabilities {
+		if _, err := tx.Exec(`INSERT INTO device_grants (device_id, capability, granted_by, granted_at)
+			VALUES (?, ?, ?, ?)`, deviceID, capability, "identity:"+identityID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureIdentityRDPService(tx *sql.Tx, deviceID, deviceName string, capabilities []string, now time.Time) error {
+	if containsCapabilityValue(capabilities, "rdp.host") {
+		var serviceID string
+		err := tx.QueryRow(`SELECT id FROM rdp_services WHERE device_id = ?`, deviceID).Scan(&serviceID)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			_, err = tx.Exec(`INSERT INTO rdp_services
+				(id, device_id, name, target_host, target_port, enabled, created_at, updated_at)
+				VALUES (?, ?, ?, '127.0.0.1', 3389, TRUE, ?, ?)`,
+				"rdpsvc_"+uuid.NewString(), deviceID, deviceName, now, now)
+			return err
+		case err != nil:
+			return err
+		default:
+			_, err = tx.Exec(`UPDATE rdp_services SET name = ?, enabled = TRUE, updated_at = ? WHERE id = ?`,
+				deviceName, now, serviceID)
+			return err
+		}
+	}
+	if _, err := tx.Exec(`UPDATE rdp_services SET enabled = FALSE, updated_at = ? WHERE device_id = ?`, now, deviceID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE rdp_port_allocations SET status = 'disabled', updated_at = ?
+		WHERE service_id IN (SELECT id FROM rdp_services WHERE device_id = ?)`, now, deviceID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// IsIdentityDeviceAuthorized is the register-time recheck for a v4 session.
+// It verifies the exact access key, identity, device binding and revocation
+// state under the session manager authorization gate.
+func (db *DB) IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, keyID string) bool {
+	now := time.Now().UTC()
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*)
+		FROM device_identities di
+		JOIN devices d ON d.id = di.device_id
+		JOIN identities i ON i.id = d.identity_id
+		JOIN identity_access_keys k ON k.identity_id = i.id
+		WHERE di.fingerprint = ? AND di.device_id = ? AND di.status = ?
+		  AND d.approval_state = ? AND d.identity_id = ?
+		  AND i.status = ? AND k.id = ? AND k.revoked_at IS NULL
+		  AND (k.expires_at IS NULL OR k.expires_at > ?)`,
+		fingerprint, deviceID, EnrollmentApproved, EnrollmentApproved,
+		identityID, IdentityStatusActive, keyID, now).Scan(&count)
+	return err == nil && count == 1
+}
+
+func intersectIdentityCapabilities(identityCapabilities, requested []string) []string {
+	allowed := make(map[string]bool, len(identityCapabilities))
+	for _, capability := range identityCapabilities {
+		allowed[capability] = true
+	}
+	result := make([]string, 0, len(requested))
+	seen := make(map[string]bool, len(requested))
+	for _, capability := range requested {
+		capability = strings.TrimSpace(capability)
+		if capability == "" || seen[capability] || !allowed[capability] {
+			continue
+		}
+		seen[capability] = true
+		result = append(result, capability)
+	}
+	return result
+}
+
+func containsCapabilityValue(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func bytesEqual(left, right []byte) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	var diff byte
+	for index := range left {
+		diff |= left[index] ^ right[index]
+	}
+	return diff == 0
+}

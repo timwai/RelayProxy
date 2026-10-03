@@ -125,6 +125,28 @@
           <div class="panel-heading rp-card-heading"><div><h2>身份列表</h2><small>禁用身份会使其全部接入密钥和在线会话失效</small></div><span id="identity-count" class="badge neutral">0</span></div>
           <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>身份</th><th>状态</th><th>能力</th><th>策略版本</th><th>更新时间</th><th class="right">操作</th></tr></thead><tbody id="identities-body"></tbody></table></div>
         </article>
+        <article class="panel rp-card">
+          <div class="panel-heading rp-card-heading"><div><h2>跨身份设备授权</h2><small>默认拒绝；同身份无需配置。授权对象固定为“目标设备 → 被授权身份”。</small></div><span id="identity-grant-count" class="badge neutral">0</span></div>
+          <form id="identity-grant-form">
+            <input id="identity-grant-id" type="hidden">
+            <input id="identity-grant-revision" type="hidden">
+            <div class="form-grid">
+              <div><label for="identity-grant-target">目标设备</label><select id="identity-grant-target" required></select><small>仅展示已归属身份、且可作为 Proxy Exit 或 RDP Host 的设备。</small></div>
+              <div><label for="identity-grant-grantee">被授权身份</label><select id="identity-grant-grantee" required></select><small>该身份下现有和未来设备都会继承此授权，但仍需自身具备对应客户端能力。</small></div>
+            </div>
+            <div class="permission-grid">
+              <label class="permission"><input id="identity-grant-proxy" type="checkbox"><span><strong>使用 Proxy 出口</strong><small>允许 proxy.client 使用该目标设备的 proxy.exit</small></span></label>
+              <label class="permission"><input id="identity-grant-rdp" type="checkbox"><span><strong>连接 RDP</strong><small>允许 rdp.controller 连接该目标设备的 rdp.host</small></span></label>
+            </div>
+            <div class="form-grid">
+              <div><label for="identity-grant-expires">过期时间（可选）</label><input id="identity-grant-expires" type="datetime-local"><small>过期后新连接立即拒绝；直连 lease 续约也会重新鉴权。</small></div>
+              <div><label>编辑状态</label><input id="identity-grant-mode" value="新建授权" disabled></div>
+            </div>
+            <p id="identity-grant-error" class="form-error" role="alert" hidden></p>
+            <div class="button-row"><button id="identity-grant-cancel" type="button" hidden>取消编辑</button><button id="identity-grant-submit" type="submit" class="primary rp-btn rp-btn-primary">创建授权</button></div>
+          </form>
+          <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>目标设备</th><th>被授权身份</th><th>功能</th><th>过期时间</th><th>版本</th><th class="right">操作</th></tr></thead><tbody id="identity-grants-body"></tbody></table></div>
+        </article>
       </section>
 <section id="page-exits" class="page" hidden>
         <div class="page-heading"><div><p class="eyebrow">EXIT NODES</p><h1>出口节点</h1><p class="muted">展示当前在线的设备出口，以及已启用的 Relay Server 本机出口。</p></div></div>

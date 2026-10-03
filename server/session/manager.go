@@ -11,28 +11,28 @@ import (
 )
 
 type DeviceSession struct {
-	DeviceID      string
-	DeviceName    string
-	Fingerprint   string   // verified installation public-key fingerprint
-	OwnerUserID   string   // legacy authenticated ownership snapshot
-	IdentityID    string   // v4 server-derived connection identity
-	IdentityName  string   // display-only identity name snapshot
-	AccessKeyID   string   // exact v4 key used by this authenticated session
-	PolicyRevision int64   // identity policy revision at authentication time
-	Mode          string   // "CLIENT", "EXIT", "BOTH"
-	Capabilities  []string // authenticated transport/protocol features
-	Grants        []string // server-approved product capabilities
-	Transport     tunnel.TransportType
-	Tunnel        tunnel.TunnelSession
-	ControlStream tunnel.TunnelStream
-	ConnectedAt   time.Time
-	HeartbeatSec  int
-	LastHeartbeat atomic.Int64 // Unix timestamp in seconds
-	ActiveStreams atomic.Int64
-	ActiveExitID  atomic.Pointer[string]
-	BytesUp       atomic.Int64
-	BytesDown     atomic.Int64
-	Diagnostics   atomic.Pointer[DeviceDiagnostics]
+	DeviceID       string
+	DeviceName     string
+	Fingerprint    string   // verified installation public-key fingerprint
+	OwnerUserID    string   // legacy authenticated ownership snapshot
+	IdentityID     string   // v4 server-derived connection identity
+	IdentityName   string   // display-only identity name snapshot
+	AccessKeyID    string   // exact v4 key used by this authenticated session
+	PolicyRevision int64    // identity policy revision at authentication time
+	Mode           string   // "CLIENT", "EXIT", "BOTH"
+	Capabilities   []string // authenticated transport/protocol features
+	Grants         []string // server-approved product capabilities
+	Transport      tunnel.TransportType
+	Tunnel         tunnel.TunnelSession
+	ControlStream  tunnel.TunnelStream
+	ConnectedAt    time.Time
+	HeartbeatSec   int
+	LastHeartbeat  atomic.Int64 // Unix timestamp in seconds
+	ActiveStreams  atomic.Int64
+	ActiveExitID   atomic.Pointer[string]
+	BytesUp        atomic.Int64
+	BytesDown      atomic.Int64
+	Diagnostics    atomic.Pointer[DeviceDiagnostics]
 }
 
 type DeviceDiagnostics struct {
@@ -342,7 +342,6 @@ func (m *Manager) GetExitsForIdentity(identityID string) []*DeviceSession {
 	}
 	return res
 }
-
 
 // UniqueExitForOwner is the allocation-free fast path used by auto-routing.
 // The count lets callers distinguish no exit, exactly one, and ambiguity.

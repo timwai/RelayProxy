@@ -514,6 +514,46 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 	}
 	if current.String != identityID || current.Valid != (identityID != "") {
 		now := time.Now().UTC()
+
+		// A grant shares one concrete target device from its current identity.
+		// Moving that target to another identity must not silently carry old
+		// cross-identity shares into the new ownership boundary.
+		rows, err := tx.Query(`SELECT id, grantee_identity_id, features
+			FROM device_identity_grants WHERE target_device_id = ? ORDER BY id`, deviceID)
+		if err != nil {
+			return nil, err
+		}
+		removedGrants := make([]map[string]any, 0)
+		for rows.Next() {
+			var grantID, granteeIdentityID, rawFeatures string
+			if err := rows.Scan(&grantID, &granteeIdentityID, &rawFeatures); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			features, err := decodeGrantFeatures(rawFeatures)
+			if err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			removedGrants = append(removedGrants, map[string]any{
+				"id": grantID, "granteeIdentityId": granteeIdentityID, "features": features,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		_ = rows.Close()
+		if len(removedGrants) > 0 {
+			if _, err := tx.Exec(`DELETE FROM device_identity_grants WHERE target_device_id = ?`, deviceID); err != nil {
+				return nil, err
+			}
+			if err := insertAuthorizationAudit(tx, "device_identity_grant.reset_on_identity_move", actor, "device", deviceID,
+				map[string]any{"beforeIdentityId": current.String, "afterIdentityId": identityID, "removedGrants": removedGrants}, now); err != nil {
+				return nil, err
+			}
+		}
+
 		if _, err := tx.Exec(`UPDATE devices SET identity_id = ?, updated_at = ? WHERE id = ?`,
 			nullableString(identityID), now, deviceID); err != nil {
 			return nil, err

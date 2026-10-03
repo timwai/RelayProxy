@@ -46,3 +46,37 @@ func TestRevocationAndRegistrationAreSerialized(t *testing.T) {
 		t.Fatal("revocation or old handshake removed the new session")
 	}
 }
+
+func TestInvalidateIdentityRemovesAllMatchingSessionsOnly(t *testing.T) {
+	m := NewManager()
+	first := &DeviceSession{DeviceID: "identity-device-a", IdentityID: "identity-a"}
+	second := &DeviceSession{DeviceID: "identity-device-b", IdentityID: "identity-a"}
+	other := &DeviceSession{DeviceID: "identity-device-c", IdentityID: "identity-b"}
+	m.Register(first)
+	m.Register(second)
+	m.Register(other)
+
+	removed := m.InvalidateIdentity("identity-a")
+	if len(removed) != 2 {
+		t.Fatalf("removed devices=%v want two identity-a sessions", removed)
+	}
+	removedSet := map[string]bool{}
+	for _, deviceID := range removed {
+		removedSet[deviceID] = true
+	}
+	if !removedSet[first.DeviceID] || !removedSet[second.DeviceID] {
+		t.Fatalf("identity invalidation missed matching devices: %v", removed)
+	}
+	if _, ok := m.Get(first.DeviceID); ok {
+		t.Fatal("first identity-a session survived invalidation")
+	}
+	if _, ok := m.Get(second.DeviceID); ok {
+		t.Fatal("second identity-a session survived invalidation")
+	}
+	if got, ok := m.Get(other.DeviceID); !ok || got != other {
+		t.Fatal("identity-b session was removed by identity-a invalidation")
+	}
+	if again := m.InvalidateIdentity("identity-a"); len(again) != 0 {
+		t.Fatalf("repeated identity invalidation was not idempotent: %v", again)
+	}
+}

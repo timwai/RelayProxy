@@ -129,11 +129,27 @@ func (db *DB) ensureIdentityAccessSchema() error {
 			FOREIGN KEY(target_device_id) REFERENCES devices(id) ON DELETE CASCADE,
 			FOREIGN KEY(grantee_identity_id) REFERENCES identities(id) ON DELETE CASCADE
 		)`,
+		`CREATE TABLE IF NOT EXISTS system_identity_grants (
+			id VARCHAR(64) PRIMARY KEY,
+			resource_id VARCHAR(64) NOT NULL,
+			grantee_identity_id VARCHAR(64) NOT NULL,
+			features TEXT NOT NULL,
+			expires_at TIMESTAMP,
+			revision BIGINT NOT NULL DEFAULT 1,
+			created_by VARCHAR(36) NOT NULL,
+			updated_by VARCHAR(36) NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			UNIQUE(resource_id, grantee_identity_id),
+			FOREIGN KEY(grantee_identity_id) REFERENCES identities(id) ON DELETE CASCADE
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_identity_keys_identity ON identity_access_keys(identity_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_identity_keys_digest ON identity_access_keys(key_digest)`,
 		`CREATE INDEX IF NOT EXISTS idx_identity_memberships_user ON identity_memberships(user_id, identity_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_device_identity_grants_target ON device_identity_grants(target_device_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_device_identity_grants_grantee ON device_identity_grants(grantee_identity_id, target_device_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_identity_grants_resource ON system_identity_grants(resource_id, grantee_identity_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_system_identity_grants_grantee ON system_identity_grants(grantee_identity_id, resource_id)`,
 	}
 	for _, query := range queries {
 		if _, err := db.Exec(query); err != nil {

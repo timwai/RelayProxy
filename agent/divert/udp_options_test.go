@@ -25,14 +25,31 @@ func (d *testUDPOptionsDialer) DialUDPWithOptions(ctx context.Context, exit, hos
 func TestUDPDatagramRequiredUsesFrozenRuleAndReusesAssociation(t *testing.T) {
 	target, observed := udpReplyServer(t, 0)
 	var preferredCalls, requiredCalls atomic.Int32
-	requiredDialer := connectedUDPDialer(&requiredCalls)
+	connectTarget := func(ctx context.Context) (net.PacketConn, error) {
+		conn, err := (&net.Dialer{}).DialContext(ctx, "udp", target.String())
+		if err != nil {
+			return nil, err
+		}
+		return conn.(*net.UDPConn), nil
+	}
+	preferredDialer := &testDialer{udp: func(ctx context.Context, exit, host string, port uint16) (net.PacketConn, error) {
+		preferredCalls.Add(1)
+		if exit != "exit-preferred" || host != "localhost" || port != uint16(target.Port) {
+			return nil, fmt.Errorf("lost preferred UDP decision: exit=%s host=%s port=%d", exit, host, port)
+		}
+		// The test validates the hostname passed to the tunnel dialer. Connect to
+		// the fixture address explicitly so localhost IPv4/IPv6 ordering cannot
+		// make the test platform-dependent.
+		return connectTarget(ctx)
+	}}
 	dialer := &testUDPOptionsDialer{
-		testDialer: connectedUDPDialer(&preferredCalls),
+		testDialer: preferredDialer,
 		udpWithOptions: func(ctx context.Context, exit, host string, port uint16, opts proxy.UDPDialOptions) (net.PacketConn, error) {
+			requiredCalls.Add(1)
 			if !opts.DatagramRequired || exit != "exit-required" || host != "localhost" || port != uint16(target.Port) {
 				return nil, fmt.Errorf("lost frozen UDP decision: exit=%s host=%s port=%d options=%+v", exit, host, port, opts)
 			}
-			return requiredDialer.DialUDP(ctx, exit, host, port)
+			return connectTarget(ctx)
 		},
 	}
 	cfg := Config{DefaultAction: ActionReject, Rules: []Rule{{

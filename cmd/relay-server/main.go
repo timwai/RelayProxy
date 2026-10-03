@@ -162,6 +162,45 @@ func main() {
 		defer proxyP2PCoordinator.Close()
 	}
 
+	invalidateIdentitySessions := func(identityID string) []string {
+		deviceIDs := sessionMgr.InvalidateIdentity(identityID)
+		for _, deviceID := range deviceIDs {
+			rdpCoordinator.CloseDevice(deviceID)
+			if proxyP2PCoordinator != nil {
+				proxyP2PCoordinator.RevokeDevice(deviceID)
+			}
+		}
+		return deviceIDs
+	}
+
+	authorizationExpiryStop := make(chan struct{})
+	authorizationExpiryDone := make(chan struct{})
+	expireAuthorizationGrants := func() {
+		affected, expireErr := db.ExpireIdentityGrants(time.Now().UTC())
+		if expireErr != nil {
+			log.Printf("[AuthZ] Failed to expire identity grants: %v", expireErr)
+			return
+		}
+		for _, identityID := range affected {
+			deviceIDs := invalidateIdentitySessions(identityID)
+			log.Printf("[AuthZ] Expired grants invalidated identity=%s devices=%d", identityID, len(deviceIDs))
+		}
+	}
+	expireAuthorizationGrants()
+	go func() {
+		defer close(authorizationExpiryDone)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				expireAuthorizationGrants()
+			case <-authorizationExpiryStop:
+				return
+			}
+		}
+	}()
+
 	// Async audit writer (N5): bounded channel + background insert
 	auditCh := make(chan *repository.ConnectionAudit, 2048)
 	auditDone := make(chan struct{})
@@ -431,35 +470,30 @@ func main() {
 			ingress.Reload()
 		}),
 		api.WithIdentityAuthorizationChanged(func(identityID, accessKeyID string) {
-			for _, active := range sessionMgr.List() {
-				if active == nil || active.IdentityID != identityID {
-					continue
+			if accessKeyID == "" {
+				invalidateIdentitySessions(identityID)
+			} else {
+				for _, active := range sessionMgr.List() {
+					if active == nil || active.IdentityID != identityID || active.AccessKeyID != accessKeyID {
+						continue
+					}
+					deviceID := active.DeviceID
+					rdpCoordinator.CloseDevice(deviceID)
+					if proxyP2PCoordinator != nil {
+						proxyP2PCoordinator.RevokeDevice(deviceID)
+					}
+					_ = sessionMgr.ChangeDeviceAuthorization(deviceID, true, func() error { return nil })
 				}
-				if accessKeyID != "" && active.AccessKeyID != accessKeyID {
-					continue
-				}
-				deviceID := active.DeviceID
-				rdpCoordinator.CloseDevice(deviceID)
-				if proxyP2PCoordinator != nil {
-					proxyP2PCoordinator.RevokeDevice(deviceID)
-				}
-				_ = sessionMgr.ChangeDeviceAuthorization(deviceID, true, func() error { return nil })
 			}
 			ingress.Reload()
 		}),
 		api.WithDeviceIdentityGrantChanged(func(targetDeviceID, granteeIdentityID string) {
-			// M2 first release deliberately invalidates the grantee identity's
-			// authenticated tunnels after any grant mutation. This is broader
-			// than feature-specific stream teardown, but it makes additions,
-			// edits, expiry changes and revocations visible immediately and
-			// prevents existing Relay streams from retaining stale authority.
-			deviceIDs := sessionMgr.InvalidateIdentity(granteeIdentityID)
-			for _, deviceID := range deviceIDs {
-				rdpCoordinator.CloseDevice(deviceID)
-				if proxyP2PCoordinator != nil {
-					proxyP2PCoordinator.RevokeDevice(deviceID)
-				}
-			}
+			// M2 deliberately invalidates the grantee identity's authenticated
+			// tunnels after any grant mutation. This is broader than
+			// feature-specific stream teardown, but guarantees that resource
+			// inventories and existing Relay/P2P/RDP paths cannot retain stale
+			// authority.
+			invalidateIdentitySessions(granteeIdentityID)
 			// A target can itself be an active controller/client. Do not close
 			// its main tunnel; its peer-side direct paths are revalidated on
 			// candidate updates/renewal and the grantee side has been revoked.
@@ -538,6 +572,11 @@ func main() {
 
 	_ = adminServer.Shutdown(shutdownCtx)
 	_ = gw.Close()
+	close(authorizationExpiryStop)
+	select {
+	case <-authorizationExpiryDone:
+	case <-shutdownCtx.Done():
+	}
 	close(auditCh)
 	select {
 	case <-auditDone:

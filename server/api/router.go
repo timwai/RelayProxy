@@ -37,6 +37,7 @@ type Router struct {
 	settings                     *config.ServerSettings
 	onDeviceRevoked              func(string)
 	onDeviceAuthorizationChanged func(string)
+	onIdentityAuthorizationChanged func(identityID, accessKeyID string)
 	onRDPIngressChanged          func(string)
 	onRDPIngressReload           func(string) error
 	onRDPIngressStatus           func(string) RDPIngressRuntimeStatus
@@ -115,6 +116,13 @@ func WithDeviceRevoked(fn func(string)) RouterOption {
 func WithDeviceAuthorizationChanged(fn func(string)) RouterOption {
 	return func(r *Router) { r.onDeviceAuthorizationChanged = fn }
 }
+
+// WithIdentityAuthorizationChanged invalidates authenticated identity sessions.
+// accessKeyID is empty for identity-wide policy/status changes.
+func WithIdentityAuthorizationChanged(fn func(identityID, accessKeyID string)) RouterOption {
+	return func(r *Router) { r.onIdentityAuthorizationChanged = fn }
+}
+
 
 func WithRDPIngressChanged(fn func(string)) RouterOption {
 	return func(r *Router) { r.onRDPIngressChanged = fn }

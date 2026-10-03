@@ -1013,6 +1013,9 @@ func (db *DB) AuthorizeClientExit(clientDeviceID, exitDeviceID string) (bool, er
 	if clientDeviceID == "" || exitDeviceID == "" || clientDeviceID == exitDeviceID {
 		return false, nil
 	}
+	if exitDeviceID == SystemResourceServerExit {
+		return db.AuthorizeServerExit(clientDeviceID)
+	}
 	managed, allowed, err := db.authorizeIdentityDeviceFeature(clientDeviceID, exitDeviceID, GrantFeatureProxyUse)
 	if err != nil {
 		return false, err

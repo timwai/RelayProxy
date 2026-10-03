@@ -224,6 +224,38 @@ func (m *Manager) ChangeDeviceAuthorization(deviceID string, revoke bool, change
 	return nil
 }
 
+// InvalidateIdentity closes every authenticated v4 session for an identity.
+// It is intentionally conservative for M2 authorization edits: reconnecting
+// refreshes the server-derived resource inventory and guarantees that existing
+// Relay streams cannot outlive a revoked cross-identity grant.
+func (m *Manager) InvalidateIdentity(identityID string) []string {
+	if identityID == "" {
+		return nil
+	}
+	m.authorizationMu.Lock()
+	m.mu.Lock()
+	deviceIDs := make([]string, 0)
+	toClose := make([]tunnel.TunnelSession, 0)
+	for deviceID, sess := range m.sessions {
+		if sess == nil || sess.IdentityID != identityID {
+			continue
+		}
+		if removed := m.removeLocked(deviceID); removed != nil {
+			deviceIDs = append(deviceIDs, deviceID)
+			if removed.Tunnel != nil {
+				toClose = append(toClose, removed.Tunnel)
+			}
+		}
+	}
+	m.mu.Unlock()
+	m.authorizationMu.Unlock()
+
+	for _, transport := range toClose {
+		_ = transport.Close()
+	}
+	return deviceIDs
+}
+
 func (m *Manager) UnregisterSession(sess *DeviceSession) bool {
 	if sess == nil {
 		return false

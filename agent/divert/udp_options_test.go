@@ -29,7 +29,7 @@ func TestUDPDatagramRequiredUsesFrozenRuleAndReusesAssociation(t *testing.T) {
 	dialer := &testUDPOptionsDialer{
 		testDialer: connectedUDPDialer(&preferredCalls),
 		udpWithOptions: func(ctx context.Context, exit, host string, port uint16, opts proxy.UDPDialOptions) (net.PacketConn, error) {
-			if !opts.DatagramRequired || exit != "exit-required" || host != target.IP.String() || port != uint16(target.Port) {
+			if !opts.DatagramRequired || exit != "exit-required" || host != "localhost" || port != uint16(target.Port) {
 				return nil, fmt.Errorf("lost frozen UDP decision: exit=%s host=%s port=%d options=%+v", exit, host, port, opts)
 			}
 			return requiredDialer.DialUDP(ctx, exit, host, port)
@@ -41,6 +41,8 @@ func TestUDPDatagramRequiredUsesFrozenRuleAndReusesAssociation(t *testing.T) {
 	}}}
 	server := newTestServer(t, Options{Dialer: dialer, Config: cfg})
 	flow := testFlow(ProtoUDP, target)
+	flow.Host = "localhost"
+	flow.DomainSource = "dns"
 	route, err := server.ClassifyFlow(flow)
 	if err != nil {
 		t.Fatal(err)

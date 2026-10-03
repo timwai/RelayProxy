@@ -26,24 +26,45 @@ func (db *DB) ListRDPTargetsForController(controllerID string) ([]*RDPTarget, er
 		return nil, errors.New("controller device id is required")
 	}
 	var controllerCaps string
-	if err := db.QueryRow(`SELECT approved_capabilities FROM devices WHERE id = ? AND approval_state = 'approved'`, controllerID).Scan(&controllerCaps); err != nil {
+	var controllerIdentity sql.NullString
+	if err := db.QueryRow(`SELECT approved_capabilities, identity_id FROM devices
+		WHERE id = ? AND approval_state = 'approved'`, controllerID).Scan(&controllerCaps, &controllerIdentity); err != nil {
 		return nil, err
 	}
 	if !hasCapabilityJSON(controllerCaps, "rdp.controller") {
 		return []*RDPTarget{}, nil
 	}
-	rows, err := db.Query(`SELECT target.id, target.name, target.last_seen_at, target.approved_capabilities,
-		service.id, service.target_port, service.updated_at
-		FROM rdp_access_grants access
-		JOIN devices controller ON controller.id = access.controller_device_id
-		JOIN devices target ON target.id = access.target_device_id
-		JOIN rdp_services service ON service.device_id = target.id AND service.enabled = TRUE
-		WHERE access.controller_device_id = ?
-		  AND controller.approval_state = 'approved'
-		  AND target.approval_state = 'approved'
-		  AND controller.owner_user_id IS NOT NULL
-		  AND controller.owner_user_id = target.owner_user_id
-		ORDER BY target.name, target.id`, controllerID)
+
+	var rows *sql.Rows
+	var err error
+	if controllerIdentity.Valid && strings.TrimSpace(controllerIdentity.String) != "" {
+		rows, err = db.Query(`SELECT target.id, target.name, target.last_seen_at, target.approved_capabilities,
+			service.id, service.target_port, service.updated_at
+			FROM devices target
+			JOIN identities identity ON identity.id = target.identity_id AND identity.status = ?
+			JOIN rdp_services service ON service.device_id = target.id AND service.enabled = TRUE
+			WHERE target.identity_id = ?
+			  AND target.id <> ?
+			  AND target.approval_state = 'approved'
+			ORDER BY target.name, target.id`,
+			IdentityStatusActive, controllerIdentity.String, controllerID)
+	} else {
+		// Legacy v3 devices retain explicit per-controller grants during migration.
+		rows, err = db.Query(`SELECT target.id, target.name, target.last_seen_at, target.approved_capabilities,
+			service.id, service.target_port, service.updated_at
+			FROM rdp_access_grants access
+			JOIN devices controller ON controller.id = access.controller_device_id
+			JOIN devices target ON target.id = access.target_device_id
+			JOIN rdp_services service ON service.device_id = target.id AND service.enabled = TRUE
+			WHERE access.controller_device_id = ?
+			  AND controller.approval_state = 'approved'
+			  AND target.approval_state = 'approved'
+			  AND controller.identity_id IS NULL
+			  AND target.identity_id IS NULL
+			  AND controller.owner_user_id IS NOT NULL
+			  AND controller.owner_user_id = target.owner_user_id
+			ORDER BY target.name, target.id`, controllerID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -119,11 +140,14 @@ func (db *DB) ReplaceRDPTargetGrants(controllerID, reviewerID string, targetIDs 
 	}
 	defer tx.Rollback()
 
-	var controllerOwner sql.NullString
+	var controllerOwner, controllerIdentity sql.NullString
 	var controllerCaps string
-	if err := tx.QueryRow(`SELECT owner_user_id, approved_capabilities FROM devices
-		WHERE id = ? AND approval_state = 'approved'`, controllerID).Scan(&controllerOwner, &controllerCaps); err != nil {
+	if err := tx.QueryRow(`SELECT owner_user_id, identity_id, approved_capabilities FROM devices
+		WHERE id = ? AND approval_state = 'approved'`, controllerID).Scan(&controllerOwner, &controllerIdentity, &controllerCaps); err != nil {
 		return nil, err
+	}
+	if controllerIdentity.Valid && strings.TrimSpace(controllerIdentity.String) != "" {
+		return nil, errors.New("identity-managed RDP controllers use automatic same-identity access")
 	}
 	if !controllerOwner.Valid || strings.TrimSpace(controllerOwner.String) == "" {
 		return nil, errors.New("RDP controller has no owner")
@@ -194,27 +218,48 @@ func (db *DB) AuthorizeRDP(controllerID, targetID string) (bool, error) {
 	if controllerID == "" || targetID == "" || controllerID == targetID {
 		return false, nil
 	}
-	var controllerOwner, targetOwner sql.NullString
+	var controllerOwner, targetOwner, controllerIdentity, targetIdentity sql.NullString
 	var controllerCaps, targetCaps string
-	var granted int
-	err := db.QueryRow(`SELECT controller.owner_user_id, controller.approved_capabilities,
-		target.owner_user_id, target.approved_capabilities,
+	var serviceEnabled int
+	err := db.QueryRow(`SELECT controller.owner_user_id, controller.identity_id, controller.approved_capabilities,
+		target.owner_user_id, target.identity_id, target.approved_capabilities,
 		CASE WHEN EXISTS (
-			SELECT 1 FROM rdp_access_grants access
-			JOIN rdp_services service ON service.device_id = access.target_device_id AND service.enabled = TRUE
-			WHERE access.controller_device_id = controller.id AND access.target_device_id = target.id
+			SELECT 1 FROM rdp_services service WHERE service.device_id = target.id AND service.enabled = TRUE
 		) THEN 1 ELSE 0 END
 		FROM devices controller
 		JOIN devices target ON target.id = ?
 		WHERE controller.id = ?
 		  AND controller.approval_state = 'approved'
 		  AND target.approval_state = 'approved'`, targetID, controllerID).
-		Scan(&controllerOwner, &controllerCaps, &targetOwner, &targetCaps, &granted)
+		Scan(&controllerOwner, &controllerIdentity, &controllerCaps,
+			&targetOwner, &targetIdentity, &targetCaps, &serviceEnabled)
 	if err != nil {
 		return false, err
 	}
-	if !hasCapabilityJSON(controllerCaps, "rdp.controller") || !hasCapabilityJSON(targetCaps, "rdp.host") || !controllerOwner.Valid || !targetOwner.Valid || controllerOwner.String != targetOwner.String {
+	if !hasCapabilityJSON(controllerCaps, "rdp.controller") || !hasCapabilityJSON(targetCaps, "rdp.host") || serviceEnabled != 1 {
 		return false, nil
+	}
+	if controllerIdentity.Valid || targetIdentity.Valid {
+		if !controllerIdentity.Valid || !targetIdentity.Valid ||
+			controllerIdentity.String == "" || controllerIdentity.String != targetIdentity.String {
+			return false, nil
+		}
+		var active int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM identities WHERE id = ? AND status = ?`,
+			controllerIdentity.String, IdentityStatusActive).Scan(&active); err != nil {
+			return false, err
+		}
+		return active == 1, nil
+	}
+
+	// Legacy v3 behavior remains explicit, same-owner, per controller/target.
+	if !controllerOwner.Valid || !targetOwner.Valid || controllerOwner.String != targetOwner.String {
+		return false, nil
+	}
+	var granted int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM rdp_access_grants
+		WHERE controller_device_id = ? AND target_device_id = ?`, controllerID, targetID).Scan(&granted); err != nil {
+		return false, err
 	}
 	return granted == 1, nil
 }

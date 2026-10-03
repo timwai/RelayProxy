@@ -2,11 +2,12 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
-  const titles = { overview: '总览', devices: '设备管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
+  const state = { user: null, devices: [], identities: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
     devices: [{ page: 'devices', label: '设备管理' }, { page: 'exits', label: '出口节点' }],
+    identities: [{ page: 'identities', label: '身份与密钥', admin: true }],
     connections: [{ page: 'sessions', label: '活跃会话' }],
     messages: [{ page: 'messages', label: '消息历史' }],
     rdp: [{ page: 'rdp-ingress', label: '公网入口', admin: true }],
@@ -19,7 +20,7 @@
       { page: 'settings', label: 'ACL', admin: true, settingsTab: 'acl' }
     ]
   };
-  const pageSections = { overview:'overview', devices:'devices', exits:'devices', sessions:'connections', messages:'messages', 'rdp-ingress':'rdp', settings:'settings' };
+  const pageSections = { overview:'overview', devices:'devices', identities:'identities', exits:'devices', sessions:'connections', messages:'messages', 'rdp-ingress':'rdp', settings:'settings' };
   const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', rdp: 'RDP 公网入口', database: '数据库' };
   const roleNames = { CLIENT: '客户端', EXIT: '出口节点', BOTH: '客户端 + 出口' };
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
@@ -158,7 +159,8 @@
       settingsSubtab = parts[1];
       try { localStorage.setItem(settingsSubtabKey, settingsSubtab); } catch (_) {}
     }
-    if (!titles[page] || ((page === 'settings' || page === 'rdp-ingress') && (!state.user || state.user.role !== 'admin'))) { page = 'overview'; }
+    const adminOnlyPage = page === 'settings' || page === 'rdp-ingress' || page === 'identities';
+    if (!titles[page] || (adminOnlyPage && (!state.user || state.user.role !== 'admin'))) { page = 'overview'; }
     const section = pageSections[page] || 'overview';
     all('.page').forEach(el => {
       el.hidden = el.id !== 'page-' + page;
@@ -209,6 +211,164 @@
       if (input.dataset.capability === 'rdp.host' && !input.checked && publicIngress) { publicIngress.checked = false; }
     });
   }
+  function renderIdentities() {
+    if (!$('identities-body')) { return; }
+    $('identity-count').textContent = state.identities.length;
+    $('nav-identity-count').textContent = state.identities.length;
+    $('identities-body').innerHTML = state.identities.length ? state.identities.map(item => {
+      const capabilities = orderedCapabilities(item.capabilities || []).map(capability => capabilityNames[capability] || capability).join('、') || '—';
+      const status = item.status === 'active' ? badge('启用', 'success') : badge('禁用', 'warning-badge');
+      return '<tr><td><span class="device-name">' + esc(item.name) + '</span><span class="device-id mono">' + esc(item.id) + '</span></td><td>' + status + '</td><td>' + esc(capabilities) + '</td><td class="mono">' + esc(item.policyRevision) + '</td><td class="muted">' + esc(date(item.updatedAt)) + '</td><td class="right"><button type="button" class="small-button" data-identity-manage="' + esc(item.id) + '">管理</button></td></tr>';
+    }).join('') : emptyRow(6, '尚未创建身份', '创建身份后签发接入密钥，客户端即可自动归属');
+  }
+
+  async function refreshIdentities() {
+    if (!state.user || state.user.role !== 'admin') { return; }
+    const data = await api('/identities');
+    state.identities = Array.isArray(data) ? data : [];
+    renderIdentities();
+  }
+
+  async function createIdentity(event) {
+    event.preventDefault();
+    if (state.identityBusy) { return; }
+    const name = $('identity-create-name').value.trim();
+    const capabilities = selectedCapabilities('identity-create-capabilities');
+    if (!name) { errorAt('identity-create-error', '请输入身份名称'); $('identity-create-name').focus(); return; }
+    if (!capabilities.length) { errorAt('identity-create-error', '至少选择一项允许能力'); return; }
+    state.identityBusy = true;
+    $('identity-create-submit').disabled = true;
+    errorAt('identity-create-error', '');
+    try {
+      await api('/identities', { method: 'POST', body: JSON.stringify({ name, capabilities }) });
+      $('identity-create-name').value = '';
+      await refreshIdentities();
+      toast('身份已创建');
+    } catch (err) {
+      errorAt('identity-create-error', err.message);
+    } finally {
+      state.identityBusy = false;
+      $('identity-create-submit').disabled = false;
+    }
+  }
+
+  async function openIdentity(id) {
+    if (!state.user || state.user.role !== 'admin' || state.identityBusy) { return; }
+    const item = state.identities.find(candidate => candidate.id === id);
+    if (!item) { toast('身份不存在或已刷新'); return; }
+    state.selectedIdentity = item;
+    $('identity-dialog-title').textContent = item.name;
+    $('identity-dialog-summary').textContent = item.id;
+    $('identity-name').value = item.name;
+    $('identity-status').value = item.status;
+    $('identity-policy-revision').textContent = '策略版本 ' + item.policyRevision;
+    $('identity-capabilities').innerHTML = capabilityOptionsHTML(capabilityOrder, item.capabilities || []);
+    $('identity-key-label').value = '';
+    $('identity-key-expires').value = '';
+    errorAt('identity-error', '');
+    errorAt('identity-key-error', '');
+    $('identity-keys-body').innerHTML = emptyRow(6, '正在读取密钥', '');
+    $('identity-dialog').showModal();
+    try {
+      await loadIdentityKeys(item.id);
+    } catch (err) {
+      errorAt('identity-key-error', err.message);
+    }
+  }
+
+  async function saveIdentity() {
+    const current = state.selectedIdentity;
+    if (!current || state.identityBusy) { return; }
+    const name = $('identity-name').value.trim();
+    const status = $('identity-status').value;
+    const capabilities = selectedCapabilities('identity-capabilities');
+    if (!name) { errorAt('identity-error', '请输入身份名称'); return; }
+    if (!capabilities.length) { errorAt('identity-error', '至少选择一项允许能力'); return; }
+    state.identityBusy = true;
+    $('identity-save').disabled = true;
+    errorAt('identity-error', '');
+    try {
+      const updated = await api('/identities/' + encodeURIComponent(current.id), {
+        method: 'PATCH',
+        body: JSON.stringify({ name, status, capabilities, policyRevision: current.policyRevision })
+      });
+      state.selectedIdentity = updated;
+      state.identities = state.identities.map(item => item.id === updated.id ? updated : item);
+      renderIdentities();
+      $('identity-dialog-title').textContent = updated.name;
+      $('identity-policy-revision').textContent = '策略版本 ' + updated.policyRevision;
+      toast(status === 'disabled' ? '身份已禁用，在线会话将失效' : '身份配置已保存');
+    } catch (err) {
+      errorAt('identity-error', err.status === 409 ? err.message + '，请关闭窗口并刷新后重试' : err.message);
+    } finally {
+      state.identityBusy = false;
+      $('identity-save').disabled = false;
+    }
+  }
+
+  async function loadIdentityKeys(identityID) {
+    const keys = await api('/identities/' + encodeURIComponent(identityID) + '/access-keys');
+    if (!state.selectedIdentity || state.selectedIdentity.id !== identityID) { return; }
+    const now = Date.now();
+    $('identity-keys-body').innerHTML = keys.length ? keys.map(key => {
+      const expired = key.expiresAt && Date.parse(key.expiresAt) <= now;
+      const revoked = !!key.revokedAt;
+      const status = revoked ? badge('已撤销', 'warning-badge') : expired ? badge('已过期', 'warning-badge') : badge('有效', 'success');
+      const action = revoked || expired ? '<span class="muted">—</span>' : '<button type="button" class="small-button danger" data-identity-key-revoke="' + esc(key.id) + '">撤销</button>';
+      return '<tr><td><span class="device-name">' + esc(key.label || '未备注') + '</span><span class="device-id mono">' + esc(key.id) + '</span></td><td class="muted">' + esc(date(key.createdAt)) + '</td><td class="muted">' + esc(key.expiresAt ? date(key.expiresAt) : '永不过期') + '</td><td class="muted">' + esc(key.lastUsedAt ? date(key.lastUsedAt) : '尚未使用') + '</td><td>' + status + '</td><td class="right">' + action + '</td></tr>';
+    }).join('') : emptyRow(6, '尚未签发接入密钥', '签发后将密钥复制到 Agent 或 Android 客户端');
+  }
+
+  async function issueIdentityKey() {
+    const identity = state.selectedIdentity;
+    if (!identity || state.identityBusy) { return; }
+    const label = $('identity-key-label').value.trim();
+    const expiresRaw = $('identity-key-expires').value;
+    let expiresAt = '';
+    if (expiresRaw) {
+      const parsed = new Date(expiresRaw);
+      if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now()) {
+        errorAt('identity-key-error', '过期时间必须晚于当前时间');
+        return;
+      }
+      expiresAt = parsed.toISOString();
+    }
+    state.identityBusy = true;
+    $('identity-key-issue').disabled = true;
+    errorAt('identity-key-error', '');
+    try {
+      const issued = await api('/identities/' + encodeURIComponent(identity.id) + '/access-keys', {
+        method: 'POST', body: JSON.stringify({ label, expiresAt })
+      });
+      await loadIdentityKeys(identity.id);
+      $('identity-key-label').value = '';
+      $('identity-key-expires').value = '';
+      $('issued-access-key').textContent = issued.accessKey || '';
+      $('issued-key-dialog').showModal();
+    } catch (err) {
+      errorAt('identity-key-error', err.message);
+    } finally {
+      state.identityBusy = false;
+      $('identity-key-issue').disabled = false;
+    }
+  }
+
+  async function revokeIdentityKey(keyID) {
+    const identity = state.selectedIdentity;
+    if (!identity || state.identityBusy || !confirm('撤销此接入密钥？使用该密钥建立的在线会话会被关闭，且无法再次重连。')) { return; }
+    state.identityBusy = true;
+    errorAt('identity-key-error', '');
+    try {
+      await api('/identities/' + encodeURIComponent(identity.id) + '/access-keys/' + encodeURIComponent(keyID), { method: 'DELETE' });
+      await loadIdentityKeys(identity.id);
+      toast('接入密钥已撤销');
+    } catch (err) {
+      errorAt('identity-key-error', err.message);
+    } finally {
+      state.identityBusy = false;
+    }
+  }
+
   function renderDevices() {
     const needle = $('device-search').value.trim().toLowerCase();
     const mode = $('device-mode').value, status = $('device-status').value;
@@ -680,12 +840,15 @@
       ['messages', messageListPath(), data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }]
     ];
     if (user.role === 'admin') {
+      jobs.push(['identities', '/identities', data => { state.identities = Array.isArray(data) ? data : []; renderIdentities(); }]);
       jobs.push(['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]);
       jobs.push(['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }]);
       jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); }]);
     } else {
+      state.identities = [];
       state.enrollments = [];
       state.channels = [];
+      renderIdentities();
       renderEnrollments();
       renderChannels();
     }
@@ -1136,6 +1299,26 @@
     if (copyButton) { copy(copyButton.dataset.copyMessageCode); toast('验证码已复制'); }
     if (deleteButton) deleteServerMessage(deleteButton.dataset.deleteMessage);
   });
+  $('identity-refresh').addEventListener('click', () => refresh(true));
+  $('identity-create-form').addEventListener('submit', createIdentity);
+  $('identities-body').addEventListener('click', event => {
+    const button = event.target.closest('[data-identity-manage]');
+    if (button) openIdentity(button.dataset.identityManage);
+  });
+  $('identity-save').addEventListener('click', saveIdentity);
+  $('identity-key-issue').addEventListener('click', issueIdentityKey);
+  $('identity-keys-body').addEventListener('click', event => {
+    const button = event.target.closest('[data-identity-key-revoke]');
+    if (button) revokeIdentityKey(button.dataset.identityKeyRevoke);
+  });
+  $('issued-key-copy').addEventListener('click', () => copy($('issued-access-key').textContent));
+  $('issued-key-dialog').addEventListener('close', () => { $('issued-access-key').textContent = ''; });
+  $('identity-dialog').addEventListener('close', () => {
+    state.selectedIdentity = null;
+    $('identity-keys-body').innerHTML = '';
+    errorAt('identity-error', '');
+    errorAt('identity-key-error', '');
+  });
   $('refresh-enrollments').addEventListener('click', () => refresh(true));
   $('copy-admin-url').addEventListener('click', () => copy(managementURL($('admin-listen').value, $('admin-protocol').value === 'true')));
   $('device-revoke').addEventListener('click', revokeDevice);
@@ -1144,6 +1327,9 @@
   $('device-rdp-targets-save').addEventListener('click', saveDeviceRDPTargets);
   $('enrollment-approve').addEventListener('click', approveEnrollment);
   $('enrollment-reject').addEventListener('click', () => { if (state.selectedEnrollment) rejectEnrollment(state.selectedEnrollment.id); });
+  $('identity-create-capabilities').innerHTML = capabilityOptionsHTML(capabilityOrder, ['proxy.client']);
+  bindCapabilityDependencies('identity-create-capabilities');
+  bindCapabilityDependencies('identity-capabilities');
   bindCapabilityDependencies('device-capabilities');
   bindCapabilityDependencies('enrollment-capabilities');
   $('device-dialog').addEventListener('cancel', event => { if (state.deviceBusy || state.rdpTargetBusy) event.preventDefault(); });

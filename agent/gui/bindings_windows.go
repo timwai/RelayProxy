@@ -80,6 +80,17 @@ func (s *WailsService) RunSpeedTest(exitID string, durationSeconds int) (string,
 	return string(data), nil
 }
 
+func (s *WailsService) GetProxyExits() (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return "[]", nil
+	}
+	data, err := json.Marshal(s.owner.bridge.GetProxyExits())
+	if err != nil {
+		return "[]", nil
+	}
+	return string(data), nil
+}
+
 func (s *WailsService) GetRDPTargets() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil

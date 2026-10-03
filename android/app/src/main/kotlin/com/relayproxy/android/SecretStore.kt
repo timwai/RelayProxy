@@ -43,11 +43,9 @@ class SecretStore(context: Context) {
     private fun encrypt(value: String): String {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
-        val payload = ByteArray(1 + cipher.iv.size + cipher.doFinal(value.toByteArray(Charsets.UTF_8)).size)
-        payload[0] = cipher.iv.size.toByte()
-        System.arraycopy(cipher.iv, 0, payload, 1, cipher.iv.size)
         val ciphertext = cipher.doFinal(value.toByteArray(Charsets.UTF_8))
-        // Rebuild once with the actual ciphertext. Keeping the format simple
+        // Keep the format simple so migration is independent of Java object
+        // serialization: [iv length][iv][ciphertext+GCM tag].
         // makes migration independent of Java object serialization.
         val packed = ByteArray(1 + cipher.iv.size + ciphertext.size)
         packed[0] = cipher.iv.size.toByte()

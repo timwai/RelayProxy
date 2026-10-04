@@ -317,7 +317,9 @@ class RoutingRuleActivity : Activity() {
             ).show()
             return
         }
-        val saveError = runCatching { ConfigStore(this).saveRouting(next) }.exceptionOrNull()
+        val saveError = runCatching {
+            routing = ConfigStore(this).saveRouting(next)
+        }.exceptionOrNull()
         if (saveError != null) {
             Toast.makeText(this, saveError.message, Toast.LENGTH_LONG).show()
             return
@@ -351,6 +353,12 @@ class RoutingRuleActivity : Activity() {
                 .setAction(RelayExitService.ACTION_RECONFIGURE)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay)
             else startService(relay)
+        }
+        if (store.isVpnDesiredRunning()) {
+            val vpn = android.content.Intent(this, RelayVpnService::class.java)
+                .setAction(RelayVpnService.ACTION_RECONFIGURE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(vpn)
+            else startService(vpn)
         }
     }
 

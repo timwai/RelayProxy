@@ -37,6 +37,7 @@ func TestConsoleUsesUnifiedPersonalNavigation(t *testing.T) {
 		`/ui/theme.js`,
 		`data-settings-panel="admin"`,
 		`data-settings-panel="tunnel"`,
+		`data-settings-panel="p2p"`,
 		`data-settings-panel="rdp"`,
 		`data-settings-panel="certificate"`,
 		`data-settings-panel="acl"`,
@@ -56,6 +57,7 @@ func TestServerConsoleKeepsLargeMenuAndSecondarySettingsTabs(t *testing.T) {
 	for _, want := range []string{
 		`settingsTab: 'admin'`,
 		`settingsTab: 'tunnel'`,
+		`settingsTab: 'p2p'`,
 		`settingsTab: 'rdp'`,
 		`settingsTab: 'certificate'`,
 		`settingsTab: 'acl'`,
@@ -106,5 +108,16 @@ func TestServerConsoleLoadsSharedFoundationBeforeProductCSS(t *testing.T) {
 	}
 	if !strings.Contains(string(style), `margin-left:var(--rp-sidebar-width)`) {
 		t.Fatal("server layout no longer follows shared sidebar width")
+	}
+}
+
+func TestServerSettingsFormInitializesEverySettingGroup(t *testing.T) {
+	script, err := EmbeddedFiles.ReadFile("js/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	if !strings.Contains(text, "rdpIngress: {}, p2p: {}") {
+		t.Fatal("server settings form does not initialize the P2P settings group")
 	}
 }

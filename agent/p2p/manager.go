@@ -79,6 +79,8 @@ type QUICManagerOptions struct {
 	KeepAlive            time.Duration
 	IdleTimeout          time.Duration
 	MaxExitSessions      int
+	PortStart            int
+	PortEnd              int
 	LowPowerIdleTimeout  time.Duration
 	LowPowerMaxSessions  int
 	NetworkCheckInterval time.Duration
@@ -203,7 +205,7 @@ func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rende
 	if m.networkSignature != nil {
 		m.networkSig = m.networkSignature()
 	}
-	m.endpointFactory = func() *Endpoint { return NewEndpoint(rendezvous) }
+	m.endpointFactory = func() *Endpoint { return NewEndpointWithPortRange(rendezvous, options.PortStart, options.PortEnd) }
 	go m.reapIdleLoop()
 	go m.watchNetworkLoop()
 	return m

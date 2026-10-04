@@ -34,7 +34,6 @@ class SettingsActivity : Activity() {
     private lateinit var insecureTls: Switch
     private lateinit var allowPrivate: Switch
     private lateinit var autoNetworkSwitch: Switch
-    private lateinit var clientEnabled: Switch
     private lateinit var socks5Enabled: Switch
     private lateinit var httpEnabled: Switch
     private lateinit var proxyP2pEnabled: Switch
@@ -184,18 +183,26 @@ class SettingsActivity : Activity() {
 
         val client = card()
         addSectionHeader(client, "代理客户端", "本机代理只监听回环地址；使用服务端授权的 Relay 出口。")
-        clientEnabled = Switch(this)
         socks5Enabled = Switch(this)
         httpEnabled = Switch(this)
         proxyP2pEnabled = Switch(this)
         client.addView(
-            switchRow("启用本机代理", "允许本机应用连接 SOCKS5 或 HTTP 代理。", clientEnabled),
+            switchRow(
+                "SOCKS5 代理",
+                "独立启用 SOCKS5；同时提供 TCP 与 UDP 转发。关闭 SOCKS5 和 HTTP 即关闭本机代理。",
+                socks5Enabled,
+            ),
             topMargin(14),
         )
         client.addView(divider(), topMargin(10))
-        client.addView(switchRow("SOCKS5 代理", "同时提供 TCP 与 UDP 转发。", socks5Enabled), topMargin(10))
-        client.addView(divider(), topMargin(10))
-        client.addView(switchRow("HTTP / HTTPS 代理", "支持 HTTP 请求与 HTTPS CONNECT。", httpEnabled), topMargin(10))
+        client.addView(
+            switchRow(
+                "HTTP / HTTPS 代理",
+                "独立启用 HTTP 代理；支持 HTTP 请求与 HTTPS CONNECT。",
+                httpEnabled,
+            ),
+            topMargin(10),
+        )
         client.addView(divider(), topMargin(10))
         client.addView(
             switchRow("优先 P2P 直连", "直连失败时自动回退 Relay。", proxyP2pEnabled),
@@ -340,7 +347,7 @@ class SettingsActivity : Activity() {
                 autoNetworkSwitch = autoNetworkSwitch.isChecked,
             )
             SECTION_PROXY -> current.copy(
-                clientEnabled = clientEnabled.isChecked,
+                clientEnabled = socks5Enabled.isChecked || httpEnabled.isChecked,
                 socks5Enabled = socks5Enabled.isChecked,
                 httpEnabled = httpEnabled.isChecked,
                 proxyP2pEnabled = proxyP2pEnabled.isChecked,
@@ -367,17 +374,13 @@ class SettingsActivity : Activity() {
             identityId.requestFocus()
             return
         }
-        if (section == SECTION_PROXY && config.clientEnabled && !config.socks5Enabled && !config.httpEnabled) {
-            Toast.makeText(this, "启用本机代理时至少选择 SOCKS5 或 HTTP", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (section == SECTION_PROXY && ((config.clientEnabled && config.socks5Enabled && config.socks5Port !in 1..65535) ||
-            (config.clientEnabled && config.httpEnabled && config.httpPort !in 1..65535)
+        if (section == SECTION_PROXY && ((config.socks5Enabled && config.socks5Port !in 1..65535) ||
+            (config.httpEnabled && config.httpPort !in 1..65535)
         )) {
             Toast.makeText(this, "代理端口必须在 1 到 65535 之间", Toast.LENGTH_SHORT).show()
             return
         }
-        if (section == SECTION_PROXY && config.clientEnabled && config.socks5Enabled && config.httpEnabled &&
+        if (section == SECTION_PROXY && config.socks5Enabled && config.httpEnabled &&
             config.socks5Port == config.httpPort
         ) {
             Toast.makeText(this, "SOCKS5 与 HTTP 不能使用相同端口", Toast.LENGTH_SHORT).show()
@@ -411,7 +414,6 @@ class SettingsActivity : Activity() {
         insecureTls.isChecked = cfg.insecureTls
         allowPrivate.isChecked = cfg.allowPrivateNetwork
         autoNetworkSwitch.isChecked = cfg.autoNetworkSwitch
-        clientEnabled.isChecked = cfg.clientEnabled
         socks5Enabled.isChecked = cfg.socks5Enabled
         httpEnabled.isChecked = cfg.httpEnabled
         proxyP2pEnabled.isChecked = cfg.proxyP2pEnabled

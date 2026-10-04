@@ -61,6 +61,8 @@ type ServerConfig struct {
 		RendezvousAdvertise  string `yaml:"rendezvous_advertise"`
 		LeaseSec             int    `yaml:"lease_sec"`
 		MaxSessionsPerDevice int    `yaml:"max_sessions_per_device"`
+		PortStart            int    `yaml:"port_start"`
+		PortEnd              int    `yaml:"port_end"`
 	} `yaml:"p2p"`
 
 	// Exit lets the Relay server itself act as a network egress node. It is

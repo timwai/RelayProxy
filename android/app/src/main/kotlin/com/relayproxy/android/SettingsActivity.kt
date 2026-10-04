@@ -76,15 +76,19 @@ class SettingsActivity : Activity() {
         intent.getStringExtra(EXTRA_SECTION) ?: SECTION_CONNECTION
     }
 
-    private val bg = Color.rgb(246, 248, 252)
-    private val surface = Color.WHITE
-    private val ink = Color.rgb(15, 23, 42)
-    private val muted = Color.rgb(100, 116, 139)
-    private val line = Color.rgb(226, 232, 240)
-    private val brand = Color.rgb(37, 99, 235)
+    private val bg get() = UiPalette.bg
+    private val surface get() = UiPalette.surface
+    private val surfaceSubtle get() = UiPalette.surfaceSubtle
+    private val inputBg get() = UiPalette.inputBg
+    private val ink get() = UiPalette.ink
+    private val muted get() = UiPalette.muted
+    private val line get() = UiPalette.line
+    private val brand get() = UiPalette.brand
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UiPalette.isDark = ConfigStore(this).isDarkTheme()
+        setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
         setContentView(buildUi())
         loadConfig()
@@ -107,8 +111,23 @@ class SettingsActivity : Activity() {
         }
         window.statusBarColor = bg
         window.navigationBarColor = bg
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            var flags = window.decorView.systemUiVisibility
+            flags = if (!UiPalette.isDark) {
+                flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            } else {
+                flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = if (!UiPalette.isDark) {
+                    flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                } else {
+                    flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                }
+            }
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = flags
+        }
     }
 
     private fun buildUi(): View {
@@ -128,12 +147,8 @@ class SettingsActivity : Activity() {
         connection.addView(labeled("设备名称", deviceName), topMargin(12))
 
         transport = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@SettingsActivity,
-                android.R.layout.simple_spinner_item,
-                transportLabels
-            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            adapter = UiKit.themedSpinnerAdapter(this@SettingsActivity, transportLabels)
+            background = rounded(inputBg, 13, line)
             setPadding(dp(12), 0, dp(10), 0)
             minimumHeight = dp(50)
         }
@@ -230,7 +245,7 @@ class SettingsActivity : Activity() {
         addSectionHeader(exit, "出口选择", "从当前身份可用及跨身份授权的出口中选择默认设备。")
         defaultExitId = styledField("留空由服务端选择")
         exitSelection = Spinner(this).apply {
-            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            background = rounded(inputBg, 13, line)
             setPadding(dp(12), 0, dp(10), 0)
             minimumHeight = dp(50)
         }
@@ -245,12 +260,8 @@ class SettingsActivity : Activity() {
             "应用范围只决定哪些流量进入 VPN；代理、直连或拒绝仍由分流规则决定。DNS 使用 Mapped DNS 并交给所选出口解析。",
         )
         vpnAppMode = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@SettingsActivity,
-                android.R.layout.simple_spinner_item,
-                vpnAppModeLabels,
-            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
-            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            adapter = UiKit.themedSpinnerAdapter(this@SettingsActivity, vpnAppModeLabels)
+            background = rounded(inputBg, 13, line)
             setPadding(dp(12), 0, dp(10), 0)
             minimumHeight = dp(50)
         }
@@ -259,7 +270,7 @@ class SettingsActivity : Activity() {
             textSize = 12.5f
             setTextColor(ink)
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = rounded(Color.rgb(248, 250, 252), 13, line)
+            background = rounded(inputBg, 13, line)
             setOnClickListener { openVpnAppSelection() }
         }
         vpn.addView(labeled("选择应用（点击编辑）", vpnAppsSummary), topMargin(12))
@@ -278,7 +289,7 @@ class SettingsActivity : Activity() {
                 textSize = 12.5f
                 setTextColor(ink)
                 setPadding(dp(12), dp(12), dp(12), dp(12))
-                background = rounded(Color.rgb(248, 250, 252), 13, line)
+                background = rounded(inputBg, 13, line)
             },
             topMargin(12),
         )
@@ -320,7 +331,7 @@ class SettingsActivity : Activity() {
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             setAllCaps(false)
-            background = rounded(brand, 14)
+            background = rounded(brand, 8)
             setOnClickListener { onSave() }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
     }
@@ -495,11 +506,7 @@ class SettingsActivity : Activity() {
             labels += "固定出口 ${selectedExitId.take(12)} · 当前未发现"
         }
 
-        exitSelection.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_item,
-            labels,
-        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        exitSelection.adapter = UiKit.themedSpinnerAdapter(this, labels)
         exitSelection.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
 
@@ -522,7 +529,7 @@ class SettingsActivity : Activity() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(dp(4), dp(4), dp(4), dp(4))
-            background = rounded(Color.rgb(241, 245, 249), 13, line)
+            background = rounded(surfaceSubtle, 13, line)
         }
 
         networkModeLabels.forEachIndexed { index, label ->
@@ -557,7 +564,7 @@ class SettingsActivity : Activity() {
         selectedNetworkModeIndex = index.coerceIn(0, networkModeValues.lastIndex)
         networkModeTabs.forEachIndexed { tabIndex, tab ->
             val selected = tabIndex == selectedNetworkModeIndex
-            tab.setTextColor(if (selected) Color.WHITE else Color.rgb(71, 85, 105))
+            tab.setTextColor(if (selected) Color.WHITE else muted)
             tab.background = if (selected) {
                 rounded(brand, 10)
             } else {
@@ -593,8 +600,8 @@ class SettingsActivity : Activity() {
         setSingleLine(true)
         textSize = 15f
         setTextColor(ink)
-        setHintTextColor(Color.rgb(148, 163, 184))
-        background = rounded(Color.rgb(248, 250, 252), 13, line)
+        setHintTextColor(UiPalette.placeholder)
+        background = rounded(inputBg, 13, line)
         setPadding(dp(14), 0, dp(14), 0)
         minimumHeight = dp(50)
     }
@@ -608,7 +615,7 @@ class SettingsActivity : Activity() {
         addView(TextView(this@SettingsActivity).apply {
             text = labelText
             textSize = 12f
-            setTextColor(Color.rgb(71, 85, 105))
+            setTextColor(muted)
             setTypeface(typeface, Typeface.BOLD)
             setPadding(dp(2), 0, 0, dp(6))
         })
@@ -642,19 +649,12 @@ class SettingsActivity : Activity() {
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
             control.showText = false
-            control.thumbTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(brand, Color.rgb(148, 163, 184))
-            )
-            control.trackTintList = ColorStateList(
-                arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
-                intArrayOf(Color.rgb(147, 197, 253), Color.rgb(226, 232, 240))
-            )
+            UiKit.styleSwitch(control)
             addView(control)
         }
 
     private fun divider() = View(this).apply {
-        setBackgroundColor(Color.rgb(241, 245, 249))
+        setBackgroundColor(line)
         minimumHeight = dp(1)
     }
 

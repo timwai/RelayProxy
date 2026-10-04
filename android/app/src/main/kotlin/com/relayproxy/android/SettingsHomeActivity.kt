@@ -14,14 +14,16 @@ import android.widget.ScrollView
 import android.widget.TextView
 
 class SettingsHomeActivity : Activity() {
-    private val backgroundColor = Color.rgb(246, 248, 252)
-    private val surfaceColor = Color.WHITE
-    private val inkColor = Color.rgb(15, 23, 42)
-    private val mutedColor = Color.rgb(100, 116, 139)
-    private val lineColor = Color.rgb(226, 232, 240)
+    private val backgroundColor get() = UiPalette.bg
+    private val surfaceColor get() = UiPalette.surface
+    private val inkColor get() = UiPalette.ink
+    private val mutedColor get() = UiPalette.muted
+    private val lineColor get() = UiPalette.line
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UiPalette.isDark = ConfigStore(this).isDarkTheme()
+        setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
     }
 
@@ -36,29 +38,43 @@ class SettingsHomeActivity : Activity() {
         }
         window.statusBarColor = backgroundColor
         window.navigationBarColor = backgroundColor
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            var flags = window.decorView.systemUiVisibility
+            flags = if (!UiPalette.isDark) {
+                flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            } else {
+                flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = if (!UiPalette.isDark) {
+                    flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                } else {
+                    flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                }
+            }
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = flags
+        }
     }
 
     private fun buildUi(): View {
         val config = ConfigStore(this).load()
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(20), dp(30), dp(20), dp(36))
+            setPadding(dp(20), dp(24), dp(20), dp(36))
             setBackgroundColor(backgroundColor)
         }
         content.addView(TextView(this).apply {
-            text = "设置"
-            textSize = 24f
+            text = "功能设置目录"
+            textSize = 22f
             setTextColor(inkColor)
-            setTypeface(typeface, Typeface.BOLD)
+            typeface = Typeface.DEFAULT_BOLD
         })
         content.addView(TextView(this).apply {
             text = "按功能分别配置，保存一页不会覆盖其他页面的内容。"
-            textSize = 13f
+            textSize = 12.5f
             setTextColor(mutedColor)
-            setPadding(0, dp(5), 0, dp(12))
+            setPadding(0, dp(4), 0, dp(14))
         })
 
         content.addView(item(
@@ -111,15 +127,15 @@ class SettingsHomeActivity : Activity() {
             setOnClickListener { onClick() }
             addView(TextView(this@SettingsHomeActivity).apply {
                 text = "$title  ›"
-                textSize = 16f
+                textSize = 15f
                 setTextColor(inkColor)
-                setTypeface(typeface, Typeface.BOLD)
+                typeface = Typeface.DEFAULT_BOLD
             })
             addView(TextView(this@SettingsHomeActivity).apply {
                 text = summary
-                textSize = 12.5f
+                textSize = 12f
                 setTextColor(mutedColor)
-                setPadding(0, dp(5), 0, 0)
+                setPadding(0, dp(4), 0, 0)
             })
         }
 
@@ -168,5 +184,5 @@ class SettingsHomeActivity : Activity() {
         ViewGroup.LayoutParams.WRAP_CONTENT,
     ).apply { topMargin = dp(10) }
 
-    private fun dp(value: Int) = (value * resources.displayMetrics.density + 0.5f).toInt()
+    private fun dp(value: Int) = UiKit.dp(this, value)
 }

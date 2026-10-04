@@ -48,15 +48,18 @@ class RoutingRuleActivity : Activity() {
     private val protocolLabels = listOf("全部", "TCP", "UDP")
     private val actionValues = listOf("PROXY", "DIRECT", "REJECT")
     private val actionLabels = listOf("通过 Relay 出口", "本机直连", "拒绝连接")
-    private val backgroundColor = Color.rgb(246, 248, 252)
-    private val surfaceColor = Color.WHITE
-    private val inkColor = Color.rgb(15, 23, 42)
-    private val mutedColor = Color.rgb(100, 116, 139)
-    private val lineColor = Color.rgb(226, 232, 240)
-    private val brandColor = Color.rgb(37, 99, 235)
+    private val backgroundColor get() = UiPalette.bg
+    private val surfaceColor get() = UiPalette.surface
+    private val inputBg get() = UiPalette.inputBg
+    private val inkColor get() = UiPalette.ink
+    private val mutedColor get() = UiPalette.muted
+    private val lineColor get() = UiPalette.line
+    private val brandColor get() = UiPalette.brand
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UiPalette.isDark = ConfigStore(this).isDarkTheme()
+        setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
         routing = savedInstanceState?.getString("routingSnapshot")?.let(RoutingConfig::fromJson)
             ?: ConfigStore(this).load().routing
@@ -88,9 +91,23 @@ class RoutingRuleActivity : Activity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.setDecorFitsSystemWindows(true)
         window.statusBarColor = backgroundColor
         window.navigationBarColor = backgroundColor
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            var flags = window.decorView.systemUiVisibility
+            flags = if (!UiPalette.isDark) {
+                flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            } else {
+                flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = if (!UiPalette.isDark) {
+                    flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                } else {
+                    flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                }
+            }
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = flags
+        }
     }
 
     private fun buildUi(): View {
@@ -114,38 +131,42 @@ class RoutingRuleActivity : Activity() {
 
         val card = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(16), dp(16), dp(16))
+            setPadding(dp(18), dp(18), dp(18), dp(18))
             background = rounded(surfaceColor, 16, lineColor)
         }
         name = field("例如：公司内网")
         card.addView(labeled("规则名称", name))
-        enabled = Switch(this).apply { text = "启用此规则" }
-        card.addView(enabled, topMargin(10))
+        enabled = Switch(this).apply {
+            text = "启用此规则"
+            setTextColor(inkColor)
+            UiKit.styleSwitch(this)
+        }
+        card.addView(enabled, topMargin(14))
 
         applicationsSummary = TextView(this).apply {
             textSize = 12.5f
             setTextColor(inkColor)
             setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = rounded(Color.rgb(248, 250, 252), 12, lineColor)
+            background = rounded(inputBg, 12, lineColor)
             isEnabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
             alpha = if (isEnabled) 1f else 0.55f
             setOnClickListener {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) openApplicationSelection()
             }
         }
-        card.addView(labeled("应用（Android 10+）", applicationsSummary), topMargin(12))
+        card.addView(labeled("应用（Android 10+）", applicationsSummary), topMargin(16))
 
         targets = field("例如：10.0.0.0/8\n*.example.com", multiline = true)
-        card.addView(labeled("IP、CIDR 或域名", targets), topMargin(12))
+        card.addView(labeled("IP、CIDR 或域名", targets), topMargin(16))
         ports = field("例如：80\n443\n8000-9000", multiline = true)
-        card.addView(labeled("端口（留空表示全部）", ports), topMargin(12))
+        card.addView(labeled("端口（留空表示全部）", ports), topMargin(16))
         protocol = spinner(protocolLabels)
-        card.addView(labeled("协议", protocol), topMargin(12))
+        card.addView(labeled("协议", protocol), topMargin(16))
         action = spinner(actionLabels)
-        card.addView(labeled("动作", action), topMargin(12))
+        card.addView(labeled("动作", action), topMargin(16))
         exit = spinner(listOf("跟随默认出口"))
         exitContainer = labeled("代理出口", exit)
-        card.addView(exitContainer, topMargin(12))
+        card.addView(exitContainer, topMargin(16))
         action.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
 
@@ -168,7 +189,8 @@ class RoutingRuleActivity : Activity() {
             }
             textSize = 11.5f
             setTextColor(mutedColor)
-            setPadding(0, dp(14), 0, 0)
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, dp(16), 0, 0)
         })
         root.addView(card)
         val scroll = ScrollView(this).apply {
@@ -195,9 +217,9 @@ class RoutingRuleActivity : Activity() {
             setAllCaps(false)
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
-            background = rounded(brandColor, 14)
+            background = rounded(brandColor, 10)
             setOnClickListener { onSave() }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48)))
     }
 
     private fun loadRule(rule: RoutingRuleConfig) {
@@ -380,8 +402,8 @@ class RoutingRuleActivity : Activity() {
         hint = hintText
         textSize = 14f
         setTextColor(inkColor)
-        setHintTextColor(Color.rgb(148, 163, 184))
-        background = rounded(Color.rgb(248, 250, 252), 12, lineColor)
+        setHintTextColor(UiPalette.placeholder)
+        background = rounded(inputBg, 12, lineColor)
         setPadding(dp(12), dp(if (multiline) 10 else 0), dp(12), dp(if (multiline) 10 else 0))
         if (multiline) {
             minLines = 3
@@ -394,12 +416,10 @@ class RoutingRuleActivity : Activity() {
     }
 
     private fun spinner(labels: List<String>) = Spinner(this).apply {
-        adapter = ArrayAdapter(this@RoutingRuleActivity, android.R.layout.simple_spinner_item, labels).also {
-            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
+        adapter = UiKit.themedSpinnerAdapter(this@RoutingRuleActivity, labels)
         minimumHeight = dp(48)
         setPadding(dp(10), 0, dp(8), 0)
-        background = rounded(Color.rgb(248, 250, 252), 12, lineColor)
+        background = rounded(inputBg, 12, lineColor)
     }
 
     private fun labeled(label: String, child: View) = LinearLayout(this).apply {
@@ -408,7 +428,7 @@ class RoutingRuleActivity : Activity() {
             text = label
             textSize = 12f
             setTextColor(mutedColor)
-            setPadding(dp(2), 0, 0, dp(5))
+            setPadding(dp(2), 0, 0, dp(6))
         })
         addView(child)
     }

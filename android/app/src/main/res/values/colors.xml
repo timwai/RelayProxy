@@ -1,5 +1,18 @@
 <resources>
-    <color name="relay_background">#F6F8FC</color>
-    <color name="relay_brand">#2563EB</color>
+    <color name="relay_background">#090D16</color>
+    <color name="relay_background_light">#F6F8FC</color>
+    <color name="relay_brand">#3B82F6</color>
+    <color name="relay_brand_dark">#1D4ED8</color>
+    <color name="relay_brand_soft">#1E293B</color>
+    <color name="relay_card">#111827</color>
+    <color name="relay_card_border">#1F2937</color>
+    <color name="relay_text_primary">#F9FAFB</color>
+    <color name="relay_text_secondary">#9CA3AF</color>
+    <color name="relay_success">#10B981</color>
+    <color name="relay_success_soft">#064E3B</color>
+    <color name="relay_warning">#F59E0B</color>
+    <color name="relay_warning_soft">#78350F</color>
+    <color name="relay_danger">#EF4444</color>
+    <color name="relay_danger_soft">#7F1D1D</color>
     <color name="relay_launcher_background">#FFFFFF</color>
 </resources>

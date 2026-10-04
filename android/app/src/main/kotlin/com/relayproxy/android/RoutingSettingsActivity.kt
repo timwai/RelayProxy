@@ -34,16 +34,19 @@ class RoutingSettingsActivity : Activity() {
     private val modeLabels = listOf("全局代理", "按规则分流", "全局直连")
     private val actionValues = listOf("PROXY", "DIRECT", "REJECT")
     private val actionLabels = listOf("代理", "直连", "拒绝")
-    private val backgroundColor = Color.rgb(246, 248, 252)
-    private val surfaceColor = Color.WHITE
-    private val inkColor = Color.rgb(15, 23, 42)
-    private val mutedColor = Color.rgb(100, 116, 139)
-    private val lineColor = Color.rgb(226, 232, 240)
-    private val brandColor = Color.rgb(37, 99, 235)
-    private val dangerColor = Color.rgb(220, 38, 38)
+    private val backgroundColor get() = UiPalette.bg
+    private val surfaceColor get() = UiPalette.surface
+    private val inputBg get() = UiPalette.inputBg
+    private val inkColor get() = UiPalette.ink
+    private val mutedColor get() = UiPalette.muted
+    private val lineColor get() = UiPalette.line
+    private val brandColor get() = UiPalette.brand
+    private val dangerColor get() = UiPalette.danger
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UiPalette.isDark = ConfigStore(this).isDarkTheme()
+        setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
     }
 
@@ -57,9 +60,23 @@ class RoutingSettingsActivity : Activity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) window.setDecorFitsSystemWindows(true)
         window.statusBarColor = backgroundColor
         window.navigationBarColor = backgroundColor
-        @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility =
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            var flags = window.decorView.systemUiVisibility
+            flags = if (!UiPalette.isDark) {
+                flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            } else {
+                flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags = if (!UiPalette.isDark) {
+                    flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+                } else {
+                    flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+                }
+            }
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = flags
+        }
     }
 
     private fun buildUi(): View {
@@ -126,10 +143,11 @@ class RoutingSettingsActivity : Activity() {
         }
 
         root.addView(Button(this).apply {
-            text = "添加规则"
+            text = "+ 添加规则"
             setAllCaps(false)
             setTextColor(brandColor)
-            background = rounded(Color.WHITE, 14, Color.rgb(191, 219, 254))
+            setTypeface(typeface, Typeface.BOLD)
+            background = rounded(if (UiPalette.isDark) UiPalette.brandSoft else Color.WHITE, 8, if (UiPalette.isDark) UiPalette.brandSoftBorder else Color.rgb(191, 219, 254))
             setOnClickListener {
                 if (config.rules.isEmpty() &&
                     modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" } != "rule"
@@ -164,7 +182,7 @@ class RoutingSettingsActivity : Activity() {
             setAllCaps(false)
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
-            background = rounded(brandColor, 14)
+            background = rounded(brandColor, 8)
             setOnClickListener { onSave() }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
     }
@@ -342,9 +360,7 @@ class RoutingSettingsActivity : Activity() {
 
     private fun confirmDelete(ruleId: String) {
         val rule = config.rules.firstOrNull { it.id == ruleId } ?: return
-        AlertDialog.Builder(this)
-            .setTitle("删除规则")
-            .setMessage("确定删除“${rule.name}”吗？")
+        UiKit.alertDialog(this, "删除规则", "确定删除“${rule.name}”吗？")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
                 val base = currentPolicy()
@@ -421,11 +437,10 @@ class RoutingSettingsActivity : Activity() {
     }
 
     private fun spinner(labels: List<String>) = Spinner(this).apply {
-        adapter = ArrayAdapter(this@RoutingSettingsActivity, android.R.layout.simple_spinner_item, labels)
-            .also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+        adapter = UiKit.themedSpinnerAdapter(this@RoutingSettingsActivity, labels)
         minimumHeight = dp(48)
         setPadding(dp(10), 0, dp(8), 0)
-        background = rounded(Color.rgb(248, 250, 252), 12, lineColor)
+        background = rounded(inputBg, 12, lineColor)
     }
 
     private fun labeled(label: String, child: View) = LinearLayout(this).apply {

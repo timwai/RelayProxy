@@ -198,6 +198,11 @@ data class ExitConfig(
 class ConfigStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("relayproxy_android", Context.MODE_PRIVATE)
 
+    fun isDarkTheme(): Boolean = prefs.getBoolean("dark_theme", true)
+    fun setDarkTheme(isDark: Boolean) {
+        prefs.edit().putBoolean("dark_theme", isDark).apply()
+    }
+
     fun hasConnectionConfig(config: ExitConfig = load()): Boolean =
         config.serverAddress.isNotBlank() &&
             Regex("^(?=.*[a-z])(?=.*[0-9])[a-z0-9]{16}$").matches(config.identityId)

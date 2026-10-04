@@ -1,13 +1,33 @@
 <resources>
-    <style name="Theme.RelayProxy.Base" parent="@android:style/Theme.Material.Light.NoActionBar">
+    <!-- 深色夜间模式系统主题：继承深色 Material 主题，默认文字纯白高对比度，底色深黑 -->
+    <style name="Theme.RelayProxy.Dark" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
+        <item name="android:textColorPrimary">#FFFFFF</item>
+        <item name="android:textColorSecondary">#B4C3D7</item>
         <item name="android:colorAccent">@color/relay_brand</item>
         <item name="android:statusBarColor">@color/relay_background</item>
         <item name="android:navigationBarColor">@color/relay_background</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowBackground">@color/relay_background</item>
     </style>
-    <style name="Theme.RelayProxy" parent="Theme.RelayProxy.Base" />
+
+    <!-- 浅色日间模式系统主题：继承浅色 Material 主题，默认文字深墨水黑，底色清爽浅灰 -->
+    <style name="Theme.RelayProxy.Light" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:textColorPrimary">#0F172A</item>
+        <item name="android:textColorSecondary">#64748B</item>
+        <item name="android:colorAccent">@color/relay_brand</item>
+        <item name="android:statusBarColor">@color/relay_background_light</item>
+        <item name="android:navigationBarColor">@color/relay_background_light</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowBackground">@color/relay_background_light</item>
+    </style>
+
+    <!-- 兼容别名与默认应用主题 -->
+    <style name="Theme.RelayProxy.Base" parent="Theme.RelayProxy.Dark" />
+    <style name="Theme.RelayProxy" parent="Theme.RelayProxy.Dark" />
 </resources>

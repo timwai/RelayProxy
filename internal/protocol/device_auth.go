@@ -96,6 +96,8 @@ type DeviceAccepted struct {
 	RDPLeaseSec           int          `json:"rdpLeaseSec,omitempty"`
 	P2PRendezvousAddress  string       `json:"p2pRendezvousAddress,omitempty"`
 	P2PLeaseSec           int          `json:"p2pLeaseSec,omitempty"`
+	P2PPortStart          int          `json:"p2pPortStart,omitempty"`
+	P2PPortEnd            int          `json:"p2pPortEnd,omitempty"`
 	SessionID             string       `json:"sessionId,omitempty"`
 	HeartbeatSec          int          `json:"heartbeat,omitempty"`
 	MaxConnections        int          `json:"maxConnections,omitempty"`

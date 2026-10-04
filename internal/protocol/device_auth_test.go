@@ -20,7 +20,7 @@ func TestDeviceAuthPayloadBindsChallengeAndIdentity(t *testing.T) {
 func TestDeviceAuthPayloadV5BindsIdentityIDAndCapabilities(t *testing.T) {
 	hello := DeviceHello{
 		ProtocolVersion: IdentityDeviceProtocolVersion,
-		IdentityID:      "team-test",
+		IdentityID:      "a1b2c3d4e5f6g7h8",
 		InstallationID:  "install", PublicKey: []byte("key"), ClientNonce: []byte("client"),
 		RequestedCapabilities: []string{CapabilityProxyClient, CapabilityProxyExit},
 		TransportCapabilities: []string{UDPModeStream},

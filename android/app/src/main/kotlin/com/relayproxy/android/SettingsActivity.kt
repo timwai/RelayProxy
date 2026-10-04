@@ -122,7 +122,7 @@ class SettingsActivity : Activity() {
         addSectionHeader(connection, "连接设置", "配置 Relay Server 和传输参数。")
         server = styledField("relay.example.com")
         connection.addView(labeled("Relay Server", server), topMargin(16))
-        identityId = styledField("team-a")
+        identityId = styledField("a1b2c3d4e5f6g7h8")
         connection.addView(labeled("身份 ID", identityId), topMargin(12))
         deviceName = styledField(ConfigStore(this).defaultDeviceName())
         connection.addView(labeled("设备名称", deviceName), topMargin(12))
@@ -351,8 +351,8 @@ class SettingsActivity : Activity() {
             server.requestFocus()
             return
         }
-        if (section == SECTION_CONNECTION && !Regex("^[a-z0-9](?:[a-z0-9-]{2,18})[a-z0-9]$").matches(config.identityId)) {
-            identityId.error = "身份 ID 必须是 4–20 位小写字母、数字或连字符"
+        if (section == SECTION_CONNECTION && !Regex("^(?=.*[a-z])(?=.*[0-9])[a-z0-9]{16}$").matches(config.identityId)) {
+            identityId.error = "身份 ID 必须是服务端生成的 16 位小写字母数字组合"
             identityId.requestFocus()
             return
         }

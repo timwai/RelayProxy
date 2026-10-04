@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 const (
 	IdentityStatusActive   = "active"
 	IdentityStatusDisabled = "disabled"
+	IdentityPublicIDLength = 16
+	identityIDAlphabet     = "abcdefghijklmnopqrstuvwxyz0123456789"
 )
 
 var (
@@ -27,6 +30,7 @@ type Identity struct {
 	Status          string    `json:"status"`
 	PolicyRevision  int64     `json:"policyRevision"`
 	LoginConfigured bool      `json:"loginConfigured"`
+	LoginUsername   string    `json:"loginUsername,omitempty"`
 	CreatedBy       string    `json:"createdBy"`
 	UpdatedBy       string    `json:"updatedBy"`
 	CreatedAt       time.Time `json:"createdAt"`
@@ -34,42 +38,108 @@ type Identity struct {
 }
 
 func validateIdentityShortID(value string) error {
-	if len(value) < 4 || len(value) > 20 {
-		return errors.New("identity id must contain 4 to 20 lowercase letters, digits or hyphens")
+	if len(value) != IdentityPublicIDLength {
+		return errors.New("identity id must contain exactly 16 lowercase letters and digits")
 	}
-	for index, char := range value {
-		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || (char == '-' && index > 0 && index < len(value)-1) {
-			continue
+	hasLetter, hasDigit := false, false
+	for _, char := range value {
+		switch {
+		case char >= 'a' && char <= 'z':
+			hasLetter = true
+		case char >= '0' && char <= '9':
+			hasDigit = true
+		default:
+			return errors.New("identity id must contain exactly 16 lowercase letters and digits")
 		}
-		return errors.New("identity id must contain 4 to 20 lowercase letters, digits or hyphens")
 	}
-	return nil
+	if hasLetter && hasDigit {
+		return nil
+	}
+	return errors.New("identity id must contain exactly 16 lowercase letters and digits")
 }
 
-func newIdentityShortID() string {
-	return "id-" + strings.ToLower(uuid.NewString()[:8])
+func newIdentityShortID() (string, error) {
+	for {
+		result := make([]byte, IdentityPublicIDLength)
+		random := make([]byte, IdentityPublicIDLength*2)
+		for index := 0; index < len(result); {
+			if _, err := rand.Read(random); err != nil {
+				return "", err
+			}
+			for _, value := range random {
+				// 252 is the largest multiple of 36 that fits in one byte. Dropping
+				// higher values avoids modulo bias without weakening the identifier.
+				if value >= 252 {
+					continue
+				}
+				result[index] = identityIDAlphabet[int(value)%len(identityIDAlphabet)]
+				index++
+				if index == len(result) {
+					break
+				}
+			}
+		}
+		if validateIdentityShortID(string(result)) == nil {
+			return string(result), nil
+		}
+	}
+}
+
+func normalizeIdentityUsername(value string) (string, error) {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if len(value) < 3 || len(value) > 64 {
+		return "", errors.New("login username must contain 3 to 64 letters, digits, dots, underscores or hyphens")
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '.' || char == '_' || char == '-' {
+			continue
+		}
+		return "", errors.New("login username must contain 3 to 64 letters, digits, dots, underscores or hyphens")
+	}
+	return value, nil
 }
 
 func (db *DB) ensureIdentityShortIDs() error {
-	rows, err := db.Query(`SELECT id FROM identities WHERE short_id IS NULL OR short_id = '' ORDER BY id`)
+	rows, err := db.Query(`SELECT id, COALESCE(short_id, '') FROM identities ORDER BY id`)
 	if err != nil {
 		return err
 	}
 	var ids []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, shortID string
+		if err := rows.Scan(&id, &shortID); err != nil {
 			_ = rows.Close()
 			return err
 		}
-		ids = append(ids, id)
+		if validateIdentityShortID(shortID) != nil {
+			ids = append(ids, id)
+		}
 	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
 	for _, id := range ids {
-		if _, err := db.Exec(`UPDATE identities SET short_id = ? WHERE id = ?`, newIdentityShortID(), id); err != nil {
-			return err
+		updated := false
+		for attempt := 0; attempt < 16; attempt++ {
+			shortID, err := newIdentityShortID()
+			if err != nil {
+				return err
+			}
+			var exists int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM identities WHERE short_id = ?`, shortID).Scan(&exists); err != nil {
+				return err
+			}
+			if exists != 0 {
+				continue
+			}
+			if _, err := db.Exec(`UPDATE identities SET short_id = ? WHERE id = ?`, shortID, id); err != nil {
+				return err
+			}
+			updated = true
+			break
+		}
+		if !updated {
+			return errors.New("failed to generate a unique identity id")
 		}
 	}
 	return nil
@@ -180,10 +250,14 @@ func (db *DB) ensureIdentityAccessSchema() error {
 }
 
 func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {
-	return db.CreateIdentityWithShortID(newIdentityShortID(), name, actor)
+	shortID, err := newIdentityShortID()
+	if err != nil {
+		return nil, err
+	}
+	return db.createIdentityWithShortID(shortID, name, actor)
 }
 
-func (db *DB) CreateIdentityWithShortID(shortID, name, actor string) (*Identity, error) {
+func (db *DB) createIdentityWithShortID(shortID, name, actor string) (*Identity, error) {
 	shortID = strings.ToLower(strings.TrimSpace(shortID))
 	name = strings.TrimSpace(name)
 	actor = strings.TrimSpace(actor)
@@ -226,11 +300,9 @@ func (db *DB) CreateIdentityWithShortID(shortID, name, actor string) (*Identity,
 	return item, nil
 }
 
-// CreateIdentityWithLogin creates the isolation boundary and its independent
-// management account atomically. The short ID is both the device-facing public
-// identifier and the login username.
-func (db *DB) CreateIdentityWithLogin(shortID, name, actor, passwordHash string) (*Identity, error) {
-	shortID = strings.ToLower(strings.TrimSpace(shortID))
+// CreateIdentityWithLogin creates an automatically identified isolation
+// boundary and its independently named management account atomically.
+func (db *DB) CreateIdentityWithLogin(username, name, actor, passwordHash string) (*Identity, error) {
 	name, actor, passwordHash = strings.TrimSpace(name), strings.TrimSpace(actor), strings.TrimSpace(passwordHash)
 	if name == "" || actor == "" || passwordHash == "" {
 		return nil, errors.New("identity name, actor and password hash are required")
@@ -238,13 +310,18 @@ func (db *DB) CreateIdentityWithLogin(shortID, name, actor, passwordHash string)
 	if len(name) > 100 {
 		return nil, errors.New("identity name is too long")
 	}
-	if err := validateIdentityShortID(shortID); err != nil {
+	username, err := normalizeIdentityUsername(username)
+	if err != nil {
+		return nil, err
+	}
+	shortID, err := newIdentityShortID()
+	if err != nil {
 		return nil, err
 	}
 	now := time.Now().UTC()
 	item := &Identity{
 		ID: "idn_" + uuid.NewString(), ShortID: shortID, Name: name, Status: IdentityStatusActive,
-		PolicyRevision: 1, LoginConfigured: true,
+		PolicyRevision: 1, LoginConfigured: true, LoginUsername: username,
 		CreatedBy: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now,
 	}
 	userID := uuid.NewString()
@@ -261,7 +338,7 @@ func (db *DB) CreateIdentityWithLogin(shortID, name, actor, passwordHash string)
 	}
 	if _, err := tx.Exec(`INSERT INTO users
 		(id, username, password_hash, display_name, role, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 'user', 'active', ?, ?)`, userID, shortID, passwordHash, name, now, now); err != nil {
+		VALUES (?, ?, ?, ?, 'user', 'active', ?, ?)`, userID, username, passwordHash, name, now, now); err != nil {
 		return nil, err
 	}
 	if _, err := tx.Exec(`INSERT INTO identity_memberships (identity_id, user_id, role, created_by, created_at)
@@ -269,7 +346,7 @@ func (db *DB) CreateIdentityWithLogin(shortID, name, actor, passwordHash string)
 		return nil, err
 	}
 	if err := insertAuthorizationAudit(tx, "identity.create", actor, "identity", item.ID,
-		map[string]any{"shortId": item.ShortID, "name": item.Name, "loginConfigured": true}, now); err != nil {
+		map[string]any{"shortId": item.ShortID, "name": item.Name, "loginUsername": username, "loginConfigured": true}, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -281,6 +358,8 @@ func (db *DB) CreateIdentityWithLogin(shortID, name, actor, passwordHash string)
 func (db *DB) ListIdentities() ([]*Identity, error) {
 	rows, err := db.Query(`SELECT id, short_id, name, status, policy_revision,
 		EXISTS(SELECT 1 FROM identity_memberships WHERE identity_id = identities.id),
+		COALESCE((SELECT user.username FROM identity_memberships membership JOIN users user ON user.id = membership.user_id
+			WHERE membership.identity_id = identities.id ORDER BY CASE membership.role WHEN 'owner' THEN 0 ELSE 1 END, membership.created_at LIMIT 1), ''),
 		created_by, updated_by, created_at, updated_at
 		FROM identities ORDER BY name, id`)
 	if err != nil {
@@ -290,7 +369,7 @@ func (db *DB) ListIdentities() ([]*Identity, error) {
 	result := make([]*Identity, 0)
 	for rows.Next() {
 		item := &Identity{}
-		if err := rows.Scan(&item.ID, &item.ShortID, &item.Name, &item.Status, &item.PolicyRevision, &item.LoginConfigured,
+		if err := rows.Scan(&item.ID, &item.ShortID, &item.Name, &item.Status, &item.PolicyRevision, &item.LoginConfigured, &item.LoginUsername,
 			&item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -303,9 +382,11 @@ func (db *DB) GetIdentity(id string) (*Identity, error) {
 	item := &Identity{}
 	err := db.QueryRow(`SELECT id, short_id, name, status, policy_revision,
 		EXISTS(SELECT 1 FROM identity_memberships WHERE identity_id = identities.id),
+		COALESCE((SELECT user.username FROM identity_memberships membership JOIN users user ON user.id = membership.user_id
+			WHERE membership.identity_id = identities.id ORDER BY CASE membership.role WHEN 'owner' THEN 0 ELSE 1 END, membership.created_at LIMIT 1), ''),
 		created_by, updated_by, created_at, updated_at
 		FROM identities WHERE id = ?`, strings.TrimSpace(id)).Scan(
-		&item.ID, &item.ShortID, &item.Name, &item.Status, &item.PolicyRevision, &item.LoginConfigured,
+		&item.ID, &item.ShortID, &item.Name, &item.Status, &item.PolicyRevision, &item.LoginConfigured, &item.LoginUsername,
 		&item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
 	return item, err
 }
@@ -324,8 +405,10 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	current := &Identity{}
 	if err := tx.QueryRow(`SELECT id, short_id, name, status, policy_revision,
 		EXISTS(SELECT 1 FROM identity_memberships WHERE identity_id = identities.id),
+		COALESCE((SELECT user.username FROM identity_memberships membership JOIN users user ON user.id = membership.user_id
+			WHERE membership.identity_id = identities.id ORDER BY CASE membership.role WHEN 'owner' THEN 0 ELSE 1 END, membership.created_at LIMIT 1), ''),
 		created_by, updated_by, created_at, updated_at FROM identities WHERE id = ?`, id).Scan(
-		&current.ID, &current.ShortID, &current.Name, &current.Status, &current.PolicyRevision, &current.LoginConfigured,
+		&current.ID, &current.ShortID, &current.Name, &current.Status, &current.PolicyRevision, &current.LoginConfigured, &current.LoginUsername,
 		&current.CreatedBy, &current.UpdatedBy, &current.CreatedAt, &current.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -403,18 +486,22 @@ func (db *DB) ResolveIdentity(shortID string) (*IdentityAuthorization, error) {
 	return &authorization, err
 }
 
-func (db *DB) ConfigureIdentityLogin(identityID, passwordHash, actor string) error {
+func (db *DB) ConfigureIdentityLogin(identityID, username, passwordHash, actor string) error {
 	identityID, passwordHash, actor = strings.TrimSpace(identityID), strings.TrimSpace(passwordHash), strings.TrimSpace(actor)
 	if identityID == "" || passwordHash == "" || actor == "" {
-		return errors.New("identity id, password hash and actor are required")
+		return errors.New("identity id, login username, password hash and actor are required")
+	}
+	username, err := normalizeIdentityUsername(username)
+	if err != nil {
+		return err
 	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var shortID, name, status string
-	if err := tx.QueryRow(`SELECT short_id, name, status FROM identities WHERE id = ?`, identityID).Scan(&shortID, &name, &status); err != nil {
+	var name, status string
+	if err := tx.QueryRow(`SELECT name, status FROM identities WHERE id = ?`, identityID).Scan(&name, &status); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
@@ -424,7 +511,7 @@ func (db *DB) ConfigureIdentityLogin(identityID, passwordHash, actor string) err
 	case errors.Is(err, sql.ErrNoRows):
 		userID = uuid.NewString()
 		if _, err := tx.Exec(`INSERT INTO users (id, username, password_hash, display_name, role, status, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`, userID, shortID, passwordHash, name, status, now, now); err != nil {
+			VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`, userID, username, passwordHash, name, status, now, now); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`INSERT INTO identity_memberships (identity_id, user_id, role, created_by, created_at)
@@ -435,12 +522,12 @@ func (db *DB) ConfigureIdentityLogin(identityID, passwordHash, actor string) err
 		return err
 	default:
 		if _, err := tx.Exec(`UPDATE users SET username = ?, password_hash = ?, display_name = ?, status = ?, updated_at = ? WHERE id = ?`,
-			shortID, passwordHash, name, status, now, userID); err != nil {
+			username, passwordHash, name, status, now, userID); err != nil {
 			return err
 		}
 	}
 	if err := insertAuthorizationAudit(tx, "identity.login.configure", actor, "identity", identityID,
-		map[string]any{"username": shortID}, now); err != nil {
+		map[string]any{"username": username}, now); err != nil {
 		return err
 	}
 	return tx.Commit()

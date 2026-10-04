@@ -8,7 +8,7 @@ import (
 
 func TestIdentityEnrollmentRequiresApprovalAndRechecksIdentity(t *testing.T) {
 	db := openIdentityTestDB(t)
-	identity, err := db.CreateIdentityWithShortID("owner-one", "Owner", "admin")
+	identity, err := db.CreateIdentity("Owner", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestIdentityEnrollmentIsScopedAndPreservesDeviceCapabilities(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := db.CreateIdentityWithShortID("other-two", "Other", "admin")
+	other, err := db.CreateIdentity("Other", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

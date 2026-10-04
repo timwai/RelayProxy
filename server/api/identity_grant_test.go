@@ -172,7 +172,7 @@ func TestIdentityLoginManagesOnlyItsOwnDeviceGrants(t *testing.T) {
 	}
 	seedGrantAPIDevice(t, router.db, "identity-owned-target", owner.ID, []string{"proxy.exit", "rdp.host"})
 	seedGrantAPIDevice(t, router.db, "other-owned-target", otherOwner.ID, []string{"proxy.exit"})
-	token, _, err := router.authService.Login(owner.ShortID, "identity-password")
+	token, _, err := router.authService.Login(owner.LoginUsername, "identity-password")
 	if err != nil {
 		t.Fatal(err)
 	}

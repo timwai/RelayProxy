@@ -7,7 +7,7 @@ import (
 )
 
 func TestPowerConstrainedStatusBeforeStart(t *testing.T) {
-	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"team-test"}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, filepath.Join(t.TempDir(), "device-identity.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestPowerConstrainedStatusBeforeStart(t *testing.T) {
 }
 
 func TestSetPowerConstrainedAfterStopIsIgnored(t *testing.T) {
-	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"team-test"}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, filepath.Join(t.TempDir(), "device-identity.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,5 +50,18 @@ func TestSetPowerConstrainedAfterStopIsIgnored(t *testing.T) {
 	}
 	if status.PowerConstrained {
 		t.Fatal("closed client accepted a power-profile mutation")
+	}
+}
+
+func TestIdentityIDRequiresGeneratedLetterDigitFormat(t *testing.T) {
+	if !validIdentityID("a1b2c3d4e5f6g7h8") {
+		t.Fatal("valid generated identity id was rejected")
+	}
+	for _, value := range []string{
+		"team-a", "abcdefghijklmnop", "1234567890123456", "A1b2c3d4e5f6g7h8", "a1b2c3d4e5f6g7-8",
+	} {
+		if validIdentityID(value) {
+			t.Fatalf("invalid identity id %q was accepted", value)
+		}
 	}
 }

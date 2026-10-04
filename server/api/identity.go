@@ -22,7 +22,7 @@ func (r *Router) handleListIdentities(w http.ResponseWriter, req *http.Request) 
 
 func (r *Router) handleCreateIdentity(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		ShortID  string `json:"shortId"`
+		Username string `json:"username"`
 		Name     string `json:"name"`
 		Password string `json:"password"`
 	}
@@ -40,7 +40,7 @@ func (r *Router) handleCreateIdentity(w http.ResponseWriter, req *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to protect identity password")
 		return
 	}
-	item, err := r.db.CreateIdentityWithLogin(body.ShortID, body.Name, actor, hash)
+	item, err := r.db.CreateIdentityWithLogin(body.Username, body.Name, actor, hash)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -55,6 +55,7 @@ func validIdentityPassword(password string) bool {
 
 func (r *Router) handleResetIdentityPassword(w http.ResponseWriter, req *http.Request) {
 	var body struct {
+		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if err := decodeJSON(w, req, &body); err != nil {
@@ -71,7 +72,7 @@ func (r *Router) handleResetIdentityPassword(w http.ResponseWriter, req *http.Re
 		return
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
-	if err := r.db.ConfigureIdentityLogin(req.PathValue("id"), hash, actor); err != nil {
+	if err := r.db.ConfigureIdentityLogin(req.PathValue("id"), body.Username, hash, actor); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "identity not found")
 		} else {

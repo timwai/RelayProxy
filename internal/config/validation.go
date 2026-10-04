@@ -128,7 +128,7 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 		return fmt.Errorf("客户端角色由服务端授权，配置文件不再接受 mode")
 	}
 	if c.Device.IdentityID != "" && !validIdentityID(c.Device.IdentityID) {
-		return fmt.Errorf("device.identity_id 必须是 4-20 位小写字母、数字或连字符，且不能以连字符开头或结尾")
+		return fmt.Errorf("device.identity_id 必须是服务端生成的 16 位小写字母数字组合")
 	}
 	switch c.Transport.Mode {
 	case "auto", "quic_only", "tcp_only":
@@ -236,16 +236,21 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 }
 
 func validIdentityID(value string) bool {
-	if len(value) < 4 || len(value) > 20 || value[0] == '-' || value[len(value)-1] == '-' {
+	if len(value) != 16 {
 		return false
 	}
+	hasLetter, hasDigit := false, false
 	for _, char := range value {
-		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
-			continue
+		switch {
+		case char >= 'a' && char <= 'z':
+			hasLetter = true
+		case char >= '0' && char <= '9':
+			hasDigit = true
+		default:
+			return false
 		}
-		return false
 	}
-	return true
+	return hasLetter && hasDigit
 }
 
 // AgentConfigRevision identifies the normalized bytes SaveAgentConfig writes.

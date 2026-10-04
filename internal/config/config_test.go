@@ -29,6 +29,19 @@ func TestApplyAgentDefaultsPreservesExplicitRoutingMode(t *testing.T) {
 	}
 }
 
+func TestIdentityIDRequiresGeneratedLetterDigitFormat(t *testing.T) {
+	if !validIdentityID("a1b2c3d4e5f6g7h8") {
+		t.Fatal("valid generated identity id was rejected")
+	}
+	for _, value := range []string{
+		"team-a", "abcdefghijklmnop", "1234567890123456", "A1b2c3d4e5f6g7h8", "a1b2c3d4e5f6g7-8",
+	} {
+		if validIdentityID(value) {
+			t.Fatalf("invalid identity id %q was accepted", value)
+		}
+	}
+}
+
 func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	agent := &AgentConfigFile{}
 	if err := NormalizeAgentConfig(agent); err != nil {

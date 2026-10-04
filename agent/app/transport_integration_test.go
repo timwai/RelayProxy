@@ -59,7 +59,7 @@ func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Chec
 	base := AgentConfig{
 		ServerAddress: "127.0.0.1", TCPPort: gateway.TCPAddr().(*net.TCPAddr).Port, QUICPort: gateway.QUICAddr().(*net.UDPAddr).Port,
 		InsecureTLS: true, SOCKS5Enabled: &disabled, HTTPEnabled: &disabled,
-		IdentityID: "test-team", DefaultExitID: "exit", ConnectTimeout: 3 * time.Second,
+		IdentityID: "a1b2c3d4e5f6g7h8", DefaultExitID: "exit", ConnectTimeout: 3 * time.Second,
 	}
 	exitCfg := base
 	exitCfg.Mode, exitCfg.TransportMode = "EXIT", exitMode

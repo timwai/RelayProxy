@@ -218,8 +218,9 @@
     $('nav-identity-count').textContent = state.identities.length;
     $('identities-body').innerHTML = state.identities.length ? state.identities.map(item => {
       const status = item.status === 'active' ? badge('启用', 'success') : badge('禁用', 'warning-badge');
-      return '<tr><td><span class="device-name">' + esc(item.name) + '</span><span class="device-id mono">' + esc(item.shortId || item.id) + '</span></td><td>' + status + '</td><td class="mono">' + esc(item.policyRevision) + '</td><td class="muted">' + esc(date(item.updatedAt)) + '</td><td class="right"><button type="button" class="small-button" data-identity-manage="' + esc(item.id) + '">管理</button></td></tr>';
-    }).join('') : emptyRow(5, '尚未创建身份', '创建身份后即可使用短 ID 连接，并以该 ID 独立登录');
+      const login = item.loginUsername ? ' · 登录：' + item.loginUsername : ' · 登录待配置';
+      return '<tr><td><span class="device-name">' + esc(item.name) + '</span><span class="device-id mono">ID：' + esc(item.shortId || item.id) + esc(login) + '</span></td><td>' + status + '</td><td class="mono">' + esc(item.policyRevision) + '</td><td class="muted">' + esc(date(item.updatedAt)) + '</td><td class="right"><button type="button" class="small-button" data-identity-manage="' + esc(item.id) + '">管理</button></td></tr>';
+    }).join('') : emptyRow(5, '尚未创建身份', '创建身份后，设备使用自动生成的 16 位 ID 连接，管理员使用自定义用户名登录');
   }
 
   async function refreshIdentities() {
@@ -565,22 +566,22 @@
   async function createIdentity(event) {
     event.preventDefault();
     if (state.identityBusy) { return; }
-    const shortId = $('identity-create-short-id').value.trim().toLowerCase();
+    const username = $('identity-create-username').value.trim().toLowerCase();
     const name = $('identity-create-name').value.trim();
     const password = $('identity-create-password').value;
-    if (!/^[a-z0-9](?:[a-z0-9-]{2,18})[a-z0-9]$/.test(shortId)) { errorAt('identity-create-error', '短身份 ID 必须是 4–20 位小写字母、数字或连字符'); return; }
+    if (!/^[a-z0-9._-]{3,64}$/.test(username)) { errorAt('identity-create-error', '登录用户名必须是 3–64 位小写字母、数字、点、下划线或连字符'); return; }
     if (!name) { errorAt('identity-create-error', '请输入身份名称'); $('identity-create-name').focus(); return; }
     if (password.length < 8) { errorAt('identity-create-error', '初始密码至少需要 8 个字符'); return; }
     state.identityBusy = true;
     $('identity-create-submit').disabled = true;
     errorAt('identity-create-error', '');
     try {
-      await api('/identities', { method: 'POST', body: JSON.stringify({ shortId, name, password }) });
-      $('identity-create-short-id').value = '';
+      const created = await api('/identities', { method: 'POST', body: JSON.stringify({ username, name, password }) });
+      $('identity-create-username').value = '';
       $('identity-create-name').value = '';
       $('identity-create-password').value = '';
       await refreshIdentities();
-      toast('身份已创建');
+      toast('身份已创建，连接 ID：' + created.shortId);
     } catch (err) {
       errorAt('identity-create-error', err.message);
     } finally {
@@ -598,8 +599,9 @@
     $('identity-dialog-summary').textContent = '身份 ID：' + item.shortId;
     $('identity-name').value = item.name;
     $('identity-status').value = item.status;
+    $('identity-login-username').value = item.loginUsername || '';
     $('identity-reset-password').value = '';
-    $('identity-login-state').textContent = item.loginConfigured ? '已配置' : '待配置';
+    $('identity-login-state').textContent = item.loginConfigured ? '用户名：' + item.loginUsername : '待配置';
     $('identity-policy-revision').textContent = '版本 ' + item.policyRevision + '；设备能力请在设备管理中配置。';
     errorAt('identity-error', '');
     errorAt('identity-password-error', '');
@@ -636,17 +638,19 @@
 
   async function resetIdentityPassword() {
     const identity = state.selectedIdentity;
+    const username = $('identity-login-username').value.trim().toLowerCase();
     const password = $('identity-reset-password').value;
     if (!identity || state.identityBusy) return;
+    if (!/^[a-z0-9._-]{3,64}$/.test(username)) { errorAt('identity-password-error', '登录用户名必须是 3–64 位小写字母、数字、点、下划线或连字符'); return; }
     if (password.length < 8 || password.length > 128 || !password.trim()) { errorAt('identity-password-error', '密码须为 8–128 个字符，且不能全部为空白'); return; }
     state.identityBusy = true;
     $('identity-password-reset').disabled = true;
     errorAt('identity-password-error', '');
     try {
-      await api('/identities/' + encodeURIComponent(identity.id) + '/password', { method: 'PUT', body: JSON.stringify({ password }) });
+      await api('/identities/' + encodeURIComponent(identity.id) + '/password', { method: 'PUT', body: JSON.stringify({ username, password }) });
       $('identity-reset-password').value = '';
-      $('identity-login-state').textContent = '已配置';
-      toast('身份登录密码已重置，原管理会话已注销');
+      $('identity-login-state').textContent = '用户名：' + username;
+      toast('身份登录配置已保存，原管理会话已注销');
       await refreshIdentities();
     } catch (err) { errorAt('identity-password-error', err.message); }
     finally { state.identityBusy = false; $('identity-password-reset').disabled = false; }
@@ -669,9 +673,9 @@
       const identity = d.identityId ? '<span class="device-name">' + esc(d.identityName || d.identityId) + '</span><span class="device-id mono">' + esc(d.identityId) + '</span>' : '<span class="muted">未分配身份</span>';
       const assign = state.user && state.user.role === 'admin' ? ' <button class="small-button" data-assign-identity="' + esc(d.id) + '">' + (d.identityId ? '更改归属' : '分配身份') + '</button>' : '';
       return '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + identity + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '<small>' + esc([d.platform, d.arch].filter(Boolean).join(' / ')) + '</small></td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td><td class="right"><button class="small-button" data-manage="' + esc(d.id) + '">管理</button>' + assign + '</td></tr>';
-    }).join('') : emptyRow(7, state.devices.length ? '没有匹配的设备' : '还没有已授权设备', state.devices.length ? '调整搜索或筛选条件' : '客户端填写短身份 ID 后，设备会进入对应身份的待审批列表');
+    }).join('') : emptyRow(7, state.devices.length ? '没有匹配的设备' : '还没有已授权设备', state.devices.length ? '调整搜索或筛选条件' : '客户端填写身份 ID 后，设备会进入对应身份的待审批列表');
     const recent = state.devices.slice().sort((a, b) => (b.status === 'online') - (a.status === 'online') || (Date.parse(b.lastSeenAt) || 0) - (Date.parse(a.lastSeenAt) || 0)).slice(0, 5);
-    $('overview-devices').innerHTML = recent.length ? recent.map(d => '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '</td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td></tr>').join('') : emptyRow(5, '连接你的第一台设备', '先创建身份，并在客户端填写短身份 ID');
+    $('overview-devices').innerHTML = recent.length ? recent.map(d => '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '</td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td></tr>').join('') : emptyRow(5, '连接你的第一台设备', '先创建身份，并在客户端填写身份 ID');
     $('nav-device-count').textContent = state.devices.length;
     $('stat-total').textContent = '共 ' + state.devices.length + ' 台已注册设备';
     $('device-filter-count').textContent = filtered.length + ' / ' + state.devices.length + ' 台设备';
@@ -684,7 +688,7 @@
       const caps = orderedCapabilities(requested).map(capability => capabilityNames[capability] || capability).join('、') || '未声明';
       const identity = item.identityName || item.identityId || '未分配身份';
       return '<tr><td><span class="device-name">' + esc(item.deviceName || '未命名设备') + '</span><span class="device-id mono">' + esc(identity) + ' · ' + esc(item.fingerprint.slice(0, 16)) + '…</span></td><td>' + esc([item.platform, item.arch, item.clientVersion].filter(Boolean).join(' / ') || '—') + '</td><td>' + esc(caps) + '</td><td><small>' + esc(date(item.firstSeenAt)) + '<br>' + esc(date(item.lastSeenAt)) + '</small></td><td class="right"><button class="small-button primary" data-enrollment-manage="' + esc(item.id) + '">审批能力</button> <button class="small-button" data-enrollment-reject="' + esc(item.id) + '">拒绝</button></td></tr>';
-    }).join('') : emptyRow(5, '没有待审批设备', '新设备使用短身份 ID 发起申请，审批后才能连接');
+    }).join('') : emptyRow(5, '没有待审批设备', '新设备使用身份 ID 发起申请，审批后才能连接');
   }
   function renderExits() {
     $('exits-grid').innerHTML = state.exits.length ? state.exits.map(e => '<article class="panel exit-card"><div class="exit-header"><div><h3>' + esc(e.deviceName || '未命名出口') + '</h3><span class="device-id mono">' + esc(e.deviceId) + '</span></div>' + badge('在线', 'success') + '</div><div class="detail-list">' + details([['传输方式', String(e.transport || '—').toUpperCase()], ['活跃流', e.activeStreams], ['目标权限', '服务端与出口本地共同限制']]) + '</div><button data-copy-exit="' + esc(e.deviceId) + '">复制出口 ID</button></article>').join('') : '<div class="panel empty"><strong>暂无在线出口</strong>将已配对设备设为「出口」或「客户端 + 出口」，并开启出口服务。</div>';
@@ -1439,7 +1443,7 @@
     if (state.deviceBusy || !state.selectedDevice) { return; }
     const device = state.selectedDevice;
     const label = device.name || device.id;
-    if (!confirm('永久删除设备「' + label + '」？\n\n这会立即断开当前连接，并清除该设备的授权、RDP 关系和安装身份。客户端下次可使用短身份 ID 重新申请，并等待身份管理员审批。')) { return; }
+    if (!confirm('永久删除设备「' + label + '」？\n\n这会立即断开当前连接，并清除该设备的授权、RDP 关系和安装身份。客户端下次可使用身份 ID 重新申请，并等待身份管理员审批。')) { return; }
     state.deviceBusy = true;
     all('#device-dialog button').forEach(button => { button.disabled = true; });
     errorAt('device-action-error', '');
@@ -1447,7 +1451,7 @@
       await api('/devices/' + encodeURIComponent(device.id), { method: 'DELETE' });
       state.selectedDevice = null;
       $('device-dialog').close();
-      toast('设备已删除；可使用短身份 ID 重新申请审批');
+      toast('设备已删除；可使用身份 ID 重新申请审批');
       await refresh(true);
     } catch (err) { errorAt('device-action-error', err.message); }
     finally { state.deviceBusy = false; all('#device-dialog button').forEach(button => { button.disabled = false; }); }

@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -16,16 +17,16 @@ func openIdentityTestDB(t *testing.T) *DB {
 	return db
 }
 
-func TestIdentityShortIDAndIndependentLogin(t *testing.T) {
+func TestGeneratedIdentityIDAndIndependentLogin(t *testing.T) {
 	db := openIdentityTestDB(t)
 	identity, err := db.CreateIdentityWithLogin("engineering", "Engineering", "admin", "hashed-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.ShortID != "engineering" || !identity.LoginConfigured || identity.PolicyRevision != 1 {
+	if validateIdentityShortID(identity.ShortID) != nil || identity.LoginUsername != "engineering" || !identity.LoginConfigured || identity.PolicyRevision != 1 {
 		t.Fatalf("unexpected identity: %+v", identity)
 	}
-	resolved, err := db.ResolveIdentity("ENGINEERING")
+	resolved, err := db.ResolveIdentity(strings.ToUpper(identity.ShortID))
 	if err != nil || resolved.IdentityID != identity.ID || resolved.IdentityName != identity.Name {
 		t.Fatalf("short identity id did not resolve: %+v err=%v", resolved, err)
 	}
@@ -58,7 +59,7 @@ func TestIdentityShortIDAndIndependentLogin(t *testing.T) {
 
 func TestIdentityRevisionDisableAndDeviceAssignment(t *testing.T) {
 	db := openIdentityTestDB(t)
-	identity, err := db.CreateIdentityWithShortID("operations", "Operations", "admin")
+	identity, err := db.CreateIdentity("Operations", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +153,7 @@ func TestHistoricalDeviceMigrationReusesExplicitIdentityBinding(t *testing.T) {
 		t.Fatalf("migration created duplicate devices: count=%d err=%v", deviceCount, err)
 	}
 
-	other, err := db.CreateIdentityWithShortID("other-owner", "Other Owner", admin.ID)
+	other, err := db.CreateIdentity("Other Owner", admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,5 +163,43 @@ func TestHistoricalDeviceMigrationReusesExplicitIdentityBinding(t *testing.T) {
 	}
 	if _, err := db.ObserveIdentityDevice(*otherResolved, observation); !errors.Is(err, ErrDeviceIdentityConflict) {
 		t.Fatalf("historical device accepted another identity id: %v", err)
+	}
+}
+
+func TestLegacyIdentityIDMigratesWithoutChangingLoginUsername(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-identity.db")
+	db, err := OpenDB("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := db.CreateIdentityWithLogin("legacy.login", "Legacy", "admin", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE identities SET short_id = 'legacy-team' WHERE id = ?`, identity.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err = OpenDB("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	migrated, err := db.GetIdentity(identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validateIdentityShortID(migrated.ShortID) != nil || migrated.ShortID == "legacy-team" {
+		t.Fatalf("legacy public id was not migrated: %+v", migrated)
+	}
+	if migrated.LoginUsername != "legacy.login" {
+		t.Fatalf("login username changed during public id migration: %+v", migrated)
+	}
+	user, err := db.GetUserByUsername("legacy.login")
+	if err != nil || user.IdentityID != identity.ID {
+		t.Fatalf("legacy login no longer belongs to identity: %+v err=%v", user, err)
 	}
 }

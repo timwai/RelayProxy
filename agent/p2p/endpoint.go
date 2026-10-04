@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"relayproxy/internal/p2p/candidate"
@@ -24,14 +26,44 @@ import (
 type Endpoint struct {
 	mu         sync.RWMutex
 	rendezvous string
+	portStart  int
+	portEnd    int
 	conn       *net.UDPConn
 	identity   *secure.TLSIdentity
 	candidates []protocol.P2PCandidate
 	closed     bool
 }
 
+var endpointPortCursor atomic.Uint32
+
 func NewEndpoint(rendezvous string) *Endpoint {
-	return &Endpoint{rendezvous: rendezvous}
+	return NewEndpointWithPortRange(rendezvous, 0, 0)
+}
+
+func NewEndpointWithPortRange(rendezvous string, portStart, portEnd int) *Endpoint {
+	return &Endpoint{rendezvous: rendezvous, portStart: portStart, portEnd: portEnd}
+}
+
+func listenP2PUDP(portStart, portEnd int) (*net.UDPConn, error) {
+	if portStart == 0 && portEnd == 0 {
+		return net.ListenUDP("udp", &net.UDPAddr{Port: 0})
+	}
+	if portStart < 1 || portStart > 65535 || portEnd < portStart || portEnd > 65535 {
+		return nil, fmt.Errorf("invalid P2P UDP port range %d-%d", portStart, portEnd)
+	}
+
+	count := portEnd - portStart + 1
+	offset := int(endpointPortCursor.Add(1)-1) % count
+	var lastErr error
+	for i := 0; i < count; i++ {
+		port := portStart + (offset+i)%count
+		conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port})
+		if err == nil {
+			return conn, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("no available UDP port in P2P range %d-%d: %w", portStart, portEnd, lastErr)
 }
 
 func (e *Endpoint) Start(ctx context.Context) error {
@@ -56,7 +88,7 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	// Use Go's wildcard "udp" listener so supported platforms get one dual-stack
 	// socket. Candidate discovery, punching and QUIC must all keep this exact
 	// socket to preserve the NAT mapping.
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
+	conn, err := listenP2PUDP(e.portStart, e.portEnd)
 	if err != nil {
 		return err
 	}

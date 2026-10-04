@@ -1068,6 +1068,12 @@ class MainActivity : Activity() {
             isClickable = true
             isFocusable = true
             setOnClickListener {
+                val routing = ConfigStore(this@MainActivity).load().routing
+                if (routing.rules.isEmpty() && routing.mode != "rule") {
+                    if (updateRoutingConfig { current -> current.copy(mode = "rule") } == null) {
+                        return@setOnClickListener
+                    }
+                }
                 startActivityForResult(
                     Intent(this@MainActivity, RoutingRuleActivity::class.java),
                     REQUEST_ROUTING_RULE

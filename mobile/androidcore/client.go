@@ -949,6 +949,8 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 				KeepAlive:           10 * time.Second,
 				IdleTimeout:         120 * time.Second,
 				MaxExitSessions:     1,
+				PortStart:           accepted.P2PPortStart,
+				PortEnd:             accepted.P2PPortEnd,
 				LowPowerIdleTimeout: 60 * time.Second,
 				LowPowerMaxSessions: 1,
 			},

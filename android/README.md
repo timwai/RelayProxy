@@ -8,7 +8,7 @@ Android 支持作为 **Relay 网络出口**，也支持作为 **代理客户端*
 - `android/app`：Kotlin 原生 UI + 前台 Service。有效连接配置保存后，`RelayExitService` 持有唯一 Go Core 并维持控制连接，提前同步设备审批和授权出口；出口、VPN 和本机代理的启动状态独立控制数据面。`RelayVpnService` 管理 VPN 授权、TUN fd 和前台通知，启动时复用或重建该 Core。
 - VPN 使用 `VpnService` + 固定版本 `hev-socks5-tunnel`，将 IPv4/IPv6 默认路由送入独立且需要认证的内部回环 SOCKS5。RelayProxy 自身应用从 VPN 路由中排除，避免隧道回环。
 - VPN 可选择全部应用、仅选中应用或排除选中应用；DNS 使用 hev-socks5-tunnel Mapped DNS，在 TUN 内返回 Fake-IP，并在建立 SOCKS5 连接时恢复为原始域名交给所选出口解析，避免把明文 UDP/53 DNS 暴露给出口网络。当前物理网络同步给 Android VPN，Wi-Fi / 蜂窝切换时共享 Core 会重连。
-- Android 10+ 会根据原始 TCP/UDP 四元组查询连接 UID，把共享 UID 映射为包名组，再交给共用路由引擎匹配应用、目标、端口和协议条件。Android 8/9 保留非应用规则，并拒绝启用含应用条件的规则。
+- Android 10+ 会根据原始 TCP/UDP 四元组查询连接 UID，把共享 UID 映射为包名组，再交给共用路由引擎匹配应用、目标、端口和协议条件。仅选中应用模式只包含一个 UID 时，短生命周期或原生连接查询不到 UID 会安全回退到该应用组，兼容 Telegram 等直接连接数据中心 IP 的客户端。Android 8/9 保留非应用规则，并拒绝启用含应用条件的规则。
 - SOCKS5 UDP ASSOCIATE 按目标维护有界 UDP association；HTTP 代理支持普通 HTTP 与 HTTPS CONNECT。所有本机代理仅绑定回环地址。
 
 ## 一键打包 APK（Windows）
@@ -157,7 +157,7 @@ APK 输出：
 3. 从设置目录分别进入“出口选择”“分流规则”“VPN 与应用范围”或“本机代理”。出口和每条代理规则都可从已授权设备下拉选择；空白表示跟随默认出口，只有一个可用出口时会自动选择。
 4. 点击“启动”会运行 Relay 服务，并申请出口能力；点击“启动 VPN”或启用本机代理后才申请代理能力。新设备首次连接后进入该身份的待审批列表；已审批设备后来启动另一项功能时，只为新增能力再次进入待审批，批准后合并到同一设备。使用该身份独立登录 Server，勾选设备能力后批准。同一身份的已审批设备可直接使用彼此的出口；跨身份代理或 RDP 由目标设备所属身份在设备详情中授权给指定身份。
 5. 显式代理应用时，SOCKS5 默认地址为 `127.0.0.1:1080`，HTTP 默认地址为 `127.0.0.1:8080`。保存新端口后，运行中的 Relay 服务会自动重建。
-6. 在设置中选择 VPN 应用范围，并在“分流规则”中配置应用、IP/CIDR、域名、端口、协议、动作和出口。VPN DNS 默认启用 Mapped DNS，不再要求手动配置公网 DNS。点击独立的“启动 VPN”按钮，首次使用需在 Android 系统弹窗中授权。VPN 接管范围内应用的 IPv4/IPv6 默认流量；即使关闭用户 SOCKS5 开关，Core 仍会为 TUN 建立一个使用 Keystore 密钥认证的内部回环 SOCKS5 入口。RelayProxy 自身流量排除在 VPN 外。
+6. 在设置中选择 VPN 应用范围，并在“分流规则”中配置应用、IP/CIDR、域名、端口、协议、动作和出口。应用范围只决定流量是否进入 VPN；规则中的非空条件需要同时满足。Telegram 等直接连接 IP 的应用如需代理全部流量，应只选择应用并将目标留空。VPN DNS 默认启用 Mapped DNS，不再要求手动配置公网 DNS。点击独立的“启动 VPN”按钮，首次使用需在 Android 系统弹窗中授权。VPN 接管范围内应用的 IPv4/IPv6 默认流量；即使关闭用户 SOCKS5 开关，Core 仍会为 TUN 建立一个使用 Keystore 密钥认证的内部回环 SOCKS5 入口。RelayProxy 自身流量排除在 VPN 外。
 7. 在“首选出口网络”中选择“Wi-Fi 优先”或“移动数据优先”。关闭“自动切换网络”时，Relay 隧道固定使用所选网络。
 8. 开启“自动切换网络”后：
    - Wi-Fi 优先：Wi-Fi 具有已验证互联网连接时使用 Wi-Fi；Wi-Fi 断开或无互联网时自动切换到蜂窝，Wi-Fi 恢复后自动切回。

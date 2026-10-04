@@ -19,4 +19,20 @@ class FlowOwnerIdentityTest {
             assertEquals(FlowOwnerIdentity.UNKNOWN, FlowOwnerIdentity.encode(packages))
         }
     }
+
+    @Test fun singleUidVpnScopeCanRecoverMissedNativeConnections() {
+        assertEquals(
+            "org.telegram.messenger|org.telegram.messenger.web",
+            FlowOwnerIdentity.encodeSingleUidScope(
+                mapOf(10234 to listOf("org.telegram.messenger.web", "org.telegram.messenger")),
+            ),
+        )
+        assertEquals(
+            FlowOwnerIdentity.UNKNOWN,
+            FlowOwnerIdentity.encodeSingleUidScope(
+                mapOf(10234 to listOf("org.telegram.messenger"), 10235 to listOf("com.example.browser")),
+            ),
+        )
+        assertEquals(FlowOwnerIdentity.UNKNOWN, FlowOwnerIdentity.encodeSingleUidScope(emptyMap()))
+    }
 }

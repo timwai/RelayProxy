@@ -106,7 +106,7 @@ class RoutingRuleActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "应用、目标、端口和协议同时满足时命中；每行可填写一个目标或端口范围。"
+            text = "应用、目标、端口和协议同时满足时命中。Telegram 等应用会直接连接 IP；如需代理该应用的全部流量，只选择应用并将目标留空。"
             textSize = 12.5f
             setTextColor(mutedColor)
             setPadding(0, dp(5), 0, dp(12))
@@ -164,7 +164,7 @@ class RoutingRuleActivity : Activity() {
             text = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 "Android 8/9 支持当前非应用规则；按应用分流需要 Android 10 或更高版本。"
             } else {
-                "应用条件仅适用于 VPN 范围内的流量；共享 UID 按应用组匹配。按规则分流且启用应用条件时，无法识别归属的连接会被拒绝。本机 SOCKS5/HTTP 不识别应用。"
+                "应用条件仅适用于 VPN 范围内的流量；共享 UID 按应用组匹配。目标留空可匹配该应用的域名和直接 IP 连接。按规则分流且启用应用条件时，无法识别归属的连接会被拒绝。本机 SOCKS5/HTTP 不识别应用。"
             }
             textSize = 11.5f
             setTextColor(mutedColor)

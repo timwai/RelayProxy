@@ -234,7 +234,7 @@ class SettingsActivity : Activity() {
         addSectionHeader(
             vpn,
             "VPN 范围与 DNS",
-            "DNS 使用 Mapped DNS，在 VPN 内保留域名并交给所选出口解析，避免明文 DNS 被污染或劫持。",
+            "应用范围只决定哪些流量进入 VPN；代理、直连或拒绝仍由分流规则决定。DNS 使用 Mapped DNS 并交给所选出口解析。",
         )
         vpnAppMode = Spinner(this).apply {
             adapter = ArrayAdapter(

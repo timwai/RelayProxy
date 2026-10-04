@@ -67,6 +67,9 @@ class RelayVpnService : VpnService() {
     @Volatile
     private var startInProgress = false
 
+    @Volatile
+    private var scopedApplicationIdentity = UNKNOWN_APPLICATION
+
     private var operationGeneration = 0L
 
     @Volatile
@@ -295,6 +298,7 @@ class RelayVpnService : VpnService() {
             return
         }
         tun = descriptor
+        scopedApplicationIdentity = resolveScopedApplicationIdentity(config)
         TProxyService.setFlowOwnerResolver { protocol, sourceAddress, sourcePort, destinationAddress, destinationPort ->
             resolveFlowOwner(
                 protocol,
@@ -348,10 +352,31 @@ class RelayVpnService : VpnService() {
                 InetSocketAddress(InetAddress.getByName(destinationAddress), destinationPort),
             )
         }.getOrDefault(-1)
-        if (uid < 0 || uid == applicationInfo.uid) return UNKNOWN_APPLICATION
+        if (uid < 0) return scopedApplicationIdentity
+        if (uid == applicationInfo.uid) return UNKNOWN_APPLICATION
         return runCatching {
             FlowOwnerIdentity.encode(packageManager.getPackagesForUid(uid).orEmpty().toList())
         }.getOrDefault(UNKNOWN_APPLICATION)
+    }
+
+    private fun resolveScopedApplicationIdentity(config: ExitConfig): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            config.vpnAppMode != ExitConfig.VPN_APP_MODE_INCLUDE
+        ) {
+            return UNKNOWN_APPLICATION
+        }
+        val selectedUids = linkedSetOf<Int>()
+        for (packageName in config.vpnPackages) {
+            val uid = runCatching {
+                @Suppress("DEPRECATION")
+                packageManager.getApplicationInfo(packageName, 0).uid
+            }.getOrNull() ?: continue
+            if (uid != applicationInfo.uid) selectedUids += uid
+        }
+        val packagesByUid = selectedUids.associateWith { uid ->
+            packageManager.getPackagesForUid(uid).orEmpty().toList()
+        }
+        return FlowOwnerIdentity.encodeSingleUidScope(packagesByUid)
     }
 
     private fun startRelayService(action: String) {
@@ -488,6 +513,7 @@ class RelayVpnService : VpnService() {
             if (TProxyService.TProxyIsRunning()) TProxyService.TProxyStopService()
         }
         runCatching { TProxyService.setFlowOwnerResolver(null) }
+        scopedApplicationIdentity = UNKNOWN_APPLICATION
         val old = tun
         tun = null
         runCatching { old?.close() }

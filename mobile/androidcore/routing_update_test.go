@@ -63,6 +63,40 @@ func TestRoutingUpdateKeepsExistingTCPAndRejectsNewFlows(t *testing.T) {
 	}
 }
 
+
+func TestRoutingUpdatePreservesDisabledRulesOrderAndExitOverride(t *testing.T) {
+	c, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","routing":{"mode":"global_proxy"}}`, filepath.Join(t.TempDir(), "identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Stop()
+
+	err = c.SetRoutingConfig(`{
+		"mode":"rule",
+		"default_action":"PROXY",
+		"rules":[
+			{"name":"disabled-first","enabled":false,"targets":["api.example.com"],"action":"REJECT"},
+			{"name":"specific-exit","enabled":true,"targets":["api.example.com"],"action":"PROXY","exit_id":"exit-b"},
+			{"name":"fallback-direct","enabled":true,"targets":["*.example.com"],"action":"DIRECT"}
+		]
+	}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decision := c.routingDialer.Engine().Decide("api.example.com", 443)
+	if !decision.Matched || decision.Rule != "specific-exit" || decision.Action != routing.ActionProxy || decision.ExitID != "exit-b" {
+		t.Fatalf("ordered rule did not override default exit: %+v", decision)
+	}
+
+	if err := c.SetRoutingConfig(`{"mode":"rule","default_action":"DIRECT","rules":[]}`); err != nil {
+		t.Fatal(err)
+	}
+	decision = c.routingDialer.Engine().Decide("api.example.com", 443)
+	if decision.Matched || decision.Rule != "default" || decision.Action != routing.ActionDirect {
+		t.Fatalf("deleted rules remained active: %+v", decision)
+	}
+}
+
 func TestVPNAuthenticationAndPackageGroups(t *testing.T) {
 	c := &Client{cfg: clientConfig{VPNProxyToken: "private-secret"}}
 	for _, test := range []struct {

@@ -19,7 +19,16 @@ func TestIdentityAdminAPIsAndDeviceAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	createBody := []byte(`{"name":"Engineering","capabilities":["proxy.client","proxy.exit","rdp.controller","rdp.host"]}`)
+	invalidReq := httptest.NewRequest(http.MethodPost, "/api/v1/identities",
+		bytes.NewReader([]byte(`{"name":"Invalid","capabilities":["proxy.client"]}`)))
+	invalidReq.AddCookie(adminCookie)
+	invalidRec := httptest.NewRecorder()
+	router.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusBadRequest {
+		t.Fatalf("identity capability field was accepted: %d %s", invalidRec.Code, invalidRec.Body.String())
+	}
+
+	createBody := []byte(`{"name":"Engineering"}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/identities", bytes.NewReader(createBody))
 	createReq.AddCookie(adminCookie)
 	createRec := httptest.NewRecorder()
@@ -31,7 +40,7 @@ func TestIdentityAdminAPIsAndDeviceAssignment(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &identity); err != nil {
 		t.Fatal(err)
 	}
-	if identity.ID == "" || identity.Name != "Engineering" {
+	if identity.ID == "" || identity.Name != "Engineering" || bytes.Contains(createRec.Body.Bytes(), []byte("capabilities")) {
 		t.Fatalf("unexpected identity: %+v", identity)
 	}
 
@@ -140,7 +149,7 @@ func TestIdentityAPIRequiresRevisionForSafeConcurrentUpdate(t *testing.T) {
 	adminCookie := loginAdmin(t, router)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/identities",
-		bytes.NewReader([]byte(`{"name":"Revision Test","capabilities":["proxy.client"]}`)))
+		bytes.NewReader([]byte(`{"name":"Revision Test"}`)))
 	createReq.AddCookie(adminCookie)
 	createRec := httptest.NewRecorder()
 	router.ServeHTTP(createRec, createReq)

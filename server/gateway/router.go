@@ -92,8 +92,8 @@ func (r *StreamRouter) authorizeExit(client, exit *session.DeviceSession) (bool,
 	if client == nil || exit == nil {
 		return false, nil
 	}
-	// v4 peers use live policy so disabled identities and narrowed capabilities
-	// take effect before their control sessions finish disconnecting.
+	// v4 peers use live policy so disabled identities and device capability
+	// changes take effect before their control sessions finish disconnecting.
 	if client.IdentityID != "" || exit.IdentityID != "" {
 		if client.IdentityID == "" || exit.IdentityID == "" {
 			return false, nil

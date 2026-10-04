@@ -31,11 +31,11 @@ func TestDeviceIdentityGrantAdminAPILifecycle(t *testing.T) {
 	defer cleanup()
 	adminCookie := loginAdmin(t, router)
 
-	targetIdentity, err := router.db.CreateIdentity("Target Identity", "admin", []string{"proxy.exit", "rdp.host"})
+	targetIdentity, err := router.db.CreateIdentity("Target Identity", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	granteeIdentity, err := router.db.CreateIdentity("Grantee Identity", "admin", []string{"proxy.client", "rdp.controller"})
+	granteeIdentity, err := router.db.CreateIdentity("Grantee Identity", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestDeviceIdentityGrantAPIRejectsSameIdentity(t *testing.T) {
 	defer cleanup()
 	adminCookie := loginAdmin(t, router)
 
-	identity, err := router.db.CreateIdentity("Same Identity", "admin", []string{"proxy.exit", "proxy.client"})
+	identity, err := router.db.CreateIdentity("Same Identity", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,15 +180,15 @@ func TestDeviceIdentityMoveRefreshesAffectedIdentities(t *testing.T) {
 	defer cleanup()
 	adminCookie := loginAdmin(t, router)
 
-	source, err := router.db.CreateIdentity("Move Source", "admin", []string{"proxy.exit"})
+	source, err := router.db.CreateIdentity("Move Source", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination, err := router.db.CreateIdentity("Move Destination", "admin", []string{"proxy.exit"})
+	destination, err := router.db.CreateIdentity("Move Destination", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	grantee, err := router.db.CreateIdentity("Move Grantee", "admin", []string{"proxy.client"})
+	grantee, err := router.db.CreateIdentity("Move Grantee", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

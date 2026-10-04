@@ -59,7 +59,6 @@ type IdentityAccessAuthorization struct {
 	KeyDigest      string
 	IdentityID     string
 	IdentityName   string
-	Capabilities   []string
 	PolicyRevision int64
 }
 

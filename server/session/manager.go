@@ -18,7 +18,7 @@ type DeviceSession struct {
 	IdentityID     string   // v4 server-derived connection identity
 	IdentityName   string   // display-only identity name snapshot
 	AccessKeyID    string   // exact v4 key used by this authenticated session
-	PolicyRevision int64    // identity policy revision at authentication time
+	PolicyRevision int64    // identity record revision at authentication time
 	Mode           string   // "CLIENT", "EXIT", "BOTH"
 	Capabilities   []string // authenticated transport/protocol features
 	Grants         []string // server-approved product capabilities

@@ -310,7 +310,6 @@ func main() {
 			return gateway.IdentityAccessAuthorization{
 				KeyID: resolved.KeyID, KeyDigest: resolved.KeyDigest,
 				IdentityID: resolved.IdentityID, IdentityName: resolved.IdentityName,
-				Capabilities:   append([]string(nil), resolved.Capabilities...),
 				PolicyRevision: resolved.PolicyRevision,
 			}, nil
 		},
@@ -318,7 +317,6 @@ func main() {
 			decision, err := db.ObserveIdentityDevice(repository.IdentityAccessAuthorization{
 				KeyID: identity.KeyID, KeyDigest: identity.KeyDigest,
 				IdentityID: identity.IdentityID, IdentityName: identity.IdentityName,
-				Capabilities:   append([]string(nil), identity.Capabilities...),
 				PolicyRevision: identity.PolicyRevision,
 			}, repository.DeviceIdentityObservation{
 				Fingerprint: fingerprint, InstallationID: hello.InstallationID, PublicKey: hello.PublicKey,

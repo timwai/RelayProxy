@@ -9,7 +9,7 @@ import (
 func TestServerExitIdentityGrantLifecycleAndAuthorization(t *testing.T) {
 	db := openIdentityTestDB(t)
 
-	identity, err := db.CreateIdentity("Server Exit Clients", "admin", []string{"proxy.client"})
+	identity, err := db.CreateIdentity("Server Exit Clients", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -112,18 +112,16 @@
             <section id="page-identities" class="page" hidden data-admin>
         <div class="page-heading"><div><p class="eyebrow">IDENTITIES</p><h1>身份与接入密钥</h1><p class="muted">客户端只填写接入密钥；服务端由密钥确定唯一身份。密钥原文仅在签发时显示一次。</p></div><button id="identity-refresh" type="button" class="rp-btn"><svg><use href="#i-refresh"/></svg>刷新</button></div>
         <article class="panel rp-card">
-          <div class="panel-heading rp-card-heading"><div><h2>创建身份</h2><small>身份能力决定该身份下设备可申请的最大能力范围</small></div></div>
+          <div class="panel-heading rp-card-heading"><div><h2>创建身份</h2><small>身份用于识别连接人；能力在设备管理中单独配置</small></div></div>
           <form id="identity-create-form">
             <div class="form-grid"><div><label for="identity-create-name">身份名称</label><input id="identity-create-name" maxlength="100" required placeholder="例如：研发组 / 张三"></div><div><label>状态</label><input value="创建后立即启用" disabled></div></div>
-            <div class="capability-editor-heading"><h3>允许能力</h3><span>至少选择一项</span></div>
-            <div id="identity-create-capabilities" class="capability-list"></div>
             <p id="identity-create-error" class="form-error" role="alert" hidden></p>
             <div class="button-row"><button id="identity-create-submit" type="submit" class="primary rp-btn rp-btn-primary">创建身份</button></div>
           </form>
         </article>
         <article class="panel rp-card">
           <div class="panel-heading rp-card-heading"><div><h2>身份列表</h2><small>禁用身份会使其全部接入密钥和在线会话失效</small></div><span id="identity-count" class="badge neutral">0</span></div>
-          <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>身份</th><th>状态</th><th>能力</th><th>策略版本</th><th>更新时间</th><th class="right">操作</th></tr></thead><tbody id="identities-body"></tbody></table></div>
+          <div class="table-wrap rp-scroll"><table class="rp-table"><thead><tr><th>身份</th><th>状态</th><th>版本</th><th>更新时间</th><th class="right">操作</th></tr></thead><tbody id="identities-body"></tbody></table></div>
         </article>
         <article class="panel rp-card">
           <div class="panel-heading rp-card-heading"><div><h2>跨身份设备授权</h2><small>默认拒绝；同身份无需配置。授权对象固定为“目标设备 → 被授权身份”。</small></div><span id="identity-grant-count" class="badge neutral">0</span></div>
@@ -277,8 +275,7 @@
   <p class="eyebrow">IDENTITY</p><h2 id="identity-dialog-title">身份配置</h2>
   <p id="identity-dialog-summary" class="muted"></p>
   <div class="form-grid"><div><label for="identity-name">身份名称</label><input id="identity-name" maxlength="100" required></div><div><label for="identity-status">状态</label><select id="identity-status"><option value="active">启用</option><option value="disabled">禁用</option></select></div></div>
-  <div class="capability-editor-heading"><h3>允许能力</h3><span id="identity-policy-revision">策略版本 —</span></div>
-  <div id="identity-capabilities" class="capability-list"></div>
+  <p id="identity-policy-revision" class="field-hint">版本 —</p>
   <p id="identity-error" class="form-error" role="alert" hidden></p>
   <div class="button-row"><button id="identity-save" type="button" class="primary rp-btn rp-btn-primary">保存身份</button></div>
   <section class="capability-editor">

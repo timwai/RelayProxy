@@ -9,15 +9,15 @@ import (
 func TestExpireIdentityGrantsRemovesExpiredRowsAndDeduplicatesIdentities(t *testing.T) {
 	db := openIdentityTestDB(t)
 
-	targetIdentity, err := db.CreateIdentity("Expiry Target", "admin", []string{"proxy.exit"})
+	targetIdentity, err := db.CreateIdentity("Expiry Target", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	grantee, err := db.CreateIdentity("Expiry Grantee", "admin", []string{"proxy.client"})
+	grantee, err := db.CreateIdentity("Expiry Grantee", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := db.CreateIdentity("Expiry Other", "admin", []string{"proxy.client"})
+	other, err := db.CreateIdentity("Expiry Other", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

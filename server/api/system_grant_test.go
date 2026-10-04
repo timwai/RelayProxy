@@ -15,7 +15,7 @@ func TestSystemIdentityGrantAdminAPILifecycle(t *testing.T) {
 	defer cleanup()
 	adminCookie := loginAdmin(t, router)
 
-	identity, err := router.db.CreateIdentity("Server Exit API", "admin", []string{"proxy.client"})
+	identity, err := router.db.CreateIdentity("Server Exit API", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestSystemIdentityGrantAPIRejectsUnsupportedFeature(t *testing.T) {
 	defer cleanup()
 	adminCookie := loginAdmin(t, router)
 
-	identity, err := router.db.CreateIdentity("Server Exit Reject", "admin", []string{"proxy.client"})
+	identity, err := router.db.CreateIdentity("Server Exit Reject", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

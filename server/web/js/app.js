@@ -217,10 +217,9 @@
     $('identity-count').textContent = state.identities.length;
     $('nav-identity-count').textContent = state.identities.length;
     $('identities-body').innerHTML = state.identities.length ? state.identities.map(item => {
-      const capabilities = orderedCapabilities(item.capabilities || []).map(capability => capabilityNames[capability] || capability).join('、') || '—';
       const status = item.status === 'active' ? badge('启用', 'success') : badge('禁用', 'warning-badge');
-      return '<tr><td><span class="device-name">' + esc(item.name) + '</span><span class="device-id mono">' + esc(item.id) + '</span></td><td>' + status + '</td><td>' + esc(capabilities) + '</td><td class="mono">' + esc(item.policyRevision) + '</td><td class="muted">' + esc(date(item.updatedAt)) + '</td><td class="right"><button type="button" class="small-button" data-identity-manage="' + esc(item.id) + '">管理</button></td></tr>';
-    }).join('') : emptyRow(6, '尚未创建身份', '创建身份后签发接入密钥，客户端即可自动归属');
+      return '<tr><td><span class="device-name">' + esc(item.name) + '</span><span class="device-id mono">' + esc(item.id) + '</span></td><td>' + status + '</td><td class="mono">' + esc(item.policyRevision) + '</td><td class="muted">' + esc(date(item.updatedAt)) + '</td><td class="right"><button type="button" class="small-button" data-identity-manage="' + esc(item.id) + '">管理</button></td></tr>';
+    }).join('') : emptyRow(5, '尚未创建身份', '创建身份后签发接入密钥，客户端即可自动归属');
   }
 
   async function refreshIdentities() {
@@ -568,14 +567,12 @@
     event.preventDefault();
     if (state.identityBusy) { return; }
     const name = $('identity-create-name').value.trim();
-    const capabilities = selectedCapabilities('identity-create-capabilities');
     if (!name) { errorAt('identity-create-error', '请输入身份名称'); $('identity-create-name').focus(); return; }
-    if (!capabilities.length) { errorAt('identity-create-error', '至少选择一项允许能力'); return; }
     state.identityBusy = true;
     $('identity-create-submit').disabled = true;
     errorAt('identity-create-error', '');
     try {
-      await api('/identities', { method: 'POST', body: JSON.stringify({ name, capabilities }) });
+      await api('/identities', { method: 'POST', body: JSON.stringify({ name }) });
       $('identity-create-name').value = '';
       await refreshIdentities();
       toast('身份已创建');
@@ -596,8 +593,7 @@
     $('identity-dialog-summary').textContent = item.id;
     $('identity-name').value = item.name;
     $('identity-status').value = item.status;
-    $('identity-policy-revision').textContent = '策略版本 ' + item.policyRevision;
-    $('identity-capabilities').innerHTML = capabilityOptionsHTML(capabilityOrder, item.capabilities || []);
+    $('identity-policy-revision').textContent = '版本 ' + item.policyRevision + '；设备能力请在设备管理中配置。';
     $('identity-key-label').value = '';
     $('identity-key-expires').value = '';
     errorAt('identity-error', '');
@@ -616,22 +612,20 @@
     if (!current || state.identityBusy) { return; }
     const name = $('identity-name').value.trim();
     const status = $('identity-status').value;
-    const capabilities = selectedCapabilities('identity-capabilities');
     if (!name) { errorAt('identity-error', '请输入身份名称'); return; }
-    if (!capabilities.length) { errorAt('identity-error', '至少选择一项允许能力'); return; }
     state.identityBusy = true;
     $('identity-save').disabled = true;
     errorAt('identity-error', '');
     try {
       const updated = await api('/identities/' + encodeURIComponent(current.id), {
         method: 'PATCH',
-        body: JSON.stringify({ name, status, capabilities, policyRevision: current.policyRevision })
+        body: JSON.stringify({ name, status, policyRevision: current.policyRevision })
       });
       state.selectedIdentity = updated;
       state.identities = state.identities.map(item => item.id === updated.id ? updated : item);
       renderIdentities();
       $('identity-dialog-title').textContent = updated.name;
-      $('identity-policy-revision').textContent = '策略版本 ' + updated.policyRevision;
+      $('identity-policy-revision').textContent = '版本 ' + updated.policyRevision + '；设备能力请在设备管理中配置。';
       toast(status === 'disabled' ? '身份已禁用，在线会话将失效' : '身份配置已保存');
     } catch (err) {
       errorAt('identity-error', err.status === 409 ? err.message + '，请关闭窗口并刷新后重试' : err.message);
@@ -1767,11 +1761,8 @@
   $('device-rdp-targets-save').addEventListener('click', saveDeviceRDPTargets);
   $('enrollment-approve').addEventListener('click', approveEnrollment);
   $('enrollment-reject').addEventListener('click', () => { if (state.selectedEnrollment) rejectEnrollment(state.selectedEnrollment.id); });
-  $('identity-create-capabilities').innerHTML = capabilityOptionsHTML(capabilityOrder, ['proxy.client']);
-  bindCapabilityDependencies('identity-create-capabilities');
   resetIdentityGrantForm();
   resetServerExitGrantForm();
-  bindCapabilityDependencies('identity-capabilities');
   bindCapabilityDependencies('device-capabilities');
   bindCapabilityDependencies('enrollment-capabilities');
   $('device-dialog').addEventListener('cancel', event => { if (state.deviceBusy || state.rdpTargetBusy) event.preventDefault(); });

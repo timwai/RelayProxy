@@ -27,7 +27,7 @@ func seedIdentityGrantDevice(t *testing.T, db *DB, id, name, identityID string, 
 			t.Fatal(err)
 		}
 		now := time.Now().UTC()
-		if err := ensureIdentityRDPService(tx, id, name, capabilities, now); err != nil {
+		if err := syncDeviceRDPService(tx, id, name, capabilities, now); err != nil {
 			_ = tx.Rollback()
 			t.Fatal(err)
 		}
@@ -40,15 +40,15 @@ func seedIdentityGrantDevice(t *testing.T, db *DB, id, name, identityID string, 
 func TestDeviceIdentityGrantLifecycleAndAuthorization(t *testing.T) {
 	db := openIdentityTestDB(t)
 
-	owner, err := db.CreateIdentity("Owner", "admin", []string{"proxy.client", "proxy.exit", "rdp.controller", "rdp.host"})
+	owner, err := db.CreateIdentity("Owner", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	grantee, err := db.CreateIdentity("Grantee", "admin", []string{"proxy.client", "rdp.controller"})
+	grantee, err := db.CreateIdentity("Grantee", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := db.CreateIdentity("Other", "admin", []string{"proxy.client"})
+	other, err := db.CreateIdentity("Other", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,11 +173,11 @@ func TestDeviceIdentityGrantLifecycleAndAuthorization(t *testing.T) {
 
 func TestDeviceIdentityGrantExpiryAndTargetCapabilityValidation(t *testing.T) {
 	db := openIdentityTestDB(t)
-	owner, err := db.CreateIdentity("Target Owner", "admin", []string{"proxy.exit"})
+	owner, err := db.CreateIdentity("Target Owner", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	grantee, err := db.CreateIdentity("Client Identity", "admin", []string{"proxy.client"})
+	grantee, err := db.CreateIdentity("Client Identity", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,15 +212,15 @@ func TestDeviceIdentityGrantExpiryAndTargetCapabilityValidation(t *testing.T) {
 
 func TestDeviceIdentityMoveRevokesTargetShares(t *testing.T) {
 	db := openIdentityTestDB(t)
-	source, err := db.CreateIdentity("Source Identity", "admin", []string{"proxy.exit"})
+	source, err := db.CreateIdentity("Source Identity", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination, err := db.CreateIdentity("Destination Identity", "admin", []string{"proxy.exit"})
+	destination, err := db.CreateIdentity("Destination Identity", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	grantee, err := db.CreateIdentity("Shared Client Identity", "admin", []string{"proxy.client"})
+	grantee, err := db.CreateIdentity("Shared Client Identity", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1007,7 +1007,7 @@
             </div><p id="share-acl-hint" class="config-help"></p>
           </details>
         </div>
-        <div class="config-actions"><span class="config-help">本机开关决定是否申请并承载出口能力；最终权限受所属身份的能力策略约束。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary rp-btn rp-btn-primary config-small">保存出口设置</button></div>
+        <div class="config-actions"><span class="config-help">本机开关决定是否申请并承载出口能力；最终权限由服务端记录的设备能力决定。</span><button data-config-write disabled onclick="saveShare()" class="btn-primary rp-btn rp-btn-primary config-small">保存出口设置</button></div>
       </section>
 
       <!-- ============ 身份接入 ============ -->
@@ -1367,10 +1367,10 @@
       $('cfg-tcp-port').disabled = locked || (tls && $('cfg-transport').value === 'quic_only');
       $('cfg-routing-default').disabled = locked || $('cfg-routing-mode').value !== 'rule';
       $('connection-tls-hint').textContent = tls ? '隧道使用 TLS 加密并验证系统信任链；RDP UDP 还要求服务端 QUIC 的 UDP 端口可达。' : '身份接入密钥要求已验证的 TLS；关闭 TLS 后设备无法接入。';
-      $('connection-role-hint').textContent = approvedMode ? '服务端当前能力：' + (approvedMode === 'BOTH' ? '客户端 + 出口' : approvedMode === 'EXIT' ? '出口节点' : '客户端') + '。能力范围由所属身份策略决定。' : '尚未取得设备能力；本机会声明所启用的能力，服务端按所属身份策略授予。';
-      $('share-role-hint').textContent = exitApproved ? '所属身份允许出口能力；下方本机权限决定允许转发的目标范围。' : approvedMode === 'CLIENT' ? '所属身份当前仅允许客户端能力。可先保存本机出口配置，再由管理员为该身份开启出口能力。' : '可预先配置本机出口；管理员为所属身份开启出口能力后生效。';
+      $('connection-role-hint').textContent = approvedMode ? '当前设备能力：' + (approvedMode === 'BOTH' ? '客户端 + 出口' : approvedMode === 'EXIT' ? '出口节点' : '客户端') + '。能力由服务端按设备独立管理。' : '尚未取得设备能力；本机会声明所启用的能力，服务端登记后可由管理员调整。';
+      $('share-role-hint').textContent = exitApproved ? '当前设备已获出口能力；下方本机权限决定允许转发的目标范围。' : approvedMode === 'CLIENT' ? '当前设备仅有客户端能力。可先保存本机出口配置，再由管理员为此设备开启出口能力。' : '可预先配置本机出口；管理员为此设备开启出口能力后生效。';
       $('proxy-role-hint').classList.toggle('hidden', !approvedMode || clientApproved);
-      $('proxy-role-hint').textContent = '所属身份当前仅允许出口能力。本地代理设置会保留，但代理流量还需要客户端能力。';
+      $('proxy-role-hint').textContent = '当前设备仅有出口能力。本地代理设置会保留，但代理流量还需要客户端能力。';
       $('proxy-scope-hint').textContent = $('cfg-socks-listen').value === '0.0.0.0' || $('cfg-http-listen').value === '0.0.0.0' ? '所有网卡可访问；本地代理不提供密码认证。' : '监听本机地址时，其他设备无法访问这些端口。';
       var aclMode = $('cfg-acl-mode').value;
       $('share-acl-hint').textContent = aclMode === 'allow' ? '允许列表为空时拒绝所有目标。命中列表仍需满足上方网络权限。' : aclMode === 'deny' ? '命中列表的目标会被拒绝，其余目标仍需满足上方网络权限。' : '列表暂不参与筛选，内容会保留；互联网、私网和回环开关仍有效。';

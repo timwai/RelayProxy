@@ -30,7 +30,6 @@ type Identity struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
 	Status         string    `json:"status"`
-	Capabilities   []string  `json:"capabilities"`
 	PolicyRevision int64     `json:"policyRevision"`
 	CreatedBy      string    `json:"createdBy"`
 	UpdatedBy      string    `json:"updatedBy"`
@@ -41,7 +40,6 @@ type Identity struct {
 type IdentityUpdate struct {
 	Name           *string
 	Status         *string
-	Capabilities   *[]string
 	PolicyRevision int64
 }
 
@@ -67,7 +65,6 @@ type IdentityAccessAuthorization struct {
 	KeyDigest      string
 	IdentityID     string
 	IdentityName   string
-	Capabilities   []string
 	PolicyRevision int64
 }
 
@@ -165,7 +162,7 @@ func (db *DB) ensureIdentityAccessSchema() error {
 	return nil
 }
 
-func (db *DB) CreateIdentity(name, actor string, capabilities []string) (*Identity, error) {
+func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {
 	name = strings.TrimSpace(name)
 	actor = strings.TrimSpace(actor)
 	if name == "" {
@@ -177,19 +174,11 @@ func (db *DB) CreateIdentity(name, actor string, capabilities []string) (*Identi
 	if actor == "" {
 		return nil, errors.New("actor is required")
 	}
-	capabilities, err := normalizeIdentityCapabilities(capabilities)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := encodeCapabilities(capabilities)
-	if err != nil {
-		return nil, err
-	}
 	now := time.Now().UTC()
 	item := &Identity{
 		ID: "idn_" + uuid.NewString(), Name: name, Status: IdentityStatusActive,
-		Capabilities: capabilities, PolicyRevision: 1,
-		CreatedBy: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now,
+		PolicyRevision: 1,
+		CreatedBy:      actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now,
 	}
 	tx, err := db.Begin()
 	if err != nil {
@@ -199,11 +188,11 @@ func (db *DB) CreateIdentity(name, actor string, capabilities []string) (*Identi
 	if _, err := tx.Exec(`INSERT INTO identities
 		(id, name, status, capabilities, policy_revision, created_by, updated_by, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.Name, item.Status, raw, item.PolicyRevision, actor, actor, now, now); err != nil {
+		item.ID, item.Name, item.Status, "[]", item.PolicyRevision, actor, actor, now, now); err != nil {
 		return nil, err
 	}
 	if err := insertAuthorizationAudit(tx, "identity.create", actor, "identity", item.ID,
-		map[string]any{"name": item.Name, "capabilities": item.Capabilities}, now); err != nil {
+		map[string]any{"name": item.Name}, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -213,7 +202,7 @@ func (db *DB) CreateIdentity(name, actor string, capabilities []string) (*Identi
 }
 
 func (db *DB) ListIdentities() ([]*Identity, error) {
-	rows, err := db.Query(`SELECT id, name, status, capabilities, policy_revision,
+	rows, err := db.Query(`SELECT id, name, status, policy_revision,
 		created_by, updated_by, created_at, updated_at
 		FROM identities ORDER BY name, id`)
 	if err != nil {
@@ -223,12 +212,8 @@ func (db *DB) ListIdentities() ([]*Identity, error) {
 	result := make([]*Identity, 0)
 	for rows.Next() {
 		item := &Identity{}
-		var raw string
-		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &raw, &item.PolicyRevision,
+		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.PolicyRevision,
 			&item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		if item.Capabilities, err = decodeCapabilities(raw); err != nil {
 			return nil, err
 		}
 		result = append(result, item)
@@ -238,20 +223,12 @@ func (db *DB) ListIdentities() ([]*Identity, error) {
 
 func (db *DB) GetIdentity(id string) (*Identity, error) {
 	item := &Identity{}
-	var raw string
-	err := db.QueryRow(`SELECT id, name, status, capabilities, policy_revision,
+	err := db.QueryRow(`SELECT id, name, status, policy_revision,
 		created_by, updated_by, created_at, updated_at
 		FROM identities WHERE id = ?`, strings.TrimSpace(id)).Scan(
-		&item.ID, &item.Name, &item.Status, &raw, &item.PolicyRevision,
+		&item.ID, &item.Name, &item.Status, &item.PolicyRevision,
 		&item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
-	if err != nil {
-		return nil, err
-	}
-	item.Capabilities, err = decodeCapabilities(raw)
-	if err != nil {
-		return nil, err
-	}
-	return item, nil
+	return item, err
 }
 
 func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity, error) {
@@ -266,14 +243,10 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	defer tx.Rollback()
 
 	current := &Identity{}
-	var raw string
-	if err := tx.QueryRow(`SELECT id, name, status, capabilities, policy_revision,
+	if err := tx.QueryRow(`SELECT id, name, status, policy_revision,
 		created_by, updated_by, created_at, updated_at FROM identities WHERE id = ?`, id).Scan(
-		&current.ID, &current.Name, &current.Status, &raw, &current.PolicyRevision,
+		&current.ID, &current.Name, &current.Status, &current.PolicyRevision,
 		&current.CreatedBy, &current.UpdatedBy, &current.CreatedAt, &current.UpdatedAt); err != nil {
-		return nil, err
-	}
-	if current.Capabilities, err = decodeCapabilities(raw); err != nil {
 		return nil, err
 	}
 	if update.PolicyRevision > 0 && update.PolicyRevision != current.PolicyRevision {
@@ -297,23 +270,12 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 			return nil, errors.New("identity status must be active or disabled")
 		}
 	}
-	nextCapabilities := current.Capabilities
-	if update.Capabilities != nil {
-		nextCapabilities, err = normalizeIdentityCapabilities(*update.Capabilities)
-		if err != nil {
-			return nil, err
-		}
-	}
-	nextRaw, err := encodeCapabilities(nextCapabilities)
-	if err != nil {
-		return nil, err
-	}
 	now := time.Now().UTC()
 	nextRevision := current.PolicyRevision + 1
-	result, err := tx.Exec(`UPDATE identities SET name = ?, status = ?, capabilities = ?,
+	result, err := tx.Exec(`UPDATE identities SET name = ?, status = ?,
 		policy_revision = ?, updated_by = ?, updated_at = ?
 		WHERE id = ? AND policy_revision = ?`,
-		nextName, nextStatus, nextRaw, nextRevision, actor, now, id, current.PolicyRevision)
+		nextName, nextStatus, nextRevision, actor, now, id, current.PolicyRevision)
 	if err != nil {
 		return nil, err
 	}
@@ -326,8 +288,8 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	}
 	if err := insertAuthorizationAudit(tx, "identity.update", actor, "identity", id,
 		map[string]any{
-			"before": map[string]any{"name": current.Name, "status": current.Status, "capabilities": current.Capabilities, "policyRevision": current.PolicyRevision},
-			"after":  map[string]any{"name": nextName, "status": nextStatus, "capabilities": nextCapabilities, "policyRevision": nextRevision},
+			"before": map[string]any{"name": current.Name, "status": current.Status, "policyRevision": current.PolicyRevision},
+			"after":  map[string]any{"name": nextName, "status": nextStatus, "policyRevision": nextRevision},
 		}, now); err != nil {
 		return nil, err
 	}
@@ -336,7 +298,6 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	}
 	current.Name = nextName
 	current.Status = nextStatus
-	current.Capabilities = nextCapabilities
 	current.PolicyRevision = nextRevision
 	current.UpdatedBy = actor
 	current.UpdatedAt = now
@@ -478,8 +439,7 @@ func (db *DB) ResolveIdentityAccessKey(accessKey string) (*IdentityAccessAuthori
 	digest := identityAccessKeyDigest(accessKey)
 	now := time.Now().UTC()
 	var authorization IdentityAccessAuthorization
-	var raw string
-	err := db.QueryRow(`SELECT k.id, k.key_digest, i.id, i.name, i.capabilities, i.policy_revision
+	err := db.QueryRow(`SELECT k.id, k.key_digest, i.id, i.name, i.policy_revision
 		FROM identity_access_keys k
 		JOIN identities i ON i.id = k.identity_id
 		WHERE k.key_digest = ?
@@ -487,14 +447,10 @@ func (db *DB) ResolveIdentityAccessKey(accessKey string) (*IdentityAccessAuthori
 		  AND (k.expires_at IS NULL OR k.expires_at > ?)
 		  AND i.status = ?`, digest, now, IdentityStatusActive).Scan(
 		&authorization.KeyID, &authorization.KeyDigest, &authorization.IdentityID,
-		&authorization.IdentityName, &raw, &authorization.PolicyRevision)
+		&authorization.IdentityName, &authorization.PolicyRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInvalidIdentityAccessKey
 	}
-	if err != nil {
-		return nil, err
-	}
-	authorization.Capabilities, err = decodeCapabilities(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -516,33 +472,15 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 	defer tx.Rollback()
 
 	var current sql.NullString
-	var deviceName, currentCapabilitiesRaw string
-	if err := tx.QueryRow(`SELECT identity_id, name, approved_capabilities FROM devices WHERE id = ?`, deviceID).
-		Scan(&current, &deviceName, &currentCapabilitiesRaw); err != nil {
+	if err := tx.QueryRow(`SELECT identity_id FROM devices WHERE id = ?`, deviceID).Scan(&current); err != nil {
 		return nil, err
 	}
-	var identityCapabilitiesRaw string
-	if err := tx.QueryRow(`SELECT capabilities FROM identities WHERE id = ?`, identityID).Scan(&identityCapabilitiesRaw); err != nil {
+	var identityExists int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM identities WHERE id = ?`, identityID).Scan(&identityExists); err != nil {
 		return nil, err
 	}
-	currentCapabilities, err := decodeCapabilities(currentCapabilitiesRaw)
-	if err != nil {
-		return nil, err
-	}
-	identityCapabilities, err := decodeCapabilities(identityCapabilitiesRaw)
-	if err != nil {
-		return nil, err
-	}
-	effectiveCapabilities := intersectIdentityCapabilities(identityCapabilities, currentCapabilities)
-	if len(effectiveCapabilities) == 0 {
-		return nil, errors.New("identity policy does not allow any capability currently approved for this device")
-	}
-	if err := validateCapabilityDependencies(effectiveCapabilities); err != nil {
-		return nil, err
-	}
-	effectiveCapabilitiesRaw, err := encodeCapabilities(effectiveCapabilities)
-	if err != nil {
-		return nil, err
+	if identityExists != 1 {
+		return nil, sql.ErrNoRows
 	}
 	if current.String != identityID || current.Valid != (identityID != "") {
 		now := time.Now().UTC()
@@ -586,21 +524,12 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 			}
 		}
 
-		if _, err := tx.Exec(`UPDATE devices SET identity_id = ?, approved_capabilities = ?, updated_at = ? WHERE id = ?`,
-			identityID, effectiveCapabilitiesRaw, now, deviceID); err != nil {
-			return nil, err
-		}
-		if err := replaceIdentityDeviceGrants(tx, deviceID, identityID, effectiveCapabilities, now); err != nil {
-			return nil, err
-		}
-		if err := ensureIdentityRDPService(tx, deviceID, deviceName, effectiveCapabilities, now); err != nil {
+		if _, err := tx.Exec(`UPDATE devices SET identity_id = ?, updated_at = ? WHERE id = ?`,
+			identityID, now, deviceID); err != nil {
 			return nil, err
 		}
 		if err := insertAuthorizationAudit(tx, "device.identity.update", actor, "device", deviceID,
-			map[string]any{
-				"before": current.String, "after": identityID,
-				"capabilitiesBefore": currentCapabilities, "capabilitiesAfter": effectiveCapabilities,
-			}, now); err != nil {
+			map[string]any{"before": current.String, "after": identityID}, now); err != nil {
 			return nil, err
 		}
 	}
@@ -645,44 +574,6 @@ func identityAccessKeyDigest(accessKey string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func normalizeIdentityCapabilities(input []string) ([]string, error) {
-	if len(input) == 0 {
-		input = []string{"proxy.client"}
-	}
-	allowedOrder := []string{"proxy.client", "proxy.exit", "rdp.controller", "rdp.host", "rdp.public"}
-	selected := make(map[string]bool, len(input))
-	for _, raw := range input {
-		value := strings.TrimSpace(raw)
-		if value == "" {
-			continue
-		}
-		known := false
-		for _, candidate := range allowedOrder {
-			if value == candidate {
-				known = true
-				break
-			}
-		}
-		if !known {
-			return nil, fmt.Errorf("unsupported identity capability %q", value)
-		}
-		selected[value] = true
-	}
-	result := make([]string, 0, len(selected))
-	for _, capability := range allowedOrder {
-		if selected[capability] {
-			result = append(result, capability)
-		}
-	}
-	if len(result) == 0 {
-		return nil, errors.New("at least one identity capability is required")
-	}
-	if err := validateCapabilityDependencies(result); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 // ObserveIdentityDevice auto-enrolls a v4 device after its identity access key
 // and Ed25519 proof have been validated by the gateway. Identity is derived
 // exclusively from the server-side access-key record.
@@ -699,37 +590,33 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 		return nil, err
 	}
 	defer tx.Rollback()
-	// The challenge snapshot can outlive a key revocation or policy update.
-	// Re-read both in the same transaction that enrolls/updates the device.
-	var policy string
-	err = tx.QueryRow(`SELECT i.name, i.capabilities, i.policy_revision
+	// The challenge snapshot can outlive a key revocation, expiry, identity
+	// disable, or metadata update. Re-read the key and identity in the same
+	// transaction that enrolls or refreshes the device.
+	err = tx.QueryRow(`SELECT i.name, i.policy_revision
 		FROM identity_access_keys k JOIN identities i ON i.id = k.identity_id
 		WHERE k.id = ? AND k.identity_id = ? AND k.key_digest = ?
 		  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)
 		  AND i.status = ?`, access.KeyID, access.IdentityID, access.KeyDigest,
-		now, IdentityStatusActive).Scan(&access.IdentityName, &policy, &access.PolicyRevision)
+		now, IdentityStatusActive).Scan(&access.IdentityName, &access.PolicyRevision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrInvalidIdentityAccessKey
 	}
 	if err != nil {
 		return nil, err
 	}
-	access.Capabilities, err = decodeCapabilities(policy)
+	requested := filterApprovedCapabilities(observation.RequestedCapabilities, observation.RequestedCapabilities)
+	if len(requested) == 0 {
+		return nil, errors.New("device must request at least one supported capability")
+	}
+	if err := validateCapabilityDependencies(requested); err != nil {
+		return nil, err
+	}
+	requestedRaw, err := encodeCapabilities(requested)
 	if err != nil {
 		return nil, err
 	}
-	effective := intersectIdentityCapabilities(access.Capabilities, observation.RequestedCapabilities)
-	if len(effective) == 0 {
-		return nil, errors.New("identity policy does not allow any requested capability")
-	}
-	if err := validateCapabilityDependencies(effective); err != nil {
-		return nil, err
-	}
-	requestedRaw, err := encodeCapabilities(observation.RequestedCapabilities)
-	if err != nil {
-		return nil, err
-	}
-	approvedRaw, err := encodeCapabilities(effective)
+	initialApprovedRaw, err := encodeCapabilities(requested)
 	if err != nil {
 		return nil, err
 	}
@@ -756,9 +643,9 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 				return nil, errors.New("approved identity has no device")
 			}
 			var boundIdentity sql.NullString
-			var approvalState string
-			if err := tx.QueryRow(`SELECT identity_id, approval_state FROM devices WHERE id = ?`,
-				existingDeviceID.String).Scan(&boundIdentity, &approvalState); err != nil {
+			var approvalState, approvedRaw string
+			if err := tx.QueryRow(`SELECT identity_id, approval_state, approved_capabilities FROM devices WHERE id = ?`,
+				existingDeviceID.String).Scan(&boundIdentity, &approvalState, &approvedRaw); err != nil {
 				return nil, err
 			}
 			if approvalState == EnrollmentRevoked {
@@ -767,7 +654,15 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 			if !boundIdentity.Valid || boundIdentity.String == "" || boundIdentity.String != access.IdentityID {
 				return nil, ErrDeviceIdentityConflict
 			}
-			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, approvedRaw, effective, now); err != nil {
+			approved, err := decodeCapabilities(approvedRaw)
+			if err != nil {
+				return nil, err
+			}
+			effective := filterApprovedCapabilities(approved, requested)
+			if len(effective) == 0 {
+				return nil, errors.New("device does not request any approved capability")
+			}
+			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, effective, now); err != nil {
 				return nil, err
 			}
 			if err := tx.Commit(); err != nil {
@@ -795,7 +690,7 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 		VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		deviceID, access.IdentityID, fallbackDeviceName(observation.DeviceName), observation.Fingerprint,
 		observation.InstallationID, observation.Platform, observation.Arch, observation.ClientVersion,
-		EnrollmentApproved, requestedRaw, approvedRaw, now, now); err != nil {
+		EnrollmentApproved, requestedRaw, initialApprovedRaw, now, now); err != nil {
 		return nil, err
 	}
 	if err == nil && identityState == EnrollmentPending {
@@ -826,20 +721,20 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 			return nil, err
 		}
 	}
-	if err := replaceIdentityDeviceGrants(tx, deviceID, access.IdentityID, effective, now); err != nil {
+	if err := replaceDeviceRuntimeGrants(tx, deviceID, requested, now); err != nil {
 		return nil, err
 	}
-	if err := ensureIdentityRDPService(tx, deviceID, fallbackDeviceName(observation.DeviceName), effective, now); err != nil {
+	if err := syncDeviceRDPService(tx, deviceID, fallbackDeviceName(observation.DeviceName), requested, now); err != nil {
 		return nil, err
 	}
 	if err := insertAuthorizationAudit(tx, "device.identity.auto_enroll", "identity:"+access.IdentityID, "device", deviceID,
-		map[string]any{"identityId": access.IdentityID, "accessKeyId": access.KeyID, "capabilities": effective}, now); err != nil {
+		map[string]any{"identityId": access.IdentityID, "accessKeyId": access.KeyID, "capabilities": requested}, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return db.identityDeviceAuthorization(deviceID, access, effective)
+	return db.identityDeviceAuthorization(deviceID, access, requested)
 }
 
 var ErrDeviceIdentityConflict = errors.New("device is already bound to another or legacy identity")
@@ -861,38 +756,34 @@ func (db *DB) identityDeviceAuthorization(deviceID string, access IdentityAccess
 	return authorization, nil
 }
 
-func updateIdentityManagedDevice(tx *sql.Tx, deviceID string, observation DeviceIdentityObservation, requestedRaw, approvedRaw string, effective []string, now time.Time) error {
+func updateIdentityManagedDevice(tx *sql.Tx, deviceID string, observation DeviceIdentityObservation, requestedRaw string, effective []string, now time.Time) error {
 	if _, err := tx.Exec(`UPDATE devices SET name = ?, platform = ?, arch = ?, client_version = ?,
-		requested_capabilities = ?, approved_capabilities = ?, updated_at = ?
+		requested_capabilities = ?, updated_at = ?
 		WHERE id = ? AND approval_state = ?`,
 		fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
-		observation.ClientVersion, requestedRaw, approvedRaw, now, deviceID, EnrollmentApproved); err != nil {
+		observation.ClientVersion, requestedRaw, now, deviceID, EnrollmentApproved); err != nil {
 		return err
 	}
-	var identityID string
-	if err := tx.QueryRow(`SELECT identity_id FROM devices WHERE id = ?`, deviceID).Scan(&identityID); err != nil {
+	if err := replaceDeviceRuntimeGrants(tx, deviceID, effective, now); err != nil {
 		return err
 	}
-	if err := replaceIdentityDeviceGrants(tx, deviceID, identityID, effective, now); err != nil {
-		return err
-	}
-	return ensureIdentityRDPService(tx, deviceID, fallbackDeviceName(observation.DeviceName), effective, now)
+	return syncDeviceRDPService(tx, deviceID, fallbackDeviceName(observation.DeviceName), effective, now)
 }
 
-func replaceIdentityDeviceGrants(tx *sql.Tx, deviceID, identityID string, capabilities []string, now time.Time) error {
+func replaceDeviceRuntimeGrants(tx *sql.Tx, deviceID string, capabilities []string, now time.Time) error {
 	if _, err := tx.Exec(`DELETE FROM device_grants WHERE device_id = ?`, deviceID); err != nil {
 		return err
 	}
 	for _, capability := range capabilities {
 		if _, err := tx.Exec(`INSERT INTO device_grants (device_id, capability, granted_by, granted_at)
-			VALUES (?, ?, ?, ?)`, deviceID, capability, "identity:"+identityID, now); err != nil {
+			VALUES (?, ?, ?, ?)`, deviceID, capability, "device-auto", now); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func ensureIdentityRDPService(tx *sql.Tx, deviceID, deviceName string, capabilities []string, now time.Time) error {
+func syncDeviceRDPService(tx *sql.Tx, deviceID, deviceName string, capabilities []string, now time.Time) error {
 	if containsCapabilityValue(capabilities, "rdp.host") {
 		var serviceID string
 		err := tx.QueryRow(`SELECT id FROM rdp_services WHERE device_id = ?`, deviceID).Scan(&serviceID)
@@ -926,8 +817,8 @@ func ensureIdentityRDPService(tx *sql.Tx, deviceID, deviceName string, capabilit
 // state under the session manager authorization gate.
 func (db *DB) IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, keyID string) bool {
 	now := time.Now().UTC()
-	var deviceCaps, identityCaps string
-	err := db.QueryRow(`SELECT d.approved_capabilities, i.capabilities
+	var count int
+	err := db.QueryRow(`SELECT COUNT(*)
 		FROM device_identities di
 		JOIN devices d ON d.id = di.device_id
 		JOIN identities i ON i.id = d.identity_id
@@ -937,34 +828,8 @@ func (db *DB) IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, keyI
 		  AND i.status = ? AND k.id = ? AND k.revoked_at IS NULL
 		  AND (k.expires_at IS NULL OR k.expires_at > ?)`,
 		fingerprint, deviceID, EnrollmentApproved, EnrollmentApproved,
-		identityID, IdentityStatusActive, keyID, now).Scan(&deviceCaps, &identityCaps)
-	if err != nil {
-		return false
-	}
-	approved, err := decodeCapabilities(deviceCaps)
-	if err != nil {
-		return false
-	}
-	allowed, err := decodeCapabilities(identityCaps)
-	return err == nil && len(intersectIdentityCapabilities(allowed, approved)) == len(approved)
-}
-
-func intersectIdentityCapabilities(identityCapabilities, requested []string) []string {
-	allowed := make(map[string]bool, len(identityCapabilities))
-	for _, capability := range identityCapabilities {
-		allowed[capability] = true
-	}
-	result := make([]string, 0, len(requested))
-	seen := make(map[string]bool, len(requested))
-	for _, capability := range requested {
-		capability = strings.TrimSpace(capability)
-		if capability == "" || seen[capability] || !allowed[capability] {
-			continue
-		}
-		seen[capability] = true
-		result = append(result, capability)
-	}
-	return result
+		identityID, IdentityStatusActive, keyID, now).Scan(&count)
+	return err == nil && count == 1
 }
 
 func containsCapabilityValue(values []string, wanted string) bool {

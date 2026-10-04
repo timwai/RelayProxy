@@ -119,7 +119,7 @@ func WithDeviceAuthorizationChanged(fn func(string)) RouterOption {
 }
 
 // WithIdentityAuthorizationChanged invalidates authenticated identity sessions.
-// accessKeyID is empty for identity-wide policy/status changes.
+// accessKeyID is empty for identity-wide status or access changes.
 func WithIdentityAuthorizationChanged(fn func(identityID, accessKeyID string)) RouterOption {
 	return func(r *Router) { r.onIdentityAuthorizationChanged = fn }
 }

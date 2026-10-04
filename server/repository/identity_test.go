@@ -20,9 +20,7 @@ func openIdentityTestDB(t *testing.T) *DB {
 func TestIdentityAccessKeyLifecycle(t *testing.T) {
 	db := openIdentityTestDB(t)
 
-	identity, err := db.CreateIdentity("Engineering", "admin", []string{
-		"proxy.client", "proxy.exit", "rdp.controller", "rdp.host",
-	})
+	identity, err := db.CreateIdentity("Engineering", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +71,7 @@ func TestIdentityAccessKeyLifecycle(t *testing.T) {
 func TestIdentityRevisionDisableAndDeviceAssignment(t *testing.T) {
 	db := openIdentityTestDB(t)
 
-	identity, err := db.CreateIdentity("Operations", "admin", []string{"proxy.client"})
+	identity, err := db.CreateIdentity("Operations", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +139,7 @@ func TestHistoricalDeviceMigrationReusesDeviceAndRejectsWrongIdentityKey(t *test
 	if err := db.CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
-	identity, err := db.CreateIdentity("Historical Owner", admin.ID, []string{"proxy.client"})
+	identity, err := db.CreateIdentity("Historical Owner", admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,8 +171,8 @@ func TestHistoricalDeviceMigrationReusesDeviceAndRejectsWrongIdentityKey(t *test
 		t.Fatal(err)
 	}
 	capabilities, err := decodeCapabilities(capabilitiesRaw)
-	if err != nil || len(capabilities) != 1 || capabilities[0] != "proxy.client" {
-		t.Fatalf("migration did not intersect historical capabilities with identity policy: %v %v", capabilities, err)
+	if err != nil || len(capabilities) != 2 || capabilities[0] != "proxy.client" || capabilities[1] != "proxy.exit" {
+		t.Fatalf("migration changed historical device capabilities: %v %v", capabilities, err)
 	}
 	access, err := db.ResolveIdentityAccessKey(issued.AccessKey)
 	if err != nil {
@@ -192,7 +190,7 @@ func TestHistoricalDeviceMigrationReusesDeviceAndRejectsWrongIdentityKey(t *test
 		t.Fatalf("migration created duplicate devices: count=%d err=%v", deviceCount, err)
 	}
 
-	other, err := db.CreateIdentity("Other Owner", admin.ID, []string{"proxy.client"})
+	other, err := db.CreateIdentity("Other Owner", admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

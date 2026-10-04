@@ -22,15 +22,14 @@ func (r *Router) handleListIdentities(w http.ResponseWriter, req *http.Request) 
 
 func (r *Router) handleCreateIdentity(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Name         string   `json:"name"`
-		Capabilities []string `json:"capabilities"`
+		Name string `json:"name"`
 	}
 	if err := decodeJSON(w, req, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
-	item, err := r.db.CreateIdentity(body.Name, actor, body.Capabilities)
+	item, err := r.db.CreateIdentity(body.Name, actor)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -40,22 +39,21 @@ func (r *Router) handleCreateIdentity(w http.ResponseWriter, req *http.Request) 
 
 func (r *Router) handleUpdateIdentity(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Name           *string   `json:"name"`
-		Status         *string   `json:"status"`
-		Capabilities   *[]string `json:"capabilities"`
-		PolicyRevision int64     `json:"policyRevision"`
+		Name           *string `json:"name"`
+		Status         *string `json:"status"`
+		PolicyRevision int64   `json:"policyRevision"`
 	}
 	if err := decodeJSON(w, req, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.Name == nil && body.Status == nil && body.Capabilities == nil {
+	if body.Name == nil && body.Status == nil {
 		writeError(w, http.StatusBadRequest, "at least one identity field must be changed")
 		return
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
 	item, err := r.db.UpdateIdentity(req.PathValue("id"), actor, repository.IdentityUpdate{
-		Name: body.Name, Status: body.Status, Capabilities: body.Capabilities, PolicyRevision: body.PolicyRevision,
+		Name: body.Name, Status: body.Status, PolicyRevision: body.PolicyRevision,
 	})
 	if err != nil {
 		switch {
@@ -68,7 +66,7 @@ func (r *Router) handleUpdateIdentity(w http.ResponseWriter, req *http.Request) 
 		}
 		return
 	}
-	if r.onIdentityAuthorizationChanged != nil {
+	if body.Status != nil && r.onIdentityAuthorizationChanged != nil {
 		r.onIdentityAuthorizationChanged(item.ID, "")
 	}
 	writeJSON(w, http.StatusOK, item)

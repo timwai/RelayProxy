@@ -10,9 +10,12 @@ Before compiling, both build scripts apply
 `TProxyService`, lets Android 10+ resolve the owning UID to a package group,
 and sends that group as the authenticated username of RelayProxy's private
 VPN SOCKS5 entry. The password is a per-installation secret held in Android
-Keystore. This keeps application metadata separate from the user-facing
-SOCKS5/HTTP listeners and makes the native changes reproducible from the
-pinned upstream archive.
+Keystore. UID lookup runs on a dedicated native pthread attached to ART; Hev's
+user-space task stacks exchange requests through a condition variable and
+never enter JNI directly. This preserves synchronous per-flow authentication,
+keeps ART stack walking valid, separates application metadata from the
+user-facing SOCKS5/HTTP listeners, and makes the native build reproducible from
+the pinned archive.
 
 - Source: https://github.com/heiher/hev-socks5-tunnel
 - Release archive: `hev-socks5-tunnel-2.18.0.tar.xz`

@@ -16,18 +16,124 @@ diff --git a/src/hev-jni.h b/src/hev-jni.h
 +
  #endif /* __HEV_JNI_H__ */
 diff --git a/src/hev-jni.c b/src/hev-jni.c
+index 6639837..186baae 100644
 --- a/src/hev-jni.c
 +++ b/src/hev-jni.c
-@@ -46,6 +46,8 @@
+@@ -36,6 +36,7 @@
+ #define N_ELEMENTS(arr) (sizeof (arr) / sizeof ((arr)[0]))
+
+ typedef struct _ThreadData ThreadData;
++typedef struct _FlowOwnerRequest FlowOwnerRequest;
+
+ struct _ThreadData
+ {
+@@ -43,12 +44,33 @@ struct _ThreadData
+     int fd;
+ };
+
++struct _FlowOwnerRequest
++{
++    int protocol;
++    int source_port;
++    int destination_port;
++    char source_address[64];
++    char destination_address[64];
++    char owner[256];
++    int result;
++};
++
  static atomic_int is_running;
  static int thread_joinable;
  static JavaVM *java_vm;
 +static jclass service_class;
 +static jmethodID resolve_owner_method;
  static pthread_t work_thread;
++static pthread_t owner_resolver_thread;
  static pthread_mutex_t mutex;
++static pthread_mutex_t owner_mutex;
++static pthread_cond_t owner_request_cond;
++static pthread_cond_t owner_response_cond;
  static pthread_key_t current_jni_env;
-@@ -85,6 +87,14 @@ JNI_OnLoad (JavaVM *vm, void *reserved)
++static FlowOwnerRequest owner_request;
++static int owner_resolver_state;
++static int owner_request_pending;
++static int owner_response_ready;
+
+ static jboolean native_start_service (JNIEnv *env, jobject thiz,
+                                       jstring conig_path, jint fd);
+@@ -70,6 +92,71 @@ detach_current_thread (void *env)
+     (*java_vm)->DetachCurrentThread (java_vm);
+ }
+
++static int
++resolve_owner_on_jvm_thread (JNIEnv *env)
++{
++    const char *bytes;
++    jstring source = NULL;
++    jstring destination = NULL;
++    jstring result = NULL;
++    int res = -1;
++
++    owner_request.owner[0] = '\0';
++    source = (*env)->NewStringUTF (env, owner_request.source_address);
++    destination = (*env)->NewStringUTF (env, owner_request.destination_address);
++    if (!source || !destination)
++        goto exit;
++    result = (jstring)(*env)->CallStaticObjectMethod (
++        env, service_class, resolve_owner_method, owner_request.protocol, source,
++        owner_request.source_port, destination, owner_request.destination_port);
++    if ((*env)->ExceptionCheck (env)) {
++        (*env)->ExceptionClear (env);
++        goto exit;
++    }
++    if (!result)
++        goto exit;
++    bytes = (*env)->GetStringUTFChars (env, result, NULL);
++    if (!bytes)
++        goto exit;
++    snprintf (owner_request.owner, sizeof (owner_request.owner), "%s", bytes);
++    (*env)->ReleaseStringUTFChars (env, result, bytes);
++    res = owner_request.owner[0] ? 0 : -1;
++
++exit:
++    if ((*env)->ExceptionCheck (env))
++        (*env)->ExceptionClear (env);
++    if (result)
++        (*env)->DeleteLocalRef (env, result);
++    if (source)
++        (*env)->DeleteLocalRef (env, source);
++    if (destination)
++        (*env)->DeleteLocalRef (env, destination);
++    return res;
++}
++
++static void *
++owner_resolver_thread_handler (void *data)
++{
++    JNIEnv *env = NULL;
++    jint attach_res;
++
++    /* Hev protocol callbacks run on user-space task stacks. Perform JNI
++     * transitions from this regular pthread so ART can safely walk it. */
++    attach_res = (*java_vm)->AttachCurrentThreadAsDaemon (java_vm, &env, NULL);
++    pthread_mutex_lock (&owner_mutex);
++    owner_resolver_state = (attach_res == JNI_OK) ? 1 : -1;
++    pthread_cond_broadcast (&owner_response_cond);
++    while (owner_resolver_state > 0) {
++        while (!owner_request_pending || owner_response_ready)
++            pthread_cond_wait (&owner_request_cond, &owner_mutex);
++        owner_request.result = resolve_owner_on_jvm_thread (env);
++        owner_response_ready = 1;
++        pthread_cond_broadcast (&owner_response_cond);
++    }
++    pthread_mutex_unlock (&owner_mutex);
++    return NULL;
++}
++
+ jint
+ JNI_OnLoad (JavaVM *vm, void *reserved)
+ {
+@@ -85,6 +172,14 @@ JNI_OnLoad (JavaVM *vm, void *reserved)
      klass = (*env)->FindClass (env, STR (PKGNAME) "/" STR (CLSNAME));
      if (!klass)
          return JNI_ERR;
@@ -42,75 +148,66 @@ diff --git a/src/hev-jni.c b/src/hev-jni.c
      res = (*env)->RegisterNatives (env, klass, native_methods,
                                     N_ELEMENTS (native_methods));
      (*env)->DeleteLocalRef (env, klass);
-@@ -97,6 +107,73 @@ JNI_OnLoad (JavaVM *vm, void *reserved)
+@@ -93,10 +188,64 @@ JNI_OnLoad (JavaVM *vm, void *reserved)
+
+     pthread_key_create (&current_jni_env, detach_current_thread);
+     pthread_mutex_init (&mutex, NULL);
++    pthread_mutex_init (&owner_mutex, NULL);
++    pthread_cond_init (&owner_request_cond, NULL);
++    pthread_cond_init (&owner_response_cond, NULL);
++    res = pthread_create (&owner_resolver_thread, NULL,
++                          owner_resolver_thread_handler, NULL);
++    if (res != 0)
++        owner_resolver_state = -1;
+
      return JNI_VERSION_1_4;
  }
- 
-+static JNIEnv *
-+get_current_env (void)
-+{
-+    JNIEnv *env = pthread_getspecific (current_jni_env);
-+    jint res;
-+
-+    if (env)
-+        return env;
-+    res = (*java_vm)->AttachCurrentThread (java_vm, &env, NULL);
-+    if (res != JNI_OK)
-+        return NULL;
-+    pthread_setspecific (current_jni_env, env);
-+    return env;
-+}
-+
+
 +int
 +hev_jni_resolve_owner (int protocol, const char *source_address,
 +                       int source_port, const char *destination_address,
 +                       int destination_port, char *owner, size_t owner_size)
 +{
-+    const char *bytes;
-+    JNIEnv *env;
-+    jstring source = NULL;
-+    jstring destination = NULL;
-+    jstring result;
++    int res = -1;
 +
 +    if (!owner || owner_size == 0)
 +        return -1;
 +    owner[0] = '\0';
-+    env = get_current_env ();
-+    if (!env)
-+        return -1;
-+    source = (*env)->NewStringUTF (env, source_address);
-+    destination = (*env)->NewStringUTF (env, destination_address);
-+    if (!source || !destination)
-+        goto error;
-+    result = (jstring)(*env)->CallStaticObjectMethod (
-+        env, service_class, resolve_owner_method, protocol, source, source_port,
-+        destination, destination_port);
-+    if ((*env)->ExceptionCheck (env)) {
-+        (*env)->ExceptionClear (env);
-+        goto error;
-+    }
-+    if (!result)
-+        goto error;
-+    bytes = (*env)->GetStringUTFChars (env, result, NULL);
-+    if (!bytes) {
-+        (*env)->DeleteLocalRef (env, result);
-+        goto error;
-+    }
-+    snprintf (owner, owner_size, "%s", bytes);
-+    (*env)->ReleaseStringUTFChars (env, result, bytes);
-+    (*env)->DeleteLocalRef (env, result);
-+    (*env)->DeleteLocalRef (env, source);
-+    (*env)->DeleteLocalRef (env, destination);
-+    return owner[0] ? 0 : -1;
 +
-+error:
-+    if ((*env)->ExceptionCheck (env))
-+        (*env)->ExceptionClear (env);
-+    if (source)
-+        (*env)->DeleteLocalRef (env, source);
-+    if (destination)
-+        (*env)->DeleteLocalRef (env, destination);
-+    return -1;
++    pthread_mutex_lock (&owner_mutex);
++    while (owner_resolver_state == 0)
++        pthread_cond_wait (&owner_response_cond, &owner_mutex);
++    while (owner_resolver_state > 0 && owner_request_pending)
++        pthread_cond_wait (&owner_response_cond, &owner_mutex);
++    if (owner_resolver_state < 0)
++        goto exit;
++
++    owner_request.protocol = protocol;
++    owner_request.source_port = source_port;
++    owner_request.destination_port = destination_port;
++    snprintf (owner_request.source_address,
++              sizeof (owner_request.source_address), "%s", source_address);
++    snprintf (owner_request.destination_address,
++              sizeof (owner_request.destination_address), "%s",
++              destination_address);
++    owner_request.result = -1;
++    owner_request_pending = 1;
++    owner_response_ready = 0;
++    pthread_cond_signal (&owner_request_cond);
++    while (!owner_response_ready && owner_resolver_state > 0)
++        pthread_cond_wait (&owner_response_cond, &owner_mutex);
++    if (owner_response_ready && owner_request.result == 0) {
++        snprintf (owner, owner_size, "%s", owner_request.owner);
++        res = owner[0] ? 0 : -1;
++    }
++    owner_request_pending = 0;
++    owner_response_ready = 0;
++    pthread_cond_broadcast (&owner_request_cond);
++    pthread_cond_broadcast (&owner_response_cond);
++
++exit:
++    pthread_mutex_unlock (&owner_mutex);
++    return res;
 +}
 +
  static void *

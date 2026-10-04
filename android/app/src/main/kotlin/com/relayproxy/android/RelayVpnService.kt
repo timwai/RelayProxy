@@ -79,16 +79,11 @@ class RelayVpnService : VpnService() {
         override fun run() {
             val generation = activeGeneration
             if (tun == null || !isCurrentGeneration(generation)) return
-            if (!runCatching { TProxyService.TProxyIsRunning() }.getOrDefault(false)) {
-                ConfigStore(this@RelayVpnService).setVpnDesiredRunning(false)
-                scheduleStop(
-                    stopOwnedRelay = true,
-                    errorDetail = "VPN 转发进程已退出",
-                )
-                return
+            // Keep every native runtime call on the VPN executor. In particular,
+            // stats/state reads must not overlap the stop call that joins Hev.
+            executeVpnTask {
+                pollNativeTunnel(generation)
             }
-            updateTunnelStats()
-            handler.postDelayed(this, 1_000)
         }
     }
 
@@ -456,6 +451,27 @@ class RelayVpnService : VpnService() {
             put("tunTxBytes", values[1])
             put("tunRxPackets", values[2])
             put("tunRxBytes", values[3])
+        }
+    }
+
+    private fun pollNativeTunnel(generation: Long) {
+        if (tun == null || !isCurrentGeneration(generation)) return
+        if (!runCatching { TProxyService.TProxyIsRunning() }.getOrDefault(false)) {
+            handler.post {
+                if (!isCurrentGeneration(generation)) return@post
+                ConfigStore(this).setVpnDesiredRunning(false)
+                scheduleStop(
+                    stopOwnedRelay = true,
+                    errorDetail = "VPN 转发进程已退出",
+                )
+            }
+            return
+        }
+        updateTunnelStats()
+        handler.post {
+            if (tun != null && isCurrentGeneration(generation)) {
+                handler.postDelayed(nativeMonitor, 1_000)
+            }
         }
     }
 

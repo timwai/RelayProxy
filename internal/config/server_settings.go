@@ -91,6 +91,11 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	if c.P2P.MaxSessionsPerDevice < 1 || c.P2P.MaxSessionsPerDevice > 1024 {
 		return errors.New("p2p.max_sessions_per_device 必须在 1-1024 之间")
 	}
+	if c.P2P.PortStart == 0 && c.P2P.PortEnd == 0 {
+		// 0/0 preserves the historical behavior: let the OS choose an ephemeral UDP port.
+	} else if c.P2P.PortStart < 1 || c.P2P.PortStart > 65535 || c.P2P.PortEnd < c.P2P.PortStart || c.P2P.PortEnd > 65535 {
+		return errors.New("p2p 的端口范围无效；请同时设置 1-65535 内的 port_start/port_end，或都设为 0")
+	}
 	switch c.Exit.Upstream.Mode {
 	case "direct":
 	case "socks5", "http", "https":

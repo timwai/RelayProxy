@@ -749,6 +749,8 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 			KeepAlive:       cfg.P2PKeepalive,
 			IdleTimeout:     cfg.P2PIdleTimeout,
 			MaxExitSessions: cfg.P2PMaxSessions,
+			PortStart:       accepted.P2PPortStart,
+			PortEnd:         accepted.P2PPortEnd,
 		})
 		keepManager := false
 		a.mu.Lock()

@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -85,7 +86,7 @@ class MainActivity : Activity() {
     private lateinit var totalTrafficText: TextView
 
     private lateinit var routingModePills: List<TextView>
-    private var currentRoutingMode = "rule"
+    private var currentRoutingMode = "global_proxy"
 
     private lateinit var activeNodeName: TextView
     private lateinit var activeNodeSubtitle: TextView
@@ -106,6 +107,8 @@ class MainActivity : Activity() {
     private lateinit var autoNodeRadioDot: View
 
     // ====== Tab 2: Routing UI Views ======
+    private data class RuleDragToken(val ruleId: String)
+
     private lateinit var vpnScopeSpinner: Spinner
     private lateinit var vpnAppsSummaryText: TextView
     private lateinit var rulesListContainer: LinearLayout
@@ -154,6 +157,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        syncRoutingModeFromStore()
+        if (::rulesListContainer.isInitialized) refreshRoutingTab()
         connectControlChannel()
         RelayExitService.setUiVisible(true)
         handler.removeCallbacks(pollStatus)
@@ -488,28 +493,34 @@ class MainActivity : Activity() {
         }
 
         routingModePills = pills
-        updateRoutingModeSegmentViews()
+        syncRoutingModeFromStore()
         return segmentCard
     }
 
     private fun selectRoutingMode(newMode: String) {
-        if (currentRoutingMode == newMode) return
-        currentRoutingMode = newMode
-        val store = ConfigStore(this)
-        val config = store.load()
-        val updatedRouting = config.routing.copy(
-            mode = if (newMode == "global") "global_proxy" else newMode,
-            revision = System.currentTimeMillis()
-        )
-        store.save(config.copy(routing = updatedRouting))
+        val persistedMode = if (newMode == "global") "global_proxy" else newMode
+        val current = ConfigStore(this).load().routing
+        if (current.mode == persistedMode) {
+            currentRoutingMode = current.mode
+            updateRoutingModeSegmentViews()
+            return
+        }
+        val saved = updateRoutingConfig { routing ->
+            routing.copy(mode = persistedMode)
+        } ?: return
+        currentRoutingMode = saved.mode
         updateRoutingModeSegmentViews()
-        notifyServiceReconfigure()
-        val label = when (newMode) {
+        val label = when (persistedMode) {
             "rule" -> "按规则分流"
-            "global" -> "全局代理"
+            "global_proxy" -> "全局代理"
             else -> "全局直连"
         }
         Toast.makeText(this, "分流模式已切换为：$label", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun syncRoutingModeFromStore() {
+        currentRoutingMode = ConfigStore(this).load().routing.mode
+        if (::routingModePills.isInitialized) updateRoutingModeSegmentViews()
     }
 
     private fun updateRoutingModeSegmentViews() {
@@ -1057,6 +1068,12 @@ class MainActivity : Activity() {
             isClickable = true
             isFocusable = true
             setOnClickListener {
+                val routing = ConfigStore(this@MainActivity).load().routing
+                if (routing.rules.isEmpty() && routing.mode != "rule") {
+                    if (updateRoutingConfig { current -> current.copy(mode = "rule") } == null) {
+                        return@setOnClickListener
+                    }
+                }
                 startActivityForResult(
                     Intent(this@MainActivity, RoutingRuleActivity::class.java),
                     REQUEST_ROUTING_RULE
@@ -1167,7 +1184,7 @@ class MainActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
         })
         rulesTitleCol.addView(TextView(this).apply {
-            text = "自上而下逐条匹配 · 单击编辑 · 长按删除"
+            text = "自上而下逐条匹配 · 单击编辑 · 拖动排序 · 长按删除"
             textSize = 11.5f
             setTextColor(UiPalette.muted)
             setPadding(0, dp(2), 0, 0)
@@ -1306,11 +1323,18 @@ class MainActivity : Activity() {
                 isChecked = rule.enabled
                 UiKit.styleSwitch(this)
                 setOnCheckedChangeListener { _, isChecked ->
-                    val updated = rules.toMutableList()
-                    updated[index] = rule.copy(enabled = isChecked)
-                    store.save(config.copy(routing = config.routing.copy(rules = updated, revision = System.currentTimeMillis())))
-                    notifyServiceReconfigure()
-                    nameView.setTextColor(if (isChecked) UiPalette.ink else UiPalette.placeholder)
+                    val saved = updateRoutingConfig { routing ->
+                        routing.copy(
+                            rules = routing.rules.map { item ->
+                                if (item.id == rule.id) item.copy(enabled = isChecked) else item
+                            },
+                        )
+                    }
+                    if (saved == null) {
+                        refreshRoutingTab()
+                    } else {
+                        nameView.setTextColor(if (isChecked) UiPalette.ink else UiPalette.placeholder)
+                    }
                 }
             }
             head.addView(ruleSwitch)
@@ -1399,6 +1423,57 @@ class MainActivity : Activity() {
             }
             card.addView(details)
 
+            val dragHandle = TextView(this).apply {
+                text = "☰  长按拖动排序"
+                textSize = 11.5f
+                setTextColor(UiPalette.brand)
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(10), 0, 0)
+                contentDescription = "拖动${rule.name.ifBlank { "规则 ${index + 1}" }}调整顺序"
+                setOnLongClickListener { view ->
+                    view.startDragAndDrop(
+                        ClipData.newPlainText("relayproxy-routing-rule", rule.id),
+                        View.DragShadowBuilder(card),
+                        RuleDragToken(rule.id),
+                        0,
+                    )
+                    true
+                }
+            }
+            card.addView(dragHandle)
+
+            card.setOnDragListener { view, event ->
+                val token = event.localState as? RuleDragToken
+                when (event.action) {
+                    DragEvent.ACTION_DRAG_STARTED -> token != null
+                    DragEvent.ACTION_DRAG_ENTERED -> {
+                        if (token != null && token.ruleId != rule.id) view.alpha = 0.72f
+                        true
+                    }
+                    DragEvent.ACTION_DRAG_EXITED -> {
+                        view.alpha = 1f
+                        true
+                    }
+                    DragEvent.ACTION_DROP -> {
+                        view.alpha = 1f
+                        if (token != null && token.ruleId != rule.id) {
+                            moveRoutingRule(
+                                sourceRuleId = token.ruleId,
+                                targetRuleId = rule.id,
+                                placeAfter = event.y > view.height / 2f,
+                            )
+                        }
+                        true
+                    }
+                    DragEvent.ACTION_DRAG_ENDED -> {
+                        view.alpha = 1f
+                        true
+                    }
+                    else -> true
+                }
+            }
+
             card.setOnClickListener {
                 startActivityForResult(
                     Intent(this, RoutingRuleActivity::class.java).putExtra(RoutingRuleActivity.EXTRA_RULE_ID, rule.id),
@@ -1408,11 +1483,12 @@ class MainActivity : Activity() {
             card.setOnLongClickListener {
                 UiKit.alertDialog(this, "删除规则", "确定删除规则“${rule.name}”吗？")
                     .setPositiveButton("删除") { _, _ ->
-                        val updated = rules.toMutableList()
-                        updated.removeAt(index)
-                        store.save(config.copy(routing = config.routing.copy(rules = updated, revision = System.currentTimeMillis())))
-                        notifyServiceReconfigure()
-                        refreshRoutingTab()
+                        if (updateRoutingConfig { routing ->
+                                routing.copy(rules = routing.rules.filterNot { it.id == rule.id })
+                            } != null
+                        ) {
+                            refreshRoutingTab()
+                        }
                     }
                     .setNegativeButton("取消", null)
                     .show()
@@ -1424,6 +1500,49 @@ class MainActivity : Activity() {
             }
             rulesListContainer.addView(card, lpCard)
         }
+    }
+
+    private fun updateRoutingConfig(
+        transform: (RoutingConfig) -> RoutingConfig,
+    ): RoutingConfig? {
+        val store = ConfigStore(this)
+        val current = store.load().routing
+        val next = transform(current)
+        val saved = runCatching { store.saveRouting(next) }
+            .onFailure {
+                Toast.makeText(
+                    this,
+                    it.message ?: "保存分流规则失败",
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            .getOrNull() ?: return null
+        currentRoutingMode = saved.mode
+        if (::routingModePills.isInitialized) updateRoutingModeSegmentViews()
+        notifyServiceReconfigure()
+        return saved
+    }
+
+    private fun moveRoutingRule(
+        sourceRuleId: String,
+        targetRuleId: String,
+        placeAfter: Boolean,
+    ) {
+        val saved = updateRoutingConfig { routing ->
+            val sourceIndex = routing.rules.indexOfFirst { it.id == sourceRuleId }
+            val targetIndexBeforeMove = routing.rules.indexOfFirst { it.id == targetRuleId }
+            if (sourceIndex < 0 || targetIndexBeforeMove < 0 || sourceIndex == targetIndexBeforeMove) {
+                return@updateRoutingConfig routing
+            }
+            val reordered = routing.rules.toMutableList()
+            val moved = reordered.removeAt(sourceIndex)
+            var targetIndex = reordered.indexOfFirst { it.id == targetRuleId }
+            if (targetIndex < 0) return@updateRoutingConfig routing
+            if (placeAfter) targetIndex++
+            reordered.add(targetIndex.coerceIn(0, reordered.size), moved)
+            routing.copy(rules = reordered)
+        }
+        if (saved != null) refreshRoutingTab()
     }
 
     // =========================================================================

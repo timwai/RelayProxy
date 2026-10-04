@@ -171,22 +171,33 @@ class RoutingRuleActivity : Activity() {
             setPadding(0, dp(14), 0, 0)
         })
         root.addView(card)
-        root.addView(Button(this).apply {
-            text = "保存规则"
-            setAllCaps(false)
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-            background = rounded(brandColor, 14)
-            setOnClickListener { saveRule() }
-        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)).apply {
-            topMargin = dp(16)
-        })
-
-        return ScrollView(this).apply {
+        val scroll = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(backgroundColor)
             addView(root)
         }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+            addView(
+                scroll,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+            )
+            addView(fixedSaveBar("保存规则") { saveRule() })
+        }
+    }
+
+    private fun fixedSaveBar(label: String, onSave: () -> Unit) = LinearLayout(this).apply {
+        setPadding(dp(20), dp(10), dp(20), dp(16))
+        setBackgroundColor(backgroundColor)
+        addView(Button(this@RoutingRuleActivity).apply {
+            text = label
+            setAllCaps(false)
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            background = rounded(brandColor, 14)
+            setOnClickListener { onSave() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
     }
 
     private fun loadRule(rule: RoutingRuleConfig) {

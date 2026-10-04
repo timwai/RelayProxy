@@ -111,7 +111,7 @@ class SettingsActivity : Activity() {
             View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
     }
 
-    private fun buildUi(): ScrollView {
+    private fun buildUi(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(30), dp(20), dp(36))
@@ -267,19 +267,6 @@ class SettingsActivity : Activity() {
         )
         addSectionCard(root, SECTION_VPN, vpn)
 
-        root.addView(Button(this).apply {
-            text = "保存设置"
-            textSize = 15f
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-            setAllCaps(false)
-            background = rounded(brand, 14)
-            setOnClickListener { saveAndClose() }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(52)
-        ).apply { topMargin = dp(16) })
-
         val runningStore = ConfigStore(this)
         if (runningStore.isDesiredRunning() || runningStore.isVpnDesiredRunning() || runningStore.load().clientEnabled) {
             root.addView(TextView(this).apply {
@@ -291,11 +278,34 @@ class SettingsActivity : Activity() {
             })
         }
 
-        return ScrollView(this).apply {
+        val scroll = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(bg)
             addView(root)
         }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
+            addView(
+                scroll,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+            )
+            addView(fixedSaveBar("保存设置") { saveAndClose() })
+        }
+    }
+
+    private fun fixedSaveBar(label: String, onSave: () -> Unit) = LinearLayout(this).apply {
+        setPadding(dp(20), dp(10), dp(20), dp(16))
+        setBackgroundColor(bg)
+        addView(Button(this@SettingsActivity).apply {
+            text = label
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            setAllCaps(false)
+            background = rounded(brand, 14)
+            setOnClickListener { onSave() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
     }
 
     private fun saveAndClose() {

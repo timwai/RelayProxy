@@ -138,20 +138,33 @@ class RoutingSettingsActivity : Activity() {
                 startActivity(Intent(this@RoutingSettingsActivity, RoutingRuleActivity::class.java))
             }
         }, buttonParams(16))
-        root.addView(Button(this).apply {
-            text = "保存分流设置"
-            setAllCaps(false)
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-            background = rounded(brandColor, 14)
-            setOnClickListener { persistPolicy(showToast = true) }
-        }, buttonParams(10))
-
-        return ScrollView(this).apply {
+        val scroll = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(backgroundColor)
             addView(root)
         }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(backgroundColor)
+            addView(
+                scroll,
+                LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f),
+            )
+            addView(fixedSaveBar("保存分流设置") { persistPolicy(showToast = true) })
+        }
+    }
+
+    private fun fixedSaveBar(label: String, onSave: () -> Unit) = LinearLayout(this).apply {
+        setPadding(dp(20), dp(10), dp(20), dp(16))
+        setBackgroundColor(backgroundColor)
+        addView(Button(this@RoutingSettingsActivity).apply {
+            text = label
+            setAllCaps(false)
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            background = rounded(brandColor, 14)
+            setOnClickListener { onSave() }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)))
     }
 
     private fun ruleCard(index: Int, rule: RoutingRuleConfig): View = card().apply {

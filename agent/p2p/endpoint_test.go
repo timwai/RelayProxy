@@ -84,3 +84,50 @@ func TestCurrentNetworkSignatureIsOpaque(t *testing.T) {
 		t.Fatalf("network signature is not hex: %q", signature)
 	}
 }
+
+func TestEndpointUsesConfiguredUDPPortRange(t *testing.T) {
+	probe, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.LocalAddr().(*net.UDPAddr).Port
+	if err := probe.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	endpoint := NewEndpointWithPortRange("", port, port)
+	if err := endpoint.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+	conn, err := endpoint.UDPConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := conn.LocalAddr().(*net.UDPAddr).Port; got != port {
+		t.Fatalf("P2P endpoint port=%d, want configured port %d", got, port)
+	}
+}
+
+func TestEndpointRejectsExhaustedUDPPortRange(t *testing.T) {
+	occupied, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	port := occupied.LocalAddr().(*net.UDPAddr).Port
+
+	endpoint := NewEndpointWithPortRange("", port, port)
+	if err := endpoint.Start(context.Background()); err == nil {
+		_ = endpoint.Close()
+		t.Fatalf("P2P endpoint unexpectedly escaped exhausted configured port %d", port)
+	}
+}
+
+func TestEndpointRejectsInvalidUDPPortRange(t *testing.T) {
+	endpoint := NewEndpointWithPortRange("", 40001, 40000)
+	if err := endpoint.Start(context.Background()); err == nil {
+		_ = endpoint.Close()
+		t.Fatal("invalid P2P UDP port range was accepted")
+	}
+}

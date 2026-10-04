@@ -509,3 +509,28 @@ func TestAgentP2PSettingsValidateAndPersist(t *testing.T) {
 		})
 	}
 }
+
+func TestServerP2PPortRangeValidation(t *testing.T) {
+	cfg := &ServerConfig{}
+	if err := NormalizeServerConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.P2P.PortStart != 0 || cfg.P2P.PortEnd != 0 {
+		t.Fatalf("default P2P port range=%d-%d, want OS-assigned 0-0", cfg.P2P.PortStart, cfg.P2P.PortEnd)
+	}
+
+	cfg.P2P.PortStart, cfg.P2P.PortEnd = 30000, 30100
+	if err := NormalizeServerConfig(cfg); err != nil {
+		t.Fatalf("valid P2P port range rejected: %v", err)
+	}
+
+	cfg.P2P.PortStart, cfg.P2P.PortEnd = 30000, 0
+	if err := NormalizeServerConfig(cfg); err == nil {
+		t.Fatal("partial P2P port range was accepted")
+	}
+
+	cfg.P2P.PortStart, cfg.P2P.PortEnd = 30100, 30000
+	if err := NormalizeServerConfig(cfg); err == nil {
+		t.Fatal("reversed P2P port range was accepted")
+	}
+}

@@ -475,3 +475,25 @@ func TestActiveRuntimeCapabilitiesAreSignedAndGrantBound(t *testing.T) {
 		t.Fatalf("legacy grants fallback = %v", got)
 	}
 }
+
+func TestWelcomeDistributesP2PPortRange(t *testing.T) {
+	gateway := testGateway(t, time.Second, nil)
+	gateway.cfg.P2PEnabled = true
+	gateway.cfg.P2PPortStart = 30000
+	gateway.cfg.P2PPortEnd = 30100
+
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := dialTestGateway(t, gateway)
+	control := openTestStream(t, sess)
+	writeControlHeader(t, control)
+	accepted := authenticateTestDevice(t, control, identity)
+	if !accepted.Success {
+		t.Fatalf("device was not accepted: %+v", accepted)
+	}
+	if accepted.P2PPortStart != 30000 || accepted.P2PPortEnd != 30100 {
+		t.Fatalf("P2P port range=%d-%d, want 30000-30100", accepted.P2PPortStart, accepted.P2PPortEnd)
+	}
+}

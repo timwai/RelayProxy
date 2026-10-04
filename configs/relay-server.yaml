@@ -44,6 +44,8 @@ p2p:
   rendezvous_advertise: ""    # 例如 relay.example.com:3479
   lease_sec: 60
   max_sessions_per_device: 8
+  port_start: 0                  # 0/0 表示 Agent 使用系统分配的随机 UDP 端口
+  port_end: 0                    # 例如 30000-30100；配置后需放行 Agent 侧对应 UDP 范围
 
 # Relay Server 本机也可以作为网络出口。默认关闭；开启后客户端使用
 # exitDeviceId=server 即可明确选择服务端出口。

@@ -50,6 +50,8 @@ type GatewayConfig struct {
 	P2PEnabled              bool
 	P2PRendezvousAddress    string
 	P2PLeaseSec             int
+	P2PPortStart            int
+	P2PPortEnd              int
 	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
 }
 
@@ -562,6 +564,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		RDPLeaseSec:           g.cfg.RDPLeaseSec,
 		P2PRendezvousAddress:  g.cfg.P2PRendezvousAddress,
 		P2PLeaseSec:           g.cfg.P2PLeaseSec,
+		P2PPortStart:          g.cfg.P2PPortStart,
+		P2PPortEnd:            g.cfg.P2PPortEnd,
 	}
 
 	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)

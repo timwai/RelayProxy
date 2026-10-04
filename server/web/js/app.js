@@ -14,6 +14,7 @@
     settings: [
       { page: 'settings', label: '管理访问', admin: true, settingsTab: 'admin' },
       { page: 'settings', label: '隧道', admin: true, settingsTab: 'tunnel' },
+      { page: 'settings', label: 'P2P', admin: true, settingsTab: 'p2p' },
       { page: 'settings', label: 'RDP', admin: true, settingsTab: 'rdp' },
       { page: 'settings', label: 'Server 出口', admin: true, settingsTab: 'exit' },
       { page: 'settings', label: '证书', admin: true, settingsTab: 'certificate' },
@@ -21,7 +22,7 @@
     ]
   };
   const pageSections = { overview:'overview', devices:'devices', identities:'identities', exits:'devices', sessions:'connections', messages:'messages', 'rdp-ingress':'rdp', settings:'settings' };
-  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', rdp: 'RDP 公网入口', database: '数据库' };
+  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', p2p: 'P2P 直连', rdp: 'RDP 公网入口', database: '数据库' };
   const roleNames = { CLIENT: '客户端', EXIT: '出口节点', BOTH: '客户端 + 出口' };
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
   const capabilityNames = { 'proxy.client': '代理客户端', 'proxy.exit': '出口节点', 'rdp.controller': 'RDP 控制端', 'rdp.host': 'RDP 主机', 'rdp.public': 'RDP 公网入口' };

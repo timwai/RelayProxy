@@ -44,6 +44,7 @@ class SettingsActivity : Activity() {
     private lateinit var httpPort: EditText
     private lateinit var vpnAppMode: Spinner
     private lateinit var vpnAppsSummary: TextView
+    private lateinit var vpnIpv6Enabled: Switch
     private val selectedVpnPackages = linkedSetOf<String>()
     private val networkModeTabs = mutableListOf<TextView>()
     private var selectedNetworkModeIndex = 0
@@ -255,6 +256,15 @@ class SettingsActivity : Activity() {
             setOnClickListener { openVpnAppSelection() }
         }
         vpn.addView(labeled("选择应用（点击编辑）", vpnAppsSummary), topMargin(12))
+        vpnIpv6Enabled = Switch(this)
+        vpn.addView(
+            switchRow(
+                "启用 IPv6 转发",
+                "默认关闭并由 Android 阻断 IPv6，避免出口不支持 IPv6 时 Telegram 等直连 IP 应用持续选择不可达地址。确认所选出口具备 IPv6 后再开启。",
+                vpnIpv6Enabled,
+            ),
+            topMargin(12),
+        )
         vpn.addView(
             TextView(this).apply {
                 text = "Mapped DNS 已启用\n系统 DNS 查询会在 VPN 内转换为域名，再由所选出口解析。"
@@ -343,6 +353,7 @@ class SettingsActivity : Activity() {
                     ExitConfig.VPN_APP_MODE_ALL
                 },
                 vpnPackages = selectedVpnPackages.toSet(),
+                vpnIpv6Enabled = vpnIpv6Enabled.isChecked,
             )
             else -> current
         }
@@ -408,6 +419,7 @@ class SettingsActivity : Activity() {
         socks5Port.setText(cfg.socks5Port.toString())
         httpPort.setText(cfg.httpPort.toString())
         vpnAppMode.setSelection(vpnAppModeValues.indexOf(cfg.vpnAppMode).coerceAtLeast(0))
+        vpnIpv6Enabled.isChecked = cfg.vpnIpv6Enabled
         selectedVpnPackages.clear()
         selectedVpnPackages += cfg.vpnPackages
         updateVpnAppsSummary()

@@ -133,10 +133,13 @@ class SettingsHomeActivity : Activity() {
         else -> "全局代理"
     }
 
-    private fun vpnSummary(config: ExitConfig): String = when (config.vpnAppMode) {
-        ExitConfig.VPN_APP_MODE_INCLUDE -> "仅 ${config.vpnPackages.size} 个应用进入 VPN"
-        ExitConfig.VPN_APP_MODE_EXCLUDE -> "排除 ${config.vpnPackages.size} 个应用"
-        else -> "全部应用进入 VPN"
+    private fun vpnSummary(config: ExitConfig): String {
+        val scope = when (config.vpnAppMode) {
+            ExitConfig.VPN_APP_MODE_INCLUDE -> "仅 ${config.vpnPackages.size} 个应用进入 VPN"
+            ExitConfig.VPN_APP_MODE_EXCLUDE -> "排除 ${config.vpnPackages.size} 个应用"
+            else -> "全部应用进入 VPN"
+        }
+        return "$scope · ${if (config.vpnIpv6Enabled) "IPv4/IPv6" else "仅 IPv4"}"
     }
 
     private fun localProxySummary(config: ExitConfig): String {

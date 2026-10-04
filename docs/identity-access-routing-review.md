@@ -35,6 +35,7 @@
 | P1 | Android 按应用归属补丁从 Hev 用户态协程栈直接进入 ART JNI，首个 TCP/UDP 流量可能触发 Java 无法捕获的 native 进程退出；native 状态轮询还会与停止并发 | UID 查询改由独立的 ART daemon pthread 执行，Hev 线程只通过条件变量同步请求；全部 TProxy JNI 调用收敛到 VPN 单线程执行器；双 ABI native 编译和 APK 构建通过 |
 | P1 | Android 仅在启动出口或 VPN 后连接服务端，导致设备审批和出口列表都晚于配置时机；若直接常驻原数据会话，未启动的设备又会被误报为在线出口 | 保存有效连接配置、打开客户端或设备重启后即建立控制连接，预先申报 Android 支持的设备能力并同步出口；握手增加签名覆盖的运行态标记，服务端仅把实际启动的数据能力加入在线出口索引 |
 | P1 | Telegram 等原生客户端直接连接数据中心 IP，短生命周期连接若未被 Android UID 查询命中，会成为未知应用并被应用规则保护逻辑拒绝；应用范围也容易被误解为路由动作 | 仅选中应用范围只包含一个 Android UID 时，使用该 UID 的完整包名组安全回退；多个 UID 继续保持未知并拒绝。规则页明确应用、目标、端口、协议为同时匹配，代理应用全部流量时目标应留空 |
+| P1 | 全局代理且全部应用时 Telegram 仍无法连接，说明故障不在应用归属或规则匹配；VPN 默认宣告未经出口能力确认的 IPv6，并对每条连接执行无用的 UID 查询 | IPv6 改为默认关闭并由 Android 阻断，VPN 页面允许对确认支持 IPv6 的出口显式开启；全局代理和无应用条件规则跳过系统 UID 查询，Telegram 的直连 IPv4 流量直接进入 SOCKS 数据链路 |
 | P2 | 首次设备申请缺少身份范围，身份用户可能看到或审批其他身份的申请 | enrollment 保存 `identity_id`，列表、批准、拒绝全部按登录身份过滤 |
 | P2 | 身份状态变化和密码重置后已有 Web/设备会话仍可能继续使用旧权限 | 密码重置撤销该身份 Web 会话；身份禁用同步账号状态并失效该身份设备会话 |
 | P2 | 移动目标设备到新身份时，旧跨身份授权可能跨越所有权边界 | 身份变更事务内删除该目标设备授权并记录审计，随后清理受影响的 Relay、P2P 和 RDP 路径 |
@@ -48,10 +49,10 @@
 | `go test -race ./server/repository ./server/api ./server/gateway ./server/p2p ./mobile/androidcore ./agent/app` | 通过，覆盖身份仓储、管理 API、接入、实时策略、Android 核心和 Agent 集成 |
 | `node --check server/web/js/app.js` | 通过 |
 | `git diff --check` | 通过 |
-| Gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` | 通过；3 个原生库通过 16 KB ELF 对齐检查 |
+| Gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` | 通过；新增测试确认全局代理、无应用条件规则和 Android 8/9 不执行应用归属查询；3 个原生库通过 16 KB ELF 对齐检查 |
 | Gradle `:app:testDebugUnitTest --tests com.relayproxy.android.FlowOwnerIdentityTest` | 通过；覆盖单 UID 回退、共享 UID 完整包名组及多 UID 拒绝回退 |
 
-本轮补充执行完整 Release 构建并使用本机 debug keystore 签名。ARM64 APK 位于 `dist/android/RelayProxy-Android-arm64-release.apk`，SHA-256 为 `23d8010712bb96b2b3a59d771a718d4c237fcda747d6b03cf8584658e0f926d8`；ARM32 APK 位于 `dist/android/RelayProxy-Android-arm32-release.apk`，SHA-256 为 `cfbaa44aef90070321320124677cf7ad9f28492fccee29505145f7c1752fa350`。两个 APK 均通过 v2/v3 签名校验，全部原生库通过 16 KB ELF 对齐检查。构建中的 Kotlin 提示来自 Android 系统栏兼容 API 已弃用，不影响结果。
+本轮补充执行完整 Release 构建并使用本机 debug keystore 签名。ARM64 APK 位于 `dist/android/RelayProxy-Android-arm64-release.apk`，SHA-256 为 `3cc48ea8389c52d27f6dd6b26bd802b7fd5f934ff47d31321c5db54fd5f2dac2`；ARM32 APK 位于 `dist/android/RelayProxy-Android-arm32-release.apk`，SHA-256 为 `3c352e845250ab4c903a6405d870b6e8fbdab07b0ad13b721305463322e28691`。两个 APK 均通过 v2/v3 签名校验，全部原生库通过 16 KB ELF 对齐检查。构建中的 Kotlin 提示来自 Android 系统栏兼容 API 已弃用，不影响结果。
 
 ## 尚需设备验收的边界
 

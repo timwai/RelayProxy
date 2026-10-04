@@ -36,6 +36,10 @@ data class RoutingConfig(
     val rules: List<RoutingRuleConfig> = emptyList(),
     val revision: Long = 0,
 ) {
+    fun requiresApplicationIdentity(androidSdk: Int): Boolean =
+        androidSdk >= Build.VERSION_CODES.Q && mode == "rule" &&
+            rules.any { rule -> rule.enabled && rule.applications.isNotEmpty() }
+
     fun toJson(
         forCore: Boolean = false,
         rejectUnknownApplications: Boolean = false,
@@ -135,6 +139,7 @@ data class ExitConfig(
     val vpnSocks5Port: Int = 1081,
     val vpnAppMode: String = VPN_APP_MODE_ALL,
     val vpnPackages: Set<String> = emptySet(),
+    val vpnIpv6Enabled: Boolean = false,
     val vpnDnsServers: List<String> = listOf("1.1.1.1", "8.8.8.8"),
     val vpnProxyToken: String = "",
     val routing: RoutingConfig = RoutingConfig(),
@@ -296,6 +301,7 @@ class ConfigStore(private val context: Context) {
                 ?.filter(String::isNotBlank)
                 ?.toSet()
                 .orEmpty(),
+            vpnIpv6Enabled = prefs.getBoolean("vpnIpv6Enabled", false),
             vpnDnsServers = prefs.getString("vpnDnsServers", "1.1.1.1,8.8.8.8")
                 .orEmpty()
                 .split(',', '\n', ';', ' ')
@@ -329,6 +335,7 @@ class ConfigStore(private val context: Context) {
             .putBoolean("proxyP2pEnabled", config.proxyP2pEnabled)
             .putString("vpnAppMode", config.vpnAppMode)
             .putStringSet("vpnPackages", config.vpnPackages.toSet())
+            .putBoolean("vpnIpv6Enabled", config.vpnIpv6Enabled)
             .putString("vpnDnsServers", config.vpnDnsServers.joinToString(","))
             .putInt("configVersion", 4)
             .remove("cellularOnly")

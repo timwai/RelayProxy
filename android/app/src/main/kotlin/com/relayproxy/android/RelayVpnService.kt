@@ -246,13 +246,13 @@ class RelayVpnService : VpnService() {
 
         val configFile = File(filesDir, "relayproxy/vpn-tun.yml")
         configFile.parentFile?.mkdirs()
+        val ipv6TunnelConfig = if (config.vpnIpv6Enabled) "\n              ipv6: 'fc00::1'" else ""
         configFile.writeText(
             """
             tunnel:
               name: relayproxy
               mtu: 1280
-              ipv4: 198.18.0.1
-              ipv6: 'fc00::1'
+              ipv4: 198.18.0.1$ipv6TunnelConfig
               icmp: 'off'
             socks5:
               address: 127.0.0.1
@@ -273,9 +273,7 @@ class RelayVpnService : VpnService() {
             .setSession("RelayProxy")
             .setMtu(1280)
             .addAddress("198.18.0.1", 32)
-            .addAddress("fc00::1", 128)
             .addRoute("0.0.0.0", 0)
-            .addRoute("::", 0)
             .setConfigureIntent(
                 PendingIntent.getActivity(
                     this,
@@ -284,6 +282,12 @@ class RelayVpnService : VpnService() {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
                 )
             )
+        if (config.vpnIpv6Enabled) {
+            builder.addAddress("fc00::1", 128)
+            builder.addRoute("::", 0)
+        }
+        // Do not call allowFamily(AF_INET6) when IPv6 is disabled. Android then
+        // blocks that family instead of leaking it through the physical network.
         // Use hev-socks5-tunnel Mapped DNS instead of sending plaintext DNS
         // queries from the selected exit to public UDP/53 resolvers. Mapped DNS
         // preserves the original hostname and hands it to the RelayProxy SOCKS5
@@ -298,15 +302,20 @@ class RelayVpnService : VpnService() {
             return
         }
         tun = descriptor
-        scopedApplicationIdentity = resolveScopedApplicationIdentity(config)
-        TProxyService.setFlowOwnerResolver { protocol, sourceAddress, sourcePort, destinationAddress, destinationPort ->
-            resolveFlowOwner(
-                protocol,
-                sourceAddress,
-                sourcePort,
-                destinationAddress,
-                destinationPort,
-            )
+        if (config.routing.requiresApplicationIdentity(Build.VERSION.SDK_INT)) {
+            scopedApplicationIdentity = resolveScopedApplicationIdentity(config)
+            TProxyService.setFlowOwnerResolver { protocol, sourceAddress, sourcePort, destinationAddress, destinationPort ->
+                resolveFlowOwner(
+                    protocol,
+                    sourceAddress,
+                    sourcePort,
+                    destinationAddress,
+                    destinationPort,
+                )
+            }
+        } else {
+            scopedApplicationIdentity = UNKNOWN_APPLICATION
+            TProxyService.setFlowOwnerResolver(null)
         }
         if (!TProxyService.TProxyStartService(configFile.absolutePath, descriptor.fd)) {
             TProxyService.setFlowOwnerResolver(null)

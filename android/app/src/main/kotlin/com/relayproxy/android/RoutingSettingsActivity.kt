@@ -2,12 +2,14 @@ package com.relayproxy.android
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ClipData
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.view.DragEvent
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -16,15 +18,17 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.relayproxy.core.androidcore.Androidcore
 
 class RoutingSettingsActivity : Activity() {
+    private data class RuleDragToken(val ruleId: String)
+
     private lateinit var mode: Spinner
     private lateinit var defaultAction: Spinner
     private var config = RoutingConfig()
-    private var draft: RoutingConfig? = null
 
     private val modeValues = listOf("global_proxy", "rule", "direct")
     private val modeLabels = listOf("全局代理", "按规则分流", "全局直连")
@@ -41,33 +45,12 @@ class RoutingSettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         configureWindow()
-        draft = savedInstanceState?.getString("routingDraft")?.let(RoutingConfig::fromJson)
     }
 
     override fun onResume() {
         super.onResume()
-        config = draft ?: ConfigStore(this).load().routing
+        config = ConfigStore(this).load().routing
         setContentView(buildUi())
-    }
-
-    override fun onPause() {
-        captureDraft()
-        super.onPause()
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        captureDraft()
-        draft?.let { outState.putString("routingDraft", it.toJson().toString()) }
-        super.onSaveInstanceState(outState)
-    }
-
-    private fun captureDraft() {
-        if (!::mode.isInitialized) return
-        val current = config.copy(
-            mode = modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" },
-            defaultAction = actionValues.getOrElse(defaultAction.selectedItemPosition) { "PROXY" },
-        )
-        if (current != config) draft = current
     }
 
     private fun configureWindow() {
@@ -92,7 +75,7 @@ class RoutingSettingsActivity : Activity() {
             setTypeface(typeface, Typeface.BOLD)
         })
         root.addView(TextView(this).apply {
-            text = "规则从上到下匹配；同一字段内任意值命中，不同字段需同时命中。"
+            text = "规则从上到下匹配；长按规则的拖动区域可调整顺序。启用、删除和排序会立即保存。"
             textSize = 12.5f
             setTextColor(mutedColor)
             setPadding(0, dp(5), 0, dp(12))
@@ -107,6 +90,20 @@ class RoutingSettingsActivity : Activity() {
         defaultAction.setSelection(actionValues.indexOf(config.defaultAction).coerceAtLeast(0), false)
         root.addView(policy)
 
+        if (config.rules.isNotEmpty() && config.mode != "rule") {
+            root.addView(TextView(this).apply {
+                text = if (config.mode == "direct") {
+                    "当前是“全局直连”模式，下面的分流规则不会参与匹配。切换到“按规则分流”并保存后才会生效。"
+                } else {
+                    "当前是“全局代理”模式，下面的分流规则不会参与匹配，所有代理流量会使用默认出口。切换到“按规则分流”并保存后才会生效。"
+                }
+                textSize = 12.5f
+                setTextColor(dangerColor)
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = rounded(Color.rgb(254, 242, 242), 14, Color.rgb(254, 202, 202))
+            }, topMargin(12))
+        }
+
         root.addView(TextView(this).apply {
             text = "规则列表"
             textSize = 16f
@@ -116,7 +113,7 @@ class RoutingSettingsActivity : Activity() {
         })
         if (config.rules.isEmpty()) {
             root.addView(TextView(this).apply {
-                text = "暂无规则。全局代理模式保持现有行为；切换到按规则分流后，可添加多条规则。"
+                text = "暂无规则。添加第一条规则时会自动切换到“按规则分流”。"
                 textSize = 12.5f
                 setTextColor(mutedColor)
                 setPadding(dp(14), dp(14), dp(14), dp(14))
@@ -134,6 +131,11 @@ class RoutingSettingsActivity : Activity() {
             setTextColor(brandColor)
             background = rounded(Color.WHITE, 14, Color.rgb(191, 219, 254))
             setOnClickListener {
+                if (config.rules.isEmpty() &&
+                    modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" } != "rule"
+                ) {
+                    mode.setSelection(modeValues.indexOf("rule"), false)
+                }
                 if (!persistPolicy(showToast = false)) return@setOnClickListener
                 startActivity(Intent(this@RoutingSettingsActivity, RoutingRuleActivity::class.java))
             }
@@ -168,6 +170,7 @@ class RoutingSettingsActivity : Activity() {
     }
 
     private fun ruleCard(index: Int, rule: RoutingRuleConfig): View = card().apply {
+        val targetCard = this
         val heading = LinearLayout(this@RoutingSettingsActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -178,18 +181,72 @@ class RoutingSettingsActivity : Activity() {
             setTextColor(if (rule.enabled) inkColor else mutedColor)
             setTypeface(typeface, Typeface.BOLD)
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        heading.addView(TextView(this@RoutingSettingsActivity).apply {
-            text = if (rule.enabled) actionLabel(rule.action) else "已停用"
+        heading.addView(Switch(this@RoutingSettingsActivity).apply {
+            text = if (rule.enabled) "启用" else "停用"
             textSize = 12f
-            setTextColor(if (rule.action == "REJECT") dangerColor else brandColor)
+            setTextColor(if (rule.enabled) brandColor else mutedColor)
+            isChecked = rule.enabled
+            setOnCheckedChangeListener { _, checked ->
+                if (checked != rule.enabled) setRuleEnabled(rule.id, checked)
+            }
         })
         addView(heading)
         addView(TextView(this@RoutingSettingsActivity).apply {
             text = ruleSummary(rule)
             textSize = 12f
             setTextColor(mutedColor)
-            setPadding(0, dp(6), 0, dp(10))
+            setPadding(0, dp(6), 0, dp(8))
         })
+
+        addView(TextView(this@RoutingSettingsActivity).apply {
+            text = "☰  长按拖动排序"
+            textSize = 12f
+            gravity = Gravity.CENTER_VERTICAL
+            setTextColor(brandColor)
+            setPadding(dp(4), dp(8), dp(4), dp(8))
+            contentDescription = "拖动${rule.name.ifBlank { "规则 ${index + 1}" }}调整顺序"
+            setOnLongClickListener { view ->
+                view.startDragAndDrop(
+                    ClipData.newPlainText("relayproxy-routing-rule", rule.id),
+                    View.DragShadowBuilder(targetCard),
+                    RuleDragToken(rule.id),
+                    0,
+                )
+                true
+            }
+        })
+
+        setOnDragListener { view, event ->
+            val token = event.localState as? RuleDragToken
+            when (event.action) {
+                DragEvent.ACTION_DRAG_STARTED -> token != null
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    if (token != null && token.ruleId != rule.id) view.alpha = 0.72f
+                    true
+                }
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    view.alpha = 1f
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    view.alpha = 1f
+                    if (token == null || token.ruleId == rule.id) {
+                        true
+                    } else {
+                        moveRuleByDrag(
+                            sourceRuleId = token.ruleId,
+                            targetRuleId = rule.id,
+                            placeAfter = event.y > view.height / 2f,
+                        )
+                    }
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    view.alpha = 1f
+                    true
+                }
+                else -> true
+            }
+        }
 
         val actions = LinearLayout(this@RoutingSettingsActivity).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -201,63 +258,110 @@ class RoutingSettingsActivity : Activity() {
                     .putExtra(RoutingRuleActivity.EXTRA_RULE_ID, rule.id)
             )
         }, actionParams())
-        actions.addView(textAction("复制") { duplicateRule(index) }, actionParams())
-        actions.addView(textAction("上移") { moveRule(index, -1) }, actionParams())
-        actions.addView(textAction("下移") { moveRule(index, 1) }, actionParams())
-        actions.addView(textAction("删除", dangerColor) { confirmDelete(index) }, actionParams())
+        actions.addView(textAction("复制") { duplicateRule(rule.id) }, actionParams())
+        actions.addView(textAction("上移") { moveRule(rule.id, -1) }, actionParams())
+        actions.addView(textAction("下移") { moveRule(rule.id, 1) }, actionParams())
+        actions.addView(textAction("删除", dangerColor) { confirmDelete(rule.id) }, actionParams())
         addView(actions)
     }
 
+    private fun currentPolicy(): RoutingConfig = config.copy(
+        mode = if (::mode.isInitialized) {
+            modeValues.getOrElse(mode.selectedItemPosition) { config.mode }
+        } else {
+            config.mode
+        },
+        defaultAction = if (::defaultAction.isInitialized) {
+            actionValues.getOrElse(defaultAction.selectedItemPosition) { config.defaultAction }
+        } else {
+            config.defaultAction
+        },
+    )
+
     private fun persistPolicy(showToast: Boolean): Boolean {
-        val updated = config.copy(
-            mode = modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" },
-            defaultAction = actionValues.getOrElse(defaultAction.selectedItemPosition) { "PROXY" },
-        )
-        if (!save(updated)) return false
+        if (!save(currentPolicy())) return false
         if (showToast) Toast.makeText(this, "分流设置已保存", Toast.LENGTH_SHORT).show()
         return true
     }
 
-    private fun duplicateRule(index: Int) {
-        val source = config.rules.getOrNull(index) ?: return
-        val rules = config.rules.toMutableList()
-        rules.add(index + 1, source.copy(id = java.util.UUID.randomUUID().toString(), name = "${source.name} 副本"))
-        if (save(config.copy(rules = rules))) recreate()
+    private fun setRuleEnabled(ruleId: String, enabled: Boolean) {
+        val base = currentPolicy()
+        val rules = base.rules.map { rule ->
+            if (rule.id == ruleId) rule.copy(enabled = enabled) else rule
+        }
+        if (save(base.copy(rules = rules))) renderCurrent()
     }
 
-    private fun moveRule(index: Int, offset: Int) {
+    private fun duplicateRule(ruleId: String) {
+        val base = currentPolicy()
+        val index = base.rules.indexOfFirst { it.id == ruleId }
+        if (index < 0) return
+        val source = base.rules[index]
+        val rules = base.rules.toMutableList()
+        rules.add(
+            index + 1,
+            source.copy(
+                id = java.util.UUID.randomUUID().toString(),
+                name = "${source.name} 副本",
+            ),
+        )
+        if (save(base.copy(rules = rules))) renderCurrent()
+    }
+
+    private fun moveRule(ruleId: String, offset: Int) {
+        val base = currentPolicy()
+        val index = base.rules.indexOfFirst { it.id == ruleId }
         val target = index + offset
-        if (index !in config.rules.indices || target !in config.rules.indices) return
-        val rules = config.rules.toMutableList()
+        if (index !in base.rules.indices || target !in base.rules.indices) return
+        val rules = base.rules.toMutableList()
         val item = rules.removeAt(index)
         rules.add(target, item)
-        if (save(config.copy(rules = rules))) recreate()
+        if (save(base.copy(rules = rules))) renderCurrent()
     }
 
-    private fun confirmDelete(index: Int) {
-        val rule = config.rules.getOrNull(index) ?: return
+    private fun moveRuleByDrag(
+        sourceRuleId: String,
+        targetRuleId: String,
+        placeAfter: Boolean,
+    ): Boolean {
+        val base = currentPolicy()
+        val sourceIndex = base.rules.indexOfFirst { it.id == sourceRuleId }
+        val originalTargetIndex = base.rules.indexOfFirst { it.id == targetRuleId }
+        if (sourceIndex < 0 || originalTargetIndex < 0 || sourceIndex == originalTargetIndex) return true
+
+        val rules = base.rules.toMutableList()
+        val moved = rules.removeAt(sourceIndex)
+        var targetIndex = rules.indexOfFirst { it.id == targetRuleId }
+        if (targetIndex < 0) return true
+        if (placeAfter) targetIndex++
+        rules.add(targetIndex.coerceIn(0, rules.size), moved)
+        if (rules == base.rules) return true
+        if (save(base.copy(rules = rules))) renderCurrent()
+        return true
+    }
+
+    private fun confirmDelete(ruleId: String) {
+        val rule = config.rules.firstOrNull { it.id == ruleId } ?: return
         AlertDialog.Builder(this)
             .setTitle("删除规则")
             .setMessage("确定删除“${rule.name}”吗？")
             .setNegativeButton("取消", null)
             .setPositiveButton("删除") { _, _ ->
-                if (save(config.copy(rules = config.rules.filterIndexed { i, _ -> i != index }))) recreate()
+                val base = currentPolicy()
+                val rules = base.rules.filterNot { it.id == ruleId }
+                if (save(base.copy(rules = rules))) renderCurrent()
             }
             .show()
     }
 
-    private fun save(updated: RoutingConfig): Boolean {
-        val next = updated.copy(
-            mode = modeValues.getOrElse(mode.selectedItemPosition) { "global_proxy" },
-            defaultAction = actionValues.getOrElse(defaultAction.selectedItemPosition) { "PROXY" },
-        )
+    private fun save(next: RoutingConfig): Boolean {
         val error = runCatching {
-            require(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
-                next.rules.none { it.enabled && it.applications.isNotEmpty() }
+            require(
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q ||
+                    next.rules.none { it.enabled && it.applications.isNotEmpty() }
             ) { "Android 8/9 不能启用包含应用条件的规则" }
             Androidcore.validateRoutingConfig(next.toJson(forCore = true).toString())
             config = ConfigStore(this).saveRouting(next)
-            draft = null
         }.exceptionOrNull()
         if (error != null) {
             Toast.makeText(this, error.message ?: "保存规则失败", Toast.LENGTH_LONG).show()
@@ -267,12 +371,30 @@ class RoutingSettingsActivity : Activity() {
         return true
     }
 
+    private fun renderCurrent() {
+        setContentView(buildUi())
+    }
+
     private fun reconfigureRuntime() {
         val store = ConfigStore(this)
         val current = store.load()
         if (store.isDesiredRunning() || store.isVpnDesiredRunning() || current.clientEnabled) {
-            val relay = Intent(this, RelayExitService::class.java).setAction(RelayExitService.ACTION_RECONFIGURE)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay) else startService(relay)
+            val relay = Intent(this, RelayExitService::class.java)
+                .setAction(RelayExitService.ACTION_RECONFIGURE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(relay)
+            } else {
+                startService(relay)
+            }
+        }
+        if (store.isVpnDesiredRunning()) {
+            val vpn = Intent(this, RelayVpnService::class.java)
+                .setAction(RelayVpnService.ACTION_RECONFIGURE)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(vpn)
+            } else {
+                startService(vpn)
+            }
         }
     }
 

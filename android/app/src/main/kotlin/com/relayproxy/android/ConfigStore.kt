@@ -160,6 +160,10 @@ data class ExitConfig(
             .put("allowLoopback", false)
             .put("exitEnabled", exitEnabled)
             .put("clientEnabled", coreClientEnabled)
+            .put("requestedCapabilities", org.json.JSONArray().apply {
+                put("proxy.client")
+                put("proxy.exit")
+            })
             .put("socks5Enabled", localSocksEnabled)
             .put("httpEnabled", clientEnabled && httpEnabled)
             .put("proxyP2pEnabled", proxyP2pEnabled)
@@ -188,6 +192,10 @@ data class ExitConfig(
 
 class ConfigStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("relayproxy_android", Context.MODE_PRIVATE)
+
+    fun hasConnectionConfig(config: ExitConfig = load()): Boolean =
+        config.serverAddress.isNotBlank() &&
+            Regex("^(?=.*[a-z])(?=.*[0-9])[a-z0-9]{16}$").matches(config.identityId)
 
     fun defaultDeviceName(): String {
         val systemName = runCatching {

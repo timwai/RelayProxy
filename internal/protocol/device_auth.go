@@ -18,9 +18,16 @@ const (
 
 	CapabilityProxyClient = "proxy.client"
 	CapabilityProxyExit   = "proxy.exit"
-	CapabilityRDPClient   = "rdp.controller"
-	CapabilityRDPHost     = "rdp.host"
-	CapabilityRDPPublic   = "rdp.public"
+	// CapabilityRuntimeState tells the server that this client distinguishes
+	// approved device capabilities from the capabilities currently running.
+	// The active flags keep a control-only session from being advertised as an
+	// online exit while the user has not started its data plane.
+	CapabilityRuntimeState      = "runtime.capabilities"
+	CapabilityProxyClientActive = "proxy.client.active"
+	CapabilityProxyExitActive   = "proxy.exit.active"
+	CapabilityRDPClient         = "rdp.controller"
+	CapabilityRDPHost           = "rdp.host"
+	CapabilityRDPPublic         = "rdp.public"
 
 	ErrCodeApprovalPending  = "APPROVAL_PENDING"
 	ErrCodeDeviceRejected   = "DEVICE_REJECTED"

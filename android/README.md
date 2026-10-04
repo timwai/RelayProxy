@@ -5,7 +5,7 @@ Android 支持作为 **Relay 网络出口**，也支持作为 **代理客户端*
 ## 架构
 
 - `mobile/androidcore`：Go + gomobile。复用设备认证、QUIC/TLS+yamux、`TunnelDialer`、TCP/UDP 转发与出口 ACL；同一个 Core 提供出口服务及经过 `proxy.client` 授权的本机代理入口。`-javapkg com.relayproxy.core` 生成的 Java 包为 `com.relayproxy.core.androidcore`。
-- `android/app`：Kotlin 原生 UI + 前台 Service。`RelayExitService` 持有唯一 Go Core；`RelayVpnService` 管理 VPN 授权、TUN fd 和前台通知，启动时复用或重建该 Core。
+- `android/app`：Kotlin 原生 UI + 前台 Service。有效连接配置保存后，`RelayExitService` 持有唯一 Go Core 并维持控制连接，提前同步设备审批和授权出口；出口、VPN 和本机代理的启动状态独立控制数据面。`RelayVpnService` 管理 VPN 授权、TUN fd 和前台通知，启动时复用或重建该 Core。
 - VPN 使用 `VpnService` + 固定版本 `hev-socks5-tunnel`，将 IPv4/IPv6 默认路由送入独立且需要认证的内部回环 SOCKS5。RelayProxy 自身应用从 VPN 路由中排除，避免隧道回环。
 - VPN 可选择全部应用、仅选中应用或排除选中应用；DNS 使用 hev-socks5-tunnel Mapped DNS，在 TUN 内返回 Fake-IP，并在建立 SOCKS5 连接时恢复为原始域名交给所选出口解析，避免把明文 UDP/53 DNS 暴露给出口网络。当前物理网络同步给 Android VPN，Wi-Fi / 蜂窝切换时共享 Core 会重连。
 - Android 10+ 会根据原始 TCP/UDP 四元组查询连接 UID，把共享 UID 映射为包名组，再交给共用路由引擎匹配应用、目标、端口和协议条件。Android 8/9 保留非应用规则，并拒绝启用含应用条件的规则。

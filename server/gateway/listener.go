@@ -564,22 +564,24 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		P2PLeaseSec:           g.cfg.P2PLeaseSec,
 	}
 
+	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)
 	deviceSession := &session.DeviceSession{
-		DeviceID:       authorization.DeviceID,
-		DeviceName:     hello.DeviceName,
-		Fingerprint:    fingerprint,
-		OwnerUserID:    authorization.OwnerUserID,
-		IdentityID:     authorization.IdentityID,
-		IdentityName:   authorization.IdentityName,
-		PolicyRevision: authorization.PolicyRevision,
-		Mode:           modeForCapabilities(authorization.ApprovedCapabilities),
-		Capabilities:   hello.TransportCapabilities,
-		Grants:         authorization.ApprovedCapabilities,
-		Transport:      sess.Transport(),
-		Tunnel:         sess,
-		ControlStream:  ctrlStream,
-		ConnectedAt:    time.Now(),
-		HeartbeatSec:   heartbeatSec,
+		DeviceID:            authorization.DeviceID,
+		DeviceName:          hello.DeviceName,
+		Fingerprint:         fingerprint,
+		OwnerUserID:         authorization.OwnerUserID,
+		IdentityID:          authorization.IdentityID,
+		IdentityName:        authorization.IdentityName,
+		PolicyRevision:      authorization.PolicyRevision,
+		Mode:                modeForCapabilities(runtimeCapabilitiesOrGrants(runtimeCapabilities, authorization.ApprovedCapabilities)),
+		Capabilities:        hello.TransportCapabilities,
+		Grants:              authorization.ApprovedCapabilities,
+		RuntimeCapabilities: runtimeCapabilities,
+		Transport:           sess.Transport(),
+		Tunnel:              sess,
+		ControlStream:       ctrlStream,
+		ConnectedAt:         time.Now(),
+		HeartbeatSec:        heartbeatSec,
 	}
 
 	g.mu.Lock()
@@ -693,7 +695,33 @@ func modeForCapabilities(capabilities []string) string {
 	if exit {
 		return "EXIT"
 	}
+	if !client {
+		return "CONTROL"
+	}
 	return "CLIENT"
+}
+
+func activeRuntimeCapabilities(transportCapabilities, approved []string) []string {
+	if !containsCapability(transportCapabilities, protocol.CapabilityRuntimeState) {
+		return nil
+	}
+	active := make([]string, 0, 2)
+	if containsCapability(approved, protocol.CapabilityProxyClient) &&
+		containsCapability(transportCapabilities, protocol.CapabilityProxyClientActive) {
+		active = append(active, protocol.CapabilityProxyClient)
+	}
+	if containsCapability(approved, protocol.CapabilityProxyExit) &&
+		containsCapability(transportCapabilities, protocol.CapabilityProxyExitActive) {
+		active = append(active, protocol.CapabilityProxyExit)
+	}
+	return active
+}
+
+func runtimeCapabilitiesOrGrants(runtimeCapabilities, grants []string) []string {
+	if runtimeCapabilities != nil {
+		return runtimeCapabilities
+	}
+	return grants
 }
 
 // acceptControlStream loops AcceptStream until a FrameTypeControl header is seen.

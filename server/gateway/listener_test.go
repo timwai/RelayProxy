@@ -451,3 +451,27 @@ func TestHeartbeatForDeviceKeepsDefaultForOtherClients(t *testing.T) {
 		})
 	}
 }
+
+func TestActiveRuntimeCapabilitiesAreSignedAndGrantBound(t *testing.T) {
+	approved := []string{protocol.CapabilityProxyClient, protocol.CapabilityProxyExit}
+	active := activeRuntimeCapabilities([]string{
+		protocol.CapabilityRuntimeState,
+		protocol.CapabilityProxyClientActive,
+	}, approved)
+	if len(active) != 1 || active[0] != protocol.CapabilityProxyClient {
+		t.Fatalf("active runtime capabilities = %v", active)
+	}
+
+	idle := activeRuntimeCapabilities([]string{protocol.CapabilityRuntimeState}, approved)
+	if idle == nil || len(idle) != 0 {
+		t.Fatalf("control-only runtime capabilities = %#v, want non-nil empty", idle)
+	}
+
+	legacy := activeRuntimeCapabilities(nil, approved)
+	if legacy != nil {
+		t.Fatalf("legacy runtime capabilities = %#v, want nil fallback", legacy)
+	}
+	if got := runtimeCapabilitiesOrGrants(legacy, approved); len(got) != len(approved) {
+		t.Fatalf("legacy grants fallback = %v", got)
+	}
+}

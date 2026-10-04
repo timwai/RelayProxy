@@ -17,20 +17,24 @@ class BootReceiver : BroadcastReceiver() {
         val store = ConfigStore(context)
         val relayDesired = store.isDesiredRunning()
         val vpnDesired = store.isVpnDesiredRunning()
-        val localProxyDesired = store.load().clientEnabled
+        val config = store.load()
+        val localProxyDesired = config.clientEnabled
+        val controlDesired = store.hasConnectionConfig(config)
         val vpnCanStart = vpnDesired && VpnService.prepare(context) == null
         if (vpnDesired && !vpnCanStart) store.setVpnDesiredRunning(false)
-        if (!relayDesired && !vpnCanStart && !localProxyDesired) {
+        if (!relayDesired && !vpnCanStart && !localProxyDesired && !controlDesired) {
             return
         }
 
-        if (relayDesired || vpnCanStart || localProxyDesired) {
+        if (relayDesired || vpnCanStart || localProxyDesired || controlDesired) {
             val service = Intent(context, RelayExitService::class.java)
                 .setAction(
                     if (relayDesired) {
                         RelayExitService.ACTION_START
-                    } else {
+                    } else if (vpnCanStart || localProxyDesired) {
                         RelayExitService.ACTION_RECONFIGURE
+                    } else {
+                        RelayExitService.ACTION_CONNECT
                     }
                 )
             startService(context, service)

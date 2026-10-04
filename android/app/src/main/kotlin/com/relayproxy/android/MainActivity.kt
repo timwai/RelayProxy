@@ -90,6 +90,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        connectControlChannel()
         RelayExitService.setUiVisible(true)
         handler.removeCallbacks(pollStatus)
         handler.post(pollStatus)
@@ -492,6 +493,18 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun connectControlChannel() {
+        val store = ConfigStore(this)
+        if (!store.hasConnectionConfig()) return
+        val intent = Intent(this, RelayExitService::class.java)
+            .setAction(RelayExitService.ACTION_CONNECT)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+    }
+
     private fun renderStatus() {
         val obj = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
         if (obj == null) {
@@ -525,16 +538,22 @@ class MainActivity : Activity() {
         val proxyBytesUp = obj.optLong("proxyBytesUp", 0)
         val proxyBytesDown = obj.optLong("proxyBytesDown", 0)
         val ready = approved || clientApproved
+        val store = ConfigStore(this)
+        val config = store.load()
+        val dataPlaneRequested = config.exitEnabled || config.clientEnabled || config.vpnEnabled
 
         when (state) {
             "CONNECTED" -> {
                 statusSummary.text = when {
+                    !dataPlaneRequested -> "控制连接已就绪"
                     approved && clientApproved -> "出口与代理均已就绪"
                     clientApproved -> "代理客户端已就绪"
                     approved -> "网络出口已就绪"
                     else -> "已连接，能力受限"
                 }
-                if (ready) {
+                if (!dataPlaneRequested) {
+                    updateChip("已连接", success, successSoft)
+                } else if (ready) {
                     updateChip("运行中", success, successSoft)
                 } else {
                     updateChip("能力受限", warning, warningSoft)
@@ -566,8 +585,6 @@ class MainActivity : Activity() {
         statusStreams.text = (streams + proxyActiveTcp + proxyActiveUdp).toString()
         statusLatency.text = if (latency > 0) "$latency ms" else "—"
 
-        val store = ConfigStore(this)
-        val config = store.load()
         infoServer.text = config.serverAddress.ifBlank { "未配置" }
         infoDevice.text = config.deviceName.ifBlank { "RelayProxy Android" }
         infoNetworkMode.text = networkModeLabel(
@@ -592,13 +609,13 @@ class MainActivity : Activity() {
         } ?: "—"
         infoApproval.text = approvalLabel(approval)
         infoExitPermission.text = when {
-            !config.exitEnabled -> "未启用"
+            approved && !config.exitEnabled -> "已授权 · 未启动"
             approved -> "已授权"
             state == "CONNECTED" -> "等待服务端授权"
             else -> "等待连接"
         }
         infoClientPermission.text = when {
-            !config.clientEnabled && !store.isVpnDesiredRunning() -> "未启用"
+            clientApproved && !config.clientEnabled && !store.isVpnDesiredRunning() -> "已授权 · 未启动"
             clientApproved -> "已授权"
             state == "CONNECTED" -> "等待服务端授权"
             else -> "等待连接"
@@ -662,6 +679,7 @@ class MainActivity : Activity() {
             proxyError.isNotBlank() && (config.clientEnabled || vpnDesired) -> proxyError
             approval == "pending" -> "历史设备等待身份迁移"
             approval == "rejected" -> "设备接入已拒绝"
+            state == "CONNECTED" && ready && !dataPlaneRequested -> "已同步设备授权和出口节点"
             state == "CONNECTED" && ready -> "后台常驻运行中"
             state == "STOPPED" -> "点击启动后可退出 App，服务继续后台运行"
             else -> "接入状态：$approval"

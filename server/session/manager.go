@@ -18,20 +18,23 @@ type DeviceSession struct {
 	IdentityID     string   // server-resolved connection identity
 	IdentityName   string   // display-only identity name snapshot
 	PolicyRevision int64    // identity record revision at authentication time
-	Mode           string   // "CLIENT", "EXIT", "BOTH"
+	Mode           string   // "CONTROL", "CLIENT", "EXIT", "BOTH"
 	Capabilities   []string // authenticated transport/protocol features
 	Grants         []string // server-approved product capabilities
-	Transport      tunnel.TransportType
-	Tunnel         tunnel.TunnelSession
-	ControlStream  tunnel.TunnelStream
-	ConnectedAt    time.Time
-	HeartbeatSec   int
-	LastHeartbeat  atomic.Int64 // Unix timestamp in seconds
-	ActiveStreams  atomic.Int64
-	ActiveExitID   atomic.Pointer[string]
-	BytesUp        atomic.Int64
-	BytesDown      atomic.Int64
-	Diagnostics    atomic.Pointer[DeviceDiagnostics]
+	// RuntimeCapabilities is nil for older clients. A non-nil slice is the
+	// signed set of approved product capabilities that are currently running.
+	RuntimeCapabilities []string
+	Transport           tunnel.TransportType
+	Tunnel              tunnel.TunnelSession
+	ControlStream       tunnel.TunnelStream
+	ConnectedAt         time.Time
+	HeartbeatSec        int
+	LastHeartbeat       atomic.Int64 // Unix timestamp in seconds
+	ActiveStreams       atomic.Int64
+	ActiveExitID        atomic.Pointer[string]
+	BytesUp             atomic.Int64
+	BytesDown           atomic.Int64
+	Diagnostics         atomic.Pointer[DeviceDiagnostics]
 }
 
 type DeviceDiagnostics struct {
@@ -73,7 +76,11 @@ func (s *DeviceSession) DiagnosticsSnapshot() *DeviceDiagnostics {
 }
 
 func (s *DeviceSession) IsExit() bool {
-	for _, c := range s.Grants {
+	capabilities := s.Grants
+	if s.RuntimeCapabilities != nil {
+		capabilities = s.RuntimeCapabilities
+	}
+	for _, c := range capabilities {
 		if c == protocol.CapabilityProxyExit {
 			return true
 		}

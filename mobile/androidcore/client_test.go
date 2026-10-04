@@ -3,7 +3,10 @@ package androidcore
 import (
 	"encoding/json"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"relayproxy/internal/protocol"
 )
 
 func TestPowerConstrainedStatusBeforeStart(t *testing.T) {
@@ -63,5 +66,27 @@ func TestIdentityIDRequiresGeneratedLetterDigitFormat(t *testing.T) {
 		if validIdentityID(value) {
 			t.Fatalf("invalid identity id %q was accepted", value)
 		}
+	}
+}
+
+func TestControlOnlyConfigRequestsAndroidCapabilities(t *testing.T) {
+	client, err := NewClient(`{
+		"serverAddress":"relay.example.com",
+		"identityId":"a1b2c3d4e5f6g7h8",
+		"exitEnabled":false,
+		"clientEnabled":false,
+		"requestedCapabilities":["proxy.client","proxy.exit"]
+	}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Stop() })
+
+	want := []string{protocol.CapabilityProxyClient, protocol.CapabilityProxyExit}
+	if got := client.requestedCapabilities(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("requested capabilities = %v, want %v", got, want)
+	}
+	if client.cfg.ClientEnabled || *client.cfg.ExitEnabled {
+		t.Fatal("control-only config enabled a data-plane capability")
 	}
 }

@@ -49,6 +49,20 @@ func TestIsExitRequiresCapability(t *testing.T) {
 	}
 }
 
+func TestRuntimeCapabilityKeepsControlSessionOutOfExitInventory(t *testing.T) {
+	control := &DeviceSession{
+		Grants:              []string{protocol.CapabilityProxyClient, protocol.CapabilityProxyExit},
+		RuntimeCapabilities: []string{},
+	}
+	if control.IsExit() {
+		t.Fatal("control-only session was advertised as an online exit")
+	}
+	control.RuntimeCapabilities = []string{protocol.CapabilityProxyExit}
+	if !control.IsExit() {
+		t.Fatal("active exit session was omitted from the exit inventory")
+	}
+}
+
 func TestDeviceDiagnosticsValidateAndClonePayload(t *testing.T) {
 	session := &DeviceSession{}
 	payload := json.RawMessage(`{"sampledAt":"2026-10-03T00:00:00Z","mode":"BOTH"}`)

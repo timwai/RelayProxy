@@ -50,29 +50,30 @@ func ValidateRoutingConfig(configJSON string) error {
 }
 
 type clientConfig struct {
-	ServerAddress       string         `json:"serverAddress"`
-	IdentityID          string         `json:"identityId"`
-	DeviceName          string         `json:"deviceName"`
-	QUICPort            int            `json:"quicPort"`
-	TCPPort             int            `json:"tcpPort"`
-	TransportMode       string         `json:"transportMode"`
-	TLSEnabled          *bool          `json:"tlsEnabled"`
-	InsecureTLS         bool           `json:"insecureTLS"`
-	AllowInternet       *bool          `json:"allowInternet"`
-	AllowPrivateNetwork bool           `json:"allowPrivateNetwork"`
-	AllowLoopback       bool           `json:"allowLoopback"`
-	ExitEnabled         *bool          `json:"exitEnabled"`
-	ClientEnabled       bool           `json:"clientEnabled"`
-	SOCKS5Enabled       *bool          `json:"socks5Enabled"`
-	HTTPEnabled         *bool          `json:"httpEnabled"`
-	ProxyP2PEnabled     *bool          `json:"proxyP2pEnabled"`
-	DefaultExitID       string         `json:"defaultExitId"`
-	SOCKS5Listen        string         `json:"socks5Listen"`
-	HTTPListen          string         `json:"httpListen"`
-	Routing             routing.Config `json:"routing"`
-	VPNProxyEnabled     bool           `json:"vpnProxyEnabled"`
-	VPNProxyListen      string         `json:"vpnProxyListen"`
-	VPNProxyToken       string         `json:"vpnProxyToken"`
+	ServerAddress         string         `json:"serverAddress"`
+	IdentityID            string         `json:"identityId"`
+	DeviceName            string         `json:"deviceName"`
+	QUICPort              int            `json:"quicPort"`
+	TCPPort               int            `json:"tcpPort"`
+	TransportMode         string         `json:"transportMode"`
+	TLSEnabled            *bool          `json:"tlsEnabled"`
+	InsecureTLS           bool           `json:"insecureTLS"`
+	AllowInternet         *bool          `json:"allowInternet"`
+	AllowPrivateNetwork   bool           `json:"allowPrivateNetwork"`
+	AllowLoopback         bool           `json:"allowLoopback"`
+	ExitEnabled           *bool          `json:"exitEnabled"`
+	ClientEnabled         bool           `json:"clientEnabled"`
+	RequestedCapabilities []string       `json:"requestedCapabilities"`
+	SOCKS5Enabled         *bool          `json:"socks5Enabled"`
+	HTTPEnabled           *bool          `json:"httpEnabled"`
+	ProxyP2PEnabled       *bool          `json:"proxyP2pEnabled"`
+	DefaultExitID         string         `json:"defaultExitId"`
+	SOCKS5Listen          string         `json:"socks5Listen"`
+	HTTPListen            string         `json:"httpListen"`
+	Routing               routing.Config `json:"routing"`
+	VPNProxyEnabled       bool           `json:"vpnProxyEnabled"`
+	VPNProxyListen        string         `json:"vpnProxyListen"`
+	VPNProxyToken         string         `json:"vpnProxyToken"`
 }
 
 type statusSnapshot struct {
@@ -197,8 +198,23 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		enabled := true
 		cfg.ExitEnabled = &enabled
 	}
-	if !*cfg.ExitEnabled && !cfg.ClientEnabled {
-		return cfg, errors.New("at least one of exitEnabled or clientEnabled is required")
+	cfg.RequestedCapabilities = normalizeRequestedCapabilities(cfg.RequestedCapabilities)
+	if len(cfg.RequestedCapabilities) == 0 {
+		if cfg.ClientEnabled {
+			cfg.RequestedCapabilities = append(cfg.RequestedCapabilities, protocol.CapabilityProxyClient)
+		}
+		if *cfg.ExitEnabled {
+			cfg.RequestedCapabilities = append(cfg.RequestedCapabilities, protocol.CapabilityProxyExit)
+		}
+	}
+	if len(cfg.RequestedCapabilities) == 0 {
+		return cfg, errors.New("at least one requested capability is required")
+	}
+	if cfg.ClientEnabled && !contains(cfg.RequestedCapabilities, protocol.CapabilityProxyClient) {
+		return cfg, errors.New("clientEnabled requires proxy.client to be requested")
+	}
+	if *cfg.ExitEnabled && !contains(cfg.RequestedCapabilities, protocol.CapabilityProxyExit) {
+		return cfg, errors.New("exitEnabled requires proxy.exit to be requested")
 	}
 	if cfg.SOCKS5Enabled == nil {
 		enabled := cfg.ClientEnabled
@@ -252,6 +268,20 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	}
 	cfg.Routing = engine.Config()
 	return cfg, nil
+}
+
+func normalizeRequestedCapabilities(values []string) []string {
+	out := make([]string, 0, 2)
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != protocol.CapabilityProxyClient && value != protocol.CapabilityProxyExit {
+			continue
+		}
+		if !contains(out, value) {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func validIdentityID(value string) bool {
@@ -778,6 +808,13 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 
 	transportCaps := []string{
 		"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL,
+		protocol.CapabilityRuntimeState,
+	}
+	if c.cfg.ClientEnabled {
+		transportCaps = append(transportCaps, protocol.CapabilityProxyClientActive)
+	}
+	if *c.cfg.ExitEnabled {
+		transportCaps = append(transportCaps, protocol.CapabilityProxyExitActive)
 	}
 	if *c.cfg.ProxyP2PEnabled && (*c.cfg.ExitEnabled || c.cfg.ClientEnabled) {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
@@ -851,8 +888,10 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		return err
 	}
 
-	exitApproved := *c.cfg.ExitEnabled && contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
-	clientApproved := c.cfg.ClientEnabled && contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyClient)
+	exitApproved := contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
+	clientApproved := contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyClient)
+	exitRuntimeApproved := *c.cfg.ExitEnabled && exitApproved
+	clientRuntimeApproved := c.cfg.ClientEnabled && clientApproved
 	c.mu.RLock()
 	configuredExit := c.cfg.DefaultExitID
 	c.mu.RUnlock()
@@ -887,13 +926,13 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	c.status.LastError = ""
 	powerConstrained := c.powerConstrained
 	c.mu.Unlock()
-	c.clientApproved.Store(clientApproved)
+	c.clientApproved.Store(clientRuntimeApproved)
 	if accepted.ProxyExits != nil {
 		c.proxyDialer.SetDefaultExitID(selectedExit)
 	}
 
 	var proxyP2PManager *proxyp2p.Manager
-	if *c.cfg.ProxyP2PEnabled && (exitApproved || clientApproved) && contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) {
+	if *c.cfg.ProxyP2PEnabled && (exitRuntimeApproved || clientRuntimeApproved) && contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) {
 		lease := time.Duration(accepted.P2PLeaseSec) * time.Second
 		if lease <= 0 {
 			lease = 60 * time.Second
@@ -925,7 +964,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		}
 		c.mu.Unlock()
 		selected := strings.TrimSpace(c.proxyDialer.GetDefaultExitID())
-		if clientApproved && selected != "" && selected != protocol.ServerExitDeviceID {
+		if clientRuntimeApproved && selected != "" && selected != protocol.ServerExitDeviceID {
 			proxyP2PManager.EnsureClient(selected)
 		}
 		defer func() {
@@ -944,13 +983,13 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		defer workers.Done()
 		c.heartbeatLoop(ctx, ctrl, sess, accepted.HeartbeatSec)
 	}()
-	if exitApproved || proxyP2PManager != nil {
+	if exitRuntimeApproved || proxyP2PManager != nil {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			c.acceptIncomingStreams(ctx, sess, accepted.MaxConnections, exitApproved, proxyP2PManager, &workers)
+			c.acceptIncomingStreams(ctx, sess, accepted.MaxConnections, exitRuntimeApproved, proxyP2PManager, &workers)
 		}()
-		if exitApproved && proxyP2PManager != nil {
+		if exitRuntimeApproved && proxyP2PManager != nil {
 			workers.Add(1)
 			go func() {
 				defer workers.Done()
@@ -970,14 +1009,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 }
 
 func (c *Client) requestedCapabilities() []string {
-	capabilities := make([]string, 0, 2)
-	if c.cfg.ClientEnabled {
-		capabilities = append(capabilities, protocol.CapabilityProxyClient)
-	}
-	if *c.cfg.ExitEnabled {
-		capabilities = append(capabilities, protocol.CapabilityProxyExit)
-	}
-	return capabilities
+	return append([]string(nil), c.cfg.RequestedCapabilities...)
 }
 
 func cloneProxyExits(exits []protocol.ProxyExit) []protocol.ProxyExit {

@@ -26,6 +26,7 @@ class RelayExitService : Service() {
         const val ACTION_START = "com.relayproxy.android.START"
         const val ACTION_STOP = "com.relayproxy.android.STOP"
         const val ACTION_RECONFIGURE = "com.relayproxy.android.RECONFIGURE"
+        const val ACTION_CONNECT = "com.relayproxy.android.CONNECT"
         private const val CHANNEL_ID = "relayproxy_exit"
         private const val NOTIFICATION_ID = 1001
 
@@ -142,6 +143,16 @@ class RelayExitService : Service() {
                     stopRelay(startId)
                 }
             }
+            ACTION_CONNECT -> {
+                if (store.hasConnectionConfig()) {
+                    if (serviceStartedAtElapsed == 0L) {
+                        serviceStartedAtElapsed = SystemClock.elapsedRealtime()
+                    }
+                    if (core == null && networkBinder == null) startRelay() else reconfigureRelay()
+                } else {
+                    stopRelay(startId)
+                }
+            }
             else -> {
                 if (shouldRunCore(store)) {
                     if (serviceStartedAtElapsed == 0L) {
@@ -180,8 +191,7 @@ class RelayExitService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     private fun shouldRunCore(store: ConfigStore): Boolean {
-        val config = store.load()
-        return store.isDesiredRunning() || store.isVpnDesiredRunning() || config.clientEnabled
+        return store.hasConnectionConfig()
     }
 
     private fun startRelay() {

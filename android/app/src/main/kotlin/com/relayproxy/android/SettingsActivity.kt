@@ -440,9 +440,15 @@ class SettingsActivity : Activity() {
         config: ExitConfig,
         coreWasDesired: Boolean,
     ) {
-        if (coreWasDesired || store.isDesiredRunning() || store.isVpnDesiredRunning() || config.clientEnabled) {
+        if (store.hasConnectionConfig(config)) {
             val relay = Intent(this, RelayExitService::class.java)
-                .setAction(RelayExitService.ACTION_RECONFIGURE)
+                .setAction(
+                    if (coreWasDesired || store.isDesiredRunning() || store.isVpnDesiredRunning() || config.clientEnabled) {
+                        RelayExitService.ACTION_RECONFIGURE
+                    } else {
+                        RelayExitService.ACTION_CONNECT
+                    }
+                )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay)
             else startService(relay)
         }

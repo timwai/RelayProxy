@@ -33,6 +33,7 @@
 | P1 | Android 首次只批准出口或代理后，启动另一项只刷新声明能力，不会重新进入待审批，导致第二项无法批准 | 已审批设备把“本次声明 − 历史批准”写为增量 pending；审批合并能力并原子失效旧会话；仓储和 API 测试覆盖仅新增能力、保留原能力、拒绝不撤销设备和会话刷新 |
 | P1 | Android 14+ 在 VPN 尚未建立时以 `systemExempted` 类型启动前台服务，设备不满足系统豁免条件时会直接抛出异常 | VPN 前台服务改为无运行时前置条件的 `specialUse` 并声明具体用途；Service 和 Activity 两层捕获启动异常并展示错误；Lint、单测和 APK 构建通过 |
 | P1 | Android 按应用归属补丁从 Hev 用户态协程栈直接进入 ART JNI，首个 TCP/UDP 流量可能触发 Java 无法捕获的 native 进程退出；native 状态轮询还会与停止并发 | UID 查询改由独立的 ART daemon pthread 执行，Hev 线程只通过条件变量同步请求；全部 TProxy JNI 调用收敛到 VPN 单线程执行器；双 ABI native 编译和 APK 构建通过 |
+| P1 | Android 仅在启动出口或 VPN 后连接服务端，导致设备审批和出口列表都晚于配置时机；若直接常驻原数据会话，未启动的设备又会被误报为在线出口 | 保存有效连接配置、打开客户端或设备重启后即建立控制连接，预先申报 Android 支持的设备能力并同步出口；握手增加签名覆盖的运行态标记，服务端仅把实际启动的数据能力加入在线出口索引 |
 | P2 | 首次设备申请缺少身份范围，身份用户可能看到或审批其他身份的申请 | enrollment 保存 `identity_id`，列表、批准、拒绝全部按登录身份过滤 |
 | P2 | 身份状态变化和密码重置后已有 Web/设备会话仍可能继续使用旧权限 | 密码重置撤销该身份 Web 会话；身份禁用同步账号状态并失效该身份设备会话 |
 | P2 | 移动目标设备到新身份时，旧跨身份授权可能跨越所有权边界 | 身份变更事务内删除该目标设备授权并记录审计，随后清理受影响的 Relay、P2P 和 RDP 路径 |
@@ -48,7 +49,7 @@
 | `git diff --check` | 通过 |
 | Gradle `:app:testDebugUnitTest :app:lintDebug :app:assembleDebug` | 通过；3 个原生库通过 16 KB ELF 对齐检查 |
 
-本轮补充执行完整 Release 构建并使用本机 debug keystore 签名。ARM64 APK 位于 `dist/android/RelayProxy-Android-arm64-release.apk`，SHA-256 为 `73a19db3bb2c01ae271e028f765e1688775bc80e45d05a61d9dba30bacb25c05`；ARM32 APK 位于 `dist/android/RelayProxy-Android-arm32-release.apk`，SHA-256 为 `01cd459e4b41fbf9d383810037e7ead456ad915e5fc8e95eef3bce61b45f9190`。两个 APK 均通过 v2/v3 签名校验，全部原生库通过 16 KB ELF 对齐检查。构建中的 Kotlin 提示来自 Android 系统栏兼容 API 已弃用，不影响结果。
+本轮补充执行完整 Release 构建并使用本机 debug keystore 签名。ARM64 APK 位于 `dist/android/RelayProxy-Android-arm64-release.apk`，SHA-256 为 `a766cbea85217707ac3babe6190808b5bed9d27845be0b5ba3dcaad37c288964`；ARM32 APK 位于 `dist/android/RelayProxy-Android-arm32-release.apk`，SHA-256 为 `cfb072389a513e820d4a76ce1f47679e5002267c42ffa7a0ff93e761e037293d`。两个 APK 均通过 v2/v3 签名校验，全部原生库通过 16 KB ELF 对齐检查。构建中的 Kotlin 提示来自 Android 系统栏兼容 API 已弃用，不影响结果。
 
 ## 尚需设备验收的边界
 

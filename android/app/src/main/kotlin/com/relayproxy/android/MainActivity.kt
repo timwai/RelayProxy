@@ -450,10 +450,20 @@ class MainActivity : Activity() {
 
     private fun startVpnService() {
         val intent = Intent(this, RelayVpnService::class.java).setAction(RelayVpnService.ACTION_START)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
+        val error = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+        }.exceptionOrNull()
+        if (error != null) {
+            ConfigStore(this).setVpnDesiredRunning(false)
+            android.widget.Toast.makeText(
+                this,
+                "VPN 启动失败：${error.message ?: error.javaClass.simpleName}",
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
         }
     }
 

@@ -1056,7 +1056,9 @@ func (r *Router) handleApproveEnrollment(w http.ResponseWriter, req *http.Reques
 		}
 	}
 	userID, _ := req.Context().Value(userContextKey).(string)
-	device, err := r.db.ApproveEnrollmentForIdentity(req.PathValue("id"), userID, requestIdentityScope(req), body.Capabilities)
+	requestID := req.PathValue("id")
+	identityScope := requestIdentityScope(req)
+	existingDeviceID, err := r.db.PendingEnrollmentDeviceIDForIdentity(requestID, identityScope)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "pending enrollment not found")
@@ -1064,6 +1066,28 @@ func (r *Router) handleApproveEnrollment(w http.ResponseWriter, req *http.Reques
 			writeError(w, http.StatusBadRequest, err.Error())
 		}
 		return
+	}
+	var device *repository.Device
+	approve := func() error {
+		var approveErr error
+		device, approveErr = r.db.ApproveEnrollmentForIdentity(requestID, userID, identityScope, body.Capabilities)
+		return approveErr
+	}
+	if existingDeviceID == "" {
+		err = approve()
+	} else {
+		err = r.sessions.ChangeDeviceAuthorization(existingDeviceID, true, approve)
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "pending enrollment not found")
+		} else {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	if existingDeviceID != "" && r.onDeviceAuthorizationChanged != nil {
+		r.onDeviceAuthorizationChanged(existingDeviceID)
 	}
 	writeJSON(w, http.StatusOK, device)
 }

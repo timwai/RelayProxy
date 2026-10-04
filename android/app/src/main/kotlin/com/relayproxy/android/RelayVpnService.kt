@@ -153,7 +153,16 @@ class RelayVpnService : VpnService() {
         startInProgress = true
         activeGeneration = -1L
         handler.removeCallbacks(nativeMonitor)
-        startForeground(NOTIFICATION_ID, buildNotification("正在启动 VPN"))
+        val foregroundError = runCatching {
+            startForeground(NOTIFICATION_ID, buildNotification("正在启动 VPN"))
+        }.exceptionOrNull()
+        if (foregroundError != null) {
+            startInProgress = false
+            ConfigStore(this).setVpnDesiredRunning(false)
+            setStatus("ERROR", foregroundError.message ?: foregroundError.javaClass.simpleName)
+            stopSelf()
+            return
+        }
         setStatus("STARTING", "准备本机 SOCKS5 代理")
         executeVpnTask {
             stopNativeTunnel()

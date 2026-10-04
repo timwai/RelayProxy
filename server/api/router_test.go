@@ -139,6 +139,61 @@ func TestEnrollmentApprovalAPI(t *testing.T) {
 	}
 }
 
+func TestIncrementalEnrollmentApprovalInvalidatesExistingSession(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	adminUser, err := router.db.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := router.db.CreateIdentity("Android", adminUser.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := router.db.ResolveIdentity(identity.ShortID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := repository.DeviceIdentityObservation{
+		Fingerprint: "incremental-api-fingerprint", InstallationID: "incremental-api-install", PublicKey: []byte("incremental-api-key"),
+		DeviceName: "Android", Platform: "android", Arch: "arm64", RequestedCapabilities: []string{"proxy.exit"},
+	}
+	pending, err := router.db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := router.db.ApproveEnrollmentForIdentity(pending.RequestID, adminUser.ID, identity.ID, []string{"proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation.RequestedCapabilities = []string{"proxy.client", "proxy.exit"}
+	incremental, err := router.db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router.sessions.Register(&session.DeviceSession{DeviceID: device.ID})
+
+	approveReq := httptest.NewRequest(http.MethodPost, "/api/v1/enrollments/"+incremental.RequestID+"/approve",
+		bytes.NewReader([]byte(`{"capabilities":["proxy.client"]}`)))
+	approveReq.AddCookie(adminCookie)
+	approveRec := httptest.NewRecorder()
+	router.ServeHTTP(approveRec, approveReq)
+	if approveRec.Code != http.StatusOK {
+		t.Fatalf("incremental approval failed: %d %s", approveRec.Code, approveRec.Body.String())
+	}
+	var updated repository.Device
+	if err := json.Unmarshal(approveRec.Body.Bytes(), &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != device.ID || len(updated.ApprovedCapabilities) != 2 {
+		t.Fatalf("incremental approval did not merge capabilities: %+v", updated)
+	}
+	if _, online := router.sessions.Get(device.ID); online {
+		t.Fatal("incremental approval left the stale session registered")
+	}
+}
+
 func TestDeleteDeviceAPI(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()

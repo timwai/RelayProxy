@@ -732,16 +732,32 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 				return nil, err
 			}
 			effective := filterApprovedCapabilities(approved, requested)
-			if len(effective) == 0 {
-				return nil, errors.New("device does not request any approved capability")
-			}
 			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, effective, now); err != nil {
 				return nil, err
+			}
+			pending := capabilitiesExcept(requested, approved)
+			requestID := ""
+			requestState := ""
+			if len(pending) > 0 {
+				requestID, requestState, err = upsertIncrementalEnrollment(tx, access.IdentityID, observation, pending, now)
+				if err != nil {
+					return nil, err
+				}
 			}
 			if err := tx.Commit(); err != nil {
 				return nil, err
 			}
-			return db.identityDeviceAuthorization(existingDeviceID.String, access, effective)
+			if len(effective) == 0 {
+				return &DeviceAuthorization{
+					State: requestState, RequestID: requestID, DeviceID: existingDeviceID.String,
+					IdentityID: access.IdentityID, IdentityName: access.IdentityName,
+				}, nil
+			}
+			authorization, err := db.identityDeviceAuthorization(existingDeviceID.String, access, effective)
+			if authorization != nil && requestState == EnrollmentPending {
+				authorization.RequestID = requestID
+			}
+			return authorization, err
 		case EnrollmentRejected, EnrollmentRevoked:
 			return &DeviceAuthorization{State: identityState, DeviceID: existingDeviceID.String}, nil
 		case EnrollmentPending:
@@ -790,6 +806,79 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 		return nil, err
 	}
 	return &DeviceAuthorization{State: EnrollmentPending, RequestID: requestID, IdentityID: access.IdentityID, IdentityName: access.IdentityName}, nil
+}
+
+func capabilitiesExcept(requested, approved []string) []string {
+	approvedSet := make(map[string]bool, len(approved))
+	for _, capability := range normalizeCapabilities(approved) {
+		approvedSet[capability] = true
+	}
+	result := make([]string, 0, len(requested))
+	for _, capability := range normalizeCapabilities(requested) {
+		if !approvedSet[capability] {
+			result = append(result, capability)
+		}
+	}
+	return result
+}
+
+func upsertIncrementalEnrollment(tx *sql.Tx, identityID string, observation DeviceIdentityObservation, capabilities []string, now time.Time) (string, string, error) {
+	requestedRaw, err := encodeCapabilities(capabilities)
+	if err != nil {
+		return "", "", err
+	}
+	var existingID, existingState, existingRequestedRaw string
+	err = tx.QueryRow(`SELECT id, state, requested_capabilities
+		FROM device_enrollment_requests WHERE fingerprint = ?`, observation.Fingerprint).
+		Scan(&existingID, &existingState, &existingRequestedRaw)
+	if err == nil && existingState == EnrollmentRejected {
+		existingRequested, decodeErr := decodeCapabilities(existingRequestedRaw)
+		if decodeErr != nil {
+			return "", "", decodeErr
+		}
+		if len(capabilitiesExcept(existingRequested, capabilities)) == 0 && len(capabilitiesExcept(capabilities, existingRequested)) == 0 {
+			if _, err := tx.Exec(`UPDATE device_enrollment_requests SET
+				device_name = ?, platform = ?, arch = ?, client_version = ?, last_seen_at = ?
+				WHERE id = ?`, fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
+				observation.ClientVersion, now, existingID); err != nil {
+				return "", "", err
+			}
+			return existingID, EnrollmentRejected, nil
+		}
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", "", err
+	}
+	requestID := "enr_" + uuid.NewString()
+	if _, err := tx.Exec(`INSERT INTO device_enrollment_requests
+		(id, identity_id, fingerprint, installation_id, public_key, device_name, platform, arch, client_version,
+		 requested_capabilities, state, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(fingerprint) DO UPDATE SET
+			identity_id = excluded.identity_id,
+			device_name = excluded.device_name,
+			platform = excluded.platform,
+			arch = excluded.arch,
+			client_version = excluded.client_version,
+			requested_capabilities = excluded.requested_capabilities,
+			state = excluded.state,
+			first_seen_at = CASE
+				WHEN device_enrollment_requests.state = 'pending' THEN device_enrollment_requests.first_seen_at
+				ELSE excluded.first_seen_at
+			END,
+			last_seen_at = excluded.last_seen_at,
+			reviewed_at = NULL,
+			reviewed_by = NULL,
+			rejection_reason = NULL`,
+		requestID, identityID, observation.Fingerprint, observation.InstallationID, observation.PublicKey,
+		fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch, observation.ClientVersion,
+		requestedRaw, EnrollmentPending, now, now); err != nil {
+		return "", "", err
+	}
+	if err := tx.QueryRow(`SELECT id FROM device_enrollment_requests WHERE fingerprint = ?`, observation.Fingerprint).Scan(&requestID); err != nil {
+		return "", "", err
+	}
+	return requestID, EnrollmentPending, nil
 }
 
 var ErrDeviceIdentityConflict = errors.New("device is already bound to another identity")

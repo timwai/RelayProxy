@@ -283,6 +283,23 @@ func (db *DB) ApproveEnrollmentForIdentity(requestID, reviewerID, allowedIdentit
 	if len(approved) == 0 {
 		return nil, errors.New("at least one requested capability must be approved")
 	}
+	now := time.Now().UTC()
+
+	var existingDeviceID sql.NullString
+	var identityState string
+	if err := tx.QueryRow(`SELECT device_id, status FROM device_identities WHERE fingerprint = ?`, request.Fingerprint).
+		Scan(&existingDeviceID, &identityState); err != nil {
+		return nil, err
+	}
+	if identityState == EnrollmentApproved {
+		if !existingDeviceID.Valid || existingDeviceID.String == "" {
+			return nil, errors.New("approved identity has no device")
+		}
+		return approveAdditionalCapabilities(tx, requestID, reviewerID, existingDeviceID.String, requested, approved, now)
+	}
+	if identityState != EnrollmentPending {
+		return nil, fmt.Errorf("device identity is %s, not pending", identityState)
+	}
 	if err := validateCapabilityDependencies(approved); err != nil {
 		return nil, err
 	}
@@ -290,7 +307,6 @@ func (db *DB) ApproveEnrollmentForIdentity(requestID, reviewerID, allowedIdentit
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
 	ownerUserID := reviewerID
 	if err := tx.QueryRow(`SELECT user_id FROM identity_memberships WHERE identity_id = ?
 		ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, created_at LIMIT 1`, request.IdentityID).Scan(&ownerUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -344,6 +360,101 @@ func (db *DB) ApproveEnrollmentForIdentity(requestID, reviewerID, allowedIdentit
 	return device, nil
 }
 
+func approveAdditionalCapabilities(tx *sql.Tx, requestID, reviewerID, deviceID string, requested, selected []string, now time.Time) (*Device, error) {
+	var device Device
+	var owner sql.NullString
+	var lastSeen sql.NullTime
+	var requestedRaw, approvedRaw string
+	if err := tx.QueryRow(`SELECT id, owner_user_id, name, public_key_fingerprint, installation_id,
+		platform, arch, client_version, approval_state, requested_capabilities,
+		approved_capabilities, last_seen_at, created_at, updated_at
+		FROM devices WHERE id = ?`, deviceID).Scan(
+		&device.ID, &owner, &device.Name, &device.Fingerprint, &device.InstallationID,
+		&device.Platform, &device.Arch, &device.ClientVersion, &device.ApprovalState,
+		&requestedRaw, &approvedRaw, &lastSeen, &device.CreatedAt, &device.UpdatedAt); err != nil {
+		return nil, err
+	}
+	if device.ApprovalState != EnrollmentApproved {
+		return nil, fmt.Errorf("device is %s, not approved", device.ApprovalState)
+	}
+	currentRequested, err := decodeCapabilities(requestedRaw)
+	if err != nil {
+		return nil, err
+	}
+	previous, err := decodeCapabilities(approvedRaw)
+	if err != nil {
+		return nil, err
+	}
+	merged := normalizeCapabilities(append(append([]string(nil), previous...), selected...))
+	if err := validateCapabilityDependencies(merged); err != nil {
+		return nil, err
+	}
+	mergedRaw, err := encodeCapabilities(merged)
+	if err != nil {
+		return nil, err
+	}
+	result, err := tx.Exec(`UPDATE devices SET approved_capabilities = ?, updated_at = ?
+		WHERE id = ? AND approval_state = ?`, mergedRaw, now, deviceID, EnrollmentApproved)
+	if err != nil {
+		return nil, err
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		if err != nil {
+			return nil, err
+		}
+		return nil, sql.ErrNoRows
+	}
+	if _, err := tx.Exec(`UPDATE device_enrollment_requests
+		SET state = ?, reviewed_at = ?, reviewed_by = ?, rejection_reason = NULL
+		WHERE id = ? AND state = ?`, EnrollmentApproved, now, reviewerID, requestID, EnrollmentPending); err != nil {
+		return nil, err
+	}
+	effective := filterApprovedCapabilities(merged, currentRequested)
+	if err := replaceDeviceRuntimeGrants(tx, deviceID, effective, now); err != nil {
+		return nil, err
+	}
+	if err := syncDeviceRDPService(tx, deviceID, device.Name, effective, now); err != nil {
+		return nil, err
+	}
+	if err := insertAuthorizationAudit(tx, "device.capabilities.approve", reviewerID, "device", deviceID,
+		map[string]any{"enrollmentId": requestID, "requested": requested, "approved": selected, "before": previous, "after": merged}, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	device.OwnerUserID = owner.String
+	device.RequestedCapabilities = currentRequested
+	device.ApprovedCapabilities = merged
+	device.DeviceMode = modeForCapabilities(merged)
+	device.Enabled = true
+	device.UpdatedAt = now
+	if lastSeen.Valid {
+		value := lastSeen.Time
+		device.LastSeenAt = &value
+	}
+	return &device, nil
+}
+
+// PendingEnrollmentDeviceIDForIdentity returns the already-approved device
+// associated with an incremental capability request. Initial enrollment has no
+// device ID yet and therefore needs no active-session invalidation.
+func (db *DB) PendingEnrollmentDeviceIDForIdentity(requestID, allowedIdentityID string) (string, error) {
+	var deviceID sql.NullString
+	var identityID string
+	err := db.QueryRow(`SELECT identity.device_id, COALESCE(request.identity_id, '')
+		FROM device_enrollment_requests request
+		JOIN device_identities identity ON identity.fingerprint = request.fingerprint
+		WHERE request.id = ? AND request.state = ?`, requestID, EnrollmentPending).Scan(&deviceID, &identityID)
+	if err != nil {
+		return "", err
+	}
+	if allowedIdentityID != "" && identityID != allowedIdentityID {
+		return "", sql.ErrNoRows
+	}
+	return deviceID.String, nil
+}
+
 func (db *DB) RejectEnrollment(requestID, reviewerID, reason string) error {
 	return db.RejectEnrollmentForIdentity(requestID, reviewerID, "", reason)
 }
@@ -359,7 +470,13 @@ func (db *DB) reviewEnrollment(requestID, reviewerID, allowedIdentityID, reason,
 	}
 	defer tx.Rollback()
 	var fingerprint, identityID string
-	if err := tx.QueryRow(`SELECT fingerprint, COALESCE(identity_id, '') FROM device_enrollment_requests WHERE id = ? AND state = 'pending'`, requestID).Scan(&fingerprint, &identityID); err != nil {
+	var deviceID sql.NullString
+	var identityState string
+	if err := tx.QueryRow(`SELECT request.fingerprint, COALESCE(request.identity_id, ''), identity.device_id, identity.status
+		FROM device_enrollment_requests request
+		JOIN device_identities identity ON identity.fingerprint = request.fingerprint
+		WHERE request.id = ? AND request.state = 'pending'`, requestID).
+		Scan(&fingerprint, &identityID, &deviceID, &identityState); err != nil {
 		return err
 	}
 	if allowedIdentityID != "" && identityID != allowedIdentityID {
@@ -370,11 +487,17 @@ func (db *DB) reviewEnrollment(requestID, reviewerID, allowedIdentityID, reason,
 		state, now, reviewerID, reason, requestID); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE device_identities SET status = ?, updated_at = ? WHERE fingerprint = ?`, state, now, fingerprint); err != nil {
-		return err
+	if identityState != EnrollmentApproved || !deviceID.Valid {
+		if _, err := tx.Exec(`UPDATE device_identities SET status = ?, updated_at = ? WHERE fingerprint = ?`, state, now, fingerprint); err != nil {
+			return err
+		}
 	}
-	if err := insertAuthorizationAudit(tx, "device.reject", reviewerID, "enrollment", requestID,
-		map[string]any{"fingerprint": fingerprint, "reason": reason}, now); err != nil {
+	action, targetType, targetID := "device.reject", "enrollment", requestID
+	if identityState == EnrollmentApproved && deviceID.Valid {
+		action, targetType, targetID = "device.capabilities.reject", "device", deviceID.String
+	}
+	if err := insertAuthorizationAudit(tx, action, reviewerID, targetType, targetID,
+		map[string]any{"enrollmentId": requestID, "fingerprint": fingerprint, "reason": reason}, now); err != nil {
 		return err
 	}
 	return tx.Commit()

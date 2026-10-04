@@ -135,3 +135,138 @@ func TestDeviceCapabilitiesControlAdmissionAndFeatures(t *testing.T) {
 		t.Fatalf("reconnect self-expanded device capabilities: %+v", reconnected.ApprovedCapabilities)
 	}
 }
+
+func TestApprovedIdentityDeviceCanRequestAndApproveAdditionalCapabilities(t *testing.T) {
+	db := openIdentityTestDB(t)
+	identity, err := db.CreateIdentityWithLogin("incremental-owner", "Incremental", "admin", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := db.ResolveIdentity(identity.ShortID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerID, err := db.GetIdentityLoginUserID(identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "incremental-fp", InstallationID: "incremental-install", PublicKey: []byte("incremental-public"),
+		DeviceName: "Android", Platform: "android", Arch: "arm64",
+		RequestedCapabilities: []string{"proxy.exit"},
+	}
+	pending, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := db.ApproveEnrollmentForIdentity(pending.RequestID, reviewerID, identity.ID, []string{"proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observation.RequestedCapabilities = []string{"proxy.client"}
+	waiting, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waiting.State != EnrollmentPending || waiting.DeviceID != device.ID || waiting.RequestID == "" {
+		t.Fatalf("new capability without a current grant was not queued: %+v", waiting)
+	}
+
+	observation.RequestedCapabilities = []string{"proxy.client", "proxy.exit"}
+	connected, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connected.State != EnrollmentApproved || connected.DeviceID != device.ID || connected.RequestID != waiting.RequestID ||
+		len(connected.ApprovedCapabilities) != 1 || connected.ApprovedCapabilities[0] != "proxy.exit" {
+		t.Fatalf("existing capability was not preserved while requesting another: %+v", connected)
+	}
+	requests, err := db.ListEnrollmentRequestsForIdentity(EnrollmentPending, identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 1 || requests[0].ID != connected.RequestID ||
+		len(requests[0].RequestedCapabilities) != 1 || requests[0].RequestedCapabilities[0] != "proxy.client" {
+		t.Fatalf("incremental request contains the wrong capabilities: %+v", requests)
+	}
+	requestDeviceID, err := db.PendingEnrollmentDeviceIDForIdentity(connected.RequestID, identity.ID)
+	if err != nil || requestDeviceID != device.ID {
+		t.Fatalf("incremental request device = %q, %v", requestDeviceID, err)
+	}
+	updated, err := db.ApproveEnrollmentForIdentity(connected.RequestID, reviewerID, identity.ID, []string{"proxy.client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != device.ID || len(updated.ApprovedCapabilities) != 2 {
+		t.Fatalf("incremental approval replaced the device or its previous capability: %+v", updated)
+	}
+	var deviceCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM devices WHERE public_key_fingerprint = ?`, observation.Fingerprint).Scan(&deviceCount); err != nil {
+		t.Fatal(err)
+	}
+	if deviceCount != 1 {
+		t.Fatalf("incremental approval created %d devices", deviceCount)
+	}
+	reconnected, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconnected.State != EnrollmentApproved || len(reconnected.ApprovedCapabilities) != 2 || reconnected.RequestID != "" {
+		t.Fatalf("approved capabilities were not effective on reconnect: %+v", reconnected)
+	}
+}
+
+func TestRejectingAdditionalCapabilityKeepsDeviceApproved(t *testing.T) {
+	db := openIdentityTestDB(t)
+	identity, err := db.CreateIdentityWithLogin("reject-owner", "Reject", "admin", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := db.ResolveIdentity(identity.ShortID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerID, err := db.GetIdentityLoginUserID(identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "reject-fp", InstallationID: "reject-install", PublicKey: []byte("reject-public"),
+		RequestedCapabilities: []string{"proxy.exit"},
+	}
+	pending, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := db.ApproveEnrollmentForIdentity(pending.RequestID, reviewerID, identity.ID, []string{"proxy.exit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation.RequestedCapabilities = []string{"proxy.client", "proxy.exit"}
+	connected, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.RejectEnrollmentForIdentity(connected.RequestID, reviewerID, identity.ID, "not allowed"); err != nil {
+		t.Fatal(err)
+	}
+	if !db.IsIdentityDeviceAuthorized(observation.Fingerprint, device.ID, identity.ID) {
+		t.Fatal("rejecting an additional capability revoked the approved device")
+	}
+	denied, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil || denied.State != EnrollmentApproved || denied.RequestID != "" ||
+		len(denied.ApprovedCapabilities) != 1 || denied.ApprovedCapabilities[0] != "proxy.exit" {
+		t.Fatalf("rejected capability was immediately reopened or removed the existing grant: %+v err=%v", denied, err)
+	}
+	observation.RequestedCapabilities = []string{"proxy.client"}
+	denied, err = db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil || denied.State != EnrollmentRejected {
+		t.Fatalf("a rejected standalone capability did not remain rejected: %+v err=%v", denied, err)
+	}
+	observation.RequestedCapabilities = []string{"proxy.exit"}
+	reconnected, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil || reconnected.State != EnrollmentApproved {
+		t.Fatalf("device could not reconnect with its original capability: %+v err=%v", reconnected, err)
+	}
+}

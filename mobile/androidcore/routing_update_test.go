@@ -63,7 +63,6 @@ func TestRoutingUpdateKeepsExistingTCPAndRejectsNewFlows(t *testing.T) {
 	}
 }
 
-
 func TestRoutingUpdatePreservesDisabledRulesOrderAndExitOverride(t *testing.T) {
 	c, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","routing":{"mode":"global_proxy"}}`, filepath.Join(t.TempDir(), "identity.json"))
 	if err != nil {

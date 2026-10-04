@@ -69,6 +69,11 @@ type RDPIngressSettings struct {
 	RateLimitPerMin int      `json:"rateLimitPerMinute"`
 }
 
+type P2PSettings struct {
+	PortStart int `json:"portStart"`
+	PortEnd   int `json:"portEnd"`
+}
+
 type ServerEditableConfig struct {
 	Admin       AdminSettings       `json:"admin"`
 	Tunnel      TunnelSettings      `json:"tunnel"`
@@ -76,6 +81,7 @@ type ServerEditableConfig struct {
 	RelayACL    RelayACLSettings    `json:"relayACL"`
 	ServerExit  ServerExitSettings  `json:"serverExit"`
 	RDPIngress  RDPIngressSettings  `json:"rdpIngress"`
+	P2P         P2PSettings         `json:"p2p"`
 }
 
 type CertificateInfo struct {
@@ -147,6 +153,7 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 		},
 		RDPIngress: RDPIngressSettings{ingressEnabled, c.RDP.Ingress.Listen, c.RDP.Ingress.PortStart,
 			c.RDP.Ingress.PortEnd, append([]string{}, c.RDP.Ingress.SourceCIDRs...), c.RDP.Ingress.RateLimitPerMin},
+		P2P: P2PSettings{PortStart: c.P2P.PortStart, PortEnd: c.P2P.PortEnd},
 	}
 }
 
@@ -191,6 +198,8 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 	target.RDP.Ingress.PortEnd = c.RDPIngress.PortEnd
 	target.RDP.Ingress.SourceCIDRs = cleanSettingLines(c.RDPIngress.SourceCIDRs)
 	target.RDP.Ingress.RateLimitPerMin = c.RDPIngress.RateLimitPerMin
+	target.P2P.PortStart = c.P2P.PortStart
+	target.P2P.PortEnd = c.P2P.PortEnd
 	return nil
 }
 

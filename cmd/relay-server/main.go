@@ -432,6 +432,8 @@ func main() {
 		P2PEnabled:              proxyP2PCoordinator != nil,
 		P2PRendezvousAddress:    p2pRendezvousAddress,
 		P2PLeaseSec:             p2pLeaseSec,
+		P2PPortStart:            cfg.P2P.PortStart,
+		P2PPortEnd:              cfg.P2P.PortEnd,
 	}, sessionMgr, router)
 
 	if err := gw.Start(); err != nil {

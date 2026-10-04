@@ -247,9 +247,6 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 		_, _ = rw.Write([]byte(webConfigJSON(w.bridge)))
 	})
 	mux.HandleFunc("PUT /api/config", w.saveConfig)
-	mux.HandleFunc("GET /api/credential", w.getCredential)
-	mux.HandleFunc("PUT /api/credential", w.setCredential)
-	mux.HandleFunc("DELETE /api/credential", w.clearCredential)
 	mux.HandleFunc("POST /api/reload", w.reloadConfig)
 	mux.HandleFunc("POST /api/select-exit", w.selectExit)
 	mux.HandleFunc("POST /api/autostart", w.setAutostart)
@@ -318,35 +315,6 @@ func (w *WebServer) saveConfig(rw http.ResponseWriter, r *http.Request) {
 	}
 	res, err := w.bridge.SaveConfig(in)
 	writeWebMutation(rw, res, err)
-}
-
-func (w *WebServer) getCredential(rw http.ResponseWriter, _ *http.Request) {
-	state, err := w.bridge.GetAccessKeyState()
-	writeWebMutation(rw, state, err)
-}
-
-func (w *WebServer) setCredential(rw http.ResponseWriter, r *http.Request) {
-	var in struct {
-		AccessKey string `json:"accessKey"`
-	}
-	if err := decodeWebJSON(rw, r, &in); err != nil {
-		return
-	}
-	state, err := w.bridge.SetAccessKey(in.AccessKey)
-	if err != nil {
-		writeWebError(rw, err)
-		return
-	}
-	writeWebJSON(rw, map[string]any{"ok": true, "state": state})
-}
-
-func (w *WebServer) clearCredential(rw http.ResponseWriter, _ *http.Request) {
-	state, err := w.bridge.ClearAccessKey()
-	if err != nil {
-		writeWebError(rw, err)
-		return
-	}
-	writeWebJSON(rw, map[string]any{"ok": true, "state": state})
 }
 
 func (w *WebServer) reloadConfig(rw http.ResponseWriter, _ *http.Request) {
@@ -464,7 +432,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Port    int    `json:"port"`
 	}
 	payload := struct {
-		ConfigPath, ServerAddress, DeviceName, Transport, DefaultExitID             string
+		ConfigPath, ServerAddress, DeviceName, IdentityID, Transport, DefaultExitID string
 		QUICPort, TCPPort, VerificationPopupTimeoutSec                              int
 		TLSEnabled, ExitEnabled, AllowInternet, AllowPrivate, AllowLoopback         bool
 		AccessMode, NetworkMode, Theme, Version                                     string
@@ -477,7 +445,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 	}{
 		ConfigPath: b.ConfigPath(), ServerAddress: cfg.Server.Address, QUICPort: cfg.Server.QUICPort,
 		TCPPort: cfg.Server.TCPPort, TLSEnabled: cfg.IsServerTLSEnabled(),
-		DeviceName: cfg.Device.Name, Transport: cfg.Transport.Mode,
+		DeviceName: cfg.Device.Name, IdentityID: cfg.Device.IdentityID, Transport: cfg.Transport.Mode,
 		SOCKS5:        proxyLeg{cfg.Proxy.SOCKS5.Enabled == nil || *cfg.Proxy.SOCKS5.Enabled, cfg.Proxy.SOCKS5.Listen, cfg.Proxy.SOCKS5.Port},
 		HTTP:          proxyLeg{cfg.Proxy.HTTP.Enabled == nil || *cfg.Proxy.HTTP.Enabled, cfg.Proxy.HTTP.Listen, cfg.Proxy.HTTP.Port},
 		DefaultExitID: cfg.Proxy.DefaultExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
@@ -514,7 +482,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 	data, _ := json.Marshal(map[string]any{
 		"configPath": payload.ConfigPath, "serverAddress": payload.ServerAddress, "quicPort": payload.QUICPort,
 		"tcpPort": payload.TCPPort, "tlsEnabled": payload.TLSEnabled,
-		"deviceName": payload.DeviceName, "transport": payload.Transport,
+		"deviceName": payload.DeviceName, "identityId": payload.IdentityID, "transport": payload.Transport,
 		"socks5": payload.SOCKS5, "http": payload.HTTP, "defaultExitId": payload.DefaultExitID,
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
@@ -559,9 +527,6 @@ const webBridgeJS = `(function () {
   window.goClearMessages = function () { return request('/api/messages', {method:'DELETE'}); };
   window.goGetConfig = function () { return request('/api/config'); };
   window.goSaveConfig = function (raw) { return request('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:raw}); };
-  window.goGetCredentialState = function () { return request('/api/credential'); };
-  window.goSetAccessKey = function (accessKey) { return json('/api/credential', 'PUT', {accessKey:accessKey}); };
-  window.goClearAccessKey = function () { return request('/api/credential', {method:'DELETE'}); };
   window.goReloadConfig = function () { return json('/api/reload', 'POST', {}); };
   window.goSelectExit = async function (exitId) { await json('/api/select-exit', 'POST', {exitId:exitId}); return 'ok'; };
   window.goSetAutostart = function (enabled) { return json('/api/autostart', 'POST', {enabled:enabled}); };

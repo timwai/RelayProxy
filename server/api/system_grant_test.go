@@ -20,9 +20,9 @@ func TestSystemIdentityGrantAdminAPILifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	refreshes := 0
-	router.onIdentityAuthorizationChanged = func(identityID, accessKeyID string) {
-		if identityID != identity.ID || accessKeyID != "" {
-			t.Fatalf("unexpected authorization refresh: identity=%s key=%s", identityID, accessKeyID)
+	router.onIdentityAuthorizationChanged = func(identityID string) {
+		if identityID != identity.ID {
+			t.Fatalf("unexpected authorization refresh: identity=%s", identityID)
 		}
 		refreshes++
 	}

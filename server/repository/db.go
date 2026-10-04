@@ -822,6 +822,7 @@ func (db *DB) DeleteMessages(channelID string) (int64, error) {
 // User model
 type User struct {
 	ID           string    `json:"id"`
+	IdentityID   string    `json:"identityId,omitempty"`
 	Username     string    `json:"username"`
 	PasswordHash string    `json:"-"`
 	DisplayName  string    `json:"displayName"`
@@ -869,9 +870,10 @@ func (db *DB) CreateUser(u *User) error {
 
 func (db *DB) GetUserByUsername(username string) (*User, error) {
 	u := &User{}
-	err := db.QueryRow(`SELECT id, username, password_hash, display_name, role, status, created_at, updated_at
-		FROM users WHERE username = ?`, username).Scan(
-		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	err := db.QueryRow(`SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.status,
+		u.created_at, u.updated_at, COALESCE((SELECT identity_id FROM identity_memberships WHERE user_id = u.id LIMIT 1), '')
+		FROM users u WHERE u.username = ?`, username).Scan(
+		&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt, &u.IdentityID)
 	if err != nil {
 		return nil, err
 	}
@@ -882,9 +884,10 @@ func (db *DB) GetUserByUsername(username string) (*User, error) {
 // Authorization must not depend on the role cached when the session was created.
 func (db *DB) GetUserByID(id string) (*User, error) {
 	u := &User{}
-	err := db.QueryRow(`SELECT id, username, display_name, role, status, created_at, updated_at
-		FROM users WHERE id = ?`, id).Scan(
-		&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt)
+	err := db.QueryRow(`SELECT u.id, u.username, u.display_name, u.role, u.status, u.created_at, u.updated_at,
+		COALESCE((SELECT identity_id FROM identity_memberships WHERE user_id = u.id LIMIT 1), '')
+		FROM users u WHERE u.id = ?`, id).Scan(
+		&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.Status, &u.CreatedAt, &u.UpdatedAt, &u.IdentityID)
 	if err != nil {
 		return nil, err
 	}

@@ -84,7 +84,7 @@ func authenticateTestDevice(t *testing.T, control tunnel.TunnelStream, identity 
 		t.Fatal(err)
 	}
 	hello := protocol.DeviceHello{
-		ProtocolVersion: protocol.DeviceProtocolVersion, InstallationID: identity.InstallationID,
+		ProtocolVersion: protocol.LegacyDeviceProtocolVersion, InstallationID: identity.InstallationID,
 		PublicKey: identity.PublicKey, ClientNonce: nonce, DeviceName: "test",
 		RequestedCapabilities: []string{protocol.CapabilityProxyClient},
 	}
@@ -154,7 +154,7 @@ func TestInvalidDeviceProofCannotRegister(t *testing.T) {
 	writeControlHeader(t, control)
 	nonce := make([]byte, 32)
 	_, _ = rand.Read(nonce)
-	hello := protocol.DeviceHello{ProtocolVersion: protocol.DeviceProtocolVersion, InstallationID: identity.InstallationID,
+	hello := protocol.DeviceHello{ProtocolVersion: protocol.LegacyDeviceProtocolVersion, InstallationID: identity.InstallationID,
 		PublicKey: identity.PublicKey, ClientNonce: nonce, RequestedCapabilities: []string{protocol.CapabilityProxyClient}}
 	if err := protocol.WriteJSON(control, hello); err != nil {
 		t.Fatal(err)
@@ -200,7 +200,7 @@ func TestIdentityRequiredRejectsLegacyProtocolBeforeChallenge(t *testing.T) {
 	if err := protocol.ReadJSON(control, &rejected); err != nil {
 		t.Fatal(err)
 	}
-	if rejected.Success || rejected.ErrorCode != protocol.ErrCodeAccessKeyInvalid || len(gateway.sessions.List()) != 0 {
+	if rejected.Success || rejected.ErrorCode != protocol.ErrCodeIdentityInvalid || len(gateway.sessions.List()) != 0 {
 		t.Fatalf("legacy protocol was not rejected for identity-only server: %+v", rejected)
 	}
 }

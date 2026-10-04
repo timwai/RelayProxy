@@ -11,12 +11,10 @@ const (
 	// enrollment protocol. Current production servers reject it; the constant
 	// remains so upgraded clients receive a framed migration error.
 	LegacyDeviceProtocolVersion = 3
-	// IdentityDeviceProtocolVersion authenticates a server-issued identity
-	// access key in addition to the installation Ed25519 identity.
-	IdentityDeviceProtocolVersion = 4
-	// DeviceProtocolVersion remains the value sent by a client without an access
-	// key so the server can return a precise identity-migration error.
-	DeviceProtocolVersion = LegacyDeviceProtocolVersion
+	// IdentityDeviceProtocolVersion binds the public identity ID to the
+	// installation Ed25519 proof. Device admission remains server-approved.
+	IdentityDeviceProtocolVersion = 5
+	DeviceProtocolVersion         = IdentityDeviceProtocolVersion
 
 	CapabilityProxyClient = "proxy.client"
 	CapabilityProxyExit   = "proxy.exit"
@@ -28,7 +26,7 @@ const (
 	ErrCodeDeviceRejected   = "DEVICE_REJECTED"
 	ErrCodeDeviceRevoked    = "DEVICE_REVOKED"
 	ErrCodeProtocolMismatch = "PROTOCOL_MISMATCH"
-	ErrCodeAccessKeyInvalid = "ACCESS_KEY_INVALID"
+	ErrCodeIdentityInvalid  = "IDENTITY_INVALID"
 	ErrCodeIdentityConflict = "IDENTITY_CONFLICT"
 )
 
@@ -52,10 +50,8 @@ type ProxyExit struct {
 }
 
 type DeviceHello struct {
-	ProtocolVersion int `json:"protocolVersion"`
-	// AccessKey is present only in v4. The server resolves identity from this
-	// credential; clients never submit or choose an identity ID.
-	AccessKey             string   `json:"accessKey,omitempty"`
+	ProtocolVersion       int      `json:"protocolVersion"`
+	IdentityID            string   `json:"identityId"`
 	InstallationID        string   `json:"installationId"`
 	PublicKey             []byte   `json:"publicKey"`
 	ClientNonce           []byte   `json:"clientNonce"`
@@ -117,10 +113,7 @@ func DeviceAuthPayload(hello DeviceHello, challenge AuthChallenge) []byte {
 	keyHash := sha256.Sum256(hello.PublicKey)
 	writeAuthField(&out, keyHash[:])
 	if hello.ProtocolVersion >= IdentityDeviceProtocolVersion {
-		// Bind the credential without signing or logging the plaintext twice.
-		// The server has already resolved the key before issuing the challenge.
-		accessKeyHash := sha256.Sum256([]byte(hello.AccessKey))
-		writeAuthField(&out, accessKeyHash[:])
+		writeAuthField(&out, []byte(hello.IdentityID))
 		_ = binary.Write(&out, binary.BigEndian, uint32(len(hello.RequestedCapabilities)))
 		for _, capability := range hello.RequestedCapabilities {
 			writeAuthField(&out, []byte(capability))

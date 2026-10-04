@@ -1,8 +1,11 @@
-# 客户端填写服务端地址，并通过 GUI 受保护凭据存储或
-# RELAYPROXY_ACCESS_KEY 环境变量配置身份接入密钥。密钥不写入本文件。
-# 首次连接会自动生成安装身份，并登记到接入密钥对应的服务端身份。
+# 客户端填写服务端地址和公开的短身份 ID。首次连接后，需要使用该身份
+# 独立登录 Server，并在待审批设备中勾选能力。安装私钥由客户端自动管理。
 server:
   address: relay.example.com
+
+device:
+  identity_id: team-a
+  name: My-PC
 
 # P2P 直连默认自动启用：首个连接立即走 Relay，后台建立直连；
 # 后续连接优先复用 P2P QUIC。relay_only 可完全关闭直连尝试。

@@ -1,98 +1,102 @@
 package repository
 
 import (
+	"database/sql"
 	"errors"
 	"testing"
-	"time"
 )
 
-func TestIdentityEnrollmentRechecksChallengeSnapshot(t *testing.T) {
-	for _, mutation := range []string{"revoke", "expire", "disable"} {
-		t.Run(mutation, func(t *testing.T) {
-			db := openIdentityTestDB(t)
-			identity, err := db.CreateIdentity("Owner", "admin")
-			if err != nil {
-				t.Fatal(err)
-			}
-			key, err := db.IssueIdentityAccessKey(identity.ID, "admin", "", nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			access, err := db.ResolveIdentityAccessKey(key.AccessKey)
-			if err != nil {
-				t.Fatal(err)
-			}
-			switch mutation {
-			case "revoke":
-				err = db.RevokeIdentityAccessKey(identity.ID, key.ID, "admin")
-			case "expire":
-				_, err = db.Exec(`UPDATE identity_access_keys SET expires_at = ? WHERE id = ?`, time.Now().UTC().Add(-time.Minute), key.ID)
-			case "disable":
-				status := IdentityStatusDisabled
-				_, err = db.UpdateIdentity(identity.ID, "admin", IdentityUpdate{Status: &status})
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			observation := DeviceIdentityObservation{
-				Fingerprint: "fp", InstallationID: "install", PublicKey: []byte("public"),
-				RequestedCapabilities: []string{"proxy.client", "proxy.exit"},
-			}
-			if _, err := db.ObserveIdentityDevice(*access, observation); !errors.Is(err, ErrInvalidIdentityAccessKey) {
-				t.Fatalf("stale challenge admitted after %s: %v", mutation, err)
-			}
-			var n int
-			if err := db.QueryRow(`SELECT COUNT(*) FROM devices`).Scan(&n); err != nil || n != 0 {
-				t.Fatalf("enrollment left devices: %d %v", n, err)
-			}
-		})
+func TestIdentityEnrollmentRequiresApprovalAndRechecksIdentity(t *testing.T) {
+	db := openIdentityTestDB(t)
+	identity, err := db.CreateIdentityWithShortID("owner-one", "Owner", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := db.ResolveIdentity(identity.ShortID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := IdentityStatusDisabled
+	if _, err := db.UpdateIdentity(identity.ID, "admin", IdentityUpdate{Status: &status}); err != nil {
+		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "fp", InstallationID: "install", PublicKey: []byte("public"),
+		RequestedCapabilities: []string{"proxy.client", "proxy.exit"},
+	}
+	if _, err := db.ObserveIdentityDevice(*resolved, observation); !errors.Is(err, ErrInvalidIdentity) {
+		t.Fatalf("stale identity resolution admitted after disable: %v", err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM devices`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("disabled enrollment left devices: %d %v", count, err)
 	}
 }
 
-func TestIdentityEnrollmentRefreshesMetadataWithoutFilteringDeviceCapabilities(t *testing.T) {
+func TestIdentityEnrollmentIsScopedAndPreservesDeviceCapabilities(t *testing.T) {
 	db := openIdentityTestDB(t)
-	identity, err := db.CreateIdentity("Before", "admin")
+	owner, err := db.CreateIdentityWithLogin("owner-two", "Before", "admin", "hash")
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := db.IssueIdentityAccessKey(identity.ID, "admin", "", nil)
+	other, err := db.CreateIdentityWithShortID("other-two", "Other", "admin")
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, err := db.ResolveIdentityAccessKey(key.AccessKey)
+	resolved, err := db.ResolveIdentity(owner.ShortID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`UPDATE identities SET capabilities = ? WHERE id = ?`, `["proxy.client"]`, identity.ID); err != nil {
+	ownerUserID, err := db.GetIdentityLoginUserID(owner.ID)
+	if err != nil {
 		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "fp", InstallationID: "install", PublicKey: []byte("public"),
+		DeviceName: "Client", RequestedCapabilities: []string{"proxy.client", "proxy.exit"},
+	}
+	pending, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil || pending.State != EnrollmentPending || pending.RequestID == "" {
+		t.Fatalf("first connection was not pending: %+v err=%v", pending, err)
+	}
+	if _, err := db.ApproveEnrollmentForIdentity(pending.RequestID, "other-admin", other.ID, []string{"proxy.client"}); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("another identity approved the request: %v", err)
+	}
+	approved, err := db.ApproveEnrollmentForIdentity(pending.RequestID, ownerUserID, owner.ID, []string{"proxy.client"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary, err := db.GetDeviceIdentitySummary(approved.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.IdentityID != owner.ID || len(approved.ApprovedCapabilities) != 1 {
+		t.Fatalf("unexpected approved device: %+v", approved)
 	}
 	after := "After"
-	if _, err := db.UpdateIdentity(identity.ID, "admin", IdentityUpdate{Name: &after}); err != nil {
+	if _, err := db.UpdateIdentity(owner.ID, "admin", IdentityUpdate{Name: &after}); err != nil {
 		t.Fatal(err)
 	}
-	decision, err := db.ObserveIdentityDevice(*access, DeviceIdentityObservation{
-		Fingerprint: "fp", InstallationID: "install", PublicKey: []byte("public"),
-		RequestedCapabilities: []string{"proxy.client", "proxy.exit"},
-	})
+	reconnected, err := db.ObserveIdentityDevice(*resolved, observation)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decision.IdentityName != after || decision.PolicyRevision != 2 || len(decision.ApprovedCapabilities) != 2 {
-		t.Fatalf("identity metadata or device capabilities were not refreshed independently: %+v", decision)
+	if reconnected.IdentityName != after || reconnected.PolicyRevision != 2 || len(reconnected.ApprovedCapabilities) != 1 || reconnected.ApprovedCapabilities[0] != "proxy.client" {
+		t.Fatalf("reconnect bypassed identity metadata or device capabilities: %+v", reconnected)
 	}
 }
 
 func TestDeviceCapabilitiesControlAdmissionAndFeatures(t *testing.T) {
 	db := openIdentityTestDB(t)
-	identity, err := db.CreateIdentity("Owner", "admin")
+	identity, err := db.CreateIdentityWithLogin("feature-owner", "Owner", "admin", "hash")
 	if err != nil {
 		t.Fatal(err)
 	}
-	key, err := db.IssueIdentityAccessKey(identity.ID, "admin", "", nil)
+	resolved, err := db.ResolveIdentity(identity.ShortID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	access, err := db.ResolveIdentityAccessKey(key.AccessKey)
+	reviewerID, err := db.GetIdentityLoginUserID(identity.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,28 +104,30 @@ func TestDeviceCapabilitiesControlAdmissionAndFeatures(t *testing.T) {
 		Fingerprint: "fp", InstallationID: "install", PublicKey: []byte("public"),
 		RequestedCapabilities: []string{"proxy.client", "rdp.controller"},
 	}
-	client, err := db.ObserveIdentityDevice(*access, observation)
+	pending, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := db.ApproveEnrollmentForIdentity(pending.RequestID, reviewerID, identity.ID, observation.RequestedCapabilities)
 	if err != nil {
 		t.Fatal(err)
 	}
 	seedIdentityGrantDevice(t, db, "target", "Target", identity.ID, []string{"proxy.exit", "rdp.host"})
-
-	if _, err := db.UpdateDeviceCapabilities(client.DeviceID, "admin", []string{"proxy.client"}); err != nil {
+	if _, err := db.UpdateDeviceCapabilities(client.ID, reviewerID, []string{"proxy.client"}); err != nil {
 		t.Fatal(err)
 	}
-	if !db.IsIdentityDeviceAuthorized("fp", client.DeviceID, identity.ID, key.ID) {
+	if !db.IsIdentityDeviceAuthorized("fp", client.ID, identity.ID) {
 		t.Fatal("device capability change unexpectedly invalidated identity authentication")
 	}
-	managed, allowed, err := db.authorizeIdentityDeviceFeature(client.DeviceID, "target", GrantFeatureProxyUse)
+	managed, allowed, err := db.authorizeIdentityDeviceFeature(client.ID, "target", GrantFeatureProxyUse)
 	if err != nil || !managed || !allowed {
 		t.Fatalf("approved proxy capability was not honored: %v %v %v", managed, allowed, err)
 	}
-	managed, allowed, err = db.authorizeIdentityDeviceFeature(client.DeviceID, "target", GrantFeatureRDPConnect)
+	managed, allowed, err = db.authorizeIdentityDeviceFeature(client.ID, "target", GrantFeatureRDPConnect)
 	if err != nil || !managed || allowed {
 		t.Fatalf("removed RDP device capability remained effective: %v %v %v", managed, allowed, err)
 	}
-
-	reconnected, err := db.ObserveIdentityDevice(*access, observation)
+	reconnected, err := db.ObserveIdentityDevice(*resolved, observation)
 	if err != nil {
 		t.Fatal(err)
 	}

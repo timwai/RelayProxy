@@ -2,13 +2,13 @@ package api
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
-	"time"
+	"unicode/utf8"
 
 	"relayproxy/server/repository"
+	"relayproxy/server/service"
 )
 
 func (r *Router) handleListIdentities(w http.ResponseWriter, req *http.Request) {
@@ -22,19 +22,82 @@ func (r *Router) handleListIdentities(w http.ResponseWriter, req *http.Request) 
 
 func (r *Router) handleCreateIdentity(w http.ResponseWriter, req *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		ShortID  string `json:"shortId"`
+		Name     string `json:"name"`
+		Password string `json:"password"`
 	}
 	if err := decodeJSON(w, req, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
-	item, err := r.db.CreateIdentity(body.Name, actor)
+	if !validIdentityPassword(body.Password) {
+		writeError(w, http.StatusBadRequest, "password must contain 8 to 128 characters and cannot be blank")
+		return
+	}
+	hash, err := service.HashPassword(body.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to protect identity password")
+		return
+	}
+	item, err := r.db.CreateIdentityWithLogin(body.ShortID, body.Name, actor, hash)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
+}
+
+func validIdentityPassword(password string) bool {
+	length := utf8.RuneCountInString(password)
+	return utf8.ValidString(password) && length >= 8 && length <= 128 && strings.TrimSpace(password) != ""
+}
+
+func (r *Router) handleResetIdentityPassword(w http.ResponseWriter, req *http.Request) {
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(w, req, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !validIdentityPassword(body.Password) {
+		writeError(w, http.StatusBadRequest, "password must contain 8 to 128 characters and cannot be blank")
+		return
+	}
+	hash, err := service.HashPassword(body.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to protect identity password")
+		return
+	}
+	actor, _ := req.Context().Value(userContextKey).(string)
+	if err := r.db.ConfigureIdentityLogin(req.PathValue("id"), hash, actor); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "identity not found")
+		} else {
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
+		return
+	}
+	if userID, err := r.db.GetIdentityLoginUserID(req.PathValue("id")); err == nil {
+		r.authService.RevokeUserSessions(userID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"id": req.PathValue("id"), "loginConfigured": true})
+}
+
+func (r *Router) handleListIdentityOptions(w http.ResponseWriter, _ *http.Request) {
+	items, err := r.db.ListIdentities()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list identities")
+		return
+	}
+	result := make([]map[string]string, 0, len(items))
+	for _, item := range items {
+		if item.Status == repository.IdentityStatusActive {
+			result = append(result, map[string]string{"id": item.ID, "shortId": item.ShortID, "name": item.Name})
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (r *Router) handleUpdateIdentity(w http.ResponseWriter, req *http.Request) {
@@ -67,81 +130,14 @@ func (r *Router) handleUpdateIdentity(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	if body.Status != nil && r.onIdentityAuthorizationChanged != nil {
-		r.onIdentityAuthorizationChanged(item.ID, "")
+		r.onIdentityAuthorizationChanged(item.ID)
+	}
+	if body.Status != nil {
+		if userID, err := r.db.GetIdentityLoginUserID(item.ID); err == nil {
+			r.authService.RevokeUserSessions(userID)
+		}
 	}
 	writeJSON(w, http.StatusOK, item)
-}
-
-func (r *Router) handleListIdentityAccessKeys(w http.ResponseWriter, req *http.Request) {
-	if _, err := r.db.GetIdentity(req.PathValue("id")); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "identity not found")
-		} else {
-			writeError(w, http.StatusInternalServerError, "failed to load identity")
-		}
-		return
-	}
-	items, err := r.db.ListIdentityAccessKeys(req.PathValue("id"))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list access keys")
-		return
-	}
-	writeJSON(w, http.StatusOK, items)
-}
-
-func (r *Router) handleIssueIdentityAccessKey(w http.ResponseWriter, req *http.Request) {
-	var body struct {
-		Label     string `json:"label"`
-		ExpiresAt string `json:"expiresAt"`
-	}
-	if req.ContentLength != 0 {
-		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-	}
-	var expiresAt *time.Time
-	if strings.TrimSpace(body.ExpiresAt) != "" {
-		value, err := time.Parse(time.RFC3339, strings.TrimSpace(body.ExpiresAt))
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "expiresAt must be an RFC3339 timestamp")
-			return
-		}
-		value = value.UTC()
-		expiresAt = &value
-	}
-	actor, _ := req.Context().Value(userContextKey).(string)
-	item, err := r.db.IssueIdentityAccessKey(req.PathValue("id"), actor, body.Label, expiresAt)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "identity not found")
-		} else {
-			writeError(w, http.StatusBadRequest, err.Error())
-		}
-		return
-	}
-	// AccessKey is intentionally returned only by this endpoint. List responses
-	// never expose the digest or the original secret.
-	writeJSON(w, http.StatusCreated, item)
-}
-
-func (r *Router) handleRevokeIdentityAccessKey(w http.ResponseWriter, req *http.Request) {
-	actor, _ := req.Context().Value(userContextKey).(string)
-	err := r.db.RevokeIdentityAccessKey(req.PathValue("id"), req.PathValue("keyId"), actor)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "identity access key not found")
-		} else {
-			writeError(w, http.StatusBadRequest, err.Error())
-		}
-		return
-	}
-	if r.onIdentityAuthorizationChanged != nil {
-		r.onIdentityAuthorizationChanged(req.PathValue("id"), req.PathValue("keyId"))
-	}
-	writeJSON(w, http.StatusOK, map[string]string{
-		"id": req.PathValue("keyId"), "status": "revoked",
-	})
 }
 
 func (r *Router) handleSetDeviceIdentity(w http.ResponseWriter, req *http.Request) {
@@ -205,7 +201,7 @@ func (r *Router) handleSetDeviceIdentity(w http.ResponseWriter, req *http.Reques
 			}
 		}
 		for identityID := range affected {
-			r.onIdentityAuthorizationChanged(identityID, "")
+			r.onIdentityAuthorizationChanged(identityID)
 		}
 	}
 	writeJSON(w, http.StatusOK, item)

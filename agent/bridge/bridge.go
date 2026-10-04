@@ -20,7 +20,6 @@ import (
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
-	"relayproxy/internal/credentialstore"
 	"relayproxy/internal/protocol"
 )
 
@@ -196,61 +195,6 @@ func (b *UIBridge) ConfigPath() string {
 	return p
 }
 
-type AccessKeyState struct {
-	Configured        bool   `json:"configured"`
-	Source            string `json:"source"`
-	ManagedExternally bool   `json:"managedExternally"`
-	RestartRequired   bool   `json:"restartRequired"`
-}
-
-// GetAccessKeyState exposes only credential metadata. The plaintext access key
-// never enters config/status JSON and cannot be read back through the UI bridge.
-func (b *UIBridge) GetAccessKeyState() (AccessKeyState, error) {
-	runtimeKey := strings.TrimSpace(b.agent.Config().AccessKey)
-	if strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")) != "" {
-		return AccessKeyState{
-			Configured: true, Source: "environment", ManagedExternally: true,
-			RestartRequired: false,
-		}, nil
-	}
-	path := credentialstore.PathForConfig(b.rawConfigPath())
-	stored, err := credentialstore.LoadAccessKey(path)
-	if err != nil {
-		return AccessKeyState{}, err
-	}
-	return AccessKeyState{
-		Configured: stored != "", Source: map[bool]string{true: "store", false: "none"}[stored != ""],
-		RestartRequired: stored != runtimeKey,
-	}, nil
-}
-
-// SetAccessKey replaces the protected credential used on the next process
-// start. Existing authenticated sessions are intentionally not mutated in place.
-func (b *UIBridge) SetAccessKey(accessKey string) (AccessKeyState, error) {
-	if strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")) != "" {
-		return AccessKeyState{}, errors.New("RELAYPROXY_ACCESS_KEY 环境变量正在覆盖本地凭据，请先移除该环境变量")
-	}
-	path := credentialstore.PathForConfig(b.rawConfigPath())
-	if path == "" {
-		return AccessKeyState{}, errors.New("未指定配置文件，无法确定凭据存储位置")
-	}
-	if err := credentialstore.SaveAccessKey(path, accessKey); err != nil {
-		return AccessKeyState{}, err
-	}
-	return b.GetAccessKeyState()
-}
-
-func (b *UIBridge) ClearAccessKey() (AccessKeyState, error) {
-	if strings.TrimSpace(os.Getenv("RELAYPROXY_ACCESS_KEY")) != "" {
-		return AccessKeyState{}, errors.New("RELAYPROXY_ACCESS_KEY 环境变量正在覆盖本地凭据，请先移除该环境变量")
-	}
-	path := credentialstore.PathForConfig(b.rawConfigPath())
-	if err := credentialstore.ClearAccessKey(path); err != nil {
-		return AccessKeyState{}, err
-	}
-	return b.GetAccessKeyState()
-}
-
 // rawConfigPath returns the absolute config path, or "" when none was given.
 func (b *UIBridge) rawConfigPath() string {
 	b.mu.RLock()
@@ -314,6 +258,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Server.TCPPort = c.TCPPort
 	res.Server.TLSEnabled = config.BoolPtr(!c.PlainTCP)
 	res.Device.Name = c.DeviceName
+	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
 	res.Proxy.DefaultExitID = c.DefaultExitID
 	res.Proxy.SOCKS5.Enabled = c.SOCKS5Enabled
@@ -357,7 +302,8 @@ type ConfigUpdate struct {
 		TLSEnabled *bool   `json:"tlsEnabled"`
 	} `json:"server"`
 	Device struct {
-		Name *string `json:"name"`
+		Name       *string `json:"name"`
+		IdentityID *string `json:"identityId"`
 	} `json:"device"`
 	Transport *string `json:"transport"`
 	P2P       struct {
@@ -473,6 +419,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.Device.Name != nil {
 		cfg.Device.Name = strings.TrimSpace(*in.Device.Name)
+	}
+	if in.Device.IdentityID != nil {
+		cfg.Device.IdentityID = strings.ToLower(strings.TrimSpace(*in.Device.IdentityID))
 	}
 	if in.Transport != nil {
 		mode := strings.ToLower(strings.TrimSpace(*in.Transport))
@@ -709,7 +658,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 	enabled := func(v *bool) bool { return v == nil || *v }
 	return map[string]any{
 		"中继地址": c.Server.Address, "QUIC 端口": c.Server.QUICPort, "TCP 端口": c.Server.TCPPort,
-		"设备名称": name, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(),
+		"设备名称": name, "身份 ID": c.Device.IdentityID, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(),
 		"P2P 开关": enabled(c.P2P.Enabled), "P2P 模式": c.P2P.Mode,
 		"P2P 打洞超时": c.P2P.PunchTimeoutMs, "P2P Keepalive": c.P2P.KeepaliveSec,
 		"P2P 空闲超时": c.P2P.IdleTimeoutSec, "P2P 会话上限": c.P2P.MaxExitSessions,

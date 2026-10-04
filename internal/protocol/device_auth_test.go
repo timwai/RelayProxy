@@ -17,10 +17,10 @@ func TestDeviceAuthPayloadBindsChallengeAndIdentity(t *testing.T) {
 	}
 }
 
-func TestDeviceAuthPayloadV4BindsAccessKeyAndCapabilities(t *testing.T) {
+func TestDeviceAuthPayloadV5BindsIdentityIDAndCapabilities(t *testing.T) {
 	hello := DeviceHello{
 		ProtocolVersion: IdentityDeviceProtocolVersion,
-		AccessKey:       "rpk_test_key",
+		IdentityID:      "team-test",
 		InstallationID:  "install", PublicKey: []byte("key"), ClientNonce: []byte("client"),
 		RequestedCapabilities: []string{CapabilityProxyClient, CapabilityProxyExit},
 		TransportCapabilities: []string{UDPModeStream},
@@ -28,20 +28,20 @@ func TestDeviceAuthPayloadV4BindsAccessKeyAndCapabilities(t *testing.T) {
 	challenge := AuthChallenge{ProtocolVersion: IdentityDeviceProtocolVersion, ServerInstanceID: "server", ServerNonce: []byte("server-nonce")}
 	base := DeviceAuthPayload(hello, challenge)
 
-	changedKey := hello
-	changedKey.AccessKey = "rpk_other_key"
-	if bytes.Equal(base, DeviceAuthPayload(changedKey, challenge)) {
-		t.Fatal("v4 payload did not bind the identity access key")
+	changedIdentity := hello
+	changedIdentity.IdentityID = "other-team"
+	if bytes.Equal(base, DeviceAuthPayload(changedIdentity, challenge)) {
+		t.Fatal("v5 payload did not bind the identity id")
 	}
 	changedCapability := hello
 	changedCapability.RequestedCapabilities = []string{CapabilityProxyClient}
 	if bytes.Equal(base, DeviceAuthPayload(changedCapability, challenge)) {
-		t.Fatal("v4 payload did not bind requested capabilities")
+		t.Fatal("v5 payload did not bind requested capabilities")
 	}
 	changedTransport := hello
 	changedTransport.TransportCapabilities = []string{UDPModeStream, UDPModeDatagram}
 	if bytes.Equal(base, DeviceAuthPayload(changedTransport, challenge)) {
-		t.Fatal("v4 payload did not bind transport capabilities")
+		t.Fatal("v5 payload did not bind transport capabilities")
 	}
 }
 
@@ -53,10 +53,10 @@ func TestDeviceAuthPayloadV3KeepsLegacyWireSemantics(t *testing.T) {
 	}
 	challenge := AuthChallenge{ProtocolVersion: LegacyDeviceProtocolVersion, ServerInstanceID: "server", ServerNonce: []byte("server-nonce")}
 	base := DeviceAuthPayload(hello, challenge)
-	hello.AccessKey = "ignored-by-v3"
+	hello.IdentityID = "ignored-by-v3"
 	hello.RequestedCapabilities = append(hello.RequestedCapabilities, CapabilityProxyExit)
 	if !bytes.Equal(base, DeviceAuthPayload(hello, challenge)) {
-		t.Fatal("v3 payload changed when v4-only fields changed")
+		t.Fatal("v3 payload changed when v5-only fields changed")
 	}
 }
 

@@ -132,8 +132,8 @@ func TestDeviceOwnershipAcrossManagementAndViews(t *testing.T) {
 	}
 
 	seed("revoke-target", other.ID, "EXIT")
-	if response := apiRequest(router, ownerCookie, http.MethodPost, "/api/v1/devices/revoke-target/revoke"); response.Code != http.StatusForbidden {
-		t.Fatalf("ordinary user revoked a device: %d %s", response.Code, response.Body.String())
+	if response := apiRequest(router, ownerCookie, http.MethodPost, "/api/v1/devices/revoke-target/revoke"); response.Code != http.StatusNotFound {
+		t.Fatalf("ordinary user discovered or revoked a device: %d %s", response.Code, response.Body.String())
 	}
 	if response := apiRequest(router, adminCookie, http.MethodPost, "/api/v1/devices/revoke-target/revoke"); response.Code != http.StatusOK {
 		t.Fatalf("admin revoke rejected: %d %s", response.Code, response.Body.String())

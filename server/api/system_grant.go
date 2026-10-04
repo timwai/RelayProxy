@@ -65,7 +65,7 @@ func (r *Router) handleCreateSystemIdentityGrant(w http.ResponseWriter, req *htt
 		return
 	}
 	if r.onIdentityAuthorizationChanged != nil {
-		r.onIdentityAuthorizationChanged(item.GranteeIdentityID, "")
+		r.onIdentityAuthorizationChanged(item.GranteeIdentityID)
 	}
 	writeJSON(w, http.StatusCreated, item)
 }
@@ -121,9 +121,9 @@ func (r *Router) handleUpdateSystemIdentityGrant(w http.ResponseWriter, req *htt
 		return
 	}
 	if r.onIdentityAuthorizationChanged != nil {
-		r.onIdentityAuthorizationChanged(current.GranteeIdentityID, "")
+		r.onIdentityAuthorizationChanged(current.GranteeIdentityID)
 		if item.GranteeIdentityID != current.GranteeIdentityID {
-			r.onIdentityAuthorizationChanged(item.GranteeIdentityID, "")
+			r.onIdentityAuthorizationChanged(item.GranteeIdentityID)
 		}
 	}
 	writeJSON(w, http.StatusOK, item)
@@ -158,7 +158,7 @@ func (r *Router) handleDeleteSystemIdentityGrant(w http.ResponseWriter, req *htt
 		return
 	}
 	if deleted && r.onIdentityAuthorizationChanged != nil {
-		r.onIdentityAuthorizationChanged(current.GranteeIdentityID, "")
+		r.onIdentityAuthorizationChanged(current.GranteeIdentityID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": current.ID, "deleted": deleted})
 }

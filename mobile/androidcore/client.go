@@ -51,7 +51,7 @@ func ValidateRoutingConfig(configJSON string) error {
 
 type clientConfig struct {
 	ServerAddress       string         `json:"serverAddress"`
-	AccessKey           string         `json:"accessKey"`
+	IdentityID          string         `json:"identityId"`
 	DeviceName          string         `json:"deviceName"`
 	QUICPort            int            `json:"quicPort"`
 	TCPPort             int            `json:"tcpPort"`
@@ -153,12 +153,15 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		return cfg, fmt.Errorf("decode config: %w", err)
 	}
 	cfg.ServerAddress = strings.TrimSpace(cfg.ServerAddress)
-	cfg.AccessKey = strings.TrimSpace(cfg.AccessKey)
+	cfg.IdentityID = strings.ToLower(strings.TrimSpace(cfg.IdentityID))
 	if cfg.ServerAddress == "" {
 		return cfg, errors.New("serverAddress is required")
 	}
 	if strings.ContainsAny(cfg.ServerAddress, " /\\\t\r\n") {
 		return cfg, errors.New("serverAddress must be a host or IP without scheme or port")
+	}
+	if !validIdentityID(cfg.IdentityID) {
+		return cfg, errors.New("identityId must contain 4 to 20 lowercase letters, digits or hyphens")
 	}
 	cfg.DeviceName = strings.TrimSpace(cfg.DeviceName)
 	if cfg.DeviceName == "" {
@@ -185,9 +188,6 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	if cfg.TLSEnabled == nil {
 		enabled := true
 		cfg.TLSEnabled = &enabled
-	}
-	if cfg.AccessKey != "" && (!*cfg.TLSEnabled || cfg.InsecureTLS) {
-		return cfg, errors.New("identity access keys require TLS with server certificate verification")
 	}
 	if cfg.AllowInternet == nil {
 		enabled := true
@@ -252,6 +252,19 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	}
 	cfg.Routing = engine.Config()
 	return cfg, nil
+}
+
+func validIdentityID(value string) bool {
+	if len(value) < 4 || len(value) > 20 {
+		return false
+	}
+	for index, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || (char == '-' && index > 0 && index < len(value)-1) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // NewClient creates an Android exit-node core. identityPath should point to the
@@ -775,13 +788,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if _, err := rand.Read(clientNonce); err != nil {
 		return fmt.Errorf("generate client nonce: %w", err)
 	}
-	protocolVersion := protocol.LegacyDeviceProtocolVersion
-	if c.cfg.AccessKey != "" {
-		protocolVersion = protocol.IdentityDeviceProtocolVersion
-	}
 	hello := protocol.DeviceHello{
-		ProtocolVersion:       protocolVersion,
-		AccessKey:             c.cfg.AccessKey,
+		ProtocolVersion:       protocol.IdentityDeviceProtocolVersion,
+		IdentityID:            c.cfg.IdentityID,
 		InstallationID:        c.identity.InstallationID,
 		PublicKey:             append([]byte(nil), c.identity.PublicKey...),
 		ClientNonce:           clientNonce,
@@ -800,7 +809,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if err := protocol.ReadJSON(ctrl, &challenge); err != nil {
 		return fmt.Errorf("read authentication challenge: %w", err)
 	}
-	if challenge.ProtocolVersion != protocolVersion ||
+	if challenge.ProtocolVersion != protocol.IdentityDeviceProtocolVersion ||
 		challenge.ChallengeID == "" ||
 		challenge.ServerInstanceID == "" ||
 		len(challenge.ServerNonce) != 32 ||

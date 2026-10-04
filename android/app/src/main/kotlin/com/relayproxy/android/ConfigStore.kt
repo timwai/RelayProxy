@@ -113,7 +113,7 @@ private fun JSONObject.stringList(name: String): List<String> {
 
 data class ExitConfig(
     val serverAddress: String = "",
-    val accessKey: String = "",
+    val identityId: String = "",
     val deviceName: String = "RelayProxy Android",
     val quicPort: Int = 443,
     val tcpPort: Int = 443,
@@ -148,7 +148,7 @@ data class ExitConfig(
         val coreClientEnabled = clientEnabled || vpnEnabled
         return JSONObject()
             .put("serverAddress", serverAddress.trim())
-            .put("accessKey", accessKey.trim())
+            .put("identityId", identityId.trim())
             .put("deviceName", deviceName.trim())
             .put("quicPort", quicPort)
             .put("tcpPort", tcpPort)
@@ -258,7 +258,7 @@ class ConfigStore(private val context: Context) {
 
         return ExitConfig(
             serverAddress = prefs.getString("serverAddress", "") ?: "",
-            accessKey = SecretStore(context).accessKey(),
+            identityId = prefs.getString("identityId", "") ?: "",
             deviceName = resolvedDeviceName,
             quicPort = prefs.getInt("quicPort", 443),
             tcpPort = prefs.getInt("tcpPort", 443),
@@ -300,9 +300,9 @@ class ConfigStore(private val context: Context) {
     }
 
     fun save(config: ExitConfig) {
-        SecretStore(context).setAccessKey(config.accessKey)
         prefs.edit()
             .putString("serverAddress", config.serverAddress.trim())
+            .putString("identityId", config.identityId.trim().lowercase())
             .putString("deviceName", config.deviceName.trim())
             .putInt("quicPort", config.quicPort)
             .putInt("tcpPort", config.tcpPort)

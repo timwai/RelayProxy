@@ -364,6 +364,16 @@ func (s *AuthService) Logout(token string) {
 	delete(s.sessions, token)
 }
 
+func (s *AuthService) RevokeUserSessions(userID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, entry := range s.sessions {
+		if entry.UserID == userID {
+			delete(s.sessions, token)
+		}
+	}
+}
+
 // Argon2id parameters
 const (
 	argonMemory      = 64 * 1024 // 64 MB

@@ -302,20 +302,18 @@ func main() {
 			refreshRDPTargetOnlineState(authorization.RDPTargets, sessionMgr)
 			return authorization, nil
 		},
-		ResolveIdentityAccessKey: func(accessKey string) (gateway.IdentityAccessAuthorization, error) {
-			resolved, err := db.ResolveIdentityAccessKey(accessKey)
+		ResolveIdentity: func(shortID string) (gateway.IdentityAuthorization, error) {
+			resolved, err := db.ResolveIdentity(shortID)
 			if err != nil {
-				return gateway.IdentityAccessAuthorization{}, err
+				return gateway.IdentityAuthorization{}, err
 			}
-			return gateway.IdentityAccessAuthorization{
-				KeyID: resolved.KeyID, KeyDigest: resolved.KeyDigest,
+			return gateway.IdentityAuthorization{
 				IdentityID: resolved.IdentityID, IdentityName: resolved.IdentityName,
 				PolicyRevision: resolved.PolicyRevision,
 			}, nil
 		},
-		AuthorizeIdentityDevice: func(fingerprint string, hello protocol.DeviceHello, identity gateway.IdentityAccessAuthorization) (gateway.DeviceAuthorization, error) {
-			decision, err := db.ObserveIdentityDevice(repository.IdentityAccessAuthorization{
-				KeyID: identity.KeyID, KeyDigest: identity.KeyDigest,
+		AuthorizeIdentityDevice: func(fingerprint string, hello protocol.DeviceHello, identity gateway.IdentityAuthorization) (gateway.DeviceAuthorization, error) {
+			decision, err := db.ObserveIdentityDevice(repository.IdentityAuthorization{
 				IdentityID: identity.IdentityID, IdentityName: identity.IdentityName,
 				PolicyRevision: identity.PolicyRevision,
 			}, repository.DeviceIdentityObservation{
@@ -336,8 +334,8 @@ func main() {
 		RecheckDevice: func(fingerprint, deviceID string) bool {
 			return db.IsDeviceIdentityApproved(fingerprint, deviceID)
 		},
-		RecheckIdentityDevice: func(fingerprint, deviceID, identityID, accessKeyID string) bool {
-			return db.IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, accessKeyID)
+		RecheckIdentityDevice: func(fingerprint, deviceID, identityID string) bool {
+			return db.IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID)
 		},
 		ListRDPTargets: func(controllerID string) ([]protocol.RDPTarget, error) {
 			targets, err := db.ListRDPTargetsForController(controllerID)
@@ -351,7 +349,7 @@ func main() {
 		ListProxyExits: func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error) {
 			var exits []*session.DeviceSession
 			if identityID != "" {
-				// v4 inventory is authorization-derived rather than limited to
+				// v5 inventory is authorization-derived rather than limited to
 				// the same identity, so newly granted cross-identity exits appear
 				// on the next authentication/heartbeat refresh.
 				exits = sessionMgr.GetExits()
@@ -481,27 +479,13 @@ func main() {
 			}
 			ingress.Reload()
 		}),
-		api.WithIdentityAuthorizationChanged(func(identityID, accessKeyID string) {
-			if accessKeyID == "" {
-				invalidateIdentitySessions(identityID)
-			} else {
-				for _, active := range sessionMgr.List() {
-					if active == nil || active.IdentityID != identityID || active.AccessKeyID != accessKeyID {
-						continue
-					}
-					deviceID := active.DeviceID
-					rdpCoordinator.CloseDevice(deviceID)
-					if proxyP2PCoordinator != nil {
-						proxyP2PCoordinator.RevokeDevice(deviceID)
-					}
-					_ = sessionMgr.ChangeDeviceAuthorization(deviceID, true, func() error { return nil })
-				}
-			}
+		api.WithIdentityAuthorizationChanged(func(identityID string) {
+			invalidateIdentitySessions(identityID)
 			ingress.Reload()
 		}),
 		api.WithDeviceIdentityGrantChanged(func(targetDeviceID, granteeIdentityID string) {
-			// M2 deliberately invalidates the grantee identity's authenticated
-			// tunnels after any grant mutation. This is broader than
+			// Invalidate the grantee identity's authenticated tunnels after any
+			// grant mutation. This is broader than
 			// feature-specific stream teardown, but guarantees that resource
 			// inventories and existing Relay/P2P/RDP paths cannot retain stale
 			// authority.
@@ -606,7 +590,7 @@ func gatewayAuthorization(decision *repository.DeviceAuthorization) gateway.Devi
 	authorized := gateway.DeviceAuthorization{
 		State: decision.State, DeviceID: decision.DeviceID, OwnerUserID: decision.OwnerUserID,
 		IdentityID: decision.IdentityID, IdentityName: decision.IdentityName,
-		AccessKeyID: decision.AccessKeyID, PolicyRevision: decision.PolicyRevision,
+		PolicyRevision:       decision.PolicyRevision,
 		ApprovedCapabilities: append([]string(nil), decision.ApprovedCapabilities...),
 		RDPTargets:           protocolRDPTargets(decision.RDPTargets),
 	}

@@ -34,10 +34,12 @@ func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Chec
 	}, nil)
 	gateway := gateway.NewGateway(gateway.GatewayConfig{
 		TCPAddr: "127.0.0.1:0", QUICAddr: "127.0.0.1:0",
-		TLSConfig:             &tls.Config{Certificates: []tls.Certificate{certificate}},
-		ServerInstanceID:      "transport-test",
-		AllowLegacyDeviceAuth: true,
-		AuthorizeDevice: func(_ string, hello protocol.DeviceHello) (gateway.DeviceAuthorization, error) {
+		TLSConfig:        &tls.Config{Certificates: []tls.Certificate{certificate}},
+		ServerInstanceID: "transport-test",
+		ResolveIdentity: func(shortID string) (gateway.IdentityAuthorization, error) {
+			return gateway.IdentityAuthorization{IdentityID: "identity-test", IdentityName: shortID}, nil
+		},
+		AuthorizeIdentityDevice: func(_ string, hello protocol.DeviceHello, identity gateway.IdentityAuthorization) (gateway.DeviceAuthorization, error) {
 			deviceID := "client"
 			caps := []string{protocol.CapabilityProxyClient}
 			for _, capability := range hello.RequestedCapabilities {
@@ -45,9 +47,9 @@ func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Chec
 					deviceID, caps = "exit", []string{protocol.CapabilityProxyExit}
 				}
 			}
-			return gateway.DeviceAuthorization{State: "approved", DeviceID: deviceID, ApprovedCapabilities: caps}, nil
+			return gateway.DeviceAuthorization{State: "approved", DeviceID: deviceID, IdentityID: identity.IdentityID, ApprovedCapabilities: caps}, nil
 		},
-		RecheckDevice: func(string, string) bool { return true },
+		RecheckIdentityDevice: func(string, string, string) bool { return true },
 	}, sessions, router)
 	if err := gateway.Start(); err != nil {
 		t.Fatal(err)
@@ -57,7 +59,7 @@ func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Chec
 	base := AgentConfig{
 		ServerAddress: "127.0.0.1", TCPPort: gateway.TCPAddr().(*net.TCPAddr).Port, QUICPort: gateway.QUICAddr().(*net.UDPAddr).Port,
 		InsecureTLS: true, SOCKS5Enabled: &disabled, HTTPEnabled: &disabled,
-		DefaultExitID: "exit", ConnectTimeout: 3 * time.Second,
+		IdentityID: "test-team", DefaultExitID: "exit", ConnectTimeout: 3 * time.Second,
 	}
 	exitCfg := base
 	exitCfg.Mode, exitCfg.TransportMode = "EXIT", exitMode

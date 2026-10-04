@@ -121,10 +121,8 @@ func init() {
 }
 
 type AgentConfig struct {
-	Identity *deviceidentity.Identity
-	// AccessKey is a runtime-only credential. It must come from a protected
-	// secret source and is never included in AgentStatus or diagnostics.
-	AccessKey       string
+	Identity        *deviceidentity.Identity
+	IdentityID      string
 	DeviceID        string
 	DeviceName      string
 	ServerAddress   string
@@ -305,9 +303,6 @@ func (a *Agent) setDivertStage(stage string, err error) {
 }
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
-	if strings.TrimSpace(cfg.AccessKey) != "" && (cfg.PlainTCP || cfg.InsecureTLS) {
-		return nil, errors.New("identity access keys require TLS with server certificate verification")
-	}
 	cfg = cloneAgentConfig(cfg)
 	if cfg.Identity == nil {
 		var err error
@@ -586,6 +581,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 }
 
 func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler *exit.Handler, epoch uint64) error {
+	if strings.TrimSpace(cfg.IdentityID) == "" {
+		return errors.New("identity id is required")
+	}
 	ctx, cancel := context.WithCancel(a.ctx)
 	defer cancel()
 	stopClose := context.AfterFunc(ctx, func() { _ = sess.Close() })
@@ -630,13 +628,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if _, err := rand.Read(clientNonce); err != nil {
 		return fmt.Errorf("generate client nonce: %w", err)
 	}
-	protocolVersion := protocol.LegacyDeviceProtocolVersion
-	if strings.TrimSpace(cfg.AccessKey) != "" {
-		protocolVersion = protocol.IdentityDeviceProtocolVersion
-	}
 	hello := protocol.DeviceHello{
-		ProtocolVersion: protocolVersion,
-		AccessKey:       strings.TrimSpace(cfg.AccessKey),
+		ProtocolVersion: protocol.IdentityDeviceProtocolVersion,
+		IdentityID:      strings.ToLower(strings.TrimSpace(cfg.IdentityID)),
 		InstallationID:  cfg.Identity.InstallationID,
 		PublicKey:       append([]byte(nil), cfg.Identity.PublicKey...),
 		ClientNonce:     clientNonce, DeviceName: cfg.DeviceName, Platform: runtime.GOOS,
@@ -650,7 +644,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if err := protocol.ReadJSON(ctrl, &challenge); err != nil {
 		return fmt.Errorf("read authentication challenge: %w", err)
 	}
-	if challenge.ProtocolVersion != protocolVersion || challenge.ChallengeID == "" ||
+	if challenge.ProtocolVersion != protocol.IdentityDeviceProtocolVersion || challenge.ChallengeID == "" ||
 		challenge.ServerInstanceID == "" || len(challenge.ServerNonce) != 32 || time.Now().Unix() > challenge.ExpiresAt {
 		return errors.New("server returned an invalid authentication challenge")
 	}

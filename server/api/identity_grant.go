@@ -40,8 +40,18 @@ func parseGrantExpiry(raw string) (*time.Time, error) {
 }
 
 func (r *Router) handleListDeviceIdentityGrants(w http.ResponseWriter, req *http.Request) {
+	targetDeviceID := strings.TrimSpace(req.URL.Query().Get("targetDeviceId"))
+	if requestOwner(req) != "" {
+		if targetDeviceID == "" {
+			writeError(w, http.StatusBadRequest, "targetDeviceId is required")
+			return
+		}
+		if !r.requireDeviceIDAccess(w, req, targetDeviceID) {
+			return
+		}
+	}
 	items, err := r.db.ListDeviceIdentityGrants(
-		req.URL.Query().Get("targetDeviceId"),
+		targetDeviceID,
 		req.URL.Query().Get("granteeIdentityId"),
 		req.URL.Query().Get("feature"),
 	)
@@ -56,6 +66,9 @@ func (r *Router) handleCreateDeviceIdentityGrant(w http.ResponseWriter, req *htt
 	var body deviceIdentityGrantRequest
 	if err := decodeJSON(w, req, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !r.requireDeviceIDAccess(w, req, body.TargetDeviceID) {
 		return
 	}
 	expiresAt, err := parseGrantExpiry(body.ExpiresAt)
@@ -103,6 +116,9 @@ func (r *Router) handleUpdateDeviceIdentityGrant(w http.ResponseWriter, req *htt
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to load device identity grant")
 		}
+		return
+	}
+	if !r.requireDeviceIDAccess(w, req, current.TargetDeviceID) {
 		return
 	}
 
@@ -157,6 +173,9 @@ func (r *Router) handleDeleteDeviceIdentityGrant(w http.ResponseWriter, req *htt
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed to load device identity grant")
 		}
+		return
+	}
+	if !r.requireDeviceIDAccess(w, req, current.TargetDeviceID) {
 		return
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)

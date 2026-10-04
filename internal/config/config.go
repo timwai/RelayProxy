@@ -93,7 +93,8 @@ type AgentConfigFile struct {
 	} `yaml:"server"`
 
 	Device struct {
-		Name string `yaml:"name"`
+		Name       string `yaml:"name"`
+		IdentityID string `yaml:"identity_id"`
 	} `yaml:"device"`
 
 	Transport struct {

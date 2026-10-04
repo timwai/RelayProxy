@@ -14,7 +14,7 @@ import (
 )
 
 func TestRoutingUpdateKeepsExistingTCPAndRejectsNewFlows(t *testing.T) {
-	c, err := NewClient(`{"serverAddress":"relay.example.com","routing":{"mode":"direct"}}`, filepath.Join(t.TempDir(), "identity.json"))
+	c, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"team-test","routing":{"mode":"direct"}}`, filepath.Join(t.TempDir(), "identity.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,11 +87,11 @@ func TestVPNAuthenticationAndPackageGroups(t *testing.T) {
 	}
 }
 
-func TestIdentityKeyRequiresVerifiedTLS(t *testing.T) {
+func TestPublicIdentityIDAllowsConfiguredTransport(t *testing.T) {
 	for _, settings := range []string{`"tlsEnabled":false`, `"insecureTLS":true`} {
-		_, err := normalizeConfig(`{"serverAddress":"relay.example.com","accessKey":"rpk_test",` + settings + `}`)
-		if err == nil || !strings.Contains(err.Error(), "certificate verification") {
-			t.Fatalf("unsafe credential transport: %v", err)
+		_, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"team-test",` + settings + `}`)
+		if err != nil {
+			t.Fatalf("public identity id rejected: %v", err)
 		}
 	}
 }

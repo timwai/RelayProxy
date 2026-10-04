@@ -15,9 +15,8 @@ type DeviceSession struct {
 	DeviceName     string
 	Fingerprint    string   // verified installation public-key fingerprint
 	OwnerUserID    string   // legacy authenticated ownership snapshot
-	IdentityID     string   // v4 server-derived connection identity
+	IdentityID     string   // server-resolved connection identity
 	IdentityName   string   // display-only identity name snapshot
-	AccessKeyID    string   // exact v4 key used by this authenticated session
 	PolicyRevision int64    // identity record revision at authentication time
 	Mode           string   // "CLIENT", "EXIT", "BOTH"
 	Capabilities   []string // authenticated transport/protocol features
@@ -224,9 +223,8 @@ func (m *Manager) ChangeDeviceAuthorization(deviceID string, revoke bool, change
 	return nil
 }
 
-// InvalidateIdentity closes every authenticated v4 session for an identity.
-// It is intentionally conservative for M2 authorization edits: reconnecting
-// refreshes the server-derived resource inventory and guarantees that existing
+// InvalidateIdentity closes every authenticated v5 session for an identity.
+// Reconnecting refreshes the server-derived resource inventory and guarantees that existing
 // Relay streams cannot outlive a revoked cross-identity grant.
 func (m *Manager) InvalidateIdentity(identityID string) []string {
 	if identityID == "" {
@@ -359,8 +357,8 @@ func (m *Manager) GetExitsForOwner(ownerUserID string) []*DeviceSession {
 	return res
 }
 
-// GetExitsForIdentity returns only exits authenticated under the same v4
-// connection identity. Cross-identity grants are layered on top in M2.
+// GetExitsForIdentity returns only exits authenticated under the same v5
+// connection identity. Cross-identity grants are layered on top by policy.
 func (m *Manager) GetExitsForIdentity(identityID string) []*DeviceSession {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

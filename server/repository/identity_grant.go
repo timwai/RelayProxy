@@ -134,8 +134,9 @@ func (db *DB) validateDeviceIdentityGrant(tx *sql.Tx, targetDeviceID, granteeIde
 	if err := tx.QueryRow(`SELECT status FROM identities WHERE id = ?`, targetIdentity.String).Scan(&targetIdentityStatus); err != nil {
 		return nil, err
 	}
-	_ = granteeStatus
-	_ = targetIdentityStatus
+	if granteeStatus != IdentityStatusActive || targetIdentityStatus != IdentityStatusActive {
+		return nil, errors.New("both target and grantee identities must be active")
+	}
 
 	for _, feature := range features {
 		switch feature {
@@ -492,7 +493,7 @@ func (db *DB) HasActiveDeviceIdentityGrant(targetDeviceID, granteeIdentityID, fe
 	return false, rows.Err()
 }
 
-// authorizeIdentityDeviceFeature evaluates only the v4 identity model. Legacy
+// authorizeIdentityDeviceFeature evaluates only the v5 identity model. Legacy
 // owner semantics stay in the feature-specific wrappers during migration.
 func (db *DB) authorizeIdentityDeviceFeature(clientDeviceID, targetDeviceID, feature string) (bool, bool, error) {
 	if clientDeviceID == "" || targetDeviceID == "" || clientDeviceID == targetDeviceID {

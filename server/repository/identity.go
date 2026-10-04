@@ -1,11 +1,7 @@
 package repository
 
 import (
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -17,24 +13,66 @@ import (
 const (
 	IdentityStatusActive   = "active"
 	IdentityStatusDisabled = "disabled"
-
-	IdentityAccessKeyPrefix = "rpk_"
 )
 
 var (
-	ErrInvalidIdentityAccessKey = errors.New("invalid or inactive identity access key")
+	ErrInvalidIdentity          = errors.New("invalid or inactive identity")
 	ErrIdentityRevisionConflict = errors.New("identity revision conflict")
 )
 
 type Identity struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Status         string    `json:"status"`
-	PolicyRevision int64     `json:"policyRevision"`
-	CreatedBy      string    `json:"createdBy"`
-	UpdatedBy      string    `json:"updatedBy"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID              string    `json:"id"`
+	ShortID         string    `json:"shortId"`
+	Name            string    `json:"name"`
+	Status          string    `json:"status"`
+	PolicyRevision  int64     `json:"policyRevision"`
+	LoginConfigured bool      `json:"loginConfigured"`
+	CreatedBy       string    `json:"createdBy"`
+	UpdatedBy       string    `json:"updatedBy"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+func validateIdentityShortID(value string) error {
+	if len(value) < 4 || len(value) > 20 {
+		return errors.New("identity id must contain 4 to 20 lowercase letters, digits or hyphens")
+	}
+	for index, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || (char == '-' && index > 0 && index < len(value)-1) {
+			continue
+		}
+		return errors.New("identity id must contain 4 to 20 lowercase letters, digits or hyphens")
+	}
+	return nil
+}
+
+func newIdentityShortID() string {
+	return "id-" + strings.ToLower(uuid.NewString()[:8])
+}
+
+func (db *DB) ensureIdentityShortIDs() error {
+	rows, err := db.Query(`SELECT id FROM identities WHERE short_id IS NULL OR short_id = '' ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := db.Exec(`UPDATE identities SET short_id = ? WHERE id = ?`, newIdentityShortID(), id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type IdentityUpdate struct {
@@ -43,26 +81,7 @@ type IdentityUpdate struct {
 	PolicyRevision int64
 }
 
-type IdentityAccessKey struct {
-	ID         string     `json:"id"`
-	IdentityID string     `json:"identityId"`
-	Label      string     `json:"label,omitempty"`
-	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
-	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
-	CreatedBy  string     `json:"createdBy"`
-	RevokedBy  string     `json:"revokedBy,omitempty"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
-}
-
-type IssuedIdentityAccessKey struct {
-	IdentityAccessKey
-	AccessKey string `json:"accessKey"`
-}
-
-type IdentityAccessAuthorization struct {
-	KeyID          string
-	KeyDigest      string
+type IdentityAuthorization struct {
 	IdentityID     string
 	IdentityName   string
 	PolicyRevision int64
@@ -79,6 +98,7 @@ func (db *DB) ensureIdentityAccessSchema() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS identities (
 			id VARCHAR(64) PRIMARY KEY,
+			short_id VARCHAR(32),
 			name VARCHAR(100) NOT NULL UNIQUE,
 			status VARCHAR(20) NOT NULL,
 			capabilities TEXT NOT NULL,
@@ -87,19 +107,6 @@ func (db *DB) ensureIdentityAccessSchema() error {
 			updated_by VARCHAR(36) NOT NULL,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
-		)`,
-		`CREATE TABLE IF NOT EXISTS identity_access_keys (
-			id VARCHAR(64) PRIMARY KEY,
-			identity_id VARCHAR(64) NOT NULL,
-			label VARCHAR(100),
-			key_digest VARCHAR(64) NOT NULL UNIQUE,
-			expires_at TIMESTAMP,
-			revoked_at TIMESTAMP,
-			created_by VARCHAR(36) NOT NULL,
-			revoked_by VARCHAR(36),
-			created_at TIMESTAMP NOT NULL,
-			last_used_at TIMESTAMP,
-			FOREIGN KEY(identity_id) REFERENCES identities(id) ON DELETE CASCADE
 		)`,
 		`CREATE TABLE IF NOT EXISTS identity_memberships (
 			identity_id VARCHAR(64) NOT NULL,
@@ -140,8 +147,6 @@ func (db *DB) ensureIdentityAccessSchema() error {
 			UNIQUE(resource_id, grantee_identity_id),
 			FOREIGN KEY(grantee_identity_id) REFERENCES identities(id) ON DELETE CASCADE
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_identity_keys_identity ON identity_access_keys(identity_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_identity_keys_digest ON identity_access_keys(key_digest)`,
 		`CREATE INDEX IF NOT EXISTS idx_identity_memberships_user ON identity_memberships(user_id, identity_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_device_identity_grants_target ON device_identity_grants(target_device_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_device_identity_grants_grantee ON device_identity_grants(grantee_identity_id, target_device_id)`,
@@ -156,6 +161,18 @@ func (db *DB) ensureIdentityAccessSchema() error {
 	if err := db.ensureSQLiteColumn("devices", "identity_id", "VARCHAR(64)"); err != nil {
 		return err
 	}
+	if err := db.ensureSQLiteColumn("identities", "short_id", "VARCHAR(32)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("device_enrollment_requests", "identity_id", "VARCHAR(64)"); err != nil {
+		return err
+	}
+	if err := db.ensureIdentityShortIDs(); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_identities_short_id ON identities(short_id)`); err != nil {
+		return err
+	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_devices_identity ON devices(identity_id)`); err != nil {
 		return err
 	}
@@ -163,6 +180,11 @@ func (db *DB) ensureIdentityAccessSchema() error {
 }
 
 func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {
+	return db.CreateIdentityWithShortID(newIdentityShortID(), name, actor)
+}
+
+func (db *DB) CreateIdentityWithShortID(shortID, name, actor string) (*Identity, error) {
+	shortID = strings.ToLower(strings.TrimSpace(shortID))
 	name = strings.TrimSpace(name)
 	actor = strings.TrimSpace(actor)
 	if name == "" {
@@ -174,9 +196,12 @@ func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {
 	if actor == "" {
 		return nil, errors.New("actor is required")
 	}
+	if err := validateIdentityShortID(shortID); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	item := &Identity{
-		ID: "idn_" + uuid.NewString(), Name: name, Status: IdentityStatusActive,
+		ID: "idn_" + uuid.NewString(), ShortID: shortID, Name: name, Status: IdentityStatusActive,
 		PolicyRevision: 1,
 		CreatedBy:      actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now,
 	}
@@ -186,13 +211,65 @@ func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {
 	}
 	defer tx.Rollback()
 	if _, err := tx.Exec(`INSERT INTO identities
-		(id, name, status, capabilities, policy_revision, created_by, updated_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, item.Name, item.Status, "[]", item.PolicyRevision, actor, actor, now, now); err != nil {
+		(id, short_id, name, status, capabilities, policy_revision, created_by, updated_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		item.ID, item.ShortID, item.Name, item.Status, "[]", item.PolicyRevision, actor, actor, now, now); err != nil {
 		return nil, err
 	}
 	if err := insertAuthorizationAudit(tx, "identity.create", actor, "identity", item.ID,
-		map[string]any{"name": item.Name}, now); err != nil {
+		map[string]any{"shortId": item.ShortID, "name": item.Name}, now); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+// CreateIdentityWithLogin creates the isolation boundary and its independent
+// management account atomically. The short ID is both the device-facing public
+// identifier and the login username.
+func (db *DB) CreateIdentityWithLogin(shortID, name, actor, passwordHash string) (*Identity, error) {
+	shortID = strings.ToLower(strings.TrimSpace(shortID))
+	name, actor, passwordHash = strings.TrimSpace(name), strings.TrimSpace(actor), strings.TrimSpace(passwordHash)
+	if name == "" || actor == "" || passwordHash == "" {
+		return nil, errors.New("identity name, actor and password hash are required")
+	}
+	if len(name) > 100 {
+		return nil, errors.New("identity name is too long")
+	}
+	if err := validateIdentityShortID(shortID); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	item := &Identity{
+		ID: "idn_" + uuid.NewString(), ShortID: shortID, Name: name, Status: IdentityStatusActive,
+		PolicyRevision: 1, LoginConfigured: true,
+		CreatedBy: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now,
+	}
+	userID := uuid.NewString()
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`INSERT INTO identities
+		(id, short_id, name, status, capabilities, policy_revision, created_by, updated_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, '[]', ?, ?, ?, ?, ?)`, item.ID, item.ShortID, item.Name, item.Status,
+		item.PolicyRevision, actor, actor, now, now); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`INSERT INTO users
+		(id, username, password_hash, display_name, role, status, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 'user', 'active', ?, ?)`, userID, shortID, passwordHash, name, now, now); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(`INSERT INTO identity_memberships (identity_id, user_id, role, created_by, created_at)
+		VALUES (?, ?, 'owner', ?, ?)`, item.ID, userID, actor, now); err != nil {
+		return nil, err
+	}
+	if err := insertAuthorizationAudit(tx, "identity.create", actor, "identity", item.ID,
+		map[string]any{"shortId": item.ShortID, "name": item.Name, "loginConfigured": true}, now); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -202,7 +279,8 @@ func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {
 }
 
 func (db *DB) ListIdentities() ([]*Identity, error) {
-	rows, err := db.Query(`SELECT id, name, status, policy_revision,
+	rows, err := db.Query(`SELECT id, short_id, name, status, policy_revision,
+		EXISTS(SELECT 1 FROM identity_memberships WHERE identity_id = identities.id),
 		created_by, updated_by, created_at, updated_at
 		FROM identities ORDER BY name, id`)
 	if err != nil {
@@ -212,7 +290,7 @@ func (db *DB) ListIdentities() ([]*Identity, error) {
 	result := make([]*Identity, 0)
 	for rows.Next() {
 		item := &Identity{}
-		if err := rows.Scan(&item.ID, &item.Name, &item.Status, &item.PolicyRevision,
+		if err := rows.Scan(&item.ID, &item.ShortID, &item.Name, &item.Status, &item.PolicyRevision, &item.LoginConfigured,
 			&item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
@@ -223,10 +301,11 @@ func (db *DB) ListIdentities() ([]*Identity, error) {
 
 func (db *DB) GetIdentity(id string) (*Identity, error) {
 	item := &Identity{}
-	err := db.QueryRow(`SELECT id, name, status, policy_revision,
+	err := db.QueryRow(`SELECT id, short_id, name, status, policy_revision,
+		EXISTS(SELECT 1 FROM identity_memberships WHERE identity_id = identities.id),
 		created_by, updated_by, created_at, updated_at
 		FROM identities WHERE id = ?`, strings.TrimSpace(id)).Scan(
-		&item.ID, &item.Name, &item.Status, &item.PolicyRevision,
+		&item.ID, &item.ShortID, &item.Name, &item.Status, &item.PolicyRevision, &item.LoginConfigured,
 		&item.CreatedBy, &item.UpdatedBy, &item.CreatedAt, &item.UpdatedAt)
 	return item, err
 }
@@ -243,9 +322,10 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	defer tx.Rollback()
 
 	current := &Identity{}
-	if err := tx.QueryRow(`SELECT id, name, status, policy_revision,
+	if err := tx.QueryRow(`SELECT id, short_id, name, status, policy_revision,
+		EXISTS(SELECT 1 FROM identity_memberships WHERE identity_id = identities.id),
 		created_by, updated_by, created_at, updated_at FROM identities WHERE id = ?`, id).Scan(
-		&current.ID, &current.Name, &current.Status, &current.PolicyRevision,
+		&current.ID, &current.ShortID, &current.Name, &current.Status, &current.PolicyRevision, &current.LoginConfigured,
 		&current.CreatedBy, &current.UpdatedBy, &current.CreatedAt, &current.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -286,6 +366,11 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	if rows != 1 {
 		return nil, ErrIdentityRevisionConflict
 	}
+	if _, err := tx.Exec(`UPDATE users SET display_name = ?, status = ?, updated_at = ?
+		WHERE id IN (SELECT user_id FROM identity_memberships WHERE identity_id = ?)`,
+		nextName, nextStatus, now, id); err != nil {
+		return nil, err
+	}
 	if err := insertAuthorizationAudit(tx, "identity.update", actor, "identity", id,
 		map[string]any{
 			"before": map[string]any{"name": current.Name, "status": current.Status, "policyRevision": current.PolicyRevision},
@@ -304,160 +389,68 @@ func (db *DB) UpdateIdentity(id, actor string, update IdentityUpdate) (*Identity
 	return current, nil
 }
 
-func (db *DB) IssueIdentityAccessKey(identityID, actor, label string, expiresAt *time.Time) (*IssuedIdentityAccessKey, error) {
-	identityID, actor, label = strings.TrimSpace(identityID), strings.TrimSpace(actor), strings.TrimSpace(label)
-	if identityID == "" || actor == "" {
-		return nil, errors.New("identity id and actor are required")
+func (db *DB) ResolveIdentity(shortID string) (*IdentityAuthorization, error) {
+	shortID = strings.ToLower(strings.TrimSpace(shortID))
+	if err := validateIdentityShortID(shortID); err != nil {
+		return nil, ErrInvalidIdentity
 	}
-	if len(label) > 100 {
-		return nil, errors.New("access key label is too long")
+	var authorization IdentityAuthorization
+	err := db.QueryRow(`SELECT id, name, policy_revision FROM identities WHERE short_id = ? AND status = ?`,
+		shortID, IdentityStatusActive).Scan(&authorization.IdentityID, &authorization.IdentityName, &authorization.PolicyRevision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrInvalidIdentity
 	}
-	if expiresAt != nil {
-		value := expiresAt.UTC()
-		if !value.After(time.Now().UTC()) {
-			return nil, errors.New("access key expiry must be in the future")
-		}
-		expiresAt = &value
-	}
-	identity, err := db.GetIdentity(identityID)
-	if err != nil {
-		return nil, err
-	}
-	if identity.Status != IdentityStatusActive {
-		return nil, errors.New("cannot issue an access key for a disabled identity")
-	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		return nil, fmt.Errorf("generate access key: %w", err)
-	}
-	plain := IdentityAccessKeyPrefix + base64.RawURLEncoding.EncodeToString(secret)
-	digest := identityAccessKeyDigest(plain)
-	now := time.Now().UTC()
-	item := &IssuedIdentityAccessKey{
-		IdentityAccessKey: IdentityAccessKey{
-			ID: "iak_" + uuid.NewString(), IdentityID: identityID, Label: label,
-			ExpiresAt: expiresAt, CreatedBy: actor, CreatedAt: now,
-		},
-		AccessKey: plain,
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO identity_access_keys
-		(id, identity_id, label, key_digest, expires_at, created_by, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		item.ID, identityID, nullableString(label), digest, expiresAt, actor, now); err != nil {
-		return nil, err
-	}
-	if err := insertAuthorizationAudit(tx, "identity.access_key.issue", actor, "identity_access_key", item.ID,
-		map[string]any{"identityId": identityID, "label": label, "expiresAt": expiresAt}, now); err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return item, nil
+	return &authorization, err
 }
 
-func (db *DB) ListIdentityAccessKeys(identityID string) ([]*IdentityAccessKey, error) {
-	rows, err := db.Query(`SELECT id, identity_id, COALESCE(label, ''), expires_at, revoked_at,
-		created_by, COALESCE(revoked_by, ''), created_at, last_used_at
-		FROM identity_access_keys WHERE identity_id = ? ORDER BY created_at DESC, id DESC`, strings.TrimSpace(identityID))
-	if err != nil {
-		return nil, err
+func (db *DB) ConfigureIdentityLogin(identityID, passwordHash, actor string) error {
+	identityID, passwordHash, actor = strings.TrimSpace(identityID), strings.TrimSpace(passwordHash), strings.TrimSpace(actor)
+	if identityID == "" || passwordHash == "" || actor == "" {
+		return errors.New("identity id, password hash and actor are required")
 	}
-	defer rows.Close()
-	result := make([]*IdentityAccessKey, 0)
-	for rows.Next() {
-		item := &IdentityAccessKey{}
-		var expires, revoked, lastUsed sql.NullTime
-		if err := rows.Scan(&item.ID, &item.IdentityID, &item.Label, &expires, &revoked,
-			&item.CreatedBy, &item.RevokedBy, &item.CreatedAt, &lastUsed); err != nil {
-			return nil, err
-		}
-		if expires.Valid {
-			value := expires.Time
-			item.ExpiresAt = &value
-		}
-		if revoked.Valid {
-			value := revoked.Time
-			item.RevokedAt = &value
-		}
-		if lastUsed.Valid {
-			value := lastUsed.Time
-			item.LastUsedAt = &value
-		}
-		result = append(result, item)
-	}
-	return result, rows.Err()
-}
-
-func (db *DB) RevokeIdentityAccessKey(identityID, keyID, actor string) error {
-	identityID, keyID, actor = strings.TrimSpace(identityID), strings.TrimSpace(keyID), strings.TrimSpace(actor)
-	if identityID == "" || keyID == "" || actor == "" {
-		return errors.New("identity id, key id and actor are required")
-	}
-	now := time.Now().UTC()
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.Exec(`UPDATE identity_access_keys SET revoked_at = ?, revoked_by = ?
-		WHERE id = ? AND identity_id = ? AND revoked_at IS NULL`, now, actor, keyID, identityID)
-	if err != nil {
+	var shortID, name, status string
+	if err := tx.QueryRow(`SELECT short_id, name, status FROM identities WHERE id = ?`, identityID).Scan(&shortID, &name, &status); err != nil {
 		return err
 	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		var exists int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM identity_access_keys WHERE id = ? AND identity_id = ?`, keyID, identityID).Scan(&exists); err != nil {
+	now := time.Now().UTC()
+	var userID string
+	err = tx.QueryRow(`SELECT user_id FROM identity_memberships WHERE identity_id = ? ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, created_at LIMIT 1`, identityID).Scan(&userID)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		userID = uuid.NewString()
+		if _, err := tx.Exec(`INSERT INTO users (id, username, password_hash, display_name, role, status, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 'user', ?, ?, ?)`, userID, shortID, passwordHash, name, status, now, now); err != nil {
 			return err
 		}
-		if exists == 0 {
-			return sql.ErrNoRows
+		if _, err := tx.Exec(`INSERT INTO identity_memberships (identity_id, user_id, role, created_by, created_at)
+			VALUES (?, ?, 'owner', ?, ?)`, identityID, userID, actor, now); err != nil {
+			return err
 		}
-		return tx.Commit()
+	case err != nil:
+		return err
+	default:
+		if _, err := tx.Exec(`UPDATE users SET username = ?, password_hash = ?, display_name = ?, status = ?, updated_at = ? WHERE id = ?`,
+			shortID, passwordHash, name, status, now, userID); err != nil {
+			return err
+		}
 	}
-	if err := insertAuthorizationAudit(tx, "identity.access_key.revoke", actor, "identity_access_key", keyID,
-		map[string]any{"identityId": identityID}, now); err != nil {
+	if err := insertAuthorizationAudit(tx, "identity.login.configure", actor, "identity", identityID,
+		map[string]any{"username": shortID}, now); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (db *DB) ResolveIdentityAccessKey(accessKey string) (*IdentityAccessAuthorization, error) {
-	accessKey = strings.TrimSpace(accessKey)
-	if accessKey == "" || !strings.HasPrefix(accessKey, IdentityAccessKeyPrefix) {
-		return nil, ErrInvalidIdentityAccessKey
-	}
-	digest := identityAccessKeyDigest(accessKey)
-	now := time.Now().UTC()
-	var authorization IdentityAccessAuthorization
-	err := db.QueryRow(`SELECT k.id, k.key_digest, i.id, i.name, i.policy_revision
-		FROM identity_access_keys k
-		JOIN identities i ON i.id = k.identity_id
-		WHERE k.key_digest = ?
-		  AND k.revoked_at IS NULL
-		  AND (k.expires_at IS NULL OR k.expires_at > ?)
-		  AND i.status = ?`, digest, now, IdentityStatusActive).Scan(
-		&authorization.KeyID, &authorization.KeyDigest, &authorization.IdentityID,
-		&authorization.IdentityName, &authorization.PolicyRevision)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInvalidIdentityAccessKey
-	}
-	if err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(`UPDATE identity_access_keys SET last_used_at = ? WHERE id = ?`, now, authorization.KeyID); err != nil {
-		return nil, err
-	}
-	return &authorization, nil
+func (db *DB) GetIdentityLoginUserID(identityID string) (string, error) {
+	var userID string
+	err := db.QueryRow(`SELECT user_id FROM identity_memberships WHERE identity_id = ?
+		ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, created_at LIMIT 1`, strings.TrimSpace(identityID)).Scan(&userID)
+	return userID, err
 }
 
 func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIdentitySummary, error) {
@@ -471,8 +464,8 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 	}
 	defer tx.Rollback()
 
-	var current sql.NullString
-	if err := tx.QueryRow(`SELECT identity_id FROM devices WHERE id = ?`, deviceID).Scan(&current); err != nil {
+	var current, currentOwner sql.NullString
+	if err := tx.QueryRow(`SELECT identity_id, owner_user_id FROM devices WHERE id = ?`, deviceID).Scan(&current, &currentOwner); err != nil {
 		return nil, err
 	}
 	var identityExists int
@@ -482,7 +475,15 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 	if identityExists != 1 {
 		return nil, sql.ErrNoRows
 	}
-	if current.String != identityID || current.Valid != (identityID != "") {
+	var identityOwner string
+	err = tx.QueryRow(`SELECT user_id FROM identity_memberships WHERE identity_id = ?
+		ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, created_at LIMIT 1`, identityID).Scan(&identityOwner)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	identityChanged := current.String != identityID || !current.Valid
+	ownerChanged := identityOwner != "" && currentOwner.String != identityOwner
+	if identityChanged {
 		now := time.Now().UTC()
 
 		// A grant shares one concrete target device from its current identity.
@@ -524,12 +525,19 @@ func (db *DB) SetDeviceIdentity(deviceID, identityID, actor string) (*DeviceIden
 			}
 		}
 
-		if _, err := tx.Exec(`UPDATE devices SET identity_id = ?, updated_at = ? WHERE id = ?`,
-			identityID, now, deviceID); err != nil {
-			return nil, err
-		}
 		if err := insertAuthorizationAudit(tx, "device.identity.update", actor, "device", deviceID,
 			map[string]any{"before": current.String, "after": identityID}, now); err != nil {
+			return nil, err
+		}
+	}
+	if identityChanged || ownerChanged {
+		// Historical owner_user_id values identify the old approving account,
+		// not the isolation identity. Synchronize ownership even when the device
+		// already carries this identity, which repairs assignments made before
+		// independent identity logins were introduced.
+		if _, err := tx.Exec(`UPDATE devices SET identity_id = ?,
+			owner_user_id = CASE WHEN ? <> '' THEN ? ELSE owner_user_id END,
+			updated_at = ? WHERE id = ?`, identityID, identityOwner, identityOwner, time.Now().UTC(), deviceID); err != nil {
 			return nil, err
 		}
 	}
@@ -569,41 +577,14 @@ func (db *DB) ListDeviceIDsForIdentity(identityID string) ([]string, error) {
 	return result, rows.Err()
 }
 
-func identityAccessKeyDigest(accessKey string) string {
-	sum := sha256.Sum256([]byte(accessKey))
-	return hex.EncodeToString(sum[:])
-}
-
-// ObserveIdentityDevice auto-enrolls a v4 device after its identity access key
-// and Ed25519 proof have been validated by the gateway. Identity is derived
-// exclusively from the server-side access-key record.
-func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observation DeviceIdentityObservation) (*DeviceAuthorization, error) {
-	if access.IdentityID == "" || access.KeyID == "" {
-		return nil, ErrInvalidIdentityAccessKey
+// ObserveIdentityDevice records a device under the resolved identity. New devices
+// remain pending until an administrator of that identity approves their capabilities.
+func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation DeviceIdentityObservation) (*DeviceAuthorization, error) {
+	if access.IdentityID == "" {
+		return nil, ErrInvalidIdentity
 	}
 	if observation.Fingerprint == "" || observation.InstallationID == "" || len(observation.PublicKey) == 0 {
 		return nil, errors.New("incomplete device identity")
-	}
-	now := time.Now().UTC()
-	tx, err := db.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	// The challenge snapshot can outlive a key revocation, expiry, identity
-	// disable, or metadata update. Re-read the key and identity in the same
-	// transaction that enrolls or refreshes the device.
-	err = tx.QueryRow(`SELECT i.name, i.policy_revision
-		FROM identity_access_keys k JOIN identities i ON i.id = k.identity_id
-		WHERE k.id = ? AND k.identity_id = ? AND k.key_digest = ?
-		  AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at > ?)
-		  AND i.status = ?`, access.KeyID, access.IdentityID, access.KeyDigest,
-		now, IdentityStatusActive).Scan(&access.IdentityName, &access.PolicyRevision)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrInvalidIdentityAccessKey
-	}
-	if err != nil {
-		return nil, err
 	}
 	requested := filterApprovedCapabilities(observation.RequestedCapabilities, observation.RequestedCapabilities)
 	if len(requested) == 0 {
@@ -616,8 +597,17 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 	if err != nil {
 		return nil, err
 	}
-	initialApprovedRaw, err := encodeCapabilities(requested)
+	now := time.Now().UTC()
+	tx, err := db.Begin()
 	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if err := tx.QueryRow(`SELECT name, policy_revision FROM identities WHERE id = ? AND status = ?`,
+		access.IdentityID, IdentityStatusActive).Scan(&access.IdentityName, &access.PolicyRevision); errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrInvalidIdentity
+	} else if err != nil {
 		return nil, err
 	}
 
@@ -634,10 +624,6 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 			return nil, errors.New("device identity metadata does not match its first observation")
 		}
 		switch identityState {
-		case EnrollmentRevoked:
-			return &DeviceAuthorization{State: EnrollmentRevoked, DeviceID: existingDeviceID.String}, nil
-		case EnrollmentRejected:
-			return &DeviceAuthorization{State: EnrollmentRejected, DeviceID: existingDeviceID.String}, nil
 		case EnrollmentApproved:
 			if !existingDeviceID.Valid || existingDeviceID.String == "" {
 				return nil, errors.New("approved identity has no device")
@@ -651,7 +637,7 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 			if approvalState == EnrollmentRevoked {
 				return &DeviceAuthorization{State: EnrollmentRevoked, DeviceID: existingDeviceID.String}, nil
 			}
-			if !boundIdentity.Valid || boundIdentity.String == "" || boundIdentity.String != access.IdentityID {
+			if !boundIdentity.Valid || boundIdentity.String != access.IdentityID {
 				return nil, ErrDeviceIdentityConflict
 			}
 			approved, err := decodeCapabilities(approvedRaw)
@@ -669,81 +655,63 @@ func (db *DB) ObserveIdentityDevice(access IdentityAccessAuthorization, observat
 				return nil, err
 			}
 			return db.identityDeviceAuthorization(existingDeviceID.String, access, effective)
+		case EnrollmentRejected, EnrollmentRevoked:
+			return &DeviceAuthorization{State: identityState, DeviceID: existingDeviceID.String}, nil
 		case EnrollmentPending:
-			// A previously pending legacy observation may become an automatic
-			// v4 enrollment only because possession of a valid identity key is
-			// now proven. Rejected/revoked observations are never resurrected.
+			var pendingIdentity string
+			if err := tx.QueryRow(`SELECT identity_id FROM device_enrollment_requests WHERE fingerprint = ?`, observation.Fingerprint).Scan(&pendingIdentity); err != nil {
+				return nil, err
+			}
+			if pendingIdentity != access.IdentityID {
+				return nil, ErrDeviceIdentityConflict
+			}
 		default:
 			return nil, fmt.Errorf("unsupported device identity state %q", identityState)
 		}
 	case errors.Is(err, sql.ErrNoRows):
-		// First observation is created below.
+		if _, err := tx.Exec(`INSERT INTO device_identities
+			(fingerprint, device_id, installation_id, public_key, status, created_at, updated_at)
+			VALUES (?, NULL, ?, ?, ?, ?, ?)`, observation.Fingerprint, observation.InstallationID,
+			observation.PublicKey, EnrollmentPending, now, now); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, err
 	}
 
-	deviceID := "dev_" + uuid.NewString()
-	if _, err := tx.Exec(`INSERT INTO devices
-		(id, owner_user_id, identity_id, name, public_key_fingerprint, installation_id,
-		 platform, arch, client_version, approval_state, requested_capabilities,
-		 approved_capabilities, created_at, updated_at)
-		VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		deviceID, access.IdentityID, fallbackDeviceName(observation.DeviceName), observation.Fingerprint,
-		observation.InstallationID, observation.Platform, observation.Arch, observation.ClientVersion,
-		EnrollmentApproved, requestedRaw, initialApprovedRaw, now, now); err != nil {
+	requestID := "enr_" + uuid.NewString()
+	if _, err := tx.Exec(`INSERT INTO device_enrollment_requests
+		(id, identity_id, fingerprint, installation_id, public_key, device_name, platform, arch, client_version,
+		 requested_capabilities, state, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(fingerprint) DO UPDATE SET
+			device_name = excluded.device_name, platform = excluded.platform, arch = excluded.arch,
+			client_version = excluded.client_version, requested_capabilities = excluded.requested_capabilities,
+			last_seen_at = excluded.last_seen_at`,
+		requestID, access.IdentityID, observation.Fingerprint, observation.InstallationID, observation.PublicKey,
+		fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch, observation.ClientVersion,
+		requestedRaw, EnrollmentPending, now, now); err != nil {
 		return nil, err
 	}
-	if err == nil && identityState == EnrollmentPending {
-		result, err := tx.Exec(`UPDATE device_identities SET device_id = ?, status = ?, updated_at = ?
-			WHERE fingerprint = ? AND status = ?`,
-			deviceID, EnrollmentApproved, now, observation.Fingerprint, EnrollmentPending)
-		if err != nil {
-			return nil, err
-		}
-		if rows, err := result.RowsAffected(); err != nil || rows != 1 {
-			if err != nil {
-				return nil, err
-			}
-			return nil, errors.New("pending identity changed during automatic enrollment")
-		}
-		if _, err := tx.Exec(`UPDATE device_enrollment_requests
-			SET state = ?, reviewed_at = ?, reviewed_by = ?, rejection_reason = ''
-			WHERE fingerprint = ? AND state = ?`,
-			EnrollmentApproved, now, "identity:"+access.IdentityID, observation.Fingerprint, EnrollmentPending); err != nil {
-			return nil, err
-		}
-	} else {
-		if _, err := tx.Exec(`INSERT INTO device_identities
-			(fingerprint, device_id, installation_id, public_key, status, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?)`,
-			observation.Fingerprint, deviceID, observation.InstallationID, observation.PublicKey,
-			EnrollmentApproved, now, now); err != nil {
-			return nil, err
-		}
-	}
-	if err := replaceDeviceRuntimeGrants(tx, deviceID, requested, now); err != nil {
+	if _, err := tx.Exec(`UPDATE device_identities SET updated_at = ? WHERE fingerprint = ?`, now, observation.Fingerprint); err != nil {
 		return nil, err
 	}
-	if err := syncDeviceRDPService(tx, deviceID, fallbackDeviceName(observation.DeviceName), requested, now); err != nil {
-		return nil, err
-	}
-	if err := insertAuthorizationAudit(tx, "device.identity.auto_enroll", "identity:"+access.IdentityID, "device", deviceID,
-		map[string]any{"identityId": access.IdentityID, "accessKeyId": access.KeyID, "capabilities": requested}, now); err != nil {
+	if err := tx.QueryRow(`SELECT id FROM device_enrollment_requests WHERE fingerprint = ?`, observation.Fingerprint).Scan(&requestID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return db.identityDeviceAuthorization(deviceID, access, requested)
+	return &DeviceAuthorization{State: EnrollmentPending, RequestID: requestID, IdentityID: access.IdentityID, IdentityName: access.IdentityName}, nil
 }
 
-var ErrDeviceIdentityConflict = errors.New("device is already bound to another or legacy identity")
+var ErrDeviceIdentityConflict = errors.New("device is already bound to another identity")
 
-func (db *DB) identityDeviceAuthorization(deviceID string, access IdentityAccessAuthorization, effective []string) (*DeviceAuthorization, error) {
+func (db *DB) identityDeviceAuthorization(deviceID string, access IdentityAuthorization, effective []string) (*DeviceAuthorization, error) {
 	authorization := &DeviceAuthorization{
 		State: EnrollmentApproved, DeviceID: deviceID,
 		IdentityID: access.IdentityID, IdentityName: access.IdentityName,
-		AccessKeyID: access.KeyID, PolicyRevision: access.PolicyRevision,
+		PolicyRevision:       access.PolicyRevision,
 		ApprovedCapabilities: append([]string(nil), effective...),
 	}
 	if containsCapabilityValue(effective, "rdp.controller") {
@@ -812,23 +780,19 @@ func syncDeviceRDPService(tx *sql.Tx, deviceID, deviceName string, capabilities 
 	return nil
 }
 
-// IsIdentityDeviceAuthorized is the register-time recheck for a v4 session.
-// It verifies the exact access key, identity, device binding and revocation
-// state under the session manager authorization gate.
-func (db *DB) IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID, keyID string) bool {
-	now := time.Now().UTC()
+// IsIdentityDeviceAuthorized rechecks the approved device-to-identity binding
+// immediately before a session is registered.
+func (db *DB) IsIdentityDeviceAuthorized(fingerprint, deviceID, identityID string) bool {
 	var count int
 	err := db.QueryRow(`SELECT COUNT(*)
 		FROM device_identities di
 		JOIN devices d ON d.id = di.device_id
 		JOIN identities i ON i.id = d.identity_id
-		JOIN identity_access_keys k ON k.identity_id = i.id
 		WHERE di.fingerprint = ? AND di.device_id = ? AND di.status = ?
 		  AND d.approval_state = ? AND d.identity_id = ?
-		  AND i.status = ? AND k.id = ? AND k.revoked_at IS NULL
-		  AND (k.expires_at IS NULL OR k.expires_at > ?)`,
+		  AND i.status = ?`,
 		fingerprint, deviceID, EnrollmentApproved, EnrollmentApproved,
-		identityID, IdentityStatusActive, keyID, now).Scan(&count)
+		identityID, IdentityStatusActive).Scan(&count)
 	return err == nil && count == 1
 }
 

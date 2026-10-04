@@ -36,7 +36,7 @@ func (db *DB) ListRDPTargetsForController(controllerID string) ([]*RDPTarget, er
 	}
 
 	if controllerIdentity.Valid && strings.TrimSpace(controllerIdentity.String) != "" {
-		// v4 visibility is policy-derived: same-identity targets and explicitly
+		// v5 visibility is policy-derived: same-identity targets and explicitly
 		// shared cross-identity targets use the exact admission check used by
 		// Relay/P2P RDP connections.
 		rows, err := db.Query(`SELECT target.id, target.name, target.last_seen_at, target.approved_capabilities,

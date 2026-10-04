@@ -37,7 +37,7 @@ type Router struct {
 	settings                       *config.ServerSettings
 	onDeviceRevoked                func(string)
 	onDeviceAuthorizationChanged   func(string)
-	onIdentityAuthorizationChanged func(identityID, accessKeyID string)
+	onIdentityAuthorizationChanged func(identityID string)
 	onDeviceIdentityGrantChanged   func(targetDeviceID, granteeIdentityID string)
 	onRDPIngressChanged            func(string)
 	onRDPIngressReload             func(string) error
@@ -119,8 +119,7 @@ func WithDeviceAuthorizationChanged(fn func(string)) RouterOption {
 }
 
 // WithIdentityAuthorizationChanged invalidates authenticated identity sessions.
-// accessKeyID is empty for identity-wide status or access changes.
-func WithIdentityAuthorizationChanged(fn func(identityID, accessKeyID string)) RouterOption {
+func WithIdentityAuthorizationChanged(fn func(identityID string)) RouterOption {
 	return func(r *Router) { r.onIdentityAuthorizationChanged = fn }
 }
 
@@ -247,21 +246,20 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("PUT /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateMessageChannel)))
 	r.mux.HandleFunc("DELETE /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteMessageChannel)))
 
-	// Identity APIs. Identity IDs appear only in the authenticated admin plane;
-	// Agents authenticate with an access key and never choose their own identity.
+	// Global administrators create isolation identities and their independent
+	// login accounts. Any authenticated identity may resolve active grant targets.
 	r.mux.HandleFunc("GET /api/v1/identities", r.requireAuth(r.requireAdmin(r.handleListIdentities)))
+	r.mux.HandleFunc("GET /api/v1/identity-options", r.requireAuth(r.handleListIdentityOptions))
 	r.mux.HandleFunc("POST /api/v1/identities", r.requireAuth(r.requireAdmin(r.handleCreateIdentity)))
 	r.mux.HandleFunc("PATCH /api/v1/identities/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateIdentity)))
-	r.mux.HandleFunc("GET /api/v1/identities/{id}/access-keys", r.requireAuth(r.requireAdmin(r.handleListIdentityAccessKeys)))
-	r.mux.HandleFunc("POST /api/v1/identities/{id}/access-keys", r.requireAuth(r.requireAdmin(r.handleIssueIdentityAccessKey)))
-	r.mux.HandleFunc("DELETE /api/v1/identities/{id}/access-keys/{keyId}", r.requireAuth(r.requireAdmin(r.handleRevokeIdentityAccessKey)))
+	r.mux.HandleFunc("PUT /api/v1/identities/{id}/password", r.requireAuth(r.requireAdmin(r.handleResetIdentityPassword)))
 
 	// Cross-identity authorization. Grants are always device -> identity and
 	// feature-scoped; same-identity access remains implicit.
-	r.mux.HandleFunc("GET /api/v1/device-identity-grants", r.requireAuth(r.requireAdmin(r.handleListDeviceIdentityGrants)))
-	r.mux.HandleFunc("POST /api/v1/device-identity-grants", r.requireAuth(r.requireAdmin(r.handleCreateDeviceIdentityGrant)))
-	r.mux.HandleFunc("PATCH /api/v1/device-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateDeviceIdentityGrant)))
-	r.mux.HandleFunc("DELETE /api/v1/device-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteDeviceIdentityGrant)))
+	r.mux.HandleFunc("GET /api/v1/device-identity-grants", r.requireAuth(r.handleListDeviceIdentityGrants))
+	r.mux.HandleFunc("POST /api/v1/device-identity-grants", r.requireAuth(r.handleCreateDeviceIdentityGrant))
+	r.mux.HandleFunc("PATCH /api/v1/device-identity-grants/{id}", r.requireAuth(r.handleUpdateDeviceIdentityGrant))
+	r.mux.HandleFunc("DELETE /api/v1/device-identity-grants/{id}", r.requireAuth(r.handleDeleteDeviceIdentityGrant))
 	r.mux.HandleFunc("GET /api/v1/system-identity-grants", r.requireAuth(r.requireAdmin(r.handleListSystemIdentityGrants)))
 	r.mux.HandleFunc("POST /api/v1/system-identity-grants", r.requireAuth(r.requireAdmin(r.handleCreateSystemIdentityGrant)))
 	r.mux.HandleFunc("PATCH /api/v1/system-identity-grants/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateSystemIdentityGrant)))
@@ -270,12 +268,12 @@ func (r *Router) registerRoutes() {
 	// Device APIs
 	r.mux.HandleFunc("GET /api/v1/devices", r.requireAuth(r.handleListDevices))
 	r.mux.HandleFunc("PUT /api/v1/devices/{id}/identity", r.requireAuth(r.requireAdmin(r.handleSetDeviceIdentity)))
-	r.mux.HandleFunc("GET /api/v1/enrollments", r.requireAuth(r.requireAdmin(r.handleListEnrollments)))
-	r.mux.HandleFunc("POST /api/v1/enrollments/{id}/approve", r.requireAuth(r.requireAdmin(r.handleApproveEnrollment)))
-	r.mux.HandleFunc("POST /api/v1/enrollments/{id}/reject", r.requireAuth(r.requireAdmin(r.handleRejectEnrollment)))
-	r.mux.HandleFunc("PUT /api/v1/devices/{id}/capabilities", r.requireAuth(r.requireAdmin(r.handleUpdateDeviceCapabilities)))
-	r.mux.HandleFunc("POST /api/v1/devices/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleRevokeDevice)))
-	r.mux.HandleFunc("DELETE /api/v1/devices/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteDevice)))
+	r.mux.HandleFunc("GET /api/v1/enrollments", r.requireAuth(r.handleListEnrollments))
+	r.mux.HandleFunc("POST /api/v1/enrollments/{id}/approve", r.requireAuth(r.handleApproveEnrollment))
+	r.mux.HandleFunc("POST /api/v1/enrollments/{id}/reject", r.requireAuth(r.handleRejectEnrollment))
+	r.mux.HandleFunc("PUT /api/v1/devices/{id}/capabilities", r.requireAuth(r.handleUpdateDeviceCapabilities))
+	r.mux.HandleFunc("POST /api/v1/devices/{id}/revoke", r.requireAuth(r.handleRevokeDevice))
+	r.mux.HandleFunc("DELETE /api/v1/devices/{id}", r.requireAuth(r.handleDeleteDevice))
 
 	// Exit APIs
 	r.mux.HandleFunc("GET /api/v1/exits", r.requireAuth(r.handleListExits))
@@ -866,8 +864,23 @@ func requestOwner(req *http.Request) string {
 	return user.ID
 }
 
+func requestIdentityScope(req *http.Request) string {
+	user := req.Context().Value(principalContextKey).(*repository.User)
+	if user.Role == "admin" {
+		return ""
+	}
+	if user.IdentityID == "" {
+		return "__no_identity__"
+	}
+	return user.IdentityID
+}
+
 func (r *Router) requireDeviceAccess(w http.ResponseWriter, req *http.Request) bool {
-	owner, err := r.db.GetDeviceOwnerUserID(req.PathValue("id"))
+	return r.requireDeviceIDAccess(w, req, req.PathValue("id"))
+}
+
+func (r *Router) requireDeviceIDAccess(w http.ResponseWriter, req *http.Request, deviceID string) bool {
+	owner, err := r.db.GetDeviceOwnerUserID(deviceID)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && requestOwner(req) != "" && owner != requestOwner(req)) {
 		// Do not reveal whether another user's device exists.
 		writeError(w, http.StatusNotFound, "device not found")
@@ -1024,7 +1037,7 @@ func (r *Router) handleListEnrollments(w http.ResponseWriter, req *http.Request)
 	if state == "" {
 		state = repository.EnrollmentPending
 	}
-	requests, err := r.db.ListEnrollmentRequests(state)
+	requests, err := r.db.ListEnrollmentRequestsForIdentity(state, requestIdentityScope(req))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list enrollment requests")
 		return
@@ -1043,7 +1056,7 @@ func (r *Router) handleApproveEnrollment(w http.ResponseWriter, req *http.Reques
 		}
 	}
 	userID, _ := req.Context().Value(userContextKey).(string)
-	device, err := r.db.ApproveEnrollment(req.PathValue("id"), userID, body.Capabilities)
+	device, err := r.db.ApproveEnrollmentForIdentity(req.PathValue("id"), userID, requestIdentityScope(req), body.Capabilities)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "pending enrollment not found")
@@ -1066,7 +1079,7 @@ func (r *Router) handleRejectEnrollment(w http.ResponseWriter, req *http.Request
 		}
 	}
 	userID, _ := req.Context().Value(userContextKey).(string)
-	if err := r.db.RejectEnrollment(req.PathValue("id"), userID, strings.TrimSpace(body.Reason)); err != nil {
+	if err := r.db.RejectEnrollmentForIdentity(req.PathValue("id"), userID, requestIdentityScope(req), strings.TrimSpace(body.Reason)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "pending enrollment not found")
 		} else {
@@ -1078,6 +1091,9 @@ func (r *Router) handleRejectEnrollment(w http.ResponseWriter, req *http.Request
 }
 
 func (r *Router) handleRevokeDevice(w http.ResponseWriter, req *http.Request) {
+	if !r.requireDeviceAccess(w, req) {
+		return
+	}
 	var body struct {
 		Reason string `json:"reason"`
 	}
@@ -1106,6 +1122,9 @@ func (r *Router) handleRevokeDevice(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleDeleteDevice(w http.ResponseWriter, req *http.Request) {
+	if !r.requireDeviceAccess(w, req) {
+		return
+	}
 	id := req.PathValue("id")
 	actor, _ := req.Context().Value(userContextKey).(string)
 	err := r.sessions.ChangeDeviceAuthorization(id, true, func() error {
@@ -1129,6 +1148,9 @@ func (r *Router) handleDeleteDevice(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) handleUpdateDeviceCapabilities(w http.ResponseWriter, req *http.Request) {
+	if !r.requireDeviceAccess(w, req) {
+		return
+	}
 	var body struct {
 		Capabilities []string `json:"capabilities"`
 	}

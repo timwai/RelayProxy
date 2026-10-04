@@ -96,6 +96,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 		return fmt.Errorf("config cannot be nil")
 	}
 	c.Server.Address = strings.TrimSpace(c.Server.Address)
+	c.Device.IdentityID = strings.ToLower(strings.TrimSpace(c.Device.IdentityID))
 	c.Mode = strings.ToUpper(strings.TrimSpace(c.Mode))
 	c.Transport.Mode = strings.ToLower(strings.TrimSpace(c.Transport.Mode))
 	c.P2P.Mode = strings.ToLower(strings.TrimSpace(c.P2P.Mode))
@@ -125,6 +126,9 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	}
 	if c.Mode != "CLIENT" {
 		return fmt.Errorf("客户端角色由服务端授权，配置文件不再接受 mode")
+	}
+	if c.Device.IdentityID != "" && !validIdentityID(c.Device.IdentityID) {
+		return fmt.Errorf("device.identity_id 必须是 4-20 位小写字母、数字或连字符，且不能以连字符开头或结尾")
 	}
 	switch c.Transport.Mode {
 	case "auto", "quic_only", "tcp_only":
@@ -229,6 +233,19 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 		return fmt.Errorf("network: %w", err)
 	}
 	return nil
+}
+
+func validIdentityID(value string) bool {
+	if len(value) < 4 || len(value) > 20 || value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // AgentConfigRevision identifies the normalized bytes SaveAgentConfig writes.

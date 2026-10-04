@@ -4,7 +4,6 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 func openIdentityTestDB(t *testing.T) *DB {
@@ -17,88 +16,56 @@ func openIdentityTestDB(t *testing.T) *DB {
 	return db
 }
 
-func TestIdentityAccessKeyLifecycle(t *testing.T) {
+func TestIdentityShortIDAndIndependentLogin(t *testing.T) {
 	db := openIdentityTestDB(t)
-
-	identity, err := db.CreateIdentity("Engineering", "admin")
+	identity, err := db.CreateIdentityWithLogin("engineering", "Engineering", "admin", "hashed-password")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if identity.Status != IdentityStatusActive || identity.PolicyRevision != 1 {
+	if identity.ShortID != "engineering" || !identity.LoginConfigured || identity.PolicyRevision != 1 {
 		t.Fatalf("unexpected identity: %+v", identity)
 	}
-
-	expires := time.Now().UTC().Add(time.Hour)
-	issued, err := db.IssueIdentityAccessKey(identity.ID, "admin", "laptop rollout", &expires)
-	if err != nil {
-		t.Fatal(err)
+	resolved, err := db.ResolveIdentity("ENGINEERING")
+	if err != nil || resolved.IdentityID != identity.ID || resolved.IdentityName != identity.Name {
+		t.Fatalf("short identity id did not resolve: %+v err=%v", resolved, err)
 	}
-	if issued.AccessKey == "" || issued.AccessKey[:len(IdentityAccessKeyPrefix)] != IdentityAccessKeyPrefix {
-		t.Fatalf("unexpected issued access key: %+v", issued)
-	}
-
-	authorization, err := db.ResolveIdentityAccessKey(issued.AccessKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if authorization.IdentityID != identity.ID || authorization.KeyID != issued.ID {
-		t.Fatalf("access key resolved to wrong identity: %+v", authorization)
-	}
-	if authorization.KeyDigest == issued.AccessKey {
-		t.Fatal("stored key digest unexpectedly equals plaintext key")
-	}
-
-	keys, err := db.ListIdentityAccessKeys(identity.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(keys) != 1 || keys[0].ID != issued.ID || keys[0].LastUsedAt == nil {
-		t.Fatalf("unexpected access key list: %+v", keys)
-	}
-
-	if err := db.RevokeIdentityAccessKey(identity.ID, issued.ID, "admin"); err != nil {
-		t.Fatal(err)
-	}
-	// Revocation is idempotent for an existing key.
-	if err := db.RevokeIdentityAccessKey(identity.ID, issued.ID, "admin"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ResolveIdentityAccessKey(issued.AccessKey); !errors.Is(err, ErrInvalidIdentityAccessKey) {
-		t.Fatalf("revoked key resolved with err=%v", err)
-	}
-}
-
-func TestIdentityRevisionDisableAndDeviceAssignment(t *testing.T) {
-	db := openIdentityTestDB(t)
-
-	identity, err := db.CreateIdentity("Operations", "admin")
-	if err != nil {
-		t.Fatal(err)
-	}
-	issued, err := db.IssueIdentityAccessKey(identity.ID, "admin", "", nil)
-	if err != nil {
-		t.Fatal(err)
+	user, err := db.GetUserByUsername("engineering")
+	if err != nil || user.IdentityID != identity.ID || user.Role != "user" {
+		t.Fatalf("identity login was not created independently: %+v err=%v", user, err)
 	}
 
 	disabled := IdentityStatusDisabled
-	updated, err := db.UpdateIdentity(identity.ID, "admin", IdentityUpdate{
-		Status: &disabled, PolicyRevision: identity.PolicyRevision,
-	})
+	updated, err := db.UpdateIdentity(identity.ID, "admin", IdentityUpdate{Status: &disabled, PolicyRevision: identity.PolicyRevision})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.Status != IdentityStatusDisabled || updated.PolicyRevision != 2 {
 		t.Fatalf("unexpected updated identity: %+v", updated)
 	}
-	if _, err := db.ResolveIdentityAccessKey(issued.AccessKey); !errors.Is(err, ErrInvalidIdentityAccessKey) {
-		t.Fatalf("disabled identity key resolved with err=%v", err)
+	if _, err := db.ResolveIdentity(identity.ShortID); !errors.Is(err, ErrInvalidIdentity) {
+		t.Fatalf("disabled identity resolved with err=%v", err)
+	}
+	user, err = db.GetUserByUsername("engineering")
+	if err != nil || user.Status != IdentityStatusDisabled {
+		t.Fatalf("identity login status was not synchronized: %+v err=%v", user, err)
 	}
 	if _, err := db.UpdateIdentity(identity.ID, "admin", IdentityUpdate{
 		Status: &disabled, PolicyRevision: identity.PolicyRevision,
 	}); !errors.Is(err, ErrIdentityRevisionConflict) {
 		t.Fatalf("stale identity revision accepted: %v", err)
 	}
+}
 
+func TestIdentityRevisionDisableAndDeviceAssignment(t *testing.T) {
+	db := openIdentityTestDB(t)
+	identity, err := db.CreateIdentityWithShortID("operations", "Operations", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled := IdentityStatusDisabled
+	if _, err := db.UpdateIdentity(identity.ID, "admin", IdentityUpdate{Status: &disabled}); err != nil {
+		t.Fatal(err)
+	}
 	device := &Device{
 		ID: "dev_identity_test", Name: "Identity Test",
 		Fingerprint: "identity-test-fingerprint", InstallationID: "identity-test-install",
@@ -117,33 +84,21 @@ func TestIdentityRevisionDisableAndDeviceAssignment(t *testing.T) {
 		t.Fatalf("unexpected device identity summary: %+v", summary)
 	}
 	ids, err := db.ListDeviceIDsForIdentity(identity.ID)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(ids) != 1 || ids[0] != device.ID {
+		t.Fatalf("unexpected identity devices: %+v err=%v", ids, err)
 	}
-	if len(ids) != 1 || ids[0] != device.ID {
-		t.Fatalf("unexpected identity devices: %+v", ids)
-	}
-
 	if _, err := db.SetDeviceIdentity(device.ID, "", "admin"); err == nil {
 		t.Fatal("identity assignment was cleared even though all devices require an identity")
 	}
-	unchanged, err := db.GetDeviceIdentitySummary(device.ID)
-	if err != nil || unchanged.IdentityID != identity.ID {
-		t.Fatalf("failed clear changed identity assignment: %+v %v", unchanged, err)
-	}
 }
 
-func TestHistoricalDeviceMigrationReusesDeviceAndRejectsWrongIdentityKey(t *testing.T) {
+func TestHistoricalDeviceMigrationReusesExplicitIdentityBinding(t *testing.T) {
 	db := openIdentityTestDB(t)
 	admin := &User{Username: "migration-admin", PasswordHash: "hash", Role: "admin", Status: "active"}
 	if err := db.CreateUser(admin); err != nil {
 		t.Fatal(err)
 	}
-	identity, err := db.CreateIdentity("Historical Owner", admin.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	issued, err := db.IssueIdentityAccessKey(identity.ID, admin.ID, "migration", nil)
+	identity, err := db.CreateIdentityWithLogin("historical", "Historical Owner", admin.ID, "hash")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,53 +111,56 @@ func TestHistoricalDeviceMigrationReusesDeviceAndRejectsWrongIdentityKey(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	historical, err := db.ApproveEnrollment(pending.RequestID, admin.ID, []string{"proxy.client", "proxy.exit"})
+	historical, err := db.ApproveEnrollment(pending.RequestID, admin.ID, observation.RequestedCapabilities)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if historical.OwnerUserID != admin.ID {
-		t.Fatalf("legacy owner was not recorded: %+v", historical)
 	}
 	if _, err := db.SetDeviceIdentity(historical.ID, identity.ID, admin.ID); err != nil {
 		t.Fatal(err)
 	}
-	var capabilitiesRaw string
-	if err := db.QueryRow(`SELECT approved_capabilities FROM devices WHERE id = ?`, historical.ID).Scan(&capabilitiesRaw); err != nil {
-		t.Fatal(err)
-	}
-	capabilities, err := decodeCapabilities(capabilitiesRaw)
-	if err != nil || len(capabilities) != 2 || capabilities[0] != "proxy.client" || capabilities[1] != "proxy.exit" {
-		t.Fatalf("migration changed historical device capabilities: %v %v", capabilities, err)
-	}
-	access, err := db.ResolveIdentityAccessKey(issued.AccessKey)
+	identityUserID, err := db.GetIdentityLoginUserID(identity.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	migrated, err := db.ObserveIdentityDevice(*access, observation)
+	ownerUserID, err := db.GetDeviceOwnerUserID(historical.ID)
+	if err != nil || ownerUserID != identityUserID {
+		t.Fatalf("historical device ownership was not transferred to the identity login: owner=%q err=%v", ownerUserID, err)
+	}
+	if _, err := db.Exec(`UPDATE devices SET owner_user_id = ? WHERE id = ?`, admin.ID, historical.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetDeviceIdentity(historical.ID, identity.ID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
+	ownerUserID, err = db.GetDeviceOwnerUserID(historical.ID)
+	if err != nil || ownerUserID != identityUserID {
+		t.Fatalf("same-identity repair did not transfer historical ownership: owner=%q err=%v", ownerUserID, err)
+	}
+	resolved, err := db.ResolveIdentity(identity.ShortID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if migrated.DeviceID != historical.ID || migrated.IdentityID != identity.ID {
-		t.Fatalf("historical device was duplicated or assigned incorrectly: %+v", migrated)
+	migrated, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated.DeviceID != historical.ID || migrated.IdentityID != identity.ID || len(migrated.ApprovedCapabilities) != 2 {
+		t.Fatalf("historical device was duplicated or changed: %+v", migrated)
 	}
 	var deviceCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM devices WHERE public_key_fingerprint = ?`, observation.Fingerprint).Scan(&deviceCount); err != nil || deviceCount != 1 {
 		t.Fatalf("migration created duplicate devices: count=%d err=%v", deviceCount, err)
 	}
 
-	other, err := db.CreateIdentity("Other Owner", admin.ID)
+	other, err := db.CreateIdentityWithShortID("other-owner", "Other Owner", admin.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherKey, err := db.IssueIdentityAccessKey(other.ID, admin.ID, "wrong identity", nil)
+	otherResolved, err := db.ResolveIdentity(other.ShortID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherAccess, err := db.ResolveIdentityAccessKey(otherKey.AccessKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.ObserveIdentityDevice(*otherAccess, observation); !errors.Is(err, ErrDeviceIdentityConflict) {
-		t.Fatalf("historical device accepted a key for another identity: %v", err)
+	if _, err := db.ObserveIdentityDevice(*otherResolved, observation); !errors.Is(err, ErrDeviceIdentityConflict) {
+		t.Fatalf("historical device accepted another identity id: %v", err)
 	}
 }

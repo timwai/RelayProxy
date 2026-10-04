@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"relayproxy/server/repository"
+	"relayproxy/server/service"
 )
 
 func seedGrantAPIDevice(t *testing.T, db *repository.DB, id, identityID string, capabilities []string) {
@@ -150,6 +151,75 @@ func TestDeviceIdentityGrantAdminAPILifecycle(t *testing.T) {
 	}
 }
 
+func TestIdentityLoginManagesOnlyItsOwnDeviceGrants(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	hash, err := service.HashPassword("identity-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := router.db.CreateIdentityWithLogin("grant-owner", "Grant Owner", "admin", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherOwner, err := router.db.CreateIdentityWithLogin("other-owner", "Other Owner", "admin", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantee, err := router.db.CreateIdentityWithLogin("grant-user", "Grant User", "admin", hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedGrantAPIDevice(t, router.db, "identity-owned-target", owner.ID, []string{"proxy.exit", "rdp.host"})
+	seedGrantAPIDevice(t, router.db, "other-owned-target", otherOwner.ID, []string{"proxy.exit"})
+	token, _, err := router.authService.Login(owner.ShortID, "identity-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := &http.Cookie{Name: "relay_session", Value: token}
+
+	create := func(target string) *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{
+			"targetDeviceId": target, "granteeIdentityId": grantee.ID,
+			"features": []string{repository.GrantFeatureProxyUse, repository.GrantFeatureRDPConnect},
+		})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/device-identity-grants", bytes.NewReader(body))
+		req.AddCookie(cookie)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := create("other-owned-target"); rec.Code != http.StatusNotFound {
+		t.Fatalf("identity managed another identity's device: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := create("identity-owned-target")
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("identity could not grant its own device: %d %s", rec.Code, rec.Body.String())
+	}
+	var grant repository.DeviceIdentityGrant
+	if err := json.Unmarshal(rec.Body.Bytes(), &grant); err != nil {
+		t.Fatal(err)
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/device-identity-grants?targetDeviceId=identity-owned-target", nil)
+	listReq.AddCookie(cookie)
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("identity could not list its device grants: %d %s", listRec.Code, listRec.Body.String())
+	}
+	var listed []repository.DeviceIdentityGrant
+	if err := json.Unmarshal(listRec.Body.Bytes(), &listed); err != nil || len(listed) != 1 || listed[0].ID != grant.ID {
+		t.Fatalf("unexpected identity grant list: %+v err=%v", listed, err)
+	}
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/device-identity-grants/"+grant.ID+"?revision=1", nil)
+	deleteReq.AddCookie(cookie)
+	deleteRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("identity could not delete its device grant: %d %s", deleteRec.Code, deleteRec.Body.String())
+	}
+}
+
 func TestDeviceIdentityGrantAPIRejectsSameIdentity(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()
@@ -201,10 +271,7 @@ func TestDeviceIdentityMoveRefreshesAffectedIdentities(t *testing.T) {
 	}
 
 	refreshed := map[string]int{}
-	router.onIdentityAuthorizationChanged = func(identityID, accessKeyID string) {
-		if accessKeyID != "" {
-			t.Fatalf("identity move unexpectedly scoped refresh to access key %q", accessKeyID)
-		}
+	router.onIdentityAuthorizationChanged = func(identityID string) {
 		refreshed[identityID]++
 	}
 

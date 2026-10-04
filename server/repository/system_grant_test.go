@@ -16,7 +16,7 @@ func TestServerExitIdentityGrantLifecycleAndAuthorization(t *testing.T) {
 	seedIdentityGrantDevice(t, db, "server-exit-client", "Server Exit Client", identity.ID, []string{"proxy.client"})
 
 	if allowed, err := db.AuthorizeServerExit("server-exit-client"); err != nil || allowed {
-		t.Fatalf("server exit was available before explicit v4 grant: allowed=%v err=%v", allowed, err)
+		t.Fatalf("server exit was available before explicit identity grant: allowed=%v err=%v", allowed, err)
 	}
 
 	grant, err := db.CreateSystemIdentityGrant(

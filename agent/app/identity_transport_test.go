@@ -1,17 +1,14 @@
 package app
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
-func TestIdentityKeyRejectsUnverifiedTransportBeforeSetup(t *testing.T) {
+func TestPublicIdentityIDDoesNotRequireVerifiedTransport(t *testing.T) {
 	for _, cfg := range []AgentConfig{
-		{AccessKey: "rpk_test", PlainTCP: true},
-		{AccessKey: "rpk_test", InsecureTLS: true},
+		{IdentityID: "team-test", PlainTCP: true},
+		{IdentityID: "team-test", InsecureTLS: true},
 	} {
-		if _, err := NewAgent(cfg); err == nil || !strings.Contains(err.Error(), "certificate verification") {
-			t.Fatalf("credential transport accepted: %v", err)
+		if _, err := NewAgent(cfg); err != nil {
+			t.Fatalf("public identity id rejected: %v", err)
 		}
 	}
 }

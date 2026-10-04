@@ -622,7 +622,7 @@
           <svg class="icon-lg text-amber-500" viewBox="0 0 24 24"><use href="#i-alert"/></svg>
           <div class="min-w-0 flex-1">
             <div class="text-[13px] font-medium text-amber-700 dark:text-amber-300">身份接入未完成</div>
-            <div id="approval-help" class="text-[12px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">请配置服务端签发的身份接入密钥。</div>
+            <div id="approval-help" class="text-[12px] text-amber-700/80 dark:text-amber-400/80 mt-0.5">请填写短身份 ID，连接后由该身份管理员审批设备。</div>
           </div>
           <button onclick="switchTab('connection')" class="btn-primary rp-btn rp-btn-primary px-3 py-1.5 rounded-md text-[12px] font-semibold shrink-0">配置连接</button>
         </div>
@@ -713,7 +713,7 @@
       </section>
 
       <section id="tab-pane-connection" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
-        <div class="config-page-heading"><div><p class="config-eyebrow">CONNECTION</p><h1>连接与身份</h1><p class="config-help">填写服务器地址和接入密钥即可；身份由 Server 根据密钥确定，安装私钥由客户端自动管理。</p></div><span class="config-pill">连接设置需重启</span></div>
+        <div class="config-page-heading"><div><p class="config-eyebrow">CONNECTION</p><h1>连接与身份</h1><p class="config-help">填写服务器地址和短身份 ID；首次连接后由该身份管理员在 Server 中审批设备。</p></div><span class="config-pill">连接设置需重启</span></div>
         <div class="config-card rp-card">
           <div class="config-section-title"><span>01</span><div><h2>服务器与设备</h2><p>服务器填写主机名或 IP；端口在下方单独设置。</p></div></div>
           <div class="config-grid">
@@ -722,17 +722,9 @@
           </div>
           <div class="config-grid">
             <div class="config-field">
-              <label for="cfg-access-key">身份接入密钥</label>
-              <input id="cfg-access-key" class="mono" type="password" autocomplete="new-password" placeholder="rpk_...（已保存的密钥不会回显）">
-              <small id="access-key-state" class="config-help">正在读取凭据状态…</small>
-            </div>
-            <div class="config-field">
-              <label>凭据操作</label>
-              <div class="button-row">
-                <button id="access-key-save" type="button" class="btn-primary rp-btn rp-btn-primary config-small" onclick="saveAccessKey()">保存 / 替换密钥</button>
-                <button id="access-key-clear" type="button" class="config-secondary rp-btn config-small" onclick="clearAccessKey()">清除密钥</button>
-              </div>
-              <small class="config-help">密钥单独保存在受保护的凭据存储中，不写入 relay-agent.yaml、日志或状态接口。</small>
+              <label for="cfg-identity-id">身份 ID</label>
+              <input id="cfg-identity-id" class="mono" autocomplete="off" maxlength="20" placeholder="如：team-a">
+              <small class="config-help">4–20 位小写字母、数字或连字符。设备首次连接后需要在 Server 中审批。</small>
             </div>
           </div>
           <div class="config-grid">
@@ -1014,7 +1006,7 @@
       <section id="tab-pane-pair" class="tab-pane hidden h-full overflow-y-auto px-6 py-4 space-y-4">
         <div>
           <h1 class="text-[15px] font-semibold text-slate-900 dark:text-white">身份接入</h1>
-          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">无需填写身份 ID。服务端通过接入密钥确定身份，并自动登记当前设备。</p>
+          <p class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">设备使用短身份 ID 加入隔离空间；首次连接后需要该身份管理员审批。</p>
         </div>
 
         <div class="card rp-card bg-white dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 rounded-lg p-4 space-y-4">
@@ -1026,13 +1018,13 @@
                 <svg class="icon-sm" viewBox="0 0 24 24"><use href="#i-copy"/></svg>
               </button>
             </div>
-            <div id="pair-approval-state" class="text-[12px] text-slate-500 dark:text-slate-400 mt-1.5">正在使用身份接入密钥连接服务器…</div>
+            <div id="pair-approval-state" class="text-[12px] text-slate-500 dark:text-slate-400 mt-1.5">正在使用短身份 ID 连接服务器…</div>
           </div>
 
           <div class="pt-3 border-t border-slate-200 dark:border-slate-700/60 text-[12px] text-slate-500 dark:text-slate-400 space-y-2">
-            <p>1. 管理员在服务端创建身份并签发接入密钥。</p>
-            <p>2. 在「连接与身份」填写服务器地址和接入密钥并保存。</p>
-            <p>3. 客户端验证密钥后自动登记到对应身份并上线。</p>
+            <p>1. 管理员在服务端创建身份，并设置独立登录密码。</p>
+            <p>2. 在「连接与身份」填写服务器地址和短身份 ID。</p>
+            <p>3. 首次连接后，使用该身份登录 Server 并审批设备能力。</p>
           </div>
         </div>
       </section>
@@ -1301,7 +1293,7 @@
       return !!(caps && !caps.unavailable_reason && caps.tcp && caps.udp && caps.ipv6 && caps.process_identity && caps.original_destination && caps.reply_injection && caps.loop_bypass);
     }
     var groupFields = {
-      connection: ['cfg-server','cfg-device-name','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport','cfg-p2p-enabled','cfg-p2p-mode','cfg-p2p-fallback','cfg-p2p-punch-timeout','cfg-p2p-keepalive','cfg-p2p-idle-timeout','cfg-p2p-max-sessions'],
+      connection: ['cfg-server','cfg-device-name','cfg-identity-id','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport','cfg-p2p-enabled','cfg-p2p-mode','cfg-p2p-fallback','cfg-p2p-punch-timeout','cfg-p2p-keepalive','cfg-p2p-idle-timeout','cfg-p2p-max-sessions'],
       proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on'],
       routing: ['cfg-routing-mode','cfg-routing-default'],
       network: ['cfg-network-excludes'],
@@ -1366,7 +1358,7 @@
       $('cfg-quic-port').disabled = locked || !tls || $('cfg-transport').value === 'tcp_only';
       $('cfg-tcp-port').disabled = locked || (tls && $('cfg-transport').value === 'quic_only');
       $('cfg-routing-default').disabled = locked || $('cfg-routing-mode').value !== 'rule';
-      $('connection-tls-hint').textContent = tls ? '隧道使用 TLS 加密并验证系统信任链；RDP UDP 还要求服务端 QUIC 的 UDP 端口可达。' : '身份接入密钥要求已验证的 TLS；关闭 TLS 后设备无法接入。';
+      $('connection-tls-hint').textContent = tls ? '隧道使用 TLS 加密并验证系统信任链；RDP UDP 还要求服务端 QUIC 的 UDP 端口可达。' : '隧道当前未启用 TLS；身份 ID 是公开标识，设备仍会使用安装私钥完成签名认证。';
       $('connection-role-hint').textContent = approvedMode ? '当前设备能力：' + (approvedMode === 'BOTH' ? '客户端 + 出口' : approvedMode === 'EXIT' ? '出口节点' : '客户端') + '。能力由服务端按设备独立管理。' : '尚未取得设备能力；本机会声明所启用的能力，服务端登记后可由管理员调整。';
       $('share-role-hint').textContent = exitApproved ? '当前设备已获出口能力；下方本机权限决定允许转发的目标范围。' : approvedMode === 'CLIENT' ? '当前设备仅有客户端能力。可先保存本机出口配置，再由管理员为此设备开启出口能力。' : '可预先配置本机出口；管理员为此设备开启出口能力后生效。';
       $('proxy-role-hint').classList.toggle('hidden', !approvedMode || clientApproved);
@@ -1746,7 +1738,7 @@
       var approval = st.approvalState || (up ? 'approved' : 'connecting');
       $('home-device-id').textContent = devId || (approval === 'pending' ? '历史待迁移' : approval === 'rejected' ? '已拒绝' : approval === 'revoked' ? '已撤销' : '正在连接');
       $('pair-current-id').textContent = $('home-device-id').textContent;
-      $('pair-approval-state').textContent = approval === 'approved' ? '身份密钥已验证，设备已登记并可以正常连接。' : approval === 'pending' ? '这是升级前的历史申请，需要管理员先完成身份迁移。' : approval === 'rejected' ? '服务端已拒绝此安装身份。' : approval === 'revoked' ? '服务端已撤销此设备授权。' : '正在使用身份接入密钥连接服务器…';
+      $('pair-approval-state').textContent = approval === 'approved' ? '设备已获该身份审批，可以正常连接。' : approval === 'pending' ? '设备正在等待该身份管理员审批。' : approval === 'rejected' ? '服务端已拒绝此安装身份。' : approval === 'revoked' ? '服务端已撤销此设备授权。' : '正在使用短身份 ID 连接服务器…';
       $('approval-help').textContent = $('pair-approval-state').textContent;
       $('unpaired-banner').classList.toggle('hidden', approval === 'approved');
 
@@ -1884,83 +1876,6 @@
     window.disconnectRDP = disconnectRDP;
     window.onGoStatus = function (st) { if (st) { renderStatus(st); } };
 
-    /* ---------- identity access credential ---------- */
-    var credentialBusy = false;
-    function renderCredentialState(value) {
-      value = value || {};
-      var status = $('access-key-state'), saveButton = $('access-key-save'), clearButton = $('access-key-clear');
-      if (!status) return;
-      if (value.managedExternally) {
-        status.textContent = '已由 RELAYPROXY_ACCESS_KEY 环境变量提供；本地凭据编辑已锁定。';
-      } else if (value.configured) {
-        status.textContent = value.restartRequired ? '已配置新接入密钥 · 重启客户端后生效' : '接入密钥已配置并正在使用';
-      } else {
-        status.textContent = value.restartRequired ? '本地接入密钥已清除 · 重启后将无法连接 Server' : '尚未配置接入密钥 · Server 会拒绝连接';
-      }
-      if (saveButton) saveButton.disabled = credentialBusy || !!value.managedExternally;
-      if (clearButton) clearButton.disabled = credentialBusy || !!value.managedExternally || !value.configured;
-    }
-    async function refreshCredentialState(showError) {
-      if (!hasFn('goGetCredentialState')) {
-        renderCredentialState({ configured:false, managedExternally:false, restartRequired:false });
-        return;
-      }
-      try {
-        var raw = await call('goGetCredentialState');
-        var value = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
-        if (value && value.ok === false) throw new Error(value.message || '读取接入密钥状态失败');
-        renderCredentialState(value);
-      } catch (err) {
-        if ($('access-key-state')) $('access-key-state').textContent = '凭据状态读取失败';
-        if (showError) toast('读取接入密钥状态失败：' + err.message);
-      }
-    }
-    async function saveAccessKey() {
-      if (credentialBusy || !hasFn('goSetAccessKey')) return;
-      var input = $('cfg-access-key'), value = (input.value || '').trim();
-      if (!value || value.indexOf('rpk_') !== 0) {
-        input.setAttribute('aria-invalid', 'true');
-        input.focus();
-        toast('请输入 Server 签发的 rpk_ 接入密钥');
-        return;
-      }
-      credentialBusy = true;
-      try {
-        var raw = await call('goSetAccessKey', value);
-        var result = mutationResult(raw);
-        if (!result || !result.ok) throw new Error((result && result.message) || '保存接入密钥失败');
-        input.value = '';
-        input.removeAttribute('aria-invalid');
-        renderCredentialState(result.state || { configured:true, restartRequired:true });
-        toast('接入密钥已安全保存，重启客户端后生效');
-      } catch (err) {
-        toast('保存接入密钥失败：' + err.message);
-      } finally {
-        credentialBusy = false;
-        await refreshCredentialState(false);
-      }
-    }
-    async function clearAccessKey() {
-      if (credentialBusy || !hasFn('goClearAccessKey') || !confirm('清除本机接入密钥？重启后 Server 会拒绝此设备，重新配置有效密钥后才能连接。')) return;
-      credentialBusy = true;
-      try {
-        var raw = await call('goClearAccessKey');
-        var result = mutationResult(raw);
-        if (!result || !result.ok) throw new Error((result && result.message) || '清除接入密钥失败');
-        $('cfg-access-key').value = '';
-        renderCredentialState(result.state || { configured:false, restartRequired:true });
-        toast('接入密钥已清除；重启后设备将保持离线，直到配置新密钥');
-      } catch (err) {
-        toast('清除接入密钥失败：' + err.message);
-      } finally {
-        credentialBusy = false;
-        await refreshCredentialState(false);
-      }
-    }
-    window.saveAccessKey = saveAccessKey;
-    window.clearAccessKey = clearAccessKey;
-    window.refreshCredentialState = refreshCredentialState;
-
     /* ---------- config rendering ---------- */
     function renderConfig(cfg) {
       if (!cfg || cfg.configError) { throw new Error((cfg && cfg.configError) || '配置为空'); }
@@ -1970,6 +1885,7 @@
 
       $('cfg-server').value = cfg.serverAddress || '';
       $('cfg-device-name').value = cfg.deviceName || '';
+      $('cfg-identity-id').value = cfg.identityId || '';
       $('cfg-tls-on').checked = cfg.tlsEnabled !== false;
       $('cfg-quic-port').value = cfg.quicPort || '';
       $('cfg-tcp-port').value = cfg.tcpPort || '';
@@ -2129,6 +2045,11 @@
       if (!/^\d+$/.test(raw) || !Number.isInteger(n) || n < min || n > max) fieldError(id, label + '必须是 ' + min + '–' + max + ' 的整数');
       return n;
     }
+    function identityIDValue() {
+      var value = $('cfg-identity-id').value.trim().toLowerCase();
+      if (!/^[a-z0-9](?:[a-z0-9-]{2,18})[a-z0-9]$/.test(value)) fieldError('cfg-identity-id', '身份 ID 必须是 4–20 位小写字母、数字或连字符');
+      return value;
+    }
     function hostValue(id, label) {
       var host = $(id).value.trim().replace(/^\[([^\]]+)\]$/, '$1');
       if (!host || /[\s/\\]/.test(host) || (host.indexOf(':') >= 0 && host.split(':').length < 3)) fieldError(id, label + '请填写主机名或 IP，协议和端口请分开填写');
@@ -2140,7 +2061,7 @@
         if (!$('cfg-tls-on').checked && $('cfg-transport').value === 'quic_only') fieldError('cfg-transport', 'QUIC 需要开启隧道 TLS');
         return {
           server: { address: hostValue('cfg-server', '服务器'), quicPort: portValue('cfg-quic-port','QUIC 端口'), tcpPort: portValue('cfg-tcp-port','TCP 端口'), tlsEnabled: $('cfg-tls-on').checked },
-          device: { name: $('cfg-device-name').value.trim() },
+          device: { name: $('cfg-device-name').value.trim(), identityId: identityIDValue() },
           transport: $('cfg-tls-on').checked ? $('cfg-transport').value : 'tcp_only',
           p2p: {
             enabled: $('cfg-p2p-enabled').checked,
@@ -2682,7 +2603,6 @@
       if (state.saving) return;
       if (dirtyGroups(true).length) { await refreshStatus(); toast('运行状态已刷新，未保存输入已保留。需要重读文件时请先放弃修改。'); return; }
       var loaded = await loadConfig();
-      await refreshCredentialState(false);
       await refreshStatus();
       if (loaded) { toast('已刷新表单；运行规则未改变'); }
     }

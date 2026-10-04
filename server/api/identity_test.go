@@ -28,7 +28,7 @@ func TestIdentityAdminAPIsAndDeviceAssignment(t *testing.T) {
 		t.Fatalf("identity capability field was accepted: %d %s", invalidRec.Code, invalidRec.Body.String())
 	}
 
-	createBody := []byte(`{"name":"Engineering"}`)
+	createBody := []byte(`{"shortId":"engineering","name":"Engineering","password":"identity-pass-123"}`)
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/identities", bytes.NewReader(createBody))
 	createReq.AddCookie(adminCookie)
 	createRec := httptest.NewRecorder()
@@ -40,35 +40,15 @@ func TestIdentityAdminAPIsAndDeviceAssignment(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &identity); err != nil {
 		t.Fatal(err)
 	}
-	if identity.ID == "" || identity.Name != "Engineering" || bytes.Contains(createRec.Body.Bytes(), []byte("capabilities")) {
+	if identity.ID == "" || identity.ShortID != "engineering" || identity.Name != "Engineering" || !identity.LoginConfigured || bytes.Contains(createRec.Body.Bytes(), []byte("capabilities")) {
 		t.Fatalf("unexpected identity: %+v", identity)
 	}
 
-	keyReq := httptest.NewRequest(http.MethodPost, "/api/v1/identities/"+identity.ID+"/access-keys",
-		bytes.NewReader([]byte(`{"label":"android"}`)))
-	keyReq.AddCookie(adminCookie)
-	keyRec := httptest.NewRecorder()
-	router.ServeHTTP(keyRec, keyReq)
-	if keyRec.Code != http.StatusCreated {
-		t.Fatalf("issue access key failed: %d %s", keyRec.Code, keyRec.Body.String())
-	}
-	var issued repository.IssuedIdentityAccessKey
-	if err := json.Unmarshal(keyRec.Body.Bytes(), &issued); err != nil {
-		t.Fatal(err)
-	}
-	if issued.ID == "" || issued.AccessKey == "" {
-		t.Fatalf("access key was not returned once: %+v", issued)
-	}
-
-	listKeysReq := httptest.NewRequest(http.MethodGet, "/api/v1/identities/"+identity.ID+"/access-keys", nil)
-	listKeysReq.AddCookie(adminCookie)
-	listKeysRec := httptest.NewRecorder()
-	router.ServeHTTP(listKeysRec, listKeysReq)
-	if listKeysRec.Code != http.StatusOK {
-		t.Fatalf("list access keys failed: %d %s", listKeysRec.Code, listKeysRec.Body.String())
-	}
-	if bytes.Contains(listKeysRec.Body.Bytes(), []byte("accessKey")) || bytes.Contains(listKeysRec.Body.Bytes(), []byte(issued.AccessKey)) {
-		t.Fatalf("access key plaintext leaked from list response: %s", listKeysRec.Body.String())
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader([]byte(`{"username":"engineering","password":"identity-pass-123"}`)))
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("identity login failed: %d %s", loginRec.Code, loginRec.Body.String())
 	}
 
 	pending, err := router.db.ObserveDeviceIdentity(repository.DeviceIdentityObservation{
@@ -130,17 +110,6 @@ func TestIdentityAdminAPIsAndDeviceAssignment(t *testing.T) {
 		t.Fatalf("device identity missing from list: %s", devicesRec.Body.String())
 	}
 
-	revokeReq := httptest.NewRequest(http.MethodDelete,
-		"/api/v1/identities/"+identity.ID+"/access-keys/"+issued.ID, nil)
-	revokeReq.AddCookie(adminCookie)
-	revokeRec := httptest.NewRecorder()
-	router.ServeHTTP(revokeRec, revokeReq)
-	if revokeRec.Code != http.StatusOK {
-		t.Fatalf("revoke access key failed: %d %s", revokeRec.Code, revokeRec.Body.String())
-	}
-	if _, err := router.db.ResolveIdentityAccessKey(issued.AccessKey); err == nil {
-		t.Fatal("revoked API access key still resolved")
-	}
 }
 
 func TestIdentityAPIRequiresRevisionForSafeConcurrentUpdate(t *testing.T) {
@@ -149,7 +118,7 @@ func TestIdentityAPIRequiresRevisionForSafeConcurrentUpdate(t *testing.T) {
 	adminCookie := loginAdmin(t, router)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/identities",
-		bytes.NewReader([]byte(`{"name":"Revision Test"}`)))
+		bytes.NewReader([]byte(`{"shortId":"revision-test","name":"Revision Test","password":"identity-pass-123"}`)))
 	createReq.AddCookie(adminCookie)
 	createRec := httptest.NewRecorder()
 	router.ServeHTTP(createRec, createReq)

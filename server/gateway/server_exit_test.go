@@ -237,6 +237,6 @@ func TestServerExitV4AutoSelectionDetectsAmbiguity(t *testing.T) {
 	client := &session.DeviceSession{DeviceID: "identity-client", IdentityID: "idn_client"}
 
 	if _, _, err := router.resolveExitSession(client, ""); err != errMultipleExits {
-		t.Fatalf("v4 auto-select error=%v, want %v", err, errMultipleExits)
+		t.Fatalf("identity auto-select error=%v, want %v", err, errMultipleExits)
 	}
 }

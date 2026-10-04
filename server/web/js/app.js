@@ -7,7 +7,7 @@
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
     devices: [{ page: 'devices', label: '设备管理' }, { page: 'exits', label: '出口节点' }],
-    identities: [{ page: 'identities', label: '身份与密钥', admin: true }],
+    identities: [{ page: 'identities', label: '身份管理', admin: true }],
     connections: [{ page: 'sessions', label: '活跃会话' }],
     messages: [{ page: 'messages', label: '消息历史' }],
     rdp: [{ page: 'rdp-ingress', label: '公网入口', admin: true }],
@@ -218,13 +218,13 @@
     $('nav-identity-count').textContent = state.identities.length;
     $('identities-body').innerHTML = state.identities.length ? state.identities.map(item => {
       const status = item.status === 'active' ? badge('启用', 'success') : badge('禁用', 'warning-badge');
-      return '<tr><td><span class="device-name">' + esc(item.name) + '</span><span class="device-id mono">' + esc(item.id) + '</span></td><td>' + status + '</td><td class="mono">' + esc(item.policyRevision) + '</td><td class="muted">' + esc(date(item.updatedAt)) + '</td><td class="right"><button type="button" class="small-button" data-identity-manage="' + esc(item.id) + '">管理</button></td></tr>';
-    }).join('') : emptyRow(5, '尚未创建身份', '创建身份后签发接入密钥，客户端即可自动归属');
+      return '<tr><td><span class="device-name">' + esc(item.name) + '</span><span class="device-id mono">' + esc(item.shortId || item.id) + '</span></td><td>' + status + '</td><td class="mono">' + esc(item.policyRevision) + '</td><td class="muted">' + esc(date(item.updatedAt)) + '</td><td class="right"><button type="button" class="small-button" data-identity-manage="' + esc(item.id) + '">管理</button></td></tr>';
+    }).join('') : emptyRow(5, '尚未创建身份', '创建身份后即可使用短 ID 连接，并以该 ID 独立登录');
   }
 
   async function refreshIdentities() {
-    if (!state.user || state.user.role !== 'admin') { return; }
-    const data = await api('/identities');
+    if (!state.user) { return; }
+    const data = await api(state.user.role === 'admin' ? '/identities' : '/identity-options');
     state.identities = Array.isArray(data) ? data : [];
     renderIdentities();
     syncIdentityGrantFormOptions();
@@ -286,7 +286,7 @@
     }).join('');
 
     $('identity-grant-grantee').innerHTML = '<option value="">请选择被授权身份</option>' + state.identities.map(identity => {
-      const suffix = identity.status === 'active' ? '' : ' · 已禁用';
+      const suffix = identity.status === 'disabled' ? ' · 已禁用' : '';
       return '<option value="' + esc(identity.id) + '">' + esc(identity.name + suffix) + '</option>';
     }).join('');
 
@@ -304,18 +304,16 @@
       const features = (item.features || []).map(feature => identityGrantFeatureNames[feature] || feature).join('、') || '—';
       const expired = item.expiresAt && Date.parse(item.expiresAt) <= now;
       const expiry = item.expiresAt ? esc(date(item.expiresAt)) + (expired ? ' ' + badge('已过期', 'warning-badge') : '') : '<span class="muted">永不过期</span>';
-      return '<tr>' +
-        '<td><span class="device-name">' + esc(item.targetDeviceName || item.targetDeviceId) + '</span><span class="device-id mono">' + esc(item.targetDeviceId) + '</span><small>' + esc(item.targetIdentityName || item.targetIdentityId) + '</small></td>' +
-        '<td><span class="device-name">' + esc(item.granteeIdentityName || item.granteeIdentityId) + '</span><span class="device-id mono">' + esc(item.granteeIdentityId) + '</span></td>' +
-        '<td>' + esc(features) + '</td><td class="muted">' + expiry + '</td><td class="mono">' + esc(item.revision) + '</td>' +
+      return '<tr><td><span class="device-name">' + esc(item.granteeIdentityName || item.granteeIdentityId) + '</span><span class="device-id mono">' + esc(item.granteeIdentityId) + '</span></td>' +
+        '<td>' + esc(features) + '</td><td class="muted">' + expiry + '</td>' +
         '<td class="right"><button type="button" class="small-button" data-identity-grant-edit="' + esc(item.id) + '">编辑</button> <button type="button" class="small-button danger" data-identity-grant-delete="' + esc(item.id) + '">删除</button></td></tr>';
-    }).join('') : emptyRow(6, '尚未配置跨身份授权', '同身份设备自动互通；只有确实需要跨身份访问时才添加授权');
+    }).join('') : emptyRow(4, '尚未配置跨身份授权', '同身份设备自动互通；只有确实需要跨身份访问时才添加授权');
     syncIdentityGrantFormOptions();
   }
 
-  async function refreshIdentityGrants() {
-    if (!state.user || state.user.role !== 'admin') { return; }
-    const data = await api('/device-identity-grants');
+  async function refreshIdentityGrants(deviceID) {
+    if (!state.user || !deviceID) { return; }
+    const data = await api('/device-identity-grants?targetDeviceId=' + encodeURIComponent(deviceID));
     state.identityGrants = Array.isArray(data) ? data : [];
     renderIdentityGrants();
   }
@@ -406,7 +404,8 @@
         toast('跨身份授权已创建；被授权身份的在线设备将重新认证');
       }
       resetIdentityGrantForm();
-      await refresh(true);
+      $('identity-grant-target').value = targetDeviceId;
+      await refreshIdentityGrants(targetDeviceId);
     } catch (err) {
       $('identity-grant-error').dataset.serverError = 'true';
       errorAt('identity-grant-error', err.status === 409 ? err.message + '，请刷新后重试' : err.message);
@@ -426,7 +425,7 @@
       await api('/device-identity-grants/' + encodeURIComponent(item.id) + '?revision=' + encodeURIComponent(item.revision), { method: 'DELETE' });
       if ($('identity-grant-id').value === item.id) { resetIdentityGrantForm(); }
       toast('跨身份授权已删除；被授权身份的在线设备将重新认证');
-      await refresh(true);
+      await refreshIdentityGrants(item.targetDeviceId);
     } catch (err) {
       $('identity-grant-error').dataset.serverError = 'true';
       errorAt('identity-grant-error', err.status === 409 ? err.message + '，请刷新后重试' : err.message);
@@ -464,7 +463,7 @@
       return '<tr><td><span class="device-name">' + esc(item.granteeIdentityName || item.granteeIdentityId) + '</span><span class="device-id mono">' + esc(item.granteeIdentityId) + '</span></td>' +
         '<td>Proxy 出口</td><td class="muted">' + expiry + '</td><td class="mono">' + esc(item.revision) + '</td>' +
         '<td class="right"><button type="button" class="small-button" data-server-exit-grant-edit="' + esc(item.id) + '">编辑</button> <button type="button" class="small-button danger" data-server-exit-grant-delete="' + esc(item.id) + '">删除</button></td></tr>';
-    }).join('') : emptyRow(5, '尚未授权 v4 身份', '启用 Server Exit 后，在这里选择允许使用它的身份');
+    }).join('') : emptyRow(5, '尚未授权身份', '启用 Server Exit 后，在这里选择允许使用它的身份');
     syncServerExitGrantIdentityOptions();
   }
 
@@ -566,14 +565,20 @@
   async function createIdentity(event) {
     event.preventDefault();
     if (state.identityBusy) { return; }
+    const shortId = $('identity-create-short-id').value.trim().toLowerCase();
     const name = $('identity-create-name').value.trim();
+    const password = $('identity-create-password').value;
+    if (!/^[a-z0-9](?:[a-z0-9-]{2,18})[a-z0-9]$/.test(shortId)) { errorAt('identity-create-error', '短身份 ID 必须是 4–20 位小写字母、数字或连字符'); return; }
     if (!name) { errorAt('identity-create-error', '请输入身份名称'); $('identity-create-name').focus(); return; }
+    if (password.length < 8) { errorAt('identity-create-error', '初始密码至少需要 8 个字符'); return; }
     state.identityBusy = true;
     $('identity-create-submit').disabled = true;
     errorAt('identity-create-error', '');
     try {
-      await api('/identities', { method: 'POST', body: JSON.stringify({ name }) });
+      await api('/identities', { method: 'POST', body: JSON.stringify({ shortId, name, password }) });
+      $('identity-create-short-id').value = '';
       $('identity-create-name').value = '';
+      $('identity-create-password').value = '';
       await refreshIdentities();
       toast('身份已创建');
     } catch (err) {
@@ -590,21 +595,15 @@
     if (!item) { toast('身份不存在或已刷新'); return; }
     state.selectedIdentity = item;
     $('identity-dialog-title').textContent = item.name;
-    $('identity-dialog-summary').textContent = item.id;
+    $('identity-dialog-summary').textContent = '身份 ID：' + item.shortId;
     $('identity-name').value = item.name;
     $('identity-status').value = item.status;
+    $('identity-reset-password').value = '';
+    $('identity-login-state').textContent = item.loginConfigured ? '已配置' : '待配置';
     $('identity-policy-revision').textContent = '版本 ' + item.policyRevision + '；设备能力请在设备管理中配置。';
-    $('identity-key-label').value = '';
-    $('identity-key-expires').value = '';
     errorAt('identity-error', '');
-    errorAt('identity-key-error', '');
-    $('identity-keys-body').innerHTML = emptyRow(6, '正在读取密钥', '');
+    errorAt('identity-password-error', '');
     $('identity-dialog').showModal();
-    try {
-      await loadIdentityKeys(item.id);
-    } catch (err) {
-      errorAt('identity-key-error', err.message);
-    }
   }
 
   async function saveIdentity() {
@@ -635,67 +634,22 @@
     }
   }
 
-  async function loadIdentityKeys(identityID) {
-    const keys = await api('/identities/' + encodeURIComponent(identityID) + '/access-keys');
-    if (!state.selectedIdentity || state.selectedIdentity.id !== identityID) { return; }
-    const now = Date.now();
-    $('identity-keys-body').innerHTML = keys.length ? keys.map(key => {
-      const expired = key.expiresAt && Date.parse(key.expiresAt) <= now;
-      const revoked = !!key.revokedAt;
-      const status = revoked ? badge('已撤销', 'warning-badge') : expired ? badge('已过期', 'warning-badge') : badge('有效', 'success');
-      const action = revoked || expired ? '<span class="muted">—</span>' : '<button type="button" class="small-button danger" data-identity-key-revoke="' + esc(key.id) + '">撤销</button>';
-      return '<tr><td><span class="device-name">' + esc(key.label || '未备注') + '</span><span class="device-id mono">' + esc(key.id) + '</span></td><td class="muted">' + esc(date(key.createdAt)) + '</td><td class="muted">' + esc(key.expiresAt ? date(key.expiresAt) : '永不过期') + '</td><td class="muted">' + esc(key.lastUsedAt ? date(key.lastUsedAt) : '尚未使用') + '</td><td>' + status + '</td><td class="right">' + action + '</td></tr>';
-    }).join('') : emptyRow(6, '尚未签发接入密钥', '签发后将密钥复制到 Agent 或 Android 客户端');
-  }
-
-  async function issueIdentityKey() {
+  async function resetIdentityPassword() {
     const identity = state.selectedIdentity;
-    if (!identity || state.identityBusy) { return; }
-    const label = $('identity-key-label').value.trim();
-    const expiresRaw = $('identity-key-expires').value;
-    let expiresAt = '';
-    if (expiresRaw) {
-      const parsed = new Date(expiresRaw);
-      if (!Number.isFinite(parsed.getTime()) || parsed.getTime() <= Date.now()) {
-        errorAt('identity-key-error', '过期时间必须晚于当前时间');
-        return;
-      }
-      expiresAt = parsed.toISOString();
-    }
+    const password = $('identity-reset-password').value;
+    if (!identity || state.identityBusy) return;
+    if (password.length < 8 || password.length > 128 || !password.trim()) { errorAt('identity-password-error', '密码须为 8–128 个字符，且不能全部为空白'); return; }
     state.identityBusy = true;
-    $('identity-key-issue').disabled = true;
-    errorAt('identity-key-error', '');
+    $('identity-password-reset').disabled = true;
+    errorAt('identity-password-error', '');
     try {
-      const issued = await api('/identities/' + encodeURIComponent(identity.id) + '/access-keys', {
-        method: 'POST', body: JSON.stringify({ label, expiresAt })
-      });
-      await loadIdentityKeys(identity.id);
-      $('identity-key-label').value = '';
-      $('identity-key-expires').value = '';
-      $('issued-access-key').textContent = issued.accessKey || '';
-      $('issued-key-dialog').showModal();
-    } catch (err) {
-      errorAt('identity-key-error', err.message);
-    } finally {
-      state.identityBusy = false;
-      $('identity-key-issue').disabled = false;
-    }
-  }
-
-  async function revokeIdentityKey(keyID) {
-    const identity = state.selectedIdentity;
-    if (!identity || state.identityBusy || !confirm('撤销此接入密钥？使用该密钥建立的在线会话会被关闭，且无法再次重连。')) { return; }
-    state.identityBusy = true;
-    errorAt('identity-key-error', '');
-    try {
-      await api('/identities/' + encodeURIComponent(identity.id) + '/access-keys/' + encodeURIComponent(keyID), { method: 'DELETE' });
-      await loadIdentityKeys(identity.id);
-      toast('接入密钥已撤销');
-    } catch (err) {
-      errorAt('identity-key-error', err.message);
-    } finally {
-      state.identityBusy = false;
-    }
+      await api('/identities/' + encodeURIComponent(identity.id) + '/password', { method: 'PUT', body: JSON.stringify({ password }) });
+      $('identity-reset-password').value = '';
+      $('identity-login-state').textContent = '已配置';
+      toast('身份登录密码已重置，原管理会话已注销');
+      await refreshIdentities();
+    } catch (err) { errorAt('identity-password-error', err.message); }
+    finally { state.identityBusy = false; $('identity-password-reset').disabled = false; }
   }
 
   function renderDevices() {
@@ -715,9 +669,9 @@
       const identity = d.identityId ? '<span class="device-name">' + esc(d.identityName || d.identityId) + '</span><span class="device-id mono">' + esc(d.identityId) + '</span>' : '<span class="muted">未分配身份</span>';
       const assign = state.user && state.user.role === 'admin' ? ' <button class="small-button" data-assign-identity="' + esc(d.id) + '">' + (d.identityId ? '更改归属' : '分配身份') + '</button>' : '';
       return '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + identity + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '<small>' + esc([d.platform, d.arch].filter(Boolean).join(' / ')) + '</small></td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td><td class="right"><button class="small-button" data-manage="' + esc(d.id) + '">管理</button>' + assign + '</td></tr>';
-    }).join('') : emptyRow(7, state.devices.length ? '没有匹配的设备' : '还没有已授权设备', state.devices.length ? '调整搜索或筛选条件' : '配置身份接入密钥后，设备会自动登记到对应身份');
+    }).join('') : emptyRow(7, state.devices.length ? '没有匹配的设备' : '还没有已授权设备', state.devices.length ? '调整搜索或筛选条件' : '客户端填写短身份 ID 后，设备会进入对应身份的待审批列表');
     const recent = state.devices.slice().sort((a, b) => (b.status === 'online') - (a.status === 'online') || (Date.parse(b.lastSeenAt) || 0) - (Date.parse(a.lastSeenAt) || 0)).slice(0, 5);
-    $('overview-devices').innerHTML = recent.length ? recent.map(d => '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '</td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td></tr>').join('') : emptyRow(5, '连接你的第一台设备', '先创建身份并在客户端配置接入密钥');
+    $('overview-devices').innerHTML = recent.length ? recent.map(d => '<tr><td>' + nameCell(d.name, d.id) + '</td><td>' + esc(roleNames[d.deviceMode] || d.deviceMode) + '</td><td>' + deviceState(d) + '</td><td>' + transport(d.transport) + '</td><td class="muted">' + esc(date(d.lastSeenAt)) + '</td></tr>').join('') : emptyRow(5, '连接你的第一台设备', '先创建身份，并在客户端填写短身份 ID');
     $('nav-device-count').textContent = state.devices.length;
     $('stat-total').textContent = '共 ' + state.devices.length + ' 台已注册设备';
     $('device-filter-count').textContent = filtered.length + ' / ' + state.devices.length + ' 台设备';
@@ -728,8 +682,9 @@
     $('enrollments-body').innerHTML = state.enrollments.length ? state.enrollments.map(item => {
       const requested = item.requestedCapabilities || [];
       const caps = orderedCapabilities(requested).map(capability => capabilityNames[capability] || capability).join('、') || '未声明';
-      return '<tr><td><span class="device-name">' + esc(item.deviceName || '未命名设备') + '</span><span class="device-id mono">' + esc(item.fingerprint.slice(0, 16)) + '…</span></td><td>' + esc([item.platform, item.arch, item.clientVersion].filter(Boolean).join(' / ') || '—') + '</td><td>' + esc(caps) + '</td><td><small>' + esc(date(item.firstSeenAt)) + '<br>' + esc(date(item.lastSeenAt)) + '</small></td><td class="right"><button class="small-button primary" data-enrollment-manage="' + esc(item.id) + '">审批能力</button> <button class="small-button" data-enrollment-reject="' + esc(item.id) + '">拒绝</button></td></tr>';
-    }).join('') : emptyRow(5, '没有历史待审批记录', '新设备会凭有效身份密钥自动登记');
+      const identity = item.identityName || item.identityId || '未分配身份';
+      return '<tr><td><span class="device-name">' + esc(item.deviceName || '未命名设备') + '</span><span class="device-id mono">' + esc(identity) + ' · ' + esc(item.fingerprint.slice(0, 16)) + '…</span></td><td>' + esc([item.platform, item.arch, item.clientVersion].filter(Boolean).join(' / ') || '—') + '</td><td>' + esc(caps) + '</td><td><small>' + esc(date(item.firstSeenAt)) + '<br>' + esc(date(item.lastSeenAt)) + '</small></td><td class="right"><button class="small-button primary" data-enrollment-manage="' + esc(item.id) + '">审批能力</button> <button class="small-button" data-enrollment-reject="' + esc(item.id) + '">拒绝</button></td></tr>';
+    }).join('') : emptyRow(5, '没有待审批设备', '新设备使用短身份 ID 发起申请，审批后才能连接');
   }
   function renderExits() {
     $('exits-grid').innerHTML = state.exits.length ? state.exits.map(e => '<article class="panel exit-card"><div class="exit-header"><div><h3>' + esc(e.deviceName || '未命名出口') + '</h3><span class="device-id mono">' + esc(e.deviceId) + '</span></div>' + badge('在线', 'success') + '</div><div class="detail-list">' + details([['传输方式', String(e.transport || '—').toUpperCase()], ['活跃流', e.activeStreams], ['目标权限', '服务端与出口本地共同限制']]) + '</div><button data-copy-exit="' + esc(e.deviceId) + '">复制出口 ID</button></article>').join('') : '<div class="panel empty"><strong>暂无在线出口</strong>将已配对设备设为「出口」或「客户端 + 出口」，并开启出口服务。</div>';
@@ -1179,23 +1134,17 @@
       ['exits', '/exits', data => { state.exits = data; renderExits(); }],
       ['sessions', '/sessions/active', data => { state.sessions = data; renderSessions(); }],
       ['p2pSessions', '/p2p/sessions', data => { state.p2pSessions = Array.isArray(data) ? data : []; renderP2PSessions(); }],
-      ['messages', messageListPath(), data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }]
+      ['messages', messageListPath(), data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }],
+      ['identityOptions', user.role === 'admin' ? '/identities' : '/identity-options', data => { state.identities = Array.isArray(data) ? data : []; if (user.role === 'admin') renderIdentities(); syncIdentityGrantFormOptions(); }],
+      ['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]
     ];
     if (user.role === 'admin') {
-      jobs.push(['identities', '/identities', data => { state.identities = Array.isArray(data) ? data : []; renderIdentities(); }]);
-      jobs.push(['identityGrants', '/device-identity-grants', data => { state.identityGrants = Array.isArray(data) ? data : []; renderIdentityGrants(); }]);
       jobs.push(['systemIdentityGrants', '/system-identity-grants?resourceId=server', data => { state.systemIdentityGrants = Array.isArray(data) ? data : []; renderSystemIdentityGrants(); }]);
-      jobs.push(['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]);
       jobs.push(['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }]);
       jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); }]);
     } else {
-      state.identities = [];
-      state.identityGrants = [];
       state.systemIdentityGrants = [];
-      state.enrollments = [];
       state.channels = [];
-      renderIdentities();
-      renderIdentityGrants();
       renderSystemIdentityGrants();
       renderEnrollments();
       renderChannels();
@@ -1295,7 +1244,7 @@
     $('copy-admin-url').disabled = !preview;
     $('listen-hint').textContent = cfg.admin.listen.startsWith('127.') || cfg.admin.listen.startsWith('[::1]') ? '当前地址仅允许从服务端本机访问。' : '监听所有接口时，预览使用你当前访问的主机名或 IP。更改协议或端口后，请在重启完成后使用新地址。';
     $('quic-listen').disabled = !cfg.tunnel.tlsEnabled;
-    $('tunnel-tls-help').textContent = cfg.tunnel.tlsEnabled ? '开启后同时提供加密 TCP 和 QUIC 隧道。' : '身份接入密钥要求 TLS；关闭后设备无法连接，QUIC 也会关闭。';
+    $('tunnel-tls-help').textContent = cfg.tunnel.tlsEnabled ? '开启后同时提供加密 TCP 和 QUIC 隧道。' : '关闭 TLS 后仍可使用 TCP，但隧道内容不会被 TLS 加密；QUIC 也会关闭。';
     $('acl-mode-hint').textContent = cfg.relayACL.accessMode === 'allow' ? '允许列表为空时，所有目标都会被拒绝。匹配目标仍需满足上方互联网 / 私网 / 回环权限。' : cfg.relayACL.accessMode === 'deny' ? '拒绝列表匹配项会被拦截；其余目标仍需满足上方权限。' : '域名和 IP 列表暂不参与筛选，保留内容便于下次启用。上方网络权限仍然有效。';
     const serverExitEnabled = !!cfg.serverExit.enabled;
     const serverExitProxy = cfg.serverExit.upstreamMode && cfg.serverExit.upstreamMode !== 'direct';
@@ -1407,14 +1356,13 @@
       errorAt('device-identity-error', '请选择设备所属身份。');
       return;
     }
-    if (device.identityId === identityId) {
-      $('device-identity-dialog').close();
-      return;
-    }
-    const impact = device.identityId
-      ? '更改归属会立即断开设备，并删除以该设备为目标的跨身份授权。'
-      : '分配后，该设备只能使用此身份签发的接入密钥重连。';
-    if (!confirm('将设备「' + (device.name || device.id) + '」归属到身份「' + identity.name + '」？\n\n' + impact)) return;
+    const unchanged = device.identityId === identityId;
+    const impact = unchanged
+      ? '再次保存会修复历史 owner 数据，并同步到该身份的独立登录账号。'
+      : device.identityId
+        ? '更改归属会立即断开设备，并删除以该设备为目标的跨身份授权。'
+        : '分配后，该设备只能使用此身份的短 ID 重连。';
+    if (!confirm((unchanged ? '重新保存' : '将') + '设备「' + (device.name || device.id) + '」归属到身份「' + identity.name + '」？\n\n' + impact)) return;
     state.identityAssignmentBusy = true;
     all('#device-identity-dialog button, #device-identity-dialog select').forEach(item => { item.disabled = true; });
     errorAt('device-identity-error', '');
@@ -1424,7 +1372,7 @@
       });
       state.selectedDevice = null;
       $('device-identity-dialog').close();
-      toast('设备身份归属已保存；请在客户端配置该身份的接入密钥');
+      toast('设备身份归属已保存；请在客户端配置该身份的短 ID');
       await refresh(true);
     } catch (err) {
       errorAt('device-identity-error', err.message);
@@ -1443,15 +1391,23 @@
     $('device-title').textContent = device.name || '未命名设备';
     $('device-details').innerHTML = details([['设备 ID', device.id], ['身份归属', device.identityName || device.identityId || '未分配（旧设备不可连接）'], ['角色', roleNames[device.deviceMode] || device.deviceMode], ['系统', [device.platform, device.arch].filter(Boolean).join(' / ') || '—'], ['客户端版本', device.clientVersion || '—'], ['授权状态', device.approvalState === 'approved' ? '已授权' : '已撤销'], ['当前能力', orderedCapabilities(approved).map(capability => capabilityNames[capability] || capability).join('、') || '无'], ['RDP UDP', device.rdpUdpReady ? 'QUIC Datagram 可用' : '不可用（需 QUIC 隧道）'], ['最近在线', date(device.lastSeenAt)]]);
     $('device-capabilities').innerHTML = capabilityOptionsHTML(requested, approved);
-    $('device-capability-editor').hidden = !state.user || state.user.role !== 'admin' || device.approvalState !== 'approved';
-    $('device-revoke').hidden = device.approvalState !== 'approved' || !state.user || state.user.role !== 'admin';
-    $('device-delete').hidden = !state.user || state.user.role !== 'admin';
+    $('device-capability-editor').hidden = !state.user || device.approvalState !== 'approved';
+    $('device-revoke').hidden = device.approvalState !== 'approved' || !state.user;
+    $('device-delete').hidden = !state.user;
     errorAt('device-action-error', '');
     errorAt('device-capability-error', '');
     errorAt('device-rdp-target-error', '');
     $('device-rdp-access-editor').hidden = true;
+    const canGrant = !!device.identityId && device.approvalState === 'approved' && approved.some(cap => cap === 'proxy.exit' || cap === 'rdp.host');
+    $('device-identity-grant-editor').hidden = !canGrant;
     $('device-dialog').showModal();
     loadDeviceRDPTargets(device);
+    if (canGrant) {
+      resetIdentityGrantForm();
+      $('identity-grant-target').value = device.id;
+      syncIdentityGrantCapabilities();
+      refreshIdentityGrants(device.id).catch(err => errorAt('identity-grant-error', err.message));
+    }
   }
   function openEnrollment(id) {
     const item = state.enrollments.find(entry => entry.id === id);
@@ -1483,7 +1439,7 @@
     if (state.deviceBusy || !state.selectedDevice) { return; }
     const device = state.selectedDevice;
     const label = device.name || device.id;
-    if (!confirm('永久删除设备「' + label + '」？\n\n这会立即断开当前连接，并清除该设备的授权、RDP 关系和安装身份。客户端下次可凭有效身份密钥自动重新登记。')) { return; }
+    if (!confirm('永久删除设备「' + label + '」？\n\n这会立即断开当前连接，并清除该设备的授权、RDP 关系和安装身份。客户端下次可使用短身份 ID 重新申请，并等待身份管理员审批。')) { return; }
     state.deviceBusy = true;
     all('#device-dialog button').forEach(button => { button.disabled = true; });
     errorAt('device-action-error', '');
@@ -1491,7 +1447,7 @@
       await api('/devices/' + encodeURIComponent(device.id), { method: 'DELETE' });
       state.selectedDevice = null;
       $('device-dialog').close();
-      toast('设备已删除；可凭有效身份密钥重新登记');
+      toast('设备已删除；可使用短身份 ID 重新申请审批');
       await refresh(true);
     } catch (err) { errorAt('device-action-error', err.message); }
     finally { state.deviceBusy = false; all('#device-dialog button').forEach(button => { button.disabled = false; }); }
@@ -1732,18 +1688,11 @@
     if (edit) { editIdentityGrant(edit.dataset.identityGrantEdit); }
     if (remove) { deleteIdentityGrant(remove.dataset.identityGrantDelete); }
   });
-  $('identity-key-issue').addEventListener('click', issueIdentityKey);
-  $('identity-keys-body').addEventListener('click', event => {
-    const button = event.target.closest('[data-identity-key-revoke]');
-    if (button) revokeIdentityKey(button.dataset.identityKeyRevoke);
-  });
-  $('issued-key-copy').addEventListener('click', () => copy($('issued-access-key').textContent));
-  $('issued-key-dialog').addEventListener('close', () => { $('issued-access-key').textContent = ''; });
+  $('identity-password-reset').addEventListener('click', resetIdentityPassword);
   $('identity-dialog').addEventListener('close', () => {
     state.selectedIdentity = null;
-    $('identity-keys-body').innerHTML = '';
     errorAt('identity-error', '');
-    errorAt('identity-key-error', '');
+    errorAt('identity-password-error', '');
   });
   $('refresh-enrollments').addEventListener('click', () => refresh(true));
   $('copy-admin-url').addEventListener('click', () => copy(managementURL($('admin-listen').value, $('admin-protocol').value === 'true')));

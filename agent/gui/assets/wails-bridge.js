@@ -25,9 +25,6 @@
   window.goClearLogs = () => invoke('ClearLogs');
   window.goGetConfig = () => invoke('GetConfig');
   window.goSaveConfig = raw => invoke('SaveConfig', raw);
-  window.goGetCredentialState = () => invoke('GetCredentialState');
-  window.goSetAccessKey = accessKey => invoke('SetAccessKey', accessKey);
-  window.goClearAccessKey = () => invoke('ClearAccessKey');
   window.goReloadConfig = () => invoke('ReloadConfig');
   window.goSelectExit = exitID => invoke('SelectExit', exitID);
   window.goGetNetworkServiceStatus = () => invoke('GetNetworkServiceStatus');

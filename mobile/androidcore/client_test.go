@@ -7,7 +7,7 @@ import (
 )
 
 func TestPowerConstrainedStatusBeforeStart(t *testing.T) {
-	client, err := NewClient(`{"serverAddress":"relay.example.com"}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"team-test"}`, filepath.Join(t.TempDir(), "device-identity.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestPowerConstrainedStatusBeforeStart(t *testing.T) {
 }
 
 func TestSetPowerConstrainedAfterStopIsIgnored(t *testing.T) {
-	client, err := NewClient(`{"serverAddress":"relay.example.com"}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"team-test"}`, filepath.Join(t.TempDir(), "device-identity.json"))
 	if err != nil {
 		t.Fatal(err)
 	}

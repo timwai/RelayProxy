@@ -25,7 +25,7 @@ import android.widget.Toast
 
 class SettingsActivity : Activity() {
     private lateinit var server: EditText
-    private lateinit var accessKey: EditText
+    private lateinit var identityId: EditText
     private lateinit var deviceName: EditText
     private lateinit var quicPort: EditText
     private lateinit var tcpPort: EditText
@@ -122,10 +122,8 @@ class SettingsActivity : Activity() {
         addSectionHeader(connection, "连接设置", "配置 Relay Server 和传输参数。")
         server = styledField("relay.example.com")
         connection.addView(labeled("Relay Server", server), topMargin(16))
-        accessKey = styledField("rpk_...").apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-        }
-        connection.addView(labeled("接入密钥", accessKey), topMargin(12))
+        identityId = styledField("team-a")
+        connection.addView(labeled("身份 ID", identityId), topMargin(12))
         deviceName = styledField(ConfigStore(this).defaultDeviceName())
         connection.addView(labeled("设备名称", deviceName), topMargin(12))
 
@@ -306,7 +304,7 @@ class SettingsActivity : Activity() {
         val config = when (section) {
             SECTION_CONNECTION -> current.copy(
                 serverAddress = server.text.toString().trim(),
-                accessKey = accessKey.text.toString().trim(),
+                identityId = identityId.text.toString().trim(),
                 deviceName = deviceName.text.toString().trim().ifBlank { store.defaultDeviceName() },
                 quicPort = quicPort.text.toString().toIntOrNull() ?: 443,
                 tcpPort = tcpPort.text.toString().toIntOrNull() ?: 443,
@@ -343,20 +341,9 @@ class SettingsActivity : Activity() {
             server.requestFocus()
             return
         }
-        if (section == SECTION_CONNECTION && config.accessKey.isBlank()) {
-            accessKey.error = "必须填写身份接入密钥"
-            accessKey.requestFocus()
-            return
-        }
-        if (section == SECTION_CONNECTION && config.accessKey.isNotBlank() && !config.accessKey.startsWith("rpk_")) {
-            accessKey.error = "接入密钥格式不正确"
-            accessKey.requestFocus()
-            return
-        }
-        if (section == SECTION_CONNECTION && config.accessKey.isNotBlank() &&
-            (!config.tlsEnabled || config.insecureTls)
-        ) {
-            Toast.makeText(this, "接入密钥需要开启 TLS 并校验服务器证书", Toast.LENGTH_LONG).show()
+        if (section == SECTION_CONNECTION && !Regex("^[a-z0-9](?:[a-z0-9-]{2,18})[a-z0-9]$").matches(config.identityId)) {
+            identityId.error = "身份 ID 必须是 4–20 位小写字母、数字或连字符"
+            identityId.requestFocus()
             return
         }
         if (section == SECTION_PROXY && config.clientEnabled && !config.socks5Enabled && !config.httpEnabled) {
@@ -394,7 +381,7 @@ class SettingsActivity : Activity() {
     private fun loadConfig() {
         val cfg = ConfigStore(this).load()
         server.setText(cfg.serverAddress)
-        accessKey.setText(cfg.accessKey)
+        identityId.setText(cfg.identityId)
         deviceName.setText(cfg.deviceName)
         quicPort.setText(cfg.quicPort.toString())
         tcpPort.setText(cfg.tcpPort.toString())

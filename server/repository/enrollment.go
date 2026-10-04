@@ -37,7 +37,6 @@ type DeviceAuthorization struct {
 	OwnerUserID          string
 	IdentityID           string
 	IdentityName         string
-	AccessKeyID          string
 	PolicyRevision       int64
 	ApprovedCapabilities []string
 	RDPTargets           []*RDPTarget
@@ -45,6 +44,8 @@ type DeviceAuthorization struct {
 
 type EnrollmentRequest struct {
 	ID                    string     `json:"id"`
+	IdentityID            string     `json:"identityId,omitempty"`
+	IdentityName          string     `json:"identityName,omitempty"`
 	Fingerprint           string     `json:"fingerprint"`
 	InstallationID        string     `json:"installationId"`
 	DeviceName            string     `json:"deviceName"`
@@ -189,15 +190,30 @@ func (db *DB) IsDeviceIdentityApproved(fingerprint, deviceID string) bool {
 }
 
 func (db *DB) ListEnrollmentRequests(state string) ([]*EnrollmentRequest, error) {
-	query := `SELECT id, fingerprint, installation_id, device_name, platform, arch, client_version,
-		requested_capabilities, state, first_seen_at, last_seen_at, reviewed_at, reviewed_by, rejection_reason
-		FROM device_enrollment_requests`
+	return db.ListEnrollmentRequestsForIdentity(state, "")
+}
+
+func (db *DB) ListEnrollmentRequestsForIdentity(state, identityID string) ([]*EnrollmentRequest, error) {
+	query := `SELECT request.id, COALESCE(request.identity_id, ''), COALESCE(identity.name, ''),
+		request.fingerprint, request.installation_id, request.device_name, request.platform, request.arch, request.client_version,
+		request.requested_capabilities, request.state, request.first_seen_at, request.last_seen_at,
+		request.reviewed_at, request.reviewed_by, request.rejection_reason
+		FROM device_enrollment_requests request LEFT JOIN identities identity ON identity.id = request.identity_id`
 	var args []any
 	if state != "" {
-		query += ` WHERE state = ?`
+		query += ` WHERE request.state = ?`
 		args = append(args, state)
 	}
-	query += ` ORDER BY last_seen_at DESC`
+	if identityID != "" {
+		if len(args) == 0 {
+			query += ` WHERE`
+		} else {
+			query += ` AND`
+		}
+		query += ` request.identity_id = ?`
+		args = append(args, identityID)
+	}
+	query += ` ORDER BY request.last_seen_at DESC`
 	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -209,7 +225,7 @@ func (db *DB) ListEnrollmentRequests(state string) ([]*EnrollmentRequest, error)
 		var capabilities string
 		var reviewedAt sql.NullTime
 		var reviewedBy, reason sql.NullString
-		if err := rows.Scan(&item.ID, &item.Fingerprint, &item.InstallationID, &item.DeviceName,
+		if err := rows.Scan(&item.ID, &item.IdentityID, &item.IdentityName, &item.Fingerprint, &item.InstallationID, &item.DeviceName,
 			&item.Platform, &item.Arch, &item.ClientVersion, &capabilities, &item.State,
 			&item.FirstSeenAt, &item.LastSeenAt, &reviewedAt, &reviewedBy, &reason); err != nil {
 			return nil, err
@@ -228,6 +244,10 @@ func (db *DB) ListEnrollmentRequests(state string) ([]*EnrollmentRequest, error)
 }
 
 func (db *DB) ApproveEnrollment(requestID, reviewerID string, capabilities []string) (*Device, error) {
+	return db.ApproveEnrollmentForIdentity(requestID, reviewerID, "", capabilities)
+}
+
+func (db *DB) ApproveEnrollmentForIdentity(requestID, reviewerID, allowedIdentityID string, capabilities []string) (*Device, error) {
 	if requestID == "" || reviewerID == "" {
 		return nil, errors.New("request id and reviewer id are required")
 	}
@@ -239,15 +259,21 @@ func (db *DB) ApproveEnrollment(requestID, reviewerID string, capabilities []str
 	var request EnrollmentRequest
 	var publicKey []byte
 	var requestedRaw string
-	err = tx.QueryRow(`SELECT fingerprint, installation_id, public_key, device_name, platform, arch,
+	err = tx.QueryRow(`SELECT COALESCE(identity_id, ''), fingerprint, installation_id, public_key, device_name, platform, arch,
 		client_version, requested_capabilities, state FROM device_enrollment_requests WHERE id = ?`, requestID).
-		Scan(&request.Fingerprint, &request.InstallationID, &publicKey, &request.DeviceName, &request.Platform,
+		Scan(&request.IdentityID, &request.Fingerprint, &request.InstallationID, &publicKey, &request.DeviceName, &request.Platform,
 			&request.Arch, &request.ClientVersion, &requestedRaw, &request.State)
 	if err != nil {
 		return nil, err
 	}
 	if request.State != EnrollmentPending {
 		return nil, fmt.Errorf("enrollment is %s, not pending", request.State)
+	}
+	if request.IdentityID == "" && allowedIdentityID != "" {
+		return nil, errors.New("enrollment has no identity")
+	}
+	if allowedIdentityID != "" && request.IdentityID != allowedIdentityID {
+		return nil, sql.ErrNoRows
 	}
 	requested, err := decodeCapabilities(requestedRaw)
 	if err != nil {
@@ -265,8 +291,13 @@ func (db *DB) ApproveEnrollment(requestID, reviewerID string, capabilities []str
 		return nil, err
 	}
 	now := time.Now().UTC()
+	ownerUserID := reviewerID
+	if err := tx.QueryRow(`SELECT user_id FROM identity_memberships WHERE identity_id = ?
+		ORDER BY CASE role WHEN 'owner' THEN 0 ELSE 1 END, created_at LIMIT 1`, request.IdentityID).Scan(&ownerUserID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
 	device := &Device{
-		ID: "dev_" + uuid.NewString(), OwnerUserID: reviewerID, Name: request.DeviceName,
+		ID: "dev_" + uuid.NewString(), OwnerUserID: ownerUserID, Name: request.DeviceName,
 		Fingerprint: request.Fingerprint, InstallationID: request.InstallationID,
 		Platform: request.Platform, Arch: request.Arch, ClientVersion: request.ClientVersion,
 		ApprovalState: EnrollmentApproved, RequestedCapabilities: requested,
@@ -274,9 +305,9 @@ func (db *DB) ApproveEnrollment(requestID, reviewerID string, capabilities []str
 		DeviceMode: modeForCapabilities(approved),
 	}
 	if _, err := tx.Exec(`INSERT INTO devices
-		(id, owner_user_id, name, public_key_fingerprint, installation_id, platform, arch, client_version,
+		(id, owner_user_id, identity_id, name, public_key_fingerprint, installation_id, platform, arch, client_version,
 		 approval_state, requested_capabilities, approved_capabilities, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, device.ID, reviewerID, device.Name,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, device.ID, ownerUserID, nullableString(request.IdentityID), device.Name,
 		device.Fingerprint, device.InstallationID, device.Platform, device.Arch, device.ClientVersion,
 		EnrollmentApproved, requestedRaw, approvedRaw, now, now); err != nil {
 		return nil, err
@@ -314,18 +345,25 @@ func (db *DB) ApproveEnrollment(requestID, reviewerID string, capabilities []str
 }
 
 func (db *DB) RejectEnrollment(requestID, reviewerID, reason string) error {
-	return db.reviewEnrollment(requestID, reviewerID, reason, EnrollmentRejected)
+	return db.RejectEnrollmentForIdentity(requestID, reviewerID, "", reason)
 }
 
-func (db *DB) reviewEnrollment(requestID, reviewerID, reason, state string) error {
+func (db *DB) RejectEnrollmentForIdentity(requestID, reviewerID, allowedIdentityID, reason string) error {
+	return db.reviewEnrollment(requestID, reviewerID, allowedIdentityID, reason, EnrollmentRejected)
+}
+
+func (db *DB) reviewEnrollment(requestID, reviewerID, allowedIdentityID, reason, state string) error {
 	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	var fingerprint string
-	if err := tx.QueryRow(`SELECT fingerprint FROM device_enrollment_requests WHERE id = ? AND state = 'pending'`, requestID).Scan(&fingerprint); err != nil {
+	var fingerprint, identityID string
+	if err := tx.QueryRow(`SELECT fingerprint, COALESCE(identity_id, '') FROM device_enrollment_requests WHERE id = ? AND state = 'pending'`, requestID).Scan(&fingerprint, &identityID); err != nil {
 		return err
+	}
+	if allowedIdentityID != "" && identityID != allowedIdentityID {
+		return sql.ErrNoRows
 	}
 	now := time.Now().UTC()
 	if _, err := tx.Exec(`UPDATE device_enrollment_requests SET state = ?, reviewed_at = ?, reviewed_by = ?, rejection_reason = ? WHERE id = ?`,

@@ -12,34 +12,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /**
- * Stores RelayProxy connection credentials separately from ordinary app config.
+ * Stores the local VPN proxy token separately from ordinary app config.
  *
  * Only AES-GCM ciphertext is persisted in SharedPreferences. The AES key is
  * generated inside Android Keystore and is never exported to the app.
  */
 class SecretStore(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-
-    fun accessKey(): String {
-        val encoded = prefs.getString(KEY_ACCESS_KEY, null)?.trim().orEmpty()
-        if (encoded.isBlank()) return ""
-        return runCatching { decrypt(encoded) }
-            .onFailure {
-                // A restored/invalidated Keystore entry cannot decrypt old
-                // ciphertext. Drop it rather than repeatedly failing startup.
-                prefs.edit().remove(KEY_ACCESS_KEY).apply()
-            }
-            .getOrDefault("")
-    }
-
-    fun setAccessKey(value: String) {
-        val normalized = value.trim()
-        if (normalized.isBlank()) {
-            prefs.edit().remove(KEY_ACCESS_KEY).apply()
-            return
-        }
-        prefs.edit().putString(KEY_ACCESS_KEY, encrypt(normalized)).apply()
-    }
 
     fun vpnProxyToken(): String = synchronized(vpnTokenLock) {
         val encoded = prefs.getString(KEY_VPN_PROXY_TOKEN, null)?.trim().orEmpty()
@@ -102,7 +81,6 @@ class SecretStore(context: Context) {
     companion object {
         private val vpnTokenLock = Any()
         private const val PREFS_NAME = "relayproxy_android_secrets"
-        private const val KEY_ACCESS_KEY = "identityAccessKey"
         private const val KEY_VPN_PROXY_TOKEN = "vpnProxyToken"
         private const val KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "relayproxy.identity.access.v1"

@@ -1185,7 +1185,7 @@
     if (manual && !errors.length) { toast(state.dirty ? '数据已刷新，未保存的配置已保留' : '数据已刷新'); }
   }
   function readSettingsForm() {
-    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, serverExit: {}, rdpIngress: {} };
+    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, serverExit: {}, rdpIngress: {}, p2p: {} };
     all('[data-setting]').forEach(el => {
       const [group, key] = el.dataset.setting.split('.');
       let value = el.type === 'checkbox' ? el.checked : el.value.trim();

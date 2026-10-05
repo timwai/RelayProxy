@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
@@ -89,26 +88,16 @@ func (r *Rendezvous) serve(ctx context.Context) {
 			return
 		}
 		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
-		if n != 16 || binary.BigEndian.Uint32(buffer[0:4]) != candidate.ProbeMagic || buffer[4] != candidate.ProbeVersion || !r.allowAddr(remote.Addr()) {
+		nonce, valid := candidate.DecodeProbeRequest(buffer[:n])
+		if !valid || !r.allowAddr(remote.Addr()) {
 			continue
 		}
-		var response [32]byte
-		binary.BigEndian.PutUint32(response[0:4], candidate.ProbeMagic)
-		response[4] = candidate.ProbeVersion
-		binary.BigEndian.PutUint16(response[6:8], remote.Port())
-		copy(response[8:16], buffer[8:16])
-		ip := remote.Addr().As16()
-		copy(response[16:32], ip[:])
+		response, valid := candidate.EncodeProbeResponse(nonce, remote)
+		if !valid {
+			continue
+		}
 		_, _ = r.conn.WriteToUDPAddrPort(response[:], remote)
 	}
-}
-
-func (r *Rendezvous) allow(ip string) bool {
-	parsed, err := netip.ParseAddr(ip)
-	if err != nil {
-		return false
-	}
-	return r.allowAddr(parsed)
 }
 
 func (r *Rendezvous) allowAddr(ip netip.Addr) bool {

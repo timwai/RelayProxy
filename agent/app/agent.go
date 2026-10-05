@@ -280,8 +280,8 @@ type Agent struct {
 	rdpP2P            *rdpp2p.Manager
 	rdpSession        *rdpp2p.Session
 	proxyP2P          *proxyp2p.Manager
-	publicDirectAuthz  *agentdirect.AuthorizationStore
-	publicDirectKey    []byte
+	publicDirectAuthz *agentdirect.AuthorizationStore
+	publicDirectKey   []byte
 	closed            atomic.Bool
 	ctx               context.Context
 	cancel            context.CancelFunc

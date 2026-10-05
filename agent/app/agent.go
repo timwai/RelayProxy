@@ -685,9 +685,11 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
+	if accepted.ProxyExitRevision != 0 {
+		a.proxyExitRevision = accepted.ProxyExitRevision
+	}
 	if accepted.ProxyExits != nil {
 		a.proxyExits = proxyExitsFromProtocol(*accepted.ProxyExits)
-		a.proxyExitRevision = accepted.ProxyExitRevision
 	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)

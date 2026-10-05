@@ -25,6 +25,8 @@ type ExitRuntimeOptions struct {
 	MaxConcurrentHandshakes int
 	MaxSessions             int
 	MaxStreams              int
+	PortStart               int
+	PortEnd                 int
 	RegisterTimeout         time.Duration
 }
 
@@ -67,12 +69,7 @@ func StartExitRuntime(
 		return nil, fmt.Errorf("generate TLS identity: %w", err)
 	}
 
-	listenAddress := strings.TrimSpace(options.ListenAddress)
-	if listenAddress == "" {
-		listenAddress = ":0"
-	}
-	listener, err := Listen(ListenerConfig{
-		ListenAddress: listenAddress,
+	listenerConfig := ListenerConfig{
 		TLSConfig: &tls.Config{
 			MinVersion:   tls.VersionTLS13,
 			Certificates: []tls.Certificate{identity.Certificate},
@@ -81,9 +78,10 @@ func StartExitRuntime(
 		AuthTimeout:             options.AuthTimeout,
 		AuthAttemptsPerMinute:   options.AuthAttemptsPerMinute,
 		MaxConcurrentHandshakes: options.MaxConcurrentHandshakes,
-	})
+	}
+	listener, err := listenExitRuntime(listenerConfig, options.ListenAddress, options.PortStart, options.PortEnd)
 	if err != nil {
-		return nil, fmt.Errorf("listen: %w", err)
+		return nil, err
 	}
 
 	_, portText, err := net.SplitHostPort(listener.Addr())
@@ -168,4 +166,41 @@ func (r *ExitRuntime) Candidates() []protocol.PublicDirectEndpointCandidate {
 		return nil
 	}
 	return append([]protocol.PublicDirectEndpointCandidate(nil), r.candidates...)
+}
+
+func listenExitRuntime(config ListenerConfig, listenAddress string, portStart, portEnd int) (*PublicListener, error) {
+	listenAddress = strings.TrimSpace(listenAddress)
+	if portStart == 0 && portEnd == 0 {
+		if listenAddress == "" {
+			listenAddress = ":0"
+		}
+		config.ListenAddress = listenAddress
+		listener, err := Listen(config)
+		if err != nil {
+			return nil, fmt.Errorf("listen: %w", err)
+		}
+		return listener, nil
+	}
+	if portStart < 1 || portStart > 65535 || portEnd < portStart || portEnd > 65535 {
+		return nil, fmt.Errorf("invalid public direct port range %d-%d", portStart, portEnd)
+	}
+
+	host := ""
+	if listenAddress != "" {
+		parsedHost, _, err := net.SplitHostPort(listenAddress)
+		if err != nil {
+			return nil, fmt.Errorf("parse listen address %q: %w", listenAddress, err)
+		}
+		host = parsedHost
+	}
+	var lastErr error
+	for port := portStart; port <= portEnd; port++ {
+		config.ListenAddress = net.JoinHostPort(host, strconv.Itoa(port))
+		listener, err := Listen(config)
+		if err == nil {
+			return listener, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("no public direct UDP port available in %d-%d: %w", portStart, portEnd, lastErr)
 }

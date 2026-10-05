@@ -868,10 +868,11 @@
         : '';
       const fallback = channel.allDevices ? '<span class="badge success">兜底：本身份全部设备</span>' : '<span class="badge neutral">兜底：' + esc((channel.deviceIds || []).length) + ' 台</span>';
       const routeCount = (channel.routeRules || []).length;
-      const customCount = (channel.verificationRules || []).filter(rule => !rule.default).length;
+      const messageRules = Array.isArray(channel.messageRules) ? channel.messageRules : [];
+      const activeMessageCount = messageRules.filter(rule => rule.enabled !== false).length;
       const ruleBadges = (routeCount ? '<span class="badge transport">分流 ' + esc(routeCount) + '</span>' : '') +
-        (customCount ? '<span class="badge transport">识别 ' + esc(customCount) + '</span>' : '');
-      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + identityBadge + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-messages="' + esc(channel.id) + '">查看消息</button><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
+        (activeMessageCount ? '<span class="badge transport">消息规则 ' + esc(activeMessageCount) + '</span>' : '');
+      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + identityBadge + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (activeMessageCount ? ' · ' + activeMessageCount + ' 条消息规则' : '') + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-messages="' + esc(channel.id) + '">查看消息</button><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
     }).join('');
   }
   function renderChannelDevices(selected) {

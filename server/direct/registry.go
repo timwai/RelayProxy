@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,6 +185,13 @@ func (r *Registry) VerifiedEndpoints(deviceID string) []protocol.PublicDirectEnd
 			out = append(out, record.Endpoint)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool {
+		left, right := publicEndpointPriority(out[i].Source), publicEndpointPriority(out[j].Source)
+		if left != right {
+			return left > right
+		}
+		return out[i].Address < out[j].Address
+	})
 	return out
 }
 
@@ -195,7 +203,15 @@ func (r *Registry) Snapshot(deviceID string) []EndpointRecord {
 	for address, record := range bucket {
 		bucket[address] = r.expireLocked(record)
 	}
-	return cloneRecords(bucket)
+	out := cloneRecords(bucket)
+	sort.Slice(out, func(i, j int) bool {
+		left, right := publicEndpointPriority(out[i].Endpoint.Source), publicEndpointPriority(out[j].Endpoint.Source)
+		if left != right {
+			return left > right
+		}
+		return out[i].Endpoint.Address < out[j].Endpoint.Address
+	})
+	return out
 }
 
 func (r *Registry) InvalidateSession(deviceID, sessionID string) {
@@ -307,4 +323,17 @@ func normalizeCandidate(candidate protocol.PublicDirectEndpointCandidate) (proto
 func isPublicIP(ip netip.Addr) bool {
 	return ip.IsValid() && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() &&
 		!ip.IsLinkLocalUnicast() && !ip.IsUnspecified() && !ip.IsMulticast()
+}
+
+func publicEndpointPriority(source string) int {
+	switch source {
+	case protocol.PublicDirectEndpointManual:
+		return 3
+	case protocol.PublicDirectEndpointObserved:
+		return 2
+	case protocol.PublicDirectEndpointIPv6:
+		return 1
+	default:
+		return 0
+	}
 }

@@ -146,6 +146,8 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	want.RDPIngress.PortEnd = 34100
 	want.RDPIngress.SourceCIDRs = []string{" 203.0.113.0/24 ", "203.0.113.0/24"}
 	want.RDPIngress.RateLimitPerMin = 240
+	want.P2P.RendezvousListen = " :3479 "
+	want.P2P.RendezvousAdvertise = " relay.example.com:3479 "
 	want.P2P.PortStart = 30000
 	want.P2P.PortEnd = 30100
 	request := map[string]any{"revision": initial.Revision, "config": want}
@@ -162,7 +164,10 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 		saved.Config.ServerExit.UpstreamMode != "direct" || saved.Config.ServerExit.AccessMode != "deny" ||
 		len(saved.Config.ServerExit.Domains) != 1 || len(saved.Config.ServerExit.CIDRs) != 1 ||
 		saved.Runtime.ServerExit.Enabled || !saved.Config.RDPIngress.Enabled || saved.Config.RDPIngress.Listen != "127.0.0.1:0" ||
-		len(saved.Config.RDPIngress.SourceCIDRs) != 1 || saved.Config.P2P.PortStart != 30000 || saved.Config.P2P.PortEnd != 30100 ||
+		len(saved.Config.RDPIngress.SourceCIDRs) != 1 || saved.Config.P2P.RendezvousListen != ":3479" ||
+		saved.Config.P2P.RendezvousAdvertise != "relay.example.com:3479" ||
+		saved.Config.P2P.PortStart != 30000 || saved.Config.P2P.PortEnd != 30100 ||
+		saved.Runtime.P2P.RendezvousListen != "" || saved.Runtime.P2P.RendezvousAdvertise != "" ||
 		saved.Runtime.P2P.PortStart != 0 || saved.Runtime.P2P.PortEnd != 0 {
 		t.Fatalf("invalid saved/runtime response: %+v", saved)
 	}
@@ -193,6 +198,7 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 		len(loaded.Exit.Access.Domains) != 1 || len(loaded.Exit.Access.CIDRs) != 1 ||
 		loaded.RDP.Ingress.Enabled == nil || !*loaded.RDP.Ingress.Enabled || loaded.RDP.Ingress.Listen != "127.0.0.1:0" ||
 		loaded.RDP.Ingress.PortStart != 34000 || loaded.RDP.Ingress.PortEnd != 34100 ||
+		loaded.P2P.RendezvousListen != ":3479" || loaded.P2P.RendezvousAdvertise != "relay.example.com:3479" ||
 		loaded.P2P.PortStart != 30000 || loaded.P2P.PortEnd != 30100 {
 		t.Fatalf("saved configuration did not round-trip: %v", err)
 	}

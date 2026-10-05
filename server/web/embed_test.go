@@ -111,6 +111,19 @@ func TestServerConsoleLoadsSharedFoundationBeforeProductCSS(t *testing.T) {
 	}
 }
 
+func TestServerP2PRendezvousSettingsAreEmbedded(t *testing.T) {
+	page, err := EmbeddedFiles.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(page)
+	for _, setting := range []string{"p2p.rendezvousListen", "p2p.rendezvousAdvertise", "p2p.portStart", "p2p.portEnd"} {
+		if !strings.Contains(text, `data-setting="`+setting+`"`) {
+			t.Fatalf("server P2P setting %s is missing from the embedded form", setting)
+		}
+	}
+}
+
 func TestServerSettingsFormInitializesEverySettingGroup(t *testing.T) {
 	script, err := EmbeddedFiles.ReadFile("js/app.js")
 	if err != nil {

@@ -162,6 +162,9 @@ func (c *Client) startPublicDirectExit(
 		MaxStreams: maxStreams,
 		PortStart:  accepted.PublicDirectPortStart,
 		PortEnd:    accepted.PublicDirectPortEnd,
+		ValidateTicket: func(validateCtx context.Context, claims protocol.PublicDirectTicketClaims) error {
+			return proxydirect.ValidateTicketCurrent(validateCtx, relay, claims)
+		},
 	})
 	if err != nil {
 		log.Printf("[PublicDirect] Android exit listener unavailable; P2P/Relay fallback remains active: %v", err)

@@ -257,10 +257,11 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/messages", r.requireAuth(r.handleListMessages))
 	r.mux.HandleFunc("DELETE /api/v1/messages", r.requireAuth(r.requireAdmin(r.handleClearMessages)))
 	r.mux.HandleFunc("DELETE /api/v1/messages/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteMessage)))
-	r.mux.HandleFunc("GET /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleListMessageChannels)))
-	r.mux.HandleFunc("POST /api/v1/message-channels", r.requireAuth(r.requireAdmin(r.handleCreateMessageChannel)))
-	r.mux.HandleFunc("PUT /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateMessageChannel)))
-	r.mux.HandleFunc("DELETE /api/v1/message-channels/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteMessageChannel)))
+	r.mux.HandleFunc("GET /api/v1/message-channels", r.requireAuth(r.handleListMessageChannels))
+	r.mux.HandleFunc("POST /api/v1/message-channels", r.requireAuth(r.handleCreateMessageChannel))
+	r.mux.HandleFunc("PUT /api/v1/message-channels/{id}", r.requireAuth(r.handleUpdateMessageChannel))
+	r.mux.HandleFunc("DELETE /api/v1/message-channels/{id}", r.requireAuth(r.handleDeleteMessageChannel))
+	r.mux.HandleFunc("GET /api/v1/message-push-info", r.requireAuth(r.handleMessagePushInfo))
 
 	// Global administrators create isolation identities and their independent
 	// login accounts. Any authenticated identity may resolve active grant targets.
@@ -329,8 +330,14 @@ type channelPushRequest struct {
 	Source  string `json:"source,omitempty"`
 }
 
+type messagePushInfo struct {
+	TCPListen  string `json:"tcpListen"`
+	TLSEnabled bool   `json:"tlsEnabled"`
+}
+
 type messageChannelRequest struct {
 	ID                     string                         `json:"id,omitempty"`
+	IdentityID             string                         `json:"identityId,omitempty"`
 	Name                   string                         `json:"name"`
 	AllDevices             bool                           `json:"allDevices"`
 	DeviceIDs              []string                       `json:"deviceIds,omitempty"`
@@ -366,13 +373,20 @@ func normalizeChannelDeviceIDs(ids []string) []string {
 	return out
 }
 
-func (r *Router) channelFromRequest(w http.ResponseWriter, body *messageChannelRequest, existing *repository.MessageChannel) (*repository.MessageChannel, bool) {
+func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, body *messageChannelRequest, existing *repository.MessageChannel) (*repository.MessageChannel, bool) {
 	body.Name = strings.TrimSpace(body.Name)
 	body.ID = strings.TrimSpace(body.ID)
+	body.IdentityID = strings.TrimSpace(body.IdentityID)
 	body.DeviceIDs = normalizeChannelDeviceIDs(body.DeviceIDs)
 
+	user, _ := req.Context().Value(principalContextKey).(*repository.User)
+	if user == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return nil, false
+	}
 	channel := &repository.MessageChannel{
 		ID:                     body.ID,
+		IdentityID:             body.IdentityID,
 		Name:                   body.Name,
 		AllDevices:             body.AllDevices,
 		DeviceIDs:              body.DeviceIDs,
@@ -380,9 +394,45 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, body *messageChannelR
 	}
 	if existing != nil {
 		channel.ID = existing.ID
+		channel.IdentityID = existing.IdentityID
 		channel.UseDefaultVerification = existing.UseDefaultVerification
 		channel.VerificationRules = append([]repository.VerificationRule(nil), existing.VerificationRules...)
 		channel.RouteRules = append([]repository.MessageRouteRule(nil), existing.RouteRules...)
+		if body.IdentityID != "" && channel.IdentityID != "" && body.IdentityID != channel.IdentityID {
+			writeError(w, http.StatusBadRequest, "channel identity cannot be changed")
+			return nil, false
+		}
+	}
+	if user.Role == "admin" {
+		if channel.IdentityID == "" {
+			channel.IdentityID = body.IdentityID
+		}
+		if channel.IdentityID == "" {
+			writeError(w, http.StatusBadRequest, "select a channel identity")
+			return nil, false
+		}
+	} else {
+		scope := requestIdentityScope(req)
+		if scope == "" || scope == "__no_identity__" {
+			writeError(w, http.StatusForbidden, "account has no identity scope")
+			return nil, false
+		}
+		if body.IdentityID != "" && body.IdentityID != scope {
+			writeError(w, http.StatusNotFound, "channel not found")
+			return nil, false
+		}
+		if existing != nil && existing.IdentityID != "" && existing.IdentityID != scope {
+			writeError(w, http.StatusNotFound, "channel not found")
+			return nil, false
+		}
+		channel.IdentityID = scope
+	}
+	if _, err := r.db.GetIdentity(channel.IdentityID); errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusBadRequest, "unknown channel identity")
+		return nil, false
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load channel identity")
+		return nil, false
 	}
 	if body.UseDefaultVerification != nil {
 		channel.UseDefaultVerification = *body.UseDefaultVerification
@@ -407,14 +457,14 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, body *messageChannelR
 		return nil, false
 	}
 
-	devices, err := r.db.ListDevicesForOwner("")
+	deviceIDs, err := r.db.ListDeviceIDsForIdentity(channel.IdentityID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load devices")
+		writeError(w, http.StatusInternalServerError, "failed to load identity devices")
 		return nil, false
 	}
-	known := make(map[string]bool, len(devices))
-	for _, device := range devices {
-		known[device.ID] = true
+	known := make(map[string]bool, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		known[deviceID] = true
 	}
 	for _, id := range channel.DeviceIDs {
 		if !known[id] {
@@ -450,8 +500,25 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, body *messageChannelR
 	return channel, true
 }
 
-func (r *Router) handleListMessageChannels(w http.ResponseWriter, _ *http.Request) {
-	channels, err := r.db.ListMessageChannels()
+func (r *Router) handleMessagePushInfo(w http.ResponseWriter, _ *http.Request) {
+	if r.settings == nil {
+		writeJSON(w, http.StatusOK, messagePushInfo{})
+		return
+	}
+	state, err := r.settings.State()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load push listener")
+		return
+	}
+	runtime := serverEditableConfig(state.Runtime)
+	writeJSON(w, http.StatusOK, messagePushInfo{
+		TCPListen:  runtime.Tunnel.TCPListen,
+		TLSEnabled: runtime.Tunnel.TLSEnabled,
+	})
+}
+
+func (r *Router) handleListMessageChannels(w http.ResponseWriter, req *http.Request) {
+	channels, err := r.db.ListMessageChannelsForIdentity(requestIdentityScope(req))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load message channels")
 		return
@@ -465,7 +532,7 @@ func (r *Router) handleCreateMessageChannel(w http.ResponseWriter, req *http.Req
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	channel, ok := r.channelFromRequest(w, &body, nil)
+	channel, ok := r.channelFromRequest(w, req, &body, nil)
 	if !ok {
 		return
 	}
@@ -491,7 +558,7 @@ func (r *Router) handleUpdateMessageChannel(w http.ResponseWriter, req *http.Req
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	existing, err := r.db.GetMessageChannel(id)
+	existing, err := r.db.GetMessageChannelForIdentity(id, requestIdentityScope(req))
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
@@ -500,7 +567,7 @@ func (r *Router) handleUpdateMessageChannel(w http.ResponseWriter, req *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to load channel")
 		return
 	}
-	channel, ok := r.channelFromRequest(w, &body, existing)
+	channel, ok := r.channelFromRequest(w, req, &body, existing)
 	if !ok {
 		return
 	}
@@ -513,7 +580,7 @@ func (r *Router) handleUpdateMessageChannel(w http.ResponseWriter, req *http.Req
 
 func (r *Router) handleDeleteMessageChannel(w http.ResponseWriter, req *http.Request) {
 	id := strings.TrimSpace(req.PathValue("id"))
-	if err := r.db.DeleteMessageChannel(id); errors.Is(err, sql.ErrNoRows) {
+	if err := r.db.DeleteMessageChannelForIdentity(id, requestIdentityScope(req)); errors.Is(err, sql.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "channel not found")
 		return
 	} else if err != nil {
@@ -590,6 +657,7 @@ func (r *Router) handleChannelPush(w http.ResponseWriter, req *http.Request) {
 	}
 
 	message := &repository.MessageRecord{
+		IdentityID: channel.IdentityID,
 		ChannelID: channel.ID, Title: title, Content: content, Source: source,
 		VerificationCode: messageutil.ExtractVerificationCode(content),
 		CreatedAt:        time.Now().UTC(),
@@ -697,10 +765,20 @@ func (r *Router) handleListMessages(w http.ResponseWriter, req *http.Request) {
 		messages []*repository.MessageRecord
 		err      error
 	)
+	identityScope := requestIdentityScope(req)
 	if channelID == "" {
-		messages, err = r.db.ListMessages(requestOwner(req), limit)
+		messages, err = r.db.ListMessagesForIdentity(identityScope, limit)
 	} else {
-		messages, err = r.db.ListMessagesByChannel(requestOwner(req), channelID, limit)
+		if identityScope != "" {
+			if _, channelErr := r.db.GetMessageChannelForIdentity(channelID, identityScope); errors.Is(channelErr, sql.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "channel not found")
+				return
+			} else if channelErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load channel")
+				return
+			}
+		}
+		messages, err = r.db.ListMessagesByChannelForIdentity(identityScope, channelID, limit)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load messages")

@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, messagePushInfo: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -805,7 +805,9 @@
     }).join('') : emptyRow(5, '当前没有 P2P 会话', 'Client 选择支持 P2P 的 Exit 后会在后台建立直连');
   }
   function relayPushOrigin() {
-    const tunnel = state.settings && state.settings.runtime && state.settings.runtime.tunnel;
+    const tunnel = state.messagePushInfo && state.messagePushInfo.tcpListen
+      ? { tcpListen: state.messagePushInfo.tcpListen, tlsEnabled: !!state.messagePushInfo.tlsEnabled }
+      : state.settings && state.settings.runtime && state.settings.runtime.tunnel;
     if (!tunnel || !tunnel.tcpListen) return '';
     const match = /^(?:\[[^\]]+\]|[^:]*):(\d{1,5})$/.exec(String(tunnel.tcpListen).trim());
     if (!match) return '';
@@ -821,8 +823,28 @@
     const origin = relayPushOrigin();
     return (origin || '中继地址读取中') + '/api/v1/push/' + encodeURIComponent(id || '');
   }
+  function currentChannelIdentityID() {
+    if (!state.user) return '';
+    if (state.user.role !== 'admin') return state.user.identityId || '';
+    if (state.selectedChannel && state.selectedChannel.identityId) return state.selectedChannel.identityId;
+    return $('channel-identity') ? $('channel-identity').value : '';
+  }
+  function channelScopedDevices() {
+    const identityId = currentChannelIdentityID();
+    if (!identityId) return [];
+    return state.devices.filter(device => device.identityId === identityId);
+  }
+  function renderChannelIdentityOptions(selected = '') {
+    const select = $('channel-identity');
+    if (!select) return;
+    const identities = state.identities.filter(identity => identity && identity.id);
+    select.innerHTML = '<option value="">请选择身份</option>' + identities.map(identity =>
+      '<option value="' + esc(identity.id) + '">' + esc(identity.name || identity.shortId || identity.id) + '</option>'
+    ).join('');
+    select.value = selected || '';
+  }
   function channelDeviceLabel(channel) {
-    if (channel.allDevices) return '全部已批准设备';
+    if (channel.allDevices) return '本身份全部已批准设备';
     const ids = Array.isArray(channel.deviceIds) ? channel.deviceIds : [];
     const names = ids.map(id => {
       const device = state.devices.find(item => item.id === id);
@@ -840,18 +862,22 @@
     }
     host.innerHTML = state.channels.map(channel => {
       const url = channelPushURL(channel.id);
-      const fallback = channel.allDevices ? '<span class="badge success">兜底：全部设备</span>' : '<span class="badge neutral">兜底：' + esc((channel.deviceIds || []).length) + ' 台</span>';
+      const identity = state.identities.find(item => item.id === channel.identityId);
+      const identityBadge = state.user && state.user.role === 'admin'
+        ? '<span class="badge neutral">' + esc(identity ? (identity.name || identity.shortId) : (channel.identityId || '未绑定身份')) + '</span>'
+        : '';
+      const fallback = channel.allDevices ? '<span class="badge success">兜底：本身份全部设备</span>' : '<span class="badge neutral">兜底：' + esc((channel.deviceIds || []).length) + ' 台</span>';
       const routeCount = (channel.routeRules || []).length;
       const customCount = (channel.verificationRules || []).length;
       const ruleBadges = (routeCount ? '<span class="badge transport">分流 ' + esc(routeCount) + '</span>' : '') +
         (customCount ? '<span class="badge transport">识别 ' + esc(customCount) + '</span>' : '');
-      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-messages="' + esc(channel.id) + '">查看消息</button><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
+      return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + identityBadge + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-messages="' + esc(channel.id) + '">查看消息</button><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
     }).join('');
   }
   function renderChannelDevices(selected) {
     const selectedSet = new Set(selected || []);
     const host = $('channel-devices');
-    const devices = state.devices.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), 'zh-CN'));
+    const devices = channelScopedDevices().slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), 'zh-CN'));
     host.innerHTML = devices.length ? devices.map(device => {
       const checked = selectedSet.has(device.id);
       const status = device.approvalState === 'approved' ? (device.status === 'online' ? '在线' : '离线') : '已撤销';
@@ -861,7 +887,7 @@
   }
   function routeDeviceOptions(selected) {
     const selectedSet = new Set(selected || []);
-    return state.devices.slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), 'zh-CN')).map(device => {
+    return channelScopedDevices().slice().sort((a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id), 'zh-CN')).map(device => {
       const status = device.approvalState === 'approved' ? (device.status === 'online' ? '在线' : '离线') : '已撤销';
       return '<option value="' + esc(device.id) + '"' + (selectedSet.has(device.id) ? ' selected' : '') + '>' + esc((device.name || device.id) + ' · ' + status) + '</option>';
     }).join('');
@@ -884,7 +910,7 @@
       '<label class="wide">匹配内容<input data-route-pattern class="mono" maxlength="500" value="' + esc(rule.pattern || '') + '" placeholder="例如：4A系统 或 四川移动.*EIP"></label>' +
       '<label class="wide">目标设备<select data-route-devices class="channel-route-devices" multiple>' + routeDeviceOptions(rule.deviceIds || []) + '</select></label>' +
       '</div><label class="channel-rule-check"><input data-route-case type="checkbox"' + (rule.caseSensitive ? ' checked' : '') + '>区分大小写</label>' +
-      '<label class="channel-rule-check"><input data-route-all type="checkbox"' + (rule.allDevices ? ' checked' : '') + '>命中后推送到全部已批准设备</label></article>';
+      '<label class="channel-rule-check"><input data-route-all type="checkbox"' + (rule.allDevices ? ' checked' : '') + '>命中后推送到本身份全部已批准设备</label></article>';
   }
   function renderChannelRules(channel) {
     const verificationRules = channel && Array.isArray(channel.verificationRules) ? channel.verificationRules : [];
@@ -954,6 +980,8 @@
     const channel = id ? state.channels.find(item => item.id === id) : null;
     state.selectedChannel = channel || null;
     $('channel-dialog-title').textContent = channel ? '编辑推送渠道' : '新建推送渠道';
+    renderChannelIdentityOptions(channel ? channel.identityId : '');
+    $('channel-identity').disabled = !!(channel && channel.identityId);
     $('channel-name').value = channel ? channel.name : '';
     $('channel-id').value = channel ? channel.id : '';
     $('channel-id').disabled = !!channel;
@@ -979,6 +1007,13 @@
       verificationRules: readVerificationRules(),
       routeRules: readRouteRules()
     };
+    if (state.user && state.user.role === 'admin') {
+      body.identityId = $('channel-identity').value;
+      if (!body.identityId) {
+        errorAt('channel-error', '请选择渠道所属身份。');
+        return;
+      }
+    }
     if (!body.useDefaultVerification && !body.verificationRules.length) {
       errorAt('channel-error', '请启用默认验证码识别，或至少添加一条自定义识别规则。');
       return;
@@ -1007,6 +1042,7 @@
       state.channelBusy = false;
       all('#channel-dialog button, #channel-dialog input, #channel-dialog select, #channel-dialog textarea').forEach(el => { el.disabled = false; });
       $('channel-id').disabled = !!state.selectedChannel;
+      $('channel-identity').disabled = !!(state.selectedChannel && state.selectedChannel.identityId);
       syncRouteRuleDeviceStates();
     }
   }
@@ -1183,19 +1219,18 @@
       ['sessions', '/sessions/active', data => { state.sessions = data; renderSessions(); }],
       ['p2pSessions', '/p2p/sessions', data => { state.p2pSessions = Array.isArray(data) ? data : []; renderP2PSessions(); }],
       ['messages', messageListPath(), data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }],
+      ['messagePushInfo', '/message-push-info', data => { state.messagePushInfo = data || null; }],
+      ['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }],
       ['identityOptions', user.role === 'admin' ? '/identities' : '/identity-options', data => { state.identities = Array.isArray(data) ? data : []; if (user.role === 'admin') renderIdentities(); syncIdentityGrantFormOptions(); }],
       ['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]
     ];
     if (user.role === 'admin') {
       jobs.push(['systemIdentityGrants', '/system-identity-grants?resourceId=server', data => { state.systemIdentityGrants = Array.isArray(data) ? data : []; renderSystemIdentityGrants(); }]);
-      jobs.push(['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }]);
       jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); }]);
     } else {
       state.systemIdentityGrants = [];
-      state.channels = [];
       renderSystemIdentityGrants();
       renderEnrollments();
-      renderChannels();
     }
     if (user.role === 'admin' && !state.dirty && !state.saving) {
       jobs.push(['settings', '/server/config', data => {
@@ -1683,6 +1718,14 @@
   $('channel-create').addEventListener('click', () => openChannel(''));
   $('channel-form').addEventListener('submit', saveChannel);
   $('channel-delete').addEventListener('click', deleteChannel);
+  $('channel-identity').addEventListener('change', () => {
+    renderChannelDevices([]);
+    all('#channel-route-rules [data-route-rule]').forEach(card => {
+      const select = card.querySelector('[data-route-devices]');
+      if (select) select.innerHTML = routeDeviceOptions([]);
+    });
+    syncRouteRuleDeviceStates();
+  });
   $('channel-all-devices').addEventListener('change', updateChannelDeviceState);
   $('channel-id').addEventListener('input', updateChannelDeviceState);
   $('channel-devices').addEventListener('change', updateChannelDeviceState);

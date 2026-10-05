@@ -81,6 +81,10 @@ func OpenDB(driver, dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("identity access schema migration failed: %w", err)
 	}
+	if err := wrapper.ensureMessageIdentityIsolation(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("message identity isolation migration failed: %w", err)
+	}
 
 	return wrapper, nil
 }
@@ -310,6 +314,7 @@ func (db *DB) ensureMessageSchema() error {
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS messages (
 			id VARCHAR(64) PRIMARY KEY,
+			identity_id VARCHAR(64),
 			channel_id VARCHAR(80),
 			title VARCHAR(200) NOT NULL,
 			content TEXT NOT NULL,
@@ -330,6 +335,7 @@ func (db *DB) ensureMessageSchema() error {
 		)`,
 		`CREATE TABLE IF NOT EXISTS message_channels (
 			id VARCHAR(80) PRIMARY KEY,
+			identity_id VARCHAR(64),
 			name VARCHAR(120) NOT NULL,
 			all_devices BOOLEAN NOT NULL DEFAULT FALSE,
 			use_default_verification BOOLEAN NOT NULL DEFAULT TRUE,
@@ -354,10 +360,16 @@ func (db *DB) ensureMessageSchema() error {
 			return err
 		}
 	}
+	if err := db.ensureSQLiteColumn("messages", "identity_id", "VARCHAR(64)"); err != nil {
+		return err
+	}
 	if err := db.ensureSQLiteColumn("messages", "channel_id", "VARCHAR(80)"); err != nil {
 		return err
 	}
 	if err := db.ensureSQLiteColumn("messages", "route_rule", "VARCHAR(120)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("message_channels", "identity_id", "VARCHAR(64)"); err != nil {
 		return err
 	}
 	if err := db.ensureSQLiteColumn("message_channels", "use_default_verification", "BOOLEAN NOT NULL DEFAULT TRUE"); err != nil {
@@ -403,6 +415,139 @@ func (db *DB) ensureSQLiteColumn(table, column, definition string) error {
 	return err
 }
 
+func (db *DB) ensureMessageIdentityIsolation() error {
+	if err := db.ensureSQLiteColumn("message_channels", "identity_id", "VARCHAR(64)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "identity_id", "VARCHAR(64)"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_message_channels_identity ON message_channels(identity_id, created_at)`); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_messages_identity_created ON messages(identity_id, created_at)`); err != nil {
+		return err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Legacy device-bound channels can be migrated only when every bound
+	// device already belongs to the same identity. Ambiguous channels stay
+	// unscoped and public delivery fails closed until an administrator edits
+	// them.
+	rows, err := tx.Query(`
+		SELECT mcd.channel_id, MIN(d.identity_id)
+		FROM message_channel_devices mcd
+		JOIN devices d ON d.id = mcd.device_id
+		JOIN message_channels mc ON mc.id = mcd.channel_id
+		WHERE COALESCE(mc.identity_id, '') = ''
+		GROUP BY mcd.channel_id
+		HAVING COUNT(*) > 0
+		   AND COUNT(d.identity_id) = COUNT(*)
+		   AND COUNT(DISTINCT d.identity_id) = 1`)
+	if err != nil {
+		return err
+	}
+	type channelIdentity struct{ channelID, identityID string }
+	var inferred []channelIdentity
+	for rows.Next() {
+		var item channelIdentity
+		if err := rows.Scan(&item.channelID, &item.identityID); err != nil {
+			rows.Close()
+			return err
+		}
+		if item.identityID != "" {
+			inferred = append(inferred, item)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, item := range inferred {
+		if _, err := tx.Exec(`UPDATE message_channels SET identity_id = ?
+			WHERE id = ? AND COALESCE(identity_id, '') = ''`, item.identityID, item.channelID); err != nil {
+			return err
+		}
+	}
+
+	// A deployment with exactly one identity has no possible cross-identity
+	// ambiguity, so all remaining historical channels safely belong to it.
+	var identityCount int
+	var soleIdentity sql.NullString
+	if err := tx.QueryRow(`SELECT COUNT(*), MIN(id) FROM identities`).Scan(&identityCount, &soleIdentity); err != nil {
+		return err
+	}
+	if identityCount == 1 && soleIdentity.Valid && soleIdentity.String != "" {
+		if _, err := tx.Exec(`UPDATE message_channels SET identity_id = ?
+			WHERE COALESCE(identity_id, '') = ''`, soleIdentity.String); err != nil {
+			return err
+		}
+	}
+
+	// Preserve ownership for messages whose legacy channel was deleted but
+	// whose delivery set unambiguously belongs to one identity.
+	messageRows, err := tx.Query(`
+		SELECT md.message_id, MIN(d.identity_id)
+		FROM message_deliveries md
+		JOIN devices d ON d.id = md.device_id
+		JOIN messages m ON m.id = md.message_id
+		WHERE COALESCE(m.identity_id, '') = ''
+		GROUP BY md.message_id
+		HAVING COUNT(*) > 0
+		   AND COUNT(d.identity_id) = COUNT(*)
+		   AND COUNT(DISTINCT d.identity_id) = 1`)
+	if err != nil {
+		return err
+	}
+	var messageIdentities []channelIdentity
+	for messageRows.Next() {
+		var item channelIdentity
+		if err := messageRows.Scan(&item.channelID, &item.identityID); err != nil {
+			messageRows.Close()
+			return err
+		}
+		if item.identityID != "" {
+			messageIdentities = append(messageIdentities, item)
+		}
+	}
+	if err := messageRows.Err(); err != nil {
+		messageRows.Close()
+		return err
+	}
+	messageRows.Close()
+	for _, item := range messageIdentities {
+		if _, err := tx.Exec(`UPDATE messages SET identity_id = ?
+			WHERE id = ? AND COALESCE(identity_id, '') = ''`, item.identityID, item.channelID); err != nil {
+			return err
+		}
+	}
+
+	// Messages without delivery rows can inherit the channel identity. Messages
+	// that were historically delivered across multiple identities remain
+	// unscoped instead of exposing cross-identity delivery metadata.
+	if _, err := tx.Exec(`UPDATE messages
+		SET identity_id = (
+			SELECT mc.identity_id FROM message_channels mc WHERE mc.id = messages.channel_id
+		)
+		WHERE COALESCE(identity_id, '') = ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM message_deliveries md WHERE md.message_id = messages.id
+		  )
+		  AND EXISTS (
+			SELECT 1 FROM message_channels mc
+			WHERE mc.id = messages.channel_id AND COALESCE(mc.identity_id, '') <> ''
+		  )`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 type VerificationRule struct {
 	Name          string   `json:"name,omitempty"`
 	Keywords      []string `json:"keywords,omitempty"`
@@ -422,6 +567,7 @@ type MessageRouteRule struct {
 
 type MessageChannel struct {
 	ID                     string             `json:"id"`
+	IdentityID             string             `json:"identityId"`
 	Name                   string             `json:"name"`
 	AllDevices             bool               `json:"allDevices"`
 	DeviceIDs              []string           `json:"deviceIds"`
@@ -432,9 +578,57 @@ type MessageChannel struct {
 	UpdatedAt              time.Time          `json:"updatedAt"`
 }
 
+func (db *DB) inferMessageChannelIdentity(deviceIDs []string) (string, error) {
+	seen := make(map[string]bool)
+	for _, deviceID := range deviceIDs {
+		deviceID = strings.TrimSpace(deviceID)
+		if deviceID == "" {
+			continue
+		}
+		var identity sql.NullString
+		if err := db.QueryRow(`SELECT identity_id FROM devices WHERE id = ?`, deviceID).Scan(&identity); err != nil {
+			return "", err
+		}
+		if !identity.Valid || strings.TrimSpace(identity.String) == "" {
+			return "", errors.New("message target device has no identity")
+		}
+		seen[identity.String] = true
+		if len(seen) > 1 {
+			return "", errors.New("message channel targets span multiple identities")
+		}
+	}
+	for identityID := range seen {
+		return identityID, nil
+	}
+	var count int
+	var only sql.NullString
+	if err := db.QueryRow(`SELECT COUNT(*), MIN(id) FROM identities`).Scan(&count, &only); err != nil {
+		return "", err
+	}
+	if count == 1 && only.Valid && only.String != "" {
+		return only.String, nil
+	}
+	return "", errors.New("channel identity is required")
+}
+
 func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
 	if channel == nil {
 		return errors.New("channel is required")
+	}
+	channel.IdentityID = strings.TrimSpace(channel.IdentityID)
+	if channel.IdentityID == "" {
+		inferred, err := db.inferMessageChannelIdentity(channel.DeviceIDs)
+		if err != nil {
+			return err
+		}
+		channel.IdentityID = inferred
+	}
+	var identityExists int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM identities WHERE id = ?`, channel.IdentityID).Scan(&identityExists); err != nil {
+		return err
+	}
+	if identityExists != 1 {
+		return sql.ErrNoRows
 	}
 	if channel.ID == "" {
 		channel.ID = "ch_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
@@ -456,7 +650,45 @@ func (db *DB) UpdateMessageChannel(channel *MessageChannel) error {
 	return db.saveMessageChannel(channel, false)
 }
 
+func (db *DB) validateMessageChannelIdentityTargets(channel *MessageChannel) error {
+	if channel == nil || strings.TrimSpace(channel.IdentityID) == "" {
+		return errors.New("channel identity is required")
+	}
+	deviceIDs, err := db.ListDeviceIDsForIdentity(channel.IdentityID)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]bool, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		allowed[deviceID] = true
+	}
+	validate := func(deviceIDs []string) error {
+		for _, deviceID := range deviceIDs {
+			deviceID = strings.TrimSpace(deviceID)
+			if deviceID == "" {
+				continue
+			}
+			if !allowed[deviceID] {
+				return fmt.Errorf("message target device is outside channel identity: %s", deviceID)
+			}
+		}
+		return nil
+	}
+	if err := validate(channel.DeviceIDs); err != nil {
+		return err
+	}
+	for _, rule := range channel.RouteRules {
+		if err := validate(rule.DeviceIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
+	if err := db.validateMessageChannelIdentityTargets(channel); err != nil {
+		return err
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -474,17 +706,17 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 
 	if create {
 		if _, err := tx.Exec(`INSERT INTO message_channels
-			(id, name, all_devices, use_default_verification, verification_rules, route_rules, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			channel.ID, channel.Name, channel.AllDevices, channel.UseDefaultVerification,
+			(id, identity_id, name, all_devices, use_default_verification, verification_rules, route_rules, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			channel.ID, channel.IdentityID, channel.Name, channel.AllDevices, channel.UseDefaultVerification,
 			string(verificationRules), string(routeRules), channel.CreatedAt, channel.UpdatedAt); err != nil {
 			return err
 		}
 	} else {
 		result, err := tx.Exec(`UPDATE message_channels
-			SET name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, route_rules = ?, updated_at = ?
+			SET identity_id = ?, name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, route_rules = ?, updated_at = ?
 			WHERE id = ?`,
-			channel.Name, channel.AllDevices, channel.UseDefaultVerification, string(verificationRules), string(routeRules), channel.UpdatedAt, channel.ID)
+			channel.IdentityID, channel.Name, channel.AllDevices, channel.UseDefaultVerification, string(verificationRules), string(routeRules), channel.UpdatedAt, channel.ID)
 		if err != nil {
 			return err
 		}
@@ -494,6 +726,19 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 			return sql.ErrNoRows
 		}
 		if _, err := tx.Exec(`DELETE FROM message_channel_devices WHERE channel_id = ?`, channel.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE messages
+			SET identity_id = ?
+			WHERE channel_id = ?
+			  AND COALESCE(identity_id, '') = ''
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM message_deliveries md
+				LEFT JOIN devices d ON d.id = md.device_id
+				WHERE md.message_id = messages.id
+				  AND COALESCE(d.identity_id, '') <> ?
+			  )`, channel.IdentityID, channel.ID, channel.IdentityID); err != nil {
 			return err
 		}
 	}
@@ -531,10 +776,10 @@ func (db *DB) DeleteMessageChannel(id string) error {
 func (db *DB) GetMessageChannel(id string) (*MessageChannel, error) {
 	channel := &MessageChannel{}
 	var verificationRules, routeRules string
-	if err := db.QueryRow(`SELECT id, name, all_devices, use_default_verification,
+	if err := db.QueryRow(`SELECT id, COALESCE(identity_id, ''), name, all_devices, use_default_verification,
 		COALESCE(verification_rules, '[]'), COALESCE(route_rules, '[]'), created_at, updated_at
 		FROM message_channels WHERE id = ?`, id).Scan(
-		&channel.ID, &channel.Name, &channel.AllDevices, &channel.UseDefaultVerification,
+		&channel.ID, &channel.IdentityID, &channel.Name, &channel.AllDevices, &channel.UseDefaultVerification,
 		&verificationRules, &routeRules, &channel.CreatedAt, &channel.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -567,8 +812,32 @@ func (db *DB) GetMessageChannel(id string) (*MessageChannel, error) {
 	return channel, nil
 }
 
+func (db *DB) GetMessageChannelForIdentity(id, identityID string) (*MessageChannel, error) {
+	channel, err := db.GetMessageChannel(id)
+	if err != nil {
+		return nil, err
+	}
+	identityID = strings.TrimSpace(identityID)
+	if identityID != "" && channel.IdentityID != identityID {
+		return nil, sql.ErrNoRows
+	}
+	return channel, nil
+}
+
 func (db *DB) ListMessageChannels() ([]*MessageChannel, error) {
-	rows, err := db.Query(`SELECT id FROM message_channels ORDER BY created_at, id`)
+	return db.ListMessageChannelsForIdentity("")
+}
+
+func (db *DB) ListMessageChannelsForIdentity(identityID string) ([]*MessageChannel, error) {
+	query := `SELECT id FROM message_channels`
+	var args []any
+	identityID = strings.TrimSpace(identityID)
+	if identityID != "" {
+		query += ` WHERE identity_id = ?`
+		args = append(args, identityID)
+	}
+	query += ` ORDER BY created_at, id`
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -598,27 +867,75 @@ func (db *DB) ListMessageChannels() ([]*MessageChannel, error) {
 	return channels, nil
 }
 
+func (db *DB) DeleteMessageChannelForIdentity(id, identityID string) error {
+	identityID = strings.TrimSpace(identityID)
+	query := `DELETE FROM message_channels WHERE id = ?`
+	args := []any{strings.TrimSpace(id)}
+	if identityID != "" {
+		query += ` AND identity_id = ?`
+		args = append(args, identityID)
+	}
+	result, err := db.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func (db *DB) ResolveMessageChannelTargets(id string) (*MessageChannel, []*Device, error) {
 	channel, err := db.GetMessageChannel(id)
 	if err != nil {
 		return nil, nil, err
 	}
-	targets, err := db.ResolveMessageTargets(channel.AllDevices, channel.DeviceIDs)
+	targets, err := db.ResolveMessageTargetsForIdentity(channel.IdentityID, channel.AllDevices, channel.DeviceIDs)
 	return channel, targets, err
 }
 
-func (db *DB) ResolveMessageTargets(allDevices bool, deviceIDs []string) ([]*Device, error) {
+func (db *DB) ResolveMessageTargetsForIdentity(identityID string, allDevices bool, deviceIDs []string) ([]*Device, error) {
+	identityID = strings.TrimSpace(identityID)
+	if identityID == "" {
+		return nil, errors.New("message channel identity is required")
+	}
+	var identityStatus string
+	if err := db.QueryRow(`SELECT status FROM identities WHERE id = ?`, identityID).Scan(&identityStatus); err != nil {
+		return nil, err
+	}
+	if identityStatus != "active" {
+		return nil, errors.New("message channel identity is disabled")
+	}
+	allowedIDs, err := db.ListDeviceIDsForIdentity(identityID)
+	if err != nil {
+		return nil, err
+	}
+	allowed := make(map[string]bool, len(allowedIDs))
+	for _, id := range allowedIDs {
+		allowed[id] = true
+	}
+	selected := make(map[string]bool, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		deviceID = strings.TrimSpace(deviceID)
+		if deviceID == "" {
+			continue
+		}
+		if !allowed[deviceID] {
+			return nil, fmt.Errorf("message target device is outside channel identity: %s", deviceID)
+		}
+		selected[deviceID] = true
+	}
 	devices, err := db.ListDevicesForOwner("")
 	if err != nil {
 		return nil, err
 	}
-	selected := make(map[string]bool, len(deviceIDs))
-	for _, deviceID := range deviceIDs {
-		selected[deviceID] = true
-	}
 	targets := make([]*Device, 0, len(devices))
 	for _, device := range devices {
-		if device.ApprovalState != "approved" {
+		if device.ApprovalState != "approved" || !allowed[device.ID] {
 			continue
 		}
 		if allDevices || selected[device.ID] {
@@ -626,6 +943,12 @@ func (db *DB) ResolveMessageTargets(allDevices bool, deviceIDs []string) ([]*Dev
 		}
 	}
 	return targets, nil
+}
+
+// ResolveMessageTargets is retained for internal compatibility. It now fails
+// closed unless the caller supplies an identity through the scoped variant.
+func (db *DB) ResolveMessageTargets(allDevices bool, deviceIDs []string) ([]*Device, error) {
+	return nil, errors.New("message target resolution requires identity scope")
 }
 
 type MessageDelivery struct {
@@ -638,6 +961,7 @@ type MessageDelivery struct {
 
 type MessageRecord struct {
 	ID               string            `json:"id"`
+	IdentityID       string            `json:"identityId"`
 	ChannelID        string            `json:"channelId,omitempty"`
 	Title            string            `json:"title"`
 	Content          string            `json:"content"`
@@ -652,6 +976,29 @@ func (db *DB) CreateMessage(message *MessageRecord, targets []*Device) error {
 	if message == nil {
 		return errors.New("message is required")
 	}
+	message.IdentityID = strings.TrimSpace(message.IdentityID)
+	if message.IdentityID == "" && strings.TrimSpace(message.ChannelID) != "" {
+		if err := db.QueryRow(`SELECT COALESCE(identity_id, '') FROM message_channels WHERE id = ?`,
+			strings.TrimSpace(message.ChannelID)).Scan(&message.IdentityID); err != nil {
+			return err
+		}
+	}
+	if message.IdentityID == "" {
+		return errors.New("message identity is required")
+	}
+	allowedIDs, err := db.ListDeviceIDsForIdentity(message.IdentityID)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]bool, len(allowedIDs))
+	for _, deviceID := range allowedIDs {
+		allowed[deviceID] = true
+	}
+	for _, target := range targets {
+		if target != nil && !allowed[target.ID] {
+			return fmt.Errorf("message target device is outside message identity: %s", target.ID)
+		}
+	}
 	if message.ID == "" {
 		message.ID = "msg_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	}
@@ -663,8 +1010,8 @@ func (db *DB) CreateMessage(message *MessageRecord, targets []*Device) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO messages (id, channel_id, title, content, verification_code, route_rule, source, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, nullableString(message.ChannelID), message.Title, message.Content,
+	if _, err := tx.Exec(`INSERT INTO messages (id, identity_id, channel_id, title, content, verification_code, route_rule, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, message.IdentityID, nullableString(message.ChannelID), message.Title, message.Content,
 		nullableString(message.VerificationCode), nullableString(message.RouteRule), nullableString(message.Source), message.CreatedAt); err != nil {
 		return err
 	}
@@ -701,7 +1048,7 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 	if limit > 500 {
 		limit = 500
 	}
-	query := `SELECT m.id, COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
+	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
 		COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m`
 	args := make([]any, 0, 2)
@@ -726,7 +1073,7 @@ func (db *DB) listMessagesQuery(query string, args []any, limit int) ([]*Message
 	messages := make([]*MessageRecord, 0, limit)
 	for rows.Next() {
 		message := &MessageRecord{}
-		if err := rows.Scan(&message.ID, &message.ChannelID, &message.Title, &message.Content,
+		if err := rows.Scan(&message.ID, &message.IdentityID, &message.ChannelID, &message.Title, &message.Content,
 			&message.VerificationCode, &message.RouteRule, &message.Source, &message.CreatedAt); err != nil {
 			rows.Close()
 			return nil, err
@@ -778,7 +1125,7 @@ func (db *DB) ListMessagesByChannel(ownerID, channelID string, limit int) ([]*Me
 	if limit > 500 {
 		limit = 500
 	}
-	query := `SELECT m.id, COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
+	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
 		COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m WHERE m.channel_id = ?`
 	args := []any{channelID}
@@ -789,6 +1136,52 @@ func (db *DB) ListMessagesByChannel(ownerID, channelID string, limit int) ([]*Me
 			WHERE md.message_id = m.id AND d.owner_user_id = ?
 		)`
 		args = append(args, ownerID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT ?`
+	args = append(args, limit)
+	return db.listMessagesQuery(query, args, limit)
+}
+
+func (db *DB) ListMessagesForIdentity(identityID string, limit int) ([]*MessageRecord, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content,
+		COALESCE(m.verification_code, ''), COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
+		FROM messages m`
+	args := make([]any, 0, 2)
+	identityID = strings.TrimSpace(identityID)
+	if identityID != "" {
+		query += ` WHERE m.identity_id = ?`
+		args = append(args, identityID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT ?`
+	args = append(args, limit)
+	return db.listMessagesQuery(query, args, limit)
+}
+
+func (db *DB) ListMessagesByChannelForIdentity(identityID, channelID string, limit int) ([]*MessageRecord, error) {
+	channelID = strings.TrimSpace(channelID)
+	if channelID == "" {
+		return db.ListMessagesForIdentity(identityID, limit)
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content,
+		COALESCE(m.verification_code, ''), COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
+		FROM messages m WHERE m.channel_id = ?`
+	args := []any{channelID}
+	identityID = strings.TrimSpace(identityID)
+	if identityID != "" {
+		query += ` AND m.identity_id = ?`
+		args = append(args, identityID)
 	}
 	query += ` ORDER BY m.created_at DESC LIMIT ?`
 	args = append(args, limit)

@@ -1259,9 +1259,9 @@ func (r *Router) handleListExits(w http.ResponseWriter, req *http.Request) {
 			"activeStreams": e.ActiveStreams.Load(),
 			"online":        true,
 			"publicDirect": map[string]any{
-				"available": verifiedDirect > 0,
+				"available":             verifiedDirect > 0,
 				"verifiedEndpointCount": verifiedDirect,
-				"endpoints": directEndpoints,
+				"endpoints":             directEndpoints,
 			},
 		})
 	}

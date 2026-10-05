@@ -14,6 +14,11 @@ import (
 
 type publicDirectClientManager = proxydirect.ClientManager
 
+func publicDirectAllowedForMode(mode string) bool {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	return mode != "relay_only" && mode != "p2p_only"
+}
+
 func (a *Agent) initPublicDirectClient() {
 	if a == nil || a.proxyDirect != nil {
 		return

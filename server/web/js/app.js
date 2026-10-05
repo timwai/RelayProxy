@@ -892,39 +892,86 @@
       return '<option value="' + esc(device.id) + '"' + (selectedSet.has(device.id) ? ' selected' : '') + '>' + esc((device.name || device.id) + ' · ' + status) + '</option>';
     }).join('');
   }
-  function defaultVerificationRule() {
+  function defaultMessageRule() {
     return {
       name: '默认验证码',
+      type: 'verification_code',
+      enabled: true,
       default: true,
       popup: true,
-      popupType: 'verification_code',
-      maxDistance: 64,
-      keywords: [
-        '验证码', '校验码', '动态码', '动态密钥', '安全码', '短信码', '附加码', '登录附加码', '认证码', '口令码',
-        'verification code', 'verification-code', 'verification_code', 'verify code', 'verify-code', 'verify_code',
-        'one time password', 'one-time password', 'one_time_password', 'one time code', 'one-time code', 'one_time_code',
-        'otp', 'passcode', 'security code', 'security-code', 'security_code', 'authentication code', 'auth code'
-      ]
+      match: {
+        matchType: 'keywords',
+        keywordMode: 'any',
+        caseSensitive: false,
+        keywords: [
+          '验证码', '短信验证码', '校验码', '验证代码', '确认码', '登录码', '登录验证码',
+          '动态码', '动态密码', '动态密钥', '一次性密码', '一次性验证码', '安全码', '安全验证码',
+          '短信码', '附加码', '登录附加码', '认证码', '授权码', '口令码',
+          'OTP', 'TOTP', 'verification code', 'verify code', 'one-time code', 'one time code',
+          'one-time password', 'one time password', 'passcode', 'security code', 'authentication code', 'auth code'
+        ]
+      },
+      verification: {
+        type: 'auto',
+        maxDistance: 64,
+        minLength: 4,
+        maxLength: 8,
+        allowLetters: true,
+        allowDigits: true,
+        requireDigit: true
+      }
     };
   }
-  function verificationRuleHTML(rule = {}, index = 0) {
+  function messageRuleHTML(rule = {}, index = 0) {
     const isDefault = !!rule.default;
-    const keywords = Array.isArray(rule.keywords) ? rule.keywords.join(', ') : '';
-    const distance = Number(rule.maxDistance) > 0 ? Number(rule.maxDistance) : 64;
-    const popupEnabled = rule.popup !== false;
-    const popupType = ['verification_code', 'message', 'important'].includes(rule.popupType) ? rule.popupType : 'verification_code';
-    return '<article class="channel-rule-card" data-verification-rule' + (isDefault ? ' data-verification-default' : '') + '><div class="channel-rule-card-head"><strong>' +
-      (isDefault ? '默认验证码规则' : '自定义识别规则 ' + (index + 1)) + '</strong>' +
-      (isDefault ? '<span class="badge neutral">默认</span>' : '<button type="button" class="small-button danger" data-verification-remove>删除</button>') +
+    const type = ['verification_code', 'message', 'important'].includes(rule.type) ? rule.type : (isDefault ? 'verification_code' : 'message');
+    const match = rule.match || {};
+    const matchType = ['keywords', 'contains', 'regex', 'all'].includes(match.matchType) ? match.matchType : 'keywords';
+    const keywordMode = match.keywordMode === 'all' ? 'all' : 'any';
+    const keywords = Array.isArray(match.keywords) ? match.keywords.join(', ') : '';
+    const extractor = rule.verification || {};
+    const extractorType = extractor.type === 'regex' ? 'regex' : 'auto';
+    const minLength = Number(extractor.minLength) > 0 ? Number(extractor.minLength) : 4;
+    const maxLength = Number(extractor.maxLength) > 0 ? Number(extractor.maxLength) : 8;
+    const maxDistance = Number(extractor.maxDistance) > 0 ? Number(extractor.maxDistance) : 64;
+    const allowLetters = extractor.allowLetters !== false;
+    const allowDigits = extractor.allowDigits !== false;
+    const requireDigit = extractor.requireDigit !== false;
+    const enabled = rule.enabled !== false;
+    const popup = rule.popup !== false;
+    const typeOptions = isDefault
+      ? '<option value="verification_code" selected>验证码</option>'
+      : '<option value="verification_code"' + (type === 'verification_code' ? ' selected' : '') + '>验证码</option><option value="message"' + (type === 'message' ? ' selected' : '') + '>普通消息</option><option value="important"' + (type === 'important' ? ' selected' : '') + '>重要提醒</option>';
+    return '<article class="channel-rule-card" data-message-rule' + (isDefault ? ' data-message-default' : '') + '><div class="channel-rule-card-head"><strong>' +
+      (isDefault ? '默认验证码规则' : '消息规则 ' + (index + 1)) + '</strong>' +
+      (isDefault ? '<span class="badge neutral">默认 · 最后匹配</span>' : '<button type="button" class="small-button danger" data-message-remove>删除</button>') +
       '</div><div class="channel-rule-grid">' +
-      '<label>规则名称<input data-verification-name maxlength="80" value="' + esc(rule.name || '') + '" placeholder="' + (isDefault ? '默认验证码' : '例如：四川移动附加码') + '"></label>' +
-      '<label>最大距离（字符附近）<input data-verification-distance type="number" min="0" max="1024" value="' + esc(distance) + '"></label>' +
-      '<label class="wide">关键词（逗号分隔）<input data-verification-keywords value="' + esc(keywords) + '" placeholder="附加码, 动态密钥, 登录口令"></label>' +
-      '<label class="wide">验证码正则<input data-verification-pattern class="mono" maxlength="500" value="' + esc(rule.pattern || '') + '" placeholder="例如：([A-Z0-9]{4,8})；留空使用默认候选格式"></label>' +
-      '<label>弹窗类型<select data-verification-popup-type><option value="verification_code"' + (popupType === 'verification_code' ? ' selected' : '') + '>验证码</option><option value="message"' + (popupType === 'message' ? ' selected' : '') + '>普通消息</option><option value="important"' + (popupType === 'important' ? ' selected' : '') + '>重要提醒</option></select></label>' +
-      '</div><label class="channel-rule-check"><input data-verification-case type="checkbox"' + (rule.caseSensitive ? ' checked' : '') + '>区分大小写</label>' +
-      '<label class="channel-rule-check"><input data-verification-popup type="checkbox"' + (popupEnabled ? ' checked' : '') + '>命中此规则后弹窗</label>' +
-      '<p class="channel-fallback-note">正则含捕获组时返回第一个捕获组；没有捕获组时返回整个匹配。关闭弹窗后仍会保留消息与验证码识别结果。</p></article>';
+      '<label>规则名称<input data-message-name maxlength="80" value="' + esc(rule.name || '') + '" placeholder="' + (isDefault ? '默认验证码' : '例如：服务器故障提醒') + '"></label>' +
+      '<label>消息类型<select data-message-type>' + typeOptions + '</select></label>' +
+      '<label>匹配方式<select data-message-match-type><option value="keywords"' + (matchType === 'keywords' ? ' selected' : '') + '>关键词</option><option value="contains"' + (matchType === 'contains' ? ' selected' : '') + '>包含文本</option><option value="regex"' + (matchType === 'regex' ? ' selected' : '') + '>正则表达式</option><option value="all"' + (matchType === 'all' ? ' selected' : '') + '>所有消息</option></select></label>' +
+      '<label data-message-keyword-mode-block>关键词条件<select data-message-keyword-mode><option value="any"' + (keywordMode === 'any' ? ' selected' : '') + '>满足任意关键词</option><option value="all"' + (keywordMode === 'all' ? ' selected' : '') + '>满足全部关键词</option></select></label>' +
+      '<label class="wide" data-message-keywords-block>关键词（逗号分隔）<input data-message-keywords value="' + esc(keywords) + '" placeholder="验证码, 登录码, OTP"></label>' +
+      '<label class="wide" data-message-pattern-block><span data-message-pattern-label>匹配内容</span><input data-message-pattern class="mono" maxlength="500" value="' + esc(match.pattern || '') + '" placeholder="输入包含文本或正则表达式"></label>' +
+      '</div>' +
+      '<div data-message-verification-block class="channel-rule-section">' +
+      '<div class="channel-rule-grid">' +
+      '<label>验证码提取<select data-message-extractor><option value="auto"' + (extractorType === 'auto' ? ' selected' : '') + '>智能识别</option><option value="regex"' + (extractorType === 'regex' ? ' selected' : '') + '>正则提取</option></select></label>' +
+      '<label data-message-distance-block>关键词最大距离<input data-message-distance type="number" min="0" max="1024" value="' + esc(maxDistance) + '"></label>' +
+      '</div>' +
+      '<div data-message-auto-block class="channel-rule-grid">' +
+      '<label>最短长度<input data-message-min-length type="number" min="1" max="64" value="' + esc(minLength) + '"></label>' +
+      '<label>最长长度<input data-message-max-length type="number" min="1" max="64" value="' + esc(maxLength) + '"></label>' +
+      '</div>' +
+      '<label class="wide" data-message-extractor-regex-block>验证码提取正则<input data-message-extractor-pattern class="mono" maxlength="500" value="' + esc(extractor.pattern || '') + '" placeholder="例如：验证码[:：\\s]*([A-Z0-9]{6})"></label>' +
+      '<div data-message-auto-options>' +
+      '<label class="channel-rule-check"><input data-message-allow-letters type="checkbox"' + (allowLetters ? ' checked' : '') + '>允许字母</label>' +
+      '<label class="channel-rule-check"><input data-message-allow-digits type="checkbox"' + (allowDigits ? ' checked' : '') + '>允许数字</label>' +
+      '<label class="channel-rule-check"><input data-message-require-digit type="checkbox"' + (requireDigit ? ' checked' : '') + '>至少包含一个数字</label>' +
+      '</div></div>' +
+      '<label class="channel-rule-check"><input data-message-enabled type="checkbox"' + (enabled ? ' checked' : '') + '>启用规则</label>' +
+      '<label class="channel-rule-check" data-message-case-block><input data-message-case type="checkbox"' + (match.caseSensitive ? ' checked' : '') + '>区分大小写</label>' +
+      '<label class="channel-rule-check"><input data-message-popup type="checkbox"' + (popup ? ' checked' : '') + '>命中后弹窗</label>' +
+      '<p class="channel-fallback-note" data-message-help></p></article>';
   }
   function routeRuleHTML(rule = {}, index = 0) {
     const matchType = rule.matchType === 'regex' ? 'regex' : 'contains';
@@ -937,19 +984,36 @@
       '<label class="channel-rule-check"><input data-route-all type="checkbox"' + (rule.allDevices ? ' checked' : '') + '>命中后推送到本身份全部已批准设备</label></article>';
   }
   function renderChannelRules(channel) {
-    const verificationRules = channel && Array.isArray(channel.verificationRules) ? channel.verificationRules : [];
-    const defaultRule = verificationRules.find(rule => rule.default) || defaultVerificationRule();
-    const customRules = verificationRules.filter(rule => !rule.default);
+    const sourceRules = channel && Array.isArray(channel.messageRules) && channel.messageRules.length
+      ? channel.messageRules
+      : [defaultMessageRule()];
+    const defaultRule = sourceRules.find(rule => rule.default) || defaultMessageRule();
+    const customRules = sourceRules.filter(rule => !rule.default);
     const routeRules = channel && Array.isArray(channel.routeRules) ? channel.routeRules : [];
-    $('channel-use-default-verification').checked = !channel || channel.useDefaultVerification !== false;
-    $('channel-verification-rules').innerHTML = verificationRuleHTML(defaultRule, 0) + customRules.map((rule, index) => verificationRuleHTML(rule, index)).join('');
+    $('channel-message-rules').innerHTML =
+      customRules.map((rule, index) => messageRuleHTML(rule, index)).join('') +
+      messageRuleHTML(defaultRule, customRules.length);
     $('channel-route-rules').innerHTML = routeRules.length ? routeRules.map(routeRuleHTML).join('') : '<div class="channel-rule-empty">没有内容分流，消息会直接推送到上方兜底设备。</div>';
+    syncMessageRuleCards();
     syncRouteRuleDeviceStates();
   }
-  function addVerificationRule(rule = {}) {
-    const host = $('channel-verification-rules');
-    const index = host.querySelectorAll('[data-verification-rule]:not([data-verification-default])').length;
-    host.insertAdjacentHTML('beforeend', verificationRuleHTML(rule, index));
+  function addMessageRule(rule = {}) {
+    const host = $('channel-message-rules');
+    const index = host.querySelectorAll('[data-message-rule]:not([data-message-default])').length;
+    const initial = Object.keys(rule).length ? rule : {
+      name: '',
+      type: 'message',
+      enabled: true,
+      popup: true,
+      match: { matchType: 'keywords', keywordMode: 'any', keywords: [] }
+    };
+    const html = messageRuleHTML(initial, index);
+    const defaultCard = host.querySelector('[data-message-default]');
+    if (defaultCard) defaultCard.insertAdjacentHTML('beforebegin', html);
+    else host.insertAdjacentHTML('beforeend', html);
+    const cards = host.querySelectorAll('[data-message-rule]');
+    syncMessageRuleCard(cards[Math.max(0, cards.length - (defaultCard ? 2 : 1))]);
+    renumberChannelRules();
   }
   function addRouteRule(rule = {}) {
     const host = $('channel-route-rules');
@@ -959,9 +1023,53 @@
     syncRouteRuleDeviceStates();
   }
   function renumberChannelRules() {
-    all('#channel-verification-rules [data-verification-rule]:not([data-verification-default])').forEach((card, index) => { const title = card.querySelector('.channel-rule-card-head strong'); if (title) title.textContent = '自定义识别规则 ' + (index + 1); });
-    all('#channel-route-rules [data-route-rule]').forEach((card, index) => { const title = card.querySelector('.channel-rule-card-head strong'); if (title) title.textContent = '分流规则 ' + (index + 1); });
+    all('#channel-message-rules [data-message-rule]:not([data-message-default])').forEach((card, index) => {
+      const title = card.querySelector('.channel-rule-card-head strong');
+      if (title) title.textContent = '消息规则 ' + (index + 1);
+    });
+    all('#channel-route-rules [data-route-rule]').forEach((card, index) => {
+      const title = card.querySelector('.channel-rule-card-head strong');
+      if (title) title.textContent = '分流规则 ' + (index + 1);
+    });
     if (!$('channel-route-rules').children.length) $('channel-route-rules').innerHTML = '<div class="channel-rule-empty">没有内容分流，消息会直接推送到上方兜底设备。</div>';
+  }
+  function syncMessageRuleCard(card) {
+    if (!card) return;
+    const type = card.querySelector('[data-message-type]').value;
+    const matchType = card.querySelector('[data-message-match-type]').value;
+    const extractor = card.querySelector('[data-message-extractor]').value;
+    const keywordMode = card.querySelector('[data-message-keyword-mode-block]');
+    const keywords = card.querySelector('[data-message-keywords-block]');
+    const pattern = card.querySelector('[data-message-pattern-block]');
+    const patternLabel = card.querySelector('[data-message-pattern-label]');
+    const verification = card.querySelector('[data-message-verification-block]');
+    const auto = card.querySelector('[data-message-auto-block]');
+    const autoOptions = card.querySelector('[data-message-auto-options]');
+    const extractorRegex = card.querySelector('[data-message-extractor-regex-block]');
+    const distance = card.querySelector('[data-message-distance-block]');
+    const caseBlock = card.querySelector('[data-message-case-block]');
+    keywordMode.hidden = matchType !== 'keywords';
+    keywords.hidden = matchType !== 'keywords';
+    pattern.hidden = matchType !== 'contains' && matchType !== 'regex';
+    if (patternLabel) patternLabel.textContent = matchType === 'regex' ? '消息匹配正则' : '包含文本';
+    if (caseBlock) caseBlock.hidden = matchType === 'all';
+    const isVerification = type === 'verification_code';
+    verification.hidden = !isVerification;
+    auto.hidden = !isVerification || extractor !== 'auto';
+    autoOptions.hidden = !isVerification || extractor !== 'auto';
+    extractorRegex.hidden = !isVerification || extractor !== 'regex';
+    distance.hidden = !isVerification || extractor !== 'auto' || matchType !== 'keywords';
+    const help = card.querySelector('[data-message-help]');
+    if (help) {
+      help.textContent = isVerification
+        ? (extractor === 'auto'
+          ? '智能识别会按长度和字符类型寻找验证码；只有关键词匹配时才使用“关键词最大距离”。'
+          : '正则含捕获组时返回第一个捕获组；没有捕获组时返回整个匹配。')
+        : '普通消息和重要提醒只判断消息是否命中，不会执行验证码提取。';
+    }
+  }
+  function syncMessageRuleCards() {
+    all('#channel-message-rules [data-message-rule]').forEach(syncMessageRuleCard);
   }
   function syncRouteRuleDeviceStates() {
     all('#channel-route-rules [data-route-rule]').forEach(card => {
@@ -970,17 +1078,46 @@
       if (select) select.disabled = allDevices || state.channelBusy;
     });
   }
-  function readVerificationRules() {
-    return all('#channel-verification-rules [data-verification-rule]').map(card => ({
-      name: card.querySelector('[data-verification-name]').value.trim(),
-      keywords: card.querySelector('[data-verification-keywords]').value.split(/[,，\n]+/).map(value => value.trim()).filter(Boolean),
-      pattern: card.querySelector('[data-verification-pattern]').value.trim(),
-      maxDistance: Number(card.querySelector('[data-verification-distance]').value) || 0,
-      caseSensitive: card.querySelector('[data-verification-case]').checked,
-      default: card.hasAttribute('data-verification-default'),
-      popup: card.querySelector('[data-verification-popup]').checked,
-      popupType: card.querySelector('[data-verification-popup-type]').value
-    }));
+  function readMessageRules() {
+    return all('#channel-message-rules [data-message-rule]').map(card => {
+      const type = card.querySelector('[data-message-type]').value;
+      const matchType = card.querySelector('[data-message-match-type]').value;
+      const match = {
+        matchType,
+        caseSensitive: card.querySelector('[data-message-case]').checked
+      };
+      if (matchType === 'keywords') {
+        match.keywords = card.querySelector('[data-message-keywords]').value.split(/[,，\n]+/).map(value => value.trim()).filter(Boolean);
+        match.keywordMode = card.querySelector('[data-message-keyword-mode]').value;
+      } else if (matchType === 'contains' || matchType === 'regex') {
+        match.pattern = card.querySelector('[data-message-pattern]').value.trim();
+      }
+      const rule = {
+        name: card.querySelector('[data-message-name]').value.trim(),
+        type,
+        enabled: card.querySelector('[data-message-enabled]').checked,
+        default: card.hasAttribute('data-message-default'),
+        match,
+        popup: card.querySelector('[data-message-popup]').checked
+      };
+      if (type === 'verification_code') {
+        const extractorType = card.querySelector('[data-message-extractor]').value;
+        rule.verification = {
+          type: extractorType
+        };
+        if (extractorType === 'regex') {
+          rule.verification.pattern = card.querySelector('[data-message-extractor-pattern]').value.trim();
+        } else {
+          rule.verification.maxDistance = Number(card.querySelector('[data-message-distance]').value) || 64;
+          rule.verification.minLength = Number(card.querySelector('[data-message-min-length]').value) || 4;
+          rule.verification.maxLength = Number(card.querySelector('[data-message-max-length]').value) || 8;
+          rule.verification.allowLetters = card.querySelector('[data-message-allow-letters]').checked;
+          rule.verification.allowDigits = card.querySelector('[data-message-allow-digits]').checked;
+          rule.verification.requireDigit = card.querySelector('[data-message-require-digit]').checked;
+        }
+      }
+      return rule;
+    });
   }
   function readRouteRules() {
     return all('#channel-route-rules [data-route-rule]').map(card => {

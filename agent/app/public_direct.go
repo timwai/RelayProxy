@@ -1,11 +1,22 @@
 package app
 
 import (
+	"context"
+	"crypto/tls"
+	"fmt"
+	"log"
+	"net"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
-	proxydirect "relayproxy/agent/direct"
 	"relayproxy/agent/client"
+	proxydirect "relayproxy/agent/direct"
+	"relayproxy/agent/exit"
+	directcore "relayproxy/internal/direct"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 )
 
 type publicDirectClientManager = proxydirect.ClientManager
@@ -145,3 +156,89 @@ func (a *Agent) closePublicDirectClient() error {
 	return nil
 }
 
+
+func (a *Agent) startPublicDirectExit(
+	ctx context.Context,
+	relay tunnel.TunnelSession,
+	accepted protocol.DeviceAccepted,
+	handler *exit.Handler,
+	maxStreams int,
+) (func(), error) {
+	if handler == nil || relay == nil ||
+		!contains(accepted.TransportCapabilities, protocol.CapabilityProxyPublicDirect) {
+		return func() {}, nil
+	}
+	authenticator, err := proxydirect.NewTicketAuthenticator(
+		accepted.PublicDirectTicketIssuer,
+		accepted.PublicDirectTicketKey,
+		accepted.DeviceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("initialize ticket authenticator: %w", err)
+	}
+	identity, err := directcore.GenerateTLSIdentity()
+	if err != nil {
+		return nil, fmt.Errorf("generate TLS identity: %w", err)
+	}
+	listener, err := proxydirect.Listen(proxydirect.ListenerConfig{
+		ListenAddress: ":0",
+		TLSConfig: &tls.Config{
+			MinVersion:   tls.VersionTLS13,
+			Certificates: []tls.Certificate{identity.Certificate},
+		},
+		Authenticator: authenticator,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listen: %w", err)
+	}
+	closeListener := func() { _ = listener.Close() }
+
+	_, portText, err := net.SplitHostPort(listener.Addr())
+	if err != nil {
+		closeListener()
+		return nil, fmt.Errorf("parse listener address %q: %w", listener.Addr(), err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		closeListener()
+		return nil, fmt.Errorf("invalid listener port %q", portText)
+	}
+	candidates, err := proxydirect.DiscoverEndpointCandidates(uint16(port), "")
+	if err != nil {
+		closeListener()
+		return nil, fmt.Errorf("discover endpoints: %w", err)
+	}
+	registerCtx, cancelRegister := context.WithTimeout(ctx, 5*time.Second)
+	response, err := proxydirect.RegisterEndpoint(registerCtx, relay, protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    uint16(port),
+		CertFingerprint: identity.Fingerprint,
+		Candidates:      candidates,
+	})
+	cancelRegister()
+	if err != nil {
+		closeListener()
+		return nil, fmt.Errorf("register endpoint: %w", err)
+	}
+	if !response.Success {
+		closeListener()
+		return nil, fmt.Errorf("register endpoint rejected: [%s] %s", response.ErrorCode, response.ErrorMessage)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := proxydirect.ServeExit(ctx, listener, handler, 0, maxStreams); err != nil &&
+			ctx.Err() == nil {
+			log.Printf("[PublicDirect] exit listener stopped: %v", err)
+		}
+	}()
+	log.Printf("[PublicDirect] exit listener registered on UDP %d with %d local candidate(s)", port, len(candidates))
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			closeListener()
+			<-done
+		})
+	}, nil
+}

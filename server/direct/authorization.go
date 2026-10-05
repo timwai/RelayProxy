@@ -119,11 +119,11 @@ func (s *AuthorizationSyncer) RevokeClients(ctx context.Context, exitDeviceID st
 			continue
 		}
 		err := s.Push(ctx, exitSession.DeviceID, protocol.PublicDirectAuthorizationUpdate{
-			ClientDeviceID: clientDeviceID,
-			ExitDeviceID: exitSession.DeviceID,
-			PolicyRevision: exitSession.PolicyRevision,
+			ClientDeviceID:        clientDeviceID,
+			ExitDeviceID:          exitSession.DeviceID,
+			PolicyRevision:        exitSession.PolicyRevision,
 			AuthorizationRevision: 0,
-			Authorized: false,
+			Authorized:            false,
 		})
 		if err != nil && firstErr == nil {
 			firstErr = err

@@ -152,7 +152,7 @@ func TestRemovingApprovedCapabilityDoesNotImmediatelyRequeueIt(t *testing.T) {
 	}
 	observation := DeviceIdentityObservation{
 		Fingerprint: "capability-edit-fp", InstallationID: "capability-edit-install",
-		PublicKey: []byte("capability-edit-public"),
+		PublicKey:             []byte("capability-edit-public"),
 		RequestedCapabilities: []string{"proxy.client", "proxy.exit"},
 	}
 	pending, err := db.ObserveIdentityDevice(*resolved, observation)

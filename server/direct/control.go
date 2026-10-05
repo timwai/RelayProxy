@@ -23,9 +23,9 @@ type Controller struct {
 	verifier        *Verifier
 	onChanged       func(string)
 	ticketValidator CurrentTicketValidator
-	mu        sync.Mutex
-	wg        sync.WaitGroup
-	closed    atomic.Bool
+	mu              sync.Mutex
+	wg              sync.WaitGroup
+	closed          atomic.Bool
 }
 
 func NewController(parent context.Context, registry *Registry, verifier *Verifier, onChanged func(string)) *Controller {

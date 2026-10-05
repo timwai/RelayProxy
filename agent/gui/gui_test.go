@@ -153,6 +153,11 @@ func TestDesktopPopupCompatibility(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "mixed-version popup without type",
+			message: app.Message{Content: "hello", Popup: true},
+			want:    true,
+		},
+		{
 			name:    "explicit disabled verification",
 			message: app.Message{VerificationCode: "482931", PopupType: "verification_code", Popup: false},
 			want:    false,

@@ -249,3 +249,76 @@ func TestDeviceIdentityMoveRevokesTargetShares(t *testing.T) {
 		t.Fatalf("old grantee retained access after target identity move: allowed=%v err=%v", allowed, err)
 	}
 }
+
+
+func TestPublicDirectAuthorizationContextTracksPolicyAndGrantRevisions(t *testing.T) {
+	db := openIdentityTestDB(t)
+
+	exitIdentity, err := db.CreateIdentity("Exit Identity", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientIdentity, err := db.CreateIdentity("Client Identity", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seedIdentityGrantDevice(t, db, "exit-direct", "Exit", exitIdentity.ID, []string{"proxy.exit"})
+	seedIdentityGrantDevice(t, db, "same-direct", "Same Client", exitIdentity.ID, []string{"proxy.client"})
+	seedIdentityGrantDevice(t, db, "cross-direct", "Cross Client", clientIdentity.ID, []string{"proxy.client"})
+
+	same, allowed, err := db.PublicDirectAuthorizationContext("same-direct", "exit-direct")
+	if err != nil || !allowed {
+		t.Fatalf("same identity context allowed=%v err=%v", allowed, err)
+	}
+	if same.PolicyRevision != exitIdentity.PolicyRevision || same.AuthorizationRevision != 0 {
+		t.Fatalf("same identity context=%+v", same)
+	}
+
+	if _, allowed, err := db.PublicDirectAuthorizationContext("cross-direct", "exit-direct"); err != nil || allowed {
+		t.Fatalf("ungranted context allowed=%v err=%v", allowed, err)
+	}
+
+	grant, err := db.CreateDeviceIdentityGrant("exit-direct", clientIdentity.ID, "admin", []string{GrantFeatureProxyUse}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, allowed, err := db.PublicDirectAuthorizationContext("cross-direct", "exit-direct")
+	if err != nil || !allowed {
+		t.Fatalf("cross identity context allowed=%v err=%v", allowed, err)
+	}
+	if cross.PolicyRevision != exitIdentity.PolicyRevision || cross.AuthorizationRevision != grant.Revision {
+		t.Fatalf("cross identity context=%+v grant=%+v", cross, grant)
+	}
+
+	features := []string{GrantFeatureProxyUse}
+	grant, err = db.UpdateDeviceIdentityGrant(grant.ID, "admin", DeviceIdentityGrantUpdate{
+		Features: &features, Revision: grant.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, allowed, err = db.PublicDirectAuthorizationContext("cross-direct", "exit-direct")
+	if err != nil || !allowed || cross.AuthorizationRevision != grant.Revision {
+		t.Fatalf("updated context=%+v allowed=%v err=%v", cross, allowed, err)
+	}
+
+	renamed := "Exit Identity Updated"
+	exitIdentity, err = db.UpdateIdentity(exitIdentity.ID, "admin", IdentityUpdate{
+		Name: &renamed, PolicyRevision: exitIdentity.PolicyRevision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, allowed, err = db.PublicDirectAuthorizationContext("cross-direct", "exit-direct")
+	if err != nil || !allowed || cross.PolicyRevision != exitIdentity.PolicyRevision {
+		t.Fatalf("policy-updated context=%+v allowed=%v err=%v", cross, allowed, err)
+	}
+
+	if deleted, err := db.DeleteDeviceIdentityGrant(grant.ID, "admin", grant.Revision); err != nil || !deleted {
+		t.Fatalf("delete grant deleted=%v err=%v", deleted, err)
+	}
+	if _, allowed, err := db.PublicDirectAuthorizationContext("cross-direct", "exit-direct"); err != nil || allowed {
+		t.Fatalf("deleted grant context allowed=%v err=%v", allowed, err)
+	}
+}

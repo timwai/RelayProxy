@@ -12,6 +12,8 @@ import (
 	"relayproxy/internal/tunnel"
 )
 
+var dialPublicDirectQUIC = tunnel.DialDirectQUIC
+
 type DialConfig struct {
 	Address        string
 	TLSConfig      *tls.Config
@@ -27,7 +29,7 @@ func Dial(ctx context.Context, config DialConfig) (tunnel.TunnelSession, error) 
 	if err != nil {
 		return nil, err
 	}
-	session, err := tunnel.DialDirectQUIC(ctx, config.Address, config.TLSConfig, config.QUICConfig)
+	session, err := dialPublicDirectQUIC(ctx, config.Address, config.TLSConfig, config.QUICConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +71,7 @@ func DialAny(ctx context.Context, configs []DialConfig) (tunnel.TunnelSession, s
 	for _, config := range normalized {
 		config := config
 		go func() {
-			session, err := tunnel.DialDirectQUIC(raceCtx, config.Address, config.TLSConfig, config.QUICConfig)
+			session, err := dialPublicDirectQUIC(raceCtx, config.Address, config.TLSConfig, config.QUICConfig)
 			if err != nil {
 				select {
 				case results <- result{config: config, err: err}:

@@ -113,12 +113,12 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 			continue
 		}
 		m := &Mapping{
-			service:         svc,
-			internalClient:  internalIP.String(),
-			internalPort:    uint16(internalPort),
-			externalPort:    externalPort,
-			leaseSeconds:    leaseSeconds,
-			done:            make(chan struct{}),
+			service:        svc,
+			internalClient: internalIP.String(),
+			internalPort:   uint16(internalPort),
+			externalPort:   externalPort,
+			leaseSeconds:   leaseSeconds,
+			done:           make(chan struct{}),
 		}
 		if leaseSeconds > 0 {
 			go m.refreshLoop()

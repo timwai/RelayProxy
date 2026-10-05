@@ -98,21 +98,22 @@ func writeDeviceRejection(stream tunnel.TunnelStream, response protocol.DeviceAc
 }
 
 type Gateway struct {
-	cfg          GatewayConfig
-	sessions     *session.Manager
-	router       *StreamRouter
-	tcpListener  net.Listener
-	tcpTLSConfig *tls.Config
-	quicListener *quic.Listener
-	closed       atomic.Bool
-	activeConns  atomic.Int64
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	mu           sync.Mutex
-	started      bool
-	closeOnce    sync.Once
-	resources    map[io.Closer]struct{} // includes transports that are not authenticated yet
+	cfg               GatewayConfig
+	sessions          *session.Manager
+	router            *StreamRouter
+	tcpListener       net.Listener
+	tcpTLSConfig      *tls.Config
+	quicListener      *quic.Listener
+	closed            atomic.Bool
+	activeConns       atomic.Int64
+	proxyExitRevision atomic.Uint64
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	mu                sync.Mutex
+	started           bool
+	closeOnce         sync.Once
+	resources         map[io.Closer]struct{} // includes transports that are not authenticated yet
 }
 
 func NewGateway(cfg GatewayConfig, sessions *session.Manager, router *StreamRouter) *Gateway {
@@ -129,7 +130,7 @@ func NewGateway(cfg GatewayConfig, sessions *session.Manager, router *StreamRout
 		cfg.HandshakeTimeout = 15 * time.Second
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Gateway{
+	g := &Gateway{
 		cfg:       cfg,
 		sessions:  sessions,
 		router:    router,
@@ -137,6 +138,10 @@ func NewGateway(cfg GatewayConfig, sessions *session.Manager, router *StreamRout
 		cancel:    cancel,
 		resources: make(map[io.Closer]struct{}),
 	}
+	// Revision zero is reserved for compatibility with peers that do not
+	// version inventory snapshots.
+	g.proxyExitRevision.Store(1)
+	return g
 }
 
 func (g *Gateway) Start() error {
@@ -526,7 +531,10 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 
 	// 3. The server-selected grant controls runtime capabilities.
 	tunnel.SetPeerCapabilities(sess, hello.TransportCapabilities)
-	capabilities := []string{protocol.UDPModeStream, protocol.CapabilitySpeedTest}
+	capabilities := []string{
+		protocol.UDPModeStream, protocol.CapabilitySpeedTest,
+		protocol.CapabilityResourceInventoryPush,
+	}
 	if tunnel.SupportsDatagrams(sess) {
 		capabilities = append(capabilities, protocol.UDPModeDatagram)
 	}
@@ -555,6 +563,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		ApprovedCapabilities:  authorization.ApprovedCapabilities,
 		RDPTargets:            authorization.RDPTargets,
 		ProxyExits:            proxyExits,
+		ProxyExitRevision:     g.proxyExitRevision.Load(),
 		SessionID:             sessionID,
 		HeartbeatSec:          heartbeatSec,
 		MaxConnections:        g.cfg.MaxConnectionsPerDevice,
@@ -616,6 +625,10 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		if ready && removed && g.cfg.OnDeviceDisconnected != nil {
 			g.cfg.OnDeviceDisconnected(deviceSession.DeviceID)
 		}
+		if ready && removed && deviceSession.IsExit() {
+			revision := g.proxyExitRevision.Add(1)
+			g.notifyProxyExitInventoryChanged(revision)
+		}
 		log.Printf("[Gateway] Device disconnected: id=%s", authorization.DeviceID)
 	}()
 	// Welcome means the authenticated session is already routable. Failed writes
@@ -632,6 +645,10 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		authorization.DeviceID, hello.DeviceName, authorization.ApprovedCapabilities, sess.Transport(), sess.RemoteAddr())
 	if g.cfg.OnDeviceConnected != nil {
 		g.cfg.OnDeviceConnected(deviceSession.DeviceID)
+	}
+	if deviceSession.IsExit() {
+		revision := g.proxyExitRevision.Add(1)
+		g.notifyProxyExitInventoryChanged(revision)
 	}
 
 	// 4. Run control channel monitor in background
@@ -668,6 +685,70 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 			g.router.HandleClientStream(sessionCtx, stream, deviceSession)
 		}()
 	}
+}
+
+// RefreshProxyExitInventories invalidates the current proxy-exit inventory
+// revision and asynchronously pushes a fresh authorization-derived snapshot to
+// every connected client that negotiated live inventory updates.
+func (g *Gateway) RefreshProxyExitInventories() uint64 {
+	if g == nil || g.closed.Load() {
+		return 0
+	}
+	revision := g.proxyExitRevision.Add(1)
+	g.notifyProxyExitInventoryChanged(revision)
+	return revision
+}
+
+func (g *Gateway) notifyProxyExitInventoryChanged(revision uint64) {
+	if g == nil || g.closed.Load() || g.cfg.ListProxyExits == nil {
+		return
+	}
+	for _, dev := range g.sessions.List() {
+		if dev == nil || dev.Tunnel == nil ||
+			!containsCapability(dev.Grants, protocol.CapabilityProxyClient) ||
+			!containsCapability(dev.Capabilities, protocol.CapabilityResourceInventoryPush) {
+			continue
+		}
+		g.wg.Add(1)
+		go func(target *session.DeviceSession) {
+			defer g.wg.Done()
+			if err := g.pushProxyExitInventory(target, revision); err != nil && !g.closed.Load() {
+				log.Printf("[Gateway] Push proxy exits to %s: %v", target.DeviceID, err)
+			}
+		}(dev)
+	}
+}
+
+func (g *Gateway) pushProxyExitInventory(dev *session.DeviceSession, revision uint64) error {
+	if dev == nil || dev.Tunnel == nil || g.cfg.ListProxyExits == nil {
+		return errors.New("proxy exit inventory target is unavailable")
+	}
+	exits, err := g.cfg.ListProxyExits(dev.DeviceID, dev.OwnerUserID, dev.IdentityID)
+	if err != nil {
+		return err
+	}
+	if exits == nil {
+		exits = []protocol.ProxyExit{}
+	}
+	ctx, cancel := context.WithTimeout(g.ctx, 5*time.Second)
+	defer cancel()
+	stream, err := dev.Tunnel.OpenStream(ctx)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	stop := tunnel.InterruptOnCancel(ctx, stream)
+	defer stop()
+	_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion,
+		Type: protocol.FrameTypeResourceInventory,
+	}); err != nil {
+		return err
+	}
+	return protocol.WriteJSON(stream, protocol.ResourceInventory{
+		ProxyExits: &exits, ProxyExitRevision: revision,
+	})
 }
 
 func (g *Gateway) heartbeatForDevice(hello protocol.DeviceHello, approvedCapabilities []string) int {
@@ -817,6 +898,7 @@ func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 					exits = []protocol.ProxyExit{}
 				}
 				pong.ProxyExits = &exits
+				pong.ProxyExitRevision = g.proxyExitRevision.Load()
 			}
 		}
 

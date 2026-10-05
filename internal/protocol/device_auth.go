@@ -22,12 +22,13 @@ const (
 	// approved device capabilities from the capabilities currently running.
 	// The active flags keep a control-only session from being advertised as an
 	// online exit while the user has not started its data plane.
-	CapabilityRuntimeState      = "runtime.capabilities"
-	CapabilityProxyClientActive = "proxy.client.active"
-	CapabilityProxyExitActive   = "proxy.exit.active"
-	CapabilityRDPClient         = "rdp.controller"
-	CapabilityRDPHost           = "rdp.host"
-	CapabilityRDPPublic         = "rdp.public"
+	CapabilityRuntimeState          = "runtime.capabilities"
+	CapabilityResourceInventoryPush = "resource.inventory.push_v1"
+	CapabilityProxyClientActive     = "proxy.client.active"
+	CapabilityProxyExitActive       = "proxy.exit.active"
+	CapabilityRDPClient             = "rdp.controller"
+	CapabilityRDPHost               = "rdp.host"
+	CapabilityRDPPublic             = "rdp.public"
 
 	ErrCodeApprovalPending  = "APPROVAL_PENDING"
 	ErrCodeDeviceRejected   = "DEVICE_REJECTED"
@@ -92,6 +93,7 @@ type DeviceAccepted struct {
 	ApprovedCapabilities  []string     `json:"approvedCapabilities,omitempty"`
 	RDPTargets            []RDPTarget  `json:"rdpTargets,omitempty"`
 	ProxyExits            *[]ProxyExit `json:"proxyExits,omitempty"`
+	ProxyExitRevision     uint64       `json:"proxyExitRevision,omitempty"`
 	RendezvousAddress     string       `json:"rendezvousAddress,omitempty"`
 	RDPLeaseSec           int          `json:"rdpLeaseSec,omitempty"`
 	P2PRendezvousAddress  string       `json:"p2pRendezvousAddress,omitempty"`

@@ -22,8 +22,8 @@ func TestSSDPHeader(t *testing.T) {
 
 func TestServiceRankPrefersWANIPV2(t *testing.T) {
 	cases := map[string]int{
-		"urn:schemas-upnp-org:service:WANIPConnection:2": 30,
-		"urn:schemas-upnp-org:service:WANIPConnection:1": 20,
+		"urn:schemas-upnp-org:service:WANIPConnection:2":  30,
+		"urn:schemas-upnp-org:service:WANIPConnection:1":  20,
 		"urn:schemas-upnp-org:service:WANPPPConnection:1": 10,
 		"urn:schemas-upnp-org:service:Layer3Forwarding:1": 0,
 	}

@@ -10,21 +10,22 @@ import (
 type FrameType uint8
 
 const (
-	FrameTypeControl     FrameType = 0x01
-	FrameTypeOpenTCP     FrameType = 0x02
-	FrameTypeOpenTCPResp FrameType = 0x03
-	FrameTypeData        FrameType = 0x04
-	FrameTypePing        FrameType = 0x05
-	FrameTypePong        FrameType = 0x06
-	FrameTypeGoAway      FrameType = 0x07
-	FrameTypeOpenUDP     FrameType = 0x08
-	FrameTypeOpenUDPResp FrameType = 0x09
-	FrameTypeOpenRDP     FrameType = 0x0A
-	FrameTypeOpenRDPUDP  FrameType = 0x0B
-	FrameTypeRDPControl  FrameType = 0x0C
-	FrameTypePushMessage FrameType = 0x0D
-	FrameTypeP2PControl  FrameType = 0x0E
-	FrameTypeSpeedTest   FrameType = 0x0F
+	FrameTypeControl           FrameType = 0x01
+	FrameTypeOpenTCP           FrameType = 0x02
+	FrameTypeOpenTCPResp       FrameType = 0x03
+	FrameTypeData              FrameType = 0x04
+	FrameTypePing              FrameType = 0x05
+	FrameTypePong              FrameType = 0x06
+	FrameTypeGoAway            FrameType = 0x07
+	FrameTypeOpenUDP           FrameType = 0x08
+	FrameTypeOpenUDPResp       FrameType = 0x09
+	FrameTypeOpenRDP           FrameType = 0x0A
+	FrameTypeOpenRDPUDP        FrameType = 0x0B
+	FrameTypeRDPControl        FrameType = 0x0C
+	FrameTypePushMessage       FrameType = 0x0D
+	FrameTypeP2PControl        FrameType = 0x0E
+	FrameTypeSpeedTest         FrameType = 0x0F
+	FrameTypeResourceInventory FrameType = 0x10
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream
@@ -223,7 +224,16 @@ type PongMessage struct {
 	RDPTargets *[]RDPTarget `json:"rdpTargets,omitempty"`
 	// Nil means this server does not provide an exit inventory refresh. A
 	// non-nil empty slice explicitly removes every previously advertised exit.
-	ProxyExits *[]ProxyExit `json:"proxyExits,omitempty"`
+	ProxyExits        *[]ProxyExit `json:"proxyExits,omitempty"`
+	ProxyExitRevision uint64       `json:"proxyExitRevision,omitempty"`
+}
+
+// ResourceInventory is sent by the server on a short-lived stream when the
+// online proxy-exit set changes. Heartbeat Pong refreshes remain the fallback
+// for older peers and for recovering from a missed push.
+type ResourceInventory struct {
+	ProxyExits        *[]ProxyExit `json:"proxyExits,omitempty"`
+	ProxyExitRevision uint64       `json:"proxyExitRevision,omitempty"`
 }
 
 // GoAwayMessage notifies graceful shutdown

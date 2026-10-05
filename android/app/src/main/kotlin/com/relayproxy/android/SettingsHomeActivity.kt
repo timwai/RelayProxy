@@ -160,10 +160,17 @@ class SettingsHomeActivity : Activity() {
 
     private fun localProxySummary(config: ExitConfig): String {
         if (!config.clientEnabled) return "未启用"
+        val path = when (config.proxyPathMode) {
+            ExitConfig.PROXY_PATH_DIRECT_ONLY -> "仅直连"
+            ExitConfig.PROXY_PATH_P2P_ONLY -> "仅 P2P"
+            ExitConfig.PROXY_PATH_RELAY_ONLY -> "仅 Relay"
+            else -> "自动路径"
+        }
         return buildList {
             if (config.socks5Enabled) add("SOCKS5 ${config.socks5Port}")
             if (config.httpEnabled) add("HTTP ${config.httpPort}")
-        }.joinToString(" · ").ifBlank { "未启用" }
+            add(path)
+        }.joinToString(" · ")
     }
 
     private fun networkSummary(config: ExitConfig): String {

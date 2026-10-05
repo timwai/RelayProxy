@@ -333,9 +333,67 @@ diff --git a/src/hev-socks5-session-tcp.c b/src/hev-socks5-session-tcp.c
      }
  
      return okptr;
+diff --git a/src/misc/hev-utils.c b/src/misc/hev-utils.c
+--- a/src/misc/hev-utils.c
++++ b/src/misc/hev-utils.c
+@@ -19,6 +19,7 @@
+ #include <hev-socks5-misc.h>
+ 
+ #include "hev-logger.h"
++#include "hev-config.h"
+ #include "hev-mapped-dns.h"
+ 
+ #include "hev-utils.h"
+@@ -104,13 +105,27 @@ hev_socks5_addr_from_lwip (HevSocks5Addr *addr, const ip_addr_t *ip, u16_t port)
+     switch (ip->type) {
+     case IPADDR_TYPE_V4: {
+         HevMappedDNS *dns = hev_mapped_dns_get ();
++        unsigned int raw = ip_2_ip4 (ip)->addr;
++        unsigned int host = ntohl (raw);
+         const char *name = NULL;
+         if (dns)
+-            name = hev_mapped_dns_lookup (dns, ntohl (ip_2_ip4 (ip)->addr));
+-        if (name)
++            name = hev_mapped_dns_lookup (dns, host);
++        if (name) {
+             hev_socks5_addr_from_name (addr, name, htons (port));
+-        else
++        } else if (dns) {
++            unsigned int network = hev_config_get_mapdns_network ();
++            unsigned int netmask = hev_config_get_mapdns_netmask ();
++            unsigned int dnsaddr = hev_config_get_mapdns_address ();
++
++            /* Never leak a stale/unmapped FakeIP or the local mapped-DNS
++             * endpoint to the upstream SOCKS server. A failed local flow
++             * forces the application to resolve the hostname again. */
++            if ((netmask && ((host & netmask) == network)) || (dnsaddr && raw == dnsaddr))
++                return -1;
++            hev_socks5_addr_from_ipv4 (addr, ip, htons (port));
++        } else {
+             hev_socks5_addr_from_ipv4 (addr, ip, htons (port));
++        }
+         return 0;
+     }
+     case IPADDR_TYPE_V6:
 diff --git a/src/hev-socks5-session-udp.c b/src/hev-socks5-session-udp.c
 --- a/src/hev-socks5-session-udp.c
 +++ b/src/hev-socks5-session-udp.c
+@@ -193,9 +193,14 @@ udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
+         return;
+     }
+ 
+     frame->data = p;
+     memset (&frame->node, 0, sizeof (frame->node));
+-    hev_socks5_addr_from_lwip (&frame->addr, &pcb->local_ip, pcb->local_port);
++    if (hev_socks5_addr_from_lwip (&frame->addr, &pcb->local_ip,
++                                   pcb->local_port) < 0) {
++        hev_free (frame);
++        pbuf_free (p);
++        return;
++    }
+ 
+     if (frame->addr.atype == HEV_SOCKS5_ADDR_TYPE_NAME) {
+         self->addr = ip_2_ip4 (&pcb->local_ip)->addr;
 @@ -323,6 +323,14 @@ hev_socks5_session_udp_get_node (HevSocks5Session *base)
      return &self->data.node;
  }

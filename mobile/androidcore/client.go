@@ -484,7 +484,7 @@ func (c *Client) Start() error {
 	if c.cfg.ClientEnabled && c.cfg.VPNProxyEnabled {
 		vpnSocks = socks5.NewServer(socks5.ServerConfig{
 			ListenAddr: c.cfg.VPNProxyListen, GetExitNodeID: c.proxyDialer.GetDefaultExitID,
-			Dialer: countedDialer, Authenticate: c.authenticateVPNProxy,
+			Dialer: &vpnMappedDNSGuardDialer{base: countedDialer}, Authenticate: c.authenticateVPNProxy,
 		})
 		if err := vpnSocks.Start(); err != nil {
 			if socks != nil {

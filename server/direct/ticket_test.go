@@ -19,9 +19,9 @@ func TestTicketAuthorityIssuesScopedSignedTicket(t *testing.T) {
 	authority.ttl = 10 * time.Minute // must still be capped at the V1 maximum.
 
 	raw, expiresAt, err := authority.Issue(TicketIssue{
-		ClientDeviceID: "client",
-		ExitDeviceID: "exit",
-		PolicyRevision: 7,
+		ClientDeviceID:        "client",
+		ExitDeviceID:          "exit",
+		PolicyRevision:        7,
 		AuthorizationRevision: 11,
 	})
 	if err != nil {

@@ -123,6 +123,8 @@ func (streamOnlySession) OpenStream(context.Context) (tunnel.TunnelStream, error
 	return nil, errors.New("unexpected stream open before native capability check")
 }
 
+func (streamOnlySession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
+
 func TestDatagramRequiredRejectsUnsupportedClientTunnel(t *testing.T) {
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return streamOnlySession{} }, nil)
 	pc, err := dialer.DialUDPWithOptions(context.Background(), "exit", "127.0.0.1", 9, UDPDialOptions{DatagramRequired: true})

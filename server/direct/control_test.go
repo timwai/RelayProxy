@@ -116,12 +116,11 @@ func TestControllerRejectsNonExitSession(t *testing.T) {
 	}
 }
 
-
 func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
+		name         string
 		validatorErr error
-		wantSuccess bool
+		wantSuccess  bool
 	}{
 		{name: "current", wantSuccess: true},
 		{name: "stale", validatorErr: errors.New("stale authorization")},

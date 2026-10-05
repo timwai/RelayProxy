@@ -354,7 +354,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		cfg.P2PMode = "auto"
 	}
 	switch cfg.P2PMode {
-	case "auto", "relay_only", "p2p_only":
+	case "auto", "direct_only", "relay_only", "p2p_only":
 	default:
 		return nil, fmt.Errorf("invalid P2P mode %q", cfg.P2PMode)
 	}
@@ -584,7 +584,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
-	transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
+	if cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" {
+		transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
+	}
 	if tunnel.SupportsDatagrams(sess) {
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
 	}

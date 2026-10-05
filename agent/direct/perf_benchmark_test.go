@@ -18,10 +18,10 @@ func BenchmarkSelectPublicDirectEndpoints(b *testing.B) {
 			source = protocol.PublicDirectEndpointObserved
 		}
 		path.Endpoints = append(path.Endpoints, protocol.PublicDirectEndpoint{
-			Protocol: protocol.PublicDirectEndpointProtocolUDP,
-			Address: fmt.Sprintf("exit-%02d.example.com:35820", i),
-			Source: source,
-			Verified: true,
+			Protocol:        protocol.PublicDirectEndpointProtocolUDP,
+			Address:         fmt.Sprintf("exit-%02d.example.com:35820", i),
+			Source:          source,
+			Verified:        true,
 			CertFingerprint: fingerprint,
 		})
 	}

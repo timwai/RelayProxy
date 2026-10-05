@@ -2,6 +2,7 @@ package upnp
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -36,11 +37,16 @@ func TestServiceRankPrefersWANIPV2(t *testing.T) {
 func TestSOAPMappingActions(t *testing.T) {
 	var actions []string
 	var bodies []string
+	var parseErrors []error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		action := strings.Trim(r.Header.Get("SOAPAction"), "\"")
 		actions = append(actions, action)
 		body, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, string(body))
+		var document struct{}
+		if err := xml.Unmarshal(body, &document); err != nil {
+			parseErrors = append(parseErrors, err)
+		}
 		w.Header().Set("Content-Type", "text/xml")
 		switch {
 		case strings.HasSuffix(action, "#GetExternalIPAddress"):
@@ -72,6 +78,9 @@ func TestSOAPMappingActions(t *testing.T) {
 	}
 	if len(actions) != 3 {
 		t.Fatalf("actions=%v", actions)
+	}
+	if len(parseErrors) != 0 {
+		t.Fatalf("invalid SOAP XML: %v", parseErrors)
 	}
 	if !strings.Contains(bodies[1], "<NewProtocol>UDP</NewProtocol>") ||
 		!strings.Contains(bodies[1], "<NewInternalClient>192.168.1.20</NewInternalClient>") ||

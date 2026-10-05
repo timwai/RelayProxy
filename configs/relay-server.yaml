@@ -36,8 +36,15 @@ rdp:
 
 
 
-# Proxy P2P direct path control/rendezvous. Payload traffic still falls back to
-# Relay until the Client/Exit P2P QUIC data path is ready.
+# Public Direct lets verified public Exit UDP endpoints accept authenticated
+# QUIC directly. Server verification is mandatory before endpoints are published.
+direct:
+  enabled: true
+  port_start: 0                  # 0/0 表示 Agent 使用系统分配的随机 UDP 端口
+  port_end: 0                    # 例如 31000-31100；需在 Exit 主机/公网防火墙放行 UDP
+
+# Proxy P2P direct path control/rendezvous. Payload traffic falls back to
+# Relay when no direct path is ready.
 p2p:
   enabled: true
   rendezvous_listen: ""       # 例如 :3479；可与 RDP 使用不同 UDP 端口

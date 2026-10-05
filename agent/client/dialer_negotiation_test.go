@@ -501,6 +501,86 @@ func TestDirectPathPolicyModes(t *testing.T) {
 	})
 }
 
+func TestGenericDirectStreamHonorsFallbackPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     string
+		fallback bool
+	}{
+		{name: "direct_only", mode: "direct_only", fallback: true},
+		{name: "fallback_disabled", mode: "auto", fallback: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			direct := newScriptedSession(nil)
+			relay := newScriptedSession(func() tunnel.TunnelStream {
+				return &scriptedStream{}
+			})
+			dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+			dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+				return SelectedSession{Session: direct, Path: protocol.ProxyPathPublicDirectQUIC}, true
+			}, nil)
+			dialer.ConfigureDirectPolicy(tc.mode, tc.fallback)
+
+			selected, stream, err := dialer.openProxyStream(context.Background(), "exit")
+			if stream != nil {
+				_ = stream.Close()
+				t.Fatal("generic direct stream unexpectedly fell back to Relay")
+			}
+			if err == nil {
+				t.Fatal("generic direct stream unexpectedly succeeded")
+			}
+			if selected.Session != nil || selected.Path != "" {
+				t.Fatalf("failed generic stream returned selected path: %+v", selected)
+			}
+			if direct.opens.Load() != 1 {
+				t.Fatalf("direct attempts=%d, want 1", direct.opens.Load())
+			}
+			if relay.opens.Load() != 0 {
+				t.Fatalf("Relay attempts=%d, want 0", relay.opens.Load())
+			}
+		})
+	}
+}
+
+func TestGenericDirectStreamFallbackRecordsConcretePath(t *testing.T) {
+	direct := newScriptedSession(nil)
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return &scriptedStream{}
+	})
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+		return SelectedSession{Session: direct, Path: protocol.ProxyPathPublicDirectQUIC}, true
+	}, nil)
+
+	var fallbackPath, failurePath protocol.ProxyPath
+	dialer.ConfigurePathMetrics(func(_ string, path protocol.ProxyPath) {
+		fallbackPath = path
+	})
+	dialer.ConfigurePathFailure(func(_ string, path protocol.ProxyPath, _ string) {
+		failurePath = path
+	})
+
+	selected, stream, err := dialer.openProxyStream(context.Background(), "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stream == nil {
+		t.Fatal("generic direct stream did not fall back to Relay")
+	}
+	defer stream.Close()
+	if selected.Session != relay || !selected.Path.IsRelay() {
+		t.Fatalf("fallback selected=%+v, want Relay", selected)
+	}
+	if fallbackPath != protocol.ProxyPathPublicDirectQUIC {
+		t.Fatalf("fallback path=%q, want public direct", fallbackPath)
+	}
+	if failurePath != protocol.ProxyPathPublicDirectQUIC {
+		t.Fatalf("failure path=%q, want public direct", failurePath)
+	}
+}
+
 func TestDirectFallbackCanBeDisabled(t *testing.T) {
 	direct := newScriptedSession(func() tunnel.TunnelStream {
 		return &scriptedStream{failWriteAt: 2}

@@ -53,6 +53,10 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		writeError(w, http.StatusInternalServerError, "failed to load channel")
 		return
 	}
+	if strings.TrimSpace(channel.IdentityID) == "" {
+		writeError(w, http.StatusConflict, "channel identity is not configured")
+		return
+	}
 
 	var body channelPushRequest
 	if req.Method == http.MethodPost && req.ContentLength != 0 {
@@ -113,7 +117,7 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		deviceIDs = matchedRoute.DeviceIDs
 		routeRuleName = matchedRoute.Name
 	}
-	targets, err := h.db.ResolveMessageTargets(allDevices, deviceIDs)
+	targets, err := h.db.ResolveMessageTargetsForIdentity(channel.IdentityID, allDevices, deviceIDs)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to resolve target devices")
 		return
@@ -130,7 +134,8 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 	}
 
 	message := &repository.MessageRecord{
-		ChannelID: channel.ID,
+		IdentityID: channel.IdentityID,
+		ChannelID:  channel.ID,
 		Title:     title,
 		Content:   content,
 		Source:    source,

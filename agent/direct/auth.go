@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 )
 
@@ -17,6 +18,14 @@ var (
 // until the Server-signed ticket work in Phase 4 is complete.
 type Authenticator interface {
 	Authenticate(context.Context, protocol.PublicDirectAuthRequest) error
+}
+
+// PolicyAuthenticator is the production authentication contract. In addition
+// to validating the ticket it returns the Server-authoritative Relay ACL that
+// must be bound to every proxy stream on the accepted direct session.
+type PolicyAuthenticator interface {
+	Authenticator
+	AuthenticatePolicy(context.Context, protocol.PublicDirectAuthRequest) (*acl.Policy, error)
 }
 
 type AuthenticatorFunc func(context.Context, protocol.PublicDirectAuthRequest) error

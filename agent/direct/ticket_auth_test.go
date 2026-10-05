@@ -15,7 +15,7 @@ import (
 func signedTicketForTest(t *testing.T, privateKey ed25519.PrivateKey, claims protocol.PublicDirectTicketClaims) []byte {
 	t.Helper()
 	signed := protocol.PublicDirectSignedTicket{
-		Claims: claims,
+		Claims:    claims,
 		Signature: ed25519.Sign(privateKey, protocol.PublicDirectTicketPayload(claims)),
 	}
 	raw, err := json.Marshal(signed)
@@ -27,16 +27,16 @@ func signedTicketForTest(t *testing.T, privateKey ed25519.PrivateKey, claims pro
 
 func validTicketClaims(now time.Time) protocol.PublicDirectTicketClaims {
 	return protocol.PublicDirectTicketClaims{
-		Version: protocol.PublicDirectTicketVersion,
-		Issuer: "server-1",
-		ClientDeviceID: "client",
-		ExitDeviceID: "exit",
-		IssuedAt: now.Unix(),
-		ExpiresAt: now.Add(5 * time.Minute).Unix(),
-		PolicyRevision: 4,
+		Version:               protocol.PublicDirectTicketVersion,
+		Issuer:                "server-1",
+		ClientDeviceID:        "client",
+		ExitDeviceID:          "exit",
+		IssuedAt:              now.Unix(),
+		ExpiresAt:             now.Add(5 * time.Minute).Unix(),
+		PolicyRevision:        4,
 		AuthorizationRevision: 9,
-		Nonce: []byte("0123456789abcdef0123456789abcdef"),
-		AllowedCapabilities: []string{protocol.PublicDirectTicketCapabilityProxy},
+		Nonce:                 []byte("0123456789abcdef0123456789abcdef"),
+		AllowedCapabilities:   []string{protocol.PublicDirectTicketCapabilityProxy},
 	}
 }
 
@@ -53,10 +53,10 @@ func TestTicketAuthenticatorAcceptsOnceAndRejectsReplay(t *testing.T) {
 	auth.now = func() time.Time { return now }
 	ticket := signedTicketForTest(t, privateKey, validTicketClaims(now))
 	request := protocol.PublicDirectAuthRequest{
-		Version: protocol.PublicDirectAuthVersion,
+		Version:        protocol.PublicDirectAuthVersion,
 		ClientDeviceID: "client",
-		ExitDeviceID: "exit",
-		Ticket: ticket,
+		ExitDeviceID:   "exit",
+		Ticket:         ticket,
 	}
 	if err := auth.Authenticate(context.Background(), request); err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestTicketAuthenticatorRejectsFutureAndOverlongTickets(t *testing.T) {
 	auth.now = func() time.Time { return now }
 
 	future := validTicketClaims(now.Add(time.Minute))
-	future.ExpiresAt = future.IssuedAt + int64((5 * time.Minute) / time.Second)
+	future.ExpiresAt = future.IssuedAt + int64((5*time.Minute)/time.Second)
 	if err := auth.Authenticate(context.Background(), protocol.PublicDirectAuthRequest{
 		Version: protocol.PublicDirectAuthVersion, ClientDeviceID: "client", ExitDeviceID: "exit",
 		Ticket: signedTicketForTest(t, privateKey, future),

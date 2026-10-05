@@ -130,7 +130,6 @@ func TestRegistryRejectsStaleSessionUpdates(t *testing.T) {
 	}
 }
 
-
 func TestRegistryServerReconnectRequiresReverification(t *testing.T) {
 	registry := NewRegistry()
 	request := protocol.PublicDirectRegistrationRequest{

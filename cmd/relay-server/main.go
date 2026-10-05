@@ -392,7 +392,7 @@ func main() {
 				}
 				ticket, expiresAt, err := publicDirectTickets.Issue(serverdirect.TicketIssue{
 					ClientDeviceID: clientID, ExitDeviceID: result[i].DeviceID,
-					PolicyRevision: authorization.PolicyRevision,
+					PolicyRevision:        authorization.PolicyRevision,
 					AuthorizationRevision: authorization.AuthorizationRevision,
 				})
 				if err != nil {
@@ -448,17 +448,17 @@ func main() {
 		PublicDirectEnabled:      true,
 		PublicDirectTicketIssuer: publicDirectTickets.Issuer(),
 		PublicDirectTicketKey:    publicDirectTickets.PublicKey(),
-		MaxConnections:           cfg.Tunnel.MaxConnections,
-		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
-		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,
-		RendezvousAddress:       rendezvousAddress,
-		RDPLeaseSec:             rdpCoordinator.LeaseSeconds(),
-		P2PEnabled:              proxyP2PCoordinator != nil,
-		P2PRendezvousAddress:    p2pRendezvousAddress,
-		P2PLeaseSec:             p2pLeaseSec,
-		P2PPortStart:            cfg.P2P.PortStart,
-		P2PPortEnd:              cfg.P2P.PortEnd,
-		P2PUPnPEnabled:          cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
+		MaxConnections:            cfg.Tunnel.MaxConnections,
+		MaxConnectionsPerDevice:  cfg.Tunnel.MaxConnectionsPerDevice,
+		HeartbeatSec:             cfg.Tunnel.HeartbeatSec,
+		RendezvousAddress:        rendezvousAddress,
+		RDPLeaseSec:              rdpCoordinator.LeaseSeconds(),
+		P2PEnabled:               proxyP2PCoordinator != nil,
+		P2PRendezvousAddress:     p2pRendezvousAddress,
+		P2PLeaseSec:              p2pLeaseSec,
+		P2PPortStart:             cfg.P2P.PortStart,
+		P2PPortEnd:               cfg.P2P.PortEnd,
+		P2PUPnPEnabled:           cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 	}, sessionMgr, router)
 
 	if err := gw.Start(); err != nil {

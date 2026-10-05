@@ -13,11 +13,13 @@ import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.text.InputType
 import android.view.DragEvent
 import android.view.Gravity
@@ -58,6 +60,7 @@ class MainActivity : Activity() {
         private const val REQUEST_VPN_PERMISSION = 1401
         private const val REQUEST_ROUTING_RULE = 1402
         private const val REQUEST_VPN_APPS = 1403
+        private const val REQUEST_MESSAGE_OVERLAY_PERMISSION = 1404
 
         const val TAB_DASHBOARD = 0
         const val TAB_NODES = 1
@@ -133,6 +136,9 @@ class MainActivity : Activity() {
     private lateinit var settingHttpPortField: EditText
     private lateinit var settingP2pSwitch: Switch
     private lateinit var settingIpv6Switch: Switch
+    private lateinit var settingGlobalMessageOverlay: Switch
+    private lateinit var settingGlobalOverlayStatus: TextView
+    private lateinit var settingGlobalOverlayAction: TextView
 
     // ====== State & Sampling ======
     private var currentDeviceId: String = ""
@@ -177,6 +183,7 @@ class MainActivity : Activity() {
         if (::rulesListContainer.isInitialized) refreshRoutingTab()
         connectControlChannel()
         RelayExitService.setUiVisible(true)
+        refreshGlobalMessageOverlayPermissionState()
         handler.removeCallbacks(pollStatus)
         handler.post(pollStatus)
     }
@@ -218,6 +225,13 @@ class MainActivity : Activity() {
             }
             REQUEST_ROUTING_RULE -> {
                 refreshRoutingTab()
+            }
+            REQUEST_MESSAGE_OVERLAY_PERMISSION -> {
+                refreshGlobalMessageOverlayPermissionState()
+                RelayExitService.refreshGlobalMessageOverlaySetting()
+                if (MessageOverlayController.hasOverlayPermission(this)) {
+                    Toast.makeText(this, "全局消息弹窗权限已开启", Toast.LENGTH_SHORT).show()
+                }
             }
         }
     }
@@ -1617,6 +1631,76 @@ class MainActivity : Activity() {
         themeCard.addView(switchBlock("夜间模式", "开启深色极客质感与低眩光，关闭为清爽日间浅色", themeSwitch))
         content.addView(themeCard)
 
+        val messageCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
+        messageCard.addView(sectionHeader("消息与全局弹窗", "验证码、普通消息与重要提醒可覆盖显示在其他 App 上方"))
+
+        settingGlobalMessageOverlay = Switch(this).apply {
+            isChecked = store.isGlobalMessageOverlayEnabled()
+            UiKit.styleSwitch(this)
+            setOnCheckedChangeListener { _, enabled ->
+                store.setGlobalMessageOverlayEnabled(enabled)
+                RelayExitService.refreshGlobalMessageOverlaySetting()
+                if (enabled && !MessageOverlayController.hasOverlayPermission(this@MainActivity)) {
+                    requestGlobalMessageOverlayPermission()
+                } else {
+                    refreshGlobalMessageOverlayPermissionState()
+                }
+            }
+        }
+        messageCard.addView(
+            switchBlock(
+                "全局消息弹窗",
+                "规则命中后以悬浮卡片显示在微信、浏览器、游戏等其他应用上方；关闭后沿用应用内弹窗与系统通知",
+                settingGlobalMessageOverlay,
+            ),
+        )
+
+        val overlayStatusRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(14), 0, 0)
+        }
+        settingGlobalOverlayStatus = TextView(this).apply {
+            textSize = 11.5f
+            setTextColor(UiPalette.muted)
+            setPadding(dp(10), dp(7), dp(10), dp(7))
+            background = UiKit.rounded(this@MainActivity, UiPalette.surfaceSubtle, 8, UiPalette.lineSubtle)
+        }
+        overlayStatusRow.addView(
+            settingGlobalOverlayStatus,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+
+        settingGlobalOverlayAction = TextView(this).apply {
+            text = "去授权"
+            textSize = 11.5f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            background = UiKit.rounded(this@MainActivity, UiPalette.brand, 9)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { requestGlobalMessageOverlayPermission() }
+        }
+        overlayStatusRow.addView(
+            settingGlobalOverlayAction,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { leftMargin = dp(10) },
+        )
+        messageCard.addView(overlayStatusRow)
+        messageCard.addView(TextView(this).apply {
+            text = "全局卡片支持拖动、自动排队、一键复制验证码；没有悬浮窗权限时会自动降级为高优先级通知，不会丢消息。"
+            textSize = 10.5f
+            setTextColor(UiPalette.placeholder)
+            setLineSpacing(0f, 1.15f)
+            setPadding(0, dp(10), 0, 0)
+        })
+        content.addView(messageCard, topMargin(16))
+        refreshGlobalMessageOverlayPermissionState()
+
         // 1. 连接与身份凭证卡片
         val connCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
         connCard.addView(sectionHeader("连接与身份凭证", "Relay Server 认证与挑战签名"))
@@ -1773,6 +1857,77 @@ class MainActivity : Activity() {
             setBackgroundColor(UiPalette.bg)
             addView(content)
         }
+    }
+
+    private fun requestGlobalMessageOverlayPermission() {
+        val store = ConfigStore(this)
+        store.setGlobalMessageOverlayEnabled(true)
+        RelayExitService.refreshGlobalMessageOverlaySetting()
+
+        if (MessageOverlayController.hasOverlayPermission(this)) {
+            refreshGlobalMessageOverlayPermissionState()
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            refreshGlobalMessageOverlayPermissionState()
+            return
+        }
+
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName"),
+        )
+        runCatching {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, REQUEST_MESSAGE_OVERLAY_PERMISSION)
+        }.onFailure {
+            Toast.makeText(
+                this,
+                "无法打开悬浮窗权限页面，请在系统设置中允许 RelayProxy 显示在其他应用上层",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+        refreshGlobalMessageOverlayPermissionState()
+    }
+
+    private fun refreshGlobalMessageOverlayPermissionState() {
+        if (!::settingGlobalMessageOverlay.isInitialized ||
+            !::settingGlobalOverlayStatus.isInitialized ||
+            !::settingGlobalOverlayAction.isInitialized
+        ) {
+            return
+        }
+
+        val enabled = ConfigStore(this).isGlobalMessageOverlayEnabled()
+        val granted = MessageOverlayController.hasOverlayPermission(this)
+        settingGlobalOverlayStatus.text = when {
+            !enabled -> "已关闭 · 使用应用内弹窗 / 系统通知"
+            granted -> "已授权 · 全系统悬浮弹窗可用"
+            else -> "等待授权 · 当前自动降级为系统通知"
+        }
+        settingGlobalOverlayStatus.setTextColor(
+            when {
+                !enabled -> UiPalette.muted
+                granted -> UiPalette.success
+                else -> UiPalette.warning
+            }
+        )
+        settingGlobalOverlayStatus.background = UiKit.rounded(
+            this,
+            when {
+                !enabled -> UiPalette.surfaceSubtle
+                granted -> UiPalette.successSoft
+                else -> UiPalette.warningSoft
+            },
+            8,
+            when {
+                !enabled -> UiPalette.lineSubtle
+                granted -> UiPalette.successSoftBorder
+                else -> UiPalette.warningSoftBorder
+            },
+        )
+        settingGlobalOverlayAction.visibility =
+            if (enabled && !granted) View.VISIBLE else View.GONE
     }
 
     private fun sectionHeader(title: String, subtitle: String): View {

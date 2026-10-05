@@ -726,9 +726,24 @@
       const peerQuic = peerStatus && peerStatus.tunnelDiagnostics && peerStatus.tunnelDiagnostics.quic;
       const directPath = peerStatus && peerStatus.directPath;
       const directState = peerStatus && peerStatus.directState;
-      const direct = directPath ? '<small>当前路径：' + esc(directNames[directPath] || directPath) + (directState ? ' · ' + esc(directState) : '') + '</small>' : '';
+      const directRttMs = peerStatus && Number(peerStatus.directRttMs || 0);
+      const directError = peerStatus && String(peerStatus.directError || '');
+      const directEndpoint = peerStatus && String(peerStatus.directEndpoint || '');
+      const directFallbackCount = peerStatus && Number(peerStatus.directFallbackCount || 0);
+      const directBytesUp = peerStatus && Number(peerStatus.directBytesUp || 0);
+      const directBytesDown = peerStatus && Number(peerStatus.directBytesDown || 0);
+      const direct = directPath
+        ? '<small>当前路径：' + esc(directNames[directPath] || directPath) +
+          (directState ? ' · ' + esc(directState) : '') +
+          (directRttMs > 0 ? ' · RTT ' + esc(directRttMs) + ' ms' : '') +
+          (directFallbackCount > 0 ? ' · 回退 ' + esc(directFallbackCount) + ' 次' : '') +
+          '</small>' +
+          (directEndpoint ? '<small>直连端点：<span class="mono">' + esc(directEndpoint) + '</span></small>' : '') +
+          ((directBytesUp > 0 || directBytesDown > 0) ? '<small>直连流量：<span class="mono">' + bytes(directBytesUp) + ' / ' + bytes(directBytesDown) + '</span></small>' : '') +
+          (directError ? '<small>直连错误：' + esc(directError) + '</small>' : '')
+        : '';
       const diagnostic = relay ? '<span class="mono">Relay RTT ' + esc(relay.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(relay.sent_packets_lost || 0) + '</span>' +
-        (peerQuic ? '<small>设备 RTT ' + esc(peerQuic.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(peerQuic.sent_packets_lost || 0) + '</small>' : '<small>等待设备心跳诊断</small>') + direct : '<span class="muted">当前传输无 QUIC 统计</span>' + direct;
+        (peerQuic ? '<small>设备 Relay RTT ' + esc(peerQuic.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(peerQuic.sent_packets_lost || 0) + '</small>' : '<small>等待设备心跳诊断</small>') + direct : '<span class="muted">当前传输无 QUIC 统计</span>' + direct;
       return '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td><td>' + diagnostic + '</td></tr>';
     }).join('') : emptyRow(7, '当前没有活跃流', '设备发起代理连接后会显示在这里');
   }

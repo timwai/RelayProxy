@@ -868,7 +868,7 @@
         : '';
       const fallback = channel.allDevices ? '<span class="badge success">兜底：本身份全部设备</span>' : '<span class="badge neutral">兜底：' + esc((channel.deviceIds || []).length) + ' 台</span>';
       const routeCount = (channel.routeRules || []).length;
-      const customCount = (channel.verificationRules || []).length;
+      const customCount = (channel.verificationRules || []).filter(rule => !rule.default).length;
       const ruleBadges = (routeCount ? '<span class="badge transport">分流 ' + esc(routeCount) + '</span>' : '') +
         (customCount ? '<span class="badge transport">识别 ' + esc(customCount) + '</span>' : '');
       return '<article class="channel-card"><div class="channel-card-head"><div><strong>' + esc(channel.name) + '</strong><code class="mono">' + esc(channel.id) + '</code></div><div>' + identityBadge + fallback + ruleBadges + '</div></div><p>' + esc(channelDeviceLabel(channel)) + (routeCount ? ' · ' + routeCount + ' 条内容分流' : '') + '</p><div class="channel-url"><code class="mono">' + esc(url) + '</code></div><div class="channel-actions"><button type="button" class="small-button" data-channel-messages="' + esc(channel.id) + '">查看消息</button><button type="button" class="small-button" data-channel-copy="' + esc(channel.id) + '">复制接口</button><button type="button" class="small-button" data-channel-edit="' + esc(channel.id) + '">编辑</button></div></article>';
@@ -892,15 +892,39 @@
       return '<option value="' + esc(device.id) + '"' + (selectedSet.has(device.id) ? ' selected' : '') + '>' + esc((device.name || device.id) + ' · ' + status) + '</option>';
     }).join('');
   }
+  function defaultVerificationRule() {
+    return {
+      name: '默认验证码',
+      default: true,
+      popup: true,
+      popupType: 'verification_code',
+      maxDistance: 64,
+      keywords: [
+        '验证码', '校验码', '动态码', '动态密钥', '安全码', '短信码', '附加码', '登录附加码', '认证码', '口令码',
+        'verification code', 'verification-code', 'verification_code', 'verify code', 'verify-code', 'verify_code',
+        'one time password', 'one-time password', 'one_time_password', 'one time code', 'one-time code', 'one_time_code',
+        'otp', 'passcode', 'security code', 'security-code', 'security_code', 'authentication code', 'auth code'
+      ]
+    };
+  }
   function verificationRuleHTML(rule = {}, index = 0) {
+    const isDefault = !!rule.default;
     const keywords = Array.isArray(rule.keywords) ? rule.keywords.join(', ') : '';
     const distance = Number(rule.maxDistance) > 0 ? Number(rule.maxDistance) : 64;
-    return '<article class="channel-rule-card" data-verification-rule><div class="channel-rule-card-head"><strong>自定义识别规则 ' + (index + 1) + '</strong><button type="button" class="small-button danger" data-verification-remove>删除</button></div><div class="channel-rule-grid">' +
-      '<label>名称<input data-verification-name maxlength="80" value="' + esc(rule.name || '') + '" placeholder="例如：四川移动附加码"></label>' +
+    const popupEnabled = rule.popup !== false;
+    const popupType = ['verification_code', 'message', 'important'].includes(rule.popupType) ? rule.popupType : 'verification_code';
+    return '<article class="channel-rule-card" data-verification-rule' + (isDefault ? ' data-verification-default' : '') + '><div class="channel-rule-card-head"><strong>' +
+      (isDefault ? '默认验证码规则' : '自定义识别规则 ' + (index + 1)) + '</strong>' +
+      (isDefault ? '<span class="badge neutral">默认</span>' : '<button type="button" class="small-button danger" data-verification-remove>删除</button>') +
+      '</div><div class="channel-rule-grid">' +
+      '<label>规则名称<input data-verification-name maxlength="80" value="' + esc(rule.name || '') + '" placeholder="' + (isDefault ? '默认验证码' : '例如：四川移动附加码') + '"></label>' +
       '<label>最大距离（字符附近）<input data-verification-distance type="number" min="0" max="1024" value="' + esc(distance) + '"></label>' +
       '<label class="wide">关键词（逗号分隔）<input data-verification-keywords value="' + esc(keywords) + '" placeholder="附加码, 动态密钥, 登录口令"></label>' +
       '<label class="wide">验证码正则<input data-verification-pattern class="mono" maxlength="500" value="' + esc(rule.pattern || '') + '" placeholder="例如：([A-Z0-9]{4,8})；留空使用默认候选格式"></label>' +
-      '</div><label class="channel-rule-check"><input data-verification-case type="checkbox"' + (rule.caseSensitive ? ' checked' : '') + '>区分大小写</label><p class="channel-fallback-note">正则含捕获组时返回第一个捕获组；没有捕获组时返回整个匹配。</p></article>';
+      '<label>弹窗类型<select data-verification-popup-type><option value="verification_code"' + (popupType === 'verification_code' ? ' selected' : '') + '>验证码</option><option value="message"' + (popupType === 'message' ? ' selected' : '') + '>普通消息</option><option value="important"' + (popupType === 'important' ? ' selected' : '') + '>重要提醒</option></select></label>' +
+      '</div><label class="channel-rule-check"><input data-verification-case type="checkbox"' + (rule.caseSensitive ? ' checked' : '') + '>区分大小写</label>' +
+      '<label class="channel-rule-check"><input data-verification-popup type="checkbox"' + (popupEnabled ? ' checked' : '') + '>命中此规则后弹窗</label>' +
+      '<p class="channel-fallback-note">正则含捕获组时返回第一个捕获组；没有捕获组时返回整个匹配。关闭弹窗后仍会保留消息与验证码识别结果。</p></article>';
   }
   function routeRuleHTML(rule = {}, index = 0) {
     const matchType = rule.matchType === 'regex' ? 'regex' : 'contains';
@@ -914,16 +938,17 @@
   }
   function renderChannelRules(channel) {
     const verificationRules = channel && Array.isArray(channel.verificationRules) ? channel.verificationRules : [];
+    const defaultRule = verificationRules.find(rule => rule.default) || defaultVerificationRule();
+    const customRules = verificationRules.filter(rule => !rule.default);
     const routeRules = channel && Array.isArray(channel.routeRules) ? channel.routeRules : [];
     $('channel-use-default-verification').checked = !channel || channel.useDefaultVerification !== false;
-    $('channel-verification-rules').innerHTML = verificationRules.length ? verificationRules.map(verificationRuleHTML).join('') : '<div class="channel-rule-empty">没有自定义规则，将使用默认验证码识别。</div>';
+    $('channel-verification-rules').innerHTML = verificationRuleHTML(defaultRule, 0) + customRules.map((rule, index) => verificationRuleHTML(rule, index)).join('');
     $('channel-route-rules').innerHTML = routeRules.length ? routeRules.map(routeRuleHTML).join('') : '<div class="channel-rule-empty">没有内容分流，消息会直接推送到上方兜底设备。</div>';
     syncRouteRuleDeviceStates();
   }
   function addVerificationRule(rule = {}) {
     const host = $('channel-verification-rules');
-    if (host.querySelector('.channel-rule-empty')) host.innerHTML = '';
-    const index = host.querySelectorAll('[data-verification-rule]').length;
+    const index = host.querySelectorAll('[data-verification-rule]:not([data-verification-default])').length;
     host.insertAdjacentHTML('beforeend', verificationRuleHTML(rule, index));
   }
   function addRouteRule(rule = {}) {
@@ -934,9 +959,8 @@
     syncRouteRuleDeviceStates();
   }
   function renumberChannelRules() {
-    all('#channel-verification-rules [data-verification-rule]').forEach((card, index) => { const title = card.querySelector('.channel-rule-card-head strong'); if (title) title.textContent = '自定义识别规则 ' + (index + 1); });
+    all('#channel-verification-rules [data-verification-rule]:not([data-verification-default])').forEach((card, index) => { const title = card.querySelector('.channel-rule-card-head strong'); if (title) title.textContent = '自定义识别规则 ' + (index + 1); });
     all('#channel-route-rules [data-route-rule]').forEach((card, index) => { const title = card.querySelector('.channel-rule-card-head strong'); if (title) title.textContent = '分流规则 ' + (index + 1); });
-    if (!$('channel-verification-rules').children.length) $('channel-verification-rules').innerHTML = '<div class="channel-rule-empty">没有自定义规则，将使用默认验证码识别。</div>';
     if (!$('channel-route-rules').children.length) $('channel-route-rules').innerHTML = '<div class="channel-rule-empty">没有内容分流，消息会直接推送到上方兜底设备。</div>';
   }
   function syncRouteRuleDeviceStates() {
@@ -952,7 +976,10 @@
       keywords: card.querySelector('[data-verification-keywords]').value.split(/[,，\n]+/).map(value => value.trim()).filter(Boolean),
       pattern: card.querySelector('[data-verification-pattern]').value.trim(),
       maxDistance: Number(card.querySelector('[data-verification-distance]').value) || 0,
-      caseSensitive: card.querySelector('[data-verification-case]').checked
+      caseSensitive: card.querySelector('[data-verification-case]').checked,
+      default: card.hasAttribute('data-verification-default'),
+      popup: card.querySelector('[data-verification-popup]').checked,
+      popupType: card.querySelector('[data-verification-popup-type]').value
     }));
   }
   function readRouteRules() {
@@ -1014,7 +1041,7 @@
         return;
       }
     }
-    if (!body.useDefaultVerification && !body.verificationRules.length) {
+    if (!body.useDefaultVerification && !body.verificationRules.some(rule => !rule.default)) {
       errorAt('channel-error', '请启用默认验证码识别，或至少添加一条自定义识别规则。');
       return;
     }

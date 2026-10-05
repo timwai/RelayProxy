@@ -35,7 +35,7 @@ func TestConfigureDirectPathTagsLegacyP2P(t *testing.T) {
 		return p2p, true
 	}, nil)
 
-	selected := dialer.sessionForExit("exit-1")
+	selected := dialer.selectedSessionForExit("exit-1")
 	if selected.Session != p2p {
 		t.Fatalf("selected session = %p, want P2P %p", selected.Session, p2p)
 	}
@@ -51,7 +51,7 @@ func TestConfigureDirectProviderPreservesPublicPath(t *testing.T) {
 		return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true
 	}, nil)
 
-	selected := dialer.sessionForExit("exit-1")
+	selected := dialer.selectedSessionForExit("exit-1")
 	if selected.Session != public {
 		t.Fatalf("selected session = %p, want public %p", selected.Session, public)
 	}
@@ -69,7 +69,7 @@ func TestP2POnlyRejectsPublicDirectSession(t *testing.T) {
 	}, nil)
 	dialer.ConfigureDirectPolicy("p2p_only", true)
 
-	selected := dialer.sessionForExit("exit-1")
+	selected := dialer.selectedSessionForExit("exit-1")
 	if selected.Session != nil || selected.Path != "" {
 		t.Fatalf("selected = %#v, want no usable session", selected)
 	}
@@ -80,7 +80,7 @@ func TestDirectOnlyDoesNotFallBackToRelay(t *testing.T) {
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
 	dialer.ConfigureDirectPolicy("direct_only", true)
 
-	selected := dialer.sessionForExit("exit-1")
+	selected := dialer.selectedSessionForExit("exit-1")
 	if selected.Session != nil || selected.Path != "" {
 		t.Fatalf("selected = %#v, want no relay fallback", selected)
 	}
@@ -93,7 +93,7 @@ func TestRelaySelectionCarriesTransportPath(t *testing.T) {
 	relay := &pathSelectionTestSession{transport: tunnel.TransportTLS}
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
 
-	selected := dialer.sessionForExit("exit-1")
+	selected := dialer.selectedSessionForExit("exit-1")
 	if selected.Session != relay {
 		t.Fatalf("selected session = %p, want relay %p", selected.Session, relay)
 	}

@@ -10,7 +10,6 @@ import (
 	"relayproxy/internal/tunnel"
 )
 
-const QUICALPN = "relayproxy-public-direct-v1"
 
 func DialPublicQUIC(
 	ctx context.Context,
@@ -48,7 +47,7 @@ func publicTLSConfig(config *tls.Config) (*tls.Config, error) {
 		clone.MinVersion = tls.VersionTLS13
 	}
 	if len(clone.NextProtos) == 0 {
-		clone.NextProtos = []string{QUICALPN}
+		clone.NextProtos = []string{protocol.PublicDirectALPN}
 	}
 	return clone, nil
 }

@@ -98,7 +98,7 @@ func (d *TunnelDialer) ConfigureDirectPolicy(mode string, fallback bool) {
 
 // ConfigureDirectAttemptTimeout bounds a READY direct-path handshake when
 // Relay fallback is enabled. The caller's original context is retained for
-// the fallback, so a stale P2P session cannot consume the entire deadline.
+// the fallback, so a stale direct session cannot consume the entire deadline.
 func (d *TunnelDialer) ConfigureDirectAttemptTimeout(timeout time.Duration) {
 	d.directMu.Lock()
 	if timeout <= 0 {
@@ -191,7 +191,7 @@ func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Con
 	return context.WithTimeout(parent, timeout)
 }
 
-func (d *TunnelDialer) sessionForExit(exitDeviceID string) SelectedSession {
+func (d *TunnelDialer) selectedSessionForExit(exitDeviceID string) SelectedSession {
 	// The reserved server exit lives inside the Relay process, not behind an
 	// authenticated peer session, so there is no direct path to establish.
 	if exitDeviceID == protocol.ServerExitDeviceID {
@@ -228,8 +228,16 @@ func (d *TunnelDialer) sessionForExit(exitDeviceID string) SelectedSession {
 	return SelectedSession{Session: relay, Path: relaySessionPath(relay)}
 }
 
+// sessionForExit preserves the legacy package-level selection API for tests and
+// helpers that only need to distinguish direct from Relay. New transport code
+// should use selectedSessionForExit so the concrete path is retained.
+func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+	selected := d.selectedSessionForExit(exitDeviceID)
+	return selected.Session, selected.Path.IsDirect()
+}
+
 func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string) (tunnel.TunnelSession, tunnel.TunnelStream, protocol.ProxyPath, error) {
-	selected := d.sessionForExit(exitDeviceID)
+	selected := d.selectedSessionForExit(exitDeviceID)
 	session, path := selected.Session, selected.Path
 	if session == nil {
 		return nil, nil, "", fmt.Errorf("tunnel is not connected")
@@ -277,7 +285,7 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		exitNodeID = d.GetDefaultExitID()
 	}
 
-	selected := d.sessionForExit(exitNodeID)
+	selected := d.selectedSessionForExit(exitNodeID)
 	sess := selected.Session
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
@@ -435,7 +443,7 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		exitNodeID = d.GetDefaultExitID()
 	}
 
-	selected := d.sessionForExit(exitNodeID)
+	selected := d.selectedSessionForExit(exitNodeID)
 	sess := selected.Session
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")

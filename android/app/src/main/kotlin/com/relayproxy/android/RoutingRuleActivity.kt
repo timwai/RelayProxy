@@ -58,7 +58,7 @@ class RoutingRuleActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        UiPalette.isDark = ConfigStore(this).isDarkTheme()
+        UiPalette.sync(this)
         setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
         routing = savedInstanceState?.getString("routingSnapshot")?.let(RoutingConfig::fromJson)

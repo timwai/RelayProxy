@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -156,7 +157,6 @@ func (a *Agent) closePublicDirectClient() error {
 	return nil
 }
 
-
 func (a *Agent) startPublicDirectExit(
 	ctx context.Context,
 	relay tunnel.TunnelSession,
@@ -165,7 +165,7 @@ func (a *Agent) startPublicDirectExit(
 	maxStreams int,
 ) (func(), error) {
 	if handler == nil || relay == nil ||
-		!contains(accepted.TransportCapabilities, protocol.CapabilityProxyPublicDirect) {
+		!slices.Contains(accepted.TransportCapabilities, protocol.CapabilityProxyPublicDirect) {
 		return func() {}, nil
 	}
 	authenticator, err := proxydirect.NewTicketAuthenticator(

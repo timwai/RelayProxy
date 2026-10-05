@@ -93,6 +93,14 @@ type statusSnapshot struct {
 	ActiveStreams       int64                `json:"activeStreams"`
 	LatencyMs           int64                `json:"latencyMs"`
 	PowerConstrained    bool                 `json:"powerConstrained"`
+	DirectState         string               `json:"directState,omitempty"`
+	DirectPath          string               `json:"directPath,omitempty"`
+	DirectError         string               `json:"directError,omitempty"`
+	DirectEndpoint      string               `json:"directEndpoint,omitempty"`
+	DirectRTTMs         int64                `json:"directRttMs,omitempty"`
+	DirectFallbackCount uint64               `json:"directFallbackCount,omitempty"`
+	DirectBytesUp       uint64               `json:"directBytesUp,omitempty"`
+	DirectBytesDown     uint64               `json:"directBytesDown,omitempty"`
 	P2PState            string               `json:"p2pState,omitempty"`
 	P2PPath             string               `json:"p2pPath,omitempty"`
 	P2PError            string               `json:"p2pError,omitempty"`
@@ -660,6 +668,7 @@ func (c *Client) StatusJSON() string {
 	s.ProxyExits = redactProxyExitTickets(c.status.ProxyExits)
 	s.PowerConstrained = c.powerConstrained
 	manager := c.proxyP2P
+	publicDirect := c.proxyDirect
 	c.mu.RUnlock()
 	s.ActiveStreams = c.handler.ActiveStreams()
 	s.ProxyActiveTCP = c.proxyActiveTCP.Load()
@@ -669,6 +678,22 @@ func (c *Client) StatusJSON() string {
 	s.ProxyBytesUp = c.proxyBytesUp.Load()
 	s.ProxyBytesDown = c.proxyBytesDown.Load()
 	s.NativeUDP = tunnel.NativeUDPUsage()
+	if publicDirect != nil {
+		if path, ok := publicDirect.PathStatus(s.SelectedExit); ok {
+			s.DirectState = path.State
+			s.DirectError = path.Error
+			s.DirectEndpoint = path.Endpoint
+			s.DirectFallbackCount = path.FallbackCount
+			if directSession, ready := publicDirect.ReadyForExit(s.SelectedExit); ready {
+				s.DirectPath = string(protocol.ProxyPathPublicDirectQUIC)
+				if diagnostics := tunnel.DiagnoseSession(directSession); diagnostics != nil && diagnostics.QUIC != nil {
+					s.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
+					s.DirectBytesUp = diagnostics.QUIC.BytesSent
+					s.DirectBytesDown = diagnostics.QUIC.BytesReceived
+				}
+			}
+		}
+	}
 	if manager != nil {
 		if path, ok := manager.PathStatus(s.SelectedExit); ok {
 			s.P2PState = string(path.State)
@@ -678,6 +703,33 @@ func (c *Client) StatusJSON() string {
 			s.P2PCandidateSummary = path.CandidateSummary
 			s.P2PBytesUp = path.BytesUp
 			s.P2PBytesDown = path.BytesDown
+			if s.DirectPath == "" && path.Path != "" {
+				s.DirectState = string(path.State)
+				s.DirectPath = path.Path
+				s.DirectError = path.Error
+				s.DirectRTTMs = path.RTTMs
+				s.DirectFallbackCount = path.FallbackCount
+				s.DirectBytesUp = path.BytesUp
+				s.DirectBytesDown = path.BytesDown
+			}
+		}
+	}
+	if s.DirectPath == "" && s.ConnectionState == string(tunnel.StateConnected) {
+		if s.DirectState == "" {
+			s.DirectState = "IDLE"
+		}
+		switch s.Transport {
+		case string(tunnel.TransportQUIC):
+			s.DirectPath = string(protocol.ProxyPathRelayQUIC)
+		case string(tunnel.TransportTLS):
+			s.DirectPath = string(protocol.ProxyPathRelayTLS)
+		}
+		if relaySession := c.manager.Session(); relaySession != nil {
+			if diagnostics := tunnel.DiagnoseSession(relaySession); diagnostics != nil && diagnostics.QUIC != nil {
+				s.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
+				s.DirectBytesUp = diagnostics.QUIC.BytesSent
+				s.DirectBytesDown = diagnostics.QUIC.BytesReceived
+			}
 		}
 	}
 	data, err := json.Marshal(s)

@@ -25,7 +25,8 @@ const (
 	FrameTypePushMessage       FrameType = 0x0D
 	FrameTypeP2PControl        FrameType = 0x0E
 	FrameTypeSpeedTest         FrameType = 0x0F
-	FrameTypeResourceInventory FrameType = 0x10
+	FrameTypeResourceInventory    FrameType = 0x10
+	FrameTypePublicDirectControl FrameType = 0x11
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

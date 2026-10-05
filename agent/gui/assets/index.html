@@ -748,8 +748,9 @@
           </div>
           <div class="config-grid">
             <div class="config-field"><label for="cfg-p2p-mode">路径模式</label><select id="cfg-p2p-mode"><option value="auto">自动 · Public Direct → P2P → Relay</option><option value="direct_only">仅直连 · Public Direct → P2P → 失败</option><option value="p2p_only">仅 P2P · 不使用 Public Direct / Relay</option><option value="relay_only">仅 Relay · 不尝试任何直连</option></select></div>
-            <div class="config-field"><label for="cfg-p2p-fallback">P2P 失败回退</label><select id="cfg-p2p-fallback"><option value="true">允许回退 Relay</option><option value="false">不回退 Relay</option></select></div>
+            <div class="config-field"><label for="cfg-p2p-fallback">直连失败回退</label><select id="cfg-p2p-fallback"><option value="true">自动模式允许回退 Relay</option><option value="false">自动模式不回退 Relay</option></select></div>
           </div>
+          <div class="config-field" style="margin-top:12px"><label for="cfg-direct-public-advertise">手动公网地址</label><input id="cfg-direct-public-advertise" class="mono" type="text" placeholder="exit.example.com:35820"><small>可选，仅用于端口转发、云主机 DNS 等场景；Server 会主动验证，可留空自动发现。</small></div>
           <details class="config-advanced"><summary>直连高级参数 <span>通常无需修改</span></summary>
             <div class="config-grid">
               <div class="config-field"><label for="cfg-p2p-punch-timeout">打洞超时 / ms</label><input id="cfg-p2p-punch-timeout" type="number" min="100" max="10000" inputmode="numeric"></div>
@@ -757,7 +758,7 @@
               <div class="config-field"><label for="cfg-p2p-idle-timeout">空闲回收 / 秒</label><input id="cfg-p2p-idle-timeout" type="number" min="30" max="3600" inputmode="numeric"></div>
               <div class="config-field"><label for="cfg-p2p-max-sessions">最多 Exit 会话</label><input id="cfg-p2p-max-sessions" type="number" min="1" max="32" inputmode="numeric"></div>
             </div>
-            <p class="config-help">连续失败按 5 秒、30 秒、2 分钟、10 分钟进入冷却；网络变化自动重置将在后续优化阶段加入。</p>
+            <p class="config-help">连续失败会指数退避；网络地址变化时 Public Direct 会重新注册验证，P2P 会重建候选。</p>
           </details>
         </div>
         <div class="config-actions"><span id="connection-runtime" class="config-help mono"></span><div><button data-config-write disabled onclick="saveServer()" class="btn-primary rp-btn rp-btn-primary config-small">保存连接设置</button></div></div>
@@ -1293,7 +1294,7 @@
       return !!(caps && !caps.unavailable_reason && caps.tcp && caps.udp && caps.ipv6 && caps.process_identity && caps.original_destination && caps.reply_injection && caps.loop_bypass);
     }
     var groupFields = {
-      connection: ['cfg-server','cfg-device-name','cfg-identity-id','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport','cfg-p2p-enabled','cfg-p2p-mode','cfg-p2p-fallback','cfg-p2p-punch-timeout','cfg-p2p-keepalive','cfg-p2p-idle-timeout','cfg-p2p-max-sessions'],
+      connection: ['cfg-server','cfg-device-name','cfg-identity-id','cfg-quic-port','cfg-tcp-port','cfg-tls-on','cfg-transport','cfg-p2p-enabled','cfg-p2p-mode','cfg-p2p-fallback','cfg-direct-public-advertise','cfg-p2p-punch-timeout','cfg-p2p-keepalive','cfg-p2p-idle-timeout','cfg-p2p-max-sessions'],
       proxy: ['cfg-socks-on','cfg-socks-listen','cfg-socks-port','cfg-http-on','cfg-http-listen','cfg-http-port','cfg-tun-on'],
       routing: ['cfg-routing-mode','cfg-routing-default'],
       network: ['cfg-network-excludes'],
@@ -1905,6 +1906,8 @@
       $('cfg-p2p-keepalive').value = p2p.keepaliveSec || 10;
       $('cfg-p2p-idle-timeout').value = p2p.idleTimeoutSec || 120;
       $('cfg-p2p-max-sessions').value = p2p.maxExitSessions || 4;
+      var direct = cfg.direct || {};
+      $('cfg-direct-public-advertise').value = direct.publicAdvertise || '';
 
       var socks = cfg.socks5 || {}, http = cfg.http || {};
       $('cfg-socks-on').checked = socks.enabled !== false;
@@ -2078,7 +2081,8 @@
             keepaliveSec: boundedIntValue('cfg-p2p-keepalive','P2P Keepalive',5,60),
             idleTimeoutSec: boundedIntValue('cfg-p2p-idle-timeout','P2P 空闲超时',30,3600),
             maxExitSessions: boundedIntValue('cfg-p2p-max-sessions','P2P Exit 会话上限',1,32)
-          }
+          },
+          direct: { public: { advertise: $('cfg-direct-public-advertise').value.trim() } }
         };
       case 'proxy':
         return { proxy: { socks5Enabled: $('cfg-socks-on').checked, socks5Listen: hostValue('cfg-socks-listen','SOCKS5 地址'), socks5Port: portValue('cfg-socks-port','SOCKS5 端口'), httpEnabled: $('cfg-http-on').checked, httpListen: hostValue('cfg-http-listen','HTTP 地址'), httpPort: portValue('cfg-http-port','HTTP 端口') }, network: { mode: $('cfg-tun-on').checked ? 'divert' : '' } };

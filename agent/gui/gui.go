@@ -82,6 +82,15 @@ func (o Options) theme() string {
 	}
 }
 
+func shouldPopupMessage(message app.Message) bool {
+	popupType := strings.TrimSpace(message.PopupType)
+	if popupType == "" {
+		// Legacy servers only emitted verificationCode and had no popup metadata.
+		return strings.TrimSpace(message.VerificationCode) != ""
+	}
+	return message.Popup
+}
+
 // ui is the platform-independent surface the tray and bindings drive.
 type ui interface {
 	// pushLog appends a log line to the log view.

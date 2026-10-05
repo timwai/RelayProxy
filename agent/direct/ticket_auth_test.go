@@ -150,7 +150,6 @@ func TestTicketAuthenticatorRejectsFutureAndOverlongTickets(t *testing.T) {
 	}
 }
 
-
 func TestTicketAuthenticatorRequiresCurrentAuthorizationRevision(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

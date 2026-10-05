@@ -336,7 +336,7 @@ internal class MessageOverlayController(
                 typeface = Typeface.MONOSPACE
                 letterSpacing = 0.12f
                 setTextColor(palette.codeText)
-                isTextSelectable = true
+                setTextIsSelectable(true)
                 maxLines = 1
                 ellipsize = TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -378,7 +378,7 @@ internal class MessageOverlayController(
                 maxLines = if (popupType == TYPE_IMPORTANT) 7 else 5
                 ellipsize = TextUtils.TruncateAt.END
                 setLineSpacing(0f, 1.18f)
-                isTextSelectable = true
+                setTextIsSelectable(true)
             }, topMargin(if (code.isNotEmpty()) 12 else 14))
         }
 

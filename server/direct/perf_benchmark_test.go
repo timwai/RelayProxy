@@ -15,14 +15,14 @@ func BenchmarkVerifiedPublicDirectEndpoints(b *testing.B) {
 	for i := 0; i < 16; i++ {
 		candidates = append(candidates, protocol.PublicDirectEndpointCandidate{
 			Protocol: protocol.PublicDirectEndpointProtocolUDP,
-			Address: fmt.Sprintf("exit-%02d.example.com:35820", i),
-			Source: protocol.PublicDirectEndpointManual,
+			Address:  fmt.Sprintf("exit-%02d.example.com:35820", i),
+			Source:   protocol.PublicDirectEndpointManual,
 		})
 	}
 	records, err := registry.Register("exit", "session", netip.Addr{}, protocol.PublicDirectRegistrationRequest{
 		CertFingerprint: testFingerprint(),
-		NetworkEpoch: 1,
-		Candidates: candidates,
+		NetworkEpoch:    1,
+		Candidates:      candidates,
 	})
 	if err != nil {
 		b.Fatal(err)

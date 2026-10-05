@@ -96,6 +96,11 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	} else if c.P2P.PortStart < 1 || c.P2P.PortStart > 65535 || c.P2P.PortEnd < c.P2P.PortStart || c.P2P.PortEnd > 65535 {
 		return errors.New("p2p 的端口范围无效；请同时设置 1-65535 内的 port_start/port_end，或都设为 0")
 	}
+	if c.Direct.PortStart == 0 && c.Direct.PortEnd == 0 {
+		// 0/0 lets each Agent bind an ephemeral Public Direct UDP port.
+	} else if c.Direct.PortStart < 1 || c.Direct.PortStart > 65535 || c.Direct.PortEnd < c.Direct.PortStart || c.Direct.PortEnd > 65535 {
+		return errors.New("direct 的端口范围无效；请同时设置 1-65535 内的 port_start/port_end，或都设为 0")
+	}
 	switch c.Exit.Upstream.Mode {
 	case "direct":
 	case "socks5", "http", "https":
@@ -226,6 +231,9 @@ func CloneServerConfig(c *ServerConfig) *ServerConfig {
 	}
 	if c.P2P.UPnPEnabled != nil {
 		out.P2P.UPnPEnabled = BoolPtr(*c.P2P.UPnPEnabled)
+	}
+	if c.Direct.Enabled != nil {
+		out.Direct.Enabled = BoolPtr(*c.Direct.Enabled)
 	}
 	if c.Exit.Enabled != nil {
 		out.Exit.Enabled = BoolPtr(*c.Exit.Enabled)
@@ -367,6 +375,7 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "relay_acl": policy,
 			"rdp":      c.RDP,
 			"p2p":      c.P2P,
+			"direct":   c.Direct,
 			"exit":     c.Exit,
 			"database": c.Database,
 		}

@@ -200,6 +200,9 @@ type PushMessage struct {
 	Title            string `json:"title"`
 	Content          string `json:"content"`
 	VerificationCode string `json:"verificationCode,omitempty"`
+	VerificationRule string `json:"verificationRule,omitempty"`
+	Popup            bool   `json:"popup"`
+	PopupType        string `json:"popupType,omitempty"`
 	Source           string `json:"source,omitempty"`
 	CreatedAt        int64  `json:"createdAt"`
 }

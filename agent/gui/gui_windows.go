@@ -433,6 +433,11 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	if strings.TrimSpace(message.VerificationCode) == "" || a.verification == nil {
 		return
 	}
+	// PopupType is empty on older servers. Only honor Popup=false when the new
+	// presentation metadata is present, preserving compatibility with legacy pushes.
+	if strings.TrimSpace(message.PopupType) != "" && !message.Popup {
+		return
+	}
 	popup := a.verification
 	timeout := a.bridge.GetConfig().VerificationPopupTimeout()
 	popup.Center()

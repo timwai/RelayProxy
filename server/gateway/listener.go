@@ -98,22 +98,22 @@ func writeDeviceRejection(stream tunnel.TunnelStream, response protocol.DeviceAc
 }
 
 type Gateway struct {
-	cfg          GatewayConfig
-	sessions     *session.Manager
-	router       *StreamRouter
-	tcpListener  net.Listener
-	tcpTLSConfig *tls.Config
-	quicListener *quic.Listener
-	closed       atomic.Bool
-	activeConns        atomic.Int64
+	cfg               GatewayConfig
+	sessions          *session.Manager
+	router            *StreamRouter
+	tcpListener       net.Listener
+	tcpTLSConfig      *tls.Config
+	quicListener      *quic.Listener
+	closed            atomic.Bool
+	activeConns       atomic.Int64
 	proxyExitRevision atomic.Uint64
-	ctx          context.Context
-	cancel       context.CancelFunc
-	wg           sync.WaitGroup
-	mu           sync.Mutex
-	started      bool
-	closeOnce    sync.Once
-	resources    map[io.Closer]struct{} // includes transports that are not authenticated yet
+	ctx               context.Context
+	cancel            context.CancelFunc
+	wg                sync.WaitGroup
+	mu                sync.Mutex
+	started           bool
+	closeOnce         sync.Once
+	resources         map[io.Closer]struct{} // includes transports that are not authenticated yet
 }
 
 func NewGateway(cfg GatewayConfig, sessions *session.Manager, router *StreamRouter) *Gateway {

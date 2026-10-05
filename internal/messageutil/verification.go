@@ -51,7 +51,7 @@ func ValidateVerificationRule(rule VerificationRule) error {
 	if len(strings.TrimSpace(rule.Name)) > 80 {
 		return fmt.Errorf("verification rule name is too long")
 	}
-	if len(rule.Keywords) > 32 {
+	if len(rule.Keywords) > 64 {
 		return fmt.Errorf("verification rule has too many keywords")
 	}
 	for _, keyword := range rule.Keywords {

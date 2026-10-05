@@ -281,6 +281,97 @@ func TestChannelCustomVerificationAndRouting(t *testing.T) {
 	}
 }
 
+func TestTypedMessageRulesSeparateClassificationAndVerificationExtraction(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	public := NewPublicPushHandler(router.sessions, router.db)
+	device := createMessageTestDevice(t, router, "TYPED-RULES")
+
+	popup := true
+	messageRules := []repository.MessageRule{
+		{
+			Name: "生产告警", Type: "important", Enabled: true,
+			Match: repository.MessageMatchConfig{
+				MatchType: "keywords", KeywordMode: "any",
+				Keywords: []string{"磁盘空间不足", "服务异常"},
+			},
+			Popup: &popup,
+		},
+		{
+			Name: "任务通知", Type: "message", Enabled: true,
+			Match: repository.MessageMatchConfig{
+				MatchType: "contains", Pattern: "备份完成",
+			},
+			Popup: &popup,
+		},
+		{
+			Name: "登录验证码", Type: "verification_code", Enabled: true,
+			Match: repository.MessageMatchConfig{
+				MatchType: "keywords", KeywordMode: "any",
+				Keywords: []string{"验证码"},
+			},
+			Verification: &repository.VerificationExtractorConfig{
+				Type: "auto", MaxDistance: 64, MinLength: 4, MaxLength: 8,
+				AllowLetters: true, AllowDigits: true, RequireDigit: true,
+			},
+			Popup: &popup,
+		},
+	}
+	createBody, _ := json.Marshal(messageChannelRequest{
+		ID: "typed-rules", IdentityID: messageDeviceIdentityID(t, router, device.ID),
+		Name: "类型化消息规则", DeviceIDs: []string{device.ID}, MessageRules: &messageRules,
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels", bytes.NewReader(createBody))
+	createReq.AddCookie(adminCookie)
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create typed channel returned %d: %s", createRec.Code, createRec.Body.String())
+	}
+
+	push := func(text string) repository.MessageRecord {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/push/typed-rules?message="+url.QueryEscape(text), nil)
+		rec := httptest.NewRecorder()
+		public.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("push returned %d: %s", rec.Code, rec.Body.String())
+		}
+		var record repository.MessageRecord
+		if err := json.Unmarshal(rec.Body.Bytes(), &record); err != nil {
+			t.Fatal(err)
+		}
+		return record
+	}
+
+	important := push("生产服务器磁盘空间不足，请尽快处理")
+	if important.MessageType != "important" || important.MessageRule != "生产告警" ||
+		important.VerificationCode != "" || !important.Popup || important.PopupType != "important" {
+		t.Fatalf("important classification = %+v", important)
+	}
+
+	normal := push("数据库备份完成，请检查归档")
+	if normal.MessageType != "message" || normal.MessageRule != "任务通知" ||
+		normal.VerificationCode != "" || !normal.Popup || normal.PopupType != "message" {
+		t.Fatalf("normal classification = %+v", normal)
+	}
+
+	verification := push("您的验证码为 G931，请勿泄露")
+	if verification.MessageType != "verification_code" || verification.MessageRule != "登录验证码" ||
+		verification.VerificationCode != "G931" || verification.VerificationRule != "登录验证码" ||
+		!verification.Popup || verification.PopupType != "verification_code" {
+		t.Fatalf("verification classification = %+v", verification)
+	}
+
+	unmatched := push("这是一条没有配置规则的普通通知")
+	if unmatched.MessageType != "" || unmatched.MessageRule != "" ||
+		unmatched.VerificationCode != "" || unmatched.Popup || unmatched.PopupType != "" {
+		t.Fatalf("unmatched message should be delivered silently: %+v", unmatched)
+	}
+}
+
 func TestChannelRejectsInvalidCustomRules(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()

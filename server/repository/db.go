@@ -319,6 +319,11 @@ func (db *DB) ensureMessageSchema() error {
 			title VARCHAR(200) NOT NULL,
 			content TEXT NOT NULL,
 			verification_code VARCHAR(64),
+			verification_rule VARCHAR(80),
+			message_type VARCHAR(40),
+			message_rule VARCHAR(80),
+			popup BOOLEAN NOT NULL DEFAULT FALSE,
+			popup_type VARCHAR(40),
 			route_rule VARCHAR(120),
 			source VARCHAR(120),
 			created_at TIMESTAMP NOT NULL
@@ -340,6 +345,7 @@ func (db *DB) ensureMessageSchema() error {
 			all_devices BOOLEAN NOT NULL DEFAULT FALSE,
 			use_default_verification BOOLEAN NOT NULL DEFAULT TRUE,
 			verification_rules TEXT NOT NULL DEFAULT '[]',
+			message_rules TEXT NOT NULL DEFAULT '[]',
 			route_rules TEXT NOT NULL DEFAULT '[]',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
@@ -366,6 +372,21 @@ func (db *DB) ensureMessageSchema() error {
 	if err := db.ensureSQLiteColumn("messages", "channel_id", "VARCHAR(80)"); err != nil {
 		return err
 	}
+	if err := db.ensureSQLiteColumn("messages", "verification_rule", "VARCHAR(80)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "message_type", "VARCHAR(40)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "message_rule", "VARCHAR(80)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "popup", "BOOLEAN NOT NULL DEFAULT FALSE"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "popup_type", "VARCHAR(40)"); err != nil {
+		return err
+	}
 	if err := db.ensureSQLiteColumn("messages", "route_rule", "VARCHAR(120)"); err != nil {
 		return err
 	}
@@ -376,6 +397,9 @@ func (db *DB) ensureMessageSchema() error {
 		return err
 	}
 	if err := db.ensureSQLiteColumn("message_channels", "verification_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("message_channels", "message_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 	if err := db.ensureSQLiteColumn("message_channels", "route_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
@@ -559,6 +583,38 @@ type VerificationRule struct {
 	PopupType     string   `json:"popupType,omitempty"`
 }
 
+// MessageRule is the v2 message classification model. Matching a message and
+// extracting a verification code are separate concerns: only verification_code
+// rules carry a Verification extractor.
+type MessageMatchConfig struct {
+	MatchType     string   `json:"matchType"`
+	Keywords      []string `json:"keywords,omitempty"`
+	KeywordMode   string   `json:"keywordMode,omitempty"`
+	Pattern       string   `json:"pattern,omitempty"`
+	CaseSensitive bool     `json:"caseSensitive,omitempty"`
+}
+
+type VerificationExtractorConfig struct {
+	Type         string `json:"type"`
+	Pattern      string `json:"pattern,omitempty"`
+	MaxDistance  int    `json:"maxDistance,omitempty"`
+	MinLength    int    `json:"minLength,omitempty"`
+	MaxLength    int    `json:"maxLength,omitempty"`
+	AllowLetters bool   `json:"allowLetters,omitempty"`
+	AllowDigits  bool   `json:"allowDigits,omitempty"`
+	RequireDigit bool   `json:"requireDigit,omitempty"`
+}
+
+type MessageRule struct {
+	Name         string                       `json:"name"`
+	Type         string                       `json:"type"`
+	Enabled      bool                         `json:"enabled"`
+	Default      bool                         `json:"default,omitempty"`
+	Match        MessageMatchConfig           `json:"match"`
+	Verification *VerificationExtractorConfig `json:"verification,omitempty"`
+	Popup        *bool                        `json:"popup,omitempty"`
+}
+
 func boolValue(value bool) *bool {
 	return &value
 }
@@ -570,10 +626,13 @@ func DefaultVerificationRule() VerificationRule {
 	return VerificationRule{
 		Name: "默认验证码",
 		Keywords: []string{
-			"验证码", "校验码", "动态码", "动态密钥", "安全码", "短信码", "附加码", "登录附加码", "认证码", "口令码",
-			"verification code", "verification-code", "verification_code", "verify code", "verify-code", "verify_code",
-			"one time password", "one-time password", "one_time_password", "one time code", "one-time code", "one_time_code",
-			"otp", "passcode", "security code", "security-code", "security_code", "authentication code", "auth code",
+			"验证码", "短信验证码", "校验码", "验证代码", "确认码", "登录码", "登录验证码",
+			"动态码", "动态密码", "动态密钥", "一次性密码", "一次性验证码", "安全码", "安全验证码",
+			"短信码", "附加码", "登录附加码", "认证码", "授权码", "口令码",
+			"OTP", "TOTP", "verification code", "verification-code", "verification_code",
+			"verify code", "verify-code", "verify_code", "one time password", "one-time password",
+			"one_time_password", "one time code", "one-time code", "one_time_code", "passcode",
+			"security code", "security-code", "security_code", "authentication code", "auth code",
 		},
 		MaxDistance: 64,
 		Default:     true,
@@ -591,6 +650,82 @@ func EnsureDefaultVerificationRule(rules []VerificationRule) []VerificationRule 
 	return append(rules, DefaultVerificationRule())
 }
 
+// LegacyMessageRules converts the historical verificationRules model into the
+// typed message-rule model. Custom rules keep their order and the editable
+// default detector remains last, matching the old precedence.
+func LegacyMessageRules(useDefault bool, rules []VerificationRule) []MessageRule {
+	// The editable default rule always exists in v2. The legacy
+	// useDefaultVerification flag maps to its Enabled state so an explicitly
+	// disabled default cannot be accidentally re-enabled by a later edit.
+	rules = EnsureDefaultVerificationRule(rules)
+	out := make([]MessageRule, 0, len(rules))
+	appendRule := func(rule VerificationRule) {
+		ruleType := strings.ToLower(strings.TrimSpace(rule.PopupType))
+		switch ruleType {
+		case "message", "important", "verification_code":
+		default:
+			ruleType = "verification_code"
+		}
+		match := MessageMatchConfig{CaseSensitive: rule.CaseSensitive, KeywordMode: "any"}
+		if len(rule.Keywords) > 0 {
+			match.MatchType = "keywords"
+			match.Keywords = append([]string(nil), rule.Keywords...)
+		} else if ruleType != "verification_code" && strings.TrimSpace(rule.Pattern) != "" {
+			match.MatchType = "regex"
+			match.Pattern = strings.TrimSpace(rule.Pattern)
+		} else {
+			match.MatchType = "all"
+		}
+		next := MessageRule{
+			Name:    strings.TrimSpace(rule.Name),
+			Type:    ruleType,
+			Enabled: !rule.Default || useDefault,
+			Default: rule.Default,
+			Match:   match,
+			Popup:   rule.Popup,
+		}
+		if next.Name == "" {
+			if rule.Default {
+				next.Name = "默认验证码"
+			} else {
+				next.Name = "消息规则"
+			}
+		}
+		if ruleType == "verification_code" {
+			extractor := &VerificationExtractorConfig{
+				Type:         "auto",
+				MaxDistance:  rule.MaxDistance,
+				MinLength:    4,
+				MaxLength:    8,
+				AllowLetters: true,
+				AllowDigits:  true,
+				RequireDigit: true,
+			}
+			if extractor.MaxDistance <= 0 {
+				extractor.MaxDistance = 64
+			}
+			if strings.TrimSpace(rule.Pattern) != "" {
+				extractor.Type = "regex"
+				extractor.Pattern = strings.TrimSpace(rule.Pattern)
+			}
+			next.Verification = extractor
+		}
+		out = append(out, next)
+	}
+	for _, rule := range rules {
+		if !rule.Default {
+			appendRule(rule)
+		}
+	}
+	for _, rule := range rules {
+		if rule.Default {
+			appendRule(rule)
+			break
+		}
+	}
+	return out
+}
+
 type MessageRouteRule struct {
 	Name          string   `json:"name"`
 	MatchType     string   `json:"matchType"`
@@ -606,7 +741,8 @@ type MessageChannel struct {
 	Name                   string             `json:"name"`
 	AllDevices             bool               `json:"allDevices"`
 	DeviceIDs              []string           `json:"deviceIds"`
-	UseDefaultVerification bool               `json:"useDefaultVerification"`
+	MessageRules           []MessageRule      `json:"messageRules,omitempty"`
+	UseDefaultVerification bool               `json:"useDefaultVerification,omitempty"`
 	VerificationRules      []VerificationRule `json:"verificationRules,omitempty"`
 	RouteRules             []MessageRouteRule `json:"routeRules,omitempty"`
 	CreatedAt              time.Time          `json:"createdAt"`
@@ -668,7 +804,9 @@ func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
 	if channel.ID == "" {
 		channel.ID = "ch_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
 	}
-	if !channel.UseDefaultVerification && len(channel.VerificationRules) == 0 {
+	if len(channel.MessageRules) == 0 &&
+		!channel.UseDefaultVerification &&
+		len(channel.VerificationRules) == 0 {
 		channel.UseDefaultVerification = true
 	}
 	now := time.Now().UTC()
@@ -734,6 +872,10 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 	if err != nil {
 		return err
 	}
+	messageRules, err := json.Marshal(channel.MessageRules)
+	if err != nil {
+		return err
+	}
 	routeRules, err := json.Marshal(channel.RouteRules)
 	if err != nil {
 		return err
@@ -741,17 +883,18 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 
 	if create {
 		if _, err := tx.Exec(`INSERT INTO message_channels
-			(id, identity_id, name, all_devices, use_default_verification, verification_rules, route_rules, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, identity_id, name, all_devices, use_default_verification, verification_rules, message_rules, route_rules, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			channel.ID, channel.IdentityID, channel.Name, channel.AllDevices, channel.UseDefaultVerification,
-			string(verificationRules), string(routeRules), channel.CreatedAt, channel.UpdatedAt); err != nil {
+			string(verificationRules), string(messageRules), string(routeRules), channel.CreatedAt, channel.UpdatedAt); err != nil {
 			return err
 		}
 	} else {
 		result, err := tx.Exec(`UPDATE message_channels
-			SET identity_id = ?, name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, route_rules = ?, updated_at = ?
+			SET identity_id = ?, name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, message_rules = ?, route_rules = ?, updated_at = ?
 			WHERE id = ?`,
-			channel.IdentityID, channel.Name, channel.AllDevices, channel.UseDefaultVerification, string(verificationRules), string(routeRules), channel.UpdatedAt, channel.ID)
+			channel.IdentityID, channel.Name, channel.AllDevices, channel.UseDefaultVerification,
+			string(verificationRules), string(messageRules), string(routeRules), channel.UpdatedAt, channel.ID)
 		if err != nil {
 			return err
 		}
@@ -810,19 +953,24 @@ func (db *DB) DeleteMessageChannel(id string) error {
 
 func (db *DB) GetMessageChannel(id string) (*MessageChannel, error) {
 	channel := &MessageChannel{}
-	var verificationRules, routeRules string
+	var verificationRules, messageRules, routeRules string
 	if err := db.QueryRow(`SELECT id, COALESCE(identity_id, ''), name, all_devices, use_default_verification,
-		COALESCE(verification_rules, '[]'), COALESCE(route_rules, '[]'), created_at, updated_at
+		COALESCE(verification_rules, '[]'), COALESCE(message_rules, '[]'), COALESCE(route_rules, '[]'), created_at, updated_at
 		FROM message_channels WHERE id = ?`, id).Scan(
 		&channel.ID, &channel.IdentityID, &channel.Name, &channel.AllDevices, &channel.UseDefaultVerification,
-		&verificationRules, &routeRules, &channel.CreatedAt, &channel.UpdatedAt,
+		&verificationRules, &messageRules, &routeRules, &channel.CreatedAt, &channel.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal([]byte(verificationRules), &channel.VerificationRules); err != nil {
 		return nil, fmt.Errorf("decode verification rules for channel %s: %w", id, err)
 	}
-	channel.VerificationRules = EnsureDefaultVerificationRule(channel.VerificationRules)
+	if err := json.Unmarshal([]byte(messageRules), &channel.MessageRules); err != nil {
+		return nil, fmt.Errorf("decode message rules for channel %s: %w", id, err)
+	}
+	if len(channel.MessageRules) == 0 {
+		channel.MessageRules = LegacyMessageRules(channel.UseDefaultVerification, channel.VerificationRules)
+	}
 	if err := json.Unmarshal([]byte(routeRules), &channel.RouteRules); err != nil {
 		return nil, fmt.Errorf("decode route rules for channel %s: %w", id, err)
 	}
@@ -1001,6 +1149,8 @@ type MessageRecord struct {
 	ChannelID        string            `json:"channelId,omitempty"`
 	Title            string            `json:"title"`
 	Content          string            `json:"content"`
+	MessageType      string            `json:"messageType,omitempty"`
+	MessageRule      string            `json:"messageRule,omitempty"`
 	VerificationCode string            `json:"verificationCode,omitempty"`
 	VerificationRule string            `json:"verificationRule,omitempty"`
 	Popup            bool              `json:"popup"`
@@ -1049,9 +1199,13 @@ func (db *DB) CreateMessage(message *MessageRecord, targets []*Device) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`INSERT INTO messages (id, identity_id, channel_id, title, content, verification_code, route_rule, source, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, message.ID, message.IdentityID, nullableString(message.ChannelID), message.Title, message.Content,
-		nullableString(message.VerificationCode), nullableString(message.RouteRule), nullableString(message.Source), message.CreatedAt); err != nil {
+	if _, err := tx.Exec(`INSERT INTO messages
+		(id, identity_id, channel_id, title, content, message_type, message_rule, verification_code, verification_rule, popup, popup_type, route_rule, source, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		message.ID, message.IdentityID, nullableString(message.ChannelID), message.Title, message.Content,
+		nullableString(message.MessageType), nullableString(message.MessageRule), nullableString(message.VerificationCode),
+		nullableString(message.VerificationRule), message.Popup, nullableString(message.PopupType),
+		nullableString(message.RouteRule), nullableString(message.Source), message.CreatedAt); err != nil {
 		return err
 	}
 	message.Deliveries = make([]MessageDelivery, 0, len(targets))
@@ -1087,7 +1241,7 @@ func (db *DB) ListMessages(ownerID string, limit int) ([]*MessageRecord, error) 
 	if limit > 500 {
 		limit = 500
 	}
-	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
+	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.message_type, ''), COALESCE(m.message_rule, ''), COALESCE(m.verification_code, ''), COALESCE(m.verification_rule, ''), COALESCE(m.popup, FALSE), COALESCE(m.popup_type, ''),
 		COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m`
 	args := make([]any, 0, 2)
@@ -1113,7 +1267,8 @@ func (db *DB) listMessagesQuery(query string, args []any, limit int) ([]*Message
 	for rows.Next() {
 		message := &MessageRecord{}
 		if err := rows.Scan(&message.ID, &message.IdentityID, &message.ChannelID, &message.Title, &message.Content,
-			&message.VerificationCode, &message.RouteRule, &message.Source, &message.CreatedAt); err != nil {
+			&message.MessageType, &message.MessageRule, &message.VerificationCode, &message.VerificationRule,
+			&message.Popup, &message.PopupType, &message.RouteRule, &message.Source, &message.CreatedAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -1164,7 +1319,7 @@ func (db *DB) ListMessagesByChannel(ownerID, channelID string, limit int) ([]*Me
 	if limit > 500 {
 		limit = 500
 	}
-	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.verification_code, ''),
+	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content, COALESCE(m.message_type, ''), COALESCE(m.message_rule, ''), COALESCE(m.verification_code, ''), COALESCE(m.verification_rule, ''), COALESCE(m.popup, FALSE), COALESCE(m.popup_type, ''),
 		COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m WHERE m.channel_id = ?`
 	args := []any{channelID}
@@ -1189,7 +1344,7 @@ func (db *DB) ListMessagesForIdentity(identityID string, limit int) ([]*MessageR
 		limit = 500
 	}
 	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content,
-		COALESCE(m.verification_code, ''), COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
+		COALESCE(m.message_type, ''), COALESCE(m.message_rule, ''), COALESCE(m.verification_code, ''), COALESCE(m.verification_rule, ''), COALESCE(m.popup, FALSE), COALESCE(m.popup_type, ''), COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m`
 	args := make([]any, 0, 2)
 	identityID = strings.TrimSpace(identityID)
@@ -1214,7 +1369,7 @@ func (db *DB) ListMessagesByChannelForIdentity(identityID, channelID string, lim
 		limit = 500
 	}
 	query := `SELECT m.id, COALESCE(m.identity_id, ''), COALESCE(m.channel_id, ''), m.title, m.content,
-		COALESCE(m.verification_code, ''), COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
+		COALESCE(m.message_type, ''), COALESCE(m.message_rule, ''), COALESCE(m.verification_code, ''), COALESCE(m.verification_rule, ''), COALESCE(m.popup, FALSE), COALESCE(m.popup_type, ''), COALESCE(m.route_rule, ''), COALESCE(m.source, ''), m.created_at
 		FROM messages m WHERE m.channel_id = ?`
 	args := []any{channelID}
 	identityID = strings.TrimSpace(identityID)

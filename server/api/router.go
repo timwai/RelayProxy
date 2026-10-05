@@ -341,6 +341,7 @@ type messageChannelRequest struct {
 	Name                   string                         `json:"name"`
 	AllDevices             bool                           `json:"allDevices"`
 	DeviceIDs              []string                       `json:"deviceIds,omitempty"`
+	MessageRules           *[]repository.MessageRule      `json:"messageRules,omitempty"`
 	UseDefaultVerification *bool                          `json:"useDefaultVerification,omitempty"`
 	VerificationRules      *[]repository.VerificationRule `json:"verificationRules,omitempty"`
 	RouteRules             *[]repository.MessageRouteRule `json:"routeRules,omitempty"`
@@ -395,6 +396,7 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 	if existing != nil {
 		channel.ID = existing.ID
 		channel.IdentityID = existing.IdentityID
+		channel.MessageRules = append([]repository.MessageRule(nil), existing.MessageRules...)
 		channel.UseDefaultVerification = existing.UseDefaultVerification
 		channel.VerificationRules = append([]repository.VerificationRule(nil), existing.VerificationRules...)
 		channel.RouteRules = append([]repository.MessageRouteRule(nil), existing.RouteRules...)
@@ -433,6 +435,9 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load channel identity")
 		return nil, false
+	}
+	if body.MessageRules != nil {
+		channel.MessageRules = append([]repository.MessageRule(nil), (*body.MessageRules)...)
 	}
 	if body.UseDefaultVerification != nil {
 		channel.UseDefaultVerification = *body.UseDefaultVerification
@@ -473,24 +478,48 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 		}
 	}
 
-	channel.VerificationRules = repository.EnsureDefaultVerificationRule(channel.VerificationRules)
-	verificationRules, err := normalizeVerificationRules(channel.VerificationRules)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return nil, false
+	// messageRules is the canonical v2 model. Legacy verificationRules requests
+	// are still accepted and converted so existing API clients remain usable.
+	switch {
+	case body.MessageRules != nil:
+		messageRules, err := normalizeMessageRules(channel.MessageRules)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return nil, false
+		}
+		channel.MessageRules = messageRules
+	case body.VerificationRules != nil || existing == nil:
+		channel.VerificationRules = repository.EnsureDefaultVerificationRule(channel.VerificationRules)
+		verificationRules, err := normalizeVerificationRules(channel.VerificationRules)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return nil, false
+		}
+		channel.VerificationRules = verificationRules
+		channel.MessageRules = repository.LegacyMessageRules(channel.UseDefaultVerification, channel.VerificationRules)
+		messageRules, err := normalizeMessageRules(channel.MessageRules)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return nil, false
+		}
+		channel.MessageRules = messageRules
+	default:
+		messageRules, err := normalizeMessageRules(channel.MessageRules)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return nil, false
+		}
+		channel.MessageRules = messageRules
 	}
-	channel.VerificationRules = verificationRules
+	if enabled, ok := defaultMessageRuleEnabled(channel.MessageRules); ok {
+		channel.UseDefaultVerification = enabled
+	}
 	routeRules, err := normalizeRouteRules(channel.RouteRules, known)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return nil, false
 	}
 	channel.RouteRules = routeRules
-
-	if !channel.UseDefaultVerification && customVerificationRuleCount(channel.VerificationRules) == 0 {
-		writeError(w, http.StatusBadRequest, "enable default verification recognition or add at least one custom verification rule")
-		return nil, false
-	}
 	if channel.AllDevices {
 		channel.DeviceIDs = nil
 	}
@@ -657,8 +686,8 @@ func (r *Router) handleChannelPush(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	verification := messageutil.MatchVerificationCodeWithRules(
-		content, channel.UseDefaultVerification, messageutilVerificationRules(channel.VerificationRules),
+	classification := messageutil.MatchMessageRules(
+		content, messageutilMessageRules(channel.MessageRules),
 	)
 	message := &repository.MessageRecord{
 		IdentityID:       channel.IdentityID,
@@ -666,11 +695,18 @@ func (r *Router) handleChannelPush(w http.ResponseWriter, req *http.Request) {
 		Title:            title,
 		Content:          content,
 		Source:           source,
-		VerificationCode: verification.Code,
-		VerificationRule: verification.RuleName,
-		Popup:            verification.Popup,
-		PopupType:        verification.PopupType,
-		CreatedAt:        time.Now().UTC(),
+		MessageType:      classification.Type,
+		MessageRule:      classification.RuleName,
+		VerificationCode: classification.VerificationCode,
+		VerificationRule: func() string {
+			if classification.Type == messageutil.MessageTypeVerification {
+				return classification.RuleName
+			}
+			return ""
+		}(),
+		Popup:     classification.Popup,
+		PopupType: classification.Type,
+		CreatedAt: time.Now().UTC(),
 	}
 	if err := r.db.CreateMessage(message, targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist message")
@@ -737,6 +773,7 @@ func (r *Router) pushMessage(sess *session.DeviceSession, message *repository.Me
 	}
 	wire := protocol.PushMessage{
 		ID: message.ID, Title: message.Title, Content: message.Content,
+		MessageType: message.MessageType, MessageRule: message.MessageRule,
 		VerificationCode: message.VerificationCode, VerificationRule: message.VerificationRule,
 		Popup: message.Popup, PopupType: message.PopupType, Source: message.Source,
 		CreatedAt: message.CreatedAt.UnixMilli(),

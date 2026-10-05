@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	directtransport "relayproxy/internal/direct"
 	"relayproxy/internal/p2p/secure"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -18,11 +19,7 @@ import (
 
 const QUICALPN = "relayproxy-p2p-v1"
 
-type QUICOptions struct {
-	KeepAlivePeriod  time.Duration
-	MaxIdleTimeout   time.Duration
-	DisableKeepAlive bool
-}
+type QUICOptions = directtransport.QUICOptions
 
 // QUICSession owns the quic-go Transport that took over the punched UDP socket.
 // The embedded RelayProxy session keeps the existing stream/datagram interface.
@@ -35,21 +32,7 @@ type QUICSession struct {
 }
 
 func DirectQUICConfig(options ...QUICOptions) *quic.Config {
-	config := tunnel.DefaultQUICConfig()
-	config.KeepAlivePeriod = 10 * time.Second
-	config.MaxIdleTimeout = 120 * time.Second
-	if len(options) > 0 {
-		if options[0].DisableKeepAlive {
-			config.KeepAlivePeriod = 0
-		} else if options[0].KeepAlivePeriod > 0 {
-			config.KeepAlivePeriod = options[0].KeepAlivePeriod
-		}
-		if options[0].MaxIdleTimeout > 0 {
-			config.MaxIdleTimeout = options[0].MaxIdleTimeout
-		}
-	}
-	config.EnableDatagrams = true
-	return config
+	return directtransport.QUICConfig(options...)
 }
 
 func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, identity *secure.TLSIdentity, expectedPeerFingerprint string, options ...QUICOptions) (*QUICSession, error) {

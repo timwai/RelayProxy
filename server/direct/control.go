@@ -3,6 +3,7 @@ package direct
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
 	"strings"
@@ -198,12 +199,15 @@ func endpointSetChanged(left, right []protocol.PublicDirectEndpoint) bool {
 	if len(left) != len(right) {
 		return true
 	}
-	seen := make(map[string]bool, len(left))
+	seen := make(map[string]struct{}, len(left))
 	for _, endpoint := range left {
-		seen[endpoint.Protocol+"|"+endpoint.Address+"|"+endpoint.Source] = endpoint.Verified
+		seen[endpoint.Protocol+"|"+endpoint.Address+"|"+endpoint.DialAddress+"|"+endpoint.Source+"|"+
+			endpoint.CertFingerprint+"|"+fmt.Sprint(endpoint.Verified)] = struct{}{}
 	}
 	for _, endpoint := range right {
-		if !seen[endpoint.Protocol+"|"+endpoint.Address+"|"+endpoint.Source] || !endpoint.Verified {
+		key := endpoint.Protocol + "|" + endpoint.Address + "|" + endpoint.DialAddress + "|" + endpoint.Source + "|" +
+			endpoint.CertFingerprint + "|" + fmt.Sprint(endpoint.Verified)
+		if _, ok := seen[key]; !ok {
 			return true
 		}
 	}

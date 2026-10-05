@@ -144,8 +144,9 @@ type AgentConfig struct {
 	P2PPunchTimeout time.Duration
 	P2PKeepalive    time.Duration
 	P2PIdleTimeout  time.Duration
-	P2PMaxSessions  int
-	P2PFallback     *bool
+	P2PMaxSessions       int
+	P2PFallback          *bool
+	PublicDirectAdvertise string
 	AllowInternet   bool
 	AllowPrivateNet bool
 	AllowLoopback   bool     // Allow localhost/loopback for testing

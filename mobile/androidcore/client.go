@@ -128,8 +128,9 @@ type Client struct {
 	started          bool
 	closed           bool
 	powerConstrained bool
-	proxyP2P         *proxyp2p.Manager
-	proxyDialer      *agentclient.TunnelDialer
+	proxyP2P          *proxyp2p.Manager
+	proxyExitRevision uint64
+	proxyDialer       *agentclient.TunnelDialer
 	routingDialer    *routing.RoutingDialer
 	traffic          *traffic.Registry
 	clientApproved   atomic.Bool
@@ -810,7 +811,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 
 	transportCaps := []string{
 		"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL,
-		protocol.CapabilityRuntimeState,
+		protocol.CapabilityRuntimeState, protocol.CapabilityResourceInventoryPush,
 	}
 	if c.cfg.ClientEnabled {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyClientActive)
@@ -919,6 +920,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	c.status.ClientApproved = clientApproved
 	c.status.ProxyState = proxyState
 	c.status.ProxyError = proxyError
+	if accepted.ProxyExitRevision != 0 {
+		c.proxyExitRevision = accepted.ProxyExitRevision
+	}
 	if accepted.ProxyExits != nil {
 		c.status.ProxyExits = acceptedExits
 		c.status.SelectedExit = selectedExit
@@ -988,7 +992,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		defer workers.Done()
 		c.heartbeatLoop(ctx, ctrl, sess, accepted.HeartbeatSec)
 	}()
-	if exitRuntimeApproved || proxyP2PManager != nil {
+	// Every approved Android client accepts server-originated inventory streams,
+	// even when it is not acting as an Exit and proxy P2P is disabled.
+	if exitRuntimeApproved || clientRuntimeApproved || proxyP2PManager != nil {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
@@ -1055,6 +1061,28 @@ func (c *Client) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSe
 	return response, nil
 }
 
+func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.ProxyExit, revision uint64) {
+	refreshed := cloneProxyExits(exits)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed || c.manager.Session() != sess {
+		return
+	}
+	if revision != 0 && c.proxyExitRevision != 0 && revision < c.proxyExitRevision {
+		return
+	}
+	selected := effectiveProxyExit(c.cfg.DefaultExitID, refreshed)
+	proxyState, proxyError := proxySelectionStatus(c.cfg.DefaultExitID, refreshed)
+	c.status.ProxyExits = refreshed
+	c.status.SelectedExit = selected
+	c.status.ProxyState = proxyState
+	c.status.ProxyError = proxyError
+	if revision != 0 {
+		c.proxyExitRevision = revision
+	}
+	c.proxyDialer.SetDefaultExitID(selected)
+}
+
 func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, sess tunnel.TunnelSession, heartbeatSec int) {
 	if heartbeatSec <= 0 {
 		heartbeatSec = 15
@@ -1084,18 +1112,11 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 			c.mu.Lock()
 			if !c.closed && c.manager.Session() == sess {
 				c.status.LatencyMs = time.Since(start).Milliseconds()
-				if pong.ProxyExits != nil {
-					exits := cloneProxyExits(*pong.ProxyExits)
-					selected := effectiveProxyExit(c.cfg.DefaultExitID, exits)
-					proxyState, proxyError := proxySelectionStatus(c.cfg.DefaultExitID, exits)
-					c.status.ProxyExits = exits
-					c.status.SelectedExit = selected
-					c.status.ProxyState = proxyState
-					c.status.ProxyError = proxyError
-					c.proxyDialer.SetDefaultExitID(selected)
-				}
 			}
 			c.mu.Unlock()
+			if pong.ProxyExits != nil {
+				c.refreshProxyExits(sess, *pong.ProxyExits, pong.ProxyExitRevision)
+			}
 		}
 	}
 }
@@ -1136,6 +1157,14 @@ func (c *Client) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSe
 				var message protocol.P2PControlMessage
 				if err := protocol.ReadJSON(s, &message); err == nil {
 					p2pManager.HandleControl(message)
+				}
+				return
+			}
+			if header.Type == protocol.FrameTypeResourceInventory {
+				defer s.Close()
+				var inventory protocol.ResourceInventory
+				if err := protocol.ReadJSON(s, &inventory); err == nil && inventory.ProxyExits != nil {
+					c.refreshProxyExits(sess, *inventory.ProxyExits, inventory.ProxyExitRevision)
 				}
 				return
 			}

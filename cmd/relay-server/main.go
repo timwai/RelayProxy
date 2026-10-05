@@ -171,6 +171,7 @@ func main() {
 	}
 
 	var gw *gateway.Gateway
+	publicDirectEnabled := cfg.Direct.Enabled != nil && *cfg.Direct.Enabled
 	publicDirectTickets, err := serverdirect.NewTicketAuthority(serverInstanceID)
 	if err != nil {
 		log.Fatalf("[PublicDirect] Failed to initialize ticket authority: %v", err)
@@ -296,7 +297,9 @@ func main() {
 	if proxyP2PCoordinator != nil {
 		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)
 	}
-	router.SetPublicDirectControlHandler(publicDirectController.HandleControl)
+	if publicDirectEnabled {
+		router.SetPublicDirectControlHandler(publicDirectController.HandleControl)
+	}
 
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
 
@@ -378,8 +381,9 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
-			for i := range result {
-				endpoints := publicDirectRegistry.VerifiedEndpoints(result[i].DeviceID)
+			if publicDirectEnabled {
+				for i := range result {
+					endpoints := publicDirectRegistry.VerifiedEndpoints(result[i].DeviceID)
 				if len(endpoints) == 0 {
 					continue
 				}
@@ -398,10 +402,11 @@ func main() {
 				if err != nil {
 					return nil, err
 				}
-				result[i].Direct = &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
-					Available: true, Transport: "quic", Endpoints: endpoints,
-					Ticket: ticket, TicketExpiresAt: expiresAt,
-				}}
+					result[i].Direct = &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+						Available: true, Transport: "quic", Endpoints: endpoints,
+						Ticket: ticket, TicketExpiresAt: expiresAt,
+					}}
+				}
 			}
 			if serverExit != nil {
 				authorized, err := db.AuthorizeClientExit(clientID, protocol.ServerExitDeviceID)
@@ -445,9 +450,11 @@ func main() {
 			}
 			publicDirectController.InvalidateDevice(deviceID)
 		},
-		PublicDirectEnabled:      true,
+		PublicDirectEnabled:      publicDirectEnabled,
 		PublicDirectTicketIssuer: publicDirectTickets.Issuer(),
 		PublicDirectTicketKey:    publicDirectTickets.PublicKey(),
+		PublicDirectPortStart:    cfg.Direct.PortStart,
+		PublicDirectPortEnd:      cfg.Direct.PortEnd,
 		MaxConnections:           cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice:  cfg.Tunnel.MaxConnectionsPerDevice,
 		HeartbeatSec:             cfg.Tunnel.HeartbeatSec,

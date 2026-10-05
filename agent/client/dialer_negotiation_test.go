@@ -472,6 +472,33 @@ func TestDirectPathPolicyModes(t *testing.T) {
 			t.Fatalf("p2p_only cold selected=%+v ensure=%d", selected, ensure.Load())
 		}
 	})
+
+	t.Run("direct_only_cold", func(t *testing.T) {
+		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+		var ensure atomic.Int32
+		dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) { return SelectedSession{}, false }, func(string) { ensure.Add(1) })
+		dialer.ConfigureDirectPolicy("direct_only", true)
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != nil || selected.Path != "" || ensure.Load() != 1 {
+			t.Fatalf("direct_only cold selected=%+v ensure=%d", selected, ensure.Load())
+		}
+		if dialer.directFallbackEnabled() {
+			t.Fatal("direct_only unexpectedly enabled Relay fallback")
+		}
+	})
+
+	t.Run("p2p_only_rejects_public_direct", func(t *testing.T) {
+		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+		public := &namedSession{name: "public"}
+		dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+			return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true
+		}, nil)
+		dialer.ConfigureDirectPolicy("p2p_only", false)
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != nil || selected.Path != "" {
+			t.Fatalf("p2p_only accepted public direct session: %+v", selected)
+		}
+	})
 }
 
 func TestDirectFallbackCanBeDisabled(t *testing.T) {

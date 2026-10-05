@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -29,13 +30,27 @@ const (
 	mappingLeaseSeconds = uint32(3600)
 	maxDescriptionBytes = 1 << 20
 	maxSOAPBytes        = 1 << 20
+	serviceCacheTTL     = 5 * time.Minute
 )
 
 var ErrUnavailable = errors.New("UPnP IGD is unavailable")
 
+var serviceCache = struct {
+	sync.Mutex
+	networkKey string
+	expiresAt  time.Time
+	services   []service
+}{}
+
 type service struct {
 	serviceType string
 	controlURL  *url.URL
+	controlIP   netip.Addr
+}
+
+type soapArgument struct {
+	name  string
+	value string
 }
 
 type Mapping struct {
@@ -44,7 +59,8 @@ type Mapping struct {
 	internalPort   uint16
 	externalPort   uint16
 	leaseSeconds   uint32
-	done           chan struct{}
+	refreshCancel  context.CancelFunc
+	refreshWG      sync.WaitGroup
 	closeOnce      sync.Once
 }
 
@@ -91,39 +107,56 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 	if internalPort < 1 || internalPort > 65535 {
 		return nil, netip.AddrPort{}, fmt.Errorf("invalid UPnP internal UDP port %d", internalPort)
 	}
-	services, err := discoverServices(ctx)
+	services, cacheKey, fromCache, err := discoverServicesCached(ctx)
 	if err != nil {
 		return nil, netip.AddrPort{}, err
 	}
+
 	var lastErr error
-	for _, svc := range services {
-		internalIP, err := localIPv4For(ctx, svc.controlURL)
+	for attempt := 0; attempt < 2; attempt++ {
+		for _, svc := range services {
+			internalIP, err := localIPv4For(ctx, svc)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			externalIP, err := svc.externalIPAddress(ctx)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			externalPort, leaseSeconds, err := svc.addAvailableUDPMapping(ctx, internalIP.String(), uint16(internalPort))
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			m := &Mapping{
+				service:         svc,
+				internalClient:  internalIP.String(),
+				internalPort:    uint16(internalPort),
+				externalPort:    externalPort,
+				leaseSeconds:    leaseSeconds,
+			}
+			if leaseSeconds > 0 {
+				refreshCtx, cancel := context.WithCancel(context.Background())
+				m.refreshCancel = cancel
+				m.refreshWG.Add(1)
+				go m.refreshLoop(refreshCtx)
+			}
+			return m, netip.AddrPortFrom(externalIP, externalPort), nil
+		}
+
+		if !fromCache {
+			break
+		}
+		invalidateServiceCache(cacheKey)
+		services, err = discoverServices(ctx)
 		if err != nil {
 			lastErr = err
-			continue
+			break
 		}
-		externalIP, err := svc.externalIPAddress(ctx)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		externalPort, leaseSeconds, err := svc.addAvailableUDPMapping(ctx, internalIP.String(), uint16(internalPort))
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		m := &Mapping{
-			service:         svc,
-			internalClient:  internalIP.String(),
-			internalPort:    uint16(internalPort),
-			externalPort:    externalPort,
-			leaseSeconds:    leaseSeconds,
-			done:            make(chan struct{}),
-		}
-		if leaseSeconds > 0 {
-			go m.refreshLoop()
-		}
-		return m, netip.AddrPortFrom(externalIP, externalPort), nil
+		storeServicesInCache(cacheKey, services)
+		fromCache = false
 	}
 	if lastErr != nil {
 		return nil, netip.AddrPort{}, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
@@ -137,9 +170,10 @@ func (m *Mapping) Close() error {
 	}
 	var closeErr error
 	m.closeOnce.Do(func() {
-		if m.done != nil {
-			close(m.done)
+		if m.refreshCancel != nil {
+			m.refreshCancel()
 		}
+		m.refreshWG.Wait()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		closeErr = m.service.deletePortMapping(ctx, m.externalPort)
@@ -147,23 +181,136 @@ func (m *Mapping) Close() error {
 	return closeErr
 }
 
-func (m *Mapping) refreshLoop() {
-	interval := time.Duration(m.leaseSeconds) * time.Second / 2
+func mappingRefreshInterval(leaseSeconds uint32) time.Duration {
+	interval := time.Duration(leaseSeconds) * time.Second / 2
 	if interval < time.Minute {
 		interval = time.Minute
 	}
-	timer := time.NewTicker(interval)
+	return interval
+}
+
+func mappingRefreshRetryDelay(failures int) time.Duration {
+	switch {
+	case failures <= 1:
+		return 5 * time.Second
+	case failures == 2:
+		return 15 * time.Second
+	case failures == 3:
+		return 30 * time.Second
+	default:
+		return time.Minute
+	}
+}
+
+func (m *Mapping) refreshLoop(ctx context.Context) {
+	defer m.refreshWG.Done()
+	delay := mappingRefreshInterval(m.leaseSeconds)
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
+	failures := 0
 	for {
 		select {
-		case <-m.done:
+		case <-ctx.Done():
 			return
 		case <-timer.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_ = m.service.addPortMapping(ctx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds)
+			requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			err := m.service.addPortMapping(requestCtx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds)
 			cancel()
+			if ctx.Err() != nil {
+				return
+			}
+			if err != nil {
+				failures++
+				delay = mappingRefreshRetryDelay(failures)
+				log.Printf("[P2P][UPnP] refresh UDP mapping %d->%s:%d failed (retry in %s): %v",
+					m.externalPort, m.internalClient, m.internalPort, delay, err)
+			} else {
+				if failures > 0 {
+					log.Printf("[P2P][UPnP] UDP mapping %d->%s:%d refresh recovered",
+						m.externalPort, m.internalClient, m.internalPort)
+				}
+				failures = 0
+				delay = mappingRefreshInterval(m.leaseSeconds)
+			}
+			timer.Reset(delay)
 		}
 	}
+}
+
+func discoverServicesCached(ctx context.Context) ([]service, string, bool, error) {
+	key := localNetworkCacheKey()
+	if key != "" {
+		serviceCache.Lock()
+		if serviceCache.networkKey == key && time.Now().Before(serviceCache.expiresAt) && len(serviceCache.services) > 0 {
+			services := append([]service(nil), serviceCache.services...)
+			serviceCache.Unlock()
+			return services, key, true, nil
+		}
+		serviceCache.Unlock()
+	}
+
+	services, err := discoverServices(ctx)
+	if err != nil {
+		return nil, key, false, err
+	}
+	if key != "" {
+		storeServicesInCache(key, services)
+	}
+	return services, key, false, nil
+}
+
+func storeServicesInCache(key string, services []service) {
+	if key == "" || len(services) == 0 {
+		return
+	}
+	serviceCache.Lock()
+	serviceCache.networkKey = key
+	serviceCache.expiresAt = time.Now().Add(serviceCacheTTL)
+	serviceCache.services = append([]service(nil), services...)
+	serviceCache.Unlock()
+}
+
+func invalidateServiceCache(key string) {
+	if key == "" {
+		return
+	}
+	serviceCache.Lock()
+	if serviceCache.networkKey == key {
+		serviceCache.networkKey = ""
+		serviceCache.expiresAt = time.Time{}
+		serviceCache.services = nil
+	}
+	serviceCache.Unlock()
+}
+
+func localNetworkCacheKey() string {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	values := make([]string, 0)
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, _ := iface.Addrs()
+		for _, raw := range addrs {
+			ipText := raw.String()
+			if slash := strings.IndexByte(ipText, '/'); slash >= 0 {
+				ipText = ipText[:slash]
+			}
+			ip, err := netip.ParseAddr(ipText)
+			if err != nil {
+				continue
+			}
+			ip = ip.Unmap()
+			if ip.Is4() && (ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+				values = append(values, strconv.Itoa(iface.Index)+"="+ip.String())
+			}
+		}
+	}
+	sort.Strings(values)
+	return strings.Join(values, ",")
 }
 
 func discoverServices(ctx context.Context) ([]service, error) {
@@ -255,17 +402,11 @@ func fetchServices(ctx context.Context, rawLocation string) ([]service, error) {
 	if err != nil || location.Scheme != "http" || location.Hostname() == "" {
 		return nil, errors.New("invalid UPnP device description URL")
 	}
-	if err := requireLocalGatewayHost(ctx, location.Hostname()); err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, location.String(), nil)
+	locationIPs, err := resolveLocalGatewayHost(ctx, location.Hostname())
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return errors.New("UPnP description redirects are disabled")
-	}}
-	resp, err := client.Do(req)
+	resp, _, err := doPinnedRequest(ctx, http.MethodGet, location, locationIPs, "", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -284,11 +425,18 @@ func fetchServices(ctx context.Context, rawLocation string) ([]service, error) {
 
 	base := location
 	if strings.TrimSpace(root.URLBase) != "" {
-		if candidate, parseErr := url.Parse(strings.TrimSpace(root.URLBase)); parseErr == nil &&
-			candidate.Scheme == "http" && strings.EqualFold(candidate.Hostname(), location.Hostname()) {
-			base = candidate
+		if candidate, parseErr := url.Parse(strings.TrimSpace(root.URLBase)); parseErr == nil {
+			candidate = location.ResolveReference(candidate)
+			if candidate.Scheme == "http" && candidate.Hostname() != "" {
+				if candidateIPs, resolveErr := resolveLocalGatewayHost(ctx, candidate.Hostname()); resolveErr == nil {
+					if _, ok := commonLocalAddress(locationIPs, candidateIPs); ok {
+						base = candidate
+					}
+				}
+			}
 		}
 	}
+
 	var descriptions []serviceDescription
 	collectServiceDescriptions(root.Device, &descriptions)
 	result := make([]service, 0, len(descriptions))
@@ -302,16 +450,27 @@ func fetchServices(ctx context.Context, rawLocation string) ([]service, error) {
 			continue
 		}
 		control := base.ResolveReference(ref)
-		if control.Scheme != "http" || control.Hostname() == "" ||
-			!strings.EqualFold(control.Hostname(), location.Hostname()) {
+		if control.Scheme != "http" || control.Hostname() == "" {
 			continue
 		}
-		key := item.ServiceType + "|" + control.String()
+		controlIPs, resolveErr := resolveLocalGatewayHost(ctx, control.Hostname())
+		if resolveErr != nil {
+			continue
+		}
+		controlIP, ok := commonLocalAddress(locationIPs, controlIPs)
+		if !ok {
+			continue
+		}
+		key := item.ServiceType + "|" + control.String() + "|" + controlIP.String()
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
-		result = append(result, service{serviceType: strings.TrimSpace(item.ServiceType), controlURL: control})
+		result = append(result, service{
+			serviceType: strings.TrimSpace(item.ServiceType),
+			controlURL:  control,
+			controlIP:   controlIP,
+		})
 	}
 	if len(result) == 0 {
 		return nil, errors.New("UPnP IGD has no WAN connection service")
@@ -339,37 +498,117 @@ func serviceRank(serviceType string) int {
 	}
 }
 
-func requireLocalGatewayHost(ctx context.Context, host string) error {
+func resolveLocalGatewayHost(ctx context.Context, host string) ([]netip.Addr, error) {
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ip = ip.Unmap()
-		if ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-			return nil
+		if ip.Is4() && (ip.IsPrivate() || ip.IsLinkLocalUnicast()) {
+			return []netip.Addr{ip}, nil
 		}
-		return errors.New("UPnP device description is not on a local gateway address")
+		return nil, errors.New("UPnP endpoint is not on a local gateway address")
 	}
 	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	result := make([]netip.Addr, 0, len(addrs))
+	seen := map[netip.Addr]struct{}{}
 	for _, ip := range addrs {
 		ip = ip.Unmap()
-		if ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-			return nil
+		if !ip.Is4() || (!ip.IsPrivate() && !ip.IsLinkLocalUnicast()) {
+			continue
 		}
+		if _, ok := seen[ip]; ok {
+			continue
+		}
+		seen[ip] = struct{}{}
+		result = append(result, ip)
 	}
-	return errors.New("UPnP device hostname did not resolve to a local gateway address")
+	if len(result) == 0 {
+		return nil, errors.New("UPnP endpoint hostname did not resolve to a local gateway address")
+	}
+	return result, nil
 }
 
-func localIPv4For(ctx context.Context, controlURL *url.URL) (netip.Addr, error) {
-	if controlURL == nil {
-		return netip.Addr{}, errors.New("missing UPnP control URL")
+func commonLocalAddress(a, b []netip.Addr) (netip.Addr, bool) {
+	set := make(map[netip.Addr]struct{}, len(a))
+	for _, ip := range a {
+		set[ip.Unmap()] = struct{}{}
 	}
-	port := controlURL.Port()
+	for _, ip := range b {
+		ip = ip.Unmap()
+		if _, ok := set[ip]; ok {
+			return ip, true
+		}
+	}
+	return netip.Addr{}, false
+}
+
+func pinnedHTTPClient(target *url.URL, pinnedIP netip.Addr) *http.Client {
+	port := target.Port()
+	if port == "" {
+		port = "80"
+	}
+	transport := &http.Transport{
+		Proxy:             nil,
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			dialer := net.Dialer{}
+			return dialer.DialContext(ctx, "tcp4", net.JoinHostPort(pinnedIP.String(), port))
+		},
+	}
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errors.New("UPnP HTTP redirects are disabled")
+		},
+	}
+}
+
+func doPinnedRequest(
+	ctx context.Context,
+	method string,
+	target *url.URL,
+	pinnedIPs []netip.Addr,
+	body string,
+	headers map[string]string,
+) (*http.Response, netip.Addr, error) {
+	if target == nil || target.Scheme != "http" || target.Hostname() == "" || len(pinnedIPs) == 0 {
+		return nil, netip.Addr{}, errors.New("invalid pinned UPnP HTTP target")
+	}
+	var lastErr error
+	for _, pinnedIP := range pinnedIPs {
+		req, err := http.NewRequestWithContext(ctx, method, target.String(), strings.NewReader(body))
+		if err != nil {
+			return nil, netip.Addr{}, err
+		}
+		for key, value := range headers {
+			req.Header.Set(key, value)
+		}
+		resp, err := pinnedHTTPClient(target, pinnedIP).Do(req)
+		if err == nil {
+			return resp, pinnedIP, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, netip.Addr{}, ctx.Err()
+		}
+	}
+	if lastErr != nil {
+		return nil, netip.Addr{}, lastErr
+	}
+	return nil, netip.Addr{}, errors.New("UPnP HTTP request failed")
+}
+
+func localIPv4For(ctx context.Context, svc service) (netip.Addr, error) {
+	if svc.controlURL == nil || !svc.controlIP.IsValid() || !svc.controlIP.Is4() {
+		return netip.Addr{}, errors.New("missing UPnP control endpoint")
+	}
+	port := svc.controlURL.Port()
 	if port == "" {
 		port = "80"
 	}
 	d := net.Dialer{}
-	conn, err := d.DialContext(ctx, "udp4", net.JoinHostPort(controlURL.Hostname(), port))
+	conn, err := d.DialContext(ctx, "udp4", net.JoinHostPort(svc.controlIP.String(), port))
 	if err != nil {
 		return netip.Addr{}, err
 	}
@@ -413,7 +652,7 @@ func (s service) addAvailableUDPMapping(ctx context.Context, internalClient stri
 		if _, err := rand.Read(raw[:]); err != nil {
 			break
 		}
-		port := uint16(1024 + int(binary.BigEndian.Uint16(raw[:]))%(65535-1024))
+		port := uint16(1024 + int(binary.BigEndian.Uint16(raw[:]))%(65535-1024+1))
 		duplicate := false
 		for _, existing := range ports {
 			if existing == port {
@@ -434,10 +673,11 @@ func (s service) addAvailableUDPMapping(ctx context.Context, internalClient stri
 		if code == 725 {
 			if permanentErr := s.addPortMapping(ctx, externalPort, internalPort, internalClient, 0); permanentErr == nil {
 				return externalPort, 0, nil
+			} else {
+				return 0, 0, permanentErr
 			}
-			return 0, 0, err
 		}
-		if code == 724 || code != 718 {
+		if code != 718 {
 			return 0, 0, err
 		}
 	}
@@ -445,32 +685,32 @@ func (s service) addAvailableUDPMapping(ctx context.Context, internalClient stri
 }
 
 func (s service) addPortMapping(ctx context.Context, externalPort, internalPort uint16, internalClient string, lease uint32) error {
-	args := map[string]string{
-		"NewRemoteHost":             "",
-		"NewExternalPort":           strconv.Itoa(int(externalPort)),
-		"NewProtocol":               "UDP",
-		"NewInternalPort":           strconv.Itoa(int(internalPort)),
-		"NewInternalClient":         internalClient,
-		"NewEnabled":                "1",
-		"NewPortMappingDescription": "RelayProxy P2P",
-		"NewLeaseDuration":          strconv.FormatUint(uint64(lease), 10),
+	args := []soapArgument{
+		{name: "NewRemoteHost", value: ""},
+		{name: "NewExternalPort", value: strconv.Itoa(int(externalPort))},
+		{name: "NewProtocol", value: "UDP"},
+		{name: "NewInternalPort", value: strconv.Itoa(int(internalPort))},
+		{name: "NewInternalClient", value: internalClient},
+		{name: "NewEnabled", value: "1"},
+		{name: "NewPortMappingDescription", value: "RelayProxy P2P"},
+		{name: "NewLeaseDuration", value: strconv.FormatUint(uint64(lease), 10)},
 	}
 	_, err := s.soap(ctx, "AddPortMapping", args)
 	return err
 }
 
 func (s service) deletePortMapping(ctx context.Context, externalPort uint16) error {
-	args := map[string]string{
-		"NewRemoteHost":   "",
-		"NewExternalPort": strconv.Itoa(int(externalPort)),
-		"NewProtocol":     "UDP",
+	args := []soapArgument{
+		{name: "NewRemoteHost", value: ""},
+		{name: "NewExternalPort", value: strconv.Itoa(int(externalPort))},
+		{name: "NewProtocol", value: "UDP"},
 	}
 	_, err := s.soap(ctx, "DeletePortMapping", args)
 	return err
 }
 
-func (s service) soap(ctx context.Context, action string, args map[string]string) ([]byte, error) {
-	if s.controlURL == nil || s.serviceType == "" {
+func (s service) soap(ctx context.Context, action string, args []soapArgument) ([]byte, error) {
+	if s.controlURL == nil || s.serviceType == "" || !s.controlIP.IsValid() || !s.controlIP.Is4() {
 		return nil, errors.New("invalid UPnP service")
 	}
 	var payload strings.Builder
@@ -480,34 +720,25 @@ func (s service) soap(ctx context.Context, action string, args map[string]string
 	payload.WriteString(` xmlns:u="`)
 	payload.WriteString(xmlEscape(s.serviceType))
 	payload.WriteString(`">`)
-	if len(args) > 0 {
-		keys := make([]string, 0, len(args))
-		for key := range args {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
-			payload.WriteString("<")
-			payload.WriteString(key)
-			payload.WriteString(">")
-			payload.WriteString(xmlEscape(args[key]))
-			payload.WriteString("</")
-			payload.WriteString(key)
-			payload.WriteString(">")
-		}
+	for _, arg := range args {
+		payload.WriteString("<")
+		payload.WriteString(arg.name)
+		payload.WriteString(">")
+		payload.WriteString(xmlEscape(arg.value))
+		payload.WriteString("</")
+		payload.WriteString(arg.name)
+		payload.WriteString(">")
 	}
 	payload.WriteString(`</u:`)
 	payload.WriteString(action)
 	payload.WriteString(`></s:Body></s:Envelope>`)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.controlURL.String(), strings.NewReader(payload.String()))
-	if err != nil {
-		return nil, err
+	headers := map[string]string{
+		"Content-Type": `text/xml; charset="utf-8"`,
+		"SOAPAction":   `"` + s.serviceType + "#" + action + `"`,
+		"Connection":   "close",
 	}
-	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
-	req.Header.Set("SOAPAction", `"`+s.serviceType+"#"+action+`"`)
-	req.Header.Set("Connection", "close")
-	resp, err := http.DefaultClient.Do(req)
+	resp, _, err := doPinnedRequest(ctx, http.MethodPost, s.controlURL, []netip.Addr{s.controlIP}, payload.String(), headers)
 	if err != nil {
 		return nil, err
 	}

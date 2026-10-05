@@ -277,7 +277,6 @@ func TestAndroidProxyPathModeNormalization(t *testing.T) {
 	}
 }
 
-
 func TestAndroidMessageQueueDrainsOnce(t *testing.T) {
 	client := &Client{}
 	client.enqueueMessage(protocol.PushMessage{

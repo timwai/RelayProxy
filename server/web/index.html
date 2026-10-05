@@ -227,9 +227,9 @@
     </div>
 
     <section class="channel-rule-section">
-      <div class="channel-rule-heading"><div><h3>消息识别与弹窗</h3><p>先执行自定义规则，再执行默认规则；每条规则都可以决定是否弹窗以及弹窗类型。</p></div><button id="channel-verification-add" type="button" class="small-button">+ 自定义规则</button></div>
-      <label class="switch-row"><input id="channel-use-default-verification" type="checkbox" checked><span><strong>启用默认验证码规则</strong><small>默认规则本身也可以编辑，包括规则名称、关键词、正则、匹配距离和弹窗方式。</small></span></label>
-      <div id="channel-verification-rules" class="channel-rule-list"></div>
+      <div class="channel-rule-heading"><div><h3>消息规则</h3><p>按顺序匹配，第一条命中规则决定消息类型和是否弹窗；只有“验证码”类型才执行验证码提取。</p></div><button id="channel-message-rule-add" type="button" class="small-button">+ 消息规则</button></div>
+      <p class="channel-fallback-note">默认验证码规则位于最后，可编辑或停用。未命中任何消息规则时仍会保存并推送，但不会弹窗。</p>
+      <div id="channel-message-rules" class="channel-rule-list"></div>
     </section>
 
     <section class="channel-rule-section">

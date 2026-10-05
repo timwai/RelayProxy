@@ -11,6 +11,7 @@ import (
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
+
 type publicDirectClientManager = proxydirect.ClientManager
 
 func (a *Agent) initPublicDirectClient() {

@@ -593,7 +593,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
-	if cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" {
+	if publicDirectAllowedForMode(cfg.P2PMode) {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
 	}
 	if tunnel.SupportsDatagrams(sess) {
@@ -762,7 +762,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
 	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
 	stopPublicDirect := func() {}
-	publicDirectExitEnabled := allowExit && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only"
+	publicDirectExitEnabled := allowExit && publicDirectAllowedForMode(cfg.P2PMode)
 	if publicDirectExitEnabled {
 		stop, err := a.startPublicDirectExit(ctx, sess, accepted, handler, accepted.MaxConnections)
 		if err != nil {

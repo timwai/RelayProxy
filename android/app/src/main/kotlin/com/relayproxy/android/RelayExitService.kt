@@ -17,6 +17,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import com.relayproxy.core.androidcore.Androidcore
 import com.relayproxy.core.androidcore.Client
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
@@ -27,7 +28,10 @@ class RelayExitService : Service() {
         const val ACTION_STOP = "com.relayproxy.android.STOP"
         const val ACTION_RECONFIGURE = "com.relayproxy.android.RECONFIGURE"
         const val ACTION_CONNECT = "com.relayproxy.android.CONNECT"
+        const val ACTION_MESSAGE = "com.relayproxy.android.MESSAGE"
+        const val EXTRA_MESSAGE_JSON = "message_json"
         private const val CHANNEL_ID = "relayproxy_exit"
+        private const val MESSAGE_CHANNEL_ID = "relayproxy_messages"
         private const val NOTIFICATION_ID = 1001
 
         private const val UI_REFRESH_MS = 1_000L
@@ -102,6 +106,7 @@ class RelayExitService : Service() {
             core?.let {
                 status = runCatching { decorateStatus(it.statusJSON()) }
                     .getOrElse { errorStatus(it.message ?: "读取状态失败") }
+                drainMessages(it)
             }
             updateNotificationIfChanged()
             val delay = nextRefreshDelay()
@@ -442,6 +447,65 @@ class RelayExitService : Service() {
                 NotificationManager.IMPORTANCE_LOW,
             )
         )
+        manager.createNotificationChannel(
+            NotificationChannel(
+                MESSAGE_CHANNEL_ID,
+                "RelayProxy 消息提醒",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "按服务端消息规则显示验证码、普通消息和重要提醒"
+            }
+        )
+    }
+
+    private fun drainMessages(client: Client) {
+        val raw = runCatching { client.popMessagesJSON() }.getOrDefault("[]")
+        val messages = runCatching { JSONArray(raw) }.getOrNull() ?: return
+        for (index in 0 until messages.length()) {
+            val message = messages.optJSONObject(index) ?: continue
+            if (!message.optBoolean("popup", false)) continue
+            if (uiVisible) {
+                sendBroadcast(
+                    Intent(ACTION_MESSAGE)
+                        .setPackage(packageName)
+                        .putExtra(EXTRA_MESSAGE_JSON, message.toString())
+                )
+            } else {
+                showMessageNotification(message)
+            }
+        }
+    }
+
+    private fun showMessageNotification(message: JSONObject) {
+        val raw = message.toString()
+        val popupType = message.optString("popupType", "verification_code")
+        val title = message.optString("title", "RelayProxy 消息").ifBlank { "RelayProxy 消息" }
+        val content = message.optString("content", "")
+        val code = message.optString("verificationCode", "")
+        val displayTitle = if (popupType == "important") "重要提醒 · $title" else title
+        val displayText = when (popupType) {
+            "verification_code" -> if (code.isNotBlank()) "验证码 $code · $content" else content
+            else -> content
+        }.ifBlank { "收到一条新消息" }
+
+        val openApp = PendingIntent.getActivity(
+            this,
+            message.optString("id", raw).hashCode(),
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                .putExtra(EXTRA_MESSAGE_JSON, raw),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = Notification.Builder(this, MESSAGE_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_relayproxy)
+            .setContentTitle(displayTitle)
+            .setContentText(displayText)
+            .setStyle(Notification.BigTextStyle().bigText(displayText))
+            .setContentIntent(openApp)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java)
+            .notify(20_000 + (message.optString("id", raw).hashCode() and 0x3fff), notification)
     }
 
     private fun buildNotification(text: String): Notification {

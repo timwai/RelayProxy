@@ -112,3 +112,18 @@ func TestClearPublicDirectStateDoesNotClearNewerRelayGeneration(t *testing.T) {
 		t.Fatal("stale relay cleanup modified the current relay generation")
 	}
 }
+
+func TestPublicDirectAllowedForMode(t *testing.T) {
+	tests := map[string]bool{
+		"":            true,
+		"auto":        true,
+		"direct_only": true,
+		"p2p_only":    false,
+		"relay_only":  false,
+	}
+	for mode, want := range tests {
+		if got := publicDirectAllowedForMode(mode); got != want {
+			t.Fatalf("mode %q public direct allowed=%t, want %t", mode, got, want)
+		}
+	}
+}

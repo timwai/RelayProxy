@@ -48,12 +48,13 @@ func TestVerifierPinsExitCertificateAndChallenge(t *testing.T) {
 	listener, fingerprint, _ := startProbeListener(t)
 	registry := NewRegistry()
 	now := time.Now()
+	const advertised = "exit.example.com:35820"
 	registry.records["exit"] = map[string]EndpointRecord{
-		listener.Addr(): {
+		advertised: {
 			DeviceID: "exit", SessionID: "session-1", CertFingerprint: fingerprint,
 			Endpoint: protocol.PublicDirectEndpoint{
 				Protocol: protocol.PublicDirectEndpointProtocolUDP,
-				Address:  listener.Addr(),
+				Address:  advertised,
 				Source:   protocol.PublicDirectEndpointManual,
 			},
 			State: StateUnknown, RegisteredAt: now,
@@ -63,14 +64,18 @@ func TestVerifierPinsExitCertificateAndChallenge(t *testing.T) {
 		Registry: registry, Timeout: 2 * time.Second, TTL: time.Minute,
 		resolve: func(context.Context, string) (string, error) { return listener.Addr(), nil },
 	}
-	if err := verifier.Verify(context.Background(), "exit", "session-1", listener.Addr()); err != nil {
+	if err := verifier.Verify(context.Background(), "exit", "session-1", advertised); err != nil {
 		t.Fatal(err)
 	}
-	record, ok := registry.Lookup("exit", "session-1", listener.Addr())
+	record, ok := registry.Lookup("exit", "session-1", advertised)
 	if !ok || record.State != StateVerified || !record.Endpoint.Verified {
 		t.Fatalf("verified record=%+v ok=%v", record, ok)
 	}
-	if got := registry.VerifiedEndpoints("exit"); len(got) != 1 || got[0].Address != listener.Addr() {
+	if record.Endpoint.Address != advertised || record.Endpoint.DialAddress != listener.Addr() {
+		t.Fatalf("verified endpoint did not bind resolved dial target: %+v", record.Endpoint)
+	}
+	got := registry.VerifiedEndpoints("exit")
+	if len(got) != 1 || got[0].Address != advertised || got[0].DialAddress != listener.Addr() {
 		t.Fatalf("published endpoints=%+v", got)
 	}
 }

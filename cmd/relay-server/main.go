@@ -21,6 +21,7 @@ import (
 	agentexit "relayproxy/agent/exit"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/config"
+	internaldirect "relayproxy/internal/direct"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
 	serverdirect "relayproxy/server/direct"
@@ -173,6 +174,20 @@ func main() {
 	var gw *gateway.Gateway
 	publicDirectRegistry := serverdirect.NewRegistry()
 	publicDirectVerifier := &serverdirect.Verifier{Registry: publicDirectRegistry}
+	publicDirectTicketSigner, err := internaldirect.GenerateTicketSigner(internaldirect.DefaultAccessTicketTTL)
+	if err != nil {
+		log.Fatalf("[PublicDirect] Failed to initialize ticket signer: %v", err)
+	}
+	publicDirectTicketIssuer := &serverdirect.TicketIssuer{
+		Registry: publicDirectRegistry,
+		Signer:   publicDirectTicketSigner,
+		Authorize: func(clientDeviceID, exitDeviceID string) (serverdirect.TicketAuthorizationContext, bool, error) {
+			context, allowed, err := db.PublicDirectAuthorizationContext(clientDeviceID, exitDeviceID)
+			return serverdirect.TicketAuthorizationContext{
+				PolicyRevision: context.PolicyRevision, AuthorizationRevision: context.AuthorizationRevision,
+			}, allowed, err
+		},
+	}
 	publicDirectController := serverdirect.NewController(context.Background(), publicDirectRegistry, publicDirectVerifier, func(string) {
 		if gw != nil {
 			gw.RefreshProxyExitInventories()
@@ -293,6 +308,7 @@ func main() {
 		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)
 	}
 	router.SetPublicDirectControlHandler(publicDirectController.HandleControl)
+	router.SetPublicDirectTicketHandler(publicDirectTicketIssuer.HandleControl)
 
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
 
@@ -376,11 +392,12 @@ func main() {
 			}
 			for i := range result {
 				endpoints := publicDirectRegistry.VerifiedEndpoints(result[i].DeviceID)
-				if len(endpoints) == 0 {
+				fingerprint := publicDirectRegistry.VerifiedCertificateFingerprint(result[i].DeviceID)
+				if len(endpoints) == 0 || fingerprint == "" {
 					continue
 				}
 				result[i].Direct = &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
-					Available: true, Transport: "quic", Endpoints: endpoints,
+					Available: true, Transport: "quic", CertFingerprint: fingerprint, Endpoints: endpoints,
 				}}
 			}
 			if serverExit != nil {
@@ -425,8 +442,9 @@ func main() {
 			}
 			publicDirectController.InvalidateDevice(deviceID)
 		},
-		PublicDirectEnabled:     true,
-		MaxConnections:          cfg.Tunnel.MaxConnections,
+		PublicDirectEnabled:         true,
+		PublicDirectTicketVerifyKey: publicDirectTicketIssuer.PublicKey(),
+		MaxConnections:              cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
 		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,
 		RendezvousAddress:       rendezvousAddress,

@@ -53,8 +53,9 @@ type ProxyExit struct {
 	DeviceID            string `json:"deviceId"`
 	Name                string `json:"name"`
 	IdentityName        string `json:"identityName,omitempty"`
-	AuthorizationSource string `json:"authorizationSource,omitempty"`
-	Online              bool   `json:"online"`
+	AuthorizationSource    string                 `json:"authorizationSource,omitempty"`
+	Online                 bool                   `json:"online"`
+	PublicDirectEndpoints  []PublicDirectEndpoint `json:"publicDirectEndpoints,omitempty"`
 }
 
 type DeviceHello struct {

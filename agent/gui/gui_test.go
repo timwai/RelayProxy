@@ -163,6 +163,16 @@ func TestDesktopPopupCompatibility(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "typed normal message popup",
+			message: app.Message{Content: "hello", MessageType: "message", Popup: true},
+			want:    true,
+		},
+		{
+			name:    "typed normal message explicitly disabled",
+			message: app.Message{Content: "hello", MessageType: "message", Popup: false},
+			want:    false,
+		},
+		{
 			name:    "important popup",
 			message: app.Message{Content: "urgent", PopupType: "important", Popup: true},
 			want:    true,
@@ -185,6 +195,9 @@ func TestDesktopPopupAssetSupportsAllMessageTypes(t *testing.T) {
 	page := string(data)
 	for _, want := range []string{
 		"window.enqueueMessage",
+		"window.__relayPendingMessages",
+		"window.relayMessagePopupReady",
+		"message.messageType",
 		"verification_code",
 		"important",
 		"MESSAGE",

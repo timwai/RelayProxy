@@ -384,24 +384,24 @@ func main() {
 			if publicDirectEnabled {
 				for i := range result {
 					endpoints := publicDirectRegistry.VerifiedEndpoints(result[i].DeviceID)
-				if len(endpoints) == 0 {
-					continue
-				}
-				authorization, err := db.PublicDirectAuthorization(clientID, result[i].DeviceID)
-				if err != nil {
-					return nil, err
-				}
-				if !authorization.Allowed {
-					continue
-				}
-				ticket, expiresAt, err := publicDirectTickets.Issue(serverdirect.TicketIssue{
-					ClientDeviceID: clientID, ExitDeviceID: result[i].DeviceID,
-					PolicyRevision:        authorization.PolicyRevision,
-					AuthorizationRevision: authorization.AuthorizationRevision,
-				})
-				if err != nil {
-					return nil, err
-				}
+					if len(endpoints) == 0 {
+						continue
+					}
+					authorization, err := db.PublicDirectAuthorization(clientID, result[i].DeviceID)
+					if err != nil {
+						return nil, err
+					}
+					if !authorization.Allowed {
+						continue
+					}
+					ticket, expiresAt, err := publicDirectTickets.Issue(serverdirect.TicketIssue{
+						ClientDeviceID: clientID, ExitDeviceID: result[i].DeviceID,
+						PolicyRevision:        authorization.PolicyRevision,
+						AuthorizationRevision: authorization.AuthorizationRevision,
+					})
+					if err != nil {
+						return nil, err
+					}
 					result[i].Direct = &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
 						Available: true, Transport: "quic", Endpoints: endpoints,
 						Ticket: ticket, TicketExpiresAt: expiresAt,

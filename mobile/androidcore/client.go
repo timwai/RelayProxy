@@ -688,6 +688,9 @@ func (c *Client) PopMessagesJSON() string {
 	messages := append([]protocol.PushMessage(nil), c.messages...)
 	c.messages = nil
 	c.mu.Unlock()
+	if len(messages) == 0 {
+		return "[]"
+	}
 	data, err := json.Marshal(messages)
 	if err != nil {
 		return "[]"

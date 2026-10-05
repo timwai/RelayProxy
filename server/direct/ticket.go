@@ -17,10 +17,13 @@ type TicketAuthorizationContext struct {
 
 type TicketAuthorizeFunc func(clientDeviceID, exitDeviceID string) (TicketAuthorizationContext, bool, error)
 
+type TicketAuthorizationSyncFunc func(context.Context, string, protocol.PublicDirectAuthorizationUpdate) error
+
 type TicketIssuer struct {
 	Registry  *Registry
 	Signer    *internaldirect.TicketSigner
 	Authorize TicketAuthorizeFunc
+	Sync      TicketAuthorizationSyncFunc
 }
 
 func (i *TicketIssuer) PublicKey() []byte {
@@ -31,13 +34,12 @@ func (i *TicketIssuer) PublicKey() []byte {
 }
 
 func (i *TicketIssuer) HandleControl(ctx context.Context, stream tunnel.TunnelStream, dev *session.DeviceSession) {
-	_ = ctx
 	if stream == nil {
 		return
 	}
 	defer stream.Close()
 
-	if i == nil || i.Registry == nil || i.Signer == nil || i.Authorize == nil ||
+	if i == nil || i.Registry == nil || i.Signer == nil || i.Authorize == nil || i.Sync == nil ||
 		dev == nil || strings.TrimSpace(dev.DeviceID) == "" ||
 		!containsValue(dev.Grants, protocol.CapabilityProxyClient) {
 		_ = writeTicketError(stream, protocol.ErrCodeAccessDenied, "public direct ticket issuance is unavailable")
@@ -67,6 +69,16 @@ func (i *TicketIssuer) HandleControl(ctx context.Context, stream tunnel.TunnelSt
 	}
 	if !allowed {
 		_ = writeTicketError(stream, protocol.ErrCodeAccessDenied, "public direct access is not authorized")
+		return
+	}
+	if err := i.Sync(ctx, request.ExitDeviceID, protocol.PublicDirectAuthorizationUpdate{
+		ClientDeviceID:        dev.DeviceID,
+		ExitDeviceID:          request.ExitDeviceID,
+		PolicyRevision:        authorization.PolicyRevision,
+		AuthorizationRevision: authorization.AuthorizationRevision,
+		Authorized:            true,
+	}); err != nil {
+		_ = writeTicketError(stream, protocol.ErrCodeAccessDenied, "public direct authorization state is not synchronized")
 		return
 	}
 

@@ -10,10 +10,10 @@ import (
 )
 
 type fakeProxyExitInventoryStore struct {
-	devices       []*repository.Device
-	ownerDevices  map[string][]*repository.Device
-	authorized    map[string]bool
-	identities    map[string]*repository.DeviceIdentitySummary
+	devices      []*repository.Device
+	ownerDevices map[string][]*repository.Device
+	authorized   map[string]bool
+	identities   map[string]*repository.DeviceIdentitySummary
 }
 
 func (f *fakeProxyExitInventoryStore) ListDevices() ([]*repository.Device, error) {
@@ -72,7 +72,6 @@ func TestRefreshRDPTargetOnlineStateUsesAuthenticatedHostSessions(t *testing.T) 
 		t.Fatalf("live RDP target state = %+v", targets)
 	}
 }
-
 
 func TestListAuthorizedProxyExitInventoryKeepsOfflineAuthorizedExits(t *testing.T) {
 	store := &fakeProxyExitInventoryStore{

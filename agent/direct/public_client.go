@@ -60,7 +60,7 @@ func Dial(ctx context.Context, config DialConfig) (tunnel.TunnelSession, error) 
 	if err := protocol.ReadJSON(stream, &response); err != nil {
 		_ = stream.Close()
 		_ = session.Close()
-		return nil, err
+		return nil, protocol.NewRelayError(protocol.ErrCodeAuthFailed, "public direct authentication failed")
 	}
 	_ = stream.Close()
 	if !response.Success {

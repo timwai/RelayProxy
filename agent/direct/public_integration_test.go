@@ -71,7 +71,7 @@ func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.C
 	}
 	listener, err := direct.Listen(direct.ListenerConfig{
 		ListenAddress: "127.0.0.1:0",
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{identity.Certificate}},
+		TLSConfig:     &tls.Config{Certificates: []tls.Certificate{identity.Certificate}},
 		Authenticator: authenticator,
 	})
 	if err != nil {

@@ -23,6 +23,7 @@ import (
 	"relayproxy/internal/config"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
+	serverdirect "relayproxy/server/direct"
 	"relayproxy/server/gateway"
 	serverp2p "relayproxy/server/p2p"
 	serverrdp "relayproxy/server/rdp"
@@ -170,6 +171,16 @@ func main() {
 	}
 
 	var gw *gateway.Gateway
+	publicDirectCoordinator := serverdirect.NewCoordinator(
+		serverdirect.NewRegistry(5*time.Minute),
+		serverdirect.NewVerifier(5*time.Second),
+		func(string) {
+			if gw != nil {
+				gw.RefreshProxyExitInventories()
+			}
+		},
+	)
+	defer publicDirectCoordinator.Close()
 
 	invalidateIdentitySessions := func(identityID string) []string {
 		deviceIDs := sessionMgr.InvalidateIdentity(identityID)
@@ -178,6 +189,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectCoordinator.RevokeDevice(deviceID)
 		}
 		return deviceIDs
 	}
@@ -282,6 +294,7 @@ func main() {
 	if proxyP2PCoordinator != nil {
 		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)
 	}
+	router.SetPublicDirectControlHandler(publicDirectCoordinator.HandleControl)
 
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
 
@@ -363,6 +376,9 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
+			for i := range result {
+				result[i].PublicDirectEndpoints = publicDirectCoordinator.VerifiedEndpoints(result[i].DeviceID)
+			}
 			if serverExit != nil {
 				authorized, err := db.AuthorizeClientExit(clientID, protocol.ServerExitDeviceID)
 				if err != nil {
@@ -400,6 +416,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.CloseDevice(deviceID)
 			}
+			publicDirectCoordinator.RevokeDevice(deviceID)
 		},
 		MaxConnections:          cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
@@ -457,6 +474,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectCoordinator.RevokeDevice(deviceID)
 			gw.RefreshProxyExitInventories()
 			ingress.Reload()
 		}),
@@ -483,6 +501,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectCoordinator.RevokeDevice(deviceID)
 			gw.RefreshProxyExitInventories()
 			ingress.CloseDevice(deviceID)
 		}),

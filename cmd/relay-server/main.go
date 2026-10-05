@@ -174,6 +174,7 @@ func main() {
 	var gw *gateway.Gateway
 	publicDirectRegistry := serverdirect.NewRegistry()
 	publicDirectVerifier := &serverdirect.Verifier{Registry: publicDirectRegistry}
+	publicDirectAuthorizationSync := &serverdirect.AuthorizationSyncer{Sessions: sessionMgr}
 	publicDirectTicketSigner, err := internaldirect.GenerateTicketSigner(internaldirect.DefaultAccessTicketTTL)
 	if err != nil {
 		log.Fatalf("[PublicDirect] Failed to initialize ticket signer: %v", err)
@@ -187,6 +188,7 @@ func main() {
 				PolicyRevision: context.PolicyRevision, AuthorizationRevision: context.AuthorizationRevision,
 			}, allowed, err
 		},
+		Sync: publicDirectAuthorizationSync.Push,
 	}
 	publicDirectController := serverdirect.NewController(context.Background(), publicDirectRegistry, publicDirectVerifier, func(string) {
 		if gw != nil {
@@ -195,7 +197,26 @@ func main() {
 	})
 	defer publicDirectController.Close()
 
+	revokeIdentityPublicDirect := func(identityID string) {
+		deviceIDs, err := db.DeviceIDsForIdentity(identityID)
+		if err != nil {
+			log.Printf("[PublicDirect] Failed to enumerate identity devices for revocation identity=%s: %v", identityID, err)
+			for _, exitSession := range sessionMgr.GetExits() {
+				if exitSession != nil && slices.Contains(exitSession.Capabilities, protocol.CapabilityProxyPublicDirect) {
+					sessionMgr.Unregister(exitSession.DeviceID)
+				}
+			}
+			return
+		}
+		revokeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		for _, deviceID := range deviceIDs {
+			publicDirectAuthorizationSync.RevokeClientFromAllExits(revokeCtx, deviceID)
+		}
+	}
+
 	invalidateIdentitySessions := func(identityID string) []string {
+		revokeIdentityPublicDirect(identityID)
 		deviceIDs := sessionMgr.InvalidateIdentity(identityID)
 		for _, deviceID := range deviceIDs {
 			rdpCoordinator.CloseDevice(deviceID)
@@ -496,6 +517,9 @@ func main() {
 			return api.ServerExitRuntimeStatus{Enabled: true, ActiveStreams: serverExit.ActiveStreams()}
 		}),
 		api.WithDeviceAuthorizationChanged(func(deviceID string) {
+			revokeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			publicDirectAuthorizationSync.RevokeClientFromAllExits(revokeCtx, deviceID)
+			cancel()
 			rdpCoordinator.CloseDevice(deviceID)
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
@@ -522,6 +546,9 @@ func main() {
 			ingress.Reload()
 		}),
 		api.WithDeviceRevoked(func(deviceID string) {
+			revokeCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			publicDirectAuthorizationSync.RevokeClientFromAllExits(revokeCtx, deviceID)
+			cancel()
 			rdpCoordinator.CloseDevice(deviceID)
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)

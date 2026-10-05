@@ -50,9 +50,10 @@ type RDPTarget struct {
 // ProxyExit is the client-visible, online exit inventory. Authorization is
 // checked again by the gateway for every opened stream.
 type ProxyPublicDirectPath struct {
-	Available bool                   `json:"available"`
-	Transport string                 `json:"transport,omitempty"`
-	Endpoints []PublicDirectEndpoint `json:"endpoints,omitempty"`
+	Available       bool                   `json:"available"`
+	Transport       string                 `json:"transport,omitempty"`
+	CertFingerprint string                 `json:"certFingerprint,omitempty"`
+	Endpoints       []PublicDirectEndpoint `json:"endpoints,omitempty"`
 }
 
 type ProxyDirectPaths struct {
@@ -111,8 +112,9 @@ type DeviceAccepted struct {
 	P2PLeaseSec           int          `json:"p2pLeaseSec,omitempty"`
 	P2PPortStart          int          `json:"p2pPortStart,omitempty"`
 	P2PPortEnd            int          `json:"p2pPortEnd,omitempty"`
-	P2PUPnPEnabled        bool         `json:"p2pUPnPEnabled,omitempty"`
-	SessionID             string       `json:"sessionId,omitempty"`
+	P2PUPnPEnabled              bool         `json:"p2pUPnPEnabled,omitempty"`
+	PublicDirectTicketVerifyKey []byte       `json:"publicDirectTicketVerifyKey,omitempty"`
+	SessionID                   string       `json:"sessionId,omitempty"`
 	HeartbeatSec          int          `json:"heartbeat,omitempty"`
 	MaxConnections        int          `json:"maxConnections,omitempty"`
 	ServerTime            int64        `json:"serverTime"`

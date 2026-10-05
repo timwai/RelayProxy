@@ -371,7 +371,7 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 
 	relay := d.relayFallbackSession(sess)
 	alternate := d.prepareDirectFallback(exitNodeID, selected, err, relay)
-	if alternate.Session != nil {
+	if alternate.Session != nil && attemptCtx.Err() == nil {
 		allowAlternateResume := tunnel.PeerSupportsStreamResume(alternate.Session)
 		conn, alternateErr := d.dialTCPOnSession(
 			attemptCtx, alternate.Session, exitNodeID, host, port,
@@ -563,7 +563,7 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 
 	relay := d.relayFallbackSession(sess)
 	alternate := d.prepareDirectFallback(exitNodeID, selected, err, relay)
-	if alternate.Session != nil {
+	if alternate.Session != nil && attemptCtx.Err() == nil {
 		if !opts.DatagramRequired || tunnel.PeerSupportsDatagrams(alternate.Session) {
 			conn, alternateErr := d.dialUDPOnSession(attemptCtx, alternate.Session, exitNodeID, host, port, opts)
 			if alternateErr == nil || !retryableDirectUDPHandshakeError(ctx, alternateErr) {

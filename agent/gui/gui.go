@@ -96,7 +96,7 @@ func messagePopupType(message app.Message) string {
 }
 
 func shouldPopupMessage(message app.Message) bool {
-	if messagePopupType(message) == "" {
+	if strings.TrimSpace(message.MessageType) == "" && strings.TrimSpace(message.PopupType) == "" {
 		// Legacy servers only emitted verificationCode and had no popup metadata.
 		// A mixed-version sender may still provide popup=true without a type;
 		// treat that as an ordinary popup instead of silently dropping it.

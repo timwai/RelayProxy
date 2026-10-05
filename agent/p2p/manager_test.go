@@ -514,3 +514,44 @@ func TestFailReadyForExitRemovesBrokenPathAndStartsCooldown(t *testing.T) {
 		t.Fatalf("unexpected failed-path status: %#v ok=%v", status, ok)
 	}
 }
+
+
+func TestReadyQueueFullRemovesSessionAndClosesServerLease(t *testing.T) {
+	closed := make(chan protocol.P2PControlMessage, 1)
+	manager := NewManager(context.Background(), func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		if message.Type == protocol.P2PControlClose {
+			closed <- message
+		}
+		return protocol.P2PControlMessage{Type: protocol.P2PControlLeaseAck, SessionID: message.SessionID}, nil
+	}, nil, time.Minute)
+	defer manager.Close()
+	manager.ready = make(chan *Session)
+
+	token := []byte("0123456789abcdef0123456789abcdef")
+	item := manager.newSession(502, "client", "exit", token, time.Now().Add(time.Minute).UnixMilli())
+	if item == nil {
+		t.Fatal("failed to create session")
+	}
+	item.mu.Lock()
+	item.clientRole = true
+	item.state = StateReady
+	item.mu.Unlock()
+
+	if item.enqueueReady(nil) {
+		t.Fatal("session unexpectedly entered a full ready queue")
+	}
+	if _, ok := manager.Session(item.ID); ok {
+		t.Fatal("ready-queue overflow left the P2P session registered")
+	}
+	if state := item.State(); state != StateClosed {
+		t.Fatalf("ready-queue overflow state=%s, want %s", state, StateClosed)
+	}
+	select {
+	case message := <-closed:
+		if message.SessionID != item.ID || message.Reason != "ready_queue_full" {
+			t.Fatalf("unexpected close message: %#v", message)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("server P2P close was not sent for ready-queue overflow")
+	}
+}

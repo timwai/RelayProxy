@@ -188,3 +188,115 @@ func TestClientManagerRacesAllVerifiedEndpointsBeforeAuth(t *testing.T) {
 		t.Fatalf("path status=%+v ok=%v", status, ok)
 	}
 }
+
+
+func TestClientManagerIgnoresStaleTicketAttemptResults(t *testing.T) {
+	fingerprint := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	inventory := func(ticket string) []protocol.ProxyExit {
+		return []protocol.ProxyExit{{
+			DeviceID: "exit", Online: true,
+			Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+				Available:       true,
+				Transport:       "quic",
+				Ticket:          []byte(ticket),
+				TicketExpiresAt: time.Now().Add(time.Minute).Unix(),
+				Endpoints: []protocol.PublicDirectEndpoint{{
+					Protocol:        protocol.PublicDirectEndpointProtocolUDP,
+					Address:         "203.0.113.20:35820",
+					Source:          protocol.PublicDirectEndpointObserved,
+					Verified:        true,
+					CertFingerprint: fingerprint,
+				}},
+			}},
+		}}
+	}
+
+	for _, tc := range []struct {
+		name     string
+		firstErr error
+	}{
+		{name: "stale success"},
+		{name: "stale failure", firstErr: errors.New("old ticket dial failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			oldSession := newClientManagerTestSession()
+			newSession := newClientManagerTestSession()
+			firstStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			var callsMu sync.Mutex
+			calls := 0
+
+			manager := NewClientManager(context.Background(), func() string { return "client" }, ClientManagerOptions{
+				AttemptTimeout: time.Second,
+				RaceDial: func(_ context.Context, configs []DialConfig) (tunnel.TunnelSession, string, error) {
+					callsMu.Lock()
+					calls++
+					call := calls
+					callsMu.Unlock()
+					if call == 1 {
+						close(firstStarted)
+						<-releaseFirst
+						if tc.firstErr != nil {
+							return nil, "", tc.firstErr
+						}
+						return oldSession, configs[0].Address, nil
+					}
+					return newSession, configs[0].Address, nil
+				},
+			})
+			defer manager.Close()
+
+			manager.UpdateInventory(inventory("old-ticket"))
+			if !manager.EnsureClient("exit") {
+				t.Fatal("old-ticket attempt was not started")
+			}
+			select {
+			case <-firstStarted:
+			case <-time.After(time.Second):
+				t.Fatal("old-ticket attempt did not start")
+			}
+
+			manager.UpdateInventory(inventory("new-ticket"))
+			if manager.EnsureClient("exit") {
+				t.Fatal("new-ticket attempt started before stale attempt completed")
+			}
+			close(releaseFirst)
+
+			deadline := time.Now().Add(time.Second)
+			for {
+				status, ok := manager.PathStatus("exit")
+				if ok && status.State == "AVAILABLE" && status.Error == "" && status.CooldownUntil.IsZero() {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("stale attempt polluted refreshed ticket state: status=%+v ok=%v", status, ok)
+				}
+				time.Sleep(time.Millisecond)
+			}
+
+			if tc.firstErr == nil {
+				select {
+				case <-oldSession.Done():
+				case <-time.After(time.Second):
+					t.Fatal("stale successful session was not closed")
+				}
+			}
+			if !manager.EnsureClient("exit") {
+				t.Fatal("refreshed ticket could not start after stale attempt completed")
+			}
+			deadline = time.Now().Add(time.Second)
+			for {
+				if session, ok := manager.ReadyForExit("exit"); ok {
+					if session != newSession {
+						t.Fatalf("ready session=%T, want refreshed-ticket session", session)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("refreshed ticket did not become ready")
+				}
+				time.Sleep(time.Millisecond)
+			}
+		})
+	}
+}

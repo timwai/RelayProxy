@@ -468,6 +468,27 @@ p2p:
 	}
 }
 
+func TestAgentPublicDirectAdvertiseValidateAndPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	cfg := &AgentConfigFile{}
+	cfg.Direct.Public.Advertise = " exit.example.com:35820 "
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Direct.Public.Advertise != "exit.example.com:35820" {
+		t.Fatalf("public direct advertise=%q", loaded.Direct.Public.Advertise)
+	}
+
+	loaded.Direct.Public.Advertise = "exit.example.com"
+	if err := ValidateAgentConfig(loaded); err == nil {
+		t.Fatal("public direct advertise without port was accepted")
+	}
+}
+
 func TestAgentP2PSettingsValidateAndPersist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	cfg := &AgentConfigFile{}

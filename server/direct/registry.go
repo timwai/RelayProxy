@@ -119,9 +119,13 @@ func (r *Registry) Register(deviceID, sessionID string, observedIP netip.Addr, r
 			record.ExpiresAt = old.ExpiresAt
 			record.LastError = old.LastError
 			record.Endpoint.Verified = old.Endpoint.Verified && old.State == StateVerified && old.ExpiresAt.After(now)
+			if record.Endpoint.Verified {
+				record.Endpoint.DialAddress = old.Endpoint.DialAddress
+			}
 			if old.State == StateVerified && !old.ExpiresAt.After(now) {
 				record.State = StateExpired
 				record.Endpoint.Verified = false
+				record.Endpoint.DialAddress = ""
 			}
 		}
 		next[candidate.Address] = record
@@ -171,19 +175,22 @@ func (r *Registry) markVerifyingRegistration(expected EndpointRecord) bool {
 	return r.updateRegistration(expected, func(record *EndpointRecord, now time.Time) {
 		record.State = StateVerifying
 		record.Endpoint.Verified = false
+		record.Endpoint.DialAddress = ""
 		record.LastError = ""
 		record.VerifiedAt = time.Time{}
 		record.ExpiresAt = time.Time{}
 	})
 }
 
-func (r *Registry) markVerifiedRegistration(expected EndpointRecord, ttl time.Duration) bool {
-	if ttl <= 0 {
+func (r *Registry) markVerifiedRegistration(expected EndpointRecord, dialAddress string, ttl time.Duration) bool {
+	dialAddress = strings.TrimSpace(dialAddress)
+	if ttl <= 0 || dialAddress == "" {
 		return false
 	}
 	return r.updateRegistration(expected, func(record *EndpointRecord, now time.Time) {
 		record.State = StateVerified
 		record.Endpoint.Verified = true
+		record.Endpoint.DialAddress = dialAddress
 		record.VerifiedAt = now
 		record.ExpiresAt = now.Add(ttl)
 		record.LastError = ""
@@ -194,6 +201,7 @@ func (r *Registry) markFailedRegistration(expected EndpointRecord, err error) bo
 	return r.updateRegistration(expected, func(record *EndpointRecord, now time.Time) {
 		record.State = StateFailed
 		record.Endpoint.Verified = false
+		record.Endpoint.DialAddress = ""
 		record.VerifiedAt = time.Time{}
 		record.ExpiresAt = time.Time{}
 		if err != nil {
@@ -215,12 +223,18 @@ func (r *Registry) MarkVerifying(deviceID, sessionID, address string) bool {
 }
 
 func (r *Registry) MarkVerified(deviceID, sessionID, address string, ttl time.Duration) bool {
-	if ttl <= 0 {
+	return r.MarkVerifiedAddress(deviceID, sessionID, address, address, ttl)
+}
+
+func (r *Registry) MarkVerifiedAddress(deviceID, sessionID, address, dialAddress string, ttl time.Duration) bool {
+	dialAddress = strings.TrimSpace(dialAddress)
+	if ttl <= 0 || dialAddress == "" {
 		return false
 	}
 	return r.update(deviceID, sessionID, address, func(record *EndpointRecord, now time.Time) {
 		record.State = StateVerified
 		record.Endpoint.Verified = true
+		record.Endpoint.DialAddress = dialAddress
 		record.VerifiedAt = now
 		record.ExpiresAt = now.Add(ttl)
 		record.LastError = ""
@@ -320,6 +334,7 @@ func (r *Registry) expireLocked(record EndpointRecord) EndpointRecord {
 	if record.State == StateVerified && !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(r.now()) {
 		record.State = StateExpired
 		record.Endpoint.Verified = false
+		record.Endpoint.DialAddress = ""
 	}
 	return record
 }

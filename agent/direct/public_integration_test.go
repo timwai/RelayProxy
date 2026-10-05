@@ -419,7 +419,6 @@ func TestPublicDirectSlowHandshakeDoesNotBlockValidClient(t *testing.T) {
 	}
 }
 
-
 func TestPublicDirectListenerCloseUnblocksPendingAuthentication(t *testing.T) {
 	identity, err := secure.GenerateEphemeralIdentity()
 	if err != nil {

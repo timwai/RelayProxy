@@ -581,6 +581,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 
 	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)
 	deviceSession := &session.DeviceSession{
+		SessionID:           sessionID,
 		DeviceID:            authorization.DeviceID,
 		DeviceName:          hello.DeviceName,
 		Fingerprint:         fingerprint,

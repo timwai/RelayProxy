@@ -119,7 +119,6 @@ type PublicDirectTicketResponse struct {
 	ErrorMessage          string `json:"errorMessage,omitempty"`
 }
 
-
 type PublicDirectAuthorizationUpdate struct {
 	ClientDeviceID        string `json:"clientDeviceId"`
 	ExitDeviceID          string `json:"exitDeviceId"`

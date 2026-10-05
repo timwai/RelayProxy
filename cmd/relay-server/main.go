@@ -425,7 +425,7 @@ func main() {
 			}
 			publicDirectController.InvalidateDevice(deviceID)
 		},
-		PublicDirectEnabled:      true,
+		PublicDirectEnabled:     true,
 		MaxConnections:          cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
 		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,

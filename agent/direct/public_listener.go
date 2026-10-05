@@ -80,7 +80,7 @@ func Listen(config ListenerConfig) (*PublicListener, error) {
 	listener := &PublicListener{
 		transport: transport, authenticator: config.Authenticator, authTimeout: timeout,
 		limiter: newHandshakeLimiter(config.AuthAttemptsPerMinute),
-		ctx: listenerCtx, cancel: cancel,
+		ctx:     listenerCtx, cancel: cancel,
 		results: make(chan acceptResult, maxHandshakes),
 		slots:   make(chan struct{}, maxHandshakes),
 	}

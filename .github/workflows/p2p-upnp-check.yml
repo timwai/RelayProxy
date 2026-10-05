@@ -1,0 +1,28 @@
+name: P2P UPnP check
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Go format check
+        run: |
+          files="$(git diff --name-only origin/main...HEAD -- '*.go')"
+          if [ -n "$files" ]; then
+            unformatted="$(gofmt -l $files)"
+            if [ -n "$unformatted" ]; then
+              echo "Unformatted Go files:"
+              echo "$unformatted"
+              exit 1
+            fi
+          fi
+      - name: Relevant Go tests
+        run: go test ./internal/p2p/upnp ./agent/p2p ./internal/config ./server/gateway ./server/api ./server/web

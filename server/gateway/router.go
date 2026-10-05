@@ -24,12 +24,12 @@ var (
 )
 
 type StreamRouter struct {
-	sessions          *session.Manager
-	localExit         *agentexit.Handler
-	aclChecker        *acl.Checker
-	relayPolicy       *acl.Policy
-	authChecker       func(clientDeviceID, exitDeviceID string) (bool, error)
-	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
+	sessions                   *session.Manager
+	localExit                  *agentexit.Handler
+	aclChecker                 *acl.Checker
+	relayPolicy                *acl.Policy
+	authChecker                func(clientDeviceID, exitDeviceID string) (bool, error)
+	rdpChecker                 func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler          func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	p2pControlHandler          func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	publicDirectControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)

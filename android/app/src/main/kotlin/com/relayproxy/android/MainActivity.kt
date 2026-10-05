@@ -277,6 +277,7 @@ class MainActivity : Activity() {
         configureWindow()
         setContentView(buildRootUi())
         renderStatus()
+        RelayExitService.refreshGlobalMessageOverlaySetting()
         if (showToast) {
             val label = when (store.themeMode()) {
                 ConfigStore.THEME_LIGHT -> "浅色模式"

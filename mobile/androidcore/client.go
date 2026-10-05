@@ -67,6 +67,7 @@ type clientConfig struct {
 	SOCKS5Enabled         *bool          `json:"socks5Enabled"`
 	HTTPEnabled           *bool          `json:"httpEnabled"`
 	ProxyP2PEnabled       *bool          `json:"proxyP2pEnabled"`
+	ProxyPathMode         string         `json:"proxyPathMode"`
 	DefaultExitID         string         `json:"defaultExitId"`
 	SOCKS5Listen          string         `json:"socks5Listen"`
 	HTTPListen            string         `json:"httpListen"`
@@ -239,6 +240,18 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		enabled := true
 		cfg.ProxyP2PEnabled = &enabled
 	}
+	cfg.ProxyPathMode = strings.ToLower(strings.TrimSpace(cfg.ProxyPathMode))
+	if cfg.ProxyPathMode == "" {
+		cfg.ProxyPathMode = "auto"
+	}
+	switch cfg.ProxyPathMode {
+	case "auto", "direct_only", "p2p_only", "relay_only":
+	default:
+		return cfg, fmt.Errorf("unsupported proxyPathMode %q", cfg.ProxyPathMode)
+	}
+	if cfg.ProxyPathMode == "p2p_only" && !*cfg.ProxyP2PEnabled {
+		return cfg, errors.New("p2p_only requires proxyP2pEnabled")
+	}
 	if cfg.ClientEnabled && !*cfg.SOCKS5Enabled && !*cfg.HTTPEnabled && !cfg.VPNProxyEnabled {
 		return cfg, errors.New("clientEnabled requires a local proxy listener")
 	}
@@ -384,8 +397,11 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 		defer c.mu.RUnlock()
 		return c.status.DeviceID
 	})
-	c.proxyDialer.ConfigureDirectPolicy("auto", true)
-	c.proxyDialer.ConfigureStreamResume(*cfg.ProxyP2PEnabled, 512<<10)
+	c.proxyDialer.ConfigureDirectPolicy(cfg.ProxyPathMode, true)
+	c.proxyDialer.ConfigureStreamResume(
+		*cfg.ProxyP2PEnabled && cfg.ProxyPathMode != "relay_only" && cfg.ProxyPathMode != "p2p_only",
+		512<<10,
+	)
 	c.configureProxyPathProvider()
 	c.proxyDialer.SetDefaultExitID(cfg.DefaultExitID)
 	routingEngine, err := routing.NewEngine(cfg.Routing)
@@ -832,10 +848,13 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if *c.cfg.ExitEnabled {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyExitActive)
 	}
-	if *c.cfg.ProxyP2PEnabled && (*c.cfg.ExitEnabled || c.cfg.ClientEnabled) {
+	if *c.cfg.ProxyP2PEnabled && c.cfg.ProxyPathMode != "relay_only" &&
+		(*c.cfg.ExitEnabled || c.cfg.ClientEnabled) {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
-	transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
+	if c.cfg.ProxyPathMode != "relay_only" && c.cfg.ProxyPathMode != "p2p_only" {
+		transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
+	}
 	if *c.cfg.TLSEnabled {
 		transportCaps = append(transportCaps, "tls", "quic")
 	}
@@ -953,7 +972,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	}
 
 	var proxyP2PManager *proxyp2p.Manager
-	if *c.cfg.ProxyP2PEnabled && (exitRuntimeApproved || clientRuntimeApproved) && contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) {
+	if *c.cfg.ProxyP2PEnabled && c.cfg.ProxyPathMode != "relay_only" &&
+		(exitRuntimeApproved || clientRuntimeApproved) &&
+		contains(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) {
 		lease := time.Duration(accepted.P2PLeaseSec) * time.Second
 		if lease <= 0 {
 			lease = 60 * time.Second
@@ -1001,7 +1022,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		}()
 	}
 
-	stopPublicDirect := c.startPublicDirectExit(ctx, sess, accepted, exitRuntimeApproved, accepted.MaxConnections)
+	publicDirectExitEnabled := exitRuntimeApproved &&
+		c.cfg.ProxyPathMode != "relay_only" && c.cfg.ProxyPathMode != "p2p_only"
+	stopPublicDirect := c.startPublicDirectExit(ctx, sess, accepted, publicDirectExitEnabled, accepted.MaxConnections)
 
 	var workers sync.WaitGroup
 	workers.Add(1)

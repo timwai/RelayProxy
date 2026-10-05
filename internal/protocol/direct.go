@@ -1,5 +1,7 @@
 package protocol
 
+import "relayproxy/internal/acl"
+
 // ProxyPath identifies the concrete transport used to reach a selected proxy
 // Exit. Routing still chooses the Exit; this value describes only the data path.
 type ProxyPath string
@@ -94,6 +96,7 @@ type PublicDirectRegistrationRequest struct {
 type PublicDirectRegistrationResponse struct {
 	Success      bool                   `json:"success"`
 	Endpoints    []PublicDirectEndpoint `json:"endpoints,omitempty"`
+	RelayPolicy  *acl.Policy            `json:"relayPolicy,omitempty"`
 	ErrorCode    string                 `json:"errorCode,omitempty"`
 	ErrorMessage string                 `json:"errorMessage,omitempty"`
 }

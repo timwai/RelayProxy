@@ -439,7 +439,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		AccessDomains, AccessCIDRs, RestartFields                                   []string
 		SOCKS5, HTTP                                                                proxyLeg
 		IsAutostart, MinimizeToTray, StartMinimized, RestartRequired, ReloadPending bool
-		Routing, Network, Runtime, ExitUpstream, P2P                                any
+		Routing, Network, Runtime, ExitUpstream, P2P, Direct                        any
 		NetworkCapabilities                                                         divert.Capabilities
 		Revision                                                                    string
 	}{
@@ -458,6 +458,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 			"idleTimeoutSec": cfg.P2P.IdleTimeoutSec, "maxExitSessions": cfg.P2P.MaxExitSessions,
 			"fallback": cfg.P2P.Fallback == nil || *cfg.P2P.Fallback,
 		},
+		Direct:      map[string]any{"publicAdvertise": cfg.Direct.Public.Advertise},
 		NetworkMode: cfg.Network.Mode, IsAutostart: b.IsAutoStart(), MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized, Theme: cfg.GUI.Theme, Version: Version,
 		VerificationPopupTimeoutSec: cfg.VerificationPopupTimeout(),
@@ -468,6 +469,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
 			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(),
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,
+			"direct": map[string]any{"publicAdvertise": state.Runtime.Direct.Public.Advertise},
 			"p2p": map[string]any{
 				"enabled": state.Runtime.P2P.Enabled == nil || *state.Runtime.P2P.Enabled, "mode": state.Runtime.P2P.Mode,
 				"punchTimeoutMs": state.Runtime.P2P.PunchTimeoutMs, "keepaliveSec": state.Runtime.P2P.KeepaliveSec,
@@ -487,7 +489,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,
-		"exitUpstream": payload.ExitUpstream, "p2p": payload.P2P,
+		"exitUpstream": payload.ExitUpstream, "p2p": payload.P2P, "direct": payload.Direct,
 		"networkMode": payload.NetworkMode, "isAutostart": payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
 		"verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,

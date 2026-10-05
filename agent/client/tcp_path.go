@@ -6,23 +6,23 @@ import (
 )
 
 // tcpPathConn preserves the stream adapter's half-close support while exposing
-// the session actually chosen for this connection, not current P2P readiness.
+// the concrete path selected for this connection.
 type tcpPathConn struct {
 	*tunnel.NetConnAdapter
-	path string
+	path protocol.ProxyPath
 }
 
-func (c *tcpPathConn) ProxyPath() string { return c.path }
+func (c *tcpPathConn) ProxyPath() string { return c.path.String() }
 
-func tcpSessionPath(session tunnel.TunnelSession, direct bool) string {
-	if direct {
-		return protocol.P2PPathDirectQUIC
+func relaySessionPath(session tunnel.TunnelSession) protocol.ProxyPath {
+	if session == nil {
+		return ""
 	}
 	switch session.Transport() {
 	case tunnel.TransportQUIC:
-		return protocol.P2PPathRelayQUIC
+		return protocol.ProxyPathRelayQUIC
 	case tunnel.TransportTLS:
-		return protocol.P2PPathRelayTLS
+		return protocol.ProxyPathRelayTLS
 	default:
 		return ""
 	}

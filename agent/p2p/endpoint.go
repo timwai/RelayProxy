@@ -2,18 +2,16 @@ package p2p
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"relayproxy/internal/netutil"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/secure"
 	p2pupnp "relayproxy/internal/p2p/upnp"
@@ -275,36 +273,8 @@ func (e *Endpoint) Close() error {
 	return nil
 }
 
-// CurrentNetworkSignature returns a stable, non-reversible signature of the
-// currently usable non-loopback interface addresses. It is used only to detect
-// local network changes; raw addresses are never reported through telemetry.
+// CurrentNetworkSignature is retained for compatibility with P2P callers while
+// the implementation lives in the path-neutral network utility.
 func CurrentNetworkSignature() string {
-	interfaces, _ := net.Interfaces()
-	values := make([]string, 0)
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, _ := iface.Addrs()
-		for _, raw := range addrs {
-			var ip netip.Addr
-			switch value := raw.(type) {
-			case *net.IPNet:
-				if parsed, ok := netip.AddrFromSlice(value.IP); ok {
-					ip = parsed.Unmap()
-				}
-			case *net.IPAddr:
-				if parsed, ok := netip.AddrFromSlice(value.IP); ok {
-					ip = parsed.Unmap()
-				}
-			}
-			if !ip.IsValid() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
-				continue
-			}
-			values = append(values, iface.Name+"="+ip.String())
-		}
-	}
-	sort.Strings(values)
-	sum := sha256.Sum256([]byte(strings.Join(values, "\n")))
-	return hex.EncodeToString(sum[:16])
+	return netutil.CurrentNetworkSignature()
 }

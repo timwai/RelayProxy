@@ -135,6 +135,7 @@ data class ExitConfig(
     val socks5Port: Int = 1080,
     val httpPort: Int = 8080,
     val proxyP2pEnabled: Boolean = true,
+    val proxyPathMode: String = PROXY_PATH_AUTO,
     val vpnEnabled: Boolean = false,
     val vpnSocks5Port: Int = 1081,
     val vpnAppMode: String = VPN_APP_MODE_ALL,
@@ -172,6 +173,7 @@ data class ExitConfig(
             .put("socks5Enabled", localSocksEnabled)
             .put("httpEnabled", clientEnabled && httpEnabled)
             .put("proxyP2pEnabled", proxyP2pEnabled)
+            .put("proxyPathMode", proxyPathMode)
             .put("defaultExitId", defaultExitId.trim())
             .put("socks5Listen", "127.0.0.1:$socks5Port")
             .put("httpListen", "127.0.0.1:$httpPort")
@@ -192,6 +194,10 @@ data class ExitConfig(
         const val VPN_APP_MODE_ALL = "all"
         const val VPN_APP_MODE_INCLUDE = "include"
         const val VPN_APP_MODE_EXCLUDE = "exclude"
+        const val PROXY_PATH_AUTO = "auto"
+        const val PROXY_PATH_DIRECT_ONLY = "direct_only"
+        const val PROXY_PATH_P2P_ONLY = "p2p_only"
+        const val PROXY_PATH_RELAY_ONLY = "relay_only"
     }
 }
 
@@ -294,6 +300,12 @@ class ConfigStore(private val context: Context) {
             socks5Port = socks5Port,
             httpPort = httpPort,
             proxyP2pEnabled = prefs.getBoolean("proxyP2pEnabled", true),
+            proxyPathMode = when (prefs.getString("proxyPathMode", ExitConfig.PROXY_PATH_AUTO)) {
+                ExitConfig.PROXY_PATH_DIRECT_ONLY -> ExitConfig.PROXY_PATH_DIRECT_ONLY
+                ExitConfig.PROXY_PATH_P2P_ONLY -> ExitConfig.PROXY_PATH_P2P_ONLY
+                ExitConfig.PROXY_PATH_RELAY_ONLY -> ExitConfig.PROXY_PATH_RELAY_ONLY
+                else -> ExitConfig.PROXY_PATH_AUTO
+            },
             vpnEnabled = isVpnDesiredRunning(),
             vpnSocks5Port = vpnSocks5Port,
             vpnAppMode = when (prefs.getString("vpnAppMode", ExitConfig.VPN_APP_MODE_ALL)) {
@@ -338,11 +350,12 @@ class ConfigStore(private val context: Context) {
             .putInt("socks5Port", config.socks5Port)
             .putInt("httpPort", config.httpPort)
             .putBoolean("proxyP2pEnabled", config.proxyP2pEnabled)
+            .putString("proxyPathMode", config.proxyPathMode)
             .putString("vpnAppMode", config.vpnAppMode)
             .putStringSet("vpnPackages", config.vpnPackages.toSet())
             .putBoolean("vpnIpv6Enabled", config.vpnIpv6Enabled)
             .putString("vpnDnsServers", config.vpnDnsServers.joinToString(","))
-            .putInt("configVersion", 4)
+            .putInt("configVersion", 5)
             .remove("cellularOnly")
             .remove("vpnManagingRelay")
             .apply()
@@ -354,7 +367,7 @@ class ConfigStore(private val context: Context) {
         val updated = routing.copy(revision = current.revision + 1)
         prefs.edit()
             .putString("routing", updated.toJson().toString())
-            .putInt("configVersion", 4)
+            .putInt("configVersion", 5)
             .apply()
         updated
     }

@@ -121,43 +121,44 @@ func init() {
 }
 
 type AgentConfig struct {
-	Identity        *deviceidentity.Identity
-	IdentityID      string
-	DeviceID        string
-	DeviceName      string
-	ServerAddress   string
-	QUICPort        int
-	TCPPort         int
-	Mode            string // "CLIENT", "EXIT", "BOTH"
-	TransportMode   string // "auto", "quic_only", "tcp_only"
-	SOCKS5Enabled   *bool
-	SOCKS5Listen    string // "127.0.0.1:1080"
-	HTTPEnabled     *bool
-	HTTPListen      string // "127.0.0.1:8080"
-	DefaultExitID   string
-	ExitEnabled     *bool
-	ExitUpstream    exit.UpstreamConfig
-	RDPEnabled      *bool
-	RDPAddress      string // target-local RDP service, default 127.0.0.1:3389
-	P2PEnabled      *bool
-	P2PMode         string
-	P2PPunchTimeout time.Duration
-	P2PKeepalive    time.Duration
-	P2PIdleTimeout  time.Duration
-	P2PMaxSessions  int
-	P2PFallback     *bool
-	AllowInternet   bool
-	AllowPrivateNet bool
-	AllowLoopback   bool     // Allow localhost/loopback for testing
-	AccessMode      string   // "" (no gate), "allow" (whitelist), "deny" (blacklist)
-	AccessDomains   []string // domain patterns for the access list (glob / .suffix / exact)
-	AccessCIDRs     []string // IP ranges for the access list (CIDR / single IP / start-end)
-	NetworkMode     string   // "" (off) | "divert"
-	DivertConfig    divert.Config
-	Routing         routing.Config
-	InsecureTLS     bool // Allow self-signed TLS certificates for development/testing
-	PlainTCP        bool // Disable TLS entirely; connect via plaintext TCP + yamux
-	ConnectTimeout  time.Duration
+	Identity              *deviceidentity.Identity
+	IdentityID            string
+	DeviceID              string
+	DeviceName            string
+	ServerAddress         string
+	QUICPort              int
+	TCPPort               int
+	Mode                  string // "CLIENT", "EXIT", "BOTH"
+	TransportMode         string // "auto", "quic_only", "tcp_only"
+	SOCKS5Enabled         *bool
+	SOCKS5Listen          string // "127.0.0.1:1080"
+	HTTPEnabled           *bool
+	HTTPListen            string // "127.0.0.1:8080"
+	DefaultExitID         string
+	ExitEnabled           *bool
+	ExitUpstream          exit.UpstreamConfig
+	RDPEnabled            *bool
+	RDPAddress            string // target-local RDP service, default 127.0.0.1:3389
+	P2PEnabled            *bool
+	P2PMode               string
+	P2PPunchTimeout       time.Duration
+	P2PKeepalive          time.Duration
+	P2PIdleTimeout        time.Duration
+	P2PMaxSessions        int
+	P2PFallback           *bool
+	PublicDirectAdvertise string
+	AllowInternet         bool
+	AllowPrivateNet       bool
+	AllowLoopback         bool     // Allow localhost/loopback for testing
+	AccessMode            string   // "" (no gate), "allow" (whitelist) or "deny" (blacklist)
+	AccessDomains         []string // domain patterns for the access list (glob / .suffix / exact)
+	AccessCIDRs           []string // IP ranges for the access list (CIDR / single IP / start-end)
+	NetworkMode           string   // "" (off) | "divert"
+	DivertConfig          divert.Config
+	Routing               routing.Config
+	InsecureTLS           bool // Allow self-signed TLS certificates for development/testing
+	PlainTCP              bool // Disable TLS entirely; connect via plaintext TCP + yamux
+	ConnectTimeout        time.Duration
 }
 
 func (c AgentConfig) IsSOCKS5Enabled() bool {
@@ -230,6 +231,14 @@ type AgentStatus struct {
 	RDPUDPReason        string                     `json:"rdpUdpReason,omitempty"`
 	RDPPathTCP          string                     `json:"rdpPathTcp,omitempty"`
 	RDPPathUDP          string                     `json:"rdpPathUdp,omitempty"`
+	DirectState         string                     `json:"directState,omitempty"`
+	DirectPath          string                     `json:"directPath,omitempty"`
+	DirectError         string                     `json:"directError,omitempty"`
+	DirectEndpoint      string                     `json:"directEndpoint,omitempty"`
+	DirectRTTMs         int64                      `json:"directRttMs,omitempty"`
+	DirectFallbackCount uint64                     `json:"directFallbackCount,omitempty"`
+	DirectBytesUp       uint64                     `json:"directBytesUp,omitempty"`
+	DirectBytesDown     uint64                     `json:"directBytesDown,omitempty"`
 	P2PState            string                     `json:"p2pState,omitempty"`
 	P2PPath             string                     `json:"p2pPath,omitempty"`
 	P2PError            string                     `json:"p2pError,omitempty"`
@@ -279,6 +288,7 @@ type Agent struct {
 	rdpP2P            *rdpp2p.Manager
 	rdpSession        *rdpp2p.Session
 	proxyP2P          *proxyp2p.Manager
+	proxyDirect       *publicDirectClientManager
 	closed            atomic.Bool
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -353,7 +363,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		cfg.P2PMode = "auto"
 	}
 	switch cfg.P2PMode {
-	case "auto", "relay_only", "p2p_only":
+	case "auto", "direct_only", "relay_only", "p2p_only":
 	default:
 		return nil, fmt.Errorf("invalid P2P mode %q", cfg.P2PMode)
 	}
@@ -404,6 +414,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Agent{cfg: cfg, ctx: ctx, cancel: cancel, routingEngine: engine, traffic: traffic.NewRegistry(0, 0), messages: NewMessageBuffer(defaultMessageHistorySize)}
 	a.setDivertStage("disabled", nil)
+	a.initPublicDirectClient()
 	a.rawDialer = client.NewTunnelDialer(func() tunnel.TunnelSession {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
@@ -419,43 +430,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
 	a.rawDialer.ConfigureStreamResume(resumeClient, 512<<10)
-	a.rawDialer.ConfigureDirectPath(
-		func(exitDeviceID string) (tunnel.TunnelSession, bool) {
-			a.mu.RLock()
-			manager := a.proxyP2P
-			closed := a.closed.Load()
-			a.mu.RUnlock()
-			if closed || manager == nil {
-				return nil, false
-			}
-			return manager.ReadyForExit(exitDeviceID)
-		},
-		func(exitDeviceID string) {
-			a.mu.RLock()
-			manager := a.proxyP2P
-			ready := a.handshakeOK.Load()
-			a.mu.RUnlock()
-			if ready && manager != nil {
-				manager.EnsureClient(exitDeviceID)
-			}
-		},
-	)
-	a.rawDialer.ConfigureDirectMetrics(func(exitDeviceID string) {
-		a.mu.RLock()
-		manager := a.proxyP2P
-		a.mu.RUnlock()
-		if manager != nil {
-			manager.NoteFallback(exitDeviceID)
-		}
-	})
-	a.rawDialer.ConfigureDirectFailure(func(exitDeviceID, reason string) {
-		a.mu.RLock()
-		manager := a.proxyP2P
-		a.mu.RUnlock()
-		if manager != nil {
-			manager.FailReadyForExit(exitDeviceID, reason)
-		}
-	})
+	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
@@ -618,6 +593,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
+	if publicDirectAllowedForMode(cfg.P2PMode) {
+		transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
+	}
 	if tunnel.SupportsDatagrams(sess) {
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
 	}
@@ -694,6 +672,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
 	a.mu.Unlock()
+	if accepted.ProxyExits != nil {
+		a.updatePublicDirectInventory(proxyExitsFromProtocol(*accepted.ProxyExits))
+	}
 
 	if a.divertSrv != nil && !a.divertSrv.Running() {
 		a.setDivertStage("starting", nil)
@@ -778,14 +759,25 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		}
 	}
 
+	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
+	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
+	stopPublicDirect := func() {}
+	publicDirectExitEnabled := allowExit && publicDirectAllowedForMode(cfg.P2PMode)
+	if publicDirectExitEnabled {
+		stop, err := a.startPublicDirectExit(ctx, sess, accepted, handler, accepted.MaxConnections)
+		if err != nil {
+			log.Printf("[PublicDirect] listener unavailable; P2P/Relay fallback remains active: %v", err)
+		} else {
+			stopPublicDirect = stop
+		}
+	}
+
 	var workers sync.WaitGroup
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
 		a.heartbeatLoop(ctx, ctrl, sess, accepted.HeartbeatSec, epoch)
 	}()
-	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
-	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
 	// Every approved Agent accepts server-originated message streams, including
 	// CLIENT-only devices that do not expose proxy-exit or RDP services.
 	workers.Add(1)
@@ -810,6 +802,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	case <-sess.Done():
 	}
 	cancel()
+	stopPublicDirect()
 	_ = sess.Close()
 	if proxyP2PManager != nil {
 		_ = proxyP2PManager.Close()
@@ -817,6 +810,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	workers.Wait()
 	a.clearRDPState(sess, epoch)
 	a.clearProxyP2PState(sess, epoch, proxyP2PManager)
+	a.clearPublicDirectState(sess, epoch)
 	return nil
 }
 
@@ -891,20 +885,23 @@ func proxyExitsFromProtocol(exits []protocol.ProxyExit) []protocol.ProxyExit {
 func (a *Agent) refreshProxyExits(sess tunnel.TunnelSession, epoch uint64, exits []protocol.ProxyExit, revision uint64) {
 	refreshed := proxyExitsFromProtocol(exits)
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.epoch != epoch || a.readySession != sess {
+		a.mu.Unlock()
 		return
 	}
 	// Revision zero is the compatibility path for older servers. For versioned
 	// pushes, reject only strictly older snapshots; the same revision may be
 	// replayed by heartbeat as a recovery copy after a lost/corrupt push.
 	if revision != 0 && a.proxyExitRevision != 0 && revision < a.proxyExitRevision {
+		a.mu.Unlock()
 		return
 	}
 	a.proxyExits = refreshed
 	if revision != 0 {
 		a.proxyExitRevision = revision
 	}
+	a.mu.Unlock()
+	a.updatePublicDirectInventory(refreshed)
 }
 
 func rdpTargetsFromProtocol(targets []protocol.RDPTarget) []rdp.Target {
@@ -1267,13 +1264,8 @@ func (a *Agent) SelectExit(exitID string) {
 	a.cfg.DefaultExitID = exitID
 	a.selectedExit.Store(&exitID)
 	a.dialer.SetDefaultExitID(exitID)
-	manager := a.proxyP2P
-	ready := a.handshakeOK.Load()
-	mode := a.cfg.P2PMode
 	a.mu.Unlock()
-	if ready && manager != nil && mode != "relay_only" && strings.TrimSpace(exitID) != "" {
-		manager.EnsureClient(exitID)
-	}
+	a.ensureProxyDirectPath(exitID)
 }
 
 func (a *Agent) Status() AgentStatus {
@@ -1287,7 +1279,7 @@ func (a *Agent) Status() AgentStatus {
 		NetworkMode:   a.cfg.NetworkMode, LatencyMs: a.latencyMs.Load(),
 		NativeUDP: tunnel.NativeUDPUsage(),
 	}
-	sess, handler, divertSrv, proxyP2P := a.readySession, a.exitHandler, a.divertSrv, a.proxyP2P
+	sess, handler, divertSrv, proxyP2P, proxyDirect := a.readySession, a.exitHandler, a.divertSrv, a.proxyP2P, a.proxyDirect
 	if a.rdpConnection != nil {
 		st.RDPListenAddr = a.rdpConnection.ListenAddr
 		st.RDPTargetID = a.rdpConnection.Target.DeviceID
@@ -1338,6 +1330,22 @@ func (a *Agent) Status() AgentStatus {
 		default:
 		}
 	}
+	if proxyDirect != nil {
+		if path, ok := proxyDirect.PathStatus(st.SelectedExit); ok {
+			st.DirectState = path.State
+			st.DirectError = path.Error
+			st.DirectEndpoint = path.Endpoint
+			st.DirectFallbackCount = path.FallbackCount
+			if directSession, ready := proxyDirect.ReadyForExit(st.SelectedExit); ready {
+				st.DirectPath = string(protocol.ProxyPathPublicDirectQUIC)
+				if diagnostics := tunnel.DiagnoseSession(directSession); diagnostics != nil && diagnostics.QUIC != nil {
+					st.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
+					st.DirectBytesUp = diagnostics.QUIC.BytesSent
+					st.DirectBytesDown = diagnostics.QUIC.BytesReceived
+				}
+			}
+		}
+	}
 	if proxyP2P != nil {
 		if path, ok := proxyP2P.PathStatus(st.SelectedExit); ok {
 			st.P2PState = string(path.State)
@@ -1350,6 +1358,15 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PFallbackCount = path.FallbackCount
 			st.P2PBytesUp = path.BytesUp
 			st.P2PBytesDown = path.BytesDown
+			if st.DirectPath == "" && path.Path != "" {
+				st.DirectState = string(path.State)
+				st.DirectPath = path.Path
+				st.DirectError = path.Error
+				st.DirectRTTMs = path.RTTMs
+				st.DirectFallbackCount = path.FallbackCount
+				st.DirectBytesUp = path.BytesUp
+				st.DirectBytesDown = path.BytesDown
+			}
 		} else {
 			st.P2PState = "IDLE"
 		}
@@ -1360,6 +1377,22 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PPath = protocol.P2PPathRelayQUIC
 		case string(tunnel.TransportTLS):
 			st.P2PPath = protocol.P2PPathRelayTLS
+		}
+	}
+	if st.DirectPath == "" && st.Connected {
+		if st.DirectState == "" {
+			st.DirectState = "IDLE"
+		}
+		switch st.Transport {
+		case string(tunnel.TransportQUIC):
+			st.DirectPath = string(protocol.ProxyPathRelayQUIC)
+		case string(tunnel.TransportTLS):
+			st.DirectPath = string(protocol.ProxyPathRelayTLS)
+		}
+		if st.TunnelDiagnostics != nil && st.TunnelDiagnostics.QUIC != nil {
+			st.DirectRTTMs = int64(st.TunnelDiagnostics.QUIC.SmoothedRTTMS)
+			st.DirectBytesUp = st.TunnelDiagnostics.QUIC.BytesSent
+			st.DirectBytesDown = st.TunnelDiagnostics.QUIC.BytesReceived
 		}
 	}
 	if st.RDPListenAddr != "" && !st.RDPUDPEnabled {
@@ -1751,6 +1784,25 @@ func (a *Agent) clearProxyP2PState(sess tunnel.TunnelSession, epoch uint64, mana
 	_ = manager.Close()
 }
 
+func (a *Agent) clearPublicDirectState(sess tunnel.TunnelSession, epoch uint64) {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	if a.epoch != epoch || a.readySession != sess {
+		a.mu.RUnlock()
+		return
+	}
+	manager := a.proxyDirect
+	a.mu.RUnlock()
+	if manager != nil {
+		// Public Direct authorization is derived from the active Relay control
+		// session. When that session ends, every direct session and cached ticket
+		// must be discarded before a reconnect can authorize fresh paths.
+		manager.UpdateInventory(nil)
+	}
+}
+
 func (a *Agent) setApprovalState(state string) {
 	copy := state
 	a.approvalState.Store(&copy)
@@ -1830,6 +1882,7 @@ func (a *Agent) closeRuntime() error {
 		if proxyP2P != nil {
 			errs = append(errs, proxyP2P.Close())
 		}
+		errs = append(errs, a.closePublicDirectClient())
 		if exitHandler != nil {
 			errs = append(errs, exitHandler.Close())
 		}

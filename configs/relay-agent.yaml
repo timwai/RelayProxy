@@ -17,3 +17,9 @@ p2p:
   idle_timeout_sec: 120
   max_exit_sessions: 4
   fallback: true
+
+# 可选。仅用于公网端口转发、云主机 DNS 等无法从本机接口直接发现的场景。
+# Server 仍会主动探测并验证该地址，验证失败不会下发给客户端。
+direct:
+  public:
+    advertise: ""              # 例如 exit.example.com:35820

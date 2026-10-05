@@ -66,6 +66,12 @@ type ServerConfig struct {
 		UPnPEnabled          *bool  `yaml:"upnp_enabled"`
 	} `yaml:"p2p"`
 
+	Direct struct {
+		Enabled   *bool `yaml:"enabled"`
+		PortStart int   `yaml:"port_start"`
+		PortEnd   int   `yaml:"port_end"`
+	} `yaml:"direct"`
+
 	// Exit lets the Relay server itself act as a network egress node. It is
 	// disabled by default so existing deployments keep their current routing.
 	Exit struct {
@@ -127,13 +133,19 @@ type AgentConfigFile struct {
 
 	P2P struct {
 		Enabled         *bool  `yaml:"enabled"`
-		Mode            string `yaml:"mode"` // auto | relay_only | p2p_only
+		Mode            string `yaml:"mode"` // auto | direct_only | relay_only | p2p_only
 		PunchTimeoutMs  int    `yaml:"punch_timeout_ms"`
 		KeepaliveSec    int    `yaml:"keepalive_sec"`
 		IdleTimeoutSec  int    `yaml:"idle_timeout_sec"`
 		MaxExitSessions int    `yaml:"max_exit_sessions"`
 		Fallback        *bool  `yaml:"fallback"`
 	} `yaml:"p2p"`
+
+	Direct struct {
+		Public struct {
+			Advertise string `yaml:"advertise"`
+		} `yaml:"public"`
+	} `yaml:"direct"`
 
 	Routing routing.Config `yaml:"routing"` // 新增路由配置
 
@@ -272,6 +284,9 @@ func applyServerDefaults(cfg *ServerConfig) {
 	}
 	if cfg.P2P.MaxSessionsPerDevice == 0 {
 		cfg.P2P.MaxSessionsPerDevice = 8
+	}
+	if cfg.Direct.Enabled == nil {
+		cfg.Direct.Enabled = BoolPtr(true)
 	}
 	if cfg.Exit.Enabled == nil {
 		cfg.Exit.Enabled = BoolPtr(false)

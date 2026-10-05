@@ -92,4 +92,17 @@ class RoutingConfigTest {
         assertFalse(restored.rules.single().enabled)
     }
 
+
+    @Test
+    fun `core json includes configured proxy path mode`() {
+        val json = JSONObject(
+            ExitConfig(
+                proxyPathMode = ExitConfig.PROXY_PATH_DIRECT_ONLY,
+                proxyP2pEnabled = true,
+            ).coreJson()
+        )
+        assertEquals(ExitConfig.PROXY_PATH_DIRECT_ONLY, json.getString("proxyPathMode"))
+        assertTrue(json.getBoolean("proxyP2pEnabled"))
+    }
+
 }

@@ -119,6 +119,8 @@ func TestDatagramRequiredRejectsLegacySuccessResponse(t *testing.T) {
 
 type streamOnlySession struct{ tunnel.TunnelSession }
 
+func (streamOnlySession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
+
 func (streamOnlySession) OpenStream(context.Context) (tunnel.TunnelStream, error) {
 	return nil, errors.New("unexpected stream open before native capability check")
 }
@@ -137,6 +139,8 @@ type namedSession struct {
 	name string
 }
 
+func (*namedSession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
+
 func TestTunnelDialerPrefersReadyDirectPathAndWarmsMissingPath(t *testing.T) {
 	relay := &namedSession{name: "relay"}
 	direct := &namedSession{name: "direct"}
@@ -153,23 +157,40 @@ func TestTunnelDialerPrefersReadyDirectPathAndWarmsMissingPath(t *testing.T) {
 		}
 	})
 
-	session, isDirect := dialer.sessionForExit("exit-ready")
-	if session != direct || !isDirect {
-		t.Fatalf("ready direct path not selected: session=%v direct=%v", session, isDirect)
+	selected := dialer.selectedSessionForExit("exit-ready")
+	if selected.Session != direct || selected.Path != protocol.ProxyPathP2PQUIC {
+		t.Fatalf("ready direct path not selected: selected=%+v", selected)
 	}
-	session, isDirect = dialer.sessionForExit("exit-cold")
-	if session != relay || isDirect {
-		t.Fatalf("cold path did not fall back to Relay: session=%v direct=%v", session, isDirect)
+	selected = dialer.selectedSessionForExit("exit-cold")
+	if selected.Session != relay || !selected.Path.IsRelay() {
+		t.Fatalf("cold path did not fall back to Relay: selected=%+v", selected)
 	}
 	if ensureCalls != 1 {
 		t.Fatalf("ensure calls=%d, want 1", ensureCalls)
 	}
-	session, isDirect = dialer.sessionForExit("")
-	if session != relay || isDirect {
-		t.Fatalf("auto-selected Exit should stay on Relay: session=%v direct=%v", session, isDirect)
+	selected = dialer.selectedSessionForExit("")
+	if selected.Session != relay || !selected.Path.IsRelay() {
+		t.Fatalf("auto-selected Exit should stay on Relay: selected=%+v", selected)
 	}
 	if ensureCalls != 1 {
 		t.Fatalf("empty Exit unexpectedly started P2P: ensure calls=%d", ensureCalls)
+	}
+}
+
+func TestTunnelDialerCarriesExplicitPublicDirectPath(t *testing.T) {
+	relay := &namedSession{name: "relay"}
+	public := &namedSession{name: "public"}
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigurePathProvider(func(exitID string) (SelectedSession, bool) {
+		if exitID != "exit" {
+			return SelectedSession{}, false
+		}
+		return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true
+	}, nil)
+
+	selected := dialer.selectedSessionForExit("exit")
+	if selected.Session != public || selected.Path != protocol.ProxyPathPublicDirectQUIC || !selected.IsDirect() {
+		t.Fatalf("public direct path was not preserved: %+v", selected)
 	}
 }
 
@@ -424,9 +445,9 @@ func TestDirectPathPolicyModes(t *testing.T) {
 		var ensure atomic.Int32
 		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, func(string) { ensure.Add(1) })
 		dialer.ConfigureDirectPolicy("p2p_only", false)
-		session, isDirect := dialer.sessionForExit(protocol.ServerExitDeviceID)
-		if session != relay || isDirect || ensure.Load() != 0 {
-			t.Fatalf("server exit selected session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		selected := dialer.selectedSessionForExit(protocol.ServerExitDeviceID)
+		if selected.Session != relay || !selected.Path.IsRelay() || ensure.Load() != 0 {
+			t.Fatalf("server exit selected=%+v ensure=%d", selected, ensure.Load())
 		}
 	})
 
@@ -435,9 +456,9 @@ func TestDirectPathPolicyModes(t *testing.T) {
 		var ensure atomic.Int32
 		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, func(string) { ensure.Add(1) })
 		dialer.ConfigureDirectPolicy("relay_only", true)
-		session, isDirect := dialer.sessionForExit("exit")
-		if session != relay || isDirect || ensure.Load() != 0 {
-			t.Fatalf("relay_only selected session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != relay || !selected.Path.IsRelay() || ensure.Load() != 0 {
+			t.Fatalf("relay_only selected=%+v ensure=%d", selected, ensure.Load())
 		}
 	})
 
@@ -446,11 +467,118 @@ func TestDirectPathPolicyModes(t *testing.T) {
 		var ensure atomic.Int32
 		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return nil, false }, func(string) { ensure.Add(1) })
 		dialer.ConfigureDirectPolicy("p2p_only", false)
-		session, isDirect := dialer.sessionForExit("exit")
-		if session != nil || isDirect || ensure.Load() != 1 {
-			t.Fatalf("p2p_only cold session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != nil || selected.Path != "" || ensure.Load() != 1 {
+			t.Fatalf("p2p_only cold selected=%+v ensure=%d", selected, ensure.Load())
 		}
 	})
+
+	t.Run("direct_only_cold", func(t *testing.T) {
+		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+		var ensure atomic.Int32
+		dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) { return SelectedSession{}, false }, func(string) { ensure.Add(1) })
+		dialer.ConfigureDirectPolicy("direct_only", true)
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != nil || selected.Path != "" || ensure.Load() != 1 {
+			t.Fatalf("direct_only cold selected=%+v ensure=%d", selected, ensure.Load())
+		}
+		if dialer.directFallbackEnabled() {
+			t.Fatal("direct_only unexpectedly enabled Relay fallback")
+		}
+	})
+
+	t.Run("p2p_only_rejects_public_direct", func(t *testing.T) {
+		dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+		public := &namedSession{name: "public"}
+		dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+			return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true
+		}, nil)
+		dialer.ConfigureDirectPolicy("p2p_only", false)
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != nil || selected.Path != "" {
+			t.Fatalf("p2p_only accepted public direct session: %+v", selected)
+		}
+	})
+}
+
+func TestGenericDirectStreamHonorsFallbackPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     string
+		fallback bool
+	}{
+		{name: "direct_only", mode: "direct_only", fallback: true},
+		{name: "fallback_disabled", mode: "auto", fallback: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			direct := newScriptedSession(nil)
+			relay := newScriptedSession(func() tunnel.TunnelStream {
+				return &scriptedStream{}
+			})
+			dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+			dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+				return SelectedSession{Session: direct, Path: protocol.ProxyPathPublicDirectQUIC}, true
+			}, nil)
+			dialer.ConfigureDirectPolicy(tc.mode, tc.fallback)
+
+			selected, stream, err := dialer.openProxyStream(context.Background(), "exit")
+			if stream != nil {
+				_ = stream.Close()
+				t.Fatal("generic direct stream unexpectedly fell back to Relay")
+			}
+			if err == nil {
+				t.Fatal("generic direct stream unexpectedly succeeded")
+			}
+			if selected.Session != nil || selected.Path != "" {
+				t.Fatalf("failed generic stream returned selected path: %+v", selected)
+			}
+			if direct.opens.Load() != 1 {
+				t.Fatalf("direct attempts=%d, want 1", direct.opens.Load())
+			}
+			if relay.opens.Load() != 0 {
+				t.Fatalf("Relay attempts=%d, want 0", relay.opens.Load())
+			}
+		})
+	}
+}
+
+func TestGenericDirectStreamFallbackRecordsConcretePath(t *testing.T) {
+	direct := newScriptedSession(nil)
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return &scriptedStream{}
+	})
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+		return SelectedSession{Session: direct, Path: protocol.ProxyPathPublicDirectQUIC}, true
+	}, nil)
+
+	var fallbackPath, failurePath protocol.ProxyPath
+	dialer.ConfigurePathMetrics(func(_ string, path protocol.ProxyPath) {
+		fallbackPath = path
+	})
+	dialer.ConfigurePathFailure(func(_ string, path protocol.ProxyPath, _ string) {
+		failurePath = path
+	})
+
+	selected, stream, err := dialer.openProxyStream(context.Background(), "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stream == nil {
+		t.Fatal("generic direct stream did not fall back to Relay")
+	}
+	defer stream.Close()
+	if selected.Session != relay || !selected.Path.IsRelay() {
+		t.Fatalf("fallback selected=%+v, want Relay", selected)
+	}
+	if fallbackPath != protocol.ProxyPathPublicDirectQUIC {
+		t.Fatalf("fallback path=%q, want public direct", fallbackPath)
+	}
+	if failurePath != protocol.ProxyPathPublicDirectQUIC {
+		t.Fatalf("failure path=%q, want public direct", failurePath)
+	}
 }
 
 func TestDirectFallbackCanBeDisabled(t *testing.T) {
@@ -479,5 +607,138 @@ func TestDirectFallbackCanBeDisabled(t *testing.T) {
 	}
 	if fallbacks.Load() != 0 {
 		t.Fatalf("disabled fallback metric=%d, want 0", fallbacks.Load())
+	}
+}
+
+func TestPublicDirectFailureUsesReadyP2PBeforeRelay(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mode     string
+		fallback bool
+	}{
+		{name: "auto", mode: "auto", fallback: true},
+		{name: "auto without relay fallback", mode: "auto", fallback: false},
+		{name: "direct only", mode: "direct_only", fallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			public := newScriptedSession(func() tunnel.TunnelStream {
+				return &scriptedStream{failWriteAt: 2}
+			})
+			p2p := newScriptedSession(func() tunnel.TunnelStream {
+				return responseStream(protocol.OpenTCPResponse{Success: true, RemoteIP: "203.0.113.10"})
+			})
+			relay := newScriptedSession(func() tunnel.TunnelStream {
+				return responseStream(protocol.OpenTCPResponse{Success: true, RemoteIP: "203.0.113.11"})
+			})
+
+			var publicReady atomic.Bool
+			publicReady.Store(true)
+			dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+			dialer.ConfigureDirectPolicy(tc.mode, tc.fallback)
+			dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+				if publicReady.Load() {
+					return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true
+				}
+				return SelectedSession{Session: p2p, Path: protocol.ProxyPathP2PQUIC}, true
+			}, nil)
+			dialer.ConfigurePathFailure(func(_ string, path protocol.ProxyPath, _ string) {
+				if path == protocol.ProxyPathPublicDirectQUIC {
+					publicReady.Store(false)
+				}
+			})
+
+			conn, err := dialer.DialTCP(context.Background(), "exit", "example.com", 443)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.Close()
+			requireTCPPath(t, conn, protocol.ProxyPathP2PQUIC.String())
+			if public.opens.Load() != 1 || p2p.opens.Load() != 1 || relay.opens.Load() != 0 {
+				t.Fatalf("unexpected path attempts public=%d p2p=%d relay=%d",
+					public.opens.Load(), p2p.opens.Load(), relay.opens.Load())
+			}
+		})
+	}
+}
+
+func TestPublicDirectUDPFailureUsesReadyP2PBeforeRelay(t *testing.T) {
+	public := newScriptedSession(func() tunnel.TunnelStream {
+		return &scriptedStream{failWriteAt: 2}
+	})
+	p2p := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenUDPResponse{Success: true, Mode: protocol.UDPModeStream})
+	})
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenUDPResponse{Success: true, Mode: protocol.UDPModeStream})
+	})
+
+	var publicReady atomic.Bool
+	publicReady.Store(true)
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+		if publicReady.Load() {
+			return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true
+		}
+		return SelectedSession{Session: p2p, Path: protocol.ProxyPathP2PQUIC}, true
+	}, nil)
+	dialer.ConfigurePathFailure(func(_ string, path protocol.ProxyPath, _ string) {
+		if path == protocol.ProxyPathPublicDirectQUIC {
+			publicReady.Store(false)
+		}
+	})
+
+	conn, err := dialer.DialUDP(context.Background(), "exit", "203.0.113.53", 53)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if public.opens.Load() != 1 || p2p.opens.Load() != 1 || relay.opens.Load() != 0 {
+		t.Fatalf("unexpected path attempts public=%d p2p=%d relay=%d",
+			public.opens.Load(), p2p.opens.Load(), relay.opens.Load())
+	}
+}
+
+func TestExpiredDirectAttemptBudgetDoesNotQuarantineAlternateP2P(t *testing.T) {
+	public := &blockingOpenSession{scriptedSession: newScriptedSession(nil)}
+	p2p := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenTCPResponse{Success: true})
+	})
+	relay := newScriptedSession(func() tunnel.TunnelStream {
+		return responseStream(protocol.OpenTCPResponse{Success: true})
+	})
+
+	var publicReady atomic.Bool
+	publicReady.Store(true)
+	var p2pFailures atomic.Int32
+	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
+	dialer.ConfigureDirectAttemptTimeout(20 * time.Millisecond)
+	dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
+		if publicReady.Load() {
+			return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true
+		}
+		return SelectedSession{Session: p2p, Path: protocol.ProxyPathP2PQUIC}, true
+	}, nil)
+	dialer.ConfigurePathFailure(func(_ string, path protocol.ProxyPath, _ string) {
+		if path == protocol.ProxyPathPublicDirectQUIC {
+			publicReady.Store(false)
+		} else if path == protocol.ProxyPathP2PQUIC {
+			p2pFailures.Add(1)
+		}
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	conn, err := dialer.DialTCP(ctx, "exit", "example.com", 443)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	requireTCPPath(t, conn, protocol.ProxyPathRelayTLS.String())
+	if public.opens.Load() != 1 || p2p.opens.Load() != 0 || relay.opens.Load() != 1 {
+		t.Fatalf("unexpected path attempts public=%d p2p=%d relay=%d",
+			public.opens.Load(), p2p.opens.Load(), relay.opens.Load())
+	}
+	if p2pFailures.Load() != 0 {
+		t.Fatalf("expired public-direct budget quarantined P2P %d time(s)", p2pFailures.Load())
 	}
 }

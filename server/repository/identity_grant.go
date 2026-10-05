@@ -543,3 +543,79 @@ func (db *DB) authorizeIdentityDeviceFeature(clientDeviceID, targetDeviceID, fea
 	granted, err := db.HasActiveDeviceIdentityGrant(targetDeviceID, clientIdentity.String, feature)
 	return true, granted, err
 }
+
+type PublicDirectAuthorizationSnapshot struct {
+	Allowed               bool
+	PolicyRevision        int64
+	AuthorizationRevision int64
+}
+
+// PublicDirectAuthorization returns only identity-managed authorization state.
+// Legacy owner-based authorization intentionally does not receive Internet-
+// reachable Public Direct tickets.
+func (db *DB) PublicDirectAuthorization(clientDeviceID, exitDeviceID string) (PublicDirectAuthorizationSnapshot, error) {
+	clientDeviceID = strings.TrimSpace(clientDeviceID)
+	exitDeviceID = strings.TrimSpace(exitDeviceID)
+	if clientDeviceID == "" || exitDeviceID == "" || clientDeviceID == exitDeviceID {
+		return PublicDirectAuthorizationSnapshot{}, nil
+	}
+
+	var clientIdentity, exitIdentity, clientStatus, exitStatus sql.NullString
+	var clientPolicy, exitPolicy sql.NullInt64
+	var clientCaps, exitCaps string
+	err := db.QueryRow(`SELECT client.identity_id, client.approved_capabilities, client_identity.status, client_identity.policy_revision,
+		exit.identity_id, exit.approved_capabilities, exit_identity.status, exit_identity.policy_revision
+		FROM devices client
+		JOIN devices exit ON exit.id = ?
+		LEFT JOIN identities client_identity ON client_identity.id = client.identity_id
+		LEFT JOIN identities exit_identity ON exit_identity.id = exit.identity_id
+		WHERE client.id = ? AND client.approval_state = 'approved' AND exit.approval_state = 'approved'`,
+		exitDeviceID, clientDeviceID).Scan(
+		&clientIdentity, &clientCaps, &clientStatus, &clientPolicy,
+		&exitIdentity, &exitCaps, &exitStatus, &exitPolicy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PublicDirectAuthorizationSnapshot{}, nil
+	}
+	if err != nil {
+		return PublicDirectAuthorizationSnapshot{}, err
+	}
+	if !clientIdentity.Valid || !exitIdentity.Valid ||
+		strings.TrimSpace(clientIdentity.String) == "" || strings.TrimSpace(exitIdentity.String) == "" ||
+		clientStatus.String != IdentityStatusActive || exitStatus.String != IdentityStatusActive ||
+		!clientPolicy.Valid || clientPolicy.Int64 <= 0 || !exitPolicy.Valid || exitPolicy.Int64 <= 0 ||
+		!hasCapabilityJSON(clientCaps, "proxy.client") || !hasCapabilityJSON(exitCaps, "proxy.exit") {
+		return PublicDirectAuthorizationSnapshot{}, nil
+	}
+
+	if clientIdentity.String == exitIdentity.String {
+		return PublicDirectAuthorizationSnapshot{
+			Allowed: true, PolicyRevision: clientPolicy.Int64,
+			AuthorizationRevision: clientPolicy.Int64,
+		}, nil
+	}
+
+	var raw string
+	var revision int64
+	err = db.QueryRow(`SELECT features, revision FROM device_identity_grants
+		WHERE target_device_id = ? AND grantee_identity_id = ?
+		  AND (expires_at IS NULL OR expires_at > ?)
+		ORDER BY revision DESC LIMIT 1`,
+		exitDeviceID, clientIdentity.String, time.Now().UTC()).Scan(&raw, &revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PublicDirectAuthorizationSnapshot{}, nil
+	}
+	if err != nil {
+		return PublicDirectAuthorizationSnapshot{}, err
+	}
+	features, err := decodeGrantFeatures(raw)
+	if err != nil {
+		return PublicDirectAuthorizationSnapshot{}, err
+	}
+	if revision <= 0 || !containsGrantFeature(features, GrantFeatureProxyUse) {
+		return PublicDirectAuthorizationSnapshot{}, nil
+	}
+	return PublicDirectAuthorizationSnapshot{
+		Allowed: true, PolicyRevision: clientPolicy.Int64,
+		AuthorizationRevision: revision,
+	}, nil
+}

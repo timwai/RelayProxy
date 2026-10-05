@@ -556,6 +556,36 @@ func TestWelcomeDistributesP2PPortRange(t *testing.T) {
 	}
 }
 
+func TestWelcomeDistributesPublicDirectPolicy(t *testing.T) {
+	gateway := testGateway(t, time.Second, nil)
+	gateway.cfg.PublicDirectEnabled = true
+	gateway.cfg.PublicDirectTicketIssuer = "relay-test"
+	gateway.cfg.PublicDirectTicketKey = []byte{1, 2, 3, 4}
+	gateway.cfg.PublicDirectPortStart = 31000
+	gateway.cfg.PublicDirectPortEnd = 31100
+
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := dialTestGateway(t, gateway)
+	control := openTestStream(t, sess)
+	writeControlHeader(t, control)
+	accepted := authenticateTestDevice(t, control, identity)
+	if !accepted.Success {
+		t.Fatalf("device was not accepted: %+v", accepted)
+	}
+	if !containsCapability(accepted.TransportCapabilities, protocol.CapabilityProxyPublicDirect) {
+		t.Fatalf("Public Direct capability not advertised: %v", accepted.TransportCapabilities)
+	}
+	if accepted.PublicDirectTicketIssuer != "relay-test" || len(accepted.PublicDirectTicketKey) != 4 {
+		t.Fatalf("Public Direct ticket verification material missing: %+v", accepted)
+	}
+	if accepted.PublicDirectPortStart != 31000 || accepted.PublicDirectPortEnd != 31100 {
+		t.Fatalf("Public Direct port range=%d-%d, want 31000-31100", accepted.PublicDirectPortStart, accepted.PublicDirectPortEnd)
+	}
+}
+
 func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 	gateway := testGateway(t, time.Second, nil, func(_ string, hello protocol.DeviceHello) (DeviceAuthorization, error) {
 		switch hello.DeviceName {

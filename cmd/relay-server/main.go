@@ -23,6 +23,7 @@ import (
 	"relayproxy/internal/config"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
+	serverdirect "relayproxy/server/direct"
 	"relayproxy/server/gateway"
 	serverp2p "relayproxy/server/p2p"
 	serverrdp "relayproxy/server/rdp"
@@ -170,6 +171,39 @@ func main() {
 	}
 
 	var gw *gateway.Gateway
+	publicDirectEnabled := cfg.Direct.Enabled != nil && *cfg.Direct.Enabled
+	publicDirectTickets, err := serverdirect.NewTicketAuthority(serverInstanceID)
+	if err != nil {
+		log.Fatalf("[PublicDirect] Failed to initialize ticket authority: %v", err)
+	}
+	publicDirectRegistry := serverdirect.NewRegistry()
+	if err := publicDirectRegistry.SetListenerPortRange(cfg.Direct.PortStart, cfg.Direct.PortEnd); err != nil {
+		log.Fatalf("[PublicDirect] Invalid listener port policy: %v", err)
+	}
+	publicDirectVerifier := &serverdirect.Verifier{Registry: publicDirectRegistry}
+	publicDirectController := serverdirect.NewController(context.Background(), publicDirectRegistry, publicDirectVerifier, func(string) {
+		if gw != nil {
+			gw.RefreshProxyExitInventories()
+		}
+	})
+	publicDirectController.SetTicketValidator(func(_ context.Context, exitDeviceID string, validation protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
+		if strings.TrimSpace(validation.ClientDeviceID) == "" ||
+			strings.TrimSpace(validation.ExitDeviceID) != strings.TrimSpace(exitDeviceID) {
+			return nil, errors.New("public direct ticket scope is invalid")
+		}
+		authorization, err := db.PublicDirectAuthorization(validation.ClientDeviceID, exitDeviceID)
+		if err != nil {
+			return nil, err
+		}
+		if !authorization.Allowed ||
+			authorization.PolicyRevision != validation.PolicyRevision ||
+			authorization.AuthorizationRevision != validation.AuthorizationRevision {
+			return nil, errors.New("public direct authorization revision is stale")
+		}
+		policy := relayACL.Policy()
+		return &policy, nil
+	})
+	defer publicDirectController.Close()
 
 	invalidateIdentitySessions := func(identityID string) []string {
 		deviceIDs := sessionMgr.InvalidateIdentity(identityID)
@@ -178,6 +212,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 		}
 		return deviceIDs
 	}
@@ -282,6 +317,9 @@ func main() {
 	if proxyP2PCoordinator != nil {
 		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)
 	}
+	if publicDirectEnabled {
+		router.SetPublicDirectControlHandler(publicDirectController.HandleControl)
+	}
 
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
 
@@ -363,6 +401,33 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
+			if publicDirectEnabled {
+				for i := range result {
+					endpoints := publicDirectRegistry.VerifiedEndpoints(result[i].DeviceID)
+					if len(endpoints) == 0 {
+						continue
+					}
+					authorization, err := db.PublicDirectAuthorization(clientID, result[i].DeviceID)
+					if err != nil {
+						return nil, err
+					}
+					if !authorization.Allowed {
+						continue
+					}
+					ticket, expiresAt, err := publicDirectTickets.Issue(serverdirect.TicketIssue{
+						ClientDeviceID: clientID, ExitDeviceID: result[i].DeviceID,
+						PolicyRevision:        authorization.PolicyRevision,
+						AuthorizationRevision: authorization.AuthorizationRevision,
+					})
+					if err != nil {
+						return nil, err
+					}
+					result[i].Direct = &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+						Available: true, Transport: "quic", Endpoints: endpoints,
+						Ticket: ticket, TicketExpiresAt: expiresAt,
+					}}
+				}
+			}
 			if serverExit != nil {
 				authorized, err := db.AuthorizeClientExit(clientID, protocol.ServerExitDeviceID)
 				if err != nil {
@@ -390,6 +455,9 @@ func main() {
 		},
 		OnDeviceConnected: func(deviceID string) {
 			_ = db.UpdateDeviceLastSeen(deviceID)
+			// A new authenticated session invalidates endpoints verified for the
+			// previous tunnel generation until this Exit registers them again.
+			publicDirectController.InvalidateDevice(deviceID)
 		},
 		OnDeviceHeartbeat: func(deviceID string) {
 			_ = db.UpdateDeviceLastSeen(deviceID)
@@ -400,18 +468,24 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.CloseDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 		},
-		MaxConnections:          cfg.Tunnel.MaxConnections,
-		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
-		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,
-		RendezvousAddress:       rendezvousAddress,
-		RDPLeaseSec:             rdpCoordinator.LeaseSeconds(),
-		P2PEnabled:              proxyP2PCoordinator != nil,
-		P2PRendezvousAddress:    p2pRendezvousAddress,
-		P2PLeaseSec:             p2pLeaseSec,
-		P2PPortStart:            cfg.P2P.PortStart,
-		P2PPortEnd:              cfg.P2P.PortEnd,
-		P2PUPnPEnabled:          cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
+		PublicDirectEnabled:      publicDirectEnabled,
+		PublicDirectTicketIssuer: publicDirectTickets.Issuer(),
+		PublicDirectTicketKey:    publicDirectTickets.PublicKey(),
+		PublicDirectPortStart:    cfg.Direct.PortStart,
+		PublicDirectPortEnd:      cfg.Direct.PortEnd,
+		MaxConnections:           cfg.Tunnel.MaxConnections,
+		MaxConnectionsPerDevice:  cfg.Tunnel.MaxConnectionsPerDevice,
+		HeartbeatSec:             cfg.Tunnel.HeartbeatSec,
+		RendezvousAddress:        rendezvousAddress,
+		RDPLeaseSec:              rdpCoordinator.LeaseSeconds(),
+		P2PEnabled:               proxyP2PCoordinator != nil,
+		P2PRendezvousAddress:     p2pRendezvousAddress,
+		P2PLeaseSec:              p2pLeaseSec,
+		P2PPortStart:             cfg.P2P.PortStart,
+		P2PPortEnd:               cfg.P2P.PortEnd,
+		P2PUPnPEnabled:           cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 	}, sessionMgr, router)
 
 	if err := gw.Start(); err != nil {
@@ -457,6 +531,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 			gw.RefreshProxyExitInventories()
 			ingress.Reload()
 		}),
@@ -483,8 +558,25 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 			gw.RefreshProxyExitInventories()
 			ingress.CloseDevice(deviceID)
+		}),
+		api.WithPublicDirectStatus(func(deviceID string) []api.PublicDirectEndpointStatus {
+			if !publicDirectEnabled {
+				return []api.PublicDirectEndpointStatus{}
+			}
+			records := publicDirectRegistry.Snapshot(deviceID)
+			out := make([]api.PublicDirectEndpointStatus, 0, len(records))
+			for _, record := range records {
+				out = append(out, api.PublicDirectEndpointStatus{
+					Address: record.Endpoint.Address, DialAddress: record.Endpoint.DialAddress,
+					Source: record.Endpoint.Source, State: string(record.State), Verified: record.Endpoint.Verified,
+					VerifiedAt: record.VerifiedAt, ExpiresAt: record.ExpiresAt, LastError: record.LastError,
+				})
+			}
+			sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
+			return out
 		}),
 		api.WithP2PSessions(func() []api.P2PSessionRuntimeStatus {
 			if proxyP2PCoordinator == nil {

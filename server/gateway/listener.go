@@ -31,29 +31,35 @@ type GatewayConfig struct {
 	ServerInstanceID  string
 	// AllowLegacyDeviceAuth exists for compatibility tests and controlled data
 	// migration tooling. Its zero value requires the short identity ID protocol.
-	AllowLegacyDeviceAuth   bool
-	AuthorizeDevice         func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
-	ResolveIdentity         func(shortID string) (IdentityAuthorization, error)
-	AuthorizeIdentityDevice func(fingerprint string, hello protocol.DeviceHello, identity IdentityAuthorization) (DeviceAuthorization, error)
-	RecheckDevice           func(fingerprint, deviceID string) bool
-	RecheckIdentityDevice   func(fingerprint, deviceID, identityID string) bool
-	ListRDPTargets          func(controllerID string) ([]protocol.RDPTarget, error)
-	ListProxyExits          func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error)
-	OnDeviceConnected       func(deviceID string)
-	OnDeviceHeartbeat       func(deviceID string)
-	OnDeviceDisconnected    func(deviceID string)
-	MaxConnections          int // global tunnel connection limit
-	MaxConnectionsPerDevice int // per-device concurrent streams (also sent in Welcome)
-	HeartbeatSec            int
-	RendezvousAddress       string
-	RDPLeaseSec             int
-	P2PEnabled              bool
-	P2PRendezvousAddress    string
-	P2PLeaseSec             int
-	P2PPortStart            int
-	P2PPortEnd              int
-	P2PUPnPEnabled          bool
-	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
+	AllowLegacyDeviceAuth    bool
+	AuthorizeDevice          func(fingerprint string, hello protocol.DeviceHello) (DeviceAuthorization, error)
+	ResolveIdentity          func(shortID string) (IdentityAuthorization, error)
+	AuthorizeIdentityDevice  func(fingerprint string, hello protocol.DeviceHello, identity IdentityAuthorization) (DeviceAuthorization, error)
+	RecheckDevice            func(fingerprint, deviceID string) bool
+	RecheckIdentityDevice    func(fingerprint, deviceID, identityID string) bool
+	ListRDPTargets           func(controllerID string) ([]protocol.RDPTarget, error)
+	ListProxyExits           func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error)
+	OnDeviceConnected        func(deviceID string)
+	OnDeviceHeartbeat        func(deviceID string)
+	OnDeviceDisconnected     func(deviceID string)
+	MaxConnections           int // global tunnel connection limit
+	MaxConnectionsPerDevice  int // per-device concurrent streams (also sent in Welcome)
+	HeartbeatSec             int
+	RendezvousAddress        string
+	RDPLeaseSec              int
+	P2PEnabled               bool
+	P2PRendezvousAddress     string
+	P2PLeaseSec              int
+	P2PPortStart             int
+	P2PPortEnd               int
+	P2PUPnPEnabled           bool
+	PublicDirectEnabled      bool
+	PublicDirectTicketIssuer string
+	PublicDirectTicketKey    []byte
+	PublicDirectPortStart    int
+	PublicDirectPortEnd      int
+	HandshakeTimeout         time.Duration // covers control stream/header/Hello/Welcome
+
 }
 
 type IdentityAuthorization struct {
@@ -541,6 +547,9 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	if g.cfg.P2PEnabled {
 		capabilities = append(capabilities, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
+	if g.cfg.PublicDirectEnabled {
+		capabilities = append(capabilities, protocol.CapabilityProxyPublicDirect)
+	}
 	var proxyExits *[]protocol.ProxyExit
 	if containsCapability(authorization.ApprovedCapabilities, protocol.CapabilityProxyClient) && g.cfg.ListProxyExits != nil {
 		exits, err := g.cfg.ListProxyExits(authorization.DeviceID, authorization.OwnerUserID, authorization.IdentityID)
@@ -556,31 +565,36 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	sessionID := "sess_" + uuid.New().String()
 	heartbeatSec := g.heartbeatForDevice(hello, authorization.ApprovedCapabilities)
 	welcome := protocol.DeviceAccepted{
-		State:                 "approved",
-		DeviceID:              authorization.DeviceID,
-		IdentityName:          authorization.IdentityName,
-		PolicyRevision:        authorization.PolicyRevision,
-		ApprovedCapabilities:  authorization.ApprovedCapabilities,
-		RDPTargets:            authorization.RDPTargets,
-		ProxyExits:            proxyExits,
-		ProxyExitRevision:     g.proxyExitRevision.Load(),
-		SessionID:             sessionID,
-		HeartbeatSec:          heartbeatSec,
-		MaxConnections:        g.cfg.MaxConnectionsPerDevice,
-		ServerTime:            time.Now().Unix(),
-		Success:               true,
-		TransportCapabilities: capabilities,
-		RendezvousAddress:     g.cfg.RendezvousAddress,
-		RDPLeaseSec:           g.cfg.RDPLeaseSec,
-		P2PRendezvousAddress:  g.cfg.P2PRendezvousAddress,
-		P2PLeaseSec:           g.cfg.P2PLeaseSec,
-		P2PPortStart:          g.cfg.P2PPortStart,
-		P2PPortEnd:            g.cfg.P2PPortEnd,
-		P2PUPnPEnabled:        g.cfg.P2PUPnPEnabled,
+		State:                    "approved",
+		DeviceID:                 authorization.DeviceID,
+		IdentityName:             authorization.IdentityName,
+		PolicyRevision:           authorization.PolicyRevision,
+		ApprovedCapabilities:     authorization.ApprovedCapabilities,
+		RDPTargets:               authorization.RDPTargets,
+		ProxyExits:               proxyExits,
+		ProxyExitRevision:        g.proxyExitRevision.Load(),
+		SessionID:                sessionID,
+		HeartbeatSec:             heartbeatSec,
+		MaxConnections:           g.cfg.MaxConnectionsPerDevice,
+		ServerTime:               time.Now().Unix(),
+		Success:                  true,
+		TransportCapabilities:    capabilities,
+		RendezvousAddress:        g.cfg.RendezvousAddress,
+		RDPLeaseSec:              g.cfg.RDPLeaseSec,
+		P2PRendezvousAddress:     g.cfg.P2PRendezvousAddress,
+		P2PLeaseSec:              g.cfg.P2PLeaseSec,
+		P2PPortStart:             g.cfg.P2PPortStart,
+		P2PPortEnd:               g.cfg.P2PPortEnd,
+		P2PUPnPEnabled:           g.cfg.P2PUPnPEnabled,
+		PublicDirectTicketIssuer: g.cfg.PublicDirectTicketIssuer,
+		PublicDirectTicketKey:    append([]byte(nil), g.cfg.PublicDirectTicketKey...),
+		PublicDirectPortStart:    g.cfg.PublicDirectPortStart,
+		PublicDirectPortEnd:      g.cfg.PublicDirectPortEnd,
 	}
 
 	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)
 	deviceSession := &session.DeviceSession{
+		SessionID:           sessionID,
 		DeviceID:            authorization.DeviceID,
 		DeviceName:          hello.DeviceName,
 		Fingerprint:         fingerprint,

@@ -151,6 +151,9 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	want.P2P.PortStart = 30000
 	want.P2P.PortEnd = 30100
 	want.P2P.UPnPEnabled = true
+	want.Direct.Enabled = false
+	want.Direct.PortStart = 31000
+	want.Direct.PortEnd = 31100
 	request := map[string]any{"revision": initial.Revision, "config": want}
 	if rec = submit(request, "http://other.example"); rec.Code != http.StatusForbidden {
 		t.Fatal("cross-origin configuration update accepted")
@@ -168,6 +171,8 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 		len(saved.Config.RDPIngress.SourceCIDRs) != 1 || saved.Config.P2P.RendezvousListen != ":3479" ||
 		saved.Config.P2P.RendezvousAdvertise != "relay.example.com:3479" ||
 		saved.Config.P2P.PortStart != 30000 || saved.Config.P2P.PortEnd != 30100 || !saved.Config.P2P.UPnPEnabled ||
+		saved.Config.Direct.Enabled || saved.Config.Direct.PortStart != 31000 || saved.Config.Direct.PortEnd != 31100 ||
+		!saved.Runtime.Direct.Enabled || saved.Runtime.Direct.PortStart != 0 || saved.Runtime.Direct.PortEnd != 0 ||
 		saved.Runtime.P2P.RendezvousListen != "" || saved.Runtime.P2P.RendezvousAdvertise != "" ||
 		saved.Runtime.P2P.PortStart != 0 || saved.Runtime.P2P.PortEnd != 0 || saved.Runtime.P2P.UPnPEnabled {
 		t.Fatalf("invalid saved/runtime response: %+v", saved)
@@ -201,7 +206,9 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 		loaded.RDP.Ingress.PortStart != 34000 || loaded.RDP.Ingress.PortEnd != 34100 ||
 		loaded.P2P.RendezvousListen != ":3479" || loaded.P2P.RendezvousAdvertise != "relay.example.com:3479" ||
 		loaded.P2P.PortStart != 30000 || loaded.P2P.PortEnd != 30100 ||
-		loaded.P2P.UPnPEnabled == nil || !*loaded.P2P.UPnPEnabled {
+		loaded.P2P.UPnPEnabled == nil || !*loaded.P2P.UPnPEnabled ||
+		loaded.Direct.Enabled == nil || *loaded.Direct.Enabled ||
+		loaded.Direct.PortStart != 31000 || loaded.Direct.PortEnd != 31100 {
 		t.Fatalf("saved configuration did not round-trip: %v", err)
 	}
 }

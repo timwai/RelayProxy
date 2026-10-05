@@ -100,6 +100,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Mode = strings.ToUpper(strings.TrimSpace(c.Mode))
 	c.Transport.Mode = strings.ToLower(strings.TrimSpace(c.Transport.Mode))
 	c.P2P.Mode = strings.ToLower(strings.TrimSpace(c.P2P.Mode))
+	c.Direct.Public.Advertise = strings.TrimSpace(c.Direct.Public.Advertise)
 	c.Network.Mode = strings.ToLower(strings.TrimSpace(c.Network.Mode))
 	// The short-lived global handle_direct_connections setting was replaced by
 	// per-routing-rule handle_direct. Keep accepting old files, then drop it.
@@ -136,9 +137,9 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 		return fmt.Errorf("transport.mode 必须是 auto / quic_only / tcp_only")
 	}
 	switch c.P2P.Mode {
-	case "auto", "relay_only", "p2p_only":
+	case "auto", "direct_only", "relay_only", "p2p_only":
 	default:
-		return fmt.Errorf("p2p.mode 必须是 auto / relay_only / p2p_only")
+		return fmt.Errorf("p2p.mode 必须是 auto / direct_only / relay_only / p2p_only")
 	}
 	if c.P2P.PunchTimeoutMs < 100 || c.P2P.PunchTimeoutMs > 10000 {
 		return fmt.Errorf("p2p.punch_timeout_ms 必须在 100-10000 之间")
@@ -151,6 +152,16 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	}
 	if c.P2P.MaxExitSessions < 1 || c.P2P.MaxExitSessions > 32 {
 		return fmt.Errorf("p2p.max_exit_sessions 必须在 1-32 之间")
+	}
+	if c.Direct.Public.Advertise != "" {
+		host, rawPort, err := net.SplitHostPort(c.Direct.Public.Advertise)
+		if err != nil || strings.TrimSpace(host) == "" || strings.ContainsAny(host, " /\\\t\r\n") {
+			return fmt.Errorf("direct.public.advertise 必须是可路由的 host:port")
+		}
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("direct.public.advertise 端口必须在 1-65535 之间")
+		}
 	}
 	for _, item := range []struct {
 		name string

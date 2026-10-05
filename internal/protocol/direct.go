@@ -1,0 +1,123 @@
+package protocol
+
+import "relayproxy/internal/acl"
+
+// ProxyPath identifies the concrete transport used to reach a selected proxy
+// Exit. Routing still chooses the Exit; this value describes only the data path.
+type ProxyPath string
+
+const (
+	proxyPathPublicDirectQUIC = "public_direct_quic"
+	proxyPathP2PQUIC          = "p2p_quic"
+	proxyPathRelayQUIC        = "relay_quic"
+	proxyPathRelayTLS         = "relay_tls"
+
+	ProxyPathPublicDirectQUIC ProxyPath = proxyPathPublicDirectQUIC
+	ProxyPathP2PQUIC          ProxyPath = proxyPathP2PQUIC
+	ProxyPathRelayQUIC        ProxyPath = proxyPathRelayQUIC
+	ProxyPathRelayTLS         ProxyPath = proxyPathRelayTLS
+)
+
+func (p ProxyPath) String() string { return string(p) }
+
+func (p ProxyPath) IsDirect() bool {
+	return p == ProxyPathPublicDirectQUIC || p == ProxyPathP2PQUIC
+}
+
+func (p ProxyPath) IsRelay() bool {
+	return p == ProxyPathRelayQUIC || p == ProxyPathRelayTLS
+}
+
+const PublicDirectAuthVersion = 1
+
+// PublicDirectAuthRequest authenticates a newly established Public Direct
+// connection before any proxy stream is accepted. Ticket is intentionally
+// opaque here so Phase 4 can replace development test credentials with
+// Server-signed short-lived tickets without changing the transport handshake.
+type PublicDirectAuthRequest struct {
+	Version        int    `json:"version"`
+	ClientDeviceID string `json:"clientDeviceId"`
+	ExitDeviceID   string `json:"exitDeviceId"`
+	Ticket         []byte `json:"ticket"`
+}
+
+type PublicDirectAuthResponse struct {
+	Success      bool   `json:"success"`
+	ErrorCode    string `json:"errorCode,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}
+
+const (
+	CapabilityProxyPublicDirect = "proxy_public_direct_v1"
+
+	PublicDirectControlRegister       = "register"
+	PublicDirectControlValidateTicket = "validate_ticket"
+
+	PublicDirectEndpointProtocolUDP = "udp"
+	PublicDirectEndpointObserved    = "observed"
+	PublicDirectEndpointIPv6        = "ipv6"
+	PublicDirectEndpointManual      = "manual"
+
+	PublicDirectHandshakeAuth  = "auth"
+	PublicDirectHandshakeProbe = "probe"
+)
+
+type PublicDirectEndpointCandidate struct {
+	Protocol string `json:"protocol"`
+	Address  string `json:"address"`
+	Source   string `json:"source"`
+}
+
+type PublicDirectEndpoint struct {
+	Protocol        string `json:"protocol"`
+	Address         string `json:"address"`
+	DialAddress     string `json:"dialAddress,omitempty"`
+	Source          string `json:"source"`
+	Verified        bool   `json:"verified"`
+	CertFingerprint string `json:"certFingerprint,omitempty"`
+}
+
+type PublicDirectTicketValidationRequest struct {
+	ClientDeviceID        string `json:"clientDeviceId"`
+	ExitDeviceID          string `json:"exitDeviceId"`
+	PolicyRevision        int64  `json:"policyRevision"`
+	AuthorizationRevision int64  `json:"authorizationRevision"`
+}
+
+type PublicDirectRegistrationRequest struct {
+	Operation        string                               `json:"operation,omitempty"`
+	ListenerPort     uint16                               `json:"listenerPort,omitempty"`
+	CertFingerprint  string                               `json:"certFingerprint,omitempty"`
+	NetworkEpoch     uint64                               `json:"networkEpoch,omitempty"`
+	Candidates       []PublicDirectEndpointCandidate      `json:"candidates,omitempty"`
+	TicketValidation *PublicDirectTicketValidationRequest `json:"ticketValidation,omitempty"`
+}
+
+type PublicDirectRegistrationResponse struct {
+	Success      bool                   `json:"success"`
+	Endpoints    []PublicDirectEndpoint `json:"endpoints,omitempty"`
+	RelayPolicy  *acl.Policy            `json:"relayPolicy,omitempty"`
+	ErrorCode    string                 `json:"errorCode,omitempty"`
+	ErrorMessage string                 `json:"errorMessage,omitempty"`
+}
+
+type PublicDirectProbeRequest struct {
+	Nonce []byte `json:"nonce"`
+}
+
+type PublicDirectProbeResponse struct {
+	Nonce []byte `json:"nonce"`
+}
+
+type PublicDirectHandshakeRequest struct {
+	Type  string                    `json:"type"`
+	Auth  *PublicDirectAuthRequest  `json:"auth,omitempty"`
+	Probe *PublicDirectProbeRequest `json:"probe,omitempty"`
+}
+
+type PublicDirectHandshakeResponse struct {
+	Success      bool                       `json:"success"`
+	ErrorCode    string                     `json:"errorCode,omitempty"`
+	ErrorMessage string                     `json:"errorMessage,omitempty"`
+	Probe        *PublicDirectProbeResponse `json:"probe,omitempty"`
+}

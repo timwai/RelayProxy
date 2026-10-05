@@ -14,6 +14,7 @@
     settings: [
       { page: 'settings', label: '管理访问', admin: true, settingsTab: 'admin' },
       { page: 'settings', label: '隧道', admin: true, settingsTab: 'tunnel' },
+      { page: 'settings', label: '公网直连', admin: true, settingsTab: 'direct' },
       { page: 'settings', label: 'P2P', admin: true, settingsTab: 'p2p' },
       { page: 'settings', label: 'RDP', admin: true, settingsTab: 'rdp' },
       { page: 'settings', label: 'Server 出口', admin: true, settingsTab: 'exit' },
@@ -22,7 +23,7 @@
     ]
   };
   const pageSections = { overview:'overview', devices:'devices', identities:'identities', exits:'devices', sessions:'connections', messages:'messages', 'rdp-ingress':'rdp', settings:'settings' };
-  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', p2p: 'P2P 直连', rdp: 'RDP 公网入口', database: '数据库' };
+  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', direct: '公网直连', p2p: 'P2P 直连', rdp: 'RDP 公网入口', database: '数据库' };
   const roleNames = { CLIENT: '客户端', EXIT: '出口节点', BOTH: '客户端 + 出口' };
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
   const capabilityNames = { 'proxy.client': '代理客户端', 'proxy.exit': '出口节点', 'rdp.controller': 'RDP 控制端', 'rdp.host': 'RDP 主机', 'rdp.public': 'RDP 公网入口' };
@@ -691,17 +692,58 @@
       return '<tr><td><span class="device-name">' + esc(item.deviceName || '未命名设备') + '</span><span class="device-id mono">' + esc(identity) + ' · ' + esc(item.fingerprint.slice(0, 16)) + '…</span></td><td>' + esc([item.platform, item.arch, item.clientVersion].filter(Boolean).join(' / ') || '—') + '</td><td>' + esc(caps) + '</td><td><small>' + esc(date(item.firstSeenAt)) + '<br>' + esc(date(item.lastSeenAt)) + '</small></td><td class="right"><button class="small-button primary" data-enrollment-manage="' + esc(item.id) + '">审批能力</button> <button class="small-button" data-enrollment-reject="' + esc(item.id) + '">拒绝</button></td></tr>';
     }).join('') : emptyRow(5, '没有待审批设备', '新设备使用身份 ID 发起申请，审批后才能连接');
   }
+  function publicDirectStatusHTML(value) {
+    if (!value) return '<div class="notice subtle"><strong>Public Direct</strong><small>Server 本机出口不使用设备公网直连。</small></div>';
+    const endpoints = Array.isArray(value.endpoints) ? value.endpoints : [];
+    const stateNames = {unknown:'待验证', verifying:'验证中', verified:'已验证', failed:'验证失败', expired:'已过期'};
+    const rows = endpoints.map(item => {
+      const usable = !!item.verified;
+      const stateName = item.state === 'verifying' && usable
+        ? '复验中 · 可用'
+        : (stateNames[item.state] || item.state || '未知');
+      const stateClass = usable ? 'success' : item.state === 'failed' ? 'warning-badge' : 'neutral';
+      const time = item.verifiedAt ? ' · 验证 ' + esc(date(item.verifiedAt)) : '';
+      const dial = item.dialAddress && item.dialAddress !== item.address ? '<small>实际拨号：<span class="mono">' + esc(item.dialAddress) + '</span></small>' : '';
+      const reason = item.lastError ? '<small>' + esc(item.lastError) + '</small>' : '';
+      return '<div><span class="mono">' + esc(item.address) + '</span> ' + badge(stateName, stateClass) + '<small>' + esc(item.source || '') + time + '</small>' + dial + reason + '</div>';
+    }).join('');
+    const summary = value.available ? badge('Public Direct 可用', 'success') : badge(endpoints.length ? 'Public Direct 未就绪' : 'Public Direct 未注册', endpoints.length ? 'warning-badge' : 'neutral');
+    return '<div class="notice subtle"><strong>' + summary + '</strong><small>已验证端点 ' + esc(value.verifiedEndpointCount || 0) + ' 个</small>' + (rows ? '<div class="direct-endpoints">' + rows + '</div>' : '') + '</div>';
+  }
   function renderExits() {
-    $('exits-grid').innerHTML = state.exits.length ? state.exits.map(e => '<article class="panel exit-card"><div class="exit-header"><div><h3>' + esc(e.deviceName || '未命名出口') + '</h3><span class="device-id mono">' + esc(e.deviceId) + '</span></div>' + badge('在线', 'success') + '</div><div class="detail-list">' + details([['传输方式', String(e.transport || '—').toUpperCase()], ['活跃流', e.activeStreams], ['目标权限', '服务端与出口本地共同限制']]) + '</div><button data-copy-exit="' + esc(e.deviceId) + '">复制出口 ID</button></article>').join('') : '<div class="panel empty"><strong>暂无在线出口</strong>将已配对设备设为「出口」或「客户端 + 出口」，并开启出口服务。</div>';
+    $('exits-grid').innerHTML = state.exits.length ? state.exits.map(e => {
+      const direct = publicDirectStatusHTML(e.publicDirect);
+      return '<article class="panel exit-card"><div class="exit-header"><div><h3>' + esc(e.deviceName || '未命名出口') + '</h3><span class="device-id mono">' + esc(e.deviceId) + '</span></div>' + badge('在线', 'success') + '</div><div class="detail-list">' + details([['传输方式', String(e.transport || '—').toUpperCase()], ['活跃流', e.activeStreams], ['目标权限', '服务端与出口本地共同限制']]) + '</div>' + direct + '<button data-copy-exit="' + esc(e.deviceId) + '">复制出口 ID</button></article>';
+    }).join('') : '<div class="panel empty"><strong>暂无在线出口</strong>将已配对设备设为「出口」或「客户端 + 出口」，并开启出口服务。</div>';
   }
   function renderSessions() {
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };
+    const directNames = {public_direct_quic:'Public Direct QUIC',p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
     $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => {
       const relay = s.tunnelDiagnostics && s.tunnelDiagnostics.quic;
       const peer = s.peerDiagnostics && s.peerDiagnostics.payload;
-      const peerQuic = peer && peer.status && peer.status.tunnelDiagnostics && peer.status.tunnelDiagnostics.quic;
+      const peerStatus = peer && peer.status;
+      const peerQuic = peerStatus && peerStatus.tunnelDiagnostics && peerStatus.tunnelDiagnostics.quic;
+      const directPath = peerStatus && peerStatus.directPath;
+      const directState = peerStatus && peerStatus.directState;
+      const directRttMs = peerStatus && Number(peerStatus.directRttMs || 0);
+      const directError = peerStatus && String(peerStatus.directError || '');
+      const directEndpoint = peerStatus && String(peerStatus.directEndpoint || '');
+      const directFallbackCount = peerStatus && Number(peerStatus.directFallbackCount || 0);
+      const directBytesUp = peerStatus && Number(peerStatus.directBytesUp || 0);
+      const directBytesDown = peerStatus && Number(peerStatus.directBytesDown || 0);
+      const direct = directPath
+        ? '<small>当前路径：' + esc(directNames[directPath] || directPath) +
+          (directState ? ' · ' + esc(directState) : '') +
+          (directRttMs > 0 ? ' · RTT ' + esc(directRttMs) + ' ms' : '') +
+          (directFallbackCount > 0 ? ' · 回退 ' + esc(directFallbackCount) + ' 次' : '') +
+          '</small>' +
+          (directEndpoint ? '<small>直连端点：<span class="mono">' + esc(directEndpoint) + '</span></small>' : '') +
+          ((directBytesUp > 0 || directBytesDown > 0) ? '<small>直连流量：<span class="mono">' + bytes(directBytesUp) + ' / ' + bytes(directBytesDown) + '</span></small>' : '') +
+          (directError ? '<small>直连错误：' + esc(directError) + '</small>' : '')
+        : '';
       const diagnostic = relay ? '<span class="mono">Relay RTT ' + esc(relay.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(relay.sent_packets_lost || 0) + '</span>' +
-        (peerQuic ? '<small>设备 RTT ' + esc(peerQuic.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(peerQuic.sent_packets_lost || 0) + '</small>' : '<small>等待设备心跳诊断</small>') : '<span class="muted">当前传输无 QUIC 统计</span>';
+        (peerQuic ? '<small>设备 Relay RTT ' + esc(peerQuic.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(peerQuic.sent_packets_lost || 0) + '</small>' : '<small>等待设备心跳诊断</small>') + direct : '<span class="muted">当前传输无 QUIC 统计</span>' + direct;
       return '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td><td>' + diagnostic + '</td></tr>';
     }).join('') : emptyRow(7, '当前没有活跃流', '设备发起代理连接后会显示在这里');
   }
@@ -1109,6 +1151,7 @@
       rows.push(['TCP 隧道', (runtime.tunnel.tlsEnabled ? 'TLS · ' : 'TCP · ') + runtime.tunnel.tcpListen]);
       rows.push(['QUIC 隧道', runtime.tunnel.tlsEnabled ? runtime.tunnel.quicListen : '未启用']);
       rows.push(['Server 出口', runtime.serverExit && runtime.serverExit.enabled ? '已启用 · ID server · ' + String(runtime.serverExit.upstreamMode || 'direct').toUpperCase() : '未启用']);
+      rows.push(['公网直连', runtime.direct && runtime.direct.enabled ? '已启用 · UDP ' + (runtime.direct.portStart || 0) + '-' + (runtime.direct.portEnd || 0) : '未启用']);
       rows.push(['启动时间', date(state.settings.info.startedAt)]);
       const cert = state.settings.info.certificate;
       $('certificate-summary').innerHTML = cert ? '<strong>' + esc(cert.dnsNames.length ? cert.dnsNames.join(' · ') : cert.subject) + '</strong><br>签发者：' + esc(cert.issuer) + '<br>有效期：' + esc(date(cert.notBefore)) + ' — ' + esc(date(cert.notAfter)) + '<div class="mono">SHA256 ' + esc(cert.sha256) + '</div>' : '当前进程没有加载 TLS 证书。';
@@ -1185,7 +1228,7 @@
     if (manual && !errors.length) { toast(state.dirty ? '数据已刷新，未保存的配置已保留' : '数据已刷新'); }
   }
   function readSettingsForm() {
-    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, serverExit: {}, rdpIngress: {}, p2p: {} };
+    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, serverExit: {}, rdpIngress: {}, p2p: {}, direct: {} };
     all('[data-setting]').forEach(el => {
       const [group, key] = el.dataset.setting.split('.');
       let value = el.type === 'checkbox' ? el.checked : el.value.trim();
@@ -1250,6 +1293,12 @@
     $('listen-hint').textContent = cfg.admin.listen.startsWith('127.') || cfg.admin.listen.startsWith('[::1]') ? '当前地址仅允许从服务端本机访问。' : '监听所有接口时，预览使用你当前访问的主机名或 IP。更改协议或端口后，请在重启完成后使用新地址。';
     $('quic-listen').disabled = !cfg.tunnel.tlsEnabled;
     $('tunnel-tls-help').textContent = cfg.tunnel.tlsEnabled ? '开启后同时提供加密 TCP 和 QUIC 隧道。' : '关闭 TLS 后仍可使用 TCP，但隧道内容不会被 TLS 加密；QUIC 也会关闭。';
+    const directEnabled = !!cfg.direct.enabled;
+    $('direct-port-start').disabled = !directEnabled;
+    $('direct-port-end').disabled = !directEnabled;
+    $('direct-hint').textContent = directEnabled
+      ? 'Server 会验证 Agent 公网 UDP 端点后才下发给客户端；0 / 0 表示由 Agent 使用系统随机端口。'
+      : '关闭后 Server 不再广告 Public Direct 能力、验证端点或签发直连 Ticket。';
     $('acl-mode-hint').textContent = cfg.relayACL.accessMode === 'allow' ? '允许列表为空时，所有目标都会被拒绝。匹配目标仍需满足上方互联网 / 私网 / 回环权限。' : cfg.relayACL.accessMode === 'deny' ? '拒绝列表匹配项会被拦截；其余目标仍需满足上方权限。' : '域名和 IP 列表暂不参与筛选，保留内容便于下次启用。上方网络权限仍然有效。';
     const serverExitEnabled = !!cfg.serverExit.enabled;
     const serverExitProxy = cfg.serverExit.upstreamMode && cfg.serverExit.upstreamMode !== 'direct';

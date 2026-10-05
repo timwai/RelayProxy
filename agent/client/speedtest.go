@@ -25,7 +25,7 @@ type SpeedTestResult struct {
 }
 
 func (d *TunnelDialer) runSpeedTestDirection(ctx context.Context, exitID, direction string, duration time.Duration) (SpeedTestDirectionResult, error) {
-	sess, stream, direct, err := d.openProxyStream(ctx, exitID)
+	selected, stream, err := d.openProxyStream(ctx, exitID)
 	if err != nil {
 		return SpeedTestDirectionResult{}, err
 	}
@@ -44,7 +44,7 @@ func (d *TunnelDialer) runSpeedTestDirection(ctx context.Context, exitID, direct
 	measurement, err := speedtest.Run(ctx, stream, protocol.SpeedTestRequest{
 		RequestID: requestID, Direction: direction, DurationMS: int(duration / time.Millisecond),
 	})
-	return SpeedTestDirectionResult{Path: tcpSessionPath(sess, direct), Measurement: measurement}, err
+	return SpeedTestDirectionResult{Path: selected.Path.String(), Measurement: measurement}, err
 }
 
 // RunSpeedTest measures both directions through one authorized exit. Each

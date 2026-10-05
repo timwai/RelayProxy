@@ -17,6 +17,7 @@ import (
 	"relayproxy/agent/divert"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/config"
+	"relayproxy/internal/protocol"
 )
 
 func newTestBridge(t *testing.T) *UIBridge {
@@ -468,5 +469,35 @@ func TestConcurrentConfigUpdatesDoNotLoseUnrelatedFields(t *testing.T) {
 	cfg, err := config.LoadAgentConfig(b.configPath)
 	if err != nil || cfg.GUI.Theme != "light" || cfg.Server.Address != "new.example.test" {
 		t.Fatalf("concurrent updates lost fields: config = %+v, error = %v", cfg, err)
+	}
+}
+
+func TestProxyExitUIRedactionKeepsTicketInternal(t *testing.T) {
+	ticket := []byte("secret-direct-ticket")
+	source := []protocol.ProxyExit{{
+		DeviceID: "exit-1", Name: "Exit", Online: true,
+		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+			Available: true, Transport: "quic", Ticket: ticket, TicketExpiresAt: 123,
+			Endpoints: []protocol.PublicDirectEndpoint{{
+				Protocol: protocol.PublicDirectEndpointProtocolUDP,
+				Address:  "203.0.113.20:35820", Source: protocol.PublicDirectEndpointManual,
+				Verified: true, CertFingerprint: "sha256:test",
+			}},
+		}},
+	}}
+	redacted := redactProxyExitSecrets(source)
+	if len(redacted) != 1 || redacted[0].Direct == nil || redacted[0].Direct.Public == nil {
+		t.Fatalf("redacted inventory=%+v", redacted)
+	}
+	if len(redacted[0].Direct.Public.Ticket) != 0 {
+		t.Fatal("public direct ticket leaked into UI inventory")
+	}
+	if redacted[0].Direct.Public.TicketExpiresAt != 123 ||
+		len(redacted[0].Direct.Public.Endpoints) != 1 ||
+		redacted[0].Direct.Public.Endpoints[0].CertFingerprint != "sha256:test" {
+		t.Fatalf("non-secret direct metadata was lost: %+v", redacted[0].Direct.Public)
+	}
+	if string(source[0].Direct.Public.Ticket) != string(ticket) {
+		t.Fatal("redaction mutated the Agent's internal ticket")
 	}
 }

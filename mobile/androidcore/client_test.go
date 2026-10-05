@@ -201,3 +201,78 @@ func TestAndroidLegacyProxyExitRefreshKeepsRevision(t *testing.T) {
 		t.Fatalf("legacy Android refresh reset revision: %d", client.proxyExitRevision)
 	}
 }
+
+func TestAndroidStatusRedactsPublicDirectTicket(t *testing.T) {
+	source := []protocol.ProxyExit{{
+		DeviceID: "exit-direct", Online: true,
+		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+			Available: true, Transport: "quic",
+			Ticket: []byte("android-secret-ticket"), TicketExpiresAt: 456,
+			Endpoints: []protocol.PublicDirectEndpoint{{
+				Protocol: protocol.PublicDirectEndpointProtocolUDP,
+				Address:  "203.0.113.20:35820", Source: protocol.PublicDirectEndpointManual,
+				Verified: true, CertFingerprint: "sha256:test",
+			}},
+		}},
+	}}
+	redacted := redactProxyExitTickets(source)
+	if len(redacted) != 1 || redacted[0].Direct == nil || redacted[0].Direct.Public == nil {
+		t.Fatalf("redacted exits=%+v", redacted)
+	}
+	if len(redacted[0].Direct.Public.Ticket) != 0 {
+		t.Fatal("Android UI inventory exposed the Public Direct ticket")
+	}
+	if redacted[0].Direct.Public.TicketExpiresAt != 456 ||
+		redacted[0].Direct.Public.Endpoints[0].CertFingerprint != "sha256:test" {
+		t.Fatalf("redaction removed non-secret metadata: %+v", redacted[0].Direct.Public)
+	}
+	if string(source[0].Direct.Public.Ticket) != "android-secret-ticket" {
+		t.Fatal("Android redaction mutated the internal ticket")
+	}
+}
+
+func TestAndroidProxyPathModeNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "default",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`,
+			want: "auto",
+		},
+		{
+			name: "direct only",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"direct_only"}`,
+			want: "direct_only",
+		},
+		{
+			name: "p2p only",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"p2p_only","proxyP2pEnabled":true}`,
+			want: "p2p_only",
+		},
+		{
+			name: "relay only",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"relay_only"}`,
+			want: "relay_only",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := normalizeConfig(tc.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ProxyPathMode != tc.want {
+				t.Fatalf("proxyPathMode=%q, want %q", cfg.ProxyPathMode, tc.want)
+			}
+		})
+	}
+
+	if _, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"invalid"}`); err == nil {
+		t.Fatal("invalid proxyPathMode was accepted")
+	}
+	if _, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"p2p_only","proxyP2pEnabled":false}`); err == nil {
+		t.Fatal("p2p_only without P2P enabled was accepted")
+	}
+}

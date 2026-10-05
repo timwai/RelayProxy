@@ -583,6 +583,8 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 			a.readySession = nil
 			a.ctrlStream = nil
 			a.approvedMode = ""
+			a.publicDirectAuthz = nil
+			a.publicDirectKey = nil
 			a.handshakeOK.Store(false)
 		}
 		a.mu.Unlock()

@@ -1976,6 +1976,7 @@ class MainActivity : Activity() {
         val activeNetwork = obj?.optString("activeNetwork", "") ?: ""
         val p2pState = obj?.optString("p2pState", "") ?: ""
         val p2pPath = obj?.optString("p2pPath", "") ?: ""
+        val p2pError = obj?.optString("p2pError", "") ?: ""
         val p2pRttMs = obj?.optLong("p2pRttMs", 0) ?: 0
         val selectedExit = obj?.optString("selectedExit", "") ?: ""
         val powerConstrained = obj?.optBoolean("powerConstrained", false) ?: false
@@ -2057,6 +2058,7 @@ class MainActivity : Activity() {
         val err = obj?.optString("lastError", "").orEmpty()
         statusDetail.text = when {
             err.isNotBlank() -> err
+            state == "CONNECTED" && p2pError.isNotBlank() -> "P2P: $p2pError"
             vpnState == "RUNNING" -> "VPN TUN 数据隧道接管正常"
             desiredExit && approved -> "后台出口服务正常运行中"
             approval == "pending" -> "新设备已连接，等待服务端审批"
@@ -2071,6 +2073,10 @@ class MainActivity : Activity() {
                 p2pBadge.text = "P2P QUIC · ${p2pRttMs}ms"
                 p2pBadge.setTextColor(UiPalette.success)
                 p2pBadge.background = UiKit.rounded(this, UiPalette.successSoft, 8, UiPalette.successSoftBorder)
+            } else if (p2pError.isNotBlank()) {
+                p2pBadge.text = "P2P 失败"
+                p2pBadge.setTextColor(UiPalette.warning)
+                p2pBadge.background = UiKit.rounded(this, UiPalette.warningSoft, 8, UiPalette.warningSoftBorder)
             } else if (state == "CONNECTED") {
                 p2pBadge.text = "Relay 转发"
                 p2pBadge.setTextColor(UiPalette.brand)

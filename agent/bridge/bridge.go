@@ -89,6 +89,9 @@ func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {
 }
 
 func redactProxyExitSecrets(exits []protocol.ProxyExit) []protocol.ProxyExit {
+	if len(exits) == 0 {
+		return []protocol.ProxyExit{}
+	}
 	result := append([]protocol.ProxyExit(nil), exits...)
 	for i := range result {
 		if result[i].Direct == nil {

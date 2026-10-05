@@ -53,6 +53,7 @@ type GatewayConfig struct {
 	P2PPortStart            int
 	P2PPortEnd              int
 	P2PUPnPEnabled          bool
+	PublicDirectEnabled     bool
 	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
 }
 
@@ -540,6 +541,9 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	if g.cfg.P2PEnabled {
 		capabilities = append(capabilities, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
+	}
+	if g.cfg.PublicDirectEnabled {
+		capabilities = append(capabilities, protocol.CapabilityProxyPublicDirect)
 	}
 	var proxyExits *[]protocol.ProxyExit
 	if containsCapability(authorization.ApprovedCapabilities, protocol.CapabilityProxyClient) && g.cfg.ListProxyExits != nil {

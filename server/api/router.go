@@ -94,6 +94,7 @@ type PublicDirectEndpointStatus struct {
 	DialAddress string    `json:"dialAddress,omitempty"`
 	Source      string    `json:"source"`
 	State       string    `json:"state"`
+	Verified    bool      `json:"verified"`
 	VerifiedAt  time.Time `json:"verifiedAt,omitempty"`
 	ExpiresAt   time.Time `json:"expiresAt,omitempty"`
 	LastError   string    `json:"lastError,omitempty"`
@@ -1249,7 +1250,7 @@ func (r *Router) handleListExits(w http.ResponseWriter, req *http.Request) {
 		}
 		verifiedDirect := 0
 		for _, endpoint := range directEndpoints {
-			if endpoint.State == "verified" {
+			if endpoint.Verified {
 				verifiedDirect++
 			}
 		}

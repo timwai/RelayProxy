@@ -16,11 +16,12 @@ import (
 const defaultAuthTimeout = 5 * time.Second
 
 type ListenerConfig struct {
-	ListenAddress string
-	TLSConfig     *tls.Config
-	QUICConfig    *quic.Config
-	Authenticator Authenticator
-	AuthTimeout   time.Duration
+	ListenAddress         string
+	TLSConfig             *tls.Config
+	QUICConfig            *quic.Config
+	Authenticator         Authenticator
+	AuthTimeout           time.Duration
+	AuthAttemptsPerMinute int
 }
 
 type AcceptedSession struct {
@@ -33,6 +34,7 @@ type PublicListener struct {
 	transport     *tunnel.DirectQUICListener
 	authenticator Authenticator
 	authTimeout   time.Duration
+	limiter       *handshakeLimiter
 }
 
 func Listen(config ListenerConfig) (*PublicListener, error) {
@@ -50,7 +52,10 @@ func Listen(config ListenerConfig) (*PublicListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PublicListener{transport: transport, authenticator: config.Authenticator, authTimeout: timeout}, nil
+	return &PublicListener{
+		transport: transport, authenticator: config.Authenticator, authTimeout: timeout,
+		limiter: newHandshakeLimiter(config.AuthAttemptsPerMinute),
+	}, nil
 }
 
 func (l *PublicListener) Addr() string {
@@ -101,6 +106,10 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 	}
 	defer stream.Close()
 	_ = stream.SetDeadline(time.Now().Add(l.authTimeout))
+	if l.limiter == nil || !l.limiter.Allow(session.RemoteAddr(), time.Now()) {
+		_ = writeHandshakeFailure(stream, protocol.ErrCodeRateLimited, "public direct authentication rate limited")
+		return nil, false, fmt.Errorf("%w: authentication rate limited", ErrUnauthorized)
+	}
 
 	var handshake protocol.PublicDirectHandshakeRequest
 	if err := protocol.ReadJSON(stream, &handshake); err != nil {

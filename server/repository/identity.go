@@ -234,19 +234,7 @@ func (db *DB) ensureIdentityAccessSchema() error {
 	if err := db.ensureSQLiteColumn("devices", "denied_capabilities", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
-	// Preserve capability rejections made before denied_capabilities existed.
-	// Initial rejected enrollments have no device_id and are naturally skipped.
-	if _, err := db.Exec(`UPDATE devices
-		SET denied_capabilities = COALESCE((
-			SELECT request.requested_capabilities
-			FROM device_enrollment_requests request
-			JOIN device_identities identity ON identity.fingerprint = request.fingerprint
-			WHERE identity.device_id = devices.id
-				AND identity.status = 'approved'
-				AND request.state = 'rejected'
-			LIMIT 1
-		), denied_capabilities)
-		WHERE denied_capabilities = '[]'`); err != nil {
+	if err := db.ensureDeniedCapabilitiesMigration(); err != nil {
 		return err
 	}
 	if err := db.ensureSQLiteColumn("identities", "short_id", "VARCHAR(32)"); err != nil {
@@ -265,6 +253,52 @@ func (db *DB) ensureIdentityAccessSchema() error {
 		return err
 	}
 	return nil
+}
+
+// ensureDeniedCapabilitiesMigration preserves capability rejections made before
+// denied_capabilities existed. It is intentionally one-shot: later runtime
+// pruning must not be undone by replaying historical rejected enrollments.
+func (db *DB) ensureDeniedCapabilitiesMigration() error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS server_migrations (
+		name VARCHAR(100) PRIMARY KEY,
+		applied_at TIMESTAMP NOT NULL
+	)`); err != nil {
+		return err
+	}
+	var migrated int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM server_migrations
+		WHERE name = 'device.denied_capabilities.v1'`).Scan(&migrated); err != nil {
+		return err
+	}
+	if migrated > 0 {
+		return tx.Commit()
+	}
+
+	// Initial rejected enrollments have no device_id and are naturally skipped.
+	if _, err := tx.Exec(`UPDATE devices
+		SET denied_capabilities = COALESCE((
+			SELECT request.requested_capabilities
+			FROM device_enrollment_requests request
+			JOIN device_identities identity ON identity.fingerprint = request.fingerprint
+			WHERE identity.device_id = devices.id
+				AND identity.status = 'approved'
+				AND request.state = 'rejected'
+			LIMIT 1
+		), denied_capabilities)
+		WHERE denied_capabilities = '[]'`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO server_migrations (name, applied_at)
+		VALUES ('device.denied_capabilities.v1', ?)`, time.Now().UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {

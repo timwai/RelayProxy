@@ -59,13 +59,12 @@ func (a *TicketAuthenticator) Authenticate(_ context.Context, request protocol.P
 	if a.Now != nil {
 		now = a.Now().UTC()
 	}
-	authorizationRevision := int64(-1)
-	if a.AuthorizationRevision != nil {
-		revision, ok := a.AuthorizationRevision(strings.TrimSpace(request.ClientDeviceID))
-		if !ok {
-			return ErrUnauthorized
-		}
-		authorizationRevision = revision
+	if a.AuthorizationRevision == nil {
+		return ErrUnauthorized
+	}
+	authorizationRevision, ok := a.AuthorizationRevision(strings.TrimSpace(request.ClientDeviceID))
+	if !ok {
+		return ErrUnauthorized
 	}
 
 	claims, err := internaldirect.VerifyAccessTicket(a.VerifyKey, request.Ticket, internaldirect.TicketVerifyOptions{

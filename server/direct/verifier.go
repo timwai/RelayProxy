@@ -148,6 +148,12 @@ func probeEndpoint(ctx context.Context, record EndpointRecord, dialAddress strin
 	}); err != nil {
 		return err
 	}
+	// Signal that the verifier has no more request bytes. The Exit waits for
+	// this FIN after writing its response before closing the QUIC connection,
+	// preventing connection close from overtaking the response stream.
+	if err := stream.CloseWrite(); err != nil {
+		return fmt.Errorf("public direct probe close-write failed: %w", err)
+	}
 	var response protocol.PublicDirectHandshakeResponse
 	if err := protocol.ReadJSON(stream, &response); err != nil {
 		return err

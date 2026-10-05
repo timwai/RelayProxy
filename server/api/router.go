@@ -511,6 +511,9 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 		}
 		channel.MessageRules = messageRules
 	}
+	if enabled, ok := defaultMessageRuleEnabled(channel.MessageRules); ok {
+		channel.UseDefaultVerification = enabled
+	}
 	routeRules, err := normalizeRouteRules(channel.RouteRules, known)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

@@ -53,8 +53,9 @@ type GatewayConfig struct {
 	P2PPortStart            int
 	P2PPortEnd              int
 	P2PUPnPEnabled          bool
-	PublicDirectEnabled     bool
-	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
+	PublicDirectEnabled         bool
+	PublicDirectTicketVerifyKey []byte
+	HandshakeTimeout            time.Duration // covers control stream/header/Hello/Welcome
 }
 
 type IdentityAuthorization struct {
@@ -580,7 +581,10 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		P2PLeaseSec:           g.cfg.P2PLeaseSec,
 		P2PPortStart:          g.cfg.P2PPortStart,
 		P2PPortEnd:            g.cfg.P2PPortEnd,
-		P2PUPnPEnabled:        g.cfg.P2PUPnPEnabled,
+		P2PUPnPEnabled: g.cfg.P2PUPnPEnabled,
+	}
+	if g.cfg.PublicDirectEnabled && containsCapability(authorization.ApprovedCapabilities, protocol.CapabilityProxyExit) {
+		welcome.PublicDirectTicketVerifyKey = append([]byte(nil), g.cfg.PublicDirectTicketVerifyKey...)
 	}
 
 	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)

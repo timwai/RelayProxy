@@ -527,6 +527,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 			gw.RefreshProxyExitInventories()
 			ingress.Reload()
 		}),
@@ -553,6 +554,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 			gw.RefreshProxyExitInventories()
 			ingress.CloseDevice(deviceID)
 		}),

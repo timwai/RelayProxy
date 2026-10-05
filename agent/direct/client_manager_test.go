@@ -299,3 +299,59 @@ func TestClientManagerIgnoresStaleTicketAttemptResults(t *testing.T) {
 		})
 	}
 }
+
+func TestClientManagerUsesServerVerifiedDialAddress(t *testing.T) {
+	fake := newClientManagerTestSession()
+	var dialed string
+	manager := NewClientManager(context.Background(), func() string { return "client" }, ClientManagerOptions{
+		AttemptTimeout: time.Second,
+		RaceDial: func(_ context.Context, configs []DialConfig) (tunnel.TunnelSession, string, error) {
+			if len(configs) != 1 {
+				t.Fatalf("dial configs=%d, want 1", len(configs))
+			}
+			dialed = configs[0].Address
+			return fake, configs[0].Address, nil
+		},
+	})
+	defer manager.Close()
+
+	fingerprint := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	manager.UpdateInventory([]protocol.ProxyExit{{
+		DeviceID: "exit", Online: true,
+		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+			Available:       true,
+			Transport:       "quic",
+			Ticket:          []byte("verified-dial-ticket"),
+			TicketExpiresAt: time.Now().Add(time.Minute).Unix(),
+			Endpoints: []protocol.PublicDirectEndpoint{{
+				Protocol:        protocol.PublicDirectEndpointProtocolUDP,
+				Address:         "exit.example.com:35820",
+				DialAddress:     "203.0.113.20:35820",
+				Source:          protocol.PublicDirectEndpointManual,
+				Verified:        true,
+				CertFingerprint: fingerprint,
+			}},
+		}},
+	}})
+	if !manager.EnsureClient("exit") {
+		t.Fatal("public direct attempt was not started")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, ok := manager.ReadyForExit("exit"); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("public direct session did not become ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if dialed != "203.0.113.20:35820" {
+		t.Fatalf("dialed address=%q, want Server-verified IP literal", dialed)
+	}
+	status, ok := manager.PathStatus("exit")
+	if !ok || status.Endpoint != dialed {
+		t.Fatalf("path status=%+v ok=%v", status, ok)
+	}
+}

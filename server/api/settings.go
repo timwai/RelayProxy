@@ -74,6 +74,7 @@ type P2PSettings struct {
 	RendezvousAdvertise string `json:"rendezvousAdvertise"`
 	PortStart           int    `json:"portStart"`
 	PortEnd             int    `json:"portEnd"`
+	UPnPEnabled         bool   `json:"upnpEnabled"`
 }
 
 type ServerEditableConfig struct {
@@ -158,6 +159,7 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 		P2P: P2PSettings{
 			RendezvousListen: c.P2P.RendezvousListen, RendezvousAdvertise: c.P2P.RendezvousAdvertise,
 			PortStart: c.P2P.PortStart, PortEnd: c.P2P.PortEnd,
+			UPnPEnabled: c.P2P.UPnPEnabled != nil && *c.P2P.UPnPEnabled,
 		},
 	}
 }
@@ -207,6 +209,7 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 	target.P2P.RendezvousAdvertise = strings.TrimSpace(c.P2P.RendezvousAdvertise)
 	target.P2P.PortStart = c.P2P.PortStart
 	target.P2P.PortEnd = c.P2P.PortEnd
+	target.P2P.UPnPEnabled = config.BoolPtr(c.P2P.UPnPEnabled)
 	return nil
 }
 

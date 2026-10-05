@@ -344,7 +344,13 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 		return
 	}
 	entry := m.entries[exitDeviceID]
-	if entry == nil || entry.ticketHash != ticketHash {
+	if entry == nil {
+		m.mu.Unlock()
+		_ = session.Close()
+		return
+	}
+	if entry.ticketHash != ticketHash {
+		entry.starting = false
 		m.mu.Unlock()
 		_ = session.Close()
 		return
@@ -471,10 +477,14 @@ func (m *ClientManager) finishFailure(exitDeviceID string, ticketHash [sha256.Si
 	var fallback func(string, string)
 	m.mu.Lock()
 	entry := m.entries[exitDeviceID]
-	if entry != nil && entry.ticketHash == ticketHash {
-		entry.starting = false
-		m.recordFailureLocked(entry, reason)
-		fallback = m.fallback
+	if entry != nil {
+		if entry.ticketHash != ticketHash {
+			entry.starting = false
+		} else {
+			entry.starting = false
+			m.recordFailureLocked(entry, reason)
+			fallback = m.fallback
+		}
 	}
 	m.mu.Unlock()
 	if fallback != nil {

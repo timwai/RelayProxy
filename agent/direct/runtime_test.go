@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"relayproxy/agent/exit"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -57,6 +59,21 @@ func (s *runtimeRegistrationSession) requests(t *testing.T) []protocol.PublicDir
 		out = append(out, request)
 	}
 	return out
+}
+
+func TestStartExitRuntimeRequiresCurrentACLValidator(t *testing.T) {
+	session := &runtimeRegistrationSession{done: make(chan struct{})}
+	handler := exit.NewHandler(exit.HandlerConfig{})
+	defer handler.Close()
+
+	runtime, err := StartExitRuntime(context.Background(), session, protocol.DeviceAccepted{}, handler, ExitRuntimeOptions{})
+	if runtime != nil {
+		_ = runtime.Close()
+		t.Fatal("runtime started without a current ticket and relay ACL validator")
+	}
+	if err == nil || !strings.Contains(err.Error(), "current ticket and relay ACL validation") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestExitRuntimeReregistersAfterNetworkChange(t *testing.T) {

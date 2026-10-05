@@ -663,7 +663,7 @@
             <div class="min-w-0">
               <div class="flex items-center gap-2">
                 <svg class="icon-sm text-emerald-500" viewBox="0 0 24 24"><use href="#i-bolt"/></svg>
-                <span class="text-[12px] font-semibold text-slate-700 dark:text-slate-200">P2P Direct Path</span>
+                <span class="text-[12px] font-semibold text-slate-700 dark:text-slate-200">Direct Path</span>
                 <span id="home-p2p-state" class="rp-badge">IDLE</span>
               </div>
               <div id="home-p2p-detail" class="text-[11px] text-slate-500 dark:text-slate-400 mt-1.5">等待选择出口或建立直连。</div>
@@ -741,13 +741,13 @@
           <details class="config-advanced"><summary>隧道加密 <span>高级设置</span></summary><label class="config-check"><input id="cfg-tls-on" type="checkbox"><span>使用 TLS 加密隧道</span></label><p id="connection-tls-hint" class="config-help">独立于管理 HTTP / HTTPS。RDP UDP 需要 TLS + QUIC，且服务端 UDP 端口必须可达。</p></details>
         </div>
         <div class="config-card rp-card">
-          <div class="config-section-title"><span>03</span><div><h2>P2P Direct Path</h2><p>路由仍选择原 Exit；P2P 只改变到该 Exit 的传输路径，失败可回退 Relay。</p></div></div>
+          <div class="config-section-title"><span>03</span><div><h2>Direct Path</h2><p>路由仍选择原 Exit；传输优先级由模式控制，Public Direct 与 P2P 都只改变到该 Exit 的数据路径。</p></div></div>
           <div class="config-switch-line">
-            <div><strong>启用 P2P 直连</strong><small>自动模式下首个连接不等待打洞，后台建立直连供后续连接复用。</small></div>
+            <div><strong>启用 P2P 备用直连</strong><small>Public Direct 不依赖此开关；开启后公网直连不可用时可继续尝试 P2P 打洞。</small></div>
             <label class="config-check"><input id="cfg-p2p-enabled" type="checkbox"><span>启用</span></label>
           </div>
           <div class="config-grid">
-            <div class="config-field"><label for="cfg-p2p-mode">路径模式</label><select id="cfg-p2p-mode"><option value="auto">自动 · P2P READY 优先，否则 Relay</option><option value="relay_only">仅 Relay · 不尝试 P2P</option><option value="p2p_only">仅 P2P · 无 READY 直连时失败</option></select></div>
+            <div class="config-field"><label for="cfg-p2p-mode">路径模式</label><select id="cfg-p2p-mode"><option value="auto">自动 · Public Direct → P2P → Relay</option><option value="direct_only">仅直连 · Public Direct → P2P → 失败</option><option value="p2p_only">仅 P2P · 不使用 Public Direct / Relay</option><option value="relay_only">仅 Relay · 不尝试任何直连</option></select></div>
             <div class="config-field"><label for="cfg-p2p-fallback">P2P 失败回退</label><select id="cfg-p2p-fallback"><option value="true">允许回退 Relay</option><option value="false">不回退 Relay</option></select></div>
           </div>
           <details class="config-advanced"><summary>直连高级参数 <span>通常无需修改</span></summary>
@@ -1715,24 +1715,31 @@
       $('home-exit').textContent = st.selectedExit ? proxyExitDisplayName(st.selectedExit) : '自动选择';
       $('exit-current').textContent = st.selectedExit ? proxyExitDisplayName(st.selectedExit) : '自动选择';
       $('home-streams').textContent = st.activeStreams || 0;
-      var p2pStateNames = {IDLE:'空闲',DISCOVERING:'发现地址',RENDEZVOUS:'协商中',PUNCHING:'打洞中',QUIC_HANDSHAKE:'QUIC 握手',READY:'已直连',DEGRADED:'已降级',COOLDOWN:'冷却中',CLOSED:'已关闭'};
-      var p2pPathNames = {p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
-      var p2pState = st.p2pState || (up ? 'IDLE' : 'CLOSED');
-      $('home-p2p-state').textContent = p2pStateNames[p2pState] || p2pState;
-      $('home-p2p-path').textContent = p2pPathNames[st.p2pPath] || st.p2pPath || (up ? (st.transport === 'quic' ? 'Relay QUIC' : 'Relay TLS') : '—');
-      var p2pDetail = '';
-      if (st.p2pError) p2pDetail = st.p2pError + ' · 当前连接可使用 Relay 回退';
-      else if (p2pState === 'READY') p2pDetail = '已与 Exit 建立端到端 QUIC，后续代理连接优先走直连。';
-      else if (p2pState === 'COOLDOWN') p2pDetail = '直连失败后暂缓重试，期间新连接直接使用 Relay。';
-      else if (p2pState === 'PUNCHING' || p2pState === 'RENDEZVOUS' || p2pState === 'QUIC_HANDSHAKE') p2pDetail = '后台建立直连中；应用连接不会等待。';
-      else if (!up) p2pDetail = 'Relay 未连接，P2P 控制面不可用。';
-      else p2pDetail = st.selectedExit ? '等待直连就绪，当前使用 Relay。' : '选择 Exit 后可在后台预热 P2P。';
-      var p2pMetrics = [];
-      if (st.p2pRttMs > 0) p2pMetrics.push('RTT ' + st.p2pRttMs + ' ms');
-      if ((st.p2pBytesUp || 0) > 0 || (st.p2pBytesDown || 0) > 0) p2pMetrics.push('↑ ' + formatBytes(st.p2pBytesUp || 0) + ' ↓ ' + formatBytes(st.p2pBytesDown || 0));
-      if ((st.p2pFallbackCount || 0) > 0) p2pMetrics.push('fallback ' + st.p2pFallbackCount + ' 次');
-      if (st.p2pCandidateSummary) p2pMetrics.push(st.p2pCandidateSummary);
-      $('home-p2p-detail').textContent = p2pDetail + (p2pMetrics.length ? ' · ' + p2pMetrics.join(' · ') : '');
+      var directStateNames = {AVAILABLE:'可用',IDLE:'空闲',CONNECTING:'连接中',DISCOVERING:'发现地址',RENDEZVOUS:'协商中',PUNCHING:'打洞中',QUIC_HANDSHAKE:'QUIC 握手',READY:'已直连',FAILED:'失败',DEGRADED:'已降级',COOLDOWN:'冷却中',UNAVAILABLE:'不可用',CLOSED:'已关闭'};
+      var directPathNames = {public_direct_quic:'Public Direct QUIC',p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
+      var directState = st.directState || st.p2pState || (up ? 'IDLE' : 'CLOSED');
+      var directPath = st.directPath || st.p2pPath || (up ? (st.transport === 'quic' ? 'relay_quic' : 'relay_tls') : '');
+      $('home-p2p-state').textContent = directStateNames[directState] || directState;
+      $('home-p2p-path').textContent = directPathNames[directPath] || directPath || '—';
+      var directDetail = '';
+      if (st.directError) directDetail = st.directError;
+      else if (directPath === 'public_direct_quic' && directState === 'READY') directDetail = '已通过服务端验证的公网端点直连 Exit，无需 P2P 协商。';
+      else if (directPath === 'p2p_quic' && directState === 'READY') directDetail = '已通过 P2P 建立端到端 QUIC。';
+      else if (directState === 'COOLDOWN') directDetail = '当前直连路径处于冷却；自动模式会继续使用可用的下一层路径。';
+      else if (directState === 'CONNECTING' || directState === 'PUNCHING' || directState === 'RENDEZVOUS' || directState === 'QUIC_HANDSHAKE') directDetail = '后台建立直连中；自动模式不会阻塞应用连接。';
+      else if (!up) directDetail = 'Relay 未连接，Direct Path 控制面不可用。';
+      else directDetail = st.selectedExit ? '当前使用 ' + (directPathNames[directPath] || directPath || 'Relay') + '。' : '选择 Exit 后会按策略建立可用直连。';
+      var directMetrics = [];
+      var directRtt = st.directRttMs || st.p2pRttMs || 0;
+      var directUp = st.directBytesUp || st.p2pBytesUp || 0;
+      var directDown = st.directBytesDown || st.p2pBytesDown || 0;
+      var fallbackCount = st.directFallbackCount || st.p2pFallbackCount || 0;
+      if (directRtt > 0) directMetrics.push('RTT ' + directRtt + ' ms');
+      if (directUp > 0 || directDown > 0) directMetrics.push('↑ ' + formatBytes(directUp) + ' ↓ ' + formatBytes(directDown));
+      if (fallbackCount > 0) directMetrics.push('fallback ' + fallbackCount + ' 次');
+      if (st.directEndpoint) directMetrics.push(st.directEndpoint);
+      else if (st.p2pCandidateSummary) directMetrics.push(st.p2pCandidateSummary);
+      $('home-p2p-detail').textContent = directDetail + (directMetrics.length ? ' · ' + directMetrics.join(' · ') : '');
 
       var devId = st.deviceId || '';
       var approval = st.approvalState || (up ? 'approved' : 'connecting');

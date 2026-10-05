@@ -55,7 +55,6 @@ func TestDiscoveryPriorityMatchesDirectPathPreference(t *testing.T) {
 	}
 }
 
-
 func TestProbeWireCodecRoundTrip(t *testing.T) {
 	const nonce uint64 = 0x0102030405060708
 	request := EncodeProbeRequest(nonce)

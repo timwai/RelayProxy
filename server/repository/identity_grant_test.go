@@ -249,3 +249,82 @@ func TestDeviceIdentityMoveRevokesTargetShares(t *testing.T) {
 		t.Fatalf("old grantee retained access after target identity move: allowed=%v err=%v", allowed, err)
 	}
 }
+
+
+func TestPublicDirectAuthorizationSnapshotBindsPolicyAndGrantRevision(t *testing.T) {
+	db := openIdentityTestDB(t)
+	exitIdentity, err := db.CreateIdentity("Direct Exit Identity", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientIdentity, err := db.CreateIdentity("Direct Client Identity", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedIdentityGrantDevice(t, db, "direct-exit", "Direct Exit", exitIdentity.ID, []string{"proxy.exit"})
+	seedIdentityGrantDevice(t, db, "direct-same-client", "Direct Same Client", exitIdentity.ID, []string{"proxy.client"})
+	seedIdentityGrantDevice(t, db, "direct-cross-client", "Direct Cross Client", clientIdentity.ID, []string{"proxy.client"})
+
+	same, err := db.PublicDirectAuthorization("direct-same-client", "direct-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !same.Allowed || same.PolicyRevision != exitIdentity.PolicyRevision ||
+		same.AuthorizationRevision != exitIdentity.PolicyRevision {
+		t.Fatalf("same-identity snapshot=%+v", same)
+	}
+
+	before, err := db.PublicDirectAuthorization("direct-cross-client", "direct-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Allowed {
+		t.Fatalf("ungranted cross-identity snapshot=%+v", before)
+	}
+
+	grant, err := db.CreateDeviceIdentityGrant(
+		"direct-exit", clientIdentity.ID, "admin", []string{GrantFeatureProxyUse}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, err := db.PublicDirectAuthorization("direct-cross-client", "direct-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cross.Allowed || cross.PolicyRevision != clientIdentity.PolicyRevision ||
+		cross.AuthorizationRevision != grant.Revision {
+		t.Fatalf("cross-identity snapshot=%+v grant=%+v", cross, grant)
+	}
+
+	newName := "Direct Client Identity Updated"
+	updatedIdentity, err := db.UpdateIdentity(clientIdentity.ID, "admin", IdentityUpdate{
+		Name: &newName, PolicyRevision: clientIdentity.PolicyRevision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, err = db.PublicDirectAuthorization("direct-cross-client", "direct-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cross.Allowed || cross.PolicyRevision != updatedIdentity.PolicyRevision ||
+		cross.AuthorizationRevision != grant.Revision {
+		t.Fatalf("policy revision not reflected in snapshot=%+v", cross)
+	}
+
+	features := []string{GrantFeatureProxyUse, GrantFeatureRDPConnect}
+	updatedGrant, err := db.UpdateDeviceIdentityGrant(grant.ID, "admin", DeviceIdentityGrantUpdate{
+		Features: &features, Revision: grant.Revision,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, err = db.PublicDirectAuthorization("direct-cross-client", "direct-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cross.Allowed || cross.AuthorizationRevision != updatedGrant.Revision {
+		t.Fatalf("grant revision not reflected in snapshot=%+v", cross)
+	}
+}

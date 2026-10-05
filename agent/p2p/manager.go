@@ -895,26 +895,45 @@ func (s *Session) establish(clientRole bool) {
 		s.manager.enforceClientLimit(s.ID)
 	}
 	s.reportPath(protocol.P2PPathDirectQUIC, "")
-	select {
-	case s.manager.ready <- s:
-	default:
-		s.mu.Lock()
-		if s.direct == direct && s.state != StateClosed {
-			s.direct = nil
-			s.state = StateDegraded
-			s.lastError = "P2P ready queue is full"
-		}
-		endpoint := s.endpoint
-		s.endpoint = nil
-		s.mu.Unlock()
-		_ = direct.Close()
-		if endpoint != nil {
-			_ = endpoint.Close()
-		}
-		s.reportPath("", "ready_queue_full")
+	if !s.enqueueReady(direct) {
 		return
 	}
 	go s.watchDirect(direct)
+}
+
+func (s *Session) enqueueReady(direct *directp2p.QUICSession) bool {
+	if s == nil || s.manager == nil {
+		if direct != nil {
+			_ = direct.Close()
+		}
+		return false
+	}
+	select {
+	case s.manager.ready <- s:
+		return true
+	default:
+	}
+
+	s.mu.Lock()
+	remove := s.direct == direct && s.state != StateClosed
+	if remove {
+		s.state = StateDegraded
+		s.lastError = "P2P ready queue is full"
+	}
+	s.mu.Unlock()
+	if !remove {
+		if direct != nil {
+			_ = direct.Close()
+		}
+		return false
+	}
+
+	// A full consumer queue means this direct path cannot be handed to the
+	// dialer. Remove it locally and explicitly close the coordinator lease
+	// instead of leaving a degraded session alive until lease expiry.
+	s.reportPath("", "ready_queue_full")
+	s.manager.removeFailedSession(s, "ready_queue_full")
+	return false
 }
 
 func (s *Session) failDirect(err error) {
@@ -1289,8 +1308,11 @@ func (m *Manager) directQUICOptions() directp2p.QUICOptions {
 }
 
 func (m *Manager) enforceClientLimit(keepID uint64) {
+	if m == nil {
+		return
+	}
 	limit := m.effectiveClientLimit()
-	if m == nil || limit <= 0 {
+	if limit <= 0 {
 		return
 	}
 	for {

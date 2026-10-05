@@ -31,6 +31,7 @@ type ExitRuntimeOptions struct {
 	RegisterTimeout         time.Duration
 	NetworkCheckInterval    time.Duration
 	NetworkSignature        func() string
+	ValidateTicket          TicketCurrentValidator
 }
 
 type ExitRuntime struct {
@@ -69,6 +70,7 @@ func StartExitRuntime(
 	if err != nil {
 		return nil, fmt.Errorf("initialize ticket authenticator: %w", err)
 	}
+	authenticator.SetCurrentValidator(options.ValidateTicket)
 	identity, err := directcore.GenerateTLSIdentity()
 	if err != nil {
 		return nil, fmt.Errorf("generate TLS identity: %w", err)

@@ -127,9 +127,12 @@ func (c *Controller) HandleControl(ctx context.Context, stream tunnel.TunnelStre
 	}
 
 	for _, record := range records {
-		if record.State != StateUnknown && record.State != StateFailed && record.State != StateExpired {
+		if record.State == StateVerifying {
 			continue
 		}
+		// Re-probe even a currently verified endpoint when the authenticated
+		// Exit refreshes its registration. This renews the short verification
+		// TTL without publishing an unverified address to Clients.
 		c.verify(dev.DeviceID, dev.SessionID, record.Endpoint.Address)
 	}
 }

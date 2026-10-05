@@ -94,7 +94,6 @@ func TestControlOnlyConfigRequestsAndroidCapabilities(t *testing.T) {
 	}
 }
 
-
 func TestStatusJSONExposesP2PFailureReason(t *testing.T) {
 	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, filepath.Join(t.TempDir(), "device-identity.json"))
 	if err != nil {

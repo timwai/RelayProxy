@@ -1725,7 +1725,7 @@ class MainActivity : Activity() {
         proxyCard.addView(localPortRow)
 
         settingP2pSwitch = Switch(this).apply { isChecked = config.proxyP2pEnabled; UiKit.styleSwitch(this) }
-        proxyCard.addView(switchBlock("优先 P2P 直连", "出口节点同域时直连通信，失败自动平滑回退 Relay", settingP2pSwitch), topMargin(14))
+        proxyCard.addView(switchBlock("启用 P2P 备用直连", "Public Direct 不依赖此开关；公网直连不可用时可继续尝试 P2P 打洞", settingP2pSwitch), topMargin(14))
 
         settingIpv6Switch = Switch(this).apply { isChecked = config.vpnIpv6Enabled; UiKit.styleSwitch(this) }
         proxyCard.addView(switchBlock("VPN IPv6 转发", "所选出口节点具备 IPv6 外部接入时开启", settingIpv6Switch), topMargin(14))
@@ -1978,6 +1978,10 @@ class MainActivity : Activity() {
         val p2pPath = obj?.optString("p2pPath", "") ?: ""
         val p2pError = obj?.optString("p2pError", "") ?: ""
         val p2pRttMs = obj?.optLong("p2pRttMs", 0) ?: 0
+        val directState = obj?.optString("directState", p2pState).orEmpty().ifBlank { p2pState }
+        val directPath = obj?.optString("directPath", p2pPath).orEmpty().ifBlank { p2pPath }
+        val directError = obj?.optString("directError", p2pError).orEmpty().ifBlank { p2pError }
+        val directRttMs = obj?.optLong("directRttMs", p2pRttMs) ?: p2pRttMs
         val selectedExit = obj?.optString("selectedExit", "") ?: ""
         val powerConstrained = obj?.optBoolean("powerConstrained", false) ?: false
         val nativeUdp = obj?.optJSONObject("nativeUdp")
@@ -2058,7 +2062,7 @@ class MainActivity : Activity() {
         val err = obj?.optString("lastError", "").orEmpty()
         statusDetail.text = when {
             err.isNotBlank() -> err
-            state == "CONNECTED" && p2pError.isNotBlank() -> "P2P: $p2pError"
+            state == "CONNECTED" && directError.isNotBlank() -> "Direct Path: $directError"
             vpnState == "RUNNING" -> "VPN TUN 数据隧道接管正常"
             desiredExit && approved -> "后台出口服务正常运行中"
             approval == "pending" -> "新设备已连接，等待服务端审批"
@@ -2066,30 +2070,39 @@ class MainActivity : Activity() {
             else -> "点击右侧启动按钮开启 VPN 保护"
         }
 
-        // P2P 徽标
-        if (config.proxyP2pEnabled) {
-            p2pBadge.visibility = View.VISIBLE
-            if (p2pState == "READY" && p2pPath == "p2p_quic") {
-                p2pBadge.text = "P2P QUIC · ${p2pRttMs}ms"
+        // Direct Path 徽标。Public Direct 与 P2P 独立，不能用 P2P 开关推断当前路径。
+        p2pBadge.visibility = View.VISIBLE
+        when {
+            directState == "READY" && directPath == "public_direct_quic" -> {
+                p2pBadge.text = "公网直连 · ${directRttMs}ms"
                 p2pBadge.setTextColor(UiPalette.success)
                 p2pBadge.background = UiKit.rounded(this, UiPalette.successSoft, 8, UiPalette.successSoftBorder)
-            } else if (p2pError.isNotBlank()) {
-                p2pBadge.text = "P2P 失败"
+            }
+            directState == "READY" && directPath == "p2p_quic" -> {
+                p2pBadge.text = "P2P QUIC · ${directRttMs}ms"
+                p2pBadge.setTextColor(UiPalette.success)
+                p2pBadge.background = UiKit.rounded(this, UiPalette.successSoft, 8, UiPalette.successSoftBorder)
+            }
+            directError.isNotBlank() && directPath != "relay_quic" && directPath != "relay_tls" -> {
+                p2pBadge.text = "直连失败"
                 p2pBadge.setTextColor(UiPalette.warning)
                 p2pBadge.background = UiKit.rounded(this, UiPalette.warningSoft, 8, UiPalette.warningSoftBorder)
-            } else if (state == "CONNECTED") {
+            }
+            directState == "CONNECTING" || directState == "RENDEZVOUS" || directState == "PUNCHING" || directState == "QUIC_HANDSHAKE" -> {
+                p2pBadge.text = "直连中"
+                p2pBadge.setTextColor(UiPalette.brand)
+                p2pBadge.background = UiKit.rounded(this, UiPalette.brandSoft, 8, UiPalette.brandSoftBorder)
+            }
+            state == "CONNECTED" -> {
                 p2pBadge.text = "Relay 转发"
                 p2pBadge.setTextColor(UiPalette.brand)
                 p2pBadge.background = UiKit.rounded(this, UiPalette.brandSoft, 8, UiPalette.brandSoftBorder)
-            } else {
+            }
+            else -> {
                 p2pBadge.text = "等待直连"
                 p2pBadge.setTextColor(UiPalette.muted)
                 p2pBadge.background = UiKit.rounded(this, UiPalette.surfaceElevated, 8)
             }
-        } else {
-            p2pBadge.text = "Relay 优先"
-            p2pBadge.setTextColor(UiPalette.muted)
-            p2pBadge.background = UiKit.rounded(this, UiPalette.surfaceElevated, 8)
         }
 
         // 主电源大按钮 (还原原型设计：运行态蓝紫渐变+纯白图标，停止态暗底微转)

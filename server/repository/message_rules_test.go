@@ -141,7 +141,6 @@ func TestLegacyVerificationRulesAreExposedAsMessageRules(t *testing.T) {
 	}
 }
 
-
 func TestLegacyDisabledDefaultBecomesDisabledV2Rule(t *testing.T) {
 	rules := LegacyMessageRules(false, nil)
 	if len(rules) != 1 {

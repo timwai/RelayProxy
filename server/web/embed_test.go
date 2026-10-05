@@ -117,7 +117,7 @@ func TestServerP2PRendezvousSettingsAreEmbedded(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(page)
-	for _, setting := range []string{"p2p.rendezvousListen", "p2p.rendezvousAdvertise", "p2p.portStart", "p2p.portEnd"} {
+	for _, setting := range []string{"p2p.rendezvousListen", "p2p.rendezvousAdvertise", "p2p.portStart", "p2p.portEnd", "p2p.upnpEnabled"} {
 		if !strings.Contains(text, `data-setting="`+setting+`"`) {
 			t.Fatalf("server P2P setting %s is missing from the embedded form", setting)
 		}

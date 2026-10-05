@@ -751,6 +751,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 			MaxExitSessions: cfg.P2PMaxSessions,
 			PortStart:       accepted.P2PPortStart,
 			PortEnd:         accepted.P2PPortEnd,
+			UPnPEnabled:     accepted.P2PUPnPEnabled,
 		})
 		keepManager := false
 		a.mu.Lock()

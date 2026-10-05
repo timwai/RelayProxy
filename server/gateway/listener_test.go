@@ -481,6 +481,7 @@ func TestWelcomeDistributesP2PPortRange(t *testing.T) {
 	gateway.cfg.P2PEnabled = true
 	gateway.cfg.P2PPortStart = 30000
 	gateway.cfg.P2PPortEnd = 30100
+	gateway.cfg.P2PUPnPEnabled = true
 
 	identity, err := deviceidentity.Generate()
 	if err != nil {
@@ -495,5 +496,8 @@ func TestWelcomeDistributesP2PPortRange(t *testing.T) {
 	}
 	if accepted.P2PPortStart != 30000 || accepted.P2PPortEnd != 30100 {
 		t.Fatalf("P2P port range=%d-%d, want 30000-30100", accepted.P2PPortStart, accepted.P2PPortEnd)
+	}
+	if !accepted.P2PUPnPEnabled {
+		t.Fatal("P2P UPnP setting was not distributed")
 	}
 }

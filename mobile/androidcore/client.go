@@ -953,6 +953,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 				MaxExitSessions:     1,
 				PortStart:           accepted.P2PPortStart,
 				PortEnd:             accepted.P2PPortEnd,
+				UPnPEnabled:         accepted.P2PUPnPEnabled,
 				LowPowerIdleTimeout: 60 * time.Second,
 				LowPowerMaxSessions: 1,
 			},

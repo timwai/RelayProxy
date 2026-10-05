@@ -63,6 +63,7 @@ type ServerConfig struct {
 		MaxSessionsPerDevice int    `yaml:"max_sessions_per_device"`
 		PortStart            int    `yaml:"port_start"`
 		PortEnd              int    `yaml:"port_end"`
+		UPnPEnabled          *bool  `yaml:"upnp_enabled"`
 	} `yaml:"p2p"`
 
 	// Exit lets the Relay server itself act as a network egress node. It is
@@ -262,6 +263,9 @@ func applyServerDefaults(cfg *ServerConfig) {
 	}
 	if cfg.P2P.Enabled == nil {
 		cfg.P2P.Enabled = BoolPtr(true)
+	}
+	if cfg.P2P.UPnPEnabled == nil {
+		cfg.P2P.UPnPEnabled = BoolPtr(false)
 	}
 	if cfg.P2P.LeaseSec == 0 {
 		cfg.P2P.LeaseSec = 60

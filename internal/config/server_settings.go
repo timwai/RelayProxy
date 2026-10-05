@@ -224,6 +224,9 @@ func CloneServerConfig(c *ServerConfig) *ServerConfig {
 	if c.P2P.Enabled != nil {
 		out.P2P.Enabled = BoolPtr(*c.P2P.Enabled)
 	}
+	if c.P2P.UPnPEnabled != nil {
+		out.P2P.UPnPEnabled = BoolPtr(*c.P2P.UPnPEnabled)
+	}
 	if c.Exit.Enabled != nil {
 		out.Exit.Enabled = BoolPtr(*c.Exit.Enabled)
 	}

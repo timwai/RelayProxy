@@ -69,6 +69,7 @@ type PublicDirectEndpointCandidate struct {
 type PublicDirectEndpoint struct {
 	Protocol        string `json:"protocol"`
 	Address         string `json:"address"`
+	DialAddress     string `json:"dialAddress,omitempty"`
 	Source          string `json:"source"`
 	Verified        bool   `json:"verified"`
 	CertFingerprint string `json:"certFingerprint,omitempty"`

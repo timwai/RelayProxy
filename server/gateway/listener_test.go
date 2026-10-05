@@ -636,9 +636,10 @@ func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 		t.Fatalf("online revision=%d, initial=%d", online.ProxyExitRevision, initialRevision)
 	}
 
-	if err := exitSession.Close(); err != nil {
-		t.Fatal(err)
-	}
+	// Closing an already-draining multiplexed transport may report the
+	// underlying network close; the lifecycle signal is the server-side
+	// unregister and the inventory push that follows.
+	_ = exitSession.Close()
 	offline := readInventoryPush(t, clientSession)
 	if offline.ProxyExits == nil || len(*offline.ProxyExits) != 0 {
 		t.Fatalf("offline exit push retained inventory: %+v", offline)

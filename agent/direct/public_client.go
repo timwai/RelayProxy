@@ -3,14 +3,30 @@ package direct
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"strings"
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"relayproxy/internal/cert"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
+
+func PinnedTLSConfig(fingerprint string) (*tls.Config, error) {
+	fingerprint = strings.TrimSpace(fingerprint)
+	if fingerprint == "" {
+		return nil, errors.New("public direct certificate fingerprint is required")
+	}
+	return &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(rawCertificates [][]byte, _ [][]*x509.Certificate) error {
+			return cert.VerifyFingerprint(rawCertificates, fingerprint)
+		},
+	}, nil
+}
 
 type DialConfig struct {
 	Address        string

@@ -366,7 +366,7 @@ diff --git a/src/misc/hev-utils.c b/src/misc/hev-utils.c
 +            /* Never leak a stale/unmapped FakeIP or the local mapped-DNS
 +             * endpoint to the upstream SOCKS server. A failed local flow
 +             * forces the application to resolve the hostname again. */
-+            if (((host & netmask) == network) || raw == dnsaddr)
++            if ((netmask && ((host & netmask) == network)) || (dnsaddr && raw == dnsaddr))
 +                return -1;
 +            hev_socks5_addr_from_ipv4 (addr, ip, htons (port));
 +        } else {

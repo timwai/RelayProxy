@@ -1030,6 +1030,10 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	}
 	cancel()
 	stopPublicDirect()
+	// Public Direct authorization is derived from this Relay session's
+	// server-provided inventory and one-time tickets. Never carry a ready direct
+	// session across Relay reconnects or authorization changes.
+	c.updatePublicDirectInventory(nil)
 	_ = sess.Close()
 	workers.Wait()
 	return nil

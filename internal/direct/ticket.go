@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	AccessTicketVersion = 1
+	AccessTicketVersion   = 1
 	AccessCapabilityProxy = "proxy"
 )
 
@@ -23,10 +23,10 @@ const (
 )
 
 var (
-	ErrInvalidTicket   = errors.New("invalid public direct access ticket")
-	ErrExpiredTicket   = errors.New("public direct access ticket expired")
-	ErrTicketScope     = errors.New("public direct access ticket scope mismatch")
-	ErrTicketRevision  = errors.New("public direct access ticket revision mismatch")
+	ErrInvalidTicket    = errors.New("invalid public direct access ticket")
+	ErrExpiredTicket    = errors.New("public direct access ticket expired")
+	ErrTicketScope      = errors.New("public direct access ticket scope mismatch")
+	ErrTicketRevision   = errors.New("public direct access ticket revision mismatch")
 	ErrTicketCapability = errors.New("public direct access ticket capability missing")
 )
 

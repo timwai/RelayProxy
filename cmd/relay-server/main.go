@@ -570,7 +570,7 @@ func main() {
 			for _, record := range records {
 				out = append(out, api.PublicDirectEndpointStatus{
 					Address: record.Endpoint.Address, DialAddress: record.Endpoint.DialAddress,
-					Source: record.Endpoint.Source, State: string(record.State),
+					Source: record.Endpoint.Source, State: string(record.State), Verified: record.Endpoint.Verified,
 					VerifiedAt: record.VerifiedAt, ExpiresAt: record.ExpiresAt, LastError: record.LastError,
 				})
 			}

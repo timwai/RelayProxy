@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"relayproxy/agent/exit"
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -51,6 +52,10 @@ func ServeExit(ctx context.Context, listener *PublicListener, handler *exit.Hand
 		if accepted == nil || accepted.Tunnel == nil {
 			continue
 		}
+		if accepted.RelayPolicy == nil {
+			_ = accepted.Tunnel.Close()
+			continue
+		}
 		select {
 		case sessionSlots <- struct{}{}:
 		default:
@@ -58,11 +63,11 @@ func ServeExit(ctx context.Context, listener *PublicListener, handler *exit.Hand
 			continue
 		}
 		sessions.Add(1)
-		go func(session tunnel.TunnelSession) {
+		go func(session tunnel.TunnelSession, relayPolicy *acl.Policy) {
 			defer sessions.Done()
 			defer func() { <-sessionSlots }()
-			serveExitSession(ctx, session, handler, maxStreams)
-		}(accepted.Tunnel)
+			serveExitSession(exit.BindRelayPolicy(ctx, relayPolicy), session, handler, maxStreams)
+		}(accepted.Tunnel, accepted.RelayPolicy)
 	}
 }
 

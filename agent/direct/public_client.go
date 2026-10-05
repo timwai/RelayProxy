@@ -16,6 +16,8 @@ var dialPublicDirectQUIC = func(ctx context.Context, address string, tlsConfig *
 	return tunnel.DialDirectQUIC(ctx, address, tlsConfig, quicConfig)
 }
 
+const endpointRaceHeadStart = 150 * time.Millisecond
+
 type DialConfig struct {
 	Address        string
 	TLSConfig      *tls.Config
@@ -70,9 +72,18 @@ func DialAny(ctx context.Context, configs []DialConfig) (tunnel.TunnelSession, s
 	raceCtx, cancelRace := context.WithCancel(ctx)
 	defer cancelRace()
 	results := make(chan result)
-	for _, config := range normalized {
-		config := config
+	for index, config := range normalized {
+		index, config := index, config
 		go func() {
+			if index > 0 {
+				timer := time.NewTimer(endpointRaceHeadStart)
+				defer timer.Stop()
+				select {
+				case <-raceCtx.Done():
+					return
+				case <-timer.C:
+				}
+			}
 			session, err := dialPublicDirectQUIC(raceCtx, config.Address, config.TLSConfig, config.QUICConfig)
 			if err != nil {
 				select {

@@ -2,7 +2,6 @@ package direct
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	internaldirect "relayproxy/internal/direct"
@@ -79,7 +78,7 @@ func (i *TicketIssuer) HandleControl(ctx context.Context, stream tunnel.TunnelSt
 		[]string{internaldirect.AccessCapabilityProxy},
 	)
 	if err != nil {
-		_ = writeTicketError(stream, protocol.ErrCodeInternal, "public direct ticket issuance failed")
+		_ = writeTicketError(stream, protocol.ErrCodeInternalError, "public direct ticket issuance failed")
 		return
 	}
 	_ = protocol.WriteJSON(stream, protocol.PublicDirectTicketResponse{
@@ -106,4 +105,3 @@ func containsValue(values []string, wanted string) bool {
 	return false
 }
 
-var _ = errors.Is

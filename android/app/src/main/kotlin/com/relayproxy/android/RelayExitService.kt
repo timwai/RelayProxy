@@ -509,17 +509,21 @@ class RelayExitService : Service() {
     }
 
     private fun applyGlobalMessageOverlaySetting() {
-        if (!ConfigStore(this).isGlobalMessageOverlayEnabled() &&
-            ::messageOverlayController.isInitialized
-        ) {
-            messageOverlayController.dismissAll()
+        if (::messageOverlayController.isInitialized) {
+            if (!ConfigStore(this).isGlobalMessageOverlayEnabled()) {
+                messageOverlayController.dismissAll()
+            } else {
+                messageOverlayController.refreshTheme()
+            }
         }
         requestRefreshSoon()
     }
 
     private fun showMessageNotification(message: JSONObject) {
         val raw = message.toString()
-        val popupType = message.optString("popupType", "verification_code")
+        val popupType = message.optString("messageType").ifBlank {
+            message.optString("popupType", "verification_code")
+        }
         val title = message.optString("title", "RelayProxy 消息").ifBlank { "RelayProxy 消息" }
         val content = message.optString("content", "")
         val code = message.optString("verificationCode", "")

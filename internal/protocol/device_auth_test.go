@@ -122,7 +122,6 @@ func TestResourceInventoryEmptyProxyExitsRoundTrip(t *testing.T) {
 	}
 }
 
-
 func TestProxyExitPublicDirectInventoryRoundTrip(t *testing.T) {
 	in := ProxyExit{
 		DeviceID: "exit-1", Name: "Exit", Online: true,

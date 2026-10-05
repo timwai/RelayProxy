@@ -17,7 +17,7 @@ func (c *Client) initPublicDirectClient() {
 	if c == nil || c.proxyDirect != nil {
 		return
 	}
-	c.proxyDirect = proxydirect.NewClientManager(c.ctx, func() string {
+	manager := proxydirect.NewClientManager(c.ctx, func() string {
 		c.mu.RLock()
 		defer c.mu.RUnlock()
 		if c.closed {
@@ -25,6 +25,17 @@ func (c *Client) initPublicDirectClient() {
 		}
 		return c.status.DeviceID
 	}, proxydirect.ClientManagerOptions{})
+	manager.SetFallback(func(exitDeviceID, _ string) {
+		c.mu.RLock()
+		p2p := c.proxyP2P
+		p2pEnabled := c.cfg.ProxyP2PEnabled != nil && *c.cfg.ProxyP2PEnabled
+		closed := c.closed
+		c.mu.RUnlock()
+		if !closed && c.clientApproved.Load() && p2pEnabled && p2p != nil {
+			p2p.EnsureClient(exitDeviceID)
+		}
+	})
+	c.proxyDirect = manager
 }
 
 func (c *Client) configureProxyPathProvider() {

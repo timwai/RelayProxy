@@ -762,7 +762,8 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
 	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
 	stopPublicDirect := func() {}
-	if allowExit {
+	publicDirectExitEnabled := allowExit && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only"
+	if publicDirectExitEnabled {
 		stop, err := a.startPublicDirectExit(ctx, sess, accepted, handler, accepted.MaxConnections)
 		if err != nil {
 			log.Printf("[PublicDirect] listener unavailable; P2P/Relay fallback remains active: %v", err)

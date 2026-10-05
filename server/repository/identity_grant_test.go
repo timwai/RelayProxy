@@ -250,7 +250,6 @@ func TestDeviceIdentityMoveRevokesTargetShares(t *testing.T) {
 	}
 }
 
-
 func TestPublicDirectAuthorizationContextTracksPolicyAndGrantRevisions(t *testing.T) {
 	db := openIdentityTestDB(t)
 

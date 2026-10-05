@@ -128,7 +128,6 @@ func TestStatusJSONExposesP2PFailureReason(t *testing.T) {
 	}
 }
 
-
 func TestAndroidProxyExitInventoryRevisionOrdering(t *testing.T) {
 	client, err := NewClient(`{
 		"serverAddress":"relay.example.com",

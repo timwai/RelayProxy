@@ -230,6 +230,14 @@ type AgentStatus struct {
 	RDPUDPReason        string                     `json:"rdpUdpReason,omitempty"`
 	RDPPathTCP          string                     `json:"rdpPathTcp,omitempty"`
 	RDPPathUDP          string                     `json:"rdpPathUdp,omitempty"`
+	DirectState         string                     `json:"directState,omitempty"`
+	DirectPath          string                     `json:"directPath,omitempty"`
+	DirectError         string                     `json:"directError,omitempty"`
+	DirectEndpoint      string                     `json:"directEndpoint,omitempty"`
+	DirectRTTMs         int64                      `json:"directRttMs,omitempty"`
+	DirectFallbackCount uint64                     `json:"directFallbackCount,omitempty"`
+	DirectBytesUp       uint64                     `json:"directBytesUp,omitempty"`
+	DirectBytesDown     uint64                     `json:"directBytesDown,omitempty"`
 	P2PState            string                     `json:"p2pState,omitempty"`
 	P2PPath             string                     `json:"p2pPath,omitempty"`
 	P2PError            string                     `json:"p2pError,omitempty"`
@@ -1268,7 +1276,7 @@ func (a *Agent) Status() AgentStatus {
 		NetworkMode:   a.cfg.NetworkMode, LatencyMs: a.latencyMs.Load(),
 		NativeUDP: tunnel.NativeUDPUsage(),
 	}
-	sess, handler, divertSrv, proxyP2P := a.readySession, a.exitHandler, a.divertSrv, a.proxyP2P
+	sess, handler, divertSrv, proxyP2P, proxyDirect := a.readySession, a.exitHandler, a.divertSrv, a.proxyP2P, a.proxyDirect
 	if a.rdpConnection != nil {
 		st.RDPListenAddr = a.rdpConnection.ListenAddr
 		st.RDPTargetID = a.rdpConnection.Target.DeviceID
@@ -1319,6 +1327,22 @@ func (a *Agent) Status() AgentStatus {
 		default:
 		}
 	}
+	if proxyDirect != nil {
+		if path, ok := proxyDirect.PathStatus(st.SelectedExit); ok {
+			st.DirectState = path.State
+			st.DirectError = path.Error
+			st.DirectEndpoint = path.Endpoint
+			st.DirectFallbackCount = path.FallbackCount
+			if directSession, ready := proxyDirect.ReadyForExit(st.SelectedExit); ready {
+				st.DirectPath = string(protocol.ProxyPathPublicDirectQUIC)
+				if diagnostics := tunnel.DiagnoseSession(directSession); diagnostics != nil && diagnostics.QUIC != nil {
+					st.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
+					st.DirectBytesUp = diagnostics.QUIC.BytesSent
+					st.DirectBytesDown = diagnostics.QUIC.BytesReceived
+				}
+			}
+		}
+	}
 	if proxyP2P != nil {
 		if path, ok := proxyP2P.PathStatus(st.SelectedExit); ok {
 			st.P2PState = string(path.State)
@@ -1331,6 +1355,15 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PFallbackCount = path.FallbackCount
 			st.P2PBytesUp = path.BytesUp
 			st.P2PBytesDown = path.BytesDown
+			if st.DirectPath == "" && path.Path != "" {
+				st.DirectState = string(path.State)
+				st.DirectPath = path.Path
+				st.DirectError = path.Error
+				st.DirectRTTMs = path.RTTMs
+				st.DirectFallbackCount = path.FallbackCount
+				st.DirectBytesUp = path.BytesUp
+				st.DirectBytesDown = path.BytesDown
+			}
 		} else {
 			st.P2PState = "IDLE"
 		}
@@ -1341,6 +1374,22 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PPath = protocol.P2PPathRelayQUIC
 		case string(tunnel.TransportTLS):
 			st.P2PPath = protocol.P2PPathRelayTLS
+		}
+	}
+	if st.DirectPath == "" && st.Connected {
+		if st.DirectState == "" {
+			st.DirectState = "IDLE"
+		}
+		switch st.Transport {
+		case string(tunnel.TransportQUIC):
+			st.DirectPath = string(protocol.ProxyPathRelayQUIC)
+		case string(tunnel.TransportTLS):
+			st.DirectPath = string(protocol.ProxyPathRelayTLS)
+		}
+		if st.TunnelDiagnostics != nil && st.TunnelDiagnostics.QUIC != nil {
+			st.DirectRTTMs = int64(st.TunnelDiagnostics.QUIC.SmoothedRTTMS)
+			st.DirectBytesUp = st.TunnelDiagnostics.QUIC.BytesSent
+			st.DirectBytesDown = st.TunnelDiagnostics.QUIC.BytesReceived
 		}
 	}
 	if st.RDPListenAddr != "" && !st.RDPUDPEnabled {

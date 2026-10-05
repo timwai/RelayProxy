@@ -161,5 +161,9 @@ func probeEndpoint(ctx context.Context, record EndpointRecord, dialAddress strin
 	if !response.Success || response.Probe == nil || !bytes.Equal(response.Probe.Nonce, nonce) {
 		return errors.New("public direct verification challenge mismatch")
 	}
+	// The verified response is the security boundary. Best-effort half-close
+	// only coordinates teardown with the Exit; a concurrent connection close
+	// after a valid nonce must not turn verification into a failure.
+	_ = stream.CloseWrite()
 	return nil
 }

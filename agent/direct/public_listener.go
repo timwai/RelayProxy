@@ -119,6 +119,13 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 		}); err != nil {
 			return nil, false, fmt.Errorf("public direct probe response: %w", err)
 		}
+		// Do not close the whole QUIC connection until the verifier has read the
+		// response. Closing the connection immediately can race buffered stream
+		// delivery and surface a spurious "session closed" on the Server.
+		_ = stream.CloseWrite()
+		_ = stream.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+		var drain [1]byte
+		_, _ = stream.Read(drain[:])
 		return nil, true, nil
 
 	case protocol.PublicDirectHandshakeAuth:

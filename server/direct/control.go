@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 
@@ -13,12 +14,15 @@ import (
 	"relayproxy/server/session"
 )
 
+type CurrentTicketValidator func(context.Context, string, protocol.PublicDirectTicketValidationRequest) error
+
 type Controller struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	registry  *Registry
-	verifier  *Verifier
-	onChanged func(string)
+	ctx             context.Context
+	cancel          context.CancelFunc
+	registry        *Registry
+	verifier        *Verifier
+	onChanged       func(string)
+	ticketValidator CurrentTicketValidator
 	mu        sync.Mutex
 	wg        sync.WaitGroup
 	closed    atomic.Bool
@@ -32,6 +36,15 @@ func NewController(parent context.Context, registry *Registry, verifier *Verifie
 	return &Controller{
 		ctx: ctx, cancel: cancel, registry: registry, verifier: verifier, onChanged: onChanged,
 	}
+}
+
+func (c *Controller) SetTicketValidator(validator CurrentTicketValidator) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.ticketValidator = validator
+	c.mu.Unlock()
 }
 
 func (c *Controller) Close() error {
@@ -62,7 +75,38 @@ func (c *Controller) HandleControl(ctx context.Context, stream tunnel.TunnelStre
 	var request protocol.PublicDirectRegistrationRequest
 	if err := protocol.ReadJSON(stream, &request); err != nil {
 		_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
-			ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "invalid public direct registration",
+			ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "invalid public direct control request",
+		})
+		return
+	}
+
+	operation := strings.TrimSpace(request.Operation)
+	if operation == protocol.PublicDirectControlValidateTicket {
+		c.mu.Lock()
+		validator := c.ticketValidator
+		c.mu.Unlock()
+		validation := request.TicketValidation
+		if validator == nil || validation == nil ||
+			strings.TrimSpace(validation.ClientDeviceID) == "" ||
+			strings.TrimSpace(validation.ExitDeviceID) != dev.DeviceID ||
+			validation.PolicyRevision <= 0 || validation.AuthorizationRevision <= 0 {
+			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
+				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct authorization is unavailable",
+			})
+			return
+		}
+		if err := validator(ctx, dev.DeviceID, *validation); err != nil {
+			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
+				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct authorization is no longer current",
+			})
+			return
+		}
+		_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{Success: true})
+		return
+	}
+	if operation != "" && operation != protocol.PublicDirectControlRegister {
+		_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
+			ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "unsupported public direct control operation",
 		})
 		return
 	}

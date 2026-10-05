@@ -126,6 +126,15 @@ func toMessageutilRule(rule repository.MessageRule) messageutil.MessageRule {
 	return out
 }
 
+func defaultMessageRuleEnabled(rules []repository.MessageRule) (bool, bool) {
+	for _, rule := range rules {
+		if rule.Default {
+			return rule.Enabled, true
+		}
+	}
+	return false, false
+}
+
 func messageutilMessageRules(rules []repository.MessageRule) []messageutil.MessageRule {
 	out := make([]messageutil.MessageRule, 0, len(rules))
 	for _, rule := range rules {

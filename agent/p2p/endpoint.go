@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"sort"
@@ -147,11 +148,23 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	var upnpMapping *p2pupnp.Mapping
 	if upnpResultCh != nil {
 		result := <-upnpResultCh
-		if result.err == nil && result.address.IsValid() {
+		switch {
+		case result.err != nil:
+			if result.mapping != nil {
+				_ = result.mapping.Close()
+			}
+			log.Printf("[P2P][UPnP] UDP mapping for local port %d unavailable: %v", port, result.err)
+		case !result.address.IsValid():
+			if result.mapping != nil {
+				_ = result.mapping.Close()
+			}
+			log.Printf("[P2P][UPnP] UDP mapping for local port %d returned an invalid public address", port)
+		default:
 			upnpMapping = result.mapping
 			discovered = appendEndpointCandidate(discovered, protocol.P2PCandidate{
 				Protocol: "udp", Type: "reflexive", Address: result.address.String(), Priority: 900,
 			})
+			log.Printf("[P2P][UPnP] mapped local UDP %d to %s", port, result.address)
 		}
 	}
 	if validated, validateErr := candidate.Validate(discovered); validateErr == nil {

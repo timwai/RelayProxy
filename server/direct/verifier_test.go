@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -58,7 +59,10 @@ func TestVerifierPinsExitCertificateAndChallenge(t *testing.T) {
 			State: StateUnknown, RegisteredAt: now,
 		},
 	}
-	verifier := &Verifier{Registry: registry, Timeout: 2 * time.Second, TTL: time.Minute}
+	verifier := &Verifier{
+		Registry: registry, Timeout: 2 * time.Second, TTL: time.Minute,
+		resolve: func(context.Context, string) (string, error) { return listener.Addr(), nil },
+	}
 	if err := verifier.Verify(context.Background(), "exit", "session-1", listener.Addr()); err != nil {
 		t.Fatal(err)
 	}
@@ -86,12 +90,51 @@ func TestVerifierRejectsWrongCertificateFingerprint(t *testing.T) {
 			State: StateUnknown, RegisteredAt: time.Now(),
 		},
 	}
-	verifier := &Verifier{Registry: registry, Timeout: time.Second, TTL: time.Minute}
+	verifier := &Verifier{
+		Registry: registry, Timeout: time.Second, TTL: time.Minute,
+		resolve: func(context.Context, string) (string, error) { return listener.Addr(), nil },
+	}
 	if err := verifier.Verify(context.Background(), "exit", "session-1", listener.Addr()); err == nil {
 		t.Fatal("wrong certificate fingerprint was accepted")
 	}
 	record, ok := registry.Lookup("exit", "session-1", listener.Addr())
 	if !ok || record.State != StateFailed || record.Endpoint.Verified {
 		t.Fatalf("failed record=%+v ok=%v", record, ok)
+	}
+}
+
+
+func TestResolvePublicEndpointRejectsPrivateResolution(t *testing.T) {
+	for _, address := range []string{"10.0.0.1:35820", "127.0.0.1:35820", "[::1]:35820", "[fe80::1]:35820"} {
+		if _, err := resolvePublicEndpointWithLookup(context.Background(), address, nil); err == nil {
+			t.Fatalf("non-public endpoint %q was accepted", address)
+		}
+	}
+
+	resolved, err := resolvePublicEndpointWithLookup(
+		context.Background(),
+		"exit.example.com:35820",
+		func(context.Context, string) ([]netip.Addr, error) {
+			return []netip.Addr{
+				netip.MustParseAddr("10.0.0.5"),
+				netip.MustParseAddr("1.1.1.1"),
+			}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != "1.1.1.1:35820" {
+		t.Fatalf("resolved endpoint=%q", resolved)
+	}
+
+	if _, err := resolvePublicEndpointWithLookup(
+		context.Background(),
+		"internal.example:35820",
+		func(context.Context, string) ([]netip.Addr, error) {
+			return []netip.Addr{netip.MustParseAddr("192.168.1.5")}, nil
+		},
+	); err == nil {
+		t.Fatal("private-only DNS result was accepted")
 	}
 }

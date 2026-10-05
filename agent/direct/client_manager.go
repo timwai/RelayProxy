@@ -292,7 +292,7 @@ func (m *ClientManager) EnsureClient(exitDeviceID string) bool {
 	}
 	entry.starting = true
 	entry.attempted = true
-	entry.lastEndpoint = endpoints[0].Address
+	entry.lastEndpoint = publicEndpointDialAddress(endpoints[0])
 	public := clonePublicDirectPath(entry.public)
 	ticketHash := entry.ticketHash
 	m.wg.Add(1)
@@ -321,7 +321,7 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 			continue
 		}
 		configs = append(configs, DialConfig{
-			Address: endpoint.Address, TLSConfig: tlsConfig,
+			Address: publicEndpointDialAddress(endpoint), TLSConfig: tlsConfig,
 			ClientDeviceID: clientID, ExitDeviceID: exitDeviceID,
 			Ticket:      append([]byte(nil), public.Ticket...),
 			AuthTimeout: m.attemptTimeout,
@@ -559,6 +559,13 @@ func selectPublicEndpoints(value protocol.ProxyPublicDirectPath) []protocol.Publ
 		return items[i].Address < items[j].Address
 	})
 	return items
+}
+
+func publicEndpointDialAddress(endpoint protocol.PublicDirectEndpoint) string {
+	if address := strings.TrimSpace(endpoint.DialAddress); address != "" {
+		return address
+	}
+	return strings.TrimSpace(endpoint.Address)
 }
 
 func clientEndpointPriority(source string) int {

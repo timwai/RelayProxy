@@ -35,7 +35,10 @@ type PublicListener struct {
 	handler    *exit.Handler
 	authorize  SessionAuthorizer
 	maxStreams int
-	wg         sync.WaitGroup
+
+	mu       sync.Mutex
+	sessions map[tunnel.TunnelSession]struct{}
+	wg       sync.WaitGroup
 }
 
 func ListenPublic(config PublicListenerConfig, handler *exit.Handler) (*PublicListener, error) {
@@ -62,6 +65,7 @@ func ListenPublic(config PublicListenerConfig, handler *exit.Handler) (*PublicLi
 	}
 	return &PublicListener{
 		listener: listener, handler: handler, authorize: config.Authorize, maxStreams: maxStreams,
+		sessions: make(map[tunnel.TunnelSession]struct{}),
 	}, nil
 }
 
@@ -89,6 +93,15 @@ func (l *PublicListener) Close() error {
 		return nil
 	}
 	err := l.listener.Close()
+	l.mu.Lock()
+	sessions := make([]tunnel.TunnelSession, 0, len(l.sessions))
+	for session := range l.sessions {
+		sessions = append(sessions, session)
+	}
+	l.mu.Unlock()
+	for _, session := range sessions {
+		_ = session.Close()
+	}
 	l.wg.Wait()
 	return err
 }
@@ -105,10 +118,18 @@ func (l *PublicListener) Serve(ctx context.Context) error {
 			}
 			return err
 		}
+		l.mu.Lock()
+		l.sessions[session] = struct{}{}
+		l.mu.Unlock()
 		l.wg.Add(1)
 		go func(session tunnel.TunnelSession) {
 			defer l.wg.Done()
-			defer session.Close()
+			defer func() {
+				l.mu.Lock()
+				delete(l.sessions, session)
+				l.mu.Unlock()
+				_ = session.Close()
+			}()
 			policy, err := l.authorize(ctx, session)
 			if err != nil || policy == nil {
 				return

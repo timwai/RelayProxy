@@ -26,16 +26,16 @@ const (
 )
 
 type EndpointRecord struct {
-	DeviceID       string
-	SessionID      string
-	NetworkEpoch   uint64
+	DeviceID        string
+	SessionID       string
+	NetworkEpoch    uint64
 	CertFingerprint string
-	Endpoint       protocol.PublicDirectEndpoint
-	State          VerificationState
-	RegisteredAt   time.Time
-	VerifiedAt     time.Time
-	ExpiresAt      time.Time
-	LastError      string
+	Endpoint        protocol.PublicDirectEndpoint
+	State           VerificationState
+	RegisteredAt    time.Time
+	VerifiedAt      time.Time
+	ExpiresAt       time.Time
+	LastError       string
 }
 
 type Registry struct {

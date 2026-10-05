@@ -105,8 +105,10 @@ button.action:active{transform:scale(.98)}
 </article>
 <script>
 (function(){
+  var initialTimeout=Number(window.__relayPendingTimeout);
+  if(!Number.isFinite(initialTimeout)) initialTimeout=15;
   var queue=[], current=null,
-      timeoutSeconds=Math.max(0,Math.min(3600,Math.floor(Number(window.__relayPendingTimeout)||15))),
+      timeoutSeconds=Math.max(0,Math.min(3600,Math.floor(initialTimeout))),
       dismissTimer=null, countdownTimer=null;
   function fmtTime(ms){
     var d=new Date(Number(ms)||Date.now());

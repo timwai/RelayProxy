@@ -85,7 +85,7 @@ func TestVerifierProvesEndpointBelongsToRegisteredExit(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := serverdirect.NewVerifier(3 * time.Second).Verify(ctx, target); err != nil {
+	if err := serverdirect.NewVerifier(3*time.Second).Verify(ctx, target); err != nil {
 		t.Fatal(err)
 	}
 	if got := handler.calls.Load(); got != 0 {
@@ -112,7 +112,7 @@ func TestVerifierRejectsWrongSecret(t *testing.T) {
 
 	wrong := append([]byte(nil), secret...)
 	wrong[0] ^= 0xff
-	err = serverdirect.NewVerifier(3 * time.Second).Verify(context.Background(), serverdirect.VerificationTarget{
+	err = serverdirect.NewVerifier(3*time.Second).Verify(context.Background(), serverdirect.VerificationTarget{
 		DeviceID:       "exit-test",
 		RegistrationID: "registration-test",
 		Generation:     1,

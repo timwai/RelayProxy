@@ -23,8 +23,8 @@ func TestSSDPHeader(t *testing.T) {
 
 func TestServiceRankPrefersWANIPV2(t *testing.T) {
 	cases := map[string]int{
-		"urn:schemas-upnp-org:service:WANIPConnection:2": 30,
-		"urn:schemas-upnp-org:service:WANIPConnection:1": 20,
+		"urn:schemas-upnp-org:service:WANIPConnection:2":  30,
+		"urn:schemas-upnp-org:service:WANIPConnection:1":  20,
 		"urn:schemas-upnp-org:service:WANPPPConnection:1": 10,
 		"urn:schemas-upnp-org:service:Layer3Forwarding:1": 0,
 	}
@@ -120,7 +120,6 @@ func TestSOAPFaultCode(t *testing.T) {
 	}
 }
 
-
 func assertElementOrder(t *testing.T, body string, names []string) {
 	t.Helper()
 	last := -1
@@ -198,17 +197,19 @@ func TestSOAPRedirectIsRejected(t *testing.T) {
 	}
 }
 
-func TestMappingCloseCancelsRefreshBeforeDelete(t *testing.T) {
+func TestMappingCloseDrainsRefreshBeforeDelete(t *testing.T) {
 	events := make(chan string, 4)
 	addStarted := make(chan struct{})
+	releaseAdd := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		action := strings.Trim(r.Header.Get("SOAPAction"), "\"")
 		switch {
 		case strings.HasSuffix(action, "#AddPortMapping"):
 			events <- "add-start"
 			close(addStarted)
-			<-r.Context().Done()
-			events <- "add-cancel"
+			<-releaseAdd
+			events <- "add-done"
+			fmt.Fprint(w, `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body/></s:Envelope>`)
 		case strings.HasSuffix(action, "#DeletePortMapping"):
 			events <- "delete"
 			fmt.Fprint(w, `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body/></s:Envelope>`)
@@ -225,19 +226,21 @@ func TestMappingCloseCancelsRefreshBeforeDelete(t *testing.T) {
 		controlURL:  control,
 		controlIP:   netip.MustParseAddr("127.0.0.1"),
 	}
-	refreshCtx, refreshCancel := context.WithCancel(context.Background())
+	_, refreshCancel := context.WithCancel(context.Background())
 	m := &Mapping{
-		service:         svc,
-		internalClient:  "192.168.1.20",
-		internalPort:    32123,
-		externalPort:    32123,
-		leaseSeconds:    3600,
-		refreshCancel:   refreshCancel,
+		service:        svc,
+		internalClient: "192.168.1.20",
+		internalPort:   32123,
+		externalPort:   32123,
+		leaseSeconds:   3600,
+		refreshCancel:  refreshCancel,
 	}
 	m.refreshWG.Add(1)
 	go func() {
 		defer m.refreshWG.Done()
-		_ = svc.addPortMapping(refreshCtx, 32123, 32123, "192.168.1.20", 3600)
+		requestCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = svc.addPortMapping(requestCtx, 32123, 32123, "192.168.1.20", 3600)
 	}()
 
 	select {
@@ -250,14 +253,21 @@ func TestMappingCloseCancelsRefreshBeforeDelete(t *testing.T) {
 	go func() { closed <- m.Close() }()
 	select {
 	case err := <-closed:
+		t.Fatalf("Close returned before in-flight refresh completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(releaseAdd)
+	select {
+	case err := <-closed:
 		if err != nil {
 			t.Fatalf("Close failed: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Close did not cancel and wait for refresh")
+		t.Fatal("Close did not finish after refresh completed")
 	}
 
-	want := []string{"add-start", "add-cancel", "delete"}
+	want := []string{"add-start", "add-done", "delete"}
 	for i, expected := range want {
 		select {
 		case got := <-events:

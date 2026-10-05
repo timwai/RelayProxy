@@ -352,8 +352,6 @@ func (db *DB) ensureMessageSchema() error {
 			FOREIGN KEY(device_id) REFERENCES devices(id) ON DELETE CASCADE
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_identity_created ON messages(identity_id, created_at)`,
-		`CREATE INDEX IF NOT EXISTS idx_message_channels_identity ON message_channels(identity_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_deliveries_device ON message_deliveries(device_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_channel_devices_device ON message_channel_devices(device_id)`,
 	}

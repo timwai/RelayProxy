@@ -32,14 +32,14 @@ func directTestTLS(t *testing.T) (*tls.Config, *tls.Config) {
 	}
 	cert := tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}
 	return &tls.Config{
-			MinVersion:   tls.VersionTLS13,
-			NextProtos:   []string{"relayproxy-direct-test"},
-			Certificates: []tls.Certificate{cert},
-		}, &tls.Config{
-			MinVersion:         tls.VersionTLS13,
-			NextProtos:         []string{"relayproxy-direct-test"},
-			InsecureSkipVerify: true,
-		}
+		MinVersion:   tls.VersionTLS13,
+		NextProtos:   []string{"relayproxy-direct-test"},
+		Certificates: []tls.Certificate{cert},
+	}, &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		NextProtos:         []string{"relayproxy-direct-test"},
+		InsecureSkipVerify: true,
+	}
 }
 
 func TestQUICConfig(t *testing.T) {

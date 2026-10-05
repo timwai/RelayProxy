@@ -209,6 +209,13 @@ class ConfigStore(private val context: Context) {
         prefs.edit().putBoolean("dark_theme", isDark).apply()
     }
 
+    fun isGlobalMessageOverlayEnabled(): Boolean =
+        prefs.getBoolean("global_message_overlay", false)
+
+    fun setGlobalMessageOverlayEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("global_message_overlay", enabled).apply()
+    }
+
     fun hasConnectionConfig(config: ExitConfig = load()): Boolean =
         config.serverAddress.isNotBlank() &&
             Regex("^(?=.*[a-z])(?=.*[0-9])[a-z0-9]{16}$").matches(config.identityId)

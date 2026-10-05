@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.res.Configuration
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
@@ -186,6 +187,15 @@ class RelayExitService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::messageOverlayController.isInitialized &&
+            ConfigStore(this).themeMode() == ConfigStore.THEME_SYSTEM
+        ) {
+            messageOverlayController.refreshTheme()
+        }
     }
 
     override fun onDestroy() {

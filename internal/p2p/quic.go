@@ -5,12 +5,10 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
-	"fmt"
 	"net"
-	"sync"
-	"time"
 
 	"github.com/quic-go/quic-go"
+	direct "relayproxy/internal/direct"
 	"relayproxy/internal/p2p/secure"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -18,38 +16,12 @@ import (
 
 const QUICALPN = "relayproxy-p2p-v1"
 
-type QUICOptions struct {
-	KeepAlivePeriod  time.Duration
-	MaxIdleTimeout   time.Duration
-	DisableKeepAlive bool
-}
-
-// QUICSession owns the quic-go Transport that took over the punched UDP socket.
-// The embedded RelayProxy session keeps the existing stream/datagram interface.
-type QUICSession struct {
-	*tunnel.QUICSession
-	conn      *quic.Conn
-	transport *quic.Transport
-	closeOnce sync.Once
-	closeErr  error
-}
+type QUICOptions = direct.QUICOptions
+type QUICSession = direct.PacketSession
+type QUICStats = direct.QUICStats
 
 func DirectQUICConfig(options ...QUICOptions) *quic.Config {
-	config := tunnel.DefaultQUICConfig()
-	config.KeepAlivePeriod = 10 * time.Second
-	config.MaxIdleTimeout = 120 * time.Second
-	if len(options) > 0 {
-		if options[0].DisableKeepAlive {
-			config.KeepAlivePeriod = 0
-		} else if options[0].KeepAlivePeriod > 0 {
-			config.KeepAlivePeriod = options[0].KeepAlivePeriod
-		}
-		if options[0].MaxIdleTimeout > 0 {
-			config.MaxIdleTimeout = options[0].MaxIdleTimeout
-		}
-	}
-	config.EnableDatagrams = true
-	return config
+	return direct.QUICConfig(options...)
 }
 
 func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, identity *secure.TLSIdentity, expectedPeerFingerprint string, options ...QUICOptions) (*QUICSession, error) {
@@ -60,15 +32,12 @@ func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, ident
 	if err != nil {
 		return nil, err
 	}
-	transport := &quic.Transport{Conn: conn}
-	qconn, err := transport.Dial(ctx, remote, tlsConfig, DirectQUICConfig(options...))
+	session, err := direct.DialPacket(ctx, conn, remote, tlsConfig, direct.QUICConfig(options...))
 	if err != nil {
-		_ = transport.Close()
-		return nil, fmt.Errorf("P2P QUIC dial failed: %w", err)
+		return nil, err
 	}
-	session := tunnel.NewQUICSession(qconn)
-	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
-	return &QUICSession{QUICSession: session, conn: qconn, transport: transport}, nil
+	tunnel.SetPeerCapabilities(session.QUICSession, []string{protocol.UDPModeDatagram})
+	return session, nil
 }
 
 func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIdentity, expectedPeerFingerprint string, options ...QUICOptions) (*QUICSession, error) {
@@ -79,55 +48,12 @@ func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIden
 	if err != nil {
 		return nil, err
 	}
-	transport := &quic.Transport{Conn: conn}
-	listener, err := transport.Listen(tlsConfig, DirectQUICConfig(options...))
+	session, err := direct.AcceptPacket(ctx, conn, tlsConfig, direct.QUICConfig(options...))
 	if err != nil {
-		_ = transport.Close()
-		return nil, fmt.Errorf("P2P QUIC listen failed: %w", err)
+		return nil, err
 	}
-	qconn, err := listener.Accept(ctx)
-	if err != nil {
-		_ = listener.Close()
-		_ = transport.Close()
-		return nil, fmt.Errorf("P2P QUIC accept failed: %w", err)
-	}
-	// One Endpoint belongs to one Client/Exit P2P session. Stop accepting
-	// additional connections while preserving the accepted connection.
-	_ = listener.Close()
-	session := tunnel.NewQUICSession(qconn)
-	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
-	return &QUICSession{QUICSession: session, conn: qconn, transport: transport}, nil
-}
-
-type QUICStats struct {
-	RTT           time.Duration
-	BytesSent     uint64
-	BytesReceived uint64
-}
-
-func (s *QUICSession) Stats() QUICStats {
-	if s == nil || s.conn == nil {
-		return QUICStats{}
-	}
-	stats := s.conn.ConnectionStats()
-	return QUICStats{RTT: stats.SmoothedRTT, BytesSent: stats.BytesSent, BytesReceived: stats.BytesReceived}
-}
-
-func (s *QUICSession) Close() error {
-	if s == nil {
-		return nil
-	}
-	s.closeOnce.Do(func() {
-		if s.QUICSession != nil {
-			s.closeErr = s.QUICSession.Close()
-		}
-		if s.transport != nil {
-			if err := s.transport.Close(); s.closeErr == nil {
-				s.closeErr = err
-			}
-		}
-	})
-	return s.closeErr
+	tunnel.SetPeerCapabilities(session.QUICSession, []string{protocol.UDPModeDatagram})
+	return session, nil
 }
 
 func clientTLSConfig(identity *secure.TLSIdentity, expected string) (*tls.Config, error) {

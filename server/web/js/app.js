@@ -700,8 +700,9 @@
       const stateName = stateNames[item.state] || item.state || '未知';
       const stateClass = item.state === 'verified' ? 'success' : item.state === 'failed' ? 'warning-badge' : 'neutral';
       const time = item.verifiedAt ? ' · 验证 ' + esc(date(item.verifiedAt)) : '';
+      const dial = item.dialAddress && item.dialAddress !== item.address ? '<small>实际拨号：<span class="mono">' + esc(item.dialAddress) + '</span></small>' : '';
       const reason = item.lastError ? '<small>' + esc(item.lastError) + '</small>' : '';
-      return '<div><span class="mono">' + esc(item.address) + '</span> ' + badge(stateName, stateClass) + '<small>' + esc(item.source || '') + time + '</small>' + reason + '</div>';
+      return '<div><span class="mono">' + esc(item.address) + '</span> ' + badge(stateName, stateClass) + '<small>' + esc(item.source || '') + time + '</small>' + dial + reason + '</div>';
     }).join('');
     const summary = value.available ? badge('Public Direct 可用', 'success') : badge(endpoints.length ? 'Public Direct 未就绪' : 'Public Direct 未注册', endpoints.length ? 'warning-badge' : 'neutral');
     return '<div class="notice subtle"><strong>' + summary + '</strong><small>已验证端点 ' + esc(value.verifiedEndpointCount || 0) + ' 个</small>' + (rows ? '<div class="direct-endpoints">' + rows + '</div>' : '') + '</div>';

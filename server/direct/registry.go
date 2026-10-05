@@ -95,6 +95,7 @@ func (r *Registry) Register(deviceID, sessionID string, observedIP netip.Addr, r
 			CertFingerprint: fingerprint,
 			Endpoint: protocol.PublicDirectEndpoint{
 				Protocol: candidate.Protocol, Address: candidate.Address, Source: candidate.Source,
+				CertFingerprint: fingerprint,
 			},
 			State: StateUnknown, RegisteredAt: now,
 		}

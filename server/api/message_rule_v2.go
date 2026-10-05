@@ -53,16 +53,27 @@ func normalizeMessageRules(rules []repository.MessageRule) ([]repository.Message
 			rule.Verification.Type = strings.ToLower(strings.TrimSpace(rule.Verification.Type))
 			rule.Verification.Pattern = strings.TrimSpace(rule.Verification.Pattern)
 			if rule.Verification.Type == messageutil.ExtractorAuto {
+				// Treat a completely omitted auto-extractor configuration as the
+				// historical smart defaults. Once any tuning field is supplied,
+				// invalid combinations (such as allowing neither letters nor
+				// digits) are rejected by ValidateMessageRule instead of being
+				// silently rewritten.
+				omittedAutoConfig := rule.Verification.MinLength == 0 &&
+					rule.Verification.MaxLength == 0 &&
+					rule.Verification.MaxDistance == 0 &&
+					!rule.Verification.AllowLetters &&
+					!rule.Verification.AllowDigits &&
+					!rule.Verification.RequireDigit
+				if omittedAutoConfig {
+					rule.Verification.AllowLetters = true
+					rule.Verification.AllowDigits = true
+					rule.Verification.RequireDigit = true
+				}
 				if rule.Verification.MinLength == 0 {
 					rule.Verification.MinLength = 4
 				}
 				if rule.Verification.MaxLength == 0 {
 					rule.Verification.MaxLength = 8
-				}
-				if !rule.Verification.AllowLetters && !rule.Verification.AllowDigits {
-					rule.Verification.AllowLetters = true
-					rule.Verification.AllowDigits = true
-					rule.Verification.RequireDigit = true
 				}
 				if rule.Verification.MaxDistance == 0 {
 					rule.Verification.MaxDistance = 64

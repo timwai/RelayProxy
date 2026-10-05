@@ -90,7 +90,6 @@ func TestValidateVerificationRule(t *testing.T) {
 	}
 }
 
-
 func TestMatchVerificationCodeWithPopupMetadata(t *testing.T) {
 	disabled := false
 	rules := []VerificationRule{

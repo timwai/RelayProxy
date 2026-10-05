@@ -515,7 +515,6 @@ func TestFailReadyForExitRemovesBrokenPathAndStartsCooldown(t *testing.T) {
 	}
 }
 
-
 func TestReadyQueueFullRemovesSessionAndClosesServerLease(t *testing.T) {
 	closed := make(chan protocol.P2PControlMessage, 1)
 	manager := NewManager(context.Background(), func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {

@@ -490,6 +490,11 @@ func TestAgentP2PSettingsValidateAndPersist(t *testing.T) {
 		loaded.P2P.MaxExitSessions != 6 || loaded.P2P.Fallback == nil || *loaded.P2P.Fallback {
 		t.Fatalf("P2P settings changed after persistence: %+v", loaded.P2P)
 	}
+	directOnly := *loaded
+	directOnly.P2P.Mode = "direct_only"
+	if err := ValidateAgentConfig(&directOnly); err != nil {
+		t.Fatalf("direct_only mode was rejected: %v", err)
+	}
 
 	for name, mutate := range map[string]func(*AgentConfigFile){
 		"mode":          func(c *AgentConfigFile) { c.P2P.Mode = "magic" },

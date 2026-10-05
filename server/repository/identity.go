@@ -231,6 +231,9 @@ func (db *DB) ensureIdentityAccessSchema() error {
 	if err := db.ensureSQLiteColumn("devices", "identity_id", "VARCHAR(64)"); err != nil {
 		return err
 	}
+	if err := db.ensureSQLiteColumn("devices", "denied_capabilities", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
 	if err := db.ensureSQLiteColumn("identities", "short_id", "VARCHAR(32)"); err != nil {
 		return err
 	}
@@ -716,9 +719,9 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 				return nil, errors.New("approved identity has no device")
 			}
 			var boundIdentity sql.NullString
-			var approvalState, approvedRaw string
-			if err := tx.QueryRow(`SELECT identity_id, approval_state, approved_capabilities FROM devices WHERE id = ?`,
-				existingDeviceID.String).Scan(&boundIdentity, &approvalState, &approvedRaw); err != nil {
+			var approvalState, approvedRaw, deniedRaw string
+			if err := tx.QueryRow(`SELECT identity_id, approval_state, approved_capabilities, denied_capabilities FROM devices WHERE id = ?`,
+				existingDeviceID.String).Scan(&boundIdentity, &approvalState, &approvedRaw, &deniedRaw); err != nil {
 				return nil, err
 			}
 			if approvalState == EnrollmentRevoked {
@@ -731,11 +734,23 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 			if err != nil {
 				return nil, err
 			}
-			effective := filterApprovedCapabilities(approved, requested)
-			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, effective, now); err != nil {
+			denied, err := decodeCapabilities(deniedRaw)
+			if err != nil {
 				return nil, err
 			}
-			pending := capabilitiesExcept(requested, approved)
+			// A server-side denial only suppresses a capability while the Agent
+			// keeps declaring it. Once the Agent stops requesting it, forget the
+			// denial so a later re-enable is treated as a fresh request.
+			denied = capabilitiesIntersection(denied, requested)
+			deniedRaw, err = encodeCapabilities(denied)
+			if err != nil {
+				return nil, err
+			}
+			effective := filterApprovedCapabilities(approved, requested)
+			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, deniedRaw, effective, now); err != nil {
+				return nil, err
+			}
+			pending := capabilitiesExcept(capabilitiesExcept(requested, approved), denied)
 			requestID := ""
 			requestState := ""
 			if len(pending) > 0 {
@@ -748,6 +763,11 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 				return nil, err
 			}
 			if len(effective) == 0 {
+				if requestState == "" {
+					// The device remains approved, but every capability it is
+					// currently declaring was explicitly denied by the server.
+					requestState = EnrollmentRejected
+				}
 				return &DeviceAuthorization{
 					State: requestState, RequestID: requestID, DeviceID: existingDeviceID.String,
 					IdentityID: access.IdentityID, IdentityName: access.IdentityName,
@@ -816,6 +836,20 @@ func capabilitiesExcept(requested, approved []string) []string {
 	result := make([]string, 0, len(requested))
 	for _, capability := range normalizeCapabilities(requested) {
 		if !approvedSet[capability] {
+			result = append(result, capability)
+		}
+	}
+	return result
+}
+
+func capabilitiesIntersection(left, right []string) []string {
+	rightSet := make(map[string]bool, len(right))
+	for _, capability := range normalizeCapabilities(right) {
+		rightSet[capability] = true
+	}
+	result := make([]string, 0, len(left))
+	for _, capability := range normalizeCapabilities(left) {
+		if rightSet[capability] {
 			result = append(result, capability)
 		}
 	}
@@ -900,12 +934,12 @@ func (db *DB) identityDeviceAuthorization(deviceID string, access IdentityAuthor
 	return authorization, nil
 }
 
-func updateIdentityManagedDevice(tx *sql.Tx, deviceID string, observation DeviceIdentityObservation, requestedRaw string, effective []string, now time.Time) error {
+func updateIdentityManagedDevice(tx *sql.Tx, deviceID string, observation DeviceIdentityObservation, requestedRaw, deniedRaw string, effective []string, now time.Time) error {
 	if _, err := tx.Exec(`UPDATE devices SET name = ?, platform = ?, arch = ?, client_version = ?,
-		requested_capabilities = ?, updated_at = ?
+		requested_capabilities = ?, denied_capabilities = ?, updated_at = ?
 		WHERE id = ? AND approval_state = ?`,
 		fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
-		observation.ClientVersion, requestedRaw, now, deviceID, EnrollmentApproved); err != nil {
+		observation.ClientVersion, requestedRaw, deniedRaw, now, deviceID, EnrollmentApproved); err != nil {
 		return err
 	}
 	if err := replaceDeviceRuntimeGrants(tx, deviceID, effective, now); err != nil {

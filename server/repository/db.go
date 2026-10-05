@@ -572,13 +572,50 @@ type MessageChannel struct {
 	UpdatedAt              time.Time          `json:"updatedAt"`
 }
 
+func (db *DB) inferMessageChannelIdentity(deviceIDs []string) (string, error) {
+	seen := make(map[string]bool)
+	for _, deviceID := range deviceIDs {
+		deviceID = strings.TrimSpace(deviceID)
+		if deviceID == "" {
+			continue
+		}
+		var identity sql.NullString
+		if err := db.QueryRow(`SELECT identity_id FROM devices WHERE id = ?`, deviceID).Scan(&identity); err != nil {
+			return "", err
+		}
+		if !identity.Valid || strings.TrimSpace(identity.String) == "" {
+			return "", errors.New("message target device has no identity")
+		}
+		seen[identity.String] = true
+		if len(seen) > 1 {
+			return "", errors.New("message channel targets span multiple identities")
+		}
+	}
+	for identityID := range seen {
+		return identityID, nil
+	}
+	var count int
+	var only sql.NullString
+	if err := db.QueryRow(`SELECT COUNT(*), MIN(id) FROM identities`).Scan(&count, &only); err != nil {
+		return "", err
+	}
+	if count == 1 && only.Valid && only.String != "" {
+		return only.String, nil
+	}
+	return "", errors.New("channel identity is required")
+}
+
 func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
 	if channel == nil {
 		return errors.New("channel is required")
 	}
 	channel.IdentityID = strings.TrimSpace(channel.IdentityID)
 	if channel.IdentityID == "" {
-		return errors.New("channel identity is required")
+		inferred, err := db.inferMessageChannelIdentity(channel.DeviceIDs)
+		if err != nil {
+			return err
+		}
+		channel.IdentityID = inferred
 	}
 	var identityExists int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM identities WHERE id = ?`, channel.IdentityID).Scan(&identityExists); err != nil {

@@ -82,11 +82,11 @@ type PublicDirectTicketValidationRequest struct {
 }
 
 type PublicDirectRegistrationRequest struct {
-	Operation       string                               `json:"operation,omitempty"`
-	ListenerPort    uint16                               `json:"listenerPort,omitempty"`
-	CertFingerprint string                               `json:"certFingerprint,omitempty"`
-	NetworkEpoch    uint64                               `json:"networkEpoch,omitempty"`
-	Candidates      []PublicDirectEndpointCandidate      `json:"candidates,omitempty"`
+	Operation        string                               `json:"operation,omitempty"`
+	ListenerPort     uint16                               `json:"listenerPort,omitempty"`
+	CertFingerprint  string                               `json:"certFingerprint,omitempty"`
+	NetworkEpoch     uint64                               `json:"networkEpoch,omitempty"`
+	Candidates       []PublicDirectEndpointCandidate      `json:"candidates,omitempty"`
 	TicketValidation *PublicDirectTicketValidationRequest `json:"ticketValidation,omitempty"`
 }
 

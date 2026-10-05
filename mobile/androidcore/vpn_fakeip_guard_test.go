@@ -1,0 +1,66 @@
+package androidcore
+
+import (
+	"context"
+	"errors"
+	"net"
+	"testing"
+
+	"relayproxy/internal/protocol"
+	"relayproxy/internal/proxy"
+)
+
+type fakeVPNGuardDialer struct {
+	tcpCalls int
+	udpCalls int
+}
+
+func (d *fakeVPNGuardDialer) DialTCP(context.Context, string, string, uint16) (net.Conn, error) {
+	d.tcpCalls++
+	return nil, errors.New("base tcp dial")
+}
+
+func (d *fakeVPNGuardDialer) DialUDP(context.Context, string, string, uint16) (net.PacketConn, error) {
+	d.udpCalls++
+	return nil, errors.New("base udp dial")
+}
+
+func (d *fakeVPNGuardDialer) DialUDPWithOptions(context.Context, string, string, uint16, proxy.UDPDialOptions) (net.PacketConn, error) {
+	d.udpCalls++
+	return nil, errors.New("base udp options dial")
+}
+
+func TestVPNMappedDNSGuardRejectsFakeIPBeforeTunnel(t *testing.T) {
+	base := &fakeVPNGuardDialer{}
+	guard := &vpnMappedDNSGuardDialer{base: base}
+
+	for _, host := range []string{"198.18.0.2", "198.19.0.21", "198.19.1.248"} {
+		_, err := guard.DialTCP(context.Background(), "exit", host, 443)
+		var relayErr *protocol.RelayError
+		if !errors.As(err, &relayErr) || relayErr.Code != protocol.ErrCodeHostUnreach {
+			t.Fatalf("DialTCP(%q) error = %v, want HOST_UNREACHABLE", host, err)
+		}
+		_, err = guard.DialUDPWithOptions(context.Background(), "exit", host, 53, proxy.UDPDialOptions{DatagramRequired: true})
+		if !errors.As(err, &relayErr) || relayErr.Code != protocol.ErrCodeHostUnreach {
+			t.Fatalf("DialUDP(%q) error = %v, want HOST_UNREACHABLE", host, err)
+		}
+	}
+	if base.tcpCalls != 0 || base.udpCalls != 0 {
+		t.Fatalf("FakeIP reached base dialer: tcp=%d udp=%d", base.tcpCalls, base.udpCalls)
+	}
+}
+
+func TestVPNMappedDNSGuardAllowsDomainsAndPublicIPs(t *testing.T) {
+	base := &fakeVPNGuardDialer{}
+	guard := &vpnMappedDNSGuardDialer{base: base}
+
+	if _, err := guard.DialTCP(context.Background(), "exit", "example.com", 443); err == nil {
+		t.Fatal("expected fake base dial error")
+	}
+	if _, err := guard.DialTCP(context.Background(), "exit", "42.81.252.103", 443); err == nil {
+		t.Fatal("expected fake base dial error")
+	}
+	if base.tcpCalls != 2 {
+		t.Fatalf("base tcp calls = %d, want 2", base.tcpCalls)
+	}
+}

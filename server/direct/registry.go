@@ -52,13 +52,13 @@ type endpointRecord struct {
 }
 
 type registration struct {
-	owner          *session.DeviceSession
-	id             string
-	generation     uint64
-	secret         []byte
-	registeredAt   time.Time
+	owner           *session.DeviceSession
+	id              string
+	generation      uint64
+	secret          []byte
+	registeredAt    time.Time
 	registrationTTL time.Duration
-	endpoints      []endpointRecord
+	endpoints       []endpointRecord
 }
 
 type Registry struct {

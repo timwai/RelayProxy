@@ -133,6 +133,7 @@ type Client struct {
 
 	mu                sync.RWMutex
 	status            statusSnapshot
+	messages          []protocol.PushMessage
 	starting          bool
 	started           bool
 	closed            bool
@@ -675,6 +676,33 @@ func (c *Client) SetPowerConstrained(constrained bool) {
 	if manager != nil {
 		manager.SetPowerConstrained(constrained)
 	}
+}
+
+// PopMessagesJSON returns and clears server-originated messages waiting for the
+// Android UI. Keeping this as JSON preserves a gomobile-friendly scalar API.
+func (c *Client) PopMessagesJSON() string {
+	if c == nil {
+		return "[]"
+	}
+	c.mu.Lock()
+	messages := append([]protocol.PushMessage(nil), c.messages...)
+	c.messages = nil
+	c.mu.Unlock()
+	data, err := json.Marshal(messages)
+	if err != nil {
+		return "[]"
+	}
+	return string(data)
+}
+
+func (c *Client) enqueueMessage(message protocol.PushMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.messages) >= 500 {
+		copy(c.messages, c.messages[len(c.messages)-499:])
+		c.messages = c.messages[:499]
+	}
+	c.messages = append(c.messages, message)
 }
 
 // StatusJSON returns a stable JSON snapshot for the Android UI.
@@ -1221,6 +1249,27 @@ func (c *Client) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSe
 			header, err := protocol.ReadStreamHeader(s)
 			if err != nil {
 				_ = s.Close()
+				return
+			}
+			if header.Type == protocol.FrameTypePushMessage {
+				defer s.Close()
+				var message protocol.PushMessage
+				if err := protocol.ReadJSON(s, &message); err != nil {
+					_ = protocol.WriteJSON(s, protocol.PushMessageReceipt{
+						MessageID: message.ID, Received: false, Error: err.Error(),
+					})
+					return
+				}
+				if message.ID == "" || strings.TrimSpace(message.Content) == "" {
+					_ = protocol.WriteJSON(s, protocol.PushMessageReceipt{
+						MessageID: message.ID, Received: false, Error: "invalid message",
+					})
+					return
+				}
+				c.enqueueMessage(message)
+				_ = protocol.WriteJSON(s, protocol.PushMessageReceipt{
+					MessageID: message.ID, Received: true,
+				})
 				return
 			}
 			if header.Type == protocol.FrameTypeP2PControl && p2pManager != nil {

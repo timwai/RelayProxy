@@ -10,7 +10,6 @@ import (
 	"relayproxy/internal/tunnel"
 )
 
-
 func DialPublicQUIC(
 	ctx context.Context,
 	address string,

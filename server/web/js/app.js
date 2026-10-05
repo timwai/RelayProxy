@@ -714,12 +714,17 @@
   }
   function renderSessions() {
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };
+    const directNames = {public_direct_quic:'Public Direct QUIC',p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
     $('sessions-body').innerHTML = state.sessions.length ? state.sessions.map(s => {
       const relay = s.tunnelDiagnostics && s.tunnelDiagnostics.quic;
       const peer = s.peerDiagnostics && s.peerDiagnostics.payload;
-      const peerQuic = peer && peer.status && peer.status.tunnelDiagnostics && peer.status.tunnelDiagnostics.quic;
+      const peerStatus = peer && peer.status;
+      const peerQuic = peerStatus && peerStatus.tunnelDiagnostics && peerStatus.tunnelDiagnostics.quic;
+      const directPath = peerStatus && peerStatus.directPath;
+      const directState = peerStatus && peerStatus.directState;
+      const direct = directPath ? '<small>当前路径：' + esc(directNames[directPath] || directPath) + (directState ? ' · ' + esc(directState) : '') + '</small>' : '';
       const diagnostic = relay ? '<span class="mono">Relay RTT ' + esc(relay.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(relay.sent_packets_lost || 0) + '</span>' +
-        (peerQuic ? '<small>设备 RTT ' + esc(peerQuic.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(peerQuic.sent_packets_lost || 0) + '</small>' : '<small>等待设备心跳诊断</small>') : '<span class="muted">当前传输无 QUIC 统计</span>';
+        (peerQuic ? '<small>设备 RTT ' + esc(peerQuic.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(peerQuic.sent_packets_lost || 0) + '</small>' : '<small>等待设备心跳诊断</small>') + direct : '<span class="muted">当前传输无 QUIC 统计</span>' + direct;
       return '<tr><td>' + nameCell(s.clientDeviceName, s.clientDeviceId) + '</td><td>' + esc(roleNames[s.mode] || s.mode) + '</td><td>' + esc(s.exitDeviceId ? nameFor(s.exitDeviceId) : '未指定') + '</td><td>' + transport(s.transport) + '</td><td>' + esc(s.activeStreams) + '</td><td class="mono">' + bytes(s.bytesUp) + ' / ' + bytes(s.bytesDown) + '</td><td>' + diagnostic + '</td></tr>';
     }).join('') : emptyRow(7, '当前没有活跃流', '设备发起代理连接后会显示在这里');
   }

@@ -87,7 +87,11 @@ func TestRegistryInvalidatesVerificationOnNetworkChange(t *testing.T) {
 	}
 	record, ok := registry.Lookup("exit", "session-1", "8.8.4.4:35820")
 	if !ok || record.State != StateUnknown {
-		t.Fatalf("record after network change=%+v ok=%v", record, func TestRegistryRejectsStaleNetworkEpochRegistration(t *testing.T) {
+		t.Fatalf("record after network change=%+v ok=%v", record, ok)
+	}
+}
+
+func TestRegistryRejectsStaleNetworkEpochRegistration(t *testing.T) {
 	registry := NewRegistry()
 	request := protocol.PublicDirectRegistrationRequest{
 		ListenerPort:    35820,
@@ -136,7 +140,7 @@ func TestRegistryRejectsStaleVerificationAfterNetworkChange(t *testing.T) {
 	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.4.4"), request); err != nil {
 		t.Fatal(err)
 	}
-	if registry.markVerifiedRegistration(old, time.Minute) {
+	if registry.markVerifiedRegistration(old, old.Endpoint.Address, time.Minute) {
 		t.Fatal("stale verification result marked the new network epoch verified")
 	}
 	if registry.markFailedRegistration(old, errors.New("old probe failed")) {
@@ -145,10 +149,6 @@ func TestRegistryRejectsStaleVerificationAfterNetworkChange(t *testing.T) {
 	record, ok := registry.Lookup("exit", "session-1", "8.8.4.4:35820")
 	if !ok || record.NetworkEpoch != 2 || record.State != StateUnknown || record.Endpoint.Verified {
 		t.Fatalf("new network epoch was polluted by stale verification: record=%+v ok=%v", record, ok)
-	}
-}
-
-ok)
 	}
 }
 

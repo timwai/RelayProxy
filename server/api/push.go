@@ -154,7 +154,7 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		}(),
 		Popup:     classification.Popup,
 		PopupType: classification.Type,
-		CreatedAt:        time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
 	}
 	if err := h.db.CreateMessage(message, targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist message")

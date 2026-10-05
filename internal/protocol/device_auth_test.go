@@ -121,3 +121,32 @@ func TestResourceInventoryEmptyProxyExitsRoundTrip(t *testing.T) {
 		t.Fatalf("resource inventory did not round-trip: %+v", decoded)
 	}
 }
+
+
+func TestProxyExitPublicDirectInventoryRoundTrip(t *testing.T) {
+	in := ProxyExit{
+		DeviceID: "exit-1", Name: "Exit", Online: true,
+		Direct: &ProxyDirectPaths{Public: &ProxyPublicDirectPath{
+			Available: true, Transport: "quic",
+			Endpoints: []PublicDirectEndpoint{{
+				Protocol: PublicDirectEndpointProtocolUDP,
+				Address:  "203.0.113.20:35820",
+				Source:   PublicDirectEndpointManual,
+				Verified: true,
+			}},
+		}},
+	}
+	raw, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out ProxyExit
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Direct == nil || out.Direct.Public == nil || !out.Direct.Public.Available ||
+		out.Direct.Public.Transport != "quic" || len(out.Direct.Public.Endpoints) != 1 ||
+		!out.Direct.Public.Endpoints[0].Verified {
+		t.Fatalf("public direct inventory did not round-trip: %+v", out)
+	}
+}

@@ -11,6 +11,7 @@ import (
 )
 
 type DeviceSession struct {
+	SessionID      string
 	DeviceID       string
 	DeviceName     string
 	Fingerprint    string   // verified installation public-key fingerprint

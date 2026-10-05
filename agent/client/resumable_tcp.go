@@ -168,12 +168,13 @@ func (c *resumableTCPConn) recoverViaRelay(lostGeneration uint64) error {
 			relay = c.dialer.getTunnel()
 		}
 		if relay != nil {
+			failedPath := c.currentPath()
 			if err := c.tryRelayRebind(ctx, relay, lostGeneration, nextGeneration); err == nil {
-				// Only generation 1 represents P2P -> Relay fallback. Later
+				// Only generation 1 represents direct -> Relay fallback. Later
 				// generations are Relay -> Relay recovery and must not inflate the
-				// P2P fallback metric.
+				// direct-path fallback metric.
 				if lostGeneration == 1 {
-					c.dialer.recordFallback(c.exitID)
+					c.dialer.recordFallback(c.exitID, failedPath)
 				}
 				return nil
 			} else {

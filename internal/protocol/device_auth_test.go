@@ -86,7 +86,6 @@ func TestPongRDPTargetsDistinguishesRefreshFromNoUpdate(t *testing.T) {
 	}
 }
 
-
 func TestPongProxyExitsDistinguishesRefreshFromNoUpdate(t *testing.T) {
 	empty := []ProxyExit{}
 	encoded, err := json.Marshal(PongMessage{Timestamp: 1, ProxyExits: &empty, ProxyExitRevision: 7})

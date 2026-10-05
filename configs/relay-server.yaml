@@ -46,6 +46,7 @@ p2p:
   max_sessions_per_device: 8
   port_start: 0                  # 0/0 表示 Agent 使用系统分配的随机 UDP 端口
   port_end: 0                    # 例如 30000-30100；配置后需放行 Agent 侧对应 UDP 范围
+  upnp_enabled: false            # 开启后 Agent 尝试通过本地路由器 UPnP 映射 P2P UDP 端口
 
 # Relay Server 本机也可以作为网络出口。默认关闭；开启后客户端使用
 # exitDeviceId=server 即可明确选择服务端出口。

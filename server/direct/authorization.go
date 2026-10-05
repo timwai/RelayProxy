@@ -76,6 +76,34 @@ func (s *AuthorizationSyncer) Push(ctx context.Context, exitDeviceID string, upd
 	return nil
 }
 
+func (s *AuthorizationSyncer) RevokeClientFromAllExits(ctx context.Context, clientDeviceID string) {
+	if s == nil || s.Sessions == nil {
+		return
+	}
+	clientDeviceID = strings.TrimSpace(clientDeviceID)
+	if clientDeviceID == "" {
+		return
+	}
+	for _, exitSession := range s.Sessions.GetExits() {
+		if exitSession == nil || exitSession.DeviceID == clientDeviceID ||
+			!containsValue(exitSession.Capabilities, protocol.CapabilityProxyPublicDirect) {
+			continue
+		}
+		err := s.Push(ctx, exitSession.DeviceID, protocol.PublicDirectAuthorizationUpdate{
+			ClientDeviceID:        clientDeviceID,
+			ExitDeviceID:          exitSession.DeviceID,
+			PolicyRevision:        exitSession.PolicyRevision,
+			AuthorizationRevision: 0,
+			Authorized:            false,
+		})
+		if err != nil {
+			// Fail closed: an Exit that cannot receive revocation state must not
+			// keep serving Public Direct sessions under stale authorization.
+			s.Sessions.Unregister(exitSession.DeviceID)
+		}
+	}
+}
+
 func (s *AuthorizationSyncer) RevokeClients(ctx context.Context, exitDeviceID string, clientDeviceIDs []string) error {
 	if s == nil || s.Sessions == nil {
 		return errors.New("public direct authorization sync is unavailable")

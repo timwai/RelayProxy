@@ -46,6 +46,13 @@ func TestTicketIssuerSignsCurrentAuthorizedContext(t *testing.T) {
 			}
 			return TicketAuthorizationContext{PolicyRevision: 7, AuthorizationRevision: 11}, true, nil
 		},
+		Sync: func(_ context.Context, exitDeviceID string, update protocol.PublicDirectAuthorizationUpdate) error {
+			if exitDeviceID != "exit" || update.ClientDeviceID != "client" ||
+				update.PolicyRevision != 7 || update.AuthorizationRevision != 11 || !update.Authorized {
+				t.Fatalf("unexpected authorization sync: exit=%s update=%+v", exitDeviceID, update)
+			}
+			return nil
+		},
 	}
 	stream := newControlStream(t, protocol.PublicDirectTicketRequest{ExitDeviceID: "exit"})
 	issuer.HandleControl(context.Background(), stream, &session.DeviceSession{
@@ -104,7 +111,10 @@ func TestTicketIssuerRejectsUnverifiedOrUnauthorizedExit(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			issuer := &TicketIssuer{Registry: tc.registry, Signer: signer, Authorize: tc.authorize}
+			issuer := &TicketIssuer{
+				Registry: tc.registry, Signer: signer, Authorize: tc.authorize,
+				Sync: func(context.Context, string, protocol.PublicDirectAuthorizationUpdate) error { return nil },
+			}
 			stream := newControlStream(t, protocol.PublicDirectTicketRequest{ExitDeviceID: "exit"})
 			issuer.HandleControl(context.Background(), stream, &session.DeviceSession{
 				DeviceID: "client", Grants: []string{protocol.CapabilityProxyClient},
@@ -117,6 +127,34 @@ func TestTicketIssuerRejectsUnverifiedOrUnauthorizedExit(t *testing.T) {
 				t.Fatalf("response=%+v", response)
 			}
 		})
+	}
+}
+
+func TestTicketIssuerRejectsAuthorizationSyncFailure(t *testing.T) {
+	signer, err := internaldirect.GenerateTicketSigner(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := &TicketIssuer{
+		Registry: verifiedTicketRegistry(t),
+		Signer:   signer,
+		Authorize: func(string, string) (TicketAuthorizationContext, bool, error) {
+			return TicketAuthorizationContext{PolicyRevision: 7, AuthorizationRevision: 11}, true, nil
+		},
+		Sync: func(context.Context, string, protocol.PublicDirectAuthorizationUpdate) error {
+			return errors.New("exit sync failed")
+		},
+	}
+	stream := newControlStream(t, protocol.PublicDirectTicketRequest{ExitDeviceID: "exit"})
+	issuer.HandleControl(context.Background(), stream, &session.DeviceSession{
+		DeviceID: "client", Grants: []string{protocol.CapabilityProxyClient},
+	})
+	var response protocol.PublicDirectTicketResponse
+	if err := protocol.ReadJSON(&stream.write, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Success || response.ErrorCode != protocol.ErrCodeAccessDenied || len(response.Ticket) != 0 {
+		t.Fatalf("response=%+v", response)
 	}
 }
 

@@ -22,13 +22,13 @@ const (
 	// approved device capabilities from the capabilities currently running.
 	// The active flags keep a control-only session from being advertised as an
 	// online exit while the user has not started its data plane.
-	CapabilityRuntimeState          = "runtime.capabilities"
+	CapabilityRuntimeState           = "runtime.capabilities"
 	CapabilityResourceInventoryPush = "resource.inventory.push_v1"
-	CapabilityProxyClientActive     = "proxy.client.active"
-	CapabilityProxyExitActive   = "proxy.exit.active"
-	CapabilityRDPClient         = "rdp.controller"
-	CapabilityRDPHost           = "rdp.host"
-	CapabilityRDPPublic         = "rdp.public"
+	CapabilityProxyClientActive      = "proxy.client.active"
+	CapabilityProxyExitActive        = "proxy.exit.active"
+	CapabilityRDPClient              = "rdp.controller"
+	CapabilityRDPHost                = "rdp.host"
+	CapabilityRDPPublic              = "rdp.public"
 
 	ErrCodeApprovalPending  = "APPROVAL_PENDING"
 	ErrCodeDeviceRejected   = "DEVICE_REJECTED"

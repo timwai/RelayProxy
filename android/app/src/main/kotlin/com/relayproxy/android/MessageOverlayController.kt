@@ -129,11 +129,12 @@ internal class MessageOverlayController(
         val popupType = normalizedType(message)
         val palette = Palette(ConfigStore(context).isDarkTheme(), popupType)
         val safeArea = currentSafeArea()
-        val availableWidth = (safeArea.width - safeArea.left - safeArea.right).coerceAtLeast(dp(280))
+        val availableWidth = (safeArea.width - safeArea.left - safeArea.right).coerceAtLeast(dp(240))
         val width = minOf(
-            availableWidth - dp(24),
+            (availableWidth - dp(24)).coerceAtLeast(dp(240)),
             dp(440),
-        ).coerceAtLeast(dp(280))
+            availableWidth,
+        )
         val params = WindowManager.LayoutParams(
             width,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -333,7 +334,9 @@ internal class MessageOverlayController(
         installDragGesture(titleGroup, params)
 
         val source = message.optString("source").trim()
-        val rule = message.optString("verificationRule").trim()
+        val rule = message.optString("messageRule").trim().ifEmpty {
+            message.optString("verificationRule").trim()
+        }
         val meta = buildString {
             if (source.isNotEmpty()) append("来自 ").append(source)
             if (rule.isNotEmpty()) {

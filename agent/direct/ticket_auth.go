@@ -85,14 +85,14 @@ func (a *TicketAuthenticator) Authenticate(_ context.Context, request protocol.P
 
 	now := a.now().UTC()
 	if claims.IssuedAt > now.Add(maxTicketClockSkew).Unix() ||
-		claims.ExpiresAt <= claims.IssuedAt ||
-		time.Duration(claims.ExpiresAt-claims.IssuedAt)*time.Second > maxTicketLifetime {
+		claims.ExpiresAt <= claims.IssuedAt {
 		return ErrUnauthorized
 	}
 	if claims.ExpiresAt <= now.Unix() {
 		return ErrTicketExpired
 	}
-	if claims.IssuedAt < now.Add(-maxTicketLifetime-maxTicketClockSkew).Unix() {
+	if time.Duration(claims.ExpiresAt-claims.IssuedAt)*time.Second > maxTicketLifetime ||
+		claims.IssuedAt < now.Add(-maxTicketLifetime-maxTicketClockSkew).Unix() {
 		return ErrUnauthorized
 	}
 

@@ -85,13 +85,17 @@ func (b *UIBridge) GetStatus() app.AgentStatus {
 }
 
 func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {
-	exits := b.agent.ProxyExits()
-	for i := range exits {
-		if exits[i].Direct == nil {
+	return redactProxyExitSecrets(b.agent.ProxyExits())
+}
+
+func redactProxyExitSecrets(exits []protocol.ProxyExit) []protocol.ProxyExit {
+	result := append([]protocol.ProxyExit(nil), exits...)
+	for i := range result {
+		if result[i].Direct == nil {
 			continue
 		}
-		directPaths := *exits[i].Direct
-		exits[i].Direct = &directPaths
+		directPaths := *result[i].Direct
+		result[i].Direct = &directPaths
 		if directPaths.Public == nil {
 			continue
 		}
@@ -100,7 +104,7 @@ func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {
 		public.Endpoints = append([]protocol.PublicDirectEndpoint(nil), public.Endpoints...)
 		directPaths.Public = &public
 	}
-	return exits
+	return result
 }
 
 func (b *UIBridge) GetRDPTargets() []rdp.Target {

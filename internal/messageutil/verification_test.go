@@ -89,3 +89,27 @@ func TestValidateVerificationRule(t *testing.T) {
 		t.Fatalf("valid keyword rule rejected: %v", err)
 	}
 }
+
+
+func TestMatchVerificationCodeWithPopupMetadata(t *testing.T) {
+	disabled := false
+	rules := []VerificationRule{
+		{
+			Name: "default editable", Default: true, Keywords: []string{"验证码"},
+			MaxDistance: 64, Popup: &disabled, PopupType: "important",
+		},
+		{
+			Name: "vendor", Keywords: []string{"附加码"}, Pattern: `([A-Z][0-9]{3})`,
+			MaxDistance: 64, PopupType: "message",
+		},
+	}
+	match := MatchVerificationCodeWithRules("您的附加码是 G931，请及时使用。", true, rules)
+	if match.Code != "G931" || match.RuleName != "vendor" || !match.Popup || match.PopupType != "message" {
+		t.Fatalf("unexpected custom match: %#v", match)
+	}
+
+	match = MatchVerificationCodeWithRules("验证码 482931", true, rules)
+	if match.Code != "482931" || match.Popup || match.PopupType != "important" {
+		t.Fatalf("unexpected default match: %#v", match)
+	}
+}

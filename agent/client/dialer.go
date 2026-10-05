@@ -190,10 +190,9 @@ func (d *TunnelDialer) alternateDirectSession(exitDeviceID string, failed Select
 	d.directMu.RLock()
 	getDirect := d.getDirect
 	mode := d.directMode
-	fallback := d.directFallback
 	d.directMu.RUnlock()
 	if getDirect == nil || exitDeviceID == "" ||
-		(mode != "direct_only" && (mode != "auto" || !fallback)) {
+		(mode != "direct_only" && mode != "auto") {
 		return SelectedSession{}
 	}
 	selected, ok := getDirect(exitDeviceID)

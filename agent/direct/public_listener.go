@@ -82,7 +82,9 @@ func (l *PublicListener) Accept(ctx context.Context) (*AcceptedSession, error) {
 			return nil, err
 		}
 		if probe {
-			_ = session.Close()
+			// The verifier owns connection shutdown after it has consumed the
+			// challenge response. Sending an application close from this side can
+			// overtake stream delivery and turn a successful probe into session closed.
 			continue
 		}
 		return accepted, nil

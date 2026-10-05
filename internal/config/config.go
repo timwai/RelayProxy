@@ -141,6 +141,12 @@ type AgentConfigFile struct {
 		Fallback        *bool  `yaml:"fallback"`
 	} `yaml:"p2p"`
 
+	Direct struct {
+		Public struct {
+			Advertise string `yaml:"advertise"`
+		} `yaml:"public"`
+	} `yaml:"direct"`
+
 	Routing routing.Config `yaml:"routing"` // 新增路由配置
 
 	Exit struct {

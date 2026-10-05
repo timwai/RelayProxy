@@ -208,7 +208,6 @@ func TestTicketAuthenticatorRequiresCurrentAuthorizationRevision(t *testing.T) {
 	}
 }
 
-
 func TestTicketAuthenticatorPolicyAuthenticationFailsClosedWithoutCurrentPolicy(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

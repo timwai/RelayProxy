@@ -17,6 +17,7 @@ import (
 	"relayproxy/internal/p2p/secure"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
+	serverdirect "relayproxy/server/direct"
 )
 
 func newTestListener(t *testing.T, ticket []byte) *direct.PublicListener {
@@ -54,6 +55,50 @@ func testDialConfig(listener *direct.PublicListener, ticket []byte) direct.DialC
 	}
 }
 
+func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.Config) {
+	t.Helper()
+	identity, err := secure.GenerateEphemeralIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := serverdirect.NewTicketAuthority("test-server")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := direct.NewTicketAuthenticator(authority.Issuer(), authority.PublicKey(), "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := direct.Listen(direct.ListenerConfig{
+		ListenAddress: "127.0.0.1:0",
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{identity.Certificate}},
+		Authenticator: authenticator,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	ticket, _, err := authority.Issue(serverdirect.TicketIssue{
+		ClientDeviceID: "client", ExitDeviceID: "exit",
+		PolicyRevision: 3, AuthorizationRevision: 5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := direct.PinnedTLSConfig(identity.Fingerprint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return listener, ticket, pinned
+}
+
+func signedDialConfig(listener *direct.PublicListener, ticket []byte, tlsConfig *tls.Config) direct.DialConfig {
+	return direct.DialConfig{
+		Address: listener.Addr(), TLSConfig: tlsConfig,
+		ClientDeviceID: "client", ExitDeviceID: "exit", Ticket: ticket,
+	}
+}
+
 func TestPublicDirectRejectsInvalidTicket(t *testing.T) {
 	ticket := []byte("development-ticket")
 	listener := newTestListener(t, ticket)
@@ -80,8 +125,7 @@ func TestPublicDirectRejectsInvalidTicket(t *testing.T) {
 }
 
 func TestPublicDirectReusesExistingExitHandlerForTCPAndUDP(t *testing.T) {
-	ticket := []byte("development-ticket")
-	listener := newTestListener(t, ticket)
+	listener, ticket, pinnedTLS := newSignedTestListener(t)
 	checker, err := acl.NewChecker(acl.Policy{
 		AllowInternet:       true,
 		AllowPrivateNetwork: true,
@@ -100,7 +144,7 @@ func TestPublicDirectReusesExistingExitHandlerForTCPAndUDP(t *testing.T) {
 		serveErr <- direct.ServeExit(ctx, listener, handler, 8, 64)
 	}()
 
-	session, err := direct.Dial(ctx, testDialConfig(listener, ticket))
+	session, err := direct.Dial(ctx, signedDialConfig(listener, ticket, pinnedTLS))
 	if err != nil {
 		t.Fatal(err)
 	}

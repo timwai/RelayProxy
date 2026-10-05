@@ -35,6 +35,7 @@ class RelayExitService : Service() {
         private const val NOTIFICATION_ID = 1001
 
         private const val UI_REFRESH_MS = 1_000L
+        private const val MESSAGE_POLL_MS = 1_000L
         private const val CONNECTING_REFRESH_MS = 3_000L
         private const val ACTIVE_REFRESH_MS = 5_000L
         private const val IDLE_REFRESH_MS = 20_000L
@@ -61,6 +62,10 @@ class RelayExitService : Service() {
             activeInstance?.requestRefreshSoon()
         }
 
+        fun refreshGlobalMessageOverlaySetting() {
+            activeInstance?.applyGlobalMessageOverlaySetting()
+        }
+
         fun statusJson(): String = runCatching {
             val uptime = if (serviceStartedAtElapsed > 0) {
                 (SystemClock.elapsedRealtime() - serviceStartedAtElapsed).coerceAtLeast(0)
@@ -85,6 +90,7 @@ class RelayExitService : Service() {
     private var networkBinder: NetworkBinder? = null
     private var lastNotificationText: String? = null
     private lateinit var powerManager: PowerManager
+    private lateinit var messageOverlayController: MessageOverlayController
     private var powerReceiverRegistered = false
     private var coreGeneration = 0L
 
@@ -106,7 +112,6 @@ class RelayExitService : Service() {
             core?.let {
                 status = runCatching { decorateStatus(it.statusJSON()) }
                     .getOrElse { errorStatus(it.message ?: "读取状态失败") }
-                drainMessages(it)
             }
             updateNotificationIfChanged()
             val delay = nextRefreshDelay()
@@ -116,12 +121,23 @@ class RelayExitService : Service() {
         }
     }
 
+    private val messagePoll = object : Runnable {
+        override fun run() {
+            core?.let(::drainMessages)
+            if (!destroyed) {
+                handler.postDelayed(this, MESSAGE_POLL_MS)
+            }
+        }
+    }
+
     override fun onCreate() {
         super.onCreate()
         activeInstance = this
         powerManager = getSystemService(PowerManager::class.java)
+        messageOverlayController = MessageOverlayController(this, ::showMessageNotification)
         registerPowerStateReceiver()
         createNotificationChannel()
+        handler.post(messagePoll)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -174,6 +190,10 @@ class RelayExitService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refresh)
+        handler.removeCallbacks(messagePoll)
+        if (::messageOverlayController.isInitialized) {
+            messageOverlayController.dismissAll()
+        }
         unregisterPowerStateReceiver()
         if (activeInstance === this) {
             activeInstance = null
@@ -464,7 +484,9 @@ class RelayExitService : Service() {
         for (index in 0 until messages.length()) {
             val message = messages.optJSONObject(index) ?: continue
             if (!message.optBoolean("popup", false)) continue
-            if (uiVisible) {
+            if (ConfigStore(this).isGlobalMessageOverlayEnabled()) {
+                messageOverlayController.enqueue(message)
+            } else if (uiVisible) {
                 sendBroadcast(
                     Intent(ACTION_MESSAGE)
                         .setPackage(packageName)
@@ -474,6 +496,15 @@ class RelayExitService : Service() {
                 showMessageNotification(message)
             }
         }
+    }
+
+    private fun applyGlobalMessageOverlaySetting() {
+        if (!ConfigStore(this).isGlobalMessageOverlayEnabled() &&
+            ::messageOverlayController.isInitialized
+        ) {
+            messageOverlayController.dismissAll()
+        }
+        requestRefreshSoon()
     }
 
     private fun showMessageNotification(message: JSONObject) {

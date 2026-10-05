@@ -308,7 +308,7 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoint protocol
 		session, err = m.dial(ctx, DialConfig{
 			Address: endpoint.Address, TLSConfig: tlsConfig,
 			ClientDeviceID: clientID, ExitDeviceID: exitDeviceID,
-			Ticket: append([]byte(nil), public.Ticket...),
+			Ticket:      append([]byte(nil), public.Ticket...),
 			AuthTimeout: m.attemptTimeout,
 		})
 	}

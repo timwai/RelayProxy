@@ -186,21 +186,22 @@ func main() {
 			gw.RefreshProxyExitInventories()
 		}
 	})
-	publicDirectController.SetTicketValidator(func(_ context.Context, exitDeviceID string, validation protocol.PublicDirectTicketValidationRequest) error {
+	publicDirectController.SetTicketValidator(func(_ context.Context, exitDeviceID string, validation protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
 		if strings.TrimSpace(validation.ClientDeviceID) == "" ||
 			strings.TrimSpace(validation.ExitDeviceID) != strings.TrimSpace(exitDeviceID) {
-			return errors.New("public direct ticket scope is invalid")
+			return nil, errors.New("public direct ticket scope is invalid")
 		}
 		authorization, err := db.PublicDirectAuthorization(validation.ClientDeviceID, exitDeviceID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !authorization.Allowed ||
 			authorization.PolicyRevision != validation.PolicyRevision ||
 			authorization.AuthorizationRevision != validation.AuthorizationRevision {
-			return errors.New("public direct authorization revision is stale")
+			return nil, errors.New("public direct authorization revision is stale")
 		}
-		return nil
+		policy := relayACL.Policy()
+		return &policy, nil
 	})
 	defer publicDirectController.Close()
 

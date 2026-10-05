@@ -177,6 +177,9 @@ func main() {
 		log.Fatalf("[PublicDirect] Failed to initialize ticket authority: %v", err)
 	}
 	publicDirectRegistry := serverdirect.NewRegistry()
+	if err := publicDirectRegistry.SetListenerPortRange(cfg.Direct.PortStart, cfg.Direct.PortEnd); err != nil {
+		log.Fatalf("[PublicDirect] Invalid listener port policy: %v", err)
+	}
 	publicDirectVerifier := &serverdirect.Verifier{Registry: publicDirectRegistry}
 	publicDirectController := serverdirect.NewController(context.Background(), publicDirectRegistry, publicDirectVerifier, func(string) {
 		if gw != nil {

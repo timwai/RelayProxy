@@ -503,15 +503,35 @@ func ticketLifetime(value protocol.ProxyPublicDirectPath, now time.Time) (time.D
 }
 
 func selectPublicEndpoint(value protocol.ProxyPublicDirectPath) (protocol.PublicDirectEndpoint, bool) {
+	best := protocol.PublicDirectEndpoint{}
+	bestPriority := -1
 	for _, endpoint := range value.Endpoints {
-		if endpoint.Verified &&
-			endpoint.Protocol == protocol.PublicDirectEndpointProtocolUDP &&
-			strings.TrimSpace(endpoint.Address) != "" &&
-			strings.TrimSpace(endpoint.CertFingerprint) != "" {
-			return endpoint, true
+		if !endpoint.Verified ||
+			endpoint.Protocol != protocol.PublicDirectEndpointProtocolUDP ||
+			strings.TrimSpace(endpoint.Address) == "" ||
+			strings.TrimSpace(endpoint.CertFingerprint) == "" {
+			continue
+		}
+		priority := clientEndpointPriority(endpoint.Source)
+		if priority > bestPriority || (priority == bestPriority && (best.Address == "" || endpoint.Address < best.Address)) {
+			best = endpoint
+			bestPriority = priority
 		}
 	}
-	return protocol.PublicDirectEndpoint{}, false
+	return best, bestPriority >= 0
+}
+
+func clientEndpointPriority(source string) int {
+	switch source {
+	case protocol.PublicDirectEndpointManual:
+		return 3
+	case protocol.PublicDirectEndpointObserved:
+		return 2
+	case protocol.PublicDirectEndpointIPv6:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func sessionDone(session tunnel.TunnelSession) bool {

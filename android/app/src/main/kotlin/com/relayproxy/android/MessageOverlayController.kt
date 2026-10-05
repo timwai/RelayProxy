@@ -83,6 +83,24 @@ internal class MessageOverlayController(
         if (currentView == null) showNext()
     }
 
+    fun refreshTheme() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(::refreshTheme)
+            return
+        }
+        val active = currentMessage?.let { JSONObject(it.toString()) } ?: return
+        cancelAutoDismiss()
+        currentView?.let { runCatching { windowManager.removeViewImmediate(it) } }
+        currentView = null
+        currentCard = null
+        currentMessage = null
+        currentParams = null
+        queueBadge = null
+        dismissing = false
+        queue.addFirst(active)
+        showNext()
+    }
+
     fun dismissAll() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             handler.post(::dismissAll)

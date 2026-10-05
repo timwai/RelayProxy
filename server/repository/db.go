@@ -490,18 +490,6 @@ func (db *DB) ensureMessageIdentityIsolation() error {
 		}
 	}
 
-	if _, err := tx.Exec(`UPDATE messages
-		SET identity_id = (
-			SELECT mc.identity_id FROM message_channels mc WHERE mc.id = messages.channel_id
-		)
-		WHERE COALESCE(identity_id, '') = ''
-		  AND EXISTS (
-			SELECT 1 FROM message_channels mc
-			WHERE mc.id = messages.channel_id AND COALESCE(mc.identity_id, '') <> ''
-		  )`); err != nil {
-		return err
-	}
-
 	// Preserve ownership for messages whose legacy channel was deleted but
 	// whose delivery set unambiguously belongs to one identity.
 	messageRows, err := tx.Query(`
@@ -538,6 +526,24 @@ func (db *DB) ensureMessageIdentityIsolation() error {
 			WHERE id = ? AND COALESCE(identity_id, '') = ''`, item.identityID, item.channelID); err != nil {
 			return err
 		}
+	}
+
+	// Messages without delivery rows can inherit the channel identity. Messages
+	// that were historically delivered across multiple identities remain
+	// unscoped instead of exposing cross-identity delivery metadata.
+	if _, err := tx.Exec(`UPDATE messages
+		SET identity_id = (
+			SELECT mc.identity_id FROM message_channels mc WHERE mc.id = messages.channel_id
+		)
+		WHERE COALESCE(identity_id, '') = ''
+		  AND NOT EXISTS (
+			SELECT 1 FROM message_deliveries md WHERE md.message_id = messages.id
+		  )
+		  AND EXISTS (
+			SELECT 1 FROM message_channels mc
+			WHERE mc.id = messages.channel_id AND COALESCE(mc.identity_id, '') <> ''
+		  )`); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

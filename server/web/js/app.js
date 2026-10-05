@@ -1167,8 +1167,7 @@
       name: $('channel-name').value.trim(),
       allDevices,
       deviceIds,
-      useDefaultVerification: $('channel-use-default-verification').checked,
-      verificationRules: readVerificationRules(),
+      messageRules: readMessageRules(),
       routeRules: readRouteRules()
     };
     if (state.user && state.user.role === 'admin') {
@@ -1177,10 +1176,6 @@
         errorAt('channel-error', '请选择渠道所属身份。');
         return;
       }
-    }
-    if (!body.useDefaultVerification && !body.verificationRules.some(rule => !rule.default)) {
-      errorAt('channel-error', '请启用默认验证码识别，或至少添加一条自定义识别规则。');
-      return;
     }
     if (!allDevices && !deviceIds.length && !body.routeRules.length) {
       errorAt('channel-error', '请选择兜底设备、启用全部设备，或至少添加一条内容分流规则。');
@@ -1893,11 +1888,16 @@
   $('channel-all-devices').addEventListener('change', updateChannelDeviceState);
   $('channel-id').addEventListener('input', updateChannelDeviceState);
   $('channel-devices').addEventListener('change', updateChannelDeviceState);
-  $('channel-verification-add').addEventListener('click', () => addVerificationRule());
+  $('channel-message-rule-add').addEventListener('click', () => addMessageRule());
   $('channel-route-add').addEventListener('click', () => addRouteRule());
-  $('channel-verification-rules').addEventListener('click', event => {
-    const button = event.target.closest('[data-verification-remove]');
-    if (button) { button.closest('[data-verification-rule]').remove(); renumberChannelRules(); }
+  $('channel-message-rules').addEventListener('click', event => {
+    const button = event.target.closest('[data-message-remove]');
+    if (button) { button.closest('[data-message-rule]').remove(); renumberChannelRules(); }
+  });
+  $('channel-message-rules').addEventListener('change', event => {
+    if (event.target.matches('[data-message-type], [data-message-match-type], [data-message-extractor]')) {
+      syncMessageRuleCard(event.target.closest('[data-message-rule]'));
+    }
   });
   $('channel-route-rules').addEventListener('click', event => {
     const button = event.target.closest('[data-route-remove]');

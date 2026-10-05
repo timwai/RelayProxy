@@ -344,7 +344,7 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 		return
 	}
 	entry := m.entries[exitDeviceID]
-	if entry == nil {
+	if entry == nil || entry.ticketHash != ticketHash {
 		m.mu.Unlock()
 		_ = session.Close()
 		return
@@ -471,11 +471,8 @@ func (m *ClientManager) finishFailure(exitDeviceID string, ticketHash [sha256.Si
 	var fallback func(string, string)
 	m.mu.Lock()
 	entry := m.entries[exitDeviceID]
-	if entry != nil {
+	if entry != nil && entry.ticketHash == ticketHash {
 		entry.starting = false
-		// A newer Server ticket can remain unconsumed, but the per-path cooldown
-		// still prevents immediate retry storms against an unhealthy endpoint.
-		_ = ticketHash
 		m.recordFailureLocked(entry, reason)
 		fallback = m.fallback
 	}

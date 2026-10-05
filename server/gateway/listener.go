@@ -56,6 +56,8 @@ type GatewayConfig struct {
 	PublicDirectEnabled      bool
 	PublicDirectTicketIssuer string
 	PublicDirectTicketKey    []byte
+	PublicDirectPortStart    int
+	PublicDirectPortEnd      int
 	HandshakeTimeout         time.Duration // covers control stream/header/Hello/Welcome
 
 }
@@ -586,6 +588,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		P2PUPnPEnabled:           g.cfg.P2PUPnPEnabled,
 		PublicDirectTicketIssuer: g.cfg.PublicDirectTicketIssuer,
 		PublicDirectTicketKey:    append([]byte(nil), g.cfg.PublicDirectTicketKey...),
+		PublicDirectPortStart:    g.cfg.PublicDirectPortStart,
+		PublicDirectPortEnd:      g.cfg.PublicDirectPortEnd,
 	}
 
 	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)

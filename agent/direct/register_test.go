@@ -83,8 +83,47 @@ func TestRegisterEndpointUsesPublicDirectControlFrame(t *testing.T) {
 	if err := protocol.ReadJSON(&stream.write, &sent); err != nil {
 		t.Fatal(err)
 	}
-	if sent.ListenerPort != request.ListenerPort || sent.NetworkEpoch != request.NetworkEpoch ||
+	if sent.Operation != protocol.PublicDirectControlRegister ||
+		sent.ListenerPort != request.ListenerPort || sent.NetworkEpoch != request.NetworkEpoch ||
 		sent.CertFingerprint != request.CertFingerprint {
 		t.Fatalf("sent request=%+v", sent)
+	}
+}
+
+func TestValidateTicketCurrentUsesPublicDirectControlFrame(t *testing.T) {
+	stream := &registrationStream{}
+	if err := protocol.WriteJSON(&stream.read, protocol.PublicDirectRegistrationResponse{Success: true}); err != nil {
+		t.Fatal(err)
+	}
+	session := &registrationSession{stream: stream, done: make(chan struct{})}
+	claims := protocol.PublicDirectTicketClaims{
+		ClientDeviceID:        "client",
+		ExitDeviceID:          "exit",
+		PolicyRevision:        4,
+		AuthorizationRevision: 9,
+	}
+	if err := ValidateTicketCurrent(context.Background(), session, claims); err != nil {
+		t.Fatal(err)
+	}
+
+	header, err := protocol.ReadStreamHeader(&stream.write)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header.Type != protocol.FrameTypePublicDirectControl || header.RequestID != "public_direct_validate_ticket" {
+		t.Fatalf("header=%+v", header)
+	}
+	var sent protocol.PublicDirectRegistrationRequest
+	if err := protocol.ReadJSON(&stream.write, &sent); err != nil {
+		t.Fatal(err)
+	}
+	if sent.Operation != protocol.PublicDirectControlValidateTicket || sent.TicketValidation == nil {
+		t.Fatalf("sent request=%+v", sent)
+	}
+	if sent.TicketValidation.ClientDeviceID != claims.ClientDeviceID ||
+		sent.TicketValidation.ExitDeviceID != claims.ExitDeviceID ||
+		sent.TicketValidation.PolicyRevision != claims.PolicyRevision ||
+		sent.TicketValidation.AuthorizationRevision != claims.AuthorizationRevision {
+		t.Fatalf("ticket validation=%+v", sent.TicketValidation)
 	}
 }

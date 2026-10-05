@@ -230,3 +230,50 @@ func TestAndroidStatusRedactsPublicDirectTicket(t *testing.T) {
 		t.Fatal("Android redaction mutated the internal ticket")
 	}
 }
+
+
+func TestAndroidProxyPathModeNormalization(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "default",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`,
+			want: "auto",
+		},
+		{
+			name: "direct only",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"direct_only"}`,
+			want: "direct_only",
+		},
+		{
+			name: "p2p only",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"p2p_only","proxyP2pEnabled":true}`,
+			want: "p2p_only",
+		},
+		{
+			name: "relay only",
+			raw:  `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"relay_only"}`,
+			want: "relay_only",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := normalizeConfig(tc.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ProxyPathMode != tc.want {
+				t.Fatalf("proxyPathMode=%q, want %q", cfg.ProxyPathMode, tc.want)
+			}
+		})
+	}
+
+	if _, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"invalid"}`); err == nil {
+		t.Fatal("invalid proxyPathMode was accepted")
+	}
+	if _, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","proxyPathMode":"p2p_only","proxyP2pEnabled":false}`); err == nil {
+		t.Fatal("p2p_only without P2P enabled was accepted")
+	}
+}

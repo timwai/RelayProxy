@@ -354,44 +354,9 @@ func main() {
 			return result, nil
 		},
 		ListProxyExits: func(clientID, ownerUserID, identityID string) ([]protocol.ProxyExit, error) {
-			var exits []*session.DeviceSession
-			if identityID != "" {
-				// v5 inventory is authorization-derived rather than limited to
-				// the same identity, so newly granted cross-identity exits appear
-				// on the next authentication/heartbeat refresh.
-				exits = sessionMgr.GetExits()
-			} else {
-				exits = sessionMgr.GetExitsForOwner(ownerUserID)
-			}
-			result := make([]protocol.ProxyExit, 0, len(exits)+1)
-			for _, exit := range exits {
-				if exit == nil || exit.DeviceID == "" || exit.DeviceID == clientID {
-					continue
-				}
-				if identityID != "" || ownerUserID == "" {
-					authorized, err := db.AuthorizeClientExit(clientID, exit.DeviceID)
-					if err != nil {
-						return nil, err
-					}
-					if !authorized {
-						continue
-					}
-				}
-				name := strings.TrimSpace(exit.DeviceName)
-				if name == "" {
-					name = exit.DeviceID
-				}
-				source := "legacy"
-				if identityID != "" {
-					source = "explicit"
-					if exit.IdentityID == identityID {
-						source = "same_identity"
-					}
-				}
-				result = append(result, protocol.ProxyExit{
-					DeviceID: exit.DeviceID, Name: name, IdentityName: exit.IdentityName,
-					AuthorizationSource: source, Online: true,
-				})
+			result, err := listAuthorizedProxyExitInventory(db, sessionMgr, clientID, ownerUserID, identityID)
+			if err != nil {
+				return nil, err
 			}
 			if serverExit != nil {
 				authorized, err := db.AuthorizeClientExit(clientID, protocol.ServerExitDeviceID)
@@ -620,6 +585,107 @@ func protocolRDPTargets(targets []*repository.RDPTarget) []protocol.RDPTarget {
 		})
 	}
 	return result
+}
+
+type proxyExitInventoryStore interface {
+	ListDevices() ([]*repository.Device, error)
+	ListDevicesForOwner(string) ([]*repository.Device, error)
+	AuthorizeClientExit(string, string) (bool, error)
+	GetDeviceIdentitySummary(string) (*repository.DeviceIdentitySummary, error)
+}
+
+type proxyExitSessionSource interface {
+	GetExits() []*session.DeviceSession
+}
+
+func listAuthorizedProxyExitInventory(
+	store proxyExitInventoryStore,
+	sessions proxyExitSessionSource,
+	clientID, ownerUserID, identityID string,
+) ([]protocol.ProxyExit, error) {
+	if store == nil {
+		return nil, errors.New("proxy exit inventory store is unavailable")
+	}
+	var (
+		devices []*repository.Device
+		err     error
+	)
+	if identityID == "" && ownerUserID != "" {
+		devices, err = store.ListDevicesForOwner(ownerUserID)
+	} else {
+		devices, err = store.ListDevices()
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	online := make(map[string]*session.DeviceSession)
+	if sessions != nil {
+		for _, item := range sessions.GetExits() {
+			if item == nil || strings.TrimSpace(item.DeviceID) == "" {
+				continue
+			}
+			online[item.DeviceID] = item
+		}
+	}
+
+	result := make([]protocol.ProxyExit, 0, len(devices))
+	for _, device := range devices {
+		if device == nil || device.ID == "" || device.ID == clientID ||
+			device.ApprovalState != "approved" ||
+			!containsString(device.ApprovedCapabilities, protocol.CapabilityProxyExit) {
+			continue
+		}
+		if identityID != "" || ownerUserID == "" {
+			authorized, authErr := store.AuthorizeClientExit(clientID, device.ID)
+			if authErr != nil {
+				return nil, authErr
+			}
+			if !authorized {
+				continue
+			}
+		}
+
+		name := strings.TrimSpace(device.Name)
+		if name == "" {
+			name = device.ID
+		}
+		identityName := ""
+		source := "legacy"
+		if identityID != "" {
+			summary, summaryErr := store.GetDeviceIdentitySummary(device.ID)
+			if summaryErr != nil {
+				return nil, summaryErr
+			}
+			identityName = summary.IdentityName
+			source = "explicit"
+			if summary.IdentityID == identityID {
+				source = "same_identity"
+			}
+		}
+
+		live := online[device.ID]
+		if live != nil {
+			if liveName := strings.TrimSpace(live.DeviceName); liveName != "" {
+				name = liveName
+			}
+			if strings.TrimSpace(live.IdentityName) != "" {
+				identityName = live.IdentityName
+			}
+		}
+		result = append(result, protocol.ProxyExit{
+			DeviceID: device.ID, Name: name, IdentityName: identityName,
+			AuthorizationSource: source, Online: live != nil,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Name == result[j].Name {
+			return result[i].DeviceID < result[j].DeviceID
+		}
+		return result[i].Name < result[j].Name
+	})
+	return result, nil
 }
 
 func refreshRDPTargetOnlineState(targets []protocol.RDPTarget, sessions *session.Manager) {

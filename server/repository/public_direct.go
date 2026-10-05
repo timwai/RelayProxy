@@ -96,3 +96,27 @@ func (db *DB) PublicDirectAuthorizationContext(clientDeviceID, exitDeviceID stri
 	}
 	return ProxyDirectAuthorizationContext{}, false, nil
 }
+
+
+func (db *DB) DeviceIDsForIdentity(identityID string) ([]string, error) {
+	identityID = strings.TrimSpace(identityID)
+	if identityID == "" {
+		return []string{}, nil
+	}
+	rows, err := db.Query(`SELECT id FROM devices WHERE identity_id = ? ORDER BY id`, identityID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]string, 0)
+	for rows.Next() {
+		var deviceID string
+		if err := rows.Scan(&deviceID); err != nil {
+			return nil, err
+		}
+		if deviceID = strings.TrimSpace(deviceID); deviceID != "" {
+			result = append(result, deviceID)
+		}
+	}
+	return result, rows.Err()
+}

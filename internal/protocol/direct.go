@@ -12,6 +12,7 @@ const (
 	ProxyPathRelayTLS         ProxyPath = "relay_tls"
 
 	PublicDirectALPN = "relayproxy-public-direct-v1"
+	CapabilityProxyPublicDirect = "proxy_public_direct_v1"
 
 	PublicDirectEndpointProtocolUDP = "udp"
 

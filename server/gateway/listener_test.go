@@ -556,7 +556,6 @@ func TestWelcomeDistributesP2PPortRange(t *testing.T) {
 	}
 }
 
-
 func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 	gateway := testGateway(t, time.Second, nil, func(_ string, hello protocol.DeviceHello) (DeviceAuthorization, error) {
 		switch hello.DeviceName {

@@ -41,7 +41,7 @@ func (v *Verifier) Verify(ctx context.Context, deviceID, sessionID, address stri
 	if !ok {
 		return errors.New("public direct endpoint registration is stale")
 	}
-	if !v.Registry.MarkVerifying(deviceID, sessionID, address) {
+	if !v.Registry.markVerifyingRegistration(record) {
 		return errors.New("public direct endpoint registration changed")
 	}
 
@@ -61,7 +61,7 @@ func (v *Verifier) Verify(ctx context.Context, deviceID, sessionID, address stri
 		err = probeEndpoint(verifyCtx, record, dialAddress)
 	}
 	if err != nil {
-		v.Registry.MarkFailed(deviceID, sessionID, address, err)
+		v.Registry.markFailedRegistration(record, err)
 		return err
 	}
 
@@ -69,7 +69,7 @@ func (v *Verifier) Verify(ctx context.Context, deviceID, sessionID, address stri
 	if ttl <= 0 {
 		ttl = defaultVerifyTTL
 	}
-	if !v.Registry.MarkVerified(deviceID, sessionID, address, ttl) {
+	if !v.Registry.markVerifiedRegistration(record, ttl) {
 		return errors.New("public direct endpoint changed during verification")
 	}
 	return nil

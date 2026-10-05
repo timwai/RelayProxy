@@ -554,6 +554,41 @@ type VerificationRule struct {
 	Pattern       string   `json:"pattern,omitempty"`
 	MaxDistance   int      `json:"maxDistance,omitempty"`
 	CaseSensitive bool     `json:"caseSensitive,omitempty"`
+	Default       bool     `json:"default,omitempty"`
+	Popup         *bool    `json:"popup,omitempty"`
+	PopupType     string   `json:"popupType,omitempty"`
+}
+
+func boolValue(value bool) *bool {
+	return &value
+}
+
+// DefaultVerificationRule is materialized for legacy channels that predate
+// editable default verification rules. It intentionally uses the same generic
+// candidate format as custom rules while keeping the historical keyword set.
+func DefaultVerificationRule() VerificationRule {
+	return VerificationRule{
+		Name: "默认验证码",
+		Keywords: []string{
+			"验证码", "校验码", "动态码", "动态密钥", "安全码", "短信码", "附加码", "登录附加码", "认证码", "口令码",
+			"verification code", "verification-code", "verification_code", "verify code", "verify-code", "verify_code",
+			"one time password", "one-time password", "one_time_password", "one time code", "one-time code", "one_time_code",
+			"otp", "passcode", "security code", "security-code", "security_code", "authentication code", "auth code",
+		},
+		MaxDistance: 64,
+		Default:     true,
+		Popup:       boolValue(true),
+		PopupType:   "verification_code",
+	}
+}
+
+func EnsureDefaultVerificationRule(rules []VerificationRule) []VerificationRule {
+	for i := range rules {
+		if rules[i].Default {
+			return rules
+		}
+	}
+	return append(rules, DefaultVerificationRule())
 }
 
 type MessageRouteRule struct {
@@ -787,6 +822,7 @@ func (db *DB) GetMessageChannel(id string) (*MessageChannel, error) {
 	if err := json.Unmarshal([]byte(verificationRules), &channel.VerificationRules); err != nil {
 		return nil, fmt.Errorf("decode verification rules for channel %s: %w", id, err)
 	}
+	channel.VerificationRules = EnsureDefaultVerificationRule(channel.VerificationRules)
 	if err := json.Unmarshal([]byte(routeRules), &channel.RouteRules); err != nil {
 		return nil, fmt.Errorf("decode route rules for channel %s: %w", id, err)
 	}
@@ -966,6 +1002,9 @@ type MessageRecord struct {
 	Title            string            `json:"title"`
 	Content          string            `json:"content"`
 	VerificationCode string            `json:"verificationCode,omitempty"`
+	VerificationRule string            `json:"verificationRule,omitempty"`
+	Popup            bool              `json:"popup"`
+	PopupType        string            `json:"popupType,omitempty"`
 	RouteRule        string            `json:"routeRule,omitempty"`
 	Source           string            `json:"source,omitempty"`
 	CreatedAt        time.Time         `json:"createdAt"`

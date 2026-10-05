@@ -129,3 +129,33 @@ func TestRegistryRejectsStaleSessionUpdates(t *testing.T) {
 		t.Fatal("current session invalidation kept endpoint")
 	}
 }
+
+
+func TestRegistryServerReconnectRequiresReverification(t *testing.T) {
+	registry := NewRegistry()
+	request := protocol.PublicDirectRegistrationRequest{
+		ListenerPort: 35820, CertFingerprint: testFingerprint(), NetworkEpoch: 1,
+	}
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("1.1.1.1"), request); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.MarkVerified("exit", "session-1", "1.1.1.1:35820", time.Minute) {
+		t.Fatal("initial endpoint verification failed")
+	}
+	if got := registry.VerifiedEndpoints("exit"); len(got) != 1 {
+		t.Fatalf("initial verified endpoints=%+v", got)
+	}
+
+	if _, err := registry.Register("exit", "session-2", netip.MustParseAddr("1.1.1.1"), request); err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.VerifiedEndpoints("exit"); len(got) != 0 {
+		t.Fatalf("server reconnect reused verification from previous session: %+v", got)
+	}
+	if registry.MarkVerified("exit", "session-1", "1.1.1.1:35820", time.Minute) {
+		t.Fatal("stale verification result from previous session was accepted")
+	}
+	if !registry.MarkVerified("exit", "session-2", "1.1.1.1:35820", time.Minute) {
+		t.Fatal("new session could not verify endpoint")
+	}
+}

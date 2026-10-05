@@ -60,6 +60,9 @@ func StartExitRuntime(
 	if relay == nil || handler == nil {
 		return nil, fmt.Errorf("public direct exit runtime requires relay session and exit handler")
 	}
+	if options.ValidateTicket == nil {
+		return nil, fmt.Errorf("public direct exit runtime requires current ticket and relay ACL validation")
+	}
 	if !slices.Contains(accepted.TransportCapabilities, protocol.CapabilityProxyPublicDirect) {
 		return nil, fmt.Errorf("server does not advertise public direct capability")
 	}

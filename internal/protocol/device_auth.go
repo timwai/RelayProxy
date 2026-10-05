@@ -124,7 +124,6 @@ type DeviceAccepted struct {
 	TransportCapabilities    []string     `json:"transportCapabilities,omitempty"`
 	ErrorCode                string       `json:"errorCode,omitempty"`
 	ErrorMessage             string       `json:"errorMessage,omitempty"`
-
 }
 
 // DeviceAuthPayload returns an unambiguous length-prefixed signature payload.

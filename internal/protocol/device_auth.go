@@ -49,12 +49,23 @@ type RDPTarget struct {
 
 // ProxyExit is the client-visible, online exit inventory. Authorization is
 // checked again by the gateway for every opened stream.
+type ProxyPublicDirectPath struct {
+	Available bool                   `json:"available"`
+	Transport string                 `json:"transport,omitempty"`
+	Endpoints []PublicDirectEndpoint `json:"endpoints,omitempty"`
+}
+
+type ProxyDirectPaths struct {
+	Public *ProxyPublicDirectPath `json:"public,omitempty"`
+}
+
 type ProxyExit struct {
-	DeviceID            string `json:"deviceId"`
-	Name                string `json:"name"`
-	IdentityName        string `json:"identityName,omitempty"`
-	AuthorizationSource string `json:"authorizationSource,omitempty"`
-	Online              bool   `json:"online"`
+	DeviceID            string            `json:"deviceId"`
+	Name                string            `json:"name"`
+	IdentityName        string            `json:"identityName,omitempty"`
+	AuthorizationSource string            `json:"authorizationSource,omitempty"`
+	Online              bool              `json:"online"`
+	Direct              *ProxyDirectPaths `json:"direct,omitempty"`
 }
 
 type DeviceHello struct {

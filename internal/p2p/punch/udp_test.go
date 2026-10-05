@@ -393,7 +393,6 @@ func TestBestPunchObservationDoesNotMixHandshakeAcrossCandidates(t *testing.T) {
 	}
 }
 
-
 func TestPunchResponderRTTTracksAcknowledgedProbeRound(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")
 	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})

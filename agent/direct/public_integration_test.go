@@ -57,6 +57,18 @@ func testDialConfig(listener *direct.PublicListener, ticket []byte) direct.DialC
 
 func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.Config) {
 	t.Helper()
+	checker, err := acl.NewChecker(acl.Policy{
+		ID: "relay-test", AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := checker.Policy()
+	return newSignedTestListenerWithPolicy(t, &policy)
+}
+
+func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy) (*direct.PublicListener, []byte, *tls.Config) {
+	t.Helper()
 	identity, err := secure.GenerateEphemeralIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -69,6 +81,13 @@ func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.C
 	if err != nil {
 		t.Fatal(err)
 	}
+	authenticator.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
+		if relayPolicy == nil {
+			return nil, errors.New("relay policy unavailable")
+		}
+		copy := *relayPolicy
+		return &copy, nil
+	})
 	listener, err := direct.Listen(direct.ListenerConfig{
 		ListenAddress: "127.0.0.1:0",
 		TLSConfig:     &tls.Config{Certificates: []tls.Certificate{identity.Certificate}},
@@ -256,6 +275,80 @@ func TestPublicDirectReusesExistingExitHandlerForTCPAndUDP(t *testing.T) {
 			t.Fatalf("serve exit: %v", err)
 		}
 	case <-time.After(2 * time.Second):
+		t.Fatal("public direct server did not stop")
+	}
+}
+
+func TestPublicDirectEnforcesServerRelayACL(t *testing.T) {
+	relayChecker, err := acl.NewChecker(acl.Policy{
+		ID: "relay-deny-loopback", AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	relayPolicy := relayChecker.Policy()
+	listener, ticket, pinnedTLS := newSignedTestListenerWithPolicy(t, &relayPolicy)
+
+	localChecker, err := acl.NewChecker(acl.Policy{
+		ID: "exit-local-allow", AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := exit.NewHandler(exit.HandlerConfig{ACLChecker: localChecker})
+	defer handler.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- direct.ServeExit(ctx, listener, handler, 8, 64)
+	}()
+
+	session, err := direct.Dial(ctx, signedDialConfig(listener, ticket, pinnedTLS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	dialer := client.NewTunnelDialer(func() tunnel.TunnelSession { return nil }, nil)
+	dialer.ConfigurePathProvider(func(exitID string) (client.SelectedSession, bool) {
+		if exitID != "exit" {
+			return client.SelectedSession{}, false
+		}
+		return client.SelectedSession{Session: session, Path: protocol.ProxyPathPublicDirectQUIC}, true
+	}, nil)
+
+	target, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.Close()
+	port := uint16(target.Addr().(*net.TCPAddr).Port)
+
+	conn, err := dialer.DialTCP(ctx, "exit", "127.0.0.1", port)
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("server relay ACL unexpectedly allowed loopback over Public Direct")
+	}
+	var relayErr *protocol.RelayError
+	if !errors.As(err, &relayErr) || relayErr.Code != protocol.ErrCodeACLDenied {
+		t.Fatalf("public direct ACL error=%v", err)
+	}
+
+	_ = target.SetDeadline(time.Now().Add(200 * time.Millisecond))
+	if accepted, acceptErr := target.AcceptTCP(); acceptErr == nil {
+		_ = accepted.Close()
+		t.Fatal("blocked Public Direct request reached the target listener")
+	}
+
+	cancel()
+	_ = listener.Close()
+	select {
+	case err := <-serveErr:
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("serve exit: %v", err)
+		}
+	case <-time.After(time.Second):
 		t.Fatal("public direct server did not stop")
 	}
 }

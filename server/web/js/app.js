@@ -14,6 +14,7 @@
     settings: [
       { page: 'settings', label: '管理访问', admin: true, settingsTab: 'admin' },
       { page: 'settings', label: '隧道', admin: true, settingsTab: 'tunnel' },
+      { page: 'settings', label: '公网直连', admin: true, settingsTab: 'direct' },
       { page: 'settings', label: 'P2P', admin: true, settingsTab: 'p2p' },
       { page: 'settings', label: 'RDP', admin: true, settingsTab: 'rdp' },
       { page: 'settings', label: 'Server 出口', admin: true, settingsTab: 'exit' },
@@ -22,7 +23,7 @@
     ]
   };
   const pageSections = { overview:'overview', devices:'devices', identities:'identities', exits:'devices', sessions:'connections', messages:'messages', 'rdp-ingress':'rdp', settings:'settings' };
-  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', p2p: 'P2P 直连', rdp: 'RDP 公网入口', database: '数据库' };
+  const restartNames = { 'server.admin.listen': '管理监听地址', 'server.admin.tls_enabled': '管理访问协议', 'server.tls_enabled': '隧道 TLS', 'server.tls.listen': 'TCP 监听地址', 'server.quic.listen': 'QUIC 监听地址', 'server.cert_file': '证书路径', 'server.key_file': '私钥路径', 'tunnel.heartbeat_sec': '心跳间隔', 'tunnel.max_connections': '设备连接上限', 'tunnel.max_connections_per_device': '每设备并发流上限', relay_acl: '目标访问权限', exit: 'Server 网络出口', direct: '公网直连', p2p: 'P2P 直连', rdp: 'RDP 公网入口', database: '数据库' };
   const roleNames = { CLIENT: '客户端', EXIT: '出口节点', BOTH: '客户端 + 出口' };
   const capabilityOrder = ['proxy.client', 'proxy.exit', 'rdp.controller', 'rdp.host', 'rdp.public'];
   const capabilityNames = { 'proxy.client': '代理客户端', 'proxy.exit': '出口节点', 'rdp.controller': 'RDP 控制端', 'rdp.host': 'RDP 主机', 'rdp.public': 'RDP 公网入口' };
@@ -1109,6 +1110,7 @@
       rows.push(['TCP 隧道', (runtime.tunnel.tlsEnabled ? 'TLS · ' : 'TCP · ') + runtime.tunnel.tcpListen]);
       rows.push(['QUIC 隧道', runtime.tunnel.tlsEnabled ? runtime.tunnel.quicListen : '未启用']);
       rows.push(['Server 出口', runtime.serverExit && runtime.serverExit.enabled ? '已启用 · ID server · ' + String(runtime.serverExit.upstreamMode || 'direct').toUpperCase() : '未启用']);
+      rows.push(['公网直连', runtime.direct && runtime.direct.enabled ? '已启用 · UDP ' + (runtime.direct.portStart || 0) + '-' + (runtime.direct.portEnd || 0) : '未启用']);
       rows.push(['启动时间', date(state.settings.info.startedAt)]);
       const cert = state.settings.info.certificate;
       $('certificate-summary').innerHTML = cert ? '<strong>' + esc(cert.dnsNames.length ? cert.dnsNames.join(' · ') : cert.subject) + '</strong><br>签发者：' + esc(cert.issuer) + '<br>有效期：' + esc(date(cert.notBefore)) + ' — ' + esc(date(cert.notAfter)) + '<div class="mono">SHA256 ' + esc(cert.sha256) + '</div>' : '当前进程没有加载 TLS 证书。';
@@ -1185,7 +1187,7 @@
     if (manual && !errors.length) { toast(state.dirty ? '数据已刷新，未保存的配置已保留' : '数据已刷新'); }
   }
   function readSettingsForm() {
-    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, serverExit: {}, rdpIngress: {}, p2p: {} };
+    const cfg = { admin: {}, tunnel: {}, certificate: {}, relayACL: {}, serverExit: {}, rdpIngress: {}, p2p: {}, direct: {} };
     all('[data-setting]').forEach(el => {
       const [group, key] = el.dataset.setting.split('.');
       let value = el.type === 'checkbox' ? el.checked : el.value.trim();
@@ -1250,6 +1252,12 @@
     $('listen-hint').textContent = cfg.admin.listen.startsWith('127.') || cfg.admin.listen.startsWith('[::1]') ? '当前地址仅允许从服务端本机访问。' : '监听所有接口时，预览使用你当前访问的主机名或 IP。更改协议或端口后，请在重启完成后使用新地址。';
     $('quic-listen').disabled = !cfg.tunnel.tlsEnabled;
     $('tunnel-tls-help').textContent = cfg.tunnel.tlsEnabled ? '开启后同时提供加密 TCP 和 QUIC 隧道。' : '关闭 TLS 后仍可使用 TCP，但隧道内容不会被 TLS 加密；QUIC 也会关闭。';
+    const directEnabled = !!cfg.direct.enabled;
+    $('direct-port-start').disabled = !directEnabled;
+    $('direct-port-end').disabled = !directEnabled;
+    $('direct-hint').textContent = directEnabled
+      ? 'Server 会验证 Agent 公网 UDP 端点后才下发给客户端；0 / 0 表示由 Agent 使用系统随机端口。'
+      : '关闭后 Server 不再广告 Public Direct 能力、验证端点或签发直连 Ticket。';
     $('acl-mode-hint').textContent = cfg.relayACL.accessMode === 'allow' ? '允许列表为空时，所有目标都会被拒绝。匹配目标仍需满足上方互联网 / 私网 / 回环权限。' : cfg.relayACL.accessMode === 'deny' ? '拒绝列表匹配项会被拦截；其余目标仍需满足上方权限。' : '域名和 IP 列表暂不参与筛选，保留内容便于下次启用。上方网络权限仍然有效。';
     const serverExitEnabled = !!cfg.serverExit.enabled;
     const serverExitProxy = cfg.serverExit.upstreamMode && cfg.serverExit.upstreamMode !== 'direct';

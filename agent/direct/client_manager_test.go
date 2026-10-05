@@ -54,7 +54,6 @@ func TestSelectPublicEndpointIgnoresUnverifiedHigherPriority(t *testing.T) {
 	}
 }
 
-
 type clientManagerTestSession struct {
 	once sync.Once
 	done chan struct{}
@@ -98,13 +97,13 @@ func TestClientManagerClosesReadySessionWhenAuthorizationDisappears(t *testing.T
 		DeviceID: "exit", Online: true,
 		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
 			Available: true, Transport: "quic",
-			Ticket: []byte("one-time-ticket"),
+			Ticket:          []byte("one-time-ticket"),
 			TicketExpiresAt: time.Now().Add(time.Minute).Unix(),
 			Endpoints: []protocol.PublicDirectEndpoint{{
-				Protocol: protocol.PublicDirectEndpointProtocolUDP,
-				Address: "203.0.113.20:35820",
-				Source: protocol.PublicDirectEndpointObserved,
-				Verified: true,
+				Protocol:        protocol.PublicDirectEndpointProtocolUDP,
+				Address:         "203.0.113.20:35820",
+				Source:          protocol.PublicDirectEndpointObserved,
+				Verified:        true,
 				CertFingerprint: fingerprint,
 			}},
 		}},

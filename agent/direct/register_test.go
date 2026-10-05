@@ -40,10 +40,10 @@ func (s *registrationSession) AcceptStream(context.Context) (tunnel.TunnelStream
 	return nil, errors.New("not supported")
 }
 func (s *registrationSession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
-func (s *registrationSession) RemoteAddr() net.Addr             { return &net.TCPAddr{} }
-func (s *registrationSession) LocalAddr() net.Addr              { return &net.TCPAddr{} }
-func (s *registrationSession) Close() error                     { return nil }
-func (s *registrationSession) Done() <-chan struct{}             { return s.done }
+func (s *registrationSession) RemoteAddr() net.Addr            { return &net.TCPAddr{} }
+func (s *registrationSession) LocalAddr() net.Addr             { return &net.TCPAddr{} }
+func (s *registrationSession) Close() error                    { return nil }
+func (s *registrationSession) Done() <-chan struct{}           { return s.done }
 
 func TestRegisterEndpointUsesPublicDirectControlFrame(t *testing.T) {
 	stream := &registrationStream{}

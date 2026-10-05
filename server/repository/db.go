@@ -670,9 +670,9 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 		}
 	} else {
 		result, err := tx.Exec(`UPDATE message_channels
-			SET name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, route_rules = ?, updated_at = ?
+			SET identity_id = ?, name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, route_rules = ?, updated_at = ?
 			WHERE id = ?`,
-			channel.Name, channel.AllDevices, channel.UseDefaultVerification, string(verificationRules), string(routeRules), channel.UpdatedAt, channel.ID)
+			channel.IdentityID, channel.Name, channel.AllDevices, channel.UseDefaultVerification, string(verificationRules), string(routeRules), channel.UpdatedAt, channel.ID)
 		if err != nil {
 			return err
 		}

@@ -121,44 +121,45 @@ func init() {
 }
 
 type AgentConfig struct {
-	Identity        *deviceidentity.Identity
-	IdentityID      string
-	DeviceID        string
-	DeviceName      string
-	ServerAddress   string
-	QUICPort        int
-	TCPPort         int
-	Mode            string // "CLIENT", "EXIT", "BOTH"
-	TransportMode   string // "auto", "quic_only", "tcp_only"
-	SOCKS5Enabled   *bool
-	SOCKS5Listen    string // "127.0.0.1:1080"
-	HTTPEnabled     *bool
-	HTTPListen      string // "127.0.0.1:8080"
-	DefaultExitID   string
-	ExitEnabled     *bool
-	ExitUpstream    exit.UpstreamConfig
-	RDPEnabled      *bool
-	RDPAddress      string // target-local RDP service, default 127.0.0.1:3389
-	P2PEnabled      *bool
-	P2PMode         string
-	P2PPunchTimeout time.Duration
-	P2PKeepalive    time.Duration
-	P2PIdleTimeout  time.Duration
-	P2PMaxSessions       int
-	P2PFallback          *bool
+	Identity              *deviceidentity.Identity
+	IdentityID            string
+	DeviceID              string
+	DeviceName            string
+	ServerAddress         string
+	QUICPort              int
+	TCPPort               int
+	Mode                  string // "CLIENT", "EXIT", "BOTH"
+	TransportMode         string // "auto", "quic_only", "tcp_only"
+	SOCKS5Enabled         *bool
+	SOCKS5Listen          string // "127.0.0.1:1080"
+	HTTPEnabled           *bool
+	HTTPListen            string // "127.0.0.1:8080"
+	DefaultExitID         string
+	ExitEnabled           *bool
+	ExitUpstream          exit.UpstreamConfig
+	RDPEnabled            *bool
+	RDPAddress            string // target-local RDP service, default 127.0.0.1:3389
+	P2PEnabled            *bool
+	P2PMode               string
+	P2PPunchTimeout       time.Duration
+	P2PKeepalive          time.Duration
+	P2PIdleTimeout        time.Duration
+	P2PMaxSessions        int
+	P2PFallback           *bool
 	PublicDirectAdvertise string
-	AllowInternet   bool
-	AllowPrivateNet bool
-	AllowLoopback   bool     // Allow localhost/loopback for testing
-	AccessMode      string   // "" (no gate), "allow" (whitelist), "deny" (blacklist)
-	AccessDomains   []string // domain patterns for the access list (glob / .suffix / exact)
-	AccessCIDRs     []string // IP ranges for the access list (CIDR / single IP / start-end)
-	NetworkMode     string   // "" (off) | "divert"
-	DivertConfig    divert.Config
-	Routing         routing.Config
-	InsecureTLS     bool // Allow self-signed TLS certificates for development/testing
-	PlainTCP        bool // Disable TLS entirely; connect via plaintext TCP + yamux
-	ConnectTimeout  time.Duration
+	AllowInternet         bool
+	AllowPrivateNet       bool
+	AllowLoopback         bool     // Allow localhost/loopback for testing
+	AccessMode            string   // "" (no gate), "allow" (whitelist) or "deny" (blacklist)
+	AccessDomains         []string // domain patterns for the access list (glob / .suffix / exact)
+	AccessCIDRs           []string // IP ranges for the access list (CIDR / single IP / start-end)
+	NetworkMode           string   // "" (off) | "divert"
+	DivertConfig          divert.Config
+	Routing               routing.Config
+	InsecureTLS           bool // Allow self-signed TLS certificates for development/testing
+	PlainTCP              bool // Disable TLS entirely; connect via plaintext TCP + yamux
+	ConnectTimeout        time.Duration
+
 }
 
 func (c AgentConfig) IsSOCKS5Enabled() bool {

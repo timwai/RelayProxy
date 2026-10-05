@@ -24,7 +24,8 @@ const (
 	FrameTypeRDPControl  FrameType = 0x0C
 	FrameTypePushMessage FrameType = 0x0D
 	FrameTypeP2PControl  FrameType = 0x0E
-	FrameTypeSpeedTest   FrameType = 0x0F
+	FrameTypeSpeedTest         FrameType = 0x0F
+	FrameTypeResourceInventory FrameType = 0x10
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream
@@ -223,7 +224,16 @@ type PongMessage struct {
 	RDPTargets *[]RDPTarget `json:"rdpTargets,omitempty"`
 	// Nil means this server does not provide an exit inventory refresh. A
 	// non-nil empty slice explicitly removes every previously advertised exit.
-	ProxyExits *[]ProxyExit `json:"proxyExits,omitempty"`
+	ProxyExits        *[]ProxyExit `json:"proxyExits,omitempty"`
+	ProxyExitRevision uint64       `json:"proxyExitRevision,omitempty"`
+}
+
+// ResourceInventory is sent by the server on a short-lived stream when the
+// online proxy-exit set changes. Heartbeat Pong refreshes remain the fallback
+// for older peers and for recovering from a missed push.
+type ResourceInventory struct {
+	ProxyExits        *[]ProxyExit `json:"proxyExits,omitempty"`
+	ProxyExitRevision uint64       `json:"proxyExitRevision,omitempty"`
 }
 
 // GoAwayMessage notifies graceful shutdown

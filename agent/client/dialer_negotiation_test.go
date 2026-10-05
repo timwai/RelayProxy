@@ -611,8 +611,16 @@ func TestDirectFallbackCanBeDisabled(t *testing.T) {
 }
 
 func TestPublicDirectFailureUsesReadyP2PBeforeRelay(t *testing.T) {
-	for _, mode := range []string{"auto", "direct_only"} {
-		t.Run(mode, func(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		mode     string
+		fallback bool
+	}{
+		{name: "auto", mode: "auto", fallback: true},
+		{name: "auto without relay fallback", mode: "auto", fallback: false},
+		{name: "direct only", mode: "direct_only", fallback: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			public := newScriptedSession(func() tunnel.TunnelStream {
 				return &scriptedStream{failWriteAt: 2}
 			})
@@ -626,7 +634,7 @@ func TestPublicDirectFailureUsesReadyP2PBeforeRelay(t *testing.T) {
 			var publicReady atomic.Bool
 			publicReady.Store(true)
 			dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, nil)
-			dialer.ConfigureDirectPolicy(mode, true)
+			dialer.ConfigureDirectPolicy(tc.mode, tc.fallback)
 			dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
 				if publicReady.Load() {
 					return SelectedSession{Session: public, Path: protocol.ProxyPathPublicDirectQUIC}, true

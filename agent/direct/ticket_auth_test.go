@@ -149,3 +149,49 @@ func TestTicketAuthenticatorRejectsFutureAndOverlongTickets(t *testing.T) {
 		t.Fatalf("overlong ticket error=%v", err)
 	}
 }
+
+
+func TestTicketAuthenticatorRequiresCurrentAuthorizationRevision(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	claims := validTicketClaims(now)
+	request := protocol.PublicDirectAuthRequest{
+		Version:        protocol.PublicDirectAuthVersion,
+		ClientDeviceID: claims.ClientDeviceID,
+		ExitDeviceID:   claims.ExitDeviceID,
+		Ticket:         signedTicketForTest(t, privateKey, claims),
+	}
+
+	current, err := NewTicketAuthenticator("server-1", publicKey, "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current.now = func() time.Time { return now }
+	var validated protocol.PublicDirectTicketClaims
+	current.SetCurrentValidator(func(_ context.Context, got protocol.PublicDirectTicketClaims) error {
+		validated = got
+		return nil
+	})
+	if err := current.Authenticate(context.Background(), request); err != nil {
+		t.Fatalf("current ticket rejected: %v", err)
+	}
+	if validated.PolicyRevision != claims.PolicyRevision ||
+		validated.AuthorizationRevision != claims.AuthorizationRevision {
+		t.Fatalf("validated claims=%+v", validated)
+	}
+
+	stale, err := NewTicketAuthenticator("server-1", publicKey, "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale.now = func() time.Time { return now }
+	stale.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) error {
+		return errors.New("authorization revoked")
+	})
+	if err := stale.Authenticate(context.Background(), request); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("stale ticket error=%v", err)
+	}
+}

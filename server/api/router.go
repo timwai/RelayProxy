@@ -261,6 +261,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/message-channels", r.requireAuth(r.handleCreateMessageChannel))
 	r.mux.HandleFunc("PUT /api/v1/message-channels/{id}", r.requireAuth(r.handleUpdateMessageChannel))
 	r.mux.HandleFunc("DELETE /api/v1/message-channels/{id}", r.requireAuth(r.handleDeleteMessageChannel))
+	r.mux.HandleFunc("GET /api/v1/message-push-info", r.requireAuth(r.handleMessagePushInfo))
 
 	// Global administrators create isolation identities and their independent
 	// login accounts. Any authenticated identity may resolve active grant targets.
@@ -327,6 +328,11 @@ type channelPushRequest struct {
 	Message string `json:"message,omitempty"`
 	Content string `json:"content,omitempty"`
 	Source  string `json:"source,omitempty"`
+}
+
+type messagePushInfo struct {
+	TCPListen  string `json:"tcpListen"`
+	TLSEnabled bool   `json:"tlsEnabled"`
 }
 
 type messageChannelRequest struct {
@@ -492,6 +498,22 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 		return nil, false
 	}
 	return channel, true
+}
+
+func (r *Router) handleMessagePushInfo(w http.ResponseWriter, _ *http.Request) {
+	if r.settings == nil {
+		writeJSON(w, http.StatusOK, messagePushInfo{})
+		return
+	}
+	state, err := r.settings.State()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load push listener")
+		return
+	}
+	writeJSON(w, http.StatusOK, messagePushInfo{
+		TCPListen:  state.Runtime.Server.TLS.Listen,
+		TLSEnabled: state.Runtime.IsTLSEnabled(),
+	})
 }
 
 func (r *Router) handleListMessageChannels(w http.ResponseWriter, req *http.Request) {

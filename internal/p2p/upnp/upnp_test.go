@@ -37,7 +37,7 @@ func TestSOAPMappingActions(t *testing.T) {
 	var actions []string
 	var bodies []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		action := strings.Trim(r.Header.Get("SOAPAction"), """)
+		action := strings.Trim(r.Header.Get("SOAPAction"), "\"")
 		actions = append(actions, action)
 		body, _ := io.ReadAll(r.Body)
 		bodies = append(bodies, string(body))

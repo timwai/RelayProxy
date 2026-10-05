@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, messagePushInfo: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -805,7 +805,9 @@
     }).join('') : emptyRow(5, '当前没有 P2P 会话', 'Client 选择支持 P2P 的 Exit 后会在后台建立直连');
   }
   function relayPushOrigin() {
-    const tunnel = state.settings && state.settings.runtime && state.settings.runtime.tunnel;
+    const tunnel = state.messagePushInfo && state.messagePushInfo.tcpListen
+      ? { tcpListen: state.messagePushInfo.tcpListen, tlsEnabled: !!state.messagePushInfo.tlsEnabled }
+      : state.settings && state.settings.runtime && state.settings.runtime.tunnel;
     if (!tunnel || !tunnel.tcpListen) return '';
     const match = /^(?:\[[^\]]+\]|[^:]*):(\d{1,5})$/.exec(String(tunnel.tcpListen).trim());
     if (!match) return '';
@@ -1217,6 +1219,7 @@
       ['sessions', '/sessions/active', data => { state.sessions = data; renderSessions(); }],
       ['p2pSessions', '/p2p/sessions', data => { state.p2pSessions = Array.isArray(data) ? data : []; renderP2PSessions(); }],
       ['messages', messageListPath(), data => { state.messages = Array.isArray(data) ? data : []; renderMessages(); }],
+      ['messagePushInfo', '/message-push-info', data => { state.messagePushInfo = data || null; }],
       ['channels', '/message-channels', data => { state.channels = Array.isArray(data) ? data : []; renderChannels(); }],
       ['identityOptions', user.role === 'admin' ? '/identities' : '/identity-options', data => { state.identities = Array.isArray(data) ? data : []; if (user.role === 'admin') renderIdentities(); syncIdentityGrantFormOptions(); }],
       ['enrollments', '/enrollments?state=pending', data => { state.enrollments = data; renderEnrollments(); }]

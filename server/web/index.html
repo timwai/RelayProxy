@@ -140,9 +140,9 @@
       <section id="page-messages" class="page" hidden>
         <div class="page-heading">
           <div><p class="eyebrow">MESSAGE CENTER</p><h1>消息与推送渠道</h1><p class="muted">渠道决定消息推送到哪些设备；外部系统只需要使用渠道 ID。</p></div>
-          <div class="button-row"><button id="channel-create" type="button" data-admin class="primary rp-btn rp-btn-primary">新建渠道</button><button id="messages-clear" type="button" data-admin class="danger rp-btn">清空全部消息</button><button id="messages-refresh" type="button" class="rp-btn">刷新</button></div>
+          <div class="button-row"><button id="channel-create" type="button" class="primary rp-btn rp-btn-primary">新建渠道</button><button id="messages-clear" type="button" data-admin class="danger rp-btn">清空全部消息</button><button id="messages-refresh" type="button" class="rp-btn">刷新</button></div>
         </div>
-        <article class="panel rp-card channel-panel" data-admin>
+        <article class="panel rp-card channel-panel">
           <div class="panel-heading"><div><h2>推送渠道</h2><small>公开接口：GET / POST · /api/v1/push/{channelId}</small></div><span id="channel-count" class="badge neutral">0</span></div>
           <div id="channel-list" class="channel-grid"></div>
         </article>
@@ -210,8 +210,12 @@
 <dialog id="channel-dialog" aria-labelledby="channel-dialog-title">
   <form method="dialog" class="dialog-close"><button aria-label="关闭渠道配置">×</button></form>
   <p class="eyebrow">PUSH CHANNEL</p><h2 id="channel-dialog-title">新建推送渠道</h2>
-  <p class="muted">渠道 ID 会直接出现在公开推送 URL 中。创建后不可修改 ID。</p>
+  <p class="muted">每个渠道属于一个身份；公开推送只会触达该身份下的设备。渠道 ID 创建后不可修改。</p>
   <form id="channel-form">
+    <div id="channel-identity-field" data-admin>
+      <label for="channel-identity">所属身份</label><select id="channel-identity"><option value="">请选择身份</option></select>
+      <small>渠道、内容分流和“全部设备”都只能作用于所选身份。创建后不可更改所属身份。</small>
+    </div>
     <label for="channel-name">渠道名称</label><input id="channel-name" required maxlength="120" placeholder="例如：登录验证码">
     <label for="channel-id">渠道 ID</label><input id="channel-id" class="mono" maxlength="80" placeholder="留空自动生成，例如 login-code">
     <small>仅允许字母、数字、点、短横线和下划线。</small>

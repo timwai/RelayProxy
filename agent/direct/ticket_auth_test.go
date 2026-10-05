@@ -241,7 +241,6 @@ func TestTicketAuthenticatorPolicyAuthenticationFailsClosedWithoutCurrentPolicy(
 	}
 }
 
-
 func TestTicketAuthenticatorRejectsTamperedRelayPolicy(t *testing.T) {
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {

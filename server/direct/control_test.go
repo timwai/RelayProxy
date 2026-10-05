@@ -27,13 +27,13 @@ func newControlStream(t *testing.T, request any) *testControlStream {
 	return stream
 }
 
-func (s *testControlStream) Read(p []byte) (int, error)         { return s.read.Read(p) }
-func (s *testControlStream) Write(p []byte) (int, error)        { return s.write.Write(p) }
-func (s *testControlStream) Close() error                       { return nil }
-func (s *testControlStream) CloseWrite() error                  { return nil }
-func (s *testControlStream) SetDeadline(time.Time) error        { return nil }
-func (s *testControlStream) SetReadDeadline(time.Time) error    { return nil }
-func (s *testControlStream) SetWriteDeadline(time.Time) error   { return nil }
+func (s *testControlStream) Read(p []byte) (int, error)       { return s.read.Read(p) }
+func (s *testControlStream) Write(p []byte) (int, error)      { return s.write.Write(p) }
+func (s *testControlStream) Close() error                     { return nil }
+func (s *testControlStream) CloseWrite() error                { return nil }
+func (s *testControlStream) SetDeadline(time.Time) error      { return nil }
+func (s *testControlStream) SetReadDeadline(time.Time) error  { return nil }
+func (s *testControlStream) SetWriteDeadline(time.Time) error { return nil }
 
 type observedSession struct {
 	remote net.Addr
@@ -47,10 +47,10 @@ func (s *observedSession) AcceptStream(context.Context) (tunnel.TunnelStream, er
 	return nil, errors.New("not supported")
 }
 func (s *observedSession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
-func (s *observedSession) RemoteAddr() net.Addr             { return s.remote }
-func (s *observedSession) LocalAddr() net.Addr              { return &net.TCPAddr{} }
-func (s *observedSession) Close() error                     { return nil }
-func (s *observedSession) Done() <-chan struct{}             { return s.done }
+func (s *observedSession) RemoteAddr() net.Addr            { return s.remote }
+func (s *observedSession) LocalAddr() net.Addr             { return &net.TCPAddr{} }
+func (s *observedSession) Close() error                    { return nil }
+func (s *observedSession) Done() <-chan struct{}           { return s.done }
 
 func TestControllerRegistersObservedEndpointForAuthenticatedExit(t *testing.T) {
 	registry := NewRegistry()

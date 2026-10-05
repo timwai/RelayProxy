@@ -157,20 +157,20 @@ func TestTunnelDialerPrefersReadyDirectPathAndWarmsMissingPath(t *testing.T) {
 		}
 	})
 
-	session, isDirect := dialer.sessionForExit("exit-ready")
-	if session != direct || !isDirect {
-		t.Fatalf("ready direct path not selected: session=%v direct=%v", session, isDirect)
+	selected := dialer.selectedSessionForExit("exit-ready")
+	if selected.Session != direct || selected.Path != protocol.ProxyPathP2PQUIC {
+		t.Fatalf("ready direct path not selected: session=%v path=%v", selected.Session, selected.Path)
 	}
-	session, isDirect = dialer.sessionForExit("exit-cold")
-	if session != relay || isDirect {
-		t.Fatalf("cold path did not fall back to Relay: session=%v direct=%v", session, isDirect)
+	selected = dialer.selectedSessionForExit("exit-cold")
+	if selected.Session != relay || selected.Path != protocol.ProxyPathRelayTLS {
+		t.Fatalf("cold path did not fall back to Relay: session=%v path=%v", selected.Session, selected.Path)
 	}
 	if ensureCalls != 1 {
 		t.Fatalf("ensure calls=%d, want 1", ensureCalls)
 	}
-	session, isDirect = dialer.sessionForExit("")
-	if session != relay || isDirect {
-		t.Fatalf("auto-selected Exit should stay on Relay: session=%v direct=%v", session, isDirect)
+	selected = dialer.selectedSessionForExit("")
+	if selected.Session != relay || selected.Path != protocol.ProxyPathRelayTLS {
+		t.Fatalf("auto-selected Exit should stay on Relay: session=%v path=%v", selected.Session, selected.Path)
 	}
 	if ensureCalls != 1 {
 		t.Fatalf("empty Exit unexpectedly started P2P: ensure calls=%d", ensureCalls)
@@ -428,9 +428,9 @@ func TestDirectPathPolicyModes(t *testing.T) {
 		var ensure atomic.Int32
 		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, func(string) { ensure.Add(1) })
 		dialer.ConfigureDirectPolicy("p2p_only", false)
-		session, isDirect := dialer.sessionForExit(protocol.ServerExitDeviceID)
-		if session != relay || isDirect || ensure.Load() != 0 {
-			t.Fatalf("server exit selected session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		selected := dialer.selectedSessionForExit(protocol.ServerExitDeviceID)
+		if selected.Session != relay || selected.Path != protocol.ProxyPathRelayTLS || ensure.Load() != 0 {
+			t.Fatalf("server exit selected session=%v path=%v ensure=%d", selected.Session, selected.Path, ensure.Load())
 		}
 	})
 
@@ -439,9 +439,9 @@ func TestDirectPathPolicyModes(t *testing.T) {
 		var ensure atomic.Int32
 		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return direct, true }, func(string) { ensure.Add(1) })
 		dialer.ConfigureDirectPolicy("relay_only", true)
-		session, isDirect := dialer.sessionForExit("exit")
-		if session != relay || isDirect || ensure.Load() != 0 {
-			t.Fatalf("relay_only selected session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != relay || selected.Path != protocol.ProxyPathRelayTLS || ensure.Load() != 0 {
+			t.Fatalf("relay_only selected session=%v path=%v ensure=%d", selected.Session, selected.Path, ensure.Load())
 		}
 	})
 
@@ -450,9 +450,9 @@ func TestDirectPathPolicyModes(t *testing.T) {
 		var ensure atomic.Int32
 		dialer.ConfigureDirectPath(func(string) (tunnel.TunnelSession, bool) { return nil, false }, func(string) { ensure.Add(1) })
 		dialer.ConfigureDirectPolicy("p2p_only", false)
-		session, isDirect := dialer.sessionForExit("exit")
-		if session != nil || isDirect || ensure.Load() != 1 {
-			t.Fatalf("p2p_only cold session=%v direct=%v ensure=%d", session, isDirect, ensure.Load())
+		selected := dialer.selectedSessionForExit("exit")
+		if selected.Session != nil || selected.Path != "" || ensure.Load() != 1 {
+			t.Fatalf("p2p_only cold session=%v path=%v ensure=%d", selected.Session, selected.Path, ensure.Load())
 		}
 	})
 }

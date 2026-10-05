@@ -70,8 +70,10 @@ type RDPIngressSettings struct {
 }
 
 type P2PSettings struct {
-	PortStart int `json:"portStart"`
-	PortEnd   int `json:"portEnd"`
+	RendezvousListen    string `json:"rendezvousListen"`
+	RendezvousAdvertise string `json:"rendezvousAdvertise"`
+	PortStart           int    `json:"portStart"`
+	PortEnd             int    `json:"portEnd"`
 }
 
 type ServerEditableConfig struct {
@@ -153,7 +155,10 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 		},
 		RDPIngress: RDPIngressSettings{ingressEnabled, c.RDP.Ingress.Listen, c.RDP.Ingress.PortStart,
 			c.RDP.Ingress.PortEnd, append([]string{}, c.RDP.Ingress.SourceCIDRs...), c.RDP.Ingress.RateLimitPerMin},
-		P2P: P2PSettings{PortStart: c.P2P.PortStart, PortEnd: c.P2P.PortEnd},
+		P2P: P2PSettings{
+			RendezvousListen: c.P2P.RendezvousListen, RendezvousAdvertise: c.P2P.RendezvousAdvertise,
+			PortStart: c.P2P.PortStart, PortEnd: c.P2P.PortEnd,
+		},
 	}
 }
 
@@ -198,6 +203,8 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 	target.RDP.Ingress.PortEnd = c.RDPIngress.PortEnd
 	target.RDP.Ingress.SourceCIDRs = cleanSettingLines(c.RDPIngress.SourceCIDRs)
 	target.RDP.Ingress.RateLimitPerMin = c.RDPIngress.RateLimitPerMin
+	target.P2P.RendezvousListen = strings.TrimSpace(c.P2P.RendezvousListen)
+	target.P2P.RendezvousAdvertise = strings.TrimSpace(c.P2P.RendezvousAdvertise)
 	target.P2P.PortStart = c.P2P.PortStart
 	target.P2P.PortEnd = c.P2P.PortEnd
 	return nil

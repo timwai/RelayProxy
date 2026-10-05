@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"
@@ -117,6 +118,19 @@ func TestControllerRejectsNonExitSession(t *testing.T) {
 	}
 }
 
+func currentRelayPolicyForTest(t *testing.T) *acl.Policy {
+	t.Helper()
+	checker, err := acl.NewChecker(acl.Policy{
+		ID: "relay-test", AllowInternet: true,
+		AccessMode: acl.AccessModeDeny, AccessHosts: []string{"blocked.example"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := checker.Policy()
+	return &policy
+}
+
 func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
@@ -133,10 +147,13 @@ func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
 
 			var gotExitID string
 			var got protocol.PublicDirectTicketValidationRequest
-			controller.SetTicketValidator(func(_ context.Context, exitID string, request protocol.PublicDirectTicketValidationRequest) error {
+			controller.SetTicketValidator(func(_ context.Context, exitID string, request protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
 				gotExitID = exitID
 				got = request
-				return tc.validatorErr
+				if tc.validatorErr != nil {
+					return nil, tc.validatorErr
+				}
+				return currentRelayPolicyForTest(t), nil
 			})
 
 			request := protocol.PublicDirectRegistrationRequest{
@@ -167,6 +184,9 @@ func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
 			if response.Success != tc.wantSuccess {
 				t.Fatalf("response=%+v", response)
 			}
+			if tc.wantSuccess && (response.RelayPolicy == nil || response.RelayPolicy.Fingerprint == "") {
+				t.Fatalf("successful validation omitted relay policy: %+v", response)
+			}
 			if !tc.wantSuccess && response.ErrorCode != protocol.ErrCodeAccessDenied {
 				t.Fatalf("stale response=%+v", response)
 			}
@@ -184,9 +204,9 @@ func TestControllerRejectsTicketValidationForAnotherExit(t *testing.T) {
 	defer controller.Close()
 
 	called := false
-	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) error {
+	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
 		called = true
-		return nil
+		return currentRelayPolicyForTest(t), nil
 	})
 	stream := newControlStream(t, protocol.PublicDirectRegistrationRequest{
 		Operation: protocol.PublicDirectControlValidateTicket,
@@ -278,5 +298,34 @@ func TestEndpointSetChangedIncludesVerifiedDialTarget(t *testing.T) {
 	changed.DialAddress = "203.0.113.21:35820"
 	if !endpointSetChanged([]protocol.PublicDirectEndpoint{base}, []protocol.PublicDirectEndpoint{changed}) {
 		t.Fatal("verified dial target change was not reported")
+	}
+}
+
+
+func TestControllerRejectsTicketValidationWithoutRelayPolicy(t *testing.T) {
+	registry := NewRegistry()
+	controller := NewController(context.Background(), registry, &Verifier{Registry: registry}, nil)
+	defer controller.Close()
+	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
+		return nil, nil
+	})
+	stream := newControlStream(t, protocol.PublicDirectRegistrationRequest{
+		Operation: protocol.PublicDirectControlValidateTicket,
+		TicketValidation: &protocol.PublicDirectTicketValidationRequest{
+			ClientDeviceID: "client", ExitDeviceID: "exit",
+			PolicyRevision: 4, AuthorizationRevision: 9,
+		},
+	})
+	controller.HandleControl(context.Background(), stream, &session.DeviceSession{
+		SessionID: "session-1", DeviceID: "exit",
+		Grants: []string{protocol.CapabilityProxyExit},
+		Tunnel: &observedSession{remote: &net.TCPAddr{IP: net.ParseIP("8.8.8.8"), Port: 443}, done: make(chan struct{})},
+	})
+	var response protocol.PublicDirectRegistrationResponse
+	if err := protocol.ReadJSON(&stream.write, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Success || response.ErrorCode != protocol.ErrCodeAccessDenied {
+		t.Fatalf("missing-policy response=%+v", response)
 	}
 }

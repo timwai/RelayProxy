@@ -107,6 +107,60 @@ func authenticateTestDevice(t *testing.T, control tunnel.TunnelStream, identity 
 	return accepted
 }
 
+func authenticateTestDeviceHello(t *testing.T, control tunnel.TunnelStream, identity *deviceidentity.Identity, hello protocol.DeviceHello) protocol.DeviceAccepted {
+	t.Helper()
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatal(err)
+	}
+	hello.ProtocolVersion = protocol.LegacyDeviceProtocolVersion
+	hello.InstallationID = identity.InstallationID
+	hello.PublicKey = identity.PublicKey
+	hello.ClientNonce = nonce
+	if err := protocol.WriteJSON(control, hello); err != nil {
+		t.Fatal(err)
+	}
+	var challenge protocol.AuthChallenge
+	if err := protocol.ReadJSON(control, &challenge); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteJSON(control, protocol.AuthProof{
+		ChallengeID: challenge.ChallengeID,
+		Signature:   identity.Sign(protocol.DeviceAuthPayload(hello, challenge)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var accepted protocol.DeviceAccepted
+	if err := protocol.ReadJSON(control, &accepted); err != nil {
+		t.Fatal(err)
+	}
+	return accepted
+}
+
+func readInventoryPush(t *testing.T, sess tunnel.TunnelSession) protocol.ResourceInventory {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	stream, err := sess.AcceptStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	_ = stream.SetDeadline(time.Now().Add(time.Second))
+	header, err := protocol.ReadStreamHeader(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header.Type != protocol.FrameTypeResourceInventory {
+		t.Fatalf("push frame type=%d, want resource inventory", header.Type)
+	}
+	var inventory protocol.ResourceInventory
+	if err := protocol.ReadJSON(stream, &inventory); err != nil {
+		t.Fatal(err)
+	}
+	return inventory
+}
+
 func TestControlHandshakeDeadlineCoversHeaderAndHello(t *testing.T) {
 	for _, phase := range []string{"accept", "partial-header", "hello"} {
 		t.Run(phase, func(t *testing.T) {
@@ -499,5 +553,98 @@ func TestWelcomeDistributesP2PPortRange(t *testing.T) {
 	}
 	if !accepted.P2PUPnPEnabled {
 		t.Fatal("P2P UPnP setting was not distributed")
+	}
+}
+
+
+func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
+	gateway := testGateway(t, time.Second, nil, func(_ string, hello protocol.DeviceHello) (DeviceAuthorization, error) {
+		switch hello.DeviceName {
+		case "client":
+			return DeviceAuthorization{
+				State: "approved", DeviceID: "client",
+				ApprovedCapabilities: []string{protocol.CapabilityProxyClient},
+			}, nil
+		case "exit":
+			return DeviceAuthorization{
+				State: "approved", DeviceID: "exit-a",
+				ApprovedCapabilities: []string{protocol.CapabilityProxyExit},
+			}, nil
+		default:
+			return DeviceAuthorization{State: "rejected"}, nil
+		}
+	})
+	gateway.cfg.ListProxyExits = func(clientID, _, _ string) ([]protocol.ProxyExit, error) {
+		exits := gateway.sessions.GetExits()
+		result := make([]protocol.ProxyExit, 0, len(exits))
+		for _, item := range exits {
+			if item == nil || item.DeviceID == "" || item.DeviceID == clientID {
+				continue
+			}
+			result = append(result, protocol.ProxyExit{
+				DeviceID: item.DeviceID,
+				Name:     item.DeviceName,
+				Online:   true,
+			})
+		}
+		return result, nil
+	}
+
+	clientIdentity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSession := dialTestGateway(t, gateway)
+	clientControl := openTestStream(t, clientSession)
+	writeControlHeader(t, clientControl)
+	clientAccepted := authenticateTestDeviceHello(t, clientControl, clientIdentity, protocol.DeviceHello{
+		DeviceName:            "client",
+		RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+		TransportCapabilities: []string{protocol.CapabilityResourceInventoryPush},
+	})
+	if !clientAccepted.Success {
+		t.Fatalf("client was not accepted: %+v", clientAccepted)
+	}
+	if clientAccepted.ProxyExits == nil || len(*clientAccepted.ProxyExits) != 0 {
+		t.Fatalf("client startup inventory=%+v, want explicit empty list", clientAccepted.ProxyExits)
+	}
+	initialRevision := clientAccepted.ProxyExitRevision
+	if initialRevision == 0 {
+		t.Fatal("client startup inventory revision was not set")
+	}
+
+	exitIdentity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitSession := dialTestGateway(t, gateway)
+	exitControl := openTestStream(t, exitSession)
+	writeControlHeader(t, exitControl)
+	exitAccepted := authenticateTestDeviceHello(t, exitControl, exitIdentity, protocol.DeviceHello{
+		DeviceName:            "exit",
+		RequestedCapabilities: []string{protocol.CapabilityProxyExit},
+	})
+	if !exitAccepted.Success {
+		t.Fatalf("exit was not accepted: %+v", exitAccepted)
+	}
+
+	online := readInventoryPush(t, clientSession)
+	if online.ProxyExits == nil || len(*online.ProxyExits) != 1 ||
+		(*online.ProxyExits)[0].DeviceID != "exit-a" || !(*online.ProxyExits)[0].Online {
+		t.Fatalf("online exit push=%+v", online)
+	}
+	if online.ProxyExitRevision <= initialRevision {
+		t.Fatalf("online revision=%d, initial=%d", online.ProxyExitRevision, initialRevision)
+	}
+
+	if err := exitSession.Close(); err != nil {
+		t.Fatal(err)
+	}
+	offline := readInventoryPush(t, clientSession)
+	if offline.ProxyExits == nil || len(*offline.ProxyExits) != 0 {
+		t.Fatalf("offline exit push retained inventory: %+v", offline)
+	}
+	if offline.ProxyExitRevision <= online.ProxyExitRevision {
+		t.Fatalf("offline revision=%d, online=%d", offline.ProxyExitRevision, online.ProxyExitRevision)
 	}
 }

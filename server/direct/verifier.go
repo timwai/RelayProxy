@@ -69,7 +69,7 @@ func (v *Verifier) Verify(ctx context.Context, deviceID, sessionID, address stri
 	if ttl <= 0 {
 		ttl = defaultVerifyTTL
 	}
-	if !v.Registry.markVerifiedRegistration(record, ttl) {
+	if !v.Registry.markVerifiedRegistration(record, dialAddress, ttl) {
 		return errors.New("public direct endpoint changed during verification")
 	}
 	return nil

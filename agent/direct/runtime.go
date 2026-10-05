@@ -13,6 +13,7 @@ import (
 
 	"relayproxy/agent/exit"
 	directcore "relayproxy/internal/direct"
+	"relayproxy/internal/netutil"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -28,16 +29,20 @@ type ExitRuntimeOptions struct {
 	PortStart               int
 	PortEnd                 int
 	RegisterTimeout         time.Duration
+	NetworkCheckInterval    time.Duration
+	NetworkSignature        func() string
 }
 
 type ExitRuntime struct {
-	cancel   context.CancelFunc
-	listener *PublicListener
-	done     chan struct{}
-	once     sync.Once
-
-	listenPort int
-	candidates []protocol.PublicDirectEndpointCandidate
+	cancel       context.CancelFunc
+	listener     *PublicListener
+	serveDone    chan struct{}
+	networkDone  chan struct{}
+	once         sync.Once
+	mu           sync.RWMutex
+	listenPort   int
+	candidates   []protocol.PublicDirectEndpointCandidate
+	networkEpoch uint64
 }
 
 func StartExitRuntime(
@@ -94,44 +99,33 @@ func StartExitRuntime(
 		_ = listener.Close()
 		return nil, fmt.Errorf("invalid listener port %q", portText)
 	}
-	candidates, err := DiscoverEndpointCandidates(uint16(port), options.ManualAdvertise)
-	if err != nil {
-		_ = listener.Close()
-		return nil, fmt.Errorf("discover endpoints: %w", err)
-	}
-
 	registerTimeout := options.RegisterTimeout
 	if registerTimeout <= 0 {
 		registerTimeout = 5 * time.Second
 	}
-	registerCtx, cancelRegister := context.WithTimeout(parent, registerTimeout)
-	response, err := RegisterEndpoint(registerCtx, relay, protocol.PublicDirectRegistrationRequest{
-		ListenerPort:    uint16(port),
-		CertFingerprint: identity.Fingerprint,
-		Candidates:      candidates,
-	})
-	cancelRegister()
+	const initialNetworkEpoch uint64 = 1
+	candidates, err := registerExitEndpoints(parent, relay, uint16(port), identity.Fingerprint,
+		options.ManualAdvertise, initialNetworkEpoch, registerTimeout)
 	if err != nil {
 		_ = listener.Close()
-		return nil, fmt.Errorf("register endpoint: %w", err)
-	}
-	if !response.Success {
-		_ = listener.Close()
-		return nil, fmt.Errorf("register endpoint rejected: [%s] %s", response.ErrorCode, response.ErrorMessage)
+		return nil, err
 	}
 
 	runtimeCtx, cancel := context.WithCancel(parent)
 	runtime := &ExitRuntime{
-		cancel:     cancel,
-		listener:   listener,
-		done:       make(chan struct{}),
-		listenPort: port,
-		candidates: append([]protocol.PublicDirectEndpointCandidate(nil), candidates...),
+		cancel:       cancel,
+		listener:     listener,
+		serveDone:    make(chan struct{}),
+		networkDone:  make(chan struct{}),
+		listenPort:   port,
+		candidates:   append([]protocol.PublicDirectEndpointCandidate(nil), candidates...),
+		networkEpoch: initialNetworkEpoch,
 	}
 	go func() {
-		defer close(runtime.done)
+		defer close(runtime.serveDone)
 		_ = ServeExit(runtimeCtx, listener, handler, options.MaxSessions, options.MaxStreams)
 	}()
+	go runtime.watchNetwork(runtimeCtx, relay, identity.Fingerprint, options)
 	return runtime, nil
 }
 
@@ -147,8 +141,11 @@ func (r *ExitRuntime) Close() error {
 		if r.listener != nil {
 			closeErr = r.listener.Close()
 		}
-		if r.done != nil {
-			<-r.done
+		if r.serveDone != nil {
+			<-r.serveDone
+		}
+		if r.networkDone != nil {
+			<-r.networkDone
 		}
 	})
 	return closeErr
@@ -165,7 +162,86 @@ func (r *ExitRuntime) Candidates() []protocol.PublicDirectEndpointCandidate {
 	if r == nil {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return append([]protocol.PublicDirectEndpointCandidate(nil), r.candidates...)
+}
+
+func (r *ExitRuntime) watchNetwork(ctx context.Context, relay tunnel.TunnelSession, fingerprint string, options ExitRuntimeOptions) {
+	defer close(r.networkDone)
+	interval := options.NetworkCheckInterval
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	signature := options.NetworkSignature
+	if signature == nil {
+		signature = netutil.CurrentNetworkSignature
+	}
+	previous := signature()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			current := signature()
+			if current == "" || previous == "" {
+				previous = current
+				continue
+			}
+			if current == previous {
+				continue
+			}
+			r.mu.RLock()
+			nextEpoch := r.networkEpoch + 1
+			port := r.listenPort
+			r.mu.RUnlock()
+			candidates, err := registerExitEndpoints(ctx, relay, uint16(port), fingerprint,
+				options.ManualAdvertise, nextEpoch, options.RegisterTimeout)
+			if err != nil {
+				continue
+			}
+			r.mu.Lock()
+			r.networkEpoch = nextEpoch
+			r.candidates = append([]protocol.PublicDirectEndpointCandidate(nil), candidates...)
+			r.mu.Unlock()
+			previous = current
+		}
+	}
+}
+
+func registerExitEndpoints(
+	ctx context.Context,
+	relay tunnel.TunnelSession,
+	port uint16,
+	fingerprint string,
+	manualAdvertise string,
+	networkEpoch uint64,
+	timeout time.Duration,
+) ([]protocol.PublicDirectEndpointCandidate, error) {
+	candidates, err := DiscoverEndpointCandidates(port, manualAdvertise)
+	if err != nil {
+		return nil, fmt.Errorf("discover endpoints: %w", err)
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	registerCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	response, err := RegisterEndpoint(registerCtx, relay, protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    port,
+		CertFingerprint: fingerprint,
+		NetworkEpoch:    networkEpoch,
+		Candidates:      candidates,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("register endpoint: %w", err)
+	}
+	if !response.Success {
+		return nil, fmt.Errorf("register endpoint rejected: [%s] %s", response.ErrorCode, response.ErrorMessage)
+	}
+	return candidates, nil
 }
 
 func listenExitRuntime(config ListenerConfig, listenAddress string, portStart, portEnd int) (*PublicListener, error) {

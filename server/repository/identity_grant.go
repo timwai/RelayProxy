@@ -544,7 +544,6 @@ func (db *DB) authorizeIdentityDeviceFeature(clientDeviceID, targetDeviceID, fea
 	return true, granted, err
 }
 
-
 type PublicDirectAuthorizationSnapshot struct {
 	Allowed               bool
 	PolicyRevision        int64

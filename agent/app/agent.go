@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"relayproxy/agent/client"
+	agentdirect "relayproxy/agent/direct"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
 	proxyp2p "relayproxy/agent/p2p"
@@ -279,6 +280,8 @@ type Agent struct {
 	rdpP2P            *rdpp2p.Manager
 	rdpSession        *rdpp2p.Session
 	proxyP2P          *proxyp2p.Manager
+	publicDirectAuthz  *agentdirect.AuthorizationStore
+	publicDirectKey    []byte
 	closed            atomic.Bool
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -529,6 +532,8 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	a.rdpConnection = nil
 	a.rdpP2P = nil
 	a.proxyP2P = nil
+	a.publicDirectAuthz = nil
+	a.publicDirectKey = nil
 	a.rdpSession = nil
 	a.rdpTargets = nil
 	// Keep the last authoritative exit inventory across transient transport
@@ -618,6 +623,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
+	transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
 	if tunnel.SupportsDatagrams(sess) {
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
 	}
@@ -684,6 +690,12 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.identityName = accepted.IdentityName
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
+	a.publicDirectKey = append([]byte(nil), accepted.PublicDirectTicketVerifyKey...)
+	a.publicDirectAuthz = nil
+	if slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit) &&
+		len(accepted.PublicDirectTicketVerifyKey) > 0 {
+		a.publicDirectAuthz = agentdirect.NewAuthorizationStore(accepted.DeviceID, accepted.PolicyRevision)
+	}
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	if accepted.ProxyExitRevision != 0 {
 		a.proxyExitRevision = accepted.ProxyExitRevision
@@ -1086,6 +1098,38 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 				if err := protocol.ReadJSON(stream, &message); err == nil {
 					proxyP2PManager.HandleControl(message)
 				}
+			}()
+			continue
+		}
+		if header.Type == protocol.FrameTypePublicDirectAuthorization {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				defer stream.Close()
+				var update protocol.PublicDirectAuthorizationUpdate
+				if err := protocol.ReadJSON(stream, &update); err != nil {
+					_ = protocol.WriteJSON(stream, protocol.PublicDirectAuthorizationReceipt{
+						Success: false, ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "invalid public direct authorization update",
+					})
+					return
+				}
+				a.mu.RLock()
+				store := a.publicDirectAuthz
+				a.mu.RUnlock()
+				if store == nil {
+					_ = protocol.WriteJSON(stream, protocol.PublicDirectAuthorizationReceipt{
+						Success: false, ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct authorization state is unavailable",
+					})
+					return
+				}
+				if err := store.Update(update); err != nil {
+					_ = protocol.WriteJSON(stream, protocol.PublicDirectAuthorizationReceipt{
+						Success: false, ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: err.Error(),
+					})
+					return
+				}
+				_ = protocol.WriteJSON(stream, protocol.PublicDirectAuthorizationReceipt{Success: true})
 			}()
 			continue
 		}

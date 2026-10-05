@@ -697,8 +697,11 @@
     const endpoints = Array.isArray(value.endpoints) ? value.endpoints : [];
     const stateNames = {unknown:'待验证', verifying:'验证中', verified:'已验证', failed:'验证失败', expired:'已过期'};
     const rows = endpoints.map(item => {
-      const stateName = stateNames[item.state] || item.state || '未知';
-      const stateClass = item.state === 'verified' ? 'success' : item.state === 'failed' ? 'warning-badge' : 'neutral';
+      const usable = !!item.verified;
+      const stateName = item.state === 'verifying' && usable
+        ? '复验中 · 可用'
+        : (stateNames[item.state] || item.state || '未知');
+      const stateClass = usable ? 'success' : item.state === 'failed' ? 'warning-badge' : 'neutral';
       const time = item.verifiedAt ? ' · 验证 ' + esc(date(item.verifiedAt)) : '';
       const dial = item.dialAddress && item.dialAddress !== item.address ? '<small>实际拨号：<span class="mono">' + esc(item.dialAddress) + '</span></small>' : '';
       const reason = item.lastError ? '<small>' + esc(item.lastError) + '</small>' : '';

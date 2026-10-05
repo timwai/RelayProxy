@@ -392,3 +392,59 @@ func TestBestPunchObservationDoesNotMixHandshakeAcrossCandidates(t *testing.T) {
 		t.Fatalf("selected candidate=%v ok=%v, want preferred LAN %v", selected, ok, left)
 	}
 }
+
+
+func TestPunchResponderRTTTracksAcknowledgedProbeRound(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+
+	done := make(chan struct{})
+	defer func() {
+		_ = server.Close()
+		<-done
+	}()
+	go func() {
+		defer close(done)
+		buffer := make([]byte, 1500)
+		requests := 0
+		for {
+			n, source, err := server.ReadFromUDP(buffer)
+			if err != nil {
+				return
+			}
+			packet, err := secure.DecodePunchPacket(buffer[:n], key)
+			if err != nil || packet.SessionID != 42 || packet.Type != secure.PunchRequest {
+				continue
+			}
+			requests++
+			if requests == 1 {
+				continue
+			}
+			packet.Type = secure.PunchAck
+			_, _ = server.WriteToUDP(packet.Encode(key), source)
+		}
+	}()
+
+	client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	result, err := PunchResponder(context.Background(), client, []protocol.P2PCandidate{{
+		Protocol: "udp", Address: server.LocalAddr().String(),
+	}}, 42, key, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PunchRTT <= 0 {
+		t.Fatalf("invalid punch RTT: %s", result.PunchRTT)
+	}
+	if result.PunchRTT >= 80*time.Millisecond {
+		t.Fatalf("punch RTT includes previous retry interval: %s", result.PunchRTT)
+	}
+}

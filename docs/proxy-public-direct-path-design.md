@@ -1,6 +1,6 @@
 # RelayProxy Public Direct Path Design
 
-> Status: Planning
+> Status: Implemented / hardening
 >
 > Target branch: `main`
 >
@@ -9,6 +9,30 @@
 > Related design: `docs/proxy-p2p-direct-path-design.md`
 >
 > Goal: When an Exit Agent has a verified publicly reachable endpoint, allow Client Agents to connect to it directly without P2P hole punching, while preserving P2P and Relay as fallback paths.
+
+## Implementation status
+
+The V1 architecture in this document is implemented on the integration branch.
+
+Automated coverage now includes:
+
+- explicit `public_direct_quic / p2p_quic / relay_quic / relay_tls` path selection;
+- Public Direct TCP and UDP through the shared Exit handler;
+- Server-verified observed IPv4, global IPv6, and manual/DNS endpoints;
+- short-lived Server-signed tickets with scope, expiry, replay protection, authorization/policy revision checks, and current Server Relay ACL binding;
+- fail-closed Public Direct listener authentication and handshake admission/rate limits;
+- `auto / direct_only / p2p_only / relay_only` behavior on desktop and Android;
+- independent Public Direct/P2P cooldown and fallback behavior;
+- endpoint re-verification, network-change invalidation, stale-session protection, and Server reconnect re-verification;
+- Server Web Public Direct configuration/status and Android direct-path status;
+- lifecycle/race tests and benchmark smoke coverage for direct endpoint selection and ticket/ACL validation.
+
+Remaining release validation is environment-dependent rather than protocol work:
+
+- long-running soak testing on real public IPv4 and IPv6 hosts;
+- WAN throughput/latency comparison against Relay and P2P under representative loss;
+- firewall/NAT/router matrix validation for manual advertise and DNS endpoints;
+- operational tuning of direct attempt/cooldown and listener limits from production measurements.
 
 ---
 

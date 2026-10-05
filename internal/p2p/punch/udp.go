@@ -88,12 +88,11 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 	if len(addresses) == 0 {
 		return nil, errors.New("no usable P2P UDP candidates")
 	}
-	var nonce uint64
-	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
+	var nextNonce uint64
+	if err := binary.Read(rand.Reader, binary.BigEndian, &nextNonce); err != nil {
 		return nil, err
 	}
-	request := secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}.Encode(key)
-	started := time.Now()
+	pending := make(map[uint64]time.Time, len(addresses)*2)
 	nextSend := time.Time{}
 	buffer := make([]byte, 1500)
 	var settleUntil time.Time
@@ -114,10 +113,10 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			return nil, fmt.Errorf("P2P UDP punch timeout after %s", timeout)
 		}
 		if nextSend.IsZero() || !now.Before(nextSend) {
-			if err := sendAll(conn, request, addresses); err != nil {
+			if err := sendPunchRound(conn, sessionID, key, addresses, &nextNonce, pending); err != nil {
 				return nil, err
 			}
-			nextSend = now.Add(80 * time.Millisecond)
+			nextSend = time.Now().Add(80 * time.Millisecond)
 		}
 		readDeadline := nextSend
 		if !settleUntil.IsZero() && settleUntil.Before(readDeadline) {
@@ -152,13 +151,17 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			ack := secure.PunchPacket{Type: secure.PunchAck, SessionID: sessionID, Nonce: packet.Nonce}.Encode(key)
 			_, _ = conn.WriteToUDPAddrPort(ack, remote)
 		case secure.PunchAck:
-			if packet.Nonce == nonce {
+			if sentAt, ok := pending[packet.Nonce]; ok {
+				delete(pending, packet.Nonce)
 				observation.gotAck = true
+				rtt := time.Since(sentAt)
+				if observation.rtt <= 0 || rtt < observation.rtt {
+					observation.rtt = rtt
+				}
 			}
 		}
 		if observation.gotAck && (!symmetric || observation.sawPeerRequest) && !observation.ready {
 			observation.ready = true
-			observation.rtt = time.Since(started)
 			if settleUntil.IsZero() {
 				settleUntil = time.Now().Add(punchSelectionWindow)
 				if deadline.Before(settleUntil) {
@@ -202,6 +205,29 @@ func bestPunchObservation(observations map[netip.AddrPort]*punchObservation) (ne
 		}
 	}
 	return bestAddr, best, best != nil
+}
+
+func sendPunchRound(conn *net.UDPConn, sessionID uint64, key []byte, addresses []netip.AddrPort, nextNonce *uint64, pending map[uint64]time.Time) error {
+	var lastErr error
+	sent := 0
+	for _, address := range addresses {
+		*nextNonce = *nextNonce + 1
+		nonce := *nextNonce
+		packet := secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}.Encode(key)
+		if _, err := conn.WriteToUDPAddrPort(packet, address); err != nil {
+			lastErr = err
+			continue
+		}
+		pending[nonce] = time.Now()
+		sent++
+	}
+	if sent > 0 {
+		return nil
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return errors.New("no usable P2P UDP candidates")
 }
 
 func sendAll(conn *net.UDPConn, packet []byte, addresses []netip.AddrPort) error {

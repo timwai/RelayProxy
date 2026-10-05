@@ -224,6 +224,48 @@ func TestRegistryRejectsStaleVerificationAfterNetworkChange(t *testing.T) {
 	}
 }
 
+func TestRegistryEnforcesServerListenerPortRange(t *testing.T) {
+	registry := NewRegistry()
+	if err := registry.SetListenerPortRange(35000, 35999); err != nil {
+		t.Fatal(err)
+	}
+
+	request := protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    34999,
+		CertFingerprint: testFingerprint(),
+		NetworkEpoch:    1,
+		Candidates: []protocol.PublicDirectEndpointCandidate{{
+			Protocol: protocol.PublicDirectEndpointProtocolUDP,
+			Address:  "exit.example.com:443",
+			Source:   protocol.PublicDirectEndpointManual,
+		}},
+	}
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.8.8"), request); err == nil {
+		t.Fatal("listener port below server policy was accepted")
+	}
+
+	request.ListenerPort = 35000
+	records, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.8.8"), request)
+	if err != nil {
+		t.Fatalf("listener port inside server policy rejected: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records=%d, want observed + manual endpoints", len(records))
+	}
+
+	request.ListenerPort = 0
+	if _, err := registry.Register("exit", "session-2", netip.Addr{}, request); err == nil {
+		t.Fatal("missing listener port bypassed configured server policy")
+	}
+
+	if err := registry.SetListenerPortRange(0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Register("exit", "session-2", netip.Addr{}, request); err != nil {
+		t.Fatalf("0/0 listener policy did not preserve manual endpoint compatibility: %v", err)
+	}
+}
+
 func TestRegistryRejectsNonPublicAgentCandidates(t *testing.T) {
 	registry := NewRegistry()
 	for _, candidate := range []protocol.PublicDirectEndpointCandidate{

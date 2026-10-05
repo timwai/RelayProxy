@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>RelayProxy 验证码</title>
+<title>RelayProxy 消息</title>
 <script src="/wails/runtime.js" type="module"></script>
 <script src="/wails-bridge.js" defer></script>
 <style>
@@ -14,50 +14,55 @@ html{background-color:transparent!important}
 body{display:grid;place-items:center;padding:22px;-webkit-font-smoothing:antialiased;isolation:isolate}
 .card{
   position:relative;width:100%;height:100%;overflow:hidden;border-radius:28px;
-  display:flex;flex-direction:column;
-  border:1px solid rgba(255,255,255,.62);
-  background:
-    radial-gradient(circle at 14% 5%,rgba(45,212,191,.16),transparent 34%),
-    radial-gradient(circle at 94% 88%,rgba(59,130,246,.11),transparent 38%),
-    rgba(247,250,252,.985);
-  color:#13202d;
-  box-shadow:0 8px 18px rgba(15,23,42,.16),0 1px 3px rgba(15,23,42,.10);
-  animation:enter .30s cubic-bezier(.2,.9,.25,1);
+  display:flex;flex-direction:column;border:1px solid rgba(255,255,255,.62);
+  background:radial-gradient(circle at 14% 5%,rgba(45,212,191,.16),transparent 34%),
+    radial-gradient(circle at 94% 88%,rgba(59,130,246,.11),transparent 38%),rgba(247,250,252,.985);
+  color:#13202d;box-shadow:0 8px 18px rgba(15,23,42,.16),0 1px 3px rgba(15,23,42,.10);
+  animation:enter .30s cubic-bezier(.2,.9,.25,1)
 }
+.card.important{background:radial-gradient(circle at 14% 5%,rgba(245,158,11,.18),transparent 34%),
+  radial-gradient(circle at 94% 88%,rgba(239,68,68,.10),transparent 38%),rgba(255,250,244,.99)}
 @media(prefers-color-scheme:dark){
- .card{border-color:rgba(255,255,255,.13);background:
-   radial-gradient(circle at 14% 5%,rgba(45,212,191,.16),transparent 34%),
-   radial-gradient(circle at 94% 88%,rgba(59,130,246,.12),transparent 38%),
-   rgba(15,23,34,.985);color:#f5f9fc;box-shadow:0 8px 18px rgba(0,0,0,.32),0 1px 3px rgba(0,0,0,.24)}
+ .card{border-color:rgba(255,255,255,.13);background:radial-gradient(circle at 14% 5%,rgba(45,212,191,.16),transparent 34%),radial-gradient(circle at 94% 88%,rgba(59,130,246,.12),transparent 38%),rgba(15,23,34,.985);color:#f5f9fc;box-shadow:0 8px 18px rgba(0,0,0,.32),0 1px 3px rgba(0,0,0,.24)}
+ .card.important{background:radial-gradient(circle at 14% 5%,rgba(245,158,11,.15),transparent 34%),radial-gradient(circle at 94% 88%,rgba(239,68,68,.12),transparent 38%),rgba(25,20,18,.985)}
  .sub,.meta,.content{color:#9aabbc}.code-shell{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.10)}
  .ghost{background:rgba(255,255,255,.06);color:#d5e1ea;border-color:rgba(255,255,255,.09)}
 }
 .glow{position:absolute;width:150px;height:150px;border-radius:50%;filter:blur(34px);opacity:.18;pointer-events:none}
 .glow.one{left:-58px;top:-64px;background:#2dd4bf}.glow.two{right:-70px;bottom:-85px;background:#60a5fa}
+.important .glow.one{background:#f59e0b}.important .glow.two{background:#ef4444}
 .top{display:flex;align-items:flex-start;justify-content:space-between;padding:24px 25px 0;flex:0 0 auto}
 .identity{display:flex;align-items:center;gap:11px}
 .icon{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(145deg,#14b8a6,#0f766e);box-shadow:0 9px 24px rgba(20,184,166,.26);color:white}
+.important .icon{background:linear-gradient(145deg,#f59e0b,#c2410c);box-shadow:0 9px 24px rgba(245,158,11,.24)}
 .icon svg{width:22px;height:22px}
 .eyebrow{font-size:10px;letter-spacing:.15em;font-weight:800;color:#0f9f91}
+.important .eyebrow{color:#d97706}
 .title{margin-top:3px;font-size:16px;font-weight:700;letter-spacing:-.02em}
 .close{width:34px;height:34px;border:0;border-radius:11px;background:rgba(100,116,139,.10);color:#64748b;font-size:20px;line-height:1;cursor:pointer;transition:.15s}
 .close:hover{background:rgba(100,116,139,.18);transform:scale(1.04)}
 .body{padding:18px 25px 23px;min-height:0;flex:1;display:flex;flex-direction:column}
 .sub{font-size:11px;color:#6b7c8f;margin-bottom:9px}
 .code-shell{position:relative;border:1px solid rgba(15,118,110,.13);background:rgba(255,255,255,.66);border-radius:18px;padding:16px 18px 14px}
+.code-shell.hidden{display:none}
 .code{font-family:"Cascadia Mono","Consolas",monospace;font-size:39px;line-height:1;font-weight:750;letter-spacing:.18em;color:#0f766e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center;padding-left:.18em;user-select:text}
+.important .code{color:#c2410c}
 .meta{display:flex;justify-content:center;gap:7px;margin-top:10px;color:#8090a0;font-size:10px}
 .dot{opacity:.55}
-.content{margin:14px 2px 0;color:#5f7081;font-size:11px;line-height:1.65;min-height:0;flex:1;overflow:auto;user-select:text;scrollbar-width:thin}
+.content{margin:14px 2px 0;color:#5f7081;font-size:11px;line-height:1.65;min-height:0;flex:1;overflow:auto;user-select:text;scrollbar-width:thin;white-space:pre-wrap}
+.card.message .content{font-size:13px;line-height:1.75;margin-top:8px}
 .actions{display:grid;grid-template-columns:1fr 1.7fr;gap:10px;margin-top:17px;flex:0 0 auto}
+.actions.single{grid-template-columns:1fr}
 button.action{height:42px;border-radius:13px;border:1px solid transparent;font-size:12px;font-weight:700;cursor:pointer;transition:transform .14s ease,box-shadow .14s ease,background .14s ease}
 button.action:active{transform:scale(.98)}
 .ghost{background:rgba(100,116,139,.08);color:#526272;border-color:rgba(100,116,139,.10)}
 .primary{background:linear-gradient(135deg,#14b8a6,#0f8d83);color:white;box-shadow:0 10px 24px rgba(20,184,166,.24)}
+.important .primary{background:linear-gradient(135deg,#f59e0b,#c2410c);box-shadow:0 10px 24px rgba(245,158,11,.22)}
 .primary:hover{box-shadow:0 13px 28px rgba(20,184,166,.31)}
 .copy-state{display:inline-flex;align-items:center;justify-content:center;gap:7px}
 .copy-state svg{width:15px;height:15px}
 .queue{position:absolute;right:24px;top:63px;min-width:22px;height:22px;border-radius:999px;padding:0 7px;display:none;place-items:center;background:#0f766e;color:white;font-size:10px;font-weight:800;box-shadow:0 4px 14px rgba(15,118,110,.25)}
+.important .queue{background:#c2410c}
 .queue.show{display:grid}
 @keyframes enter{from{opacity:0;transform:translateY(10px) scale(.965)}to{opacity:1;transform:none}}
 @keyframes copied{0%{transform:scale(1)}50%{transform:scale(1.035)}100%{transform:scale(1)}}
@@ -66,7 +71,7 @@ button.action:active{transform:scale(.98)}
 </style>
 </head>
 <body>
-<article class="card" role="dialog" aria-labelledby="popup-title">
+<article id="card" class="card" role="dialog" aria-labelledby="popup-title">
   <span class="glow one"></span><span class="glow two"></span>
   <div class="top">
     <div class="identity">
@@ -75,24 +80,24 @@ button.action:active{transform:scale(.98)}
           <rect x="4" y="3" width="16" height="18" rx="4"/><path d="M8 8h8M8 12h5"/><path d="M15.5 16.5l1.4 1.4 2.6-3"/>
         </svg>
       </div>
-      <div><div class="eyebrow">VERIFICATION CODE</div><div class="title" id="popup-title">收到新的验证码</div></div>
+      <div><div class="eyebrow" id="eyebrow">MESSAGE</div><div class="title" id="popup-title">RelayProxy 消息</div></div>
     </div>
     <button class="close" type="button" aria-label="关闭" onclick="dismiss()">×</button>
   </div>
   <span id="queue" class="queue"></span>
   <div class="body">
     <div class="sub" id="source">RelayProxy 消息</div>
-    <div class="code-shell">
-      <div id="code" class="code">••••••</div>
+    <div id="code-shell" class="code-shell hidden">
+      <div id="code" class="code">—</div>
       <div class="meta"><span id="time">刚刚</span><span class="dot">•</span><span id="countdown">15 秒后自动关闭</span></div>
     </div>
     <div id="content" class="content"></div>
-    <div class="actions">
-      <button class="action ghost" type="button" onclick="dismiss()">稍后处理</button>
-      <button id="copy" class="action primary" type="button" onclick="copyCode()">
+    <div id="actions" class="actions">
+      <button id="secondary" class="action ghost" type="button" onclick="dismiss()">稍后处理</button>
+      <button id="primary" class="action primary" type="button" onclick="primaryAction()">
         <span class="copy-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-          <span id="copy-label">复制验证码</span>
+          <svg id="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+          <span id="primary-label">知道了</span>
         </span>
       </button>
     </div>
@@ -106,6 +111,11 @@ button.action:active{transform:scale(.98)}
     if(!Number.isFinite(d.getTime())) return '刚刚';
     return d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
   }
+  function popupType(message){
+    var value=String((message&&message.popupType)||'').trim();
+    if(value) return value;
+    return message&&message.verificationCode ? 'verification_code' : 'message';
+  }
   function stopAutoDismiss(){
     if(dismissTimer){ clearTimeout(dismissTimer); dismissTimer=null; }
     if(countdownTimer){ clearInterval(countdownTimer); countdownTimer=null; }
@@ -114,10 +124,7 @@ button.action:active{transform:scale(.98)}
     stopAutoDismiss();
     var label=document.getElementById('countdown');
     var seconds=Math.max(0,Math.floor(Number(timeoutSeconds)||0));
-    if(seconds===0){
-      label.textContent='自动关闭已关闭';
-      return;
-    }
+    if(seconds===0){label.textContent='自动关闭已关闭';return;}
     var deadline=Date.now()+seconds*1000;
     function update(){
       var left=Math.max(0,Math.ceil((deadline-Date.now())/1000));
@@ -125,10 +132,7 @@ button.action:active{transform:scale(.98)}
     }
     update();
     countdownTimer=setInterval(update,250);
-    dismissTimer=setTimeout(function(){
-      stopAutoDismiss();
-      window.dismiss();
-    },seconds*1000);
+    dismissTimer=setTimeout(function(){stopAutoDismiss();window.dismiss();},seconds*1000);
   }
   function updateQueueBadge(){
     var badge=document.getElementById('queue');
@@ -137,24 +141,37 @@ button.action:active{transform:scale(.98)}
   }
   function render(message){
     current=message;
-    document.getElementById('popup-title').textContent=message.title||'收到新的验证码';
+    var type=popupType(message);
+    var code=String(message.verificationCode||'').trim();
+    var isCode=type==='verification_code';
+    var isImportant=type==='important';
+    var card=document.getElementById('card');
+    card.className='card '+(isImportant?'important':(type==='message'?'message':'verification'));
+    document.getElementById('eyebrow').textContent=isImportant?'IMPORTANT':(isCode?'VERIFICATION CODE':'MESSAGE');
+    document.getElementById('popup-title').textContent=message.title||(isImportant?'重要提醒':(isCode?'收到新的验证码':'收到新消息'));
     document.getElementById('source').textContent=message.source ? '来自 '+message.source : 'RelayProxy 消息';
-    document.getElementById('code').textContent=message.verificationCode||'—';
+    document.getElementById('code').textContent=code||'—';
+    document.getElementById('code-shell').classList.toggle('hidden',!code);
     document.getElementById('content').textContent=message.content||'';
     document.getElementById('time').textContent=fmtTime(message.createdAt);
-    document.getElementById('copy-label').textContent='复制验证码';
-    document.getElementById('copy').classList.remove('copied');
+    var canCopy=!!code&&(isCode||isImportant);
+    document.getElementById('primary-label').textContent=canCopy?'复制验证码':'知道了';
+    document.getElementById('copy-icon').style.display=canCopy?'block':'none';
+    document.getElementById('secondary').style.display=type==='message'&&!code?'none':'block';
+    document.getElementById('actions').classList.toggle('single',type==='message'&&!code);
+    document.getElementById('primary').classList.remove('copied');
     updateQueueBadge();
     startAutoDismiss();
   }
-  window.enqueueVerification=function(message){
-    if(!message||!message.verificationCode) return;
-    if(current && current.id===message.id) { render(message); return; }
+  window.enqueueMessage=function(message){
+    if(!message||!message.id) return;
+    if(current&&current.id===message.id){render(message);return;}
     if(queue.some(function(item){return item.id===message.id})) return;
-    if(current){ queue.push(message); updateQueueBadge(); return; }
+    if(current){queue.push(message);updateQueueBadge();return;}
     render(message);
   };
-  window.seedVerification=function(message){ if(message&&message.verificationCode&&!current) render(message); };
+  window.enqueueVerification=window.enqueueMessage;
+  window.seedVerification=function(message){if(message&&!current)render(message);};
   window.setVerificationTimeout=function(seconds){
     seconds=Number(seconds);
     if(!Number.isFinite(seconds)) return;
@@ -163,24 +180,28 @@ button.action:active{transform:scale(.98)}
   };
   window.dismiss=function(){
     stopAutoDismiss();
-    if(queue.length){ render(queue.shift()); return; }
+    if(queue.length){render(queue.shift());return;}
     current=null;
     if(window.goHideVerificationPopup) window.goHideVerificationPopup();
   };
-  window.copyCode=async function(){
-    if(!current||!current.verificationCode) return;
+  window.primaryAction=async function(){
+    if(!current) return;
+    var code=String(current.verificationCode||'').trim();
+    var type=popupType(current);
+    if(!code||(type!=='verification_code'&&type!=='important')){window.dismiss();return;}
     stopAutoDismiss();
     try{
-      if(window.goCopyClipboard) await window.goCopyClipboard(current.verificationCode);
-      else if(navigator.clipboard) await navigator.clipboard.writeText(current.verificationCode);
-      document.getElementById('copy-label').textContent='已复制';
-      document.getElementById('copy').classList.add('copied');
+      if(window.goCopyClipboard) await window.goCopyClipboard(code);
+      else if(navigator.clipboard) await navigator.clipboard.writeText(code);
+      document.getElementById('primary-label').textContent='已复制';
+      document.getElementById('primary').classList.add('copied');
       setTimeout(window.dismiss,650);
     }catch(_){
-      document.getElementById('copy-label').textContent='复制失败';
+      document.getElementById('primary-label').textContent='复制失败';
     }
   };
-  document.addEventListener('keydown',function(event){if(event.key==='Escape') window.dismiss();});
+  window.copyCode=window.primaryAction;
+  document.addEventListener('keydown',function(event){if(event.key==='Escape')window.dismiss();});
 })();
 </script>
 </body>

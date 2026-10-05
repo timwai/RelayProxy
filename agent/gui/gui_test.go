@@ -136,7 +136,6 @@ func TestSettingsDoNotHideManualLaunch(t *testing.T) {
 	}
 }
 
-
 func TestDesktopPopupCompatibility(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -144,29 +143,29 @@ func TestDesktopPopupCompatibility(t *testing.T) {
 		want    bool
 	}{
 		{
-			name: "legacy verification",
+			name:    "legacy verification",
 			message: app.Message{VerificationCode: "482931"},
-			want: true,
+			want:    true,
 		},
 		{
-			name: "legacy normal message",
+			name:    "legacy normal message",
 			message: app.Message{Content: "hello"},
-			want: false,
+			want:    false,
 		},
 		{
-			name: "explicit disabled verification",
+			name:    "explicit disabled verification",
 			message: app.Message{VerificationCode: "482931", PopupType: "verification_code", Popup: false},
-			want: false,
+			want:    false,
 		},
 		{
-			name: "normal message popup",
+			name:    "normal message popup",
 			message: app.Message{Content: "hello", PopupType: "message", Popup: true},
-			want: true,
+			want:    true,
 		},
 		{
-			name: "important popup",
+			name:    "important popup",
 			message: app.Message{Content: "urgent", PopupType: "important", Popup: true},
-			want: true,
+			want:    true,
 		},
 	}
 	for _, tc := range tests {

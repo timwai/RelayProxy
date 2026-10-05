@@ -45,18 +45,21 @@ func Dial(ctx context.Context, config DialConfig) (tunnel.TunnelSession, error) 
 		return nil, err
 	}
 	_ = stream.SetDeadline(time.Now().Add(timeout))
-	request := protocol.PublicDirectAuthRequest{
-		Version:        protocol.PublicDirectAuthVersion,
-		ClientDeviceID: config.ClientDeviceID,
-		ExitDeviceID:   config.ExitDeviceID,
-		Ticket:         append([]byte(nil), config.Ticket...),
+	request := protocol.PublicDirectHandshakeRequest{
+		Type: protocol.PublicDirectHandshakeAuth,
+		Auth: &protocol.PublicDirectAuthRequest{
+			Version:        protocol.PublicDirectAuthVersion,
+			ClientDeviceID: config.ClientDeviceID,
+			ExitDeviceID:   config.ExitDeviceID,
+			Ticket:         append([]byte(nil), config.Ticket...),
+		},
 	}
 	if err := protocol.WriteJSON(stream, request); err != nil {
 		_ = stream.Close()
 		_ = session.Close()
 		return nil, err
 	}
-	var response protocol.PublicDirectAuthResponse
+	var response protocol.PublicDirectHandshakeResponse
 	if err := protocol.ReadJSON(stream, &response); err != nil {
 		_ = stream.Close()
 		_ = session.Close()

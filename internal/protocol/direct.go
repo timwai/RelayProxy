@@ -26,7 +26,6 @@ func (p ProxyPath) IsRelay() bool {
 	return p == ProxyPathRelayQUIC || p == ProxyPathRelayTLS
 }
 
-
 const PublicDirectAuthVersion = 1
 
 // PublicDirectAuthRequest authenticates a newly established Public Direct

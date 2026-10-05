@@ -87,6 +87,15 @@ func (r *Registry) Register(deviceID, sessionID string, observedIP netip.Addr, r
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	previous := r.records[deviceID]
+	var currentEpoch uint64
+	for _, old := range previous {
+		if old.SessionID == sessionID && old.NetworkEpoch > currentEpoch {
+			currentEpoch = old.NetworkEpoch
+		}
+	}
+	if request.NetworkEpoch < currentEpoch {
+		return nil, fmt.Errorf("stale public direct network epoch %d; current epoch is %d", request.NetworkEpoch, currentEpoch)
+	}
 	for _, candidate := range candidates {
 		if _, exists := next[candidate.Address]; exists {
 			continue
@@ -133,6 +142,66 @@ func (r *Registry) Lookup(deviceID, sessionID, address string) (EndpointRecord, 
 		bucket[record.Endpoint.Address] = record
 	}
 	return record, true
+}
+
+func sameRegistration(current, expected EndpointRecord) bool {
+	return current.DeviceID == expected.DeviceID &&
+		current.SessionID == expected.SessionID &&
+		current.NetworkEpoch == expected.NetworkEpoch &&
+		current.CertFingerprint == expected.CertFingerprint &&
+		current.Endpoint.Protocol == expected.Endpoint.Protocol &&
+		current.Endpoint.Address == expected.Endpoint.Address &&
+		current.Endpoint.Source == expected.Endpoint.Source
+}
+
+func (r *Registry) updateRegistration(expected EndpointRecord, fn func(*EndpointRecord, time.Time)) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	bucket := r.records[expected.DeviceID]
+	current, ok := bucket[expected.Endpoint.Address]
+	if !ok || !sameRegistration(current, expected) {
+		return false
+	}
+	fn(&current, r.now())
+	bucket[expected.Endpoint.Address] = current
+	return true
+}
+
+func (r *Registry) markVerifyingRegistration(expected EndpointRecord) bool {
+	return r.updateRegistration(expected, func(record *EndpointRecord, now time.Time) {
+		record.State = StateVerifying
+		record.Endpoint.Verified = false
+		record.LastError = ""
+		record.VerifiedAt = time.Time{}
+		record.ExpiresAt = time.Time{}
+	})
+}
+
+func (r *Registry) markVerifiedRegistration(expected EndpointRecord, ttl time.Duration) bool {
+	if ttl <= 0 {
+		return false
+	}
+	return r.updateRegistration(expected, func(record *EndpointRecord, now time.Time) {
+		record.State = StateVerified
+		record.Endpoint.Verified = true
+		record.VerifiedAt = now
+		record.ExpiresAt = now.Add(ttl)
+		record.LastError = ""
+	})
+}
+
+func (r *Registry) markFailedRegistration(expected EndpointRecord, err error) bool {
+	return r.updateRegistration(expected, func(record *EndpointRecord, now time.Time) {
+		record.State = StateFailed
+		record.Endpoint.Verified = false
+		record.VerifiedAt = time.Time{}
+		record.ExpiresAt = time.Time{}
+		if err != nil {
+			record.LastError = err.Error()
+		} else {
+			record.LastError = "verification failed"
+		}
+	})
 }
 
 func (r *Registry) MarkVerifying(deviceID, sessionID, address string) bool {

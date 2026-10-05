@@ -3,8 +3,8 @@ package p2p
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"encoding/hex"
+	"errors"
 	"net"
 	"net/netip"
 	"testing"
@@ -133,7 +133,6 @@ func TestEndpointRejectsInvalidUDPPortRange(t *testing.T) {
 		t.Fatal("invalid P2P UDP port range was accepted")
 	}
 }
-
 
 func TestEndpointPublishesUPnPCandidate(t *testing.T) {
 	previous := mapUPnPUDP

@@ -248,13 +248,20 @@ func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string)
 	if err == nil {
 		return selected, stream, nil
 	}
-	if !selected.IsDirect() || d.getTunnel == nil {
+	if !selected.IsDirect() {
+		return SelectedSession{}, nil, err
+	}
+	if d.getTunnel == nil || !d.directFallbackEnabled() {
+		d.recordPathFailure(exitDeviceID, selected.Path, err)
 		return SelectedSession{}, nil, err
 	}
 	relay := d.getTunnel()
 	if relay == nil || relay == selected.Session {
+		d.recordPathFailure(exitDeviceID, selected.Path, err)
 		return SelectedSession{}, nil, err
 	}
+	d.recordFallback(exitDeviceID, selected.Path)
+	d.recordPathFailure(exitDeviceID, selected.Path, err)
 	stream, relayErr := relay.OpenStream(ctx)
 	if relayErr != nil {
 		return SelectedSession{}, nil, fmt.Errorf("direct stream failed: %v; relay fallback failed: %w", err, relayErr)

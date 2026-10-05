@@ -64,7 +64,7 @@ type appWindow struct {
 
 func disableVerificationNativeFrame() {
 	class, classErr := windows.UTF16PtrFromString(windowClass)
-	title, titleErr := windows.UTF16PtrFromString("RelayProxy 验证码")
+	title, titleErr := windows.UTF16PtrFromString("RelayProxy 消息")
 	if classErr != nil || titleErr != nil {
 		return
 	}

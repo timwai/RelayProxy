@@ -22,10 +22,10 @@ func (s *pathSelectionTestSession) AcceptStream(context.Context) (tunnel.TunnelS
 }
 
 func (s *pathSelectionTestSession) Transport() tunnel.TransportType { return s.transport }
-func (s *pathSelectionTestSession) RemoteAddr() net.Addr             { return nil }
-func (s *pathSelectionTestSession) LocalAddr() net.Addr              { return nil }
-func (s *pathSelectionTestSession) Close() error                     { return nil }
-func (s *pathSelectionTestSession) Done() <-chan struct{}            { return nil }
+func (s *pathSelectionTestSession) RemoteAddr() net.Addr            { return nil }
+func (s *pathSelectionTestSession) LocalAddr() net.Addr             { return nil }
+func (s *pathSelectionTestSession) Close() error                    { return nil }
+func (s *pathSelectionTestSession) Done() <-chan struct{}           { return nil }
 
 func TestConfigureDirectPathTagsLegacyP2P(t *testing.T) {
 	relay := &pathSelectionTestSession{transport: tunnel.TransportQUIC}

@@ -949,6 +949,8 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		}()
 	}
 
+	stopPublicDirect := c.startPublicDirectExit(ctx, sess, accepted, exitRuntimeApproved, accepted.MaxConnections)
+
 	var workers sync.WaitGroup
 	workers.Add(1)
 	go func() {
@@ -975,6 +977,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	case <-sess.Done():
 	}
 	cancel()
+	stopPublicDirect()
 	_ = sess.Close()
 	workers.Wait()
 	return nil

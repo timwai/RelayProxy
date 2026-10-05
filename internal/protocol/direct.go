@@ -48,6 +48,9 @@ type PublicDirectAuthResponse struct {
 const (
 	CapabilityProxyPublicDirect = "proxy_public_direct_v1"
 
+	PublicDirectControlRegister       = "register"
+	PublicDirectControlValidateTicket = "validate_ticket"
+
 	PublicDirectEndpointProtocolUDP = "udp"
 	PublicDirectEndpointObserved    = "observed"
 	PublicDirectEndpointIPv6        = "ipv6"
@@ -71,11 +74,20 @@ type PublicDirectEndpoint struct {
 	CertFingerprint string `json:"certFingerprint,omitempty"`
 }
 
+type PublicDirectTicketValidationRequest struct {
+	ClientDeviceID        string `json:"clientDeviceId"`
+	ExitDeviceID          string `json:"exitDeviceId"`
+	PolicyRevision        int64  `json:"policyRevision"`
+	AuthorizationRevision int64  `json:"authorizationRevision"`
+}
+
 type PublicDirectRegistrationRequest struct {
-	ListenerPort    uint16                          `json:"listenerPort"`
-	CertFingerprint string                          `json:"certFingerprint"`
-	NetworkEpoch    uint64                          `json:"networkEpoch,omitempty"`
-	Candidates      []PublicDirectEndpointCandidate `json:"candidates,omitempty"`
+	Operation       string                               `json:"operation,omitempty"`
+	ListenerPort    uint16                               `json:"listenerPort,omitempty"`
+	CertFingerprint string                               `json:"certFingerprint,omitempty"`
+	NetworkEpoch    uint64                               `json:"networkEpoch,omitempty"`
+	Candidates      []PublicDirectEndpointCandidate      `json:"candidates,omitempty"`
+	TicketValidation *PublicDirectTicketValidationRequest `json:"ticketValidation,omitempty"`
 }
 
 type PublicDirectRegistrationResponse struct {

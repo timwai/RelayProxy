@@ -30,7 +30,7 @@ type resumableTCPConn struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	closeOnce sync.Once
-	path      atomic.Value // string: most recently bound transport path
+	path      atomic.Value // protocol.ProxyPath: most recently bound transport path
 }
 
 func newResumableTCPConn(
@@ -40,7 +40,7 @@ func newResumableTCPConn(
 	exitID, host string,
 	port uint16,
 	localAddr, remoteAddr net.Addr,
-	path string,
+	path protocol.ProxyPath,
 ) net.Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	conn := &resumableTCPConn{
@@ -54,7 +54,18 @@ func newResumableTCPConn(
 	return conn
 }
 
-func (c *resumableTCPConn) ProxyPath() string { return c.path.Load().(string) }
+func (c *resumableTCPConn) currentPath() protocol.ProxyPath {
+	if c == nil {
+		return ""
+	}
+	value := c.path.Load()
+	if value == nil {
+		return ""
+	}
+	return value.(protocol.ProxyPath)
+}
+
+func (c *resumableTCPConn) ProxyPath() string { return c.currentPath().String() }
 
 func (c *resumableTCPConn) Read(p []byte) (int, error) {
 	if c == nil || c.endpoint == nil {
@@ -116,11 +127,11 @@ func (c *resumableTCPConn) recoveryLoop() {
 			if loss.Generation != c.endpoint.Generation() {
 				continue
 			}
-			// Generation 1 is the original P2P stream. Quarantine that READY
-			// path on an abrupt transport loss so new flows don't keep selecting
-			// a direct session that just failed an established stream.
+			// Generation 1 is the original direct stream. Quarantine only that
+			// concrete path on abrupt transport loss so another direct provider
+			// remains independently usable.
 			if loss.Generation == 1 {
-				c.dialer.recordDirectFailure(c.exitID, fmt.Errorf("established direct stream lost: %w", loss.Err))
+				c.dialer.recordPathFailure(c.exitID, c.currentPath(), fmt.Errorf("established direct stream lost: %w", loss.Err))
 			}
 			if !c.dialer.directFallbackEnabled() {
 				c.endpoint.Abort(fmt.Errorf("resumable TCP transport lost with Relay fallback disabled: %w", loss.Err))
@@ -273,7 +284,7 @@ func (c *resumableTCPConn) tryRelayRebind(
 	if err := c.endpoint.Bind(stream, nextGeneration); err != nil {
 		return err
 	}
-	c.path.Store(tcpSessionPath(relay, false))
+	c.path.Store(relaySessionPath(relay))
 	owned = false
 	return nil
 }

@@ -586,7 +586,6 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		P2PUPnPEnabled:           g.cfg.P2PUPnPEnabled,
 		PublicDirectTicketIssuer: g.cfg.PublicDirectTicketIssuer,
 		PublicDirectTicketKey:    append([]byte(nil), g.cfg.PublicDirectTicketKey...),
-
 	}
 
 	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)

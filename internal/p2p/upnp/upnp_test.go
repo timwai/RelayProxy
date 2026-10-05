@@ -202,7 +202,7 @@ func TestMappingCloseCancelsRefreshBeforeDelete(t *testing.T) {
 	events := make(chan string, 4)
 	addStarted := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		action := strings.Trim(r.Header.Get("SOAPAction"), """)
+		action := strings.Trim(r.Header.Get("SOAPAction"), "\"")
 		switch {
 		case strings.HasSuffix(action, "#AddPortMapping"):
 			events <- "add-start"

@@ -169,6 +169,8 @@ func main() {
 		}
 	}
 
+	var gw *gateway.Gateway
+
 	invalidateIdentitySessions := func(identityID string) []string {
 		deviceIDs := sessionMgr.InvalidateIdentity(identityID)
 		for _, deviceID := range deviceIDs {
@@ -191,6 +193,9 @@ func main() {
 		for _, identityID := range affected {
 			deviceIDs := invalidateIdentitySessions(identityID)
 			log.Printf("[AuthZ] Expired grants invalidated identity=%s devices=%d", identityID, len(deviceIDs))
+		}
+		if len(affected) > 0 && gw != nil {
+			gw.RefreshProxyExitInventories()
 		}
 	}
 	expireAuthorizationGrants()
@@ -290,7 +295,7 @@ func main() {
 		p2pLeaseSec = proxyP2PCoordinator.LeaseSeconds()
 	}
 
-	gw := gateway.NewGateway(gateway.GatewayConfig{
+	gw = gateway.NewGateway(gateway.GatewayConfig{
 		TCPAddr:           cfg.Server.TLS.Listen,
 		QUICAddr:          quicAddr,
 		TLSConfig:         tunnelTLSConfig(cfg, tlsConfig),
@@ -452,19 +457,21 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			gw.RefreshProxyExitInventories()
 			ingress.Reload()
 		}),
 		api.WithIdentityAuthorizationChanged(func(identityID string) {
 			invalidateIdentitySessions(identityID)
+			gw.RefreshProxyExitInventories()
 			ingress.Reload()
 		}),
 		api.WithDeviceIdentityGrantChanged(func(targetDeviceID, granteeIdentityID string) {
 			// Invalidate the grantee identity's authenticated tunnels after any
-			// grant mutation. This is broader than
-			// feature-specific stream teardown, but guarantees that resource
-			// inventories and existing Relay/P2P/RDP paths cannot retain stale
-			// authority.
+			// grant mutation. This is broader than feature-specific stream teardown,
+			// but guarantees that existing Relay/P2P/RDP paths cannot retain stale
+			// authority. Remaining clients receive a fresh exit inventory immediately.
 			invalidateIdentitySessions(granteeIdentityID)
+			gw.RefreshProxyExitInventories()
 			// A target can itself be an active controller/client. Do not close
 			// its main tunnel; its peer-side direct paths are revalidated on
 			// candidate updates/renewal and the grantee side has been revoked.
@@ -476,6 +483,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			gw.RefreshProxyExitInventories()
 			ingress.CloseDevice(deviceID)
 		}),
 		api.WithP2PSessions(func() []api.P2PSessionRuntimeStatus {

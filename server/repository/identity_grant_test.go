@@ -250,7 +250,6 @@ func TestDeviceIdentityMoveRevokesTargetShares(t *testing.T) {
 	}
 }
 
-
 func TestPublicDirectAuthorizationSnapshotBindsPolicyAndGrantRevision(t *testing.T) {
 	db := openIdentityTestDB(t)
 	exitIdentity, err := db.CreateIdentity("Direct Exit Identity", "admin")

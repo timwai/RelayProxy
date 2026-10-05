@@ -910,7 +910,7 @@
       '<label class="wide">匹配内容<input data-route-pattern class="mono" maxlength="500" value="' + esc(rule.pattern || '') + '" placeholder="例如：4A系统 或 四川移动.*EIP"></label>' +
       '<label class="wide">目标设备<select data-route-devices class="channel-route-devices" multiple>' + routeDeviceOptions(rule.deviceIds || []) + '</select></label>' +
       '</div><label class="channel-rule-check"><input data-route-case type="checkbox"' + (rule.caseSensitive ? ' checked' : '') + '>区分大小写</label>' +
-      '<label class="channel-rule-check"><input data-route-all type="checkbox"' + (rule.allDevices ? ' checked' : '') + '>命中后推送到全部已批准设备</label></article>';
+      '<label class="channel-rule-check"><input data-route-all type="checkbox"' + (rule.allDevices ? ' checked' : '') + '>命中后推送到本身份全部已批准设备</label></article>';
   }
   function renderChannelRules(channel) {
     const verificationRules = channel && Array.isArray(channel.verificationRules) ? channel.verificationRules : [];

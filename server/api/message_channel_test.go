@@ -526,6 +526,20 @@ func TestMessageChannelsAreIsolatedByIdentity(t *testing.T) {
 		t.Fatalf("identity A accepted identity B target: %d %s", crossRec.Code, crossRec.Body.String())
 	}
 
+	crossRouteRules := []repository.MessageRouteRule{{
+		Name: "Cross B", MatchType: "contains", Pattern: "route-b", DeviceIDs: []string{deviceB.ID},
+	}}
+	crossRouteBody, _ := json.Marshal(messageChannelRequest{
+		ID: "cross-route", Name: "Cross Route", DeviceIDs: []string{deviceA.ID}, RouteRules: &crossRouteRules,
+	})
+	crossRouteReq := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels", bytes.NewReader(crossRouteBody))
+	crossRouteReq.AddCookie(cookieA)
+	crossRouteRec := httptest.NewRecorder()
+	router.ServeHTTP(crossRouteRec, crossRouteReq)
+	if crossRouteRec.Code != http.StatusBadRequest {
+		t.Fatalf("identity A accepted identity B route target: %d %s", crossRouteRec.Code, crossRouteRec.Body.String())
+	}
+
 	public := NewPublicPushHandler(router.sessions, router.db)
 	pushReq := httptest.NewRequest(http.MethodGet, "/api/v1/push/identity-a?message=hello", nil)
 	pushRec := httptest.NewRecorder()

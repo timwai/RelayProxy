@@ -85,3 +85,40 @@ func TestPongRDPTargetsDistinguishesRefreshFromNoUpdate(t *testing.T) {
 		t.Fatalf("no-update pong unexpectedly included RDP targets: %s", encoded)
 	}
 }
+
+
+func TestPongProxyExitsDistinguishesRefreshFromNoUpdate(t *testing.T) {
+	empty := []ProxyExit{}
+	encoded, err := json.Marshal(PongMessage{Timestamp: 1, ProxyExits: &empty, ProxyExitRevision: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"proxyExits":[]`) || !strings.Contains(string(encoded), `"proxyExitRevision":7`) {
+		t.Fatalf("empty proxy exit refresh was omitted: %s", encoded)
+	}
+	var decoded PongMessage
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ProxyExits == nil || len(*decoded.ProxyExits) != 0 || decoded.ProxyExitRevision != 7 {
+		t.Fatalf("proxy exit refresh did not round-trip: %+v", decoded)
+	}
+}
+
+func TestResourceInventoryEmptyProxyExitsRoundTrip(t *testing.T) {
+	empty := []ProxyExit{}
+	encoded, err := json.Marshal(ResourceInventory{ProxyExits: &empty, ProxyExitRevision: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"proxyExits":[]`) {
+		t.Fatalf("explicit empty inventory was omitted: %s", encoded)
+	}
+	var decoded ResourceInventory
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ProxyExits == nil || len(*decoded.ProxyExits) != 0 || decoded.ProxyExitRevision != 12 {
+		t.Fatalf("resource inventory did not round-trip: %+v", decoded)
+	}
+}

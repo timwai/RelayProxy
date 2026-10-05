@@ -7,6 +7,7 @@ import (
 
 	agentclient "relayproxy/agent/client"
 	proxydirect "relayproxy/agent/direct"
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -176,7 +177,7 @@ func (c *Client) startPublicDirectExit(
 		MaxStreams: maxStreams,
 		PortStart:  accepted.PublicDirectPortStart,
 		PortEnd:    accepted.PublicDirectPortEnd,
-		ValidateTicket: func(validateCtx context.Context, claims protocol.PublicDirectTicketClaims) error {
+		ValidateTicket: func(validateCtx context.Context, claims protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
 			return proxydirect.ValidateTicketCurrent(validateCtx, relay, claims)
 		},
 	})

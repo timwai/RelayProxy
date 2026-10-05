@@ -159,7 +159,6 @@ type AgentConfig struct {
 	InsecureTLS           bool // Allow self-signed TLS certificates for development/testing
 	PlainTCP              bool // Disable TLS entirely; connect via plaintext TCP + yamux
 	ConnectTimeout        time.Duration
-
 }
 
 func (c AgentConfig) IsSOCKS5Enabled() bool {

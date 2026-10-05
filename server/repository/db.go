@@ -650,7 +650,45 @@ func (db *DB) UpdateMessageChannel(channel *MessageChannel) error {
 	return db.saveMessageChannel(channel, false)
 }
 
+func (db *DB) validateMessageChannelIdentityTargets(channel *MessageChannel) error {
+	if channel == nil || strings.TrimSpace(channel.IdentityID) == "" {
+		return errors.New("channel identity is required")
+	}
+	deviceIDs, err := db.ListDeviceIDsForIdentity(channel.IdentityID)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]bool, len(deviceIDs))
+	for _, deviceID := range deviceIDs {
+		allowed[deviceID] = true
+	}
+	validate := func(deviceIDs []string) error {
+		for _, deviceID := range deviceIDs {
+			deviceID = strings.TrimSpace(deviceID)
+			if deviceID == "" {
+				continue
+			}
+			if !allowed[deviceID] {
+				return fmt.Errorf("message target device is outside channel identity: %s", deviceID)
+			}
+		}
+		return nil
+	}
+	if err := validate(channel.DeviceIDs); err != nil {
+		return err
+	}
+	for _, rule := range channel.RouteRules {
+		if err := validate(rule.DeviceIDs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
+	if err := db.validateMessageChannelIdentityTargets(channel); err != nil {
+		return err
+	}
 	tx, err := db.Begin()
 	if err != nil {
 		return err
@@ -852,6 +890,13 @@ func (db *DB) ResolveMessageTargetsForIdentity(identityID string, allDevices boo
 	if identityID == "" {
 		return nil, errors.New("message channel identity is required")
 	}
+	var identityStatus string
+	if err := db.QueryRow(`SELECT status FROM identities WHERE id = ?`, identityID).Scan(&identityStatus); err != nil {
+		return nil, err
+	}
+	if identityStatus != "active" {
+		return nil, errors.New("message channel identity is disabled")
+	}
 	allowedIDs, err := db.ListDeviceIDsForIdentity(identityID)
 	if err != nil {
 		return nil, err
@@ -927,6 +972,19 @@ func (db *DB) CreateMessage(message *MessageRecord, targets []*Device) error {
 	}
 	if message.IdentityID == "" {
 		return errors.New("message identity is required")
+	}
+	allowedIDs, err := db.ListDeviceIDsForIdentity(message.IdentityID)
+	if err != nil {
+		return err
+	}
+	allowed := make(map[string]bool, len(allowedIDs))
+	for _, deviceID := range allowedIDs {
+		allowed[deviceID] = true
+	}
+	for _, target := range targets {
+		if target != nil && !allowed[target.ID] {
+			return fmt.Errorf("message target device is outside message identity: %s", target.ID)
+		}
 	}
 	if message.ID == "" {
 		message.ID = "msg_" + strings.ReplaceAll(uuid.NewString(), "-", "")

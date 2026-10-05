@@ -61,7 +61,9 @@ func TestDialAnyAuthenticatesOnlyTransportWinner(t *testing.T) {
 		if address == "winner.example:35820" {
 			return winner, nil
 		}
-		time.Sleep(20 * time.Millisecond)
+		// The preferred endpoint starts first but completes after the fallback
+		// endpoint's head-start delay, so the fallback wins the transport race.
+		time.Sleep(250 * time.Millisecond)
 		close(loserReturned)
 		return loser, nil
 	}
@@ -70,8 +72,8 @@ func TestDialAnyAuthenticatesOnlyTransportWinner(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	session, address, err := DialAny(ctx, []DialConfig{
-		{Address: "winner.example:35820", TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}, ClientDeviceID: "client", ExitDeviceID: "exit", Ticket: ticket},
 		{Address: "[2001:4860:4860::8888]:35820", TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}, ClientDeviceID: "client", ExitDeviceID: "exit", Ticket: ticket},
+		{Address: "winner.example:35820", TLSConfig: &tls.Config{MinVersion: tls.VersionTLS13}, ClientDeviceID: "client", ExitDeviceID: "exit", Ticket: ticket},
 	})
 	if err != nil {
 		t.Fatal(err)

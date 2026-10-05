@@ -118,3 +118,18 @@ type PublicDirectTicketResponse struct {
 	ErrorCode             string `json:"errorCode,omitempty"`
 	ErrorMessage          string `json:"errorMessage,omitempty"`
 }
+
+
+type PublicDirectAuthorizationUpdate struct {
+	ClientDeviceID        string `json:"clientDeviceId"`
+	ExitDeviceID          string `json:"exitDeviceId"`
+	PolicyRevision        int64  `json:"policyRevision"`
+	AuthorizationRevision int64  `json:"authorizationRevision"`
+	Authorized            bool   `json:"authorized"`
+}
+
+type PublicDirectAuthorizationReceipt struct {
+	Success      bool   `json:"success"`
+	ErrorCode    string `json:"errorCode,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}

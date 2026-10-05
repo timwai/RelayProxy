@@ -129,6 +129,7 @@ type Client struct {
 	closed            bool
 	powerConstrained  bool
 	proxyP2P          *proxyp2p.Manager
+	proxyDirect       *publicDirectClientManager
 	proxyExitRevision uint64
 	proxyDialer       *agentclient.TunnelDialer
 	routingDialer     *routing.RoutingDialer
@@ -345,6 +346,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 			RoutingMode:     cfg.Routing.Mode,
 		},
 	}
+	c.initPublicDirectClient()
 
 	var tlsConfig *tls.Config
 	plainTCP := !*cfg.TLSEnabled
@@ -374,49 +376,9 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 		defer c.mu.RUnlock()
 		return c.status.DeviceID
 	})
-	directMode := "relay_only"
-	if *cfg.ProxyP2PEnabled {
-		directMode = "auto"
-	}
-	c.proxyDialer.ConfigureDirectPolicy(directMode, true)
+	c.proxyDialer.ConfigureDirectPolicy("auto", true)
 	c.proxyDialer.ConfigureStreamResume(*cfg.ProxyP2PEnabled, 512<<10)
-	c.proxyDialer.ConfigureDirectPath(
-		func(exitDeviceID string) (tunnel.TunnelSession, bool) {
-			c.mu.RLock()
-			manager := c.proxyP2P
-			closed := c.closed
-			c.mu.RUnlock()
-			if closed || manager == nil || !c.clientApproved.Load() {
-				return nil, false
-			}
-			return manager.ReadyForExit(exitDeviceID)
-		},
-		func(exitDeviceID string) {
-			c.mu.RLock()
-			manager := c.proxyP2P
-			closed := c.closed
-			c.mu.RUnlock()
-			if !closed && manager != nil && c.clientApproved.Load() {
-				manager.EnsureClient(exitDeviceID)
-			}
-		},
-	)
-	c.proxyDialer.ConfigureDirectMetrics(func(exitDeviceID string) {
-		c.mu.RLock()
-		manager := c.proxyP2P
-		c.mu.RUnlock()
-		if manager != nil {
-			manager.NoteFallback(exitDeviceID)
-		}
-	})
-	c.proxyDialer.ConfigureDirectFailure(func(exitDeviceID, reason string) {
-		c.mu.RLock()
-		manager := c.proxyP2P
-		c.mu.RUnlock()
-		if manager != nil {
-			manager.FailReadyForExit(exitDeviceID, reason)
-		}
-	})
+	c.configureProxyPathProvider()
 	c.proxyDialer.SetDefaultExitID(cfg.DefaultExitID)
 	routingEngine, err := routing.NewEngine(cfg.Routing)
 	if err != nil {
@@ -576,10 +538,11 @@ func (c *Client) Stop() error {
 	if httpServer != nil {
 		proxyErr = errors.Join(proxyErr, httpServer.Close())
 	}
+	directErr := c.closePublicDirectClient()
 	managerErr := c.manager.Close()
 	handlerErr := c.handler.Close()
 	c.wg.Wait()
-	return errors.Join(proxyErr, managerErr, handlerErr)
+	return errors.Join(proxyErr, directErr, managerErr, handlerErr)
 }
 
 func (c *Client) authenticateVPNProxy(username, password string) (string, []string, bool) {
@@ -663,15 +626,12 @@ func (c *Client) SetDefaultExit(exitID string) {
 	c.status.ProxyState = state
 	c.status.ProxyError = statusError
 	exitID = selected
-	manager := c.proxyP2P
 	c.mu.Unlock()
 	c.proxyDialer.SetDefaultExitID(exitID)
 	if c.routingDialer != nil {
 		c.routingDialer.SetDefaultExitID(exitID)
 	}
-	if exitID != "" && exitID != protocol.ServerExitDeviceID && manager != nil && c.clientApproved.Load() {
-		manager.EnsureClient(exitID)
-	}
+	c.ensureProxyDirectPath(exitID)
 }
 
 // SetPowerConstrained switches Proxy P2P into its mobile battery-aware profile.
@@ -823,6 +783,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if *c.cfg.ProxyP2PEnabled && (*c.cfg.ExitEnabled || c.cfg.ClientEnabled) {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
+	transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
 	if *c.cfg.TLSEnabled {
 		transportCaps = append(transportCaps, "tls", "quic")
 	}
@@ -936,6 +897,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	c.clientApproved.Store(clientRuntimeApproved)
 	if accepted.ProxyExits != nil {
 		c.proxyDialer.SetDefaultExitID(selectedExit)
+		c.updatePublicDirectInventory(acceptedExits)
 	}
 
 	var proxyP2PManager *proxyp2p.Manager
@@ -975,7 +937,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		c.mu.Unlock()
 		selected := strings.TrimSpace(c.proxyDialer.GetDefaultExitID())
 		if clientRuntimeApproved && selected != "" && selected != protocol.ServerExitDeviceID {
-			proxyP2PManager.EnsureClient(selected)
+			c.ensureProxyDirectPath(selected)
 		}
 		defer func() {
 			c.mu.Lock()
@@ -1087,11 +1049,12 @@ func (c *Client) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSe
 func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.ProxyExit, revision uint64) {
 	refreshed := cloneProxyExits(exits)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closed || c.manager.Session() != sess {
+		c.mu.Unlock()
 		return
 	}
 	if revision != 0 && c.proxyExitRevision != 0 && revision < c.proxyExitRevision {
+		c.mu.Unlock()
 		return
 	}
 	selected := effectiveProxyExit(c.cfg.DefaultExitID, refreshed)
@@ -1104,6 +1067,9 @@ func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.P
 		c.proxyExitRevision = revision
 	}
 	c.proxyDialer.SetDefaultExitID(selected)
+	c.mu.Unlock()
+	c.updatePublicDirectInventory(refreshed)
+	c.ensureProxyDirectPath(selected)
 }
 
 func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, sess tunnel.TunnelSession, heartbeatSec int) {

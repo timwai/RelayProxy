@@ -160,8 +160,9 @@ func main() {
 		)
 		proxyP2PCoordinator.Start(context.Background())
 		defer proxyP2PCoordinator.Close()
-		log.Printf("[P2P] enabled rendezvous_listen=%q rendezvous_advertise=%q agent_udp_ports=%d-%d lease=%ds max_sessions_per_device=%d",
+		log.Printf("[P2P] enabled rendezvous_listen=%q rendezvous_advertise=%q agent_udp_ports=%d-%d upnp=%t lease=%ds max_sessions_per_device=%d",
 			cfg.P2P.RendezvousListen, p2pRendezvousAddress, cfg.P2P.PortStart, cfg.P2P.PortEnd,
+			cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 			proxyP2PCoordinator.LeaseSeconds(), cfg.P2P.MaxSessionsPerDevice)
 		if p2pRendezvousAddress == "" {
 			log.Printf("[P2P] rendezvous advertise address is empty; cross-NAT peers will only advertise local interface candidates")
@@ -440,6 +441,7 @@ func main() {
 		P2PLeaseSec:             p2pLeaseSec,
 		P2PPortStart:            cfg.P2P.PortStart,
 		P2PPortEnd:              cfg.P2P.PortEnd,
+		P2PUPnPEnabled:          cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 	}, sessionMgr, router)
 
 	if err := gw.Start(); err != nil {

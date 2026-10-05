@@ -16,6 +16,7 @@ import (
 
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/secure"
+	p2pupnp "relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -24,24 +25,33 @@ import (
 // hole punching and the future QUIC transport. Replacing this socket changes
 // the NAT mapping and would invalidate the candidates sent through the server.
 type Endpoint struct {
-	mu         sync.RWMutex
-	rendezvous string
-	portStart  int
-	portEnd    int
-	conn       *net.UDPConn
-	identity   *secure.TLSIdentity
-	candidates []protocol.P2PCandidate
-	closed     bool
+	mu          sync.RWMutex
+	rendezvous  string
+	portStart   int
+	portEnd     int
+	upnpEnabled bool
+	conn        *net.UDPConn
+	identity    *secure.TLSIdentity
+	candidates  []protocol.P2PCandidate
+	upnpMapping *p2pupnp.Mapping
+	closed      bool
 }
 
-var endpointPortCursor atomic.Uint32
+var (
+	endpointPortCursor atomic.Uint32
+	mapUPnPUDP         = p2pupnp.MapUDP
+)
 
 func NewEndpoint(rendezvous string) *Endpoint {
 	return NewEndpointWithPortRange(rendezvous, 0, 0)
 }
 
 func NewEndpointWithPortRange(rendezvous string, portStart, portEnd int) *Endpoint {
-	return &Endpoint{rendezvous: rendezvous, portStart: portStart, portEnd: portEnd}
+	return NewEndpointWithPortRangeAndUPnP(rendezvous, portStart, portEnd, false)
+}
+
+func NewEndpointWithPortRangeAndUPnP(rendezvous string, portStart, portEnd int, upnpEnabled bool) *Endpoint {
+	return &Endpoint{rendezvous: rendezvous, portStart: portStart, portEnd: portEnd, upnpEnabled: upnpEnabled}
 }
 
 func listenP2PUDP(portStart, portEnd int) (*net.UDPConn, error) {
@@ -95,12 +105,40 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	tunnel.TuneUDPConn(conn)
 	port := conn.LocalAddr().(*net.UDPAddr).Port
 	discovered := candidate.Discover(port, 0)
+
+	type upnpResult struct {
+		mapping *p2pupnp.Mapping
+		address netip.AddrPort
+		err     error
+	}
+	var upnpResultCh chan upnpResult
+	if e.upnpEnabled {
+		upnpResultCh = make(chan upnpResult, 1)
+		go func() {
+			mapCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			mapping, address, mapErr := mapUPnPUDP(mapCtx, port)
+			upnpResultCh <- upnpResult{mapping: mapping, address: address, err: mapErr}
+		}()
+	}
+
 	if e.rendezvous != "" {
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		reflexive, probeErr := candidate.ProbeReflexive(probeCtx, e.rendezvous, conn, "udp")
 		cancel()
 		if probeErr == nil {
-			discovered = append(discovered, reflexive)
+			discovered = appendEndpointCandidate(discovered, reflexive)
+		}
+	}
+
+	var upnpMapping *p2pupnp.Mapping
+	if upnpResultCh != nil {
+		result := <-upnpResultCh
+		if result.err == nil && result.address.IsValid() {
+			upnpMapping = result.mapping
+			discovered = appendEndpointCandidate(discovered, protocol.P2PCandidate{
+				Protocol: "udp", Type: "reflexive", Address: result.address.String(), Priority: 900,
+			})
 		}
 	}
 	if validated, validateErr := candidate.Validate(discovered); validateErr == nil {
@@ -110,19 +148,50 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
+		if upnpMapping != nil {
+			_ = upnpMapping.Close()
+		}
 		_ = conn.Close()
 		return net.ErrClosed
 	}
 	if e.conn != nil {
 		e.mu.Unlock()
+		if upnpMapping != nil {
+			_ = upnpMapping.Close()
+		}
 		_ = conn.Close()
 		return nil
 	}
 	e.conn = conn
 	e.identity = identity
 	e.candidates = append([]protocol.P2PCandidate(nil), discovered...)
+	e.upnpMapping = upnpMapping
 	e.mu.Unlock()
 	return nil
+}
+
+func appendEndpointCandidate(items []protocol.P2PCandidate, extra protocol.P2PCandidate) []protocol.P2PCandidate {
+	validated, err := candidate.Validate([]protocol.P2PCandidate{extra})
+	if err != nil || len(validated) != 1 {
+		return items
+	}
+	extra = validated[0]
+	for _, item := range items {
+		if item.Protocol == extra.Protocol && item.Address == extra.Address {
+			return items
+		}
+	}
+	items = append(items, extra)
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Priority != items[j].Priority {
+			return items[i].Priority > items[j].Priority
+		}
+		return items[i].Address < items[j].Address
+	})
+	if len(items) > candidate.MaxCandidates {
+		items = items[:candidate.MaxCandidates]
+	}
+	return items
 }
 
 func (e *Endpoint) Description() ([]protocol.P2PCandidate, string, error) {
@@ -178,10 +247,15 @@ func (e *Endpoint) Close() error {
 	}
 	e.closed = true
 	conn := e.conn
+	mapping := e.upnpMapping
 	e.conn = nil
 	e.identity = nil
 	e.candidates = nil
+	e.upnpMapping = nil
 	e.mu.Unlock()
+	if mapping != nil {
+		_ = mapping.Close()
+	}
 	if conn != nil {
 		return conn.Close()
 	}

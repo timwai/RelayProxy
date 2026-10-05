@@ -5,9 +5,7 @@ import (
 
 	proxydirect "relayproxy/agent/direct"
 	"relayproxy/agent/client"
-	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/internal/protocol"
-	"relayproxy/internal/tunnel"
 )
 
 type publicDirectClientManager = proxydirect.ClientManager
@@ -147,17 +145,3 @@ func (a *Agent) closePublicDirectClient() error {
 	return nil
 }
 
-func directSessionAlive(session tunnel.TunnelSession) bool {
-	if session == nil {
-		return false
-	}
-	select {
-	case <-session.Done():
-		return false
-	default:
-		return true
-	}
-}
-
-var _ = directSessionAlive
-var _ *proxyp2p.Manager

@@ -231,7 +231,6 @@ func TestAndroidStatusRedactsPublicDirectTicket(t *testing.T) {
 	}
 }
 
-
 func TestAndroidProxyPathModeNormalization(t *testing.T) {
 	for _, tc := range []struct {
 		name string

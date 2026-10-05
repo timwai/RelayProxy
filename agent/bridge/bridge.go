@@ -297,6 +297,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.P2P.IdleTimeoutSec = int(c.P2PIdleTimeout / time.Second)
 	res.P2P.MaxExitSessions = c.P2PMaxSessions
 	res.P2P.Fallback = c.P2PFallback
+	res.Direct.Public.Advertise = c.PublicDirectAdvertise
 	res.Exit.AllowInternet = c.AllowInternet
 	res.Exit.AllowPrivateNetwork = c.AllowPrivateNet
 	res.Exit.AllowLoopback = c.AllowLoopback

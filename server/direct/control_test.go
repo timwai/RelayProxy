@@ -301,7 +301,6 @@ func TestEndpointSetChangedIncludesVerifiedDialTarget(t *testing.T) {
 	}
 }
 
-
 func TestControllerRejectsTicketValidationWithoutRelayPolicy(t *testing.T) {
 	registry := NewRegistry()
 	controller := NewController(context.Background(), registry, &Verifier{Registry: registry}, nil)

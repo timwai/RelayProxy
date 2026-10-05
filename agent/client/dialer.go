@@ -24,6 +24,13 @@ type proxyAddr struct {
 func (a proxyAddr) Network() string { return a.net }
 func (a proxyAddr) String() string  { return a.addr }
 
+// SelectedSession carries the concrete proxy path together with the tunnel
+// session. A direct session is no longer assumed to mean P2P.
+type SelectedSession struct {
+	Session tunnel.TunnelSession
+	Path    protocol.ProxyPath
+}
+
 type TunnelDialer struct {
 	getTunnel     func() tunnel.TunnelSession
 	getClientID   func() string
@@ -31,7 +38,7 @@ type TunnelDialer struct {
 	requestSeq    atomic.Uint64
 
 	directMu             sync.RWMutex
-	getDirect            func(exitDeviceID string) (tunnel.TunnelSession, bool)
+	getDirect            func(exitDeviceID string) (SelectedSession, bool)
 	ensureDirect         func(exitDeviceID string)
 	directMode           string
 	directFallback       bool
@@ -52,11 +59,29 @@ func NewTunnelDialer(getTunnel func() tunnel.TunnelSession, getClientID func() s
 	}
 }
 
-// ConfigureDirectPath installs optional Client -> Exit P2P lookup hooks. When
-// no READY direct path exists, normal Relay traffic proceeds immediately while
-// ensureDirect prepares a path for later flows.
+// ConfigureDirectPath installs the legacy P2P direct-path hooks. Existing
+// callers keep this API while the dialer internally records the concrete path.
 func (d *TunnelDialer) ConfigureDirectPath(
 	get func(exitDeviceID string) (tunnel.TunnelSession, bool),
+	ensure func(exitDeviceID string),
+) {
+	var provider func(exitDeviceID string) (SelectedSession, bool)
+	if get != nil {
+		provider = func(exitDeviceID string) (SelectedSession, bool) {
+			session, ok := get(exitDeviceID)
+			if !ok || session == nil {
+				return SelectedSession{}, false
+			}
+			return SelectedSession{Session: session, Path: protocol.ProxyPathP2PQUIC}, true
+		}
+	}
+	d.ConfigureDirectProvider(provider, ensure)
+}
+
+// ConfigureDirectProvider installs a path-aware Client -> Exit direct provider.
+// Public Direct can use this API without being misidentified as P2P.
+func (d *TunnelDialer) ConfigureDirectProvider(
+	get func(exitDeviceID string) (SelectedSession, bool),
 	ensure func(exitDeviceID string),
 ) {
 	d.directMu.Lock()
@@ -132,7 +157,20 @@ func (d *TunnelDialer) recordFallback(exitDeviceID string) {
 func (d *TunnelDialer) directFallbackEnabled() bool {
 	d.directMu.RLock()
 	defer d.directMu.RUnlock()
-	return d.directMode != "p2p_only" && d.directFallback
+	return d.directMode != "p2p_only" && d.directMode != "direct_only" && d.directFallback
+}
+
+func proxyPathAllowed(mode string, path protocol.ProxyPath) bool {
+	switch mode {
+	case "relay_only":
+		return false
+	case "p2p_only":
+		return path == protocol.ProxyPathP2PQUIC
+	case "direct_only":
+		return path.IsDirect()
+	default:
+		return path.IsDirect()
+	}
 }
 
 func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -153,59 +191,65 @@ func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Con
 	return context.WithTimeout(parent, timeout)
 }
 
-func (d *TunnelDialer) sessionForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+func (d *TunnelDialer) sessionForExit(exitDeviceID string) SelectedSession {
 	// The reserved server exit lives inside the Relay process, not behind an
-	// authenticated peer session, so there is no direct P2P path to establish.
+	// authenticated peer session, so there is no direct path to establish.
 	if exitDeviceID == protocol.ServerExitDeviceID {
 		if d.getTunnel == nil {
-			return nil, false
+			return SelectedSession{}
 		}
-		return d.getTunnel(), false
+		relay := d.getTunnel()
+		return SelectedSession{Session: relay, Path: relaySessionPath(relay)}
 	}
+
 	d.directMu.RLock()
 	getDirect, ensureDirect := d.getDirect, d.ensureDirect
 	mode := d.directMode
 	d.directMu.RUnlock()
+
 	if mode != "relay_only" && exitDeviceID != "" {
 		if getDirect != nil {
-			if session, ok := getDirect(exitDeviceID); ok && session != nil {
-				return session, true
+			if selected, ok := getDirect(exitDeviceID); ok && selected.Session != nil && proxyPathAllowed(mode, selected.Path) {
+				return selected
 			}
 		}
 		if ensureDirect != nil {
 			ensureDirect(exitDeviceID)
 		}
-		if mode == "p2p_only" {
-			return nil, false
+		if mode == "p2p_only" || mode == "direct_only" {
+			return SelectedSession{}
 		}
 	}
+
 	if d.getTunnel == nil {
-		return nil, false
+		return SelectedSession{}
 	}
-	return d.getTunnel(), false
+	relay := d.getTunnel()
+	return SelectedSession{Session: relay, Path: relaySessionPath(relay)}
 }
 
-func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string) (tunnel.TunnelSession, tunnel.TunnelStream, bool, error) {
-	session, direct := d.sessionForExit(exitDeviceID)
+func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string) (tunnel.TunnelSession, tunnel.TunnelStream, protocol.ProxyPath, error) {
+	selected := d.sessionForExit(exitDeviceID)
+	session, path := selected.Session, selected.Path
 	if session == nil {
-		return nil, nil, false, fmt.Errorf("tunnel is not connected")
+		return nil, nil, "", fmt.Errorf("tunnel is not connected")
 	}
 	stream, err := session.OpenStream(ctx)
 	if err == nil {
-		return session, stream, direct, nil
+		return session, stream, path, nil
 	}
-	if !direct || d.getTunnel == nil {
-		return nil, nil, direct, err
+	if !path.IsDirect() || d.getTunnel == nil {
+		return nil, nil, path, err
 	}
 	relay := d.getTunnel()
 	if relay == nil || relay == session {
-		return nil, nil, direct, err
+		return nil, nil, path, err
 	}
 	stream, relayErr := relay.OpenStream(ctx)
 	if relayErr != nil {
-		return nil, nil, false, fmt.Errorf("direct stream failed: %v; relay fallback failed: %w", err, relayErr)
+		return nil, nil, "", fmt.Errorf("direct stream failed: %v; relay fallback failed: %w", err, relayErr)
 	}
-	return relay, stream, false, nil
+	return relay, stream, relaySessionPath(relay), nil
 }
 
 func (d *TunnelDialer) SetDefaultExitID(exitID string) {
@@ -233,16 +277,18 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		exitNodeID = d.GetDefaultExitID()
 	}
 
-	sess, direct := d.sessionForExit(exitNodeID)
+	selected := d.sessionForExit(exitNodeID)
+	sess := selected.Session
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
+	direct := selected.Path.IsDirect()
 	allowResume := direct && tunnel.PeerSupportsStreamResume(sess)
 	attemptCtx, cancelAttempt := ctx, func() {}
 	if direct && d.directFallbackEnabled() {
 		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
 	}
-	conn, err := d.dialTCPOnSession(attemptCtx, sess, exitNodeID, host, port, allowResume, tcpSessionPath(sess, direct))
+	conn, err := d.dialTCPOnSession(attemptCtx, sess, exitNodeID, host, port, allowResume, selected.Path.String())
 	cancelAttempt()
 	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
@@ -261,7 +307,7 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 	// includes the increment, then quarantine that broken direct path.
 	d.recordFallback(exitNodeID)
 	d.recordDirectFailure(exitNodeID, err)
-	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port, false, tcpSessionPath(relay, false))
+	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port, false, relaySessionPath(relay).String())
 }
 
 func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, allowResume bool, path string) (net.Conn, error) {
@@ -389,10 +435,12 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		exitNodeID = d.GetDefaultExitID()
 	}
 
-	sess, direct := d.sessionForExit(exitNodeID)
+	selected := d.sessionForExit(exitNodeID)
+	sess := selected.Session
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
+	direct := selected.Path.IsDirect()
 	if opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(sess) {
 		if direct && d.getTunnel != nil && d.directFallbackEnabled() {
 			relay := d.getTunnel()

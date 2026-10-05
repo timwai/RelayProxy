@@ -122,27 +122,27 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu               sync.RWMutex
-	status           statusSnapshot
-	starting         bool
-	started          bool
-	closed           bool
-	powerConstrained bool
+	mu                sync.RWMutex
+	status            statusSnapshot
+	starting          bool
+	started           bool
+	closed            bool
+	powerConstrained  bool
 	proxyP2P          *proxyp2p.Manager
 	proxyExitRevision uint64
 	proxyDialer       *agentclient.TunnelDialer
-	routingDialer    *routing.RoutingDialer
-	traffic          *traffic.Registry
-	clientApproved   atomic.Bool
-	socksServer      *socks5.Server
-	vpnSocksServer   *socks5.Server
-	httpServer       *httpproxy.Server
-	proxyActiveTCP   atomic.Int64
-	proxyActiveUDP   atomic.Int64
-	proxyTCPFlows    atomic.Uint64
-	proxyUDPFlows    atomic.Uint64
-	proxyBytesUp     atomic.Uint64
-	proxyBytesDown   atomic.Uint64
+	routingDialer     *routing.RoutingDialer
+	traffic           *traffic.Registry
+	clientApproved    atomic.Bool
+	socksServer       *socks5.Server
+	vpnSocksServer    *socks5.Server
+	httpServer        *httpproxy.Server
+	proxyActiveTCP    atomic.Int64
+	proxyActiveUDP    atomic.Int64
+	proxyTCPFlows     atomic.Uint64
+	proxyUDPFlows     atomic.Uint64
+	proxyBytesUp      atomic.Uint64
+	proxyBytesDown    atomic.Uint64
 
 	wg sync.WaitGroup
 }

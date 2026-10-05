@@ -1,7 +1,6 @@
 package direct
 
 import (
-	"crypto/x509"
 	"testing"
 
 	"relayproxy/internal/cert"
@@ -29,7 +28,7 @@ func TestPinnedTLSConfigAcceptsOnlyVerifiedExitCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := config.VerifyPeerCertificate([][]byte{other.Certificate.Certificate[0]}, []*x509.Certificate{}); err == nil {
+	if err := config.VerifyPeerCertificate([][]byte{other.Certificate.Certificate[0]}, nil); err == nil {
 		t.Fatal("wrong exit certificate was accepted")
 	}
 }

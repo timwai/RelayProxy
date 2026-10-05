@@ -105,6 +105,19 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	tunnel.TuneUDPConn(conn)
 	port := conn.LocalAddr().(*net.UDPAddr).Port
 	discovered := candidate.Discover(port, 0)
+	// Leave room for public-path candidates. Hosts with many VPN/virtual
+	// interfaces can otherwise fill MaxCandidates with LAN addresses before
+	// rendezvous or UPnP has a chance to be advertised.
+	reserved := 0
+	if e.rendezvous != "" {
+		reserved++
+	}
+	if e.upnpEnabled {
+		reserved++
+	}
+	if limit := candidate.MaxCandidates - reserved; limit >= 0 && len(discovered) > limit {
+		discovered = discovered[:limit]
+	}
 
 	type upnpResult struct {
 		mapping *p2pupnp.Mapping

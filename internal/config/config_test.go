@@ -518,6 +518,9 @@ func TestServerP2PPortRangeValidation(t *testing.T) {
 	if cfg.P2P.PortStart != 0 || cfg.P2P.PortEnd != 0 {
 		t.Fatalf("default P2P port range=%d-%d, want OS-assigned 0-0", cfg.P2P.PortStart, cfg.P2P.PortEnd)
 	}
+	if cfg.P2P.UPnPEnabled == nil || *cfg.P2P.UPnPEnabled {
+		t.Fatalf("default P2P UPnP=%v, want disabled", cfg.P2P.UPnPEnabled)
+	}
 
 	cfg.P2P.PortStart, cfg.P2P.PortEnd = 30000, 30100
 	if err := NormalizeServerConfig(cfg); err != nil {

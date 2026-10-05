@@ -55,7 +55,7 @@ type TicketSigner struct {
 }
 
 func GenerateTicketSigner(ttl time.Duration) (*TicketSigner, error) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
 	}

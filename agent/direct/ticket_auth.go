@@ -24,11 +24,14 @@ var (
 	ErrTicketReplay  = errors.New("public direct ticket replayed")
 )
 
+type TicketCurrentValidator func(context.Context, protocol.PublicDirectTicketClaims) error
+
 type TicketAuthenticator struct {
-	issuer    string
-	exitID    string
-	publicKey ed25519.PublicKey
-	now       func() time.Time
+	issuer           string
+	exitID           string
+	publicKey        ed25519.PublicKey
+	now              func() time.Time
+	currentValidator TicketCurrentValidator
 
 	mu     sync.Mutex
 	replay map[string]int64
@@ -51,7 +54,16 @@ func NewTicketAuthenticator(issuer string, publicKey []byte, exitDeviceID string
 	}, nil
 }
 
-func (a *TicketAuthenticator) Authenticate(_ context.Context, request protocol.PublicDirectAuthRequest) error {
+func (a *TicketAuthenticator) SetCurrentValidator(validator TicketCurrentValidator) {
+	if a == nil {
+		return
+	}
+	a.mu.Lock()
+	a.currentValidator = validator
+	a.mu.Unlock()
+}
+
+func (a *TicketAuthenticator) Authenticate(ctx context.Context, request protocol.PublicDirectAuthRequest) error {
 	if a == nil || len(a.publicKey) != ed25519.PublicKeySize {
 		return ErrAuthenticatorRequired
 	}
@@ -94,6 +106,15 @@ func (a *TicketAuthenticator) Authenticate(_ context.Context, request protocol.P
 	if time.Duration(claims.ExpiresAt-claims.IssuedAt)*time.Second > maxTicketLifetime ||
 		claims.IssuedAt < now.Add(-maxTicketLifetime-maxTicketClockSkew).Unix() {
 		return ErrUnauthorized
+	}
+
+	a.mu.Lock()
+	currentValidator := a.currentValidator
+	a.mu.Unlock()
+	if currentValidator != nil {
+		if err := currentValidator(ctx, claims); err != nil {
+			return ErrUnauthorized
+		}
 	}
 
 	replayKey := claims.Issuer + "\x00" + string(claims.Nonce)

@@ -170,6 +170,21 @@ func (r *Registry) MarkFailed(deviceID, sessionID, address string, err error) bo
 	})
 }
 
+func (r *Registry) VerifiedCertificateFingerprint(deviceID string) string {
+	deviceID = strings.TrimSpace(deviceID)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	bucket := r.records[deviceID]
+	for address, record := range bucket {
+		record = r.expireLocked(record)
+		bucket[address] = record
+		if record.State == StateVerified && record.Endpoint.Verified {
+			return record.CertFingerprint
+		}
+	}
+	return ""
+}
+
 func (r *Registry) VerifiedEndpoints(deviceID string) []protocol.PublicDirectEndpoint {
 	deviceID = strings.TrimSpace(deviceID)
 	r.mu.Lock()

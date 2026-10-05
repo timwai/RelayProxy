@@ -54,3 +54,28 @@ func TestDiscoveryPriorityMatchesDirectPathPreference(t *testing.T) {
 		t.Fatalf("private IPv4 TCP priority=%d, want 1100", got)
 	}
 }
+
+
+func TestProbeWireCodecRoundTrip(t *testing.T) {
+	const nonce uint64 = 0x0102030405060708
+	request := EncodeProbeRequest(nonce)
+	decodedNonce, ok := DecodeProbeRequest(request[:])
+	if !ok || decodedNonce != nonce {
+		t.Fatalf("request round trip: nonce=%x ok=%v", decodedNonce, ok)
+	}
+
+	observed := netip.MustParseAddrPort("198.51.100.7:4242")
+	response, ok := EncodeProbeResponse(nonce, observed)
+	if !ok {
+		t.Fatal("failed to encode valid probe response")
+	}
+	decodedObserved, ok := DecodeProbeResponse(response[:], nonce)
+	if !ok || decodedObserved != observed {
+		t.Fatalf("response round trip: observed=%s ok=%v", decodedObserved, ok)
+	}
+
+	response[4]++
+	if _, ok := DecodeProbeResponse(response[:], nonce); ok {
+		t.Fatal("probe response with unsupported version was accepted")
+	}
+}

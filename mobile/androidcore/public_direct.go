@@ -160,6 +160,8 @@ func (c *Client) startPublicDirectExit(
 	}
 	runtime, err := proxydirect.StartExitRuntime(ctx, relay, accepted, c.handler, proxydirect.ExitRuntimeOptions{
 		MaxStreams: maxStreams,
+		PortStart:  accepted.PublicDirectPortStart,
+		PortEnd:    accepted.PublicDirectPortEnd,
 	})
 	if err != nil {
 		log.Printf("[PublicDirect] Android exit listener unavailable; P2P/Relay fallback remains active: %v", err)

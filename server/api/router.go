@@ -43,6 +43,7 @@ type Router struct {
 	onRDPIngressReload             func(string) error
 	onRDPIngressStatus             func(string) RDPIngressRuntimeStatus
 	p2pSessions                    func() []P2PSessionRuntimeStatus
+	publicDirectStatus             func(string) []PublicDirectEndpointStatus
 	serverExitStatus               func() ServerExitRuntimeStatus
 	rdpIngressEnabled              func() bool
 	rdpIngressPortStart            int
@@ -86,6 +87,15 @@ type P2PSessionRuntimeStatus struct {
 type ServerExitRuntimeStatus struct {
 	Enabled       bool  `json:"enabled"`
 	ActiveStreams int64 `json:"activeStreams"`
+}
+
+type PublicDirectEndpointStatus struct {
+	Address    string    `json:"address"`
+	Source     string    `json:"source"`
+	State      string    `json:"state"`
+	VerifiedAt time.Time `json:"verifiedAt,omitempty"`
+	ExpiresAt  time.Time `json:"expiresAt,omitempty"`
+	LastError  string    `json:"lastError,omitempty"`
 }
 
 func NewRouter(authService *service.AuthService, deviceService *service.DeviceService, sessions *session.Manager, db *repository.DB, options ...RouterOption) *Router {
@@ -147,6 +157,10 @@ func WithRDPIngressStatus(fn func(string) RDPIngressRuntimeStatus) RouterOption 
 
 func WithP2PSessions(fn func() []P2PSessionRuntimeStatus) RouterOption {
 	return func(r *Router) { r.p2pSessions = fn }
+}
+
+func WithPublicDirectStatus(fn func(string) []PublicDirectEndpointStatus) RouterOption {
+	return func(r *Router) { r.publicDirectStatus = fn }
 }
 
 func WithServerExitStatus(fn func() ServerExitRuntimeStatus) RouterOption {
@@ -1228,12 +1242,27 @@ func (r *Router) handleListExits(w http.ResponseWriter, req *http.Request) {
 		if !e.IsExit() {
 			continue
 		}
+		directEndpoints := []PublicDirectEndpointStatus{}
+		if r.publicDirectStatus != nil {
+			directEndpoints = r.publicDirectStatus(e.DeviceID)
+		}
+		verifiedDirect := 0
+		for _, endpoint := range directEndpoints {
+			if endpoint.State == "verified" {
+				verifiedDirect++
+			}
+		}
 		res = append(res, map[string]any{
 			"deviceId":      e.DeviceID,
 			"deviceName":    e.DeviceName,
 			"transport":     string(e.Transport),
 			"activeStreams": e.ActiveStreams.Load(),
 			"online":        true,
+			"publicDirect": map[string]any{
+				"available": verifiedDirect > 0,
+				"verifiedEndpointCount": verifiedDirect,
+				"endpoints": directEndpoints,
+			},
 		})
 	}
 	writeJSON(w, http.StatusOK, res)

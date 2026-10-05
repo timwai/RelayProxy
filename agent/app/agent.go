@@ -272,7 +272,8 @@ type Agent struct {
 	approvedMode   string
 	identityName   string
 	policyRevision int64
-	proxyExits     []protocol.ProxyExit
+	proxyExits        []protocol.ProxyExit
+	proxyExitRevision uint64
 	rdpTargets     []rdp.Target
 	rdpConnection  *rdp.Connection
 	rdpP2P         *rdpp2p.Manager
@@ -530,7 +531,11 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	a.proxyP2P = nil
 	a.rdpSession = nil
 	a.rdpTargets = nil
-	a.proxyExits = nil
+	// Keep the last authoritative exit inventory across transient transport
+	// reconnects. The UI marks it stale while disconnected, and the next
+	// Welcome/heartbeat/push replaces it. Clearing here caused visible list
+	// flicker and could leave startup/reconnect screens empty for a full
+	// heartbeat interval.
 	if newState != tunnel.StateConnected || sess == nil {
 		a.mu.Unlock()
 		if oldControl != nil {
@@ -606,7 +611,10 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}); err != nil {
 		return fmt.Errorf("write control header: %w", err)
 	}
-	transportCaps := []string{"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilitySpeedTest}
+	transportCaps := []string{
+		"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilitySpeedTest,
+		protocol.CapabilityResourceInventoryPush,
+	}
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
@@ -679,8 +687,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	if accepted.ProxyExits != nil {
 		a.proxyExits = proxyExitsFromProtocol(*accepted.ProxyExits)
-	} else {
-		a.proxyExits = nil
+		a.proxyExitRevision = accepted.ProxyExitRevision
 	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
@@ -782,7 +789,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
-		a.acceptIncomingStreams(ctx, sess, func() *exit.Handler {
+		a.acceptIncomingStreams(ctx, sess, epoch, func() *exit.Handler {
 			if allowExit {
 				return handler
 			}
@@ -851,7 +858,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 				a.refreshRDPTargets(sess, epoch, *pong.RDPTargets)
 			}
 			if pong.ProxyExits != nil {
-				a.refreshProxyExits(sess, epoch, *pong.ProxyExits)
+				a.refreshProxyExits(sess, epoch, *pong.ProxyExits, pong.ProxyExitRevision)
 			}
 			a.mu.RLock()
 			if a.epoch == epoch && a.readySession == sess {
@@ -879,14 +886,23 @@ func proxyExitsFromProtocol(exits []protocol.ProxyExit) []protocol.ProxyExit {
 	return result
 }
 
-func (a *Agent) refreshProxyExits(sess tunnel.TunnelSession, epoch uint64, exits []protocol.ProxyExit) {
+func (a *Agent) refreshProxyExits(sess tunnel.TunnelSession, epoch uint64, exits []protocol.ProxyExit, revision uint64) {
 	refreshed := proxyExitsFromProtocol(exits)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.epoch != epoch || a.readySession != sess {
 		return
 	}
+	// Revision zero is the compatibility path for older servers. For versioned
+	// pushes, reject only strictly older snapshots; the same revision may be
+	// replayed by heartbeat as a recovery copy after a lost/corrupt push.
+	if revision != 0 && a.proxyExitRevision != 0 && revision < a.proxyExitRevision {
+		return
+	}
 	a.proxyExits = refreshed
+	if revision != 0 {
+		a.proxyExitRevision = revision
+	}
 }
 
 func rdpTargetsFromProtocol(targets []protocol.RDPTarget) []rdp.Target {
@@ -987,7 +1003,7 @@ func (a *Agent) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSes
 	return response, nil
 }
 
-func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, proxyP2PManager *proxyp2p.Manager, workers *sync.WaitGroup) {
+func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, epoch uint64, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, proxyP2PManager *proxyp2p.Manager, workers *sync.WaitGroup) {
 	if maxStreams <= 0 {
 		maxStreams = 1024
 	}
@@ -1067,6 +1083,22 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 				var message protocol.P2PControlMessage
 				if err := protocol.ReadJSON(stream, &message); err == nil {
 					proxyP2PManager.HandleControl(message)
+				}
+			}()
+			continue
+		}
+		if header.Type == protocol.FrameTypeResourceInventory {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				defer stream.Close()
+				var inventory protocol.ResourceInventory
+				if err := protocol.ReadJSON(stream, &inventory); err != nil {
+					return
+				}
+				if inventory.ProxyExits != nil {
+					a.refreshProxyExits(sess, epoch, *inventory.ProxyExits, inventory.ProxyExitRevision)
 				}
 			}()
 			continue

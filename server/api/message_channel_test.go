@@ -11,7 +11,7 @@ import (
 	"relayproxy/server/repository"
 )
 
-func createMessageTestDevice(t *testing.T, router *Router, suffix string) *repository.Device {
+func createMessageDeviceForIdentity(t *testing.T, router *Router, identityID, suffix string) *repository.Device {
 	t.Helper()
 	admin, err := router.db.GetUserByUsername("admin")
 	if err != nil {
@@ -33,7 +33,47 @@ func createMessageTestDevice(t *testing.T, router *Router, suffix string) *repos
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := router.db.SetDeviceIdentity(device.ID, identityID, admin.ID); err != nil {
+		t.Fatal(err)
+	}
 	return device
+}
+
+func messageTestIdentity(t *testing.T, router *Router) *repository.Identity {
+	t.Helper()
+	identities, err := router.db.ListIdentities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identities) > 0 {
+		return identities[0]
+	}
+	admin, err := router.db.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := router.db.CreateIdentity("Message Tests", admin.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
+func createMessageTestDevice(t *testing.T, router *Router, suffix string) *repository.Device {
+	t.Helper()
+	return createMessageDeviceForIdentity(t, router, messageTestIdentity(t, router).ID, suffix)
+}
+
+func messageDeviceIdentityID(t *testing.T, router *Router, deviceID string) string {
+	t.Helper()
+	summary, err := router.db.GetDeviceIdentitySummary(deviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.IdentityID == "" {
+		t.Fatal("message test device has no identity")
+	}
+	return summary.IdentityID
 }
 
 func TestChannelPushGETAndPOST(t *testing.T) {
@@ -85,8 +125,10 @@ func TestChannelAllDevicesAndCRUD(t *testing.T) {
 	a := createMessageTestDevice(t, router, "ALL-A")
 	b := createMessageTestDevice(t, router, "ALL-B")
 
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels",
-		bytes.NewBufferString(`{"id":"all","name":"全部","allDevices":true}`))
+	createBody, _ := json.Marshal(messageChannelRequest{
+		ID: "all", IdentityID: messageDeviceIdentityID(t, router, a.ID), Name: "全部", AllDevices: true,
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels", bytes.NewReader(createBody))
 	createReq.AddCookie(adminCookie)
 	createRec := httptest.NewRecorder()
 	router.ServeHTTP(createRec, createReq)
@@ -138,9 +180,12 @@ func TestChannelRequiresTargets(t *testing.T) {
 	router, cleanup := setupTestRouter(t)
 	defer cleanup()
 	adminCookie := loginAdmin(t, router)
+	device := createMessageTestDevice(t, router, "EMPTY")
+	body, _ := json.Marshal(messageChannelRequest{
+		ID: "empty", IdentityID: messageDeviceIdentityID(t, router, device.ID), Name: "Empty", AllDevices: false,
+	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels",
-		bytes.NewBufferString(`{"id":"empty","name":"Empty","allDevices":false}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels", bytes.NewReader(body))
 	req.AddCookie(adminCookie)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -178,7 +223,7 @@ func TestChannelCustomVerificationAndRouting(t *testing.T) {
 		{Name: "系统 B", MatchType: "regex", Pattern: "系统B|业务B", DeviceIDs: []string{b.ID}},
 	}
 	createBody, _ := json.Marshal(messageChannelRequest{
-		ID: "routed", Name: "分流渠道",
+		ID: "routed", IdentityID: messageDeviceIdentityID(t, router, a.ID), Name: "分流渠道",
 		UseDefaultVerification: &useDefault,
 		VerificationRules:      &verificationRules,
 		RouteRules:             &routeRules,
@@ -250,11 +295,11 @@ func TestChannelRejectsInvalidCustomRules(t *testing.T) {
 	}}
 	for name, body := range map[string]messageChannelRequest{
 		"verification": {
-			ID: "bad-verification", Name: "bad", DeviceIDs: []string{device.ID},
+			ID: "bad-verification", IdentityID: messageDeviceIdentityID(t, router, device.ID), Name: "bad", DeviceIDs: []string{device.ID},
 			UseDefaultVerification: &useDefault, VerificationRules: &verificationRules,
 		},
 		"routing": {
-			ID: "bad-routing", Name: "bad", DeviceIDs: []string{device.ID},
+			ID: "bad-routing", IdentityID: messageDeviceIdentityID(t, router, device.ID), Name: "bad", DeviceIDs: []string{device.ID},
 			UseDefaultVerification: &useDefault, RouteRules: &routeRules,
 		},
 	} {
@@ -367,5 +412,165 @@ func TestServerMessagesFilterAndClearByChannel(t *testing.T) {
 	router.ServeHTTP(clearAllRec, clearAllReq)
 	if clearAllRec.Code != http.StatusOK {
 		t.Fatalf("clear all returned %d: %s", clearAllRec.Code, clearAllRec.Body.String())
+	}
+}
+
+
+func createMessageIdentityLogin(t *testing.T, router *Router, adminCookie *http.Cookie, username, name string) (repository.Identity, *http.Cookie) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{
+		"username": username,
+		"name":     name,
+		"password": "identity-pass-123",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/identities", bytes.NewReader(body))
+	createReq.AddCookie(adminCookie)
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create identity %s returned %d: %s", name, createRec.Code, createRec.Body.String())
+	}
+	var identity repository.Identity
+	if err := json.Unmarshal(createRec.Body.Bytes(), &identity); err != nil {
+		t.Fatal(err)
+	}
+
+	loginBody, _ := json.Marshal(map[string]string{"username": username, "password": "identity-pass-123"})
+	loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody))
+	loginRec := httptest.NewRecorder()
+	router.ServeHTTP(loginRec, loginReq)
+	if loginRec.Code != http.StatusOK {
+		t.Fatalf("login identity %s returned %d: %s", name, loginRec.Code, loginRec.Body.String())
+	}
+	for _, cookie := range loginRec.Result().Cookies() {
+		if cookie.Name == "relay_session_http" {
+			return identity, cookie
+		}
+	}
+	t.Fatal("identity session cookie missing")
+	return identity, nil
+}
+
+func TestMessageChannelsAreIsolatedByIdentity(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	identityA, cookieA := createMessageIdentityLogin(t, router, adminCookie, "message.a", "Message A")
+	identityB, cookieB := createMessageIdentityLogin(t, router, adminCookie, "message.b", "Message B")
+	deviceA := createMessageDeviceForIdentity(t, router, identityA.ID, "ISO-A")
+	deviceB := createMessageDeviceForIdentity(t, router, identityB.ID, "ISO-B")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels",
+		bytes.NewBufferString(`{"id":"identity-a","name":"Identity A","allDevices":true}`))
+	createReq.AddCookie(cookieA)
+	createRec := httptest.NewRecorder()
+	router.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("identity A create channel returned %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var created repository.MessageChannel
+	if err := json.Unmarshal(createRec.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.IdentityID != identityA.ID {
+		t.Fatalf("channel identity = %q, want %q", created.IdentityID, identityA.ID)
+	}
+
+	listAReq := httptest.NewRequest(http.MethodGet, "/api/v1/message-channels", nil)
+	listAReq.AddCookie(cookieA)
+	listARec := httptest.NewRecorder()
+	router.ServeHTTP(listARec, listAReq)
+	if listARec.Code != http.StatusOK {
+		t.Fatalf("identity A list channels returned %d: %s", listARec.Code, listARec.Body.String())
+	}
+	var channelsA []repository.MessageChannel
+	if err := json.Unmarshal(listARec.Body.Bytes(), &channelsA); err != nil {
+		t.Fatal(err)
+	}
+	if len(channelsA) != 1 || channelsA[0].ID != "identity-a" {
+		t.Fatalf("identity A channels = %+v", channelsA)
+	}
+
+	listBReq := httptest.NewRequest(http.MethodGet, "/api/v1/message-channels", nil)
+	listBReq.AddCookie(cookieB)
+	listBRec := httptest.NewRecorder()
+	router.ServeHTTP(listBRec, listBReq)
+	if listBRec.Code != http.StatusOK {
+		t.Fatalf("identity B list channels returned %d: %s", listBRec.Code, listBRec.Body.String())
+	}
+	var channelsB []repository.MessageChannel
+	if err := json.Unmarshal(listBRec.Body.Bytes(), &channelsB); err != nil {
+		t.Fatal(err)
+	}
+	if len(channelsB) != 0 {
+		t.Fatalf("identity B saw identity A channels: %+v", channelsB)
+	}
+
+	updateBReq := httptest.NewRequest(http.MethodPut, "/api/v1/message-channels/identity-a",
+		bytes.NewBufferString(`{"name":"stolen","allDevices":true}`))
+	updateBReq.AddCookie(cookieB)
+	updateBRec := httptest.NewRecorder()
+	router.ServeHTTP(updateBRec, updateBReq)
+	if updateBRec.Code != http.StatusNotFound {
+		t.Fatalf("identity B updated identity A channel: %d %s", updateBRec.Code, updateBRec.Body.String())
+	}
+
+	crossReqBody, _ := json.Marshal(messageChannelRequest{
+		ID: "cross-device", Name: "Cross", DeviceIDs: []string{deviceB.ID},
+	})
+	crossReq := httptest.NewRequest(http.MethodPost, "/api/v1/message-channels", bytes.NewReader(crossReqBody))
+	crossReq.AddCookie(cookieA)
+	crossRec := httptest.NewRecorder()
+	router.ServeHTTP(crossRec, crossReq)
+	if crossRec.Code != http.StatusBadRequest {
+		t.Fatalf("identity A accepted identity B target: %d %s", crossRec.Code, crossRec.Body.String())
+	}
+
+	public := NewPublicPushHandler(router.sessions, router.db)
+	pushReq := httptest.NewRequest(http.MethodGet, "/api/v1/push/identity-a?message=hello", nil)
+	pushRec := httptest.NewRecorder()
+	public.ServeHTTP(pushRec, pushReq)
+	if pushRec.Code != http.StatusOK {
+		t.Fatalf("identity A push returned %d: %s", pushRec.Code, pushRec.Body.String())
+	}
+	var message repository.MessageRecord
+	if err := json.Unmarshal(pushRec.Body.Bytes(), &message); err != nil {
+		t.Fatal(err)
+	}
+	if message.IdentityID != identityA.ID || len(message.Deliveries) != 1 || message.Deliveries[0].DeviceID != deviceA.ID {
+		t.Fatalf("identity A push escaped scope: %+v", message)
+	}
+	if message.Deliveries[0].DeviceID == deviceB.ID {
+		t.Fatal("identity B device received identity A allDevices push")
+	}
+
+	messagesAReq := httptest.NewRequest(http.MethodGet, "/api/v1/messages?limit=500", nil)
+	messagesAReq.AddCookie(cookieA)
+	messagesARec := httptest.NewRecorder()
+	router.ServeHTTP(messagesARec, messagesAReq)
+	if messagesARec.Code != http.StatusOK {
+		t.Fatalf("identity A messages returned %d: %s", messagesARec.Code, messagesARec.Body.String())
+	}
+	var messagesA []repository.MessageRecord
+	if err := json.Unmarshal(messagesARec.Body.Bytes(), &messagesA); err != nil {
+		t.Fatal(err)
+	}
+	if len(messagesA) != 1 || messagesA[0].IdentityID != identityA.ID {
+		t.Fatalf("identity A messages = %+v", messagesA)
+	}
+
+	messagesBReq := httptest.NewRequest(http.MethodGet, "/api/v1/messages?limit=500", nil)
+	messagesBReq.AddCookie(cookieB)
+	messagesBRec := httptest.NewRecorder()
+	router.ServeHTTP(messagesBRec, messagesBReq)
+	if messagesBRec.Code != http.StatusOK {
+		t.Fatalf("identity B messages returned %d: %s", messagesBRec.Code, messagesBRec.Body.String())
+	}
+	var messagesB []repository.MessageRecord
+	if err := json.Unmarshal(messagesBRec.Body.Bytes(), &messagesB); err != nil {
+		t.Fatal(err)
+	}
+	if len(messagesB) != 0 {
+		t.Fatalf("identity B saw identity A messages: %+v", messagesB)
 	}
 }

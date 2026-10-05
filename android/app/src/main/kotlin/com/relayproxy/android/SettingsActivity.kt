@@ -37,6 +37,7 @@ class SettingsActivity : Activity() {
     private lateinit var socks5Enabled: Switch
     private lateinit var httpEnabled: Switch
     private lateinit var proxyP2pEnabled: Switch
+    private lateinit var proxyPathMode: Spinner
     private lateinit var defaultExitId: EditText
     private lateinit var exitSelection: Spinner
     private lateinit var socks5Port: EditText
@@ -50,6 +51,18 @@ class SettingsActivity : Activity() {
 
     private val transportValues = listOf("auto", "quic_only", "tcp_only")
     private val transportLabels = listOf("自动选择", "仅 QUIC", "仅 TCP/TLS")
+    private val proxyPathModeValues = listOf(
+        ExitConfig.PROXY_PATH_AUTO,
+        ExitConfig.PROXY_PATH_DIRECT_ONLY,
+        ExitConfig.PROXY_PATH_P2P_ONLY,
+        ExitConfig.PROXY_PATH_RELAY_ONLY,
+    )
+    private val proxyPathModeLabels = listOf(
+        "自动 · Public Direct → P2P → Relay",
+        "仅直连 · Public Direct → P2P → 失败",
+        "仅 P2P · 不使用 Public Direct / Relay",
+        "仅 Relay · 不尝试任何直连",
+    )
     private val networkModeValues = listOf(
         NetworkBinder.MODE_WIFI,
         NetworkBinder.MODE_CELLULAR,
@@ -201,6 +214,14 @@ class SettingsActivity : Activity() {
         socks5Enabled = Switch(this)
         httpEnabled = Switch(this)
         proxyP2pEnabled = Switch(this)
+        proxyPathMode = Spinner(this).apply {
+            adapter = UiKit.themedSpinnerAdapter(this@SettingsActivity, proxyPathModeLabels)
+            background = rounded(inputBg, 13, line)
+            setPadding(dp(12), 0, dp(10), 0)
+            minimumHeight = dp(50)
+        }
+        client.addView(labeled("路径模式", proxyPathMode), topMargin(14))
+        client.addView(divider(), topMargin(10))
         client.addView(
             switchRow(
                 "SOCKS5 代理",
@@ -220,7 +241,11 @@ class SettingsActivity : Activity() {
         )
         client.addView(divider(), topMargin(10))
         client.addView(
-            switchRow("优先 P2P 直连", "直连失败时自动回退 Relay。", proxyP2pEnabled),
+            switchRow(
+                "启用 P2P 备用直连",
+                "Public Direct 不依赖此开关；自动/仅直连模式下公网直连不可用时继续尝试 P2P。",
+                proxyP2pEnabled,
+            ),
             topMargin(10),
         )
 
@@ -362,6 +387,9 @@ class SettingsActivity : Activity() {
                 socks5Enabled = socks5Enabled.isChecked,
                 httpEnabled = httpEnabled.isChecked,
                 proxyP2pEnabled = proxyP2pEnabled.isChecked,
+                proxyPathMode = proxyPathModeValues.getOrElse(proxyPathMode.selectedItemPosition) {
+                    ExitConfig.PROXY_PATH_AUTO
+                },
                 socks5Port = socks5Port.text.toString().toIntOrNull() ?: 1080,
                 httpPort = httpPort.text.toString().toIntOrNull() ?: 8080,
             )
@@ -397,6 +425,13 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, "SOCKS5 与 HTTP 不能使用相同端口", Toast.LENGTH_SHORT).show()
             return
         }
+        if (section == SECTION_PROXY &&
+            config.proxyPathMode == ExitConfig.PROXY_PATH_P2P_ONLY &&
+            !config.proxyP2pEnabled
+        ) {
+            Toast.makeText(this, "仅 P2P 模式需要启用 P2P 备用直连", Toast.LENGTH_SHORT).show()
+            return
+        }
         if (section == SECTION_VPN && config.vpnAppMode == ExitConfig.VPN_APP_MODE_INCLUDE && config.vpnPackages.isEmpty()) {
             Toast.makeText(this, "仅选中应用模式至少需要选择一个应用", Toast.LENGTH_SHORT).show()
             return
@@ -428,6 +463,7 @@ class SettingsActivity : Activity() {
         socks5Enabled.isChecked = cfg.socks5Enabled
         httpEnabled.isChecked = cfg.httpEnabled
         proxyP2pEnabled.isChecked = cfg.proxyP2pEnabled
+        proxyPathMode.setSelection(proxyPathModeValues.indexOf(cfg.proxyPathMode).coerceAtLeast(0))
         defaultExitId.setText(cfg.defaultExitId)
         socks5Port.setText(cfg.socks5Port.toString())
         httpPort.setText(cfg.httpPort.toString())

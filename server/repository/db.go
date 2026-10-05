@@ -728,6 +728,19 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 		if _, err := tx.Exec(`DELETE FROM message_channel_devices WHERE channel_id = ?`, channel.ID); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`UPDATE messages
+			SET identity_id = ?
+			WHERE channel_id = ?
+			  AND COALESCE(identity_id, '') = ''
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM message_deliveries md
+				LEFT JOIN devices d ON d.id = md.device_id
+				WHERE md.message_id = messages.id
+				  AND COALESCE(d.identity_id, '') <> ?
+			  )`, channel.IdentityID, channel.ID, channel.IdentityID); err != nil {
+			return err
+		}
 	}
 	if !channel.AllDevices {
 		seen := make(map[string]bool, len(channel.DeviceIDs))

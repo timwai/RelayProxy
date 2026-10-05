@@ -234,6 +234,21 @@ func (db *DB) ensureIdentityAccessSchema() error {
 	if err := db.ensureSQLiteColumn("devices", "denied_capabilities", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
+	// Preserve capability rejections made before denied_capabilities existed.
+	// Initial rejected enrollments have no device_id and are naturally skipped.
+	if _, err := db.Exec(`UPDATE devices
+		SET denied_capabilities = COALESCE((
+			SELECT request.requested_capabilities
+			FROM device_enrollment_requests request
+			JOIN device_identities identity ON identity.fingerprint = request.fingerprint
+			WHERE identity.device_id = devices.id
+				AND identity.status = 'approved'
+				AND request.state = 'rejected'
+			LIMIT 1
+		), denied_capabilities)
+		WHERE denied_capabilities = '[]'`); err != nil {
+		return err
+	}
 	if err := db.ensureSQLiteColumn("identities", "short_id", "VARCHAR(32)"); err != nil {
 		return err
 	}
@@ -859,28 +874,6 @@ func capabilitiesIntersection(left, right []string) []string {
 func upsertIncrementalEnrollment(tx *sql.Tx, identityID string, observation DeviceIdentityObservation, capabilities []string, now time.Time) (string, string, error) {
 	requestedRaw, err := encodeCapabilities(capabilities)
 	if err != nil {
-		return "", "", err
-	}
-	var existingID, existingState, existingRequestedRaw string
-	err = tx.QueryRow(`SELECT id, state, requested_capabilities
-		FROM device_enrollment_requests WHERE fingerprint = ?`, observation.Fingerprint).
-		Scan(&existingID, &existingState, &existingRequestedRaw)
-	if err == nil && existingState == EnrollmentRejected {
-		existingRequested, decodeErr := decodeCapabilities(existingRequestedRaw)
-		if decodeErr != nil {
-			return "", "", decodeErr
-		}
-		if len(capabilitiesExcept(existingRequested, capabilities)) == 0 && len(capabilitiesExcept(capabilities, existingRequested)) == 0 {
-			if _, err := tx.Exec(`UPDATE device_enrollment_requests SET
-				device_name = ?, platform = ?, arch = ?, client_version = ?, last_seen_at = ?
-				WHERE id = ?`, fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
-				observation.ClientVersion, now, existingID); err != nil {
-				return "", "", err
-			}
-			return existingID, EnrollmentRejected, nil
-		}
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", "", err
 	}
 	requestID := "enr_" + uuid.NewString()

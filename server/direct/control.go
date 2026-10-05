@@ -10,12 +10,13 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"
 )
 
-type CurrentTicketValidator func(context.Context, string, protocol.PublicDirectTicketValidationRequest) error
+type CurrentTicketValidator func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error)
 
 type Controller struct {
 	ctx             context.Context
@@ -96,13 +97,36 @@ func (c *Controller) HandleControl(ctx context.Context, stream tunnel.TunnelStre
 			})
 			return
 		}
-		if err := validator(ctx, dev.DeviceID, *validation); err != nil {
+		policy, err := validator(ctx, dev.DeviceID, *validation)
+		if err != nil {
 			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
 				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct authorization is no longer current",
 			})
 			return
 		}
-		_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{Success: true})
+		if policy == nil || strings.TrimSpace(policy.Fingerprint) == "" {
+			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
+				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct relay policy is unavailable",
+			})
+			return
+		}
+		checker, err := acl.NewChecker(*policy)
+		if err != nil {
+			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
+				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct relay policy is invalid",
+			})
+			return
+		}
+		normalized := checker.Policy()
+		if normalized.Fingerprint != policy.Fingerprint {
+			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
+				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct relay policy fingerprint mismatch",
+			})
+			return
+		}
+		_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
+			Success: true, RelayPolicy: &normalized,
+		})
 		return
 	}
 	if operation != "" && operation != protocol.PublicDirectControlRegister {

@@ -140,3 +140,15 @@ func TestLegacyVerificationRulesAreExposedAsMessageRules(t *testing.T) {
 		t.Fatalf("default verification rule missing after legacy conversion: %#v", last)
 	}
 }
+
+
+func TestLegacyDisabledDefaultBecomesDisabledV2Rule(t *testing.T) {
+	rules := LegacyMessageRules(false, nil)
+	if len(rules) != 1 {
+		t.Fatalf("got %d rules, want disabled default only: %#v", len(rules), rules)
+	}
+	if !rules[0].Default || rules[0].Enabled || rules[0].Type != "verification_code" ||
+		rules[0].Verification == nil {
+		t.Fatalf("legacy disabled default was not preserved: %#v", rules[0])
+	}
+}

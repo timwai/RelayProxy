@@ -137,6 +137,8 @@ type namedSession struct {
 	name string
 }
 
+func (s *namedSession) Transport() tunnel.TransportType { return tunnel.TransportTLS }
+
 func TestTunnelDialerPrefersReadyDirectPathAndWarmsMissingPath(t *testing.T) {
 	relay := &namedSession{name: "relay"}
 	direct := &namedSession{name: "direct"}

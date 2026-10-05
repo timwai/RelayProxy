@@ -326,4 +326,19 @@ func TestPublicDirectAuthorizationSnapshotBindsPolicyAndGrantRevision(t *testing
 	if !cross.Allowed || cross.AuthorizationRevision != updatedGrant.Revision {
 		t.Fatalf("grant revision not reflected in snapshot=%+v", cross)
 	}
+
+	deleted, err := db.DeleteDeviceIdentityGrant(updatedGrant.ID, "admin", updatedGrant.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deleted {
+		t.Fatal("grant delete reported no change")
+	}
+	revoked, err := db.PublicDirectAuthorization("direct-cross-client", "direct-exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Allowed || revoked.PolicyRevision != 0 || revoked.AuthorizationRevision != 0 {
+		t.Fatalf("revoked grant still authorizes Public Direct: %+v", revoked)
+	}
 }

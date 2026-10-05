@@ -158,6 +158,8 @@ func (a *Agent) startPublicDirectExit(
 ) (func(), error) {
 	runtime, err := proxydirect.StartExitRuntime(ctx, relay, accepted, handler, proxydirect.ExitRuntimeOptions{
 		MaxStreams: maxStreams,
+		PortStart:  accepted.PublicDirectPortStart,
+		PortEnd:    accepted.PublicDirectPortEnd,
 	})
 	if err != nil {
 		return nil, err

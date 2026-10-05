@@ -246,7 +246,7 @@ func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string)
 	if err == nil {
 		return session, stream, path, nil
 	}
-	if !path.IsDirect() || d.getTunnel == nil {
+	if !path.IsDirect() || d.getTunnel == nil || !d.directFallbackEnabled() {
 		return nil, nil, path, err
 	}
 	relay := d.getTunnel()

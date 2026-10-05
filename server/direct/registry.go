@@ -251,6 +251,7 @@ func (r *Registry) MarkFailed(deviceID, sessionID, address string, err error) bo
 	return r.update(deviceID, sessionID, address, func(record *EndpointRecord, now time.Time) {
 		record.State = StateFailed
 		record.Endpoint.Verified = false
+		record.Endpoint.DialAddress = ""
 		record.VerifiedAt = time.Time{}
 		record.ExpiresAt = time.Time{}
 		if err != nil {

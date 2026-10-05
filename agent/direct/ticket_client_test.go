@@ -10,10 +10,10 @@ import (
 func TestRequestTicketUsesDedicatedControlFrame(t *testing.T) {
 	stream := &registrationStream{}
 	if err := protocol.WriteJSON(&stream.read, protocol.PublicDirectTicketResponse{
-		Success: true,
-		Ticket:  []byte("signed-ticket"),
-		ExpiresAt: time.Now().Add(time.Minute).Unix(),
-		PolicyRevision: 7,
+		Success:               true,
+		Ticket:                []byte("signed-ticket"),
+		ExpiresAt:             time.Now().Add(time.Minute).Unix(),
+		PolicyRevision:        7,
 		AuthorizationRevision: 11,
 	}); err != nil {
 		t.Fatal(err)

@@ -30,6 +30,7 @@ type ExitRuntimeOptions struct {
 	PortEnd                 int
 	RegisterTimeout         time.Duration
 	NetworkCheckInterval    time.Duration
+	VerificationRefresh     time.Duration
 	NetworkSignature        func() string
 	ValidateTicket          TicketCurrentValidator
 }
@@ -171,22 +172,52 @@ func (r *ExitRuntime) Candidates() []protocol.PublicDirectEndpointCandidate {
 
 func (r *ExitRuntime) watchNetwork(ctx context.Context, relay tunnel.TunnelSession, fingerprint string, options ExitRuntimeOptions) {
 	defer close(r.networkDone)
-	interval := options.NetworkCheckInterval
-	if interval <= 0 {
-		interval = 10 * time.Second
+	networkInterval := options.NetworkCheckInterval
+	if networkInterval <= 0 {
+		networkInterval = 10 * time.Second
+	}
+	refreshInterval := options.VerificationRefresh
+	if refreshInterval <= 0 {
+		refreshInterval = 2 * time.Minute
 	}
 	signature := options.NetworkSignature
 	if signature == nil {
 		signature = netutil.CurrentNetworkSignature
 	}
 	previous := signature()
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	networkTicker := time.NewTicker(networkInterval)
+	refreshTicker := time.NewTicker(refreshInterval)
+	defer networkTicker.Stop()
+	defer refreshTicker.Stop()
+
+	register := func(epoch uint64) bool {
+		r.mu.RLock()
+		port := r.listenPort
+		r.mu.RUnlock()
+		candidates, err := registerExitEndpoints(ctx, relay, uint16(port), fingerprint,
+			options.ManualAdvertise, epoch, options.RegisterTimeout)
+		if err != nil {
+			return false
+		}
+		r.mu.Lock()
+		r.candidates = append([]protocol.PublicDirectEndpointCandidate(nil), candidates...)
+		r.mu.Unlock()
+		return true
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-refreshTicker.C:
+			r.mu.RLock()
+			epoch := r.networkEpoch
+			r.mu.RUnlock()
+			// Verification results are intentionally short-lived. Re-register
+			// the stable endpoint set so the Server can re-probe it before the
+			// previous verification TTL expires.
+			_ = register(epoch)
+		case <-networkTicker.C:
 			current := signature()
 			if current == "" || previous == "" {
 				previous = current
@@ -197,16 +228,12 @@ func (r *ExitRuntime) watchNetwork(ctx context.Context, relay tunnel.TunnelSessi
 			}
 			r.mu.RLock()
 			nextEpoch := r.networkEpoch + 1
-			port := r.listenPort
 			r.mu.RUnlock()
-			candidates, err := registerExitEndpoints(ctx, relay, uint16(port), fingerprint,
-				options.ManualAdvertise, nextEpoch, options.RegisterTimeout)
-			if err != nil {
+			if !register(nextEpoch) {
 				continue
 			}
 			r.mu.Lock()
 			r.networkEpoch = nextEpoch
-			r.candidates = append([]protocol.PublicDirectEndpointCandidate(nil), candidates...)
 			r.mu.Unlock()
 			previous = current
 		}

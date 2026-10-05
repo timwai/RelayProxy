@@ -261,7 +261,7 @@ func TestPublicDirectAuthorizationSnapshotBindsPolicyAndGrantRevision(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedIdentityGrantDevice(t, db, "direct-exit", "Direct Exit", exitIdentity.ID, []string{"proxy.exit"})
+	seedIdentityGrantDevice(t, db, "direct-exit", "Direct Exit", exitIdentity.ID, []string{"proxy.exit", "rdp.host"})
 	seedIdentityGrantDevice(t, db, "direct-same-client", "Direct Same Client", exitIdentity.ID, []string{"proxy.client"})
 	seedIdentityGrantDevice(t, db, "direct-cross-client", "Direct Cross Client", clientIdentity.ID, []string{"proxy.client"})
 

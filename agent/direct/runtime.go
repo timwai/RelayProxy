@@ -122,11 +122,11 @@ func StartExitRuntime(
 
 	runtimeCtx, cancel := context.WithCancel(parent)
 	runtime := &ExitRuntime{
-		cancel:      cancel,
-		listener:    listener,
-		done:        make(chan struct{}),
-		listenPort:  port,
-		candidates:  append([]protocol.PublicDirectEndpointCandidate(nil), candidates...),
+		cancel:     cancel,
+		listener:   listener,
+		done:       make(chan struct{}),
+		listenPort: port,
+		candidates: append([]protocol.PublicDirectEndpointCandidate(nil), candidates...),
 	}
 	go func() {
 		defer close(runtime.done)

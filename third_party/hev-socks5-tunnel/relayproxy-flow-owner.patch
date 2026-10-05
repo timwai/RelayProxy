@@ -344,7 +344,7 @@ diff --git a/src/misc/hev-utils.c b/src/misc/hev-utils.c
  #include "hev-mapped-dns.h"
  
  #include "hev-utils.h"
-@@ -103,14 +104,27 @@ hev_socks5_addr_from_lwip (HevSocks5Addr *addr, const ip_addr_t *ip, u16_t port)
+@@ -104,13 +105,27 @@ hev_socks5_addr_from_lwip (HevSocks5Addr *addr, const ip_addr_t *ip, u16_t port)
      switch (ip->type) {
      case IPADDR_TYPE_V4: {
          HevMappedDNS *dns = hev_mapped_dns_get ();
@@ -378,7 +378,7 @@ diff --git a/src/misc/hev-utils.c b/src/misc/hev-utils.c
 diff --git a/src/hev-socks5-session-udp.c b/src/hev-socks5-session-udp.c
 --- a/src/hev-socks5-session-udp.c
 +++ b/src/hev-socks5-session-udp.c
-@@ -193,9 +193,13 @@ udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
+@@ -193,9 +193,14 @@ udp_recv_handler (void *arg, struct udp_pcb *pcb, struct pbuf *p,
          return;
      }
  

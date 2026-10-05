@@ -45,7 +45,6 @@ type PublicDirectAuthResponse struct {
 	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
-
 const (
 	CapabilityProxyPublicDirect = "proxy_public_direct_v1"
 
@@ -94,8 +93,8 @@ type PublicDirectProbeResponse struct {
 }
 
 type PublicDirectHandshakeRequest struct {
-	Type  string                   `json:"type"`
-	Auth  *PublicDirectAuthRequest `json:"auth,omitempty"`
+	Type  string                    `json:"type"`
+	Auth  *PublicDirectAuthRequest  `json:"auth,omitempty"`
 	Probe *PublicDirectProbeRequest `json:"probe,omitempty"`
 }
 

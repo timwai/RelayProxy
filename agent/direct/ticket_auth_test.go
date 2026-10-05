@@ -240,3 +240,30 @@ func TestTicketAuthenticatorPolicyAuthenticationFailsClosedWithoutCurrentPolicy(
 		t.Fatalf("validated relay policy=%+v", policy)
 	}
 }
+
+
+func TestTicketAuthenticatorRejectsTamperedRelayPolicy(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	claims := validTicketClaims(now)
+	request := protocol.PublicDirectAuthRequest{
+		Version: protocol.PublicDirectAuthVersion, ClientDeviceID: claims.ClientDeviceID,
+		ExitDeviceID: claims.ExitDeviceID, Ticket: signedTicketForTest(t, privateKey, claims),
+	}
+	auth, err := NewTicketAuthenticator("server-1", publicKey, "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.now = func() time.Time { return now }
+	auth.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
+		policy := testDirectRelayPolicy(t)
+		policy.Fingerprint = "tampered"
+		return policy, nil
+	})
+	if policy, err := auth.AuthenticatePolicy(context.Background(), request); !errors.Is(err, ErrUnauthorized) || policy != nil {
+		t.Fatalf("tampered relay policy policy=%+v err=%v", policy, err)
+	}
+}

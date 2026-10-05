@@ -171,6 +171,10 @@ func main() {
 	}
 
 	var gw *gateway.Gateway
+	publicDirectTickets, err := serverdirect.NewTicketAuthority(serverInstanceID)
+	if err != nil {
+		log.Fatalf("[PublicDirect] Failed to initialize ticket authority: %v", err)
+	}
 	publicDirectRegistry := serverdirect.NewRegistry()
 	publicDirectVerifier := &serverdirect.Verifier{Registry: publicDirectRegistry}
 	publicDirectController := serverdirect.NewController(context.Background(), publicDirectRegistry, publicDirectVerifier, func(string) {
@@ -379,8 +383,24 @@ func main() {
 				if len(endpoints) == 0 {
 					continue
 				}
+				authorization, err := db.PublicDirectAuthorization(clientID, result[i].DeviceID)
+				if err != nil {
+					return nil, err
+				}
+				if !authorization.Allowed {
+					continue
+				}
+				ticket, expiresAt, err := publicDirectTickets.Issue(serverdirect.TicketIssue{
+					ClientDeviceID: clientID, ExitDeviceID: result[i].DeviceID,
+					PolicyRevision: authorization.PolicyRevision,
+					AuthorizationRevision: authorization.AuthorizationRevision,
+				})
+				if err != nil {
+					return nil, err
+				}
 				result[i].Direct = &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
 					Available: true, Transport: "quic", Endpoints: endpoints,
+					Ticket: ticket, TicketExpiresAt: expiresAt,
 				}}
 			}
 			if serverExit != nil {
@@ -425,8 +445,10 @@ func main() {
 			}
 			publicDirectController.InvalidateDevice(deviceID)
 		},
-		PublicDirectEnabled:     true,
-		MaxConnections:          cfg.Tunnel.MaxConnections,
+		PublicDirectEnabled:      true,
+		PublicDirectTicketIssuer: publicDirectTickets.Issuer(),
+		PublicDirectTicketKey:    publicDirectTickets.PublicKey(),
+		MaxConnections:           cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
 		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,
 		RendezvousAddress:       rendezvousAddress,

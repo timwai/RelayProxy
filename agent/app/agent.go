@@ -1043,7 +1043,8 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 					return
 				}
 				a.messages.Add(message)
-				log.Printf("[Message] received id=%s source=%s verification=%v", message.ID, message.Source, message.VerificationCode != "")
+				log.Printf("[Message] received id=%s source=%s type=%s popup=%v verification=%v",
+					message.ID, message.Source, message.MessageType, message.Popup, message.VerificationCode != "")
 				_ = protocol.WriteJSON(stream, protocol.PushMessageReceipt{MessageID: message.ID, Received: true})
 			}()
 			continue

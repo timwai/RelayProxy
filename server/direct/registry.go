@@ -38,6 +38,8 @@ type EndpointRecord struct {
 	LastError       string
 }
 
+const maxEndpointCandidates = 16
+
 type Registry struct {
 	mu      sync.Mutex
 	records map[string]map[string]EndpointRecord
@@ -56,6 +58,9 @@ func (r *Registry) Register(deviceID, sessionID string, observedIP netip.Addr, r
 	fingerprint, err := normalizeFingerprint(request.CertFingerprint)
 	if err != nil {
 		return nil, err
+	}
+	if len(request.Candidates) > maxEndpointCandidates {
+		return nil, fmt.Errorf("public direct registration has too many endpoint candidates: %d", len(request.Candidates))
 	}
 	candidates := make([]protocol.PublicDirectEndpointCandidate, 0, len(request.Candidates)+1)
 	if request.ListenerPort != 0 && observedIP.IsValid() && observedIP.Is4() && isPublicIP(observedIP) {

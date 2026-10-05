@@ -418,3 +418,44 @@ func TestPublicDirectSlowHandshakeDoesNotBlockValidClient(t *testing.T) {
 		t.Fatalf("valid authenticated session was not delivered: %v", validCtx.Err())
 	}
 }
+
+
+func TestPublicDirectListenerCloseUnblocksPendingAuthentication(t *testing.T) {
+	identity, err := secure.GenerateEphemeralIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := direct.Listen(direct.ListenerConfig{
+		ListenAddress: "127.0.0.1:0",
+		TLSConfig:     &tls.Config{Certificates: []tls.Certificate{identity.Certificate}},
+		Authenticator: direct.AuthenticatorFunc(func(context.Context, protocol.PublicDirectAuthRequest) error {
+			return nil
+		}),
+		AuthTimeout:             30 * time.Second,
+		MaxConcurrentHandshakes: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	slow, err := tunnel.DialDirectQUIC(ctx, listener.Addr(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		_ = listener.Close()
+		t.Fatal(err)
+	}
+	defer slow.Close()
+	time.Sleep(50 * time.Millisecond)
+
+	closed := make(chan error, 1)
+	go func() { closed <- listener.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil && !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("listener close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("listener close waited for authentication timeout")
+	}
+}

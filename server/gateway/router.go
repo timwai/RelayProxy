@@ -32,6 +32,7 @@ type StreamRouter struct {
 	rdpChecker        func(controllerDeviceID, targetDeviceID string) (bool, error)
 	rdpControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	p2pControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
+	publicDirectControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	onAudit           func(audit *repository.ConnectionAudit)
 }
 
@@ -54,6 +55,12 @@ func (r *StreamRouter) SetRDPControlHandler(fn func(context.Context, tunnel.Tunn
 // selected Exit.
 func (r *StreamRouter) SetP2PControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
 	r.p2pControlHandler = fn
+}
+
+// SetPublicDirectControlHandler installs endpoint registration signaling. It is
+// distinct from P2P rendezvous because Public Direct owns a stable listener.
+func (r *StreamRouter) SetPublicDirectControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
+	r.publicDirectControlHandler = fn
 }
 
 // SetLocalExit enables the Relay process itself as an egress node. The
@@ -271,6 +278,12 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 		if r.p2pControlHandler != nil && containsCapability(clientSession.Capabilities, protocol.CapabilityProxyP2P) &&
 			(containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) || containsCapability(clientSession.Grants, protocol.CapabilityProxyExit)) {
 			r.p2pControlHandler(ctx, clientStream, clientSession)
+		}
+	case protocol.FrameTypePublicDirectControl:
+		if r.publicDirectControlHandler != nil &&
+			containsCapability(clientSession.Capabilities, protocol.CapabilityProxyPublicDirect) &&
+			containsCapability(clientSession.Grants, protocol.CapabilityProxyExit) {
+			r.publicDirectControlHandler(ctx, clientStream, clientSession)
 		}
 	default:
 		log.Printf("[StreamRouter] Unsupported FrameType %d from device %s", header.Type, clientSession.DeviceID)

@@ -115,3 +115,96 @@ func TestControllerRejectsNonExitSession(t *testing.T) {
 		t.Fatal("non-exit session created endpoint records")
 	}
 }
+
+
+func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		validatorErr error
+		wantSuccess bool
+	}{
+		{name: "current", wantSuccess: true},
+		{name: "stale", validatorErr: errors.New("stale authorization")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := NewRegistry()
+			controller := NewController(context.Background(), registry, &Verifier{Registry: registry}, nil)
+			defer controller.Close()
+
+			var gotExitID string
+			var got protocol.PublicDirectTicketValidationRequest
+			controller.SetTicketValidator(func(_ context.Context, exitID string, request protocol.PublicDirectTicketValidationRequest) error {
+				gotExitID = exitID
+				got = request
+				return tc.validatorErr
+			})
+
+			request := protocol.PublicDirectRegistrationRequest{
+				Operation: protocol.PublicDirectControlValidateTicket,
+				TicketValidation: &protocol.PublicDirectTicketValidationRequest{
+					ClientDeviceID:        "client",
+					ExitDeviceID:          "exit",
+					PolicyRevision:        4,
+					AuthorizationRevision: 9,
+				},
+			}
+			stream := newControlStream(t, request)
+			dev := &session.DeviceSession{
+				SessionID: "session-1",
+				DeviceID:  "exit",
+				Grants:    []string{protocol.CapabilityProxyExit},
+				Tunnel: &observedSession{
+					remote: &net.TCPAddr{IP: net.ParseIP("8.8.8.8"), Port: 443},
+					done:   make(chan struct{}),
+				},
+			}
+			controller.HandleControl(context.Background(), stream, dev)
+
+			var response protocol.PublicDirectRegistrationResponse
+			if err := protocol.ReadJSON(&stream.write, &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Success != tc.wantSuccess {
+				t.Fatalf("response=%+v", response)
+			}
+			if !tc.wantSuccess && response.ErrorCode != protocol.ErrCodeAccessDenied {
+				t.Fatalf("stale response=%+v", response)
+			}
+			if gotExitID != "exit" || got.ClientDeviceID != "client" || got.ExitDeviceID != "exit" ||
+				got.PolicyRevision != 4 || got.AuthorizationRevision != 9 {
+				t.Fatalf("validator args exit=%q request=%+v", gotExitID, got)
+			}
+		})
+	}
+}
+
+func TestControllerRejectsTicketValidationForAnotherExit(t *testing.T) {
+	registry := NewRegistry()
+	controller := NewController(context.Background(), registry, &Verifier{Registry: registry}, nil)
+	defer controller.Close()
+
+	called := false
+	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) error {
+		called = true
+		return nil
+	})
+	stream := newControlStream(t, protocol.PublicDirectRegistrationRequest{
+		Operation: protocol.PublicDirectControlValidateTicket,
+		TicketValidation: &protocol.PublicDirectTicketValidationRequest{
+			ClientDeviceID: "client", ExitDeviceID: "other-exit",
+			PolicyRevision: 4, AuthorizationRevision: 9,
+		},
+	})
+	controller.HandleControl(context.Background(), stream, &session.DeviceSession{
+		SessionID: "session-1", DeviceID: "exit",
+		Grants: []string{protocol.CapabilityProxyExit},
+		Tunnel: &observedSession{remote: &net.TCPAddr{IP: net.ParseIP("8.8.8.8"), Port: 443}, done: make(chan struct{})},
+	})
+	var response protocol.PublicDirectRegistrationResponse
+	if err := protocol.ReadJSON(&stream.write, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Success || response.ErrorCode != protocol.ErrCodeAccessDenied || called {
+		t.Fatalf("cross-exit validation response=%+v called=%v", response, called)
+	}
+}

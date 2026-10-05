@@ -90,12 +90,13 @@ type ServerExitRuntimeStatus struct {
 }
 
 type PublicDirectEndpointStatus struct {
-	Address    string    `json:"address"`
-	Source     string    `json:"source"`
-	State      string    `json:"state"`
-	VerifiedAt time.Time `json:"verifiedAt,omitempty"`
-	ExpiresAt  time.Time `json:"expiresAt,omitempty"`
-	LastError  string    `json:"lastError,omitempty"`
+	Address     string    `json:"address"`
+	DialAddress string    `json:"dialAddress,omitempty"`
+	Source      string    `json:"source"`
+	State       string    `json:"state"`
+	VerifiedAt  time.Time `json:"verifiedAt,omitempty"`
+	ExpiresAt   time.Time `json:"expiresAt,omitempty"`
+	LastError   string    `json:"lastError,omitempty"`
 }
 
 func NewRouter(authService *service.AuthService, deviceService *service.DeviceService, sessions *session.Manager, db *repository.DB, options ...RouterOption) *Router {

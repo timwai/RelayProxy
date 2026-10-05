@@ -64,10 +64,10 @@ func TestMessageRuleV2RoundTripAndMessageMetadata(t *testing.T) {
 	}
 
 	message := &MessageRecord{
-		IdentityID: identity.ID,
-		ChannelID:  channel.ID,
-		Title:      "磁盘告警",
-		Content:    "生产服务器磁盘空间不足",
+		IdentityID:  identity.ID,
+		ChannelID:   channel.ID,
+		Title:       "磁盘告警",
+		Content:     "生产服务器磁盘空间不足",
 		MessageType: "important",
 		MessageRule: "重要告警",
 		Popup:       true,

@@ -1635,8 +1635,6 @@ class MainActivity : Activity() {
             adapter = UiKit.themedSpinnerAdapter(this@MainActivity, themeLabels)
             setSelection(themeModes.indexOf(store.themeMode()).coerceAtLeast(0), false)
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                private var initialized = false
-
                 override fun onItemSelected(
                     parent: android.widget.AdapterView<*>?,
                     view: View?,
@@ -1644,10 +1642,6 @@ class MainActivity : Activity() {
                     id: Long,
                 ) {
                     val selected = themeModes.getOrElse(position) { ConfigStore.THEME_SYSTEM }
-                    if (!initialized) {
-                        initialized = true
-                        return
-                    }
                     if (selected != ConfigStore(this@MainActivity).themeMode()) {
                         applyThemeMode(selected)
                     }

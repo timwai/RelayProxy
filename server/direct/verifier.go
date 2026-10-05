@@ -8,6 +8,10 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net"
+	"net/netip"
+	"strconv"
+	"strings"
 	"time"
 
 	"relayproxy/internal/cert"
@@ -20,10 +24,13 @@ const (
 	defaultVerifyTTL     = 5 * time.Minute
 )
 
+type endpointResolver func(context.Context, string) (string, error)
+
 type Verifier struct {
 	Registry *Registry
 	Timeout  time.Duration
 	TTL      time.Duration
+	resolve  endpointResolver
 }
 
 func (v *Verifier) Verify(ctx context.Context, deviceID, sessionID, address string) error {
@@ -44,11 +51,20 @@ func (v *Verifier) Verify(ctx context.Context, deviceID, sessionID, address stri
 	}
 	verifyCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	err := probeEndpoint(verifyCtx, record)
+
+	resolve := v.resolve
+	if resolve == nil {
+		resolve = resolvePublicEndpoint
+	}
+	dialAddress, err := resolve(verifyCtx, record.Endpoint.Address)
+	if err == nil {
+		err = probeEndpoint(verifyCtx, record, dialAddress)
+	}
 	if err != nil {
 		v.Registry.MarkFailed(deviceID, sessionID, address, err)
 		return err
 	}
+
 	ttl := v.TTL
 	if ttl <= 0 {
 		ttl = defaultVerifyTTL
@@ -59,7 +75,51 @@ func (v *Verifier) Verify(ctx context.Context, deviceID, sessionID, address stri
 	return nil
 }
 
-func probeEndpoint(ctx context.Context, record EndpointRecord) error {
+func resolvePublicEndpoint(ctx context.Context, address string) (string, error) {
+	return resolvePublicEndpointWithLookup(ctx, address, func(ctx context.Context, host string) ([]netip.Addr, error) {
+		return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	})
+}
+
+func resolvePublicEndpointWithLookup(
+	ctx context.Context,
+	address string,
+	lookup func(context.Context, string) ([]netip.Addr, error),
+) (string, error) {
+	host, portText, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return "", fmt.Errorf("invalid public direct endpoint %q", address)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return "", fmt.Errorf("invalid public direct endpoint port %q", portText)
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		ip = ip.Unmap()
+		if !isPublicIP(ip) {
+			return "", fmt.Errorf("public direct endpoint %q resolved to non-public address", address)
+		}
+		return net.JoinHostPort(ip.String(), strconv.Itoa(port)), nil
+	}
+	if lookup == nil {
+		return "", errors.New("public direct endpoint resolver is unavailable")
+	}
+	addrs, err := lookup(ctx, host)
+	if err != nil {
+		return "", fmt.Errorf("resolve public direct endpoint %q: %w", host, err)
+	}
+	for _, ip := range addrs {
+		ip = ip.Unmap()
+		if isPublicIP(ip) {
+			// Dial the verified public IP literal directly so a second DNS
+			// lookup cannot rebind the Server probe onto a private address.
+			return net.JoinHostPort(ip.String(), strconv.Itoa(port)), nil
+		}
+	}
+	return "", fmt.Errorf("public direct endpoint %q has no globally routable address", host)
+}
+
+func probeEndpoint(ctx context.Context, record EndpointRecord, dialAddress string) error {
 	tlsConfig := &tls.Config{
 		MinVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true,
@@ -67,7 +127,7 @@ func probeEndpoint(ctx context.Context, record EndpointRecord) error {
 			return cert.VerifyFingerprint(rawCerts, record.CertFingerprint)
 		},
 	}
-	session, err := tunnel.DialDirectQUIC(ctx, record.Endpoint.Address, tlsConfig, nil)
+	session, err := tunnel.DialDirectQUIC(ctx, dialAddress, tlsConfig, nil)
 	if err != nil {
 		return fmt.Errorf("public direct QUIC probe failed: %w", err)
 	}

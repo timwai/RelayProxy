@@ -319,6 +319,11 @@ func (db *DB) ensureMessageSchema() error {
 			title VARCHAR(200) NOT NULL,
 			content TEXT NOT NULL,
 			verification_code VARCHAR(64),
+			verification_rule VARCHAR(80),
+			message_type VARCHAR(40),
+			message_rule VARCHAR(80),
+			popup BOOLEAN NOT NULL DEFAULT FALSE,
+			popup_type VARCHAR(40),
 			route_rule VARCHAR(120),
 			source VARCHAR(120),
 			created_at TIMESTAMP NOT NULL
@@ -340,6 +345,7 @@ func (db *DB) ensureMessageSchema() error {
 			all_devices BOOLEAN NOT NULL DEFAULT FALSE,
 			use_default_verification BOOLEAN NOT NULL DEFAULT TRUE,
 			verification_rules TEXT NOT NULL DEFAULT '[]',
+			message_rules TEXT NOT NULL DEFAULT '[]',
 			route_rules TEXT NOT NULL DEFAULT '[]',
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL
@@ -366,6 +372,21 @@ func (db *DB) ensureMessageSchema() error {
 	if err := db.ensureSQLiteColumn("messages", "channel_id", "VARCHAR(80)"); err != nil {
 		return err
 	}
+	if err := db.ensureSQLiteColumn("messages", "verification_rule", "VARCHAR(80)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "message_type", "VARCHAR(40)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "message_rule", "VARCHAR(80)"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "popup", "BOOLEAN NOT NULL DEFAULT FALSE"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("messages", "popup_type", "VARCHAR(40)"); err != nil {
+		return err
+	}
 	if err := db.ensureSQLiteColumn("messages", "route_rule", "VARCHAR(120)"); err != nil {
 		return err
 	}
@@ -376,6 +397,9 @@ func (db *DB) ensureMessageSchema() error {
 		return err
 	}
 	if err := db.ensureSQLiteColumn("message_channels", "verification_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
+	if err := db.ensureSQLiteColumn("message_channels", "message_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
 		return err
 	}
 	if err := db.ensureSQLiteColumn("message_channels", "route_rules", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
@@ -559,6 +583,38 @@ type VerificationRule struct {
 	PopupType     string   `json:"popupType,omitempty"`
 }
 
+// MessageRule is the v2 message classification model. Matching a message and
+// extracting a verification code are separate concerns: only verification_code
+// rules carry a Verification extractor.
+type MessageMatchConfig struct {
+	MatchType     string   `json:"matchType"`
+	Keywords      []string `json:"keywords,omitempty"`
+	KeywordMode   string   `json:"keywordMode,omitempty"`
+	Pattern       string   `json:"pattern,omitempty"`
+	CaseSensitive bool     `json:"caseSensitive,omitempty"`
+}
+
+type VerificationExtractorConfig struct {
+	Type         string `json:"type"`
+	Pattern      string `json:"pattern,omitempty"`
+	MaxDistance  int    `json:"maxDistance,omitempty"`
+	MinLength    int    `json:"minLength,omitempty"`
+	MaxLength    int    `json:"maxLength,omitempty"`
+	AllowLetters bool   `json:"allowLetters,omitempty"`
+	AllowDigits  bool   `json:"allowDigits,omitempty"`
+	RequireDigit bool   `json:"requireDigit,omitempty"`
+}
+
+type MessageRule struct {
+	Name         string                       `json:"name"`
+	Type         string                       `json:"type"`
+	Enabled      bool                         `json:"enabled"`
+	Default      bool                         `json:"default,omitempty"`
+	Match        MessageMatchConfig           `json:"match"`
+	Verification *VerificationExtractorConfig `json:"verification,omitempty"`
+	Popup        *bool                        `json:"popup,omitempty"`
+}
+
 func boolValue(value bool) *bool {
 	return &value
 }
@@ -591,6 +647,84 @@ func EnsureDefaultVerificationRule(rules []VerificationRule) []VerificationRule 
 	return append(rules, DefaultVerificationRule())
 }
 
+// LegacyMessageRules converts the historical verificationRules model into the
+// typed message-rule model. Custom rules keep their order and the editable
+// default detector remains last, matching the old precedence.
+func LegacyMessageRules(useDefault bool, rules []VerificationRule) []MessageRule {
+	if useDefault {
+		rules = EnsureDefaultVerificationRule(rules)
+	}
+	out := make([]MessageRule, 0, len(rules))
+	appendRule := func(rule VerificationRule) {
+		if rule.Default && !useDefault {
+			return
+		}
+		ruleType := strings.ToLower(strings.TrimSpace(rule.PopupType))
+		switch ruleType {
+		case "message", "important", "verification_code":
+		default:
+			ruleType = "verification_code"
+		}
+		match := MessageMatchConfig{CaseSensitive: rule.CaseSensitive, KeywordMode: "any"}
+		if len(rule.Keywords) > 0 {
+			match.MatchType = "keywords"
+			match.Keywords = append([]string(nil), rule.Keywords...)
+		} else if ruleType != "verification_code" && strings.TrimSpace(rule.Pattern) != "" {
+			match.MatchType = "regex"
+			match.Pattern = strings.TrimSpace(rule.Pattern)
+		} else {
+			match.MatchType = "all"
+		}
+		next := MessageRule{
+			Name:    strings.TrimSpace(rule.Name),
+			Type:    ruleType,
+			Enabled: true,
+			Default: rule.Default,
+			Match:   match,
+			Popup:   rule.Popup,
+		}
+		if next.Name == "" {
+			if rule.Default {
+				next.Name = "默认验证码"
+			} else {
+				next.Name = "消息规则"
+			}
+		}
+		if ruleType == "verification_code" {
+			extractor := &VerificationExtractorConfig{
+				Type:         "auto",
+				MaxDistance:  rule.MaxDistance,
+				MinLength:    4,
+				MaxLength:    8,
+				AllowLetters: true,
+				AllowDigits:  true,
+				RequireDigit: true,
+			}
+			if extractor.MaxDistance <= 0 {
+				extractor.MaxDistance = 64
+			}
+			if strings.TrimSpace(rule.Pattern) != "" {
+				extractor.Type = "regex"
+				extractor.Pattern = strings.TrimSpace(rule.Pattern)
+			}
+			next.Verification = extractor
+		}
+		out = append(out, next)
+	}
+	for _, rule := range rules {
+		if !rule.Default {
+			appendRule(rule)
+		}
+	}
+	for _, rule := range rules {
+		if rule.Default {
+			appendRule(rule)
+			break
+		}
+	}
+	return out
+}
+
 type MessageRouteRule struct {
 	Name          string   `json:"name"`
 	MatchType     string   `json:"matchType"`
@@ -606,7 +740,8 @@ type MessageChannel struct {
 	Name                   string             `json:"name"`
 	AllDevices             bool               `json:"allDevices"`
 	DeviceIDs              []string           `json:"deviceIds"`
-	UseDefaultVerification bool               `json:"useDefaultVerification"`
+	MessageRules           []MessageRule      `json:"messageRules,omitempty"`
+	UseDefaultVerification bool               `json:"useDefaultVerification,omitempty"`
 	VerificationRules      []VerificationRule `json:"verificationRules,omitempty"`
 	RouteRules             []MessageRouteRule `json:"routeRules,omitempty"`
 	CreatedAt              time.Time          `json:"createdAt"`

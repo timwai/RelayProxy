@@ -260,7 +260,6 @@ func TestPublicDirectReusesExistingExitHandlerForTCPAndUDP(t *testing.T) {
 	}
 }
 
-
 func TestPublicDirectSlowHandshakeDoesNotBlockValidClient(t *testing.T) {
 	identity, err := secure.GenerateEphemeralIdentity()
 	if err != nil {

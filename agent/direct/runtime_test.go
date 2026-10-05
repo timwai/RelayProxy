@@ -120,3 +120,51 @@ func TestExitRuntimeReregistersAfterNetworkChange(t *testing.T) {
 		t.Fatalf("runtime network epoch=%d, want 2", runtime.networkEpoch)
 	}
 }
+
+func TestExitRuntimeRefreshesVerificationWithoutNetworkChange(t *testing.T) {
+	session := &runtimeRegistrationSession{done: make(chan struct{})}
+	runtime := &ExitRuntime{
+		networkDone:  make(chan struct{}),
+		listenPort:   35820,
+		networkEpoch: 1,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go runtime.watchNetwork(ctx, session, "sha256:0000000000000000000000000000000000000000000000000000000000000000", ExitRuntimeOptions{
+		ManualAdvertise:      "exit.example.com:35820",
+		RegisterTimeout:      100 * time.Millisecond,
+		NetworkCheckInterval: time.Hour,
+		VerificationRefresh:  5 * time.Millisecond,
+		NetworkSignature:     func() string { return "stable-network" },
+	})
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		session.mu.Lock()
+		count := len(session.streams)
+		session.mu.Unlock()
+		if count > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-runtime.networkDone
+			t.Fatal("stable network did not refresh Public Direct verification")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	<-runtime.networkDone
+
+	requests := session.requests(t)
+	if len(requests) == 0 {
+		t.Fatal("verification refresh did not register endpoints")
+	}
+	for _, request := range requests {
+		if request.NetworkEpoch != 1 {
+			t.Fatalf("stable network refresh changed epoch: %+v", request)
+		}
+	}
+	if runtime.networkEpoch != 1 {
+		t.Fatalf("stable network refresh changed runtime epoch=%d", runtime.networkEpoch)
+	}
+}

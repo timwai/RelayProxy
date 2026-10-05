@@ -133,8 +133,8 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		return
 	}
 
-	verification := messageutil.MatchVerificationCodeWithRules(
-		content, channel.UseDefaultVerification, messageutilVerificationRules(channel.VerificationRules),
+	classification := messageutil.MatchMessageRules(
+		content, messageutilMessageRules(channel.MessageRules),
 	)
 	message := &repository.MessageRecord{
 		IdentityID:       channel.IdentityID,
@@ -143,10 +143,17 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		Content:          content,
 		Source:           source,
 		RouteRule:        routeRuleName,
-		VerificationCode: verification.Code,
-		VerificationRule: verification.RuleName,
-		Popup:            verification.Popup,
-		PopupType:        verification.PopupType,
+		MessageType:      classification.Type,
+		MessageRule:      classification.RuleName,
+		VerificationCode: classification.VerificationCode,
+		VerificationRule: func() string {
+			if classification.Type == messageutil.MessageTypeVerification {
+				return classification.RuleName
+			}
+			return ""
+		}(),
+		Popup:     classification.Popup,
+		PopupType: classification.Type,
 		CreatedAt:        time.Now().UTC(),
 	}
 	if err := h.db.CreateMessage(message, targets); err != nil {
@@ -219,6 +226,8 @@ func (h *PublicPushHandler) pushMessage(sess *session.DeviceSession, message *re
 		ID:               message.ID,
 		Title:            message.Title,
 		Content:          message.Content,
+		MessageType:      message.MessageType,
+		MessageRule:      message.MessageRule,
 		VerificationCode: message.VerificationCode,
 		VerificationRule: message.VerificationRule,
 		Popup:            message.Popup,

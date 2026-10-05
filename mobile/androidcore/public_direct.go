@@ -1,11 +1,14 @@
 package androidcore
 
 import (
+	"context"
+	"log"
 	"strings"
 
 	agentclient "relayproxy/agent/client"
 	proxydirect "relayproxy/agent/direct"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 )
 
 type publicDirectClientManager = proxydirect.ClientManager
@@ -143,4 +146,26 @@ func (c *Client) closePublicDirectClient() error {
 		return manager.Close()
 	}
 	return nil
+}
+
+func (c *Client) startPublicDirectExit(
+	ctx context.Context,
+	relay tunnel.TunnelSession,
+	accepted protocol.DeviceAccepted,
+	enabled bool,
+	maxStreams int,
+) func() {
+	if c == nil || !enabled {
+		return func() {}
+	}
+	runtime, err := proxydirect.StartExitRuntime(ctx, relay, accepted, c.handler, proxydirect.ExitRuntimeOptions{
+		MaxStreams: maxStreams,
+	})
+	if err != nil {
+		log.Printf("[PublicDirect] Android exit listener unavailable; P2P/Relay fallback remains active: %v", err)
+		return func() {}
+	}
+	log.Printf("[PublicDirect] Android exit listener registered on UDP %d with %d local candidate(s)",
+		runtime.ListenPort(), len(runtime.Candidates()))
+	return func() { _ = runtime.Close() }
 }

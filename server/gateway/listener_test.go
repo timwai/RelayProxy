@@ -612,6 +612,16 @@ func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 		t.Fatal("client startup inventory revision was not set")
 	}
 
+	manualRevision := gateway.RefreshProxyExitInventories()
+	manual := readInventoryPush(t, clientSession)
+	if manual.ProxyExits == nil || len(*manual.ProxyExits) != 0 {
+		t.Fatalf("manual refresh inventory=%+v, want explicit empty list", manual.ProxyExits)
+	}
+	if manual.ProxyExitRevision != manualRevision || manualRevision <= initialRevision {
+		t.Fatalf("manual revision=%d push=%d initial=%d", manualRevision, manual.ProxyExitRevision, initialRevision)
+	}
+	initialRevision = manualRevision
+
 	exitIdentity, err := deviceidentity.Generate()
 	if err != nil {
 		t.Fatal(err)

@@ -169,7 +169,7 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 			UPnPEnabled: c.P2P.UPnPEnabled != nil && *c.P2P.UPnPEnabled,
 		},
 		Direct: DirectSettings{
-			Enabled: c.Direct.Enabled != nil && *c.Direct.Enabled,
+			Enabled:   c.Direct.Enabled != nil && *c.Direct.Enabled,
 			PortStart: c.Direct.PortStart, PortEnd: c.Direct.PortEnd,
 		},
 	}

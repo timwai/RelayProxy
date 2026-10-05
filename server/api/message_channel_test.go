@@ -415,7 +415,6 @@ func TestServerMessagesFilterAndClearByChannel(t *testing.T) {
 	}
 }
 
-
 func createMessageIdentityLogin(t *testing.T, router *Router, adminCookie *http.Cookie, username, name string) (repository.Identity, *http.Cookie) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{
@@ -588,7 +587,6 @@ func TestMessageChannelsAreIsolatedByIdentity(t *testing.T) {
 		t.Fatalf("identity B saw identity A messages: %+v", messagesB)
 	}
 }
-
 
 func TestLegacyUnscopedChannelFailsClosedUntilAdminAssignsIdentity(t *testing.T) {
 	router, cleanup := setupTestRouter(t)

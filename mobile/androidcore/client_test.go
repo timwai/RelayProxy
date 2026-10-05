@@ -276,3 +276,21 @@ func TestAndroidProxyPathModeNormalization(t *testing.T) {
 		t.Fatal("p2p_only without P2P enabled was accepted")
 	}
 }
+
+func TestAndroidMessageQueueDrainsOnce(t *testing.T) {
+	client := &Client{}
+	client.enqueueMessage(protocol.PushMessage{
+		ID: "msg-1", Content: "验证码 482931", VerificationCode: "482931",
+		VerificationRule: "默认验证码", Popup: true, PopupType: "verification_code",
+	})
+	var messages []protocol.PushMessage
+	if err := json.Unmarshal([]byte(client.PopMessagesJSON()), &messages); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 1 || messages[0].ID != "msg-1" || !messages[0].Popup || messages[0].PopupType != "verification_code" {
+		t.Fatalf("unexpected messages: %+v", messages)
+	}
+	if got := client.PopMessagesJSON(); got != "[]" {
+		t.Fatalf("message queue was not drained: %s", got)
+	}
+}

@@ -227,8 +227,8 @@
     </div>
 
     <section class="channel-rule-section">
-      <div class="channel-rule-heading"><div><h3>验证码识别</h3><p>先执行自定义规则，再执行默认规则；支持数字和字母数字组合。</p></div><button id="channel-verification-add" type="button" class="small-button">+ 自定义规则</button></div>
-      <label class="switch-row"><input id="channel-use-default-verification" type="checkbox" checked><span><strong>启用默认识别规则</strong><small>包含“验证码 / 动态密钥 / 附加码 / OTP”等语义，默认识别 4–8 位且至少含一个数字的字母数字码。</small></span></label>
+      <div class="channel-rule-heading"><div><h3>消息识别与弹窗</h3><p>先执行自定义规则，再执行默认规则；每条规则都可以决定是否弹窗以及弹窗类型。</p></div><button id="channel-verification-add" type="button" class="small-button">+ 自定义规则</button></div>
+      <label class="switch-row"><input id="channel-use-default-verification" type="checkbox" checked><span><strong>启用默认验证码规则</strong><small>默认规则本身也可以编辑，包括规则名称、关键词、正则、匹配距离和弹窗方式。</small></span></label>
       <div id="channel-verification-rules" class="channel-rule-list"></div>
     </section>
 

@@ -473,6 +473,7 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 		}
 	}
 
+	channel.VerificationRules = repository.EnsureDefaultVerificationRule(channel.VerificationRules)
 	verificationRules, err := normalizeVerificationRules(channel.VerificationRules)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -486,7 +487,7 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 	}
 	channel.RouteRules = routeRules
 
-	if !channel.UseDefaultVerification && len(channel.VerificationRules) == 0 {
+	if !channel.UseDefaultVerification && customVerificationRuleCount(channel.VerificationRules) == 0 {
 		writeError(w, http.StatusBadRequest, "enable default verification recognition or add at least one custom verification rule")
 		return nil, false
 	}
@@ -656,10 +657,19 @@ func (r *Router) handleChannelPush(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	verification := messageutil.MatchVerificationCodeWithRules(
+		content, channel.UseDefaultVerification, messageutilVerificationRules(channel.VerificationRules),
+	)
 	message := &repository.MessageRecord{
-		IdentityID: channel.IdentityID,
-		ChannelID: channel.ID, Title: title, Content: content, Source: source,
-		VerificationCode: messageutil.ExtractVerificationCode(content),
+		IdentityID:       channel.IdentityID,
+		ChannelID:        channel.ID,
+		Title:            title,
+		Content:          content,
+		Source:           source,
+		VerificationCode: verification.Code,
+		VerificationRule: verification.RuleName,
+		Popup:            verification.Popup,
+		PopupType:        verification.PopupType,
 		CreatedAt:        time.Now().UTC(),
 	}
 	if err := r.db.CreateMessage(message, targets); err != nil {
@@ -727,7 +737,8 @@ func (r *Router) pushMessage(sess *session.DeviceSession, message *repository.Me
 	}
 	wire := protocol.PushMessage{
 		ID: message.ID, Title: message.Title, Content: message.Content,
-		VerificationCode: message.VerificationCode, Source: message.Source,
+		VerificationCode: message.VerificationCode, VerificationRule: message.VerificationRule,
+		Popup: message.Popup, PopupType: message.PopupType, Source: message.Source,
 		CreatedAt: message.CreatedAt.UnixMilli(),
 	}
 	if err := protocol.WriteJSON(stream, wire); err != nil {

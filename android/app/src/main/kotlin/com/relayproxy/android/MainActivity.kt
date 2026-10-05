@@ -3,9 +3,12 @@ package com.relayproxy.android
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -34,6 +37,7 @@ import android.widget.TextView
 import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.ArrayDeque
 
 /**
  * RelayProxy Android 客户端全新现代主控制台。
@@ -138,6 +142,16 @@ class MainActivity : Activity() {
     private var isPingingNodes = false
 
     private val handler = Handler(Looper.getMainLooper())
+    private val messagePopupQueue = ArrayDeque<JSONObject>()
+    private var activeMessageDialog: AlertDialog? = null
+    private var messageReceiverRegistered = false
+    private val messageReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val raw = intent?.getStringExtra(RelayExitService.EXTRA_MESSAGE_JSON) ?: return
+            runCatching { JSONObject(raw) }.getOrNull()?.let(::enqueueMessagePopup)
+        }
+    }
+
     private val pollStatus = object : Runnable {
         override fun run() {
             renderStatus()
@@ -152,11 +166,13 @@ class MainActivity : Activity() {
         setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
         setContentView(buildRootUi())
+        handleMessageIntent(intent)
         requestNotificationPermission()
     }
 
     override fun onResume() {
         super.onResume()
+        registerMessageReceiver()
         syncRoutingModeFromStore()
         if (::rulesListContainer.isInitialized) refreshRoutingTab()
         connectControlChannel()
@@ -167,8 +183,17 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         RelayExitService.setUiVisible(false)
+        unregisterMessageReceiver()
         handler.removeCallbacks(pollStatus)
         super.onPause()
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent != null) {
+            setIntent(intent)
+            handleMessageIntent(intent)
+        }
     }
 
     @Deprecated("Deprecated in Android API; retained for VPN consent result compatibility")
@@ -2334,6 +2359,99 @@ class MainActivity : Activity() {
 
     private fun formatDeviceId(value: String): String {
         return value.chunked(16).joinToString("\n")
+    }
+
+    private fun registerMessageReceiver() {
+        if (messageReceiverRegistered) return
+        val filter = IntentFilter(RelayExitService.ACTION_MESSAGE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(messageReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(messageReceiver, filter)
+        }
+        messageReceiverRegistered = true
+    }
+
+    private fun unregisterMessageReceiver() {
+        if (!messageReceiverRegistered) return
+        messageReceiverRegistered = false
+        runCatching { unregisterReceiver(messageReceiver) }
+    }
+
+    private fun handleMessageIntent(source: Intent?) {
+        val raw = source?.getStringExtra(RelayExitService.EXTRA_MESSAGE_JSON) ?: return
+        source.removeExtra(RelayExitService.EXTRA_MESSAGE_JSON)
+        runCatching { JSONObject(raw) }.getOrNull()?.let(::enqueueMessagePopup)
+    }
+
+    private fun enqueueMessagePopup(message: JSONObject) {
+        if (!message.optBoolean("popup", false)) return
+        val id = message.optString("id", "")
+        if (id.isNotBlank() && messagePopupQueue.any { it.optString("id", "") == id }) return
+        messagePopupQueue.addLast(message)
+        showNextMessagePopup()
+    }
+
+    private fun showNextMessagePopup() {
+        if (activeMessageDialog?.isShowing == true) return
+        val message = messagePopupQueue.pollFirst() ?: return
+        val popupType = message.optString("popupType", "verification_code")
+        val title = message.optString("title", "RelayProxy 消息").ifBlank { "RelayProxy 消息" }
+        val content = message.optString("content", "")
+        val code = message.optString("verificationCode", "")
+        val rule = message.optString("verificationRule", "")
+        val builder = when (popupType) {
+            "message" -> UiKit.alertDialog(this, title, content.ifBlank { "收到一条新消息" })
+                .setPositiveButton("知道了", null)
+            "important" -> UiKit.alertDialog(
+                this,
+                "重要提醒 · $title",
+                buildString {
+                    if (content.isNotBlank()) append(content)
+                    if (code.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append("验证码：").append(code)
+                    }
+                }.ifBlank { "收到一条重要消息" },
+            ).setPositiveButton("知道了", null)
+            else -> UiKit.alertDialog(
+                this,
+                title.ifBlank { "收到新的验证码" },
+                buildString {
+                    if (code.isNotBlank()) append("验证码：").append(code)
+                    if (content.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append(content)
+                    }
+                    if (rule.isNotBlank()) {
+                        if (isNotEmpty()) append("\n\n")
+                        append("匹配规则：").append(rule)
+                    }
+                }.ifBlank { "收到一条验证码消息" },
+            ).setNegativeButton("关闭", null)
+                .setPositiveButton("复制验证码") { _, _ ->
+                    if (code.isNotBlank()) {
+                        val clipboard = getSystemService(ClipboardManager::class.java)
+                        clipboard.setPrimaryClip(ClipData.newPlainText("RelayProxy verification code", code))
+                        Toast.makeText(this, "验证码已复制", Toast.LENGTH_SHORT).show()
+                    }
+                }
+        }
+        if (popupType == "important" && code.isNotBlank()) {
+            builder.setNeutralButton("复制验证码") { _, _ ->
+                val clipboard = getSystemService(ClipboardManager::class.java)
+                clipboard.setPrimaryClip(ClipData.newPlainText("RelayProxy verification code", code))
+                Toast.makeText(this, "验证码已复制", Toast.LENGTH_SHORT).show()
+            }
+        }
+        activeMessageDialog = builder.create().also { dialog ->
+            dialog.setOnDismissListener {
+                activeMessageDialog = null
+                handler.post { showNextMessagePopup() }
+            }
+            dialog.show()
+        }
     }
 
     private fun requestNotificationPermission() {

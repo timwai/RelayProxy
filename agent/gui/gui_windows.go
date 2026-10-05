@@ -64,7 +64,7 @@ type appWindow struct {
 
 func disableVerificationNativeFrame() {
 	class, classErr := windows.UTF16PtrFromString(windowClass)
-	title, titleErr := windows.UTF16PtrFromString("RelayProxy 验证码")
+	title, titleErr := windows.UTF16PtrFromString("RelayProxy 消息")
 	if classErr != nil || titleErr != nil {
 		return
 	}
@@ -199,7 +199,7 @@ func Run(b *bridge.UIBridge, opts Options) error {
 
 	verification := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:                       "verification",
-		Title:                      "RelayProxy 验证码",
+		Title:                      "RelayProxy 消息",
 		Width:                      520,
 		Height:                     390,
 		URL:                        "/verification.html",
@@ -430,7 +430,7 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	}
 	payload := string(data)
 	a.eval("window.onRelayMessage && window.onRelayMessage(" + payload + ")")
-	if strings.TrimSpace(message.VerificationCode) == "" || a.verification == nil {
+	if a.verification == nil || !shouldPopupMessage(message) {
 		return
 	}
 	popup := a.verification
@@ -439,13 +439,13 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	popup.Show()
 	disableVerificationNativeFrame()
 	popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
-		"window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+		"window.enqueueMessage && window.enqueueMessage(" + payload + ")")
 	// A message may arrive during the hidden WebView's first paint. Retrying is
 	// harmless because the popup page deduplicates by message ID.
 	time.AfterFunc(250*time.Millisecond, func() {
 		if a.verification == popup {
 			popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
-				"window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+				"window.enqueueMessage && window.enqueueMessage(" + payload + ")")
 		}
 	})
 }

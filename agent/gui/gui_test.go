@@ -3,6 +3,8 @@ package gui
 import (
 	"strings"
 	"testing"
+
+	"relayproxy/agent/app"
 )
 
 func TestDesktopWindowDimensionsRemainResponsive(t *testing.T) {
@@ -130,6 +132,66 @@ func TestSettingsDoNotHideManualLaunch(t *testing.T) {
 	} {
 		if strings.Contains(page, forbidden) {
 			t.Fatalf("settings still expose manual start-minimized behavior %q", forbidden)
+		}
+	}
+}
+
+func TestDesktopPopupCompatibility(t *testing.T) {
+	tests := []struct {
+		name    string
+		message app.Message
+		want    bool
+	}{
+		{
+			name:    "legacy verification",
+			message: app.Message{VerificationCode: "482931"},
+			want:    true,
+		},
+		{
+			name:    "legacy normal message",
+			message: app.Message{Content: "hello"},
+			want:    false,
+		},
+		{
+			name:    "explicit disabled verification",
+			message: app.Message{VerificationCode: "482931", PopupType: "verification_code", Popup: false},
+			want:    false,
+		},
+		{
+			name:    "normal message popup",
+			message: app.Message{Content: "hello", PopupType: "message", Popup: true},
+			want:    true,
+		},
+		{
+			name:    "important popup",
+			message: app.Message{Content: "urgent", PopupType: "important", Popup: true},
+			want:    true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldPopupMessage(tc.message); got != tc.want {
+				t.Fatalf("shouldPopupMessage(%+v) = %v, want %v", tc.message, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDesktopPopupAssetSupportsAllMessageTypes(t *testing.T) {
+	data, err := assets.ReadFile("assets/verification.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"window.enqueueMessage",
+		"verification_code",
+		"important",
+		"MESSAGE",
+		"复制验证码",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("desktop popup asset missing %q", want)
 		}
 	}
 }

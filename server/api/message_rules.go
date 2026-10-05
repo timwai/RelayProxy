@@ -10,13 +10,37 @@ import (
 )
 
 func normalizeVerificationRules(rules []repository.VerificationRule) ([]repository.VerificationRule, error) {
-	if len(rules) > 32 {
+	rules = repository.EnsureDefaultVerificationRule(rules)
+	if len(rules) > 33 {
 		return nil, fmt.Errorf("too many verification rules")
 	}
 	out := make([]repository.VerificationRule, 0, len(rules))
+	defaultCount := 0
 	for _, rule := range rules {
 		rule.Name = strings.TrimSpace(rule.Name)
 		rule.Pattern = strings.TrimSpace(rule.Pattern)
+		rule.PopupType = strings.ToLower(strings.TrimSpace(rule.PopupType))
+		if rule.Popup == nil {
+			enabled := true
+			rule.Popup = &enabled
+		}
+		if rule.PopupType == "" {
+			rule.PopupType = "verification_code"
+		}
+		switch rule.PopupType {
+		case "verification_code", "message", "important":
+		default:
+			return nil, fmt.Errorf("verification rule %q has unsupported popupType %q", rule.Name, rule.PopupType)
+		}
+		if rule.Default {
+			defaultCount++
+			if defaultCount > 1 {
+				return nil, fmt.Errorf("only one default verification rule is allowed")
+			}
+			if rule.Name == "" {
+				rule.Name = "默认验证码"
+			}
+		}
 		keywords := make([]string, 0, len(rule.Keywords))
 		seen := make(map[string]bool, len(rule.Keywords))
 		for _, keyword := range rule.Keywords {
@@ -31,6 +55,7 @@ func normalizeVerificationRules(rules []repository.VerificationRule) ([]reposito
 		if err := messageutil.ValidateVerificationRule(messageutil.VerificationRule{
 			Name: rule.Name, Keywords: rule.Keywords, Pattern: rule.Pattern,
 			MaxDistance: rule.MaxDistance, CaseSensitive: rule.CaseSensitive,
+			Default: rule.Default, Popup: rule.Popup, PopupType: rule.PopupType,
 		}); err != nil {
 			return nil, err
 		}
@@ -39,12 +64,23 @@ func normalizeVerificationRules(rules []repository.VerificationRule) ([]reposito
 	return out, nil
 }
 
+func customVerificationRuleCount(rules []repository.VerificationRule) int {
+	count := 0
+	for _, rule := range rules {
+		if !rule.Default {
+			count++
+		}
+	}
+	return count
+}
+
 func messageutilVerificationRules(rules []repository.VerificationRule) []messageutil.VerificationRule {
 	out := make([]messageutil.VerificationRule, 0, len(rules))
 	for _, rule := range rules {
 		out = append(out, messageutil.VerificationRule{
 			Name: rule.Name, Keywords: rule.Keywords, Pattern: rule.Pattern,
 			MaxDistance: rule.MaxDistance, CaseSensitive: rule.CaseSensitive,
+			Default: rule.Default, Popup: rule.Popup, PopupType: rule.PopupType,
 		})
 	}
 	return out

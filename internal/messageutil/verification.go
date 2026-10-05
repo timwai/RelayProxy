@@ -22,6 +22,28 @@ type VerificationRule struct {
 	Pattern       string   `json:"pattern,omitempty"`
 	MaxDistance   int      `json:"maxDistance,omitempty"`
 	CaseSensitive bool     `json:"caseSensitive,omitempty"`
+	Default       bool     `json:"default,omitempty"`
+	Popup         *bool    `json:"popup,omitempty"`
+	PopupType     string   `json:"popupType,omitempty"`
+}
+
+type VerificationMatch struct {
+	Code      string
+	RuleName  string
+	Popup     bool
+	PopupType string
+}
+
+func rulePopup(rule VerificationRule) bool {
+	return rule.Popup == nil || *rule.Popup
+}
+
+func rulePopupType(rule VerificationRule) string {
+	value := strings.ToLower(strings.TrimSpace(rule.PopupType))
+	if value == "" {
+		return "verification_code"
+	}
+	return value
 }
 
 // ValidateVerificationRule checks a custom detector before it is persisted.
@@ -84,6 +106,52 @@ func ExtractVerificationCodeWithRules(message string, useDefault bool, rules []V
 		return ""
 	}
 	return extractDefault(text)
+}
+
+// MatchVerificationCodeWithRules returns the matched rule metadata used by
+// clients to decide whether and how the message should be presented. Custom
+// rules are evaluated before the editable default rule.
+func MatchVerificationCodeWithRules(message string, useDefault bool, rules []VerificationRule) VerificationMatch {
+	text := strings.TrimSpace(message)
+	if text == "" {
+		return VerificationMatch{}
+	}
+	var defaultRule *VerificationRule
+	for i := range rules {
+		rule := rules[i]
+		if rule.Default {
+			if defaultRule == nil {
+				copy := rule
+				defaultRule = &copy
+			}
+			continue
+		}
+		if code, ok := extractWithRule(text, rule); ok {
+			return VerificationMatch{
+				Code: code, RuleName: strings.TrimSpace(rule.Name),
+				Popup: rulePopup(rule), PopupType: rulePopupType(rule),
+			}
+		}
+	}
+	if !useDefault {
+		return VerificationMatch{}
+	}
+	if defaultRule != nil {
+		if code, ok := extractWithRule(text, *defaultRule); ok {
+			return VerificationMatch{
+				Code: code, RuleName: strings.TrimSpace(defaultRule.Name),
+				Popup: rulePopup(*defaultRule), PopupType: rulePopupType(*defaultRule),
+			}
+		}
+		return VerificationMatch{}
+	}
+	code := extractDefault(text)
+	if code == "" {
+		return VerificationMatch{}
+	}
+	return VerificationMatch{
+		Code: code, RuleName: "默认验证码", Popup: true, PopupType: "verification_code",
+	}
 }
 
 func extractDefault(text string) string {

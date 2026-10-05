@@ -15,6 +15,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private var agentStateItem: NSMenuItem!
     private var reloadItem: NSMenuItem!
     private var copyAddressItem: NSMenuItem!
+    private var messagePollTimer: Timer?
+    private var messagePollInFlight = false
+    private var seenMessageIDs = Set<String>()
+    private let messageBaselineMillis = Int64(Date().timeIntervalSince1970 * 1000)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -39,6 +43,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
     func applicationWillTerminate(_ notification: Notification) {
         startupTimeout?.cancel()
+        messagePollTimer?.invalidate()
+        messagePollTimer = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: lifecycleMessageName)
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         if let agent, agent.isRunning {
@@ -328,12 +334,145 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             self.copyAddressItem.isEnabled = true
             self.updateAgentState("Agent 正常运行", symbol: "checkmark.circle", tooltip: "RelayProxy · Agent 正常运行")
             self.webView.load(URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData))
+            self.startMessagePolling()
+        }
+    }
+
+    private struct RelayMessage: Decodable {
+        let id: String
+        let title: String?
+        let content: String?
+        let verificationCode: String?
+        let verificationRule: String?
+        let popup: Bool?
+        let popupType: String?
+        let source: String?
+        let createdAt: Int64?
+
+        var effectivePopupType: String {
+            let value = popupType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !value.isEmpty { return value }
+            return (verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                ? "verification_code"
+                : "message"
+        }
+
+        var shouldPopup: Bool {
+            let type = popupType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if type.isEmpty {
+                return verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            }
+            return popup == true
+        }
+    }
+
+    private func messageAPIURL() -> URL? {
+        guard let managementURL,
+              var components = URLComponents(url: managementURL, resolvingAgainstBaseURL: false) else { return nil }
+        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
+        components.path = basePath + "/api/messages"
+        return components.url
+    }
+
+    private func startMessagePolling() {
+        messagePollTimer?.invalidate()
+        pollMessages()
+        messagePollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            self?.pollMessages()
+        }
+    }
+
+    private func pollMessages() {
+        guard !messagePollInFlight, let url = messageAPIURL() else { return }
+        messagePollInFlight = true
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        request.httpMethod = "GET"
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.messagePollInFlight = false
+                guard error == nil, let data,
+                      let messages = try? JSONDecoder().decode([RelayMessage].self, from: data) else { return }
+                self.consumeMessages(messages)
+            }
+        }.resume()
+    }
+
+    private func consumeMessages(_ messages: [RelayMessage]) {
+        for message in messages {
+            let isNew = seenMessageIDs.insert(message.id).inserted
+            guard isNew, message.shouldPopup else { continue }
+            if let createdAt = message.createdAt, createdAt + 1_000 < messageBaselineMillis {
+                continue
+            }
+            presentMessagePopup(message)
+        }
+    }
+
+    private func presentMessagePopup(_ message: RelayMessage) {
+        let type = message.effectivePopupType
+        let code = message.verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let content = message.content?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let source = message.source?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rule = message.verificationRule?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = message.title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let alert = NSAlert()
+        switch type {
+        case "important":
+            alert.alertStyle = .warning
+            alert.messageText = title.isEmpty ? "RelayProxy 重要提醒" : "重要提醒 · \(title)"
+        case "message":
+            alert.alertStyle = .informational
+            alert.messageText = title.isEmpty ? "RelayProxy 消息" : title
+        default:
+            alert.alertStyle = .informational
+            alert.messageText = title.isEmpty ? "收到新的验证码" : title
+        }
+
+        var details: [String] = []
+        if type == "verification_code", !code.isEmpty {
+            details.append("验证码：\(code)")
+        }
+        if !content.isEmpty {
+            details.append(content)
+        }
+        if type == "important", !code.isEmpty {
+            details.append("验证码：\(code)")
+        }
+        if !source.isEmpty {
+            details.append("来源：\(source)")
+        }
+        if !rule.isEmpty {
+            details.append("匹配规则：\(rule)")
+        }
+        alert.informativeText = details.isEmpty ? "收到一条 RelayProxy 消息" : details.joined(separator: "\n\n")
+
+        let canCopy = !code.isEmpty && (type == "verification_code" || type == "important")
+        if canCopy {
+            alert.addButton(withTitle: "复制验证码")
+            alert.addButton(withTitle: "关闭")
+        } else {
+            alert.addButton(withTitle: "知道了")
+        }
+
+        if type == "important" {
+            NSApp.requestUserAttention(.criticalRequest)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        let response = alert.runModal()
+        if canCopy && response == .alertFirstButtonReturn {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(code, forType: .string)
         }
     }
 
     private func agentDidTerminate(_ process: Process) {
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         startupTimeout?.cancel()
+        messagePollTimer?.invalidate()
+        messagePollTimer = nil
+        messagePollInFlight = false
         agent = nil
         reloadItem?.isEnabled = false
         copyAddressItem?.isEnabled = false

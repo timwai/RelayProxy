@@ -66,6 +66,12 @@ type ServerConfig struct {
 		UPnPEnabled          *bool  `yaml:"upnp_enabled"`
 	} `yaml:"p2p"`
 
+	Direct struct {
+		Enabled   *bool `yaml:"enabled"`
+		PortStart int   `yaml:"port_start"`
+		PortEnd   int   `yaml:"port_end"`
+	} `yaml:"direct"`
+
 	// Exit lets the Relay server itself act as a network egress node. It is
 	// disabled by default so existing deployments keep their current routing.
 	Exit struct {
@@ -272,6 +278,9 @@ func applyServerDefaults(cfg *ServerConfig) {
 	}
 	if cfg.P2P.MaxSessionsPerDevice == 0 {
 		cfg.P2P.MaxSessionsPerDevice = 8
+	}
+	if cfg.Direct.Enabled == nil {
+		cfg.Direct.Enabled = BoolPtr(true)
 	}
 	if cfg.Exit.Enabled == nil {
 		cfg.Exit.Enabled = BoolPtr(false)

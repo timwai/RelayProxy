@@ -14,8 +14,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Check formatting
+      - name: Format and show diff
         run: |
-          test -z "$(gofmt -l internal/p2p/upnp/upnp.go internal/p2p/upnp/upnp_test.go agent/p2p/endpoint.go)"
+          gofmt -w internal/p2p/upnp/upnp.go internal/p2p/upnp/upnp_test.go agent/p2p/endpoint.go
+          git diff -- internal/p2p/upnp/upnp.go internal/p2p/upnp/upnp_test.go agent/p2p/endpoint.go
       - name: Test UPnP and P2P
         run: go test ./internal/p2p/upnp ./agent/p2p

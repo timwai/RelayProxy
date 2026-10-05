@@ -186,6 +186,52 @@ func (d *TunnelDialer) directFallbackEnabled() bool {
 	return d.directMode != "p2p_only" && d.directMode != "direct_only" && d.directFallback
 }
 
+func (d *TunnelDialer) alternateDirectSession(exitDeviceID string, failed SelectedSession) SelectedSession {
+	d.directMu.RLock()
+	getDirect := d.getDirect
+	mode := d.directMode
+	fallback := d.directFallback
+	d.directMu.RUnlock()
+	if getDirect == nil || exitDeviceID == "" ||
+		(mode != "direct_only" && (mode != "auto" || !fallback)) {
+		return SelectedSession{}
+	}
+	selected, ok := getDirect(exitDeviceID)
+	if !ok || selected.Session == nil || !selected.Path.IsDirect() ||
+		selected.Session == failed.Session || selected.Path == failed.Path {
+		return SelectedSession{}
+	}
+	return selected
+}
+
+func (d *TunnelDialer) relayFallbackSession(failed tunnel.TunnelSession) tunnel.TunnelSession {
+	if !d.directFallbackEnabled() || d.getTunnel == nil {
+		return nil
+	}
+	relay := d.getTunnel()
+	if relay == nil || relay == failed {
+		return nil
+	}
+	return relay
+}
+
+// prepareDirectFallback quarantines the failed path before asking the provider
+// for another READY direct mechanism. When Relay is already known to be
+// available, record the fallback first so legacy P2P path reports retain their
+// existing metric ordering.
+func (d *TunnelDialer) prepareDirectFallback(exitDeviceID string, failed SelectedSession, err error, relay tunnel.TunnelSession) SelectedSession {
+	precounted := relay != nil
+	if precounted {
+		d.recordFallback(exitDeviceID, failed.Path)
+	}
+	d.recordPathFailure(exitDeviceID, failed.Path, err)
+	alternate := d.alternateDirectSession(exitDeviceID, failed)
+	if alternate.Session != nil && !precounted {
+		d.recordFallback(exitDeviceID, failed.Path)
+	}
+	return alternate
+}
+
 func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Context, context.CancelFunc) {
 	d.directMu.RLock()
 	timeout := d.directAttemptTimeout
@@ -251,17 +297,28 @@ func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string)
 	if !selected.IsDirect() {
 		return SelectedSession{}, nil, err
 	}
-	if d.getTunnel == nil || !d.directFallbackEnabled() {
-		d.recordPathFailure(exitDeviceID, selected.Path, err)
+
+	relay := d.relayFallbackSession(selected.Session)
+	alternate := d.prepareDirectFallback(exitDeviceID, selected, err, relay)
+	if alternate.Session != nil {
+		stream, alternateErr := alternate.Session.OpenStream(ctx)
+		if alternateErr == nil {
+			return alternate, stream, nil
+		}
+		if relay == nil || relay == alternate.Session {
+			relay = d.relayFallbackSession(alternate.Session)
+		}
+		if relay != nil {
+			d.recordFallback(exitDeviceID, alternate.Path)
+		}
+		d.recordPathFailure(exitDeviceID, alternate.Path, alternateErr)
+		if relay == nil {
+			return SelectedSession{}, nil, alternateErr
+		}
+	} else if relay == nil {
 		return SelectedSession{}, nil, err
 	}
-	relay := d.getTunnel()
-	if relay == nil || relay == selected.Session {
-		d.recordPathFailure(exitDeviceID, selected.Path, err)
-		return SelectedSession{}, nil, err
-	}
-	d.recordFallback(exitDeviceID, selected.Path)
-	d.recordPathFailure(exitDeviceID, selected.Path, err)
+
 	stream, relayErr := relay.OpenStream(ctx)
 	if relayErr != nil {
 		return SelectedSession{}, nil, fmt.Errorf("direct stream failed: %v; relay fallback failed: %w", err, relayErr)
@@ -300,30 +357,44 @@ func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host stri
 		return nil, fmt.Errorf("tunnel is not connected")
 	}
 	direct := selected.IsDirect()
-	allowResume := direct && tunnel.PeerSupportsStreamResume(sess)
 	attemptCtx, cancelAttempt := ctx, func() {}
 	if direct && d.directFallbackEnabled() {
 		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
 	}
+	allowResume := direct && tunnel.PeerSupportsStreamResume(sess)
 	conn, err := d.dialTCPOnSession(attemptCtx, sess, exitNodeID, host, port, allowResume, selected.Path)
-	cancelAttempt()
 	retryableDirectFailure := direct && retryableDirectHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
+		cancelAttempt()
 		return conn, err
 	}
-	if d.getTunnel == nil || !d.directFallbackEnabled() {
-		d.recordPathFailure(exitNodeID, selected.Path, err)
+
+	relay := d.relayFallbackSession(sess)
+	alternate := d.prepareDirectFallback(exitNodeID, selected, err, relay)
+	if alternate.Session != nil {
+		allowAlternateResume := tunnel.PeerSupportsStreamResume(alternate.Session)
+		conn, alternateErr := d.dialTCPOnSession(
+			attemptCtx, alternate.Session, exitNodeID, host, port,
+			allowAlternateResume, alternate.Path,
+		)
+		if alternateErr == nil || !retryableDirectHandshakeError(ctx, alternateErr) {
+			cancelAttempt()
+			return conn, alternateErr
+		}
+		if relay == nil || relay == alternate.Session {
+			relay = d.relayFallbackSession(alternate.Session)
+		}
+		if relay != nil {
+			d.recordFallback(exitNodeID, alternate.Path)
+		}
+		d.recordPathFailure(exitNodeID, alternate.Path, alternateErr)
+		err = alternateErr
+	}
+	cancelAttempt()
+
+	if relay == nil {
 		return nil, err
 	}
-	relay := d.getTunnel()
-	if relay == nil || relay == sess {
-		d.recordPathFailure(exitNodeID, selected.Path, err)
-		return nil, err
-	}
-	// Count the fallback while the READY session still exists so the path report
-	// includes the increment, then quarantine only the path that actually failed.
-	d.recordFallback(exitNodeID, selected.Path)
-	d.recordPathFailure(exitNodeID, selected.Path, err)
 	return d.dialTCPOnSession(ctx, relay, exitNodeID, host, port, false, relaySessionPath(relay))
 }
 
@@ -459,10 +530,17 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 	}
 	direct := selected.IsDirect()
 	if opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(sess) {
-		if direct && d.getTunnel != nil && d.directFallbackEnabled() {
-			relay := d.getTunnel()
-			if relay != nil && tunnel.PeerSupportsDatagrams(relay) {
-				d.recordFallback(exitNodeID, selected.Path)
+		if direct {
+			relay := d.relayFallbackSession(sess)
+			alternate := d.prepareDirectFallback(
+				exitNodeID, selected,
+				protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "selected direct path does not support native UDP datagrams"),
+				relay,
+			)
+			if alternate.Session != nil && tunnel.PeerSupportsDatagrams(alternate.Session) {
+				selected, sess = alternate, alternate.Session
+				direct = true
+			} else if relay != nil && tunnel.PeerSupportsDatagrams(relay) {
 				selected = SelectedSession{Session: relay, Path: relaySessionPath(relay)}
 				sess, direct = relay, false
 			}
@@ -477,22 +555,36 @@ func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string
 		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
 	}
 	conn, err := d.dialUDPOnSession(attemptCtx, sess, exitNodeID, host, port, opts)
-	cancelAttempt()
 	retryableDirectFailure := direct && retryableDirectUDPHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
+		cancelAttempt()
 		return conn, err
 	}
-	if d.getTunnel == nil || !d.directFallbackEnabled() {
-		d.recordPathFailure(exitNodeID, selected.Path, err)
+
+	relay := d.relayFallbackSession(sess)
+	alternate := d.prepareDirectFallback(exitNodeID, selected, err, relay)
+	if alternate.Session != nil {
+		if !opts.DatagramRequired || tunnel.PeerSupportsDatagrams(alternate.Session) {
+			conn, alternateErr := d.dialUDPOnSession(attemptCtx, alternate.Session, exitNodeID, host, port, opts)
+			if alternateErr == nil || !retryableDirectUDPHandshakeError(ctx, alternateErr) {
+				cancelAttempt()
+				return conn, alternateErr
+			}
+			if relay == nil || relay == alternate.Session {
+				relay = d.relayFallbackSession(alternate.Session)
+			}
+			if relay != nil {
+				d.recordFallback(exitNodeID, alternate.Path)
+			}
+			d.recordPathFailure(exitNodeID, alternate.Path, alternateErr)
+			err = alternateErr
+		}
+	}
+	cancelAttempt()
+
+	if relay == nil || (opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(relay)) {
 		return nil, err
 	}
-	relay := d.getTunnel()
-	if relay == nil || relay == sess || (opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(relay)) {
-		d.recordPathFailure(exitNodeID, selected.Path, err)
-		return nil, err
-	}
-	d.recordFallback(exitNodeID, selected.Path)
-	d.recordPathFailure(exitNodeID, selected.Path, err)
 	return d.dialUDPOnSession(ctx, relay, exitNodeID, host, port, opts)
 }
 

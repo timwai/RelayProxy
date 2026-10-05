@@ -261,3 +261,22 @@ func TestControllerReverifiesAlreadyVerifiedEndpointOnRefresh(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+func TestEndpointSetChangedIncludesVerifiedDialTarget(t *testing.T) {
+	base := protocol.PublicDirectEndpoint{
+		Protocol:        protocol.PublicDirectEndpointProtocolUDP,
+		Address:         "exit.example.com:35820",
+		DialAddress:     "203.0.113.20:35820",
+		Source:          protocol.PublicDirectEndpointManual,
+		Verified:        true,
+		CertFingerprint: testFingerprint(),
+	}
+	if endpointSetChanged([]protocol.PublicDirectEndpoint{base}, []protocol.PublicDirectEndpoint{base}) {
+		t.Fatal("identical endpoint sets were reported as changed")
+	}
+	changed := base
+	changed.DialAddress = "203.0.113.21:35820"
+	if !endpointSetChanged([]protocol.PublicDirectEndpoint{base}, []protocol.PublicDirectEndpoint{changed}) {
+		t.Fatal("verified dial target change was not reported")
+	}
+}

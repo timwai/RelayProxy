@@ -626,10 +626,13 @@ func DefaultVerificationRule() VerificationRule {
 	return VerificationRule{
 		Name: "默认验证码",
 		Keywords: []string{
-			"验证码", "校验码", "动态码", "动态密钥", "安全码", "短信码", "附加码", "登录附加码", "认证码", "口令码",
-			"verification code", "verification-code", "verification_code", "verify code", "verify-code", "verify_code",
-			"one time password", "one-time password", "one_time_password", "one time code", "one-time code", "one_time_code",
-			"otp", "passcode", "security code", "security-code", "security_code", "authentication code", "auth code",
+			"验证码", "短信验证码", "校验码", "验证代码", "确认码", "登录码", "登录验证码",
+			"动态码", "动态密码", "动态密钥", "一次性密码", "一次性验证码", "安全码", "安全验证码",
+			"短信码", "附加码", "登录附加码", "认证码", "授权码", "口令码",
+			"OTP", "TOTP", "verification code", "verification-code", "verification_code",
+			"verify code", "verify-code", "verify_code", "one time password", "one-time password",
+			"one_time_password", "one time code", "one-time code", "one_time_code", "passcode",
+			"security code", "security-code", "security_code", "authentication code", "auth code",
 		},
 		MaxDistance: 64,
 		Default:     true,

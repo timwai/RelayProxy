@@ -992,21 +992,19 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		defer workers.Done()
 		c.heartbeatLoop(ctx, ctrl, sess, accepted.HeartbeatSec)
 	}()
-	// Every approved Android client accepts server-originated inventory streams,
-	// even when it is not acting as an Exit and proxy P2P is disabled.
-	if exitRuntimeApproved || clientRuntimeApproved || proxyP2PManager != nil {
+	// Every approved Android session accepts server-originated inventory streams,
+	// including control-only clients whose local proxy data plane is disabled.
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		c.acceptIncomingStreams(ctx, sess, accepted.MaxConnections, exitRuntimeApproved, proxyP2PManager, &workers)
+	}()
+	if exitRuntimeApproved && proxyP2PManager != nil {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			c.acceptIncomingStreams(ctx, sess, accepted.MaxConnections, exitRuntimeApproved, proxyP2PManager, &workers)
+			c.serveProxyP2PExit(ctx, proxyP2PManager, accepted.MaxConnections)
 		}()
-		if exitRuntimeApproved && proxyP2PManager != nil {
-			workers.Add(1)
-			go func() {
-				defer workers.Done()
-				c.serveProxyP2PExit(ctx, proxyP2PManager, accepted.MaxConnections)
-			}()
-		}
 	}
 
 	select {

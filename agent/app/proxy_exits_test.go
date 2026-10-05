@@ -41,7 +41,6 @@ func TestProxyExitsReturnsDefensiveCopy(t *testing.T) {
 	}
 }
 
-
 func TestRefreshProxyExitsRejectsOlderRevision(t *testing.T) {
 	agent := &Agent{
 		epoch:             7,

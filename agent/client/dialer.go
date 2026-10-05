@@ -183,7 +183,7 @@ func (d *TunnelDialer) recordFallback(exitDeviceID string, path protocol.ProxyPa
 func (d *TunnelDialer) directFallbackEnabled() bool {
 	d.directMu.RLock()
 	defer d.directMu.RUnlock()
-	return d.directMode != "p2p_only" && d.directFallback
+	return d.directMode != "p2p_only" && d.directMode != "direct_only" && d.directFallback
 }
 
 func (d *TunnelDialer) directAttemptContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -228,7 +228,7 @@ func (d *TunnelDialer) selectedSessionForExit(exitDeviceID string) SelectedSessi
 		if ensureDirect != nil {
 			ensureDirect(exitDeviceID)
 		}
-		if mode == "p2p_only" {
+		if mode == "p2p_only" || mode == "direct_only" {
 			return SelectedSession{}
 		}
 	}

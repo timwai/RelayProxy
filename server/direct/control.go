@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -18,7 +19,9 @@ type Controller struct {
 	registry  *Registry
 	verifier  *Verifier
 	onChanged func(string)
+	mu        sync.Mutex
 	wg        sync.WaitGroup
+	closed    atomic.Bool
 }
 
 func NewController(parent context.Context, registry *Registry, verifier *Verifier, onChanged func(string)) *Controller {
@@ -32,10 +35,12 @@ func NewController(parent context.Context, registry *Registry, verifier *Verifie
 }
 
 func (c *Controller) Close() error {
-	if c == nil {
+	if c == nil || c.closed.Swap(true) {
 		return nil
 	}
+	c.mu.Lock()
 	c.cancel()
+	c.mu.Unlock()
 	c.wg.Wait()
 	return nil
 }
@@ -86,7 +91,13 @@ func (c *Controller) HandleControl(ctx context.Context, stream tunnel.TunnelStre
 }
 
 func (c *Controller) verify(deviceID, sessionID, address string) {
+	c.mu.Lock()
+	if c.closed.Load() {
+		c.mu.Unlock()
+		return
+	}
 	c.wg.Add(1)
+	c.mu.Unlock()
 	go func() {
 		defer c.wg.Done()
 		before := c.registry.VerifiedEndpoints(deviceID)

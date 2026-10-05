@@ -697,6 +697,7 @@ func (c *Client) SetPowerConstrained(constrained bool) {
 func (c *Client) StatusJSON() string {
 	c.mu.RLock()
 	s := c.status
+	s.ProxyExits = redactProxyExitTickets(c.status.ProxyExits)
 	s.PowerConstrained = c.powerConstrained
 	manager := c.proxyP2P
 	c.mu.RUnlock()
@@ -1024,7 +1025,31 @@ func (c *Client) requestedCapabilities() []string {
 func cloneProxyExits(exits []protocol.ProxyExit) []protocol.ProxyExit {
 	cloned := make([]protocol.ProxyExit, len(exits))
 	copy(cloned, exits)
+	for i := range cloned {
+		if cloned[i].Direct == nil {
+			continue
+		}
+		directPaths := *cloned[i].Direct
+		cloned[i].Direct = &directPaths
+		if directPaths.Public == nil {
+			continue
+		}
+		public := *directPaths.Public
+		public.Endpoints = append([]protocol.PublicDirectEndpoint(nil), public.Endpoints...)
+		public.Ticket = append([]byte(nil), public.Ticket...)
+		directPaths.Public = &public
+	}
 	return cloned
+}
+
+func redactProxyExitTickets(exits []protocol.ProxyExit) []protocol.ProxyExit {
+	redacted := cloneProxyExits(exits)
+	for i := range redacted {
+		if redacted[i].Direct != nil && redacted[i].Direct.Public != nil {
+			redacted[i].Direct.Public.Ticket = nil
+		}
+	}
+	return redacted
 }
 
 // sendP2PControlRequest keeps rendezvous, lease and authorization signaling on

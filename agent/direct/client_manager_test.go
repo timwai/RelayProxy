@@ -133,3 +133,59 @@ func TestClientManagerClosesReadySessionWhenAuthorizationDisappears(t *testing.T
 		t.Fatal("revoked public direct session remained selectable")
 	}
 }
+
+
+func TestClientManagerRacesAllVerifiedEndpointsBeforeAuth(t *testing.T) {
+	fake := newClientManagerTestSession()
+	var raced []DialConfig
+	manager := NewClientManager(context.Background(), func() string { return "client" }, ClientManagerOptions{
+		AttemptTimeout: time.Second,
+		RaceDial: func(_ context.Context, configs []DialConfig) (tunnel.TunnelSession, string, error) {
+			raced = append([]DialConfig(nil), configs...)
+			return fake, configs[1].Address, nil
+		},
+	})
+	defer manager.Close()
+
+	fingerprint := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	manager.UpdateInventory([]protocol.ProxyExit{{
+		DeviceID: "exit", Online: true,
+		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+			Available:       true,
+			Transport:       "quic",
+			Ticket:          []byte("race-ticket"),
+			TicketExpiresAt: time.Now().Add(time.Minute).Unix(),
+			Endpoints: []protocol.PublicDirectEndpoint{
+				{Protocol: protocol.PublicDirectEndpointProtocolUDP, Address: "[2001:4860:4860::8888]:35820", Source: protocol.PublicDirectEndpointIPv6, Verified: true, CertFingerprint: fingerprint},
+				{Protocol: protocol.PublicDirectEndpointProtocolUDP, Address: "203.0.113.20:35820", Source: protocol.PublicDirectEndpointObserved, Verified: true, CertFingerprint: fingerprint},
+				{Protocol: protocol.PublicDirectEndpointProtocolUDP, Address: "exit.example.com:35820", Source: protocol.PublicDirectEndpointManual, Verified: true, CertFingerprint: fingerprint},
+			},
+		}},
+	}})
+	if !manager.EnsureClient("exit") {
+		t.Fatal("public direct race was not started")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, ok := manager.ReadyForExit("exit"); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("raced public direct session did not become ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if len(raced) != 3 {
+		t.Fatalf("raced endpoints=%d, want 3", len(raced))
+	}
+	if raced[0].Address != "exit.example.com:35820" ||
+		raced[1].Address != "203.0.113.20:35820" ||
+		raced[2].Address != "[2001:4860:4860::8888]:35820" {
+		t.Fatalf("unexpected endpoint race order: %+v", raced)
+	}
+	status, ok := manager.PathStatus("exit")
+	if !ok || status.Endpoint != raced[1].Address || status.State != "READY" {
+		t.Fatalf("path status=%+v ok=%v", status, ok)
+	}
+}

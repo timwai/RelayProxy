@@ -201,3 +201,33 @@ func TestAndroidLegacyProxyExitRefreshKeepsRevision(t *testing.T) {
 		t.Fatalf("legacy Android refresh reset revision: %d", client.proxyExitRevision)
 	}
 }
+
+
+func TestAndroidStatusRedactsPublicDirectTicket(t *testing.T) {
+	source := []protocol.ProxyExit{{
+		DeviceID: "exit-direct", Online: true,
+		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+			Available: true, Transport: "quic",
+			Ticket: []byte("android-secret-ticket"), TicketExpiresAt: 456,
+			Endpoints: []protocol.PublicDirectEndpoint{{
+				Protocol: protocol.PublicDirectEndpointProtocolUDP,
+				Address: "203.0.113.20:35820", Source: protocol.PublicDirectEndpointManual,
+				Verified: true, CertFingerprint: "sha256:test",
+			}},
+		}},
+	}}
+	redacted := redactProxyExitTickets(source)
+	if len(redacted) != 1 || redacted[0].Direct == nil || redacted[0].Direct.Public == nil {
+		t.Fatalf("redacted exits=%+v", redacted)
+	}
+	if len(redacted[0].Direct.Public.Ticket) != 0 {
+		t.Fatal("Android UI inventory exposed the Public Direct ticket")
+	}
+	if redacted[0].Direct.Public.TicketExpiresAt != 456 ||
+		redacted[0].Direct.Public.Endpoints[0].CertFingerprint != "sha256:test" {
+		t.Fatalf("redaction removed non-secret metadata: %+v", redacted[0].Direct.Public)
+	}
+	if string(source[0].Direct.Public.Ticket) != "android-secret-ticket" {
+		t.Fatal("Android redaction mutated the internal ticket")
+	}
+}

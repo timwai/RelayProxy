@@ -510,9 +510,10 @@ func (r *Router) handleMessagePushInfo(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load push listener")
 		return
 	}
+	runtime := serverEditableConfig(state.Runtime)
 	writeJSON(w, http.StatusOK, messagePushInfo{
-		TCPListen:  state.Runtime.Server.TLS.Listen,
-		TLSEnabled: state.Runtime.IsTLSEnabled(),
+		TCPListen:  runtime.Tunnel.TCPListen,
+		TLSEnabled: runtime.Tunnel.TLSEnabled,
 	})
 }
 

@@ -33,6 +33,7 @@ type StreamRouter struct {
 	rdpControlHandler          func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	p2pControlHandler          func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	publicDirectControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
+	publicDirectTicketHandler  func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	onAudit                    func(audit *repository.ConnectionAudit)
 }
 
@@ -61,6 +62,12 @@ func (r *StreamRouter) SetP2PControlHandler(fn func(context.Context, tunnel.Tunn
 // authenticated Exit sessions. Verification remains server-owned.
 func (r *StreamRouter) SetPublicDirectControlHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
 	r.publicDirectControlHandler = fn
+}
+
+// SetPublicDirectTicketHandler installs short-lived ticket issuance for
+// authenticated proxy clients. The issuer rechecks current authorization.
+func (r *StreamRouter) SetPublicDirectTicketHandler(fn func(context.Context, tunnel.TunnelStream, *session.DeviceSession)) {
+	r.publicDirectTicketHandler = fn
 }
 
 // SetLocalExit enables the Relay process itself as an egress node. The
@@ -284,6 +291,12 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 			containsCapability(clientSession.Capabilities, protocol.CapabilityProxyPublicDirect) &&
 			containsCapability(clientSession.Grants, protocol.CapabilityProxyExit) {
 			r.publicDirectControlHandler(ctx, clientStream, clientSession)
+		}
+	case protocol.FrameTypePublicDirectTicket:
+		if r.publicDirectTicketHandler != nil &&
+			containsCapability(clientSession.Capabilities, protocol.CapabilityProxyPublicDirect) &&
+			containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) {
+			r.publicDirectTicketHandler(ctx, clientStream, clientSession)
 		}
 	default:
 		log.Printf("[StreamRouter] Unsupported FrameType %d from device %s", header.Type, clientSession.DeviceID)

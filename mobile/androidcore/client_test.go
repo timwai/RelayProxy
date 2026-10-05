@@ -127,3 +127,78 @@ func TestStatusJSONExposesP2PFailureReason(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+
+func TestAndroidProxyExitInventoryRevisionOrdering(t *testing.T) {
+	client, err := NewClient(`{
+		"serverAddress":"relay.example.com",
+		"identityId":"a1b2c3d4e5f6g7h8",
+		"exitEnabled":false,
+		"clientEnabled":true,
+		"socks5Enabled":true,
+		"requestedCapabilities":["proxy.client"]
+	}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Stop() })
+
+	client.mu.Lock()
+	client.proxyExitRevision = 5
+	client.status.ProxyExits = []protocol.ProxyExit{{DeviceID: "exit-new", Name: "New", Online: true}}
+	client.mu.Unlock()
+
+	client.refreshProxyExits(nil, []protocol.ProxyExit{{DeviceID: "exit-old", Name: "Old", Online: true}}, 4)
+	client.mu.RLock()
+	if len(client.status.ProxyExits) != 1 || client.status.ProxyExits[0].DeviceID != "exit-new" || client.proxyExitRevision != 5 {
+		got, revision := cloneProxyExits(client.status.ProxyExits), client.proxyExitRevision
+		client.mu.RUnlock()
+		t.Fatalf("older Android inventory replaced current snapshot: exits=%+v revision=%d", got, revision)
+	}
+	client.mu.RUnlock()
+
+	client.refreshProxyExits(nil, []protocol.ProxyExit{{DeviceID: "exit-replay", Name: "Replay", Online: true}}, 5)
+	client.mu.RLock()
+	if len(client.status.ProxyExits) != 1 || client.status.ProxyExits[0].DeviceID != "exit-replay" || client.proxyExitRevision != 5 {
+		got, revision := cloneProxyExits(client.status.ProxyExits), client.proxyExitRevision
+		client.mu.RUnlock()
+		t.Fatalf("same-revision Android recovery snapshot was ignored: exits=%+v revision=%d", got, revision)
+	}
+	client.mu.RUnlock()
+
+	client.refreshProxyExits(nil, []protocol.ProxyExit{{DeviceID: "exit-latest", Name: "Latest", Online: true}}, 6)
+	client.mu.RLock()
+	defer client.mu.RUnlock()
+	if len(client.status.ProxyExits) != 1 || client.status.ProxyExits[0].DeviceID != "exit-latest" || client.proxyExitRevision != 6 {
+		t.Fatalf("newer Android inventory was not applied: exits=%+v revision=%d", client.status.ProxyExits, client.proxyExitRevision)
+	}
+}
+
+func TestAndroidLegacyProxyExitRefreshKeepsRevision(t *testing.T) {
+	client, err := NewClient(`{
+		"serverAddress":"relay.example.com",
+		"identityId":"a1b2c3d4e5f6g7h8",
+		"exitEnabled":false,
+		"clientEnabled":true,
+		"socks5Enabled":true,
+		"requestedCapabilities":["proxy.client"]
+	}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Stop() })
+
+	client.mu.Lock()
+	client.proxyExitRevision = 9
+	client.mu.Unlock()
+	client.refreshProxyExits(nil, []protocol.ProxyExit{{DeviceID: "exit-b", Online: true}}, 0)
+
+	client.mu.RLock()
+	defer client.mu.RUnlock()
+	if len(client.status.ProxyExits) != 1 || client.status.ProxyExits[0].DeviceID != "exit-b" {
+		t.Fatalf("legacy Android inventory refresh was not applied: %+v", client.status.ProxyExits)
+	}
+	if client.proxyExitRevision != 9 {
+		t.Fatalf("legacy Android refresh reset revision: %d", client.proxyExitRevision)
+	}
+}

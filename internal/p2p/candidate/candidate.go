@@ -20,24 +20,26 @@ import (
 // Rendezvous probe wire format (network byte order):
 //
 // Request (16 bytes)
-//   [0:4]   magic
-//   [4]     version
-//   [5:8]   reserved
-//   [8:16]  nonce
+//
+//	[0:4]   magic
+//	[4]     version
+//	[5:8]   reserved
+//	[8:16]  nonce
 //
 // Response (32 bytes)
-//   [0:4]   magic
-//   [4]     version
-//   [5]     reserved
-//   [6:8]   observed source port
-//   [8:16]  echoed nonce
-//   [16:32] observed source IP as 16 bytes
+//
+//	[0:4]   magic
+//	[4]     version
+//	[5]     reserved
+//	[6:8]   observed source port
+//	[8:16]  echoed nonce
+//	[16:32] observed source IP as 16 bytes
 const (
-	MaxCandidates = 16
-	ProbeMagic     uint32 = 0x52505633 // "RPV3"
-	ProbeVersion   byte   = 1
-	ProbeRequestSize      = 16
-	ProbeResponseSize     = 32
+	MaxCandidates            = 16
+	ProbeMagic        uint32 = 0x52505633 // "RPV3"
+	ProbeVersion      byte   = 1
+	ProbeRequestSize         = 16
+	ProbeResponseSize        = 32
 )
 
 var (

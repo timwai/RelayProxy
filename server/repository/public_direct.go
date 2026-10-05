@@ -97,7 +97,6 @@ func (db *DB) PublicDirectAuthorizationContext(clientDeviceID, exitDeviceID stri
 	return ProxyDirectAuthorizationContext{}, false, nil
 }
 
-
 func (db *DB) DeviceIDsForIdentity(identityID string) ([]string, error) {
 	identityID = strings.TrimSpace(identityID)
 	if identityID == "" {

@@ -569,9 +569,9 @@ func main() {
 			out := make([]api.PublicDirectEndpointStatus, 0, len(records))
 			for _, record := range records {
 				out = append(out, api.PublicDirectEndpointStatus{
-					Address: record.Endpoint.Address, Source: record.Endpoint.Source,
-					State: string(record.State), VerifiedAt: record.VerifiedAt,
-					ExpiresAt: record.ExpiresAt, LastError: record.LastError,
+					Address: record.Endpoint.Address, DialAddress: record.Endpoint.DialAddress,
+					Source: record.Endpoint.Source, State: string(record.State),
+					VerifiedAt: record.VerifiedAt, ExpiresAt: record.ExpiresAt, LastError: record.LastError,
 				})
 			}
 			sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })

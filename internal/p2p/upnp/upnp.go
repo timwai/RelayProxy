@@ -137,7 +137,9 @@ func (m *Mapping) Close() error {
 	}
 	var closeErr error
 	m.closeOnce.Do(func() {
-		close(m.done)
+		if m.done != nil {
+			close(m.done)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		closeErr = m.service.deletePortMapping(ctx, m.externalPort)

@@ -35,6 +35,8 @@ const (
 
 var ErrUnavailable = errors.New("UPnP IGD is unavailable")
 
+var serviceDiscoveryMu sync.Mutex
+
 var serviceCache = struct {
 	sync.Mutex
 	networkKey string
@@ -239,14 +241,16 @@ func (m *Mapping) refreshLoop(ctx context.Context) {
 
 func discoverServicesCached(ctx context.Context) ([]service, string, bool, error) {
 	key := localNetworkCacheKey()
-	if key != "" {
-		serviceCache.Lock()
-		if serviceCache.networkKey == key && time.Now().Before(serviceCache.expiresAt) && len(serviceCache.services) > 0 {
-			services := append([]service(nil), serviceCache.services...)
-			serviceCache.Unlock()
-			return services, key, true, nil
-		}
-		serviceCache.Unlock()
+	if services, ok := loadServicesFromCache(key); ok {
+		return services, key, true, nil
+	}
+
+	// Serialize cache misses so simultaneous P2P sessions do not all emit SSDP
+	// discovery traffic and fetch the same IGD description independently.
+	serviceDiscoveryMu.Lock()
+	defer serviceDiscoveryMu.Unlock()
+	if services, ok := loadServicesFromCache(key); ok {
+		return services, key, true, nil
 	}
 
 	services, err := discoverServices(ctx)
@@ -257,6 +261,18 @@ func discoverServicesCached(ctx context.Context) ([]service, string, bool, error
 		storeServicesInCache(key, services)
 	}
 	return services, key, false, nil
+}
+
+func loadServicesFromCache(key string) ([]service, bool) {
+	if key == "" {
+		return nil, false
+	}
+	serviceCache.Lock()
+	defer serviceCache.Unlock()
+	if serviceCache.networkKey != key || time.Now().After(serviceCache.expiresAt) || len(serviceCache.services) == 0 {
+		return nil, false
+	}
+	return append([]service(nil), serviceCache.services...), true
 }
 
 func storeServicesInCache(key string, services []service) {

@@ -71,58 +71,90 @@ func (l *PublicListener) Accept(ctx context.Context) (*AcceptedSession, error) {
 	if l == nil || l.transport == nil {
 		return nil, errors.New("public direct listener is closed")
 	}
-	session, err := l.transport.Accept(ctx)
-	if err != nil {
-		return nil, err
+	for {
+		session, err := l.transport.Accept(ctx)
+		if err != nil {
+			return nil, err
+		}
+		accepted, probe, err := l.handshake(ctx, session)
+		if err != nil {
+			_ = session.Close()
+			return nil, err
+		}
+		if probe {
+			_ = session.Close()
+			continue
+		}
+		return accepted, nil
 	}
-	accepted, err := l.authenticate(ctx, session)
-	if err != nil {
-		_ = session.Close()
-		return nil, err
-	}
-	return accepted, nil
 }
 
-func (l *PublicListener) authenticate(ctx context.Context, session tunnel.TunnelSession) (*AcceptedSession, error) {
+func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSession) (*AcceptedSession, bool, error) {
 	authCtx, cancel := context.WithTimeout(ctx, l.authTimeout)
 	defer cancel()
 
 	stream, err := session.AcceptStream(authCtx)
 	if err != nil {
-		return nil, fmt.Errorf("%w: authentication stream unavailable", ErrUnauthorized)
+		return nil, false, fmt.Errorf("%w: authentication stream unavailable", ErrUnauthorized)
 	}
 	defer stream.Close()
 	_ = stream.SetDeadline(time.Now().Add(l.authTimeout))
 
-	var request protocol.PublicDirectAuthRequest
-	if err := protocol.ReadJSON(stream, &request); err != nil {
-		_ = writeAuthFailure(stream, protocol.ErrCodeInvalidRequest, "invalid authentication request")
-		return nil, fmt.Errorf("%w: invalid authentication request", ErrUnauthorized)
+	var handshake protocol.PublicDirectHandshakeRequest
+	if err := protocol.ReadJSON(stream, &handshake); err != nil {
+		_ = writeHandshakeFailure(stream, protocol.ErrCodeInvalidRequest, "invalid handshake request")
+		return nil, false, fmt.Errorf("%w: invalid handshake request", ErrUnauthorized)
 	}
-	request.ClientDeviceID = strings.TrimSpace(request.ClientDeviceID)
-	request.ExitDeviceID = strings.TrimSpace(request.ExitDeviceID)
-	if request.Version != protocol.PublicDirectAuthVersion ||
-		request.ClientDeviceID == "" || request.ExitDeviceID == "" || len(request.Ticket) == 0 {
-		_ = writeAuthFailure(stream, protocol.ErrCodeInvalidRequest, "invalid authentication request")
-		return nil, fmt.Errorf("%w: invalid authentication request", ErrUnauthorized)
+	switch handshake.Type {
+	case protocol.PublicDirectHandshakeProbe:
+		if handshake.Probe == nil || len(handshake.Probe.Nonce) < 16 || len(handshake.Probe.Nonce) > 64 {
+			_ = writeHandshakeFailure(stream, protocol.ErrCodeInvalidRequest, "invalid probe request")
+			return nil, false, fmt.Errorf("%w: invalid probe request", ErrUnauthorized)
+		}
+		if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeResponse{
+			Success: true,
+			Probe: &protocol.PublicDirectProbeResponse{
+				Nonce: append([]byte(nil), handshake.Probe.Nonce...),
+			},
+		}); err != nil {
+			return nil, false, fmt.Errorf("public direct probe response: %w", err)
+		}
+		return nil, true, nil
+
+	case protocol.PublicDirectHandshakeAuth:
+		if handshake.Auth == nil {
+			_ = writeHandshakeFailure(stream, protocol.ErrCodeInvalidRequest, "invalid authentication request")
+			return nil, false, fmt.Errorf("%w: invalid authentication request", ErrUnauthorized)
+		}
+		request := *handshake.Auth
+		request.ClientDeviceID = strings.TrimSpace(request.ClientDeviceID)
+		request.ExitDeviceID = strings.TrimSpace(request.ExitDeviceID)
+		if request.Version != protocol.PublicDirectAuthVersion ||
+			request.ClientDeviceID == "" || request.ExitDeviceID == "" || len(request.Ticket) == 0 {
+			_ = writeHandshakeFailure(stream, protocol.ErrCodeInvalidRequest, "invalid authentication request")
+			return nil, false, fmt.Errorf("%w: invalid authentication request", ErrUnauthorized)
+		}
+		if err := l.authenticator.Authenticate(authCtx, request); err != nil {
+			_ = writeHandshakeFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
+			return nil, false, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
+		}
+		if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeResponse{Success: true}); err != nil {
+			return nil, false, fmt.Errorf("public direct authentication response: %w", err)
+		}
+		_ = stream.SetDeadline(time.Time{})
+		return &AcceptedSession{
+			Tunnel:         session,
+			ClientDeviceID: request.ClientDeviceID,
+			ExitDeviceID:   request.ExitDeviceID,
+		}, false, nil
+	default:
+		_ = writeHandshakeFailure(stream, protocol.ErrCodeInvalidRequest, "unsupported handshake type")
+		return nil, false, fmt.Errorf("%w: unsupported handshake type", ErrUnauthorized)
 	}
-	if err := l.authenticator.Authenticate(authCtx, request); err != nil {
-		_ = writeAuthFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
-		return nil, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
-	}
-	if err := protocol.WriteJSON(stream, protocol.PublicDirectAuthResponse{Success: true}); err != nil {
-		return nil, fmt.Errorf("public direct authentication response: %w", err)
-	}
-	_ = stream.SetDeadline(time.Time{})
-	return &AcceptedSession{
-		Tunnel:         session,
-		ClientDeviceID: request.ClientDeviceID,
-		ExitDeviceID:   request.ExitDeviceID,
-	}, nil
 }
 
-func writeAuthFailure(stream tunnel.TunnelStream, code, message string) error {
-	return protocol.WriteJSON(stream, protocol.PublicDirectAuthResponse{
+func writeHandshakeFailure(stream tunnel.TunnelStream, code, message string) error {
+	return protocol.WriteJSON(stream, protocol.PublicDirectHandshakeResponse{
 		Success: false, ErrorCode: code, ErrorMessage: message,
 	})
 }

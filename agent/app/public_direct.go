@@ -38,11 +38,12 @@ func (a *Agent) configureProxyPathProvider() {
 			publicDirect := a.proxyDirect
 			p2p := a.proxyP2P
 			closed := a.closed.Load()
+			mode := a.cfg.P2PMode
 			a.mu.RUnlock()
 			if closed {
 				return client.SelectedSession{}, false
 			}
-			if publicDirect != nil {
+			if mode != "p2p_only" && publicDirect != nil {
 				if session, ok := publicDirect.ReadyForExit(exitDeviceID); ok && session != nil {
 					return client.SelectedSession{Session: session, Path: protocol.ProxyPathPublicDirectQUIC}, true
 				}
@@ -109,7 +110,7 @@ func (a *Agent) ensureProxyDirectPath(exitDeviceID string) {
 	if !ready || mode == "relay_only" {
 		return
 	}
-	if publicDirect != nil {
+	if mode != "p2p_only" && publicDirect != nil {
 		if publicDirect.PreferForExit(exitDeviceID) {
 			publicDirect.EnsureClient(exitDeviceID)
 			return

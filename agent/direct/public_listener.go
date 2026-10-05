@@ -151,7 +151,7 @@ func (l *PublicListener) serveAuthorizedSession(ctx context.Context, session tun
 	}
 }
 
-func publicProxyFrame(frameType uint8) bool {
+func publicProxyFrame(frameType protocol.FrameType) bool {
 	switch frameType {
 	case protocol.FrameTypeOpenTCP, protocol.FrameTypeOpenUDP, protocol.FrameTypeSpeedTest:
 		return true

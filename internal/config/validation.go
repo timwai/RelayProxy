@@ -136,9 +136,9 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 		return fmt.Errorf("transport.mode 必须是 auto / quic_only / tcp_only")
 	}
 	switch c.P2P.Mode {
-	case "auto", "relay_only", "p2p_only":
+	case "auto", "direct_only", "relay_only", "p2p_only":
 	default:
-		return fmt.Errorf("p2p.mode 必须是 auto / relay_only / p2p_only")
+		return fmt.Errorf("p2p.mode 必须是 auto / direct_only / relay_only / p2p_only")
 	}
 	if c.P2P.PunchTimeoutMs < 100 || c.P2P.PunchTimeoutMs > 10000 {
 		return fmt.Errorf("p2p.punch_timeout_ms 必须在 100-10000 之间")

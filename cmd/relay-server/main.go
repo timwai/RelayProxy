@@ -23,6 +23,7 @@ import (
 	"relayproxy/internal/config"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
+	serverdirect "relayproxy/server/direct"
 	"relayproxy/server/gateway"
 	serverp2p "relayproxy/server/p2p"
 	serverrdp "relayproxy/server/rdp"
@@ -170,6 +171,14 @@ func main() {
 	}
 
 	var gw *gateway.Gateway
+	publicDirectRegistry := serverdirect.NewRegistry()
+	publicDirectVerifier := &serverdirect.Verifier{Registry: publicDirectRegistry}
+	publicDirectController := serverdirect.NewController(context.Background(), publicDirectRegistry, publicDirectVerifier, func(string) {
+		if gw != nil {
+			gw.RefreshProxyExitInventories()
+		}
+	})
+	defer publicDirectController.Close()
 
 	invalidateIdentitySessions := func(identityID string) []string {
 		deviceIDs := sessionMgr.InvalidateIdentity(identityID)
@@ -178,6 +187,7 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.RevokeDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 		}
 		return deviceIDs
 	}
@@ -282,6 +292,7 @@ func main() {
 	if proxyP2PCoordinator != nil {
 		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)
 	}
+	router.SetPublicDirectControlHandler(publicDirectController.HandleControl)
 
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
 
@@ -363,6 +374,15 @@ func main() {
 			if err != nil {
 				return nil, err
 			}
+			for i := range result {
+				endpoints := publicDirectRegistry.VerifiedEndpoints(result[i].DeviceID)
+				if len(endpoints) == 0 {
+					continue
+				}
+				result[i].Direct = &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+					Available: true, Transport: "quic", Endpoints: endpoints,
+				}}
+			}
 			if serverExit != nil {
 				authorized, err := db.AuthorizeClientExit(clientID, protocol.ServerExitDeviceID)
 				if err != nil {
@@ -390,6 +410,9 @@ func main() {
 		},
 		OnDeviceConnected: func(deviceID string) {
 			_ = db.UpdateDeviceLastSeen(deviceID)
+			// A new authenticated session invalidates endpoints verified for the
+			// previous tunnel generation until this Exit registers them again.
+			publicDirectController.InvalidateDevice(deviceID)
 		},
 		OnDeviceHeartbeat: func(deviceID string) {
 			_ = db.UpdateDeviceLastSeen(deviceID)
@@ -400,7 +423,9 @@ func main() {
 			if proxyP2PCoordinator != nil {
 				proxyP2PCoordinator.CloseDevice(deviceID)
 			}
+			publicDirectController.InvalidateDevice(deviceID)
 		},
+		PublicDirectEnabled:      true,
 		MaxConnections:          cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
 		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,

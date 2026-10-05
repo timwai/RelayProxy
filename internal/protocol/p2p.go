@@ -25,9 +25,11 @@ const (
 	P2PControlPathReport      = "path_report"
 	P2PControlError           = "error"
 
-	P2PPathDirectQUIC = "p2p_quic"
-	P2PPathRelayQUIC  = "relay_quic"
-	P2PPathRelayTLS   = "relay_tls"
+	// Backward-compatible aliases for the original P2P-oriented path names.
+	// New code should use ProxyPath* so Public Direct shares the same path model.
+	P2PPathDirectQUIC = proxyPathP2PQUIC
+	P2PPathRelayQUIC  = proxyPathRelayQUIC
+	P2PPathRelayTLS   = proxyPathRelayTLS
 )
 
 // P2PControlMessage carries proxy direct-path signaling over the authenticated

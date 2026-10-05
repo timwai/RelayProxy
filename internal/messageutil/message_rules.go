@@ -128,7 +128,7 @@ func validateMessageMatch(name string, match MessageMatch) error {
 		if len(keywords) == 0 {
 			return fmt.Errorf("message rule %q requires at least one keyword", name)
 		}
-		if len(keywords) > 32 {
+		if len(keywords) > 64 {
 			return fmt.Errorf("message rule %q has too many keywords", name)
 		}
 		for _, keyword := range keywords {

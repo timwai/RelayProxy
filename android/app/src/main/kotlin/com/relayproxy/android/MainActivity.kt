@@ -52,7 +52,7 @@ import java.util.ArrayDeque
  * 特性：
  * - 动态适配状态栏高空间预留与设备 Cutout 安全区，顶部视觉呼吸感充足
  * - 原生还原原型高保真底部悬浮导航栏 (SVG Vector 图标、Material 3 胶囊指示灯、动态染色)
- * - 完备支持一键日间 (Light) / 夜间 (Dark) 主题切换，状态栏图标随动
+ * - 支持跟随系统 / 浅色 / 深色三态主题，状态栏与导航栏图标随动
  */
 class MainActivity : Activity() {
 
@@ -168,7 +168,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // 初始化深浅色主题
-        UiPalette.isDark = ConfigStore(this).isDarkTheme()
+        UiPalette.sync(this)
         setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
         setContentView(buildRootUi())
@@ -269,16 +269,23 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun toggleTheme() {
+    private fun applyThemeMode(mode: String, showToast: Boolean = true) {
         val store = ConfigStore(this)
-        val newDark = !UiPalette.isDark
-        UiPalette.isDark = newDark
-        store.setDarkTheme(newDark)
-        setTheme(if (newDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
+        store.setThemeMode(mode)
+        UiPalette.sync(this)
+        setTheme(if (UiPalette.isDark) R.style.Theme_RelayProxy_Dark else R.style.Theme_RelayProxy_Light)
         configureWindow()
         setContentView(buildRootUi())
         renderStatus()
-        Toast.makeText(this, if (newDark) "已切换至夜间模式" else "已切换至日间模式", Toast.LENGTH_SHORT).show()
+        RelayExitService.refreshGlobalMessageOverlaySetting()
+        if (showToast) {
+            val label = when (store.themeMode()) {
+                ConfigStore.THEME_LIGHT -> "浅色模式"
+                ConfigStore.THEME_DARK -> "深色模式"
+                else -> "跟随系统"
+            }
+            Toast.makeText(this, "主题已切换为" + label, Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun buildRootUi(): View {
@@ -1616,19 +1623,45 @@ class MainActivity : Activity() {
         val store = ConfigStore(this)
         val config = store.load()
 
-        // 0. 主题模式切换卡片 (移至设置页：夜间模式切换)
+        // 0. 主题模式：跟随系统 / 浅色 / 深色
         val themeCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
-        themeCard.addView(sectionHeader("外观与主题", "暗色模式与显示偏好"))
-        val themeSwitch = Switch(this).apply {
-            isChecked = UiPalette.isDark
-            UiKit.styleSwitch(this)
-            setOnCheckedChangeListener { _, isChecked ->
-                if (isChecked != UiPalette.isDark) {
-                    toggleTheme()
+        themeCard.addView(sectionHeader("外观与主题", "支持跟随 Android 系统深浅色设置"))
+        val themeModes = listOf(
+            ConfigStore.THEME_SYSTEM,
+            ConfigStore.THEME_LIGHT,
+            ConfigStore.THEME_DARK,
+        )
+        val themeLabels = listOf("跟随系统", "浅色", "深色")
+        val themeSpinner = Spinner(this).apply {
+            adapter = UiKit.themedSpinnerAdapter(this@MainActivity, themeLabels)
+            setSelection(themeModes.indexOf(store.themeMode()).coerceAtLeast(0), false)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: android.widget.AdapterView<*>?,
+                    view: View?,
+                    position: Int,
+                    id: Long,
+                ) {
+                    val selected = themeModes.getOrElse(position) { ConfigStore.THEME_SYSTEM }
+                    if (selected != ConfigStore(this@MainActivity).themeMode()) {
+                        applyThemeMode(selected)
+                    }
                 }
+
+                override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
             }
         }
-        themeCard.addView(switchBlock("夜间模式", "开启深色极客质感与低眩光，关闭为清爽日间浅色", themeSwitch))
+        themeCard.addView(fieldBlock("主题模式", themeSpinner))
+        themeCard.addView(TextView(this).apply {
+            text = if (store.themeMode() == ConfigStore.THEME_SYSTEM) {
+                "当前跟随系统 · " + if (UiPalette.isDark) "系统处于深色模式" else "系统处于浅色模式"
+            } else {
+                "选择“跟随系统”后，Android 切换深色/浅色时 RelayProxy 会自动同步。"
+            }
+            textSize = 10.5f
+            setTextColor(UiPalette.placeholder)
+            setPadding(0, dp(10), 0, 0)
+        })
         content.addView(themeCard)
 
         val messageCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)

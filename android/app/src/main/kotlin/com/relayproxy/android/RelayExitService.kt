@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.res.Configuration
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
@@ -186,6 +187,15 @@ class RelayExitService : Service() {
             }
         }
         return START_STICKY
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::messageOverlayController.isInitialized &&
+            ConfigStore(this).themeMode() == ConfigStore.THEME_SYSTEM
+        ) {
+            messageOverlayController.refreshTheme()
+        }
     }
 
     override fun onDestroy() {
@@ -499,17 +509,21 @@ class RelayExitService : Service() {
     }
 
     private fun applyGlobalMessageOverlaySetting() {
-        if (!ConfigStore(this).isGlobalMessageOverlayEnabled() &&
-            ::messageOverlayController.isInitialized
-        ) {
-            messageOverlayController.dismissAll()
+        if (::messageOverlayController.isInitialized) {
+            if (!ConfigStore(this).isGlobalMessageOverlayEnabled()) {
+                messageOverlayController.dismissAll()
+            } else {
+                messageOverlayController.refreshTheme()
+            }
         }
         requestRefreshSoon()
     }
 
     private fun showMessageNotification(message: JSONObject) {
         val raw = message.toString()
-        val popupType = message.optString("popupType", "verification_code")
+        val popupType = message.optString("messageType").ifBlank {
+            message.optString("popupType", "verification_code")
+        }
         val title = message.optString("title", "RelayProxy 消息").ifBlank { "RelayProxy 消息" }
         val content = message.optString("content", "")
         val code = message.optString("verificationCode", "")

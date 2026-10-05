@@ -1,6 +1,7 @@
 package com.relayproxy.android
 
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Build
 import android.provider.Settings
 import org.json.JSONArray
@@ -204,10 +205,44 @@ data class ExitConfig(
 class ConfigStore(private val context: Context) {
     private val prefs = context.getSharedPreferences("relayproxy_android", Context.MODE_PRIVATE)
 
-    fun isDarkTheme(): Boolean = prefs.getBoolean("dark_theme", true)
-    fun setDarkTheme(isDark: Boolean) {
-        prefs.edit().putBoolean("dark_theme", isDark).apply()
+    fun themeMode(): String {
+        val saved = prefs.getString(KEY_THEME_MODE, null)?.trim()?.lowercase()
+        if (saved == THEME_SYSTEM || saved == THEME_LIGHT || saved == THEME_DARK) {
+            return saved
+        }
+        // Existing installs used a single dark_theme boolean. Preserve that
+        // explicit choice; fresh installs default to following Android.
+        return if (prefs.contains(KEY_LEGACY_DARK_THEME)) {
+            if (prefs.getBoolean(KEY_LEGACY_DARK_THEME, true)) THEME_DARK else THEME_LIGHT
+        } else {
+            THEME_SYSTEM
+        }
     }
+
+    fun isDarkTheme(): Boolean = when (themeMode()) {
+        THEME_DARK -> true
+        THEME_LIGHT -> false
+        else -> isSystemDarkTheme()
+    }
+
+    fun setThemeMode(mode: String) {
+        val normalized = when (mode.trim().lowercase()) {
+            THEME_LIGHT -> THEME_LIGHT
+            THEME_DARK -> THEME_DARK
+            else -> THEME_SYSTEM
+        }
+        prefs.edit()
+            .putString(KEY_THEME_MODE, normalized)
+            .apply()
+    }
+
+    fun setDarkTheme(isDark: Boolean) {
+        setThemeMode(if (isDark) THEME_DARK else THEME_LIGHT)
+    }
+
+    private fun isSystemDarkTheme(): Boolean =
+        (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
 
     fun isGlobalMessageOverlayEnabled(): Boolean =
         prefs.getBoolean("global_message_overlay", false)
@@ -392,6 +427,12 @@ class ConfigStore(private val context: Context) {
     }
 
     companion object {
+        const val THEME_SYSTEM = "system"
+        const val THEME_LIGHT = "light"
+        const val THEME_DARK = "dark"
+
+        private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_LEGACY_DARK_THEME = "dark_theme"
         private val routingLock = Any()
     }
 

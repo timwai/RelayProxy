@@ -22,6 +22,11 @@ object UiPalette {
     @Volatile
     var isDark: Boolean = true
 
+    fun sync(context: Context): Boolean {
+        isDark = ConfigStore(context).isDarkTheme()
+        return isDark
+    }
+
     val bg: Int get() = if (isDark) Color.rgb(10, 15, 29) else Color.rgb(241, 245, 249) // #0A0F1D / #F1F5F9
     val surface: Int get() = if (isDark) Color.rgb(17, 24, 39) else Color.WHITE // #111827 / White
     val surfaceSubtle: Int get() = if (isDark) Color.rgb(15, 23, 42) else Color.rgb(248, 250, 252)

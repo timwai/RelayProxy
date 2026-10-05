@@ -16,6 +16,8 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
@@ -81,6 +83,24 @@ internal class MessageOverlayController(
         if (currentView == null) showNext()
     }
 
+    fun refreshTheme() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post(::refreshTheme)
+            return
+        }
+        val active = currentMessage?.let { JSONObject(it.toString()) } ?: return
+        cancelAutoDismiss()
+        currentView?.let { runCatching { windowManager.removeViewImmediate(it) } }
+        currentView = null
+        currentCard = null
+        currentMessage = null
+        currentParams = null
+        queueBadge = null
+        dismissing = false
+        queue.addFirst(active)
+        showNext()
+    }
+
     fun dismissAll() {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             handler.post(::dismissAll)
@@ -108,10 +128,13 @@ internal class MessageOverlayController(
 
         val popupType = normalizedType(message)
         val palette = Palette(ConfigStore(context).isDarkTheme(), popupType)
+        val safeArea = currentSafeArea()
+        val availableWidth = (safeArea.width - safeArea.left - safeArea.right).coerceAtLeast(dp(240))
         val width = minOf(
-            context.resources.displayMetrics.widthPixels - dp(24),
+            (availableWidth - dp(24)).coerceAtLeast(dp(240)),
             dp(440),
-        ).coerceAtLeast(dp(280))
+            availableWidth,
+        )
         val params = WindowManager.LayoutParams(
             width,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -126,8 +149,9 @@ internal class MessageOverlayController(
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = ((context.resources.displayMetrics.widthPixels - width) / 2).coerceAtLeast(0)
-            y = statusBarHeight() + dp(14)
+            val usableWidth = safeArea.width - safeArea.left - safeArea.right
+            x = safeArea.left + ((usableWidth - width) / 2).coerceAtLeast(0)
+            y = safeArea.top + dp(12)
             setTitle("RelayProxy message overlay")
         }
 
@@ -176,26 +200,34 @@ internal class MessageOverlayController(
     ): View {
         val outer = FrameLayout(context).apply {
             clipToPadding = false
-            setPadding(dp(2), dp(2), dp(2), dp(8))
+            // Leave enough room for the elevation shadow so the rounded top edge
+            // is not clipped by the overlay window itself.
+            setPadding(dp(4), dp(5), dp(4), dp(10))
         }
 
         val card = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            elevation = dp(18).toFloat()
+            elevation = dp(16).toFloat()
             background = gradient(
                 palette.cardStart,
                 palette.cardEnd,
                 radius = 22,
                 stroke = palette.border,
             )
+            outlineProvider = ViewOutlineProvider.BACKGROUND
+            clipToOutline = true
         }
         currentCard = card
 
         card.addView(
             View(context).apply {
-                background = gradient(palette.accent, palette.accentEnd, radius = 99)
+                // The card clips this strip to the same rounded top corners.
+                background = GradientDrawable(
+                    GradientDrawable.Orientation.LEFT_RIGHT,
+                    intArrayOf(palette.accent, palette.accentEnd),
+                )
             },
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)),
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(5)),
         )
 
         val body = LinearLayout(context).apply {
@@ -302,7 +334,9 @@ internal class MessageOverlayController(
         installDragGesture(titleGroup, params)
 
         val source = message.optString("source").trim()
-        val rule = message.optString("verificationRule").trim()
+        val rule = message.optString("messageRule").trim().ifEmpty {
+            message.optString("verificationRule").trim()
+        }
         val meta = buildString {
             if (source.isNotEmpty()) append("来自 ").append(source)
             if (rule.isNotEmpty()) {
@@ -446,10 +480,14 @@ internal class MessageOverlayController(
                     val dx = event.rawX - downRawX
                     val dy = event.rawY - downRawY
                     val view = currentView ?: return@setOnTouchListener true
-                    val maxX = (context.resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0)
-                    val maxY = (context.resources.displayMetrics.heightPixels - dp(120)).coerceAtLeast(statusBarHeight())
-                    params.x = (startX + dx.roundToInt()).coerceIn(0, maxX)
-                    params.y = (startY + dy.roundToInt()).coerceIn(statusBarHeight(), maxY)
+                    val safeArea = currentSafeArea()
+                    val minX = safeArea.left
+                    val maxX = (safeArea.width - safeArea.right - params.width).coerceAtLeast(minX)
+                    val minY = safeArea.top
+                    val popupHeight = view.height.takeIf { it > 0 } ?: dp(120)
+                    val maxY = (safeArea.height - safeArea.bottom - popupHeight).coerceAtLeast(minY)
+                    params.x = (startX + dx.roundToInt()).coerceIn(minX, maxX)
+                    params.y = (startY + dy.roundToInt()).coerceIn(minY, maxY)
                     runCatching { windowManager.updateViewLayout(view, params) }
                     true
                 }
@@ -528,15 +566,55 @@ internal class MessageOverlayController(
         else -> 12_000L
     }
 
-    private fun normalizedType(message: JSONObject): String = when (
-        message.optString("popupType", TYPE_VERIFICATION).trim().lowercase()
-    ) {
-        TYPE_MESSAGE -> TYPE_MESSAGE
-        TYPE_IMPORTANT -> TYPE_IMPORTANT
-        else -> TYPE_VERIFICATION
+    private fun normalizedType(message: JSONObject): String {
+        val value = message.optString("messageType").trim().ifEmpty {
+            message.optString("popupType", TYPE_VERIFICATION).trim()
+        }.lowercase()
+        return when (value) {
+            TYPE_MESSAGE -> TYPE_MESSAGE
+            TYPE_IMPORTANT -> TYPE_IMPORTANT
+            else -> TYPE_VERIFICATION
+        }
     }
 
-    private fun statusBarHeight(): Int {
+    private data class SafeArea(
+        val width: Int,
+        val height: Int,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    )
+
+    private fun currentSafeArea(): SafeArea {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val metrics = windowManager.currentWindowMetrics
+            val bounds = metrics.bounds
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
+            )
+            return SafeArea(
+                width = bounds.width(),
+                height = bounds.height(),
+                left = insets.left,
+                top = insets.top,
+                right = insets.right,
+                bottom = insets.bottom,
+            )
+        }
+
+        val display = context.resources.displayMetrics
+        return SafeArea(
+            width = display.widthPixels,
+            height = display.heightPixels,
+            left = 0,
+            top = legacyStatusBarHeight(),
+            right = 0,
+            bottom = 0,
+        )
+    }
+
+    private fun legacyStatusBarHeight(): Int {
         val id = context.resources.getIdentifier("status_bar_height", "dimen", "android")
         return if (id > 0) context.resources.getDimensionPixelSize(id) else dp(28)
     }

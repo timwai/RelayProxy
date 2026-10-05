@@ -279,6 +279,7 @@ type Agent struct {
 	rdpP2P            *rdpp2p.Manager
 	rdpSession        *rdpp2p.Session
 	proxyP2P          *proxyp2p.Manager
+	proxyDirect       *publicDirectClientManager
 	closed            atomic.Bool
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -404,6 +405,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Agent{cfg: cfg, ctx: ctx, cancel: cancel, routingEngine: engine, traffic: traffic.NewRegistry(0, 0), messages: NewMessageBuffer(defaultMessageHistorySize)}
 	a.setDivertStage("disabled", nil)
+	a.initPublicDirectClient()
 	a.rawDialer = client.NewTunnelDialer(func() tunnel.TunnelSession {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
@@ -419,43 +421,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
 	a.rawDialer.ConfigureStreamResume(resumeClient, 512<<10)
-	a.rawDialer.ConfigureDirectPath(
-		func(exitDeviceID string) (tunnel.TunnelSession, bool) {
-			a.mu.RLock()
-			manager := a.proxyP2P
-			closed := a.closed.Load()
-			a.mu.RUnlock()
-			if closed || manager == nil {
-				return nil, false
-			}
-			return manager.ReadyForExit(exitDeviceID)
-		},
-		func(exitDeviceID string) {
-			a.mu.RLock()
-			manager := a.proxyP2P
-			ready := a.handshakeOK.Load()
-			a.mu.RUnlock()
-			if ready && manager != nil {
-				manager.EnsureClient(exitDeviceID)
-			}
-		},
-	)
-	a.rawDialer.ConfigureDirectMetrics(func(exitDeviceID string) {
-		a.mu.RLock()
-		manager := a.proxyP2P
-		a.mu.RUnlock()
-		if manager != nil {
-			manager.NoteFallback(exitDeviceID)
-		}
-	})
-	a.rawDialer.ConfigureDirectFailure(func(exitDeviceID, reason string) {
-		a.mu.RLock()
-		manager := a.proxyP2P
-		a.mu.RUnlock()
-		if manager != nil {
-			manager.FailReadyForExit(exitDeviceID, reason)
-		}
-	})
+	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
@@ -618,6 +584,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
 	}
+	transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
 	if tunnel.SupportsDatagrams(sess) {
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
 	}
@@ -694,6 +661,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
 	a.mu.Unlock()
+	if accepted.ProxyExits != nil {
+		a.updatePublicDirectInventory(proxyExitsFromProtocol(*accepted.ProxyExits))
+	}
 
 	if a.divertSrv != nil && !a.divertSrv.Running() {
 		a.setDivertStage("starting", nil)
@@ -891,20 +861,23 @@ func proxyExitsFromProtocol(exits []protocol.ProxyExit) []protocol.ProxyExit {
 func (a *Agent) refreshProxyExits(sess tunnel.TunnelSession, epoch uint64, exits []protocol.ProxyExit, revision uint64) {
 	refreshed := proxyExitsFromProtocol(exits)
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.epoch != epoch || a.readySession != sess {
+		a.mu.Unlock()
 		return
 	}
 	// Revision zero is the compatibility path for older servers. For versioned
 	// pushes, reject only strictly older snapshots; the same revision may be
 	// replayed by heartbeat as a recovery copy after a lost/corrupt push.
 	if revision != 0 && a.proxyExitRevision != 0 && revision < a.proxyExitRevision {
+		a.mu.Unlock()
 		return
 	}
 	a.proxyExits = refreshed
 	if revision != 0 {
 		a.proxyExitRevision = revision
 	}
+	a.mu.Unlock()
+	a.updatePublicDirectInventory(refreshed)
 }
 
 func rdpTargetsFromProtocol(targets []protocol.RDPTarget) []rdp.Target {
@@ -1267,13 +1240,8 @@ func (a *Agent) SelectExit(exitID string) {
 	a.cfg.DefaultExitID = exitID
 	a.selectedExit.Store(&exitID)
 	a.dialer.SetDefaultExitID(exitID)
-	manager := a.proxyP2P
-	ready := a.handshakeOK.Load()
-	mode := a.cfg.P2PMode
 	a.mu.Unlock()
-	if ready && manager != nil && mode != "relay_only" && strings.TrimSpace(exitID) != "" {
-		manager.EnsureClient(exitID)
-	}
+	a.ensureProxyDirectPath(exitID)
 }
 
 func (a *Agent) Status() AgentStatus {
@@ -1830,6 +1798,7 @@ func (a *Agent) closeRuntime() error {
 		if proxyP2P != nil {
 			errs = append(errs, proxyP2P.Close())
 		}
+		errs = append(errs, a.closePublicDirectClient())
 		if exitHandler != nil {
 			errs = append(errs, exitHandler.Close())
 		}

@@ -2596,8 +2596,7 @@
     async function refreshStatus() {
       var raw = await call('goGetStatus');
       if (!raw) { return; }
-      try { renderStatus(JSON.parse(raw)); } catch (err) { /* ignore */ }
-      await refreshProxyExits(false);
+      try { renderStatus(typeof raw === 'string' ? JSON.parse(raw) : raw); } catch (err) { /* ignore */ }
     }
     async function refreshAll() {
       if (state.saving) return;
@@ -2664,6 +2663,10 @@
       // action visible only where the native launcher is available.
       if (!hasFn('goRestart') && $('restart-card')) { $('restart-card').classList.add('hidden'); }
 
+      // Exit inventory is server-pushed into the Agent, while this cheap local
+      // poll keeps Windows, macOS and browser UIs in sync without waiting for a
+      // full status refresh. The slower heartbeat refresh remains a fallback.
+      setInterval(function () { refreshProxyExits(false); }, 1000);
       // Go pushes status every 1.5s; these polls cover the window's first paint.
       setInterval(refreshStatus, 3000);
       setInterval(refreshNetworkServiceStatus, 5000);

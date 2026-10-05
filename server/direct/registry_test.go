@@ -61,6 +61,78 @@ func TestRegistryPublishesOnlyVerifiedUnexpiredEndpoints(t *testing.T) {
 	}
 }
 
+func TestRegistryKeepsVerifiedEndpointPublishedDuringReverification(t *testing.T) {
+	registry := NewRegistry()
+	now := time.Unix(1000, 0)
+	registry.now = func() time.Time { return now }
+
+	request := protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    35820,
+		CertFingerprint: testFingerprint(),
+		NetworkEpoch:    1,
+	}
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.8.8"), request); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.MarkVerifying("exit", "session-1", "8.8.8.8:35820") {
+		t.Fatal("initial verification did not start")
+	}
+	if got := registry.VerifiedEndpoints("exit"); len(got) != 0 {
+		t.Fatalf("initial verification published endpoint: %+v", got)
+	}
+
+	const dialAddress = "8.8.4.4:35820"
+	if !registry.MarkVerifiedAddress("exit", "session-1", "8.8.8.8:35820", dialAddress, time.Minute) {
+		t.Fatal("verification did not succeed")
+	}
+	if !registry.MarkVerifying("exit", "session-1", "8.8.8.8:35820") {
+		t.Fatal("reverification did not start")
+	}
+	got := registry.VerifiedEndpoints("exit")
+	if len(got) != 1 || !got[0].Verified || got[0].DialAddress != dialAddress {
+		t.Fatalf("reverification withdrew verified endpoint: %+v", got)
+	}
+	record, ok := registry.Lookup("exit", "session-1", "8.8.8.8:35820")
+	if !ok || record.State != StateVerifying {
+		t.Fatalf("reverification state=%+v ok=%v", record, ok)
+	}
+
+	if !registry.MarkFailed("exit", "session-1", "8.8.8.8:35820", errors.New("probe failed")) {
+		t.Fatal("reverification failure was not recorded")
+	}
+	if got := registry.VerifiedEndpoints("exit"); len(got) != 0 {
+		t.Fatalf("failed reverification kept endpoint published: %+v", got)
+	}
+}
+
+func TestRegistryExpiresPublishedEndpointWhileReverifying(t *testing.T) {
+	registry := NewRegistry()
+	now := time.Unix(1000, 0)
+	registry.now = func() time.Time { return now }
+	request := protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    35820,
+		CertFingerprint: testFingerprint(),
+		NetworkEpoch:    1,
+	}
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.8.8"), request); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.MarkVerified("exit", "session-1", "8.8.8.8:35820", time.Minute) {
+		t.Fatal("mark verified failed")
+	}
+	if !registry.MarkVerifying("exit", "session-1", "8.8.8.8:35820") {
+		t.Fatal("reverification did not start")
+	}
+	now = now.Add(2 * time.Minute)
+	if got := registry.VerifiedEndpoints("exit"); len(got) != 0 {
+		t.Fatalf("expired endpoint remained published while verifying: %+v", got)
+	}
+	record, ok := registry.Lookup("exit", "session-1", "8.8.8.8:35820")
+	if !ok || record.State != StateExpired || record.Endpoint.Verified {
+		t.Fatalf("expired reverification state=%+v ok=%v", record, ok)
+	}
+}
+
 func TestRegistryInvalidatesVerificationOnNetworkChange(t *testing.T) {
 	registry := NewRegistry()
 	request := protocol.PublicDirectRegistrationRequest{

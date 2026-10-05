@@ -1,11 +1,14 @@
 package androidcore
 
 import (
+	"context"
 	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
+	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/internal/protocol"
 )
 
@@ -88,5 +91,39 @@ func TestControlOnlyConfigRequestsAndroidCapabilities(t *testing.T) {
 	}
 	if client.cfg.ClientEnabled || *client.cfg.ExitEnabled {
 		t.Fatal("control-only config enabled a data-plane capability")
+	}
+}
+
+func TestStatusJSONExposesP2PFailureReason(t *testing.T) {
+	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, filepath.Join(t.TempDir(), "device-identity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Stop() })
+
+	manager := proxyp2p.NewManager(context.Background(), nil, nil, time.Minute)
+	t.Cleanup(func() { _ = manager.Close() })
+	client.mu.Lock()
+	client.proxyP2P = manager
+	client.status.SelectedExit = "exit-device"
+	client.mu.Unlock()
+
+	manager.EnsureClient("exit-device")
+	deadline := time.Now().Add(time.Second)
+	for {
+		var status statusSnapshot
+		if err := json.Unmarshal([]byte(client.StatusJSON()), &status); err != nil {
+			t.Fatal(err)
+		}
+		if status.P2PError != "" {
+			if status.P2PState != "COOLDOWN" {
+				t.Fatalf("p2pState=%q, want COOLDOWN", status.P2PState)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("P2P failure reason was not exposed in status JSON")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

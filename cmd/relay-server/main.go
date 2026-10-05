@@ -160,6 +160,12 @@ func main() {
 		)
 		proxyP2PCoordinator.Start(context.Background())
 		defer proxyP2PCoordinator.Close()
+		log.Printf("[P2P] enabled rendezvous_listen=%q rendezvous_advertise=%q agent_udp_ports=%d-%d lease=%ds max_sessions_per_device=%d",
+			cfg.P2P.RendezvousListen, p2pRendezvousAddress, cfg.P2P.PortStart, cfg.P2P.PortEnd,
+			proxyP2PCoordinator.LeaseSeconds(), cfg.P2P.MaxSessionsPerDevice)
+		if p2pRendezvousAddress == "" {
+			log.Printf("[P2P] rendezvous advertise address is empty; cross-NAT peers will only advertise local interface candidates")
+		}
 	}
 
 	invalidateIdentitySessions := func(identityID string) []string {

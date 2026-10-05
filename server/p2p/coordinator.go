@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"sort"
 	"strings"
@@ -250,6 +251,7 @@ func (c *Coordinator) HandleControl(ctx context.Context, stream tunnel.TunnelStr
 	}
 	var message protocol.P2PControlMessage
 	if err := protocol.ReadJSON(stream, &message); err != nil {
+		log.Printf("[P2P] control decode failed device=%s: %v", device.DeviceID, err)
 		return
 	}
 	var response protocol.P2PControlMessage
@@ -273,6 +275,28 @@ func (c *Coordinator) HandleControl(ctx context.Context, stream tunnel.TunnelStr
 		response = c.pathReport(device, message)
 	default:
 		response = p2pError("UNKNOWN_CONTROL", "unsupported P2P control message")
+	}
+
+	if response.Type == protocol.P2PControlError {
+		log.Printf("[P2P] control rejected type=%s device=%s session=%d exit=%s code=%s",
+			message.Type, device.DeviceID, message.SessionID, message.ExitDeviceID, response.ErrorCode)
+	} else {
+		switch message.Type {
+		case protocol.P2PControlConnectRequest:
+			log.Printf("[P2P] session offered session=%d client=%s exit=%s client_candidates=%d",
+				response.SessionID, device.DeviceID, message.ExitDeviceID, len(message.Candidates))
+		case protocol.P2PControlConnectAnswer:
+			log.Printf("[P2P] session answered session=%d exit=%s exit_candidates=%d",
+				message.SessionID, device.DeviceID, len(message.Candidates))
+		case protocol.P2PControlCandidateUpdate:
+			log.Printf("[P2P] candidates updated session=%d device=%s candidates=%d",
+				message.SessionID, device.DeviceID, len(message.Candidates))
+		case protocol.P2PControlPathReport:
+			log.Printf("[P2P] path report session=%d device=%s path=%s rtt_ms=%d fallback=%d active_streams=%d",
+				message.SessionID, device.DeviceID, message.Path, message.RTTMs, message.FallbackCount, message.ActiveStreams)
+		case protocol.P2PControlClose:
+			log.Printf("[P2P] session closed session=%d device=%s", message.SessionID, device.DeviceID)
+		}
 	}
 	if response.Type != "" {
 		_ = protocol.WriteJSON(stream, response)

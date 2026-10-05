@@ -809,6 +809,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	workers.Wait()
 	a.clearRDPState(sess, epoch)
 	a.clearProxyP2PState(sess, epoch, proxyP2PManager)
+	a.clearPublicDirectState(sess, epoch)
 	return nil
 }
 
@@ -1780,6 +1781,25 @@ func (a *Agent) clearProxyP2PState(sess tunnel.TunnelSession, epoch uint64, mana
 	}
 	a.mu.Unlock()
 	_ = manager.Close()
+}
+
+func (a *Agent) clearPublicDirectState(sess tunnel.TunnelSession, epoch uint64) {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	if a.epoch != epoch || a.readySession != sess {
+		a.mu.RUnlock()
+		return
+	}
+	manager := a.proxyDirect
+	a.mu.RUnlock()
+	if manager != nil {
+		// Public Direct authorization is derived from the active Relay control
+		// session. When that session ends, every direct session and cached ticket
+		// must be discarded before a reconnect can authorize fresh paths.
+		manager.UpdateInventory(nil)
+	}
 }
 
 func (a *Agent) setApprovalState(state string) {

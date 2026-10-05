@@ -41,6 +41,40 @@ func TestTicketAuthenticatorVerifiesScopeRevisionAndReplay(t *testing.T) {
 	_ = now
 }
 
+func TestTicketAuthenticatorRejectsTicketAfterAuthorizationRevocation(t *testing.T) {
+	signer, err := internaldirect.GenerateTicketSigner(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, err := signer.Issue("client", "exit", 7, 11, []string{internaldirect.AccessCapabilityProxy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewAuthorizationStore("exit", 7)
+	if err := store.Update(protocol.PublicDirectAuthorizationUpdate{
+		ClientDeviceID: "client", ExitDeviceID: "exit",
+		PolicyRevision: 7, AuthorizationRevision: 11, Authorized: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Update(protocol.PublicDirectAuthorizationUpdate{
+		ClientDeviceID: "client", ExitDeviceID: "exit",
+		PolicyRevision: 7, AuthorizationRevision: 11, Authorized: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	auth := &TicketAuthenticator{
+		VerifyKey: signer.PublicKey(), ExitDeviceID: "exit", PolicyRevision: 7,
+		AuthorizationRevision: store.Resolve,
+	}
+	err = auth.Authenticate(context.Background(), protocol.PublicDirectAuthRequest{
+		Version: protocol.PublicDirectAuthVersion, ClientDeviceID: "client", ExitDeviceID: "exit", Ticket: raw,
+	})
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("revoked ticket error=%v", err)
+	}
+}
+
 func TestTicketAuthenticatorRejectsWrongPolicyAndAuthorizationRevision(t *testing.T) {
 	signer, err := internaldirect.GenerateTicketSigner(time.Minute)
 	if err != nil {

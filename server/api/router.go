@@ -703,7 +703,7 @@ func (r *Router) handleChannelPush(w http.ResponseWriter, req *http.Request) {
 		}(),
 		Popup:     classification.Popup,
 		PopupType: classification.Type,
-		CreatedAt:        time.Now().UTC(),
+		CreatedAt: time.Now().UTC(),
 	}
 	if err := r.db.CreateMessage(message, targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist message")

@@ -206,9 +206,9 @@ type PushMessage struct {
 	Popup            bool   `json:"popup"`
 	// PopupType is retained as a compatibility alias for older clients. New
 	// clients should use MessageType to choose presentation.
-	PopupType        string `json:"popupType,omitempty"`
-	Source           string `json:"source,omitempty"`
-	CreatedAt        int64  `json:"createdAt"`
+	PopupType string `json:"popupType,omitempty"`
+	Source    string `json:"source,omitempty"`
+	CreatedAt int64  `json:"createdAt"`
 }
 
 // PushMessageReceipt is returned only after the Agent accepted the message.

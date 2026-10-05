@@ -219,7 +219,7 @@
     <label for="channel-name">渠道名称</label><input id="channel-name" required maxlength="120" placeholder="例如：登录验证码">
     <label for="channel-id">渠道 ID</label><input id="channel-id" class="mono" maxlength="80" placeholder="留空自动生成，例如 login-code">
     <small>仅允许字母、数字、点、短横线和下划线。</small>
-    <label class="switch-row channel-all-row"><input id="channel-all-devices" type="checkbox"><span><strong>默认推送到全部设备</strong><small>没有命中分流规则时，动态选择当前所有已批准设备，新设备也会自动加入。</small></span></label>
+    <label class="switch-row channel-all-row"><input id="channel-all-devices" type="checkbox"><span><strong>默认推送到本身份全部设备</strong><small>没有命中分流规则时，只动态选择所属身份当前所有已批准设备；该身份的新设备也会自动加入。</small></span></label>
     <div id="channel-device-section">
       <div class="capability-editor-heading"><h3>默认 / 兜底设备</h3><span id="channel-device-count">0 台</span></div>
       <div id="channel-devices" class="channel-device-list"></div>

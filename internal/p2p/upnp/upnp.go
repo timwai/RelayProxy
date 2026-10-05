@@ -133,11 +133,11 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 				continue
 			}
 			m := &Mapping{
-				service:         svc,
-				internalClient:  internalIP.String(),
-				internalPort:    uint16(internalPort),
-				externalPort:    externalPort,
-				leaseSeconds:    leaseSeconds,
+				service:        svc,
+				internalClient: internalIP.String(),
+				internalPort:   uint16(internalPort),
+				externalPort:   externalPort,
+				leaseSeconds:   leaseSeconds,
 			}
 			if leaseSeconds > 0 {
 				refreshCtx, cancel := context.WithCancel(context.Background())
@@ -215,7 +215,11 @@ func (m *Mapping) refreshLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			// Once a refresh request has been sent, let it complete (or hit its
+			// short timeout) before Close sends DeletePortMapping. Canceling the
+			// HTTP request here cannot guarantee that the router stopped applying
+			// it, which could otherwise recreate the mapping after deletion.
+			requestCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			err := m.service.addPortMapping(requestCtx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds)
 			cancel()
 			if ctx.Err() != nil {

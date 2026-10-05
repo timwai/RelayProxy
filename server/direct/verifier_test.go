@@ -103,7 +103,6 @@ func TestVerifierRejectsWrongCertificateFingerprint(t *testing.T) {
 	}
 }
 
-
 func TestResolvePublicEndpointRejectsPrivateResolution(t *testing.T) {
 	for _, address := range []string{"10.0.0.1:35820", "127.0.0.1:35820", "[::1]:35820", "[fe80::1]:35820"} {
 		if _, err := resolvePublicEndpointWithLookup(context.Background(), address, nil); err == nil {

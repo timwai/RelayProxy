@@ -42,19 +42,60 @@ type EndpointRecord struct {
 const maxEndpointCandidates = 16
 
 type Registry struct {
-	mu      sync.Mutex
-	records map[string]map[string]EndpointRecord
-	now     func() time.Time
+	mu                sync.Mutex
+	records           map[string]map[string]EndpointRecord
+	now               func() time.Time
+	listenerPortStart int
+	listenerPortEnd   int
 }
 
 func NewRegistry() *Registry {
 	return &Registry{records: make(map[string]map[string]EndpointRecord), now: time.Now}
 }
 
+// SetListenerPortRange constrains the actual UDP listener port an Exit may
+// register. A 0/0 range preserves the historical OS-assigned-port behavior.
+// Manual advertise addresses may still use a different externally mapped port.
+func (r *Registry) SetListenerPortRange(start, end int) error {
+	if r == nil {
+		return errors.New("public direct registry is unavailable")
+	}
+	if start == 0 && end == 0 {
+		r.mu.Lock()
+		r.listenerPortStart, r.listenerPortEnd = 0, 0
+		r.mu.Unlock()
+		return nil
+	}
+	if start < 1 || start > 65535 || end < start || end > 65535 {
+		return errors.New("invalid public direct listener port range")
+	}
+	r.mu.Lock()
+	r.listenerPortStart, r.listenerPortEnd = start, end
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *Registry) validateListenerPort(port uint16) error {
+	r.mu.Lock()
+	start, end := r.listenerPortStart, r.listenerPortEnd
+	r.mu.Unlock()
+	if start == 0 && end == 0 {
+		return nil
+	}
+	value := int(port)
+	if value < start || value > end {
+		return fmt.Errorf("public direct listener port %d is outside server policy %d-%d", value, start, end)
+	}
+	return nil
+}
+
 func (r *Registry) Register(deviceID, sessionID string, observedIP netip.Addr, request protocol.PublicDirectRegistrationRequest) ([]EndpointRecord, error) {
 	deviceID, sessionID = strings.TrimSpace(deviceID), strings.TrimSpace(sessionID)
 	if deviceID == "" || sessionID == "" {
 		return nil, errors.New("public direct registration requires authenticated device and session ids")
+	}
+	if err := r.validateListenerPort(request.ListenerPort); err != nil {
+		return nil, err
 	}
 	fingerprint, err := normalizeFingerprint(request.CertFingerprint)
 	if err != nil {

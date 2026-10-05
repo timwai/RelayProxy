@@ -18,7 +18,7 @@ func (a *Agent) initPublicDirectClient() {
 	if a == nil || a.proxyDirect != nil {
 		return
 	}
-	a.proxyDirect = proxydirect.NewClientManager(a.ctx, func() string {
+	manager := proxydirect.NewClientManager(a.ctx, func() string {
 		a.mu.RLock()
 		defer a.mu.RUnlock()
 		if a.closed.Load() {
@@ -26,6 +26,18 @@ func (a *Agent) initPublicDirectClient() {
 		}
 		return a.cfg.DeviceID
 	}, proxydirect.ClientManagerOptions{})
+	manager.SetFallback(func(exitDeviceID, _ string) {
+		a.mu.RLock()
+		p2p := a.proxyP2P
+		ready := a.handshakeOK.Load()
+		mode := a.cfg.P2PMode
+		closed := a.closed.Load()
+		a.mu.RUnlock()
+		if !closed && ready && mode != "relay_only" && p2p != nil {
+			p2p.EnsureClient(exitDeviceID)
+		}
+	})
+	a.proxyDirect = manager
 }
 
 func (a *Agent) configureProxyPathProvider() {

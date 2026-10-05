@@ -1292,13 +1292,15 @@
     const status = $('message-status') ? $('message-status').value : '';
     const filtered = state.messages.filter(message => {
       const code = String(message.verificationCode || '');
+      const messageType = String(message.messageType || (code ? 'verification_code' : ''));
       const deliveries = Array.isArray(message.deliveries) ? message.deliveries : [];
-      if (kind === 'code' && !code) return false;
-      if (kind === 'normal' && code) return false;
+      if (kind === 'unmatched' && messageType) return false;
+      if (kind && kind !== 'unmatched' && messageType !== kind) return false;
       if (status && !deliveries.some(delivery => delivery.status === status)) return false;
       if (!needle) return true;
       return [
-        message.title, message.content, message.source, message.channelId, message.routeRule, code,
+        message.title, message.content, message.source, message.channelId, message.routeRule,
+        message.messageType, message.messageRule, code,
         ...deliveries.flatMap(delivery => [delivery.deviceName, delivery.deviceId, delivery.status])
       ].join(' ').toLowerCase().includes(needle);
     });
@@ -1306,6 +1308,10 @@
     $('message-summary').textContent = '显示 ' + filtered.length + ' / ' + state.messages.length + ' 条';
     $('messages-body').innerHTML = filtered.length ? filtered.map(message => {
       const code = String(message.verificationCode || '').trim();
+      const messageType = String(message.messageType || (code ? 'verification_code' : '')).trim();
+      const typeLabel = messageType === 'verification_code' ? '验证码' : messageType === 'important' ? '重要提醒' : messageType === 'message' ? '普通消息' : '未匹配';
+      const typeTone = messageType === 'important' ? 'warning-badge' : messageType === 'verification_code' ? 'transport' : messageType === 'message' ? 'neutral' : 'neutral';
+      const ruleMeta = message.messageRule ? ' · 规则：' + esc(message.messageRule) : '';
       const deliveries = Array.isArray(message.deliveries) ? message.deliveries : [];
       const deliveryHTML = deliveries.length ? deliveries.map(delivery => {
         const tone = delivery.status === 'delivered' ? 'success' : delivery.status === 'failed' ? 'warning-badge' : delivery.status === 'offline' ? 'neutral' : 'transport';
@@ -1315,7 +1321,7 @@
       }).join('') : '<span class="muted">—</span>';
       const codeHTML = code ? '<div class="message-code"><span class="mono">' + esc(code) + '</span><button type="button" class="small-button" data-copy-message-code="' + esc(code) + '">复制</button></div>' : '<span class="muted">—</span>';
       const actionHTML = state.user && state.user.role === 'admin' ? '<button type="button" class="small-button danger" data-delete-message="' + esc(message.id) + '">删除</button>' : '<span class="muted">—</span>';
-      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || '渠道推送') + (message.channelId ? ' · ' + esc(message.channelId) : '') + (message.routeRule ? ' · 分流：' + esc(message.routeRule) : '') + '</small></td><td><strong>' + esc(message.title || 'RelayProxy 消息') + '</strong><small class="message-content">' + esc(message.content || '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td><td class="right">' + actionHTML + '</td></tr>';
+      return '<tr><td><strong>' + esc(date(message.createdAt)) + '</strong><small>' + esc(message.source || '渠道推送') + (message.channelId ? ' · ' + esc(message.channelId) : '') + (message.routeRule ? ' · 分流：' + esc(message.routeRule) : '') + '</small></td><td><div class="button-row">' + badge(typeLabel, typeTone) + '<strong>' + esc(message.title || 'RelayProxy 消息') + '</strong></div><small class="message-content">' + esc(message.content || '') + '</small><small>' + ruleMeta.replace(/^ · /, '') + '</small></td><td>' + codeHTML + '</td><td><div class="message-deliveries">' + deliveryHTML + '</div></td><td class="right">' + actionHTML + '</td></tr>';
     }).join('') : emptyRow(5, '暂无匹配消息', state.messageChannel ? '这个渠道还没有消息' : '渠道推送后会显示在这里');
   }
 

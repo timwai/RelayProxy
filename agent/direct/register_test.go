@@ -92,7 +92,9 @@ func TestRegisterEndpointUsesPublicDirectControlFrame(t *testing.T) {
 
 func TestValidateTicketCurrentUsesPublicDirectControlFrame(t *testing.T) {
 	stream := &registrationStream{}
-	if err := protocol.WriteJSON(&stream.read, protocol.PublicDirectRegistrationResponse{Success: true}); err != nil {
+	if err := protocol.WriteJSON(&stream.read, protocol.PublicDirectRegistrationResponse{
+		Success: true, RelayPolicy: testDirectRelayPolicy(t),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	session := &registrationSession{stream: stream, done: make(chan struct{})}
@@ -102,8 +104,12 @@ func TestValidateTicketCurrentUsesPublicDirectControlFrame(t *testing.T) {
 		PolicyRevision:        4,
 		AuthorizationRevision: 9,
 	}
-	if err := ValidateTicketCurrent(context.Background(), session, claims); err != nil {
+	policy, err := ValidateTicketCurrent(context.Background(), session, claims)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if policy == nil || policy.Fingerprint == "" {
+		t.Fatalf("relay policy=%+v", policy)
 	}
 
 	header, err := protocol.ReadStreamHeader(&stream.write)

@@ -259,3 +259,70 @@ func TestPublicDirectReusesExistingExitHandlerForTCPAndUDP(t *testing.T) {
 		t.Fatal("public direct server did not stop")
 	}
 }
+
+
+func TestPublicDirectSlowHandshakeDoesNotBlockValidClient(t *testing.T) {
+	identity, err := secure.GenerateEphemeralIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket := []byte("development-ticket")
+	listener, err := direct.Listen(direct.ListenerConfig{
+		ListenAddress: "127.0.0.1:0",
+		TLSConfig:     &tls.Config{Certificates: []tls.Certificate{identity.Certificate}},
+		Authenticator: direct.AuthenticatorFunc(func(_ context.Context, request protocol.PublicDirectAuthRequest) error {
+			if request.ClientDeviceID != "client" || request.ExitDeviceID != "exit" || !bytes.Equal(request.Ticket, ticket) {
+				return errors.New("rejected")
+			}
+			return nil
+		}),
+		AuthTimeout:             2 * time.Second,
+		MaxConcurrentHandshakes: 4,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	rootCtx, rootCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer rootCancel()
+	slow, err := tunnel.DialDirectQUIC(rootCtx, listener.Addr(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer slow.Close()
+	// Give the listener enough time to admit the slow connection into one
+	// authentication worker. It deliberately never opens the auth stream.
+	time.Sleep(50 * time.Millisecond)
+
+	accepted := make(chan *direct.AcceptedSession, 1)
+	acceptErr := make(chan error, 1)
+	go func() {
+		session, err := listener.Accept(rootCtx)
+		if err != nil {
+			acceptErr <- err
+			return
+		}
+		accepted <- session
+	}()
+
+	validCtx, validCancel := context.WithTimeout(rootCtx, time.Second)
+	defer validCancel()
+	client, err := direct.Dial(validCtx, testDialConfig(listener, ticket))
+	if err != nil {
+		t.Fatalf("valid client was blocked by slow handshake: %v", err)
+	}
+	defer client.Close()
+
+	select {
+	case err := <-acceptErr:
+		t.Fatal(err)
+	case server := <-accepted:
+		if server == nil || server.Tunnel == nil || server.ClientDeviceID != "client" {
+			t.Fatalf("accepted session=%+v", server)
+		}
+		_ = server.Tunnel.Close()
+	case <-validCtx.Done():
+		t.Fatalf("valid authenticated session was not delivered: %v", validCtx.Err())
+	}
+}

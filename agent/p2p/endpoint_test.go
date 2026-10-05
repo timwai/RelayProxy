@@ -3,6 +3,7 @@ package p2p
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"encoding/hex"
 	"net"
 	"net/netip"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"relayproxy/internal/p2p/candidate"
+	p2pupnp "relayproxy/internal/p2p/upnp"
 )
 
 func TestEndpointUsesSameSocketForReflexiveDiscovery(t *testing.T) {
@@ -129,5 +131,56 @@ func TestEndpointRejectsInvalidUDPPortRange(t *testing.T) {
 	if err := endpoint.Start(context.Background()); err == nil {
 		_ = endpoint.Close()
 		t.Fatal("invalid P2P UDP port range was accepted")
+	}
+}
+
+
+func TestEndpointPublishesUPnPCandidate(t *testing.T) {
+	previous := mapUPnPUDP
+	defer func() { mapUPnPUDP = previous }()
+	mapUPnPUDP = func(ctx context.Context, internalPort int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+		if internalPort == 0 {
+			t.Fatal("UPnP mapper received zero internal port")
+		}
+		return nil, netip.MustParseAddrPort("198.51.100.44:45678"), nil
+	}
+
+	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)
+	if err := endpoint.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+
+	candidates, _, err := endpoint.Description()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range candidates {
+		if item.Protocol == "udp" && item.Type == "reflexive" &&
+			item.Address == "198.51.100.44:45678" && item.Priority == 900 {
+			return
+		}
+	}
+	t.Fatalf("UPnP candidate missing from %#v", candidates)
+}
+
+func TestEndpointUPnPFailureIsNonFatal(t *testing.T) {
+	previous := mapUPnPUDP
+	defer func() { mapUPnPUDP = previous }()
+	mapUPnPUDP = func(context.Context, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+		return nil, netip.AddrPort{}, errors.New("router does not support UPnP")
+	}
+
+	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)
+	if err := endpoint.Start(context.Background()); err != nil {
+		t.Fatalf("UPnP failure unexpectedly failed P2P endpoint: %v", err)
+	}
+	defer endpoint.Close()
+	candidates, _, err := endpoint.Description()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) == 0 {
+		t.Fatal("UPnP failure removed all local P2P candidates")
 	}
 }

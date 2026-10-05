@@ -52,9 +52,11 @@ type GatewayConfig struct {
 	P2PLeaseSec             int
 	P2PPortStart            int
 	P2PPortEnd              int
-	P2PUPnPEnabled          bool
-	PublicDirectEnabled     bool
-	HandshakeTimeout        time.Duration // covers control stream/header/Hello/Welcome
+	P2PUPnPEnabled           bool
+	PublicDirectEnabled      bool
+	PublicDirectTicketIssuer string
+	PublicDirectTicketKey    []byte
+	HandshakeTimeout         time.Duration // covers control stream/header/Hello/Welcome
 }
 
 type IdentityAuthorization struct {
@@ -579,8 +581,10 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		P2PRendezvousAddress:  g.cfg.P2PRendezvousAddress,
 		P2PLeaseSec:           g.cfg.P2PLeaseSec,
 		P2PPortStart:          g.cfg.P2PPortStart,
-		P2PPortEnd:            g.cfg.P2PPortEnd,
-		P2PUPnPEnabled:        g.cfg.P2PUPnPEnabled,
+		P2PPortEnd:               g.cfg.P2PPortEnd,
+		P2PUPnPEnabled:           g.cfg.P2PUPnPEnabled,
+		PublicDirectTicketIssuer: g.cfg.PublicDirectTicketIssuer,
+		PublicDirectTicketKey:    append([]byte(nil), g.cfg.PublicDirectTicketKey...),
 	}
 
 	runtimeCapabilities := activeRuntimeCapabilities(hello.TransportCapabilities, authorization.ApprovedCapabilities)

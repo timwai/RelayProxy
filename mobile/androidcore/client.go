@@ -95,6 +95,7 @@ type statusSnapshot struct {
 	PowerConstrained    bool                 `json:"powerConstrained"`
 	P2PState            string               `json:"p2pState,omitempty"`
 	P2PPath             string               `json:"p2pPath,omitempty"`
+	P2PError            string               `json:"p2pError,omitempty"`
 	P2PRTTMs            int64                `json:"p2pRttMs,omitempty"`
 	P2PCandidateSummary string               `json:"p2pCandidateSummary,omitempty"`
 	P2PBytesUp          uint64               `json:"p2pBytesUp,omitempty"`
@@ -710,6 +711,7 @@ func (c *Client) StatusJSON() string {
 		if path, ok := manager.PathStatus(s.SelectedExit); ok {
 			s.P2PState = string(path.State)
 			s.P2PPath = path.Path
+			s.P2PError = path.Error
 			s.P2PRTTMs = path.RTTMs
 			s.P2PCandidateSummary = path.CandidateSummary
 			s.P2PBytesUp = path.BytesUp

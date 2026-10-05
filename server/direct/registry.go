@@ -118,11 +118,15 @@ func (r *Registry) Register(deviceID, sessionID string, observedIP netip.Addr, r
 			record.VerifiedAt = old.VerifiedAt
 			record.ExpiresAt = old.ExpiresAt
 			record.LastError = old.LastError
-			record.Endpoint.Verified = old.Endpoint.Verified && old.State == StateVerified && old.ExpiresAt.After(now)
+			record.Endpoint.Verified = old.Endpoint.Verified &&
+				(old.State == StateVerified || old.State == StateVerifying) &&
+				old.ExpiresAt.After(now)
 			if record.Endpoint.Verified {
 				record.Endpoint.DialAddress = old.Endpoint.DialAddress
 			}
-			if old.State == StateVerified && !old.ExpiresAt.After(now) {
+			if old.Endpoint.Verified &&
+				(old.State == StateVerified || old.State == StateVerifying) &&
+				!old.ExpiresAt.After(now) {
 				record.State = StateExpired
 				record.Endpoint.Verified = false
 				record.Endpoint.DialAddress = ""
@@ -171,15 +175,23 @@ func (r *Registry) updateRegistration(expected EndpointRecord, fn func(*Endpoint
 	return true
 }
 
+func beginVerification(record *EndpointRecord, now time.Time) {
+	keepPublished := record.Endpoint.Verified &&
+		(record.State == StateVerified || record.State == StateVerifying) &&
+		!record.ExpiresAt.IsZero() && record.ExpiresAt.After(now)
+	record.State = StateVerifying
+	record.LastError = ""
+	if keepPublished {
+		return
+	}
+	record.Endpoint.Verified = false
+	record.Endpoint.DialAddress = ""
+	record.VerifiedAt = time.Time{}
+	record.ExpiresAt = time.Time{}
+}
+
 func (r *Registry) markVerifyingRegistration(expected EndpointRecord) bool {
-	return r.updateRegistration(expected, func(record *EndpointRecord, now time.Time) {
-		record.State = StateVerifying
-		record.Endpoint.Verified = false
-		record.Endpoint.DialAddress = ""
-		record.LastError = ""
-		record.VerifiedAt = time.Time{}
-		record.ExpiresAt = time.Time{}
-	})
+	return r.updateRegistration(expected, beginVerification)
 }
 
 func (r *Registry) markVerifiedRegistration(expected EndpointRecord, dialAddress string, ttl time.Duration) bool {
@@ -213,13 +225,7 @@ func (r *Registry) markFailedRegistration(expected EndpointRecord, err error) bo
 }
 
 func (r *Registry) MarkVerifying(deviceID, sessionID, address string) bool {
-	return r.update(deviceID, sessionID, address, func(record *EndpointRecord, now time.Time) {
-		record.State = StateVerifying
-		record.Endpoint.Verified = false
-		record.LastError = ""
-		record.VerifiedAt = time.Time{}
-		record.ExpiresAt = time.Time{}
-	})
+	return r.update(deviceID, sessionID, address, beginVerification)
 }
 
 func (r *Registry) MarkVerified(deviceID, sessionID, address string, ttl time.Duration) bool {
@@ -264,7 +270,7 @@ func (r *Registry) VerifiedEndpoints(deviceID string) []protocol.PublicDirectEnd
 	for address, record := range bucket {
 		record = r.expireLocked(record)
 		bucket[address] = record
-		if record.State == StateVerified && record.Endpoint.Verified {
+		if (record.State == StateVerified || record.State == StateVerifying) && record.Endpoint.Verified {
 			out = append(out, record.Endpoint)
 		}
 	}
@@ -331,7 +337,8 @@ func (r *Registry) update(deviceID, sessionID, address string, fn func(*Endpoint
 }
 
 func (r *Registry) expireLocked(record EndpointRecord) EndpointRecord {
-	if record.State == StateVerified && !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(r.now()) {
+	if (record.State == StateVerified || record.State == StateVerifying) &&
+		record.Endpoint.Verified && !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(r.now()) {
 		record.State = StateExpired
 		record.Endpoint.Verified = false
 		record.Endpoint.DialAddress = ""

@@ -40,3 +40,41 @@ func TestProxyExitsReturnsDefensiveCopy(t *testing.T) {
 		t.Fatalf("caller mutated agent inventory: %+v", second)
 	}
 }
+
+
+func TestRefreshProxyExitsRejectsOlderRevision(t *testing.T) {
+	agent := &Agent{
+		epoch:             7,
+		proxyExits:        []protocol.ProxyExit{{DeviceID: "exit-new", Name: "New", Online: true}},
+		proxyExitRevision: 5,
+	}
+	agent.refreshProxyExits(nil, 7, []protocol.ProxyExit{{DeviceID: "exit-old", Name: "Old", Online: true}}, 4)
+	if got := agent.ProxyExits(); len(got) != 1 || got[0].DeviceID != "exit-new" || agent.proxyExitRevision != 5 {
+		t.Fatalf("older inventory replaced current snapshot: exits=%+v revision=%d", got, agent.proxyExitRevision)
+	}
+
+	agent.refreshProxyExits(nil, 7, []protocol.ProxyExit{{DeviceID: "exit-replay", Name: "Replay", Online: true}}, 5)
+	if got := agent.ProxyExits(); len(got) != 1 || got[0].DeviceID != "exit-replay" || agent.proxyExitRevision != 5 {
+		t.Fatalf("same-revision recovery snapshot was ignored: exits=%+v revision=%d", got, agent.proxyExitRevision)
+	}
+
+	agent.refreshProxyExits(nil, 7, []protocol.ProxyExit{{DeviceID: "exit-latest", Name: "Latest", Online: true}}, 6)
+	if got := agent.ProxyExits(); len(got) != 1 || got[0].DeviceID != "exit-latest" || agent.proxyExitRevision != 6 {
+		t.Fatalf("newer inventory was not applied: exits=%+v revision=%d", got, agent.proxyExitRevision)
+	}
+}
+
+func TestRefreshProxyExitsLegacyRevisionKeepsVersionCounter(t *testing.T) {
+	agent := &Agent{
+		epoch:             3,
+		proxyExits:        []protocol.ProxyExit{{DeviceID: "exit-a", Online: true}},
+		proxyExitRevision: 9,
+	}
+	agent.refreshProxyExits(nil, 3, []protocol.ProxyExit{{DeviceID: "exit-b", Online: true}}, 0)
+	if got := agent.ProxyExits(); len(got) != 1 || got[0].DeviceID != "exit-b" {
+		t.Fatalf("legacy inventory refresh was not applied: %+v", got)
+	}
+	if agent.proxyExitRevision != 9 {
+		t.Fatalf("legacy refresh reset revision: %d", agent.proxyExitRevision)
+	}
+}

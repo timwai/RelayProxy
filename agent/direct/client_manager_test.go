@@ -189,7 +189,6 @@ func TestClientManagerRacesAllVerifiedEndpointsBeforeAuth(t *testing.T) {
 	}
 }
 
-
 func TestClientManagerIgnoresStaleTicketAttemptResults(t *testing.T) {
 	fingerprint := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	inventory := func(ticket string) []protocol.ProxyExit {

@@ -654,14 +654,12 @@ func EnsureDefaultVerificationRule(rules []VerificationRule) []VerificationRule 
 // typed message-rule model. Custom rules keep their order and the editable
 // default detector remains last, matching the old precedence.
 func LegacyMessageRules(useDefault bool, rules []VerificationRule) []MessageRule {
-	if useDefault {
-		rules = EnsureDefaultVerificationRule(rules)
-	}
+	// The editable default rule always exists in v2. The legacy
+	// useDefaultVerification flag maps to its Enabled state so an explicitly
+	// disabled default cannot be accidentally re-enabled by a later edit.
+	rules = EnsureDefaultVerificationRule(rules)
 	out := make([]MessageRule, 0, len(rules))
 	appendRule := func(rule VerificationRule) {
-		if rule.Default && !useDefault {
-			return
-		}
 		ruleType := strings.ToLower(strings.TrimSpace(rule.PopupType))
 		switch ruleType {
 		case "message", "important", "verification_code":
@@ -681,7 +679,7 @@ func LegacyMessageRules(useDefault bool, rules []VerificationRule) []MessageRule
 		next := MessageRule{
 			Name:    strings.TrimSpace(rule.Name),
 			Type:    ruleType,
-			Enabled: true,
+			Enabled: !rule.Default || useDefault,
 			Default: rule.Default,
 			Match:   match,
 			Popup:   rule.Popup,
@@ -806,7 +804,9 @@ func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
 	if channel.ID == "" {
 		channel.ID = "ch_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20]
 	}
-	if !channel.UseDefaultVerification && len(channel.VerificationRules) == 0 {
+	if len(channel.MessageRules) == 0 &&
+		!channel.UseDefaultVerification &&
+		len(channel.VerificationRules) == 0 {
 		channel.UseDefaultVerification = true
 	}
 	now := time.Now().UTC()

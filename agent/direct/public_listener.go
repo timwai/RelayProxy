@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/quic-go/quic-go"
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -34,6 +35,7 @@ type AcceptedSession struct {
 	Tunnel         tunnel.TunnelSession
 	ClientDeviceID string
 	ExitDeviceID   string
+	RelayPolicy    *acl.Policy
 }
 
 type acceptResult struct {
@@ -245,7 +247,15 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 			_ = writeHandshakeFailure(stream, protocol.ErrCodeInvalidRequest, "invalid authentication request")
 			return nil, false, fmt.Errorf("%w: invalid authentication request", ErrUnauthorized)
 		}
-		if err := l.authenticator.Authenticate(authCtx, request); err != nil {
+		var relayPolicy *acl.Policy
+		if authenticator, ok := l.authenticator.(PolicyAuthenticator); ok {
+			policy, err := authenticator.AuthenticatePolicy(authCtx, request)
+			if err != nil {
+				_ = writeHandshakeFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
+				return nil, false, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
+			}
+			relayPolicy = policy
+		} else if err := l.authenticator.Authenticate(authCtx, request); err != nil {
 			_ = writeHandshakeFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
 			return nil, false, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
 		}
@@ -257,6 +267,7 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 			Tunnel:         session,
 			ClientDeviceID: request.ClientDeviceID,
 			ExitDeviceID:   request.ExitDeviceID,
+			RelayPolicy:    relayPolicy,
 		}, false, nil
 	default:
 		_ = writeHandshakeFailure(stream, protocol.ErrCodeInvalidRequest, "unsupported handshake type")

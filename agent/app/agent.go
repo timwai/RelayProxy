@@ -748,14 +748,24 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		}
 	}
 
+	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
+	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
+	stopPublicDirect := func() {}
+	if allowExit {
+		stop, err := a.startPublicDirectExit(ctx, sess, accepted, handler, accepted.MaxConnections)
+		if err != nil {
+			log.Printf("[PublicDirect] listener unavailable; P2P/Relay fallback remains active: %v", err)
+		} else {
+			stopPublicDirect = stop
+		}
+	}
+
 	var workers sync.WaitGroup
 	workers.Add(1)
 	go func() {
 		defer workers.Done()
 		a.heartbeatLoop(ctx, ctrl, sess, accepted.HeartbeatSec, epoch)
 	}()
-	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
-	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
 	// Every approved Agent accepts server-originated message streams, including
 	// CLIENT-only devices that do not expose proxy-exit or RDP services.
 	workers.Add(1)
@@ -780,6 +790,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	case <-sess.Done():
 	}
 	cancel()
+	stopPublicDirect()
 	_ = sess.Close()
 	if proxyP2PManager != nil {
 		_ = proxyP2PManager.Close()

@@ -692,8 +692,25 @@
       return '<tr><td><span class="device-name">' + esc(item.deviceName || '未命名设备') + '</span><span class="device-id mono">' + esc(identity) + ' · ' + esc(item.fingerprint.slice(0, 16)) + '…</span></td><td>' + esc([item.platform, item.arch, item.clientVersion].filter(Boolean).join(' / ') || '—') + '</td><td>' + esc(caps) + '</td><td><small>' + esc(date(item.firstSeenAt)) + '<br>' + esc(date(item.lastSeenAt)) + '</small></td><td class="right"><button class="small-button primary" data-enrollment-manage="' + esc(item.id) + '">审批能力</button> <button class="small-button" data-enrollment-reject="' + esc(item.id) + '">拒绝</button></td></tr>';
     }).join('') : emptyRow(5, '没有待审批设备', '新设备使用身份 ID 发起申请，审批后才能连接');
   }
+  function publicDirectStatusHTML(value) {
+    if (!value) return '<div class="notice subtle"><strong>Public Direct</strong><small>Server 本机出口不使用设备公网直连。</small></div>';
+    const endpoints = Array.isArray(value.endpoints) ? value.endpoints : [];
+    const stateNames = {unknown:'待验证', verifying:'验证中', verified:'已验证', failed:'验证失败', expired:'已过期'};
+    const rows = endpoints.map(item => {
+      const stateName = stateNames[item.state] || item.state || '未知';
+      const stateClass = item.state === 'verified' ? 'success' : item.state === 'failed' ? 'warning-badge' : 'neutral';
+      const time = item.verifiedAt ? ' · 验证 ' + esc(date(item.verifiedAt)) : '';
+      const reason = item.lastError ? '<small>' + esc(item.lastError) + '</small>' : '';
+      return '<div><span class="mono">' + esc(item.address) + '</span> ' + badge(stateName, stateClass) + '<small>' + esc(item.source || '') + time + '</small>' + reason + '</div>';
+    }).join('');
+    const summary = value.available ? badge('Public Direct 可用', 'success') : badge(endpoints.length ? 'Public Direct 未就绪' : 'Public Direct 未注册', endpoints.length ? 'warning-badge' : 'neutral');
+    return '<div class="notice subtle"><strong>' + summary + '</strong><small>已验证端点 ' + esc(value.verifiedEndpointCount || 0) + ' 个</small>' + (rows ? '<div class="direct-endpoints">' + rows + '</div>' : '') + '</div>';
+  }
   function renderExits() {
-    $('exits-grid').innerHTML = state.exits.length ? state.exits.map(e => '<article class="panel exit-card"><div class="exit-header"><div><h3>' + esc(e.deviceName || '未命名出口') + '</h3><span class="device-id mono">' + esc(e.deviceId) + '</span></div>' + badge('在线', 'success') + '</div><div class="detail-list">' + details([['传输方式', String(e.transport || '—').toUpperCase()], ['活跃流', e.activeStreams], ['目标权限', '服务端与出口本地共同限制']]) + '</div><button data-copy-exit="' + esc(e.deviceId) + '">复制出口 ID</button></article>').join('') : '<div class="panel empty"><strong>暂无在线出口</strong>将已配对设备设为「出口」或「客户端 + 出口」，并开启出口服务。</div>';
+    $('exits-grid').innerHTML = state.exits.length ? state.exits.map(e => {
+      const direct = publicDirectStatusHTML(e.publicDirect);
+      return '<article class="panel exit-card"><div class="exit-header"><div><h3>' + esc(e.deviceName || '未命名出口') + '</h3><span class="device-id mono">' + esc(e.deviceId) + '</span></div>' + badge('在线', 'success') + '</div><div class="detail-list">' + details([['传输方式', String(e.transport || '—').toUpperCase()], ['活跃流', e.activeStreams], ['目标权限', '服务端与出口本地共同限制']]) + '</div>' + direct + '<button data-copy-exit="' + esc(e.deviceId) + '">复制出口 ID</button></article>';
+    }).join('') : '<div class="panel empty"><strong>暂无在线出口</strong>将已配对设备设为「出口」或「客户端 + 出口」，并开启出口服务。</div>';
   }
   function renderSessions() {
     const nameFor = id => { const device = state.devices.find(d => d.id === id); return device ? device.name : id; };

@@ -17,10 +17,27 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+// Rendezvous probe wire format (network byte order):
+//
+// Request (16 bytes)
+//   [0:4]   magic
+//   [4]     version
+//   [5:8]   reserved
+//   [8:16]  nonce
+//
+// Response (32 bytes)
+//   [0:4]   magic
+//   [4]     version
+//   [5]     reserved
+//   [6:8]   observed source port
+//   [8:16]  echoed nonce
+//   [16:32] observed source IP as 16 bytes
 const (
-	MaxCandidates        = 16
-	ProbeMagic    uint32 = 0x52505633 // "RPV3"
-	ProbeVersion  byte   = 1
+	MaxCandidates = 16
+	ProbeMagic     uint32 = 0x52505633 // "RPV3"
+	ProbeVersion   byte   = 1
+	ProbeRequestSize      = 16
+	ProbeResponseSize     = 32
 )
 
 var (
@@ -141,6 +158,56 @@ func discoveryPriority(ip netip.Addr, protocolName string) uint32 {
 	return priority
 }
 
+func EncodeProbeRequest(nonce uint64) [ProbeRequestSize]byte {
+	var request [ProbeRequestSize]byte
+	binary.BigEndian.PutUint32(request[0:4], ProbeMagic)
+	request[4] = ProbeVersion
+	binary.BigEndian.PutUint64(request[8:16], nonce)
+	return request
+}
+
+func DecodeProbeRequest(raw []byte) (uint64, bool) {
+	if len(raw) != ProbeRequestSize || binary.BigEndian.Uint32(raw[0:4]) != ProbeMagic || raw[4] != ProbeVersion {
+		return 0, false
+	}
+	return binary.BigEndian.Uint64(raw[8:16]), true
+}
+
+func EncodeProbeResponse(nonce uint64, observed netip.AddrPort) ([ProbeResponseSize]byte, bool) {
+	var response [ProbeResponseSize]byte
+	if !observed.IsValid() || observed.Port() == 0 {
+		return response, false
+	}
+	ip := observed.Addr().Unmap()
+	if !ip.IsValid() || ip.IsUnspecified() {
+		return response, false
+	}
+	binary.BigEndian.PutUint32(response[0:4], ProbeMagic)
+	response[4] = ProbeVersion
+	binary.BigEndian.PutUint16(response[6:8], observed.Port())
+	binary.BigEndian.PutUint64(response[8:16], nonce)
+	encodedIP := ip.As16()
+	copy(response[16:32], encodedIP[:])
+	return response, true
+}
+
+func DecodeProbeResponse(raw []byte, expectedNonce uint64) (netip.AddrPort, bool) {
+	if len(raw) != ProbeResponseSize || binary.BigEndian.Uint32(raw[0:4]) != ProbeMagic || raw[4] != ProbeVersion ||
+		binary.BigEndian.Uint64(raw[8:16]) != expectedNonce {
+		return netip.AddrPort{}, false
+	}
+	port := binary.BigEndian.Uint16(raw[6:8])
+	ip, ok := netip.AddrFromSlice(raw[16:32])
+	if !ok || port == 0 {
+		return netip.AddrPort{}, false
+	}
+	ip = ip.Unmap()
+	if !ip.IsValid() || ip.IsUnspecified() {
+		return netip.AddrPort{}, false
+	}
+	return netip.AddrPortFrom(ip, port), true
+}
+
 // ProbeReflexive asks the server's UDP rendezvous socket to report the source
 // address it observed.  A short deadline and a nonce prevent stale responses
 // from being mistaken for the current endpoint.
@@ -156,17 +223,14 @@ func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, p
 	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
 		return protocol.P2PCandidate{}, err
 	}
-	request := make([]byte, 16)
-	binary.BigEndian.PutUint32(request[0:4], ProbeMagic)
-	request[4] = ProbeVersion
-	binary.BigEndian.PutUint64(request[8:16], nonce)
+	request := EncodeProbeRequest(nonce)
 	deadline := time.Now().Add(2 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 	defer conn.SetReadDeadline(time.Time{})
 	_ = conn.SetReadDeadline(deadline)
-	if _, err := conn.WriteToUDP(request, remote); err != nil {
+	if _, err := conn.WriteToUDP(request[:], remote); err != nil {
 		return protocol.P2PCandidate{}, err
 	}
 	buffer := make([]byte, 64)
@@ -175,20 +239,11 @@ func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, p
 		if err != nil {
 			return protocol.P2PCandidate{}, err
 		}
-		if n != 32 || binary.BigEndian.Uint32(buffer[0:4]) != ProbeMagic || buffer[4] != ProbeVersion || binary.BigEndian.Uint64(buffer[8:16]) != nonce {
+		observed, ok := DecodeProbeResponse(buffer[:n], nonce)
+		if !ok {
 			continue
 		}
-		ip, ok := netip.AddrFromSlice(buffer[16:32])
-		ip = ip.Unmap()
-		if !ok || !ip.IsValid() || ip.IsUnspecified() {
-			return protocol.P2PCandidate{}, ErrProbeUnavailable
-		}
-		// The source port is returned in the lower two bytes of the response.
-		port := binary.BigEndian.Uint16(buffer[6:8])
-		if port == 0 {
-			return protocol.P2PCandidate{}, ErrProbeUnavailable
-		}
 		_ = conn.SetReadDeadline(time.Time{})
-		return protocol.P2PCandidate{Protocol: protocolName, Type: "reflexive", Address: netip.AddrPortFrom(ip, port).String(), Priority: 800}, nil
+		return protocol.P2PCandidate{Protocol: protocolName, Type: "reflexive", Address: observed.String(), Priority: 800}, nil
 	}
 }

@@ -24,10 +24,10 @@ func (s *registryTestTunnel) AcceptStream(context.Context) (tunnel.TunnelStream,
 	return nil, errors.New("not used")
 }
 func (s *registryTestTunnel) Transport() tunnel.TransportType { return tunnel.TransportQUIC }
-func (s *registryTestTunnel) RemoteAddr() net.Addr             { return s.remote }
-func (s *registryTestTunnel) LocalAddr() net.Addr              { return nil }
-func (s *registryTestTunnel) Close() error                     { return nil }
-func (s *registryTestTunnel) Done() <-chan struct{}            { return nil }
+func (s *registryTestTunnel) RemoteAddr() net.Addr            { return s.remote }
+func (s *registryTestTunnel) LocalAddr() net.Addr             { return nil }
+func (s *registryTestTunnel) Close() error                    { return nil }
+func (s *registryTestTunnel) Done() <-chan struct{}           { return nil }
 
 func registryExit(deviceID, remote string) *session.DeviceSession {
 	return &session.DeviceSession{

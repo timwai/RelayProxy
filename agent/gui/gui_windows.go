@@ -433,21 +433,42 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	if a.verification == nil || !shouldPopupMessage(message) {
 		return
 	}
+
 	popup := a.verification
 	timeout := a.bridge.GetConfig().VerificationPopupTimeout()
 	popup.Center()
 	popup.Show()
 	disableVerificationNativeFrame()
-	popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
-		"window.enqueueMessage && window.enqueueMessage(" + payload + ")")
-	// A message may arrive during the hidden WebView's first paint. Retrying is
-	// harmless because the popup page deduplicates by message ID.
-	time.AfterFunc(250*time.Millisecond, func() {
-		if a.verification == popup {
-			popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
-				"window.enqueueMessage && window.enqueueMessage(" + payload + ")")
+
+	// The popup WebView starts hidden. On Windows WebView2, Show() can happen
+	// before verification.html has finished evaluating its script, so a single
+	// immediate ExecJS may be lost. Queue the message in the page when possible
+	// and retry across the first second. enqueueMessage deduplicates by ID, so
+	// these retries are safe after the page is ready as well.
+	script := fmt.Sprintf(`(function(message,timeout){
+		window.__relayPendingMessages=window.__relayPendingMessages||[];
+		window.__relayPendingTimeout=timeout;
+		if(window.setVerificationTimeout){window.setVerificationTimeout(timeout);}
+		if(window.enqueueMessage){window.enqueueMessage(message);return;}
+		if(!window.__relayPendingMessages.some(function(item){return item&&item.id===message.id;})){
+			window.__relayPendingMessages.push(message);
 		}
-	})
+	})(%s,%d);`, payload, timeout)
+	deliver := func() {
+		if a.verification == popup {
+			popup.ExecJS(script)
+		}
+	}
+	deliver()
+	for _, delay := range []time.Duration{
+		100 * time.Millisecond,
+		250 * time.Millisecond,
+		500 * time.Millisecond,
+		time.Second,
+	} {
+		time.AfterFunc(delay, deliver)
+	}
+	log.Printf("[GUI] message popup queued id=%s type=%s popup=%v", message.ID, messagePopupType(message), message.Popup)
 }
 
 func (a *appWindow) setVerificationPopupTimeout(seconds int) {

@@ -153,6 +153,11 @@ func TestDesktopPopupCompatibility(t *testing.T) {
 			want:    false,
 		},
 		{
+			name:    "mixed-version popup without type",
+			message: app.Message{Content: "hello", Popup: true},
+			want:    true,
+		},
+		{
 			name:    "explicit disabled verification",
 			message: app.Message{VerificationCode: "482931", PopupType: "verification_code", Popup: false},
 			want:    false,
@@ -161,6 +166,16 @@ func TestDesktopPopupCompatibility(t *testing.T) {
 			name:    "normal message popup",
 			message: app.Message{Content: "hello", PopupType: "message", Popup: true},
 			want:    true,
+		},
+		{
+			name:    "typed normal message popup",
+			message: app.Message{Content: "hello", MessageType: "message", Popup: true},
+			want:    true,
+		},
+		{
+			name:    "typed normal message explicitly disabled",
+			message: app.Message{Content: "hello", MessageType: "message", Popup: false},
+			want:    false,
 		},
 		{
 			name:    "important popup",
@@ -185,6 +200,9 @@ func TestDesktopPopupAssetSupportsAllMessageTypes(t *testing.T) {
 	page := string(data)
 	for _, want := range []string{
 		"window.enqueueMessage",
+		"window.__relayPendingMessages",
+		"window.relayMessagePopupReady",
+		"message.messageType",
 		"verification_code",
 		"important",
 		"MESSAGE",

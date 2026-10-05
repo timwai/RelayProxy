@@ -82,11 +82,25 @@ func (o Options) theme() string {
 	}
 }
 
+func messagePopupType(message app.Message) string {
+	if value := strings.TrimSpace(message.MessageType); value != "" {
+		return value
+	}
+	if value := strings.TrimSpace(message.PopupType); value != "" {
+		return value
+	}
+	if strings.TrimSpace(message.VerificationCode) != "" {
+		return "verification_code"
+	}
+	return ""
+}
+
 func shouldPopupMessage(message app.Message) bool {
-	popupType := strings.TrimSpace(message.PopupType)
-	if popupType == "" {
+	if strings.TrimSpace(message.MessageType) == "" && strings.TrimSpace(message.PopupType) == "" {
 		// Legacy servers only emitted verificationCode and had no popup metadata.
-		return strings.TrimSpace(message.VerificationCode) != ""
+		// A mixed-version sender may still provide popup=true without a type;
+		// treat that as an ordinary popup instead of silently dropping it.
+		return message.Popup || strings.TrimSpace(message.VerificationCode) != ""
 	}
 	return message.Popup
 }

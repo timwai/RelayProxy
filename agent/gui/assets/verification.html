@@ -105,14 +105,20 @@ button.action:active{transform:scale(.98)}
 </article>
 <script>
 (function(){
-  var queue=[], current=null, timeoutSeconds=15, dismissTimer=null, countdownTimer=null;
+  var initialTimeout=Number(window.__relayPendingTimeout);
+  if(!Number.isFinite(initialTimeout)) initialTimeout=15;
+  var queue=[], current=null,
+      timeoutSeconds=Math.max(0,Math.min(3600,Math.floor(initialTimeout))),
+      dismissTimer=null, countdownTimer=null;
   function fmtTime(ms){
     var d=new Date(Number(ms)||Date.now());
     if(!Number.isFinite(d.getTime())) return '刚刚';
     return d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false});
   }
   function popupType(message){
-    var value=String((message&&message.popupType)||'').trim();
+    var value=String((message&&message.messageType)||'').trim();
+    if(value) return value;
+    value=String((message&&message.popupType)||'').trim();
     if(value) return value;
     return message&&message.verificationCode ? 'verification_code' : 'message';
   }
@@ -172,6 +178,10 @@ button.action:active{transform:scale(.98)}
   };
   window.enqueueVerification=window.enqueueMessage;
   window.seedVerification=function(message){if(message&&!current)render(message);};
+  window.relayMessagePopupReady=true;
+  var pendingMessages=Array.isArray(window.__relayPendingMessages) ? window.__relayPendingMessages.slice() : [];
+  window.__relayPendingMessages=[];
+  pendingMessages.forEach(function(message){window.enqueueMessage(message);});
   window.setVerificationTimeout=function(seconds){
     seconds=Number(seconds);
     if(!Number.isFinite(seconds)) return;

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/netip"
 	"testing"
 	"time"
 
@@ -205,5 +206,58 @@ func TestControllerRejectsTicketValidationForAnotherExit(t *testing.T) {
 	}
 	if response.Success || response.ErrorCode != protocol.ErrCodeAccessDenied || called {
 		t.Fatalf("cross-exit validation response=%+v called=%v", response, called)
+	}
+}
+
+func TestControllerReverifiesAlreadyVerifiedEndpointOnRefresh(t *testing.T) {
+	registry := NewRegistry()
+	request := protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    35820,
+		CertFingerprint: testFingerprint(),
+		NetworkEpoch:    1,
+	}
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.8.8"), request); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.MarkVerified("exit", "session-1", "8.8.8.8:35820", time.Minute) {
+		t.Fatal("failed to seed verified endpoint")
+	}
+
+	verifier := &Verifier{Registry: registry, Timeout: time.Second}
+	verifier.resolve = func(context.Context, string) (string, error) {
+		return "", errors.New("refresh probe failed")
+	}
+	controller := NewController(context.Background(), registry, verifier, nil)
+	defer controller.Close()
+
+	stream := newControlStream(t, request)
+	controller.HandleControl(context.Background(), stream, &session.DeviceSession{
+		SessionID: "session-1",
+		DeviceID:  "exit",
+		Grants:    []string{protocol.CapabilityProxyExit},
+		Tunnel: &observedSession{
+			remote: &net.TCPAddr{IP: net.ParseIP("8.8.8.8"), Port: 443},
+			done:   make(chan struct{}),
+		},
+	})
+
+	var response protocol.PublicDirectRegistrationResponse
+	if err := protocol.ReadJSON(&stream.write, &response); err != nil {
+		t.Fatal(err)
+	}
+	if !response.Success {
+		t.Fatalf("refresh registration failed: %+v", response)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		record, ok := registry.Lookup("exit", "session-1", "8.8.8.8:35820")
+		if ok && record.State == StateFailed && !record.Endpoint.Verified {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("verified endpoint was not re-probed: record=%+v ok=%v", record, ok)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

@@ -133,17 +133,21 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 		return
 	}
 
+	verification := messageutil.MatchVerificationCodeWithRules(
+		content, channel.UseDefaultVerification, messageutilVerificationRules(channel.VerificationRules),
+	)
 	message := &repository.MessageRecord{
-		IdentityID: channel.IdentityID,
-		ChannelID:  channel.ID,
-		Title:     title,
-		Content:   content,
-		Source:    source,
-		RouteRule: routeRuleName,
-		VerificationCode: messageutil.ExtractVerificationCodeWithRules(
-			content, channel.UseDefaultVerification, messageutilVerificationRules(channel.VerificationRules),
-		),
-		CreatedAt: time.Now().UTC(),
+		IdentityID:       channel.IdentityID,
+		ChannelID:        channel.ID,
+		Title:            title,
+		Content:          content,
+		Source:           source,
+		RouteRule:        routeRuleName,
+		VerificationCode: verification.Code,
+		VerificationRule: verification.RuleName,
+		Popup:            verification.Popup,
+		PopupType:        verification.PopupType,
+		CreatedAt:        time.Now().UTC(),
 	}
 	if err := h.db.CreateMessage(message, targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to persist message")
@@ -216,6 +220,9 @@ func (h *PublicPushHandler) pushMessage(sess *session.DeviceSession, message *re
 		Title:            message.Title,
 		Content:          message.Content,
 		VerificationCode: message.VerificationCode,
+		VerificationRule: message.VerificationRule,
+		Popup:            message.Popup,
+		PopupType:        message.PopupType,
 		Source:           message.Source,
 		CreatedAt:        message.CreatedAt.UnixMilli(),
 	}

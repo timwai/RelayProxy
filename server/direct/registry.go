@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"relayproxy/internal/protocol"
 )
@@ -289,8 +290,7 @@ func normalizeCandidate(candidate protocol.PublicDirectEndpointCandidate) (proto
 		if candidate.Source == protocol.PublicDirectEndpointIPv6 {
 			return candidate, errors.New("ipv6 public direct candidate must use an IP literal")
 		}
-		if strings.EqualFold(host, "localhost") || strings.ContainsAny(host, " 	
-") {
+		if strings.EqualFold(host, "localhost") || strings.IndexFunc(host, unicode.IsSpace) >= 0 {
 			return candidate, errors.New("manual public direct hostname is invalid")
 		}
 	}

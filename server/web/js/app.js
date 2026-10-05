@@ -1717,7 +1717,11 @@
   $('channel-delete').addEventListener('click', deleteChannel);
   $('channel-identity').addEventListener('change', () => {
     renderChannelDevices([]);
-    renderChannelRules(null);
+    all('#channel-route-rules [data-route-rule]').forEach(card => {
+      const select = card.querySelector('[data-route-devices]');
+      if (select) select.innerHTML = routeDeviceOptions([]);
+    });
+    syncRouteRuleDeviceStates();
   });
   $('channel-all-devices').addEventListener('change', updateChannelDeviceState);
   $('channel-id').addEventListener('input', updateChannelDeviceState);

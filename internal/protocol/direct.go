@@ -25,3 +25,23 @@ func (p ProxyPath) IsDirect() bool {
 func (p ProxyPath) IsRelay() bool {
 	return p == ProxyPathRelayQUIC || p == ProxyPathRelayTLS
 }
+
+
+const PublicDirectAuthVersion = 1
+
+// PublicDirectAuthRequest authenticates a newly established Public Direct
+// connection before any proxy stream is accepted. Ticket is intentionally
+// opaque here so Phase 4 can replace development test credentials with
+// Server-signed short-lived tickets without changing the transport handshake.
+type PublicDirectAuthRequest struct {
+	Version        int    `json:"version"`
+	ClientDeviceID string `json:"clientDeviceId"`
+	ExitDeviceID   string `json:"exitDeviceId"`
+	Ticket         []byte `json:"ticket"`
+}
+
+type PublicDirectAuthResponse struct {
+	Success      bool   `json:"success"`
+	ErrorCode    string `json:"errorCode,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
+}

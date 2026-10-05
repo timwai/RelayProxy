@@ -231,6 +231,12 @@ func (db *DB) ensureIdentityAccessSchema() error {
 	if err := db.ensureSQLiteColumn("devices", "identity_id", "VARCHAR(64)"); err != nil {
 		return err
 	}
+	if err := db.ensureSQLiteColumn("devices", "denied_capabilities", "TEXT NOT NULL DEFAULT '[]'"); err != nil {
+		return err
+	}
+	if err := db.ensureDeniedCapabilitiesMigration(); err != nil {
+		return err
+	}
 	if err := db.ensureSQLiteColumn("identities", "short_id", "VARCHAR(32)"); err != nil {
 		return err
 	}
@@ -247,6 +253,52 @@ func (db *DB) ensureIdentityAccessSchema() error {
 		return err
 	}
 	return nil
+}
+
+// ensureDeniedCapabilitiesMigration preserves capability rejections made before
+// denied_capabilities existed. It is intentionally one-shot: later runtime
+// pruning must not be undone by replaying historical rejected enrollments.
+func (db *DB) ensureDeniedCapabilitiesMigration() error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`CREATE TABLE IF NOT EXISTS server_migrations (
+		name VARCHAR(100) PRIMARY KEY,
+		applied_at TIMESTAMP NOT NULL
+	)`); err != nil {
+		return err
+	}
+	var migrated int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM server_migrations
+		WHERE name = 'device.denied_capabilities.v1'`).Scan(&migrated); err != nil {
+		return err
+	}
+	if migrated > 0 {
+		return tx.Commit()
+	}
+
+	// Initial rejected enrollments have no device_id and are naturally skipped.
+	if _, err := tx.Exec(`UPDATE devices
+		SET denied_capabilities = COALESCE((
+			SELECT request.requested_capabilities
+			FROM device_enrollment_requests request
+			JOIN device_identities identity ON identity.fingerprint = request.fingerprint
+			WHERE identity.device_id = devices.id
+				AND identity.status = 'approved'
+				AND request.state = 'rejected'
+			LIMIT 1
+		), denied_capabilities)
+		WHERE denied_capabilities = '[]'`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO server_migrations (name, applied_at)
+		VALUES ('device.denied_capabilities.v1', ?)`, time.Now().UTC()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (db *DB) CreateIdentity(name, actor string) (*Identity, error) {
@@ -716,9 +768,9 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 				return nil, errors.New("approved identity has no device")
 			}
 			var boundIdentity sql.NullString
-			var approvalState, approvedRaw string
-			if err := tx.QueryRow(`SELECT identity_id, approval_state, approved_capabilities FROM devices WHERE id = ?`,
-				existingDeviceID.String).Scan(&boundIdentity, &approvalState, &approvedRaw); err != nil {
+			var approvalState, approvedRaw, deniedRaw string
+			if err := tx.QueryRow(`SELECT identity_id, approval_state, approved_capabilities, denied_capabilities FROM devices WHERE id = ?`,
+				existingDeviceID.String).Scan(&boundIdentity, &approvalState, &approvedRaw, &deniedRaw); err != nil {
 				return nil, err
 			}
 			if approvalState == EnrollmentRevoked {
@@ -731,11 +783,23 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 			if err != nil {
 				return nil, err
 			}
-			effective := filterApprovedCapabilities(approved, requested)
-			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, effective, now); err != nil {
+			denied, err := decodeCapabilities(deniedRaw)
+			if err != nil {
 				return nil, err
 			}
-			pending := capabilitiesExcept(requested, approved)
+			// A server-side denial only suppresses a capability while the Agent
+			// keeps declaring it. Once the Agent stops requesting it, forget the
+			// denial so a later re-enable is treated as a fresh request.
+			denied = capabilitiesIntersection(denied, requested)
+			deniedRaw, err = encodeCapabilities(denied)
+			if err != nil {
+				return nil, err
+			}
+			effective := filterApprovedCapabilities(approved, requested)
+			if err := updateIdentityManagedDevice(tx, existingDeviceID.String, observation, requestedRaw, deniedRaw, effective, now); err != nil {
+				return nil, err
+			}
+			pending := capabilitiesExcept(capabilitiesExcept(requested, approved), denied)
 			requestID := ""
 			requestState := ""
 			if len(pending) > 0 {
@@ -748,6 +812,11 @@ func (db *DB) ObserveIdentityDevice(access IdentityAuthorization, observation De
 				return nil, err
 			}
 			if len(effective) == 0 {
+				if requestState == "" {
+					// The device remains approved, but every capability it is
+					// currently declaring was explicitly denied by the server.
+					requestState = EnrollmentRejected
+				}
 				return &DeviceAuthorization{
 					State: requestState, RequestID: requestID, DeviceID: existingDeviceID.String,
 					IdentityID: access.IdentityID, IdentityName: access.IdentityName,
@@ -822,31 +891,23 @@ func capabilitiesExcept(requested, approved []string) []string {
 	return result
 }
 
+func capabilitiesIntersection(left, right []string) []string {
+	rightSet := make(map[string]bool, len(right))
+	for _, capability := range normalizeCapabilities(right) {
+		rightSet[capability] = true
+	}
+	result := make([]string, 0, len(left))
+	for _, capability := range normalizeCapabilities(left) {
+		if rightSet[capability] {
+			result = append(result, capability)
+		}
+	}
+	return result
+}
+
 func upsertIncrementalEnrollment(tx *sql.Tx, identityID string, observation DeviceIdentityObservation, capabilities []string, now time.Time) (string, string, error) {
 	requestedRaw, err := encodeCapabilities(capabilities)
 	if err != nil {
-		return "", "", err
-	}
-	var existingID, existingState, existingRequestedRaw string
-	err = tx.QueryRow(`SELECT id, state, requested_capabilities
-		FROM device_enrollment_requests WHERE fingerprint = ?`, observation.Fingerprint).
-		Scan(&existingID, &existingState, &existingRequestedRaw)
-	if err == nil && existingState == EnrollmentRejected {
-		existingRequested, decodeErr := decodeCapabilities(existingRequestedRaw)
-		if decodeErr != nil {
-			return "", "", decodeErr
-		}
-		if len(capabilitiesExcept(existingRequested, capabilities)) == 0 && len(capabilitiesExcept(capabilities, existingRequested)) == 0 {
-			if _, err := tx.Exec(`UPDATE device_enrollment_requests SET
-				device_name = ?, platform = ?, arch = ?, client_version = ?, last_seen_at = ?
-				WHERE id = ?`, fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
-				observation.ClientVersion, now, existingID); err != nil {
-				return "", "", err
-			}
-			return existingID, EnrollmentRejected, nil
-		}
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", "", err
 	}
 	requestID := "enr_" + uuid.NewString()
@@ -900,12 +961,12 @@ func (db *DB) identityDeviceAuthorization(deviceID string, access IdentityAuthor
 	return authorization, nil
 }
 
-func updateIdentityManagedDevice(tx *sql.Tx, deviceID string, observation DeviceIdentityObservation, requestedRaw string, effective []string, now time.Time) error {
+func updateIdentityManagedDevice(tx *sql.Tx, deviceID string, observation DeviceIdentityObservation, requestedRaw, deniedRaw string, effective []string, now time.Time) error {
 	if _, err := tx.Exec(`UPDATE devices SET name = ?, platform = ?, arch = ?, client_version = ?,
-		requested_capabilities = ?, updated_at = ?
+		requested_capabilities = ?, denied_capabilities = ?, updated_at = ?
 		WHERE id = ? AND approval_state = ?`,
 		fallbackDeviceName(observation.DeviceName), observation.Platform, observation.Arch,
-		observation.ClientVersion, requestedRaw, now, deviceID, EnrollmentApproved); err != nil {
+		observation.ClientVersion, requestedRaw, deniedRaw, now, deviceID, EnrollmentApproved); err != nil {
 		return err
 	}
 	if err := replaceDeviceRuntimeGrants(tx, deviceID, effective, now); err != nil {

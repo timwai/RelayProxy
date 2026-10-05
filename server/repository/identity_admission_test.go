@@ -136,6 +136,80 @@ func TestDeviceCapabilitiesControlAdmissionAndFeatures(t *testing.T) {
 	}
 }
 
+func TestRemovingApprovedCapabilityDoesNotImmediatelyRequeueIt(t *testing.T) {
+	db := openIdentityTestDB(t)
+	identity, err := db.CreateIdentityWithLogin("capability-editor", "Capability Editor", "admin", "hash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := db.ResolveIdentity(identity.ShortID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewerID, err := db.GetIdentityLoginUserID(identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := DeviceIdentityObservation{
+		Fingerprint: "capability-edit-fp", InstallationID: "capability-edit-install",
+		PublicKey:             []byte("capability-edit-public"),
+		RequestedCapabilities: []string{"proxy.client", "proxy.exit"},
+	}
+	pending, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := db.ApproveEnrollmentForIdentity(
+		pending.RequestID, reviewerID, identity.ID, observation.RequestedCapabilities,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := db.UpdateDeviceCapabilities(device.ID, reviewerID, []string{"proxy.client"}); err != nil {
+		t.Fatal(err)
+	}
+	reconnected, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconnected.State != EnrollmentApproved || reconnected.RequestID != "" ||
+		len(reconnected.ApprovedCapabilities) != 1 || reconnected.ApprovedCapabilities[0] != "proxy.client" {
+		t.Fatalf("administrator-removed capability was requeued on reconnect: %+v", reconnected)
+	}
+	requests, err := db.ListEnrollmentRequestsForIdentity(EnrollmentPending, identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 0 {
+		t.Fatalf("administrator-removed capability appeared in pending enrollments: %+v", requests)
+	}
+
+	// Stopping the declaration clears the server-side denial. Re-enabling it
+	// later is a genuine new request and must require approval again.
+	observation.RequestedCapabilities = []string{"proxy.client"}
+	if _, err := db.ObserveIdentityDevice(*resolved, observation); err != nil {
+		t.Fatal(err)
+	}
+	observation.RequestedCapabilities = []string{"proxy.client", "proxy.exit"}
+	requestedAgain, err := db.ObserveIdentityDevice(*resolved, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestedAgain.State != EnrollmentApproved || requestedAgain.RequestID == "" ||
+		len(requestedAgain.ApprovedCapabilities) != 1 || requestedAgain.ApprovedCapabilities[0] != "proxy.client" {
+		t.Fatalf("re-enabled capability did not become a fresh incremental request: %+v", requestedAgain)
+	}
+	requests, err = db.ListEnrollmentRequestsForIdentity(EnrollmentPending, identity.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 1 || len(requests[0].RequestedCapabilities) != 1 ||
+		requests[0].RequestedCapabilities[0] != "proxy.exit" {
+		t.Fatalf("fresh capability request was not queued correctly: %+v", requests)
+	}
+}
+
 func TestApprovedIdentityDeviceCanRequestAndApproveAdditionalCapabilities(t *testing.T) {
 	db := openIdentityTestDB(t)
 	identity, err := db.CreateIdentityWithLogin("incremental-owner", "Incremental", "admin", "hash")

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -21,12 +22,14 @@ const (
 )
 
 type ClientDialFunc func(context.Context, DialConfig) (tunnel.TunnelSession, error)
+type ClientRaceDialFunc func(context.Context, []DialConfig) (tunnel.TunnelSession, string, error)
 
 type ClientManagerOptions struct {
 	AttemptTimeout time.Duration
 	Cooldown       time.Duration
 	MaxCooldown    time.Duration
 	Dial           ClientDialFunc
+	RaceDial       ClientRaceDialFunc
 	Now            func() time.Time
 }
 
@@ -56,7 +59,7 @@ type ClientManager struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	clientID func() string
-	dial     ClientDialFunc
+	raceDial ClientRaceDialFunc
 	now      func() time.Time
 
 	attemptTimeout time.Duration
@@ -90,16 +93,26 @@ func NewClientManager(parent context.Context, clientID func() string, options Cl
 	if maxCooldown < cooldown {
 		maxCooldown = cooldown
 	}
-	dial := options.Dial
-	if dial == nil {
-		dial = Dial
+	raceDial := options.RaceDial
+	if raceDial == nil {
+		if options.Dial != nil {
+			raceDial = func(ctx context.Context, configs []DialConfig) (tunnel.TunnelSession, string, error) {
+				if len(configs) == 0 {
+					return nil, "", errors.New("public direct dial requires at least one endpoint")
+				}
+				session, err := options.Dial(ctx, configs[0])
+				return session, configs[0].Address, err
+			}
+		} else {
+			raceDial = DialAny
+		}
 	}
 	now := options.Now
 	if now == nil {
 		now = time.Now
 	}
 	return &ClientManager{
-		ctx: ctx, cancel: cancel, clientID: clientID, dial: dial, now: now,
+		ctx: ctx, cancel: cancel, clientID: clientID, raceDial: raceDial, now: now,
 		attemptTimeout: attemptTimeout, cooldown: cooldown, maxCooldown: maxCooldown,
 		entries: make(map[string]*clientEntry),
 	}
@@ -272,14 +285,14 @@ func (m *ClientManager) EnsureClient(exitDeviceID string) bool {
 		}
 		entry.session = nil
 	}
-	endpoint, ok := selectPublicEndpoint(entry.public)
-	if !ok {
+	endpoints := selectPublicEndpoints(entry.public)
+	if len(endpoints) == 0 {
 		m.mu.Unlock()
 		return false
 	}
 	entry.starting = true
 	entry.attempted = true
-	entry.lastEndpoint = endpoint.Address
+	entry.lastEndpoint = endpoints[0].Address
 	public := clonePublicDirectPath(entry.public)
 	ticketHash := entry.ticketHash
 	m.wg.Add(1)
@@ -287,31 +300,38 @@ func (m *ClientManager) EnsureClient(exitDeviceID string) bool {
 
 	go func() {
 		defer m.wg.Done()
-		m.connect(exitDeviceID, clientID, endpoint, public, ticketHash)
+		m.connect(exitDeviceID, clientID, endpoints, public, ticketHash)
 	}()
 	return true
 }
 
-func (m *ClientManager) connect(exitDeviceID, clientID string, endpoint protocol.PublicDirectEndpoint, public protocol.ProxyPublicDirectPath, ticketHash [sha256.Size]byte) {
+func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []protocol.PublicDirectEndpoint, public protocol.ProxyPublicDirectPath, ticketHash [sha256.Size]byte) {
 	ctx, cancel := context.WithTimeout(m.ctx, m.attemptTimeout)
 	defer cancel()
 
-	tlsConfig, err := PinnedTLSConfig(endpoint.CertFingerprint)
-	if err == nil {
-		_, stillValid := ticketLifetime(public, m.now().UTC())
-		if !stillValid {
-			err = errors.New("public direct ticket expired before connection")
-		}
+	_, stillValid := ticketLifetime(public, m.now().UTC())
+	if !stillValid {
+		m.finishFailure(exitDeviceID, ticketHash, errors.New("public direct ticket expired before connection"))
+		return
 	}
-	var session tunnel.TunnelSession
-	if err == nil {
-		session, err = m.dial(ctx, DialConfig{
+	configs := make([]DialConfig, 0, len(endpoints))
+	for _, endpoint := range endpoints {
+		tlsConfig, err := PinnedTLSConfig(endpoint.CertFingerprint)
+		if err != nil {
+			continue
+		}
+		configs = append(configs, DialConfig{
 			Address: endpoint.Address, TLSConfig: tlsConfig,
 			ClientDeviceID: clientID, ExitDeviceID: exitDeviceID,
 			Ticket:      append([]byte(nil), public.Ticket...),
 			AuthTimeout: m.attemptTimeout,
 		})
 	}
+	if len(configs) == 0 {
+		m.finishFailure(exitDeviceID, ticketHash, errors.New("public direct has no endpoint with a valid certificate fingerprint"))
+		return
+	}
+	session, selectedAddress, err := m.raceDial(ctx, configs)
 	if err != nil {
 		m.finishFailure(exitDeviceID, ticketHash, err)
 		return
@@ -336,6 +356,9 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoint protocol
 		return
 	}
 	entry.session = session
+	if strings.TrimSpace(selectedAddress) != "" {
+		entry.lastEndpoint = strings.TrimSpace(selectedAddress)
+	}
 	entry.failureCount = 0
 	entry.cooldownUntil = time.Time{}
 	entry.lastError = ""
@@ -503,8 +526,15 @@ func ticketLifetime(value protocol.ProxyPublicDirectPath, now time.Time) (time.D
 }
 
 func selectPublicEndpoint(value protocol.ProxyPublicDirectPath) (protocol.PublicDirectEndpoint, bool) {
-	best := protocol.PublicDirectEndpoint{}
-	bestPriority := -1
+	items := selectPublicEndpoints(value)
+	if len(items) == 0 {
+		return protocol.PublicDirectEndpoint{}, false
+	}
+	return items[0], true
+}
+
+func selectPublicEndpoints(value protocol.ProxyPublicDirectPath) []protocol.PublicDirectEndpoint {
+	items := make([]protocol.PublicDirectEndpoint, 0, len(value.Endpoints))
 	for _, endpoint := range value.Endpoints {
 		if !endpoint.Verified ||
 			endpoint.Protocol != protocol.PublicDirectEndpointProtocolUDP ||
@@ -512,13 +542,16 @@ func selectPublicEndpoint(value protocol.ProxyPublicDirectPath) (protocol.Public
 			strings.TrimSpace(endpoint.CertFingerprint) == "" {
 			continue
 		}
-		priority := clientEndpointPriority(endpoint.Source)
-		if priority > bestPriority || (priority == bestPriority && (best.Address == "" || endpoint.Address < best.Address)) {
-			best = endpoint
-			bestPriority = priority
-		}
+		items = append(items, endpoint)
 	}
-	return best, bestPriority >= 0
+	sort.SliceStable(items, func(i, j int) bool {
+		left, right := clientEndpointPriority(items[i].Source), clientEndpointPriority(items[j].Source)
+		if left != right {
+			return left > right
+		}
+		return items[i].Address < items[j].Address
+	})
+	return items
 }
 
 func clientEndpointPriority(source string) int {

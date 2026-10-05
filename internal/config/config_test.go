@@ -83,8 +83,9 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 		t.Fatal(err)
 	}
 	if server.Server.TLSEnabled == nil || !*server.Server.TLSEnabled || server.RDP.Ingress.Enabled == nil || *server.RDP.Ingress.Enabled ||
-		server.P2P.Enabled == nil || !*server.P2P.Enabled || server.P2P.LeaseSec != 60 || server.P2P.MaxSessionsPerDevice != 8 {
-		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v p2p=%+v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled, server.P2P)
+		server.P2P.Enabled == nil || !*server.P2P.Enabled || server.P2P.LeaseSec != 60 || server.P2P.MaxSessionsPerDevice != 8 ||
+		server.Direct.Enabled == nil || !*server.Direct.Enabled {
+		t.Fatalf("unexpected concrete server defaults: tls=%v ingress=%v p2p=%+v direct=%+v", server.Server.TLSEnabled, server.RDP.Ingress.Enabled, server.P2P, server.Direct)
 	}
 	if server.Exit.Enabled == nil || *server.Exit.Enabled || server.Exit.AllowInternet == nil || !*server.Exit.AllowInternet ||
 		server.Exit.Upstream.Mode != "direct" || server.Exit.Access.Domains == nil || server.Exit.Access.CIDRs == nil {
@@ -507,6 +508,34 @@ func TestAgentP2PSettingsValidateAndPersist(t *testing.T) {
 				t.Fatalf("invalid P2P %s accepted", name)
 			}
 		})
+	}
+}
+
+func TestServerPublicDirectPortRangeValidation(t *testing.T) {
+	cfg := &ServerConfig{}
+	if err := NormalizeServerConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Direct.Enabled == nil || !*cfg.Direct.Enabled {
+		t.Fatalf("default Public Direct enabled=%v, want true", cfg.Direct.Enabled)
+	}
+	if cfg.Direct.PortStart != 0 || cfg.Direct.PortEnd != 0 {
+		t.Fatalf("default Public Direct port range=%d-%d, want OS-assigned 0-0", cfg.Direct.PortStart, cfg.Direct.PortEnd)
+	}
+
+	cfg.Direct.PortStart, cfg.Direct.PortEnd = 31000, 31100
+	if err := NormalizeServerConfig(cfg); err != nil {
+		t.Fatalf("valid Public Direct port range rejected: %v", err)
+	}
+
+	cfg.Direct.PortStart, cfg.Direct.PortEnd = 31000, 0
+	if err := NormalizeServerConfig(cfg); err == nil {
+		t.Fatal("partial Public Direct port range was accepted")
+	}
+
+	cfg.Direct.PortStart, cfg.Direct.PortEnd = 31100, 31000
+	if err := NormalizeServerConfig(cfg); err == nil {
+		t.Fatal("reversed Public Direct port range was accepted")
 	}
 }
 

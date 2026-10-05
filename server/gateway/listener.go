@@ -687,6 +687,18 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 }
 
+// RefreshProxyExitInventories invalidates the current proxy-exit inventory
+// revision and asynchronously pushes a fresh authorization-derived snapshot to
+// every connected client that negotiated live inventory updates.
+func (g *Gateway) RefreshProxyExitInventories() uint64 {
+	if g == nil || g.closed.Load() {
+		return 0
+	}
+	revision := g.proxyExitRevision.Add(1)
+	g.notifyProxyExitInventoryChanged(revision)
+	return revision
+}
+
 func (g *Gateway) notifyProxyExitInventoryChanged(revision uint64) {
 	if g == nil || g.closed.Load() || g.cfg.ListProxyExits == nil {
 		return

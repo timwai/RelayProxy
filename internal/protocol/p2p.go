@@ -25,9 +25,11 @@ const (
 	P2PControlPathReport      = "path_report"
 	P2PControlError           = "error"
 
-	P2PPathDirectQUIC = "p2p_quic"
-	P2PPathRelayQUIC  = "relay_quic"
-	P2PPathRelayTLS   = "relay_tls"
+	// Legacy P2P path names remain wire-compatible aliases of the
+	// path-neutral proxy transport identifiers.
+	P2PPathDirectQUIC = string(ProxyPathP2PQUIC)
+	P2PPathRelayQUIC  = string(ProxyPathRelayQUIC)
+	P2PPathRelayTLS   = string(ProxyPathRelayTLS)
 )
 
 // P2PControlMessage carries proxy direct-path signaling over the authenticated

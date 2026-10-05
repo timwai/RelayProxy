@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
 )
 
@@ -23,6 +24,18 @@ func signedTicketForTest(t *testing.T, privateKey ed25519.PrivateKey, claims pro
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func testDirectRelayPolicy(t *testing.T) *acl.Policy {
+	t.Helper()
+	checker, err := acl.NewChecker(acl.Policy{
+		ID: "relay-test", AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := checker.Policy()
+	return &policy
 }
 
 func validTicketClaims(now time.Time) protocol.PublicDirectTicketClaims {
@@ -170,9 +183,9 @@ func TestTicketAuthenticatorRequiresCurrentAuthorizationRevision(t *testing.T) {
 	}
 	current.now = func() time.Time { return now }
 	var validated protocol.PublicDirectTicketClaims
-	current.SetCurrentValidator(func(_ context.Context, got protocol.PublicDirectTicketClaims) error {
+	current.SetCurrentValidator(func(_ context.Context, got protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
 		validated = got
-		return nil
+		return testDirectRelayPolicy(t), nil
 	})
 	if err := current.Authenticate(context.Background(), request); err != nil {
 		t.Fatalf("current ticket rejected: %v", err)
@@ -187,10 +200,44 @@ func TestTicketAuthenticatorRequiresCurrentAuthorizationRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	stale.now = func() time.Time { return now }
-	stale.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) error {
-		return errors.New("authorization revoked")
+	stale.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
+		return nil, errors.New("authorization revoked")
 	})
 	if err := stale.Authenticate(context.Background(), request); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("stale ticket error=%v", err)
+	}
+}
+
+
+func TestTicketAuthenticatorPolicyAuthenticationFailsClosedWithoutCurrentPolicy(t *testing.T) {
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	claims := validTicketClaims(now)
+	request := protocol.PublicDirectAuthRequest{
+		Version: protocol.PublicDirectAuthVersion, ClientDeviceID: claims.ClientDeviceID,
+		ExitDeviceID: claims.ExitDeviceID, Ticket: signedTicketForTest(t, privateKey, claims),
+	}
+
+	auth, err := NewTicketAuthenticator("server-1", publicKey, "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.now = func() time.Time { return now }
+	if policy, err := auth.AuthenticatePolicy(context.Background(), request); !errors.Is(err, ErrUnauthorized) || policy != nil {
+		t.Fatalf("missing current policy authentication policy=%+v err=%v", policy, err)
+	}
+
+	auth.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
+		return testDirectRelayPolicy(t), nil
+	})
+	policy, err := auth.AuthenticatePolicy(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy == nil || policy.Fingerprint == "" {
+		t.Fatalf("validated relay policy=%+v", policy)
 	}
 }

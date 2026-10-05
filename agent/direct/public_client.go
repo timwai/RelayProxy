@@ -12,7 +12,9 @@ import (
 	"relayproxy/internal/tunnel"
 )
 
-var dialPublicDirectQUIC = tunnel.DialDirectQUIC
+var dialPublicDirectQUIC = func(ctx context.Context, address string, tlsConfig *tls.Config, quicConfig *quic.Config) (tunnel.TunnelSession, error) {
+	return tunnel.DialDirectQUIC(ctx, address, tlsConfig, quicConfig)
+}
 
 type DialConfig struct {
 	Address        string

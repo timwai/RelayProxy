@@ -104,3 +104,18 @@ type PublicDirectHandshakeResponse struct {
 	ErrorMessage string                     `json:"errorMessage,omitempty"`
 	Probe        *PublicDirectProbeResponse `json:"probe,omitempty"`
 }
+
+
+type PublicDirectTicketRequest struct {
+	ExitDeviceID string `json:"exitDeviceId"`
+}
+
+type PublicDirectTicketResponse struct {
+	Success         bool   `json:"success"`
+	Ticket          []byte `json:"ticket,omitempty"`
+	ExpiresAt       int64  `json:"expiresAt,omitempty"`
+	PolicyRevision  int64  `json:"policyRevision,omitempty"`
+	AuthorizationRevision int64 `json:"authorizationRevision,omitempty"`
+	ErrorCode       string `json:"errorCode,omitempty"`
+	ErrorMessage    string `json:"errorMessage,omitempty"`
+}

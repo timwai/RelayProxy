@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"io"
 	"math/big"
 	"net"
@@ -237,6 +238,56 @@ func TestPublicDirectUDPUsesNativeDatagrams(t *testing.T) {
 	}
 	if string(buf[:n]) != string(payload) {
 		t.Fatalf("UDP echo = %q, want %q", buf[:n], payload)
+	}
+}
+
+func TestRejectedPublicAuthorizationNeverReachesExitHandler(t *testing.T) {
+	serverTLS, clientTLS := publicDirectTLS(t)
+	handler := exit.NewHandler(exit.HandlerConfig{ConnectTimeout: time.Second})
+	defer handler.Close()
+
+	publicListener, err := agentdirect.ListenPublic(agentdirect.PublicListenerConfig{
+		ListenAddress: "127.0.0.1:0",
+		TLSConfig:     serverTLS,
+		Authorize: func(context.Context, tunnel.TunnelSession) (*acl.Policy, error) {
+			return nil, errors.New("denied")
+		},
+	}, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer publicListener.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go func() { _ = publicListener.Serve(ctx) }()
+
+	session, err := agentdirect.DialPublic(ctx, publicListener.Addr().String(), agentdirect.PublicClientConfig{
+		TLSConfig: clientTLS,
+		Authenticate: func(context.Context, tunnel.TunnelSession) error {
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	dialer := client.NewTunnelDialer(nil, nil)
+	dialer.ConfigureDirectProvider(func(string) (client.SelectedSession, bool) {
+		return client.SelectedSession{Session: session, Path: protocol.ProxyPathPublicDirectQUIC}, true
+	}, nil)
+
+	conn, err := dialer.DialTCP(ctx, "exit-public", "127.0.0.1", 9)
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("rejected public-direct authorization returned a proxy connection")
+	}
+	if err == nil {
+		t.Fatal("rejected public-direct authorization did not fail the proxy request")
+	}
+	if active := handler.ActiveStreams(); active != 0 {
+		t.Fatalf("exit handler processed %d stream(s) after authorization rejection", active)
 	}
 }
 

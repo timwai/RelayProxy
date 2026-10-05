@@ -134,7 +134,6 @@ func TestClientManagerClosesReadySessionWhenAuthorizationDisappears(t *testing.T
 	}
 }
 
-
 func TestClientManagerRacesAllVerifiedEndpointsBeforeAuth(t *testing.T) {
 	fake := newClientManagerTestSession()
 	var raced []DialConfig

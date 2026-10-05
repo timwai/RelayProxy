@@ -469,6 +469,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
 			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(),
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,
+			"direct": map[string]any{"publicAdvertise": state.Runtime.Direct.Public.Advertise},
 			"p2p": map[string]any{
 				"enabled": state.Runtime.P2P.Enabled == nil || *state.Runtime.P2P.Enabled, "mode": state.Runtime.P2P.Mode,
 				"punchTimeoutMs": state.Runtime.P2P.PunchTimeoutMs, "keepaliveSec": state.Runtime.P2P.KeepaliveSec,

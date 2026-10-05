@@ -116,6 +116,8 @@ type DeviceAccepted struct {
 	P2PUPnPEnabled           bool         `json:"p2pUPnPEnabled,omitempty"`
 	PublicDirectTicketIssuer string       `json:"publicDirectTicketIssuer,omitempty"`
 	PublicDirectTicketKey    []byte       `json:"publicDirectTicketKey,omitempty"`
+	PublicDirectPortStart    int          `json:"publicDirectPortStart,omitempty"`
+	PublicDirectPortEnd      int          `json:"publicDirectPortEnd,omitempty"`
 	SessionID                string       `json:"sessionId,omitempty"`
 	HeartbeatSec             int          `json:"heartbeat,omitempty"`
 	MaxConnections           int          `json:"maxConnections,omitempty"`

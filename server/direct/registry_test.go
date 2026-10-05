@@ -1,6 +1,7 @@
 package direct
 
 import (
+	"errors"
 	"net/netip"
 	"strings"
 	"testing"
@@ -86,7 +87,68 @@ func TestRegistryInvalidatesVerificationOnNetworkChange(t *testing.T) {
 	}
 	record, ok := registry.Lookup("exit", "session-1", "8.8.4.4:35820")
 	if !ok || record.State != StateUnknown {
-		t.Fatalf("record after network change=%+v ok=%v", record, ok)
+		t.Fatalf("record after network change=%+v ok=%v", record, func TestRegistryRejectsStaleNetworkEpochRegistration(t *testing.T) {
+	registry := NewRegistry()
+	request := protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    35820,
+		CertFingerprint: testFingerprint(),
+		NetworkEpoch:    8,
+	}
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.4.4"), request); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.MarkVerified("exit", "session-1", "8.8.4.4:35820", time.Minute) {
+		t.Fatal("mark verified failed")
+	}
+
+	request.NetworkEpoch = 7
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("1.1.1.1"), request); err == nil {
+		t.Fatal("stale network epoch registration was accepted")
+	}
+	record, ok := registry.Lookup("exit", "session-1", "8.8.4.4:35820")
+	if !ok || record.NetworkEpoch != 8 || record.State != StateVerified {
+		t.Fatalf("current registration was replaced by stale epoch: record=%+v ok=%v", record, ok)
+	}
+	if _, ok := registry.Lookup("exit", "session-1", "1.1.1.1:35820"); ok {
+		t.Fatal("stale epoch published a replacement endpoint")
+	}
+}
+
+func TestRegistryRejectsStaleVerificationAfterNetworkChange(t *testing.T) {
+	registry := NewRegistry()
+	request := protocol.PublicDirectRegistrationRequest{
+		ListenerPort:    35820,
+		CertFingerprint: testFingerprint(),
+		NetworkEpoch:    1,
+	}
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.4.4"), request); err != nil {
+		t.Fatal(err)
+	}
+	old, ok := registry.Lookup("exit", "session-1", "8.8.4.4:35820")
+	if !ok {
+		t.Fatal("initial registration missing")
+	}
+	if !registry.markVerifyingRegistration(old) {
+		t.Fatal("initial verification could not start")
+	}
+
+	request.NetworkEpoch = 2
+	if _, err := registry.Register("exit", "session-1", netip.MustParseAddr("8.8.4.4"), request); err != nil {
+		t.Fatal(err)
+	}
+	if registry.markVerifiedRegistration(old, time.Minute) {
+		t.Fatal("stale verification result marked the new network epoch verified")
+	}
+	if registry.markFailedRegistration(old, errors.New("old probe failed")) {
+		t.Fatal("stale verification failure modified the new network epoch")
+	}
+	record, ok := registry.Lookup("exit", "session-1", "8.8.4.4:35820")
+	if !ok || record.NetworkEpoch != 2 || record.State != StateUnknown || record.Endpoint.Verified {
+		t.Fatalf("new network epoch was polluted by stale verification: record=%+v ok=%v", record, ok)
+	}
+}
+
+ok)
 	}
 }
 

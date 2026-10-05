@@ -574,3 +574,47 @@ func TestMessageChannelsAreIsolatedByIdentity(t *testing.T) {
 		t.Fatalf("identity B saw identity A messages: %+v", messagesB)
 	}
 }
+
+
+func TestLegacyUnscopedChannelFailsClosedUntilAdminAssignsIdentity(t *testing.T) {
+	router, cleanup := setupTestRouter(t)
+	defer cleanup()
+	adminCookie := loginAdmin(t, router)
+	device := createMessageTestDevice(t, router, "LEGACY-SCOPE")
+	identityID := messageDeviceIdentityID(t, router, device.ID)
+	channel := &repository.MessageChannel{
+		ID: "legacy-unscoped", IdentityID: identityID, Name: "Legacy", AllDevices: true,
+	}
+	if err := router.db.CreateMessageChannel(channel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := router.db.Exec(`UPDATE message_channels SET identity_id = NULL WHERE id = ?`, channel.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	public := NewPublicPushHandler(router.sessions, router.db)
+	pushReq := httptest.NewRequest(http.MethodGet, "/api/v1/push/legacy-unscoped?message=hello", nil)
+	pushRec := httptest.NewRecorder()
+	public.ServeHTTP(pushRec, pushReq)
+	if pushRec.Code != http.StatusConflict {
+		t.Fatalf("unscoped legacy channel push returned %d: %s", pushRec.Code, pushRec.Body.String())
+	}
+
+	updateBody, _ := json.Marshal(messageChannelRequest{
+		IdentityID: identityID, Name: "Legacy", AllDevices: true,
+	})
+	updateReq := httptest.NewRequest(http.MethodPut, "/api/v1/message-channels/legacy-unscoped", bytes.NewReader(updateBody))
+	updateReq.AddCookie(adminCookie)
+	updateRec := httptest.NewRecorder()
+	router.ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("assign legacy channel identity returned %d: %s", updateRec.Code, updateRec.Body.String())
+	}
+	updated, err := router.db.GetMessageChannel("legacy-unscoped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.IdentityID != identityID {
+		t.Fatalf("legacy channel identity = %q, want %q", updated.IdentityID, identityID)
+	}
+}

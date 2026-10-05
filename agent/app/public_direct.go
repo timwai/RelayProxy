@@ -162,6 +162,9 @@ func (a *Agent) startPublicDirectExit(
 		PortStart:       accepted.PublicDirectPortStart,
 		PortEnd:         accepted.PublicDirectPortEnd,
 		ManualAdvertise: a.cfg.PublicDirectAdvertise,
+		ValidateTicket: func(validateCtx context.Context, claims protocol.PublicDirectTicketClaims) error {
+			return proxydirect.ValidateTicketCurrent(validateCtx, relay, claims)
+		},
 	})
 	if err != nil {
 		return nil, err

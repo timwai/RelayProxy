@@ -540,6 +540,22 @@ func main() {
 			gw.RefreshProxyExitInventories()
 			ingress.CloseDevice(deviceID)
 		}),
+		api.WithPublicDirectStatus(func(deviceID string) []api.PublicDirectEndpointStatus {
+			if !publicDirectEnabled {
+				return []api.PublicDirectEndpointStatus{}
+			}
+			records := publicDirectRegistry.Snapshot(deviceID)
+			out := make([]api.PublicDirectEndpointStatus, 0, len(records))
+			for _, record := range records {
+				out = append(out, api.PublicDirectEndpointStatus{
+					Address: record.Endpoint.Address, Source: record.Endpoint.Source,
+					State: string(record.State), VerifiedAt: record.VerifiedAt,
+					ExpiresAt: record.ExpiresAt, LastError: record.LastError,
+				})
+			}
+			sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
+			return out
+		}),
 		api.WithP2PSessions(func() []api.P2PSessionRuntimeStatus {
 			if proxyP2PCoordinator == nil {
 				return []api.P2PSessionRuntimeStatus{}

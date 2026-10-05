@@ -199,7 +199,7 @@ func Run(b *bridge.UIBridge, opts Options) error {
 
 	verification := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:                       "verification",
-		Title:                      "RelayProxy 验证码",
+		Title:                      "RelayProxy 消息",
 		Width:                      520,
 		Height:                     390,
 		URL:                        "/verification.html",
@@ -430,12 +430,7 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	}
 	payload := string(data)
 	a.eval("window.onRelayMessage && window.onRelayMessage(" + payload + ")")
-	if strings.TrimSpace(message.VerificationCode) == "" || a.verification == nil {
-		return
-	}
-	// PopupType is empty on older servers. Only honor Popup=false when the new
-	// presentation metadata is present, preserving compatibility with legacy pushes.
-	if strings.TrimSpace(message.PopupType) != "" && !message.Popup {
+	if a.verification == nil || !shouldPopupMessage(message) {
 		return
 	}
 	popup := a.verification
@@ -444,13 +439,13 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	popup.Show()
 	disableVerificationNativeFrame()
 	popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
-		"window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+		"window.enqueueMessage && window.enqueueMessage(" + payload + ")")
 	// A message may arrive during the hidden WebView's first paint. Retrying is
 	// harmless because the popup page deduplicates by message ID.
 	time.AfterFunc(250*time.Millisecond, func() {
 		if a.verification == popup {
 			popup.ExecJS(fmt.Sprintf("window.setVerificationTimeout && window.setVerificationTimeout(%d);", timeout) +
-				"window.enqueueVerification && window.enqueueVerification(" + payload + ")")
+				"window.enqueueMessage && window.enqueueMessage(" + payload + ")")
 		}
 	})
 }

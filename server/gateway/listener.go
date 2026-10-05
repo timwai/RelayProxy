@@ -534,6 +534,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	capabilities := []string{
 		protocol.UDPModeStream, protocol.CapabilitySpeedTest,
 		protocol.CapabilityResourceInventoryPush,
+		protocol.CapabilityProxyPublicDirect,
 	}
 	if tunnel.SupportsDatagrams(sess) {
 		capabilities = append(capabilities, protocol.UDPModeDatagram)

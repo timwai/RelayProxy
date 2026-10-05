@@ -5,7 +5,9 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -13,15 +15,19 @@ import (
 	"relayproxy/internal/tunnel"
 )
 
-const defaultAuthTimeout = 5 * time.Second
+const (
+	defaultAuthTimeout             = 5 * time.Second
+	defaultMaxConcurrentHandshakes = 64
+)
 
 type ListenerConfig struct {
-	ListenAddress         string
-	TLSConfig             *tls.Config
-	QUICConfig            *quic.Config
-	Authenticator         Authenticator
-	AuthTimeout           time.Duration
-	AuthAttemptsPerMinute int
+	ListenAddress           string
+	TLSConfig               *tls.Config
+	QUICConfig              *quic.Config
+	Authenticator           Authenticator
+	AuthTimeout             time.Duration
+	AuthAttemptsPerMinute   int
+	MaxConcurrentHandshakes int
 }
 
 type AcceptedSession struct {
@@ -30,11 +36,25 @@ type AcceptedSession struct {
 	ExitDeviceID   string
 }
 
+type acceptResult struct {
+	accepted *AcceptedSession
+	err      error
+}
+
 type PublicListener struct {
 	transport     *tunnel.DirectQUICListener
 	authenticator Authenticator
 	authTimeout   time.Duration
 	limiter       *handshakeLimiter
+
+	ctx         context.Context
+	cancel      context.CancelFunc
+	results     chan acceptResult
+	slots       chan struct{}
+	acceptWG    sync.WaitGroup
+	handshakeWG sync.WaitGroup
+	closeOnce   sync.Once
+	closeErr    error
 }
 
 func Listen(config ListenerConfig) (*PublicListener, error) {
@@ -52,10 +72,21 @@ func Listen(config ListenerConfig) (*PublicListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &PublicListener{
+	maxHandshakes := config.MaxConcurrentHandshakes
+	if maxHandshakes <= 0 {
+		maxHandshakes = defaultMaxConcurrentHandshakes
+	}
+	listenerCtx, cancel := context.WithCancel(context.Background())
+	listener := &PublicListener{
 		transport: transport, authenticator: config.Authenticator, authTimeout: timeout,
 		limiter: newHandshakeLimiter(config.AuthAttemptsPerMinute),
-	}, nil
+		ctx: listenerCtx, cancel: cancel,
+		results: make(chan acceptResult, maxHandshakes),
+		slots:   make(chan struct{}, maxHandshakes),
+	}
+	listener.acceptWG.Add(1)
+	go listener.acceptLoop()
+	return listener, nil
 }
 
 func (l *PublicListener) Addr() string {
@@ -69,30 +100,92 @@ func (l *PublicListener) Close() error {
 	if l == nil || l.transport == nil {
 		return nil
 	}
-	return l.transport.Close()
+	l.closeOnce.Do(func() {
+		if l.cancel != nil {
+			l.cancel()
+		}
+		l.closeErr = l.transport.Close()
+		l.acceptWG.Wait()
+		l.handshakeWG.Wait()
+		close(l.results)
+		for result := range l.results {
+			if result.accepted != nil && result.accepted.Tunnel != nil {
+				_ = result.accepted.Tunnel.Close()
+			}
+		}
+	})
+	return l.closeErr
 }
 
 func (l *PublicListener) Accept(ctx context.Context) (*AcceptedSession, error) {
-	if l == nil || l.transport == nil {
-		return nil, errors.New("public direct listener is closed")
+	if l == nil || l.transport == nil || l.ctx == nil {
+		return nil, net.ErrClosed
 	}
+	select {
+	case result, ok := <-l.results:
+		if !ok {
+			return nil, net.ErrClosed
+		}
+		return result.accepted, result.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-l.ctx.Done():
+		return nil, net.ErrClosed
+	}
+}
+
+func (l *PublicListener) acceptLoop() {
+	defer l.acceptWG.Done()
 	for {
-		session, err := l.transport.Accept(ctx)
+		session, err := l.transport.Accept(l.ctx)
 		if err != nil {
-			return nil, err
+			if l.ctx.Err() == nil {
+				l.deliver(acceptResult{err: err})
+			}
+			return
 		}
-		accepted, probe, err := l.handshake(ctx, session)
-		if err != nil {
+		select {
+		case l.slots <- struct{}{}:
+			l.handshakeWG.Add(1)
+			go l.handleHandshake(session)
+		default:
+			// Fail closed when the bounded authentication pool is saturated.
 			_ = session.Close()
-			return nil, err
 		}
-		if probe {
-			// The verifier owns connection shutdown after it has consumed the
-			// challenge response. Sending an application close from this side can
-			// overtake stream delivery and turn a successful probe into session closed.
-			continue
-		}
-		return accepted, nil
+	}
+}
+
+func (l *PublicListener) handleHandshake(session tunnel.TunnelSession) {
+	defer l.handshakeWG.Done()
+	defer func() { <-l.slots }()
+
+	accepted, probe, err := l.handshake(l.ctx, session)
+	if err != nil {
+		_ = session.Close()
+		l.deliver(acceptResult{err: err})
+		return
+	}
+	if probe {
+		// The verifier owns connection shutdown after it has consumed the
+		// challenge response. Sending an application close from this side can
+		// overtake stream delivery and turn a successful probe into session closed.
+		return
+	}
+	if accepted == nil || accepted.Tunnel == nil {
+		_ = session.Close()
+		return
+	}
+	if !l.deliver(acceptResult{accepted: accepted}) {
+		_ = accepted.Tunnel.Close()
+	}
+}
+
+func (l *PublicListener) deliver(result acceptResult) bool {
+	select {
+	case l.results <- result:
+		return true
+	case <-l.ctx.Done():
+		return false
 	}
 }
 

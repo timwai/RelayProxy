@@ -448,7 +448,7 @@ func main() {
 		PublicDirectEnabled:      true,
 		PublicDirectTicketIssuer: publicDirectTickets.Issuer(),
 		PublicDirectTicketKey:    publicDirectTickets.PublicKey(),
-		MaxConnections:            cfg.Tunnel.MaxConnections,
+		MaxConnections:           cfg.Tunnel.MaxConnections,
 		MaxConnectionsPerDevice:  cfg.Tunnel.MaxConnectionsPerDevice,
 		HeartbeatSec:             cfg.Tunnel.HeartbeatSec,
 		RendezvousAddress:        rendezvousAddress,

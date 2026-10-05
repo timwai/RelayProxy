@@ -338,6 +338,11 @@ type ConfigUpdate struct {
 		MaxExitSessions *int    `json:"maxExitSessions"`
 		Fallback        *bool   `json:"fallback"`
 	} `json:"p2p"`
+	Direct struct {
+		Public struct {
+			Advertise *string `json:"advertise"`
+		} `json:"public"`
+	} `json:"direct"`
 	Proxy struct {
 		SOCKS5Enabled *bool   `json:"socks5Enabled"`
 		SOCKS5Listen  *string `json:"socks5Listen"`
@@ -462,10 +467,10 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.P2P.Mode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*in.P2P.Mode))
 		switch mode {
-		case "auto", "relay_only", "p2p_only":
+		case "auto", "direct_only", "relay_only", "p2p_only":
 			cfg.P2P.Mode = mode
 		default:
-			return nil, fmt.Errorf("P2P 模式必须是 auto / relay_only / p2p_only")
+			return nil, fmt.Errorf("Direct Path 模式必须是 auto / direct_only / relay_only / p2p_only")
 		}
 	}
 	if in.P2P.PunchTimeoutMs != nil {
@@ -482,6 +487,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.P2P.Fallback != nil {
 		cfg.P2P.Fallback = config.BoolPtr(*in.P2P.Fallback)
+	}
+	if in.Direct.Public.Advertise != nil {
+		cfg.Direct.Public.Advertise = strings.TrimSpace(*in.Direct.Public.Advertise)
 	}
 
 	if in.Proxy.SOCKS5Enabled != nil {
@@ -686,6 +694,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"P2P 打洞超时": c.P2P.PunchTimeoutMs, "P2P Keepalive": c.P2P.KeepaliveSec,
 		"P2P 空闲超时": c.P2P.IdleTimeoutSec, "P2P 会话上限": c.P2P.MaxExitSessions,
 		"P2P Relay 回退": enabled(c.P2P.Fallback),
+		"公网直连广播地址": c.Direct.Public.Advertise,
 		"SOCKS5 开关":    enabled(c.Proxy.SOCKS5.Enabled), "SOCKS5 地址": c.Proxy.SOCKS5.Listen,
 		"SOCKS5 端口": c.Proxy.SOCKS5.Port, "HTTP 开关": enabled(c.Proxy.HTTP.Enabled),
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,

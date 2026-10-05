@@ -472,7 +472,6 @@ func TestConcurrentConfigUpdatesDoNotLoseUnrelatedFields(t *testing.T) {
 	}
 }
 
-
 func TestProxyExitUIRedactionKeepsTicketInternal(t *testing.T) {
 	ticket := []byte("secret-direct-ticket")
 	source := []protocol.ProxyExit{{
@@ -481,7 +480,7 @@ func TestProxyExitUIRedactionKeepsTicketInternal(t *testing.T) {
 			Available: true, Transport: "quic", Ticket: ticket, TicketExpiresAt: 123,
 			Endpoints: []protocol.PublicDirectEndpoint{{
 				Protocol: protocol.PublicDirectEndpointProtocolUDP,
-				Address: "203.0.113.20:35820", Source: protocol.PublicDirectEndpointManual,
+				Address:  "203.0.113.20:35820", Source: protocol.PublicDirectEndpointManual,
 				Verified: true, CertFingerprint: "sha256:test",
 			}},
 		}},

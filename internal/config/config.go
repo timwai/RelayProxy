@@ -133,7 +133,7 @@ type AgentConfigFile struct {
 
 	P2P struct {
 		Enabled         *bool  `yaml:"enabled"`
-		Mode            string `yaml:"mode"` // auto | relay_only | p2p_only
+		Mode            string `yaml:"mode"` // auto | direct_only | relay_only | p2p_only
 		PunchTimeoutMs  int    `yaml:"punch_timeout_ms"`
 		KeepaliveSec    int    `yaml:"keepalive_sec"`
 		IdleTimeoutSec  int    `yaml:"idle_timeout_sec"`

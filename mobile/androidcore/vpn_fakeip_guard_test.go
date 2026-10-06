@@ -67,7 +67,6 @@ func TestVPNMappedDNSGuardAllowsDomainsAndPublicIPs(t *testing.T) {
 	}
 }
 
-
 func TestVPNMappedDNSGuardPrefersReliableStreamForOrdinaryUDP443(t *testing.T) {
 	base := &fakeVPNGuardDialer{}
 	guard := &vpnMappedDNSGuardDialer{base: base}

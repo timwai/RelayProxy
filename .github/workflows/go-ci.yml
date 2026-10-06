@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "perf/**"
+      - "fix/**"
   pull_request:
 
 permissions:

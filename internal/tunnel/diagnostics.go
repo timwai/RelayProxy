@@ -14,15 +14,28 @@ type SessionDiagnostics struct {
 }
 
 type QUICDiagnostics struct {
-	MinRTTMS        float64 `json:"min_rtt_ms"`
-	LatestRTTMS     float64 `json:"latest_rtt_ms"`
-	SmoothedRTTMS   float64 `json:"smoothed_rtt_ms"`
-	BytesSent       uint64  `json:"bytes_sent"`
-	BytesReceived   uint64  `json:"bytes_received"`
-	PacketsSent     uint64  `json:"packets_sent"`
-	PacketsReceived uint64  `json:"packets_received"`
-	SentBytesLost   uint64  `json:"sent_bytes_lost"`
-	SentPacketsLost uint64  `json:"sent_packets_lost"`
+	MinRTTMS          float64 `json:"min_rtt_ms"`
+	LatestRTTMS       float64 `json:"latest_rtt_ms"`
+	SmoothedRTTMS     float64 `json:"smoothed_rtt_ms"`
+	RTTDeviationMS    float64 `json:"rtt_deviation_ms"`
+	BytesSent         uint64  `json:"bytes_sent"`
+	BytesReceived     uint64  `json:"bytes_received"`
+	SendBPS           uint64  `json:"send_bps"`
+	ReceiveBPS        uint64  `json:"receive_bps"`
+	PacketsSent       uint64  `json:"packets_sent"`
+	PacketsReceived   uint64  `json:"packets_received"`
+	SentBytesLost     uint64  `json:"sent_bytes_lost"`
+	SentPacketsLost   uint64  `json:"sent_packets_lost"`
+	SentByteLossPct   float64 `json:"sent_byte_loss_pct"`
+	SentPacketLossPct float64 `json:"sent_packet_loss_pct"`
+	GSO               bool    `json:"gso"`
+}
+
+func lossPercent(lost, total uint64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(lost) * 100 / float64(total)
 }
 
 func DiagnoseSession(session TunnelSession) *SessionDiagnostics {
@@ -36,15 +49,26 @@ func DiagnoseSession(session TunnelSession) *SessionDiagnostics {
 	if addr := session.RemoteAddr(); addr != nil {
 		d.Remote = addr.String()
 	}
-	if quic, ok := session.(*QUICSession); ok && quic.conn != nil {
-		s := quic.conn.ConnectionStats()
+	if quicSession, ok := session.(*QUICSession); ok && quicSession.conn != nil {
+		stats := quicSession.conn.ConnectionStats()
+		sendBPS, receiveBPS := quicSession.sampleByteRates(time.Now(), stats.BytesSent, stats.BytesReceived)
+		state := quicSession.conn.ConnectionState()
 		d.QUIC = &QUICDiagnostics{
-			MinRTTMS:      float64(s.MinRTT) / float64(time.Millisecond),
-			LatestRTTMS:   float64(s.LatestRTT) / float64(time.Millisecond),
-			SmoothedRTTMS: float64(s.SmoothedRTT) / float64(time.Millisecond),
-			BytesSent:     s.BytesSent, BytesReceived: s.BytesReceived,
-			PacketsSent: s.PacketsSent, PacketsReceived: s.PacketsReceived,
-			SentBytesLost: s.BytesLost, SentPacketsLost: s.PacketsLost,
+			MinRTTMS:          float64(stats.MinRTT) / float64(time.Millisecond),
+			LatestRTTMS:       float64(stats.LatestRTT) / float64(time.Millisecond),
+			SmoothedRTTMS:     float64(stats.SmoothedRTT) / float64(time.Millisecond),
+			RTTDeviationMS:    float64(stats.MeanDeviation) / float64(time.Millisecond),
+			BytesSent:         stats.BytesSent,
+			BytesReceived:     stats.BytesReceived,
+			SendBPS:           sendBPS,
+			ReceiveBPS:        receiveBPS,
+			PacketsSent:       stats.PacketsSent,
+			PacketsReceived:   stats.PacketsReceived,
+			SentBytesLost:     stats.BytesLost,
+			SentPacketsLost:   stats.PacketsLost,
+			SentByteLossPct:   lossPercent(stats.BytesLost, stats.BytesSent),
+			SentPacketLossPct: lossPercent(stats.PacketsLost, stats.PacketsSent),
+			GSO:               state.GSO,
 		}
 	}
 	return d

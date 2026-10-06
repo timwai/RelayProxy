@@ -30,6 +30,8 @@ jobs:
             gofmt -d $bad
             exit 1
           fi
+      - name: Check modules
+        run: go mod tidy -diff
       - name: Vet
         run: go vet ./...
       - name: Test

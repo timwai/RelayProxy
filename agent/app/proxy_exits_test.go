@@ -81,14 +81,14 @@ func TestRefreshProxyExitsLegacyRevisionKeepsVersionCounter(t *testing.T) {
 
 func TestProxyExitSummariesAreSafeForStatus(t *testing.T) {
 	exits := []protocol.ProxyExit{{
-		DeviceID: "exit-a",
-		Name: "Exit A",
-		IdentityName: "Team A",
+		DeviceID:            "exit-a",
+		Name:                "Exit A",
+		IdentityName:        "Team A",
 		AuthorizationSource: "same_identity",
-		Online: true,
+		Online:              true,
 		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
 			Available: true,
-			Ticket: []byte("secret-ticket"),
+			Ticket:    []byte("secret-ticket"),
 		}},
 	}}
 	got := proxyExitSummaries(exits)

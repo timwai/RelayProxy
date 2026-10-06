@@ -746,7 +746,11 @@
             ' · 丢包 ' + esc(Number(directQuic.sent_packet_loss_pct || 0).toFixed(2)) + '%' +
             ' · RTT 抖动 ' + esc(Number(directQuic.rtt_deviation_ms || 0).toFixed(1)) + ' ms' +
             ' · GSO ' + (directQuic.gso ? 'ON' : 'OFF') +
-            '</span></small>' : '') +
+            '</span></small>' +
+            ((Number(directQuic.udp_read_buffer_bytes || 0) > 0 || Number(directQuic.udp_write_buffer_bytes || 0) > 0)
+              ? '<small>QUIC UDP 缓冲：<span class="mono">RX ' + bytes(Number(directQuic.udp_read_buffer_bytes || 0)) +
+                ' · TX ' + bytes(Number(directQuic.udp_write_buffer_bytes || 0)) + '</span></small>'
+              : '') : '') +
           (directError ? '<small>直连错误：' + esc(directError) + '</small>' : '')
         : '';
       const diagnostic = relay ? '<span class="mono">Relay RTT ' + esc(relay.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(relay.sent_packets_lost || 0) + '</span>' +

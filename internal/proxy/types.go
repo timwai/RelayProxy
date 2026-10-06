@@ -14,6 +14,9 @@ type TunnelDialer interface {
 // UDPDialOptions expresses requirements for the entire two-hop association.
 type UDPDialOptions struct {
 	DatagramRequired bool
+	// PreferStream requests reliable framed UDP when both stream and native
+	// datagram modes are available. DatagramRequired always takes precedence.
+	PreferStream bool
 }
 
 type UDPOptionsDialer interface {

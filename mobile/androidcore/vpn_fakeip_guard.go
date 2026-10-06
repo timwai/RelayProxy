@@ -54,6 +54,14 @@ func (d *vpnMappedDNSGuardDialer) dialUDP(ctx context.Context, exitID, host stri
 	if err := rejectAndroidVPNFakeIP(host); err != nil {
 		return nil, err
 	}
+	// Android Cronet / Google services aggressively bootstrap HTTP/3 on
+	// UDP/443. RelayProxy native UDP fragments at 1100 bytes, so a >=1200-byte
+	// QUIC Initial would otherwise become multiple independently lossy outer
+	// QUIC DATAGRAM frames. Prefer the reliable framed UDP stream for ordinary
+	// Android VPN UDP/443. Explicit DatagramRequired routing still wins.
+	if port == 443 && !options.DatagramRequired {
+		options.PreferStream = true
+	}
 	if optional, ok := d.base.(proxy.UDPOptionsDialer); ok {
 		return optional.DialUDPWithOptions(ctx, exitID, host, port, options)
 	}

@@ -742,3 +742,78 @@ func TestExpiredDirectAttemptBudgetDoesNotQuarantineAlternateP2P(t *testing.T) {
 		t.Fatalf("expired public-direct budget quarantined P2P %d time(s)", p2pFailures.Load())
 	}
 }
+
+func TestPreferStreamUsesReliableUDPUnlessDatagramsRequired(t *testing.T) {
+	for _, required := range []bool{false, true} {
+		t.Run(fmt.Sprintf("required=%t", required), func(t *testing.T) {
+			client, server := dialerQUICPair(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			served := make(chan error, 1)
+			go func() {
+				s, err := server.AcceptStream(ctx)
+				if err != nil {
+					served <- err
+					return
+				}
+				defer s.Close()
+				_ = s.SetDeadline(time.Now().Add(2 * time.Second))
+				if _, err := protocol.ReadStreamHeader(s); err != nil {
+					served <- err
+					return
+				}
+				var req protocol.OpenUDPRequest
+				if err := protocol.ReadJSON(s, &req); err != nil {
+					served <- err
+					return
+				}
+				wantMode := protocol.UDPModeStream
+				if required {
+					wantMode = protocol.UDPModeDatagram
+				}
+				if req.DatagramRequired != required || req.Mode != wantMode {
+					served <- fmt.Errorf("preferred UDP request = %+v, want mode=%s required=%t", req, wantMode, required)
+					return
+				}
+				if required {
+					if req.AssociationID == 0 {
+						served <- fmt.Errorf("required preferred-stream request missing association id")
+						return
+					}
+				} else if req.AssociationID != 0 {
+					served <- fmt.Errorf("preferred-stream request unexpectedly allocated datagram association %d", req.AssociationID)
+					return
+				}
+				served <- protocol.WriteJSON(s, protocol.OpenUDPResponse{
+					RequestID:     req.RequestID,
+					Success:       true,
+					Mode:          wantMode,
+					AssociationID: req.AssociationID,
+				})
+			}()
+
+			dialer := NewTunnelDialer(func() tunnel.TunnelSession { return client }, nil)
+			pc, err := dialer.DialUDPWithOptions(ctx, "exit", "example.com", 443, UDPDialOptions{
+				DatagramRequired: required,
+				PreferStream:     true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if pc == nil {
+				t.Fatal("preferred UDP dial returned nil connection")
+			}
+			_ = pc.Close()
+
+			select {
+			case err := <-served:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		})
+	}
+}

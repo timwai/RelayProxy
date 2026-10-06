@@ -607,7 +607,8 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 	defer stopCancel()
 
 	var datagrams *tunnel.DatagramChannel
-	if tunnel.PeerSupportsDatagrams(sess) {
+	useNativeDatagrams := opts.DatagramRequired || !opts.PreferStream
+	if useNativeDatagrams && tunnel.PeerSupportsDatagrams(sess) {
 		datagrams, err = tunnel.OpenDatagramChannel(sess, 0)
 		if err != nil {
 			_ = stream.Close()

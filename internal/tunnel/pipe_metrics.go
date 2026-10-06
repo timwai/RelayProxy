@@ -1,7 +1,7 @@
 package tunnel
 
 import (
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,15 +20,29 @@ type PipeMetricsSnapshot struct {
 	Down PumpMetrics `json:"down"`
 }
 
+const (
+	pipePhaseIdle uint32 = iota
+	pipePhaseRead
+	pipePhaseWrite
+)
+
 type pipePumpMetrics struct {
-	PumpMetrics
-	started time.Time
+	phase        atomic.Uint32
+	startedNanos atomic.Int64
+	readNanos    atomic.Uint64
+	writeNanos   atomic.Uint64
+	readCalls    atomic.Uint64
+	writeCalls   atomic.Uint64
+	readBytes    atomic.Uint64
+	writeBytes   atomic.Uint64
 }
 
-// PipeMetrics records elapsed time inside the active Read or Write call. It is
-// safe to snapshot while both Pipe pumps are running.
+// PipeMetrics records approximate elapsed time and exact byte/call counters for
+// both copy pumps. The hot path is lock-free and uses the process-wide coarse
+// clock so high-throughput proxy streams don't pay a mutex plus time.Now on
+// every copied chunk. Snapshot uses a precise clock for the currently blocked
+// operation, while completed operation timing has coarse-clock granularity.
 type PipeMetrics struct {
-	mu   sync.Mutex
 	up   pipePumpMetrics
 	down pipePumpMetrics
 }
@@ -41,52 +55,77 @@ func (m *PipeMetrics) pump(up bool) *pipePumpMetrics {
 }
 
 func (m *PipeMetrics) begin(up bool, phase string) {
-	m.mu.Lock()
 	p := m.pump(up)
-	p.Phase, p.started = phase, time.Now()
-	if phase == "read" {
-		p.ReadCalls++
-	} else {
-		p.WriteCalls++
+	p.startedNanos.Store(coarseTimeNanos())
+	switch phase {
+	case "read":
+		p.readCalls.Add(1)
+		p.phase.Store(pipePhaseRead)
+	case "write":
+		p.writeCalls.Add(1)
+		p.phase.Store(pipePhaseWrite)
+	default:
+		p.phase.Store(pipePhaseIdle)
 	}
-	m.mu.Unlock()
 }
 
 func (m *PipeMetrics) end(up bool, n int) {
-	now := time.Now()
-	m.mu.Lock()
 	p := m.pump(up)
-	elapsed := now.Sub(p.started).Seconds() * 1000
-	if p.Phase == "read" {
-		p.ReadMS += elapsed
+	now := coarseTimeNanos()
+	phase := p.phase.Swap(pipePhaseIdle)
+	started := p.startedNanos.Swap(0)
+	var elapsed uint64
+	if started > 0 && now > started {
+		elapsed = uint64(now - started)
+	}
+	switch phase {
+	case pipePhaseRead:
+		p.readNanos.Add(elapsed)
 		if n > 0 {
-			p.ReadBytes += uint64(n)
+			p.readBytes.Add(uint64(n))
 		}
-	} else if p.Phase == "write" {
-		p.WriteMS += elapsed
+	case pipePhaseWrite:
+		p.writeNanos.Add(elapsed)
 		if n > 0 {
-			p.WriteBytes += uint64(n)
+			p.writeBytes.Add(uint64(n))
 		}
 	}
-	p.Phase, p.started = "idle", time.Time{}
-	m.mu.Unlock()
 }
 
 func (m *PipeMetrics) Snapshot() PipeMetricsSnapshot {
-	now := time.Now()
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	snapshot := func(p pipePumpMetrics) PumpMetrics {
-		out := p.PumpMetrics
-		if !p.started.IsZero() {
-			elapsed := now.Sub(p.started).Seconds() * 1000
-			if p.Phase == "read" {
-				out.ReadMS += elapsed
-			} else if p.Phase == "write" {
-				out.WriteMS += elapsed
+	now := time.Now().UnixNano()
+	snapshot := func(p *pipePumpMetrics) PumpMetrics {
+		readNanos := p.readNanos.Load()
+		writeNanos := p.writeNanos.Load()
+		out := PumpMetrics{
+			ReadCalls:  p.readCalls.Load(),
+			WriteCalls: p.writeCalls.Load(),
+			ReadBytes:  p.readBytes.Load(),
+			WriteBytes: p.writeBytes.Load(),
+		}
+
+		phase := p.phase.Load()
+		started := p.startedNanos.Load()
+		if started > 0 && now > started {
+			elapsed := uint64(now - started)
+			switch phase {
+			case pipePhaseRead:
+				readNanos += elapsed
+			case pipePhaseWrite:
+				writeNanos += elapsed
 			}
 		}
+		switch phase {
+		case pipePhaseRead:
+			out.Phase = "read"
+		case pipePhaseWrite:
+			out.Phase = "write"
+		default:
+			out.Phase = "idle"
+		}
+		out.ReadMS = float64(readNanos) / float64(time.Millisecond)
+		out.WriteMS = float64(writeNanos) / float64(time.Millisecond)
 		return out
 	}
-	return PipeMetricsSnapshot{Up: snapshot(m.up), Down: snapshot(m.down)}
+	return PipeMetricsSnapshot{Up: snapshot(&m.up), Down: snapshot(&m.down)}
 }

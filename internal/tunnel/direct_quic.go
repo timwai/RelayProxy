@@ -12,7 +12,14 @@ import (
 	"relayproxy/internal/protocol"
 )
 
-const DirectQUICALPN = "relayproxy-direct-v1"
+const (
+	DirectQUICALPN = "relayproxy-direct-v1"
+
+	directInitialStreamReceiveWindow     = 16 << 20
+	directMaxStreamReceiveWindow         = 64 << 20
+	directInitialConnectionReceiveWindow = 32 << 20
+	directMaxConnectionReceiveWindow     = 256 << 20
+)
 
 // DirectQUICConfig returns the generic QUIC profile shared by direct transports.
 // Authentication is deliberately owned by the caller; this helper only defines
@@ -20,7 +27,12 @@ const DirectQUICALPN = "relayproxy-direct-v1"
 func DirectQUICConfig(config *quic.Config) *quic.Config {
 	if config == nil {
 		config = DefaultQUICConfig()
+		config.InitialStreamReceiveWindow = directInitialStreamReceiveWindow
+		config.MaxStreamReceiveWindow = directMaxStreamReceiveWindow
+		config.InitialConnectionReceiveWindow = directInitialConnectionReceiveWindow
+		config.MaxConnectionReceiveWindow = directMaxConnectionReceiveWindow
 	} else {
+		// Explicit caller tuning wins over the high-throughput direct defaults.
 		config = config.Clone()
 	}
 	config.EnableDatagrams = true

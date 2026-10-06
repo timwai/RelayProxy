@@ -117,6 +117,13 @@ type QUICSession struct {
 	ownedPacketConn  net.PacketConn
 	closeOnce        sync.Once
 	closeErr         error
+
+	diagnosticsMu            sync.Mutex
+	diagnosticsLastAt        time.Time
+	diagnosticsLastBytesSent uint64
+	diagnosticsLastBytesRecv uint64
+	diagnosticsSendBPS       uint64
+	diagnosticsRecvBPS       uint64
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -150,6 +157,40 @@ func newOwnedQUICSession(conn *quic.Conn, packetConn net.PacketConn) *QUICSessio
 	s := NewQUICSession(conn)
 	s.ownedPacketConn = packetConn
 	return s
+}
+
+func (s *QUICSession) sampleByteRates(now time.Time, bytesSent, bytesRecv uint64) (sendBPS, recvBPS uint64) {
+	if s == nil {
+		return 0, 0
+	}
+	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+
+	if s.diagnosticsLastAt.IsZero() {
+		s.diagnosticsLastAt = now
+		s.diagnosticsLastBytesSent = bytesSent
+		s.diagnosticsLastBytesRecv = bytesRecv
+		return 0, 0
+	}
+	elapsed := now.Sub(s.diagnosticsLastAt)
+	if elapsed < 250*time.Millisecond {
+		return s.diagnosticsSendBPS, s.diagnosticsRecvBPS
+	}
+	seconds := elapsed.Seconds()
+	if bytesSent >= s.diagnosticsLastBytesSent {
+		s.diagnosticsSendBPS = uint64(float64(bytesSent-s.diagnosticsLastBytesSent) / seconds)
+	} else {
+		s.diagnosticsSendBPS = 0
+	}
+	if bytesRecv >= s.diagnosticsLastBytesRecv {
+		s.diagnosticsRecvBPS = uint64(float64(bytesRecv-s.diagnosticsLastBytesRecv) / seconds)
+	} else {
+		s.diagnosticsRecvBPS = 0
+	}
+	s.diagnosticsLastAt = now
+	s.diagnosticsLastBytesSent = bytesSent
+	s.diagnosticsLastBytesRecv = bytesRecv
+	return s.diagnosticsSendBPS, s.diagnosticsRecvBPS
 }
 
 // DialQUIC connects to targetAddr using QUIC

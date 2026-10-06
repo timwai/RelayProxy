@@ -22,7 +22,7 @@ type Dialer interface {
 	DialUDP(context.Context, string, string, uint16) (net.PacketConn, error)
 }
 
-const tcpCopyBufferSize = 32 * 1024
+const tcpCopyBufferSize = 128 * 1024
 
 var tcpCopyBufferPool = sync.Pool{
 	New: func() any { return new([tcpCopyBufferSize]byte) },

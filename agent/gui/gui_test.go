@@ -44,6 +44,7 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goGetDiagnostics",
 		"goRunSpeedTest",
 		"goGetLogs",
+		"goGetProxyExits",
 		"goGetRDPTargets",
 		"goGetStatus",
 		"goOpenConfigDir",
@@ -222,11 +223,15 @@ func TestProxyExitInventoryLoadingStateCannotBeBlockedByRoutingUI(t *testing.T) 
 	}
 	page := string(data)
 	start := strings.Index(page, "function syncProxyExitSelectors()")
-	end := strings.Index(page[start:], "async function refreshProxyExits")
-	if start < 0 || end < 0 {
-		t.Fatal("unable to locate proxy exit synchronization functions")
+	if start < 0 {
+		t.Fatal("unable to locate proxy exit selector synchronization")
 	}
-	syncBlock := page[start : start+end]
+	rest := page[start:]
+	end := strings.Index(rest, "async function refreshProxyExits")
+	if end < 0 {
+		t.Fatal("unable to locate proxy exit refresh function")
+	}
+	syncBlock := rest[:end]
 	hint := strings.Index(syncBlock, "renderProxyExitInventoryHint();")
 	routing := strings.Index(syncBlock, "window.syncRoutingExitOptions();")
 	if hint < 0 || routing < 0 || hint > routing {

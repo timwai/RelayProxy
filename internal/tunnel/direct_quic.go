@@ -29,14 +29,18 @@ const (
 func DirectQUICConfig(config *quic.Config) *quic.Config {
 	if config == nil {
 		config = DefaultQUICConfig()
-		config.InitialStreamReceiveWindow = directInitialStreamReceiveWindow
-		config.MaxStreamReceiveWindow = directMaxStreamReceiveWindow
-		config.InitialConnectionReceiveWindow = directInitialConnectionReceiveWindow
-		config.MaxConnectionReceiveWindow = directMaxConnectionReceiveWindow
 	} else {
-		// Explicit caller tuning wins over the high-throughput direct defaults.
 		config = config.Clone()
 	}
+
+	// Public Direct is expected to carry high-BDP WAN traffic. Treat these
+	// values as minimums rather than nil-only defaults so a generic QUIC config
+	// can't accidentally downgrade the direct path. Larger explicit values are
+	// preserved.
+	config.InitialStreamReceiveWindow = max(config.InitialStreamReceiveWindow, uint64(directInitialStreamReceiveWindow))
+	config.MaxStreamReceiveWindow = max(config.MaxStreamReceiveWindow, uint64(directMaxStreamReceiveWindow))
+	config.InitialConnectionReceiveWindow = max(config.InitialConnectionReceiveWindow, uint64(directInitialConnectionReceiveWindow))
+	config.MaxConnectionReceiveWindow = max(config.MaxConnectionReceiveWindow, uint64(directMaxConnectionReceiveWindow))
 	config.EnableDatagrams = true
 	return config
 }
@@ -80,7 +84,7 @@ func ListenDirectQUIC(address string, tlsConfig *tls.Config, quicConfig *quic.Co
 	if err != nil {
 		return nil, fmt.Errorf("direct QUIC UDP listen failed: %w", err)
 	}
-	TuneQUICUDPConn(packetConn)
+	TuneDirectQUICUDPConn(packetConn)
 	listener, err := quic.Listen(packetConn, tlsConfig, DirectQUICConfig(quicConfig))
 	if err != nil {
 		_ = packetConn.Close()
@@ -155,7 +159,7 @@ func DialDirectQUIC(ctx context.Context, address string, tlsConfig *tls.Config, 
 	if err != nil {
 		return nil, fmt.Errorf("direct QUIC UDP socket failed: %w", err)
 	}
-	TuneQUICUDPConn(packetConn)
+	TuneDirectQUICUDPConn(packetConn)
 
 	conn, err := quic.Dial(ctx, packetConn, remoteAddr, tlsConfig, DirectQUICConfig(quicConfig))
 	if err != nil {

@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go"
+	"github.com/apernet/quic-go"
 	"relayproxy/internal/config"
 	"relayproxy/server/gateway"
 	"relayproxy/server/session"

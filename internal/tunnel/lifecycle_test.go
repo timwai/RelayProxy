@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/yamux"
-	"github.com/quic-go/quic-go"
+	"github.com/apernet/quic-go"
 	"relayproxy/internal/protocol"
 )
 

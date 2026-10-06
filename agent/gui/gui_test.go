@@ -285,7 +285,6 @@ func TestDesktopStatusDrivesProxyExitInventory(t *testing.T) {
 	}
 }
 
-
 func TestDesktopBootSerializesConfigAndInitialStatus(t *testing.T) {
 	data, err := assets.ReadFile("assets/index.html")
 	if err != nil {

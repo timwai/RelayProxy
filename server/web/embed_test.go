@@ -148,6 +148,8 @@ func TestServerConsoleShowsPublicDirectPerformanceDiagnostics(t *testing.T) {
 		"directQuic.sent_packet_loss_pct",
 		"directQuic.rtt_deviation_ms",
 		"directQuic.gso",
+		"directQuic.udp_read_buffer_bytes",
+		"directQuic.udp_write_buffer_bytes",
 		"Public Direct QUIC",
 	} {
 		if !strings.Contains(text, want) {

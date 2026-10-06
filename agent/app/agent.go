@@ -203,6 +203,14 @@ func (c AgentConfig) IsP2PFallbackEnabled() bool {
 	return true
 }
 
+type ProxyExitSummary struct {
+	DeviceID            string `json:"deviceId"`
+	Name                string `json:"name"`
+	IdentityName        string `json:"identityName,omitempty"`
+	AuthorizationSource string `json:"authorizationSource,omitempty"`
+	Online              bool   `json:"online"`
+}
+
 type AgentStatus struct {
 	Connected           bool                       `json:"connected"`
 	Transport           string                     `json:"transport"`
@@ -214,6 +222,8 @@ type AgentStatus struct {
 	PolicyRevision      int64                      `json:"policyRevision,omitempty"`
 	Mode                string                     `json:"mode"`
 	SelectedExit        string                     `json:"selectedExit"`
+	ProxyExits          []ProxyExitSummary         `json:"proxyExits"`
+	ProxyExitRevision   uint64                     `json:"proxyExitRevision,omitempty"`
 	SOCKS5Running       bool                       `json:"socks5Running"`
 	HTTPRunning         bool                       `json:"httpRunning"`
 	ExitRunning         bool                       `json:"exitRunning"`
@@ -866,6 +876,20 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 	}
 }
 
+func proxyExitSummaries(exits []protocol.ProxyExit) []ProxyExitSummary {
+	result := make([]ProxyExitSummary, 0, len(exits))
+	for _, exit := range exits {
+		result = append(result, ProxyExitSummary{
+			DeviceID: exit.DeviceID,
+			Name: exit.Name,
+			IdentityName: exit.IdentityName,
+			AuthorizationSource: exit.AuthorizationSource,
+			Online: exit.Online,
+		})
+	}
+	return result
+}
+
 func proxyExitsFromProtocol(exits []protocol.ProxyExit) []protocol.ProxyExit {
 	result := make([]protocol.ProxyExit, 0, len(exits))
 	seen := make(map[string]bool, len(exits))
@@ -1275,6 +1299,7 @@ func (a *Agent) Status() AgentStatus {
 	st := AgentStatus{
 		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName,
 		IdentityName: a.identityName, PolicyRevision: a.policyRevision, Mode: a.approvedMode,
+		ProxyExits: proxyExitSummaries(a.proxyExits), ProxyExitRevision: a.proxyExitRevision,
 		SOCKS5Running: a.started && a.socksServer != nil,
 		HTTPRunning:   a.started && a.httpServer != nil,
 		ExitRunning:   a.started && a.exitHandler != nil,

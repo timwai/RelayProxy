@@ -127,6 +127,7 @@ type QUICSession struct {
 	diagnosticsRecvBPS       uint64
 	udpReadBufferBytes       int
 	udpWriteBufferBytes      int
+	congestionController     string
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -156,7 +157,7 @@ func NewQUICSession(conn *quic.Conn) *QUICSession {
 	// transport-specific tuning at every dial / accept site.
 	quicprofile.UseDefaultBBR(conn)
 
-	s := &QUICSession{conn: conn}
+	s := &QUICSession{conn: conn, congestionController: "bbr-standard"}
 	s.datagrams = newDatagramMux(s)
 	return s
 }

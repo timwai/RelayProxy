@@ -607,7 +607,14 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 	defer stopCancel()
 
 	var datagrams *tunnel.DatagramChannel
-	if tunnel.PeerSupportsDatagrams(sess) {
+	// QUIC Initial packets are at least 1200 bytes, while RelayProxy native UDP
+	// fragments payloads at 1100 bytes. Carrying UDP/443 over outer QUIC
+	// DATAGRAM therefore turns every cold HTTP/3 handshake packet into multiple
+	// independently lossy datagrams. Prefer the reliable framed stream for
+	// ordinary UDP/443 so Android Cronet / Google services can bootstrap
+	// consistently. Explicit DatagramRequired traffic keeps native datagrams.
+	useNativeDatagrams := opts.DatagramRequired || port != 443
+	if useNativeDatagrams && tunnel.PeerSupportsDatagrams(sess) {
 		datagrams, err = tunnel.OpenDatagramChannel(sess, 0)
 		if err != nil {
 			_ = stream.Close()

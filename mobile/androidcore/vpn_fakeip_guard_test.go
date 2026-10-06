@@ -11,8 +11,9 @@ import (
 )
 
 type fakeVPNGuardDialer struct {
-	tcpCalls int
-	udpCalls int
+	tcpCalls       int
+	udpCalls       int
+	lastUDPOptions proxy.UDPDialOptions
 }
 
 func (d *fakeVPNGuardDialer) DialTCP(context.Context, string, string, uint16) (net.Conn, error) {
@@ -25,8 +26,9 @@ func (d *fakeVPNGuardDialer) DialUDP(context.Context, string, string, uint16) (n
 	return nil, errors.New("base udp dial")
 }
 
-func (d *fakeVPNGuardDialer) DialUDPWithOptions(context.Context, string, string, uint16, proxy.UDPDialOptions) (net.PacketConn, error) {
+func (d *fakeVPNGuardDialer) DialUDPWithOptions(_ context.Context, _ string, _ string, _ uint16, options proxy.UDPDialOptions) (net.PacketConn, error) {
 	d.udpCalls++
+	d.lastUDPOptions = options
 	return nil, errors.New("base udp options dial")
 }
 
@@ -62,5 +64,39 @@ func TestVPNMappedDNSGuardAllowsDomainsAndPublicIPs(t *testing.T) {
 	}
 	if base.tcpCalls != 2 {
 		t.Fatalf("base tcp calls = %d, want 2", base.tcpCalls)
+	}
+}
+
+
+func TestVPNMappedDNSGuardPrefersReliableStreamForOrdinaryUDP443(t *testing.T) {
+	base := &fakeVPNGuardDialer{}
+	guard := &vpnMappedDNSGuardDialer{base: base}
+
+	_, _ = guard.DialUDP(context.Background(), "exit", "youtube.googleapis.com", 443)
+	if base.udpCalls != 1 || !base.lastUDPOptions.PreferStream || base.lastUDPOptions.DatagramRequired {
+		t.Fatalf("ordinary UDP/443 options = %+v calls=%d", base.lastUDPOptions, base.udpCalls)
+	}
+
+	base.udpCalls = 0
+	base.lastUDPOptions = proxy.UDPDialOptions{}
+	_, _ = guard.DialUDP(context.Background(), "exit", "dns.google", 53)
+	if base.udpCalls != 1 || base.lastUDPOptions.PreferStream || base.lastUDPOptions.DatagramRequired {
+		t.Fatalf("ordinary UDP/53 options = %+v calls=%d", base.lastUDPOptions, base.udpCalls)
+	}
+}
+
+func TestVPNMappedDNSGuardKeepsRequiredDatagramsOnUDP443(t *testing.T) {
+	base := &fakeVPNGuardDialer{}
+	guard := &vpnMappedDNSGuardDialer{base: base}
+
+	_, _ = guard.DialUDPWithOptions(
+		context.Background(),
+		"exit",
+		"realtime.example",
+		443,
+		proxy.UDPDialOptions{DatagramRequired: true},
+	)
+	if base.udpCalls != 1 || !base.lastUDPOptions.DatagramRequired || base.lastUDPOptions.PreferStream {
+		t.Fatalf("required UDP/443 options = %+v calls=%d", base.lastUDPOptions, base.udpCalls)
 	}
 }

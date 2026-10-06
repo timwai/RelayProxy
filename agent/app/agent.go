@@ -880,11 +880,11 @@ func proxyExitSummaries(exits []protocol.ProxyExit) []ProxyExitSummary {
 	result := make([]ProxyExitSummary, 0, len(exits))
 	for _, exit := range exits {
 		result = append(result, ProxyExitSummary{
-			DeviceID: exit.DeviceID,
-			Name: exit.Name,
-			IdentityName: exit.IdentityName,
+			DeviceID:            exit.DeviceID,
+			Name:                exit.Name,
+			IdentityName:        exit.IdentityName,
 			AuthorizationSource: exit.AuthorizationSource,
-			Online: exit.Online,
+			Online:              exit.Online,
 		})
 	}
 	return result

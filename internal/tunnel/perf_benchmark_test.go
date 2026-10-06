@@ -106,7 +106,6 @@ func BenchmarkPipe1MiBWithMetrics(b *testing.B) {
 	}
 }
 
-
 type benchmarkDiscardStream struct{}
 
 func (benchmarkDiscardStream) Read([]byte) (int, error)         { return 0, io.EOF }

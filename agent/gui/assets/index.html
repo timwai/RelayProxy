@@ -2718,7 +2718,6 @@
       });
       loadConfig();
       refreshCredentialState(false);
-      refreshProxyExits(false);
       refreshStatus();
       refreshLogs();
       refreshMessages(false);
@@ -2729,11 +2728,9 @@
       // action visible only where the native launcher is available.
       if (!hasFn('goRestart') && $('restart-card')) { $('restart-card').classList.add('hidden'); }
 
-      // Status now carries the authoritative Exit inventory. Keep the legacy
-      // endpoint as a slow compatibility fallback for mixed-version clients.
-      setInterval(function () {
-        if (!state.proxyExitsLoaded) refreshProxyExits(false);
-      }, 5000);
+      // Exit inventory is carried by the same status channel as connection
+      // state. Do not issue a second desktop RPC / HTTP request for the same
+      // data: one stuck auxiliary call must never block the GUI control path.
       // Go pushes status every 1.5s; these polls cover the window's first paint.
       setInterval(refreshStatus, 3000);
       setInterval(refreshNetworkServiceStatus, 5000);

@@ -249,3 +249,35 @@ func TestProxyExitInventoryLoadingStateCannotBeBlockedByRoutingUI(t *testing.T) 
 		}
 	}
 }
+
+
+func TestDesktopStatusDrivesProxyExitInventory(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	start := strings.Index(page, "function renderStatus(st)")
+	if start < 0 {
+		t.Fatal("renderStatus not found")
+	}
+	block := page[start:]
+	end := strings.Index(block, "var up = !!st.connected")
+	if end < 0 {
+		t.Fatal("renderStatus status prelude not found")
+	}
+	block = block[:end]
+	for _, want := range []string{
+		"Array.isArray(st.proxyExits)",
+		"state.proxyExits = st.proxyExits;",
+		"state.proxyExitsLoaded = true;",
+		"syncProxyExitSelectors();",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("status-driven exit inventory missing %q", want)
+		}
+	}
+	if !strings.Contains(page, "if (!state.proxyExitsLoaded) refreshProxyExits(false);") {
+		t.Fatal("legacy proxy exit endpoint must be fallback-only")
+	}
+}

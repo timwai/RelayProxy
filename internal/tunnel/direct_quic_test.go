@@ -86,3 +86,45 @@ func TestDirectQUICRequiresExplicitTLS(t *testing.T) {
 		t.Fatal("dial accepted missing TLS config")
 	}
 }
+
+func TestDirectQUICConfigUsesHighThroughputDefaults(t *testing.T) {
+	config := DirectQUICConfig(nil)
+	if config.InitialStreamReceiveWindow != directInitialStreamReceiveWindow {
+		t.Fatalf("initial stream receive window=%d", config.InitialStreamReceiveWindow)
+	}
+	if config.MaxStreamReceiveWindow != directMaxStreamReceiveWindow {
+		t.Fatalf("max stream receive window=%d", config.MaxStreamReceiveWindow)
+	}
+	if config.InitialConnectionReceiveWindow != directInitialConnectionReceiveWindow {
+		t.Fatalf("initial connection receive window=%d", config.InitialConnectionReceiveWindow)
+	}
+	if config.MaxConnectionReceiveWindow != directMaxConnectionReceiveWindow {
+		t.Fatalf("max connection receive window=%d", config.MaxConnectionReceiveWindow)
+	}
+	if !config.EnableDatagrams {
+		t.Fatal("direct QUIC datagrams disabled")
+	}
+}
+
+func TestDirectQUICConfigPreservesExplicitWindowTuning(t *testing.T) {
+	custom := DefaultQUICConfig()
+	custom.InitialStreamReceiveWindow = 2 << 20
+	custom.MaxStreamReceiveWindow = 8 << 20
+	custom.InitialConnectionReceiveWindow = 4 << 20
+	custom.MaxConnectionReceiveWindow = 16 << 20
+	custom.EnableDatagrams = false
+
+	config := DirectQUICConfig(custom)
+	if config.InitialStreamReceiveWindow != custom.InitialStreamReceiveWindow ||
+		config.MaxStreamReceiveWindow != custom.MaxStreamReceiveWindow ||
+		config.InitialConnectionReceiveWindow != custom.InitialConnectionReceiveWindow ||
+		config.MaxConnectionReceiveWindow != custom.MaxConnectionReceiveWindow {
+		t.Fatalf("explicit flow control tuning changed: %+v", config)
+	}
+	if !config.EnableDatagrams {
+		t.Fatal("direct QUIC datagrams disabled")
+	}
+	if custom.EnableDatagrams {
+		t.Fatal("DirectQUICConfig mutated caller config")
+	}
+}

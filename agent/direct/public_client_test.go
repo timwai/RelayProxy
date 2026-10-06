@@ -63,7 +63,7 @@ func TestDialAnyAuthenticatesOnlyTransportWinner(t *testing.T) {
 		}
 		// The preferred endpoint starts first but completes after the fallback
 		// endpoint's head-start delay, so the fallback wins the transport race.
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(endpointRaceHeadStart + 100*time.Millisecond)
 		close(loserReturned)
 		return loser, nil
 	}

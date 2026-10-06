@@ -152,12 +152,12 @@ func DefaultQUICConfig() *quic.Config {
 
 // NewQUICSession wraps an established quic.Conn
 func NewQUICSession(conn *quic.Conn) *QUICSession {
-	// All RelayProxy QUIC paths share Hysteria's BBR congestion controller.
+	// All RelayProxy QUIC paths share Hysteria's aggressive BBR congestion controller.
 	// Installing it here covers Relay, P2P and Public Direct without duplicating
 	// transport-specific tuning at every dial / accept site.
 	quicprofile.UseDefaultBBR(conn)
 
-	s := &QUICSession{conn: conn, congestionController: "bbr-standard"}
+	s := &QUICSession{conn: conn, congestionController: "bbr-aggressive"}
 	s.datagrams = newDatagramMux(s)
 	return s
 }

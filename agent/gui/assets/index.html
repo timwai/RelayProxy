@@ -1279,7 +1279,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, proxyExits: [], proxyExitsRefreshing: false, rdpTargets: [], rdpBusyTarget: '', rdpRefreshing: false };
+    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, proxyExits: [], proxyExitsRefreshing: false, proxyExitsLoaded: false, proxyExitsError: '', rdpTargets: [], rdpBusyTarget: '', rdpRefreshing: false };
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1651,6 +1651,23 @@
       select.value = selectedValue;
       if (select.value !== selectedValue) select.value = '';
     }
+    function renderProxyExitInventoryHint() {
+      var hint = $('exit-inventory-hint');
+      if (!hint) return;
+      if (state.proxyExitsError) {
+        hint.textContent = '读取服务端授权出口失败，正在自动重试：' + state.proxyExitsError;
+        return;
+      }
+      if (!state.proxyExitsLoaded) {
+        hint.textContent = state.status && state.status.connected
+          ? '正在读取服务端授权出口…'
+          : 'Relay 未连接，暂时无法确认服务端授权出口。';
+        return;
+      }
+      if (!state.status || !state.status.connected) hint.textContent = 'Relay 未连接，暂时无法确认服务端授权出口。';
+      else if (!state.proxyExits.length) hint.textContent = '当前没有可用的已授权出口；控制隧道仍可保持连接。';
+      else hint.textContent = '服务端已下发 ' + state.proxyExits.length + ' 个授权出口；名称变化不会影响保存的稳定设备 ID。';
+    }
     function syncProxyExitSelectors() {
       var defaultSelect = $('cfg-exit-id');
       var defaultValue = defaultSelect ? defaultSelect.value : (state.cfg && state.cfg.defaultExitId) || '';
@@ -1660,29 +1677,44 @@
       var speedValue = speedSelect ? speedSelect.value : '';
       fillProxyExitSelect(speedSelect, speedValue, '跟随默认出口 / 自动选择');
 
-      if (typeof window.syncRoutingExitOptions === 'function') window.syncRoutingExitOptions();
-
-      var hint = $('exit-inventory-hint');
-      if (hint) {
-        if (!state.status || !state.status.connected) hint.textContent = 'Relay 未连接，暂时无法确认服务端授权出口。';
-        else if (!state.proxyExits.length) hint.textContent = '当前没有可用的已授权出口；控制隧道仍可保持连接。';
-        else hint.textContent = '服务端已下发 ' + state.proxyExits.length + ' 个授权出口；名称变化不会影响保存的稳定设备 ID。';
-      }
+      // Update the core Exit UI before optional routing integrations. A routing
+      // renderer bug must never leave Windows/macOS stuck on the loading hint.
+      renderProxyExitInventoryHint();
       if (state.status) {
         $('home-exit').textContent = state.status.selectedExit ? proxyExitDisplayName(state.status.selectedExit) : '自动选择';
         $('exit-current').textContent = state.status.selectedExit ? proxyExitDisplayName(state.status.selectedExit) : '自动选择';
       }
+
+      if (typeof window.syncRoutingExitOptions === 'function') {
+        try {
+          window.syncRoutingExitOptions();
+        } catch (err) {
+          console.warn('failed to sync routing exit options', err);
+        }
+      }
     }
     async function refreshProxyExits(showError) {
-      if (state.proxyExitsRefreshing || !hasFn('goGetProxyExits')) return;
+      if (state.proxyExitsRefreshing) return;
+      if (!hasFn('goGetProxyExits')) {
+        state.proxyExitsError = '出口接口尚未就绪';
+        renderProxyExitInventoryHint();
+        return;
+      }
       state.proxyExitsRefreshing = true;
       try {
-        var raw = await call('goGetProxyExits');
+        // Call the binding directly here instead of call(): this inventory has
+        // its own visible error state, so swallowing the bridge exception would
+        // incorrectly turn failures into a successful empty inventory.
+        var raw = await window.goGetProxyExits();
         var exits = typeof raw === 'string' ? JSON.parse(raw || '[]') : raw;
         state.proxyExits = Array.isArray(exits) ? exits : [];
+        state.proxyExitsLoaded = true;
+        state.proxyExitsError = '';
         syncProxyExitSelectors();
       } catch (err) {
-        if (showError) toast('读取授权出口失败：' + err.message);
+        state.proxyExitsError = err && err.message ? err.message : String(err || '未知错误');
+        renderProxyExitInventoryHint();
+        if (showError) toast('读取授权出口失败：' + state.proxyExitsError);
       } finally {
         state.proxyExitsRefreshing = false;
       }
@@ -1694,6 +1726,7 @@
     /* ---------- status rendering ---------- */
     function renderStatus(st) {
       state.status = st;
+      renderProxyExitInventoryHint();
 
       var up = !!st.connected;
       var side = $('side-tunnel');

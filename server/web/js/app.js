@@ -732,6 +732,7 @@
       const directFallbackCount = peerStatus && Number(peerStatus.directFallbackCount || 0);
       const directBytesUp = peerStatus && Number(peerStatus.directBytesUp || 0);
       const directBytesDown = peerStatus && Number(peerStatus.directBytesDown || 0);
+      const directQuic = peerStatus && peerStatus.directQuic;
       const direct = directPath
         ? '<small>当前路径：' + esc(directNames[directPath] || directPath) +
           (directState ? ' · ' + esc(directState) : '') +
@@ -740,6 +741,12 @@
           '</small>' +
           (directEndpoint ? '<small>直连端点：<span class="mono">' + esc(directEndpoint) + '</span></small>' : '') +
           ((directBytesUp > 0 || directBytesDown > 0) ? '<small>直连流量：<span class="mono">' + bytes(directBytesUp) + ' / ' + bytes(directBytesDown) + '</span></small>' : '') +
+          (directQuic ? '<small>Public Direct QUIC：<span class="mono">' +
+            '↑ ' + bytes(Number(directQuic.send_bps || 0)) + '/s · ↓ ' + bytes(Number(directQuic.receive_bps || 0)) + '/s' +
+            ' · 丢包 ' + esc(Number(directQuic.sent_packet_loss_pct || 0).toFixed(2)) + '%' +
+            ' · RTT 抖动 ' + esc(Number(directQuic.rtt_deviation_ms || 0).toFixed(1)) + ' ms' +
+            ' · GSO ' + (directQuic.gso ? 'ON' : 'OFF') +
+            '</span></small>' : '') +
           (directError ? '<small>直连错误：' + esc(directError) + '</small>' : '')
         : '';
       const diagnostic = relay ? '<span class="mono">Relay RTT ' + esc(relay.smoothed_rtt_ms || 0) + ' ms · 丢包 ' + esc(relay.sent_packets_lost || 0) + '</span>' +

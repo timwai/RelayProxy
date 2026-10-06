@@ -162,8 +162,15 @@ func (d *RoutingDialer) dialTCP(ctx context.Context, exitNodeID, host string, po
 
 // DialUDP implements proxy.TunnelDialer.
 func (d *RoutingDialer) DialUDP(ctx context.Context, exitNodeID string, host string, port uint16) (net.PacketConn, error) {
+	return d.DialUDPWithOptions(ctx, exitNodeID, host, port, proxy.UDPDialOptions{})
+}
+
+// DialUDPWithOptions preserves transport requirements and preferences through
+// routing. Android VPN relies on this to carry its reliable UDP/443 preference
+// all the way to the shared tunnel dialer.
+func (d *RoutingDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string, host string, port uint16, options proxy.UDPDialOptions) (net.PacketConn, error) {
 	decision, record := d.begin(ctx, exitNodeID, host, port, "udp")
-	pc, err := d.dialUDP(ctx, exitNodeID, host, port, decision)
+	pc, err := d.dialUDP(ctx, exitNodeID, host, port, decision, options)
 	if err != nil {
 		finishDial(record, decision, err)
 		return nil, err
@@ -176,7 +183,7 @@ func (d *RoutingDialer) DialUDP(ctx context.Context, exitNodeID string, host str
 	return traffic.WrapPacketConn(pc, record), nil
 }
 
-func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, port uint16, decision Decision) (net.PacketConn, error) {
+func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, port uint16, decision Decision, options proxy.UDPDialOptions) (net.PacketConn, error) {
 	action, ruleExitID := decision.Action, decision.ExitID
 
 	switch action {
@@ -210,11 +217,14 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 		}
 		log.Printf("[Routing] PROXY UDP %s:%d (exit=%s)", host, port, eid)
 		if decision.DatagramRequired {
-			optionsDialer, ok := d.tunnel.(proxy.UDPOptionsDialer)
-			if !ok {
-				return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required by routing policy")
-			}
-			return optionsDialer.DialUDPWithOptions(ctx, eid, host, port, proxy.UDPDialOptions{DatagramRequired: true})
+			options.DatagramRequired = true
+			options.PreferStream = false
+		}
+		if optionsDialer, ok := d.tunnel.(proxy.UDPOptionsDialer); ok {
+			return optionsDialer.DialUDPWithOptions(ctx, eid, host, port, options)
+		}
+		if options.DatagramRequired {
+			return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required by routing policy")
 		}
 		return d.tunnel.DialUDP(ctx, eid, host, port)
 

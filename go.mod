@@ -8,7 +8,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/yamux v0.1.2
 	github.com/lxn/win v0.0.0-20210218163916-a377121e959e
-	github.com/quic-go/quic-go v0.62.0
+	github.com/apernet/quic-go v0.63.1-0.20261004180939-a10df75c260c
 	github.com/wailsapp/wails/v3 v3.0.0-beta.23
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.56.0

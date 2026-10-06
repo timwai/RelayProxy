@@ -50,6 +50,12 @@ func TestDirectQUICListenerCarriesStreamsAndDatagrams(t *testing.T) {
 	}
 	defer server.Close()
 
+	if listener.packetConn == nil {
+		t.Fatal("direct QUIC listener did not retain tuned UDP socket")
+	}
+	if client.ownedPacketConn == nil {
+		t.Fatal("direct QUIC client did not retain owned UDP socket")
+	}
 	if !PeerSupportsDatagrams(client) || !PeerSupportsDatagrams(server) {
 		t.Fatal("direct QUIC did not enable negotiated datagram support")
 	}
@@ -73,6 +79,12 @@ func TestDirectQUICListenerCarriesStreamsAndDatagrams(t *testing.T) {
 	}
 	if string(got) != "direct-quic" {
 		t.Fatalf("payload=%q", got)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("close direct QUIC client: %v", err)
+	}
+	if err := client.Close(); err != nil {
+		t.Fatalf("second close direct QUIC client: %v", err)
 	}
 }
 

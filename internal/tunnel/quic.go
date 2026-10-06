@@ -124,6 +124,8 @@ type QUICSession struct {
 	diagnosticsLastBytesRecv uint64
 	diagnosticsSendBPS       uint64
 	diagnosticsRecvBPS       uint64
+	udpReadBufferBytes       int
+	udpWriteBufferBytes      int
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -156,7 +158,17 @@ func NewQUICSession(conn *quic.Conn) *QUICSession {
 func newOwnedQUICSession(conn *quic.Conn, packetConn net.PacketConn) *QUICSession {
 	s := NewQUICSession(conn)
 	s.ownedPacketConn = packetConn
+	if udpConn, ok := packetConn.(*net.UDPConn); ok {
+		s.setUDPSocketBufferSizes(udpConn)
+	}
 	return s
+}
+
+func (s *QUICSession) setUDPSocketBufferSizes(conn *net.UDPConn) {
+	if s == nil || conn == nil {
+		return
+	}
+	s.udpReadBufferBytes, s.udpWriteBufferBytes = udpSocketBufferSizes(conn)
 }
 
 func (s *QUICSession) sampleByteRates(now time.Time, bytesSent, bytesRecv uint64) (sendBPS, recvBPS uint64) {

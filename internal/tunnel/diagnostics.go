@@ -27,8 +27,10 @@ type QUICDiagnostics struct {
 	SentBytesLost     uint64  `json:"sent_bytes_lost"`
 	SentPacketsLost   uint64  `json:"sent_packets_lost"`
 	SentByteLossPct   float64 `json:"sent_byte_loss_pct"`
-	SentPacketLossPct float64 `json:"sent_packet_loss_pct"`
-	GSO               bool    `json:"gso"`
+	SentPacketLossPct   float64 `json:"sent_packet_loss_pct"`
+	GSO                 bool    `json:"gso"`
+	UDPReadBufferBytes  int     `json:"udp_read_buffer_bytes,omitempty"`
+	UDPWriteBufferBytes int     `json:"udp_write_buffer_bytes,omitempty"`
 }
 
 func lossPercent(lost, total uint64) float64 {
@@ -69,6 +71,8 @@ func DiagnoseSession(session TunnelSession) *SessionDiagnostics {
 			SentByteLossPct:   lossPercent(stats.BytesLost, stats.BytesSent),
 			SentPacketLossPct: lossPercent(stats.PacketsLost, stats.PacketsSent),
 			GSO:               state.GSO,
+			UDPReadBufferBytes: quicSession.udpReadBufferBytes,
+			UDPWriteBufferBytes: quicSession.udpWriteBufferBytes,
 		}
 	}
 	return d

@@ -98,6 +98,7 @@ func (l *DirectQUICListener) Accept(ctx context.Context) (*QUICSession, error) {
 		return nil, err
 	}
 	session := NewQUICSession(conn)
+	session.setUDPSocketBufferSizes(l.packetConn)
 	SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
 	return session, nil
 }

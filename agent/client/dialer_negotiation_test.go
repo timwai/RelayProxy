@@ -743,7 +743,6 @@ func TestExpiredDirectAttemptBudgetDoesNotQuarantineAlternateP2P(t *testing.T) {
 	}
 }
 
-
 func TestUDP443PrefersReliableStreamUnlessDatagramsRequired(t *testing.T) {
 	for _, required := range []bool{false, true} {
 		t.Run(fmt.Sprintf("required=%t", required), func(t *testing.T) {
@@ -787,9 +786,9 @@ func TestUDP443PrefersReliableStreamUnlessDatagramsRequired(t *testing.T) {
 					return
 				}
 				served <- protocol.WriteJSON(s, protocol.OpenUDPResponse{
-					RequestID: req.RequestID,
-					Success: true,
-					Mode: wantMode,
+					RequestID:     req.RequestID,
+					Success:       true,
+					Mode:          wantMode,
 					AssociationID: req.AssociationID,
 				})
 			}()

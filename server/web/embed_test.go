@@ -134,3 +134,24 @@ func TestServerSettingsFormInitializesEverySettingGroup(t *testing.T) {
 		t.Fatal("server settings form does not initialize the P2P settings group")
 	}
 }
+
+func TestServerConsoleShowsPublicDirectPerformanceDiagnostics(t *testing.T) {
+	script, err := EmbeddedFiles.ReadFile("js/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(script)
+	for _, want := range []string{
+		"peerStatus.directQuic",
+		"directQuic.send_bps",
+		"directQuic.receive_bps",
+		"directQuic.sent_packet_loss_pct",
+		"directQuic.rtt_deviation_ms",
+		"directQuic.gso",
+		"Public Direct QUIC",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("server Public Direct diagnostics missing %q", want)
+		}
+	}
+}

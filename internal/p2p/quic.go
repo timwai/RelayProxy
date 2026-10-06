@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/quic-go/quic-go"
+	"github.com/apernet/quic-go"
 	"relayproxy/internal/p2p/secure"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"

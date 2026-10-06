@@ -250,7 +250,6 @@ func TestProxyExitInventoryLoadingStateCannotBeBlockedByRoutingUI(t *testing.T) 
 	}
 }
 
-
 func TestDesktopStatusDrivesProxyExitInventory(t *testing.T) {
 	data, err := assets.ReadFile("assets/index.html")
 	if err != nil {

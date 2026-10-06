@@ -50,6 +50,18 @@ func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Chec
 			return gateway.DeviceAuthorization{State: "approved", DeviceID: deviceID, IdentityID: identity.IdentityID, ApprovedCapabilities: caps}, nil
 		},
 		RecheckIdentityDevice: func(string, string, string) bool { return true },
+		ListProxyExits: func(clientID, _, _ string) ([]protocol.ProxyExit, error) {
+			if clientID != "client" && clientID != "new-client" {
+				return []protocol.ProxyExit{}, nil
+			}
+			return []protocol.ProxyExit{{
+				DeviceID:            "exit",
+				Name:                "Test Exit",
+				IdentityName:        "Test Identity",
+				AuthorizationSource: "same_identity",
+				Online:              true,
+			}}, nil
+		},
 	}, sessions, router)
 	if err := gateway.Start(); err != nil {
 		t.Fatal(err)
@@ -95,6 +107,23 @@ func waitAgentReady(t *testing.T, agent *Agent) {
 	}
 	if !agent.Status().Connected {
 		t.Fatal("agent never completed authentication")
+	}
+}
+
+func TestStatusCarriesAuthorizedProxyExitInventory(t *testing.T) {
+	central, err := acl.NewChecker(acl.Policy{AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientAgent, _, _ := startRelayPair(t, "quic_only", "quic_only", central)
+	status := clientAgent.Status()
+	if len(status.ProxyExits) != 1 {
+		t.Fatalf("status proxy exits = %+v", status.ProxyExits)
+	}
+	exit := status.ProxyExits[0]
+	if exit.DeviceID != "exit" || exit.Name != "Test Exit" || exit.IdentityName != "Test Identity" ||
+		exit.AuthorizationSource != "same_identity" || !exit.Online {
+		t.Fatalf("unexpected status proxy exit: %+v", exit)
 	}
 }
 

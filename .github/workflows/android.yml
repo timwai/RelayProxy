@@ -13,6 +13,8 @@ on:
     paths:
       - "android/**"
       - "mobile/androidcore/**"
+      - "agent/client/**"
+      - "agent/client/**"
       - "agent/exit/**"
       - "agent/p2p/**"
       - "internal/p2p/**"
@@ -62,7 +64,7 @@ jobs:
 
       - name: Test Android relay compatibility
         run: |
-          go test ./mobile/androidcore ./agent/p2p ./agent/exit ./internal/p2p/... ./internal/tunnel ./internal/protocol ./server/p2p ./server/session ./server/gateway -count=1
+          go test ./mobile/androidcore ./agent/client ./agent/p2p ./agent/exit ./internal/p2p/... ./internal/tunnel ./internal/protocol ./server/p2p ./server/session ./server/gateway -count=1
 
       - name: Install gomobile
         run: |

@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/apernet/quic-go"
 	"github.com/google/uuid"
-	"github.com/quic-go/quic-go"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"

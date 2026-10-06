@@ -13,6 +13,11 @@ const (
 	// QUIC benefits from deeper kernel queues on high-bandwidth, high-RTT paths.
 	// The kernel can clamp this value to its configured maximum.
 	quicUDPSocketBufferBytes = 8 << 20
+
+	// Public Direct carries all proxy streams for an Exit over one long-lived
+	// UDP socket. Give that shared socket extra burst headroom on high-BDP WANs
+	// without increasing the per-session memory target used by P2P QUIC.
+	directQUICUDPSocketBufferBytes = 16 << 20
 )
 
 // TuneUDPConn raises kernel queues so short bursts do not turn into packet
@@ -35,6 +40,17 @@ func TuneQUICUDPConn(conn *net.UDPConn) {
 	}
 	_ = conn.SetReadBuffer(quicUDPSocketBufferBytes)
 	_ = conn.SetWriteBuffer(quicUDPSocketBufferBytes)
+}
+
+// TuneDirectQUICUDPConn uses a larger queue target for the stable Public Direct
+// listener / client sockets. The OS is still free to clamp these requests to
+// its configured maximums.
+func TuneDirectQUICUDPConn(conn *net.UDPConn) {
+	if conn == nil {
+		return
+	}
+	_ = conn.SetReadBuffer(directQUICUDPSocketBufferBytes)
+	_ = conn.SetWriteBuffer(directQUICUDPSocketBufferBytes)
 }
 
 // TuneTCPConn applies the low-latency settings shared by tunnel and ingress

@@ -12,8 +12,8 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/apernet/quic-go"
 	"github.com/hashicorp/yamux"
-	"github.com/quic-go/quic-go"
 	"relayproxy/internal/protocol"
 )
 

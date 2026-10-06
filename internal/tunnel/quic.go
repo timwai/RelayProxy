@@ -9,7 +9,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/quic-go/quic-go"
+	"github.com/apernet/quic-go"
+	quicprofile "relayproxy/internal/congestion"
 )
 
 // QUICStreamAdapter adapts quic.Stream to TunnelStream
@@ -126,6 +127,7 @@ type QUICSession struct {
 	diagnosticsRecvBPS       uint64
 	udpReadBufferBytes       int
 	udpWriteBufferBytes      int
+	congestionController     string
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -150,7 +152,12 @@ func DefaultQUICConfig() *quic.Config {
 
 // NewQUICSession wraps an established quic.Conn
 func NewQUICSession(conn *quic.Conn) *QUICSession {
-	s := &QUICSession{conn: conn}
+	// All RelayProxy QUIC paths share Hysteria's aggressive BBR congestion controller.
+	// Installing it here covers Relay, P2P and Public Direct without duplicating
+	// transport-specific tuning at every dial / accept site.
+	quicprofile.UseDefaultBBR(conn)
+
+	s := &QUICSession{conn: conn, congestionController: "bbr-aggressive"}
 	s.datagrams = newDatagramMux(s)
 	return s
 }

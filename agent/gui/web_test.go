@@ -130,6 +130,23 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
+func TestWebStatusIncludesProxyExitInventory(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/status", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status response = %d %q", response.Code, response.Body.String())
+	}
+	var status map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+		t.Fatal(err)
+	}
+	exits, ok := status["proxyExits"].([]any)
+	if !ok || exits == nil || len(exits) != 0 {
+		t.Fatalf("status proxyExits = %#v, want empty array", status["proxyExits"])
+	}
+}
+
 func TestWebManagementExposesServerAuthorizedProxyExitInventory(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 

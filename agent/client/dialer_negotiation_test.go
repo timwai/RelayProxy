@@ -743,7 +743,7 @@ func TestExpiredDirectAttemptBudgetDoesNotQuarantineAlternateP2P(t *testing.T) {
 	}
 }
 
-func TestUDP443PrefersReliableStreamUnlessDatagramsRequired(t *testing.T) {
+func TestPreferStreamUsesReliableUDPUnlessDatagramsRequired(t *testing.T) {
 	for _, required := range []bool{false, true} {
 		t.Run(fmt.Sprintf("required=%t", required), func(t *testing.T) {
 			client, server := dialerQUICPair(t)
@@ -773,16 +773,16 @@ func TestUDP443PrefersReliableStreamUnlessDatagramsRequired(t *testing.T) {
 					wantMode = protocol.UDPModeDatagram
 				}
 				if req.DatagramRequired != required || req.Mode != wantMode {
-					served <- fmt.Errorf("UDP/443 request = %+v, want mode=%s required=%t", req, wantMode, required)
+					served <- fmt.Errorf("preferred UDP request = %+v, want mode=%s required=%t", req, wantMode, required)
 					return
 				}
 				if required {
 					if req.AssociationID == 0 {
-						served <- fmt.Errorf("required UDP/443 request missing association id")
+						served <- fmt.Errorf("required preferred-stream request missing association id")
 						return
 					}
 				} else if req.AssociationID != 0 {
-					served <- fmt.Errorf("ordinary UDP/443 unexpectedly allocated datagram association %d", req.AssociationID)
+					served <- fmt.Errorf("preferred-stream request unexpectedly allocated datagram association %d", req.AssociationID)
 					return
 				}
 				served <- protocol.WriteJSON(s, protocol.OpenUDPResponse{
@@ -794,12 +794,15 @@ func TestUDP443PrefersReliableStreamUnlessDatagramsRequired(t *testing.T) {
 			}()
 
 			dialer := NewTunnelDialer(func() tunnel.TunnelSession { return client }, nil)
-			pc, err := dialer.DialUDPWithOptions(ctx, "exit", "youtube.googleapis.com", 443, UDPDialOptions{DatagramRequired: required})
+			pc, err := dialer.DialUDPWithOptions(ctx, "exit", "example.com", 443, UDPDialOptions{
+				DatagramRequired: required,
+				PreferStream:     true,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if pc == nil {
-				t.Fatal("UDP/443 dial returned nil connection")
+				t.Fatal("preferred UDP dial returned nil connection")
 			}
 			_ = pc.Close()
 

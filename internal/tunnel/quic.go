@@ -114,6 +114,9 @@ type QUICSession struct {
 	peerDatagrams    atomic.Bool
 	peerStreamResume atomic.Bool
 	activeStreams    atomic.Int64
+	ownedPacketConn  net.PacketConn
+	closeOnce        sync.Once
+	closeErr         error
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -140,6 +143,12 @@ func DefaultQUICConfig() *quic.Config {
 func NewQUICSession(conn *quic.Conn) *QUICSession {
 	s := &QUICSession{conn: conn}
 	s.datagrams = newDatagramMux(s)
+	return s
+}
+
+func newOwnedQUICSession(conn *quic.Conn, packetConn net.PacketConn) *QUICSession {
+	s := NewQUICSession(conn)
+	s.ownedPacketConn = packetConn
 	return s
 }
 
@@ -213,10 +222,20 @@ func (s *QUICSession) LocalAddr() net.Addr {
 }
 
 func (s *QUICSession) Close() error {
-	err := s.conn.CloseWithError(quic.ApplicationErrorCode(quic.NoError), "session closed")
-	s.datagrams.close()
-	s.datagrams.wg.Wait()
-	return err
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		s.closeErr = s.conn.CloseWithError(quic.ApplicationErrorCode(quic.NoError), "session closed")
+		s.datagrams.close()
+		s.datagrams.wg.Wait()
+		if s.ownedPacketConn != nil {
+			if err := s.ownedPacketConn.Close(); s.closeErr == nil {
+				s.closeErr = err
+			}
+		}
+	})
+	return s.closeErr
 }
 
 func (s *QUICSession) Done() <-chan struct{} {

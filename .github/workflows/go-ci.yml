@@ -30,6 +30,12 @@ jobs:
             gofmt -d $bad
             exit 1
           fi
+      - name: Reject upstream quic-go imports
+        run: |
+          if grep -R --line-number --include='*.go' 'github.com/quic-go/quic-go' .; then
+            echo "Use github.com/apernet/quic-go globally."
+            exit 1
+          fi
       - name: Check modules
         run: go mod tidy -diff
       - name: Vet

@@ -36,6 +36,12 @@ jobs:
             echo "Use github.com/apernet/quic-go globally."
             exit 1
           fi
+      - name: Check QUIC imports
+        run: |
+          if git grep -n 'github.com/quic-go/quic-go' -- '*.go'; then
+            echo "upstream quic-go imports must be migrated to github.com/apernet/quic-go"
+            exit 1
+          fi
       - name: Check modules
         run: go mod tidy -diff
       - name: Vet

@@ -16,7 +16,9 @@ var dialPublicDirectQUIC = func(ctx context.Context, address string, tlsConfig *
 	return tunnel.DialDirectQUIC(ctx, address, tlsConfig, quicConfig)
 }
 
-const endpointRaceHeadStart = 150 * time.Millisecond
+// Keep the preferred endpoint a small lead without making normal-RTT alternatives
+// effectively unable to win the transport race.
+const endpointRaceHeadStart = 50 * time.Millisecond
 
 type DialConfig struct {
 	Address        string

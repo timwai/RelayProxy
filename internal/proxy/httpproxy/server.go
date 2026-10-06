@@ -24,7 +24,7 @@ type ServerConfig struct {
 	Dialer        proxy.TunnelDialer
 }
 
-const proxyCopyBufferSize = 32 * 1024
+const proxyCopyBufferSize = 128 * 1024
 
 var proxyCopyBufferPool = sync.Pool{
 	New: func() any { return new([proxyCopyBufferSize]byte) },

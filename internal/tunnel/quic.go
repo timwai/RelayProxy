@@ -114,6 +114,18 @@ type QUICSession struct {
 	peerDatagrams    atomic.Bool
 	peerStreamResume atomic.Bool
 	activeStreams    atomic.Int64
+	ownedPacketConn  net.PacketConn
+	closeOnce        sync.Once
+	closeErr         error
+
+	diagnosticsMu            sync.Mutex
+	diagnosticsLastAt        time.Time
+	diagnosticsLastBytesSent uint64
+	diagnosticsLastBytesRecv uint64
+	diagnosticsSendBPS       uint64
+	diagnosticsRecvBPS       uint64
+	udpReadBufferBytes       int
+	udpWriteBufferBytes      int
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -141,6 +153,56 @@ func NewQUICSession(conn *quic.Conn) *QUICSession {
 	s := &QUICSession{conn: conn}
 	s.datagrams = newDatagramMux(s)
 	return s
+}
+
+func newOwnedQUICSession(conn *quic.Conn, packetConn net.PacketConn) *QUICSession {
+	s := NewQUICSession(conn)
+	s.ownedPacketConn = packetConn
+	if udpConn, ok := packetConn.(*net.UDPConn); ok {
+		s.setUDPSocketBufferSizes(udpConn)
+	}
+	return s
+}
+
+func (s *QUICSession) setUDPSocketBufferSizes(conn *net.UDPConn) {
+	if s == nil || conn == nil {
+		return
+	}
+	s.udpReadBufferBytes, s.udpWriteBufferBytes = udpSocketBufferSizes(conn)
+}
+
+func (s *QUICSession) sampleByteRates(now time.Time, bytesSent, bytesRecv uint64) (sendBPS, recvBPS uint64) {
+	if s == nil {
+		return 0, 0
+	}
+	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+
+	if s.diagnosticsLastAt.IsZero() {
+		s.diagnosticsLastAt = now
+		s.diagnosticsLastBytesSent = bytesSent
+		s.diagnosticsLastBytesRecv = bytesRecv
+		return 0, 0
+	}
+	elapsed := now.Sub(s.diagnosticsLastAt)
+	if elapsed < 250*time.Millisecond {
+		return s.diagnosticsSendBPS, s.diagnosticsRecvBPS
+	}
+	seconds := elapsed.Seconds()
+	if bytesSent >= s.diagnosticsLastBytesSent {
+		s.diagnosticsSendBPS = uint64(float64(bytesSent-s.diagnosticsLastBytesSent) / seconds)
+	} else {
+		s.diagnosticsSendBPS = 0
+	}
+	if bytesRecv >= s.diagnosticsLastBytesRecv {
+		s.diagnosticsRecvBPS = uint64(float64(bytesRecv-s.diagnosticsLastBytesRecv) / seconds)
+	} else {
+		s.diagnosticsRecvBPS = 0
+	}
+	s.diagnosticsLastAt = now
+	s.diagnosticsLastBytesSent = bytesSent
+	s.diagnosticsLastBytesRecv = bytesRecv
+	return s.diagnosticsSendBPS, s.diagnosticsRecvBPS
 }
 
 // DialQUIC connects to targetAddr using QUIC
@@ -213,10 +275,20 @@ func (s *QUICSession) LocalAddr() net.Addr {
 }
 
 func (s *QUICSession) Close() error {
-	err := s.conn.CloseWithError(quic.ApplicationErrorCode(quic.NoError), "session closed")
-	s.datagrams.close()
-	s.datagrams.wg.Wait()
-	return err
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		s.closeErr = s.conn.CloseWithError(quic.ApplicationErrorCode(quic.NoError), "session closed")
+		s.datagrams.close()
+		s.datagrams.wg.Wait()
+		if s.ownedPacketConn != nil {
+			if err := s.ownedPacketConn.Close(); s.closeErr == nil {
+				s.closeErr = err
+			}
+		}
+	})
+	return s.closeErr
 }
 
 func (s *QUICSession) Done() <-chan struct{} {

@@ -431,3 +431,28 @@ func TestMainWebConnectionsPaneMatchesRealtimeMonitorFeatures(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentSpeedTestShowsPathAndQUICDiagnostics(t *testing.T) {
+	_, handler := webTestHandler(newWebTestBridge(t), true)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("management page status = %d", response.Code)
+	}
+	body := response.Body.String()
+	for _, want := range []string{
+		"speedTestPathLabel",
+		"speedTestQUICDetail",
+		"public_direct_quic",
+		"Public Direct QUIC",
+		"sent_packet_loss_pct",
+		"rtt_deviation_ms",
+		"udp_read_buffer_bytes",
+		"udp_write_buffer_bytes",
+		"GSO ",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Agent speed test diagnostics missing %q", want)
+		}
+	}
+}

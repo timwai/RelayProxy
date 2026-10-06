@@ -14,7 +14,7 @@ import (
 const (
 	MinDuration = 500 * time.Millisecond
 	MaxDuration = 10 * time.Second
-	bufferSize  = 32 << 10
+	bufferSize  = 128 << 10
 )
 
 type Measurement struct {

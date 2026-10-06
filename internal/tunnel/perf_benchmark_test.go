@@ -71,6 +71,41 @@ func BenchmarkPipe1MiBIdleTimeout(b *testing.B) {
 	}
 }
 
+func BenchmarkPipe1MiBWithMetrics(b *testing.B) {
+	payload := bytes.Repeat([]byte{0x5a}, 1<<20)
+	b.SetBytes(int64(len(payload)))
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		left, leftPeer := net.Pipe()
+		right, rightPeer := net.Pipe()
+		metrics := &PipeMetrics{}
+		done := make(chan struct{})
+		go func() {
+			PipeWithMetrics(context.Background(), left, right, 5*time.Minute, nil, metrics)
+			close(done)
+		}()
+		writeDone := make(chan error, 1)
+		go func() {
+			_, err := leftPeer.Write(payload)
+			_ = leftPeer.Close()
+			writeDone <- err
+		}()
+		if _, err := io.Copy(io.Discard, rightPeer); err != nil {
+			b.Fatal(err)
+		}
+		_ = rightPeer.Close()
+		if err := <-writeDone; err != nil {
+			b.Fatal(err)
+		}
+		<-done
+		snapshot := metrics.Snapshot()
+		if snapshot.Up.WriteBytes != uint64(len(payload)) {
+			b.Fatalf("metrics wrote %d bytes, want %d", snapshot.Up.WriteBytes, len(payload))
+		}
+	}
+}
+
 type benchmarkDiscardStream struct{}
 
 func (benchmarkDiscardStream) Read([]byte) (int, error)         { return 0, io.EOF }

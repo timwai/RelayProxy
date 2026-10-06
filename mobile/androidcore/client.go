@@ -78,46 +78,47 @@ type clientConfig struct {
 }
 
 type statusSnapshot struct {
-	ConnectionState     string               `json:"connectionState"`
-	ApprovalState       string               `json:"approvalState"`
-	DeviceID            string               `json:"deviceId,omitempty"`
-	DeviceName          string               `json:"deviceName"`
-	IdentityName        string               `json:"identityName,omitempty"`
-	PolicyRevision      int64                `json:"policyRevision,omitempty"`
-	Transport           string               `json:"transport,omitempty"`
-	ExitApproved        bool                 `json:"exitApproved"`
-	ClientApproved      bool                 `json:"clientApproved"`
-	ProxyState          string               `json:"proxyState,omitempty"`
-	ProxyError          string               `json:"proxyError,omitempty"`
-	SelectedExit        string               `json:"selectedExit"`
-	ProxyExits          []protocol.ProxyExit `json:"proxyExits,omitempty"`
-	ActiveStreams       int64                `json:"activeStreams"`
-	LatencyMs           int64                `json:"latencyMs"`
-	PowerConstrained    bool                 `json:"powerConstrained"`
-	DirectState         string               `json:"directState,omitempty"`
-	DirectPath          string               `json:"directPath,omitempty"`
-	DirectError         string               `json:"directError,omitempty"`
-	DirectEndpoint      string               `json:"directEndpoint,omitempty"`
-	DirectRTTMs         int64                `json:"directRttMs,omitempty"`
-	DirectFallbackCount uint64               `json:"directFallbackCount,omitempty"`
-	DirectBytesUp       uint64               `json:"directBytesUp,omitempty"`
-	DirectBytesDown     uint64               `json:"directBytesDown,omitempty"`
-	P2PState            string               `json:"p2pState,omitempty"`
-	P2PPath             string               `json:"p2pPath,omitempty"`
-	P2PError            string               `json:"p2pError,omitempty"`
-	P2PRTTMs            int64                `json:"p2pRttMs,omitempty"`
-	P2PCandidateSummary string               `json:"p2pCandidateSummary,omitempty"`
-	P2PBytesUp          uint64               `json:"p2pBytesUp,omitempty"`
-	P2PBytesDown        uint64               `json:"p2pBytesDown,omitempty"`
-	ProxyActiveTCP      int64                `json:"proxyActiveTcp"`
-	ProxyActiveUDP      int64                `json:"proxyActiveUdp"`
-	ProxyTCPFlows       uint64               `json:"proxyTcpFlows"`
-	ProxyUDPFlows       uint64               `json:"proxyUdpFlows"`
-	ProxyBytesUp        uint64               `json:"proxyBytesUp"`
-	ProxyBytesDown      uint64               `json:"proxyBytesDown"`
-	NativeUDP           tunnel.DatagramUsage `json:"nativeUdp"`
-	RoutingMode         routing.Mode         `json:"routingMode"`
-	LastError           string               `json:"lastError,omitempty"`
+	ConnectionState     string                  `json:"connectionState"`
+	ApprovalState       string                  `json:"approvalState"`
+	DeviceID            string                  `json:"deviceId,omitempty"`
+	DeviceName          string                  `json:"deviceName"`
+	IdentityName        string                  `json:"identityName,omitempty"`
+	PolicyRevision      int64                   `json:"policyRevision,omitempty"`
+	Transport           string                  `json:"transport,omitempty"`
+	ExitApproved        bool                    `json:"exitApproved"`
+	ClientApproved      bool                    `json:"clientApproved"`
+	ProxyState          string                  `json:"proxyState,omitempty"`
+	ProxyError          string                  `json:"proxyError,omitempty"`
+	SelectedExit        string                  `json:"selectedExit"`
+	ProxyExits          []protocol.ProxyExit    `json:"proxyExits,omitempty"`
+	ActiveStreams       int64                   `json:"activeStreams"`
+	LatencyMs           int64                   `json:"latencyMs"`
+	PowerConstrained    bool                    `json:"powerConstrained"`
+	DirectState         string                  `json:"directState,omitempty"`
+	DirectPath          string                  `json:"directPath,omitempty"`
+	DirectError         string                  `json:"directError,omitempty"`
+	DirectEndpoint      string                  `json:"directEndpoint,omitempty"`
+	DirectRTTMs         int64                   `json:"directRttMs,omitempty"`
+	DirectFallbackCount uint64                  `json:"directFallbackCount,omitempty"`
+	DirectBytesUp       uint64                  `json:"directBytesUp,omitempty"`
+	DirectBytesDown     uint64                  `json:"directBytesDown,omitempty"`
+	DirectQUIC          *tunnel.QUICDiagnostics `json:"directQuic,omitempty"`
+	P2PState            string                  `json:"p2pState,omitempty"`
+	P2PPath             string                  `json:"p2pPath,omitempty"`
+	P2PError            string                  `json:"p2pError,omitempty"`
+	P2PRTTMs            int64                   `json:"p2pRttMs,omitempty"`
+	P2PCandidateSummary string                  `json:"p2pCandidateSummary,omitempty"`
+	P2PBytesUp          uint64                  `json:"p2pBytesUp,omitempty"`
+	P2PBytesDown        uint64                  `json:"p2pBytesDown,omitempty"`
+	ProxyActiveTCP      int64                   `json:"proxyActiveTcp"`
+	ProxyActiveUDP      int64                   `json:"proxyActiveUdp"`
+	ProxyTCPFlows       uint64                  `json:"proxyTcpFlows"`
+	ProxyUDPFlows       uint64                  `json:"proxyUdpFlows"`
+	ProxyBytesUp        uint64                  `json:"proxyBytesUp"`
+	ProxyBytesDown      uint64                  `json:"proxyBytesDown"`
+	NativeUDP           tunnel.DatagramUsage    `json:"nativeUdp"`
+	RoutingMode         routing.Mode            `json:"routingMode"`
+	LastError           string                  `json:"lastError,omitempty"`
 }
 
 // Client is the small gomobile-facing wrapper for the Android exit node.
@@ -737,6 +738,7 @@ func (c *Client) StatusJSON() string {
 					s.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
 					s.DirectBytesUp = diagnostics.QUIC.BytesSent
 					s.DirectBytesDown = diagnostics.QUIC.BytesReceived
+					s.DirectQUIC = diagnostics.QUIC
 				}
 			}
 		}

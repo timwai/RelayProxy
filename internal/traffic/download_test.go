@@ -100,7 +100,7 @@ func BenchmarkCopyDownload1MiB(b *testing.B) {
 			if observed {
 				record = NewRegistry(1, 1).Start(Metadata{})
 			}
-			buf := make([]byte, 32<<10)
+			buf := make([]byte, 128<<10)
 			b.SetBytes(int64(len(payload)))
 			b.ReportAllocs()
 			for b.Loop() {

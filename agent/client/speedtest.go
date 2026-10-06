@@ -9,10 +9,12 @@ import (
 
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/speedtest"
+	"relayproxy/internal/tunnel"
 )
 
 type SpeedTestDirectionResult struct {
-	Path string `json:"path"`
+	Path string                  `json:"path"`
+	QUIC *tunnel.QUICDiagnostics `json:"quic,omitempty"`
 	speedtest.Measurement
 }
 
@@ -41,10 +43,17 @@ func (d *TunnelDialer) runSpeedTestDirection(ctx context.Context, exitID, direct
 	}); err != nil {
 		return SpeedTestDirectionResult{}, err
 	}
+	// Establish a diagnostics baseline before moving bulk data so the
+	// post-test QUIC sample can report a meaningful bytes-per-second rate.
+	_ = tunnel.DiagnoseSession(selected.Session)
 	measurement, err := speedtest.Run(ctx, stream, protocol.SpeedTestRequest{
 		RequestID: requestID, Direction: direction, DurationMS: int(duration / time.Millisecond),
 	})
-	return SpeedTestDirectionResult{Path: selected.Path.String(), Measurement: measurement}, err
+	result := SpeedTestDirectionResult{Path: selected.Path.String(), Measurement: measurement}
+	if diagnostics := tunnel.DiagnoseSession(selected.Session); diagnostics != nil {
+		result.QUIC = diagnostics.QUIC
+	}
+	return result, err
 }
 
 // RunSpeedTest measures both directions through one authorized exit. Each

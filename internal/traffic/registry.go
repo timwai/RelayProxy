@@ -15,7 +15,7 @@ import (
 const (
 	bucketWidth    = 250 * time.Millisecond
 	bucketCount    = 8
-	rateFlushBytes = 256 * 1024
+	rateFlushBytes = 1024 * 1024
 )
 
 type Metadata struct {

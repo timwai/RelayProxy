@@ -36,3 +36,24 @@ func TestQUICDiagnosticsDescribeTheSendingEndpoint(t *testing.T) {
 		t.Fatalf("server download bytes not counted as sent: before=%+v after=%+v", before.QUIC, after.QUIC)
 	}
 }
+
+func TestQUICDiagnosticsRateSamplingAndLossPercent(t *testing.T) {
+	session := &QUICSession{}
+	start := time.Unix(100, 0)
+	if send, recv := session.sampleByteRates(start, 1000, 2000); send != 0 || recv != 0 {
+		t.Fatalf("first sample rates = %d/%d, want 0/0", send, recv)
+	}
+	if send, recv := session.sampleByteRates(start.Add(100*time.Millisecond), 2000, 4000); send != 0 || recv != 0 {
+		t.Fatalf("sub-interval sample rates = %d/%d, want cached 0/0", send, recv)
+	}
+	send, recv := session.sampleByteRates(start.Add(time.Second), 3000, 6000)
+	if send != 2000 || recv != 4000 {
+		t.Fatalf("sample rates = %d/%d, want 2000/4000", send, recv)
+	}
+	if got := lossPercent(5, 200); got != 2.5 {
+		t.Fatalf("loss percent = %v, want 2.5", got)
+	}
+	if got := lossPercent(1, 0); got != 0 {
+		t.Fatalf("zero-total loss percent = %v, want 0", got)
+	}
+}

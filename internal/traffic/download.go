@@ -2,7 +2,7 @@ package traffic
 
 import (
 	"io"
-	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -19,54 +19,96 @@ type DownloadIO struct {
 	Phase      string  `json:"phase"`
 }
 
+const (
+	downloadPhaseIdle uint32 = iota
+	downloadPhaseRead
+	downloadPhaseWrite
+)
+
+var downloadClockStart = time.Now()
+
+func downloadNowNanos() int64 {
+	return time.Since(downloadClockStart).Nanoseconds()
+}
+
 type downloadObserver struct {
-	mu       sync.Mutex
-	read     time.Duration
-	write    time.Duration
-	started  time.Time
-	snapshot DownloadIO
+	phase        atomic.Uint32
+	startedNanos atomic.Int64
+	readNanos    atomic.Uint64
+	writeNanos   atomic.Uint64
+	readCalls    atomic.Uint64
+	writeCalls   atomic.Uint64
+	readBytes    atomic.Uint64
+	writeBytes   atomic.Uint64
 }
 
 func (d *downloadObserver) begin(phase string) {
-	d.mu.Lock()
-	d.started = time.Now()
-	d.snapshot.Phase = phase
-	if phase == "read" {
-		d.snapshot.ReadCalls++
-	} else {
-		d.snapshot.WriteCalls++
+	d.startedNanos.Store(downloadNowNanos())
+	switch phase {
+	case "read":
+		d.readCalls.Add(1)
+		d.phase.Store(downloadPhaseRead)
+	case "write":
+		d.writeCalls.Add(1)
+		d.phase.Store(downloadPhaseWrite)
+	default:
+		d.phase.Store(downloadPhaseIdle)
 	}
-	d.mu.Unlock()
 }
 
 func (d *downloadObserver) end(n int) {
-	d.mu.Lock()
-	elapsed := time.Since(d.started)
-	if d.snapshot.Phase == "read" {
-		d.read += elapsed
-		d.snapshot.ReadBytes += uint64(max(n, 0))
-	} else {
-		d.write += elapsed
-		d.snapshot.WriteBytes += uint64(max(n, 0))
+	now := downloadNowNanos()
+	phase := d.phase.Swap(downloadPhaseIdle)
+	started := d.startedNanos.Swap(0)
+	var elapsed uint64
+	if started > 0 && now > started {
+		elapsed = uint64(now - started)
 	}
-	d.snapshot.Phase = "idle"
-	d.mu.Unlock()
+	switch phase {
+	case downloadPhaseRead:
+		d.readNanos.Add(elapsed)
+		if n > 0 {
+			d.readBytes.Add(uint64(n))
+		}
+	case downloadPhaseWrite:
+		d.writeNanos.Add(elapsed)
+		if n > 0 {
+			d.writeBytes.Add(uint64(n))
+		}
+	}
 }
 
 func (d *downloadObserver) Snapshot() *DownloadIO {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	s := d.snapshot
-	read, write := d.read, d.write
-	switch s.Phase {
-	case "read":
-		read += time.Since(d.started)
-	case "write":
-		write += time.Since(d.started)
+	now := downloadNowNanos()
+	readNanos := d.readNanos.Load()
+	writeNanos := d.writeNanos.Load()
+	phase := d.phase.Load()
+	started := d.startedNanos.Load()
+	if started > 0 && now > started {
+		elapsed := uint64(now - started)
+		switch phase {
+		case downloadPhaseRead:
+			readNanos += elapsed
+		case downloadPhaseWrite:
+			writeNanos += elapsed
+		}
 	}
-	s.ReadMS = float64(read) / float64(time.Millisecond)
-	s.WriteMS = float64(write) / float64(time.Millisecond)
-	return &s
+	out := &DownloadIO{
+		ReadMS:     float64(readNanos) / float64(time.Millisecond),
+		WriteMS:    float64(writeNanos) / float64(time.Millisecond),
+		ReadCalls:  d.readCalls.Load(),
+		WriteCalls: d.writeCalls.Load(),
+		ReadBytes:  d.readBytes.Load(),
+		WriteBytes: d.writeBytes.Load(),
+		Phase:      "idle",
+	}
+	switch phase {
+	case downloadPhaseRead:
+		out.Phase = "read"
+	case downloadPhaseWrite:
+		out.Phase = "write"
+	}
+	return out
 }
 
 type observedDownloadReader struct {
@@ -100,7 +142,7 @@ func CopyDownload(dst io.Writer, src io.Reader, buf []byte, record *Record) (int
 	if record == nil {
 		return io.CopyBuffer(dst, src, buf)
 	}
-	observer := &downloadObserver{snapshot: DownloadIO{Phase: "idle"}}
+	observer := &downloadObserver{}
 	record.registry.mu.Lock()
 	if record.finished {
 		record.registry.mu.Unlock()

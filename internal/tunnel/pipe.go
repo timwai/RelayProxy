@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	pipeBufferSize        = 32 * 1024
+	pipeBufferSize        = 128 * 1024
 	pipeTransferBatchSize = 256 * 1024
 )
 

@@ -239,6 +239,7 @@ type AgentStatus struct {
 	DirectFallbackCount uint64                     `json:"directFallbackCount,omitempty"`
 	DirectBytesUp       uint64                     `json:"directBytesUp,omitempty"`
 	DirectBytesDown     uint64                     `json:"directBytesDown,omitempty"`
+	DirectQUIC          *tunnel.QUICDiagnostics    `json:"directQuic,omitempty"`
 	P2PState            string                     `json:"p2pState,omitempty"`
 	P2PPath             string                     `json:"p2pPath,omitempty"`
 	P2PError            string                     `json:"p2pError,omitempty"`
@@ -1343,6 +1344,7 @@ func (a *Agent) Status() AgentStatus {
 					st.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
 					st.DirectBytesUp = diagnostics.QUIC.BytesSent
 					st.DirectBytesDown = diagnostics.QUIC.BytesReceived
+					st.DirectQUIC = diagnostics.QUIC
 				}
 			}
 		}

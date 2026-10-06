@@ -381,6 +381,10 @@ func (m *ClientManager) watchSession(exitDeviceID string, session tunnel.TunnelS
 		return
 	case <-session.Done():
 	}
+	// Public Direct owns its client UDP socket. Explicitly close a remotely
+	// terminated session so the socket is released even though Done is already
+	// closed. Close is required to be idempotent by TunnelSession implementations.
+	_ = session.Close()
 	if m.closed.Load() {
 		return
 	}

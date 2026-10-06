@@ -2110,6 +2110,21 @@
     function saveServer() { return saveGroup('connection','连接设置已保存'); }
     async function applyExit() { if (await saveGroup('exit','出口选择已应用')) refreshStatus(); }
     var speedTestBusy = false;
+    function speedTestPathLabel(path) {
+      return ({ public_direct_quic: 'Public Direct QUIC', p2p_quic: 'P2P QUIC', relay_quic: 'Relay QUIC', relay_tls: 'Relay TLS' })[path] || path || '未知路径';
+    }
+    function speedTestQUICDetail(result) {
+      var q = result && result.quic;
+      if (!q) return '';
+      var details = [
+        '丢包 ' + (Number(q.sent_packet_loss_pct) || 0).toFixed(2) + '%',
+        'RTT 抖动 ' + (Number(q.rtt_deviation_ms) || 0).toFixed(1) + ' ms',
+        'GSO ' + (q.gso ? 'ON' : 'OFF')
+      ];
+      var rx = Number(q.udp_read_buffer_bytes) || 0, tx = Number(q.udp_write_buffer_bytes) || 0;
+      if (rx > 0 || tx > 0) details.push('UDP RX ' + formatTrafficBytes(rx, false) + ' / TX ' + formatTrafficBytes(tx, false));
+      return '<small class="block mt-1 text-slate-500 dark:text-slate-400">' + details.join(' · ') + '</small>';
+    }
     async function runExitSpeedTest() {
       if (speedTestBusy || !hasFn('goRunSpeedTest')) return;
       var exitID = $('speed-test-exit').value.trim() || $('cfg-exit-id').value.trim();
@@ -2122,8 +2137,8 @@
         if (!payload.ok) throw new Error(payload.message || '测速失败');
         var result = payload.result || {}, up = result.upload || {}, down = result.download || {};
         output.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-2 gap-3">' +
-          '<div><strong>上行</strong><div class="mono text-[18px] mt-1">' + (Number(up.megabitsPerSecond) || 0).toFixed(2) + ' Mbps</div><small>' + formatTrafficBytes(up.bytesPerSecond, true) + ' · ' + (up.path || '未知路径') + '</small></div>' +
-          '<div><strong>下行</strong><div class="mono text-[18px] mt-1">' + (Number(down.megabitsPerSecond) || 0).toFixed(2) + ' Mbps</div><small>' + formatTrafficBytes(down.bytesPerSecond, true) + ' · ' + (down.path || '未知路径') + '</small></div></div>';
+          '<div><strong>上行</strong><div class="mono text-[18px] mt-1">' + (Number(up.megabitsPerSecond) || 0).toFixed(2) + ' Mbps</div><small>' + formatTrafficBytes(up.bytesPerSecond, true) + ' · ' + speedTestPathLabel(up.path) + '</small>' + speedTestQUICDetail(up) + '</div>' +
+          '<div><strong>下行</strong><div class="mono text-[18px] mt-1">' + (Number(down.megabitsPerSecond) || 0).toFixed(2) + ' Mbps</div><small>' + formatTrafficBytes(down.bytesPerSecond, true) + ' · ' + speedTestPathLabel(down.path) + '</small>' + speedTestQUICDetail(down) + '</div></div>';
         toast('出口测速完成');
       } catch (err) {
         output.textContent = '测速失败：' + err.message;

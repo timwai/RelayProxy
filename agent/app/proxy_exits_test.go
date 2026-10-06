@@ -103,11 +103,20 @@ func TestProxyExitSummariesAreSafeForStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) == "" || !containsJSONFragment(data, `"proxyExits":[{"deviceId":"exit-a"`) {
+	var encoded struct {
+		ProxyExits []map[string]any `json:"proxyExits"`
+	}
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded.ProxyExits) != 1 || encoded.ProxyExits[0]["deviceId"] != "exit-a" {
 		t.Fatalf("status JSON missing exit inventory: %s", data)
 	}
-	if containsJSONFragment(data, "secret-ticket") || containsJSONFragment(data, `"direct"`) {
+	if _, ok := encoded.ProxyExits[0]["direct"]; ok {
 		t.Fatalf("status leaked direct authorization material: %s", data)
+	}
+	if containsJSONFragment(data, "secret-ticket") {
+		t.Fatalf("status leaked direct ticket: %s", data)
 	}
 }
 

@@ -29,7 +29,7 @@ func UseBBR(conn *quic.Conn, profile bbr.Profile) {
 }
 
 func UseDefaultBBR(conn *quic.Conn) {
-	UseBBR(conn, bbr.ProfileStandard)
+	UseBBR(conn, bbr.ProfileAggressive)
 }
 
 func seedPacketSize(quicSize, byAddr quiccongestion.ByteCount) quiccongestion.ByteCount {

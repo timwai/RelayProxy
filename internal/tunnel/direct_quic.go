@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/quic-go/quic-go"
+	"github.com/apernet/quic-go"
 	"relayproxy/internal/protocol"
 )
 

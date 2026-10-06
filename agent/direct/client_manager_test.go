@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,8 +56,9 @@ func TestSelectPublicEndpointIgnoresUnverifiedHigherPriority(t *testing.T) {
 }
 
 type clientManagerTestSession struct {
-	once sync.Once
-	done chan struct{}
+	once       sync.Once
+	done       chan struct{}
+	closeCalls atomic.Int32
 }
 
 func newClientManagerTestSession() *clientManagerTestSession {
@@ -76,11 +78,70 @@ func (s *clientManagerTestSession) RemoteAddr() net.Addr            { return &ne
 func (s *clientManagerTestSession) LocalAddr() net.Addr             { return &net.UDPAddr{} }
 
 func (s *clientManagerTestSession) Close() error {
-	s.once.Do(func() { close(s.done) })
+	s.closeCalls.Add(1)
+	s.signalDone()
 	return nil
 }
 
 func (s *clientManagerTestSession) Done() <-chan struct{} { return s.done }
+
+func (s *clientManagerTestSession) signalDone() {
+	s.once.Do(func() { close(s.done) })
+}
+
+func TestClientManagerClosesSessionAfterRemoteTermination(t *testing.T) {
+	fake := newClientManagerTestSession()
+	manager := NewClientManager(context.Background(), func() string { return "client" }, ClientManagerOptions{
+		AttemptTimeout: time.Second,
+		Dial: func(context.Context, DialConfig) (tunnel.TunnelSession, error) {
+			return fake, nil
+		},
+	})
+	defer manager.Close()
+
+	fingerprint := "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	manager.UpdateInventory([]protocol.ProxyExit{{
+		DeviceID: "exit", Online: true,
+		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+			Available: true, Transport: "quic",
+			Ticket:          []byte("remote-close-ticket"),
+			TicketExpiresAt: time.Now().Add(time.Minute).Unix(),
+			Endpoints: []protocol.PublicDirectEndpoint{{
+				Protocol:        protocol.PublicDirectEndpointProtocolUDP,
+				Address:         "203.0.113.20:35820",
+				Source:          protocol.PublicDirectEndpointObserved,
+				Verified:        true,
+				CertFingerprint: fingerprint,
+			}},
+		}},
+	}})
+	if !manager.EnsureClient("exit") {
+		t.Fatal("public direct client attempt was not started")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, ok := manager.ReadyForExit("exit"); ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("public direct session did not become ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	fake.signalDone()
+	deadline = time.Now().Add(time.Second)
+	for fake.closeCalls.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("remotely terminated public direct session was not closed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, ok := manager.ReadyForExit("exit"); ok {
+		t.Fatal("remotely terminated public direct session remained selectable")
+	}
+}
 
 func TestClientManagerClosesReadySessionWhenAuthorizationDisappears(t *testing.T) {
 	fake := newClientManagerTestSession()

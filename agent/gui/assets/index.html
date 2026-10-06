@@ -1279,7 +1279,7 @@
   (function () {
     'use strict';
 
-    var state = { status: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, proxyExits: [], proxyExitsRefreshing: false, proxyExitsLoaded: false, proxyExitsError: '', rdpTargets: [], rdpBusyTarget: '', rdpRefreshing: false };
+    var state = { status: null, pendingStatus: null, cfg: null, loaded: false, saving: false, lastLogCount: -1, tab: 'home', baseline: {}, proxyExits: [], proxyExitsRefreshing: false, proxyExitsLoaded: false, proxyExitsError: '', rdpTargets: [], rdpBusyTarget: '', rdpRefreshing: false };
     var earlyLogs = [];
 
     function $(id) { return document.getElementById(id); }
@@ -1922,7 +1922,14 @@
     window.refreshRDPTargets = refreshRDPTargets;
     window.connectRDP = connectRDP;
     window.disconnectRDP = disconnectRDP;
-    window.onGoStatus = function (st) { if (st) { renderStatus(st); } };
+    window.onGoStatus = function (st) {
+      if (!st) return;
+      if (!state.loaded) {
+        state.pendingStatus = st;
+        return;
+      }
+      renderStatus(st);
+    };
 
     /* ---------- config rendering ---------- */
     function renderConfig(cfg) {
@@ -2028,6 +2035,11 @@
         renderConfig(cfg);
         Object.keys(keep).forEach(function (group) { restoreDraft(group, keep[group]); });
         markDrafts();
+        if (state.pendingStatus) {
+          var pendingStatus = state.pendingStatus;
+          state.pendingStatus = null;
+          renderStatus(pendingStatus);
+        }
         return true;
       } catch (err) {
         setConfigReady(false);
@@ -2661,8 +2673,26 @@
     /* ---------- polling ---------- */
     async function refreshStatus() {
       var raw = await call('goGetStatus');
-      if (!raw) { return; }
-      try { renderStatus(typeof raw === 'string' ? JSON.parse(raw) : raw); } catch (err) { /* ignore */ }
+      if (!raw) { return null; }
+      try {
+        var status = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!state.loaded) state.pendingStatus = status;
+        else renderStatus(status);
+        return status;
+      } catch (err) {
+        return null;
+      }
+    }
+    function delay(ms) {
+      return new Promise(function (resolve) { setTimeout(resolve, ms); });
+    }
+    async function primeInitialStatus() {
+      for (var attempt = 0; attempt < 12; attempt++) {
+        var status = await refreshStatus();
+        if (status && status.connected && Number(status.proxyExitRevision || 0) > 0) return status;
+        await delay(250);
+      }
+      return state.status || state.pendingStatus;
     }
     async function refreshAll() {
       if (state.saving) return;
@@ -2716,12 +2746,14 @@
       if (window.addEventListener) window.addEventListener('beforeunload', function (event) {
         if (dirtyGroups(true).length || state.saving) { event.preventDefault(); event.returnValue = ''; }
       });
-      loadConfig();
-      refreshCredentialState(false);
-      refreshStatus();
-      refreshLogs();
-      refreshMessages(false);
-      refreshNetworkServiceStatus();
+      (async function initialiseDesktopUI() {
+        await loadConfig();
+        await primeInitialStatus();
+        refreshCredentialState(false);
+        refreshLogs();
+        refreshMessages(false);
+        refreshNetworkServiceStatus();
+      })();
 
       // The browser management page shares this HTML with the native Windows
       // window, but it has no process-replacement binding. Keep the restart

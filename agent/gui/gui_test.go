@@ -284,3 +284,42 @@ func TestDesktopStatusDrivesProxyExitInventory(t *testing.T) {
 		t.Fatal("desktop boot must not issue the duplicate proxy-exit RPC")
 	}
 }
+
+func TestDesktopBootSerializesConfigAndInitialStatus(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	for _, want := range []string{
+		"pendingStatus: null",
+		"if (!state.loaded) {",
+		"state.pendingStatus = st;",
+		"var pendingStatus = state.pendingStatus;",
+		"renderStatus(pendingStatus);",
+		"async function primeInitialStatus()",
+		"Number(status.proxyExitRevision || 0) > 0",
+		"await loadConfig();",
+		"await primeInitialStatus();",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("desktop boot synchronization missing %q", want)
+		}
+	}
+
+	boot := strings.Index(page, "async function initialiseDesktopUI()")
+	if boot < 0 {
+		t.Fatal("desktop initialization function not found")
+	}
+	block := page[boot:]
+	config := strings.Index(block, "await loadConfig();")
+	status := strings.Index(block, "await primeInitialStatus();")
+	if config < 0 || status < 0 || config > status {
+		t.Fatalf("desktop boot must load config before priming status: config=%d status=%d", config, status)
+	}
+
+	oldConcurrent := "loadConfig();\n      refreshCredentialState(false);\n      refreshStatus();"
+	if strings.Contains(page, oldConcurrent) {
+		t.Fatal("desktop boot still starts config and status refresh concurrently")
+	}
+}

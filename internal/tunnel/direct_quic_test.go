@@ -118,7 +118,7 @@ func TestDirectQUICConfigUsesHighThroughputDefaults(t *testing.T) {
 	}
 }
 
-func TestDirectQUICConfigPreservesExplicitWindowTuning(t *testing.T) {
+func TestDirectQUICConfigAppliesHighThroughputMinimumsWithoutMutatingCaller(t *testing.T) {
 	custom := DefaultQUICConfig()
 	custom.InitialStreamReceiveWindow = 2 << 20
 	custom.MaxStreamReceiveWindow = 8 << 20
@@ -127,16 +127,36 @@ func TestDirectQUICConfigPreservesExplicitWindowTuning(t *testing.T) {
 	custom.EnableDatagrams = false
 
 	config := DirectQUICConfig(custom)
-	if config.InitialStreamReceiveWindow != custom.InitialStreamReceiveWindow ||
-		config.MaxStreamReceiveWindow != custom.MaxStreamReceiveWindow ||
-		config.InitialConnectionReceiveWindow != custom.InitialConnectionReceiveWindow ||
-		config.MaxConnectionReceiveWindow != custom.MaxConnectionReceiveWindow {
-		t.Fatalf("explicit flow control tuning changed: %+v", config)
+	if config.InitialStreamReceiveWindow != directInitialStreamReceiveWindow ||
+		config.MaxStreamReceiveWindow != directMaxStreamReceiveWindow ||
+		config.InitialConnectionReceiveWindow != directInitialConnectionReceiveWindow ||
+		config.MaxConnectionReceiveWindow != directMaxConnectionReceiveWindow {
+		t.Fatalf("direct flow control minimums not applied: %+v", config)
 	}
 	if !config.EnableDatagrams {
 		t.Fatal("direct QUIC datagrams disabled")
 	}
-	if custom.EnableDatagrams {
+	if custom.InitialStreamReceiveWindow != 2<<20 ||
+		custom.MaxStreamReceiveWindow != 8<<20 ||
+		custom.InitialConnectionReceiveWindow != 4<<20 ||
+		custom.MaxConnectionReceiveWindow != 16<<20 ||
+		custom.EnableDatagrams {
 		t.Fatal("DirectQUICConfig mutated caller config")
+	}
+}
+
+func TestDirectQUICConfigPreservesLargerExplicitWindows(t *testing.T) {
+	custom := DefaultQUICConfig()
+	custom.InitialStreamReceiveWindow = 32 << 20
+	custom.MaxStreamReceiveWindow = 128 << 20
+	custom.InitialConnectionReceiveWindow = 64 << 20
+	custom.MaxConnectionReceiveWindow = 512 << 20
+
+	config := DirectQUICConfig(custom)
+	if config.InitialStreamReceiveWindow != custom.InitialStreamReceiveWindow ||
+		config.MaxStreamReceiveWindow != custom.MaxStreamReceiveWindow ||
+		config.InitialConnectionReceiveWindow != custom.InitialConnectionReceiveWindow ||
+		config.MaxConnectionReceiveWindow != custom.MaxConnectionReceiveWindow {
+		t.Fatalf("larger explicit flow control tuning changed: %+v", config)
 	}
 }

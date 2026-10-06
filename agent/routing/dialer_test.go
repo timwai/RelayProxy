@@ -114,7 +114,7 @@ func TestRoutingPropagatesUDPStreamPreference(t *testing.T) {
 
 func TestRoutingNativeRequirementOverridesStreamPreference(t *testing.T) {
 	engine, err := NewEngine(Config{
-		Mode: ModeRule,
+		Mode:  ModeRule,
 		Rules: []Rule{{Enabled: true, Action: ActionProxy, DatagramRequired: true}},
 	})
 	if err != nil {

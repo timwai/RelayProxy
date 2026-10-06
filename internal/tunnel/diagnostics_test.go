@@ -32,8 +32,8 @@ func TestQUICDiagnosticsDescribeTheSendingEndpoint(t *testing.T) {
 	if after.Local != server.LocalAddr().String() || after.Remote != server.RemoteAddr().String() {
 		t.Fatalf("diagnostics do not match the sampled endpoint: %+v", after)
 	}
-	if after.QUIC.CongestionController != "bbr-standard" {
-		t.Fatalf("congestion controller=%q, want bbr-standard", after.QUIC.CongestionController)
+	if after.QUIC.CongestionController != "bbr-aggressive" {
+		t.Fatalf("congestion controller=%q, want bbr-aggressive", after.QUIC.CongestionController)
 	}
 	if after.QUIC.BytesSent-before.QUIC.BytesSent < uint64(len(payload)) || after.QUIC.PacketsSent <= before.QUIC.PacketsSent {
 		t.Fatalf("server download bytes not counted as sent: before=%+v after=%+v", before.QUIC, after.QUIC)

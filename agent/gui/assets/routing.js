@@ -67,6 +67,7 @@ function ruleSummary(values, emptyLabel) {
 function renderRoutingRules(rules) {
   routingRules = JSON.parse(JSON.stringify(rules || [])).map(normalizeRoutingRule);
   const body = $('routing-rules-body');
+  if (!body) return;
   body.replaceChildren();
 
   routingRules.forEach((rule, index) => body.appendChild(createRuleRow(rule, index)));

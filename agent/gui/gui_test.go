@@ -44,6 +44,7 @@ func TestWailsBridgeCoversAgentFrontendBindings(t *testing.T) {
 		"goGetDiagnostics",
 		"goRunSpeedTest",
 		"goGetLogs",
+		"goGetProxyExits",
 		"goGetRDPTargets",
 		"goGetStatus",
 		"goOpenConfigDir",
@@ -210,6 +211,41 @@ func TestDesktopPopupAssetSupportsAllMessageTypes(t *testing.T) {
 	} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("desktop popup asset missing %q", want)
+		}
+	}
+}
+
+func TestProxyExitInventoryLoadingStateCannotBeBlockedByRoutingUI(t *testing.T) {
+	data, err := assets.ReadFile("assets/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(data)
+	start := strings.Index(page, "function syncProxyExitSelectors()")
+	if start < 0 {
+		t.Fatal("unable to locate proxy exit selector synchronization")
+	}
+	rest := page[start:]
+	end := strings.Index(rest, "async function refreshProxyExits")
+	if end < 0 {
+		t.Fatal("unable to locate proxy exit refresh function")
+	}
+	syncBlock := rest[:end]
+	hint := strings.Index(syncBlock, "renderProxyExitInventoryHint();")
+	routing := strings.Index(syncBlock, "window.syncRoutingExitOptions();")
+	if hint < 0 || routing < 0 || hint > routing {
+		t.Fatal("core exit inventory hint must update before optional routing synchronization")
+	}
+	for _, want := range []string{
+		"try {",
+		"console.warn('failed to sync routing exit options'",
+		"state.proxyExitsLoaded = true;",
+		"state.proxyExitsError = '';",
+		"读取服务端授权出口失败，正在自动重试",
+		"window.goGetProxyExits()",
+	} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("proxy exit inventory recovery logic missing %q", want)
 		}
 	}
 }

@@ -276,7 +276,11 @@ func TestDesktopStatusDrivesProxyExitInventory(t *testing.T) {
 			t.Fatalf("status-driven exit inventory missing %q", want)
 		}
 	}
-	if !strings.Contains(page, "if (!state.proxyExitsLoaded) refreshProxyExits(false);") {
-		t.Fatal("legacy proxy exit endpoint must be fallback-only")
+	boot := strings.Index(page, "document.addEventListener('DOMContentLoaded'")
+	if boot < 0 {
+		t.Fatal("desktop boot block not found")
+	}
+	if strings.Contains(page[boot:], "refreshProxyExits(false)") {
+		t.Fatal("desktop boot must not issue the duplicate proxy-exit RPC")
 	}
 }

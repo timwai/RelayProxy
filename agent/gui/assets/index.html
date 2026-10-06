@@ -1726,7 +1726,14 @@
     /* ---------- status rendering ---------- */
     function renderStatus(st) {
       state.status = st;
-      renderProxyExitInventoryHint();
+      if (Array.isArray(st.proxyExits)) {
+        state.proxyExits = st.proxyExits;
+        state.proxyExitsLoaded = true;
+        state.proxyExitsError = '';
+        syncProxyExitSelectors();
+      } else {
+        renderProxyExitInventoryHint();
+      }
 
       var up = !!st.connected;
       var side = $('side-tunnel');
@@ -2711,7 +2718,6 @@
       });
       loadConfig();
       refreshCredentialState(false);
-      refreshProxyExits(false);
       refreshStatus();
       refreshLogs();
       refreshMessages(false);
@@ -2722,10 +2728,9 @@
       // action visible only where the native launcher is available.
       if (!hasFn('goRestart') && $('restart-card')) { $('restart-card').classList.add('hidden'); }
 
-      // Exit inventory is server-pushed into the Agent, while this cheap local
-      // poll keeps Windows, macOS and browser UIs in sync without waiting for a
-      // full status refresh. The slower heartbeat refresh remains a fallback.
-      setInterval(function () { refreshProxyExits(false); }, 1000);
+      // Exit inventory is carried by the same status channel as connection
+      // state. Do not issue a second desktop RPC / HTTP request for the same
+      // data: one stuck auxiliary call must never block the GUI control path.
       // Go pushes status every 1.5s; these polls cover the window's first paint.
       setInterval(refreshStatus, 3000);
       setInterval(refreshNetworkServiceStatus, 5000);

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"testing"
 
 	"relayproxy/internal/protocol"
@@ -76,4 +77,68 @@ func TestRefreshProxyExitsLegacyRevisionKeepsVersionCounter(t *testing.T) {
 	if agent.proxyExitRevision != 9 {
 		t.Fatalf("legacy refresh reset revision: %d", agent.proxyExitRevision)
 	}
+}
+
+func TestProxyExitSummariesAreSafeForStatus(t *testing.T) {
+	exits := []protocol.ProxyExit{{
+		DeviceID:            "exit-a",
+		Name:                "Exit A",
+		IdentityName:        "Team A",
+		AuthorizationSource: "same_identity",
+		Online:              true,
+		Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+			Available: true,
+			Ticket:    []byte("secret-ticket"),
+		}},
+	}}
+	got := proxyExitSummaries(exits)
+	if len(got) != 1 {
+		t.Fatalf("summaries = %+v", got)
+	}
+	if got[0].DeviceID != "exit-a" || got[0].Name != "Exit A" || got[0].IdentityName != "Team A" ||
+		got[0].AuthorizationSource != "same_identity" || !got[0].Online {
+		t.Fatalf("unexpected summary: %+v", got[0])
+	}
+	data, err := json.Marshal(AgentStatus{ProxyExits: got})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded struct {
+		ProxyExits []map[string]any `json:"proxyExits"`
+	}
+	if err := json.Unmarshal(data, &encoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded.ProxyExits) != 1 || encoded.ProxyExits[0]["deviceId"] != "exit-a" {
+		t.Fatalf("status JSON missing exit inventory: %s", data)
+	}
+	if _, ok := encoded.ProxyExits[0]["direct"]; ok {
+		t.Fatalf("status leaked direct authorization material: %s", data)
+	}
+	if containsJSONFragment(data, "secret-ticket") {
+		t.Fatalf("status leaked direct ticket: %s", data)
+	}
+}
+
+func TestAgentStatusAlwaysEncodesProxyExitArray(t *testing.T) {
+	data, err := json.Marshal(AgentStatus{ProxyExits: proxyExitSummaries(nil)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsJSONFragment(data, `"proxyExits":[]`) {
+		t.Fatalf("empty status inventory must encode as []: %s", data)
+	}
+}
+
+func containsJSONFragment(data []byte, fragment string) bool {
+	return len(fragment) == 0 || string(data) != "" && jsonFragmentIndex(string(data), fragment) >= 0
+}
+
+func jsonFragmentIndex(value, fragment string) int {
+	for i := 0; i+len(fragment) <= len(value); i++ {
+		if value[i:i+len(fragment)] == fragment {
+			return i
+		}
+	}
+	return -1
 }

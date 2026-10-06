@@ -87,10 +87,9 @@ func TestRoutingPropagatesNativeRequirementWithoutFallback(t *testing.T) {
 	}
 }
 
-
 func TestRoutingPropagatesUDPStreamPreference(t *testing.T) {
 	engine, err := NewEngine(Config{
-		Mode: ModeRule,
+		Mode:  ModeRule,
 		Rules: []Rule{{Enabled: true, Action: ActionProxy, ExitID: "chosen-exit"}},
 	})
 	if err != nil {

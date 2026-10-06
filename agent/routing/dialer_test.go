@@ -50,9 +50,9 @@ func TestDirectUDPUsesFixedConnectedTarget(t *testing.T) {
 }
 
 type requiredDialer struct {
-	legacy, required int
-	exit             string
-	err              error
+	legacy, required, preferred int
+	exit                        string
+	err                         error
 }
 
 func (d *requiredDialer) DialTCP(context.Context, string, string, uint16) (net.Conn, error) {
@@ -65,6 +65,9 @@ func (d *requiredDialer) DialUDP(context.Context, string, string, uint16) (net.P
 func (d *requiredDialer) DialUDPWithOptions(_ context.Context, exit, host string, port uint16, opts proxy.UDPDialOptions) (net.PacketConn, error) {
 	if opts.DatagramRequired {
 		d.required++
+	}
+	if opts.PreferStream {
+		d.preferred++
 	}
 	d.exit = exit
 	return nil, d.err
@@ -81,5 +84,55 @@ func TestRoutingPropagatesNativeRequirementWithoutFallback(t *testing.T) {
 	_, err = dialer.DialUDP(context.Background(), "other-exit", "example.com", 443)
 	if !errors.Is(err, expected) || underlying.required != 1 || underlying.legacy != 0 || underlying.exit != "chosen-exit" {
 		t.Fatalf("required policy lost: err=%v underlying=%+v", err, underlying)
+	}
+}
+
+
+func TestRoutingPropagatesUDPStreamPreference(t *testing.T) {
+	engine, err := NewEngine(Config{
+		Mode: ModeRule,
+		Rules: []Rule{{Enabled: true, Action: ActionProxy, ExitID: "chosen-exit"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := errors.New("preferred stream probe")
+	underlying := &requiredDialer{err: expected}
+	dialer := NewRoutingDialer(engine, underlying)
+
+	_, err = dialer.DialUDPWithOptions(
+		context.Background(),
+		"other-exit",
+		"youtube.googleapis.com",
+		443,
+		proxy.UDPDialOptions{PreferStream: true},
+	)
+	if !errors.Is(err, expected) || underlying.preferred != 1 || underlying.required != 0 ||
+		underlying.legacy != 0 || underlying.exit != "chosen-exit" {
+		t.Fatalf("stream preference lost: err=%v underlying=%+v", err, underlying)
+	}
+}
+
+func TestRoutingNativeRequirementOverridesStreamPreference(t *testing.T) {
+	engine, err := NewEngine(Config{
+		Mode: ModeRule,
+		Rules: []Rule{{Enabled: true, Action: ActionProxy, DatagramRequired: true}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := errors.New("required datagram probe")
+	underlying := &requiredDialer{err: expected}
+	dialer := NewRoutingDialer(engine, underlying)
+
+	_, err = dialer.DialUDPWithOptions(
+		context.Background(),
+		"exit",
+		"realtime.example",
+		443,
+		proxy.UDPDialOptions{PreferStream: true},
+	)
+	if !errors.Is(err, expected) || underlying.required != 1 || underlying.preferred != 0 || underlying.legacy != 0 {
+		t.Fatalf("required datagram did not override stream preference: err=%v underlying=%+v", err, underlying)
 	}
 }

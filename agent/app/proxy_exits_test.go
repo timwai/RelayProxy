@@ -79,7 +79,6 @@ func TestRefreshProxyExitsLegacyRevisionKeepsVersionCounter(t *testing.T) {
 	}
 }
 
-
 func TestProxyExitSummariesAreSafeForStatus(t *testing.T) {
 	exits := []protocol.ProxyExit{{
 		DeviceID: "exit-a",

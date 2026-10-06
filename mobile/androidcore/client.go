@@ -102,6 +102,7 @@ type statusSnapshot struct {
 	DirectFallbackCount uint64               `json:"directFallbackCount,omitempty"`
 	DirectBytesUp       uint64               `json:"directBytesUp,omitempty"`
 	DirectBytesDown     uint64               `json:"directBytesDown,omitempty"`
+	DirectQUIC          *tunnel.QUICDiagnostics `json:"directQuic,omitempty"`
 	P2PState            string               `json:"p2pState,omitempty"`
 	P2PPath             string               `json:"p2pPath,omitempty"`
 	P2PError            string               `json:"p2pError,omitempty"`
@@ -737,6 +738,7 @@ func (c *Client) StatusJSON() string {
 					s.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
 					s.DirectBytesUp = diagnostics.QUIC.BytesSent
 					s.DirectBytesDown = diagnostics.QUIC.BytesReceived
+					s.DirectQUIC = diagnostics.QUIC
 				}
 			}
 		}

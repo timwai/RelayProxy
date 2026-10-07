@@ -609,6 +609,123 @@ jobs:
           path: .\lean-arm64\single\RelayProxy-agent-windows-arm64-lean.exe
           if-no-files-found: error
 
+      - name: Compare outer-only partial trim compression
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          Remove-Item ".\windows\RelayProxy.Native\obj" -Recurse -Force -ErrorAction SilentlyContinue
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-x64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+
+          Remove-Item ".\outer-partial" -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path ".\outer-partial\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\outer-partial\gzip" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\outer-partial\zstd" -Force | Out-Null
+          $core = (Resolve-Path ".\staging\win-x64\relay-agent.exe").Path
+
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\outer-partial\host
+
+          $nativeHost = ".\outer-partial\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "outer-partial RelayProxy.NativeHost.exe missing" }
+          $extra = @(Get-ChildItem ".\outer-partial\host" -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
+          if ($extra.Count -gt 0) { throw "outer-partial WinUI host has sidecars: $($extra.Name -join ', ')" }
+
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+
+          $gzipStub = ".\outer-partial\gzip-launcher.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $gzipStub .\cmd\relay-agent-win-launcher
+          if ($LASTEXITCODE -ne 0) { throw "outer-partial gzip launcher build failed" }
+          $gzipExe = ".\outer-partial\gzip\RelayProxy-agent-windows-amd64-outer-partial-gzip.exe"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pack-windows-launcher.ps1 -Launcher $gzipStub -Payload $nativeHost -Output $gzipExe
+          if ($LASTEXITCODE -ne 0) { throw "outer-partial gzip packing failed" }
+
+          $zstdStub = ".\outer-partial\zstd-launcher.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $zstdStub .\cmd\relay-agent-win-launcher-zstd
+          if ($LASTEXITCODE -ne 0) { throw "outer-partial zstd launcher build failed" }
+          $zstdExe = ".\outer-partial\zstd\RelayProxy-agent-windows-amd64-outer-partial-zstd.exe"
+          go run .\scripts\pack-windows-launcher-zstd.go -launcher $zstdStub -payload $nativeHost -output $zstdExe
+          if ($LASTEXITCODE -ne 0) { throw "outer-partial zstd packing failed" }
+
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          $gzipMb = [math]::Round((Get-Item $gzipExe).Length / 1MB, 2)
+          $zstdMb = [math]::Round((Get-Item $zstdExe).Length / 1MB, 2)
+          Write-Host "[outer-partial-size] uncompressed-inner WinUI host: $hostMb MB"
+          Write-Host "[outer-partial-size] gzip EXE: $gzipMb MB"
+          Write-Host "[outer-partial-size] zstd EXE: $zstdMb MB"
+          if ((Get-Item $gzipExe).Length -gt (50MB)) { throw "outer-partial gzip exceeds 50 MiB: $gzipMb MiB" }
+          if ((Get-Item $zstdExe).Length -gt (50MB)) { throw "outer-partial zstd exceeds 50 MiB: $zstdMb MiB" }
+
+          foreach ($candidate in @(
+            @{ Name = "gzip"; Path = $gzipExe },
+            @{ Name = "zstd"; Path = $zstdExe }
+          )) {
+            $renamed = ".\outer-partial\$($candidate.Name)-renamed-client.exe"
+            Copy-Item $candidate.Path $renamed -Force
+            $process = $null
+            try {
+              $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+              Start-Sleep -Seconds 8
+              $process.Refresh()
+              if ($process.HasExited) {
+                $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+                if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+                throw "Outer-partial $($candidate.Name) renamed EXE exited with code $($process.ExitCode)."
+              }
+              Write-Host "[outer-partial-smoke] $($candidate.Name) renamed EXE stayed alive for 8 seconds." -ForegroundColor Green
+            }
+            finally {
+              if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+              Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+              Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+              Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          @"
+          ### win-x64 outer-only partial trim experiment
+          **Uncompressed-inner WinUI host:** $hostMb MiB
+          **Outer gzip EXE:** $gzipMb MiB
+          **Outer zstd EXE:** $zstdMb MiB
+
+          Uses lean Windows App SDK dependencies and partial trimming, disables .NET inner single-file compression, then compares outer gzip and zstd using the same host payload.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.runtime == 'win-x64'
+        with:
+          name: RelayProxy-agent-win-x64-outer-partial-experiments
+          path: |
+            .\outer-partial\gzip\RelayProxy-agent-windows-amd64-outer-partial-gzip.exe
+            .\outer-partial\zstd\RelayProxy-agent-windows-amd64-outer-partial-zstd.exe
+          if-no-files-found: error
+
       - name: Publish aggressive size experiment
         if: matrix.runtime == 'win-x64'
         shell: pwsh

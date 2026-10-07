@@ -39,11 +39,20 @@
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 
-  <ItemGroup>
-    <!-- Keep the complete Windows App SDK graph for Windows 10 compatibility.
-         Partial trimming reduces managed payload while the CsWinRT roots below stay intact.
-         The external launcher keeps the user-visible EXE rename-safe. -->
+  <ItemGroup Condition="'$(RelayProxyLeanWindowsAppSdk)' != 'true'">
+    <!-- Default compatibility graph: keep the complete Windows App SDK package.
+         The lean graph below is CI-tested separately before it is ever promoted. -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RelayProxyLeanWindowsAppSdk)' == 'true'">
+    <!-- Experimental lean graph: RelayProxy currently uses WinUI plus Windows App SDK Runtime,
+         while AI/ML/Search/Widgets/DWrite are not referenced by the native GUI. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="2.3.9" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
   </ItemGroup>
 

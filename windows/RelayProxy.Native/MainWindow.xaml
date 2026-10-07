@@ -254,7 +254,7 @@
           <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="窗口与托盘" FontSize="16" FontWeight="SemiBold"/><ToggleSwitch x:Name="AutostartSwitch" Header="开机自动启动" Toggled="AutostartSwitch_Toggled"/><ToggleSwitch x:Name="MinimizeToTraySwitch" Header="关闭窗口时最小化到托盘"/><ComboBox x:Name="ThemeCombo" Header="主题" HorizontalAlignment="Stretch"><ComboBoxItem Tag="system" Content="跟随系统"/><ComboBoxItem Tag="light" Content="浅色"/><ComboBoxItem Tag="dark" Content="深色"/></ComboBox><NumberBox x:Name="PopupTimeoutBox" Header="消息弹窗自动关闭 / 秒（0 = 不自动关闭）" Minimum="0" Maximum="3600"/><Button Content="保存 GUI 设置" Style="{StaticResource AccentButtonStyle}" HorizontalAlignment="Left" Click="SaveGuiSettings_Click"/></StackPanel></Border>
         </StackPanel></ScrollViewer>
 
-        <ScrollViewer x:Name="PlaceholderView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14" MaxWidth="760" HorizontalAlignment="Left"><TextBlock x:Name="PlaceholderTitle" Text="模块" FontSize="28" FontWeight="SemiBold" /><TextBlock x:Name="PlaceholderDescription" Text="正在迁移到 WinUI 3 原生实现。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" /><Border Style="{StaticResource CardStyle}"><StackPanel Spacing="8"><TextBlock Text="迁移原则" FontSize="16" FontWeight="SemiBold" /><TextBlock Text="• UI 使用 WinUI 3 / Fluent，不再嵌 WebView。" /><TextBlock Text="• Go 网络核心、认证、QUIC、P2P、透明代理和 RDP 继续复用。" /><TextBlock Text="• 旧 Wails GUI 在功能完全对等前保留回退。" /><TextBlock Text="• 交互与信息架构以 docs/prototypes/relayproxy-complete-ui-prototype.html 为基准。" /></StackPanel></Border></StackPanel></ScrollViewer>
+
       </Grid>
     </NavigationView>
   </Grid>

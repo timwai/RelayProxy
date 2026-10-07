@@ -253,6 +253,11 @@ jobs:
           Write-Host "[size] single EXE: $singleMb MB"
           Write-Host "[size] embedded Go Core: $coreMb MB"
           Write-Host "[size] UI + .NET + Windows App SDK payload: ~$runtimeMb MB"
+          $sizeBudgetMb = 80
+          if ($singleBytes -gt ($sizeBudgetMb * 1MB)) {
+            throw "Native single EXE exceeds ${sizeBudgetMb} MiB size budget: $singleMb MiB"
+          }
+          Write-Host "[size] budget: <= $sizeBudgetMb MiB (PASS)" -ForegroundColor Green
           Write-Host "::notice title=Native package size::${{ matrix.runtime }} single EXE = $singleMb MB; Go Core = $coreMb MB"
           @"
           ### ${{ matrix.runtime }} native package size
@@ -262,7 +267,7 @@ jobs:
           | embedded Go Core | $coreMb MB |
           | UI + .NET + Windows App SDK (approx.) | $runtimeMb MB |
 
-          Single-file assembly compression is enabled and ReadyToRun is disabled.
+          Single-file assembly compression is enabled and ReadyToRun is disabled. CI enforces an 80 MiB single-EXE size budget.
           "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
           Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe" -Force

@@ -31,7 +31,35 @@ permissions:
   contents: read
 
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+      - name: Check native bridge Go formatting
+        run: |
+          files=(
+            agent/bridge/bridge.go
+            agent/gui/web.go
+            agent/gui/web_test.go
+            agent/startup/startup_windows.go
+            agent/startup/startup_other.go
+            cmd/relay-agent/main.go
+            scripts/fetch-windivert.go
+          )
+          bad="$(gofmt -l "${files[@]}")"
+          if [ -n "$bad" ]; then
+            for file in $bad; do
+              echo "==== gofmt diff: $file ===="
+              gofmt -d "$file"
+            done
+            exit 1
+          fi
+
   build:
+    needs: format
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -56,26 +84,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
-
-      - name: Check native bridge Go formatting
-        shell: pwsh
-        run: |
-          $files = @(
-            ".\agent\bridge\bridge.go",
-            ".\agent\gui\web.go",
-            ".\agent\startup\startup_windows.go",
-            ".\agent\startup\startup_other.go",
-            ".\cmd\relay-agent\main.go",
-            ".\scripts\fetch-windivert.go"
-          )
-          $bad = & gofmt -l $files
-          if ($bad) {
-            foreach ($file in $bad) {
-              Write-Host "==== gofmt diff: $file ===="
-              & gofmt -d $file
-            }
-            throw "Go formatting check failed"
-          }
 
       - name: Test native Core bridge
         if: matrix.runtime == 'win-x64'

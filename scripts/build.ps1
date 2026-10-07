@@ -147,7 +147,8 @@ try {
             [string]$GOARCH,
             [string]$Package,
             [string]$Output,
-            [string]$ExtraLdFlags = ""
+            [string]$ExtraLdFlags = "",
+            [string]$BuildTags = ""
         )
         $dir = Split-Path -Parent $Output
         if (-not (Test-Path $dir)) {
@@ -165,7 +166,9 @@ try {
         $buildFlags = $ldflags
         if ($ExtraLdFlags) { $buildFlags = "$ldflags $ExtraLdFlags" }
 
-        & go build -trimpath -ldflags $buildFlags -o $Output $Package
+        $tagArgs = @()
+        if ($BuildTags) { $tagArgs = @("-tags", $BuildTags) }
+        & go build -trimpath @tagArgs -ldflags $buildFlags -o $Output $Package
         if ($LASTEXITCODE -ne 0) {
             throw "go build failed: $GOOS/$GOARCH $Package"
         }
@@ -268,7 +271,8 @@ try {
     Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `
         -Package "./cmd/relay-agent" `
         -Output (Join-Path $OutDir "windows-amd64/relay-agent-wails.exe") `
-        -ExtraLdFlags "-H=windowsgui"
+        -ExtraLdFlags "-H=windowsgui" `
+        -BuildTags "wailslegacy"
 
     Publish-WindowsNativeUI -Runtime "win-x64" -Platform "x64" `
         -OutputDir (Join-Path $OutDir "windows-amd64")
@@ -284,7 +288,8 @@ try {
     Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
         -Package "./cmd/relay-agent" `
         -Output (Join-Path $OutDir "windows-arm64/relay-agent-wails.exe") `
-        -ExtraLdFlags "-H=windowsgui"
+        -ExtraLdFlags "-H=windowsgui" `
+        -BuildTags "wailslegacy"
 
     Publish-WindowsNativeUI -Runtime "win-arm64" -Platform "ARM64" `
         -OutputDir (Join-Path $OutDir "windows-arm64")

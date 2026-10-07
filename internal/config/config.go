@@ -113,7 +113,7 @@ type AgentConfigFile struct {
 	} `yaml:"device"`
 
 	Transport struct {
-		Mode string `yaml:"mode"` // "auto", "quic_only", "tcp_only"
+		Mode      string `yaml:"mode"` // "auto", "quic_only", "tcp_only"
 		Bandwidth struct {
 			UpMbps                  int  `yaml:"up_mbps"`   // local agent -> peer target; 0 = BBR
 			DownMbps                int  `yaml:"down_mbps"` // desired peer -> agent target; 0 = BBR

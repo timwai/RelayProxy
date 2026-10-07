@@ -1239,7 +1239,43 @@ public sealed partial class MainWindow : Window
             };
             ops.Children.Add(up); ops.Children.Add(down); ops.Children.Add(edit); ops.Children.Add(del);
             Grid.SetColumn(ops, 2); grid.Children.Add(ops);
-            RoutingRulesPanel.Children.Add(Card(grid));
+
+            var card = Card(grid);
+            card.Tag = i;
+            card.CanDrag = true;
+            card.AllowDrop = true;
+            ToolTipService.SetToolTip(card, "拖动卡片可调整规则顺序");
+            card.DragStarting += (_, args) =>
+            {
+                args.Data.SetText(i.ToString());
+                args.Data.RequestedOperation = DataPackageOperation.Move;
+            };
+            card.DragOver += (_, args) =>
+            {
+                args.AcceptedOperation = DataPackageOperation.Move;
+                args.DragUIOverride.Caption = "移动规则";
+                args.DragUIOverride.IsCaptionVisible = true;
+            };
+            card.Drop += async (_, args) =>
+            {
+                try
+                {
+                    var value = await args.DataView.GetTextAsync();
+                    if (!int.TryParse(value, out var source) || source < 0 || source >= _routingRules.Count) return;
+                    var target = i;
+                    if (source == target) return;
+
+                    var moving = _routingRules[source];
+                    _routingRules.RemoveAt(source);
+                    if (source < target) target--;
+                    target = Math.Clamp(target, 0, _routingRules.Count);
+                    _routingRules.Insert(target, moving);
+                    MarkDirty("routing");
+                    RenderRoutingRules();
+                }
+                catch { }
+            };
+            RoutingRulesPanel.Children.Add(card);
         }
         if (_routingRules.Count == 0)
             RoutingRulesPanel.Children.Add(Card(new TextBlock { Text = "暂无规则。按规则分流模式下将使用“未命中时”动作。", Foreground = ThemeBrush("TextFillColorSecondaryBrush") }));

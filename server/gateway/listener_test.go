@@ -688,3 +688,122 @@ func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 		t.Fatalf("offline revision=%d, online=%d", offline.ProxyExitRevision, online.ProxyExitRevision)
 	}
 }
+
+
+func TestNegotiatedBrutalRates(t *testing.T) {
+	tests := []struct {
+		name                    string
+		transport               tunnel.TransportType
+		hello                   protocol.DeviceHello
+		cfg                     GatewayConfig
+		wantClientTx, wantServerTx uint64
+	}{
+		{
+			name: "quic clamps both directions",
+			transport: tunnel.TransportQUIC,
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg: GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
+			wantClientTx: 10_000_000, wantServerTx: 30_000_000,
+		},
+		{
+			name: "zero server caps leave client hints unchanged",
+			transport: tunnel.TransportQUIC,
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			wantClientTx: 20_000_000, wantServerTx: 40_000_000,
+		},
+		{
+			name: "one zero hint keeps that direction on BBR",
+			transport: tunnel.TransportQUIC,
+			hello: protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
+			wantServerTx: 40_000_000,
+		},
+		{
+			name: "TLS never negotiates Brutal",
+			transport: tunnel.TransportTLS,
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+		},
+		{
+			name: "server can ignore client bandwidth",
+			transport: tunnel.TransportQUIC,
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg: GatewayConfig{IgnoreClientBandwidth: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientTx, serverTx := negotiatedBrutalRates(tt.transport, tt.hello, tt.cfg)
+			if clientTx != tt.wantClientTx || serverTx != tt.wantServerTx {
+				t.Fatalf("rates client/server=%d/%d, want %d/%d", clientTx, serverTx, tt.wantClientTx, tt.wantServerTx)
+			}
+		})
+	}
+}
+
+func TestQUICHandshakeNegotiatesAndAppliesBrutal(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	gateway := NewGateway(GatewayConfig{
+		QUICAddr:                  "127.0.0.1:0",
+		TLSConfig:                 &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:          2 * time.Second,
+		ServerInstanceID:         "brutal-test-server",
+		AllowLegacyDeviceAuth:     true,
+		BrutalMaxUploadBPS:        25_000_000,
+		BrutalMaxDownloadBPS:      15_000_000,
+		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+			return DeviceAuthorization{
+				State: "approved", DeviceID: "client",
+				ApprovedCapabilities: []string{protocol.CapabilityProxyClient},
+			}, nil
+		},
+		RecheckDevice: func(string, string) bool { return true },
+	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gateway.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	clientSession, err := tunnel.DialQUIC(ctx, gateway.QUICAddr().String(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	control := openTestStream(t, clientSession)
+	writeControlHeader(t, control)
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
+		DeviceName: "brutal-client",
+		RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+		BrutalUploadBPS: 20_000_000,
+		BrutalDownloadBPS: 30_000_000,
+	})
+	if !accepted.Success {
+		t.Fatalf("unexpected approval failure: %+v", accepted)
+	}
+	if accepted.BrutalUploadBPS != 15_000_000 || accepted.BrutalDownloadBPS != 25_000_000 {
+		t.Fatalf("negotiated rates upload/download=%d/%d, want 15000000/25000000",
+			accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
+	}
+
+	serverSession, ok := sessions.Get("client")
+	if !ok || serverSession == nil {
+		t.Fatal("authenticated QUIC session was not registered")
+	}
+	diagnostics := tunnel.DiagnoseSession(serverSession.Tunnel)
+	if diagnostics == nil || diagnostics.QUIC == nil {
+		t.Fatal("missing server QUIC diagnostics")
+	}
+	if diagnostics.QUIC.CongestionController != "brutal" ||
+		diagnostics.QUIC.CongestionTargetBPS != 25_000_000 {
+		t.Fatalf("server congestion diagnostics = %+v", diagnostics.QUIC)
+	}
+}

@@ -690,7 +690,11 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
+	publicDirect := a.proxyDirect
 	a.mu.Unlock()
+	if publicDirect != nil {
+		publicDirect.SetBrutalProfile(accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
+	}
 	if accepted.ProxyExits != nil {
 		a.updatePublicDirectInventory(proxyExitsFromProtocol(*accepted.ProxyExits))
 	}
@@ -761,8 +765,8 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 			PortStart:               accepted.P2PPortStart,
 			PortEnd:                 accepted.P2PPortEnd,
 			UPnPEnabled:             accepted.P2PUPnPEnabled,
-			BrutalUploadBPS:         cfg.BrutalUploadBPS,
-			BrutalDownloadBPS:       cfg.BrutalDownloadBPS,
+			BrutalUploadBPS:         accepted.BrutalUploadBPS,
+			BrutalDownloadBPS:       accepted.BrutalDownloadBPS,
 			DisableLossCompensation: cfg.DisableLossCompensation,
 		})
 		keepManager := false

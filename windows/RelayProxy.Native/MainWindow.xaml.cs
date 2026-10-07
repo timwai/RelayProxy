@@ -733,6 +733,530 @@ public sealed partial class MainWindow : Window
     private static string MessageSearchText(PushMessageDto m) =>
         string.Join("\n", m.Title, m.Content, m.Source, m.MessageRule, m.VerificationCode);
 
+    private async void ServerConsoleLogin_Click(object sender, RoutedEventArgs e)
+    {
+        ServerConsoleLoginButton.IsEnabled = false;
+        try
+        {
+            var user = await _serverConsole.LoginAsync(ServerConsoleUrlBox.Text, ServerConsoleUserBox.Text, ServerConsolePasswordBox.Password);
+            ServerConsolePasswordBox.Password = "";
+            ServerConsoleStateText.Text = $"已登录：{(string.IsNullOrWhiteSpace(user.DisplayName) ? user.Username : user.DisplayName)} · {user.Role} · Identity {user.IdentityId}";
+            ServerConsoleLoginButton.Visibility = Visibility.Collapsed;
+            ServerConsoleLogoutButton.Visibility = Visibility.Visible;
+            ServerRuleEditorPanel.Visibility = Visibility.Visible;
+            await RefreshServerChannelsAsync(preserveSelection: false);
+            ShowInfo(MessagesBar, "Server Console 已登录", "只使用本次内存会话管理当前账号可见的 Message Channel。", InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            ServerConsoleStateText.Text = "登录失败；Agent 隧道身份不会被用于 Server 管理操作。";
+            ShowInfo(MessagesBar, "Server Console 登录失败", ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            ServerConsoleLoginButton.IsEnabled = true;
+        }
+    }
+
+    private async void ServerConsoleLogout_Click(object sender, RoutedEventArgs e)
+    {
+        if (_dirtyPages.Contains("messages") && !await ConfirmDiscardChangesAsync("退出 Server Console"))
+            return;
+
+        _dirtyPages.Remove("messages");
+        await _serverConsole.LogoutAsync();
+        ResetServerConsoleEditor();
+        ServerConsoleStateText.Text = "未登录；Agent 隧道身份不会被用于 Server 管理操作。";
+    }
+
+    private async void RefreshServerChannels_Click(object sender, RoutedEventArgs e)
+    {
+        if (_dirtyPages.Contains("messages") && !await ConfirmDiscardChangesAsync("刷新 Message Channel"))
+            return;
+
+        _dirtyPages.Remove("messages");
+        await RefreshServerChannelsAsync(preserveSelection: true);
+    }
+
+    private async Task RefreshServerChannelsAsync(bool preserveSelection)
+    {
+        if (!_serverConsole.IsAuthenticated) return;
+        try
+        {
+            var selectedId = preserveSelection ? _selectedMessageChannel?.Id : "";
+            _serverChannels = (await _serverConsole.GetMessageChannelsAsync()).ToList();
+
+            _suppressMessageChannelSelection = true;
+            MessageChannelCombo.Items.Clear();
+            foreach (var channel in _serverChannels.OrderBy(x => x.Name))
+            {
+                MessageChannelCombo.Items.Add(new ComboBoxItem
+                {
+                    Content = string.IsNullOrWhiteSpace(channel.Name) ? channel.Id : channel.Name,
+                    Tag = channel
+                });
+            }
+
+            var selected = !string.IsNullOrWhiteSpace(selectedId)
+                ? MessageChannelCombo.Items.OfType<ComboBoxItem>().FirstOrDefault(x => (x.Tag as MessageChannelDto)?.Id == selectedId)
+                : null;
+            if (selected is null && MessageChannelCombo.Items.Count > 0)
+                selected = MessageChannelCombo.Items[0] as ComboBoxItem;
+            MessageChannelCombo.SelectedItem = selected;
+            _suppressMessageChannelSelection = false;
+
+            LoadSelectedMessageChannel(selected?.Tag as MessageChannelDto);
+        }
+        catch (Exception ex)
+        {
+            _suppressMessageChannelSelection = false;
+            ShowInfo(MessagesBar, "读取 Message Channel 失败", ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
+    private async void MessageChannel_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressMessageChannelSelection) return;
+        var next = (MessageChannelCombo.SelectedItem as ComboBoxItem)?.Tag as MessageChannelDto;
+        if (next?.Id == _selectedMessageChannel?.Id) return;
+
+        if (_dirtyPages.Contains("messages"))
+        {
+            if (!await ConfirmDiscardChangesAsync("切换 Message Channel"))
+            {
+                _suppressMessageChannelSelection = true;
+                var current = MessageChannelCombo.Items.OfType<ComboBoxItem>()
+                    .FirstOrDefault(x => (x.Tag as MessageChannelDto)?.Id == _selectedMessageChannel?.Id);
+                MessageChannelCombo.SelectedItem = current;
+                _suppressMessageChannelSelection = false;
+                return;
+            }
+            _dirtyPages.Remove("messages");
+        }
+
+        LoadSelectedMessageChannel(next);
+    }
+
+    private void LoadSelectedMessageChannel(MessageChannelDto? channel)
+    {
+        _selectedMessageChannel = channel;
+        _messageRulesDraft = channel?.MessageRules.Select(x => x.Clone()).ToList() ?? [];
+        if (channel is null)
+        {
+            MessageChannelMetaText.Text = "选择一个 Message Channel 后编辑规则。";
+        }
+        else
+        {
+            var target = channel.AllDevices
+                ? "所有审批设备"
+                : channel.DeviceIds.Count == 0 ? "无目标设备" : $"{channel.DeviceIds.Count} 个指定设备";
+            MessageChannelMetaText.Text = $"{channel.Name} · {target} · {_messageRulesDraft.Count} 条规则";
+        }
+        RenderMessageRules();
+    }
+
+    private void ResetServerConsoleEditor()
+    {
+        _serverChannels.Clear();
+        _selectedMessageChannel = null;
+        _messageRulesDraft.Clear();
+        _suppressMessageChannelSelection = true;
+        MessageChannelCombo.Items.Clear();
+        MessageChannelCombo.SelectedItem = null;
+        _suppressMessageChannelSelection = false;
+        MessageRulesPanel.Children.Clear();
+        MessageChannelMetaText.Text = "选择一个 Message Channel 后编辑规则。";
+        ServerRuleEditorPanel.Visibility = Visibility.Collapsed;
+        ServerConsoleLoginButton.Visibility = Visibility.Visible;
+        ServerConsoleLogoutButton.Visibility = Visibility.Collapsed;
+    }
+
+    private void RestoreMessageRuleDraft()
+    {
+        if (_selectedMessageChannel is null) return;
+        _messageRulesDraft = _selectedMessageChannel.MessageRules.Select(x => x.Clone()).ToList();
+        RenderMessageRules();
+    }
+
+    private async void AddMessageRule_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedMessageChannel is null)
+        {
+            ShowInfo(MessagesBar, "尚未选择 Message Channel", "", InfoBarSeverity.Warning);
+            return;
+        }
+
+        var rule = new MessageRuleDto
+        {
+            Name = "新消息规则",
+            Type = "message",
+            Enabled = true,
+            Match = new MessageMatchDto { MatchType = "all", KeywordMode = "any" },
+            Popup = true,
+            PopupType = "message"
+        };
+        if (await EditMessageRuleAsync(rule, isNew: true))
+        {
+            _messageRulesDraft.Add(rule);
+            MarkDirty("messages");
+            RenderMessageRules();
+        }
+    }
+
+    private void RenderMessageRules()
+    {
+        if (MessageRulesPanel is null) return;
+        MessageRulesPanel.Children.Clear();
+
+        for (var index = 0; index < _messageRulesDraft.Count; index++)
+        {
+            var rule = _messageRulesDraft[index];
+            var row = new Grid { ColumnSpacing = 12 };
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var summary = RuleSummary(rule);
+            row.Children.Add(TwoLine(
+                $"{(rule.Enabled ? "✓" : "—")} {rule.Name}{(rule.Default ? " · 默认" : "")}",
+                summary));
+
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, VerticalAlignment = VerticalAlignment.Center };
+            var toggle = new Button { Content = rule.Enabled ? "停用" : "启用" };
+            toggle.Click += (_, _) =>
+            {
+                rule.Enabled = !rule.Enabled;
+                MarkDirty("messages");
+                RenderMessageRules();
+            };
+            actions.Children.Add(toggle);
+
+            var edit = new Button { Content = "编辑" };
+            edit.Click += async (_, _) =>
+            {
+                if (await EditMessageRuleAsync(rule, isNew: false))
+                {
+                    MarkDirty("messages");
+                    RenderMessageRules();
+                }
+            };
+            actions.Children.Add(edit);
+
+            if (!rule.Default)
+            {
+                if (index > 0 && !_messageRulesDraft[index - 1].Default)
+                {
+                    var up = new Button { Content = "↑" };
+                    up.Click += (_, _) =>
+                    {
+                        var current = _messageRulesDraft.IndexOf(rule);
+                        if (current <= 0) return;
+                        (_messageRulesDraft[current - 1], _messageRulesDraft[current]) = (_messageRulesDraft[current], _messageRulesDraft[current - 1]);
+                        MarkDirty("messages");
+                        RenderMessageRules();
+                    };
+                    actions.Children.Add(up);
+                }
+
+                var defaultIndex = _messageRulesDraft.FindIndex(x => x.Default);
+                var currentIndex = _messageRulesDraft.IndexOf(rule);
+                var maxCustomIndex = defaultIndex >= 0 ? defaultIndex - 1 : _messageRulesDraft.Count - 1;
+                if (currentIndex >= 0 && currentIndex < maxCustomIndex)
+                {
+                    var down = new Button { Content = "↓" };
+                    down.Click += (_, _) =>
+                    {
+                        var current = _messageRulesDraft.IndexOf(rule);
+                        if (current < 0 || current + 1 >= _messageRulesDraft.Count || _messageRulesDraft[current + 1].Default) return;
+                        (_messageRulesDraft[current + 1], _messageRulesDraft[current]) = (_messageRulesDraft[current], _messageRulesDraft[current + 1]);
+                        MarkDirty("messages");
+                        RenderMessageRules();
+                    };
+                    actions.Children.Add(down);
+                }
+
+                var delete = new Button { Content = "删除" };
+                delete.Click += async (_, _) =>
+                {
+                    var dialog = new ContentDialog
+                    {
+                        XamlRoot = Content.XamlRoot,
+                        Title = "删除消息规则",
+                        Content = $"确定删除“{rule.Name}”吗？",
+                        PrimaryButtonText = "删除",
+                        CloseButtonText = "取消",
+                        DefaultButton = ContentDialogButton.Close
+                    };
+                    if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+                    _messageRulesDraft.Remove(rule);
+                    MarkDirty("messages");
+                    RenderMessageRules();
+                };
+                actions.Children.Add(delete);
+            }
+
+            Grid.SetColumn(actions, 1);
+            row.Children.Add(actions);
+            MessageRulesPanel.Children.Add(Card(row));
+        }
+
+        if (_messageRulesDraft.Count == 0)
+            MessageRulesPanel.Children.Add(Card(TwoLine("暂无消息规则", "新增规则后保存到当前 Message Channel。")));
+    }
+
+    private async Task<bool> EditMessageRuleAsync(MessageRuleDto rule, bool isNew)
+    {
+        var draft = rule.Clone();
+        if (string.IsNullOrWhiteSpace(draft.PopupType))
+            draft.PopupType = draft.Type;
+
+        var name = new TextBox { Header = "规则名称", Text = draft.Name };
+        var type = new ComboBox { Header = "消息分类", HorizontalAlignment = HorizontalAlignment.Stretch };
+        type.Items.Add(new ComboBoxItem { Content = "验证码", Tag = "verification_code" });
+        type.Items.Add(new ComboBoxItem { Content = "普通消息", Tag = "message" });
+        type.Items.Add(new ComboBoxItem { Content = "重要提醒", Tag = "important" });
+        SelectComboTag(type, draft.Type);
+
+        var enabled = new ToggleSwitch { Header = "启用规则", IsOn = draft.Enabled };
+        var popup = new ToggleSwitch { Header = "命中后弹窗", IsOn = draft.Popup ?? true };
+        var popupType = new ComboBox { Header = "弹窗类型", HorizontalAlignment = HorizontalAlignment.Stretch };
+        popupType.Items.Add(new ComboBoxItem { Content = "验证码弹窗", Tag = "verification_code" });
+        popupType.Items.Add(new ComboBoxItem { Content = "普通消息弹窗", Tag = "message" });
+        popupType.Items.Add(new ComboBoxItem { Content = "重要提醒弹窗", Tag = "important" });
+        SelectComboTag(popupType, draft.PopupType);
+
+        var matchType = new ComboBox { Header = "匹配方式", HorizontalAlignment = HorizontalAlignment.Stretch };
+        matchType.Items.Add(new ComboBoxItem { Content = "关键词", Tag = "keywords" });
+        matchType.Items.Add(new ComboBoxItem { Content = "包含文本", Tag = "contains" });
+        matchType.Items.Add(new ComboBoxItem { Content = "正则表达式", Tag = "regex" });
+        matchType.Items.Add(new ComboBoxItem { Content = "全部消息", Tag = "all" });
+        SelectComboTag(matchType, string.IsNullOrWhiteSpace(draft.Match.MatchType) ? "all" : draft.Match.MatchType);
+
+        var keywords = new TextBox
+        {
+            Header = "关键词（逗号或换行分隔）",
+            Text = string.Join(Environment.NewLine, draft.Match.Keywords),
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 72
+        };
+        var keywordMode = new ComboBox { Header = "关键词模式", HorizontalAlignment = HorizontalAlignment.Stretch };
+        keywordMode.Items.Add(new ComboBoxItem { Content = "任一命中", Tag = "any" });
+        keywordMode.Items.Add(new ComboBoxItem { Content = "全部命中", Tag = "all" });
+        SelectComboTag(keywordMode, string.IsNullOrWhiteSpace(draft.Match.KeywordMode) ? "any" : draft.Match.KeywordMode);
+
+        var matchPattern = new TextBox
+        {
+            Header = "匹配文本 / 正则",
+            Text = draft.Match.Pattern,
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap
+        };
+        var caseSensitive = new ToggleSwitch { Header = "区分大小写", IsOn = draft.Match.CaseSensitive };
+
+        var extractorType = new ComboBox { Header = "验证码提取方式", HorizontalAlignment = HorizontalAlignment.Stretch };
+        extractorType.Items.Add(new ComboBoxItem { Content = "智能提取", Tag = "auto" });
+        extractorType.Items.Add(new ComboBoxItem { Content = "正则提取", Tag = "regex" });
+        SelectComboTag(extractorType, draft.Verification?.Type ?? "auto");
+        var extractorPattern = new TextBox { Header = "验证码提取正则", Text = draft.Verification?.Pattern ?? "" };
+        var minLength = new NumberBox { Header = "最短长度", Minimum = 1, Maximum = 64, Value = draft.Verification?.MinLength is > 0 ? draft.Verification.MinLength : 4 };
+        var maxLength = new NumberBox { Header = "最长长度", Minimum = 1, Maximum = 64, Value = draft.Verification?.MaxLength is > 0 ? draft.Verification.MaxLength : 8 };
+        var maxDistance = new NumberBox { Header = "关键词最大距离", Minimum = 0, Maximum = 1024, Value = draft.Verification?.MaxDistance is > 0 ? draft.Verification.MaxDistance : 64 };
+        var allowLetters = new CheckBox { Content = "允许字母", IsChecked = draft.Verification?.AllowLetters ?? true };
+        var allowDigits = new CheckBox { Content = "允许数字", IsChecked = draft.Verification?.AllowDigits ?? true };
+        var requireDigit = new CheckBox { Content = "至少包含一个数字", IsChecked = draft.Verification?.RequireDigit ?? true };
+
+        var body = new StackPanel { Spacing = 10, MaxWidth = 620 };
+        body.Children.Add(name);
+        body.Children.Add(type);
+        body.Children.Add(enabled);
+        body.Children.Add(popup);
+        body.Children.Add(popupType);
+        body.Children.Add(matchType);
+        body.Children.Add(keywords);
+        body.Children.Add(keywordMode);
+        body.Children.Add(matchPattern);
+        body.Children.Add(caseSensitive);
+        body.Children.Add(new TextBlock
+        {
+            Text = draft.Default
+                ? "默认验证码规则可以编辑名称、匹配条件、提取方式和弹窗，但不能删除。"
+                : "验证码分类需要配置验证码提取；普通消息和重要提醒不会提取验证码。",
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        body.Children.Add(extractorType);
+        body.Children.Add(extractorPattern);
+        var lengths = new Grid { ColumnSpacing = 8 };
+        lengths.ColumnDefinitions.Add(new ColumnDefinition());
+        lengths.ColumnDefinitions.Add(new ColumnDefinition());
+        lengths.ColumnDefinitions.Add(new ColumnDefinition());
+        lengths.Children.Add(minLength);
+        Grid.SetColumn(maxLength, 1);
+        lengths.Children.Add(maxLength);
+        Grid.SetColumn(maxDistance, 2);
+        lengths.Children.Add(maxDistance);
+        body.Children.Add(lengths);
+        var extractorFlags = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        extractorFlags.Children.Add(allowLetters);
+        extractorFlags.Children.Add(allowDigits);
+        extractorFlags.Children.Add(requireDigit);
+        body.Children.Add(extractorFlags);
+
+        void UpdateEditorVisibility()
+        {
+            var match = ComboTag(matchType, "all");
+            keywords.Visibility = match == "keywords" ? Visibility.Visible : Visibility.Collapsed;
+            keywordMode.Visibility = match == "keywords" ? Visibility.Visible : Visibility.Collapsed;
+            matchPattern.Visibility = match is "contains" or "regex" ? Visibility.Visible : Visibility.Collapsed;
+
+            var verification = ComboTag(type, "message") == "verification_code";
+            extractorType.Visibility = verification ? Visibility.Visible : Visibility.Collapsed;
+            var extractor = ComboTag(extractorType, "auto");
+            extractorPattern.Visibility = verification && extractor == "regex" ? Visibility.Visible : Visibility.Collapsed;
+            lengths.Visibility = verification && extractor == "auto" ? Visibility.Visible : Visibility.Collapsed;
+            extractorFlags.Visibility = verification && extractor == "auto" ? Visibility.Visible : Visibility.Collapsed;
+            popupType.IsEnabled = popup.IsOn;
+        }
+        matchType.SelectionChanged += (_, _) => UpdateEditorVisibility();
+        type.SelectionChanged += (_, _) => UpdateEditorVisibility();
+        extractorType.SelectionChanged += (_, _) => UpdateEditorVisibility();
+        popup.Toggled += (_, _) => UpdateEditorVisibility();
+        UpdateEditorVisibility();
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = isNew ? "新增消息规则" : $"编辑规则 · {rule.Name}",
+            Content = new ScrollViewer { Content = body, MaxHeight = 620, VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
+            PrimaryButtonText = isNew ? "添加" : "保存修改",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return false;
+
+        var ruleName = name.Text.Trim();
+        if (string.IsNullOrWhiteSpace(ruleName))
+        {
+            ShowInfo(MessagesBar, "规则名称不能为空", "", InfoBarSeverity.Warning);
+            return false;
+        }
+
+        var selectedType = ComboTag(type, "message");
+        var selectedMatch = ComboTag(matchType, "all");
+        var keywordValues = SplitList(keywords.Text);
+        if (selectedMatch == "keywords" && keywordValues.Count == 0)
+        {
+            ShowInfo(MessagesBar, "关键词规则至少需要一个关键词", "", InfoBarSeverity.Warning);
+            return false;
+        }
+        if (selectedMatch is "contains" or "regex" && string.IsNullOrWhiteSpace(matchPattern.Text))
+        {
+            ShowInfo(MessagesBar, "匹配文本不能为空", "", InfoBarSeverity.Warning);
+            return false;
+        }
+
+        VerificationExtractorDto? verification = null;
+        if (selectedType == "verification_code")
+        {
+            var selectedExtractor = ComboTag(extractorType, "auto");
+            if (selectedExtractor == "regex" && string.IsNullOrWhiteSpace(extractorPattern.Text))
+            {
+                ShowInfo(MessagesBar, "验证码提取正则不能为空", "", InfoBarSeverity.Warning);
+                return false;
+            }
+            verification = new VerificationExtractorDto
+            {
+                Type = selectedExtractor,
+                Pattern = extractorPattern.Text.Trim(),
+                MinLength = Math.Max(1, SafeInt(minLength, 4)),
+                MaxLength = Math.Max(1, SafeInt(maxLength, 8)),
+                MaxDistance = Math.Max(0, SafeInt(maxDistance, 64)),
+                AllowLetters = allowLetters.IsChecked == true,
+                AllowDigits = allowDigits.IsChecked == true,
+                RequireDigit = requireDigit.IsChecked == true
+            };
+            if (verification.MinLength > verification.MaxLength)
+            {
+                ShowInfo(MessagesBar, "验证码长度范围无效", "最短长度不能大于最长长度。", InfoBarSeverity.Warning);
+                return false;
+            }
+            if (verification.Type == "auto" && !verification.AllowLetters && !verification.AllowDigits)
+            {
+                ShowInfo(MessagesBar, "验证码提取范围无效", "至少允许字母或数字中的一种。", InfoBarSeverity.Warning);
+                return false;
+            }
+        }
+
+        rule.Name = ruleName;
+        rule.Type = selectedType;
+        rule.Enabled = enabled.IsOn;
+        rule.Popup = popup.IsOn;
+        rule.PopupType = ComboTag(popupType, selectedType);
+        rule.Match = new MessageMatchDto
+        {
+            MatchType = selectedMatch,
+            Keywords = selectedMatch == "keywords" ? keywordValues : [],
+            KeywordMode = ComboTag(keywordMode, "any"),
+            Pattern = selectedMatch is "contains" or "regex" ? matchPattern.Text.Trim() : "",
+            CaseSensitive = caseSensitive.IsOn
+        };
+        rule.Verification = verification;
+        return true;
+    }
+
+    private async void SaveMessageRules_Click(object sender, RoutedEventArgs e)
+    {
+        if (_selectedMessageChannel is null)
+        {
+            ShowInfo(MessagesBar, "尚未选择 Message Channel", "", InfoBarSeverity.Warning);
+            return;
+        }
+
+        try
+        {
+            var saved = await _serverConsole.UpdateMessageRulesAsync(_selectedMessageChannel, _messageRulesDraft);
+            var index = _serverChannels.FindIndex(x => x.Id == saved.Id);
+            if (index >= 0) _serverChannels[index] = saved;
+            _selectedMessageChannel = saved;
+            _messageRulesDraft = saved.MessageRules.Select(x => x.Clone()).ToList();
+            _dirtyPages.Remove("messages");
+            MessageChannelMetaText.Text = $"{saved.Name} · {(_messageRulesDraft.Count)} 条规则 · 已保存";
+            RenderMessageRules();
+            ShowInfo(MessagesBar, "消息规则已保存", "Server 已重新校验并返回标准化规则。", InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowInfo(MessagesBar, "保存消息规则失败", ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
+    private static string RuleSummary(MessageRuleDto rule)
+    {
+        var type = rule.Type switch
+        {
+            "verification_code" => "验证码",
+            "important" => "重要提醒",
+            _ => "普通消息"
+        };
+        var match = rule.Match.MatchType switch
+        {
+            "keywords" => $"关键词 {string.Join(" / ", rule.Match.Keywords.Take(3))}{(rule.Match.Keywords.Count > 3 ? "…" : "")}",
+            "contains" => $"包含“{rule.Match.Pattern}”",
+            "regex" => $"正则 {rule.Match.Pattern}",
+            _ => "匹配全部"
+        };
+        var popup = rule.Popup ?? true ? $"弹窗：{PopupTypeName(string.IsNullOrWhiteSpace(rule.PopupType) ? rule.Type : rule.PopupType)}" : "不弹窗";
+        return $"{type} · {match} · {popup}";
+    }
+
+    private static string PopupTypeName(string value) => value switch
+    {
+        "verification_code" => "验证码",
+        "important" => "重要提醒",
+        _ => "普通消息"
+    };
+
     private void TestVerificationPopup_Click(object sender, RoutedEventArgs e) => ShowLocalTestMessage("verification_code");
     private void TestMessagePopup_Click(object sender, RoutedEventArgs e) => ShowLocalTestMessage("message");
     private void TestImportantPopup_Click(object sender, RoutedEventArgs e) => ShowLocalTestMessage("important");

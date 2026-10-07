@@ -388,10 +388,10 @@ func main() {
 
 // resolveGUIMode decides between the desktop window and headless operation.
 //
-// Explicit flags always win. Otherwise the desktop window is chosen for the
-// GUI-named binary (relay-agent-gui.exe), an explicit GUI/minimized launch, and
-// a bare double-click (no arguments at all) select the desktop window; ordinary
-// CLI arguments keep the process headless.
+// Explicit flags always win. On Windows the default relay-agent.exe is now the
+// headless Go Core used by the WinUI shell, so only GUI/legacy-Wails named
+// binaries implicitly choose desktop mode. macOS keeps its bare app launch
+// behavior. Ordinary CLI arguments remain headless.
 func resolveStartMinimized(minimizedFlag, hiddenFlag bool) bool {
 	// Persisted GUI preferences must never hide a manual launch. Starting in the
 	// tray is reserved for an explicit command-line request (used by autostart).
@@ -405,13 +405,14 @@ func resolveGUIMode(guiFlag, noGuiFlag, minimizedFlag bool) bool {
 	if guiFlag || minimizedFlag {
 		return true
 	}
-	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
-		return false
+	base := strings.ToLower(filepath.Base(os.Args[0]))
+	if runtime.GOOS == "windows" {
+		return strings.Contains(base, "gui") || strings.Contains(base, "wails")
 	}
-	if len(os.Args) == 1 {
-		return true
+	if runtime.GOOS == "darwin" {
+		return len(os.Args) == 1 || strings.Contains(base, "gui")
 	}
-	return strings.Contains(strings.ToLower(filepath.Base(os.Args[0])), "gui")
+	return false
 }
 
 func defaultConfigFile() *config.AgentConfigFile {

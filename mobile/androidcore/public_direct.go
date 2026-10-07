@@ -24,7 +24,9 @@ func (c *Client) initPublicDirectClient() {
 			return ""
 		}
 		return c.status.DeviceID
-	}, proxydirect.ClientManagerOptions{})
+	}, proxydirect.ClientManagerOptions{
+		DisableLossCompensation: c.cfg.DisableLossCompensation,
+	})
 	manager.SetFallback(func(exitDeviceID, _ string) {
 		c.mu.RLock()
 		p2p := c.proxyP2P
@@ -173,9 +175,10 @@ func (c *Client) startPublicDirectExit(
 		return func() {}
 	}
 	runtime, err := proxydirect.StartExitRuntime(ctx, relay, accepted, c.handler, proxydirect.ExitRuntimeOptions{
-		MaxStreams: maxStreams,
-		PortStart:  accepted.PublicDirectPortStart,
-		PortEnd:    accepted.PublicDirectPortEnd,
+		MaxStreams:              maxStreams,
+		PortStart:               accepted.PublicDirectPortStart,
+		PortEnd:                 accepted.PublicDirectPortEnd,
+		DisableLossCompensation: c.cfg.DisableLossCompensation,
 		ValidateTicket: func(validateCtx context.Context, claims protocol.PublicDirectTicketClaims) (proxydirect.Authorization, error) {
 			return proxydirect.ValidateTicketCurrent(validateCtx, relay, claims)
 		},

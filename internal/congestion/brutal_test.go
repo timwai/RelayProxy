@@ -29,3 +29,21 @@ func TestCapRequestedRate(t *testing.T) {
 		}
 	}
 }
+
+
+func TestAuthorizeRequestedRate(t *testing.T) {
+	tests := []struct {
+		requested, authorized, want uint64
+	}{
+		{0, 100, 0},
+		{100, 0, 0},
+		{50, 100, 50},
+		{200, 100, 100},
+		{^uint64(0), 100, 100},
+	}
+	for _, tt := range tests {
+		if got := AuthorizeRequestedRate(tt.requested, tt.authorized); got != tt.want {
+			t.Fatalf("AuthorizeRequestedRate(%d,%d)=%d, want %d", tt.requested, tt.authorized, got, tt.want)
+		}
+	}
+}

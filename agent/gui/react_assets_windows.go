@@ -87,6 +87,9 @@ func buildReactWailsAssets(opts Options) (string, string, fstest.MapFS, bool, er
 		classAttr = " class=\"dark\""
 	}
 	mainHTML := string(index)
+	mainInject := "<script src=\"/wails/runtime.js\" type=\"module\"></script>" +
+		"<script src=\"/wails-bridge.js\"></script>"
+	mainHTML = strings.Replace(mainHTML, "<head>", "<head>"+mainInject, 1)
 	mainHTML = strings.Replace(
 		mainHTML,
 		"<html lang=\"zh-CN\" data-theme-mode=\"system\">",

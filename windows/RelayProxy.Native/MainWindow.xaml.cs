@@ -929,6 +929,26 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowInfo(ConnectionBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
     }
 
+    private void CopySocksAddress_Click(object sender, RoutedEventArgs e) =>
+        CopyProxyAddress("socks5", SocksListenBox.Text, SafeInt(SocksPortBox, 1080));
+
+    private void CopyHttpAddress_Click(object sender, RoutedEventArgs e) =>
+        CopyProxyAddress("http", HttpListenBox.Text, SafeInt(HttpPortBox, 8080));
+
+    private void CopyProxyAddress(string scheme, string listen, int port)
+    {
+        var host = listen.Trim();
+        if (string.IsNullOrWhiteSpace(host) || host is "0.0.0.0" or "::" or "[::]")
+            host = "127.0.0.1";
+        if (host.Contains(':') && !host.StartsWith('['))
+            host = $"[{host}]";
+        var value = $"{scheme}://{host}:{port}";
+        var package = new DataPackage();
+        package.SetText(value);
+        Clipboard.SetContent(package);
+        ShowInfo(ProxyBar, "代理地址已复制", value, InfoBarSeverity.Success);
+    }
+
     private async void SaveProxy_Click(object sender, RoutedEventArgs e)
     {
         if (_config is null) { await LoadConfigAsync(); if (_config is null) return; }
@@ -1178,6 +1198,8 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex) { ShowInfo(SettingsBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
     }
+
+    private async void ExitRelayProxy_Click(object sender, RoutedEventArgs e) => await RequestShutdownAsync();
 
     private async void RestartAgent_Click(object sender, RoutedEventArgs e)
     {

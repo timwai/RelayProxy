@@ -132,6 +132,8 @@ class MainActivity : Activity() {
     private lateinit var settingTcpPortField: EditText
     private lateinit var settingTlsSwitch: Switch
     private lateinit var settingInsecureTlsSwitch: Switch
+    private lateinit var settingSocks5Switch: Switch
+    private lateinit var settingHttpSwitch: Switch
     private lateinit var settingSocksPortField: EditText
     private lateinit var settingHttpPortField: EditText
     private lateinit var settingP2pSwitch: Switch
@@ -760,19 +762,15 @@ class MainActivity : Activity() {
     }
 
     private fun buildLiveApplicationMonitorCard(): View {
+        val store = ConfigStore(this)
+        val enabled = store.isApplicationMonitorEnabled()
         val card = UiKit.card(
             this,
             paddingDp = 16,
             radiusDp = 14,
             backgroundColor = UiPalette.surfaceSubtle,
-            borderColor = UiPalette.brandSoftBorder,
-        ).apply {
-            isClickable = true
-            isFocusable = true
-            setOnClickListener {
-                startActivity(Intent(this@MainActivity, ConnectionMonitorActivity::class.java))
-            }
-        }
+            borderColor = if (enabled) UiPalette.brandSoftBorder else UiPalette.lineSubtle,
+        )
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -788,20 +786,45 @@ class MainActivity : Activity() {
             typeface = Typeface.DEFAULT_BOLD
         })
         titles.addView(TextView(this).apply {
-            text = "查看正在联网的 App、TCP/UDP、实时速率、目标与出口路径"
+            text = if (enabled) {
+                "查看正在联网的 App、TCP/UDP、实时速率、目标与出口路径"
+            } else {
+                "已关闭 · 不读取实时应用连接列表"
+            }
             textSize = 11f
             setTextColor(UiPalette.muted)
             setPadding(0, dp(3), 0, 0)
         })
         row.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        row.addView(TextView(this).apply {
-            text = "查看 ›"
-            textSize = 12f
-            setTextColor(UiPalette.brand)
+
+        val monitorSwitch = Switch(this).apply {
+            isChecked = enabled
+            UiKit.styleSwitch(this)
+            setOnCheckedChangeListener { _, checked ->
+                store.setApplicationMonitorEnabled(checked)
+                setContentView(buildRootUi())
+                renderStatus()
+            }
+        }
+        row.addView(monitorSwitch)
+        card.addView(row)
+
+        val openMonitor = TextView(this).apply {
+            text = if (enabled) "查看实时连接 ›" else "开启后可查看实时连接"
+            textSize = 11.5f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-        })
-        card.addView(row)
+            setTextColor(if (enabled) UiPalette.brand else UiPalette.placeholder)
+            setPadding(0, dp(10), 0, 0)
+            isClickable = enabled
+            isFocusable = enabled
+            setOnClickListener {
+                if (ConfigStore(this@MainActivity).isApplicationMonitorEnabled()) {
+                    startActivity(Intent(this@MainActivity, ConnectionMonitorActivity::class.java))
+                }
+            }
+        }
+        card.addView(openMonitor)
         return card
     }
 
@@ -830,12 +853,22 @@ class MainActivity : Activity() {
         diagActiveNet = diagRow(card, "当前承载网络", "—")
         diagPowerMode = diagRow(card, "P2P 电源策略", "标准")
         diagUdpDrops = diagRow(card, "UDP 丢弃诊断", "队列 0 · 重组 0 · 丢弃 0")
-        diagLoopback = diagRow(card, "回环代理端口", "SOCKS5 1080 · HTTP 8080").apply {
+        diagLoopback = diagRow(card, "回环代理端口", "等待配置").apply {
             isClickable = true
             setOnClickListener {
-                val clip = getSystemService(ClipboardManager::class.java)
-                clip.setPrimaryClip(ClipData.newPlainText("RelayProxy Loopback", "127.0.0.1:1080"))
-                Toast.makeText(this@MainActivity, "回环 SOCKS5 代理地址已复制", Toast.LENGTH_SHORT).show()
+                val cfg = ConfigStore(this@MainActivity).load()
+                val endpoint = when {
+                    cfg.clientEnabled && cfg.socks5Enabled -> "127.0.0.1:${cfg.socks5Port}"
+                    cfg.clientEnabled && cfg.httpEnabled -> "127.0.0.1:${cfg.httpPort}"
+                    else -> ""
+                }
+                if (endpoint.isBlank()) {
+                    Toast.makeText(this@MainActivity, "SOCKS5 和 HTTP 代理均已关闭", Toast.LENGTH_SHORT).show()
+                } else {
+                    val clip = getSystemService(ClipboardManager::class.java)
+                    clip.setPrimaryClip(ClipData.newPlainText("RelayProxy Loopback", endpoint))
+                    Toast.makeText(this@MainActivity, "回环代理地址已复制", Toast.LENGTH_SHORT).show()
+                }
             }
         }
 
@@ -1905,6 +1938,31 @@ class MainActivity : Activity() {
         val proxyCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
         proxyCard.addView(sectionHeader("本机代理与高级特性", "SOCKS5 / HTTP 本机回环与直连拓扑"))
 
+        settingSocks5Switch = Switch(this).apply {
+            isChecked = config.socks5Enabled && config.clientEnabled
+            UiKit.styleSwitch(this)
+        }
+        proxyCard.addView(
+            switchBlock(
+                "SOCKS5 代理",
+                "独立启用 SOCKS5 TCP/UDP 回环代理；关闭后不会监听 SOCKS5 端口",
+                settingSocks5Switch,
+            ),
+        )
+
+        settingHttpSwitch = Switch(this).apply {
+            isChecked = config.httpEnabled && config.clientEnabled
+            UiKit.styleSwitch(this)
+        }
+        proxyCard.addView(
+            switchBlock(
+                "HTTP / HTTPS 代理",
+                "独立启用 HTTP 与 HTTPS CONNECT 回环代理；关闭后不会监听 HTTP 端口",
+                settingHttpSwitch,
+            ),
+            topMargin(12),
+        )
+
         val localPortRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         settingSocksPortField = styledInput(config.socks5Port.toString(), "1080", isNumber = true)
         localPortRow.addView(fieldBlock("SOCKS5 端口", settingSocksPortField), weighted())
@@ -2095,7 +2153,22 @@ class MainActivity : Activity() {
         val current = store.load()
 
         val netModeValues = listOf(NetworkBinder.MODE_WIFI, NetworkBinder.MODE_CELLULAR)
-        val chosenNetMode = netModeValues.getOrElse(settingNetModeSpinner.selectedItemPosition) { NetworkBinder.MODE_WIFI }
+        val chosenNetMode = netModeValues.getOrElse(settingNetModeSpinner.selectedItemPosition) {
+            NetworkBinder.MODE_WIFI
+        }
+        val socksEnabled = settingSocks5Switch.isChecked
+        val httpEnabled = settingHttpSwitch.isChecked
+        val socksPort = settingSocksPortField.text.toString().toIntOrNull() ?: 1080
+        val httpPort = settingHttpPortField.text.toString().toIntOrNull() ?: 8080
+
+        if ((socksEnabled && socksPort !in 1..65535) || (httpEnabled && httpPort !in 1..65535)) {
+            Toast.makeText(this, "代理端口必须在 1 到 65535 之间", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (socksEnabled && httpEnabled && socksPort == httpPort) {
+            Toast.makeText(this, "SOCKS5 与 HTTP 不能使用相同端口", Toast.LENGTH_SHORT).show()
+            return
+        }
 
         val updated = current.copy(
             serverAddress = settingServerField.text.toString().trim(),
@@ -2108,8 +2181,11 @@ class MainActivity : Activity() {
             tcpPort = settingTcpPortField.text.toString().toIntOrNull() ?: 443,
             tlsEnabled = settingTlsSwitch.isChecked,
             insecureTls = settingInsecureTlsSwitch.isChecked,
-            socks5Port = settingSocksPortField.text.toString().toIntOrNull() ?: 1080,
-            httpPort = settingHttpPortField.text.toString().toIntOrNull() ?: 8080,
+            clientEnabled = socksEnabled || httpEnabled,
+            socks5Enabled = socksEnabled,
+            httpEnabled = httpEnabled,
+            socks5Port = socksPort,
+            httpPort = httpPort,
             proxyP2pEnabled = settingP2pSwitch.isChecked,
             vpnIpv6Enabled = settingIpv6Switch.isChecked,
         )
@@ -2256,6 +2332,13 @@ class MainActivity : Activity() {
 
         val store = ConfigStore(this)
         val config = store.load()
+        val loopbackEntries = buildList {
+            if (config.clientEnabled && config.socks5Enabled) add("SOCKS5 ${config.socks5Port}")
+            if (config.clientEnabled && config.httpEnabled) add("HTTP ${config.httpPort}")
+        }
+        if (::diagLoopback.isInitialized) {
+            diagLoopback.text = if (loopbackEntries.isEmpty()) "已关闭" else loopbackEntries.joinToString(" · ")
+        }
         val desiredExit = store.isDesiredRunning()
         val desiredVpn = store.isVpnDesiredRunning()
 

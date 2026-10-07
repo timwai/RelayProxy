@@ -460,8 +460,8 @@ class SettingsActivity : Activity() {
         insecureTls.isChecked = cfg.insecureTls
         allowPrivate.isChecked = cfg.allowPrivateNetwork
         autoNetworkSwitch.isChecked = cfg.autoNetworkSwitch
-        socks5Enabled.isChecked = cfg.socks5Enabled
-        httpEnabled.isChecked = cfg.httpEnabled
+        socks5Enabled.isChecked = cfg.clientEnabled && cfg.socks5Enabled
+        httpEnabled.isChecked = cfg.clientEnabled && cfg.httpEnabled
         proxyP2pEnabled.isChecked = cfg.proxyP2pEnabled
         proxyPathMode.setSelection(proxyPathModeValues.indexOf(cfg.proxyPathMode).coerceAtLeast(0))
         defaultExitId.setText(cfg.defaultExitId)

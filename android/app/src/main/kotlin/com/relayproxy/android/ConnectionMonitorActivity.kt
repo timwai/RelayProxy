@@ -13,6 +13,7 @@ import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
@@ -20,6 +21,7 @@ import org.json.JSONObject
 class ConnectionMonitorActivity : Activity() {
     private lateinit var summaryText: TextView
     private lateinit var detailText: TextView
+    private lateinit var monitorSwitch: Switch
     private lateinit var applicationList: LinearLayout
     private val handler = Handler(Looper.getMainLooper())
 
@@ -41,8 +43,7 @@ class ConnectionMonitorActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        handler.removeCallbacks(poll)
-        handler.post(poll)
+        syncMonitorState()
     }
 
     override fun onPause() {
@@ -99,20 +100,41 @@ class ConnectionMonitorActivity : Activity() {
         }
 
         val summary = UiKit.card(this, paddingDp = 16, radiusDp = 14)
+        val summaryHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val summaryTitles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
         summaryText = TextView(this).apply {
             text = "实时应用 0 · 活跃连接 0"
             textSize = 15f
             setTextColor(UiPalette.ink)
             typeface = Typeface.DEFAULT_BOLD
         }
-        summary.addView(summaryText)
+        summaryTitles.addView(summaryText)
         detailText = TextView(this).apply {
             text = "每秒刷新 · 仅显示当前连接"
             textSize = 11.5f
             setTextColor(UiPalette.muted)
             setPadding(0, dp(5), 0, 0)
         }
-        summary.addView(detailText)
+        summaryTitles.addView(detailText)
+        summaryHeader.addView(
+            summaryTitles,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        monitorSwitch = Switch(this).apply {
+            isChecked = ConfigStore(this@ConnectionMonitorActivity).isApplicationMonitorEnabled()
+            UiKit.styleSwitch(this)
+            setOnCheckedChangeListener { _, enabled ->
+                ConfigStore(this@ConnectionMonitorActivity).setApplicationMonitorEnabled(enabled)
+                syncMonitorState()
+            }
+        }
+        summaryHeader.addView(monitorSwitch)
+        summary.addView(summaryHeader)
         content.addView(summary)
 
         applicationList = LinearLayout(this).apply {
@@ -141,7 +163,48 @@ class ConnectionMonitorActivity : Activity() {
         return root
     }
 
+    private fun syncMonitorState() {
+        handler.removeCallbacks(poll)
+        val enabled = ConfigStore(this).isApplicationMonitorEnabled()
+        if (::monitorSwitch.isInitialized && monitorSwitch.isChecked != enabled) {
+            monitorSwitch.isChecked = enabled
+        }
+        if (enabled) {
+            renderSnapshot()
+            handler.postDelayed(poll, 1_000)
+        } else {
+            renderMonitorDisabled()
+        }
+    }
+
+    private fun renderMonitorDisabled() {
+        summaryText.text = "实时应用监控已关闭"
+        detailText.text = "开启后每秒刷新当前应用连接"
+        applicationList.removeAllViews()
+        val card = UiKit.card(this, paddingDp = 24, radiusDp = 14)
+        card.gravity = Gravity.CENTER_HORIZONTAL
+        card.addView(TextView(this).apply {
+            text = "监控已关闭"
+            textSize = 14f
+            setTextColor(UiPalette.ink)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        })
+        card.addView(TextView(this).apply {
+            text = "关闭时不会读取和聚合实时应用连接列表；应用分流所需的包名识别仍正常工作。"
+            textSize = 11.5f
+            setTextColor(UiPalette.muted)
+            gravity = Gravity.CENTER
+            setPadding(0, dp(5), 0, 0)
+        })
+        applicationList.addView(card)
+    }
+
     private fun renderSnapshot() {
+        if (!ConfigStore(this).isApplicationMonitorEnabled()) {
+            renderMonitorDisabled()
+            return
+        }
         val snapshot = runCatching { JSONObject(RelayExitService.activeApplicationsJson()) }
             .getOrElse { JSONObject() }
         val applications = snapshot.optJSONArray("applications") ?: JSONArray()

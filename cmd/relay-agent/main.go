@@ -159,6 +159,16 @@ func main() {
 	if noWebFlag {
 		cfgFile.Web.Enabled = config.BoolPtr(false)
 	}
+	// The native WinUI shell owns a separate process and needs a private
+	// loopback control channel even when the user disabled the browser UI or
+	// configured a different web token. The shell supplies a per-run random
+	// token through the child environment, so it never needs to persist or log
+	// that credential. An explicit --no-web still wins for manual CLI launches.
+	if token := strings.TrimSpace(os.Getenv("RELAYPROXY_NATIVE_MANAGEMENT_TOKEN")); token != "" && !noWebFlag {
+		cfgFile.Web.Enabled = config.BoolPtr(true)
+		cfgFile.Web.Listen = "127.0.0.1"
+		cfgFile.Web.Token = token
+	}
 	if err := config.NormalizeAgentConfig(cfgFile); err != nil {
 		log.Fatalf("[Config] Invalid startup configuration: %v", err)
 	}

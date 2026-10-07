@@ -222,6 +222,7 @@ public sealed partial class MainWindow : Window
             SelectComboTag(ThemeCombo, cfg.Theme);
             PopupTimeoutBox.Value = cfg.VerificationPopupTimeoutSec;
             _suppressAutostart = false;
+            RestartAgentButton.Visibility = cfg.RestartRequired && App.AgentHost.CanRestart ? Visibility.Visible : Visibility.Collapsed;
             ApplyTheme(cfg.Theme);
             if (!_initialConfigApplied)
             {
@@ -740,6 +741,36 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowInfo(SettingsBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
     }
 
+    private async void RestartAgent_Click(object sender, RoutedEventArgs e)
+    {
+        RestartAgentButton.IsEnabled = false;
+        var original = RestartAgentButton.Content;
+        RestartAgentButton.Content = "正在重启…";
+        try
+        {
+            await App.AgentHost.RestartAsync();
+            await LoadConfigAsync();
+            await RefreshCurrentAsync();
+            RestartAgentButton.Visibility = Visibility.Collapsed;
+        }
+        catch (Exception ex)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "Agent 重启失败",
+                Content = ex.Message,
+                CloseButtonText = "关闭"
+            };
+            await dialog.ShowAsync();
+        }
+        finally
+        {
+            RestartAgentButton.Content = original;
+            RestartAgentButton.IsEnabled = true;
+        }
+    }
+
     private async void RefreshOverview_Click(object sender, RoutedEventArgs e) => await RefreshOverviewAsync();
     private async void RefreshExits_Click(object sender, RoutedEventArgs e) => await RefreshExitsAsync();
     private async void RefreshConnections_Click(object sender, RoutedEventArgs e) => await RefreshConnectionsAsync();
@@ -762,7 +793,10 @@ public sealed partial class MainWindow : Window
     {
         if (result is null) { ShowInfo(bar, "保存完成", "", InfoBarSeverity.Success); return; }
         if (_config is not null && !string.IsNullOrWhiteSpace(result.Revision)) _config.Revision = result.Revision;
+        RestartAgentButton.Visibility = result.RestartRequired && App.AgentHost.CanRestart ? Visibility.Visible : Visibility.Collapsed;
         var details = result.RestartRequired && result.RestartFields.Count > 0 ? $"需要重启：{string.Join("、", result.RestartFields)}" : result.Message;
+        if (result.RestartRequired && !App.AgentHost.CanRestart)
+            details += " 当前连接的是外部 Agent，请手动重启该 Agent。";
         ShowInfo(bar, result.RestartRequired ? "设置已保存，需要重启" : "设置已应用", details, result.RestartRequired ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
     }
 

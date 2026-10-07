@@ -19,24 +19,24 @@ import (
 )
 
 const (
-	footerMagic        = "RELAYPROXY_GUI4!"
-	footerSize         = 16 + 8 + 8 + sha256.Size
-	nativeHostName     = "RelayProxy.NativeHost.exe"
-	launcherPathEnv    = "RELAYPROXY_LAUNCHER_PATH"
-	cacheReadyFile     = ".ready"
-	cacheProductDir    = "RelayProxy"
-	cacheNativeHostDir = "native-host-lzms-experiment"
-	lzmsAlgorithm               = 5
-	compressInfoClassBlockSize   = 1
-	lzmsBlockSize         uint32 = 64 * 1024 * 1024
+	footerMagic                       = "RELAYPROXY_GUI4!"
+	footerSize                        = 16 + 8 + 8 + sha256.Size
+	nativeHostName                    = "RelayProxy.NativeHost.exe"
+	launcherPathEnv                   = "RELAYPROXY_LAUNCHER_PATH"
+	cacheReadyFile                    = ".ready"
+	cacheProductDir                   = "RelayProxy"
+	cacheNativeHostDir                = "native-host-lzms-experiment"
+	lzmsAlgorithm                     = 5
+	compressInfoClassBlockSize        = 1
+	lzmsBlockSize              uint32 = 64 * 1024 * 1024
 )
 
 var (
-	cabinetDLL         = syscall.NewLazyDLL("cabinet.dll")
-	createDecompressor       = cabinetDLL.NewProc("CreateDecompressor")
+	cabinetDLL                 = syscall.NewLazyDLL("cabinet.dll")
+	createDecompressor         = cabinetDLL.NewProc("CreateDecompressor")
 	setDecompressorInformation = cabinetDLL.NewProc("SetDecompressorInformation")
-	decompressProc           = cabinetDLL.NewProc("Decompress")
-	closeDecompressor        = cabinetDLL.NewProc("CloseDecompressor")
+	decompressProc             = cabinetDLL.NewProc("Decompress")
+	closeDecompressor          = cabinetDLL.NewProc("CloseDecompressor")
 )
 
 type payloadDescriptor struct {

@@ -95,10 +95,11 @@ type ServerConfig struct {
 
 type AgentConfigFile struct {
 	Server struct {
-		Address    string `yaml:"address"` // e.g. "127.0.0.1" or "relay.example.com"
-		QUICPort   int    `yaml:"quic_port"`
-		TCPPort    int    `yaml:"tcp_port"`
-		TLSEnabled *bool  `yaml:"tls_enabled"` // nil or true = TLS on; false = plaintext TCP
+		Address     string `yaml:"address"` // e.g. "127.0.0.1" or "relay.example.com"
+		QUICPort    int    `yaml:"quic_port"`
+		TCPPort     int    `yaml:"tcp_port"`
+		TLSEnabled  *bool  `yaml:"tls_enabled"` // nil or true = TLS on; false = plaintext TCP
+		InsecureTLS bool   `yaml:"insecure_tls,omitempty"` // development only: skip server certificate verification
 	} `yaml:"server"`
 
 	Device struct {

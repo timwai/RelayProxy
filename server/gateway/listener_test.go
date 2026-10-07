@@ -689,44 +689,43 @@ func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 	}
 }
 
-
 func TestNegotiatedBrutalRates(t *testing.T) {
 	tests := []struct {
-		name                    string
-		transport               tunnel.TransportType
-		hello                   protocol.DeviceHello
-		cfg                     GatewayConfig
+		name                       string
+		transport                  tunnel.TransportType
+		hello                      protocol.DeviceHello
+		cfg                        GatewayConfig
 		wantClientTx, wantServerTx uint64
 	}{
 		{
-			name: "quic clamps both directions",
-			transport: tunnel.TransportQUIC,
-			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
-			cfg: GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
+			name:         "quic clamps both directions",
+			transport:    tunnel.TransportQUIC,
+			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg:          GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
 			wantClientTx: 10_000_000, wantServerTx: 30_000_000,
 		},
 		{
-			name: "zero server caps leave client hints unchanged",
-			transport: tunnel.TransportQUIC,
-			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			name:         "zero server caps leave client hints unchanged",
+			transport:    tunnel.TransportQUIC,
+			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
 			wantClientTx: 20_000_000, wantServerTx: 40_000_000,
 		},
 		{
-			name: "one zero hint keeps that direction on BBR",
-			transport: tunnel.TransportQUIC,
-			hello: protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
+			name:         "one zero hint keeps that direction on BBR",
+			transport:    tunnel.TransportQUIC,
+			hello:        protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
 			wantServerTx: 40_000_000,
 		},
 		{
-			name: "TLS never negotiates Brutal",
+			name:      "TLS never negotiates Brutal",
 			transport: tunnel.TransportTLS,
-			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			hello:     protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
 		},
 		{
-			name: "server can ignore client bandwidth",
+			name:      "server can ignore client bandwidth",
 			transport: tunnel.TransportQUIC,
-			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
-			cfg: GatewayConfig{IgnoreClientBandwidth: true},
+			hello:     protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg:       GatewayConfig{IgnoreClientBandwidth: true},
 		},
 	}
 	for _, tt := range tests {
@@ -746,13 +745,13 @@ func TestQUICHandshakeNegotiatesAndAppliesBrutal(t *testing.T) {
 	}
 	sessions := session.NewManager()
 	gateway := NewGateway(GatewayConfig{
-		QUICAddr:                  "127.0.0.1:0",
-		TLSConfig:                 &tls.Config{Certificates: []tls.Certificate{certificate}},
-		HandshakeTimeout:          2 * time.Second,
-		ServerInstanceID:         "brutal-test-server",
-		AllowLegacyDeviceAuth:     true,
-		BrutalMaxUploadBPS:        25_000_000,
-		BrutalMaxDownloadBPS:      15_000_000,
+		QUICAddr:              "127.0.0.1:0",
+		TLSConfig:             &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:      2 * time.Second,
+		ServerInstanceID:      "brutal-test-server",
+		AllowLegacyDeviceAuth: true,
+		BrutalMaxUploadBPS:    25_000_000,
+		BrutalMaxDownloadBPS:  15_000_000,
 		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{
 				State: "approved", DeviceID: "client",
@@ -781,10 +780,10 @@ func TestQUICHandshakeNegotiatesAndAppliesBrutal(t *testing.T) {
 		t.Fatal(err)
 	}
 	accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
-		DeviceName: "brutal-client",
+		DeviceName:            "brutal-client",
 		RequestedCapabilities: []string{protocol.CapabilityProxyClient},
-		BrutalUploadBPS: 20_000_000,
-		BrutalDownloadBPS: 30_000_000,
+		BrutalUploadBPS:       20_000_000,
+		BrutalDownloadBPS:     30_000_000,
 	})
 	if !accepted.Success {
 		t.Fatalf("unexpected approval failure: %+v", accepted)

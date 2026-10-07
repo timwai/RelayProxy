@@ -190,8 +190,13 @@ func TestTicketAuthenticatorRequiresCurrentAuthorizationRevision(t *testing.T) {
 			BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: 50_000_000,
 		}, nil
 	})
-	if err := current.Authenticate(context.Background(), request); err != nil {
+	authorization, err := current.AuthenticateAuthorization(context.Background(), request)
+	if err != nil {
 		t.Fatalf("current ticket rejected: %v", err)
+	}
+	if authorization.RelayPolicy == nil || authorization.RelayPolicy.Fingerprint == "" ||
+		authorization.BrutalUploadBPS != 12_500_000 || authorization.BrutalDownloadBPS != 50_000_000 {
+		t.Fatalf("current authorization=%+v", authorization)
 	}
 	if validated.PolicyRevision != claims.PolicyRevision ||
 		validated.AuthorizationRevision != claims.AuthorizationRevision {

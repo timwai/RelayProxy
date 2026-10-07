@@ -45,17 +45,17 @@ type Manager struct {
 	local  LocalDescription
 	lease  time.Duration
 
-	endpointFactory      EndpointFactory
-	punchTimeout         time.Duration
-	keepAlive            time.Duration
-	idleTimeout          time.Duration
-	maxExitSessions      int
-	lowPowerIdleTimeout  time.Duration
-	lowPowerMaxSessions  int
-	networkCheckInterval time.Duration
-	networkSignature     func() string
-	brutalUploadBPS       uint64
-	brutalDownloadBPS     uint64
+	endpointFactory         EndpointFactory
+	punchTimeout            time.Duration
+	keepAlive               time.Duration
+	idleTimeout             time.Duration
+	maxExitSessions         int
+	lowPowerIdleTimeout     time.Duration
+	lowPowerMaxSessions     int
+	networkCheckInterval    time.Duration
+	networkSignature        func() string
+	brutalUploadBPS         uint64
+	brutalDownloadBPS       uint64
 	disableLossCompensation bool
 
 	mu               sync.Mutex
@@ -78,16 +78,16 @@ type failureState struct {
 }
 
 type QUICManagerOptions struct {
-	PunchTimeout         time.Duration
-	KeepAlive            time.Duration
-	IdleTimeout          time.Duration
-	MaxExitSessions      int
-	PortStart            int
-	PortEnd              int
-	UPnPEnabled          bool
-	LowPowerIdleTimeout  time.Duration
-	LowPowerMaxSessions  int
-	NetworkCheckInterval time.Duration
+	PunchTimeout            time.Duration
+	KeepAlive               time.Duration
+	IdleTimeout             time.Duration
+	MaxExitSessions         int
+	PortStart               int
+	PortEnd                 int
+	UPnPEnabled             bool
+	LowPowerIdleTimeout     time.Duration
+	LowPowerMaxSessions     int
+	NetworkCheckInterval    time.Duration
 	NetworkSignature        func() string
 	BrutalUploadBPS         uint64
 	BrutalDownloadBPS       uint64

@@ -229,9 +229,13 @@ class RelayExitService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun readActiveApplicationsJson(): String =
-        core?.let { runCatching { it.activeApplicationsJSON() }.getOrNull() }
-            ?: """{"applications":[],"activeConnections":0,"trackedConnections":0}"""
+    private fun readActiveApplicationsJson(): String {
+        if (!ConfigStore(this).isApplicationMonitorEnabled()) {
+            return """{"enabled":false,"applications":[],"activeConnections":0,"trackedConnections":0}"""
+        }
+        return core?.let { runCatching { it.activeApplicationsJSON() }.getOrNull() }
+            ?: """{"enabled":true,"applications":[],"activeConnections":0,"trackedConnections":0}"""
+    }
 
     private fun shouldRunCore(store: ConfigStore): Boolean {
         return store.hasConnectionConfig()

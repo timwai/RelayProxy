@@ -32,8 +32,8 @@ type ExitRuntimeOptions struct {
 	NetworkCheckInterval    time.Duration
 	VerificationRefresh     time.Duration
 	NetworkSignature        func() string
-	ValidateTicket             TicketCurrentValidator
-	DisableLossCompensation    bool
+	ValidateTicket          TicketCurrentValidator
+	DisableLossCompensation bool
 }
 
 type ExitRuntime struct {

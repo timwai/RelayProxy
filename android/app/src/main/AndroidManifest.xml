@@ -43,6 +43,10 @@
             android:exported="false" />
 
         <activity
+            android:name=".ConnectionMonitorActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>

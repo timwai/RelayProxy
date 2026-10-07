@@ -116,6 +116,14 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Proxy.HTTP.Listen = strings.TrimSpace(c.Proxy.HTTP.Listen)
 	c.Web.Listen = strings.TrimSpace(c.Web.Listen)
 	applyAgentDefaults(c)
+	// QUIC requires TLS. Keep the persisted/desired transport aligned with what
+	// relay-agent can actually run, otherwise tls_enabled=false + auto/quic_only
+	// becomes tcp_only only at runtime and leaves the UI permanently reporting a
+	// restart mismatch after restart.
+	if !c.IsServerTLSEnabled() {
+		c.Transport.Mode = "tcp_only"
+		c.Server.InsecureTLS = false
+	}
 	return ValidateAgentConfig(c)
 }
 

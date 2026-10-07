@@ -251,6 +251,13 @@ class ConfigStore(private val context: Context) {
         prefs.edit().putBoolean("global_message_overlay", enabled).apply()
     }
 
+    fun isApplicationMonitorEnabled(): Boolean =
+        prefs.getBoolean("applicationMonitorEnabled", true)
+
+    fun setApplicationMonitorEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("applicationMonitorEnabled", enabled).apply()
+    }
+
     fun hasConnectionConfig(config: ExitConfig = load()): Boolean =
         config.serverAddress.isNotBlank() &&
             Regex("^(?=.*[a-z])(?=.*[0-9])[a-z0-9]{16}$").matches(config.identityId)

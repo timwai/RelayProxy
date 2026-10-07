@@ -31,6 +31,7 @@ public sealed class TrayIconService : IDisposable
     private readonly WndProc _wndProc;
     private readonly nint _oldWndProc;
     private NotifyIconData _data;
+    private readonly nint _ownedIcon;
     private bool _disposed;
 
     public event Action? ShowRequested;
@@ -47,7 +48,10 @@ public sealed class TrayIconService : IDisposable
         var icon = !string.IsNullOrWhiteSpace(iconPath) && File.Exists(iconPath)
             ? LoadImage(0, iconPath, ImageIcon, 0, 0, LrLoadFromFile | LrDefaultSize)
             : 0;
-        if (icon == 0) icon = LoadIcon(0, (nint)32512);
+        if (icon != 0)
+            _ownedIcon = icon;
+        else
+            icon = LoadIcon(0, (nint)32512);
 
         _data = new NotifyIconData
         {
@@ -115,6 +119,7 @@ public sealed class TrayIconService : IDisposable
         _disposed = true;
         ShellNotifyIcon(NimDelete, ref _data);
         if (_oldWndProc != 0) SetWindowLongPtr(_hwnd, GwlpWndProc, _oldWndProc);
+        if (_ownedIcon != 0) DestroyIcon(_ownedIcon);
         GC.KeepAlive(_wndProc);
     }
 
@@ -153,6 +158,10 @@ public sealed class TrayIconService : IDisposable
 
     [DllImport("user32.dll", EntryPoint = "LoadIconW")]
     private static extern nint LoadIcon(nint instance, nint iconName);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(nint icon);
 
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW", SetLastError = true)]
     private static extern nint SetWindowLongPtr(nint hwnd, int index, nint value);

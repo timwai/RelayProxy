@@ -1,10 +1,10 @@
-// Package gui implements the RelayProxy desktop client. On Windows the native
-// shell, system tray and auxiliary windows are provided by Wails v3, while the
-// Agent core remains connected through the bridge package.
+// Package gui owns the Agent's local management HTTP surface plus optional
+// platform desktop adapters. The default Windows Agent build is a lightweight
+// headless Core used by the WinUI 3 shell. The old Wails/WebView2 desktop shell
+// is compiled only with the explicit wailslegacy build tag.
 //
-// The UI stays plain HTML/CSS/JavaScript rendered from embedded assets. Wails
-// owns the Windows WebView2 lifecycle and Go<->JavaScript transport; non-Windows
-// platforms keep their existing platform-specific behaviour.
+// macOS and other platforms keep their platform-specific behaviour while the
+// shared bridge and local management API remain independent of any desktop UI.
 package gui
 
 import (

@@ -30,6 +30,9 @@ class SettingsActivity : Activity() {
     private lateinit var quicPort: EditText
     private lateinit var tcpPort: EditText
     private lateinit var transport: Spinner
+    private lateinit var brutalUpMbps: EditText
+    private lateinit var brutalDownMbps: EditText
+    private lateinit var disableLossCompensation: Switch
     private lateinit var tlsEnabled: Switch
     private lateinit var insecureTls: Switch
     private lateinit var allowPrivate: Switch
@@ -182,6 +185,39 @@ class SettingsActivity : Activity() {
             )
         }
         connection.addView(ports, topMargin(12))
+
+        brutalUpMbps = numberField("0")
+        brutalDownMbps = numberField("0")
+        val bandwidth = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(
+                labeled("Brutal 上行 Mbps", brutalUpMbps),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            )
+            addView(View(this@SettingsActivity), LinearLayout.LayoutParams(dp(10), 1))
+            addView(
+                labeled("Brutal 下行 Mbps", brutalDownMbps),
+                LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            )
+        }
+        connection.addView(bandwidth, topMargin(12))
+        connection.addView(
+            TextView(this).apply {
+                text = "0 = BBR Aggressive；只有填写实际可用带宽时才启用 Hysteria Brutal。"
+                textSize = 12f
+                setTextColor(muted)
+                setPadding(dp(2), dp(8), dp(2), 0)
+            }
+        )
+        disableLossCompensation = Switch(this)
+        connection.addView(
+            switchRow(
+                "关闭 Brutal 丢包补偿",
+                "通常保持关闭。仅在已知链路需要固定发送速率时使用。",
+                disableLossCompensation,
+            ),
+            topMargin(10),
+        )
         addSectionCard(root, SECTION_CONNECTION, connection)
 
         val policy = card()
@@ -372,6 +408,9 @@ class SettingsActivity : Activity() {
                 quicPort = quicPort.text.toString().toIntOrNull() ?: 443,
                 tcpPort = tcpPort.text.toString().toIntOrNull() ?: 443,
                 transportMode = transportValues.getOrElse(transport.selectedItemPosition) { "auto" },
+                brutalUpMbps = brutalUpMbps.text.toString().toIntOrNull() ?: 0,
+                brutalDownMbps = brutalDownMbps.text.toString().toIntOrNull() ?: 0,
+                disableLossCompensation = disableLossCompensation.isChecked,
                 tlsEnabled = tlsEnabled.isChecked,
                 insecureTls = insecureTls.isChecked,
             )
@@ -411,6 +450,12 @@ class SettingsActivity : Activity() {
         if (section == SECTION_CONNECTION && !Regex("^(?=.*[a-z])(?=.*[0-9])[a-z0-9]{16}$").matches(config.identityId)) {
             identityId.error = "身份 ID 必须是服务端生成的 16 位小写字母数字组合"
             identityId.requestFocus()
+            return
+        }
+        if (section == SECTION_CONNECTION &&
+            (config.brutalUpMbps !in 0..1_000_000 || config.brutalDownMbps !in 0..1_000_000)
+        ) {
+            Toast.makeText(this, "Brutal 带宽必须在 0 到 1000000 Mbps 之间", Toast.LENGTH_SHORT).show()
             return
         }
         if (section == SECTION_PROXY && ((config.socks5Enabled && config.socks5Port !in 1..65535) ||
@@ -456,6 +501,9 @@ class SettingsActivity : Activity() {
         quicPort.setText(cfg.quicPort.toString())
         tcpPort.setText(cfg.tcpPort.toString())
         transport.setSelection(transportValues.indexOf(cfg.transportMode).coerceAtLeast(0))
+        brutalUpMbps.setText(cfg.brutalUpMbps.toString())
+        brutalDownMbps.setText(cfg.brutalDownMbps.toString())
+        disableLossCompensation.isChecked = cfg.disableLossCompensation
         tlsEnabled.isChecked = cfg.tlsEnabled
         insecureTls.isChecked = cfg.insecureTls
         allowPrivate.isChecked = cfg.allowPrivateNetwork

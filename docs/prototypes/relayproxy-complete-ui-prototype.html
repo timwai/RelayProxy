@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RelayProxy · Complete Native UI Prototype</title>
+<style>
+:root{
+ --bg:#f4f7fb;--surface:rgba(255,255,255,.86);--surface2:#fff;--surface3:#f7f9fc;--text:#111827;--muted:#6b7280;
+ --subtle:#94a3b8;--line:rgba(15,23,42,.09);--line2:rgba(15,23,42,.14);--brand:#1677ff;--brand2:#6c63ff;
+ --ok:#16a36a;--warn:#d98b00;--danger:#e5484d;--shadow:0 20px 60px rgba(15,23,42,.12);--shadow2:0 8px 24px rgba(15,23,42,.08);
+ --radius:18px;--radius-sm:11px;--sidebar:rgba(246,248,252,.88)
+}
+html[data-theme="dark"]{
+ --bg:#09111f;--surface:rgba(16,25,42,.88);--surface2:#111c2d;--surface3:#162235;--text:#f8fafc;--muted:#a4b2c5;
+ --subtle:#74839a;--line:rgba(255,255,255,.08);--line2:rgba(255,255,255,.14);--brand:#67a8ff;--brand2:#9a91ff;
+ --ok:#42d392;--warn:#f3bd57;--danger:#ff7d82;--shadow:0 22px 65px rgba(0,0,0,.35);--shadow2:0 8px 30px rgba(0,0,0,.22);
+ --sidebar:rgba(11,18,31,.92)
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--text)}
+body{background:
+ radial-gradient(circle at 8% 0%,rgba(111,111,255,.16),transparent 31%),
+ radial-gradient(circle at 92% 0%,rgba(22,119,255,.13),transparent 28%),var(--bg);font-size:13px}
+button,input,select,textarea{font:inherit;color:inherit} button{cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.appbar{height:64px;position:sticky;top:0;z-index:100;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 22px;background:color-mix(in srgb,var(--bg) 78%,transparent);backdrop-filter:blur(20px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:11px;font-weight:800}.logo{width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,#0868ff,#7368ff);color:#fff;display:grid;place-items:center;box-shadow:0 8px 20px rgba(40,100,255,.28)}.logo:after{content:"↗";font-weight:900}
+.platforms{display:flex;padding:4px;border:1px solid var(--line);border-radius:13px;background:var(--surface);box-shadow:var(--shadow2)}
+.platforms button{border:0;background:transparent;color:var(--muted);font-weight:700;padding:8px 13px;border-radius:9px}.platforms button.active{color:var(--text);background:var(--surface2);box-shadow:0 3px 12px rgba(15,23,42,.09)}
+.toolbar{display:flex;gap:8px}.btn,.iconbtn{border:1px solid var(--line2);background:var(--surface);border-radius:10px;color:var(--text);min-height:37px;padding:0 12px;font-weight:650}.btn:hover,.iconbtn:hover{background:var(--surface2)}.btn.primary{background:var(--brand);border-color:var(--brand);color:white}.btn.danger{color:var(--danger)}
+.stage{max-width:1540px;margin:auto;padding:24px}.note{color:var(--muted);margin:0 0 10px 4px}
+.shell{position:relative;display:grid;grid-template-columns:242px 1fr;min-height:830px;background:var(--surface);border:1px solid var(--line);border-radius:24px;overflow:hidden;box-shadow:var(--shadow);backdrop-filter:blur(26px)}
+.titlebar{position:absolute;top:0;left:0;right:0;height:42px;z-index:3;display:flex;align-items:center;pointer-events:none}
+.platform-macos .titlebar{padding-left:17px;gap:7px}.platform-macos .titlebar i{width:11px;height:11px;border-radius:50%;display:block}.platform-macos .titlebar i:nth-child(1){background:#ff5f57}.platform-macos .titlebar i:nth-child(2){background:#febc2e}.platform-macos .titlebar i:nth-child(3){background:#28c840}
+.platform-windows .shell{border-radius:12px}.platform-windows .titlebar{justify-content:flex-end;padding-right:14px;gap:20px;color:var(--muted)}.platform-windows .titlebar:after{content:"—    □    ×";white-space:pre;font-size:12px}
+.sidebar{padding:52px 12px 14px;background:var(--sidebar);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:830px}
+.sidebrand{display:flex;gap:9px;align-items:center;padding:0 8px 14px;font-weight:800}.sidebrand .logo{width:27px;height:27px;border-radius:8px}
+.groupname{text-transform:uppercase;letter-spacing:1.5px;color:var(--subtle);font-size:9px;font-weight:800;padding:13px 11px 6px}
+.nav{border:0;background:transparent;color:var(--muted);display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 10px;border-radius:10px;font-weight:650;margin:1px 0}.nav:hover{background:var(--surface3);color:var(--text)}.nav.active{background:color-mix(in srgb,var(--brand) 11%,var(--surface2));color:var(--brand)}
+.ico{width:23px;height:23px;border-radius:7px;background:color-mix(in srgb,var(--text) 5%,transparent);display:grid;place-items:center;font-size:12px}.sidebarFooter{margin-top:auto}
+.main{padding:64px 24px 28px;min-width:0;overflow:auto;max-height:830px}.mobileHead,.bottomnav{display:none}
+.page{display:none}.page.active{display:block}
+.pagehead{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:18px}.pagehead h1{font-size:28px;letter-spacing:-.5px;margin:0 0 5px}.desc{color:var(--muted);line-height:1.55}
+.card{background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 7px 22px rgba(15,23,42,.035)}.card+.card{margin-top:14px}
+.cards2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.cards3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.cardtitle{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.cardtitle h2{font-size:15px;margin:0}.eyebrow{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--subtle);font-weight:750}
+.row{display:flex;align-items:center;gap:10px}.between{justify-content:space-between}.grow{flex:1;min-width:0}.stack{display:flex;flex-direction:column;gap:8px}
+.muted{color:var(--muted)}.mini{font-size:11px;color:var(--muted);line-height:1.5}.strong{font-weight:750}.big{font-size:25px;font-weight:820}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:750;background:color-mix(in srgb,var(--ok) 12%,transparent);color:var(--ok)}.badge.blue{color:var(--brand);background:color-mix(in srgb,var(--brand) 11%,transparent)}.badge.warn{color:var(--warn);background:color-mix(in srgb,var(--warn) 12%,transparent)}.badge.red{color:var(--danger);background:color-mix(in srgb,var(--danger) 11%,transparent)}.badge.gray{color:var(--muted);background:var(--surface3)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 6px color-mix(in srgb,var(--ok) 13%,transparent)}
+.switch{width:46px;height:27px;border:0;border-radius:999px;padding:3px;background:color-mix(in srgb,var(--text) 15%,transparent);flex-shrink:0}.switch span{width:21px;height:21px;border-radius:50%;display:block;background:#fff;transition:.18s}.switch.on{background:var(--brand)}.switch.on span{transform:translateX(19px)}
+.field{display:flex;flex-direction:column;gap:6px}.field label{font-size:11px;color:var(--muted);font-weight:650}.control{width:100%;border:1px solid var(--line2);background:var(--surface3);border-radius:9px;padding:9px 10px;min-height:38px}.control:disabled{opacity:.45}.field small{font-size:10px;color:var(--subtle);line-height:1.45}
+.formgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 14px}.full{grid-column:1/-1}
+.setting{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:13px 0;border-bottom:1px solid var(--line)}.setting:last-child{border-bottom:0}.setting b{display:block;margin-bottom:3px}
+.segment{display:inline-flex;padding:3px;border-radius:10px;border:1px solid var(--line);background:var(--surface3)}.segment button{border:0;background:transparent;color:var(--muted);padding:7px 10px;border-radius:7px}.segment button.active{color:var(--text);background:var(--surface2);box-shadow:0 2px 7px rgba(15,23,42,.08)}
+.hero{position:relative;min-height:238px;overflow:hidden}.heroGlow{position:absolute;right:-40px;top:-70px;width:420px;height:320px;background:radial-gradient(circle,rgba(22,119,255,.18),transparent 66%);pointer-events:none}.exitmini{margin-top:26px;position:relative;z-index:1;width:min(380px,100%);display:flex;align-items:center;gap:12px;padding:13px;border:1px solid var(--line);background:var(--surface3);border-radius:14px}.flag{width:39px;height:39px;border-radius:11px;background:var(--surface2);border:1px solid var(--line);display:grid;place-items:center;font-size:21px}
+.mapline{position:absolute;right:10px;bottom:10px;width:57%;height:130px;opacity:.48}
+.metric{padding:15px}.metric .v{font-size:21px;font-weight:820;margin-top:4px}.spark{height:34px;width:100%;margin-top:7px}
+.table{border:1px solid var(--line);border-radius:13px;overflow:hidden}.tr{display:grid;grid-template-columns:1.25fr .85fr .65fr .65fr .55fr;gap:10px;align-items:center;padding:11px 12px;border-top:1px solid var(--line)}.tr:first-child{border-top:0}.th{background:var(--surface3);color:var(--muted);font-size:10px;font-weight:700}.appcell{display:flex;align-items:center;gap:9px;min-width:0}.appico{width:28px;height:28px;border-radius:8px;color:white;display:grid;place-items:center;font-size:11px;font-weight:900;flex-shrink:0}.chrome{background:linear-gradient(135deg,#fbbc05,#ea4335 35%,#34a853 65%,#4285f4)}.telegram{background:#2aabee}.discord{background:#5865f2}.edge{background:#0aa0f5}.spotify{background:#1db954}
+.optiongrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.option{border:1px solid var(--line);background:var(--surface2);padding:13px;border-radius:13px;display:flex;align-items:center;gap:11px;text-align:left}.option.selected{border-color:color-mix(in srgb,var(--brand) 60%,transparent);box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 9%,transparent)}.radio{margin-left:auto;width:18px;height:18px;border:2px solid var(--line2);border-radius:50%}.option.selected .radio{background:var(--brand);border-color:var(--brand);box-shadow:inset 0 0 0 4px var(--surface2)}
+.notice{border:1px solid color-mix(in srgb,var(--brand) 24%,var(--line));background:color-mix(in srgb,var(--brand) 7%,var(--surface2));color:var(--muted);padding:11px 13px;border-radius:10px;line-height:1.55}.notice.warn{border-color:color-mix(in srgb,var(--warn) 32%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--surface2))}.notice.danger{border-color:color-mix(in srgb,var(--danger) 28%,var(--line));background:color-mix(in srgb,var(--danger) 7%,var(--surface2))}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.spacer{height:12px}.divider{height:1px;background:var(--line);margin:15px 0}
+.rule{display:grid;grid-template-columns:34px 1.3fr 1fr .7fr .75fr 140px;gap:9px;align-items:center;padding:11px;border-top:1px solid var(--line)}.rule:first-child{border-top:0}.drag{color:var(--subtle);font-size:17px;text-align:center}.ruleops{display:flex;justify-content:flex-end;gap:4px}.tinybtn{border:0;background:transparent;color:var(--muted);padding:5px 6px;border-radius:6px}.tinybtn:hover{background:var(--surface3);color:var(--text)}
+.chips{display:flex;gap:5px;flex-wrap:wrap}.chip{font-size:10px;background:var(--surface3);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+.log{background:#07101d;color:#c8d6e8;border-radius:12px;padding:14px;min-height:290px;max-height:400px;overflow:auto;font:11px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;user-select:text}
+.gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.gallery button{border:1px solid var(--line);background:var(--surface2);border-radius:12px;padding:14px;text-align:left}.gallery button:hover{border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
+.phoneOnly{display:none}
+
+/* modal + drawer */
+.overlay{position:fixed;inset:0;z-index:300;background:rgba(6,12,23,.52);backdrop-filter:blur(5px);display:none;align-items:center;justify-content:center;padding:20px}.overlay.show{display:flex}
+.modal{width:min(680px,calc(100vw - 28px));max-height:min(820px,calc(100vh - 34px));overflow:auto;background:var(--surface2);border:1px solid var(--line);border-radius:18px;box-shadow:0 26px 90px rgba(0,0,0,.3)}
+.modal.wide{width:min(900px,calc(100vw - 28px))}.modalhead{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:18px 20px;border-bottom:1px solid var(--line)}.modalhead h2{font-size:17px;margin:0}.close{border:0;background:var(--surface3);width:31px;height:31px;border-radius:9px;color:var(--muted);font-size:18px}.modalbody{padding:19px 20px}.modalfoot{display:flex;justify-content:flex-end;gap:8px;padding:13px 20px;border-top:1px solid var(--line);background:var(--surface3)}
+.messagePopup{width:min(440px,calc(100vw - 28px));overflow:hidden}.messagePopup .modalbody{padding-top:20px}.messagePopup .bigIcon{width:42px;height:42px;border-radius:13px;background:color-mix(in srgb,var(--brand) 10%,var(--surface3));border:1px solid color-mix(in srgb,var(--brand) 20%,var(--line));color:var(--brand);font-weight:850}.messagePopup.normal .bigIcon{color:var(--brand2);background:color-mix(in srgb,var(--brand2) 10%,var(--surface3));border-color:color-mix(in srgb,var(--brand2) 22%,var(--line))}.messagePopup.important .bigIcon{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,var(--surface3));border-color:color-mix(in srgb,var(--danger) 22%,var(--line))}.codebox{font-size:34px;font-weight:850;letter-spacing:8px;text-align:center;padding:17px;background:var(--surface3);border:1px solid var(--line);border-radius:13px;margin:16px 0}
+.toast{position:fixed;z-index:500;right:22px;bottom:22px;background:#111827;color:white;padding:11px 14px;border-radius:10px;box-shadow:var(--shadow);opacity:0;transform:translateY(12px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+.tray{position:fixed;z-index:260;top:57px;right:22px;width:290px;padding:9px;background:var(--surface2);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);display:none}.tray.show{display:block}.tray .item{display:flex;align-items:center;justify-content:space-between;padding:9px 10px;border-radius:8px}.tray .item:hover{background:var(--surface3)}
+.progress{height:7px;background:var(--surface3);border-radius:999px;overflow:hidden}.progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--brand2));transition:.5s}
+.appSelectorList{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;max-height:420px;overflow:auto}.appRow{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:11px;padding:10px;background:var(--surface2)}.appRow.selected{background:color-mix(in srgb,var(--brand) 7%,var(--surface2));border-color:color-mix(in srgb,var(--brand) 30%,var(--line))}
+.check{width:18px;height:18px;border-radius:5px;border:2px solid var(--line2);margin-left:auto;display:grid;place-items:center;color:white}.selected .check{background:var(--brand);border-color:var(--brand)}.selected .check:after{content:"✓";font-size:11px;font-weight:900}
+
+/* Android form factor */
+.platform-android .shell{display:block;max-width:430px;min-height:880px;margin:auto;border:8px solid #111827;border-radius:38px;overflow:hidden}.platform-android .titlebar,.platform-android .sidebar{display:none}.platform-android .main{padding:15px 13px 88px;max-height:864px}.platform-android .mobileHead{display:flex;align-items:center;justify-content:space-between;padding:4px 2px 13px}.platform-android .pagehead{display:none}.platform-android .cards2,.platform-android .cards3,.platform-android .formgrid,.platform-android .optiongrid,.platform-android .gallery{grid-template-columns:1fr}.platform-android .hero{min-height:225px}.platform-android .mapline{width:90%;right:-30px}.platform-android .tr{grid-template-columns:1fr .65fr}.platform-android .tr>*:nth-child(2),.platform-android .tr>*:nth-child(4),.platform-android .tr>*:nth-child(5){display:none}.platform-android .rule{grid-template-columns:26px 1fr 72px}.platform-android .rule>*:nth-child(3),.platform-android .rule>*:nth-child(4),.platform-android .rule>*:nth-child(5){display:none}.platform-android .bottomnav{display:grid;position:absolute;left:0;right:0;bottom:0;z-index:20;grid-template-columns:repeat(5,1fr);background:color-mix(in srgb,var(--surface2) 90%,transparent);backdrop-filter:blur(18px);border-top:1px solid var(--line);padding:7px 7px 9px}.platform-android .bottomnav button{border:0;background:transparent;color:var(--muted);font-size:10px;padding:5px 2px}.platform-android .bottomnav button.active{color:var(--brand);font-weight:800}.platform-android .phoneOnly{display:block}.platform-android .desktopOnly{display:none}.platform-android .appSelectorList{grid-template-columns:1fr}.platform-android .toolbar .platformHide{display:none}
+@media(max-width:980px){.shell:not(.platform-android .shell){grid-template-columns:80px 1fr}.sidebar{padding-inline:8px}.sidebrand span,.groupname,.nav span:last-child{display:none}.sidebrand,.nav{justify-content:center}.main{padding-inline:14px}.cards2,.cards3,.gallery{grid-template-columns:1fr}.rule{min-width:850px}.table.ruleTable{overflow:auto}.formgrid{grid-template-columns:1fr}.full{grid-column:auto}}
+</style>
+</head>
+<body>
+<header class="appbar">
+ <div class="brand"><div class="logo"></div><div>RelayProxy <span class="muted" style="font-weight:500">完整 UI 原型</span></div></div>
+ <div class="platforms" id="platforms"><button class="active" data-platform="macos">macOS</button><button data-platform="windows">Windows</button><button data-platform="android">Android</button></div>
+ <div class="toolbar"><button class="iconbtn platformHide" id="trayBtn">托盘 / 菜单栏</button><button class="iconbtn" id="dialogsBtn">弹窗测试</button><button class="iconbtn" id="themeBtn">◐ 主题</button></div>
+</header>
+
+<div class="stage platform-macos" id="stage">
+ <div class="note" id="platformNote">macOS · 目标实现：SwiftUI + AppKit · 原生信息架构</div>
+ <div class="shell">
+  <div class="titlebar"><i></i><i></i><i></i></div>
+  <aside class="sidebar">
+   <div class="sidebrand"><div class="logo"></div><span>RelayProxy</span></div>
+   <div class="groupname">概览</div>
+   <button class="nav active" data-page="overview"><span class="ico">◉</span><span>运行概览</span></button>
+   <button class="nav" data-page="devices"><span class="ico">▱</span><span>身份与设备</span></button>
+   <div class="groupname">网络</div>
+   <button class="nav" data-page="connection"><span class="ico">⌁</span><span>连接与路径</span></button>
+   <button class="nav" data-page="exits"><span class="ico">↗</span><span>出口选择</span></button>
+   <button class="nav" data-page="proxy"><span class="ico">⇄</span><span>本机代理</span></button>
+   <button class="nav" data-page="exitshare"><span class="ico">◇</span><span>本机出口共享</span></button>
+   <div class="groupname">策略</div>
+   <button class="nav" data-page="routing"><span class="ico">⑂</span><span>分流规则</span></button>
+   <button class="nav" data-page="rdp"><span class="ico">▣</span><span>远程桌面</span></button>
+   <button class="nav" data-page="messages"><span class="ico">✦</span><span>消息</span></button>
+   <div class="groupname">观察</div>
+   <button class="nav" data-page="monitor"><span class="ico">⌁</span><span>实时监控</span></button>
+   <button class="nav" data-page="diagnostics"><span class="ico">⌘</span><span>诊断与日志</span></button>
+   <div class="sidebarFooter"><button class="nav" data-page="settings"><span class="ico">⚙</span><span>设置</span></button></div>
+  </aside>
+
+  <main class="main">
+   <div class="mobileHead"><div class="row"><div class="logo" style="width:28px;height:28px;border-radius:8px"></div><b>RelayProxy</b></div><button class="iconbtn" data-page="settings">⚙</button></div>
+
+   <!-- OVERVIEW -->
+   <section class="page active" id="page-overview">
+    <div class="pagehead"><div><h1>运行概览</h1><div class="desc">连接状态、当前出口、数据路径、VPN / Exit / 本机代理与实时流量。</div></div><div class="actions"><button class="btn" data-page="diagnostics">诊断</button><button class="btn primary" id="mainPower">暂停代理</button></div></div>
+    <div class="cards2">
+     <div class="card hero">
+      <div class="row between"><div class="row"><span class="dot"></span><div><div class="big" id="overviewState">已连接</div><div class="mini">00:12:34 · 控制隧道正常</div></div></div><span class="badge">已审批</span></div>
+      <div class="exitmini"><div class="flag" id="heroFlag">🇺🇸</div><div class="grow"><b id="heroExitName">Los Angeles</b><div class="mini" id="heroExitMeta">Public Direct · QUIC · 23 ms</div><div class="chips" style="margin-top:5px"><span class="badge">公网直连</span><span class="badge blue">UDP 原生数据报</span></div></div><button class="tinybtn" data-page="exits">›</button></div>
+      <svg class="mapline" viewBox="0 0 400 130"><path d="M15 95 C65 65 100 70 142 82 S220 75 268 52 S335 43 385 22" fill="none" stroke="var(--brand)" stroke-width="3"/><circle cx="15" cy="95" r="6" fill="var(--brand)"/><circle cx="385" cy="22" r="6" fill="var(--ok)"/></svg><div class="heroGlow"></div>
+     </div>
+     <div class="card">
+      <div class="cardtitle"><div><div class="eyebrow">Data Path</div><h2>路径状态</h2></div><span class="badge">优秀</span></div>
+      <div class="setting"><div><b>Public Direct</b><span class="mini">已验证公网端点，当前生效</span></div><span class="badge">Active</span></div>
+      <div class="setting"><div><b>P2P QUIC</b><span class="mini">备用路径 · 已发现候选</span></div><span class="badge blue">Ready</span></div>
+      <div class="setting"><div><b>Relay</b><span class="mini">最后回退路径</span></div><span class="badge gray">Standby</span></div>
+      <div class="setting"><div><b>电源策略</b><span class="mini">标准 · 保持直连 Session</span></div><span>标准</span></div>
+     </div>
+    </div>
+    <div class="cards3" style="margin-top:14px">
+     <div class="card metric"><div class="mini">下载速度</div><div class="v">82.4 MB/s</div><svg class="spark" viewBox="0 0 120 34"><path d="M0 27L12 23L24 25L36 14L48 20L60 10L72 17L84 7L96 15L108 5L120 10" fill="none" stroke="#1677ff" stroke-width="2"/></svg></div>
+     <div class="card metric"><div class="mini">上传速度</div><div class="v">18.6 MB/s</div><svg class="spark" viewBox="0 0 120 34"><path d="M0 30L12 25L24 17L36 22L48 13L60 19L72 11L84 15L96 6L108 13L120 8" fill="none" stroke="#7c4dff" stroke-width="2"/></svg></div>
+     <div class="card metric"><div class="mini">往返延迟</div><div class="v">23 ms</div><svg class="spark" viewBox="0 0 120 34"><path d="M0 23L12 20L24 21L36 18L48 20L60 16L72 18L84 14L96 16L108 12L120 13" fill="none" stroke="#16a36a" stroke-width="2"/></svg></div>
+    </div>
+    <div class="cards3" style="margin-top:14px">
+     <div class="card"><div class="row between"><div><div class="eyebrow">VPN</div><h2 style="margin:4px 0">系统流量接管</h2><div class="mini">按规则分流 · 12 个应用</div></div><button class="switch on" id="vpnQuick"><span></span></button></div></div>
+     <div class="card"><div class="row between"><div><div class="eyebrow">Exit</div><h2 style="margin:4px 0">网络出口</h2><div class="mini">正在承载 4 条转发</div></div><button class="switch on"><span></span></button></div></div>
+     <div class="card"><div class="row between"><div><div class="eyebrow">Loopback</div><h2 style="margin:4px 0">本机代理</h2><div class="mini">SOCKS5 :1080 · HTTP :8080</div></div><button class="switch on"><span></span></button></div></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+     <div class="cardtitle"><h2>最近连接</h2><button class="btn" data-page="monitor">查看全部</button></div>
+     <div class="table">
+      <div class="tr"><div class="appcell"><span class="appico chrome">C</span><div><b>Chrome</b><div class="mini">youtube.com:443</div></div></div><div>🇺🇸 Los Angeles</div><div style="color:var(--brand)">↓ 8.2 MB/s</div><div style="color:var(--brand2)">↑ 324 KB/s</div><span class="badge">Direct</span></div>
+      <div class="tr"><div class="appcell"><span class="appico telegram">T</span><div><b>Telegram</b><div class="mini">149.154.167.99:443</div></div></div><div>🇸🇬 Singapore</div><div style="color:var(--brand)">↓ 1.4 MB/s</div><div style="color:var(--brand2)">↑ 92 KB/s</div><span class="badge blue">P2P</span></div>
+      <div class="tr"><div class="appcell"><span class="appico discord">D</span><div><b>Discord</b><div class="mini">gateway.discord.gg:443</div></div></div><div>🇯🇵 Tokyo</div><div>892 KB/s</div><div>61 KB/s</div><span class="badge warn">Relay</span></div>
+     </div>
+    </div>
+   </section>
+
+   <!-- DEVICES -->
+   <section class="page" id="page-devices">
+    <div class="pagehead"><div><h1>身份与设备</h1><div class="desc">身份隔离、设备 ID、审批状态与服务端授予的能力。</div></div><button class="btn" id="approvalStateBtn">模拟审批状态</button></div>
+    <div class="cards2">
+     <div class="card"><div class="cardtitle"><h2>当前身份</h2><span class="badge">已连接</span></div>
+      <div class="setting"><div><b>Identity ID</b><span class="mini">公开隔离标识，设备仍使用安装私钥签名</span></div><div class="row"><code>ab12cd34ef56gh78</code><button class="tinybtn copyBtn">复制</button></div></div>
+      <div class="setting"><div><b>设备名称</b></div><span>MacBook Pro</span></div>
+      <div class="setting"><div><b>设备 ID</b></div><code>device-8c71…a4f2</code></div>
+      <div class="setting"><div><b>审批状态</b></div><span class="badge" id="approvalBadge">已审批</span></div>
+     </div>
+     <div class="card"><div class="cardtitle"><h2>当前设备能力</h2><span class="mini">服务端独立授权</span></div>
+      <div class="setting"><div><b>proxy.client</b><span class="mini">使用授权出口代理本机流量</span></div><span class="badge">允许</span></div>
+      <div class="setting"><div><b>exit</b><span class="mini">承载其他设备的转发</span></div><span class="badge">允许</span></div>
+      <div class="setting"><div><b>rdp.client</b><span class="mini">连接服务端授权的 RDP 设备</span></div><span class="badge">允许</span></div>
+      <div class="setting"><div><b>messages</b><span class="mini">接收消息与验证码</span></div><span class="badge">允许</span></div>
+     </div>
+    </div>
+    <div class="card"><div class="cardtitle"><h2>同身份 / 显式授权设备</h2><button class="btn">刷新</button></div>
+     <div class="optiongrid">
+      <div class="option"><div class="flag">🖥️</div><div><b>Windows Desktop</b><div class="mini">Windows · 在线 · proxy.client / rdp.client</div></div><span class="badge">在线</span></div>
+      <div class="option"><div class="flag">📱</div><div><b>Pixel 9 Pro</b><div class="mini">Android · 在线 · proxy.client / exit / p2p</div></div><span class="badge">在线</span></div>
+      <div class="option"><div class="flag">🧰</div><div><b>Home Server</b><div class="mini">Linux · 在线 · exit</div></div><span class="badge">在线</span></div>
+      <div class="option"><div class="flag">💻</div><div><b>Office PC</b><div class="mini">Windows · 离线 · 显式授权 RDP</div></div><span class="badge gray">离线</span></div>
+     </div>
+    </div>
+   </section>
+
+   <!-- CONNECTION -->
+   <section class="page" id="page-connection">
+    <div class="pagehead"><div><h1>连接与数据路径</h1><div class="desc">Server、身份、QUIC/TLS、Public Direct、P2P、Relay 回退与网络调度。</div></div><div class="actions"><button class="btn" id="reloadConfig">重载配置</button><button class="btn primary" id="saveConnection">保存连接设置</button></div></div>
+    <div class="card"><div class="cardtitle"><div><div class="eyebrow">Identity</div><h2>服务器与设备</h2></div><span class="badge blue">认证与挑战签名</span></div>
+     <div class="formgrid">
+      <div class="field"><label>Relay Server</label><input class="control" value="relay.example.com"><small>只填写主机名或 IP，端口单独配置。</small></div>
+      <div class="field"><label>设备名称</label><input class="control" value="MacBook Pro"></div>
+      <div class="field full"><label>16 位 Identity ID</label><div class="row"><input class="control" value="ab12cd34ef56gh78"><button class="btn copyBtn">复制</button></div><small>由 Server 自动生成的小写字母数字组合。</small></div>
+     </div>
+    </div>
+    <div class="cards2">
+     <div class="card"><div class="cardtitle"><h2>传输参数与 TLS</h2><span class="badge">推荐</span></div>
+      <div class="field"><label>传输方式</label><select class="control"><option>自动 · 优先 QUIC，失败回退 TLS</option><option>仅 QUIC</option><option>仅 TCP/TLS</option></select></div><div class="spacer"></div>
+      <div class="formgrid"><div class="field"><label>QUIC / UDP 端口</label><input class="control" value="443"></div><div class="field"><label>TCP / TLS 端口</label><input class="control" value="443"></div></div>
+      <div class="setting"><div><b>启用 TLS</b><span class="mini">保护隧道内容并验证系统信任链</span></div><button class="switch on"><span></span></button></div>
+      <div class="setting"><div><b>允许自签名证书</b><span class="mini">仅可信自建环境</span></div><button class="switch" id="insecureTls"><span></span></button></div>
+     </div>
+     <div class="card"><div class="cardtitle"><h2>路径策略</h2><span class="badge blue">QUIC fork</span></div>
+      <div class="field"><label>路径模式</label><select class="control" id="pathMode"><option>自动 · Public Direct → P2P → Relay</option><option>仅直连 · Public Direct / P2P，不回退 Relay</option><option>仅 P2P</option><option>仅 Relay</option></select></div>
+      <div class="setting"><div><b>P2P 备用直连</b><span class="mini">公网直连不可用时继续打洞</span></div><button class="switch on"><span></span></button></div>
+      <div class="setting"><div><b>自动回退 Relay</b><span class="mini">只在自动模式生效</span></div><button class="switch on"><span></span></button></div>
+      <div class="field"><label>手动公网地址（可选）</label><input class="control" placeholder="edge.example.com:443"><small>用于端口转发 / 云主机 DNS 等场景，会主动验证。</small></div>
+     </div>
+    </div>
+    <div class="cards2">
+     <div class="card"><div class="cardtitle"><h2>直连高级参数</h2></div><div class="formgrid"><div class="field"><label>打洞超时 / ms</label><input class="control" value="3500"></div><div class="field"><label>空闲回收 / 秒</label><input class="control" value="90"></div><div class="field"><label>最多 Exit 会话</label><input class="control" value="4"></div><div class="field"><label>失败退避</label><select class="control"><option>指数退避</option><option>固定 5 秒</option></select></div></div></div>
+     <div class="card phoneOnly"><div class="cardtitle"><h2>Android 网络调度</h2><span class="badge">Android</span></div><div class="field"><label>首选网络</label><select class="control"><option>Wi‑Fi 优先</option><option>移动数据优先</option></select></div><div class="setting"><div><b>自动故障切换</b><span class="mini">首选网络无互联网时切换，恢复后切回</span></div><button class="switch on"><span></span></button></div><div class="setting"><div><b>IPv6 转发</b><span class="mini">默认关闭；确认出口支持 IPv6 后启用</span></div><button class="switch"><span></span></button></div></div>
+    </div>
+   </section>
+
+   <!-- EXITS -->
+   <section class="page" id="page-exits">
+    <div class="pagehead"><div><h1>出口选择</h1><div class="desc">只显示当前身份或管理员显式授权的出口；支持稳定设备 ID、RTT 与实际路径测速。</div></div><div class="actions"><button class="btn" id="speedAll">全部测速</button><button class="btn primary">应用切换</button></div></div>
+    <div class="notice">自动选择仅在有一个授权在线出口时直接生效；原选择被撤销或删除时会保留“不可用旧选择”，不会静默改选其他出口或 DIRECT。</div>
+    <div class="spacer"></div>
+    <div class="optiongrid" id="exitOptions">
+     <button class="option selected" data-exit="Los Angeles|🇺🇸|Public Direct · QUIC · 23 ms"><div class="flag">🇺🇸</div><div><b>Los Angeles</b><div class="mini">23 ms · Public Direct · UDP</div><div class="chips"><span class="badge">在线</span><span class="badge blue">Public Direct</span></div></div><span class="radio"></span></button>
+     <button class="option" data-exit="Singapore|🇸🇬|P2P QUIC · 48 ms"><div class="flag">🇸🇬</div><div><b>Singapore</b><div class="mini">48 ms · P2P QUIC · UDP</div><div class="chips"><span class="badge">在线</span><span class="badge blue">P2P</span></div></div><span class="radio"></span></button>
+     <button class="option" data-exit="Tokyo|🇯🇵|Relay · 62 ms"><div class="flag">🇯🇵</div><div><b>Tokyo</b><div class="mini">62 ms · QUIC Relay</div><div class="chips"><span class="badge">在线</span><span class="badge warn">Relay</span></div></div><span class="radio"></span></button>
+     <button class="option" data-exit="Hong Kong|🇭🇰|Direct · 38 ms"><div class="flag">🇭🇰</div><div><b>Hong Kong</b><div class="mini">38 ms · Public Direct</div><div class="chips"><span class="badge">在线</span><span class="badge blue">Direct</span></div></div><span class="radio"></span></button>
+     <button class="option" data-exit="Office Exit|🏢|不可用旧选择"><div class="flag">🏢</div><div><b>Office Exit</b><div class="mini">原设备 ID 已撤销授权</div><span class="badge red">已撤销</span></div><span class="radio"></span></button>
+    </div>
+    <div class="card"><div class="cardtitle"><h2>出口上下行测速</h2><span class="mini">直接测试本机到出口的实际路径</span></div><div class="formgrid"><div class="field"><label>测速出口</label><select class="control"><option>Los Angeles</option><option>Singapore</option><option>Tokyo</option></select></div><div class="field"><label>每方向时长</label><select class="control"><option>3 秒</option><option>5 秒</option><option>10 秒</option></select></div></div><div class="spacer"></div><button class="btn primary" id="speedSingle">开始测速</button></div>
+   </section>
+
+   <!-- PROXY -->
+   <section class="page" id="page-proxy">
+    <div class="pagehead"><div><h1>本机代理</h1><div class="desc">SOCKS5 / HTTP 独立控制，Windows 透明代理服务，以及 Android VPN 接管范围。</div></div><button class="btn primary" id="saveProxy">保存代理设置</button></div>
+    <div class="cards2">
+     <div class="card"><div class="cardtitle"><h2>SOCKS5</h2><button class="switch on"><span></span></button></div><div class="mini">支持 TCP 与 UDP ASSOCIATE；使用 socks5h 可由出口解析域名。</div><div class="spacer"></div><div class="formgrid"><div class="field"><label>监听地址</label><select class="control"><option>127.0.0.1 · 仅本机</option><option>0.0.0.0 · 局域网可访问</option></select></div><div class="field"><label>端口</label><input class="control proxyPort" value="1080"></div></div><div class="spacer"></div><div class="row"><code class="grow">socks5h://127.0.0.1:1080</code><button class="btn copyBtn">复制</button></div></div>
+     <div class="card"><div class="cardtitle"><h2>HTTP / HTTPS CONNECT</h2><button class="switch on"><span></span></button></div><div class="mini">普通 HTTP 代理与 HTTPS CONNECT 隧道；只绑定配置的监听地址。</div><div class="spacer"></div><div class="formgrid"><div class="field"><label>监听地址</label><select class="control"><option>127.0.0.1 · 仅本机</option><option>0.0.0.0 · 局域网可访问</option></select></div><div class="field"><label>端口</label><input class="control proxyPort" value="8080"></div></div><div class="spacer"></div><div class="row"><code class="grow">http://127.0.0.1:8080</code><button class="btn copyBtn">复制</button></div></div>
+    </div>
+    <div class="card desktopOnly"><div class="cardtitle"><div><h2>Windows 系统透明代理</h2><div class="mini">按进程代理 TCP / UDP；首次安装 / 修复 Network Service 会弹一次 UAC。</div></div><span class="badge">运行条件已满足</span></div>
+     <div class="setting"><div><b>启用系统透明代理</b><span class="mini">新连接生效；保存后需要重启客户端</span></div><button class="switch on"><span></span></button></div>
+     <div class="cards3"><div class="notice"><b>服务</b><br>已安装 · Automatic</div><div class="notice"><b>抓包后端</b><br>运行中 · 等待首包</div><div class="notice"><b>数据面</b><br>抓包 26 · 分类 26 · PROXY 18</div></div><div class="spacer"></div>
+     <div class="actions"><button class="btn" id="serviceRepair">安装 / 修复服务</button><button class="btn danger" id="serviceRemove">卸载服务</button></div>
+    </div>
+    <div class="card phoneOnly"><div class="cardtitle"><div><h2>Android VPN 与应用范围</h2><div class="mini">应用范围只决定哪些流量进入 VPN，最终动作仍由分流模式 / 规则决定。</div></div><button class="switch on" id="vpnSwitch"><span></span></button></div>
+     <div class="field"><label>应用接管范围</label><select class="control" id="vpnScope"><option>全部应用</option><option>仅选中应用</option><option>排除选中应用</option></select></div><div class="spacer"></div>
+     <div class="row between"><div><b>已选择 12 个应用 / 服务</b><div class="mini">支持用户应用、系统应用、无桌面入口系统服务</div></div><button class="btn" id="openAppSelector">选择应用</button></div>
+     <div class="setting"><div><b>Mapped DNS</b><span class="mini">TUN 内返回 Fake-IP，SOCKS 建连时恢复原始域名交给出口解析</span></div><span class="badge">启用</span></div>
+    </div>
+   </section>
+
+   <!-- EXIT SHARE -->
+   <section class="page" id="page-exitshare">
+    <div class="pagehead"><div><h1>本机出口共享</h1><div class="desc">决定本设备作为 Exit 时允许访问的网络范围、上游代理与域名 / IP ACL。</div></div><button class="btn primary" id="saveExitShare">保存出口设置</button></div>
+    <div class="card"><div class="cardtitle"><div><h2>出口共享</h2><div class="mini">最终权限同时受服务端设备能力和访问规则约束。</div></div><button class="switch on"><span></span></button></div>
+     <div class="cards3"><label class="option selected"><div><b>互联网</b><div class="mini">公网网站和服务</div></div><span class="check"></span></label><label class="option selected"><div><b>私有网络</b><div class="mini">本机所在局域网</div></div><span class="check"></span></label><label class="option"><div><b>回环地址</b><div class="mini">本机本地服务</div></div><span class="check"></span></label></div>
+    </div>
+    <div class="cards2">
+     <div class="card"><div class="cardtitle"><h2>出口网络</h2></div><div class="field"><label>访问方式</label><select class="control" id="egressMode"><option>本机直连</option><option>SOCKS5 上游代理</option><option>HTTP 上游代理</option></select></div><div class="spacer"></div><div class="field"><label>上游代理地址</label><input class="control" placeholder="host:port" disabled id="upstreamAddr"></div><div class="formgrid" style="margin-top:12px"><div class="field"><label>用户名</label><input class="control" disabled id="upUser"></div><div class="field"><label>密码</label><input type="password" class="control" disabled id="upPass"></div></div><div class="notice warn" style="margin-top:12px">上游代理模式仅支持 TCP；UDP 会明确拒绝，不会绕过代理直连。</div></div>
+     <div class="card"><div class="cardtitle"><h2>域名与 IP 访问规则</h2></div><div class="field"><label>匹配模式</label><select class="control"><option>不附加筛选</option><option>允许列表 · 仅允许匹配目标</option><option>拒绝列表 · 阻止匹配目标</option></select></div><div class="spacer"></div><div class="field"><label>域名</label><textarea class="control" rows="4" placeholder="*.example.com&#10;internal.example.net"></textarea></div><div class="spacer"></div><div class="field"><label>IP / CIDR / 范围</label><textarea class="control" rows="4" placeholder="10.0.0.0/8&#10;192.168.1.10-192.168.1.30"></textarea></div></div>
+    </div>
+   </section>
+
+   <!-- ROUTING -->
+   <section class="page" id="page-routing">
+    <div class="pagehead"><div><h1>代理与路由</h1><div class="desc">分流模式、默认动作、组合规则、应用范围、透明排除与原生数据报要求。</div></div><div class="actions"><button class="btn" id="discardDraft">放弃修改</button><button class="btn primary" id="saveRules">保存并应用规则</button></div></div>
+    <div class="card"><div class="row between" style="gap:20px;flex-wrap:wrap"><div><b>路由模式</b><div class="mini">第一条启用且匹配的规则生效。</div></div><div class="segment" id="routingMode"><button class="active">按规则分流</button><button>全局代理</button><button>全局直连</button></div><div class="field" style="min-width:180px"><label>未命中时</label><select class="control"><option>代理</option><option>直连</option><option>拒绝</option></select></div></div></div>
+    <div class="card phoneOnly"><div class="cardtitle"><h2>VPN 应用接管范围</h2><button class="btn" id="openAppSelector2">修改</button></div><div class="row between"><div><b>仅选中应用</b><div class="mini">已选择 12 个应用 / 系统服务</div></div><span class="badge blue">Android 10+</span></div></div>
+    <div class="card"><div class="cardtitle"><div><h2>匹配规则 · 从上到下执行</h2><div class="mini">进程、应用、目标、端口和协议可组合；留空表示不限制。</div></div><button class="btn primary" id="newRule">＋ 添加规则</button></div>
+     <div class="table ruleTable" id="ruleTable">
+      <div class="rule th"><div></div><div>优先级 / 规则</div><div>匹配条件</div><div>协议</div><div>动作 / 出口</div><div>操作</div></div>
+      <div class="rule" data-rule="浏览器代理"><div class="drag">⋮⋮</div><div><b>浏览器代理</b><div class="mini">#1 · 已启用</div></div><div class="chips"><span class="chip">Chrome</span><span class="chip">Edge</span><span class="chip">*.google.com</span></div><span>全部</span><div><span class="badge blue">代理</span><div class="mini">Los Angeles</div></div><div class="ruleops"><button class="tinybtn upRule">↑</button><button class="tinybtn downRule">↓</button><button class="tinybtn editRule">编辑</button><button class="tinybtn deleteRule">删除</button></div></div>
+      <div class="rule" data-rule="Telegram 全代理"><div class="drag">⋮⋮</div><div><b>Telegram 全代理</b><div class="mini">#2 · 已启用</div></div><div class="chips"><span class="chip">Telegram</span><span class="chip">任意目标</span></div><span>TCP+UDP</span><div><span class="badge blue">代理</span><div class="mini">Singapore · 原生数据报</div></div><div class="ruleops"><button class="tinybtn upRule">↑</button><button class="tinybtn downRule">↓</button><button class="tinybtn editRule">编辑</button><button class="tinybtn deleteRule">删除</button></div></div>
+      <div class="rule" data-rule="公司内网直连"><div class="drag">⋮⋮</div><div><b>公司内网直连</b><div class="mini">#3 · 已启用</div></div><div class="chips"><span class="chip">10.0.0.0/8</span><span class="chip">*.corp.local</span></div><span>全部</span><div><span class="badge">直连</span><div class="mini">RelayProxy 处理直连</div></div><div class="ruleops"><button class="tinybtn upRule">↑</button><button class="tinybtn downRule">↓</button><button class="tinybtn editRule">编辑</button><button class="tinybtn deleteRule">删除</button></div></div>
+      <div class="rule" data-rule="阻断广告"><div class="drag">⋮⋮</div><div><b>阻断广告</b><div class="mini">#4 · 已停用</div></div><div class="chips"><span class="chip">*.ads.example</span></div><span>全部</span><div><span class="badge red">阻断</span></div><div class="ruleops"><button class="tinybtn upRule">↑</button><button class="tinybtn downRule">↓</button><button class="tinybtn editRule">编辑</button><button class="tinybtn deleteRule">删除</button></div></div>
+     </div>
+    </div>
+    <div class="cards2 desktopOnly">
+     <div class="card"><div class="cardtitle"><h2>透明代理排除进程</h2></div><textarea class="control" rows="6">relayproxy.exe
+updater.exe
+backup-agent.exe</textarea><div class="mini" style="margin-top:7px">本程序及中继连接自动直连；此列表优先于规则。</div></div>
+     <div class="card"><div class="cardtitle"><h2>域名识别说明</h2></div><div class="notice">透明代理通过捕获的 DNS 应答关联域名。加密 DNS、缓存命中和共享 IP 可能只能识别 IP；没有可靠关联时域名条件不会命中。</div><div class="setting"><div><b>由 RelayProxy 处理 DIRECT</b><span class="mini">使直连连接也进入实时监控</span></div><button class="switch on"><span></span></button></div></div>
+    </div>
+   </section>
+
+   <!-- RDP -->
+   <section class="page" id="page-rdp">
+    <div class="pagehead"><div><h1>远程桌面</h1><div class="desc">仅展示服务端明确授权给当前 Agent 的 RDP 设备；优先 P2P，失败自动回退 Relay。</div></div><button class="btn">刷新授权设备</button></div>
+    <div class="notice">连接后创建本机回环入口；Windows 桌面端可自动启动 mstsc。未获授权的设备不会下发到 Agent。</div><div class="spacer"></div>
+    <div class="optiongrid">
+     <div class="card"><div class="row between"><div class="row"><div class="flag">🖥️</div><div><b>Office Windows</b><div class="mini">在线 · Windows 11 Pro</div></div></div><span class="badge">已授权</span></div><div class="setting"><span>路径偏好</span><span>P2P → Relay</span></div><button class="btn primary rdpConnect" data-device="Office Windows">一键连接</button></div>
+     <div class="card"><div class="row between"><div class="row"><div class="flag">🖥️</div><div><b>Lab Workstation</b><div class="mini">在线 · Windows Server</div></div></div><span class="badge">已授权</span></div><div class="setting"><span>路径偏好</span><span>Public Direct → P2P</span></div><button class="btn primary rdpConnect" data-device="Lab Workstation">一键连接</button></div>
+     <div class="card"><div class="row between"><div class="row"><div class="flag">💻</div><div><b>Home PC</b><div class="mini">离线 · 最近 3 小时前</div></div></div><span class="badge gray">离线</span></div><button class="btn" disabled>不可连接</button></div>
+    </div>
+    <div class="card" id="rdpSession"><div class="cardtitle"><h2>当前 RDP 会话</h2><span class="badge gray" id="rdpState">尚未启动</span></div><div class="cards3"><div><div class="mini">本地入口</div><b id="rdpLocal">—</b></div><div><div class="mini">数据路径</div><b id="rdpPath">—</b></div><div><div class="mini">UDP</div><b id="rdpUdp">—</b></div></div><div class="spacer"></div><button class="btn danger" id="rdpDisconnect">断开 RDP</button></div>
+   </section>
+
+   <!-- MESSAGES -->
+   <section class="page" id="page-messages">
+    <div class="pagehead"><div><h1>消息中心</h1><div class="desc">验证码、普通消息、重要提醒；支持规则、全局悬浮弹窗、系统通知与一键复制。</div></div><div class="actions"><button class="btn" id="messageRulesBtn">消息规则</button><button class="btn danger" id="clearMessages">清空历史</button></div></div>
+    <div class="cards2">
+     <div class="card"><div class="cardtitle"><h2>弹窗策略</h2><span class="badge">已启用</span></div>
+      <div class="setting phoneOnly"><div><b>全局悬浮弹窗</b><span class="mini">覆盖显示在其他 App 上方；无权限时降级为通知</span></div><button class="switch on" id="overlaySwitch"><span></span></button></div>
+      <div class="setting"><div><b>验证码自动关闭</b><span class="mini">0 表示不自动关闭</span></div><div class="row"><input class="control" style="width:84px" value="15"><span>秒</span></div></div>
+      <div class="setting"><div><b>弹窗队列</b><span class="mini">拖动 · 自动排队 · 一键复制验证码</span></div><span class="badge blue">启用</span></div>
+     </div>
+     <div class="card"><div class="cardtitle"><h2>测试弹窗</h2></div><div class="actions"><button class="btn" data-popup="verification">验证码</button><button class="btn" data-popup="normal">普通消息</button><button class="btn" data-popup="important">重要提醒</button><button class="btn" data-popup="queued">排队 3 条</button></div><div class="notice" style="margin-top:12px">三端都采用系统原生感卡片：不使用顶部色条，仅通过类型图标、Badge、按钮和轻量边框区分消息级别。</div></div>
+    </div>
+    <div class="card"><div class="row between" style="margin-bottom:12px"><div class="segment" id="messageFilter"><button class="active">全部消息</button><button>仅验证码</button><button>普通消息</button><button>重要提醒</button></div><input class="control desktopOnly" style="max-width:300px" placeholder="搜索标题、内容、来源或验证码"></div>
+     <div class="table">
+      <div class="setting"><div><div class="row"><span class="badge blue">验证码</span><b>Google 登录验证码</b></div><div class="mini">来自 Google · 验证码规则 · 刚刚</div></div><div class="row"><code>482913</code><button class="btn copyBtn">复制</button></div></div>
+      <div class="setting"><div><div class="row"><span class="badge red">重要</span><b>出口健康状态变化</b></div><div class="mini">Tokyo 已从 Public Direct 降级至 Relay · 3 分钟前</div></div><button class="btn" data-popup="important">查看</button></div>
+      <div class="setting"><div><div class="row"><span class="badge gray">消息</span><b>设备审批完成</b></div><div class="mini">MacBook Pro 已获 proxy.client / exit · 12 分钟前</div></div><button class="btn" data-popup="normal">查看</button></div>
+     </div>
+    </div>
+   </section>
+
+   <!-- MONITOR -->
+   <section class="page" id="page-monitor">
+    <div class="pagehead"><div><h1>实时监控</h1><div class="desc">TCP / UDP、进程 / 应用、目标、规则、动作、出口、路径、状态与速率。</div></div><div class="actions"><button class="btn" id="diag30">采集 30 秒诊断</button><button class="btn">清空已结束历史</button></div></div>
+    <div class="cards3">
+     <div class="card"><div class="mini">活跃连接</div><div class="big">24</div></div><div class="card"><div class="mini">上传速率</div><div class="big">18.6 MB/s</div></div><div class="card"><div class="mini">下载速率</div><div class="big">82.4 MB/s</div></div>
+    </div>
+    <div class="card phoneOnly"><div class="cardtitle"><div><h2>Android 实时应用监控</h2><div class="mini">关闭时不读取 / 聚合实时应用连接；分流所需包名识别仍工作。</div></div><button class="switch on" id="appMonitorSwitch"><span></span></button></div><div class="row between"><span>实时应用 5 · 活跃连接 24</span><span class="badge">每秒刷新</span></div></div>
+    <div class="card">
+     <div class="row" style="flex-wrap:wrap;margin-bottom:12px"><input class="control" style="max-width:220px" placeholder="搜索进程 / 应用 / 目标 / 规则"><select class="control" style="width:auto"><option>全部状态</option><option>连接中</option><option>活跃</option><option>已结束</option><option>已阻断</option></select><select class="control" style="width:auto"><option>全部协议</option><option>TCP</option><option>UDP</option></select><select class="control" style="width:auto"><option>全部动作</option><option>代理</option><option>直连</option><option>阻断</option></select></div>
+     <div class="table">
+      <div class="tr th"><div>进程 / 应用</div><div>目标 / 出口</div><div>下载</div><div>上传</div><div>状态</div></div>
+      <div class="tr"><div class="appcell"><span class="appico chrome">C</span><div><b>Chrome</b><div class="mini">chrome.exe · 浏览器代理</div></div></div><div>youtube.com:443<br><span class="mini">Los Angeles · Public Direct</span></div><div>8.2 MB/s</div><div>324 KB/s</div><span class="badge">活跃</span></div>
+      <div class="tr"><div class="appcell"><span class="appico telegram">T</span><div><b>Telegram</b><div class="mini">org.telegram.messenger · TCP+UDP</div></div></div><div>149.154.167.99:443<br><span class="mini">Singapore · P2P</span></div><div>1.4 MB/s</div><div>92 KB/s</div><span class="badge">活跃</span></div>
+      <div class="tr"><div class="appcell"><span class="appico discord">D</span><div><b>Discord</b><div class="mini">com.discord · 默认动作</div></div></div><div>gateway.discord.gg:443<br><span class="mini">Tokyo · Relay</span></div><div>892 KB/s</div><div>61 KB/s</div><span class="badge warn">连接中</span></div>
+      <div class="tr"><div class="appcell"><span class="appico edge">?</span><div><b>未知应用</b><div class="mini">UID 暂无法识别</div></div></div><div>1.1.1.1:443<br><span class="mini">按规则模式 · 应用条件存在</span></div><div>0</div><div>0</div><span class="badge red">已拒绝</span></div>
+     </div>
+    </div>
+   </section>
+
+   <!-- DIAGNOSTICS -->
+   <section class="page" id="page-diagnostics">
+    <div class="pagehead"><div><h1>诊断与日志</h1><div class="desc">中继连接、P2P、代理转发、出口处理、透明代理、VPN 与错误日志。</div></div><div class="actions"><button class="btn" id="collectDiag">采集诊断</button><button class="btn">清空日志</button></div></div>
+    <div class="cards3"><div class="card"><div class="mini">控制连接</div><div class="big" style="color:var(--ok)">正常</div><div class="mini">QUIC · RTT 23 ms</div></div><div class="card"><div class="mini">UDP 丢弃诊断</div><div class="big">0</div><div class="mini">队列 0 · 重组 0 · 丢弃 0</div></div><div class="card"><div class="mini">透明代理</div><div class="big">26</div><div class="mini">抓包 26 · 分类 26 · 注入失败 0</div></div></div>
+    <div class="card"><div class="cardtitle"><h2>实时运行日志</h2><div class="segment"><button class="active">全部</button><button>中继</button><button>P2P</button><button>代理</button><button>出口</button></div></div><div class="log">14:32:01 [Agent] control session connected transport=quic rtt=23ms
+14:32:02 [DirectPath] public direct endpoint verified exit=LA-01
+14:32:02 [P2P] backup candidate ready reflexive=203.0.113.24:46018
+14:32:04 [Proxy] SOCKS5 listening 127.0.0.1:1080 udp=true
+14:32:04 [Proxy] HTTP listening 127.0.0.1:8080
+14:32:07 [Routing] chrome.exe youtube.com:443 => PROXY exit=LA-01
+14:32:07 [Path] selected public-direct quic datagram=true
+14:32:12 [VPN] mapped DNS fake-ip=198.19.0.21 domain=www.youtube.com
+14:32:13 [Monitor] uid=10177 package=com.google.android.youtube
+14:32:18 [RDP] authorized targets refreshed count=2
+14:32:21 [Message] verification_code matched rule="Google 验证码"</div></div>
+   </section>
+
+   <!-- SETTINGS -->
+   <section class="page" id="page-settings">
+    <div class="pagehead"><div><h1>系统设置</h1><div class="desc">外观、启动、托盘 / 菜单栏、消息权限、配置文件与客户端生命周期。</div></div></div>
+    <div class="cards2">
+     <div class="card"><div class="cardtitle"><h2>界面与启动</h2></div>
+      <div class="setting"><div><b>界面主题</b><span class="mini">跟随系统，也可固定浅色 / 深色</span></div><select class="control" id="themeSelect" style="width:130px"><option>跟随系统</option><option>浅色</option><option>深色</option></select></div>
+      <div class="setting"><div><b>开机自动启动</b><span class="mini">登录后自动启动到托盘 / 菜单栏</span></div><button class="switch on"><span></span></button></div>
+      <div class="setting desktopOnly"><div><b>关闭窗口时最小化</b><span class="mini">关闭后仍保持代理与隧道运行</span></div><button class="switch on"><span></span></button></div>
+      <div class="setting"><div><b>语言</b></div><select class="control" style="width:130px"><option>简体中文</option><option>English</option></select></div>
+     </div>
+     <div class="card"><div class="cardtitle"><h2>消息与权限</h2></div>
+      <div class="setting phoneOnly"><div><b>全局弹窗权限</b><span class="mini">显示在其他应用上层</span></div><button class="btn" id="overlayPermission">检查权限</button></div>
+      <div class="setting phoneOnly"><div><b>VPN 系统授权</b><span class="mini">首次启用需 Android 系统授权</span></div><button class="btn" id="vpnPermission">重新请求</button></div>
+      <div class="setting"><div><b>验证码自动关闭</b></div><div class="row"><input class="control" style="width:72px" value="15"><span>秒</span></div></div>
+      <div class="setting"><div><b>系统通知</b><span class="mini">弹窗不可用时作为降级通道</span></div><button class="switch on"><span></span></button></div>
+     </div>
+    </div>
+    <div class="card"><div class="cardtitle"><h2>配置与生命周期</h2></div>
+     <div class="setting"><div><b>配置文件</b><span class="mini">打开所在目录 / 重新读取并应用</span></div><div class="actions"><button class="btn">打开所在目录</button><button class="btn" id="refreshForm">刷新表单</button></div></div>
+     <div class="setting"><div><b>重启客户端</b><span class="mini">未保存的表单修改不会保留</span></div><button class="btn" id="restartClient">重启 RelayProxy</button></div>
+     <div class="setting"><div><b>退出客户端</b><span class="mini">停止本地代理并断开中继隧道</span></div><button class="btn danger" id="quitClient">退出 RelayProxy</button></div>
+    </div>
+    <div class="card"><div class="cardtitle"><h2>交互状态 / 弹窗总览</h2><button class="btn" id="openGallery">打开全部弹窗</button></div><div class="gallery">
+     <button data-dialog="vpn"><b>VPN 系统授权</b><div class="mini">首次启用 Android VPN</div></button>
+     <button data-dialog="overlay"><b>全局悬浮窗权限</b><div class="mini">Android overlay 降级通知</div></button>
+     <button data-dialog="uac"><b>Windows 服务 / UAC</b><div class="mini">安装透明代理服务</div></button>
+     <button data-dialog="unsaved"><b>未保存修改</b><div class="mini">离开 / 重载 / 重启保护</div></button>
+     <button data-dialog="restart"><b>需要重启</b><div class="mini">连接 / 监听 / 服务参数变更</div></button>
+     <button data-dialog="tls"><b>TLS 风险提醒</b><div class="mini">允许自签名证书</div></button>
+     <button data-dialog="pending"><b>设备待审批</b><div class="mini">Identity 设备审批状态</div></button>
+     <button data-dialog="rejected"><b>设备拒绝 / 撤销</b><div class="mini">拒绝与撤销状态</div></button>
+     <button data-dialog="exitdown"><b>出口不可用</b><div class="mini">不静默改选出口</div></button>
+     <button data-popup="verification"><b>验证码弹窗</b><div class="mini">复制 / 自动关闭</div></button>
+     <button data-popup="normal"><b>普通消息</b><div class="mini">内容型弹窗</div></button>
+     <button data-popup="important"><b>重要提醒</b><div class="mini">高优先级提醒</div></button>
+    </div></div>
+   </section>
+  </main>
+
+  <nav class="bottomnav">
+   <button class="active" data-page="overview">◉<br>控制台</button><button data-page="exits">↗<br>出口节点</button><button data-page="routing">⑂<br>分流规则</button><button data-page="monitor">⌁<br>监控</button><button data-page="settings">•••<br>更多</button>
+  </nav>
+ </div>
+</div>
+
+<div class="tray" id="tray">
+ <div class="item"><b>RelayProxy</b><span class="badge">已连接</span></div>
+ <div class="divider"></div>
+ <div class="item"><span>当前出口</span><b>🇺🇸 Los Angeles</b></div>
+ <div class="item"><span>路径</span><span>Public Direct · 23 ms</span></div>
+ <div class="divider"></div>
+ <div class="item"><span>暂停代理</span><span>⌘ P</span></div>
+ <div class="item"><span>切换出口…</span><span>›</span></div>
+ <div class="item"><span>打开控制台</span><span>⌘ O</span></div>
+ <div class="divider"></div>
+ <div class="item"><span>退出 RelayProxy</span><span>⌘ Q</span></div>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+<div class="toast" id="toast">已完成</div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const stage=$('#stage'), overlay=$('#overlay'), modal=$('#modal'), toast=$('#toast');
+let platform='macos', dirty=false;
+const platformNames={macos:'macOS · 目标实现：SwiftUI + AppKit · 原生信息架构',windows:'Windows · 目标实现：WinUI 3 + Windows App SDK · Fluent / Mica',android:'Android · 目标实现：Jetpack Compose + Material 3 · 原生移动交互'};
+function showToast(t){toast.textContent=t;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1500)}
+function gotoPage(name){$$('.page').forEach(x=>x.classList.remove('active'));$('#page-'+name)?.classList.add('active');$$('[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page===name))}
+$$('[data-page]').forEach(x=>x.addEventListener('click',()=>gotoPage(x.dataset.page)));
+$$('#platforms button').forEach(b=>b.onclick=()=>{$$('#platforms button').forEach(x=>x.classList.remove('active'));b.classList.add('active');platform=b.dataset.platform;stage.className='stage platform-'+platform;$('#platformNote').textContent=platformNames[platform];showToast('已切换 '+b.textContent+' 原型')});
+$$('.switch').forEach(s=>s.addEventListener('click',()=>s.classList.toggle('on')));
+$$('.segment').forEach(seg=>seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{seg.querySelectorAll('button').forEach(x=>x.classList.remove('active'));b.classList.add('active');dirty=true}));
+$$('.copyBtn').forEach(b=>b.onclick=()=>showToast('已复制到剪贴板'));
+function closeModal(){overlay.classList.remove('show');modal.innerHTML=''}
+overlay.addEventListener('click',e=>{if(e.target===overlay)closeModal()});
+function modalHTML(title,body,buttons='<button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="closeModal();showToast(\'已确认\')">确认</button>',wide=false){
+ modal.className='modal'+(wide?' wide':'');modal.innerHTML=`<div class="modalhead"><div><h2>${title}</h2></div><button class="close" onclick="closeModal()">×</button></div><div class="modalbody">${body}</div><div class="modalfoot">${buttons}</div>`;overlay.classList.add('show')
+}
+function infoDialog(kind){
+ const map={
+  vpn:['允许 RelayProxy 建立 VPN 连接？',`<div class="notice">Android 将显示系统 VPN 授权确认。RelayProxy 需要该权限接管所选应用的 TCP / UDP 流量。</div><div class="setting"><div><b>接管范围</b><span class="mini">仅选中应用 · 12 个包</span></div><span>VPN</span></div>`,`<button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="closeModal();showToast('VPN 权限已授权')">允许</button>`],
+  overlay:['允许显示在其他应用上层？',`<div class="notice">开启后，验证码、普通消息和重要提醒可在微信、浏览器、游戏等其他 App 上方显示。未授权时自动降级为高优先级系统通知，不会丢消息。</div>`,`<button class="btn" onclick="closeModal()">稍后</button><button class="btn primary" onclick="closeModal();showToast('已打开系统悬浮窗设置')">前往系统设置</button>`],
+  uac:['安装 / 修复 RelayProxy Network Service',`<div class="notice warn">此操作需要 Windows 管理员权限，仅首次安装或修复透明代理服务时需要。日常 GUI、自启动和透明代理运行不需要管理员身份。</div><div class="setting"><span>服务启动类型</span><b>Automatic</b></div>`,`<button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="closeModal();showToast('已模拟 UAC 提权并修复服务')">继续并请求 UAC</button>`],
+  unsaved:['有未保存的修改',`<div class="notice warn">连接、代理或分流规则存在尚未保存的草稿。重新读取、重启或离开将丢失这些修改。</div>`,`<button class="btn" onclick="closeModal()">继续编辑</button><button class="btn danger" onclick="dirty=false;closeModal();showToast('已放弃未保存修改')">放弃修改</button>`],
+  restart:['部分设置需要重启客户端',`<div class="notice">监听地址 / 端口、透明代理服务或部分连接参数已保存，但需要重启 RelayProxy 才能完全生效。</div><div class="setting"><span>SOCKS5 监听</span><b>127.0.0.1:1080</b></div><div class="setting"><span>系统透明代理</span><b>启用</b></div>`,`<button class="btn" onclick="closeModal()">稍后</button><button class="btn primary" onclick="closeModal();showToast('正在模拟重启')">立即重启</button>`],
+  tls:['允许自签名证书？',`<div class="notice danger"><b>仅用于可信的自建测试服务器。</b><br>跳过证书校验会削弱服务端身份验证。生产环境应保持关闭并使用受信任证书。</div>`,`<button class="btn" onclick="closeModal()">保持安全设置</button><button class="btn danger" onclick="closeModal();$('#insecureTls').classList.add('on');showToast('已启用自签名证书')">我了解风险，继续</button>`],
+  pending:['设备等待审批',`<div class="row" style="align-items:flex-start"><div class="flag">⏳</div><div><b>当前安装已向 Identity ab12cd34ef56gh78 发起接入请求</b><div class="mini" style="margin-top:5px">请使用该身份登录 Relay Server，并审批此设备需要的 proxy.client / exit / rdp.client 等能力。</div></div></div>`,`<button class="btn primary" onclick="closeModal()">知道了</button>`],
+  rejected:['设备授权不可用',`<div class="notice danger">服务端已拒绝此安装身份，或管理员撤销了当前设备授权。代理、出口与 RDP 能力将停止，配置仍保留在本机。</div>`,`<button class="btn" onclick="closeModal()">查看设备 ID</button><button class="btn primary" onclick="closeModal()">知道了</button>`],
+  exitdown:['已选出口不可用',`<div class="notice warn"><b>Office Exit</b> 已撤销、删除或离线。RelayProxy 不会静默改选其他出口或 DIRECT，以免改变既定路由策略。</div><div class="setting"><span>当前保存选择</span><span class="badge red">不可用旧选择</span></div>`,`<button class="btn" onclick="closeModal()">保持选择</button><button class="btn primary" onclick="closeModal();gotoPage('exits')">重新选择出口</button>`]
+ };
+ const [t,b,bt]=map[kind];modalHTML(t,b,bt)
+}
+$$('[data-dialog]').forEach(b=>b.onclick=()=>infoDialog(b.dataset.dialog));
+function popup(type,queued=false){
+ const configs={
+  verification:{cls:'',badge:'验证码',title:'Google 登录验证码',meta:'来自 Google · Google 验证码规则',body:`<div class="codebox">482913</div><div class="mini">用于登录验证，请勿向他人泄露。</div>`,buttons:`<button class="btn" onclick="closeModal()">关闭</button><button class="btn primary" onclick="showToast('验证码 482913 已复制');closeModal()">复制验证码</button>`},
+  normal:{cls:'normal',badge:'消息',title:'设备审批完成',meta:'来自 Relay Server · 普通消息规则',body:`<div class="notice">MacBook Pro 已获得 <b>proxy.client</b> 与 <b>exit</b> 能力，可以正常使用代理与出口共享。</div>`,buttons:`<button class="btn primary" onclick="closeModal()">知道了</button>`},
+  important:{cls:'important',badge:'重要提醒',title:'出口路径已降级',meta:'来自网络监控 · 重要提醒规则',body:`<div class="notice warn">Tokyo 的 Public Direct 连续失败，当前已回退到 Relay。自动模式会继续后台重试直连，不阻塞现有连接。</div>`,buttons:`<button class="btn" onclick="closeModal()">关闭</button><button class="btn primary" onclick="closeModal();gotoPage('diagnostics')">查看诊断</button>`}
+ };
+ let c=configs[type];modal.className='modal messagePopup '+c.cls;modal.innerHTML=`<div class="modalbody"><div class="row between" style="align-items:flex-start"><div class="row" style="align-items:flex-start"><div class="flag bigIcon">${type==='verification'?'123':type==='important'?'!':'✦'}</div><div><span class="badge ${type==='important'?'red':type==='normal'?'blue':''}">${c.badge}</span><h2 style="margin:7px 0 3px">${c.title}</h2><div class="mini">${c.meta}${queued?' · 队列中还有 2 条':''}</div></div></div><button class="close" onclick="closeModal()">×</button></div>${c.body}</div><div class="modalfoot">${c.buttons}</div>`;overlay.classList.add('show')
+}
+$$('[data-popup]').forEach(b=>b.onclick=()=>{if(b.dataset.popup==='queued')popup('verification',true);else popup(b.dataset.popup)});
+function ruleEditor(name='新规则'){
+ modalHTML(name==='新规则'?'新增路由规则':'编辑路由规则',`<div class="formgrid">
+ <div class="field"><label>规则名称</label><input class="control" value="${name==='新规则'?'':name}" placeholder="例如：浏览器走代理"></div>
+ <div class="field"><label>规则状态</label><select class="control"><option>启用</option><option>停用</option></select></div>
+ <div class="field full"><label>应用 / 进程</label><input class="control" placeholder="Chrome, Edge, com.google.android.youtube"><small>Android 10+ 可按应用；桌面端可按进程名称或路径。</small></div>
+ <div class="field full"><label>域名 / IP / CIDR</label><textarea class="control" rows="3" placeholder="*.google.com, 10.0.0.0/8"></textarea></div>
+ <div class="field"><label>目标端口</label><input class="control" placeholder="443, 8000-8999"></div><div class="field"><label>协议</label><select class="control"><option>全部</option><option>TCP</option><option>UDP</option></select></div>
+ <div class="field"><label>动作</label><select class="control"><option>代理</option><option>本机直连</option><option>阻断</option></select></div><div class="field"><label>指定出口</label><select class="control"><option>跟随默认出口</option><option>Los Angeles</option><option>Singapore</option></select></div>
+ <div class="setting full"><div><b>必须使用原生数据报</b><span class="mini">不支持数据报时拒绝，不回退可靠流</span></div><button class="switch"><span></span></button></div>
+ <div class="setting full desktopOnly"><div><b>由 RelayProxy 处理 DIRECT</b><span class="mini">使直连流量也进入实时连接监控</span></div><button class="switch on"><span></span></button></div>
+ </div>`,`<button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="dirty=true;closeModal();showToast('规则已进入未保存草稿')">确认修改</button>`,true);
+ $$('.modal .switch').forEach(s=>s.onclick=()=>s.classList.toggle('on'))
+}
+$('#newRule').onclick=()=>ruleEditor();$$('.editRule').forEach(b=>b.onclick=()=>ruleEditor(b.closest('.rule').dataset.rule));
+$$('.deleteRule').forEach(b=>b.onclick=()=>{let row=b.closest('.rule'),name=row.dataset.rule;modalHTML('删除路由规则',`<div class="notice danger">确定删除“<b>${name}</b>”吗？删除后需要保存并应用规则才会生效。</div>`,`<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" id="confirmDelete">删除</button>`);setTimeout(()=>{$('#confirmDelete').onclick=()=>{row.remove();dirty=true;closeModal();showToast('规则已删除（未保存）')}},0)});
+function moveRule(btn,dir){const row=btn.closest('.rule'),tbl=row.parentElement,target=dir<0?row.previousElementSibling:row.nextElementSibling;if(target&& !target.classList.contains('th')){if(dir<0)tbl.insertBefore(row,target);else tbl.insertBefore(target,row);dirty=true;showToast('规则顺序已调整')}}
+$$('.upRule').forEach(b=>b.onclick=()=>moveRule(b,-1));$$('.downRule').forEach(b=>b.onclick=()=>moveRule(b,1));
+$('#saveRules').onclick=()=>{dirty=false;showToast('组合路由规则已应用 · 新连接使用新规则')};$('#discardDraft').onclick=()=>dirty?infoDialog('unsaved'):showToast('没有未保存的配置');
+function appSelector(){
+ modalHTML('选择 VPN 接管应用',`<div class="row" style="gap:8px;flex-wrap:wrap"><input class="control" id="appSearch" style="flex:1;min-width:220px" placeholder="搜索应用、系统服务或包名"><div class="segment" id="appType"><button class="active">全部</button><button>已选</button><button>用户应用</button><button>系统应用</button><button>系统服务</button></div></div><div class="spacer"></div>
+ <div class="row between"><div class="mini">支持用户应用、系统应用和无桌面入口的系统服务包；共享 UID 可能作为同一 VPN 流量主体。</div><div class="actions"><button class="btn" id="selAll">全选</button><button class="btn" id="selNone">清空</button><button class="btn" id="selInvert">反选</button></div></div><div class="spacer"></div>
+ <div class="appSelectorList" id="appList">
+ ${[['YouTube','com.google.android.youtube','Y','chrome'],['Chrome','com.android.chrome','C','chrome'],['Telegram','org.telegram.messenger','T','telegram'],['Discord','com.discord','D','discord'],['Google Play 服务','com.google.android.gms','G','edge'],['系统下载管理器','com.android.providers.downloads','↓','spotify'],['Private DNS Resolver','com.android.resolv','DNS','edge'],['System UI','com.android.systemui','UI','discord']].map((a,i)=>`<div class="appRow ${i<5?'selected':''}" data-name="${a[0]} ${a[1]}"><span class="appico ${a[3]}">${a[2]}</span><div class="grow"><b>${a[0]}</b><div class="mini">${a[1]}</div></div><span class="check"></span></div>`).join('')}
+ </div>`,`<button class="btn" onclick="closeModal()">取消</button><button class="btn primary" onclick="closeModal();showToast('应用范围已保存')">保存设置</button>`,true);
+ setTimeout(()=>{$$('.appRow').forEach(r=>r.onclick=()=>r.classList.toggle('selected'));$('#selAll').onclick=()=>$$('.appRow').forEach(r=>r.classList.add('selected'));$('#selNone').onclick=()=>$$('.appRow').forEach(r=>r.classList.remove('selected'));$('#selInvert').onclick=()=>$$('.appRow').forEach(r=>r.classList.toggle('selected'));$('#appSearch').oninput=e=>$$('.appRow').forEach(r=>r.style.display=r.dataset.name.toLowerCase().includes(e.target.value.toLowerCase())?'flex':'none');$$('#appType button').forEach(b=>b.onclick=()=>{$$('#appType button').forEach(x=>x.classList.remove('active'));b.classList.add('active')})},0)
+}
+$('#openAppSelector')?.addEventListener('click',appSelector);$('#openAppSelector2')?.addEventListener('click',appSelector);
+function messageRules(){
+ modalHTML('消息规则',`<div class="notice">不同消息类型使用不同匹配条件：验证码可配置正则 / 提取规则；普通消息不要求验证码规则。每条规则独立决定是否弹窗以及弹窗类型。</div><div class="spacer"></div>
+ <div class="table">
+ <div class="setting"><div><div class="row"><b>Google 验证码</b><span class="badge blue">验证码</span></div><div class="mini">匹配：Google / G‑ / 验证码 · 正则提取 4–8 位数字</div></div><button class="btn" onclick="editMessageRule('Google 验证码','验证码')">编辑</button></div>
+ <div class="setting"><div><div class="row"><b>普通系统消息</b><span class="badge gray">普通消息</span></div><div class="mini">无需验证码正则 · 弹窗：普通消息</div></div><button class="btn" onclick="editMessageRule('普通系统消息','普通消息')">编辑</button></div>
+ <div class="setting"><div><div class="row"><b>重要告警</b><span class="badge red">重要提醒</span></div><div class="mini">来源 / 标题关键词 · 弹窗：重要提醒</div></div><button class="btn" onclick="editMessageRule('重要告警','重要提醒')">编辑</button></div>
+ </div>`,`<button class="btn" onclick="closeModal()">关闭</button><button class="btn primary" onclick="editMessageRule('新消息规则','普通消息')">＋ 新建规则</button>`,true)
+}
+window.editMessageRule=(name,type)=>{modalHTML('编辑消息规则',`<div class="formgrid"><div class="field"><label>规则名称</label><input class="control" value="${name}"></div><div class="field"><label>消息类型</label><select class="control"><option ${type==='验证码'?'selected':''}>验证码</option><option ${type==='普通消息'?'selected':''}>普通消息</option><option ${type==='重要提醒'?'selected':''}>重要提醒</option></select></div><div class="field full"><label>来源 / 标题 / 内容匹配</label><textarea class="control" rows="3" placeholder="关键字，每行一条"></textarea></div><div class="field full"><label>验证码提取正则（普通消息可留空）</label><input class="control" value="${type==='验证码'?'(?<!\\\\d)\\\\d{4,8}(?!\\\\d)':''}" placeholder="仅验证码类型需要"></div><div class="setting full"><div><b>命中后弹窗</b><span class="mini">关闭时仅进入消息中心 / 系统通知策略</span></div><button class="switch on"><span></span></button></div><div class="field"><label>弹窗类型</label><select class="control"><option>验证码</option><option>普通消息</option><option>重要提醒</option></select></div><div class="field"><label>自动关闭</label><select class="control"><option>15 秒</option><option>不自动关闭</option></select></div></div>`,`<button class="btn" onclick="messageRules()">返回</button><button class="btn primary" onclick="closeModal();showToast('消息规则已保存')">保存规则</button>`,true);$$('.modal .switch').forEach(s=>s.onclick=()=>s.classList.toggle('on'))};
+window.messageRules=messageRules;$('#messageRulesBtn').onclick=messageRules;
+$('#clearMessages').onclick=()=>modalHTML('清空消息历史','<div class="notice danger">将清空本机消息历史。规则和弹窗设置不会删除。</div>',`<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" onclick="closeModal();showToast('消息历史已清空')">清空</button>`);
+$$('.rdpConnect').forEach(b=>b.onclick=()=>{let d=b.dataset.device;modalHTML('正在建立远程桌面连接',`<div class="row"><div class="flag">🖥️</div><div><b>${d}</b><div class="mini">优先尝试 P2P；失败后自动回退 Relay。</div></div></div><div class="spacer"></div><div class="progress"><i id="rdpProgress"></i></div><div class="mini" id="rdpStep" style="margin-top:8px">正在请求授权设备会话…</div>`,`<button class="btn" onclick="closeModal()">取消</button>`);setTimeout(()=>{$('#rdpProgress').style.width='45%';$('#rdpStep').textContent='正在进行 P2P 协商…'},250);setTimeout(()=>{$('#rdpProgress').style.width='100%';$('#rdpStep').textContent='P2P 已直连，本地入口已建立';$('#rdpState').className='badge';$('#rdpState').textContent='已连接';$('#rdpLocal').textContent='127.0.0.1:33901';$('#rdpPath').textContent='P2P QUIC';$('#rdpUdp').textContent='等待 mstsc UDP';setTimeout(()=>{closeModal();showToast('RDP 已连接 · 127.0.0.1:33901')},450)},850)});
+$('#rdpDisconnect').onclick=()=>{$('#rdpState').className='badge gray';$('#rdpState').textContent='尚未启动';$('#rdpLocal').textContent=$('#rdpPath').textContent=$('#rdpUdp').textContent='—';showToast('RDP 连接已断开')};
+function speedModal(all=false){modalHTML(all?'出口批量测速':'出口测速',`<div class="row between"><b>${all?'4 个在线出口':'Los Angeles'}</b><span class="badge blue">上行 + 下行</span></div><div class="spacer"></div><div class="progress"><i id="speedP"></i></div><div class="mini" id="speedStep" style="margin-top:8px">正在测试上行…</div><div id="speedResult"></div>`,`<button class="btn" onclick="closeModal()">关闭</button>`);setTimeout(()=>{$('#speedP').style.width='45%';$('#speedStep').textContent='正在测试下行…'},300);setTimeout(()=>{$('#speedP').style.width='100%';$('#speedStep').textContent='测速完成';$('#speedResult').innerHTML='<div class="cards3" style="margin-top:14px"><div class="notice"><b>上行</b><br>41.8 MB/s</div><div class="notice"><b>下行</b><br>96.2 MB/s</div><div class="notice"><b>RTT</b><br>23 ms</div></div>'},800)}
+$('#speedAll').onclick=()=>speedModal(true);$('#speedSingle').onclick=()=>speedModal(false);
+$$('#exitOptions .option').forEach(o=>o.onclick=()=>{if(o.textContent.includes('已撤销')){infoDialog('exitdown');return}$$('#exitOptions .option').forEach(x=>x.classList.remove('selected'));o.classList.add('selected');let [n,f,m]=o.dataset.exit.split('|');$('#heroExitName').textContent=n;$('#heroFlag').textContent=f;$('#heroExitMeta').textContent=m;showToast('默认出口已切换到 '+n)});
+$('#egressMode').onchange=e=>{let on=e.target.value!=='本机直连';['#upstreamAddr','#upUser','#upPass'].forEach(s=>$(s).disabled=!on)};
+$('#serviceRepair').onclick=()=>infoDialog('uac');$('#serviceRemove').onclick=()=>modalHTML('卸载透明代理服务','<div class="notice danger">卸载服务会同时关闭已保存的系统透明代理配置，并立即中断当前透明代理。重新启用时可再次安装。</div>',`<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" onclick="closeModal();showToast('服务已卸载')">确定卸载</button>`);
+$('#overlayPermission').onclick=()=>infoDialog('overlay');$('#vpnPermission').onclick=()=>infoDialog('vpn');
+$('#overlaySwitch')?.addEventListener('click',()=>{if(!$('#overlaySwitch').classList.contains('on'))infoDialog('overlay')});
+$('#vpnSwitch')?.addEventListener('click',()=>{if($('#vpnSwitch').classList.contains('on'))infoDialog('vpn')});
+$('#insecureTls').onclick=()=>{if(!$('#insecureTls').classList.contains('on'))infoDialog('tls');else $('#insecureTls').classList.remove('on')};
+function saveWithRestart(label){dirty=false;modalHTML(label+'已保存',`<div class="notice">配置已写入。部分连接 / 监听参数支持热更新；需要重启的数据面会明确标记。</div>`,`<button class="btn" onclick="closeModal()">稍后</button><button class="btn primary" onclick="closeModal();showToast('已模拟重启并重新连接')">立即重启</button>`)}
+$('#saveConnection').onclick=()=>saveWithRestart('连接设置');$('#saveProxy').onclick=()=>{let ports=$$('.proxyPort').map(x=>x.value);if(ports[0]===ports[1]){modalHTML('端口冲突','<div class="notice danger">SOCKS5 与 HTTP 不能使用相同端口。端口必须在 1 到 65535 之间。</div>',`<button class="btn primary" onclick="closeModal()">修改端口</button>`)}else saveWithRestart('代理设置')};$('#saveExitShare').onclick=()=>{dirty=false;showToast('出口设置已保存')};
+$('#reloadConfig').onclick=()=>dirty?infoDialog('unsaved'):showToast('配置已重新读取');$('#refreshForm').onclick=()=>dirty?infoDialog('unsaved'):showToast('表单已刷新');
+$('#restartClient').onclick=()=>dirty?infoDialog('unsaved'):infoDialog('restart');$('#quitClient').onclick=()=>modalHTML('退出 RelayProxy','<div class="notice danger">将停止本地代理、VPN / Exit 数据面并断开中继隧道。</div>',`<button class="btn" onclick="closeModal()">取消</button><button class="btn danger" onclick="closeModal();showToast('原型：已模拟退出')">退出 RelayProxy</button>`);
+$('#approvalStateBtn').onclick=()=>{let states=[['已审批','badge'],['待审批','badge warn'],['已拒绝','badge red'],['已撤销','badge red']],cur=$('#approvalBadge').textContent,i=(states.findIndex(x=>x[0]===cur)+1)%states.length;$('#approvalBadge').textContent=states[i][0];$('#approvalBadge').className=states[i][1];if(i===1)infoDialog('pending');if(i>1)infoDialog('rejected')};
+$('#mainPower').onclick=e=>{let on=e.target.textContent.includes('暂停');e.target.textContent=on?'恢复代理':'暂停代理';$('#overviewState').textContent=on?'已暂停':'已连接';showToast(on?'代理已暂停':'代理已恢复')};
+$('#diag30').onclick=$('#collectDiag').onclick=()=>{modalHTML('采集诊断',`<div class="notice">原型会模拟 30 秒诊断采集，包括控制连接、P2P / Public Direct、路由、透明代理 / VPN、连接监控和最近错误。</div><div class="spacer"></div><div class="progress"><i id="diagP"></i></div><div class="mini" id="diagT" style="margin-top:8px">正在收集…</div>`,`<button class="btn" onclick="closeModal()">关闭</button>`);setTimeout(()=>{$('#diagP').style.width='100%';$('#diagT').textContent='诊断采集完成 · relayproxy-diagnostic.zip'},700)};
+$('#dialogsBtn').onclick=()=>{gotoPage('settings');setTimeout(()=>$('#openGallery').scrollIntoView({behavior:'smooth'}),50)};$('#openGallery').onclick=()=>showToast('下方 12 个弹窗入口均可点击测试');
+$('#trayBtn').onclick=()=>$('#tray').classList.toggle('show');document.addEventListener('click',e=>{if(!$('#tray').contains(e.target)&&e.target!==$('#trayBtn'))$('#tray').classList.remove('show')});
+$('#themeBtn').onclick=()=>{let d=document.documentElement.dataset.theme==='dark';document.documentElement.dataset.theme=d?'light':'dark';showToast(d?'浅色模式':'深色模式')};$('#themeSelect').onchange=e=>{document.documentElement.dataset.theme=e.target.value==='深色'?'dark':'light'};
+$$('input,select,textarea').forEach(x=>x.addEventListener('change',()=>dirty=true));
+$('#openGallery').onclick=()=>{modalHTML('弹窗 / 状态测试中心',`<div class="gallery">${[['vpn','VPN 系统授权'],['overlay','全局悬浮权限'],['uac','Windows UAC'],['unsaved','未保存修改'],['restart','需要重启'],['tls','TLS 风险'],['pending','设备待审批'],['rejected','拒绝 / 撤销'],['exitdown','出口不可用']].map(x=>`<button onclick="closeModal();setTimeout(()=>infoDialog('${x[0]}'),50)"><b>${x[1]}</b></button>`).join('')}<button onclick="closeModal();setTimeout(()=>popup('verification'),50)"><b>验证码弹窗</b></button><button onclick="closeModal();setTimeout(()=>popup('normal'),50)"><b>普通消息</b></button><button onclick="closeModal();setTimeout(()=>popup('important'),50)"><b>重要提醒</b></button></div>`,`<button class="btn" onclick="closeModal()">关闭</button>`,true)};
+</script>
+</body></html>

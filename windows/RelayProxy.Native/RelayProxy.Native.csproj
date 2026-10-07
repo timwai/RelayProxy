@@ -13,11 +13,41 @@
     <WindowsPackageType>None</WindowsPackageType>
     <EnableMsixTooling>false</EnableMsixTooling>
   </PropertyGroup>
+
+  <!--
+    WinUI 3 single-file publishing is opt-in so normal IDE/debug builds keep the
+    fast directory layout. Release scripts set PublishSingleFile=true and pass
+    RelayAgentCorePath to bundle the matching Go Core into the same EXE.
+  -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <SelfContained>true</SelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
   </ItemGroup>
+
   <ItemGroup>
-    <None Include="Assets\\RelayProxy.ico"><CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory></None>
+    <None Include="Assets\RelayProxy.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RelayAgentCorePath)' != '' and Exists('$(RelayAgentCorePath)')">
+    <Content Include="$(RelayAgentCorePath)">
+      <Link>relay-agent.exe</Link>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>false</ExcludeFromSingleFile>
+    </Content>
   </ItemGroup>
 </Project>

@@ -1,0 +1,173 @@
+name: Windows LZMS Experiment
+
+on:
+  push:
+    branches:
+      - feat/windows-native-gui
+    paths:
+      - "windows/RelayProxy.Native/**"
+      - "cmd/relay-agent/**"
+      - "cmd/relay-agent-win-launcher-lzms/**"
+      - "scripts/pack-windows-launcher-lzms.go"
+      - ".github/workflows/windows-lzms-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-lzms-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lzms:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Check LZMS source formatting
+        shell: pwsh
+        run: |
+          $files = @(
+            ".\cmd\relay-agent-win-launcher-lzms\main.go",
+            ".\cmd\relay-agent-win-launcher-lzms\messagebox_windows.go",
+            ".\scripts\pack-windows-launcher-lzms.go"
+          )
+          $bad = @()
+          foreach ($file in $files) {
+            $result = gofmt -l $file
+            if ($result) { $bad += $result }
+          }
+          if ($bad.Count -gt 0) {
+            foreach ($file in $bad) { gofmt -d $file }
+            throw "LZMS Go sources are not gofmt-clean"
+          }
+
+      - name: Restore lean Windows App SDK graph
+        shell: pwsh
+        run: |
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-x64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+
+      - name: Build embedded Go Agent core
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\lzms\staging" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w" -o ".\lzms\staging\relay-agent.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent core build failed" }
+
+      - name: Publish lean outer-only WinUI host
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\lzms\host" -Force | Out-Null
+          $core = (Resolve-Path ".\lzms\staging\relay-agent.exe").Path
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\lzms\host
+
+          $nativeHost = ".\lzms\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "RelayProxy.NativeHost.exe missing" }
+          $extra = @(Get-ChildItem ".\lzms\host" -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
+          if ($extra.Count -gt 0) { throw "LZMS host publish has sidecars: $($extra.Name -join ', ')" }
+
+      - name: Build and pack LZMS rename-safe EXE
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\lzms\single" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+
+          $stub = ".\lzms\relayproxy-launcher-lzms.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher-lzms
+          if ($LASTEXITCODE -ne 0) { throw "LZMS launcher build failed" }
+
+          $nativeHost = (Resolve-Path ".\lzms\host\RelayProxy.NativeHost.exe").Path
+          $exe = ".\lzms\single\RelayProxy-agent-windows-amd64-lzms.exe"
+          go run .\scripts\pack-windows-launcher-lzms.go -launcher $stub -payload $nativeHost -output $exe
+          if ($LASTEXITCODE -ne 0) { throw "LZMS launcher packing failed" }
+
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          $stubMb = [math]::Round((Get-Item $stub).Length / 1MB, 2)
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[lzms-size] uncompressed-inner WinUI host: $hostMb MB"
+          Write-Host "[lzms-size] launcher stub: $stubMb MB"
+          Write-Host "[lzms-size] rename-safe EXE: $finalMb MB"
+          Write-Host "::notice title=LZMS package size::x64 LZMS = $finalMb MB; host = $hostMb MB; stub = $stubMb MB"
+
+          @"
+          ### win-x64 Windows LZMS experiment
+          **Uncompressed-inner WinUI host:** $hostMb MiB
+          **Launcher stub:** $stubMb MiB
+          **Rename-safe EXE:** $finalMb MiB
+
+          Uses lean Windows App SDK dependencies, partial trimming, no .NET inner compression, and Windows' built-in LZMS Compression API from cabinet.dll.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Smoke test arbitrarily renamed LZMS EXE
+        shell: pwsh
+        run: |
+          $cache = Join-Path $env:LOCALAPPDATA "RelayProxy\native-host-lzms-experiment"
+          Remove-Item $cache -Recurse -Force -ErrorAction SilentlyContinue
+          $source = (Resolve-Path ".\lzms\single\RelayProxy-agent-windows-amd64-lzms.exe").Path
+          $renamed = ".\lzms\single\user-renamed-lzms-client.exe"
+          Copy-Item $source $renamed -Force
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "LZMS renamed EXE exited during startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "[lzms-smoke] fresh-cache arbitrarily renamed LZMS EXE stayed alive for 8 seconds." -ForegroundColor Green
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-win-x64-lzms-experiment
+          path: .\lzms\single\RelayProxy-agent-windows-amd64-lzms.exe
+          if-no-files-found: error

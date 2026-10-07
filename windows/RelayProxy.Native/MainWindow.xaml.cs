@@ -128,6 +128,7 @@ public sealed partial class MainWindow : Window
         else if (_page == "rdp") await RefreshRdpAsync();
         else if (_page == "devices") await RefreshDevicesAsync();
         else if (_page == "diagnostics") await RefreshDiagnosticsAsync();
+        else if (_page == "proxy") await RefreshNetworkServiceAsync();
         else await PollMessagesAsync(render: false);
     }
 
@@ -409,6 +410,51 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowInfo(RdpBar, "RDP 状态不可用", ex.Message, InfoBarSeverity.Warning); }
     }
 
+    private async Task RefreshNetworkServiceAsync()
+    {
+        try
+        {
+            var status = await App.AgentApi.GetNetworkServiceStatusAsync();
+            if (status is null) return;
+
+            RepairNetworkServiceButton.IsEnabled = status.Supported;
+            UninstallNetworkServiceButton.IsEnabled = status.Supported && status.Installed;
+
+            if (!status.Supported)
+            {
+                NetworkServiceStateText.Text = "当前平台 / 架构不支持";
+                NetworkServiceDetailText.Text = string.IsNullOrWhiteSpace(status.Message)
+                    ? "Windows ARM64 当前不启用 WinDivert 透明代理；SOCKS5 / HTTP 仍可正常使用。"
+                    : status.Message;
+            }
+            else if (status.Ready)
+            {
+                NetworkServiceStateText.Text = "已安装并运行";
+                var details = new List<string> { status.VersionMatch ? "版本匹配" : "版本需更新" };
+                if (status.AutoStartKnown) details.Add(status.AutoStart ? "自动启动" : "未设为自动启动");
+                if (status.RecoveryKnown) details.Add(status.RecoveryEnabled ? "故障恢复已启用" : "故障恢复未启用");
+                if (status.Pid != 0) details.Add($"PID {status.Pid}");
+                NetworkServiceDetailText.Text = string.Join(" · ", details);
+            }
+            else if (status.Installed)
+            {
+                NetworkServiceStateText.Text = status.VersionMatch ? "已安装，但未就绪" : "版本不匹配，需要修复";
+                NetworkServiceDetailText.Text = string.IsNullOrWhiteSpace(status.Message) ? status.State : status.Message;
+            }
+            else
+            {
+                NetworkServiceStateText.Text = "尚未安装";
+                NetworkServiceDetailText.Text = "启用系统透明代理时需要安装 RelayProxy Network Service；安装/修复会触发 Windows UAC。";
+            }
+        }
+        catch (Exception ex)
+        {
+            NetworkServiceStateText.Text = "状态读取失败";
+            NetworkServiceDetailText.Text = ex.Message;
+        }
+        await PollMessagesAsync(render: false);
+    }
+
     private async Task RefreshDiagnosticsAsync()
     {
         try
@@ -473,6 +519,7 @@ public sealed partial class MainWindow : Window
             });
             HandleSaveResult(ProxyBar, result);
             await LoadConfigAsync();
+            await RefreshNetworkServiceAsync();
         }
         catch (Exception ex) { ShowInfo(ProxyBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
     }
@@ -606,6 +653,53 @@ public sealed partial class MainWindow : Window
     {
         try { var result = await App.AgentApi.ReloadConfigAsync(); HandleSaveResult(ConnectionBar, result); await LoadConfigAsync(); }
         catch (Exception ex) { ShowInfo(ConnectionBar, "重新读取失败", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async void RefreshNetworkService_Click(object sender, RoutedEventArgs e) => await RefreshNetworkServiceAsync();
+
+    private async void RepairNetworkService_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            RepairNetworkServiceButton.IsEnabled = false;
+            var result = await App.AgentApi.RepairNetworkServiceAsync();
+            ShowInfo(ProxyBar, "Network Service 已就绪", result?.Message ?? "服务已安装/修复并启动。", InfoBarSeverity.Success);
+            await RefreshNetworkServiceAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowInfo(ProxyBar, "安装 / 修复失败", ex.Message, InfoBarSeverity.Error);
+            await RefreshNetworkServiceAsync();
+        }
+    }
+
+    private async void UninstallNetworkService_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "卸载 RelayProxy Network Service",
+            Content = "卸载后会同时关闭系统透明代理配置。SOCKS5 和 HTTP 代理不会受影响。",
+            PrimaryButtonText = "卸载",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        try
+        {
+            UninstallNetworkServiceButton.IsEnabled = false;
+            var result = await App.AgentApi.UninstallNetworkServiceAsync();
+            TransparentProxySwitch.IsOn = false;
+            ShowInfo(ProxyBar, "Network Service 已卸载", result?.Message ?? "透明代理服务已移除。", result?.RebootCleanup == true ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+            await LoadConfigAsync();
+            await RefreshNetworkServiceAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowInfo(ProxyBar, "卸载失败", ex.Message, InfoBarSeverity.Error);
+            await RefreshNetworkServiceAsync();
+        }
     }
 
     private async void RefreshDevices_Click(object sender, RoutedEventArgs e) => await RefreshDevicesAsync();

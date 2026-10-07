@@ -458,3 +458,55 @@ func TestPublicDirectListenerCloseUnblocksPendingAuthentication(t *testing.T) {
 		t.Fatal("listener close waited for authentication timeout")
 	}
 }
+
+
+func TestPublicDirectNegotiatesDirectionalBrutal(t *testing.T) {
+	ticket := []byte("brutal-ticket")
+	listener := newTestListener(t, ticket)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	acceptedCh := make(chan *direct.AcceptedSession, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		accepted, err := listener.Accept(ctx)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		acceptedCh <- accepted
+	}()
+
+	config := testDialConfig(listener, ticket)
+	config.BrutalUploadBPS = 12_500_000
+	config.BrutalDownloadBPS = 25_000_000
+	clientSession, err := direct.Dial(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+
+	var accepted *direct.AcceptedSession
+	select {
+	case err := <-errCh:
+		t.Fatal(err)
+	case accepted = <-acceptedCh:
+	}
+	if accepted == nil || accepted.Tunnel == nil {
+		t.Fatal("missing accepted Public Direct session")
+	}
+	defer accepted.Tunnel.Close()
+
+	clientDiag := tunnel.DiagnoseSession(clientSession)
+	exitDiag := tunnel.DiagnoseSession(accepted.Tunnel)
+	if clientDiag == nil || clientDiag.QUIC == nil ||
+		clientDiag.QUIC.CongestionController != "brutal" ||
+		clientDiag.QUIC.CongestionTargetBPS != 12_500_000 {
+		t.Fatalf("client Public Direct congestion = %+v", clientDiag)
+	}
+	if exitDiag == nil || exitDiag.QUIC == nil ||
+		exitDiag.QUIC.CongestionController != "brutal" ||
+		exitDiag.QUIC.CongestionTargetBPS != 25_000_000 {
+		t.Fatalf("exit Public Direct congestion = %+v", exitDiag)
+	}
+}

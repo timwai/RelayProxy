@@ -149,3 +149,27 @@ func TestProxyExitPublicDirectInventoryRoundTrip(t *testing.T) {
 		t.Fatalf("public direct inventory did not round-trip: %+v", out)
 	}
 }
+
+
+func TestDeviceAuthPayloadDoesNotBindBrutalPerformanceHints(t *testing.T) {
+	hello := DeviceHello{
+		ProtocolVersion: IdentityDeviceProtocolVersion,
+		IdentityID:      "a1b2c3d4e5f6g7h8",
+		InstallationID:  "install",
+		PublicKey:       []byte("key"),
+		ClientNonce:     []byte("client"),
+		RequestedCapabilities: []string{CapabilityProxyClient},
+		TransportCapabilities: []string{UDPModeStream},
+	}
+	challenge := AuthChallenge{
+		ProtocolVersion: IdentityDeviceProtocolVersion,
+		ServerInstanceID: "server",
+		ServerNonce: []byte("server-nonce"),
+	}
+	base := DeviceAuthPayload(hello, challenge)
+	hello.BrutalUploadBPS = 12_500_000
+	hello.BrutalDownloadBPS = 50_000_000
+	if !bytes.Equal(base, DeviceAuthPayload(hello, challenge)) {
+		t.Fatal("performance-only Brutal hints changed the device authorization signature payload")
+	}
+}

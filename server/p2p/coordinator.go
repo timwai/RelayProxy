@@ -352,8 +352,8 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		ID: id, ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		Token: append([]byte(nil), token...), ClientCandidates: append([]protocol.P2PCandidate(nil), validated...),
 		ClientFingerprint: fingerprint,
-		BrutalUploadBPS:   quiccongestion.CapRequestedRate(message.BrutalUploadBPS, 0),
-		BrutalDownloadBPS: quiccongestion.CapRequestedRate(message.BrutalDownloadBPS, 0),
+		BrutalUploadBPS:   quiccongestion.AuthorizeRequestedRate(message.BrutalUploadBPS, client.BrutalUploadBPS),
+		BrutalDownloadBPS: quiccongestion.AuthorizeRequestedRate(message.BrutalDownloadBPS, client.BrutalDownloadBPS),
 		ExpiresAt:         time.Now().Add(c.lease),
 	}
 	now := time.Now()

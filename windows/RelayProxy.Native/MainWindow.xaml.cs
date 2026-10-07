@@ -54,6 +54,7 @@ public sealed partial class MainWindow : Window
         _tray = new TrayIconService(this, iconPath);
         _tray.ShowRequested += OnTrayShowRequested;
         _tray.CopyDeviceIdRequested += OnTrayCopyDeviceIdRequested;
+        _tray.ToggleProxyPauseRequested += OnTrayToggleProxyPauseRequested;
         _tray.ExitRequested += OnTrayExitRequested;
         AppWindow.Closing += OnAppWindowClosing;
         AppWindow.Changed += OnAppWindowChanged;
@@ -87,7 +88,14 @@ public sealed partial class MainWindow : Window
         AppWindow.Changed -= OnAppWindowChanged;
         try { _popupWindow?.ClosePermanently(); } catch { }
         App.Notifications.Dispose();
-        _tray?.Dispose();
+        if (_tray is not null)
+        {
+            _tray.ShowRequested -= OnTrayShowRequested;
+            _tray.CopyDeviceIdRequested -= OnTrayCopyDeviceIdRequested;
+            _tray.ToggleProxyPauseRequested -= OnTrayToggleProxyPauseRequested;
+            _tray.ExitRequested -= OnTrayExitRequested;
+            _tray.Dispose();
+        }
         _tray = null;
     }
 
@@ -163,6 +171,8 @@ public sealed partial class MainWindow : Window
         data.SetText(_lastDeviceId);
         Clipboard.SetContent(data);
     });
+
+    private void OnTrayToggleProxyPauseRequested() => DispatcherQueue.TryEnqueue(() => _ = SetProxyPausedAsync(!_proxyPaused, showFeedback: false));
 
     private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() => _ = RequestShutdownAsync());
 
@@ -268,6 +278,13 @@ public sealed partial class MainWindow : Window
             P2PDetailText.Text = string.IsNullOrWhiteSpace(status.P2PPath) ? "备用路径" : $"{status.P2PPath} · {status.P2PRttMs} ms";
             DownloadRateText.Text = FormatRate(traffic?.DownloadRate ?? 0);
             UploadRateText.Text = FormatRate(traffic?.UploadRate ?? 0);
+            _tray?.UpdateRuntimeState(
+                status.Connected,
+                status.ProxyPaused,
+                status.Transport,
+                ExitNameText.Text,
+                DownloadRateText.Text,
+                UploadRateText.Text);
             OverviewRecentConnectionsPanel.Children.Clear();
             foreach (var connection in (traffic?.Connections ?? []).OrderByDescending(x => x.Id).Take(5))
             {
@@ -1480,30 +1497,37 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private async void PauseProxy_Click(object sender, RoutedEventArgs e)
+    private async void PauseProxy_Click(object sender, RoutedEventArgs e) => await SetProxyPausedAsync(!_proxyPaused, showFeedback: true);
+
+    private async Task SetProxyPausedAsync(bool paused, bool showFeedback)
     {
-        var next = !_proxyPaused;
         PauseProxyButton.IsEnabled = false;
         try
         {
-            var status = await App.AgentApi.SetProxyPausedAsync(next);
-            _proxyPaused = status?.ProxyPaused ?? next;
+            var status = await App.AgentApi.SetProxyPausedAsync(paused);
+            _proxyPaused = status?.ProxyPaused ?? paused;
             await RefreshOverviewAsync();
-            ShowInfo(
-                OverviewBar,
-                _proxyPaused ? "代理已暂停" : "代理已恢复",
-                _proxyPaused
-                    ? "新的透明代理 PROXY 流量会临时直连；SOCKS5 / HTTP 的新代理请求会明确拒绝。现有连接自然结束，控制连接、消息、RDP 与 Exit 不受影响。"
-                    : "新的代理流量已恢复按当前路由和出口策略处理。",
-                InfoBarSeverity.Success);
+            if (showFeedback)
+            {
+                ShowInfo(
+                    OverviewBar,
+                    _proxyPaused ? "代理已暂停" : "代理已恢复",
+                    _proxyPaused
+                        ? "新的透明代理 PROXY 流量会临时直连；SOCKS5 / HTTP 的新代理请求会明确拒绝。现有连接自然结束，控制连接、消息、RDP 与 Exit 不受影响。"
+                        : "新的代理流量已恢复按当前路由和出口策略处理。",
+                    InfoBarSeverity.Success);
+            }
         }
         catch (Exception ex)
         {
-            ShowInfo(OverviewBar, next ? "暂停代理失败" : "恢复代理失败", ex.Message, InfoBarSeverity.Error);
+            if (showFeedback)
+                ShowInfo(OverviewBar, paused ? "暂停代理失败" : "恢复代理失败", ex.Message, InfoBarSeverity.Error);
+            else
+                _tray?.UpdateTooltip($"RelayProxy · {(paused ? "暂停失败" : "恢复失败")}");
         }
         finally
         {
-            PauseProxyButton.IsEnabled = true;
+            PauseProxyButton.IsEnabled = App.AgentApi.IsReady;
         }
     }
 

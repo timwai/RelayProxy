@@ -20,6 +20,8 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        var launch = ParseLaunchOptions(Environment.GetCommandLineArgs().Skip(1));
+
         _instanceMutex = new Mutex(initiallyOwned: true, InstanceMutexName, out var firstInstance);
         _activationEvent = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationEventName);
 
@@ -33,8 +35,10 @@ public partial class App : Application
         }
 
         var dispatcher = DispatcherQueue.GetForCurrentThread();
-        _window = new MainWindow();
-        _window.Activate();
+        var main = new MainWindow();
+        _window = main;
+        if (!launch.Minimized)
+            main.Activate();
 
         _ = Task.Run(() =>
         {
@@ -51,12 +55,43 @@ public partial class App : Application
 
                 dispatcher.TryEnqueue(() =>
                 {
-                    if (_window is MainWindow main)
-                        main.ShowFromExternalActivation();
+                    if (_window is MainWindow existing)
+                        existing.ShowFromExternalActivation();
                 });
             }
         });
 
-        _ = AgentHost.StartAsync();
+        _ = AgentHost.StartAsync(launch.ConfigPath);
+    }
+
+    private static NativeLaunchOptions ParseLaunchOptions(IEnumerable<string> args)
+    {
+        var options = new NativeLaunchOptions();
+        var values = args.ToArray();
+        for (var i = 0; i < values.Length; i++)
+        {
+            var value = values[i];
+            if (value is "--minimized" or "--hidden")
+            {
+                options.Minimized = true;
+                continue;
+            }
+            if (value.StartsWith("--config=", StringComparison.OrdinalIgnoreCase))
+            {
+                options.ConfigPath = value["--config=".Length..].Trim('"');
+                continue;
+            }
+            if (string.Equals(value, "--config", StringComparison.OrdinalIgnoreCase) && i + 1 < values.Length)
+            {
+                options.ConfigPath = values[++i];
+            }
+        }
+        return options;
+    }
+
+    private sealed class NativeLaunchOptions
+    {
+        public bool Minimized { get; set; }
+        public string? ConfigPath { get; set; }
     }
 }

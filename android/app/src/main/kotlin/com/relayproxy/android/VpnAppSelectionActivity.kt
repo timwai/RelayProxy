@@ -92,6 +92,8 @@ class VpnAppSelectionActivity : Activity() {
             ?: intent.getStringArrayListExtra(EXTRA_SELECTED)).orEmpty()
             .filter { it != packageName }
 
+        filterOnlySelected = false
+        categoryFilter = CATEGORY_ALL
         entries = loadApps()
         setContentView(buildUi())
         renderApps()
@@ -130,13 +132,56 @@ class VpnAppSelectionActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun installedApplications(): List<ApplicationInfo> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            packageManager.getInstalledApplications(
-                PackageManager.ApplicationInfoFlags.of(PackageManager.GET_META_DATA.toLong()),
-            )
-        } else {
-            packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+        val byPackage = linkedMapOf<String, ApplicationInfo>()
+        fun add(info: ApplicationInfo?) {
+            val pkg = info?.packageName?.trim().orEmpty()
+            if (pkg.isBlank() || pkg == packageName) return
+            byPackage[pkg] = info!!
         }
+
+        val flags = PackageManager.GET_META_DATA or
+            PackageManager.MATCH_DISABLED_COMPONENTS or
+            PackageManager.MATCH_DIRECT_BOOT_AWARE or
+            PackageManager.MATCH_DIRECT_BOOT_UNAWARE
+
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getInstalledPackages(
+                    PackageManager.PackageInfoFlags.of(flags.toLong()),
+                ).forEach { add(it.applicationInfo) }
+            } else {
+                packageManager.getInstalledPackages(flags).forEach { add(it.applicationInfo) }
+            }
+        }
+
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getInstalledApplications(
+                    PackageManager.ApplicationInfoFlags.of(flags.toLong()),
+                ).forEach(::add)
+            } else {
+                packageManager.getInstalledApplications(flags).forEach(::add)
+            }
+        }
+
+        // Some vendor ROMs return an unexpectedly restricted installed-package list
+        // even when QUERY_ALL_PACKAGES is declared. Merge launcher-visible packages
+        // as a second independent source so normal user apps never disappear.
+        val launcherIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.queryIntentActivities(
+                    launcherIntent,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DISABLED_COMPONENTS.toLong()),
+                )
+            } else {
+                packageManager.queryIntentActivities(launcherIntent, PackageManager.MATCH_DISABLED_COMPONENTS)
+            }
+        }.getOrDefault(emptyList()).forEach { resolved ->
+            add(resolved.activityInfo?.applicationInfo)
+        }
+
+        return byPackage.values.toList()
     }
 
     private fun loadApps(): List<AppEntry> {

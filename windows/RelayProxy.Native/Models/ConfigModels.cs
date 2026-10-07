@@ -58,7 +58,7 @@ public sealed class P2PConfigDto
     [JsonPropertyName("enabled")] public bool Enabled { get; set; } = true;
     [JsonPropertyName("mode")] public string Mode { get; set; } = "auto";
     [JsonPropertyName("punchTimeoutMs")] public int PunchTimeoutMs { get; set; } = 3500;
-    [JsonPropertyName("keepaliveSec")] public int KeepaliveSec { get; set; }
+    [JsonPropertyName("keepaliveSec")] public int KeepaliveSec { get; set; } = 10;
     [JsonPropertyName("idleTimeoutSec")] public int IdleTimeoutSec { get; set; } = 90;
     [JsonPropertyName("maxExitSessions")] public int MaxExitSessions { get; set; } = 4;
     [JsonPropertyName("fallback")] public bool Fallback { get; set; } = true;

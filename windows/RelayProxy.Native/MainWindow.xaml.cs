@@ -385,6 +385,7 @@ public sealed partial class MainWindow : Window
             P2PFallbackSwitch.IsOn = cfg.P2P.Fallback;
             PublicAdvertiseBox.Text = cfg.Direct.PublicAdvertise;
             PunchTimeoutBox.Value = cfg.P2P.PunchTimeoutMs;
+            KeepaliveBox.Value = cfg.P2P.KeepaliveSec > 0 ? cfg.P2P.KeepaliveSec : 10;
             IdleTimeoutBox.Value = cfg.P2P.IdleTimeoutSec;
             MaxSessionsBox.Value = cfg.P2P.MaxExitSessions;
 
@@ -1824,13 +1825,19 @@ public sealed partial class MainWindow : Window
         if (_config is null) { await LoadConfigAsync(); if (_config is null) return; }
         try
         {
+            var serverAddress = HostValue(ServerAddressBox, "Relay Server");
+            var identityId = IdentityIdValue();
+            var transport = ComboTag(TransportCombo, "auto");
+            if (!TlsSwitch.IsOn && string.Equals(transport, "quic_only", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("QUIC 需要开启 TLS；请启用 TLS，或改为 TCP/TLS。");
+
             var result = await App.AgentApi.SaveConfigAsync(new
             {
                 revision = _config.Revision,
-                server = new { address = ServerAddressBox.Text.Trim(), quicPort = SafeInt(QuicPortBox, 443), tcpPort = SafeInt(TcpPortBox, 443), tlsEnabled = TlsSwitch.IsOn },
-                device = new { name = DeviceNameBox.Text.Trim(), identityId = IdentityBox.Text.Trim() },
-                transport = ComboTag(TransportCombo, "auto"),
-                p2p = new { enabled = P2PEnabledSwitch.IsOn, mode = ComboTag(P2PModeCombo, "auto"), punchTimeoutMs = SafeInt(PunchTimeoutBox, 3500), idleTimeoutSec = SafeInt(IdleTimeoutBox, 90), maxExitSessions = SafeInt(MaxSessionsBox, 4), fallback = P2PFallbackSwitch.IsOn },
+                server = new { address = serverAddress, quicPort = SafeInt(QuicPortBox, 443), tcpPort = SafeInt(TcpPortBox, 443), tlsEnabled = TlsSwitch.IsOn },
+                device = new { name = DeviceNameBox.Text.Trim(), identityId },
+                transport = TlsSwitch.IsOn ? transport : "tcp_only",
+                p2p = new { enabled = P2PEnabledSwitch.IsOn, mode = ComboTag(P2PModeCombo, "auto"), punchTimeoutMs = SafeInt(PunchTimeoutBox, 3500), keepaliveSec = SafeInt(KeepaliveBox, 10), idleTimeoutSec = SafeInt(IdleTimeoutBox, 90), maxExitSessions = SafeInt(MaxSessionsBox, 4), fallback = P2PFallbackSwitch.IsOn },
                 direct = new { @public = new { advertise = PublicAdvertiseBox.Text.Trim() } }
             });
             HandleSaveResult(ConnectionBar, result);
@@ -2349,7 +2356,7 @@ public sealed partial class MainWindow : Window
     private void RegisterDirtyTracking()
     {
         TrackDirty("connection", ServerAddressBox, QuicPortBox, TcpPortBox, TlsSwitch, DeviceNameBox, IdentityBox, TransportCombo,
-            P2PEnabledSwitch, P2PModeCombo, P2PFallbackSwitch, PublicAdvertiseBox, PunchTimeoutBox, IdleTimeoutBox, MaxSessionsBox);
+            P2PEnabledSwitch, P2PModeCombo, P2PFallbackSwitch, PublicAdvertiseBox, PunchTimeoutBox, KeepaliveBox, IdleTimeoutBox, MaxSessionsBox);
         TrackDirty("proxy", SocksEnabledSwitch, SocksListenBox, SocksPortBox, HttpEnabledSwitch, HttpListenBox, HttpPortBox,
             TransparentProxySwitch, ExcludeProcessesBox);
         TrackDirty("exitshare", ExitEnabledSwitch, AllowInternetCheck, AllowPrivateCheck, AllowLoopbackCheck, ExitUpstreamModeCombo,
@@ -2461,6 +2468,34 @@ public sealed partial class MainWindow : Window
         Processes = [.. r.Processes], Targets = [.. r.Targets], Ports = [.. r.Ports], Protocols = [.. r.Protocols]
     };
     private static List<string> SplitList(string value) => value.Split(new[] { '\r', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private static string HostValue(TextBox box, string label)
+    {
+        var host = box.Text.Trim();
+        if (host.Length >= 2 && host[0] == '[' && host[^1] == ']')
+            host = host[1..^1];
+
+        var colonCount = host.Count(ch => ch == ':');
+        if (string.IsNullOrWhiteSpace(host) || host.Any(char.IsWhiteSpace) || host.Contains('/') || host.Contains('\\') || colonCount == 1)
+            throw new InvalidOperationException($"{label}请填写主机名或 IP，协议和端口请分开填写。");
+
+        return host;
+    }
+
+    private string IdentityIdValue()
+    {
+        var value = IdentityBox.Text.Trim().ToLowerInvariant();
+        var valid = value.Length == 16
+            && value.All(ch => ch is >= 'a' and <= 'z' or >= '0' and <= '9')
+            && value.Any(ch => ch is >= 'a' and <= 'z')
+            && value.Any(char.IsDigit);
+        if (!valid)
+            throw new InvalidOperationException("Identity ID 必须是服务端生成的 16 位小写字母数字组合。");
+
+        IdentityBox.Text = value;
+        return value;
+    }
+
     private static int SafeInt(NumberBox box, int fallback) => double.IsNaN(box.Value) ? fallback : (int)Math.Round(box.Value);
     private static string ComboTag(ComboBox combo, string fallback) => (combo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? fallback;
     private static void SelectComboTag(ComboBox combo, string? tag)

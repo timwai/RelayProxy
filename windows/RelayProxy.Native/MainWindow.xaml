@@ -130,10 +130,11 @@
                 <ComboBox x:Name="P2PModeCombo" Header="路径模式" HorizontalAlignment="Stretch"><ComboBoxItem Tag="auto" Content="自动 · Public Direct → P2P → Relay"/><ComboBoxItem Tag="direct_only" Content="仅直连 · 不回退 Relay"/><ComboBoxItem Tag="p2p_only" Content="仅 P2P"/><ComboBoxItem Tag="relay_only" Content="仅 Relay"/></ComboBox>
                 <ToggleSwitch x:Name="P2PFallbackSwitch" Header="自动回退 Relay"/>
                 <TextBox x:Name="PublicAdvertiseBox" Header="手动公网地址（可选）" PlaceholderText="edge.example.com:443"/>
-                <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-                  <NumberBox x:Name="PunchTimeoutBox" Header="打洞超时 ms" Minimum="100" Maximum="60000"/>
-                  <NumberBox x:Name="IdleTimeoutBox" Grid.Column="1" Header="空闲回收 s" Minimum="1" Maximum="3600"/>
-                  <NumberBox x:Name="MaxSessionsBox" Grid.Column="2" Header="最多 Exit 会话" Minimum="1" Maximum="64"/>
+                <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <NumberBox x:Name="PunchTimeoutBox" Header="打洞超时 ms" Minimum="100" Maximum="10000"/>
+                  <NumberBox x:Name="KeepaliveBox" Grid.Column="1" Header="Keepalive s" Minimum="5" Maximum="60"/>
+                  <NumberBox x:Name="IdleTimeoutBox" Grid.Column="2" Header="空闲回收 s" Minimum="30" Maximum="3600"/>
+                  <NumberBox x:Name="MaxSessionsBox" Grid.Column="3" Header="最多 Exit 会话" Minimum="1" Maximum="32"/>
                 </Grid>
                 <TextBlock Text="Windows 不提供 Android 的 Wi‑Fi / 移动数据网络调度；这里只配置 RelayProxy 数据路径。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
               </StackPanel></Border>

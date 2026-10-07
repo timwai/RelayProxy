@@ -19,7 +19,8 @@ func IsAutoStartEnabled(appName string) bool {
 }
 
 func HelperFlagName() string { return "relayproxy-startup-helper" }
+func TargetFlagName() string { return "relayproxy-startup-target" }
 
-func RunElevatedHelper(action, appName, configPath string) error {
+func RunElevatedHelper(action, appName, configPath, targetExe string) error {
 	return nil
 }

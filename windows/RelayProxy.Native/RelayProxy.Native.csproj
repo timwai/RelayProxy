@@ -54,6 +54,13 @@
     </None>
   </ItemGroup>
 
+  <ItemGroup Condition="'$(PublishTrimmed)' == 'true'">
+    <!-- CsWinRT/Windows SDK projection assemblies still emit trim-analysis warnings.
+         Keep them intact while trimming the rest of the framework payload. -->
+    <TrimmerRootAssembly Include="Microsoft.Windows.SDK.NET" />
+    <TrimmerRootAssembly Include="WinRT.Runtime" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(RelayAgentCorePath)' != '' and Exists('$(RelayAgentCorePath)')">
     <Content Include="$(RelayAgentCorePath)">
       <Link>relay-agent.exe</Link>

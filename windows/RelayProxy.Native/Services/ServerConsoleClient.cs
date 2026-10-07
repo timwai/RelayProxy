@@ -7,11 +7,6 @@ namespace RelayProxy.Native.Services;
 
 public sealed class ServerConsoleClient : IDisposable
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
     private CookieContainer _cookies = new();
     private HttpClient? _http;
     private bool _disposed;
@@ -45,9 +40,10 @@ public sealed class ServerConsoleClient : IDisposable
 
         try
         {
-            using var response = await _http.PostAsJsonAsync("api/v1/auth/login", new { username, password }, Json, ct);
+            var request = new ServerConsoleLoginRequestDto { Username = username, Password = password };
+            using var response = await _http.PostAsJsonAsync("api/v1/auth/login", request, RelayProxyJsonContext.Get<ServerConsoleLoginRequestDto>(), ct);
             await EnsureSuccessAsync(response, ct);
-            var body = await response.Content.ReadFromJsonAsync<ServerConsoleLoginResponseDto>(Json, ct)
+            var body = await response.Content.ReadFromJsonAsync(RelayProxyJsonContext.Get<ServerConsoleLoginResponseDto>(), ct)
                 ?? throw new InvalidOperationException("Server Console 登录响应为空。");
             CurrentUser = body.User;
             BaseAddress = uri;
@@ -65,7 +61,7 @@ public sealed class ServerConsoleClient : IDisposable
         var http = EnsureAuthenticated();
         using var response = await http.GetAsync("api/v1/message-channels", ct);
         await EnsureSuccessAsync(response, ct);
-        return await response.Content.ReadFromJsonAsync<List<MessageChannelDto>>(Json, ct) ?? [];
+        return await response.Content.ReadFromJsonAsync(RelayProxyJsonContext.Get<List<MessageChannelDto>>(), ct) ?? [];
     }
 
     public async Task<MessageChannelDto> UpdateMessageRulesAsync(MessageChannelDto channel, IReadOnlyList<MessageRuleDto> rules, CancellationToken ct = default)
@@ -73,16 +69,20 @@ public sealed class ServerConsoleClient : IDisposable
         var http = EnsureAuthenticated();
         if (string.IsNullOrWhiteSpace(channel.Id)) throw new InvalidOperationException("消息渠道 ID 为空。");
 
-        var body = new
+        var body = new MessageChannelUpdateRequestDto
         {
-            name = channel.Name,
-            allDevices = channel.AllDevices,
-            deviceIds = channel.DeviceIds,
-            messageRules = rules
+            Name = channel.Name,
+            AllDevices = channel.AllDevices,
+            DeviceIds = [.. channel.DeviceIds],
+            MessageRules = [.. rules]
         };
-        using var response = await http.PutAsJsonAsync($"api/v1/message-channels/{Uri.EscapeDataString(channel.Id)}", body, Json, ct);
+        using var response = await http.PutAsJsonAsync(
+            $"api/v1/message-channels/{Uri.EscapeDataString(channel.Id)}",
+            body,
+            RelayProxyJsonContext.Get<MessageChannelUpdateRequestDto>(),
+            ct);
         await EnsureSuccessAsync(response, ct);
-        return await response.Content.ReadFromJsonAsync<MessageChannelDto>(Json, ct)
+        return await response.Content.ReadFromJsonAsync(RelayProxyJsonContext.Get<MessageChannelDto>(), ct)
             ?? throw new InvalidOperationException("Server Console 未返回更新后的消息渠道。");
     }
 

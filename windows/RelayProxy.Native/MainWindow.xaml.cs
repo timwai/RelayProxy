@@ -1802,19 +1802,21 @@ public sealed partial class MainWindow : Window
 
             DiagnosticCollectionText.Text = "正在整理日志与诊断包…";
             var logs = await App.AgentApi.GetLogsAsync();
-            var manifest = new
+            var manifest = new DiagnosticsManifestDto
             {
-                format = "relayproxy-diagnostic-v1",
-                collectedAt = DateTimeOffset.Now,
-                durationSeconds = 30,
-                sampleIntervalSeconds = 5,
-                sampleCount = samples.Count,
-                note = "此诊断包不包含 RelayProxy 配置文件、密码或管理 token。"
+                CollectedAt = DateTimeOffset.Now,
+                DurationSeconds = 30,
+                SampleIntervalSeconds = 5,
+                SampleCount = samples.Count,
+                Note = "此诊断包不包含 RelayProxy 配置文件、密码或管理 token。"
             };
 
-            var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-            await File.WriteAllTextAsync(Path.Combine(temp, "manifest.json"), JsonSerializer.Serialize(manifest, jsonOptions));
-            await File.WriteAllTextAsync(Path.Combine(temp, "diagnostics.json"), JsonSerializer.Serialize(samples, jsonOptions));
+            await File.WriteAllTextAsync(
+                Path.Combine(temp, "manifest.json"),
+                JsonSerializer.Serialize(manifest, RelayProxyJsonContext.Get<DiagnosticsManifestDto>()));
+            await File.WriteAllTextAsync(
+                Path.Combine(temp, "diagnostics.json"),
+                JsonSerializer.Serialize(samples, RelayProxyJsonContext.Get<List<DiagnosticsSnapshotDto>>()));
             await File.WriteAllTextAsync(
                 Path.Combine(temp, "logs.txt"),
                 string.Join(Environment.NewLine, logs.Select(x => $"{x.Timestamp} {x.Message}")));
@@ -1862,14 +1864,29 @@ public sealed partial class MainWindow : Window
             if (!TlsSwitch.IsOn && string.Equals(transport, "quic_only", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("QUIC 需要开启 TLS；请启用 TLS，或改为 TCP/TLS。");
 
-            var result = await App.AgentApi.SaveConfigAsync(new
+            var result = await App.AgentApi.SaveConfigAsync(new AgentConfigUpdateDto
             {
-                revision = _config.Revision,
-                server = new { address = serverAddress, quicPort = SafeInt(QuicPortBox, 443), tcpPort = SafeInt(TcpPortBox, 443), tlsEnabled = TlsSwitch.IsOn },
-                device = new { name = DeviceNameBox.Text.Trim(), identityId },
-                transport = TlsSwitch.IsOn ? transport : "tcp_only",
-                p2p = new { enabled = P2PEnabledSwitch.IsOn, mode = ComboTag(P2PModeCombo, "auto"), punchTimeoutMs = SafeInt(PunchTimeoutBox, 3500), keepaliveSec = SafeInt(KeepaliveBox, 10), idleTimeoutSec = SafeInt(IdleTimeoutBox, 90), maxExitSessions = SafeInt(MaxSessionsBox, 4), fallback = P2PFallbackSwitch.IsOn },
-                direct = new { @public = new { advertise = PublicAdvertiseBox.Text.Trim() } }
+                Revision = _config.Revision,
+                Server = new ServerUpdateDto
+                {
+                    Address = serverAddress,
+                    QuicPort = SafeInt(QuicPortBox, 443),
+                    TcpPort = SafeInt(TcpPortBox, 443),
+                    TlsEnabled = TlsSwitch.IsOn
+                },
+                Device = new DeviceUpdateDto { Name = DeviceNameBox.Text.Trim(), IdentityId = identityId },
+                Transport = TlsSwitch.IsOn ? transport : "tcp_only",
+                P2P = new P2PUpdateDto
+                {
+                    Enabled = P2PEnabledSwitch.IsOn,
+                    Mode = ComboTag(P2PModeCombo, "auto"),
+                    PunchTimeoutMs = SafeInt(PunchTimeoutBox, 3500),
+                    KeepaliveSec = SafeInt(KeepaliveBox, 10),
+                    IdleTimeoutSec = SafeInt(IdleTimeoutBox, 90),
+                    MaxExitSessions = SafeInt(MaxSessionsBox, 4),
+                    Fallback = P2PFallbackSwitch.IsOn
+                },
+                Direct = new DirectUpdateDto { Public = new PublicDirectUpdateDto { Advertise = PublicAdvertiseBox.Text.Trim() } }
             });
             HandleSaveResult(ConnectionBar, result);
             _dirtyPages.Remove("connection");
@@ -1909,15 +1926,23 @@ public sealed partial class MainWindow : Window
             var httpPort = SafeInt(HttpPortBox, 8080);
             if (SocksEnabledSwitch.IsOn && HttpEnabledSwitch.IsOn && string.Equals(socksListen, httpListen, StringComparison.OrdinalIgnoreCase) && socksPort == httpPort)
                 throw new InvalidOperationException("SOCKS5 与 HTTP 不能监听同一个地址和端口。");
-            var result = await App.AgentApi.SaveConfigAsync(new
+            var result = await App.AgentApi.SaveConfigAsync(new AgentConfigUpdateDto
             {
-                revision = _config.Revision,
-                proxy = new
+                Revision = _config.Revision,
+                Proxy = new ProxyUpdateDto
                 {
-                    socks5Enabled = SocksEnabledSwitch.IsOn, socks5Listen = socksListen, socks5Port = socksPort,
-                    httpEnabled = HttpEnabledSwitch.IsOn, httpListen, httpPort
+                    Socks5Enabled = SocksEnabledSwitch.IsOn,
+                    Socks5Listen = socksListen,
+                    Socks5Port = socksPort,
+                    HttpEnabled = HttpEnabledSwitch.IsOn,
+                    HttpListen = httpListen,
+                    HttpPort = httpPort
                 },
-                network = new { mode = TransparentProxySwitch.IsOn ? "divert" : "", excludeProcesses = SplitList(ExcludeProcessesBox.Text) }
+                Network = new NetworkUpdateDto
+                {
+                    Mode = TransparentProxySwitch.IsOn ? "divert" : "",
+                    ExcludeProcesses = SplitList(ExcludeProcessesBox.Text)
+                }
             });
             HandleSaveResult(ProxyBar, result);
             _dirtyPages.Remove("proxy");
@@ -1947,27 +1972,27 @@ public sealed partial class MainWindow : Window
             if (!string.IsNullOrWhiteSpace(upstreamMode))
                 upstreamAddress = EndpointValue(ExitUpstreamAddressBox, "上游代理地址");
 
-            var result = await App.AgentApi.SaveConfigAsync(new
+            var result = await App.AgentApi.SaveConfigAsync(new AgentConfigUpdateDto
             {
-                revision = _config.Revision,
-                exit = new
+                Revision = _config.Revision,
+                Exit = new ExitUpdateDto
                 {
-                    enabled = ExitEnabledSwitch.IsOn,
-                    allowInternet = AllowInternetCheck.IsChecked == true,
-                    allowPrivateNetwork = AllowPrivateCheck.IsChecked == true,
-                    allowLoopback = AllowLoopbackCheck.IsChecked == true,
-                    upstream = new
+                    Enabled = ExitEnabledSwitch.IsOn,
+                    AllowInternet = AllowInternetCheck.IsChecked == true,
+                    AllowPrivateNetwork = AllowPrivateCheck.IsChecked == true,
+                    AllowLoopback = AllowLoopbackCheck.IsChecked == true,
+                    Upstream = new ExitUpstreamUpdateDto
                     {
-                        mode = upstreamMode,
-                        address = upstreamAddress,
-                        username = ExitUpstreamUserBox.Text.Trim(),
-                        password = ExitUpstreamPasswordBox.Password
+                        Mode = upstreamMode,
+                        Address = upstreamAddress,
+                        Username = ExitUpstreamUserBox.Text.Trim(),
+                        Password = ExitUpstreamPasswordBox.Password
                     },
-                    access = new
+                    Access = new ExitAccessUpdateDto
                     {
-                        mode = ComboTag(AccessModeCombo, ""),
-                        domains = SplitList(AccessDomainsBox.Text),
-                        cidrs = SplitList(AccessCidrsBox.Text)
+                        Mode = ComboTag(AccessModeCombo, ""),
+                        Domains = SplitList(AccessDomainsBox.Text),
+                        Cidrs = SplitList(AccessCidrsBox.Text)
                     }
                 }
             });
@@ -2007,10 +2032,15 @@ public sealed partial class MainWindow : Window
         if (_config is null) { await LoadConfigAsync(); if (_config is null) return; }
         try
         {
-            var result = await App.AgentApi.SaveConfigAsync(new
+            var result = await App.AgentApi.SaveConfigAsync(new AgentConfigUpdateDto
             {
-                revision = _config.Revision,
-                routing = new { mode = ComboTag(RoutingModeCombo, "rule"), default_action = ComboTag(DefaultActionCombo, "PROXY"), rules = _routingRules }
+                Revision = _config.Revision,
+                Routing = new RoutingUpdateDto
+                {
+                    Mode = ComboTag(RoutingModeCombo, "rule"),
+                    DefaultAction = ComboTag(DefaultActionCombo, "PROXY"),
+                    Rules = [.. _routingRules]
+                }
             });
             HandleSaveResult(RoutingBar, result);
             _dirtyPages.Remove("routing");
@@ -2250,7 +2280,17 @@ public sealed partial class MainWindow : Window
         try
         {
             var theme = ComboTag(ThemeCombo, "system");
-            var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { minimizeToTray = MinimizeToTraySwitch.IsOn, systemNotifications = SystemNotificationsSwitch.IsOn, theme, verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
+            var result = await App.AgentApi.SaveConfigAsync(new AgentConfigUpdateDto
+            {
+                Revision = _config.Revision,
+                Gui = new GuiUpdateDto
+                {
+                    MinimizeToTray = MinimizeToTraySwitch.IsOn,
+                    SystemNotifications = SystemNotificationsSwitch.IsOn,
+                    Theme = theme,
+                    VerificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15)
+                }
+            });
             ApplyTheme(theme);
             HandleSaveResult(SettingsBar, result); _dirtyPages.Remove("settings"); await LoadConfigAsync();
         }

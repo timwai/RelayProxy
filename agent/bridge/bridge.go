@@ -403,7 +403,7 @@ type ConfigUpdate struct {
 		StartMinimized              *bool   `json:"startMinimized"`
 		Theme                       *string `json:"theme"`
 		VerificationPopupTimeoutSec *int    `json:"verificationPopupTimeoutSec"`
-		SystemNotifications          *bool   `json:"systemNotifications"`
+		SystemNotifications         *bool   `json:"systemNotifications"`
 	} `json:"gui"`
 }
 

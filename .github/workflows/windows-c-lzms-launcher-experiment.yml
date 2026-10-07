@@ -1,0 +1,149 @@
+name: Windows Tiny C LZMS Launcher Experiment
+
+on:
+  push:
+    branches:
+      - feat/windows-native-gui
+    paths:
+      - "windows/RelayProxy.LzmsLauncher/**"
+      - ".github/workflows/windows-c-lzms-launcher-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-c-lzms-launcher-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  c-lzms:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Restore lean Windows App SDK graph
+        shell: pwsh
+        run: |
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-x64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+          if ($LASTEXITCODE -ne 0) { throw "C launcher experiment restore failed" }
+
+      - name: Build embedded Go Agent core
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\c-lzms\staging" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w" -o ".\c-lzms\staging\relay-agent.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent core build failed" }
+
+      - name: Publish lean outer-only WinUI host
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\c-lzms\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\c-lzms\single" -Force | Out-Null
+          $core = (Resolve-Path ".\c-lzms\staging\relay-agent.exe").Path
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\c-lzms\host
+          if ($LASTEXITCODE -ne 0) { throw "C launcher experiment host publish failed" }
+
+      - name: Build tiny native C launcher
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSINSTALL=%%i"
+          if not defined VSINSTALL exit /b 1
+          call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          cl /nologo /O1 /GL /MT /DUNICODE /D_UNICODE windows\RelayProxy.LzmsLauncher\launcher.c /Fe:c-lzms\launcher-c.exe /link /SUBSYSTEM:WINDOWS /OPT:REF /OPT:ICF /LTCG
+          if errorlevel 1 exit /b 1
+
+      - name: Pack C-launcher LZMS EXE
+        shell: pwsh
+        run: |
+          $stub = (Resolve-Path ".\c-lzms\launcher-c.exe").Path
+          $nativeHost = (Resolve-Path ".\c-lzms\host\RelayProxy.NativeHost.exe").Path
+          $exe = ".\c-lzms\single\RelayProxy-agent-windows-amd64-c-lzms.exe"
+          go run .\scripts\pack-windows-launcher-lzms.go -launcher $stub -payload $nativeHost -output $exe
+          if ($LASTEXITCODE -ne 0) { throw "C launcher LZMS packing failed" }
+
+          $stubMb = [math]::Round((Get-Item $stub).Length / 1MB, 3)
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[c-lzms-size] C launcher stub: $stubMb MB"
+          Write-Host "[c-lzms-size] uncompressed-inner Host: $hostMb MB"
+          Write-Host "[c-lzms-size] rename-safe EXE: $finalMb MB"
+          Write-Host "::notice title=Tiny C LZMS package::x64 C+LZMS = $finalMb MB; stub = $stubMb MB"
+
+          @"
+          ### win-x64 tiny C launcher + 64 MiB LZMS experiment
+          **C launcher stub:** $stubMb MiB
+          **Uncompressed-inner Host:** $hostMb MiB
+          **Rename-safe EXE:** $finalMb MiB
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Smoke test arbitrarily renamed C LZMS EXE
+        shell: pwsh
+        run: |
+          $cache = Join-Path $env:LOCALAPPDATA "RelayProxy\native-host-lzms-c-experiment"
+          Remove-Item $cache -Recurse -Force -ErrorAction SilentlyContinue
+          $source = (Resolve-Path ".\c-lzms\single\RelayProxy-agent-windows-amd64-c-lzms.exe").Path
+          $renamed = ".\c-lzms\single\用户可任意改名.exe"
+          Copy-Item $source $renamed -Force
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "C LZMS renamed EXE exited with code $($process.ExitCode)."
+            }
+            Write-Host "[c-lzms-smoke] Unicode-renamed C launcher stayed alive for 8 seconds." -ForegroundColor Green
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-win-x64-c-lzms-experiment
+          path: .\c-lzms\single\RelayProxy-agent-windows-amd64-c-lzms.exe
+          if-no-files-found: error

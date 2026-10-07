@@ -21,6 +21,7 @@ import (
 	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
+	quiccongestion "relayproxy/internal/congestion"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
@@ -56,6 +57,9 @@ type clientConfig struct {
 	QUICPort              int            `json:"quicPort"`
 	TCPPort               int            `json:"tcpPort"`
 	TransportMode         string         `json:"transportMode"`
+	BrutalUpMbps          int            `json:"brutalUpMbps"`
+	BrutalDownMbps        int            `json:"brutalDownMbps"`
+	DisableLossCompensation bool         `json:"disableLossCompensation"`
 	TLSEnabled            *bool          `json:"tlsEnabled"`
 	InsecureTLS           bool           `json:"insecureTLS"`
 	AllowInternet         *bool          `json:"allowInternet"`
@@ -199,6 +203,10 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	case tunnel.ModeAuto, tunnel.ModeQUICOnly, tunnel.ModeTCPOnly:
 	default:
 		return cfg, fmt.Errorf("unsupported transportMode %q", cfg.TransportMode)
+	}
+	if cfg.BrutalUpMbps < 0 || cfg.BrutalUpMbps > 1_000_000 ||
+		cfg.BrutalDownMbps < 0 || cfg.BrutalDownMbps > 1_000_000 {
+		return cfg, errors.New("brutal bandwidth must be between 0 and 1000000 Mbps")
 	}
 	if cfg.TLSEnabled == nil {
 		enabled := true
@@ -911,6 +919,8 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		ClientVersion:         clientVersion,
 		RequestedCapabilities: c.requestedCapabilities(),
 		TransportCapabilities: transportCaps,
+		BrutalUploadBPS:       quiccongestion.MbpsToBytesPerSecond(c.cfg.BrutalUpMbps),
+		BrutalDownloadBPS:     quiccongestion.MbpsToBytesPerSecond(c.cfg.BrutalDownMbps),
 	}
 	if err := protocol.WriteJSON(ctrl, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)
@@ -953,6 +963,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		return errors.New("server returned an incomplete device approval")
 	}
 	tunnel.SetPeerCapabilities(sess, accepted.TransportCapabilities)
+	if accepted.BrutalUploadBPS > 0 {
+		tunnel.UseBrutal(sess, accepted.BrutalUploadBPS, c.cfg.DisableLossCompensation)
+	}
 	if err := ctrl.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
@@ -999,6 +1012,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	powerConstrained := c.powerConstrained
 	c.mu.Unlock()
 	c.clientApproved.Store(clientRuntimeApproved)
+	if c.proxyDirect != nil {
+		c.proxyDirect.SetBrutalProfile(accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
+	}
 	if accepted.ProxyExits != nil {
 		c.proxyDialer.SetDefaultExitID(selectedExit)
 		c.updatePublicDirectInventory(acceptedExits)
@@ -1027,8 +1043,11 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 				PortStart:           accepted.P2PPortStart,
 				PortEnd:             accepted.P2PPortEnd,
 				UPnPEnabled:         accepted.P2PUPnPEnabled,
-				LowPowerIdleTimeout: 60 * time.Second,
-				LowPowerMaxSessions: 1,
+				LowPowerIdleTimeout:     60 * time.Second,
+				LowPowerMaxSessions:     1,
+				BrutalUploadBPS:         accepted.BrutalUploadBPS,
+				BrutalDownloadBPS:       accepted.BrutalDownloadBPS,
+				DisableLossCompensation: c.cfg.DisableLossCompensation,
 			},
 		)
 		proxyP2PManager.SetPowerConstrained(powerConstrained)

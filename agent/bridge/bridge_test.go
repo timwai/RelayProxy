@@ -254,6 +254,44 @@ func TestRestartStateTracksAppliedSettingsAcrossSaves(t *testing.T) {
 	}
 }
 
+func TestInsecureTLSSaveRequiresRestart(t *testing.T) {
+	b := newTestBridge(t)
+	var in ConfigUpdate
+	in.Server.InsecureTLS = ptr(true)
+
+	result, err := b.SaveConfig(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RestartRequired {
+		t.Fatal("insecure TLS startup setting was applied without restart")
+	}
+	cfg, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Server.InsecureTLS {
+		t.Fatal("insecure TLS setting was not saved")
+	}
+	state, err := b.GetConfigState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.RestartRequired || !state.Config.Server.InsecureTLS || state.Runtime.Server.InsecureTLS {
+		t.Fatalf("desired/runtime insecure TLS state mismatch: desired=%v runtime=%v", state.Config.Server.InsecureTLS, state.Runtime.Server.InsecureTLS)
+	}
+	found := false
+	for _, field := range state.RestartFields {
+		if field == "TLS 允许不受信任证书" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("restart fields missing insecure TLS: %v", state.RestartFields)
+	}
+}
+
 func TestP2PConfigSaveRequiresRestart(t *testing.T) {
 	b := newTestBridge(t)
 	var in ConfigUpdate

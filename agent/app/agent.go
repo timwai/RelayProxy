@@ -212,56 +212,56 @@ type ProxyExitSummary struct {
 }
 
 type AgentStatus struct {
-	Connected             bool                       `json:"connected"`
-	Transport             string                     `json:"transport"`
-	TunnelDiagnostics     *tunnel.SessionDiagnostics `json:"tunnelDiagnostics,omitempty"`
-	LatencyMs             int64                      `json:"latency"`
-	DeviceID              string                     `json:"deviceId"`
-	DeviceName            string                     `json:"deviceName"`
-	IdentityName          string                     `json:"identityName,omitempty"`
-	PolicyRevision        int64                      `json:"policyRevision,omitempty"`
-	Mode                  string                     `json:"mode"`
-	SelectedExit          string                     `json:"selectedExit"`
-	ProxyExits            []ProxyExitSummary         `json:"proxyExits"`
-	ProxyExitRevision     uint64                     `json:"proxyExitRevision,omitempty"`
-	SOCKS5Running         bool                       `json:"socks5Running"`
-	HTTPRunning           bool                       `json:"httpRunning"`
-	ExitRunning           bool                       `json:"exitRunning"`
-	NetworkMode           string                     `json:"networkMode"`
-	DivertRunning         bool                       `json:"divertRunning"`
-	DivertStage           string                     `json:"divertStage"`
-	DivertError           string                     `json:"divertError,omitempty"`
-	DivertDiagnostics     divert.Diagnostics         `json:"divertDiagnostics"`
-	ActiveStreams         int64                      `json:"activeStreams"`
-	ApprovalState         string                     `json:"approvalState"`
-	ApprovedCapabilities  []string                   `json:"approvedCapabilities,omitempty"`
-	RDPListenAddr         string                     `json:"rdpListenAddr,omitempty"`
-	RDPTargetID           string                     `json:"rdpTargetId,omitempty"`
-	RDPUDPEnabled         bool                       `json:"rdpUdpEnabled"`
-	RDPUDPActive          bool                       `json:"rdpUdpActive"`
-	RDPUDPReason          string                     `json:"rdpUdpReason,omitempty"`
-	RDPPathTCP            string                     `json:"rdpPathTcp,omitempty"`
-	RDPPathUDP            string                     `json:"rdpPathUdp,omitempty"`
-	DirectState           string                     `json:"directState,omitempty"`
-	DirectPath            string                     `json:"directPath,omitempty"`
-	DirectError           string                     `json:"directError,omitempty"`
-	DirectEndpoint        string                     `json:"directEndpoint,omitempty"`
-	DirectRTTMs           int64                      `json:"directRttMs,omitempty"`
-	DirectFallbackCount   uint64                     `json:"directFallbackCount,omitempty"`
-	DirectBytesUp         uint64                     `json:"directBytesUp,omitempty"`
-	DirectBytesDown       uint64                     `json:"directBytesDown,omitempty"`
-	DirectQUIC            *tunnel.QUICDiagnostics    `json:"directQuic,omitempty"`
-	P2PState              string                     `json:"p2pState,omitempty"`
-	P2PPath               string                     `json:"p2pPath,omitempty"`
-	P2PError              string                     `json:"p2pError,omitempty"`
-	P2PSessionID          uint64                     `json:"p2pSessionId,omitempty"`
-	P2PExitID             string                     `json:"p2pExitId,omitempty"`
-	P2PRTTMs              int64                      `json:"p2pRttMs,omitempty"`
-	P2PCandidateSummary   string                     `json:"p2pCandidateSummary,omitempty"`
-	P2PFallbackCount      uint64                     `json:"p2pFallbackCount,omitempty"`
-	P2PBytesUp            uint64                     `json:"p2pBytesUp,omitempty"`
-	P2PBytesDown          uint64                     `json:"p2pBytesDown,omitempty"`
-	NativeUDP             tunnel.DatagramUsage       `json:"nativeUdp"`
+	Connected	bool	`json:"connected"`
+	Transport	string	`json:"transport"`
+	TunnelDiagnostics	*tunnel.SessionDiagnostics	`json:"tunnelDiagnostics,omitempty"`
+	LatencyMs	int64	`json:"latency"`
+	DeviceID	string	`json:"deviceId"`
+	DeviceName	string	`json:"deviceName"`
+	IdentityName	string	`json:"identityName,omitempty"`
+	PolicyRevision	int64	`json:"policyRevision,omitempty"`
+	Mode	string	`json:"mode"`
+	SelectedExit	string	`json:"selectedExit"`
+	ProxyExits	[]ProxyExitSummary	`json:"proxyExits"`
+	ProxyExitRevision	uint64	`json:"proxyExitRevision,omitempty"`
+	SOCKS5Running	bool	`json:"socks5Running"`
+	HTTPRunning	bool	`json:"httpRunning"`
+	ExitRunning	bool	`json:"exitRunning"`
+	NetworkMode	string	`json:"networkMode"`
+	DivertRunning	bool	`json:"divertRunning"`
+	DivertStage	string	`json:"divertStage"`
+	DivertError	string	`json:"divertError,omitempty"`
+	DivertDiagnostics	divert.Diagnostics	`json:"divertDiagnostics"`
+	ActiveStreams	int64	`json:"activeStreams"`
+	ApprovalState	string	`json:"approvalState"`
+	ApprovedCapabilities	[]string	`json:"approvedCapabilities,omitempty"`
+	RDPListenAddr	string	`json:"rdpListenAddr,omitempty"`
+	RDPTargetID	string	`json:"rdpTargetId,omitempty"`
+	RDPUDPEnabled	bool	`json:"rdpUdpEnabled"`
+	RDPUDPActive	bool	`json:"rdpUdpActive"`
+	RDPUDPReason	string	`json:"rdpUdpReason,omitempty"`
+	RDPPathTCP	string	`json:"rdpPathTcp,omitempty"`
+	RDPPathUDP	string	`json:"rdpPathUdp,omitempty"`
+	DirectState	string	`json:"directState,omitempty"`
+	DirectPath	string	`json:"directPath,omitempty"`
+	DirectError	string	`json:"directError,omitempty"`
+	DirectEndpoint	string	`json:"directEndpoint,omitempty"`
+	DirectRTTMs	int64	`json:"directRttMs,omitempty"`
+	DirectFallbackCount	uint64	`json:"directFallbackCount,omitempty"`
+	DirectBytesUp	uint64	`json:"directBytesUp,omitempty"`
+	DirectBytesDown	uint64	`json:"directBytesDown,omitempty"`
+	DirectQUIC	*tunnel.QUICDiagnostics	`json:"directQuic,omitempty"`
+	P2PState	string	`json:"p2pState,omitempty"`
+	P2PPath	string	`json:"p2pPath,omitempty"`
+	P2PError	string	`json:"p2pError,omitempty"`
+	P2PSessionID	uint64	`json:"p2pSessionId,omitempty"`
+	P2PExitID	string	`json:"p2pExitId,omitempty"`
+	P2PRTTMs	int64	`json:"p2pRttMs,omitempty"`
+	P2PCandidateSummary	string	`json:"p2pCandidateSummary,omitempty"`
+	P2PFallbackCount	uint64	`json:"p2pFallbackCount,omitempty"`
+	P2PBytesUp	uint64	`json:"p2pBytesUp,omitempty"`
+	P2PBytesDown	uint64	`json:"p2pBytesDown,omitempty"`
+	NativeUDP	tunnel.DatagramUsage	`json:"nativeUdp"`
 }
 
 // ErrRestartRequired means a saved startup setting has not changed the running
@@ -269,49 +269,49 @@ type AgentStatus struct {
 var ErrRestartRequired = errors.New("agent role change requires restart")
 
 type Agent struct {
-	cfg                  AgentConfig
-	tunnelMgr            *tunnel.TunnelManager
-	dialer               *routing.RoutingDialer
-	rawDialer            *client.TunnelDialer
-	routingEngine        *routing.Engine
-	traffic              *traffic.Registry
-	messages             *MessageBuffer
-	exitHandler          *exit.Handler
-	socksServer          *socks5.Server
-	httpServer           *httpproxy.Server
-	divertSrv            *divert.Server
-	divertStage          atomic.Pointer[string]
-	divertError          atomic.Pointer[string]
-	ctrlStream           tunnel.TunnelStream
-	readySession         tunnel.TunnelSession
-	epoch                uint64
-	started              bool
-	selectedExit         atomic.Pointer[string]
-	latencyMs            atomic.Int64
-	handshakeOK          atomic.Bool
-	approvalState        atomic.Pointer[string]
-	approvedMode         string
-	approvedCapabilities []string
-	identityName         string
-	policyRevision       int64
-	proxyExits           []protocol.ProxyExit
-	proxyExitRevision    uint64
-	rdpTargets           []rdp.Target
-	rdpConnection        *rdp.Connection
-	rdpP2P               *rdpp2p.Manager
-	rdpSession           *rdpp2p.Session
-	proxyP2P             *proxyp2p.Manager
-	proxyDirect          *publicDirectClientManager
-	closed               atomic.Bool
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	wg                   sync.WaitGroup
-	mu                   sync.RWMutex
-	policyMu             sync.RWMutex
-	lifecycleMu          sync.Mutex
-	closeOnce            sync.Once
-	closeErr             error
-	rdpConnectMu         sync.Mutex
+	cfg	AgentConfig
+	tunnelMgr	*tunnel.TunnelManager
+	dialer	*routing.RoutingDialer
+	rawDialer	*client.TunnelDialer
+	routingEngine	*routing.Engine
+	traffic	*traffic.Registry
+	messages	*MessageBuffer
+	exitHandler	*exit.Handler
+	socksServer	*socks5.Server
+	httpServer	*httpproxy.Server
+	divertSrv	*divert.Server
+	divertStage	atomic.Pointer[string]
+	divertError	atomic.Pointer[string]
+	ctrlStream	tunnel.TunnelStream
+	readySession	tunnel.TunnelSession
+	epoch	uint64
+	started	bool
+	selectedExit	atomic.Pointer[string]
+	latencyMs	atomic.Int64
+	handshakeOK	atomic.Bool
+	approvalState	atomic.Pointer[string]
+	approvedMode	string
+	approvedCapabilities	[]string
+	identityName	string
+	policyRevision	int64
+	proxyExits	[]protocol.ProxyExit
+	proxyExitRevision	uint64
+	rdpTargets	[]rdp.Target
+	rdpConnection	*rdp.Connection
+	rdpP2P	*rdpp2p.Manager
+	rdpSession	*rdpp2p.Session
+	proxyP2P	*proxyp2p.Manager
+	proxyDirect	*publicDirectClientManager
+	closed	atomic.Bool
+	ctx	context.Context
+	cancel	context.CancelFunc
+	wg	sync.WaitGroup
+	mu	sync.RWMutex
+	policyMu	sync.RWMutex
+	lifecycleMu	sync.Mutex
+	closeOnce	sync.Once
+	closeErr	error
+	rdpConnectMu	sync.Mutex
 }
 
 func (a *Agent) setDivertStage(stage string, err error) {

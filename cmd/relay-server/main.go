@@ -21,6 +21,7 @@ import (
 	agentexit "relayproxy/agent/exit"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/config"
+	"relayproxy/internal/congestion"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
 	serverdirect "relayproxy/server/direct"
@@ -475,9 +476,13 @@ func main() {
 		PublicDirectTicketKey:    publicDirectTickets.PublicKey(),
 		PublicDirectPortStart:    cfg.Direct.PortStart,
 		PublicDirectPortEnd:      cfg.Direct.PortEnd,
-		MaxConnections:           cfg.Tunnel.MaxConnections,
-		MaxConnectionsPerDevice:  cfg.Tunnel.MaxConnectionsPerDevice,
-		HeartbeatSec:             cfg.Tunnel.HeartbeatSec,
+		MaxConnections:          cfg.Tunnel.MaxConnections,
+		MaxConnectionsPerDevice: cfg.Tunnel.MaxConnectionsPerDevice,
+		HeartbeatSec:            cfg.Tunnel.HeartbeatSec,
+		BrutalMaxUploadBPS:      congestion.MbpsToBytesPerSecond(cfg.Tunnel.Bandwidth.UpMbps),
+		BrutalMaxDownloadBPS:    congestion.MbpsToBytesPerSecond(cfg.Tunnel.Bandwidth.DownMbps),
+		IgnoreClientBandwidth:   cfg.Tunnel.Bandwidth.IgnoreClientBandwidth,
+		DisableLossCompensation: cfg.Tunnel.Bandwidth.DisableLossCompensation,
 		RendezvousAddress:        rendezvousAddress,
 		RDPLeaseSec:              rdpCoordinator.LeaseSeconds(),
 		P2PEnabled:               proxyP2PCoordinator != nil,

@@ -697,19 +697,19 @@ func TestAuthorizedBrutalRates(t *testing.T) {
 		wantClientTx, wantServerTx uint64
 	}{
 		{
-			name:  "caps both directions",
-			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
-			cfg:   GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
+			name:         "caps both directions",
+			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg:          GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
 			wantClientTx: 10_000_000, wantServerTx: 30_000_000,
 		},
 		{
-			name:  "zero server caps leave client hints unchanged",
-			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			name:         "zero server caps leave client hints unchanged",
+			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
 			wantClientTx: 20_000_000, wantServerTx: 40_000_000,
 		},
 		{
-			name:  "one zero hint keeps that direction on BBR",
-			hello: protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
+			name:         "one zero hint keeps that direction on BBR",
+			hello:        protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
 			wantServerTx: 40_000_000,
 		},
 		{

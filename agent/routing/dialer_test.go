@@ -137,7 +137,7 @@ func TestRoutingNativeRequirementOverridesStreamPreference(t *testing.T) {
 }
 
 func TestRoutingProxyPauseRejectsTCPAndUDPProxyDials(t *testing.T) {
-	engine, err := NewEngine(Config{Mode: ModeProxy})
+	engine, err := NewEngine(Config{Mode: ModeGlobalProxy})
 	if err != nil {
 		t.Fatal(err)
 	}

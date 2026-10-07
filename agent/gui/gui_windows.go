@@ -114,6 +114,15 @@ func (a *appWindow) themeDark() bool {
 	}
 }
 
+func supportsMicaVersion(major, build uint32) bool {
+	return major >= 10 && build >= 22621
+}
+
+func supportsMicaBackdrop() bool {
+	version := windows.RtlGetVersion()
+	return version != nil && supportsMicaVersion(version.MajorVersion, version.BuildNumber)
+}
+
 // Run opens the Windows desktop UI using Wails v3. The Agent core, UIBridge and
 // browser management page remain unchanged; Wails only owns the native shell,
 // system tray and Go<->JavaScript transport.
@@ -182,6 +191,13 @@ func Run(b *bridge.UIBridge, opts Options) error {
 	})
 	a.app = wailsApp
 
+	backgroundType := application.BackgroundTypeSolid
+	windowsWindow := application.WindowsWindow{}
+	if supportsMicaBackdrop() {
+		backgroundType = application.BackgroundTypeTranslucent
+		windowsWindow.BackdropType = application.Mica
+	}
+
 	window := wailsApp.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:                       "main",
 		Title:                      opts.Title,
@@ -192,6 +208,8 @@ func Run(b *bridge.UIBridge, opts Options) error {
 		URL:                        "/",
 		Hidden:                     opts.StartMinimized,
 		InitialPosition:            application.WindowCentered,
+		BackgroundType:             backgroundType,
+		Windows:                    windowsWindow,
 		DefaultContextMenuDisabled: true,
 		DevToolsEnabled:            false,
 	})

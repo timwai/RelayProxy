@@ -53,7 +53,7 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 	if host == "" {
 		host = "127.0.0.1"
 	}
-	if opts.Port <= 0 || opts.Port > 65535 {
+	if opts.Port < 0 || opts.Port > 65535 {
 		return nil, fmt.Errorf("invalid web management port %d", opts.Port)
 	}
 	loopback := webLoopbackHost(host)

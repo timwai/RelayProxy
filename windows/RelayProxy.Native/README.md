@@ -5,7 +5,7 @@ Windows 客户端的 WinUI 3 原生 GUI。默认发行文件名仍是 `relay-age
 ## 当前功能
 
 - WinUI 3 / Fluent / Mica 原生主窗口
-- 原生系统托盘、关闭到托盘、启动时最小化、浅色 / 深色 / 跟随系统
+- 原生系统托盘、关闭到托盘、浅色 / 深色 / 跟随系统；开机自启动使用 `--minimized` 参数进入托盘
 - 自动启动同目录 `relay-agent.exe --no-gui`
 - `RELAYPROXY_AGENT_PATH` 可指定 Agent Core
 - `RELAYPROXY_MANAGEMENT_URL` 可连接已经运行的 Agent
@@ -39,7 +39,7 @@ Microsoft.*              Windows App SDK 自包含依赖
 ...
 ```
 
-`relay-agent-gui.exe` 启动后会寻找同目录 `relay-agent.exe`，并通过 Agent 现有 loopback management API 工作。旧 Wails GUI 不再是默认桌面入口，但暂时保留到原生 GUI 经实际部署验证完成。默认 `relay-agent.exe` 也不再编译 Wails/WebView2 shell；只有 `relay-agent-wails.exe` 使用 `wailslegacy` build tag。
+`relay-agent-gui.exe` 启动后会寻找同目录 `relay-agent.exe`，为当前 GUI 会话创建一个独立的随机 loopback 管理端口与随机 token；这条私有通道不会修改或复用用户配置的 Web 管理监听地址、端口和 token。Network Service 安装 / 修复 / 卸载接口也只注册在这条原生私有通道上，不会暴露给普通浏览器管理页。旧 Wails GUI 不再是默认桌面入口，但暂时保留到原生 GUI 经实际部署验证完成。默认 `relay-agent.exe` 也不再编译 Wails/WebView2 shell；只有 `relay-agent-wails.exe` 使用 `wailslegacy` build tag。
 
 ## 开发环境
 

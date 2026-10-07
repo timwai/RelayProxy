@@ -17,6 +17,7 @@ public sealed class AgentStatusDto
     [JsonPropertyName("exitRunning")] public bool ExitRunning { get; set; }
     [JsonPropertyName("activeStreams")] public long ActiveStreams { get; set; }
     [JsonPropertyName("approvalState")] public string ApprovalState { get; set; } = "";
+    [JsonPropertyName("proxyPaused")] public bool ProxyPaused { get; set; }
     [JsonPropertyName("approvedCapabilities")] public List<string> ApprovedCapabilities { get; set; } = [];
     [JsonPropertyName("rdpListenAddr")] public string RDPListenAddr { get; set; } = "";
     [JsonPropertyName("rdpTargetId")] public string RDPTargetID { get; set; } = "";

@@ -15,7 +15,7 @@ const EMPTY={
  exitUpstream:{mode:'',address:'',username:'',password:''},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true},publicDirectAdvertise:'',
  networkMode:'',network:{mode:'',exclude_processes:[]},isAutostart:false,minimizeToTray:true,theme:'system',
- verificationPopupTimeoutSec:12,routing:{mode:'global_proxy',default_action:'PROXY',rules:[]},configPath:'',version:''
+ verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',default_action:'PROXY',rules:[]},configPath:'',version:''
 };
 
 const cx=(...v)=>v.filter(Boolean).join(' ');

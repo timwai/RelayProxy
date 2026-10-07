@@ -154,7 +154,7 @@ func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
 					return CurrentTicketAuthorization{}, tc.validatorErr
 				}
 				return CurrentTicketAuthorization{
-					RelayPolicy: currentRelayPolicyForTest(t),
+					RelayPolicy:     currentRelayPolicyForTest(t),
 					BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: 50_000_000,
 				}, nil
 			})

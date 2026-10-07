@@ -42,9 +42,11 @@ type appWindow struct {
 	bridge *bridge.UIBridge
 	opts   Options
 
-	app    *application.App
-	window *application.WebviewWindow
-	tray   *application.SystemTray
+	app        *application.App
+	window     *application.WebviewWindow
+	tray       *application.SystemTray
+	trayStatus *application.MenuItem
+	trayExit   *application.MenuItem
 
 	forceExit atomic.Bool
 
@@ -358,15 +360,76 @@ func buildWailsAssets(opts Options) (string, string, fstest.MapFS, error) {
 	return mainHTML, connectionsHTML, files, nil
 }
 
+func trayStatusLabels(st agentapp.AgentStatus) (string, string, string) {
+	status := "未连接"
+	switch {
+	case st.Connected:
+		status = "已连接"
+	case strings.Contains(strings.ToLower(st.ApprovalState), "pending"):
+		status = "等待审批"
+	case strings.TrimSpace(st.ApprovalState) != "":
+		status = st.ApprovalState
+	}
+	if st.Connected && st.Transport != "" {
+		status += " · " + strings.ToUpper(st.Transport)
+	}
+
+	exit := "自动选择"
+	if st.SelectedExit != "" {
+		exit = st.SelectedExit
+		for _, item := range st.ProxyExits {
+			if item.DeviceID == st.SelectedExit {
+				if strings.TrimSpace(item.Name) != "" {
+					exit = item.Name
+				}
+				break
+			}
+		}
+	}
+
+	statusLabel := "状态：" + status
+	exitLabel := "出口：" + exit
+	tooltip := "RelayProxy · " + status
+	if st.SelectedExit != "" {
+		tooltip += " · " + exit
+	}
+	return statusLabel, exitLabel, tooltip
+}
+
+func (a *appWindow) updateTrayStatus(st agentapp.AgentStatus) {
+	if a == nil {
+		return
+	}
+	status, exit, tooltip := trayStatusLabels(st)
+	if a.trayStatus != nil {
+		a.trayStatus.SetLabel(status)
+	}
+	if a.trayExit != nil {
+		a.trayExit.SetLabel(exit)
+	}
+	if a.tray != nil {
+		a.tray.SetTooltip(tooltip)
+	}
+}
+
 func (a *appWindow) installTray(icon []byte) {
 	if a.app == nil {
 		return
 	}
 	menu := a.app.NewMenu()
 
+	a.trayStatus = menu.Add("状态：正在读取…").SetEnabled(false)
+	a.trayExit = menu.Add("出口：正在读取…").SetEnabled(false)
+	menu.AddSeparator()
+
 	menu.Add("打开主界面").OnClick(func(*application.Context) {
 		a.showWindow(true)
 	})
+	menu.Add("实时连接监控").OnClick(func(*application.Context) {
+		a.openConnections()
+	})
+	menu.AddSeparator()
+
 	menu.Add("复制设备 ID").OnClick(func(*application.Context) {
 		id := strings.TrimSpace(a.bridge.GetStatus().DeviceID)
 		if id != "" && a.app != nil {
@@ -426,6 +489,7 @@ func (a *appWindow) installTray(icon []byte) {
 		a.showWindow(!a.window.IsVisible())
 	})
 	a.tray = tray
+	a.updateTrayStatus(a.bridge.GetStatus())
 }
 
 func (a *appWindow) applyThemeMode(mode string) {
@@ -568,6 +632,7 @@ func (a *appWindow) stopStatusLoop() {
 
 func (a *appWindow) statusJSON() string {
 	st := a.bridge.GetStatus()
+	a.updateTrayStatus(st)
 	a.mu.Lock()
 	a.last = st
 	a.proxyUp = st.SOCKS5Running || st.HTTPRunning

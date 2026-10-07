@@ -18,6 +18,7 @@ public sealed partial class MainWindow : Window
     private readonly HashSet<string> _seenMessageIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> _speedTestingExits = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SpeedTestResultDto> _speedTests = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _dirtyPages = new(StringComparer.Ordinal);
     private List<PushMessageDto> _messageCache = [];
     private AgentConfigDto? _config;
     private List<RoutingRuleDto> _routingRules = [];
@@ -28,12 +29,15 @@ public sealed partial class MainWindow : Window
     private bool _forceExit;
     private bool _shutdownInProgress;
     private bool _diagnosticCollecting;
+    private bool _suppressDirtyTracking;
+    private bool _suppressNavigationSelection;
     private string _lastDeviceId = "";
     private string _page = "overview";
 
     public MainWindow()
     {
         InitializeComponent();
+        RegisterDirtyTracking();
         Title = "RelayProxy";
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
@@ -109,7 +113,14 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        _ = ShutdownAndCloseAsync();
+        _ = RequestShutdownAsync();
+    }
+
+    private async Task RequestShutdownAsync()
+    {
+        if (!await ConfirmDiscardChangesAsync("退出 RelayProxy")) return;
+        _dirtyPages.Clear();
+        await ShutdownAndCloseAsync();
     }
 
     private async Task ShutdownAndCloseAsync()
@@ -143,11 +154,24 @@ public sealed partial class MainWindow : Window
         Clipboard.SetContent(data);
     });
 
-    private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() => _ = ShutdownAndCloseAsync());
+    private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() => _ = RequestShutdownAsync());
 
-    private void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
+    private async void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (args.SelectedItemContainer?.Tag is string tag) ShowPage(tag);
+        if (_suppressNavigationSelection) return;
+        if (args.SelectedItemContainer?.Tag is not string tag || tag == _page) return;
+
+        if (_dirtyPages.Contains(_page))
+        {
+            if (!await ConfirmDiscardChangesAsync("切换页面"))
+            {
+                RestoreNavigationSelection(_page);
+                return;
+            }
+            _dirtyPages.Remove(_page);
+            await LoadConfigAsync();
+        }
+        ShowPage(tag);
     }
 
     private void ShowPage(string tag)
@@ -222,6 +246,8 @@ public sealed partial class MainWindow : Window
 
     private async Task LoadConfigAsync()
     {
+        if (_dirtyPages.Contains(_page)) return;
+        _suppressDirtyTracking = true;
         try
         {
             var cfg = await App.AgentApi.GetConfigAsync();
@@ -285,6 +311,10 @@ public sealed partial class MainWindow : Window
             else if (_page == "routing") ShowInfo(RoutingBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
             else if (_page == "exitshare") ShowInfo(ExitShareBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
             else if (_page == "settings") ShowInfo(SettingsBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            _suppressDirtyTracking = false;
         }
     }
 
@@ -759,6 +789,7 @@ public sealed partial class MainWindow : Window
                 direct = new { @public = new { advertise = PublicAdvertiseBox.Text.Trim() } }
             });
             HandleSaveResult(ConnectionBar, result);
+            _dirtyPages.Remove("connection");
             await LoadConfigAsync();
         }
         catch (Exception ex) { ShowInfo(ConnectionBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
@@ -784,6 +815,7 @@ public sealed partial class MainWindow : Window
                 network = new { mode = TransparentProxySwitch.IsOn ? "divert" : "", excludeProcesses = SplitList(ExcludeProcessesBox.Text) }
             });
             HandleSaveResult(ProxyBar, result);
+            _dirtyPages.Remove("proxy");
             await LoadConfigAsync();
             await RefreshNetworkServiceAsync();
         }
@@ -820,6 +852,7 @@ public sealed partial class MainWindow : Window
                 }
             });
             HandleSaveResult(ExitShareBar, result);
+            _dirtyPages.Remove("exitshare");
             await LoadConfigAsync();
         }
         catch (Exception ex) { ShowInfo(ExitShareBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
@@ -836,6 +869,7 @@ public sealed partial class MainWindow : Window
                 routing = new { mode = ComboTag(RoutingModeCombo, "rule"), default_action = ComboTag(DefaultActionCombo, "PROXY"), rules = _routingRules }
             });
             HandleSaveResult(RoutingBar, result);
+            _dirtyPages.Remove("routing");
             await LoadConfigAsync();
         }
         catch (Exception ex) { ShowInfo(RoutingBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
@@ -844,7 +878,7 @@ public sealed partial class MainWindow : Window
     private async void AddRule_Click(object sender, RoutedEventArgs e)
     {
         var rule = new RoutingRuleDto { Name = "新规则", Enabled = true, Action = "PROXY" };
-        if (await EditRuleAsync(rule, isNew: true)) { _routingRules.Add(rule); RenderRoutingRules(); }
+        if (await EditRuleAsync(rule, isNew: true)) { _routingRules.Add(rule); MarkDirty("routing"); RenderRoutingRules(); }
     }
 
     private void RenderRoutingRules()
@@ -859,7 +893,7 @@ public sealed partial class MainWindow : Window
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             var enabled = new ToggleSwitch { IsOn = rule.Enabled, VerticalAlignment = VerticalAlignment.Center };
-            enabled.Toggled += (_, _) => rule.Enabled = enabled.IsOn;
+            enabled.Toggled += (_, _) => { rule.Enabled = enabled.IsOn; MarkDirty("routing"); };
             grid.Children.Add(enabled);
             var details = string.Join(" · ", new[]
             {
@@ -875,13 +909,13 @@ public sealed partial class MainWindow : Window
             var down = new Button { Content = "↓", IsEnabled = i < _routingRules.Count - 1 };
             var edit = new Button { Content = "编辑" };
             var del = new Button { Content = "删除" };
-            up.Click += (_, _) => { (_routingRules[i - 1], _routingRules[i]) = (_routingRules[i], _routingRules[i - 1]); RenderRoutingRules(); };
-            down.Click += (_, _) => { (_routingRules[i + 1], _routingRules[i]) = (_routingRules[i], _routingRules[i + 1]); RenderRoutingRules(); };
-            edit.Click += async (_, _) => { if (await EditRuleAsync(rule, false)) RenderRoutingRules(); };
+            up.Click += (_, _) => { (_routingRules[i - 1], _routingRules[i]) = (_routingRules[i], _routingRules[i - 1]); MarkDirty("routing"); RenderRoutingRules(); };
+            down.Click += (_, _) => { (_routingRules[i + 1], _routingRules[i]) = (_routingRules[i], _routingRules[i + 1]); MarkDirty("routing"); RenderRoutingRules(); };
+            edit.Click += async (_, _) => { if (await EditRuleAsync(rule, false)) { MarkDirty("routing"); RenderRoutingRules(); } };
             del.Click += async (_, _) =>
             {
                 var dialog = new ContentDialog { XamlRoot = Content.XamlRoot, Title = "删除路由规则", Content = $"确定删除“{rule.Name}”吗？", PrimaryButtonText = "删除", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close };
-                if (await dialog.ShowAsync() == ContentDialogResult.Primary) { _routingRules.Remove(rule); RenderRoutingRules(); }
+                if (await dialog.ShowAsync() == ContentDialogResult.Primary) { _routingRules.Remove(rule); MarkDirty("routing"); RenderRoutingRules(); }
             };
             ops.Children.Add(up); ops.Children.Add(down); ops.Children.Add(edit); ops.Children.Add(del);
             Grid.SetColumn(ops, 2); grid.Children.Add(ops);
@@ -917,6 +951,8 @@ public sealed partial class MainWindow : Window
 
     private async void ReloadConfig_Click(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmDiscardChangesAsync("重新读取配置")) return;
+        _dirtyPages.Clear();
         try { var result = await App.AgentApi.ReloadConfigAsync(); HandleSaveResult(ConnectionBar, result); await LoadConfigAsync(); }
         catch (Exception ex) { ShowInfo(ConnectionBar, "重新读取失败", ex.Message, InfoBarSeverity.Error); }
     }
@@ -956,7 +992,10 @@ public sealed partial class MainWindow : Window
         {
             UninstallNetworkServiceButton.IsEnabled = false;
             var result = await App.AgentApi.UninstallNetworkServiceAsync();
+            _suppressDirtyTracking = true;
             TransparentProxySwitch.IsOn = false;
+            _suppressDirtyTracking = false;
+            _dirtyPages.Remove("proxy");
             ShowInfo(ProxyBar, "Network Service 已卸载", result?.Message ?? "透明代理服务已移除。", result?.RebootCleanup == true ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
             await LoadConfigAsync();
             await RefreshNetworkServiceAsync();
@@ -1001,13 +1040,15 @@ public sealed partial class MainWindow : Window
             var theme = ComboTag(ThemeCombo, "system");
             var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { minimizeToTray = MinimizeToTraySwitch.IsOn, theme, verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
             ApplyTheme(theme);
-            HandleSaveResult(SettingsBar, result); await LoadConfigAsync();
+            HandleSaveResult(SettingsBar, result); _dirtyPages.Remove("settings"); await LoadConfigAsync();
         }
         catch (Exception ex) { ShowInfo(SettingsBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
     }
 
     private async void RestartAgent_Click(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmDiscardChangesAsync("重启 Agent")) return;
+        _dirtyPages.Clear();
         RestartAgentButton.IsEnabled = false;
         var original = RestartAgentButton.Content;
         RestartAgentButton.Content = "正在重启…";
@@ -1090,10 +1131,111 @@ public sealed partial class MainWindow : Window
 
     private void SelectNavigation(string tag)
     {
-        var item = Navigation.MenuItems.OfType<NavigationViewItem>().FirstOrDefault(x => (x.Tag as string) == tag);
-        if (item is not null) Navigation.SelectedItem = item;
-        ShowPage(tag);
+        var item = FindNavigationItem(tag);
+        if (item is not null)
+            Navigation.SelectedItem = item;
+        else
+            ShowPage(tag);
     }
+
+    private NavigationViewItem? FindNavigationItem(string tag) =>
+        Navigation.MenuItems.OfType<NavigationViewItem>()
+            .Concat(Navigation.FooterMenuItems.OfType<NavigationViewItem>())
+            .FirstOrDefault(x => string.Equals(x.Tag as string, tag, StringComparison.Ordinal));
+
+    private void RestoreNavigationSelection(string tag)
+    {
+        var item = FindNavigationItem(tag);
+        if (item is null) return;
+        _suppressNavigationSelection = true;
+        Navigation.SelectedItem = item;
+        _suppressNavigationSelection = false;
+    }
+
+    private void RegisterDirtyTracking()
+    {
+        TrackDirty("connection", ServerAddressBox, QuicPortBox, TcpPortBox, TlsSwitch, DeviceNameBox, IdentityBox, TransportCombo,
+            P2PEnabledSwitch, P2PModeCombo, P2PFallbackSwitch, PublicAdvertiseBox, PunchTimeoutBox, IdleTimeoutBox, MaxSessionsBox);
+        TrackDirty("proxy", SocksEnabledSwitch, SocksListenBox, SocksPortBox, HttpEnabledSwitch, HttpListenBox, HttpPortBox,
+            TransparentProxySwitch, ExcludeProcessesBox);
+        TrackDirty("exitshare", ExitEnabledSwitch, AllowInternetCheck, AllowPrivateCheck, AllowLoopbackCheck, ExitUpstreamModeCombo,
+            ExitUpstreamAddressBox, ExitUpstreamUserBox, ExitUpstreamPasswordBox, AccessModeCombo, AccessDomainsBox, AccessCidrsBox);
+        TrackDirty("routing", RoutingModeCombo, DefaultActionCombo);
+        TrackDirty("settings", MinimizeToTraySwitch, ThemeCombo, PopupTimeoutBox);
+    }
+
+    private void TrackDirty(string page, params FrameworkElement[] controls)
+    {
+        foreach (var control in controls)
+        {
+            switch (control)
+            {
+                case TextBox text:
+                    text.TextChanged += (_, _) => MarkDirty(page);
+                    break;
+                case PasswordBox password:
+                    password.PasswordChanged += (_, _) => MarkDirty(page);
+                    break;
+                case ToggleSwitch toggle:
+                    toggle.Toggled += (_, _) => MarkDirty(page);
+                    break;
+                case CheckBox check:
+                    check.Checked += (_, _) => MarkDirty(page);
+                    check.Unchecked += (_, _) => MarkDirty(page);
+                    break;
+                case ComboBox combo:
+                    combo.SelectionChanged += (_, _) => MarkDirty(page);
+                    break;
+                case NumberBox number:
+                    number.ValueChanged += (_, _) => MarkDirty(page);
+                    break;
+            }
+        }
+    }
+
+    private void MarkDirty(string page)
+    {
+        if (_suppressDirtyTracking || _config is null) return;
+        if (!_dirtyPages.Add(page)) return;
+        var bar = PageInfoBar(page);
+        if (bar is not null)
+            ShowInfo(bar, "有未保存的修改", "保存后生效；离开此页面或退出时会要求确认。", InfoBarSeverity.Warning);
+    }
+
+    private InfoBar? PageInfoBar(string page) => page switch
+    {
+        "connection" => ConnectionBar,
+        "proxy" => ProxyBar,
+        "exitshare" => ExitShareBar,
+        "routing" => RoutingBar,
+        "settings" => SettingsBar,
+        _ => null
+    };
+
+    private async Task<bool> ConfirmDiscardChangesAsync(string action)
+    {
+        if (!_dirtyPages.Contains(_page)) return true;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "有未保存的修改",
+            Content = $"{PageLabel(_page)}中的修改尚未保存。要{action}并放弃这些修改吗？",
+            PrimaryButtonText = "放弃修改",
+            CloseButtonText = "继续编辑",
+            DefaultButton = ContentDialogButton.Close
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    private static string PageLabel(string page) => page switch
+    {
+        "connection" => "连接与路径",
+        "proxy" => "本机代理",
+        "exitshare" => "本机出口共享",
+        "routing" => "分流规则",
+        "settings" => "设置",
+        _ => "当前页面"
+    };
 
     private void HandleSaveResult(InfoBar bar, SaveResultDto? result)
     {

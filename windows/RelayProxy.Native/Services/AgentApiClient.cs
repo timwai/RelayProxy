@@ -7,19 +7,34 @@ namespace RelayProxy.Native.Services;
 
 public sealed class AgentApiClient : IDisposable
 {
-    private readonly HttpClient _http = new();
+    private HttpClient _http = new();
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
     public Uri? BaseAddress { get; private set; }
     public bool IsReady => BaseAddress is not null;
 
-    public void Configure(Uri managementUrl)
+    public void Configure(Uri managementUrl, string? explicitToken = null)
     {
-        var token = GetQueryValue(managementUrl, "token");
+        var token = string.IsNullOrWhiteSpace(explicitToken) ? GetQueryValue(managementUrl, "token") : explicitToken;
         var builder = new UriBuilder(managementUrl) { Query = "", Fragment = "", Path = "/" };
         BaseAddress = builder.Uri;
-        _http.BaseAddress = BaseAddress;
-        _http.Timeout = TimeSpan.FromSeconds(15);
-        _http.DefaultRequestHeaders.Authorization = string.IsNullOrWhiteSpace(token) ? null : new AuthenticationHeaderValue("Bearer", token);
+
+        var previous = _http;
+        _http = new HttpClient
+        {
+            BaseAddress = BaseAddress,
+            Timeout = TimeSpan.FromSeconds(15),
+        };
+        if (!string.IsNullOrWhiteSpace(token))
+            _http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        previous.Dispose();
+    }
+
+    public void Reset()
+    {
+        BaseAddress = null;
+        var previous = _http;
+        _http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        previous.Dispose();
     }
 
     public Task<AgentStatusDto?> GetStatusAsync(CancellationToken ct = default) => GetAsync<AgentStatusDto>("api/status", ct);

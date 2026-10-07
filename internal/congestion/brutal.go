@@ -6,7 +6,10 @@ import (
 	"relayproxy/internal/congestion/brutal"
 )
 
-const bitsPerMegabit = 1_000_000
+const (
+	bitsPerMegabit           = 1_000_000
+	MaxConfiguredRateBPS     = uint64(1_000_000) * bitsPerMegabit / 8
+)
 
 // UseBrutal installs Hysteria's fixed-rate Brutal congestion controller.
 // txBPS is bytes per second, matching quic-go's congestion.ByteCount units.
@@ -30,6 +33,9 @@ func MbpsToBytesPerSecond(mbps int) uint64 {
 func CapRequestedRate(requested, cap uint64) uint64 {
 	if requested == 0 {
 		return 0
+	}
+	if requested > MaxConfiguredRateBPS {
+		requested = MaxConfiguredRateBPS
 	}
 	if cap > 0 && requested > cap {
 		return cap

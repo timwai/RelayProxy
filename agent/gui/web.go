@@ -485,16 +485,16 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Port    int    `json:"port"`
 	}
 	payload := struct {
-		ConfigPath, ServerAddress, DeviceName, IdentityID, Transport, DefaultExitID string
-		QUICPort, TCPPort, VerificationPopupTimeoutSec                              int
-		TLSEnabled, ExitEnabled, AllowInternet, AllowPrivate, AllowLoopback         bool
-		AccessMode, NetworkMode, Theme, Version                                     string
-		AccessDomains, AccessCIDRs, RestartFields                                   []string
-		SOCKS5, HTTP                                                                proxyLeg
+		ConfigPath, ServerAddress, DeviceName, IdentityID, Transport, DefaultExitID                      string
+		QUICPort, TCPPort, VerificationPopupTimeoutSec                                                   int
+		TLSEnabled, ExitEnabled, AllowInternet, AllowPrivate, AllowLoopback                              bool
+		AccessMode, NetworkMode, Theme, Version                                                          string
+		AccessDomains, AccessCIDRs, RestartFields                                                        []string
+		SOCKS5, HTTP                                                                                     proxyLeg
 		IsAutostart, MinimizeToTray, StartMinimized, SystemNotifications, RestartRequired, ReloadPending bool
-		Routing, Network, Runtime, ExitUpstream, P2P, Direct                        any
-		NetworkCapabilities                                                         divert.Capabilities
-		Revision                                                                    string
+		Routing, Network, Runtime, ExitUpstream, P2P, Direct                                             any
+		NetworkCapabilities                                                                              divert.Capabilities
+		Revision                                                                                         string
 	}{
 		ConfigPath: b.ConfigPath(), ServerAddress: cfg.Server.Address, QUICPort: cfg.Server.QUICPort,
 		TCPPort: cfg.Server.TCPPort, TLSEnabled: cfg.IsServerTLSEnabled(),
@@ -514,7 +514,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Direct:      map[string]any{"publicAdvertise": cfg.Direct.Public.Advertise},
 		NetworkMode: cfg.Network.Mode, IsAutostart: b.IsAutoStart(), MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized, Theme: cfg.GUI.Theme, Version: Version,
-		SystemNotifications: cfg.GUI.SystemNotifications == nil || *cfg.GUI.SystemNotifications,
+		SystemNotifications:         cfg.GUI.SystemNotifications == nil || *cfg.GUI.SystemNotifications,
 		VerificationPopupTimeoutSec: cfg.VerificationPopupTimeout(),
 		Network:                     map[string]any{"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses},
 		NetworkCapabilities:         divert.PlatformCapabilities(), Revision: state.Revision,
@@ -547,7 +547,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"networkMode": payload.NetworkMode, "isAutostart": payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
 		"systemNotifications": payload.SystemNotifications, "verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,
-		"routing":                     payload.Routing, "network": payload.Network, "networkCapabilities": payload.NetworkCapabilities,
+		"routing": payload.Routing, "network": payload.Network, "networkCapabilities": payload.NetworkCapabilities,
 		"runtime": payload.Runtime, "revision": payload.Revision, "restartRequired": payload.RestartRequired,
 		"restartFields": payload.RestartFields, "reloadPending": payload.ReloadPending,
 	})

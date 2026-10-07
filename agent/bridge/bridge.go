@@ -403,6 +403,7 @@ type ConfigUpdate struct {
 		StartMinimized              *bool   `json:"startMinimized"`
 		Theme                       *string `json:"theme"`
 		VerificationPopupTimeoutSec *int    `json:"verificationPopupTimeoutSec"`
+		SystemNotifications          *bool   `json:"systemNotifications"`
 	} `json:"gui"`
 }
 
@@ -637,6 +638,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.GUI.VerificationPopupTimeoutSec != nil {
 		value := *in.GUI.VerificationPopupTimeoutSec
 		cfg.GUI.VerificationPopupTimeoutSec = &value
+	}
+	if in.GUI.SystemNotifications != nil {
+		cfg.GUI.SystemNotifications = config.BoolPtr(*in.GUI.SystemNotifications)
 	}
 
 	if err := config.NormalizeAgentConfig(cfg); err != nil {

@@ -15,27 +15,70 @@ if ([string]::IsNullOrWhiteSpace($OutDir)) {
     $OutDir = Join-Path $Root "dist\windows-native-$($Runtime.Substring(4))"
 }
 
+$OutDir = [System.IO.Path]::GetFullPath($OutDir)
+$StageDir = Join-Path ([System.IO.Path]::GetTempPath()) ("relayproxy-native-" + [Guid]::NewGuid().ToString("N"))
+$CorePath = Join-Path $StageDir "relay-agent.exe"
+
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
+New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
 
-Write-Host "[native-ui] Restore $Runtime"
-dotnet restore $Project -r $Runtime
-
-Write-Host "[native-ui] Publish WinUI 3 client ($Platform)"
-dotnet publish $Project -c $Configuration -r $Runtime -p:Platform=$Platform -p:WindowsPackageType=None -p:WindowsAppSDKSelfContained=true --self-contained true -o $OutDir --no-restore
-if ($LASTEXITCODE -ne 0) { throw "WinUI publish failed" }
-
-Write-Host "[native-ui] Build Go Agent companion ($GoArch)"
 $oldGoos = $env:GOOS
 $oldGoarch = $env:GOARCH
+$oldCgo = $env:CGO_ENABLED
 try {
+    Write-Host "[native-ui] Build embedded Go Agent core ($GoArch)"
     $env:GOOS = "windows"
     $env:GOARCH = $GoArch
-    go build -trimpath -ldflags "-s -w" -o (Join-Path $OutDir "relay-agent.exe") .\cmd\relay-agent
+    $env:CGO_ENABLED = "0"
+    go build -trimpath -ldflags "-s -w" -o $CorePath .\cmd\relay-agent
     if ($LASTEXITCODE -ne 0) { throw "Go Agent build failed" }
+    if (-not (Test-Path $CorePath)) { throw "Embedded Go Agent core missing: $CorePath" }
+
+    Write-Host "[native-ui] Restore $Runtime"
+    dotnet restore $Project -r $Runtime
+    if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed" }
+
+    if (Test-Path $OutDir) {
+        Get-ChildItem -LiteralPath $OutDir -Force | Remove-Item -Recurse -Force
+    }
+
+    Write-Host "[native-ui] Publish WinUI 3 single-file client ($Platform)"
+    dotnet publish $Project `
+        -c $Configuration `
+        -r $Runtime `
+        -p:Platform=$Platform `
+        -p:WindowsPackageType=None `
+        -p:WindowsAppSDKSelfContained=true `
+        -p:SelfContained=true `
+        -p:PublishSingleFile=true `
+        -p:EnableMsixTooling=true `
+        -p:IncludeAllContentForSelfExtract=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true `
+        -p:DebugType=None `
+        -p:DebugSymbols=false `
+        -p:RelayAgentCorePath="$CorePath" `
+        --self-contained true `
+        --no-restore `
+        -o $OutDir
+    if ($LASTEXITCODE -ne 0) { throw "WinUI single-file publish failed" }
+
+    $NativeExe = Join-Path $OutDir "relay-agent-gui.exe"
+    if (-not (Test-Path $NativeExe)) { throw "Single-file executable missing: $NativeExe" }
+
+    $Unexpected = @(Get-ChildItem -LiteralPath $OutDir -Force | Where-Object { $_.Name -ne "relay-agent-gui.exe" })
+    if ($Unexpected.Count -gt 0) {
+        $Names = ($Unexpected | ForEach-Object { $_.Name }) -join ", "
+        throw "Single-file publish produced unexpected sidecar files: $Names"
+    }
+
+    $Size = (Get-Item $NativeExe).Length
+    Write-Host "[native-ui] Single EXE: $NativeExe ($([math]::Round($Size / 1MB, 2)) MB)" -ForegroundColor Green
 }
 finally {
     $env:GOOS = $oldGoos
     $env:GOARCH = $oldGoarch
+    $env:CGO_ENABLED = $oldCgo
+    Remove-Item -LiteralPath $StageDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host "[native-ui] Output: $OutDir"

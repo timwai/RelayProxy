@@ -5,11 +5,22 @@ export function hasBridge(name) {
 }
 
 export async function call(name, ...args) {
-  const fn = window[name];
-  if (typeof fn !== 'function') {
-    throw new Error(`${name} 接口尚未就绪`);
+  let lastError = null;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const fn = window[name];
+    if (typeof fn === 'function') {
+      try {
+        return await fn(...args);
+      } catch (error) {
+        lastError = error;
+        if (!/wails runtime is not ready/i.test(String(error?.message || error))) {
+          throw error;
+        }
+      }
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
   }
-  return await fn(...args);
+  throw lastError || new Error(`${name} 接口尚未就绪`);
 }
 
 export function parseJSON(value, fallback = null) {

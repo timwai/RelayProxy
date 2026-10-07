@@ -51,6 +51,9 @@ try {
         -p:WindowsAppSDKSelfContained=true `
         -p:SelfContained=true `
         -p:PublishSingleFile=true `
+        -p:EnableCompressionInSingleFile=true `
+        -p:PublishReadyToRun=false `
+        -p:PublishTrimmed=false `
         -p:EnableMsixTooling=true `
         -p:IncludeAllContentForSelfExtract=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -72,7 +75,12 @@ try {
     }
 
     $Size = (Get-Item $NativeExe).Length
+    $CoreSize = (Get-Item $CorePath).Length
+    $RuntimePayloadSize = [Math]::Max(0, $Size - $CoreSize)
     Write-Host "[native-ui] Single EXE: $NativeExe ($([math]::Round($Size / 1MB, 2)) MB)" -ForegroundColor Green
+    Write-Host "[native-ui] Embedded Go Core: $([math]::Round($CoreSize / 1MB, 2)) MB"
+    Write-Host "[native-ui] UI + .NET + Windows App SDK payload: ~$([math]::Round($RuntimePayloadSize / 1MB, 2)) MB"
+    Write-Host "[native-ui] Single-file assembly compression: enabled; ReadyToRun: disabled" -ForegroundColor DarkGray
 }
 finally {
     $env:GOOS = $oldGoos

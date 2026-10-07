@@ -181,6 +181,9 @@ try {
                 -p:WindowsAppSDKSelfContained=true `
                 -p:SelfContained=true `
                 -p:PublishSingleFile=true `
+                -p:EnableCompressionInSingleFile=true `
+                -p:PublishReadyToRun=false `
+                -p:PublishTrimmed=false `
                 -p:EnableMsixTooling=true `
                 -p:IncludeAllContentForSelfExtract=true `
                 -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -201,6 +204,14 @@ try {
             }
 
             Copy-Item $nativeExe (Join-Path $OutputDir "relay-agent-gui.exe") -Force
+
+            $nativeSize = (Get-Item $nativeExe).Length
+            $coreSize = (Get-Item $corePath).Length
+            $runtimePayloadSize = [Math]::Max(0, $nativeSize - $coreSize)
+            Write-Host "  SIZE  native single EXE: $([math]::Round($nativeSize / 1MB, 2)) MB" -ForegroundColor Green
+            Write-Host "  SIZE  embedded Go Core: $([math]::Round($coreSize / 1MB, 2)) MB"
+            Write-Host "  SIZE  UI + .NET + Windows App SDK payload: ~$([math]::Round($runtimePayloadSize / 1MB, 2)) MB"
+            Write-Host "  MODE  single-file compression enabled; ReadyToRun disabled" -ForegroundColor DarkGray
         }
         finally {
             $env:GOOS = $savedGoos

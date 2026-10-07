@@ -201,6 +201,9 @@ jobs:
             -p:WindowsAppSDKSelfContained=true `
             -p:SelfContained=true `
             -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=false `
             -p:EnableMsixTooling=true `
             -p:IncludeAllContentForSelfExtract=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -222,6 +225,28 @@ jobs:
             throw "single-file publish has sidecars: $($extra.Name -join ', ')"
           }
           New-Item -ItemType Directory -Path ".\artifacts\${{ matrix.runtime }}" -Force | Out-Null
+          $core = "./staging/${{ matrix.runtime }}/relay-agent.exe"
+          $singleBytes = (Get-Item $exe).Length
+          $coreBytes = (Get-Item $core).Length
+          $runtimeBytes = [Math]::Max(0, $singleBytes - $coreBytes)
+          $singleMb = [math]::Round($singleBytes / 1MB, 2)
+          $coreMb = [math]::Round($coreBytes / 1MB, 2)
+          $runtimeMb = [math]::Round($runtimeBytes / 1MB, 2)
+          Write-Host "[size] single EXE: $singleMb MB"
+          Write-Host "[size] embedded Go Core: $coreMb MB"
+          Write-Host "[size] UI + .NET + Windows App SDK payload: ~$runtimeMb MB"
+          Write-Host "::notice title=Native package size::${{ matrix.runtime }} single EXE = $singleMb MB; Go Core = $coreMb MB"
+          @"
+          ### ${{ matrix.runtime }} native package size
+          | Item | Size |
+          | --- | ---: |
+          | relay-agent-gui.exe | $singleMb MB |
+          | embedded Go Core | $coreMb MB |
+          | UI + .NET + Windows App SDK (approx.) | $runtimeMb MB |
+
+          Single-file assembly compression is enabled and ReadyToRun is disabled.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
           Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe" -Force
 
       - name: Build Go Agent core

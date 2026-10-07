@@ -35,7 +35,7 @@ try {
     $payloadStart = $out.Position
     $payloadStream = [System.IO.File]::OpenRead($Payload)
     try {
-        $gzip = New-Object System.IO.Compression.GZipStream(
+        $gzip = [System.IO.Compression.GZipStream]::new(
             $out,
             [System.IO.Compression.CompressionLevel]::Optimal,
             $true

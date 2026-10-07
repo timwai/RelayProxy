@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"relayproxy/internal/acl"
+	quiccongestion "relayproxy/internal/congestion"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -47,6 +48,8 @@ type Session struct {
 	ExitCandidates    []protocol.P2PCandidate
 	ClientFingerprint string
 	ExitFingerprint   string
+	BrutalUploadBPS   uint64
+	BrutalDownloadBPS uint64
 	ExpiresAt         time.Time
 	Answered          bool
 	ClientReport      PeerReport
@@ -348,7 +351,10 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 	item := &Session{
 		ID: id, ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		Token: append([]byte(nil), token...), ClientCandidates: append([]protocol.P2PCandidate(nil), validated...),
-		ClientFingerprint: fingerprint, ExpiresAt: time.Now().Add(c.lease),
+		ClientFingerprint: fingerprint,
+		BrutalUploadBPS: quiccongestion.CapRequestedRate(message.BrutalUploadBPS, 0),
+		BrutalDownloadBPS: quiccongestion.CapRequestedRate(message.BrutalDownloadBPS, 0),
+		ExpiresAt: time.Now().Add(c.lease),
 	}
 	now := time.Now()
 	c.mu.Lock()
@@ -375,6 +381,7 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		SessionToken: append([]byte(nil), token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
 		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
 		PeerCapabilities: peerP2PCapabilities(client), RelayPolicy: c.policyCopy(),
+		BrutalUploadBPS: item.BrutalUploadBPS, BrutalDownloadBPS: item.BrutalDownloadBPS,
 		LeaseExpiresAt: item.ExpiresAt.UnixMilli(), RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(exit, offer); err != nil {
@@ -387,6 +394,7 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		Type: protocol.P2PControlLeaseAck, SessionID: id,
 		ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		SessionToken: append([]byte(nil), token...), LeaseExpiresAt: item.ExpiresAt.UnixMilli(),
+		BrutalUploadBPS: item.BrutalUploadBPS, BrutalDownloadBPS: item.BrutalDownloadBPS,
 		PeerCapabilities:  peerP2PCapabilities(exit),
 		RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
@@ -433,6 +441,7 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 		SessionToken: append([]byte(nil), item.Token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
 		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
 		PeerCapabilities: peerP2PCapabilities(exit),
+		BrutalUploadBPS: item.BrutalUploadBPS, BrutalDownloadBPS: item.BrutalDownloadBPS,
 		LeaseExpiresAt:   expires, RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(client, answer); err != nil {

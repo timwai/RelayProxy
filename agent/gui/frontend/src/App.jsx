@@ -29,7 +29,7 @@ const exitName=(exits,id)=>{if(!id)return'自动选择';const e=arr(exits).find(
 
 function Logo(){return <div className="logo">↗</div>}
 function Button({children,primary,danger,quiet,className,...p}){return <button className={cx('btn',primary&&'primary',danger&&'danger',quiet&&'quiet',className)} {...p}>{children}</button>}
-function Badge({children,tone:'toneProp'=null,...rest}){const t=rest.tone||'neutral';return <span className={cx('badge',t)}>{children}</span>}
+function Badge({children,tone:t='neutral'}){return <span className={cx('badge',t)}>{children}</span>}
 function Switch({checked,onChange,disabled,label}){return <button type="button" className={cx('switch',checked&&'on')} role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled} onClick={()=>onChange&&onChange(!checked)}><span/></button>}
 function Card({title,eyebrow,action,children,className}){return <section className={cx('card',className)}>{(title||eyebrow||action)&&<div className="card-head"><div>{eyebrow&&<div className="eyebrow">{eyebrow}</div>}{title&&<h2>{title}</h2>}</div>{action}</div>}{children}</section>}
 function PageHead({title,desc,actions}){return <div className="page-head"><div><h1>{title}</h1>{desc&&<p>{desc}</p>}</div>{actions&&<div className="actions">{actions}</div>}</div>}

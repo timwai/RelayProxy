@@ -7,6 +7,7 @@ on:
       - feat/windows-native-gui
     paths:
       - "windows/RelayProxy.Native/**"
+      - "agent/app/**"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -18,6 +19,7 @@ on:
   pull_request:
     paths:
       - "windows/RelayProxy.Native/**"
+      - "agent/app/**"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -108,6 +110,11 @@ jobs:
         if: matrix.runtime == 'win-x64'
         shell: pwsh
         run: go test -tags wailslegacy ./agent/gui -count=1
+
+      - name: Test Agent capability status
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: go test ./agent/app -run TestStatusApprovedCapabilitiesReturnsDefensiveCopy -count=1
 
       - name: Validate PowerShell release scripts
         shell: pwsh

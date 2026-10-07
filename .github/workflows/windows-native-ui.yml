@@ -70,7 +70,10 @@ jobs:
           )
           $bad = & gofmt -l $files
           if ($bad) {
-            $bad | ForEach-Object { Write-Error "gofmt required: $_" }
+            foreach ($file in $bad) {
+              Write-Host "==== gofmt diff: $file ===="
+              & gofmt -d $file
+            }
             throw "Go formatting check failed"
           }
 

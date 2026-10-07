@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/apernet/quic-go"
+	quiccongestion "relayproxy/internal/congestion"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -26,8 +27,11 @@ type DialConfig struct {
 	QUICConfig     *quic.Config
 	ClientDeviceID string
 	ExitDeviceID   string
-	Ticket         []byte
-	AuthTimeout    time.Duration
+	Ticket                  []byte
+	AuthTimeout             time.Duration
+	BrutalUploadBPS         uint64
+	BrutalDownloadBPS       uint64
+	DisableLossCompensation bool
 }
 
 func Dial(ctx context.Context, config DialConfig) (tunnel.TunnelSession, error) {
@@ -151,10 +155,12 @@ func authenticateSession(ctx context.Context, session tunnel.TunnelSession, conf
 	request := protocol.PublicDirectHandshakeRequest{
 		Type: protocol.PublicDirectHandshakeAuth,
 		Auth: &protocol.PublicDirectAuthRequest{
-			Version:        protocol.PublicDirectAuthVersion,
-			ClientDeviceID: config.ClientDeviceID,
-			ExitDeviceID:   config.ExitDeviceID,
-			Ticket:         append([]byte(nil), config.Ticket...),
+			Version:           protocol.PublicDirectAuthVersion,
+			ClientDeviceID:    config.ClientDeviceID,
+			ExitDeviceID:      config.ExitDeviceID,
+			Ticket:            append([]byte(nil), config.Ticket...),
+			BrutalUploadBPS:   quiccongestion.CapRequestedRate(config.BrutalUploadBPS, 0),
+			BrutalDownloadBPS: quiccongestion.CapRequestedRate(config.BrutalDownloadBPS, 0),
 		},
 	}
 	if err := protocol.WriteJSON(stream, request); err != nil {
@@ -177,6 +183,9 @@ func authenticateSession(ctx context.Context, session tunnel.TunnelSession, conf
 			message = "public direct authentication failed"
 		}
 		return protocol.NewRelayError(code, message)
+	}
+	if response.BrutalUploadBPS > 0 {
+		tunnel.UseBrutal(session, quiccongestion.CapRequestedRate(response.BrutalUploadBPS, 0), config.DisableLossCompensation)
 	}
 	return nil
 }

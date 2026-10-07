@@ -59,9 +59,9 @@ public sealed partial class MainWindow : Window
         _page = tag;
         var map = new Dictionary<string, UIElement>
         {
-            ["overview"] = OverviewView, ["connection"] = ConnectionView, ["exits"] = ExitsView,
-            ["proxy"] = ProxyView, ["routing"] = RoutingView, ["rdp"] = RdpView,
-            ["connections"] = ConnectionsView, ["messages"] = MessagesView, ["settings"] = SettingsView,
+            ["overview"] = OverviewView, ["devices"] = DevicesView, ["connection"] = ConnectionView, ["exits"] = ExitsView,
+            ["proxy"] = ProxyView, ["exitshare"] = ExitShareView, ["routing"] = RoutingView, ["rdp"] = RdpView,
+            ["connections"] = ConnectionsView, ["messages"] = MessagesView, ["diagnostics"] = DiagnosticsView, ["settings"] = SettingsView,
         };
         foreach (var view in map.Values) view.Visibility = Visibility.Collapsed;
         PlaceholderView.Visibility = Visibility.Collapsed;
@@ -78,7 +78,7 @@ public sealed partial class MainWindow : Window
             };
         }
 
-        if (tag is "connection" or "proxy" or "routing" or "settings") _ = LoadConfigAsync();
+        if (tag is "connection" or "proxy" or "exitshare" or "routing" or "settings") _ = LoadConfigAsync();
         _ = RefreshCurrentAsync();
     }
 
@@ -89,6 +89,8 @@ public sealed partial class MainWindow : Window
         else if (_page == "connections") await RefreshConnectionsAsync();
         else if (_page == "messages") await RefreshMessagesAsync();
         else if (_page == "rdp") await RefreshRdpAsync();
+        else if (_page == "devices") await RefreshDevicesAsync();
+        else if (_page == "diagnostics") await RefreshDiagnosticsAsync();
         else await PollMessagesAsync(render: false);
     }
 
@@ -158,6 +160,18 @@ public sealed partial class MainWindow : Window
             TransparentProxySwitch.IsOn = string.Equals(cfg.Network.Mode, "divert", StringComparison.OrdinalIgnoreCase);
             ExcludeProcessesBox.Text = string.Join(Environment.NewLine, cfg.Network.ExcludeProcesses);
 
+            ExitEnabledSwitch.IsOn = cfg.ExitEnabled;
+            AllowInternetCheck.IsChecked = cfg.AllowInternet;
+            AllowPrivateCheck.IsChecked = cfg.AllowPrivateNetwork;
+            AllowLoopbackCheck.IsChecked = cfg.AllowLoopback;
+            SelectComboTag(ExitUpstreamModeCombo, cfg.ExitUpstream.Mode);
+            ExitUpstreamAddressBox.Text = cfg.ExitUpstream.Address;
+            ExitUpstreamUserBox.Text = cfg.ExitUpstream.Username;
+            ExitUpstreamPasswordBox.Password = cfg.ExitUpstream.Password;
+            SelectComboTag(AccessModeCombo, cfg.AccessMode);
+            AccessDomainsBox.Text = string.Join(Environment.NewLine, cfg.AccessDomains);
+            AccessCidrsBox.Text = string.Join(Environment.NewLine, cfg.AccessCidrs);
+
             SelectComboTag(RoutingModeCombo, cfg.Routing.Mode);
             SelectComboTag(DefaultActionCombo, cfg.Routing.DefaultAction);
             _routingRules = cfg.Routing.Rules.Select(CloneRule).ToList();
@@ -173,6 +187,7 @@ public sealed partial class MainWindow : Window
             if (_page == "connection") ShowInfo(ConnectionBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
             else if (_page == "proxy") ShowInfo(ProxyBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
             else if (_page == "routing") ShowInfo(RoutingBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
+            else if (_page == "exitshare") ShowInfo(ExitShareBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
             else if (_page == "settings") ShowInfo(SettingsBar, "读取配置失败", ex.Message, InfoBarSeverity.Error);
         }
     }
@@ -280,6 +295,37 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private async Task RefreshDevicesAsync()
+    {
+        try
+        {
+            var statusTask = App.AgentApi.GetStatusAsync();
+            var exitsTask = App.AgentApi.GetExitsAsync();
+            var rdpTask = App.AgentApi.GetRdpTargetsAsync();
+            await Task.WhenAll(statusTask, exitsTask, rdpTask);
+            var status = await statusTask;
+            var exits = await exitsTask;
+            var targets = await rdpTask;
+            if (status is null) return;
+
+            DeviceNameText.Text = string.IsNullOrWhiteSpace(status.DeviceName) ? "当前设备" : status.DeviceName;
+            IdentityNameText.Text = string.IsNullOrWhiteSpace(status.IdentityName) ? "Identity 未命名" : status.IdentityName;
+            DeviceIdText.Text = string.IsNullOrWhiteSpace(status.DeviceId) ? "—" : status.DeviceId;
+            DeviceTransportText.Text = status.Connected ? status.Transport.ToUpperInvariant() : "未连接";
+            DeviceApprovalText.Text = status.ApprovalState switch { "approved" => "已审批", "pending" => "待审批", "rejected" => "已拒绝", "revoked" => "已撤销", _ => status.ApprovalState };
+            AuthorizedExitCountText.Text = exits.Count.ToString();
+            AuthorizedRdpCountText.Text = targets.Count.ToString();
+
+            AuthorizedResourcesPanel.Children.Clear();
+            foreach (var exit in exits.OrderByDescending(x => x.Online).ThenBy(x => x.Name))
+                AuthorizedResourcesPanel.Children.Add(Card(TwoLine($"出口 · {(string.IsNullOrWhiteSpace(exit.Name) ? exit.DeviceId : exit.Name)}", $"{(exit.Online ? "在线" : "离线")} · {exit.AuthorizationSource} · {exit.DeviceId}")));
+            foreach (var target in targets.OrderByDescending(x => x.Online).ThenBy(x => x.Name))
+                AuthorizedResourcesPanel.Children.Add(Card(TwoLine($"RDP · {(string.IsNullOrWhiteSpace(target.Name) ? target.DeviceId : target.Name)}", $"{(target.Online ? "在线" : "离线")} · 服务端显式授权 · {target.DeviceId}")));
+            DevicesBar.IsOpen = false;
+        }
+        catch (Exception ex) { ShowInfo(DevicesBar, "设备状态不可用", ex.Message, InfoBarSeverity.Warning); }
+    }
+
     private async Task RefreshRdpAsync()
     {
         try
@@ -315,6 +361,29 @@ public sealed partial class MainWindow : Window
             if (targets.Count == 0) ShowInfo(RdpBar, "暂无授权设备", "服务端未向当前 Agent 授权 RDP 目标。", InfoBarSeverity.Informational);
         }
         catch (Exception ex) { ShowInfo(RdpBar, "RDP 状态不可用", ex.Message, InfoBarSeverity.Warning); }
+    }
+
+    private async Task RefreshDiagnosticsAsync()
+    {
+        try
+        {
+            var diagTask = App.AgentApi.GetDiagnosticsAsync();
+            var logsTask = App.AgentApi.GetLogsAsync();
+            await Task.WhenAll(diagTask, logsTask);
+            var diag = await diagTask;
+            var logs = await logsTask;
+            if (diag is not null)
+            {
+                DiagControlText.Text = diag.Status.Connected ? $"{diag.Status.Transport.ToUpperInvariant()} · {diag.Status.LatencyMs} ms" : "未连接";
+                var path = !string.IsNullOrWhiteSpace(diag.Status.DirectPath) ? diag.Status.DirectPath :
+                           !string.IsNullOrWhiteSpace(diag.Status.P2PPath) ? diag.Status.P2PPath : "Relay / 未知";
+                DiagPathText.Text = path;
+                DiagConnectionsText.Text = diag.Connections.Count.ToString();
+            }
+            LogsTextBox.Text = string.Join(Environment.NewLine, logs.Select(x => $"{x.Timestamp} {x.Message}"));
+            DiagnosticsBar.IsOpen = false;
+        }
+        catch (Exception ex) { ShowInfo(DiagnosticsBar, "诊断读取失败", ex.Message, InfoBarSeverity.Warning); }
     }
 
     private async void SaveConnection_Click(object sender, RoutedEventArgs e)
@@ -360,6 +429,41 @@ public sealed partial class MainWindow : Window
             await LoadConfigAsync();
         }
         catch (Exception ex) { ShowInfo(ProxyBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async void SaveExitShare_Click(object sender, RoutedEventArgs e)
+    {
+        if (_config is null) { await LoadConfigAsync(); if (_config is null) return; }
+        try
+        {
+            var result = await App.AgentApi.SaveConfigAsync(new
+            {
+                revision = _config.Revision,
+                exit = new
+                {
+                    enabled = ExitEnabledSwitch.IsOn,
+                    allowInternet = AllowInternetCheck.IsChecked == true,
+                    allowPrivateNetwork = AllowPrivateCheck.IsChecked == true,
+                    allowLoopback = AllowLoopbackCheck.IsChecked == true,
+                    upstream = new
+                    {
+                        mode = ComboTag(ExitUpstreamModeCombo, ""),
+                        address = ExitUpstreamAddressBox.Text.Trim(),
+                        username = ExitUpstreamUserBox.Text.Trim(),
+                        password = ExitUpstreamPasswordBox.Password
+                    },
+                    access = new
+                    {
+                        mode = ComboTag(AccessModeCombo, ""),
+                        domains = SplitList(AccessDomainsBox.Text),
+                        cidrs = SplitList(AccessCidrsBox.Text)
+                    }
+                }
+            });
+            HandleSaveResult(ExitShareBar, result);
+            await LoadConfigAsync();
+        }
+        catch (Exception ex) { ShowInfo(ExitShareBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
     }
 
     private async void SaveRouting_Click(object sender, RoutedEventArgs e)
@@ -458,7 +562,14 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowInfo(ConnectionBar, "重新读取失败", ex.Message, InfoBarSeverity.Error); }
     }
 
+    private async void RefreshDevices_Click(object sender, RoutedEventArgs e) => await RefreshDevicesAsync();
     private async void RefreshRdp_Click(object sender, RoutedEventArgs e) => await RefreshRdpAsync();
+    private async void RefreshDiagnostics_Click(object sender, RoutedEventArgs e) => await RefreshDiagnosticsAsync();
+    private async void ClearLogs_Click(object sender, RoutedEventArgs e)
+    {
+        try { await App.AgentApi.ClearLogsAsync(); LogsTextBox.Text = ""; ShowInfo(DiagnosticsBar, "日志已清空", "", InfoBarSeverity.Success); }
+        catch (Exception ex) { ShowInfo(DiagnosticsBar, "清空失败", ex.Message, InfoBarSeverity.Error); }
+    }
     private async void DisconnectRdp_Click(object sender, RoutedEventArgs e)
     {
         try { await App.AgentApi.DisconnectRdpAsync(); ShowInfo(RdpBar, "RDP 已断开", "", InfoBarSeverity.Success); await RefreshRdpAsync(); }

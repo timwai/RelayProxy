@@ -13,6 +13,7 @@ public sealed partial class MessagePopupWindow : Window
     private DispatcherTimer? _timer;
     private PushMessageDto? _message;
     private bool _showing;
+    private bool _allowClose;
 
     public MessagePopupWindow()
     {
@@ -29,6 +30,22 @@ public sealed partial class MessagePopupWindow : Window
             presenter.IsMinimizable = false;
             presenter.IsAlwaysOnTop = true;
         }
+        AppWindow.Closing += OnAppWindowClosing;
+    }
+
+    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_allowClose) return;
+        args.Cancel = true;
+        CompleteCurrent();
+    }
+
+    public void ClosePermanently()
+    {
+        _allowClose = true;
+        _timer?.Stop();
+        _queue.Clear();
+        Close();
     }
 
     public void EnqueueMessage(PushMessageDto message, int timeoutSeconds)

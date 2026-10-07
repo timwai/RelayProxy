@@ -11,10 +11,12 @@ public sealed class AgentApiClient : IDisposable
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { PropertyNameCaseInsensitive = true };
     public Uri? BaseAddress { get; private set; }
     public bool IsReady => BaseAddress is not null;
+    public bool IsPrivateNativeChannel { get; private set; }
 
     public void Configure(Uri managementUrl, string? explicitToken = null)
     {
-        var token = string.IsNullOrWhiteSpace(explicitToken) ? GetQueryValue(managementUrl, "token") : explicitToken;
+        IsPrivateNativeChannel = !string.IsNullOrWhiteSpace(explicitToken);
+        var token = IsPrivateNativeChannel ? explicitToken : GetQueryValue(managementUrl, "token");
         var builder = new UriBuilder(managementUrl) { Query = "", Fragment = "", Path = "/" };
         BaseAddress = builder.Uri;
 
@@ -32,6 +34,7 @@ public sealed class AgentApiClient : IDisposable
     public void Reset()
     {
         BaseAddress = null;
+        IsPrivateNativeChannel = false;
         var previous = _http;
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
         previous.Dispose();

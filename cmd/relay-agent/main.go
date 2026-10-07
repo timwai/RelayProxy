@@ -281,9 +281,10 @@ func main() {
 	var nativeManagement *gui.WebServer
 	if nativeToken := strings.TrimSpace(os.Getenv("RELAYPROXY_NATIVE_MANAGEMENT_TOKEN")); nativeToken != "" {
 		nativeManagement, err = gui.StartWeb(uiBridge, gui.WebOptions{
-			Listen: "127.0.0.1",
-			Port:   0,
-			Token:  nativeToken,
+			Listen:           "127.0.0.1",
+			Port:             0,
+			Token:            nativeToken,
+			NativeManagement: true,
 		})
 		if err != nil {
 			log.Fatalf("[Native] Failed to start private management API: %v", err)

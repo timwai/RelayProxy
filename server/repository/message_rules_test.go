@@ -151,3 +151,27 @@ func TestLegacyDisabledDefaultBecomesDisabledV2Rule(t *testing.T) {
 		t.Fatalf("legacy disabled default was not preserved: %#v", rules[0])
 	}
 }
+
+
+func TestLegacyMessageRulesPreservePopupType(t *testing.T) {
+	popup := true
+	rules := LegacyMessageRules(false, []VerificationRule{{
+		Name:      "legacy important",
+		Keywords:  []string{"告警"},
+		Popup:     &popup,
+		PopupType: "important",
+	}})
+	var found *MessageRule
+	for i := range rules {
+		if rules[i].Name == "legacy important" {
+			found = &rules[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("legacy rule was not converted")
+	}
+	if found.Type != "important" || found.PopupType != "important" {
+		t.Fatalf("legacy popup type lost: %#v", *found)
+	}
+}

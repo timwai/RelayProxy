@@ -140,8 +140,8 @@ func (a *TicketAuthenticator) authenticate(ctx context.Context, request protocol
 			return Authorization{}, ErrUnauthorized
 		}
 		authorization = Authorization{
-			RelayPolicy: relayPolicy,
-			BrutalUploadBPS: current.BrutalUploadBPS,
+			RelayPolicy:       relayPolicy,
+			BrutalUploadBPS:   current.BrutalUploadBPS,
 			BrutalDownloadBPS: current.BrutalDownloadBPS,
 		}
 	} else if requirePolicy {

@@ -135,3 +135,24 @@ func TestRoutingNativeRequirementOverridesStreamPreference(t *testing.T) {
 		t.Fatalf("required datagram did not override stream preference: err=%v underlying=%+v", err, underlying)
 	}
 }
+
+
+func TestRoutingProxyPauseRejectsTCPAndUDPProxyDials(t *testing.T) {
+	engine, err := NewEngine(Config{Mode: ModeProxy})
+	if err != nil {
+		t.Fatal(err)
+	}
+	underlying := &requiredDialer{err: errors.New("underlying dialer must not be called")}
+	dialer := NewRoutingDialer(engine, underlying)
+	dialer.ProxyPaused = func() bool { return true }
+
+	if _, err := dialer.dialTCP(context.Background(), "exit", "example.com", 443, Decision{Action: ActionProxy}); !errors.Is(err, ErrProxyPaused) {
+		t.Fatalf("paused TCP proxy dial error = %v, want %v", err, ErrProxyPaused)
+	}
+	if _, err := dialer.dialUDP(context.Background(), "exit", "example.com", 443, Decision{Action: ActionProxy}, proxy.UDPDialOptions{}); !errors.Is(err, ErrProxyPaused) {
+		t.Fatalf("paused UDP proxy dial error = %v, want %v", err, ErrProxyPaused)
+	}
+	if underlying.legacy != 0 || underlying.required != 0 || underlying.preferred != 0 {
+		t.Fatalf("paused proxy reached underlying dialer: %+v", underlying)
+	}
+}

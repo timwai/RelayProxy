@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using RelayProxy.Native.Services;
@@ -17,9 +18,40 @@ public partial class App : Application
     public static AgentProcessHost AgentHost { get; } = new(AgentApi);
     public static AppNotificationService Notifications { get; } = new();
 
-    public App() => InitializeComponent();
+    public App()
+    {
+        StartupDiagnostics.Write("App constructor starting.");
+        UnhandledException += (_, e) => StartupDiagnostics.Write("Unhandled WinUI exception.", e.Exception);
+        try
+        {
+            InitializeComponent();
+            StartupDiagnostics.Write("XAML application initialized.");
+        }
+        catch (Exception ex)
+        {
+            StartupDiagnostics.Write("InitializeComponent failed.", ex);
+            StartupDiagnostics.ShowFatal("RelayProxy 无法初始化 Windows UI。", ex);
+            throw;
+        }
+    }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        StartupDiagnostics.Write($"OnLaunched: OS={Environment.OSVersion.VersionString}; Arch={RuntimeInformation.ProcessArchitecture}; Base={AppContext.BaseDirectory}");
+        try
+        {
+            LaunchCore(args);
+            StartupDiagnostics.Write("Main window launch completed.");
+        }
+        catch (Exception ex)
+        {
+            StartupDiagnostics.Write("OnLaunched failed.", ex);
+            StartupDiagnostics.ShowFatal("RelayProxy 启动失败。已写入启动日志。", ex);
+            Environment.Exit(1);
+        }
+    }
+
+    private void LaunchCore(LaunchActivatedEventArgs args)
     {
         var launch = ParseLaunchOptions(Environment.GetCommandLineArgs().Skip(1));
 

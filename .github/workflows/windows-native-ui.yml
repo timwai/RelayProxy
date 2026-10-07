@@ -19,8 +19,10 @@ on:
       - "agent/gui/**"
       - "agent/startup/**"
       - "cmd/relay-agent/**"
+      - "cmd/relay-agent-win-launcher/**"
       - "scripts/fetch-windivert.go"
       - "scripts/build-windows-native.ps1"
+      - "scripts/pack-windows-launcher.ps1"
       - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
   pull_request:
@@ -38,8 +40,10 @@ on:
       - "agent/gui/**"
       - "agent/startup/**"
       - "cmd/relay-agent/**"
+      - "cmd/relay-agent-win-launcher/**"
       - "scripts/fetch-windivert.go"
       - "scripts/build-windows-native.ps1"
+      - "scripts/pack-windows-launcher.ps1"
       - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
 
@@ -86,6 +90,10 @@ jobs:
             agent/startup/startup_windows.go
             agent/startup/startup_other.go
             cmd/relay-agent/main.go
+            cmd/relay-agent-win-launcher/main.go
+            cmd/relay-agent-win-launcher/messagebox_windows.go
+            cmd/relay-agent-win-launcher/messagebox_other.go
+            cmd/relay-agent-win-launcher/main_test.go
             scripts/fetch-windivert.go
           )
           bad="$(gofmt -l "${files[@]}")"
@@ -157,7 +165,8 @@ jobs:
         run: |
           $scripts = @(
             ".\scripts\build.ps1",
-            ".\scripts\build-windows-native.ps1"
+            ".\scripts\build-windows-native.ps1",
+            ".\scripts\pack-windows-launcher.ps1"
           )
           foreach ($script in $scripts) {
             $tokens = $null
@@ -173,9 +182,14 @@ jobs:
             }
           }
 
+      - name: Test rename-safe launcher
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: go test .\cmd\relay-agent-win-launcher -count=1
+
       - name: Restore
         shell: pwsh
-        run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }}
+        run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }} -p:PublishTrimmed=true
 
       - name: Verify Windows 10 compatibility declaration
         shell: pwsh
@@ -202,10 +216,10 @@ jobs:
           $env:CGO_ENABLED = "0"
           go build -trimpath -ldflags "-s -w" -o ".\staging\${{ matrix.runtime }}\relay-agent.exe" .\cmd\relay-agent
 
-      - name: Publish native GUI single EXE
+      - name: Publish fixed-name WinUI host payload
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path ".\single\${{ matrix.runtime }}" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\host\${{ matrix.runtime }}" -Force | Out-Null
           $core = (Resolve-Path ".\staging\${{ matrix.runtime }}\relay-agent.exe").Path
           dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
             -c Release `
@@ -217,7 +231,9 @@ jobs:
             -p:PublishSingleFile=true `
             -p:EnableCompressionInSingleFile=true `
             -p:PublishReadyToRun=false `
-            -p:PublishTrimmed=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
             -p:EnableMsixTooling=true `
             -p:IncludeAllContentForSelfExtract=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -226,70 +242,89 @@ jobs:
             -p:RelayAgentCorePath="$core" `
             --self-contained true `
             --no-restore `
-            -o .\single\${{ matrix.runtime }}
+            -o .\host\${{ matrix.runtime }}
 
-      - name: Verify single EXE output
+      - name: Build rename-safe portable EXE
         shell: pwsh
         run: |
-          $dir = ".\single\${{ matrix.runtime }}"
-          $exe = Join-Path $dir "${{ matrix.exe }}"
-          if (-not (Test-Path $exe)) { throw "${{ matrix.exe }} missing from single-file publish" }
-          $extra = @(Get-ChildItem -LiteralPath $dir -Force | Where-Object { $_.Name -ne "${{ matrix.exe }}" })
+          $hostDir = ".\host\${{ matrix.runtime }}"
+          $host = Join-Path $hostDir "RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $host)) { throw "RelayProxy.NativeHost.exe missing from WinUI host publish" }
+          $extra = @(Get-ChildItem -LiteralPath $hostDir -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
           if ($extra.Count -gt 0) {
-            throw "single-file publish has sidecars: $($extra.Name -join ', ')"
+            throw "WinUI host publish has sidecars: $($extra.Name -join ', ')"
           }
+
+          New-Item -ItemType Directory -Path ".\single\${{ matrix.runtime }}" -Force | Out-Null
           New-Item -ItemType Directory -Path ".\artifacts\${{ matrix.runtime }}" -Force | Out-Null
-          $core = "./staging/${{ matrix.runtime }}/relay-agent.exe"
-          $singleBytes = (Get-Item $exe).Length
+          $env:GOOS = "windows"
+          $env:GOARCH = "${{ matrix.goarch }}"
+          $env:CGO_ENABLED = "0"
+          $stub = ".\staging\${{ matrix.runtime }}\relayproxy-launcher.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher
+          if ($LASTEXITCODE -ne 0) { throw "rename-safe launcher build failed" }
+
+          $exe = ".\single\${{ matrix.runtime }}\${{ matrix.exe }}"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pack-windows-launcher.ps1 -Launcher $stub -Payload $host -Output $exe
+          if ($LASTEXITCODE -ne 0) { throw "launcher payload packing failed" }
+
+          $core = ".\staging\${{ matrix.runtime }}\relay-agent.exe"
+          $finalBytes = (Get-Item $exe).Length
+          $hostBytes = (Get-Item $host).Length
           $coreBytes = (Get-Item $core).Length
-          $runtimeBytes = [Math]::Max(0, $singleBytes - $coreBytes)
-          $singleMb = [math]::Round($singleBytes / 1MB, 2)
+          $overheadBytes = [Math]::Max(0, $finalBytes - $hostBytes)
+          $finalMb = [math]::Round($finalBytes / 1MB, 2)
+          $hostMb = [math]::Round($hostBytes / 1MB, 2)
           $coreMb = [math]::Round($coreBytes / 1MB, 2)
-          $runtimeMb = [math]::Round($runtimeBytes / 1MB, 2)
-          Write-Host "[size] single EXE: $singleMb MB"
+          $overheadMb = [math]::Round($overheadBytes / 1MB, 2)
+          Write-Host "[size] rename-safe EXE: $finalMb MB"
+          Write-Host "[size] trimmed WinUI host: $hostMb MB"
           Write-Host "[size] embedded Go Core: $coreMb MB"
-          Write-Host "[size] UI + .NET + Windows App SDK payload: ~$runtimeMb MB"
-          $sizeBudgetMb = 110
-          if ($singleBytes -gt ($sizeBudgetMb * 1MB)) {
-            throw "Native single EXE exceeds ${sizeBudgetMb} MiB size budget: $singleMb MiB"
+          Write-Host "[size] launcher/footer overhead: ~$overheadMb MB"
+          $sizeBudgetMb = 80
+          if ($finalBytes -gt ($sizeBudgetMb * 1MB)) {
+            throw "Rename-safe native EXE exceeds ${sizeBudgetMb} MiB size budget: $finalMb MiB"
           }
           Write-Host "[size] budget: <= $sizeBudgetMb MiB (PASS)" -ForegroundColor Green
-          Write-Host "::notice title=Native package size::${{ matrix.runtime }} single EXE = $singleMb MB; Go Core = $coreMb MB"
+          Write-Host "::notice title=Rename-safe native package::${{ matrix.runtime }} = $finalMb MB; host = $hostMb MB"
           @"
-          ### ${{ matrix.runtime }} native package size
+          ### ${{ matrix.runtime }} rename-safe native package
           | Item | Size |
           | --- | ---: |
-          | ${{ matrix.exe }} | $singleMb MB |
+          | ${{ matrix.exe }} | $finalMb MB |
+          | trimmed fixed-name WinUI host | $hostMb MB |
           | embedded Go Core | $coreMb MB |
-          | UI + .NET + Windows App SDK (approx.) | $runtimeMb MB |
+          | launcher/footer overhead | $overheadMb MB |
 
-          Single-file compression is enabled, trimming is disabled for Windows 10 compatibility, and the complete Windows App SDK graph is retained. CI enforces a 110 MiB single-EXE size budget.
+          The distributed EXE is a rename-safe Go launcher. It extracts the fixed-name WinUI host to the user cache, so changing the outer EXE filename does not affect XAML resource resolution. The WinUI host uses single-file compression plus partial trimming. CI enforces an 80 MiB final size budget.
           "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
           Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\${{ matrix.exe }}" -Force
-
-      - name: Smoke test native x64 release startup
+      - name: Smoke test arbitrary EXE rename
         if: matrix.runtime == 'win-x64'
         shell: pwsh
         run: |
-          $exe = (Resolve-Path ".\single\${{ matrix.runtime }}\${{ matrix.exe }}").Path
+          $source = (Resolve-Path ".\single\${{ matrix.runtime }}\${{ matrix.exe }}").Path
+          $renamed = Join-Path (Split-Path -Parent $source) "anything-user-wants.exe"
+          Copy-Item $source $renamed -Force
           $process = $null
           try {
-            $process = Start-Process -FilePath $exe -ArgumentList "--minimized" -PassThru
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
             Start-Sleep -Seconds 8
             $process.Refresh()
             if ($process.HasExited) {
               $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
               if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
-              throw "Native GUI exited during startup smoke test with code $($process.ExitCode)."
+              throw "Renamed portable EXE exited during startup smoke test with code $($process.ExitCode)."
             }
-            Write-Host "[smoke] native release GUI stayed alive for 8 seconds." -ForegroundColor Green
+            Write-Host "[smoke] arbitrarily renamed EXE stayed alive for 8 seconds." -ForegroundColor Green
           }
           finally {
             if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
           }
-
       - name: Build Go Agent core
         shell: pwsh
         run: |

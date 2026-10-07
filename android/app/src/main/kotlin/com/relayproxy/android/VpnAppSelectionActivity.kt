@@ -2,6 +2,8 @@ package com.relayproxy.android
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
@@ -42,18 +44,25 @@ class VpnAppSelectionActivity : Activity() {
         const val EXTRA_SELECTED = "vpnSelectedPackages"
         const val EXTRA_TITLE = "selectionTitle"
         const val EXTRA_SUBTITLE = "selectionSubtitle"
+
+        private const val CATEGORY_ALL = "all"
+        private const val CATEGORY_USER = "user"
+        private const val CATEGORY_SYSTEM_APP = "system_app"
+        private const val CATEGORY_SYSTEM_SERVICE = "system_service"
     }
 
     private data class AppEntry(
         val label: String,
         val packageName: String,
-        val icon: Drawable? = null
+        val category: String,
+        val icon: Drawable? = null,
     )
 
     private val selected = linkedSetOf<String>()
     private var entries = emptyList<AppEntry>()
     private var currentQuery: String = ""
     private var filterOnlySelected: Boolean = false
+    private var categoryFilter: String = CATEGORY_ALL
 
     private val debounceHandler = Handler(Looper.getMainLooper())
     private val debounceRunnable = Runnable { renderApps() }
@@ -62,6 +71,10 @@ class VpnAppSelectionActivity : Activity() {
     private lateinit var countSubtitle: TextView
     private lateinit var chipAll: TextView
     private lateinit var chipOnlySelected: TextView
+    private lateinit var chipCategoryAll: TextView
+    private lateinit var chipCategoryUser: TextView
+    private lateinit var chipCategorySystemApp: TextView
+    private lateinit var chipCategorySystemService: TextView
     private lateinit var summaryTitle: TextView
     private lateinit var summarySub: TextView
     private lateinit var doneButton: Button
@@ -115,29 +128,79 @@ class VpnAppSelectionActivity : Activity() {
         outState.putStringArrayList(EXTRA_SELECTED, ArrayList(selected))
     }
 
+    @Suppress("DEPRECATION")
+    private fun installedApplications(): List<ApplicationInfo> {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getInstalledApplications(
+                PackageManager.ApplicationInfoFlags.of(PackageManager.GET_META_DATA.toLong()),
+            )
+        } else {
+            packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+        }
+    }
+
     private fun loadApps(): List<AppEntry> {
-        val launchIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        @Suppress("DEPRECATION")
-        val launchable = packageManager.queryIntentActivities(launchIntent, 0)
-            .mapNotNull { resolved ->
-                val pkg = resolved.activityInfo?.packageName?.trim().orEmpty()
-                if (pkg.isBlank() || pkg == packageName) return@mapNotNull null
-                val label = runCatching { resolved.loadLabel(packageManager).toString() }.getOrNull()?.ifBlank { pkg } ?: pkg
-                val icon = runCatching { resolved.loadIcon(packageManager) }.getOrNull()
-                AppEntry(label, pkg, icon)
+        val installed = installedApplications()
+            .asSequence()
+            .filter { info -> info.packageName.isNotBlank() && info.packageName != packageName }
+            .map { info ->
+                val pkg = info.packageName
+                val isSystem = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                    (info.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                val hasLauncher = packageManager.getLaunchIntentForPackage(pkg) != null
+                val category = when {
+                    !isSystem -> CATEGORY_USER
+                    hasLauncher -> CATEGORY_SYSTEM_APP
+                    else -> CATEGORY_SYSTEM_SERVICE
+                }
+                val label = runCatching {
+                    packageManager.getApplicationLabel(info).toString()
+                }.getOrNull()?.ifBlank { pkg } ?: pkg
+                val icon = runCatching { packageManager.getApplicationIcon(info) }.getOrNull()
+                AppEntry(label, pkg, category, icon)
             }
             .distinctBy(AppEntry::packageName)
             .toMutableList()
 
-        val known = launchable.mapTo(hashSetOf(), AppEntry::packageName)
+        val known = installed.mapTo(hashSetOf(), AppEntry::packageName)
         selected.filterNot { it in known }.forEach { pkg ->
             val appInfo = runCatching { packageManager.getApplicationInfo(pkg, 0) }.getOrNull()
-            val label = appInfo?.let { runCatching { packageManager.getApplicationLabel(it).toString() }.getOrNull() } ?: "$pkg（不可见或已卸载）"
+            val label = appInfo?.let {
+                runCatching { packageManager.getApplicationLabel(it).toString() }.getOrNull()
+            } ?: "$pkg（不可见或已卸载）"
             val icon = appInfo?.let { runCatching { packageManager.getApplicationIcon(it) }.getOrNull() }
-            launchable += AppEntry(label, pkg, icon)
+            val category = if (appInfo == null) {
+                CATEGORY_USER
+            } else {
+                val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0 ||
+                    (appInfo.flags and ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                when {
+                    !isSystem -> CATEGORY_USER
+                    packageManager.getLaunchIntentForPackage(pkg) != null -> CATEGORY_SYSTEM_APP
+                    else -> CATEGORY_SYSTEM_SERVICE
+                }
+            }
+            installed += AppEntry(label, pkg, category, icon)
         }
 
-        return launchable.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.label })
+        return installed.sortedWith(
+            compareBy<AppEntry> { categorySortOrder(it.category) }
+                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.label },
+        )
+    }
+
+    private fun categorySortOrder(category: String): Int = when (category) {
+        CATEGORY_USER -> 0
+        CATEGORY_SYSTEM_APP -> 1
+        CATEGORY_SYSTEM_SERVICE -> 2
+        else -> 3
+    }
+
+    private fun categoryLabel(category: String): String = when (category) {
+        CATEGORY_USER -> "用户应用"
+        CATEGORY_SYSTEM_APP -> "系统应用"
+        CATEGORY_SYSTEM_SERVICE -> "系统服务"
+        else -> "应用"
     }
 
     private fun buildUi(): View {
@@ -336,6 +399,49 @@ class VpnAppSelectionActivity : Activity() {
         chipsScroll.addView(chipsRow)
         root.addView(chipsScroll)
 
+        val categoryScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                leftMargin = dp(16)
+                rightMargin = dp(16)
+                bottomMargin = dp(8)
+            }
+        }
+        val categoryRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        chipCategoryAll = buildChip("全部类型", isActive = true) {
+            categoryFilter = CATEGORY_ALL
+            updateChipStyles()
+            renderApps()
+        }
+        chipCategoryUser = buildChip("用户应用", isActive = false) {
+            categoryFilter = CATEGORY_USER
+            updateChipStyles()
+            renderApps()
+        }
+        chipCategorySystemApp = buildChip("系统应用", isActive = false) {
+            categoryFilter = CATEGORY_SYSTEM_APP
+            updateChipStyles()
+            renderApps()
+        }
+        chipCategorySystemService = buildChip("系统服务", isActive = false) {
+            categoryFilter = CATEGORY_SYSTEM_SERVICE
+            updateChipStyles()
+            renderApps()
+        }
+        categoryRow.addView(chipCategoryAll)
+        categoryRow.addView(chipCategoryUser, marginStart(8))
+        categoryRow.addView(chipCategorySystemApp, marginStart(8))
+        categoryRow.addView(chipCategorySystemService, marginStart(8))
+        categoryScroll.addView(categoryRow)
+        root.addView(categoryScroll)
+
         // 4. 应用列表视窗 (带有舒适内边距)
         appList = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -427,6 +533,10 @@ class VpnAppSelectionActivity : Activity() {
     private fun updateChipStyles() {
         styleChip(chipAll, !filterOnlySelected)
         styleChip(chipOnlySelected, filterOnlySelected)
+        styleChip(chipCategoryAll, categoryFilter == CATEGORY_ALL)
+        styleChip(chipCategoryUser, categoryFilter == CATEGORY_USER)
+        styleChip(chipCategorySystemApp, categoryFilter == CATEGORY_SYSTEM_APP)
+        styleChip(chipCategorySystemService, categoryFilter == CATEGORY_SYSTEM_SERVICE)
     }
 
     private fun buildActionButton(text: String, onClick: () -> Unit): TextView {
@@ -451,8 +561,9 @@ class VpnAppSelectionActivity : Activity() {
             val matchesQuery = query.isBlank() ||
                 entry.label.contains(query, ignoreCase = true) ||
                 entry.packageName.contains(query, ignoreCase = true)
-            val matchesFilter = !filterOnlySelected || entry.packageName in selected
-            matchesQuery && matchesFilter
+            val matchesSelected = !filterOnlySelected || entry.packageName in selected
+            val matchesCategory = categoryFilter == CATEGORY_ALL || entry.category == categoryFilter
+            matchesQuery && matchesSelected && matchesCategory
         }
     }
 
@@ -547,7 +658,7 @@ class VpnAppSelectionActivity : Activity() {
             })
 
             textCol.addView(TextView(this).apply {
-                text = entry.packageName
+                text = entry.packageName + " · " + categoryLabel(entry.category)
                 textSize = 11.5f
                 setTextColor(UiPalette.muted)
                 maxLines = 1
@@ -596,11 +707,18 @@ class VpnAppSelectionActivity : Activity() {
         if (!::countSubtitle.isInitialized) return
         val count = selected.size
         val total = entries.size
-        countSubtitle.text = "共 $total 个应用 · 已选 $count 个"
+        val userCount = entries.count { it.category == CATEGORY_USER }
+        val systemAppCount = entries.count { it.category == CATEGORY_SYSTEM_APP }
+        val systemServiceCount = entries.count { it.category == CATEGORY_SYSTEM_SERVICE }
+        countSubtitle.text = "共 $total 个应用/服务 · 已选 $count 个"
         chipAll.text = "全部 ($total)"
         chipOnlySelected.text = "已选 ($count)"
-        summaryTitle.text = "已勾选 $count 个应用"
-        summarySub.text = if (count > 0) "已选应用将在生效后由 VPN 代理/排除" else "未勾选应用，全部直接走原链路"
+        chipCategoryAll.text = "全部类型"
+        chipCategoryUser.text = "用户应用 ($userCount)"
+        chipCategorySystemApp.text = "系统应用 ($systemAppCount)"
+        chipCategorySystemService.text = "系统服务 ($systemServiceCount)"
+        summaryTitle.text = "已勾选 $count 个应用/服务"
+        summarySub.text = if (count > 0) "已选包将在生效后由 VPN 代理/排除" else "未勾选包，全部直接走原链路"
         doneButton.text = "保存设置 ($count)"
     }
 

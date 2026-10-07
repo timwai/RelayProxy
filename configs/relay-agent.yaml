@@ -2,6 +2,7 @@
 # 独立登录 Server，并在待审批设备中勾选能力。安装私钥由客户端自动管理。
 server:
   address: relay.example.com
+  # insecure_tls: false  # 仅可信开发环境；开启后跳过服务端证书验证
 
 device:
   identity_id: a1b2c3d4e5f6g7h8

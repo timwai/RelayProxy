@@ -126,6 +126,16 @@ func NewClientManager(parent context.Context, clientID func() string, options Cl
 	}
 }
 
+func (m *ClientManager) SetBrutalProfile(uploadBPS, downloadBPS uint64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.brutalUploadBPS = uploadBPS
+	m.brutalDownloadBPS = downloadBPS
+	m.mu.Unlock()
+}
+
 func (m *ClientManager) SetFallback(fn func(exitDeviceID, reason string)) {
 	if m == nil {
 		return
@@ -317,6 +327,12 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 	ctx, cancel := context.WithTimeout(m.ctx, m.attemptTimeout)
 	defer cancel()
 
+	m.mu.Lock()
+	brutalUploadBPS := m.brutalUploadBPS
+	brutalDownloadBPS := m.brutalDownloadBPS
+	disableLossCompensation := m.disableLossCompensation
+	m.mu.Unlock()
+
 	_, stillValid := ticketLifetime(public, m.now().UTC())
 	if !stillValid {
 		m.finishFailure(exitDeviceID, ticketHash, errors.New("public direct ticket expired before connection"))
@@ -332,8 +348,8 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 			Address: publicEndpointDialAddress(endpoint), TLSConfig: tlsConfig,
 			ClientDeviceID: clientID, ExitDeviceID: exitDeviceID,
 			Ticket: append([]byte(nil), public.Ticket...), AuthTimeout: m.attemptTimeout,
-			BrutalUploadBPS: m.brutalUploadBPS, BrutalDownloadBPS: m.brutalDownloadBPS,
-			DisableLossCompensation: m.disableLossCompensation,
+			BrutalUploadBPS: brutalUploadBPS, BrutalDownloadBPS: brutalDownloadBPS,
+			DisableLossCompensation: disableLossCompensation,
 		})
 	}
 	if len(configs) == 0 {

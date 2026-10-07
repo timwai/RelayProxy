@@ -7,15 +7,14 @@
   产出：
     - Linux 服务端 / Agent amd64 / arm64
     - macOS Server / Agent amd64 / arm64（含 RelayProxy.app Agent 包装）
-    - Windows 客户端 amd64 / arm64（relay-agent-gui.exe 桌面窗口 + relay-agent.exe CLI）
+    - Windows 客户端 amd64 / arm64（WinUI 3 relay-agent-gui.exe + relay-agent.exe Core + legacy Wails fallback）
     - Windows 服务端 amd64 / arm64（relay-server.exe，Console 子系统，含 Admin UI）
     - 每个平台目录的完整 ZIP 分发包
 
-  说明：Windows 客户端使用 Wails v3 + WebView2 桌面窗口（含系统托盘），
-  relay-agent-gui.exe 使用 -H=windowsgui 子系统，双击不会弹出控制台窗口；
-  relay-agent.exe 保留 Console 子系统供 CLI / 脚本调用，带参数时会自动保持无窗口。
+  说明：Windows 默认桌面客户端使用 WinUI 3 + Windows App SDK，不再依赖 WebView2。
+  relay-agent-gui.exe 是原生 UI，启动同目录 relay-agent.exe --no-gui 作为 Go 网络核心；
+  relay-agent-wails.exe 暂时保留旧 Wails/WebView2 GUI 作为迁移期回退。
   Windows arm64 产物可运行 Agent / Server，但系统透明代理目前仍只支持 amd64。
-  Windows ARM64 桌面窗口需要 ARM64 WebView2 Runtime；缺失时会提示并继续提供本地 Web 管理页。
   管理界面通过 Linux 服务端的 Admin HTTPS 控制台访问，或直接使用桌面窗口。
 
 .EXAMPLE
@@ -101,6 +100,41 @@ try {
         foreach ($f in $sysoFiles) {
             $bak = $f + ".bak"
             if (Test-Path $bak) { Rename-Item $bak $f -Force }
+        }
+    }
+
+    function Publish-WindowsNativeUI {
+        param(
+            [ValidateSet("win-x64", "win-arm64")]
+            [string]$Runtime,
+            [ValidateSet("x64", "ARM64")]
+            [string]$Platform,
+            [string]$OutputDir
+        )
+
+        $project = Join-Path $Root "windows\RelayProxy.Native\RelayProxy.Native.csproj"
+        New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+
+        Write-Host ""
+        Write-Host "[BUILD] Windows Native UI $Runtime -> $OutputDir" -ForegroundColor Cyan
+
+        & dotnet restore $project -r $Runtime
+        if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed: $Runtime" }
+
+        & dotnet publish $project `
+            -c Release `
+            -r $Runtime `
+            -p:Platform=$Platform `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            --self-contained true `
+            --no-restore `
+            -o $OutputDir
+        if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed: $Runtime" }
+
+        $nativeExe = Join-Path $OutputDir "relay-agent-gui.exe"
+        if (-not (Test-Path $nativeExe)) {
+            throw "Native Windows GUI executable not found: $nativeExe"
         }
     }
 
@@ -219,16 +253,22 @@ try {
     Package-MacOSApp -Arch "amd64"
     Package-MacOSApp -Arch "arm64"
 
-    # --- Windows client (icons + manifest embedded via resource_windows.syso) ---
-    # Desktop build first: it is the artifact users are told to double-click.
-    Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `
-        -Package "./cmd/relay-agent" `
-        -Output (Join-Path $OutDir "windows-amd64/relay-agent-gui.exe") `
-        -ExtraLdFlags "-H=windowsgui"
-
+    # --- Windows client ------------------------------------------------------
+    # relay-agent-gui.exe is now the WinUI 3 native shell. It launches the
+    # sibling relay-agent.exe in --no-gui mode and talks to its loopback
+    # management API. Keep the old Wails binary under a legacy name until the
+    # migration has been validated in production.
     Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `
         -Package "./cmd/relay-agent" `
         -Output (Join-Path $OutDir "windows-amd64/relay-agent.exe")
+
+    Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `
+        -Package "./cmd/relay-agent" `
+        -Output (Join-Path $OutDir "windows-amd64/relay-agent-wails.exe") `
+        -ExtraLdFlags "-H=windowsgui"
+
+    Publish-WindowsNativeUI -Runtime "win-x64" -Platform "x64" `
+        -OutputDir (Join-Path $OutDir "windows-amd64")
 
     Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `
         -Package "./cmd/relay-server" `
@@ -236,12 +276,15 @@ try {
 
     Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
         -Package "./cmd/relay-agent" `
-        -Output (Join-Path $OutDir "windows-arm64/relay-agent-gui.exe") `
-        -ExtraLdFlags "-H=windowsgui"
+        -Output (Join-Path $OutDir "windows-arm64/relay-agent.exe")
 
     Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
         -Package "./cmd/relay-agent" `
-        -Output (Join-Path $OutDir "windows-arm64/relay-agent.exe")
+        -Output (Join-Path $OutDir "windows-arm64/relay-agent-wails.exe") `
+        -ExtraLdFlags "-H=windowsgui"
+
+    Publish-WindowsNativeUI -Runtime "win-arm64" -Platform "ARM64" `
+        -OutputDir (Join-Path $OutDir "windows-arm64")
 
     Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
         -Package "./cmd/relay-server" `
@@ -344,12 +387,14 @@ try {
   darwin-arm64/relay-agent          macOS Apple Silicon Agent
   darwin-arm64/relay-server         macOS Apple Silicon Server（可构建实验产物）
   darwin-arm64/RelayProxy.app       macOS Apple Silicon Agent App 包装
-  windows-amd64/relay-agent-gui.exe Windows x64 桌面客户端（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-agent.exe     Windows x64 Agent CLI（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-agent-gui.exe Windows x64 WinUI 3 原生桌面客户端
+  windows-amd64/relay-agent.exe     Windows x64 Agent Core / CLI
+  windows-amd64/relay-agent-wails.exe Windows x64 旧 Wails GUI（迁移期回退）
   windows-amd64/relay-server.exe    Windows x64 Server（含 Admin UI）
   windows-amd64/windivert/          外置 WinDivert 运行库与许可证
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端
-  windows-arm64/relay-agent.exe     Windows ARM64 Agent CLI
+  windows-arm64/relay-agent-gui.exe Windows ARM64 WinUI 3 原生桌面客户端
+  windows-arm64/relay-agent.exe     Windows ARM64 Agent Core / CLI
+  windows-arm64/relay-agent-wails.exe Windows ARM64 旧 Wails GUI（迁移期回退）
   windows-arm64/relay-server.exe    Windows ARM64 Server（含 Admin UI）
   */configs/*.yaml                  示例配置
   SHA256SUMS.txt
@@ -361,7 +406,7 @@ try {
 部署提示:
   Linux:  chmod +x relay-server relay-agent
   Admin:  https://<server>:8443
-  桌面:   双击 relay-agent-gui.exe
+  桌面:   双击 relay-agent-gui.exe（WinUI 3 原生界面）
   透明代理: 以管理员身份启动 Windows x64 客户端；保存启用设置后重启
   自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
   配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml

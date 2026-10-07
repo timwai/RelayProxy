@@ -21,6 +21,7 @@ func TestCapRequestedRate(t *testing.T) {
 		{100, 0, 100},
 		{100, 200, 100},
 		{200, 100, 100},
+		{^uint64(0), 0, MaxConfiguredRateBPS},
 	}
 	for _, tt := range tests {
 		if got := CapRequestedRate(tt.requested, tt.cap); got != tt.want {

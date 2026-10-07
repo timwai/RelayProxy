@@ -1,0 +1,133 @@
+name: Windows ARM64 LZMS Experiment
+
+on:
+  push:
+    branches:
+      - feat/windows-native-gui
+    paths:
+      - ".github/workflows/windows-lzms-arm64-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-lzms-arm64-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arm64-lzms:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Restore lean ARM64 graph
+        shell: pwsh
+        run: |
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-arm64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 lean restore failed" }
+
+      - name: Build embedded ARM64 Go Agent core
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\lzms-arm64\staging" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "arm64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w" -o ".\lzms-arm64\staging\relay-agent.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 embedded Go Agent core build failed" }
+
+      - name: Publish lean outer-only ARM64 WinUI host
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\lzms-arm64\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\lzms-arm64\single" -Force | Out-Null
+          $core = (Resolve-Path ".\lzms-arm64\staging\relay-agent.exe").Path
+
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-arm64 `
+            -p:Platform=ARM64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\lzms-arm64\host
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 lean host publish failed" }
+
+          $nativeHost = ".\lzms-arm64\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "ARM64 RelayProxy.NativeHost.exe missing" }
+          $extra = @(Get-ChildItem ".\lzms-arm64\host" -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
+          if ($extra.Count -gt 0) { throw "ARM64 LZMS host has sidecars: $($extra.Name -join ', ')" }
+
+      - name: Build and pack ARM64 LZMS EXE
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "arm64"
+          $env:CGO_ENABLED = "0"
+          $stub = ".\lzms-arm64\relayproxy-launcher-lzms.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher-lzms
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 LZMS launcher build failed" }
+
+          $nativeHost = (Resolve-Path ".\lzms-arm64\host\RelayProxy.NativeHost.exe").Path
+          $exe = ".\lzms-arm64\single\RelayProxy-agent-windows-arm64-lzms.exe"
+
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go run .\scripts\pack-windows-launcher-lzms.go -launcher $stub -payload $nativeHost -output $exe
+          if ($LASTEXITCODE -ne 0) { throw "ARM64 LZMS payload packing failed" }
+
+          $coreMb = [math]::Round((Get-Item ".\lzms-arm64\staging\relay-agent.exe").Length / 1MB, 2)
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          $stubMb = [math]::Round((Get-Item $stub).Length / 1MB, 2)
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[lzms-arm64-size] Go Core: $coreMb MB"
+          Write-Host "[lzms-arm64-size] uncompressed-inner WinUI host: $hostMb MB"
+          Write-Host "[lzms-arm64-size] launcher stub: $stubMb MB"
+          Write-Host "[lzms-arm64-size] rename-safe EXE: $finalMb MB"
+          Write-Host "::notice title=ARM64 LZMS package size::ARM64 LZMS = $finalMb MB; Core = $coreMb MB"
+
+          @"
+          ### win-arm64 Windows LZMS experiment
+          **Go Core:** $coreMb MiB
+          **Uncompressed-inner WinUI host:** $hostMb MiB
+          **ARM64 launcher stub:** $stubMb MiB
+          **Rename-safe EXE:** $finalMb MiB
+
+          Uses lean Windows App SDK dependencies, partial trimming, no .NET inner compression, and Windows LZMS outer compression. ARM64 execution is not smoke-tested on the x64 GitHub runner.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-win-arm64-lzms-experiment
+          path: .\lzms-arm64\single\RelayProxy-agent-windows-arm64-lzms.exe
+          if-no-files-found: error

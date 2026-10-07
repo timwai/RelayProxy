@@ -34,7 +34,7 @@ Android 独有的 Wi-Fi / 移动数据优先、移动网络故障切换等“And
 relay-agent-gui.exe      WinUI 3 原生 GUI（默认双击入口）
 relay-agent.exe          Go Agent Core / CLI
 relay-agent-wails.exe    旧 Wails GUI，仅迁移期回退
-RelayProxy.Native.dll    原生 GUI 依赖
+relay-agent-gui.dll      原生 GUI 主程序集
 Microsoft.*              Windows App SDK 自包含依赖
 ...
 ```

@@ -386,8 +386,8 @@ func (g *Gateway) serveQUIC() {
 	}
 }
 
-func negotiatedBrutalRates(transport tunnel.TransportType, hello protocol.DeviceHello, cfg GatewayConfig) (clientTxBPS, serverTxBPS uint64) {
-	if transport != tunnel.TransportQUIC || cfg.IgnoreClientBandwidth {
+func authorizedBrutalRates(hello protocol.DeviceHello, cfg GatewayConfig) (clientTxBPS, serverTxBPS uint64) {
+	if cfg.IgnoreClientBandwidth {
 		return 0, 0
 	}
 	clientTxBPS = quiccongestion.CapRequestedRate(hello.BrutalUploadBPS, cfg.BrutalMaxDownloadBPS)
@@ -578,7 +578,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	sessionID := "sess_" + uuid.New().String()
 	heartbeatSec := g.heartbeatForDevice(hello, authorization.ApprovedCapabilities)
-	clientTxBPS, serverTxBPS := negotiatedBrutalRates(sess.Transport(), hello, g.cfg)
+	clientTxBPS, serverTxBPS := authorizedBrutalRates(hello, g.cfg)
 	if serverTxBPS > 0 && tunnel.UseBrutal(sess, serverTxBPS, g.cfg.DisableLossCompensation) {
 		log.Printf("[Gateway] Relay QUIC download switched to Brutal device=%s target=%d B/s", authorization.DeviceID, serverTxBPS)
 	}
@@ -631,6 +631,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		ControlStream:       ctrlStream,
 		ConnectedAt:         time.Now(),
 		HeartbeatSec:        heartbeatSec,
+		BrutalUploadBPS:     clientTxBPS,
+		BrutalDownloadBPS:   serverTxBPS,
 	}
 
 	g.mu.Lock()

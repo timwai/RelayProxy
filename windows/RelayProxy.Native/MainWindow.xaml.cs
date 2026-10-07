@@ -31,6 +31,7 @@ public sealed partial class MainWindow : Window
     private bool _forceExit;
     private bool _shutdownInProgress;
     private bool _diagnosticCollecting;
+    private CancellationTokenSource? _rdpConnectCts;
     private bool _suppressDirtyTracking;
     private bool _suppressNavigationSelection;
     private string _lastDeviceId = "";
@@ -77,6 +78,9 @@ public sealed partial class MainWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         _timer.Stop();
+        try { _rdpConnectCts?.Cancel(); } catch { }
+        _rdpConnectCts?.Dispose();
+        _rdpConnectCts = null;
         App.AgentHost.StateChanged -= OnAgentStateChanged;
         AppWindow.Closing -= OnAppWindowClosing;
         AppWindow.Changed -= OnAppWindowChanged;
@@ -763,22 +767,112 @@ public sealed partial class MainWindow : Window
                 grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 grid.Children.Add(TwoLine(string.IsNullOrWhiteSpace(target.Name) ? target.DeviceId : target.Name, $"{(target.Online ? "在线" : "离线")} · {target.DeviceId}"));
                 var button = new Button { Content = "一键连接", IsEnabled = target.Online, Tag = target.DeviceId, VerticalAlignment = VerticalAlignment.Center };
-                button.Click += async (_, _) =>
-                {
-                    try
-                    {
-                        await App.AgentApi.ConnectRdpAsync(target.DeviceId, autoLaunch: true);
-                        ShowInfo(RdpBar, "RDP 已建立", "已创建本地回环入口并启动 mstsc.exe。", InfoBarSeverity.Success);
-                        await RefreshRdpAsync();
-                    }
-                    catch (Exception ex) { ShowInfo(RdpBar, "RDP 连接失败", ex.Message, InfoBarSeverity.Error); }
-                };
+                button.Click += async (_, _) => await ConnectRdpWithProgressAsync(target);
                 Grid.SetColumn(button, 1); grid.Children.Add(button);
                 RdpTargetsPanel.Children.Add(Card(grid));
             }
             if (targets.Count == 0) ShowInfo(RdpBar, "暂无授权设备", "服务端未向当前 Agent 授权 RDP 目标。", InfoBarSeverity.Informational);
         }
         catch (Exception ex) { ShowInfo(RdpBar, "RDP 状态不可用", ex.Message, InfoBarSeverity.Warning); }
+    }
+
+    private async Task ConnectRdpWithProgressAsync(RdpTargetDto target)
+    {
+        if (_rdpConnectCts is not null)
+        {
+            ShowInfo(RdpBar, "已有 RDP 连接正在建立", "请先完成或取消当前连接。", InfoBarSeverity.Informational);
+            return;
+        }
+
+        var targetName = string.IsNullOrWhiteSpace(target.Name) ? target.DeviceId : target.Name;
+        var cts = new CancellationTokenSource();
+        _rdpConnectCts = cts;
+        var progressText = new TextBlock
+        {
+            Text = "正在向 Agent 请求 RDP 会话并建立本地回环入口…",
+            TextWrapping = TextWrapping.Wrap
+        };
+        var progress = new ProgressRing
+        {
+            IsActive = true,
+            Width = 30,
+            Height = 30,
+            HorizontalAlignment = HorizontalAlignment.Left
+        };
+        var content = new StackPanel { Spacing = 12 };
+        content.Children.Add(progress);
+        content.Children.Add(progressText);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = $"正在连接 {targetName}",
+            Content = content,
+            CloseButtonText = "取消连接",
+            DefaultButton = ContentDialogButton.None
+        };
+
+        var completed = false;
+        dialog.Closing += (_, _) =>
+        {
+            if (!completed)
+            {
+                try { cts.Cancel(); } catch { }
+            }
+        };
+
+        try
+        {
+            _ = dialog.ShowAsync();
+            var connectTask = App.AgentApi.ConnectRdpAsync(target.DeviceId, autoLaunch: true, cts.Token);
+            while (!connectTask.IsCompleted)
+            {
+                await Task.WhenAny(connectTask, Task.Delay(700, cts.Token));
+                if (connectTask.IsCompleted) break;
+                try
+                {
+                    var status = await App.AgentApi.GetStatusAsync(cts.Token);
+                    if (status is not null && !string.IsNullOrWhiteSpace(status.RDPListenAddr))
+                    {
+                        var tcp = string.IsNullOrWhiteSpace(status.RDPPathTCP) ? "正在选择" : status.RDPPathTCP;
+                        var udp = status.RDPUDPEnabled
+                            ? (status.RDPUDPActive ? $"已激活 · {status.RDPPathUDP}" : "已监听，等待 mstsc")
+                            : "不可用";
+                        progressText.Text = $"本地入口 {status.RDPListenAddr}\nTCP：{tcp}\nUDP：{udp}";
+                    }
+                }
+                catch (OperationCanceledException) { throw; }
+                catch { }
+            }
+
+            await connectTask;
+            completed = true;
+            try { dialog.Hide(); } catch { }
+
+            await RefreshRdpAsync();
+            ShowInfo(
+                RdpBar,
+                "RDP 已建立",
+                $"已为“{targetName}”建立本地入口并启动 mstsc.exe。TCP：{RdpTcpPathText.Text} · UDP：{RdpUdpText.Text}",
+                InfoBarSeverity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            completed = true;
+            try { dialog.Hide(); } catch { }
+            ShowInfo(RdpBar, "RDP 连接已取消", targetName, InfoBarSeverity.Informational);
+        }
+        catch (Exception ex)
+        {
+            completed = true;
+            try { dialog.Hide(); } catch { }
+            ShowInfo(RdpBar, "RDP 连接失败", ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            if (ReferenceEquals(_rdpConnectCts, cts))
+                _rdpConnectCts = null;
+            cts.Dispose();
+        }
     }
 
     private async Task RefreshNetworkServiceAsync()

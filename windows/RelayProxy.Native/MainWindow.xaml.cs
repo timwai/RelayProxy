@@ -1161,7 +1161,28 @@ public sealed partial class MainWindow : Window
         var action = new ComboBox { Header = "动作", HorizontalAlignment = HorizontalAlignment.Stretch };
         action.Items.Add(new ComboBoxItem { Content = "代理", Tag = "PROXY" }); action.Items.Add(new ComboBoxItem { Content = "本机直连", Tag = "DIRECT" }); action.Items.Add(new ComboBoxItem { Content = "阻断", Tag = "REJECT" });
         SelectComboTag(action, rule.Action);
-        var exit = new TextBox { Header = "指定出口 Device ID（可选）", Text = rule.ExitId };
+        var exits = await App.AgentApi.GetExitsAsync();
+        var exit = new ComboBox { Header = "指定出口（可选）", HorizontalAlignment = HorizontalAlignment.Stretch };
+        exit.Items.Add(new ComboBoxItem { Content = "自动选择 / 使用默认出口", Tag = "" });
+        foreach (var candidate in exits.OrderByDescending(x => x.Online).ThenBy(x => x.Name))
+        {
+            var label = string.IsNullOrWhiteSpace(candidate.Name) ? candidate.DeviceId : candidate.Name;
+            exit.Items.Add(new ComboBoxItem
+            {
+                Content = $"{label} · {(candidate.Online ? "在线" : "离线")} · {candidate.DeviceId}",
+                Tag = candidate.DeviceId
+            });
+        }
+        if (!string.IsNullOrWhiteSpace(rule.ExitId) &&
+            !exit.Items.OfType<ComboBoxItem>().Any(x => string.Equals(x.Tag?.ToString(), rule.ExitId, StringComparison.OrdinalIgnoreCase)))
+        {
+            exit.Items.Add(new ComboBoxItem
+            {
+                Content = $"当前配置 · 已不在授权列表 · {rule.ExitId}",
+                Tag = rule.ExitId
+            });
+        }
+        SelectComboTag(exit, rule.ExitId);
         var datagram = new ToggleSwitch { Header = "必须使用原生数据报", IsOn = rule.DatagramRequired };
         var handleDirect = new ToggleSwitch { Header = "由 RelayProxy 处理 DIRECT", IsOn = rule.HandleDirect };
         var panel = new StackPanel { Spacing = 10 };
@@ -1170,7 +1191,7 @@ public sealed partial class MainWindow : Window
         if (await dialog.ShowAsync() != ContentDialogResult.Primary) return false;
         if (string.IsNullOrWhiteSpace(name.Text)) { ShowInfo(RoutingBar, "规则名称不能为空", "", InfoBarSeverity.Warning); return false; }
         rule.Name = name.Text.Trim(); rule.Processes = SplitList(processes.Text); rule.Targets = SplitList(targets.Text); rule.Ports = SplitList(ports.Text);
-        rule.Protocols = SplitList(protocols.Text).Select(x => x.ToLowerInvariant()).ToList(); rule.Action = ComboTag(action, "PROXY"); rule.ExitId = exit.Text.Trim();
+        rule.Protocols = SplitList(protocols.Text).Select(x => x.ToLowerInvariant()).ToList(); rule.Action = ComboTag(action, "PROXY"); rule.ExitId = ComboTag(exit, "");
         rule.DatagramRequired = datagram.IsOn; rule.HandleDirect = handleDirect.IsOn;
         return true;
     }
@@ -1187,6 +1208,17 @@ public sealed partial class MainWindow : Window
 
     private async void RepairNetworkService_Click(object sender, RoutedEventArgs e)
     {
+        var confirm = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "安装 / 修复 RelayProxy Network Service",
+            Content = "Windows 透明代理需要一次管理员授权来安装或修复受保护的 Network Service 与 WinDivert 驱动。\n\n日常启动 RelayProxy GUI 不需要管理员权限；只有安装、修复或卸载服务时才会出现 UAC。",
+            PrimaryButtonText = "继续并请求管理员权限",
+            CloseButtonText = "取消",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await confirm.ShowAsync() != ContentDialogResult.Primary) return;
+
         try
         {
             RepairNetworkServiceButton.IsEnabled = false;

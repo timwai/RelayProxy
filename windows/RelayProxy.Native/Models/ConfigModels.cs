@@ -32,6 +32,7 @@ public sealed class AgentConfigDto
     [JsonPropertyName("minimizeToTray")] public bool MinimizeToTray { get; set; }
     [JsonPropertyName("startMinimized")] public bool StartMinimized { get; set; }
     [JsonPropertyName("theme")] public string Theme { get; set; } = "system";
+    [JsonPropertyName("systemNotifications")] public bool SystemNotifications { get; set; } = true;
     [JsonPropertyName("verificationPopupTimeoutSec")] public int VerificationPopupTimeoutSec { get; set; } = 15;
     [JsonPropertyName("revision")] public string Revision { get; set; } = "";
     [JsonPropertyName("restartRequired")] public bool RestartRequired { get; set; }

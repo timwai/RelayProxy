@@ -101,6 +101,7 @@
                 <TextBlock Text="这里只展示服务端下发给当前身份 / 当前设备的资源，不会显示未授权设备。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
               </StackPanel></Border>
             </Grid>
+            <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="10"><TextBlock Text="已批准能力" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="这些能力来自服务端对当前设备的实际批准结果。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/><StackPanel x:Name="DeviceCapabilitiesPanel" Spacing="6"/></StackPanel></Border>
             <StackPanel x:Name="AuthorizedResourcesPanel" Spacing="8"/>
           </StackPanel>
         </ScrollViewer>

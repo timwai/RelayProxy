@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO.Compression;
+using System.Text.Json;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -25,6 +27,7 @@ public sealed partial class MainWindow : Window
     private bool _suppressAutostart;
     private bool _forceExit;
     private bool _shutdownInProgress;
+    private bool _diagnosticCollecting;
     private string _lastDeviceId = "";
     private string _page = "overview";
 
@@ -667,6 +670,78 @@ public sealed partial class MainWindow : Window
             DiagnosticsBar.IsOpen = false;
         }
         catch (Exception ex) { ShowInfo(DiagnosticsBar, "诊断读取失败", ex.Message, InfoBarSeverity.Warning); }
+    }
+
+    private async void CollectDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        if (_diagnosticCollecting) return;
+        _diagnosticCollecting = true;
+        CollectDiagnosticsButton.IsEnabled = false;
+
+        var temp = Path.Combine(Path.GetTempPath(), "RelayProxy-diagnostic-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(temp);
+            var samples = new List<DiagnosticsSnapshotDto>();
+            const int sampleCount = 7;
+            for (var index = 0; index < sampleCount; index++)
+            {
+                DiagnosticCollectionText.Text = $"正在采集诊断… {index + 1}/{sampleCount}（约 30 秒）";
+                var snapshot = await App.AgentApi.GetDiagnosticsAsync();
+                if (snapshot is not null) samples.Add(snapshot);
+                if (index + 1 < sampleCount)
+                    await Task.Delay(TimeSpan.FromSeconds(5));
+            }
+
+            DiagnosticCollectionText.Text = "正在整理日志与诊断包…";
+            var logs = await App.AgentApi.GetLogsAsync();
+            var manifest = new
+            {
+                format = "relayproxy-diagnostic-v1",
+                collectedAt = DateTimeOffset.Now,
+                durationSeconds = 30,
+                sampleIntervalSeconds = 5,
+                sampleCount = samples.Count,
+                note = "此诊断包不包含 RelayProxy 配置文件、密码或管理 token。"
+            };
+
+            var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+            await File.WriteAllTextAsync(Path.Combine(temp, "manifest.json"), JsonSerializer.Serialize(manifest, jsonOptions));
+            await File.WriteAllTextAsync(Path.Combine(temp, "diagnostics.json"), JsonSerializer.Serialize(samples, jsonOptions));
+            await File.WriteAllTextAsync(
+                Path.Combine(temp, "logs.txt"),
+                string.Join(Environment.NewLine, logs.Select(x => $"{x.Timestamp} {x.Message}")));
+
+            var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "RelayProxy");
+            Directory.CreateDirectory(downloads);
+            var zip = Path.Combine(downloads, $"relayproxy-diagnostic-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+            if (File.Exists(zip)) File.Delete(zip);
+            ZipFile.CreateFromDirectory(temp, zip, CompressionLevel.Optimal, includeBaseDirectory: false);
+
+            DiagnosticCollectionText.Text = $"诊断包已保存：{zip}";
+            ShowInfo(DiagnosticsBar, "诊断包采集完成", zip, InfoBarSeverity.Success);
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    ArgumentList = { "/select,", zip },
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            DiagnosticCollectionText.Text = "诊断采集失败，可重新尝试。";
+            ShowInfo(DiagnosticsBar, "诊断采集失败", ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            CollectDiagnosticsButton.IsEnabled = true;
+            _diagnosticCollecting = false;
+            try { Directory.Delete(temp, recursive: true); } catch { }
+        }
     }
 
     private async void SaveConnection_Click(object sender, RoutedEventArgs e)

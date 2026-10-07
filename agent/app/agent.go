@@ -234,6 +234,7 @@ type AgentStatus struct {
 	DivertDiagnostics    divert.Diagnostics         `json:"divertDiagnostics"`
 	ActiveStreams        int64                      `json:"activeStreams"`
 	ApprovalState        string                     `json:"approvalState"`
+	ProxyPaused          bool                       `json:"proxyPaused"`
 	ApprovedCapabilities []string                   `json:"approvedCapabilities,omitempty"`
 	RDPListenAddr        string                     `json:"rdpListenAddr,omitempty"`
 	RDPTargetID          string                     `json:"rdpTargetId,omitempty"`
@@ -290,6 +291,7 @@ type Agent struct {
 	latencyMs            atomic.Int64
 	handshakeOK          atomic.Bool
 	approvalState        atomic.Pointer[string]
+	proxyPaused          atomic.Bool
 	approvedMode         string
 	approvedCapabilities []string
 	identityName         string
@@ -446,6 +448,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
+	a.dialer.ProxyPaused = a.proxyPaused.Load
 	a.SelectExit(cfg.DefaultExitID)
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
 		a.exitHandler = exit.NewHandler(exit.HandlerConfig{
@@ -476,7 +479,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			Config: cfg.DivertConfig, Dialer: a.rawDialer, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
 			ProxyReady: func() bool {
-				return a.handshakeOK.Load()
+				return a.handshakeOK.Load() && !a.proxyPaused.Load()
 			},
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
 				d := engine.DecideFlow(routing.Flow{Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
@@ -1290,6 +1293,14 @@ func (a *Agent) Start() (err error) {
 	return nil
 }
 
+func (a *Agent) SetProxyPaused(paused bool) {
+	a.proxyPaused.Store(paused)
+}
+
+func (a *Agent) ProxyPaused() bool {
+	return a.proxyPaused.Load()
+}
+
 func (a *Agent) SelectExit(exitID string) {
 	a.mu.Lock()
 	a.cfg.DefaultExitID = exitID
@@ -1305,6 +1316,7 @@ func (a *Agent) Status() AgentStatus {
 		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName,
 		IdentityName: a.identityName, PolicyRevision: a.policyRevision, Mode: a.approvedMode,
 		ApprovedCapabilities: append([]string(nil), a.approvedCapabilities...),
+		ProxyPaused:          a.proxyPaused.Load(),
 		ProxyExits:           proxyExitSummaries(a.proxyExits), ProxyExitRevision: a.proxyExitRevision,
 		SOCKS5Running: a.started && a.socksServer != nil,
 		HTTPRunning:   a.started && a.httpServer != nil,

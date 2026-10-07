@@ -76,6 +76,28 @@
           </StackPanel>
         </ScrollViewer>
 
+        <ScrollViewer x:Name="DevicesView" Visibility="Collapsed">
+          <StackPanel Padding="28" Spacing="14">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="身份与设备" FontSize="28" FontWeight="SemiBold"/><TextBlock Text="当前安装身份、设备审批状态与已授权资源" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              <Button Grid.Column="1" Content="刷新" Click="RefreshDevices_Click"/>
+            </Grid>
+            <InfoBar x:Name="DevicesBar" IsOpen="False"/>
+            <Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="10"><TextBlock Text="当前设备" FontSize="16" FontWeight="SemiBold"/>
+                <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="DeviceNameText" Text="—" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="IdentityNameText" Text="—" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel><Border Grid.Column="1" CornerRadius="999" Padding="9,5" Background="{ThemeResource LayerFillColorDefaultBrush}"><TextBlock x:Name="DeviceApprovalText" Text="未知"/></Border></Grid>
+                <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="设备 ID" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="DeviceIdText" Grid.Column="1" Text="—" TextWrapping="Wrap"/></Grid>
+                <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBlock Text="传输" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="DeviceTransportText" Grid.Column="1" Text="—"/></Grid>
+              </StackPanel></Border>
+              <Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="授权资源" FontSize="16" FontWeight="SemiBold"/>
+                <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><StackPanel><TextBlock Text="代理出口" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="AuthorizedExitCountText" Text="0" FontSize="24" FontWeight="SemiBold"/></StackPanel><StackPanel Grid.Column="1"><TextBlock Text="RDP 设备" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="AuthorizedRdpCountText" Text="0" FontSize="24" FontWeight="SemiBold"/></StackPanel></Grid>
+                <TextBlock Text="这里只展示服务端下发给当前身份 / 当前设备的资源，不会显示未授权设备。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel></Border>
+            </Grid>
+            <StackPanel x:Name="AuthorizedResourcesPanel" Spacing="8"/>
+          </StackPanel>
+        </ScrollViewer>
+
         <ScrollViewer x:Name="ConnectionView" Visibility="Collapsed">
           <StackPanel Padding="28" Spacing="14">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
@@ -138,6 +160,35 @@
           </StackPanel>
         </ScrollViewer>
 
+        <ScrollViewer x:Name="ExitShareView" Visibility="Collapsed">
+          <StackPanel Padding="28" Spacing="14">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="本机出口共享" FontSize="28" FontWeight="SemiBold"/><TextBlock Text="允许其他授权设备通过本机访问互联网、私网或回环服务" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              <Button Grid.Column="1" Content="保存出口设置" Style="{StaticResource AccentButtonStyle}" Click="SaveExitShare_Click"/>
+            </Grid>
+            <InfoBar x:Name="ExitShareBar" IsOpen="False"/>
+            <Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="出口权限" FontSize="16" FontWeight="SemiBold"/>
+                <ToggleSwitch x:Name="ExitEnabledSwitch" Header="启用本机作为 Exit"/>
+                <CheckBox x:Name="AllowInternetCheck" Content="允许访问互联网"/>
+                <CheckBox x:Name="AllowPrivateCheck" Content="允许访问私有网络"/>
+                <CheckBox x:Name="AllowLoopbackCheck" Content="允许访问本机回环地址"/>
+                <TextBlock Text="最终权限仍受服务端设备能力与身份策略约束。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel></Border>
+              <Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="上游代理" FontSize="16" FontWeight="SemiBold"/>
+                <ComboBox x:Name="ExitUpstreamModeCombo" Header="访问方式" HorizontalAlignment="Stretch"><ComboBoxItem Tag="" Content="本机直连"/><ComboBoxItem Tag="socks5" Content="SOCKS5 上游"/><ComboBoxItem Tag="http" Content="HTTP 上游"/></ComboBox>
+                <TextBox x:Name="ExitUpstreamAddressBox" Header="上游地址" PlaceholderText="host:port"/>
+                <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBox x:Name="ExitUpstreamUserBox" Header="用户名"/><PasswordBox x:Name="ExitUpstreamPasswordBox" Grid.Column="1" Header="密码"/></Grid>
+                <TextBlock Text="上游代理模式只支持 TCP；UDP 会明确拒绝，不会绕过代理直连。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel></Border>
+            </Grid>
+            <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="域名与 IP 访问规则" FontSize="16" FontWeight="SemiBold"/>
+              <ComboBox x:Name="AccessModeCombo" Header="匹配模式" HorizontalAlignment="Stretch"><ComboBoxItem Tag="" Content="不附加筛选"/><ComboBoxItem Tag="allow" Content="允许列表"/><ComboBoxItem Tag="deny" Content="拒绝列表"/></ComboBox>
+              <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBox x:Name="AccessDomainsBox" Header="域名（每行一条）" AcceptsReturn="True" MinHeight="120" TextWrapping="Wrap"/><TextBox x:Name="AccessCidrsBox" Grid.Column="1" Header="IP / CIDR / 范围（每行一条）" AcceptsReturn="True" MinHeight="120" TextWrapping="Wrap"/></Grid>
+            </StackPanel></Border>
+          </StackPanel>
+        </ScrollViewer>
+
         <ScrollViewer x:Name="RoutingView" Visibility="Collapsed">
           <StackPanel Padding="28" Spacing="14">
             <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -172,6 +223,22 @@
         <ScrollViewer x:Name="ConnectionsView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="实时连接" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="进程、目标、规则、出口与数据路径" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><Button Grid.Column="1" Content="刷新" Click="RefreshConnections_Click" /></Grid><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Border Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="活跃连接" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><TextBlock x:Name="ActiveConnectionsText" Text="0" FontSize="24" FontWeight="SemiBold" /></StackPanel></Border><Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="下载" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><TextBlock x:Name="ConnectionsDownText" Text="0 B/s" FontSize="24" FontWeight="SemiBold" /></StackPanel></Border><Border Grid.Column="2" Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="上传" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><TextBlock x:Name="ConnectionsUpText" Text="0 B/s" FontSize="24" FontWeight="SemiBold" /></StackPanel></Border></Grid><StackPanel x:Name="ConnectionsPanel" Spacing="8" /></StackPanel></ScrollViewer>
 
         <ScrollViewer x:Name="MessagesView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="消息" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="验证码、普通消息与重要提醒；弹窗已改为 WinUI 原生窗口" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="刷新" Click="RefreshMessages_Click" /><Button Content="清空历史" Click="ClearMessages_Click" /></StackPanel></Grid><InfoBar x:Name="MessagesBar" IsOpen="False" /><StackPanel x:Name="MessagesPanel" Spacing="8" /></StackPanel></ScrollViewer>
+
+        <ScrollViewer x:Name="DiagnosticsView" Visibility="Collapsed">
+          <StackPanel Padding="28" Spacing="14">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="诊断与日志" FontSize="28" FontWeight="SemiBold"/><TextBlock Text="控制连接、Public Direct、P2P、透明代理、RDP 与运行日志" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="刷新" Click="RefreshDiagnostics_Click"/><Button Content="清空日志" Click="ClearLogs_Click"/></StackPanel>
+            </Grid>
+            <InfoBar x:Name="DiagnosticsBar" IsOpen="False"/>
+            <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="控制连接" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="DiagControlText" Text="—" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="数据路径" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="DiagPathText" Text="—" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+              <Border Grid.Column="2" Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="活跃连接" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="DiagConnectionsText" Text="0" FontSize="20" FontWeight="SemiBold"/></StackPanel></Border>
+            </Grid>
+            <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="10"><TextBlock Text="运行日志" FontSize="16" FontWeight="SemiBold"/><TextBox x:Name="LogsTextBox" IsReadOnly="True" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Cascadia Mono, Consolas" MinHeight="360" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/></StackPanel></Border>
+          </StackPanel>
+        </ScrollViewer>
 
         <ScrollViewer x:Name="SettingsView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><StackPanel><TextBlock Text="设置" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Windows 原生 GUI 行为" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><InfoBar x:Name="SettingsBar" IsOpen="False"/><Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="Agent 连接" FontSize="16" FontWeight="SemiBold" /><TextBlock x:Name="ManagementUrlText" Text="尚未连接" /><TextBlock x:Name="SettingsAgentStateText" Text="未启动" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel></Border>
           <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><ToggleSwitch x:Name="AutostartSwitch" Header="开机自动启动" Toggled="AutostartSwitch_Toggled"/><NumberBox x:Name="PopupTimeoutBox" Header="消息弹窗自动关闭 / 秒（0 = 不自动关闭）" Minimum="0" Maximum="3600"/><Button Content="保存 GUI 设置" HorizontalAlignment="Left" Click="SaveGuiSettings_Click"/></StackPanel></Border>

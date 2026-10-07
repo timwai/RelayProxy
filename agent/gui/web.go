@@ -250,6 +250,9 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/reload", w.reloadConfig)
 	mux.HandleFunc("POST /api/select-exit", w.selectExit)
 	mux.HandleFunc("POST /api/autostart", w.setAutostart)
+	mux.HandleFunc("GET /api/network-service", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.GetPlatformServiceStatus()) })
+	mux.HandleFunc("POST /api/network-service/repair", w.repairNetworkService)
+	mux.HandleFunc("DELETE /api/network-service", w.uninstallNetworkService)
 	mux.HandleFunc("GET /api/connections", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetConnections()) })
 	mux.HandleFunc("DELETE /api/connections", func(rw http.ResponseWriter, _ *http.Request) {
 		w.bridge.ClearConnections()
@@ -366,6 +369,42 @@ func (w *WebServer) runSpeedTest(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeWebJSON(rw, map[string]any{"ok": true, "result": result})
+}
+
+func (w *WebServer) repairNetworkService(rw http.ResponseWriter, _ *http.Request) {
+	if err := divert.RepairPlatformService(); err != nil {
+		log.Printf("[Web] 修复 Network Service 失败: %v", err)
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, map[string]any{"ok": true, "message": "Network Service 已安装/修复并启动"})
+}
+
+func (w *WebServer) uninstallNetworkService(rw http.ResponseWriter, _ *http.Request) {
+	uninstallResult, err := divert.UninstallPlatformService()
+	if err != nil {
+		log.Printf("[Web] 卸载 Network Service 失败: %v", err)
+		writeWebError(rw, fmt.Errorf("卸载服务失败，透明代理配置保持不变: %w", err))
+		return
+	}
+
+	disabled := ""
+	var update bridge.ConfigUpdate
+	update.Network.Mode = &disabled
+	if _, err := w.bridge.SaveConfig(update); err != nil {
+		log.Printf("[Web] Network Service 已卸载，但关闭透明代理配置失败: %v", err)
+		writeWebError(rw, fmt.Errorf("Network Service 已卸载，但关闭透明代理配置失败；下次启动可能再次请求安装: %w", err))
+		return
+	}
+	message := "Network Service 已完全卸载，系统透明代理配置已关闭"
+	if uninstallResult.RebootCleanup {
+		message = "Network Service 已从 SCM 卸载；部分 ProgramData 文件仍被 Windows 占用，已安排重启后删除：" + uninstallResult.CleanupPath
+	}
+	writeWebJSON(rw, map[string]any{
+		"ok": true, "message": message,
+		"rebootCleanup": uninstallResult.RebootCleanup,
+		"cleanupPath": uninstallResult.CleanupPath,
+	})
 }
 
 func (w *WebServer) setAutostart(rw http.ResponseWriter, r *http.Request) {

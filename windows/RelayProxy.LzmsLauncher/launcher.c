@@ -8,6 +8,7 @@
 #include <shlobj.h>
 #include <strsafe.h>
 #include <stdint.h>
+#include <string.h>
 
 #pragma comment(lib, "Cabinet.lib")
 #pragma comment(lib, "Bcrypt.lib")

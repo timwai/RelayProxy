@@ -438,7 +438,7 @@ public sealed partial class MainWindow : Window
         {
             var exits = await App.AgentApi.GetExitsAsync();
             ExitsPanel.Children.Clear();
-            foreach (var exit in exits.OrderByDescending(x => x.Online).ThenBy(x => x.Name))
+            foreach (var exit in SortExits(exits))
             {
                 var pathText = exit.Direct?.Public?.Available == true ? $"Public Direct · {exit.Direct.Public.Transport.ToUpperInvariant()}" : "P2P / Relay";
                 var testing = _speedTestingExits.Contains(exit.DeviceId);
@@ -498,6 +498,30 @@ public sealed partial class MainWindow : Window
             else ExitsBar.IsOpen = false;
         }
         catch (Exception ex) { ShowInfo(ExitsBar, "正在等待服务端出口", ex.Message, InfoBarSeverity.Warning); }
+    }
+
+    private async void ExitSort_Changed(object sender, SelectionChangedEventArgs e) => await RefreshExitsAsync();
+
+    private IEnumerable<ProxyExitDto> SortExits(IEnumerable<ProxyExitDto> exits)
+    {
+        var sort = (ExitSortCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "default";
+        return sort switch
+        {
+            "download" => exits
+                .OrderByDescending(x => x.Online)
+                .ThenByDescending(x => _speedTests.TryGetValue(x.DeviceId, out var result) ? result.Download.MegabitsPerSecond : -1)
+                .ThenBy(x => x.Name),
+            "upload" => exits
+                .OrderByDescending(x => x.Online)
+                .ThenByDescending(x => _speedTests.TryGetValue(x.DeviceId, out var result) ? result.Upload.MegabitsPerSecond : -1)
+                .ThenBy(x => x.Name),
+            "name" => exits
+                .OrderByDescending(x => x.Online)
+                .ThenBy(x => string.IsNullOrWhiteSpace(x.Name) ? x.DeviceId : x.Name),
+            _ => exits
+                .OrderByDescending(x => x.Online)
+                .ThenBy(x => string.IsNullOrWhiteSpace(x.Name) ? x.DeviceId : x.Name)
+        };
     }
 
     private async void SpeedAll_Click(object sender, RoutedEventArgs e)
@@ -665,19 +689,31 @@ public sealed partial class MainWindow : Window
                 $"{type} · {(string.IsNullOrWhiteSpace(m.Title) ? "RelayProxy 消息" : m.Title)}",
                 $"{m.Content}\n{metadata}"));
 
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
             if (!string.IsNullOrWhiteSpace(m.VerificationCode))
             {
-                var button = new Button { Content = $"复制 {m.VerificationCode}", Tag = m.VerificationCode, VerticalAlignment = VerticalAlignment.Center };
-                button.Click += (_, _) =>
+                var copyButton = new Button { Content = $"复制 {m.VerificationCode}", Tag = m.VerificationCode };
+                copyButton.Click += (_, _) =>
                 {
                     var p = new DataPackage();
-                    p.SetText((string)button.Tag);
+                    p.SetText((string)copyButton.Tag);
                     Clipboard.SetContent(p);
-                    ShowInfo(MessagesBar, "验证码已复制", (string)button.Tag, InfoBarSeverity.Success);
+                    ShowInfo(MessagesBar, "验证码已复制", (string)copyButton.Tag, InfoBarSeverity.Success);
                 };
-                Grid.SetColumn(button, 1);
-                grid.Children.Add(button);
+                actions.Children.Add(copyButton);
             }
+            if (MessageTypeValue(m) == "important")
+            {
+                var diagnosticsButton = new Button { Content = "查看诊断" };
+                diagnosticsButton.Click += (_, _) => SelectNavigation("diagnostics");
+                actions.Children.Add(diagnosticsButton);
+            }
+            var detailsButton = new Button { Content = "详情" };
+            detailsButton.Click += async (_, _) => await ShowMessageDetailsAsync(m);
+            actions.Children.Add(detailsButton);
+
+            Grid.SetColumn(actions, 1);
+            grid.Children.Add(actions);
             MessagesPanel.Children.Add(Card(grid));
         }
 
@@ -687,6 +723,113 @@ public sealed partial class MainWindow : Window
 
     private static string MessageSearchText(PushMessageDto m) =>
         string.Join("\n", m.Title, m.Content, m.Source, m.MessageRule, m.VerificationCode);
+
+    private void TestVerificationPopup_Click(object sender, RoutedEventArgs e) => ShowLocalTestMessage("verification_code");
+    private void TestMessagePopup_Click(object sender, RoutedEventArgs e) => ShowLocalTestMessage("message");
+    private void TestImportantPopup_Click(object sender, RoutedEventArgs e) => ShowLocalTestMessage("important");
+
+    private void TestPopupQueue_Click(object sender, RoutedEventArgs e)
+    {
+        ShowLocalTestMessage("verification_code");
+        ShowLocalTestMessage("message");
+        ShowLocalTestMessage("important");
+    }
+
+    private void ShowLocalTestMessage(string type)
+    {
+        var message = type switch
+        {
+            "verification_code" => new PushMessageDto
+            {
+                Id = $"local-test-verification-{Guid.NewGuid():N}",
+                Title = "登录验证码",
+                Content = "这是 Windows 原生 GUI 的本机验证码弹窗测试。",
+                MessageType = "verification_code",
+                MessageRule = "本机测试 · 验证码",
+                VerificationCode = "731204",
+                Popup = true,
+                PopupType = "verification_code",
+                Source = "Windows GUI 测试",
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            },
+            "important" => new PushMessageDto
+            {
+                Id = $"local-test-important-{Guid.NewGuid():N}",
+                Title = "出口健康状态异常",
+                Content = "这是 Windows 原生 GUI 的本机重要提醒测试。可从消息中心直接进入诊断页面。",
+                MessageType = "important",
+                MessageRule = "本机测试 · 重要提醒",
+                Popup = true,
+                PopupType = "important",
+                Source = "Windows GUI 测试",
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            },
+            _ => new PushMessageDto
+            {
+                Id = $"local-test-message-{Guid.NewGuid():N}",
+                Title = "RelayProxy 普通消息",
+                Content = "这是 Windows 原生 GUI 的本机普通消息弹窗测试。",
+                MessageType = "message",
+                MessageRule = "本机测试 · 普通消息",
+                Popup = true,
+                PopupType = "message",
+                Source = "Windows GUI 测试",
+                CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            }
+        };
+
+        if (_config?.SystemNotifications == true)
+            App.Notifications.TryShow(message);
+        _popupWindow ??= new MessagePopupWindow();
+        _popupWindow.EnqueueMessage(message, _config?.VerificationPopupTimeoutSec ?? 15);
+    }
+
+    private async Task ShowMessageDetailsAsync(PushMessageDto message)
+    {
+        var type = PopupTypeLabel(message);
+        var title = string.IsNullOrWhiteSpace(message.Title) ? "RelayProxy 消息" : message.Title;
+        var details = new StackPanel { Spacing = 8, MaxWidth = 560 };
+        details.Children.Add(new TextBlock { Text = message.Content, TextWrapping = TextWrapping.Wrap });
+        details.Children.Add(new TextBlock
+        {
+            Text = string.Join(Environment.NewLine, new[]
+            {
+                $"类型：{type}",
+                string.IsNullOrWhiteSpace(message.Source) ? "" : $"来源：{message.Source}",
+                string.IsNullOrWhiteSpace(message.MessageRule) ? "" : $"命中规则：{message.MessageRule}",
+                string.IsNullOrWhiteSpace(message.VerificationCode) ? "" : $"验证码：{message.VerificationCode}",
+                $"时间：{FormatCreatedAt(message.CreatedAt)}"
+            }.Where(x => !string.IsNullOrWhiteSpace(x))),
+            Foreground = ThemeBrush("TextFillColorSecondaryBrush"),
+            TextWrapping = TextWrapping.Wrap
+        });
+
+        var important = MessageTypeValue(message) == "important";
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = title,
+            Content = details,
+            PrimaryButtonText = important ? "查看诊断" : (!string.IsNullOrWhiteSpace(message.VerificationCode) ? "复制验证码" : ""),
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary) return;
+        if (important)
+        {
+            SelectNavigation("diagnostics");
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(message.VerificationCode))
+        {
+            var package = new DataPackage();
+            package.SetText(message.VerificationCode);
+            Clipboard.SetContent(package);
+            ShowInfo(MessagesBar, "验证码已复制", message.VerificationCode, InfoBarSeverity.Success);
+        }
+    }
 
     private async Task PollMessagesAsync(bool render)
     {
@@ -1578,7 +1721,7 @@ public sealed partial class MainWindow : Window
     private async void RefreshMessages_Click(object sender, RoutedEventArgs e) => await RefreshMessagesAsync();
     private async void ClearMessages_Click(object sender, RoutedEventArgs e)
     {
-        try { await App.AgentApi.ClearMessagesAsync(); MessagesPanel.Children.Clear(); ShowInfo(MessagesBar, "消息历史已清空", "", InfoBarSeverity.Success); }
+        try { await App.AgentApi.ClearMessagesAsync(); _messageCache.Clear(); MessagesPanel.Children.Clear(); ShowInfo(MessagesBar, "消息历史已清空", "", InfoBarSeverity.Success); }
         catch (Exception ex) { ShowInfo(MessagesBar, "清空失败", ex.Message, InfoBarSeverity.Error); }
     }
     private void OpenExits_Click(object sender, RoutedEventArgs e) => SelectNavigation("exits");

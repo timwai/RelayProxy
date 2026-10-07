@@ -1303,7 +1303,7 @@ func (a *Agent) Status() AgentStatus {
 		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName,
 		IdentityName: a.identityName, PolicyRevision: a.policyRevision, Mode: a.approvedMode,
 		ApprovedCapabilities: append([]string(nil), a.approvedCapabilities...),
-		ProxyExits: proxyExitSummaries(a.proxyExits), ProxyExitRevision: a.proxyExitRevision,
+		ProxyExits:           proxyExitSummaries(a.proxyExits), ProxyExitRevision: a.proxyExitRevision,
 		SOCKS5Running: a.started && a.socksServer != nil,
 		HTTPRunning:   a.started && a.httpServer != nil,
 		ExitRunning:   a.started && a.exitHandler != nil,

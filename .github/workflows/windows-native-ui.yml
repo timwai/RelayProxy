@@ -9,6 +9,7 @@ on:
       - "windows/RelayProxy.Native/**"
       - "agent/app/**"
       - "agent/routing/**"
+      - "internal/config/**"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -22,6 +23,7 @@ on:
       - "windows/RelayProxy.Native/**"
       - "agent/app/**"
       - "agent/routing/**"
+      - "internal/config/**"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -54,6 +56,7 @@ jobs:
             agent/app/status_capabilities_test.go
             agent/routing/dialer.go
             agent/routing/dialer_test.go
+            internal/config/config.go
             agent/bridge/bridge.go
             agent/gui/web.go
             agent/gui/web_test.go

@@ -58,3 +58,8 @@ Thumbs.db
 /android/local.properties
 /android/app/libs/*.aar
 /android/app/libs/*-sources.jar
+
+# Wails React frontend
+/agent/gui/frontend/node_modules/
+/agent/gui/react_dist/*
+!/agent/gui/react_dist/README.txt

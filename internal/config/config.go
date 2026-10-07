@@ -39,6 +39,12 @@ type ServerConfig struct {
 		HeartbeatSec            int `yaml:"heartbeat_sec"`
 		MaxConnectionsPerDevice int `yaml:"max_connections_per_device"`
 		MaxConnections          int `yaml:"max_connections"` // global tunnel sessions
+		Bandwidth               struct {
+			UpMbps                  int  `yaml:"up_mbps"`   // server -> agent per-client cap; 0 = unlimited
+			DownMbps                int  `yaml:"down_mbps"` // agent -> server per-client cap; 0 = unlimited
+			IgnoreClientBandwidth   bool `yaml:"ignore_client_bandwidth"`
+			DisableLossCompensation bool `yaml:"disable_loss_compensation"`
+		} `yaml:"bandwidth"`
 	} `yaml:"tunnel"`
 
 	RDP struct {
@@ -108,6 +114,11 @@ type AgentConfigFile struct {
 
 	Transport struct {
 		Mode string `yaml:"mode"` // "auto", "quic_only", "tcp_only"
+		Bandwidth struct {
+			UpMbps                  int  `yaml:"up_mbps"`   // local agent -> peer target; 0 = BBR
+			DownMbps                int  `yaml:"down_mbps"` // desired peer -> agent target; 0 = BBR
+			DisableLossCompensation bool `yaml:"disable_loss_compensation"`
+		} `yaml:"bandwidth"`
 	} `yaml:"transport"`
 
 	Mode string `yaml:"-"` // runtime-only capability view; grants come from the server

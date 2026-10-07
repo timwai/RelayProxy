@@ -20,6 +20,7 @@ public sealed partial class MainWindow : Window
     private readonly Dictionary<string, SpeedTestResultDto> _speedTests = new(StringComparer.Ordinal);
     private readonly HashSet<string> _dirtyPages = new(StringComparer.Ordinal);
     private List<ConnectionDto> _connectionCache = [];
+    private List<LogEntryDto> _logCache = [];
     private List<PushMessageDto> _messageCache = [];
     private AgentConfigDto? _config;
     private List<RoutingRuleDto> _routingRules = [];
@@ -852,10 +853,59 @@ public sealed partial class MainWindow : Window
                 DiagPathText.Text = path;
                 DiagConnectionsText.Text = diag.Connections.Count.ToString();
             }
-            LogsTextBox.Text = string.Join(Environment.NewLine, logs.Select(x => $"{x.Timestamp} {x.Message}"));
+            _logCache = logs;
+            RenderLogs();
             DiagnosticsBar.IsOpen = false;
         }
         catch (Exception ex) { ShowInfo(DiagnosticsBar, "诊断读取失败", ex.Message, InfoBarSeverity.Warning); }
+    }
+
+    private void LogSearch_Changed(object sender, TextChangedEventArgs e) => RenderLogs();
+
+    private void RenderLogs()
+    {
+        if (LogsTextBox is null) return;
+        var search = LogSearchBox?.Text?.Trim() ?? "";
+        var lines = _logCache
+            .Where(x => string.IsNullOrWhiteSpace(search) ||
+                        x.Timestamp.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
+                        x.Message.Contains(search, StringComparison.CurrentCultureIgnoreCase))
+            .Select(x => $"{x.Timestamp} {x.Message}");
+        LogsTextBox.Text = string.Join(Environment.NewLine, lines);
+    }
+
+    private void CopyLogs_Click(object sender, RoutedEventArgs e)
+    {
+        var package = new DataPackage();
+        package.SetText(LogsTextBox.Text ?? "");
+        Clipboard.SetContent(package);
+        ShowInfo(DiagnosticsBar, "日志已复制", string.IsNullOrWhiteSpace(LogSearchBox.Text) ? "已复制当前日志。" : "已复制当前搜索结果。", InfoBarSeverity.Success);
+    }
+
+    private async void ExportLogs_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "RelayProxy");
+            Directory.CreateDirectory(downloads);
+            var path = Path.Combine(downloads, $"relayproxy-logs-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+            await File.WriteAllTextAsync(path, LogsTextBox.Text ?? "");
+            ShowInfo(DiagnosticsBar, "日志已导出", path, InfoBarSeverity.Success);
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    ArgumentList = { "/select,", path },
+                    UseShellExecute = true
+                });
+            }
+            catch { }
+        }
+        catch (Exception ex)
+        {
+            ShowInfo(DiagnosticsBar, "导出日志失败", ex.Message, InfoBarSeverity.Error);
+        }
     }
 
     private async void CollectDiagnostics_Click(object sender, RoutedEventArgs e)
@@ -1188,7 +1238,7 @@ public sealed partial class MainWindow : Window
     private async void RefreshDiagnostics_Click(object sender, RoutedEventArgs e) => await RefreshDiagnosticsAsync();
     private async void ClearLogs_Click(object sender, RoutedEventArgs e)
     {
-        try { await App.AgentApi.ClearLogsAsync(); LogsTextBox.Text = ""; ShowInfo(DiagnosticsBar, "日志已清空", "", InfoBarSeverity.Success); }
+        try { await App.AgentApi.ClearLogsAsync(); _logCache.Clear(); RenderLogs(); ShowInfo(DiagnosticsBar, "日志已清空", "", InfoBarSeverity.Success); }
         catch (Exception ex) { ShowInfo(DiagnosticsBar, "清空失败", ex.Message, InfoBarSeverity.Error); }
     }
     private async void DisconnectRdp_Click(object sender, RoutedEventArgs e)

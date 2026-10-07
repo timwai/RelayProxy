@@ -90,10 +90,11 @@ func buildReactWailsAssets(opts Options) (string, string, fstest.MapFS, bool, er
 	mainInject := "<script src=\"/wails/runtime.js\" type=\"module\"></script>" +
 		"<script src=\"/wails-bridge.js\"></script>"
 	mainHTML = strings.Replace(mainHTML, "<head>", "<head>"+mainInject, 1)
+	mica := supportsMicaBackdrop()
 	mainHTML = strings.Replace(
 		mainHTML,
 		"<html lang=\"zh-CN\" data-theme-mode=\"system\">",
-		"<html lang=\"zh-CN\""+classAttr+" data-theme-mode=\""+mode+"\" data-theme=\""+map[bool]string{true: "dark", false: "light"}[dark]+"\">",
+		"<html lang=\"zh-CN\""+classAttr+" data-theme-mode=\""+mode+"\" data-theme=\""+map[bool]string{true: "dark", false: "light"}[dark]+"\" data-mica=\""+map[bool]string{true: "1", false: "0"}[mica]+"\">",
 		1,
 	)
 	return mainHTML, connections, files, true, nil

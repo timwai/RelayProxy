@@ -153,7 +153,7 @@ func (h *PublicPushHandler) handleChannelPush(w http.ResponseWriter, req *http.R
 			return ""
 		}(),
 		Popup:     classification.Popup,
-		PopupType: classification.Type,
+		PopupType: classification.PopupType,
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := h.db.CreateMessage(message, targets); err != nil {

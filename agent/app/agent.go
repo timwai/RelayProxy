@@ -234,6 +234,7 @@ type AgentStatus struct {
 	DivertDiagnostics   divert.Diagnostics         `json:"divertDiagnostics"`
 	ActiveStreams       int64                      `json:"activeStreams"`
 	ApprovalState       string                     `json:"approvalState"`
+	ApprovedCapabilities []string                   `json:"approvedCapabilities,omitempty"`
 	RDPListenAddr       string                     `json:"rdpListenAddr,omitempty"`
 	RDPTargetID         string                     `json:"rdpTargetId,omitempty"`
 	RDPUDPEnabled       bool                       `json:"rdpUdpEnabled"`
@@ -290,6 +291,7 @@ type Agent struct {
 	handshakeOK       atomic.Bool
 	approvalState     atomic.Pointer[string]
 	approvedMode      string
+	approvedCapabilities []string
 	identityName      string
 	policyRevision    int64
 	proxyExits        []protocol.ProxyExit
@@ -507,6 +509,7 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	a.handshakeOK.Store(false)
 	a.readySession = nil
 	a.approvedMode = ""
+	a.approvedCapabilities = nil
 	oldControl := a.ctrlStream
 	oldRDP := a.rdpConnection
 	oldP2P := a.rdpP2P
@@ -564,6 +567,7 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 			a.readySession = nil
 			a.ctrlStream = nil
 			a.approvedMode = ""
+			a.approvedCapabilities = nil
 			a.handshakeOK.Store(false)
 		}
 		a.mu.Unlock()
@@ -673,6 +677,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.identityName = accepted.IdentityName
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
+	a.approvedCapabilities = append([]string(nil), accepted.ApprovedCapabilities...)
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	if accepted.ProxyExitRevision != 0 {
 		a.proxyExitRevision = accepted.ProxyExitRevision
@@ -1299,6 +1304,7 @@ func (a *Agent) Status() AgentStatus {
 	st := AgentStatus{
 		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName,
 		IdentityName: a.identityName, PolicyRevision: a.policyRevision, Mode: a.approvedMode,
+		ApprovedCapabilities: append([]string(nil), a.approvedCapabilities...),
 		ProxyExits: proxyExitSummaries(a.proxyExits), ProxyExitRevision: a.proxyExitRevision,
 		SOCKS5Running: a.started && a.socksServer != nil,
 		HTTPRunning:   a.started && a.httpServer != nil,

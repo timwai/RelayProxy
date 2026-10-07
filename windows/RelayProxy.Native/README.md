@@ -39,7 +39,7 @@ Microsoft.*              Windows App SDK 自包含依赖
 ...
 ```
 
-`relay-agent-gui.exe` 启动后会寻找同目录 `relay-agent.exe`，并通过 Agent 现有 loopback management API 工作。旧 Wails GUI 不再是默认桌面入口，但暂时保留到原生 GUI 经实际部署验证完成。
+`relay-agent-gui.exe` 启动后会寻找同目录 `relay-agent.exe`，并通过 Agent 现有 loopback management API 工作。旧 Wails GUI 不再是默认桌面入口，但暂时保留到原生 GUI 经实际部署验证完成。默认 `relay-agent.exe` 也不再编译 Wails/WebView2 shell；只有 `relay-agent-wails.exe` 使用 `wailslegacy` build tag。
 
 ## 开发环境
 

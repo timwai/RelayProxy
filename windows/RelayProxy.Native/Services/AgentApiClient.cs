@@ -30,6 +30,7 @@ public sealed class AgentApiClient : IDisposable
     public async Task<List<RdpTargetDto>> GetRdpTargetsAsync(CancellationToken ct = default) => await GetAsync<List<RdpTargetDto>>("api/rdp/targets", ct) ?? [];
     public async Task<List<LogEntryDto>> GetLogsAsync(CancellationToken ct = default) => await GetAsync<List<LogEntryDto>>("api/logs", ct) ?? [];
     public Task<DiagnosticsSnapshotDto?> GetDiagnosticsAsync(CancellationToken ct = default) => GetAsync<DiagnosticsSnapshotDto>("api/diagnostics", ct);
+    public Task<NetworkServiceStatusDto?> GetNetworkServiceStatusAsync(CancellationToken ct = default) => GetAsync<NetworkServiceStatusDto>("api/network-service", ct);
 
     public async Task<SaveResultDto?> SaveConfigAsync(object update, CancellationToken ct = default)
     {
@@ -64,6 +65,20 @@ public sealed class AgentApiClient : IDisposable
         EnsureReady();
         using var response = await _http.PostAsJsonAsync("api/rdp/disconnect", new { }, Json, ct);
         await EnsureMutationAsync(response, ct);
+    }
+
+    public async Task<MutationMessageDto?> RepairNetworkServiceAsync(CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.PostAsJsonAsync("api/network-service/repair", new { }, Json, ct);
+        return await ReadMutationAsync<MutationMessageDto>(response, ct);
+    }
+
+    public async Task<MutationMessageDto?> UninstallNetworkServiceAsync(CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.DeleteAsync("api/network-service", ct);
+        return await ReadMutationAsync<MutationMessageDto>(response, ct);
     }
 
     public async Task SetAutostartAsync(bool enabled, CancellationToken ct = default)

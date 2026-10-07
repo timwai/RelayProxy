@@ -18,15 +18,18 @@ import (
 )
 
 const (
-	footerMagic   = "RELAYPROXY_GUI4!"
-	lzmsAlgorithm = 5
+	footerMagic                 = "RELAYPROXY_GUI4!"
+	lzmsAlgorithm               = 5
+	compressInfoClassBlockSize = 1
+	lzmsBlockSize       uint32 = 64 * 1024 * 1024
 )
 
 var (
 	cabinetDLL       = syscall.NewLazyDLL("cabinet.dll")
-	createCompressor = cabinetDLL.NewProc("CreateCompressor")
-	compressProc     = cabinetDLL.NewProc("Compress")
-	closeCompressor  = cabinetDLL.NewProc("CloseCompressor")
+	createCompressor       = cabinetDLL.NewProc("CreateCompressor")
+	setCompressorInformation = cabinetDLL.NewProc("SetCompressorInformation")
+	compressProc           = cabinetDLL.NewProc("Compress")
+	closeCompressor        = cabinetDLL.NewProc("CloseCompressor")
 )
 
 func main() {
@@ -124,6 +127,17 @@ func compressLZMS(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("Windows LZMS CreateCompressor failed: %v", callErr)
 	}
 	defer closeCompressor.Call(handle)
+
+	blockSize := lzmsBlockSize
+	ok, _, callErr = setCompressorInformation.Call(
+		handle,
+		uintptr(compressInfoClassBlockSize),
+		uintptr(unsafe.Pointer(&blockSize)),
+		unsafe.Sizeof(blockSize),
+	)
+	if ok == 0 {
+		return nil, fmt.Errorf("Windows LZMS set 64 MiB block size failed: %v", callErr)
+	}
 
 	var needed uintptr
 	_, _, firstErr := compressProc.Call(

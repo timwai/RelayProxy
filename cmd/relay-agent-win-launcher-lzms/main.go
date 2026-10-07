@@ -26,14 +26,17 @@ const (
 	cacheReadyFile     = ".ready"
 	cacheProductDir    = "RelayProxy"
 	cacheNativeHostDir = "native-host-lzms-experiment"
-	lzmsAlgorithm      = 5
+	lzmsAlgorithm               = 5
+	compressInfoClassBlockSize   = 1
+	lzmsBlockSize         uint32 = 64 * 1024 * 1024
 )
 
 var (
 	cabinetDLL         = syscall.NewLazyDLL("cabinet.dll")
-	createDecompressor = cabinetDLL.NewProc("CreateDecompressor")
-	decompressProc     = cabinetDLL.NewProc("Decompress")
-	closeDecompressor  = cabinetDLL.NewProc("CloseDecompressor")
+	createDecompressor       = cabinetDLL.NewProc("CreateDecompressor")
+	setDecompressorInformation = cabinetDLL.NewProc("SetDecompressorInformation")
+	decompressProc           = cabinetDLL.NewProc("Decompress")
+	closeDecompressor        = cabinetDLL.NewProc("CloseDecompressor")
 )
 
 type payloadDescriptor struct {
@@ -208,6 +211,17 @@ func decompressLZMS(compressed, output []byte) (int, error) {
 		return 0, fmt.Errorf("Windows LZMS CreateDecompressor 失败: %v", callErr)
 	}
 	defer closeDecompressor.Call(handle)
+
+	blockSize := lzmsBlockSize
+	ok, _, callErr = setDecompressorInformation.Call(
+		handle,
+		uintptr(compressInfoClassBlockSize),
+		uintptr(unsafe.Pointer(&blockSize)),
+		unsafe.Sizeof(blockSize),
+	)
+	if ok == 0 {
+		return 0, fmt.Errorf("Windows LZMS 设置 64 MiB block size 失败: %v", callErr)
+	}
 
 	var written uintptr
 	ok, _, callErr = decompressProc.Call(

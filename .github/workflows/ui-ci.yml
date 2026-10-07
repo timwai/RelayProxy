@@ -83,6 +83,16 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        if: runner.os == 'Windows'
+        with:
+          node-version: "22"
+      - name: Build Windows Wails React frontend
+        if: runner.os == 'Windows'
+        working-directory: agent/gui/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
       - name: Check PowerShell build script syntax
         if: runner.os == 'Windows'
         shell: powershell

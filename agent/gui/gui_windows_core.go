@@ -10,7 +10,7 @@ import "relayproxy/agent/bridge"
 func Run(_ *bridge.UIBridge, _ Options) error { return ErrUnsupported }
 
 func ShowStartupError(_ error, _ string) {}
-func ActivateExistingWindow()                {}
-func RequestQuit()                           {}
-func RequestRestart() error                  { return ErrUnsupported }
-func WaitForRestartParent()                  {}
+func ActivateExistingWindow()            {}
+func RequestQuit()                       {}
+func RequestRestart() error              { return ErrUnsupported }
+func WaitForRestartParent()              {}

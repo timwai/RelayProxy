@@ -689,48 +689,38 @@ func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 	}
 }
 
-func TestNegotiatedBrutalRates(t *testing.T) {
+func TestAuthorizedBrutalRates(t *testing.T) {
 	tests := []struct {
 		name                       string
-		transport                  tunnel.TransportType
 		hello                      protocol.DeviceHello
 		cfg                        GatewayConfig
 		wantClientTx, wantServerTx uint64
 	}{
 		{
-			name:         "quic clamps both directions",
-			transport:    tunnel.TransportQUIC,
-			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
-			cfg:          GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
+			name:  "caps both directions",
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg:   GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
 			wantClientTx: 10_000_000, wantServerTx: 30_000_000,
 		},
 		{
-			name:         "zero server caps leave client hints unchanged",
-			transport:    tunnel.TransportQUIC,
-			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			name:  "zero server caps leave client hints unchanged",
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
 			wantClientTx: 20_000_000, wantServerTx: 40_000_000,
 		},
 		{
-			name:         "one zero hint keeps that direction on BBR",
-			transport:    tunnel.TransportQUIC,
-			hello:        protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
+			name:  "one zero hint keeps that direction on BBR",
+			hello: protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
 			wantServerTx: 40_000_000,
 		},
 		{
-			name:      "TLS never negotiates Brutal",
-			transport: tunnel.TransportTLS,
-			hello:     protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
-		},
-		{
-			name:      "server can ignore client bandwidth",
-			transport: tunnel.TransportQUIC,
-			hello:     protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
-			cfg:       GatewayConfig{IgnoreClientBandwidth: true},
+			name:  "server can ignore client bandwidth",
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg:   GatewayConfig{IgnoreClientBandwidth: true},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			clientTx, serverTx := negotiatedBrutalRates(tt.transport, tt.hello, tt.cfg)
+			clientTx, serverTx := authorizedBrutalRates(tt.hello, tt.cfg)
 			if clientTx != tt.wantClientTx || serverTx != tt.wantServerTx {
 				t.Fatalf("rates client/server=%d/%d, want %d/%d", clientTx, serverTx, tt.wantClientTx, tt.wantServerTx)
 			}
@@ -796,6 +786,9 @@ func TestQUICHandshakeNegotiatesAndAppliesBrutal(t *testing.T) {
 	serverSession, ok := sessions.Get("client")
 	if !ok || serverSession == nil {
 		t.Fatal("authenticated QUIC session was not registered")
+	}
+	if serverSession.BrutalUploadBPS != 15_000_000 || serverSession.BrutalDownloadBPS != 25_000_000 {
+		t.Fatalf("session Brutal profile=%d/%d", serverSession.BrutalUploadBPS, serverSession.BrutalDownloadBPS)
 	}
 	diagnostics := tunnel.DiagnoseSession(serverSession.Tunnel)
 	if diagnostics == nil || diagnostics.QUIC == nil {

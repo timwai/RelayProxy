@@ -10,6 +10,11 @@ on:
       - "agent/app/**"
       - "agent/routing/**"
       - "internal/config/**"
+      - "internal/messageutil/**"
+      - "server/api/message_rule_v2.go"
+      - "server/api/push.go"
+      - "server/repository/db.go"
+      - "server/repository/message_rules_test.go"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -24,6 +29,11 @@ on:
       - "agent/app/**"
       - "agent/routing/**"
       - "internal/config/**"
+      - "internal/messageutil/**"
+      - "server/api/message_rule_v2.go"
+      - "server/api/push.go"
+      - "server/repository/db.go"
+      - "server/repository/message_rules_test.go"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -57,6 +67,12 @@ jobs:
             agent/routing/dialer.go
             agent/routing/dialer_test.go
             internal/config/config.go
+            internal/messageutil/message_rules.go
+            internal/messageutil/message_rules_test.go
+            server/api/message_rule_v2.go
+            server/api/push.go
+            server/repository/db.go
+            server/repository/message_rules_test.go
             agent/bridge/bridge.go
             agent/gui/web.go
             agent/gui/web_test.go
@@ -126,6 +142,13 @@ jobs:
         if: matrix.runtime == 'win-x64'
         shell: pwsh
         run: go test ./agent/routing -run TestRoutingProxyPauseRejectsTCPAndUDPProxyDials -count=1
+
+      - name: Test message rule popup types
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          go test ./internal/messageutil -run 'TestMessageRule.*PopupType|TestValidateMessageRuleRejectsInvalidPopupType' -count=1
+          go test ./server/repository -run TestLegacyMessageRulesPreservePopupType -count=1
 
       - name: Validate PowerShell release scripts
         shell: pwsh

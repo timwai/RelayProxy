@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	bitsPerMegabit           = 1_000_000
-	MaxConfiguredRateBPS     = uint64(1_000_000) * bitsPerMegabit / 8
+	bitsPerMegabit       = 1_000_000
+	MaxConfiguredRateBPS = uint64(1_000_000) * bitsPerMegabit / 8
 )
 
 // UseBrutal installs Hysteria's fixed-rate Brutal congestion controller.

@@ -20,6 +20,8 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	manager := session.NewManager()
 	client := newTestDevice("client", "owner", protocol.CapabilityProxyClient)
 	exit := newTestDevice("exit", "owner", protocol.CapabilityProxyExit)
+	client.BrutalUploadBPS = 10_000_000
+	client.BrutalDownloadBPS = 50_000_000
 	client.Capabilities = append(client.Capabilities, protocol.CapabilityProxyStreamResume)
 	exit.Capabilities = append(exit.Capabilities, protocol.CapabilityProxyStreamResume)
 	manager.Register(client)
@@ -51,7 +53,7 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	if !hasCapability(ack.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
 		t.Fatalf("authenticated exit capability missing from client ack: %#v", ack.PeerCapabilities)
 	}
-	if ack.BrutalUploadBPS != 12_500_000 || ack.BrutalDownloadBPS != 125_000_000_000 {
+	if ack.BrutalUploadBPS != 10_000_000 || ack.BrutalDownloadBPS != 50_000_000 {
 		t.Fatalf("client ack Brutal rates=%d/%d", ack.BrutalUploadBPS, ack.BrutalDownloadBPS)
 	}
 	if len(deliveries) != 1 || deliveries[0].device != exit.DeviceID || deliveries[0].msg.Type != protocol.P2PControlConnectOffer {

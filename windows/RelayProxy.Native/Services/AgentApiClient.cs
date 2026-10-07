@@ -18,27 +18,71 @@ public sealed class AgentApiClient : IDisposable
         var builder = new UriBuilder(managementUrl) { Query = "", Fragment = "", Path = "/" };
         BaseAddress = builder.Uri;
         _http.BaseAddress = BaseAddress;
-        _http.Timeout = TimeSpan.FromSeconds(10);
+        _http.Timeout = TimeSpan.FromSeconds(15);
         _http.DefaultRequestHeaders.Authorization = string.IsNullOrWhiteSpace(token) ? null : new AuthenticationHeaderValue("Bearer", token);
     }
 
     public Task<AgentStatusDto?> GetStatusAsync(CancellationToken ct = default) => GetAsync<AgentStatusDto>("api/status", ct);
+    public Task<AgentConfigDto?> GetConfigAsync(CancellationToken ct = default) => GetAsync<AgentConfigDto>("api/config", ct);
     public async Task<List<ProxyExitDto>> GetExitsAsync(CancellationToken ct = default) => await GetAsync<List<ProxyExitDto>>("api/proxy/exits", ct) ?? [];
     public Task<TrafficSnapshotDto?> GetConnectionsAsync(CancellationToken ct = default) => GetAsync<TrafficSnapshotDto>("api/connections", ct);
     public async Task<List<PushMessageDto>> GetMessagesAsync(CancellationToken ct = default) => await GetAsync<List<PushMessageDto>>("api/messages", ct) ?? [];
+    public async Task<List<RdpTargetDto>> GetRdpTargetsAsync(CancellationToken ct = default) => await GetAsync<List<RdpTargetDto>>("api/rdp/targets", ct) ?? [];
+
+    public async Task<SaveResultDto?> SaveConfigAsync(object update, CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.PutAsJsonAsync("api/config", update, Json, ct);
+        return await ReadMutationAsync<SaveResultDto>(response, ct);
+    }
+
+    public async Task<SaveResultDto?> ReloadConfigAsync(CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.PostAsJsonAsync("api/reload", new { }, Json, ct);
+        return await ReadMutationAsync<SaveResultDto>(response, ct);
+    }
 
     public async Task SelectExitAsync(string exitId, CancellationToken ct = default)
     {
         EnsureReady();
         using var response = await _http.PostAsJsonAsync("api/select-exit", new { exitId }, Json, ct);
-        response.EnsureSuccessStatusCode();
+        await EnsureMutationAsync(response, ct);
+    }
+
+    public async Task<RdpConnectResponseDto?> ConnectRdpAsync(string targetId, bool autoLaunch = true, CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.PostAsJsonAsync("api/rdp/connect", new { targetId, autoLaunch }, Json, ct);
+        return await ReadMutationAsync<RdpConnectResponseDto>(response, ct);
+    }
+
+    public async Task DisconnectRdpAsync(CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.PostAsJsonAsync("api/rdp/disconnect", new { }, Json, ct);
+        await EnsureMutationAsync(response, ct);
+    }
+
+    public async Task SetAutostartAsync(bool enabled, CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.PostAsJsonAsync("api/autostart", new { enabled }, Json, ct);
+        await EnsureMutationAsync(response, ct);
     }
 
     public async Task ClearMessagesAsync(CancellationToken ct = default)
     {
         EnsureReady();
         using var response = await _http.DeleteAsync("api/messages", ct);
-        response.EnsureSuccessStatusCode();
+        await EnsureMutationAsync(response, ct);
+    }
+
+    public async Task ClearConnectionsAsync(CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.DeleteAsync("api/connections", ct);
+        await EnsureMutationAsync(response, ct);
     }
 
     public async Task QuitAsync(CancellationToken ct = default)
@@ -54,6 +98,31 @@ public sealed class AgentApiClient : IDisposable
         response.EnsureSuccessStatusCode();
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         return await JsonSerializer.DeserializeAsync<T>(stream, Json, ct);
+    }
+
+    private static async Task<T?> ReadMutationAsync<T>(HttpResponseMessage response, CancellationToken ct)
+    {
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode) throw new InvalidOperationException(ReadError(body, response.StatusCode.ToString()));
+        return JsonSerializer.Deserialize<T>(body, Json);
+    }
+
+    private static async Task EnsureMutationAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var body = await response.Content.ReadAsStringAsync(ct);
+        throw new InvalidOperationException(ReadError(body, response.StatusCode.ToString()));
+    }
+
+    private static string ReadError(string body, string fallback)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var message)) return message.GetString() ?? fallback;
+        }
+        catch { }
+        return string.IsNullOrWhiteSpace(body) ? fallback : body.Trim();
     }
 
     private void EnsureReady()

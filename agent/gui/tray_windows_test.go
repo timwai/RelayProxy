@@ -26,7 +26,7 @@ func TestTrayStatusLabels(t *testing.T) {
 		if exit != "出口：Tokyo" {
 			t.Fatalf("exit=%q", exit)
 		}
-		if path != "路径：—" {
+		if path != "路径：quic" {
 			t.Fatalf("path=%q", path)
 		}
 		if !strings.Contains(tooltip, "Tokyo") || !strings.Contains(tooltip, "已连接") {
@@ -63,4 +63,3 @@ func TestTrayStatusLabelsIncludePathAndLatency(t *testing.T) {
 		t.Fatalf("path=%q", path)
 	}
 }
-

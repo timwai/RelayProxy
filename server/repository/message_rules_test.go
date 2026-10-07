@@ -152,7 +152,6 @@ func TestLegacyDisabledDefaultBecomesDisabledV2Rule(t *testing.T) {
 	}
 }
 
-
 func TestLegacyMessageRulesPreservePopupType(t *testing.T) {
 	popup := true
 	rules := LegacyMessageRules(false, []VerificationRule{{

@@ -169,9 +169,9 @@ func (b *BrutalSender) updateAckRate(currentTimestamp int64) {
 	}
 }
 
-func (b *BrutalSender) InSlowStart() bool { return false }
-func (b *BrutalSender) InRecovery() bool  { return false }
-func (b *BrutalSender) MaybeExitSlowStart() {}
+func (b *BrutalSender) InSlowStart() bool                                 { return false }
+func (b *BrutalSender) InRecovery() bool                                  { return false }
+func (b *BrutalSender) MaybeExitSlowStart()                               {}
 func (b *BrutalSender) OnRetransmissionTimeout(packetsRetransmitted bool) {}
 
 func (b *BrutalSender) canPrintAckRate(currentTimestamp int64) bool {

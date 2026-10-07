@@ -25,11 +25,11 @@ const (
 )
 
 var (
-	cabinetDLL                 = syscall.NewLazyDLL("cabinet.dll")
-	createCompressor           = cabinetDLL.NewProc("CreateCompressor")
-	setCompressorInformation   = cabinetDLL.NewProc("SetCompressorInformation")
-	compressProc               = cabinetDLL.NewProc("Compress")
-	closeCompressor            = cabinetDLL.NewProc("CloseCompressor")
+	cabinetDLL               = syscall.NewLazyDLL("cabinet.dll")
+	createCompressor         = cabinetDLL.NewProc("CreateCompressor")
+	setCompressorInformation = cabinetDLL.NewProc("SetCompressorInformation")
+	compressProc             = cabinetDLL.NewProc("Compress")
+	closeCompressor          = cabinetDLL.NewProc("CloseCompressor")
 )
 
 func main() {

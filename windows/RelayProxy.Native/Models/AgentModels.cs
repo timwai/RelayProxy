@@ -93,3 +93,17 @@ public sealed class PushMessageDto
     [JsonPropertyName("source")] public string Source { get; set; } = "";
     [JsonPropertyName("createdAt")] public long CreatedAt { get; set; }
 }
+
+
+public sealed class LogEntryDto
+{
+    [JsonPropertyName("timestamp")] public string Timestamp { get; set; } = "";
+    [JsonPropertyName("message")] public string Message { get; set; } = "";
+}
+
+public sealed class DiagnosticsSnapshotDto
+{
+    [JsonPropertyName("sampledAt")] public DateTimeOffset SampledAt { get; set; }
+    [JsonPropertyName("status")] public AgentStatusDto Status { get; set; } = new();
+    [JsonPropertyName("connections")] public List<ConnectionDto> Connections { get; set; } = [];
+}

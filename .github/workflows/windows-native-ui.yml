@@ -489,9 +489,9 @@ jobs:
           go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher-zstd
           if ($LASTEXITCODE -ne 0) { throw "zstd launcher build failed" }
 
-          $host = (Resolve-Path ".\lean\host\RelayProxy.NativeHost.exe").Path
+          $nativeHost = (Resolve-Path ".\lean\host\RelayProxy.NativeHost.exe").Path
           $exe = ".\zstd\single\RelayProxy-agent-windows-amd64-zstd.exe"
-          go run .\scripts\pack-windows-launcher-zstd.go -launcher $stub -payload $host -output $exe
+          go run .\scripts\pack-windows-launcher-zstd.go -launcher $stub -payload $nativeHost -output $exe
           if ($LASTEXITCODE -ne 0) { throw "zstd launcher packing failed" }
 
           $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)

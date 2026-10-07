@@ -47,6 +47,21 @@ jobs:
         with:
           go-version-file: "go.mod"
 
+      - name: Validate PowerShell release script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ".\scripts\build.ps1"),
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            throw "scripts/build.ps1 has syntax errors"
+          }
+
       - name: Restore
         shell: pwsh
         run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }}

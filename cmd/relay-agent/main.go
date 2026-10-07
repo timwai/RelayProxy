@@ -247,7 +247,7 @@ func main() {
 		NetworkMode:           networkMode,
 		DivertConfig:          cfgFile.DivertConfig(),
 		Routing:               cfgFile.Routing,
-		InsecureTLS:           *insecureFlag,
+		InsecureTLS:           *insecureFlag || cfgFile.Server.InsecureTLS,
 		PlainTCP:              !cfgFile.IsServerTLSEnabled(),
 		ConnectTimeout:        10 * time.Second,
 	}

@@ -186,7 +186,7 @@ func TestTicketAuthenticatorRequiresCurrentAuthorizationRevision(t *testing.T) {
 	current.SetCurrentValidator(func(_ context.Context, got protocol.PublicDirectTicketClaims) (Authorization, error) {
 		validated = got
 		return Authorization{
-			RelayPolicy: testDirectRelayPolicy(t),
+			RelayPolicy:     testDirectRelayPolicy(t),
 			BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: 50_000_000,
 		}, nil
 	})

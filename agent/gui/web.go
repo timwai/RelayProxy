@@ -228,6 +228,16 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
 	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
+	mux.HandleFunc("POST /api/proxy/pause", func(rw http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Paused bool `json:"paused"`
+		}
+		if err := decodeWebJSON(rw, r, &in); err != nil {
+			return
+		}
+		w.bridge.SetProxyPaused(in.Paused)
+		writeWebJSON(rw, w.bridge.GetStatus())
+	})
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
 	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
 	mux.HandleFunc("POST /api/rdp/disconnect", func(rw http.ResponseWriter, _ *http.Request) {

@@ -38,6 +38,7 @@ public sealed partial class MainWindow : Window
     private string _lastApprovalState = "";
     private string _lastExitIssueKey = "";
     private string _page = "overview";
+    private bool _proxyPaused;
 
     public MainWindow()
     {
@@ -226,7 +227,12 @@ public sealed partial class MainWindow : Window
             if (status is null) return;
             OverviewBar.IsOpen = false;
             ConnectionStateText.Text = status.Connected ? "已连接" : "未连接";
-            ConnectionMetaText.Text = status.Connected ? $"{status.Transport.ToUpperInvariant()} · {status.DeviceName} · {status.IdentityName}" : "正在连接 Relay Server";
+            _proxyPaused = status.ProxyPaused;
+            PauseProxyButton.Content = status.ProxyPaused ? "恢复代理" : "暂停代理";
+            PauseProxyButton.IsEnabled = status.Connected;
+            ConnectionMetaText.Text = status.Connected
+                ? $"{status.Transport.ToUpperInvariant()} · {status.DeviceName} · {status.IdentityName}{(status.ProxyPaused ? " · 代理已暂停" : "")}"
+                : "正在连接 Relay Server";
             ApprovalText.Text = status.ApprovalState switch { "approved" => "已审批", "pending" => "待审批", "rejected" => "已拒绝", "revoked" => "已撤销", _ => "未知" };
             _lastDeviceId = status.DeviceId;
             if (!string.Equals(_lastApprovalState, status.ApprovalState, StringComparison.OrdinalIgnoreCase))
@@ -1464,6 +1470,33 @@ public sealed partial class MainWindow : Window
         {
             RestartAgentButton.Content = original;
             RestartAgentButton.IsEnabled = true;
+        }
+    }
+
+    private async void PauseProxy_Click(object sender, RoutedEventArgs e)
+    {
+        var next = !_proxyPaused;
+        PauseProxyButton.IsEnabled = false;
+        try
+        {
+            var status = await App.AgentApi.SetProxyPausedAsync(next);
+            _proxyPaused = status?.ProxyPaused ?? next;
+            await RefreshOverviewAsync();
+            ShowInfo(
+                OverviewBar,
+                _proxyPaused ? "代理已暂停" : "代理已恢复",
+                _proxyPaused
+                    ? "新的透明代理 PROXY 流量会临时直连；SOCKS5 / HTTP 的新代理请求会明确拒绝。现有连接自然结束，控制连接、消息、RDP 与 Exit 不受影响。"
+                    : "新的代理流量已恢复按当前路由和出口策略处理。",
+                InfoBarSeverity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowInfo(OverviewBar, next ? "暂停代理失败" : "恢复代理失败", ex.Message, InfoBarSeverity.Error);
+        }
+        finally
+        {
+            PauseProxyButton.IsEnabled = true;
         }
     }
 

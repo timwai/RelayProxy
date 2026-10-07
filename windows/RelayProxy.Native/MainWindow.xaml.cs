@@ -141,18 +141,12 @@ public sealed partial class MainWindow : Window
             ["connections"] = ConnectionsView, ["messages"] = MessagesView, ["diagnostics"] = DiagnosticsView, ["settings"] = SettingsView,
         };
         foreach (var view in map.Values) view.Visibility = Visibility.Collapsed;
-        PlaceholderView.Visibility = Visibility.Collapsed;
-        if (map.TryGetValue(tag, out var selected)) selected.Visibility = Visibility.Visible;
+        if (map.TryGetValue(tag, out var selected))
+            selected.Visibility = Visibility.Visible;
         else
         {
-            PlaceholderView.Visibility = Visibility.Visible;
-            (PlaceholderTitle.Text, PlaceholderDescription.Text) = tag switch
-            {
-                "devices" => ("身份与设备", "设备审批、能力与身份隔离页面将在下一批直接读取 Agent 与服务端授权状态。"),
-                "exitshare" => ("本机出口共享", "Exit 开关、互联网/私网/回环权限、上游代理与 ACL 将继续迁移为 WinUI 原生设置页。"),
-                "diagnostics" => ("诊断与日志", "控制连接、P2P/Public Direct、透明代理、连接监控与诊断采集将迁移为原生诊断页。"),
-                _ => ("模块", "正在迁移到 WinUI 3 原生实现。")
-            };
+            _page = "overview";
+            OverviewView.Visibility = Visibility.Visible;
         }
 
         if (tag is "connection" or "proxy" or "exitshare" or "routing" or "settings") _ = LoadConfigAsync();

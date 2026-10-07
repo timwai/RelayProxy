@@ -255,7 +255,7 @@ class VpnAppSelectionActivity : Activity() {
         titleCol.addView(titleView)
 
         countSubtitle = TextView(this).apply {
-            text = intent.getStringExtra(EXTRA_SUBTITLE) ?: "选择需要由 VPN 代理或排除的已安装应用"
+            text = intent.getStringExtra(EXTRA_SUBTITLE) ?: "支持用户应用、系统应用和无桌面入口的系统服务包"
             textSize = 11.5f
             setTextColor(UiPalette.muted)
             setPadding(0, dp(2), 0, 0)
@@ -290,7 +290,7 @@ class VpnAppSelectionActivity : Activity() {
         searchContainer.addView(searchIcon)
 
         searchInput = EditText(this).apply {
-            hint = "搜索应用名称或包名…"
+            hint = "搜索应用、系统服务或包名…"
             textSize = 13.5f
             setTextColor(UiPalette.ink)
             setHintTextColor(UiPalette.placeholder)
@@ -441,6 +441,14 @@ class VpnAppSelectionActivity : Activity() {
         categoryRow.addView(chipCategorySystemService, marginStart(8))
         categoryScroll.addView(categoryRow)
         root.addView(categoryScroll)
+        root.addView(
+            TextView(this).apply {
+                text = "系统服务按包选择；共享 UID 的多个包可能由 Android 作为同一 VPN 流量主体处理。"
+                textSize = 10.5f
+                setTextColor(UiPalette.placeholder)
+                setPadding(dp(16), 0, dp(16), dp(6))
+            }
+        )
 
         // 4. 应用列表视窗 (带有舒适内边距)
         appList = LinearLayout(this).apply {

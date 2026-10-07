@@ -189,7 +189,7 @@
                 <TextBlock Text="最终权限仍受服务端设备能力与身份策略约束。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
               </StackPanel></Border>
               <Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="上游代理" FontSize="16" FontWeight="SemiBold"/>
-                <ComboBox x:Name="ExitUpstreamModeCombo" Header="访问方式" HorizontalAlignment="Stretch"><ComboBoxItem Tag="" Content="本机直连"/><ComboBoxItem Tag="socks5" Content="SOCKS5 上游"/><ComboBoxItem Tag="http" Content="HTTP 上游"/></ComboBox>
+                <ComboBox x:Name="ExitUpstreamModeCombo" Header="访问方式" HorizontalAlignment="Stretch" SelectionChanged="ExitUpstreamMode_Changed"><ComboBoxItem Tag="" Content="本机直连"/><ComboBoxItem Tag="socks5" Content="SOCKS5 上游"/><ComboBoxItem Tag="http" Content="HTTP 上游"/></ComboBox>
                 <TextBox x:Name="ExitUpstreamAddressBox" Header="上游地址" PlaceholderText="host:port"/>
                 <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions><TextBox x:Name="ExitUpstreamUserBox" Header="用户名"/><PasswordBox x:Name="ExitUpstreamPasswordBox" Grid.Column="1" Header="密码"/></Grid>
                 <TextBlock Text="上游代理模式只支持 TCP；UDP 会明确拒绝，不会绕过代理直连。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>

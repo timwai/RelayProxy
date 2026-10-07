@@ -406,6 +406,7 @@ public sealed partial class MainWindow : Window
             ExitUpstreamAddressBox.Text = cfg.ExitUpstream.Address;
             ExitUpstreamUserBox.Text = cfg.ExitUpstream.Username;
             ExitUpstreamPasswordBox.Password = cfg.ExitUpstream.Password;
+            UpdateExitUpstreamFields();
             SelectComboTag(AccessModeCombo, cfg.AccessMode);
             AccessDomainsBox.Text = string.Join(Environment.NewLine, cfg.AccessDomains);
             AccessCidrsBox.Text = string.Join(Environment.NewLine, cfg.AccessCidrs);
@@ -1902,17 +1903,19 @@ public sealed partial class MainWindow : Window
         if (_config is null) { await LoadConfigAsync(); if (_config is null) return; }
         try
         {
+            var socksListen = HostValue(SocksListenBox, "SOCKS5 地址");
+            var httpListen = HostValue(HttpListenBox, "HTTP 地址");
             var socksPort = SafeInt(SocksPortBox, 1080);
             var httpPort = SafeInt(HttpPortBox, 8080);
-            if (SocksEnabledSwitch.IsOn && HttpEnabledSwitch.IsOn && SocksListenBox.Text.Trim() == HttpListenBox.Text.Trim() && socksPort == httpPort)
+            if (SocksEnabledSwitch.IsOn && HttpEnabledSwitch.IsOn && string.Equals(socksListen, httpListen, StringComparison.OrdinalIgnoreCase) && socksPort == httpPort)
                 throw new InvalidOperationException("SOCKS5 与 HTTP 不能监听同一个地址和端口。");
             var result = await App.AgentApi.SaveConfigAsync(new
             {
                 revision = _config.Revision,
                 proxy = new
                 {
-                    socks5Enabled = SocksEnabledSwitch.IsOn, socks5Listen = SocksListenBox.Text.Trim(), socks5Port = socksPort,
-                    httpEnabled = HttpEnabledSwitch.IsOn, httpListen = HttpListenBox.Text.Trim(), httpPort
+                    socks5Enabled = SocksEnabledSwitch.IsOn, socks5Listen, socks5Port = socksPort,
+                    httpEnabled = HttpEnabledSwitch.IsOn, httpListen, httpPort
                 },
                 network = new { mode = TransparentProxySwitch.IsOn ? "divert" : "", excludeProcesses = SplitList(ExcludeProcessesBox.Text) }
             });
@@ -1924,11 +1927,26 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowInfo(ProxyBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
     }
 
+    private void ExitUpstreamMode_Changed(object sender, SelectionChangedEventArgs e) => UpdateExitUpstreamFields();
+
+    private void UpdateExitUpstreamFields()
+    {
+        var enabled = !string.IsNullOrWhiteSpace(ComboTag(ExitUpstreamModeCombo, ""));
+        ExitUpstreamAddressBox.IsEnabled = enabled;
+        ExitUpstreamUserBox.IsEnabled = enabled;
+        ExitUpstreamPasswordBox.IsEnabled = enabled;
+    }
+
     private async void SaveExitShare_Click(object sender, RoutedEventArgs e)
     {
         if (_config is null) { await LoadConfigAsync(); if (_config is null) return; }
         try
         {
+            var upstreamMode = ComboTag(ExitUpstreamModeCombo, "");
+            var upstreamAddress = ExitUpstreamAddressBox.Text.Trim();
+            if (!string.IsNullOrWhiteSpace(upstreamMode))
+                upstreamAddress = EndpointValue(ExitUpstreamAddressBox, "上游代理地址");
+
             var result = await App.AgentApi.SaveConfigAsync(new
             {
                 revision = _config.Revision,
@@ -1940,8 +1958,8 @@ public sealed partial class MainWindow : Window
                     allowLoopback = AllowLoopbackCheck.IsChecked == true,
                     upstream = new
                     {
-                        mode = ComboTag(ExitUpstreamModeCombo, ""),
-                        address = ExitUpstreamAddressBox.Text.Trim(),
+                        mode = upstreamMode,
+                        address = upstreamAddress,
                         username = ExitUpstreamUserBox.Text.Trim(),
                         password = ExitUpstreamPasswordBox.Password
                     },
@@ -2523,6 +2541,37 @@ public sealed partial class MainWindow : Window
             throw new InvalidOperationException("Identity ID 必须是服务端生成的 16 位小写字母数字组合。");
 
         IdentityBox.Text = value;
+        return value;
+    }
+
+    private static string EndpointValue(TextBox box, string label)
+    {
+        var value = box.Text.Trim();
+        if (string.IsNullOrWhiteSpace(value) || value.Contains("://") || value.Any(char.IsWhiteSpace))
+            throw new InvalidOperationException($"{label}必须使用 host:port 格式。");
+
+        string host;
+        string portText;
+        if (value.StartsWith('['))
+        {
+            var close = value.IndexOf(']');
+            if (close <= 1 || close + 2 >= value.Length || value[close + 1] != ':')
+                throw new InvalidOperationException($"{label}必须使用 host:port 格式；IPv6 请使用 [addr]:port。");
+            host = value[1..close];
+            portText = value[(close + 2)..];
+        }
+        else
+        {
+            var colon = value.LastIndexOf(':');
+            if (colon <= 0 || value.IndexOf(':') != colon)
+                throw new InvalidOperationException($"{label}必须使用 host:port 格式；IPv6 请使用 [addr]:port。");
+            host = value[..colon];
+            portText = value[(colon + 1)..];
+        }
+
+        if (string.IsNullOrWhiteSpace(host) || host.Contains('/') || host.Contains('\\') || !int.TryParse(portText, out var port) || port is < 1 or > 65535)
+            throw new InvalidOperationException($"{label}必须使用有效的 host:port，端口范围 1-65535。");
+
         return value;
     }
 

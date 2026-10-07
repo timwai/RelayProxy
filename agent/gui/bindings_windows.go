@@ -200,6 +200,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		AccessCIDRs                 []string            `json:"accessCidrs"`
 		ExitUpstream                any                 `json:"exitUpstream"`
 		P2P                         any                 `json:"p2p"`
+		PublicDirectAdvertise       string              `json:"publicDirectAdvertise"`
 		NetworkMode                 string              `json:"networkMode"`
 		IsAutostart                 bool                `json:"isAutostart"`
 		MinimizeToTray              bool                `json:"minimizeToTray"`
@@ -242,6 +243,7 @@ func (s *WailsService) GetConfig() (string, error) {
 			"idleTimeoutSec": cfg.P2P.IdleTimeoutSec, "maxExitSessions": cfg.P2P.MaxExitSessions,
 			"fallback": cfg.P2P.Fallback == nil || *cfg.P2P.Fallback,
 		},
+		PublicDirectAdvertise:      cfg.Direct.Public.Advertise,
 		NetworkMode:                 cfg.Network.Mode,
 		IsAutostart:                 a.bridge.IsAutoStart(),
 		MinimizeToTray:              cfg.IsMinimizeToTray(),

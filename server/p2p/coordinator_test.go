@@ -43,6 +43,7 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 		Type: protocol.P2PControlConnectRequest, ExitDeviceID: exit.DeviceID,
 		CertFingerprint: "sha256:client",
 		Candidates:      []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:52133", Priority: 100}},
+		BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: ^uint64(0),
 	})
 	if ack.Type != protocol.P2PControlLeaseAck || ack.SessionID == 0 || len(ack.SessionToken) != 32 {
 		t.Fatalf("unexpected connect ack: %#v", ack)
@@ -50,12 +51,18 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	if !hasCapability(ack.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
 		t.Fatalf("authenticated exit capability missing from client ack: %#v", ack.PeerCapabilities)
 	}
+	if ack.BrutalUploadBPS != 12_500_000 || ack.BrutalDownloadBPS != 125_000_000_000 {
+		t.Fatalf("client ack Brutal rates=%d/%d", ack.BrutalUploadBPS, ack.BrutalDownloadBPS)
+	}
 	if len(deliveries) != 1 || deliveries[0].device != exit.DeviceID || deliveries[0].msg.Type != protocol.P2PControlConnectOffer {
 		t.Fatalf("offer was not delivered to exit: %#v", deliveries)
 	}
 	offer := deliveries[0].msg
 	if offer.PeerFingerprint != "sha256:client" || offer.RendezvousAddress != "relay.example.com:3478" {
 		t.Fatalf("unexpected offer: %#v", offer)
+	}
+	if offer.BrutalUploadBPS != ack.BrutalUploadBPS || offer.BrutalDownloadBPS != ack.BrutalDownloadBPS {
+		t.Fatalf("offer Brutal rates=%d/%d, ack=%d/%d", offer.BrutalUploadBPS, offer.BrutalDownloadBPS, ack.BrutalUploadBPS, ack.BrutalDownloadBPS)
 	}
 	if !hasCapability(offer.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
 		t.Fatalf("authenticated client capability missing from exit offer: %#v", offer.PeerCapabilities)

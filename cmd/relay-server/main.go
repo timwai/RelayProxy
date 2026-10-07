@@ -187,22 +187,27 @@ func main() {
 			gw.RefreshProxyExitInventories()
 		}
 	})
-	publicDirectController.SetTicketValidator(func(_ context.Context, exitDeviceID string, validation protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
+	publicDirectController.SetTicketValidator(func(_ context.Context, exitDeviceID string, validation protocol.PublicDirectTicketValidationRequest) (serverdirect.CurrentTicketAuthorization, error) {
 		if strings.TrimSpace(validation.ClientDeviceID) == "" ||
 			strings.TrimSpace(validation.ExitDeviceID) != strings.TrimSpace(exitDeviceID) {
-			return nil, errors.New("public direct ticket scope is invalid")
+			return serverdirect.CurrentTicketAuthorization{}, errors.New("public direct ticket scope is invalid")
 		}
 		authorization, err := db.PublicDirectAuthorization(validation.ClientDeviceID, exitDeviceID)
 		if err != nil {
-			return nil, err
+			return serverdirect.CurrentTicketAuthorization{}, err
 		}
 		if !authorization.Allowed ||
 			authorization.PolicyRevision != validation.PolicyRevision ||
 			authorization.AuthorizationRevision != validation.AuthorizationRevision {
-			return nil, errors.New("public direct authorization revision is stale")
+			return serverdirect.CurrentTicketAuthorization{}, errors.New("public direct authorization revision is stale")
 		}
 		policy := relayACL.Policy()
-		return &policy, nil
+		current := serverdirect.CurrentTicketAuthorization{RelayPolicy: &policy}
+		if clientSession, ok := sessionMgr.Get(validation.ClientDeviceID); ok && clientSession != nil {
+			current.BrutalUploadBPS = clientSession.BrutalUploadBPS
+			current.BrutalDownloadBPS = clientSession.BrutalDownloadBPS
+		}
+		return current, nil
 	})
 	defer publicDirectController.Close()
 

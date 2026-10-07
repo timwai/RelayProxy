@@ -54,6 +54,9 @@ type Manager struct {
 	lowPowerMaxSessions  int
 	networkCheckInterval time.Duration
 	networkSignature     func() string
+	brutalUploadBPS       uint64
+	brutalDownloadBPS     uint64
+	disableLossCompensation bool
 
 	mu               sync.Mutex
 	sessions         map[uint64]*Session
@@ -85,7 +88,10 @@ type QUICManagerOptions struct {
 	LowPowerIdleTimeout  time.Duration
 	LowPowerMaxSessions  int
 	NetworkCheckInterval time.Duration
-	NetworkSignature     func() string
+	NetworkSignature        func() string
+	BrutalUploadBPS         uint64
+	BrutalDownloadBPS       uint64
+	DisableLossCompensation bool
 }
 
 type Session struct {
@@ -113,6 +119,7 @@ type Session struct {
 	lastRTTMs        int64
 	lastBytesUp      uint64
 	lastBytesDown    uint64
+	brutalTxBPS      uint64
 	lastUsed         atomic.Int64
 	closed           chan struct{}
 	closeOnce        sync.Once
@@ -203,6 +210,9 @@ func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rende
 	if options.NetworkSignature != nil {
 		m.networkSignature = options.NetworkSignature
 	}
+	m.brutalUploadBPS = options.BrutalUploadBPS
+	m.brutalDownloadBPS = options.BrutalDownloadBPS
+	m.disableLossCompensation = options.DisableLossCompensation
 	if m.networkSignature != nil {
 		m.networkSig = m.networkSignature()
 	}
@@ -339,6 +349,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	response, err := m.send(ctx, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectRequest, ExitDeviceID: exitDeviceID,
 		Candidates: append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
+		BrutalUploadBPS: m.brutalUploadBPS, BrutalDownloadBPS: m.brutalDownloadBPS,
 	})
 	if err != nil {
 		if endpoint != nil {
@@ -370,6 +381,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	}
 	item.mu.Lock()
 	item.clientRole = true
+	item.brutalTxBPS = response.BrutalUploadBPS
 	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
 	item.lastUsed.Store(time.Now().UnixMilli())
 	item.mu.Unlock()
@@ -446,6 +458,7 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 	}
 	item.mu.Lock()
 	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
+	item.brutalTxBPS = message.BrutalDownloadBPS
 	item.mu.Unlock()
 	item.setPeer(message.Candidates, message.PeerFingerprint)
 	item.setPeerCapabilities(message.PeerCapabilities)
@@ -835,6 +848,7 @@ func (s *Session) establish(clientRole bool) {
 	endpoint := s.endpoint
 	candidates := append([]protocol.P2PCandidate(nil), s.peerCandidates...)
 	fingerprint := s.peerFingerprint
+	brutalTxBPS := s.brutalTxBPS
 	s.mu.Unlock()
 
 	conn, err := endpoint.UDPConn()
@@ -872,6 +886,9 @@ func (s *Session) establish(clientRole bool) {
 		return
 	}
 	if direct.QUICSession != nil {
+		if brutalTxBPS > 0 {
+			tunnel.UseBrutal(direct.QUICSession, brutalTxBPS, s.manager.disableLossCompensation)
+		}
 		// Native datagrams are a property of the direct QUIC transport itself.
 		// Overlay capabilities are server-authoritative and are added without
 		// clearing the already-negotiated datagram capability.

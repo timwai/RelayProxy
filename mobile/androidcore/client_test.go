@@ -294,3 +294,22 @@ func TestAndroidMessageQueueDrainsOnce(t *testing.T) {
 		t.Fatalf("message queue was not drained: %s", got)
 	}
 }
+
+
+func TestAndroidBrutalBandwidthNormalization(t *testing.T) {
+	cfg, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","brutalUpMbps":120,"brutalDownMbps":450,"disableLossCompensation":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.BrutalUpMbps != 120 || cfg.BrutalDownMbps != 450 || !cfg.DisableLossCompensation {
+		t.Fatalf("Brutal config=%+v", cfg)
+	}
+	for _, raw := range []string{
+		`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","brutalUpMbps":-1}`,
+		`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","brutalDownMbps":1000001}`,
+	} {
+		if _, err := normalizeConfig(raw); err == nil {
+			t.Fatalf("invalid Brutal config accepted: %s", raw)
+		}
+	}
+}

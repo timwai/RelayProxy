@@ -108,3 +108,28 @@ public sealed class DiagnosticsSnapshotDto
     [JsonPropertyName("status")] public AgentStatusDto Status { get; set; } = new();
     [JsonPropertyName("connections")] public List<ConnectionDto> Connections { get; set; } = [];
 }
+
+
+public sealed class SpeedTestApiResponseDto
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("result")] public SpeedTestResultDto? Result { get; set; }
+}
+
+public sealed class SpeedTestResultDto
+{
+    [JsonPropertyName("exitId")] public string ExitId { get; set; } = "";
+    [JsonPropertyName("startedAt")] public DateTimeOffset StartedAt { get; set; }
+    [JsonPropertyName("finishedAt")] public DateTimeOffset FinishedAt { get; set; }
+    [JsonPropertyName("upload")] public SpeedTestDirectionDto Upload { get; set; } = new();
+    [JsonPropertyName("download")] public SpeedTestDirectionDto Download { get; set; } = new();
+}
+
+public sealed class SpeedTestDirectionDto
+{
+    [JsonPropertyName("path")] public string Path { get; set; } = "";
+    [JsonPropertyName("bytes")] public ulong Bytes { get; set; }
+    [JsonPropertyName("durationMs")] public double DurationMs { get; set; }
+    [JsonPropertyName("bytesPerSecond")] public double BytesPerSecond { get; set; }
+    [JsonPropertyName("megabitsPerSecond")] public double MegabitsPerSecond { get; set; }
+}

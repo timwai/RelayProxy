@@ -80,6 +80,13 @@ public sealed class AgentApiClient : IDisposable
         await EnsureMutationAsync(response, ct);
     }
 
+    public async Task<AgentStatusDto?> SetProxyPausedAsync(bool paused, CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.PostAsJsonAsync("api/proxy/pause", new { paused }, Json, ct);
+        return await ReadMutationAsync<AgentStatusDto>(response, ct);
+    }
+
     public async Task<RdpConnectResponseDto?> ConnectRdpAsync(string targetId, bool autoLaunch = true, CancellationToken ct = default)
     {
         EnsureReady();

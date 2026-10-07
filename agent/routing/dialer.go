@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -25,7 +26,10 @@ type RoutingDialer struct {
 	// Set before accepting connections.
 	Traffic       *traffic.Registry
 	LookupProcess func(string, netip.AddrPort, netip.AddrPort) (uint32, string, error)
+	ProxyPaused   func() bool
 }
+
+var ErrProxyPaused = errors.New("routing: proxy client is paused")
 
 // NewRoutingDialer creates a RoutingDialer that wraps the given tunnel dialer.
 func NewRoutingDialer(engine *Engine, tunnel proxy.TunnelDialer, policyMu ...*sync.RWMutex) *RoutingDialer {
@@ -148,6 +152,9 @@ func (d *RoutingDialer) dialTCP(ctx context.Context, exitNodeID, host string, po
 		return nil, fmt.Errorf("connection to %s:%d blocked by routing rule", host, port)
 
 	case ActionProxy:
+		if d.ProxyPaused != nil && d.ProxyPaused() {
+			return nil, ErrProxyPaused
+		}
 		eid := exitNodeID
 		if ruleExitID != "" {
 			eid = ruleExitID
@@ -211,6 +218,9 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 		return nil, fmt.Errorf("connection to %s:%d blocked by routing rule", host, port)
 
 	case ActionProxy:
+		if d.ProxyPaused != nil && d.ProxyPaused() {
+			return nil, ErrProxyPaused
+		}
 		eid := exitNodeID
 		if ruleExitID != "" {
 			eid = ruleExitID

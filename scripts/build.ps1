@@ -167,7 +167,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent build failed: $GoArch" }
 
             Reset-GoHostEnvironment
-            & dotnet restore $project -r $Runtime
+            & dotnet restore $project -r $Runtime -p:PublishTrimmed=true
             if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed: $Runtime" }
 
             & dotnet publish $project `
@@ -183,7 +183,9 @@ try {
                 -p:PublishSingleFile=true `
                 -p:EnableCompressionInSingleFile=true `
                 -p:PublishReadyToRun=false `
-                -p:PublishTrimmed=false `
+                -p:PublishTrimmed=true `
+                -p:TrimMode=partial `
+                -p:SuppressTrimAnalysisWarnings=false `
                 -p:EnableMsixTooling=true `
                 -p:IncludeAllContentForSelfExtract=true `
                 -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -211,7 +213,7 @@ try {
             Write-Host "  SIZE  native single EXE: $([math]::Round($nativeSize / 1MB, 2)) MB" -ForegroundColor Green
             Write-Host "  SIZE  embedded Go Core: $([math]::Round($coreSize / 1MB, 2)) MB"
             Write-Host "  SIZE  UI + .NET + Windows App SDK payload: ~$([math]::Round($runtimePayloadSize / 1MB, 2)) MB"
-            Write-Host "  MODE  single-file compression enabled; ReadyToRun disabled" -ForegroundColor DarkGray
+            Write-Host "  MODE  single-file compression + partial trimming enabled; ReadyToRun disabled" -ForegroundColor DarkGray
         }
         finally {
             $env:GOOS = $savedGoos

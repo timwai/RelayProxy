@@ -35,7 +35,7 @@ try {
     if (-not (Test-Path $CorePath)) { throw "Embedded Go Agent core missing: $CorePath" }
 
     Write-Host "[native-ui] Restore $Runtime"
-    dotnet restore $Project -r $Runtime
+    dotnet restore $Project -r $Runtime -p:PublishTrimmed=true
     if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed" }
 
     if (Test-Path $OutDir) {
@@ -53,7 +53,9 @@ try {
         -p:PublishSingleFile=true `
         -p:EnableCompressionInSingleFile=true `
         -p:PublishReadyToRun=false `
-        -p:PublishTrimmed=false `
+        -p:PublishTrimmed=true `
+        -p:TrimMode=partial `
+        -p:SuppressTrimAnalysisWarnings=false `
         -p:EnableMsixTooling=true `
         -p:IncludeAllContentForSelfExtract=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -80,7 +82,7 @@ try {
     Write-Host "[native-ui] Single EXE: $NativeExe ($([math]::Round($Size / 1MB, 2)) MB)" -ForegroundColor Green
     Write-Host "[native-ui] Embedded Go Core: $([math]::Round($CoreSize / 1MB, 2)) MB"
     Write-Host "[native-ui] UI + .NET + Windows App SDK payload: ~$([math]::Round($RuntimePayloadSize / 1MB, 2)) MB"
-    Write-Host "[native-ui] Single-file assembly compression: enabled; ReadyToRun: disabled" -ForegroundColor DarkGray
+    Write-Host "[native-ui] Single-file compression: enabled; ReadyToRun: disabled; partial trimming: enabled" -ForegroundColor DarkGray
 }
 finally {
     $env:GOOS = $oldGoos

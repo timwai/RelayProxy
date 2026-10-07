@@ -21,10 +21,12 @@ on:
       - "cmd/relay-agent/**"
       - "cmd/relay-agent-win-launcher/**"
       - "cmd/relay-agent-win-launcher-zstd/**"
+      - "cmd/relay-agent-win-launcher-lzms/**"
       - "scripts/fetch-windivert.go"
       - "scripts/build-windows-native.ps1"
       - "scripts/pack-windows-launcher.ps1"
       - "scripts/pack-windows-launcher-zstd.go"
+      - "scripts/pack-windows-launcher-lzms.go"
       - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
   pull_request:
@@ -44,10 +46,12 @@ on:
       - "cmd/relay-agent/**"
       - "cmd/relay-agent-win-launcher/**"
       - "cmd/relay-agent-win-launcher-zstd/**"
+      - "cmd/relay-agent-win-launcher-lzms/**"
       - "scripts/fetch-windivert.go"
       - "scripts/build-windows-native.ps1"
       - "scripts/pack-windows-launcher.ps1"
       - "scripts/pack-windows-launcher-zstd.go"
+      - "scripts/pack-windows-launcher-lzms.go"
       - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
 
@@ -101,7 +105,10 @@ jobs:
             cmd/relay-agent-win-launcher-zstd/main.go
             cmd/relay-agent-win-launcher-zstd/messagebox_windows.go
             cmd/relay-agent-win-launcher-zstd/messagebox_other.go
+            cmd/relay-agent-win-launcher-lzms/main.go
+            cmd/relay-agent-win-launcher-lzms/messagebox_windows.go
             scripts/pack-windows-launcher-zstd.go
+            scripts/pack-windows-launcher-lzms.go
             scripts/fetch-windivert.go
           )
           bad="$(gofmt -l "${files[@]}")"
@@ -938,4 +945,65 @@ jobs:
         with:
           name: RelayProxy-agent-win-x64-outer-only-experiment
           path: .\outer-only\single\RelayProxy-agent-windows-amd64-outer-only.exe
+          if-no-files-found: error
+
+      - name: Repack outer-only x64 payload with Windows LZMS
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\lzms\single" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+
+          $stub = ".\lzms\relayproxy-launcher-lzms.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher-lzms
+          if ($LASTEXITCODE -ne 0) { throw "LZMS launcher build failed" }
+
+          $nativeHost = (Resolve-Path ".\outer-only\host\RelayProxy.NativeHost.exe").Path
+          $exe = ".\lzms\single\RelayProxy-agent-windows-amd64-lzms.exe"
+          go run .\scripts\pack-windows-launcher-lzms.go -launcher $stub -payload $nativeHost -output $exe
+          if ($LASTEXITCODE -ne 0) { throw "LZMS launcher packing failed" }
+
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          $stubMb = [math]::Round((Get-Item $stub).Length / 1MB, 2)
+          Write-Host "[lzms-size] rename-safe EXE: $finalMb MB"
+          Write-Host "[lzms-size] launcher stub: $stubMb MB"
+
+          $lzmsCache = Join-Path $env:LOCALAPPDATA "RelayProxy\native-host-lzms-experiment"
+          Remove-Item $lzmsCache -Recurse -Force -ErrorAction SilentlyContinue
+          $renamed = ".\lzms\single\user-renamed-lzms-client.exe"
+          Copy-Item $exe $renamed -Force
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "LZMS renamed EXE exited during startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "[lzms-smoke] fresh-cache arbitrarily renamed LZMS EXE stayed alive for 8 seconds." -ForegroundColor Green
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+          }
+
+          @"
+          ### win-x64 Windows LZMS payload experiment
+          **Rename-safe EXE:** $finalMb MiB
+          **Launcher stub:** $stubMb MiB
+
+          Uses the Windows built-in LZMS Compression API from cabinet.dll, so no compression runtime DLL is bundled.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.runtime == 'win-x64'
+        with:
+          name: RelayProxy-agent-win-x64-lzms-experiment
+          path: .\lzms\single\RelayProxy-agent-windows-amd64-lzms.exe
           if-no-files-found: error

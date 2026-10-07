@@ -61,7 +61,6 @@ func TestQUICDiagnosticsRateSamplingAndLossPercent(t *testing.T) {
 	}
 }
 
-
 func TestQUICDiagnosticsTrackBrutalController(t *testing.T) {
 	client, server := sessionPair(t, "quic")
 	if !UseBrutal(server, 12_500_000, false) {

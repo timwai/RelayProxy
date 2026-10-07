@@ -7,12 +7,22 @@ on:
       - feat/windows-native-gui
     paths:
       - "windows/RelayProxy.Native/**"
+      - "agent/bridge/bridge.go"
+      - "agent/gui/web.go"
+      - "agent/startup/**"
+      - "cmd/relay-agent/**"
+      - "scripts/fetch-windivert.go"
       - "scripts/build-windows-native.ps1"
       - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
   pull_request:
     paths:
       - "windows/RelayProxy.Native/**"
+      - "agent/bridge/bridge.go"
+      - "agent/gui/web.go"
+      - "agent/startup/**"
+      - "cmd/relay-agent/**"
+      - "scripts/fetch-windivert.go"
       - "scripts/build-windows-native.ps1"
       - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
@@ -46,6 +56,23 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
+
+      - name: Check native bridge Go formatting
+        shell: pwsh
+        run: |
+          $files = @(
+            ".\agent\bridge\bridge.go",
+            ".\agent\gui\web.go",
+            ".\agent\startup\startup_windows.go",
+            ".\agent\startup\startup_other.go",
+            ".\cmd\relay-agent\main.go",
+            ".\scripts\fetch-windivert.go"
+          )
+          $bad = & gofmt -l $files
+          if ($bad) {
+            $bad | ForEach-Object { Write-Error "gofmt required: $_" }
+            throw "Go formatting check failed"
+          }
 
       - name: Validate PowerShell release script
         shell: pwsh

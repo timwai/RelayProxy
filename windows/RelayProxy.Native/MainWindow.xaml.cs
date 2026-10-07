@@ -612,12 +612,21 @@ public sealed partial class MainWindow : Window
     {
         if (ConnectionsPanel is null) return;
         var search = ConnectionSearchBox?.Text?.Trim() ?? "";
+        var statusFilter = (ConnectionStatusFilter?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "all";
+        var protocolFilter = (ConnectionProtocolFilter?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "all";
+        var actionFilter = (ConnectionActionFilter?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "all";
         var pathFilter = (ConnectionPathFilter?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "all";
         var sort = (ConnectionSortCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "newest";
 
         IEnumerable<ConnectionDto> query = _connectionCache;
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(c => ConnectionSearchText(c).Contains(search, StringComparison.CurrentCultureIgnoreCase));
+        if (statusFilter != "all")
+            query = query.Where(c => ConnectionStatusValue(c) == statusFilter);
+        if (protocolFilter != "all")
+            query = query.Where(c => string.Equals(c.Protocol, protocolFilter, StringComparison.OrdinalIgnoreCase));
+        if (actionFilter != "all")
+            query = query.Where(c => ConnectionActionValue(c) == actionFilter);
         if (pathFilter != "all")
             query = query.Where(c => ConnectionPathValue(c) == pathFilter);
 
@@ -645,11 +654,35 @@ public sealed partial class MainWindow : Window
         }
 
         if (visible.Count == 0)
-            ConnectionsPanel.Children.Add(Card(TwoLine("没有匹配的连接", "调整搜索条件、路径筛选或排序后重试。")));
+            ConnectionsPanel.Children.Add(Card(TwoLine("没有匹配的连接", "调整搜索、状态、协议、动作、路径或排序条件后重试。")));
     }
 
     private static string ConnectionSearchText(ConnectionDto c) =>
         string.Join("\n", c.ProcessName, c.Process, c.Host, c.Ip, c.Port.ToString(), c.Protocol, c.Action, c.Rule, c.ExitId, c.Path, c.State);
+
+    private static string ConnectionStatusValue(ConnectionDto c)
+    {
+        var state = (c.State ?? "").Trim().ToLowerInvariant();
+        if (state.Contains("block") || state.Contains("reject") || state.Contains("deny") ||
+            string.Equals(c.Action, "REJECT", StringComparison.OrdinalIgnoreCase))
+            return "blocked";
+        if (state.Contains("connect") || state.Contains("dial") || state.Contains("handshake") || state.Contains("pending"))
+            return "connecting";
+        if (state.Contains("closed") || state.Contains("ended") || state.Contains("done") ||
+            state.Contains("failed") || state.Contains("error") || state.Contains("timeout"))
+            return "ended";
+        return "active";
+    }
+
+    private static string ConnectionActionValue(ConnectionDto c)
+    {
+        return (c.Action ?? "").Trim().ToUpperInvariant() switch
+        {
+            "DIRECT" => "direct",
+            "REJECT" => "reject",
+            _ => "proxy"
+        };
+    }
 
     private static string ConnectionPathValue(ConnectionDto c)
     {
@@ -1708,6 +1741,12 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void CollectConnectionsDiagnostics_Click(object sender, RoutedEventArgs e)
+    {
+        SelectNavigation("diagnostics");
+        CollectDiagnostics_Click(sender, e);
+    }
+
     private async void CollectDiagnostics_Click(object sender, RoutedEventArgs e)
     {
         if (_diagnosticCollecting) return;
@@ -1882,6 +1921,30 @@ public sealed partial class MainWindow : Window
             await LoadConfigAsync();
         }
         catch (Exception ex) { ShowInfo(ExitShareBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
+    }
+
+    private async void DiscardRouting_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_dirtyPages.Contains("routing"))
+        {
+            ShowInfo(RoutingBar, "没有未保存的修改", "", InfoBarSeverity.Informational);
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = "放弃分流规则修改",
+            Content = "将恢复为当前已保存的路由模式、默认动作和规则顺序。",
+            PrimaryButtonText = "放弃修改",
+            CloseButtonText = "继续编辑",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+        _dirtyPages.Remove("routing");
+        await LoadConfigAsync();
+        ShowInfo(RoutingBar, "已放弃修改", "表单已恢复为当前保存配置。", InfoBarSeverity.Success);
     }
 
     private async void SaveRouting_Click(object sender, RoutedEventArgs e)

@@ -1,6 +1,6 @@
 # RelayProxy Windows Native GUI
 
-Windows 客户端的 WinUI 3 原生 GUI。默认发行文件名仍是 `relay-agent-gui.exe`，但界面已经不再依赖 Wails / WebView2。网络核心继续由同目录 `relay-agent.exe --no-gui` 提供，WinUI 只负责原生界面、托盘、弹窗和配置。
+Windows 客户端的 WinUI 3 原生 GUI。正式 Agent 下载采用单 EXE：WinUI、.NET、Windows App SDK 运行时和对应架构的 Go Core 都打进同一个可执行文件；首次启动由 WinUI/.NET single-file 机制释放运行依赖后，GUI 再启动内嵌的 `relay-agent.exe --no-gui`。界面不依赖 Wails / WebView2。
 
 ## 当前功能
 
@@ -28,18 +28,26 @@ Android 独有的 Wi-Fi / 移动数据优先、移动网络故障切换等“And
 
 ## 发行布局
 
-正式 Windows 目录现在使用：
+面向普通 Windows 用户的主产物是单文件：
 
 ```text
-relay-agent-gui.exe      WinUI 3 原生 GUI（默认双击入口）
-relay-agent.exe          Go Agent Core / CLI
+RelayProxy-agent-windows-amd64.exe
+RelayProxy-agent-windows-arm64.exe
+```
+
+这两个文件分别对应 x64 / ARM64，内部已经包含 WinUI 3、.NET、Windows App SDK 运行时、图标和对应架构的 Go Core。WinUI single-file 在首次启动时会把运行依赖释放到 Windows 临时提取目录；它是“单文件分发”，不是“零落盘运行”。
+
+完整目录版仍保留给 CLI、诊断和迁移期回退：
+
+```text
+relay-agent-gui.exe      同一套 WinUI 单文件 GUI
+relay-agent.exe          独立 Go Agent Core / CLI
 relay-agent-wails.exe    旧 Wails GUI，仅迁移期回退
-relay-agent-gui.dll      原生 GUI 主程序集
-Microsoft.*              Windows App SDK 自包含依赖
+relay-server.exe         Windows Server
 ...
 ```
 
-`relay-agent-gui.exe` 启动后会寻找同目录 `relay-agent.exe`，为当前 GUI 会话创建一个独立的随机 loopback 管理端口与随机 token；这条私有通道不会修改或复用用户配置的 Web 管理监听地址、端口和 token。Network Service 安装 / 修复 / 卸载接口也只注册在这条原生私有通道上，不会暴露给普通浏览器管理页。旧 Wails GUI 不再是默认桌面入口，但暂时保留到原生 GUI 经实际部署验证完成。默认 `relay-agent.exe` 也不再编译 Wails/WebView2 shell；只有 `relay-agent-wails.exe` 使用 `wailslegacy` build tag。
+单文件版启动后会使用 bundle 中释放出来的 `relay-agent.exe`，为当前 GUI 会话创建一个独立的随机 loopback 管理端口与随机 token；这条私有通道不会修改或复用用户配置的 Web 管理监听地址、端口和 token。Network Service 安装 / 修复 / 卸载接口也只注册在这条原生私有通道上，不会暴露给普通浏览器管理页。旧 Wails GUI 不再是默认桌面入口，但暂时保留到原生 GUI 经实际部署验证完成。默认独立 `relay-agent.exe` 也不编译 Wails/WebView2 shell；只有 `relay-agent-wails.exe` 使用 `wailslegacy` build tag。
 
 ## 开发环境
 
@@ -56,7 +64,7 @@ dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r win-x64
 dotnet build .\windows\RelayProxy.Native\RelayProxy.Native.csproj -c Debug -r win-x64 -p:Platform=x64
 ```
 
-生成可运行的原生客户端目录：
+生成可直接分发的单 EXE：
 
 ```powershell
 .\scripts\build-windows-native.ps1 -Configuration Release -Runtime win-x64
@@ -68,4 +76,4 @@ dotnet build .\windows\RelayProxy.Native\RelayProxy.Native.csproj -c Debug -r wi
 .\scripts\build.ps1 -Version 1.0.0
 ```
 
-完整构建会让 `relay-agent-gui.exe` 成为 WinUI 3 原生客户端，并额外保留 `relay-agent-wails.exe` 作为回退。
+完整构建会额外生成根目录的 `RelayProxy-agent-windows-amd64.exe` / `RelayProxy-agent-windows-arm64.exe` 单文件下载产物；平台目录仍保留独立 Core、Server 和 `relay-agent-wails.exe` 供 CLI、调试与回退。

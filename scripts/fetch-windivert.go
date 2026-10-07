@@ -10,9 +10,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,27 +42,63 @@ func packageAgent(directory, destination string) error {
 	if !strings.EqualFold(filepath.Ext(destination), ".zip") {
 		return fmt.Errorf("agent archive must have a .zip extension")
 	}
-	files := []string{
-		"relay-agent-gui.exe", "relay-agent.exe", "configs/relay-agent.yaml",
-		"windivert/WinDivert.dll", "windivert/WinDivert64.sys",
-		"windivert/LICENSE", "windivert/README", "windivert/VERSION", "windivert/SOURCE.txt",
-	}
-	for _, name := range []string{"brand/icon.ico", "brand/logo.png", "README.md"} {
-		if _, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name))); err == nil {
-			files = append(files, name)
-		} else if !os.IsNotExist(err) {
+
+	// WinUI 3 self-contained publishing produces the executable plus managed
+	// assemblies, Windows App SDK runtime files, PRI resources and Assets.
+	// Keep the client package future-proof by taking the whole Windows client
+	// directory and excluding only the server-specific artifacts.
+	files := make([]string, 0, 64)
+	if err := filepath.WalkDir(directory, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(directory, path)
+		if err != nil {
 			return err
 		}
-	}
-	for _, name := range files {
-		info, err := os.Stat(filepath.Join(directory, filepath.FromSlash(name)))
+		name := filepath.ToSlash(relative)
+		switch strings.ToLower(name) {
+		case "relay-server.exe", "configs/relay-server.yaml":
+			return nil
+		}
+		if strings.HasSuffix(strings.ToLower(name), ".zip") {
+			return nil
+		}
+		info, err := entry.Info()
 		if err != nil {
-			return fmt.Errorf("incomplete Windows agent package: %w", err)
+			return err
 		}
 		if !info.Mode().IsRegular() || info.Size() == 0 {
 			return fmt.Errorf("invalid Windows agent package file: %s", name)
 		}
+		files = append(files, name)
+		return nil
+	}); err != nil {
+		return err
 	}
+	sort.Strings(files)
+
+	required := []string{
+		"relay-agent-gui.exe",
+		"relay-agent.exe",
+		"configs/relay-agent.yaml",
+		"windivert/WinDivert.dll",
+		"windivert/WinDivert64.sys",
+		"windivert/LICENSE",
+	}
+	present := make(map[string]struct{}, len(files))
+	for _, name := range files {
+		present[strings.ToLower(name)] = struct{}{}
+	}
+	for _, name := range required {
+		if _, ok := present[strings.ToLower(name)]; !ok {
+			return fmt.Errorf("incomplete Windows agent package: missing %s", name)
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
 		return err
 	}
@@ -70,6 +108,7 @@ func packageAgent(directory, destination string) error {
 	}
 	defer os.Remove(temporary.Name())
 	defer temporary.Close()
+
 	archive := zip.NewWriter(temporary)
 	defer archive.Close()
 	var sums strings.Builder
@@ -110,7 +149,7 @@ func packageAgent(directory, destination string) error {
 	if err := os.Rename(temporary.Name(), destination); err != nil {
 		return err
 	}
-	fmt.Printf("Windows agent + WinDivert package: %s\n", destination)
+	fmt.Printf("Windows native agent + WinDivert package: %s\n", destination)
 	return nil
 }
 

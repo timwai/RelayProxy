@@ -711,6 +711,28 @@ public sealed partial class MainWindow : Window
             AuthorizedExitCountText.Text = exits.Count.ToString();
             AuthorizedRdpCountText.Text = targets.Count.ToString();
 
+            DeviceCapabilitiesPanel.Children.Clear();
+            var approved = new HashSet<string>(status.ApprovedCapabilities, StringComparer.OrdinalIgnoreCase);
+            foreach (var capability in new[]
+            {
+                ("proxy.client", "代理客户端", "可使用授权出口访问网络"),
+                ("proxy.exit", "网络出口", "可作为其他授权设备的 Exit"),
+                ("rdp.controller", "远程桌面控制端", "可发起已授权 RDP 连接"),
+                ("rdp.host", "远程桌面被控端", "可作为 RDP 目标设备"),
+                ("rdp.public", "RDP 公网直连", "允许协商 RDP Public Direct 路径")
+            })
+            {
+                var enabled = approved.Contains(capability.Item1);
+                DeviceCapabilitiesPanel.Children.Add(TwoLine(
+                    $"{(enabled ? "✓" : "—")} {capability.Item2}",
+                    enabled ? $"{capability.Item1} · {capability.Item3}" : $"{capability.Item1} · 未批准"));
+            }
+            DeviceCapabilitiesPanel.Children.Add(TwoLine(
+                $"{(status.ApprovalState == "approved" ? "✓" : "—")} 消息接收",
+                status.ApprovalState == "approved"
+                    ? "审批设备默认可接收服务端推送；消息类型与弹窗由 Message Channel 规则决定"
+                    : "设备尚未处于 approved 状态"));
+
             AuthorizedResourcesPanel.Children.Clear();
             foreach (var exit in exits.OrderByDescending(x => x.Online).ThenBy(x => x.Name))
                 AuthorizedResourcesPanel.Children.Add(Card(TwoLine($"出口 · {(string.IsNullOrWhiteSpace(exit.Name) ? exit.DeviceId : exit.Name)}", $"{(exit.Online ? "在线" : "离线")} · {exit.AuthorizationSource} · {exit.DeviceId}")));

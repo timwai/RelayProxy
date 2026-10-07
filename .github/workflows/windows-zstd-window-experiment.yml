@@ -1,0 +1,142 @@
+name: Windows Zstd Window Experiment
+
+on:
+  push:
+    branches:
+      - feat/windows-native-gui
+    paths:
+      - "scripts/pack-windows-launcher-zstd-window.go"
+      - ".github/workflows/windows-zstd-window-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-zstd-window-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zstd-window:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Restore lean Windows App SDK graph
+        shell: pwsh
+        run: |
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-x64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+
+      - name: Build embedded Go Agent core
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\zstd-window\staging" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w" -o ".\zstd-window\staging\relay-agent.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent core build failed" }
+
+      - name: Publish lean outer-only WinUI host
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\zstd-window\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\zstd-window\single" -Force | Out-Null
+          $core = (Resolve-Path ".\zstd-window\staging\relay-agent.exe").Path
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\zstd-window\host
+          $nativeHost = ".\zstd-window\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "RelayProxy.NativeHost.exe missing" }
+
+      - name: Build zstd launcher
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o ".\zstd-window\launcher.exe" .\cmd\relay-agent-win-launcher-zstd
+          if ($LASTEXITCODE -ne 0) { throw "zstd launcher build failed" }
+
+      - name: Compare zstd windows
+        shell: pwsh
+        run: |
+          $launcher = (Resolve-Path ".\zstd-window\launcher.exe").Path
+          $nativeHost = (Resolve-Path ".\zstd-window\host\RelayProxy.NativeHost.exe").Path
+          $results = @()
+          foreach ($window in @(8, 32, 64, 128)) {
+            $exe = ".\zstd-window\single\RelayProxy-agent-windows-amd64-zstd-${window}m.exe"
+            go run .\scripts\pack-windows-launcher-zstd-window.go -launcher $launcher -payload $nativeHost -output $exe -window-mib $window
+            if ($LASTEXITCODE -ne 0) { throw "zstd window $window MiB packing failed" }
+            $bytes = (Get-Item $exe).Length
+            $mb = [math]::Round($bytes / 1MB, 2)
+            $results += [PSCustomObject]@{ Window = $window; Bytes = $bytes; MB = $mb }
+            Write-Host "[zstd-window-size] $window MiB window -> $mb MiB"
+          }
+          $best = $results | Sort-Object Bytes | Select-Object -First 1
+          Write-Host "[zstd-window-best] $($best.Window) MiB -> $($best.MB) MiB" -ForegroundColor Green
+          $results | ForEach-Object { Write-Host "::notice title=Zstd window::$($_.Window) MiB window = $($_.MB) MiB" }
+
+      - name: Smoke test all zstd windows after arbitrary rename
+        shell: pwsh
+        run: |
+          foreach ($window in @(8, 32, 64, 128)) {
+            $source = (Resolve-Path ".\zstd-window\single\RelayProxy-agent-windows-amd64-zstd-${window}m.exe").Path
+            $renamed = ".\zstd-window\single\renamed-${window}m-client.exe"
+            Copy-Item $source $renamed -Force
+            $process = $null
+            try {
+              $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+              Start-Sleep -Seconds 8
+              $process.Refresh()
+              if ($process.HasExited) {
+                $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+                if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+                throw "zstd $window MiB renamed EXE exited with code $($process.ExitCode)."
+              }
+              Write-Host "[zstd-window-smoke] $window MiB window renamed EXE stayed alive for 8 seconds." -ForegroundColor Green
+            }
+            finally {
+              if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+              Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+              Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+              Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-win-x64-zstd-window-experiments
+          path: .\zstd-window\single\*.exe
+          if-no-files-found: error

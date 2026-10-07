@@ -32,7 +32,8 @@ type ExitRuntimeOptions struct {
 	NetworkCheckInterval    time.Duration
 	VerificationRefresh     time.Duration
 	NetworkSignature        func() string
-	ValidateTicket          TicketCurrentValidator
+	ValidateTicket             TicketCurrentValidator
+	DisableLossCompensation    bool
 }
 
 type ExitRuntime struct {
@@ -89,6 +90,7 @@ func StartExitRuntime(
 		AuthTimeout:             options.AuthTimeout,
 		AuthAttemptsPerMinute:   options.AuthAttemptsPerMinute,
 		MaxConcurrentHandshakes: options.MaxConcurrentHandshakes,
+		DisableLossCompensation: options.DisableLossCompensation,
 	}
 	listener, err := listenExitRuntime(listenerConfig, options.ListenAddress, options.PortStart, options.PortEnd)
 	if err != nil {

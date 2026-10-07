@@ -18,6 +18,8 @@ public sealed class TrayIconService : IDisposable
     private const uint WmRButtonUp = 0x0205;
     private const uint WmContextMenu = 0x007B;
     private const uint MfString = 0x0000;
+    private const uint MfGrayed = 0x0001;
+    private const uint MfDisabled = 0x0002;
     private const uint MfSeparator = 0x0800;
     private const uint TpmRightButton = 0x0002;
     private const uint TpmReturnCmd = 0x0100;
@@ -33,9 +35,16 @@ public sealed class TrayIconService : IDisposable
     private NotifyIconData _data;
     private readonly nint _ownedIcon;
     private bool _disposed;
+    private bool _connected;
+    private bool _proxyPaused;
+    private string _transport = "";
+    private string _exitName = "自动选择";
+    private string _downloadRate = "0 B/s";
+    private string _uploadRate = "0 B/s";
 
     public event Action? ShowRequested;
     public event Action? CopyDeviceIdRequested;
+    public event Action? ToggleProxyPauseRequested;
     public event Action? ExitRequested;
 
     public TrayIconService(Window window, string? iconPath)
@@ -74,6 +83,21 @@ public sealed class TrayIconService : IDisposable
         ShellNotifyIcon(nimModify, ref _data);
     }
 
+    public void UpdateRuntimeState(bool connected, bool proxyPaused, string? transport, string? exitName, string? downloadRate, string? uploadRate)
+    {
+        if (_disposed) return;
+        _connected = connected;
+        _proxyPaused = proxyPaused;
+        _transport = string.IsNullOrWhiteSpace(transport) ? "" : transport.Trim().ToUpperInvariant();
+        _exitName = string.IsNullOrWhiteSpace(exitName) ? "自动选择" : exitName.Trim();
+        _downloadRate = string.IsNullOrWhiteSpace(downloadRate) ? "0 B/s" : downloadRate.Trim();
+        _uploadRate = string.IsNullOrWhiteSpace(uploadRate) ? "0 B/s" : uploadRate.Trim();
+
+        var state = connected ? (_proxyPaused ? "已连接 · 代理已暂停" : "已连接") : "未连接";
+        var transportText = connected && !string.IsNullOrWhiteSpace(_transport) ? $" · {_transport}" : "";
+        UpdateTooltip($"RelayProxy · {state}{transportText}");
+    }
+
     private nint WindowProc(nint hwnd, uint msg, nint wParam, nint lParam)
     {
         if (msg == CallbackMessage)
@@ -100,15 +124,25 @@ public sealed class TrayIconService : IDisposable
         if (menu == 0) return;
         try
         {
+            var status = _connected
+                ? $"状态：已连接{(string.IsNullOrWhiteSpace(_transport) ? "" : $" · {_transport}")}{(_proxyPaused ? " · 已暂停" : "")}"
+                : "状态：未连接";
+            AppendMenu(menu, MfString | MfDisabled | MfGrayed, 10, status);
+            AppendMenu(menu, MfString | MfDisabled | MfGrayed, 11, $"出口：{_exitName}");
+            AppendMenu(menu, MfString | MfDisabled | MfGrayed, 12, $"↓ {_downloadRate}   ↑ {_uploadRate}");
+            AppendMenu(menu, MfSeparator, 0, null);
+            AppendMenu(menu, _connected ? MfString : MfString | MfDisabled | MfGrayed, 4, _proxyPaused ? "恢复代理" : "暂停代理");
             AppendMenu(menu, MfString, 1, "打开 RelayProxy");
             AppendMenu(menu, MfString, 2, "复制设备 ID");
             AppendMenu(menu, MfSeparator, 0, null);
             AppendMenu(menu, MfString, 3, "退出");
+
             SetForegroundWindow(_hwnd);
             var command = TrackPopupMenu(menu, TpmRightButton | TpmReturnCmd | TpmNoNotify, point.X, point.Y, 0, _hwnd, 0);
             if (command == 1) ShowRequested?.Invoke();
             else if (command == 2) CopyDeviceIdRequested?.Invoke();
             else if (command == 3) ExitRequested?.Invoke();
+            else if (command == 4 && _connected) ToggleProxyPauseRequested?.Invoke();
         }
         finally { DestroyMenu(menu); }
     }

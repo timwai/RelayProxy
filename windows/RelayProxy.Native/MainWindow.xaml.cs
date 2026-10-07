@@ -68,7 +68,7 @@ public sealed partial class MainWindow : Window
         App.AgentHost.StateChanged -= OnAgentStateChanged;
         AppWindow.Closing -= OnAppWindowClosing;
         AppWindow.Changed -= OnAppWindowChanged;
-        try { _popupWindow?.Close(); } catch { }
+        try { _popupWindow?.ClosePermanently(); } catch { }
         _tray?.Dispose();
         _tray = null;
     }

@@ -15,7 +15,6 @@ func TestStatusApprovedCapabilitiesReturnsDefensiveCopy(t *testing.T) {
 	}
 }
 
-
 func TestStatusReportsProxyPaused(t *testing.T) {
 	agent := &Agent{}
 	agent.SetProxyPaused(true)

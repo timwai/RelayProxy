@@ -25,7 +25,7 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 		},
 		"device": map[string]any{
 			"name":       "react-agent",
-			"identityId": "identity-1234",
+			"identityId": "abcdef1234567890",
 		},
 		"transport": "auto",
 		"p2p": map[string]any{
@@ -98,7 +98,7 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 	if cfg.Server.Address != "relay-next.example.test" || cfg.Server.QUICPort != 4433 || cfg.Server.TCPPort != 8443 || !cfg.Server.InsecureTLS {
 		t.Fatalf("server payload mismatch: %+v", cfg.Server)
 	}
-	if cfg.Device.Name != "react-agent" || cfg.Device.IdentityID != "identity-1234" || cfg.Transport.Mode != "auto" {
+	if cfg.Device.Name != "react-agent" || cfg.Device.IdentityID != "abcdef1234567890" || cfg.Transport.Mode != "auto" {
 		t.Fatalf("device/transport payload mismatch: device=%+v transport=%q", cfg.Device, cfg.Transport.Mode)
 	}
 	if cfg.P2P.PunchTimeoutMs != 1600 || cfg.P2P.KeepaliveSec != 12 || cfg.P2P.IdleTimeoutSec != 180 || cfg.P2P.MaxExitSessions != 6 || cfg.P2P.Fallback == nil || *cfg.P2P.Fallback {

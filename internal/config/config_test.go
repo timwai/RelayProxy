@@ -104,6 +104,34 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	}
 }
 
+func TestAgentPlaintextForcesTCPOnlyAndClearsInsecureTLS(t *testing.T) {
+	cfg := &AgentConfigFile{}
+	cfg.Server.TLSEnabled = BoolPtr(false)
+	cfg.Server.InsecureTLS = true
+	cfg.Transport.Mode = "quic_only"
+	if err := NormalizeAgentConfig(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Transport.Mode != "tcp_only" {
+		t.Fatalf("plaintext transport normalized to %q, want tcp_only", cfg.Transport.Mode)
+	}
+	if cfg.Server.InsecureTLS {
+		t.Fatal("plaintext transport retained meaningless insecure TLS setting")
+	}
+
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Transport.Mode != "tcp_only" || loaded.Server.InsecureTLS {
+		t.Fatalf("plaintext normalized config did not round-trip: transport=%q insecure=%v", loaded.Transport.Mode, loaded.Server.InsecureTLS)
+	}
+}
+
 func TestAgentInsecureTLSPersistsOnlyWhenEnabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	cfg := &AgentConfigFile{}

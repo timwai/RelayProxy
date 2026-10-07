@@ -130,6 +130,40 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
+func TestNetworkServiceAPIIsNativeManagementOnly(t *testing.T) {
+	bridge := newWebTestBridge(t)
+
+	_, browserHandler := webTestHandler(bridge, true)
+	browserResponse := httptest.NewRecorder()
+	browserHandler.ServeHTTP(browserResponse, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/network-service", nil))
+	if browserResponse.Code != http.StatusNotFound {
+		t.Fatalf("browser management exposed Network Service API: status=%d body=%q", browserResponse.Code, browserResponse.Body.String())
+	}
+
+	token := strings.Repeat("n", 32)
+	native := &WebServer{
+		bridge: bridge, token: token, loopback: true,
+		nativeManagement: true, done: make(chan struct{}),
+	}
+	mux := http.NewServeMux()
+	native.registerRoutes(mux)
+	handler := native.authorize(mux)
+
+	unauthorized := httptest.NewRecorder()
+	handler.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/network-service", nil))
+	if unauthorized.Code != http.StatusUnauthorized {
+		t.Fatalf("native Network Service API accepted missing token: status=%d", unauthorized.Code)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/api/network-service", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("native Network Service API rejected valid token: status=%d body=%q", response.Code, response.Body.String())
+	}
+}
+
 func TestWebStatusIncludesProxyExitInventory(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()

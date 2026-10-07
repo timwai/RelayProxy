@@ -279,6 +279,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Server.QUICPort = c.QUICPort
 	res.Server.TCPPort = c.TCPPort
 	res.Server.TLSEnabled = config.BoolPtr(!c.PlainTCP)
+	res.Server.InsecureTLS = c.InsecureTLS
 	res.Device.Name = c.DeviceName
 	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
@@ -319,10 +320,11 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 type ConfigUpdate struct {
 	Revision *string `json:"revision,omitempty"`
 	Server   struct {
-		Address    *string `json:"address"`
-		QUICPort   *int    `json:"quicPort"`
-		TCPPort    *int    `json:"tcpPort"`
-		TLSEnabled *bool   `json:"tlsEnabled"`
+		Address     *string `json:"address"`
+		QUICPort    *int    `json:"quicPort"`
+		TCPPort     *int    `json:"tcpPort"`
+		TLSEnabled  *bool   `json:"tlsEnabled"`
+		InsecureTLS *bool   `json:"insecureTls"`
 	} `json:"server"`
 	Device struct {
 		Name       *string `json:"name"`
@@ -444,6 +446,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.Server.TLSEnabled != nil {
 		cfg.Server.TLSEnabled = config.BoolPtr(*in.Server.TLSEnabled)
+	}
+	if in.Server.InsecureTLS != nil {
+		cfg.Server.InsecureTLS = *in.Server.InsecureTLS
 	}
 	if in.Device.Name != nil {
 		cfg.Device.Name = strings.TrimSpace(*in.Device.Name)
@@ -689,7 +694,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 	enabled := func(v *bool) bool { return v == nil || *v }
 	return map[string]any{
 		"中继地址": c.Server.Address, "QUIC 端口": c.Server.QUICPort, "TCP 端口": c.Server.TCPPort,
-		"设备名称": name, "身份 ID": c.Device.IdentityID, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(),
+		"设备名称": name, "身份 ID": c.Device.IdentityID, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(), "TLS 允许不受信任证书": c.Server.InsecureTLS,
 		"P2P 开关": enabled(c.P2P.Enabled), "P2P 模式": c.P2P.Mode,
 		"P2P 打洞超时": c.P2P.PunchTimeoutMs, "P2P Keepalive": c.P2P.KeepaliveSec,
 		"P2P 空闲超时": c.P2P.IdleTimeoutSec, "P2P 会话上限": c.P2P.MaxExitSessions,

@@ -375,12 +375,13 @@ func (a *appWindow) openPage(page string) {
 
 func trayStatusLabels(st agentapp.AgentStatus) (string, string, string, string) {
 	status := "未连接"
+	approval := strings.ToLower(strings.TrimSpace(st.ApprovalState))
 	switch {
 	case st.Connected:
 		status = "已连接"
-	case strings.Contains(strings.ToLower(st.ApprovalState), "pending"):
+	case strings.Contains(approval, "pending"):
 		status = "等待审批"
-	case strings.TrimSpace(st.ApprovalState) != "":
+	case strings.Contains(approval, "reject") || strings.Contains(approval, "denied") || strings.Contains(approval, "revoked"):
 		status = st.ApprovalState
 	}
 	if st.Connected && st.Transport != "" {

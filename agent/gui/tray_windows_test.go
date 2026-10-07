@@ -44,6 +44,14 @@ func TestTrayStatusLabels(t *testing.T) {
 		}
 	})
 
+
+	t.Run("disconnected cached approval stays offline", func(t *testing.T) {
+		status, _, _, tooltip := trayStatusLabels(agentapp.AgentStatus{ApprovalState: "approved"})
+		if status != "状态：未连接" || !strings.Contains(tooltip, "未连接") {
+			t.Fatalf("cached approval leaked into live tray status: %q %q", status, tooltip)
+		}
+	})
+
 	t.Run("unknown selected exit keeps id", func(t *testing.T) {
 		_, exit, _, tooltip := trayStatusLabels(agentapp.AgentStatus{Connected: true, SelectedExit: "exit-unknown"})
 		if exit != "出口：exit-unknown" || !strings.Contains(tooltip, "exit-unknown") {

@@ -37,14 +37,14 @@ type WebOptions struct {
 // WebServer owns the browser management listener. Done is closed when the user
 // requests shutdown from the page.
 type WebServer struct {
-	server   *http.Server
-	listener net.Listener
-	bridge   *bridge.UIBridge
+	server           *http.Server
+	listener         net.Listener
+	bridge           *bridge.UIBridge
 	token            string
 	loopback         bool
 	nativeManagement bool
 	done             chan struct{}
-	doneOnce sync.Once
+	doneOnce         sync.Once
 }
 
 func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {

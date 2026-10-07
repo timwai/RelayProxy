@@ -1,7 +1,9 @@
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using RelayProxy.Native.Models;
+using RelayProxy.Native.Services;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
 
@@ -14,8 +16,11 @@ public sealed partial class MainWindow : Window
     private AgentConfigDto? _config;
     private List<RoutingRuleDto> _routingRules = [];
     private MessagePopupWindow? _popupWindow;
+    private TrayIconService? _tray;
     private bool _messageBaselineReady;
     private bool _suppressAutostart;
+    private bool _forceExit;
+    private bool _initialConfigApplied;
     private string _page = "overview";
 
     public MainWindow()
@@ -26,6 +31,12 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         SystemBackdrop = new MicaBackdrop();
         AppWindow.Resize(new SizeInt32(1180, 780));
+        var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "RelayProxy.ico");
+        if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
+        _tray = new TrayIconService(this, iconPath);
+        _tray.ShowRequested += OnTrayShowRequested;
+        _tray.ExitRequested += OnTrayExitRequested;
+        AppWindow.Closing += OnAppWindowClosing;
         App.AgentHost.StateChanged += OnAgentStateChanged;
         Closed += OnClosed;
         _timer.Tick += async (_, _) => await RefreshCurrentAsync();
@@ -38,6 +49,7 @@ public sealed partial class MainWindow : Window
         AgentStateText.Text = state;
         SettingsAgentStateText.Text = state;
         ManagementUrlText.Text = App.AgentApi.BaseAddress?.ToString() ?? "尚未连接";
+        _tray?.UpdateTooltip($"RelayProxy · {state}");
         if (App.AgentApi.IsReady) _ = LoadConfigAsync();
     });
 
@@ -45,9 +57,34 @@ public sealed partial class MainWindow : Window
     {
         _timer.Stop();
         App.AgentHost.StateChanged -= OnAgentStateChanged;
+        AppWindow.Closing -= OnAppWindowClosing;
         try { _popupWindow?.Close(); } catch { }
+        _tray?.Dispose();
+        _tray = null;
         _ = App.AgentHost.StopAsync();
     }
+
+    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_forceExit) return;
+        if (_config?.MinimizeToTray ?? true)
+        {
+            args.Cancel = true;
+            sender.Hide();
+        }
+    }
+
+    private void OnTrayShowRequested() => DispatcherQueue.TryEnqueue(() =>
+    {
+        AppWindow.Show();
+        Activate();
+    });
+
+    private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() =>
+    {
+        _forceExit = true;
+        Close();
+    });
 
     private void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
@@ -179,8 +216,17 @@ public sealed partial class MainWindow : Window
 
             _suppressAutostart = true;
             AutostartSwitch.IsOn = cfg.IsAutostart;
+            MinimizeToTraySwitch.IsOn = cfg.MinimizeToTray;
+            StartMinimizedSwitch.IsOn = cfg.StartMinimized;
+            SelectComboTag(ThemeCombo, cfg.Theme);
             PopupTimeoutBox.Value = cfg.VerificationPopupTimeoutSec;
             _suppressAutostart = false;
+            ApplyTheme(cfg.Theme);
+            if (!_initialConfigApplied)
+            {
+                _initialConfigApplied = true;
+                if (cfg.StartMinimized) AppWindow.Hide();
+            }
         }
         catch (Exception ex)
         {
@@ -592,7 +638,9 @@ public sealed partial class MainWindow : Window
         if (_config is null) { await LoadConfigAsync(); if (_config is null) return; }
         try
         {
-            var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
+            var theme = ComboTag(ThemeCombo, "system");
+            var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { minimizeToTray = MinimizeToTraySwitch.IsOn, startMinimized = StartMinimizedSwitch.IsOn, theme, verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
+            ApplyTheme(theme);
             HandleSaveResult(SettingsBar, result); await LoadConfigAsync();
         }
         catch (Exception ex) { ShowInfo(SettingsBar, "保存失败", ex.Message, InfoBarSeverity.Error); }
@@ -622,6 +670,17 @@ public sealed partial class MainWindow : Window
         if (_config is not null && !string.IsNullOrWhiteSpace(result.Revision)) _config.Revision = result.Revision;
         var details = result.RestartRequired && result.RestartFields.Count > 0 ? $"需要重启：{string.Join("、", result.RestartFields)}" : result.Message;
         ShowInfo(bar, result.RestartRequired ? "设置已保存，需要重启" : "设置已应用", details, result.RestartRequired ? InfoBarSeverity.Warning : InfoBarSeverity.Success);
+    }
+
+    private void ApplyTheme(string? mode)
+    {
+        if (Content is not FrameworkElement root) return;
+        root.RequestedTheme = mode?.ToLowerInvariant() switch
+        {
+            "light" => ElementTheme.Light,
+            "dark" => ElementTheme.Dark,
+            _ => ElementTheme.Default
+        };
     }
 
     private static RoutingRuleDto CloneRule(RoutingRuleDto r) => new()

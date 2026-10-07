@@ -150,21 +150,20 @@ func TestProxyExitPublicDirectInventoryRoundTrip(t *testing.T) {
 	}
 }
 
-
 func TestDeviceAuthPayloadDoesNotBindBrutalPerformanceHints(t *testing.T) {
 	hello := DeviceHello{
-		ProtocolVersion: IdentityDeviceProtocolVersion,
-		IdentityID:      "a1b2c3d4e5f6g7h8",
-		InstallationID:  "install",
-		PublicKey:       []byte("key"),
-		ClientNonce:     []byte("client"),
+		ProtocolVersion:       IdentityDeviceProtocolVersion,
+		IdentityID:            "a1b2c3d4e5f6g7h8",
+		InstallationID:        "install",
+		PublicKey:             []byte("key"),
+		ClientNonce:           []byte("client"),
 		RequestedCapabilities: []string{CapabilityProxyClient},
 		TransportCapabilities: []string{UDPModeStream},
 	}
 	challenge := AuthChallenge{
-		ProtocolVersion: IdentityDeviceProtocolVersion,
+		ProtocolVersion:  IdentityDeviceProtocolVersion,
 		ServerInstanceID: "server",
-		ServerNonce: []byte("server-nonce"),
+		ServerNonce:      []byte("server-nonce"),
 	}
 	base := DeviceAuthPayload(hello, challenge)
 	hello.BrutalUploadBPS = 12_500_000

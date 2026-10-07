@@ -19,7 +19,12 @@ public sealed partial class MainWindow : Window
     private readonly HashSet<string> _speedTestingExits = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SpeedTestResultDto> _speedTests = new(StringComparer.Ordinal);
     private readonly HashSet<string> _dirtyPages = new(StringComparer.Ordinal);
+    private readonly ServerConsoleClient _serverConsole = new();
     private List<ConnectionDto> _connectionCache = [];
+    private List<MessageChannelDto> _serverChannels = [];
+    private MessageChannelDto? _selectedMessageChannel;
+    private List<MessageRuleDto> _messageRulesDraft = [];
+    private bool _suppressMessageChannelSelection;
     private List<LogEntryDto> _logCache = [];
     private List<PushMessageDto> _messageCache = [];
     private AgentConfigDto? _config;
@@ -88,6 +93,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Changed -= OnAppWindowChanged;
         try { _popupWindow?.ClosePermanently(); } catch { }
         App.Notifications.Dispose();
+        _serverConsole.Dispose();
         if (_tray is not null)
         {
             _tray.ShowRequested -= OnTrayShowRequested;
@@ -189,7 +195,10 @@ public sealed partial class MainWindow : Window
                 return;
             }
             _dirtyPages.Remove(_page);
-            await LoadConfigAsync();
+            if (_page == "messages")
+                RestoreMessageRuleDraft();
+            else
+                await LoadConfigAsync();
         }
         ShowPage(tag);
     }
@@ -1806,6 +1815,7 @@ public sealed partial class MainWindow : Window
         "proxy" => ProxyBar,
         "exitshare" => ExitShareBar,
         "routing" => RoutingBar,
+        "messages" => MessagesBar,
         "settings" => SettingsBar,
         _ => null
     };
@@ -1831,6 +1841,7 @@ public sealed partial class MainWindow : Window
         "proxy" => "本机代理",
         "exitshare" => "本机出口共享",
         "routing" => "分流规则",
+        "messages" => "消息规则",
         "settings" => "设置",
         _ => "当前页面"
     };

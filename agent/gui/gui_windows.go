@@ -47,6 +47,7 @@ type appWindow struct {
 	tray       *application.SystemTray
 	trayStatus *application.MenuItem
 	trayExit   *application.MenuItem
+	trayPath   *application.MenuItem
 
 	forceExit atomic.Bool
 
@@ -360,7 +361,7 @@ func buildWailsAssets(opts Options) (string, string, fstest.MapFS, error) {
 	return mainHTML, connectionsHTML, files, nil
 }
 
-func trayStatusLabels(st agentapp.AgentStatus) (string, string, string) {
+func trayStatusLabels(st agentapp.AgentStatus) (string, string, string, string) {
 	status := "未连接"
 	switch {
 	case st.Connected:
@@ -387,25 +388,42 @@ func trayStatusLabels(st agentapp.AgentStatus) (string, string, string) {
 		}
 	}
 
+	path := "—"
+	switch {
+	case strings.TrimSpace(st.DirectPath) != "":
+		path = st.DirectPath
+	case strings.TrimSpace(st.P2PPath) != "":
+		path = st.P2PPath
+	case st.Connected && strings.TrimSpace(st.Transport) != "":
+		path = strings.ToLower(st.Transport)
+	}
+	if st.Connected && st.LatencyMs > 0 {
+		path += fmt.Sprintf(" · %d ms", st.LatencyMs)
+	}
+
 	statusLabel := "状态：" + status
 	exitLabel := "出口：" + exit
+	pathLabel := "路径：" + path
 	tooltip := "RelayProxy · " + status
 	if st.SelectedExit != "" {
 		tooltip += " · " + exit
 	}
-	return statusLabel, exitLabel, tooltip
+	return statusLabel, exitLabel, pathLabel, tooltip
 }
 
 func (a *appWindow) updateTrayStatus(st agentapp.AgentStatus) {
 	if a == nil {
 		return
 	}
-	status, exit, tooltip := trayStatusLabels(st)
+	status, exit, path, tooltip := trayStatusLabels(st)
 	if a.trayStatus != nil {
 		a.trayStatus.SetLabel(status)
 	}
 	if a.trayExit != nil {
 		a.trayExit.SetLabel(exit)
+	}
+	if a.trayPath != nil {
+		a.trayPath.SetLabel(path)
 	}
 	if a.tray != nil {
 		a.tray.SetTooltip(tooltip)
@@ -420,6 +438,7 @@ func (a *appWindow) installTray(icon []byte) {
 
 	a.trayStatus = menu.Add("状态：正在读取…").SetEnabled(false)
 	a.trayExit = menu.Add("出口：正在读取…").SetEnabled(false)
+	a.trayPath = menu.Add("路径：正在读取…").SetEnabled(false)
 	menu.AddSeparator()
 
 	menu.Add("打开主界面").OnClick(func(*application.Context) {
@@ -452,26 +471,10 @@ func (a *appWindow) installTray(icon []byte) {
 		a.setAutostartChecked(enabled)
 	})
 
-	minimize := menu.AddCheckbox("关闭时最小化到托盘", a.minimizeTray)
-	minimize.OnClick(func(*application.Context) {
-		enabled := minimize.Checked()
-		a.mu.Lock()
-		a.minimizeTray = enabled
-		a.mu.Unlock()
-		if err := a.persistGUI(map[string]any{"minimizeToTray": enabled}); err != nil {
-			log.Printf("[GUI] 保存托盘行为失败: %v", err)
-		}
-	})
-
-	menu.Add("切换浅色/深色").OnClick(func(*application.Context) {
-		next := "light"
-		if a.opts.theme() != "dark" {
-			next = "dark"
-		}
-		a.applyThemeMode(next)
-		if err := a.persistGUI(map[string]any{"theme": next}); err != nil {
-			log.Printf("[GUI] 保存主题失败: %v", err)
-		}
+	menu.Add("界面与托盘设置…").OnClick(func(*application.Context) {
+		// Theme/minimise settings live in React so they participate in the same
+		// unsaved-draft/revision protection as every other config mutation.
+		a.showWindow(true)
 	})
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(*application.Context) {

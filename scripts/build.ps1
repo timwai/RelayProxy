@@ -141,35 +141,72 @@ try {
             [string]$Runtime,
             [ValidateSet("x64", "ARM64")]
             [string]$Platform,
+            [ValidateSet("amd64", "arm64")]
+            [string]$GoArch,
             [string]$OutputDir
         )
 
         $project = Join-Path $Root "windows\RelayProxy.Native\RelayProxy.Native.csproj"
+        $stageDir = Join-Path ([System.IO.Path]::GetTempPath()) ("relayproxy-native-" + [Guid]::NewGuid().ToString("N"))
+        $publishDir = Join-Path $stageDir "publish"
+        $corePath = Join-Path $stageDir "relay-agent.exe"
         New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
+        New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
 
         Write-Host ""
-        Write-Host "[BUILD] Windows Native UI $Runtime -> $OutputDir" -ForegroundColor Cyan
+        Write-Host "[BUILD] Windows Native single EXE $Runtime -> $OutputDir" -ForegroundColor Cyan
 
-        & dotnet restore $project -r $Runtime
-        if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed: $Runtime" }
+        $savedGoos = $env:GOOS
+        $savedGoarch = $env:GOARCH
+        $savedCgo = $env:CGO_ENABLED
+        try {
+            $env:GOOS = "windows"
+            $env:GOARCH = $GoArch
+            $env:CGO_ENABLED = "0"
+            & go build -trimpath -ldflags $ldflags -o $corePath .\cmd\relay-agent
+            if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent build failed: $GoArch" }
 
-        & dotnet publish $project `
-            -c Release `
-            -r $Runtime `
-            -p:Platform=$Platform `
-            -p:Version=$Version `
-            -p:FileVersion=$Version `
-            -p:InformationalVersion=$Version `
-            -p:WindowsPackageType=None `
-            -p:WindowsAppSDKSelfContained=true `
-            --self-contained true `
-            --no-restore `
-            -o $OutputDir
-        if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed: $Runtime" }
+            Reset-GoHostEnvironment
+            & dotnet restore $project -r $Runtime
+            if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed: $Runtime" }
 
-        $nativeExe = Join-Path $OutputDir "relay-agent-gui.exe"
-        if (-not (Test-Path $nativeExe)) {
-            throw "Native Windows GUI executable not found: $nativeExe"
+            & dotnet publish $project `
+                -c Release `
+                -r $Runtime `
+                -p:Platform=$Platform `
+                -p:Version=$Version `
+                -p:FileVersion=$Version `
+                -p:InformationalVersion=$Version `
+                -p:WindowsPackageType=None `
+                -p:WindowsAppSDKSelfContained=true `
+                -p:SelfContained=true `
+                -p:PublishSingleFile=true `
+                -p:EnableMsixTooling=true `
+                -p:IncludeAllContentForSelfExtract=true `
+                -p:IncludeNativeLibrariesForSelfExtract=true `
+                -p:DebugType=None `
+                -p:DebugSymbols=false `
+                -p:RelayAgentCorePath="$corePath" `
+                --self-contained true `
+                --no-restore `
+                -o $publishDir
+            if ($LASTEXITCODE -ne 0) { throw "dotnet single-file publish failed: $Runtime" }
+
+            $nativeExe = Join-Path $publishDir "relay-agent-gui.exe"
+            if (-not (Test-Path $nativeExe)) { throw "Native Windows single EXE not found: $nativeExe" }
+            $unexpected = @(Get-ChildItem -LiteralPath $publishDir -Force | Where-Object { $_.Name -ne "relay-agent-gui.exe" })
+            if ($unexpected.Count -gt 0) {
+                $names = ($unexpected | ForEach-Object { $_.Name }) -join ", "
+                throw "Single-file publish produced unexpected sidecar files: $names"
+            }
+
+            Copy-Item $nativeExe (Join-Path $OutputDir "relay-agent-gui.exe") -Force
+        }
+        finally {
+            $env:GOOS = $savedGoos
+            $env:GOARCH = $savedGoarch
+            $env:CGO_ENABLED = $savedCgo
+            Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -306,7 +343,7 @@ try {
         -ExtraLdFlags "-H=windowsgui" `
         -BuildTags "wailslegacy"
 
-    Publish-WindowsNativeUI -Runtime "win-x64" -Platform "x64" `
+    Publish-WindowsNativeUI -Runtime "win-x64" -Platform "x64" -GoArch "amd64" `
         -OutputDir (Join-Path $OutDir "windows-amd64")
 
     Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `
@@ -323,13 +360,16 @@ try {
         -ExtraLdFlags "-H=windowsgui" `
         -BuildTags "wailslegacy"
 
-    Publish-WindowsNativeUI -Runtime "win-arm64" -Platform "ARM64" `
+    Publish-WindowsNativeUI -Runtime "win-arm64" -Platform "ARM64" -GoArch "arm64" `
         -OutputDir (Join-Path $OutDir "windows-arm64")
 
     Invoke-GoBuild -GOOS "windows" -GOARCH "arm64" `
         -Package "./cmd/relay-server" `
         -Output (Join-Path $OutDir "windows-arm64/relay-server.exe")
 
+    # Primary portable Windows Agent downloads: one EXE per architecture.
+    Copy-Item (Join-Path $OutDir "windows-amd64/relay-agent-gui.exe") (Join-Path $OutDir "RelayProxy-agent-windows-amd64.exe") -Force
+    Copy-Item (Join-Path $OutDir "windows-arm64/relay-agent-gui.exe") (Join-Path $OutDir "RelayProxy-agent-windows-arm64.exe") -Force
     # Copy brand icon into Windows package for shortcuts / installers
     foreach ($t in @("windows-amd64", "windows-arm64")) {
         $brandOut = Join-Path $OutDir "$t/brand"
@@ -393,7 +433,75 @@ try {
     $checksumFile = Join-Path $OutDir "SHA256SUMS.txt"
     $lines = @()
     Get-ChildItem -Path $OutDir -Recurse -File |
-        Where-Object { $_.Name -match '^(relay-server|relay-agent(-(gui|wails))?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxy-.*\.zip$' } |
+        Where-Object { $_.Name -match '^(relay-server|relay-agent(-(gui|wails))?)(\.exe)?$|^WinDivert(64)?\.(dll|sys)$|^RelayProxy-.*\.(zip|exe) |
+        ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')
+            $rel = $rel -replace '\\', '/'
+            $lines += "$hash  $rel"
+            Write-Host "  $hash  $rel"
+        }
+    $lines | Set-Content -Path $checksumFile -Encoding utf8
+
+    # Restore host env
+    Remove-Item Env:GOOS -ErrorAction SilentlyContinue
+    Remove-Item Env:GOARCH -ErrorAction SilentlyContinue
+    Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
+
+    Write-Host ""
+    Write-Host "=================================================="
+    Write-Host " Build complete -> $OutDir" -ForegroundColor Green
+    Write-Host "=================================================="
+    Write-Host @"
+
+产物布局:
+  RelayProxy-agent-windows-amd64.exe Windows x64 Agent 单文件版（WinUI + Core）
+  RelayProxy-agent-windows-arm64.exe Windows ARM64 Agent 单文件版（WinUI + Core）
+  RelayProxy-agent-windows-amd64.zip Windows x64 Agent 完整目录分发包（兼容/调试）
+  RelayProxy-<platform>-<arch>.zip    各平台完整目录分发包
+  linux-amd64/relay-agent           Linux x86_64 Agent
+  linux-amd64/relay-server          Linux x86_64 Server（含 Admin Web UI）
+  linux-arm64/relay-agent           Linux ARM64 Agent
+  linux-arm64/relay-server          Linux ARM64 Server（含 Admin Web UI）
+  darwin-amd64/relay-agent          macOS Intel Agent
+  darwin-amd64/relay-server         macOS Intel Server（可构建实验产物）
+  darwin-amd64/RelayProxy.app       macOS Intel Agent App 包装
+  darwin-arm64/relay-agent          macOS Apple Silicon Agent
+  darwin-arm64/relay-server         macOS Apple Silicon Server（可构建实验产物）
+  darwin-arm64/RelayProxy.app       macOS Apple Silicon Agent App 包装
+  windows-amd64/relay-agent-gui.exe Windows x64 WinUI 3 原生桌面客户端
+  windows-amd64/relay-agent.exe     Windows x64 Agent Core / CLI
+  windows-amd64/relay-agent-wails.exe Windows x64 旧 Wails GUI（迁移期回退）
+  windows-amd64/relay-server.exe    Windows x64 Server（含 Admin UI）
+  windows-amd64/windivert/          外置 WinDivert 运行库与许可证
+  windows-arm64/relay-agent-gui.exe Windows ARM64 WinUI 3 原生桌面客户端
+  windows-arm64/relay-agent.exe     Windows ARM64 Agent Core / CLI
+  windows-arm64/relay-agent-wails.exe Windows ARM64 旧 Wails GUI（迁移期回退）
+  windows-arm64/relay-server.exe    Windows ARM64 Server（含 Admin UI）
+  */configs/*.yaml                  示例配置
+  SHA256SUMS.txt
+
+说明:
+  macOS Server 当前作为可构建实验产物输出，不改变 README 中的正式支持范围。
+  原生 macOS NetworkExtension Host 需要在 macOS 上使用 scripts/build.sh 构建。
+
+部署提示:
+  Linux:  chmod +x relay-server relay-agent
+  Admin:  https://<server>:8443
+  桌面:   双击 relay-agent-gui.exe（WinUI 3 原生界面）
+  透明代理: 以管理员身份启动 Windows x64 客户端；保存启用设置后重启
+  自启动: relay-agent-gui.exe --minimized；透明代理由 RelayProxy Network Service 提供权限
+  配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
+  授权:   首次连接后，在服务端管理控制台批准设备
+  无界面: relay-agent.exe --no-gui
+  自定义: relay-agent.exe --config <配置文件路径>
+
+"@
+}
+finally {
+    Pop-Location
+}
+ } |
         ForEach-Object {
             $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
             $rel = $_.FullName.Substring($OutDir.Length).TrimStart('\', '/')

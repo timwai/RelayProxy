@@ -155,8 +155,12 @@
             <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="Windows 系统透明代理" FontSize="16" FontWeight="SemiBold"/>
               <ToggleSwitch x:Name="TransparentProxySwitch" Header="启用系统透明代理（WinDivert）"/>
               <TextBox x:Name="ExcludeProcessesBox" Header="排除进程" AcceptsReturn="True" MinHeight="120" TextWrapping="Wrap" PlaceholderText="relayproxy.exe&#10;updater.exe"/>
-              <TextBlock Text="按进程代理 TCP / UDP；本程序及控制连接应保持直连。服务安装 / 修复仍由现有 Agent 能力负责。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+              <TextBlock Text="按进程代理 TCP / UDP；本程序及控制连接保持直连。Windows x64 使用独立 RelayProxy Network Service 承载需要管理员权限的抓包能力。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
             </StackPanel></Border>
+            <Border Style="{StaticResource CardStyle}"><Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel Spacing="5"><TextBlock Text="RelayProxy Network Service" FontSize="16" FontWeight="SemiBold"/><TextBlock x:Name="NetworkServiceStateText" Text="正在读取服务状态…" FontWeight="SemiBold"/><TextBlock x:Name="NetworkServiceDetailText" Text="WinDivert 提权服务状态" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/></StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"><Button Content="刷新" Click="RefreshNetworkService_Click"/><Button x:Name="RepairNetworkServiceButton" Content="安装 / 修复" Style="{StaticResource AccentButtonStyle}" Click="RepairNetworkService_Click"/><Button x:Name="UninstallNetworkServiceButton" Content="卸载" Click="UninstallNetworkService_Click"/></StackPanel>
+            </Grid></Border>
           </StackPanel>
         </ScrollViewer>
 

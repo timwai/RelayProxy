@@ -363,6 +363,14 @@ func (s *WailsService) SelectExit(exitID string) (string, error) {
 	return okResult, nil
 }
 
+func (s *WailsService) GetNetworkCapabilities() (string, error) {
+	data, err := json.Marshal(divert.PlatformCapabilities())
+	if err != nil {
+		return "{}", nil
+	}
+	return string(data), nil
+}
+
 func (s *WailsService) GetNetworkServiceStatus() (string, error) {
 	data, err := json.Marshal(divert.GetPlatformServiceStatus())
 	if err != nil {

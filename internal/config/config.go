@@ -182,7 +182,7 @@ type AgentConfigFile struct {
 		StartMinimized              bool   `yaml:"start_minimized"`                // Default: false — boot straight into the tray
 		Theme                       string `yaml:"theme"`                          // "dark", "light", or "system"
 		VerificationPopupTimeoutSec *int   `yaml:"verification_popup_timeout_sec"` // Default: 15; 0 disables automatic dismissal
-		SystemNotifications          *bool  `yaml:"system_notifications"`           // Default: true — mirror incoming messages to Windows app notifications
+		SystemNotifications         *bool  `yaml:"system_notifications"`           // Default: true — mirror incoming messages to Windows app notifications
 	} `yaml:"gui"`
 
 	Web struct {

@@ -77,6 +77,10 @@ class RelayExitService : Service() {
                 .put("serviceUptimeMs", uptime)
                 .toString()
         }.getOrElse { status }
+
+        fun activeApplicationsJson(): String =
+            activeInstance?.readActiveApplicationsJson()
+                ?: """{"applications":[],"activeConnections":0,"trackedConnections":0}"""
     }
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -224,6 +228,10 @@ class RelayExitService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun readActiveApplicationsJson(): String =
+        core?.let { runCatching { it.activeApplicationsJSON() }.getOrNull() }
+            ?: """{"applications":[],"activeConnections":0,"trackedConnections":0}"""
 
     private fun shouldRunCore(store: ConfigStore): Boolean {
         return store.hasConnectionConfig()

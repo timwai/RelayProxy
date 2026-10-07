@@ -347,6 +347,7 @@ class MainActivity : Activity() {
         content.addView(buildRoutingModeSegment(), topMargin(14))
         content.addView(buildActiveNodeCard(), topMargin(14))
         content.addView(buildDualCoreGrid(), topMargin(14))
+        content.addView(buildLiveApplicationMonitorCard(), topMargin(14))
         content.addView(buildDiagnosticsCard(), topMargin(14))
 
         return ScrollView(this).apply {
@@ -756,6 +757,52 @@ class MainActivity : Activity() {
         grid.addView(exitCard, weighted())
 
         return grid
+    }
+
+    private fun buildLiveApplicationMonitorCard(): View {
+        val card = UiKit.card(
+            this,
+            paddingDp = 16,
+            radiusDp = 14,
+            backgroundColor = UiPalette.surfaceSubtle,
+            borderColor = UiPalette.brandSoftBorder,
+        ).apply {
+            isClickable = true
+            isFocusable = true
+            setOnClickListener {
+                startActivity(Intent(this@MainActivity, ConnectionMonitorActivity::class.java))
+            }
+        }
+
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        titles.addView(TextView(this).apply {
+            text = "实时应用监控"
+            textSize = 13.5f
+            setTextColor(UiPalette.ink)
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        titles.addView(TextView(this).apply {
+            text = "查看正在联网的 App、TCP/UDP、实时速率、目标与出口路径"
+            textSize = 11f
+            setTextColor(UiPalette.muted)
+            setPadding(0, dp(3), 0, 0)
+        })
+        row.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        row.addView(TextView(this).apply {
+            text = "查看 ›"
+            textSize = 12f
+            setTextColor(UiPalette.brand)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        })
+        card.addView(row)
+        return card
     }
 
     private fun buildDiagnosticsCard(): View {

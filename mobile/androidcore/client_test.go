@@ -295,7 +295,6 @@ func TestAndroidMessageQueueDrainsOnce(t *testing.T) {
 	}
 }
 
-
 func TestAndroidBrutalBandwidthNormalization(t *testing.T) {
 	cfg, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","brutalUpMbps":120,"brutalDownMbps":450,"disableLossCompensation":true}`)
 	if err != nil {

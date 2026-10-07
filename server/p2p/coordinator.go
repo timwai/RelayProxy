@@ -352,9 +352,9 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 		ID: id, ClientDeviceID: client.DeviceID, ExitDeviceID: exit.DeviceID,
 		Token: append([]byte(nil), token...), ClientCandidates: append([]protocol.P2PCandidate(nil), validated...),
 		ClientFingerprint: fingerprint,
-		BrutalUploadBPS: quiccongestion.CapRequestedRate(message.BrutalUploadBPS, 0),
+		BrutalUploadBPS:   quiccongestion.CapRequestedRate(message.BrutalUploadBPS, 0),
 		BrutalDownloadBPS: quiccongestion.CapRequestedRate(message.BrutalDownloadBPS, 0),
-		ExpiresAt: time.Now().Add(c.lease),
+		ExpiresAt:         time.Now().Add(c.lease),
 	}
 	now := time.Now()
 	c.mu.Lock()
@@ -441,8 +441,8 @@ func (c *Coordinator) answer(exit *session.DeviceSession, message protocol.P2PCo
 		SessionToken: append([]byte(nil), item.Token...), Candidates: append([]protocol.P2PCandidate(nil), validated...),
 		CertFingerprint: fingerprint, PeerFingerprint: fingerprint,
 		PeerCapabilities: peerP2PCapabilities(exit),
-		BrutalUploadBPS: item.BrutalUploadBPS, BrutalDownloadBPS: item.BrutalDownloadBPS,
-		LeaseExpiresAt:   expires, RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
+		BrutalUploadBPS:  item.BrutalUploadBPS, BrutalDownloadBPS: item.BrutalDownloadBPS,
+		LeaseExpiresAt: expires, RendezvousAddress: c.rendezvousAddress, LeaseSec: c.LeaseSeconds(),
 	}
 	if err := c.send(client, answer); err != nil {
 		return p2pError("CLIENT_NOTIFY_FAILED", "failed to deliver P2P answer to client")

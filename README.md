@@ -363,6 +363,8 @@ Windows GUI 可以直接启动：
 
 ```powershell
 .\RelayProxy-agent-windows-amd64.exe
+
+> Windows 原生单文件版使用可重命名启动器：外层 EXE 可以任意修改文件名；启动器会把固定名称的 `RelayProxy.NativeHost.exe` 提取到用户缓存后启动，因此不会再因为重命名触发 WinUI XAML 资源解析失败。
 ```
 
 在「连接与身份」中填写 Server 为该身份自动生成的 16 位身份 ID。设备会使用自动生成的安装私钥完成挑战签名；首次连接显示待审批，使用该身份自定义用户名登录 Server 后，在「待审批设备」中勾选设备能力并批准。

@@ -150,6 +150,9 @@ try {
         $stageDir = Join-Path ([System.IO.Path]::GetTempPath()) ("relayproxy-native-" + [Guid]::NewGuid().ToString("N"))
         $publishDir = Join-Path $stageDir "publish"
         $corePath = Join-Path $stageDir "relay-agent.exe"
+        $nativeHostName = "RelayProxy.NativeHost.exe"
+        $launcherStub = Join-Path $stageDir "relayproxy-launcher.exe"
+        $packScript = Join-Path $Root "scripts\pack-windows-launcher.ps1"
         $nativeFileName = if ($Runtime -eq "win-arm64") { "RelayProxy-agent-windows-arm64.exe" } else { "RelayProxy-agent-windows-amd64.exe" }
         New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
         New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
@@ -168,7 +171,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent build failed: $GoArch" }
 
             Reset-GoHostEnvironment
-            & dotnet restore $project -r $Runtime
+            & dotnet restore $project -r $Runtime -p:PublishTrimmed=true
             if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed: $Runtime" }
 
             & dotnet publish $project `
@@ -184,7 +187,9 @@ try {
                 -p:PublishSingleFile=true `
                 -p:EnableCompressionInSingleFile=true `
                 -p:PublishReadyToRun=false `
-                -p:PublishTrimmed=false `
+                -p:PublishTrimmed=true `
+                -p:TrimMode=partial `
+                -p:SuppressTrimAnalysisWarnings=false `
                 -p:EnableMsixTooling=true `
                 -p:IncludeAllContentForSelfExtract=true `
                 -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -196,23 +201,33 @@ try {
                 -o $publishDir
             if ($LASTEXITCODE -ne 0) { throw "dotnet single-file publish failed: $Runtime" }
 
-            $nativeExe = Join-Path $publishDir $nativeFileName
-            if (-not (Test-Path $nativeExe)) { throw "Native Windows single EXE not found: $nativeExe" }
-            $unexpected = @(Get-ChildItem -LiteralPath $publishDir -Force | Where-Object { $_.Name -ne $nativeFileName })
+            $nativeHost = Join-Path $publishDir $nativeHostName
+            if (-not (Test-Path $nativeHost)) { throw "Native Windows host payload not found: $nativeHost" }
+            $unexpected = @(Get-ChildItem -LiteralPath $publishDir -Force | Where-Object { $_.Name -ne $nativeHostName })
             if ($unexpected.Count -gt 0) {
                 $names = ($unexpected | ForEach-Object { $_.Name }) -join ", "
-                throw "Single-file publish produced unexpected sidecar files: $names"
+                throw "WinUI host publish produced unexpected sidecar files: $names"
             }
 
-            Copy-Item $nativeExe (Join-Path $OutputDir $nativeFileName) -Force
+            $env:GOOS = "windows"
+            $env:GOARCH = $GoArch
+            $env:CGO_ENABLED = "0"
+            & go build -trimpath -ldflags "-s -w -H=windowsgui" -o $launcherStub .\cmd\relay-agent-win-launcher
+            if ($LASTEXITCODE -ne 0) { throw "rename-safe launcher build failed: $GoArch" }
+
+            $nativeExe = Join-Path $OutputDir $nativeFileName
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $packScript -Launcher $launcherStub -Payload $nativeHost -Output $nativeExe
+            if ($LASTEXITCODE -ne 0) { throw "launcher payload packing failed: $Runtime" }
 
             $nativeSize = (Get-Item $nativeExe).Length
+            $hostSize = (Get-Item $nativeHost).Length
             $coreSize = (Get-Item $corePath).Length
-            $runtimePayloadSize = [Math]::Max(0, $nativeSize - $coreSize)
-            Write-Host "  SIZE  native single EXE: $([math]::Round($nativeSize / 1MB, 2)) MB" -ForegroundColor Green
+            $launcherOverhead = [Math]::Max(0, $nativeSize - $hostSize)
+            Write-Host "  SIZE  rename-safe Windows EXE: $([math]::Round($nativeSize / 1MB, 2)) MB" -ForegroundColor Green
+            Write-Host "  SIZE  trimmed WinUI host payload: $([math]::Round($hostSize / 1MB, 2)) MB"
             Write-Host "  SIZE  embedded Go Core: $([math]::Round($coreSize / 1MB, 2)) MB"
-            Write-Host "  SIZE  UI + .NET + Windows App SDK payload: ~$([math]::Round($runtimePayloadSize / 1MB, 2)) MB"
-            Write-Host "  MODE  single-file compression enabled; trimming disabled for Windows 10 compatibility; ReadyToRun disabled" -ForegroundColor DarkGray
+            Write-Host "  SIZE  launcher/footer overhead: ~$([math]::Round($launcherOverhead / 1MB, 2)) MB"
+            Write-Host "  MODE  final EXE is rename-safe; fixed-name XAML host stays internal" -ForegroundColor DarkGray
         }
         finally {
             $env:GOOS = $savedGoos
@@ -379,9 +394,8 @@ try {
         -Package "./cmd/relay-server" `
         -Output (Join-Path $OutDir "windows-arm64/relay-server.exe")
 
-    # Primary portable Windows Agent downloads: one EXE per architecture.
-    # Preserve the compiled WinUI executable name. Renaming a self-contained WinUI EXE
-    # after publish can break XAML resource resolution.
+    # Primary portable Windows Agent downloads: one rename-safe launcher EXE per architecture.
+    # The embedded WinUI host keeps a fixed internal name, so the outer files may be renamed freely.
     Copy-Item (Join-Path $OutDir "windows-amd64/RelayProxy-agent-windows-amd64.exe") (Join-Path $OutDir "RelayProxy-agent-windows-amd64.exe") -Force
     Copy-Item (Join-Path $OutDir "windows-arm64/RelayProxy-agent-windows-arm64.exe") (Join-Path $OutDir "RelayProxy-agent-windows-arm64.exe") -Force
     # Copy brand icon into Windows package for shortcuts / installers

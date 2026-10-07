@@ -56,8 +56,10 @@ public sealed class AgentProcessHost
             startInfo.ArgumentList.Add(_configPath);
         }
         startInfo.Environment[NativeTokenEnvironment] = managementToken;
-        var publishedGui = Path.Combine(AppContext.BaseDirectory, "relay-agent-gui.exe");
-        var nativeGuiPath = File.Exists(publishedGui) ? publishedGui : Environment.ProcessPath;
+        var launcherPath = Environment.GetEnvironmentVariable("RELAYPROXY_LAUNCHER_PATH");
+        var nativeGuiPath = !string.IsNullOrWhiteSpace(launcherPath) && File.Exists(launcherPath)
+            ? launcherPath
+            : Environment.ProcessPath;
         if (!string.IsNullOrWhiteSpace(nativeGuiPath))
             startInfo.Environment["RELAYPROXY_NATIVE_GUI_PATH"] = nativeGuiPath;
 

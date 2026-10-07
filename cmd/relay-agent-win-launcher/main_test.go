@@ -45,7 +45,9 @@ func TestReadPayloadDescriptorAndExtract(t *testing.T) {
 		t.Fatalf("payload hash mismatch")
 	}
 
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cacheRoot := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheRoot)
+	t.Setenv("LOCALAPPDATA", cacheRoot)
 	hostPath, err := ensurePayload(file, desc)
 	if err != nil {
 		t.Fatal(err)

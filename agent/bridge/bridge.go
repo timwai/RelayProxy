@@ -24,6 +24,7 @@ import (
 )
 
 const autoStartName = "RelayProxy Agent"
+const nativeGUIPathEnvironment = "RELAYPROXY_NATIVE_GUI_PATH"
 
 // UIBridge decouples the UI layer (WebView2 desktop window / JS bridge) from the
 // Agent core. It is the only package the GUI talks to, so the UI never reaches
@@ -39,6 +40,24 @@ type UIBridge struct {
 	setAutoStart        func(string, bool, bool) error
 }
 
+func autoStartExecutable() (string, error) {
+	if configured := strings.TrimSpace(os.Getenv(nativeGUIPathEnvironment)); configured != "" {
+		absolute, err := filepath.Abs(configured)
+		if err != nil {
+			return "", err
+		}
+		info, err := os.Stat(absolute)
+		if err != nil {
+			return "", fmt.Errorf("原生 GUI 自启动程序不可用: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return "", fmt.Errorf("原生 GUI 自启动程序不是普通文件: %s", absolute)
+		}
+		return absolute, nil
+	}
+	return os.Executable()
+}
+
 func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 	b := &UIBridge{
 		agent:               agent,
@@ -46,14 +65,14 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 		writeConfig:         config.SaveAgentConfig,
 		ensureDivertService: divert.EnsurePlatformService,
 		syncAutoStart: func(path string, requireAdmin bool) (func() error, error) {
-			executable, err := os.Executable()
+			executable, err := autoStartExecutable()
 			if err != nil {
 				return nil, err
 			}
 			return startup.SyncAutoStart(autoStartName, executable, path, requireAdmin)
 		},
 		setAutoStart: func(path string, enabled, requireAdmin bool) error {
-			executable, err := os.Executable()
+			executable, err := autoStartExecutable()
 			if err != nil {
 				return err
 			}

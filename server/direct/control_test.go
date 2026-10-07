@@ -147,13 +147,16 @@ func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
 
 			var gotExitID string
 			var got protocol.PublicDirectTicketValidationRequest
-			controller.SetTicketValidator(func(_ context.Context, exitID string, request protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
+			controller.SetTicketValidator(func(_ context.Context, exitID string, request protocol.PublicDirectTicketValidationRequest) (CurrentTicketAuthorization, error) {
 				gotExitID = exitID
 				got = request
 				if tc.validatorErr != nil {
-					return nil, tc.validatorErr
+					return CurrentTicketAuthorization{}, tc.validatorErr
 				}
-				return currentRelayPolicyForTest(t), nil
+				return CurrentTicketAuthorization{
+					RelayPolicy: currentRelayPolicyForTest(t),
+					BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: 50_000_000,
+				}, nil
 			})
 
 			request := protocol.PublicDirectRegistrationRequest{
@@ -187,6 +190,9 @@ func TestControllerValidatesCurrentTicketRevision(t *testing.T) {
 			if tc.wantSuccess && (response.RelayPolicy == nil || response.RelayPolicy.Fingerprint == "") {
 				t.Fatalf("successful validation omitted relay policy: %+v", response)
 			}
+			if tc.wantSuccess && (response.BrutalUploadBPS != 12_500_000 || response.BrutalDownloadBPS != 50_000_000) {
+				t.Fatalf("successful validation omitted Brutal profile: %+v", response)
+			}
 			if !tc.wantSuccess && response.ErrorCode != protocol.ErrCodeAccessDenied {
 				t.Fatalf("stale response=%+v", response)
 			}
@@ -204,9 +210,9 @@ func TestControllerRejectsTicketValidationForAnotherExit(t *testing.T) {
 	defer controller.Close()
 
 	called := false
-	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
+	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (CurrentTicketAuthorization, error) {
 		called = true
-		return currentRelayPolicyForTest(t), nil
+		return CurrentTicketAuthorization{RelayPolicy: currentRelayPolicyForTest(t)}, nil
 	})
 	stream := newControlStream(t, protocol.PublicDirectRegistrationRequest{
 		Operation: protocol.PublicDirectControlValidateTicket,
@@ -305,8 +311,8 @@ func TestControllerRejectsTicketValidationWithoutRelayPolicy(t *testing.T) {
 	registry := NewRegistry()
 	controller := NewController(context.Background(), registry, &Verifier{Registry: registry}, nil)
 	defer controller.Close()
-	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error) {
-		return nil, nil
+	controller.SetTicketValidator(func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (CurrentTicketAuthorization, error) {
+		return CurrentTicketAuthorization{}, nil
 	})
 	stream := newControlStream(t, protocol.PublicDirectRegistrationRequest{
 		Operation: protocol.PublicDirectControlValidateTicket,

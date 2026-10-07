@@ -82,6 +82,8 @@ type DeviceHello struct {
 	ClientVersion         string   `json:"clientVersion"`
 	RequestedCapabilities []string `json:"requestedCapabilities"`
 	TransportCapabilities []string `json:"transportCapabilities,omitempty"`
+	BrutalUploadBPS       uint64   `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS     uint64   `json:"brutalDownloadBps,omitempty"`
 }
 
 type AuthChallenge struct {
@@ -124,6 +126,8 @@ type DeviceAccepted struct {
 	ServerTime               int64        `json:"serverTime"`
 	RetryAfterSec            int          `json:"retryAfterSec,omitempty"`
 	TransportCapabilities    []string     `json:"transportCapabilities,omitempty"`
+	BrutalUploadBPS          uint64       `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS        uint64       `json:"brutalDownloadBps,omitempty"`
 	ErrorCode                string       `json:"errorCode,omitempty"`
 	ErrorMessage             string       `json:"errorMessage,omitempty"`
 }

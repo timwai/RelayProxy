@@ -252,7 +252,18 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 			return nil, false, fmt.Errorf("%w: invalid authentication request", ErrUnauthorized)
 		}
 		var relayPolicy *acl.Policy
-		if authenticator, ok := l.authenticator.(PolicyAuthenticator); ok {
+		uploadBPS := quiccongestion.CapRequestedRate(request.BrutalUploadBPS, 0)
+		downloadBPS := quiccongestion.CapRequestedRate(request.BrutalDownloadBPS, 0)
+		if authenticator, ok := l.authenticator.(AuthorizationAuthenticator); ok {
+			authorization, err := authenticator.AuthenticateAuthorization(authCtx, request)
+			if err != nil {
+				_ = writeHandshakeFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
+				return nil, false, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
+			}
+			relayPolicy = authorization.RelayPolicy
+			uploadBPS = quiccongestion.AuthorizeRequestedRate(uploadBPS, authorization.BrutalUploadBPS)
+			downloadBPS = quiccongestion.AuthorizeRequestedRate(downloadBPS, authorization.BrutalDownloadBPS)
+		} else if authenticator, ok := l.authenticator.(PolicyAuthenticator); ok {
 			policy, err := authenticator.AuthenticatePolicy(authCtx, request)
 			if err != nil {
 				_ = writeHandshakeFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
@@ -263,8 +274,6 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 			_ = writeHandshakeFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
 			return nil, false, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
 		}
-		uploadBPS := quiccongestion.CapRequestedRate(request.BrutalUploadBPS, 0)
-		downloadBPS := quiccongestion.CapRequestedRate(request.BrutalDownloadBPS, 0)
 		if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeResponse{
 			Success: true, BrutalUploadBPS: uploadBPS, BrutalDownloadBPS: downloadBPS,
 		}); err != nil {

@@ -133,7 +133,7 @@ func (c *Controller) HandleControl(ctx context.Context, stream tunnel.TunnelStre
 		}
 		_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
 			Success: true, RelayPolicy: &normalized,
-			BrutalUploadBPS: authorization.BrutalUploadBPS,
+			BrutalUploadBPS:   authorization.BrutalUploadBPS,
 			BrutalDownloadBPS: authorization.BrutalDownloadBPS,
 		})
 		return

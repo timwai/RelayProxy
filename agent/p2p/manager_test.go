@@ -514,3 +514,66 @@ func TestFailReadyForExitRemovesBrokenPathAndStartsCooldown(t *testing.T) {
 		t.Fatalf("unexpected failed-path status: %#v ok=%v", status, ok)
 	}
 }
+
+
+func TestP2PBrutalRatesFollowClientDirections(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	token := []byte("0123456789abcdef0123456789abcdef")
+
+	client := NewManager(ctx, func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		if message.Type != protocol.P2PControlConnectRequest {
+			t.Fatalf("unexpected client request: %#v", message)
+		}
+		if message.BrutalUploadBPS != 12_500_000 || message.BrutalDownloadBPS != 50_000_000 {
+			t.Fatalf("client request Brutal rates=%d/%d", message.BrutalUploadBPS, message.BrutalDownloadBPS)
+		}
+		return protocol.P2PControlMessage{
+			Type: protocol.P2PControlLeaseAck, SessionID: 71, ClientDeviceID: "client", ExitDeviceID: "exit",
+			SessionToken: token, LeaseExpiresAt: time.Now().Add(time.Minute).UnixMilli(),
+			BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: 50_000_000,
+		}, nil
+	}, testDescription("192.0.2.10:51000", "sha256:client"), time.Minute)
+	client.brutalUploadBPS = 12_500_000
+	client.brutalDownloadBPS = 50_000_000
+	defer client.Close()
+
+	clientSession, err := client.StartClient(ctx, "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSession.mu.RLock()
+	clientTx := clientSession.brutalTxBPS
+	clientSession.mu.RUnlock()
+	if clientTx != 12_500_000 {
+		t.Fatalf("client P2P sender target=%d, want 12500000", clientTx)
+	}
+
+	exit := NewManager(ctx, func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		return protocol.P2PControlMessage{
+			Type: protocol.P2PControlLeaseAck, SessionID: message.SessionID,
+			LeaseExpiresAt: time.Now().Add(time.Minute).UnixMilli(),
+		}, nil
+	}, testDescription("192.0.2.20:52000", "sha256:exit"), time.Minute)
+	defer exit.Close()
+	exit.HandleControl(protocol.P2PControlMessage{
+		Type: protocol.P2PControlConnectOffer, SessionID: 72, ClientDeviceID: "client", ExitDeviceID: "exit",
+		SessionToken: token, Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:51000"}},
+		PeerFingerprint: "sha256:client", LeaseExpiresAt: time.Now().Add(time.Minute).UnixMilli(),
+		BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: 50_000_000,
+	})
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if exitSession, ok := exit.Session(72); ok {
+			exitSession.mu.RLock()
+			exitTx := exitSession.brutalTxBPS
+			exitSession.mu.RUnlock()
+			if exitTx != 50_000_000 {
+				t.Fatalf("exit P2P sender target=%d, want 50000000", exitTx)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("exit P2P session was not created")
+}

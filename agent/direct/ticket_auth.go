@@ -25,7 +25,7 @@ var (
 	ErrTicketReplay  = errors.New("public direct ticket replayed")
 )
 
-type TicketCurrentValidator func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error)
+type TicketCurrentValidator func(context.Context, protocol.PublicDirectTicketClaims) (Authorization, error)
 
 type TicketAuthenticator struct {
 	issuer           string
@@ -69,25 +69,33 @@ func (a *TicketAuthenticator) Authenticate(ctx context.Context, request protocol
 	return err
 }
 
-func (a *TicketAuthenticator) AuthenticatePolicy(ctx context.Context, request protocol.PublicDirectAuthRequest) (*acl.Policy, error) {
+func (a *TicketAuthenticator) AuthenticateAuthorization(ctx context.Context, request protocol.PublicDirectAuthRequest) (Authorization, error) {
 	return a.authenticate(ctx, request, true)
 }
 
-func (a *TicketAuthenticator) authenticate(ctx context.Context, request protocol.PublicDirectAuthRequest, requirePolicy bool) (*acl.Policy, error) {
+func (a *TicketAuthenticator) AuthenticatePolicy(ctx context.Context, request protocol.PublicDirectAuthRequest) (*acl.Policy, error) {
+	authorization, err := a.authenticate(ctx, request, true)
+	if err != nil {
+		return nil, err
+	}
+	return authorization.RelayPolicy, nil
+}
+
+func (a *TicketAuthenticator) authenticate(ctx context.Context, request protocol.PublicDirectAuthRequest, requirePolicy bool) (Authorization, error) {
 	if a == nil || len(a.publicKey) != ed25519.PublicKeySize {
-		return nil, ErrAuthenticatorRequired
+		return Authorization{}, ErrAuthenticatorRequired
 	}
 	request.ClientDeviceID = strings.TrimSpace(request.ClientDeviceID)
 	request.ExitDeviceID = strings.TrimSpace(request.ExitDeviceID)
 	if request.Version != protocol.PublicDirectAuthVersion ||
 		request.ClientDeviceID == "" || request.ExitDeviceID != a.exitID ||
 		len(request.Ticket) == 0 || len(request.Ticket) > maxSignedTicketSize {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 
 	var signed protocol.PublicDirectSignedTicket
 	if err := json.Unmarshal(request.Ticket, &signed); err != nil {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 	claims := signed.Claims
 	if claims.Version != protocol.PublicDirectTicketVersion ||
@@ -98,41 +106,46 @@ func (a *TicketAuthenticator) authenticate(ctx context.Context, request protocol
 		claims.PolicyRevision <= 0 || claims.AuthorizationRevision <= 0 ||
 		len(claims.Nonce) < 16 || len(claims.Nonce) > 64 ||
 		!containsDirectCapability(claims.AllowedCapabilities, protocol.PublicDirectTicketCapabilityProxy) {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 	if len(signed.Signature) != ed25519.SignatureSize ||
 		!ed25519.Verify(a.publicKey, protocol.PublicDirectTicketPayload(claims), signed.Signature) {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 
 	now := a.now().UTC()
 	if claims.IssuedAt > now.Add(maxTicketClockSkew).Unix() ||
 		claims.ExpiresAt <= claims.IssuedAt {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 	if claims.ExpiresAt <= now.Unix() {
-		return nil, ErrTicketExpired
+		return Authorization{}, ErrTicketExpired
 	}
 	if time.Duration(claims.ExpiresAt-claims.IssuedAt)*time.Second > maxTicketLifetime ||
 		claims.IssuedAt < now.Add(-maxTicketLifetime-maxTicketClockSkew).Unix() {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 
 	a.mu.Lock()
 	currentValidator := a.currentValidator
 	a.mu.Unlock()
-	var relayPolicy *acl.Policy
+	authorization := Authorization{}
 	if currentValidator != nil {
-		policy, err := currentValidator(ctx, claims)
+		current, err := currentValidator(ctx, claims)
 		if err != nil {
-			return nil, ErrUnauthorized
+			return Authorization{}, ErrUnauthorized
 		}
-		relayPolicy, err = normalizeDirectRelayPolicy(policy)
+		relayPolicy, err := normalizeDirectRelayPolicy(current.RelayPolicy)
 		if err != nil {
-			return nil, ErrUnauthorized
+			return Authorization{}, ErrUnauthorized
+		}
+		authorization = Authorization{
+			RelayPolicy: relayPolicy,
+			BrutalUploadBPS: current.BrutalUploadBPS,
+			BrutalDownloadBPS: current.BrutalDownloadBPS,
 		}
 	} else if requirePolicy {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 
 	replayKey := claims.Issuer + "\x00" + string(claims.Nonce)
@@ -145,13 +158,13 @@ func (a *TicketAuthenticator) authenticate(ctx context.Context, request protocol
 		}
 	}
 	if _, exists := a.replay[replayKey]; exists {
-		return nil, ErrTicketReplay
+		return Authorization{}, ErrTicketReplay
 	}
 	if len(a.replay) >= maxReplayEntries {
-		return nil, ErrUnauthorized
+		return Authorization{}, ErrUnauthorized
 	}
 	a.replay[replayKey] = claims.ExpiresAt
-	return relayPolicy, nil
+	return authorization, nil
 }
 
 func normalizeDirectRelayPolicy(policy *acl.Policy) (*acl.Policy, error) {

@@ -160,16 +160,6 @@ func main() {
 	if noWebFlag {
 		cfgFile.Web.Enabled = config.BoolPtr(false)
 	}
-	// The native WinUI shell owns a separate process and needs a private
-	// loopback control channel even when the user disabled the browser UI or
-	// configured a different web token. The shell supplies a per-run random
-	// token through the child environment, so it never needs to persist or log
-	// that credential. An explicit --no-web still wins for manual CLI launches.
-	if token := strings.TrimSpace(os.Getenv("RELAYPROXY_NATIVE_MANAGEMENT_TOKEN")); token != "" && !noWebFlag {
-		cfgFile.Web.Enabled = config.BoolPtr(true)
-		cfgFile.Web.Listen = "127.0.0.1"
-		cfgFile.Web.Token = token
-	}
 	if err := config.NormalizeAgentConfig(cfgFile); err != nil {
 		log.Fatalf("[Config] Invalid startup configuration: %v", err)
 	}
@@ -283,6 +273,31 @@ func main() {
 	uiBridge := bridge.NewUIBridge(agent, *configPath)
 	gui.Version = Version
 
+	// The WinUI shell uses its own ephemeral loopback management listener.
+	// This leaves the user's browser-management configuration completely
+	// untouched: web.enabled, listen address, port and persisted token keep
+	// their original meaning. The per-run token is supplied by the parent UI
+	// through the child environment and is never written to disk or logs.
+	var nativeManagement *gui.WebServer
+	if nativeToken := strings.TrimSpace(os.Getenv("RELAYPROXY_NATIVE_MANAGEMENT_TOKEN")); nativeToken != "" {
+		nativeManagement, err = gui.StartWeb(uiBridge, gui.WebOptions{
+			Listen: "127.0.0.1",
+			Port:   0,
+			Token:  nativeToken,
+		})
+		if err != nil {
+			log.Fatalf("[Native] Failed to start private management API: %v", err)
+		}
+		log.Printf("[Native] Management API: http://%s/", nativeManagement.Addr())
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := nativeManagement.Close(ctx); err != nil {
+				log.Printf("[Native] Failed to stop private management API cleanly: %v", err)
+			}
+		}()
+	}
+
 	// The browser UI uses the same embedded page and UIBridge as the native
 	// Windows window. It is enabled by default on loopback so Linux/macOS and
 	// service-style launches remain fully manageable without a desktop session.
@@ -352,15 +367,20 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigChan)
-	var webDone <-chan struct{}
+	var webDone, nativeDone <-chan struct{}
 	if webServer != nil {
 		webDone = webServer.Done()
+	}
+	if nativeManagement != nil {
+		nativeDone = nativeManagement.Done()
 	}
 	select {
 	case sig := <-sigChan:
 		log.Printf("[Agent] Received signal %v, shutting down...", sig)
 	case <-webDone:
 		log.Println("[Agent] Shutdown requested from the web management page.")
+	case <-nativeDone:
+		log.Println("[Agent] Shutdown requested from the native management API.")
 	}
 	_ = agent.Close()
 	log.Println("[Agent] RelayProxy Agent cleanly stopped.")

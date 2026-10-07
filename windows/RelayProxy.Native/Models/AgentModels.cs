@@ -7,6 +7,7 @@ public sealed class AgentStatusDto
     [JsonPropertyName("connected")] public bool Connected { get; set; }
     [JsonPropertyName("transport")] public string Transport { get; set; } = "";
     [JsonPropertyName("latency")] public long LatencyMs { get; set; }
+    [JsonPropertyName("deviceId")] public string DeviceId { get; set; } = "";
     [JsonPropertyName("deviceName")] public string DeviceName { get; set; } = "";
     [JsonPropertyName("identityName")] public string IdentityName { get; set; } = "";
     [JsonPropertyName("selectedExit")] public string SelectedExit { get; set; } = "";

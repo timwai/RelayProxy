@@ -8,11 +8,13 @@ on:
     paths:
       - "windows/RelayProxy.Native/**"
       - "scripts/build-windows-native.ps1"
+      - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
   pull_request:
     paths:
       - "windows/RelayProxy.Native/**"
       - "scripts/build-windows-native.ps1"
+      - "scripts/build.ps1"
       - ".github/workflows/windows-native-ui.yml"
 
 permissions:
@@ -27,8 +29,12 @@ jobs:
         include:
           - runtime: win-x64
             platform: x64
+            goarch: amd64
+            artifact: windows-amd64-native
           - runtime: win-arm64
             platform: ARM64
+            goarch: arm64
+            artifact: windows-arm64-native
 
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +43,10 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+
       - name: Restore
         shell: pwsh
         run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }}
@@ -44,3 +54,35 @@ jobs:
       - name: Build
         shell: pwsh
         run: dotnet build .\windows\RelayProxy.Native\RelayProxy.Native.csproj -c Release -r ${{ matrix.runtime }} -p:Platform=${{ matrix.platform }} --no-restore
+
+      - name: Publish native GUI
+        shell: pwsh
+        run: |
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r ${{ matrix.runtime }} `
+            -p:Platform=${{ matrix.platform }} `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            --self-contained true `
+            --no-restore `
+            -o .\artifacts\${{ matrix.runtime }}
+
+      - name: Build Go Agent core
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "${{ matrix.goarch }}"
+          go build -trimpath -o ".\artifacts\${{ matrix.runtime }}\relay-agent.exe" .\cmd\relay-agent
+
+      - name: Verify release layout
+        shell: pwsh
+        run: |
+          if (-not (Test-Path ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe")) { throw "relay-agent-gui.exe missing" }
+          if (-not (Test-Path ".\artifacts\${{ matrix.runtime }}\relay-agent.exe")) { throw "relay-agent.exe missing" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: .\artifacts\${{ matrix.runtime }}
+          if-no-files-found: error

@@ -248,8 +248,8 @@ jobs:
         shell: pwsh
         run: |
           $hostDir = ".\host\${{ matrix.runtime }}"
-          $host = Join-Path $hostDir "RelayProxy.NativeHost.exe"
-          if (-not (Test-Path $host)) { throw "RelayProxy.NativeHost.exe missing from WinUI host publish" }
+          $nativeHost = Join-Path $hostDir "RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "RelayProxy.NativeHost.exe missing from WinUI host publish" }
           $extra = @(Get-ChildItem -LiteralPath $hostDir -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
           if ($extra.Count -gt 0) {
             throw "WinUI host publish has sidecars: $($extra.Name -join ', ')"
@@ -265,12 +265,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "rename-safe launcher build failed" }
 
           $exe = ".\single\${{ matrix.runtime }}\${{ matrix.exe }}"
-          & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pack-windows-launcher.ps1 -Launcher $stub -Payload $host -Output $exe
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pack-windows-launcher.ps1 -Launcher $stub -Payload $nativeHost -Output $exe
           if ($LASTEXITCODE -ne 0) { throw "launcher payload packing failed" }
 
           $core = ".\staging\${{ matrix.runtime }}\relay-agent.exe"
           $finalBytes = (Get-Item $exe).Length
-          $hostBytes = (Get-Item $host).Length
+          $hostBytes = (Get-Item $nativeHost).Length
           $coreBytes = (Get-Item $core).Length
           $overheadBytes = [Math]::Max(0, $finalBytes - $hostBytes)
           $finalMb = [math]::Round($finalBytes / 1MB, 2)

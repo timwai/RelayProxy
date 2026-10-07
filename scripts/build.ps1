@@ -12,7 +12,7 @@
     - 每个平台目录的完整 ZIP 分发包
 
   说明：Windows 默认桌面客户端使用 WinUI 3 + Windows App SDK，不再依赖 WebView2。
-  relay-agent-gui.exe 是原生 UI，启动同目录 relay-agent.exe --no-gui 作为 Go 网络核心；
+  RelayProxy-agent-windows-<arch>.exe 是原生 UI，启动同目录 relay-agent.exe --no-gui 作为 Go 网络核心；
   relay-agent-wails.exe 暂时保留旧 Wails/WebView2 GUI 作为迁移期回退。
   Windows arm64 产物可运行 Agent / Server，但系统透明代理目前仍只支持 amd64。
   管理界面通过 Linux 服务端的 Admin HTTPS 控制台访问，或直接使用桌面窗口。
@@ -150,6 +150,7 @@ try {
         $stageDir = Join-Path ([System.IO.Path]::GetTempPath()) ("relayproxy-native-" + [Guid]::NewGuid().ToString("N"))
         $publishDir = Join-Path $stageDir "publish"
         $corePath = Join-Path $stageDir "relay-agent.exe"
+        $nativeFileName = if ($Runtime -eq "win-arm64") { "RelayProxy-agent-windows-arm64.exe" } else { "RelayProxy-agent-windows-amd64.exe" }
         New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
         New-Item -ItemType Directory -Path $publishDir -Force | Out-Null
 
@@ -167,7 +168,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent build failed: $GoArch" }
 
             Reset-GoHostEnvironment
-            & dotnet restore $project -r $Runtime -p:PublishTrimmed=true
+            & dotnet restore $project -r $Runtime
             if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed: $Runtime" }
 
             & dotnet publish $project `
@@ -183,9 +184,7 @@ try {
                 -p:PublishSingleFile=true `
                 -p:EnableCompressionInSingleFile=true `
                 -p:PublishReadyToRun=false `
-                -p:PublishTrimmed=true `
-                -p:TrimMode=partial `
-                -p:SuppressTrimAnalysisWarnings=false `
+                -p:PublishTrimmed=false `
                 -p:EnableMsixTooling=true `
                 -p:IncludeAllContentForSelfExtract=true `
                 -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -197,15 +196,15 @@ try {
                 -o $publishDir
             if ($LASTEXITCODE -ne 0) { throw "dotnet single-file publish failed: $Runtime" }
 
-            $nativeExe = Join-Path $publishDir "relay-agent-gui.exe"
+            $nativeExe = Join-Path $publishDir $nativeFileName
             if (-not (Test-Path $nativeExe)) { throw "Native Windows single EXE not found: $nativeExe" }
-            $unexpected = @(Get-ChildItem -LiteralPath $publishDir -Force | Where-Object { $_.Name -ne "relay-agent-gui.exe" })
+            $unexpected = @(Get-ChildItem -LiteralPath $publishDir -Force | Where-Object { $_.Name -ne $nativeFileName })
             if ($unexpected.Count -gt 0) {
                 $names = ($unexpected | ForEach-Object { $_.Name }) -join ", "
                 throw "Single-file publish produced unexpected sidecar files: $names"
             }
 
-            Copy-Item $nativeExe (Join-Path $OutputDir "relay-agent-gui.exe") -Force
+            Copy-Item $nativeExe (Join-Path $OutputDir $nativeFileName) -Force
 
             $nativeSize = (Get-Item $nativeExe).Length
             $coreSize = (Get-Item $corePath).Length
@@ -213,7 +212,7 @@ try {
             Write-Host "  SIZE  native single EXE: $([math]::Round($nativeSize / 1MB, 2)) MB" -ForegroundColor Green
             Write-Host "  SIZE  embedded Go Core: $([math]::Round($coreSize / 1MB, 2)) MB"
             Write-Host "  SIZE  UI + .NET + Windows App SDK payload: ~$([math]::Round($runtimePayloadSize / 1MB, 2)) MB"
-            Write-Host "  MODE  single-file compression + partial trimming enabled; ReadyToRun disabled" -ForegroundColor DarkGray
+            Write-Host "  MODE  single-file compression enabled; trimming disabled for Windows 10 compatibility; ReadyToRun disabled" -ForegroundColor DarkGray
         }
         finally {
             $env:GOOS = $savedGoos
@@ -381,8 +380,10 @@ try {
         -Output (Join-Path $OutDir "windows-arm64/relay-server.exe")
 
     # Primary portable Windows Agent downloads: one EXE per architecture.
-    Copy-Item (Join-Path $OutDir "windows-amd64/relay-agent-gui.exe") (Join-Path $OutDir "RelayProxy-agent-windows-amd64.exe") -Force
-    Copy-Item (Join-Path $OutDir "windows-arm64/relay-agent-gui.exe") (Join-Path $OutDir "RelayProxy-agent-windows-arm64.exe") -Force
+    # Preserve the compiled WinUI executable name. Renaming a self-contained WinUI EXE
+    # after publish can break XAML resource resolution.
+    Copy-Item (Join-Path $OutDir "windows-amd64/RelayProxy-agent-windows-amd64.exe") (Join-Path $OutDir "RelayProxy-agent-windows-amd64.exe") -Force
+    Copy-Item (Join-Path $OutDir "windows-arm64/RelayProxy-agent-windows-arm64.exe") (Join-Path $OutDir "RelayProxy-agent-windows-arm64.exe") -Force
     # Copy brand icon into Windows package for shortcuts / installers
     foreach ($t in @("windows-amd64", "windows-arm64")) {
         $brandOut = Join-Path $OutDir "$t/brand"
@@ -481,11 +482,11 @@ try {
   darwin-arm64/relay-agent          macOS Apple Silicon Agent
   darwin-arm64/relay-server         macOS Apple Silicon Server（可构建实验产物）
   darwin-arm64/RelayProxy.app       macOS Apple Silicon Agent App 包装
-  windows-amd64/relay-agent-gui.exe Windows x64 WinUI 3 单文件桌面客户端
+  windows-amd64/RelayProxy-agent-windows-amd64.exe Windows x64 WinUI 3 单文件桌面客户端
   windows-amd64/relay-agent.exe     Windows x64 Agent Core / CLI
   windows-amd64/relay-agent-wails.exe Windows x64 旧 Wails GUI（迁移期回退）
   windows-amd64/relay-server.exe    Windows x64 Server（含 Admin UI）
-  windows-arm64/relay-agent-gui.exe Windows ARM64 WinUI 3 单文件桌面客户端
+  windows-arm64/RelayProxy-agent-windows-arm64.exe Windows ARM64 WinUI 3 单文件桌面客户端
   windows-arm64/relay-agent.exe     Windows ARM64 Agent Core / CLI
   windows-arm64/relay-agent-wails.exe Windows ARM64 旧 Wails GUI（迁移期回退）
   windows-arm64/relay-server.exe    Windows ARM64 Server（含 Admin UI）

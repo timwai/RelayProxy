@@ -6,7 +6,11 @@
     <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <RootNamespace>RelayProxy.Native</RootNamespace>
-    <AssemblyName>relay-agent-gui</AssemblyName>
+    <!-- WinUI single-file XAML resources are bound to the executable name.
+         Never rename the published EXE after build; compile each RID with its final name. -->
+    <AssemblyName Condition="'$(RuntimeIdentifier)' == 'win-x64'">RelayProxy-agent-windows-amd64</AssemblyName>
+    <AssemblyName Condition="'$(RuntimeIdentifier)' == 'win-arm64'">RelayProxy-agent-windows-arm64</AssemblyName>
+    <AssemblyName Condition="'$(RuntimeIdentifier)' != 'win-x64' and '$(RuntimeIdentifier)' != 'win-arm64'">RelayProxy-agent-windows</AssemblyName>
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
     <Nullable>enable</Nullable>
@@ -30,9 +34,7 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <PublishReadyToRun>false</PublishReadyToRun>
-    <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
-    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
+    <PublishTrimmed>false</PublishTrimmed>
     <DebugType>None</DebugType>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>

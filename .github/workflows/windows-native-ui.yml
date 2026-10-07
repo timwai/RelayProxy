@@ -106,10 +106,12 @@ jobs:
           - runtime: win-x64
             platform: x64
             goarch: amd64
+            exe: RelayProxy-agent-windows-amd64.exe
             artifact: windows-amd64-native
           - runtime: win-arm64
             platform: ARM64
             goarch: arm64
+            exe: RelayProxy-agent-windows-arm64.exe
             artifact: windows-arm64-native
 
     steps:
@@ -173,7 +175,7 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }} -p:PublishTrimmed=true
+        run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }}
 
       - name: Verify Windows 10 compatibility declaration
         shell: pwsh
@@ -215,9 +217,7 @@ jobs:
             -p:PublishSingleFile=true `
             -p:EnableCompressionInSingleFile=true `
             -p:PublishReadyToRun=false `
-            -p:PublishTrimmed=true `
-            -p:TrimMode=partial `
-            -p:SuppressTrimAnalysisWarnings=false `
+            -p:PublishTrimmed=false `
             -p:EnableMsixTooling=true `
             -p:IncludeAllContentForSelfExtract=true `
             -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -232,9 +232,9 @@ jobs:
         shell: pwsh
         run: |
           $dir = ".\single\${{ matrix.runtime }}"
-          $exe = Join-Path $dir "relay-agent-gui.exe"
-          if (-not (Test-Path $exe)) { throw "relay-agent-gui.exe missing from single-file publish" }
-          $extra = @(Get-ChildItem -LiteralPath $dir -Force | Where-Object { $_.Name -ne "relay-agent-gui.exe" })
+          $exe = Join-Path $dir "${{ matrix.exe }}"
+          if (-not (Test-Path $exe)) { throw "${{ matrix.exe }} missing from single-file publish" }
+          $extra = @(Get-ChildItem -LiteralPath $dir -Force | Where-Object { $_.Name -ne "${{ matrix.exe }}" })
           if ($extra.Count -gt 0) {
             throw "single-file publish has sidecars: $($extra.Name -join ', ')"
           }
@@ -249,7 +249,7 @@ jobs:
           Write-Host "[size] single EXE: $singleMb MB"
           Write-Host "[size] embedded Go Core: $coreMb MB"
           Write-Host "[size] UI + .NET + Windows App SDK payload: ~$runtimeMb MB"
-          $sizeBudgetMb = 80
+          $sizeBudgetMb = 110
           if ($singleBytes -gt ($sizeBudgetMb * 1MB)) {
             throw "Native single EXE exceeds ${sizeBudgetMb} MiB size budget: $singleMb MiB"
           }
@@ -259,20 +259,20 @@ jobs:
           ### ${{ matrix.runtime }} native package size
           | Item | Size |
           | --- | ---: |
-          | relay-agent-gui.exe | $singleMb MB |
+          | ${{ matrix.exe }} | $singleMb MB |
           | embedded Go Core | $coreMb MB |
           | UI + .NET + Windows App SDK (approx.) | $runtimeMb MB |
 
-          Single-file compression and partial trimming are enabled, ReadyToRun is disabled, and the complete Windows App SDK graph is retained for Windows 10 compatibility. CI enforces an 80 MiB single-EXE size budget.
+          Single-file compression is enabled, trimming is disabled for Windows 10 compatibility, and the complete Windows App SDK graph is retained. CI enforces a 110 MiB single-EXE size budget.
           "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
 
-          Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe" -Force
+          Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\${{ matrix.exe }}" -Force
 
       - name: Smoke test native x64 release startup
         if: matrix.runtime == 'win-x64'
         shell: pwsh
         run: |
-          $exe = (Resolve-Path ".\single\${{ matrix.runtime }}\relay-agent-gui.exe").Path
+          $exe = (Resolve-Path ".\single\${{ matrix.runtime }}\${{ matrix.exe }}").Path
           $process = $null
           try {
             $process = Start-Process -FilePath $exe -ArgumentList "--minimized" -PassThru
@@ -308,7 +308,7 @@ jobs:
       - name: Verify release layout
         shell: pwsh
         run: |
-          if (-not (Test-Path ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe")) { throw "relay-agent-gui.exe missing" }
+          if (-not (Test-Path ".\artifacts\${{ matrix.runtime }}\${{ matrix.exe }}")) { throw "${{ matrix.exe }} missing" }
           if (-not (Test-Path ".\artifacts\${{ matrix.runtime }}\relay-agent.exe")) { throw "relay-agent.exe missing" }
           if (-not (Test-Path ".\artifacts\${{ matrix.runtime }}\relay-agent-wails.exe")) { throw "relay-agent-wails.exe missing" }
 
@@ -321,5 +321,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: RelayProxy-agent-${{ matrix.runtime }}-single-exe
-          path: .\single\${{ matrix.runtime }}\relay-agent-gui.exe
+          path: .\single\${{ matrix.runtime }}\${{ matrix.exe }}
           if-no-files-found: error

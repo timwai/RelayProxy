@@ -11,6 +11,7 @@ $Root = Split-Path -Parent $PSScriptRoot
 $Project = Join-Path $Root "windows\RelayProxy.Native\RelayProxy.Native.csproj"
 $Platform = if ($Runtime -eq "win-arm64") { "ARM64" } else { "x64" }
 $GoArch = if ($Runtime -eq "win-arm64") { "arm64" } else { "amd64" }
+$NativeExeName = if ($Runtime -eq "win-arm64") { "RelayProxy-agent-windows-arm64.exe" } else { "RelayProxy-agent-windows-amd64.exe" }
 if ([string]::IsNullOrWhiteSpace($OutDir)) {
     $OutDir = Join-Path $Root "dist\windows-native-$($Runtime.Substring(4))"
 }
@@ -35,7 +36,7 @@ try {
     if (-not (Test-Path $CorePath)) { throw "Embedded Go Agent core missing: $CorePath" }
 
     Write-Host "[native-ui] Restore $Runtime"
-    dotnet restore $Project -r $Runtime -p:PublishTrimmed=true
+    dotnet restore $Project -r $Runtime
     if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed" }
 
     if (Test-Path $OutDir) {
@@ -53,9 +54,7 @@ try {
         -p:PublishSingleFile=true `
         -p:EnableCompressionInSingleFile=true `
         -p:PublishReadyToRun=false `
-        -p:PublishTrimmed=true `
-        -p:TrimMode=partial `
-        -p:SuppressTrimAnalysisWarnings=false `
+        -p:PublishTrimmed=false `
         -p:EnableMsixTooling=true `
         -p:IncludeAllContentForSelfExtract=true `
         -p:IncludeNativeLibrariesForSelfExtract=true `
@@ -67,10 +66,10 @@ try {
         -o $OutDir
     if ($LASTEXITCODE -ne 0) { throw "WinUI single-file publish failed" }
 
-    $NativeExe = Join-Path $OutDir "relay-agent-gui.exe"
+    $NativeExe = Join-Path $OutDir $NativeExeName
     if (-not (Test-Path $NativeExe)) { throw "Single-file executable missing: $NativeExe" }
 
-    $Unexpected = @(Get-ChildItem -LiteralPath $OutDir -Force | Where-Object { $_.Name -ne "relay-agent-gui.exe" })
+    $Unexpected = @(Get-ChildItem -LiteralPath $OutDir -Force | Where-Object { $_.Name -ne $NativeExeName })
     if ($Unexpected.Count -gt 0) {
         $Names = ($Unexpected | ForEach-Object { $_.Name }) -join ", "
         throw "Single-file publish produced unexpected sidecar files: $Names"
@@ -82,7 +81,7 @@ try {
     Write-Host "[native-ui] Single EXE: $NativeExe ($([math]::Round($Size / 1MB, 2)) MB)" -ForegroundColor Green
     Write-Host "[native-ui] Embedded Go Core: $([math]::Round($CoreSize / 1MB, 2)) MB"
     Write-Host "[native-ui] UI + .NET + Windows App SDK payload: ~$([math]::Round($RuntimePayloadSize / 1MB, 2)) MB"
-    Write-Host "[native-ui] Single-file compression: enabled; ReadyToRun: disabled; partial trimming: enabled" -ForegroundColor DarkGray
+    Write-Host "[native-ui] Single-file compression: enabled; ReadyToRun: disabled; trimming: disabled for Windows 10 compatibility" -ForegroundColor DarkGray
 }
 finally {
     $env:GOOS = $oldGoos

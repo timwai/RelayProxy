@@ -47,12 +47,24 @@ public sealed partial class MainWindow : Window
 
     public MainWindow()
     {
-        InitializeComponent();
+        try
+        {
+            InitializeComponent();
+        }
+        catch (Exception ex)
+        {
+            StartupDiagnostics.Write("MainWindow XAML initialization failed.", ex);
+            throw;
+        }
         RegisterDirtyTracking();
         Title = "RelayProxy";
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
-        SystemBackdrop = new MicaBackdrop();
+        if (OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22000))
+        {
+            try { SystemBackdrop = new MicaBackdrop(); }
+            catch (Exception ex) { StartupDiagnostics.Write("Mica backdrop unavailable; using normal background.", ex); }
+        }
         AppWindow.Resize(new SizeInt32(1180, 780));
         var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "RelayProxy.ico");
         if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);

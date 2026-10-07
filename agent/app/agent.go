@@ -130,6 +130,9 @@ type AgentConfig struct {
 	TCPPort               int
 	Mode                  string // "CLIENT", "EXIT", "BOTH"
 	TransportMode         string // "auto", "quic_only", "tcp_only"
+	BrutalUploadBPS       uint64
+	BrutalDownloadBPS     uint64
+	DisableLossCompensation bool
 	SOCKS5Enabled         *bool
 	SOCKS5Listen          string // "127.0.0.1:1080"
 	HTTPEnabled           *bool
@@ -633,6 +636,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		ClientNonce:     clientNonce, DeviceName: cfg.DeviceName, Platform: runtime.GOOS,
 		Arch: runtime.GOARCH, ClientVersion: "2.0.0",
 		RequestedCapabilities: requested, TransportCapabilities: transportCaps,
+		BrutalUploadBPS: cfg.BrutalUploadBPS, BrutalDownloadBPS: cfg.BrutalDownloadBPS,
 	}
 	if err := protocol.WriteJSON(ctrl, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)
@@ -661,6 +665,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		return errors.New("server returned an incomplete device approval")
 	}
 	tunnel.SetPeerCapabilities(sess, accepted.TransportCapabilities)
+	if accepted.BrutalUploadBPS > 0 && tunnel.UseBrutal(sess, accepted.BrutalUploadBPS, cfg.DisableLossCompensation) {
+		log.Printf("[Transport] Relay QUIC upload switched to Brutal target=%d B/s", accepted.BrutalUploadBPS)
+	}
 	if err := ctrl.SetDeadline(time.Time{}); err != nil {
 		return err
 	}

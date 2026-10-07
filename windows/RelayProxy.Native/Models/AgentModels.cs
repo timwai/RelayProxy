@@ -16,6 +16,13 @@ public sealed class AgentStatusDto
     [JsonPropertyName("exitRunning")] public bool ExitRunning { get; set; }
     [JsonPropertyName("activeStreams")] public long ActiveStreams { get; set; }
     [JsonPropertyName("approvalState")] public string ApprovalState { get; set; } = "";
+    [JsonPropertyName("rdpListenAddr")] public string RDPListenAddr { get; set; } = "";
+    [JsonPropertyName("rdpTargetId")] public string RDPTargetID { get; set; } = "";
+    [JsonPropertyName("rdpUdpEnabled")] public bool RDPUDPEnabled { get; set; }
+    [JsonPropertyName("rdpUdpActive")] public bool RDPUDPActive { get; set; }
+    [JsonPropertyName("rdpUdpReason")] public string RDPUDPReason { get; set; } = "";
+    [JsonPropertyName("rdpPathTcp")] public string RDPPathTCP { get; set; } = "";
+    [JsonPropertyName("rdpPathUdp")] public string RDPPathUDP { get; set; } = "";
     [JsonPropertyName("directState")] public string DirectState { get; set; } = "";
     [JsonPropertyName("directPath")] public string DirectPath { get; set; } = "";
     [JsonPropertyName("directRttMs")] public long DirectRttMs { get; set; }

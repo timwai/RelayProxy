@@ -20,6 +20,7 @@ const runKeyPath = `Software\Microsoft\Windows\CurrentVersion\Run`
 
 const (
 	startupHelperFlagName = "relayproxy-startup-helper"
+	startupTargetFlagName = "relayproxy-startup-target"
 	startupHelperInstall  = "install"
 	startupHelperRemove   = "remove"
 
@@ -87,9 +88,9 @@ func SetAutoStart(appName, exePath, configPath string, enable, requireAdmin bool
 	if !elevated && !sameAutoStart(before, desired) {
 		switch {
 		case desired.taskXML != "":
-			return runElevatedAutoStartHelper(configPath, startupHelperInstall)
+			return runElevatedAutoStartHelper(configPath, startupHelperInstall, exePath)
 		case before.taskXML != "":
-			if err := runElevatedAutoStartHelper(configPath, startupHelperRemove); err != nil {
+			if err := runElevatedAutoStartHelper(configPath, startupHelperRemove, exePath); err != nil {
 				return err
 			}
 			if desired.command != "" {
@@ -125,33 +126,33 @@ func SyncAutoStart(appName, exePath, configPath string, requireAdmin bool) (func
 	}
 	elevated := windows.GetCurrentProcessToken().IsElevated()
 	if !elevated && before.taskXML == "" && desired.taskXML != "" {
-		if err := runElevatedAutoStartHelper(configPath, startupHelperInstall); err != nil {
+		if err := runElevatedAutoStartHelper(configPath, startupHelperInstall, exePath); err != nil {
 			return nil, err
 		}
 		beforeCommand := before.command
 		return func() error {
 			startupMu.Lock()
 			defer startupMu.Unlock()
-			removeErr := runElevatedAutoStartHelper(configPath, startupHelperRemove)
+			removeErr := runElevatedAutoStartHelper(configPath, startupHelperRemove, exePath)
 			restoreErr := store.writeCommand(beforeCommand)
 			return errors.Join(removeErr, restoreErr)
 		}, nil
 	}
 	if !elevated && before.taskXML != "" && desired.taskXML == "" {
-		if err := runElevatedAutoStartHelper(configPath, startupHelperRemove); err != nil {
+		if err := runElevatedAutoStartHelper(configPath, startupHelperRemove, exePath); err != nil {
 			return nil, err
 		}
 		if err := store.writeCommand(desired.command); err != nil {
 			// Best-effort restore of the managed elevated task if publishing the
 			// ordinary Run entry fails.
-			restoreErr := runElevatedAutoStartHelper(configPath, startupHelperInstall)
+			restoreErr := runElevatedAutoStartHelper(configPath, startupHelperInstall, exePath)
 			return nil, errors.Join(err, restoreErr)
 		}
 		return func() error {
 			startupMu.Lock()
 			defer startupMu.Unlock()
 			removeErr := store.writeCommand("")
-			restoreErr := runElevatedAutoStartHelper(configPath, startupHelperInstall)
+			restoreErr := runElevatedAutoStartHelper(configPath, startupHelperInstall, exePath)
 			return errors.Join(removeErr, restoreErr)
 		}, nil
 	}
@@ -338,23 +339,32 @@ func (s *windowsAutoStartStore) deleteTask() error { return deleteLogonTask(s.ta
 func ExePath() (string, error) { return os.Executable() }
 
 func HelperFlagName() string { return startupHelperFlagName }
+func TargetFlagName() string { return startupTargetFlagName }
 
-func RunElevatedHelper(action, appName, configPath string) error {
+func RunElevatedHelper(action, appName, configPath, targetExe string) error {
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		return errors.New("管理员自启动辅助进程未获得提升权限")
 	}
 	if action != startupHelperInstall && action != startupHelperRemove {
 		return fmt.Errorf("未知的自启动辅助操作 %q", action)
 	}
-	executable, err := os.Executable()
+	targetExe = strings.TrimSpace(targetExe)
+	if targetExe == "" {
+		var err error
+		targetExe, err = os.Executable()
+		if err != nil {
+			return err
+		}
+	}
+	targetExe, err := filepath.Abs(targetExe)
 	if err != nil {
 		return err
 	}
 	enable := action == startupHelperInstall
-	return SetAutoStart(appName, executable, configPath, enable, enable)
+	return SetAutoStart(appName, targetExe, configPath, enable, enable)
 }
 
-func runElevatedAutoStartHelper(configPath, action string) error {
+func runElevatedAutoStartHelper(configPath, action, targetExe string) error {
 	if action != startupHelperInstall && action != startupHelperRemove {
 		return fmt.Errorf("未知的自启动辅助操作 %q", action)
 	}
@@ -377,7 +387,16 @@ func runElevatedAutoStartHelper(configPath, action string) error {
 	if err != nil {
 		return err
 	}
-	parameters := "--" + startupHelperFlagName + "=" + action
+	targetExe = strings.TrimSpace(targetExe)
+	if targetExe == "" || strings.ContainsRune(targetExe, 0) {
+		return errors.New("无效的原生 GUI 自启动目标")
+	}
+	targetExe, err = filepath.Abs(targetExe)
+	if err != nil {
+		return err
+	}
+	parameters := "--" + startupHelperFlagName + "=" + action +
+		" --" + startupTargetFlagName + " " + syscall.EscapeArg(targetExe)
 	if configPath != "" {
 		parameters += " --config " + syscall.EscapeArg(configPath)
 	}

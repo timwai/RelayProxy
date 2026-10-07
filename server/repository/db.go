@@ -613,6 +613,7 @@ type MessageRule struct {
 	Match        MessageMatchConfig           `json:"match"`
 	Verification *VerificationExtractorConfig `json:"verification,omitempty"`
 	Popup        *bool                        `json:"popup,omitempty"`
+	PopupType    string                       `json:"popupType,omitempty"`
 }
 
 func boolValue(value bool) *bool {
@@ -682,7 +683,8 @@ func LegacyMessageRules(useDefault bool, rules []VerificationRule) []MessageRule
 			Enabled: !rule.Default || useDefault,
 			Default: rule.Default,
 			Match:   match,
-			Popup:   rule.Popup,
+			Popup:     rule.Popup,
+			PopupType: ruleType,
 		}
 		if next.Name == "" {
 			if rule.Default {

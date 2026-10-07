@@ -9,8 +9,10 @@ namespace RelayProxy.Native;
 
 public sealed partial class MessagePopupWindow : Window
 {
+    private readonly Queue<(PushMessageDto Message, int Timeout)> _queue = new();
     private DispatcherTimer? _timer;
     private PushMessageDto? _message;
+    private bool _showing;
 
     public MessagePopupWindow()
     {
@@ -29,28 +31,11 @@ public sealed partial class MessagePopupWindow : Window
         }
     }
 
-    public void ShowMessage(PushMessageDto message, int timeoutSeconds)
+    public void EnqueueMessage(PushMessageDto message, int timeoutSeconds)
     {
-        _message = message;
-        var type = PopupType(message);
-        TypeText.Text = type switch { "verification_code" => "验证码", "important" => "重要提醒", _ => "消息" };
-        TypeIconText.Text = type switch { "verification_code" => "123", "important" => "!", _ => "✦" };
-        TitleText.Text = string.IsNullOrWhiteSpace(message.Title) ? "RelayProxy 消息" : message.Title;
-        ContentText.Text = message.Content;
-        MetaText.Text = string.Join(" · ", new[] { message.Source, message.MessageRule }.Where(x => !string.IsNullOrWhiteSpace(x)));
-        CodePanel.Visibility = string.IsNullOrWhiteSpace(message.VerificationCode) ? Visibility.Collapsed : Visibility.Visible;
-        CopyButton.Visibility = CodePanel.Visibility;
-        CodeText.Text = message.VerificationCode;
-
-        _timer?.Stop();
-        if (timeoutSeconds > 0)
-        {
-            _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 1, 3600)) };
-            _timer.Tick += (_, _) => { _timer?.Stop(); Hide(); };
-            _timer.Start();
-        }
-
-        Activate();
+        if (_message?.Id == message.Id || _queue.Any(x => x.Message.Id == message.Id)) return;
+        _queue.Enqueue((message, timeoutSeconds));
+        if (!_showing) ShowNext();
     }
 
     public static bool ShouldPopup(PushMessageDto message)
@@ -58,6 +43,39 @@ public sealed partial class MessagePopupWindow : Window
         if (string.IsNullOrWhiteSpace(message.MessageType) && string.IsNullOrWhiteSpace(message.PopupType))
             return message.Popup || !string.IsNullOrWhiteSpace(message.VerificationCode);
         return message.Popup;
+    }
+
+    private void ShowNext()
+    {
+        _timer?.Stop();
+        if (_queue.Count == 0)
+        {
+            _showing = false;
+            _message = null;
+            Hide();
+            return;
+        }
+
+        _showing = true;
+        var item = _queue.Dequeue();
+        _message = item.Message;
+        var type = PopupType(item.Message);
+        TypeText.Text = type switch { "verification_code" => "验证码", "important" => "重要提醒", _ => "消息" };
+        TypeIconText.Text = type switch { "verification_code" => "123", "important" => "!", _ => "✦" };
+        TitleText.Text = string.IsNullOrWhiteSpace(item.Message.Title) ? "RelayProxy 消息" : item.Message.Title;
+        ContentText.Text = item.Message.Content;
+        MetaText.Text = string.Join(" · ", new[] { item.Message.Source, item.Message.MessageRule }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        CodePanel.Visibility = string.IsNullOrWhiteSpace(item.Message.VerificationCode) ? Visibility.Collapsed : Visibility.Visible;
+        CopyButton.Visibility = CodePanel.Visibility;
+        CodeText.Text = item.Message.VerificationCode;
+
+        if (item.Timeout > 0)
+        {
+            _timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(Math.Clamp(item.Timeout, 1, 3600)) };
+            _timer.Tick += (_, _) => CompleteCurrent();
+            _timer.Start();
+        }
+        Activate();
     }
 
     private static string PopupType(PushMessageDto message)
@@ -68,18 +86,22 @@ public sealed partial class MessagePopupWindow : Window
         return "message";
     }
 
+    private void CompleteCurrent()
+    {
+        _timer?.Stop();
+        _message = null;
+        _showing = false;
+        ShowNext();
+    }
+
     private void Copy_Click(object sender, RoutedEventArgs e)
     {
         if (_message is null || string.IsNullOrWhiteSpace(_message.VerificationCode)) return;
         var data = new DataPackage();
         data.SetText(_message.VerificationCode);
         Clipboard.SetContent(data);
-        Hide();
+        CompleteCurrent();
     }
 
-    private void Close_Click(object sender, RoutedEventArgs e)
-    {
-        _timer?.Stop();
-        Hide();
-    }
+    private void Close_Click(object sender, RoutedEventArgs e) => CompleteCurrent();
 }

@@ -61,6 +61,15 @@ public sealed class AgentApiClient : IDisposable
         return await ReadMutationAsync<SaveResultDto>(response, ct);
     }
 
+    public async Task<SpeedTestResultDto?> RunSpeedTestAsync(string exitId, int durationSeconds = 2, CancellationToken ct = default)
+    {
+        EnsureReady();
+        durationSeconds = Math.Clamp(durationSeconds, 1, 10);
+        using var response = await _http.PostAsJsonAsync("api/speed-test", new { exitId, durationSeconds }, Json, ct);
+        var payload = await ReadMutationAsync<SpeedTestApiResponseDto>(response, ct);
+        return payload?.Result;
+    }
+
     public async Task SelectExitAsync(string exitId, CancellationToken ct = default)
     {
         EnsureReady();

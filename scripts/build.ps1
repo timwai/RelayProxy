@@ -125,6 +125,9 @@ try {
             -c Release `
             -r $Runtime `
             -p:Platform=$Platform `
+            -p:Version=$Version `
+            -p:FileVersion=$Version `
+            -p:InformationalVersion=$Version `
             -p:WindowsPackageType=None `
             -p:WindowsAppSDKSelfContained=true `
             --self-contained true `

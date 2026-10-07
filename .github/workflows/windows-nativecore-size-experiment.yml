@@ -1,0 +1,170 @@
+name: Windows NativeCore Size Experiment
+
+on:
+  push:
+    branches:
+      - feat/windows-native-gui
+    paths:
+      - "agent/gui/**"
+      - ".github/workflows/windows-nativecore-size-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-nativecore-size-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nativecore:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Test nativecore route profile
+        shell: pwsh
+        run: go test -tags nativecore .\agent\gui -count=1
+
+      - name: Compare Go Core sizes
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\nativecore\staging" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+
+          go build -trimpath -ldflags "-s -w" -o ".\nativecore\staging\relay-agent-default.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "default core build failed" }
+
+          go build -tags nativecore -trimpath -ldflags "-s -w" -o ".\nativecore\staging\relay-agent.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "nativecore build failed" }
+
+          $defaultBytes = (Get-Item ".\nativecore\staging\relay-agent-default.exe").Length
+          $nativeBytes = (Get-Item ".\nativecore\staging\relay-agent.exe").Length
+          $savedBytes = $defaultBytes - $nativeBytes
+          $defaultMb = [math]::Round($defaultBytes / 1MB, 2)
+          $nativeMb = [math]::Round($nativeBytes / 1MB, 2)
+          $savedMb = [math]::Round($savedBytes / 1MB, 2)
+          Write-Host "[nativecore-size] default Go Core: $defaultMb MB"
+          Write-Host "[nativecore-size] nativecore Go Core: $nativeMb MB"
+          Write-Host "[nativecore-size] raw saving: $savedMb MB"
+
+          @"
+          ### Windows nativecore Go Core
+          **Default Core:** $defaultMb MiB
+          **NativeCore:** $nativeMb MiB
+          **Raw saving:** $savedMb MiB
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Restore lean Windows App SDK graph
+        shell: pwsh
+        run: |
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-x64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+
+      - name: Publish nativecore outer-only WinUI host
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\nativecore\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\nativecore\single" -Force | Out-Null
+          $core = (Resolve-Path ".\nativecore\staging\relay-agent.exe").Path
+
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\nativecore\host
+
+          $nativeHost = ".\nativecore\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "nativecore RelayProxy.NativeHost.exe missing" }
+          $extra = @(Get-ChildItem ".\nativecore\host" -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
+          if ($extra.Count -gt 0) { throw "nativecore WinUI host has sidecars: $($extra.Name -join ', ')" }
+
+      - name: Pack nativecore outer-zstd EXE
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          $stub = ".\nativecore\zstd-launcher.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher-zstd
+          if ($LASTEXITCODE -ne 0) { throw "zstd launcher build failed" }
+
+          $nativeHost = (Resolve-Path ".\nativecore\host\RelayProxy.NativeHost.exe").Path
+          $exe = ".\nativecore\single\RelayProxy-agent-windows-amd64-nativecore-zstd.exe"
+          go run .\scripts\pack-windows-launcher-zstd.go -launcher $stub -payload $nativeHost -output $exe
+          if ($LASTEXITCODE -ne 0) { throw "nativecore zstd packing failed" }
+
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[nativecore-package] uncompressed-inner host: $hostMb MB"
+          Write-Host "[nativecore-package] outer-zstd EXE: $finalMb MB"
+          Write-Host "::notice title=NativeCore package size::x64 nativecore zstd = $finalMb MB"
+
+          @"
+          ### win-x64 nativecore outer-zstd experiment
+          **Uncompressed-inner Host:** $hostMb MiB
+          **Rename-safe EXE:** $finalMb MiB
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Smoke test renamed nativecore package
+        shell: pwsh
+        run: |
+          $source = (Resolve-Path ".\nativecore\single\RelayProxy-agent-windows-amd64-nativecore-zstd.exe").Path
+          $renamed = ".\nativecore\single\user-renamed-nativecore-client.exe"
+          Copy-Item $source $renamed -Force
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "NativeCore renamed EXE exited with code $($process.ExitCode)."
+            }
+            Write-Host "[nativecore-smoke] renamed package stayed alive for 8 seconds." -ForegroundColor Green
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-win-x64-nativecore-zstd-experiment
+          path: .\nativecore\single\RelayProxy-agent-windows-amd64-nativecore-zstd.exe
+          if-no-files-found: error

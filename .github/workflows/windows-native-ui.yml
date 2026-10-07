@@ -83,7 +83,10 @@ jobs:
             server/repository/message_rules_test.go
             agent/bridge/bridge.go
             agent/gui/web.go
+            agent/gui/web_browser.go
+            agent/gui/web_browser_nativecore.go
             agent/gui/web_test.go
+            agent/gui/web_nativecore_test.go
             agent/gui/gui_windows_core.go
             agent/gui/gui_windows.go
             agent/gui/bindings_windows.go

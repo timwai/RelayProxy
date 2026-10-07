@@ -1,3 +1,5 @@
+//go:build !nativecore
+
 package gui
 
 import "embed"

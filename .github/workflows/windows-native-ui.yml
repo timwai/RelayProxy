@@ -273,7 +273,6 @@ jobs:
           Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe" -Force
 
       - name: Publish trimmed size experiment
-        if: matrix.runtime == 'win-x64'
         continue-on-error: true
         shell: pwsh
         run: |
@@ -306,13 +305,35 @@ jobs:
           if (-not (Test-Path $exe)) { throw "trimmed experiment did not produce relay-agent-gui.exe" }
           $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
           Write-Host "[size-experiment] partial-trim single EXE: $sizeMb MB"
-          Write-Host "::notice title=Trimmed size experiment::win-x64 partial trim = $sizeMb MB"
+          Write-Host "::notice title=Trimmed size experiment::${{ matrix.runtime }} partial trim = $sizeMb MB"
           @"
-          ### win-x64 partial-trim experiment
+          ### ${{ matrix.runtime }} partial-trim experiment
           Experimental only; the regular release artifact remains untrimmed.
 
           **relay-agent-gui.exe:** $sizeMb MB
           "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Smoke test trimmed x64 startup
+        if: matrix.runtime == 'win-x64'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path ".\trimmed\${{ matrix.runtime }}\relay-agent-gui.exe").Path
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $exe -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "Trimmed native GUI exited during startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "[smoke] trimmed native GUI remained alive for 8 seconds." -ForegroundColor Green
+            Write-Host "::notice title=Trimmed startup smoke test::win-x64 stayed alive for 8 seconds"
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Build Go Agent core
         shell: pwsh

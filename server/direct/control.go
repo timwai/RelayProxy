@@ -16,7 +16,13 @@ import (
 	"relayproxy/server/session"
 )
 
-type CurrentTicketValidator func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (*acl.Policy, error)
+type CurrentTicketAuthorization struct {
+	RelayPolicy       *acl.Policy
+	BrutalUploadBPS   uint64
+	BrutalDownloadBPS uint64
+}
+
+type CurrentTicketValidator func(context.Context, string, protocol.PublicDirectTicketValidationRequest) (CurrentTicketAuthorization, error)
 
 type Controller struct {
 	ctx             context.Context
@@ -97,13 +103,14 @@ func (c *Controller) HandleControl(ctx context.Context, stream tunnel.TunnelStre
 			})
 			return
 		}
-		policy, err := validator(ctx, dev.DeviceID, *validation)
+		authorization, err := validator(ctx, dev.DeviceID, *validation)
 		if err != nil {
 			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
 				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct authorization is no longer current",
 			})
 			return
 		}
+		policy := authorization.RelayPolicy
 		if policy == nil || strings.TrimSpace(policy.Fingerprint) == "" {
 			_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
 				ErrorCode: protocol.ErrCodeAccessDenied, ErrorMessage: "public direct relay policy is unavailable",
@@ -126,6 +133,8 @@ func (c *Controller) HandleControl(ctx context.Context, stream tunnel.TunnelStre
 		}
 		_ = protocol.WriteJSON(stream, protocol.PublicDirectRegistrationResponse{
 			Success: true, RelayPolicy: &normalized,
+			BrutalUploadBPS: authorization.BrutalUploadBPS,
+			BrutalDownloadBPS: authorization.BrutalDownloadBPS,
 		})
 		return
 	}

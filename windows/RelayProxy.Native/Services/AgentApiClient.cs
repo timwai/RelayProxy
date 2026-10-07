@@ -28,6 +28,8 @@ public sealed class AgentApiClient : IDisposable
     public Task<TrafficSnapshotDto?> GetConnectionsAsync(CancellationToken ct = default) => GetAsync<TrafficSnapshotDto>("api/connections", ct);
     public async Task<List<PushMessageDto>> GetMessagesAsync(CancellationToken ct = default) => await GetAsync<List<PushMessageDto>>("api/messages", ct) ?? [];
     public async Task<List<RdpTargetDto>> GetRdpTargetsAsync(CancellationToken ct = default) => await GetAsync<List<RdpTargetDto>>("api/rdp/targets", ct) ?? [];
+    public async Task<List<LogEntryDto>> GetLogsAsync(CancellationToken ct = default) => await GetAsync<List<LogEntryDto>>("api/logs", ct) ?? [];
+    public Task<DiagnosticsSnapshotDto?> GetDiagnosticsAsync(CancellationToken ct = default) => GetAsync<DiagnosticsSnapshotDto>("api/diagnostics", ct);
 
     public async Task<SaveResultDto?> SaveConfigAsync(object update, CancellationToken ct = default)
     {
@@ -75,6 +77,13 @@ public sealed class AgentApiClient : IDisposable
     {
         EnsureReady();
         using var response = await _http.DeleteAsync("api/messages", ct);
+        await EnsureMutationAsync(response, ct);
+    }
+
+    public async Task ClearLogsAsync(CancellationToken ct = default)
+    {
+        EnsureReady();
+        using var response = await _http.DeleteAsync("api/logs", ct);
         await EnsureMutationAsync(response, ct);
     }
 

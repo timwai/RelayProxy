@@ -56,8 +56,10 @@
               </StackPanel></Border>
               <Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel Spacing="9"><TextBlock Text="数据路径" FontSize="16" FontWeight="SemiBold" />
                 <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Public Direct" FontWeight="SemiBold" /><TextBlock x:Name="DirectDetailText" Text="等待状态" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><TextBlock x:Name="DirectStateText" Grid.Column="1" Text="—" VerticalAlignment="Center" /></Grid>
-                <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" /><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="P2P QUIC" FontWeight="SemiBold" /><TextBlock x:Name="P2PDetailText" Text="等待状态" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><TextBlock x:Name="P2PStateText" Grid.Column="1" Text="—" VerticalAlignment="Center" /></Grid>
-                <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" /><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Relay" FontWeight="SemiBold" /><TextBlock Text="直连不可用时回退" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><TextBlock Grid.Column="1" Text="Standby" VerticalAlignment="Center" /></Grid>
+                <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="P2P QUIC" FontWeight="SemiBold" /><TextBlock x:Name="P2PDetailText" Text="等待状态" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><TextBlock x:Name="P2PStateText" Grid.Column="1" Text="—" VerticalAlignment="Center" /></Grid>
+                <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="Relay" FontWeight="SemiBold" /><TextBlock Text="直连不可用时回退" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><TextBlock Grid.Column="1" Text="Standby" VerticalAlignment="Center" /></Grid>
               </StackPanel></Border>
             </Grid>
             <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
@@ -74,10 +76,107 @@
           </StackPanel>
         </ScrollViewer>
 
+        <ScrollViewer x:Name="ConnectionView" Visibility="Collapsed">
+          <StackPanel Padding="28" Spacing="14">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="连接与路径" FontSize="28" FontWeight="SemiBold"/><TextBlock Text="Server、Identity、QUIC/TLS、Public Direct、P2P 与 Relay 回退" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="重新读取" Click="ReloadConfig_Click"/><Button Content="保存连接设置" Style="{StaticResource AccentButtonStyle}" Click="SaveConnection_Click"/></StackPanel>
+            </Grid>
+            <InfoBar x:Name="ConnectionBar" IsOpen="False"/>
+            <Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="服务器与设备" FontSize="16" FontWeight="SemiBold"/>
+                <TextBox x:Name="ServerAddressBox" Header="Relay Server"/>
+                <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <NumberBox x:Name="QuicPortBox" Header="QUIC / UDP 端口" Minimum="1" Maximum="65535" SpinButtonPlacementMode="Compact"/>
+                  <NumberBox x:Name="TcpPortBox" Grid.Column="1" Header="TCP / TLS 端口" Minimum="1" Maximum="65535" SpinButtonPlacementMode="Compact"/>
+                </Grid>
+                <ComboBox x:Name="TransportCombo" Header="传输方式" HorizontalAlignment="Stretch"><ComboBoxItem Tag="auto" Content="自动 · 优先 QUIC，失败回退 TLS"/><ComboBoxItem Tag="quic_only" Content="仅 QUIC"/><ComboBoxItem Tag="tcp_only" Content="仅 TCP/TLS"/></ComboBox>
+                <ToggleSwitch x:Name="TlsSwitch" Header="启用 TLS"/>
+                <TextBox x:Name="DeviceNameBox" Header="设备名称"/>
+                <TextBox x:Name="IdentityBox" Header="Identity ID"/>
+              </StackPanel></Border>
+              <Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="路径策略" FontSize="16" FontWeight="SemiBold"/>
+                <ToggleSwitch x:Name="P2PEnabledSwitch" Header="启用 P2P / Public Direct 直连能力"/>
+                <ComboBox x:Name="P2PModeCombo" Header="路径模式" HorizontalAlignment="Stretch"><ComboBoxItem Tag="auto" Content="自动 · Public Direct → P2P → Relay"/><ComboBoxItem Tag="direct_only" Content="仅直连 · 不回退 Relay"/><ComboBoxItem Tag="p2p_only" Content="仅 P2P"/><ComboBoxItem Tag="relay_only" Content="仅 Relay"/></ComboBox>
+                <ToggleSwitch x:Name="P2PFallbackSwitch" Header="自动回退 Relay"/>
+                <TextBox x:Name="PublicAdvertiseBox" Header="手动公网地址（可选）" PlaceholderText="edge.example.com:443"/>
+                <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                  <NumberBox x:Name="PunchTimeoutBox" Header="打洞超时 ms" Minimum="100" Maximum="60000"/>
+                  <NumberBox x:Name="IdleTimeoutBox" Grid.Column="1" Header="空闲回收 s" Minimum="1" Maximum="3600"/>
+                  <NumberBox x:Name="MaxSessionsBox" Grid.Column="2" Header="最多 Exit 会话" Minimum="1" Maximum="64"/>
+                </Grid>
+                <TextBlock Text="Windows 不提供 Android 的 Wi‑Fi / 移动数据网络调度；这里只配置 RelayProxy 数据路径。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel></Border>
+            </Grid>
+          </StackPanel>
+        </ScrollViewer>
+
         <ScrollViewer x:Name="ExitsView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="出口选择" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="当前身份与显式授权出口" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><Button Grid.Column="1" Content="刷新" Click="RefreshExits_Click" /></Grid><InfoBar x:Name="ExitsBar" IsOpen="False" /><StackPanel x:Name="ExitsPanel" Spacing="10" /></StackPanel></ScrollViewer>
+
+        <ScrollViewer x:Name="ProxyView" Visibility="Collapsed">
+          <StackPanel Padding="28" Spacing="14">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="本机代理" FontSize="28" FontWeight="SemiBold"/><TextBlock Text="SOCKS5 / HTTP 独立控制，以及 Windows 系统透明代理" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              <Button Grid.Column="1" Content="保存代理设置" Style="{StaticResource AccentButtonStyle}" Click="SaveProxy_Click"/>
+            </Grid>
+            <InfoBar x:Name="ProxyBar" IsOpen="False"/>
+            <Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="SOCKS5" FontSize="16" FontWeight="SemiBold"/><ToggleSwitch x:Name="SocksEnabledSwitch" Grid.Column="1"/></Grid>
+                <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="140"/></Grid.ColumnDefinitions><TextBox x:Name="SocksListenBox" Header="监听地址"/><NumberBox x:Name="SocksPortBox" Grid.Column="1" Header="端口" Minimum="1" Maximum="65535"/></Grid>
+                <TextBlock Text="支持 TCP 与 UDP ASSOCIATE；socks5h 可由出口解析域名。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel></Border>
+              <Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBlock Text="HTTP / HTTPS CONNECT" FontSize="16" FontWeight="SemiBold"/><ToggleSwitch x:Name="HttpEnabledSwitch" Grid.Column="1"/></Grid>
+                <Grid ColumnSpacing="10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="140"/></Grid.ColumnDefinitions><TextBox x:Name="HttpListenBox" Header="监听地址"/><NumberBox x:Name="HttpPortBox" Grid.Column="1" Header="端口" Minimum="1" Maximum="65535"/></Grid>
+                <TextBlock Text="普通 HTTP 代理与 HTTPS CONNECT 隧道。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+              </StackPanel></Border>
+            </Grid>
+            <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="Windows 系统透明代理" FontSize="16" FontWeight="SemiBold"/>
+              <ToggleSwitch x:Name="TransparentProxySwitch" Header="启用系统透明代理（WinDivert）"/>
+              <TextBox x:Name="ExcludeProcessesBox" Header="排除进程" AcceptsReturn="True" MinHeight="120" TextWrapping="Wrap" PlaceholderText="relayproxy.exe&#10;updater.exe"/>
+              <TextBlock Text="按进程代理 TCP / UDP；本程序及控制连接应保持直连。服务安装 / 修复仍由现有 Agent 能力负责。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/>
+            </StackPanel></Border>
+          </StackPanel>
+        </ScrollViewer>
+
+        <ScrollViewer x:Name="RoutingView" Visibility="Collapsed">
+          <StackPanel Padding="28" Spacing="14">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="分流规则" FontSize="28" FontWeight="SemiBold"/><TextBlock Text="第一条启用且匹配的规则生效；支持进程、目标、端口、协议与指定出口" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="添加规则" Click="AddRule_Click"/><Button Content="保存并应用" Style="{StaticResource AccentButtonStyle}" Click="SaveRouting_Click"/></StackPanel>
+            </Grid>
+            <InfoBar x:Name="RoutingBar" IsOpen="False"/>
+            <Border Style="{StaticResource CardStyle}"><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <ComboBox x:Name="RoutingModeCombo" Header="路由模式" HorizontalAlignment="Stretch"><ComboBoxItem Tag="rule" Content="按规则分流"/><ComboBoxItem Tag="global_proxy" Content="全局代理"/><ComboBoxItem Tag="direct" Content="全局直连"/></ComboBox>
+              <ComboBox x:Name="DefaultActionCombo" Grid.Column="1" Header="未命中时" HorizontalAlignment="Stretch"><ComboBoxItem Tag="PROXY" Content="代理"/><ComboBoxItem Tag="DIRECT" Content="直连"/><ComboBoxItem Tag="REJECT" Content="拒绝"/></ComboBox>
+            </Grid></Border>
+            <StackPanel x:Name="RoutingRulesPanel" Spacing="8"/>
+          </StackPanel>
+        </ScrollViewer>
+
+        <ScrollViewer x:Name="RdpView" Visibility="Collapsed">
+          <StackPanel Padding="28" Spacing="14">
+            <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="远程桌面" FontSize="28" FontWeight="SemiBold"/><TextBlock Text="只显示服务端明确授权给当前 Agent 的 RDP 设备" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/></StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="刷新" Click="RefreshRdp_Click"/><Button Content="断开当前 RDP" Click="DisconnectRdp_Click"/></StackPanel>
+            </Grid>
+            <InfoBar x:Name="RdpBar" IsOpen="False"/>
+            <Border Style="{StaticResource CardStyle}"><Grid ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+              <StackPanel><TextBlock Text="本地入口" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="RdpListenText" Text="—" FontWeight="SemiBold"/></StackPanel>
+              <StackPanel Grid.Column="1"><TextBlock Text="TCP 路径" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="RdpTcpPathText" Text="—" FontWeight="SemiBold"/></StackPanel>
+              <StackPanel Grid.Column="2"><TextBlock Text="UDP 状态" Foreground="{ThemeResource TextFillColorSecondaryBrush}"/><TextBlock x:Name="RdpUdpText" Text="—" FontWeight="SemiBold"/></StackPanel>
+            </Grid></Border>
+            <StackPanel x:Name="RdpTargetsPanel" Spacing="8"/>
+          </StackPanel>
+        </ScrollViewer>
+
         <ScrollViewer x:Name="ConnectionsView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="实时连接" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="进程、目标、规则、出口与数据路径" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><Button Grid.Column="1" Content="刷新" Click="RefreshConnections_Click" /></Grid><Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><Border Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="活跃连接" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><TextBlock x:Name="ActiveConnectionsText" Text="0" FontSize="24" FontWeight="SemiBold" /></StackPanel></Border><Border Grid.Column="1" Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="下载" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><TextBlock x:Name="ConnectionsDownText" Text="0 B/s" FontSize="24" FontWeight="SemiBold" /></StackPanel></Border><Border Grid.Column="2" Style="{StaticResource CardStyle}"><StackPanel><TextBlock Text="上传" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /><TextBlock x:Name="ConnectionsUpText" Text="0 B/s" FontSize="24" FontWeight="SemiBold" /></StackPanel></Border></Grid><StackPanel x:Name="ConnectionsPanel" Spacing="8" /></StackPanel></ScrollViewer>
-        <ScrollViewer x:Name="MessagesView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="消息" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="验证码、普通消息与重要提醒" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="刷新" Click="RefreshMessages_Click" /><Button Content="清空历史" Click="ClearMessages_Click" /></StackPanel></Grid><InfoBar x:Name="MessagesBar" IsOpen="False" /><StackPanel x:Name="MessagesPanel" Spacing="8" /></StackPanel></ScrollViewer>
-        <ScrollViewer x:Name="SettingsView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><StackPanel><TextBlock Text="设置" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="原生 GUI 运行环境与迁移状态" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><Border Style="{StaticResource CardStyle}"><StackPanel Spacing="10"><TextBlock Text="Agent 连接" FontSize="16" FontWeight="SemiBold" /><TextBlock x:Name="ManagementUrlText" Text="尚未连接" /><TextBlock x:Name="SettingsAgentStateText" Text="未启动" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel></Border><InfoBar IsOpen="True" Severity="Informational" Title="第一阶段" Message="运行概览、出口、实时连接、消息已经接入真实 Go Agent；其余功能继续按完整 HTML 原型逐页迁移。" /></StackPanel></ScrollViewer>
+
+        <ScrollViewer x:Name="MessagesView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="消息" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="验证码、普通消息与重要提醒；弹窗已改为 WinUI 原生窗口" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"><Button Content="刷新" Click="RefreshMessages_Click" /><Button Content="清空历史" Click="ClearMessages_Click" /></StackPanel></Grid><InfoBar x:Name="MessagesBar" IsOpen="False" /><StackPanel x:Name="MessagesPanel" Spacing="8" /></StackPanel></ScrollViewer>
+
+        <ScrollViewer x:Name="SettingsView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14"><StackPanel><TextBlock Text="设置" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Windows 原生 GUI 行为" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel><InfoBar x:Name="SettingsBar" IsOpen="False"/><Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><TextBlock Text="Agent 连接" FontSize="16" FontWeight="SemiBold" /><TextBlock x:Name="ManagementUrlText" Text="尚未连接" /><TextBlock x:Name="SettingsAgentStateText" Text="未启动" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></StackPanel></Border>
+          <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12"><ToggleSwitch x:Name="AutostartSwitch" Header="开机自动启动" Toggled="AutostartSwitch_Toggled"/><NumberBox x:Name="PopupTimeoutBox" Header="消息弹窗自动关闭 / 秒（0 = 不自动关闭）" Minimum="0" Maximum="3600"/><Button Content="保存 GUI 设置" HorizontalAlignment="Left" Click="SaveGuiSettings_Click"/></StackPanel></Border>
+        </StackPanel></ScrollViewer>
+
         <ScrollViewer x:Name="PlaceholderView" Visibility="Collapsed"><StackPanel Padding="28" Spacing="14" MaxWidth="760" HorizontalAlignment="Left"><TextBlock x:Name="PlaceholderTitle" Text="模块" FontSize="28" FontWeight="SemiBold" /><TextBlock x:Name="PlaceholderDescription" Text="正在迁移到 WinUI 3 原生实现。" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" /><Border Style="{StaticResource CardStyle}"><StackPanel Spacing="8"><TextBlock Text="迁移原则" FontSize="16" FontWeight="SemiBold" /><TextBlock Text="• UI 使用 WinUI 3 / Fluent，不再嵌 WebView。" /><TextBlock Text="• Go 网络核心、认证、QUIC、P2P、透明代理和 RDP 继续复用。" /><TextBlock Text="• 旧 Wails GUI 在功能完全对等前保留回退。" /><TextBlock Text="• 交互与信息架构以 docs/prototypes/relayproxy-complete-ui-prototype.html 为基准。" /></StackPanel></Border></StackPanel></ScrollViewer>
       </Grid>
     </NavigationView>

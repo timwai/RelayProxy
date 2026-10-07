@@ -76,11 +76,13 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void OnTrayShowRequested() => DispatcherQueue.TryEnqueue(() =>
+    public void ShowFromExternalActivation()
     {
         AppWindow.Show();
         Activate();
-    });
+    }
+
+    private void OnTrayShowRequested() => DispatcherQueue.TryEnqueue(ShowFromExternalActivation);
 
     private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() =>
     {

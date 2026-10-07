@@ -103,6 +103,10 @@ func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()
 }
 
+func (b *UIBridge) SetProxyPaused(paused bool) {
+	b.agent.SetProxyPaused(paused)
+}
+
 func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {
 	return redactProxyExitSecrets(b.agent.ProxyExits())
 }

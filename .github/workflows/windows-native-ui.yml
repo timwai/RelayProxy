@@ -130,18 +130,50 @@ jobs:
         shell: pwsh
         run: dotnet build .\windows\RelayProxy.Native\RelayProxy.Native.csproj -c Release -r ${{ matrix.runtime }} -p:Platform=${{ matrix.platform }} --no-restore
 
-      - name: Publish native GUI
+      - name: Build embedded Go Agent core
         shell: pwsh
         run: |
+          New-Item -ItemType Directory -Path ".\staging\${{ matrix.runtime }}" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "${{ matrix.goarch }}"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w" -o ".\staging\${{ matrix.runtime }}\relay-agent.exe" .\cmd\relay-agent
+
+      - name: Publish native GUI single EXE
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\single\${{ matrix.runtime }}" -Force | Out-Null
+          $core = (Resolve-Path ".\staging\${{ matrix.runtime }}\relay-agent.exe").Path
           dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
             -c Release `
             -r ${{ matrix.runtime }} `
             -p:Platform=${{ matrix.platform }} `
             -p:WindowsPackageType=None `
             -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
             --self-contained true `
             --no-restore `
-            -o .\artifacts\${{ matrix.runtime }}
+            -o .\single\${{ matrix.runtime }}
+
+      - name: Verify single EXE output
+        shell: pwsh
+        run: |
+          $dir = ".\single\${{ matrix.runtime }}"
+          $exe = Join-Path $dir "relay-agent-gui.exe"
+          if (-not (Test-Path $exe)) { throw "relay-agent-gui.exe missing from single-file publish" }
+          $extra = @(Get-ChildItem -LiteralPath $dir -Force | Where-Object { $_.Name -ne "relay-agent-gui.exe" })
+          if ($extra.Count -gt 0) {
+            throw "single-file publish has sidecars: $($extra.Name -join ', ')"
+          }
+          New-Item -ItemType Directory -Path ".\artifacts\${{ matrix.runtime }}" -Force | Out-Null
+          Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe" -Force
 
       - name: Build Go Agent core
         shell: pwsh
@@ -169,4 +201,10 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: .\artifacts\${{ matrix.runtime }}
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-${{ matrix.runtime }}-single-exe
+          path: .\single\${{ matrix.runtime }}\relay-agent-gui.exe
           if-no-files-found: error

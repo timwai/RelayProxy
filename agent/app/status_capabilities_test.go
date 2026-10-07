@@ -14,3 +14,16 @@ func TestStatusApprovedCapabilitiesReturnsDefensiveCopy(t *testing.T) {
 		t.Fatalf("status caller mutated agent capabilities: %#v", again.ApprovedCapabilities)
 	}
 }
+
+
+func TestStatusReportsProxyPaused(t *testing.T) {
+	agent := &Agent{}
+	agent.SetProxyPaused(true)
+	if !agent.Status().ProxyPaused {
+		t.Fatal("proxyPaused status did not reflect paused runtime state")
+	}
+	agent.SetProxyPaused(false)
+	if agent.Status().ProxyPaused {
+		t.Fatal("proxyPaused status did not clear after resume")
+	}
+}

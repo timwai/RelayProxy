@@ -28,19 +28,17 @@ on:
       - ".github/workflows/windows-native-ui.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   format:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
-      - name: Normalize native bridge Go formatting
+      - name: Check native bridge Go formatting
         run: |
           files=(
             agent/bridge/bridge.go
@@ -51,26 +49,14 @@ jobs:
             cmd/relay-agent/main.go
             scripts/fetch-windivert.go
           )
-          gofmt -w "${files[@]}"
-          if ! git diff --quiet -- "${files[@]}"; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -- "${files[@]}"
-            git commit -m "style: gofmt Windows native bridge"
-            git push origin HEAD:feat/windows-native-gui
+          bad="$(gofmt -l "${files[@]}")"
+          if [ -n "$bad" ]; then
+            for file in $bad; do
+              echo "==== gofmt diff: $file ===="
+              gofmt -d "$file"
+            done
+            exit 1
           fi
-      - name: Verify native bridge Go formatting
-        run: |
-          files=(
-            agent/bridge/bridge.go
-            agent/gui/web.go
-            agent/gui/web_test.go
-            agent/startup/startup_windows.go
-            agent/startup/startup_other.go
-            cmd/relay-agent/main.go
-            scripts/fetch-windivert.go
-          )
-          test -z "$(gofmt -l "${files[@]}")"
 
   build:
     needs: format

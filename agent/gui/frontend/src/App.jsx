@@ -1,5 +1,6 @@
 import React, {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
+import {exitInventoryKey as makeExitInventoryKey} from './exitInventory.js';
 
 const NAV=[
  {group:'概览',items:[['overview','◉','运行概览'],['devices','▱','身份与设备']]},
@@ -237,7 +238,7 @@ export default function App(){
  const toastTimer=useRef(null),exitInventoryKey=useRef('');
  const toast=useCallback((message,t='normal')=>{clearTimeout(toastTimer.current);setToastState({message,t});toastTimer.current=setTimeout(()=>setToastState(null),3200)},[]);
  const theme=useCallback(mode=>{const m=['light','dark','system'].includes(mode)?mode:'system',dark=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.classList.toggle('dark',dark)},[]);
- const syncExitInventory=useCallback(async x=>{const summary=arr(x?.proxyExits),key=String(x?.proxyExitRevision||0)+'|'+summary.map(e=>[e.deviceId||e.id,e.name||'',e.online===false?'0':'1',e.authorizationSource||''].join(':')).join(';');if(exitInventoryKey.current===key)return;exitInventoryKey.current=key;if(!hasBridge('goGetProxyExits')){setExits(summary);setExitsReady(true);return}try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch{setExits(summary);setExitsReady(true)}},[]);
+ const syncExitInventory=useCallback(async x=>{const summary=arr(x?.proxyExits),key=makeExitInventoryKey(x);if(exitInventoryKey.current===key)return;exitInventoryKey.current=key;if(!hasBridge('goGetProxyExits')){setExits(summary);setExitsReady(true);return}try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch{setExits(summary);setExitsReady(true)}},[]);
  const refreshStatus=useCallback(async()=>{if(!hasBridge('goGetStatus'))return null;try{const x=await callJSON('goGetStatus',{});setStatus(x||{});void syncExitInventory(x);return x}catch{return null}},[syncExitInventory]);
  const refreshConfig=useCallback(async()=>{if(!hasBridge('goGetConfig'))return false;try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError||'配置读取失败');setConfig({...EMPTY,...x,socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules)}});theme(x.theme||'system');setLoaded(true);setDirty(false);return true}catch(e){toast(e.message,'danger');return false}},[theme,toast]);
  const refreshExits=useCallback(async()=>{if(hasBridge('goGetProxyExits'))try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch(e){toast('读取授权出口失败：'+e.message,'danger')}},[toast]);

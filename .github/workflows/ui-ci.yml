@@ -35,10 +35,11 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - name: Build Wails React frontend
+      - name: Test and build Wails React frontend
         working-directory: agent/gui/frontend
         run: |
           npm install --no-audit --no-fund
+          npm test
           npm run build
       - name: Check Go formatting
         shell: bash

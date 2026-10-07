@@ -3,6 +3,7 @@ package androidcore
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,7 +11,7 @@ import (
 )
 
 const (
-	maxMonitorApplications = 64
+	maxMonitorApplications  = 64
 	maxMonitorTargetsPerApp = 6
 )
 
@@ -37,10 +38,10 @@ type activeApplicationSnapshot struct {
 }
 
 type activeApplicationsSnapshot struct {
-	Applications      []activeApplicationSnapshot `json:"applications"`
-	ActiveConnections int                         `json:"activeConnections"`
-	TrackedConnections int                        `json:"trackedConnections"`
-	OmittedConnections uint64                     `json:"omittedConnections,omitempty"`
+	Applications       []activeApplicationSnapshot `json:"applications"`
+	ActiveConnections  int                         `json:"activeConnections"`
+	TrackedConnections int                         `json:"trackedConnections"`
+	OmittedConnections uint64                      `json:"omittedConnections,omitempty"`
 	SampledAt          time.Time                   `json:"sampledAt"`
 }
 
@@ -109,7 +110,7 @@ func (c *Client) ActiveApplicationsJSON() string {
 		if len(group.snapshot.Targets) < maxMonitorTargetsPerApp {
 			target := monitorTarget(connection)
 			if target.Host != "" {
-				targetKey := target.Protocol + "\x00" + target.Host + "\x00" + string(rune(target.Port))
+				targetKey := target.Protocol + "\x00" + target.Host + "\x00" + strconv.Itoa(int(target.Port))
 				if _, exists := group.targets[targetKey]; !exists {
 					group.targets[targetKey] = struct{}{}
 					group.snapshot.Targets = append(group.snapshot.Targets, target)

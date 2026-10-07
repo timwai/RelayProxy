@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$Magic = "RELAYPROXY_GUI1!"
+$Magic = "RELAYPROXY_GUI2!"
 $MagicBytes = [System.Text.Encoding]::ASCII.GetBytes($Magic)
 if ($MagicBytes.Length -ne 16) { throw "launcher footer magic must be exactly 16 bytes" }
 
@@ -27,19 +27,36 @@ for ($i = 0; $i -lt 32; $i++) {
     $hashBytes[$i] = [Convert]::ToByte($hashHex.Substring($i * 2, 2), 16)
 }
 
-$sizeBytes = [BitConverter]::GetBytes([UInt64]$payloadInfo.Length)
-if (-not [BitConverter]::IsLittleEndian) { [Array]::Reverse($sizeBytes) }
-
 $out = [System.IO.File]::Open($Output, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
 try {
     $stub = [System.IO.File]::OpenRead($Launcher)
     try { $stub.CopyTo($out) } finally { $stub.Dispose() }
 
+    $payloadStart = $out.Position
     $payloadStream = [System.IO.File]::OpenRead($Payload)
-    try { $payloadStream.CopyTo($out) } finally { $payloadStream.Dispose() }
+    try {
+        $gzip = New-Object System.IO.Compression.GZipStream(
+            $out,
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $true
+        )
+        try { $payloadStream.CopyTo($gzip) } finally { $gzip.Dispose() }
+    }
+    finally {
+        $payloadStream.Dispose()
+    }
+    $compressedSize = [UInt64]($out.Position - $payloadStart)
+
+    $compressedSizeBytes = [BitConverter]::GetBytes($compressedSize)
+    $payloadSizeBytes = [BitConverter]::GetBytes([UInt64]$payloadInfo.Length)
+    if (-not [BitConverter]::IsLittleEndian) {
+        [Array]::Reverse($compressedSizeBytes)
+        [Array]::Reverse($payloadSizeBytes)
+    }
 
     $out.Write($MagicBytes, 0, $MagicBytes.Length)
-    $out.Write($sizeBytes, 0, $sizeBytes.Length)
+    $out.Write($compressedSizeBytes, 0, $compressedSizeBytes.Length)
+    $out.Write($payloadSizeBytes, 0, $payloadSizeBytes.Length)
     $out.Write($hashBytes, 0, $hashBytes.Length)
 }
 finally {
@@ -47,7 +64,11 @@ finally {
 }
 
 $final = Get-Item -LiteralPath $Output
-Write-Host "[launcher] stub: $([math]::Round((Get-Item $Launcher).Length / 1MB, 2)) MiB"
-Write-Host "[launcher] WinUI payload: $([math]::Round($payloadInfo.Length / 1MB, 2)) MiB"
+$stubBytes = (Get-Item $Launcher).Length
+$compressedPayloadBytes = $final.Length - $stubBytes - 64
+$ratio = if ($payloadInfo.Length -gt 0) { [math]::Round(($compressedPayloadBytes / $payloadInfo.Length) * 100, 1) } else { 0 }
+Write-Host "[launcher] stub: $([math]::Round($stubBytes / 1MB, 2)) MiB"
+Write-Host "[launcher] WinUI payload raw: $([math]::Round($payloadInfo.Length / 1MB, 2)) MiB"
+Write-Host "[launcher] WinUI payload gzip: $([math]::Round($compressedPayloadBytes / 1MB, 2)) MiB ($ratio%)"
 Write-Host "[launcher] final rename-safe EXE: $([math]::Round($final.Length / 1MB, 2)) MiB"
 Write-Host "[launcher] payload sha256: $hashHex"

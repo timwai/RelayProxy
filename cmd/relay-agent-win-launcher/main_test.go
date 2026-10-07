@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/binary"
 	"os"
@@ -13,13 +15,26 @@ func TestReadPayloadDescriptorAndExtract(t *testing.T) {
 	sum := sha256.Sum256(payload)
 	stub := []byte("MZ-fake-launcher")
 
+	var compressed bytes.Buffer
+	zw, err := gzip.NewWriterLevel(&compressed, gzip.BestCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := zw.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
 	footer := make([]byte, footerSize)
 	copy(footer[:len(footerMagic)], []byte(footerMagic))
-	binary.LittleEndian.PutUint64(footer[len(footerMagic):len(footerMagic)+8], uint64(len(payload)))
-	copy(footer[len(footerMagic)+8:], sum[:])
+	binary.LittleEndian.PutUint64(footer[len(footerMagic):len(footerMagic)+8], uint64(compressed.Len()))
+	binary.LittleEndian.PutUint64(footer[len(footerMagic)+8:len(footerMagic)+16], uint64(len(payload)))
+	copy(footer[len(footerMagic)+16:], sum[:])
 
 	selfPath := filepath.Join(t.TempDir(), "renamed-anything.exe")
-	data := append(append(append([]byte{}, stub...), payload...), footer...)
+	data := append(append(append([]byte{}, stub...), compressed.Bytes()...), footer...)
 	if err := os.WriteFile(selfPath, data, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +52,9 @@ func TestReadPayloadDescriptorAndExtract(t *testing.T) {
 	desc, err := readPayloadDescriptor(file, info.Size())
 	if err != nil {
 		t.Fatal(err)
+	}
+	if desc.compressedSize != int64(compressed.Len()) {
+		t.Fatalf("compressed payload size = %d, want %d", desc.compressedSize, compressed.Len())
 	}
 	if desc.size != int64(len(payload)) {
 		t.Fatalf("payload size = %d, want %d", desc.size, len(payload))

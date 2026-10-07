@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -15,8 +16,8 @@ import (
 )
 
 const (
-	footerMagic        = "RELAYPROXY_GUI1!"
-	footerSize         = 16 + 8 + sha256.Size
+	footerMagic        = "RELAYPROXY_GUI2!"
+	footerSize         = 16 + 8 + 8 + sha256.Size
 	nativeHostName     = "RelayProxy.NativeHost.exe"
 	launcherPathEnv    = "RELAYPROXY_LAUNCHER_PATH"
 	cacheReadyFile     = ".ready"
@@ -25,9 +26,10 @@ const (
 )
 
 type payloadDescriptor struct {
-	offset int64
-	size   int64
-	hash   [sha256.Size]byte
+	offset         int64
+	compressedSize int64
+	size           int64
+	hash           [sha256.Size]byte
 }
 
 func main() {
@@ -101,14 +103,16 @@ func readPayloadDescriptor(file *os.File, fileSize int64) (payloadDescriptor, er
 		return desc, errors.New("启动器 payload 标记无效；请重新下载完整 EXE")
 	}
 
-	payloadSize := binary.LittleEndian.Uint64(footer[len(footerMagic) : len(footerMagic)+8])
-	if payloadSize == 0 || payloadSize > uint64(footerOffset) {
+	compressedSize := binary.LittleEndian.Uint64(footer[len(footerMagic) : len(footerMagic)+8])
+	payloadSize := binary.LittleEndian.Uint64(footer[len(footerMagic)+8 : len(footerMagic)+16])
+	if compressedSize == 0 || compressedSize > uint64(footerOffset) || payloadSize == 0 {
 		return desc, errors.New("启动器 payload 长度无效")
 	}
 
+	desc.compressedSize = int64(compressedSize)
 	desc.size = int64(payloadSize)
-	desc.offset = footerOffset - desc.size
-	copy(desc.hash[:], footer[len(footerMagic)+8:])
+	desc.offset = footerOffset - desc.compressedSize
+	copy(desc.hash[:], footer[len(footerMagic)+16:])
 	return desc, nil
 }
 
@@ -150,11 +154,20 @@ func ensurePayload(source *os.File, desc payloadDescriptor) (string, error) {
 	}
 
 	hasher := sha256.New()
-	reader := io.NewSectionReader(source, desc.offset, desc.size)
+	compressed := io.NewSectionReader(source, desc.offset, desc.compressedSize)
+	reader, err := gzip.NewReader(compressed)
+	if err != nil {
+		_ = out.Close()
+		return "", fmt.Errorf("无法打开 RelayProxy UI Host 压缩 payload: %w", err)
+	}
 	written, copyErr := io.Copy(io.MultiWriter(out, hasher), reader)
+	readerCloseErr := reader.Close()
 	closeErr := out.Close()
 	if copyErr != nil {
 		return "", fmt.Errorf("解压 RelayProxy UI Host 失败: %w", copyErr)
+	}
+	if readerCloseErr != nil {
+		return "", fmt.Errorf("完成 RelayProxy UI Host 解压失败: %w", readerCloseErr)
 	}
 	if closeErr != nil {
 		return "", fmt.Errorf("保存 RelayProxy UI Host 失败: %w", closeErr)

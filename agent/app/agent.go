@@ -220,8 +220,9 @@ type AgentStatus struct {
 	DeviceName          string                     `json:"deviceName"`
 	IdentityName        string                     `json:"identityName,omitempty"`
 	PolicyRevision      int64                      `json:"policyRevision,omitempty"`
-	Mode                string                     `json:"mode"`
-	SelectedExit        string                     `json:"selectedExit"`
+	Mode                 string                     `json:"mode"`
+	ApprovedCapabilities []string                   `json:"approvedCapabilities,omitempty"`
+	SelectedExit         string                     `json:"selectedExit"`
 	ProxyExits          []ProxyExitSummary         `json:"proxyExits"`
 	ProxyExitRevision   uint64                     `json:"proxyExitRevision,omitempty"`
 	SOCKS5Running       bool                       `json:"socks5Running"`
@@ -289,8 +290,9 @@ type Agent struct {
 	latencyMs         atomic.Int64
 	handshakeOK       atomic.Bool
 	approvalState     atomic.Pointer[string]
-	approvedMode      string
-	identityName      string
+	approvedMode         string
+	approvedCapabilities []string
+	identityName         string
 	policyRevision    int64
 	proxyExits        []protocol.ProxyExit
 	proxyExitRevision uint64
@@ -673,6 +675,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.identityName = accepted.IdentityName
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
+	a.approvedCapabilities = append([]string(nil), accepted.ApprovedCapabilities...)
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	if accepted.ProxyExitRevision != 0 {
 		a.proxyExitRevision = accepted.ProxyExitRevision
@@ -1299,6 +1302,7 @@ func (a *Agent) Status() AgentStatus {
 	st := AgentStatus{
 		DeviceID: a.cfg.DeviceID, DeviceName: a.cfg.DeviceName,
 		IdentityName: a.identityName, PolicyRevision: a.policyRevision, Mode: a.approvedMode,
+		ApprovedCapabilities: append([]string(nil), a.approvedCapabilities...),
 		ProxyExits: proxyExitSummaries(a.proxyExits), ProxyExitRevision: a.proxyExitRevision,
 		SOCKS5Running: a.started && a.socksServer != nil,
 		HTTPRunning:   a.started && a.httpServer != nil,

@@ -481,6 +481,16 @@ public sealed partial class MainWindow : Window
 
     private async Task RefreshNetworkServiceAsync()
     {
+        if (!App.AgentApi.IsPrivateNativeChannel)
+        {
+            RepairNetworkServiceButton.IsEnabled = false;
+            UninstallNetworkServiceButton.IsEnabled = false;
+            NetworkServiceStateText.Text = "仅本机原生会话可管理";
+            NetworkServiceDetailText.Text = "当前 GUI 连接的是外部 Agent。Network Service 安装、修复和卸载只开放给本机 WinUI 创建的私有 loopback 管理通道。";
+            await PollMessagesAsync(render: false);
+            return;
+        }
+
         try
         {
             var status = await App.AgentApi.GetNetworkServiceStatusAsync();

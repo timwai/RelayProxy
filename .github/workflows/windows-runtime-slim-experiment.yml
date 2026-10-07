@@ -1,0 +1,191 @@
+name: Windows Runtime Slim Experiment
+
+on:
+  push:
+    branches:
+      - feat/windows-native-gui
+    paths:
+      - ".github/workflows/windows-runtime-slim-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-runtime-slim-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-slim:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Prepare no-Runtime measurement build
+        shell: pwsh
+        run: |
+          $projectPath = ".\windows\RelayProxy.Native\RelayProxy.Native.csproj"
+          $project = Get-Content $projectPath -Raw
+          $runtimeRef = '    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" Version="2.5.1" />'
+          if (-not $project.Contains($runtimeRef)) {
+            throw "Microsoft.WindowsAppSDK.Runtime reference not found"
+          }
+          $project = $project.Replace($runtimeRef, "")
+          Set-Content -Path $projectPath -Value $project -Encoding utf8
+
+          $stub = @'
+          using Microsoft.UI.Dispatching;
+          using RelayProxy.Native.Models;
+
+          namespace RelayProxy.Native.Services;
+
+          public sealed class AppNotificationService : IDisposable
+          {
+              public bool IsRegistered => false;
+              public string LastError { get; private set; } = "Runtime-slim size experiment: Windows system notifications are disabled.";
+
+              public void Initialize(DispatcherQueue dispatcher, Action activateWindow)
+              {
+                  LastError = "Runtime-slim size experiment: Windows system notifications are disabled.";
+              }
+
+              public bool TryShow(PushMessageDto message) => false;
+
+              public void Dispose()
+              {
+              }
+          }
+          '@
+          Set-Content -Path ".\windows\RelayProxy.Native\Services\AppNotificationService.cs" -Value $stub -Encoding utf8
+
+      - name: Restore lean graph without Windows App SDK Runtime
+        shell: pwsh
+        run: |
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-x64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+          if ($LASTEXITCODE -ne 0) { throw "runtime-slim restore failed" }
+
+          $assets = Get-Content ".\windows\RelayProxy.Native\obj\project.assets.json" -Raw
+          if ($assets.Contains('"Microsoft.WindowsAppSDK.Runtime/')) {
+            throw "Microsoft.WindowsAppSDK.Runtime still present in runtime-slim graph"
+          }
+          Write-Host "[runtime-slim] Microsoft.WindowsAppSDK.Runtime absent from dependency graph." -ForegroundColor Green
+
+      - name: Build embedded Go Agent core
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\runtime-slim\staging" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -trimpath -ldflags "-s -w" -o ".\runtime-slim\staging\relay-agent.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "embedded Go Agent core build failed" }
+
+      - name: Publish outer-only partial-trim WinUI host
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\runtime-slim\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\runtime-slim\single" -Force | Out-Null
+          $core = (Resolve-Path ".\runtime-slim\staging\relay-agent.exe").Path
+
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\runtime-slim\host
+          if ($LASTEXITCODE -ne 0) { throw "runtime-slim publish failed" }
+
+          $nativeHost = ".\runtime-slim\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "runtime-slim RelayProxy.NativeHost.exe missing" }
+          $extra = @(Get-ChildItem ".\runtime-slim\host" -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
+          if ($extra.Count -gt 0) { throw "runtime-slim WinUI host has sidecars: $($extra.Name -join ', ')" }
+
+      - name: Pack runtime-slim rename-safe EXE
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          $stub = ".\runtime-slim\relayproxy-launcher.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher
+          if ($LASTEXITCODE -ne 0) { throw "runtime-slim launcher build failed" }
+
+          $nativeHost = (Resolve-Path ".\runtime-slim\host\RelayProxy.NativeHost.exe").Path
+          $exe = ".\runtime-slim\single\RelayProxy-agent-windows-amd64-no-runtime.exe"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pack-windows-launcher.ps1 -Launcher $stub -Payload $nativeHost -Output $exe
+          if ($LASTEXITCODE -ne 0) { throw "runtime-slim launcher packing failed" }
+
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[runtime-slim-size] uncompressed-inner WinUI host: $hostMb MB"
+          Write-Host "[runtime-slim-size] rename-safe EXE: $finalMb MB"
+          Write-Host "::notice title=Runtime-slim package size::x64 no-Runtime = $finalMb MB; host = $hostMb MB"
+
+          @"
+          ### win-x64 no Windows App SDK Runtime experiment
+          **Uncompressed-inner WinUI host:** $hostMb MiB
+          **Outer gzip rename-safe EXE:** $finalMb MiB
+
+          This is a measurement-only build. Windows App SDK Runtime and system AppNotifications are disabled, while RelayProxy's own MessagePopupWindow remains in the application.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Smoke test runtime-slim GUI
+        shell: pwsh
+        run: |
+          $source = (Resolve-Path ".\runtime-slim\single\RelayProxy-agent-windows-amd64-no-runtime.exe").Path
+          $renamed = ".\runtime-slim\single\user-renamed-no-runtime-client.exe"
+          Copy-Item $source $renamed -Force
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "Runtime-slim renamed EXE exited during startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "[runtime-slim-smoke] renamed no-Runtime EXE stayed alive for 8 seconds." -ForegroundColor Green
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-win-x64-no-runtime-experiment
+          path: .\runtime-slim\single\RelayProxy-agent-windows-amd64-no-runtime.exe
+          if-no-files-found: error

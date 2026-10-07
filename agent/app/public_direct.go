@@ -179,10 +179,10 @@ func (a *Agent) startPublicDirectExit(
 	maxStreams int,
 ) (func(), error) {
 	runtime, err := proxydirect.StartExitRuntime(ctx, relay, accepted, handler, proxydirect.ExitRuntimeOptions{
-		MaxStreams:      maxStreams,
-		PortStart:       accepted.PublicDirectPortStart,
-		PortEnd:         accepted.PublicDirectPortEnd,
-		ManualAdvertise: a.cfg.PublicDirectAdvertise,
+		MaxStreams:              maxStreams,
+		PortStart:               accepted.PublicDirectPortStart,
+		PortEnd:                 accepted.PublicDirectPortEnd,
+		ManualAdvertise:         a.cfg.PublicDirectAdvertise,
 		DisableLossCompensation: a.cfg.DisableLossCompensation,
 		ValidateTicket: func(validateCtx context.Context, claims protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
 			return proxydirect.ValidateTicketCurrent(validateCtx, relay, claims)

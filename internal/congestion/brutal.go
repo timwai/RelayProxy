@@ -42,3 +42,18 @@ func CapRequestedRate(requested, cap uint64) uint64 {
 	}
 	return requested
 }
+
+
+// AuthorizeRequestedRate intersects a runtime request with the Server-authorized
+// rate negotiated at device authentication. Either side being zero keeps BBR.
+func AuthorizeRequestedRate(requested, authorized uint64) uint64 {
+	requested = CapRequestedRate(requested, 0)
+	authorized = CapRequestedRate(authorized, 0)
+	if requested == 0 || authorized == 0 {
+		return 0
+	}
+	if requested > authorized {
+		return authorized
+	}
+	return requested
+}

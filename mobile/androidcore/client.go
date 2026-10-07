@@ -51,34 +51,34 @@ func ValidateRoutingConfig(configJSON string) error {
 }
 
 type clientConfig struct {
-	ServerAddress         string         `json:"serverAddress"`
-	IdentityID            string         `json:"identityId"`
-	DeviceName            string         `json:"deviceName"`
-	QUICPort              int            `json:"quicPort"`
-	TCPPort               int            `json:"tcpPort"`
-	TransportMode         string         `json:"transportMode"`
-	BrutalUpMbps          int            `json:"brutalUpMbps"`
-	BrutalDownMbps        int            `json:"brutalDownMbps"`
-	DisableLossCompensation bool         `json:"disableLossCompensation"`
-	TLSEnabled            *bool          `json:"tlsEnabled"`
-	InsecureTLS           bool           `json:"insecureTLS"`
-	AllowInternet         *bool          `json:"allowInternet"`
-	AllowPrivateNetwork   bool           `json:"allowPrivateNetwork"`
-	AllowLoopback         bool           `json:"allowLoopback"`
-	ExitEnabled           *bool          `json:"exitEnabled"`
-	ClientEnabled         bool           `json:"clientEnabled"`
-	RequestedCapabilities []string       `json:"requestedCapabilities"`
-	SOCKS5Enabled         *bool          `json:"socks5Enabled"`
-	HTTPEnabled           *bool          `json:"httpEnabled"`
-	ProxyP2PEnabled       *bool          `json:"proxyP2pEnabled"`
-	ProxyPathMode         string         `json:"proxyPathMode"`
-	DefaultExitID         string         `json:"defaultExitId"`
-	SOCKS5Listen          string         `json:"socks5Listen"`
-	HTTPListen            string         `json:"httpListen"`
-	Routing               routing.Config `json:"routing"`
-	VPNProxyEnabled       bool           `json:"vpnProxyEnabled"`
-	VPNProxyListen        string         `json:"vpnProxyListen"`
-	VPNProxyToken         string         `json:"vpnProxyToken"`
+	ServerAddress           string         `json:"serverAddress"`
+	IdentityID              string         `json:"identityId"`
+	DeviceName              string         `json:"deviceName"`
+	QUICPort                int            `json:"quicPort"`
+	TCPPort                 int            `json:"tcpPort"`
+	TransportMode           string         `json:"transportMode"`
+	BrutalUpMbps            int            `json:"brutalUpMbps"`
+	BrutalDownMbps          int            `json:"brutalDownMbps"`
+	DisableLossCompensation bool           `json:"disableLossCompensation"`
+	TLSEnabled              *bool          `json:"tlsEnabled"`
+	InsecureTLS             bool           `json:"insecureTLS"`
+	AllowInternet           *bool          `json:"allowInternet"`
+	AllowPrivateNetwork     bool           `json:"allowPrivateNetwork"`
+	AllowLoopback           bool           `json:"allowLoopback"`
+	ExitEnabled             *bool          `json:"exitEnabled"`
+	ClientEnabled           bool           `json:"clientEnabled"`
+	RequestedCapabilities   []string       `json:"requestedCapabilities"`
+	SOCKS5Enabled           *bool          `json:"socks5Enabled"`
+	HTTPEnabled             *bool          `json:"httpEnabled"`
+	ProxyP2PEnabled         *bool          `json:"proxyP2pEnabled"`
+	ProxyPathMode           string         `json:"proxyPathMode"`
+	DefaultExitID           string         `json:"defaultExitId"`
+	SOCKS5Listen            string         `json:"socks5Listen"`
+	HTTPListen              string         `json:"httpListen"`
+	Routing                 routing.Config `json:"routing"`
+	VPNProxyEnabled         bool           `json:"vpnProxyEnabled"`
+	VPNProxyListen          string         `json:"vpnProxyListen"`
+	VPNProxyToken           string         `json:"vpnProxyToken"`
 }
 
 type statusSnapshot struct {
@@ -1036,13 +1036,13 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 			accepted.P2PRendezvousAddress,
 			lease,
 			proxyp2p.QUICManagerOptions{
-				PunchTimeout:        1200 * time.Millisecond,
-				KeepAlive:           10 * time.Second,
-				IdleTimeout:         120 * time.Second,
-				MaxExitSessions:     1,
-				PortStart:           accepted.P2PPortStart,
-				PortEnd:             accepted.P2PPortEnd,
-				UPnPEnabled:         accepted.P2PUPnPEnabled,
+				PunchTimeout:            1200 * time.Millisecond,
+				KeepAlive:               10 * time.Second,
+				IdleTimeout:             120 * time.Second,
+				MaxExitSessions:         1,
+				PortStart:               accepted.P2PPortStart,
+				PortEnd:                 accepted.P2PPortEnd,
+				UPnPEnabled:             accepted.P2PUPnPEnabled,
 				LowPowerIdleTimeout:     60 * time.Second,
 				LowPowerMaxSessions:     1,
 				BrutalUploadBPS:         accepted.BrutalUploadBPS,

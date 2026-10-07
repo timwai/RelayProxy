@@ -314,7 +314,6 @@ func TestAndroidBrutalBandwidthNormalization(t *testing.T) {
 	}
 }
 
-
 func TestAndroidStatusSerializesP2PQUICDiagnostics(t *testing.T) {
 	status := statusSnapshot{
 		P2PQUIC: &tunnel.QUICDiagnostics{

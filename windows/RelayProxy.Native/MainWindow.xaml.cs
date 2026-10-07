@@ -23,7 +23,6 @@ public sealed partial class MainWindow : Window
     private bool _messageBaselineReady;
     private bool _suppressAutostart;
     private bool _forceExit;
-    private bool _initialConfigApplied;
     private string _lastDeviceId = "";
     private string _page = "overview";
 
@@ -42,6 +41,9 @@ public sealed partial class MainWindow : Window
         _tray.CopyDeviceIdRequested += OnTrayCopyDeviceIdRequested;
         _tray.ExitRequested += OnTrayExitRequested;
         AppWindow.Closing += OnAppWindowClosing;
+        AppWindow.Changed += OnAppWindowChanged;
+        if (Content is FrameworkElement root)
+            root.Loaded += (_, _) => UpdateTitleBarInset();
         App.AgentHost.StateChanged += OnAgentStateChanged;
         Closed += OnClosed;
         _timer.Tick += async (_, _) => await RefreshCurrentAsync();
@@ -52,6 +54,7 @@ public sealed partial class MainWindow : Window
     private void OnAgentStateChanged(string state) => DispatcherQueue.TryEnqueue(() =>
     {
         AgentStateText.Text = state;
+        UpdateAgentStateVisual(state);
         SettingsAgentStateText.Text = state;
         ManagementUrlText.Text = App.AgentApi.BaseAddress?.ToString() ?? "尚未连接";
         _tray?.UpdateTooltip($"RelayProxy · {state}");
@@ -63,10 +66,32 @@ public sealed partial class MainWindow : Window
         _timer.Stop();
         App.AgentHost.StateChanged -= OnAgentStateChanged;
         AppWindow.Closing -= OnAppWindowClosing;
+        AppWindow.Changed -= OnAppWindowChanged;
         try { _popupWindow?.Close(); } catch { }
         _tray?.Dispose();
         _tray = null;
         _ = App.AgentHost.StopAsync();
+    }
+
+    private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args) => UpdateTitleBarInset();
+
+    private void UpdateTitleBarInset()
+    {
+        if (!AppWindowTitleBar.IsCustomizationSupported()) return;
+        var scale = (Content as FrameworkElement)?.XamlRoot?.RasterizationScale ?? 1.0;
+        if (scale <= 0) scale = 1.0;
+        TitleBarRightInsetSpacer.Width = Math.Max(0, AppWindow.TitleBar.RightInset / scale);
+    }
+
+    private void UpdateAgentStateVisual(string state)
+    {
+        var key = state switch
+        {
+            var s when s.Contains("正常", StringComparison.Ordinal) || s.Contains("已连接", StringComparison.Ordinal) => "SystemFillColorSuccessBrush",
+            var s when s.Contains("正在", StringComparison.Ordinal) || s.Contains("启动", StringComparison.Ordinal) => "SystemFillColorCautionBrush",
+            _ => "SystemFillColorCriticalBrush",
+        };
+        AgentStateDot.Fill = ThemeBrush(key);
     }
 
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
@@ -234,17 +259,11 @@ public sealed partial class MainWindow : Window
             _suppressAutostart = true;
             AutostartSwitch.IsOn = cfg.IsAutostart;
             MinimizeToTraySwitch.IsOn = cfg.MinimizeToTray;
-            StartMinimizedSwitch.IsOn = cfg.StartMinimized;
             SelectComboTag(ThemeCombo, cfg.Theme);
             PopupTimeoutBox.Value = cfg.VerificationPopupTimeoutSec;
             _suppressAutostart = false;
             RestartAgentButton.Visibility = cfg.RestartRequired && App.AgentHost.CanRestart ? Visibility.Visible : Visibility.Collapsed;
             ApplyTheme(cfg.Theme);
-            if (!_initialConfigApplied)
-            {
-                _initialConfigApplied = true;
-                if (cfg.StartMinimized) AppWindow.Hide();
-            }
         }
         catch (Exception ex)
         {
@@ -789,7 +808,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var theme = ComboTag(ThemeCombo, "system");
-            var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { minimizeToTray = MinimizeToTraySwitch.IsOn, startMinimized = StartMinimizedSwitch.IsOn, theme, verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
+            var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { minimizeToTray = MinimizeToTraySwitch.IsOn, theme, verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
             ApplyTheme(theme);
             HandleSaveResult(SettingsBar, result); await LoadConfigAsync();
         }

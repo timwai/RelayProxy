@@ -104,6 +104,40 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	}
 }
 
+func TestAgentInsecureTLSPersistsOnlyWhenEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	cfg := &AgentConfigFile{}
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte("insecure_tls")) {
+		t.Fatalf("default secure TLS setting should stay omitted:\n%s", data)
+	}
+
+	cfg.Server.InsecureTLS = true
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Server.InsecureTLS {
+		t.Fatal("enabled insecure TLS setting did not round-trip")
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(data, []byte("insecure_tls: true")) {
+		t.Fatalf("enabled insecure TLS setting was not persisted:\n%s", data)
+	}
+}
+
 func TestVerificationPopupTimeoutDefaultsAndExplicitZero(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	if err := NormalizeAgentConfig(cfg); err != nil {

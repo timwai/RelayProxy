@@ -17,6 +17,10 @@ func normalizeMessageRules(rules []repository.MessageRule) ([]repository.Message
 	for _, rule := range rules {
 		rule.Name = strings.TrimSpace(rule.Name)
 		rule.Type = strings.ToLower(strings.TrimSpace(rule.Type))
+		rule.PopupType = strings.ToLower(strings.TrimSpace(rule.PopupType))
+		if rule.PopupType == "" {
+			rule.PopupType = rule.Type
+		}
 		rule.Match.MatchType = strings.ToLower(strings.TrimSpace(rule.Match.MatchType))
 		rule.Match.KeywordMode = strings.ToLower(strings.TrimSpace(rule.Match.KeywordMode))
 		rule.Match.Pattern = strings.TrimSpace(rule.Match.Pattern)
@@ -109,7 +113,8 @@ func toMessageutilRule(rule repository.MessageRule) messageutil.MessageRule {
 			Pattern:       rule.Match.Pattern,
 			CaseSensitive: rule.Match.CaseSensitive,
 		},
-		Popup: rule.Popup,
+		Popup:     rule.Popup,
+		PopupType: rule.PopupType,
 	}
 	if rule.Verification != nil {
 		out.Verification = &messageutil.VerificationExtractor{

@@ -81,12 +81,12 @@ func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy) (*di
 	if err != nil {
 		t.Fatal(err)
 	}
-	authenticator.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
+	authenticator.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (direct.Authorization, error) {
 		if relayPolicy == nil {
-			return nil, errors.New("relay policy unavailable")
+			return direct.Authorization{}, errors.New("relay policy unavailable")
 		}
 		copy := *relayPolicy
-		return &copy, nil
+		return direct.Authorization{RelayPolicy: &copy}, nil
 	})
 	listener, err := direct.Listen(direct.ListenerConfig{
 		ListenAddress: "127.0.0.1:0",

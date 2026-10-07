@@ -13,6 +13,8 @@ public sealed partial class MainWindow : Window
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     private readonly HashSet<string> _seenMessageIds = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _speedTestingExits = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, SpeedTestResultDto> _speedTests = new(StringComparer.Ordinal);
     private AgentConfigDto? _config;
     private List<RoutingRuleDto> _routingRules = [];
     private MessagePopupWindow? _popupWindow;
@@ -248,19 +250,58 @@ public sealed partial class MainWindow : Window
             ExitsPanel.Children.Clear();
             foreach (var exit in exits.OrderByDescending(x => x.Online).ThenBy(x => x.Name))
             {
-                var text = exit.Direct?.Public?.Available == true ? $"Public Direct · {exit.Direct.Public.Transport.ToUpperInvariant()}" : "P2P / Relay";
-                var button = new Button { Content = "设为默认", Tag = exit.DeviceId, VerticalAlignment = VerticalAlignment.Center, IsEnabled = exit.Online };
-                button.Click += async (_, _) =>
+                var pathText = exit.Direct?.Public?.Available == true ? $"Public Direct · {exit.Direct.Public.Transport.ToUpperInvariant()}" : "P2P / Relay";
+                var testing = _speedTestingExits.Contains(exit.DeviceId);
+                _speedTests.TryGetValue(exit.DeviceId, out var lastTest);
+
+                var selectButton = new Button { Content = "设为默认", Tag = exit.DeviceId, VerticalAlignment = VerticalAlignment.Center, IsEnabled = exit.Online && !testing };
+                selectButton.Click += async (_, _) =>
                 {
                     try { await App.AgentApi.SelectExitAsync(exit.DeviceId); await RefreshExitsAsync(); await RefreshOverviewAsync(); }
                     catch (Exception ex) { ShowInfo(ExitsBar, "切换失败", ex.Message, InfoBarSeverity.Error); }
                 };
+
+                var speedButton = new Button { Content = testing ? "测速中…" : "测速", Tag = exit.DeviceId, VerticalAlignment = VerticalAlignment.Center, IsEnabled = exit.Online && !testing };
+                speedButton.Click += async (_, _) =>
+                {
+                    if (!_speedTestingExits.Add(exit.DeviceId)) return;
+                    await RefreshExitsAsync();
+                    try
+                    {
+                        var result = await App.AgentApi.RunSpeedTestAsync(exit.DeviceId, 2);
+                        if (result is null) throw new InvalidOperationException("测速没有返回结果。");
+                        _speedTests[exit.DeviceId] = result;
+                        ShowInfo(
+                            ExitsBar,
+                            $"{(string.IsNullOrWhiteSpace(exit.Name) ? exit.DeviceId : exit.Name)} 测速完成",
+                            $"↓ {result.Download.MegabitsPerSecond:0.0} Mbps · ↑ {result.Upload.MegabitsPerSecond:0.0} Mbps · {result.Download.Path}",
+                            InfoBarSeverity.Success);
+                    }
+                    catch (Exception ex)
+                    {
+                        ShowInfo(ExitsBar, "测速失败", ex.Message, InfoBarSeverity.Error);
+                    }
+                    finally
+                    {
+                        _speedTestingExits.Remove(exit.DeviceId);
+                        await RefreshExitsAsync();
+                    }
+                };
+
                 var grid = new Grid { ColumnSpacing = 14 };
                 grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
                 var stack = new StackPanel { Spacing = 3 };
                 stack.Children.Add(new TextBlock { Text = string.IsNullOrWhiteSpace(exit.Name) ? exit.DeviceId : exit.Name, FontSize = 15, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-                stack.Children.Add(new TextBlock { Text = $"{(exit.Online ? "在线" : "离线")} · {text} · {exit.IdentityName}", Foreground = ThemeBrush("TextFillColorSecondaryBrush") });
-                grid.Children.Add(stack); Grid.SetColumn(button, 1); grid.Children.Add(button);
+                stack.Children.Add(new TextBlock { Text = $"{(exit.Online ? "在线" : "离线")} · {pathText} · {exit.IdentityName}", Foreground = ThemeBrush("TextFillColorSecondaryBrush") });
+                if (lastTest is not null)
+                    stack.Children.Add(new TextBlock { Text = $"上次测速  ↓ {lastTest.Download.MegabitsPerSecond:0.0} Mbps  ↑ {lastTest.Upload.MegabitsPerSecond:0.0} Mbps  ·  {lastTest.Download.Path}", Foreground = ThemeBrush("TextFillColorSecondaryBrush") });
+
+                var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+                actions.Children.Add(speedButton);
+                actions.Children.Add(selectButton);
+                grid.Children.Add(stack);
+                Grid.SetColumn(actions, 1);
+                grid.Children.Add(actions);
                 ExitsPanel.Children.Add(Card(grid));
             }
             if (exits.Count == 0) ShowInfo(ExitsBar, "暂无授权出口", "请确认当前身份已审批设备，并已授权可用出口。", InfoBarSeverity.Informational);

@@ -15,6 +15,7 @@ public partial class App : Application
 
     public static AgentApiClient AgentApi { get; } = new();
     public static AgentProcessHost AgentHost { get; } = new(AgentApi);
+    public static AppNotificationService Notifications { get; } = new();
 
     public App() => InitializeComponent();
 
@@ -37,6 +38,7 @@ public partial class App : Application
         var dispatcher = DispatcherQueue.GetForCurrentThread();
         var main = new MainWindow();
         _window = main;
+        Notifications.Initialize(dispatcher, main.ShowFromExternalActivation);
         if (!launch.Minimized)
             main.Activate();
 

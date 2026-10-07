@@ -46,6 +46,37 @@ function Reset-GoHostEnvironment {
     Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
 }
 
+function Assert-WindowsNativeBuildPrerequisites {
+    $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
+    if (-not $dotnet) {
+        throw @"
+Windows Native UI requires the .NET 10 SDK, but 'dotnet' was not found.
+Install it from an elevated PowerShell:
+  winget install --id Microsoft.DotNet.SDK.10 --exact --source winget
+Then close this terminal, open a new PowerShell window, and run:
+  dotnet --version
+"@
+    }
+
+    $sdks = @(& dotnet --list-sdks)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to query installed .NET SDKs with 'dotnet --list-sdks'."
+    }
+
+    $net10 = @($sdks | Where-Object { $_ -match '^10\.' })
+    if ($net10.Count -eq 0) {
+        $installed = if ($sdks.Count -gt 0) { $sdks -join ", " } else { "(none)" }
+        throw @"
+Windows Native UI targets net10.0 and requires the .NET 10 SDK.
+Installed SDKs: $installed
+Install it from an elevated PowerShell:
+  winget install --id Microsoft.DotNet.SDK.10 --exact --source winget
+"@
+    }
+
+    Write-Host "[prep] .NET 10 SDK detected: $($net10[-1])" -ForegroundColor Green
+}
+
 Write-Host "=================================================="
 Write-Host " RelayProxy Build  v$Version"
 Write-Host " Root:   $Root"
@@ -58,6 +89,7 @@ try {
     # The caller may already have GOOS/GOARCH set from a previous cross-build.
     # Reset before invoking any host-side Go helper.
     Reset-GoHostEnvironment
+    Assert-WindowsNativeBuildPrerequisites
 
     Write-Host "[prep] Generate brand icons + Windows resources"
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\gen-brand.ps1")

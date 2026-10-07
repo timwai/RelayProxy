@@ -27,6 +27,7 @@
   window.goSaveConfig = raw => invoke('SaveConfig', raw);
   window.goReloadConfig = () => invoke('ReloadConfig');
   window.goSelectExit = exitID => invoke('SelectExit', exitID);
+  window.goGetNetworkCapabilities = () => invoke('GetNetworkCapabilities');
   window.goGetNetworkServiceStatus = () => invoke('GetNetworkServiceStatus');
   window.goRepairNetworkService = () => invoke('RepairNetworkService');
   window.goUninstallNetworkService = () => invoke('UninstallNetworkService');

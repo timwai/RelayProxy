@@ -44,7 +44,6 @@ func TestTrayStatusLabels(t *testing.T) {
 		}
 	})
 
-
 	t.Run("disconnected cached approval stays offline", func(t *testing.T) {
 		status, _, _, tooltip := trayStatusLabels(agentapp.AgentStatus{ApprovalState: "approved"})
 		if status != "状态：未连接" || !strings.Contains(tooltip, "未连接") {

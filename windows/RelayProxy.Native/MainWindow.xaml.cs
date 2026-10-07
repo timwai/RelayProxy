@@ -23,6 +23,7 @@ public sealed partial class MainWindow : Window
     private bool _messageBaselineReady;
     private bool _suppressAutostart;
     private bool _forceExit;
+    private bool _shutdownInProgress;
     private string _lastDeviceId = "";
     private string _page = "overview";
 
@@ -70,7 +71,6 @@ public sealed partial class MainWindow : Window
         try { _popupWindow?.Close(); } catch { }
         _tray?.Dispose();
         _tray = null;
-        _ = App.AgentHost.StopAsync();
     }
 
     private void OnAppWindowChanged(AppWindow sender, AppWindowChangedEventArgs args) => UpdateTitleBarInset();
@@ -97,10 +97,29 @@ public sealed partial class MainWindow : Window
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (_forceExit) return;
+        args.Cancel = true;
+
         if (_config?.MinimizeToTray ?? true)
         {
-            args.Cancel = true;
             sender.Hide();
+            return;
+        }
+
+        _ = ShutdownAndCloseAsync();
+    }
+
+    private async Task ShutdownAndCloseAsync()
+    {
+        if (_shutdownInProgress) return;
+        _shutdownInProgress = true;
+        try
+        {
+            await App.AgentHost.StopAsync();
+        }
+        finally
+        {
+            _forceExit = true;
+            Close();
         }
     }
 
@@ -120,11 +139,7 @@ public sealed partial class MainWindow : Window
         Clipboard.SetContent(data);
     });
 
-    private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() =>
-    {
-        _forceExit = true;
-        Close();
-    });
+    private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() => _ = ShutdownAndCloseAsync());
 
     private void Navigation_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {

@@ -23,6 +23,13 @@ func (a *appWindow) openConnections() {
 		return
 	}
 
+	backgroundType := application.BackgroundTypeSolid
+	windowsWindow := application.WindowsWindow{}
+	if supportsMicaBackdrop() {
+		backgroundType = application.BackgroundTypeTranslucent
+		windowsWindow.BackdropType = application.Mica
+	}
+
 	window := a.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:                       "connections",
 		Title:                      "RelayProxy · 实时连接",
@@ -32,6 +39,8 @@ func (a *appWindow) openConnections() {
 		MinHeight:                  420,
 		URL:                        "/connections.html",
 		InitialPosition:            application.WindowCentered,
+		BackgroundType:             backgroundType,
+		Windows:                    windowsWindow,
 		DefaultContextMenuDisabled: true,
 		DevToolsEnabled:            false,
 	})

@@ -267,6 +267,48 @@ jobs:
 
           Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe" -Force
 
+      - name: Publish trimmed size experiment
+        if: matrix.runtime == 'win-x64'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $dir = ".\trimmed\${{ matrix.runtime }}"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $core = (Resolve-Path ".\staging\${{ matrix.runtime }}\relay-agent.exe").Path
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r ${{ matrix.runtime }} `
+            -p:Platform=${{ matrix.platform }} `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            -o $dir
+
+          $exe = Join-Path $dir "relay-agent-gui.exe"
+          if (-not (Test-Path $exe)) { throw "trimmed experiment did not produce relay-agent-gui.exe" }
+          $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[size-experiment] partial-trim single EXE: $sizeMb MB"
+          Write-Host "::notice title=Trimmed size experiment::win-x64 partial trim = $sizeMb MB"
+          @"
+          ### win-x64 partial-trim experiment
+          Experimental only; the regular release artifact remains untrimmed.
+
+          **relay-agent-gui.exe:** $sizeMb MB
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
       - name: Build Go Agent core
         shell: pwsh
         run: |

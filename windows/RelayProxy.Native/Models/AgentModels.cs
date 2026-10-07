@@ -78,8 +78,10 @@ public sealed class PushMessageDto
     [JsonPropertyName("id")] public string Id { get; set; } = "";
     [JsonPropertyName("title")] public string Title { get; set; } = "";
     [JsonPropertyName("content")] public string Content { get; set; } = "";
+    [JsonPropertyName("messageType")] public string MessageType { get; set; } = "";
     [JsonPropertyName("messageRule")] public string MessageRule { get; set; } = "";
     [JsonPropertyName("verificationCode")] public string VerificationCode { get; set; } = "";
+    [JsonPropertyName("popup")] public bool Popup { get; set; }
     [JsonPropertyName("popupType")] public string PopupType { get; set; } = "";
     [JsonPropertyName("source")] public string Source { get; set; } = "";
     [JsonPropertyName("createdAt")] public long CreatedAt { get; set; }

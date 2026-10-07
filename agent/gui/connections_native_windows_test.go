@@ -42,6 +42,8 @@ func TestWailsBridgeExposesConnectionBinding(t *testing.T) {
 	for _, want := range []string{
 		`window.goGetConnections`,
 		`invoke('GetConnections')`,
+		`window.goGetNetworkCapabilities`,
+		`invoke('GetNetworkCapabilities')`,
 		`gui.WailsService.`,
 	} {
 		if !strings.Contains(script, want) {

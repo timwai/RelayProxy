@@ -50,6 +50,7 @@ type MessageRule struct {
 	Match        MessageMatch           `json:"match"`
 	Verification *VerificationExtractor `json:"verification,omitempty"`
 	Popup        *bool                  `json:"popup,omitempty"`
+	PopupType    string                 `json:"popupType,omitempty"`
 }
 
 type MessageRuleMatch struct {
@@ -57,6 +58,7 @@ type MessageRuleMatch struct {
 	Type             string
 	RuleName         string
 	Popup            bool
+	PopupType        string
 	VerificationCode string
 }
 
@@ -88,12 +90,21 @@ func DefaultMessageRule() MessageRule {
 			AllowDigits:  true,
 			RequireDigit: true,
 		},
-		Popup: &enabled,
+		Popup:     &enabled,
+		PopupType: MessageTypeVerification,
 	}
 }
 
 func RulePopup(rule MessageRule) bool {
 	return rule.Popup == nil || *rule.Popup
+}
+
+func RulePopupType(rule MessageRule) string {
+	value := strings.ToLower(strings.TrimSpace(rule.PopupType))
+	if value == "" {
+		value = rule.Type
+	}
+	return value
 }
 
 func ValidateMessageRule(rule MessageRule) error {
@@ -105,6 +116,11 @@ func ValidateMessageRule(rule MessageRule) error {
 	case MessageTypeVerification, MessageTypeMessage, MessageTypeImportant:
 	default:
 		return fmt.Errorf("message rule %q has unsupported type %q", rule.Name, rule.Type)
+	}
+	switch RulePopupType(rule) {
+	case MessageTypeVerification, MessageTypeMessage, MessageTypeImportant:
+	default:
+		return fmt.Errorf("message rule %q has unsupported popupType %q", rule.Name, rule.PopupType)
 	}
 	if err := validateMessageMatch(rule.Name, rule.Match); err != nil {
 		return err
@@ -211,10 +227,11 @@ func MatchMessageRules(text string, rules []MessageRule) MessageRuleMatch {
 			continue
 		}
 		result := MessageRuleMatch{
-			Matched:  true,
-			Type:     rule.Type,
-			RuleName: strings.TrimSpace(rule.Name),
-			Popup:    RulePopup(rule),
+			Matched:   true,
+			Type:      rule.Type,
+			RuleName:  strings.TrimSpace(rule.Name),
+			Popup:     RulePopup(rule),
+			PopupType: RulePopupType(rule),
 		}
 		if rule.Type == MessageTypeVerification {
 			code := extractVerificationForMessageRule(text, keywordIndexes, *rule.Verification)

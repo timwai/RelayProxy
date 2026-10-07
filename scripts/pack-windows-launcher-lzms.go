@@ -18,18 +18,18 @@ import (
 )
 
 const (
-	footerMagic                 = "RELAYPROXY_GUI4!"
-	lzmsAlgorithm               = 5
-	compressInfoClassBlockSize = 1
-	lzmsBlockSize       uint32 = 64 * 1024 * 1024
+	footerMagic                       = "RELAYPROXY_GUI4!"
+	lzmsAlgorithm                     = 5
+	compressInfoClassBlockSize        = 1
+	lzmsBlockSize              uint32 = 64 * 1024 * 1024
 )
 
 var (
-	cabinetDLL       = syscall.NewLazyDLL("cabinet.dll")
-	createCompressor       = cabinetDLL.NewProc("CreateCompressor")
-	setCompressorInformation = cabinetDLL.NewProc("SetCompressorInformation")
-	compressProc           = cabinetDLL.NewProc("Compress")
-	closeCompressor        = cabinetDLL.NewProc("CloseCompressor")
+	cabinetDLL                 = syscall.NewLazyDLL("cabinet.dll")
+	createCompressor           = cabinetDLL.NewProc("CreateCompressor")
+	setCompressorInformation   = cabinetDLL.NewProc("SetCompressorInformation")
+	compressProc               = cabinetDLL.NewProc("Compress")
+	closeCompressor            = cabinetDLL.NewProc("CloseCompressor")
 )
 
 func main() {

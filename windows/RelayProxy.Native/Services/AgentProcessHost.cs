@@ -11,6 +11,7 @@ public sealed class AgentProcessHost
     private Process? _process;
     private bool _ownsProcess;
     private bool _stopping;
+    private string? _configPath;
 
     public event Action<string>? StateChanged;
     public string State { get; private set; } = "未启动";
@@ -18,8 +19,9 @@ public sealed class AgentProcessHost
 
     public AgentProcessHost(AgentApiClient api) => _api = api;
 
-    public async Task StartAsync(CancellationToken ct = default)
+    public async Task StartAsync(string? configPath = null, CancellationToken ct = default)
     {
+        if (!string.IsNullOrWhiteSpace(configPath)) _configPath = Path.GetFullPath(configPath);
         var existing = Environment.GetEnvironmentVariable("RELAYPROXY_MANAGEMENT_URL");
         if (Uri.TryCreate(existing, UriKind.Absolute, out var existingUri))
         {
@@ -41,14 +43,21 @@ public sealed class AgentProcessHost
         var startInfo = new ProcessStartInfo
         {
             FileName = exe,
-            Arguments = "--no-gui",
             WorkingDirectory = Path.GetDirectoryName(exe) ?? AppContext.BaseDirectory,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
+        startInfo.ArgumentList.Add("--no-gui");
+        if (!string.IsNullOrWhiteSpace(_configPath))
+        {
+            startInfo.ArgumentList.Add("--config");
+            startInfo.ArgumentList.Add(_configPath);
+        }
         startInfo.Environment[NativeTokenEnvironment] = managementToken;
+        if (!string.IsNullOrWhiteSpace(Environment.ProcessPath))
+            startInfo.Environment["RELAYPROXY_NATIVE_GUI_PATH"] = Environment.ProcessPath;
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _process = process;
@@ -119,7 +128,7 @@ public sealed class AgentProcessHost
 
         SetState("正在重启 Agent…");
         await StopAsync();
-        await StartAsync(ct);
+        await StartAsync(_configPath, ct);
         if (!_api.IsReady)
             throw new InvalidOperationException("Agent 重启后本地管理接口未就绪。");
     }

@@ -86,6 +86,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Closing -= OnAppWindowClosing;
         AppWindow.Changed -= OnAppWindowChanged;
         try { _popupWindow?.ClosePermanently(); } catch { }
+        App.Notifications.Dispose();
         _tray?.Dispose();
         _tray = null;
     }
@@ -390,6 +391,10 @@ public sealed partial class MainWindow : Window
             _suppressAutostart = true;
             AutostartSwitch.IsOn = cfg.IsAutostart;
             MinimizeToTraySwitch.IsOn = cfg.MinimizeToTray;
+            SystemNotificationsSwitch.IsOn = cfg.SystemNotifications;
+            SystemNotificationStateText.Text = App.Notifications.IsRegistered
+                ? "Windows 系统通知已注册；点击通知会前置 RelayProxy 窗口。"
+                : $"Windows 系统通知不可用：{(string.IsNullOrWhiteSpace(App.Notifications.LastError) ? "注册失败" : App.Notifications.LastError)}";
             SelectComboTag(ThemeCombo, cfg.Theme);
             PopupTimeoutBox.Value = cfg.VerificationPopupTimeoutSec;
             _suppressAutostart = false;
@@ -684,6 +689,8 @@ public sealed partial class MainWindow : Window
                     _seenMessageIds.Add(m.Id);
                     if (MessagePopupWindow.ShouldPopup(m))
                     {
+                        if (_config?.SystemNotifications == true)
+                            App.Notifications.TryShow(m);
                         _popupWindow ??= new MessagePopupWindow();
                         _popupWindow.EnqueueMessage(m, _config?.VerificationPopupTimeoutSec ?? 15);
                     }
@@ -1432,7 +1439,7 @@ public sealed partial class MainWindow : Window
         try
         {
             var theme = ComboTag(ThemeCombo, "system");
-            var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { minimizeToTray = MinimizeToTraySwitch.IsOn, theme, verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
+            var result = await App.AgentApi.SaveConfigAsync(new { revision = _config.Revision, gui = new { minimizeToTray = MinimizeToTraySwitch.IsOn, systemNotifications = SystemNotificationsSwitch.IsOn, theme, verificationPopupTimeoutSec = SafeInt(PopupTimeoutBox, 15) } });
             ApplyTheme(theme);
             HandleSaveResult(SettingsBar, result); _dirtyPages.Remove("settings"); await LoadConfigAsync();
         }
@@ -1585,7 +1592,7 @@ public sealed partial class MainWindow : Window
         TrackDirty("exitshare", ExitEnabledSwitch, AllowInternetCheck, AllowPrivateCheck, AllowLoopbackCheck, ExitUpstreamModeCombo,
             ExitUpstreamAddressBox, ExitUpstreamUserBox, ExitUpstreamPasswordBox, AccessModeCombo, AccessDomainsBox, AccessCidrsBox);
         TrackDirty("routing", RoutingModeCombo, DefaultActionCombo);
-        TrackDirty("settings", MinimizeToTraySwitch, ThemeCombo, PopupTimeoutBox);
+        TrackDirty("settings", MinimizeToTraySwitch, SystemNotificationsSwitch, ThemeCombo, PopupTimeoutBox);
     }
 
     private void TrackDirty(string page, params FrameworkElement[] controls)

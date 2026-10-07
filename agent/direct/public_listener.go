@@ -46,10 +46,10 @@ type acceptResult struct {
 }
 
 type PublicListener struct {
-	transport     *tunnel.DirectQUICListener
-	authenticator Authenticator
-	authTimeout   time.Duration
-	limiter       *handshakeLimiter
+	transport               *tunnel.DirectQUICListener
+	authenticator           Authenticator
+	authTimeout             time.Duration
+	limiter                 *handshakeLimiter
 	disableLossCompensation bool
 
 	ctx         context.Context
@@ -84,9 +84,9 @@ func Listen(config ListenerConfig) (*PublicListener, error) {
 	listenerCtx, cancel := context.WithCancel(context.Background())
 	listener := &PublicListener{
 		transport: transport, authenticator: config.Authenticator, authTimeout: timeout,
-		limiter: newHandshakeLimiter(config.AuthAttemptsPerMinute),
+		limiter:                 newHandshakeLimiter(config.AuthAttemptsPerMinute),
 		disableLossCompensation: config.DisableLossCompensation,
-		ctx:     listenerCtx, cancel: cancel,
+		ctx:                     listenerCtx, cancel: cancel,
 		results: make(chan acceptResult, maxHandshakes),
 		slots:   make(chan struct{}, maxHandshakes),
 	}

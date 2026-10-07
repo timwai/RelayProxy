@@ -25,10 +25,10 @@ type ClientDialFunc func(context.Context, DialConfig) (tunnel.TunnelSession, err
 type ClientRaceDialFunc func(context.Context, []DialConfig) (tunnel.TunnelSession, string, error)
 
 type ClientManagerOptions struct {
-	AttemptTimeout time.Duration
-	Cooldown       time.Duration
-	MaxCooldown    time.Duration
-	Dial           ClientDialFunc
+	AttemptTimeout          time.Duration
+	Cooldown                time.Duration
+	MaxCooldown             time.Duration
+	Dial                    ClientDialFunc
 	RaceDial                ClientRaceDialFunc
 	Now                     func() time.Time
 	BrutalUploadBPS         uint64
@@ -65,8 +65,8 @@ type ClientManager struct {
 	raceDial ClientRaceDialFunc
 	now      func() time.Time
 
-	attemptTimeout time.Duration
-	cooldown       time.Duration
+	attemptTimeout          time.Duration
+	cooldown                time.Duration
 	maxCooldown             time.Duration
 	brutalUploadBPS         uint64
 	brutalDownloadBPS       uint64
@@ -122,7 +122,7 @@ func NewClientManager(parent context.Context, clientID func() string, options Cl
 		attemptTimeout: attemptTimeout, cooldown: cooldown, maxCooldown: maxCooldown,
 		brutalUploadBPS: options.BrutalUploadBPS, brutalDownloadBPS: options.BrutalDownloadBPS,
 		disableLossCompensation: options.DisableLossCompensation,
-		entries: make(map[string]*clientEntry),
+		entries:                 make(map[string]*clientEntry),
 	}
 }
 

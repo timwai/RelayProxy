@@ -491,7 +491,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		AccessMode, NetworkMode, Theme, Version                                     string
 		AccessDomains, AccessCIDRs, RestartFields                                   []string
 		SOCKS5, HTTP                                                                proxyLeg
-		IsAutostart, MinimizeToTray, StartMinimized, RestartRequired, ReloadPending bool
+		IsAutostart, MinimizeToTray, StartMinimized, SystemNotifications, RestartRequired, ReloadPending bool
 		Routing, Network, Runtime, ExitUpstream, P2P, Direct                        any
 		NetworkCapabilities                                                         divert.Capabilities
 		Revision                                                                    string
@@ -514,6 +514,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Direct:      map[string]any{"publicAdvertise": cfg.Direct.Public.Advertise},
 		NetworkMode: cfg.Network.Mode, IsAutostart: b.IsAutoStart(), MinimizeToTray: cfg.IsMinimizeToTray(),
 		StartMinimized: cfg.GUI.StartMinimized, Theme: cfg.GUI.Theme, Version: Version,
+		SystemNotifications: cfg.GUI.SystemNotifications == nil || *cfg.GUI.SystemNotifications,
 		VerificationPopupTimeoutSec: cfg.VerificationPopupTimeout(),
 		Network:                     map[string]any{"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses},
 		NetworkCapabilities:         divert.PlatformCapabilities(), Revision: state.Revision,
@@ -545,7 +546,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"exitUpstream": payload.ExitUpstream, "p2p": payload.P2P, "direct": payload.Direct,
 		"networkMode": payload.NetworkMode, "isAutostart": payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
-		"verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,
+		"systemNotifications": payload.SystemNotifications, "verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,
 		"routing":                     payload.Routing, "network": payload.Network, "networkCapabilities": payload.NetworkCapabilities,
 		"runtime": payload.Runtime, "revision": payload.Revision, "restartRequired": payload.RestartRequired,
 		"restartFields": payload.RestartFields, "reloadPending": payload.ReloadPending,

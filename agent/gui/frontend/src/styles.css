@@ -13,6 +13,9 @@ html,body,#root{margin:0;width:100%;height:100%;overflow:hidden}
 body{font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);background:
  radial-gradient(circle at 8% 0%,rgba(111,111,255,.16),transparent 31%),
  radial-gradient(circle at 92% 0%,rgba(22,119,255,.13),transparent 28%),var(--bg)}
+html[data-mica="1"] body{background:transparent}
+html[data-mica="1"] .app-shell{background:color-mix(in srgb,var(--surface) 78%,transparent)}
+html[data-mica="1"] .workspace{background:transparent}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}

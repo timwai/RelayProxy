@@ -46,6 +46,8 @@ jobs:
       - name: Check native bridge Go formatting
         run: |
           files=(
+            agent/app/agent.go
+            agent/app/status_capabilities_test.go
             agent/bridge/bridge.go
             agent/gui/web.go
             agent/gui/web_test.go

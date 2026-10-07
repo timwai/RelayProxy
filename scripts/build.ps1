@@ -219,6 +219,23 @@ try {
     Package-MacOSApp -Arch "amd64"
     Package-MacOSApp -Arch "arm64"
 
+    # --- Wails React frontend ---
+    $frontendDir = Join-Path $Root "agent\gui\frontend"
+    Write-Host ""
+    Write-Host "[BUILD] Wails React frontend" -ForegroundColor Cyan
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        throw "npm was not found. Install Node.js before building the Windows desktop client."
+    }
+    Push-Location $frontendDir
+    try {
+        & npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw "npm install failed for Wails React frontend" }
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw "React frontend build failed" }
+    } finally {
+        Pop-Location
+    }
+
     # --- Windows client (icons + manifest embedded via resource_windows.syso) ---
     # Desktop build first: it is the artifact users are told to double-click.
     Invoke-GoBuild -GOOS "windows" -GOARCH "amd64" `

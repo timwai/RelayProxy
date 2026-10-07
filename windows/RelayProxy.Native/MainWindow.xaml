@@ -165,7 +165,7 @@
             </StackPanel></Border>
             <Border Style="{StaticResource CardStyle}"><Grid ColumnSpacing="14"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
               <StackPanel Spacing="5"><TextBlock Text="RelayProxy Network Service" FontSize="16" FontWeight="SemiBold"/><TextBlock x:Name="NetworkServiceStateText" Text="正在读取服务状态…" FontWeight="SemiBold"/><TextBlock x:Name="NetworkServiceDetailText" Text="WinDivert 提权服务状态" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap"/></StackPanel>
-              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"><Button Content="刷新" Click="RefreshNetworkService_Click"/><Button x:Name="RepairNetworkServiceButton" Content="安装 / 修复" Style="{StaticResource AccentButtonStyle}" Click="RepairNetworkService_Click"/><Button x:Name="UninstallNetworkServiceButton" Content="卸载" Click="UninstallNetworkService_Click"/></StackPanel>
+              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center"><Button Content="刷新" Click="RefreshNetworkService_Click"/><Button x:Name="RepairNetworkServiceButton" Content="安装 / 修复" IsEnabled="False" Style="{StaticResource AccentButtonStyle}" Click="RepairNetworkService_Click"/><Button x:Name="UninstallNetworkServiceButton" Content="卸载" IsEnabled="False" Click="UninstallNetworkService_Click"/></StackPanel>
             </Grid></Border>
           </StackPanel>
         </ScrollViewer>

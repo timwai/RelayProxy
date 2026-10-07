@@ -31,7 +31,10 @@ func (a *Agent) initPublicDirectClient() {
 			return ""
 		}
 		return a.cfg.DeviceID
-	}, proxydirect.ClientManagerOptions{})
+	}, proxydirect.ClientManagerOptions{
+		BrutalUploadBPS: a.cfg.BrutalUploadBPS, BrutalDownloadBPS: a.cfg.BrutalDownloadBPS,
+		DisableLossCompensation: a.cfg.DisableLossCompensation,
+	})
 	manager.SetFallback(func(exitDeviceID, _ string) {
 		a.mu.RLock()
 		p2p := a.proxyP2P
@@ -180,6 +183,7 @@ func (a *Agent) startPublicDirectExit(
 		PortStart:       accepted.PublicDirectPortStart,
 		PortEnd:         accepted.PublicDirectPortEnd,
 		ManualAdvertise: a.cfg.PublicDirectAdvertise,
+		DisableLossCompensation: a.cfg.DisableLossCompensation,
 		ValidateTicket: func(validateCtx context.Context, claims protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
 			return proxydirect.ValidateTicketCurrent(validateCtx, relay, claims)
 		},

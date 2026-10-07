@@ -7,7 +7,7 @@
   产出：
     - Linux 服务端 / Agent amd64 / arm64
     - macOS Server / Agent amd64 / arm64（含 RelayProxy.app Agent 包装）
-    - Windows 客户端 amd64 / arm64（WinUI 3 relay-agent-gui.exe + relay-agent.exe Core + legacy Wails fallback）
+    - Windows 客户端 amd64 / arm64（可任意改名的 WinUI 3 启动器 + relay-agent.exe Core + legacy Wails fallback）
     - Windows 服务端 amd64 / arm64（relay-server.exe，Console 子系统，含 Admin UI）
     - 每个平台目录的完整 ZIP 分发包
 
@@ -356,7 +356,8 @@ try {
     Package-MacOSApp -Arch "arm64"
 
     # --- Windows client ------------------------------------------------------
-    # relay-agent-gui.exe is now the WinUI 3 native shell. It launches the
+    # The RelayProxy-agent-windows-<arch>.exe artifact is the rename-safe WinUI
+    # launcher. It starts the fixed-name embedded WinUI host, which launches the
     # sibling relay-agent.exe in --no-gui mode and talks to its loopback
     # management API. Keep the old Wails binary under a legacy name until the
     # migration has been validated in production.

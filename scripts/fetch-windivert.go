@@ -82,7 +82,10 @@ func packageAgent(directory, destination string) error {
 	sort.Strings(files)
 
 	required := []string{
-		"relay-agent-gui.exe",
+		// The user-visible WinUI client is now the rename-safe launcher. The
+		// fixed-name RelayProxy.NativeHost.exe is embedded inside this EXE and
+		// extracted at runtime, so it is intentionally not a package sidecar.
+		"RelayProxy-agent-windows-amd64.exe",
 		"relay-agent.exe",
 		"configs/relay-agent.yaml",
 		"windivert/WinDivert.dll",

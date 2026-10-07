@@ -20,7 +20,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: false
+      - name: Check LZMS source formatting
+        shell: bash
+        run: |
+          files=(
+            cmd/relay-agent-win-launcher-lzms/main.go
+            cmd/relay-agent-win-launcher-lzms/messagebox_windows.go
+            scripts/pack-windows-launcher-lzms.go
+          )
+          bad="$(gofmt -l "${files[@]}")"
+          if [ -n "$bad" ]; then
+            for file in $bad; do
+              gofmt -d "$file"
+            done
+            exit 1
+          fi
+
   lzms:
+    needs: format
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,24 +58,6 @@ jobs:
         with:
           go-version-file: "go.mod"
           cache: true
-
-      - name: Check LZMS source formatting
-        shell: pwsh
-        run: |
-          $files = @(
-            ".\cmd\relay-agent-win-launcher-lzms\main.go",
-            ".\cmd\relay-agent-win-launcher-lzms\messagebox_windows.go",
-            ".\scripts\pack-windows-launcher-lzms.go"
-          )
-          $bad = @()
-          foreach ($file in $files) {
-            $result = gofmt -l $file
-            if ($result) { $bad += $result }
-          }
-          if ($bad.Count -gt 0) {
-            foreach ($file in $bad) { gofmt -d $file }
-            throw "LZMS Go sources are not gofmt-clean"
-          }
 
       - name: Restore lean Windows App SDK graph
         shell: pwsh

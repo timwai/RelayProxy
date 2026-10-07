@@ -171,6 +171,10 @@ func (s *QUICSession) UseBrutal(txBPS uint64, disableLossCompensation bool) bool
 	if s == nil || s.conn == nil || txBPS == 0 {
 		return false
 	}
+	txBPS = quicprofile.CapRequestedRate(txBPS, 0)
+	if txBPS == 0 {
+		return false
+	}
 	quicprofile.UseBrutal(s.conn, txBPS, disableLossCompensation)
 	s.diagnosticsMu.Lock()
 	s.congestionController = "brutal"

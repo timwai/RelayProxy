@@ -128,6 +128,7 @@ type QUICSession struct {
 	udpReadBufferBytes       int
 	udpWriteBufferBytes      int
 	congestionController     string
+	congestionTargetBPS      uint64
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -160,6 +161,29 @@ func NewQUICSession(conn *quic.Conn) *QUICSession {
 	s := &QUICSession{conn: conn, congestionController: "bbr-aggressive"}
 	s.datagrams = newDatagramMux(s)
 	return s
+}
+
+// UseBrutal switches an established QUIC session to Hysteria Brutal.
+// QUIC starts on BBR Aggressive so authentication and capability negotiation
+// don't depend on a bandwidth hint. The authenticated control plane can then
+// opt into Brutal for the sending direction.
+func (s *QUICSession) UseBrutal(txBPS uint64, disableLossCompensation bool) bool {
+	if s == nil || s.conn == nil || txBPS == 0 {
+		return false
+	}
+	quicprofile.UseBrutal(s.conn, txBPS, disableLossCompensation)
+	s.diagnosticsMu.Lock()
+	s.congestionController = "brutal"
+	s.congestionTargetBPS = txBPS
+	s.diagnosticsMu.Unlock()
+	return true
+}
+
+// UseBrutal configures a TunnelSession when its transport is QUIC.
+// TLS/yamux sessions intentionally ignore QUIC congestion settings.
+func UseBrutal(session TunnelSession, txBPS uint64, disableLossCompensation bool) bool {
+	quicSession, ok := session.(*QUICSession)
+	return ok && quicSession.UseBrutal(txBPS, disableLossCompensation)
 }
 
 func newOwnedQUICSession(conn *quic.Conn, packetConn net.PacketConn) *QUICSession {

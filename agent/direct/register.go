@@ -41,8 +41,8 @@ func ValidateTicketCurrent(ctx context.Context, relay tunnel.TunnelSession, clai
 		return Authorization{}, fmt.Errorf("public direct relay ACL fingerprint mismatch")
 	}
 	return Authorization{
-		RelayPolicy: &policy,
-		BrutalUploadBPS: response.BrutalUploadBPS,
+		RelayPolicy:       &policy,
+		BrutalUploadBPS:   response.BrutalUploadBPS,
 		BrutalDownloadBPS: response.BrutalDownloadBPS,
 	}, nil
 }

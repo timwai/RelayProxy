@@ -145,3 +145,46 @@ func TestValidateMessageRuleRejectsVerificationFieldsOnNormalMessage(t *testing.
 		t.Fatal("normal message rule accepted verification extractor")
 	}
 }
+
+
+func TestMessageRulePopupTypeCanDifferFromMessageType(t *testing.T) {
+	popup := true
+	rules := []MessageRule{{
+		Name:      "普通消息重要弹窗",
+		Type:      MessageTypeMessage,
+		Enabled:   true,
+		Match:     MessageMatch{MatchType: MatchTypeAll},
+		Popup:     &popup,
+		PopupType: MessageTypeImportant,
+	}}
+	got := MatchMessageRules("普通状态更新", rules)
+	if !got.Matched || got.Type != MessageTypeMessage || got.PopupType != MessageTypeImportant || !got.Popup {
+		t.Fatalf("independent popup type not preserved: %#v", got)
+	}
+}
+
+func TestMessageRulePopupTypeDefaultsToMessageType(t *testing.T) {
+	rules := []MessageRule{{
+		Name:    "默认弹窗类型",
+		Type:    MessageTypeImportant,
+		Enabled: true,
+		Match:   MessageMatch{MatchType: MatchTypeAll},
+	}}
+	got := MatchMessageRules("告警", rules)
+	if got.PopupType != MessageTypeImportant {
+		t.Fatalf("popup type fallback = %q, want %q", got.PopupType, MessageTypeImportant)
+	}
+}
+
+func TestValidateMessageRuleRejectsInvalidPopupType(t *testing.T) {
+	rule := MessageRule{
+		Name:      "bad popup",
+		Type:      MessageTypeMessage,
+		Enabled:   true,
+		PopupType: "unsupported",
+		Match:     MessageMatch{MatchType: MatchTypeAll},
+	}
+	if err := ValidateMessageRule(rule); err == nil {
+		t.Fatal("invalid popupType was accepted")
+	}
+}

@@ -34,6 +34,7 @@ public sealed class TrayIconService : IDisposable
     private bool _disposed;
 
     public event Action? ShowRequested;
+    public event Action? CopyDeviceIdRequested;
     public event Action? ExitRequested;
 
     public TrayIconService(Window window, string? iconPath)
@@ -96,12 +97,14 @@ public sealed class TrayIconService : IDisposable
         try
         {
             AppendMenu(menu, MfString, 1, "打开 RelayProxy");
+            AppendMenu(menu, MfString, 2, "复制设备 ID");
             AppendMenu(menu, MfSeparator, 0, null);
-            AppendMenu(menu, MfString, 2, "退出");
+            AppendMenu(menu, MfString, 3, "退出");
             SetForegroundWindow(_hwnd);
             var command = TrackPopupMenu(menu, TpmRightButton | TpmReturnCmd | TpmNoNotify, point.X, point.Y, 0, _hwnd, 0);
             if (command == 1) ShowRequested?.Invoke();
-            else if (command == 2) ExitRequested?.Invoke();
+            else if (command == 2) CopyDeviceIdRequested?.Invoke();
+            else if (command == 3) ExitRequested?.Invoke();
         }
         finally { DestroyMenu(menu); }
     }

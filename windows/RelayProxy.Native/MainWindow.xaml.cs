@@ -33,6 +33,8 @@ public sealed partial class MainWindow : Window
     private bool _suppressDirtyTracking;
     private bool _suppressNavigationSelection;
     private string _lastDeviceId = "";
+    private string _lastApprovalState = "";
+    private string _lastExitIssueKey = "";
     private string _page = "overview";
 
     public MainWindow()
@@ -222,6 +224,12 @@ public sealed partial class MainWindow : Window
             ConnectionMetaText.Text = status.Connected ? $"{status.Transport.ToUpperInvariant()} · {status.DeviceName} · {status.IdentityName}" : "正在连接 Relay Server";
             ApprovalText.Text = status.ApprovalState switch { "approved" => "已审批", "pending" => "待审批", "rejected" => "已拒绝", "revoked" => "已撤销", _ => "未知" };
             _lastDeviceId = status.DeviceId;
+            if (!string.Equals(_lastApprovalState, status.ApprovalState, StringComparison.OrdinalIgnoreCase))
+            {
+                _lastApprovalState = status.ApprovalState;
+                if (status.ApprovalState is "pending" or "rejected" or "revoked")
+                    await ShowApprovalStateDialogAsync(status);
+            }
             LatencyText.Text = status.LatencyMs > 0 ? $"{status.LatencyMs} ms" : "—";
             SocksStateText.Text = status.Socks5Running ? "运行中" : "已停止";
             HttpStateText.Text = status.HttpRunning ? "运行中" : "已停止";
@@ -230,6 +238,18 @@ public sealed partial class MainWindow : Window
             var selected = status.ProxyExits.FirstOrDefault(x => x.DeviceId == status.SelectedExit);
             ExitNameText.Text = selected?.Name ?? (string.IsNullOrWhiteSpace(status.SelectedExit) ? "自动选择" : status.SelectedExit);
             ExitMetaText.Text = selected is null ? "等待授权出口状态" : $"{(selected.Online ? "在线" : "离线")} · {selected.AuthorizationSource}";
+
+            var exitIssue = string.IsNullOrWhiteSpace(status.SelectedExit)
+                ? ""
+                : selected is null
+                    ? $"missing:{status.SelectedExit}"
+                    : selected.Online ? "" : $"offline:{status.SelectedExit}";
+            if (exitIssue != _lastExitIssueKey)
+            {
+                _lastExitIssueKey = exitIssue;
+                if (!string.IsNullOrWhiteSpace(exitIssue))
+                    await ShowExitUnavailableDialogAsync(status.SelectedExit, selected?.Name, selected is null);
+            }
             DirectStateText.Text = StateLabel(status.DirectState);
             DirectDetailText.Text = string.IsNullOrWhiteSpace(status.DirectPath) ? "未建立" : $"{status.DirectPath} · {status.DirectRttMs} ms";
             P2PStateText.Text = StateLabel(status.P2PState);
@@ -252,6 +272,57 @@ public sealed partial class MainWindow : Window
             OverviewBar.Message = ex.Message;
             OverviewBar.IsOpen = true;
         }
+    }
+
+    private async Task ShowApprovalStateDialogAsync(AgentStatusDto status)
+    {
+        var title = status.ApprovalState switch
+        {
+            "pending" => "设备正在等待审批",
+            "rejected" => "设备审批已被拒绝",
+            "revoked" => "设备授权已被撤销",
+            _ => "设备审批状态已变化"
+        };
+        var detail = status.ApprovalState switch
+        {
+            "pending" => "请在 RelayProxy Server 管理控制台审批当前设备后再使用代理、RDP 与消息能力。",
+            "rejected" => "服务端拒绝了当前设备。请检查身份和申请能力，必要时重新发起审批。",
+            "revoked" => "服务端已撤销当前设备授权。现有资源访问将被停止。",
+            _ => ""
+        };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = title,
+            Content = $"{detail}\n\n设备 ID：{status.DeviceId}",
+            PrimaryButtonText = "复制设备 ID",
+            CloseButtonText = "关闭",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary && !string.IsNullOrWhiteSpace(status.DeviceId))
+        {
+            var package = new DataPackage();
+            package.SetText(status.DeviceId);
+            Clipboard.SetContent(package);
+        }
+    }
+
+    private async Task ShowExitUnavailableDialogAsync(string exitId, string? exitName, bool authorizationMissing)
+    {
+        var name = string.IsNullOrWhiteSpace(exitName) ? exitId : exitName;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = Content.XamlRoot,
+            Title = authorizationMissing ? "当前出口已不可用" : "当前出口已离线",
+            Content = authorizationMissing
+                ? $"之前选择的出口“{name}”已不在当前身份授权列表中。RelayProxy 不会把这个状态伪装成正常出口。"
+                : $"出口“{name}”当前离线。可以选择其他在线出口，或等待它恢复。",
+            PrimaryButtonText = "选择其他出口",
+            CloseButtonText = "知道了",
+            DefaultButton = ContentDialogButton.Close
+        };
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+            SelectNavigation("exits");
     }
 
     private async Task LoadConfigAsync()

@@ -19,6 +19,10 @@ public sealed class AgentConfigDto
     [JsonPropertyName("allowInternet")] public bool AllowInternet { get; set; }
     [JsonPropertyName("allowPrivateNetwork")] public bool AllowPrivateNetwork { get; set; }
     [JsonPropertyName("allowLoopback")] public bool AllowLoopback { get; set; }
+    [JsonPropertyName("accessMode")] public string AccessMode { get; set; } = "";
+    [JsonPropertyName("accessDomains")] public List<string> AccessDomains { get; set; } = [];
+    [JsonPropertyName("accessCidrs")] public List<string> AccessCidrs { get; set; } = [];
+    [JsonPropertyName("exitUpstream")] public ExitUpstreamDto ExitUpstream { get; set; } = new();
     [JsonPropertyName("p2p")] public P2PConfigDto P2P { get; set; } = new();
     [JsonPropertyName("direct")] public DirectConfigDto Direct { get; set; } = new();
     [JsonPropertyName("networkMode")] public string NetworkMode { get; set; } = "";
@@ -40,6 +44,13 @@ public sealed class ProxyLegDto
     [JsonPropertyName("enabled")] public bool Enabled { get; set; }
     [JsonPropertyName("listen")] public string Listen { get; set; } = "127.0.0.1";
     [JsonPropertyName("port")] public int Port { get; set; }
+}
+public sealed class ExitUpstreamDto
+{
+    [JsonPropertyName("mode")] public string Mode { get; set; } = "";
+    [JsonPropertyName("address")] public string Address { get; set; } = "";
+    [JsonPropertyName("username")] public string Username { get; set; } = "";
+    [JsonPropertyName("password")] public string Password { get; set; } = "";
 }
 public sealed class P2PConfigDto
 {

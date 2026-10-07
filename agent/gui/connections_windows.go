@@ -80,6 +80,11 @@ func renderConnectionsHTML(dark bool) (string, error) {
 		return "", err
 	}
 	html := string(raw)
+	mica := "0"
+	if supportsMicaBackdrop() {
+		mica = "1"
+	}
+	html = strings.Replace(html, `data-theme="dark"`, `data-theme="dark" data-mica="`+mica+`"`, 1)
 	if !dark {
 		html = strings.Replace(html, "data-theme=\"dark\"", "data-theme=\"light\"", 1)
 	}

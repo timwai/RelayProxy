@@ -15,6 +15,7 @@ func TestConnectionsDocumentRemainsReusableByWails(t *testing.T) {
 	}
 	for _, want := range []string{
 		`data-theme="dark"`,
+		`data-mica="`,
 		`connections.js`,
 		`id="connections"`,
 	} {

@@ -98,11 +98,13 @@ type PublicDirectRegistrationRequest struct {
 }
 
 type PublicDirectRegistrationResponse struct {
-	Success      bool                   `json:"success"`
-	Endpoints    []PublicDirectEndpoint `json:"endpoints,omitempty"`
-	RelayPolicy  *acl.Policy            `json:"relayPolicy,omitempty"`
-	ErrorCode    string                 `json:"errorCode,omitempty"`
-	ErrorMessage string                 `json:"errorMessage,omitempty"`
+	Success           bool                   `json:"success"`
+	Endpoints         []PublicDirectEndpoint `json:"endpoints,omitempty"`
+	RelayPolicy       *acl.Policy            `json:"relayPolicy,omitempty"`
+	BrutalUploadBPS   uint64                 `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64                 `json:"brutalDownloadBps,omitempty"`
+	ErrorCode         string                 `json:"errorCode,omitempty"`
+	ErrorMessage      string                 `json:"errorMessage,omitempty"`
 }
 
 type PublicDirectProbeRequest struct {
@@ -120,8 +122,10 @@ type PublicDirectHandshakeRequest struct {
 }
 
 type PublicDirectHandshakeResponse struct {
-	Success      bool                       `json:"success"`
-	ErrorCode    string                     `json:"errorCode,omitempty"`
-	ErrorMessage string                     `json:"errorMessage,omitempty"`
-	Probe        *PublicDirectProbeResponse `json:"probe,omitempty"`
+	Success           bool                       `json:"success"`
+	BrutalUploadBPS   uint64                     `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64                     `json:"brutalDownloadBps,omitempty"`
+	ErrorCode         string                     `json:"errorCode,omitempty"`
+	ErrorMessage      string                     `json:"errorMessage,omitempty"`
+	Probe             *PublicDirectProbeResponse `json:"probe,omitempty"`
 }

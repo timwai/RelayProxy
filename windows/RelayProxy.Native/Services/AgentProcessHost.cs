@@ -1,67 +1,139 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 
 namespace RelayProxy.Native.Services;
 
 public sealed class AgentProcessHost
 {
     private const string Marker = "[Web] Management page: ";
+    private const string NativeTokenEnvironment = "RELAYPROXY_NATIVE_MANAGEMENT_TOKEN";
     private readonly AgentApiClient _api;
     private Process? _process;
     private bool _ownsProcess;
+    private bool _stopping;
+
     public event Action<string>? StateChanged;
     public string State { get; private set; } = "未启动";
+    public bool CanRestart => _ownsProcess && _process is not null;
 
     public AgentProcessHost(AgentApiClient api) => _api = api;
 
     public async Task StartAsync(CancellationToken ct = default)
     {
         var existing = Environment.GetEnvironmentVariable("RELAYPROXY_MANAGEMENT_URL");
-        if (Uri.TryCreate(existing, UriKind.Absolute, out var uri))
+        if (Uri.TryCreate(existing, UriKind.Absolute, out var existingUri))
         {
-            _api.Configure(uri); SetState("已连接现有 Agent"); return;
+            _ownsProcess = false;
+            _api.Configure(existingUri);
+            SetState("已连接现有 Agent");
+            return;
         }
 
         var exe = ResolveAgentPath();
-        if (exe is null) { SetState("未找到 relay-agent.exe"); return; }
-        var ready = new TaskCompletionSource<Uri>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _process = new Process
+        if (exe is null)
         {
-            StartInfo = new ProcessStartInfo
-            {
-                FileName = exe, Arguments = "--no-gui", WorkingDirectory = Path.GetDirectoryName(exe) ?? AppContext.BaseDirectory,
-                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
-            },
-            EnableRaisingEvents = true,
+            SetState("未找到 relay-agent.exe");
+            return;
+        }
+
+        var managementToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        var ready = new TaskCompletionSource<Uri>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = exe,
+            Arguments = "--no-gui",
+            WorkingDirectory = Path.GetDirectoryName(exe) ?? AppContext.BaseDirectory,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
         };
-        _process.Exited += (_, _) => { if (!_api.IsReady) SetState("Agent 已退出"); };
+        startInfo.Environment[NativeTokenEnvironment] = managementToken;
+
+        var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        _process = process;
+        _stopping = false;
+        process.Exited += (_, _) =>
+        {
+            _api.Reset();
+            _ownsProcess = false;
+            if (!_stopping) SetState("Agent 意外退出");
+        };
 
         try
         {
-            if (!_process.Start()) { SetState("Agent 启动失败"); return; }
-            _ownsProcess = true; SetState("正在连接 Agent…");
-            _ = PumpAsync(_process.StandardOutput, ready, ct);
-            _ = PumpAsync(_process.StandardError, ready, ct);
+            if (!process.Start())
+            {
+                SetState("Agent 启动失败");
+                return;
+            }
+            _ownsProcess = true;
+            SetState("正在连接 Agent…");
+            _ = PumpAsync(process.StandardOutput, ready, ct);
+            _ = PumpAsync(process.StandardError, ready, ct);
             var management = await ready.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
-            _api.Configure(management); SetState("Agent 正常运行");
+            _api.Configure(management, managementToken);
+            SetState("Agent 正常运行");
         }
-        catch (TimeoutException) { SetState("本地管理接口未就绪"); }
-        catch (Exception ex) { SetState($"Agent 启动失败: {ex.Message}"); }
+        catch (TimeoutException)
+        {
+            SetState(process.HasExited ? "Agent 已退出，本地管理接口未启动" : "本地管理接口未就绪");
+        }
+        catch (Exception ex)
+        {
+            SetState($"Agent 启动失败: {ex.Message}");
+        }
     }
 
     public async Task StopAsync()
     {
-        if (!_ownsProcess || _process is null) return;
-        try { using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2)); await _api.QuitAsync(cts.Token); } catch { }
-        try { if (!_process.HasExited && !_process.WaitForExit(2500)) _process.Kill(entireProcessTree: true); } catch { }
+        var process = _process;
+        if (!_ownsProcess || process is null) return;
+
+        _stopping = true;
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            await _api.QuitAsync(cts.Token);
+        }
+        catch { }
+
+        try
+        {
+            if (!process.HasExited && !process.WaitForExit(2500))
+                process.Kill(entireProcessTree: true);
+        }
+        catch { }
+
+        _ownsProcess = false;
+        _api.Reset();
+        try { process.Dispose(); } catch { }
+        if (ReferenceEquals(_process, process)) _process = null;
+        SetState("Agent 已停止");
+    }
+
+    public async Task RestartAsync(CancellationToken ct = default)
+    {
+        if (!CanRestart)
+            throw new InvalidOperationException("当前 GUI 连接的是外部 Agent，无法由此窗口自动重启。");
+
+        SetState("正在重启 Agent…");
+        await StopAsync();
+        await StartAsync(ct);
+        if (!_api.IsReady)
+            throw new InvalidOperationException("Agent 重启后本地管理接口未就绪。");
     }
 
     private async Task PumpAsync(StreamReader reader, TaskCompletionSource<Uri> ready, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(ct); if (line is null) break;
-            var i = line.IndexOf(Marker, StringComparison.Ordinal); if (i < 0) continue;
-            if (Uri.TryCreate(line[(i + Marker.Length)..].Trim(), UriKind.Absolute, out var uri)) ready.TrySetResult(uri);
+            var line = await reader.ReadLineAsync(ct);
+            if (line is null) break;
+            var i = line.IndexOf(Marker, StringComparison.Ordinal);
+            if (i < 0) continue;
+            if (Uri.TryCreate(line[(i + Marker.Length)..].Trim(), UriKind.Absolute, out var uri))
+                ready.TrySetResult(uri);
         }
     }
 
@@ -77,5 +149,9 @@ public sealed class AgentProcessHost
         }.FirstOrDefault(File.Exists);
     }
 
-    private void SetState(string state) { State = state; StateChanged?.Invoke(state); }
+    private void SetState(string state)
+    {
+        State = state;
+        StateChanged?.Invoke(state);
+    }
 }

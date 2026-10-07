@@ -74,6 +74,11 @@ jobs:
             throw "Go formatting check failed"
           }
 
+      - name: Test native Core bridge
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: go test ./agent/gui ./agent/bridge ./agent/startup -count=1
+
       - name: Validate PowerShell release script
         shell: pwsh
         run: |

@@ -243,7 +243,7 @@ func (s *WailsService) GetConfig() (string, error) {
 			"idleTimeoutSec": cfg.P2P.IdleTimeoutSec, "maxExitSessions": cfg.P2P.MaxExitSessions,
 			"fallback": cfg.P2P.Fallback == nil || *cfg.P2P.Fallback,
 		},
-		PublicDirectAdvertise:      cfg.Direct.Public.Advertise,
+		PublicDirectAdvertise:       cfg.Direct.Public.Advertise,
 		NetworkMode:                 cfg.Network.Mode,
 		IsAutostart:                 a.bridge.IsAutoStart(),
 		MinimizeToTray:              cfg.IsMinimizeToTray(),

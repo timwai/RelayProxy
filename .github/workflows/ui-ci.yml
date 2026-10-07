@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "feature/unified-ui-*"
+      - "feature/wails-react-*"
   pull_request:
     paths:
       - "agent/gui/**"
@@ -16,6 +17,7 @@ on:
       - "macos/**"
       - ".github/workflows/ui-ci.yml"
       - "scripts/build.sh"
+      - "scripts/build.ps1"
 
 permissions:
   contents: read
@@ -30,6 +32,14 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Build Wails React frontend
+        working-directory: agent/gui/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
       - name: Check Go formatting
         shell: bash
         run: |

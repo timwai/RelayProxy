@@ -109,6 +109,35 @@ public sealed class DiagnosticsSnapshotDto
     [JsonPropertyName("sampledAt")] public DateTimeOffset SampledAt { get; set; }
     [JsonPropertyName("status")] public AgentStatusDto Status { get; set; } = new();
     [JsonPropertyName("connections")] public List<ConnectionDto> Connections { get; set; } = [];
+    [JsonPropertyName("exit")] public ExitDiagnosticsDto? Exit { get; set; }
+}
+
+public sealed class ExitDiagnosticsDto
+{
+    [JsonPropertyName("sampled_at")] public DateTimeOffset SampledAt { get; set; }
+    [JsonPropertyName("active_tcp")] public List<ExitTcpDiagnosticDto> ActiveTcp { get; set; } = [];
+}
+
+public sealed class ExitTcpDiagnosticDto
+{
+    [JsonPropertyName("id")] public ulong Id { get; set; }
+    [JsonPropertyName("host")] public string Host { get; set; } = "";
+    [JsonPropertyName("port")] public ushort Port { get; set; }
+    [JsonPropertyName("remote")] public string Remote { get; set; } = "";
+    [JsonPropertyName("started_at")] public DateTimeOffset StartedAt { get; set; }
+    [JsonPropertyName("tunnel_to_target")] public PumpMetricsDto TunnelToTarget { get; set; } = new();
+    [JsonPropertyName("target_to_tunnel")] public PumpMetricsDto TargetToTunnel { get; set; } = new();
+}
+
+public sealed class PumpMetricsDto
+{
+    [JsonPropertyName("phase")] public string Phase { get; set; } = "idle";
+    [JsonPropertyName("read_ms")] public double ReadMs { get; set; }
+    [JsonPropertyName("write_ms")] public double WriteMs { get; set; }
+    [JsonPropertyName("read_calls")] public ulong ReadCalls { get; set; }
+    [JsonPropertyName("write_calls")] public ulong WriteCalls { get; set; }
+    [JsonPropertyName("read_bytes")] public ulong ReadBytes { get; set; }
+    [JsonPropertyName("write_bytes")] public ulong WriteBytes { get; set; }
 }
 
 

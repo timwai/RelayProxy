@@ -1686,6 +1686,36 @@ public sealed partial class MainWindow : Window
                            !string.IsNullOrWhiteSpace(diag.Status.P2PPath) ? diag.Status.P2PPath : "Relay / 未知";
                 DiagPathText.Text = path;
                 DiagConnectionsText.Text = diag.Connections.Count.ToString();
+
+                var exitTcp = diag.Exit?.ActiveTcp ?? [];
+                DiagExitTcpText.Text = exitTcp.Count.ToString();
+                DiagExitTcpPanel.Children.Clear();
+                if (exitTcp.Count == 0)
+                {
+                    DiagExitTcpPanel.Children.Add(new TextBlock
+                    {
+                        Text = "当前没有作为 Exit 承载的活跃 TCP 转发。",
+                        Foreground = ThemeBrush("TextFillColorSecondaryBrush")
+                    });
+                }
+                else
+                {
+                    foreach (var item in exitTcp.Take(8))
+                    {
+                        var target = string.IsNullOrWhiteSpace(item.Host) ? item.Remote : $"{item.Host}:{item.Port}";
+                        var phase = $"tunnel→target {PumpPhaseLabel(item.TunnelToTarget.Phase)} · target→tunnel {PumpPhaseLabel(item.TargetToTunnel.Phase)}";
+                        var traffic = $"↑ {FormatBytes(item.TunnelToTarget.ReadBytes)} · ↓ {FormatBytes(item.TargetToTunnel.ReadBytes)}";
+                        var remote = string.IsNullOrWhiteSpace(item.Remote) ? "" : $" · client {item.Remote}";
+                        DiagExitTcpPanel.Children.Add(TwoLine(target, $"{traffic} · {phase}{remote}"));
+                    }
+
+                    if (exitTcp.Count > 8)
+                        DiagExitTcpPanel.Children.Add(new TextBlock
+                        {
+                            Text = $"另有 {exitTcp.Count - 8} 条活跃 Exit TCP 已包含在诊断数据中。",
+                            Foreground = ThemeBrush("TextFillColorSecondaryBrush")
+                        });
+                }
             }
             _logCache = logs;
             RenderLogs();
@@ -2515,6 +2545,8 @@ public sealed partial class MainWindow : Window
     private static void ShowInfo(InfoBar bar, string title, string message, InfoBarSeverity severity) { bar.Title = title; bar.Message = message; bar.Severity = severity; bar.IsOpen = true; }
     private static string StateLabel(string value) => value switch { "connected" or "active" or "direct" => "已直连", "connecting" or "negotiating" or "punching" => "协商中", "cooldown" => "冷却中", "fallback" => "已降级", "disabled" => "已关闭", "unavailable" => "不可用", _ => string.IsNullOrWhiteSpace(value) ? "—" : value };
     private static string FormatRate(double n) => n < 1024 ? $"{n:0} B/s" : n < 1024 * 1024 ? $"{n / 1024:0.0} KB/s" : $"{n / 1024 / 1024:0.0} MB/s";
+    private static string FormatBytes(ulong n) => n < 1024 ? $"{n} B" : n < 1024 * 1024 ? $"{n / 1024.0:0.0} KB" : n < 1024UL * 1024 * 1024 ? $"{n / 1024.0 / 1024:0.0} MB" : $"{n / 1024.0 / 1024 / 1024:0.0} GB";
+    private static string PumpPhaseLabel(string value) => value switch { "read" => "读取", "write" => "写入", _ => "空闲" };
     private static string FormatCreatedAt(long value)
     {
         if (value <= 0) return "";

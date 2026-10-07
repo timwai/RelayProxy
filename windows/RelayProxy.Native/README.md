@@ -21,7 +21,7 @@ Windows 客户端的 WinUI 3 原生 GUI。正式 Agent 下载采用单 EXE：Win
 - 消息中心：验证码、普通消息、重要提醒、历史、复制验证码、清空历史
 - 原生消息弹窗：WinUI 窗口、消息队列、无顶部色条、可配置自动关闭时间
 - 实时连接：进程、目标、规则、出口、路径、上下行速率
-- 诊断与日志：`/api/diagnostics`、`/api/logs`、清空日志
+- 诊断与日志：`/api/diagnostics`、Exit 活跃 TCP / pump 指标、`/api/logs`、清空日志
 - 配置 revision 校验，避免 GUI 覆盖外部修改
 
 Android 独有的 Wi-Fi / 移动数据优先、移动网络故障切换等“Android 网络调度”不会出现在 Windows GUI。

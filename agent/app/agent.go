@@ -757,9 +757,12 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 			KeepAlive:       cfg.P2PKeepalive,
 			IdleTimeout:     cfg.P2PIdleTimeout,
 			MaxExitSessions: cfg.P2PMaxSessions,
-			PortStart:       accepted.P2PPortStart,
-			PortEnd:         accepted.P2PPortEnd,
-			UPnPEnabled:     accepted.P2PUPnPEnabled,
+			PortStart:                 accepted.P2PPortStart,
+			PortEnd:                   accepted.P2PPortEnd,
+			UPnPEnabled:               accepted.P2PUPnPEnabled,
+			BrutalUploadBPS:           cfg.BrutalUploadBPS,
+			BrutalDownloadBPS:         cfg.BrutalDownloadBPS,
+			DisableLossCompensation:   cfg.DisableLossCompensation,
 		})
 		keepManager := false
 		a.mu.Lock()

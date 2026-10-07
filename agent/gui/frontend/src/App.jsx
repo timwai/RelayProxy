@@ -23,7 +23,7 @@ const arr=v=>Array.isArray(v)?v:[];
 const split=v=>String(v||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
 const fmtTime=v=>{if(!v)return '—';const d=new Date(v);return Number.isNaN(d.getTime())?String(v):d.toLocaleString()};
 const fmtBytes=(v,rate=false)=>{let n=Math.max(0,Number(v)||0),i=0;const u=['B','KB','MB','GB','TB'];while(n>=1024&&i<u.length-1){n/=1024;i++}return n.toFixed(i===0?0:n>=100?0:n>=10?1:2)+' '+u[i]+(rate?'/s':'')};
-const logText=v=>typeof v==='string'?v:(v&&(v.line||v.message||v.text))||JSON.stringify(v||'');
+const logText=v=>{if(typeof v==='string')return v;if(!v)return'';const message=v.line||v.message||v.text;if(message&&v.timestamp)return v.timestamp+'  '+message;return message||JSON.stringify(v)};
 const tone=v=>{const s=String(v||'').toLowerCase();if(/active|ready|connected|online|approved|success|直连/.test(s))return'ok';if(/error|failed|reject|deny|offline|失败|拒绝/.test(s))return'danger';if(/connecting|pending|wait|准备|协商/.test(s))return'warn';return'neutral'};
 const exitName=(exits,id)=>{if(!id)return'自动选择';const e=arr(exits).find(x=>(x.deviceId||x.id)===id);return(e&&(e.name||e.deviceName))||id};
 

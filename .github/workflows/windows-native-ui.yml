@@ -266,6 +266,71 @@ jobs:
 
           Copy-Item $exe ".\artifacts\${{ matrix.runtime }}\relay-agent-gui.exe" -Force
 
+      - name: Publish Windows 10 compatible trimmed experiment
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $dir = ".\trimmed\${{ matrix.runtime }}"
+          New-Item -ItemType Directory -Path $dir -Force | Out-Null
+          $core = (Resolve-Path ".\staging\${{ matrix.runtime }}\relay-agent.exe").Path
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r ${{ matrix.runtime }} `
+            -p:Platform=${{ matrix.platform }} `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            -o $dir
+
+          $exe = Join-Path $dir "relay-agent-gui.exe"
+          if (-not (Test-Path $exe)) { throw "trimmed experiment did not produce relay-agent-gui.exe" }
+          $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[size-experiment] Windows 10 compatible partial-trim EXE: $sizeMb MB"
+          Write-Host "::notice title=Win10 compatible trim size::${{ matrix.runtime }} = $sizeMb MB"
+          @"
+          ### ${{ matrix.runtime }} Windows 10 compatible partial-trim experiment
+          Full Microsoft.WindowsAppSDK dependency graph retained; only trimmable managed payload is reduced.
+
+          **relay-agent-gui.exe:** $sizeMb MB
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Smoke test Windows 10 compatible trimmed x64 startup
+        if: matrix.runtime == 'win-x64'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path ".\trimmed\${{ matrix.runtime }}\relay-agent-gui.exe").Path
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $exe -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "Trimmed native GUI exited during startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "[smoke] Windows 10 compatible trimmed native GUI stayed alive for 8 seconds." -ForegroundColor Green
+            Write-Host "::notice title=Trimmed startup smoke test::win-x64 stayed alive for 8 seconds"
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          }
+
       - name: Build Go Agent core
         shell: pwsh
         run: |

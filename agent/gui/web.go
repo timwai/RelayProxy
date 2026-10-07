@@ -28,9 +28,10 @@ const webAuthCookie = "relayproxy_agent_web"
 
 // WebOptions configures the browser-accessible copy of the desktop UI.
 type WebOptions struct {
-	Listen string
-	Port   int
-	Token  string
+	Listen           string
+	Port             int
+	Token            string
+	NativeManagement bool
 }
 
 // WebServer owns the browser management listener. Done is closed when the user
@@ -39,9 +40,10 @@ type WebServer struct {
 	server   *http.Server
 	listener net.Listener
 	bridge   *bridge.UIBridge
-	token    string
-	loopback bool
-	done     chan struct{}
+	token            string
+	loopback         bool
+	nativeManagement bool
+	done             chan struct{}
 	doneOnce sync.Once
 }
 
@@ -65,7 +67,7 @@ func StartWeb(b *bridge.UIBridge, opts WebOptions) (*WebServer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("start web management listener: %w", err)
 	}
-	w := &WebServer{listener: listener, bridge: b, token: token, loopback: loopback, done: make(chan struct{})}
+	w := &WebServer{listener: listener, bridge: b, token: token, loopback: loopback, nativeManagement: opts.NativeManagement, done: make(chan struct{})}
 	mux := http.NewServeMux()
 	w.registerRoutes(mux)
 	w.server = &http.Server{
@@ -250,9 +252,11 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/reload", w.reloadConfig)
 	mux.HandleFunc("POST /api/select-exit", w.selectExit)
 	mux.HandleFunc("POST /api/autostart", w.setAutostart)
-	mux.HandleFunc("GET /api/network-service", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.GetPlatformServiceStatus()) })
-	mux.HandleFunc("POST /api/network-service/repair", w.repairNetworkService)
-	mux.HandleFunc("DELETE /api/network-service", w.uninstallNetworkService)
+	if w.nativeManagement {
+		mux.HandleFunc("GET /api/network-service", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.GetPlatformServiceStatus()) })
+		mux.HandleFunc("POST /api/network-service/repair", w.repairNetworkService)
+		mux.HandleFunc("DELETE /api/network-service", w.uninstallNetworkService)
+	}
 	mux.HandleFunc("GET /api/connections", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetConnections()) })
 	mux.HandleFunc("DELETE /api/connections", func(rw http.ResponseWriter, _ *http.Request) {
 		w.bridge.ClearConnections()

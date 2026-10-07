@@ -16,6 +16,7 @@ public sealed partial class MainWindow : Window
     private readonly HashSet<string> _seenMessageIds = new(StringComparer.Ordinal);
     private readonly HashSet<string> _speedTestingExits = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SpeedTestResultDto> _speedTests = new(StringComparer.Ordinal);
+    private List<PushMessageDto> _messageCache = [];
     private AgentConfigDto? _config;
     private List<RoutingRuleDto> _routingRules = [];
     private MessagePopupWindow? _popupWindow;
@@ -310,7 +311,7 @@ public sealed partial class MainWindow : Window
                     await RefreshExitsAsync();
                     try
                     {
-                        var result = await App.AgentApi.RunSpeedTestAsync(exit.DeviceId, 2);
+                        var result = await App.AgentApi.RunSpeedTestAsync(exit.DeviceId, SafeInt(SpeedDurationBox, 2));
                         if (result is null) throw new InvalidOperationException("测速没有返回结果。");
                         _speedTests[exit.DeviceId] = result;
                         ShowInfo(
@@ -352,6 +353,63 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowInfo(ExitsBar, "正在等待服务端出口", ex.Message, InfoBarSeverity.Warning); }
     }
 
+    private async void SpeedAll_Click(object sender, RoutedEventArgs e)
+    {
+        if (_speedTestingExits.Count > 0)
+        {
+            ShowInfo(ExitsBar, "测速正在进行", "请等待当前测速完成后再开始批量测速。", InfoBarSeverity.Informational);
+            return;
+        }
+
+        try
+        {
+            var exits = (await App.AgentApi.GetExitsAsync()).Where(x => x.Online).ToList();
+            if (exits.Count == 0)
+            {
+                ShowInfo(ExitsBar, "没有可测速出口", "当前没有在线且已授权的出口。", InfoBarSeverity.Informational);
+                return;
+            }
+
+            var duration = SafeInt(SpeedDurationBox, 2);
+            foreach (var exit in exits) _speedTestingExits.Add(exit.DeviceId);
+            await RefreshExitsAsync();
+
+            var succeeded = 0;
+            var failed = 0;
+            foreach (var exit in exits)
+            {
+                try
+                {
+                    var result = await App.AgentApi.RunSpeedTestAsync(exit.DeviceId, duration);
+                    if (result is null) throw new InvalidOperationException("测速没有返回结果。");
+                    _speedTests[exit.DeviceId] = result;
+                    succeeded++;
+                }
+                catch
+                {
+                    failed++;
+                }
+                finally
+                {
+                    _speedTestingExits.Remove(exit.DeviceId);
+                    await RefreshExitsAsync();
+                }
+            }
+
+            ShowInfo(
+                ExitsBar,
+                "批量测速完成",
+                $"成功 {succeeded} 个 · 失败 {failed} 个 · 每方向 {duration} 秒",
+                failed == 0 ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        }
+        catch (Exception ex)
+        {
+            _speedTestingExits.Clear();
+            await RefreshExitsAsync();
+            ShowInfo(ExitsBar, "批量测速失败", ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
     private async Task RefreshConnectionsAsync()
     {
         try
@@ -378,6 +436,58 @@ public sealed partial class MainWindow : Window
 
     private async Task RefreshMessagesAsync() => await PollMessagesAsync(render: true);
 
+    private void MessageFilter_Changed(object sender, TextChangedEventArgs e) => RenderMessages();
+    private void MessageFilter_Changed(object sender, SelectionChangedEventArgs e) => RenderMessages();
+
+    private void RenderMessages()
+    {
+        if (MessagesPanel is null) return;
+
+        var search = MessageSearchBox?.Text?.Trim() ?? "";
+        var filter = (MessageTypeFilter?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "all";
+        var visible = _messageCache
+            .Where(m => filter == "all" || string.Equals(MessageTypeValue(m), filter, StringComparison.OrdinalIgnoreCase))
+            .Where(m => string.IsNullOrWhiteSpace(search) || MessageSearchText(m).Contains(search, StringComparison.CurrentCultureIgnoreCase))
+            .OrderByDescending(m => m.CreatedAt)
+            .Take(200)
+            .ToList();
+
+        MessagesPanel.Children.Clear();
+        foreach (var m in visible)
+        {
+            var grid = new Grid { ColumnSpacing = 12 };
+            grid.ColumnDefinitions.Add(new ColumnDefinition());
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var type = PopupTypeLabel(m);
+            var when = FormatCreatedAt(m.CreatedAt);
+            var metadata = string.Join(" · ", new[] { m.Source, string.IsNullOrWhiteSpace(m.MessageRule) ? "" : $"规则：{m.MessageRule}", when }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            grid.Children.Add(TwoLine(
+                $"{type} · {(string.IsNullOrWhiteSpace(m.Title) ? "RelayProxy 消息" : m.Title)}",
+                $"{m.Content}\n{metadata}"));
+
+            if (!string.IsNullOrWhiteSpace(m.VerificationCode))
+            {
+                var button = new Button { Content = $"复制 {m.VerificationCode}", Tag = m.VerificationCode, VerticalAlignment = VerticalAlignment.Center };
+                button.Click += (_, _) =>
+                {
+                    var p = new DataPackage();
+                    p.SetText((string)button.Tag);
+                    Clipboard.SetContent(p);
+                    ShowInfo(MessagesBar, "验证码已复制", (string)button.Tag, InfoBarSeverity.Success);
+                };
+                Grid.SetColumn(button, 1);
+                grid.Children.Add(button);
+            }
+            MessagesPanel.Children.Add(Card(grid));
+        }
+
+        if (visible.Count == 0)
+            MessagesPanel.Children.Add(Card(TwoLine("没有匹配的消息", "调整搜索关键词或消息类型筛选后重试。")));
+    }
+
+    private static string MessageSearchText(PushMessageDto m) =>
+        string.Join("\n", m.Title, m.Content, m.Source, m.MessageRule, m.VerificationCode);
+
     private async Task PollMessagesAsync(bool render)
     {
         try
@@ -402,23 +512,10 @@ public sealed partial class MainWindow : Window
                 }
             }
 
+            _messageCache = messages;
             if (!render) return;
-            MessagesPanel.Children.Clear(); MessagesBar.IsOpen = false;
-            foreach (var m in messages.OrderByDescending(x => x.CreatedAt).Take(200))
-            {
-                var grid = new Grid { ColumnSpacing = 12 };
-                grid.ColumnDefinitions.Add(new ColumnDefinition()); grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                var type = PopupTypeLabel(m);
-                var when = FormatCreatedAt(m.CreatedAt);
-                grid.Children.Add(TwoLine($"{type} · {(string.IsNullOrWhiteSpace(m.Title) ? "RelayProxy 消息" : m.Title)}", $"{m.Content}\n{string.Join(" · ", new[] { m.Source, m.MessageRule, when }.Where(x => !string.IsNullOrWhiteSpace(x)))}"));
-                if (!string.IsNullOrWhiteSpace(m.VerificationCode))
-                {
-                    var button = new Button { Content = $"复制 {m.VerificationCode}", Tag = m.VerificationCode, VerticalAlignment = VerticalAlignment.Center };
-                    button.Click += (_, _) => { var p = new DataPackage(); p.SetText((string)button.Tag); Clipboard.SetContent(p); ShowInfo(MessagesBar, "验证码已复制", (string)button.Tag, InfoBarSeverity.Success); };
-                    Grid.SetColumn(button, 1); grid.Children.Add(button);
-                }
-                MessagesPanel.Children.Add(Card(grid));
-            }
+            MessagesBar.IsOpen = false;
+            RenderMessages();
         }
         catch (Exception ex)
         {
@@ -976,10 +1073,15 @@ public sealed partial class MainWindow : Window
         try { return (value > 10_000_000_000 ? DateTimeOffset.FromUnixTimeMilliseconds(value) : DateTimeOffset.FromUnixTimeSeconds(value)).ToLocalTime().ToString("g"); }
         catch { return ""; }
     }
-    private static string PopupTypeLabel(PushMessageDto m)
+    private static string MessageTypeValue(PushMessageDto m)
     {
         var type = !string.IsNullOrWhiteSpace(m.MessageType) ? m.MessageType : m.PopupType;
         if (string.IsNullOrWhiteSpace(type) && !string.IsNullOrWhiteSpace(m.VerificationCode)) type = "verification_code";
-        return type switch { "verification_code" => "验证码", "important" => "重要提醒", _ => "普通消息" };
+        return string.IsNullOrWhiteSpace(type) ? "message" : type;
+    }
+
+    private static string PopupTypeLabel(PushMessageDto m)
+    {
+        return MessageTypeValue(m) switch { "verification_code" => "验证码", "important" => "重要提醒", _ => "普通消息" };
     }
 }

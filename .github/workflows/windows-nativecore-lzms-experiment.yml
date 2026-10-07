@@ -1,0 +1,164 @@
+name: Windows NativeCore LZMS Experiment
+
+on:
+  push:
+    branches:
+      - feat/windows-native-gui
+    paths:
+      - ".github/workflows/windows-nativecore-lzms-experiment.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-nativecore-lzms-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nativecore-lzms:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: "go.mod"
+          cache: true
+
+      - name: Verify nativecore route profile
+        shell: pwsh
+        run: |
+          go test -tags nativecore .\agent\gui -count=1
+          if ($LASTEXITCODE -ne 0) { throw "nativecore route profile tests failed" }
+
+      - name: Restore lean Windows App SDK graph
+        shell: pwsh
+        run: |
+          dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -r win-x64 `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:RelayProxyLeanWindowsAppSdk=true
+          if ($LASTEXITCODE -ne 0) { throw "nativecore LZMS restore failed" }
+
+      - name: Build nativecore Go Agent
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\nativecore-lzms\staging" -Force | Out-Null
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          go build -tags nativecore -trimpath -ldflags "-s -w" -o ".\nativecore-lzms\staging\relay-agent.exe" .\cmd\relay-agent
+          if ($LASTEXITCODE -ne 0) { throw "nativecore Go Agent build failed" }
+
+          $coreMb = [math]::Round((Get-Item ".\nativecore-lzms\staging\relay-agent.exe").Length / 1MB, 2)
+          Write-Host "[nativecore-lzms-size] Go Core: $coreMb MB"
+
+      - name: Publish lean outer-only WinUI host
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path ".\nativecore-lzms\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\nativecore-lzms\single" -Force | Out-Null
+          $core = (Resolve-Path ".\nativecore-lzms\staging\relay-agent.exe").Path
+
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=partial `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\nativecore-lzms\host
+          if ($LASTEXITCODE -ne 0) { throw "nativecore LZMS WinUI host publish failed" }
+
+          $nativeHost = ".\nativecore-lzms\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "nativecore LZMS RelayProxy.NativeHost.exe missing" }
+          $extra = @(Get-ChildItem ".\nativecore-lzms\host" -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
+          if ($extra.Count -gt 0) { throw "nativecore LZMS WinUI host has sidecars: $($extra.Name -join ', ')" }
+
+      - name: Pack nativecore with 64 MiB LZMS blocks
+        shell: pwsh
+        run: |
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+
+          $stub = ".\nativecore-lzms\relayproxy-launcher-lzms.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher-lzms
+          if ($LASTEXITCODE -ne 0) { throw "nativecore LZMS launcher build failed" }
+
+          $nativeHost = (Resolve-Path ".\nativecore-lzms\host\RelayProxy.NativeHost.exe").Path
+          $exe = ".\nativecore-lzms\single\RelayProxy-agent-windows-amd64-nativecore-lzms.exe"
+          go run .\scripts\pack-windows-launcher-lzms.go -launcher $stub -payload $nativeHost -output $exe
+          if ($LASTEXITCODE -ne 0) { throw "nativecore LZMS packing failed" }
+
+          $coreMb = [math]::Round((Get-Item ".\nativecore-lzms\staging\relay-agent.exe").Length / 1MB, 2)
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          $stubMb = [math]::Round((Get-Item $stub).Length / 1MB, 2)
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          Write-Host "[nativecore-lzms-size] Go Core: $coreMb MB"
+          Write-Host "[nativecore-lzms-size] uncompressed-inner Host: $hostMb MB"
+          Write-Host "[nativecore-lzms-size] launcher stub: $stubMb MB"
+          Write-Host "[nativecore-lzms-size] rename-safe EXE: $finalMb MB"
+          Write-Host "::notice title=NativeCore LZMS package::x64 nativecore LZMS = $finalMb MB"
+
+          @"
+          ### win-x64 nativecore + 64 MiB LZMS experiment
+          **Go Core:** $coreMb MiB
+          **Uncompressed-inner Host:** $hostMb MiB
+          **Launcher stub:** $stubMb MiB
+          **Rename-safe EXE:** $finalMb MiB
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - name: Smoke test arbitrarily renamed nativecore LZMS EXE
+        shell: pwsh
+        run: |
+          $cache = Join-Path $env:LOCALAPPDATA "RelayProxy\native-host-lzms-experiment"
+          Remove-Item $cache -Recurse -Force -ErrorAction SilentlyContinue
+          $source = (Resolve-Path ".\nativecore-lzms\single\RelayProxy-agent-windows-amd64-nativecore-lzms.exe").Path
+          $renamed = ".\nativecore-lzms\single\user-renamed-nativecore-lzms.exe"
+          Copy-Item $source $renamed -Force
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "NativeCore LZMS renamed EXE exited with code $($process.ExitCode)."
+            }
+            Write-Host "[nativecore-lzms-smoke] fresh-cache renamed EXE stayed alive for 8 seconds." -ForegroundColor Green
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RelayProxy-agent-win-x64-nativecore-lzms-experiment
+          path: .\nativecore-lzms\single\RelayProxy-agent-windows-amd64-nativecore-lzms.exe
+          if-no-files-found: error

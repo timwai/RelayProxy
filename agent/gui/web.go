@@ -403,7 +403,7 @@ func (w *WebServer) uninstallNetworkService(rw http.ResponseWriter, _ *http.Requ
 	writeWebJSON(rw, map[string]any{
 		"ok": true, "message": message,
 		"rebootCleanup": uninstallResult.RebootCleanup,
-		"cleanupPath": uninstallResult.CleanupPath,
+		"cleanupPath":   uninstallResult.CleanupPath,
 	})
 }
 

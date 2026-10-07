@@ -19,6 +19,7 @@ public sealed partial class MainWindow : Window
     private readonly HashSet<string> _speedTestingExits = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SpeedTestResultDto> _speedTests = new(StringComparer.Ordinal);
     private readonly HashSet<string> _dirtyPages = new(StringComparer.Ordinal);
+    private List<ConnectionDto> _connectionCache = [];
     private List<PushMessageDto> _messageCache = [];
     private AgentConfigDto? _config;
     private List<RoutingRuleDto> _routingRules = [];
@@ -235,6 +236,15 @@ public sealed partial class MainWindow : Window
             P2PDetailText.Text = string.IsNullOrWhiteSpace(status.P2PPath) ? "备用路径" : $"{status.P2PPath} · {status.P2PRttMs} ms";
             DownloadRateText.Text = FormatRate(traffic?.DownloadRate ?? 0);
             UploadRateText.Text = FormatRate(traffic?.UploadRate ?? 0);
+            OverviewRecentConnectionsPanel.Children.Clear();
+            foreach (var connection in (traffic?.Connections ?? []).OrderByDescending(x => x.Id).Take(5))
+            {
+                var process = !string.IsNullOrWhiteSpace(connection.ProcessName) ? connection.ProcessName : (!string.IsNullOrWhiteSpace(connection.Process) ? Path.GetFileName(connection.Process) : "未知进程");
+                var target = $"{(!string.IsNullOrWhiteSpace(connection.Host) ? connection.Host : connection.Ip)}:{connection.Port}";
+                OverviewRecentConnectionsPanel.Children.Add(TwoLine(process, $"{target} · {ConnectionPathLabel(connection)} · {FormatRate(connection.DownloadRate)} ↓"));
+            }
+            if (OverviewRecentConnectionsPanel.Children.Count == 0)
+                OverviewRecentConnectionsPanel.Children.Add(new TextBlock { Text = "暂无连接记录", Foreground = ThemeBrush("TextFillColorSecondaryBrush") });
             await PollMessagesAsync(render: false);
         }
         catch (Exception ex)
@@ -447,25 +457,78 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var snapshot = await App.AgentApi.GetConnectionsAsync(); if (snapshot is null) return;
-            ActiveConnectionsText.Text = snapshot.Active.ToString(); ConnectionsDownText.Text = FormatRate(snapshot.DownloadRate); ConnectionsUpText.Text = FormatRate(snapshot.UploadRate);
-            ConnectionsPanel.Children.Clear();
-            foreach (var c in snapshot.Connections.OrderByDescending(x => x.Id).Take(120))
-            {
-                var target = $"{(!string.IsNullOrWhiteSpace(c.Host) ? c.Host : c.Ip)}:{c.Port}";
-                var process = !string.IsNullOrWhiteSpace(c.ProcessName) ? c.ProcessName : (!string.IsNullOrWhiteSpace(c.Process) ? Path.GetFileName(c.Process) : "未知进程");
-                var grid = new Grid { ColumnSpacing = 12 };
-                for (var i = 0; i < 5; i++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = i < 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
-                grid.Children.Add(TwoLine(process, string.IsNullOrWhiteSpace(c.Rule) ? $"{c.Action} · {c.Protocol.ToUpperInvariant()}" : c.Rule));
-                var dest = TwoLine(target, string.IsNullOrWhiteSpace(c.Path) ? c.ExitId : $"{c.Path} · {c.ExitId}"); Grid.SetColumn(dest, 1); grid.Children.Add(dest);
-                var down = new TextBlock { Text = FormatRate(c.DownloadRate), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(down, 2); grid.Children.Add(down);
-                var up = new TextBlock { Text = FormatRate(c.UploadRate), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(up, 3); grid.Children.Add(up);
-                var state = new TextBlock { Text = c.State, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(state, 4); grid.Children.Add(state);
-                ConnectionsPanel.Children.Add(Card(grid));
-            }
+            var snapshot = await App.AgentApi.GetConnectionsAsync();
+            if (snapshot is null) return;
+            ActiveConnectionsText.Text = snapshot.Active.ToString();
+            ConnectionsDownText.Text = FormatRate(snapshot.DownloadRate);
+            ConnectionsUpText.Text = FormatRate(snapshot.UploadRate);
+            _connectionCache = snapshot.Connections;
+            RenderConnections();
         }
         catch { }
     }
+
+    private void ConnectionFilter_Changed(object sender, TextChangedEventArgs e) => RenderConnections();
+    private void ConnectionFilter_Changed(object sender, SelectionChangedEventArgs e) => RenderConnections();
+
+    private void RenderConnections()
+    {
+        if (ConnectionsPanel is null) return;
+        var search = ConnectionSearchBox?.Text?.Trim() ?? "";
+        var pathFilter = (ConnectionPathFilter?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "all";
+        var sort = (ConnectionSortCombo?.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "newest";
+
+        IEnumerable<ConnectionDto> query = _connectionCache;
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(c => ConnectionSearchText(c).Contains(search, StringComparison.CurrentCultureIgnoreCase));
+        if (pathFilter != "all")
+            query = query.Where(c => ConnectionPathValue(c) == pathFilter);
+
+        query = sort switch
+        {
+            "download" => query.OrderByDescending(c => c.DownloadRate).ThenByDescending(c => c.Id),
+            "upload" => query.OrderByDescending(c => c.UploadRate).ThenByDescending(c => c.Id),
+            _ => query.OrderByDescending(c => c.Id)
+        };
+
+        var visible = query.Take(120).ToList();
+        ConnectionsPanel.Children.Clear();
+        foreach (var connection in visible)
+        {
+            var target = $"{(!string.IsNullOrWhiteSpace(connection.Host) ? connection.Host : connection.Ip)}:{connection.Port}";
+            var process = !string.IsNullOrWhiteSpace(connection.ProcessName) ? connection.ProcessName : (!string.IsNullOrWhiteSpace(connection.Process) ? Path.GetFileName(connection.Process) : "未知进程");
+            var grid = new Grid { ColumnSpacing = 12 };
+            for (var i = 0; i < 5; i++) grid.ColumnDefinitions.Add(new ColumnDefinition { Width = i < 2 ? new GridLength(1, GridUnitType.Star) : GridLength.Auto });
+            grid.Children.Add(TwoLine(process, string.IsNullOrWhiteSpace(connection.Rule) ? $"{connection.Action} · {connection.Protocol.ToUpperInvariant()}" : connection.Rule));
+            var dest = TwoLine(target, $"{ConnectionPathLabel(connection)} · {connection.ExitId}"); Grid.SetColumn(dest, 1); grid.Children.Add(dest);
+            var down = new TextBlock { Text = FormatRate(connection.DownloadRate), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(down, 2); grid.Children.Add(down);
+            var up = new TextBlock { Text = FormatRate(connection.UploadRate), VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(up, 3); grid.Children.Add(up);
+            var state = new TextBlock { Text = connection.State, VerticalAlignment = VerticalAlignment.Center }; Grid.SetColumn(state, 4); grid.Children.Add(state);
+            ConnectionsPanel.Children.Add(Card(grid));
+        }
+
+        if (visible.Count == 0)
+            ConnectionsPanel.Children.Add(Card(TwoLine("没有匹配的连接", "调整搜索条件、路径筛选或排序后重试。")));
+    }
+
+    private static string ConnectionSearchText(ConnectionDto c) =>
+        string.Join("\n", c.ProcessName, c.Process, c.Host, c.Ip, c.Port.ToString(), c.Protocol, c.Action, c.Rule, c.ExitId, c.Path, c.State);
+
+    private static string ConnectionPathValue(ConnectionDto c)
+    {
+        var value = (c.Path ?? "").ToLowerInvariant();
+        if (value.Contains("p2p")) return "p2p";
+        if (value.Contains("direct")) return "direct";
+        if (value.Contains("relay")) return "relay";
+        return string.Equals(c.Action, "DIRECT", StringComparison.OrdinalIgnoreCase) ? "direct" : "relay";
+    }
+
+    private static string ConnectionPathLabel(ConnectionDto c) => ConnectionPathValue(c) switch
+    {
+        "direct" => "Direct",
+        "p2p" => "P2P",
+        _ => "Relay"
+    };
 
     private async Task RefreshMessagesAsync() => await PollMessagesAsync(render: true);
 
@@ -1128,6 +1191,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex) { ShowInfo(MessagesBar, "清空失败", ex.Message, InfoBarSeverity.Error); }
     }
     private void OpenExits_Click(object sender, RoutedEventArgs e) => SelectNavigation("exits");
+    private void OpenConnections_Click(object sender, RoutedEventArgs e) => SelectNavigation("connections");
 
     private void SelectNavigation(string tag)
     {

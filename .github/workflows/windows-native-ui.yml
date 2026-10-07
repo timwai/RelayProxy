@@ -42,6 +42,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: "go.mod"
+          cache: false
       - name: Check native bridge Go formatting
         run: |
           files=(

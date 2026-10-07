@@ -459,7 +459,6 @@ func TestPublicDirectListenerCloseUnblocksPendingAuthentication(t *testing.T) {
 	}
 }
 
-
 func TestPublicDirectNegotiatesDirectionalBrutal(t *testing.T) {
 	ticket := []byte("brutal-ticket")
 	listener := newTestListener(t, ticket)

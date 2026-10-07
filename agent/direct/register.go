@@ -15,7 +15,7 @@ func RegisterEndpoint(ctx context.Context, relay tunnel.TunnelSession, request p
 	return sendPublicDirectControl(ctx, relay, "public_direct_register", request, "public direct endpoint registration failed")
 }
 
-func ValidateTicketCurrent(ctx context.Context, relay tunnel.TunnelSession, claims protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
+func ValidateTicketCurrent(ctx context.Context, relay tunnel.TunnelSession, claims protocol.PublicDirectTicketClaims) (Authorization, error) {
 	request := protocol.PublicDirectRegistrationRequest{
 		Operation: protocol.PublicDirectControlValidateTicket,
 		TicketValidation: &protocol.PublicDirectTicketValidationRequest{
@@ -27,20 +27,24 @@ func ValidateTicketCurrent(ctx context.Context, relay tunnel.TunnelSession, clai
 	}
 	response, err := sendPublicDirectControl(ctx, relay, "public_direct_validate_ticket", request, "public direct authorization is no longer current")
 	if err != nil {
-		return nil, err
+		return Authorization{}, err
 	}
 	if response.RelayPolicy == nil || response.RelayPolicy.Fingerprint == "" {
-		return nil, fmt.Errorf("public direct validation response is missing the relay ACL")
+		return Authorization{}, fmt.Errorf("public direct validation response is missing the relay ACL")
 	}
 	checker, err := acl.NewChecker(*response.RelayPolicy)
 	if err != nil {
-		return nil, fmt.Errorf("invalid public direct relay ACL: %w", err)
+		return Authorization{}, fmt.Errorf("invalid public direct relay ACL: %w", err)
 	}
 	policy := checker.Policy()
 	if policy.Fingerprint != response.RelayPolicy.Fingerprint {
-		return nil, fmt.Errorf("public direct relay ACL fingerprint mismatch")
+		return Authorization{}, fmt.Errorf("public direct relay ACL fingerprint mismatch")
 	}
-	return &policy, nil
+	return Authorization{
+		RelayPolicy: &policy,
+		BrutalUploadBPS: response.BrutalUploadBPS,
+		BrutalDownloadBPS: response.BrutalDownloadBPS,
+	}, nil
 }
 
 func sendPublicDirectControl(

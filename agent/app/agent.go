@@ -263,6 +263,7 @@ type AgentStatus struct {
 	P2PFallbackCount    uint64                     `json:"p2pFallbackCount,omitempty"`
 	P2PBytesUp          uint64                     `json:"p2pBytesUp,omitempty"`
 	P2PBytesDown        uint64                     `json:"p2pBytesDown,omitempty"`
+	P2PQUIC             *tunnel.QUICDiagnostics    `json:"p2pQuic,omitempty"`
 	NativeUDP           tunnel.DatagramUsage       `json:"nativeUdp"`
 }
 
@@ -1396,6 +1397,11 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PFallbackCount = path.FallbackCount
 			st.P2PBytesUp = path.BytesUp
 			st.P2PBytesDown = path.BytesDown
+			if p2pSession, ready := proxyP2P.ReadyForExit(st.SelectedExit); ready {
+				if diagnostics := tunnel.DiagnoseSession(p2pSession); diagnostics != nil && diagnostics.QUIC != nil {
+					st.P2PQUIC = diagnostics.QUIC
+				}
+			}
 			if st.DirectPath == "" && path.Path != "" {
 				st.DirectState = string(path.State)
 				st.DirectPath = path.Path
@@ -1404,6 +1410,9 @@ func (a *Agent) Status() AgentStatus {
 				st.DirectFallbackCount = path.FallbackCount
 				st.DirectBytesUp = path.BytesUp
 				st.DirectBytesDown = path.BytesDown
+				if st.P2PQUIC != nil {
+					st.DirectQUIC = st.P2PQUIC
+				}
 			}
 		} else {
 			st.P2PState = "IDLE"

@@ -593,7 +593,6 @@ func TestServerP2PPortRangeValidation(t *testing.T) {
 	}
 }
 
-
 func TestAgentBrutalBandwidthValidateAndPersist(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	cfg := &AgentConfigFile{}

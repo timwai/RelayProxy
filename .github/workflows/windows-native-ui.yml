@@ -583,3 +583,102 @@ jobs:
           name: RelayProxy-agent-win-x64-aggressive-experiment
           path: .\aggressive\single\RelayProxy-agent-windows-amd64-aggressive.exe
           if-no-files-found: error
+
+      - name: Publish outer-gzip-only size experiment
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          Remove-Item ".\outer-only" -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path ".\outer-only\host" -Force | Out-Null
+          New-Item -ItemType Directory -Path ".\outer-only\single" -Force | Out-Null
+          $core = (Resolve-Path ".\staging\win-x64\relay-agent.exe").Path
+
+          dotnet publish .\windows\RelayProxy.Native\RelayProxy.Native.csproj `
+            -c Release `
+            -r win-x64 `
+            -p:Platform=x64 `
+            -p:RelayProxyLeanWindowsAppSdk=true `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=false `
+            -p:PublishReadyToRun=false `
+            -p:PublishTrimmed=true `
+            -p:TrimMode=full `
+            -p:SuppressTrimAnalysisWarnings=false `
+            -p:DebuggerSupport=false `
+            -p:EventSourceSupport=false `
+            -p:MetadataUpdaterSupport=false `
+            -p:MetricsSupport=false `
+            -p:Http3Support=false `
+            -p:HttpActivityPropagationSupport=false `
+            -p:UseSizeOptimizedLinq=true `
+            -p:EnableUnsafeBinaryFormatterSerialization=false `
+            -p:EnableUnsafeUTF7Encoding=false `
+            -p:EnableMsixTooling=true `
+            -p:IncludeAllContentForSelfExtract=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -p:RelayAgentCorePath="$core" `
+            --self-contained true `
+            --no-restore `
+            -o .\outer-only\host
+
+          $nativeHost = ".\outer-only\host\RelayProxy.NativeHost.exe"
+          if (-not (Test-Path $nativeHost)) { throw "outer-only RelayProxy.NativeHost.exe missing" }
+          $extra = @(Get-ChildItem ".\outer-only\host" -Force | Where-Object { $_.Name -ne "RelayProxy.NativeHost.exe" })
+          if ($extra.Count -gt 0) { throw "outer-only WinUI host has sidecars: $($extra.Name -join ', ')" }
+
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          $env:CGO_ENABLED = "0"
+          $stub = ".\outer-only\relayproxy-launcher.exe"
+          go build -trimpath -ldflags "-s -w -H=windowsgui" -o $stub .\cmd\relay-agent-win-launcher
+          if ($LASTEXITCODE -ne 0) { throw "outer-only launcher build failed" }
+
+          $exe = ".\outer-only\single\RelayProxy-agent-windows-amd64-outer-only.exe"
+          & powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\pack-windows-launcher.ps1 -Launcher $stub -Payload $nativeHost -Output $exe
+          if ($LASTEXITCODE -ne 0) { throw "outer-only launcher packing failed" }
+
+          $finalMb = [math]::Round((Get-Item $exe).Length / 1MB, 2)
+          $hostMb = [math]::Round((Get-Item $nativeHost).Length / 1MB, 2)
+          Write-Host "[outer-only-size] rename-safe EXE: $finalMb MB"
+          Write-Host "[outer-only-size] uncompressed-inner WinUI host: $hostMb MB"
+
+          $renamed = ".\outer-only\single\user-renamed-outer-only-client.exe"
+          Copy-Item $exe $renamed -Force
+          $process = $null
+          try {
+            $process = Start-Process -FilePath $renamed -ArgumentList "--minimized" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              $startupLog = Join-Path $env:TEMP "RelayProxy\startup.log"
+              if (Test-Path $startupLog) { Get-Content $startupLog -Tail 100 | Write-Host }
+              throw "Outer-only renamed EXE exited during startup smoke test with code $($process.ExitCode)."
+            }
+            Write-Host "[outer-only-smoke] arbitrarily renamed outer-only EXE stayed alive for 8 seconds." -ForegroundColor Green
+          }
+          finally {
+            if ($process -and -not $process.HasExited) { Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+            Get-Process "RelayProxy.NativeHost" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Get-Process "relay-agent" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+            Remove-Item $renamed -Force -ErrorAction SilentlyContinue
+          }
+
+          @"
+          ### win-x64 outer-gzip-only experiment
+          **Rename-safe EXE:** $finalMb MiB
+          **Uncompressed-inner WinUI host:** $hostMb MiB
+
+          Uses lean Windows App SDK dependencies, full trimming, release feature switches, no .NET single-file compression, outer gzip payload compression, and the rename-safe launcher.
+          "@ | Add-Content -Path $env:GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.runtime == 'win-x64'
+        with:
+          name: RelayProxy-agent-win-x64-outer-only-experiment
+          path: .\outer-only\single\RelayProxy-agent-windows-amd64-outer-only.exe
+          if-no-files-found: error

@@ -29,8 +29,11 @@ type ClientManagerOptions struct {
 	Cooldown       time.Duration
 	MaxCooldown    time.Duration
 	Dial           ClientDialFunc
-	RaceDial       ClientRaceDialFunc
-	Now            func() time.Time
+	RaceDial                ClientRaceDialFunc
+	Now                     func() time.Time
+	BrutalUploadBPS         uint64
+	BrutalDownloadBPS       uint64
+	DisableLossCompensation bool
 }
 
 type ClientPathStatus struct {
@@ -64,7 +67,10 @@ type ClientManager struct {
 
 	attemptTimeout time.Duration
 	cooldown       time.Duration
-	maxCooldown    time.Duration
+	maxCooldown             time.Duration
+	brutalUploadBPS         uint64
+	brutalDownloadBPS       uint64
+	disableLossCompensation bool
 
 	mu       sync.Mutex
 	entries  map[string]*clientEntry
@@ -114,6 +120,8 @@ func NewClientManager(parent context.Context, clientID func() string, options Cl
 	return &ClientManager{
 		ctx: ctx, cancel: cancel, clientID: clientID, raceDial: raceDial, now: now,
 		attemptTimeout: attemptTimeout, cooldown: cooldown, maxCooldown: maxCooldown,
+		brutalUploadBPS: options.BrutalUploadBPS, brutalDownloadBPS: options.BrutalDownloadBPS,
+		disableLossCompensation: options.DisableLossCompensation,
 		entries: make(map[string]*clientEntry),
 	}
 }
@@ -323,8 +331,9 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 		configs = append(configs, DialConfig{
 			Address: publicEndpointDialAddress(endpoint), TLSConfig: tlsConfig,
 			ClientDeviceID: clientID, ExitDeviceID: exitDeviceID,
-			Ticket:      append([]byte(nil), public.Ticket...),
-			AuthTimeout: m.attemptTimeout,
+			Ticket: append([]byte(nil), public.Ticket...), AuthTimeout: m.attemptTimeout,
+			BrutalUploadBPS: m.brutalUploadBPS, BrutalDownloadBPS: m.brutalDownloadBPS,
+			DisableLossCompensation: m.disableLossCompensation,
 		})
 	}
 	if len(configs) == 0 {

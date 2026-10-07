@@ -30,7 +30,6 @@ func TestCapRequestedRate(t *testing.T) {
 	}
 }
 
-
 func TestAuthorizeRequestedRate(t *testing.T) {
 	tests := []struct {
 		requested, authorized, want uint64

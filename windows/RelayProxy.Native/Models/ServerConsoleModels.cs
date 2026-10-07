@@ -39,6 +39,7 @@ public sealed class MessageRuleDto
     [JsonPropertyName("match")] public MessageMatchDto Match { get; set; } = new();
     [JsonPropertyName("verification")] public VerificationExtractorDto? Verification { get; set; }
     [JsonPropertyName("popup")] public bool? Popup { get; set; } = true;
+    [JsonPropertyName("popupType")] public string PopupType { get; set; } = "";
 
     public MessageRuleDto Clone() => new()
     {
@@ -47,6 +48,7 @@ public sealed class MessageRuleDto
         Enabled = Enabled,
         Default = Default,
         Popup = Popup,
+        PopupType = PopupType,
         Match = Match.Clone(),
         Verification = Verification?.Clone()
     };

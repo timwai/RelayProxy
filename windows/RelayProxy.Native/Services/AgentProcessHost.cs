@@ -5,7 +5,7 @@ namespace RelayProxy.Native.Services;
 
 public sealed class AgentProcessHost
 {
-    private static readonly string[] ManagementMarkers = ["[Native] Management API: ", "[Web] Management page: "];
+    private const string NativeManagementMarker = "[Native] Management API: ";
     private const string NativeTokenEnvironment = "RELAYPROXY_NATIVE_MANAGEMENT_TOKEN";
     private readonly AgentApiClient _api;
     private Process? _process;
@@ -141,14 +141,16 @@ public sealed class AgentProcessHost
         {
             var line = await reader.ReadLineAsync(ct);
             if (line is null) break;
-            foreach (var marker in ManagementMarkers)
-            {
-                var i = line.IndexOf(marker, StringComparison.Ordinal);
-                if (i < 0) continue;
-                if (Uri.TryCreate(line[(i + marker.Length)..].Trim(), UriKind.Absolute, out var uri))
-                    ready.TrySetResult(uri);
-                break;
-            }
+            var i = line.IndexOf(NativeManagementMarker, StringComparison.Ordinal);
+            if (i < 0) continue;
+
+            var raw = line[(i + NativeManagementMarker.Length)..].Trim();
+            if (!Uri.TryCreate(raw, UriKind.Absolute, out var uri)) continue;
+            if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(uri.Host, "127.0.0.1", StringComparison.Ordinal)) continue;
+            if (uri.Port is <= 0 or > 65535) continue;
+
+            ready.TrySetResult(uri);
         }
     }
 

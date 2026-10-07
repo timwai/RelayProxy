@@ -10,6 +10,7 @@ import (
 
 	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 )
 
 func TestPowerConstrainedStatusBeforeStart(t *testing.T) {
@@ -310,5 +311,33 @@ func TestAndroidBrutalBandwidthNormalization(t *testing.T) {
 		if _, err := normalizeConfig(raw); err == nil {
 			t.Fatalf("invalid Brutal config accepted: %s", raw)
 		}
+	}
+}
+
+
+func TestAndroidStatusSerializesP2PQUICDiagnostics(t *testing.T) {
+	status := statusSnapshot{
+		P2PQUIC: &tunnel.QUICDiagnostics{
+			CongestionController: "brutal",
+			CongestionTargetBPS:  25_000_000,
+		},
+	}
+	raw, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	p2p, ok := decoded["p2pQuic"].(map[string]any)
+	if !ok {
+		t.Fatalf("p2pQuic missing from status JSON: %s", raw)
+	}
+	if got := p2p["congestion_controller"]; got != "brutal" {
+		t.Fatalf("p2pQuic congestion_controller=%v", got)
+	}
+	if got := p2p["congestion_target_bps"]; got != float64(25_000_000) {
+		t.Fatalf("p2pQuic congestion_target_bps=%v", got)
 	}
 }

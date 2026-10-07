@@ -57,7 +57,7 @@ public sealed class AgentProcessHost
 
     private async Task PumpAsync(StreamReader reader, TaskCompletionSource<Uri> ready, CancellationToken ct)
     {
-        while (!reader.EndOfStream && !ct.IsCancellationRequested)
+        while (!ct.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(ct); if (line is null) break;
             var i = line.IndexOf(Marker, StringComparison.Ordinal); if (i < 0) continue;

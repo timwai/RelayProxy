@@ -44,6 +44,7 @@ func main() {
 	hiddenFlag := flag.Bool("hidden", false, "Alias for --minimized (kept for existing autostart entries)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
 	startupHelperFlag := flag.String(startup.HelperFlagName(), "", "Internal Windows startup helper action")
+	startupTargetFlag := flag.String(startup.TargetFlagName(), "", "Internal Windows startup target executable")
 	networkServiceFlag := flag.Bool(divert.NetworkServiceModeFlagName(), false, "Internal Windows network service mode")
 	networkServiceSIDFlag := flag.String(divert.NetworkServiceSIDFlagName(), "", "Internal Windows network service allowed SID")
 	networkServiceHelperFlag := flag.String(divert.NetworkServiceHelperFlagName(), "", "Internal Windows network service helper action")
@@ -72,7 +73,7 @@ func main() {
 	}
 
 	if *startupHelperFlag != "" {
-		if err := startup.RunElevatedHelper(*startupHelperFlag, "RelayProxy Agent", *configPath); err != nil {
+		if err := startup.RunElevatedHelper(*startupHelperFlag, "RelayProxy Agent", *configPath, *startupTargetFlag); err != nil {
 			log.Printf("[Startup] Elevated autostart helper failed: %v", err)
 			os.Exit(1)
 		}

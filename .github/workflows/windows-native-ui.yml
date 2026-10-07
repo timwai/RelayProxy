@@ -175,6 +175,24 @@ jobs:
         shell: pwsh
         run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }}
 
+      - name: Verify lean Windows App SDK dependency graph
+        shell: pwsh
+        run: |
+          $assetsPath = ".\windows\RelayProxy.Native\obj\project.assets.json"
+          $assets = Get-Content $assetsPath -Raw
+          $forbidden = @(
+            '"Microsoft.WindowsAppSDK.AI/',
+            '"Microsoft.WindowsAppSDK.ML/',
+            '"Microsoft.WindowsAppSDK.Search/',
+            '"Microsoft.WindowsAppSDK.Widgets/',
+            '"Microsoft.WindowsAppSDK.DWrite/'
+          )
+          foreach ($package in $forbidden) {
+            if ($assets.Contains($package)) {
+              throw "Unused Windows App SDK component leaked into publish graph: $package"
+            }
+          }
+
       - name: Build
         shell: pwsh
         run: dotnet build .\windows\RelayProxy.Native\RelayProxy.Native.csproj -c Release -r ${{ matrix.runtime }} -p:Platform=${{ matrix.platform }} --no-restore

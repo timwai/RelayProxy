@@ -123,6 +123,9 @@ data class ExitConfig(
     val quicPort: Int = 443,
     val tcpPort: Int = 443,
     val transportMode: String = "auto",
+    val brutalUpMbps: Int = 0,
+    val brutalDownMbps: Int = 0,
+    val disableLossCompensation: Boolean = false,
     val tlsEnabled: Boolean = true,
     val insecureTls: Boolean = false,
     val allowPrivateNetwork: Boolean = false,
@@ -160,6 +163,9 @@ data class ExitConfig(
             .put("quicPort", quicPort)
             .put("tcpPort", tcpPort)
             .put("transportMode", transportMode)
+            .put("brutalUpMbps", brutalUpMbps)
+            .put("brutalDownMbps", brutalDownMbps)
+            .put("disableLossCompensation", disableLossCompensation)
             .put("tlsEnabled", tlsEnabled)
             .put("insecureTLS", insecureTls)
             .put("allowInternet", true)
@@ -329,6 +335,9 @@ class ConfigStore(private val context: Context) {
             quicPort = prefs.getInt("quicPort", 443),
             tcpPort = prefs.getInt("tcpPort", 443),
             transportMode = prefs.getString("transportMode", "auto") ?: "auto",
+            brutalUpMbps = prefs.getInt("brutalUpMbps", 0),
+            brutalDownMbps = prefs.getInt("brutalDownMbps", 0),
+            disableLossCompensation = prefs.getBoolean("disableLossCompensation", false),
             tlsEnabled = prefs.getBoolean("tlsEnabled", true),
             insecureTls = prefs.getBoolean("insecureTls", false),
             allowPrivateNetwork = prefs.getBoolean("allowPrivateNetwork", false),
@@ -380,6 +389,9 @@ class ConfigStore(private val context: Context) {
             .putInt("quicPort", config.quicPort)
             .putInt("tcpPort", config.tcpPort)
             .putString("transportMode", config.transportMode)
+            .putInt("brutalUpMbps", config.brutalUpMbps)
+            .putInt("brutalDownMbps", config.brutalDownMbps)
+            .putBoolean("disableLossCompensation", config.disableLossCompensation)
             .putBoolean("tlsEnabled", config.tlsEnabled)
             .putBoolean("insecureTls", config.insecureTls)
             .putBoolean("allowPrivateNetwork", config.allowPrivateNetwork)

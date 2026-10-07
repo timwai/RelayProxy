@@ -12,6 +12,7 @@ import (
 
 	"github.com/apernet/quic-go"
 	"relayproxy/internal/acl"
+	quiccongestion "relayproxy/internal/congestion"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -29,6 +30,7 @@ type ListenerConfig struct {
 	AuthTimeout             time.Duration
 	AuthAttemptsPerMinute   int
 	MaxConcurrentHandshakes int
+	DisableLossCompensation bool
 }
 
 type AcceptedSession struct {
@@ -48,6 +50,7 @@ type PublicListener struct {
 	authenticator Authenticator
 	authTimeout   time.Duration
 	limiter       *handshakeLimiter
+	disableLossCompensation bool
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -82,6 +85,7 @@ func Listen(config ListenerConfig) (*PublicListener, error) {
 	listener := &PublicListener{
 		transport: transport, authenticator: config.Authenticator, authTimeout: timeout,
 		limiter: newHandshakeLimiter(config.AuthAttemptsPerMinute),
+		disableLossCompensation: config.DisableLossCompensation,
 		ctx:     listenerCtx, cancel: cancel,
 		results: make(chan acceptResult, maxHandshakes),
 		slots:   make(chan struct{}, maxHandshakes),
@@ -259,10 +263,17 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 			_ = writeHandshakeFailure(stream, protocol.ErrCodeAuthFailed, "authentication failed")
 			return nil, false, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
 		}
-		if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeResponse{Success: true}); err != nil {
+		uploadBPS := quiccongestion.CapRequestedRate(request.BrutalUploadBPS, 0)
+		downloadBPS := quiccongestion.CapRequestedRate(request.BrutalDownloadBPS, 0)
+		if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeResponse{
+			Success: true, BrutalUploadBPS: uploadBPS, BrutalDownloadBPS: downloadBPS,
+		}); err != nil {
 			return nil, false, fmt.Errorf("public direct authentication response: %w", err)
 		}
 		_ = stream.SetDeadline(time.Time{})
+		if downloadBPS > 0 {
+			tunnel.UseBrutal(session, downloadBPS, l.disableLossCompensation)
+		}
 		return &AcceptedSession{
 			Tunnel:         session,
 			ClientDeviceID: request.ClientDeviceID,

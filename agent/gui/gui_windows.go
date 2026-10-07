@@ -263,6 +263,10 @@ func Run(b *bridge.UIBridge, opts Options) error {
 }
 
 func buildWailsAssets(opts Options) (string, string, fstest.MapFS, error) {
+	if mainHTML, connectionsHTML, files, ok, err := buildReactWailsAssets(opts); ok || err != nil {
+		return mainHTML, connectionsHTML, files, err
+	}
+
 	index, err := assets.ReadFile("assets/index.html")
 	if err != nil {
 		return "", "", nil, fmt.Errorf("读取内嵌界面失败: %w", err)

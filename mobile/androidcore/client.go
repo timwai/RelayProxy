@@ -114,6 +114,7 @@ type statusSnapshot struct {
 	P2PCandidateSummary string                  `json:"p2pCandidateSummary,omitempty"`
 	P2PBytesUp          uint64                  `json:"p2pBytesUp,omitempty"`
 	P2PBytesDown        uint64                  `json:"p2pBytesDown,omitempty"`
+	P2PQUIC             *tunnel.QUICDiagnostics `json:"p2pQuic,omitempty"`
 	ProxyActiveTCP      int64                   `json:"proxyActiveTcp"`
 	ProxyActiveUDP      int64                   `json:"proxyActiveUdp"`
 	ProxyTCPFlows       uint64                  `json:"proxyTcpFlows"`
@@ -760,6 +761,11 @@ func (c *Client) StatusJSON() string {
 			s.P2PCandidateSummary = path.CandidateSummary
 			s.P2PBytesUp = path.BytesUp
 			s.P2PBytesDown = path.BytesDown
+			if p2pSession, ready := manager.ReadyForExit(s.SelectedExit); ready {
+				if diagnostics := tunnel.DiagnoseSession(p2pSession); diagnostics != nil && diagnostics.QUIC != nil {
+					s.P2PQUIC = diagnostics.QUIC
+				}
+			}
 			if s.DirectPath == "" && path.Path != "" {
 				s.DirectState = string(path.State)
 				s.DirectPath = path.Path
@@ -768,6 +774,9 @@ func (c *Client) StatusJSON() string {
 				s.DirectFallbackCount = path.FallbackCount
 				s.DirectBytesUp = path.BytesUp
 				s.DirectBytesDown = path.BytesDown
+				if s.P2PQUIC != nil {
+					s.DirectQUIC = s.P2PQUIC
+				}
 			}
 		}
 	}

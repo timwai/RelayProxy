@@ -1,0 +1,46 @@
+name: Windows Native UI
+
+on:
+  push:
+    branches:
+      - main
+      - feat/windows-native-gui
+    paths:
+      - "windows/RelayProxy.Native/**"
+      - "scripts/build-windows-native.ps1"
+      - ".github/workflows/windows-native-ui.yml"
+  pull_request:
+    paths:
+      - "windows/RelayProxy.Native/**"
+      - "scripts/build-windows-native.ps1"
+      - ".github/workflows/windows-native-ui.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: win-x64
+            platform: x64
+          - runtime: win-arm64
+            platform: ARM64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore .\windows\RelayProxy.Native\RelayProxy.Native.csproj -r ${{ matrix.runtime }}
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build .\windows\RelayProxy.Native\RelayProxy.Native.csproj -c Release -r ${{ matrix.runtime }} -p:Platform=${{ matrix.platform }} --no-restore

@@ -146,7 +146,6 @@ func TestValidateMessageRuleRejectsVerificationFieldsOnNormalMessage(t *testing.
 	}
 }
 
-
 func TestMessageRulePopupTypeCanDifferFromMessageType(t *testing.T) {
 	popup := true
 	rules := []MessageRule{{

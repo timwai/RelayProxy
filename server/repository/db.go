@@ -678,11 +678,11 @@ func LegacyMessageRules(useDefault bool, rules []VerificationRule) []MessageRule
 			match.MatchType = "all"
 		}
 		next := MessageRule{
-			Name:    strings.TrimSpace(rule.Name),
-			Type:    ruleType,
-			Enabled: !rule.Default || useDefault,
-			Default: rule.Default,
-			Match:   match,
+			Name:      strings.TrimSpace(rule.Name),
+			Type:      ruleType,
+			Enabled:   !rule.Default || useDefault,
+			Default:   rule.Default,
+			Match:     match,
 			Popup:     rule.Popup,
 			PopupType: ruleType,
 		}

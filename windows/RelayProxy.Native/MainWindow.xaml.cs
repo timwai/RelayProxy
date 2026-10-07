@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -23,6 +24,7 @@ public sealed partial class MainWindow : Window
     private bool _suppressAutostart;
     private bool _forceExit;
     private bool _initialConfigApplied;
+    private string _lastDeviceId = "";
     private string _page = "overview";
 
     public MainWindow()
@@ -147,6 +149,7 @@ public sealed partial class MainWindow : Window
             ConnectionStateText.Text = status.Connected ? "已连接" : "未连接";
             ConnectionMetaText.Text = status.Connected ? $"{status.Transport.ToUpperInvariant()} · {status.DeviceName} · {status.IdentityName}" : "正在连接 Relay Server";
             ApprovalText.Text = status.ApprovalState switch { "approved" => "已审批", "pending" => "待审批", "rejected" => "已拒绝", "revoked" => "已撤销", _ => "未知" };
+            _lastDeviceId = status.DeviceId;
             LatencyText.Text = status.LatencyMs > 0 ? $"{status.LatencyMs} ms" : "—";
             SocksStateText.Text = status.Socks5Running ? "运行中" : "已停止";
             HttpStateText.Text = status.HttpRunning ? "运行中" : "已停止";
@@ -817,6 +820,47 @@ public sealed partial class MainWindow : Window
     private async void RefreshOverview_Click(object sender, RoutedEventArgs e) => await RefreshOverviewAsync();
     private async void RefreshExits_Click(object sender, RoutedEventArgs e) => await RefreshExitsAsync();
     private async void RefreshConnections_Click(object sender, RoutedEventArgs e) => await RefreshConnectionsAsync();
+    private async void ClearConnections_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            await App.AgentApi.ClearConnectionsAsync();
+            await RefreshConnectionsAsync();
+        }
+        catch (Exception ex)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = Content.XamlRoot,
+                Title = "清空连接记录失败",
+                Content = ex.Message,
+                CloseButtonText = "关闭"
+            };
+            await dialog.ShowAsync();
+        }
+    }
+
+    private void OpenConfigDirectory_Click(object sender, RoutedEventArgs e)
+    {
+        var path = _config?.ConfigPath;
+        if (string.IsNullOrWhiteSpace(path) || path == "(未指定)") return;
+        var directory = Path.GetDirectoryName(path);
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "explorer.exe",
+                ArgumentList = { directory },
+                UseShellExecute = true
+            });
+        }
+        catch (Exception ex)
+        {
+            ShowInfo(SettingsBar, "无法打开配置目录", ex.Message, InfoBarSeverity.Error);
+        }
+    }
+
     private async void RefreshMessages_Click(object sender, RoutedEventArgs e) => await RefreshMessagesAsync();
     private async void ClearMessages_Click(object sender, RoutedEventArgs e)
     {

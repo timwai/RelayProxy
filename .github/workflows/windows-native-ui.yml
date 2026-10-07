@@ -8,6 +8,7 @@ on:
     paths:
       - "windows/RelayProxy.Native/**"
       - "agent/app/**"
+      - "agent/routing/**"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -20,6 +21,7 @@ on:
     paths:
       - "windows/RelayProxy.Native/**"
       - "agent/app/**"
+      - "agent/routing/**"
       - "agent/bridge/bridge.go"
       - "agent/gui/**"
       - "agent/startup/**"
@@ -50,6 +52,8 @@ jobs:
           files=(
             agent/app/agent.go
             agent/app/status_capabilities_test.go
+            agent/routing/dialer.go
+            agent/routing/dialer_test.go
             agent/bridge/bridge.go
             agent/gui/web.go
             agent/gui/web_test.go
@@ -110,10 +114,15 @@ jobs:
         shell: pwsh
         run: go test -tags wailslegacy ./agent/gui -count=1
 
-      - name: Test Agent capability status
+      - name: Test Agent runtime status
         if: matrix.runtime == 'win-x64'
         shell: pwsh
-        run: go test ./agent/app -run TestStatusApprovedCapabilitiesReturnsDefensiveCopy -count=1
+        run: go test ./agent/app -run '^TestStatus' -count=1
+
+      - name: Test proxy pause routing
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: go test ./agent/routing -run TestRoutingProxyPauseRejectsTCPAndUDPProxyDials -count=1
 
       - name: Validate PowerShell release scripts
         shell: pwsh

@@ -1914,7 +1914,7 @@ public sealed partial class MainWindow : Window
                 revision = _config.Revision,
                 proxy = new
                 {
-                    socks5Enabled = SocksEnabledSwitch.IsOn, socks5Listen, socks5Port = socksPort,
+                    socks5Enabled = SocksEnabledSwitch.IsOn, socks5Listen = socksListen, socks5Port = socksPort,
                     httpEnabled = HttpEnabledSwitch.IsOn, httpListen, httpPort
                 },
                 network = new { mode = TransparentProxySwitch.IsOn ? "divert" : "", excludeProcesses = SplitList(ExcludeProcessesBox.Text) }

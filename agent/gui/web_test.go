@@ -296,6 +296,25 @@ func TestWebConfigMutationAndQuit(t *testing.T) {
 	}
 }
 
+func TestWebAllowsEphemeralLoopbackPort(t *testing.T) {
+	server, err := StartWeb(newWebTestBridge(t), WebOptions{
+		Listen: "127.0.0.1",
+		Port:   0,
+		Token:  strings.Repeat("n", 32),
+	})
+	if err != nil {
+		t.Fatalf("ephemeral loopback management listener failed: %v", err)
+	}
+	t.Cleanup(func() { _ = server.Close(context.Background()) })
+	_, port, err := net.SplitHostPort(server.Addr())
+	if err != nil {
+		t.Fatalf("invalid ephemeral management address %q: %v", server.Addr(), err)
+	}
+	if port == "" || port == "0" {
+		t.Fatalf("ephemeral management listener did not receive a real port: %q", server.Addr())
+	}
+}
+
 func TestWebAllowsNonLoopbackListenerWithoutToken(t *testing.T) {
 	probe, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

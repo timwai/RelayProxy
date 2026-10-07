@@ -351,6 +351,10 @@ func main() {
 		case errors.Is(err, gui.ErrExternalUI):
 			log.Println("[Agent] macOS management UI opened; continuing in background.")
 		case errors.Is(err, gui.ErrUnsupported):
+			if runtime.GOOS == "windows" {
+				log.Println("[Agent] relay-agent.exe 是无界面 Core；请启动同目录 relay-agent-gui.exe。")
+				return
+			}
 			log.Println("[Agent] Falling back to headless mode.")
 		default:
 			fallbackURL := ""

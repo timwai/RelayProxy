@@ -361,6 +361,18 @@ func buildWailsAssets(opts Options) (string, string, fstest.MapFS, error) {
 	return mainHTML, connectionsHTML, files, nil
 }
 
+func (a *appWindow) openPage(page string) {
+	if a == nil {
+		return
+	}
+	a.showWindow(true)
+	script := "window.relayNavigate && window.relayNavigate(" + jsonString(page) + ")"
+	a.eval(script)
+	// WebView2 may still be finalising the React page after a tray activation.
+	// requestPage deduplicates the same target and preserves dirty-state guards.
+	time.AfterFunc(200*time.Millisecond, func() { a.eval(script) })
+}
+
 func trayStatusLabels(st agentapp.AgentStatus) (string, string, string, string) {
 	status := "未连接"
 	switch {
@@ -474,7 +486,7 @@ func (a *appWindow) installTray(icon []byte) {
 	menu.Add("界面与托盘设置…").OnClick(func(*application.Context) {
 		// Theme/minimise settings live in React so they participate in the same
 		// unsaved-draft/revision protection as every other config mutation.
-		a.showWindow(true)
+		a.openPage("settings")
 	})
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(*application.Context) {

@@ -456,8 +456,14 @@ func (a *appWindow) installTray(icon []byte) {
 	menu.Add("打开主界面").OnClick(func(*application.Context) {
 		a.showWindow(true)
 	})
+	menu.Add("切换出口…").OnClick(func(*application.Context) {
+		a.openPage("exits")
+	})
 	menu.Add("实时连接监控").OnClick(func(*application.Context) {
 		a.openConnections()
+	})
+	menu.Add("诊断与日志").OnClick(func(*application.Context) {
+		a.openPage("diagnostics")
 	})
 	menu.AddSeparator()
 

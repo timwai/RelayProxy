@@ -39,6 +39,7 @@ public sealed partial class MainWindow : Window
         if (File.Exists(iconPath)) AppWindow.SetIcon(iconPath);
         _tray = new TrayIconService(this, iconPath);
         _tray.ShowRequested += OnTrayShowRequested;
+        _tray.CopyDeviceIdRequested += OnTrayCopyDeviceIdRequested;
         _tray.ExitRequested += OnTrayExitRequested;
         AppWindow.Closing += OnAppWindowClosing;
         App.AgentHost.StateChanged += OnAgentStateChanged;
@@ -85,6 +86,14 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnTrayShowRequested() => DispatcherQueue.TryEnqueue(ShowFromExternalActivation);
+
+    private void OnTrayCopyDeviceIdRequested() => DispatcherQueue.TryEnqueue(() =>
+    {
+        if (string.IsNullOrWhiteSpace(_lastDeviceId)) return;
+        var data = new DataPackage();
+        data.SetText(_lastDeviceId);
+        Clipboard.SetContent(data);
+    });
 
     private void OnTrayExitRequested() => DispatcherQueue.TryEnqueue(() =>
     {

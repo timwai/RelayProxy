@@ -107,3 +107,29 @@ public sealed class RdpConnectResponseDto
     [JsonPropertyName("ok")] public bool Ok { get; set; }
     [JsonPropertyName("target")] public RdpTargetDto? Target { get; set; }
 }
+
+
+public sealed class NetworkServiceStatusDto
+{
+    [JsonPropertyName("supported")] public bool Supported { get; set; }
+    [JsonPropertyName("installed")] public bool Installed { get; set; }
+    [JsonPropertyName("running")] public bool Running { get; set; }
+    [JsonPropertyName("autoStart")] public bool AutoStart { get; set; }
+    [JsonPropertyName("autoStartKnown")] public bool AutoStartKnown { get; set; }
+    [JsonPropertyName("ready")] public bool Ready { get; set; }
+    [JsonPropertyName("versionMatch")] public bool VersionMatch { get; set; }
+    [JsonPropertyName("recoveryEnabled")] public bool RecoveryEnabled { get; set; }
+    [JsonPropertyName("recoveryKnown")] public bool RecoveryKnown { get; set; }
+    [JsonPropertyName("pid")] public uint Pid { get; set; }
+    [JsonPropertyName("binaryPath")] public string BinaryPath { get; set; } = "";
+    [JsonPropertyName("state")] public string State { get; set; } = "";
+    [JsonPropertyName("message")] public string Message { get; set; } = "";
+}
+
+public sealed class MutationMessageDto
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("message")] public string Message { get; set; } = "";
+    [JsonPropertyName("rebootCleanup")] public bool RebootCleanup { get; set; }
+    [JsonPropertyName("cleanupPath")] public string CleanupPath { get; set; } = "";
+}

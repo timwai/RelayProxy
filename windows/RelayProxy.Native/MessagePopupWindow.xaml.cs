@@ -52,7 +52,7 @@ public sealed partial class MessagePopupWindow : Window
         {
             _showing = false;
             _message = null;
-            Hide();
+            AppWindow.Hide();
             return;
         }
 

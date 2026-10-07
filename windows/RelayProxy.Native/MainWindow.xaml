@@ -14,6 +14,7 @@
       <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,132,0">
         <Ellipse Width="8" Height="8" Fill="{ThemeResource SystemFillColorSuccessBrush}" />
         <TextBlock x:Name="AgentStateText" Text="正在启动 Agent…" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        <Button x:Name="RestartAgentButton" Content="重启 Agent" Visibility="Collapsed" Click="RestartAgent_Click"/>
       </StackPanel>
     </Grid>
 

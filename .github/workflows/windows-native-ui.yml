@@ -97,6 +97,11 @@ jobs:
         shell: pwsh
         run: go test ./agent/gui ./agent/bridge ./agent/startup -count=1
 
+      - name: Test legacy Wails fallback
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: go test -tags wailslegacy ./agent/gui -count=1
+
       - name: Validate PowerShell release script
         shell: pwsh
         run: |

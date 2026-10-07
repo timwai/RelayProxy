@@ -136,6 +136,17 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	default:
 		return fmt.Errorf("transport.mode 必须是 auto / quic_only / tcp_only")
 	}
+	for _, item := range []struct {
+		name  string
+		value int
+	}{
+		{"transport.bandwidth.up_mbps", c.Transport.Bandwidth.UpMbps},
+		{"transport.bandwidth.down_mbps", c.Transport.Bandwidth.DownMbps},
+	} {
+		if item.value < 0 || item.value > 1_000_000 {
+			return fmt.Errorf("%s 必须在 0-1000000 Mbps 之间；0 表示使用 BBR", item.name)
+		}
+	}
 	switch c.P2P.Mode {
 	case "auto", "direct_only", "relay_only", "p2p_only":
 	default:

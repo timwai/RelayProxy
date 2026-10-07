@@ -22,11 +22,11 @@ var dialPublicDirectQUIC = func(ctx context.Context, address string, tlsConfig *
 const endpointRaceHeadStart = 50 * time.Millisecond
 
 type DialConfig struct {
-	Address        string
-	TLSConfig      *tls.Config
-	QUICConfig     *quic.Config
-	ClientDeviceID string
-	ExitDeviceID   string
+	Address                 string
+	TLSConfig               *tls.Config
+	QUICConfig              *quic.Config
+	ClientDeviceID          string
+	ExitDeviceID            string
 	Ticket                  []byte
 	AuthTimeout             time.Duration
 	BrutalUploadBPS         uint64

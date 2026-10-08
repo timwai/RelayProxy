@@ -348,7 +348,7 @@ func TestK2PRouterMappingWithPrivateWANStillSendsAddPortMapping(t *testing.T) {
 	}
 	svc := service{
 		serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1",
-		controlURL: control, localIP: netip.MustParseAddr("192.168.31.8"),
+		controlURL:  control, localIP: netip.MustParseAddr("192.168.31.8"),
 	}
 	mapping, address, err := mapUDPOnService(context.Background(), svc, 20900, 20900, 20999)
 	if err != nil {

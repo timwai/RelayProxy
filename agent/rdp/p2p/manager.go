@@ -27,21 +27,21 @@ const maxP2PTCPConnections = 128
 type ControlSender func(context.Context, protocol.RDPControlMessage) (protocol.RDPControlMessage, error)
 
 type Manager struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	send       ControlSender
-	targetAddr string
-	lease      time.Duration
-	mu         sync.Mutex
-	tcp        net.Listener
-	udp        *net.UDPConn
-	candidates []protocol.RDPCandidate
-	sessions   map[uint64]*Session
+	ctx            context.Context
+	cancel         context.CancelFunc
+	send           ControlSender
+	targetAddr     string
+	lease          time.Duration
+	mu             sync.Mutex
+	tcp            net.Listener
+	udp            *net.UDPConn
+	candidates     []protocol.RDPCandidate
+	sessions       map[uint64]*Session
 	pendingUpdates map[uint64]protocol.RDPControlMessage
-	tcpSem     chan struct{}
-	rendezvous string
-	closed     atomic.Bool
-	targetMode atomic.Bool
+	tcpSem         chan struct{}
+	rendezvous     string
+	closed         atomic.Bool
+	targetMode     atomic.Bool
 }
 
 type Session struct {

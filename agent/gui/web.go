@@ -385,7 +385,8 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 		writeWebError(rw, err)
 		return
 	}
-	writeWebJSON(rw, map[string]any{"ok": true, "target": target})
+	status := w.bridge.GetStatus()
+	writeWebJSON(rw, map[string]any{"ok": true, "target": target, "listenAddr": status.RDPListenAddr})
 }
 
 func (w *WebServer) runSpeedTest(rw http.ResponseWriter, r *http.Request) {
@@ -568,7 +569,16 @@ const webBridgeJS = `(function () {
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
-  window.goConnectRDP = function (targetId, autoLaunch) { return json('/api/rdp/connect', 'POST', {targetId:targetId, autoLaunch:!!autoLaunch}); };
+  window.goConnectRDP = async function (targetId, autoLaunch) {
+    var nativeRDP = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.relayproxyRDP;
+    var body = await json('/api/rdp/connect', 'POST', {targetId:targetId, autoLaunch:!!autoLaunch && !nativeRDP});
+    if (nativeRDP && autoLaunch) {
+      var result = JSON.parse(body || '{}');
+      if (!result.listenAddr) throw new Error('RDP 本地入口尚未建立');
+      nativeRDP.postMessage({address:result.listenAddr});
+    }
+    return body;
+  };
   window.goDisconnectRDP = function () { return json('/api/rdp/disconnect', 'POST', {}); };
   window.goGetLogs = function () { return request('/api/logs'); };
   window.goClearLogs = function () { return request('/api/logs', {method:'DELETE'}); };

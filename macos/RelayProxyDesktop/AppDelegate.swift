@@ -3,6 +3,7 @@ import WebKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private let lifecycleMessageName = "relayproxyLifecycle"
+    private let rdpMessageName = "relayproxyRDP"
     private let outputQueue = DispatchQueue(label: "com.relayproxy.desktop.agent-output")
     private var outputBuffer = Data()
     private var agent: Process?
@@ -47,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         messagePollTimer?.invalidate()
         messagePollTimer = nil
         webView?.configuration.userContentController.removeScriptMessageHandler(forName: lifecycleMessageName)
+        webView?.configuration.userContentController.removeScriptMessageHandler(forName: rdpMessageName)
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         if let agent, agent.isRunning {
             agent.terminate()
@@ -62,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .default()
         configuration.userContentController.add(self, name: lifecycleMessageName)
+        configuration.userContentController.add(self, name: rdpMessageName)
         webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
@@ -206,11 +209,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         NSApp.terminate(sender)
     }
 
+    private func launchWindowsAppRDP(_ address: String) {
+        let endpoint = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard endpoint.hasPrefix("127.0.0.1:"), endpoint.dropFirst("127.0.0.1:".count).allSatisfy({ $0.isNumber }),
+              let rdpURL = URL(string: "rdp://full%20address=s:\(endpoint)") else {
+            presentRDPLaunchError("RelayProxy 返回了无效的本地 RDP 地址：\(address)")
+            return
+        }
+
+        let workspace = NSWorkspace.shared
+        let bundledURL = workspace.urlForApplication(withBundleIdentifier: "com.microsoft.rdc.macos")
+        let standardURL = URL(fileURLWithPath: "/Applications/Windows App.app", isDirectory: true)
+        let applicationURL = bundledURL ?? (FileManager.default.fileExists(atPath: standardURL.path) ? standardURL : nil)
+        guard let applicationURL else {
+            presentRDPLaunchError("未找到 Windows App。请先安装或重新安装 Microsoft Windows App for macOS。")
+            return
+        }
+
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        workspace.open([rdpURL], withApplicationAt: applicationURL, configuration: configuration) { [weak self] application, error in
+            DispatchQueue.main.async {
+                if let error {
+                    self?.presentRDPLaunchError("Windows App 启动失败：\(error.localizedDescription)")
+                    return
+                }
+                if application == nil {
+                    self?.presentRDPLaunchError("Windows App 未能启动。")
+                }
+            }
+        }
+    }
+
+    private func presentRDPLaunchError(_ detail: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "无法打开 Windows App"
+        alert.informativeText = detail
+        alert.addButton(withTitle: "知道了")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard message.name == lifecycleMessageName,
-              message.webView === webView,
-              message.frameInfo.isMainFrame,
-              let action = message.body as? String else { return }
+        guard message.webView === webView, message.frameInfo.isMainFrame else { return }
+
+        if message.name == rdpMessageName,
+           let body = message.body as? [String: Any],
+           let address = body["address"] as? String {
+            launchWindowsAppRDP(address)
+            return
+        }
+
+        guard message.name == lifecycleMessageName, let action = message.body as? String else { return }
         if action == "quit" { quitApplication(nil); return }
         if action == "restart" {
             guard !restartRequested, let agent, agent.isRunning else { return }

@@ -17,9 +17,10 @@ function createBridge({native = false} = {}) {
   const nativeMessages = [];
   const window = {};
   if (native) {
-    window.webkit = {messageHandlers: {relayproxyLifecycle: {
-      postMessage: message => nativeMessages.push(message)
-    }}};
+    window.webkit = {messageHandlers: {
+      relayproxyLifecycle: {postMessage: message => nativeMessages.push({handler:'lifecycle', message})},
+      relayproxyRDP: {postMessage: message => nativeMessages.push({handler:'rdp', message})}
+    }};
   }
   const context = {
     window,
@@ -27,7 +28,9 @@ function createBridge({native = false} = {}) {
       requests.push({path, options});
       return {ok: true, text: async () => path === '/api/config'
         ? '{"serverAddress":"previous.relay.test","revision":"123"}'
-        : '{"ok":true}'};
+        : path === '/api/rdp/connect'
+          ? '{"ok":true,"listenAddr":"127.0.0.1:13389"}'
+          : '{"ok":true}'};
     }
   };
   bridge.runInNewContext(context);
@@ -56,8 +59,34 @@ test('macOS shell quit is owned by native lifecycle handler', async () => {
   assert.deepEqual(nativeMessages, []);
   const result = JSON.parse(await window.goQuit());
   assert.equal(result.ok, true);
-  assert.deepEqual(nativeMessages, ['quit']);
+  assert.deepEqual(nativeMessages, [{handler:'lifecycle', message:'quit'}]);
   assert.equal(requests.length, 0);
   await window.goRestart();
-  assert.deepEqual(nativeMessages, ['quit', 'restart']);
+  assert.deepEqual(nativeMessages, [
+    {handler:'lifecycle', message:'quit'},
+    {handler:'lifecycle', message:'restart'}
+  ]);
+});
+
+
+test('macOS native shell owns Windows App launch after RDP tunnel is ready', async () => {
+  const {window, requests, nativeMessages} = createBridge({native: true});
+  const result = JSON.parse(await window.goConnectRDP('dev-rdp', true));
+  assert.equal(result.listenAddr, '127.0.0.1:13389');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].path, '/api/rdp/connect');
+  const body = JSON.parse(requests[0].options.body);
+  assert.equal(body.targetId, 'dev-rdp');
+  assert.equal(body.autoLaunch, false);
+  assert.deepEqual(nativeMessages, [{
+    handler: 'rdp',
+    message: {address: '127.0.0.1:13389'}
+  }]);
+});
+
+test('browser RDP keeps agent-side auto launch behavior', async () => {
+  const {window, requests, nativeMessages} = createBridge();
+  await window.goConnectRDP('dev-rdp', true);
+  assert.equal(JSON.parse(requests[0].options.body).autoLaunch, true);
+  assert.deepEqual(nativeMessages, []);
 });

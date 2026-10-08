@@ -335,6 +335,30 @@ func decodeAgentConfig(data []byte, knownFields bool) (*AgentConfigFile, error) 
 	return cfg, nil
 }
 
+// legacyAgentCredentialKeys are pre-identity credentials under "device:".
+// They are never migrated: starting with a fresh identity while silently
+// ignoring an old token would hide from the user why the server rejects them.
+var legacyAgentCredentialKeys = []string{"id", "token", "pair_code", "pairing_code"}
+
+func detectLegacyAgentCredentials(data []byte) error {
+	var raw struct {
+		Device map[string]any `yaml:"device"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil // structural problems are reported by the strict decode
+	}
+	var found []string
+	for _, key := range legacyAgentCredentialKeys {
+		if _, ok := raw.Device[key]; ok {
+			found = append(found, "device."+key)
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("配置文件包含旧版凭据字段 %s：当前版本使用设备身份与服务端审批，不再支持旧凭据。请删除这些字段或创建新的配置文件", strings.Join(found, "、"))
+}
+
 func isUnknownAgentConfigFieldError(err error) bool {
 	if err == nil {
 		return false
@@ -347,6 +371,9 @@ func LoadAgentConfigWithRevision(path string) (*AgentConfigFile, string, error) 
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("read agent config file failed: %w", err)
+	}
+	if err := detectLegacyAgentCredentials(data); err != nil {
+		return nil, "", err
 	}
 
 	cfg, err := decodeAgentConfig(data, true)

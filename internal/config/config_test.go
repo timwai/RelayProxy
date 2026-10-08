@@ -129,6 +129,29 @@ proxy:
 	}
 }
 
+func TestLoadAgentConfigRejectsLegacyCredentialsDespiteCompatibilityMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	data := []byte(`server:
+  address: relay.example.test
+legacy_desktop:
+  old_window_mode: native
+device:
+  name: old-laptop
+  id: old
+  token: secret
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadAgentConfig(path)
+	if err == nil {
+		t.Fatal("legacy device credentials must not be silently ignored")
+	}
+	if !strings.Contains(err.Error(), "device.id") || !strings.Contains(err.Error(), "device.token") {
+		t.Fatalf("error should name the offending fields: %v", err)
+	}
+}
+
 func TestLoadAgentConfigMigratesLegacyTunMode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	if err := os.WriteFile(path, []byte("network:\n  mode: tun\n"), 0o600); err != nil {

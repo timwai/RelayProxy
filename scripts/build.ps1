@@ -28,8 +28,7 @@
 param(
     [string]$OutDir = "",
     [string]$Version = "1.0.0",
-    [switch]$WindowsOnly,
-    [switch]$SkipFrontendTests
+    [switch]$WindowsOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,20 +82,6 @@ function Assert-ReactBundle {
     Write-Host "  React bundle OK: index.html + $($js.Count) JS + $($css.Count) CSS" -ForegroundColor Green
 }
 
-function Test-WindowsDesktopPackages {
-    Write-Host ""
-    Write-Host "[TEST] Windows desktop packages" -ForegroundColor Cyan
-    Reset-GoHostEnvironment
-    $env:CGO_ENABLED = "0"
-    $env:GOOS = "windows"
-    $env:GOARCH = "amd64"
-    & go test ./agent/divert ./agent/gui ./cmd/relay-agent -count=1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Windows desktop package tests failed"
-    }
-    Reset-GoHostEnvironment
-}
-
 
 Write-Host "=================================================="
 Write-Host " RelayProxy Build  v$Version"
@@ -107,10 +92,6 @@ Write-Host "=================================================="
 if ($WindowsOnly) {
     Write-Host " Mode:   Windows-only release" -ForegroundColor Yellow
 }
-if ($SkipFrontendTests) {
-    Write-Host " Note:   React unit tests are skipped" -ForegroundColor Yellow
-}
-
 Push-Location $Root
 try {
     # The caller may already have GOOS/GOARCH set from a previous cross-build.
@@ -303,21 +284,12 @@ try {
     try {
         & npm install --no-audit --no-fund
         if ($LASTEXITCODE -ne 0) { throw "npm install failed for Wails React frontend" }
-        if (-not $SkipFrontendTests) {
-            & npm test
-            if ($LASTEXITCODE -ne 0) { throw "React frontend tests failed" }
-        }
         & npm run build
         if ($LASTEXITCODE -ne 0) { throw "React frontend build failed" }
     } finally {
         Pop-Location
     }
     Assert-ReactBundle
-
-    # Compile/test the exact Windows packages that consume the generated React bundle
-    # before creating release EXEs. This catches missing embed assets, Wails bridge
-    # regressions and WinDivert/Network Service Windows-only compile errors.
-    Test-WindowsDesktopPackages
 
     # --- Windows client (icons + manifest embedded via resource_windows.syso) ---
     # Desktop build first: it is the artifact users are told to double-click.

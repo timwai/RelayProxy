@@ -183,3 +183,55 @@ func TestEndpointUPnPFailureIsNonFatal(t *testing.T) {
 		t.Fatal("UPnP failure removed all local P2P candidates")
 	}
 }
+
+func TestEndpointUPnPRenewalUpdatesAndWithdrawsCandidates(t *testing.T) {
+	previous := mapUPnPUDP
+	defer func() { mapUPnPUDP = previous }()
+	oldAddress := netip.MustParseAddrPort("198.51.100.44:45678")
+	newAddress := netip.MustParseAddrPort("198.51.100.44:45679")
+	mapUPnPUDP = func(context.Context, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+		return nil, oldAddress, nil
+	}
+	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)
+	if err := endpoint.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+	if state, _ := endpoint.UPnPStatus(); state != "MAPPED" {
+		t.Fatalf("initial UPnP state=%q", state)
+	}
+	updates := endpoint.CandidateChanges()
+	endpoint.applyUPnPUpdate(p2pupnp.MappingUpdate{Healthy: false, Reason: "router rebooted"})
+	select {
+	case items := <-updates:
+		for _, item := range items {
+			if item.Address == oldAddress.String() {
+				t.Fatalf("expired UPnP candidate was retained: %#v", items)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("UPnP lease loss did not notify P2P sessions")
+	}
+	if state, reason := endpoint.UPnPStatus(); state != "DEGRADED" || reason != "router rebooted" {
+		t.Fatalf("unexpected UPnP failure state: %s %q", state, reason)
+	}
+	endpoint.applyUPnPUpdate(p2pupnp.MappingUpdate{Healthy: true, Address: newAddress})
+	select {
+	case items := <-updates:
+		found := false
+		for _, item := range items {
+			if item.Address == oldAddress.String() {
+				t.Fatalf("stale UPnP candidate reappeared: %#v", items)
+			}
+			found = found || item.Address == newAddress.String()
+		}
+		if !found {
+			t.Fatalf("new external mapping was not published: %#v", items)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("UPnP recovery did not notify P2P sessions")
+	}
+	if state, reason := endpoint.UPnPStatus(); state != "MAPPED" || reason != "" {
+		t.Fatalf("unexpected recovered state: %s %q", state, reason)
+	}
+}

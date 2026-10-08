@@ -141,7 +141,7 @@ func TestEndpointPublishesUPnPCandidate(t *testing.T) {
 		if internalPort == 0 {
 			t.Fatal("UPnP mapper received zero internal port")
 		}
-		return nil, netip.MustParseAddrPort("198.51.100.44:45678"), nil
+		return nil, netip.MustParseAddrPort("8.8.8.8:45678"), nil
 	}
 
 	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)
@@ -156,7 +156,7 @@ func TestEndpointPublishesUPnPCandidate(t *testing.T) {
 	}
 	for _, item := range candidates {
 		if item.Protocol == "udp" && item.Type == "reflexive" &&
-			item.Address == "198.51.100.44:45678" && item.Priority == 900 {
+			item.Address == "8.8.8.8:45678" && item.Priority == 900 {
 			return
 		}
 	}
@@ -187,8 +187,8 @@ func TestEndpointUPnPFailureIsNonFatal(t *testing.T) {
 func TestEndpointUPnPRenewalUpdatesAndWithdrawsCandidates(t *testing.T) {
 	previous := mapUPnPUDP
 	defer func() { mapUPnPUDP = previous }()
-	oldAddress := netip.MustParseAddrPort("198.51.100.44:45678")
-	newAddress := netip.MustParseAddrPort("198.51.100.44:45679")
+	oldAddress := netip.MustParseAddrPort("8.8.8.8:45678")
+	newAddress := netip.MustParseAddrPort("8.8.8.8:45679")
 	mapUPnPUDP = func(context.Context, int, int, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
 		return nil, oldAddress, nil
 	}
@@ -233,5 +233,59 @@ func TestEndpointUPnPRenewalUpdatesAndWithdrawsCandidates(t *testing.T) {
 	}
 	if state, reason := endpoint.UPnPStatus(); state != "MAPPED" || reason != "" {
 		t.Fatalf("unexpected recovered state: %s %q", state, reason)
+	}
+}
+
+func TestPrivateWANRouterMappingNeverBecomesPublicP2PCandidate(t *testing.T) {
+	previous := mapUPnPUDP
+	defer func() { mapUPnPUDP = previous }()
+	privateWAN := netip.MustParseAddrPort("100.64.10.7:20900")
+	publicWAN := netip.MustParseAddrPort("8.8.8.8:20900")
+	mapUPnPUDP = func(context.Context, int, int, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+		return nil, privateWAN, nil
+	}
+	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)
+	if err := endpoint.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+	assertNotPublished := func() {
+		t.Helper()
+		candidates, _, err := endpoint.Description()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range candidates {
+			if c.Address == privateWAN.String() {
+				t.Fatal("CGNAT WAN was advertised as public P2P candidate")
+			}
+		}
+	}
+	assertNotPublished()
+	if state, reason := endpoint.UPnPStatus(); state != "CGNAT" || reason == "" {
+		t.Fatalf("CGNAT mapping status=%q reason=%q", state, reason)
+	}
+	if address := endpoint.UPnPAddress(); address != privateWAN.String() {
+		t.Fatalf("CGNAT mapping not visible in diagnostics: %q", address)
+	}
+	endpoint.applyUPnPUpdate(p2pupnp.MappingUpdate{Address: publicWAN, Healthy: true})
+	if state, _ := endpoint.UPnPStatus(); state != "MAPPED" {
+		t.Fatalf("public WAN recovery state=%q", state)
+	}
+	candidates, _, err := endpoint.Description()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range candidates {
+		found = found || c.Address == publicWAN.String()
+	}
+	if !found {
+		t.Fatal("restored public mapping was not advertised")
+	}
+	endpoint.applyUPnPUpdate(p2pupnp.MappingUpdate{Address: privateWAN, Healthy: true})
+	assertNotPublished()
+	if state, _ := endpoint.UPnPStatus(); state != "CGNAT" {
+		t.Fatalf("mapping returning to CGNAT state=%q", state)
 	}
 }

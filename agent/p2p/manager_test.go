@@ -625,3 +625,15 @@ func TestP2PCandidateUpdateIsRetriedAfterSignalingFailure(t *testing.T) {
 		t.Fatalf("candidate update attempts=%d, want 2", count.Load())
 	}
 }
+
+func TestUPnPStatusDistinguishesDeniedFromAllowedButIdle(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	if enabled, state, _, _ := manager.UPnPStatus(); enabled || state != "DISABLED" {
+		t.Fatalf("UPnP unexpectedly enabled: %v %s", enabled, state)
+	}
+	manager.upnpEnabled = true
+	if enabled, state, _, _ := manager.UPnPStatus(); !enabled || state != "IDLE" {
+		t.Fatalf("UPnP enabled but idle state is incorrect: %v %s", enabled, state)
+	}
+}

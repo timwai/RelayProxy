@@ -60,7 +60,6 @@ type Coordinator struct {
 	db                *repository.DB
 	lease             time.Duration
 	rendezvousAddress string
-	hostAuthFailure   func(string, protocol.RDPHostAuthFailure) error
 	mu                sync.Mutex
 	registrations     map[string]Registration
 	leases            map[uint64]*Lease
@@ -83,14 +82,6 @@ func NewCoordinator(sessions *session.Manager, db *repository.DB, lease time.Dur
 	return &Coordinator{sessions: sessions, db: db, lease: lease, rendezvousAddress: rendezvousAddress,
 		registrations: make(map[string]Registration), leases: make(map[uint64]*Lease),
 		leaseCounts: make(map[string]int), connectWindows: make(map[string]connectWindow)}
-}
-
-// SetHostAuthFailureHandler wires the public-RDP security layer to authenticated
-// Host Agent reports. The callback never accepts a client-supplied public IP.
-func (c *Coordinator) SetHostAuthFailureHandler(fn func(string, protocol.RDPHostAuthFailure) error) {
-	c.mu.Lock()
-	c.hostAuthFailure = fn
-	c.mu.Unlock()
 }
 
 func (c *Coordinator) LeaseSeconds() int         { return int(c.lease / time.Second) }
@@ -183,21 +174,6 @@ func (c *Coordinator) HandleControl(ctx context.Context, stream tunnel.TunnelStr
 		response = c.candidateUpdate(device.DeviceID, message)
 	case protocol.RDPControlLeaseRenew:
 		response = c.renew(device.DeviceID, message)
-	case protocol.RDPControlHostAuthFailure:
-		if !contains(device.Grants, protocol.CapabilityRDPHost) || !contains(device.Grants, protocol.CapabilityRDPPublic) || message.HostAuthFailure == nil {
-			response = rdpError("NOT_AUTHORIZED", "public RDP host capability required")
-			break
-		}
-		c.mu.Lock()
-		callback := c.hostAuthFailure
-		c.mu.Unlock()
-		if callback == nil {
-			response = rdpError("UNAVAILABLE", "Windows event audit unavailable")
-		} else if err := callback(device.DeviceID, *message.HostAuthFailure); err != nil {
-			response = rdpError("INVALID_AUTH_EVENT", err.Error())
-		} else {
-			response = protocol.RDPControlMessage{Type: protocol.RDPControlHostAuthFailureAck}
-		}
 	case protocol.RDPControlSessionClose:
 		if !c.validLeasePeer(device.DeviceID, message.SessionID, message.SessionToken) {
 			response = rdpError("SESSION_TOKEN_INVALID", "RDP session token is invalid")

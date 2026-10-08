@@ -59,12 +59,12 @@ type clientEntry struct {
 }
 
 type ClientManager struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	clientID func() string
-	raceDial      ClientRaceDialFunc
+	ctx            context.Context
+	cancel         context.CancelFunc
+	clientID       func() string
+	raceDial       ClientRaceDialFunc
 	endpointUsable func(address string) bool
-	now           func() time.Time
+	now            func() time.Time
 
 	attemptTimeout time.Duration
 	cooldown       time.Duration

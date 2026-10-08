@@ -50,8 +50,8 @@ func (c *Connection) Addr() string { return c.ListenAddr }
 
 // UDPStatus reports the local UDP listener capability and the state of the
 // most recent remote association. UDPEnabled only means that the same-number
-// loopback UDP socket was created; UDPActive means mstsc has sent a packet and
-// the packet path was opened successfully.
+// loopback UDP socket was created; UDPActive means the local RDP client has
+// sent a packet and the packet path was opened successfully.
 func (c *Connection) UDPStatus() (enabled, active bool, lastError string) {
 	if c == nil {
 		return false, false, ""
@@ -127,7 +127,7 @@ func StartController(parent context.Context, target Target, options ControllerOp
 	if udpEnabled {
 		go connection.serveUDP(ctx, options.DialUDP)
 	}
-	if autoLaunch && runtime.GOOS == "windows" {
+	if autoLaunch {
 		go func(ctx context.Context, address string) {
 			timer := time.NewTimer(350 * time.Millisecond)
 			defer timer.Stop()
@@ -136,12 +136,46 @@ func StartController(parent context.Context, target Target, options ControllerOp
 				return
 			case <-timer.C:
 			}
-			if err := exec.Command("mstsc.exe", "/v:"+address).Start(); err != nil {
-				log.Printf("[RDP] 启动 mstsc.exe 失败: %v", err)
+			if err := launchRDPClient(runtime.GOOS, address); err != nil {
+				log.Printf("[RDP] 启动本机 RDP 客户端失败: %v", err)
 			}
 		}(ctx, connection.ListenAddr)
 	}
 	return connection, nil
+}
+
+func rdpClientLaunchSpec(goos, address string) (string, []string, bool) {
+	switch goos {
+	case "windows":
+		return "mstsc.exe", []string{"/v:" + address}, true
+	case "darwin":
+		// Windows App replaced Microsoft Remote Desktop on macOS. Hand the
+		// RelayProxy loopback endpoint to it through the macOS RDP URI scheme.
+		return "/usr/bin/open", []string{"-a", "Windows App", "rdp://full%20address=s:" + address}, true
+	default:
+		return "", nil, false
+	}
+}
+
+func launchRDPClient(goos, address string) error {
+	command, args, ok := rdpClientLaunchSpec(goos, address)
+	if !ok {
+		return nil
+	}
+	if goos == "darwin" {
+		// /usr/bin/open exits after LaunchServices accepts the request. Run it
+		// synchronously in this background goroutine so a missing app is visible.
+		if err := exec.Command(command, args...).Run(); err != nil {
+			// Some installations can own rdp:// without resolving by display
+			// name. Let LaunchServices retry using the registered scheme handler.
+			if fallbackErr := exec.Command("/usr/bin/open", args[len(args)-1]).Run(); fallbackErr == nil {
+				return nil
+			}
+			return err
+		}
+		return nil
+	}
+	return exec.Command(command, args...).Start()
 }
 
 func (c *Connection) serveTCP(ctx context.Context, dial func(context.Context, string) (net.Conn, error)) {

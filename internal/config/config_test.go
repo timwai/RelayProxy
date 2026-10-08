@@ -734,3 +734,16 @@ func TestServerP2PPortRangeValidation(t *testing.T) {
 		t.Fatal("reversed P2P port range was accepted")
 	}
 }
+
+func TestAgentUPnPRequiresExplicitLocalApproval(t *testing.T) {
+	var config AgentConfigFile
+	applyAgentDefaults(&config)
+	if config.P2P.UPnPAllowed == nil || *config.P2P.UPnPAllowed {
+		t.Fatal("UPnP unexpectedly allowed by default")
+	}
+	config.P2P.UPnPAllowed = BoolPtr(true)
+	applyAgentDefaults(&config)
+	if !*config.P2P.UPnPAllowed {
+		t.Fatal("explicit Agent UPnP approval was overwritten by defaults")
+	}
+}

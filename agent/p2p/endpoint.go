@@ -167,6 +167,9 @@ func (e *Endpoint) Start(ctx context.Context) error {
 			})
 		} else if result.err != nil {
 			upnpError = result.err.Error()
+			if errors.Is(result.err, p2pupnp.ErrNonPublicWAN) {
+				upnpState = "CGNAT"
+			}
 			log.Printf("[P2P][UPnP] mapping unavailable; normal P2P fallback remains active: %v", result.err)
 		} else {
 			upnpError = "UPnP gateway returned no usable address"

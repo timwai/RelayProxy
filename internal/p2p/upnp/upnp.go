@@ -304,13 +304,13 @@ func (m *Mapping) refresh(ctx context.Context) error {
 
 type discoveredGateway struct {
 	location string
-	sender netip.Addr
-	localIP netip.Addr
+	sender   netip.Addr
+	localIP  netip.Addr
 }
 
 type networkInterfaceIPv4 struct {
 	address netip.Addr
-	subnet *net.IPNet
+	subnet  *net.IPNet
 }
 
 // activeLANInterfaces discovers multicast-capable on-link interfaces. The
@@ -462,14 +462,20 @@ func discoverServices(ctx context.Context) ([]service, error) {
 	}
 	preferred := defaultRouteIPv4()
 	sort.SliceStable(locations, func(i, j int) bool {
-		if locations[i].localIP == preferred { return true }
-		if locations[j].localIP == preferred { return false }
+		if locations[i].localIP == preferred {
+			return true
+		}
+		if locations[j].localIP == preferred {
+			return false
+		}
 		return locations[i].location < locations[j].location
 	})
 	var result []service
 	var lastErr error
 	for _, gateway := range locations {
-		if err := ctx.Err(); err != nil { return nil, err }
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		found, err := fetchServices(ctx, gateway.location, gateway.sender, gateway.localIP)
 		if err != nil {
 			lastErr = err
@@ -478,14 +484,20 @@ func discoverServices(ctx context.Context) ([]service, error) {
 		result = append(result, found...)
 	}
 	if len(result) == 0 {
-		if lastErr != nil { return nil, fmt.Errorf("%w: %v", ErrUnavailable, lastErr) }
+		if lastErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
+		}
 		return nil, ErrUnavailable
 	}
 	// Prefer the active/default interface before comparing IGD service
 	// versions; an IGD v2 on a disconnected VM NIC must not trump Wi-Fi.
 	sort.SliceStable(result, func(i, j int) bool {
-		if result[i].localIP == preferred && result[j].localIP != preferred { return true }
-		if result[j].localIP == preferred && result[i].localIP != preferred { return false }
+		if result[i].localIP == preferred && result[j].localIP != preferred {
+			return true
+		}
+		if result[j].localIP == preferred && result[i].localIP != preferred {
+			return false
+		}
 		return serviceRank(result[i].serviceType) > serviceRank(result[j].serviceType)
 	})
 	return result, nil
@@ -630,10 +642,14 @@ func onLinkGatewayIPv4(ip netip.Addr) bool {
 }
 
 func gatewayIsOnSelectedInterface(gateway, local netip.Addr) bool {
-	if !gateway.Is4() || !local.Is4() { return false }
+	if !gateway.Is4() || !local.Is4() {
+		return false
+	}
 	interfaces := activeLANInterfaces()
 	for _, iface := range interfaces {
-		if iface.address == local { return onInterfaceSubnet(gateway, iface) }
+		if iface.address == local {
+			return onInterfaceSubnet(gateway, iface)
+		}
 	}
 	return false
 }

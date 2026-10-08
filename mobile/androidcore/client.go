@@ -67,6 +67,7 @@ type clientConfig struct {
 	SOCKS5Enabled         *bool          `json:"socks5Enabled"`
 	HTTPEnabled           *bool          `json:"httpEnabled"`
 	ProxyP2PEnabled       *bool          `json:"proxyP2pEnabled"`
+	UPnPAllowed           *bool          `json:"upnpAllowed"`
 	ProxyPathMode         string         `json:"proxyPathMode"`
 	DefaultExitID         string         `json:"defaultExitId"`
 	SOCKS5Listen          string         `json:"socks5Listen"`
@@ -108,6 +109,10 @@ type statusSnapshot struct {
 	P2PError            string                  `json:"p2pError,omitempty"`
 	P2PRTTMs            int64                   `json:"p2pRttMs,omitempty"`
 	P2PCandidateSummary string                  `json:"p2pCandidateSummary,omitempty"`
+	UPnPEnabled         bool                    `json:"upnpEnabled"`
+	UPnPState           string                  `json:"upnpState"`
+	UPnPError           string                  `json:"upnpError,omitempty"`
+	UPnPAddress         string                  `json:"upnpAddress,omitempty"`
 	P2PBytesUp          uint64                  `json:"p2pBytesUp,omitempty"`
 	P2PBytesDown        uint64                  `json:"p2pBytesDown,omitempty"`
 	ProxyActiveTCP      int64                   `json:"proxyActiveTcp"`
@@ -744,6 +749,7 @@ func (c *Client) StatusJSON() string {
 		}
 	}
 	if manager != nil {
+		s.UPnPEnabled, s.UPnPState, s.UPnPError, s.UPnPAddress = manager.UPnPStatus()
 		if path, ok := manager.PathStatus(s.SelectedExit); ok {
 			s.P2PState = string(path.State)
 			s.P2PPath = path.Path
@@ -1026,7 +1032,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 				MaxExitSessions:     1,
 				PortStart:           accepted.P2PPortStart,
 				PortEnd:             accepted.P2PPortEnd,
-				UPnPEnabled:         accepted.P2PUPnPEnabled,
+				UPnPEnabled:         accepted.P2PUPnPEnabled && c.cfg.UPnPAllowed != nil && *c.cfg.UPnPAllowed,
 				LowPowerIdleTimeout: 60 * time.Second,
 				LowPowerMaxSessions: 1,
 			},

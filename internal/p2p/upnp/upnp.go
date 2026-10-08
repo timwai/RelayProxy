@@ -42,6 +42,7 @@ type service struct {
 	serviceType string
 	controlURL  *url.URL
 	gatewayIP   netip.Addr // pinned during SSDP description discovery
+	localIP     netip.Addr // interface that actually received the SSDP reply
 }
 
 // MappingUpdate reports when a UPnP candidate becomes invalid or changes.
@@ -128,6 +129,13 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 			pinnedURL.Host = net.JoinHostPort(svc.gatewayIP.String(), port)
 		}
 		internalIP, err := localIPv4For(ctx, &pinnedURL)
+		if svc.localIP.IsValid() {
+			// A mapping must always point back to the interface on which
+			// this IGD was discovered, not a different VPN/Wi-Fi address.
+			if err == nil && internalIP != svc.localIP {
+				err = errors.New("UPnP gateway route changed since discovery")
+			}
+		}
 		if err != nil {
 			lastErr = err
 			continue
@@ -294,23 +302,87 @@ func (m *Mapping) refresh(ctx context.Context) error {
 	return nil
 }
 
-func discoverServices(ctx context.Context) ([]service, error) {
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+type discoveredGateway struct {
+	location string
+	sender netip.Addr
+	localIP netip.Addr
+}
+
+type networkInterfaceIPv4 struct {
+	address netip.Addr
+	subnet *net.IPNet
+}
+
+// activeLANInterfaces discovers multicast-capable on-link interfaces. The
+// preferred system egress interface is tried first, with remaining physical
+// routes as a fallback when the primary router has no IGD service.
+func activeLANInterfaces() []networkInterfaceIPv4 {
+	preferred := defaultRouteIPv4()
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil
+	}
+	var out []networkInterfaceIPv4
+	seen := make(map[netip.Addr]bool)
+	for _, iface := range ifaces {
+		if iface.Flags&(net.FlagUp|net.FlagMulticast) != net.FlagUp|net.FlagMulticast ||
+			iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, raw := range addresses {
+			subnet, ok := raw.(*net.IPNet)
+			if !ok || subnet.IP.To4() == nil {
+				continue
+			}
+			ip, valid := netip.AddrFromSlice(subnet.IP.To4())
+			if !valid || !ip.IsPrivate() || seen[ip] {
+				continue
+			}
+			seen[ip] = true
+			out = append(out, networkInterfaceIPv4{address: ip, subnet: subnet})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].address == preferred {
+			return true
+		}
+		if out[j].address == preferred {
+			return false
+		}
+		return out[i].address.Less(out[j].address)
+	})
+	if len(out) > 16 {
+		out = out[:16]
+	}
+	return out
+}
+
+func defaultRouteIPv4() netip.Addr {
+	conn, err := net.DialTimeout("udp4", "1.1.1.1:53", 250*time.Millisecond)
+	if err != nil {
+		return netip.Addr{}
 	}
 	defer conn.Close()
+	if ip, ok := netip.AddrFromSlice(conn.LocalAddr().(*net.UDPAddr).IP); ok {
+		return ip.Unmap()
+	}
+	return netip.Addr{}
+}
 
-	deadline := time.Now().Add(discoveryWindow)
-	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
-		deadline = d
+func discoverOnInterface(ctx context.Context, iface networkInterfaceIPv4, deadline time.Time) []discoveredGateway {
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IP(iface.address.AsSlice())})
+	if err != nil {
+		return nil
 	}
-	if err := conn.SetDeadline(deadline); err != nil {
-		return nil, err
-	}
+	defer conn.Close()
+	_ = conn.SetDeadline(deadline)
 	remote, err := net.ResolveUDPAddr("udp4", ssdpAddress)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	for _, st := range []string{
 		"urn:schemas-upnp-org:device:InternetGatewayDevice:2",
@@ -324,26 +396,18 @@ func discoverServices(ctx context.Context) ([]service, error) {
 			"ST: " + st + "\r\n\r\n"
 		_, _ = conn.WriteToUDP([]byte(request), remote)
 	}
-
-	locations := map[string]netip.Addr{}
+	locations := make(map[string]discoveredGateway)
 	buffer := make([]byte, 64*1024)
-	for {
-		n, from, readErr := conn.ReadFromUDP(buffer)
-		if readErr != nil {
-			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
-				break
-			}
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
+	for len(locations) < maxSSDPResponses {
+		if ctx.Err() != nil {
 			break
 		}
-		// SSDP is unauthenticated: require a genuine search response and
-		// tie the advertised HTTP endpoint to its on-link IPv4 sender.
-		if len(locations) >= maxSSDPResponses {
-			continue
+		n, from, err := conn.ReadFromUDP(buffer)
+		if err != nil {
+			break
 		}
-		if !strings.HasPrefix(string(buffer[:n]), "HTTP/1.1 200") && !strings.HasPrefix(string(buffer[:n]), "HTTP/1.0 200") {
+		if !strings.HasPrefix(string(buffer[:n]), "HTTP/1.1 200") &&
+			!strings.HasPrefix(string(buffer[:n]), "HTTP/1.0 200") {
 			continue
 		}
 		sender, ok := netip.AddrFromSlice(from.IP)
@@ -351,21 +415,62 @@ func discoverServices(ctx context.Context) ([]service, error) {
 			continue
 		}
 		sender = sender.Unmap()
-		if !onLinkGatewayIPv4(sender) {
+		if !onInterfaceSubnet(sender, iface) {
 			continue
 		}
 		if location := ssdpHeader(string(buffer[:n]), "location"); location != "" {
-			locations[location] = sender
+			locations[location] = discoveredGateway{location: location, sender: sender, localIP: iface.address}
 		}
+	}
+	result := make([]discoveredGateway, 0, len(locations))
+	for _, gateway := range locations {
+		result = append(result, gateway)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].location < result[j].location })
+	return result
+}
+
+func onInterfaceSubnet(gateway netip.Addr, iface networkInterfaceIPv4) bool {
+	return gateway.Is4() && !gateway.IsLoopback() &&
+		iface.subnet != nil && gateway != iface.address &&
+		iface.subnet.Contains(net.IP(gateway.AsSlice()))
+}
+
+func discoverServices(ctx context.Context) ([]service, error) {
+	interfaces := activeLANInterfaces()
+	if len(interfaces) == 0 {
+		return nil, ErrUnavailable
+	}
+	deadline := time.Now().Add(discoveryWindow)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	// Discover on every eligible interface concurrently, avoiding arbitrary
+	// OS multicast routing decisions that otherwise favor VPN adapters.
+	found := make(chan []discoveredGateway, len(interfaces))
+	for _, iface := range interfaces {
+		go func(iface networkInterfaceIPv4) {
+			found <- discoverOnInterface(ctx, iface, deadline)
+		}(iface)
+	}
+	var locations []discoveredGateway
+	for range interfaces {
+		locations = append(locations, (<-found)...)
 	}
 	if len(locations) == 0 {
 		return nil, ErrUnavailable
 	}
-
+	preferred := defaultRouteIPv4()
+	sort.SliceStable(locations, func(i, j int) bool {
+		if locations[i].localIP == preferred { return true }
+		if locations[j].localIP == preferred { return false }
+		return locations[i].location < locations[j].location
+	})
 	var result []service
 	var lastErr error
-	for raw, sender := range locations {
-		found, err := fetchServices(ctx, raw, sender)
+	for _, gateway := range locations {
+		if err := ctx.Err(); err != nil { return nil, err }
+		found, err := fetchServices(ctx, gateway.location, gateway.sender, gateway.localIP)
 		if err != nil {
 			lastErr = err
 			continue
@@ -373,12 +478,14 @@ func discoverServices(ctx context.Context) ([]service, error) {
 		result = append(result, found...)
 	}
 	if len(result) == 0 {
-		if lastErr != nil {
-			return nil, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
-		}
+		if lastErr != nil { return nil, fmt.Errorf("%w: %v", ErrUnavailable, lastErr) }
 		return nil, ErrUnavailable
 	}
+	// Prefer the active/default interface before comparing IGD service
+	// versions; an IGD v2 on a disconnected VM NIC must not trump Wi-Fi.
 	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].localIP == preferred && result[j].localIP != preferred { return true }
+		if result[j].localIP == preferred && result[i].localIP != preferred { return false }
 		return serviceRank(result[i].serviceType) > serviceRank(result[j].serviceType)
 	})
 	return result, nil
@@ -394,7 +501,7 @@ func ssdpHeader(packet, wanted string) string {
 	return ""
 }
 
-func fetchServices(ctx context.Context, rawLocation string, sender netip.Addr) ([]service, error) {
+func fetchServices(ctx context.Context, rawLocation string, sender netip.Addr, localIPs ...netip.Addr) ([]service, error) {
 	location, err := url.Parse(strings.TrimSpace(rawLocation))
 	if err != nil || location.Scheme != "http" || location.Hostname() == "" || location.User != nil {
 		return nil, errors.New("invalid UPnP device description URL")
@@ -410,7 +517,14 @@ func fetchServices(ctx context.Context, rawLocation string, sender netip.Addr) (
 	if err != nil {
 		return nil, err
 	}
-	client := gatewayHTTPClient(location.Hostname(), gatewayIP)
+	localIP := netip.Addr{}
+	if len(localIPs) != 0 {
+		localIP = localIPs[0]
+	}
+	if localIP.IsValid() && !gatewayIsOnSelectedInterface(gatewayIP, localIP) {
+		return nil, errors.New("UPnP gateway is not reachable through the selected interface")
+	}
+	client := gatewayHTTPClient(location.Hostname(), gatewayIP, localIP)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -458,7 +572,7 @@ func fetchServices(ctx context.Context, rawLocation string, sender netip.Addr) (
 			continue
 		}
 		seen[key] = struct{}{}
-		result = append(result, service{serviceType: strings.TrimSpace(item.ServiceType), controlURL: control, gatewayIP: gatewayIP})
+		result = append(result, service{serviceType: strings.TrimSpace(item.ServiceType), controlURL: control, gatewayIP: gatewayIP, localIP: localIP})
 	}
 	if len(result) == 0 {
 		return nil, errors.New("UPnP IGD has no WAN connection service")
@@ -515,6 +629,15 @@ func onLinkGatewayIPv4(ip netip.Addr) bool {
 	return false
 }
 
+func gatewayIsOnSelectedInterface(gateway, local netip.Addr) bool {
+	if !gateway.Is4() || !local.Is4() { return false }
+	interfaces := activeLANInterfaces()
+	for _, iface := range interfaces {
+		if iface.address == local { return onInterfaceSubnet(gateway, iface) }
+	}
+	return false
+}
+
 func resolveGatewayIPv4(ctx context.Context, host string) (netip.Addr, error) {
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ip = ip.Unmap()
@@ -538,7 +661,7 @@ func resolveGatewayIPv4(ctx context.Context, host string) (netip.Addr, error) {
 // gatewayHTTPClient disables proxy use and redirects, and pins every request
 // to the previously vetted gateway IP. A hostname cannot rebind to another
 // target between SSDP, description GET, and subsequent SOAP calls.
-func gatewayHTTPClient(host string, gatewayIP netip.Addr) *http.Client {
+func gatewayHTTPClient(host string, gatewayIP netip.Addr, localIPs ...netip.Addr) *http.Client {
 	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
 	if gatewayIP.IsValid() {
 		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -547,6 +670,9 @@ func gatewayHTTPClient(host string, gatewayIP netip.Addr) *http.Client {
 				return nil, errors.New("UPnP tried to contact a different gateway")
 			}
 			var dialer net.Dialer
+			if len(localIPs) > 0 && localIPs[0].Is4() {
+				dialer.LocalAddr = &net.TCPAddr{IP: net.IP(localIPs[0].AsSlice())}
+			}
 			return dialer.DialContext(ctx, "tcp4", net.JoinHostPort(gatewayIP.String(), port))
 		}
 	}
@@ -745,7 +871,7 @@ func (s service) soap(ctx context.Context, action string, args map[string]string
 	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
 	req.Header.Set("SOAPAction", `"`+s.serviceType+"#"+action+`"`)
 	req.Header.Set("Connection", "close")
-	resp, err := gatewayHTTPClient(s.controlURL.Hostname(), s.gatewayIP).Do(req)
+	resp, err := gatewayHTTPClient(s.controlURL.Hostname(), s.gatewayIP, s.localIP).Do(req)
 	if err != nil {
 		return nil, err
 	}

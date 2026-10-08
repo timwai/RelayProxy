@@ -2,6 +2,7 @@ package direct
 
 import (
 	"net"
+	"net/netip"
 	"testing"
 
 	"relayproxy/internal/protocol"
@@ -37,5 +38,32 @@ func TestEndpointCandidatesRejectInvalidManualAddress(t *testing.T) {
 		if _, err := endpointCandidates(35820, value, nil); err == nil {
 			t.Fatalf("manual address %q was accepted", value)
 		}
+	}
+}
+
+func TestDirectEndpointFamilyPreflight(t *testing.T) {
+	for _, address := range []string{"8.8.8.8:20800", "203.0.113.20:20800"} {
+		if !localEndpointReachable(address) {
+			t.Fatalf("IPv4 public direct endpoint was incorrectly rejected: %s", address)
+		}
+	}
+	for _, address := range []string{
+		"[::1]:20800", "[fe80::1]:20800", "[::]:20800", "not-a-socket-address",
+	} {
+		if localEndpointReachable(address) {
+			t.Fatalf("unroutable public direct address was accepted: %s", address)
+		}
+	}
+	for _, address := range []string{"::1", "fe80::1", "::"} {
+		if isUsableIPv6Source(netip.MustParseAddr(address)) {
+			t.Fatalf("IPv6 source is not publicly routable: %s", address)
+		}
+	}
+	if !isUsableIPv6Source(netip.MustParseAddr("2001:4860:4860::8888")) {
+		t.Fatal("global IPv6 source was incorrectly rejected")
+	}
+	if !localHasIPv6Source() &&
+		localEndpointReachable("[2408:8266:501:6757:b251:8eff:feff:3735]:20800") {
+		t.Fatal("IPv4-only host claimed an IPv6 direct route")
 	}
 }

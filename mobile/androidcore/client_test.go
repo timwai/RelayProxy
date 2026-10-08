@@ -294,3 +294,21 @@ func TestAndroidMessageQueueDrainsOnce(t *testing.T) {
 		t.Fatalf("message queue was not drained: %s", got)
 	}
 }
+
+func TestAndroidUPnPRequiresLocalConsent(t *testing.T) {
+	base := `{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`
+	config, err := normalizeConfig(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.UPnPAllowed != nil && *config.UPnPAllowed {
+		t.Fatal("Android UPnP must be disabled without explicit local consent")
+	}
+	config, err = normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","upnpAllowed":true}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.UPnPAllowed == nil || !*config.UPnPAllowed {
+		t.Fatal("Android UPnP consent was lost")
+	}
+}

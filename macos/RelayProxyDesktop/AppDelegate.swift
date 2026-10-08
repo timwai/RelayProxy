@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private let outputQueue = DispatchQueue(label: "com.relayproxy.desktop.agent-output")
     private var outputBuffer = Data()
     private var agent: Process?
+    private var restartRequested = false
     private var outputPipe: Pipe?
     private var managementURL: URL?
     private var startupTimeout: DispatchWorkItem?
@@ -209,9 +210,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         guard message.name == lifecycleMessageName,
               message.webView === webView,
               message.frameInfo.isMainFrame,
-              let action = message.body as? String,
-              action == "quit" else { return }
-        quitApplication(nil)
+              let action = message.body as? String else { return }
+        if action == "quit" { quitApplication(nil); return }
+        if action == "restart" {
+            guard !restartRequested, let agent, agent.isRunning else { return }
+            restartRequested = true
+            updateAgentState("正在重启 Agent…", symbol: "arrow.clockwise", tooltip: "RelayProxy · 正在重启")
+            agent.terminate()
+        }
     }
 
     func webView(
@@ -476,6 +482,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         agent = nil
         reloadItem?.isEnabled = false
         copyAddressItem?.isEnabled = false
+        if restartRequested {
+            restartRequested = false
+            managementURL = nil
+            seenMessageIDs.removeAll()
+            startAgent()
+            return
+        }
         if managementURL != nil && process.terminationStatus == 0 {
             NSApp.terminate(nil)
             return

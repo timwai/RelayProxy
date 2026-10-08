@@ -85,11 +85,9 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@v5
-        if: runner.os == 'Windows'
         with:
           node-version: "22"
-      - name: Build Windows Wails React frontend
-        if: runner.os == 'Windows'
+      - name: Build shared desktop React frontend
         working-directory: agent/gui/frontend
         run: |
           npm install --no-audit --no-fund
@@ -115,6 +113,7 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
+          go build -o "$RUNNER_TEMP/relay-agent" ./cmd/relay-agent
           brew install xcodegen
           (
             cd macos

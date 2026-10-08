@@ -119,9 +119,12 @@ try {
 
     Write-Host "[prep] Verify build toolchain"
     Assert-Command -Name "go" -InstallHint "Install the Go version declared in go.mod."
+    Assert-Command -Name "node" -InstallHint "Install Node.js 22+ before building the Windows React desktop client."
     Assert-Command -Name "npm" -InstallHint "Install Node.js 22+ before building the Windows React desktop client."
     & go version
     if ($LASTEXITCODE -ne 0) { throw "go version failed" }
+    & node --version
+    if ($LASTEXITCODE -ne 0) { throw "node version check failed" }
     & npm --version
     if ($LASTEXITCODE -ne 0) { throw "npm version check failed" }
 
@@ -435,7 +438,32 @@ try {
     Write-Host "=================================================="
     Write-Host " Build complete -> $OutDir" -ForegroundColor Green
     Write-Host "=================================================="
-    Write-Host @"
+    if ($WindowsOnly) {
+        Write-Host @"
+
+产物布局:
+  RelayProxy-agent-windows-amd64.zip Windows x64 Agent 完整分发包（含 WinDivert）
+  RelayProxy-windows-amd64.zip       Windows x64 完整发布包
+  RelayProxy-windows-arm64.zip       Windows ARM64 完整发布包
+  windows-amd64/relay-agent-gui.exe Windows x64 Wails + React 桌面客户端
+  windows-amd64/relay-agent.exe     Windows x64 Agent CLI
+  windows-amd64/relay-server.exe    Windows x64 Server
+  windows-amd64/windivert/          WinDivert 运行库与许可证
+  windows-arm64/relay-agent-gui.exe Windows ARM64 Wails + React 桌面客户端
+  windows-arm64/relay-agent.exe     Windows ARM64 Agent CLI
+  windows-arm64/relay-server.exe    Windows ARM64 Server
+  SHA256SUMS.txt
+
+Windows 提示:
+  桌面:   双击 relay-agent-gui.exe；裸启动时可任意改名
+  React:  Vite bundle 已编译并内嵌到 EXE
+  透明代理: Windows x64 使用 RelayProxy Network Service + WinDivert
+  配置:   默认 %USERPROFILE%\.relayproxy\relay-agent.yaml
+  无界面: relay-agent.exe --no-gui
+
+"@
+    } else {
+        Write-Host @"
 
 产物布局:
   RelayProxy-agent-windows-amd64.zip Windows x64 Agent 完整分发包（含 WinDivert）
@@ -450,11 +478,11 @@ try {
   darwin-arm64/relay-agent          macOS Apple Silicon Agent
   darwin-arm64/relay-server         macOS Apple Silicon Server（可构建实验产物）
   darwin-arm64/RelayProxy.app       macOS Apple Silicon Agent App 包装
-  windows-amd64/relay-agent-gui.exe Windows x64 桌面客户端（单 EXE，内嵌 WinDivert）
-  windows-amd64/relay-agent.exe     Windows x64 Agent CLI（单 EXE，内嵌 WinDivert）
+  windows-amd64/relay-agent-gui.exe Windows x64 Wails + React 桌面客户端
+  windows-amd64/relay-agent.exe     Windows x64 Agent CLI
   windows-amd64/relay-server.exe    Windows x64 Server（含 Admin UI）
   windows-amd64/windivert/          外置 WinDivert 运行库与许可证
-  windows-arm64/relay-agent-gui.exe Windows ARM64 桌面客户端
+  windows-arm64/relay-agent-gui.exe Windows ARM64 Wails + React 桌面客户端
   windows-arm64/relay-agent.exe     Windows ARM64 Agent CLI
   windows-arm64/relay-server.exe    Windows ARM64 Server（含 Admin UI）
   */configs/*.yaml                  示例配置
@@ -468,7 +496,8 @@ try {
   Linux:  chmod +x relay-server relay-agent
   Admin:  https://<server>:8443
   桌面:   双击 relay-agent-gui.exe
-  透明代理: 以管理员身份启动 Windows x64 客户端；保存启用设置后重启
+  React:  Windows Vite bundle 已编译并内嵌到 EXE
+  透明代理: Windows x64 使用 RelayProxy Network Service + WinDivert
   自启动: 透明代理模式使用管理员登录任务，首次设置需管理员权限
   配置:   Windows 默认自动生成 %USERPROFILE%\.relayproxy\relay-agent.yaml
   授权:   首次连接后，在服务端管理控制台批准设备
@@ -476,6 +505,7 @@ try {
   自定义: relay-agent.exe --config <配置文件路径>
 
 "@
+    }
 }
 finally {
     Pop-Location

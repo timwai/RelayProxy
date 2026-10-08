@@ -168,7 +168,7 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 		return m, address, nil
 	}
 	if lastErr != nil {
-		return nil, netip.AddrPort{}, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
+		return nil, netip.AddrPort{}, fmt.Errorf("%w: %w", ErrUnavailable, lastErr)
 	}
 	return nil, netip.AddrPort{}, ErrUnavailable
 }

@@ -763,10 +763,12 @@ func (l *sourceLimiter) allow(ip string) bool {
 	if l.counts[ip] >= l.limit {
 		return false
 	}
-	l.counts[ip]++
-	if len(l.counts) > 8192 {
+	if _, exists := l.counts[ip]; !exists && len(l.counts) >= 8192 {
+		// UDP addresses can be spoofed; never allocate an unbounded map
+		// entry for each distinct rejected source.
 		return false
 	}
+	l.counts[ip]++
 	return true
 }
 

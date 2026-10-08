@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"relayproxy/internal/acl"
+	p2pupnp "relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
 )
 
@@ -573,5 +575,53 @@ func TestFailReadyForExitRemovesBrokenPathAndStartsCooldown(t *testing.T) {
 	status, ok := manager.PathStatus("exit")
 	if !ok || status.State != StateCooldown || status.Error != "direct stream open failed" {
 		t.Fatalf("unexpected failed-path status: %#v ok=%v", status, ok)
+	}
+}
+
+func TestP2PCandidateUpdateIsRetriedAfterSignalingFailure(t *testing.T) {
+	previous := mapUPnPUDP
+	defer func() { mapUPnPUDP = previous }()
+	oldAddress := netip.MustParseAddrPort("198.51.100.44:45678")
+	mapUPnPUDP = func(context.Context, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+		return nil, oldAddress, nil
+	}
+	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)
+	if err := endpoint.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+	messages := make(chan protocol.P2PControlMessage, 4)
+	var count atomic.Int32
+	manager := NewManager(context.Background(), func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		messages <- message
+		if count.Add(1) == 1 {
+			return protocol.P2PControlMessage{}, errors.New("signaling temporarily unavailable")
+		}
+		return protocol.P2PControlMessage{Type: protocol.P2PControlLeaseAck}, nil
+	}, nil, time.Minute)
+	defer manager.Close()
+	token := []byte("0123456789abcdef0123456789abcdef")
+	item := &Session{manager: manager, endpoint: endpoint, ID: 901, ClientDeviceID: "client",
+		ExitDeviceID: "exit", Token: token, state: StateRendezvous, closed: make(chan struct{})}
+	go item.watchLocalCandidatesWithRetry(20 * time.Millisecond)
+	endpoint.applyUPnPUpdate(p2pupnp.MappingUpdate{Healthy: false, Reason: "lease expired"})
+	for attempt := 1; attempt <= 2; attempt++ {
+		select {
+		case message := <-messages:
+			if message.Type != protocol.P2PControlCandidateUpdate || message.SessionID != 901 ||
+				string(message.SessionToken) != string(token) {
+				t.Fatalf("bad P2P candidate update: %#v", message)
+			}
+			for _, candidate := range message.Candidates {
+				if candidate.Address == oldAddress.String() {
+					t.Fatalf("expired mapping was sent to peer: %#v", message.Candidates)
+				}
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("candidate update attempt %d did not arrive", attempt)
+		}
+	}
+	if count.Load() != 2 {
+		t.Fatalf("candidate update attempts=%d, want 2", count.Load())
 	}
 }

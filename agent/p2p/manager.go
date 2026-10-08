@@ -693,7 +693,10 @@ func (s *Session) expireUnanswered(timeout time.Duration) {
 		return
 	case <-timer.C:
 	}
-	if s.State() == StateRendezvous {
+	s.mu.RLock()
+	unanswered := s.state == StateRendezvous && (s.peerFingerprint == "" || len(s.peerCandidates) == 0)
+	s.mu.RUnlock()
+	if unanswered {
 		s.failDirect(errors.New("P2P connect answer timeout"))
 	}
 }

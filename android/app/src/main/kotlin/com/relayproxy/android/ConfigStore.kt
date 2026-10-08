@@ -136,6 +136,7 @@ data class ExitConfig(
     val socks5Port: Int = 1080,
     val httpPort: Int = 8080,
     val proxyP2pEnabled: Boolean = true,
+    val upnpAllowed: Boolean = false,
     val proxyPathMode: String = PROXY_PATH_AUTO,
     val vpnEnabled: Boolean = false,
     val vpnSocks5Port: Int = 1081,
@@ -174,6 +175,7 @@ data class ExitConfig(
             .put("socks5Enabled", localSocksEnabled)
             .put("httpEnabled", clientEnabled && httpEnabled)
             .put("proxyP2pEnabled", proxyP2pEnabled)
+            .put("upnpAllowed", upnpAllowed)
             .put("proxyPathMode", proxyPathMode)
             .put("defaultExitId", defaultExitId.trim())
             .put("socks5Listen", "127.0.0.1:$socks5Port")
@@ -349,6 +351,7 @@ class ConfigStore(private val context: Context) {
             socks5Port = socks5Port,
             httpPort = httpPort,
             proxyP2pEnabled = prefs.getBoolean("proxyP2pEnabled", true),
+            upnpAllowed = prefs.getBoolean("upnpAllowed", false),
             proxyPathMode = when (prefs.getString("proxyPathMode", ExitConfig.PROXY_PATH_AUTO)) {
                 ExitConfig.PROXY_PATH_DIRECT_ONLY -> ExitConfig.PROXY_PATH_DIRECT_ONLY
                 ExitConfig.PROXY_PATH_P2P_ONLY -> ExitConfig.PROXY_PATH_P2P_ONLY
@@ -399,6 +402,7 @@ class ConfigStore(private val context: Context) {
             .putInt("socks5Port", config.socks5Port)
             .putInt("httpPort", config.httpPort)
             .putBoolean("proxyP2pEnabled", config.proxyP2pEnabled)
+            .putBoolean("upnpAllowed", config.upnpAllowed)
             .putString("proxyPathMode", config.proxyPathMode)
             .putString("vpnAppMode", config.vpnAppMode)
             .putStringSet("vpnPackages", config.vpnPackages.toSet())

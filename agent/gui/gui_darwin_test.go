@@ -54,6 +54,11 @@ func TestMacOSDesktopStaysInMenuBarAfterWindowClose(t *testing.T) {
 		"runJavaScriptConfirmPanelWithMessage",
 		"runJavaScriptAlertPanelWithMessage",
 		"relayproxyLifecycle",
+		"relayproxyRDP",
+		"com.microsoft.rdc.macos",
+		"NSWorkspace.OpenConfiguration",
+		"withApplicationAt: applicationURL",
+		"rdp://full%20address=s:",
 		"func userContentController",
 		"message.frameInfo.isMainFrame",
 	} {

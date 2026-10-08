@@ -33,9 +33,9 @@ const (
 )
 
 var (
-	ErrUnavailable = errors.New("UPnP IGD is unavailable")
+	ErrUnavailable    = errors.New("UPnP IGD is unavailable")
 	ErrPermanentLease = errors.New("UPnP router only supports permanent mappings; refusing unsafe permanent port exposure")
-	ErrNonPublicWAN = errors.New("UPnP gateway WAN address is not publicly routable")
+	ErrNonPublicWAN   = errors.New("UPnP gateway WAN address is not publicly routable")
 )
 
 type service struct {

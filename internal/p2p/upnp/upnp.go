@@ -58,9 +58,11 @@ type MappingUpdate struct {
 type Mapping struct {
 	service        service
 	internalClient string
-	internalPort   uint16
-	externalPort   uint16
-	externalIP     netip.Addr
+	internalPort       uint16
+	externalPort       uint16
+	externalPortStart  int
+	externalPortEnd    int
+	externalIP         netip.Addr
 	leaseSeconds   uint32
 	done           chan struct{}
 	closeOnce      sync.Once
@@ -110,9 +112,26 @@ func (e *soapFault) Error() string {
 
 // MapUDP discovers a local IGD and maps an external UDP port to internalPort.
 // The returned Mapping refreshes finite leases and removes the mapping on Close.
+// If no port range is configured, the mapper may select a different external
+// port if the internal port is already allocated on the router.
 func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, error) {
+	return MapUDPWithPortRange(ctx, internalPort, 0, 0)
+}
+
+// MapUDPWithPortRange constrains both the initial and renewed *external* UPnP
+// mapping to the configured P2P UDP range. An all-zero range keeps the legacy
+// dynamic-port behavior.
+func MapUDPWithPortRange(ctx context.Context, internalPort, portStart, portEnd int) (*Mapping, netip.AddrPort, error) {
 	if internalPort < 1 || internalPort > 65535 {
 		return nil, netip.AddrPort{}, fmt.Errorf("invalid UPnP internal UDP port %d", internalPort)
+	}
+	if portStart != 0 || portEnd != 0 {
+		if portStart < 1 || portEnd < portStart || portEnd > 65535 {
+			return nil, netip.AddrPort{}, fmt.Errorf("invalid UPnP external UDP port range %d-%d", portStart, portEnd)
+		}
+		if internalPort < portStart || internalPort > portEnd {
+			return nil, netip.AddrPort{}, fmt.Errorf("UPnP internal UDP port %d outside configured range %d-%d", internalPort, portStart, portEnd)
+		}
 	}
 	services, err := discoverServices(ctx)
 	if err != nil {
@@ -147,7 +166,7 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 			lastErr = err
 			continue
 		}
-		externalPort, leaseSeconds, err := svc.addAvailableUDPMapping(ctx, internalIP.String(), uint16(internalPort))
+		externalPort, leaseSeconds, err := svc.addAvailableUDPMappingRange(ctx, internalIP.String(), uint16(internalPort), portStart, portEnd)
 		if err != nil {
 			lastErr = err
 			continue
@@ -156,6 +175,7 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 		m := &Mapping{
 			service: svc, internalClient: internalIP.String(),
 			internalPort: uint16(internalPort), externalPort: externalPort,
+			externalPortStart: portStart, externalPortEnd: portEnd,
 			externalIP: externalIP, leaseSeconds: leaseSeconds,
 			done: make(chan struct{}), updates: make(chan MappingUpdate, 1),
 			status: MappingUpdate{Address: address, Healthy: true},
@@ -282,10 +302,10 @@ func (m *Mapping) refresh(ctx context.Context) error {
 	}
 	err := m.service.addPortMapping(ctx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds)
 	if soapErrorCode(err) == 718 {
-		// A different owner now occupies the port. Try a fresh random
-		// port rather than deleting or overwriting the other mapping.
+		// A different owner now occupies the port. Choose a replacement
+		// only within the original configured external-port range.
 		var nextPort uint16
-		nextPort, _, err = m.service.addAvailableUDPMapping(ctx, m.internalClient, m.internalPort)
+		nextPort, _, err = m.service.addAvailableUDPMappingRange(ctx, m.internalClient, m.internalPort, m.externalPortStart, m.externalPortEnd)
 		if err == nil {
 			m.externalPort = nextPort
 		}
@@ -781,25 +801,55 @@ func isPublicWANIPv4(ip netip.Addr) bool {
 }
 
 func (s service) addAvailableUDPMapping(ctx context.Context, internalClient string, internalPort uint16) (uint16, uint32, error) {
+	return s.addAvailableUDPMappingRange(ctx, internalClient, internalPort, 0, 0)
+}
+
+// addAvailableUDPMappingRange prefers the socket's bound internal port. If the
+// IGD reports a port collision, it only searches within the configured range.
+// Never silently open a different WAN port outside an explicitly set policy.
+func (s service) addAvailableUDPMappingRange(ctx context.Context, internalClient string, internalPort uint16, portStart, portEnd int) (uint16, uint32, error) {
+	const maxAttempts = 16
 	ports := []uint16{internalPort}
-	for len(ports) < 8 {
-		var raw [2]byte
-		if _, err := rand.Read(raw[:]); err != nil {
-			break
-		}
-		port := uint16(1024 + int(binary.BigEndian.Uint16(raw[:]))%(65535-1024))
-		duplicate := false
-		for _, existing := range ports {
-			if existing == port {
-				duplicate = true
-				break
+	if portStart == 0 && portEnd == 0 {
+		// Preserve the default behavior when no server P2P range is set.
+		for len(ports) < 8 {
+			var raw [2]byte
+			if _, err := rand.Read(raw[:]); err != nil {
+				return 0, 0, fmt.Errorf("generate UPnP external UDP port: %w", err)
+			}
+			port := uint16(1024 + int(binary.BigEndian.Uint16(raw[:]))%(65535-1024))
+			duplicate := false
+			for _, existing := range ports {
+				if existing == port {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				ports = append(ports, port)
 			}
 		}
-		if !duplicate {
-			ports = append(ports, port)
+	} else {
+		if portStart < 1 || portEnd < portStart || portEnd > 65535 || int(internalPort) < portStart || int(internalPort) > portEnd {
+			return 0, 0, fmt.Errorf("invalid UPnP external UDP range %d-%d for internal port %d", portStart, portEnd, internalPort)
+		}
+		count := portEnd - portStart + 1
+		var raw [2]byte
+		if _, err := rand.Read(raw[:]); err != nil {
+			return 0, 0, fmt.Errorf("generate UPnP external UDP port: %w", err)
+		}
+		offset := int(binary.BigEndian.Uint16(raw[:])) % count
+		for i := 0; i < count && len(ports) < maxAttempts; i++ {
+			port := uint16(portStart + (offset+i)%count)
+			if port != internalPort {
+				ports = append(ports, port)
+			}
 		}
 	}
 	for _, externalPort := range ports {
+		if err := ctx.Err(); err != nil {
+			return 0, 0, err
+		}
 		err := s.addPortMapping(ctx, externalPort, internalPort, internalClient, mappingLeaseSeconds)
 		if err == nil {
 			return externalPort, mappingLeaseSeconds, nil
@@ -813,7 +863,7 @@ func (s service) addAvailableUDPMapping(ctx context.Context, internalClient stri
 			return 0, 0, err
 		}
 	}
-	return 0, 0, errors.New("UPnP router has no available external UDP port")
+	return 0, 0, fmt.Errorf("UPnP router has no available external UDP port in range %d-%d", portStart, portEnd)
 }
 
 func (s service) addPortMapping(ctx context.Context, externalPort, internalPort uint16, internalClient string, lease uint32) error {

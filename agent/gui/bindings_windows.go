@@ -244,6 +244,7 @@ func (s *WailsService) GetConfig() (string, error) {
 			"punchTimeoutMs": cfg.P2P.PunchTimeoutMs, "keepaliveSec": cfg.P2P.KeepaliveSec,
 			"idleTimeoutSec": cfg.P2P.IdleTimeoutSec, "maxExitSessions": cfg.P2P.MaxExitSessions,
 			"fallback": cfg.P2P.Fallback == nil || *cfg.P2P.Fallback,
+			"upnpAllowed": cfg.P2P.UPnPAllowed != nil && *cfg.P2P.UPnPAllowed,
 		},
 		PublicDirectAdvertise:       cfg.Direct.Public.Advertise,
 		NetworkMode:                 cfg.Network.Mode,
@@ -275,6 +276,7 @@ func (s *WailsService) GetConfig() (string, error) {
 				"punchTimeoutMs": state.Runtime.P2P.PunchTimeoutMs, "keepaliveSec": state.Runtime.P2P.KeepaliveSec,
 				"idleTimeoutSec": state.Runtime.P2P.IdleTimeoutSec, "maxExitSessions": state.Runtime.P2P.MaxExitSessions,
 				"fallback": state.Runtime.P2P.Fallback == nil || *state.Runtime.P2P.Fallback,
+				"upnpAllowed": state.Runtime.P2P.UPnPAllowed != nil && *state.Runtime.P2P.UPnPAllowed,
 			},
 			"socks5": proxyLeg{
 				Enabled: state.Runtime.Proxy.SOCKS5.Enabled == nil || *state.Runtime.Proxy.SOCKS5.Enabled,

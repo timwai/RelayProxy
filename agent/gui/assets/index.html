@@ -746,6 +746,11 @@
             <div><strong>启用 P2P 备用直连</strong><small>Public Direct 不依赖此开关；开启后公网直连不可用时可继续尝试 P2P 打洞。</small></div>
             <label class="config-check"><input id="cfg-p2p-enabled" type="checkbox"><span>启用</span></label>
           </div>
+          <div class="config-switch-line">
+            <div><strong>本机允许 UPnP 端口映射</strong><small>默认关闭；仅在 Server 同时允许时向本地路由器开放 UDP 端口，保存后重启生效。</small></div>
+            <label class="config-check"><input id="cfg-upnp-allowed" type="checkbox"><span>允许</span></label>
+          </div>
+          <p class="config-help" id="cfg-upnp-state">UPnP：未启用</p>
           <div class="config-grid">
             <div class="config-field"><label for="cfg-p2p-mode">路径模式</label><select id="cfg-p2p-mode"><option value="auto">自动 · Public Direct → P2P → Relay</option><option value="direct_only">仅直连 · Public Direct → P2P → 失败</option><option value="p2p_only">仅 P2P · 不使用 Public Direct / Relay</option><option value="relay_only">仅 Relay · 不尝试任何直连</option></select></div>
             <div class="config-field"><label for="cfg-p2p-fallback">直连失败回退</label><select id="cfg-p2p-fallback"><option value="true">自动模式允许回退 Relay</option><option value="false">自动模式不回退 Relay</option></select></div>
@@ -1781,6 +1786,7 @@
       if (st.directEndpoint) directMetrics.push(st.directEndpoint);
       else if (st.p2pCandidateSummary) directMetrics.push(st.p2pCandidateSummary);
       $('home-p2p-detail').textContent = directDetail + (directMetrics.length ? ' · ' + directMetrics.join(' · ') : '');
+      $('cfg-upnp-state').textContent = 'UPnP：' + (st.upnpState || 'DISABLED') + (st.upnpAddress ? ' · ' + st.upnpAddress : '') + (st.upnpError ? ' · ' + st.upnpError : '');
 
       var devId = st.deviceId || '';
       var approval = st.approvalState || (up ? 'approved' : 'connecting');
@@ -1947,6 +1953,7 @@
       $('cfg-transport').value = cfg.transport || 'auto';
       var p2p = cfg.p2p || {};
       $('cfg-p2p-enabled').checked = p2p.enabled !== false;
+      $('cfg-upnp-allowed').checked = p2p.upnpAllowed === true;
       $('cfg-p2p-mode').value = p2p.mode || 'auto';
       $('cfg-p2p-fallback').value = p2p.fallback === false ? 'false' : 'true';
       $('cfg-p2p-punch-timeout').value = p2p.punchTimeoutMs || 1200;
@@ -2127,6 +2134,7 @@
           transport: $('cfg-tls-on').checked ? $('cfg-transport').value : 'tcp_only',
           p2p: {
             enabled: $('cfg-p2p-enabled').checked,
+            upnpAllowed: $('cfg-upnp-allowed').checked,
             mode: $('cfg-p2p-mode').value,
             fallback: $('cfg-p2p-fallback').value !== 'false',
             punchTimeoutMs: boundedIntValue('cfg-p2p-punch-timeout','P2P 打洞超时',100,10000),

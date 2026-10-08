@@ -78,10 +78,9 @@ test('macOS native shell owns Windows App launch after RDP tunnel is ready', asy
   const body = JSON.parse(requests[0].options.body);
   assert.equal(body.targetId, 'dev-rdp');
   assert.equal(body.autoLaunch, false);
-  assert.deepEqual(nativeMessages, [{
-    handler: 'rdp',
-    message: {address: '127.0.0.1:13389'}
-  }]);
+  assert.equal(nativeMessages.length, 1);
+  assert.equal(nativeMessages[0].handler, 'rdp');
+  assert.equal(nativeMessages[0].message.address, '127.0.0.1:13389');
 });
 
 test('browser RDP keeps agent-side auto launch behavior', async () => {

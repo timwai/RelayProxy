@@ -44,6 +44,7 @@ type IngressConfig struct {
 	PortStart   int
 	PortEnd     int
 	Audit       func(*repository.ConnectionAudit)
+	Security    *SecurityManager
 }
 
 type IngressManager struct {
@@ -78,6 +79,7 @@ type ingressEndpoint struct {
 	sourceCIDRs  []netip.Prefix
 	limiter      *sourceLimiter
 	auditLimiter *sourceLimiter
+	securityLimiter *sourceLimiter
 	tcpSem       chan struct{}
 }
 
@@ -281,6 +283,7 @@ func (m *IngressManager) open(item *repository.RDPIngress) error {
 		assocs: make(map[netip.AddrPort]*udpAssociation), opening: make(map[netip.AddrPort]*udpOpening),
 		sourceCIDRs: prefixes, limiter: newSourceLimiter(item.RateLimitPerMin),
 		auditLimiter: newSourceLimiter(4),
+		securityLimiter: newSourceLimiter(4),
 		tcpSem:       make(chan struct{}, maxTCPConnections),
 	}
 	m.mu.Lock()
@@ -382,6 +385,10 @@ func (m *IngressManager) serveTCP(ctx context.Context, ep *ingressEndpoint) {
 				m.handleTCP(ctx, ep, conn)
 			}()
 		default:
+			if m.cfg.Security != nil {
+				now := time.Now().UTC()
+				m.cfg.Security.Record(repository.RDPSecurityLog{IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: sourceIP(conn.RemoteAddr()), Transport: "tcp", Result: "REJECTED", Reason: "CONNECTION_LIMIT", StartedAt: now, EndedAt: now})
+			}
 			_ = conn.Close()
 		}
 	}
@@ -392,20 +399,38 @@ func (m *IngressManager) handleTCP(ctx context.Context, ep *ingressEndpoint, con
 	openDeadline := time.Now().Add(associationOpenTimeout)
 	_ = conn.SetDeadline(openDeadline)
 	remoteIP := sourceIP(conn.RemoteAddr())
+	entry := repository.RDPSecurityLog{IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: remoteIP, Transport: "tcp", Result: "REJECTED", StartedAt: time.Now().UTC()}
+	defer func() {
+		if m.cfg.Security != nil {
+			entry.EndedAt = time.Now().UTC()
+			m.cfg.Security.Record(entry)
+		}
+	}()
+	if m.cfg.Security != nil {
+		allowed, reason := m.cfg.Security.Admit(ep.item.ID, remoteIP, true)
+		if !allowed {
+			entry.Reason = reason
+			m.auditReject(ep, remoteIP, reason)
+			return
+		}
+	}
 	if !ep.allow(remoteIP) {
-		m.auditReject(ep, remoteIP, "SOURCE_OR_RATE_LIMIT")
+		entry.Reason = "SOURCE_OR_RATE_LIMIT"
+		m.auditReject(ep, remoteIP, entry.Reason)
 		return
 	}
 	target, ok := m.sessions.Get(ep.item.TargetDeviceID)
 	if !ok || target == nil || !contains(target.Grants, protocol.CapabilityRDPHost) || !contains(target.Grants, protocol.CapabilityRDPPublic) {
-		m.auditReject(ep, remoteIP, "TARGET_OFFLINE")
+		entry.Reason = "TARGET_OFFLINE"
+		m.auditReject(ep, remoteIP, entry.Reason)
 		return
 	}
 	openCtx, cancel := context.WithTimeout(ctx, associationOpenTimeout)
 	defer cancel()
 	stream, err := target.Tunnel.OpenStream(openCtx)
 	if err != nil {
-		m.auditReject(ep, remoteIP, "STREAM_OPEN_FAILED")
+		entry.Reason = "STREAM_OPEN_FAILED"
+		m.auditReject(ep, remoteIP, entry.Reason)
 		return
 	}
 	defer stream.Close()
@@ -414,19 +439,25 @@ func (m *IngressManager) handleTCP(ctx context.Context, ep *ingressEndpoint, con
 	}
 	requestID := "ingress_" + uuid.NewString()[:8]
 	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeOpenRDP, RequestID: requestID, ExitDeviceID: target.DeviceID}); err != nil {
+		entry.Reason = "TARGET_WRITE_FAILED"
 		return
 	}
 	if err := protocol.WriteJSON(stream, protocol.OpenRDPRequest{RequestID: requestID, TimeoutMs: 10000}); err != nil {
+		entry.Reason = "TARGET_WRITE_FAILED"
 		return
 	}
 	var response protocol.OpenTCPResponse
 	if err := protocol.ReadJSON(stream, &response); err != nil || !response.Success {
-		m.auditReject(ep, remoteIP, "TARGET_UNAVAILABLE")
+		entry.Reason = "TARGET_UNAVAILABLE"
+		m.auditReject(ep, remoteIP, entry.Reason)
 		return
 	}
 	_ = stream.SetDeadline(time.Time{})
 	_ = conn.SetDeadline(time.Time{})
 	up, down := tunnel.Pipe(ctx, conn, stream, 30*time.Minute, nil)
+	entry.Result = "FORWARDED"
+	entry.Reason = ""
+	entry.BytesUp, entry.BytesDown = up, down
 	m.audit(ep.item, remoteIP, "SUCCESS", "", up, down)
 }
 
@@ -443,6 +474,7 @@ func (m *IngressManager) serveUDP(ctx context.Context, ep *ingressEndpoint) {
 		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
 		if !ep.allowSourceAddr(remote.Addr()) {
 			m.auditReject(ep, remote.Addr().String(), "SOURCE_NOT_ALLOWED")
+			m.auditUDPDecision(ep, remote.Addr().String(), "SOURCE_NOT_ALLOWED")
 			continue
 		}
 		key := remote
@@ -451,6 +483,15 @@ func (m *IngressManager) serveUDP(ctx context.Context, ep *ingressEndpoint) {
 		opening := ep.opening[key]
 		startOpening := false
 		if assoc == nil && opening == nil {
+			if m.cfg.Security != nil {
+				allowed, reason := m.cfg.Security.Admit(ep.item.ID, remote.Addr().String(), false)
+				if !allowed {
+					ep.mu.Unlock()
+					m.auditReject(ep, remote.Addr().String(), reason)
+					m.auditUDPDecision(ep, remote.Addr().String(), reason)
+					continue
+				}
+			}
 			if len(ep.opening) >= maxUDPOpeningAssociations {
 				ep.mu.Unlock()
 				continue
@@ -458,6 +499,7 @@ func (m *IngressManager) serveUDP(ctx context.Context, ep *ingressEndpoint) {
 			if !ep.allow(remote.Addr().String()) {
 				ep.mu.Unlock()
 				m.auditReject(ep, remote.Addr().String(), "RATE_LIMIT")
+				m.auditUDPDecision(ep, remote.Addr().String(), "RATE_LIMIT")
 				continue
 			}
 			opening = &udpOpening{remote: remote}
@@ -488,6 +530,12 @@ func (m *IngressManager) openUDPAssociationAsync(ctx context.Context, ep *ingres
 	openCtx, cancel := context.WithTimeout(ctx, associationOpenTimeout)
 	assoc := m.openUDPAssociation(openCtx, ep, opening.remote)
 	cancel()
+	if m.cfg.Security != nil {
+		now := time.Now().UTC()
+		result, reason := "FORWARDED", ""
+		if assoc == nil { result, reason = "REJECTED", "ASSOCIATION_OPEN_FAILED" }
+		m.cfg.Security.Record(repository.RDPSecurityLog{IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: key.Addr().String(), Transport: "udp", Result: result, Reason: reason, StartedAt: now, EndedAt: now})
+	}
 	ep.mu.Lock()
 	if ep.opening[key] == opening {
 		delete(ep.opening, key)
@@ -649,6 +697,14 @@ func (m *IngressManager) auditReject(ep *ingressEndpoint, ip, code string) {
 	if ep.auditLimiter == nil || ep.auditLimiter.allow(ip+"\x00"+code) {
 		m.audit(ep.item, ip, "REJECTED", code, 0, 0)
 	}
+}
+
+// auditUDPDecision rate-limits datagram rejection records separately from
+// the existing generic connection audit.
+func (m *IngressManager) auditUDPDecision(ep *ingressEndpoint, ip, reason string) {
+	if m.cfg.Security == nil || ep == nil || (ep.securityLimiter != nil && !ep.securityLimiter.allow(ip+"\x00"+reason)) { return }
+	now := time.Now().UTC()
+	m.cfg.Security.Record(repository.RDPSecurityLog{IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: ip, Transport: "udp", Result: "REJECTED", Reason: reason, StartedAt: now, EndedAt: now})
 }
 
 func sourceIP(address net.Addr) string {

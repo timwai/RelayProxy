@@ -82,4 +82,3 @@ func monitorWindowsRDPAuthFailures(ctx context.Context, report func(context.Cont
 		}
 	}
 }
-

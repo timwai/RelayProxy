@@ -129,7 +129,7 @@ func (db *DB) CreateRDPSecurityBan(cidr,ingressID,kind,reason,actor string, expi
     switch kind { case "manual","auto","allow": default: return nil,errors.New("invalid RDP security entry kind") }
     if len(reason) > 512 || len(actor) > 128 { return nil,errors.New("reason or actor is too long") }
     if expiresAt != nil && !expiresAt.After(time.Now()) { return nil,errors.New("expiry must be in the future") }
-    if ingressID != "" {
+    if ingressID != "" && kind != "auto" {
         if _,err := db.GetRDPIngress(ingressID); err != nil { return nil,errors.New("RDP ingress not found") }
     }
     entry := &RDPSecurityBan{ID:uuid.NewString(),CIDR:normalized,IngressID:ingressID,Kind:kind,Reason:reason,Actor:actor,CreatedAt:time.Now().UTC(),ExpiresAt:expiresAt}

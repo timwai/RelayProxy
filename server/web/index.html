@@ -211,7 +211,7 @@
 <dialog id="channel-dialog" aria-labelledby="channel-dialog-title">
   <form method="dialog" class="dialog-close"><button aria-label="关闭渠道配置">×</button></form>
   <p class="eyebrow">PUSH CHANNEL</p><h2 id="channel-dialog-title">新建推送渠道</h2>
-  <p class="muted">每个渠道属于一个身份；公开推送只会触达该身份下的设备。渠道 ID 创建后不可修改。</p>
+  <p class="muted">每个渠道属于一个身份；公开推送只会触达该身份下的设备。渠道 ID 可自定义及编辑，修改后旧推送 URL 将失效。</p>
   <form id="channel-form">
     <div id="channel-identity-field" data-admin>
       <label for="channel-identity">所属身份</label><select id="channel-identity"><option value="">请选择身份</option></select>
@@ -219,7 +219,7 @@
     </div>
     <label for="channel-name">渠道名称</label><input id="channel-name" required maxlength="120" placeholder="例如：登录验证码">
     <label for="channel-id">渠道 ID</label><input id="channel-id" class="mono" maxlength="80" placeholder="留空自动生成，例如 login-code">
-    <small>仅允许字母、数字、点、短横线和下划线。</small>
+    <small>仅允许 1-80 位英文字母、数字、点、短横线和下划线。新建时留空将自动生成；编辑时修改 ID 会改变推送 URL，历史消息不会丢失。</small>
     <label class="switch-row channel-all-row"><input id="channel-all-devices" type="checkbox"><span><strong>默认推送到本身份全部设备</strong><small>没有命中分流规则时，只动态选择所属身份当前所有已批准设备；该身份的新设备也会自动加入。</small></span></label>
     <div id="channel-device-section">
       <div class="capability-editor-heading"><h3>默认 / 兜底设备</h3><span id="channel-device-count">0 台</span></div>

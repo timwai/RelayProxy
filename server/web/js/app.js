@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], rdpSecurityLogs: [], rdpSecurityBans: [], rdpSecurityRules: [], nativeUdp: null, messagePushInfo: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], rdpSecurityLogs: [], rdpSecurityBans: [], rdpSecurityRules: [], rdpAuthFailures: [], nativeUdp: null, messagePushInfo: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -1355,6 +1355,20 @@
   }
 
 
+  function renderRDPAuthFailures() {
+    const host = $('rdp-auth-failures-body');
+    if (!host) return;
+    host.innerHTML = state.rdpAuthFailures.length ? state.rdpAuthFailures.map(item =>
+      '<tr><td>' + esc(date(item.occurredAt)) + '</td><td class="mono">' + esc(item.targetDeviceId) +
+      '</td><td>' + esc(item.username || '未知账户') + '</td>' +
+      '<td class="mono">' + esc(item.correlated ? item.sourceIp : '无法可靠关联') + '</td>' +
+      '<td><span class="mono">' + esc(item.status || '—') + '</span><small>' + esc(item.subStatus || '') +
+      ' · 登录类型 ' + esc(item.logonType) + '</small></td>' +
+      '<td>' + badge(item.correlated ? '已关联' : '仅记录', item.correlated ? 'success' : 'neutral') +
+      '<small>本地端口 ' + esc(item.sourcePort || '未知') + '</small></td></tr>'
+    ).join('') : emptyRow(6, '暂无 Windows 登录失败记录', 'Windows Host Agent 需要 Security 日志读取权限及登录失败审计策略');
+  }
+
   function renderRDPSecurityLogs() {
     const text = ($('rdp-security-ip-filter').value || '').trim().toLowerCase();
     const rows = state.rdpSecurityLogs.filter(item => !text || String(item.sourceIp).toLowerCase().includes(text));
@@ -1504,6 +1518,7 @@
       jobs.push(['systemIdentityGrants', '/system-identity-grants?resourceId=server', data => { state.systemIdentityGrants = Array.isArray(data) ? data : []; renderSystemIdentityGrants(); }]);
       jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); renderRDPSecurityBans(); }]);
       jobs.push(['rdpSecurityLogs', '/rdp/security/logs?limit=100', data => { state.rdpSecurityLogs = Array.isArray(data) ? data : []; renderRDPSecurityLogs(); }]);
+      jobs.push(['rdpAuthFailures', '/rdp/security/auth-failures?limit=100', data => { state.rdpAuthFailures = Array.isArray(data) ? data : []; renderRDPAuthFailures(); }]);
       jobs.push(['rdpSecurityBans', '/rdp/security/bans', data => { state.rdpSecurityBans = Array.isArray(data) ? data : []; renderRDPSecurityBans(); }]);
       jobs.push(['rdpSecurityRules', '/rdp/security/rules', data => { state.rdpSecurityRules = Array.isArray(data) ? data : []; renderRDPSecurityRules(); }]);
     } else {

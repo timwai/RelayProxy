@@ -278,11 +278,11 @@ func TestSOAPFaultReturnedWithHTTP200IsRejected(t *testing.T) {
 func TestGatewayDiscoveryStaysOnReceivingIPv4Interface(t *testing.T) {
 	primary := networkInterfaceIPv4{
 		address: netip.MustParseAddr("192.168.10.30"),
-		subnet: &net.IPNet{IP: net.ParseIP("192.168.10.30"), Mask: net.CIDRMask(24, 32)},
+		subnet:  &net.IPNet{IP: net.ParseIP("192.168.10.30"), Mask: net.CIDRMask(24, 32)},
 	}
 	secondary := networkInterfaceIPv4{
 		address: netip.MustParseAddr("10.12.5.30"),
-		subnet: &net.IPNet{IP: net.ParseIP("10.12.5.30"), Mask: net.CIDRMask(24, 32)},
+		subnet:  &net.IPNet{IP: net.ParseIP("10.12.5.30"), Mask: net.CIDRMask(24, 32)},
 	}
 	gateway := netip.MustParseAddr("192.168.10.1")
 	if !onInterfaceSubnet(gateway, primary) {

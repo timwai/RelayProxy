@@ -755,11 +755,16 @@ func (s *Session) Snapshot() Snapshot {
 	}
 	local := append([]protocol.P2PCandidate(nil), s.localCandidates...)
 	peer := append([]protocol.P2PCandidate(nil), s.peerCandidates...)
+	candidateSummary := summarizeCandidates(local, peer)
+	if s.endpoint != nil {
+		state, _ := s.endpoint.UPnPStatus()
+		candidateSummary += " upnp=" + strings.ToLower(state)
+	}
 	out := Snapshot{
 		ID: s.ID, ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
 		ExpiresAt: s.ExpiresAt.Load(), PeerCandidates: peer,
 		PeerFingerprint: s.peerFingerprint, State: s.state, Path: path, Error: s.lastError,
-		RTTMs: stats.RTT.Milliseconds(), CandidateSummary: summarizeCandidates(local, peer),
+		RTTMs: stats.RTT.Milliseconds(), CandidateSummary: candidateSummary,
 		FallbackCount: fallbackCount, BytesUp: stats.BytesSent, BytesDown: stats.BytesReceived,
 	}
 	s.mu.RUnlock()
@@ -1071,10 +1076,21 @@ func (s *Session) reportPath(path, reason string) {
 // peer, rather than leaving expired public UDP addresses in the rendezvous
 // candidate list. The endpoint owns and coalesces the latest candidate state.
 func (s *Session) watchLocalCandidates() {
+	s.watchLocalCandidatesWithRetry(15 * time.Second)
+}
+
+func (s *Session) watchLocalCandidatesWithRetry(retry time.Duration) {
 	if s == nil || s.endpoint == nil || s.manager == nil {
 		return
 	}
 	changes := s.endpoint.CandidateChanges()
+	if retry <= 0 {
+		retry = 15 * time.Second
+	}
+	ticker := time.NewTicker(retry)
+	defer ticker.Stop()
+	var latest []protocol.P2PCandidate
+	dirty := false
 	for {
 		select {
 		case <-s.closed:
@@ -1082,25 +1098,34 @@ func (s *Session) watchLocalCandidates() {
 		case <-s.manager.ctx.Done():
 			return
 		case candidates := <-changes:
+			latest = append([]protocol.P2PCandidate(nil), candidates...)
 			s.mu.Lock()
 			if s.state == StateClosed {
 				s.mu.Unlock()
 				return
 			}
-			s.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
+			s.localCandidates = append([]protocol.P2PCandidate(nil), latest...)
 			s.mu.Unlock()
-			if s.manager.send == nil {
+			dirty = true
+		case <-ticker.C:
+			if !dirty {
 				continue
 			}
-			ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
-			response, err := s.manager.send(ctx, protocol.P2PControlMessage{
-				Type: protocol.P2PControlCandidateUpdate, SessionID: s.ID,
-				ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
-				SessionToken: append([]byte(nil), s.Token...),
-				Candidates:   append([]protocol.P2PCandidate(nil), candidates...),
-			})
-			cancel()
-			if err == nil && response.Type == protocol.P2PControlLeaseAck && response.LeaseExpiresAt > 0 {
+		}
+		if !dirty || s.manager.send == nil {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
+		response, err := s.manager.send(ctx, protocol.P2PControlMessage{
+			Type: protocol.P2PControlCandidateUpdate, SessionID: s.ID,
+			ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
+			SessionToken: append([]byte(nil), s.Token...),
+			Candidates:   append([]protocol.P2PCandidate(nil), latest...),
+		})
+		cancel()
+		if err == nil && response.Type == protocol.P2PControlLeaseAck {
+			dirty = false
+			if response.LeaseExpiresAt > 0 {
 				s.ExpiresAt.Store(response.LeaseExpiresAt)
 			}
 		}

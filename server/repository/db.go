@@ -85,6 +85,10 @@ func OpenDB(driver, dsn string) (*DB, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("message identity isolation migration failed: %w", err)
 	}
+	if err := wrapper.ensureRDPSecuritySchema(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("RDP security migration failed: %w", err)
+	}
 
 	return wrapper, nil
 }

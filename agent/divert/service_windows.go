@@ -352,7 +352,7 @@ func watchWindowsProcessExit(pid uint32, onExit func()) (func(), error) {
 					onExit()
 				}
 				return
-			case windows.WAIT_TIMEOUT:
+			case uint32(windows.WAIT_TIMEOUT):
 				continue
 			default:
 				return

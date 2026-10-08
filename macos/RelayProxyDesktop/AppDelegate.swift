@@ -219,15 +219,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             return
         }
 
-        // Microsoft's macOS client intentionally uses a legacy URI whose text
-        // after rdp:// is not a standards-compliant URL authority:
-        // rdp://full%20address=s:host:port
-        // Foundation's URL(string:) rejects valid instances such as
-        // rdp://full%20address=s:127.0.0.1:59907, so pass the documented URI
-        // verbatim to LaunchServices through /usr/bin/open instead.
-        let rdpURI = "rdp://full%20address=s:\(endpoint)"
+        // Windows App is stricter than the retired Microsoft Remote Desktop
+        // client when LaunchServices parses the legacy rdp:// scheme. Encode the
+        // attribute separators after the equals sign as %3A; otherwise `open`
+        // reports the URI as an uninterpretable path or URL.
+        let rdpURI = "rdp://full%20address=s%3A127.0.0.1%3A\(port)"
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let attempts = [
+                ["-n", "-a", "/Applications/Windows App.app", rdpURI],
                 ["-b", "com.microsoft.rdc.macos", rdpURI],
                 ["-a", "Windows App", rdpURI],
                 [rdpURI],

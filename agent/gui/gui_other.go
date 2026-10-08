@@ -19,7 +19,7 @@ func Run(b *bridge.UIBridge, opts Options) error {
 }
 
 // ActivateExistingWindow is a no-op on platforms without a desktop window.
-func ActivateExistingWindow() {}
+func ActivateExistingWindow() bool { return false }
 
 // RequestQuit is a no-op when there is no native desktop event loop. Headless
 // process lifetime is handled directly by the web server's Done channel.

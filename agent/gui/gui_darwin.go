@@ -73,7 +73,7 @@ func ShowStartupError(err error, fallbackURL string) {
 	_ = exec.Command("open", fallbackURL).Start()
 }
 
-func ActivateExistingWindow() {}
+func ActivateExistingWindow() bool { return false }
 func RequestQuit()            {}
 func RequestRestart() error   { return ErrUnsupported }
 func WaitForRestartParent()   {}

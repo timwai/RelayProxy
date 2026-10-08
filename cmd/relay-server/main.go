@@ -493,7 +493,14 @@ func main() {
 	}
 	defer gw.Close()
 
+	rdpSecurity, err := serverrdp.NewSecurityManager(db)
+	if err != nil {
+		log.Fatalf("[RDP Security] Failed to load security policy: %v", err)
+	}
+	defer rdpSecurity.Close()
+
 	ingress := serverrdp.NewIngressManager(context.Background(), db, sessionMgr, serverrdp.IngressConfig{
+		Security: rdpSecurity,
 		Enabled: cfg.RDP.Ingress.Enabled != nil && *cfg.RDP.Ingress.Enabled,
 		Listen:  cfg.RDP.Ingress.Listen, RateLimit: cfg.RDP.Ingress.RateLimitPerMin,
 		SourceCIDRs: cfg.RDP.Ingress.SourceCIDRs, PortStart: cfg.RDP.Ingress.PortStart, PortEnd: cfg.RDP.Ingress.PortEnd,
@@ -601,6 +608,7 @@ func main() {
 			}
 			return out
 		}),
+		api.WithRDPSecurityReload(rdpSecurity.Reload),
 		api.WithRDPIngressEnabled(ingress.Enabled),
 		api.WithRDPIngressReload(func(string) error { return ingress.Reload() }),
 		api.WithRDPIngressStatus(func(id string) api.RDPIngressRuntimeStatus {

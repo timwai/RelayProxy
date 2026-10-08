@@ -68,7 +68,7 @@ func (db *DB) InsertRDPSecurityLog(item RDPSecurityLog) error {
     if item.ID == "" { item.ID = uuid.NewString() }
     if item.StartedAt.IsZero() { item.StartedAt = time.Now().UTC() }
     if item.EndedAt.IsZero() { item.EndedAt = item.StartedAt }
-    _, err := db.Exec("INSERT INTO rdp_security_logs (id,ingress_id,target_device_id,source_ip,transport,result,reason,started_at,ended_at,bytes_up,bytes_down) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+    _, err := db.Exec("INSERT INTO rdp_security_logs (id,ingress_id,target_device_id,source_ip,transport,result,reason,started_at,ended_at,bytes_up,bytes_down) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET result=excluded.result,reason=excluded.reason,ended_at=excluded.ended_at,bytes_up=excluded.bytes_up,bytes_down=excluded.bytes_down",
         item.ID,item.IngressID,item.TargetDeviceID,item.SourceIP,item.Transport,item.Result,item.Reason,item.StartedAt.UTC(),item.EndedAt.UTC(),item.BytesUp,item.BytesDown)
     return err
 }

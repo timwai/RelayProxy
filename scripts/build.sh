@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # RelayProxy 跨平台发布编译脚本
-# 产出：Linux/macOS/Windows amd64/arm64 Server + Agent、Windows GUI、macOS App、完整分发包
+# 产出：Linux/macOS/Windows amd64/arm64 Server + Agent、Wails React Windows GUI、macOS App、完整分发包
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -49,6 +49,49 @@ show_syso() {
   for f in "${SYSO_FILES[@]}"; do
     [[ -f "${f}.bak" ]] && mv "${f}.bak" "$f"
   done
+}
+
+build_react_frontend() {
+  local frontend="$ROOT/agent/gui/frontend"
+  local dist="$ROOT/agent/gui/react_dist"
+
+  command -v node >/dev/null 2>&1 || {
+    echo "ERROR: node was not found. Install Node.js 22+ before building the Windows React desktop client." >&2
+    return 1
+  }
+  command -v npm >/dev/null 2>&1 || {
+    echo "ERROR: npm was not found. Install Node.js 22+ before building the Windows React desktop client." >&2
+    return 1
+  }
+
+  echo ""
+  echo "[BUILD] Wails React frontend"
+  if [[ -d "$dist" ]]; then
+    find "$dist" -mindepth 1 -maxdepth 1 ! -name README.txt -exec rm -rf {} +
+  fi
+  (
+    cd "$frontend"
+    npm install --no-audit --no-fund
+    npm test
+    npm run build
+  )
+
+  [[ -f "$dist/index.html" ]] || {
+    echo "ERROR: React frontend build did not produce agent/gui/react_dist/index.html" >&2
+    return 1
+  }
+  [[ -d "$dist/assets" ]] || {
+    echo "ERROR: React frontend build did not produce agent/gui/react_dist/assets" >&2
+    return 1
+  }
+  local js_count css_count
+  js_count="$(find "$dist/assets" -maxdepth 1 -type f -name '*.js' | wc -l | tr -d ' ')"
+  css_count="$(find "$dist/assets" -maxdepth 1 -type f -name '*.css' | wc -l | tr -d ' ')"
+  if [[ "$js_count" == "0" || "$css_count" == "0" ]]; then
+    echo "ERROR: React frontend bundle is incomplete: expected at least one JS and CSS asset" >&2
+    return 1
+  fi
+  echo "  React bundle OK: index.html + ${js_count} JS + ${css_count} CSS"
 }
 
 build_one() {
@@ -246,7 +289,119 @@ build_native_macos_app() {
 build_macos_universal
 build_native_macos_app
 
-# Windows client + server (icons embedded)
+# Windows client + server (Wails v3 + React assets embedded)
+# Build/test Vite before compiling the Windows Agent so go:embed always contains
+# the current React UI rather than a stale bundle or the legacy fallback page.
+build_react_frontend
+
+echo ""
+echo "[TEST] Windows desktop packages (cross-compile)"
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test \
+  ./agent/divert ./agent/gui ./cmd/relay-agent -run '^build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent.exe"
+build_one windows amd64 ./cmd/relay-server "$OUT_DIR/windows-amd64/relay-server.exe"
+# WinDivert is x64-only; ARM64 binaries still support the non-divert modes.
+build_one windows arm64 ./cmd/relay-agent "$OUT_DIR/windows-arm64/relay-agent-gui.exe" "-H=windowsgui"
+build_one windows arm64 ./cmd/relay-agent "$OUT_DIR/windows-arm64/relay-agent.exe"
+build_one windows arm64 ./cmd/relay-server "$OUT_DIR/windows-arm64/relay-server.exe"
+
+# Configs + brand files
+TARGETS=(linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64 windows-arm64)
+[[ -d "$OUT_DIR/darwin-universal" ]] && TARGETS+=(darwin-universal)
+
+for t in "${TARGETS[@]}"; do
+  mkdir -p "$OUT_DIR/$t/configs" "$OUT_DIR/$t/brand"
+  cp "$ROOT/configs/relay-server.yaml" "$OUT_DIR/$t/configs/"
+  cp "$ROOT/configs/relay-agent.yaml" "$OUT_DIR/$t/configs/"
+  cp "$ROOT/assets/brand/logo.png" "$OUT_DIR/$t/brand/"
+done
+cp "$ROOT/assets/brand/icon.ico" "$OUT_DIR/windows-amd64/brand/"
+cp "$ROOT/assets/brand/icon.ico" "$OUT_DIR/windows-arm64/brand/"
+cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/linux-amd64/brand/icon.png"
+cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/linux-arm64/brand/icon.png"
+cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/darwin-amd64/brand/icon.png"
+cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/darwin-arm64/brand/icon.png"
+if [[ -d "$OUT_DIR/darwin-universal" ]]; then
+  cp "$ROOT/assets/brand/icon-256.png" "$OUT_DIR/darwin-universal/brand/icon.png"
+fi
+cp "$ROOT/docs/windows-transparent-proxy.md" "$OUT_DIR/windows-amd64/README.md"
+cp "$ROOT/docs/windows-transparent-proxy.md" "$OUT_DIR/windows-arm64/README.md"
+cp "$ROOT/docs/linux-transparent-proxy.md" "$OUT_DIR/linux-amd64/README.md"
+cp "$ROOT/docs/linux-transparent-proxy.md" "$OUT_DIR/linux-arm64/README.md"
+cp "$ROOT/agent/divert/macos/README.md" "$OUT_DIR/darwin-amd64/README.md"
+cp "$ROOT/agent/divert/macos/README.md" "$OUT_DIR/darwin-arm64/README.md"
+if [[ -d "$OUT_DIR/darwin-universal" ]]; then
+  cp "$ROOT/agent/divert/macos/README.md" "$OUT_DIR/darwin-universal/README.md"
+fi
+go run ./scripts/fetch-windivert.go \
+  -out "$OUT_DIR/windows-amd64/windivert" \
+  -agent-zip "$OUT_DIR/RelayProxy-agent-windows-amd64.zip"
+
+package_release_archives() {
+  local t archive
+  for t in "${TARGETS[@]}"; do
+    archive="$OUT_DIR/RelayProxy-${t}.tar.gz"
+    echo "[PACKAGE] ${t} -> ${archive}"
+    tar -C "$OUT_DIR" -czf "$archive" "$t"
+  done
+  if [[ -d "$OUT_DIR/darwin-native" ]]; then
+    tar -C "$OUT_DIR" -czf "$OUT_DIR/RelayProxy-darwin-native.tar.gz" darwin-native
+  fi
+
+  if command -v zip >/dev/null 2>&1; then
+    (
+      cd "$OUT_DIR"
+      zip -qry "RelayProxy-windows-amd64.zip" windows-amd64
+      zip -qry "RelayProxy-windows-arm64.zip" windows-arm64
+    )
+  else
+    echo "[SKIP] Windows full ZIP archives: zip command is unavailable; tar.gz archives were created"
+  fi
+}
+
+package_release_archives
+
+# Checksums
+echo ""
+echo "[SHA256]"
+(
+  cd "$OUT_DIR"
+  if command -v sha256sum >/dev/null 2>&1; then
+    find . -type f \( -name 'relay-server' -o -name 'relay-server.exe' -o -name 'relay-agent' -o -name 'relay-agent*.exe' -o -name 'WinDivert*.dll' -o -name 'WinDivert*.sys' -o -name 'RelayProxy-*.zip' -o -name 'RelayProxy-*.tar.gz' \) \
+      | sort | while read -r f; do sha256sum "$f"; done | tee SHA256SUMS.txt
+  else
+    find . -type f \( -name 'relay-server' -o -name 'relay-server.exe' -o -name 'relay-agent' -o -name 'relay-agent*.exe' -o -name 'WinDivert*.dll' -o -name 'WinDivert*.sys' -o -name 'RelayProxy-*.zip' -o -name 'RelayProxy-*.tar.gz' \) \
+      | sort | while read -r f; do shasum -a 256 "$f"; done | tee SHA256SUMS.txt
+  fi
+)
+
+echo ""
+echo "=================================================="
+echo " Build complete -> ${OUT_DIR}"
+echo "=================================================="
+
+
+echo ""
+echo "Buildable artifacts:"
+echo "  linux-amd64/   relay-agent + relay-server"
+echo "  linux-arm64/   relay-agent + relay-server"
+echo "  darwin-amd64/  relay-agent + relay-server + RelayProxy.app"
+echo "  darwin-arm64/  relay-agent + relay-server + RelayProxy.app"
+echo "  windows-amd64/ relay-agent-gui.exe + relay-agent.exe + relay-server.exe + WinDivert"
+echo "  windows-arm64/ relay-agent-gui.exe + relay-agent.exe + relay-server.exe"
+if [[ -d "$OUT_DIR/darwin-universal" ]]; then
+  echo "  darwin-universal/ relay-agent + relay-server + RelayProxy.app"
+fi
+if [[ -d "$OUT_DIR/darwin-native" ]]; then
+  echo "  darwin-native/ RelayProxyMacHost.app + embedded NetworkExtension"
+fi
+echo "  RelayProxy-<target>.tar.gz release archives"
+if command -v zip >/dev/null 2>&1; then
+  echo "  RelayProxy-windows-{amd64,arm64}.zip full Windows release archives"
+fi
+echo "  RelayProxy-agent-windows-amd64.zip Agent-only Windows x64 package"
+echo "  SHA256SUMS.txt"
+ -count=1
+
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent-gui.exe" "-H=windowsgui"
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent.exe"
 build_one windows amd64 ./cmd/relay-server "$OUT_DIR/windows-amd64/relay-server.exe"

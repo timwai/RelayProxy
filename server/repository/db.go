@@ -812,15 +812,25 @@ func (db *DB) CreateMessageChannel(channel *MessageChannel) error {
 	now := time.Now().UTC()
 	channel.CreatedAt = now
 	channel.UpdatedAt = now
-	return db.saveMessageChannel(channel, true)
+	return db.saveMessageChannel(channel, true, channel.ID)
 }
 
 func (db *DB) UpdateMessageChannel(channel *MessageChannel) error {
-	if channel == nil || channel.ID == "" {
+	if channel == nil {
+		return errors.New("channel is required")
+	}
+	return db.UpdateMessageChannelByID(channel.ID, channel)
+}
+
+// UpdateMessageChannelByID allows changing a channel's public ID while keeping
+// its device targets, rules and recorded message history. Both IDs are global
+// identifiers; a duplicate new ID fails atomically without touching the old.
+func (db *DB) UpdateMessageChannelByID(previousID string, channel *MessageChannel) error {
+	if channel == nil || previousID == "" || channel.ID == "" {
 		return errors.New("channel id is required")
 	}
 	channel.UpdatedAt = time.Now().UTC()
-	return db.saveMessageChannel(channel, false)
+	return db.saveMessageChannel(channel, false, previousID)
 }
 
 func (db *DB) validateMessageChannelIdentityTargets(channel *MessageChannel) error {
@@ -858,7 +868,7 @@ func (db *DB) validateMessageChannelIdentityTargets(channel *MessageChannel) err
 	return nil
 }
 
-func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
+func (db *DB) saveMessageChannel(channel *MessageChannel, create bool, previousID string) error {
 	if err := db.validateMessageChannelIdentityTargets(channel); err != nil {
 		return err
 	}
@@ -890,6 +900,35 @@ func (db *DB) saveMessageChannel(channel *MessageChannel, create bool) error {
 			return err
 		}
 	} else {
+		if previousID != channel.ID {
+			// SQLite's existing foreign key from message_channel_devices does
+			// not have ON UPDATE CASCADE. Stage the new parent first, rebind
+			// its children and historical messages, then remove the old ID,
+			// all within the same transaction.
+			inserted, err := tx.Exec(`INSERT INTO message_channels
+				(id, identity_id, name, all_devices, use_default_verification, verification_rules, message_rules, route_rules, created_at, updated_at)
+				SELECT ?, identity_id, name, all_devices, use_default_verification, verification_rules, message_rules, route_rules, created_at, updated_at
+				FROM message_channels WHERE id = ?`, channel.ID, previousID)
+			if err != nil {
+				return err
+			}
+			if count, err := inserted.RowsAffected(); err != nil {
+				return err
+			} else if count != 1 {
+				return sql.ErrNoRows
+			}
+			if _, err := tx.Exec(`UPDATE message_channel_devices SET channel_id = ? WHERE channel_id = ?`,
+				channel.ID, previousID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`UPDATE messages SET channel_id = ? WHERE channel_id = ?`,
+				channel.ID, previousID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`DELETE FROM message_channels WHERE id = ?`, previousID); err != nil {
+				return err
+			}
+		}
 		result, err := tx.Exec(`UPDATE message_channels
 			SET identity_id = ?, name = ?, all_devices = ?, use_default_verification = ?, verification_rules = ?, message_rules = ?, route_rules = ?, updated_at = ?
 			WHERE id = ?`,

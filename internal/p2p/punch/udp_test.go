@@ -294,7 +294,7 @@ func TestSymmetricPunchWithDualStackAndIPv4OnlyPeer(t *testing.T) {
 	defer cancel()
 	type result struct {
 		value *UDPResult
-		err error
+		err   error
 	}
 	dualResult := make(chan result, 1)
 	ipv4Result := make(chan result, 1)

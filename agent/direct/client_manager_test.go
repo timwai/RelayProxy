@@ -450,13 +450,13 @@ func TestIPv4OnlyClientSkipsIPv6DirectAndUsesIPv4(t *testing.T) {
 	}
 	ipv6 := protocol.PublicDirectEndpoint{
 		Protocol: protocol.PublicDirectEndpointProtocolUDP,
-		Address: "[2408:8266:501:6757:b251:8eff:feff:3735]:20800",
-		Source: protocol.PublicDirectEndpointIPv6, Verified: true, CertFingerprint: fingerprint,
+		Address:  "[2408:8266:501:6757:b251:8eff:feff:3735]:20800",
+		Source:   protocol.PublicDirectEndpointIPv6, Verified: true, CertFingerprint: fingerprint,
 	}
 	ipv4 := protocol.PublicDirectEndpoint{
 		Protocol: protocol.PublicDirectEndpointProtocolUDP,
-		Address: "203.0.113.20:20800",
-		Source: protocol.PublicDirectEndpointObserved, Verified: true, CertFingerprint: fingerprint,
+		Address:  "203.0.113.20:20800",
+		Source:   protocol.PublicDirectEndpointObserved, Verified: true, CertFingerprint: fingerprint,
 	}
 	manager.UpdateInventory(makeInventory("first-ticket", ipv6))
 	if manager.PreferForExit("exit") || manager.EnsureClient("exit") {
@@ -496,12 +496,12 @@ func TestServerPinnedIPv6ManualEndpointIsFilteredOnIPv4OnlyClient(t *testing.T) 
 	public := protocol.ProxyPublicDirectPath{Endpoints: []protocol.PublicDirectEndpoint{
 		{
 			Protocol: protocol.PublicDirectEndpointProtocolUDP,
-			Address: "exit.example.com:20800", DialAddress: "[2408:8266:501:6757:b251:8eff:feff:3735]:20800",
+			Address:  "exit.example.com:20800", DialAddress: "[2408:8266:501:6757:b251:8eff:feff:3735]:20800",
 			Source: protocol.PublicDirectEndpointManual, Verified: true, CertFingerprint: "sha256:abc",
 		},
 		{
 			Protocol: protocol.PublicDirectEndpointProtocolUDP,
-			Address: "203.0.113.20:20800", Source: protocol.PublicDirectEndpointObserved,
+			Address:  "203.0.113.20:20800", Source: protocol.PublicDirectEndpointObserved,
 			Verified: true, CertFingerprint: "sha256:abc",
 		},
 	}}

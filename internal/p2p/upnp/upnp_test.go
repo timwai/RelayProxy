@@ -318,3 +318,68 @@ func TestUPnPClientPinsSourceAndRemoteIPv4(t *testing.T) {
 		t.Fatal("UPnP HTTP client accepted a different gateway host")
 	}
 }
+
+func TestK2PRouterMappingWithPrivateWANStillSendsAddPortMapping(t *testing.T) {
+	var mu sync.Mutex
+	var actions []string
+	var addBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		action := strings.Trim(r.Header.Get("SOAPAction"), "\"")
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		actions = append(actions, action)
+		if strings.HasSuffix(action, "#AddPortMapping") {
+			addBody = string(body)
+		}
+		mu.Unlock()
+		switch {
+		case strings.HasSuffix(action, "#GetExternalIPAddress"):
+			_, _ = io.WriteString(w, "<root><NewExternalIPAddress>100.64.10.7</NewExternalIPAddress></root>")
+		case strings.HasSuffix(action, "#GetSpecificPortMappingEntry"):
+			_, _ = io.WriteString(w, "<root><NewInternalClient>192.168.31.8</NewInternalClient><NewInternalPort>20900</NewInternalPort></root>")
+		default:
+			_, _ = io.WriteString(w, "<ok/>")
+		}
+	}))
+	defer server.Close()
+	control, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := service{
+		serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1",
+		controlURL: control, localIP: netip.MustParseAddr("192.168.31.8"),
+	}
+	mapping, address, err := mapUDPOnService(context.Background(), svc, 20900, 20900, 20999)
+	if err != nil {
+		t.Fatalf("K2P UPnP mapping was incorrectly blocked by CGNAT: %v", err)
+	}
+	if address.String() != "100.64.10.7:20900" || IsPublicWANIPv4(address.Addr()) {
+		t.Fatalf("CGNAT WAN address was incorrectly advertised: %s", address)
+	}
+	if err := mapping.refresh(context.Background()); err != nil {
+		t.Fatalf("K2P mapping could not renew behind CGNAT: %v", err)
+	}
+	if err := mapping.Close(); err != nil {
+		t.Fatalf("K2P router mapping cleanup failed: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !strings.Contains(addBody, "<NewInternalClient>192.168.31.8</NewInternalClient>") ||
+		!strings.Contains(addBody, "<NewInternalPort>20900</NewInternalPort>") ||
+		!strings.Contains(addBody, "<NewExternalPort>20900</NewExternalPort>") {
+		t.Fatalf("K2P was not sent the expected UPnP SOAP AddPortMapping request: %s", addBody)
+	}
+	var adds, deletes int
+	for _, action := range actions {
+		if strings.HasSuffix(action, "#AddPortMapping") {
+			adds++
+		}
+		if strings.HasSuffix(action, "#DeletePortMapping") {
+			deletes++
+		}
+	}
+	if adds != 2 || deletes != 1 {
+		t.Fatalf("incorrect K2P mapping lifecycle: add=%d delete=%d actions=%v", adds, deletes, actions)
+	}
+}

@@ -274,3 +274,43 @@ func TestSOAPFaultReturnedWithHTTP200IsRejected(t *testing.T) {
 		t.Fatalf("HTTP 200 SOAP Fault was not rejected: code=%d err=%v", got, err)
 	}
 }
+
+func TestGatewayDiscoveryStaysOnReceivingIPv4Interface(t *testing.T) {
+	primary := networkInterfaceIPv4{
+		address: netip.MustParseAddr("192.168.10.30"),
+		subnet: &net.IPNet{IP: net.ParseIP("192.168.10.30"), Mask: net.CIDRMask(24, 32)},
+	}
+	secondary := networkInterfaceIPv4{
+		address: netip.MustParseAddr("10.12.5.30"),
+		subnet: &net.IPNet{IP: net.ParseIP("10.12.5.30"), Mask: net.CIDRMask(24, 32)},
+	}
+	gateway := netip.MustParseAddr("192.168.10.1")
+	if !onInterfaceSubnet(gateway, primary) {
+		t.Fatal("local gateway was incorrectly rejected")
+	}
+	if onInterfaceSubnet(gateway, secondary) {
+		t.Fatal("SSDP gateway from another interface was accepted")
+	}
+	if onInterfaceSubnet(primary.address, primary) {
+		t.Fatal("own network interface should not be accepted as the gateway")
+	}
+	if onInterfaceSubnet(netip.MustParseAddr("8.8.8.8"), primary) {
+		t.Fatal("unrelated public endpoint was accepted as the gateway")
+	}
+}
+
+func TestUPnPClientPinsSourceAndRemoteIPv4(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "<ok/>")
+	}))
+	defer server.Close()
+	serverURL, err := url.Parse(server.URL)
+	if err != nil { t.Fatal(err) }
+	client := gatewayHTTPClient("gateway.example.test", netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("127.0.0.1"))
+	response, err := client.Get("http://gateway.example.test:" + serverURL.Port() + "/")
+	if err != nil { t.Fatalf("pinned gateway request failed: %v", err) }
+	_ = response.Body.Close()
+	if _, err := client.Get("http://different-gateway.example.test:" + serverURL.Port() + "/"); err == nil {
+		t.Fatal("UPnP HTTP client accepted a different gateway host")
+	}
+}

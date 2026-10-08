@@ -139,62 +139,68 @@ func MapUDPWithPortRange(ctx context.Context, internalPort, portStart, portEnd i
 	}
 	var lastErr error
 	for _, svc := range services {
-		// Select the LAN-side source address using the pinned gateway IP,
-		// not a hostname that could resolve differently on a later lookup.
-		pinnedURL := *svc.controlURL
-		if svc.gatewayIP.IsValid() {
-			port := svc.controlURL.Port()
-			if port == "" {
-				port = "80"
-			}
-			pinnedURL.Host = net.JoinHostPort(svc.gatewayIP.String(), port)
+		mapping, address, err := mapUDPOnService(ctx, svc, internalPort, portStart, portEnd)
+		if err == nil {
+			return mapping, address, nil
 		}
-		// Use the exact interface that received SSDP; the SOAP HTTP
-		// client is bound to that same local address. Never substitute
-		// another interface when networks have overlapping subnets.
-		internalIP := svc.localIP
-		var err error
-		if !internalIP.IsValid() {
-			internalIP, err = localIPv4For(ctx, &pinnedURL)
-		}
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		// The router's WAN address may be private or CGNAT. Still submit
-		// AddPortMapping to the local IGD: a local mapping can be useful
-		// behind another NAT. The Agent must not publish an unroutable WAN
-		// address as a public P2P candidate.
-		externalIP, err := svc.wanIPAddress(ctx)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		externalPort, leaseSeconds, err := svc.addAvailableUDPMappingRange(ctx, internalIP.String(), uint16(internalPort), portStart, portEnd)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		address := netip.AddrPortFrom(externalIP, externalPort)
-		m := &Mapping{
-			service: svc, internalClient: internalIP.String(),
-			internalPort: uint16(internalPort), externalPort: externalPort,
-			externalPortStart: portStart, externalPortEnd: portEnd,
-			externalIP: externalIP, leaseSeconds: leaseSeconds,
-			done: make(chan struct{}), updates: make(chan MappingUpdate, 1),
-			status: MappingUpdate{Address: address, Healthy: true},
-		}
-		if ctx.Err() != nil {
-			_ = m.Close()
-			return nil, netip.AddrPort{}, ctx.Err()
-		}
-		go m.refreshLoop()
-		return m, address, nil
+		lastErr = err
 	}
 	if lastErr != nil {
 		return nil, netip.AddrPort{}, fmt.Errorf("%w: %w", ErrUnavailable, lastErr)
 	}
 	return nil, netip.AddrPort{}, ErrUnavailable
+}
+
+// mapUDPOnService sends SOAP requests to the IGD discovered on the Agent LAN
+// and keeps the mapping alive even when the gateway's WAN address is private.
+// Remote peers never receive that private WAN address as a P2P candidate.
+func mapUDPOnService(ctx context.Context, svc service, internalPort, portStart, portEnd int) (*Mapping, netip.AddrPort, error) {
+	// Select the LAN-side source address using the pinned gateway IP, not a
+	// hostname that could resolve differently on a later lookup.
+	pinnedURL := *svc.controlURL
+	if svc.gatewayIP.IsValid() {
+		port := svc.controlURL.Port()
+		if port == "" {
+			port = "80"
+		}
+		pinnedURL.Host = net.JoinHostPort(svc.gatewayIP.String(), port)
+	}
+	// Use the exact interface that received SSDP. The HTTP client uses
+	// that same interface for subsequent UPnP SOAP operations.
+	internalIP := svc.localIP
+	var err error
+	if !internalIP.IsValid() {
+		internalIP, err = localIPv4For(ctx, &pinnedURL)
+	}
+	if err != nil {
+		return nil, netip.AddrPort{}, err
+	}
+	// The router's WAN address may be private or CGNAT. This must not
+	// prevent AddPortMapping from reaching the router; eligibility for
+	// advertising to other Agents is a separate decision.
+	externalIP, err := svc.wanIPAddress(ctx)
+	if err != nil {
+		return nil, netip.AddrPort{}, err
+	}
+	externalPort, leaseSeconds, err := svc.addAvailableUDPMappingRange(ctx, internalIP.String(), uint16(internalPort), portStart, portEnd)
+	if err != nil {
+		return nil, netip.AddrPort{}, err
+	}
+	address := netip.AddrPortFrom(externalIP, externalPort)
+	m := &Mapping{
+		service: svc, internalClient: internalIP.String(),
+		internalPort: uint16(internalPort), externalPort: externalPort,
+		externalPortStart: portStart, externalPortEnd: portEnd,
+		externalIP: externalIP, leaseSeconds: leaseSeconds,
+		done: make(chan struct{}), updates: make(chan MappingUpdate, 1),
+		status: MappingUpdate{Address: address, Healthy: true},
+	}
+	if ctx.Err() != nil {
+		_ = m.Close()
+		return nil, netip.AddrPort{}, ctx.Err()
+	}
+	go m.refreshLoop()
+	return m, address, nil
 }
 
 // Updates returns a bounded, coalesced stream of state transitions.

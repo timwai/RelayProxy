@@ -118,10 +118,20 @@ func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool
 		return true, ""
 	}
 	// Keep the counter map bounded even under large source-address churn.
-	if len(s.counters) > 8192 {
+	// A hard cap is necessary: an attacker can otherwise keep creating new
+	// source keys faster than the configured windows expire.
+	if len(s.counters) >= 8192 {
 		for key, window := range s.counters {
 			if now.Sub(window.began) > 5*time.Minute {
 				delete(s.counters, key)
+			}
+		}
+		if len(s.counters) >= 8192 {
+			for key := range s.counters {
+				delete(s.counters, key)
+				if len(s.counters) <= 4096 {
+					break
+				}
 			}
 		}
 	}

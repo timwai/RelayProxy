@@ -431,7 +431,8 @@ func fetchServices(ctx context.Context, rawLocation string, sender netip.Addr) (
 	base := location
 	if strings.TrimSpace(root.URLBase) != "" {
 		if candidate, parseErr := url.Parse(strings.TrimSpace(root.URLBase)); parseErr == nil &&
-			candidate.Scheme == "http" && strings.EqualFold(candidate.Hostname(), location.Hostname()) {
+			candidate.Scheme == "http" && candidate.User == nil &&
+			strings.EqualFold(candidate.Hostname(), location.Hostname()) {
 			base = candidate
 		}
 	}
@@ -448,7 +449,7 @@ func fetchServices(ctx context.Context, rawLocation string, sender netip.Addr) (
 			continue
 		}
 		control := base.ResolveReference(ref)
-		if control.Scheme != "http" || control.Hostname() == "" ||
+		if control.Scheme != "http" || control.Hostname() == "" || control.User != nil ||
 			!strings.EqualFold(control.Hostname(), location.Hostname()) {
 			continue
 		}
@@ -473,12 +474,12 @@ func collectServiceDescriptions(device deviceDescription, out *[]serviceDescript
 }
 
 func serviceRank(serviceType string) int {
-	switch {
-	case strings.HasSuffix(serviceType, ":WANIPConnection:2"):
+	switch strings.TrimSpace(serviceType) {
+	case "urn:schemas-upnp-org:service:WANIPConnection:2":
 		return 30
-	case strings.HasSuffix(serviceType, ":WANIPConnection:1"):
+	case "urn:schemas-upnp-org:service:WANIPConnection:1":
 		return 20
-	case strings.HasSuffix(serviceType, ":WANPPPConnection:1"):
+	case "urn:schemas-upnp-org:service:WANPPPConnection:1":
 		return 10
 	default:
 		return 0
@@ -753,11 +754,24 @@ func (s service) soap(ctx context.Context, action string, args map[string]string
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || hasSOAPFault(body) {
 		code, _ := strconv.Atoi(xmlElementText(body, "errorCode"))
 		return nil, &soapFault{Status: resp.StatusCode, Code: code, Description: xmlElementText(body, "errorDescription")}
 	}
 	return body, nil
+}
+
+func hasSOAPFault(body []byte) bool {
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return false
+		}
+		if start, ok := token.(xml.StartElement); ok && start.Name.Local == "Fault" {
+			return true
+		}
+	}
 }
 
 func soapErrorCode(err error) int {

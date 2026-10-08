@@ -609,6 +609,7 @@ func main() {
 			return out
 		}),
 		api.WithRDPSecurityReload(rdpSecurity.Reload),
+		api.WithRDPSecurityLogsClear(rdpSecurity.ClearLogs),
 		api.WithRDPIngressEnabled(ingress.Enabled),
 		api.WithRDPIngressReload(func(string) error { return ingress.Reload() }),
 		api.WithRDPIngressStatus(func(id string) api.RDPIngressRuntimeStatus {

@@ -50,7 +50,7 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 		COUNT(*), SUM(CASE WHEN l.result = 'FORWARDED' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN l.result = 'REJECTED' THEN 1 ELSE 0 END),
 		COALESCE(SUM(l.bytes_up),0), COALESCE(SUM(l.bytes_down),0),
-		MIN(l.started_at),MAX(l.started_at)
+		COALESCE(MIN(CAST(strftime('%s',l.started_at) AS INTEGER)),0),COALESCE(MAX(CAST(strftime('%s',l.started_at) AS INTEGER)),0)
 		FROM rdp_security_logs l
 		LEFT JOIN devices d ON d.id = l.target_device_id
 		WHERE instr(l.source_ip, ?) > 0
@@ -63,8 +63,11 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 	for rows.Next() {
 		var item RDPSourceGroup
 		var targets string
+		var firstSec, lastSec int64
 		if err:=rows.Scan(&item.SourceIP,&targets,&item.ConnectionCount,&item.ForwardedCount,
-			&item.RejectedCount,&item.BytesUp,&item.BytesDown,&item.FirstSeen,&item.LastSeen);err!=nil {return nil,err}
+			&item.RejectedCount,&item.BytesUp,&item.BytesDown,&firstSec,&lastSec);err!=nil {return nil,err}
+		item.FirstSeen=time.Unix(firstSec,0).UTC()
+		item.LastSeen=time.Unix(lastSec,0).UTC()
 		item.Targets=[]string{}
 		if targets!="" { if err:=json.Unmarshal([]byte(targets),&item.Targets);err!=nil {return nil,err} }
 		output.Items=append(output.Items,item)

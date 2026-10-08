@@ -84,6 +84,11 @@ type ingressEndpoint struct {
 }
 
 type udpAssociation struct {
+	auditID string
+	openedAt time.Time
+	bytesUp atomic.Int64
+	bytesDown atomic.Int64
+	closeOnce sync.Once
 	remote netip.AddrPort
 	conn   net.PacketConn
 	stream tunnel.TunnelStream
@@ -399,7 +404,9 @@ func (m *IngressManager) handleTCP(ctx context.Context, ep *ingressEndpoint, con
 	openDeadline := time.Now().Add(associationOpenTimeout)
 	_ = conn.SetDeadline(openDeadline)
 	remoteIP := sourceIP(conn.RemoteAddr())
-	entry := repository.RDPSecurityLog{IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: remoteIP, Transport: "tcp", Result: "REJECTED", StartedAt: time.Now().UTC()}
+	entry := repository.RDPSecurityLog{ID: uuid.NewString(), IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: remoteIP, Transport: "tcp", Result: "CONNECTING", StartedAt: time.Now().UTC()}
+	if m.cfg.Security != nil { m.cfg.Security.Record(entry) }
+	entry.Result, entry.Reason = "REJECTED", "UNAVAILABLE"
 	defer func() {
 		if m.cfg.Security != nil {
 			entry.EndedAt = time.Now().UTC()
@@ -522,7 +529,7 @@ func (m *IngressManager) serveUDP(ctx context.Context, ep *ingressEndpoint) {
 		}
 		if _, err := assoc.conn.WriteTo(buffer[:n], nil); err != nil {
 			m.removeUDPAssociation(ep, key, assoc)
-		}
+		} else { assoc.bytesUp.Add(int64(n)) }
 	}
 }
 
@@ -530,12 +537,7 @@ func (m *IngressManager) openUDPAssociationAsync(ctx context.Context, ep *ingres
 	openCtx, cancel := context.WithTimeout(ctx, associationOpenTimeout)
 	assoc := m.openUDPAssociation(openCtx, ep, opening.remote)
 	cancel()
-	if m.cfg.Security != nil {
-		now := time.Now().UTC()
-		result, reason := "FORWARDED", ""
-		if assoc == nil { result, reason = "REJECTED", "ASSOCIATION_OPEN_FAILED" }
-		m.cfg.Security.Record(repository.RDPSecurityLog{IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: key.Addr().String(), Transport: "udp", Result: result, Reason: reason, StartedAt: now, EndedAt: now})
-	}
+	if assoc == nil { m.auditUDPDecision(ep, key.Addr().String(), "ASSOCIATION_OPEN_FAILED") }
 	ep.mu.Lock()
 	if ep.opening[key] == opening {
 		delete(ep.opening, key)
@@ -555,12 +557,16 @@ func (m *IngressManager) openUDPAssociationAsync(ctx context.Context, ep *ingres
 	ep.assocs[key] = assoc
 	packets := opening.packets
 	ep.mu.Unlock()
+	if m.cfg.Security != nil {
+		m.cfg.Security.Record(repository.RDPSecurityLog{ID: assoc.auditID, IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: key.Addr().String(), Transport: "udp", Result: "CONNECTING", StartedAt: assoc.openedAt, EndedAt: assoc.openedAt})
+	}
 	go m.readUDPAssociation(ctx, ep, key, assoc)
 	for _, packet := range packets {
 		if _, err := assoc.conn.WriteTo(packet, nil); err != nil {
 			m.removeUDPAssociation(ep, key, assoc)
 			return
 		}
+		assoc.bytesUp.Add(int64(len(packet)))
 	}
 }
 
@@ -603,7 +609,7 @@ func (m *IngressManager) openUDPAssociation(ctx context.Context, ep *ingressEndp
 	}
 	_ = stream.SetDeadline(time.Time{})
 	remoteAddr := &net.UDPAddr{IP: remote.Addr().AsSlice(), Port: int(remote.Port())}
-	return &udpAssociation{remote: remote, conn: tunnel.NewUDPDatagramConn(channel, stream, remoteAddr), stream: stream, cancel: func() { _ = channel.Close() }}
+	return &udpAssociation{auditID: uuid.NewString(), openedAt: time.Now().UTC(), remote: remote, conn: tunnel.NewUDPDatagramConn(channel, stream, remoteAddr), stream: stream, cancel: func() { _ = channel.Close() }}
 }
 
 func (m *IngressManager) readUDPAssociation(ctx context.Context, ep *ingressEndpoint, key netip.AddrPort, assoc *udpAssociation) {
@@ -618,6 +624,7 @@ func (m *IngressManager) readUDPAssociation(ctx context.Context, ep *ingressEndp
 			m.removeUDPAssociation(ep, key, assoc)
 			return
 		}
+		assoc.bytesDown.Add(int64(n))
 		select {
 		case <-ctx.Done():
 			return
@@ -635,6 +642,11 @@ func (m *IngressManager) removeUDPAssociation(ep *ingressEndpoint, key netip.Add
 	assoc.cancel()
 	_ = assoc.conn.Close()
 	_ = assoc.stream.Close()
+	if m.cfg.Security != nil {
+		assoc.closeOnce.Do(func() {
+			m.cfg.Security.Record(repository.RDPSecurityLog{ID: assoc.auditID, IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: key.Addr().String(), Transport: "udp", Result: "FORWARDED", StartedAt: assoc.openedAt, EndedAt: time.Now().UTC(), BytesUp: assoc.bytesUp.Load(), BytesDown: assoc.bytesDown.Load()})
+		})
+	}
 }
 
 func (ep *ingressEndpoint) allow(ip string) bool {

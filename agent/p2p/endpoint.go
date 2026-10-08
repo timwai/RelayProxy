@@ -23,22 +23,22 @@ import (
 // hole punching and the future QUIC transport. Replacing this socket changes
 // the NAT mapping and would invalidate the candidates sent through the server.
 type Endpoint struct {
-	mu          sync.RWMutex
-	rendezvous  string
-	portStart   int
-	portEnd     int
-	upnpEnabled bool
-	conn        *net.UDPConn
-	identity    *secure.TLSIdentity
-	candidates  []protocol.P2PCandidate
-	upnpMapping *p2pupnp.Mapping
-	upnpAddress netip.AddrPort
-	baseCandidates []protocol.P2PCandidate
-	upnpState string
-	upnpError string
+	mu               sync.RWMutex
+	rendezvous       string
+	portStart        int
+	portEnd          int
+	upnpEnabled      bool
+	conn             *net.UDPConn
+	identity         *secure.TLSIdentity
+	candidates       []protocol.P2PCandidate
+	upnpMapping      *p2pupnp.Mapping
+	upnpAddress      netip.AddrPort
+	baseCandidates   []protocol.P2PCandidate
+	upnpState        string
+	upnpError        string
 	candidateChanges chan []protocol.P2PCandidate
-	done chan struct{}
-	closed      bool
+	done             chan struct{}
+	closed           bool
 }
 
 var (
@@ -149,11 +149,11 @@ func (e *Endpoint) Start(ctx context.Context) error {
 		}
 	}
 
-	baseCandidates := append([]protocol.P2PCandidate(nil), discovered...)
+	baseCandidates   := append([]protocol.P2PCandidate(nil), discovered...)
 	var upnpMapping *p2pupnp.Mapping
 	var upnpAddr netip.AddrPort
-	upnpState := "DISABLED"
-	upnpError := ""
+	upnpState        := "DISABLED"
+	upnpError        := ""
 	if upnpResultCh != nil {
 		upnpState = "FAILED"
 		result := <-upnpResultCh
@@ -364,7 +364,7 @@ func (e *Endpoint) Close() error {
 	if e.done != nil {
 		close(e.done)
 	}
-	conn := e.conn
+	conn             := e.conn
 	mapping := e.upnpMapping
 	e.conn = nil
 	e.identity = nil

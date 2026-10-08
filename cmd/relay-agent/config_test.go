@@ -26,7 +26,7 @@ func TestExplicitConfigPathRemainsIndependent(t *testing.T) {
 
 func TestStartupCreatesMinimalConfigAndReusesIt(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "user", ".relayproxy", agentConfigName)
-	created, err := loadOrCreateAgentConfig(path, nil)
+	created, err := loadOrCreateAgentConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +41,7 @@ func TestStartupCreatesMinimalConfigAndReusesIt(t *testing.T) {
 		t.Fatalf("in-memory defaults are incomplete: %+v", created)
 	}
 	before := append([]byte(nil), data...)
-	loaded, err := loadOrCreateAgentConfig(path, []string{filepath.Join(t.TempDir(), "ignored-old.yaml")})
+	loaded, err := loadOrCreateAgentConfig(path)
 	if err != nil || loaded.Server.Address != "127.0.0.1" {
 		t.Fatalf("existing config could not be reused: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestStartupRejectsLegacyCredentials(t *testing.T) {
 	if err := os.WriteFile(path, legacy, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadOrCreateAgentConfig(path, nil); err == nil {
+	if _, err := loadOrCreateAgentConfig(path); err == nil {
 		t.Fatal("legacy credential configuration was accepted")
 	}
 	data, _ := os.ReadFile(path)

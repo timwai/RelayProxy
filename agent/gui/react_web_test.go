@@ -44,12 +44,17 @@ func TestReactWebEntrypointAndAssets(t *testing.T) {
 			t.Errorf("embedded asset %s: HTTP %d (%d bytes)", match[1], response.Code, response.Body.Len())
 		}
 	}
-	for _, path := range []string{"/assets/../../web.go", "/assets/README.txt", "/assets/nonexistent.js"} {
+	for _, path := range []string{"/assets/README.txt", "/assets/nonexistent.js"} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1"+path, nil))
 		if response.Code != http.StatusNotFound {
 			t.Errorf("asset path %q status = %d, want 404", path, response.Code)
 		}
+	}
+	traversal := httptest.NewRecorder()
+	serveReactAsset(traversal, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/assets/../../web.go", nil))
+	if traversal.Code != http.StatusNotFound {
+		t.Fatalf("asset traversal status = %d", traversal.Code)
 	}
 }
 

@@ -792,6 +792,22 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 
 	var workers sync.WaitGroup
+	if runtime.GOOS == "windows" && allowRDP && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPPublic) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			monitorWindowsRDPAuthFailures(ctx, func(sendCtx context.Context, failure protocol.RDPHostAuthFailure) error {
+				reply, err := a.sendRDPControlRequest(sendCtx, sess, protocol.RDPControlMessage{
+					Type: protocol.RDPControlHostAuthFailure, HostAuthFailure: &failure,
+				})
+				if err != nil { return err }
+				if reply.Type != protocol.RDPControlHostAuthFailureAck {
+					return fmt.Errorf("Windows RDP auth report rejected: %s %s", reply.ErrorCode, reply.ErrorMessage)
+				}
+				return nil
+			})
+		}()
+	}
 	workers.Add(1)
 	go func() {
 		defer workers.Done()

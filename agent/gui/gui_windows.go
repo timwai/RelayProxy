@@ -711,7 +711,7 @@ func RequestRestart() error {
 
 // ActivateExistingWindow raises an already-running Wails window after singleton
 // acquisition rejects a second Agent process.
-func ActivateExistingWindow() {
+func ActivateExistingWindow() bool {
 	var hwnd win.HWND
 	for attempt := 0; attempt < 40 && hwnd == 0; attempt++ {
 		hwnd = findMainWindow()
@@ -720,14 +720,15 @@ func ActivateExistingWindow() {
 		}
 	}
 	if hwnd == 0 {
-		return
+		return false
 	}
 	msg := win.RegisterWindowMessage(windows.StringToUTF16Ptr("RelayProxyAgentShowWindow"))
 	if msg != 0 && win.PostMessage(hwnd, msg, 0, 0) != 0 {
-		return
+		return true
 	}
 	win.ShowWindow(hwnd, win.SW_RESTORE)
 	win.SetForegroundWindow(hwnd)
+	return true
 }
 
 func findMainWindow() win.HWND {

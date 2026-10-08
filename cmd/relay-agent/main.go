@@ -139,7 +139,9 @@ func main() {
 		if wantGUI {
 			// Surface the instance that is already running instead of failing
 			// silently when the user double-clicks the icon again.
-			gui.ActivateExistingWindow()
+			if !gui.ActivateExistingWindow() {
+				gui.ShowStartupError(errors.New("已有 RelayProxy Agent 实例正在运行，但没有可激活的桌面窗口。请先在任务管理器结束旧的 relay-agent/RelayProxy 进程后重试。"), "")
+			}
 		}
 		log.Println("[Agent] Another instance is already active. Exiting.")
 		return

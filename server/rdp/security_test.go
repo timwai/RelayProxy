@@ -139,26 +139,34 @@ func TestPublicRDPCIDRNormalization(t *testing.T) {
 
 func TestRDPSecurityClearLogsCannotResurrectOldSessions(t *testing.T) {
 	db := openSecurityTestDB(t)
-	security,err:=NewSecurityManager(db)
-	if err!=nil { t.Fatal(err) }
-	old:=time.Now().UTC().Add(-time.Minute)
-	first:=repository.RDPSecurityLog{
-		ID:"old-session",IngressID:"ingress-a",SourceIP:"203.0.113.10",
-		Transport:"tcp",Result:"CONNECTING",StartedAt:old,EndedAt:old,
+	security, err := NewSecurityManager(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-time.Minute)
+	first := repository.RDPSecurityLog{
+		ID: "old-session", IngressID: "ingress-a", SourceIP: "203.0.113.10",
+		Transport: "tcp", Result: "CONNECTING", StartedAt: old, EndedAt: old,
 	}
 	security.Record(first)
-	deleted,err:=security.ClearLogs(context.Background(),"203.0.113.10")
-	if err!=nil || deleted!=1 {t.Fatalf("clear failed: %d %v",deleted,err)}
-	first.Result="FORWARDED"
-	first.EndedAt=time.Now().UTC()
+	deleted, err := security.ClearLogs(context.Background(), "203.0.113.10")
+	if err != nil || deleted != 1 {
+		t.Fatalf("clear failed: %d %v", deleted, err)
+	}
+	first.Result = "FORWARDED"
+	first.EndedAt = time.Now().UTC()
 	security.Record(first) // Completion from the pre-clear connection.
 	security.Record(repository.RDPSecurityLog{
-		ID:"other-source",IngressID:"ingress-a",SourceIP:"203.0.113.11",Transport:"tcp",
-		Result:"FORWARDED",StartedAt:time.Now().UTC(),EndedAt:time.Now().UTC(),
+		ID: "other-source", IngressID: "ingress-a", SourceIP: "203.0.113.11", Transport: "tcp",
+		Result: "FORWARDED", StartedAt: time.Now().UTC(), EndedAt: time.Now().UTC(),
 	})
 	security.Close()
-	firstPage,err:=db.ListRDPSecurityLogPage("203.0.113.10",1,10)
-	if err!=nil || firstPage.Total!=0 {t.Fatalf("old session resurrected: %+v %v",firstPage,err)}
-	otherPage,err:=db.ListRDPSecurityLogPage("203.0.113.11",1,10)
-	if err!=nil || otherPage.Total!=1 {t.Fatalf("other IP unexpectedly cleared: %+v %v",otherPage,err)}
+	firstPage, err := db.ListRDPSecurityLogPage("203.0.113.10", 1, 10)
+	if err != nil || firstPage.Total != 0 {
+		t.Fatalf("old session resurrected: %+v %v", firstPage, err)
+	}
+	otherPage, err := db.ListRDPSecurityLogPage("203.0.113.11", 1, 10)
+	if err != nil || otherPage.Total != 1 {
+		t.Fatalf("other IP unexpectedly cleared: %+v %v", otherPage, err)
+	}
 }

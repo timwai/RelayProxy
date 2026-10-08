@@ -44,7 +44,7 @@ type Endpoint struct {
 
 var (
 	endpointPortCursor atomic.Uint32
-	mapUPnPUDP         = p2pupnp.MapUDP
+	mapUPnPUDP         = p2pupnp.MapUDPWithPortRange
 )
 
 func NewEndpoint(rendezvous string) *Endpoint {
@@ -134,7 +134,7 @@ func (e *Endpoint) Start(ctx context.Context) error {
 		go func() {
 			mapCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			defer cancel()
-			mapping, address, mapErr := mapUPnPUDP(mapCtx, port)
+			mapping, address, mapErr := mapUPnPUDP(mapCtx, port, e.portStart, e.portEnd)
 			upnpResultCh <- upnpResult{mapping: mapping, address: address, err: mapErr}
 		}()
 	}

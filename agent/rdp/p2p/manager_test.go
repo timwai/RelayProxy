@@ -19,7 +19,7 @@ func TestCandidateUpdateArrivesBeforeControllerSession(t *testing.T) {
 	manager.HandleControl(protocol.RDPControlMessage{
 		Type: protocol.RDPControlCandidateUpdate, SessionID: 81,
 		SessionToken: token,
-		Candidates: []protocol.RDPCandidate{{Protocol: "udp", Type: "reflexive", Address: newAddress}},
+		Candidates:   []protocol.RDPCandidate{{Protocol: "udp", Type: "reflexive", Address: newAddress}},
 	})
 	item := manager.newSession(81, "controller", "target", token,
 		[]protocol.RDPCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.20:12345"}}, 0)
@@ -43,7 +43,7 @@ func TestCandidateUpdateRejectsOtherSessionToken(t *testing.T) {
 	manager.HandleControl(protocol.RDPControlMessage{
 		Type: protocol.RDPControlCandidateUpdate, SessionID: 82,
 		SessionToken: []byte("wrong-token-1234"),
-		Candidates: []protocol.RDPCandidate{{Protocol: "udp", Type: "lan", Address: "198.51.100.20:4444"}},
+		Candidates:   []protocol.RDPCandidate{{Protocol: "udp", Type: "lan", Address: "198.51.100.20:4444"}},
 	})
 	item.mu.Lock()
 	got := append([]protocol.RDPCandidate(nil), item.candidates...)

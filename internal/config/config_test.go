@@ -104,7 +104,6 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	}
 }
 
-
 func TestLoadAgentConfigAcceptsUnknownLegacyFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	data := []byte(`server:

@@ -262,6 +262,7 @@ func main() {
 		P2PIdleTimeout:        time.Duration(cfgFile.P2P.IdleTimeoutSec) * time.Second,
 		P2PMaxSessions:        cfgFile.P2P.MaxExitSessions,
 		P2PFallback:           cfgFile.P2P.Fallback,
+		P2PUPnPAllowed:        cfgFile.P2P.UPnPAllowed,
 		PublicDirectAdvertise: cfgFile.Direct.Public.Advertise,
 		AllowInternet:         cfgFile.Exit.AllowInternet,
 		AllowPrivateNet:       cfgFile.Exit.AllowPrivateNetwork,

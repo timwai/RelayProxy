@@ -137,7 +137,7 @@ func TestEndpointRejectsInvalidUDPPortRange(t *testing.T) {
 func TestEndpointPublishesUPnPCandidate(t *testing.T) {
 	previous := mapUPnPUDP
 	defer func() { mapUPnPUDP = previous }()
-	mapUPnPUDP = func(ctx context.Context, internalPort int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+	mapUPnPUDP = func(ctx context.Context, internalPort, portStart, portEnd int) (*p2pupnp.Mapping, netip.AddrPort, error) {
 		if internalPort == 0 {
 			t.Fatal("UPnP mapper received zero internal port")
 		}
@@ -166,7 +166,7 @@ func TestEndpointPublishesUPnPCandidate(t *testing.T) {
 func TestEndpointUPnPFailureIsNonFatal(t *testing.T) {
 	previous := mapUPnPUDP
 	defer func() { mapUPnPUDP = previous }()
-	mapUPnPUDP = func(context.Context, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+	mapUPnPUDP = func(context.Context, int, int, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
 		return nil, netip.AddrPort{}, errors.New("router does not support UPnP")
 	}
 
@@ -189,7 +189,7 @@ func TestEndpointUPnPRenewalUpdatesAndWithdrawsCandidates(t *testing.T) {
 	defer func() { mapUPnPUDP = previous }()
 	oldAddress := netip.MustParseAddrPort("198.51.100.44:45678")
 	newAddress := netip.MustParseAddrPort("198.51.100.44:45679")
-	mapUPnPUDP = func(context.Context, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+	mapUPnPUDP = func(context.Context, int, int, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
 		return nil, oldAddress, nil
 	}
 	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)

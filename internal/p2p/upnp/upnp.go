@@ -44,14 +44,28 @@ type service struct {
 	gatewayIP   netip.Addr // pinned during SSDP description discovery
 }
 
+// MappingUpdate reports when a UPnP candidate becomes invalid or changes.
+// Consumers must withdraw the old address from rendezvous signaling.
+type MappingUpdate struct {
+	Address netip.AddrPort
+	Healthy bool
+	Reason  string
+}
+
 type Mapping struct {
 	service        service
 	internalClient string
 	internalPort   uint16
 	externalPort   uint16
+	externalIP     netip.Addr
 	leaseSeconds   uint32
 	done           chan struct{}
 	closeOnce      sync.Once
+	opMu           sync.Mutex // serializes renew, remap, and final delete
+	statusMu       sync.RWMutex
+	status         MappingUpdate
+	updates        chan MappingUpdate
+	closeErr       error
 }
 
 type rootDescription struct {
@@ -118,18 +132,20 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 			lastErr = err
 			continue
 		}
+		address := netip.AddrPortFrom(externalIP, externalPort)
 		m := &Mapping{
-			service:        svc,
-			internalClient: internalIP.String(),
-			internalPort:   uint16(internalPort),
-			externalPort:   externalPort,
-			leaseSeconds:   leaseSeconds,
-			done:           make(chan struct{}),
+			service: svc, internalClient: internalIP.String(),
+			internalPort: uint16(internalPort), externalPort: externalPort,
+			externalIP: externalIP, leaseSeconds: leaseSeconds,
+			done: make(chan struct{}), updates: make(chan MappingUpdate, 1),
+			status: MappingUpdate{Address: address, Healthy: true},
 		}
-		if leaseSeconds > 0 {
-			go m.refreshLoop()
+		if ctx.Err() != nil {
+			_ = m.Close()
+			return nil, netip.AddrPort{}, ctx.Err()
 		}
-		return m, netip.AddrPortFrom(externalIP, externalPort), nil
+		go m.refreshLoop()
+		return m, address, nil
 	}
 	if lastErr != nil {
 		return nil, netip.AddrPort{}, fmt.Errorf("%w: %v", ErrUnavailable, lastErr)
@@ -137,20 +153,76 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 	return nil, netip.AddrPort{}, ErrUnavailable
 }
 
+// Updates returns a bounded, coalesced stream of state transitions.
+func (m *Mapping) Updates() <-chan MappingUpdate {
+	if m == nil {
+		return nil
+	}
+	return m.updates
+}
+
+func (m *Mapping) Status() MappingUpdate {
+	if m == nil {
+		return MappingUpdate{Healthy: false, Reason: "UPnP mapping is unavailable"}
+	}
+	m.statusMu.RLock()
+	defer m.statusMu.RUnlock()
+	return m.status
+}
+
+// publish is called only while opMu is held so updates cannot overtake Close.
+func (m *Mapping) publish(next MappingUpdate) {
+	m.statusMu.Lock()
+	prior := m.status
+	if prior == next {
+		m.statusMu.Unlock()
+		return
+	}
+	m.status = next
+	m.statusMu.Unlock()
+	if m.updates != nil {
+		select {
+		case m.updates <- next:
+		default:
+			select {
+			case <-m.updates:
+			default:
+			}
+			select {
+			case m.updates <- next:
+			default:
+			}
+		}
+	}
+}
+
 func (m *Mapping) Close() error {
 	if m == nil {
 		return nil
 	}
-	var closeErr error
 	m.closeOnce.Do(func() {
 		if m.done != nil {
 			close(m.done)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		// Wait for in-flight SOAP AddPortMapping to complete, preventing
+		// a racing refresh from reopening a successfully removed port.
+		m.opMu.Lock()
+		defer m.opMu.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
-		closeErr = m.service.deletePortMapping(ctx, m.externalPort)
+		// A lease may have expired and the port may now belong to another
+		// device. Never delete a mapping without checking its ownership.
+		ownerIP, ownerPort, err := m.service.mappingOwner(ctx, m.externalPort)
+		if err == nil && (ownerIP != m.internalClient || ownerPort != m.internalPort) {
+			err = errors.New("UPnP mapping ownership changed; refusing to delete another device's port")
+		}
+		if err == nil {
+			err = m.service.deletePortMapping(ctx, m.externalPort)
+		}
+		m.closeErr = err
+		m.publish(MappingUpdate{Healthy: false, Reason: "closed"})
 	})
-	return closeErr
+	return m.closeErr
 }
 
 func (m *Mapping) refreshLoop() {
@@ -158,18 +230,58 @@ func (m *Mapping) refreshLoop() {
 	if interval < time.Minute {
 		interval = time.Minute
 	}
-	timer := time.NewTicker(interval)
+	timer := time.NewTimer(interval)
 	defer timer.Stop()
 	for {
 		select {
 		case <-m.done:
 			return
 		case <-timer.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			_ = m.service.addPortMapping(ctx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds)
-			cancel()
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := m.refresh(ctx)
+		cancel()
+		next := interval
+		if err != nil {
+			// Retry promptly after router reboot, IP change, or a timeout.
+			// The ongoing lease is never extended without confirmation.
+			next = 30 * time.Second
+		}
+		timer.Reset(next)
+	}
+}
+
+// refresh is intentionally separate from the timer for deterministic tests.
+func (m *Mapping) refresh(ctx context.Context) error {
+	m.opMu.Lock()
+	defer m.opMu.Unlock()
+	select {
+	case <-m.done:
+		return net.ErrClosed
+	default:
+	}
+	err := m.service.addPortMapping(ctx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds)
+	if soapErrorCode(err) == 718 {
+		// A different owner now occupies the port. Try a fresh random
+		// port rather than deleting or overwriting the other mapping.
+		var nextPort uint16
+		nextPort, _, err = m.service.addAvailableUDPMapping(ctx, m.internalClient, m.internalPort)
+		if err == nil {
+			m.externalPort = nextPort
 		}
 	}
+	if err != nil {
+		m.publish(MappingUpdate{Healthy: false, Reason: err.Error()})
+		return err
+	}
+	ip, err := m.service.externalIPAddress(ctx)
+	if err != nil {
+		m.publish(MappingUpdate{Healthy: false, Reason: err.Error()})
+		return err
+	}
+	m.externalIP = ip
+	m.publish(MappingUpdate{Healthy: true, Address: netip.AddrPortFrom(ip, m.externalPort)})
+	return nil
 }
 
 func discoverServices(ctx context.Context) ([]service, error) {
@@ -554,6 +666,24 @@ func (s service) addPortMapping(ctx context.Context, externalPort, internalPort 
 	}
 	_, err := s.soap(ctx, "AddPortMapping", args)
 	return err
+}
+
+// mappingOwner verifies that the external UDP mapping still points to this
+// Agent before Close deletes it. Failing closed is safer than deleting another
+// device's mapping if the router recycled the external port.
+func (s service) mappingOwner(ctx context.Context, externalPort uint16) (string, uint16, error) {
+	body, err := s.soap(ctx, "GetSpecificPortMappingEntry", map[string]string{
+		"NewRemoteHost": "", "NewExternalPort": strconv.Itoa(int(externalPort)), "NewProtocol": "UDP",
+	})
+	if err != nil {
+		return "", 0, err
+	}
+	client := xmlElementText(body, "NewInternalClient")
+	port, err := strconv.ParseUint(xmlElementText(body, "NewInternalPort"), 10, 16)
+	if err != nil || client == "" || port == 0 {
+		return "", 0, errors.New("UPnP router returned incomplete mapping ownership")
+	}
+	return client, uint16(port), nil
 }
 
 func (s service) deletePortMapping(ctx context.Context, externalPort uint16) error {

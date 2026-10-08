@@ -90,6 +90,67 @@ func TestManagersExchangeOfferAndAnswer(t *testing.T) {
 	}
 }
 
+// A pushed answer may arrive before connect_request returns and the client
+// session exists. It must be replayed rather than discarded.
+func TestConnectAnswerBeforeClientSessionIsRegistered(t *testing.T) {
+	token := []byte("0123456789abcdef0123456789abcdef")
+	var manager *Manager
+	manager = NewManager(context.Background(), func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		if message.Type != protocol.P2PControlConnectRequest {
+			t.Fatalf("unexpected signaling type: %s", message.Type)
+		}
+		manager.HandleControl(protocol.P2PControlMessage{
+			Type: protocol.P2PControlConnectAnswer, SessionID: 601,
+			SessionToken: token, PeerFingerprint: "sha256:exit",
+			Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.20:52000"}},
+		})
+		return protocol.P2PControlMessage{
+			Type: protocol.P2PControlLeaseAck, SessionID: 601,
+			ClientDeviceID: "client", ExitDeviceID: "exit", SessionToken: token,
+		}, nil
+	}, testDescription("192.0.2.10:51000", "sha256:client"), time.Minute)
+	defer manager.Close()
+
+	item, err := manager.StartClient(context.Background(), "exit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := item.Snapshot()
+	if snapshot.PeerFingerprint != "sha256:exit" || len(snapshot.PeerCandidates) != 1 {
+		t.Fatalf("early answer was lost: %#v", snapshot)
+	}
+	manager.mu.Lock()
+	pending := len(manager.pendingAnswers)
+	manager.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("unconsumed early answers: %d", pending)
+	}
+}
+
+func TestUnansweredEndpointSessionExpires(t *testing.T) {
+	manager := NewManager(context.Background(), nil, nil, time.Minute)
+	defer manager.Close()
+	item := manager.newSessionWithEndpoint(
+		602, "client", "exit", []byte("0123456789abcdef0123456789abcdef"),
+		time.Now().Add(time.Minute).UnixMilli(), &Endpoint{},
+	)
+	if item == nil {
+		t.Fatal("could not create session")
+	}
+	item.mu.Lock()
+	item.clientRole = true
+	item.mu.Unlock()
+	go item.expireUnanswered(10 * time.Millisecond)
+	select {
+	case <-item.closed:
+	case <-time.After(time.Second):
+		t.Fatal("unanswered session never expired")
+	}
+	if _, ok := manager.Session(602); ok {
+		t.Fatal("unanswered session remains registered")
+	}
+}
+
 func TestRevokeClosesLocalSession(t *testing.T) {
 	ctx := context.Background()
 	token := []byte("0123456789abcdef0123456789abcdef")

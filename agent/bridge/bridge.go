@@ -298,6 +298,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.P2P.IdleTimeoutSec = int(c.P2PIdleTimeout / time.Second)
 	res.P2P.MaxExitSessions = c.P2PMaxSessions
 	res.P2P.Fallback = c.P2PFallback
+	res.P2P.UPnPAllowed = c.P2PUPnPAllowed
 	res.Direct.Public.Advertise = c.PublicDirectAdvertise
 	res.Exit.AllowInternet = c.AllowInternet
 	res.Exit.AllowPrivateNetwork = c.AllowPrivateNet
@@ -339,6 +340,7 @@ type ConfigUpdate struct {
 		IdleTimeoutSec  *int    `json:"idleTimeoutSec"`
 		MaxExitSessions *int    `json:"maxExitSessions"`
 		Fallback        *bool   `json:"fallback"`
+		UPnPAllowed     *bool   `json:"upnpAllowed"`
 	} `json:"p2p"`
 	Direct struct {
 		Public struct {
@@ -492,6 +494,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.P2P.Fallback != nil {
 		cfg.P2P.Fallback = config.BoolPtr(*in.P2P.Fallback)
+	}
+	if in.P2P.UPnPAllowed != nil {
+		cfg.P2P.UPnPAllowed = config.BoolPtr(*in.P2P.UPnPAllowed)
 	}
 	if in.Direct.Public.Advertise != nil {
 		cfg.Direct.Public.Advertise = strings.TrimSpace(*in.Direct.Public.Advertise)
@@ -699,6 +704,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"P2P 打洞超时": c.P2P.PunchTimeoutMs, "P2P Keepalive": c.P2P.KeepaliveSec,
 		"P2P 空闲超时": c.P2P.IdleTimeoutSec, "P2P 会话上限": c.P2P.MaxExitSessions,
 		"P2P Relay 回退": enabled(c.P2P.Fallback),
+		"P2P 本机 UPnP 授权": c.P2P.UPnPAllowed != nil && *c.P2P.UPnPAllowed,
 		"公网直连广播地址":     c.Direct.Public.Advertise,
 		"SOCKS5 开关":    enabled(c.Proxy.SOCKS5.Enabled), "SOCKS5 地址": c.Proxy.SOCKS5.Listen,
 		"SOCKS5 端口": c.Proxy.SOCKS5.Port, "HTTP 开关": enabled(c.Proxy.HTTP.Enabled),

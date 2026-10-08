@@ -2350,6 +2350,7 @@ class MainActivity : Activity() {
                 "MAPPED" -> "已映射 · " + upnpAddress
                 "DEGRADED" -> "映射失效 · " + upnpError
                 "FAILED" -> "映射失败 · " + upnpError
+                "CGNAT" -> "上游 NAT / 非公网 WAN · " + upnpError
                 "IDLE" -> "已允许 · 等待 P2P"
                 else -> if (config.upnpAllowed) "等待 Server 启用" else "本机未允许"
             }

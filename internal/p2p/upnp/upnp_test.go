@@ -31,7 +31,7 @@ func TestServiceRankPrefersWANIPV2(t *testing.T) {
 		"urn:schemas-upnp-org:service:WANIPConnection:1":  20,
 		"urn:schemas-upnp-org:service:WANPPPConnection:1": 10,
 		"urn:schemas-upnp-org:service:Layer3Forwarding:1": 0,
-		"evil:WANIPConnection:2":                      0,
+		"evil:WANIPConnection:2":                          0,
 	}
 	for serviceType, want := range cases {
 		if got := serviceRank(serviceType); got != want {

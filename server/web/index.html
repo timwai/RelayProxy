@@ -168,6 +168,35 @@
         <div class="page-heading"><div><p class="eyebrow">RDP PUBLIC INGRESS</p><h1>RDP 公网入口</h1><p class="muted">默认关闭；每个入口固定一个 TCP/UDP 端口，并由目标设备的公网能力、来源 CIDR、过期时间和速率共同约束。</p></div></div>
         <article class="panel rp-card rdp-ingress-panel"><div class="panel-heading rp-card-heading"><h2>创建受控入口</h2><span class="badge warning-badge">默认关闭</span></div><p id="rdp-ingress-global-hint" class="field-hint"></p><form id="rdp-ingress-form" class="rdp-ingress-form"><div class="form-grid three"><div><label for="rdp-ingress-target">目标设备</label><select id="rdp-ingress-target" required></select></div><div><label for="rdp-ingress-port">监听端口（可留空自动分配）</label><input id="rdp-ingress-port" type="number" min="1" max="65535" placeholder="自动分配"></div><div><label for="rdp-ingress-rate">每来源 IP 每分钟上限</label><input id="rdp-ingress-rate" type="number" min="1" max="100000" value="120" required></div></div><div class="form-grid"><div><label for="rdp-ingress-cidrs">来源 CIDR（每行一条）</label><textarea id="rdp-ingress-cidrs" rows="4" class="mono" placeholder="203.0.113.0/24"></textarea><small>留空表示 IPv4/IPv6 全部来源；生产环境建议填写固定办公出口网段。</small></div><div><label for="rdp-ingress-expires">过期时间（可选）</label><input id="rdp-ingress-expires" type="datetime-local"><small>到期后立即拒绝新连接，已建立的连接由入口服务关闭。</small></div></div><p id="rdp-ingress-error" class="form-error" role="alert" hidden></p><div class="button-row"><button type="submit" class="primary rp-btn rp-btn-primary">创建入口</button></div></form></article>
         <article class="panel rp-card rdp-ingress-panel"><div class="panel-heading rp-card-heading"><h2>已分配入口</h2><button id="rdp-ingress-refresh" type="button" class="small-button rp-btn">刷新</button></div><div class="table-wrap"><table class="rdp-ingress-table"><thead><tr><th>目标</th><th>端口</th><th>来源</th><th>速率 / 过期</th><th>TCP / UDP</th><th>状态</th><th class="right">操作</th></tr></thead><tbody id="rdp-ingress-body"></tbody></table></div></article>
+        <article class="panel rp-card rdp-ingress-panel">
+          <div class="panel-heading rp-card-heading"><h2>RDP 连接审计</h2><button id="rdp-security-refresh" type="button" class="small-button rp-btn">刷新</button></div>
+          <p class="field-hint">记录公网 TCP 连接和 UDP 关联；“转发成功”仅表示隧道建立，不代表 Windows 登录成功。默认展示最近 100 条。</p>
+          <div class="toolbar"><input id="rdp-security-ip-filter" type="search" placeholder="筛选来源 IP"><span id="rdp-security-log-count" class="muted"></span></div>
+          <div class="table-wrap"><table class="rdp-ingress-table"><thead><tr><th>连接时间</th><th>来源 IP</th><th>入口 / 目标设备</th><th>协议</th><th>状态 / 原因</th><th class="right">操作</th></tr></thead><tbody id="rdp-security-logs-body"></tbody></table></div>
+        </article>
+        <article class="panel rp-card rdp-ingress-panel">
+          <div class="panel-heading rp-card-heading"><h2>IP 黑名单 / 白名单</h2><span class="badge neutral">支持 IPv4 / IPv6 / CIDR</span></div>
+          <form id="rdp-security-ban-form">
+            <div class="form-grid three">
+              <div><label for="rdp-security-cidr">IP 或 CIDR</label><input id="rdp-security-cidr" class="mono" placeholder="203.0.113.24" required></div>
+              <div><label for="rdp-security-kind">策略</label><select id="rdp-security-kind"><option value="manual">手动封禁</option><option value="allow">自动封禁白名单</option></select></div>
+              <div><label for="rdp-security-scope">生效范围</label><select id="rdp-security-scope"><option value="">全部公网 RDP 入口</option></select></div>
+            </div>
+            <div class="form-grid">
+              <div><label for="rdp-security-duration">有效期</label><select id="rdp-security-duration"><option value="900">15 分钟</option><option value="3600">1 小时</option><option value="86400">24 小时</option><option value="604800">7 天</option><option value="0">永久</option></select></div>
+              <div><label for="rdp-security-reason">原因</label><input id="rdp-security-reason" maxlength="512" placeholder="手动封禁原因"></div>
+            </div>
+            <p class="field-hint">白名单只豁免自动封禁，不能绕过手动封禁、入口来源 CIDR 和设备授权。</p>
+            <p id="rdp-security-ban-error" class="form-error" role="alert" hidden></p>
+            <div class="button-row"><button type="submit" class="primary rp-btn rp-btn-primary">添加 IP 策略</button></div>
+          </form>
+          <div class="table-wrap"><table class="rdp-ingress-table"><thead><tr><th>IP / CIDR</th><th>类型</th><th>范围</th><th>原因</th><th>过期时间</th><th class="right">操作</th></tr></thead><tbody id="rdp-security-bans-body"></tbody></table></div>
+        </article>
+        <article class="panel rp-card rdp-ingress-panel">
+          <div class="panel-heading rp-card-heading"><h2>自动封禁规则</h2><span class="badge neutral">仅统计新建 TCP 连接</span></div>
+          <p class="field-hint">达到阈值后拒绝同一来源 IP 的后续新连接；与公网入口已有的每分钟限速并行生效。</p>
+          <div class="table-wrap"><table class="rdp-ingress-table"><thead><tr><th>规则</th><th>启用</th><th>窗口（秒）</th><th>连接阈值</th><th>封禁（秒）</th><th class="right">操作</th></tr></thead><tbody id="rdp-security-rules-body"></tbody></table></div>
+        </article>
       </section>
       <section id="page-settings" class="page" hidden>
         <div class="page-heading"><div><p class="eyebrow">CONFIGURATION</p><h1>服务配置</h1><p class="muted">保存至服务端配置文件，重启服务后统一生效。</p></div><span id="config-status" class="badge neutral">正在读取</span></div>

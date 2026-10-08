@@ -15,7 +15,7 @@ func TestWindowsDefaultConfigUsesUserProfile(t *testing.T) {
 	if err != nil || path != filepath.Join(profile, ".relayproxy", agentConfigName) {
 		t.Fatalf("unexpected default path %q: %v", path, err)
 	}
-	if _, err := loadOrCreateAgentConfig(path, []string{filepath.Join(t.TempDir(), "old.yaml")}); err != nil {
+	if _, err := loadOrCreateAgentConfig(path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {

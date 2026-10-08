@@ -581,8 +581,8 @@ func TestFailReadyForExitRemovesBrokenPathAndStartsCooldown(t *testing.T) {
 func TestP2PCandidateUpdateIsRetriedAfterSignalingFailure(t *testing.T) {
 	previous := mapUPnPUDP
 	defer func() { mapUPnPUDP = previous }()
-	oldAddress := netip.MustParseAddrPort("198.51.100.44:45678")
-	mapUPnPUDP = func(context.Context, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
+	oldAddress := netip.MustParseAddrPort("8.8.8.8:45678")
+	mapUPnPUDP = func(context.Context, int, int, int) (*p2pupnp.Mapping, netip.AddrPort, error) {
 		return nil, oldAddress, nil
 	}
 	endpoint := NewEndpointWithPortRangeAndUPnP("", 0, 0, true)

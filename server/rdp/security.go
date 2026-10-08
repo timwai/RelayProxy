@@ -43,7 +43,7 @@ type SecurityManager struct {
 	bans              []compiledBan
 	rules             []repository.RDPSecurityRule
 	counters          map[string]securityWindow
-	logs              chan repository.RDPSecurityLog
+	logs              chan rdpSecurityAuditTask
 	stopping          chan struct{}
 	done              chan struct{}
 	closeOnce         sync.Once

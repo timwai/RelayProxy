@@ -1160,7 +1160,7 @@
     $('channel-identity').disabled = !!(channel && channel.identityId);
     $('channel-name').value = channel ? channel.name : '';
     $('channel-id').value = channel ? channel.id : '';
-    $('channel-id').disabled = !!channel;
+    $('channel-id').disabled = false;
     $('channel-all-devices').checked = channel ? !!channel.allDevices : false;
     $('channel-delete').hidden = !channel;
     renderChannelDevices(channel ? channel.deviceIds : []);
@@ -1193,7 +1193,22 @@
       errorAt('channel-error', '请选择兜底设备、启用全部设备，或至少添加一条内容分流规则。');
       return;
     }
-    if (!state.selectedChannel) body.id = $('channel-id').value.trim();
+    const requestedID = $('channel-id').value.trim();
+    if (requestedID && !/^[A-Za-z0-9._-]{1,80}$/.test(requestedID)) {
+      errorAt('channel-error', '渠道 ID 仅支持 1-80 位英文字母、数字、点、短横线和下划线。');
+      return;
+    }
+    if (state.selectedChannel && !requestedID) {
+      errorAt('channel-error', '编辑渠道时 ID 不能为空。');
+      return;
+    }
+    if (requestedID && state.channels.some(item => item.id === requestedID && (!state.selectedChannel || item.id !== state.selectedChannel.id))) {
+      errorAt('channel-error', '渠道 ID 已存在，请使用不同的 ID。');
+      return;
+    }
+    if (state.selectedChannel && requestedID !== state.selectedChannel.id &&
+        !confirm('修改渠道 ID 后，旧推送 URL 将立即失效，历史消息仍会保留。确定继续吗？')) return;
+    if (requestedID) body.id = requestedID;
     state.channelBusy = true;
     all('#channel-dialog button, #channel-dialog input, #channel-dialog select, #channel-dialog textarea').forEach(el => { el.disabled = true; });
     errorAt('channel-error', '');
@@ -1203,8 +1218,10 @@
       } else {
         await api('/message-channels', { method: 'POST', body: JSON.stringify(body) });
       }
+      const renamed = !!(state.selectedChannel && requestedID !== state.selectedChannel.id);
+      if (renamed && state.messageChannel === state.selectedChannel.id) state.messageChannel = requestedID;
       $('channel-dialog').close();
-      toast(state.selectedChannel ? '渠道已更新' : '渠道已创建');
+      toast(renamed ? '渠道 ID 已更新，请同步修改外部系统的推送 URL' : (state.selectedChannel ? '渠道已更新' : '渠道已创建'));
       state.selectedChannel = null;
       await refresh(true);
     } catch (err) {
@@ -1212,7 +1229,7 @@
     } finally {
       state.channelBusy = false;
       all('#channel-dialog button, #channel-dialog input, #channel-dialog select, #channel-dialog textarea').forEach(el => { el.disabled = false; });
-      $('channel-id').disabled = !!state.selectedChannel;
+      $('channel-id').disabled = false;
       $('channel-identity').disabled = !!(state.selectedChannel && state.selectedChannel.identityId);
       syncRouteRuleDeviceStates();
     }

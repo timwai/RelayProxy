@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -13,14 +14,64 @@ import (
 
 // RDP security APIs are administrator-only. An identity login must not gain
 // visibility into other tenants' source addresses or mutate global bans.
-func (r *Router) handleListRDPSecurityLogs(w http.ResponseWriter, req *http.Request) {
-	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-	rows, err := r.db.ListRDPSecurityLogs(strings.TrimSpace(req.URL.Query().Get("ip")), strings.TrimSpace(req.URL.Query().Get("ingressId")), limit)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list RDP connections")
-		return
+func rdpSecurityPagination(req *http.Request) (int, int, error) {
+	page, size := 1, 20
+	if raw := req.URL.Query().Get("page"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil { return 0, 0, errors.New("invalid page") }
+		page = n
 	}
-	writeJSON(w, http.StatusOK, rows)
+	if raw := req.URL.Query().Get("pageSize"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil { return 0, 0, errors.New("invalid pageSize") }
+		size = n
+	}
+	if page < 1 || page > 100000 || size < 1 || size > 100 {
+		return 0, 0, errors.New("page must be 1-100000; pageSize must be 1-100")
+	}
+	return page, size, nil
+}
+
+func (r *Router) handleListRDPSecurityGroups(w http.ResponseWriter, req *http.Request) {
+	page, size, err := rdpSecurityPagination(req)
+	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	groups, err := r.db.ListRDPSecuritySourceGroups(req.URL.Query().Get("search"), page, size)
+	if err != nil { writeError(w, http.StatusInternalServerError, "failed to list RDP source IP groups"); return }
+	writeJSON(w, http.StatusOK, groups)
+}
+
+func (r *Router) handleListRDPSecurityLogs(w http.ResponseWriter, req *http.Request) {
+	page, size, err := rdpSecurityPagination(req)
+	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	ip := strings.TrimSpace(req.URL.Query().Get("ip"))
+	if ip != "" {
+		address, parseErr := netip.ParseAddr(ip)
+		if parseErr != nil { writeError(w, http.StatusBadRequest, "invalid source IP"); return }
+		ip = address.Unmap().String()
+	}
+	logs, err := r.db.ListRDPSecurityLogPage(ip, page, size)
+	if err != nil { writeError(w, http.StatusInternalServerError, "failed to list RDP connections"); return }
+	writeJSON(w, http.StatusOK, logs)
+}
+
+// Deleting connection audit is separate from deleting bans, allowlist entries,
+// configured ingress or the unrelated regular proxy connection audit.
+func (r *Router) handleClearRDPSecurityLogs(w http.ResponseWriter, req *http.Request) {
+	ip := strings.TrimSpace(req.URL.Query().Get("ip"))
+	if ip != "" {
+		address, err := netip.ParseAddr(ip)
+		if err != nil { writeError(w, http.StatusBadRequest, "invalid source IP"); return }
+		ip = address.Unmap().String()
+	}
+	var count int64
+	var err error
+	if r.onRDPSecurityLogsClear != nil {
+		count, err = r.onRDPSecurityLogsClear(req.Context(), ip)
+	} else {
+		count, err = r.db.DeleteRDPSecurityLogs(ip)
+	}
+	if err != nil { writeError(w, http.StatusInternalServerError, "failed to clear RDP connection audit"); return }
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": count, "sourceIp": ip})
 }
 
 func (r *Router) handleListRDPSecurityBans(w http.ResponseWriter, req *http.Request) {

@@ -56,7 +56,7 @@ build_react_frontend() {
   local dist="$ROOT/agent/gui/react_dist"
 
   command -v node >/dev/null 2>&1 || {
-    echo "ERROR: node was not found. Install Node.js 22+ before building the Windows React desktop client." >&2
+    echo "ERROR: node was not found. Install Node.js 22+ before building the cross-platform React client." >&2
     return 1
   }
   command -v npm >/dev/null 2>&1 || {
@@ -65,7 +65,7 @@ build_react_frontend() {
   }
 
   echo ""
-  echo "[BUILD] Wails React frontend"
+  echo "[BUILD] Cross-platform React frontend"
   if [[ -d "$dist" ]]; then
     find "$dist" -mindepth 1 -maxdepth 1 ! -name README.txt -exec rm -rf {} +
   fi
@@ -106,6 +106,10 @@ build_one() {
   size="$(wc -c < "$out" | tr -d ' ')"
   echo "  OK  $(awk -v s="$size" 'BEGIN{printf "%.2f MB", s/1024/1024}')"
 }
+
+# Bundle React before compiling any Agent. The same embedded frontend is used
+# by Windows Wails, macOS WKWebView and the browser-accessible Agent WebUI.
+build_react_frontend
 
 # Linux + macOS server/agent — hide Windows .syso during cross-compile
 hide_syso
@@ -290,9 +294,7 @@ build_macos_universal
 build_native_macos_app
 
 # Windows client + server (Wails v3 + React assets embedded)
-# Build/test Vite before compiling the Windows Agent so go:embed always contains
-# the current React UI rather than a stale bundle or the legacy fallback page.
-build_react_frontend
+# React was already built before the macOS/Linux Agent binaries.
 
 echo ""
 echo "[TEST] Windows desktop packages (cross-compile compile-check)"

@@ -89,3 +89,73 @@ func isGlobalDirectIP(ip netip.Addr) bool {
 	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() &&
 		!ip.IsLinkLocalUnicast() && !ip.IsUnspecified() && !ip.IsMulticast()
 }
+
+// localEndpointReachable is a conservative, side-effect-free family/route
+// preflight. In particular, Windows can create an udp6 socket even when it has
+// no IPv6 route, only to fail at sendto with WSAENETUNREACH.
+func localEndpointReachable(address string) bool {
+	host, portText, err := net.SplitHostPort(strings.TrimSpace(address))
+	if err != nil {
+		return false
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return false
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		// Legacy verified hostname without a Server-pinned dialAddress.
+		// DNS family choice stays with the normal dialer.
+		return true
+	}
+	ip = ip.Unmap()
+	if ip.Is4() {
+		return true
+	}
+	if !ip.Is6() || !ip.IsGlobalUnicast() {
+		return false
+	}
+	if !localHasIPv6Source() {
+		return false
+	}
+	// UDP connect asks the kernel for a route/source address without sending a
+	// datagram or consuming a one-time Public Direct ticket.
+	conn, err := net.DialUDP("udp6", nil, &net.UDPAddr{IP: net.IP(ip.AsSlice()), Port: port})
+	if err != nil {
+		return false
+	}
+	defer conn.Close()
+	local, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok {
+		return false
+	}
+	source, ok := netip.AddrFromSlice(local.IP)
+	return ok && isUsableIPv6Source(source)
+}
+
+func isUsableIPv6Source(ip netip.Addr) bool {
+	return ip.Is6() && ip.IsGlobalUnicast() && !ip.IsLinkLocalUnicast() &&
+		!ip.IsLoopback() && !ip.IsUnspecified()
+}
+
+func localHasIPv6Source() bool {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			if ip := addressIP(address); isUsableIPv6Source(ip) {
+				return true
+			}
+		}
+	}
+	return false
+}

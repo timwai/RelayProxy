@@ -406,7 +406,6 @@ if command -v zip >/dev/null 2>&1; then
 fi
 echo "  RelayProxy-agent-windows-amd64.zip Agent-only Windows x64 package"
 echo "  SHA256SUMS.txt"
- -count=1
 
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent-gui.exe" "-H=windowsgui"
 build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent.exe"

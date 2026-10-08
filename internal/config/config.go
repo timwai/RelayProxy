@@ -140,6 +140,7 @@ type AgentConfigFile struct {
 		IdleTimeoutSec  int    `yaml:"idle_timeout_sec"`
 		MaxExitSessions int    `yaml:"max_exit_sessions"`
 		Fallback        *bool  `yaml:"fallback"`
+		UPnPAllowed     *bool  `yaml:"upnp_allowed"` // local opt-in; Server enable alone never opens router ports
 	} `yaml:"p2p"`
 
 	Direct struct {
@@ -486,6 +487,9 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	}
 	if cfg.P2P.MaxExitSessions == 0 {
 		cfg.P2P.MaxExitSessions = 4
+	}
+	if cfg.P2P.UPnPAllowed == nil {
+		cfg.P2P.UPnPAllowed = BoolPtr(false)
 	}
 	if cfg.GUI.Theme == "" {
 		cfg.GUI.Theme = "system"

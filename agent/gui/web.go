@@ -570,9 +570,27 @@ const webBridgeJS = `(function () {
   window.goReloadConfig = function () { return json('/api/reload', 'POST', {}); };
   window.goSelectExit = async function (exitId) { await json('/api/select-exit', 'POST', {exitId:exitId}); return 'ok'; };
   window.goSetAutostart = function (enabled) { return json('/api/autostart', 'POST', {enabled:enabled}); };
-  window.goOpenConnections = async function () { window.open('/connections', '_blank', 'noopener'); return 'ok'; };
+  window.goOpenConnections = async function () { if (typeof window.relayNavigate === 'function') { window.relayNavigate('monitor'); return 'ok'; } window.open('/connections', '_blank', 'noopener'); return 'ok'; };
   window.goGetConnections = function () { return request('/api/connections'); };
   window.goClearConnections = function () { return request('/api/connections', {method:'DELETE'}); };
+  window.goCopyClipboard = async function (text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+      return 'ok';
+    }
+    var node = document.createElement('textarea');
+    node.value = String(text || '');
+    node.style.position = 'fixed';
+    node.style.opacity = '0';
+    document.body.appendChild(node);
+    node.select();
+    try {
+      if (!document.execCommand('copy')) throw new Error('无法复制到剪贴板');
+      return 'ok';
+    } finally {
+      node.remove();
+    }
+  };
   window.goOpenConfigDir = async function () { var out = JSON.parse(await request('/api/config-path')); alert('配置文件：' + out.path); };
   window.goRestart = function () {
     if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.relayproxyLifecycle) {

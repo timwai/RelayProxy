@@ -1,6 +1,8 @@
 package rdp
 
 import (
+	"context"
+	"errors"
 	"log"
 	"net/netip"
 	"sync"
@@ -8,6 +10,20 @@ import (
 
 	"relayproxy/server/repository"
 )
+
+// Audits and cleanup operations share a FIFO writer queue so that clearing
+// historical records is not reversed by audit events already queued.
+type rdpSecurityAuditTask struct {
+	entry *repository.RDPSecurityLog
+	clearIP string
+	clearAll bool
+	reply chan rdpSecurityClearResult
+}
+
+type rdpSecurityClearResult struct {
+	deleted int64
+	err error
+}
 
 type securityWindow struct {
 	began time.Time
@@ -35,7 +51,7 @@ type SecurityManager struct {
 
 func NewSecurityManager(db *repository.DB) (*SecurityManager, error) {
 	s := &SecurityManager{db: db, counters: make(map[string]securityWindow),
-		logs: make(chan repository.RDPSecurityLog, 4096), stopping: make(chan struct{}), done: make(chan struct{})}
+		logs: make(chan rdpSecurityAuditTask, 4096), stopping: make(chan struct{}), done: make(chan struct{})}
 	if err := s.Reload(); err != nil {
 		return nil, err
 	}
@@ -168,14 +184,30 @@ func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool
 
 // Record never blocks the incoming RDP connection on a SQLite transaction.
 // If the bounded queue is full, the attempted audit write is logged.
+// Record never blocks an ingress socket on a SQLite write.
 func (s *SecurityManager) Record(entry repository.RDPSecurityLog) {
-	if s == nil {
-		return
-	}
+	if s == nil { return }
 	select {
-	case s.logs <- entry:
+	case s.logs <- rdpSecurityAuditTask{entry: &entry}:
 	default:
 		log.Printf("[RDP Security] audit queue full, dropping connection record")
+	}
+}
+
+// ClearLogs is serialized behind all previously queued audit writes. A
+// source-specific or global clear also suppresses late completion events for
+// connections which began before the clear (so old rows cannot reappear).
+func (s *SecurityManager) ClearLogs(ctx context.Context, sourceIP string) (int64, error) {
+	if s == nil { return 0, errors.New("RDP security unavailable") }
+	task := rdpSecurityAuditTask{clearIP:sourceIP,clearAll:sourceIP=="",reply:make(chan rdpSecurityClearResult,1)}
+	select {
+	case s.logs <- task:
+	case <-ctx.Done(): return 0,ctx.Err()
+	case <-s.stopping: return 0,errors.New("RDP security is stopping")
+	}
+	select {
+	case result:=<-task.reply: return result.deleted,result.err
+	case <-ctx.Done(): return 0,ctx.Err()
 	}
 }
 
@@ -183,15 +215,41 @@ func (s *SecurityManager) writeLoop() {
 	defer close(s.done)
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
-	write := func(entry repository.RDPSecurityLog) {
-		if err := s.db.InsertRDPSecurityLog(entry); err != nil {
-			log.Printf("[RDP Security] Failed to write connection audit: %v", err)
+	var globalClearedAt time.Time
+	sourceClearedAt := make(map[string]time.Time)
+	handle := func(task rdpSecurityAuditTask) {
+		if task.entry != nil {
+			entry:=*task.entry
+			cutoff:=globalClearedAt
+			if at:=sourceClearedAt[entry.SourceIP];at.After(cutoff){cutoff=at}
+			if !cutoff.IsZero() && !entry.StartedAt.After(cutoff) {
+				return
+			}
+			if err:=s.db.InsertRDPSecurityLog(entry);err!=nil{
+				log.Printf("[RDP Security] Failed to write connection audit: %v",err)
+			}
+			return
+		}
+		if task.reply!=nil {
+			deleted,err:=s.db.DeleteRDPSecurityLogs(task.clearIP)
+			if err==nil {
+				clearedAt:=time.Now().UTC()
+				if task.clearAll {
+					globalClearedAt=clearedAt
+					clear(sourceClearedAt)
+				} else {
+					sourceClearedAt[task.clearIP]=clearedAt
+				}
+				// Cleanup requests are administrative, but keep per-IP memory bounded.
+				if len(sourceClearedAt)>8192 {clear(sourceClearedAt)}
+			}
+			task.reply<-rdpSecurityClearResult{deleted:deleted,err:err}
 		}
 	}
 	for {
 		select {
-		case entry := <-s.logs:
-			write(entry)
+		case task:=<-s.logs:
+			handle(task)
 		case <-ticker.C:
 			if err := s.db.PruneRDPSecurityLogs(time.Now().Add(-30 * 24 * time.Hour)); err != nil {
 				log.Printf("[RDP Security] Failed to prune expired logs: %v", err)
@@ -199,10 +257,8 @@ func (s *SecurityManager) writeLoop() {
 		case <-s.stopping:
 			for {
 				select {
-				case entry := <-s.logs:
-					write(entry)
-				default:
-					return
+				case task:=<-s.logs: handle(task)
+				default: return
 				}
 			}
 		}

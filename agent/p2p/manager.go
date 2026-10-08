@@ -57,6 +57,7 @@ type Manager struct {
 
 	mu               sync.Mutex
 	sessions         map[uint64]*Session
+	pendingAnswers   map[uint64]protocol.P2PControlMessage
 	starting         map[string]uint64
 	cooldowns        map[string]failureState
 	fallbacks        map[string]uint64
@@ -165,7 +166,7 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 		punchTimeout: 1200 * time.Millisecond, keepAlive: 10 * time.Second, idleTimeout: 120 * time.Second, maxExitSessions: 4,
 		lowPowerIdleTimeout: 60 * time.Second, lowPowerMaxSessions: 1,
 		networkCheckInterval: 10 * time.Second, networkSignature: CurrentNetworkSignature,
-		sessions: make(map[uint64]*Session), starting: make(map[string]uint64), cooldowns: make(map[string]failureState),
+		sessions: make(map[uint64]*Session), pendingAnswers: make(map[uint64]protocol.P2PControlMessage), starting: make(map[string]uint64), cooldowns: make(map[string]failureState),
 		fallbacks: make(map[string]uint64), ready: make(chan *Session, 1024),
 	}
 }
@@ -225,6 +226,7 @@ func (m *Manager) Close() error {
 		items = append(items, item)
 	}
 	m.sessions = make(map[uint64]*Session)
+	m.pendingAnswers = make(map[uint64]protocol.P2PControlMessage)
 	m.mu.Unlock()
 	for _, item := range items {
 		item.closeLocal()
@@ -374,8 +376,30 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	item.lastUsed.Store(time.Now().UnixMilli())
 	item.mu.Unlock()
 	item.setPeerCapabilities(response.PeerCapabilities)
-	item.setState(StateRendezvous, "")
+	// The Exit can answer before connect_request returns and registers this
+	// session. Consume any early answer only after client-side state is ready.
+	m.mu.Lock()
+	pending, hasPending := m.pendingAnswers[item.ID]
+	delete(m.pendingAnswers, item.ID)
+	m.mu.Unlock()
+	if hasPending {
+		m.applyConnectAnswer(item, pending)
+	}
 	return item, nil
+}
+
+func (m *Manager) applyConnectAnswer(item *Session, message protocol.P2PControlMessage) {
+	if item == nil || !item.matchesToken(message.SessionToken) {
+		return
+	}
+	item.setPeer(message.Candidates, message.PeerFingerprint)
+	item.setPeerCapabilities(message.PeerCapabilities)
+	if message.LeaseExpiresAt > 0 {
+		item.ExpiresAt.Store(message.LeaseExpiresAt)
+	}
+	if item.hasEndpoint() {
+		go item.establish(true)
+	}
 }
 
 func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
@@ -389,20 +413,27 @@ func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
 		}
 		go m.handleOffer(message)
 	case protocol.P2PControlConnectAnswer:
+		if message.SessionID == 0 || len(message.SessionToken) < 16 {
+			return
+		}
 		m.mu.Lock()
 		item := m.sessions[message.SessionID]
+		if item == nil {
+			// Server push streams and the initiating request use different
+			// Relay streams; their delivery order is not guaranteed.
+			if len(m.pendingAnswers) >= 128 {
+				for id := range m.pendingAnswers {
+					delete(m.pendingAnswers, id)
+					break
+				}
+			}
+			message.SessionToken = append([]byte(nil), message.SessionToken...)
+			message.Candidates = append([]protocol.P2PCandidate(nil), message.Candidates...)
+			m.pendingAnswers[message.SessionID] = message
+		}
 		m.mu.Unlock()
-		if item != nil && item.matchesToken(message.SessionToken) {
-			item.setPeer(message.Candidates, message.PeerFingerprint)
-			item.setPeerCapabilities(message.PeerCapabilities)
-			if message.LeaseExpiresAt > 0 {
-				item.ExpiresAt.Store(message.LeaseExpiresAt)
-			}
-			if item.hasEndpoint() {
-				go item.establish(true)
-			} else {
-				item.setState(StateRendezvous, "")
-			}
+		if item != nil {
+			m.applyConnectAnswer(item, message)
 		}
 	case protocol.P2PControlCandidateUpdate:
 		m.mu.Lock()
@@ -644,7 +675,27 @@ func (m *Manager) newSessionWithEndpoint(id uint64, clientDeviceID, exitDeviceID
 		old.closeLocal()
 	}
 	go item.renewLoop()
+	if endpoint != nil {
+		go item.expireUnanswered(15 * time.Second)
+	}
 	return item
+}
+
+// expireUnanswered prevents a missing or reordered signaling message from
+// holding a lease alive indefinitely via renewLoop.
+func (s *Session) expireUnanswered(timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-s.closed:
+		return
+	case <-s.manager.ctx.Done():
+		return
+	case <-timer.C:
+	}
+	if s.State() == StateRendezvous {
+		s.failDirect(errors.New("P2P connect answer timeout"))
+	}
 }
 
 func (m *Manager) remove(id uint64) {
@@ -1207,6 +1258,7 @@ func (m *Manager) invalidateNetwork() {
 		}
 	}
 	m.sessions = make(map[uint64]*Session)
+	m.pendingAnswers = make(map[uint64]protocol.P2PControlMessage)
 	m.cooldowns = make(map[string]failureState)
 	m.starting = make(map[string]uint64)
 	m.mu.Unlock()

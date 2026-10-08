@@ -336,7 +336,7 @@ type ConfigUpdate struct {
 		Enabled *bool   `json:"enabled"`
 		Address *string `json:"address"`
 	} `json:"rdp"`
-	P2P       struct {
+	P2P struct {
 		Enabled         *bool   `json:"enabled"`
 		Mode            *string `json:"mode"`
 		PunchTimeoutMs  *int    `json:"punchTimeoutMs"`

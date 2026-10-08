@@ -5,6 +5,7 @@ package p2p
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log"
@@ -36,6 +37,7 @@ type Manager struct {
 	udp        *net.UDPConn
 	candidates []protocol.RDPCandidate
 	sessions   map[uint64]*Session
+	pendingUpdates map[uint64]protocol.RDPControlMessage
 	tcpSem     chan struct{}
 	rendezvous string
 	closed     atomic.Bool
@@ -78,7 +80,7 @@ func NewManager(parent context.Context, send ControlSender, targetAddress string
 		lease = 60 * time.Second
 	}
 	ctx, cancel := context.WithCancel(parent)
-	m := &Manager{ctx: ctx, cancel: cancel, send: send, targetAddr: targetAddress, lease: lease, rendezvous: rendezvous, sessions: make(map[uint64]*Session), tcpSem: make(chan struct{}, maxP2PTCPConnections)}
+	m := &Manager{ctx: ctx, cancel: cancel, send: send, targetAddr: targetAddress, lease: lease, rendezvous: rendezvous, sessions: make(map[uint64]*Session), pendingUpdates: make(map[uint64]protocol.RDPControlMessage), tcpSem: make(chan struct{}, maxP2PTCPConnections)}
 	m.targetMode.Store(true)
 	return m
 }
@@ -108,7 +110,7 @@ func (m *Manager) Start() error {
 			return err
 		}
 	}
-	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
 	if err != nil {
 		if tcp != nil {
 			_ = tcp.Close()
@@ -129,13 +131,13 @@ func (m *Manager) Start() error {
 		m.tcpSem = make(chan struct{}, maxP2PTCPConnections)
 	}
 	m.tcp, m.udp = tcp, udp
-	m.candidates = candidate.Discover(udpPort(udp), tcpPort(tcp))
+	m.candidates = candidate.DiscoverWithLimit(udpPort(udp), tcpPort(tcp), candidate.MaxCandidates-2)
 	m.mu.Unlock()
 	if m.rendezvous != "" {
 		probeCtx, cancel := context.WithTimeout(m.ctx, 2*time.Second)
-		if reflexive, err := candidate.ProbeReflexive(probeCtx, m.rendezvous, udp, "udp"); err == nil {
+		if reflexives, err := candidate.ProbeReflexiveAll(probeCtx, m.rendezvous, udp, "udp"); err == nil {
 			m.mu.Lock()
-			m.candidates = append(m.candidates, reflexive)
+			m.candidates = append(m.candidates, reflexives...)
 			m.mu.Unlock()
 		}
 		cancel()
@@ -180,6 +182,7 @@ func (m *Manager) Close() error {
 		sessions = append(sessions, item)
 	}
 	m.sessions = make(map[uint64]*Session)
+	m.pendingUpdates = make(map[uint64]protocol.RDPControlMessage)
 	m.mu.Unlock()
 	if tcp != nil {
 		_ = tcp.Close()
@@ -254,8 +257,21 @@ func (m *Manager) HandleControl(message protocol.RDPControlMessage) {
 	case protocol.RDPControlCandidateUpdate:
 		m.mu.Lock()
 		item := m.sessions[message.SessionID]
+		if item == nil && message.SessionID != 0 && len(message.SessionToken) >= 16 {
+			// The target can publish its per-session UDP mapping before
+			// connect_request has returned to the controller.
+			if len(m.pendingUpdates) >= 128 {
+				for id := range m.pendingUpdates {
+					delete(m.pendingUpdates, id)
+					break
+				}
+			}
+			message.SessionToken = append([]byte(nil), message.SessionToken...)
+			message.Candidates = append([]protocol.RDPCandidate(nil), message.Candidates...)
+			m.pendingUpdates[message.SessionID] = message
+		}
 		m.mu.Unlock()
-		if item != nil {
+		if item != nil && subtle.ConstantTimeCompare(message.SessionToken, item.Token) == 1 {
 			item.setCandidates(message.Candidates, false)
 		}
 	case protocol.RDPControlLeaseAck:
@@ -293,11 +309,19 @@ func (m *Manager) newSession(id uint64, controllerID, targetID string, token []b
 	if m.sessions == nil {
 		m.sessions = make(map[uint64]*Session)
 	}
-	if old := m.sessions[id]; old != nil {
-		old.closeLocal()
+	// Consume an early candidate update before exposing the new session.
+	if pending, ok := m.pendingUpdates[id]; ok {
+		if subtle.ConstantTimeCompare(pending.SessionToken, item.Token) == 1 {
+			item.setCandidates(pending.Candidates, false)
+		}
+		delete(m.pendingUpdates, id)
 	}
+	old := m.sessions[id]
 	m.sessions[id] = item
 	m.mu.Unlock()
+	if old != nil {
+		old.closeLocal()
+	}
 	go item.renewLoop()
 	return item
 }
@@ -394,7 +418,7 @@ func (m *Manager) startTargetUDP(item *Session) (err error) {
 			item.mu.Unlock()
 		}
 	}()
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
 	if err != nil {
 		return err
 	}
@@ -448,14 +472,14 @@ func (m *Manager) startTargetUDP(item *Session) (err error) {
 	// coordinator forwards it to the controller and keeps the token in memory.
 	// A per-session socket has a different NAT mapping from the registration
 	// socket, so probe the current port instead of reusing a stale candidate.
-	udpCandidates := candidate.Discover(conn.LocalAddr().(*net.UDPAddr).Port, 0)
+	udpCandidates := candidate.DiscoverWithLimit(conn.LocalAddr().(*net.UDPAddr).Port, 0, candidate.MaxCandidates-2)
 	m.mu.Lock()
 	rendezvous := m.rendezvous
 	m.mu.Unlock()
 	if rendezvous != "" {
 		probeCtx, cancel := context.WithTimeout(m.ctx, 2*time.Second)
-		if reflexive, probeErr := candidate.ProbeReflexive(probeCtx, rendezvous, conn, "udp"); probeErr == nil {
-			udpCandidates = append(udpCandidates, reflexive)
+		if reflexives, probeErr := candidate.ProbeReflexiveAll(probeCtx, rendezvous, conn, "udp"); probeErr == nil {
+			udpCandidates = append(udpCandidates, reflexives...)
 		}
 		cancel()
 	}
@@ -700,7 +724,7 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 	// registration socket would let concurrent PacketConn readers steal one
 	// another's authenticated datagrams and would make lease cleanup unable to
 	// close only one association.
-	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +742,7 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 	// The controller's registration socket is not the socket used for this
 	// association. Publish the actual bound port before punching so the target
 	// can validate and reply to the same NAT mapping.
-	localCandidates := candidate.Discover(conn.LocalAddr().(*net.UDPAddr).Port, 0)
+	localCandidates := candidate.DiscoverWithLimit(conn.LocalAddr().(*net.UDPAddr).Port, 0, candidate.MaxCandidates-2)
 	if len(localCandidates) > 0 {
 		s.publishCandidates(ctx, "udp", localCandidates)
 	}
@@ -730,8 +754,8 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 	s.manager.mu.Unlock()
 	if rendezvous != "" {
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		if reflexive, probeErr := candidate.ProbeReflexive(probeCtx, rendezvous, conn, "udp"); probeErr == nil {
-			localCandidates = append(localCandidates, reflexive)
+		if reflexives, probeErr := candidate.ProbeReflexiveAll(probeCtx, rendezvous, conn, "udp"); probeErr == nil {
+			localCandidates = append(localCandidates, reflexives...)
 			s.publishCandidates(ctx, "udp", localCandidates)
 		}
 		cancel()

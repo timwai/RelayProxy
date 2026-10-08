@@ -102,20 +102,16 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	}
 	tunnel.TuneUDPConn(conn)
 	port := conn.LocalAddr().(*net.UDPAddr).Port
-	discovered := candidate.Discover(port, 0)
-	// Leave room for public-path candidates. Hosts with many VPN/virtual
-	// interfaces can otherwise fill MaxCandidates with LAN addresses before
-	// rendezvous or UPnP has a chance to be advertised.
+	// Keep slots for both reflexive families and UPnP without allowing
+	// virtual interfaces to crowd out the only IPv4 or IPv6 candidate.
 	reserved := 0
 	if e.rendezvous != "" {
-		reserved++
+		reserved += 2
 	}
 	if e.upnpEnabled {
 		reserved++
 	}
-	if limit := candidate.MaxCandidates - reserved; limit >= 0 && len(discovered) > limit {
-		discovered = discovered[:limit]
-	}
+	discovered := candidate.DiscoverWithLimit(port, 0, candidate.MaxCandidates-reserved)
 
 	type upnpResult struct {
 		mapping *p2pupnp.Mapping
@@ -135,10 +131,12 @@ func (e *Endpoint) Start(ctx context.Context) error {
 
 	if e.rendezvous != "" {
 		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		reflexive, probeErr := candidate.ProbeReflexive(probeCtx, e.rendezvous, conn, "udp")
+		reflexives, probeErr := candidate.ProbeReflexiveAll(probeCtx, e.rendezvous, conn, "udp")
 		cancel()
 		if probeErr == nil {
-			discovered = appendEndpointCandidate(discovered, reflexive)
+			for _, reflexive := range reflexives {
+				discovered = appendEndpointCandidate(discovered, reflexive)
+			}
 		}
 	}
 

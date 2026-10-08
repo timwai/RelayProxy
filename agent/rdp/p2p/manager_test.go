@@ -11,6 +11,48 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+func TestCandidateUpdateArrivesBeforeControllerSession(t *testing.T) {
+	manager := NewManager(context.Background(), nil, "", time.Minute, "")
+	defer manager.Close()
+	token := []byte("0123456789abcdef0123456789abcdef")
+	newAddress := "198.51.100.20:55000"
+	manager.HandleControl(protocol.RDPControlMessage{
+		Type: protocol.RDPControlCandidateUpdate, SessionID: 81,
+		SessionToken: token,
+		Candidates: []protocol.RDPCandidate{{Protocol: "udp", Type: "reflexive", Address: newAddress}},
+	})
+	item := manager.newSession(81, "controller", "target", token,
+		[]protocol.RDPCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.20:12345"}}, 0)
+	if item == nil {
+		t.Fatal("could not create controller session")
+	}
+	item.mu.Lock()
+	got := append([]protocol.RDPCandidate(nil), item.candidates...)
+	item.mu.Unlock()
+	if len(got) != 1 || got[0].Address != newAddress {
+		t.Fatalf("early candidate update was lost: %#v", got)
+	}
+}
+
+func TestCandidateUpdateRejectsOtherSessionToken(t *testing.T) {
+	manager := NewManager(context.Background(), nil, "", time.Minute, "")
+	defer manager.Close()
+	token := []byte("0123456789abcdef0123456789abcdef")
+	item := manager.newSession(82, "controller", "target", token,
+		[]protocol.RDPCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.20:12345"}}, 0)
+	manager.HandleControl(protocol.RDPControlMessage{
+		Type: protocol.RDPControlCandidateUpdate, SessionID: 82,
+		SessionToken: []byte("wrong-token-1234"),
+		Candidates: []protocol.RDPCandidate{{Protocol: "udp", Type: "lan", Address: "198.51.100.20:4444"}},
+	})
+	item.mu.Lock()
+	got := append([]protocol.RDPCandidate(nil), item.candidates...)
+	item.mu.Unlock()
+	if len(got) != 1 || got[0].Address != "192.0.2.20:12345" {
+		t.Fatalf("unauthenticated candidate update replaced peer endpoints: %#v", got)
+	}
+}
+
 // Exercise the actual target reader and controller dialer together: testing
 // two generic punch clients alone misses mismatched handshake roles.
 func newDirectUDPPair(t testing.TB) (*Session, *net.UDPConn) {

@@ -677,6 +677,7 @@ func (m *Manager) newSessionWithEndpoint(id uint64, clientDeviceID, exitDeviceID
 	go item.renewLoop()
 	if endpoint != nil {
 		go item.expireUnanswered(15 * time.Second)
+		go item.watchLocalCandidates()
 	}
 	return item
 }
@@ -1064,6 +1065,46 @@ func (s *Session) reportPath(path, reason string) {
 			FallbackCount: snapshot.FallbackCount, BytesUp: snapshot.BytesUp, BytesDown: snapshot.BytesDown,
 		})
 	}()
+}
+
+// watchLocalCandidates propagates UPnP renewal failures and remaps to the
+// peer, rather than leaving expired public UDP addresses in the rendezvous
+// candidate list. The endpoint owns and coalesces the latest candidate state.
+func (s *Session) watchLocalCandidates() {
+	if s == nil || s.endpoint == nil || s.manager == nil {
+		return
+	}
+	changes := s.endpoint.CandidateChanges()
+	for {
+		select {
+		case <-s.closed:
+			return
+		case <-s.manager.ctx.Done():
+			return
+		case candidates := <-changes:
+			s.mu.Lock()
+			if s.state == StateClosed {
+				s.mu.Unlock()
+				return
+			}
+			s.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
+			s.mu.Unlock()
+			if s.manager.send == nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
+			response, err := s.manager.send(ctx, protocol.P2PControlMessage{
+				Type: protocol.P2PControlCandidateUpdate, SessionID: s.ID,
+				ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
+				SessionToken: append([]byte(nil), s.Token...),
+				Candidates: append([]protocol.P2PCandidate(nil), candidates...),
+			})
+			cancel()
+			if err == nil && response.Type == protocol.P2PControlLeaseAck && response.LeaseExpiresAt > 0 {
+				s.ExpiresAt.Store(response.LeaseExpiresAt)
+			}
+		}
+	}
 }
 
 func (s *Session) renewLoop() {

@@ -161,10 +161,18 @@ func (e *Endpoint) Start(ctx context.Context) error {
 		if result.err == nil && result.address.IsValid() {
 			upnpMapping = result.mapping
 			upnpAddr = result.address
-			upnpState = "MAPPED"
-			discovered = appendEndpointCandidate(discovered, protocol.P2PCandidate{
-				Protocol: "udp", Type: "reflexive", Address: result.address.String(), Priority: 900,
-			})
+			if p2pupnp.IsPublicWANIPv4(result.address.Addr()) {
+				upnpState = "MAPPED"
+				discovered = appendEndpointCandidate(discovered, protocol.P2PCandidate{
+					Protocol: "udp", Type: "reflexive", Address: result.address.String(), Priority: 900,
+				})
+			} else {
+				// A CGNAT or private WAN still permits a local router mapping,
+				// but must never be advertised as a public direct-path address.
+				upnpState = "CGNAT"
+				upnpError = fmt.Sprintf("router mapped UDP %s, but WAN IP is not publicly routable", result.address)
+				log.Printf("[P2P][UPnP] %s", upnpError)
+			}
 		} else if result.err != nil {
 			upnpError = result.err.Error()
 			if errors.Is(result.err, p2pupnp.ErrNonPublicWAN) {
@@ -261,7 +269,7 @@ func (e *Endpoint) UPnPAddress() string {
 	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
-	if e.upnpState == "MAPPED" && e.upnpAddress.IsValid() {
+	if (e.upnpState == "MAPPED" || e.upnpState == "CGNAT") && e.upnpAddress.IsValid() {
 		return e.upnpAddress.String()
 	}
 	return ""
@@ -297,12 +305,17 @@ func (e *Endpoint) applyUPnPUpdate(update p2pupnp.MappingUpdate) {
 	e.upnpAddress = netip.AddrPort{}
 	if update.Healthy && update.Address.IsValid() {
 		e.upnpAddress = update.Address
-		e.upnpState, e.upnpError = "MAPPED", ""
+		if p2pupnp.IsPublicWANIPv4(update.Address.Addr()) {
+			e.upnpState, e.upnpError = "MAPPED", ""
+		} else {
+			e.upnpState = "CGNAT"
+			e.upnpError = fmt.Sprintf("router mapped UDP %s, but WAN IP is not publicly routable", update.Address)
+		}
 	} else {
 		e.upnpState, e.upnpError = "DEGRADED", update.Reason
 	}
 	updated := append([]protocol.P2PCandidate(nil), e.baseCandidates...)
-	if e.upnpAddress.IsValid() {
+	if e.upnpState == "MAPPED" && e.upnpAddress.IsValid() {
 		updated = appendEndpointCandidate(updated, protocol.P2PCandidate{
 			Protocol: "udp", Type: "reflexive", Address: e.upnpAddress.String(), Priority: 900,
 		})

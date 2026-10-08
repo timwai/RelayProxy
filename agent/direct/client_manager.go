@@ -31,6 +31,9 @@ type ClientManagerOptions struct {
 	Dial           ClientDialFunc
 	RaceDial       ClientRaceDialFunc
 	Now            func() time.Time
+	// EndpointUsable checks local address-family reachability before dialing.
+	// An incompatible endpoint must not consume a one-time Direct ticket.
+	EndpointUsable func(address string) bool
 }
 
 type ClientPathStatus struct {
@@ -59,8 +62,9 @@ type ClientManager struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	clientID func() string
-	raceDial ClientRaceDialFunc
-	now      func() time.Time
+	raceDial      ClientRaceDialFunc
+	endpointUsable func(address string) bool
+	now           func() time.Time
 
 	attemptTimeout time.Duration
 	cooldown       time.Duration
@@ -111,8 +115,12 @@ func NewClientManager(parent context.Context, clientID func() string, options Cl
 	if now == nil {
 		now = time.Now
 	}
+	endpointUsable := options.EndpointUsable
+	if endpointUsable == nil {
+		endpointUsable = localEndpointReachable
+	}
 	return &ClientManager{
-		ctx: ctx, cancel: cancel, clientID: clientID, raceDial: raceDial, now: now,
+		ctx: ctx, cancel: cancel, clientID: clientID, raceDial: raceDial, endpointUsable: endpointUsable, now: now,
 		attemptTimeout: attemptTimeout, cooldown: cooldown, maxCooldown: maxCooldown,
 		entries: make(map[string]*clientEntry),
 	}
@@ -192,8 +200,15 @@ func (m *ClientManager) UpdateInventory(exits []protocol.ProxyExit) {
 			entry.attempted = false
 		}
 		entry.public = public
-		if entry.session == nil && !publicPathUsable(public, now) {
-			entry.lastError = "public direct credentials unavailable"
+		if entry.session == nil {
+			switch {
+			case !publicPathUsable(public, now):
+				entry.lastError = "public direct credentials unavailable"
+			case len(m.reachablePublicEndpoints(public)) == 0:
+				entry.lastError = "public direct unavailable: no endpoint matches the local network IP family"
+			case !entry.attempted:
+				entry.lastError = ""
+			}
 		}
 	}
 	m.mu.Unlock()
@@ -248,7 +263,7 @@ func (m *ClientManager) PreferForExit(exitDeviceID string) bool {
 	if entry.attempted || now.Before(entry.cooldownUntil) {
 		return false
 	}
-	return publicPathUsable(entry.public, now)
+	return publicPathUsable(entry.public, now) && len(m.reachablePublicEndpoints(entry.public)) > 0
 }
 
 // EnsureClient starts at most one bounded attempt. A ticket is marked consumed
@@ -285,8 +300,10 @@ func (m *ClientManager) EnsureClient(exitDeviceID string) bool {
 		}
 		entry.session = nil
 	}
-	endpoints := selectPublicEndpoints(entry.public)
+	endpoints := m.reachablePublicEndpoints(entry.public)
 	if len(endpoints) == 0 {
+		entry.lastEndpoint = ""
+		entry.lastError = "public direct unavailable: no endpoint matches the local network IP family"
 		m.mu.Unlock()
 		return false
 	}
@@ -463,12 +480,20 @@ func (m *ClientManager) PathStatus(exitDeviceID string) (ClientPathStatus, bool)
 		state = "COOLDOWN"
 	} else if entry.attempted {
 		state = "FAILED"
-	} else if !publicPathUsable(entry.public, m.now().UTC()) {
+	} else if !publicPathUsable(entry.public, m.now().UTC()) ||
+		len(m.reachablePublicEndpoints(entry.public)) == 0 {
 		state = "UNAVAILABLE"
 	}
+	reason := entry.lastError
+	endpoint := entry.lastEndpoint
+	if state == "UNAVAILABLE" && publicPathUsable(entry.public, m.now().UTC()) &&
+		len(m.reachablePublicEndpoints(entry.public)) == 0 {
+		reason = "public direct unavailable: no endpoint matches the local network IP family"
+		endpoint = ""
+	}
 	return ClientPathStatus{
-		ExitDeviceID: exitDeviceID, State: state, Endpoint: entry.lastEndpoint,
-		Error: entry.lastError, CooldownUntil: entry.cooldownUntil,
+		ExitDeviceID: exitDeviceID, State: state, Endpoint: endpoint,
+		Error: reason, CooldownUntil: entry.cooldownUntil,
 		FallbackCount: entry.fallbackCount,
 	}, true
 }
@@ -563,6 +588,23 @@ func selectPublicEndpoints(value protocol.ProxyPublicDirectPath) []protocol.Publ
 		return items[i].Address < items[j].Address
 	})
 	return items
+}
+
+// reachablePublicEndpoints preserves Server verification and source priority
+// while excluding network families the local OS cannot route. This check is
+// repeated for every attempt, so switching Wi-Fi/VPN can restore IPv6 paths.
+func (m *ClientManager) reachablePublicEndpoints(value protocol.ProxyPublicDirectPath) []protocol.PublicDirectEndpoint {
+	endpoints := selectPublicEndpoints(value)
+	if m.endpointUsable == nil {
+		return endpoints
+	}
+	usable := endpoints[:0]
+	for _, endpoint := range endpoints {
+		if m.endpointUsable(publicEndpointDialAddress(endpoint)) {
+			usable = append(usable, endpoint)
+		}
+	}
+	return usable
 }
 
 func publicEndpointDialAddress(endpoint protocol.PublicDirectEndpoint) string {

@@ -60,7 +60,7 @@ type Coordinator struct {
 	db                *repository.DB
 	lease             time.Duration
 	rendezvousAddress string
-	hostAuthFailure func(string, protocol.RDPHostAuthFailure) error
+	hostAuthFailure   func(string, protocol.RDPHostAuthFailure) error
 	mu                sync.Mutex
 	registrations     map[string]Registration
 	leases            map[uint64]*Lease

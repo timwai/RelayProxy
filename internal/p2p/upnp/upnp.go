@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/netip"
@@ -180,11 +181,11 @@ func mapUDPOnService(ctx context.Context, svc service, internalPort, portStart, 
 	// advertising to other Agents is a separate decision.
 	externalIP, err := svc.wanIPAddress(ctx)
 	if err != nil {
-		return nil, netip.AddrPort{}, err
+		return nil, netip.AddrPort{}, fmt.Errorf("UPnP router %s GetExternalIPAddress: %w", svc.controlURL.Host, err)
 	}
 	externalPort, leaseSeconds, err := svc.addAvailableUDPMappingRange(ctx, internalIP.String(), uint16(internalPort), portStart, portEnd)
 	if err != nil {
-		return nil, netip.AddrPort{}, err
+		return nil, netip.AddrPort{}, fmt.Errorf("UPnP router %s AddPortMapping UDP %d: %w", svc.controlURL.Host, internalPort, err)
 	}
 	address := netip.AddrPortFrom(externalIP, externalPort)
 	m := &Mapping{
@@ -199,6 +200,7 @@ func mapUDPOnService(ctx context.Context, svc service, internalPort, portStart, 
 		_ = m.Close()
 		return nil, netip.AddrPort{}, ctx.Err()
 	}
+	log.Printf("[P2P][UPnP] router=%s mapped UDP %s:%d -> %s:%d public_wan=%t", svc.controlURL.Host, externalIP, externalPort, internalIP, internalPort, IsPublicWANIPv4(externalIP))
 	go m.refreshLoop()
 	return m, address, nil
 }

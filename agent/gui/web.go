@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"io"
 	"log"
 	"net"
@@ -214,6 +215,7 @@ func setWebHeaders(w http.ResponseWriter) {
 
 func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /ui/", http.StripPrefix("/ui/", webui.Handler()))
+	mux.HandleFunc("GET /assets/", serveReactAsset)
 	mux.HandleFunc("GET /", w.serveIndex)
 	mux.HandleFunc("GET /connections", w.serveConnections)
 	mux.HandleFunc("GET /web-bridge.js", w.serveWebBridge)
@@ -223,6 +225,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
+	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
 	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
@@ -269,7 +272,40 @@ func (w *WebServer) serveIndex(rw http.ResponseWriter, r *http.Request) {
 		http.NotFound(rw, r)
 		return
 	}
+	// The same Vite bundle powers Wails, the browser console and the native
+	// macOS WKWebView. Go-only developer builds still use the legacy page.
+	if data, err := assets.ReadFile("react_dist/index.html"); err == nil {
+		html := strings.Replace(string(data), "<head>", "<head><script src=\"/web-bridge.js\"></script>", 1)
+		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = rw.Write([]byte(html))
+		return
+	}
 	serveHTMLAsset(rw, "assets/index.html")
+}
+
+// serveReactAsset serves only files under the embedded Vite assets directory;
+// the authorization middleware protects bundles just like API endpoints.
+func serveReactAsset(rw http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/assets/")
+	if name == "" || !fs.ValidPath(name) || strings.Contains(name, "/") {
+		http.NotFound(rw, r)
+		return
+	}
+	data, err := assets.ReadFile("react_dist/assets/" + name)
+	if err != nil {
+		http.NotFound(rw, r)
+		return
+	}
+	switch {
+	case strings.HasSuffix(name, ".js"):
+		rw.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+	case strings.HasSuffix(name, ".css"):
+		rw.Header().Set("Content-Type", "text/css; charset=utf-8")
+	default:
+		http.NotFound(rw, r)
+		return
+	}
+	_, _ = rw.Write(data)
 }
 
 func (w *WebServer) serveConnections(rw http.ResponseWriter, _ *http.Request) {
@@ -468,7 +504,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		RestartRequired: state.RestartRequired, RestartFields: state.RestartFields, ReloadPending: state.ReloadPending,
 		Routing: map[string]any{"mode": cfg.Routing.Mode, "default_action": cfg.Routing.DefaultAction, "rules": cfg.Routing.Rules},
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
-			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(),
+			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(), "insecureTls": state.Runtime.Server.InsecureTLS,
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,
 			"direct": map[string]any{"publicAdvertise": state.Runtime.Direct.Public.Advertise},
 			"p2p": map[string]any{
@@ -491,7 +527,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,
-		"exitUpstream": payload.ExitUpstream, "p2p": payload.P2P, "direct": payload.Direct,
+		"exitUpstream": payload.ExitUpstream, "p2p": payload.P2P, "direct": payload.Direct, "publicDirectAdvertise": cfg.Direct.Public.Advertise, "insecureTls": cfg.Server.InsecureTLS,
 		"networkMode": payload.NetworkMode, "isAutostart": payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
 		"verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,
@@ -519,7 +555,7 @@ const webBridgeJS = `(function () {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
   window.goGetStatus = function () { return request('/api/status'); };
-  window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
+  window.goGetNetworkCapabilities = function () { return request('/api/network-capabilities'); };\n  window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
@@ -538,5 +574,12 @@ const webBridgeJS = `(function () {
   window.goGetConnections = function () { return request('/api/connections'); };
   window.goClearConnections = function () { return request('/api/connections', {method:'DELETE'}); };
   window.goOpenConfigDir = async function () { var out = JSON.parse(await request('/api/config-path')); alert('配置文件：' + out.path); };
+  window.goRestart = function () {
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.relayproxyLifecycle) {
+      window.webkit.messageHandlers.relayproxyLifecycle.postMessage('restart');
+      return Promise.resolve('{"ok":true}');
+    }
+    return Promise.resolve('{"ok":false,"message":"浏览器模式请从系统服务管理器重启 relay-agent"}');
+  };
   window.goQuit = function () { return json('/api/quit', 'POST', {}); };
 })();`

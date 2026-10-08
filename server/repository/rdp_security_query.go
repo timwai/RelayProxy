@@ -2,6 +2,7 @@ package repository
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 	var total int64
 	if err:=db.QueryRow(countQuery,pattern).Scan(&total);err!=nil { return nil,err }
 	rows,err:=db.Query(`SELECT l.source_ip,
-		COALESCE(GROUP_CONCAT(DISTINCT COALESCE(NULLIF(d.name,''),NULLIF(l.target_device_id,''),'未知设备')),''),
+		JSON_GROUP_ARRAY(DISTINCT COALESCE(NULLIF(d.name,''),NULLIF(l.target_device_id,''),'未知设备')),
 		COUNT(*), SUM(CASE WHEN l.result = 'FORWARDED' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN l.result = 'REJECTED' THEN 1 ELSE 0 END),
 		COALESCE(SUM(l.bytes_up),0), COALESCE(SUM(l.bytes_down),0),
@@ -64,7 +65,8 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 		var targets string
 		if err:=rows.Scan(&item.SourceIP,&targets,&item.ConnectionCount,&item.ForwardedCount,
 			&item.RejectedCount,&item.BytesUp,&item.BytesDown,&item.FirstSeen,&item.LastSeen);err!=nil {return nil,err}
-		if targets!="" { item.Targets=strings.Split(targets,",") } else { item.Targets=[]string{} }
+		item.Targets=[]string{}
+		if targets!="" { if err:=json.Unmarshal([]byte(targets),&item.Targets);err!=nil {return nil,err} }
 		output.Items=append(output.Items,item)
 	}
 	return output,rows.Err()

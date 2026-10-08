@@ -79,7 +79,7 @@ body {
   font-weight:600;
   transition:background .15s,color .15s;
 }
-.sidebar nav a.active {
+.sidebar nav a.active,html.dark .sidebar nav a.active,html[data-theme="dark"] .sidebar nav a.active {
   background:var(--rp-sidebar-active);
   color:var(--rp-primary);
   box-shadow:none;

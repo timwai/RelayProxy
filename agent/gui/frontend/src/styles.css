@@ -9,7 +9,7 @@ html[data-theme="dark"]{
  --shadow:0 22px 65px rgba(0,0,0,.35);--shadow2:0 8px 30px rgba(0,0,0,.22);--sidebar:rgba(11,18,31,.94)
 }
 *{box-sizing:border-box}
-html,body,#root{margin:0;width:100%;height:100%;overflow:hidden}
+html,body,#root{margin:0;width:100%;height:100%;min-width:0;min-height:0}html,body{overflow:hidden}#root{overflow:hidden}
 body{font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);background:
  radial-gradient(circle at 8% 0%,rgba(111,111,255,.16),transparent 31%),
  radial-gradient(circle at 92% 0%,rgba(22,119,255,.13),transparent 28%),var(--bg)}
@@ -20,7 +20,7 @@ button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 button:disabled{opacity:.45;cursor:not-allowed}
 button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
-.app-shell{display:grid;grid-template-columns:242px minmax(0,1fr);width:100%;height:100%;background:var(--surface);backdrop-filter:blur(24px)}
+.app-shell{display:grid;grid-template-columns:242px minmax(0,1fr);width:100vw;height:100vh;min-width:0;min-height:0;overflow:hidden;background:var(--surface);backdrop-filter:blur(24px)}
 .sidebar{display:flex;flex-direction:column;min-width:0;padding:15px 12px 12px;border-right:1px solid var(--line);background:var(--sidebar);user-select:none}
 .side-brand{height:48px;display:flex;align-items:center;gap:10px;padding:0 9px 10px}
 .side-brand>div:last-child{display:flex;flex-direction:column;line-height:1.15}
@@ -40,11 +40,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .connection-mini>div{display:flex;flex-direction:column}.connection-mini strong{font-size:11px}.connection-mini span:not(.dot){font-size:9px;color:var(--muted)}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--subtle);box-shadow:0 0 0 5px color-mix(in srgb,var(--subtle) 13%,transparent);flex:0 0 auto}
 .dot.online{background:var(--ok);box-shadow:0 0 0 5px color-mix(in srgb,var(--ok) 13%,transparent)}.dot.offline{background:var(--danger);box-shadow:0 0 0 5px color-mix(in srgb,var(--danger) 10%,transparent)}
-.workspace{min-width:0;height:100%;display:flex;flex-direction:column}
+.workspace{min-width:0;min-height:0;height:100vh;overflow:hidden;display:flex;flex-direction:column}
 .topbar{height:52px;min-height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 22px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--surface) 91%,transparent);backdrop-filter:blur(16px);-webkit-app-region:drag}
 .crumb{display:flex;align-items:center;gap:8px;color:var(--muted);min-width:0}.crumb b{color:var(--text);font-weight:700}.top-actions{display:flex;gap:8px;align-items:center;-webkit-app-region:no-drag}
 .icon-btn{border:1px solid var(--line2);background:var(--surface2);width:32px;height:32px;border-radius:9px;color:var(--muted)}.icon-btn:hover{color:var(--text);background:var(--surface3)}
-.main{flex:1;min-height:0;overflow:auto;padding:20px 24px 32px}
+.main{flex:1 1 auto;height:0;min-width:0;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;padding:20px 24px 32px;-webkit-overflow-scrolling:touch}
 .page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:17px}
 .page-head h1{font-size:26px;line-height:1.15;letter-spacing:-.6px;margin:0 0 5px}.page-head p{margin:0;color:var(--muted);line-height:1.55}
 .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.actions.end{justify-content:flex-end}

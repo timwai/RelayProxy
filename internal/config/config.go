@@ -325,21 +325,47 @@ func LoadAgentConfig(path string) (*AgentConfigFile, error) {
 
 // LoadAgentConfigWithRevision binds the decoded config to the exact file read.
 // The revision lets a UI reject a stale read/modify/write operation.
+func decodeAgentConfig(data []byte, knownFields bool) (*AgentConfigFile, error) {
+	cfg := &AgentConfigFile{}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(knownFields)
+	if err := decoder.Decode(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+func isUnknownAgentConfigFieldError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "field ") && strings.Contains(message, " not found in type ")
+}
+
 func LoadAgentConfigWithRevision(path string) (*AgentConfigFile, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("read agent config file failed: %w", err)
 	}
 
-	cfg := &AgentConfigFile{}
-	decoder := yaml.NewDecoder(bytes.NewReader(data))
-	decoder.KnownFields(true)
-	if err := decoder.Decode(cfg); err != nil {
+	cfg, err := decodeAgentConfig(data, true)
+	if err != nil && isUnknownAgentConfigFieldError(err) {
+		// Desktop UI releases must remain able to start with Agent YAML written
+		// by older RelayProxy versions. Retry only unknown-field failures in
+		// compatibility mode; malformed values and type errors stay fatal.
+		cfg, err = decodeAgentConfig(data, false)
+	}
+	if err != nil {
 		return nil, "", fmt.Errorf("unmarshal agent config failed: %w", err)
 	}
 
+	// Older Agent builds used "tun" for system interception. The current
+	// Windows implementation is WinDivert-backed, but the user intent is still
+	// the same: capture system traffic. Migrate in memory instead of refusing
+	// to launch the new GUI.
 	if strings.EqualFold(strings.TrimSpace(cfg.Network.Mode), "tun") {
-		return nil, "", fmt.Errorf("network.mode=tun 已废弃：请改为 divert（系统透明代理）或留空仅使用 SOCKS5/HTTP")
+		cfg.Network.Mode = "divert"
 	}
 
 	if err := NormalizeAgentConfig(cfg); err != nil {

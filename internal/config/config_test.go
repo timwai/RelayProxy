@@ -104,6 +104,64 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	}
 }
 
+
+func TestLoadAgentConfigAcceptsUnknownLegacyFields(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	data := []byte(`server:
+  address: relay.example.test
+legacy_desktop:
+  old_window_mode: native
+proxy:
+  socks5:
+    enabled: true
+    listen: 127.0.0.1
+    port: 1080
+  legacy_proxy_toggle: true
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatalf("legacy Agent config should remain readable: %v", err)
+	}
+	if cfg.Server.Address != "relay.example.test" || cfg.Proxy.SOCKS5.Port != 1080 {
+		t.Fatalf("known values were not preserved: server=%q socks=%d", cfg.Server.Address, cfg.Proxy.SOCKS5.Port)
+	}
+}
+
+func TestLoadAgentConfigMigratesLegacyTunMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte("network:\n  mode: tun\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatalf("legacy tun mode should migrate instead of failing: %v", err)
+	}
+	if cfg.Network.Mode != "divert" {
+		t.Fatalf("network.mode=%q, want divert", cfg.Network.Mode)
+	}
+}
+
+func TestLoadAgentConfigStillRejectsLegacyTypeErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	data := []byte(`server:
+  address: relay.example.test
+legacy_desktop:
+  old_window_mode: native
+proxy:
+  socks5:
+    port: not-a-number
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadAgentConfig(path); err == nil {
+		t.Fatal("compatibility mode must not hide invalid known-field types")
+	}
+}
+
 func TestAgentPlaintextForcesTCPOnlyAndClearsInsecureTLS(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	cfg.Server.TLSEnabled = BoolPtr(false)

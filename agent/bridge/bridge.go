@@ -332,6 +332,10 @@ type ConfigUpdate struct {
 		IdentityID *string `json:"identityId"`
 	} `json:"device"`
 	Transport *string `json:"transport"`
+	RDP       struct {
+		Enabled *bool   `json:"enabled"`
+		Address *string `json:"address"`
+	} `json:"rdp"`
 	P2P       struct {
 		Enabled         *bool   `json:"enabled"`
 		Mode            *string `json:"mode"`
@@ -466,6 +470,20 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		default:
 			return nil, fmt.Errorf("传输模式必须是 auto / quic_only / tcp_only")
 		}
+	}
+
+	if in.RDP.Enabled != nil {
+		cfg.RDP.Enabled = config.BoolPtr(*in.RDP.Enabled)
+	}
+	if in.RDP.Address != nil {
+		address := strings.TrimSpace(*in.RDP.Address)
+		if address == "" {
+			address = "127.0.0.1:3389"
+		}
+		if _, _, err := net.SplitHostPort(address); err != nil {
+			return nil, fmt.Errorf("RDP 本机服务地址必须是 host:port")
+		}
+		cfg.RDP.Address = address
 	}
 
 	if in.P2P.Enabled != nil {
@@ -700,6 +718,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 	return map[string]any{
 		"中继地址": c.Server.Address, "QUIC 端口": c.Server.QUICPort, "TCP 端口": c.Server.TCPPort,
 		"设备名称": name, "身份 ID": c.Device.IdentityID, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(), "TLS 允许不受信任证书": c.Server.InsecureTLS,
+		"RDP 开关": enabled(c.RDP.Enabled), "RDP 本机服务": c.RDP.Address,
 		"P2P 开关": enabled(c.P2P.Enabled), "P2P 模式": c.P2P.Mode,
 		"P2P 打洞超时": c.P2P.PunchTimeoutMs, "P2P Keepalive": c.P2P.KeepaliveSec,
 		"P2P 空闲超时": c.P2P.IdleTimeoutSec, "P2P 会话上限": c.P2P.MaxExitSessions,

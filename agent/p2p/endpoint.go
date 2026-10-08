@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"sort"
@@ -166,6 +167,7 @@ func (e *Endpoint) Start(ctx context.Context) error {
 			})
 		} else if result.err != nil {
 			upnpError = result.err.Error()
+			log.Printf("[P2P][UPnP] mapping unavailable; normal P2P fallback remains active: %v", result.err)
 		} else {
 			upnpError = "UPnP gateway returned no usable address"
 		}
@@ -372,13 +374,17 @@ func (e *Endpoint) Close() error {
 	e.baseCandidates = nil
 	e.upnpMapping = nil
 	e.mu.Unlock()
+	var mappingErr error
 	if mapping != nil {
-		_ = mapping.Close()
+		mappingErr = mapping.Close()
+		if mappingErr != nil {
+			log.Printf("[P2P][UPnP] failed to remove router port mapping: %v", mappingErr)
+		}
 	}
 	if conn != nil {
-		return conn.Close()
+		return errors.Join(conn.Close(), mappingErr)
 	}
-	return nil
+	return mappingErr
 }
 
 // CurrentNetworkSignature is retained for compatibility with P2P callers while

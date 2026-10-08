@@ -27,10 +27,6 @@ type SecurityManager struct {
 	bans              []compiledBan
 	rules             []repository.RDPSecurityRule
 	counters          map[string]securityWindow
-	authCounters      map[string]securityWindow
-	authConnections   map[string][]trackedRDPTCP
-	authReportWindows map[string]securityWindow
-	lastPortPrune     time.Time
 	logs              chan repository.RDPSecurityLog
 	stopping          chan struct{}
 	done              chan struct{}
@@ -38,7 +34,7 @@ type SecurityManager struct {
 }
 
 func NewSecurityManager(db *repository.DB) (*SecurityManager, error) {
-	s := &SecurityManager{db: db, counters: make(map[string]securityWindow), authCounters: make(map[string]securityWindow), authConnections: make(map[string][]trackedRDPTCP), authReportWindows: make(map[string]securityWindow),
+	s := &SecurityManager{db: db, counters: make(map[string]securityWindow),
 		logs: make(chan repository.RDPSecurityLog, 4096), stopping: make(chan struct{}), done: make(chan struct{})}
 	if err := s.Reload(); err != nil {
 		return nil, err
@@ -140,7 +136,7 @@ func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool
 		}
 	}
 	for _, rule := range s.rules {
-		if !rule.Enabled || rule.ID == "login_failure" || rule.Threshold < 1 || rule.WindowSeconds < 1 {
+		if !rule.Enabled || rule.Threshold < 1 || rule.WindowSeconds < 1 {
 			continue
 		}
 		key := ingressID + "|" + addr.String() + "|" + rule.ID

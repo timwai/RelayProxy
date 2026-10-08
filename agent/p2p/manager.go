@@ -47,6 +47,7 @@ type Manager struct {
 	lease  time.Duration
 
 	endpointFactory      EndpointFactory
+	upnpEnabled          bool
 	punchTimeout         time.Duration
 	keepAlive            time.Duration
 	idleTimeout          time.Duration
@@ -181,6 +182,7 @@ func NewQUICManager(parent context.Context, send ControlSender, rendezvous strin
 
 func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rendezvous string, lease time.Duration, options QUICManagerOptions) *Manager {
 	m := NewManager(parent, send, nil, lease)
+	m.upnpEnabled = options.UPnPEnabled
 	if options.PunchTimeout > 0 {
 		m.punchTimeout = options.PunchTimeout
 	}
@@ -541,6 +543,37 @@ func (m *Manager) prepareLocal(ctx context.Context) ([]protocol.P2PCandidate, st
 		return nil, "", nil, errors.New("P2P local description is incomplete")
 	}
 	return candidates, fingerprint, nil, nil
+}
+
+// UPnPStatus is runtime information for desktop and Android clients.
+// It reports idle while permitted but no P2P endpoint has been created.
+func (m *Manager) UPnPStatus() (enabled bool, state, reason, address string) {
+	if m == nil || !m.upnpEnabled {
+		return false, "DISABLED", "", ""
+	}
+	m.mu.Lock()
+	endpoints := make([]*Endpoint, 0, len(m.sessions))
+	for _, item := range m.sessions {
+		item.mu.RLock()
+		ep := item.endpoint
+		item.mu.RUnlock()
+		if ep != nil {
+			endpoints = append(endpoints, ep)
+		}
+	}
+	m.mu.Unlock()
+	state = "IDLE"
+	for _, ep := range endpoints {
+		s, r := ep.UPnPStatus()
+		addr := ep.UPnPAddress()
+		if s == "MAPPED" {
+			return true, s, "", addr
+		}
+		if s == "DEGRADED" || (s == "FAILED" && state != "DEGRADED") {
+			state, reason = s, r
+		}
+	}
+	return true, state, reason, ""
 }
 
 func (m *Manager) Session(id uint64) (*Session, bool) {

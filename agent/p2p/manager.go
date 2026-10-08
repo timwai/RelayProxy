@@ -569,11 +569,18 @@ func (m *Manager) UPnPStatus() (enabled bool, state, reason, address string) {
 		if s == "MAPPED" {
 			return true, s, "", addr
 		}
-		if s == "DEGRADED" || (s == "FAILED" && state != "DEGRADED") {
+		if s == "CGNAT" {
+			// The router accepted a mapping, but its WAN IPv4 cannot be
+			// advertised to a remote peer. Report the mapping to the GUI.
+			state, reason, address = "CGNAT", r, addr
+			continue
+		}
+		if state != "CGNAT" &&
+			(s == "DEGRADED" || (s == "FAILED" && state != "DEGRADED")) {
 			state, reason = s, r
 		}
 	}
-	return true, state, reason, ""
+	return true, state, reason, address
 }
 
 func (m *Manager) Session(id uint64) (*Session, bool) {

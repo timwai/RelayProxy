@@ -17,6 +17,7 @@ type RDPSecurityLog struct {
 	ID             string    `json:"id"`
 	IngressID      string    `json:"ingressId"`
 	TargetDeviceID string    `json:"targetDeviceId"`
+	TargetName     string    `json:"targetName"`
 	SourceIP       string    `json:"sourceIp"`
 	Transport      string    `json:"transport"`
 	Result         string    `json:"result"`

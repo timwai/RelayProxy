@@ -42,6 +42,7 @@ type Router struct {
 	onRDPIngressChanged            func(string)
 	onRDPIngressReload             func(string) error
 	onRDPSecurityReload            func() error
+	onRDPSecurityLogsClear         func(context.Context, string) (int64, error)
 	onRDPIngressStatus             func(string) RDPIngressRuntimeStatus
 	p2pSessions                    func() []P2PSessionRuntimeStatus
 	publicDirectStatus             func(string) []PublicDirectEndpointStatus
@@ -184,6 +185,10 @@ func WithRDPIngressEnabled(fn func() bool) RouterOption {
 	return func(r *Router) { r.rdpIngressEnabled = fn }
 }
 
+func WithRDPSecurityLogsClear(fn func(context.Context, string) (int64, error)) RouterOption {
+	return func(r *Router) { r.onRDPSecurityLogsClear = fn }
+}
+
 func WithRDPSecurityReload(fn func() error) RouterOption {
 	return func(r *Router) { r.onRDPSecurityReload = fn }
 }
@@ -310,6 +315,8 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("DELETE /api/v1/rdp/ingress/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteRDPIngress)))
 	// Audit, bans and rules contain cross-identity IP information; restrict to administrator.
 	r.mux.HandleFunc("GET /api/v1/rdp/security/logs", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityLogs)))
+	r.mux.HandleFunc("GET /api/v1/rdp/security/logs/groups", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityGroups)))
+	r.mux.HandleFunc("DELETE /api/v1/rdp/security/logs", r.requireAuth(r.requireAdmin(r.handleClearRDPSecurityLogs)))
 	r.mux.HandleFunc("GET /api/v1/rdp/security/bans", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityBans)))
 	r.mux.HandleFunc("POST /api/v1/rdp/security/bans", r.requireAuth(r.requireAdmin(r.handleCreateRDPSecurityBan)))
 	r.mux.HandleFunc("DELETE /api/v1/rdp/security/bans/{id}", r.requireAuth(r.requireAdmin(r.handleRevokeRDPSecurityBan)))

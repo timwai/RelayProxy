@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/json"
+	"time"
 
 	"relayproxy/internal/acl"
 )
@@ -73,6 +74,10 @@ type OpenTCPResponse struct {
 	RequestID    string            `json:"requestId"`
 	Success      bool              `json:"success"`
 	RemoteIP     string            `json:"remoteIp,omitempty"`
+	// RDPSourcePort is the Host Agent ephemeral TCP port toward local RDP.
+	// Public ingress uses it to correlate Windows 4625 events without
+	// trusting the Host Agent to supply the actual public source IP.
+	RDPSourcePort int              `json:"rdpSourcePort,omitempty"`
 	ErrorCode    string            `json:"errorCode,omitempty"`
 	ErrorMessage string            `json:"errorMessage,omitempty"`
 	Resume       *TCPResumeBinding `json:"resume,omitempty"`
@@ -151,6 +156,8 @@ const (
 	RDPControlLeaseAck        = "lease_ack"
 	RDPControlSessionClose    = "session_close"
 	RDPControlError           = "error"
+	RDPControlHostAuthFailure = "host_auth_failure"
+	RDPControlHostAuthFailureAck = "host_auth_failure_ack"
 )
 
 // P2PCandidate describes one protocol-specific direct-path endpoint. The
@@ -166,6 +173,20 @@ type P2PCandidate struct {
 // RDPCandidate remains an alias so the existing RDP control protocol keeps
 // source and wire compatibility while sharing the generic P2P candidate type.
 type RDPCandidate = P2PCandidate
+
+// RDPHostAuthFailure reports an observed Windows Security 4625 event.
+// SourceIP is deliberately excluded: the Server must resolve the public
+// source from a previously established RDP ingress socket and source port.
+type RDPHostAuthFailure struct {
+	RecordID uint64 `json:"recordId"`
+	SourceAddress string `json:"sourceAddress"`
+	SourcePort int `json:"sourcePort"`
+	ObservedAt time.Time `json:"observedAt"`
+	Username string `json:"username,omitempty"`
+	Status string `json:"status,omitempty"`
+	SubStatus string `json:"subStatus,omitempty"`
+	LogonType int `json:"logonType"`
+}
 
 // RDPControlMessage binds signaling to a server-issued session. Device IDs in
 // requests are advisory only; the server derives the controller from the
@@ -185,6 +206,7 @@ type RDPControlMessage struct {
 	ErrorCode         string         `json:"errorCode,omitempty"`
 	ErrorMessage      string         `json:"errorMessage,omitempty"`
 	RDPOnline         bool           `json:"rdpOnline,omitempty"`
+	HostAuthFailure *RDPHostAuthFailure `json:"hostAuthFailure,omitempty"`
 }
 
 const (

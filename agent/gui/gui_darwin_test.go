@@ -56,8 +56,9 @@ func TestMacOSDesktopStaysInMenuBarAfterWindowClose(t *testing.T) {
 		"relayproxyLifecycle",
 		"relayproxyRDP",
 		"com.microsoft.rdc.macos",
-		"NSWorkspace.OpenConfiguration",
-		"withApplicationAt: applicationURL",
+		"/usr/bin/open",
+		"func runOpen(_ arguments: [String]) -> String?",
+		"Foundation's URL(string:) rejects valid instances",
 		"rdp://full%20address=s:",
 		"func userContentController",
 		"message.frameInfo.isMainFrame",
@@ -68,6 +69,9 @@ func TestMacOSDesktopStaysInMenuBarAfterWindowClose(t *testing.T) {
 	}
 	if strings.Contains(source, "applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }") {
 		t.Fatal("closing the last macOS window still terminates RelayProxy")
+	}
+	if strings.Contains(source, `URL(string: "rdp://`) {
+		t.Fatal("macOS RDP launch must not parse Microsoft's legacy rdp:// URI with Foundation")
 	}
 }
 

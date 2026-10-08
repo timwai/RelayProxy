@@ -4,18 +4,18 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
-	"net"
-	"sync"
-	"sync/atomic"
-	"time"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestSSDPHeader(t *testing.T) {
@@ -198,7 +198,7 @@ func TestMappingCloseWaitsForRefreshAndDoesNotReopen(t *testing.T) {
 	defer server.Close()
 	control, _ := url.Parse(server.URL)
 	m := &Mapping{
-		service: service{serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlURL: control},
+		service:        service{serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlURL: control},
 		internalClient: "192.168.1.10", internalPort: 34000, externalPort: 34000,
 		externalIP: netip.MustParseAddr("8.8.8.8"), leaseSeconds: 3600,
 		done: make(chan struct{}), updates: make(chan MappingUpdate, 1),
@@ -249,7 +249,7 @@ func TestCloseRejectsChangedMappingOwner(t *testing.T) {
 	defer server.Close()
 	control, _ := url.Parse(server.URL)
 	m := &Mapping{
-		service: service{serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlURL: control},
+		service:        service{serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlURL: control},
 		internalClient: "192.168.1.10", internalPort: 34000, externalPort: 34000,
 		done: make(chan struct{}),
 	}

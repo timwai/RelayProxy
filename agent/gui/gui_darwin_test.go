@@ -60,7 +60,7 @@ func TestMacOSDesktopStaysInMenuBarAfterWindowClose(t *testing.T) {
 		"func runOpen(_ arguments: [String]) -> String?",
 		"reports the URI as an uninterpretable path or URL",
 		"rdp://full%20address=s%3A127.0.0.1%3A",
-		"[-n",
+		`["-n", "-a", "/Applications/Windows App.app", rdpURI]`,
 		"func userContentController",
 		"message.frameInfo.isMainFrame",
 	} {

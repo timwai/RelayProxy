@@ -31,6 +31,7 @@ func TestServiceRankPrefersWANIPV2(t *testing.T) {
 		"urn:schemas-upnp-org:service:WANIPConnection:1":  20,
 		"urn:schemas-upnp-org:service:WANPPPConnection:1": 10,
 		"urn:schemas-upnp-org:service:Layer3Forwarding:1": 0,
+		"evil:WANIPConnection:2":                      0,
 	}
 	for serviceType, want := range cases {
 		if got := serviceRank(serviceType); got != want {
@@ -258,5 +259,18 @@ func TestCloseRejectsChangedMappingOwner(t *testing.T) {
 	}
 	if deletes.Load() != 0 {
 		t.Fatal("Close deleted another device's port mapping")
+	}
+}
+
+func TestSOAPFaultReturnedWithHTTP200IsRejected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><s:Fault><detail><UPnPError><errorCode>718</errorCode><errorDescription>ConflictInMappingEntry</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>`)
+	}))
+	defer server.Close()
+	control, _ := url.Parse(server.URL)
+	svc := service{serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlURL: control}
+	err := svc.addPortMapping(context.Background(), 34567, 34567, "192.168.1.10", 3600)
+	if got := soapErrorCode(err); got != 718 {
+		t.Fatalf("HTTP 200 SOAP Fault was not rejected: code=%d err=%v", got, err)
 	}
 }

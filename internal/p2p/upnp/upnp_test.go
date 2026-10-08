@@ -305,10 +305,14 @@ func TestUPnPClientPinsSourceAndRemoteIPv4(t *testing.T) {
 	}))
 	defer server.Close()
 	serverURL, err := url.Parse(server.URL)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	client := gatewayHTTPClient("gateway.example.test", netip.MustParseAddr("127.0.0.1"), netip.MustParseAddr("127.0.0.1"))
 	response, err := client.Get("http://gateway.example.test:" + serverURL.Port() + "/")
-	if err != nil { t.Fatalf("pinned gateway request failed: %v", err) }
+	if err != nil {
+		t.Fatalf("pinned gateway request failed: %v", err)
+	}
 	_ = response.Body.Close()
 	if _, err := client.Get("http://different-gateway.example.test:" + serverURL.Port() + "/"); err == nil {
 		t.Fatal("UPnP HTTP client accepted a different gateway host")

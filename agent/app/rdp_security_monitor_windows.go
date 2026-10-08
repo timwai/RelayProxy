@@ -4,7 +4,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os/exec"
 	"sort"
@@ -84,6 +83,3 @@ func monitorWindowsRDPAuthFailures(ctx context.Context, report func(context.Cont
 	}
 }
 
-// This function is kept here rather than in the agent/rdp transport package
-// because it is tied to the lifetime of an authenticated Agent session.
-var _ = fmt.Sprintf

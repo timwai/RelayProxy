@@ -117,7 +117,17 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 	}
 	var lastErr error
 	for _, svc := range services {
-		internalIP, err := localIPv4For(ctx, svc.controlURL)
+		// Select the LAN-side source address using the pinned gateway IP,
+		// not a hostname that could resolve differently on a later lookup.
+		pinnedURL := *svc.controlURL
+		if svc.gatewayIP.IsValid() {
+			port := svc.controlURL.Port()
+			if port == "" {
+				port = "80"
+			}
+			pinnedURL.Host = net.JoinHostPort(svc.gatewayIP.String(), port)
+		}
+		internalIP, err := localIPv4For(ctx, &pinnedURL)
 		if err != nil {
 			lastErr = err
 			continue

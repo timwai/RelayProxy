@@ -106,6 +106,7 @@ class MainActivity : Activity() {
 
     private lateinit var diagActiveNet: TextView
     private lateinit var diagPowerMode: TextView
+    private lateinit var diagUpnp: TextView
     private lateinit var diagUdpDrops: TextView
     private lateinit var diagLoopback: TextView
 
@@ -137,6 +138,7 @@ class MainActivity : Activity() {
     private lateinit var settingSocksPortField: EditText
     private lateinit var settingHttpPortField: EditText
     private lateinit var settingP2pSwitch: Switch
+    private lateinit var settingUpnpSwitch: Switch
     private lateinit var settingIpv6Switch: Switch
     private lateinit var settingGlobalMessageOverlay: Switch
     private lateinit var settingGlobalOverlayStatus: TextView
@@ -852,6 +854,7 @@ class MainActivity : Activity() {
 
         diagActiveNet = diagRow(card, "当前承载网络", "—")
         diagPowerMode = diagRow(card, "P2P 电源策略", "标准")
+        diagUpnp = diagRow(card, "UPnP 端口映射", "未启用")
         diagUdpDrops = diagRow(card, "UDP 丢弃诊断", "队列 0 · 重组 0 · 丢弃 0")
         diagLoopback = diagRow(card, "回环代理端口", "等待配置").apply {
             isClickable = true
@@ -1973,6 +1976,8 @@ class MainActivity : Activity() {
 
         settingP2pSwitch = Switch(this).apply { isChecked = config.proxyP2pEnabled; UiKit.styleSwitch(this) }
         proxyCard.addView(switchBlock("启用 P2P 备用直连", "Public Direct 不依赖此开关；公网直连不可用时可继续尝试 P2P 打洞", settingP2pSwitch), topMargin(14))
+        settingUpnpSwitch = Switch(this).apply { isChecked = config.upnpAllowed; UiKit.styleSwitch(this) }
+        proxyCard.addView(switchBlock("允许 UPnP 自动端口映射", "默认关闭；需本机允许且 Server 启用。映射可能开放路由器公网 UDP 端口，保存后重新连接生效。", settingUpnpSwitch), topMargin(14))
 
         settingIpv6Switch = Switch(this).apply { isChecked = config.vpnIpv6Enabled; UiKit.styleSwitch(this) }
         proxyCard.addView(switchBlock("VPN IPv6 转发", "所选出口节点具备 IPv6 外部接入时开启", settingIpv6Switch), topMargin(14))
@@ -2187,6 +2192,7 @@ class MainActivity : Activity() {
             socks5Port = socksPort,
             httpPort = httpPort,
             proxyP2pEnabled = settingP2pSwitch.isChecked,
+            upnpAllowed = settingUpnpSwitch.isChecked,
             vpnIpv6Enabled = settingIpv6Switch.isChecked,
         )
         store.save(updated)
@@ -2314,6 +2320,9 @@ class MainActivity : Activity() {
         val p2pPath = obj?.optString("p2pPath", "") ?: ""
         val p2pError = obj?.optString("p2pError", "") ?: ""
         val p2pRttMs = obj?.optLong("p2pRttMs", 0) ?: 0
+        val upnpState = obj?.optString("upnpState", "DISABLED") ?: "DISABLED"
+        val upnpAddress = obj?.optString("upnpAddress", "") ?: ""
+        val upnpError = obj?.optString("upnpError", "") ?: ""
         val directState = obj?.optString("directState", p2pState).orEmpty().ifBlank { p2pState }
         val directPath = obj?.optString("directPath", p2pPath).orEmpty().ifBlank { p2pPath }
         val directError = obj?.optString("directError", p2pError).orEmpty().ifBlank { p2pError }
@@ -2335,6 +2344,15 @@ class MainActivity : Activity() {
         val loopbackEntries = buildList {
             if (config.clientEnabled && config.socks5Enabled) add("SOCKS5 ${config.socks5Port}")
             if (config.clientEnabled && config.httpEnabled) add("HTTP ${config.httpPort}")
+        }
+        if (::diagUpnp.isInitialized) {
+            diagUpnp.text = when (upnpState) {
+                "MAPPED" -> "已映射 · " + upnpAddress
+                "DEGRADED" -> "映射失效 · " + upnpError
+                "FAILED" -> "映射失败 · " + upnpError
+                "IDLE" -> "已允许 · 等待 P2P"
+                else -> if (config.upnpAllowed) "等待 Server 启用" else "本机未允许"
+            }
         }
         if (::diagLoopback.isInitialized) {
             diagLoopback.text = if (loopbackEntries.isEmpty()) "已关闭" else loopbackEntries.joinToString(" · ")

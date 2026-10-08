@@ -275,6 +275,53 @@ func TestPunchIsSymmetric(t *testing.T) {
 	}
 }
 
+func TestSymmetricPunchWithDualStackAndIPv4OnlyPeer(t *testing.T) {
+	dual, err := net.ListenUDP("udp", &net.UDPAddr{Port: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dual.Close()
+	ipv4, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ipv4.Close()
+	key := []byte("0123456789abcdef0123456789abcdef")
+	port := dual.LocalAddr().(*net.UDPAddr).Port
+	dualV4 := (&net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: port}).String()
+	dualV6 := (&net.UDPAddr{IP: net.IPv6loopback, Port: port}).String()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	type result struct {
+		value *UDPResult
+		err error
+	}
+	dualResult := make(chan result, 1)
+	ipv4Result := make(chan result, 1)
+	go func() {
+		value, punchErr := Punch(ctx, dual, []protocol.P2PCandidate{{
+			Protocol: "udp", Type: "lan", Address: ipv4.LocalAddr().String(),
+		}}, 109, key, time.Second)
+		dualResult <- result{value, punchErr}
+	}()
+	go func() {
+		value, punchErr := Punch(ctx, ipv4, []protocol.P2PCandidate{
+			{Protocol: "udp", Type: "lan", Address: dualV6, Priority: 1100},
+			{Protocol: "udp", Type: "lan", Address: dualV4, Priority: 1000},
+		}, 109, key, time.Second)
+		ipv4Result <- result{value, punchErr}
+	}()
+	for name, ch := range map[string]<-chan result{"dual-stack": dualResult, "ipv4-only": ipv4Result} {
+		got := <-ch
+		if got.err != nil || got.value == nil {
+			t.Fatalf("%s mixed family punch failed: result=%#v err=%v", name, got.value, got.err)
+		}
+		if got.value.RemoteAddr.IP.To4() == nil {
+			t.Fatalf("%s selected unusable IPv6 address: %v", name, got.value.RemoteAddr)
+		}
+	}
+}
+
 func TestSendAllKeepsRacingWhenOneAddressFamilyFails(t *testing.T) {
 	receiver, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
 	if err != nil {

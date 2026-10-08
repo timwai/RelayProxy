@@ -498,6 +498,7 @@ func main() {
 		log.Fatalf("[RDP Security] Failed to load security policy: %v", err)
 	}
 	defer rdpSecurity.Close()
+	rdpCoordinator.SetHostAuthFailureHandler(rdpSecurity.ReportHostAuthFailure)
 
 	ingress := serverrdp.NewIngressManager(context.Background(), db, sessionMgr, serverrdp.IngressConfig{
 		Security: rdpSecurity,

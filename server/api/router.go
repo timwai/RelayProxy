@@ -394,7 +394,11 @@ func (r *Router) channelFromRequest(w http.ResponseWriter, req *http.Request, bo
 		UseDefaultVerification: true,
 	}
 	if existing != nil {
-		channel.ID = existing.ID
+		// Omitted ID retains the existing value for backwards compatibility
+		// with clients that only update name, targets or routing rules.
+		if channel.ID == "" {
+			channel.ID = existing.ID
+		}
 		channel.IdentityID = existing.IdentityID
 		channel.MessageRules = append([]repository.MessageRule(nil), existing.MessageRules...)
 		channel.UseDefaultVerification = existing.UseDefaultVerification
@@ -601,8 +605,15 @@ func (r *Router) handleUpdateMessageChannel(w http.ResponseWriter, req *http.Req
 	if !ok {
 		return
 	}
-	if err := r.db.UpdateMessageChannel(channel); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+	if err := r.db.UpdateMessageChannelByID(id, channel); err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			writeError(w, http.StatusNotFound, "channel not found")
+		case strings.Contains(strings.ToLower(err.Error()), "unique"):
+			writeError(w, http.StatusConflict, "channel id already exists")
+		default:
+			writeError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, channel)

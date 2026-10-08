@@ -161,7 +161,11 @@ func MapUDPWithPortRange(ctx context.Context, internalPort, portStart, portEnd i
 			lastErr = err
 			continue
 		}
-		externalIP, err := svc.externalIPAddress(ctx)
+		// The router's WAN address may be private or CGNAT. Still submit
+		// AddPortMapping to the local IGD: a local mapping can be useful
+		// behind another NAT. The Agent must not publish an unroutable WAN
+		// address as a public P2P candidate.
+		externalIP, err := svc.wanIPAddress(ctx)
 		if err != nil {
 			lastErr = err
 			continue
@@ -314,7 +318,7 @@ func (m *Mapping) refresh(ctx context.Context) error {
 		m.publish(MappingUpdate{Healthy: false, Reason: err.Error()})
 		return err
 	}
-	ip, err := m.service.externalIPAddress(ctx)
+	ip, err := m.service.wanIPAddress(ctx)
 	if err != nil {
 		m.publish(MappingUpdate{Healthy: false, Reason: err.Error()})
 		return err
@@ -759,7 +763,10 @@ func localIPv4For(ctx context.Context, controlURL *url.URL) (netip.Addr, error) 
 	return ip, nil
 }
 
-func (s service) externalIPAddress(ctx context.Context) (netip.Addr, error) {
+// wanIPAddress reads the router WAN address without assuming a public IPv4
+// lease. Whether that address can be advertised to another Agent is decided
+// separately by the endpoint candidate filter.
+func (s service) wanIPAddress(ctx context.Context) (netip.Addr, error) {
 	body, err := s.soap(ctx, "GetExternalIPAddress", nil)
 	if err != nil {
 		return netip.Addr{}, err
@@ -767,13 +774,33 @@ func (s service) externalIPAddress(ctx context.Context) (netip.Addr, error) {
 	value := xmlElementText(body, "NewExternalIPAddress")
 	ip, err := netip.ParseAddr(strings.TrimSpace(value))
 	if err != nil {
-		return netip.Addr{}, err
+		return netip.Addr{}, fmt.Errorf("invalid UPnP router WAN IPv4 address: %w", err)
 	}
 	ip = ip.Unmap()
-	if !isPublicWANIPv4(ip) {
+	if !ip.Is4() || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLoopback() {
+		return netip.Addr{}, fmt.Errorf("invalid UPnP router WAN IPv4 address: %s", ip)
+	}
+	return ip, nil
+}
+
+// externalIPAddress is retained for callers that require a truly public
+// candidate rather than merely a successfully queried router WAN address.
+func (s service) externalIPAddress(ctx context.Context) (netip.Addr, error) {
+	ip, err := s.wanIPAddress(ctx)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if !IsPublicWANIPv4(ip) {
 		return netip.Addr{}, fmt.Errorf("%w: %s", ErrNonPublicWAN, ip)
 	}
 	return ip, nil
+}
+
+// IsPublicWANIPv4 reports whether the external mapping may safely be
+// advertised as an Internet-reachable direct-path candidate. A successful
+// UPnP mapping alone is not proof of public reachability.
+func IsPublicWANIPv4(ip netip.Addr) bool {
+	return isPublicWANIPv4(ip)
 }
 
 func isPublicWANIPv4(ip netip.Addr) bool {

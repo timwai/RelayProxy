@@ -29,13 +29,19 @@ const (
 	mappingLeaseSeconds = uint32(3600)
 	maxDescriptionBytes = 1 << 20
 	maxSOAPBytes        = 1 << 20
+	maxSSDPResponses    = 32
 )
 
-var ErrUnavailable = errors.New("UPnP IGD is unavailable")
+var (
+	ErrUnavailable = errors.New("UPnP IGD is unavailable")
+	ErrPermanentLease = errors.New("UPnP router only supports permanent mappings; refusing unsafe permanent port exposure")
+	ErrNonPublicWAN = errors.New("UPnP gateway WAN address is not publicly routable")
+)
 
 type service struct {
 	serviceType string
 	controlURL  *url.URL
+	gatewayIP   netip.Addr // pinned during SSDP description discovery
 }
 
 type Mapping struct {
@@ -197,10 +203,10 @@ func discoverServices(ctx context.Context) ([]service, error) {
 		_, _ = conn.WriteToUDP([]byte(request), remote)
 	}
 
-	locations := map[string]struct{}{}
+	locations := map[string]netip.Addr{}
 	buffer := make([]byte, 64*1024)
 	for {
-		n, _, readErr := conn.ReadFromUDP(buffer)
+		n, from, readErr := conn.ReadFromUDP(buffer)
 		if readErr != nil {
 			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
 				break
@@ -210,8 +216,24 @@ func discoverServices(ctx context.Context) ([]service, error) {
 			}
 			break
 		}
+		// SSDP is unauthenticated: require a genuine search response and
+		// tie the advertised HTTP endpoint to its on-link IPv4 sender.
+		if len(locations) >= maxSSDPResponses {
+			continue
+		}
+		if !strings.HasPrefix(string(buffer[:n]), "HTTP/1.1 200") && !strings.HasPrefix(string(buffer[:n]), "HTTP/1.0 200") {
+			continue
+		}
+		sender, ok := netip.AddrFromSlice(from.IP)
+		if !ok {
+			continue
+		}
+		sender = sender.Unmap()
+		if !onLinkGatewayIPv4(sender) {
+			continue
+		}
 		if location := ssdpHeader(string(buffer[:n]), "location"); location != "" {
-			locations[location] = struct{}{}
+			locations[location] = sender
 		}
 	}
 	if len(locations) == 0 {
@@ -220,8 +242,8 @@ func discoverServices(ctx context.Context) ([]service, error) {
 
 	var result []service
 	var lastErr error
-	for raw := range locations {
-		found, err := fetchServices(ctx, raw)
+	for raw, sender := range locations {
+		found, err := fetchServices(ctx, raw, sender)
 		if err != nil {
 			lastErr = err
 			continue
@@ -250,21 +272,23 @@ func ssdpHeader(packet, wanted string) string {
 	return ""
 }
 
-func fetchServices(ctx context.Context, rawLocation string) ([]service, error) {
+func fetchServices(ctx context.Context, rawLocation string, sender netip.Addr) ([]service, error) {
 	location, err := url.Parse(strings.TrimSpace(rawLocation))
-	if err != nil || location.Scheme != "http" || location.Hostname() == "" {
+	if err != nil || location.Scheme != "http" || location.Hostname() == "" || location.User != nil {
 		return nil, errors.New("invalid UPnP device description URL")
 	}
-	if err := requireLocalGatewayHost(ctx, location.Hostname()); err != nil {
+	gatewayIP, err := resolveGatewayIPv4(ctx, location.Hostname())
+	if err != nil {
 		return nil, err
+	}
+	if sender.IsValid() && gatewayIP != sender.Unmap() {
+		return nil, errors.New("UPnP description host differs from SSDP response sender")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, location.String(), nil)
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
-		return errors.New("UPnP description redirects are disabled")
-	}}
+	client := gatewayHTTPClient(location.Hostname(), gatewayIP)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -311,7 +335,7 @@ func fetchServices(ctx context.Context, rawLocation string) ([]service, error) {
 			continue
 		}
 		seen[key] = struct{}{}
-		result = append(result, service{serviceType: strings.TrimSpace(item.ServiceType), controlURL: control})
+		result = append(result, service{serviceType: strings.TrimSpace(item.ServiceType), controlURL: control, gatewayIP: gatewayIP})
 	}
 	if len(result) == 0 {
 		return nil, errors.New("UPnP IGD has no WAN connection service")
@@ -339,25 +363,76 @@ func serviceRank(serviceType string) int {
 	}
 }
 
-func requireLocalGatewayHost(ctx context.Context, host string) error {
+// onLinkGatewayIPv4 rejects public, loopback and off-link SSDP sources;
+// private network addresses are not by themselves proof of locality.
+func onLinkGatewayIPv4(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	if !ip.Is4() || !ip.IsValid() || (!ip.IsPrivate() && !ip.IsLinkLocalUnicast()) {
+		return false
+	}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if network, ok := addr.(*net.IPNet); ok && network.IP.To4() != nil &&
+				network.Contains(net.IP(ip.AsSlice())) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resolveGatewayIPv4(ctx context.Context, host string) (netip.Addr, error) {
 	if ip, err := netip.ParseAddr(host); err == nil {
 		ip = ip.Unmap()
-		if ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-			return nil
+		if onLinkGatewayIPv4(ip) {
+			return ip, nil
 		}
-		return errors.New("UPnP device description is not on a local gateway address")
+		return netip.Addr{}, errors.New("UPnP gateway is not an on-link private IPv4 address")
 	}
 	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
 	if err != nil {
-		return err
+		return netip.Addr{}, err
 	}
 	for _, ip := range addrs {
-		ip = ip.Unmap()
-		if ip.IsPrivate() || ip.IsLinkLocalUnicast() {
-			return nil
+		if onLinkGatewayIPv4(ip) {
+			return ip.Unmap(), nil
 		}
 	}
-	return errors.New("UPnP device hostname did not resolve to a local gateway address")
+	return netip.Addr{}, errors.New("UPnP hostname has no on-link private IPv4 address")
+}
+
+// gatewayHTTPClient disables proxy use and redirects, and pins every request
+// to the previously vetted gateway IP. A hostname cannot rebind to another
+// target between SSDP, description GET, and subsequent SOAP calls.
+func gatewayHTTPClient(host string, gatewayIP netip.Addr) *http.Client {
+	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true}
+	if gatewayIP.IsValid() {
+		transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+			targetHost, port, err := net.SplitHostPort(addr)
+			if err != nil || !strings.EqualFold(targetHost, host) {
+				return nil, errors.New("UPnP tried to contact a different gateway")
+			}
+			var dialer net.Dialer
+			return dialer.DialContext(ctx, "tcp4", net.JoinHostPort(gatewayIP.String(), port))
+		}
+	}
+	return &http.Client{
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errors.New("UPnP control redirects are disabled")
+		},
+	}
 }
 
 func localIPv4For(ctx context.Context, controlURL *url.URL) (netip.Addr, error) {
@@ -400,10 +475,34 @@ func (s service) externalIPAddress(ctx context.Context) (netip.Addr, error) {
 		return netip.Addr{}, err
 	}
 	ip = ip.Unmap()
-	if !ip.Is4() || ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() {
-		return netip.Addr{}, errors.New("invalid UPnP external IPv4 address")
+	if !isPublicWANIPv4(ip) {
+		return netip.Addr{}, fmt.Errorf("%w: %s", ErrNonPublicWAN, ip)
 	}
 	return ip, nil
+}
+
+func isPublicWANIPv4(ip netip.Addr) bool {
+	ip = ip.Unmap()
+	if !ip.Is4() || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return false
+	}
+	// CGNAT, protocol benchmarking and documentation prefixes are not
+	// Internet-routable, despite IsGlobalUnicast returning true.
+	for _, block := range []netip.Prefix{
+		netip.MustParsePrefix("0.0.0.0/8"),
+		netip.MustParsePrefix("100.64.0.0/10"),
+		netip.MustParsePrefix("192.0.0.0/24"),
+		netip.MustParsePrefix("192.0.2.0/24"),
+		netip.MustParsePrefix("198.18.0.0/15"),
+		netip.MustParsePrefix("198.51.100.0/24"),
+		netip.MustParsePrefix("203.0.113.0/24"),
+		netip.MustParsePrefix("240.0.0.0/4"),
+	} {
+		if block.Contains(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s service) addAvailableUDPMapping(ctx context.Context, internalClient string, internalPort uint16) (uint16, uint32, error) {
@@ -432,10 +531,8 @@ func (s service) addAvailableUDPMapping(ctx context.Context, internalClient stri
 		}
 		code := soapErrorCode(err)
 		if code == 725 {
-			if permanentErr := s.addPortMapping(ctx, externalPort, internalPort, internalClient, 0); permanentErr == nil {
-				return externalPort, 0, nil
-			}
-			return 0, 0, err
+			// An abnormal agent termination cannot delete an infinite lease.
+			return 0, 0, ErrPermanentLease
 		}
 		if code == 724 || code != 718 {
 			return 0, 0, err
@@ -507,7 +604,7 @@ func (s service) soap(ctx context.Context, action string, args map[string]string
 	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
 	req.Header.Set("SOAPAction", `"`+s.serviceType+"#"+action+`"`)
 	req.Header.Set("Connection", "close")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := gatewayHTTPClient(s.controlURL.Hostname(), s.gatewayIP).Do(req)
 	if err != nil {
 		return nil, err
 	}

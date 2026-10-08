@@ -30,6 +30,24 @@ import (
 // Version is stamped at build time with -ldflags "-X main.Version=x.y.z".
 var Version = "1.0.0"
 
+func startupFatal(wantGUI bool, format string, args ...any) {
+	err := fmt.Errorf(format, args...)
+	log.Printf("%v", err)
+	if wantGUI {
+		gui.ShowStartupError(err, "")
+	}
+	os.Exit(1)
+}
+
+func runDesktopUI(b *bridge.UIBridge, opts gui.Options) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("Wails 桌面界面初始化失败: %v", recovered)
+		}
+	}()
+	return gui.Run(b, opts)
+}
+
 func main() {
 	configPath := flag.String("config", "", "Path to configuration file (Windows/macOS default: ~/.relayproxy/relay-agent.yaml)")
 	serverFlag := flag.String("server", "", "Override server address")
@@ -131,11 +149,11 @@ func main() {
 	})
 	*configPath, err = resolveConfigPath(*configPath, configExplicit)
 	if err != nil {
-		log.Fatalf("[Config] Failed to resolve configuration path: %v", err)
+		startupFatal(wantGUI, "[Config] Failed to resolve configuration path: %v", err)
 	}
 	cfgFile, err := loadOrCreateAgentConfig(*configPath, nil)
 	if err != nil {
-		log.Fatalf("[Config] Failed to load configuration %s: %v", *configPath, err)
+		startupFatal(wantGUI, "[Config] Failed to load configuration %s: %v", *configPath, err)
 	}
 	log.Printf("[Config] Loaded %s", *configPath)
 	// Apply CLI flag overrides
@@ -151,7 +169,7 @@ func main() {
 			cfgFile.Web.Listen = *webListenFlag
 		case "web-port":
 			if webPortFlag < 1 || webPortFlag > 65535 {
-				log.Fatalf("[Config] --web-port must be between 1 and 65535")
+				startupFatal(wantGUI, "[Config] --web-port must be between 1 and 65535")
 			}
 			cfgFile.Web.Port = webPortFlag
 		}
@@ -160,7 +178,7 @@ func main() {
 		cfgFile.Web.Enabled = config.BoolPtr(false)
 	}
 	if err := config.NormalizeAgentConfig(cfgFile); err != nil {
-		log.Fatalf("[Config] Invalid startup configuration: %v", err)
+		startupFatal(wantGUI, "[Config] Invalid startup configuration: %v", err)
 	}
 	networkMode := cfgFile.Network.Mode
 	if runtime.GOOS == "windows" && runtime.GOARCH != "amd64" && networkMode == "divert" {
@@ -193,7 +211,7 @@ func main() {
 	identityPath := filepath.Join(filepath.Dir(*configPath), "device-identity.json")
 	deviceIdentity, err := deviceidentity.LoadOrCreate(identityPath)
 	if err != nil {
-		log.Fatalf("[Identity] Failed to load or create installation identity: %v", err)
+		startupFatal(wantGUI, "[Identity] Failed to load or create installation identity: %v", err)
 	}
 	log.Printf("[Identity] Installation %s fingerprint %s", deviceIdentity.InstallationID, deviceIdentity.Fingerprint())
 
@@ -259,10 +277,10 @@ func main() {
 
 	agent, err := app.NewAgent(agentCfg)
 	if err != nil {
-		log.Fatalf("[Agent] Invalid startup settings: %v", err)
+		startupFatal(wantGUI, "[Agent] Invalid startup settings: %v", err)
 	}
 	if err := agent.Start(); err != nil {
-		log.Fatalf("[Agent] Failed to start agent: %v", err)
+		startupFatal(wantGUI, "[Agent] Failed to start agent: %v", err)
 	}
 	defer agent.Close()
 
@@ -283,7 +301,7 @@ func main() {
 			Token:  cfgFile.Web.Token,
 		})
 		if err != nil {
-			log.Fatalf("[Web] Failed to start management page: %v", err)
+			startupFatal(wantGUI, "[Web] Failed to start management page: %v", err)
 		}
 		log.Printf("[Web] Management page: http://%s/", webServer.Addr())
 		defer func() {
@@ -296,9 +314,13 @@ func main() {
 	}
 
 	// --- Desktop window -----------------------------------------------------
+	// A bare Windows/macOS desktop launch is explicit user intent. Do not let a
+	// stale gui.enabled=false from an older config silently turn a GUI-subsystem
+	// executable into an invisible headless process. --no-gui remains the
+	// explicit way to suppress the desktop window.
 	// The window owns the process lifetime: closing it (or choosing 退出 from the
 	// tray) shuts the agent down. gui.Run blocks until then.
-	if wantGUI && cfgFile.IsGUIEnabled() {
+	if wantGUI {
 		webURL := ""
 		if webServer != nil {
 			webURL = webServer.BrowserURL()
@@ -307,7 +329,7 @@ func main() {
 				gui.RequestQuit()
 			}()
 		}
-		err := gui.Run(uiBridge, gui.Options{
+		err := runDesktopUI(uiBridge, gui.Options{
 			ConfigPath:     *configPath,
 			StartMinimized: startMinimized,
 			MinimizeToTray: cfgFile.IsMinimizeToTray(),

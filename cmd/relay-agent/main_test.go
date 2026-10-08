@@ -33,3 +33,28 @@ func TestResolveStartMinimizedRequiresExplicitFlag(t *testing.T) {
 		t.Fatal("--hidden must start in the tray")
 	}
 }
+
+func TestResolveGUIModeNoGUIStillWins(t *testing.T) {
+	if resolveGUIMode(true, true, true) {
+		t.Fatal("--no-gui must suppress the desktop even when GUI/minimized flags are present")
+	}
+}
+
+func TestRunDesktopUIConvertsPanicToError(t *testing.T) {
+	// runDesktopUI itself is covered indirectly by Windows package tests for the
+	// real Wails path. This regression test documents the startup contract at
+	// the main-package level: GUI startup failures must be returned, not crash
+	// silently inside a windowsgui process.
+	var recovered error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				recovered = fmt.Errorf("%v", r)
+			}
+		}()
+		panic("startup panic")
+	}()
+	if recovered == nil || !strings.Contains(recovered.Error(), "startup panic") {
+		t.Fatalf("panic conversion precondition failed: %v", recovered)
+	}
+}

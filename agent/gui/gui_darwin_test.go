@@ -58,8 +58,9 @@ func TestMacOSDesktopStaysInMenuBarAfterWindowClose(t *testing.T) {
 		"com.microsoft.rdc.macos",
 		"/usr/bin/open",
 		"func runOpen(_ arguments: [String]) -> String?",
-		"Foundation's URL(string:) rejects valid instances",
-		"rdp://full%20address=s:",
+		"reports the URI as an uninterpretable path or URL",
+		"rdp://full%20address=s%3A127.0.0.1%3A",
+		"[-n",
 		"func userContentController",
 		"message.frameInfo.isMainFrame",
 	} {
@@ -72,6 +73,9 @@ func TestMacOSDesktopStaysInMenuBarAfterWindowClose(t *testing.T) {
 	}
 	if strings.Contains(source, `URL(string: "rdp://`) {
 		t.Fatal("macOS RDP launch must not parse Microsoft's legacy rdp:// URI with Foundation")
+	}
+	if strings.Contains(source, `rdp://full%20address=s:\(endpoint)`) {
+		t.Fatal("Windows App launch URI still contains unescaped attribute separators")
 	}
 }
 

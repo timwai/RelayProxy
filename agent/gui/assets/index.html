@@ -1065,7 +1065,7 @@
 
         <div id="rdp-idle-card" class="rp-notice">
           <svg class="icon-lg text-slate-400" viewBox="0 0 24 24"><use href="#i-link"/></svg>
-          <div><div class="text-[13px] font-medium">尚未启动 RDP 连接</div><div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">选择在线设备后将创建本机回环入口；Windows 桌面端会自动打开 mstsc。</div></div>
+          <div><div class="text-[13px] font-medium">尚未启动 RDP 连接</div><div class="text-[12px] text-slate-500 dark:text-slate-400 mt-0.5">选择在线设备后将创建本机回环入口；Windows 自动打开 mstsc，macOS 自动打开 Windows App。</div></div>
         </div>
 
         <div>
@@ -1866,7 +1866,7 @@
         $('rdp-listen-address').textContent = st.rdpListenAddr;
         $('rdp-path-tcp').textContent = rdpPathLabel(st.rdpPathTcp, 'tcp');
         $('rdp-path-udp').textContent = rdpPathLabel(st.rdpPathUdp, 'udp');
-        $('rdp-udp-state').textContent = st.rdpUdpReason || (st.rdpUdpActive ? 'UDP 正在转发' : st.rdpUdpEnabled ? '等待 mstsc 发起 UDP' : '当前连接仅使用 TCP');
+        $('rdp-udp-state').textContent = st.rdpUdpReason || (st.rdpUdpActive ? 'UDP 正在转发' : st.rdpUdpEnabled ? '等待 RDP 客户端发起 UDP' : '当前连接仅使用 TCP');
       }
       renderRDPTargets();
     }

@@ -253,7 +253,9 @@ func (e *Endpoint) UPnPStatus() (state, reason string) {
 }
 
 func (e *Endpoint) UPnPAddress() string {
-	if e == nil { return "" }
+	if e == nil {
+		return ""
+	}
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.upnpState == "MAPPED" && e.upnpAddress.IsValid() {

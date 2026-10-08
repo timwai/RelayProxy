@@ -109,6 +109,11 @@ func main() {
 
 	startMinimized := resolveStartMinimized(*minimizedFlag, *hiddenFlag)
 	wantGUI := resolveGUIMode(*guiFlag, *noGuiFlag, startMinimized)
+	stopStartupLog := func() {}
+	if wantGUI {
+		stopStartupLog = enableGUIStartupLog()
+	}
+	defer stopStartupLog()
 
 	// A bare double-click or a minimized login launch can land on the
 	// console-subsystem binary when the user picks relay-agent.exe instead of

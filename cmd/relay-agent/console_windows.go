@@ -3,6 +3,10 @@
 package main
 
 import (
+	"io"
+	"log"
+	"os"
+	"path/filepath"
 	"unsafe"
 
 	"github.com/lxn/win"
@@ -42,4 +46,32 @@ func ownsConsole() bool {
 		uintptr(len(processIDs)),
 	)
 	return count == 1
+}
+
+func enableGUIStartupLog() func() {
+	base := os.Getenv("LOCALAPPDATA")
+	if base == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			base = home
+		}
+	}
+	if base == "" {
+		return func() {}
+	}
+	dir := filepath.Join(base, "RelayProxy")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return func() {}
+	}
+	path := filepath.Join(dir, "relay-agent-startup.log")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return func() {}
+	}
+	previous := log.Writer()
+	log.SetOutput(io.MultiWriter(previous, file))
+	log.Printf("[Startup] GUI launch log: %s", path)
+	return func() {
+		log.SetOutput(previous)
+		_ = file.Close()
+	}
 }

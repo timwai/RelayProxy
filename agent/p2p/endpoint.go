@@ -149,11 +149,11 @@ func (e *Endpoint) Start(ctx context.Context) error {
 		}
 	}
 
-	baseCandidates   := append([]protocol.P2PCandidate(nil), discovered...)
+	baseCandidates := append([]protocol.P2PCandidate(nil), discovered...)
 	var upnpMapping *p2pupnp.Mapping
 	var upnpAddr netip.AddrPort
-	upnpState        := "DISABLED"
-	upnpError        := ""
+	upnpState := "DISABLED"
+	upnpError := ""
 	if upnpResultCh != nil {
 		upnpState = "FAILED"
 		result := <-upnpResultCh
@@ -364,7 +364,7 @@ func (e *Endpoint) Close() error {
 	if e.done != nil {
 		close(e.done)
 	}
-	conn             := e.conn
+	conn := e.conn
 	mapping := e.upnpMapping
 	e.conn = nil
 	e.identity = nil

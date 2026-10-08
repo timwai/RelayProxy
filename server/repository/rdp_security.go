@@ -57,6 +57,10 @@ func (db *DB) ensureRDPSecuritySchema() error {
 		"CREATE TABLE IF NOT EXISTS rdp_security_rules (id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled BOOLEAN NOT NULL, threshold INTEGER NOT NULL, window_seconds INTEGER NOT NULL, ban_seconds INTEGER NOT NULL)",
 		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('high_frequency','高频连接防护',1,30,60,900)",
 		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('persistent_scan','持续扫描防护',1,100,300,3600)",
+		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('login_failure','Windows 登录失败防护',1,5,300,1800)",
+		"CREATE TABLE IF NOT EXISTS rdp_auth_failures (id TEXT PRIMARY KEY, target_device_id TEXT NOT NULL, event_record_id BIGINT NOT NULL, source_port INTEGER NOT NULL, logon_type INTEGER NOT NULL, username TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT '', sub_status TEXT NOT NULL DEFAULT '', occurred_at TIMESTAMP NOT NULL, received_at TIMESTAMP NOT NULL, source_ip TEXT NOT NULL DEFAULT '', ingress_id TEXT NOT NULL DEFAULT '', connection_id TEXT NOT NULL DEFAULT '', correlated BOOLEAN NOT NULL DEFAULT 0, UNIQUE(target_device_id,event_record_id))",
+		"CREATE INDEX IF NOT EXISTS idx_rdp_auth_failures_time ON rdp_auth_failures(occurred_at)",
+		"CREATE INDEX IF NOT EXISTS idx_rdp_auth_failures_ip ON rdp_auth_failures(source_ip,occurred_at)",
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {

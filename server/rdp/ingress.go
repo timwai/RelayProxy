@@ -69,30 +69,30 @@ type EndpointStatus struct {
 }
 
 type ingressEndpoint struct {
-	item         *repository.RDPIngress
-	tcp          net.Listener
-	udp          *net.UDPConn
-	cancel       context.CancelFunc
-	mu           sync.Mutex
-	assocs       map[netip.AddrPort]*udpAssociation
-	opening      map[netip.AddrPort]*udpOpening
-	sourceCIDRs  []netip.Prefix
-	limiter      *sourceLimiter
-	auditLimiter *sourceLimiter
+	item            *repository.RDPIngress
+	tcp             net.Listener
+	udp             *net.UDPConn
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	assocs          map[netip.AddrPort]*udpAssociation
+	opening         map[netip.AddrPort]*udpOpening
+	sourceCIDRs     []netip.Prefix
+	limiter         *sourceLimiter
+	auditLimiter    *sourceLimiter
 	securityLimiter *sourceLimiter
-	tcpSem       chan struct{}
+	tcpSem          chan struct{}
 }
 
 type udpAssociation struct {
-	auditID string
-	openedAt time.Time
-	bytesUp atomic.Int64
+	auditID   string
+	openedAt  time.Time
+	bytesUp   atomic.Int64
 	bytesDown atomic.Int64
 	closeOnce sync.Once
-	remote netip.AddrPort
-	conn   net.PacketConn
-	stream tunnel.TunnelStream
-	cancel context.CancelFunc
+	remote    netip.AddrPort
+	conn      net.PacketConn
+	stream    tunnel.TunnelStream
+	cancel    context.CancelFunc
 }
 
 type udpOpening struct {
@@ -287,9 +287,9 @@ func (m *IngressManager) open(item *repository.RDPIngress) error {
 		item: item, tcp: tcp, udp: udp, cancel: cancel,
 		assocs: make(map[netip.AddrPort]*udpAssociation), opening: make(map[netip.AddrPort]*udpOpening),
 		sourceCIDRs: prefixes, limiter: newSourceLimiter(item.RateLimitPerMin),
-		auditLimiter: newSourceLimiter(4),
+		auditLimiter:    newSourceLimiter(4),
 		securityLimiter: newSourceLimiter(4),
-		tcpSem:       make(chan struct{}, maxTCPConnections),
+		tcpSem:          make(chan struct{}, maxTCPConnections),
 	}
 	m.mu.Lock()
 	m.endpoints[item.ID] = ep
@@ -405,7 +405,9 @@ func (m *IngressManager) handleTCP(ctx context.Context, ep *ingressEndpoint, con
 	_ = conn.SetDeadline(openDeadline)
 	remoteIP := sourceIP(conn.RemoteAddr())
 	entry := repository.RDPSecurityLog{ID: uuid.NewString(), IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: remoteIP, Transport: "tcp", Result: "CONNECTING", StartedAt: time.Now().UTC()}
-	if m.cfg.Security != nil { m.cfg.Security.Record(entry) }
+	if m.cfg.Security != nil {
+		m.cfg.Security.Record(entry)
+	}
 	entry.Result, entry.Reason = "REJECTED", "UNAVAILABLE"
 	defer func() {
 		if m.cfg.Security != nil {
@@ -529,7 +531,9 @@ func (m *IngressManager) serveUDP(ctx context.Context, ep *ingressEndpoint) {
 		}
 		if _, err := assoc.conn.WriteTo(buffer[:n], nil); err != nil {
 			m.removeUDPAssociation(ep, key, assoc)
-		} else { assoc.bytesUp.Add(int64(n)) }
+		} else {
+			assoc.bytesUp.Add(int64(n))
+		}
 	}
 }
 
@@ -537,7 +541,9 @@ func (m *IngressManager) openUDPAssociationAsync(ctx context.Context, ep *ingres
 	openCtx, cancel := context.WithTimeout(ctx, associationOpenTimeout)
 	assoc := m.openUDPAssociation(openCtx, ep, opening.remote)
 	cancel()
-	if assoc == nil { m.auditUDPDecision(ep, key.Addr().String(), "ASSOCIATION_OPEN_FAILED") }
+	if assoc == nil {
+		m.auditUDPDecision(ep, key.Addr().String(), "ASSOCIATION_OPEN_FAILED")
+	}
 	ep.mu.Lock()
 	if ep.opening[key] == opening {
 		delete(ep.opening, key)
@@ -714,7 +720,9 @@ func (m *IngressManager) auditReject(ep *ingressEndpoint, ip, code string) {
 // auditUDPDecision rate-limits datagram rejection records separately from
 // the existing generic connection audit.
 func (m *IngressManager) auditUDPDecision(ep *ingressEndpoint, ip, reason string) {
-	if m.cfg.Security == nil || ep == nil || (ep.securityLimiter != nil && !ep.securityLimiter.allow(ip+"\x00"+reason)) { return }
+	if m.cfg.Security == nil || ep == nil || (ep.securityLimiter != nil && !ep.securityLimiter.allow(ip+"\x00"+reason)) {
+		return
+	}
 	now := time.Now().UTC()
 	m.cfg.Security.Record(repository.RDPSecurityLog{IngressID: ep.item.ID, TargetDeviceID: ep.item.TargetDeviceID, SourceIP: ip, Transport: "udp", Result: "REJECTED", Reason: reason, StartedAt: now, EndedAt: now})
 }

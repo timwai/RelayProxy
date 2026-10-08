@@ -10,6 +10,7 @@ on:
     branches:
       - main
       - feat/proxy-p2p-direct-path
+      - feature/wails-react-complete-ui
     paths:
       - "android/**"
       - "mobile/androidcore/**"

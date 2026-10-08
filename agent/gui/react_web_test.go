@@ -97,9 +97,18 @@ func TestReactWebConfigAndPlatformBridge(t *testing.T) {
 	if err := json.Unmarshal(configResponse.Body.Bytes(), &config); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"revision", "serverAddress", "insecureTls", "publicDirectAdvertise", "networkCapabilities", "p2p", "routing"} {
+	for _, key := range []string{"revision", "serverAddress", "insecureTls", "publicDirectAdvertise", "networkCapabilities", "rdp", "p2p", "routing"} {
 		if _, ok := config[key]; !ok {
 			t.Errorf("React config missing %s", key)
+		}
+	}
+	var rdp map[string]json.RawMessage
+	if err := json.Unmarshal(config["rdp"], &rdp); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"enabled", "address"} {
+		if _, ok := rdp[key]; !ok {
+			t.Errorf("React RDP config missing %s", key)
 		}
 	}
 	var p2p map[string]json.RawMessage

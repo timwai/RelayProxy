@@ -254,3 +254,20 @@ func TestControllerReadFailureDetachesUDPAssociation(t *testing.T) {
 		t.Fatal("read-side failure left the stale association installed")
 	}
 }
+
+
+func TestRDPClientLaunchSpecUsesPlatformNativeClient(t *testing.T) {
+	command, args, ok := rdpClientLaunchSpec("windows", "127.0.0.1:13389")
+	if !ok || command != "mstsc.exe" || len(args) != 1 || args[0] != "/v:127.0.0.1:13389" {
+		t.Fatalf("windows launch spec = %q %#v %v", command, args, ok)
+	}
+	command, args, ok = rdpClientLaunchSpec("darwin", "127.0.0.1:13389")
+	if !ok || command != "/usr/bin/open" || len(args) != 3 ||
+		args[0] != "-a" || args[1] != "Windows App" ||
+		args[2] != "rdp://full%20address=s:127.0.0.1:13389" {
+		t.Fatalf("macOS launch spec = %q %#v %v", command, args, ok)
+	}
+	if command, args, ok = rdpClientLaunchSpec("linux", "127.0.0.1:13389"); ok || command != "" || args != nil {
+		t.Fatalf("unsupported launch spec = %q %#v %v", command, args, ok)
+	}
+}

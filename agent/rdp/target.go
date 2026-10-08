@@ -63,7 +63,14 @@ func handleTargetTCP(ctx context.Context, stream tunnel.TunnelStream, req protoc
 	}
 	tunnel.TuneTCPConn(local)
 	defer local.Close()
-	if err := protocol.WriteJSON(stream, protocol.OpenTCPResponse{RequestID: req.RequestID, Success: true, RemoteIP: targetAddress(address)}); err != nil {
+	// The local RDP service sees the Agent's ephemeral source TCP port, not
+	// the public client IP. Report that port to the authenticated Server so a
+	// Security 4625 event can be correlated with the correct public socket.
+	localPort := 0
+	if tcp, ok := local.LocalAddr().(*net.TCPAddr); ok {
+		localPort = tcp.Port
+	}
+	if err := protocol.WriteJSON(stream, protocol.OpenTCPResponse{RequestID: req.RequestID, Success: true, RemoteIP: targetAddress(address), RDPSourcePort: localPort}); err != nil {
 		return err
 	}
 	_ = stream.SetDeadline(time.Time{})

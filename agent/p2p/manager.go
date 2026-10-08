@@ -1097,7 +1097,7 @@ func (s *Session) watchLocalCandidates() {
 				Type: protocol.P2PControlCandidateUpdate, SessionID: s.ID,
 				ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
 				SessionToken: append([]byte(nil), s.Token...),
-				Candidates: append([]protocol.P2PCandidate(nil), candidates...),
+				Candidates:   append([]protocol.P2PCandidate(nil), candidates...),
 			})
 			cancel()
 			if err == nil && response.Type == protocol.P2PControlLeaseAck && response.LeaseExpiresAt > 0 {

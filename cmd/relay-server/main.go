@@ -501,8 +501,8 @@ func main() {
 
 	ingress := serverrdp.NewIngressManager(context.Background(), db, sessionMgr, serverrdp.IngressConfig{
 		Security: rdpSecurity,
-		Enabled: cfg.RDP.Ingress.Enabled != nil && *cfg.RDP.Ingress.Enabled,
-		Listen:  cfg.RDP.Ingress.Listen, RateLimit: cfg.RDP.Ingress.RateLimitPerMin,
+		Enabled:  cfg.RDP.Ingress.Enabled != nil && *cfg.RDP.Ingress.Enabled,
+		Listen:   cfg.RDP.Ingress.Listen, RateLimit: cfg.RDP.Ingress.RateLimitPerMin,
 		SourceCIDRs: cfg.RDP.Ingress.SourceCIDRs, PortStart: cfg.RDP.Ingress.PortStart, PortEnd: cfg.RDP.Ingress.PortEnd,
 		Audit: func(audit *repository.ConnectionAudit) {
 			select {

@@ -28,6 +28,10 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 			"identityId": "abcdef1234567890",
 		},
 		"transport": "auto",
+		"rdp": map[string]any{
+			"enabled": false,
+			"address": "127.0.0.1:3390",
+		},
 		"p2p": map[string]any{
 			"enabled":         true,
 			"mode":            "auto",
@@ -100,6 +104,9 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 	}
 	if cfg.Device.Name != "react-agent" || cfg.Device.IdentityID != "abcdef1234567890" || cfg.Transport.Mode != "auto" {
 		t.Fatalf("device/transport payload mismatch: device=%+v transport=%q", cfg.Device, cfg.Transport.Mode)
+	}
+	if cfg.RDP.Enabled == nil || *cfg.RDP.Enabled || cfg.RDP.Address != "127.0.0.1:3390" {
+		t.Fatalf("rdp payload mismatch: %+v", cfg.RDP)
 	}
 	if cfg.P2P.PunchTimeoutMs != 1600 || cfg.P2P.KeepaliveSec != 12 || cfg.P2P.IdleTimeoutSec != 180 || cfg.P2P.MaxExitSessions != 6 || cfg.P2P.Fallback == nil || *cfg.P2P.Fallback {
 		t.Fatalf("p2p payload mismatch: %+v", cfg.P2P)

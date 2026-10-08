@@ -22,17 +22,17 @@ type compiledBan struct {
 // SecurityManager only protects public RDP ingress sockets. It deliberately
 // does not ban authenticated Agent tunnels or P2P traffic by source NAT IP.
 type SecurityManager struct {
-	db        *repository.DB
-	mu        sync.Mutex
-	bans      []compiledBan
-	rules     []repository.RDPSecurityRule
-	counters  map[string]securityWindow
-	authCounters map[string]securityWindow
+	db              *repository.DB
+	mu              sync.Mutex
+	bans            []compiledBan
+	rules           []repository.RDPSecurityRule
+	counters        map[string]securityWindow
+	authCounters    map[string]securityWindow
 	authConnections map[string][]trackedRDPTCP
-	logs      chan repository.RDPSecurityLog
-	stopping  chan struct{}
-	done      chan struct{}
-	closeOnce sync.Once
+	logs            chan repository.RDPSecurityLog
+	stopping        chan struct{}
+	done            chan struct{}
+	closeOnce       sync.Once
 }
 
 func NewSecurityManager(db *repository.DB) (*SecurityManager, error) {

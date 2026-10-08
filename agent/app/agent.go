@@ -800,7 +800,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 				reply, err := a.sendRDPControlRequest(sendCtx, sess, protocol.RDPControlMessage{
 					Type: protocol.RDPControlHostAuthFailure, HostAuthFailure: &failure,
 				})
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				if reply.Type != protocol.RDPControlHostAuthFailureAck {
 					return fmt.Errorf("Windows RDP auth report rejected: %s %s", reply.ErrorCode, reply.ErrorMessage)
 				}

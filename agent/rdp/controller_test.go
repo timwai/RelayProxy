@@ -255,7 +255,6 @@ func TestControllerReadFailureDetachesUDPAssociation(t *testing.T) {
 	}
 }
 
-
 func TestRDPClientLaunchSpecUsesPlatformNativeClient(t *testing.T) {
 	command, args, ok := rdpClientLaunchSpec("windows", "127.0.0.1:13389")
 	if !ok || command != "mstsc.exe" || len(args) != 1 || args[0] != "/v:127.0.0.1:13389" {

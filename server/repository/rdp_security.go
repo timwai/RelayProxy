@@ -58,7 +58,7 @@ func (db *DB) ensureRDPSecuritySchema() error {
 		"CREATE TABLE IF NOT EXISTS rdp_security_rules (id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled BOOLEAN NOT NULL, threshold INTEGER NOT NULL, window_seconds INTEGER NOT NULL, ban_seconds INTEGER NOT NULL)",
 		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('high_frequency','高频连接防护',1,30,60,900)",
 		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('persistent_scan','持续扫描防护',1,100,300,3600)",
-		"DELETE FROM rdp_security_rules WHERE id = \'login_failure\'",
+		"DELETE FROM rdp_security_rules WHERE id = 'login_failure'",
 		"DROP TABLE IF EXISTS rdp_auth_failures",
 	}
 	for _, statement := range statements {

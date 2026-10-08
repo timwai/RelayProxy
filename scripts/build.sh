@@ -295,9 +295,15 @@ build_native_macos_app
 build_react_frontend
 
 echo ""
-echo "[TEST] Windows desktop packages (cross-compile)"
-CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test \
-  ./agent/divert ./agent/gui ./cmd/relay-agent -run '^build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent.exe"
+echo "[TEST] Windows desktop packages (cross-compile compile-check)"
+# A Unix/macOS host cannot execute the generated Windows test binaries.
+# -exec=true still compiles/links the Windows tests, then delegates execution
+# to the host true command so Windows-only compile errors are caught here.
+CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -exec=true \
+  ./agent/divert ./agent/gui ./cmd/relay-agent -run '^$' -count=1
+
+build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent-gui.exe" "-H=windowsgui"
+build_one windows amd64 ./cmd/relay-agent "$OUT_DIR/windows-amd64/relay-agent.exe"
 build_one windows amd64 ./cmd/relay-server "$OUT_DIR/windows-amd64/relay-server.exe"
 # WinDivert is x64-only; ARM64 binaries still support the non-divert modes.
 build_one windows arm64 ./cmd/relay-agent "$OUT_DIR/windows-arm64/relay-agent-gui.exe" "-H=windowsgui"

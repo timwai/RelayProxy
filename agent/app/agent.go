@@ -146,6 +146,7 @@ type AgentConfig struct {
 	P2PIdleTimeout        time.Duration
 	P2PMaxSessions        int
 	P2PFallback           *bool
+	P2PUPnPAllowed        *bool
 	PublicDirectAdvertise string
 	AllowInternet         bool
 	AllowPrivateNet       bool
@@ -261,6 +262,10 @@ type AgentStatus struct {
 	P2PFallbackCount     uint64                     `json:"p2pFallbackCount,omitempty"`
 	P2PBytesUp           uint64                     `json:"p2pBytesUp,omitempty"`
 	P2PBytesDown         uint64                     `json:"p2pBytesDown,omitempty"`
+	UPnPEnabled          bool                       `json:"upnpEnabled"`
+	UPnPState            string                     `json:"upnpState"`
+	UPnPError            string                     `json:"upnpError,omitempty"`
+	UPnPAddress          string                     `json:"upnpAddress,omitempty"`
 	NativeUDP            tunnel.DatagramUsage       `json:"nativeUdp"`
 }
 
@@ -755,7 +760,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 			MaxExitSessions: cfg.P2PMaxSessions,
 			PortStart:       accepted.P2PPortStart,
 			PortEnd:         accepted.P2PPortEnd,
-			UPnPEnabled:     accepted.P2PUPnPEnabled,
+			UPnPEnabled:     accepted.P2PUPnPEnabled && cfg.P2PUPnPAllowed != nil && *cfg.P2PUPnPAllowed,
 		})
 		keepManager := false
 		a.mu.Lock()
@@ -1379,6 +1384,7 @@ func (a *Agent) Status() AgentStatus {
 		}
 	}
 	if proxyP2P != nil {
+		st.UPnPEnabled, st.UPnPState, st.UPnPError, st.UPnPAddress = proxyP2P.UPnPStatus()
 		if path, ok := proxyP2P.PathStatus(st.SelectedExit); ok {
 			st.P2PState = string(path.State)
 			st.P2PPath = path.Path

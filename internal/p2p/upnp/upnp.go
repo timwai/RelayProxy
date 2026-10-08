@@ -56,21 +56,21 @@ type MappingUpdate struct {
 }
 
 type Mapping struct {
-	service        service
-	internalClient string
-	internalPort       uint16
-	externalPort       uint16
-	externalPortStart  int
-	externalPortEnd    int
-	externalIP         netip.Addr
-	leaseSeconds   uint32
-	done           chan struct{}
-	closeOnce      sync.Once
-	opMu           sync.Mutex // serializes renew, remap, and final delete
-	statusMu       sync.RWMutex
-	status         MappingUpdate
-	updates        chan MappingUpdate
-	closeErr       error
+	service           service
+	internalClient    string
+	internalPort      uint16
+	externalPort      uint16
+	externalPortStart int
+	externalPortEnd   int
+	externalIP        netip.Addr
+	leaseSeconds      uint32
+	done              chan struct{}
+	closeOnce         sync.Once
+	opMu              sync.Mutex // serializes renew, remap, and final delete
+	statusMu          sync.RWMutex
+	status            MappingUpdate
+	updates           chan MappingUpdate
+	closeErr          error
 }
 
 type rootDescription struct {

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/netip"
 	"sort"
+	"strconv"
 	"time"
 
 	"relayproxy/internal/protocol"
@@ -120,9 +121,52 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 		return result[i].Address < result[j].Address
 	})
 	if len(result) > MaxCandidates {
-		result = result[:MaxCandidates]
+		result = limitDiscoveredCandidates(result)
 	}
 	return result
+}
+
+// Reserve at least one discovered endpoint for each available protocol/address
+// family combination before applying the global candidate limit. VPN and
+// virtual NICs must not crowd out the only reachable IPv4 or IPv6 path.
+func limitDiscoveredCandidates(sorted []protocol.P2PCandidate) []protocol.P2PCandidate {
+	if len(sorted) <= MaxCandidates {
+		return sorted
+	}
+	selected := make([]protocol.P2PCandidate, 0, MaxCandidates)
+	used := make(map[string]bool, MaxCandidates)
+	for _, protocolName := range []string{"udp", "tcp"} {
+		for _, wantIPv6 := range []bool{false, true} {
+			for _, item := range sorted {
+				addr, err := netip.ParseAddrPort(item.Address)
+				if err != nil || item.Protocol != protocolName || addr.Addr().Is6() != wantIPv6 {
+					continue
+				}
+				if !used[item.Protocol+":"+item.Address] {
+					selected = append(selected, item)
+					used[item.Protocol+":"+item.Address] = true
+				}
+				break
+			}
+		}
+	}
+	for _, item := range sorted {
+		if len(selected) >= MaxCandidates {
+			break
+		}
+		key := item.Protocol + ":" + item.Address
+		if !used[key] {
+			selected = append(selected, item)
+			used[key] = true
+		}
+	}
+	sort.SliceStable(selected, func(i, j int) bool {
+		if selected[i].Priority != selected[j].Priority {
+			return selected[i].Priority > selected[j].Priority
+		}
+		return selected[i].Address < selected[j].Address
+	})
+	return selected
 }
 
 func discoveryPriority(ip netip.Addr, protocolName string) uint32 {
@@ -141,54 +185,149 @@ func discoveryPriority(ip netip.Addr, protocolName string) uint32 {
 	return priority
 }
 
-// ProbeReflexive asks the server's UDP rendezvous socket to report the source
-// address it observed.  A short deadline and a nonce prevent stale responses
-// from being mistaken for the current endpoint.
+// ProbeReflexive preserves the single-candidate API for existing callers.
+// Use ProbeReflexiveAll to advertise both discovered address families.
 func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string) (protocol.P2PCandidate, error) {
-	if conn == nil || rendezvous == "" || (protocolName != "udp" && protocolName != "tcp") {
-		return protocol.P2PCandidate{}, ErrProbeUnavailable
-	}
-	remote, err := net.ResolveUDPAddr("udp", rendezvous)
+	all, err := ProbeReflexiveAll(ctx, rendezvous, conn, protocolName)
 	if err != nil {
 		return protocol.P2PCandidate{}, err
 	}
-	var nonce uint64
-	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
-		return protocol.P2PCandidate{}, err
+	return all[0], nil
+}
+
+// ProbeReflexiveAll probes the IPv4 and IPv6 rendezvous addresses from the
+// SAME UDP socket used by punching and QUIC. The probes use distinct nonces,
+// are verified against their responding server, and do not depend on DNS
+// answer ordering. Successful families survive failures of the other family.
+func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string) ([]protocol.P2PCandidate, error) {
+	if conn == nil || rendezvous == "" || (protocolName != "udp" && protocolName != "tcp") {
+		return nil, ErrProbeUnavailable
 	}
-	request := make([]byte, 16)
-	binary.BigEndian.PutUint32(request[0:4], ProbeMagic)
-	request[4] = ProbeVersion
-	binary.BigEndian.PutUint64(request[8:16], nonce)
+	host, rawPort, err := net.SplitHostPort(rendezvous)
+	if err != nil {
+		return nil, err
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil || port < 1 || port > 65535 {
+		return nil, ErrProbeUnavailable
+	}
+
+	var ips []netip.Addr
+	if literal, parseErr := netip.ParseAddr(host); parseErr == nil {
+		ips = append(ips, literal.Unmap())
+	} else {
+		resolved, resolveErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		for _, value := range resolved {
+			ips = append(ips, value.Unmap())
+		}
+	}
+	// Probe only one address per family; returning the first successful
+	// reflexive candidate of each family keeps signaling bounded.
+	var destinations []netip.AddrPort
+	for _, wantIPv6 := range []bool{false, true} {
+		for _, ip := range ips {
+			if !ip.IsValid() || ip.Is6() != wantIPv6 || ip.IsUnspecified() {
+				continue
+			}
+			destinations = append(destinations, netip.AddrPortFrom(ip, uint16(port)))
+			break
+		}
+	}
+	if len(destinations) == 0 {
+		return nil, ErrProbeUnavailable
+	}
 	deadline := time.Now().Add(2 * time.Second)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 	defer conn.SetReadDeadline(time.Time{})
-	_ = conn.SetReadDeadline(deadline)
-	if _, err := conn.WriteToUDP(request, remote); err != nil {
-		return protocol.P2PCandidate{}, err
-	}
-	buffer := make([]byte, 64)
-	for {
-		n, _, err := conn.ReadFromUDP(buffer)
-		if err != nil {
-			return protocol.P2PCandidate{}, err
+	pending := make(map[uint64]netip.AddrPort, len(destinations))
+	var lastErr error
+	for _, remote := range destinations {
+		var nonce uint64
+		if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
+			return nil, err
 		}
-		if n != 32 || binary.BigEndian.Uint32(buffer[0:4]) != ProbeMagic || buffer[4] != ProbeVersion || binary.BigEndian.Uint64(buffer[8:16]) != nonce {
+		var request [16]byte
+		binary.BigEndian.PutUint32(request[0:4], ProbeMagic)
+		request[4] = ProbeVersion
+		binary.BigEndian.PutUint64(request[8:16], nonce)
+		if _, err := conn.WriteToUDPAddrPort(request[:], remote); err != nil {
+			lastErr = err
 			continue
 		}
-		ip, ok := netip.AddrFromSlice(buffer[16:32])
-		ip = ip.Unmap()
-		if !ok || !ip.IsValid() || ip.IsUnspecified() {
-			return protocol.P2PCandidate{}, ErrProbeUnavailable
-		}
-		// The source port is returned in the lower two bytes of the response.
-		port := binary.BigEndian.Uint16(buffer[6:8])
-		if port == 0 {
-			return protocol.P2PCandidate{}, ErrProbeUnavailable
-		}
-		_ = conn.SetReadDeadline(time.Time{})
-		return protocol.P2PCandidate{Protocol: protocolName, Type: "reflexive", Address: netip.AddrPortFrom(ip, port).String(), Priority: 800}, nil
+		pending[nonce] = remote
 	}
+	if len(pending) == 0 {
+		if lastErr != nil {
+			return nil, lastErr
+		}
+		return nil, ErrProbeUnavailable
+	}
+
+	var results []protocol.P2PCandidate
+	var firstResponse time.Time
+	buffer := make([]byte, 64)
+	for len(pending) > 0 {
+		readUntil := deadline
+		if !firstResponse.IsZero() {
+			// Do not add a two-second delay to IPv4-only peers when an
+			// advertised IPv6 route is unavailable.
+			if grace := firstResponse.Add(250 * time.Millisecond); grace.Before(readUntil) {
+				readUntil = grace
+			}
+		}
+		if !time.Now().Before(readUntil) {
+			break
+		}
+		_ = conn.SetReadDeadline(readUntil)
+		n, sender, readErr := conn.ReadFromUDPAddrPort(buffer)
+		if readErr != nil {
+			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
+				break
+			}
+			if len(results) > 0 {
+				break
+			}
+			return nil, readErr
+		}
+		if n != 32 || binary.BigEndian.Uint32(buffer[0:4]) != ProbeMagic || buffer[4] != ProbeVersion {
+			continue
+		}
+		nonce := binary.BigEndian.Uint64(buffer[8:16])
+		expected, ok := pending[nonce]
+		if !ok || netip.AddrPortFrom(sender.Addr().Unmap(), sender.Port()) != expected {
+			continue
+		}
+		delete(pending, nonce)
+		ip, ok := netip.AddrFromSlice(buffer[16:32])
+		if !ok {
+			continue
+		}
+		ip = ip.Unmap()
+		reflexivePort := binary.BigEndian.Uint16(buffer[6:8])
+		if !ip.IsValid() || ip.IsUnspecified() || reflexivePort == 0 {
+			continue
+		}
+		results = append(results, protocol.P2PCandidate{
+			Protocol: protocolName, Type: "reflexive",
+			Address: netip.AddrPortFrom(ip, reflexivePort).String(), Priority: 800,
+		})
+		if firstResponse.IsZero() {
+			firstResponse = time.Now()
+		}
+	}
+	if len(results) > 0 {
+		return results, nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return nil, ErrProbeUnavailable
 }

@@ -18,12 +18,16 @@ func rdpSecurityPagination(req *http.Request) (int, int, error) {
 	page, size := 1, 20
 	if raw := req.URL.Query().Get("page"); raw != "" {
 		n, err := strconv.Atoi(raw)
-		if err != nil { return 0, 0, errors.New("invalid page") }
+		if err != nil {
+			return 0, 0, errors.New("invalid page")
+		}
 		page = n
 	}
 	if raw := req.URL.Query().Get("pageSize"); raw != "" {
 		n, err := strconv.Atoi(raw)
-		if err != nil { return 0, 0, errors.New("invalid pageSize") }
+		if err != nil {
+			return 0, 0, errors.New("invalid pageSize")
+		}
 		size = n
 	}
 	if page < 1 || page > 100000 || size < 1 || size > 100 {
@@ -34,23 +38,38 @@ func rdpSecurityPagination(req *http.Request) (int, int, error) {
 
 func (r *Router) handleListRDPSecurityGroups(w http.ResponseWriter, req *http.Request) {
 	page, size, err := rdpSecurityPagination(req)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	groups, err := r.db.ListRDPSecuritySourceGroups(req.URL.Query().Get("search"), page, size)
-	if err != nil { writeError(w, http.StatusInternalServerError, "failed to list RDP source IP groups"); return }
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list RDP source IP groups")
+		return
+	}
 	writeJSON(w, http.StatusOK, groups)
 }
 
 func (r *Router) handleListRDPSecurityLogs(w http.ResponseWriter, req *http.Request) {
 	page, size, err := rdpSecurityPagination(req)
-	if err != nil { writeError(w, http.StatusBadRequest, err.Error()); return }
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	ip := strings.TrimSpace(req.URL.Query().Get("ip"))
 	if ip != "" {
 		address, parseErr := netip.ParseAddr(ip)
-		if parseErr != nil { writeError(w, http.StatusBadRequest, "invalid source IP"); return }
+		if parseErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid source IP")
+			return
+		}
 		ip = address.Unmap().String()
 	}
 	logs, err := r.db.ListRDPSecurityLogPage(ip, page, size)
-	if err != nil { writeError(w, http.StatusInternalServerError, "failed to list RDP connections"); return }
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list RDP connections")
+		return
+	}
 	writeJSON(w, http.StatusOK, logs)
 }
 
@@ -60,7 +79,10 @@ func (r *Router) handleClearRDPSecurityLogs(w http.ResponseWriter, req *http.Req
 	ip := strings.TrimSpace(req.URL.Query().Get("ip"))
 	if ip != "" {
 		address, err := netip.ParseAddr(ip)
-		if err != nil { writeError(w, http.StatusBadRequest, "invalid source IP"); return }
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid source IP")
+			return
+		}
 		ip = address.Unmap().String()
 	}
 	var count int64
@@ -70,7 +92,10 @@ func (r *Router) handleClearRDPSecurityLogs(w http.ResponseWriter, req *http.Req
 	} else {
 		count, err = r.db.DeleteRDPSecurityLogs(ip)
 	}
-	if err != nil { writeError(w, http.StatusInternalServerError, "failed to clear RDP connection audit"); return }
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear RDP connection audit")
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": count, "sourceIp": ip})
 }
 

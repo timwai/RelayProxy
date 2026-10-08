@@ -16,7 +16,7 @@ func TestDarwinDefaultConfigUsesUserHome(t *testing.T) {
 	if err != nil || path != filepath.Join(home, ".relayproxy", agentConfigName) {
 		t.Fatalf("unexpected default path %q: %v", path, err)
 	}
-	if _, err := loadOrCreateAgentConfig(path, nil); err != nil {
+	if _, err := loadOrCreateAgentConfig(path); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {

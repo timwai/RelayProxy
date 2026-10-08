@@ -62,7 +62,9 @@ func (s *SecurityManager) FinishPublicRDPTCP(hostID string, port int, connection
 }
 
 func (s *SecurityManager) pruneTrackedRDPTCPLocked(now time.Time) {
-	if now.Sub(s.lastPortPrune) < 30*time.Second { return }
+	if now.Sub(s.lastPortPrune) < 30*time.Second {
+		return
+	}
 	s.lastPortPrune = now
 	for key, entries := range s.authConnections {
 		kept := entries[:0]
@@ -123,7 +125,9 @@ func (s *SecurityManager) ReportHostAuthFailure(hostID string, event protocol.RD
 	s.authReportWindows[hostID] = reportWindow
 	if len(s.authReportWindows) > 4096 {
 		for key, window := range s.authReportWindows {
-			if now.Sub(window.began) > time.Minute { delete(s.authReportWindows, key) }
+			if now.Sub(window.began) > time.Minute {
+				delete(s.authReportWindows, key)
+			}
 		}
 	}
 	if reportWindow.count > 240 {

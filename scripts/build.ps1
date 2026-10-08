@@ -15,16 +15,21 @@
   relay-agent-gui.exe 使用 -H=windowsgui 子系统，双击不会弹出控制台窗口；
   relay-agent.exe 保留 Console 子系统供 CLI / 脚本调用，带参数时会自动保持无窗口。
   Windows arm64 产物可运行 Agent / Server，但系统透明代理目前仍只支持 amd64。
+  使用 -WindowsOnly 可只构建 Windows x64/ARM64、React UI 与 Windows 发布包。
   Windows ARM64 桌面窗口需要 ARM64 WebView2 Runtime；缺失时会提示并继续提供本地 Web 管理页。
   管理界面通过 Linux 服务端的 Admin HTTPS 控制台访问，或直接使用桌面窗口。
 
 .EXAMPLE
   .\scripts\build.ps1
   .\scripts\build.ps1 -OutDir D:\release\relayproxy
+  .\scripts\build.ps1 -WindowsOnly
+  .\scripts\build.ps1 -WindowsOnly -Version 1.2.3
 #>
 param(
     [string]$OutDir = "",
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.0",
+    [switch]$WindowsOnly,
+    [switch]$SkipFrontendTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,18 +52,78 @@ function Reset-GoHostEnvironment {
     Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue
 }
 
+function Assert-Command {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [string]$InstallHint = ""
+    )
+    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
+        if ($InstallHint) {
+            throw "$Name was not found. $InstallHint"
+        }
+        throw "$Name was not found in PATH."
+    }
+}
+
+function Assert-ReactBundle {
+    $dist = Join-Path $Root "agent\gui\react_dist"
+    $index = Join-Path $dist "index.html"
+    if (-not (Test-Path -LiteralPath $index)) {
+        throw "React frontend build did not produce agent\gui\react_dist\index.html"
+    }
+    $assets = Join-Path $dist "assets"
+    if (-not (Test-Path -LiteralPath $assets)) {
+        throw "React frontend build did not produce agent\gui\react_dist\assets"
+    }
+    $js = @(Get-ChildItem -LiteralPath $assets -Filter "*.js" -File -ErrorAction SilentlyContinue)
+    $css = @(Get-ChildItem -LiteralPath $assets -Filter "*.css" -File -ErrorAction SilentlyContinue)
+    if ($js.Count -eq 0 -or $css.Count -eq 0) {
+        throw "React frontend bundle is incomplete: expected at least one JS and CSS asset"
+    }
+    Write-Host "  React bundle OK: index.html + $($js.Count) JS + $($css.Count) CSS" -ForegroundColor Green
+}
+
+function Test-WindowsDesktopPackages {
+    Write-Host ""
+    Write-Host "[TEST] Windows desktop packages" -ForegroundColor Cyan
+    Reset-GoHostEnvironment
+    $env:CGO_ENABLED = "0"
+    $env:GOOS = "windows"
+    $env:GOARCH = "amd64"
+    & go test ./agent/divert ./agent/gui ./cmd/relay-agent -count=1
+    if ($LASTEXITCODE -ne 0) {
+        throw "Windows desktop package tests failed"
+    }
+    Reset-GoHostEnvironment
+}
+
+
 Write-Host "=================================================="
 Write-Host " RelayProxy Build  v$Version"
 Write-Host " Root:   $Root"
 Write-Host " OutDir: $OutDir"
 Write-Host " Time:   $stamp"
 Write-Host "=================================================="
+if ($WindowsOnly) {
+    Write-Host " Mode:   Windows-only release" -ForegroundColor Yellow
+}
+if ($SkipFrontendTests) {
+    Write-Host " Note:   React unit tests are skipped" -ForegroundColor Yellow
+}
 
 Push-Location $Root
 try {
     # The caller may already have GOOS/GOARCH set from a previous cross-build.
     # Reset before invoking any host-side Go helper.
     Reset-GoHostEnvironment
+
+    Write-Host "[prep] Verify build toolchain"
+    Assert-Command -Name "go" -InstallHint "Install the Go version declared in go.mod."
+    Assert-Command -Name "npm" -InstallHint "Install Node.js 22+ before building the Windows React desktop client."
+    & go version
+    if ($LASTEXITCODE -ne 0) { throw "go version failed" }
+    & npm --version
+    if ($LASTEXITCODE -ne 0) { throw "npm version check failed" }
 
     Write-Host "[prep] Generate brand icons + Windows resources"
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root "scripts\gen-brand.ps1")
@@ -179,8 +244,9 @@ try {
     }
 
     # --- Linux server/agent and macOS agent ---
-    Hide-Syso
-    try {
+    if (-not $WindowsOnly) {
+        Hide-Syso
+        try {
         Invoke-GoBuild -GOOS "linux" -GOARCH "amd64" `
             -Package "./cmd/relay-server" `
             -Output (Join-Path $OutDir "linux-amd64/relay-server")
@@ -212,29 +278,43 @@ try {
         Invoke-GoBuild -GOOS "darwin" -GOARCH "arm64" `
             -Package "./cmd/relay-server" `
             -Output (Join-Path $OutDir "darwin-arm64/relay-server")
-    } finally {
-        Show-Syso
-    }
+        } finally {
+            Show-Syso
+        }
 
-    Package-MacOSApp -Arch "amd64"
-    Package-MacOSApp -Arch "arm64"
+        Package-MacOSApp -Arch "amd64"
+        Package-MacOSApp -Arch "arm64"
+    }
 
     # --- Wails React frontend ---
     $frontendDir = Join-Path $Root "agent\gui\frontend"
+    $reactDist = Join-Path $Root "agent\gui\react_dist"
     Write-Host ""
     Write-Host "[BUILD] Wails React frontend" -ForegroundColor Cyan
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
-        throw "npm was not found. Install Node.js before building the Windows desktop client."
+    if (Test-Path -LiteralPath $reactDist) {
+        Get-ChildItem -LiteralPath $reactDist -Force |
+            Where-Object { $_.Name -ne "README.txt" } |
+            Remove-Item -Recurse -Force
     }
     Push-Location $frontendDir
     try {
         & npm install --no-audit --no-fund
         if ($LASTEXITCODE -ne 0) { throw "npm install failed for Wails React frontend" }
+        if (-not $SkipFrontendTests) {
+            & npm test
+            if ($LASTEXITCODE -ne 0) { throw "React frontend tests failed" }
+        }
         & npm run build
         if ($LASTEXITCODE -ne 0) { throw "React frontend build failed" }
     } finally {
         Pop-Location
     }
+    Assert-ReactBundle
+
+    # Compile/test the exact Windows packages that consume the generated React bundle
+    # before creating release EXEs. This catches missing embed assets, Wails bridge
+    # regressions and WinDivert/Network Service Windows-only compile errors.
+    Test-WindowsDesktopPackages
 
     # --- Windows client (icons + manifest embedded via resource_windows.syso) ---
     # Desktop build first: it is the artifact users are told to double-click.
@@ -271,21 +351,28 @@ try {
         Copy-Item (Join-Path $Root "assets\brand\icon.ico") $brandOut -Force
         Copy-Item (Join-Path $Root "assets\brand\logo.png") $brandOut -Force
     }
-    foreach ($t in @("linux-amd64", "linux-arm64")) {
-        $lb = Join-Path $OutDir "$t/brand"
-        New-Item -ItemType Directory -Path $lb -Force | Out-Null
-        Copy-Item (Join-Path $Root "assets\brand\icon-256.png") (Join-Path $lb "icon.png") -Force
-        Copy-Item (Join-Path $Root "assets\brand\logo.png") $lb -Force
-    }
-    foreach ($t in @("darwin-amd64", "darwin-arm64")) {
-        $mb = Join-Path $OutDir "$t/brand"
-        New-Item -ItemType Directory -Path $mb -Force | Out-Null
-        Copy-Item (Join-Path $Root "assets\brand\icon-256.png") (Join-Path $mb "icon.png") -Force
-        Copy-Item (Join-Path $Root "assets\brand\logo.png") $mb -Force
+    if (-not $WindowsOnly) {
+        foreach ($t in @("linux-amd64", "linux-arm64")) {
+            $lb = Join-Path $OutDir "$t/brand"
+            New-Item -ItemType Directory -Path $lb -Force | Out-Null
+            Copy-Item (Join-Path $Root "assets\brand\icon-256.png") (Join-Path $lb "icon.png") -Force
+            Copy-Item (Join-Path $Root "assets\brand\logo.png") $lb -Force
+        }
+        foreach ($t in @("darwin-amd64", "darwin-arm64")) {
+            $mb = Join-Path $OutDir "$t/brand"
+            New-Item -ItemType Directory -Path $mb -Force | Out-Null
+            Copy-Item (Join-Path $Root "assets\brand\icon-256.png") (Join-Path $mb "icon.png") -Force
+            Copy-Item (Join-Path $Root "assets\brand\logo.png") $mb -Force
+        }
     }
 
     # --- Package configs ---
-    foreach ($target in @("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64")) {
+    $packageTargets = if ($WindowsOnly) {
+        @("windows-amd64", "windows-arm64")
+    } else {
+        @("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64")
+    }
+    foreach ($target in $packageTargets) {
         $cfgDir = Join-Path $OutDir "$target/configs"
         New-Item -ItemType Directory -Path $cfgDir -Force | Out-Null
         Copy-Item (Join-Path $Root "configs/relay-server.yaml") $cfgDir -Force
@@ -294,10 +381,12 @@ try {
 
     Copy-Item (Join-Path $Root "docs/windows-transparent-proxy.md") (Join-Path $OutDir "windows-amd64/README.md") -Force
     Copy-Item (Join-Path $Root "docs/windows-transparent-proxy.md") (Join-Path $OutDir "windows-arm64/README.md") -Force
-    Copy-Item (Join-Path $Root "docs/linux-transparent-proxy.md") (Join-Path $OutDir "linux-amd64/README.md") -Force
-    Copy-Item (Join-Path $Root "docs/linux-transparent-proxy.md") (Join-Path $OutDir "linux-arm64/README.md") -Force
-    Copy-Item (Join-Path $Root "agent/divert/macos/README.md") (Join-Path $OutDir "darwin-amd64/README.md") -Force
-    Copy-Item (Join-Path $Root "agent/divert/macos/README.md") (Join-Path $OutDir "darwin-arm64/README.md") -Force
+    if (-not $WindowsOnly) {
+        Copy-Item (Join-Path $Root "docs/linux-transparent-proxy.md") (Join-Path $OutDir "linux-amd64/README.md") -Force
+        Copy-Item (Join-Path $Root "docs/linux-transparent-proxy.md") (Join-Path $OutDir "linux-arm64/README.md") -Force
+        Copy-Item (Join-Path $Root "agent/divert/macos/README.md") (Join-Path $OutDir "darwin-amd64/README.md") -Force
+        Copy-Item (Join-Path $Root "agent/divert/macos/README.md") (Join-Path $OutDir "darwin-arm64/README.md") -Force
+    }
     Write-Host "[prep] Package Windows agent with verified WinDivert runtime"
     Reset-GoHostEnvironment
     & go run ./scripts/fetch-windivert.go `
@@ -316,7 +405,7 @@ try {
         Compress-Archive -Path (Join-Path $source "*") -DestinationPath $archive -CompressionLevel Optimal
     }
 
-    foreach ($target in @("linux-amd64", "linux-arm64", "darwin-amd64", "darwin-arm64", "windows-amd64", "windows-arm64")) {
+    foreach ($target in $packageTargets) {
         New-TargetArchive -Target $target
     }
 

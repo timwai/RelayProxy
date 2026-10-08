@@ -243,7 +243,7 @@ func (s *WailsService) GetConfig() (string, error) {
 			"enabled": cfg.P2P.Enabled == nil || *cfg.P2P.Enabled, "mode": cfg.P2P.Mode,
 			"punchTimeoutMs": cfg.P2P.PunchTimeoutMs, "keepaliveSec": cfg.P2P.KeepaliveSec,
 			"idleTimeoutSec": cfg.P2P.IdleTimeoutSec, "maxExitSessions": cfg.P2P.MaxExitSessions,
-			"fallback": cfg.P2P.Fallback == nil || *cfg.P2P.Fallback,
+			"fallback":    cfg.P2P.Fallback == nil || *cfg.P2P.Fallback,
 			"upnpAllowed": cfg.P2P.UPnPAllowed != nil && *cfg.P2P.UPnPAllowed,
 		},
 		PublicDirectAdvertise:       cfg.Direct.Public.Advertise,
@@ -275,7 +275,7 @@ func (s *WailsService) GetConfig() (string, error) {
 				"enabled": state.Runtime.P2P.Enabled == nil || *state.Runtime.P2P.Enabled, "mode": state.Runtime.P2P.Mode,
 				"punchTimeoutMs": state.Runtime.P2P.PunchTimeoutMs, "keepaliveSec": state.Runtime.P2P.KeepaliveSec,
 				"idleTimeoutSec": state.Runtime.P2P.IdleTimeoutSec, "maxExitSessions": state.Runtime.P2P.MaxExitSessions,
-				"fallback": state.Runtime.P2P.Fallback == nil || *state.Runtime.P2P.Fallback,
+				"fallback":    state.Runtime.P2P.Fallback == nil || *state.Runtime.P2P.Fallback,
 				"upnpAllowed": state.Runtime.P2P.UPnPAllowed != nil && *state.Runtime.P2P.UPnPAllowed,
 			},
 			"socks5": proxyLeg{

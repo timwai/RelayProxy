@@ -23,6 +23,19 @@ func (r *Router) handleListRDPSecurityLogs(w http.ResponseWriter, req *http.Requ
 	writeJSON(w, http.StatusOK, rows)
 }
 
+// handleListRDPAuthFailures exposes audited Windows events, including those
+// with unknown public source IP. Only administrators may view usernames.
+func (r *Router) handleListRDPAuthFailures(w http.ResponseWriter, req *http.Request) {
+	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
+	rows, err := r.db.ListRDPAuthFailures(strings.TrimSpace(req.URL.Query().Get("ip")),
+		strings.TrimSpace(req.URL.Query().Get("ingressId")), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list Windows login failures")
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
 func (r *Router) handleListRDPSecurityBans(w http.ResponseWriter, req *http.Request) {
 	rows, err := r.db.ListActiveRDPSecurityBans()
 	if err != nil {

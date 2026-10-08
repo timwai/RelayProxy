@@ -21,6 +21,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/ipv4"
 )
 
 const (
@@ -311,6 +313,7 @@ type discoveredGateway struct {
 type networkInterfaceIPv4 struct {
 	address netip.Addr
 	subnet  *net.IPNet
+	index   int
 }
 
 // activeLANInterfaces discovers multicast-capable on-link interfaces. The
@@ -343,7 +346,7 @@ func activeLANInterfaces() []networkInterfaceIPv4 {
 				continue
 			}
 			seen[ip] = true
-			out = append(out, networkInterfaceIPv4{address: ip, subnet: subnet})
+			out = append(out, networkInterfaceIPv4{address: ip, subnet: subnet, index: iface.Index})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -379,6 +382,13 @@ func discoverOnInterface(ctx context.Context, iface networkInterfaceIPv4, deadli
 		return nil
 	}
 	defer conn.Close()
+	if iface.index != 0 {
+		if nic, err := net.InterfaceByIndex(iface.index); err == nil {
+			if err := ipv4.NewPacketConn(conn).SetMulticastInterface(nic); err != nil {
+				return nil
+			}
+		}
+	}
 	_ = conn.SetDeadline(deadline)
 	remote, err := net.ResolveUDPAddr("udp4", ssdpAddress)
 	if err != nil {

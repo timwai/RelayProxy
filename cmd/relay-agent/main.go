@@ -158,7 +158,7 @@ func main() {
 	if err != nil {
 		startupFatal(wantGUI, "[Config] Failed to resolve configuration path: %v", err)
 	}
-	cfgFile, err := loadOrCreateAgentConfig(*configPath, nil)
+	cfgFile, err := loadOrCreateAgentConfig(*configPath)
 	if err != nil {
 		startupFatal(wantGUI, "[Config] Failed to load configuration %s: %v", *configPath, err)
 	}

@@ -135,7 +135,7 @@ func NormalizeRDPIPCIDR(raw string) (string, error) {
 // ListActiveRDPSecurityBans returns manual bans, automatic bans and allowlist
 // entries. Revoked or expired rows remain in SQLite as historical evidence.
 func (db *DB) ListActiveRDPSecurityBans() ([]RDPSecurityBan, error) {
-	rows, err := db.Query("SELECT id,cidr,ingress_id,kind,reason,actor,created_at,expires_at FROM rdp_security_bans WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC LIMIT 10000", time.Now().UTC())
+	rows, err := db.Query("SELECT id,cidr,ingress_id,kind,reason,actor,created_at,expires_at FROM rdp_security_bans WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC", time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}

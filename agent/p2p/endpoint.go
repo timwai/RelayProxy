@@ -252,6 +252,16 @@ func (e *Endpoint) UPnPStatus() (state, reason string) {
 	return e.upnpState, e.upnpError
 }
 
+func (e *Endpoint) UPnPAddress() string {
+	if e == nil { return "" }
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.upnpState == "MAPPED" && e.upnpAddress.IsValid() {
+		return e.upnpAddress.String()
+	}
+	return ""
+}
+
 func (e *Endpoint) CandidateChanges() <-chan []protocol.P2PCandidate {
 	if e == nil {
 		return nil

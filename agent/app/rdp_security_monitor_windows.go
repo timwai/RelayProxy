@@ -7,6 +7,7 @@ import (
 	"log"
 	"os/exec"
 	"sort"
+	"syscall"
 	"time"
 
 	"relayproxy/agent/rdp"
@@ -27,7 +28,10 @@ func monitorWindowsRDPAuthFailures(ctx context.Context, report func(context.Cont
 		queryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 		arg := "/q:*[System[(EventID=4625) and TimeCreated[timediff(@SystemTime) <= 30000]]]"
-		raw, err := exec.CommandContext(queryCtx, "wevtutil.exe", "qe", "Security", arg, "/f:xml", "/rd:true", "/c:256", "/e:Events", "/uni:true").Output()
+		cmd := exec.CommandContext(queryCtx, "wevtutil.exe", "qe", "Security", arg, "/f:xml", "/rd:true", "/c:256", "/e:Events", "/uni:true")
+		// A GUI Host Agent must not flash a console window every poll.
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		raw, err := cmd.Output()
 		if err != nil {
 			if ctx.Err() == nil && time.Since(lastError) > 5*time.Minute {
 				log.Printf("[RDP Security] Cannot read Windows Security 4625 events (enable Audit Logon Failure and grant Security log access): %v", err)

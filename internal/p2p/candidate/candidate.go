@@ -72,6 +72,15 @@ func Validate(input []protocol.P2PCandidate) ([]protocol.P2PCandidate, error) {
 // The caller may pass the actual bound ports (including different ports) so
 // the candidate is never an arbitrary forwarding destination.
 func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
+	return DiscoverWithLimit(udpPort, tcpPort, MaxCandidates)
+}
+
+// DiscoverWithLimit reserves room for reflexive and UPnP candidates while
+// preserving at least one address from each available protocol/IP family.
+func DiscoverWithLimit(udpPort, tcpPort, limit int) []protocol.P2PCandidate {
+	if limit < 1 || limit > MaxCandidates {
+		limit = MaxCandidates
+	}
 	result := make([]protocol.P2PCandidate, 0, MaxCandidates)
 	seen := make(map[string]struct{})
 	interfaces, _ := net.Interfaces()
@@ -120,8 +129,8 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 		}
 		return result[i].Address < result[j].Address
 	})
-	if len(result) > MaxCandidates {
-		result = limitDiscoveredCandidates(result)
+	if len(result) > limit {
+		result = limitDiscoveredCandidates(result, limit)
 	}
 	return result
 }
@@ -129,12 +138,12 @@ func Discover(udpPort, tcpPort int) []protocol.P2PCandidate {
 // Reserve at least one discovered endpoint for each available protocol/address
 // family combination before applying the global candidate limit. VPN and
 // virtual NICs must not crowd out the only reachable IPv4 or IPv6 path.
-func limitDiscoveredCandidates(sorted []protocol.P2PCandidate) []protocol.P2PCandidate {
-	if len(sorted) <= MaxCandidates {
+func limitDiscoveredCandidates(sorted []protocol.P2PCandidate, limit int) []protocol.P2PCandidate {
+	if len(sorted) <= limit {
 		return sorted
 	}
-	selected := make([]protocol.P2PCandidate, 0, MaxCandidates)
-	used := make(map[string]bool, MaxCandidates)
+	selected := make([]protocol.P2PCandidate, 0, limit)
+	used := make(map[string]bool, limit)
 	for _, protocolName := range []string{"udp", "tcp"} {
 		for _, wantIPv6 := range []bool{false, true} {
 			for _, item := range sorted {
@@ -151,7 +160,7 @@ func limitDiscoveredCandidates(sorted []protocol.P2PCandidate) []protocol.P2PCan
 		}
 	}
 	for _, item := range sorted {
-		if len(selected) >= MaxCandidates {
+		if len(selected) >= limit {
 			break
 		}
 		key := item.Protocol + ":" + item.Address

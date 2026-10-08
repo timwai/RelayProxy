@@ -32,6 +32,12 @@ type Endpoint struct {
 	identity    *secure.TLSIdentity
 	candidates  []protocol.P2PCandidate
 	upnpMapping *p2pupnp.Mapping
+	upnpAddress netip.AddrPort
+	baseCandidates []protocol.P2PCandidate
+	upnpState string
+	upnpError string
+	candidateChanges chan []protocol.P2PCandidate
+	done chan struct{}
 	closed      bool
 }
 
@@ -49,7 +55,10 @@ func NewEndpointWithPortRange(rendezvous string, portStart, portEnd int) *Endpoi
 }
 
 func NewEndpointWithPortRangeAndUPnP(rendezvous string, portStart, portEnd int, upnpEnabled bool) *Endpoint {
-	return &Endpoint{rendezvous: rendezvous, portStart: portStart, portEnd: portEnd, upnpEnabled: upnpEnabled}
+	return &Endpoint{
+		rendezvous: rendezvous, portStart: portStart, portEnd: portEnd, upnpEnabled: upnpEnabled,
+		candidateChanges: make(chan []protocol.P2PCandidate, 1), done: make(chan struct{}),
+	}
 }
 
 func listenP2PUDP(portStart, portEnd int) (*net.UDPConn, error) {
@@ -140,14 +149,25 @@ func (e *Endpoint) Start(ctx context.Context) error {
 		}
 	}
 
+	baseCandidates := append([]protocol.P2PCandidate(nil), discovered...)
 	var upnpMapping *p2pupnp.Mapping
+	var upnpAddr netip.AddrPort
+	upnpState := "DISABLED"
+	upnpError := ""
 	if upnpResultCh != nil {
+		upnpState = "FAILED"
 		result := <-upnpResultCh
 		if result.err == nil && result.address.IsValid() {
 			upnpMapping = result.mapping
+			upnpAddr = result.address
+			upnpState = "MAPPED"
 			discovered = appendEndpointCandidate(discovered, protocol.P2PCandidate{
 				Protocol: "udp", Type: "reflexive", Address: result.address.String(), Priority: 900,
 			})
+		} else if result.err != nil {
+			upnpError = result.err.Error()
+		} else {
+			upnpError = "UPnP gateway returned no usable address"
 		}
 	}
 	if validated, validateErr := candidate.Validate(discovered); validateErr == nil {
@@ -174,8 +194,21 @@ func (e *Endpoint) Start(ctx context.Context) error {
 	e.conn = conn
 	e.identity = identity
 	e.candidates = append([]protocol.P2PCandidate(nil), discovered...)
+	e.baseCandidates = baseCandidates
 	e.upnpMapping = upnpMapping
+	e.upnpAddress = upnpAddr
+	e.upnpState = upnpState
+	e.upnpError = upnpError
+	if e.done == nil {
+		e.done = make(chan struct{})
+	}
+	if e.candidateChanges == nil {
+		e.candidateChanges = make(chan []protocol.P2PCandidate, 1)
+	}
 	e.mu.Unlock()
+	if upnpMapping != nil {
+		go e.watchUPnP(upnpMapping)
+	}
 	return nil
 }
 
@@ -201,6 +234,79 @@ func appendEndpointCandidate(items []protocol.P2PCandidate, extra protocol.P2PCa
 		items = items[:candidate.MaxCandidates]
 	}
 	return items
+}
+
+// UPnPStatus is a local diagnostic. Mapping availability is not a proof of
+// external reachability (e.g. a second ISP NAT may still block ingress).
+func (e *Endpoint) UPnPStatus() (state, reason string) {
+	if e == nil {
+		return "DISABLED", ""
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.upnpState == "" {
+		return "DISABLED", ""
+	}
+	return e.upnpState, e.upnpError
+}
+
+func (e *Endpoint) CandidateChanges() <-chan []protocol.P2PCandidate {
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.candidateChanges
+}
+
+func (e *Endpoint) watchUPnP(mapping *p2pupnp.Mapping) {
+	updates := mapping.Updates()
+	for {
+		select {
+		case <-e.done:
+			return
+		case update := <-updates:
+			e.applyUPnPUpdate(update)
+		}
+	}
+}
+
+func (e *Endpoint) applyUPnPUpdate(update p2pupnp.MappingUpdate) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	e.upnpAddress = netip.AddrPort{}
+	if update.Healthy && update.Address.IsValid() {
+		e.upnpAddress = update.Address
+		e.upnpState, e.upnpError = "MAPPED", ""
+	} else {
+		e.upnpState, e.upnpError = "DEGRADED", update.Reason
+	}
+	updated := append([]protocol.P2PCandidate(nil), e.baseCandidates...)
+	if e.upnpAddress.IsValid() {
+		updated = appendEndpointCandidate(updated, protocol.P2PCandidate{
+			Protocol: "udp", Type: "reflexive", Address: e.upnpAddress.String(), Priority: 900,
+		})
+	}
+	e.candidates = updated
+	if e.candidateChanges != nil {
+		// Keep the most recent snapshot if the coordinator is temporarily
+		// unavailable; never replay stale external endpoints.
+		select {
+		case e.candidateChanges <- append([]protocol.P2PCandidate(nil), updated...):
+		default:
+			select {
+			case <-e.candidateChanges:
+			default:
+			}
+			select {
+			case e.candidateChanges <- append([]protocol.P2PCandidate(nil), updated...):
+			default:
+			}
+		}
+	}
 }
 
 func (e *Endpoint) Description() ([]protocol.P2PCandidate, string, error) {
@@ -255,11 +361,15 @@ func (e *Endpoint) Close() error {
 		return nil
 	}
 	e.closed = true
+	if e.done != nil {
+		close(e.done)
+	}
 	conn := e.conn
 	mapping := e.upnpMapping
 	e.conn = nil
 	e.identity = nil
 	e.candidates = nil
+	e.baseCandidates = nil
 	e.upnpMapping = nil
 	e.mu.Unlock()
 	if mapping != nil {

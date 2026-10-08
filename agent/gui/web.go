@@ -555,7 +555,8 @@ const webBridgeJS = `(function () {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
   window.goGetStatus = function () { return request('/api/status'); };
-  window.goGetNetworkCapabilities = function () { return request('/api/network-capabilities'); };\n  window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
+  window.goGetNetworkCapabilities = function () { return request('/api/network-capabilities'); };
+  window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
@@ -599,5 +600,13 @@ const webBridgeJS = `(function () {
     }
     return Promise.resolve('{"ok":false,"message":"浏览器模式请从系统服务管理器重启 relay-agent"}');
   };
-  window.goQuit = function () { return json('/api/quit', 'POST', {}); };
+  window.goQuit = function () {
+    // A native macOS shell must own its process lifetime. Shut down its
+    // bundled Agent from AppDelegate rather than racing HTTP server shutdown.
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.relayproxyLifecycle) {
+      window.webkit.messageHandlers.relayproxyLifecycle.postMessage('quit');
+      return Promise.resolve('{"ok":true}');
+    }
+    return json('/api/quit', 'POST', {});
+  };
 })();`

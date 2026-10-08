@@ -82,9 +82,13 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
 		body := response.Body.String()
 		for _, want := range []string{`id="root"`, `/web-bridge.js`, `/assets/`} {
-			if response.Code != http.StatusOK || !strings.Contains(body, want) { t.Fatalf("React management page missing %q", want) }
+			if response.Code != http.StatusOK || !strings.Contains(body, want) {
+				t.Fatalf("React management page missing %q", want)
+			}
 		}
-		if strings.Contains(strings.ToLower(body), "web-token") { t.Fatal("React management page exposes web token") }
+		if strings.Contains(strings.ToLower(body), "web-token") {
+			t.Fatal("React management page exposes web token")
+		}
 		return
 	}
 	_, handler := webTestHandler(newWebTestBridge(t), true)
@@ -170,16 +174,18 @@ func TestWebManagementExposesServerAuthorizedProxyExitInventory(t *testing.T) {
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
 	body := page.Body.String()
-	if !hasBuiltReactWebUI() { for _, want := range []string{
-		`id="cfg-exit-id"`, `<select id="cfg-exit-id"`,
+	if !hasBuiltReactWebUI() {
+		for _, want := range []string{
+			`id="cfg-exit-id"`, `<select id="cfg-exit-id"`,
 		`id="speed-test-exit"`, `<select id="speed-test-exit"`,
-		`id="routing-rule-exit"`, `<select id="routing-rule-exit"`,
-		"goGetProxyExits", "fillProxyExitSelect", "已撤销、删除或当前不可用",
-	} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("Agent management page missing proxy exit inventory hook %q", want)
+			`id="routing-rule-exit"`, `<select id="routing-rule-exit"`,
+			"goGetProxyExits", "fillProxyExitSelect", "已撤销、删除或当前不可用",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("Agent management page missing proxy exit inventory hook %q", want)
+			}
 		}
-	} }
+	}
 
 	bridgeJS := httptest.NewRecorder()
 	handler.ServeHTTP(bridgeJS, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
@@ -202,11 +208,13 @@ func TestWebManagementExposesServerAuthorizedRDPTargetActions(t *testing.T) {
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
 	body := page.Body.String()
-	if !hasBuiltReactWebUI() { for _, want := range []string{"section-btn-rdp", "tab-pane-rdp", "rdp-targets", "goConnectRDP", "goGetRDPTargets", "P2P TCP 直连"} {
-		if !strings.Contains(body, want) {
-			t.Fatalf("Agent management page missing RDP inventory hook %q", want)
+	if !hasBuiltReactWebUI() {
+		for _, want := range []string{"section-btn-rdp", "tab-pane-rdp", "rdp-targets", "goConnectRDP", "goGetRDPTargets", "P2P TCP 直连"} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("Agent management page missing RDP inventory hook %q", want)
+			}
 		}
-	} }
+	}
 
 	bridgeJS := httptest.NewRecorder()
 	handler.ServeHTTP(bridgeJS, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/web-bridge.js", nil))
@@ -236,7 +244,9 @@ func TestWebManagementExposesServerAuthorizedRDPTargetActions(t *testing.T) {
 }
 
 func TestWebManagementLoadsSharedFoundationBeforePageStyles(t *testing.T) {
-	if hasBuiltReactWebUI() { t.Skip("React uses Vite CSS; legacy shared-style ordering is tested only for fallback builds") }
+	if hasBuiltReactWebUI() {
+		t.Skip("React uses Vite CSS; legacy shared-style ordering is tested only for fallback builds")
+	}
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))

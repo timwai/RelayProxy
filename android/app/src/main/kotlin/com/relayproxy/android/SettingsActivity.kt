@@ -37,6 +37,7 @@ class SettingsActivity : Activity() {
     private lateinit var socks5Enabled: Switch
     private lateinit var httpEnabled: Switch
     private lateinit var proxyP2pEnabled: Switch
+    private lateinit var upnpAllowed: Switch
     private lateinit var proxyPathMode: Spinner
     private lateinit var defaultExitId: EditText
     private lateinit var exitSelection: Spinner
@@ -214,6 +215,7 @@ class SettingsActivity : Activity() {
         socks5Enabled = Switch(this)
         httpEnabled = Switch(this)
         proxyP2pEnabled = Switch(this)
+        upnpAllowed = Switch(this)
         proxyPathMode = Spinner(this).apply {
             adapter = UiKit.themedSpinnerAdapter(this@SettingsActivity, proxyPathModeLabels)
             background = rounded(inputBg, 13, line)
@@ -245,6 +247,15 @@ class SettingsActivity : Activity() {
                 "启用 P2P 备用直连",
                 "Public Direct 不依赖此开关；自动/仅直连模式下公网直连不可用时继续尝试 P2P。",
                 proxyP2pEnabled,
+            ),
+            topMargin(10),
+        )
+        client.addView(divider(), topMargin(10))
+        client.addView(
+            switchRow(
+                "允许 UPnP 自动端口映射",
+                "本机安全授权，默认关闭；仅在服务端也允许时开放路由器 UDP 端口。",
+                upnpAllowed,
             ),
             topMargin(10),
         )
@@ -387,6 +398,7 @@ class SettingsActivity : Activity() {
                 socks5Enabled = socks5Enabled.isChecked,
                 httpEnabled = httpEnabled.isChecked,
                 proxyP2pEnabled = proxyP2pEnabled.isChecked,
+                upnpAllowed = upnpAllowed.isChecked,
                 proxyPathMode = proxyPathModeValues.getOrElse(proxyPathMode.selectedItemPosition) {
                     ExitConfig.PROXY_PATH_AUTO
                 },
@@ -463,6 +475,7 @@ class SettingsActivity : Activity() {
         socks5Enabled.isChecked = cfg.clientEnabled && cfg.socks5Enabled
         httpEnabled.isChecked = cfg.clientEnabled && cfg.httpEnabled
         proxyP2pEnabled.isChecked = cfg.proxyP2pEnabled
+        upnpAllowed.isChecked = cfg.upnpAllowed
         proxyPathMode.setSelection(proxyPathModeValues.indexOf(cfg.proxyPathMode).coerceAtLeast(0))
         defaultExitId.setText(cfg.defaultExitId)
         socks5Port.setText(cfg.socks5Port.toString())

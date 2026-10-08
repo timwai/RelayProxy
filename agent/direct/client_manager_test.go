@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -200,6 +201,7 @@ func TestClientManagerRacesAllVerifiedEndpointsBeforeAuth(t *testing.T) {
 	var raced []DialConfig
 	manager := NewClientManager(context.Background(), func() string { return "client" }, ClientManagerOptions{
 		AttemptTimeout: time.Second,
+		EndpointUsable: func(string) bool { return true },
 		RaceDial: func(_ context.Context, configs []DialConfig) (tunnel.TunnelSession, string, error) {
 			raced = append([]DialConfig(nil), configs...)
 			return fake, configs[1].Address, nil
@@ -414,5 +416,97 @@ func TestClientManagerUsesServerVerifiedDialAddress(t *testing.T) {
 	status, ok := manager.PathStatus("exit")
 	if !ok || status.Endpoint != dialed {
 		t.Fatalf("path status=%+v ok=%v", status, ok)
+	}
+}
+
+func TestIPv4OnlyClientSkipsIPv6DirectAndUsesIPv4(t *testing.T) {
+	fake := newClientManagerTestSession()
+	var mu sync.Mutex
+	var raced []DialConfig
+	fingerprint := "sha256:0000000000000000000000000000000000000000000000000000"
+	manager := NewClientManager(context.Background(), func() string { return "client" }, ClientManagerOptions{
+		AttemptTimeout: time.Second,
+		EndpointUsable: func(address string) bool {
+			host, _, err := net.SplitHostPort(address)
+			return err == nil && net.ParseIP(host).To4() != nil
+		},
+		RaceDial: func(_ context.Context, configs []DialConfig) (tunnel.TunnelSession, string, error) {
+			mu.Lock()
+			raced = append([]DialConfig(nil), configs...)
+			mu.Unlock()
+			return fake, configs[0].Address, nil
+		},
+	})
+	defer manager.Close()
+	makeInventory := func(ticket string, endpoints ...protocol.PublicDirectEndpoint) []protocol.ProxyExit {
+		return []protocol.ProxyExit{{
+			DeviceID: "exit", Online: true,
+			Direct: &protocol.ProxyDirectPaths{Public: &protocol.ProxyPublicDirectPath{
+				Available: true, Transport: "quic",
+				Ticket: []byte(ticket), TicketExpiresAt: time.Now().Add(time.Minute).Unix(),
+				Endpoints: endpoints,
+			}},
+		}}
+	}
+	ipv6 := protocol.PublicDirectEndpoint{
+		Protocol: protocol.PublicDirectEndpointProtocolUDP,
+		Address: "[2408:8266:501:6757:b251:8eff:feff:3735]:20800",
+		Source: protocol.PublicDirectEndpointIPv6, Verified: true, CertFingerprint: fingerprint,
+	}
+	ipv4 := protocol.PublicDirectEndpoint{
+		Protocol: protocol.PublicDirectEndpointProtocolUDP,
+		Address: "203.0.113.20:20800",
+		Source: protocol.PublicDirectEndpointObserved, Verified: true, CertFingerprint: fingerprint,
+	}
+	manager.UpdateInventory(makeInventory("first-ticket", ipv6))
+	if manager.PreferForExit("exit") || manager.EnsureClient("exit") {
+		t.Fatal("IPv4-only client attempted to dial an IPv6-only public endpoint")
+	}
+	if status, ok := manager.PathStatus("exit"); !ok ||
+		status.State != "UNAVAILABLE" || status.Endpoint != "" ||
+		!strings.Contains(status.Error, "IP family") {
+		t.Fatalf("unusable IPv6-only Public Direct status=%+v ok=%v", status, ok)
+	}
+	manager.UpdateInventory(makeInventory("second-ticket", ipv6, ipv4))
+	if !manager.PreferForExit("exit") || !manager.EnsureClient("exit") {
+		t.Fatal("IPv4 candidate did not restore Public Direct availability")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, ready := manager.ReadyForExit("exit"); ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("IPv4 public direct connection did not become ready")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(raced) != 1 || raced[0].Address != ipv4.Address {
+		t.Fatalf("IPv4-only QUIC race included an incompatible endpoint: %+v", raced)
+	}
+}
+
+func TestServerPinnedIPv6ManualEndpointIsFilteredOnIPv4OnlyClient(t *testing.T) {
+	manager := NewClientManager(context.Background(), func() string { return "client" }, ClientManagerOptions{
+		EndpointUsable: func(address string) bool { return address == "203.0.113.20:20800" },
+	})
+	defer manager.Close()
+	public := protocol.ProxyPublicDirectPath{Endpoints: []protocol.PublicDirectEndpoint{
+		{
+			Protocol: protocol.PublicDirectEndpointProtocolUDP,
+			Address: "exit.example.com:20800", DialAddress: "[2408:8266:501:6757:b251:8eff:feff:3735]:20800",
+			Source: protocol.PublicDirectEndpointManual, Verified: true, CertFingerprint: "sha256:abc",
+		},
+		{
+			Protocol: protocol.PublicDirectEndpointProtocolUDP,
+			Address: "203.0.113.20:20800", Source: protocol.PublicDirectEndpointObserved,
+			Verified: true, CertFingerprint: "sha256:abc",
+		},
+	}}
+	items := manager.reachablePublicEndpoints(public)
+	if len(items) != 1 || publicEndpointDialAddress(items[0]) != "203.0.113.20:20800" {
+		t.Fatalf("Server-pinned IPv6 manual endpoint bypassed local route screening: %+v", items)
 	}
 }

@@ -130,13 +130,13 @@ func MapUDP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, er
 			}
 			pinnedURL.Host = net.JoinHostPort(svc.gatewayIP.String(), port)
 		}
-		internalIP, err := localIPv4For(ctx, &pinnedURL)
-		if svc.localIP.IsValid() {
-			// A mapping must always point back to the interface on which
-			// this IGD was discovered, not a different VPN/Wi-Fi address.
-			if err == nil && internalIP != svc.localIP {
-				err = errors.New("UPnP gateway route changed since discovery")
-			}
+		// Use the exact interface that received SSDP; the SOAP HTTP
+		// client is bound to that same local address. Never substitute
+		// another interface when networks have overlapping subnets.
+		internalIP := svc.localIP
+		var err error
+		if !internalIP.IsValid() {
+			internalIP, err = localIPv4For(ctx, &pinnedURL)
 		}
 		if err != nil {
 			lastErr = err

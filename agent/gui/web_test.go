@@ -456,6 +456,12 @@ func TestConnectionsPageSupportsStatusFilterClearAndNewestFirst(t *testing.T) {
 }
 
 func TestMainWebConnectionsPaneMatchesRealtimeMonitorFeatures(t *testing.T) {
+	if hasBuiltReactWebUI() {
+		// React renders the monitor after hydration; verify the embedded
+		// frontend instead of searching for legacy DOM IDs in Vite HTML.
+		assertReactBundleContains(t, "实时监控", "连接列表", "清理历史", "全部状态", "started_at")
+		return
+	}
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))
@@ -478,6 +484,10 @@ func TestMainWebConnectionsPaneMatchesRealtimeMonitorFeatures(t *testing.T) {
 }
 
 func TestAgentSpeedTestShowsPathAndQUICDiagnostics(t *testing.T) {
+	if hasBuiltReactWebUI() {
+		assertReactBundleContains(t, "出口双向测速", "sent_packet_loss_pct", "rtt_deviation_ms", "GSO", "goRunSpeedTest")
+		return
+	}
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil))

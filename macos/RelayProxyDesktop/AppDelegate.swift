@@ -211,34 +211,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
 
     private func launchWindowsAppRDP(_ address: String) {
         let endpoint = address.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard endpoint.hasPrefix("127.0.0.1:"), endpoint.dropFirst("127.0.0.1:".count).allSatisfy({ $0.isNumber }),
-              let rdpURL = URL(string: "rdp://full%20address=s:\(endpoint)") else {
+        let prefix = "127.0.0.1:"
+        guard endpoint.hasPrefix(prefix),
+              let port = Int(endpoint.dropFirst(prefix.count)),
+              (1...65535).contains(port) else {
             presentRDPLaunchError("RelayProxy 返回了无效的本地 RDP 地址：\(address)")
             return
         }
 
-        let workspace = NSWorkspace.shared
-        let bundledURL = workspace.urlForApplication(withBundleIdentifier: "com.microsoft.rdc.macos")
-        let standardURL = URL(fileURLWithPath: "/Applications/Windows App.app", isDirectory: true)
-        let applicationURL = bundledURL ?? (FileManager.default.fileExists(atPath: standardURL.path) ? standardURL : nil)
-        guard let applicationURL else {
-            presentRDPLaunchError("未找到 Windows App。请先安装或重新安装 Microsoft Windows App for macOS。")
-            return
-        }
-
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.activates = true
-        workspace.open([rdpURL], withApplicationAt: applicationURL, configuration: configuration) { [weak self] application, error in
+        // Microsoft's macOS client intentionally uses a legacy URI whose text
+        // after rdp:// is not a standards-compliant URL authority:
+        // rdp://full%20address=s:host:port
+        // Foundation's URL(string:) rejects valid instances such as
+        // rdp://full%20address=s:127.0.0.1:59907, so pass the documented URI
+        // verbatim to LaunchServices through /usr/bin/open instead.
+        let rdpURI = "rdp://full%20address=s:\(endpoint)"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let attempts = [
+                ["-b", "com.microsoft.rdc.macos", rdpURI],
+                ["-a", "Windows App", rdpURI],
+                [rdpURI],
+            ]
+            var failures: [String] = []
+            for arguments in attempts {
+                if let failure = self?.runOpen(arguments) {
+                    failures.append(failure)
+                    continue
+                }
+                return
+            }
             DispatchQueue.main.async {
-                if let error {
-                    self?.presentRDPLaunchError("Windows App 启动失败：\(error.localizedDescription)")
-                    return
-                }
-                if application == nil {
-                    self?.presentRDPLaunchError("Windows App 未能启动。")
-                }
+                let detail = failures.last ?? "LaunchServices 未能打开 RDP 地址。"
+                self?.presentRDPLaunchError("Windows App 启动失败：\(detail)")
             }
         }
+    }
+
+    private func runOpen(_ arguments: [String]) -> String? {
+        let process = Process()
+        let errorPipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = arguments
+        process.standardError = errorPipe
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return error.localizedDescription
+        }
+        if process.terminationStatus == 0 {
+            return nil
+        }
+        let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+        let message = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return (message?.isEmpty == false) ? message! : "open 退出码 \(process.terminationStatus)"
     }
 
     private func presentRDPLaunchError(_ detail: String) {

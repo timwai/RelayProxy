@@ -36,8 +36,12 @@ func (s *SecurityManager) TrackPublicRDPTCP(hostID string, port int, entry repos
 	s.pruneTrackedRDPTCPLocked(now)
 	if len(s.authConnections) >= 16384 {
 		return
-	} // uncorrelated, never auto-ban
+	}
 	key := rdpTCPKey(hostID, port)
+	if len(s.authConnections[key]) >= 4 {
+		// A frequently reused source port is too ambiguous for safe correlation.
+		return
+	}
 	s.authConnections[key] = append(s.authConnections[key], trackedRDPTCP{
 		connectionID: entry.ID, ingressID: entry.IngressID, sourceIP: entry.SourceIP, openedAt: entry.StartedAt.UTC(),
 	})
@@ -58,6 +62,8 @@ func (s *SecurityManager) FinishPublicRDPTCP(hostID string, port int, connection
 }
 
 func (s *SecurityManager) pruneTrackedRDPTCPLocked(now time.Time) {
+	if now.Sub(s.lastPortPrune) < 30*time.Second { return }
+	s.lastPortPrune = now
 	for key, entries := range s.authConnections {
 		kept := entries[:0]
 		for _, entry := range entries {
@@ -106,6 +112,24 @@ func (s *SecurityManager) ReportHostAuthFailure(hostID string, event protocol.RD
 		SubStatus: limitRDPEventCode(event.SubStatus), OccurredAt: event.ObservedAt.UTC(), ReceivedAt: now,
 	}
 	s.mu.Lock()
+	// Bound the amount of work any authenticated Host can cause by submitting
+	// event reports. Excess reports are acknowledged without persisting or
+	// triggering new bans; valid low-rate events remain idempotent in SQLite.
+	reportWindow := s.authReportWindows[hostID]
+	if reportWindow.began.IsZero() || now.Sub(reportWindow.began) >= time.Minute {
+		reportWindow = securityWindow{began: now}
+	}
+	reportWindow.count++
+	s.authReportWindows[hostID] = reportWindow
+	if len(s.authReportWindows) > 4096 {
+		for key, window := range s.authReportWindows {
+			if now.Sub(window.began) > time.Minute { delete(s.authReportWindows, key) }
+		}
+	}
+	if reportWindow.count > 240 {
+		s.mu.Unlock()
+		return nil
+	}
 	s.pruneTrackedRDPTCPLocked(now)
 	candidates := s.authConnections[rdpTCPKey(hostID, event.SourcePort)]
 	var matched *trackedRDPTCP

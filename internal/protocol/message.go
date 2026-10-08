@@ -71,16 +71,16 @@ type OpenTCPRequest struct {
 
 // OpenTCPResponse is returned from Exit -> Relay -> Client.
 type OpenTCPResponse struct {
-	RequestID    string            `json:"requestId"`
-	Success      bool              `json:"success"`
-	RemoteIP     string            `json:"remoteIp,omitempty"`
+	RequestID string `json:"requestId"`
+	Success   bool   `json:"success"`
+	RemoteIP  string `json:"remoteIp,omitempty"`
 	// RDPSourcePort is the Host Agent ephemeral TCP port toward local RDP.
 	// Public ingress uses it to correlate Windows 4625 events without
 	// trusting the Host Agent to supply the actual public source IP.
-	RDPSourcePort int              `json:"rdpSourcePort,omitempty"`
-	ErrorCode    string            `json:"errorCode,omitempty"`
-	ErrorMessage string            `json:"errorMessage,omitempty"`
-	Resume       *TCPResumeBinding `json:"resume,omitempty"`
+	RDPSourcePort int               `json:"rdpSourcePort,omitempty"`
+	ErrorCode     string            `json:"errorCode,omitempty"`
+	ErrorMessage  string            `json:"errorMessage,omitempty"`
+	Resume        *TCPResumeBinding `json:"resume,omitempty"`
 }
 
 // OpenUDPRequest is sent from Client -> Relay -> Exit to request a UDP association
@@ -146,17 +146,17 @@ type OpenRDPRequest struct {
 // FrameTypeRDPControl streams. A stream carries one request and at most one
 // response; server-pushed notifications use the same frame without a reply.
 const (
-	RDPControlRegister        = "register"
-	RDPControlRegisterAck     = "register_ack"
-	RDPControlConnectRequest  = "connect_request"
-	RDPControlConnectResponse = "connect_response"
-	RDPControlConnectNotify   = "connect_notify"
-	RDPControlCandidateUpdate = "candidate_update"
-	RDPControlLeaseRenew      = "lease_renew"
-	RDPControlLeaseAck        = "lease_ack"
-	RDPControlSessionClose    = "session_close"
-	RDPControlError           = "error"
-	RDPControlHostAuthFailure = "host_auth_failure"
+	RDPControlRegister           = "register"
+	RDPControlRegisterAck        = "register_ack"
+	RDPControlConnectRequest     = "connect_request"
+	RDPControlConnectResponse    = "connect_response"
+	RDPControlConnectNotify      = "connect_notify"
+	RDPControlCandidateUpdate    = "candidate_update"
+	RDPControlLeaseRenew         = "lease_renew"
+	RDPControlLeaseAck           = "lease_ack"
+	RDPControlSessionClose       = "session_close"
+	RDPControlError              = "error"
+	RDPControlHostAuthFailure    = "host_auth_failure"
 	RDPControlHostAuthFailureAck = "host_auth_failure_ack"
 )
 
@@ -178,14 +178,14 @@ type RDPCandidate = P2PCandidate
 // SourceIP is deliberately excluded: the Server must resolve the public
 // source from a previously established RDP ingress socket and source port.
 type RDPHostAuthFailure struct {
-	RecordID uint64 `json:"recordId"`
-	SourceAddress string `json:"sourceAddress"`
-	SourcePort int `json:"sourcePort"`
-	ObservedAt time.Time `json:"observedAt"`
-	Username string `json:"username,omitempty"`
-	Status string `json:"status,omitempty"`
-	SubStatus string `json:"subStatus,omitempty"`
-	LogonType int `json:"logonType"`
+	RecordID      uint64    `json:"recordId"`
+	SourceAddress string    `json:"sourceAddress"`
+	SourcePort    int       `json:"sourcePort"`
+	ObservedAt    time.Time `json:"observedAt"`
+	Username      string    `json:"username,omitempty"`
+	Status        string    `json:"status,omitempty"`
+	SubStatus     string    `json:"subStatus,omitempty"`
+	LogonType     int       `json:"logonType"`
 }
 
 // RDPControlMessage binds signaling to a server-issued session. Device IDs in
@@ -193,20 +193,20 @@ type RDPHostAuthFailure struct {
 // authenticated tunnel session and validates the target against its grant.
 // SessionToken is memory-only and is never persisted or logged.
 type RDPControlMessage struct {
-	Type              string         `json:"type"`
-	SessionID         uint64         `json:"sessionId,omitempty"`
-	ControllerID      string         `json:"controllerId,omitempty"`
-	TargetID          string         `json:"targetId,omitempty"`
-	SessionToken      []byte         `json:"sessionToken,omitempty"`
-	Candidates        []RDPCandidate `json:"candidates,omitempty"`
-	LeaseExpiresAt    int64          `json:"leaseExpiresAt,omitempty"`
-	RendezvousAddress string         `json:"rendezvousAddress,omitempty"`
-	LeaseSec          int            `json:"leaseSec,omitempty"`
-	Path              string         `json:"path,omitempty"`
-	ErrorCode         string         `json:"errorCode,omitempty"`
-	ErrorMessage      string         `json:"errorMessage,omitempty"`
-	RDPOnline         bool           `json:"rdpOnline,omitempty"`
-	HostAuthFailure *RDPHostAuthFailure `json:"hostAuthFailure,omitempty"`
+	Type              string              `json:"type"`
+	SessionID         uint64              `json:"sessionId,omitempty"`
+	ControllerID      string              `json:"controllerId,omitempty"`
+	TargetID          string              `json:"targetId,omitempty"`
+	SessionToken      []byte              `json:"sessionToken,omitempty"`
+	Candidates        []RDPCandidate      `json:"candidates,omitempty"`
+	LeaseExpiresAt    int64               `json:"leaseExpiresAt,omitempty"`
+	RendezvousAddress string              `json:"rendezvousAddress,omitempty"`
+	LeaseSec          int                 `json:"leaseSec,omitempty"`
+	Path              string              `json:"path,omitempty"`
+	ErrorCode         string              `json:"errorCode,omitempty"`
+	ErrorMessage      string              `json:"errorMessage,omitempty"`
+	RDPOnline         bool                `json:"rdpOnline,omitempty"`
+	HostAuthFailure   *RDPHostAuthFailure `json:"hostAuthFailure,omitempty"`
 }
 
 const (

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -18,6 +19,43 @@ import (
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc/mgr"
 )
+
+func TestWatchWindowsProcessExitInvokesCallback(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestWindowsProcessWatcherHelperProcess$")
+	cmd.Env = append(os.Environ(), "RELAYPROXY_PROCESS_WATCH_HELPER=1")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+
+	triggered := make(chan struct{}, 1)
+	stop, err := watchWindowsProcessExit(uint32(cmd.Process.Pid), func() {
+		triggered <- struct{}{}
+	})
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	defer stop()
+
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+
+	select {
+	case <-triggered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("client process exit did not trigger Network Service session shutdown")
+	}
+}
+
+func TestWindowsProcessWatcherHelperProcess(t *testing.T) {
+	if os.Getenv("RELAYPROXY_PROCESS_WATCH_HELPER") != "1" {
+		return
+	}
+	time.Sleep(30 * time.Second)
+}
 
 func TestNetworkFrameRoundTrip(t *testing.T) {
 	var buffer bytes.Buffer

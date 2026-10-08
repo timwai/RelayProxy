@@ -2,12 +2,40 @@ package gui
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
 )
+
+func assertReactBundleContains(t *testing.T, markers ...string) {
+	t.Helper()
+	var javascript strings.Builder
+	err := fs.WalkDir(assets, "react_dist/assets", func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".js") {
+			return nil
+		}
+		data, err := assets.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		javascript.Write(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range markers {
+		if !strings.Contains(javascript.String(), marker) {
+			t.Errorf("React production bundle is missing %q", marker)
+		}
+	}
+}
 
 // With a Vite build present, browser clients and macOS WKWebView must load
 // exactly the same React entrypoint as Wails, but use the HTTP bridge instead.

@@ -248,6 +248,9 @@ func (db *DB) UpdateRDPSecurityRule(rule RDPSecurityRule) error {
 }
 
 func (db *DB) PruneRDPSecurityLogs(cutoff time.Time) error {
-	_, err := db.Exec("DELETE FROM rdp_security_logs WHERE ended_at < ?", cutoff.UTC())
+	if _, err := db.Exec("DELETE FROM rdp_security_logs WHERE ended_at < ? AND result != 'CONNECTING'", cutoff.UTC()); err != nil {
+		return err
+	}
+	_, err := db.Exec("DELETE FROM rdp_auth_failures WHERE received_at < ?", cutoff.UTC())
 	return err
 }

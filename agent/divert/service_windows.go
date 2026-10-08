@@ -317,6 +317,69 @@ func createWindowsNetworkPipeNamed(pipeName, allowedSID string) (windows.Handle,
 	return pipe, nil
 }
 
+func watchWindowsProcessExit(pid uint32, onExit func()) (func(), error) {
+	if pid == 0 {
+		return func() {}, errors.New("invalid Windows client process id")
+	}
+	process, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+	if err != nil {
+		return func() {}, err
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	var stopOnce sync.Once
+	go func() {
+		defer close(done)
+		defer windows.CloseHandle(process)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			state, waitErr := windows.WaitForSingleObject(process, 200)
+			if waitErr != nil {
+				return
+			}
+			switch state {
+			case windows.WAIT_OBJECT_0:
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if onExit != nil {
+					onExit()
+				}
+				return
+			case windows.WAIT_TIMEOUT:
+				continue
+			default:
+				return
+			}
+		}
+	}()
+	return func() {
+		stopOnce.Do(func() { close(stop) })
+		<-done
+	}, nil
+}
+
+func watchWindowsNetworkClientExit(file *os.File, onExit func()) func() {
+	if file == nil {
+		return func() {}
+	}
+	var pid uint32
+	if err := windows.GetNamedPipeClientProcessId(windows.Handle(file.Fd()), &pid); err != nil {
+		return func() {}
+	}
+	stop, err := watchWindowsProcessExit(pid, onExit)
+	if err != nil {
+		return func() {}
+	}
+	return stop
+}
+
 func serveWindowsNetworkSession(file *os.File) error {
 	hello, err := readNetworkFrame(file)
 	if err != nil {
@@ -355,6 +418,16 @@ func serveWindowsNetworkSession(file *os.File) error {
 		return err
 	}
 	defer handle.Close()
+
+	// The broker can be blocked indefinitely in WinDivertRecv while the Agent
+	// has already closed its pipe and exited. Track the actual pipe client
+	// process and interrupt the receive side as soon as that process terminates,
+	// so the deferred Close releases WinDivert and the next Agent can attach
+	// immediately without waiting for an unrelated network packet.
+	stopClientWatch := watchWindowsNetworkClientExit(file, func() {
+		_ = handle.Shutdown()
+	})
+	defer stopClientWatch()
 
 	var writeMu sync.Mutex
 	if err := writeNetworkFrame(file, &writeMu, networkFrame{kind: networkFrameReady}); err != nil {

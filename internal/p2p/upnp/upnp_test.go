@@ -172,3 +172,91 @@ func TestUPnPHTTPDisablesProxyAndRedirects(t *testing.T) {
 		t.Fatalf("redirect was not rejected: err=%v visited=%v", err, redirected.Load())
 	}
 }
+
+func TestMappingCloseWaitsForRefreshAndDoesNotReopen(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var actions []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		action := strings.Trim(r.Header.Get("SOAPAction"), "\"")
+		mu.Lock()
+		actions = append(actions, action)
+		mu.Unlock()
+		switch {
+		case strings.HasSuffix(action, "#AddPortMapping"):
+			close(started)
+			<-release
+		case strings.HasSuffix(action, "#GetSpecificPortMappingEntry"):
+			_, _ = io.WriteString(w, "<root><NewInternalClient>192.168.1.10</NewInternalClient><NewInternalPort>34000</NewInternalPort></root>")
+		case strings.HasSuffix(action, "#GetExternalIPAddress"):
+			_, _ = io.WriteString(w, "<root><NewExternalIPAddress>8.8.8.8</NewExternalIPAddress></root>")
+		default:
+			_, _ = io.WriteString(w, "<ok/>")
+		}
+	}))
+	defer server.Close()
+	control, _ := url.Parse(server.URL)
+	m := &Mapping{
+		service: service{serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlURL: control},
+		internalClient: "192.168.1.10", internalPort: 34000, externalPort: 34000,
+		externalIP: netip.MustParseAddr("8.8.8.8"), leaseSeconds: 3600,
+		done: make(chan struct{}), updates: make(chan MappingUpdate, 1),
+	}
+	refreshed := make(chan struct{})
+	go func() {
+		_ = m.refresh(context.Background())
+		close(refreshed)
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("mapping refresh never started")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- m.Close() }()
+	select {
+	case err := <-closed:
+		t.Fatalf("Close did not wait for refresh: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	close(release)
+	<-refreshed
+	if err := <-closed; err != nil {
+		t.Fatalf("mapping cleanup failed: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(actions) != 4 || !strings.HasSuffix(actions[len(actions)-1], "#DeletePortMapping") {
+		t.Fatalf("mapping requests incorrectly ordered: %v", actions)
+	}
+	if err := m.refresh(context.Background()); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("closed mapping was refreshed: %v", err)
+	}
+}
+
+func TestCloseRejectsChangedMappingOwner(t *testing.T) {
+	var deletes atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		action := strings.Trim(r.Header.Get("SOAPAction"), "\"")
+		if strings.HasSuffix(action, "#GetSpecificPortMappingEntry") {
+			_, _ = io.WriteString(w, "<root><NewInternalClient>192.168.1.99</NewInternalClient><NewInternalPort>34567</NewInternalPort></root>")
+			return
+		}
+		deletes.Add(1)
+		_, _ = io.WriteString(w, "<ok/>")
+	}))
+	defer server.Close()
+	control, _ := url.Parse(server.URL)
+	m := &Mapping{
+		service: service{serviceType: "urn:schemas-upnp-org:service:WANIPConnection:1", controlURL: control},
+		internalClient: "192.168.1.10", internalPort: 34000, externalPort: 34000,
+		done: make(chan struct{}),
+	}
+	if err := m.Close(); err == nil {
+		t.Fatal("expected a changed mapping owner to prevent deletion")
+	}
+	if deletes.Load() != 0 {
+		t.Fatal("Close deleted another device's port mapping")
+	}
+}

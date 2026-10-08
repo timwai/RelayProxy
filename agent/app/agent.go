@@ -1327,9 +1327,9 @@ func (a *Agent) Status() AgentStatus {
 			// independently selected path.
 			st.RDPPathUDP = "relay"
 			if st.RDPUDPActive {
-				st.RDPUDPReason = "UDP 已建立，正在转发 mstsc 数据"
+				st.RDPUDPReason = "UDP 已建立，正在转发 RDP 客户端数据"
 			} else if st.RDPUDPReason == "" {
-				st.RDPUDPReason = "UDP 已监听，等待 mstsc 发起数据"
+				st.RDPUDPReason = "UDP 已监听，等待 RDP 客户端发起数据"
 			}
 		} else {
 			st.RDPPathUDP = "disabled"
@@ -1348,7 +1348,7 @@ func (a *Agent) Status() AgentStatus {
 			if st.RDPUDPActive {
 				st.RDPUDPReason = "UDP 已建立，路径：" + st.RDPPathUDP
 			} else {
-				st.RDPUDPReason = "UDP 已监听，等待 mstsc 发起数据"
+				st.RDPUDPReason = "UDP 已监听，等待 RDP 客户端发起数据"
 			}
 		}
 	}

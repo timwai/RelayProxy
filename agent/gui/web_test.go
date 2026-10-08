@@ -177,7 +177,7 @@ func TestWebManagementExposesServerAuthorizedProxyExitInventory(t *testing.T) {
 	if !hasBuiltReactWebUI() {
 		for _, want := range []string{
 			`id="cfg-exit-id"`, `<select id="cfg-exit-id"`,
-		`id="speed-test-exit"`, `<select id="speed-test-exit"`,
+			`id="speed-test-exit"`, `<select id="speed-test-exit"`,
 			`id="routing-rule-exit"`, `<select id="routing-rule-exit"`,
 			"goGetProxyExits", "fillProxyExitSelect", "已撤销、删除或当前不可用",
 		} {

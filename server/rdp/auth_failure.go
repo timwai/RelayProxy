@@ -68,7 +68,7 @@ func (s *SecurityManager) pruneTrackedRDPTCPLocked(now time.Time) {
 // to a Server-observed public TCP connection is eligible for an IP ban.
 func (s *SecurityManager) ReportHostAuthFailure(hostID string, event protocol.RDPHostAuthFailure) error {
 	if s == nil || s.db == nil || hostID == "" { return errors.New("RDP security unavailable") }
-	if event.RecordID == 0 || event.SourcePort <= 0 || event.SourcePort > 65535 ||
+	if event.RecordID == 0 || event.SourcePort < 0 || event.SourcePort > 65535 ||
 		(event.LogonType != 3 && event.LogonType != 10) {
 		return errors.New("invalid Windows login failure event")
 	}

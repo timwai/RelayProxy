@@ -461,6 +461,10 @@ func (m *IngressManager) handleTCP(ctx context.Context, ep *ingressEndpoint, con
 		m.auditReject(ep, remoteIP, entry.Reason)
 		return
 	}
+	if m.cfg.Security != nil && response.RDPSourcePort > 0 {
+		m.cfg.Security.TrackPublicRDPTCP(target.DeviceID, response.RDPSourcePort, entry)
+		defer m.cfg.Security.FinishPublicRDPTCP(target.DeviceID, response.RDPSourcePort, entry.ID)
+	}
 	_ = stream.SetDeadline(time.Time{})
 	_ = conn.SetDeadline(time.Time{})
 	up, down := tunnel.Pipe(ctx, conn, stream, 30*time.Minute, nil)

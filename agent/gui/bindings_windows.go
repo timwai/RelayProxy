@@ -200,6 +200,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		AccessDomains               []string            `json:"accessDomains"`
 		AccessCIDRs                 []string            `json:"accessCidrs"`
 		ExitUpstream                any                 `json:"exitUpstream"`
+		RDP                         any                 `json:"rdp"`
 		P2P                         any                 `json:"p2p"`
 		PublicDirectAdvertise       string              `json:"publicDirectAdvertise"`
 		NetworkMode                 string              `json:"networkMode"`
@@ -239,6 +240,10 @@ func (s *WailsService) GetConfig() (string, error) {
 			"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address,
 			"username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password,
 		},
+		RDP: map[string]any{
+			"enabled": cfg.RDP.Enabled == nil || *cfg.RDP.Enabled,
+			"address": cfg.RDP.Address,
+		},
 		P2P: map[string]any{
 			"enabled": cfg.P2P.Enabled == nil || *cfg.P2P.Enabled, "mode": cfg.P2P.Mode,
 			"punchTimeoutMs": cfg.P2P.PunchTimeoutMs, "keepaliveSec": cfg.P2P.KeepaliveSec,
@@ -271,6 +276,10 @@ func (s *WailsService) GetConfig() (string, error) {
 			"insecureTls":   state.Runtime.Server.InsecureTLS,
 			"transport":     state.Runtime.Transport.Mode,
 			"networkMode":   state.Runtime.Network.Mode,
+			"rdp": map[string]any{
+				"enabled": state.Runtime.RDP.Enabled == nil || *state.Runtime.RDP.Enabled,
+				"address": state.Runtime.RDP.Address,
+			},
 			"p2p": map[string]any{
 				"enabled": state.Runtime.P2P.Enabled == nil || *state.Runtime.P2P.Enabled, "mode": state.Runtime.P2P.Mode,
 				"punchTimeoutMs": state.Runtime.P2P.PunchTimeoutMs, "keepaliveSec": state.Runtime.P2P.KeepaliveSec,

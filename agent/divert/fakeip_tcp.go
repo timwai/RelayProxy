@@ -35,7 +35,7 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 			return fmt.Errorf("fake DNS TCP question cannot be safely answered")
 		}
 		binary.BigEndian.PutUint16(prefix[:], uint16(len(answer)))
-		if _, err := net.Buffers{prefix[:], answer}.WriteTo(conn); err != nil {
+		if _, err := (net.Buffers{prefix[:], answer}).WriteTo(conn); err != nil {
 			return err
 		}
 	}

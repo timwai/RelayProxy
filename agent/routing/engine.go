@@ -55,6 +55,14 @@ func (e *Engine) FakeIPEnabled() bool {
 
 // BlockDoHEndpoints is an opt-in best-effort policy; hostnames unavailable
 // before connection cannot be blocked by this selector.
+// ForwardOtherDNS never falls back to plaintext/local DNS. Queries travel
+// through the selected authenticated relay/upstream to a TLS resolver.
+func (e *Engine) ForwardOtherDNS() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.FakeIPEnabled && e.config.ForwardOtherDNS && e.config.DNSMode == DNSModeProxy
+}
+
 func (e *Engine) BlockDoHEndpoints() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

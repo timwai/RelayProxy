@@ -182,3 +182,44 @@ func TestCompoundProcessAndTargetCanMatchIndependently(t *testing.T) {
 		})
 	}
 }
+
+func TestCompoundProcessCaseInsensitiveOnEveryPlatform(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+		process string
+		aliases []string
+		matches bool
+	}{
+		{"basename", "chrome.exe", "/usr/bin/CHROME.EXE", nil, true},
+		{"mixed-case basename glob", "FireFox*", "/usr/bin/FIREFOX-ESR", nil, true},
+		{"unix full path", "/opt/Trusted/*.exe", "/OPT/TRUSTED/Tool.EXE", nil, true},
+		{"windows full path", `C:\Apps\CHROME.EXE`, `c:\APPS\chrome.exe`, nil, true},
+		{"service alias", "service:Dnscache", "/usr/bin/svchost.exe", []string{"SERVICE:DNSCACHE"}, true},
+		{"unrelated basename", "chrome.exe", "/usr/bin/FIREFOX.EXE", nil, false},
+		{"different directory", "/opt/trusted/*.exe", "/opt/other/TOOL.EXE", nil, false},
+		{"unknown process", "chrome.exe", "", nil, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine, err := NewEngine(Config{
+				Mode:          ModeRule,
+				DefaultAction: ActionReject,
+				Rules: []Rule{{
+					Name: "process rule", Enabled: true, Action: ActionProxy,
+					Processes: []string{tc.pattern},
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := engine.DecideFlow(Flow{
+				Process: tc.process, ProcessAliases: tc.aliases,
+				Protocol: "tcp", Port: 443,
+			})
+			if matched := got.Action == ActionProxy; matched != tc.matches {
+				t.Fatalf("process rule matched=%v, want %v: %+v", matched, tc.matches, got)
+			}
+		})
+	}
+}

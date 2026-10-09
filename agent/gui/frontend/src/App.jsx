@@ -141,6 +141,15 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
  };
  const toggle=async item=>{const using=refs(item.id);if(item.enabled&&using.length){toast('该出口正在被引用：'+using.join('、'),'danger');return}await persist(items.map(x=>x.id===item.id?{...x,enabled:!x.enabled}:x))};
  const remove=async item=>{const using=refs(item.id);if(using.length){toast('请先解除引用：'+using.join('、'),'danger');return}if(window.confirm('确认删除 '+item.name+'？'))await persist(items.filter(x=>x.id!==item.id))};
+ const test=async item=>{
+  setBusy(true);
+  try{
+   const result=parseMutation(await call('goTestCustomExit',item.id));
+   if(!result.ok)throw new Error(result.message||'连接测试失败');
+   toast(item.name+' CONNECT 成功 · '+(result.latencyMs??'—')+' ms');
+  }catch(e){toast(item.name+' 测试失败：'+(e.message||String(e)),'danger')}
+  finally{setBusy(false)}
+ };
  return <>
   <Card title="自定义出口" eyebrow={items.length+' LOCAL EXITS'} action={<Button primary onClick={()=>edit(null)}>＋ 添加出口</Button>}>
    <div className="mini">本机 SOCKS5 / HTTP CONNECT，不依赖 Server 授权。可作为默认出口、分流规则目标和本机出口共享上游。</div>
@@ -153,6 +162,7 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
       <div className="mono mini">{item.protocol.toUpperCase()} · {item.address} · {item.protocol==='socks5'?'支持 UDP ASSOCIATE':'仅 TCP'}</div>
      </div>
      <Button quiet onClick={()=>onSelect(item.id)} disabled={!item.enabled||selected===item.id}>{selected===item.id?'默认出口':'设为默认'}</Button>
+     <Button quiet disabled={!item.enabled||busy} onClick={()=>test(item)}>测试</Button>
      <Button quiet onClick={()=>edit(item)}>编辑</Button>
      <Switch checked={item.enabled} disabled={busy} label={'启停 '+item.name} onChange={()=>toggle(item)}/>
      <Button quiet danger disabled={busy} onClick={()=>remove(item)}>删除</Button>

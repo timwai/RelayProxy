@@ -24,6 +24,8 @@ var (
 
 type fakeIPEntry struct {
 	host    string
+	scope   string // selected DNS exit; never infer an application from system DNS
+	scoped  bool   // legacy/manual associations remain unscoped for compatibility
 	expires time.Time
 }
 
@@ -71,16 +73,21 @@ func (d *fakeIPDNS) wasIssued(addr netip.Addr) bool {
 }
 
 func (d *fakeIPDNS) lookup(addr netip.Addr) (string, bool) {
+	host, _, _, ok := d.lookupWithScope(addr)
+	return host, ok
+}
+
+func (d *fakeIPDNS) lookupWithScope(addr netip.Addr) (host, scope string, scoped, valid bool) {
 	if !isFakeIP(addr) {
-		return "", false
+		return "", "", false, false
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	entry, ok := d.byIP[addr.Unmap()]
 	if !ok || !entry.expires.After(d.now()) {
-		return "", false
+		return "", "", false, false
 	}
-	return entry.host, true
+	return entry.host, entry.scope, entry.scoped, true
 }
 
 // pruneExpiredLocked releases only expired lookup state, not the IP sequence
@@ -101,9 +108,19 @@ func (d *fakeIPDNS) pruneExpiredLocked(now time.Time) {
 }
 
 func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, bool) {
+	return d.allocateScoped(host, kind, "", false)
+}
+
+// allocateScoped never reuses an address across DNS exit scopes. The calling
+// resolver may not know the process behind the system DNS service, so the
+// selected DNS egress is the strongest reliable isolation boundary here.
+func (d *fakeIPDNS) allocateScoped(host string, kind dnsmessage.Type, scope string, scoped bool) (netip.Addr, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	key := host + "/" + string(rune(kind))
+	if scoped {
+		key += "/dns-exit:" + scope
+	}
 	now := d.now()
 	if existing, ok := d.byName[key]; ok {
 		if entry, found := d.byIP[existing]; found && entry.expires.After(now) {
@@ -141,7 +158,7 @@ func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, boo
 		ip = netip.AddrFrom16(raw)
 	}
 	d.byName[key] = ip
-	d.byIP[ip] = fakeIPEntry{host: host, expires: now.Add(15 * time.Minute)}
+	d.byIP[ip] = fakeIPEntry{host: host, scope: scope, scoped: scoped, expires: now.Add(15 * time.Minute)}
 	return ip, true
 }
 
@@ -150,6 +167,10 @@ func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, boo
 // silently forwarded to the operating system's configured resolver.
 // The Relay bootstrap hostname is answered from known relay IPs, not FakeIP.
 func (d *fakeIPDNS) reply(payload []byte, relayHost string, relayIPs []string) []byte {
+	return d.replyScoped(payload, relayHost, relayIPs, "", false)
+}
+
+func (d *fakeIPDNS) replyScoped(payload []byte, relayHost string, relayIPs []string, scope string, scoped bool) []byte {
 	var query dnsmessage.Message
 	if err := query.Unpack(payload); err != nil || query.Response {
 		return nil
@@ -211,7 +232,7 @@ func (d *fakeIPDNS) reply(payload []byte, relayHost string, relayIPs []string) [
 			return packDNSResponse(result)
 		}
 	} else {
-		ip, ok = d.allocate(host, q.Type)
+		ip, ok = d.allocateScoped(host, q.Type, scope, scoped)
 		if !ok {
 			result.RCode = dnsmessage.RCodeServerFailure
 			return packDNSResponse(result)

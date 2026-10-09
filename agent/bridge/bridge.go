@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/divert"
+	"relayproxy/agent/exit"
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
@@ -82,6 +84,31 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 // GetStatus returns the current agent runtime state
 func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()
+}
+
+// TestCustomExit makes a real TCP CONNECT to a stable public destination
+// through the selected local proxy. The upstream credentials never leave the
+// Agent process or enter the returned diagnostics.
+func (b *UIBridge) TestCustomExit(id string) (map[string]any, error) {
+	cfg, _, err := config.LoadAgentConfigWithRevision(b.rawConfigPath())
+	if err != nil {
+		return nil, err
+	}
+	item, ok := routing.FindCustomExit(cfg.Proxy.CustomExits, id)
+	if !ok || !item.Enabled {
+		return nil, fmt.Errorf("自定义出口不存在或未启用")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	start := time.Now()
+	conn, err := exit.DialViaUpstreamTCP(ctx, exit.UpstreamConfig{
+		Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password,
+	}, "example.com", 443)
+	if err != nil {
+		return nil, err
+	}
+	_ = conn.Close()
+	return map[string]any{"ok": true, "latencyMs": time.Since(start).Milliseconds(), "protocol": item.Protocol}, nil
 }
 
 func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {

@@ -331,7 +331,7 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		}
 		// Block well-known encrypted DNS transports. DoH on ordinary HTTPS/443
 		// is indistinguishable from general web traffic at this layer.
-		if packet.Destination.Port() == 853 || packet.Destination.Port() == 784 || packet.Destination.Port() == 8853 {
+		if isEncryptedDNSPort(packet.Destination.Port()) {
 			if packet.Protocol == ProtoTCP {
 				return i.rejectTCP(packet, meta)
 			}

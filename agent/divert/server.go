@@ -448,7 +448,14 @@ func bidirectionalCopy(ctx context.Context, a, b net.Conn, record *traffic.Recor
 		results <- err
 	}
 	go copyOne(a, b, true)
-	go copyOne(b, a, false)
+	// Probe the application-to-upstream byte stream, including macOS Network
+	// Extension flows which have no raw packet interceptor. This only enriches
+	// connection telemetry and cannot change the already classified route.
+	var uploadSource net.Conn = a
+	if record != nil {
+		uploadSource = &hostnameObservingConn{Conn: a, record: record}
+	}
+	go copyOne(b, uploadSource, false)
 	first := <-results
 	if first != nil {
 		_ = a.Close()

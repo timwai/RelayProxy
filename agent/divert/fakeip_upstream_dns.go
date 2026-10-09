@@ -144,10 +144,11 @@ func (s *Server) resolveFakeDirectIP(ctx context.Context, domain string, ipv6 bo
 	if ipv6 {
 		kind = dnsmessage.TypeAAAA
 	}
-	query, err := (dnsmessage.Message{
+	message := dnsmessage.Message{
 		Header:    dnsmessage.Header{ID: 47812, RecursionDesired: true},
 		Questions: []dnsmessage.Question{{Name: name, Type: kind, Class: dnsmessage.ClassINET}},
-	}).Pack()
+	}
+	query, err := message.Pack()
 	if err != nil {
 		return "", err
 	}

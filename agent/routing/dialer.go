@@ -175,15 +175,19 @@ func (d *RoutingDialer) dialTCP(ctx context.Context, exitNodeID, host string, po
 		if ruleExitID != "" {
 			eid = ruleExitID
 		}
+		target, err := d.ResolveProxyTarget(ctx, host)
+		if err != nil {
+			return nil, err
+		}
 		if IsCustomExitID(eid) {
 			upstream, err := d.lookupCustom(eid)
 			if err != nil {
 				return nil, err
 			}
-			return exit.DialViaUpstreamTCP(ctx, upstream, host, port)
+			return exit.DialViaUpstreamTCP(ctx, upstream, target, port)
 		}
-		log.Printf("[Routing] PROXY %s:%d (exit=%s)", host, port, eid)
-		return d.tunnel.DialTCP(ctx, eid, host, port)
+		log.Printf("[Routing] PROXY %s:%d (exit=%s)", target, port, eid)
+		return d.tunnel.DialTCP(ctx, eid, target, port)
 
 	default:
 		return nil, fmt.Errorf("unsupported routing action %q", action)
@@ -245,6 +249,10 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 		if ruleExitID != "" {
 			eid = ruleExitID
 		}
+		target, err := d.ResolveProxyTarget(ctx, host)
+		if err != nil {
+			return nil, err
+		}
 		if IsCustomExitID(eid) {
 			upstream, err := d.lookupCustom(eid)
 			if err != nil {
@@ -253,20 +261,20 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 			if decision.DatagramRequired {
 				return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native Relay datagrams unavailable on a SOCKS5/HTTP custom exit")
 			}
-			return exit.DialViaUpstreamUDP(ctx, upstream, host, port)
+			return exit.DialViaUpstreamUDP(ctx, upstream, target, port)
 		}
-		log.Printf("[Routing] PROXY UDP %s:%d (exit=%s)", host, port, eid)
+		log.Printf("[Routing] PROXY UDP %s:%d (exit=%s)", target, port, eid)
 		if decision.DatagramRequired {
 			options.DatagramRequired = true
 			options.PreferStream = false
 		}
 		if optionsDialer, ok := d.tunnel.(proxy.UDPOptionsDialer); ok {
-			return optionsDialer.DialUDPWithOptions(ctx, eid, host, port, options)
+			return optionsDialer.DialUDPWithOptions(ctx, eid, target, port, options)
 		}
 		if options.DatagramRequired {
 			return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native UDP datagrams are required by routing policy")
 		}
-		return d.tunnel.DialUDP(ctx, eid, host, port)
+		return d.tunnel.DialUDP(ctx, eid, target, port)
 
 	default:
 		return nil, fmt.Errorf("unsupported routing action %q", action)

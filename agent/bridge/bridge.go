@@ -445,13 +445,13 @@ type CustomExitUpdate struct {
 }
 
 type RoutingConfigUpdate struct {
-	Mode          *string        `json:"mode"`
-	DNSMode       *string        `json:"dns_mode"`
-	FakeIPEnabled *bool          `json:"fake_ip_enabled"`
-	BlockDoHEndpoints *bool `json:"block_doh_endpoints"`
-	ForwardOtherDNS *bool `json:"forward_other_dns"`
-	DefaultAction *string        `json:"default_action"`
-	Rules         []routing.Rule `json:"rules"` // Full replacement
+	Mode              *string        `json:"mode"`
+	DNSMode           *string        `json:"dns_mode"`
+	FakeIPEnabled     *bool          `json:"fake_ip_enabled"`
+	BlockDoHEndpoints *bool          `json:"block_doh_endpoints"`
+	ForwardOtherDNS   *bool          `json:"forward_other_dns"`
+	DefaultAction     *string        `json:"default_action"`
+	Rules             []routing.Rule `json:"rules"` // Full replacement
 }
 
 // SaveResult tells the UI whether the change took effect immediately.

@@ -93,7 +93,12 @@ func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantFragments := [][]string{
-		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-d", "192.0.2.10", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "--dport", "53", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "--dport", "53", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "!", "--dport", "53", "-d", "192.0.2.10", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "!", "--dport", "53", "-d", "192.0.2.10", "-j", "RETURN"},
 		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "-j", "NFQUEUE", "--queue-num", "58231", "--queue-bypass"},
 		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxInputChain, "-p", "udp", "--sport", "53", "-j", "NFQUEUE", "--queue-num", "58231", "--queue-bypass"},
 	}
@@ -108,6 +113,20 @@ func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 		if !found {
 			t.Fatalf("missing firewall command: %v\nall: %v", want, commands)
 		}
+	}
+	// DNS/53 must enter a non-bypassing queue BEFORE any Relay-IP bypass.
+	// This prevents a recursive DNS server on the Relay IP escaping capture.
+	udpQueue, relayReturn := -1, -1
+	for j, command := range commands {
+		if reflect.DeepEqual(command, []string{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231"}) {
+			udpQueue = j
+		}
+		if reflect.DeepEqual(command, []string{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "!", "--dport", "53", "-d", "192.0.2.10", "-j", "RETURN"}) {
+			relayReturn = j
+		}
+	}
+	if udpQueue < 0 || relayReturn <= udpQueue {
+		t.Fatalf("Linux DNS interception must precede relay bypass: %d %d: %v", udpQueue, relayReturn, commands)
 	}
 	for _, command := range commands {
 		if len(command) >= 8 && reflect.DeepEqual(command[4:8], []string{linuxInputChain, "-p", "tcp", "-j"}) {

@@ -162,7 +162,19 @@ func (d *fakeIPDNS) reply(payload []byte, relayHost string, relayIPs []string) [
 		return packDNSResponse(result)
 	}
 	q := query.Questions[0]
-	if q.Class != dnsmessage.ClassINET || (q.Type != dnsmessage.TypeA && q.Type != dnsmessage.TypeAAAA) {
+	if q.Class != dnsmessage.ClassINET {
+		return packDNSResponse(result)
+	}
+	// Browsers query HTTPS/SVCB records before A/AAAA. Returning REFUSED
+	// can fail whole origins; NODATA permits the RFC 9460 client fallback
+	// without exposing actual-address hints that would bypass FakeIP.
+	// No bogus SVCB/HTTPS RRs or unauthenticated ECH configs are synthesized.
+	if q.Type == dnsmessage.Type(64) || q.Type == dnsmessage.Type(65) {
+		result.RCode = dnsmessage.RCodeSuccess
+		return packDNSResponse(result)
+	}
+	if q.Type != dnsmessage.TypeA && q.Type != dnsmessage.TypeAAAA {
+		// TXT/SRV and DNSSEC are not silently resolved via system DNS.
 		return packDNSResponse(result)
 	}
 	host := strings.ToLower(strings.TrimSuffix(q.Name.String(), "."))

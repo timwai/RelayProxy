@@ -121,6 +121,7 @@ class MainActivity : Activity() {
     private lateinit var vpnScopeSpinner: Spinner
     private lateinit var vpnAppsSummaryText: TextView
     private lateinit var rulesListContainer: LinearLayout
+    private lateinit var dnsProtectionSummary: TextView
 
     // ====== Tab 3: Settings UI Views ======
     private lateinit var settingServerField: EditText
@@ -186,6 +187,7 @@ class MainActivity : Activity() {
         registerMessageReceiver()
         syncRoutingModeFromStore()
         if (::rulesListContainer.isInitialized) refreshRoutingTab()
+        updateDNSProtectionSummary()
         if (::customExitContainer.isInitialized) renderCustomExits()
         connectControlChannel()
         RelayExitService.setUiVisible(true)
@@ -1414,6 +1416,39 @@ class MainActivity : Activity() {
         header.addView(addRuleBtn)
         content.addView(header)
 
+        // Android uses hev-socks5-tunnel Mapped DNS, not desktop WinDivert/
+        // NFQUEUE FakeIP. Present the actual platform protection state rather
+        // than pretending the desktop FakeIP switch is supported on Android.
+        val dnsCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
+        dnsCard.addView(sectionHeader("DNS 解析与防泄漏", "Android VPN · Mapped DNS · 系统防护状态"))
+        dnsProtectionSummary = TextView(this).apply {
+            textSize = 12f
+            setTextColor(UiPalette.muted)
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        dnsCard.addView(dnsProtectionSummary)
+        dnsCard.addView(TextView(this).apply {
+            text = "Android 使用 VPN Mapped DNS，将域名交给所选出口解析。桌面 Agent 的 FakeIP/DoH 拦截开关不适用于此处。Private DNS、应用内 DoH、VPN 外应用仍需抓包验证。"
+            textSize = 11f
+            setTextColor(UiPalette.muted)
+        })
+        dnsCard.addView(TextView(this).apply {
+            text = "打开系统 VPN 设置 ›"
+            textSize = 12f
+            setTextColor(UiPalette.brand)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(14), 0, 0)
+            isClickable = true
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+            }
+        })
+        content.addView(dnsCard, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { bottomMargin = dp(16) })
+        updateDNSProtectionSummary()
+
         // 2. VPN 应用接管范围卡片 (充裕内边距与清晰分割)
         val vpnScopeCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
 
@@ -1547,6 +1582,26 @@ class MainActivity : Activity() {
             isFillViewport = true
             setBackgroundColor(UiPalette.bg)
             addView(content)
+        }
+    }
+
+    private fun updateDNSProtectionSummary() {
+        if (!::dnsProtectionSummary.isInitialized) return
+        val config = ConfigStore(this).load()
+        val vpn = runCatching { JSONObject(RelayVpnService.statusJson()) }.getOrNull()
+        val vpnState = vpn?.optString("vpnState", "STOPPED") ?: "STOPPED"
+        val alwaysOn = vpn?.optBoolean("alwaysOnEnabled", false) ?: false
+        val lockdown = vpn?.optBoolean("lockdownEnabled", false) ?: false
+        val privateDNS = Settings.Global.getString(contentResolver, "private_dns_mode")
+            .orEmpty().ifBlank { "unknown" }
+        dnsProtectionSummary.text = buildString {
+            append("VPN 状态：").append(vpnState)
+            append("\nDNS 方案：Mapped DNS → SOCKS5 → 当前出口")
+            append("\n系统 Private DNS：").append(privateDNS)
+            append("\n始终开启 VPN：").append(if (alwaysOn) "已开启" else "未开启 / 未验证")
+            append("\n无 VPN 时阻止连接：").append(if (lockdown) "已开启" else "未开启 / 未验证")
+            append("\nVPN IPv6：").append(if (config.vpnIpv6Enabled) "已配置" else "未启用")
+            append("\n泄漏认证：尚未实机抓包验证")
         }
     }
 
@@ -2508,6 +2563,7 @@ class MainActivity : Activity() {
     private fun renderStatus() {
         val obj = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
         val vpnObj = runCatching { JSONObject(RelayVpnService.statusJson()) }.getOrNull()
+        updateDNSProtectionSummary()
 
         val state = obj?.optString("connectionState", "STOPPED") ?: "STOPPED"
         val approval = obj?.optString("approvalState", "unknown") ?: "unknown"

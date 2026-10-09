@@ -102,4 +102,3 @@ func normalizeProcessPath(p string) string {
 	}
 	return path.Clean(p)
 }
-

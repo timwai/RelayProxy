@@ -53,6 +53,17 @@ func (e *Engine) FakeIPEnabled() bool {
 	return e.config.FakeIPEnabled && (e.config.DNSMode == "" || e.config.DNSMode == DNSModeProxy)
 }
 
+// DoHBlockedIPs returns a defensive copy of the configured explicit
+// HTTPS/443 endpoint blocklist. The matcher only runs for port 443.
+func (e *Engine) DoHBlockedIPs() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.config.FakeIPEnabled || !e.config.BlockDoHEndpoints {
+		return nil
+	}
+	return append([]string(nil), e.config.DoHBlockedIPs...)
+}
+
 // BlockDoHEndpoints is an opt-in best-effort policy; hostnames unavailable
 // before connection cannot be blocked by this selector.
 // ForwardOtherDNS never falls back to plaintext/local DNS. Queries travel

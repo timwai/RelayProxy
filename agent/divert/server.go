@@ -44,6 +44,7 @@ type Options struct {
 	LocalExitReady     func(string) bool
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
+	FakeIPEnabled     func() bool // dynamically consulted for new transparent DNS queries
 }
 
 // Server owns classified flows. OS interception is separately gated by a
@@ -54,6 +55,7 @@ type Server struct {
 	engine *Engine
 	dialer Dialer
 	guard  LoopGuard
+	fakeDNS *fakeIPDNS
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -109,7 +111,7 @@ func New(opts Options) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		opts: opts, engine: eng, dialer: opts.Dialer, guard: opts.Guard,
-		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		ctx: ctx, cancel: cancel, done: make(chan struct{}), fakeDNS: newFakeIPDNS(),
 		connections: make(map[net.Conn]struct{}), udp: make(map[FlowKey]*udpAssociation),
 	}, nil
 }

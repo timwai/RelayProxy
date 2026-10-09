@@ -79,7 +79,7 @@ button:disabled{cursor:not-allowed;opacity:.5}
 #root .rule-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 #root .rule-card{border:1px solid var(--line);border-radius:11px;padding:14px;margin:10px 0;background:var(--surface3)}
 #root .rule-card .form-grid{margin-top:11px}
-#root .rule-card .form-actions{margin:0 0 8px}
+#root .rule-card .form-actions{margin:14px 0 4px;padding-top:2px}
 #root .channel-card{min-height:260px}
 #root .scroll-table{overflow:auto}
 @media(max-width:800px){#root .settings-layout{grid-template-columns:1fr}#root .settings-sidebar{position:static;display:flex;gap:6px;overflow:auto;white-space:nowrap}#root .settings-nav-group{display:flex;gap:6px}#root .settings-nav-label,#root .settings-nav-note{display:none}#root .settings-sidebar .settings-nav-item{width:auto;min-height:40px;padding:7px}#root .settings-sidebar .settings-nav-item small,#root .settings-nav-icon{display:none}}
@@ -201,3 +201,122 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
 @media(max-width:600px){#root .overview-hero{padding:20px}#root .overview-hero-copy h2{font-size:22px}#root .overview-status-grid,#root .overview-shortcuts{grid-template-columns:1fr}#root .overview-health{gap:11px}#root .grid.g4>.overview-metric{min-height:110px}#root .brand-image{width:38px;height:38px}#root .brand-wordmark strong{font-size:15px}}
 @media(max-width:1000px){#root .sidebar .brand-wordmark{display:none}#root .sidebar > .brand{justify-content:center}#root .sidebar .nav-icon{margin:0 auto}#root .sidebar .nav-item{justify-content:center}#root .sidebar .nav-item>span:nth-child(2){display:none}}
 @media(prefers-reduced-motion:reduce){#root .overview-metric{transition:none!important}}
+
+/* 2026-10 unified button rhythm: 6/10/16/22px scale.  Apply by context,
+   not by styling every adjacent node, so nested cards stay aligned. */
+#root{
+  --control-gap-xs:6px;
+  --control-gap-sm:10px;
+  --control-gap-md:16px;
+  --control-gap-lg:22px;
+}
+#root .btn:not(.xs):not(.sm){
+  min-height:36px;
+  padding-inline:14px;
+  font-size:11px;
+  line-height:1.2;
+  gap:7px;
+}
+#root .btn{flex-shrink:0;max-width:100%;white-space:nowrap}
+#root .page-head{align-items:center;column-gap:var(--control-gap-lg);row-gap:12px}
+#root .page-head>div:first-child{min-width:0;flex:1}
+#root .head-actions{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:var(--control-gap-sm);
+  max-width:100%;
+}
+#root .card-title-area{
+  column-gap:var(--control-gap-md);
+  row-gap:var(--control-gap-sm);
+  flex-wrap:wrap;
+}
+#root .card-title-area>div:first-child{min-width:0}
+#root .form-actions{
+  gap:var(--control-gap-sm);
+  margin-top:18px;
+  padding-top:4px;
+}
+#root .table-action{
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+  white-space:normal;
+}
+#root .table-action .btn{
+  min-height:32px;
+  height:32px;
+  padding-inline:10px;
+  font-size:10px;
+}
+#root .inline-controls{
+  align-items:center;
+  column-gap:var(--control-gap-sm);
+  row-gap:10px;
+  min-width:0;
+}
+#root .inline-controls>.input{
+  width:auto;
+  min-width:140px;
+  max-width:260px;
+  flex:0 1 180px;
+}
+#root .inline-controls>input.input{
+  flex:1 1 230px;
+  max-width:420px;
+}
+#root .inline-controls>.muted{margin-left:auto}
+#root .card>.inline-controls+.table-wrap{margin-top:var(--control-gap-md)}
+#root .rule-card .card-title-area{margin-bottom:14px}
+#root .rule-card .inline-controls{gap:var(--control-gap-xs)}
+#root .rule-card .inline-controls .btn{height:32px;min-height:32px;padding-inline:10px}
+#root .rule-card .rule-row{margin-top:12px;column-gap:var(--control-gap-sm);row-gap:8px}
+#root .rule-card .form-actions{margin:14px 0 4px;padding-top:2px}
+#root .tab-line{column-gap:8px;row-gap:8px;padding-bottom:14px}
+#root .tab-line .btn{min-height:34px}
+#root .channel-card>.form-actions{
+  border-top:1px solid var(--line);
+  padding-top:14px;
+  gap:8px;
+  justify-content:flex-end;
+}
+#root .config-card-head{flex-wrap:wrap;row-gap:12px}
+#root .config-card-head>.btn{margin-left:auto}
+#root .settings-save{margin-top:18px;row-gap:12px}
+#root .settings-save .actions{gap:var(--control-gap-sm);flex-wrap:wrap;justify-content:flex-end}
+#root .dialog-header{gap:var(--control-gap-md);padding:18px 24px}
+#root .dialog-header h2{min-width:0;overflow-wrap:anywhere}
+#root .dialog-header .btn{height:34px;min-height:34px;width:34px;padding:0;font-size:15px}
+#root .modal-content-scroll{padding:22px 24px}
+#root .dialog-footer{padding:14px 24px;gap:var(--control-gap-sm)}
+#root .create-dialog-form>.dialog-note{margin:0 0 16px}
+#root .create-dialog-form>.form-actions{
+  margin-top:20px;
+  padding-top:14px;
+  border-top:1px solid var(--line);
+}
+#root .dialog-window .err-notice{margin:14px 0 0}
+#root .login-card .btn{min-height:44px;padding-inline:18px;font-size:13px}
+#root .topbar-right{gap:var(--control-gap-sm)}
+#root .overview-shortcut{gap:12px;padding:12px}
+@media(max-width:760px){
+  #root .page-head{align-items:flex-start}
+  #root .head-actions{justify-content:flex-start}
+  #root .dialog-header{padding:16px 18px}
+  #root .modal-content-scroll{padding:18px}
+  #root .dialog-footer{padding:13px 18px}
+}
+@media(max-width:520px){
+  #root .head-actions{width:100%;gap:8px}
+  #root .head-actions>.btn{flex:1 1 auto}
+  #root .form-actions{row-gap:8px}
+  #root .table-action{gap:6px}
+  #root .inline-controls>.input,#root .inline-controls>input.input{flex:1 1 100%;max-width:100%;width:100%}
+  #root .inline-controls>.muted{margin-left:0}
+  #root .settings-save .actions{width:100%}
+  #root .settings-save .actions>.btn{flex:1 1 0}
+}

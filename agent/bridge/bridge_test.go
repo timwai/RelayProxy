@@ -201,23 +201,23 @@ func TestPublicSaveCannotBypassPersistence(t *testing.T) {
 	}
 }
 
-func TestApplyFailureLeavesSavedPoliciesPending(t *testing.T) {
+func TestApplyFailureRestoresSavedPolicies(t *testing.T) {
 	b := newTestBridge(t)
-	runtime := b.agent.Config()
+	runtime, before := b.agent.Config(), readConfigBytes(t, b)
 	if err := b.agent.Close(); err != nil {
 		t.Fatal(err)
 	}
 	in := ConfigUpdate{Routing: replacementRouting()}
 	in.Proxy.DefaultExitID = ptr("new-exit")
-	if _, err := b.SaveConfig(in); err == nil || !strings.Contains(err.Error(), "已保存在磁盘") {
-		t.Fatalf("apply failure was not distinguished from persistence failure: %v", err)
+	if _, err := b.SaveConfig(in); err == nil || !strings.Contains(err.Error(), "配置未应用") {
+		t.Fatalf("apply failure was not reported: %v", err)
 	}
 	state, err := b.GetConfigState()
-	if err != nil || !state.ReloadPending || state.Config.Routing.Rules[0].Name != "replacement" || state.Config.Proxy.DefaultExitID != "new-exit" {
-		t.Fatalf("saved policies were lost or shown as applied: %+v, error = %v", state, err)
+	if err != nil || state.ReloadPending || state.Config.Routing.Rules[0].Name != "existing" || state.Config.Proxy.DefaultExitID != "old-exit" {
+		t.Fatalf("failed save was not restored to the previous policy: %+v, error = %v", state, err)
 	}
-	if !reflect.DeepEqual(runtime, b.agent.Config()) {
-		t.Fatal("closed agent published a policy or exit change")
+	if !bytes.Equal(before, readConfigBytes(t, b)) || !reflect.DeepEqual(runtime, b.agent.Config()) {
+		t.Fatal("failed application changed saved or active policies")
 	}
 }
 

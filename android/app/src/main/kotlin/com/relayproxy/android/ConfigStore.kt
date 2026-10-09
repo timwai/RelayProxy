@@ -471,7 +471,21 @@ class ConfigStore(private val context: Context) {
         require(config.customExits.map { it.id }.distinct().size == config.customExits.size) {
             "自定义出口 ID 重复"
         }
-        config.customExits.forEach { it.validate() }
+        config.customExits.forEach { item ->
+            item.validate()
+            val host = item.address.substringBeforeLast(':').removeSurrounding("[", "]").lowercase()
+            val port = item.address.substringAfterLast(':').toIntOrNull()
+            if (host in setOf("127.0.0.1", "localhost", "::1")) {
+                val owned = buildSet {
+                    if (config.vpnEnabled) add(config.vpnSocks5Port)
+                    if (config.clientEnabled && config.socks5Enabled) add(config.socks5Port)
+                    if (config.clientEnabled && config.httpEnabled) add(config.httpPort)
+                }
+                require(port !in owned) {
+                    "本机出口 ${item.name} 指向 RelayProxy 自身代理监听端口，会造成代理循环"
+                }
+            }
+        }
         val used = buildSet {
             if (config.defaultExitId.startsWith("local:")) add(config.defaultExitId)
             config.routing.rules.forEach { rule ->

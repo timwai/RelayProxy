@@ -65,10 +65,10 @@ type Decision struct {
 
 // Config holds all routing configuration.
 type Config struct {
-	Mode          Mode   `yaml:"mode"           json:"mode"`           // Routing mode
+	Mode          Mode    `yaml:"mode"           json:"mode"`                   // Routing mode
 	DNSMode       DNSMode `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"` // proxy (default) or local
-	DefaultAction Action `yaml:"default_action" json:"default_action"` // When no rule matches in rule mode
-	Rules         []Rule `yaml:"rules"          json:"rules"`          // Ordered rule list
+	DefaultAction Action  `yaml:"default_action" json:"default_action"`         // When no rule matches in rule mode
+	Rules         []Rule  `yaml:"rules"          json:"rules"`                  // Ordered rule list
 }
 
 // DefaultConfig returns a sensible default routing configuration.

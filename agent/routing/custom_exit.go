@@ -75,7 +75,7 @@ func FindCustomExit(items []CustomExit, id string) (CustomExit, bool) {
 
 // ValidateCustomReferences prevents dangling references and disabling/removing
 // an exit that is used by the default, a rule, or the shared exit upstream.
-func ValidateCustomReferences(items []CustomExit, defaultID, sharedID string, rules []Rule) error {
+func ValidateCustomReferences(items []CustomExit, defaultID, sharedID string, rules []Rule, dnsExitIDs ...string) error {
 	used := map[string]string{}
 	if IsCustomExitID(defaultID) {
 		used[defaultID] = "proxy.default_exit_id"
@@ -90,6 +90,11 @@ func ValidateCustomReferences(items []CustomExit, defaultID, sharedID string, ru
 			return fmt.Errorf("exit.upstream_exit_id must reference a local custom exit")
 		}
 		used[sharedID] = "exit.upstream_exit_id"
+	}
+	for _, dnsID := range dnsExitIDs {
+		if IsCustomExitID(dnsID) {
+			used[dnsID] = "routing.dns_exit_id"
+		}
 	}
 	for id, source := range used {
 		item, ok := FindCustomExit(items, id)

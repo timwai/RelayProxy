@@ -582,7 +582,8 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
 #root .device-auth-empty{padding:22px;border-radius:12px;background:var(--surface3);color:var(--muted);text-align:center;font-size:13px}
 #root .device-auth-footer{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;padding:20px 0 4px;border-top:1px solid var(--line)}
 #root .device-auth-footer>span{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--text)}
-#root .device-auth-footer>span>strong{display:inline;font-size:17px;font-weight:800;color:var(--brand)}
+#root .device-auth-footer-summary>span{display:inline-flex;align-items:baseline;gap:5px}
+#root .device-auth-footer-summary>span>strong{font-size:17px;font-weight:800;color:var(--brand)}
 #root .device-auth-footer>span>small{font-size:11px;color:var(--muted);line-height:1.5}
 #root .device-auth-footer-actions{display:flex;align-items:center;justify-content:flex-end;gap:10px;flex-wrap:wrap}
 #root .device-auth-footer-actions>.btn{min-height:40px;padding-inline:17px}

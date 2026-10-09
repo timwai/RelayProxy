@@ -1,0 +1,87 @@
+name: Network Acceptance (Real SOCKS5 and FakeIP policy)
+
+on:
+  pull_request:
+    paths:
+      - "agent/exit/**"
+      - "agent/divert/**"
+      - "agent/routing/**"
+      - ".github/workflows/network-acceptance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-socks5:
+    name: Real Dante SOCKS5 TCP and UDP
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Install separate production SOCKS5 daemon
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y dante-server
+      - name: Configure loopback-only Dante proxy
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/danted.conf" <<'CONFIG'
+          logoutput: stderr
+          internal: 127.0.0.1 port = 19081
+          external: lo
+          user.privileged: root
+          user.notprivileged: nobody
+          clientmethod: none
+          socksmethod: none
+          client pass {
+            from: 127.0.0.0/8 to: 0.0.0.0/0
+          }
+          socks pass {
+            from: 127.0.0.0/8 to: 0.0.0.0/0
+            command: connect udpassociate udpreply
+          }
+          CONFIG
+          sudo /usr/sbin/danted -V -f "$RUNNER_TEMP/danted.conf"
+          sudo /usr/sbin/danted -D -f "$RUNNER_TEMP/danted.conf" -p "$RUNNER_TEMP/danted.pid"
+          for attempt in {1..40}; do
+            if (echo >/dev/tcp/127.0.0.1/19081) 2>/dev/null; then exit 0; fi
+            sleep 0.25
+          done
+          echo "::error::Real Dante server did not start"
+          exit 1
+      - name: End-to-end client tests against live Dante process
+        env:
+          RELAYPROXY_LIVE_SOCKS5_ADDR: "127.0.0.1:19081"
+        run: |
+          go test ./agent/exit -run '^TestLiveDanteTCPAndUDP$' -v -count=1 -timeout=30s
+      - name: Dante runtime diagnostics
+        if: failure()
+        run: |
+          sudo ps aux | grep -E 'danted|sockd' || true
+          sudo journalctl -u danted --no-pager -n 80 || true
+
+  dns-platform-regression:
+    name: DNS / FakeIP tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Execute platform DNS policy and packet fixture tests
+        shell: bash
+        run: |
+          go test ./agent/divert ./agent/routing -run 'Test(FakeIP|Fake|DoH|DNS|Linux|Windows|Darwin)' -count=1 -v -timeout=5m
+      - name: Limitations
+        shell: bash
+        run: |
+          echo "::notice::Policy and in-process packet fixtures passed; unsigned macOS NE, WinDivert kernel interception, Android VPN and on-wire DNS remain unverified by this job."

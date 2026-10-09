@@ -118,8 +118,8 @@ func TestFakeIPReservedLocalhostAndInvalidNames(t *testing.T) {
 	d := newFakeIPDNS()
 	for _, tc := range []struct {
 		hostname string
-		kind dnsmessage.Type
-		wantIP string
+		kind     dnsmessage.Type
+		wantIP   string
 	}{
 		{"localhost", dnsmessage.TypeA, "127.0.0.1"},
 		{"API.Localhost", dnsmessage.TypeAAAA, "::1"},

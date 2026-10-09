@@ -24,7 +24,8 @@ func TestFakeIPDNSTCPStreamUsesLocalResolverOnly(t *testing.T) {
 	var header [2]byte
 	binary.BigEndian.PutUint16(header[:], uint16(len(query)))
 	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
-	if _, err := (net.Buffers{header[:], query}).WriteTo(client); err != nil {
+	buffer := net.Buffers{header[:], query}
+	if _, err := buffer.WriteTo(client); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := io.ReadFull(client, header[:]); err != nil {

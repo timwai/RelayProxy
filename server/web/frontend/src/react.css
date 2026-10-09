@@ -75,3 +75,14 @@ button:disabled{cursor:not-allowed;opacity:.5}
 .diagnostic-cell { min-width: 240px; max-width: 470px; overflow-wrap: anywhere; }
 .diagnostic-cell small { display: block; line-height: 1.5; margin-top: 4px; }
 .error-text { color: var(--danger,#e5484d); }
+
+/* Device identity is always a two-line unit across tables, cards, dialogs and selectors. */
+#root .device-label {display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0;max-width:100%;text-align:left;white-space:normal;}
+#root .device-label__name {display:block;max-width:100%;font-weight:750;font-size:11px;line-height:1.5;color:var(--text);overflow-wrap:anywhere;}
+#root .device-label__id {display:block;max-width:100%;font-size:10px;line-height:1.5;color:var(--muted);font-weight:450;overflow-wrap:anywhere;word-break:break-word;user-select:text;}
+#root .toggle-field > .device-label {flex:1;}
+#root .card-title-area .device-label__name {font-size:14px;}
+#root .device-delivery-status {display:block;color:var(--muted);margin-top:4px;}
+
+/* Secondary table details never run into the preceding value. */
+#root .table-wrap td > small {display:block;margin-top:4px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere;}

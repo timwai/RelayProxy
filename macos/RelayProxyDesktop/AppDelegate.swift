@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private var messagePollTimer: Timer?
     private var messagePollInFlight = false
     private var seenMessageIDs = Set<String>()
+    private var verificationPopupTimeoutSeconds = 15
+    private var verificationPopupConfigRefreshAt = Date.distantPast
+    private var verificationPopupConfigInFlight = false
     private let messageBaselineMillis = Int64(Date().timeIntervalSince1970 * 1000)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -425,6 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let id: String
         let title: String?
         let content: String?
+        let messageType: String?
         let verificationCode: String?
         let verificationRule: String?
         let popup: Bool?
@@ -433,35 +437,79 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let createdAt: Int64?
 
         var effectivePopupType: String {
-            let value = popupType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if !value.isEmpty { return value }
+            let messageValue = messageType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !messageValue.isEmpty { return messageValue }
+            let legacyValue = popupType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !legacyValue.isEmpty { return legacyValue }
             return (verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
                 ? "verification_code"
                 : "message"
         }
 
         var shouldPopup: Bool {
-            let type = popupType?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if type.isEmpty {
-                return verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-            }
-            return popup == true
+            if let popup { return popup }
+            return verificationCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
         }
     }
 
-    private func messageAPIURL() -> URL? {
+    private struct RelayUIConfig: Decodable {
+        let verificationPopupTimeoutSec: Int?
+    }
+
+    private func managementAPIURL(_ path: String) -> URL? {
         guard let managementURL,
               var components = URLComponents(url: managementURL, resolvingAgainstBaseURL: false) else { return nil }
         let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = basePath + "/api/messages"
+        components.path = basePath + path
         return components.url
+    }
+
+    private func messageAPIURL() -> URL? {
+        managementAPIURL("/api/messages")
+    }
+
+    private func configAPIURL() -> URL? {
+        managementAPIURL("/api/config")
+    }
+
+    private func refreshVerificationPopupTimeout(force: Bool = false, completion: (() -> Void)? = nil) {
+        guard !verificationPopupConfigInFlight, let url = configAPIURL() else {
+            completion?()
+            return
+        }
+        if !force, Date().timeIntervalSince(verificationPopupConfigRefreshAt) < 5 {
+            completion?()
+            return
+        }
+
+        verificationPopupConfigInFlight = true
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 3)
+        request.httpMethod = "GET"
+        URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.verificationPopupConfigInFlight = false
+                defer { completion?() }
+                guard error == nil, let data,
+                      let config = try? JSONDecoder().decode(RelayUIConfig.self, from: data) else { return }
+                if let timeout = config.verificationPopupTimeoutSec {
+                    self.verificationPopupTimeoutSeconds = max(0, min(3600, timeout))
+                }
+                self.verificationPopupConfigRefreshAt = Date()
+            }
+        }.resume()
     }
 
     private func startMessagePolling() {
         messagePollTimer?.invalidate()
-        pollMessages()
-        messagePollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.pollMessages()
+        refreshVerificationPopupTimeout(force: true) { [weak self] in
+            guard let self else { return }
+            self.pollMessages()
+            self.messagePollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.pollMessages()
+                self.refreshVerificationPopupTimeout()
+            }
         }
     }
 
@@ -543,7 +591,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             NSApp.requestUserAttention(.criticalRequest)
         }
         NSApp.activate(ignoringOtherApps: true)
+
+        var autoDismissTimer: Timer?
+        if verificationPopupTimeoutSeconds > 0 {
+            let timer = Timer(timeInterval: TimeInterval(verificationPopupTimeoutSeconds), repeats: false) { [weak alert] _ in
+                guard let alert, alert.window.isVisible else { return }
+                NSApp.abortModal()
+                alert.window.orderOut(nil)
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            autoDismissTimer = timer
+        }
+
         let response = alert.runModal()
+        autoDismissTimer?.invalidate()
         if canCopy && response == .alertFirstButtonReturn {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(code, forType: .string)
@@ -563,6 +624,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
             restartRequested = false
             managementURL = nil
             seenMessageIDs.removeAll()
+            verificationPopupTimeoutSeconds = 15
+            verificationPopupConfigRefreshAt = .distantPast
+            verificationPopupConfigInFlight = false
             startAgent()
             return
         }

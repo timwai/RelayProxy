@@ -108,6 +108,7 @@ button.action:active{transform:scale(.98)}
   var initialTimeout=Number(window.__relayPendingTimeout);
   if(!Number.isFinite(initialTimeout)) initialTimeout=15;
   var queue=[], current=null,
+      seenMessageIds=new Set(), seenMessageOrder=[],
       timeoutSeconds=Math.max(0,Math.min(3600,Math.floor(initialTimeout))),
       dismissTimer=null, countdownTimer=null;
   function fmtTime(ms){
@@ -169,15 +170,23 @@ button.action:active{transform:scale(.98)}
     updateQueueBadge();
     startAutoDismiss();
   }
+  function rememberMessageId(id){
+    id=String(id||'').trim();
+    if(!id||seenMessageIds.has(id)) return false;
+    seenMessageIds.add(id);
+    seenMessageOrder.push(id);
+    if(seenMessageOrder.length>1024){
+      seenMessageIds.delete(seenMessageOrder.shift());
+    }
+    return true;
+  }
   window.enqueueMessage=function(message){
-    if(!message||!message.id) return;
-    if(current&&current.id===message.id){render(message);return;}
-    if(queue.some(function(item){return item.id===message.id})) return;
+    if(!message||!message.id||!rememberMessageId(message.id)) return;
     if(current){queue.push(message);updateQueueBadge();return;}
     render(message);
   };
   window.enqueueVerification=window.enqueueMessage;
-  window.seedVerification=function(message){if(message&&!current)render(message);};
+  window.seedVerification=function(message){if(message&&!current)window.enqueueMessage(message);};
   window.relayMessagePopupReady=true;
   var pendingMessages=Array.isArray(window.__relayPendingMessages) ? window.__relayPendingMessages.slice() : [];
   window.__relayPendingMessages=[];

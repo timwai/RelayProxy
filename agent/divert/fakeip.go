@@ -14,24 +14,25 @@ import (
 // The two address families share a hostname but have distinct addresses.
 const (
 	fakeIPLimit = 32768
-	fakeIPTTL = 60
+	fakeIPTTL   = 60
 )
+
 var (
 	fakeIPv4Range = netip.MustParsePrefix("198.18.0.0/15")
 	fakeIPv6Range = netip.MustParsePrefix("2001:db8:198:18::/96")
 )
 
 type fakeIPEntry struct {
-	host string
+	host    string
 	expires time.Time
 }
 
 type fakeIPDNS struct {
-	mu sync.Mutex
-	now func() time.Time
+	mu           sync.Mutex
+	now          func() time.Time
 	next4, next6 uint32
-	byName map[string]netip.Addr
-	byIP map[netip.Addr]fakeIPEntry
+	byName       map[string]netip.Addr
+	byIP         map[netip.Addr]fakeIPEntry
 }
 
 func newFakeIPDNS() *fakeIPDNS {
@@ -69,7 +70,7 @@ func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, boo
 	now := d.now()
 	if existing, ok := d.byName[key]; ok {
 		if entry, found := d.byIP[existing]; found && entry.expires.After(now) {
-			entry.expires = now.Add(15*time.Minute)
+			entry.expires = now.Add(15 * time.Minute)
 			d.byIP[existing] = entry
 			return existing, true
 		}
@@ -88,7 +89,7 @@ func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, boo
 			return netip.Addr{}, false
 		}
 		id := d.next4
-		ip = netip.AddrFrom4([4]byte{198, 18+byte(id>>16), byte(id>>8), byte(id)})
+		ip = netip.AddrFrom4([4]byte{198, 18 + byte(id>>16), byte(id >> 8), byte(id)})
 	} else {
 		d.next6++
 		if d.next6 == 0 {
@@ -99,7 +100,7 @@ func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, boo
 		ip = netip.AddrFrom16(raw)
 	}
 	d.byName[key] = ip
-	d.byIP[ip] = fakeIPEntry{host: host, expires: now.Add(15*time.Minute)}
+	d.byIP[ip] = fakeIPEntry{host: host, expires: now.Add(15 * time.Minute)}
 	return ip, true
 }
 

@@ -1,11 +1,14 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {DeviceLabel} from './DeviceLabel.js';
+import {Icon} from './icons.jsx';
 import {api,json,list,fmtDate,fmtBytes,localDate,isoDate,normalizedCapabilities,permissionDefs,validChannelId,validatePortRange,pushURL} from './api.js';
 import {groups,getGroup,normalizeForSave,configEqual} from './settings.js';
 import {summarizeSession,summarizePathReport} from './diagnostics.js';
 
 const pages={overview:'运行总览',devices:'设备管理',identities:'身份管理',exits:'出口节点',sessions:'活跃会话',p2p:'P2P 直连',messages:'消息历史',channels:'推送渠道',rdp:'RDP 公网入口',audit:'RDP 连接审计',security:'RDP 安全策略',settings:'服务配置'};
 const nav=[['概览',[['overview','运行总览']]],['设备与身份',[['devices','设备管理'],['identities','身份管理'],['exits','出口节点']]],['连接',[['sessions','实时连接'],['p2p','P2P 路径'],['rdp','RDP 公网入口'],['audit','连接审计'],['security','IP 安全策略']]],['消息',[['messages','消息历史'],['channels','推送渠道']]],['系统',[['settings','服务配置']]]];
+const navIcons={overview:'dashboard',devices:'devices',identities:'users',exits:'globe',sessions:'activity',p2p:'route',rdp:'monitor',audit:'terminal',security:'shield',messages:'bell',channels:'share',settings:'settings'};
+function BrandMark({login=false}){return <div className={'brand '+(login?'login-brand':'')}><span className="brand-icon brand-image"><img src="/img/logo.png" alt="" loading="eager"/></span><div className="brand-wordmark"><strong>RelayProxy</strong><small>{login?'SECURE ADMIN ACCESS':'SERVER CONSOLE'}</small></div></div>}
 const adminPages=new Set(['identities','rdp','audit','security','settings']);
 const blank={dashboard:{},devices:[],enrollments:[],identities:[],exits:[],sessions:[],p2p:[],channels:[],messages:[],pushInfo:null,ingress:[],bans:[],rules:[],systemGrants:[],settings:null};
 const queryFromHash=()=>{const [p,t]=location.hash.slice(1).split('/');return {page:pages[p]?p:'overview',settingTab:getGroup(t||'admin').id};};
@@ -21,7 +24,7 @@ function Head({title,desc,actions}){return <div className="page-head"><div><h1>{
 function Panel({title,desc,actions,children,className=''}){return <section className={'card page-section '+className}><div className="card-title-area"><div><h2>{title}</h2>{desc&&<p className="section-description">{desc}</p>}</div>{actions}</div>{children}</section>}
 function Caps({value,onChange,allowed=permissionDefs.map(p=>p[0])}){return <div className="form-grid">{permissionDefs.filter(([key])=>allowed.includes(key)).map(([key,name])=><label className="toggle-field" key={key}><span>{name}</span><input type="checkbox" checked={value.includes(key)} onChange={e=>{let next=e.target.checked?[...value,key]:value.filter(x=>x!==key);if(key==='rdp.host'&&!e.target.checked)next=next.filter(x=>x!=='rdp.public');onChange(normalizedCapabilities(next));}}/></label>)}</div>}
 function Dialog({dialog,close}){const ref=useRef(null);useEffect(()=>{if(!dialog)return;const onKey=e=>{if(e.key==='Escape')close()};document.addEventListener('keydown',onKey);return()=>document.removeEventListener('keydown',onKey)},[dialog,close]);if(!dialog)return null;return <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section ref={ref} role="dialog" aria-modal="true" aria-label={dialog.title} className={'dialog-window '+(dialog.wide?'wide':'')}><header className="dialog-header"><h2>{dialog.title}</h2><Action onClick={close}>✕</Action></header><div className="modal-content-scroll">{dialog.body}</div><footer className="dialog-footer"><Action onClick={close}>关闭</Action></footer></section></div>}
-function Login({onLogin,error}){const [username,setUser]=useState(''),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[localError,setLocalError]=useState('');return <div className="login-screen"><div className="login-card"><div className="brand"><span className="brand-icon">↗</span><span>RelayProxy</span></div><h1>管理控制台</h1><p className="muted">登录以管理设备、出口和服务配置</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setLocalError('');try{await onLogin(username,password)}catch(err){setLocalError(err.message)}finally{setBusy(false)}}}><Field label="用户名" value={username} onChange={setUser} required/><Field label="密码" value={password} onChange={setPassword} type="password" required/>{(localError||error)&&<p className="err-notice">{localError||error}</p>}<Action tone="primary" type="submit" disabled={busy}>{busy?'正在登录…':'登录'}</Action></form></div></div>}
+function Login({onLogin,error}){const [username,setUser]=useState(''),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[localError,setLocalError]=useState('');return <div className="login-screen"><div className="login-card"><BrandMark login/><h1>管理控制台</h1><p className="muted">登录以管理设备、出口和服务配置</p><form onSubmit={async e=>{e.preventDefault();setBusy(true);setLocalError('');try{await onLogin(username,password)}catch(err){setLocalError(err.message)}finally{setBusy(false)}}}><Field label="用户名" value={username} onChange={setUser} required/><Field label="密码" value={password} onChange={setPassword} type="password" required/>{(localError||error)&&<p className="err-notice">{localError||error}</p>}<Action tone="primary" type="submit" disabled={busy}>{busy?'正在登录…':'登录'}</Action></form></div></div>}
 export function App(){
  const [user,setUser]=useState(null),[authReady,setAuthReady]=useState(false),[authError,setAuthError]=useState('');
  const [route,setRoute]=useState(queryFromHash),[theme,setTheme]=useState(()=>localStorage.getItem('relayproxy-theme')||'system');
@@ -64,7 +67,7 @@ export function App(){
  if(!authReady)return <div className="login-screen">正在检查登录状态…</div>;
  if(!user)return <Login error={authError} onLogin={async (username,password)=>{await api('/auth/login',json('POST',{username,password}));const result=await api('/auth/me');setUser(result.user||result);setAuthError('')}}/>;
  let page=route.page;if(!admin&&adminPages.has(page))page='overview';
- return <div id="app"><aside className="sidebar"><div className="brand"><div className="brand-icon">↗</div><div><h1>RelayProxy</h1><small>SERVER CONSOLE</small></div></div><div className="nav-scroll">{nav.map(([title,items])=><section className="nav-group" key={title}><div className="group-name">{title}</div>{items.filter(([p])=>admin||!adminPages.has(p)).map(([p,label])=><button type="button" key={p} onClick={()=>go(p)} className={'nav-item '+(page===p?'active':'')}><span className="nav-icon">{p==='overview'?'▦':p==='devices'?'▣':p==='identities'?'♧':p==='settings'?'⚙':p==='messages'||p==='channels'?'✉':p==='rdp'||p==='security'||p==='audit'?'▥':'◎'}</span><span>{label}</span>{p==='devices'&&data.enrollments.length>0&&<span className="nav-count">{data.enrollments.length}</span>}</button>)}</section>)}</div><div className="sidebar-footer"><div className="side-status"><i className="status-dot"/><div><strong>Server · {error?'DEGRADED':'ONLINE'}</strong><small>Relay 控制台</small></div></div><button className="user-chip" onClick={()=>setDialog({title:'账户管理',body:<Account user={user} onPasswordChanged={()=>{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null);setAuthError('密码已修改，请重新登录')}} logout={async()=>{try{await api('/auth/logout',{method:'POST'})}finally{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null)}}}/>})}><span className="avatar">{user.username?.slice(0,1).toUpperCase()||'A'}</span><span className="grow"><strong>{user.username}</strong><small>{admin?'全局管理员':'身份管理员'}</small></span></button></div></aside><div className="workspace"><header className="topbar"><div className="crumb"><span>RelayProxy</span><span style={{opacity:.5}}>/</span><b>{pages[page]}</b></div><div className="topbar-right"><div className="theme-seg">{[['system','自动'],['light','浅色'],['dark','深色']].map(([v,t])=><button key={v} onClick={()=>setTheme(v)} className={theme===v?'active':''}>{t}</button>)}</div><Action disabled={loading} onClick={()=>ctx.refresh()}>{loading?'刷新中':'刷新'}</Action><a className="btn sm" href="/classic" title="使用原有管理台（完整旧版功能）">经典版</a></div></header><main className="main-scroll"><div className="main-inner">{error&&<div className="err-notice" role="alert">{error}</div>}{data.settings?.restartRequired&&<Banner type="warn"><b>配置已保存，等待服务重启。</b> {list(data.settings.restartFields).join('、')}</Banner>}{page==='overview'?<Overview ctx={ctx}/>:page==='devices'?<Devices ctx={ctx}/>:page==='identities'?<Identities ctx={ctx}/>:page==='exits'?<Exits ctx={ctx}/>:page==='sessions'||page==='p2p'?<Connections ctx={ctx} p2pOnly={page==='p2p'}/>:page==='messages'?<Messages ctx={ctx}/>:page==='channels'?<Channels ctx={ctx}/>:page==='rdp'?<Ingress ctx={ctx}/>:page==='audit'?<Audit ctx={ctx}/>:page==='security'?<Security ctx={ctx}/>:<Settings ctx={ctx}/>}</div></main></div><Dialog dialog={dialog} close={close}/>{notice&&<div className="toast-live" role="status">{notice}</div>}</div>;
+ return <div id="app"><aside className="sidebar"><BrandMark/><div className="nav-scroll">{nav.map(([title,items])=><section className="nav-group" key={title}><div className="group-name">{title}</div>{items.filter(([p])=>admin||!adminPages.has(p)).map(([p,label])=><button type="button" key={p} onClick={()=>go(p)} className={'nav-item '+(page===p?'active':'')}><span className="nav-icon"><Icon name={navIcons[p]} size={17}/></span><span>{label}</span>{p==='devices'&&data.enrollments.length>0&&<span className="nav-count">{data.enrollments.length}</span>}</button>)}</section>)}</div><div className="sidebar-footer"><div className="side-status"><i className="status-dot"/><div><strong>Server · {error?'DEGRADED':'ONLINE'}</strong><small>Relay 控制台</small></div></div><button className="user-chip" onClick={()=>setDialog({title:'账户管理',body:<Account user={user} onPasswordChanged={()=>{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null);setAuthError('密码已修改，请重新登录')}} logout={async()=>{try{await api('/auth/logout',{method:'POST'})}finally{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null)}}}/>})}><span className="avatar">{user.username?.slice(0,1).toUpperCase()||'A'}</span><span className="grow"><strong>{user.username}</strong><small>{admin?'全局管理员':'身份管理员'}</small></span></button></div></aside><div className="workspace"><header className="topbar"><div className="crumb"><span>RelayProxy</span><span style={{opacity:.5}}>/</span><b>{pages[page]}</b></div><div className="topbar-right"><div className="theme-seg">{[['system','自动'],['light','浅色'],['dark','深色']].map(([v,t])=><button key={v} onClick={()=>setTheme(v)} className={theme===v?'active':''}>{t}</button>)}</div><Action disabled={loading} onClick={()=>ctx.refresh()}>{loading?'刷新中':'刷新'}</Action><a className="btn sm" href="/classic" title="使用原有管理台（完整旧版功能）">经典版</a></div></header><main className="main-scroll"><div className="main-inner">{error&&<div className="err-notice" role="alert">{error}</div>}{data.settings?.restartRequired&&<Banner type="warn"><b>配置已保存，等待服务重启。</b> {list(data.settings.restartFields).join('、')}</Banner>}{page==='overview'?<Overview ctx={ctx}/>:page==='devices'?<Devices ctx={ctx}/>:page==='identities'?<Identities ctx={ctx}/>:page==='exits'?<Exits ctx={ctx}/>:page==='sessions'||page==='p2p'?<Connections ctx={ctx} p2pOnly={page==='p2p'}/>:page==='messages'?<Messages ctx={ctx}/>:page==='channels'?<Channels ctx={ctx}/>:page==='rdp'?<Ingress ctx={ctx}/>:page==='audit'?<Audit ctx={ctx}/>:page==='security'?<Security ctx={ctx}/>:<Settings ctx={ctx}/>}</div></main></div><Dialog dialog={dialog} close={close}/>{notice&&<div className="toast-live" role="status">{notice}</div>}</div>;
 }
 function Account({user,onPasswordChanged,logout}){
  const [old,setOld]=useState(''),[pw,setPw]=useState(''),[confirmPw,setConfirmPw]=useState('');
@@ -79,7 +82,75 @@ function Account({user,onPasswordChanged,logout}){
  };
  return <form onSubmit={submit}><p className="dialog-note">当前账户：{user.username}。修改密码后所有管理会话必须重新登录。</p><div className="form-grid"><Field label="原密码" type="password" value={old} onChange={setOld} required/><Field label="新密码" type="password" value={pw} onChange={setPw} required/><Field label="确认新密码" type="password" value={confirmPw} onChange={setConfirmPw} required/></div>{error&&<p className="err-notice" role="alert">{error}</p>}<div className="form-actions"><Action tone="primary" disabled={busy} type="submit">{busy?'正在修改…':'修改密码'}</Action><Action disabled={busy} onClick={()=>logout().catch(e=>setError(e.message))}>退出登录</Action></div></form>
 }
-function Overview({ctx}){const {data,go}=ctx;const d=data.dashboard||{};const online=data.devices.filter(x=>x.status==='online').length;return <><Head title="中继网络一览" desc="服务状态、设备、出口和实时流量。" actions={<Action tone="primary" onClick={()=>go('devices')}>管理设备 →</Action>}/><div className="grid g4">{[['在线设备',online],['设备总数',data.devices.length],['可用出口',data.exits.length],['活跃会话',data.sessions.length]].map(([name,val])=><div className="card" key={name}><p className="muted">{name}</p><div className="metric-value">{val}</div><small className="muted">实时统计</small></div>)}</div><div className="grid two-one page-section"><Panel title="Relay 节点状态"><div className="detail-list"><div>管理地址　{location.origin}</div><div>今日上传　{fmtBytes(d.todayUpload)}</div><div>今日下载　{fmtBytes(d.todayDownload)}</div><div>隧道在线　<Badge tone="ok">可用</Badge></div></div></Panel><Panel title="快捷入口"><div className="form-actions" style={{justifyContent:'flex-start'}}><Action onClick={()=>go('devices')}>设备审批</Action><Action onClick={()=>go('sessions')}>查看连接</Action><Action onClick={()=>go('settings')}>服务配置</Action></div></Panel></div><Panel title="最近设备" actions={<Action onClick={()=>go('devices')}>查看全部 →</Action>}><Table columns={['设备','系统 / 角色','状态','最近在线']} items={data.devices.slice(0,6)} render={d=><><td><DeviceLabel name={d.name} id={d.id}/></td><td>{d.platform} · {d.deviceMode}</td><td><Badge tone={d.status==='online'?'ok':''}>{d.status==='online'?'在线':'离线'}</Badge></td><td>{fmtDate(d.lastSeenAt)}</td></>}/></Panel></>}
+function Overview({ctx}){
+ const {data,go,admin}=ctx;
+ const d=data.dashboard||{};
+ const online=Number(d.onlineDevices??data.devices.filter(x=>x.status==='online').length);
+ const total=data.devices.length;
+ const exits=Number(d.onlineExits??data.exits.length);
+ const sessions=Number(d.activeConnections??data.sessions.length);
+ const p2p=Number(d.activeP2PSessions??data.p2p.length);
+ const waiting=data.enrollments.length;
+ const up=Math.max(0,Number(d.todayUpload)||0),down=Math.max(0,Number(d.todayDownload)||0);
+ const totalTraffic=up+down;
+ const ratio=totalTraffic>0?Math.round(up/totalTraffic*100):50;
+ const metrics=[
+  {label:'在线设备',value:online,hint:'已登记 '+total+' 台',icon:'devices',tone:'blue',page:'devices'},
+  {label:'可用出口',value:exits,hint:'在线的代理出口',icon:'globe',tone:'teal',page:'exits'},
+  {label:'活跃连接',value:sessions,hint:'当前活跃流',icon:'activity',tone:'violet',page:'sessions'},
+  {label:'P2P 会话',value:p2p,hint:'当前协商 / 直连',icon:'route',tone:'amber',page:'p2p'}
+ ];
+ return <>
+  <Head title="中继网络一览" desc="设备、传输路径、安全审批与实时流量，尽在一处。" actions={<Action tone="primary" onClick={()=>go('devices')}>查看设备 →</Action>}/>
+  <section className="overview-hero" aria-label="RelayProxy 网络拓扑">
+   <div className="overview-hero-copy">
+    <span className="overview-hero-kicker"><span className="overview-online-dot"/> RELAYPROXY NETWORK</span>
+    <h2>连接每一台设备，<span>让流量自由流动。</span></h2>
+    <p>通过 Relay、QUIC 与 P2P 组织你的私有网络。所有设备与出口均由服务端身份和能力授权控制。</p>
+    <div className="overview-hero-meta"><span><Icon name="shield" size={15}/> 身份隔离与授权</span><span><Icon name="activity" size={15}/> 实时状态监测</span></div>
+   </div>
+   <div className="network-visual" role="img" aria-label="客户端经过 Relay Server 连接出口节点的网络拓扑示意图">
+    <svg viewBox="0 0 460 235" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+      <defs><linearGradient id="rpLine" x1="0" x2="1"><stop stopColor="#81e6f9"/><stop offset="1" stopColor="#c4b5fd"/></linearGradient><radialGradient id="rpAura"><stop stopColor="#fff" stopOpacity=".36"/><stop offset="1" stopColor="#fff" stopOpacity="0"/></radialGradient></defs>
+      <circle cx="230" cy="117" r="100" fill="url(#rpAura)"/>
+      <g stroke="url(#rpLine)" strokeWidth="2" strokeDasharray="6 7" opacity=".78" fill="none"><path d="M85 76 Q151 31 230 115"/><path d="M85 166 Q160 196 230 115"/><path d="M230 115 Q310 37 384 76"/><path d="M230 115 Q312 194 384 166"/></g>
+      <g fill="#fff" opacity=".94"><circle cx="140" cy="64" r="4"/><circle cx="149" cy="174" r="4"/><circle cx="323" cy="63" r="4"/><circle cx="319" cy="175" r="4"/></g>
+      <g fill="#122450" stroke="#9ad9ff" strokeWidth="1.5"><rect x="35" y="46" width="100" height="63" rx="14"/><rect x="35" y="139" width="100" height="63" rx="14"/><rect x="326" y="46" width="100" height="63" rx="14"/><rect x="326" y="139" width="100" height="63" rx="14"/></g>
+      <g fill="#fff" fontSize="12" fontWeight="600" textAnchor="middle"><text x="85" y="70">Client</text><text x="85" y="89" fill="#9bdcf4" fontSize="10">Agent</text><text x="85" y="162">Client</text><text x="85" y="181" fill="#9bdcf4" fontSize="10">Agent</text><text x="376" y="70">Exit</text><text x="376" y="89" fill="#9bdcf4" fontSize="10">Node</text><text x="376" y="162">Exit</text><text x="376" y="181" fill="#9bdcf4" fontSize="10">Node</text></g>
+      <circle cx="230" cy="115" r="61" fill="#fff" opacity=".13"/><circle cx="230" cy="115" r="47" fill="#fff" stroke="#dcecff" strokeWidth="2"/><circle cx="230" cy="115" r="33" fill="#dceaff"/><g textAnchor="middle"><text x="230" y="113" fill="#1d4ed8" fontSize="12" fontWeight="800">RELAY</text><text x="230" y="127" fill="#5774a8" fontSize="9">SERVER</text></g>
+    </svg>
+    <div className="network-caption">逻辑拓扑示意 · 实际路径由网络能力决定</div>
+   </div>
+  </section>
+  <div className="grid g4 overview-metrics">{metrics.map(m=><button type="button" className={'card overview-metric metric-'+m.tone} onClick={()=>go(m.page)} key={m.label}><span className="metric-icon"><Icon name={m.icon} size={21}/></span><span className="overview-metric-copy"><span className="metric-label">{m.label}</span><strong className="metric-value">{m.value}</strong><span className="metric-hint">{m.hint}</span></span><span className="metric-arrow">↗</span></button>)}</div>
+  <div className="grid two-one page-section">
+   <Panel title="Relay 节点状态" actions={<Badge tone="ok">管理台在线</Badge>}>
+    <div className="overview-status-grid">
+      <div><span>管理地址</span><strong className="mono">{location.origin}</strong></div>
+      <div><span>今日上传</span><strong>{fmtBytes(up)}</strong></div>
+      <div><span>今日下载</span><strong>{fmtBytes(down)}</strong></div>
+      <div><span>待审批设备</span><strong>{waiting} 台</strong></div>
+    </div>
+   </Panel>
+   <Panel title="快捷入口" desc="常用操作，一键直达">
+    <div className="overview-shortcuts">
+      {[[ 'devices','devices','设备审批',waiting?'待处理 '+waiting+' 台':'设备与能力授权'],['sessions','activity','查看连接','查看实时路径和 QUIC 统计'],['channels','bell','消息渠道','推送规则与通知管理'],...(admin?[['settings','settings','服务配置','隧道、P2P、出口和 ACL']]:[])].map(([p,icon,label,note])=><button type="button" className="overview-shortcut" onClick={()=>go(p)} key={p}><span className="shortcut-icon"><Icon name={icon} size={17}/></span><span><b>{label}</b><small>{note}</small></span><span className="shortcut-arrow">↗</span></button>)}
+    </div>
+   </Panel>
+  </div>
+  <div className="grid g2 overview-insights">
+   <Panel title="今日传输流量" desc="基于 Server 实际统计的上传与下载">
+     <div className="traffic-total">{fmtBytes(totalTraffic)}</div>
+     <div className="traffic-track" aria-label="上传和下载流量比例"><span style={{width:totalTraffic>0?ratio+'%':'50%'}}/><span/></div>
+     <div className="traffic-legend"><span><i className="traffic-up"/> 上行 {fmtBytes(up)}</span><span><i className="traffic-down"/> 下行 {fmtBytes(down)}</span></div>
+   </Panel>
+   <Panel title="设备与连接" desc="运行状态与待处理事项">
+     <div className="overview-health"><div><span className="health-label">在线设备占比</span><strong>{total?Math.round(online/total*100):0}%</strong><span className="health-progress"><i style={{width:(total?Math.min(100,online/total*100):0)+'%'}}/></span></div><div className="health-divider"/><div><span className="health-label">待审批申请</span><strong>{waiting}</strong><small>前往设备管理处理</small></div></div>
+   </Panel>
+  </div>
+  <Panel title="最近设备" desc="最近接入或活跃的已登记设备" actions={<Action onClick={()=>go('devices')}>查看全部 →</Action>}><Table columns={['设备','系统 / 角色','状态','最近在线']} items={data.devices.slice().sort((a,b)=>(Date.parse(b.lastSeenAt)||0)-(Date.parse(a.lastSeenAt)||0)).slice(0,6)} render={device=><><td><DeviceLabel name={device.name} id={device.id}/></td><td>{device.platform||'—'} · {device.deviceMode||'—'}</td><td><Badge tone={device.status==='online'?'ok':''}>{device.status==='online'?'在线':'离线'}</Badge></td><td>{fmtDate(device.lastSeenAt)}</td></>}/></Panel>
+ </>
+}
 function Devices({ctx}){
  const {data,run,open,close,admin}=ctx;const [q,setQ]=useState(''),[status,setStatus]=useState(''),[role,setRole]=useState('');
  const filtered=data.devices.filter(d=>[d.name,d.id,d.identityName,d.identityId].join(' ').toLowerCase().includes(q.toLowerCase())&&(!role||d.deviceMode===role)&&(!status||(status==='disabled'?d.approvalState==='revoked':d.approvalState==='approved'&&d.status===status)));

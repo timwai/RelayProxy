@@ -117,3 +117,87 @@ button:disabled{cursor:not-allowed;opacity:.5}
   #root .device-filters {grid-template-columns:minmax(0, 1fr);}
   #root .device-filters > input.input {grid-column:auto;}
 }
+
+/* Shared official RelayProxy branding with the Agent GUI stroke icon language. */
+#root .sidebar > .brand,#root .login-card .brand{justify-content:flex-start;display:flex;align-items:center;gap:12px}
+#root .brand-image{width:44px;height:44px;border-radius:14px;background:color-mix(in srgb,var(--brand) 8%,var(--surface2));box-shadow:0 6px 20px rgba(21,101,216,.15);padding:4px;overflow:hidden;flex:none;border:1px solid color-mix(in srgb,var(--brand) 14%,var(--line))}
+#root .brand-image img{display:block;width:100%;height:100%;object-fit:contain;border-radius:10px}
+#root .brand-wordmark{display:flex;flex-direction:column;gap:2px;min-width:0}
+#root .brand-wordmark strong{font-size:18px;letter-spacing:-.55px;font-weight:820;line-height:1.25;color:var(--text)}
+#root .brand-wordmark small{font-size:9px;letter-spacing:.12em;font-weight:700;color:var(--muted)}
+#root .sidebar .nav-icon{display:grid;place-items:center;flex:none;width:29px;height:29px;border-radius:9px;color:var(--muted);background:color-mix(in srgb,var(--text) 5%,transparent)}
+#root .sidebar .nav-icon svg{display:block}
+#root .sidebar .nav-item.active .nav-icon{color:var(--brand);background:color-mix(in srgb,var(--brand) 13%,var(--surface3))}
+#root .sidebar .nav-item:hover .nav-icon{color:var(--brand)}
+#root .login-card .brand{padding:0 0 22px}
+#root .login-card .brand-image{width:58px;height:58px;border-radius:17px;padding:5px}
+#root .login-card .brand-wordmark strong{font-size:23px}
+#root .login-card .brand-wordmark small{font-size:10px}
+/* Overview composition: separate outer rows from same-row card alignment. */
+#root .overview-hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(340px,1fr);align-items:center;gap:20px;min-height:250px;padding:26px 30px;margin-bottom:18px;border-radius:22px;overflow:hidden;position:relative;background:linear-gradient(120deg,#133b86 0%,#2858ba 47%,#5842ac 100%);box-shadow:0 15px 40px rgba(37,81,170,.16);color:white}
+#root .overview-hero:before{content:'';position:absolute;width:320px;height:320px;left:-95px;bottom:-235px;border-radius:50%;background:rgba(255,255,255,.10)}
+#root .overview-hero-copy{position:relative;z-index:1}
+#root .overview-hero-kicker{font-size:10px;letter-spacing:.15em;font-weight:750;display:flex;align-items:center;gap:8px;color:#dceeff}
+#root .overview-online-dot{height:8px;width:8px;background:#63e6be;border-radius:50%;box-shadow:0 0 0 4px rgba(99,230,190,.15)}
+#root .overview-hero-copy h2{font-size:clamp(21px,2.2vw,30px);line-height:1.28;margin:17px 0 12px;font-weight:800;letter-spacing:-.6px}
+#root .overview-hero-copy h2 span{display:block;color:#c1d9ff}
+#root .overview-hero-copy p{max-width:490px;line-height:1.8;color:#e2eaff;font-size:12px;margin:0}
+#root .overview-hero-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+#root .overview-hero-meta span{display:inline-flex;align-items:center;gap:7px;padding:7px 11px;border:1px solid rgba(255,255,255,.18);border-radius:9px;background:rgba(255,255,255,.1);font-size:10px;color:white}
+#root .network-visual{position:relative;min-width:0;align-self:center}
+#root .network-visual svg{width:100%;height:auto;display:block;max-height:250px}
+#root .network-caption{font-size:9px;text-align:center;color:#d6e6ff;margin-top:-9px}
+#root .overview-metrics{margin-bottom:0}
+#root .grid.g4>.overview-metric{display:flex;align-items:center;gap:14px;min-height:125px;text-align:left;padding:19px;position:relative;border-radius:17px;transition:transform .15s,box-shadow .15s}
+#root .grid.g4>.overview-metric:hover{transform:translateY(-2px);box-shadow:0 12px 30px rgba(31,72,145,.12)}
+#root .overview-metric .metric-icon{height:46px;width:46px;border-radius:14px;flex:none;display:grid;place-items:center}
+#root .overview-metric .overview-metric-copy{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0}
+#root .overview-metric .metric-label{font-size:11px;color:var(--muted)}
+#root .overview-metric .metric-value{font-size:29px;font-weight:800;color:var(--text);line-height:1.18}
+#root .overview-metric .metric-hint{font-size:10px;color:var(--muted)}
+#root .overview-metric .metric-arrow{position:absolute;right:16px;top:12px;color:var(--subtle)}
+#root .metric-blue .metric-icon{background:#e3efff;color:#1677ff}
+#root .metric-teal .metric-icon{background:#dff9ef;color:#0eaa7c}
+#root .metric-violet .metric-icon{background:#eee8ff;color:#8056d9}
+#root .metric-amber .metric-icon{background:#fff2df;color:#c88318}
+html[data-theme="dark"] #root .metric-blue .metric-icon{background:#163b64;color:#91c3ff}
+html[data-theme="dark"] #root .metric-teal .metric-icon{background:#184a3c;color:#6ee7b7}
+html[data-theme="dark"] #root .metric-violet .metric-icon{background:#38285e;color:#c6b4ff}
+html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;color:#ffd18a}
+#root .main-inner > .overview-metrics + .grid.two-one{margin-top:18px}
+#root .overview-status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#root .overview-status-grid>div{padding:13px 14px;min-width:0;border-radius:12px;background:var(--surface3);display:flex;flex-direction:column;gap:6px}
+#root .overview-status-grid>div span{font-size:10px;color:var(--muted)}
+#root .overview-status-grid>div strong{font-size:13px;color:var(--text);overflow-wrap:anywhere}
+#root .overview-shortcuts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+#root .overview-shortcut{min-width:0;display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);border-radius:11px;padding:11px;background:var(--surface3);color:var(--text)}
+#root .overview-shortcut:hover{border-color:var(--brand);background:color-mix(in srgb,var(--brand) 5%,var(--surface3))}
+#root .shortcut-icon{display:grid;place-items:center;width:34px;height:34px;flex:none;border-radius:10px;background:color-mix(in srgb,var(--brand) 10%,var(--surface2));color:var(--brand)}
+#root .overview-shortcut>span:nth-child(2){min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+#root .overview-shortcut b{font-size:11px}
+#root .overview-shortcut small{font-size:9px;color:var(--muted);line-height:1.4}
+#root .shortcut-arrow{color:var(--subtle)}
+#root .overview-insights{margin:16px 0}
+#root .overview-insights>.page-section{height:100%}
+#root .traffic-total{font-size:30px;font-weight:800;margin:16px 0}
+#root .traffic-track{height:14px;border-radius:999px;background:var(--surface3);overflow:hidden;display:flex}
+#root .traffic-track span:first-child{height:100%;background:linear-gradient(90deg,#1598e8,#4c81e9)}
+#root .traffic-track span:last-child{flex:1;background:linear-gradient(90deg,#8f69ed,#c6b3fc)}
+#root .traffic-legend{display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:14px 0 2px;font-size:11px;color:var(--muted)}
+#root .traffic-legend span{display:inline-flex;align-items:center;gap:7px}
+#root .traffic-legend i{display:inline-block;height:8px;width:8px;border-radius:3px}
+#root .traffic-up{background:#339de9}
+#root .traffic-down{background:#a17bea}
+#root .overview-health{display:grid;grid-template-columns:1fr 1px 1fr;gap:20px;align-items:center;padding-top:10px}
+#root .overview-health>div:not(.health-divider){display:grid;gap:8px}
+#root .health-divider{height:95px;background:var(--line)}
+#root .health-label{font-size:11px;color:var(--muted)}
+#root .overview-health strong{font-size:27px}
+#root .overview-health small{font-size:10px;color:var(--muted)}
+#root .health-progress{height:7px;width:100%;border-radius:9px;background:var(--surface3);overflow:hidden}
+#root .health-progress i{display:block;height:100%;background:linear-gradient(90deg,#15b9a3,#55aaf3);border-radius:9px}
+@media(max-width:1200px){#root .overview-hero{grid-template-columns:minmax(0,1fr) minmax(280px,.8fr)}#root .overview-shortcuts{grid-template-columns:1fr}}
+@media(max-width:830px){#root .overview-hero{grid-template-columns:1fr;padding:24px}#root .network-visual{max-width:480px;margin:auto;width:100%}#root .overview-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){#root .overview-hero{padding:20px}#root .overview-hero-copy h2{font-size:22px}#root .overview-status-grid,#root .overview-shortcuts{grid-template-columns:1fr}#root .overview-health{gap:11px}#root .grid.g4>.overview-metric{min-height:110px}#root .brand-image{width:38px;height:38px}#root .brand-wordmark strong{font-size:15px}}
+@media(max-width:1000px){#root .sidebar .brand-wordmark{display:none}#root .sidebar > .brand{justify-content:center}#root .sidebar .nav-icon{margin:0 auto}#root .sidebar .nav-item{justify-content:center}}
+@media(prefers-reduced-motion:reduce){#root .overview-metric{transition:none!important}}

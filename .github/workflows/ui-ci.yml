@@ -35,6 +35,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
+      - name: Test and build Server React frontend
+        working-directory: server/web/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
       - name: Test and build Wails React frontend
         working-directory: agent/gui/frontend
         run: |
@@ -54,10 +60,9 @@ jobs:
         run: bash -n scripts/build.sh
       - name: Vet
         run: go vet ./...
-      - name: Check frontend JavaScript
+      - name: Check remaining desktop JavaScript
         shell: bash
         run: |
-          node --check server/web/js/app.js
           node --check agent/gui/assets/routing.js
           node --check agent/gui/assets/connections.js
           node --test agent/gui/assets/_config.test.cjs

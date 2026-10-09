@@ -107,6 +107,26 @@ build_one() {
   echo "  OK  $(awk -v s="$size" 'BEGIN{printf "%.2f MB", s/1024/1024}')"
 }
 
+build_server_react_frontend() {
+  local frontend="$ROOT/server/web/frontend"
+  local dist="$ROOT/server/web/react_dist"
+  command -v npm >/dev/null 2>&1 || { echo "ERROR: Node.js/npm required for Server React WebUI build" >&2; return 1; }
+  echo ""
+  echo "[BUILD] Server React WebUI"
+  (
+    cd "$frontend"
+    npm install --no-audit --no-fund
+    npm test
+    npm run build
+  )
+  [[ -f "$dist/index.html" ]] || { echo "ERROR: Missing Server React entrypoint" >&2; return 1; }
+  find "$dist/assets" -name '*.js' -print -quit | grep -q . || { echo "ERROR: Missing Server React JS bundle" >&2; return 1; }
+  find "$dist/assets" -name '*.css' -print -quit | grep -q . || { echo "ERROR: Missing Server React CSS bundle" >&2; return 1; }
+}
+
+# Build both Go-embedded UIs before compiling the Server/Agent binaries.
+build_server_react_frontend
+
 # Bundle React before compiling any Agent. The same embedded frontend is used
 # by Windows Wails, macOS WKWebView and the browser-accessible Agent WebUI.
 build_react_frontend

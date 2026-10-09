@@ -227,6 +227,31 @@ try {
         $plist | Set-Content -Path (Join-Path $contents "Info.plist") -Encoding utf8
     }
 
+    # --- Server Web React frontend (embedded in all Server builds) ---
+    $serverFrontend = Join-Path $Root "server\\web\\frontend"
+    $serverReactDist = Join-Path $Root "server\\web\\react_dist"
+    Write-Host "[BUILD] Server React WebUI" -ForegroundColor Cyan
+    Push-Location $serverFrontend
+    try {
+        & npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw "Server React npm install failed" }
+        & npm test
+        if ($LASTEXITCODE -ne 0) { throw "Server React frontend tests failed" }
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw "Server React frontend build failed" }
+    } finally {
+        Pop-Location
+    }
+    if (-not (Test-Path (Join-Path $serverReactDist "index.html"))) {
+        throw "Missing Server React entrypoint"
+    }
+    if (-not (Get-ChildItem (Join-Path $serverReactDist "assets") -Filter *.js -ErrorAction SilentlyContinue)) {
+        throw "Missing Server React JS bundle"
+    }
+    if (-not (Get-ChildItem (Join-Path $serverReactDist "assets") -Filter *.css -ErrorAction SilentlyContinue)) {
+        throw "Missing Server React CSS bundle"
+    }
+
     # --- Linux server/agent and macOS agent ---
     if (-not $WindowsOnly) {
         Hide-Syso

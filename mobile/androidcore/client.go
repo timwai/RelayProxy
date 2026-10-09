@@ -1095,7 +1095,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		}
 		c.mu.Unlock()
 		selected := strings.TrimSpace(c.proxyDialer.GetDefaultExitID())
-		if clientRuntimeApproved && selected != "" && selected != protocol.ServerExitDeviceID {
+		if clientRuntimeApproved && selected != "" && selected != protocol.ServerExitDeviceID && !routing.IsCustomExitID(selected) {
 			c.ensureProxyDirectPath(selected)
 		}
 		defer func() {

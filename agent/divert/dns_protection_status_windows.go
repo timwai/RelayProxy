@@ -100,7 +100,7 @@ func interpretWindowsDNSGuardEvidence(raw []byte) (string, string) {
 			}
 		}
 		if !found {
-			return "incomplete", "Missing RelayProxy persistent Windows Firewall rule for "+protocol
+			return "incomplete", "Missing RelayProxy persistent Windows Firewall rule for " + protocol
 		}
 	}
 	if !evidence.ProfilesEnabled {

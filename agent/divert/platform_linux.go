@@ -526,6 +526,33 @@ func (i *packetInterceptor) SyncPlatformDNSCapture(enabled bool) error {
 	return device.firewall.setDNSGuardMode(enabled)
 }
 
+// dnsCaptureMode reports what the kernel rule update driver last confirmed.
+// Partial transitions remain visibly degraded instead of being misreported as
+// a completed fail-closed setup.
+func (i *packetInterceptor) dnsCaptureMode() string {
+	device, ok := i.device.(*linuxPacketDevice)
+	if !ok || device.firewall == nil {
+		return "unavailable"
+	}
+	f := device.firewall
+	f.dnsMu.Lock()
+	defer f.dnsMu.Unlock()
+	if f.dnsClosed {
+		return "unavailable"
+	}
+	if len(f.dnsRuleStates) != 0 {
+		for _, protected := range f.dnsRuleStates {
+			if protected != f.dnsGuard {
+				return "partial-update"
+			}
+		}
+	}
+	if f.dnsGuard {
+		return "nfqueue-no-bypass"
+	}
+	return "nfqueue-bypass"
+}
+
 // The routing policy is hot-reloadable. Keep NFQUEUE's kernel fail-closed
 // behavior in sync without restarting the Agent or recycling user TCP flows.
 func (i *packetInterceptor) watchLinuxDNSGuard(f *linuxFirewall) {

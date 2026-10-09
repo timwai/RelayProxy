@@ -135,6 +135,8 @@ type AgentConfig struct {
 	HTTPEnabled           *bool
 	HTTPListen            string // "127.0.0.1:8080"
 	DefaultExitID         string
+	CustomExits           []routing.CustomExit
+	ExitUpstreamID        string
 	ExitEnabled           *bool
 	ExitUpstream          exit.UpstreamConfig
 	RDPEnabled            *bool
@@ -403,6 +405,12 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
+	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil { return nil, err }
+	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules); err != nil { return nil, err }
+	if cfg.ExitUpstreamID != "" {
+		item, _ := routing.FindCustomExit(cfg.CustomExits, cfg.ExitUpstreamID)
+		cfg.ExitUpstream = exit.UpstreamConfig{Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password}
+	}
 	cfg.ExitUpstream = exit.NormalizeUpstreamConfig(cfg.ExitUpstream)
 	if err := exit.ValidateUpstreamConfig(cfg.ExitUpstream); err != nil {
 		return nil, fmt.Errorf("invalid exit upstream: %w", err)
@@ -450,6 +458,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.rawDialer.ConfigureStreamResume(resumeClient, 512<<10)
 	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
+	a.dialer.SetCustomExits(cfg.CustomExits)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
@@ -1966,6 +1975,18 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 	return nil
 }
 
+// ApplyCustomExits replaces local proxy configurations for new connections.
+// A shared exit handler retains its startup snapshot until the Agent restarts.
+func (a *Agent) ApplyCustomExits(items []routing.CustomExit) error {
+	if err := routing.ValidateCustomExits(items); err != nil { return err }
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed.Load() { return errors.New("agent closed") }
+	a.dialer.SetCustomExits(items)
+	a.cfg.CustomExits = routing.CloneCustomExits(items)
+	return nil
+}
+
 func (a *Agent) ReloadRouting(cfg routing.Config) error {
 	return a.ApplyPolicies(cfg, a.Config().DivertConfig)
 }
@@ -1986,6 +2007,7 @@ func cloneAgentConfig(cfg AgentConfig) AgentConfig {
 	cfg.P2PEnabled, cfg.P2PFallback = cloneBool(cfg.P2PEnabled), cloneBool(cfg.P2PFallback)
 	cfg.AccessDomains, cfg.AccessCIDRs = slices.Clone(cfg.AccessDomains), slices.Clone(cfg.AccessCIDRs)
 	cfg.Routing = routing.CloneConfig(cfg.Routing)
+	cfg.CustomExits = routing.CloneCustomExits(cfg.CustomExits)
 	cfg.DivertConfig.ExcludeProcesses = slices.Clone(cfg.DivertConfig.ExcludeProcesses)
 	cfg.DivertConfig.Rules = slices.Clone(cfg.DivertConfig.Rules)
 	for i := range cfg.DivertConfig.Rules {

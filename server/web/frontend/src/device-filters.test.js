@@ -1,21 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-
-const app = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-const css = readFileSync(new URL('./react.css', import.meta.url), 'utf8');
-
-test('registered-device filters have a dedicated horizontal layout', () => {
-  assert.match(app, /title="已登记设备"[\s\S]*?className="device-filters"/);
-  assert.match(app, /className="device-filters"><input[^>]*placeholder="设备名称 \/ ID \/ 身份"/);
-  assert.match(css, /#root \.device-filters\s*\{[^}]*display:grid;/);
-  assert.match(css, /grid-template-columns:minmax\(220px, 1fr\) repeat\(2, minmax\(140px, 185px\)\)/);
-  assert.match(css, /#root \.device-filters > \.input\s*\{[^}]*width:100%;[^}]*min-width:0;/);
+const app=readFileSync(new URL('./App.jsx',import.meta.url),'utf8');
+const css=readFileSync(new URL('./react.css',import.meta.url),'utf8');
+test('devices, messages and RDP audit use one responsive filter system',()=>{
+ for(const name of ['filter-three device-filters','filter-four','filter-audit'])assert.ok(app.includes(name),name);
+ assert.ok(app.includes('role="search" aria-label="已登记设备筛选"'));
+ assert.ok(app.includes('role="search" aria-label="消息历史筛选"'));
+ assert.ok(app.includes('role="search" aria-label="RDP 审计筛选"'));
+ for(const selector of ['#root .filter-bar{','#root .filter-bar.filter-three{','#root .filter-bar.filter-four{','#root .filter-bar.filter-audit{'])assert.ok(css.includes(selector),selector);
 });
-
-test('registered-device filters remain responsive on narrow screens', () => {
-  assert.match(css, /@media \(max-width: 860px\)\s*\{[\s\S]*?#root \.device-filters > input\.input\s*\{grid-column:1 \/ -1;\}/);
-  assert.match(css, /@media \(max-width: 520px\)\s*\{[\s\S]*?#root \.device-filters\s*\{grid-template-columns:minmax\(0, 1fr\);\}/);
-  assert.match(app, /aria-label="按设备状态筛选"/);
-  assert.match(app, /aria-label="按设备角色筛选"/);
+test('filter controls do not claim whole rows on desktop and stack on phones',()=>{
+ assert.match(css,/#root \.filter-bar>\.input\{[^}]*width:100%/);
+ assert.match(css,/@media\(max-width:760px\)/);
+ assert.match(css,/@media\(max-width:520px\)/);
+ assert.match(css,/#root \.filter-bar\{grid-template-columns:minmax\(0,1fr\)/);
 });

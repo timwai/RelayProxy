@@ -320,3 +320,160 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
   #root .settings-save .actions{width:100%}
   #root .settings-save .actions>.btn{flex:1 1 0}
 }
+
+/* Unified type scale and semantic surfaces across all console pages. */
+#root{--ink-size:14px;--ink-caption:12px;--accent-teal:#10a997;--accent-purple:#8056d9;--accent-amber:#e6a145;--accent-rose:#dc5983}
+#root,#root input,#root select,#root textarea,#root button{font-size:var(--ink-size)}
+#root .workspace,#root .main-scroll{font-size:var(--ink-size);line-height:1.55}
+#root .page-head h1,#root .rt-heading h1{font-size:27px}
+#root .page-head p,#root .rt-heading p{font-size:13px;line-height:1.6}
+#root .card-title-area h2,#root .section-title h2{font-size:16px}
+#root .card-title-area p,#root .section-description,#root .dialog-note{font-size:12px;line-height:1.65}
+#root .table-wrap table{font-size:13px}
+#root .table-wrap th{font-size:12px;font-weight:750;padding:13px 14px;background:color-mix(in srgb,var(--brand) 5%,var(--surface3))}
+#root .table-wrap td{font-size:13px;padding:13px 14px;line-height:1.5}
+#root .table-wrap td>small,#root .table-wrap td small{font-size:11.5px;line-height:1.6}
+#root .device-label__name{font-size:13px}
+#root .device-label__id{font-size:11.5px}
+#root .card-title-area .device-label__name{font-size:15px}
+#root .nav-group .nav-item{font-size:13px}
+#root .nav-group .group-name{font-size:11px;letter-spacing:.07em}
+#root .field>span,#root .config-card-content .field>span{font-size:13px}
+#root .field small,#root .config-card-content .field small{font-size:11.5px}
+#root .field input:not([type=checkbox]),#root .field select,#root .field textarea,#root .input,#root select{font-size:13px;min-height:42px}
+#root .btn:not(.xs):not(.sm){font-size:12.5px;min-height:38px}
+#root .table-action .btn{font-size:11.5px;min-height:34px;height:34px}
+#root .badge{font-size:11.5px;padding:5px 9px}
+#root .settings-nav-item b,#root .settings-sidebar button{font-size:13px}
+#root .settings-nav-item small{font-size:11px}
+#root .config-card-heading h3{font-size:15px}
+#root .config-card-heading p{font-size:12px}
+#root .main-inner{background:radial-gradient(ellipse 80% 48% at 14% -13%,color-mix(in srgb,var(--brand) 4%,transparent),transparent 77%)}
+#root .card{border-color:color-mix(in srgb,var(--brand) 8%,var(--line));box-shadow:0 8px 24px rgba(24,49,95,.045)}
+#root .page-section>.card-title-area::before{content:'';width:4px;height:21px;border-radius:8px;flex:none;background:linear-gradient(180deg,var(--brand),var(--accent-purple))}
+#root .grid>.page-section:nth-child(2)>.card-title-area::before{background:linear-gradient(180deg,var(--accent-teal),#72d5bf)}
+#root .grid>.page-section:nth-child(3)>.card-title-area::before{background:linear-gradient(180deg,var(--accent-amber),#ffcc70)}
+#root .channel-card{border-top:3px solid color-mix(in srgb,var(--accent-purple) 55%,var(--line))}
+#root .channel-card:nth-child(even){border-top-color:color-mix(in srgb,var(--accent-teal) 65%,var(--line))}
+#root .exit-card{border-top:3px solid color-mix(in srgb,var(--accent-teal) 55%,var(--line));box-shadow:0 9px 22px rgba(23,99,92,.055)}
+#root .rule-card{border-left:3px solid color-mix(in srgb,var(--accent-purple) 48%,var(--line))}
+#root .badge.ok{background:color-mix(in srgb,var(--accent-teal) 13%,var(--surface2));color:var(--accent-teal)}
+#root .badge.danger{background:color-mix(in srgb,var(--danger) 12%,var(--surface2));color:var(--danger)}
+#root .nav-group .nav-item.active{background:linear-gradient(90deg,color-mix(in srgb,var(--brand) 12%,var(--surface3)),color-mix(in srgb,var(--accent-purple) 6%,var(--surface2)));border-inline-start:3px solid var(--brand)}
+#root .btn.primary{background:linear-gradient(115deg,var(--brand),color-mix(in srgb,var(--brand) 72%,var(--accent-purple)));color:#fff;border-color:transparent;box-shadow:0 4px 12px color-mix(in srgb,var(--brand) 15%,transparent)}
+#root .config-card-head{background:linear-gradient(100deg,color-mix(in srgb,var(--brand) 5%,var(--surface2)),var(--surface2))}
+#root .rt-kicker{font-size:11px}
+#root .rt-metrics .metric-label,#root .rt-summary-stat>span{font-size:12px}
+#root .rt-panel-header h2,#root .rt-chart-topline h2{font-size:16px}
+#root .rt-panel-header p,#root .rt-source-note,#root .rt-muted,#root .rt-refresh>small{font-size:12px}
+#root .rt-axis{font-size:12px}
+#root .rt-device-name>strong{font-size:13px}
+#root .rt-device-name>small,#root .rt-device-last,#root .rt-device-platform{font-size:11.5px}
+
+/* Filter layout: search grows, selects stay equal; all pages share breakpoints. */
+#root .filter-bar{display:grid;gap:12px;align-items:center;min-width:0;margin-bottom:18px}
+#root .filter-bar.filter-three{grid-template-columns:minmax(240px,1fr) minmax(155px,185px) minmax(155px,185px)}
+#root .filter-bar.filter-four{grid-template-columns:minmax(250px,1.6fr) repeat(3,minmax(135px,1fr))}
+#root .filter-bar.filter-audit{grid-template-columns:minmax(250px,1fr) minmax(120px,165px) auto}
+#root .filter-bar>.input{width:100%;min-width:0;max-width:none;min-height:42px;box-sizing:border-box;flex:none}
+#root .filter-bar>.filter-search{min-width:0}
+#root .filter-bar>.filter-summary{white-space:nowrap;justify-self:end;font-size:12px;color:var(--muted)}
+#root .filter-bar:focus-within{background:color-mix(in srgb,var(--brand) 2%,transparent)}
+#root .filter-bar+.table-wrap{margin-top:2px}
+
+/* Desktop split login: marketing copy left, credential form right. */
+#root .login-screen{overflow-y:auto;overflow-x:hidden;padding:22px;box-sizing:border-box;min-height:100dvh}
+#root .login-shell{display:grid;grid-template-columns:minmax(0,1.08fr) minmax(400px,.92fr);width:min(1140px,100%);min-height:min(660px,calc(100dvh - 44px));border-radius:28px;overflow:hidden;background:var(--surface2);border:1px solid var(--line);box-shadow:0 30px 90px rgba(23,47,92,.14)}
+#root .login-promo{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;background:linear-gradient(145deg,#123c86 0%,#265dc7 50%,#593ab1 100%);color:#fff;padding:42px 44px}
+#root .login-promo::before{content:'';pointer-events:none;position:absolute;right:-155px;bottom:5%;height:460px;width:460px;border-radius:50%;border:70px solid rgba(255,255,255,.045);box-shadow:0 0 0 45px rgba(255,255,255,.04)}
+#root .login-promo::after{content:'';position:absolute;right:-100px;top:-150px;width:360px;height:360px;border-radius:50%;background:radial-gradient(circle,rgba(123,241,220,.2),transparent 70%);pointer-events:none}
+#root .login-promo-top,#root .login-promo-body,#root .login-promo-footer{position:relative;z-index:1}
+#root .login-promo .brand-wordmark strong,#root .login-promo .brand-wordmark small{color:white}
+#root .login-promo .brand-image{background:rgba(255,255,255,.95);border-color:rgba(255,255,255,.24)}
+#root .promo-edition{display:inline-block;margin:18px 0 0;font-size:10px;font-weight:750;letter-spacing:.19em;color:#c6ddff}
+#root .login-promo-body{max-width:490px}
+#root .promo-kicker{display:inline-flex;gap:9px;align-items:center;letter-spacing:.15em;font-size:11px;font-weight:750;color:#ccf3ff}
+#root .promo-kicker i{height:9px;width:9px;background:#70ebc5;border-radius:50%;box-shadow:0 0 0 4px rgba(112,235,197,.15)}
+#root .login-promo h2{font-size:clamp(30px,3.3vw,46px);letter-spacing:-1.2px;line-height:1.27;margin:18px 0}
+#root .login-promo h2 span{color:#b9ffed;display:block}
+#root .login-promo-body>p{color:#e3edff;line-height:1.8;font-size:15px;margin:0 0 27px}
+#root .promo-feature-list{display:grid;gap:14px}
+#root .promo-feature{display:flex;gap:14px;align-items:center;padding:12px 15px;border-radius:13px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.07)}
+#root .promo-feature-icon{display:grid;place-items:center;flex:none;width:39px;height:39px;border-radius:12px}
+#root .promo-feature-icon.blue{background:rgba(137,206,255,.19);color:#a8e3ff}
+#root .promo-feature-icon.teal{background:rgba(115,238,190,.18);color:#8dfbd2}
+#root .promo-feature-icon.violet{background:rgba(207,183,255,.2);color:#e0ccff}
+#root .promo-feature>span:last-child{display:grid;gap:3px}
+#root .promo-feature strong{font-size:14px}
+#root .promo-feature small{color:#d5e6ff;font-size:12px}
+#root .login-promo-footer{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;color:#c5d9ff;font-size:10px;letter-spacing:.07em;margin-top:30px}
+#root .login-card{width:auto;min-width:0;max-width:none;box-shadow:none;border:0;border-radius:0;display:flex;flex-direction:column;justify-content:center;padding:60px 54px;background:var(--surface2)}
+#root .login-form-header{margin-bottom:22px}
+#root .login-lock-icon{width:54px;height:54px;border-radius:16px;display:grid;place-items:center;color:var(--brand);background:color-mix(in srgb,var(--brand) 10%,var(--surface2));margin-bottom:18px}
+#root .login-eyebrow{font-size:11px;letter-spacing:.15em;color:var(--brand);font-weight:790}
+#root .login-card h1{font-size:29px;letter-spacing:-.7px;margin:10px 0 8px}
+#root .login-form-header>p{font-size:13px;color:var(--muted);margin:0;line-height:1.6}
+#root .login-card form{gap:20px;margin-top:0;min-width:0}
+#root .login-card .field>span{font-size:13px}
+#root .login-card .field input{min-height:48px;font-size:14px}
+#root .login-card .btn{width:100%;min-height:48px;height:48px;font-size:14px;margin-top:5px}
+#root .login-footnote{display:flex;align-items:center;justify-content:center;gap:7px;color:var(--muted);font-size:11px;margin-top:24px}
+#root .mobile-menu-toggle,#root .mobile-nav-overlay{display:none}
+@media(max-width:1080px){
+ #root .filter-bar.filter-four{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #root .filter-bar.filter-four>.filter-search{grid-column:1/-1}
+ #root .login-shell{grid-template-columns:minmax(0,1fr) minmax(390px,1fr)}
+ #root .login-promo{padding:32px}
+ #root .login-card{padding:38px}
+}
+@media(max-width:760px){
+ #root #app{display:grid;grid-template-columns:minmax(0,1fr);width:100%;height:100dvh}
+ #root #app .workspace{grid-column:1;min-width:0;width:100%}
+ #root #app .sidebar{position:fixed;top:0;bottom:0;left:0;z-index:101;width:min(295px,86vw);height:100dvh;transform:translateX(-105%);transition:transform .2s ease;background:var(--surface2);padding:18px 13px;box-sizing:border-box;box-shadow:20px 0 50px rgba(7,24,56,.1)}
+ #root #app.mobile-nav-open .sidebar{transform:translateX(0)}
+ #root #app .mobile-nav-overlay{display:block;position:fixed;inset:0;border:0;background:rgba(5,17,39,.52);opacity:0;visibility:hidden;pointer-events:none;z-index:100;transition:opacity .2s ease}
+ #root #app.mobile-nav-open .mobile-nav-overlay{opacity:1;visibility:visible;pointer-events:auto}
+ #root #app .sidebar .brand-wordmark{display:flex}
+ #root #app .sidebar .group-name{display:block;font-size:11px}
+ #root #app .sidebar .nav-item{justify-content:flex-start;padding:10px 11px}
+ #root #app .sidebar .nav-item>span:nth-child(2){display:inline}
+ #root #app .sidebar .nav-icon{margin:0}
+ #root #app .sidebar>.brand{justify-content:flex-start}
+ #root #app .sidebar .sidebar-footer .side-status{display:flex}
+ #root .mobile-menu-toggle{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;flex:none;border:1px solid var(--line);border-radius:10px;background:var(--surface3);width:42px;height:42px;padding:0}
+ #root .mobile-menu-toggle span{display:block;width:19px;height:2px;border-radius:2px;background:var(--text)}
+ #root .topbar{padding:0 14px;gap:10px}
+ #root .topbar .crumb{font-size:12px;overflow:hidden;text-overflow:ellipsis}
+ #root .topbar-right{gap:6px}
+ #root .main-inner{padding:18px 14px 70px;width:100%;box-sizing:border-box}
+ #root .grid.g2,#root .grid.g3,#root .grid.g4,#root .exit-grid{grid-template-columns:minmax(0,1fr)}
+ #root .card{padding:17px}
+ #root .page-head h1{font-size:23px}
+ #root .filter-bar.filter-three,#root .filter-bar.filter-four,#root .filter-bar.filter-audit{grid-template-columns:repeat(2,minmax(0,1fr))}
+ #root .filter-bar>.filter-search{grid-column:1/-1}
+ #root .filter-bar>.filter-summary{justify-self:start}
+ #root .login-screen{padding:0;align-items:stretch}
+ #root .login-shell{width:100%;min-height:100dvh;border:0;border-radius:0;grid-template-columns:1fr;overflow:visible}
+ #root .login-promo{padding:22px 25px;gap:6px}
+ #root .login-promo-body{margin:12px 0}
+ #root .login-promo h2{font-size:24px;margin:6px 0}
+ #root .login-promo h2 span{display:inline}
+ #root .login-promo-body>p{font-size:12px;margin:0}
+ #root .promo-feature-list,#root .login-promo-footer,#root .promo-edition,#root .promo-kicker{display:none}
+ #root .login-card{padding:30px 26px 48px;min-height:490px}
+ #root .login-card h1{font-size:25px}
+}
+@media(max-width:520px){
+ #root .filter-bar.filter-three,#root .filter-bar.filter-four,#root .filter-bar.filter-audit,#root .filter-bar{grid-template-columns:minmax(0,1fr)}
+ #root .filter-bar>.filter-search{grid-column:auto}
+ #root .filter-bar>.filter-summary{justify-self:start}
+ #root .dialog-window{width:100%;max-height:calc(100dvh - 20px)}
+ #root .login-promo{padding:20px}
+ #root .login-card{padding:28px 21px 42px;min-height:460px}
+ #root .main-inner{padding:14px 10px 65px}
+ #root .table-wrap{max-width:100%;overflow-x:auto}
+ #root .form-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media(prefers-reduced-motion:reduce){
+ #root #app .sidebar,#root #app .mobile-nav-overlay{transition:none}
+}

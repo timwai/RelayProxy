@@ -63,6 +63,10 @@ type appWindow struct {
 	monitor   *application.WebviewWindow
 
 	verification *application.WebviewWindow
+
+	verificationMu    sync.Mutex
+	verificationSeen  map[string]struct{}
+	verificationOrder []string
 }
 
 func disableVerificationNativeFrame() {
@@ -531,6 +535,35 @@ func (a *appWindow) pushLog(line string) {
 	a.eval("window.onGoLog && window.onGoLog(" + jsonString(line) + ")")
 }
 
+const maxVerificationPopupIDs = 1024
+
+func (a *appWindow) claimVerificationPopup(messageID string) bool {
+	if a == nil {
+		return false
+	}
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return true
+	}
+
+	a.verificationMu.Lock()
+	defer a.verificationMu.Unlock()
+	if a.verificationSeen == nil {
+		a.verificationSeen = make(map[string]struct{})
+	}
+	if _, exists := a.verificationSeen[messageID]; exists {
+		return false
+	}
+	a.verificationSeen[messageID] = struct{}{}
+	a.verificationOrder = append(a.verificationOrder, messageID)
+	if len(a.verificationOrder) > maxVerificationPopupIDs {
+		oldest := a.verificationOrder[0]
+		a.verificationOrder = a.verificationOrder[1:]
+		delete(a.verificationSeen, oldest)
+	}
+	return true
+}
+
 func (a *appWindow) pushMessage(message agentapp.Message) {
 	data, err := json.Marshal(message)
 	if err != nil {
@@ -539,6 +572,10 @@ func (a *appWindow) pushMessage(message agentapp.Message) {
 	payload := string(data)
 	a.eval("window.onRelayMessage && window.onRelayMessage(" + payload + ")")
 	if a.verification == nil || !shouldPopupMessage(message) {
+		return
+	}
+	if !a.claimVerificationPopup(message.ID) {
+		log.Printf("[GUI] duplicate message popup ignored id=%s", message.ID)
 		return
 	}
 

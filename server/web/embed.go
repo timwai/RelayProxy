@@ -7,23 +7,32 @@ import (
 	"strings"
 )
 
-// EmbeddedFiles includes both the classic console and the optional React bundle.
-// An unbuilt checkout continues to serve the classic interface at /.
+// EmbeddedFiles includes the classic administration page and the optional
+// React production assets. Unbuilt checkouts still serve the classic page.
 //
 //go:embed index.html js css img favicon.ico apple-touch-icon.png react_dist
 var EmbeddedFiles embed.FS
 
-// Handler serves React at / after npm run build, with /classic always available.
-// The existing administrative API and classic static assets remain unchanged.
+// Handler serves the React console at / after Vite builds the bundle.
+// /classic and all classic assets remain accessible for compatibility.
 func Handler() http.Handler {
-	oldFS, err := fs.Sub(EmbeddedFiles, ".")
+	root, err := fs.Sub(EmbeddedFiles, ".")
 	if err != nil {
 		panic(err)
 	}
-	classic := http.FileServer(http.FS(oldFS))
-	reactFS, reactErr := fs.Sub(EmbeddedFiles, "react_dist")
+	react, err := fs.Sub(EmbeddedFiles, "react_dist")
+	if err != nil {
+		react = nil
+	}
+	return newHandler(root, react)
+}
+
+// newHandler is separated from the embedded file system so that the React
+// bootstrap, asset routing and fallback can be covered by deterministic tests.
+func newHandler(classicFS, reactFS fs.FS) http.Handler {
+	classic := http.FileServer(http.FS(classicFS))
 	reactReady := false
-	if reactErr == nil {
+	if reactFS != nil {
 		_, statErr := fs.Stat(reactFS, "index.html")
 		reactReady = statErr == nil
 	}
@@ -33,14 +42,7 @@ func Handler() http.Handler {
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/classic" || r.URL.Path == "/classic/" {
-			data, readErr := fs.ReadFile(oldFS, "index.html")
-			if readErr != nil {
-				http.Error(w, "classic console unavailable", http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.Header().Set("Cache-Control", "no-cache")
-			_, _ = w.Write(data)
+			writeIndex(w, r, classicFS, "index.html", "classic console unavailable")
 			return
 		}
 		if reactReady {
@@ -49,17 +51,24 @@ func Handler() http.Handler {
 				return
 			}
 			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-				data, readErr := fs.ReadFile(reactFS, "index.html")
-				if readErr != nil {
-					http.Error(w, "React console unavailable", http.StatusInternalServerError)
-					return
-				}
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				w.Header().Set("Cache-Control", "no-cache")
-				_, _ = w.Write(data)
+				writeIndex(w, r, reactFS, "index.html", "React console unavailable")
 				return
 			}
 		}
 		classic.ServeHTTP(w, r)
 	})
+}
+
+func writeIndex(w http.ResponseWriter, r *http.Request, source fs.FS, path, fallback string) {
+	data, err := fs.ReadFile(source, path)
+	if err != nil {
+		http.Error(w, fallback, http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(data)
+	}
 }

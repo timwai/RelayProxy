@@ -28,7 +28,19 @@ export const getGroup = id => groups.find(g=>g.id===id)||groups[0];
 export const normalizeForSave = (draft, original) => {
   // Do not strip unknown config fields sent by newer servers.
   const out=structuredClone(original);
-  for(const grp of groups){const key=grp.key||grp.id;out[key]={...out[key],...draft[key]};}
+  for(const grp of groups){
+    const key=grp.key||grp.id;
+    if(!draft?.[key])continue;
+    const patch={...draft[key]};
+    for(const [field,,type] of grp.fields){
+      if(type==='lines'&&typeof patch[field]==='string') {
+        patch[field]=patch[field].split('\n').map(s=>s.trim()).filter(Boolean);
+      }
+    }
+    out[key]={...out[key],...patch};
+  }
   return out;
 };
 export function configFieldCount() {return groups.reduce((n,g)=>n+g.fields.length,0);}
+
+export const configEqual = (draft, original) => JSON.stringify(normalizeForSave(draft, original)) === JSON.stringify(original);

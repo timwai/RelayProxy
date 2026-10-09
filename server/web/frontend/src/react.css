@@ -71,3 +71,7 @@ button:disabled{cursor:not-allowed;opacity:.5}
 #root .scroll-table{overflow:auto}
 @media(max-width:800px){#root .settings-layout{grid-template-columns:1fr}#root .settings-sidebar{position:static;display:flex;gap:6px;overflow:auto;white-space:nowrap}#root .settings-nav-group{display:flex;gap:6px}#root .settings-nav-label,#root .settings-nav-note{display:none}#root .settings-sidebar .settings-nav-item{width:auto;min-height:40px;padding:7px}#root .settings-sidebar .settings-nav-item small,#root .settings-nav-icon{display:none}}
 @media(max-width:560px){#root .form-grid{grid-template-columns:1fr}#root .form-grid .wide{grid-column:auto}#root .dialog-window{max-height:96vh}#root .main-inner{padding:10px}#root .settings-save{flex-direction:column;align-items:stretch}#root .settings-save .actions>*{flex:1}}
+/* Responsive tri-end diagnostics retain full API data without forcing card overflow. */
+.diagnostic-cell { min-width: 240px; max-width: 470px; overflow-wrap: anywhere; }
+.diagnostic-cell small { display: block; line-height: 1.5; margin-top: 4px; }
+.error-text { color: var(--danger,#e5484d); }

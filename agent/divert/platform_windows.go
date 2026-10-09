@@ -128,7 +128,12 @@ func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	// on userspace reinjection.
 	reflection := fmt.Sprintf("(inbound and !loopback and tcp and (tcp.DstPort == %d or tcp.DstPort == %d))", port4, port6)
 	dnsResponse := "(inbound and !loopback and udp and udp.SrcPort == 53)"
-	return outbound + " or " + reflection + " or " + dnsResponse
+	// The Relay-IP bypass protects the authenticated transport, but DNS sent
+	// directly to that address on port 53 must still enter FakeIP interception.
+	// This branch works whether or not FakeIP is currently enabled, so hot
+	// toggling the policy cannot expose a stale DNS bypass.
+	dnsQuery := "(outbound and !loopback and ((udp and udp.DstPort == 53) or (tcp and tcp.DstPort == 53)))"
+	return outbound + " or " + dnsQuery + " or " + reflection + " or " + dnsResponse
 }
 
 func windowsRelayBypassClauses(guard LoopGuard) []string {

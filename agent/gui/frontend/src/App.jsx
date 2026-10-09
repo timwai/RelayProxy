@@ -11,6 +11,17 @@ const NAV=[
  {group:'观察',items:[['messages','bell','消息'],['monitor','activity','实时监控'],['diagnostics','terminal','诊断与日志']]}
 ];
 
+// The browser's /connections bookmark and shareable ?page=... links should
+// open the same React route as the desktop shell. Never trust arbitrary page
+// names or persist unknown values into the navigation state.
+const PAGE_IDS = new Set([...NAV.flatMap(group => group.items.map(item => item[0])), 'settings']);
+function initialPage() {
+ const requested = new URLSearchParams(window.location.search).get('page');
+ if (PAGE_IDS.has(requested)) return requested;
+ const previous = sessionStorage.getItem('relayproxy-react-page');
+ return PAGE_IDS.has(previous) ? previous : 'overview';
+}
+
 const EMPTY={
  revision:'',serverAddress:'',quicPort:35820,tcpPort:35821,tlsEnabled:true,insecureTls:false,deviceName:'',identityId:'',transport:'auto',
  socks5:{enabled:true,listen:'127.0.0.1',port:1080},http:{enabled:true,listen:'127.0.0.1',port:8080},defaultExitId:'',
@@ -314,7 +325,7 @@ function BatchSpeedModal({open,exits,onClose,toast}){
 }
 
 export default function App(){
- const[page,setPage]=useState(()=>sessionStorage.getItem('relayproxy-react-page')||'overview'),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
+ const[page,setPage]=useState(initialPage),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
  const pushHistory=useCallback(patch=>setHistory(h=>{const n={...h};for(const k in patch)n[k]=[...h[k],Number(patch[k])||0].slice(-SPARK_POINTS);return n}),[]);
  const applyStatus=useCallback(x=>{setStatus(x||{});pushHistory({latency:x?.connected?x.latency:0})},[pushHistory]);
  const toastTimer=useRef(null),exitInventoryKey=useRef(''),pageRef=useRef(page),messageIDs=useRef(new Set());

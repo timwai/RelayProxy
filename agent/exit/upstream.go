@@ -372,7 +372,7 @@ func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port 
 	if err != nil {
 		return nil, err
 	}
-	remoteAddr := socks5UDPTargetAddr{host: host, port: port}
+	var remoteAddr net.Addr = socks5UDPTargetAddr{host: host, port: port}
 	control, err := dialProxyTCP(ctx, UpstreamConfig{Mode: UpstreamHTTP, Address: cfg.Address})
 	if err != nil {
 		return nil, err
@@ -422,7 +422,7 @@ func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port 
 	_ = control.SetDeadline(time.Time{})
 	ok = true
 	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
-		remoteAddr.ip = net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), port))
+		remoteAddr = net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), port))
 	}
 	return &socks5UDPConn{control: control, udp: udp, targetAddress: address, remoteAddr: remoteAddr}, nil
 }
@@ -431,14 +431,10 @@ func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port 
 type socks5UDPTargetAddr struct {
 	host string
 	port uint16
-	ip   *net.UDPAddr
 }
 
 func (a socks5UDPTargetAddr) Network() string { return "udp" }
 func (a socks5UDPTargetAddr) String() string {
-	if a.ip != nil {
-		return a.ip.String()
-	}
 	return net.JoinHostPort(a.host, strconv.Itoa(int(a.port)))
 }
 
@@ -446,7 +442,7 @@ type socks5UDPConn struct {
 	control       net.Conn
 	udp           *net.UDPConn
 	targetAddress []byte // SOCKS5 ATYP+ADDR+PORT (including domain ATYP=0x03)
-	remoteAddr    socks5UDPTargetAddr
+	remoteAddr    net.Addr
 	once          sync.Once
 }
 

@@ -27,6 +27,9 @@ func TestAndroidNativeCustomExitSelectsAndSurvivesRoutingUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer client.Stop()
+	if len(client.cfg.CustomExits) != 1 || client.cfg.CustomExits[0].Password != "secret-do-not-export" {
+		t.Fatal("private Android config lost its SOCKS5 password during JSON unmarshalling")
+	}
 	if client.proxyDialer.GetDefaultExitID() != "local:mobile" {
 		t.Fatal("default exit did not reach client tunnel selector")
 	}

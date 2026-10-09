@@ -137,6 +137,13 @@ func dialProxyTCP(ctx context.Context, cfg UpstreamConfig) (net.Conn, error) {
 }
 
 func dialHTTPConnect(ctx context.Context, cfg UpstreamConfig, target string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return nil, fmt.Errorf("invalid HTTP CONNECT target: %w", err)
+	}
+	if err := validateUpstreamTargetHost(host); err != nil {
+		return nil, err
+	}
 	conn, err := dialProxyTCP(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect exit upstream %s: %w", cfg.Address, err)
@@ -298,7 +305,33 @@ func readSOCKS5Reply(conn net.Conn) (netip.AddrPort, error) {
 	return addr, nil
 }
 
+// validateUpstreamTargetHost rejects characters that can escape an HTTP
+// CONNECT request line or be interpreted as a different target. Client-supplied
+// SOCKS5 hostnames are untrusted; validate before opening a proxy connection.
+func validateUpstreamTargetHost(host string) error {
+	if host == "" || len(host) > 255 {
+		return errors.New("invalid upstream target hostname length")
+	}
+	for i := 0; i < len(host); i++ {
+		if host[i] <= ' ' || host[i] == 0x7f {
+			return errors.New("invalid upstream target hostname contains control or whitespace")
+		}
+	}
+	if strings.ContainsAny(host, "/\\?#@") {
+		return errors.New("invalid upstream target hostname contains reserved characters")
+	}
+	if strings.Contains(host, ":") {
+		if ip, err := netip.ParseAddr(host); err != nil || !ip.Is6() || ip.Zone() != "" {
+			return errors.New("invalid upstream target IPv6 address")
+		}
+	}
+	return nil
+}
+
 func encodeSOCKS5Address(host string, port uint16) ([]byte, error) {
+	if err := validateUpstreamTargetHost(host); err != nil {
+		return nil, err
+	}
 	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
 		ip = ip.Unmap()
 		if ip.Is4() {

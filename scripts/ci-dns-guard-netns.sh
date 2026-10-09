@@ -33,25 +33,40 @@ ip netns exec "$namespace" ip addr add 10.210.71.2/30 dev "$ns_if"
 ip netns exec "$namespace" ip link set lo up
 ip netns exec "$namespace" ip link set "$ns_if" up
 
+# Exercise IPv6 as well when the CI kernel permits IPv6 on fresh veth links.
+# Do not silently claim IPv6 coverage if the runner has disabled IPv6.
+ipv6_enabled=0
+if ip -6 addr add fd77:210:71::1/64 dev "$host_if" &&
+   ip netns exec "$namespace" ip -6 addr add fd77:210:71::2/64 dev "$ns_if"; then
+    ipv6_enabled=1
+    sleep 2
+else
+    echo "::warning::Host kernel does not allow IPv6 veth addresses; IPv6 on-wire acceptance is unverified"
+fi
+
 # Reuse the exact nft rules emitted by the shipped opt-in kill-switch
 # script. Never call its enable action on the CI host.
 sed -n '/^table inet relayproxy_dns_guard {/,/^}$/p' scripts/dns-killswitch-linux.sh > "$work/guard.nft"
 grep -q 'meta l4proto' "$work/guard.nft"
 
 probe() {
-    ip netns exec "$namespace" python3 - <<'PY'
+    ip netns exec "$namespace" python3 - "$ipv6_enabled" <<'PY'
 import socket
-target = "10.210.71.1"
-for port in (53, 853, 784, 8853):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-        sock.sendto(b"relayproxy-dns-guard-probe", (target, port))
-for port in (53, 853):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(0.2)
-        try:
-            sock.connect((target, port))
-        except OSError:
-            pass
+import sys
+targets = [(socket.AF_INET, "10.210.71.1")]
+if sys.argv[1] == "1":
+    targets.append((socket.AF_INET6, "fd77:210:71::1"))
+for family, target in targets:
+    for port in (53, 853, 784, 8853):
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.sendto(b"relayproxy-dns-guard-probe", (target, port))
+    for port in (53, 853):
+        with socket.socket(family, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            try:
+                sock.connect((target, port))
+            except OSError:
+                pass
 PY
 }
 
@@ -74,6 +89,14 @@ if [[ "$baseline" -lt 4 ]]; then
     exit 1
 fi
 echo "Observed $baseline actual DNS-port packets in the unguarded isolated namespace."
+if [[ "$ipv6_enabled" -eq 1 ]]; then
+    baseline_v6="$(tcpdump -n -r "$work/baseline.pcap" 'ip6' 2>/dev/null | wc -l)"
+    if [[ "$baseline_v6" -lt 4 ]]; then
+        echo "IPv6 veth baseline could not observe probes ($baseline_v6)" >&2
+        exit 1
+    fi
+    echo "Observed $baseline_v6 real IPv6 DNS-port packets before installing the guard."
+fi
 
 ip netns exec "$namespace" nft -f "$work/guard.nft"
 ip netns exec "$namespace" nft list table inet relayproxy_dns_guard
@@ -83,3 +106,6 @@ if [[ "$blocked" -ne 0 ]]; then
     exit 1
 fi
 echo "PASS: nftables guard stopped every tested UDP 53/853/784/8853 and TCP 53/853 packet before the veth; baseline capture proved observability."
+if [[ "$ipv6_enabled" -eq 1 ]]; then
+    echo "PASS: IPv6 tested with fd77:210:71::/64 in addition to IPv4."
+fi

@@ -12,6 +12,7 @@ import (
 // CloneConfig preserves nil versus empty lists and prevents caller mutations
 // from changing an already published policy.
 func CloneConfig(cfg Config) Config {
+	cfg.DoHBlockedIPs = slices.Clone(cfg.DoHBlockedIPs)
 	cfg.Rules = slices.Clone(cfg.Rules)
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]

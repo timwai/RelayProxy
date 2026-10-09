@@ -41,6 +41,7 @@ type Options struct {
 	UDPWriteTimeout    time.Duration
 	SharedPolicy       func(Flow) Decision
 	ProxyReady         func() bool
+	LocalExitReady     func(string) bool
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
 }
@@ -256,7 +257,11 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	guarded := s.guard.MustDirectFlow(flow)
 	if !guarded {
 		decision = s.engine.MatchWith(flow, s.opts.SharedPolicy)
-		if decision.Action == ActionProxy && s.opts.ProxyReady != nil && !s.opts.ProxyReady() {
+		if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {
+			decision.ExitID = s.opts.DefaultExitID()
+		}
+		if decision.Action == ActionProxy && s.opts.ProxyReady != nil && !s.opts.ProxyReady() &&
+			(s.opts.LocalExitReady == nil || !s.opts.LocalExitReady(decision.ExitID)) {
 			// Transparent interception must never blackhole the host while the
 			// Relay session is still connecting or reconnecting. Preserve
 			// explicit REJECT decisions, but temporarily fail PROXY open to

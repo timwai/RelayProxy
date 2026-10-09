@@ -315,10 +315,12 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 			}
 		}
 		if fake && decision.Action == ActionDirect {
-			// Directing synthetic addresses onto the public wire leaks or
-			// misroutes them. A proper DIRECT DNS strategy needs its own
-			// explicit, non-FakeIP resolver path.
-			decision = Decision{Action: ActionReject, Rule: "fakeip-direct-unsupported"}
+			// Retain the DIRECT decision, but resolve the real destination
+			// over authenticated DoT *through the selected exit* before
+			// opening a local socket. The original FakeIP never leaves the
+			// host, and a failed DNS lookup cannot fail open.
+			decision.HandleDirect = true
+			decision.DatagramRequired = false
 		}
 	}
 	if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {
@@ -398,7 +400,16 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 	var upstream net.Conn
 	var err error
 	if route.decision.Action == ActionDirect {
-		upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(route.flow.IP, strconv.Itoa(int(route.flow.Port))))
+		target := route.flow.IP
+		if route.flow.DomainSource == "fakeip" && isFakeIP(route.key.Destination.Addr()) {
+			target, err = s.resolveFakeDirectIP(dialCtx, route.flow.Host, route.key.Destination.Addr().Is6())
+		}
+		if err == nil {
+			if route.traffic != nil {
+				route.traffic.SetIP(target)
+			}
+			upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(target, strconv.Itoa(int(route.flow.Port))))
+		}
 	} else {
 		upstream, err = s.dialer.DialTCP(dialCtx, route.decision.ExitID, proxyDialTarget(route.flow), route.flow.Port)
 	}

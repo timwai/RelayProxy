@@ -271,7 +271,9 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 
 	decision := Decision{Action: ActionDirect, Rule: "loop-guard"}
 	guarded := !fake && s.guard.MustDirectFlow(flow)
-	if fake && flow.DomainSource == "fakeip-unknown" {
+	if fake && !s.fakeIPEnabled() {
+		decision = Decision{Action: ActionReject, Rule: "fakeip-disabled"}
+	} else if fake && flow.DomainSource == "fakeip-unknown" {
 		decision = Decision{Action: ActionReject, Rule: "fakeip-expired"}
 	} else if !guarded {
 		// A FakeIP is not the actual remote address: never match IP/CIDR

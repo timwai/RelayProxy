@@ -67,3 +67,17 @@ func TestReactBundleMissingKeepsClassicIndex(t *testing.T) {
 		t.Fatalf("unbuilt React fallback: HTTP %d, %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestEmbeddedVectorBrandAsset(t *testing.T) {
+	rec := httptest.NewRecorder()
+	Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/img/logo.svg", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("SVG logo: HTTP %d", rec.Code)
+	}
+	if !strings.HasPrefix(rec.Header().Get("Content-Type"), "image/svg+xml") {
+		t.Fatalf("SVG logo: wrong content type %q", rec.Header().Get("Content-Type"))
+	}
+	if !strings.Contains(rec.Body.String(), "<svg ") || !strings.Contains(rec.Body.String(), "<path ") {
+		t.Fatal("brand logo must contain scalable SVG paths")
+	}
+}

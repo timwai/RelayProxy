@@ -171,3 +171,66 @@ func TestIdleDirectConnectionRemainsWhileOSOwnsIt(t *testing.T) {
 		t.Fatal("bypass DIRECT flow unexpectedly entered telemetry")
 	}
 }
+
+type dnsOrderDevice struct {
+	*testPacketDevice
+	beforeSend func([]byte, packetMetadata)
+}
+
+func (d *dnsOrderDevice) Send(data []byte, meta packetMetadata) error {
+	if d.beforeSend != nil {
+		d.beforeSend(data, meta)
+	}
+	return d.testPacketDevice.Send(data, meta)
+}
+
+// DNS must be attached before a response is injected. On a real client that
+// response can trigger a TCP SYN before the observer processes another packet.
+func TestDNSAttributionPrecedesPacketDelivery(t *testing.T) {
+	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionDirect}})
+	p := interceptedSYN(false)
+	syn, _ := parseIPPacket(p)
+	answerIP := syn.Destination.Addr()
+	query, answer := dnsExchange(t, "play.google.com", answerIP, 90)
+	qpacket, _ := packetTestFixture(false, ProtoUDP, query, false)
+	resolver := netip.MustParseAddrPort("192.168.1.1:53")
+	if err := rewriteIPPacket(qpacket, syn.Source, resolver); err != nil {
+		t.Fatal(err)
+	}
+	seenRequest, seenResponse := false, false
+	i.device = &dnsOrderDevice{testPacketDevice: device, beforeSend: func(data []byte, meta packetMetadata) {
+		if meta.outbound {
+			i.dns.mu.Lock()
+			pending := len(i.dns.pending)
+			i.dns.mu.Unlock()
+			if pending != 1 {
+				t.Errorf("DNS query not registered before delivering outbound UDP query: %d", pending)
+			}
+			seenRequest = true
+		} else {
+			if got := i.dns.lookup(answerIP); got != "play.google.com" {
+				t.Errorf("DNS response delivered before domain attribution: %q", got)
+			}
+			seenResponse = true
+		}
+	}}
+	if err := i.handlePacket(qpacket, packetMetadata{outbound: true}); err != nil {
+		t.Fatal(err)
+	}
+	expectInterceptedPacket(t, device)
+	response, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: syn.Source, Destination: resolver}, answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := i.handlePacket(response, packetMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	expectInterceptedPacket(t, device)
+	if !seenRequest || !seenResponse {
+		t.Fatalf("DNS query/response not intercepted: request=%v response=%v", seenRequest, seenResponse)
+	}
+	flow := i.flowMetadata(syn, packetProcess{path: "chrome.exe"})
+	if flow.Host != "play.google.com" || flow.DomainSource != "dns" {
+		t.Fatalf("TCP flow did not inherit observed DNS domain: %+v", flow)
+	}
+}

@@ -11,13 +11,13 @@ import (
 func TestReactBundleRoutesAreIsolated(t *testing.T) {
 	root := fstest.MapFS{"img/logo.svg": {Data: []byte(`<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0"/></svg>`)}}
 	react := fstest.MapFS{
-		"index.html": {Data: []byte(`<html><div id="root">React</div></html>`)},
+		"index.html":    {Data: []byte(`<html><div id="root">React</div></html>`)},
 		"assets/app.js": {Data: []byte(`console.log('react')`)},
 	}
 	handler := newHandler(root, react)
 	for _, tc := range []struct {
-		path string
-		code int
+		path     string
+		code     int
 		expected string
 	}{
 		{"/", http.StatusOK, `id="root"`},

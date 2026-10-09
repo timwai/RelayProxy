@@ -11,7 +11,7 @@
 | Ubuntu CI + Dante 独立 SOCKS5 服务 | TCP CONNECT 回环 echo；RFC1928 UDP ASSOCIATE 真实 UDP echo | RelayProxy 与 Dante 的基本 TCP/UDP 互通 |
 | Ubuntu CI + Tinyproxy 独立 HTTP 服务 | Basic 认证 TCP CONNECT 回环 echo；错误密码拒绝；HTTP UDP 禁止直连回落 | RelayProxy 与 Tinyproxy HTTP CONNECT 互通及身份验证行为 |
 | Ubuntu / Windows / macOS Go test | FakeIP A/AAAA、TCP/UDP/53、DoH、DNS 出口作用域等策略/模拟数据包回归 | 代码逻辑及平台条件编译在对应操作系统通过 |
-| Ubuntu CI 独立 Linux network namespace | 从仓库脚本提取原始 nftables OUTPUT 规则；veth 抓包验证无规则时可观测 DNS 端口数据、加规则后无数据 | **Linux nftables 规则**确实能阻止被测网络命名空间中的明文/专用加密 DNS 出站 |
+| Ubuntu CI 独立 Linux network namespace | 从仓库脚本提取原始 nftables OUTPUT 规则；在 IPv4/IPv6 veth 上抓包，对比安装规则前后的 DNS 端口数据包 | **Linux nftables 规则**在隔离网络命名空间内阻止被测 IPv4/IPv6 DNS 端口出站 |
 | 真实 Windows/macOS/Android 机器 | 系统级驱动/VPN 接管、环回、故障重启、硬编码 DoH 443、OEM DNS 等 | **未由上述 CI 覆盖** |
 
 在该 CI 中，代理和业务端点都限制在临时 runner 的 127.0.0.1，没有访问生产出口、真实用户 DNS、或使用生产密码。自动化测试不代表公网线路、远程 SOCKS5 认证方式、多用户隔离或受限网络环境全部通过。
@@ -90,7 +90,7 @@ sudo bash scripts/dns-killswitch-linux.sh status
 sudo bash scripts/dns-killswitch-linux.sh disable
 ```
 
-在 CI 中，`scripts/ci-dns-guard-netns.sh` 无需启用系统服务，只在临时网络命名空间测试实际 nftables + veth 出站抓包。它**不能证明真实机器 systemd 服务在重启前的短暂窗口中也完全无泄漏**。真实系统必须补测 DNS Stub 和 loopback、NFQUEUE 清理后的状态、不同 iptables/nftables 后端以及真实 IPv6 出口。
+在 CI 中，`scripts/ci-dns-guard-netns.sh` 无需启用系统服务，只在临时网络命名空间测试实际 nftables + veth 出站抓包，包括支持 IPv6 veth 的运行器。它**不能证明真实机器 systemd 服务在重启前的短暂窗口中也完全无泄漏**。真实系统必须补测 DNS Stub 和 loopback、NFQUEUE 清理后的状态、不同 iptables/nftables 后端以及真实 IPv6 出口。
 
 ## 5. macOS 验收（Network Extension）
 
@@ -125,7 +125,7 @@ Android VPN 的 Mapped DNS 与桌面 Agent FakeIP 并非完全相同的拦截实
 | 独立 Dante SOCKS5 TCP/UDP | 自动化覆盖；以对应 workflow 绿色结果为准 |
 | 独立 Tinyproxy HTTP CONNECT + 错误密码 | 自动化覆盖；以对应 workflow 绿色结果为准 |
 | Windows/macOS/Linux FakeIP 策略及包模拟 | 自动化覆盖；不等于物理驱动验收 |
-| Linux nftables 真实出站阻断 | 隔离 veth CI 覆盖；需要观察 workflow 结果 |
+| Linux nftables 真实出站阻断 | Ubuntu runner 隔离 veth IPv4/IPv6 验证通过；真实整机重启/持久性仍未验收 |
 | Windows 真正 WinDivert + WFP 物理出口抓包 | 待设备实测 |
 | macOS 真正 Network Extension + 物理出口抓包 | 待签名设备实测 |
 | Linux 系统重启、systemd 恢复、NFQUEUE 异常关闭 | 待真实系统实测 |

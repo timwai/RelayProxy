@@ -501,6 +501,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			BlockDoHEndpoints: engine.BlockDoHEndpoints,
 			ForwardOtherDNS:   engine.ForwardOtherDNS,
 			DNSExitID:         engine.DNSExitID,
+			DoHBlockedIPs:     engine.DoHBlockedIPs,
 			ProxyReady: func() bool {
 				return a.handshakeOK.Load()
 			},

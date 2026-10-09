@@ -141,4 +141,13 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nftables iproute2 tcpdump
       - name: Verify independent DNS kill switch blocks on-wire traffic
         shell: bash
-        run: sudo bash scripts/ci-dns-guard-netns.sh
+        env:
+          RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR: ${{ runner.temp }}/dns-acceptance
+        run: sudo --preserve-env=RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR bash scripts/ci-dns-guard-netns.sh
+      - name: Upload non-production DNS capture evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-dns-guard-veth-captures
+          path: ${{ runner.temp }}/dns-acceptance/
+          if-no-files-found: warn

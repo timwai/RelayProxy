@@ -199,5 +199,5 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
 @media(max-width:1200px){#root .overview-hero{grid-template-columns:minmax(0,1fr) minmax(280px,.8fr)}#root .overview-shortcuts{grid-template-columns:1fr}}
 @media(max-width:830px){#root .overview-hero{grid-template-columns:1fr;padding:24px}#root .network-visual{max-width:480px;margin:auto;width:100%}#root .overview-shortcuts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:600px){#root .overview-hero{padding:20px}#root .overview-hero-copy h2{font-size:22px}#root .overview-status-grid,#root .overview-shortcuts{grid-template-columns:1fr}#root .overview-health{gap:11px}#root .grid.g4>.overview-metric{min-height:110px}#root .brand-image{width:38px;height:38px}#root .brand-wordmark strong{font-size:15px}}
-@media(max-width:1000px){#root .sidebar .brand-wordmark{display:none}#root .sidebar > .brand{justify-content:center}#root .sidebar .nav-icon{margin:0 auto}#root .sidebar .nav-item{justify-content:center}}
+@media(max-width:1000px){#root .sidebar .brand-wordmark{display:none}#root .sidebar > .brand{justify-content:center}#root .sidebar .nav-icon{margin:0 auto}#root .sidebar .nav-item{justify-content:center}#root .sidebar .nav-item>span:nth-child(2){display:none}}
 @media(prefers-reduced-motion:reduce){#root .overview-metric{transition:none!important}}

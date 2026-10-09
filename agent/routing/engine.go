@@ -57,6 +57,14 @@ func (e *Engine) FakeIPEnabled() bool {
 // before connection cannot be blocked by this selector.
 // ForwardOtherDNS never falls back to plaintext/local DNS. Queries travel
 // through the selected authenticated relay/upstream to a TLS resolver.
+// DNSExitID pins encrypted DNS to the chosen proxy exit. Empty means the
+// current default exit. It never changes the exit of application traffic.
+func (e *Engine) DNSExitID() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.DNSExitID
+}
+
 func (e *Engine) ForwardOtherDNS() bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

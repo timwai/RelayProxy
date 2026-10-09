@@ -264,11 +264,17 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	}
 	fake := s.fakeIPDestination(key.Destination.Addr())
 	if fake {
-		if host, ok := s.fakeDNS.lookup(key.Destination.Addr()); ok {
-			flow.Host, flow.DomainSource = host, "fakeip"
-		} else {
+		host, scope, scoped, ok := s.fakeDNS.lookupWithScope(key.Destination.Addr())
+		switch {
+		case !ok:
 			// Never forward an expired or unknown placeholder.
 			flow.Host, flow.DomainSource = "", "fakeip-unknown"
+		case scoped && scope != s.dnsExitScope(""):
+			// Resolver selection changed after the OS cached this FakeIP.
+			// Requiring a new DNS answer avoids reusing old egress context.
+			flow.Host, flow.DomainSource = "", "fakeip-scope-mismatch"
+		default:
+			flow.Host, flow.DomainSource = host, "fakeip"
 		}
 	}
 	var expired []*udpAssociation
@@ -314,6 +320,8 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 		// Only verified DNS/FakeIP/NE host metadata is used here.
 		// SNI/HTTP Host remains post-classification telemetry, not a policy key.
 		decision = Decision{Action: ActionReject, Rule: "doh-endpoint-blocked"}
+	} else if fake && flow.DomainSource == "fakeip-scope-mismatch" {
+		decision = Decision{Action: ActionReject, Rule: "fakeip-dns-exit-changed"}
 	} else if fake && flow.DomainSource == "fakeip-unknown" {
 		decision = Decision{Action: ActionReject, Rule: "fakeip-expired"}
 	} else if !guarded {

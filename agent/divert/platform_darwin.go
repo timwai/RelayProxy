@@ -321,6 +321,9 @@ func (i *darwinInterceptor) handleTCP(conn *net.UnixConn, open darwinOpenFlow) e
 	if err != nil {
 		return err
 	}
+	if i.server.fakeIPEnabled() && isDNSLeakPort(destination.Port()) {
+		return writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionReject, Reason: "fakeip-dns-egress-blocked"})
+	}
 	route, err := i.server.ClassifyFlow(open.flow(destination))
 	if err != nil {
 		_ = writeDarwinJSON(conn, darwinFrameError, map[string]string{"message": err.Error()})
@@ -354,6 +357,21 @@ func (i *darwinInterceptor) handleUDP(conn *net.UnixConn, open darwinOpenFlow) e
 		destination, datagram, err := decodeDarwinDatagram(payload)
 		if err != nil {
 			return err
+		}
+		if i.server.fakeIPEnabled() && destination.Port() == 53 {
+			answer := i.server.fakeDNS.reply(datagram, i.server.guard.RelayHost, i.server.guard.RelayIPs)
+			if answer != nil {
+				if err := respond(i.ctx, FlowKey{Protocol: ProtoUDP, Destination: destination}, answer); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if i.server.fakeIPEnabled() && isDNSLeakPort(destination.Port()) {
+			if err := writeDarwinDatagramFrame(conn, darwinFrameUDPReject, destination, nil); err != nil {
+				return err
+			}
+			continue
 		}
 		route, err := i.server.ClassifyFlow(open.flow(destination))
 		if err != nil {

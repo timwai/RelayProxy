@@ -108,3 +108,73 @@ func TestLiveDanteTCPAndUDP(t *testing.T) {
 		t.Fatal("Dante UDP target handler timed out")
 	}
 }
+
+
+// TestLiveTinyproxyHTTPConnect verifies a separately running HTTP proxy,
+// including real Basic authentication and refusal of invalid credentials.
+// Tinyproxy runs only on localhost in CI; no public web endpoints are used.
+func TestLiveTinyproxyHTTPConnect(t *testing.T) {
+	address := os.Getenv("RELAYPROXY_LIVE_HTTP_ADDR")
+	if address == "" {
+		t.Skip("set RELAYPROXY_LIVE_HTTP_ADDR to an actual HTTP CONNECT proxy")
+	}
+	server, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	received := make(chan error, 1)
+	go func() {
+		conn, err := server.Accept()
+		if err != nil {
+			received <- err
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		_, err = io.CopyN(conn, conn, 5)
+		received <- err
+	}()
+	target := uint16(server.Addr().(*net.TCPAddr).Port)
+	ctx, cancel := context.WithTimeout(context.Background(), 7*time.Second)
+	defer cancel()
+	upstream := UpstreamConfig{
+		Mode: UpstreamHTTP, Address: address,
+		Username: "relayproxy", Password: "integration-only-password",
+	}
+	conn, err := DialViaUpstreamTCP(ctx, upstream, "127.0.0.1", target)
+	if err != nil {
+		t.Fatalf("Tinyproxy authenticated CONNECT failed: %v", err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := conn.Write([]byte("hello")); err != nil {
+		_ = conn.Close()
+		t.Fatal(err)
+	}
+	var echoed [5]byte
+	_, err = io.ReadFull(conn, echoed[:])
+	_ = conn.Close()
+	if err != nil || string(echoed[:]) != "hello" {
+		t.Fatalf("Tinyproxy CONNECT echo=%q err=%v", echoed, err)
+	}
+	select {
+	case err := <-received:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("Tinyproxy target did not finish")
+	}
+	upstream.Password = "invalid-password"
+	unauthorized, err := DialViaUpstreamTCP(ctx, upstream, "127.0.0.1", target)
+	if unauthorized != nil {
+		_ = unauthorized.Close()
+	}
+	if err == nil {
+		t.Fatal("Tinyproxy accepted invalid Basic credentials")
+	}
+	if pc, err := DialViaUpstreamUDP(ctx, upstream, "127.0.0.1", 53); err == nil {
+		_ = pc.Close()
+		t.Fatal("HTTP CONNECT proxy must never silently forward UDP directly")
+	}
+}

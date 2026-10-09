@@ -192,6 +192,8 @@ func (s *WailsService) GetConfig() (string, error) {
 		SOCKS5                      proxyLeg            `json:"socks5"`
 		HTTP                        proxyLeg            `json:"http"`
 		DefaultExitID               string              `json:"defaultExitId"`
+		CustomExits                 any                 `json:"customExits"`
+		UpstreamExitID              string              `json:"upstreamExitId"`
 		ExitEnabled                 bool                `json:"exitEnabled"`
 		AllowInternet               bool                `json:"allowInternet"`
 		AllowPrivate                bool                `json:"allowPrivateNetwork"`
@@ -229,6 +231,8 @@ func (s *WailsService) GetConfig() (string, error) {
 		IdentityID:    cfg.Device.IdentityID,
 		Transport:     cfg.Transport.Mode,
 		DefaultExitID: cfg.Proxy.DefaultExitID,
+		CustomExits: cfg.Proxy.CustomExits,
+		UpstreamExitID: cfg.Exit.UpstreamExitID,
 		ExitEnabled:   cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
 		AllowInternet: cfg.Exit.AllowInternet,
 		AllowPrivate:  cfg.Exit.AllowPrivateNetwork,
@@ -238,7 +242,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		AccessCIDRs:   cfg.Exit.Access.CIDRs,
 		ExitUpstream: map[string]any{
 			"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address,
-			"username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password,
+			"username": cfg.Exit.Upstream.Username, "hasPassword": cfg.Exit.Upstream.Password != "",
 		},
 		RDP: map[string]any{
 			"enabled": cfg.RDP.Enabled == nil || *cfg.RDP.Enabled,

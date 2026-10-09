@@ -1,3 +1,3 @@
-Build the React console using: cd server/web/frontend && npm install && npm run build
-The server falls back to the original web console when react_dist/index.html is absent.
-This sentinel is committed; generated JavaScript and CSS bundles are not.
+Build the Server React console first: cd server/web/frontend && npm install && npm run build
+The Server serves only React. Without react_dist/index.html it returns HTTP 503 on /.
+This sentinel is committed; generated bundles are not.

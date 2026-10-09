@@ -42,8 +42,10 @@ func platformIndependentDNSGuardStatus() (string, string) {
 		// be both active now and enabled for boot. Do not mistake table
 		// presence for configured restart persistence.
 		unit := "relayproxy-dns-killswitch.service"
-		enabled := exec.CommandContext(ctx, "systemctl", "is-enabled", "--quiet", unit).Run() == nil
-		active := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", unit).Run() == nil
+		verifyCtx, verifyCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer verifyCancel()
+		enabled := exec.CommandContext(verifyCtx, "systemctl", "is-enabled", "--quiet", unit).Run() == nil
+		active := exec.CommandContext(verifyCtx, "systemctl", "is-active", "--quiet", unit).Run() == nil
 		if !enabled || !active {
 			status, detail = "persistence-unverified", "nftables DNS rules exist, but the systemd restart guard is not confirmed enabled and active"
 		} else {

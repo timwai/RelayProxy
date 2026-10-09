@@ -526,3 +526,10 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
   #root .login-promo{padding:20px}
   #root .login-card{padding:28px 20px 42px}
 }
+
+/* Message rule creation stays directly above its action, before default fallback. */
+#root .rule-add-area{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:14px 0 22px;padding:11px 0}
+#root .rule-add-feedback{font-size:12px;line-height:1.5;color:var(--muted);min-width:0;flex:1 1 220px}
+#root .rule-card-new{scroll-margin-top:16px;border-color:color-mix(in srgb,var(--brand) 60%,var(--line));box-shadow:0 0 0 3px color-mix(in srgb,var(--brand) 10%,transparent);background:color-mix(in srgb,var(--brand) 5%,var(--surface3))}
+#root .rule-new-indicator{display:inline-flex;align-items:center;padding:4px 9px;border-radius:8px;background:color-mix(in srgb,var(--brand) 12%,var(--surface2));color:var(--brand);font-size:11px;font-weight:700}
+@media(max-width:520px){#root .rule-add-area>.btn{width:100%}#root .rule-add-feedback{flex-basis:100%}}

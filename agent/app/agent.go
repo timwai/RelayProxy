@@ -1957,7 +1957,21 @@ func (a *Agent) closeRuntime() error {
 	return a.closeErr
 }
 
+// ApplyPolicies updates routing without changing the configured local exits
+// or selected default. Its validation and publication share the bundle path.
 func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) error {
+	return a.applyPolicyBundle(routeCfg, divertCfg, nil, nil)
+}
+
+// ApplyClientConfig publishes the rules, local exits, and default selection
+// as one policy generation. This is required when a single GUI save creates
+// an exit and immediately references it from a rule or DNS exit selection.
+// The shared Exit handler's upstream remains a startup-only setting.
+func (a *Agent) ApplyClientConfig(routeCfg routing.Config, divertCfg divert.Config, items []routing.CustomExit, defaultID string) error {
+	return a.applyPolicyBundle(routeCfg, divertCfg, &items, &defaultID)
+}
+
+func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Config, newExits *[]routing.CustomExit, newDefault *string) error {
 	routeCfg = routing.CloneConfig(routeCfg)
 	divertCfg = cloneAgentConfig(AgentConfig{DivertConfig: divertCfg}).DivertConfig
 	if err := routing.ValidateConfig(routeCfg); err != nil {
@@ -1966,6 +1980,14 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 	if err := divert.ValidateConfig(divertCfg); err != nil {
 		return err
 	}
+	var customSnapshot []routing.CustomExit
+	if newExits != nil {
+		customSnapshot = routing.CloneCustomExits(*newExits)
+		if err := routing.ValidateCustomExits(customSnapshot); err != nil {
+			return err
+		}
+	}
+
 	a.policyMu.Lock()
 	defer a.policyMu.Unlock()
 	a.mu.Lock()
@@ -1973,41 +1995,68 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 	if a.closed.Load() {
 		return errors.New("agent closed")
 	}
-	if err := routing.ValidateCustomReferences(a.cfg.CustomExits, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID); err != nil {
+	items, defaultID := a.cfg.CustomExits, a.cfg.DefaultExitID
+	if newExits != nil {
+		items = customSnapshot
+	}
+	if newDefault != nil {
+		defaultID = *newDefault
+	}
+	if err := routing.ValidateCustomReferences(items, defaultID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID); err != nil {
 		return err
 	}
 	if divertCfg.Mode != a.cfg.NetworkMode {
 		return ErrRestartRequired
 	}
+	previousDivert := a.cfg.DivertConfig
+	updatedDivert := false
+	rollbackDivert := func() {
+		if updatedDivert && a.divertSrv != nil {
+			if rollback := a.divertSrv.ReloadRules(previousDivert); rollback != nil {
+				log.Printf("[divert] 回滚分流策略失败: %v", rollback)
+			}
+		}
+	}
 	if a.divertSrv != nil {
 		if err := a.divertSrv.ReloadRules(divertCfg); err != nil {
 			return err
 		}
+		updatedDivert = true
 	}
-	// Activate the Linux kernel fail-closed queue BEFORE making FakeIP
-	// visible to concurrent packet handlers. The background reconciler
-	// shares policyMu and therefore cannot undo this pending transition.
+	// Arm the fail-closed DNS queue before publishing FakeIP. The policy
+	// mutex also serializes the reconciler with the whole bundle.
 	oldFakeIP := a.cfg.Routing.FakeIPEnabled
 	if a.divertSrv != nil && routeCfg.FakeIPEnabled {
 		if err := a.divertSrv.SyncPlatformDNSCapture(true); err != nil {
+			rollbackDivert()
 			return fmt.Errorf("无法启用内核 DNS 防泄漏队列，路由策略未生效: %w", err)
 		}
 	}
-	// Both inputs were validated before publishing under the policy lock.
 	if err := a.routingEngine.Reload(routeCfg); err != nil {
 		if a.divertSrv != nil && routeCfg.FakeIPEnabled && !oldFakeIP {
 			if rollback := a.divertSrv.SyncPlatformDNSCapture(false); rollback != nil {
 				log.Printf("[dns] 恢复原 DNS 队列模式失败: %v", rollback)
 			}
 		}
+		rollbackDivert()
 		return err
+	}
+	// All fallible operations have finished. New connections now see the
+	// same selected exit inventory as the routing generation.
+	if newExits != nil {
+		a.dialer.SetCustomExits(items)
+		a.cfg.CustomExits = routing.CloneCustomExits(items)
+	}
+	if newDefault != nil {
+		a.cfg.DefaultExitID = defaultID
+		a.selectedExit.Store(&defaultID)
+		a.dialer.SetDefaultExitID(defaultID)
 	}
 	a.cfg.Routing = a.routingEngine.Config()
 	a.cfg.DivertConfig = divertCfg
 	if a.divertSrv != nil && !routeCfg.FakeIPEnabled && oldFakeIP {
-		// Relaxing the queue is an availability optimization, not a security
-		// prerequisite. Publish disabled policy first so a partial failure
-		// can only leave a stricter queue. The reconciler retries it.
+		// Relax after publishing disabled policy. Failure leaves a stricter
+		// kernel queue, and the reconciler will retry the change.
 		if err := a.divertSrv.SyncPlatformDNSCapture(false); err != nil {
 			log.Printf("[dns] 已关闭 FakeIP，但恢复普通 DNS 队列失败，将自动重试: %v", err)
 		}
@@ -2015,12 +2064,14 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 	return nil
 }
 
-// ApplyCustomExits replaces local proxy configurations for new connections.
-// A shared exit handler retains its startup snapshot until the Agent restarts.
+// ApplyCustomExits is used by independent local-exit updates. A combined
+// rules/exits save must use ApplyClientConfig instead.
 func (a *Agent) ApplyCustomExits(items []routing.CustomExit) error {
 	if err := routing.ValidateCustomExits(items); err != nil {
 		return err
 	}
+	a.policyMu.Lock()
+	defer a.policyMu.Unlock()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.closed.Load() {

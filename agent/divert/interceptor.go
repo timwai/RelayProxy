@@ -331,8 +331,8 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 				meta.outbound = false
 				return i.inject(reply, meta)
 			}
-			// DNS-over-TCP cannot be safely redirected by a datagram handler.
-			return i.rejectTCP(packet, meta)
+			// RFC 7766 TCP/53 gets a local stream responder.
+			return i.outboundTCP(packet, meta)
 		}
 		// Block well-known encrypted DNS transports. DoH on ordinary HTTPS/443
 		// is indistinguishable from general web traffic at this layer.
@@ -519,7 +519,14 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 			i.direct.Add(1)
 			return i.sendPacket(p, meta)
 		}
-		route, err := i.server.ClassifyFlow(metadata)
+		var route *ClassifiedFlow
+		var err error
+		if i.server.fakeIPEnabled() && p.Destination.Port() == 53 {
+			route = &ClassifiedFlow{owner: i.server, key: key, flow: metadata,
+				decision: Decision{Action: ActionProxy, Rule: "fakeip-dns"}, dnsOnly: true}
+		} else {
+			route, err = i.server.ClassifyFlow(metadata)
+		}
 		if err != nil {
 			_ = i.rejectTCP(p, meta)
 			return err
@@ -776,7 +783,12 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 		i.mu.Unlock()
 		go func() {
 			defer i.wg.Done()
-			err := i.server.ForwardTCP(i.ctx, flow.route, conn)
+			var err error
+			if flow.route.dnsOnly {
+				err = i.server.serveFakeDNSTCP(i.ctx, conn)
+			} else {
+				err = i.server.ForwardTCP(i.ctx, flow.route, conn)
+			}
 			if err != nil {
 				flow.route.traffic.Finish("failed", err)
 			}

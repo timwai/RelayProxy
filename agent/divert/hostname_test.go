@@ -2,9 +2,9 @@ package divert
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"net"
-	"encoding/binary"
 	"testing"
 
 	"relayproxy/internal/traffic"

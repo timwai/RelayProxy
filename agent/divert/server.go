@@ -44,17 +44,17 @@ type Options struct {
 	LocalExitReady     func(string) bool
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
-	FakeIPEnabled     func() bool // dynamically consulted for new transparent DNS queries
+	FakeIPEnabled      func() bool // dynamically consulted for new transparent DNS queries
 }
 
 // Server owns classified flows. OS interception is separately gated by a
 // side-effect-free capability preflight. Trusted platform adapters must retain
 // ClassifiedFlow and implement DIRECT/reject and original-source reply injection.
 type Server struct {
-	opts   Options
-	engine *Engine
-	dialer Dialer
-	guard  LoopGuard
+	opts    Options
+	engine  *Engine
+	dialer  Dialer
+	guard   LoopGuard
 	fakeDNS *fakeIPDNS
 
 	ctx         context.Context

@@ -10,6 +10,9 @@ func ValidateConfig(cfg Config) error {
 	default:
 		return fmt.Errorf("routing.mode: invalid value %q", cfg.Mode)
 	}
+	if cfg.DNSMode != "" && cfg.DNSMode != DNSModeLocal && cfg.DNSMode != DNSModeProxy {
+		return fmt.Errorf("routing.dns_mode: invalid value %q (expected proxy or local)", cfg.DNSMode)
+	}
 	validAction := func(a Action) bool { return a == ActionProxy || a == ActionDirect || a == ActionReject }
 	if cfg.DefaultAction != "" && !validAction(cfg.DefaultAction) {
 		return fmt.Errorf("routing.default_action: invalid value %q", cfg.DefaultAction)

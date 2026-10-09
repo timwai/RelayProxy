@@ -25,6 +25,9 @@ Windows/Linux 的透明包本身只有 IP；macOS Network Extension 有时能给
 
 **重要：`dns_mode: proxy` 不代表完整接管系统 DNS 请求，也不保证没有 DNS 泄漏。** 它只是控制在 PROXY 连接已知目标域名时由 Agent 还是上游解析该目标。
 
-Proxifier 的完整“通过代理解析 DNS”能力可使用 FakeIP 占位，并说明这会使部分基于真实目标 IP 的规则无法工作。RelayProxy 当前没有实现等价的全平台 FakeIP DNS 接管。
+Proxifier 的完整“通过代理解析 DNS”能力可使用 FakeIP 占位，并说明这会使部分基于真实目标 IP 的规则无法工作。RelayProxy 已新增**实验性的 FakeIP DNS 接管**：Windows WinDivert、Linux NFQUEUE、macOS Network Extension 对交付到拦截器的 UDP/TCP 53 A/AAAA 问题合成占位地址；Android VPN 使用独立的 DNS 机制。需设置 `routing.fake_ip_enabled: true`，且 `routing.dns_mode: proxy`。详细的接管范围、平台限制和验证要求见 [FakeIP DNS 接管（实验性）](agent-fakeip-dns-interception.md)。
 
-要达到同样能力，需要单独实现有界 FakeIP 池、客户端 DNS/UDP/TCP53 拦截、各平台请求关联、FakeIP->域名路由、DIRECT/局域网规则处理及泄漏防护，并针对 DNSSEC、IPv6、CNAME、DoH 等做兼容设计。当前配置项不能替代这些安全措施。
+- 本机生成的 FakeIP 对应的 PROXY 流量由上游解析真实域名；命中 DIRECT 规则时，经选定代理出口执行经 TLS 验证的 DNS 查询并在连接前复核真实 IP，失败则拒绝连接，而不将占位 IP 发送到网络。
+- HTTPS/SVCB 返回 NODATA；TXT/SRV 可显式开启经代理 DoT 查询，默认关闭。DNSSEC、分流 DNS、多地址选择仍有限制。
+- SOCKS5 上游返回域名形式的 TCP CONNECT 绑定地址时无需本机 DNS；SOCKS5 UDP ASSOCIATE 返回不能直接连接的域名绑定地址时将拒绝连接，不会为解析该地址而向本地 DNS 发送查询。
+- FakeIP **不等于全平台零泄漏保证**。系统环回 DNS、应用自带 DoH/HTTPS 443、硬编码 DNS、底层驱动退出及 Windows/macOS/Linux/Android 平台差异仍需实机验证。独立 DNS Kill Switch 必须由管理员显式启用并验证，不会因打开 FakeIP 自动生效。

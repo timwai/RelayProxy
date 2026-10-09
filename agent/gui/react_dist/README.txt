@@ -1,3 +1,4 @@
-This directory is populated by agent/gui/frontend (Vite) before Windows release builds.
-It intentionally contains no generated bundle in git. When index.html is absent, the Go
-desktop shell falls back to the legacy embedded page so ordinary go test/go build remains usable.
+This directory is populated by agent/gui/frontend (Vite) before Agent release builds
+on Linux, macOS and Windows. The React bundle is shared by the Agent Web browser,
+macOS WKWebView and Windows Wails shell. Generated assets are intentionally
+not checked in; Go-only development builds retain the legacy fallback.

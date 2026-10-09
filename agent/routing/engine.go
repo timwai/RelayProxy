@@ -46,6 +46,13 @@ func (e *Engine) Reload(cfg Config) error {
 	return nil
 }
 
+// FakeIPEnabled is a hot-path, allocation-free read of the active DNS policy.
+func (e *Engine) FakeIPEnabled() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.FakeIPEnabled && (e.config.DNSMode == "" || e.config.DNSMode == DNSModeProxy)
+}
+
 func (e *Engine) Config() Config {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

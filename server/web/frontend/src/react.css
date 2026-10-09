@@ -350,13 +350,9 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
 #root .config-card-heading p{font-size:12px}
 #root .main-inner{background:radial-gradient(ellipse 80% 48% at 14% -13%,color-mix(in srgb,var(--brand) 4%,transparent),transparent 77%)}
 #root .card{border-color:color-mix(in srgb,var(--brand) 8%,var(--line));box-shadow:0 8px 24px rgba(24,49,95,.045)}
-#root .page-section>.card-title-area::before{content:'';width:4px;height:21px;border-radius:8px;flex:none;background:linear-gradient(180deg,var(--brand),var(--accent-purple))}
-#root .grid>.page-section:nth-child(2)>.card-title-area::before{background:linear-gradient(180deg,var(--accent-teal),#72d5bf)}
-#root .grid>.page-section:nth-child(3)>.card-title-area::before{background:linear-gradient(180deg,var(--accent-amber),#ffcc70)}
-#root .channel-card{border-top:3px solid color-mix(in srgb,var(--accent-purple) 55%,var(--line))}
-#root .channel-card:nth-child(even){border-top-color:color-mix(in srgb,var(--accent-teal) 65%,var(--line))}
-#root .exit-card{border-top:3px solid color-mix(in srgb,var(--accent-teal) 55%,var(--line));box-shadow:0 9px 22px rgba(23,99,92,.055)}
-#root .rule-card{border-left:3px solid color-mix(in srgb,var(--accent-purple) 48%,var(--line))}
+
+#root .exit-card{box-shadow:0 9px 22px rgba(23,99,92,.055)}
+
 #root .badge.ok{background:color-mix(in srgb,var(--accent-teal) 13%,var(--surface2));color:var(--accent-teal)}
 #root .badge.danger{background:color-mix(in srgb,var(--danger) 12%,var(--surface2));color:var(--danger)}
 #root .nav-group .nav-item.active{background:linear-gradient(90deg,color-mix(in srgb,var(--brand) 12%,var(--surface3)),color-mix(in srgb,var(--accent-purple) 6%,var(--surface2)));border-inline-start:3px solid var(--brand)}

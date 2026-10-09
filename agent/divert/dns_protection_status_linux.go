@@ -36,6 +36,20 @@ func platformIndependentDNSGuardStatus() (string, string) {
 	defer cancel()
 	output, err := exec.CommandContext(ctx, bin, "list", "table", "inet", "relayproxy_dns_guard").CombinedOutput()
 	status, detail := interpretLinuxDNSGuardEvidence(output, err)
+	if status == "rules-present" {
+		// A currently installed table may disappear after reboot. The
+		// standalone script installs a systemd oneshot service, which must
+		// be both active now and enabled for boot. Do not mistake table
+		// presence for configured restart persistence.
+		unit := "relayproxy-dns-killswitch.service"
+		enabled := exec.CommandContext(ctx, "systemctl", "is-enabled", "--quiet", unit).Run() == nil
+		active := exec.CommandContext(ctx, "systemctl", "is-active", "--quiet", unit).Run() == nil
+		if !enabled || !active {
+			status, detail = "persistence-unverified", "nftables DNS rules exist, but the systemd restart guard is not confirmed enabled and active"
+		} else {
+			detail = "nftables DNS drops and boot-time systemd guard observed; on-wire DNS bypasses still require real-device verification"
+		}
+	}
 	linuxIndependentGuardCache.status, linuxIndependentGuardCache.detail = status, detail
 	return status, detail
 }

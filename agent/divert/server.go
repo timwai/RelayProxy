@@ -54,11 +54,11 @@ type Options struct {
 // side-effect-free capability preflight. Trusted platform adapters must retain
 // ClassifiedFlow and implement DIRECT/reject and original-source reply injection.
 type Server struct {
-	opts    Options
-	engine  *Engine
-	dialer  Dialer
-	guard   LoopGuard
-	fakeDNS *fakeIPDNS
+	opts     Options
+	engine   *Engine
+	dialer   Dialer
+	guard    LoopGuard
+	fakeDNS  *fakeIPDNS
 	dnsLimit chan struct{} // bound concurrent TLS resolver requests
 
 	ctx         context.Context

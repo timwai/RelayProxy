@@ -2,7 +2,6 @@ package divert
 
 import (
 	"encoding/binary"
-	"net/netip"
 	"testing"
 
 	"relayproxy/internal/traffic"
@@ -90,7 +89,6 @@ func TestTCPHostnameTelemetryAndNoRuleReclassification(t *testing.T) {
 	if snap := stats.Snapshot(); snap.Connections[0].Host != "play.google.com" {
 		t.Fatal("late SNI replaced initial telemetry")
 	}
-	_ = netip.IPv4Unspecified()
 }
 
 func TestTCPHostnameCannotOverrideObservedDNS(t *testing.T) {

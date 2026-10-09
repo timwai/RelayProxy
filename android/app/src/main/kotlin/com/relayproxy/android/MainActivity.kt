@@ -2520,7 +2520,7 @@ class MainActivity : Activity() {
 
         // 双核状态卡片
         if (vpnState == "RUNNING") {
-            vpnStatusBadge.text = "运行中"
+            vpnStatusBadge.text = if (vpnObj?.optBoolean("lockdownEnabled", false) == true) "系统锁定 · 防绕过" else "运行中"
             vpnStatusBadge.setTextColor(UiPalette.success)
             vpnStatusBadge.background = UiKit.rounded(this, UiPalette.successSoft, 6)
             vpnActionBtn.text = "停止 VPN"

@@ -17,6 +17,7 @@ type CustomExit struct {
  Address string `yaml:"address" json:"address"`
  Username string `yaml:"username,omitempty" json:"username,omitempty"`
  Password string `yaml:"password,omitempty" json:"-"`
+ HasPassword bool `yaml:"-" json:"hasPassword,omitempty"`
 }
 
 func IsCustomExitID(id string) bool { return strings.HasPrefix(id, "local:") }

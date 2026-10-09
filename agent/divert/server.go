@@ -218,6 +218,24 @@ func (s *Server) Diagnostics() Diagnostics {
 	return Diagnostics{}
 }
 
+// SyncPlatformDNSCapture synchronizes the kernel's DNS/53 interception mode
+// without publishing an unrelated routing decision. On Linux this updates
+// NFQUEUE rule bypass flags; platforms without an adjustable queue are no-ops.
+// Callers performing hot policy updates must hold PolicyMu while invoking it.
+func (s *Server) SyncPlatformDNSCapture(enabled bool) error {
+	s.mu.Lock()
+	interceptor := s.interceptor
+	s.mu.Unlock()
+	if interceptor == nil {
+		// Startup installs the kernel rules from the active routing config.
+		return nil
+	}
+	if updater, ok := interceptor.(interface{ SyncPlatformDNSCapture(bool) error }); ok {
+		return updater.SyncPlatformDNSCapture(enabled)
+	}
+	return nil
+}
+
 // UDP is intercepted as datagrams; it does not expose a local proxy socket.
 func (s *Server) UDPListenAddr() string { return "" }
 

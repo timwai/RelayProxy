@@ -135,7 +135,6 @@ func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 	}
 }
 
-
 func TestLinuxDNSQueueNormalModeAndHotUpdates(t *testing.T) {
 	var commands [][]string
 	f := &linuxFirewall{

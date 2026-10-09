@@ -451,6 +451,7 @@ type RoutingConfigUpdate struct {
 	BlockDoHEndpoints *bool          `json:"block_doh_endpoints"`
 	ForwardOtherDNS   *bool          `json:"forward_other_dns"`
 	DNSExitID         *string        `json:"dns_exit_id"`
+	DoHBlockedIPs     *[]string     `json:"doh_blocked_ips"`
 	DefaultAction     *string        `json:"default_action"`
 	Rules             []routing.Rule `json:"rules"` // Full replacement
 }
@@ -689,6 +690,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		if in.Routing.DNSExitID != nil {
 			cfg.Routing.DNSExitID = strings.TrimSpace(*in.Routing.DNSExitID)
+		}
+		if in.Routing.DoHBlockedIPs != nil {
+			cfg.Routing.DoHBlockedIPs = append([]string(nil), (*in.Routing.DoHBlockedIPs)...)
 		}
 		if in.Routing.DNSMode != nil {
 			mode := strings.ToLower(strings.TrimSpace(*in.Routing.DNSMode))

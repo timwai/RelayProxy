@@ -118,10 +118,19 @@ class RelayVpnService : VpnService() {
                 scheduleStart()
             }
             ACTION_UNDERLYING_NETWORK -> updateUnderlyingNetworkFrom(intent)
-            else -> if (store.isVpnDesiredRunning()) {
-                if (statusState() != "RUNNING" && !startInProgress) scheduleStart()
-            } else {
-                stopSelf()
+            else -> {
+                // Android may restart an Always-on VPN service with a null
+                // Intent after a reboot/process death. Honor OS Always-on
+                // independently of the app's persisted manual start flag.
+                val alwaysOn = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isAlwaysOn
+                if (alwaysOn && !store.isVpnDesiredRunning()) {
+                    store.setVpnDesiredRunning(true)
+                }
+                if (store.isVpnDesiredRunning()) {
+                    if (statusState() != "RUNNING" && !startInProgress) scheduleStart()
+                } else {
+                    stopSelf()
+                }
             }
         }
         return START_STICKY

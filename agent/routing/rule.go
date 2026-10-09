@@ -18,6 +18,17 @@ const (
 	ModeDirect      Mode = "direct"       // All traffic direct
 )
 
+// DNSMode controls how a PROXY destination with a known hostname is encoded.
+// "proxy" forwards the name to the selected exit; "local" resolves it on
+// the client before passing an IP to the exit. Transparent packet capture
+// cannot recover a domain that the operating system has already discarded.
+type DNSMode string
+
+const (
+	DNSModeProxy DNSMode = "proxy"
+	DNSModeLocal DNSMode = "local"
+)
+
 // Rule is a single routing rule. Rules are evaluated in order (first match wins).
 type Rule struct {
 	Name             string   `yaml:"name"    json:"name"`                        // Human-readable name
@@ -55,6 +66,7 @@ type Decision struct {
 // Config holds all routing configuration.
 type Config struct {
 	Mode          Mode   `yaml:"mode"           json:"mode"`           // Routing mode
+	DNSMode       DNSMode `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"` // proxy (default) or local
 	DefaultAction Action `yaml:"default_action" json:"default_action"` // When no rule matches in rule mode
 	Rules         []Rule `yaml:"rules"          json:"rules"`          // Ordered rule list
 }
@@ -63,6 +75,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Mode:          ModeGlobalProxy,
+		DNSMode:       DNSModeProxy,
 		DefaultAction: ActionProxy,
 		Rules: []Rule{
 			{Name: "本机与局域网", Enabled: true, Targets: []string{"localhost", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8", "::1", "fc00::/7", "fe80::/10"}, Action: ActionDirect},

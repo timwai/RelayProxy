@@ -118,6 +118,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 		e.Address = strings.TrimSpace(e.Address)
 	}
 	c.Routing.Mode = routing.Mode(strings.ToLower(strings.TrimSpace(string(c.Routing.Mode))))
+	c.Routing.DNSMode = routing.DNSMode(strings.ToLower(strings.TrimSpace(string(c.Routing.DNSMode))))
 	c.Routing.DefaultAction = routing.Action(strings.ToUpper(strings.TrimSpace(string(c.Routing.DefaultAction))))
 	c.GUI.Theme = strings.ToLower(strings.TrimSpace(c.GUI.Theme))
 	c.Proxy.SOCKS5.Listen = strings.TrimSpace(c.Proxy.SOCKS5.Listen)

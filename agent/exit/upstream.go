@@ -419,7 +419,13 @@ func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port 
 	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
 		remoteAddr = net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), port))
 	}
-	return &socks5UDPConn{control: control, udp: udp, targetAddress: address, remoteAddr: remoteAddr}, nil
+	association := &socks5UDPConn{control: control, udp: udp, targetAddress: address, remoteAddr: remoteAddr}
+	// RFC 1928 ties the UDP association to its TCP control connection.
+	// If the proxy restarts or drops this control connection, unblock any
+	// pending UDP reads immediately instead of keeping a dead association
+	// alive until the caller's idle timeout.
+	go association.watchControl()
+	return association, nil
 }
 
 // socks5UDPTargetAddr describes a domain-based UDP peer without local DNS.
@@ -439,6 +445,14 @@ type socks5UDPConn struct {
 	targetAddress []byte // SOCKS5 ATYP+ADDR+PORT (including domain ATYP=0x03)
 	remoteAddr    net.Addr
 	once          sync.Once
+}
+
+// A UDP ASSOCIATE control connection carries no further data after its
+// reply. EOF or unexpected bytes both invalidate the bound UDP association.
+func (c *socks5UDPConn) watchControl() {
+	var unexpected [1]byte
+	_, _ = c.control.Read(unexpected[:])
+	_ = c.Close()
 }
 
 func (c *socks5UDPConn) Read(p []byte) (int, error) {

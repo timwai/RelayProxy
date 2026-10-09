@@ -30,8 +30,8 @@ test('create forms use existing API endpoints and close after success',()=>{
 });
 
 test('auth bootstrap and select placeholders remain safe',()=>{
- assert.doesNotMatch(app,/authRef\\.current/);
- assert.match(app,/setUser\\(principal\\)/);
+ assert.ok(!app.includes('authRef.current'));
+ assert.ok(app.includes('setUser(principal)'));
  assert.match(app,/请选择目标设备/);
  assert.match(app,/请选择身份/);
 });

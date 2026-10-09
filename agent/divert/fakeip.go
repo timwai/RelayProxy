@@ -38,6 +38,12 @@ func newFakeIPDNS() *fakeIPDNS {
 	return &fakeIPDNS{now: time.Now, byName: make(map[string]netip.Addr), byIP: make(map[netip.Addr]fakeIPEntry)}
 }
 
+// Ports used by DNS-over-TLS, DNS-over-QUIC and related non-HTTP transports.
+// HTTPS-based DoH on port 443 cannot be distinguished at the packet layer.
+func isEncryptedDNSPort(port uint16) bool { return port == 853 || port == 784 || port == 8853 }
+
+func isDNSLeakPort(port uint16) bool { return port == 53 || isEncryptedDNSPort(port) }
+
 func isFakeIP(addr netip.Addr) bool {
 	addr = addr.Unmap()
 	return addr.IsValid() && (fakeIPv4Range.Contains(addr) || fakeIPv6Range.Contains(addr))

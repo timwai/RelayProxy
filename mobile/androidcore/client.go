@@ -93,13 +93,14 @@ type clientConfig struct {
 	UPnPAllowed           *bool          `json:"upnpAllowed"`
 	ProxyPathMode         string         `json:"proxyPathMode"`
 	DefaultExitID         string         `json:"defaultExitId"`
-	CustomExits           androidPrivateCustomExits `json:"customExits"`
 	SOCKS5Listen          string         `json:"socks5Listen"`
 	HTTPListen            string         `json:"httpListen"`
 	Routing               routing.Config `json:"routing"`
 	VPNProxyEnabled       bool           `json:"vpnProxyEnabled"`
 	VPNProxyListen        string         `json:"vpnProxyListen"`
 	VPNProxyToken         string         `json:"vpnProxyToken"`
+
+	CustomExits androidPrivateCustomExits `json:"customExits"`
 }
 
 type statusSnapshot struct {

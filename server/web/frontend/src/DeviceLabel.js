@@ -5,7 +5,7 @@ export function DeviceLabel({name, id}) {
   const displayName = String(name || '').trim();
   const displayId = String(id || '').trim();
   const primary = displayName || displayId || '未命名设备';
-  const secondary = displayId && displayId !== displayName ? displayId : '';
+  const secondary = displayName && displayId && displayId !== displayName ? displayId : '';
   return React.createElement('span', {className:'device-label'},
     React.createElement('strong', {className:'device-label__name'}, primary),
     secondary ? React.createElement('small', {className:'device-label__id mono', title:displayId}, secondary) : null

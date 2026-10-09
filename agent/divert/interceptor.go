@@ -87,6 +87,9 @@ type tcpRedirect struct {
 	receivedFIN bool
 	conn        net.Conn
 	replyMeta   packetMetadata
+	hostProbe   []byte
+	hostNextSeq uint32
+	hostDone    bool
 }
 
 type interceptedUDP struct {
@@ -493,6 +496,7 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 	}
 	i.mu.Lock()
 	flow.lastSeen = time.Now()
+	i.observeTCPHostnameLocked(flow, p)
 	if p.TCPFlags&0x04 != 0 {
 		flow.finished = time.Now()
 	}
@@ -521,6 +525,36 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		return i.inject(p.Bytes, meta)
 	default:
 		return errors.New("invalid TCP interception action")
+	}
+}
+
+// observeTCPHostnameLocked accepts only in-order first application bytes.
+// It is passive, bounded, and affects telemetry only: routes were frozen at
+// the SYN and must never be changed by untrusted HTTP Host or TLS SNI.
+func (i *packetInterceptor) observeTCPHostnameLocked(flow *tcpRedirect, packet ipPacket) {
+	if flow.hostDone || flow.route.flow.Host != "" || flow.route.traffic == nil || len(packet.Payload) == 0 {
+		return
+	}
+	if len(flow.hostProbe) == 0 {
+		flow.hostNextSeq = packet.TCPSequence
+	}
+	// Reject out-of-order segments rather than assembling potentially spoofed
+	// overlapping TCP data. Retransmissions of already-consumed data are safe.
+	if packet.TCPSequence != flow.hostNextSeq {
+		return
+	}
+	if len(flow.hostProbe)+len(packet.Payload) > maxHostnameProbe {
+		flow.hostDone, flow.hostProbe = true, nil
+		return
+	}
+	flow.hostProbe = append(flow.hostProbe, packet.Payload...)
+	flow.hostNextSeq += uint32(len(packet.Payload))
+	host, source, needMore := parseApplicationHostname(flow.hostProbe)
+	if host != "" {
+		flow.route.traffic.SetObservedDomain(host, source)
+	}
+	if host != "" || !needMore {
+		flow.hostDone, flow.hostProbe = true, nil
 	}
 }
 

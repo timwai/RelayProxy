@@ -505,6 +505,11 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 	i.mu.Unlock()
 	if flow == nil {
 		if !syn {
+			// A pre-existing DNS/TCP session cannot be migrated to the local
+			// fake resolver. Never let its plaintext DNS payload escape.
+			if i.server.fakeIPEnabled() && p.Destination.Port() == 53 {
+				return nil
+			}
 			// TCP sessions established before activation cannot be migrated.
 			return i.sendPacket(p, meta)
 		}

@@ -14,8 +14,8 @@ import (
 // applies only when the connection request still carries a hostname. In
 // transparent mode the operating system may already have resolved the name.
 func (d *RoutingDialer) ResolveProxyTarget(ctx context.Context, host string) (string, error) {
-	if d == nil || d.engine == nil {
-		return "", fmt.Errorf("routing: no active engine for DNS mode")
+	if d == nil {
+		return "", fmt.Errorf("routing: missing dialer for DNS mode")
 	}
 	host = strings.TrimSpace(host)
 	if host == "" {
@@ -24,7 +24,10 @@ func (d *RoutingDialer) ResolveProxyTarget(ctx context.Context, host string) (st
 	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
 		return ip.Unmap().String(), nil
 	}
-	mode := d.engine.Config().DNSMode
+	mode := DNSModeProxy
+	if d.engine != nil {
+		mode = d.engine.Config().DNSMode
+	}
 	if mode == "" || mode == DNSModeProxy {
 		return host, nil
 	}

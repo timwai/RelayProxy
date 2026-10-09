@@ -15,3 +15,8 @@ test('port ranges validate random mode and ordering',()=>{
 test('public RDP capability always requires RDP host',()=>{
   assert.deepEqual(normalizedCapabilities(['rdp.public']),['rdp.public','rdp.host']);
 });
+import {pushURL} from './api.js';
+test('message URLs use Relay TCP listener rather than Admin HTTP port',()=>{
+  assert.equal(pushURL('channel.A',{tcpListen:':20800',tlsEnabled:true},'relay.example.com'),'https://relay.example.com:20800/api/v1/push/channel.A');
+  assert.equal(pushURL('name 1',{tcpListen:':80',tlsEnabled:false},'127.0.0.1'),'http://127.0.0.1/api/v1/push/name%201');
+});

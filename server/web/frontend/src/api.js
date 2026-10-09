@@ -35,3 +35,15 @@ export function validatePortRange(cfg) {
     if(a>b || ((a===0)!==(b===0))) throw new Error(`${group} UDP/端口范围起始必须小于等于结束，随机端口需填写 0 / 0`);
   }
 }
+
+// Public pushes are served on the Relay TCP listener, not the Admin listener.
+export function pushURL(id, info, hostname = (typeof location === 'undefined' ? '' : location.hostname)) {
+  const listen = info?.tcpListen;
+  const match = /^(?:\[[^\]]+\]|[^:]*):(\d{1,5})$/.exec(String(listen||'').trim());
+  if (!match) return '';
+  const port = Number(match[1]);
+  const secure = !!info.tlsEnabled;
+  const host = hostname.includes(':') && !hostname.startsWith('[') ? '['+hostname+']' : hostname;
+  const suffix = ((secure&&port===443)||(!secure&&port===80))?'':':'+port;
+  return (secure?'https://':'http://')+host+suffix+'/api/v1/push/'+encodeURIComponent(id);
+}

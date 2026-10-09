@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	customExitProbeDNSHost = "9.9.9.9"
+	customExitProbeDNSHost    = "9.9.9.9"
 	customExitProbeDNSTimeout = 3 * time.Second
 )
 
@@ -26,7 +26,7 @@ func probeCustomExitUDP(ctx context.Context, upstream exit.UpstreamConfig) (time
 	}
 	question := dnsmessage.Question{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}
 	query := dnsmessage.Message{
-		Header: dnsmessage.Header{ID: 0x5237, RecursionDesired: true},
+		Header:    dnsmessage.Header{ID: 0x5237, RecursionDesired: true},
 		Questions: []dnsmessage.Question{question},
 	}
 	wire, err := query.Pack()

@@ -118,8 +118,8 @@ type linuxPacketDevice struct {
 	raw4      int
 	raw6      int
 	firewall  *linuxFirewall
-	closeOnce sync.Once
-	closeErr  error
+	closeOnce     sync.Once
+	closeErr      error
 	injectFn  func([]byte) error
 }
 
@@ -376,8 +376,8 @@ type linuxFirewall struct {
 	// replacement can leave one family stricter than the other; retries
 	// must never assume the two families changed atomically.
 	dnsRuleStates map[string]bool
-	dnsMu     sync.Mutex
-	dnsClosed bool
+	dnsMu         sync.Mutex
+	dnsClosed     bool
 	closeOnce sync.Once
 	closeErr  error
 }

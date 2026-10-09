@@ -236,6 +236,7 @@ type AgentStatus struct {
 	DivertStage          string                     `json:"divertStage"`
 	DivertError          string                     `json:"divertError,omitempty"`
 	DivertDiagnostics    divert.Diagnostics         `json:"divertDiagnostics"`
+	DNSProtection        divert.DNSProtectionStatus `json:"dnsProtection"`
 	ActiveStreams        int64                      `json:"activeStreams"`
 	ApprovalState        string                     `json:"approvalState"`
 	RDPListenAddr        string                     `json:"rdpListenAddr,omitempty"`
@@ -1473,6 +1474,7 @@ func (a *Agent) Status() AgentStatus {
 	}
 	if divertSrv != nil {
 		st.DivertDiagnostics = divertSrv.Diagnostics()
+		st.DNSProtection = divertSrv.DNSProtectionStatus()
 	}
 	if state := a.approvalState.Load(); state != nil {
 		st.ApprovalState = *state

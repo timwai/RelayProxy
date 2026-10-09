@@ -7,6 +7,8 @@ on:
       - "agent/divert/**"
       - "agent/routing/**"
       - ".github/workflows/network-acceptance.yml"
+      - "scripts/ci-dns-guard-netns.sh"
+      - "scripts/dns-killswitch-linux.sh"
   workflow_dispatch:
 
 permissions:
@@ -126,3 +128,17 @@ jobs:
         if: failure()
         shell: bash
         run: cat "$RUNNER_TEMP/tinyproxy.log" || true
+
+  linux-dns-kernel:
+    name: Linux on-wire DNS drop (isolated nftables namespace)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install kernel test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nftables iproute2 tcpdump
+      - name: Verify independent DNS kill switch blocks on-wire traffic
+        shell: bash
+        run: sudo bash scripts/ci-dns-guard-netns.sh

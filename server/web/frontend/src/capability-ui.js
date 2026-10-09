@@ -17,8 +17,8 @@ export function visibleCapabilityGroups(allowed=allCapabilities){
 }
 export function toggleDeviceCapability(current,key,enabled,allowed=allCapabilities){
  const permit=new Set(allowed);
- if(!permit.has(key))return [...current];
- if(key==='rdp.public' && enabled && !permit.has('rdp.host'))return [...current];
+ if(!permit.has(key))return allCapabilities.filter(id=>permit.has(id)&&current.includes(id));
+ if(key==='rdp.public' && enabled && !permit.has('rdp.host'))return allCapabilities.filter(id=>permit.has(id)&&current.includes(id)&&id!=='rdp.public');
  const next=new Set(current.filter(id=>permit.has(id)));
  if(enabled)next.add(key);else next.delete(key);
  if(key==='rdp.public'&&enabled)next.add('rdp.host');

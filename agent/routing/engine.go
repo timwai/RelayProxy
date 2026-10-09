@@ -53,6 +53,14 @@ func (e *Engine) FakeIPEnabled() bool {
 	return e.config.FakeIPEnabled && (e.config.DNSMode == "" || e.config.DNSMode == DNSModeProxy)
 }
 
+// BlockDoHEndpoints is an opt-in best-effort policy; hostnames unavailable
+// before connection cannot be blocked by this selector.
+func (e *Engine) BlockDoHEndpoints() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.FakeIPEnabled && e.config.BlockDoHEndpoints && e.config.DNSMode == DNSModeProxy
+}
+
 func (e *Engine) Config() Config {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

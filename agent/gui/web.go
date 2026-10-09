@@ -398,7 +398,9 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *WebServer) testCustomExit(rw http.ResponseWriter, r *http.Request) {
-	var in struct { ExitID string `json:"exitId"` }
+	var in struct {
+		ExitID string `json:"exitId"`
+	}
 	if err := decodeWebJSON(rw, r, &in); err != nil {
 		return
 	}

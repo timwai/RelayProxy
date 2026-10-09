@@ -365,7 +365,7 @@ func (i *darwinInterceptor) handleUDP(conn *net.UnixConn, open darwinOpenFlow) e
 			return err
 		}
 		if i.server.fakeIPEnabled() && destination.Port() == 53 {
-			answer := i.server.fakeDNS.reply(datagram, i.server.guard.RelayHost, i.server.guard.RelayIPs)
+			answer := i.server.replyFakeDNS(i.ctx, datagram)
 			if answer != nil {
 				if err := respond(i.ctx, FlowKey{Protocol: ProtoUDP, Destination: destination}, answer); err != nil {
 					return err

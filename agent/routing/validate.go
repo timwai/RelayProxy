@@ -2,6 +2,7 @@ package routing
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 )
 
@@ -27,6 +28,34 @@ func ValidateConfig(cfg Config) error {
 	}
 	if cfg.DNSExitID != "" && (strings.TrimSpace(cfg.DNSExitID) != cfg.DNSExitID || strings.ContainsAny(cfg.DNSExitID, " \t\r\n/\\") || len(cfg.DNSExitID) > 128) {
 		return fmt.Errorf("routing.dns_exit_id: invalid proxy exit identifier")
+	}
+	if len(cfg.DoHBlockedIPs) > 256 {
+		return fmt.Errorf("routing.doh_blocked_ips: maximum 256 IP/CIDR entries")
+	}
+	for index, value := range cfg.DoHBlockedIPs {
+		raw := strings.TrimSpace(value)
+		if raw == "" || raw != value {
+			return fmt.Errorf("routing.doh_blocked_ips[%d]: empty or whitespace address", index)
+		}
+		var prefix netip.Prefix
+		if address, err := netip.ParseAddr(raw); err == nil {
+			if address.Zone() != "" || !address.IsGlobalUnicast() || address.IsPrivate() {
+				return fmt.Errorf("routing.doh_blocked_ips[%d]: address must be public and zone-free", index)
+			}
+			prefix = netip.PrefixFrom(address.Unmap(), address.Unmap().BitLen())
+		} else {
+			parsed, parseErr := netip.ParsePrefix(raw)
+			if parseErr != nil || parsed.Addr().Zone() != "" || !parsed.IsValid() ||
+				!parsed.Addr().IsGlobalUnicast() || parsed.Addr().IsPrivate() {
+				return fmt.Errorf("routing.doh_blocked_ips[%d]: invalid public IP/CIDR %q", index, value)
+			}
+			prefix = parsed.Masked()
+		}
+		// Explicitly target limited public resolver addresses. Large CIDRs
+		// cover unrelated CDN / browser traffic; reject unsafe broad blocks.
+		if (prefix.Addr().Is4() && prefix.Bits() < 24) || (prefix.Addr().Is6() && prefix.Bits() < 48) {
+			return fmt.Errorf("routing.doh_blocked_ips[%d]: prefix too broad; use IPv4 /24 or IPv6 /48 or narrower", index)
+		}
 	}
 	validAction := func(a Action) bool { return a == ActionProxy || a == ActionDirect || a == ActionReject }
 	if cfg.DefaultAction != "" && !validAction(cfg.DefaultAction) {

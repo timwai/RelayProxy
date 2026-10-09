@@ -539,7 +539,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Network:                     map[string]any{"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses},
 		NetworkCapabilities:         divert.PlatformCapabilities(), Revision: state.Revision,
 		RestartRequired: state.RestartRequired, RestartFields: state.RestartFields, ReloadPending: state.ReloadPending,
-		Routing: map[string]any{"mode": cfg.Routing.Mode, "dns_mode": cfg.Routing.DNSMode, "fake_ip_enabled": cfg.Routing.FakeIPEnabled, "block_doh_endpoints": cfg.Routing.BlockDoHEndpoints, "forward_other_dns": cfg.Routing.ForwardOtherDNS, "default_action": cfg.Routing.DefaultAction, "rules": cfg.Routing.Rules},
+		Routing: map[string]any{"mode": cfg.Routing.Mode, "dns_mode": cfg.Routing.DNSMode, "fake_ip_enabled": cfg.Routing.FakeIPEnabled, "block_doh_endpoints": cfg.Routing.BlockDoHEndpoints, "forward_other_dns": cfg.Routing.ForwardOtherDNS, "dns_exit_id": cfg.Routing.DNSExitID, "default_action": cfg.Routing.DefaultAction, "rules": cfg.Routing.Rules},
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
 			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(), "insecureTls": state.Runtime.Server.InsecureTLS,
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,

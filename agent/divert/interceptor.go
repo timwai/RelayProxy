@@ -427,6 +427,12 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 }
 
 func localOnlyPacket(p ipPacket) bool {
+	// Loopback-origin packets can target a FakeIP when a local application
+	// binds an explicit source interface. The synthetic destination must
+	// always be classified by the FakeIP policy, never reinjected as DIRECT.
+	if isFakeIP(p.Destination.Addr()) {
+		return false
+	}
 	for _, addr := range []netip.Addr{p.Source.Addr(), p.Destination.Addr()} {
 		if addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() || addr.IsUnspecified() || addr == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
 			return true

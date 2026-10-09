@@ -15,6 +15,12 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
 	for {
+		// A hot policy update must apply to existing DNS/TCP keep-alive
+		// sessions, not only to newly intercepted SYN packets. Never keep
+		// handing out FakeIPs after the feature has been disabled.
+		if s.opts.FakeIPEnabled != nil && !s.fakeIPEnabled() {
+			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
+		}
 		var prefix [2]byte
 		if _, err := io.ReadFull(conn, prefix[:]); err != nil {
 			if err == io.EOF {

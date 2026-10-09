@@ -86,3 +86,26 @@ func TestFakeIPDestinationNeverTakesLoopbackSourceBypass(t *testing.T) {
 		t.Fatalf("loopback source incorrectly bypassed FakeIP routing: %+v", route.Decision())
 	}
 }
+
+func TestFakeIPOffPacketInterceptionPreservesReservedRangeTraffic(t *testing.T) {
+	i, device := newTestInterceptor(t, Options{Config: Config{DefaultAction: ActionDirect}})
+	syn := interceptedSYN(false)
+	original, err := parseIPPacket(syn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rewriteIPPacket(syn, original.Source, netip.MustParseAddrPort("198.19.200.100:443")); err != nil {
+		t.Fatal(err)
+	}
+	if err := i.handlePacket(syn, packetMetadata{outbound: true}); err != nil {
+		t.Fatal(err)
+	}
+	sent := expectInterceptedPacket(t, device)
+	if !sent.meta.outbound {
+		t.Fatal("FakeIP-off mode diverted an unrelated reserved-range destination")
+	}
+	packet, err := parseIPPacket(sent.data)
+	if err != nil || packet.Destination != netip.MustParseAddrPort("198.19.200.100:443") {
+		t.Fatalf("FakeIP-off mode rewrote a real destination: %+v %v", packet, err)
+	}
+}

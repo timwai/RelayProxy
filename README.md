@@ -744,6 +744,12 @@ GUI 支持：
 
 ## 本地 Web
 
+Agent Web、Windows Wails GUI 与 macOS 桌面管理窗口共用同一套 React UI。浏览器中的配置保存、出口切换、分流规则、RDP、消息及实时监控仍通过 Agent 本地 HTTP API 执行，不依赖 Wails Runtime。
+
+正式发布请使用 `scripts/build.sh` 或 `scripts/build.ps1`，构建脚本会**先编译 React 前端，再编译所有平台的 Agent**，将 Vite 产物直接嵌入二进制，无需部署额外的静态文件。若直接使用 `go build`，应先在 `agent/gui/frontend` 中执行 `npm install && npm test && npm run build`；否则仅会使用 Go 开发构建的旧版后备页面。
+
+原有 `/connections` 链接在 React 产物存在时会进入新版“实时监控”页面；`/?page=monitor` 也可直接打开该页面。
+
 Agent 默认同时启动：
 
 ```text

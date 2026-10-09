@@ -489,6 +489,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Revision != nil && *in.Revision != revision {
 		return nil, fmt.Errorf("配置已被其他操作修改，请重新载入后再保存")
 	}
+	// Retain the complete pre-save snapshot so a failed runtime publication
+	// does not leave a valid-looking disk policy that never became active.
+	previousConfig := config.CloneAgentConfig(cfg)
 
 	if in.Server.Address != nil {
 		addr := strings.TrimSpace(*in.Server.Address)
@@ -781,16 +784,26 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		revision = config.AgentConfigRevision(cfg)
 	}
-	// The same validators ran before persistence. Publish both policy sets only
-	// after saving; mode, credentials and ACL remain the actual startup values.
+	// Apply the routing policy, local exit inventory and selected default as
+	// one bundle. Rules in the same save may refer to a newly created exit.
 	dcfg := cfg.DivertConfig()
 	dcfg.Mode = b.agent.Config().NetworkMode
-	if err := b.agent.ApplyPolicies(cfg.Routing, dcfg); err != nil {
-		return nil, fmt.Errorf("配置已保存在磁盘，但应用失败: %w", err)
+	if err := b.agent.ApplyClientConfig(cfg.Routing, dcfg, cfg.Proxy.CustomExits, cfg.Proxy.DefaultExitID); err != nil {
+		var rollbackErrors []error
+		if !reload {
+			if restoreErr := b.writeConfig(path, previousConfig); restoreErr != nil {
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("恢复保存前的配置失败: %w", restoreErr))
+			}
+		}
+		if rollbackAutoStart != nil {
+			if restoreErr := rollbackAutoStart(); restoreErr != nil {
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("恢复开机自启配置失败: %w", restoreErr))
+			}
+		}
+		return nil, errors.Join(append([]error{fmt.Errorf("配置未应用: %w", err)}, rollbackErrors...)...)
 	}
-	if err := b.agent.ApplyCustomExits(cfg.Proxy.CustomExits); err != nil {
-		return nil, fmt.Errorf("配置已保存，但更新自定义出口失败: %w", err)
-	}
+	// A selected Relay exit may need background path setup. This runs after
+	// atomic policy publication and does not change the routing snapshot.
 	b.agent.SelectExit(cfg.Proxy.DefaultExitID)
 	state := b.configState(cfg, revision)
 	message := "配置已保存，规则已应用。"

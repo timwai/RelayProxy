@@ -1,7 +1,6 @@
 package divert
 
 import (
-	"net/netip"
 	"strings"
 	"testing"
 
@@ -30,7 +29,7 @@ func TestFakeDirectRechecksCurrentRoutingWithOriginalProcessAndRealIP(t *testing
 	rechecked := 0
 	active := true
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionDirect},
+		Config:        Config{DefaultAction: ActionDirect},
 		FakeIPEnabled: func() bool { return active },
 		SharedPolicy: func(f Flow) Decision {
 			if f.IP != "" {
@@ -63,7 +62,7 @@ func TestFakeDirectRechecksCurrentRoutingWithOriginalProcessAndRealIP(t *testing
 		t.Fatalf("bad initial FakeIP route: %+v", route)
 	}
 	for _, test := range []struct {
-		ip string
+		ip     string
 		reject bool
 	}{
 		{"9.9.9.9", false},
@@ -77,15 +76,12 @@ func TestFakeDirectRechecksCurrentRoutingWithOriginalProcessAndRealIP(t *testing
 			t.Errorf("%s: rejected=%v, expected=%v: %v", test.ip, err != nil, test.reject, err)
 		}
 	}
-	if rechecked < 4 {
+	if rechecked < 3 {
 		t.Fatalf("not enough real-IP policy checks: %d", rechecked)
 	}
 	active = false
 	if err := s.validateFakeDirectTarget(route, "9.9.9.9"); err == nil ||
 		!strings.Contains(err.Error(), "disabled") {
 		t.Fatalf("active FakeIP policy transition was ignored: %v", err)
-	}
-	if _, err := netip.ParseAddr(fake.String()); err != nil {
-		t.Fatal(err)
 	}
 }

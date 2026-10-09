@@ -406,14 +406,7 @@ func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port 
 		}
 		ip, parseErr := netip.ParseAddr(strings.Trim(host, "[]"))
 		if parseErr != nil {
-			ips, lookupErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if lookupErr != nil {
-				return nil, fmt.Errorf("resolve SOCKS5 UDP relay host: %w", lookupErr)
-			}
-			if len(ips) == 0 {
-				return nil, errors.New("resolve SOCKS5 UDP relay host: no addresses")
-			}
-			ip = ips[0]
+			return nil, fmt.Errorf("SOCKS5 UDP relay peer has no literal IP; refusing local DNS lookup: %w", parseErr)
 		}
 		relay = netip.AddrPortFrom(ip.Unmap(), relay.Port())
 	}

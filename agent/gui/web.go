@@ -308,7 +308,14 @@ func serveReactAsset(rw http.ResponseWriter, r *http.Request) {
 	_, _ = rw.Write(data)
 }
 
-func (w *WebServer) serveConnections(rw http.ResponseWriter, _ *http.Request) {
+func (w *WebServer) serveConnections(rw http.ResponseWriter, r *http.Request) {
+	// Existing bookmarks should open the React live monitor, rather than
+	// falling back to the old standalone connections page. Keep the legacy
+	// view available in Go-only developer builds without a Vite bundle.
+	if _, err := assets.ReadFile("react_dist/index.html"); err == nil {
+		http.Redirect(rw, r, "/?page=monitor", http.StatusSeeOther)
+		return
+	}
 	serveHTMLAsset(rw, "assets/connections.html")
 }
 

@@ -13,8 +13,8 @@ import (
 var linuxIndependentGuardCache struct {
 	sync.Mutex
 	checked time.Time
-	status string
-	detail string
+	status  string
+	detail  string
 }
 
 // Checking once per refresh would fork nft on every UI poll. Cache for 15

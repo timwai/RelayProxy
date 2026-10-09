@@ -406,42 +406,52 @@ func TestConnectionsPageSupportsStatusFilterClearAndNewestFirst(t *testing.T) {
 
 	page := httptest.NewRecorder()
 	handler.ServeHTTP(page, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/connections", nil))
-	if page.Code != http.StatusOK {
+	if !hasBuiltReactWebUI() && page.Code != http.StatusOK {
 		t.Fatalf("connections page status = %d", page.Code)
 	}
-	for _, want := range []string{
-		`id="state-filter"`,
-		`value="connecting"`,
-		`value="active"`,
-		`value="closed"`,
-		`value="failed"`,
-		`value="rejected"`,
-		`id="clear"`,
-		`data-sort="started_at"`,
-		`.state.connecting`,
-		`.state.active`,
-		`.state.closed`,
-		`.state.failed`,
-		`.state.rejected`,
-	} {
-		if !strings.Contains(page.Body.String(), want) {
-			t.Fatalf("connections page missing %q", want)
+	if hasBuiltReactWebUI() {
+		// The legacy entrypoint is now a bookmark for the React monitor.
+		if page.Code != http.StatusSeeOther {
+			t.Fatalf("React connections bookmark status = %d, want 303", page.Code)
 		}
-	}
-
-	script := httptest.NewRecorder()
-	handler.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/connections.js", nil))
-	for _, want := range []string{
-		"sort = 'started_at'",
-		"state !== 'all' && row.state !== state",
-		"window.goClearConnections",
-		"startedAt(record.started_at)",
-	} {
-		if !strings.Contains(script.Body.String(), want) {
-			t.Fatalf("connections script missing %q", want)
+		if got := page.Header().Get("Location"); got != "/?page=monitor" {
+			t.Fatalf("React connections bookmark location = %q", got)
 		}
-	}
+	} else {
+		for _, want := range []string{
+			`id="state-filter"`,
+			`value="connecting"`,
+			`value="active"`,
+			`value="closed"`,
+			`value="failed"`,
+			`value="rejected"`,
+			`id="clear"`,
+			`data-sort="started_at"`,
+			`.state.connecting`,
+			`.state.active`,
+			`.state.closed`,
+			`.state.failed`,
+			`.state.rejected`,
+		} {
+			if !strings.Contains(page.Body.String(), want) {
+				t.Fatalf("connections page missing %q", want)
+			}
+		}
 
+		script := httptest.NewRecorder()
+		handler.ServeHTTP(script, httptest.NewRequest(http.MethodGet, "http://127.0.0.1/connections.js", nil))
+		for _, want := range []string{
+			"sort = 'started_at'",
+			"state !== 'all' && row.state !== state",
+			"window.goClearConnections",
+			"startedAt(record.started_at)",
+		} {
+			if !strings.Contains(script.Body.String(), want) {
+				t.Fatalf("connections script missing %q", want)
+			}
+		}
+
+	}
 	clear := httptest.NewRecorder()
 	handler.ServeHTTP(clear, httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/api/connections", nil))
 	if clear.Code != http.StatusOK || !strings.Contains(clear.Body.String(), `"ok":true`) {

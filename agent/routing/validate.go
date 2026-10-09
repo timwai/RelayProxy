@@ -1,6 +1,9 @@
 package routing
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // ValidateConfig checks disabled rules too, so enabling one cannot widen a
 // malformed selector into an accidental catch-all.
@@ -21,6 +24,9 @@ func ValidateConfig(cfg Config) error {
 	}
 	if cfg.ForwardOtherDNS && !cfg.FakeIPEnabled {
 		return fmt.Errorf("routing.forward_other_dns requires routing.fake_ip_enabled")
+	}
+	if cfg.DNSExitID != "" && (strings.TrimSpace(cfg.DNSExitID) != cfg.DNSExitID || strings.ContainsAny(cfg.DNSExitID, " \\t\\r\\n/\\\\") || len(cfg.DNSExitID) > 128) {
+		return fmt.Errorf("routing.dns_exit_id: invalid proxy exit identifier")
 	}
 	validAction := func(a Action) bool { return a == ActionProxy || a == ActionDirect || a == ActionReject }
 	if cfg.DefaultAction != "" && !validAction(cfg.DefaultAction) {

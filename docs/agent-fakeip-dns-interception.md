@@ -63,7 +63,7 @@ Android：VPN Service 已声明支持系统 **Always-on VPN**，系统重启服�
 
 ## DNS 防护诊断证据
 
-Agent「诊断与日志」新增 DNS 安全状态：FakeIP 策略开关、内核 DNS 队列模式、局部更新失败，以及独立 Kill Switch 查询结果。Linux 通过限时缓存的 `nft list table inet relayproxy_dns_guard` 判断是否观察到阻断规则；无权限、无命令、无匹配规则时分别标注无法验证或规则不完整。Windows/macOS 明确显示未验证，不把 WFP 规则、NE 标记等同于系统级认证。
+Agent「诊断与日志」新增 DNS 安全状态：FakeIP 策略开关、内核 DNS 队列模式、局部更新失败，以及独立 Kill Switch 查询结果。Linux 通过限时缓存的 `nft list table inet relayproxy_dns_guard` 检查 DNS 出站规则，并检查独立 `relayproxy-dns-killswitch.service` 是否启用且运行；服务缺失/不可用则标为持久性未验证。Windows 通过 PowerShell 检查 ActiveStore/PersistentStore 内的 TCP/UDP 阻断规则及端口、启用状态；macOS 标为未验证。所有结果都不等同于系统级零泄漏认证。
 
 诊断中的 `rules-present` 仅代表观察到独立阻断规则：无法证明其下次重启前生效、iptables/nftables 优先级配置正确、其他网络命名空间也受保护，或 DoH/443 无泄漏。要达到强保障，需按平台测试 DNS/53、853、DoH/443、环回解析、Agent 异常退出、IPv6、切换出口和重启后的网络路径。
 

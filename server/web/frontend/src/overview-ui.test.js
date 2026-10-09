@@ -39,3 +39,11 @@ test('overview polling uses real endpoints and bounded history',()=>{
  assert.match(dashboard,/appendSample\(old,packet\.sample\)/);
  assert.doesNotMatch(dashboard,/Math\.random\(/);
 });
+
+test('cards use neutral borders without decorative colored edge stripes',()=>{
+ assert.doesNotMatch(css,/\.card-title-area::before/);
+ assert.doesNotMatch(css,/#root \.channel-card\{border-top:3px/);
+ assert.doesNotMatch(css,/#root \.exit-card\{border-top:3px/);
+ assert.doesNotMatch(css,/#root \.rule-card\{border-left:3px/);
+ assert.match(css,/#root \.card\{border-color:/);
+});

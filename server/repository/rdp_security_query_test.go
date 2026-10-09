@@ -46,6 +46,9 @@ func TestRDPSourceGroupsDeviceNamesPagingAndClear(t *testing.T) {
 		t.Fatalf("bad second page: %+v", second)
 	}
 	g := second.Items[0]
+	if !g.FirstSeen.Equal(now.Add(-time.Minute)) || !g.LastSeen.Equal(now.Add(-30*time.Second)) {
+		t.Fatalf("RDP grouped timestamps must retain real dates, got first=%s last=%s", g.FirstSeen, g.LastSeen)
+	}
 	if g.ConnectionCount != 2 || g.ForwardedCount != 1 || g.RejectedCount != 1 ||
 		g.BytesUp != 1024 || len(g.Targets) != 1 || g.Targets[0] != "工作机,一号" {
 		t.Fatalf("bad grouped data: %+v", g)
@@ -126,5 +129,45 @@ func TestRDPSecurityRetiredWindowsAuditSchemaCleaned(t *testing.T) {
 	}
 	if rules != 0 {
 		t.Fatal("retired Windows audit rule still exists")
+	}
+}
+
+func TestParseRDPStoredTimestampFormats(t *testing.T) {
+	for _, input := range []any{
+		"2026-10-09T12:34:56Z",
+		"2026-10-09 12:34:56 +0000 UTC",
+		"2026-10-09 12:34:56.000000000 +0000 UTC",
+		"2026-10-09 12:34:56",
+		[]byte("2026-10-09 12:34:56"),
+		time.Date(2026, time.October, 9, 12, 34, 56, 0, time.UTC),
+	} {
+		instant, err := parseRDPStoredTimestamp(input)
+		if err != nil || instant.Year() != 2026 || instant.Hour() != 12 {
+			t.Fatalf("%v: got %v, %v", input, instant, err)
+		}
+	}
+	for _, invalid := range []any{nil, "", "not a date", "1970-01-01T00:00:00Z"} {
+		if got, err := parseRDPStoredTimestamp(invalid); err == nil {
+			t.Fatalf("accepted invalid %v as %v", invalid, got)
+		}
+	}
+}
+
+func TestRDPSourceGroupsHistoricalTimestampDoesNotFallbackToUnixEpoch(t *testing.T) {
+	t.Setenv("RELAY_ADMIN_PASSWORD", "test-password")
+	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "legacy-rdp-date.db"))
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	// Go's time.Time string format may not be understood by SQLite strftime.
+	_, err = db.Exec(`INSERT INTO rdp_security_logs
+		(id,ingress_id,target_device_id,source_ip,transport,result,reason,started_at,ended_at,bytes_up,bytes_down)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		"older-format", "rdp-entry", "target", "203.0.113.40", "tcp", "FORWARDED", "",
+		"2026-10-09 12:34:56 +0000 UTC", "2026-10-09 12:34:56 +0000 UTC", 1, 2)
+	if err != nil { t.Fatal(err) }
+	page, err := db.ListRDPSecuritySourceGroups("", 1, 20)
+	if err != nil { t.Fatal(err) }
+	if len(page.Items) != 1 || page.Items[0].FirstSeen.Year() != 2026 || page.Items[0].LastSeen.Year() != 2026 {
+		t.Fatalf("wrong historical RDP dates: %+v", page)
 	}
 }

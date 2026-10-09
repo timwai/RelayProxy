@@ -20,3 +20,9 @@ test('message URLs use Relay TCP listener rather than Admin HTTP port',()=>{
   assert.equal(pushURL('channel.A',{tcpListen:':20800',tlsEnabled:true},'relay.example.com'),'https://relay.example.com:20800/api/v1/push/channel.A');
   assert.equal(pushURL('name 1',{tcpListen:':80',tlsEnabled:false},'127.0.0.1'),'http://127.0.0.1/api/v1/push/name%201');
 });
+import {fmtDate} from './api.js';
+test('RDP audit timestamps never render missing/epoch as an event', () => {
+  for(const invalid of [null,'',0,'1970-01-01T00:00:00Z','not a date'])
+    assert.equal(fmtDate(invalid),'—');
+  assert.match(fmtDate('2026-10-09T12:34:56Z'),/2026/);
+});

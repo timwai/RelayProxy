@@ -16,7 +16,13 @@ export async function api(path, options={}) {
 }
 export const json = (method, body) => ({ method, body: JSON.stringify(body) });
 export const list = x => Array.isArray(x) ? x : [];
-export const fmtDate = x => x && !Number.isNaN(Date.parse(x)) ? new Date(x).toLocaleString('zh-CN', {hour12:false}) : '—';
+export function fmtDate(x) {
+  if(x == null || x === '' || x === 0) return '—';
+  const parsed = x instanceof Date ? x : new Date(x);
+  // Unix epoch / zero timestamps represent missing audit data, not an event.
+  if(!Number.isFinite(parsed.getTime()) || parsed.getTime()<=0) return '—';
+  return parsed.toLocaleString('zh-CN',{hour12:false});
+}
 export function fmtBytes(value) { let n = Math.max(0,Number(value)||0),i=0;const units=['B','KiB','MiB','GiB','TiB'];while(n>=1024&&i<units.length-1){n/=1024;i++;}return `${n.toFixed(i?1:0)} ${units[i]}`; }
 export const localDate = v => v ? new Date(new Date(v).getTime()-new Date(v).getTimezoneOffset()*60000).toISOString().slice(0,16) : '';
 export const isoDate = v => v ? new Date(v).toISOString() : '';

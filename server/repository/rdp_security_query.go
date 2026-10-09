@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -54,7 +55,7 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 		COUNT(*), SUM(CASE WHEN l.result = 'FORWARDED' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN l.result = 'REJECTED' THEN 1 ELSE 0 END),
 		COALESCE(SUM(l.bytes_up),0), COALESCE(SUM(l.bytes_down),0),
-		COALESCE(MIN(CAST(strftime('%s',l.started_at) AS INTEGER)),0),COALESCE(MAX(CAST(strftime('%s',l.started_at) AS INTEGER)),0)
+		MIN(l.started_at),MAX(l.started_at)
 		FROM rdp_security_logs l
 		LEFT JOIN devices d ON d.id = l.target_device_id
 		WHERE instr(l.source_ip, ?) > 0
@@ -69,13 +70,19 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 	for rows.Next() {
 		var item RDPSourceGroup
 		var targets string
-		var firstSec, lastSec int64
+		var firstRaw, lastRaw any
 		if err := rows.Scan(&item.SourceIP, &targets, &item.ConnectionCount, &item.ForwardedCount,
-			&item.RejectedCount, &item.BytesUp, &item.BytesDown, &firstSec, &lastSec); err != nil {
+			&item.RejectedCount, &item.BytesUp, &item.BytesDown, &firstRaw, &lastRaw); err != nil {
 			return nil, err
 		}
-		item.FirstSeen = time.Unix(firstSec, 0).UTC()
-		item.LastSeen = time.Unix(lastSec, 0).UTC()
+		item.FirstSeen, err = parseRDPStoredTimestamp(firstRaw)
+		if err != nil {
+			return nil, fmt.Errorf("source %q first RDP connection: %w", item.SourceIP, err)
+		}
+		item.LastSeen, err = parseRDPStoredTimestamp(lastRaw)
+		if err != nil {
+			return nil, fmt.Errorf("source %q latest RDP connection: %w", item.SourceIP, err)
+		}
 		item.Targets = []string{}
 		if targets != "" {
 			if err := json.Unmarshal([]byte(targets), &item.Targets); err != nil {
@@ -85,6 +92,45 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 		output.Items = append(output.Items, item)
 	}
 	return output, rows.Err()
+}
+
+
+ // parseRDPStoredTimestamp accepts SQLite's actual stored TIMESTAMP text.
+ // strftime('%s', timestamp) can silently return NULL for driver-serialized
+ // Go values such as "2026-10-09 12:00:00 +0000 UTC"; treating NULL as zero
+ // incorrectly showed the Unix epoch in the grouped audit.
+func parseRDPStoredTimestamp(value any) (time.Time, error) {
+	if instant, ok := value.(time.Time); ok {
+		if instant.IsZero() || instant.Unix() <= 0 {
+			return time.Time{}, errors.New("missing RDP audit timestamp")
+		}
+		return instant.UTC(), nil
+	}
+	var raw string
+	switch typed := value.(type) {
+	case string:
+		raw = typed
+	case []byte:
+		raw = string(typed)
+	default:
+		return time.Time{}, fmt.Errorf("unsupported RDP audit timestamp type %T", value)
+	}
+	raw = strings.TrimSpace(raw)
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999999 -0700",
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05.999999999",
+		"2006-01-02T15:04:05",
+	} {
+		if instant, err := time.Parse(layout, raw); err == nil && instant.Unix() > 0 {
+			return instant.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("invalid RDP audit timestamp %q", raw)
 }
 
 // ListRDPSecurityLogPage returns source-specific connection details with the

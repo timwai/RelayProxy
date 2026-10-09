@@ -11,7 +11,7 @@ type stubDNSCaptureInterceptor struct {
 	fail    bool
 }
 
-func (s *stubDNSCaptureInterceptor) Running() bool     { return true }
+func (s *stubDNSCaptureInterceptor) Running() bool      { return true }
 func (s *stubDNSCaptureInterceptor) ListenAddr() string { return "" }
 func (s *stubDNSCaptureInterceptor) Close()             {}
 func (s *stubDNSCaptureInterceptor) SyncPlatformDNSCapture(enabled bool) error {

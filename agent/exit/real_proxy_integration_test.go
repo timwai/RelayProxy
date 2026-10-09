@@ -109,7 +109,6 @@ func TestLiveDanteTCPAndUDP(t *testing.T) {
 	}
 }
 
-
 // TestLiveTinyproxyHTTPConnect verifies a separately running HTTP proxy,
 // including real Basic authentication and refusal of invalid credentials.
 // Tinyproxy runs only on localhost in CI; no public web endpoints are used.

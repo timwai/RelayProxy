@@ -499,6 +499,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			FakeIPEnabled:     engine.FakeIPEnabled,
 			BlockDoHEndpoints: engine.BlockDoHEndpoints,
 			ForwardOtherDNS:   engine.ForwardOtherDNS,
+			DNSExitID:        engine.DNSExitID,
 			ProxyReady: func() bool {
 				return a.handshakeOK.Load()
 			},

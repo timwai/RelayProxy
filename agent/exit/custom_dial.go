@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/netip"
 	"strconv"
 	"time"
 )
@@ -32,8 +31,9 @@ func DialViaUpstreamTCP(ctx context.Context, upstream UpstreamConfig, host strin
 	}
 }
 
-// DialViaUpstreamUDP requires a literal IP target. Refusing hostname targets
-// is preferable to accidentally resolving them via the local DNS resolver.
+// DialViaUpstreamUDP sends IPv4, IPv6 or a domain name as the SOCKS5 UDP
+// destination (ATYP 0x01/0x04/0x03 respectively). Destination DNS resolution
+// belongs to the upstream SOCKS5 server, never to the local Agent.
 func DialViaUpstreamUDP(ctx context.Context, upstream UpstreamConfig, host string, port uint16) (net.PacketConn, error) {
 	if err := ValidateUpstreamConfig(upstream); err != nil {
 		return nil, err
@@ -41,13 +41,9 @@ func DialViaUpstreamUDP(ctx context.Context, upstream UpstreamConfig, host strin
 	if upstream.Mode != UpstreamSOCKS5 {
 		return nil, fmt.Errorf("custom %s proxy does not support UDP", upstream.Mode)
 	}
-	addr, err := netip.ParseAddr(host)
-	if err != nil {
-		return nil, fmt.Errorf("SOCKS5 UDP requires an IP target (no local DNS fallback): %s", host)
-	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	conn, err := dialSOCKS5UDP(ctx, upstream, netip.AddrPortFrom(addr.Unmap(), port))
+	conn, err := dialSOCKS5UDPTo(ctx, upstream, host, port)
 	if err != nil {
 		return nil, err
 	}

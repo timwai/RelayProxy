@@ -9,7 +9,7 @@ const chartCss=readFileSync(new URL('./overview-charts.css',import.meta.url),'ut
 
 test('brand uses official existing web asset on login and navigation',()=>{
  assert.match(app,/function BrandMark\(/);
- assert.match(app,/src="\/img\/logo\.png"/);
+ assert.match(app,/src="\/img\/logo\.svg"/);
  assert.match(app,/<BrandMark login\/>/);
  assert.match(app,/<BrandMark\/>/);
 });

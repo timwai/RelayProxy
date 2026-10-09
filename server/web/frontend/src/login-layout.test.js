@@ -21,3 +21,18 @@ test('compact login page fits phones without horizontal overflow',()=>{
  assert.ok(css.includes('grid-template-columns:1fr;overflow:visible'));
  assert.match(css,/#root \.login-promo\{[^}]*padding/);
 });
+test('full-bleed login fills the viewport rather than a centered card',()=>{
+ assert.match(css,/#root \.login-screen\{[^}]*width:100vw;height:100dvh/);
+ assert.match(css,/#root \.login-shell\{[^}]*grid-template-columns:minmax\(0,55fr\) minmax\(0,45fr\)/);
+ assert.match(css,/#root \.login-shell\{[^}]*border-radius:0;box-shadow:none/);
+ assert.match(css,/#root \.login-card > form/);
+});
+test('brand mark is actual SVG vector art, reused in login and navigation',()=>{
+ assert.match(app,/src="\/img\/logo\.svg"/);
+ assert.doesNotMatch(app,/src="\/img\/logo\.png"/);
+ const mark=readFileSync(new URL('../../img/logo.svg',import.meta.url),'utf8');
+ assert.match(mark,/<svg[^>]*viewBox="0 0 64 64"/);
+ assert.match(mark,/<path[^>]*stroke=/);
+ assert.doesNotMatch(mark,/<image\b|data:image\//);
+});
+

@@ -18,9 +18,9 @@ func makeTLSClientHelloForTest(host string) []byte {
 	binary.BigEndian.PutUint16(ext[2:4], uint16(len(names)))
 	copy(ext[4:], names)
 	hello := append([]byte{3, 3}, make([]byte, 32)...)
-	hello = append(hello, 0) // session id
+	hello = append(hello, 0)                // session id
 	hello = append(hello, 0, 2, 0x13, 0x01) // cipher suites
-	hello = append(hello, 1, 0) // compression methods
+	hello = append(hello, 1, 0)             // compression methods
 	hello = append(hello, byte(len(ext)>>8), byte(len(ext)))
 	hello = append(hello, ext...)
 	handshake := append([]byte{1, byte(len(hello) >> 16), byte(len(hello) >> 8), byte(len(hello))}, hello...)
@@ -31,7 +31,7 @@ func makeTLSClientHelloForTest(host string) []byte {
 func TestApplicationHostnameExtraction(t *testing.T) {
 	cases := []struct {
 		name, source, expected string
-		payload []byte
+		payload                []byte
 	}{
 		{"tls", "tls-sni", "play.google.com", makeTLSClientHelloForTest("Play.Google.Com")},
 		{"http", "http-host", "play.google.com", []byte("GET /x HTTP/1.1\r\nHost: Play.Google.Com:80\r\nConnection: close\r\n\r\n")},

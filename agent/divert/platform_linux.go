@@ -377,6 +377,7 @@ type linuxFirewall struct {
 	// must never assume the two families changed atomically.
 	dnsRuleStates map[string]bool
 	dnsMu     sync.Mutex
+	dnsClosed bool
 	closeOnce sync.Once
 	closeErr  error
 }
@@ -469,6 +470,9 @@ func (f *linuxFirewall) installFamily(binary string, relayIPs []string) error {
 func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
 	f.dnsMu.Lock()
 	defer f.dnsMu.Unlock()
+	if f.dnsClosed {
+		return net.ErrClosed
+	}
 	if f.dnsRuleStates == nil {
 		f.dnsRuleStates = make(map[string]bool, 4)
 		for _, family := range []string{f.iptables, f.ip6tables} {
@@ -592,6 +596,9 @@ func (f *linuxFirewall) Close() error {
 		return nil
 	}
 	f.closeOnce.Do(func() {
+		f.dnsMu.Lock()
+		defer f.dnsMu.Unlock()
+		f.dnsClosed = true
 		for _, binary := range []string{f.ip6tables, f.iptables} {
 			f.closeErr = errors.Join(f.closeErr, f.removeFamily(binary))
 		}

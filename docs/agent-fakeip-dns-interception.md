@@ -58,8 +58,14 @@ Android：VPN Service 已声明支持系统 **Always-on VPN**，系统重启服�
 
 - **FakeIP DIRECT 二次校验**：经所选出口的 TLS DNS 解析得到真实 IP 后，拒绝环回、RFC1918、链路本地、CGNAT、文档/保留地址、FakeIP 段等非公网目标；使用原始进程、域名、端口和新 IP 再匹配全量分流规则，真实 IP 命中 PROXY/REJECT 不允许绕过。如果目标和 Relay/本地监听器回环保护冲突也拒绝。DNS 解析或复核失败时不走系统明文 DNS，也不直接发送占位 IP。
 - **DNS 专用出口**：新增 `routing.dns_exit_id`。经代理的加密 DNS 查询使用优先级：原连接明确指定的出口 → DNS 专用出口 → 当前默认出口。TXT/SRV 查询发生在应用连接建立前，通常没有可靠进程身份；只能使用显式 DNS 出口或默认出口，不能宣称跨进程 DNS 身份完全隔离。指定不存在/停用的本机自定义 DNS 出口时拒绝加载或热更新配置。
-- **Linux 按模式切换 DNS 队列**：FakeIP 关闭时 DNS/53 NFQUEUE 使用 `--queue-bypass`，避免普通模式 NFQUEUE 故障导致 DNS 意外黑洞；FakeIP 启用时移除该标志（内核队列存在期间失败关闭）。路由配置热更新后尝试同步替换 IPv4/IPv6 队列规则，失败在诊断日志中显示。异步规则切换过程中仍可能有短暂的系统窗口，不能将此模式当作独立持久 Kill Switch。
+- **Linux 按模式同步切换 DNS 队列**：FakeIP 关闭时 DNS/53 NFQUEUE 使用 `--queue-bypass`；启用 FakeIP 前，在共享策略锁内先安装无旁路 DNS 规则，再发布 FakeIP 策略。关闭时先发布普通策略、后放宽内核规则。逐项记录 IPv4/IPv6 × TCP/UDP 四条规则的更新结果，部分失败不会宣称完全成功，后续仅重试失败项。防火墙关闭时禁止后台线程重新写入。**iptables 更新并非系统级原子事务**；若内核规则被第三方删除，或 Agent/驱动清理拦截器，没有独立 Kill Switch 仍可能泄漏。
 - 这些改动并不解决应用通过硬编码 IP 的 DoH、操作系统未交付的环回 DNS、或平台级防火墙优先级差异；严格模式必须使用独立 Kill Switch 并配合真实系统验收。
+
+## DNS 防护诊断证据
+
+Agent「诊断与日志」新增 DNS 安全状态：FakeIP 策略开关、内核 DNS 队列模式、局部更新失败，以及独立 Kill Switch 查询结果。Linux 通过限时缓存的 `nft list table inet relayproxy_dns_guard` 判断是否观察到阻断规则；无权限、无命令、无匹配规则时分别标注无法验证或规则不完整。Windows/macOS 明确显示未验证，不把 WFP 规则、NE 标记等同于系统级认证。
+
+诊断中的 `rules-present` 仅代表观察到独立阻断规则：无法证明其下次重启前生效、iptables/nftables 优先级配置正确、其他网络命名空间也受保护，或 DoH/443 无泄漏。要达到强保障，需按平台测试 DNS/53、853、DoH/443、环回解析、Agent 异常退出、IPv6、切换出口和重启后的网络路径。
 
 ## 尚不能宣称完整的零泄漏能力
 

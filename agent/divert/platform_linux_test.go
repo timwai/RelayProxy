@@ -5,6 +5,8 @@ package divert
 import (
 	"bufio"
 	"context"
+	"errors"
+	"net"
 	"net/netip"
 	"reflect"
 	"strings"
@@ -183,6 +185,70 @@ func TestLinuxDNSQueueNormalModeAndHotUpdates(t *testing.T) {
 		if command[len(command)-1] != "--queue-bypass" {
 			t.Fatalf("normal mode DNS queue should not blackhole when NFQUEUE exits: %v", command)
 		}
+	}
+}
+
+func TestLinuxDNSGuardPartialReplacementRetriesOnlyFailedRules(t *testing.T) {
+	var commands [][]string
+	failOne := true
+	f := &linuxFirewall{
+		iptables: "iptables", ip6tables: "ip6tables",
+		run: func(binary string, args ...string) error {
+			command := append([]string{binary}, args...)
+			commands = append(commands, command)
+			if failOne && binary == "ip6tables" && len(args) > 9 && args[4] == "4" {
+				failOne = false
+				return errors.New("injected IPv6 UDP rule failure")
+			}
+			return nil
+		},
+	}
+	if err := f.setDNSGuardMode(true); err == nil {
+		t.Fatal("partially updated DNS firewall was reported as protected")
+	}
+	if f.dnsGuard {
+		t.Fatal("partial DNS guard must not claim a complete state")
+	}
+	if len(commands) != 4 {
+		t.Fatalf("initial transition must attempt all families: %v", commands)
+	}
+	if len(f.dnsRuleStates) != 4 || f.dnsRuleStates["ip6tables/udp"] {
+		t.Fatalf("failed rule was incorrectly marked installed: %+v", f.dnsRuleStates)
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(true); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || commands[0][0] != "ip6tables" {
+		t.Fatalf("partial transition retried already committed rules: %v", commands)
+	}
+	if !f.dnsGuard {
+		t.Fatal("all four protected rules installed but state not updated")
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(false); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 4 || f.dnsGuard {
+		t.Fatalf("normal mode did not restore all four rules: %+v", commands)
+	}
+}
+
+func TestLinuxDNSGuardCannotReinstallAfterFirewallClose(t *testing.T) {
+	var calls int
+	f := &linuxFirewall{
+		iptables: "iptables", ip6tables: "ip6tables",
+		run: func(string, ...string) error { calls++; return nil },
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := calls
+	if err := f.setDNSGuardMode(true); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("closed firewall was modified: %v", err)
+	}
+	if calls != before {
+		t.Fatalf("closed firewall issued %d new commands", calls-before)
 	}
 }
 

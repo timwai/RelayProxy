@@ -12,10 +12,18 @@ routing:
 
 - 在 Agent React UI 的「分流规则 → 全局策略」选择「由代理解析」，再打开「FakeIP 接管 DNS（实验性）」；本机 DNS 模式与 FakeIP 不可同时开启。
 - 捕获 UDP/53 请求会就地合成 A/AAAA 答案；TCP/53 遵循 RFC 7766 两字节长度帧，在本地 TCP 反射连接或 macOS IPC 内响应，**不转发原始 DNS 查询**。
-- A 使用 198.18.0.0/15，AAAA 使用 2001:db8:198:18::/96。返回 TTL 60 秒，Agent 映射保留最多 15 分钟；每个实例最多保留 32768 条同时有效的映射。过期/未知的占位地址永不直连公网。
+- A 使用 198.18.0.0/15，AAAA 使用 2001:db8:198:18::/96。返回 TTL 60 秒，Agent 映射保留最多 15 分钟；每个实例最多保留 32768 条同时有效的映射。容量耗尽时先回收过期记录，但**同一次 Agent 运行过程中不把过期 FakeIP 分配给其他域名**，避免旧缓存错误分流。IPv4 在运行期间最多签发 131070 个不同地址，签发空间耗尽时返回 SERVFAIL，不会在空间里循环复用。
+- FakeIP 模式关闭后仅防护本次运行中已签发的占位地址；没有签发过的 198.18.0.0/15 测试网络流量继续按普通规则处理。
+- RFC 6761 的 `localhost` 和 `*.localhost` 直接返回 127.0.0.1/::1，`invalid` 和 `*.invalid` 返回 NXDOMAIN，均不分配 FakeIP 或请求上游 DNS。
 - 命中 FakeIP 的连接先映射回域名，按域名分流，IP/CIDR 规则不匹配占位地址。PROXY 流量发送域名给上游，避免本地查询。遇到 Relay 不可用或 FakeIP 对应 DIRECT 规则时，为避免占位地址被直连，当前采取拒绝而不是不安全回退。
 - Relay 服务端的域名解析仅通过启动时已知的 relay IP 回应，缺少该信息时返回 SERVFAIL；不通过正常系统 DNS 查询来突破拦截。
 - 未支持的 DNS RR 类型、畸形数据、已知专用加密 DNS 出口 TCP/UDP 853、784、8853 会拒绝或丢弃，不悄悄走本机 DNS。
+
+## 已补充的平台防泄漏防线
+
+- Windows：在 WinDivert 的 Relay-IP 过滤例外之外另有 DNS/53 捕获规则，避免发往 Relay 同一 IP 的 DNS 请求绕过 FakeIP 判定；现有普通 TCP 反射和 Relay 控制流量豁免保持不变。
+- Linux：在 Relay-IP bypass 之前先通过 NFQUEUE 捕获 TCP/UDP 53；这些 DNS 队列规则**没有 `--queue-bypass`**，因而在 iptables 规则仍安装但 NFQUEUE 进程故障时 DNS/53 将被内核丢弃，而不是逃逸。普通非 DNS 规则仍按原来的可用性策略执行。
+- 以上保护不能替代**独立、持久的系统防火墙规则**：Agent 正常退出会清理 Linux 的 NFQUEUE/iptables 规则，Windows/macOS 仍有环回和未接管路径。不能把它称为跨平台 Kill Switch。
 
 ## 尚不能宣称完整的零泄漏能力
 

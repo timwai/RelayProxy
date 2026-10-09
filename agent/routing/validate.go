@@ -19,6 +19,9 @@ func ValidateConfig(cfg Config) error {
 	if cfg.BlockDoHEndpoints && !cfg.FakeIPEnabled {
 		return fmt.Errorf("routing.block_doh_endpoints requires routing.fake_ip_enabled")
 	}
+	if cfg.ForwardOtherDNS && !cfg.FakeIPEnabled {
+		return fmt.Errorf("routing.forward_other_dns requires routing.fake_ip_enabled")
+	}
 	validAction := func(a Action) bool { return a == ActionProxy || a == ActionDirect || a == ActionReject }
 	if cfg.DefaultAction != "" && !validAction(cfg.DefaultAction) {
 		return fmt.Errorf("routing.default_action: invalid value %q", cfg.DefaultAction)

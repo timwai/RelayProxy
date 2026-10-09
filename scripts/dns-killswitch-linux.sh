@@ -43,7 +43,7 @@ Wants=network-pre.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c '/usr/sbin/nft list table inet $TABLE >/dev/null 2>&1 || /usr/sbin/nft --file $RULES'
+ExecStart=/bin/sh -c '$(command -v nft) list table inet $TABLE >/dev/null 2>&1 || $(command -v nft) --file $RULES'
 RemainAfterExit=yes
 
 [Install]

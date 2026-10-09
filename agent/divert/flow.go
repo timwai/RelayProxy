@@ -34,6 +34,7 @@ type ClassifiedFlow struct {
 	key      FlowKey
 	flow     Flow
 	decision Decision
+	dnsOnly  bool // synthetic local RFC 7766 DNS TCP service
 	udp      *udpAssociation
 	used     atomic.Bool
 	traffic  *traffic.Record

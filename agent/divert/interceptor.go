@@ -621,24 +621,18 @@ func (i *packetInterceptor) disableOnInjectionError(err error) bool {
 }
 
 func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) error {
-	if accepter, ok := i.device.(packetAccepter); ok {
-		if err := accepter.Accept(meta); err != nil {
-			return err
-		}
-		if meta.outbound && packet.Protocol == ProtoUDP {
-			i.dns.query(packet.Source, packet.Destination, packet.Payload)
-		}
-		return nil
-	}
-	// Outbound captures can contain hardware-offloaded, unfinished checksums.
-	repairPacketChecksums(packet)
-	if err := i.inject(packet.Bytes, meta); err != nil {
-		return err
-	}
+	// Register outgoing DNS questions before forwarding the query: a fast
+	// resolver can answer while injection/acceptance is still in progress.
+	// DNS associations only become trusted after a matching answer is observed.
 	if meta.outbound && packet.Protocol == ProtoUDP {
 		i.dns.query(packet.Source, packet.Destination, packet.Payload)
 	}
-	return nil
+	if accepter, ok := i.device.(packetAccepter); ok {
+		return accepter.Accept(meta)
+	}
+	// Outbound captures can contain hardware-offloaded, unfinished checksums.
+	repairPacketChecksums(packet)
+	return i.inject(packet.Bytes, meta)
 }
 
 func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
@@ -659,11 +653,10 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 				if err != nil {
 					return err
 				}
-				if err := i.inject(response, meta); err != nil {
-					return err
-				}
+				// Make the DNS name available before exposing the response to
+				// the client. Otherwise its next SYN can be classified by IP.
 				i.dns.response(key.Destination, key.Source, payload)
-				return nil
+				return i.inject(response, meta)
 			})
 			if i.disableOnInjectionError(err) {
 				i.report(err)

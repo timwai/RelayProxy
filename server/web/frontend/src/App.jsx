@@ -7,6 +7,7 @@ import {api,json,list,fmtDate,fmtBytes,localDate,isoDate,normalizedCapabilities,
 import {groups,getGroup,normalizeForSave,configEqual} from './settings.js';
 import {summarizeSession,summarizePathReport} from './diagnostics.js';
 import {OverviewRealtime} from './OverviewCharts.jsx';
+import {allCapabilities,visibleCapabilityGroups,toggleDeviceCapability} from './capability-ui.js';
 
 const pages={overview:'运行总览',devices:'设备管理',identities:'身份管理',exits:'出口节点',sessions:'活跃会话',p2p:'P2P 直连',messages:'消息历史',channels:'推送渠道',rdp:'RDP 公网入口',audit:'RDP 连接审计',security:'RDP 安全策略',settings:'服务配置'};
 const nav=[['概览',[['overview','运行总览']]],['设备与身份',[['devices','设备管理'],['identities','身份管理'],['exits','出口节点']]],['连接',[['sessions','实时连接'],['p2p','P2P 路径'],['rdp','RDP 公网入口'],['audit','连接审计'],['security','IP 安全策略']]],['消息',[['messages','消息历史'],['channels','推送渠道']]],['系统',[['settings','服务配置']]]];
@@ -25,7 +26,43 @@ function Select({value,onChange,items=[],placeholder='请选择',disabled=false}
 function Table({columns,items,render,empty='暂无数据'}){return <div className="table-wrap"><table><thead><tr>{columns.map((col,i)=><th key={i}>{col}</th>)}</tr></thead><tbody>{items.length?items.map((item,i)=><tr key={item.id||item.sourceIp||i}>{render(item,i)}</tr>):<tr><td colSpan={columns.length}><div className="empty-state">{empty}</div></td></tr>}</tbody></table></div>}
 function Head({title,desc,actions}){return <div className="page-head"><div><h1>{title}</h1>{desc&&<p>{desc}</p>}</div>{actions&&<div className="head-actions">{actions}</div>}</div>}
 function Panel({title,desc,actions,children,className=''}){return <section className={'card page-section '+className}><div className="card-title-area"><div><h2>{title}</h2>{desc&&<p className="section-description">{desc}</p>}</div>{actions}</div>{children}</section>}
-function Caps({value,onChange,allowed=permissionDefs.map(p=>p[0])}){return <div className="form-grid">{permissionDefs.filter(([key])=>allowed.includes(key)).map(([key,name])=><label className="toggle-field" key={key}><span>{name}</span><input type="checkbox" checked={value.includes(key)} onChange={e=>{let next=e.target.checked?[...value,key]:value.filter(x=>x!==key);if(key==='rdp.host'&&!e.target.checked)next=next.filter(x=>x!=='rdp.public');onChange(normalizedCapabilities(next));}}/></label>)}</div>}
+function DeviceAuthSummary({name,id,platform,arch,identity,state,requested=false}) {
+ const online=state==='online';
+ return <div className="device-auth-summary">
+  <div className="device-auth-avatar"><Icon name="devices" size={24}/></div>
+  <div className="device-auth-summary-main">
+   <span className="device-auth-eyebrow">{requested?'等待审批的设备':'已登记设备'}</span>
+   <strong>{name||'未命名设备'}</strong>
+   <span className="device-auth-identifier" title={id||''}>{id||'暂无设备 ID'}</span>
+   <div className="device-auth-tags">
+    <span><Icon name="monitor" size={13}/>{[platform,arch].filter(Boolean).join(' · ')||'未知平台'}</span>
+    {identity&&<span><Icon name="users" size={13}/>{identity}</span>}
+    {!requested&&<span className={online?'is-online':''}><span className="device-auth-status-dot"/>{online?'在线':'离线'}</span>}
+   </div>
+  </div>
+ </div>;
+}
+function Caps({value,onChange,allowed=allCapabilities}) {
+ const groups=visibleCapabilityGroups(allowed);
+ const selected=value.filter(id=>allowed.includes(id)).length;
+ return <div className="device-auth-capabilities">
+  <div className="device-auth-section-title"><div><h3>授权能力</h3><p>勾选需要开放的能力，点击卡片即可切换。</p></div><span className="device-auth-counter">已选 {selected} / {allowed.length}</span></div>
+  {groups.map(group=><section className="device-auth-cap-group" key={group.id} aria-label={group.title}>
+   <div className="device-auth-group-head"><span className="device-auth-group-symbol"><Icon name={group.icon} size={18}/></span><div><strong>{group.title}</strong><small>{group.description}</small></div></div>
+   <div className="device-auth-cap-grid">{group.items.map(cap=>{
+    const checked=value.includes(cap.id);
+    const disabled=cap.id==='rdp.public'&&!allowed.includes('rdp.host');
+    return <label className={'device-auth-cap '+(checked?'is-selected':'')+(disabled?' is-disabled':'')} key={cap.id}>
+      <span className="device-auth-cap-icon"><Icon name={cap.icon} size={19}/></span>
+      <span className="device-auth-cap-copy"><strong>{cap.title}</strong><small>{cap.description}</small>{disabled&&<small className="device-auth-prerequisite">需申请 RDP 主机能力</small>}</span>
+      <input aria-label={cap.title} type="checkbox" checked={checked} disabled={disabled} onChange={e=>onChange(toggleDeviceCapability(value,cap.id,e.target.checked,allowed))}/>
+    </label>;
+   })}</div>
+  </section>)}
+  {!groups.length&&<div className="device-auth-empty">该设备没有可授权的能力。</div>}
+ </div>;
+}
+
 function Dialog({dialog,close}){const ref=useRef(null);useEffect(()=>{if(!dialog)return;const onKey=e=>{if(e.key==='Escape')close()};document.addEventListener('keydown',onKey);return()=>document.removeEventListener('keydown',onKey)},[dialog,close]);if(!dialog)return null;return <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section ref={ref} role="dialog" aria-modal="true" aria-label={dialog.title} className={'dialog-window '+(dialog.wide?'wide':'')}><header className="dialog-header"><h2>{dialog.title}</h2><Action onClick={close}>✕</Action></header><div className="modal-content-scroll">{dialog.body}</div></section></div>}
 function Login({onLogin,error}){
  const [username,setUser]=useState(''),[password,setPassword]=useState('');
@@ -115,11 +152,20 @@ function Overview({ctx}){return <OverviewRealtime ctx={ctx}/>}
 function Devices({ctx}){
  const {data,run,open,close,admin}=ctx;const [q,setQ]=useState(''),[status,setStatus]=useState(''),[role,setRole]=useState('');
  const filtered=data.devices.filter(d=>[d.name,d.id,d.identityName,d.identityId].join(' ').toLowerCase().includes(q.toLowerCase())&&(!role||d.deviceMode===role)&&(!status||(status==='disabled'?d.approvalState==='revoked':d.approvalState==='approved'&&d.status===status)));
- const approve=entry=>open('审批 · '+(entry.deviceName||entry.id),<Approval entry={entry} run={run} close={close}/>);
+ const approve=entry=>open('设备授权审批',<Approval entry={entry} run={run} close={close}/>,true);
  const manage=d=>open('设备 · '+d.name,<DeviceDetails key={d.id} device={d} ctx={ctx}/> ,true);
  return <><Head title="设备管理" desc="设备审批、身份归属与授权能力统一管理。" actions={<Action onClick={()=>ctx.refresh()}>刷新设备</Action>}/><Panel title={'待审批设备 · '+data.enrollments.length} desc="新设备通过身份 ID 发起连接申请，批准的能力不能超过其声明范围。"><Table columns={['设备','系统','申请能力','最近申请','操作']} items={data.enrollments} render={e=><><td><DeviceLabel name={e.deviceName} id={e.fingerprint?'指纹 '+e.fingerprint.slice(0,24)+'…':e.id}/></td><td>{e.platform} {e.arch}</td><td>{list(e.requestedCapabilities).join('、')}</td><td>{fmtDate(e.lastSeenAt)}</td><td><div className="table-action"><Action tone="primary" onClick={()=>approve(e)}>审批</Action><Action onClick={()=>{if(confirm('拒绝该设备申请？'))run(()=>api('/enrollments/'+encodeURIComponent(e.id)+'/reject',json('POST',{})),'申请已拒绝')}}>拒绝</Action></div></td></>} empty="当前没有待审批设备"/></Panel><Panel title="已登记设备" actions={<span className="muted">{filtered.length} / {data.devices.length}</span>}><div className="filter-bar filter-three device-filters" role="search" aria-label="已登记设备筛选"><input className="input filter-search" aria-label="搜索设备名称、ID 或身份" placeholder="设备名称 / ID / 身份" value={q} onChange={e=>setQ(e.target.value)}/><select className="input" aria-label="按设备状态筛选" value={status} onChange={e=>setStatus(e.target.value)}><option value="">所有状态</option><option value="online">在线</option><option value="offline">离线</option><option value="disabled">已撤销</option></select><select className="input" aria-label="按设备角色筛选" value={role} onChange={e=>setRole(e.target.value)}><option value="">所有角色</option><option value="CLIENT">客户端</option><option value="EXIT">出口节点</option><option value="BOTH">两种角色</option></select></div><Table columns={['设备','身份归属','角色 / 系统','状态','传输','最近在线','操作']} items={filtered} render={d=><><td><DeviceLabel name={d.name} id={d.id}/></td><td>{d.identityName||d.identityId||'未分配'}</td><td>{d.deviceMode}<small>{d.platform} / {d.arch}</small></td><td><Badge tone={d.status==='online'?'ok':''}>{d.approvalState==='revoked'?'已撤销':d.status==='online'?'在线':'离线'}</Badge></td><td>{d.transport||'—'}</td><td>{fmtDate(d.lastSeenAt)}</td><td><div className="table-action"><Action onClick={()=>manage(d)}>管理</Action>{admin&&<Action onClick={()=>open('更改身份归属',<IdentityMove device={d} ctx={ctx}/>) }>归属</Action>}</div></td></>}/></Panel></>;
 }
-function Approval({entry,run,close}){const [caps,setCaps]=useState(list(entry.requestedCapabilities));return <><p className="dialog-note">仅可批准设备当前申请的能力；RDP 公网入口必须同时具有 RDP 主机能力。</p><Caps value={caps} allowed={list(entry.requestedCapabilities)} onChange={setCaps}/><div className="form-actions"><Action onClick={close}>取消</Action><Action tone="primary" disabled={!caps.length} onClick={async()=>{if(!confirm('批准选中的能力？'))return;await run(()=>api('/enrollments/'+encodeURIComponent(entry.id)+'/approve',json('POST',{capabilities:caps})),'审批成功');close()}}>批准选中能力</Action></div></>}
+function Approval({entry,run,close}){
+ const allowed=list(entry.requestedCapabilities);
+ const [caps,setCaps]=useState(allowed);
+ return <div className="device-auth-dialog">
+  <DeviceAuthSummary name={entry.deviceName} id={entry.fingerprint?'指纹 · '+entry.fingerprint:entry.id} platform={entry.platform} arch={entry.arch} identity={entry.identityName||entry.identityId} requested/>
+  <div className="device-auth-advice"><Icon name="shield" size={18}/><span>仅可批准设备已申请的能力。RDP 公网入口依赖 RDP 主机能力，授权会在服务端校验。</span></div>
+  <Caps value={caps} allowed={allowed} onChange={setCaps}/>
+  <div className="device-auth-footer"><span><strong>{caps.length}</strong> 项能力待批准<small>审批通过后设备即可按授权范围接入</small></span><div className="device-auth-footer-actions"><Action onClick={close}>取消</Action><Action tone="primary" disabled={!caps.length} onClick={async()=>{if(!confirm('批准选中的能力？'))return;await run(()=>api('/enrollments/'+encodeURIComponent(entry.id)+'/approve',json('POST',{capabilities:caps})),'审批成功');close()}}>批准选中能力</Action></div></div>
+ </div>;
+}
 function IdentityMove({device,ctx}){const [id,setId]=useState(device.identityId||'');return <><p className="dialog-note">改变设备归属将断开当前连接，并清除以此设备为目标的跨身份授权。</p><Field label="所属身份" type="select" options={ctx.data.identities.map(x=>[x.id,x.name])} value={id} onChange={setId}/><div className="form-actions"><Action tone="primary" disabled={!id} onClick={async()=>{if(!confirm('确定调整设备所属身份？'))return;await ctx.run(()=>api('/devices/'+encodeURIComponent(device.id)+'/identity',json('PUT',{identityId:id})),'身份归属已更新');ctx.close()}}>保存归属</Action></div></>}
 function DeviceDetails({device,ctx}){
  const {data,run,close,admin}=ctx;const [caps,setCaps]=useState(list(device.approvedCapabilities));const [tab,setTab]=useState('capabilities');
@@ -129,10 +175,17 @@ function DeviceDetails({device,ctx}){
  useEffect(()=>{loadGrants().catch(()=>{})},[loadGrants]);
  const openLegacy=async()=>{setTab('legacy');try{const result=await api('/rdp/targets?controllerId='+encodeURIComponent(device.id));setLegacy(list(result?.targets).map(x=>x.deviceId));setLegacyCandidates(data.devices.filter(x=>x.id!==device.id&&(x.approvedCapabilities||[]).includes('rdp.host')))}catch(e){ctx.setError(e.message)}};
  const methods=[['capabilities','授权能力'],['grants','跨身份授权'],['legacy','历史 RDP 关系']].filter(([key])=>key!=='legacy'||(admin&&!device.identityId&&list(device.approvedCapabilities).includes('rdp.controller')));
- return <><div className="detail-list"><div>设备 ID　<span className="mono">{device.id}</span></div><div>身份归属　{device.identityName||device.identityId||'未分配'}</div><div>平台　{device.platform} / {device.arch}</div><div>状态　{device.status} · {device.approvalState}</div></div><div className="tab-line">{methods.map(([key,title])=><Action key={key} tone={tab===key?'active':''} onClick={()=>key==='legacy'?openLegacy():setTab(key)}>{title}</Action>)}</div>{tab==='capabilities'&&<><Banner>修改能力后设备会断开并重新认证；全部停用请使用撤销设备授权。</Banner><Caps value={caps} onChange={setCaps}/><div className="form-actions"><Action tone="primary" disabled={!caps.length} onClick={async()=>{if(!confirm('保存授权并使设备重新连接？'))return;await run(()=>api('/devices/'+encodeURIComponent(device.id)+'/capabilities',json('PUT',{capabilities:caps})),'设备授权已保存');close()}}>保存授权</Action></div></>}
+ return <div className="device-auth-dialog device-auth-manage">
+  <DeviceAuthSummary name={device.name} id={device.id} platform={device.platform} arch={device.arch} identity={device.identityName||device.identityId||'未分配身份'} state={device.status}/>
+  <div className="device-auth-tabs" role="tablist" aria-label="设备授权管理">{methods.map(([key,title])=><button type="button" role="tab" aria-selected={tab===key} className={'device-auth-tab '+(tab===key?'is-active':'')} key={key} onClick={()=>key==='legacy'?openLegacy():setTab(key)}>{title}</button>)}</div>
+  {tab==='capabilities'&&<>
+    <div className="device-auth-advice"><Icon name="shield" size={18}/><span>保存能力变更后，设备将断开并重新认证。需要关闭全部能力时，请使用底部的「撤销授权」。</span></div>
+    <Caps value={caps} onChange={setCaps}/>
+    <div className="device-auth-footer"><span><strong>{caps.length}</strong> 项能力已选择<small>变更将在设备重新连接后生效</small></span><div className="device-auth-footer-actions"><Action onClick={close}>取消</Action><Action tone="primary" disabled={!caps.length} onClick={async()=>{if(!confirm('保存授权并使设备重新连接？'))return;await run(()=>api('/devices/'+encodeURIComponent(device.id)+'/capabilities',json('PUT',{capabilities:caps})),'设备授权已保存');close()}}>保存授权</Action></div></div>
+  </>}
  {tab==='grants'&&<><Banner>同身份设备访问自动允许；跨身份访问需要授权功能及有效期。</Banner><div className="form-grid"><Field label="被授权身份" value={target} onChange={setTarget} type="select" options={data.identities.filter(x=>x.id!==device.identityId).map(x=>[x.id,x.name])}/><Field label="过期时间" type="datetime-local" value={expires} onChange={setExpires}/></div><div className="form-grid">{[['proxy.use','代理出口'],['rdp.connect','RDP 连接']].filter(([k])=>k==='proxy.use'?list(device.approvedCapabilities).includes('proxy.exit'):list(device.approvedCapabilities).includes('rdp.host')).map(([k,label])=><label key={k} className="toggle-field">{label}<input type="checkbox" checked={features.includes(k)} onChange={e=>setFeatures(old=>e.target.checked?[...old,k]:old.filter(v=>v!==k))}/></label>)}</div><div className="form-actions"><Action tone="primary" onClick={async()=>{if(!target||!features.length){ctx.setError('请选择被授权身份及授权功能');return;}const body={granteeIdentityId:target,features,expiresAt:isoDate(expires)};await run(()=>grant?api('/device-identity-grants/'+grant.id,json('PATCH',{...body,revision:grant.revision,...(!expires?{clearExpiresAt:true}:{})})):api('/device-identity-grants',json('POST',{...body,targetDeviceId:device.id})),'跨身份授权已保存');await loadGrants();setGrant(null);setFeatures([])}}>{grant?'保存授权':'新建授权'}</Action></div><Table columns={['被授权身份','能力','到期','操作']} items={grants} render={g=><><td>{g.granteeIdentityName||g.granteeIdentityId}</td><td>{list(g.features).join('、')}</td><td>{g.expiresAt?fmtDate(g.expiresAt):'永久'}</td><td><div className="table-action"><Action onClick={()=>{setGrant(g);setTarget(g.granteeIdentityId);setFeatures(list(g.features));setExpires(localDate(g.expiresAt))}}>编辑</Action><Action tone="danger" onClick={async()=>{if(confirm('删除此跨身份授权？')){await run(()=>api('/device-identity-grants/'+g.id+'?revision='+g.revision,{method:'DELETE'}));loadGrants()}}}>删除</Action></div></td></>}/></>}
  {tab==='legacy'&&<><p className="dialog-note">历史 RDP 关系仅保留用于迁移，不再授权生产连接；生产授权请使用跨身份授权。</p><div className="form-grid">{list(legacyCandidates).map(d=><label className="toggle-field" key={d.id}><DeviceLabel name={d.name} id={d.id}/><input type="checkbox" checked={legacy.includes(d.id)} onChange={e=>setLegacy(old=>e.target.checked?[...old,d.id]:old.filter(x=>x!==d.id))}/></label>)}</div><div className="form-actions"><Action tone="primary" onClick={async()=>{await run(()=>api('/devices/'+device.id+'/rdp-targets',json('PUT',{targetDeviceIds:legacy})),'历史 RDP 关系已保存')}}>保存历史关系</Action></div></>}
- <hr/ ><div className="form-actions"><Action tone="danger" onClick={async()=>{if(confirm('撤销设备授权并立即断开连接？')){await run(()=>api('/devices/'+device.id+'/revoke',json('POST',{})),'授权已撤销');close()}}}>撤销授权</Action>{admin&&<Action tone="danger" onClick={async()=>{if(confirm('永久删除设备及所有历史授权？')){await run(()=>api('/devices/'+device.id,{method:'DELETE'}),'设备已删除');close()}}}>删除设备</Action>}</div></>;
+ <div className="device-auth-danger"><div><strong>危险操作</strong><small>撤销会立即断开设备；删除将永久移除登记记录。</small></div><div className="device-auth-danger-actions"><Action tone="danger" onClick={async()=>{if(confirm('撤销设备授权并立即断开连接？')){await run(()=>api('/devices/'+device.id+'/revoke',json('POST',{})),'授权已撤销');close()}}}>撤销授权</Action>{admin&&<Action tone="danger" onClick={async()=>{if(confirm('永久删除设备及所有历史授权？')){await run(()=>api('/devices/'+device.id,{method:'DELETE'}),'设备已删除');close()}}}>删除设备</Action>}</div></div></div>;
 }
 function Identities({ctx}){const {data,run,open,close}=ctx;return <>
  <Head title="身份与登录" desc="身份隔离设备、消息与资源访问；账号和连接 ID 独立管理。" actions={<Action tone="primary" onClick={()=>open('创建身份',<IdentityCreate ctx={ctx}/>)}>＋ 创建身份</Action>}/>

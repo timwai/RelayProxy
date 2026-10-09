@@ -13,10 +13,10 @@ func TestAuthenticatedDNSExitPrecedenceAndFailClosed(t *testing.T) {
 	calls := []string{}
 	dnsExit := "dedicated-dns"
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
+		Config:        Config{DefaultAction: ActionProxy},
 		DefaultExitID: func() string { return "ordinary-default" },
-		DNSExitID: func() string { return dnsExit },
-		ProxyReady: func() bool { return true },
+		DNSExitID:     func() string { return dnsExit },
+		ProxyReady:    func() bool { return true },
 		Dialer: &testDialer{tcp: func(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
 			calls = append(calls, exit)
 			if host != proxyDNSResolverIP || port != 853 {

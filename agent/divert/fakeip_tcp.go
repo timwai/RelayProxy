@@ -36,6 +36,11 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 		if _, err := io.ReadFull(conn, payload); err != nil {
 			return err
 		}
+		// Recheck after a blocking socket read: the policy may have been
+		// disabled while the connection was waiting for its next question.
+		if s.opts.FakeIPEnabled != nil && !s.fakeIPEnabled() {
+			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
+		}
 		answer := s.fakeDNS.reply(payload, s.guard.RelayHost, s.guard.RelayIPs)
 		if len(answer) == 0 || len(answer) > 65535 {
 			return fmt.Errorf("fake DNS TCP question cannot be safely answered")

@@ -170,7 +170,10 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 		var conn net.Conn
 		target := a.route.flow.IP
 		if a.route.flow.DomainSource == "fakeip" && isFakeIP(a.route.key.Destination.Addr()) {
-			target, err = s.resolveFakeDirectIP(dialCtx, a.route.flow.Host, a.route.key.Destination.Addr().Is6())
+			target, err = s.resolveFakeDirectIP(dialCtx, a.route.decision.ExitID, a.route.flow.Host, a.route.key.Destination.Addr().Is6())
+			if err == nil {
+				err = s.validateFakeDirectTarget(a.route, target)
+			}
 		}
 		if err == nil {
 			if a.route.traffic != nil {

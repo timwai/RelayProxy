@@ -112,6 +112,7 @@ class MainActivity : Activity() {
 
     // ====== Tab 1: Nodes UI Views ======
     private lateinit var nodesListContainer: LinearLayout
+    private lateinit var customExitContainer: LinearLayout
     private lateinit var autoNodeRadioDot: View
 
     // ====== Tab 2: Routing UI Views ======
@@ -185,6 +186,7 @@ class MainActivity : Activity() {
         registerMessageReceiver()
         syncRoutingModeFromStore()
         if (::rulesListContainer.isInitialized) refreshRoutingTab()
+        if (::customExitContainer.isInitialized) renderCustomExits()
         connectControlChannel()
         RelayExitService.setUiVisible(true)
         refreshGlobalMessageOverlayPermissionState()
@@ -1008,6 +1010,39 @@ class MainActivity : Activity() {
         }
         content.addView(nodesListContainer)
 
+        val localHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(24), 0, dp(12))
+        }
+        localHeader.addView(TextView(this).apply {
+            text = "本机自定义代理出口"
+            textSize = 16f
+            setTextColor(UiPalette.ink)
+            typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        localHeader.addView(TextView(this).apply {
+            text = "＋ 新增"
+            textSize = 13f
+            setTextColor(UiPalette.brand)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(8), dp(9), dp(8), dp(9))
+            isClickable = true
+            setOnClickListener { editCustomExit(null) }
+        })
+        content.addView(localHeader)
+        content.addView(TextView(this).apply {
+            text = "支持 SOCKS5、HTTP、HTTPS CONNECT；可作为默认出口或分流规则出口。HTTP(S) 不支持 UDP。代理密码由 Android Keystore 加密保存。"
+            textSize = 11.5f
+            setTextColor(UiPalette.muted)
+            setPadding(0, 0, 0, dp(12))
+        })
+        customExitContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        content.addView(customExitContainer)
+        renderCustomExits()
+
         return ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(UiPalette.bg)
@@ -1131,11 +1166,178 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun renderCustomExits() {
+        if (!::customExitContainer.isInitialized) return
+        customExitContainer.removeAllViews()
+        val config = ConfigStore(this).load()
+        if (config.customExits.isEmpty()) {
+            customExitContainer.addView(TextView(this).apply {
+                text = "尚未配置本机代理出口。添加后即可作为默认出口或分流规则目标。"
+                textSize = 12f
+                setTextColor(UiPalette.muted)
+                setPadding(dp(8), dp(14), dp(8), dp(18))
+            })
+            return
+        }
+        config.customExits.forEach { item ->
+            val selected = config.defaultExitId == item.id
+            val card = UiKit.card(this, paddingDp = 15, radiusDp = 14)
+            val title = TextView(this).apply {
+                text = item.name + if (selected) " · 默认出口" else ""
+                textSize = 14.5f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(UiPalette.ink)
+            }
+            card.addView(title)
+            card.addView(TextView(this).apply {
+                text = "${item.protocol.uppercase()} · ${item.address} · " +
+                    if (item.enabled) "已启用" else "已停用"
+                textSize = 11f
+                setTextColor(UiPalette.muted)
+                setPadding(0, dp(5), 0, dp(10))
+            })
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            fun action(label: String, callback: () -> Unit) {
+                actions.addView(TextView(this).apply {
+                    text = label
+                    textSize = 12f
+                    setTextColor(UiPalette.brand)
+                    setPadding(dp(10), dp(9), dp(10), dp(9))
+                    isClickable = true
+                    setOnClickListener { callback() }
+                })
+            }
+            if (item.enabled && !selected) action("设为默认") { selectExitNode(item.id) }
+            action("编辑") { editCustomExit(item) }
+            action("删除") {
+                UiKit.alertDialog(this, "删除自定义出口", "确定删除“${item.name}”？如被默认出口或分流规则引用，将拒绝删除。")
+                    .setPositiveButton("删除") { _, _ ->
+                        val store = ConfigStore(this)
+                        val cfg = store.load()
+                        val removed = runCatching {
+                            store.save(cfg.copy(customExits = cfg.customExits.filterNot { it.id == item.id }))
+                        }
+                        if (removed.isSuccess) {
+                            notifyServiceReconfigure()
+                            renderCustomExits()
+                        } else {
+                            Toast.makeText(this, removed.exceptionOrNull()?.message ?: "删除失败", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    .setNegativeButton("取消", null).show()
+            }
+            card.addView(actions)
+            customExitContainer.addView(card, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) })
+        }
+    }
+
+    private fun editCustomExit(original: AndroidCustomExit?) {
+        val edit = original ?: AndroidCustomExit()
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(4))
+        }
+        fun input(caption: String, value: String, password: Boolean = false): EditText {
+            form.addView(TextView(this).apply {
+                text = caption
+                textSize = 12f
+                setTextColor(UiPalette.muted)
+                setPadding(0, dp(10), 0, dp(5))
+            })
+            return EditText(this).also { field ->
+                field.setSingleLine(true)
+                field.textSize = 14f
+                field.setText(value)
+                if (password) {
+                    field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+                form.addView(field)
+            }
+        }
+        val name = input("出口名称", edit.name)
+        val protocols = listOf("socks5", "http", "https")
+        form.addView(TextView(this).apply {
+            text = "代理类型"
+            textSize = 12f
+            setTextColor(UiPalette.muted)
+            setPadding(0, dp(10), 0, 0)
+        })
+        val protocol = Spinner(this).apply {
+            adapter = UiKit.themedSpinnerAdapter(this@MainActivity, protocols.map { it.uppercase() })
+            setSelection(protocols.indexOf(edit.protocol).coerceAtLeast(0))
+        }
+        form.addView(protocol)
+        val address = input("代理地址（host:port）", edit.address)
+        val user = input("认证用户名（可选）", edit.username)
+        val password = input("认证密码（留空保持原值）", "")
+        val clearPassword = Switch(this).apply {
+            text = "清除原密码"
+            isChecked = false
+            UiKit.styleSwitch(this)
+        }
+        if (original != null && original.password.isNotBlank()) form.addView(clearPassword)
+        val enabled = Switch(this).apply {
+            text = "启用出口"
+            isChecked = edit.enabled
+            UiKit.styleSwitch(this)
+        }
+        form.addView(enabled)
+        val scroll = ScrollView(this).apply { addView(form) }
+        UiKit.alertDialog(this, if (original == null) "新增自定义出口" else "编辑自定义出口", "")
+            .setView(scroll)
+            .setPositiveButton("保存", null)
+            .setNegativeButton("取消", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val next = edit.copy(
+                            name = name.text.toString().trim(),
+                            protocol = protocols[protocol.selectedItemPosition],
+                            address = address.text.toString().trim(),
+                            username = user.text.toString(),
+                            password = when {
+                                clearPassword.isChecked -> ""
+                                password.text.isNotBlank() -> password.text.toString()
+                                else -> edit.password
+                            },
+                            enabled = enabled.isChecked,
+                        )
+                        val store = ConfigStore(this)
+                        val current = store.load()
+                        val updated = if (original == null) {
+                            current.customExits + next
+                        } else {
+                            current.customExits.map { if (it.id == original.id) next else it }
+                        }
+                        val saved = runCatching { store.save(current.copy(customExits = updated)) }
+                        if (saved.isSuccess) {
+                            dialog.dismiss()
+                            notifyServiceReconfigure()
+                            renderCustomExits()
+                        } else {
+                            Toast.makeText(this, saved.exceptionOrNull()?.message ?: "保存失败", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                dialog.show()
+            }
+    }
+
     private fun selectExitNode(deviceId: String) {
         val store = ConfigStore(this)
-        store.save(store.load().copy(defaultExitId = deviceId))
+        val saved = runCatching { store.save(store.load().copy(defaultExitId = deviceId)) }
+        if (saved.isFailure) {
+            Toast.makeText(this, saved.exceptionOrNull()?.message ?: "出口设置无效", Toast.LENGTH_LONG).show()
+            return
+        }
         notifyServiceReconfigure()
-        Toast.makeText(this, if (deviceId.isBlank()) "已设为自动优选出口" else "已切换默认出口设备", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (deviceId.isBlank()) "已设为自动优选出口" else "已切换默认出口", Toast.LENGTH_SHORT).show()
+        renderCustomExits()
         renderStatus()
     }
 

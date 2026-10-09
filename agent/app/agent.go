@@ -498,6 +498,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
 			FakeIPEnabled: engine.FakeIPEnabled,
 			BlockDoHEndpoints: engine.BlockDoHEndpoints,
+			ForwardOtherDNS: engine.ForwardOtherDNS,
 			ProxyReady: func() bool {
 				return a.handshakeOK.Load()
 			},

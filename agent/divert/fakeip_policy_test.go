@@ -20,7 +20,7 @@ func TestFakeIPNeverFallsThroughToDirectOrUnavailableRelay(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newTestServer(t, Options{
-				Config: Config{DefaultAction: tc.defaultAction},
+				Config:        Config{DefaultAction: tc.defaultAction},
 				FakeIPEnabled: func() bool { return true },
 				SharedPolicy: func(flow Flow) Decision {
 					if flow.IP != "" {
@@ -59,7 +59,7 @@ func TestFakeIPNeverFallsThroughToDirectOrUnavailableRelay(t *testing.T) {
 func TestFakeIPMappingIsRejectedWhenFeatureSwitchedOff(t *testing.T) {
 	enabled := true
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
+		Config:        Config{DefaultAction: ActionProxy},
 		FakeIPEnabled: func() bool { return enabled },
 	})
 	ip, ok := s.fakeDNS.allocate("example.com", dnsmessage.TypeA)

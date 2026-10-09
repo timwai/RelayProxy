@@ -228,11 +228,15 @@ func socks5Authenticate(conn net.Conn, cfg UpstreamConfig) error {
 	if response[0] != 0x05 || response[1] == 0xff {
 		return errors.New("SOCKS5 upstream rejected authentication methods")
 	}
+	wantsPassword := cfg.Username != "" || cfg.Password != ""
 	if response[1] == 0x00 {
+		if wantsPassword {
+			return errors.New("SOCKS5 upstream selected no-auth despite configured credentials")
+		}
 		return nil
 	}
-	if response[1] != 0x02 {
-		return fmt.Errorf("SOCKS5 upstream selected unsupported auth method 0x%02x", response[1])
+	if response[1] != 0x02 || !wantsPassword {
+		return fmt.Errorf("SOCKS5 upstream selected unoffered auth method 0x%02x", response[1])
 	}
 	if len(cfg.Username) > 255 || len(cfg.Password) > 255 {
 		return errors.New("SOCKS5 username/password too long")
@@ -247,7 +251,7 @@ func socks5Authenticate(conn net.Conn, cfg UpstreamConfig) error {
 	if _, err := io.ReadFull(conn, response[:]); err != nil {
 		return err
 	}
-	if response[1] != 0x00 {
+	if response[0] != 0x01 || response[1] != 0x00 {
 		return errors.New("SOCKS5 username/password authentication failed")
 	}
 	return nil

@@ -12,7 +12,7 @@ import (
 func TestFakeIPDirectUsesVerifiedProxyDNSWithoutLocalFallback(t *testing.T) {
 	dials := 0
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionDirect},
+		Config:        Config{DefaultAction: ActionDirect},
 		FakeIPEnabled: func() bool { return true },
 		DefaultExitID: func() string { return "remote-exit" },
 		Dialer: &testDialer{tcp: func(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
@@ -24,11 +24,15 @@ func TestFakeIPDirectUsesVerifiedProxyDNSWithoutLocalFallback(t *testing.T) {
 		}},
 	})
 	ip, ok := s.fakeDNS.allocate("app.example", dnsmessage.TypeA)
-	if !ok { t.Fatal("FakeIP allocation failed") }
+	if !ok {
+		t.Fatal("FakeIP allocation failed")
+	}
 	flow := testFlow(ProtoTCP, nil)
 	flow.IP = ip.String()
 	route, err := s.ClassifyFlow(flow)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if route.Decision().Action != ActionDirect || !route.Decision().HandleDirect {
 		t.Fatalf("DIRECT FakeIP was not captured for real-IP resolution: %+v", route.Decision())
 	}

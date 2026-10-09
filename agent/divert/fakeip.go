@@ -69,14 +69,13 @@ func (d *fakeIPDNS) lookup(addr netip.Addr) (string, bool) {
 // must never be silently redirected to an unrelated hostname.
 func (d *fakeIPDNS) pruneExpiredLocked(now time.Time) {
 	for ip, entry := range d.byIP {
-		if entry.expires.After(now) {
-			continue
+		if !entry.expires.After(now) {
+			delete(d.byIP, ip)
 		}
-		delete(d.byIP, ip)
-		for key, mapped := range d.byName {
-			if mapped == ip {
-				delete(d.byName, key)
-			}
+	}
+	for key, mapped := range d.byName {
+		if _, active := d.byIP[mapped]; !active {
+			delete(d.byName, key)
 		}
 	}
 }

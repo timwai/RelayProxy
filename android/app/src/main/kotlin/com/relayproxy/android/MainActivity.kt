@@ -2772,8 +2772,16 @@ class MainActivity : Activity() {
                 }
             }
         }
+        if (selectedExit.startsWith("local:")) {
+            val local = ConfigStore(this).load().customExits.firstOrNull { it.id == selectedExit }
+            nodeDisplay = local?.name ?: "本机出口不可用"
+        }
         activeNodeName.text = nodeDisplay
-        activeNodeSubtitle.text = if (selectedExit.isBlank()) "根据延迟与链路自动优选" else "默认已绑定出口节点"
+        activeNodeSubtitle.text = when {
+            selectedExit.isBlank() -> "根据延迟与链路自动优选"
+            selectedExit.startsWith("local:") -> "本机代理 · 不经过 Relay 出口节点"
+            else -> "默认已绑定出口节点"
+        }
         activeNodeLatency.text = if (latency > 0) "$latency ms" else "—"
 
         // 双核状态卡片

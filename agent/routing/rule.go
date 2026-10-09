@@ -67,6 +67,7 @@ type Decision struct {
 type Config struct {
 	Mode          Mode    `yaml:"mode"           json:"mode"`                   // Routing mode
 	DNSMode       DNSMode `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"` // proxy (default) or local
+	FakeIPEnabled bool    `yaml:"fake_ip_enabled,omitempty" json:"fake_ip_enabled,omitempty"` // opt-in transparent DNS interception
 	DefaultAction Action  `yaml:"default_action" json:"default_action"`         // When no rule matches in rule mode
 	Rules         []Rule  `yaml:"rules"          json:"rules"`                  // Ordered rule list
 }

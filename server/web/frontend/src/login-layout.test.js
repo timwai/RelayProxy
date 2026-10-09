@@ -18,6 +18,6 @@ test('login preserves credential validation and full-width controls',()=>{
 });
 test('compact login page fits phones without horizontal overflow',()=>{
  assert.match(css,/@media\(max-width:760px\)/);
- assert.match(css,/#root \.login-shell\{grid-template-columns:1fr/);
+ assert.ok(css.includes('grid-template-columns:1fr;overflow:visible'));
  assert.match(css,/#root \.login-promo\{[^}]*padding/);
 });

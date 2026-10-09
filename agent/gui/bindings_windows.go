@@ -80,6 +80,19 @@ func (s *WailsService) RunSpeedTest(exitID string, durationSeconds int) (string,
 	return string(data), nil
 }
 
+func (s *WailsService) TestCustomExit(id string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	result, err := s.owner.bridge.TestCustomExit(id)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(result)
+	return string(data), nil
+}
+
 func (s *WailsService) GetProxyExits() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil

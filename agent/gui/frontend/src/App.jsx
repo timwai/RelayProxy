@@ -24,7 +24,7 @@ function initialPage() {
 
 const EMPTY={
  revision:'',serverAddress:'',quicPort:35820,tcpPort:35821,tlsEnabled:true,insecureTls:false,deviceName:'',identityId:'',transport:'auto',
- socks5:{enabled:true,listen:'127.0.0.1',port:1080},http:{enabled:true,listen:'127.0.0.1',port:8080},defaultExitId:'',
+ socks5:{enabled:true,listen:'127.0.0.1',port:1080},http:{enabled:true,listen:'127.0.0.1',port:8080},defaultExitId:'',customExits:[],upstreamExitId:'',
  exitEnabled:true,allowInternet:true,allowPrivateNetwork:false,allowLoopback:false,accessMode:'',accessDomains:[],accessCidrs:[],
  exitUpstream:{mode:'',address:'',username:'',password:''},
  rdp:{enabled:true,address:'127.0.0.1:3389'},
@@ -118,13 +118,68 @@ function Connection({status,config,setv,save,dirty,onReload}){
  <SaveBar dirty={dirty} label="保存连接策略" hint="同时保存服务器与端口、传输策略、Direct / P2P 三组设置；这些均为启动参数，保存后需重启客户端生效。" onSave={()=>save({server:{address:config.serverAddress,quicPort:Number(config.quicPort),tcpPort:Number(config.tcpPort),tlsEnabled:config.tlsEnabled,insecureTls:!!config.insecureTls},transport:config.transport,p2p:config.p2p,direct:{public:{advertise:config.publicDirectAdvertise||''}}})}/><Modal open={tlsRisk} title="允许不受信任的 TLS 证书？" onClose={()=>setTlsRisk(false)} footer={<><Button onClick={()=>setTlsRisk(false)}>保持安全设置</Button><Button danger onClick={()=>{setv('insecureTls',true);setTlsRisk(false)}}>我了解风险，继续</Button></>}><div className="notice danger"><b>此设置会跳过服务端证书验证。</b><br/>仅在你完全信任的自建测试环境中使用。生产环境应使用受信任证书并保持关闭。</div></Modal></>
 }
 
-function Exits({status,exits,selected,onSelect,onSpeed,onSpeedAll}){
+
+function CustomExitManager({config,save,onSelect,selected,toast}){
+ const items=arr(config.customExits);
+ const [draft,setDraft]=useState(null),[busy,setBusy]=useState(false);
+ const refs=id=>[
+  config.defaultExitId===id&&'默认出口',
+  config.upstreamExitId===id&&'本机出口共享',
+  ...arr(config.routing?.rules).filter(r=>r.exit_id===id).map(r=>'分流规则：'+(r.name||'未命名'))
+ ].filter(Boolean);
+ const update=(key,val)=>setDraft(x=>({...x,[key]:val}));
+ const persist=async next=>{setBusy(true);try{return await save({proxy:{customExits:next}})}finally{setBusy(false)}};
+ const edit=item=>setDraft(item?{...item,password:''}:{id:'local:'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),name:'',protocol:'socks5',address:'',enabled:true,username:'',password:''});
+ const saveDraft=async()=>{
+  if(!draft)return;
+  if(!draft.name.trim()||!draft.address.trim()){toast('请输入名称和 host:port 地址','danger');return}
+  const {hasPassword,...rest}=draft;
+  const value={...rest,name:rest.name.trim(),address:rest.address.trim()};
+  if(!value.password)delete value.password;
+  const next=items.some(x=>x.id===value.id)?items.map(x=>x.id===value.id?value:x):[value,...items];
+  if(await persist(next))setDraft(null);
+ };
+ const toggle=async item=>{const using=refs(item.id);if(item.enabled&&using.length){toast('该出口正在被引用：'+using.join('、'),'danger');return}await persist(items.map(x=>x.id===item.id?{...x,enabled:!x.enabled}:x))};
+ const remove=async item=>{const using=refs(item.id);if(using.length){toast('请先解除引用：'+using.join('、'),'danger');return}if(window.confirm('确认删除 '+item.name+'？'))await persist(items.filter(x=>x.id!==item.id))};
+ return <>
+  <Card title="自定义出口" eyebrow={items.length+' LOCAL EXITS'} action={<Button primary onClick={()=>edit(null)}>＋ 添加出口</Button>}>
+   <div className="mini">本机 SOCKS5 / HTTP CONNECT，不依赖 Server 授权。可作为默认出口、分流规则目标和本机出口共享上游。</div>
+   {!items.length&&<div className="empty">尚未创建自定义出口。点击「添加出口」创建 SOCKS5 或 HTTP 代理。</div>}
+   <div className="target-list top-gap">
+    {items.map(item=><div className="target-row" key={item.id}>
+     <div className="identity-icon small">↗</div>
+     <div className="grow">
+      <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
+      <div className="mono mini">{item.protocol.toUpperCase()} · {item.address} · {item.protocol==='socks5'?'支持 UDP ASSOCIATE':'仅 TCP'}</div>
+     </div>
+     <Button quiet onClick={()=>onSelect(item.id)} disabled={!item.enabled||selected===item.id}>{selected===item.id?'默认出口':'设为默认'}</Button>
+     <Button quiet onClick={()=>edit(item)}>编辑</Button>
+     <Switch checked={item.enabled} disabled={busy} label={'启停 '+item.name} onChange={()=>toggle(item)}/>
+     <Button quiet danger disabled={busy} onClick={()=>remove(item)}>删除</Button>
+    </div>)}
+   </div>
+  </Card>
+  <Modal open={!!draft} title={items.some(x=>x.id===draft?.id)?'编辑自定义出口':'新增自定义出口'} onClose={()=>setDraft(null)} footer={<><Button onClick={()=>setDraft(null)}>取消</Button><Button primary disabled={busy} onClick={saveDraft}>{busy?'保存中…':'保存出口'}</Button></>}>
+   {draft&&<div className="form-grid">
+    <Field label="名称"><Input value={draft.name} onChange={e=>update('name',e.target.value)} placeholder="办公 SOCKS5"/></Field>
+    <Field label="协议"><Select value={draft.protocol} onChange={e=>update('protocol',e.target.value)}><option value="socks5">SOCKS5</option><option value="http">HTTP CONNECT</option><option value="https">HTTPS CONNECT</option></Select></Field>
+    <Field label="代理地址"><Input value={draft.address} onChange={e=>update('address',e.target.value)} placeholder="proxy.example.com:1080"/></Field>
+    <Field label="用户名（可选）"><Input value={draft.username||''} onChange={e=>update('username',e.target.value)}/></Field>
+    <Field label="密码（留空保持原值）"><Input type="password" autoComplete="new-password" value={draft.password||''} onChange={e=>update('password',e.target.value)} placeholder={draft.hasPassword?'已设置密码':'可选'}/></Field>
+    <div className="notice">HTTP CONNECT 不支持 UDP；代理断开或不支持协议时，连接会失败，不会自动改为本机直连。</div>
+   </div>}
+  </Modal>
+ </>;
+}
+
+function Exits({status,exits,selected,onSelect,onSpeed,onSpeedAll,config,save,toast}){
  const publicMeta=e=>{const p=e?.direct?.public,endpoints=arr(p?.endpoints),verified=endpoints.filter(x=>x.verified),first=verified[0]||endpoints[0];return {available:!!p?.available,transport:p?.transport||'',count:verified.length,endpoint:first?.dialAddress||first?.address||'',source:first?.source||''}};
- const staleSelected=!!selected&&!exits.some(e=>(e.deviceId||e.id)===selected),inventoryLive=!!status.connected;
- return <><PageHead title="出口选择" desc="仅显示 Server 授权给当前身份/设备的网络出口；公网直连信息来自 Server 已验证端点。" actions={<><Button onClick={onSpeedAll}>全部测速</Button><Button primary onClick={()=>onSpeed(selected)}>单出口测速</Button></>}/>
+ const staleSelected=!!selected&&!selected.startsWith('local:')&&!exits.some(e=>(e.deviceId||e.id)===selected),inventoryLive=!!status.connected;
+ return <><PageHead title="出口选择" desc="管理 Server 授权出口与本机自定义 SOCKS5 / HTTP 出口。" actions={<><Button onClick={onSpeedAll}>全部测速</Button><Button primary onClick={()=>onSpeed(selected)}>单出口测速</Button></>}/>
  <div className={cx('notice',!inventoryLive&&'warn')}>{inventoryLive?'自动选择只在仅有一个授权在线出口时直接生效。原选择被撤销、删除或不再授权时会保留旧设备 ID，不会静默改选其他出口或 DIRECT。':'Relay 当前未连接。下面保留的是上一次成功审批得到的权威出口库存，用于排障和预选；在线状态需重连后重新确认。'}</div>
  <div className="exit-grid top-gap"><button className={cx('exit-card',!selected&&'selected')} onClick={()=>onSelect('')}><div className="flag">◎</div><div className="grow"><strong>自动选择</strong><div className="mini">仅一个授权在线出口时自动选择；不会绕过既定策略。</div></div><span className="radio"/></button>{staleSelected&&<button className="exit-card selected disabled" disabled><div className="flag">!</div><div className="grow"><div className="row"><strong>不可用旧选择</strong><Badge tone="danger">已撤销 / 已删除</Badge></div><div className="mono mini">{selected}</div><div className="mini">Server 当前授权库存中已不存在此出口。请手动选择新的出口或切回自动选择。</div></div><span className="radio"/></button>}{exits.map(e=>{const id=e.deviceId||e.id,m=publicMeta(e),offline=inventoryLive&&e.online===false;return <button key={id} className={cx('exit-card',selected===id&&'selected',offline&&'disabled')} onClick={()=>!offline&&onSelect(id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||id}</strong><Badge tone={!inventoryLive?'neutral':offline?'neutral':'ok'}>{!inventoryLive?'上次库存':offline?'离线':'在线'}</Badge>{m.available&&<Badge tone="blue">Public Direct</Badge>}</div><div className="mini">{e.identityName||e.authorizationSource||id}</div>{m.available&&<div className="exit-path-meta"><span>{m.transport||'QUIC'}</span><span>{m.count?m.count+' 个已验证端点':'端点可用'}</span>{m.endpoint&&<span className="mono">{m.endpoint}</span>}</div>}</div><span className="radio"/></button>})}</div>
  {!exits.length&&<Card><div className="empty">当前没有已授权出口。请在 Server 管理端为此身份授权可用出口。</div></Card>}
+ <CustomExitManager config={config} save={save} onSelect={onSelect} selected={selected} toast={toast}/>
  <Card title="当前路径" eyebrow="LIVE PATH"><div className="cards-3 compact"><div><div className="mini">选择出口</div><strong>{exitName(exits,selected)}</strong></div><div><div className="mini">Direct</div><strong>{status.connected?(status.directPath||status.directState||'—'):'offline'}</strong>{status.connected&&status.directEndpoint&&<div className="mono mini">{status.directEndpoint}</div>}</div><div><div className="mini">P2P</div><strong>{status.connected?(status.p2pPath||status.p2pState||'—'):'offline'}</strong>{status.connected&&status.p2pCandidateSummary&&<div className="mini">{status.p2pCandidateSummary}</div>}</div></div></Card></>
 }
 
@@ -187,6 +242,7 @@ function RuleEditor({value,exits,onChange}){
 }
 
 function RoutingPage({config,exits,setv,save,dirty,onDiscard}){
+ exits=[...exits,...arr(config.customExits).map(x=>({id:x.id,name:x.name,online:x.enabled}))];
  const r=config.routing||EMPTY.routing,[editing,setEditing]=useState(null),rules=arr(r.rules);
  const commit=x=>setv('routing.rules',x);
  const move=(i,d)=>{const j=i+d;if(j<0||j>=rules.length)return;commit(moveRule(rules,i,j))};
@@ -333,7 +389,7 @@ export default function App(){
  const theme=useCallback(mode=>{const m=['light','dark','system'].includes(mode)?mode:'system',dark=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.classList.toggle('dark',dark)},[]);
  const syncExitInventory=useCallback(async x=>{const summary=arr(x?.proxyExits),key=makeExitInventoryKey(x);if(exitInventoryKey.current===key)return;exitInventoryKey.current=key;if(!hasBridge('goGetProxyExits')){setExits(summary);setExitsReady(true);return}try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch{setExits(summary);setExitsReady(true)}},[]);
  const refreshStatus=useCallback(async()=>{if(!hasBridge('goGetStatus'))return null;try{const x=await callJSON('goGetStatus',{});applyStatus(x);void syncExitInventory(x);return x}catch{return null}},[applyStatus,syncExitInventory]);
- const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
+ const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
  const refreshNetworkCapabilities=useCallback(async()=>{if(!hasBridge('goGetNetworkCapabilities'))return null;try{const x=await callJSON('goGetNetworkCapabilities',{});setConfig(p=>({...p,networkCapabilities:x||{}}));return x}catch{return null}},[]);
  const refreshExits=useCallback(async()=>{if(hasBridge('goGetProxyExits'))try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch(e){toast('读取授权出口失败：'+e.message,'danger')}},[toast]);
  const refreshTargets=useCallback(async()=>{if(hasBridge('goGetRDPTargets'))try{setTargets(arr(await callJSON('goGetRDPTargets',[])))}catch(e){toast(e.message,'danger')}},[toast]);
@@ -376,7 +432,7 @@ export default function App(){
  if(page==='overview')content=<Overview {...p} traffic={connections} history={history} onRefresh={refreshStatus} onGoto={requestPage}/>;
  else if(page==='devices')content=<Devices {...p} onRefresh={refreshStatus}/>;
  else if(page==='connection')content=<Connection {...p} onReload={()=>requestLifecycle('reload')}/>;
- else if(page==='exits')content=<Exits status={status} exits={exits} selected={status.selectedExit||config.defaultExitId||''} onSelect={select} onSpeed={id=>{setSpeedExit(id||'');setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)}/>;
+ else if(page==='exits')content=<Exits status={status} exits={exits} selected={status.selectedExit||config.defaultExitId||''} onSelect={select} onSpeed={id=>{setSpeedExit(id||'');setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} config={config} save={save} toast={toast}/>;
  else if(page==='proxy')content=<ProxyPage {...p} onService={()=>requestPage('settings')} onRefreshCapabilities={refreshNetworkCapabilities}/>;
  else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='routing')content=<RoutingPage {...p} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;

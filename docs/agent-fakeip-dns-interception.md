@@ -54,6 +54,13 @@ macOS：当 FakeIP 启用时，Agent 在 App Group 内持久化 `dns-guard.enabl
 
 Android：VPN Service 已声明支持系统 **Always-on VPN**，系统重启服务时可重新建立隧道，VPN 状态附带 Always-on/Lockdown 信息，主界面可显示锁定状态。要确保 VPN 断线时阻止其他 App 走底层网络，用户还必须在 Android「设置 → VPN → RelayProxy」手工打开「始终开启 VPN」和「无 VPN 时阻止连接」。应用自身不能替用户直接开启系统 Lockdown。选择性应用 VPN 会受系统 Lockdown 限制，需实机验证。
 
+## 后续安全加固（本轮）
+
+- **FakeIP DIRECT 二次校验**：经所选出口的 TLS DNS 解析得到真实 IP 后，拒绝环回、RFC1918、链路本地、CGNAT、文档/保留地址、FakeIP 段等非公网目标；使用原始进程、域名、端口和新 IP 再匹配全量分流规则，真实 IP 命中 PROXY/REJECT 不允许绕过。如果目标和 Relay/本地监听器回环保护冲突也拒绝。DNS 解析或复核失败时不走系统明文 DNS，也不直接发送占位 IP。
+- **DNS 专用出口**：新增 `routing.dns_exit_id`。经代理的加密 DNS 查询使用优先级：原连接明确指定的出口 → DNS 专用出口 → 当前默认出口。TXT/SRV 查询发生在应用连接建立前，通常没有可靠进程身份；只能使用显式 DNS 出口或默认出口，不能宣称跨进程 DNS 身份完全隔离。指定不存在/停用的本机自定义 DNS 出口时拒绝加载或热更新配置。
+- **Linux 按模式切换 DNS 队列**：FakeIP 关闭时 DNS/53 NFQUEUE 使用 `--queue-bypass`，避免普通模式 NFQUEUE 故障导致 DNS 意外黑洞；FakeIP 启用时移除该标志（内核队列存在期间失败关闭）。路由配置热更新后尝试同步替换 IPv4/IPv6 队列规则，失败在诊断日志中显示。异步规则切换过程中仍可能有短暂的系统窗口，不能将此模式当作独立持久 Kill Switch。
+- 这些改动并不解决应用通过硬编码 IP 的 DoH、操作系统未交付的环回 DNS、或平台级防火墙优先级差异；严格模式必须使用独立 Kill Switch 并配合真实系统验收。
+
 ## 尚不能宣称完整的零泄漏能力
 
 1. **DoH/HTTPS/443**：已知 DoH 主机名可选阻断，但应用自带私有解析器、直连固定 IP、ECH 或其他 HTTPS 请求无法被当前层完全区分。DoH3/QUIC 也需要专门治理。

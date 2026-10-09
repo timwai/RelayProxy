@@ -35,6 +35,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
+      - name: Test and build Server React frontend
+        working-directory: server/web/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
       - name: Test and build Wails React frontend
         working-directory: agent/gui/frontend
         run: |

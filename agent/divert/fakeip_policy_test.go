@@ -14,7 +14,7 @@ func TestFakeIPNeverFallsThroughToDirectOrUnavailableRelay(t *testing.T) {
 		ready         bool
 		wantRule      string
 	}{
-		{"direct", ActionDirect, true, "fakeip-direct-unsupported"},
+		{"direct", ActionDirect, true, "global-fake-proxy"},
 		{"relay-down", ActionProxy, false, "fakeip-proxy-unavailable"},
 		{"proxy", ActionProxy, true, "global-fake-proxy"},
 	} {
@@ -46,8 +46,11 @@ func TestFakeIPNeverFallsThroughToDirectOrUnavailableRelay(t *testing.T) {
 			if route.Decision().Rule != tc.wantRule {
 				t.Fatalf("wrong decision: %+v", route.Decision())
 			}
-			if tc.name != "proxy" && route.Decision().Action != ActionReject {
-				t.Fatalf("fake destination escaped as DIRECT: %+v", route.Decision())
+			if tc.name == "relay-down" && route.Decision().Action != ActionReject {
+				t.Fatalf("unavailable relay was not rejected: %+v", route.Decision())
+			}
+			if tc.name == "direct" && (route.Decision().Action != ActionDirect || !route.Decision().HandleDirect) {
+				t.Fatalf("FakeIP DIRECT must be safely handled in userspace: %+v", route.Decision())
 			}
 			if tc.name == "proxy" && proxyDialTarget(route.Metadata()) != "play.google.com" {
 				t.Fatal("PROXY attempted to send a FakeIP address")

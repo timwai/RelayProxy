@@ -21,6 +21,9 @@ func NewEngine(cfg Config) (*Engine, error) {
 	if cfg.Mode == "" {
 		cfg.Mode = ModeGlobalProxy
 	}
+	if cfg.DNSMode == "" {
+		cfg.DNSMode = DNSModeProxy
+	}
 	if cfg.DefaultAction == "" {
 		cfg.DefaultAction = ActionProxy
 	}
@@ -67,7 +70,11 @@ func (e *Engine) DecideFlow(flow Flow) Decision {
 	}
 	for i, rule := range e.config.Rules {
 		if rule.Enabled && e.compound[i].matches(rule, flow) {
-			return Decision{Action: rule.Action, ExitID: rule.ExitID, DatagramRequired: rule.DatagramRequired, HandleDirect: rule.HandleDirect, Rule: rule.Name, Matched: true}
+			name := strings.TrimSpace(rule.Name)
+			if name == "" {
+				name = "rule #" + strconv.Itoa(i+1)
+			}
+			return Decision{Action: rule.Action, ExitID: rule.ExitID, DatagramRequired: rule.DatagramRequired, HandleDirect: rule.HandleDirect, Rule: name, Matched: true}
 		}
 	}
 	return Decision{Action: e.config.DefaultAction, Rule: "default"}

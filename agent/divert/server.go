@@ -402,7 +402,10 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 	if route.decision.Action == ActionDirect {
 		target := route.flow.IP
 		if route.flow.DomainSource == "fakeip" && isFakeIP(route.key.Destination.Addr()) {
-			target, err = s.resolveFakeDirectIP(dialCtx, route.flow.Host, route.key.Destination.Addr().Is6())
+			target, err = s.resolveFakeDirectIP(dialCtx, route.decision.ExitID, route.flow.Host, route.key.Destination.Addr().Is6())
+			if err == nil {
+				err = s.validateFakeDirectTarget(route, target)
+			}
 		}
 		if err == nil {
 			if route.traffic != nil {

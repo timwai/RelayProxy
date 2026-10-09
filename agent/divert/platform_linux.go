@@ -409,11 +409,26 @@ func (f *linuxFirewall) installFamily(binary string, relayIPs []string) error {
 		{"-t", "mangle", "-A", linuxOutputChain, "-m", "mark", "--mark", mark, "-j", "RETURN"},
 		{"-t", "mangle", "-A", linuxInputChain, "-m", "mark", "--mark", mark, "-j", "RETURN"},
 	}
+	// DNS/53 must reach NFQUEUE even when the resolver shares the Relay's IP.
+	// Unlike ordinary traffic this queue has NO --queue-bypass: if Agent's
+	// NFQUEUE listener disappears while the firewall is installed, DNS is
+	// dropped by the kernel rather than escaping to a system resolver.
+	// RETURN after an accepted verdict prevents matching the generic queue.
+	for _, protocol := range []string{"tcp", "udp"} {
+		dnsMatch := []string{"-t", "mangle", "-A", linuxOutputChain, "-p", protocol, "--dport", "53"}
+		commands = append(commands,
+			append(append([]string{}, dnsMatch...), "-j", "NFQUEUE", "--queue-num", strconv.Itoa(linuxQueueNumber)),
+			append(append([]string{}, dnsMatch...), "-j", "RETURN"),
+		)
+	}
 	isIPv6 := strings.Contains(strings.ToLower(filepathBase(binary)), "ip6tables")
 	for _, raw := range relayIPs {
 		ip, err := netip.ParseAddr(raw)
 		if err == nil && ip.Is6() == isIPv6 {
-			commands = append(commands, []string{"-t", "mangle", "-A", linuxOutputChain, "-d", ip.String(), "-j", "RETURN"})
+			commands = append(commands,
+				[]string{"-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "!", "--dport", "53", "-d", ip.String(), "-j", "RETURN"},
+				[]string{"-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "!", "--dport", "53", "-d", ip.String(), "-j", "RETURN"},
+			)
 		}
 	}
 	for _, protocol := range []string{"tcp", "udp"} {

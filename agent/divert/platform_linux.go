@@ -470,7 +470,7 @@ func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
 	for _, family := range []string{f.iptables, f.ip6tables} {
 		for _, item := range []struct {
 			protocol string
-			index string
+			index    string
 		}{
 			{"tcp", "2"}, {"udp", "4"},
 		} {

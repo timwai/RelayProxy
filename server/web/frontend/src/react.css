@@ -88,3 +88,21 @@ button:disabled{cursor:not-allowed;opacity:.5}
 
 /* Secondary table details never run into the preceding value. */
 #root .table-wrap td > small {display:block;margin-top:4px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere;}
+
+/* Registered-device filters: full-width inputs previously caused each flex item to wrap. */
+#root .device-filters {
+  display:grid;
+  grid-template-columns:minmax(220px, 1fr) repeat(2, minmax(140px, 185px));
+  align-items:center;
+  gap:10px;
+  margin-bottom:16px;
+}
+#root .device-filters > .input {width:100%;min-width:0;max-width:none;}
+@media (max-width: 860px) {
+  #root .device-filters {grid-template-columns:repeat(2, minmax(0, 1fr));}
+  #root .device-filters > input.input {grid-column:1 / -1;}
+}
+@media (max-width: 520px) {
+  #root .device-filters {grid-template-columns:minmax(0, 1fr);}
+  #root .device-filters > input.input {grid-column:auto;}
+}

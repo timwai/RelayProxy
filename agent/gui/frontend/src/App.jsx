@@ -148,13 +148,17 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
   try{
    const result=parseMutation(await call('goTestCustomExit',item.id));
    if(!result.ok)throw new Error(result.message||'连接测试失败');
-   toast(item.name+' CONNECT 成功 · '+(result.latencyMs??'—')+' ms');
+   const tcpText=item.name+' TCP CONNECT 成功 · '+(result.latencyMs??'—')+' ms';
+   if(result.udpSupported){
+    if(result.udpOk)toast(tcpText+' · UDP 收发成功 '+(result.udpLatencyMs??'—')+' ms');
+    else toast(tcpText+'；UDP 检测失败：'+(result.udpError||'超时或上游不支持 UDP'),'warn');
+   }else toast(tcpText+' · 不支持 UDP');
   }catch(e){toast(item.name+' 测试失败：'+(e.message||String(e)),'danger')}
   finally{setBusy(false)}
  };
  return <>
   <Card title="自定义出口" eyebrow={items.length+' LOCAL EXITS'} action={<Button primary onClick={()=>edit(null)}>＋ 添加出口</Button>}>
-   <div className="mini">本机 SOCKS5 / HTTP CONNECT，不依赖 Server 授权。可作为默认出口、分流规则目标和本机出口共享上游。</div>
+   <div className="mini">本机 SOCKS5 / HTTP CONNECT，不依赖 Server 授权。可作为默认出口、分流规则目标和本机出口共享上游。点击「测试」会通过代理建立 TCP CONNECT；SOCKS5 还会经该代理向 Quad9 (9.9.9.9) 发送一次 example.com 的 UDP DNS 查询，分别显示结果。</div>
    {!items.length&&<div className="empty">尚未创建自定义出口。点击「添加出口」创建 SOCKS5 或 HTTP 代理。</div>}
    <div className="target-list top-gap">
     {items.map(item=><div className="target-row" key={item.id}>

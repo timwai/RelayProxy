@@ -94,11 +94,10 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 	return output, rows.Err()
 }
 
-
- // parseRDPStoredTimestamp accepts SQLite's actual stored TIMESTAMP text.
- // strftime('%s', timestamp) can silently return NULL for driver-serialized
- // Go values such as "2026-10-09 12:00:00 +0000 UTC"; treating NULL as zero
- // incorrectly showed the Unix epoch in the grouped audit.
+// parseRDPStoredTimestamp accepts SQLite's actual stored TIMESTAMP text.
+// strftime('%s', timestamp) can silently return NULL for driver-serialized
+// Go values such as "2026-10-09 12:00:00 +0000 UTC"; treating NULL as zero
+// incorrectly showed the Unix epoch in the grouped audit.
 func parseRDPStoredTimestamp(value any) (time.Time, error) {
 	if instant, ok := value.(time.Time); ok {
 		if instant.IsZero() || instant.Unix() <= 0 {

@@ -156,7 +156,9 @@ func TestParseRDPStoredTimestampFormats(t *testing.T) {
 func TestRDPSourceGroupsHistoricalTimestampDoesNotFallbackToUnixEpoch(t *testing.T) {
 	t.Setenv("RELAY_ADMIN_PASSWORD", "test-password")
 	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "legacy-rdp-date.db"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	// Go's time.Time string format may not be understood by SQLite strftime.
 	_, err = db.Exec(`INSERT INTO rdp_security_logs
@@ -164,9 +166,13 @@ func TestRDPSourceGroupsHistoricalTimestampDoesNotFallbackToUnixEpoch(t *testing
 		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		"older-format", "rdp-entry", "target", "203.0.113.40", "tcp", "FORWARDED", "",
 		"2026-10-09 12:34:56 +0000 UTC", "2026-10-09 12:34:56 +0000 UTC", 1, 2)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	page, err := db.ListRDPSecuritySourceGroups("", 1, 20)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(page.Items) != 1 || page.Items[0].FirstSeen.Year() != 2026 || page.Items[0].LastSeen.Year() != 2026 {
 		t.Fatalf("wrong historical RDP dates: %+v", page)
 	}

@@ -304,6 +304,11 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	guarded := !fake && s.guard.MustDirectFlow(flow)
 	if fake && !s.fakeIPEnabled() {
 		decision = Decision{Action: ActionReject, Rule: "fakeip-disabled"}
+	} else if s.opts.DoHBlockedIPs != nil && flow.Port == 443 &&
+		matchesConfiguredDoHIP(flow.IP, s.opts.DoHBlockedIPs()) {
+		// User explicitly opted into an exact endpoint / narrow CIDR block.
+		// It applies to both TCP and UDP without inspecting HTTPS payloads.
+		decision = Decision{Action: ActionReject, Rule: "doh-ip-endpoint-blocked"}
 	} else if s.opts.BlockDoHEndpoints != nil && s.opts.BlockDoHEndpoints() &&
 		isKnownDoHEndpoint(flow.Host) && (flow.Port == 443 || flow.Port == 80) {
 		// Only verified DNS/FakeIP/NE host metadata is used here.

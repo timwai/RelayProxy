@@ -755,6 +755,14 @@ func (b *UIBridge) ReloadConfig() (*SaveResult, error) {
 }
 
 func startupSettings(c *config.AgentConfigFile) map[string]any {
+	upstreamMode, upstreamAddress := c.Exit.Upstream.Mode, c.Exit.Upstream.Address
+	upstreamUser, upstreamPassword := c.Exit.Upstream.Username, c.Exit.Upstream.Password
+	if c.Exit.UpstreamExitID != "" {
+		if item, ok := routing.FindCustomExit(c.Proxy.CustomExits, c.Exit.UpstreamExitID); ok {
+			upstreamMode, upstreamAddress = item.Protocol, item.Address
+			upstreamUser, upstreamPassword = item.Username, item.Password
+		}
+	}
 	name := c.Device.Name
 	if name == "" {
 		name = "Relay-Agent"
@@ -776,8 +784,8 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"私网访问": c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
 		"共享上游出口": c.Exit.UpstreamExitID,
-		"出口上游模式": c.Exit.Upstream.Mode, "出口上游地址": c.Exit.Upstream.Address,
-		"出口上游用户名": c.Exit.Upstream.Username, "出口上游密码": c.Exit.Upstream.Password,
+		"出口上游模式": upstreamMode, "出口上游地址": upstreamAddress,
+		"出口上游用户名": upstreamUser, "出口上游密码": upstreamPassword,
 		"访问控制模式": c.Exit.Access.Mode, "访问域名": strings.Join(c.Exit.Access.Domains, "\n"),
 		"访问地址": strings.Join(c.Exit.Access.CIDRs, "\n"), "透明代理开关": c.Network.Mode,
 	}

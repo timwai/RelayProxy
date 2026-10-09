@@ -124,8 +124,8 @@ type AgentConfigFile struct {
 			Listen  string `yaml:"listen"`
 			Port    int    `yaml:"port"`
 		} `yaml:"http"`
-		DefaultExitID string `yaml:"default_exit_id"`
-		CustomExits []routing.CustomExit `yaml:"custom_exits,omitempty"`
+		DefaultExitID string               `yaml:"default_exit_id"`
+		CustomExits   []routing.CustomExit `yaml:"custom_exits,omitempty"`
 	} `yaml:"proxy"`
 
 	RDP struct {
@@ -153,11 +153,11 @@ type AgentConfigFile struct {
 	Routing routing.Config `yaml:"routing"` // 新增路由配置
 
 	Exit struct {
-		Enabled             *bool `yaml:"enabled"`
-		AllowInternet       bool  `yaml:"allow_internet"`
-		AllowPrivateNetwork bool  `yaml:"allow_private_network"`
-		AllowLoopback       bool  `yaml:"allow_loopback"`
-		UpstreamExitID string `yaml:"upstream_exit_id,omitempty"`
+		Enabled             *bool  `yaml:"enabled"`
+		AllowInternet       bool   `yaml:"allow_internet"`
+		AllowPrivateNetwork bool   `yaml:"allow_private_network"`
+		AllowLoopback       bool   `yaml:"allow_loopback"`
+		UpstreamExitID      string `yaml:"upstream_exit_id,omitempty"`
 		Upstream            struct {
 			Mode     string `yaml:"mode"` // direct | socks5 | http | https
 			Address  string `yaml:"address"`

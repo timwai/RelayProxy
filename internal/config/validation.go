@@ -250,8 +250,12 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if len(c.Exit.Upstream.Username) > 255 || len(c.Exit.Upstream.Password) > 255 {
 		return fmt.Errorf("exit.upstream 用户名和密码长度不能超过 255")
 	}
-	if err := routing.ValidateCustomExits(c.Proxy.CustomExits); err != nil { return err }
-	if err := routing.ValidateCustomReferences(c.Proxy.CustomExits, c.Proxy.DefaultExitID, c.Exit.UpstreamExitID, c.Routing.Rules); err != nil { return err }
+	if err := routing.ValidateCustomExits(c.Proxy.CustomExits); err != nil {
+		return err
+	}
+	if err := routing.ValidateCustomReferences(c.Proxy.CustomExits, c.Proxy.DefaultExitID, c.Exit.UpstreamExitID, c.Routing.Rules); err != nil {
+		return err
+	}
 	for _, item := range c.Proxy.CustomExits {
 		host, port, _ := net.SplitHostPort(item.Address)
 		n, _ := strconv.Atoi(port)

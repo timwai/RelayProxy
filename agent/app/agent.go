@@ -405,8 +405,12 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
-	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil { return nil, err }
-	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules); err != nil { return nil, err }
+	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil {
+		return nil, err
+	}
+	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules); err != nil {
+		return nil, err
+	}
 	if cfg.ExitUpstreamID != "" {
 		item, _ := routing.FindCustomExit(cfg.CustomExits, cfg.ExitUpstreamID)
 		cfg.ExitUpstream = exit.UpstreamConfig{Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password}
@@ -1978,10 +1982,14 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 // ApplyCustomExits replaces local proxy configurations for new connections.
 // A shared exit handler retains its startup snapshot until the Agent restarts.
 func (a *Agent) ApplyCustomExits(items []routing.CustomExit) error {
-	if err := routing.ValidateCustomExits(items); err != nil { return err }
+	if err := routing.ValidateCustomExits(items); err != nil {
+		return err
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.closed.Load() { return errors.New("agent closed") }
+	if a.closed.Load() {
+		return errors.New("agent closed")
+	}
 	a.dialer.SetCustomExits(items)
 	a.cfg.CustomExits = routing.CloneCustomExits(items)
 	return nil

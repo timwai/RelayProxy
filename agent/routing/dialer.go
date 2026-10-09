@@ -118,15 +118,19 @@ func (d *RoutingDialer) SetCustomExits(items []CustomExit) {
 	d.customMu.Lock()
 	defer d.customMu.Unlock()
 	d.customExits = make(map[string]CustomExit, len(items))
-	for _, item := range items { d.customExits[item.ID] = item }
+	for _, item := range items {
+		d.customExits[item.ID] = item
+	}
 }
 
 func (d *RoutingDialer) lookupCustom(id string) (exit.UpstreamConfig, error) {
 	d.customMu.RLock()
 	item, ok := d.customExits[id]
 	d.customMu.RUnlock()
-	if !ok || !item.Enabled { return exit.UpstreamConfig{}, fmt.Errorf("custom exit %q is missing or disabled", id) }
-	return exit.UpstreamConfig{Mode:item.Protocol, Address:item.Address, Username:item.Username, Password:item.Password}, nil
+	if !ok || !item.Enabled {
+		return exit.UpstreamConfig{}, fmt.Errorf("custom exit %q is missing or disabled", id)
+	}
+	return exit.UpstreamConfig{Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password}, nil
 }
 
 // DialTCP implements proxy.TunnelDialer.
@@ -168,10 +172,14 @@ func (d *RoutingDialer) dialTCP(ctx context.Context, exitNodeID, host string, po
 
 	case ActionProxy:
 		eid := exitNodeID
-		if ruleExitID != "" { eid = ruleExitID }
+		if ruleExitID != "" {
+			eid = ruleExitID
+		}
 		if IsCustomExitID(eid) {
 			upstream, err := d.lookupCustom(eid)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 			return exit.DialViaUpstreamTCP(ctx, upstream, host, port)
 		}
 		log.Printf("[Routing] PROXY %s:%d (exit=%s)", host, port, eid)
@@ -234,11 +242,17 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 
 	case ActionProxy:
 		eid := exitNodeID
-		if ruleExitID != "" { eid = ruleExitID }
+		if ruleExitID != "" {
+			eid = ruleExitID
+		}
 		if IsCustomExitID(eid) {
 			upstream, err := d.lookupCustom(eid)
-			if err != nil { return nil, err }
-			if decision.DatagramRequired { return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native Relay datagrams unavailable on a SOCKS5/HTTP custom exit") }
+			if err != nil {
+				return nil, err
+			}
+			if decision.DatagramRequired {
+				return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "native Relay datagrams unavailable on a SOCKS5/HTTP custom exit")
+			}
 			return exit.DialViaUpstreamUDP(ctx, upstream, host, port)
 		}
 		log.Printf("[Routing] PROXY UDP %s:%d (exit=%s)", host, port, eid)

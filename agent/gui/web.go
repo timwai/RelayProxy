@@ -485,7 +485,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		IsAutostart, MinimizeToTray, StartMinimized, RestartRequired, ReloadPending bool
 		Routing, Network, Runtime, ExitUpstream, RDP, P2P, Direct                   any
 		NetworkCapabilities                                                         divert.Capabilities
-		CustomExits, UpstreamExitID                                                any
+		CustomExits, UpstreamExitID                                                 any
 		Revision                                                                    string
 	}{
 		ConfigPath: b.ConfigPath(), ServerAddress: cfg.Server.Address, QUICPort: cfg.Server.QUICPort,

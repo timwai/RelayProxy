@@ -364,21 +364,21 @@ type ConfigUpdate struct {
 		} `json:"public"`
 	} `json:"direct"`
 	Proxy struct {
-		SOCKS5Enabled *bool   `json:"socks5Enabled"`
-		SOCKS5Listen  *string `json:"socks5Listen"`
-		SOCKS5Port    *int    `json:"socks5Port"`
-		HTTPEnabled   *bool   `json:"httpEnabled"`
-		HTTPListen    *string `json:"httpListen"`
-		HTTPPort      *int    `json:"httpPort"`
-		DefaultExitID *string `json:"defaultExitId"`
-		CustomExits *[]CustomExitUpdate `json:"customExits"`
+		SOCKS5Enabled *bool               `json:"socks5Enabled"`
+		SOCKS5Listen  *string             `json:"socks5Listen"`
+		SOCKS5Port    *int                `json:"socks5Port"`
+		HTTPEnabled   *bool               `json:"httpEnabled"`
+		HTTPListen    *string             `json:"httpListen"`
+		HTTPPort      *int                `json:"httpPort"`
+		DefaultExitID *string             `json:"defaultExitId"`
+		CustomExits   *[]CustomExitUpdate `json:"customExits"`
 	} `json:"proxy"`
 	Exit struct {
-		Enabled             *bool `json:"enabled"`
-		AllowInternet       *bool `json:"allowInternet"`
-		AllowPrivateNetwork *bool `json:"allowPrivateNetwork"`
-		AllowLoopback       *bool `json:"allowLoopback"`
-		UpstreamExitID     *string `json:"upstreamExitId"`
+		Enabled             *bool   `json:"enabled"`
+		AllowInternet       *bool   `json:"allowInternet"`
+		AllowPrivateNetwork *bool   `json:"allowPrivateNetwork"`
+		AllowLoopback       *bool   `json:"allowLoopback"`
+		UpstreamExitID      *string `json:"upstreamExitId"`
 		Upstream            struct {
 			Mode     *string `json:"mode"`
 			Address  *string `json:"address"`
@@ -408,12 +408,12 @@ type ConfigUpdate struct {
 // CustomExitUpdate accepts a password only when explicitly provided;
 // omitted password keeps the previously saved secret for an existing exit.
 type CustomExitUpdate struct {
-	ID string `json:"id"`
-	Name string `json:"name"`
-	Enabled bool `json:"enabled"`
-	Protocol string `json:"protocol"`
-	Address string `json:"address"`
-	Username string `json:"username"`
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Enabled  bool    `json:"enabled"`
+	Protocol string  `json:"protocol"`
+	Address  string  `json:"address"`
+	Username string  `json:"username"`
 	Password *string `json:"password,omitempty"`
 }
 
@@ -576,14 +576,20 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Proxy.CustomExits != nil {
 		items := make([]routing.CustomExit, 0, len(*in.Proxy.CustomExits))
 		for _, update := range *in.Proxy.CustomExits {
-			item := routing.CustomExit{ID:update.ID, Name:update.Name, Enabled:update.Enabled, Protocol:update.Protocol, Address:update.Address, Username:update.Username}
-			if update.Password != nil { item.Password = *update.Password } else if old, ok := routing.FindCustomExit(cfg.Proxy.CustomExits, update.ID); ok { item.Password = old.Password }
+			item := routing.CustomExit{ID: update.ID, Name: update.Name, Enabled: update.Enabled, Protocol: update.Protocol, Address: update.Address, Username: update.Username}
+			if update.Password != nil {
+				item.Password = *update.Password
+			} else if old, ok := routing.FindCustomExit(cfg.Proxy.CustomExits, update.ID); ok {
+				item.Password = old.Password
+			}
 			items = append(items, item)
 		}
 		cfg.Proxy.CustomExits = items
 	}
 
-	if in.Exit.UpstreamExitID != nil { cfg.Exit.UpstreamExitID = strings.TrimSpace(*in.Exit.UpstreamExitID) }
+	if in.Exit.UpstreamExitID != nil {
+		cfg.Exit.UpstreamExitID = strings.TrimSpace(*in.Exit.UpstreamExitID)
+	}
 	if in.Exit.Enabled != nil {
 		cfg.Exit.Enabled = config.BoolPtr(*in.Exit.Enabled)
 	}
@@ -727,7 +733,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if err := b.agent.ApplyPolicies(cfg.Routing, dcfg); err != nil {
 		return nil, fmt.Errorf("配置已保存在磁盘，但应用失败: %w", err)
 	}
-	if err := b.agent.ApplyCustomExits(cfg.Proxy.CustomExits); err != nil { return nil, fmt.Errorf("配置已保存，但更新自定义出口失败: %w", err) }
+	if err := b.agent.ApplyCustomExits(cfg.Proxy.CustomExits); err != nil {
+		return nil, fmt.Errorf("配置已保存，但更新自定义出口失败: %w", err)
+	}
 	b.agent.SelectExit(cfg.Proxy.DefaultExitID)
 	state := b.configState(cfg, revision)
 	message := "配置已保存，规则已应用。"

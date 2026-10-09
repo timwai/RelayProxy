@@ -248,6 +248,8 @@ func main() {
 		HTTPEnabled:   cfgFile.Proxy.HTTP.Enabled,
 		HTTPListen:    httpListen,
 		DefaultExitID: cfgFile.Proxy.DefaultExitID,
+		CustomExits: cfgFile.Proxy.CustomExits,
+		ExitUpstreamID: cfgFile.Exit.UpstreamExitID,
 		ExitEnabled:   cfgFile.Exit.Enabled,
 		ExitUpstream: exit.UpstreamConfig{
 			Mode: cfgFile.Exit.Upstream.Mode, Address: cfgFile.Exit.Upstream.Address,

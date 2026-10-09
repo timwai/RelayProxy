@@ -104,7 +104,11 @@ func (e *Engine) MatchWith(f Flow, shared func(Flow) Decision) Decision {
 		if action == "" {
 			action = e.cfg.DefaultAction
 		}
-		return Decision{Action: action, ExitID: r.ExitID, Rule: r.Name, DatagramRequired: r.DatagramRequired, HandleDirect: r.HandleDirect}
+		name := strings.TrimSpace(r.Name)
+		if name == "" {
+			name = "rule #" + strconv.Itoa(i+1)
+		}
+		return Decision{Action: action, ExitID: r.ExitID, Rule: name, DatagramRequired: r.DatagramRequired, HandleDirect: r.HandleDirect}
 	}
 
 	return Decision{Action: e.cfg.DefaultAction, Rule: "default"}

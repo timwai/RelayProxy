@@ -49,6 +49,7 @@ type Options struct {
 	BlockDoHEndpoints  func() bool   // opt-in domain-based DoH endpoint guard
 	ForwardOtherDNS    func() bool   // opt-in authenticated DoT via proxy for TXT/SRV
 	DNSExitID          func() string // optional pinned exit for DNS, independent from app flows
+	DoHBlockedIPs      func() []string // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 
 // Server owns classified flows. OS interception is separately gated by a

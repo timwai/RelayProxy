@@ -463,7 +463,7 @@ func writeWebJSON(rw http.ResponseWriter, value any) {
 	_ = json.NewEncoder(rw).Encode(value)
 }
 
-func webConfigJSON(b *bridge.UIBridge) string {
+// nonNilSlice keeps the desktop and Web JSON contracts consistent.\nfunc nonNilSlice[T any](items []T) []T {\n\tif items == nil {\n\t\treturn []T{}\n\t}\n\treturn items\n}\n\nfunc webConfigJSON(b *bridge.UIBridge) string {
 	state, err := b.GetConfigState()
 	if err != nil {
 		data, _ := json.Marshal(map[string]any{"configError": err.Error(), "configPath": b.ConfigPath()})
@@ -493,7 +493,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		DeviceName: cfg.Device.Name, IdentityID: cfg.Device.IdentityID, Transport: cfg.Transport.Mode,
 		SOCKS5:        proxyLeg{cfg.Proxy.SOCKS5.Enabled == nil || *cfg.Proxy.SOCKS5.Enabled, cfg.Proxy.SOCKS5.Listen, cfg.Proxy.SOCKS5.Port},
 		HTTP:          proxyLeg{cfg.Proxy.HTTP.Enabled == nil || *cfg.Proxy.HTTP.Enabled, cfg.Proxy.HTTP.Listen, cfg.Proxy.HTTP.Port},
-		DefaultExitID: cfg.Proxy.DefaultExitID, CustomExits: cfg.Proxy.CustomExits, UpstreamExitID: cfg.Exit.UpstreamExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
+		DefaultExitID: cfg.Proxy.DefaultExitID, CustomExits: nonNilSlice(cfg.Proxy.CustomExits), UpstreamExitID: cfg.Exit.UpstreamExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
 		AllowInternet: cfg.Exit.AllowInternet, AllowPrivate: cfg.Exit.AllowPrivateNetwork, AllowLoopback: cfg.Exit.AllowLoopback,
 		AccessMode: cfg.Exit.Access.Mode, AccessDomains: cfg.Exit.Access.Domains, AccessCIDRs: cfg.Exit.Access.CIDRs,
 		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "hasPassword": cfg.Exit.Upstream.Password != ""},

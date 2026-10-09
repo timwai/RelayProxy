@@ -4,6 +4,10 @@ import "time"
 
 func (i *packetInterceptor) flowMetadata(p ipPacket, process packetProcess) Flow {
 	flow := packetFlow(p, process)
+	if host, ok := i.server.fakeDNS.lookup(p.Destination.Addr()); ok {
+		flow.Host, flow.DomainSource = host, "fakeip"
+		return flow
+	}
 	flow.Host = i.dns.lookup(p.Destination.Addr())
 	if flow.Host != "" {
 		flow.DomainSource = "dns"

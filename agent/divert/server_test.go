@@ -749,3 +749,23 @@ func TestClassificationPreservesRejectWhenRelayUnavailable(t *testing.T) {
 		t.Fatalf("unready relay weakened REJECT: %+v", got)
 	}
 }
+
+func TestProxyDialTargetUsesOnlyTrustedHostAttribution(t *testing.T) {
+	cases := []struct {
+		name, source, host, expected string
+	}{
+		{"observed DNS", "dns", "play.google.com", "play.google.com"},
+		{"network extension", "network-extension", "play.google.com", "play.google.com"},
+		{"SNI telemetry", "tls-sni", "play.google.com", "142.250.1.2"},
+		{"HTTP telemetry", "http-host", "play.google.com", "142.250.1.2"},
+		{"missing host", "", "", "142.250.1.2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := proxyDialTarget(Flow{Host: tc.host, DomainSource: tc.source, IP: "142.250.1.2", Port: 443})
+			if got != tc.expected {
+				t.Fatalf("proxy target %q; expected %q", got, tc.expected)
+			}
+		})
+	}
+}

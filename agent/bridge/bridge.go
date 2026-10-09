@@ -449,6 +449,7 @@ type RoutingConfigUpdate struct {
 	DNSMode       *string        `json:"dns_mode"`
 	FakeIPEnabled *bool          `json:"fake_ip_enabled"`
 	BlockDoHEndpoints *bool `json:"block_doh_endpoints"`
+	ForwardOtherDNS *bool `json:"forward_other_dns"`
 	DefaultAction *string        `json:"default_action"`
 	Rules         []routing.Rule `json:"rules"` // Full replacement
 }
@@ -681,6 +682,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		if in.Routing.BlockDoHEndpoints != nil {
 			cfg.Routing.BlockDoHEndpoints = *in.Routing.BlockDoHEndpoints
+		}
+		if in.Routing.ForwardOtherDNS != nil {
+			cfg.Routing.ForwardOtherDNS = *in.Routing.ForwardOtherDNS
 		}
 		if in.Routing.DNSMode != nil {
 			mode := strings.ToLower(strings.TrimSpace(*in.Routing.DNSMode))

@@ -14,6 +14,10 @@ ns_if="rpdn$$"
 work="$(mktemp -d)"
 capture_pid=""
 cleanup() {
+    if [[ -n "${RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR:-}" ]]; then
+        mkdir -p "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR"
+        cp "$work"/*.pcap "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR/" 2>/dev/null || true
+    fi
     if [[ -n "$capture_pid" ]]; then
         kill "$capture_pid" 2>/dev/null || true
         wait "$capture_pid" 2>/dev/null || true
@@ -104,6 +108,22 @@ blocked="$(capture "$work/guarded.pcap")"
 if [[ "$blocked" -ne 0 ]]; then
     echo "DNS guard allowed $blocked on-wire packets to escape isolated namespace" >&2
     exit 1
+fi
+if [[ -n "${RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR:-}" ]]; then
+    {
+        echo "Test: Linux isolated nftables DNS guard on-wire"
+        echo "Baseline packet count: $baseline"
+        echo "IPv6 available: $ipv6_enabled"
+        if [[ "$ipv6_enabled" -eq 1 ]]; then
+            echo "Baseline IPv6 packet count: $baseline_v6"
+        fi
+        echo "Guarded packet count: $blocked"
+        echo "Note: Does not verify persistent systemd restart or real Agent driver interception"
+    } > "$work/summary.txt"
+    cp "$work/summary.txt" "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR/" 2>/dev/null || {
+        mkdir -p "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR"
+        cp "$work/summary.txt" "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR/"
+    }
 fi
 echo "PASS: nftables guard stopped every tested UDP 53/853/784/8853 and TCP 53/853 packet before the veth; baseline capture proved observability."
 if [[ "$ipv6_enabled" -eq 1 ]]; then

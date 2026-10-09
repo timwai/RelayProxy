@@ -332,22 +332,17 @@ func readSOCKS5Address(r io.Reader, atyp byte) (netip.AddrPort, error) {
 		if _, err := io.ReadFull(r, n[:]); err != nil {
 			return netip.AddrPort{}, err
 		}
-		name := make([]byte, int(n[0]))
-		if _, err := io.ReadFull(r, name); err != nil {
+		if n[0] == 0 {
+			return netip.AddrPort{}, errors.New("empty SOCKS5 bound hostname")
+		}
+		// CONNECT does not use BND.ADDR. Consume a domain reply without
+		// resolving it locally; even an untrusted proxy can choose this name.
+		// UDP ASSOCIATE rejects the invalid (non-IP) endpoint below.
+		nameAndPort := make([]byte, int(n[0])+2)
+		if _, err := io.ReadFull(r, nameAndPort); err != nil {
 			return netip.AddrPort{}, err
 		}
-		var port [2]byte
-		if _, err := io.ReadFull(r, port[:]); err != nil {
-			return netip.AddrPort{}, err
-		}
-		ips, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", string(name))
-		if err != nil {
-			return netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 bound host %q: %w", string(name), err)
-		}
-		if len(ips) == 0 {
-			return netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 bound host %q: no addresses", string(name))
-		}
-		return netip.AddrPortFrom(ips[0].Unmap(), uint16(port[0])<<8|uint16(port[1])), nil
+		return netip.AddrPort{}, nil
 	default:
 		return netip.AddrPort{}, fmt.Errorf("unsupported SOCKS5 address type 0x%02x", atyp)
 	}
@@ -400,6 +395,9 @@ func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port 
 	relay, err := readSOCKS5Reply(control)
 	if err != nil {
 		return nil, err
+	}
+	if !relay.IsValid() {
+		return nil, errors.New("SOCKS5 UDP relay returned a domain BND.ADDR; refusing local DNS resolution")
 	}
 	if relay.Addr().IsUnspecified() {
 		host, _, splitErr := net.SplitHostPort(control.RemoteAddr().String())
@@ -548,14 +546,9 @@ func parseSOCKS5UDPAddress(packet []byte, offset int) (int, netip.AddrPort, erro
 		offset += n
 		port := uint16(packet[offset])<<8 | uint16(packet[offset+1])
 		offset += 2
-		ips, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", host)
-		if err != nil {
-			return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: %w", host, err)
-		}
-		if len(ips) == 0 {
-			return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: no addresses", host)
-		}
-		return offset, netip.AddrPortFrom(ips[0].Unmap(), port), nil
+		// The UDP reply hostname is supplied by the upstream, not the
+		// application. Resolving it locally would leak an arbitrary DNS name.
+		return 0, netip.AddrPort{}, fmt.Errorf("SOCKS5 UDP domain reply %q:%d requires remote DNS; use skipSOCKS5UDPAddress for opaque replies", host, port)
 	default:
 		return 0, netip.AddrPort{}, fmt.Errorf("unsupported SOCKS5 UDP address type 0x%02x", atyp)
 	}

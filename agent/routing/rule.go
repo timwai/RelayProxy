@@ -69,6 +69,7 @@ type Config struct {
 	DNSMode       DNSMode `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"`               // proxy (default) or local
 	FakeIPEnabled bool    `yaml:"fake_ip_enabled,omitempty" json:"fake_ip_enabled,omitempty"` // opt-in transparent DNS interception
 	BlockDoHEndpoints bool `yaml:"block_doh_endpoints,omitempty" json:"block_doh_endpoints,omitempty"` // best-effort known-host DoH blocking
+	ForwardOtherDNS   bool `yaml:"forward_other_dns,omitempty" json:"forward_other_dns,omitempty"` // forward TXT/SRV through TLS resolver on selected proxy exit
 	DefaultAction Action  `yaml:"default_action" json:"default_action"`                       // When no rule matches in rule mode
 	Rules         []Rule  `yaml:"rules"          json:"rules"`                                // Ordered rule list
 }

@@ -408,7 +408,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil {
 		return nil, err
 	}
-	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules); err != nil {
+	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
 		return nil, err
 	}
 	if cfg.ExitUpstreamID != "" {

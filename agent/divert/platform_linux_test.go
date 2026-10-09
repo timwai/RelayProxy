@@ -85,7 +85,7 @@ func TestParseLinuxSocketTableExactAndUDPWildcard(t *testing.T) {
 
 func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 	var commands [][]string
-	f := &linuxFirewall{run: func(binary string, args ...string) error {
+	f := &linuxFirewall{dnsGuard: true, run: func(binary string, args ...string) error {
 		commands = append(commands, append([]string{binary}, args...))
 		return nil
 	}}
@@ -131,6 +131,58 @@ func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 	for _, command := range commands {
 		if len(command) >= 8 && reflect.DeepEqual(command[4:8], []string{linuxInputChain, "-p", "tcp", "-j"}) {
 			t.Fatalf("all inbound TCP traffic was queued: %v", command)
+		}
+	}
+}
+
+
+func TestLinuxDNSQueueNormalModeAndHotUpdates(t *testing.T) {
+	var commands [][]string
+	f := &linuxFirewall{
+		iptables: "iptables", ip6tables: "ip6tables",
+		run: func(binary string, args ...string) error {
+			commands = append(commands, append([]string{binary}, args...))
+			return nil
+		},
+	}
+	if err := f.installFamily("iptables", nil); err != nil {
+		t.Fatal(err)
+	}
+	wantQueue := []string{"iptables", "-t", "mangle", "-A", linuxOutputChain,
+		"-p", "udp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231", "--queue-bypass"}
+	present := false
+	for _, got := range commands {
+		if reflect.DeepEqual(got, wantQueue) {
+			present = true
+		}
+	}
+	if !present {
+		t.Fatal("normal Linux mode unexpectedly enables fail-closed DNS queue")
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(true); err != nil {
+		t.Fatal(err)
+	}
+	if !f.dnsGuard || len(commands) != 4 {
+		t.Fatalf("enabling protection did not update both IP families: %+v", commands)
+	}
+	for _, command := range commands {
+		for _, option := range command {
+			if option == "--queue-bypass" {
+				t.Fatalf("protected DNS rule retains bypass flag: %v", command)
+			}
+		}
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(false); err != nil {
+		t.Fatal(err)
+	}
+	if f.dnsGuard || len(commands) != 4 {
+		t.Fatalf("disabling protection did not update both families: %+v", commands)
+	}
+	for _, command := range commands {
+		if command[len(command)-1] != "--queue-bypass" {
+			t.Fatalf("normal mode DNS queue should not blackhole when NFQUEUE exits: %v", command)
 		}
 	}
 }

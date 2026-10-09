@@ -28,8 +28,8 @@ func TestDoHBlockingHonorsOptInAndDoesNotBlockRegularWeb(t *testing.T) {
 		BlockDoHEndpoints: func() bool { return enabled },
 	})
 	for _, test := range []struct {
-		host string
-		port uint16
+		host   string
+		port   uint16
 		action Action
 	}{
 		{"dns.google", 443, ActionReject},

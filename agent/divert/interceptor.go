@@ -344,6 +344,12 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		}
 	}
 	if isFakeIP(packet.Destination.Addr()) {
+		if !i.server.fakeIPEnabled() {
+			if packet.Protocol == ProtoTCP {
+				return i.rejectTCP(packet, meta)
+			}
+			return nil // stale cached FakeIP after disabling interception
+		}
 		if _, ok := i.server.fakeDNS.lookup(packet.Destination.Addr()); !ok {
 			// Expired/unknown placeholders must not reach the public network.
 			if packet.Protocol == ProtoTCP {
@@ -373,7 +379,7 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		process = packetProcess{}
 	}
 	flow := i.flowMetadata(packet, process)
-	if i.server.guard.MustDirectFlow(flow) {
+	if !isFakeIP(packet.Destination.Addr()) && i.server.guard.MustDirectFlow(flow) {
 		i.direct.Add(1)
 		return i.sendPacket(packet, meta)
 	}
@@ -509,7 +515,7 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 			process = packetProcess{}
 		}
 		metadata := i.flowMetadata(p, process)
-		if i.server.guard.MustDirectFlow(metadata) {
+		if !isFakeIP(p.Destination.Addr()) && i.server.guard.MustDirectFlow(metadata) {
 			i.direct.Add(1)
 			return i.sendPacket(p, meta)
 		}

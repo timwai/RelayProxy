@@ -130,13 +130,14 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
  ].filter(Boolean);
  const update=(key,val)=>setDraft(x=>({...x,[key]:val}));
  const persist=async next=>{setBusy(true);try{return await save({proxy:{customExits:next}})}finally{setBusy(false)}};
- const edit=item=>setDraft(item?{...item,password:''}:{id:'local:'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),name:'',protocol:'socks5',address:'',enabled:true,username:'',password:''});
+ const edit=item=>setDraft(item?{...item,password:'',clearPassword:false}:{id:'local:'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),name:'',protocol:'socks5',address:'',enabled:true,username:'',password:'',clearPassword:false});
  const saveDraft=async()=>{
   if(!draft)return;
   if(!draft.name.trim()||!draft.address.trim()){toast('请输入名称和 host:port 地址','danger');return}
-  const {hasPassword,...rest}=draft;
+  const {hasPassword,clearPassword,...rest}=draft;
   const value={...rest,name:rest.name.trim(),address:rest.address.trim()};
-  if(!value.password)delete value.password;
+  if(clearPassword)value.password='';
+  else if(!value.password)delete value.password;
   const next=items.some(x=>x.id===value.id)?items.map(x=>x.id===value.id?value:x):[value,...items];
   if(await persist(next))setDraft(null);
  };
@@ -176,7 +177,8 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
     <Field label="协议"><Select value={draft.protocol} onChange={e=>update('protocol',e.target.value)}><option value="socks5">SOCKS5</option><option value="http">HTTP CONNECT</option><option value="https">HTTPS CONNECT</option></Select></Field>
     <Field label="代理地址"><Input value={draft.address} onChange={e=>update('address',e.target.value)} placeholder="proxy.example.com:1080"/></Field>
     <Field label="用户名（可选）"><Input value={draft.username||''} onChange={e=>update('username',e.target.value)}/></Field>
-    <Field label="密码（留空保持原值）"><Input type="password" autoComplete="new-password" value={draft.password||''} onChange={e=>update('password',e.target.value)} placeholder={draft.hasPassword?'已设置密码':'可选'}/></Field>
+    <Field label="密码（留空保持原值）"><Input type="password" autoComplete="new-password" disabled={!!draft.clearPassword} value={draft.password||''} onChange={e=>update('password',e.target.value)} placeholder={draft.hasPassword?'已设置密码':'可选'}/></Field>
+    {draft.hasPassword&&<Field label="清除已保存密码"><Switch checked={!!draft.clearPassword} label="保存时清除原密码" onChange={v=>update('clearPassword',v)}/></Field>}
     <div className="notice">HTTP CONNECT 不支持 UDP；代理断开或不支持协议时，连接会失败，不会自动改为本机直连。</div>
    </div>}
   </Modal>

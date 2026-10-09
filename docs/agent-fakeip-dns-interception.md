@@ -85,6 +85,10 @@ Agent「诊断与日志」新增 DNS 安全状态：FakeIP 策略开关、内核
 
 因此该功能的当前 UI 明确标记为 **实验性**。在实现平台 DNS 强制重定向、独立持久 OS 防火墙泄漏阻断、DoH 控制与全面应用兼容测试前，不能作为严格安全边界。
 
+## 独立实际代理及系统 DNS 防泄漏验收
+
+[实际代理与 FakeIP DNS 防泄漏验收手册](proxy-dns-security-acceptance.md) 列出了可复现的 Dante / Tinyproxy 实际服务测试、Linux nftables 隔离网络内核抓包，以及 Windows、macOS、Linux、Android 必需的物理出口/驱动/VPN 验收条件。**协议和规则的 CI 成功不代表已完成跨平台零泄漏认证**。
+
 ## 回归测试
 
 - `go test ./agent/divert ./agent/routing ./internal/config`

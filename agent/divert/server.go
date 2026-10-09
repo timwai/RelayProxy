@@ -59,6 +59,7 @@ type Server struct {
 	dialer  Dialer
 	guard   LoopGuard
 	fakeDNS *fakeIPDNS
+	dnsLimit chan struct{} // bound concurrent TLS resolver requests
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -114,7 +115,7 @@ func New(opts Options) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		opts: opts, engine: eng, dialer: opts.Dialer, guard: opts.Guard,
-		ctx: ctx, cancel: cancel, done: make(chan struct{}), fakeDNS: newFakeIPDNS(),
+		ctx: ctx, cancel: cancel, done: make(chan struct{}), fakeDNS: newFakeIPDNS(), dnsLimit: make(chan struct{}, 16),
 		connections: make(map[net.Conn]struct{}), udp: make(map[FlowKey]*udpAssociation),
 	}, nil
 }

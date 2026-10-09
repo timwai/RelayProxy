@@ -11,7 +11,7 @@ import (
 // Linux NFQUEUE; no real DNS resolver or external socket is contacted.
 func TestFakeIPDNSPacketInterceptionAndDomainRouting(t *testing.T) {
 	i, device := newTestInterceptor(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
+		Config:        Config{DefaultAction: ActionProxy},
 		FakeIPEnabled: func() bool { return true },
 	})
 	syn := interceptedSYN(false)
@@ -65,7 +65,7 @@ func TestFakeIPDNSPacketInterceptionAndDomainRouting(t *testing.T) {
 
 func TestFakeIPUnknownAddressNeverReinjectedToNetwork(t *testing.T) {
 	i, device := newTestInterceptor(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
+		Config:        Config{DefaultAction: ActionProxy},
 		FakeIPEnabled: func() bool { return true },
 	})
 	syn := interceptedSYN(false)
@@ -94,7 +94,7 @@ func TestFakeIPUnknownAddressNeverReinjectedToNetwork(t *testing.T) {
 
 func TestFakeIPRejectsSystemDNSLeakWithoutLocalForwarding(t *testing.T) {
 	i, device := newTestInterceptor(t, Options{
-		Config: Config{DefaultAction: ActionDirect},
+		Config:        Config{DefaultAction: ActionDirect},
 		FakeIPEnabled: func() bool { return true },
 	})
 	for _, port := range []uint16{853, 784, 8853} {

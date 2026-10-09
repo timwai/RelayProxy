@@ -101,7 +101,7 @@ func runCustomExitUDPProbe(t *testing.T, badResponse bool) {
 			return
 		}
 		response := dnsmessage.Message{
-			Header: dnsmessage.Header{ID: query.ID, Response: true, RecursionDesired: true, RecursionAvailable: true},
+			Header:    dnsmessage.Header{ID: query.ID, Response: true, RecursionDesired: true, RecursionAvailable: true},
 			Questions: query.Questions,
 		}
 		if badResponse {

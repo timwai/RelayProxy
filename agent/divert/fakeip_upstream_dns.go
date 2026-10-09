@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -119,6 +118,5 @@ func (s *Server) exchangeProxyDoT(parent context.Context, question []byte) ([]by
 	return response, nil
 }
 
-// The dialer must be a selected Relay/custom-proxy dispatcher, never a direct
-// net.Dialer. net.Conn appears here only as an upstream tunnel handle.
-var _ net.Conn
+// The dialer must be a selected Relay/custom-proxy dispatcher, never
+// a direct network resolver.

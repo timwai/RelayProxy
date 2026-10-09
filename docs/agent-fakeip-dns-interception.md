@@ -15,9 +15,10 @@ routing:
 - A 使用 198.18.0.0/15，AAAA 使用 2001:db8:198:18::/96。返回 TTL 60 秒，Agent 映射保留最多 15 分钟；每个实例最多保留 32768 条同时有效的映射。容量耗尽时先回收过期记录，但**同一次 Agent 运行过程中不把过期 FakeIP 分配给其他域名**，避免旧缓存错误分流。IPv4 在运行期间最多签发 131070 个不同地址，签发空间耗尽时返回 SERVFAIL，不会在空间里循环复用。
 - FakeIP 模式关闭后仅防护本次运行中已签发的占位地址；没有签发过的 198.18.0.0/15 测试网络流量继续按普通规则处理。
 - RFC 6761 的 `localhost` 和 `*.localhost` 直接返回 127.0.0.1/::1，`invalid` 和 `*.invalid` 返回 NXDOMAIN，均不分配 FakeIP 或请求上游 DNS。
-- 命中 FakeIP 的连接先映射回域名，按域名分流，IP/CIDR 规则不匹配占位地址。PROXY 流量发送域名给上游，避免本地查询。遇到 Relay 不可用或 FakeIP 对应 DIRECT 规则时，为避免占位地址被直连，当前采取拒绝而不是不安全回退。
+- 命中 FakeIP 的连接先映射回域名，按域名分流，IP/CIDR 规则不匹配占位地址。PROXY 流量发送域名给上游，避免本地查询。FakeIP 命中 DIRECT 规则时先由选定出口访问经 TLS 证书校验的 DNS 解析器获取真实 IP，然后本机对该真实 IP 建立 TCP/UDP 直连（本机不查询明文 DNS）。如代理 DNS 不可达则连接失败，不会直连 FakeIP。
 - Relay 服务端的域名解析仅通过启动时已知的 relay IP 回应，缺少该信息时返回 SERVFAIL；不通过正常系统 DNS 查询来突破拦截。
-- 未支持的 DNS RR 类型、畸形数据、已知专用加密 DNS 出口 TCP/UDP 853、784、8853 会拒绝或丢弃，不悄悄走本机 DNS。
+- HTTPS/SVCB（类型 65/64）返回 NOERROR/NODATA，阻止泄露实际 IP hints 并允许客户端回退到 A/AAAA。TXT/SRV 可启用 `routing.forward_other_dns`，通过所选出口访问 `9.9.9.9:853`、严格验证 `dns.quad9.net` TLS 证书；该模式**向 Quad9 披露域名**，默认关闭。认证/传输失败返回 SERVFAIL，不回退本机明文 DNS。其余未支持 RR、畸形数据、已知专用加密 DNS 出口 TCP/UDP 853、784、8853 拒绝或丢弃。
+- `routing.block_doh_endpoints: true` 默认关闭，仅针对**已获得可靠域名**的常见 DoH 服务域名在 443 端口采取拒绝。无法通过此方式识别硬编码 IP、ECH 和自建 DoH，也不会为了识别 DoH 封锁所有 HTTPS。
 
 ## 已补充的平台防泄漏防线
 
@@ -25,14 +26,42 @@ routing:
 - Linux：在 Relay-IP bypass 之前先通过 NFQUEUE 捕获 TCP/UDP 53；这些 DNS 队列规则**没有 `--queue-bypass`**，因而在 iptables 规则仍安装但 NFQUEUE 进程故障时 DNS/53 将被内核丢弃，而不是逃逸。普通非 DNS 规则仍按原来的可用性策略执行。
 - 以上保护不能替代**独立、持久的系统防火墙规则**：Agent 正常退出会清理 Linux 的 NFQUEUE/iptables 规则，Windows/macOS 仍有环回和未接管路径。不能把它称为跨平台 Kill Switch。
 
+## 独立 DNS Kill Switch（需要管理员明确操作）
+
+以下命令会影响整个系统的 DNS 出站通信，请务必预先安排可用的本地控制台和回滚路径。**不会随 Agent/FakeIP 开关自动启用。**
+
+Linux（nftables + systemd，阻止非 loopback TCP/UDP 53、853、784、8853）：
+
+```sh
+sudo bash scripts/dns-killswitch-linux.sh enable
+sudo bash scripts/dns-killswitch-linux.sh status
+sudo bash scripts/dns-killswitch-linux.sh disable
+```
+
+规则在 OUTPUT priority 0 执行，低于 RelayProxy iptables mangle/NFQUEUE 处理优先级。Linux 脚本写入独立 nftables table 和 systemd unit；Agent 停止也不会主动撤销该独立规则。启动期间是否存在极短空窗仍需要实机验证。
+
+Windows（需要管理员 PowerShell）：
+
+```powershell
+.\\scripts\\dns-killswitch-windows.ps1 Enable
+.\\scripts\\dns-killswitch-windows.ps1 Status
+.\\scripts\\dns-killswitch-windows.ps1 Disable
+```
+
+此命令添加独立的持久 Windows Firewall 出站封禁规则。**不同 Windows 版本的 WFP/WinDivert 规则优先级尚未实机验证**，可能阻止 FakeIP 查询，首次启用必须在测试机上验证；不保证环回流量可被此规则阻止。
+
+macOS：当 FakeIP 启用时，Agent 在 App Group 内持久化 `dns-guard.enabled` 状态。Network Extension 在 Go IPC 失联但仍能看到系统流量时，会拒绝捕获到的 TCP/UDP 流，不再将这些流静默放行。它**不是持久 PF/网络过滤器**，无法覆盖 Network Extension 未交付的系统 DNS/loopback 流，也不能阻止用户卸载/停用扩展。
+
+Android：VPN Service 已声明支持系统 **Always-on VPN**，系统重启服务时可重新建立隧道，VPN 状态附带 Always-on/Lockdown 信息，主界面可显示锁定状态。要确保 VPN 断线时阻止其他 App 走底层网络，用户还必须在 Android「设置 → VPN → RelayProxy」手工打开「始终开启 VPN」和「无 VPN 时阻止连接」。应用自身不能替用户直接开启系统 Lockdown。选择性应用 VPN 会受系统 Lockdown 限制，需实机验证。
+
 ## 尚不能宣称完整的零泄漏能力
 
-1. **DoH/HTTPS/443**：应用自带 DNS-over-HTTPS 与普通 HTTPS 无法被当前流量层可靠区分，仍可能绕过 DNS/53 接管。ECH、DoH3/QUIC 也需要专门治理。仅阻断端口不足以解决问题。
+1. **DoH/HTTPS/443**：已知 DoH 主机名可选阻断，但应用自带私有解析器、直连固定 IP、ECH 或其他 HTTPS 请求无法被当前层完全区分。DoH3/QUIC 也需要专门治理。
 2. **系统环回 DNS**：Windows WinDivert 当前过滤掉 loopback，Linux 应用到 127.0.0.1、::1 的请求，以及 macOS Network Extension 不交给透明代理的系统 DNS 流，可能绕过本次拦截。
 3. **故障期间**：底层驱动关闭或 Packet Interceptor 发生不可恢复错误时，现有平台设计会释放拦截器（fail-open）。如果没有独立 OS 防火墙的始终在线 DNS 阻断规则，就不能提供严格的断线不泄漏保证。
-4. **兼容性**：TXT/SRV/SVCB/HTTPS RR、DNSSEC、mDNS 与需要真实 IP 的 DIRECT / 局域网分流尚未形成完整语义，现阶段按安全拒绝处理，不保证相关应用正常。
+4. **兼容性**：HTTPS/SVCB 采用 NODATA 回退，TXT/SRV 可选经代理 DoT，FakeIP DIRECT 可先经代理 DNS 恢复真实 IP。但 DNSSEC、mDNS、split-horizon DNS、本地网络 DIRECT 与 IPv6/多地址选择尚不等同原系统解析语义。
 5. **IPv6**：合成 IPv6 占位地址需要应用主机有适用的 IPv6 路由才有机会进入透明代理。不能依赖 FakeIP 自动补全 IPv6 网络能力。
-6. **Android**：Android VPN 的 FakeIP/系统 DNS 接管需要在 mobile/androidcore 独立审计，不能从桌面 Agent 的测试推断 Android 已支持。
+6. **Android**：Android 使用 hev-socks5-tunnel Mapped DNS 和 Go 层 FakeIP 防护；已支持系统 Always-on/Lockdown 模式的集成状态，但无 Android 流量抓包实测，不能宣称任何 ROM/第三方 DNS App 均无泄漏。
 
 因此该功能的当前 UI 明确标记为 **实验性**。在实现平台 DNS 强制重定向、独立持久 OS 防火墙泄漏阻断、DoH 控制与全面应用兼容测试前，不能作为严格安全边界。
 

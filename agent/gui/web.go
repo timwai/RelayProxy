@@ -477,7 +477,15 @@ func writeWebJSON(rw http.ResponseWriter, value any) {
 	_ = json.NewEncoder(rw).Encode(value)
 }
 
-// nonNilSlice keeps the desktop and Web JSON contracts consistent.\nfunc nonNilSlice[T any](items []T) []T {\n\tif items == nil {\n\t\treturn []T{}\n\t}\n\treturn items\n}\n\nfunc webConfigJSON(b *bridge.UIBridge) string {
+// nonNilSlice keeps the desktop and Web JSON contracts consistent.
+func nonNilSlice[T any](items []T) []T {
+	if items == nil {
+		return []T{}
+	}
+	return items
+}
+
+func webConfigJSON(b *bridge.UIBridge) string {
 	state, err := b.GetConfigState()
 	if err != nil {
 		data, _ := json.Marshal(map[string]any{"configError": err.Error(), "configPath": b.ConfigPath()})

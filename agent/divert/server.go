@@ -48,6 +48,7 @@ type Options struct {
 	FakeIPEnabled      func() bool // dynamically consulted for new transparent DNS queries
 	BlockDoHEndpoints  func() bool // opt-in domain-based DoH endpoint guard
 	ForwardOtherDNS    func() bool // opt-in authenticated DoT via proxy for TXT/SRV
+	DNSExitID          func() string // optional pinned exit for DNS, independent from app flows
 }
 
 // Server owns classified flows. OS interception is separately gated by a

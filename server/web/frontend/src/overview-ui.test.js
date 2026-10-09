@@ -4,6 +4,8 @@ import {readFileSync} from 'node:fs';
 const app=readFileSync(new URL('./App.jsx',import.meta.url),'utf8');
 const css=readFileSync(new URL('./react.css',import.meta.url),'utf8');
 const icons=readFileSync(new URL('./icons.jsx',import.meta.url),'utf8');
+const dashboard=readFileSync(new URL('./OverviewCharts.jsx',import.meta.url),'utf8');
+const chartCss=readFileSync(new URL('./overview-charts.css',import.meta.url),'utf8');
 
 test('brand uses official existing web asset on login and navigation',()=>{
  assert.match(app,/function BrandMark\(/);
@@ -18,14 +20,22 @@ test('navigation uses GUI stroke icons instead of Unicode placeholders',()=>{
  assert.match(icons,/stroke="currentColor"/);
  assert.ok(css.includes('#root .sidebar .nav-item>span:nth-child(2){display:none}'));
 });
-test('overview has real-data metrics, visual topology, varied colors, and proper row gap',()=>{
- assert.match(app,/aria-label="RelayProxy 网络拓扑"/);
- assert.match(app,/className="network-visual"/);
- assert.match(app,/className="grid g4 overview-metrics"/);
- assert.match(app,/className="grid two-one page-section"/);
- assert.match(app,/className="overview-shortcuts"/);
- assert.match(app,/todayUpload/);
- assert.match(app,/todayDownload/);
- assert.match(css,/#root \.main-inner > \.overview-metrics \+ \.grid\.two-one\{margin-top:18px\}/);
- assert.match(css,/#root \.overview-metric \.metric-icon/);
+test('overview replaces decorative topology with live charts',()=>{
+ assert.match(app,/function Overview\(\{ctx\}\)\{return <OverviewRealtime ctx=\{ctx\}\/>/);
+ assert.doesNotMatch(app,/className="network-visual"/);
+ assert.doesNotMatch(app,/aria-label="RelayProxy 网络拓扑"/);
+ for(const keyword of ['实时上下行速率','连接与设备趋势','当前路径分布','出口实时负载','今日累计上传','最近设备']){
+   assert.ok(dashboard.includes(keyword),keyword);
+ }
+ assert.match(dashboard,/className="grid g4 rt-metrics"/);
+ assert.match(chartCss,/#root \.rt-two-col\{display:grid/);
+});
+test('overview polling uses real endpoints and bounded history',()=>{
+ assert.match(dashboard,/api\('\/dashboard',options\)/);
+ assert.match(dashboard,/api\('\/sessions\/active',options\)/);
+ assert.match(dashboard,/api\('\/p2p\/sessions',options\)/);
+ assert.match(dashboard,/setInterval\(poll,SAMPLE_INTERVAL_MS\)/);
+ assert.match(dashboard,/visibilitychange/);
+ assert.match(dashboard,/appendSample\(old,packet\.sample\)/);
+ assert.doesNotMatch(dashboard,/Math\.random\(/);
 });

@@ -4,6 +4,7 @@ import {Icon} from './icons.jsx';
 import {api,json,list,fmtDate,fmtBytes,localDate,isoDate,normalizedCapabilities,permissionDefs,validChannelId,validatePortRange,pushURL} from './api.js';
 import {groups,getGroup,normalizeForSave,configEqual} from './settings.js';
 import {summarizeSession,summarizePathReport} from './diagnostics.js';
+import {OverviewRealtime} from './OverviewCharts.jsx';
 
 const pages={overview:'运行总览',devices:'设备管理',identities:'身份管理',exits:'出口节点',sessions:'活跃会话',p2p:'P2P 直连',messages:'消息历史',channels:'推送渠道',rdp:'RDP 公网入口',audit:'RDP 连接审计',security:'RDP 安全策略',settings:'服务配置'};
 const nav=[['概览',[['overview','运行总览']]],['设备与身份',[['devices','设备管理'],['identities','身份管理'],['exits','出口节点']]],['连接',[['sessions','实时连接'],['p2p','P2P 路径'],['rdp','RDP 公网入口'],['audit','连接审计'],['security','IP 安全策略']]],['消息',[['messages','消息历史'],['channels','推送渠道']]],['系统',[['settings','服务配置']]]];
@@ -82,75 +83,7 @@ function Account({user,onPasswordChanged,logout}){
  };
  return <form onSubmit={submit}><p className="dialog-note">当前账户：{user.username}。修改密码后所有管理会话必须重新登录。</p><div className="form-grid"><Field label="原密码" type="password" value={old} onChange={setOld} required/><Field label="新密码" type="password" value={pw} onChange={setPw} required/><Field label="确认新密码" type="password" value={confirmPw} onChange={setConfirmPw} required/></div>{error&&<p className="err-notice" role="alert">{error}</p>}<div className="form-actions"><Action tone="primary" disabled={busy} type="submit">{busy?'正在修改…':'修改密码'}</Action><Action disabled={busy} onClick={()=>logout().catch(e=>setError(e.message))}>退出登录</Action></div></form>
 }
-function Overview({ctx}){
- const {data,go,admin}=ctx;
- const d=data.dashboard||{};
- const online=Number(d.onlineDevices??data.devices.filter(x=>x.status==='online').length);
- const total=data.devices.length;
- const exits=Number(d.onlineExits??data.exits.length);
- const sessions=Number(d.activeConnections??data.sessions.length);
- const p2p=Number(d.activeP2PSessions??data.p2p.length);
- const waiting=data.enrollments.length;
- const up=Math.max(0,Number(d.todayUpload)||0),down=Math.max(0,Number(d.todayDownload)||0);
- const totalTraffic=up+down;
- const ratio=totalTraffic>0?Math.round(up/totalTraffic*100):50;
- const metrics=[
-  {label:'在线设备',value:online,hint:'已登记 '+total+' 台',icon:'devices',tone:'blue',page:'devices'},
-  {label:'可用出口',value:exits,hint:'在线的代理出口',icon:'globe',tone:'teal',page:'exits'},
-  {label:'活跃连接',value:sessions,hint:'当前活跃流',icon:'activity',tone:'violet',page:'sessions'},
-  {label:'P2P 会话',value:p2p,hint:'当前协商 / 直连',icon:'route',tone:'amber',page:'p2p'}
- ];
- return <>
-  <Head title="中继网络一览" desc="设备、传输路径、安全审批与实时流量，尽在一处。" actions={<Action tone="primary" onClick={()=>go('devices')}>查看设备 →</Action>}/>
-  <section className="overview-hero" aria-label="RelayProxy 网络拓扑">
-   <div className="overview-hero-copy">
-    <span className="overview-hero-kicker"><span className="overview-online-dot"/> RELAYPROXY NETWORK</span>
-    <h2>连接每一台设备，<span>让流量自由流动。</span></h2>
-    <p>通过 Relay、QUIC 与 P2P 组织你的私有网络。所有设备与出口均由服务端身份和能力授权控制。</p>
-    <div className="overview-hero-meta"><span><Icon name="shield" size={15}/> 身份隔离与授权</span><span><Icon name="activity" size={15}/> 实时状态监测</span></div>
-   </div>
-   <div className="network-visual" role="img" aria-label="客户端经过 Relay Server 连接出口节点的网络拓扑示意图">
-    <svg viewBox="0 0 460 235" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      <defs><linearGradient id="rpLine" x1="0" x2="1"><stop stopColor="#81e6f9"/><stop offset="1" stopColor="#c4b5fd"/></linearGradient><radialGradient id="rpAura"><stop stopColor="#fff" stopOpacity=".36"/><stop offset="1" stopColor="#fff" stopOpacity="0"/></radialGradient></defs>
-      <circle cx="230" cy="117" r="100" fill="url(#rpAura)"/>
-      <g stroke="url(#rpLine)" strokeWidth="2" strokeDasharray="6 7" opacity=".78" fill="none"><path d="M85 76 Q151 31 230 115"/><path d="M85 166 Q160 196 230 115"/><path d="M230 115 Q310 37 384 76"/><path d="M230 115 Q312 194 384 166"/></g>
-      <g fill="#fff" opacity=".94"><circle cx="140" cy="64" r="4"/><circle cx="149" cy="174" r="4"/><circle cx="323" cy="63" r="4"/><circle cx="319" cy="175" r="4"/></g>
-      <g fill="#122450" stroke="#9ad9ff" strokeWidth="1.5"><rect x="35" y="46" width="100" height="63" rx="14"/><rect x="35" y="139" width="100" height="63" rx="14"/><rect x="326" y="46" width="100" height="63" rx="14"/><rect x="326" y="139" width="100" height="63" rx="14"/></g>
-      <g fill="#fff" fontSize="12" fontWeight="600" textAnchor="middle"><text x="85" y="70">Client</text><text x="85" y="89" fill="#9bdcf4" fontSize="10">Agent</text><text x="85" y="162">Client</text><text x="85" y="181" fill="#9bdcf4" fontSize="10">Agent</text><text x="376" y="70">Exit</text><text x="376" y="89" fill="#9bdcf4" fontSize="10">Node</text><text x="376" y="162">Exit</text><text x="376" y="181" fill="#9bdcf4" fontSize="10">Node</text></g>
-      <circle cx="230" cy="115" r="61" fill="#fff" opacity=".13"/><circle cx="230" cy="115" r="47" fill="#fff" stroke="#dcecff" strokeWidth="2"/><circle cx="230" cy="115" r="33" fill="#dceaff"/><g textAnchor="middle"><text x="230" y="113" fill="#1d4ed8" fontSize="12" fontWeight="800">RELAY</text><text x="230" y="127" fill="#5774a8" fontSize="9">SERVER</text></g>
-    </svg>
-    <div className="network-caption">逻辑拓扑示意 · 实际路径由网络能力决定</div>
-   </div>
-  </section>
-  <div className="grid g4 overview-metrics">{metrics.map(m=><button type="button" className={'card overview-metric metric-'+m.tone} onClick={()=>go(m.page)} key={m.label}><span className="metric-icon"><Icon name={m.icon} size={21}/></span><span className="overview-metric-copy"><span className="metric-label">{m.label}</span><strong className="metric-value">{m.value}</strong><span className="metric-hint">{m.hint}</span></span><span className="metric-arrow">↗</span></button>)}</div>
-  <div className="grid two-one page-section">
-   <Panel title="Relay 节点状态" actions={<Badge tone="ok">管理台在线</Badge>}>
-    <div className="overview-status-grid">
-      <div><span>管理地址</span><strong className="mono">{location.origin}</strong></div>
-      <div><span>今日上传</span><strong>{fmtBytes(up)}</strong></div>
-      <div><span>今日下载</span><strong>{fmtBytes(down)}</strong></div>
-      <div><span>待审批设备</span><strong>{waiting} 台</strong></div>
-    </div>
-   </Panel>
-   <Panel title="快捷入口" desc="常用操作，一键直达">
-    <div className="overview-shortcuts">
-      {[[ 'devices','devices','设备审批',waiting?'待处理 '+waiting+' 台':'设备与能力授权'],['sessions','activity','查看连接','查看实时路径和 QUIC 统计'],['channels','bell','消息渠道','推送规则与通知管理'],...(admin?[['settings','settings','服务配置','隧道、P2P、出口和 ACL']]:[])].map(([p,icon,label,note])=><button type="button" className="overview-shortcut" onClick={()=>go(p)} key={p}><span className="shortcut-icon"><Icon name={icon} size={17}/></span><span><b>{label}</b><small>{note}</small></span><span className="shortcut-arrow">↗</span></button>)}
-    </div>
-   </Panel>
-  </div>
-  <div className="grid g2 overview-insights">
-   <Panel title="今日传输流量" desc="基于 Server 实际统计的上传与下载">
-     <div className="traffic-total">{fmtBytes(totalTraffic)}</div>
-     <div className="traffic-track" aria-label="上传和下载流量比例"><span style={{width:totalTraffic>0?ratio+'%':'50%'}}/><span/></div>
-     <div className="traffic-legend"><span><i className="traffic-up"/> 上行 {fmtBytes(up)}</span><span><i className="traffic-down"/> 下行 {fmtBytes(down)}</span></div>
-   </Panel>
-   <Panel title="设备与连接" desc="运行状态与待处理事项">
-     <div className="overview-health"><div><span className="health-label">在线设备占比</span><strong>{total?Math.round(online/total*100):0}%</strong><span className="health-progress"><i style={{width:(total?Math.min(100,online/total*100):0)+'%'}}/></span></div><div className="health-divider"/><div><span className="health-label">待审批申请</span><strong>{waiting}</strong><small>前往设备管理处理</small></div></div>
-   </Panel>
-  </div>
-  <Panel title="最近设备" desc="最近接入或活跃的已登记设备" actions={<Action onClick={()=>go('devices')}>查看全部 →</Action>}><Table columns={['设备','系统 / 角色','状态','最近在线']} items={data.devices.slice().sort((a,b)=>(Date.parse(b.lastSeenAt)||0)-(Date.parse(a.lastSeenAt)||0)).slice(0,6)} render={device=><><td><DeviceLabel name={device.name} id={device.id}/></td><td>{device.platform||'—'} · {device.deviceMode||'—'}</td><td><Badge tone={device.status==='online'?'ok':''}>{device.status==='online'?'在线':'离线'}</Badge></td><td>{fmtDate(device.lastSeenAt)}</td></>}/></Panel>
- </>
-}
+function Overview({ctx}){return <OverviewRealtime ctx={ctx}/>}
 function Devices({ctx}){
  const {data,run,open,close,admin}=ctx;const [q,setQ]=useState(''),[status,setStatus]=useState(''),[role,setRole]=useState('');
  const filtered=data.devices.filter(d=>[d.name,d.id,d.identityName,d.identityId].join(' ').toLowerCase().includes(q.toLowerCase())&&(!role||d.deviceMode===role)&&(!status||(status==='disabled'?d.approvalState==='revoked':d.approvalState==='approved'&&d.status===status)));

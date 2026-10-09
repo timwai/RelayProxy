@@ -1,21 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import {readFileSync} from 'node:fs';
+const css=readFileSync(new URL('./react.css',import.meta.url),'utf8');
+const chartCss=readFileSync(new URL('./overview-charts.css',import.meta.url),'utf8');
+const jsx=readFileSync(new URL('./OverviewCharts.jsx',import.meta.url),'utf8');
 
-const css = readFileSync(new URL('./react.css', import.meta.url), 'utf8');
-const app = readFileSync(new URL('./App.jsx', import.meta.url), 'utf8');
-
-test('overview cards share a single grid row without sibling section margins', () => {
-  assert.match(app, /className="grid two-one page-section"/);
-  assert.match(app, /<Panel title="Relay 节点状态"/);
-  assert.match(app, /<Panel title="快捷入口"/);
-  // The adjacent-section rule must not target two Panel children of the grid.
-  assert.doesNotMatch(css, /#root\s+\.page-section\s*\+\s*\.page-section\s*\{/);
-  assert.match(css, /#root\s+\.main-inner\s*>\s*\.page-section\s*\+\s*\.page-section\s*\{\s*margin-top:\s*16px/);
-  assert.match(css, /#root\s+\.grid\s*>\s*\.page-section\s*\{[^}]*margin-top:\s*0\s*;/);
-  assert.match(css, /#root\s+\.grid\s*>\s*\.page-section\s*\{[^}]*align-self:\s*stretch\s*;/);
+test('live dashboard uses aligned equal-height cards and consistent section gaps',()=>{
+ assert.match(jsx,/className="grid g4 rt-metrics"/);
+ assert.match(jsx,/className="rt-two-col"/);
+ assert.match(chartCss,/#root \.rt-metrics\{margin:0 0 22px\}/);
+ assert.match(chartCss,/#root \.rt-two-col\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\);gap:16px/);
+ assert.match(chartCss,/#root \.rt-two-col>\.rt-panel\{height:100%\}/);
+ assert.doesNotMatch(css,/#root\s+\.page-section\s*\+\s*\.page-section\s*\{/);
 });
-
-test('nested grid cards keep narrow-screen stacking', () => {
-  assert.match(readFileSync(new URL('./prototype.css',import.meta.url), 'utf8'), /\.grid\.two-one\{grid-template-columns:1fr\}/);
+test('chart panels stack on narrower screens without overflow',()=>{
+ assert.match(chartCss,/@media\(max-width:1140px\)/);
+ assert.match(chartCss, /#root \.rt-two-col\{grid-template-columns:1fr\}/);
+ assert.match(chartCss, /@media\(max-width:640px\)/);
+ assert.match(chartCss, /#root \.rt-metrics\{grid-template-columns:1fr\}/);
 });

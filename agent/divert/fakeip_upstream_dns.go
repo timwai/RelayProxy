@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
+	"strings"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -124,6 +126,60 @@ func (s *Server) exchangeProxyDoT(parent context.Context, question []byte) ([]by
 		return nil, fmt.Errorf("upstream DNS response does not match requested question")
 	}
 	return response, nil
+}
+
+// resolveFakeDirectIP is only called for FakeIP flows with a rule explicitly
+// choosing DIRECT. It first obtains the real IP over verified DoT via the
+// selected proxy exit; failure is fatal, with NO system DNS fallback.
+func (s *Server) resolveFakeDirectIP(ctx context.Context, domain string, ipv6 bool) (string, error) {
+	if domain == "" {
+		return "", errDNSForwardUnavailable
+	}
+	domain = strings.TrimSuffix(domain, ".")
+	name, err := dnsmessage.NewName(domain + ".")
+	if err != nil {
+		return "", err
+	}
+	kind := dnsmessage.TypeA
+	if ipv6 {
+		kind = dnsmessage.TypeAAAA
+	}
+	query, err := (dnsmessage.Message{
+		Header: dnsmessage.Header{ID: 47812, RecursionDesired: true},
+		Questions: []dnsmessage.Question{{Name: name, Type: kind, Class: dnsmessage.ClassINET}},
+	}).Pack()
+	if err != nil {
+		return "", err
+	}
+	var answer dnsmessage.Message
+	payload, err := s.exchangeProxyDoT(ctx, query)
+	if err != nil {
+		return "", err
+	}
+	if err := answer.Unpack(payload); err != nil {
+		return "", err
+	}
+	if answer.RCode != dnsmessage.RCodeSuccess {
+		return "", fmt.Errorf("DIRECT remote DNS failed for %s: %s", domain, answer.RCode)
+	}
+	for _, rr := range answer.Answers {
+		if rr.Header.Type != kind {
+			continue
+		}
+		switch body := rr.Body.(type) {
+		case *dnsmessage.AResource:
+			ip := netip.AddrFrom4(body.A)
+			if !ipv6 && ip.IsValid() && !isFakeIP(ip) {
+				return ip.String(), nil
+			}
+		case *dnsmessage.AAAAResource:
+			ip := netip.AddrFrom16(body.AAAA)
+			if ipv6 && ip.IsValid() && !isFakeIP(ip) {
+				return ip.String(), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("DIRECT DNS did not return a usable IP for %s", domain)
 }
 
 // The dialer must be a selected Relay/custom-proxy dispatcher, never

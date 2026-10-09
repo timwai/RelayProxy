@@ -485,6 +485,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		IsAutostart, MinimizeToTray, StartMinimized, RestartRequired, ReloadPending bool
 		Routing, Network, Runtime, ExitUpstream, RDP, P2P, Direct                   any
 		NetworkCapabilities                                                         divert.Capabilities
+		CustomExits, UpstreamExitID                                                any
 		Revision                                                                    string
 	}{
 		ConfigPath: b.ConfigPath(), ServerAddress: cfg.Server.Address, QUICPort: cfg.Server.QUICPort,
@@ -492,10 +493,10 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		DeviceName: cfg.Device.Name, IdentityID: cfg.Device.IdentityID, Transport: cfg.Transport.Mode,
 		SOCKS5:        proxyLeg{cfg.Proxy.SOCKS5.Enabled == nil || *cfg.Proxy.SOCKS5.Enabled, cfg.Proxy.SOCKS5.Listen, cfg.Proxy.SOCKS5.Port},
 		HTTP:          proxyLeg{cfg.Proxy.HTTP.Enabled == nil || *cfg.Proxy.HTTP.Enabled, cfg.Proxy.HTTP.Listen, cfg.Proxy.HTTP.Port},
-		DefaultExitID: cfg.Proxy.DefaultExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
+		DefaultExitID: cfg.Proxy.DefaultExitID, CustomExits: cfg.Proxy.CustomExits, UpstreamExitID: cfg.Exit.UpstreamExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
 		AllowInternet: cfg.Exit.AllowInternet, AllowPrivate: cfg.Exit.AllowPrivateNetwork, AllowLoopback: cfg.Exit.AllowLoopback,
 		AccessMode: cfg.Exit.Access.Mode, AccessDomains: cfg.Exit.Access.Domains, AccessCIDRs: cfg.Exit.Access.CIDRs,
-		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password},
+		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "hasPassword": cfg.Exit.Upstream.Password != ""},
 		RDP: map[string]any{
 			"enabled": cfg.RDP.Enabled == nil || *cfg.RDP.Enabled,
 			"address": cfg.RDP.Address,
@@ -540,6 +541,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"tcpPort": payload.TCPPort, "tlsEnabled": payload.TLSEnabled,
 		"deviceName": payload.DeviceName, "identityId": payload.IdentityID, "transport": payload.Transport,
 		"socks5": payload.SOCKS5, "http": payload.HTTP, "defaultExitId": payload.DefaultExitID,
+		"customExits": payload.CustomExits, "upstreamExitId": payload.UpstreamExitID,
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,

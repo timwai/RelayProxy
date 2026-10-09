@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import org.json.JSONObject
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -33,6 +34,30 @@ class SecretStore(context: Context) {
         )
         prefs.edit().putString(KEY_VPN_PROXY_TOKEN, encrypt(token)).apply()
         token
+    }
+
+    // Custom proxy credentials use the same Android Keystore-backed AES-GCM
+    // mechanism as the private VPN token. Only non-secret metadata is stored
+    // in the ordinary configuration preferences.
+    fun customExitPasswords(): Map<String, String> = synchronized(customExitLock) {
+        val cipherText = prefs.getString(KEY_CUSTOM_EXIT_PASSWORDS, null)
+            ?: return@synchronized emptyMap()
+        val json = JSONObject(decrypt(cipherText))
+        buildMap {
+            for (key in json.keys()) {
+                put(key, json.getString(key))
+            }
+        }
+    }
+
+    fun setCustomExitPasswords(passwords: Map<String, String>) = synchronized(customExitLock) {
+        val json = JSONObject()
+        passwords.filterValues { it.isNotEmpty() }.forEach { (id, value) ->
+            json.put(id, value)
+        }
+        prefs.edit().putString(KEY_CUSTOM_EXIT_PASSWORDS, encrypt(json.toString())).commit().also {
+            check(it) { "无法保存加密的自定义出口密码" }
+        }
     }
 
     private fun encrypt(value: String): String {
@@ -80,6 +105,8 @@ class SecretStore(context: Context) {
 
     companion object {
         private val vpnTokenLock = Any()
+        private val customExitLock = Any()
+        private const val KEY_CUSTOM_EXIT_PASSWORDS = "customExitPasswords"
         private const val PREFS_NAME = "relayproxy_android_secrets"
         private const val KEY_VPN_PROXY_TOKEN = "vpnProxyToken"
         private const val KEYSTORE = "AndroidKeyStore"

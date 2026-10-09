@@ -11,8 +11,8 @@ import (
 func fakeDNSQuestion(t *testing.T, host string, typ dnsmessage.Type) []byte {
 	t.Helper()
 	m := dnsmessage.Message{
-		Header: dnsmessage.Header{ID: 733, RecursionDesired: true},
-		Questions: []dnsmessage.Question{{Name: dnsmessage.MustNewName(host+"."), Type: typ, Class: dnsmessage.ClassINET}},
+		Header:    dnsmessage.Header{ID: 733, RecursionDesired: true},
+		Questions: []dnsmessage.Question{{Name: dnsmessage.MustNewName(host + "."), Type: typ, Class: dnsmessage.ClassINET}},
 	}
 	data, err := m.Pack()
 	if err != nil {
@@ -57,7 +57,7 @@ func TestFakeIPDNSAnswersAndLookupBothFamilies(t *testing.T) {
 			t.Fatalf("fake IP mapping lost: %s %s %v", ip, got, ok)
 		}
 		repeat := fakeDNSAnswer(t, d.reply(query, "", nil))
-		if repeat.Answers[0].Header.Type != typ || len(d.byIP) != (1+map[bool]int{true:1}[typ == dnsmessage.TypeAAAA]) {
+		if repeat.Answers[0].Header.Type != typ || len(d.byIP) != (1+map[bool]int{true: 1}[typ == dnsmessage.TypeAAAA]) {
 			t.Fatal("repeated DNS question consumed another fake IP")
 		}
 	}
@@ -105,7 +105,7 @@ func TestFakeIPDNSMappingExpiryFailsClosed(t *testing.T) {
 	if !ok {
 		t.Fatal("failed to allocate")
 	}
-	now = now.Add(16*time.Minute)
+	now = now.Add(16 * time.Minute)
 	if _, ok := d.lookup(ip); ok {
 		t.Fatal("expired FakeIP mapping can still route")
 	}

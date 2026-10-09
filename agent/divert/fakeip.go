@@ -63,6 +63,24 @@ func (d *fakeIPDNS) lookup(addr netip.Addr) (string, bool) {
 	return entry.host, true
 }
 
+// pruneExpiredLocked releases only expired lookup state, not the IP sequence
+// number. Previously-issued addresses are deliberately never reassigned to a
+// different host within one Agent lifetime; a stale application DNS cache
+// must never be silently redirected to an unrelated hostname.
+func (d *fakeIPDNS) pruneExpiredLocked(now time.Time) {
+	for ip, entry := range d.byIP {
+		if entry.expires.After(now) {
+			continue
+		}
+		delete(d.byIP, ip)
+		for key, mapped := range d.byName {
+			if mapped == ip {
+				delete(d.byName, key)
+			}
+		}
+	}
+}
+
 func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -78,9 +96,13 @@ func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, boo
 		delete(d.byIP, existing)
 	}
 	if len(d.byIP) >= fakeIPLimit {
-		// Never evict a live association just to serve a new question; that
-		// could redirect the original TCP session to a different domain.
-		return netip.Addr{}, false
+		// Reclaim expired bookkeeping at capacity, without ever reassigning
+		// an old synthetic IP. Live sessions and DNS caches cannot be
+		// redirected to another hostname by this cleanup.
+		d.pruneExpiredLocked(now)
+		if len(d.byIP) >= fakeIPLimit {
+			return netip.Addr{}, false
+		}
 	}
 	var ip netip.Addr
 	if kind == dnsmessage.TypeA {

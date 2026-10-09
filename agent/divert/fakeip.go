@@ -171,7 +171,20 @@ func (d *fakeIPDNS) reply(payload []byte, relayHost string, relayIPs []string) [
 	}
 	var ip netip.Addr
 	var ok bool
-	if strings.EqualFold(host, strings.TrimSuffix(relayHost, ".")) && relayHost != "" {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		// RFC 6761: localhost (including subdomains) is always loopback.
+		// Creating a remote-proxy FakeIP for it would break local services.
+		if q.Type == dnsmessage.TypeA {
+			ip = netip.MustParseAddr("127.0.0.1")
+		} else {
+			ip = netip.IPv6Loopback()
+		}
+		ok = true
+	} else if host == "invalid" || strings.HasSuffix(host, ".invalid") {
+		// RFC 6761: invalid names cannot be delegated to the proxy.
+		result.RCode = dnsmessage.RCodeNameError
+		return packDNSResponse(result)
+	} else if strings.EqualFold(host, strings.TrimSuffix(relayHost, ".")) && relayHost != "" {
 		// Bootstrap is the sole DNS exception; it never requires leaking a
 		// query to a local recursive resolver.
 		for _, raw := range relayIPs {

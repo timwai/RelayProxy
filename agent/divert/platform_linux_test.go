@@ -254,9 +254,9 @@ func TestLinuxDNSGuardCannotReinstallAfterFirewallClose(t *testing.T) {
 
 func TestIndependentDNSGuardEvidenceNeverClaimsZeroLeak(t *testing.T) {
 	cases := []struct {
-		name string
-		dump string
-		failed bool
+		name     string
+		dump     string
+		failed   bool
 		expected string
 	}{
 		{"guard-installed", "table inet relayproxy_dns_guard { chain output { type filter hook output priority 0; policy accept; meta l4proto { tcp, udp } th dport { 53, 853, 784, 8853 } drop } }", false, "rules-present"},

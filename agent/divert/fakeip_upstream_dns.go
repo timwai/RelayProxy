@@ -48,7 +48,15 @@ func (s *Server) replyFakeDNS(ctx context.Context, payload []byte) []byte {
 	if err := query.Unpack(payload); err != nil {
 		return nil
 	}
-	reply, err := s.exchangeProxyDoT(ctx, payload)
+	var reply []byte
+	var err error
+	select {
+	case s.dnsLimit <- struct{}{}:
+		reply, err = s.exchangeProxyDoT(ctx, payload)
+		<-s.dnsLimit
+	default:
+		err = errDNSForwardUnavailable
+	}
 	if err == nil {
 		return reply
 	}

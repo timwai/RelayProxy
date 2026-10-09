@@ -118,8 +118,8 @@ type linuxPacketDevice struct {
 	raw4      int
 	raw6      int
 	firewall  *linuxFirewall
-	closeOnce     sync.Once
-	closeErr      error
+	closeOnce sync.Once
+	closeErr  error
 	injectFn  func([]byte) error
 }
 
@@ -378,8 +378,8 @@ type linuxFirewall struct {
 	dnsRuleStates map[string]bool
 	dnsMu         sync.Mutex
 	dnsClosed     bool
-	closeOnce sync.Once
-	closeErr  error
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 func installLinuxFirewall(relayIPs []string, dnsProtected bool) (*linuxFirewall, error) {

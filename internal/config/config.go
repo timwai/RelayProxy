@@ -125,6 +125,7 @@ type AgentConfigFile struct {
 			Port    int    `yaml:"port"`
 		} `yaml:"http"`
 		DefaultExitID string `yaml:"default_exit_id"`
+		CustomExits []routing.CustomExit `yaml:"custom_exits,omitempty"`
 	} `yaml:"proxy"`
 
 	RDP struct {
@@ -156,6 +157,7 @@ type AgentConfigFile struct {
 		AllowInternet       bool  `yaml:"allow_internet"`
 		AllowPrivateNetwork bool  `yaml:"allow_private_network"`
 		AllowLoopback       bool  `yaml:"allow_loopback"`
+		UpstreamExitID string `yaml:"upstream_exit_id,omitempty"`
 		Upstream            struct {
 			Mode     string `yaml:"mode"` // direct | socks5 | http | https
 			Address  string `yaml:"address"`

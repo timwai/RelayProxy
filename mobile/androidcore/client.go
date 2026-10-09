@@ -49,6 +49,29 @@ func ValidateRoutingConfig(configJSON string) error {
 	return nil
 }
 
+// routing.CustomExit deliberately redacts Password from JSON globally.
+// Only the Android private config ingest path may decode the secret into
+// memory; the public status endpoint must continue to omit it.
+type androidPrivateCustomExits []routing.CustomExit
+
+func (items *androidPrivateCustomExits) UnmarshalJSON(raw []byte) error {
+	var decoded []struct {
+		routing.CustomExit
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	next := make([]routing.CustomExit, 0, len(decoded))
+	for _, entry := range decoded {
+		item := entry.CustomExit
+		item.Password = entry.Password
+		next = append(next, item)
+	}
+	*items = next
+	return nil
+}
+
 type clientConfig struct {
 	ServerAddress         string         `json:"serverAddress"`
 	IdentityID            string         `json:"identityId"`
@@ -70,7 +93,7 @@ type clientConfig struct {
 	UPnPAllowed           *bool          `json:"upnpAllowed"`
 	ProxyPathMode         string         `json:"proxyPathMode"`
 	DefaultExitID         string         `json:"defaultExitId"`
-	CustomExits           []routing.CustomExit `json:"customExits"`
+	CustomExits           androidPrivateCustomExits `json:"customExits"`
 	SOCKS5Listen          string         `json:"socks5Listen"`
 	HTTPListen            string         `json:"httpListen"`
 	Routing               routing.Config `json:"routing"`
@@ -264,10 +287,10 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		return cfg, errors.New("clientEnabled requires a local proxy listener")
 	}
 	cfg.DefaultExitID = strings.TrimSpace(cfg.DefaultExitID)
-	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil {
+	if err := routing.ValidateCustomExits([]routing.CustomExit(cfg.CustomExits)); err != nil {
 		return cfg, err
 	}
-	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, "", cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
+	if err := routing.ValidateCustomReferences([]routing.CustomExit(cfg.CustomExits), cfg.DefaultExitID, "", cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
 		return cfg, err
 	}
 	cfg.SOCKS5Listen = strings.TrimSpace(cfg.SOCKS5Listen)
@@ -425,7 +448,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 	}
 	c.traffic = traffic.NewRegistry(1024, 256)
 	c.routingDialer = routing.NewRoutingDialer(routingEngine, c.proxyDialer)
-	c.routingDialer.SetCustomExits(cfg.CustomExits)
+	c.routingDialer.SetCustomExits([]routing.CustomExit(cfg.CustomExits))
 	c.routingDialer.Traffic = c.traffic
 	return c, nil
 }
@@ -639,7 +662,7 @@ func (c *Client) SetRoutingConfig(configJSON string) error {
 	if c.closed || c.routingDialer == nil {
 		return errors.New("routing runtime is unavailable")
 	}
-	if err := routing.ValidateCustomReferences(c.cfg.CustomExits, c.cfg.DefaultExitID, "", cfg.Rules, cfg.DNSExitID); err != nil {
+	if err := routing.ValidateCustomReferences([]routing.CustomExit(c.cfg.CustomExits), c.cfg.DefaultExitID, "", cfg.Rules, cfg.DNSExitID); err != nil {
 		return err
 	}
 	if err := c.routingDialer.Engine().Reload(cfg); err != nil {
@@ -661,7 +684,7 @@ func (c *Client) SetDefaultExit(exitID string) {
 		c.mu.Unlock()
 		return
 	}
-	if err := routing.ValidateCustomReferences(c.cfg.CustomExits, exitID, "", c.cfg.Routing.Rules, c.cfg.Routing.DNSExitID); err != nil {
+	if err := routing.ValidateCustomReferences([]routing.CustomExit(c.cfg.CustomExits), exitID, "", c.cfg.Routing.Rules, c.cfg.Routing.DNSExitID); err != nil {
 		c.mu.Unlock()
 		return
 	}

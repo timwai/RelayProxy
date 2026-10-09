@@ -125,6 +125,7 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
  const refs=id=>[
   config.defaultExitId===id&&'默认出口',
   config.upstreamExitId===id&&'本机出口共享',
+  config.routing?.dns_exit_id===id&&'DNS 专用出口',
   ...arr(config.routing?.rules).filter(r=>r.exit_id===id).map(r=>'分流规则：'+(r.name||'未命名'))
  ].filter(Boolean);
  const update=(key,val)=>setDraft(x=>({...x,[key]:val}));

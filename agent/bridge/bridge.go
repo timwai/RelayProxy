@@ -820,6 +820,14 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 
 func restartFields(desired, running *config.AgentConfigFile) []string {
 	want, active := startupSettings(desired), startupSettings(running)
+	// The running shared handler keeps its original dialer snapshot even when
+	// hot edits publish new custom exits to local client traffic.
+	if running.Exit.UpstreamExitID != "" {
+		active["出口上游模式"] = running.Exit.Upstream.Mode
+		active["出口上游地址"] = running.Exit.Upstream.Address
+		active["出口上游用户名"] = running.Exit.Upstream.Username
+		active["出口上游密码"] = running.Exit.Upstream.Password
+	}
 	fields := []string{}
 	for key, value := range want {
 		if !reflect.DeepEqual(value, active[key]) {

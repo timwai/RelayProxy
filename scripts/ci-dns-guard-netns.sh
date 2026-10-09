@@ -17,6 +17,7 @@ cleanup() {
     if [[ -n "${RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR:-}" ]]; then
         mkdir -p "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR"
         cp "$work"/*.pcap "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR/" 2>/dev/null || true
+        chmod -R a+rX "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR" 2>/dev/null || true
     fi
     if [[ -n "$capture_pid" ]]; then
         kill "$capture_pid" 2>/dev/null || true
@@ -120,10 +121,8 @@ if [[ -n "${RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR:-}" ]]; then
         echo "Guarded packet count: $blocked"
         echo "Note: Does not verify persistent systemd restart or real Agent driver interception"
     } > "$work/summary.txt"
-    cp "$work/summary.txt" "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR/" 2>/dev/null || {
-        mkdir -p "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR"
-        cp "$work/summary.txt" "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR/"
-    }
+    mkdir -p "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR"
+    cp "$work/summary.txt" "$RELAYPROXY_ACCEPTANCE_ARTIFACT_DIR/"
 fi
 echo "PASS: nftables guard stopped every tested UDP 53/853/784/8853 and TCP 53/853 packet before the veth; baseline capture proved observability."
 if [[ "$ipv6_enabled" -eq 1 ]]; then

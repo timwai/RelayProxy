@@ -10,7 +10,9 @@ button:disabled{cursor:not-allowed;opacity:.5}
 #root .main-inner{max-width:1460px;margin:auto}
 #root .empty-state{padding:38px 22px;text-align:center;color:var(--muted)}
 #root .empty-state strong{display:block;font-size:14px;color:var(--text);margin-bottom:8px}
-#root .page-section+.page-section{margin-top:16px}
+/* Space independent page sections, never adjacent cards inside a CSS grid. */
+#root .main-inner > .page-section + .page-section{margin-top:16px}
+#root .grid > .page-section{margin-top:0;align-self:stretch;min-width:0;height:100%}
 #root .form-actions{display:flex;justify-content:flex-end;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px}
 #root .inline-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 #root .badge{white-space:nowrap}

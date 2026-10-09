@@ -372,6 +372,10 @@ type linuxFirewall struct {
 	ip6tables string
 	run       func(string, ...string) error
 	dnsGuard  bool
+	// Tracks each installed DNS/53 rule independently. A failed iptables
+	// replacement can leave one family stricter than the other; retries
+	// must never assume the two families changed atomically.
+	dnsRuleStates map[string]bool
 	dnsMu     sync.Mutex
 	closeOnce sync.Once
 	closeErr  error
@@ -460,13 +464,20 @@ func (f *linuxFirewall) installFamily(binary string, relayIPs []string) error {
 
 // setDNSGuardMode updates only the dedicated DNS/53 NFQUEUE rules.
 // The mark exception (loop prevention) and generic TCP/UDP rules remain
-// untouched. Running this while the queue exists avoids reconnection churn.
+// untouched. It records successfully updated rules individually so a failed
+// replacement is retried, instead of assuming the platform update is atomic.
 func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
 	f.dnsMu.Lock()
 	defer f.dnsMu.Unlock()
-	if f.dnsGuard == protected {
-		return nil
+	if f.dnsRuleStates == nil {
+		f.dnsRuleStates = make(map[string]bool, 4)
+		for _, family := range []string{f.iptables, f.ip6tables} {
+			for _, protocol := range []string{"tcp", "udp"} {
+				f.dnsRuleStates[family+"/"+protocol] = f.dnsGuard
+			}
+		}
 	}
+	var failures []error
 	for _, family := range []string{f.iptables, f.ip6tables} {
 		for _, item := range []struct {
 			protocol string
@@ -474,6 +485,10 @@ func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
 		}{
 			{"tcp", "2"}, {"udp", "4"},
 		} {
+			key := family + "/" + item.protocol
+			if f.dnsRuleStates[key] == protected {
+				continue
+			}
 			args := []string{"-t", "mangle", "-R", linuxOutputChain, item.index,
 				"-p", item.protocol, "--dport", "53", "-j", "NFQUEUE",
 				"--queue-num", strconv.Itoa(linuxQueueNumber)}
@@ -481,14 +496,30 @@ func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
 				args = append(args, "--queue-bypass")
 			}
 			if err := f.run(family, args...); err != nil {
-				// Keep the old state visible so the next watcher iteration
-				// can retry. This error must not be reported as success.
-				return fmt.Errorf("更新 Linux DNS 保护队列失败: %w", err)
+				failures = append(failures, fmt.Errorf("%s/%s: %w", family, item.protocol, err))
+				continue
 			}
+			f.dnsRuleStates[key] = protected
 		}
+	}
+	if len(failures) > 0 {
+		// dnsGuard denotes a fully installed desired state only. A partial
+		// transition is not reported as successful and remains retryable.
+		return fmt.Errorf("更新 Linux DNS 保护队列失败: %w", errors.Join(failures...))
 	}
 	f.dnsGuard = protected
 	return nil
+}
+
+// SyncPlatformDNSCapture is invoked synchronously while the application holds
+// the shared policy lock. Enabling FakeIP must install fail-closed DNS rules
+// before its routing configuration is published to other goroutines.
+func (i *packetInterceptor) SyncPlatformDNSCapture(enabled bool) error {
+	device, ok := i.device.(*linuxPacketDevice)
+	if !ok || device.firewall == nil {
+		return nil
+	}
+	return device.firewall.setDNSGuardMode(enabled)
 }
 
 // The routing policy is hot-reloadable. Keep NFQUEUE's kernel fail-closed
@@ -505,7 +536,18 @@ func (i *packetInterceptor) watchLinuxDNSGuard(f *linuxFirewall) {
 		case <-i.ctx.Done():
 			return
 		case <-ticker.C:
-			if err := f.setDNSGuardMode(i.server.fakeIPEnabled()); err != nil {
+			// The apply-policy path holds PolicyMu while installing rules
+			// before publishing the new FakeIP state. Read that lock here
+			// so the background reconciler cannot undo a pending switch.
+			if i.server.opts.PolicyMu != nil {
+				i.server.opts.PolicyMu.RLock()
+			}
+			enabled := i.server.fakeIPEnabled()
+			err := f.setDNSGuardMode(enabled)
+			if i.server.opts.PolicyMu != nil {
+				i.server.opts.PolicyMu.RUnlock()
+			}
+			if err != nil {
 				i.report(err)
 			}
 		}

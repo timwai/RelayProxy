@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net"
-	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -99,8 +98,5 @@ func TestSOCKS5UDPDomainSourceIsNeverLocallyResolved(t *testing.T) {
 	offset, err := skipSOCKS5UDPAddress(packet, 3)
 	if err != nil || string(packet[offset:]) != "response" {
 		t.Fatalf("opaque UDP domain reply must still be readable: offset=%d err=%v", offset, err)
-	}
-	if netip.MustParseAddr("127.0.0.1").IsGlobalUnicast() {
-		t.Fatal("invalid test environment")
 	}
 }

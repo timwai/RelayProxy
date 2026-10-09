@@ -231,7 +231,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		IdentityID:     cfg.Device.IdentityID,
 		Transport:      cfg.Transport.Mode,
 		DefaultExitID:  cfg.Proxy.DefaultExitID,
-		CustomExits:    cfg.Proxy.CustomExits,
+		CustomExits: nonNilSlice(cfg.Proxy.CustomExits),
 		UpstreamExitID: cfg.Exit.UpstreamExitID,
 		ExitEnabled:    cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
 		AllowInternet:  cfg.Exit.AllowInternet,

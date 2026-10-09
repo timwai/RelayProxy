@@ -287,6 +287,13 @@ class RoutingRuleActivity : Activity() {
                 }.joinToString(" · ")
             }
         }
+        ConfigStore(this).load().customExits.forEach { custom ->
+            if (custom.id !in ids) {
+                ids += custom.id
+                labels += "${custom.name} · 本机 ${custom.protocol.uppercase()} · " +
+                    if (custom.enabled) "已启用" else "已停用"
+            }
+        }
         if (selectedExitId.isNotBlank() && selectedExitId !in ids) {
             ids += selectedExitId
             labels += "${selectedExitId.take(12)} · 当前不可用"

@@ -446,6 +446,7 @@ type CustomExitUpdate struct {
 
 type RoutingConfigUpdate struct {
 	Mode          *string        `json:"mode"`
+	DNSMode       *string        `json:"dns_mode"`
 	DefaultAction *string        `json:"default_action"`
 	Rules         []routing.Rule `json:"rules"` // Full replacement
 }
@@ -673,6 +674,13 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 
 	if in.Routing != nil {
+		if in.Routing.DNSMode != nil {
+			mode := strings.ToLower(strings.TrimSpace(*in.Routing.DNSMode))
+			if mode != string(routing.DNSModeProxy) && mode != string(routing.DNSModeLocal) {
+				return nil, fmt.Errorf("DNS 解析方式必须是 proxy 或 local")
+			}
+			cfg.Routing.DNSMode = routing.DNSMode(mode)
+		}
 		if in.Routing.Mode != nil {
 			mode := strings.ToLower(strings.TrimSpace(*in.Routing.Mode))
 			switch routing.Mode(mode) {

@@ -45,10 +45,10 @@ type Options struct {
 	LocalExitReady     func(string) bool
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
-	FakeIPEnabled      func() bool   // dynamically consulted for new transparent DNS queries
-	BlockDoHEndpoints  func() bool   // opt-in domain-based DoH endpoint guard
-	ForwardOtherDNS    func() bool   // opt-in authenticated DoT via proxy for TXT/SRV
-	DNSExitID          func() string // optional pinned exit for DNS, independent from app flows
+	FakeIPEnabled      func() bool     // dynamically consulted for new transparent DNS queries
+	BlockDoHEndpoints  func() bool     // opt-in domain-based DoH endpoint guard
+	ForwardOtherDNS    func() bool     // opt-in authenticated DoT via proxy for TXT/SRV
+	DNSExitID          func() string   // optional pinned exit for DNS, independent from app flows
 	DoHBlockedIPs      func() []string // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 

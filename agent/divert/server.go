@@ -117,10 +117,11 @@ func New(opts Options) (*Server, error) {
 func proxyDialTarget(flow Flow) string {
 	host := strings.TrimSuffix(strings.TrimSpace(flow.Host), ".")
 	// A transparent packet only carries an IP destination. Use a hostname for
-	// remote PROXY dialing only when it came from RelayProxy's conservative DNS
-	// association tracker. Ambiguous/shared-IP associations deliberately leave
-	// Host empty, and DIRECT flows continue using the original destination IP.
-	if flow.DomainSource == "dns" && host != "" && net.ParseIP(host) == nil {
+	// remote PROXY dialing only when it came from a matched DNS exchange or
+	// the macOS Network Extension's original remoteHostname. Telemetry-only
+	// TLS SNI/HTTP Host data is never trusted for routing. Ambiguous DNS
+	// associations stay empty; DIRECT continues using the original IP.
+	if (flow.DomainSource == "dns" || flow.DomainSource == "network-extension") && host != "" && net.ParseIP(host) == nil {
 		return host
 	}
 	return flow.IP

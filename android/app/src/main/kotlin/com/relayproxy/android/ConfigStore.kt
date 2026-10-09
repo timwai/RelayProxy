@@ -32,8 +32,18 @@ data class AndroidCustomExit(
         require(Regex("^local:[A-Za-z0-9_.:-]{1,122}$").matches(id)) { "自定义出口 ID 无效" }
         require(name.isNotBlank() && name.length <= 128) { "出口名称长度必须为 1–128" }
         require(protocol in setOf("socks5", "http", "https")) { "不支持的代理类型" }
-        val portText = address.substringAfterLast(':', "")
-        val host = address.substringBeforeLast(':', "")
+        val portText: String
+        val host: String
+        if (address.startsWith("[")) {
+            val end = address.indexOf("]:")
+            require(end > 1) { "IPv6 代理地址必须使用 [IPv6]:端口" }
+            host = address.substring(1, end)
+            portText = address.substring(end + 2)
+        } else {
+            require(address.count { it == ':' } == 1) { "代理地址必须是 host:port（IPv6 请加方括号）" }
+            host = address.substringBefore(':')
+            portText = address.substringAfter(':')
+        }
         require(host.isNotBlank() && !host.contains(Regex("[\\s/?#@\\\\]"))) { "请填写有效代理地址 host:port" }
         require(!host.any { it.isISOControl() }) { "代理地址包含控制字符" }
         require((portText.toIntOrNull() ?: 0) in 1..65535) { "代理端口必须为 1–65535" }
@@ -498,6 +508,14 @@ class ConfigStore(private val context: Context) {
     }
 
     fun saveRouting(routing: RoutingConfig): RoutingConfig = synchronized(routingLock) {
+        val locals = load().customExits
+        routing.rules.forEach { rule ->
+            if (rule.action == "PROXY" && rule.exitId.startsWith("local:")) {
+                require(locals.any { it.id == rule.exitId && it.enabled }) {
+                    "分流规则“${rule.name}”引用了不存在或已停用的本机出口"
+                }
+            }
+        }
         val current = RoutingConfig.fromJson(prefs.getString("routing", null))
         check(routing.revision == current.revision) { "规则已在其他页面修改，请返回列表后重新编辑" }
         val updated = routing.copy(revision = current.revision + 1)

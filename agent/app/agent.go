@@ -1970,6 +1970,9 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 	if a.closed.Load() {
 		return errors.New("agent closed")
 	}
+	if err := routing.ValidateCustomReferences(a.cfg.CustomExits, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID); err != nil {
+		return err
+	}
 	if divertCfg.Mode != a.cfg.NetworkMode {
 		return ErrRestartRequired
 	}
@@ -1997,6 +2000,9 @@ func (a *Agent) ApplyCustomExits(items []routing.CustomExit) error {
 	defer a.mu.Unlock()
 	if a.closed.Load() {
 		return errors.New("agent closed")
+	}
+	if err := routing.ValidateCustomReferences(items, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, a.cfg.Routing.Rules, a.cfg.Routing.DNSExitID); err != nil {
+		return err
 	}
 	a.dialer.SetCustomExits(items)
 	a.cfg.CustomExits = routing.CloneCustomExits(items)

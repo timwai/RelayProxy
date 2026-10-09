@@ -304,6 +304,11 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	}
 	packet, err := parseIPPacket(data)
 	if err != nil {
+		if i.server.fakeIPEnabled() {
+			// Unparseable IP packets may still target FakeIP or contain DNS:
+			// fail closed rather than reinjecting an unverifiable destination.
+			return nil
+		}
 		// WinDivert has already removed the packet from the network path. If
 		// RelayProxy cannot safely classify it, restore the original packet
 		// instead of blackholing the host.

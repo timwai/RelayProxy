@@ -216,6 +216,10 @@ func (s *Server) Diagnostics() Diagnostics {
 // UDP is intercepted as datagrams; it does not expose a local proxy socket.
 func (s *Server) UDPListenAddr() string { return "" }
 
+func (s *Server) fakeIPEnabled() bool {
+	return s != nil && s.opts.FakeIPEnabled != nil && s.opts.FakeIPEnabled()
+}
+
 // ClassifyFlow is the sole policy decision point. UDP packets sharing a complete
 // original five-tuple and process identity reuse the same immutable decision.
 func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
@@ -226,6 +230,15 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	flow, key, err := validateFlow(input)
 	if err != nil {
 		return nil, err
+	}
+	fake := isFakeIP(key.Destination.Addr())
+	if fake {
+		if host, ok := s.fakeDNS.lookup(key.Destination.Addr()); ok {
+			flow.Host, flow.DomainSource = host, "fakeip"
+		} else {
+			// Never forward an expired or unknown placeholder.
+			flow.Host, flow.DomainSource = "", "fakeip-unknown"
+		}
 	}
 	var expired []*udpAssociation
 	defer func() {
@@ -257,9 +270,17 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	}
 
 	decision := Decision{Action: ActionDirect, Rule: "loop-guard"}
-	guarded := s.guard.MustDirectFlow(flow)
-	if !guarded {
-		decision = s.engine.MatchWith(flow, s.opts.SharedPolicy)
+	guarded := !fake && s.guard.MustDirectFlow(flow)
+	if fake && flow.DomainSource == "fakeip-unknown" {
+		decision = Decision{Action: ActionReject, Rule: "fakeip-expired"}
+	} else if !guarded {
+		// A FakeIP is not the actual remote address: never match IP/CIDR
+		// selectors against the placeholder. Match hostname selectors only.
+		matchFlow := flow
+		if fake {
+			matchFlow.IP = ""
+		}
+		decision = s.engine.MatchWith(matchFlow, s.opts.SharedPolicy)
 		if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {
 			decision.ExitID = s.opts.DefaultExitID()
 		}
@@ -269,7 +290,17 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 			// Relay session is still connecting or reconnecting. Preserve
 			// explicit REJECT decisions, but temporarily fail PROXY open to
 			// DIRECT until the authenticated Relay session is ready.
-			decision = Decision{Action: ActionDirect, Rule: "relay-unavailable"}
+			if fake {
+				decision = Decision{Action: ActionReject, Rule: "fakeip-proxy-unavailable"}
+			} else {
+				decision = Decision{Action: ActionDirect, Rule: "relay-unavailable"}
+			}
+		}
+		if fake && decision.Action == ActionDirect {
+			// Directing synthetic addresses onto the public wire leaks or
+			// misroutes them. A proper DIRECT DNS strategy needs its own
+			// explicit, non-FakeIP resolver path.
+			decision = Decision{Action: ActionReject, Rule: "fakeip-direct-unsupported"}
 		}
 	}
 	if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {

@@ -617,3 +617,19 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
  #root .device-auth-danger-actions>.btn{flex:1 1 0}
 }
 @media(prefers-reduced-motion:reduce){#root .device-auth-cap{transition:none}}
+
+/* Cross-identity permissions within device modal. */
+#root .device-auth-grants{display:grid;gap:18px;min-width:0}
+#root .device-auth-grant-editor{display:grid;gap:15px;padding:20px;border:1px solid var(--line);background:var(--surface3);border-radius:15px}
+#root .device-auth-grant-editor h3,#root .device-auth-grant-history h3{font-size:15px;margin:0;font-weight:750}
+#root .device-auth-grant-editor>p{margin:-7px 0 1px;color:var(--muted);font-size:12px}
+#root .device-auth-grant-editor .form-grid{gap:14px}
+#root .device-auth-grant-editor .toggle-field{background:var(--surface2);min-width:0}
+#root .device-auth-grant-editor .form-actions{margin-top:4px}
+#root .device-auth-grant-history{display:grid;gap:13px;min-width:0}
+#root .device-auth-grant-history .table-wrap{max-width:100%}
+@media(max-width:600px){
+ #root .device-auth-grant-editor{padding:14px}
+ #root .device-auth-grant-editor .form-grid{grid-template-columns:minmax(0,1fr)}
+ #root .device-auth-grant-editor .form-actions>.btn{width:100%}
+}

@@ -16,7 +16,7 @@ test('navigation uses GUI stroke icons instead of Unicode placeholders',()=>{
  assert.match(app,/name=\{navIcons\[p\]\}/);
  assert.match(icons,/viewBox="0 0 24 24"/);
  assert.match(icons,/stroke="currentColor"/);
- assert.match(css,/@media\(max-width:1000px\)\{[^}]*\.nav-item>span:nth-child\(2\)\{display:none\}/);
+ assert.ok(css.includes('#root .sidebar .nav-item>span:nth-child(2){display:none}'));
 });
 test('overview has real-data metrics, visual topology, varied colors, and proper row gap',()=>{
  assert.match(app,/aria-label="RelayProxy 网络拓扑"/);

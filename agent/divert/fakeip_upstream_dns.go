@@ -44,7 +44,7 @@ func (s *Server) shouldForwardDNS(payload []byte) bool {
 // forwarding is opt-in and fails with SERVFAIL on any transport/auth error.
 func (s *Server) replyFakeDNS(ctx context.Context, payload []byte) []byte {
 	if !s.shouldForwardDNS(payload) {
-		return s.fakeDNS.reply(payload, s.guard.RelayHost, s.guard.RelayIPs)
+		return s.fakeDNS.replyScoped(payload, s.guard.RelayHost, s.guard.RelayIPs, s.dnsExitScope(""), true)
 	}
 	var query dnsmessage.Message
 	if err := query.Unpack(payload); err != nil {
@@ -71,19 +71,28 @@ func (s *Server) replyFakeDNS(ctx context.Context, payload []byte) []byte {
 	})
 }
 
+// dnsExitScope is also the FakeIP association scope. Pre-connect system DNS
+// traffic usually has no trustworthy originating application identity; never
+// infer an app's own selected routing exit from the system DNS process.
+func (s *Server) dnsExitScope(routeExitID string) string {
+	if routeExitID != "" {
+		return routeExitID
+	}
+	if s.opts.DNSExitID != nil {
+		if pinned := s.opts.DNSExitID(); pinned != "" {
+			return pinned
+		}
+	}
+	if s.opts.DefaultExitID != nil {
+		return s.opts.DefaultExitID()
+	}
+	return ""
+}
+
 func (s *Server) exchangeProxyDoT(parent context.Context, routeExitID string, question []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, proxyDNSTimeout)
 	defer cancel()
-	// The originating flow's selected exit takes precedence. A DNS query
-	// received before the app flow has no reliable process identity and uses
-	// the explicit DNS exit (or, if absent, the current default exit).
-	exit := routeExitID
-	if exit == "" && s.opts.DNSExitID != nil {
-		exit = s.opts.DNSExitID()
-	}
-	if exit == "" && s.opts.DefaultExitID != nil {
-		exit = s.opts.DefaultExitID()
-	}
+	exit := s.dnsExitScope(routeExitID)
 	if s.opts.ProxyReady != nil && !s.opts.ProxyReady() &&
 		(s.opts.LocalExitReady == nil || !s.opts.LocalExitReady(exit)) {
 		return nil, errDNSForwardUnavailable

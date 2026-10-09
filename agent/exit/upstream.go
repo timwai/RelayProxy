@@ -362,6 +362,17 @@ func readSOCKS5Address(r io.Reader, atyp byte) (netip.AddrPort, error) {
 }
 
 func dialSOCKS5UDP(ctx context.Context, cfg UpstreamConfig, target netip.AddrPort) (net.Conn, error) {
+	return dialSOCKS5UDPTo(ctx, cfg, target.Addr().String(), target.Port())
+}
+
+// dialSOCKS5UDPTo keeps the original destination name in the UDP header: the
+// SOCKS5 server resolves ATYP=0x03 names, not the local Agent.
+func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port uint16) (net.Conn, error) {
+	address, err := encodeSOCKS5Address(host, port)
+	if err != nil {
+		return nil, err
+	}
+	remoteAddr := socks5UDPTargetAddr{host: host, port: port}
 	control, err := dialProxyTCP(ctx, UpstreamConfig{Mode: UpstreamHTTP, Address: cfg.Address})
 	if err != nil {
 		return nil, err
@@ -410,14 +421,33 @@ func dialSOCKS5UDP(ctx context.Context, cfg UpstreamConfig, target netip.AddrPor
 	}
 	_ = control.SetDeadline(time.Time{})
 	ok = true
-	return &socks5UDPConn{control: control, udp: udp, target: target}, nil
+	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
+		remoteAddr.ip = net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), port))
+	}
+	return &socks5UDPConn{control: control, udp: udp, targetAddress: address, remoteAddr: remoteAddr}, nil
+}
+
+// socks5UDPTargetAddr describes a domain-based UDP peer without local DNS.
+type socks5UDPTargetAddr struct {
+	host string
+	port uint16
+	ip   *net.UDPAddr
+}
+
+func (a socks5UDPTargetAddr) Network() string { return "udp" }
+func (a socks5UDPTargetAddr) String() string {
+	if a.ip != nil {
+		return a.ip.String()
+	}
+	return net.JoinHostPort(a.host, strconv.Itoa(int(a.port)))
 }
 
 type socks5UDPConn struct {
-	control net.Conn
-	udp     *net.UDPConn
-	target  netip.AddrPort
-	once    sync.Once
+	control       net.Conn
+	udp           *net.UDPConn
+	targetAddress []byte // SOCKS5 ATYP+ADDR+PORT (including domain ATYP=0x03)
+	remoteAddr    socks5UDPTargetAddr
+	once          sync.Once
 }
 
 func (c *socks5UDPConn) Read(p []byte) (int, error) {
@@ -429,7 +459,7 @@ func (c *socks5UDPConn) Read(p []byte) (int, error) {
 	if n < 4 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 {
 		return 0, errors.New("invalid SOCKS5 UDP response")
 	}
-	offset, _, err := parseSOCKS5UDPAddress(buf[:n], 3)
+	offset, err := skipSOCKS5UDPAddress(buf[:n], 3)
 	if err != nil {
 		return 0, err
 	}
@@ -441,13 +471,9 @@ func (c *socks5UDPConn) Read(p []byte) (int, error) {
 }
 
 func (c *socks5UDPConn) Write(p []byte) (int, error) {
-	addr, err := encodeSOCKS5Address(c.target.Addr().String(), c.target.Port())
-	if err != nil {
-		return 0, err
-	}
-	packet := make([]byte, 0, 3+len(addr)+len(p))
+	packet := make([]byte, 0, 3+len(c.targetAddress)+len(p))
 	packet = append(packet, 0, 0, 0)
-	packet = append(packet, addr...)
+	packet = append(packet, c.targetAddress...)
 	packet = append(packet, p...)
 	n, err := c.udp.Write(packet)
 	if err != nil {
@@ -457,6 +483,36 @@ func (c *socks5UDPConn) Write(p []byte) (int, error) {
 		return 0, io.ErrShortWrite
 	}
 	return len(p), nil
+}
+
+// skipSOCKS5UDPAddress parses a UDP reply's ATYP and skips its source
+// address. The source can be a domain: resolving it locally here would leak
+// DNS queries and could break responses from otherwise working SOCKS5 servers.
+func skipSOCKS5UDPAddress(packet []byte, offset int) (int, error) {
+	if offset >= len(packet) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	atyp := packet[offset]
+	offset++
+	var size int
+	switch atyp {
+	case 0x01:
+		size = 4
+	case 0x04:
+		size = 16
+	case 0x03:
+		if offset >= len(packet) {
+			return 0, io.ErrUnexpectedEOF
+		}
+		size = int(packet[offset])
+		offset++
+	default:
+		return 0, fmt.Errorf("unsupported SOCKS5 UDP address type 0x%02x", atyp)
+	}
+	if offset+size+2 > len(packet) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	return offset + size + 2, nil
 }
 
 func parseSOCKS5UDPAddress(packet []byte, offset int) (int, netip.AddrPort, error) {
@@ -518,7 +574,7 @@ func (c *socks5UDPConn) Close() error {
 	return err
 }
 func (c *socks5UDPConn) LocalAddr() net.Addr                { return c.udp.LocalAddr() }
-func (c *socks5UDPConn) RemoteAddr() net.Addr               { return net.UDPAddrFromAddrPort(c.target) }
+func (c *socks5UDPConn) RemoteAddr() net.Addr               { return c.remoteAddr }
 func (c *socks5UDPConn) SetDeadline(t time.Time) error      { return c.udp.SetDeadline(t) }
 func (c *socks5UDPConn) SetReadDeadline(t time.Time) error  { return c.udp.SetReadDeadline(t) }
 func (c *socks5UDPConn) SetWriteDeadline(t time.Time) error { return c.udp.SetWriteDeadline(t) }

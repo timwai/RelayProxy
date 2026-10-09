@@ -494,6 +494,10 @@ class RelayVpnService : VpnService() {
             put("tunTxBytes", values[1])
             put("tunRxPackets", values[2])
             put("tunRxBytes", values[3])
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put("alwaysOnEnabled", isAlwaysOn)
+                put("lockdownEnabled", isLockdownEnabled)
+            }
         }
     }
 
@@ -552,6 +556,10 @@ class RelayVpnService : VpnService() {
         updateStatusFields {
             put("vpnState", state)
             put("detail", detail)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put("alwaysOnEnabled", isAlwaysOn)
+                put("lockdownEnabled", isLockdownEnabled)
+            }
         }
         handler.post {
             val notification = buildNotification(

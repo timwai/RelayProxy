@@ -54,7 +54,7 @@ func (s *Server) replyFakeDNS(ctx context.Context, payload []byte) []byte {
 	var err error
 	select {
 	case s.dnsLimit <- struct{}{}:
-		reply, err = s.exchangeProxyDoT(ctx, payload)
+		reply, err = s.exchangeProxyDoT(ctx, "", payload)
 		<-s.dnsLimit
 	default:
 		err = errDNSForwardUnavailable
@@ -71,11 +71,17 @@ func (s *Server) replyFakeDNS(ctx context.Context, payload []byte) []byte {
 	})
 }
 
-func (s *Server) exchangeProxyDoT(parent context.Context, question []byte) ([]byte, error) {
+func (s *Server) exchangeProxyDoT(parent context.Context, routeExitID string, question []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, proxyDNSTimeout)
 	defer cancel()
-	exit := ""
-	if s.opts.DefaultExitID != nil {
+	// The originating flow's selected exit takes precedence. A DNS query
+	// received before the app flow has no reliable process identity and uses
+	// the explicit DNS exit (or, if absent, the current default exit).
+	exit := routeExitID
+	if exit == "" && s.opts.DNSExitID != nil {
+		exit = s.opts.DNSExitID()
+	}
+	if exit == "" && s.opts.DefaultExitID != nil {
 		exit = s.opts.DefaultExitID()
 	}
 	if s.opts.ProxyReady != nil && !s.opts.ProxyReady() &&
@@ -131,7 +137,7 @@ func (s *Server) exchangeProxyDoT(parent context.Context, question []byte) ([]by
 // resolveFakeDirectIP is only called for FakeIP flows with a rule explicitly
 // choosing DIRECT. It first obtains the real IP over verified DoT via the
 // selected proxy exit; failure is fatal, with NO system DNS fallback.
-func (s *Server) resolveFakeDirectIP(ctx context.Context, domain string, ipv6 bool) (string, error) {
+func (s *Server) resolveFakeDirectIP(ctx context.Context, exitID, domain string, ipv6 bool) (string, error) {
 	if domain == "" {
 		return "", errDNSForwardUnavailable
 	}
@@ -153,7 +159,7 @@ func (s *Server) resolveFakeDirectIP(ctx context.Context, domain string, ipv6 bo
 		return "", err
 	}
 	var answer dnsmessage.Message
-	payload, err := s.exchangeProxyDoT(ctx, query)
+	payload, err := s.exchangeProxyDoT(ctx, exitID, query)
 	if err != nil {
 		return "", err
 	}

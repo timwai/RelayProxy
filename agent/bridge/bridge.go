@@ -451,7 +451,7 @@ type RoutingConfigUpdate struct {
 	BlockDoHEndpoints *bool          `json:"block_doh_endpoints"`
 	ForwardOtherDNS   *bool          `json:"forward_other_dns"`
 	DNSExitID         *string        `json:"dns_exit_id"`
-	DoHBlockedIPs     *[]string     `json:"doh_blocked_ips"`
+	DoHBlockedIPs     *[]string      `json:"doh_blocked_ips"`
 	DefaultAction     *string        `json:"default_action"`
 	Rules             []routing.Rule `json:"rules"` // Full replacement
 }

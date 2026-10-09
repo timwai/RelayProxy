@@ -67,6 +67,13 @@ Agent「诊断与日志」新增 DNS 安全状态：FakeIP 策略开关、内核
 
 诊断中的 `rules-present` 仅代表观察到独立阻断规则：无法证明其下次重启前生效、iptables/nftables 优先级配置正确、其他网络命名空间也受保护，或 DoH/443 无泄漏。要达到强保障，需按平台测试 DNS/53、853、DoH/443、环回解析、Agent 异常退出、IPv6、切换出口和重启后的网络路径。
 
+## 本轮：DoH 指定目标 IP、FakeIP DNS 出口隔离与防火墙状态
+
+- 在 `routing.block_doh_endpoints: true` 下可额外配置 `routing.doh_blocked_ips`，接受用户手工指定的单个公网 IPv4/IPv6 或较窄 CIDR（IPv4 /24 及以上精度、IPv6 /48 及以上精度，最多 256 项），仅阻断这些目标的 TCP/UDP 443。**会阻断这些 IP 上的其他 HTTPS/QUIC 服务**，尤其共享 CDN 的 IP，必须由用户确认；不是依据 HTTPS 内容可靠识别 DoH，也不是自动识别所有硬编码 IP 的 DoH。关闭 DoH 阻断开关后 IP 列表不生效。
+- FakeIP A/AAAA 映射按选定的加密 DNS 出口划分缓存作用域。同一域名经 DNS 出口 A、B 分配不同的合成地址；出口切换后，新流量访问旧作用域 FakeIP 会安全拒绝并显示 `fakeip-dns-exit-changed`，应用需重新发起 DNS 查询。仍然不保证某个系统 DNS 进程代表哪个应用，也不宣称应用进程/用户间 DNS 隔离。客户端设备身份由 Agent 实例管理，切换身份需要重新启动实例。
+- Windows 独立 Kill Switch 诊断通过 `Get-NetFirewallRule` 查询 ActiveStore/PersistentStore，并通过 `Get-NetFirewallPortFilter` 核对 TCP/UDP、远端 53/853/784/8853、出站 Block、启用状态和防火墙 Profile 是否开启；结果仍只表示**发现配置规则**，不能证明 WFP/WinDivert 拦截优先级或全部绕过路径。<https://learn.microsoft.com/powershell/module/netsecurity/get-netfirewallportfilter>
+- macOS Network Extension 对系统环回 DNS 的不可见范围、Android OEM 厂商 VPN/Private DNS 的差异仍需要真机断线、重启及网络抓包验收；不具备可被单元测试替代的零泄漏保证。
+
 ## 尚不能宣称完整的零泄漏能力
 
 1. **DoH/HTTPS/443**：已知 DoH 主机名可选阻断，但应用自带私有解析器、直连固定 IP、ECH 或其他 HTTPS 请求无法被当前层完全区分。DoH3/QUIC 也需要专门治理。

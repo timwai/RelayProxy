@@ -267,7 +267,17 @@ func (b *UIBridge) GetConfigState() (*ConfigState, error) {
 func (b *UIBridge) configState(cfg *config.AgentConfigFile, revision string) *ConfigState {
 	runtime := b.runtimeConfig()
 	fields := restartFields(cfg, &runtime)
-	return &ConfigState{Config: *cfg, Runtime: runtime, Revision: revision,
+	// The desktop and Web bridges must never serialize custom-exit passwords.
+	visible := config.CloneAgentConfig(cfg)
+	for i := range visible.Proxy.CustomExits {
+		visible.Proxy.CustomExits[i].HasPassword = visible.Proxy.CustomExits[i].Password != ""
+		visible.Proxy.CustomExits[i].Password = ""
+	}
+	for i := range runtime.Proxy.CustomExits {
+		runtime.Proxy.CustomExits[i].HasPassword = runtime.Proxy.CustomExits[i].Password != ""
+		runtime.Proxy.CustomExits[i].Password = ""
+	}
+	return &ConfigState{Config: *visible, Runtime: runtime, Revision: revision,
 		RestartRequired: len(fields) > 0, RestartFields: fields,
 		ReloadPending: policyFingerprint(cfg) != policyFingerprint(&runtime)}
 }
@@ -284,6 +294,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
 	res.Proxy.DefaultExitID = c.DefaultExitID
+	res.Proxy.CustomExits = routing.CloneCustomExits(c.CustomExits)
 	res.Proxy.SOCKS5.Enabled = c.SOCKS5Enabled
 	res.Proxy.SOCKS5.Listen, res.Proxy.SOCKS5.Port = splitListen(c.SOCKS5Listen)
 	res.Proxy.HTTP.Enabled = c.HTTPEnabled
@@ -303,6 +314,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.AllowInternet = c.AllowInternet
 	res.Exit.AllowPrivateNetwork = c.AllowPrivateNet
 	res.Exit.AllowLoopback = c.AllowLoopback
+	res.Exit.UpstreamExitID = c.ExitUpstreamID
 	res.Exit.Upstream.Mode = c.ExitUpstream.Mode
 	res.Exit.Upstream.Address = c.ExitUpstream.Address
 	res.Exit.Upstream.Username = c.ExitUpstream.Username
@@ -359,12 +371,14 @@ type ConfigUpdate struct {
 		HTTPListen    *string `json:"httpListen"`
 		HTTPPort      *int    `json:"httpPort"`
 		DefaultExitID *string `json:"defaultExitId"`
+		CustomExits *[]CustomExitUpdate `json:"customExits"`
 	} `json:"proxy"`
 	Exit struct {
 		Enabled             *bool `json:"enabled"`
 		AllowInternet       *bool `json:"allowInternet"`
 		AllowPrivateNetwork *bool `json:"allowPrivateNetwork"`
 		AllowLoopback       *bool `json:"allowLoopback"`
+		UpstreamExitID     *string `json:"upstreamExitId"`
 		Upstream            struct {
 			Mode     *string `json:"mode"`
 			Address  *string `json:"address"`
@@ -389,6 +403,18 @@ type ConfigUpdate struct {
 		Theme                       *string `json:"theme"`
 		VerificationPopupTimeoutSec *int    `json:"verificationPopupTimeoutSec"`
 	} `json:"gui"`
+}
+
+// CustomExitUpdate accepts a password only when explicitly provided;
+// omitted password keeps the previously saved secret for an existing exit.
+type CustomExitUpdate struct {
+	ID string `json:"id"`
+	Name string `json:"name"`
+	Enabled bool `json:"enabled"`
+	Protocol string `json:"protocol"`
+	Address string `json:"address"`
+	Username string `json:"username"`
+	Password *string `json:"password,omitempty"`
 }
 
 type RoutingConfigUpdate struct {
@@ -547,7 +573,17 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Proxy.DefaultExitID != nil {
 		cfg.Proxy.DefaultExitID = strings.TrimSpace(*in.Proxy.DefaultExitID)
 	}
+	if in.Proxy.CustomExits != nil {
+		items := make([]routing.CustomExit, 0, len(*in.Proxy.CustomExits))
+		for _, update := range *in.Proxy.CustomExits {
+			item := routing.CustomExit{ID:update.ID, Name:update.Name, Enabled:update.Enabled, Protocol:update.Protocol, Address:update.Address, Username:update.Username}
+			if update.Password != nil { item.Password = *update.Password } else if old, ok := routing.FindCustomExit(cfg.Proxy.CustomExits, update.ID); ok { item.Password = old.Password }
+			items = append(items, item)
+		}
+		cfg.Proxy.CustomExits = items
+	}
 
+	if in.Exit.UpstreamExitID != nil { cfg.Exit.UpstreamExitID = strings.TrimSpace(*in.Exit.UpstreamExitID) }
 	if in.Exit.Enabled != nil {
 		cfg.Exit.Enabled = config.BoolPtr(*in.Exit.Enabled)
 	}
@@ -691,6 +727,7 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if err := b.agent.ApplyPolicies(cfg.Routing, dcfg); err != nil {
 		return nil, fmt.Errorf("配置已保存在磁盘，但应用失败: %w", err)
 	}
+	if err := b.agent.ApplyCustomExits(cfg.Proxy.CustomExits); err != nil { return nil, fmt.Errorf("配置已保存，但更新自定义出口失败: %w", err) }
 	b.agent.SelectExit(cfg.Proxy.DefaultExitID)
 	state := b.configState(cfg, revision)
 	message := "配置已保存，规则已应用。"
@@ -730,6 +767,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
 		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"私网访问": c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
+		"共享上游出口": c.Exit.UpstreamExitID,
 		"出口上游模式": c.Exit.Upstream.Mode, "出口上游地址": c.Exit.Upstream.Address,
 		"出口上游用户名": c.Exit.Upstream.Username, "出口上游密码": c.Exit.Upstream.Password,
 		"访问控制模式": c.Exit.Access.Mode, "访问域名": strings.Join(c.Exit.Access.Domains, "\n"),

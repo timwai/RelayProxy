@@ -252,6 +252,29 @@ try {
         throw "Missing Server React CSS bundle"
     }
 
+    # --- Shared Agent React frontend (Web, Wails and macOS) ---
+    $frontendDir = Join-Path $Root "agent\gui\frontend"
+    $reactDist = Join-Path $Root "agent\gui\react_dist"
+    Write-Host ""
+    Write-Host "[BUILD] Shared Agent React frontend" -ForegroundColor Cyan
+    if (Test-Path -LiteralPath $reactDist) {
+        Get-ChildItem -LiteralPath $reactDist -Force |
+            Where-Object { $_.Name -ne "README.txt" } |
+            Remove-Item -Recurse -Force
+    }
+    Push-Location $frontendDir
+    try {
+        & npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) { throw "npm install failed for Wails React frontend" }
+        & npm test
+        if ($LASTEXITCODE -ne 0) { throw "Agent React frontend tests failed" }
+        & npm run build
+        if ($LASTEXITCODE -ne 0) { throw "React frontend build failed" }
+    } finally {
+        Pop-Location
+    }
+    Assert-ReactBundle
+
     # --- Linux server/agent and macOS agent ---
     if (-not $WindowsOnly) {
         Hide-Syso
@@ -294,27 +317,6 @@ try {
         Package-MacOSApp -Arch "amd64"
         Package-MacOSApp -Arch "arm64"
     }
-
-    # --- Wails React frontend ---
-    $frontendDir = Join-Path $Root "agent\gui\frontend"
-    $reactDist = Join-Path $Root "agent\gui\react_dist"
-    Write-Host ""
-    Write-Host "[BUILD] Wails React frontend" -ForegroundColor Cyan
-    if (Test-Path -LiteralPath $reactDist) {
-        Get-ChildItem -LiteralPath $reactDist -Force |
-            Where-Object { $_.Name -ne "README.txt" } |
-            Remove-Item -Recurse -Force
-    }
-    Push-Location $frontendDir
-    try {
-        & npm install --no-audit --no-fund
-        if ($LASTEXITCODE -ne 0) { throw "npm install failed for Wails React frontend" }
-        & npm run build
-        if ($LASTEXITCODE -ne 0) { throw "React frontend build failed" }
-    } finally {
-        Pop-Location
-    }
-    Assert-ReactBundle
 
     # --- Windows client (icons + manifest embedded via resource_windows.syso) ---
     # Desktop build first: it is the artifact users are told to double-click.

@@ -321,7 +321,13 @@ func (i *darwinInterceptor) handleTCP(conn *net.UnixConn, open darwinOpenFlow) e
 	if err != nil {
 		return err
 	}
-	if i.server.fakeIPEnabled() && isDNSLeakPort(destination.Port()) {
+	if i.server.fakeIPEnabled() && destination.Port() == 53 {
+		if err := writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionProxy, Reason: "fakeip-dns"}); err != nil {
+			return err
+		}
+		return i.server.serveFakeDNSTCP(i.ctx, conn)
+	}
+	if i.server.fakeIPEnabled() && isEncryptedDNSPort(destination.Port()) {
 		return writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionReject, Reason: "fakeip-dns-egress-blocked"})
 	}
 	route, err := i.server.ClassifyFlow(open.flow(destination))

@@ -63,7 +63,7 @@ func (s *Server) replyFakeDNS(ctx context.Context, payload []byte) []byte {
 	// Never switch to net.DefaultResolver or plaintext DNS if TLS fails.
 	return packDNSResponse(dnsmessage.Message{
 		Header: dnsmessage.Header{ID: query.ID, Response: true,
-			RecursionDesired: query.RecursionDesired,
+			RecursionDesired:   query.RecursionDesired,
 			RecursionAvailable: true, RCode: dnsmessage.RCodeServerFailure},
 		Questions: query.Questions,
 	})

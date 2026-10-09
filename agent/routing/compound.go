@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/netip"
 	"path"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,11 +73,10 @@ func matchProcess(pattern, process string) bool {
 	if process == "" {
 		return false
 	}
-	pat := strings.ReplaceAll(pattern, "\\", "/")
-	proc := strings.ReplaceAll(process, "\\", "/")
-	if runtime.GOOS == "windows" || strings.ContainsAny(pattern+process, "\\:") {
-		pat, proc = strings.ToLower(pat), strings.ToLower(proc)
-	}
+	// Process selectors are case-insensitive on every supported platform,
+	// including process aliases and full-path glob patterns.
+	pat := strings.ToLower(strings.ReplaceAll(pattern, "\\", "/"))
+	proc := strings.ToLower(strings.ReplaceAll(process, "\\", "/"))
 	if !strings.Contains(pat, "/") {
 		proc = path.Base(proc)
 	}

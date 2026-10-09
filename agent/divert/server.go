@@ -123,7 +123,7 @@ func proxyDialTarget(flow Flow) string {
 	// the macOS Network Extension's original remoteHostname. Telemetry-only
 	// TLS SNI/HTTP Host data is never trusted for routing. Ambiguous DNS
 	// associations stay empty; DIRECT continues using the original IP.
-	if (flow.DomainSource == "dns" || flow.DomainSource == "network-extension") && host != "" && net.ParseIP(host) == nil {
+	if (flow.DomainSource == "dns" || flow.DomainSource == "network-extension" || flow.DomainSource == "fakeip") && host != "" && net.ParseIP(host) == nil {
 		return host
 	}
 	return flow.IP

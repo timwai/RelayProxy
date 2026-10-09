@@ -50,6 +50,26 @@ func isFakeIP(addr netip.Addr) bool {
 	return addr.IsValid() && (fakeIPv4Range.Contains(addr) || fakeIPv6Range.Contains(addr))
 }
 
+// wasIssued distinguishes FakeIP addresses minted by this Agent from real
+// benchmark/test destinations in the same reserved ranges. Turning FakeIP off
+// must not block unrelated traffic to 198.18.0.0/15, yet already-issued
+// placeholders must still fail closed while an application caches them.
+func (d *fakeIPDNS) wasIssued(addr netip.Addr) bool {
+	if !isFakeIP(addr) {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if addr.Is4() {
+		b := addr.As4()
+		id := uint32(b[1]-18)<<16 | uint32(b[2])<<8 | uint32(b[3])
+		return id != 0 && id <= d.next4
+	}
+	b := addr.As16()
+	id := uint32(b[12])<<24 | uint32(b[13])<<16 | uint32(b[14])<<8 | uint32(b[15])
+	return id != 0 && id <= d.next6
+}
+
 func (d *fakeIPDNS) lookup(addr netip.Addr) (string, bool) {
 	if !isFakeIP(addr) {
 		return "", false

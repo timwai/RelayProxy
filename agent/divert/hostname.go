@@ -10,6 +10,35 @@ import (
 
 const maxHostnameProbe = 8192
 
+// hostnameObservingConn adds a bounded, read-only TCP probe to the upstream
+// copy path. It covers macOS Network Extension flows (where raw packets aren't
+// observed) as well as Windows/Linux and never consumes or rewrites data.
+type hostnameObservingConn struct {
+	net.Conn
+	record interface{ SetObservedDomain(string, string) }
+	probe  []byte
+	done   bool
+}
+
+func (c *hostnameObservingConn) Read(p []byte) (int, error) {
+	n, err := c.Conn.Read(p)
+	if n > 0 && !c.done {
+		if len(c.probe)+n > maxHostnameProbe {
+			c.done, c.probe = true, nil
+		} else {
+			c.probe = append(c.probe, p[:n]...)
+			host, source, needMore := parseApplicationHostname(c.probe)
+			if host != "" {
+				c.record.SetObservedDomain(host, source)
+			}
+			if host != "" || !needMore {
+				c.done, c.probe = true, nil
+			}
+		}
+	}
+	return n, err
+}
+
 // parseApplicationHostname reads only the initial, unencrypted request
 // metadata: TLS ClientHello SNI or HTTP/1.x Host. These fields are declared
 // by the application and are useful for telemetry, not an authenticated

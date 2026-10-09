@@ -10,8 +10,8 @@ import (
 func TestSOCKS5AuthenticationRejectsDowngrade(t *testing.T) {
 	cases := []struct {
 		name, user, password string
-		selection []byte
-		wantError string
+		selection            []byte
+		wantError            string
 	}{
 		{"credentials reject no-auth", "user", "secret", []byte{5, 0}, "no-auth"},
 		{"no credentials reject password auth", "", "", []byte{5, 2}, "unoffered"},
@@ -61,17 +61,28 @@ func TestSOCKS5PasswordAuthValidatesReplyVersion(t *testing.T) {
 			done := make(chan error, 1)
 			go func() {
 				var greeting [3]byte
-				if _, err := io.ReadFull(server, greeting[:]); err != nil { done <- err; return }
-				if _, err := server.Write([]byte{5, 2}); err != nil { done <- err; return }
+				if _, err := io.ReadFull(server, greeting[:]); err != nil {
+					done <- err
+					return
+				}
+				if _, err := server.Write([]byte{5, 2}); err != nil {
+					done <- err
+					return
+				}
 				auth := make([]byte, 2+len("user")+1+len("secret"))
-				if _, err := io.ReadFull(server, auth); err != nil { done <- err; return }
+				if _, err := io.ReadFull(server, auth); err != nil {
+					done <- err
+					return
+				}
 				_, err := server.Write(reply)
 				done <- err
 			}()
 			if err := socks5Authenticate(client, UpstreamConfig{Username: "user", Password: "secret"}); err == nil {
 				t.Fatal("accepted invalid password authentication reply")
 			}
-			if err := <-done; err != nil { t.Fatal(err) }
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
 		})
 	}
 }

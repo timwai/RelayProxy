@@ -1587,7 +1587,7 @@ class MainActivity : Activity() {
 
     private fun updateDNSProtectionSummary() {
         if (!::dnsProtectionSummary.isInitialized) return
-        val config = ConfigStore(this).load()
+        val store = ConfigStore(this)
         val vpn = runCatching { JSONObject(RelayVpnService.statusJson()) }.getOrNull()
         val vpnState = vpn?.optString("vpnState", "STOPPED") ?: "STOPPED"
         val alwaysOn = vpn?.optBoolean("alwaysOnEnabled", false) ?: false
@@ -1600,7 +1600,7 @@ class MainActivity : Activity() {
             append("\n系统 Private DNS：").append(privateDNS)
             append("\n始终开启 VPN：").append(if (alwaysOn) "已开启" else "未开启 / 未验证")
             append("\n无 VPN 时阻止连接：").append(if (lockdown) "已开启" else "未开启 / 未验证")
-            append("\nVPN IPv6：").append(if (config.vpnIpv6Enabled) "已配置" else "未启用")
+            append("\nVPN IPv6：").append(if (store.vpnIpv6Configured()) "已配置" else "未启用")
             append("\n泄漏认证：尚未实机抓包验证")
         }
     }
@@ -2773,8 +2773,7 @@ class MainActivity : Activity() {
             }
         }
         if (selectedExit.startsWith("local:")) {
-            val local = ConfigStore(this).load().customExits.firstOrNull { it.id == selectedExit }
-            nodeDisplay = local?.name ?: "本机出口不可用"
+            nodeDisplay = ConfigStore(this).customExitDisplayName(selectedExit) ?: "本机出口不可用"
         }
         activeNodeName.text = nodeDisplay
         activeNodeSubtitle.text = when {

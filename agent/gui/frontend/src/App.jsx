@@ -227,10 +227,30 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
 
 function ExitShare({status,config,setv,save,dirty}){
  const u=config.exitUpstream||EMPTY.exitUpstream,[loopbackRisk,setLoopbackRisk]=useState(false);
+ const customs=arr(config.customExits),chosen=customs.find(x=>x.id===config.upstreamExitId);
+ const legacy=!config.upstreamExitId&&u.mode&&u.mode!=='direct';
+ const selected=config.upstreamExitId||(legacy?'__legacy__':'__direct__');
  return <><PageHead title="本机出口共享" desc="允许 Server 将授权流量通过此设备访问 Internet 或指定网络。"/>
  <Card title="出口能力" eyebrow="EXIT NODE" action={<Switch checked={config.exitEnabled!==false} onChange={v=>setv('exitEnabled',v)}/>}><Setting title="当前运行状态" desc="Agent 出口处理器"><Badge tone={status.exitRunning?'ok':'neutral'}>{status.exitRunning?'正在提供出口':'未运行'}</Badge></Setting><Setting title="允许访问 Internet" desc="允许作为公网出口"><Switch checked={!!config.allowInternet} onChange={v=>setv('allowInternet',v)}/></Setting><Setting title="允许访问私有网络" desc="访问 RFC1918 / 内网地址"><Switch checked={!!config.allowPrivateNetwork} onChange={v=>setv('allowPrivateNetwork',v)}/></Setting><Setting title="允许访问 Loopback" desc="允许访问 127.0.0.0/8 / ::1 上的本机服务；高风险，默认关闭。"><Switch checked={!!config.allowLoopback} onChange={v=>v?setLoopbackRisk(true):setv('allowLoopback',false)}/></Setting></Card>
- <div className="cards-2"><Card title="上游代理" eyebrow="UPSTREAM"><div className="form-grid"><Field label="模式"><Select value={u.mode||'direct'} onChange={e=>setv('exitUpstream.mode',e.target.value)}><option value="direct">本机直连</option><option value="socks5">SOCKS5</option><option value="http">HTTP</option><option value="https">HTTPS Proxy</option></Select></Field><Field label="地址"><Input disabled={(u.mode||'direct')==='direct'} value={u.address||''} onChange={e=>setv('exitUpstream.address',e.target.value)} placeholder="127.0.0.1:1080"/></Field><Field label="用户名"><Input disabled={(u.mode||'direct')==='direct'} value={u.username||''} onChange={e=>setv('exitUpstream.username',e.target.value)}/></Field><Field label="密码"><Input disabled={(u.mode||'direct')==='direct'} type="password" value={u.password||''} onChange={e=>setv('exitUpstream.password',e.target.value)}/></Field></div>{(u.mode||'direct')!=='direct'&&<div className="notice warn top-gap"><b>上游代理仅承载 TCP。</b> UDP 出口请求会明确拒绝，不会绕过 SOCKS5 / HTTP(S) 上游改成本机直连。</div>}</Card><Card title="出口访问控制" eyebrow="ACCESS POLICY"><Field label="策略模式"><Select value={config.accessMode||''} onChange={e=>setv('accessMode',e.target.value)}><option value="">关闭</option><option value="allow">仅允许列表</option><option value="deny">拒绝列表</option></Select></Field><Field label="域名规则" help="可用换行、逗号或分号分隔，支持通配符，如 *.example.com"><Textarea rows="4" value={ruleListText(config.accessDomains)} onChange={e=>setv('accessDomains',e.target.value)}/></Field><Field label="CIDR / IP" help="可用换行、逗号或分号分隔，如 10.0.0.0/8, 192.168.1.1"><Textarea rows="4" value={ruleListText(config.accessCidrs)} onChange={e=>setv('accessCidrs',e.target.value)}/></Field></Card></div>
- <SaveBar dirty={dirty} label="保存出口共享设置" hint="同时保存出口能力、上游代理与访问控制；出口相关设置均为启动参数，保存后需重启客户端生效。" onSave={()=>save({exit:{enabled:config.exitEnabled,allowInternet:config.allowInternet,allowPrivateNetwork:config.allowPrivateNetwork,allowLoopback:config.allowLoopback,upstream:u,access:{mode:config.accessMode||'',domains:splitRuleList(config.accessDomains),cidrs:splitRuleList(config.accessCidrs)}}})}/>
+ <div className="cards-2"><Card title="共享上游出口" eyebrow="UPSTREAM">
+  <Field label="上游连接方式">
+   <Select value={selected} onChange={e=>{
+    const id=e.target.value;
+    setv('upstreamExitId',id.startsWith('local:')?id:'');
+    if(id==='__direct__')setv('exitUpstream.mode','direct');
+   }}>
+    <option value="__direct__">本机直连</option>
+    {legacy&&<option value="__legacy__">旧配置：{u.mode.toUpperCase()} · {u.address||'地址未知'}（保留原行为）</option>}
+    {customs.map(x=><option key={x.id} value={x.id} disabled={!x.enabled&&x.id!==config.upstreamExitId}>{x.name} · {x.protocol.toUpperCase()} · {x.address}{!x.enabled?'（已停用）':''}</option>)}
+   </Select>
+  </Field>
+  {chosen&&<div className="setting top-gap"><div className="grow"><b>{chosen.name}</b><div className="mini">{chosen.address} · {chosen.protocol.toUpperCase()}</div></div><Badge tone={chosen.enabled?'ok':'danger'}>{chosen.enabled?'可用':'不可用'}</Badge></div>}
+  {chosen&&chosen.protocol!=='socks5'&&<div className="notice warn top-gap">HTTP(S) CONNECT 仅支持 TCP。共享出口的 UDP 请求会失败，不会回退本机直连。</div>}
+  {config.upstreamExitId&&!chosen&&<div className="notice danger top-gap">所选上游出口已丢失，保存将被阻止。请重新选择或切换到本机直连。</div>}
+  {legacy&&<div className="notice warn top-gap">当前仍使用旧版上游 {u.mode}。请创建自定义出口并在此引用；切换上游前保留原有工作方式。</div>}
+  {!customs.length&&<div className="notice top-gap">暂无自定义出口。请前往「出口选择」创建。</div>}
+ </Card><Card title="出口访问控制" eyebrow="ACCESS POLICY"><Field label="策略模式"><Select value={config.accessMode||''} onChange={e=>setv('accessMode',e.target.value)}><option value="">关闭</option><option value="allow">仅允许列表</option><option value="deny">拒绝列表</option></Select></Field><Field label="域名规则" help="可用换行、逗号或分号分隔，支持通配符，如 *.example.com"><Textarea rows="4" value={ruleListText(config.accessDomains)} onChange={e=>setv('accessDomains',e.target.value)}/></Field><Field label="CIDR / IP" help="可用换行、逗号或分号分隔，如 10.0.0.0/8, 192.168.1.1"><Textarea rows="4" value={ruleListText(config.accessCidrs)} onChange={e=>setv('accessCidrs',e.target.value)}/></Field></Card></div>
+ <SaveBar dirty={dirty} label="保存出口共享设置" hint="同时保存出口能力、上游代理与访问控制；出口相关设置均为启动参数，保存后需重启客户端生效。" onSave={()=>save({exit:{enabled:config.exitEnabled,allowInternet:config.allowInternet,allowPrivateNetwork:config.allowPrivateNetwork,allowLoopback:config.allowLoopback,upstreamExitId:config.upstreamExitId||'',upstream:config.upstreamExitId?undefined:u,access:{mode:config.accessMode||'',domains:splitRuleList(config.accessDomains),cidrs:splitRuleList(config.accessCidrs)}}})}/>
  <Modal open={loopbackRisk} title="允许出口流量访问本机 Loopback？" onClose={()=>setLoopbackRisk(false)} footer={<><Button onClick={()=>setLoopbackRisk(false)}>保持关闭</Button><Button danger onClick={()=>{setv('allowLoopback',true);setLoopbackRisk(false)}}>我了解风险，允许访问</Button></>}><div className="notice danger"><b>启用后，经 Server 授权到达此出口的流量可以访问本机 Loopback 服务。</b><br/>这可能包含只监听 127.0.0.1 / ::1 的管理接口、开发服务或其他原本不面向网络开放的进程。仅在你明确需要且访问策略足够严格时开启。</div></Modal></>
 }
 

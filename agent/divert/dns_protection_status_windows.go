@@ -21,7 +21,7 @@ var windowsDNSGuardCache struct {
 
 type windowsDNSGuardEvidence struct {
 	ProfilesEnabled bool `json:"profilesEnabled"`
-	Entries []struct {
+	Entries         []struct {
 		Name       string   `json:"name"`
 		Active     bool     `json:"active"`
 		Persistent bool     `json:"persistent"`

@@ -450,8 +450,8 @@ func TestConnectionsPageSupportsStatusFilterClearAndNewestFirst(t *testing.T) {
 				t.Fatalf("connections script missing %q", want)
 			}
 		}
-
 	}
+
 	clear := httptest.NewRecorder()
 	handler.ServeHTTP(clear, httptest.NewRequest(http.MethodDelete, "http://127.0.0.1/api/connections", nil))
 	if clear.Code != http.StatusOK || !strings.Contains(clear.Body.String(), `"ok":true`) {

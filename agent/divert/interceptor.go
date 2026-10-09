@@ -310,6 +310,43 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		return i.inject(data, meta)
 	}
 	i.parsed.Add(1)
+	// DNS interception must run before the private-DNS, loopback and process
+	// bypasses. Never send an intercepted DNS/53 question to a local resolver.
+	if i.server.fakeIPEnabled() {
+		if packet.Destination.Port() == 53 {
+			if packet.Protocol == ProtoUDP {
+				answer := i.server.fakeDNS.reply(packet.Payload, i.server.guard.RelayHost, i.server.guard.RelayIPs)
+				if answer == nil {
+					return nil // malformed DNS is dropped, not leaked
+				}
+				reply, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: packet.Source, Destination: packet.Destination}, answer)
+				if err != nil {
+					return err
+				}
+				meta.outbound = false
+				return i.inject(reply, meta)
+			}
+			// DNS-over-TCP cannot be safely redirected by a datagram handler.
+			return i.rejectTCP(packet, meta)
+		}
+		// Block well-known encrypted DNS transports. DoH on ordinary HTTPS/443
+		// is indistinguishable from general web traffic at this layer.
+		if packet.Destination.Port() == 853 || packet.Destination.Port() == 784 || packet.Destination.Port() == 8853 {
+			if packet.Protocol == ProtoTCP {
+				return i.rejectTCP(packet, meta)
+			}
+			return nil
+		}
+	}
+	if isFakeIP(packet.Destination.Addr()) {
+		if _, ok := i.server.fakeDNS.lookup(packet.Destination.Addr()); !ok {
+			// Expired/unknown placeholders must not reach the public network.
+			if packet.Protocol == ProtoTCP {
+				return i.rejectTCP(packet, meta)
+			}
+			return nil
+		}
+	}
 	if packet.Protocol == ProtoTCP {
 		if port := i.ports[packet.Source.Addr().Is6()]; port != 0 && packet.Source.Port() == port {
 			return i.returnTCP(packet, meta)

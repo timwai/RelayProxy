@@ -21,6 +21,16 @@ func TestIngressSourceLimiterIsBounded(t *testing.T) {
 	}
 }
 
+func TestIngressSourceLimiterRejectsNewSourcesAtCapacity(t *testing.T) {
+	limiter := newSourceLimiter(1)
+	for i := 0; i < 9000; i++ {
+		limiter.allow(fmt.Sprintf("source-%d", i))
+	}
+	if len(limiter.counts) > 8192 {
+		t.Fatalf("source limiter grew without bound: %d", len(limiter.counts))
+	}
+}
+
 func TestIngressManagerDisabledIsExplicit(t *testing.T) {
 	manager := NewIngressManager(context.Background(), nil, nil, IngressConfig{})
 	if manager.Enabled() {

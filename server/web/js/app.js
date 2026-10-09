@@ -2,7 +2,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const all = selector => Array.from(document.querySelectorAll(selector));
-  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], nativeUdp: null, messagePushInfo: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
+  const state = { user: null, devices: [], identities: [], identityGrants: [], systemIdentityGrants: [], enrollments: [], exits: [], sessions: [], p2pSessions: [], messages: [], channels: [], ingress: [], rdpSecurityGroups: [], rdpSecurityPage: 1, rdpSecurityPageSize: 20, rdpSecurityTotal: 0, rdpSecurityExpandedIP: '', rdpSecurityDetails: [], rdpSecurityDetailPage: 1, rdpSecurityDetailTotal: 0, rdpSecurityBans: [], rdpSecurityRules: [], nativeUdp: null, messagePushInfo: null, settings: null, settingsUserID: null, dirty: false, saving: false, refreshing: false, editVersion: 0, selectedDevice: null, selectedIdentity: null, selectedEnrollment: null, selectedChannel: null, messageChannel: '', deviceBusy: false, identityBusy: false, identityAssignmentBusy: false, identityGrantBusy: false, systemIdentityGrantBusy: false, rdpTargetBusy: false, enrollmentBusy: false, channelBusy: false, passwordSaving: false };
   const titles = { overview: '总览', devices: '设备管理', identities: '身份管理', exits: '出口节点', sessions: '活跃会话', messages: '消息历史', 'rdp-ingress': 'RDP 公网入口', settings: '服务配置' };
   const sectionPages = {
     overview: [{ page: 'overview', label: '运行总览' }],
@@ -1354,6 +1354,178 @@
     }).join('') : emptyRow(5, '暂无匹配消息', state.messageChannel ? '这个渠道还没有消息' : '渠道推送后会显示在这里');
   }
 
+
+  let rdpGroupRequest = 0, rdpDetailRequest = 0, rdpIPSearchTimer;
+
+  function rdpAuditPages(total, size) {
+    return Math.max(1, Math.ceil((Number(total) || 0) / size));
+  }
+
+  function rdpAuditDetailHTML() {
+    const items = state.rdpSecurityDetails;
+    const totalPages = rdpAuditPages(state.rdpSecurityDetailTotal, 10);
+    const body = items.length ? items.map(item =>
+      '<tr><td>' + esc(date(item.startedAt)) + '<small>结束：' + esc(date(item.endedAt)) + '</small></td>' +
+      '<td><strong>' + esc(item.targetName || item.targetDeviceId || '未知设备') + '</strong><small class="mono">' + esc(item.targetDeviceId || '') + '</small></td>' +
+      '<td class="mono">' + esc(item.ingressId) + '</td>' +
+      '<td>' + badge(String(item.transport || '').toUpperCase(), 'transport') + '</td>' +
+      '<td>' + badge(item.result === 'FORWARDED' ? '已转发' : item.result === 'CONNECTING' ? '连接中' : '拒绝', item.result === 'FORWARDED' ? 'success' : 'neutral') +
+      '<small>' + esc(item.reason || '—') + '</small></td>' +
+      '<td>↑ ' + bytes(item.bytesUp) + '<small>↓ ' + bytes(item.bytesDown) + '</small></td></tr>'
+    ).join('') : emptyRow(6, '暂无连接明细');
+    return '<div class="table-wrap"><table class="rdp-ingress-table"><thead><tr><th>连接时间</th><th>目标设备</th><th>入口</th><th>协议</th><th>状态 / 原因</th><th>流量</th></tr></thead><tbody>' +
+      body + '</tbody></table></div>' +
+      '<div class="button-row" style="justify-content:flex-end;align-items:center;margin-top:8px">' +
+      '<span class="muted">共 ' + esc(state.rdpSecurityDetailTotal) + ' 条 · 第 ' + state.rdpSecurityDetailPage + ' / ' + totalPages + ' 页</span>' +
+      '<button type="button" class="small-button" data-rdp-detail-page="' + (state.rdpSecurityDetailPage - 1) + '"' + (state.rdpSecurityDetailPage <= 1 ? ' disabled' : '') + '>上一页</button>' +
+      '<button type="button" class="small-button" data-rdp-detail-page="' + (state.rdpSecurityDetailPage + 1) + '"' + (state.rdpSecurityDetailPage >= totalPages ? ' disabled' : '') + '>下一页</button></div>';
+  }
+
+  function renderRDPSecurityLogs() {
+    const totalPages = rdpAuditPages(state.rdpSecurityTotal, state.rdpSecurityPageSize);
+    const start = state.rdpSecurityTotal ? (state.rdpSecurityPage - 1) * state.rdpSecurityPageSize + 1 : 0;
+    const end = Math.min(state.rdpSecurityTotal, state.rdpSecurityPage * state.rdpSecurityPageSize);
+    $('rdp-security-log-count').textContent = '来源 IP ' + esc(state.rdpSecurityTotal) + ' 个 · 显示 ' + start + '–' + end;
+    $('rdp-security-page-label').textContent = '第 ' + state.rdpSecurityPage + ' / ' + totalPages + ' 页';
+    $('rdp-security-prev').disabled = state.rdpSecurityPage <= 1;
+    $('rdp-security-next').disabled = state.rdpSecurityPage >= totalPages;
+    $('rdp-security-logs-body').innerHTML = state.rdpSecurityGroups.length ? state.rdpSecurityGroups.map(item => {
+      const ip = esc(item.sourceIp);
+      const targets = (item.targets || []).map(name => esc(name)).join('、') || '未知设备';
+      const details = state.rdpSecurityExpandedIP === item.sourceIp ?
+        '<tr><td colspan="6"><div style="padding:8px 0 14px">' + rdpAuditDetailHTML() + '</div></td></tr>' : '';
+      return '<tr><td class="mono"><strong>' + ip + '</strong></td>' +
+        '<td>' + targets + '</td>' +
+        '<td><strong>' + esc(item.connectionCount) + ' 次</strong><small>转发 ' + esc(item.forwardedCount) + ' · 拒绝 ' + esc(item.rejectedCount) + '</small></td>' +
+        '<td>' + esc(date(item.lastSeen)) + '<small>首次：' + esc(date(item.firstSeen)) + '</small></td>' +
+        '<td>↑ ' + bytes(item.bytesUp) + '<small>↓ ' + bytes(item.bytesDown) + '</small></td>' +
+        '<td class="right"><div class="table-actions"><button type="button" class="small-button" data-rdp-group-details="' + ip + '">' + (state.rdpSecurityExpandedIP === item.sourceIp ? '收起' : '明细') + '</button>' +
+        '<button type="button" class="small-button" data-security-ban-ip="' + ip + '">封禁</button>' +
+        '<button type="button" class="small-button danger" data-rdp-clear-ip="' + ip + '">清除记录</button></div></td></tr>' + details;
+    }).join('') : emptyRow(6, '暂无 RDP 连接记录', 'Server 公网 RDP 入口发生连接后将在这里按来源 IP 聚合');
+  }
+
+  async function loadRDPSecurityGroups(page = state.rdpSecurityPage) {
+    const ticket = ++rdpGroupRequest;
+    const size = Number($('rdp-security-page-size').value) || 20;
+    const search = $('rdp-security-ip-filter').value.trim();
+    try {
+      const data = await api('/rdp/security/logs/groups?page=' + page + '&pageSize=' + size + '&search=' + encodeURIComponent(search));
+      if (ticket !== rdpGroupRequest) return;
+      state.rdpSecurityPage = page;
+      state.rdpSecurityPageSize = size;
+      state.rdpSecurityTotal = Number(data.total) || 0;
+      if (page > rdpAuditPages(state.rdpSecurityTotal, size)) {
+        await loadRDPSecurityGroups(rdpAuditPages(state.rdpSecurityTotal, size));
+        return;
+      }
+      state.rdpSecurityGroups = Array.isArray(data.items) ? data.items : [];
+      renderRDPSecurityLogs();
+    } catch (error) {
+      if (ticket === rdpGroupRequest) toast('读取 RDP 连接审计失败：' + error.message);
+    }
+  }
+
+  async function loadRDPSecurityDetails(ip, page = 1) {
+    const ticket = ++rdpDetailRequest;
+    state.rdpSecurityExpandedIP = ip;
+    state.rdpSecurityDetailPage = page;
+    state.rdpSecurityDetails = [];
+    renderRDPSecurityLogs();
+    try {
+      const data = await api('/rdp/security/logs?ip=' + encodeURIComponent(ip) + '&page=' + page + '&pageSize=10');
+      if (ticket !== rdpDetailRequest || state.rdpSecurityExpandedIP !== ip) return;
+      state.rdpSecurityDetailTotal = Number(data.total) || 0;
+      state.rdpSecurityDetails = Array.isArray(data.items) ? data.items : [];
+      renderRDPSecurityLogs();
+    } catch (error) {
+      if (ticket === rdpDetailRequest) toast('读取连接明细失败：' + error.message);
+    }
+  }
+
+  async function clearRDPSecurityLogs(ip) {
+    const scope = ip ? '来源 IP ' + ip + ' 的全部连接历史' : '所有 RDP 公网入口连接历史';
+    if (!confirm('确定永久清除' + scope + '？\n这不会解除 IP 封禁，也不会删除安全规则。')) return;
+    try {
+      const suffix = ip ? '?ip=' + encodeURIComponent(ip) : '';
+      const result = await api('/rdp/security/logs' + suffix, { method:'DELETE' });
+      ++rdpDetailRequest;
+      state.rdpSecurityExpandedIP = '';
+      state.rdpSecurityDetails = [];
+      toast('已清除 ' + (result.deleted || 0) + ' 条连接记录');
+      await loadRDPSecurityGroups(state.rdpSecurityPage);
+    } catch (error) { toast('清除连接记录失败：' + error.message); }
+  }
+
+  function renderRDPSecurityBans() {
+    const scope = $('rdp-security-scope');
+    const previous = scope.value;
+    scope.innerHTML = '<option value="">全部公网 RDP 入口</option>' + state.ingress.map(item =>
+      '<option value="' + esc(item.id) + '">' + esc(item.targetName || item.targetDeviceId) + ' · TCP/UDP ' + esc(item.listenPort) + '</option>'
+    ).join('');
+    scope.value = Array.from(scope.options).some(option => option.value === previous) ? previous : '';
+    $('rdp-security-bans-body').innerHTML = state.rdpSecurityBans.length ? state.rdpSecurityBans.map(item =>
+      '<tr><td class="mono">' + esc(item.cidr) + '</td><td>' + badge(item.kind === 'manual' ? '手动封禁' : item.kind === 'allow' ? '白名单' : '自动封禁', item.kind === 'allow' ? 'success' : 'warning-badge') + '</td>' +
+      '<td>' + esc(item.ingressId || '全局 RDP') + '</td><td>' + esc(item.reason || '—') + '</td>' +
+      '<td>' + esc(item.expiresAt ? date(item.expiresAt) : '永久') + '</td><td class="right"><button type="button" class="small-button danger" data-security-revoke="' + esc(item.id) + '">解封 / 删除</button></td></tr>'
+    ).join('') : emptyRow(6, '暂无活跃 IP 策略', '自动封禁或手动添加后会显示在这里');
+  }
+  function renderRDPSecurityRules() {
+    // Do not replace a row while its settings are being edited.
+    if (document.activeElement && document.activeElement.closest('#rdp-security-rules-body')) return;
+    $('rdp-security-rules-body').innerHTML = state.rdpSecurityRules.length ? state.rdpSecurityRules.map(item =>
+      '<tr data-security-rule="' + esc(item.id) + '"><td><strong>' + esc(item.name) + '</strong><small class="mono">' + esc(item.id) + '</small></td>' +
+      '<td><input type="checkbox" data-rule-enabled ' + (item.enabled ? 'checked' : '') + ' aria-label="启用 ' + esc(item.name) + '"></td>' +
+      '<td><input type="number" min="1" max="86400" data-rule-window value="' + esc(item.windowSeconds) + '" style="width:100px"></td>' +
+      '<td><input type="number" min="1" max="100000" data-rule-threshold value="' + esc(item.threshold) + '" style="width:100px"></td>' +
+      '<td><input type="number" min="60" max="31536000" data-rule-ban value="' + esc(item.banSeconds) + '" style="width:110px"></td>' +
+      '<td class="right"><button type="button" class="small-button" data-security-rule-save="' + esc(item.id) + '">保存</button></td></tr>'
+    ).join('') : emptyRow(6, '暂无自动封禁规则');
+  }
+  async function createRDPSecurityBan(event) {
+    event.preventDefault();
+    errorAt('rdp-security-ban-error', '');
+    const button = $('rdp-security-ban-form').querySelector('button[type="submit"]');
+    button.disabled = true;
+    try {
+      await api('/rdp/security/bans', { method:'POST', body:JSON.stringify({
+        cidr:$('rdp-security-cidr').value.trim(), kind:$('rdp-security-kind').value,
+        ingressId:$('rdp-security-scope').value, durationSeconds:Number($('rdp-security-duration').value),
+        reason:$('rdp-security-reason').value.trim()
+      }) });
+      $('rdp-security-cidr').value = '';
+      $('rdp-security-reason').value = '';
+      toast('IP 策略已生效');
+      await refresh(true);
+    } catch (error) { errorAt('rdp-security-ban-error', error.message); }
+    finally { button.disabled = false; }
+  }
+  async function revokeRDPSecurityBan(id) {
+    if (!confirm('确定撤销这条 IP 安全策略？操作会立即对新连接生效。')) return;
+    try {
+      await api('/rdp/security/bans/' + encodeURIComponent(id), { method:'DELETE' });
+      toast('策略已撤销');
+      await refresh(true);
+    } catch (error) { toast('撤销失败：' + error.message); }
+  }
+  async function saveRDPSecurityRule(button) {
+    const row = button.closest('[data-security-rule]');
+    if (!row) return;
+    button.disabled = true;
+    try {
+      const rule = {
+        enabled:row.querySelector('[data-rule-enabled]').checked,
+        threshold:Number(row.querySelector('[data-rule-threshold]').value),
+        windowSeconds:Number(row.querySelector('[data-rule-window]').value),
+        banSeconds:Number(row.querySelector('[data-rule-ban]').value)
+      };
+      await api('/rdp/security/rules/' + encodeURIComponent(row.dataset.securityRule), { method:'PUT', body:JSON.stringify(rule) });
+      toast('自动封禁规则已更新');
+      await refresh(true);
+    } catch (error) { toast('规则保存失败：' + error.message); }
+    finally { button.disabled = false; }
+  }
+
   function renderIngress() {
     if (!$('rdp-ingress-body')) { return; }
     const runtimeIngress = state.settings && state.settings.runtime && state.settings.runtime.rdpIngress;
@@ -1420,7 +1592,17 @@
     ];
     if (user.role === 'admin') {
       jobs.push(['systemIdentityGrants', '/system-identity-grants?resourceId=server', data => { state.systemIdentityGrants = Array.isArray(data) ? data : []; renderSystemIdentityGrants(); }]);
-      jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); }]);
+      jobs.push(['rdpIngress', '/rdp/ingress', data => { state.ingress = data; renderIngress(); renderRDPSecurityBans(); }]);
+      jobs.push(['rdpSecurityGroups', '/rdp/security/logs/groups?page=' + state.rdpSecurityPage + '&pageSize=' + state.rdpSecurityPageSize + '&search=' + encodeURIComponent($('rdp-security-ip-filter').value.trim()), data => {
+        state.rdpSecurityTotal = Number(data.total) || 0;
+        state.rdpSecurityGroups = Array.isArray(data.items) ? data.items : [];
+        if (state.rdpSecurityPage > rdpAuditPages(state.rdpSecurityTotal, state.rdpSecurityPageSize)) {
+          state.rdpSecurityPage = 1;
+        }
+        renderRDPSecurityLogs();
+      }]);
+      jobs.push(['rdpSecurityBans', '/rdp/security/bans', data => { state.rdpSecurityBans = Array.isArray(data) ? data : []; renderRDPSecurityBans(); }]);
+      jobs.push(['rdpSecurityRules', '/rdp/security/rules', data => { state.rdpSecurityRules = Array.isArray(data) ? data : []; renderRDPSecurityRules(); }]);
     } else {
       state.systemIdentityGrants = [];
       renderSystemIdentityGrants();
@@ -2022,6 +2204,47 @@
   $('settings-form').addEventListener('submit', saveSettings);
   $('rdp-ingress-form').addEventListener('submit', createRDPIngress);
   $('rdp-ingress-refresh').addEventListener('click', () => refresh(true));
+  $('rdp-security-refresh').addEventListener('click', () => loadRDPSecurityGroups());
+  $('rdp-security-clear-all').addEventListener('click', () => clearRDPSecurityLogs(''));
+  $('rdp-security-prev').addEventListener('click', () => loadRDPSecurityGroups(state.rdpSecurityPage - 1));
+  $('rdp-security-next').addEventListener('click', () => loadRDPSecurityGroups(state.rdpSecurityPage + 1));
+  $('rdp-security-page-size').addEventListener('change', () => loadRDPSecurityGroups(1));
+  $('rdp-security-ip-filter').addEventListener('input', () => {
+    clearTimeout(rdpIPSearchTimer);
+    rdpIPSearchTimer = setTimeout(() => loadRDPSecurityGroups(1), 300);
+  });
+  $('rdp-security-ban-form').addEventListener('submit', createRDPSecurityBan);
+  $('rdp-security-logs-body').addEventListener('click', event => {
+    const detailPage = event.target.closest('[data-rdp-detail-page]');
+    if (detailPage) { loadRDPSecurityDetails(state.rdpSecurityExpandedIP, Number(detailPage.dataset.rdpDetailPage)); return; }
+    const details = event.target.closest('[data-rdp-group-details]');
+    if (details) {
+      const ip = details.dataset.rdpGroupDetails;
+      if (state.rdpSecurityExpandedIP === ip) {
+        ++rdpDetailRequest;
+        state.rdpSecurityExpandedIP = '';
+        renderRDPSecurityLogs();
+      } else { loadRDPSecurityDetails(ip); }
+      return;
+    }
+    const clear = event.target.closest('[data-rdp-clear-ip]');
+    if (clear) { clearRDPSecurityLogs(clear.dataset.rdpClearIp); return; }
+    const ban = event.target.closest('[data-security-ban-ip]');
+    if (ban) {
+      $('rdp-security-cidr').value = ban.dataset.securityBanIp;
+      $('rdp-security-kind').value = 'manual';
+      $('rdp-security-scope').value = '';
+      $('rdp-security-cidr').focus();
+    }
+  });
+  $('rdp-security-bans-body').addEventListener('click', event => {
+    const button = event.target.closest('[data-security-revoke]');
+    if (button) revokeRDPSecurityBan(button.dataset.securityRevoke);
+  });
+  $('rdp-security-rules-body').addEventListener('click', event => {
+    const button = event.target.closest('[data-security-rule-save]');
+    if (button) saveRDPSecurityRule(button);
+  });
   $('rdp-ingress-body').addEventListener('click', event => { const toggle = event.target.closest('[data-rdp-ingress-toggle]'); if (toggle) toggleRDPIngress(toggle.dataset.rdpIngressToggle, toggle.dataset.enabled === 'true'); const button = event.target.closest('[data-rdp-ingress-delete]'); if (button) deleteRDPIngress(button.dataset.rdpIngressDelete); });
   $('settings-fields').addEventListener('input', () => { state.editVersion++; updateSettingState(); });
   $('settings-fields').addEventListener('change', updateSettingState);

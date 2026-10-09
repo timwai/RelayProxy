@@ -41,6 +41,8 @@ type Router struct {
 	onDeviceIdentityGrantChanged   func(targetDeviceID, granteeIdentityID string)
 	onRDPIngressChanged            func(string)
 	onRDPIngressReload             func(string) error
+	onRDPSecurityReload            func() error
+	onRDPSecurityLogsClear         func(context.Context, string) (int64, error)
 	onRDPIngressStatus             func(string) RDPIngressRuntimeStatus
 	p2pSessions                    func() []P2PSessionRuntimeStatus
 	publicDirectStatus             func(string) []PublicDirectEndpointStatus
@@ -183,6 +185,14 @@ func WithRDPIngressEnabled(fn func() bool) RouterOption {
 	return func(r *Router) { r.rdpIngressEnabled = fn }
 }
 
+func WithRDPSecurityLogsClear(fn func(context.Context, string) (int64, error)) RouterOption {
+	return func(r *Router) { r.onRDPSecurityLogsClear = fn }
+}
+
+func WithRDPSecurityReload(fn func() error) RouterOption {
+	return func(r *Router) { r.onRDPSecurityReload = fn }
+}
+
 func WithRDPIngressPortRange(start, end int) RouterOption {
 	return func(r *Router) { r.rdpIngressPortStart, r.rdpIngressPortEnd = start, end }
 }
@@ -303,6 +313,15 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/rdp/ingress/{id}/enable", r.requireAuth(r.requireAdmin(r.handleEnableRDPIngress)))
 	r.mux.HandleFunc("POST /api/v1/rdp/ingress/{id}/disable", r.requireAuth(r.requireAdmin(r.handleDisableRDPIngress)))
 	r.mux.HandleFunc("DELETE /api/v1/rdp/ingress/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteRDPIngress)))
+	// Audit, bans and rules contain cross-identity IP information; restrict to administrator.
+	r.mux.HandleFunc("GET /api/v1/rdp/security/logs", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityLogs)))
+	r.mux.HandleFunc("GET /api/v1/rdp/security/logs/groups", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityGroups)))
+	r.mux.HandleFunc("DELETE /api/v1/rdp/security/logs", r.requireAuth(r.requireAdmin(r.handleClearRDPSecurityLogs)))
+	r.mux.HandleFunc("GET /api/v1/rdp/security/bans", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityBans)))
+	r.mux.HandleFunc("POST /api/v1/rdp/security/bans", r.requireAuth(r.requireAdmin(r.handleCreateRDPSecurityBan)))
+	r.mux.HandleFunc("DELETE /api/v1/rdp/security/bans/{id}", r.requireAuth(r.requireAdmin(r.handleRevokeRDPSecurityBan)))
+	r.mux.HandleFunc("GET /api/v1/rdp/security/rules", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityRules)))
+	r.mux.HandleFunc("PUT /api/v1/rdp/security/rules/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateRDPSecurityRule)))
 
 	// Dashboard & Sessions
 	r.mux.HandleFunc("GET /api/v1/dashboard", r.requireAuth(r.handleDashboard))

@@ -113,3 +113,41 @@ func TestFakeIPDNSMappingExpiryFailsClosed(t *testing.T) {
 		t.Fatal("placeholder fell outside reserved range")
 	}
 }
+
+func TestFakeIPReservedLocalhostAndInvalidNames(t *testing.T) {
+	d := newFakeIPDNS()
+	for _, tc := range []struct {
+		hostname string
+		kind dnsmessage.Type
+		wantIP string
+	}{
+		{"localhost", dnsmessage.TypeA, "127.0.0.1"},
+		{"API.Localhost", dnsmessage.TypeAAAA, "::1"},
+	} {
+		response := fakeDNSAnswer(t, d.reply(fakeDNSQuestion(t, tc.hostname, tc.kind), "", nil))
+		if response.RCode != dnsmessage.RCodeSuccess || len(response.Answers) != 1 {
+			t.Fatalf("localhost failed: %+v", response)
+		}
+		var actual netip.Addr
+		switch body := response.Answers[0].Body.(type) {
+		case *dnsmessage.AResource:
+			actual = netip.AddrFrom4(body.A)
+		case *dnsmessage.AAAAResource:
+			actual = netip.AddrFrom16(body.AAAA)
+		default:
+			t.Fatalf("unexpected body %T", body)
+		}
+		if actual.String() != tc.wantIP || isFakeIP(actual) {
+			t.Fatalf("reserved local name returned %s, want %s", actual, tc.wantIP)
+		}
+	}
+	if len(d.byIP) != 0 {
+		t.Fatal("localhost consumed or registered FakeIP addresses")
+	}
+	for _, hostname := range []string{"invalid", "no-host.invalid"} {
+		response := fakeDNSAnswer(t, d.reply(fakeDNSQuestion(t, hostname, dnsmessage.TypeA), "", nil))
+		if response.RCode != dnsmessage.RCodeNameError || len(response.Answers) != 0 {
+			t.Fatalf("invalid domain was proxied or fabricated: %+v", response)
+		}
+	}
+}

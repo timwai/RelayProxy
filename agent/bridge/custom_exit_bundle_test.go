@@ -89,3 +89,24 @@ func TestSaveConfigReplacesReferencedExitInSameGeneration(t *testing.T) {
 		t.Fatalf("replacement did not publish a single generation: %+v", live)
 	}
 }
+
+func TestSaveConfigRestoresDiskIfAgentCannotPublish(t *testing.T) {
+	b := newTestBridge(t)
+	before := readConfigBytes(t, b)
+	if err := b.agent.Close(); err != nil {
+		t.Fatal(err)
+	}
+	in := ConfigUpdate{}
+	in.Proxy.DefaultExitID = ptr("local:unavailable")
+	in.Proxy.CustomExits = &[]CustomExitUpdate{localExitUpdate("local:unavailable")}
+	if _, err := b.SaveConfig(in); err == nil {
+		t.Fatal("saving an unavailable runtime unexpectedly succeeded")
+	}
+	after := readConfigBytes(t, b)
+	if !bytes.Equal(before, after) {
+		t.Fatal("failed runtime publication left a different configuration on disk")
+	}
+	if got := b.agent.Config().DefaultExitID; got != "old-exit" {
+		t.Fatalf("failed runtime publication changed selected exit to %q", got)
+	}
+}

@@ -320,7 +320,30 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	if i.server.fakeIPEnabled() {
 		if packet.Destination.Port() == 53 {
 			if packet.Protocol == ProtoUDP {
-				answer := i.server.fakeDNS.reply(packet.Payload, i.server.guard.RelayHost, i.server.guard.RelayIPs)
+				// TXT/SRV may require a TLS round-trip through the selected
+				// proxy. Run off the capture loop; otherwise an unavailable
+				// exit could stall all TCP and UDP packet interception.
+				if i.server.shouldForwardDNS(packet.Payload) {
+					source, destination := packet.Source, packet.Destination
+					payload := append([]byte(nil), packet.Payload...)
+					replyMeta := meta
+					replyMeta.outbound = false
+					i.wg.Add(1)
+					go func() {
+						defer i.wg.Done()
+						answer := i.server.replyFakeDNS(i.ctx, payload)
+						if len(answer) == 0 || i.ctx.Err() != nil {
+							return
+						}
+						reply, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: source, Destination: destination}, answer)
+						if err == nil {
+							err = i.inject(reply, replyMeta)
+						}
+						i.report(err)
+					}()
+					return nil
+				}
+				answer := i.server.replyFakeDNS(i.ctx, packet.Payload)
 				if answer == nil {
 					return nil // malformed DNS is dropped, not leaked
 				}

@@ -496,7 +496,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		a.divertSrv, err = divert.New(divert.Options{
 			Config: cfg.DivertConfig, Dialer: routing.SelectedExitDialer{Routing: a.dialer}, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
-			FakeIPEnabled: func() bool { r := engine.Config(); return r.DNSMode == routing.DNSModeProxy && r.FakeIPEnabled },
+			FakeIPEnabled: engine.FakeIPEnabled,
 			ProxyReady: func() bool {
 				return a.handshakeOK.Load()
 			},

@@ -7,8 +7,7 @@
       <stop offset="100%" stop-color="#7454EA"/>
     </linearGradient>
   </defs>
-  <rect x="0" y="0" width="64" height="64" rx="16" fill="url(#rp-mark-gradient)"/>
-  <path d="M8 32H19L26 18L36 46L44 28H56" fill="none" stroke="#FFFFFF" stroke-width="3.7" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="8" cy="32" r="2" fill="#FFFFFF"/>
-  <circle cx="56" cy="28" r="2" fill="#FFFFFF"/>
+  <path d="M8 32H19L26 18L36 46L44 28H56" fill="none" stroke="url(#rp-mark-gradient)" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="8" cy="32" r="2" fill="#316AF4"/>
+  <circle cx="56" cy="28" r="2" fill="#316AF4"/>
 </svg>

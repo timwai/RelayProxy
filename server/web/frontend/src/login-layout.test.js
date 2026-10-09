@@ -36,3 +36,16 @@ test('brand mark is actual SVG vector art, reused in login and navigation',()=>{
  assert.doesNotMatch(mark,/<image\b|data:image\//);
 });
 
+test('SVG brand mark has no background frame or nested CSS frame',()=>{
+ const svg=readFileSync(new URL('../../img/logo.svg',import.meta.url),'utf8');
+ assert.doesNotMatch(svg,/<rect\b/);
+ assert.match(svg,/<path\b[^>]*stroke="url\(#rp-mark-gradient\)"/);
+ const brand=css.match(/#root \.brand-image\{[^}]+\}/)?.[0]||'';
+ assert.match(brand,/background:transparent/);
+ assert.match(brand,/border:0/);
+ assert.match(brand,/box-shadow:none/);
+ assert.match(brand,/padding:0/);
+ const promo=css.match(/#root \.login-promo \.brand-image\{[^}]+\}/)?.[0]||'';
+ assert.doesNotMatch(promo,/rgba\(255,255,255,.95\)/);
+ assert.match(promo,/background:transparent/);
+});

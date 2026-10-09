@@ -9,10 +9,10 @@ import (
 
 func TestFakeIPNeverFallsThroughToDirectOrUnavailableRelay(t *testing.T) {
 	for _, tc := range []struct {
-		name string
+		name          string
 		defaultAction Action
-		ready bool
-		wantRule string
+		ready         bool
+		wantRule      string
 	}{
 		{"direct", ActionDirect, true, "fakeip-direct-unsupported"},
 		{"relay-down", ActionProxy, false, "fakeip-proxy-unavailable"},

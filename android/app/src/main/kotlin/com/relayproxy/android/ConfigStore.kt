@@ -8,6 +8,52 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+// Native Android custom exits are applied by mobile/androidcore's routing
+// dialer. Passwords are loaded separately from the Android Keystore.
+data class AndroidCustomExit(
+    val id: String = "local:" + UUID.randomUUID().toString(),
+    val name: String = "",
+    val enabled: Boolean = true,
+    val protocol: String = "socks5",
+    val address: String = "",
+    val username: String = "",
+    val password: String = "",
+) {
+    fun toJson(includePassword: Boolean = false): JSONObject = JSONObject()
+        .put("id", id)
+        .put("name", name)
+        .put("enabled", enabled)
+        .put("protocol", protocol)
+        .put("address", address)
+        .put("username", username)
+        .apply { if (includePassword) put("password", password) }
+
+    fun validate() {
+        require(Regex("^local:[A-Za-z0-9_.:-]{1,122}$").matches(id)) { "自定义出口 ID 无效" }
+        require(name.isNotBlank() && name.length <= 128) { "出口名称长度必须为 1–128" }
+        require(protocol in setOf("socks5", "http", "https")) { "不支持的代理类型" }
+        val portText = address.substringAfterLast(':', "")
+        val host = address.substringBeforeLast(':', "")
+        require(host.isNotBlank() && !host.contains(Regex("[\\s/?#@\\\\]"))) { "请填写有效代理地址 host:port" }
+        require(!host.any { it.isISOControl() }) { "代理地址包含控制字符" }
+        require((portText.toIntOrNull() ?: 0) in 1..65535) { "代理端口必须为 1–65535" }
+        require(username.toByteArray(Charsets.UTF_8).size <= 255 &&
+            password.toByteArray(Charsets.UTF_8).size <= 255) { "代理认证信息过长" }
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject, password: String): AndroidCustomExit = AndroidCustomExit(
+            id = json.getString("id"),
+            name = json.getString("name"),
+            enabled = json.optBoolean("enabled", true),
+            protocol = json.getString("protocol"),
+            address = json.getString("address"),
+            username = json.optString("username"),
+            password = password,
+        )
+    }
+}
+
 data class RoutingRuleConfig(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "新规则",
@@ -133,6 +179,7 @@ data class ExitConfig(
     val socks5Enabled: Boolean = true,
     val httpEnabled: Boolean = false,
     val defaultExitId: String = "",
+    val customExits: List<AndroidCustomExit> = emptyList(),
     val socks5Port: Int = 1080,
     val httpPort: Int = 8080,
     val proxyP2pEnabled: Boolean = true,
@@ -178,6 +225,9 @@ data class ExitConfig(
             .put("upnpAllowed", upnpAllowed)
             .put("proxyPathMode", proxyPathMode)
             .put("defaultExitId", defaultExitId.trim())
+            .put("customExits", JSONArray().apply {
+                customExits.forEach { put(it.toJson(includePassword = true)) }
+            })
             .put("socks5Listen", "127.0.0.1:$socks5Port")
             .put("httpListen", "127.0.0.1:$httpPort")
             .put("vpnProxyEnabled", vpnEnabled)
@@ -331,6 +381,15 @@ class ConfigStore(private val context: Context) {
             vpnSocks5Port++
         }
 
+        val exitPasswords = SecretStore(context).customExitPasswords()
+        val localExits = mutableListOf<AndroidCustomExit>()
+        val localItems = JSONArray(prefs.getString("customExits", "[]") ?: "[]")
+        for (index in 0 until localItems.length()) {
+            val item = localItems.optJSONObject(index) ?: continue
+            val id = item.optString("id")
+            localExits += AndroidCustomExit.fromJson(item, exitPasswords[id].orEmpty())
+        }
+
         return ExitConfig(
             serverAddress = prefs.getString("serverAddress", "") ?: "",
             identityId = prefs.getString("identityId", "") ?: "",
@@ -348,6 +407,7 @@ class ConfigStore(private val context: Context) {
             socks5Enabled = socks5Enabled,
             httpEnabled = httpEnabled,
             defaultExitId = prefs.getString("defaultExitId", "") ?: "",
+            customExits = localExits,
             socks5Port = socks5Port,
             httpPort = httpPort,
             proxyP2pEnabled = prefs.getBoolean("proxyP2pEnabled", true),
@@ -383,7 +443,30 @@ class ConfigStore(private val context: Context) {
     }
 
     fun save(config: ExitConfig) {
+        require(config.customExits.map { it.id }.distinct().size == config.customExits.size) {
+            "自定义出口 ID 重复"
+        }
+        config.customExits.forEach { it.validate() }
+        val used = buildSet {
+            if (config.defaultExitId.startsWith("local:")) add(config.defaultExitId)
+            config.routing.rules.forEach { rule ->
+                if (rule.action == "PROXY" && rule.exitId.startsWith("local:")) add(rule.exitId)
+            }
+        }
+        for (id in used) {
+            require(config.customExits.any { it.id == id && it.enabled }) {
+                "默认出口或分流规则引用了不存在或已停用的自定义出口：$id"
+            }
+        }
+        // Commit secrets first so the core never sees a newly published
+        // local exit without the credentials it needs.
+        SecretStore(context).setCustomExitPasswords(
+            config.customExits.associate { it.id to it.password }
+        )
         prefs.edit()
+            .putString("customExits", JSONArray().apply {
+                config.customExits.forEach { put(it.toJson()) }
+            }.toString())
             .putString("serverAddress", config.serverAddress.trim())
             .putString("identityId", config.identityId.trim().lowercase())
             .putString("deviceName", config.deviceName.trim())

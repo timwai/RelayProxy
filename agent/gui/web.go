@@ -228,6 +228,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
 	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
+	mux.HandleFunc("POST /api/proxy/custom-exits/test", w.testCustomExit)
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
 	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
@@ -394,6 +395,19 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 	}
 	status := w.bridge.GetStatus()
 	writeWebJSON(rw, map[string]any{"ok": true, "target": target, "listenAddr": status.RDPListenAddr})
+}
+
+func (w *WebServer) testCustomExit(rw http.ResponseWriter, r *http.Request) {
+	var in struct { ExitID string `json:"exitId"` }
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	result, err := w.bridge.TestCustomExit(in.ExitID)
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, result)
 }
 
 func (w *WebServer) runSpeedTest(rw http.ResponseWriter, r *http.Request) {
@@ -576,6 +590,7 @@ const webBridgeJS = `(function () {
   window.goGetNetworkCapabilities = function () { return request('/api/network-capabilities'); };
   window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
+  window.goTestCustomExit = function (exitId) { return json('/api/proxy/custom-exits/test', 'POST', {exitId:exitId}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
   window.goConnectRDP = async function (targetId, autoLaunch) {

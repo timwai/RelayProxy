@@ -100,15 +100,29 @@ func (b *UIBridge) TestCustomExit(id string) (map[string]any, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	start := time.Now()
-	conn, err := exit.DialViaUpstreamTCP(ctx, exit.UpstreamConfig{
+	upstream := exit.UpstreamConfig{
 		Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password,
-	}, "example.com", 443)
+	}
+	start := time.Now()
+	conn, err := exit.DialViaUpstreamTCP(ctx, upstream, "example.com", 443)
 	if err != nil {
 		return nil, err
 	}
 	_ = conn.Close()
-	return map[string]any{"ok": true, "latencyMs": time.Since(start).Milliseconds(), "protocol": item.Protocol}, nil
+	result := map[string]any{"ok": true, "latencyMs": time.Since(start).Milliseconds(), "protocol": item.Protocol}
+	if item.Protocol == exit.UpstreamSOCKS5 {
+		latency, udpErr := probeCustomExitUDP(ctx, upstream)
+		result["udpSupported"] = true
+		result["udpOk"] = udpErr == nil
+		if udpErr != nil {
+			result["udpError"] = udpErr.Error()
+		} else {
+			result["udpLatencyMs"] = latency.Milliseconds()
+		}
+	} else {
+		result["udpSupported"] = false
+	}
+	return result, nil
 }
 
 func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {

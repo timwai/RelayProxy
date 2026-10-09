@@ -252,6 +252,48 @@ func TestLinuxDNSGuardCannotReinstallAfterFirewallClose(t *testing.T) {
 	}
 }
 
+func TestIndependentDNSGuardEvidenceNeverClaimsZeroLeak(t *testing.T) {
+	cases := []struct {
+		name string
+		dump string
+		failed bool
+		expected string
+	}{
+		{"guard-installed", "table inet relayproxy_dns_guard { chain output { type filter hook output priority 0; policy accept; meta l4proto { tcp, udp } th dport { 53, 853, 784, 8853 } drop } }", false, "rules-present"},
+		{"empty-table", "table inet relayproxy_dns_guard { chain output { type filter hook output priority 0; policy accept; } }", false, "incomplete"},
+		{"permission-denied", "Operation not permitted", true, "unknown"},
+		{"missing-table", "No such file or directory", true, "not-installed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.failed {
+				err = errors.New("nft error")
+			}
+			status, detail := interpretLinuxDNSGuardEvidence([]byte(tc.dump), err)
+			if status != tc.expected || detail == "" {
+				t.Fatalf("guard evidence = %s / %s, wanted %s", status, detail, tc.expected)
+			}
+		})
+	}
+}
+
+func TestLinuxDNSCaptureModeReportsPartialAndClosed(t *testing.T) {
+	f := &linuxFirewall{dnsGuard: true}
+	i := &packetInterceptor{device: &linuxPacketDevice{firewall: f}}
+	if got := i.dnsCaptureMode(); got != "nfqueue-no-bypass" {
+		t.Fatalf("missing protected kernel queue status: %s", got)
+	}
+	f.dnsRuleStates = map[string]bool{"iptables/tcp": true, "iptables/udp": false}
+	if got := i.dnsCaptureMode(); got != "partial-update" {
+		t.Fatalf("partial protection was not disclosed: %s", got)
+	}
+	f.dnsClosed = true
+	if got := i.dnsCaptureMode(); got != "unavailable" {
+		t.Fatalf("closed kernel rules still reported as ready: %s", got)
+	}
+}
+
 func TestLinuxPacketVerdictsAreFinalizedExactlyOnce(t *testing.T) {
 	queue := &testLinuxQueue{}
 	injected := 0

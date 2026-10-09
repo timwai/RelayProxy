@@ -259,7 +259,7 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if err := routing.ValidateCustomExits(c.Proxy.CustomExits); err != nil {
 		return err
 	}
-	if err := routing.ValidateCustomReferences(c.Proxy.CustomExits, c.Proxy.DefaultExitID, c.Exit.UpstreamExitID, c.Routing.Rules); err != nil {
+	if err := routing.ValidateCustomReferences(c.Proxy.CustomExits, c.Proxy.DefaultExitID, c.Exit.UpstreamExitID, c.Routing.Rules, c.Routing.DNSExitID); err != nil {
 		return err
 	}
 	for _, item := range c.Proxy.CustomExits {

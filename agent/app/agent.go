@@ -1981,12 +1981,34 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 			return err
 		}
 	}
-	// Both inputs were compiled before publishing under the shared policy lock.
+	// Activate the Linux kernel fail-closed queue BEFORE making FakeIP
+	// visible to concurrent packet handlers. The background reconciler
+	// shares policyMu and therefore cannot undo this pending transition.
+	oldFakeIP := a.cfg.Routing.FakeIPEnabled
+	if a.divertSrv != nil && routeCfg.FakeIPEnabled {
+		if err := a.divertSrv.SyncPlatformDNSCapture(true); err != nil {
+			return fmt.Errorf("无法启用内核 DNS 防泄漏队列，路由策略未生效: %w", err)
+		}
+	}
+	// Both inputs were validated before publishing under the policy lock.
 	if err := a.routingEngine.Reload(routeCfg); err != nil {
+		if a.divertSrv != nil && routeCfg.FakeIPEnabled && !oldFakeIP {
+			if rollback := a.divertSrv.SyncPlatformDNSCapture(false); rollback != nil {
+				log.Printf("[dns] 恢复原 DNS 队列模式失败: %v", rollback)
+			}
+		}
 		return err
 	}
 	a.cfg.Routing = a.routingEngine.Config()
 	a.cfg.DivertConfig = divertCfg
+	if a.divertSrv != nil && !routeCfg.FakeIPEnabled && oldFakeIP {
+		// Relaxing the queue is an availability optimization, not a security
+		// prerequisite. Publish disabled policy first so a partial failure
+		// can only leave a stricter queue. The reconciler retries it.
+		if err := a.divertSrv.SyncPlatformDNSCapture(false); err != nil {
+			log.Printf("[dns] 已关闭 FakeIP，但恢复普通 DNS 队列失败，将自动重试: %v", err)
+		}
+	}
 	return nil
 }
 

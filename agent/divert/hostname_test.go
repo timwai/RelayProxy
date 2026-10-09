@@ -1,6 +1,9 @@
 package divert
 
 import (
+	"bytes"
+	"io"
+	"net"
 	"encoding/binary"
 	"testing"
 
@@ -99,5 +102,38 @@ func TestTCPHostnameCannotOverrideObservedDNS(t *testing.T) {
 	snapshot := stats.Snapshot()
 	if snapshot.Connections[0].Host != "verified.example" || snapshot.Connections[0].DomainSource != "dns" {
 		t.Fatal("SNI or HTTP Host replaced stronger DNS attribution")
+	}
+}
+
+func TestTCPHostnameStreamObserverPreservesWireBytes(t *testing.T) {
+	stats := traffic.NewRegistry(0, 0)
+	record := stats.Start(traffic.Metadata{IP: "203.0.113.5", Port: 443, Protocol: "tcp"})
+	local, remote := net.Pipe()
+	defer local.Close()
+	defer remote.Close()
+	observed := &hostnameObservingConn{Conn: remote, record: record}
+	hello := makeTLSClientHelloForTest("Play.Google.Com")
+	done := make(chan error, 1)
+	go func() {
+		if _, err := local.Write(hello[:17]); err != nil {
+			done <- err
+			return
+		}
+		_, err := local.Write(hello[17:])
+		done <- err
+	}()
+	got := make([]byte, len(hello))
+	if _, err := io.ReadFull(observed, got); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, hello) {
+		t.Fatal("hostname observer changed TCP payload")
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	conns := stats.Snapshot().Connections
+	if len(conns) != 1 || conns[0].Host != "play.google.com" || conns[0].DomainSource != "tls-sni" {
+		t.Fatalf("stream-only domain observation missing: %+v", conns)
 	}
 }

@@ -46,6 +46,7 @@ type Options struct {
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
 	FakeIPEnabled      func() bool // dynamically consulted for new transparent DNS queries
+	BlockDoHEndpoints  func() bool // opt-in domain-based DoH endpoint guard
 }
 
 // Server owns classified flows. OS interception is separately gated by a
@@ -281,6 +282,11 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	guarded := !fake && s.guard.MustDirectFlow(flow)
 	if fake && !s.fakeIPEnabled() {
 		decision = Decision{Action: ActionReject, Rule: "fakeip-disabled"}
+	} else if s.opts.BlockDoHEndpoints != nil && s.opts.BlockDoHEndpoints() &&
+		isKnownDoHEndpoint(flow.Host) && (flow.Port == 443 || flow.Port == 80) {
+		// Only verified DNS/FakeIP/NE host metadata is used here.
+		// SNI/HTTP Host remains post-classification telemetry, not a policy key.
+		decision = Decision{Action: ActionReject, Rule: "doh-endpoint-blocked"}
 	} else if fake && flow.DomainSource == "fakeip-unknown" {
 		decision = Decision{Action: ActionReject, Rule: "fakeip-expired"}
 	} else if !guarded {

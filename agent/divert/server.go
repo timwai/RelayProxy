@@ -220,6 +220,13 @@ func (s *Server) fakeIPEnabled() bool {
 	return s != nil && s.opts.FakeIPEnabled != nil && s.opts.FakeIPEnabled()
 }
 
+// fakeIPDestination includes every synthetic IP in active FakeIP mode, and
+// only addresses actually issued by this process when the mode is disabled.
+// Unrelated benchmark/documentation networks remain usable by default.
+func (s *Server) fakeIPDestination(addr netip.Addr) bool {
+	return isFakeIP(addr) && (s.fakeIPEnabled() || s.fakeDNS.wasIssued(addr))
+}
+
 // ClassifyFlow is the sole policy decision point. UDP packets sharing a complete
 // original five-tuple and process identity reuse the same immutable decision.
 func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
@@ -231,7 +238,7 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	if err != nil {
 		return nil, err
 	}
-	fake := isFakeIP(key.Destination.Addr())
+	fake := s.fakeIPDestination(key.Destination.Addr())
 	if fake {
 		if host, ok := s.fakeDNS.lookup(key.Destination.Addr()); ok {
 			flow.Host, flow.DomainSource = host, "fakeip"

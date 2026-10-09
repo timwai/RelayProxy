@@ -1,0 +1,73 @@
+html,body,#root{height:100%;min-width:320px;margin:0}
+body{overflow:hidden}
+button,input,select,textarea{font:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.5}
+#root .sidebar{display:flex;flex-direction:column}
+#root .sidebar .nav-scroll{flex:1;min-height:0;overflow:auto}
+#root .topbar .crumb{min-width:0}
+#root .main-scroll{overflow:auto;min-height:0;flex:1}
+#root .main-inner{max-width:1460px;margin:auto}
+#root .empty-state{padding:38px 22px;text-align:center;color:var(--muted)}
+#root .empty-state strong{display:block;font-size:14px;color:var(--text);margin-bottom:8px}
+#root .page-section+.page-section{margin-top:16px}
+#root .form-actions{display:flex;justify-content:flex-end;gap:8px;align-items:center;flex-wrap:wrap;margin-top:16px}
+#root .inline-controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#root .badge{white-space:nowrap}
+#root .table-wrap table{min-width:710px}
+#root .field{display:flex;flex-direction:column;gap:6px;min-width:0}
+#root .field input:not([type=checkbox]),#root .field select,#root .field textarea{width:100%;min-height:39px;padding:9px 11px;border-radius:9px;border:1px solid var(--line2);background:var(--surface3);color:var(--text)}
+#root .field textarea{resize:vertical;min-height:94px}
+#root .field > span{font-weight:650;font-size:11px}
+#root .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+#root .form-grid .wide{grid-column:1/-1}
+#root .toggle-field{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--surface3)}
+#root .toggle-field input{accent-color:var(--brand);width:16px;height:16px}
+#root .toggle-field span{font-weight:600}
+#root .settings-sidebar{position:sticky;top:10px}
+#root .settings-main{width:100%}
+#root .settings-main .config-card{min-height:0}
+#root .settings-main .config-card-content{display:grid;gap:17px}
+#root .settings-main .config-switch-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:45px}
+#root .settings-main .config-switch-row input{width:18px;height:18px;accent-color:var(--brand)}
+#root .settings-save{position:sticky;bottom:10px;z-index:6;display:flex;align-items:center;gap:12px;justify-content:space-between;padding:12px 16px;background:var(--surface2);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow2)}
+#root .settings-save .actions{display:flex;align-items:center;gap:8px}
+#root .table-action{display:flex;justify-content:flex-end;gap:5px;white-space:nowrap}
+#root .modal-content-scroll{max-height:min(72vh,800px);overflow-y:auto;padding:20px}
+#root .dialog-backdrop{position:fixed;inset:0;z-index:99;background:rgba(6,12,23,.55);backdrop-filter:blur(5px);display:flex;align-items:center;justify-content:center;padding:16px}
+#root .dialog-window{max-height:95vh;width:min(720px,100%);display:flex;flex-direction:column;background:var(--surface2);border:1px solid var(--line);border-radius:17px;box-shadow:0 20px 80px rgba(0,0,0,.25);overflow:hidden}
+#root .dialog-window.wide{width:min(980px,100%)}
+#root .dialog-header{display:flex;align-items:center;justify-content:space-between;padding:17px 20px;border-bottom:1px solid var(--line)}
+#root .dialog-header h2{font-size:16px;margin:0}
+#root .dialog-footer{display:flex;justify-content:flex-end;gap:8px;padding:13px 20px;border-top:1px solid var(--line)}
+#root .dialog-note{color:var(--muted);font-size:11px;line-height:1.65}
+#root .toast-live{position:fixed;bottom:25px;right:25px;z-index:110;max-width:440px;border-radius:10px;background:var(--text);color:var(--surface2);padding:12px 18px;box-shadow:var(--shadow)}
+#root .err-notice{margin:0 0 16px;padding:11px 14px;color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 35%,var(--line));background:color-mix(in srgb,var(--danger) 7%,var(--surface2));border-radius:10px}
+#root .notice{color:var(--muted)}
+#root .login-screen{min-height:100dvh;display:grid;place-items:center;padding:20px}
+#root .login-card{width:min(430px,100%);padding:30px;background:var(--surface2);border:1px solid var(--line);border-radius:18px}
+#root .login-card h1{margin:4px 0 8px;font-size:24px}
+#root .login-card form{display:grid;gap:15px;margin-top:24px}
+#root .login-card .btn{width:100%}
+#root .settings-nav-group{display:grid;gap:2px}
+#root .nav-group .nav-item{display:flex;align-items:center;gap:10px;width:100%;border:0;background:transparent;text-align:left;color:var(--muted);padding:10px 11px;border-radius:9px}
+#root .nav-group .nav-item.active{background:color-mix(in srgb,var(--brand) 10%,var(--surface2));color:var(--brand)}
+#root .nav-group .nav-item:hover{background:var(--surface3)}
+#root .nav-group .group-name{font-size:9px;color:var(--subtle);padding:14px 11px 6px;letter-spacing:1.1px}
+#root .nav-count{margin-left:auto;font-size:10px;color:var(--subtle)}
+#root .status-dot{background:var(--ok)}
+#root .tab-line{display:flex;gap:6px;flex-wrap:wrap;padding-bottom:14px}
+#root .tab-line .btn.active{background:color-mix(in srgb,var(--brand) 12%,var(--surface2));color:var(--brand);border-color:var(--brand)}
+#root .settings-sidebar button{width:100%}
+#root .card-title-area{display:flex;justify-content:space-between;align-items:center;gap:15px;margin-bottom:12px}
+#root .card-title-area h2{font-size:14px;margin:0}
+#root .section-description{font-size:11px;color:var(--muted);margin:5px 0 0}
+#root .metric-value{font-size:24px;font-weight:800}
+#root .rule-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#root .rule-card{border:1px solid var(--line);border-radius:11px;padding:14px;margin:10px 0;background:var(--surface3)}
+#root .rule-card .form-grid{margin-top:11px}
+#root .rule-card .form-actions{margin:0 0 8px}
+#root .channel-card{min-height:260px}
+#root .scroll-table{overflow:auto}
+@media(max-width:800px){#root .settings-layout{grid-template-columns:1fr}#root .settings-sidebar{position:static;display:flex;gap:6px;overflow:auto;white-space:nowrap}#root .settings-nav-group{display:flex;gap:6px}#root .settings-nav-label,#root .settings-nav-note{display:none}#root .settings-sidebar .settings-nav-item{width:auto;min-height:40px;padding:7px}#root .settings-sidebar .settings-nav-item small,#root .settings-nav-icon{display:none}}
+@media(max-width:560px){#root .form-grid{grid-template-columns:1fr}#root .form-grid .wide{grid-column:auto}#root .dialog-window{max-height:96vh}#root .main-inner{padding:10px}#root .settings-save{flex-direction:column;align-items:stretch}#root .settings-save .actions>*{flex:1}}

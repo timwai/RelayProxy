@@ -31,6 +31,9 @@ type ClientManagerOptions struct {
 	Dial           ClientDialFunc
 	RaceDial       ClientRaceDialFunc
 	Now            func() time.Time
+	BrutalUploadBPS uint64
+	BrutalDownloadBPS uint64
+	DisableLossCompensation bool
 	// EndpointUsable checks local address-family reachability before dialing.
 	// An incompatible endpoint must not consume a one-time Direct ticket.
 	EndpointUsable func(address string) bool
@@ -69,6 +72,9 @@ type ClientManager struct {
 	attemptTimeout time.Duration
 	cooldown       time.Duration
 	maxCooldown    time.Duration
+	brutalUploadBPS uint64
+	brutalDownloadBPS uint64
+	disableLossCompensation bool
 
 	mu       sync.Mutex
 	entries  map[string]*clientEntry
@@ -122,8 +128,18 @@ func NewClientManager(parent context.Context, clientID func() string, options Cl
 	return &ClientManager{
 		ctx: ctx, cancel: cancel, clientID: clientID, raceDial: raceDial, endpointUsable: endpointUsable, now: now,
 		attemptTimeout: attemptTimeout, cooldown: cooldown, maxCooldown: maxCooldown,
+		brutalUploadBPS: options.BrutalUploadBPS, brutalDownloadBPS: options.BrutalDownloadBPS,
+		disableLossCompensation: options.DisableLossCompensation,
 		entries: make(map[string]*clientEntry),
 	}
+}
+
+func (m *ClientManager) SetBrutalProfile(uploadBPS, downloadBPS uint64) {
+	if m == nil { return }
+	m.mu.Lock()
+	m.brutalUploadBPS = uploadBPS
+	m.brutalDownloadBPS = downloadBPS
+	m.mu.Unlock()
 }
 
 func (m *ClientManager) SetFallback(fn func(exitDeviceID, reason string)) {
@@ -326,6 +342,12 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 	ctx, cancel := context.WithTimeout(m.ctx, m.attemptTimeout)
 	defer cancel()
 
+	m.mu.Lock()
+	brutalUploadBPS := m.brutalUploadBPS
+	brutalDownloadBPS := m.brutalDownloadBPS
+	disableLossCompensation := m.disableLossCompensation
+	m.mu.Unlock()
+
 	_, stillValid := ticketLifetime(public, m.now().UTC())
 	if !stillValid {
 		m.finishFailure(exitDeviceID, ticketHash, errors.New("public direct ticket expired before connection"))
@@ -340,8 +362,9 @@ func (m *ClientManager) connect(exitDeviceID, clientID string, endpoints []proto
 		configs = append(configs, DialConfig{
 			Address: publicEndpointDialAddress(endpoint), TLSConfig: tlsConfig,
 			ClientDeviceID: clientID, ExitDeviceID: exitDeviceID,
-			Ticket:      append([]byte(nil), public.Ticket...),
-			AuthTimeout: m.attemptTimeout,
+			Ticket: append([]byte(nil), public.Ticket...), AuthTimeout: m.attemptTimeout,
+			BrutalUploadBPS: brutalUploadBPS, BrutalDownloadBPS: brutalDownloadBPS,
+			DisableLossCompensation: disableLossCompensation,
 		})
 	}
 	if len(configs) == 0 {

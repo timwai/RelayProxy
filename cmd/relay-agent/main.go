@@ -24,6 +24,7 @@ import (
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
+	"relayproxy/internal/congestion"
 	"relayproxy/internal/deviceidentity"
 )
 
@@ -243,6 +244,9 @@ func main() {
 		// subset is granted. This is not a client-side authorization choice.
 		Mode:           "BOTH",
 		TransportMode:  cfgFile.Transport.Mode,
+		BrutalUploadBPS: congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.UpMbps),
+		BrutalDownloadBPS: congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.DownMbps),
+		DisableLossCompensation: cfgFile.Transport.Bandwidth.DisableLossCompensation,
 		SOCKS5Enabled:  cfgFile.Proxy.SOCKS5.Enabled,
 		SOCKS5Listen:   socksListen,
 		HTTPEnabled:    cfgFile.Proxy.HTTP.Enabled,

@@ -21,6 +21,7 @@ import (
 	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
+	quiccongestion "relayproxy/internal/congestion"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
@@ -79,6 +80,9 @@ type clientConfig struct {
 	QUICPort              int            `json:"quicPort"`
 	TCPPort               int            `json:"tcpPort"`
 	TransportMode         string         `json:"transportMode"`
+	BrutalUpMbps int `json:"brutalUpMbps"`
+	BrutalDownMbps int `json:"brutalDownMbps"`
+	DisableLossCompensation bool `json:"disableLossCompensation"`
 	TLSEnabled            *bool          `json:"tlsEnabled"`
 	InsecureTLS           bool           `json:"insecureTLS"`
 	AllowInternet         *bool          `json:"allowInternet"`
@@ -140,6 +144,7 @@ type statusSnapshot struct {
 	UPnPAddress         string                  `json:"upnpAddress,omitempty"`
 	P2PBytesUp          uint64                  `json:"p2pBytesUp,omitempty"`
 	P2PBytesDown        uint64                  `json:"p2pBytesDown,omitempty"`
+	P2PQUIC *tunnel.QUICDiagnostics `json:"p2pQuic,omitempty"`
 	ProxyActiveTCP      int64                   `json:"proxyActiveTcp"`
 	ProxyActiveUDP      int64                   `json:"proxyActiveUdp"`
 	ProxyTCPFlows       uint64                  `json:"proxyTcpFlows"`
@@ -229,6 +234,10 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	case tunnel.ModeAuto, tunnel.ModeQUICOnly, tunnel.ModeTCPOnly:
 	default:
 		return cfg, fmt.Errorf("unsupported transportMode %q", cfg.TransportMode)
+	}
+	if cfg.BrutalUpMbps < 0 || cfg.BrutalUpMbps > 1_000_000 ||
+		cfg.BrutalDownMbps < 0 || cfg.BrutalDownMbps > 1_000_000 {
+		return cfg, errors.New("brutal bandwidth must be between 0 and 1000000 Mbps")
 	}
 	if cfg.TLSEnabled == nil {
 		enabled := true
@@ -812,6 +821,11 @@ func (c *Client) StatusJSON() string {
 			s.P2PCandidateSummary = path.CandidateSummary
 			s.P2PBytesUp = path.BytesUp
 			s.P2PBytesDown = path.BytesDown
+			if p2pSession, ready := manager.ReadyForExit(s.SelectedExit); ready {
+				if diagnostics := tunnel.DiagnoseSession(p2pSession); diagnostics != nil && diagnostics.QUIC != nil {
+					s.P2PQUIC = diagnostics.QUIC
+				}
+			}
 			if s.DirectPath == "" && path.Path != "" {
 				s.DirectState = string(path.State)
 				s.DirectPath = path.Path
@@ -820,6 +834,9 @@ func (c *Client) StatusJSON() string {
 				s.DirectFallbackCount = path.FallbackCount
 				s.DirectBytesUp = path.BytesUp
 				s.DirectBytesDown = path.BytesDown
+				if s.P2PQUIC != nil {
+					s.DirectQUIC = s.P2PQUIC
+				}
 			}
 		}
 	}
@@ -971,6 +988,8 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		ClientVersion:         clientVersion,
 		RequestedCapabilities: c.requestedCapabilities(),
 		TransportCapabilities: transportCaps,
+		BrutalUploadBPS:       quiccongestion.MbpsToBytesPerSecond(c.cfg.BrutalUpMbps),
+		BrutalDownloadBPS:     quiccongestion.MbpsToBytesPerSecond(c.cfg.BrutalDownMbps),
 	}
 	if err := protocol.WriteJSON(ctrl, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)
@@ -1013,6 +1032,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		return errors.New("server returned an incomplete device approval")
 	}
 	tunnel.SetPeerCapabilities(sess, accepted.TransportCapabilities)
+	if accepted.BrutalUploadBPS > 0 {
+		tunnel.UseBrutal(sess, accepted.BrutalUploadBPS, c.cfg.DisableLossCompensation)
+	}
 	if err := ctrl.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
@@ -1062,6 +1084,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	powerConstrained := c.powerConstrained
 	c.mu.Unlock()
 	c.clientApproved.Store(clientRuntimeApproved)
+	if c.proxyDirect != nil {
+		c.proxyDirect.SetBrutalProfile(accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
+	}
 	if accepted.ProxyExits != nil {
 		c.proxyDialer.SetDefaultExitID(selectedExit)
 		c.updatePublicDirectInventory(acceptedExits)
@@ -1092,6 +1117,9 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 				UPnPEnabled:         accepted.P2PUPnPEnabled && c.cfg.UPnPAllowed != nil && *c.cfg.UPnPAllowed,
 				LowPowerIdleTimeout: 60 * time.Second,
 				LowPowerMaxSessions: 1,
+				BrutalUploadBPS: accepted.BrutalUploadBPS,
+				BrutalDownloadBPS: accepted.BrutalDownloadBPS,
+				DisableLossCompensation: c.cfg.DisableLossCompensation,
 			},
 		)
 		proxyP2PManager.SetPowerConstrained(powerConstrained)

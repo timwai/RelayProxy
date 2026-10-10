@@ -130,6 +130,9 @@ type AgentConfig struct {
 	TCPPort               int
 	Mode                  string // "CLIENT", "EXIT", "BOTH"
 	TransportMode         string // "auto", "quic_only", "tcp_only"
+	BrutalUploadBPS       uint64
+	BrutalDownloadBPS     uint64
+	DisableLossCompensation bool
 	SOCKS5Enabled         *bool
 	SOCKS5Listen          string // "127.0.0.1:1080"
 	HTTPEnabled           *bool
@@ -265,6 +268,7 @@ type AgentStatus struct {
 	P2PFallbackCount     uint64                     `json:"p2pFallbackCount,omitempty"`
 	P2PBytesUp           uint64                     `json:"p2pBytesUp,omitempty"`
 	P2PBytesDown         uint64                     `json:"p2pBytesDown,omitempty"`
+	P2PQUIC              *tunnel.QUICDiagnostics    `json:"p2pQuic,omitempty"`
 	UPnPEnabled          bool                       `json:"upnpEnabled"`
 	UPnPState            string                     `json:"upnpState"`
 	UPnPError            string                     `json:"upnpError,omitempty"`
@@ -676,6 +680,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		ClientNonce:     clientNonce, DeviceName: cfg.DeviceName, Platform: runtime.GOOS,
 		Arch: runtime.GOARCH, ClientVersion: "2.0.0",
 		RequestedCapabilities: requested, TransportCapabilities: transportCaps,
+		BrutalUploadBPS: cfg.BrutalUploadBPS, BrutalDownloadBPS: cfg.BrutalDownloadBPS,
 	}
 	if err := protocol.WriteJSON(ctrl, hello); err != nil {
 		return fmt.Errorf("send hello: %w", err)
@@ -704,6 +709,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		return errors.New("server returned an incomplete device approval")
 	}
 	tunnel.SetPeerCapabilities(sess, accepted.TransportCapabilities)
+	if accepted.BrutalUploadBPS > 0 && tunnel.UseBrutal(sess, accepted.BrutalUploadBPS, cfg.DisableLossCompensation) {
+		log.Printf("[Transport] Relay QUIC upload switched to Brutal target=%d B/s", accepted.BrutalUploadBPS)
+	}
 	if err := ctrl.SetDeadline(time.Time{}); err != nil {
 		return err
 	}
@@ -726,7 +734,11 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
+	publicDirect := a.proxyDirect
 	a.mu.Unlock()
+	if publicDirect != nil {
+		publicDirect.SetBrutalProfile(accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
+	}
 	if accepted.ProxyExits != nil {
 		a.updatePublicDirectInventory(proxyExitsFromProtocol(*accepted.ProxyExits))
 	}
@@ -797,6 +809,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 			PortStart:       accepted.P2PPortStart,
 			PortEnd:         accepted.P2PPortEnd,
 			UPnPEnabled:     accepted.P2PUPnPEnabled && cfg.P2PUPnPAllowed != nil && *cfg.P2PUPnPAllowed,
+			BrutalUploadBPS: accepted.BrutalUploadBPS,
+			BrutalDownloadBPS: accepted.BrutalDownloadBPS,
+			DisableLossCompensation: cfg.DisableLossCompensation,
 		})
 		keepManager := false
 		a.mu.Lock()
@@ -1432,6 +1447,11 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PFallbackCount = path.FallbackCount
 			st.P2PBytesUp = path.BytesUp
 			st.P2PBytesDown = path.BytesDown
+			if p2pSession, ready := proxyP2P.ReadyForExit(st.SelectedExit); ready {
+				if diagnostics := tunnel.DiagnoseSession(p2pSession); diagnostics != nil && diagnostics.QUIC != nil {
+					st.P2PQUIC = diagnostics.QUIC
+				}
+			}
 			if st.DirectPath == "" && path.Path != "" {
 				st.DirectState = string(path.State)
 				st.DirectPath = path.Path
@@ -1440,6 +1460,9 @@ func (a *Agent) Status() AgentStatus {
 				st.DirectFallbackCount = path.FallbackCount
 				st.DirectBytesUp = path.BytesUp
 				st.DirectBytesDown = path.BytesDown
+				if st.P2PQUIC != nil {
+					st.DirectQUIC = st.P2PQUIC
+				}
 			}
 		} else {
 			st.P2PState = "IDLE"

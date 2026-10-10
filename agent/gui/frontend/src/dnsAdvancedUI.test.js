@@ -10,7 +10,7 @@ test('simplified DNS page retains advanced settings and diagnostics',()=>{
   const end=source.indexOf('function RDPPage(',begin);
   assert.ok(begin>=0 && end>begin,'DNSPage must be present');
   const dnsPage=source.slice(begin,end);
-  for(const field of ['routing.dns_association_enabled','routing.dns_exit_id','routing.doh_blocked_ips','setDoHBlocking(r,v)','setOtherDNSForwarding(r,v)']){
+  for(const field of ['routing.dns_association_enabled','routing.dns_exit_id','routing.dns_upstreams','routing.doh_blocked_ips','setDoHBlocking(r,v)','setOtherDNSForwarding(r,v)']){
     assert.ok(dnsPage.includes(field),'missing DNS advanced option '+field);
   }
   assert.ok(dnsPage.includes('disabled={!r.fake_ip_enabled}'),'FakeIP-dependent protection needs explicit mode guard');

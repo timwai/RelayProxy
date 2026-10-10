@@ -12,7 +12,7 @@ func validEnvelope(now time.Time) Envelope {
 		Protocol:              ProtocolVersion,
 		Type:                  SessionSnapshot,
 		MessageID:             "69064be2-ea88-4e8d-9aa1-a0c55e7a0d5e",
-		RuleID:                "rule_test",
+		RuleID:                "d75b3c83-415f-4a69-aea4-a78a937b3d16",
 		SourceBrowserDeviceID: "browser_a",
 		TargetBrowserDeviceID: "browser_b",
 		Sequence:              1,

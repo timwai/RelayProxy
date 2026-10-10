@@ -388,7 +388,21 @@ class ConnectionMonitorActivity : Activity() {
         if (exits.isNotEmpty()) {
             card.addView(infoLine("出口", exits.joinToString(" · ") { ExitDisplayNames.label(it, exitNames) }))
         }
+        val rules = item.optJSONArray("rules").strings()
+        if (rules.isNotEmpty()) {
+            // The Go routing engine already records the rule that was used
+            // for each flow. Show the actual matched names, not a new UI-side
+            // guess derived from the current settings.
+            card.addView(infoLine("命中规则", rules.joinToString(" · ") { matchedRuleLabel(it) }))
+        }
         return card
+    }
+
+    private fun matchedRuleLabel(rule: String): String = when (rule) {
+        "global_proxy" -> "全局代理"
+        "direct" -> "全局直连"
+        "default" -> "默认规则"
+        else -> rule
     }
 
     private fun infoLine(label: String, value: String): View {

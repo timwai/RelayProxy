@@ -429,7 +429,9 @@ func (i *packetInterceptor) interceptDNSUDP(p ipPacket, meta packetMetadata, rea
 			return nil
 		}
 		reply, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: p.Source, Destination: p.Destination}, answer)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		meta.outbound = false
 		return i.inject(reply, meta)
 	}
@@ -444,14 +446,18 @@ func (i *packetInterceptor) interceptDNSUDP(p ipPacket, meta packetMetadata, rea
 	go func() {
 		defer i.wg.Done()
 		answer := i.server.interceptedDNSReply(i.ctx, payload, true)
-		if len(answer) == 0 || i.ctx.Err() != nil { return }
+		if len(answer) == 0 || i.ctx.Err() != nil {
+			return
+		}
 		// Associate verified real DNS data *before* the browser receives the
 		// reply, preventing a race with its first TCP SYN or QUIC datagram.
 		if realMode && i.server.dnsAssociationEnabled() {
 			i.dns.response(destination, source, answer)
 		}
 		reply, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: source, Destination: destination}, answer)
-		if err == nil { err = i.inject(reply, replyMeta) }
+		if err == nil {
+			err = i.inject(reply, replyMeta)
+		}
 		i.report(err)
 	}()
 	return nil
@@ -750,7 +756,9 @@ func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) err
 	// resolver can answer while injection/acceptance is still in progress.
 	// DNS associations only become trusted after a matching answer is observed.
 	if meta.outbound && packet.Protocol == ProtoUDP {
-		if i.server.dnsAssociationEnabled() { i.dns.query(packet.Source, packet.Destination, packet.Payload) }
+		if i.server.dnsAssociationEnabled() {
+			i.dns.query(packet.Source, packet.Destination, packet.Payload)
+		}
 	}
 	if accepter, ok := i.device.(packetAccepter); ok {
 		return accepter.Accept(meta)
@@ -769,7 +777,9 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 		case job := <-queue:
 			meta := job.meta
 			meta.outbound = false
-			if i.server.dnsAssociationEnabled() { i.dns.query(job.route.key.Source, job.route.key.Destination, job.payload) }
+			if i.server.dnsAssociationEnabled() {
+				i.dns.query(job.route.key.Source, job.route.key.Destination, job.payload)
+			}
 			err := i.server.ForwardUDP(i.ctx, job.route, job.payload, func(ctx context.Context, key FlowKey, payload []byte) error {
 				if err := ctx.Err(); err != nil {
 					return err
@@ -780,7 +790,9 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 				}
 				// Make the DNS name available before exposing the response to
 				// the client. Otherwise its next SYN can be classified by IP.
-				if i.server.dnsAssociationEnabled() { i.dns.response(key.Destination, key.Source, payload) }
+				if i.server.dnsAssociationEnabled() {
+					i.dns.response(key.Destination, key.Source, payload)
+				}
 				return i.inject(response, meta)
 			})
 			if i.disableOnInjectionError(err) {

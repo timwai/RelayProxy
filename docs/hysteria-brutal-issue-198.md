@@ -15,19 +15,36 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 - [x] Port controller, rate conversion/capping, loss-compensation tests, config and directional negotiation.
 - [x] Preserve new main-line UPnP, Android settings, proxy routing, Public Direct authorization and P2P lifecycle.
 - [x] Reject rate hints on legacy Public Direct authentication paths.
-- [ ] Go CI: gofmt, go vet, go mod tidy, Go tests, core race tests and benchmark smoke must pass on this branch.
-- [ ] Cross-platform Go regression matrix: Ubuntu, macOS, Windows.
-- [ ] Android gomobile AAR and Gradle debug APK must build.
+- [x] Go CI: gofmt, go vet, go mod tidy, Go tests, core race tests and benchmark smoke ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614073)).
+- [x] Cross-platform Go regression matrix: Ubuntu, macOS, Windows; Linux includes targeted P2P and direct path race tests ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614068)).
+- [x] Android gomobile AAR and Gradle debug APK ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614074)).
 - [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow.
 - [ ] A/B Hysteria2 comparison on the same client, server, UDP path, RTT, bandwidth, packet-loss and hardware, repeated >= 5 times per case.
 - [ ] Verify old-client/new-server and new-client/old-server pairings with both QUIC and TLS.
 - [ ] Review CI artifacts and real-device results before opening/merging the replacement main PR.
 
+## Physical performance acceptance (pending)
+
+The automated CI gates above passed on source commit `54ed7361625f7230120e701393fe8329907a8198`. They do **not** replace WAN tests or establish performance equivalence to Hysteria2.
+
+Use a dedicated controllable test link and comparable SOCKS5 exit configurations. Record complete endpoints, CPUs, MTU, transport mode, configured Brutal upstream/downstream rates, actual bottleneck speeds, RTT, queue discipline, and server maximums before running. Ensure QUIC is selected on both sides; a fallback TLS result is not a Brutal measurement.
+
+| Scenario | Loss | Controllers to compare | Direction | Repeats |
+|---|---:|---|---|---:|
+| Clean path | 0% | RelayProxy BBR, RelayProxy Brutal, Hysteria2 Brutal | both | >=5 |
+| Light loss | 1% | RelayProxy BBR, RelayProxy Brutal, Hysteria2 Brutal | both | >=5 |
+| Heavy loss | 5% | RelayProxy BBR, RelayProxy Brutal, Hysteria2 Brutal | both | >=5 |
+| Coexistence | 0%, 1%, 5% | Brutal + separate BBR flow sharing the same bottleneck | both | >=5 |
+
+For each trial capture useful-payload throughput (goodput), configured and observed send rate, transfer duration, p50/p95 end-to-end RTT during load, baseline idle RTT, QUIC lost bytes/packets, process CPU and RSS, and the competing BBR flow's goodput. Alternate controller order to avoid caching/warmup bias and compare median plus spread, not a single peak. Measure startup, prolonged steady load, reconnection and fallback-to-BBR behavior. Store raw CSV, QUIC diagnostics and scripts/environment parameters as linked Issue #198 artifacts.
+
+**Release blockers:** hardware evidence above; mixed old/new Agent/Server pairings with QUIC and TLS; review of fairness under congestion. Do not silently enable non-zero rates and do not create/merge a mainline PR while these are unchecked.
+
 ## Reproduction
 
 ```sh
 go test ./internal/congestion/... ./internal/tunnel ./internal/protocol ./agent/direct ./agent/p2p ./server/gateway ./server/p2p -count=1
-go test -race ./internal/congestion/... ./internal/tunnel ./agent/direct ./agent/p2p ./server/gateway -count=1
+go test -race ./internal/congestion/... ./internal/tunnel ./agent/direct ./agent/p2p ./server/gateway ./server/p2p -count=1
 ```
 
 Reference: [#198](https://github.com/timwai/RelayProxy/issues/198), historical-only [#179](https://github.com/timwai/RelayProxy/pull/179).

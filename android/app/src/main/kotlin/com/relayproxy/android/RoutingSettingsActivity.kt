@@ -182,7 +182,8 @@ class RoutingSettingsActivity : Activity() {
                 })
                 addView(TextView(this@RoutingSettingsActivity).apply {
                     text = sub.url + "\n" + actionLabel(sub.action) +
-                        if (sub.exitId.isBlank()) " · 跟随默认出口" else " · 指定出口"
+                        (if (sub.exitId.isBlank()) " · 跟随默认出口" else " · 指定出口") +
+                        (if (sub.fetchViaProxy) " · 代理更新" else " · 直连更新")
                     textSize = 11.5f
                     setTextColor(mutedColor)
                     setPadding(0, dp(8), 0, dp(10))
@@ -293,10 +294,21 @@ class RoutingSettingsActivity : Activity() {
             isChecked = current.enabled
             UiKit.styleSwitch(this)
         }
+        val viaProxy = Switch(this).apply {
+            text = "通过代理获取订阅内容"
+            isChecked = current.fetchViaProxy
+            UiKit.styleSwitch(this)
+        }
         fields.addView(labeled("订阅名称", name))
         fields.addView(labeled("订阅 URL", url), topMargin(8))
         fields.addView(labeled("匹配动作", action), topMargin(8))
         fields.addView(labeled("指定代理出口（仅 PROXY 使用）", exit), topMargin(8))
+        fields.addView(viaProxy, topMargin(10))
+        fields.addView(TextView(this).apply {
+            text = "勾选后使用本订阅指定的代理出口，未指定则跟随默认出口。下载失败不会回退直连。"
+            textSize = 11.5f
+            setTextColor(mutedColor)
+        }, topMargin(4))
         fields.addView(enabled, topMargin(10))
         val dialog = UiKit.alertDialog(this, if (index < 0) "添加规则订阅" else "编辑规则订阅", "仅允许公开 HTTPS 订阅地址")
             .setView(fields)
@@ -310,6 +322,7 @@ class RoutingSettingsActivity : Activity() {
                     name = name.text.toString().trim(),
                     url = url.text.toString().trim(),
                     enabled = enabled.isChecked,
+                    fetchViaProxy = viaProxy.isChecked,
                     action = actionValues.getOrElse(action.selectedItemPosition) { "PROXY" },
                     exitId = if (actionValues.getOrElse(action.selectedItemPosition) { "PROXY" } == "PROXY")
                         exitIDs.getOrElse(exit.selectedItemPosition) { "" } else "",

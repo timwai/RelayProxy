@@ -20,7 +20,7 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 		// sessions, not only to newly intercepted SYN packets. Never keep
 		// handing out FakeIPs after the feature has been disabled.
 		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil) && !s.fakeIPEnabled() && !s.proxyDNSEnabled() {
-			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
+			return fmt.Errorf("DNS TCP capture disabled by active routing policy")
 		}
 		var prefix [2]byte
 		if _, err := io.ReadFull(conn, prefix[:]); err != nil {
@@ -39,7 +39,7 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 		}
 		// Recheck after a blocking socket read: the policy may have been
 		// disabled while the connection was waiting for its next question.
-		if s.opts.FakeIPEnabled != nil && !s.fakeIPEnabled() {
+		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil) && !s.fakeIPEnabled() && !s.proxyDNSEnabled() {
 			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
 		}
 		answer := s.interceptedDNSReply(ctx, payload, false)

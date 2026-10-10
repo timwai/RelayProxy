@@ -17,6 +17,9 @@ func ValidateConfig(cfg Config) error {
 	if cfg.DNSMode != "" && cfg.DNSMode != DNSModeLocal && cfg.DNSMode != DNSModeProxy {
 		return fmt.Errorf("routing.dns_mode: invalid value %q (expected proxy or local)", cfg.DNSMode)
 	}
+	if cfg.ProxyDNSEnabled && cfg.FakeIPEnabled {
+		return fmt.Errorf("routing.proxy_dns_enabled and routing.fake_ip_enabled are mutually exclusive DNS/53 capture modes")
+	}
 	if cfg.AutoDetectDNS && cfg.FakeIPEnabled {
 		return fmt.Errorf("routing.auto_detect_dns cannot be combined with FakeIP DNS interception")
 	}

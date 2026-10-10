@@ -124,6 +124,8 @@ export async function sendSnapshot(ruleId) {
 export async function requestSnapshot(ruleId) {
   const ctx=await ruleContext(ruleId);
   if(!ctx.targetRole)throw new Error('只有接收设备能请求同步');
+  const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
+  if(paused[ruleId])throw new Error('此规则因 Cookie 恢复不完整已暂停，请先检查目标网站');
   const answer=await sendControl('SYNC_REQUEST',{ruleId});
   if(answer.status!=='REQUESTED')throw new Error('来源设备不在线');
   return {state:'REQUESTED'};

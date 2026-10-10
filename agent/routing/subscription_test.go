@@ -1,6 +1,10 @@
 package routing
 
 import (
+    "context"
+    "errors"
+    "net"
+    "encoding/json"
 	"encoding/base64"
 	"reflect"
 	"strings"
@@ -122,4 +126,58 @@ func TestSubscriptionFailedParsingDoesNotProduceCatchAll(t *testing.T) {
 			t.Fatalf("expected failure for %q", payload)
 		}
 	}
+}
+
+type subscriptionProbeTunnel struct {
+ calls int
+ exit, host string
+ port uint16
+}
+func (p *subscriptionProbeTunnel) DialTCP(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
+ p.calls++
+ p.exit, p.host, p.port = exit, host, port
+ return nil, errors.New("unavailable selected exit")
+}
+func (*subscriptionProbeTunnel) DialUDP(context.Context, string, string, uint16) (net.PacketConn, error) {
+ panic("subscription fetch must use TCP")
+}
+
+func TestSubscriptionProxyDialBypassesDirectRoutingMode(t *testing.T) {
+ engine,err:=newEngineSnapshot(Config{Mode:ModeDirect})
+ if err!=nil{t.Fatal(err)}
+ tunnel:=&subscriptionProbeTunnel{}
+ d:=NewRoutingDialer(engine,tunnel)
+ defer engine.Close()
+ _,err=d.DialSubscriptionTCP(context.Background(),"exit-subscription","raw.githubusercontent.com",443)
+ if err==nil || tunnel.calls!=1 || tunnel.exit!="exit-subscription" || tunnel.host!="raw.githubusercontent.com" || tunnel.port!=443 {
+  t.Fatalf("subscription must use explicit proxy exit: call=%+v err=%v",tunnel,err)
+ }
+ _,err=d.DialSubscriptionTCP(context.Background(),"","raw.githubusercontent.com",80)
+ if err==nil || tunnel.calls!=1 {t.Fatal("non-HTTPS download reached proxy")}
+}
+
+func TestSubscriptionProxyTransportNeverFallsBackDirect(t *testing.T) {
+ sub:=Subscription{Name:"test",URL:"https://example.org/sub",FetchViaProxy:true,ExitID:"chosen"}
+ _,_,_,err:=fetchSubscription(context.Background(),sub,nil)
+ if err==nil {t.Fatal("missing proxy must fail closed")}
+ called:=0
+ probe:=subscriptionProxyContextDial(sub,func(_ context.Context,exit,host string,port uint16)(net.Conn,error){
+  called++
+  if exit!="chosen"||host!="example.org"||port!=443 {t.Fatalf("wrong proxy dial: %s %s %d",exit,host,port)}
+  return nil,errors.New("proxy rejected")
+ })
+ if _,err:=probe(context.Background(),"tcp","example.org:443");err==nil||called!=1 {t.Fatalf("proxy failure not surfaced: %v",err)}
+ if _,err:=probe(context.Background(),"tcp","example.org:80");err==nil||called!=1 {t.Fatalf("unexpected transport fallback: %v",err)}
+}
+
+func TestSubscriptionFetchPreferenceRoundTrip(t *testing.T) {
+ original:=Config{Subscriptions:[]Subscription{{Name:"sub",URL:"https://example.org/sub",Enabled:true,FetchViaProxy:true,Action:ActionDirect}}}
+ encoded,err:=json.Marshal(original)
+ if err!=nil{t.Fatal(err)}
+ var decoded Config
+ if err:=json.Unmarshal(encoded,&decoded);err!=nil{t.Fatal(err)}
+ if len(decoded.Subscriptions)!=1||!decoded.Subscriptions[0].FetchViaProxy {t.Fatalf("preference lost: %s",encoded)}
+ cloned:=CloneConfig(decoded)
+ if !cloned.Subscriptions[0].FetchViaProxy {t.Fatal("clone lost fetch preference")}
+ if err:=ValidateConfig(decoded);err!=nil {t.Fatal(err)}
 }

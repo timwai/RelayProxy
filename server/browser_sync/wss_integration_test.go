@@ -136,3 +136,46 @@ func TestWSSBrowserRulePairingAndSessionGate(t *testing.T) {
 		t.Fatalf("unsigned session was not rejected: %v", reply)
 	}
 }
+
+func TestWSSSignedEncryptedSessionDeliveredWithAck(t *testing.T) {
+	store := testBrowserStore(t)
+	source, sourceKey := approvedWSSBrowser(t,store,true,false)
+	target, targetKey := approvedWSSBrowser(t,store,false,true)
+	ruleID := uuid.NewString()
+	if err := store.OfferRule(context.Background(),source.ID,encryptedTestOffer(ruleID,target.ID));err!=nil{t.Fatal(err)}
+	if err := store.AcceptRule(context.Background(),target.ID,ruleID);err!=nil{t.Fatal(err)}
+	if err := store.ConfirmRule(context.Background(),source.ID,ruleID);err!=nil{t.Fatal(err)}
+	server := httptest.NewTLSServer(NewHandler(store, []string{testExtensionID}))
+	defer server.Close()
+	a := dialApprovedBrowser(t,server,source,sourceKey)
+	b := dialApprovedBrowser(t,server,target,targetKey)
+
+	env := signedTestSnapshot(t,sourceKey,source.ID,target.ID,ruleID)
+	sendWSSControl(t,a,map[string]any{"type":"SESSION_SNAPSHOT","requestId":"send1","envelope":env})
+	delivered := readWSSControl(t,b)
+	if delivered["type"]!="SESSION_SNAPSHOT" {
+		t.Fatalf("target did not receive an opaque encrypted payload: %v",delivered["type"])
+	}
+	push,ok:=delivered["envelope"].(map[string]any)
+	if !ok||push["ciphertext"]!=env.Ciphertext {
+		t.Fatal("ciphertext altered by server")
+	}
+	if reply:=readWSSControl(t,a);reply["type"]!="SYNC_STATUS"||reply["status"]!="RELAYED" {
+		t.Fatalf("source missing delivery status: %v",reply)
+	}
+	sendWSSControl(t,b,map[string]any{
+		"type":"SYNC_ACK","requestId":"ack1","ruleId":ruleID,
+		"messageId":env.MessageID,"status":"APPLIED",
+	})
+	pushed := readWSSControl(t,a)
+	if pushed["type"]!="SYNC_ACK"||pushed["status"]!="APPLIED" {
+		t.Fatalf("source did not get restricted ACK: %v",pushed)
+	}
+	if reply:=readWSSControl(t,b);reply["type"]!="SYNC_STATUS" {
+		t.Fatalf("target missing ACK forwarding status: %v",reply)
+	}
+	sendWSSControl(t,a,map[string]any{"type":"SESSION_SNAPSHOT","requestId":"dupe","envelope":env})
+	if reply:=readWSSControl(t,a);reply["type"]!="RULE_ERROR" {
+		t.Fatalf("server accepted replayed ciphertext: %v",reply)
+	}
+}

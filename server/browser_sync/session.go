@@ -86,20 +86,22 @@ func (s *Store) EnsureSessionSchema(ctx context.Context) error {
 	return err
 }
 
-func (s *Store) VerifyReceipt(ctx context.Context, receiverID, ruleID, messageID string) (string,error) {
+func (s *Store) VerifyReceipt(ctx context.Context, receiverID, ruleID, messageID string) (string, error) {
 	if messageID == "" || len(messageID) > 80 {
 		return "", ErrRuleDenied
 	}
-	d,err := s.deviceAllowed(ctx,receiverID)
+	d, err := s.deviceAllowed(ctx, receiverID)
 	if err != nil || !d.Receive {
-		return "",ErrRuleDenied
+		return "", ErrRuleDenied
 	}
-	rule,err := s.ActiveRule(ctx,ruleID)
+	rule, err := s.ActiveRule(ctx, ruleID)
 	if err != nil || !rule.Active || !rule.TargetApproved || rule.TargetBrowserDeviceID != receiverID {
-		return "",ErrRuleDenied
+		return "", ErrRuleDenied
 	}
 	var sourceState string
-	err=s.db.QueryRowContext(ctx,`SELECT state FROM browser_sync_devices WHERE id=?`,rule.SourceBrowserDeviceID).Scan(&sourceState)
-	if errors.Is(err,sql.ErrNoRows)||err != nil||sourceState!="approved" {return "",ErrRuleDenied}
-	return rule.SourceBrowserDeviceID,nil
+	err = s.db.QueryRowContext(ctx, `SELECT state FROM browser_sync_devices WHERE id=?`, rule.SourceBrowserDeviceID).Scan(&sourceState)
+	if errors.Is(err, sql.ErrNoRows) || err != nil || sourceState != "approved" {
+		return "", ErrRuleDenied
+	}
+	return rule.SourceBrowserDeviceID, nil
 }

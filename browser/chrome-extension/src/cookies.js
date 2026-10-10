@@ -93,7 +93,7 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
     // Never delete a Cookie that was not installed by this exact rule,
     // or that the target site/user has changed since the last sync.
     if(old){
-      if(!managed[name]||managed[name]!==await digest(old.value))
+      if(!managed[name]||managed[name]!==await cookieValueTag(ruleId,name,old.value))
         throw new Error('CONFLICT: 不允许删除接收端独立登录状态');
     }
     removals.push({name,old});

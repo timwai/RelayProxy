@@ -429,11 +429,11 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 }
 
 // localDNSDefaultRejectPassthrough intentionally applies only to outbound
-// UDP/53 in observational mode. It must never override an explicit DNS rule,
+// DNS/53 in observational mode. It must never override an explicit DNS rule,
 // nor silently leak a query in a mode which promises proxy interception.
 func localDNSDefaultRejectPassthrough(p ipPacket, decision Decision, fakeMode, proxyDNSMode, associationEnabled bool) bool {
 	return associationEnabled && !fakeMode && !proxyDNSMode &&
-		p.Protocol == ProtoUDP && p.Destination.Port() == 53 &&
+		(p.Protocol == ProtoUDP || p.Protocol == ProtoTCP) && p.Destination.Port() == 53 &&
 		decision.Action == ActionReject && decision.Rule == "default"
 }
 
@@ -590,6 +590,14 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		if err != nil {
 			_ = i.rejectTCP(p, meta)
 			return err
+		}
+		// A default-deny rule must not strand DNS/TCP fallback in the
+		// observational real-IP mode. Explicit DNS blocking still wins.
+		// The original socket stays in the Windows TCP stack; later packets
+		// are reinjected through the existing pre-established-flow path.
+		if localDNSDefaultRejectPassthrough(p, route.Decision(), i.server.fakeIPEnabled(), i.server.proxyDNSEnabled(), i.server.dnsAssociationEnabled()) {
+			i.direct.Add(1)
+			return i.sendPacket(p, meta)
 		}
 		i.classified.Add(1)
 		switch route.Decision().Action {

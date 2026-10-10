@@ -809,19 +809,21 @@ func TestBrutalAbsentHelloKeepsBBR(t *testing.T) {
 	}
 	sessions := session.NewManager()
 	gateway := NewGateway(GatewayConfig{
-		QUICAddr: "127.0.0.1:0",
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
-		HandshakeTimeout: 2 * time.Second,
-		ServerInstanceID: "brutal-absent-hints",
+		QUICAddr:              "127.0.0.1:0",
+		TLSConfig:             &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:      2 * time.Second,
+		ServerInstanceID:      "brutal-absent-hints",
 		AllowLegacyDeviceAuth: true,
-		BrutalMaxUploadBPS: 25_000_000,
-		BrutalMaxDownloadBPS: 15_000_000,
+		BrutalMaxUploadBPS:    25_000_000,
+		BrutalMaxDownloadBPS:  15_000_000,
 		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{State: "approved", DeviceID: "legacy-like-client", ApprovedCapabilities: []string{protocol.CapabilityProxyClient}}, nil
 		},
 		RecheckDevice: func(string, string) bool { return true },
 	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
-	if err := gateway.Start(); err != nil { t.Fatal(err) }
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = gateway.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -837,15 +839,19 @@ func TestBrutalAbsentHelloKeepsBBR(t *testing.T) {
 		t.Fatal(err)
 	}
 	accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
-		DeviceName: "pre-brutal-client",
+		DeviceName:            "pre-brutal-client",
 		RequestedCapabilities: []string{protocol.CapabilityProxyClient},
 	})
-	if !accepted.Success { t.Fatalf("approval rejected: %+v", accepted) }
+	if !accepted.Success {
+		t.Fatalf("approval rejected: %+v", accepted)
+	}
 	if accepted.BrutalUploadBPS != 0 || accepted.BrutalDownloadBPS != 0 {
 		t.Fatalf("server activated Brutal without client hint: %+v", accepted)
 	}
 	registered, ok := sessions.Get("legacy-like-client")
-	if !ok || registered == nil { t.Fatal("client session not registered") }
+	if !ok || registered == nil {
+		t.Fatal("client session not registered")
+	}
 	diag := tunnel.DiagnoseSession(registered.Tunnel)
 	if diag == nil || diag.QUIC == nil ||
 		diag.QUIC.CongestionController != "bbr-aggressive" ||

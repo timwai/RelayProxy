@@ -178,7 +178,9 @@ func TestDeviceAuthPayloadDoesNotBindBrutalPerformanceHints(t *testing.T) {
 func TestBrutalBandwidthFieldsRemainOptionalOnWire(t *testing.T) {
 	legacyHello := []byte(`{"protocolVersion":5,"identityId":"a1b2c3d4e5f6g7h8","installationId":"old-client","deviceName":"old-client"}`)
 	var hello DeviceHello
-	if err := json.Unmarshal(legacyHello, &hello); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(legacyHello, &hello); err != nil {
+		t.Fatal(err)
+	}
 	if hello.BrutalUploadBPS != 0 || hello.BrutalDownloadBPS != 0 {
 		t.Fatalf("absent hints must preserve BBR: %+v", hello)
 	}
@@ -191,15 +193,19 @@ func TestBrutalBandwidthFieldsRemainOptionalOnWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	var oldWelcome struct {
-		Success bool `json:"success"`
+		Success  bool   `json:"success"`
 		DeviceID string `json:"deviceId"`
 	}
-	if err := json.Unmarshal(raw, &oldWelcome); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(raw, &oldWelcome); err != nil {
+		t.Fatal(err)
+	}
 	if !oldWelcome.Success || oldWelcome.DeviceID != "old-client" {
 		t.Fatalf("older client cannot decode new welcome: %+v", oldWelcome)
 	}
 	var currentWelcome DeviceAccepted
-	if err := json.Unmarshal([]byte(`{"success":true,"deviceId":"old-client"}`), &currentWelcome); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal([]byte(`{"success":true,"deviceId":"old-client"}`), &currentWelcome); err != nil {
+		t.Fatal(err)
+	}
 	if currentWelcome.BrutalUploadBPS != 0 || currentWelcome.BrutalDownloadBPS != 0 {
 		t.Fatalf("older server response incorrectly enabled Brutal: %+v", currentWelcome)
 	}

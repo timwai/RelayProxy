@@ -3,7 +3,8 @@ import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} fro
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
-import {enableFakeIP,setDoHBlocking,setOtherDNSForwarding,setAutoDNS,setProxyDNS,setRealProxyDNS} from './dnsSettings.js';
+import {enableFakeIP,setDoHBlocking,setOtherDNSForwarding,setRealProxyDNS} from './dnsSettings.js';
+import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 
 const NAV=[
@@ -340,16 +341,13 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
  <Modal open={!!editing} title={editing&&editing.index>=0?'编辑分流规则':'新建分流规则'} wide onClose={()=>setEditing(null)} footer={<><Button onClick={()=>setEditing(null)}>取消</Button><Button primary onClick={saveEditor}>保存规则</Button></>}>{editing&&<RuleEditor value={editing.rule} exits={exits} onChange={rule=>setEditing({...editing,rule})}/>}</Modal></>
 }
 
-// DNS is a device-wide network policy, not an application-specific
-// classification rule. Keep the two Proxifier-style name resolution controls
-// independent from the advanced transparent-interception protections.
+// The three presets intentionally project to legacy backend fields. Advanced
+// settings are retained for existing deployments and specialised debugging.
 function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
+ const[advancedOpen,setAdvancedOpen]=useState(false);
  const r=config.routing||EMPTY.routing;
  const inventory=[...arr(exits).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
  const change=next=>setv('routing',next);
- const confirmDisable=()=>!(r.fake_ip_enabled||r.proxy_dns_enabled)||window.confirm('自动检测或本机解析会关闭 FakeIP、代理 DNS 真实 IP 接管以及依赖它们的 DNS 防护。确定切换到可能使用本机 DNS 的模式吗？');
- const proxy=(value)=>{if(!value&&!confirmDisable())return;change(setProxyDNS(r,value))};
- const automatic=(value)=>{if(value&&!confirmDisable())return;change(setAutoDNS(r,value))};
  const protection=status.dnsProtection||{};
  const divertRunning=status.divertRunning===true;
  const captureMode=protection.capture||'unavailable';
@@ -357,35 +355,29 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const strictCapture=captureObserved&&captureMode==='nfqueue-no-bypass';
  const fakeConfigured=!!r.fake_ip_enabled;
  const fakeApplied=divertRunning&&protection.fakeIpEnabled===true;
- return <><PageHead title="DNS 与防泄漏" desc="独立管理域名解析位置、自动检测、FakeIP DNS 接管与已知加密 DNS 绕过防护。" actions={<Button onClick={()=>onGoto('routing')}>分流规则 ›</Button>}/>
- <Card title="主机名解析" eyebrow="NAME RESOLUTION">
-  <Setting title="自动检测 DNS 状态" desc="开启时自动切换到本机优先模式：先尝试系统 DNS，本机查询失败再使用代理解析。此模式可能产生本机 DNS 查询，不适用于严格防泄漏。"><Switch checked={!!r.auto_detect_dns} label="自动检测 DNS 状态" onChange={automatic}/></Setting>
-  <Setting title="通过代理解析主机名" desc="手动模式：开启时将原始域名交给代理解析；关闭时先使用系统 DNS。修改此项会关闭自动检测；启用代理解析优先于自动检测。"><Switch checked={(r.dns_mode||'proxy')==='proxy'} label="通过代理解析主机名" onChange={proxy}/></Setting>
-  <div className="notice top-gap">{r.auto_detect_dns?((r.dns_mode||'proxy')==='proxy'?'自动检测已保存，但当前被手动代理解析覆盖；重新关闭再开启自动检测可进入本机优先模式。':'自动检测生效：系统 DNS 优先，失败后交给代理；可能产生本机 DNS 查询。'):(r.dns_mode||'proxy')==='proxy'?'手动代理解析：代理连接的原始域名始终交给远端。':'手动本机解析：系统 DNS 查询可能离开代理。'}</div>
-  <div className="mini top-gap">只有原始连接包含域名时，这两个选项才影响代理侧解析。已经被操作系统解析为 IP 的透明连接不会被自动还原为域名；需要 FakeIP 接管系统 DNS 时，请启用下方独立选项。</div>
+ const preset=currentDNSPreset(r);
+ return <><PageHead title="DNS 设置" desc="自动协调 DNS 解析与分流。通常只需使用自动模式。" actions={<Button onClick={()=>onGoto('routing')}>分流规则 ›</Button>}/>
+ <Card title="DNS 处理模式" eyebrow="DNS POLICY">
+  <Field label="解析模式" help="切换模式会统一更新内部 DNS 选项，旧版配置仍可使用。">
+   <Select value={preset} onChange={e=>change(applyDNSPreset(r,e.target.value))}>
+    <option value="auto">自动（推荐）· 经代理接管系统 DNS，返回真实 IP</option>
+    <option value="real_ip">真实 IP · 旁路关联域名，不接管系统 DNS</option>
+    <option value="fake_ip">FakeIP · 虚拟地址与域名映射</option>
+   </Select>
+  </Field>
+  <div className="notice top-gap">{preset==='auto'?'自动模式：接管可捕获的系统 DNS/53 查询，经代理出口解析真实 IP；连接中的已知域名交给出口解析。':preset==='real_ip'?'真实 IP 模式：保留系统 DNS，观察传统 DNS 响应以关联域名；DNS 查询可能从本机发出。':'FakeIP 模式：为接管的 DNS 查询分配虚拟地址，并在连接时恢复域名。'}</div>
+  <div className="mini top-gap">透明代理需处于运行状态才能接管系统 DNS。Chrome 私有 DoH、环回 DNS 与 Agent 退出后的防泄漏不保证由此模式覆盖；可在诊断页检查。</div>
+  <div className="actions end top-gap"><Button onClick={()=>setAdvancedOpen(!advancedOpen)}>{advancedOpen?'收起高级设置':'高级设置 ›'}</Button></div>
  </Card>
- <Card title="DNS 关联与系统 DNS 接管" eyebrow="SYSTEM DNS">
-  <Setting title="DNS 关联（真实 IP → 域名）" desc="默认开启。通过观察或验证传统 DNS A/AAAA 响应，尝试为透明流量恢复域名；共享 IP、缓存与 Chrome 私有 DoH 可能使关联不确定，此时不会猜测域名。"><Switch checked={r.dns_association_enabled!==false} label="DNS 关联" onChange={v=>setv("routing.dns_association_enabled",v)}/></Setting>
-  <Setting title="通过代理解析系统 DNS（返回真实 IP）" desc="不依赖 FakeIP：接管可捕获的 DNS/53 查询，经所选代理出口和加密 DoT 查询真实 A/AAAA、TXT/SRV、HTTPS/SVCB；失败时返回 SERVFAIL，不泄漏回本机 DNS。与 FakeIP 接管互斥，默认关闭。"><Switch checked={!!r.proxy_dns_enabled} label="代理 DNS 真实 IP 模式" onChange={v=>change(setRealProxyDNS(r,v))}/></Setting>
-  <div className="mini top-gap">与上方“通过代理解析主机名”不同：后者只影响代理连接已经携带域名的场景；此选项实际接管系统 DNS/53 并返回真实 IP。需开启透明代理，Chrome 自带 DoH 和环回 DNS 仍可能绕过当前捕获路径。</div>
- </Card>
- <Card title="FakeIP 与加密 DNS 防护" eyebrow="FAKEIP / PROTECTION">
-  <Setting title="FakeIP 接管 DNS（实验性）" desc="分配虚拟地址并在连接时恢复域名；与真实 IP 代理 DNS 接管互斥。启用时切换到代理解析、关闭自动检测及真实 IP 接管；仅保存选项不能代替启用透明代理。"><Switch checked={!!r.fake_ip_enabled} label="FakeIP 接管 DNS" onChange={v=>change(enableFakeIP(r,v))}/></Setting>
-  <Setting title="拦截已知 DoH 解析器" desc="开启时自动满足 FakeIP 与代理解析前置条件。仅阻断已知解析器域名上的 HTTPS/443 连接，不能识别全部私有 DoH、ECH 或 IP 直连。"><Switch checked={!!r.block_doh_endpoints} label="拦截已知 DoH 解析器" onChange={v=>change(setDoHBlocking(r,v))}/></Setting>
-  <Setting title="通过代理补充查询 TXT / SRV" desc="开启时自动满足 FakeIP 与代理解析前置条件。使用选定出口经 TLS 访问 Quad9；查询域名会发送给第三方，失败时不回落明文 DNS。"><Switch checked={!!r.forward_other_dns} label="通过代理补充查询 TXT / SRV" onChange={v=>change(setOtherDNSForwarding(r,v))}/></Setting>
-  <div className="form-grid top-gap">
-   <Field label="加密 DNS 查询出口" help="代理 DNS 真实 IP 模式或 FakeIP 的 TXT / SRV 查询使用此出口；留空跟随默认出口。"><Select value={r.dns_exit_id||''} onChange={e=>setv('routing.dns_exit_id',e.target.value)}><option value="">跟随当前默认出口</option>{inventory.filter(x=>x.id).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}{r.dns_exit_id&&!inventory.some(x=>x.id===r.dns_exit_id)&&<option value={r.dns_exit_id}>{r.dns_exit_id}（不可用）</option>}</Select></Field>
-   <Field label="额外阻断的 DoH IP / CIDR" className="full" help="一行一个公网 IP 或窄 CIDR；仅 DoH 阻断开启时生效，拦截对应地址的全部 TCP/UDP 443，可能影响同 IP 上的其他服务。"><Textarea rows="3" placeholder={'9.9.9.9\n1.1.1.1'} value={arr(r.doh_blocked_ips).join('\n')} onChange={e=>setv('routing.doh_blocked_ips',e.target.value.split(/[\n,;]+/).map(x=>x.trim()).filter(Boolean))}/></Field>
-  </div>
-  <div className="notice warn top-gap">当前开关只代表配置意图。FakeIP、DoH 阻断依赖已运行的透明代理拦截能力；环回 DNS、应用内私有 DoH 与驱动/Agent 退出后的系统防泄漏仍需实机验证。FakeIP 模式的 HTTPS/SVCB 仍采用保守处理；真实 IP 代理 DNS 模式可经 DoT 请求这些记录。</div>
-  <div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>透明代理设置 ›</Button><Button onClick={()=>onGoto('diagnostics')}>诊断与日志 ›</Button></div>
- </Card>
+ {advancedOpen&&<>
+
+ </>}
  <Card title="实际运行状态" eyebrow="ACTIVE DNS PROTECTION">
-  <Setting title="透明代理运行状态" desc={'DNS 捕获报告：'+captureMode+'（仅反映 Agent / 内核上报，不能证明所有 DNS 均已接管）'}><Badge tone={divertRunning?'blue':'warn'}>{divertRunning?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
-  <Setting title="FakeIP 配置与捕获证据" desc={fakeConfigured?'已保存 FakeIP 策略；'+(captureObserved?'观察到捕获报告，但环回 DNS、私有 DoH 和防火墙旁路仍需验证。':'目前未观察到有效的 DNS 捕获报告。'):'FakeIP 策略未启用'}><Badge tone={strictCapture&&fakeApplied?'blue':fakeConfigured?'warn':'neutral'}>{!fakeConfigured?'未启用':!fakeApplied?'已配置 · 未确认应用':strictCapture?'内核捕获报告可用 · 仍需实测':'策略已应用 · DNS 接管未独立验证'}</Badge></Setting>
-  <Setting title="独立 DNS Kill Switch" desc={protection.detail||'当前没有足够证据证明系统级防泄漏'}><Badge tone={protection.independentGuard==='rules-present'?'blue':'warn'}>{protection.independentGuard||'未验证'}</Badge></Setting>
+  <Setting title="透明代理运行状态" desc={'DNS 捕获报告：'+captureMode+'（不代表所有 DNS 均已接管）'}><Badge tone={divertRunning?'blue':'warn'}>{divertRunning?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
+  <Setting title="FakeIP 配置与捕获证据" desc={fakeConfigured?'已保存 FakeIP 策略；'+(captureObserved?'观察到捕获报告':'未观察到有效 DNS 捕获报告'):'FakeIP 策略未启用'}><Badge tone={strictCapture&&fakeApplied?'blue':fakeConfigured?'warn':'neutral'}>{!fakeConfigured?'未启用':!fakeApplied?'已配置 · 未确认应用':strictCapture?'内核捕获报告可用 · 仍需实测':'策略已应用 · 接管未独立验证'}</Badge></Setting>
+  <Setting title="独立 DNS Kill Switch" desc={protection.detail||'没有足够证据证明系统级防泄漏'}><Badge tone={protection.independentGuard==='rules-present'?'blue':'warn'}>{protection.independentGuard||'未验证'}</Badge></Setting>
  </Card>
- <SaveBar dirty={dirty} label="保存 DNS 设置" hint="解析模式与路由 DNS 策略支持热更新；如果透明代理本身未启用，请先完成对应安装与启动。" onSave={()=>save({routing:dnsPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
+ <SaveBar dirty={dirty} label="保存 DNS 设置" hint="切换模式自动配置兼容字段；保存后按现有热更新流程生效。" onSave={()=>save({routing:dnsPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
  </>;
 }
 

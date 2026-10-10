@@ -315,16 +315,21 @@ class ConfigStore(private val context: Context) {
 
     // Fast status-only accessors avoid invoking Android Keystore decryption
     // from the MainActivity's one-second UI refresh loop.
-    fun customExitDisplayName(id: String): String? {
+    fun customExitNames(): Map<String, String> {
         val entries = runCatching {
             JSONArray(prefs.getString("customExits", "[]") ?: "[]")
-        }.getOrNull() ?: return null
-        for (index in 0 until entries.length()) {
-            val item = entries.optJSONObject(index) ?: continue
-            if (item.optString("id") == id) return item.optString("name")
+        }.getOrNull() ?: return emptyMap()
+        return buildMap {
+            for (index in 0 until entries.length()) {
+                val item = entries.optJSONObject(index) ?: continue
+                val id = item.optString("id").trim()
+                val name = item.optString("name").trim()
+                if (id.isNotEmpty() && name.isNotEmpty()) put(id, name)
+            }
         }
-        return null
     }
+
+    fun customExitDisplayName(id: String): String? = customExitNames()[id]
 
     fun vpnIpv6Configured(): Boolean = prefs.getBoolean("vpnIpv6Enabled", false)
 

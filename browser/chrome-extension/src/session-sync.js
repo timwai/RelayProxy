@@ -7,7 +7,7 @@ import { sendControl, onServerPush } from './server-api.js';
 import { decryptEncryptedOffer } from './envelope.js';
 import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
-import { shouldReconcile, acceptDeliveryAck, isTerminalAck } from './lifecycle.js';
+import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence } from './lifecycle.js';
 
 const sourceBusy = new Set();
 const sourceDirty = new Set();
@@ -74,12 +74,10 @@ export async function sendSnapshot(ruleId) {
     // storage. A lower local counter must never cause silent replay failures.
     const cursorReply=await sendControl('SEQUENCE_CURSOR',{ruleId});
     const cursor=cursorReply?.lastSequence;
-    if(cursorReply?.type!=='SESSION_CURSOR'||cursorReply.ruleId!==ruleId||
-       !Number.isSafeInteger(cursor)||cursor<0) throw new Error('无法安全恢复会话序号');
-    const previous=stored[ruleId]||0;
-    if(!Number.isSafeInteger(previous)||previous<0) throw new Error('本地会话序号已损坏');
-    const sequence=Math.max(previous,cursor)+1;
-    if(!Number.isSafeInteger(sequence))throw new Error('会话序号耗尽，必须重新配对');
+    if(cursorReply?.type!=='SESSION_CURSOR'||cursorReply.ruleId!==ruleId)
+      throw new Error('无法安全恢复会话序号');
+    const previous=stored[ruleId] ?? 0;
+    const sequence=nextSessionSequence(previous,cursor);
     // Reserve BEFORE asynchronous network delivery; no repeated nonce or
     // sequence even if WSS rejects the delivery or worker suspends.
     stored[ruleId]=sequence;

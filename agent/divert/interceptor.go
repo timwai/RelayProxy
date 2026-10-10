@@ -837,7 +837,7 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 			} else {
 				err = i.server.ForwardTCP(i.ctx, flow.route, conn)
 			}
-			if err != nil {
+			if err != nil && flow.route.traffic != nil {
 				flow.route.traffic.Finish("failed", err)
 			}
 			i.report(err)

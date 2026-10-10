@@ -30,6 +30,7 @@ type Subscription struct {
 	Enabled bool   `yaml:"enabled" json:"enabled"`
 	Action  Action `yaml:"action" json:"action"`
 	ExitID  string `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
+	FetchViaProxy bool `yaml:"fetch_via_proxy,omitempty" json:"fetch_via_proxy,omitempty"`
 }
 
 type SubscriptionStatus struct {
@@ -127,11 +128,31 @@ func subscriptionDial(ctx context.Context, network, address string) (net.Conn, e
 	return nil, errors.New("subscription DNS returned no public addresses")
 }
 
-func fetchSubscription(ctx context.Context, raw string) ([]string, []string, int, error) {
+// subscriptionProxyDial explicitly chooses a proxy exit, bypassing rule matches
+// to avoid subscription download recursion and before-policy bootstrapping.
+type subscriptionProxyDial func(ctx context.Context, exitID, hostname string, port uint16) (net.Conn, error)
+
+func subscriptionProxyContextDial(sub Subscription, dial subscriptionProxyDial) func(context.Context, string, string) (net.Conn, error) {
+ return func(ctx context.Context, network, address string) (net.Conn, error) {
+  if network != "tcp" { return nil, errors.New("subscriptions only support TCP/443") }
+  host, port, err := net.SplitHostPort(address)
+  if err != nil || port != "443" { return nil, errors.New("subscription connection must use TCP/443") }
+  if err := validateSubscriptionURL("https://"+net.JoinHostPort(host,port)+"/"); err != nil { return nil, err }
+  if dial == nil { return nil, errors.New("subscription proxy tunnel unavailable; direct fallback is disabled") }
+  // Preserve the original hostname for exit-side DNS and HTTPS certificate
+  // verification. DNS never needs to resolve locally on the client.
+  return dial(ctx, sub.ExitID, host, 443)
+ }
+}
+
+func fetchSubscription(ctx context.Context, sub Subscription, proxyDial subscriptionProxyDial) ([]string, []string, int, error) {
+ raw := sub.URL
 	if err := validateSubscriptionURL(raw); err != nil {
 		return nil, nil, 0, err
 	}
-	transport := &http.Transport{DialContext: subscriptionDial, TLSHandshakeTimeout: 8 * time.Second,
+	dial := subscriptionDial
+	if sub.FetchViaProxy { dial = subscriptionProxyContextDial(sub, proxyDial) }
+	transport := &http.Transport{DialContext: dial, TLSHandshakeTimeout: 8 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 25 * time.Second,
@@ -414,8 +435,19 @@ func (e *Engine) SubscriptionStatuses() []SubscriptionStatus {
 	return out
 }
 
+// SetSubscriptionProxyDialer installs the same tunnel used by application
+// traffic and immediately retries in case startup preceded its availability.
+func (e *Engine) SetSubscriptionProxyDialer(dial subscriptionProxyDial) {
+ e.mu.Lock()
+ if e.subscriptionClosed { e.mu.Unlock(); return }
+ e.subscriptionProxyDialer = dial
+ e.mu.Unlock()
+ e.startSubscriptionUpdates()
+}
+
 func (e *Engine) startSubscriptionUpdates() {
 	e.mu.Lock()
+	if e.subscriptionClosed { e.mu.Unlock(); return }
 	if e.subscriptionCancel != nil {
 		e.subscriptionCancel()
 	}
@@ -437,21 +469,23 @@ func (e *Engine) startSubscriptionUpdates() {
 	go func() {
 		e.updateSubscriptions(ctx)
 		ticker := time.NewTicker(subscriptionRefreshInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				e.updateSubscriptions(ctx)
-			}
-		}
+        retry := time.NewTicker(time.Minute)
+        defer ticker.Stop()
+        defer retry.Stop()
+        for {
+            select {
+            case <-ctx.Done(): return
+            case <-ticker.C: e.updateSubscriptions(ctx)
+            case <-retry.C: e.retryFailedSubscriptions(ctx)
+            }
+        }
 	}()
 }
 func (e *Engine) updateSubscriptions(ctx context.Context) {
 	e.mu.RLock()
 	subs := append([]Subscription(nil), e.config.Subscriptions...)
-	e.mu.RUnlock()
+    proxyDial := e.subscriptionProxyDialer
+    e.mu.RUnlock()
 	for index, sub := range subs {
 		if !sub.Enabled {
 			continue
@@ -461,7 +495,7 @@ func (e *Engine) updateSubscriptions(ctx context.Context) {
 			return
 		default:
 		}
-		targets, exceptions, skipped, err := fetchSubscription(ctx, sub.URL)
+		targets, exceptions, skipped, err := fetchSubscription(ctx, sub, proxyDial)
 		updated := time.Time{}
 		var inclusion, exclusion subscriptionMatcher
 		if err == nil {
@@ -483,9 +517,20 @@ func (e *Engine) updateSubscriptions(ctx context.Context) {
 	}
 }
 
+func (e *Engine) retryFailedSubscriptions(ctx context.Context) {
+ e.mu.RLock()
+ anyFailed := false
+ for _, item := range e.subscriptions {
+  if item.config.Enabled && item.status.Error != "" { anyFailed = true; break }
+ }
+ e.mu.RUnlock()
+ if anyFailed { e.updateSubscriptions(ctx) }
+}
+
 // Close cancels subscription refreshes (existing decisions remain usable).
 func (e *Engine) Close() {
 	e.mu.Lock()
+	e.subscriptionClosed = true
 	if e.subscriptionCancel != nil {
 		e.subscriptionCancel()
 		e.subscriptionCancel = nil

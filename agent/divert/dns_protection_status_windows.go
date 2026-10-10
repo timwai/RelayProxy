@@ -9,7 +9,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 var windowsDNSGuardCache struct {
@@ -54,6 +57,15 @@ foreach ($proto in @('TCP','UDP')) {
 }
 @{ profilesEnabled=$profilesEnabled; entries=@($items) } | ConvertTo-Json -Compress -Depth 5`
 
+// windowsDNSGuardCommand must never create a visible console: the GUI calls
+// DNSProtectionStatus repeatedly, and this probe can run every 20 seconds.
+// The command must remain non-interactive and bounded by its caller context.
+func windowsDNSGuardCommand(ctx context.Context) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", windowsDNSGuardProbe)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	return cmd
+}
+
 func platformIndependentDNSGuardStatus() (string, string) {
 	windowsDNSGuardCache.Lock()
 	defer windowsDNSGuardCache.Unlock()
@@ -63,7 +75,7 @@ func platformIndependentDNSGuardStatus() (string, string) {
 	windowsDNSGuardCache.checked = time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", windowsDNSGuardProbe).Output()
+	output, err := windowsDNSGuardCommand(ctx).Output()
 	if err != nil {
 		windowsDNSGuardCache.status = "unknown"
 		windowsDNSGuardCache.detail = "Cannot inspect Windows Firewall ActiveStore and PersistentStore"

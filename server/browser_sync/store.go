@@ -58,7 +58,11 @@ func NewStore(db *sql.DB) (*Store, error) {
 			return nil, fmt.Errorf("browser sync schema: %w", err)
 		}
 	}
-	return &Store{db: db}, nil
+	store := &Store{db: db}
+	if err := store.EnsureRuleSchema(ctx); err != nil {
+		return nil, fmt.Errorf("browser sync rule schema: %w", err)
+	}
+	return store, nil
 }
 func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevice, error) {
 	if device.ID == "" || device.Name == "" || len(device.Name) > 100 || len(device.SigningKey) > 1024 || len(device.EncryptionKey) > 1024 {

@@ -212,44 +212,98 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Deliberately no forwarding data frames in this milestone. Even an
-	// authenticated sender cannot submit cookies until paired rules exist.
+	// Control-plane only. Encrypted offers carry policy metadata, not
+	// browser credentials. SESSION_* frames remain explicitly forbidden.
 	for {
-		loopCtx, done := context.WithTimeout(ctx, 45*time.Second)
-		var msg struct {
-			Type string `json:"type"`
-		}
-		err := readFrame(loopCtx, conn, &msg)
+		loopCtx, done := context.WithTimeout(ctx, 55*time.Second)
+		var msg ruleControlFrame
+		err := readFrameLimit(loopCtx, conn, &msg, 16*1024)
 		done()
 		if err != nil {
 			return
 		}
-		current, err := h.Store.Device(ctx, device.ID)
-		if err != nil || current.State != "approved" {
+		current, err := h.Store.deviceAllowed(ctx, device.ID)
+		if err != nil || current.ID != device.ID {
 			_ = conn.Close(websocket.StatusPolicyViolation, "browser approval revoked")
 			return
 		}
+		var payload any
 		switch msg.Type {
 		case "PING":
-			response := mustJSON(map[string]any{"type": "PONG"})
-			writeCtx, stop := context.WithTimeout(ctx, 5*time.Second)
-			err = conn.Write(writeCtx, websocket.MessageText, response)
-			stop()
-			if err != nil {
-				return
+			payload = map[string]any{"type": "PONG"}
+		case "LIST_PEERS":
+			peers, err := h.Store.PeerList(ctx, device.ID)
+			if err != nil { payload = ruleError(msg.RequestID) } else {
+				payload = map[string]any{"type": "PEERS", "requestId": msg.RequestID, "peers": peers}
+			}
+		case "LIST_RULES":
+			rules, err := h.Store.ListRules(ctx, device.ID)
+			if err != nil { payload = ruleError(msg.RequestID) } else {
+				payload = map[string]any{"type": "RULES", "requestId": msg.RequestID, "rules": rules}
+			}
+		case "RULE_OFFER":
+			if msg.Offer == nil || !current.Send ||
+				h.Store.OfferRule(ctx, device.ID, *msg.Offer) != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "RULE_UPDATED", "requestId": msg.RequestID,
+					"ruleId": msg.Offer.RuleID, "status": "offered"}
+			}
+		case "RULE_ACCEPT":
+			if !current.Receive || h.Store.AcceptRule(ctx, device.ID, msg.RuleID) != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "RULE_UPDATED", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "status": "target_approved"}
+			}
+		case "RULE_CONFIRM":
+			if !current.Send || h.Store.ConfirmRule(ctx, device.ID, msg.RuleID) != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "RULE_UPDATED", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "status": "active"}
+			}
+		case "RULE_REVOKE":
+			if h.Store.RevokeRule(ctx, device.ID, msg.RuleID) != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "RULE_UPDATED", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "status": "revoked"}
 			}
 		default:
-			_ = conn.Close(websocket.StatusPolicyViolation, "session transfer not enabled")
+			_ = conn.Close(websocket.StatusPolicyViolation, "unsupported browser control event")
+			return
+		}
+		writeCtx, stop := context.WithTimeout(ctx, 5*time.Second)
+		err = conn.Write(writeCtx, websocket.MessageText, mustJSON(payload))
+		stop()
+		if err != nil {
 			return
 		}
 	}
 }
+
+type ruleControlFrame struct {
+	Type      string          `json:"type"`
+	RequestID string          `json:"requestId"`
+	RuleID    string          `json:"ruleId"`
+	Offer     *EncryptedOffer `json:"offer"`
+}
+
+func ruleError(requestID string) map[string]any {
+	return map[string]any{"type": "RULE_ERROR", "requestId": requestID, "error": "rule not authorized or invalid"}
+}
 func readFrame(ctx context.Context, c *websocket.Conn, out any) error {
+	return readFrameLimit(ctx, c, out, 4096)
+}
+
+func readFrameLimit(ctx context.Context, c *websocket.Conn, out any, limit int) error {
+	c.SetReadLimit(int64(limit))
 	typ, raw, err := c.Read(ctx)
 	if err != nil {
 		return err
 	}
-	if typ != websocket.MessageText || len(raw) > 4096 {
+	if typ != websocket.MessageText || len(raw) > limit {
 		return errors.New("invalid browser control frame")
 	}
 	return json.Unmarshal(raw, out)

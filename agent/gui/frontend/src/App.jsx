@@ -311,7 +311,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const r=config.routing||EMPTY.routing;
  const inventory=[...arr(exits).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
  const change=next=>setv('routing',next);
- const confirmDisable=()=>!r.fake_ip_enabled||window.confirm('自动检测或本机解析会关闭 FakeIP、DoH 阻断和 TXT/SRV 代理查询。确定要切换为可能使用本机 DNS 的模式吗？');
+ const confirmDisable=()=>!(r.fake_ip_enabled||r.proxy_dns_enabled)||window.confirm('自动检测或本机解析会关闭 FakeIP、代理 DNS 真实 IP 接管以及依赖它们的 DNS 防护。确定切换到可能使用本机 DNS 的模式吗？');
  const proxy=(value)=>{if(!value&&!confirmDisable())return;change(setProxyDNS(r,value))};
  const automatic=(value)=>{if(value&&!confirmDisable())return;change(setAutoDNS(r,value))};
  const protection=status.dnsProtection||{};

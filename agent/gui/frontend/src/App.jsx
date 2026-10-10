@@ -354,6 +354,18 @@ function DNSUpstreamsEditor({upstreams,onChange}){
 
 function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const[advancedOpen,setAdvancedOpen]=useState(false);
+ const[probing,setProbing]=useState(false);
+ const[probe,setProbe]=useState(null);
+ const runDNSProbe=async()=>{
+  if(probing||dirty)return;
+  setProbing(true);setProbe(null);
+  try {
+   const response=parseMutation(await call('goProbeDNS'));
+   if(!response.ok)throw new Error(response.message||'DNS 出口诊断失败');
+   setProbe({result:response.result||response});
+  }catch(e){setProbe({error:e.message||'DNS 出口诊断失败'})}
+  finally{setProbing(false)}
+ };
  const r=config.routing||EMPTY.routing;
  const inventory=[...arr(exits).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
  const change=next=>setv('routing',next);
@@ -414,6 +426,23 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
    <div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>透明代理设置 ›</Button><Button onClick={()=>onGoto('diagnostics')}>诊断与日志 ›</Button></div>
   </Card>
  </>}
+ <Card title="加密 DNS 出口连通性" eyebrow="DNS PROBE">
+  <div className="mini">使用当前已保存的 DNS 出口逐个测试加密上游的真实 DNS 查询，并显示延迟及错误原因。不会访问本机 DNS，也不代表已经验证应用私有 DoH 或独立 Kill Switch。</div>
+  <div className="actions end top-gap"><Button disabled={probing||dirty} onClick={runDNSProbe}>{probing?'检测中…':'检测 DNS 上游'}</Button></div>
+  {dirty&&<div className="notice warn top-gap">DNS 配置尚未保存，请保存后再检测，避免诊断结果与页面设置不一致。</div>}
+  {probe?.error&&<div className="notice danger top-gap">{probe.error}</div>}
+  {probe?.result&&<>
+   <div className="mini top-gap">DNS 出口：{probe.result.exitId||'跟随默认出口'} · {probe.result.custom?'自定义上游':'内置上游'}</div>
+   {arr(probe.result.results).map((item,i)=><div className="target-row" key={item.url+'-'+i}>
+    <div className="grow">
+     <div className="row"><strong>{item.name||'DNS 上游'}</strong><Badge tone={item.ok?'ok':'warn'}>{item.ok?'可用':'失败'}</Badge></div>
+     <div className="mono mini">{item.protocol} · {item.address} · {item.url}</div>
+     <div className="mini">{item.ok?'DNS 查询成功'+(item.rcode?' · '+item.rcode:''):(item.error||'无法获取应答')}</div>
+    </div>
+    <div className="mono">{item.latencyMs??'—'} ms</div>
+   </div>)}
+  </>}
+ </Card>
  <Card title="实际运行状态" eyebrow="ACTIVE DNS PROTECTION">
   <Setting title="透明代理运行状态" desc={'DNS 捕获报告：'+captureMode+'（不代表所有 DNS 均已接管）'}><Badge tone={divertRunning?'blue':'warn'}>{divertRunning?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
   <Setting title="FakeIP 配置与捕获证据" desc={fakeConfigured?'已保存 FakeIP 策略；'+(captureObserved?'观察到捕获报告':'未观察到有效 DNS 捕获报告'):'FakeIP 策略未启用'}><Badge tone={strictCapture&&fakeApplied?'blue':fakeConfigured?'warn':'neutral'}>{!fakeConfigured?'未启用':!fakeApplied?'已配置 · 未确认应用':strictCapture?'内核捕获报告可用 · 仍需实测':'策略已应用 · 接管未独立验证'}</Badge></Setting>

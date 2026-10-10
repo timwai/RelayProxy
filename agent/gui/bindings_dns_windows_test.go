@@ -55,13 +55,10 @@ func TestWailsGetConfigPreservesDNSSettingsAcrossSave(t *testing.T) {
 				t.Fatal(err)
 			}
 			for key, want := range expected.Routing {
-				if got := values[key]; got != want {
-					// arrays compare separately as JSON to avoid slice identity.
-					gotJSON, _ := json.Marshal(got)
-					wantJSON, _ := json.Marshal(want)
-					if string(gotJSON) != string(wantJSON) {
-						t.Fatalf("Wails routing.%s = %v, want %v", key, got, want)
-					}
+				gotJSON, _ := json.Marshal(values[key])
+				wantJSON, _ := json.Marshal(want)
+				if string(gotJSON) != string(wantJSON) {
+					t.Fatalf("Wails routing.%s = %s, want %s", key, gotJSON, wantJSON)
 				}
 			}
 			// Simulate a full-routing save from the React settings page.

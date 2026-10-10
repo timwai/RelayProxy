@@ -36,7 +36,7 @@ def parse_variant(value):
 
 def sample(args, proxy, destination):
     command = [
-        "curl", "--fail", "--location", "--silent", "--show-error",
+        "curl", "--disable", "--noproxy", "", "--fail", "--location", "--silent", "--show-error",
         "--connect-timeout", "15", "--max-time", str(args.timeout),
         "--proxy", proxy, "--output", str(destination),
         "--write-out",

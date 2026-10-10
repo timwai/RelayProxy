@@ -352,7 +352,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		}
 		listeners = append(listeners, listener)
 	}
-	device, err := newLinuxPacketDevice(s.guard.RelayIPs, s.fakeIPEnabled())
+	device, err := newLinuxPacketDevice(s.guard.RelayIPs, s.fakeIPEnabled() || s.proxyDNSEnabled())
 	if err != nil {
 		for _, listener := range listeners {
 			_ = listener.Close()
@@ -573,7 +573,7 @@ func (i *packetInterceptor) watchLinuxDNSGuard(f *linuxFirewall) {
 			if i.server.opts.PolicyMu != nil {
 				i.server.opts.PolicyMu.RLock()
 			}
-			enabled := i.server.fakeIPEnabled()
+			enabled := i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()
 			err := f.setDNSGuardMode(enabled)
 			if i.server.opts.PolicyMu != nil {
 				i.server.opts.PolicyMu.RUnlock()

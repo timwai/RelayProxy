@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	proxyDNSDoHPort          uint16 = 443
-	proxyDNSOverallTimeout         = 10 * time.Second
-	proxyDNSDoHAttemptTimeout      = 2 * time.Second
+	proxyDNSDoHPort           uint16 = 443
+	proxyDNSOverallTimeout           = 10 * time.Second
+	proxyDNSDoHAttemptTimeout        = 2 * time.Second
 )
 
 // Pinned IPs avoid recursive bootstrap DNS on the Agent. The TLS SNI and

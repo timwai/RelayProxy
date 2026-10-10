@@ -25,12 +25,12 @@ import (
 // Subscription is an ordered external rule set. It is evaluated after the
 // editable rules and before default_action, only in "rule" routing mode.
 type Subscription struct {
-	Name    string `yaml:"name" json:"name"`
-	URL     string `yaml:"url" json:"url"`
-	Enabled bool   `yaml:"enabled" json:"enabled"`
-	Action  Action `yaml:"action" json:"action"`
-	ExitID  string `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
-	FetchViaProxy bool `yaml:"fetch_via_proxy,omitempty" json:"fetch_via_proxy,omitempty"`
+	Name          string `yaml:"name" json:"name"`
+	URL           string `yaml:"url" json:"url"`
+	Enabled       bool   `yaml:"enabled" json:"enabled"`
+	Action        Action `yaml:"action" json:"action"`
+	ExitID        string `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
+	FetchViaProxy bool   `yaml:"fetch_via_proxy,omitempty" json:"fetch_via_proxy,omitempty"`
 }
 
 type SubscriptionStatus struct {
@@ -133,25 +133,35 @@ func subscriptionDial(ctx context.Context, network, address string) (net.Conn, e
 type subscriptionProxyDial func(ctx context.Context, exitID, hostname string, port uint16) (net.Conn, error)
 
 func subscriptionProxyContextDial(sub Subscription, dial subscriptionProxyDial) func(context.Context, string, string) (net.Conn, error) {
- return func(ctx context.Context, network, address string) (net.Conn, error) {
-  if network != "tcp" { return nil, errors.New("subscriptions only support TCP/443") }
-  host, port, err := net.SplitHostPort(address)
-  if err != nil || port != "443" { return nil, errors.New("subscription connection must use TCP/443") }
-  if err := validateSubscriptionURL("https://"+net.JoinHostPort(host,port)+"/"); err != nil { return nil, err }
-  if dial == nil { return nil, errors.New("subscription proxy tunnel unavailable; direct fallback is disabled") }
-  // Preserve the original hostname for exit-side DNS and HTTPS certificate
-  // verification. DNS never needs to resolve locally on the client.
-  return dial(ctx, sub.ExitID, host, 443)
- }
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		if network != "tcp" {
+			return nil, errors.New("subscriptions only support TCP/443")
+		}
+		host, port, err := net.SplitHostPort(address)
+		if err != nil || port != "443" {
+			return nil, errors.New("subscription connection must use TCP/443")
+		}
+		if err := validateSubscriptionURL("https://" + net.JoinHostPort(host, port) + "/"); err != nil {
+			return nil, err
+		}
+		if dial == nil {
+			return nil, errors.New("subscription proxy tunnel unavailable; direct fallback is disabled")
+		}
+		// Preserve the original hostname for exit-side DNS and HTTPS certificate
+		// verification. DNS never needs to resolve locally on the client.
+		return dial(ctx, sub.ExitID, host, 443)
+	}
 }
 
 func fetchSubscription(ctx context.Context, sub Subscription, proxyDial subscriptionProxyDial) ([]string, []string, int, error) {
- raw := sub.URL
+	raw := sub.URL
 	if err := validateSubscriptionURL(raw); err != nil {
 		return nil, nil, 0, err
 	}
 	dial := subscriptionDial
-	if sub.FetchViaProxy { dial = subscriptionProxyContextDial(sub, proxyDial) }
+	if sub.FetchViaProxy {
+		dial = subscriptionProxyContextDial(sub, proxyDial)
+	}
 	transport := &http.Transport{DialContext: dial, TLSHandshakeTimeout: 8 * time.Second,
 		ResponseHeaderTimeout: 10 * time.Second, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
@@ -438,16 +448,22 @@ func (e *Engine) SubscriptionStatuses() []SubscriptionStatus {
 // SetSubscriptionProxyDialer installs the same tunnel used by application
 // traffic and immediately retries in case startup preceded its availability.
 func (e *Engine) SetSubscriptionProxyDialer(dial subscriptionProxyDial) {
- e.mu.Lock()
- if e.subscriptionClosed { e.mu.Unlock(); return }
- e.subscriptionProxyDialer = dial
- e.mu.Unlock()
- e.startSubscriptionUpdates()
+	e.mu.Lock()
+	if e.subscriptionClosed {
+		e.mu.Unlock()
+		return
+	}
+	e.subscriptionProxyDialer = dial
+	e.mu.Unlock()
+	e.startSubscriptionUpdates()
 }
 
 func (e *Engine) startSubscriptionUpdates() {
 	e.mu.Lock()
-	if e.subscriptionClosed { e.mu.Unlock(); return }
+	if e.subscriptionClosed {
+		e.mu.Unlock()
+		return
+	}
 	if e.subscriptionCancel != nil {
 		e.subscriptionCancel()
 	}
@@ -469,31 +485,38 @@ func (e *Engine) startSubscriptionUpdates() {
 	go func() {
 		e.updateSubscriptions(ctx, false)
 		ticker := time.NewTicker(subscriptionRefreshInterval)
-        retry := time.NewTicker(time.Minute)
-        defer ticker.Stop()
-        defer retry.Stop()
-        for {
-            select {
-            case <-ctx.Done(): return
-            case <-ticker.C: e.updateSubscriptions(ctx, false)
-            case <-retry.C: e.retryFailedSubscriptions(ctx)
-            }
-        }
+		retry := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		defer retry.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				e.updateSubscriptions(ctx, false)
+			case <-retry.C:
+				e.retryFailedSubscriptions(ctx)
+			}
+		}
 	}()
 }
 func (e *Engine) updateSubscriptions(ctx context.Context, retryOnly bool) {
 	e.mu.RLock()
 	subs := append([]Subscription(nil), e.config.Subscriptions...)
-    proxyDial := e.subscriptionProxyDialer
-    e.mu.RUnlock()
+	proxyDial := e.subscriptionProxyDialer
+	e.mu.RUnlock()
 	for index, sub := range subs {
-        if !sub.Enabled { continue }
-        if retryOnly {
-           e.mu.RLock()
-           pending := index < len(e.subscriptions) && e.subscriptions[index].status.Error != ""
-           e.mu.RUnlock()
-           if !pending { continue }
-        }
+		if !sub.Enabled {
+			continue
+		}
+		if retryOnly {
+			e.mu.RLock()
+			pending := index < len(e.subscriptions) && e.subscriptions[index].status.Error != ""
+			e.mu.RUnlock()
+			if !pending {
+				continue
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -522,13 +545,18 @@ func (e *Engine) updateSubscriptions(ctx context.Context, retryOnly bool) {
 }
 
 func (e *Engine) retryFailedSubscriptions(ctx context.Context) {
- e.mu.RLock()
- anyFailed := false
- for _, item := range e.subscriptions {
-  if item.config.Enabled && item.status.Error != "" { anyFailed = true; break }
- }
- e.mu.RUnlock()
- if anyFailed { e.updateSubscriptions(ctx, true) }
+	e.mu.RLock()
+	anyFailed := false
+	for _, item := range e.subscriptions {
+		if item.config.Enabled && item.status.Error != "" {
+			anyFailed = true
+			break
+		}
+	}
+	e.mu.RUnlock()
+	if anyFailed {
+		e.updateSubscriptions(ctx, true)
+	}
 }
 
 // Close cancels subscription refreshes (existing decisions remain usable).

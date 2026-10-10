@@ -9,13 +9,13 @@ import (
 
 // Engine evaluates the same ordered compound rules for every client entry.
 type Engine struct {
-	mu                 sync.RWMutex
-	config             Config
-	compound           []compoundRule
-	subscriptions      []compiledSubscription
-	subscriptionCancel context.CancelFunc
+	mu                      sync.RWMutex
+	config                  Config
+	compound                []compoundRule
+	subscriptions           []compiledSubscription
+	subscriptionCancel      context.CancelFunc
 	subscriptionProxyDialer subscriptionProxyDial
-	subscriptionClosed bool
+	subscriptionClosed      bool
 }
 type portRange struct{ start, end uint16 }
 

@@ -13,6 +13,10 @@ import (
 // from changing an already published policy.
 func CloneConfig(cfg Config) Config {
 	cfg.DoHBlockedIPs = slices.Clone(cfg.DoHBlockedIPs)
+	if cfg.DNSAssociationEnabled != nil {
+		enabled := *cfg.DNSAssociationEnabled
+		cfg.DNSAssociationEnabled = &enabled
+	}
 	cfg.Rules = slices.Clone(cfg.Rules)
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]

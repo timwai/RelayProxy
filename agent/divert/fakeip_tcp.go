@@ -8,8 +8,9 @@ import (
 	"net"
 )
 
-// serveFakeDNSTCP handles RFC 7766 DNS-over-TCP without ever connecting to a
-// system resolver. The caller has already authenticated/redirected the stream.
+// serveFakeDNSTCP handles RFC 7766 DNS-over-TCP without using the system
+// resolver. Depending on the active policy it returns FakeIP or verified real
+// DoT answers via the selected proxy exit. The caller owns redirection.
 func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
@@ -18,8 +19,8 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 		// A hot policy update must apply to existing DNS/TCP keep-alive
 		// sessions, not only to newly intercepted SYN packets. Never keep
 		// handing out FakeIPs after the feature has been disabled.
-		if s.opts.FakeIPEnabled != nil && !s.fakeIPEnabled() {
-			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
+		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil) && !s.fakeIPEnabled() && !s.proxyDNSEnabled() {
+			return fmt.Errorf("DNS TCP capture disabled by active routing policy")
 		}
 		var prefix [2]byte
 		if _, err := io.ReadFull(conn, prefix[:]); err != nil {
@@ -38,10 +39,10 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 		}
 		// Recheck after a blocking socket read: the policy may have been
 		// disabled while the connection was waiting for its next question.
-		if s.opts.FakeIPEnabled != nil && !s.fakeIPEnabled() {
+		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil) && !s.fakeIPEnabled() && !s.proxyDNSEnabled() {
 			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
 		}
-		answer := s.replyFakeDNS(ctx, payload)
+		answer := s.interceptedDNSReply(ctx, payload, false)
 		if len(answer) == 0 || len(answer) > 65535 {
 			return fmt.Errorf("fake DNS TCP question cannot be safely answered")
 		}

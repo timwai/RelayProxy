@@ -19,16 +19,19 @@ func routingConfigView(cfg routing.Config) map[string]any {
 	if dnsMode == "" {
 		dnsMode = routing.DNSModeProxy
 	}
+	associationEnabled := cfg.DNSAssociationEnabled == nil || *cfg.DNSAssociationEnabled
 	return map[string]any{
-		"mode":                cfg.Mode,
-		"dns_mode":            dnsMode,
-		"auto_detect_dns":     cfg.AutoDetectDNS,
-		"fake_ip_enabled":     cfg.FakeIPEnabled,
-		"block_doh_endpoints": cfg.BlockDoHEndpoints,
-		"forward_other_dns":   cfg.ForwardOtherDNS,
-		"dns_exit_id":         cfg.DNSExitID,
-		"doh_blocked_ips":     blockedIPs,
-		"default_action":      cfg.DefaultAction,
-		"rules":               rules,
+		"mode":                    cfg.Mode,
+		"dns_mode":                dnsMode,
+		"auto_detect_dns":         cfg.AutoDetectDNS,
+		"dns_association_enabled": associationEnabled,
+		"proxy_dns_enabled":       cfg.ProxyDNSEnabled,
+		"fake_ip_enabled":         cfg.FakeIPEnabled,
+		"block_doh_endpoints":     cfg.BlockDoHEndpoints,
+		"forward_other_dns":       cfg.ForwardOtherDNS,
+		"dns_exit_id":             cfg.DNSExitID,
+		"doh_blocked_ips":         blockedIPs,
+		"default_action":          cfg.DefaultAction,
+		"rules":                   rules,
 	}
 }

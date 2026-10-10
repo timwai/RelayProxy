@@ -497,11 +497,13 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		a.divertSrv, err = divert.New(divert.Options{
 			Config: cfg.DivertConfig, Dialer: routing.SelectedExitDialer{Routing: a.dialer}, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
-			FakeIPEnabled:     engine.FakeIPEnabled,
-			BlockDoHEndpoints: engine.BlockDoHEndpoints,
-			ForwardOtherDNS:   engine.ForwardOtherDNS,
-			DNSExitID:         engine.DNSExitID,
-			DoHBlockedIPs:     engine.DoHBlockedIPs,
+			FakeIPEnabled:         engine.FakeIPEnabled,
+			ProxyDNSEnabled:       engine.ProxyDNSEnabled,
+			DNSAssociationEnabled: engine.DNSAssociationEnabled,
+			BlockDoHEndpoints:     engine.BlockDoHEndpoints,
+			ForwardOtherDNS:       engine.ForwardOtherDNS,
+			DNSExitID:             engine.DNSExitID,
+			DoHBlockedIPs:         engine.DoHBlockedIPs,
 			ProxyReady: func() bool {
 				return a.handshakeOK.Load()
 			},
@@ -2023,17 +2025,18 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 		}
 		updatedDivert = true
 	}
-	// Arm the fail-closed DNS queue before publishing FakeIP. The policy
-	// mutex also serializes the reconciler with the whole bundle.
-	oldFakeIP := a.cfg.Routing.FakeIPEnabled
-	if a.divertSrv != nil && routeCfg.FakeIPEnabled {
+	// Real-IP proxy DNS and FakeIP both need the fail-closed DNS/53 queue.
+	// Arm it before publishing either policy; the same lock protects reload.
+	oldCapture := a.cfg.Routing.FakeIPEnabled || a.cfg.Routing.ProxyDNSEnabled
+	newCapture := routeCfg.FakeIPEnabled || routeCfg.ProxyDNSEnabled
+	if a.divertSrv != nil && newCapture {
 		if err := a.divertSrv.SyncPlatformDNSCapture(true); err != nil {
 			rollbackDivert()
 			return fmt.Errorf("无法启用内核 DNS 防泄漏队列，路由策略未生效: %w", err)
 		}
 	}
 	if err := a.routingEngine.Reload(routeCfg); err != nil {
-		if a.divertSrv != nil && routeCfg.FakeIPEnabled && !oldFakeIP {
+		if a.divertSrv != nil && newCapture && !oldCapture {
 			if rollback := a.divertSrv.SyncPlatformDNSCapture(false); rollback != nil {
 				log.Printf("[dns] 恢复原 DNS 队列模式失败: %v", rollback)
 			}
@@ -2054,11 +2057,11 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 	}
 	a.cfg.Routing = a.routingEngine.Config()
 	a.cfg.DivertConfig = divertCfg
-	if a.divertSrv != nil && !routeCfg.FakeIPEnabled && oldFakeIP {
+	if a.divertSrv != nil && !newCapture && oldCapture {
 		// Relax after publishing disabled policy. Failure leaves a stricter
 		// kernel queue, and the reconciler will retry the change.
 		if err := a.divertSrv.SyncPlatformDNSCapture(false); err != nil {
-			log.Printf("[dns] 已关闭 FakeIP，但恢复普通 DNS 队列失败，将自动重试: %v", err)
+			log.Printf("[dns] 已关闭 DNS 接管，但恢复普通 DNS 队列失败，将自动重试: %v", err)
 		}
 	}
 	return nil

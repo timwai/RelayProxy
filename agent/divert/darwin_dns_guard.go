@@ -10,7 +10,8 @@ import (
 )
 
 // The protection marker survives Agent crashes. Its lifecycle follows the
-// user's FakeIP policy rather than the IPC socket: disabling FakeIP removes
+// user's DNS takeover policy rather than the IPC socket: disabling both FakeIP
+// and real-IP proxy DNS removes
 // the marker, but terminating the Agent while enabled leaves it armed.
 func writeDarwinGuardMarker(tokenPath string, armed bool) error {
 	path := filepath.Join(filepath.Dir(tokenPath), "dns-guard.enabled")
@@ -46,7 +47,7 @@ func writeDarwinGuardMarker(tokenPath string, armed bool) error {
 
 func (i *darwinInterceptor) watchGuardMarker(tokenPath string) {
 	defer i.wg.Done()
-	last := i.server.fakeIPEnabled()
+	last := i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -54,7 +55,7 @@ func (i *darwinInterceptor) watchGuardMarker(tokenPath string) {
 		case <-i.ctx.Done():
 			return
 		case <-ticker.C:
-			current := i.server.fakeIPEnabled()
+			current := i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()
 			if current != last {
 				if err := writeDarwinGuardMarker(tokenPath, current); err != nil {
 					// Do not publish an unverified security state.

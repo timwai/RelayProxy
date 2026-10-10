@@ -459,16 +459,18 @@ type CustomExitUpdate struct {
 }
 
 type RoutingConfigUpdate struct {
-	Mode              *string        `json:"mode"`
-	DNSMode           *string        `json:"dns_mode"`
-	AutoDetectDNS     *bool          `json:"auto_detect_dns"`
-	FakeIPEnabled     *bool          `json:"fake_ip_enabled"`
-	BlockDoHEndpoints *bool          `json:"block_doh_endpoints"`
-	ForwardOtherDNS   *bool          `json:"forward_other_dns"`
-	DNSExitID         *string        `json:"dns_exit_id"`
-	DoHBlockedIPs     *[]string      `json:"doh_blocked_ips"`
-	DefaultAction     *string        `json:"default_action"`
-	Rules             []routing.Rule `json:"rules"` // Full replacement
+	Mode                  *string        `json:"mode"`
+	DNSMode               *string        `json:"dns_mode"`
+	AutoDetectDNS         *bool          `json:"auto_detect_dns"`
+	DNSAssociationEnabled *bool          `json:"dns_association_enabled"`
+	ProxyDNSEnabled       *bool          `json:"proxy_dns_enabled"`
+	FakeIPEnabled         *bool          `json:"fake_ip_enabled"`
+	BlockDoHEndpoints     *bool          `json:"block_doh_endpoints"`
+	ForwardOtherDNS       *bool          `json:"forward_other_dns"`
+	DNSExitID             *string        `json:"dns_exit_id"`
+	DoHBlockedIPs         *[]string      `json:"doh_blocked_ips"`
+	DefaultAction         *string        `json:"default_action"`
+	Rules                 []routing.Rule `json:"rules"` // Full replacement
 }
 
 // SaveResult tells the UI whether the change took effect immediately.
@@ -699,6 +701,13 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Routing != nil {
 		if in.Routing.AutoDetectDNS != nil {
 			cfg.Routing.AutoDetectDNS = *in.Routing.AutoDetectDNS
+		}
+		if in.Routing.DNSAssociationEnabled != nil {
+			v := *in.Routing.DNSAssociationEnabled
+			cfg.Routing.DNSAssociationEnabled = &v
+		}
+		if in.Routing.ProxyDNSEnabled != nil {
+			cfg.Routing.ProxyDNSEnabled = *in.Routing.ProxyDNSEnabled
 		}
 		if in.Routing.FakeIPEnabled != nil {
 			cfg.Routing.FakeIPEnabled = *in.Routing.FakeIPEnabled

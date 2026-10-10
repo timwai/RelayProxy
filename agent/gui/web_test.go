@@ -159,6 +159,8 @@ func TestWebDNSSettingsSurviveSaveAndSubsequentRoutingSave(t *testing.T) {
 		{"strict_fakeip", `{"dns_mode":"proxy","auto_detect_dns":false,"fake_ip_enabled":true,"block_doh_endpoints":true,"forward_other_dns":true,"dns_exit_id":"","doh_blocked_ips":["1.1.1.1"]}`},
 		{"automatic", `{"dns_mode":"proxy","auto_detect_dns":true,"fake_ip_enabled":false,"block_doh_endpoints":false,"forward_other_dns":false}`},
 		{"manual_local", `{"dns_mode":"local","auto_detect_dns":false,"fake_ip_enabled":false}`},
+		{"real_proxy_dns", `{"dns_mode":"proxy","dns_association_enabled":true,"proxy_dns_enabled":true,"fake_ip_enabled":false,"dns_exit_id":""}`},
+		{"association_disabled", `{"dns_mode":"proxy","dns_association_enabled":false,"proxy_dns_enabled":false,"fake_ip_enabled":false}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			b := newWebTestBridge(t)

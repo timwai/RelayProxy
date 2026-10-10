@@ -53,6 +53,22 @@ func (e *Engine) FakeIPEnabled() bool {
 	return e.config.FakeIPEnabled && (e.config.DNSMode == "" || e.config.DNSMode == DNSModeProxy)
 }
 
+// DNSAssociationEnabled controls conservative hostname attribution from observed
+// DNS responses. Absence in older configs preserves legacy behavior (enabled).
+func (e *Engine) DNSAssociationEnabled() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.DNSAssociationEnabled == nil || *e.config.DNSAssociationEnabled
+}
+
+// ProxyDNSEnabled is independent of proxy hostname forwarding and FakeIP.
+// Only captured system DNS/53 is resolved over authenticated proxy-side DoT.
+func (e *Engine) ProxyDNSEnabled() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.ProxyDNSEnabled && !e.config.FakeIPEnabled
+}
+
 // DoHBlockedIPs returns a defensive copy of the configured explicit
 // HTTPS/443 endpoint blocklist. The matcher only runs for port 443.
 func (e *Engine) DoHBlockedIPs() []string {

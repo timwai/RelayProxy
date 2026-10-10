@@ -181,3 +181,32 @@ func TestAutoDetectDNSRejectsFakeIPInterception(t *testing.T) {
 		t.Fatalf("auto detection should accept either manual fallback choice: %v", err)
 	}
 }
+
+func TestAutoDNSResolutionFallsBackToProxyOnlyAfterFailedLocalLookup(t *testing.T) {
+	ctx := context.Background()
+	original := "proxy-only.example.invalid"
+	for _, tc := range []struct {
+		name string
+		ips  []netip.Addr
+		err  error
+		want string
+	}{
+		{"resolver_error", nil, errors.New("system DNS unavailable"), original},
+		{"no_records", nil, nil, original},
+		{"invalid_addresses", []netip.Addr{{}}, nil, original},
+		{"success_ipv4", []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}, nil, "192.0.2.1"},
+		{"success_ipv6", []netip.Addr{netip.MustParseAddr("2001:db8::1")}, nil, "2001:db8::1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := autoDNSResolution(ctx, original, tc.ips, tc.err)
+			if err != nil || got != tc.want {
+				t.Fatalf("auto resolver chose %q (%v); want %q", got, err, tc.want)
+			}
+		})
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got, err := autoDNSResolution(canceled, original, nil, errors.New("system DNS unavailable")); !errors.Is(err, context.Canceled) || got != "" {
+		t.Fatalf("canceled DNS leaked hostname to proxy: %q, %v", got, err)
+	}
+}

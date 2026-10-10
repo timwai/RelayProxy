@@ -62,7 +62,6 @@ func (d *RoutingDialer) ResolveProxyTarget(ctx context.Context, host string) (st
 	return "", fmt.Errorf("local DNS for %q returned no IP addresses", host)
 }
 
-
 // Prefer IPv4 for the system resolver path, preserving the existing
 // local-resolution policy and leaving the DNS choice deterministic.
 func firstResolvedIP(ips []netip.Addr) string {

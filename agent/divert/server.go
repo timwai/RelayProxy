@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -63,7 +64,8 @@ type Server struct {
 	dialer   Dialer
 	guard    LoopGuard
 	fakeDNS  *fakeIPDNS
-	dnsLimit chan struct{} // bound concurrent TLS resolver requests
+	dnsLimit          chan struct{} // bound concurrent encrypted resolver requests
+	lastDNSFailureLog atomic.Int64
 
 	ctx         context.Context
 	cancel      context.CancelFunc

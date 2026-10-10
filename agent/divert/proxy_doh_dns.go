@@ -11,6 +11,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -36,13 +37,49 @@ var proxyDNSDoHUpstreams = [...]proxyDNSUpstream{
 	{"Quad9", "9.9.9.9", "dns.quad9.net", "https://dns.quad9.net/dns-query"},
 }
 
+// DNSUpstream represents an administrator-configured, certificate-validated
+// DNS-over-HTTPS resolver reached over the selected Relay/custom proxy exit.
+// URL is never resolved by the Agent OS: BootstrapIP is used for the dial.
+type DNSUpstream struct {
+	URL         string
+	BootstrapIP string
+}
+
+func (s *Server) activeProxyDNSUpstreams() ([]proxyDNSUpstream, bool) {
+	if s != nil && s.opts.DNSUpstreams != nil {
+		custom := s.opts.DNSUpstreams()
+		if len(custom) > 0 {
+			result := make([]proxyDNSUpstream, 0, len(custom))
+			for _, item := range custom {
+				endpoint, err := url.Parse(item.URL)
+				// The routing config is validated before policy publication.
+				// Fail closed if an unvalidated option reaches this layer.
+				if err != nil || endpoint.Scheme != "https" || endpoint.Hostname() == "" ||
+					(endpoint.Port() != "" && endpoint.Port() != "443") || item.BootstrapIP == "" {
+					return nil, true
+				}
+				result = append(result, proxyDNSUpstream{
+					name: endpoint.Hostname(), address: item.BootstrapIP,
+					host: endpoint.Hostname(), url: item.URL,
+				})
+			}
+			return result, true
+		}
+	}
+	return append([]proxyDNSUpstream(nil), proxyDNSDoHUpstreams[:]...), false
+}
+
 // exchangeProxyDNS tries independent HTTPS resolvers through one selected
 // exit; Quad9 is not a required bootstrap dependency. Keep negative replies
 // (NXDOMAIN) authoritative, but retry transient upstream SERVFAIL. Every
 // attempt is time-bounded; there is never a system DNS/plaintext fallback.
 func (s *Server) exchangeProxyDNS(ctx context.Context, routeExitID string, question []byte) ([]byte, error) {
+	upstreams, custom := s.activeProxyDNSUpstreams()
+	if len(upstreams) == 0 {
+		return nil, errors.New("invalid configured DNS upstream")
+	}
 	var failures []string
-	for _, upstream := range proxyDNSDoHUpstreams {
+	for _, upstream := range upstreams {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -59,6 +96,11 @@ func (s *Server) exchangeProxyDNS(ctx context.Context, routeExitID string, quest
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	// Explicit upstream lists are exclusive. Never query the built-in
+	// providers after an administrator has selected private/external DNS.
+	if custom {
+		return nil, fmt.Errorf("custom proxy DNS resolvers unavailable: %s", strings.Join(failures, "; "))
 	}
 	reply, err := s.exchangeProxyDoT(ctx, routeExitID, question)
 	if err == nil {

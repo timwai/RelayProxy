@@ -91,6 +91,17 @@ func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()
 }
 
+// ProbeDNS tests each configured encrypted resolver through the active DNS
+// exit, respecting the same TLS and no-local-DNS rules as Auto mode.
+func (b *UIBridge) ProbeDNS() (divert.DNSProbeReport, error) {
+	if b == nil || b.agent == nil {
+		return divert.DNSProbeReport{}, errors.New("agent unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return b.agent.ProbeDNS(ctx)
+}
+
 // TestCustomExit makes a real TCP CONNECT to a stable public destination
 // through the selected local proxy. The upstream credentials never leave the
 // Agent process or enter the returned diagnostics.

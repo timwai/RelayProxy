@@ -1,21 +1,35 @@
-# RelayProxy Browser Sync — 无 Agent Chrome 扩展（开发预览）
+# RelayProxy Browser Sync — Chrome 扩展（P3 开发预览）
 
-本项目使用 Chrome MV3 扩展直接连接 RelayProxy Server 的 **Admin HTTPS** 服务，无需本机 RelayProxy Agent 或 Native Messaging Host。
+Chrome 扩展直接连接 RelayProxy Server 的 **Admin HTTPS/WSS** 服务，不需要安装或运行本机 Agent，也不需要 Native Messaging、SOCKS5 或透明代理。
 
-## 当前实现
+> **安全声明：** 同步网站会话 Cookie 相当于向另一台设备授予网站账号访问能力。仅限用户自己拥有或明确授权的账号与设备；生产部署前需完成真实 Chrome 双端验证、安全审计和跨浏览器版本回归。网站设备绑定、DBSC、Passkey、多因素验证等机制不能通过复制 Cookie 绕过。
 
-- 各 Chrome Profile 独立生成设备 ID 和非导出 WebCrypto P-256 签名、加密密钥，存储在 IndexedDB。
-- Chrome 扩展在用户点击后为 Server 和目标网站请求 HTTPS Host 权限。
-- `POST /api/v1/browser-sync/devices/register` 注册 pending 浏览器设备。
-- Server Admin API 审批、撤销独立浏览器设备。
-- Chrome 使用一次性随机挑战和 ECDSA 签名完成 WSS AUTH_OK 验证。
-- **WSS 已支持双方加密配对邀请、接受、最终确认、撤销及心跳；仍拒绝所有 Session/Cookie 数据帧**；所有 Cookie/Session 数据帧均被拒绝。
+## 功能进度
 
-**当前不能同步登录会话。** 尚未实现站点规则双端配对、公钥指纹确认、端到端加密、Cookie 收发和 Server Web 浏览器管理 UI。
+| 能力 | 状态 |
+|---|---|
+| 每个 Chrome Profile 独立设备签名/加密密钥 | 已实现 |
+| Server 独立浏览器设备注册、管理员审批、撤销 | 已实现 |
+| Chrome 通过签名挑战认证 Admin WSS | 已实现 |
+| A/B 同一 Identity 双端配对及密钥指纹校验 | 已实现 |
+| 指定站点/ Cookie 名称加密邀请 | 已实现 |
+| 浏览器端 WebCrypto P-256 ECDH/HKDF/AES-GCM 快照加密及签名 | 已实现 |
+| Server 按 ACTIVE 规则签名验收、递增序号防重放、密文路由 | 已实现 |
+| 精确 HTTPS Host、Host-only、Secure、根路径、非分区 Cookie 采集/恢复 | 已实现 |
+| 目标已有不同登录 Cookie 的冲突保护、明确同意后覆盖 | 已实现 |
+| 手动同步、Cookie 变化后自动尝试发送、启动和定时重连请求 | 已实现 |
+| 同步成功后打开网站、RELAYED/APPLIED/CONFLICT/FAILED 状态 | 已实现 |
+| Server Web 浏览器设备管理可视化页面 | 未实现，目前使用 Admin API |
+| 跨 Chrome 真机双端网站登录兼容性验收、完整安全审计 | **未完成** |
+| LocalStorage、IndexedDB、分区 Cookie、跨子域、设备绑定会话 | 不在 P3 范围 |
 
-## Server 设置
+Chrome 扩展保留最小 Host 权限；所有 Cookie 值只用于内存中的加密处理和指定站点的 Cookie API 写入，**不写入 Server 数据库、浏览器扩展本地存储或日志**。服务器无会话解密密钥，不保存离线快照。启动时如果 A 离线，B 不能恢复最新状态。
 
-`browser_sync` 默认关闭。只有管理监听端口启用 TLS，且指定允许的 Chrome Extension ID，才能开启：
+目前 `APPLIED` 仅代表 Chrome Cookie API 成功写入，**不代表目标网站服务器验证了登录**。请使用经授权的测试网站或测试账号验证。
+
+## Server 配置
+
+在 Server Admin HTTPS 监听器上启用独立 Browser Sync API：
 
 ```yaml
 server:
@@ -26,14 +40,12 @@ server:
 browser_sync:
   enabled: true
   extension_ids:
-    - "abcdefghijklmnopabcdefghijklmnop" # 改为 chrome://extensions 中实际 ID
+    - "abcdefghijklmnopabcdefghijklmnop" # 改成 chrome://extensions 里的真实扩展 ID
 ```
 
-扩展应填写 `https://relay.example.com:8443` 一类的 **Admin HTTPS Origin**，不是 QUIC/代理隧道端口。证书必须由浏览器信任。
+默认 **`browser_sync.enabled=false`**。使用浏览器信任的 TLS 证书。这里填的是 **Admin HTTPS Origin**，例如 `https://relay.example.com:8443`，不是 TCP/QUIC 隧道端口。无 Agent 模式暂不支持 P2P。
 
-### Admin API
-
-以下端点由现有 RelayProxy 管理员登录态和服务端 Origin/CSRF 检查保护：
+Browser Sync 设备审批仍由现有 RelayProxy 管理员登录/CSRF 检查保护：
 
 ```text
 GET  /api/v1/browser-sync/admin/devices
@@ -41,35 +53,36 @@ POST /api/v1/browser-sync/admin/devices/{id}/approve
 POST /api/v1/browser-sync/admin/devices/{id}/revoke
 ```
 
-审批 JSON 样例：
+审批 JSON 示例：
 
 ```json
-{
-  "identityId": "已有且状态为 active 的 Identity UUID",
-  "send": true,
-  "receive": false
-}
+{"identityId":"已存在且 active 的身份 ID","send":true,"receive":false}
 ```
 
-不要将 Admin Cookie 提供给扩展，审批只赋予浏览器专用权限，不授予 proxy.use 或 RDP 权限。
+B 设备应由管理员赋予 `receive:true`；A 赋予 `send:true`。浏览器身份不能继承 Agent 的代理和 RDP 权限。
 
-## 开发验证
+## 两台 Chrome 的测试流程
 
-1. Chrome 打开 `chrome://extensions`，启用开发者模式。
-2. 选择“加载已解压的扩展程序”，目录为 `browser/chrome-extension`。
-3. 查看扩展弹窗中显示的实际扩展 ID，加入 Server `extension_ids`，重启 Server。
-4. 输入并保存 Admin HTTPS 地址；点击“注册浏览器设备”。
-5. 管理员审批设备后，点击“连接 Server”。
-6. 验证 Server AUTH_OK 返回 `sessionTransferEnabled:false`，不会传输 Cookie 数据。
+1. A/B 在 `chrome://extensions` 开启开发者模式，将本目录作为“已解压扩展”加载。确保两台扩展 ID 与 Server 白名单匹配。
+2. A/B 在扩展弹窗配置并授权 Admin HTTPS 地址，分别点击 **注册浏览器设备**。
+3. 在 Server Admin API 中审批 A（发送）、B（接收），并关联到同一 active Identity。
+4. 两边在扩展弹窗点击 **连接 Server**。A 点击“请求站点权限”，添加准确的 HTTPS **Origin**，不是带路径/查询参数的 URL。
+5. A 点击刷新设备，选 B、授权网站和 **明确指定的 Cookie 名称**，创建加密配对邀请。Cookie 名称应来自用户有权检查的网站测试环境，不要将 Cookie 值粘贴到 UI。
+6. B 刷新邀请，阅读网站和 Cookie 白名单，并通过**独立可信渠道**与 A 比较校验码后接受。A 再最终核对并确认，规则状态为 `active`。
+7. A 使用测试账号在 Chrome 正常登录网站；站点 Cookie 变化时扩展会自动尝试发送，也可按“立即发送加密登录状态”。
+8. B 点击“从来源设备请求同步”或“同步成功后打开网站”。B 没有其他登录状态时，写入符合范围的 Cookie；存在不同账号时默认显示 `CONFLICT`，只有用户明确勾选覆盖后才会重试。
+9. 观察最终状态 `APPLIED`。随后确认网站是否实际上无需再次登录；如需再次认证，属于网站兼容性问题，不宣称绕过。
+10. 任一设备可撤销配对，Server 随即拒绝后续转发。撤销 RelayProxy 配对 **不会**撤销网站已经签发的会话令牌。
 
-完整设计参见 [Browser Session Sync v1.1](../../docs/browser-session-sync-design-development.md)。
+**Cookie 兼容限制：** P3 仅支持所选择网站准确主机上的 Secure、hostOnly、`path=/`、非分区 Cookie；不自动扩展到父域、子域或 CHIPS。对复杂网站，采集可能明确失败而不是扩大 Cookie 读取/写入权限。
 
-## 双端配对开发预览
+## 测试
 
-A/B 在管理员审批后连接 WSS。A 选择同一 Identity 下的 B、已授权 HTTPS 网站及 Cookie 名称，创建经 WebCrypto ECDH/HKDF/AES-GCM 加密并用设备 ECDSA 密钥签名的邀请。B 验签、解密站点策略并核对双方校验码后接受；A 最终确认规则激活。**必须通过独立可信渠道核对校验码**，而不能仅相信 Server 转发的信息。
+```bash
+cd browser/chrome-extension
+npm test
+```
 
-目前只是授权控制面，WSS AUTH_OK 的 sessionTransferEnabled 仍为 false；Cookie/Session 载荷不会上传或恢复。
+Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api`。GitHub PR 的 Go CI 和 UI CI 也包含扩展 WebCrypto、作用域和冲突测试，以及带 TLS 的真实 WebSocket 测试。
 
-## 扩展测试
-
-运行 `cd browser/chrome-extension && npm test`，仓库 UI CI 也会执行扩展 JS 语法检查和配对逻辑测试。生产部署前必须完成剩余安全评审。
+设计文档：[Browser Session Sync v1.1](../../docs/browser-session-sync-design-development.md)。本分支是 Draft PR，未合并 `main`。

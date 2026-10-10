@@ -25,7 +25,11 @@ func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool
 		return s.fakeDNS.replyScoped(query, s.guard.RelayHost, s.guard.RelayIPs, "", false)
 	}
 	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, query []byte) ([]byte, error) {
-		return s.exchangeLimitedProxyDNS(ctx, "", query)
+		response, err := s.exchangeLimitedProxyDNS(ctx, "", query)
+		if err != nil {
+			s.reportProxyDNSError(err)
+		}
+		return response, err
 	})
 }
 

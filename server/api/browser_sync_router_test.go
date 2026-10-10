@@ -8,8 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	browsersync "relayproxy/server/browser_sync"
 	_ "modernc.org/sqlite"
+
+	browsersync "relayproxy/server/browser_sync"
 )
 
 func TestBrowserSyncRegistrationIsolatedFromAdminCSRF(t *testing.T) {

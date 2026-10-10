@@ -21,10 +21,10 @@ func TestAutoDNSUsesProxyHTTPS443BeforeTLS853(t *testing.T) {
 	var ports []uint16
 	var exits []string
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
+		Config:          Config{DefaultAction: ActionProxy},
 		ProxyDNSEnabled: func() bool { return true },
-		ProxyReady: func() bool { return true },
-		DefaultExitID: func() string { return "working-exit" },
+		ProxyReady:      func() bool { return true },
+		DefaultExitID:   func() string { return "working-exit" },
 		Dialer: &testDialer{tcp: func(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
 			if host != "9.9.9.9" {
 				t.Errorf("resolver was not pinned to an IP: %s", host)
@@ -84,10 +84,10 @@ func TestProxyDoHRejectsUntrustedAndOversizedResponses(t *testing.T) {
 	another := fakeDNSQuestion(t, "untrusted.example", dnsmessage.TypeA)
 	wrong := authenticatedTestDNSResponse(t, another, netip.MustParseAddr("203.0.113.45"))
 	for _, tt := range []struct {
-		name string
+		name   string
 		status int
-		mime string
-		body []byte
+		mime   string
+		body   []byte
 	}{
 		{"wrong question", 200, "application/dns-message", wrong},
 		{"wrong content type", 200, "text/plain", query},
@@ -115,7 +115,7 @@ func TestAutoDNSQueueWaitsInsteadOfImmediateSERVFAIL(t *testing.T) {
 	var called bool
 	var mu sync.Mutex
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
+		Config:     Config{DefaultAction: ActionProxy},
 		ProxyReady: func() bool { return true },
 		Dialer: &testDialer{tcp: func(_ context.Context, _, _ string, _ uint16) (net.Conn, error) {
 			mu.Lock()

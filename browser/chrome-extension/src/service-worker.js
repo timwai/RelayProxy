@@ -93,7 +93,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           rules.push(summary);
         }
         const transfer = (await chrome.storage.local.get('browserSyncTransferStatus')).browserSyncTransferStatus || {};
-        for (const summary of rules) summary.lastTransfer = transfer[summary.id] || null;
+        const paused = (await chrome.storage.local.get('browserSyncRestorePaused')).browserSyncRestorePaused || {};
+        const interrupted = (await chrome.storage.local.get('browserSyncRestoreJournal')).browserSyncRestoreJournal || {};
+        for (const summary of rules) {
+          summary.lastTransfer = paused[summary.id] || interrupted[summary.id]
+            ? {state:'PARTIAL',time:Date.now()} : (transfer[summary.id] || null);
+        }
         return { ok: true, rules };
       }
       case 'CREATE_RULE': {

@@ -85,7 +85,7 @@ func TestActiveApplicationsJSONGroupsLiveAndroidPackages(t *testing.T) {
 	if len(shared.Exits) != 1 || shared.Exits[0] != "exit-a" {
 		t.Fatalf("shared UID exits=%+v", shared.Exits)
 	}
-	if len(shared.Rules) != 2 || shared.Rules[0] != "视频优先" && shared.Rules[1] != "视频优先" {
+	if len(shared.Rules) != 2 || shared.Rules[0] != "视频优先" || shared.Rules[1] != "默认规则" {
 		t.Fatalf("shared UID rules=%+v", shared.Rules)
 	}
 	if len(shared.Targets) != 2 {

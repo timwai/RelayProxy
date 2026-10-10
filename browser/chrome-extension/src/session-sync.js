@@ -68,8 +68,16 @@ export async function sendSnapshot(ruleId) {
     if(!ctx.sourceRole)throw new Error('只有来源设备可以发送登录状态');
     const payload=await captureCookies(ctx.policy);
     const stored=(await chrome.storage.local.get(LAST_SEQUENCE))[LAST_SEQUENCE]||{};
-    const sequence=(stored[ruleId]||0)+1;
-    if(!Number.isSafeInteger(sequence))throw new Error('会话序号耗尽');
+    // The server is authoritative after a crash, upgrade or lost local
+    // storage. A lower local counter must never cause silent replay failures.
+    const cursorReply=await sendControl('SEQUENCE_CURSOR',{ruleId});
+    const cursor=cursorReply?.lastSequence;
+    if(cursorReply?.type!=='SESSION_CURSOR'||cursorReply.ruleId!==ruleId||
+       !Number.isSafeInteger(cursor)||cursor<0) throw new Error('无法安全恢复会话序号');
+    const previous=stored[ruleId]||0;
+    if(!Number.isSafeInteger(previous)||previous<0) throw new Error('本地会话序号已损坏');
+    const sequence=Math.max(previous,cursor)+1;
+    if(!Number.isSafeInteger(sequence))throw new Error('会话序号耗尽，必须重新配对');
     // Reserve BEFORE asynchronous network delivery; no repeated nonce or
     // sequence even if WSS rejects the delivery or worker suspends.
     stored[ruleId]=sequence;

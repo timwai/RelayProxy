@@ -9,17 +9,19 @@ import (
 
 // Engine evaluates the same ordered compound rules for every client entry.
 type Engine struct {
-	mu       sync.RWMutex
-	config   Config
-	compound []compoundRule
-	subscriptions []compiledSubscription
+	mu                 sync.RWMutex
+	config             Config
+	compound           []compoundRule
+	subscriptions      []compiledSubscription
 	subscriptionCancel context.CancelFunc
 }
 type portRange struct{ start, end uint16 }
 
 func NewEngine(cfg Config) (*Engine, error) {
 	e, err := newEngineSnapshot(cfg)
-	if err == nil { e.startSubscriptionUpdates() }
+	if err == nil {
+		e.startSubscriptionUpdates()
+	}
 	return e, err
 }
 
@@ -54,7 +56,10 @@ func (e *Engine) Reload(cfg Config) error {
 		return err
 	}
 	e.mu.Lock()
-	if e.subscriptionCancel != nil { e.subscriptionCancel(); e.subscriptionCancel = nil }
+	if e.subscriptionCancel != nil {
+		e.subscriptionCancel()
+		e.subscriptionCancel = nil
+	}
 	e.config, e.compound, e.subscriptions = compiled.config, compiled.compound, compiled.subscriptions
 	e.mu.Unlock()
 	e.startSubscriptionUpdates()
@@ -151,9 +156,13 @@ func (e *Engine) DecideFlow(flow Flow) Decision {
 		}
 	}
 	for _, item := range e.subscriptions {
-		if !item.config.Enabled || item.status.Rules == 0 || item.excluded.matches(flow) || !item.included.matches(flow) { continue }
+		if !item.config.Enabled || item.status.Rules == 0 || item.excluded.matches(flow) || !item.included.matches(flow) {
+			continue
+		}
 		action := item.config.Action
-		if action == "" { action = ActionProxy }
+		if action == "" {
+			action = ActionProxy
+		}
 		return Decision{Action: action, ExitID: item.config.ExitID, Rule: "订阅：" + item.config.Name, Matched: true}
 	}
 	return Decision{Action: e.config.DefaultAction, Rule: "default"}

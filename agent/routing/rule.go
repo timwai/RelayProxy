@@ -65,7 +65,7 @@ type Decision struct {
 
 // Config holds all routing configuration.
 type Config struct {
-	Subscriptions     []Subscription `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"` // External lists evaluated after hand-written rules
+	Subscriptions []Subscription `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"` // External lists evaluated after hand-written rules
 
 	Mode                  Mode     `yaml:"mode"           json:"mode"`                   // Routing mode
 	DNSMode               DNSMode  `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"` // proxy (default) or local

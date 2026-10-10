@@ -78,7 +78,9 @@ func ValidateConfig(cfg Config) error {
 		if err := validateSubscriptionURL(sub.URL); err != nil {
 			return fmt.Errorf("routing.subscriptions[%d]: %w", i, err)
 		}
-		if seenURLs[sub.URL] { return fmt.Errorf("routing.subscriptions[%d]: duplicate URL", i) }
+		if seenURLs[sub.URL] {
+			return fmt.Errorf("routing.subscriptions[%d]: duplicate URL", i)
+		}
 		seenURLs[sub.URL] = true
 		if len(sub.Name) > 128 || strings.TrimSpace(sub.Name) == "" {
 			return fmt.Errorf("routing.subscriptions[%d]: name required (max 128)", i)

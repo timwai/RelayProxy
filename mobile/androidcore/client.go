@@ -291,7 +291,9 @@ func normalizeConfig(raw string) (clientConfig, error) {
 	if err := routing.ValidateCustomExits([]routing.CustomExit(cfg.CustomExits)); err != nil {
 		return cfg, err
 	}
-	if err := routing.ValidateSubscriptionExitReferences([]routing.CustomExit(cfg.CustomExits), cfg.Routing.Subscriptions); err != nil { return cfg, err }
+	if err := routing.ValidateSubscriptionExitReferences([]routing.CustomExit(cfg.CustomExits), cfg.Routing.Subscriptions); err != nil {
+		return cfg, err
+	}
 	if err := routing.ValidateCustomReferences([]routing.CustomExit(cfg.CustomExits), cfg.DefaultExitID, "", cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
 		return cfg, err
 	}
@@ -593,7 +595,9 @@ func (c *Client) Stop() error {
 	c.mu.Unlock()
 
 	c.cancel()
-	if c.routingDialer != nil { c.routingDialer.Engine().Close() }
+	if c.routingDialer != nil {
+		c.routingDialer.Engine().Close()
+	}
 	var proxyErr error
 	if socksServer != nil {
 		proxyErr = errors.Join(proxyErr, socksServer.Close())
@@ -666,7 +670,9 @@ func (c *Client) SetRoutingConfig(configJSON string) error {
 	if c.closed || c.routingDialer == nil {
 		return errors.New("routing runtime is unavailable")
 	}
-	if err := routing.ValidateSubscriptionExitReferences([]routing.CustomExit(c.cfg.CustomExits), cfg.Subscriptions); err != nil { return err }
+	if err := routing.ValidateSubscriptionExitReferences([]routing.CustomExit(c.cfg.CustomExits), cfg.Subscriptions); err != nil {
+		return err
+	}
 	if err := routing.ValidateCustomReferences([]routing.CustomExit(c.cfg.CustomExits), c.cfg.DefaultExitID, "", cfg.Rules, cfg.DNSExitID); err != nil {
 		return err
 	}

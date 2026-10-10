@@ -137,9 +137,11 @@ function renderRules(rules) {
     const desc = rule.role === 'source' ? '来源 A' : '接收 B';
     card.append(textNode('strong', desc + ' · ' + rule.status));
     card.append(textNode('p', '对端：' + rule.remoteID));
-    if (rule.lastTransfer && ['RELAYED','APPLIED','FAILED','CONFLICT'].includes(rule.lastTransfer.state)) {
-      const translated = {RELAYED:'密文已转发',APPLIED:'Cookie 已应用（网站登录未验证）',
-        FAILED:'同步失败',CONFLICT:'目标已有不同登录状态'};
+    if (rule.lastTransfer && ['SENDING','RELAYED','RECEIVED','APPLIED','FAILED','CONFLICT','UNKNOWN','PARTIAL'].includes(rule.lastTransfer.state)) {
+      const translated = {SENDING:'正在发送密文',RELAYED:'密文已转发',RECEIVED:'接收端已收到',
+        APPLIED:'Cookie 已应用（网站登录未验证）',FAILED:'同步失败',
+        CONFLICT:'目标已有不同登录状态',UNKNOWN:'结果尚不确定，可重试或等待对账',
+        PARTIAL:'Cookie 恢复不完整，已暂停接收，必须人工检查'};
       card.append(textNode('p', '最近同步：' + translated[rule.lastTransfer.state]));
     }
     if (!rule.valid) {
@@ -193,6 +195,20 @@ function renderRules(rules) {
       });
       card.append(sync);
       if (rule.role === 'target') {
+        if (rule.lastTransfer?.state === 'PARTIAL') {
+          card.append(textNode('p','注意：上次部分 Cookie 无法完整恢复。请检查当前目标网站的登录状态，确认没有混合账户后再恢复。','error'));
+          const resume = document.createElement('button');
+          resume.textContent = '我已检查登录状态，恢复此规则';
+          resume.addEventListener('click',async()=>{
+            if(!window.confirm('你是否已经检查目标网站的登录状态，并确认可以继续接收会话？'))return;
+            try {
+              await ask({type:'RESUME_PARTIAL_RESTORE',ruleId:rule.id,confirmed:true});
+              status('已解除恢复暂停。请检查目标登录账号后手动请求同步。');
+              await refreshPairing();
+            }catch(error){failure(error);}
+          });
+          card.append(resume);
+        }
         const open = document.createElement('button');
         open.textContent = '同步成功后打开网站';
         open.addEventListener('click',async()=>{

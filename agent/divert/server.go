@@ -46,6 +46,8 @@ type Options struct {
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
 	FakeIPEnabled      func() bool     // dynamically consulted for new transparent DNS queries
+	ProxyDNSEnabled    func() bool     // real A/AAAA and other DNS via authenticated DoT; not FakeIP
+	DNSAssociationEnabled func() bool // observed DNS->real IP attribution; defaults to enabled
 	BlockDoHEndpoints  func() bool     // opt-in domain-based DoH endpoint guard
 	ForwardOtherDNS    func() bool     // opt-in authenticated DoT via proxy for TXT/SRV
 	DNSExitID          func() string   // optional pinned exit for DNS, independent from app flows
@@ -242,6 +244,14 @@ func (s *Server) UDPListenAddr() string { return "" }
 
 func (s *Server) fakeIPEnabled() bool {
 	return s != nil && s.opts.FakeIPEnabled != nil && s.opts.FakeIPEnabled()
+}
+
+func (s *Server) proxyDNSEnabled() bool {
+	return s != nil && !s.fakeIPEnabled() && s.opts.ProxyDNSEnabled != nil && s.opts.ProxyDNSEnabled()
+}
+
+func (s *Server) dnsAssociationEnabled() bool {
+	return s != nil && (s.opts.DNSAssociationEnabled == nil || s.opts.DNSAssociationEnabled())
 }
 
 // fakeIPDestination includes every synthetic IP in active FakeIP mode, and

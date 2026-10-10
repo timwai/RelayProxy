@@ -59,3 +59,17 @@
 - 缓存刷新为尽力而为：不支持该 API 或失败时只记录日志、不阻断代理启动；不会清理 Chrome、Firefox 私有 DNS 缓存，也无法保证 DoH/DoT 被观察到。
 - Android 当前使用 VPN 内自动 `Mapped DNS`，并没有与桌面 DNS 三模式一一对应的 FakeIP/真实 IP 开关。因此 Android 设置展示“DNS 自动处理”及能力边界，不添加不能兑现的模式选择。
 - Windows 默认 REJECT 下 DNS 放行、TCP DNS 分段关联、Windows DNS Client 缓存刷新、Android Mapped DNS 文案均仍需要各自的端到端验证。**这些变更不是完整的系统防泄漏保证。**
+
+## 2026-10-10 自动 DNS 无法解析的实机反馈与修复
+
+用户实测：桌面 Agent 的 **自动** DNS 模式无法访问代理目标，但「真实 IP」和「FakeIP」模式正常。问题排查发现自动模式以前只允许走所选出口连接 `9.9.9.9:853` 的 Quad9 DNS-over-TLS。某些代理出口无法建立 853 连接，系统 DNS/53 又已被 RelayProxy 拦截，因此返回 SERVFAIL，造成整站无法解析。
+
+修复策略：
+
+- 自动模式的 **代理接管真实 IP DNS** 优先使用 Quad9 `https://dns.quad9.net/dns-query`（RFC 8484 `application/dns-message` POST），TCP 443 由配置的 Relay/自定义代理出口拨号到固定地址 `9.9.9.9`。TLS 使用 `dns.quad9.net` 严格验证证书；不得依赖本机域名解析、环境 HTTP_PROXY 或跳转其他目标。
+- HTTPS/443 故障时再尝试原有 DoT/TLS 853；两个路径失败才返回 SERVFAIL，**禁止**自动改走本机明文 DNS/53。
+- 将 16 路并发槽位的「队列满立即失败」替换为有总超时时间的等待，不再因为浏览器批量 DNS 查询直接产生突发 SERVFAIL。
+- 记录每 30 秒最多一条自动 DNS 上游故障摘要：`[divert] proxy DNS resolution failed ...`，注明 DNS 出口及 DoH/443、DoT/853 的失败原因，便于实机故障定位。
+- 不改变 FakeIP 解析行为、不增加用户侧 DNS 开关。新增回归测试验证出口/端口顺序、DoH 报文验证及限时排队。
+
+说明：此补丁解决 853 单点依赖及 DNS 高并发立即失败的可疑根因，但需更新 Windows Agent 并通过同一网络环境重复测试，才能确认用户报告的症状完全消失。

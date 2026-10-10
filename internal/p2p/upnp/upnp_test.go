@@ -396,23 +396,32 @@ func TestSOAPArgumentOrderMatchesIGDSpec(t *testing.T) {
 	for _, tt := range cases {
 		t.Run(tt.action, func(t *testing.T) {
 			args := make(map[string]string, len(tt.want))
-			for _, k := range tt.want { args[k] = "value" }
+			for _, k := range tt.want {
+				args[k] = "value"
+			}
 			actual := soapArgumentOrder(tt.action, args)
-			if len(actual) != len(tt.want) { t.Fatalf("SOAP argument count %v", actual) }
+			if len(actual) != len(tt.want) {
+				t.Fatalf("SOAP argument count %v", actual)
+			}
 			for i, k := range tt.want {
-				if actual[i] != k { t.Fatalf("SOAP argument at %d = %q, want %q", i, actual[i], k) }
+				if actual[i] != k {
+					t.Fatalf("SOAP argument at %d = %q, want %q", i, actual[i], k)
+				}
 			}
 		})
 	}
-	got := soapArgumentOrder("UnknownMethod", map[string]string{"b":"2","a":"1"})
+	got := soapArgumentOrder("UnknownMethod", map[string]string{"b": "2", "a": "1"})
 	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
 		t.Fatalf("unknown SOAP action should remain deterministic: %v", got)
 	}
 }
 
 func TestUPnPMappingRefreshRetryIntervals(t *testing.T) {
-	for _, tt := range []struct{ failures int; want time.Duration }{
-		{1, 5*time.Second}, {2, 15*time.Second}, {3, 30*time.Second}, {4, time.Minute}, {12, time.Minute},
+	for _, tt := range []struct {
+		failures int
+		want     time.Duration
+	}{
+		{1, 5 * time.Second}, {2, 15 * time.Second}, {3, 30 * time.Second}, {4, time.Minute}, {12, time.Minute},
 	} {
 		if got := mappingRefreshRetryDelay(tt.failures); got != tt.want {
 			t.Fatalf("failure=%d, delay=%s, want %s", tt.failures, got, tt.want)

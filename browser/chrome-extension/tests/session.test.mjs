@@ -47,6 +47,11 @@ function createProfile() {
       }},
       cookies: {
         async getAll({url}) {return [...jar.values()].filter(c=>new URL(url).hostname===c.domain);},
+        async remove({url,name}) {
+          if (new URL(url).hostname!=='example.com'||!jar.has(name)) return null;
+          jar.delete(name);
+          return {url,name};
+        },
         async set(details) {
           const c = {
             name:details.name,value:details.value,secure:details.secure,
@@ -101,7 +106,7 @@ test('host-only root and existing-login conflicts are enforced without token sto
     httpOnly:true,sameSite:'lax',hostOnly:true,domain:'example.com',path:'/'};
   p.jar.set('session',conflicting);
   const snapshot={siteOrigin:policy.siteOrigin,cookieNames:policy.cookieNames,
-    cookies:[{name:'session',value:'remote-different-account',secure:true,httpOnly:true,sameSite:'lax'}]};
+    cookies:[{name:'session',value:'remote-different-account',secure:true,httpOnly:true,sameSite:'lax'}],removedNames:[]};
   await assert.rejects(applyCookies('rule',snapshot,policy),/CONFLICT/);
   assert.equal(p.jar.get('session').value,'existing-browser-account');
   await applyCookies('rule',snapshot,policy,{allowOverwrite:true});
@@ -110,4 +115,45 @@ test('host-only root and existing-login conflicts are enforced without token sto
   await assert.rejects(applyCookies('rule',{...snapshot,cookies:[{...snapshot.cookies[0],value:'next-from-source'}]},policy),/CONFLICT/);
   p.jar.set('session',{...conflicting,hostOnly:false,domain:'.example.com'});
   await assert.rejects(captureCookies(policy),/作用域/);
+});
+
+test('logout removes only Cookie values last installed by the same rule', async () => {
+  const source=createProfile(),target=createProfile();
+  use(source);
+  source.jar.set('session',{name:'session',value:'account-on-A',secure:true,
+    httpOnly:true,sameSite:'lax',hostOnly:true,domain:'example.com',path:'/'});
+  const loggedIn=await captureCookies(policy);
+  use(target);
+  await applyCookies('logout-rule',loggedIn,policy);
+  assert.equal(target.jar.get('session').value,'account-on-A');
+
+  use(source);
+  source.jar.delete('session');
+  const loggedOut=await captureCookies(policy);
+  assert.deepEqual(loggedOut.removedNames,['session']);
+  assert.deepEqual(loggedOut.cookies,[]);
+  use(target);
+  const removed=await applyCookies('logout-rule',loggedOut,policy);
+  assert.equal(removed.removed,1);
+  assert.equal(target.jar.has('session'),false);
+
+  target.jar.set('session',{name:'session',value:'other-local-account',secure:true,
+    httpOnly:true,sameSite:'lax',hostOnly:true,domain:'example.com',path:'/'});
+  await assert.rejects(applyCookies('logout-rule',loggedOut,policy),/CONFLICT/);
+  assert.equal(target.jar.get('session').value,'other-local-account');
+});
+
+test('logout refuses deleting a Cookie modified by the receiver after sync',async()=>{
+  const target=createProfile();use(target);
+  const initially={siteOrigin:policy.siteOrigin,cookieNames:policy.cookieNames,
+    cookies:[{name:'session',value:'initial-source-cookie',secure:true,
+      httpOnly:true,sameSite:'strict'}],removedNames:[]};
+  await applyCookies('logout-protected',initially,policy);
+  target.jar.get('session').value='changed-by-target-site';
+  const removed={siteOrigin:policy.siteOrigin,cookieNames:policy.cookieNames,
+    cookies:[],removedNames:['session']};
+  await assert.rejects(applyCookies('logout-protected',removed,policy),/CONFLICT/);
+  assert.equal(target.jar.get('session').value,'changed-by-target-site');
+  await assert.rejects(applyCookies('logout-protected',
+    {...removed,removedNames:['session','unexpected']},policy));
 });

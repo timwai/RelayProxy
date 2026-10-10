@@ -414,12 +414,17 @@ class ConnectionMonitorActivity : Activity() {
                 text = label
                 textSize = 10.5f
                 setTextColor(UiPalette.placeholder)
-            }, LinearLayout.LayoutParams(dp(38), ViewGroup.LayoutParams.WRAP_CONTENT))
+            }, LinearLayout.LayoutParams(
+                dp(if (label == "命中规则") 62 else 38),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ))
             addView(TextView(this@ConnectionMonitorActivity).apply {
                 text = value
+                contentDescription = "$label：$value"
                 textSize = 10.5f
                 setTextColor(UiPalette.muted)
-                maxLines = 2
+                maxLines = if (label == "命中规则") 3 else 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
     }

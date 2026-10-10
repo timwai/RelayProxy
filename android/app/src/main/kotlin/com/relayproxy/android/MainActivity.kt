@@ -114,6 +114,11 @@ class MainActivity : Activity() {
     private lateinit var nodesListContainer: LinearLayout
     private lateinit var customExitContainer: LinearLayout
     private lateinit var autoNodeRadioDot: View
+    private lateinit var nodeDeviceSection: LinearLayout
+    private lateinit var nodeCustomSection: LinearLayout
+    private lateinit var nodeTabButtons: List<TextView>
+    private lateinit var nodePingAllButton: TextView
+    private var selectedNodeTab = 0
 
     // ====== Tab 2: Routing UI Views ======
     private data class RuleDragToken(val ruleId: String)
@@ -925,13 +930,13 @@ class MainActivity : Activity() {
         val titles = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply {
-                text = "出口节点选择"
+                text = "网络出口"
                 textSize = 19f
                 setTextColor(UiPalette.ink)
                 typeface = Typeface.DEFAULT_BOLD
             })
             addView(TextView(this@MainActivity).apply {
-                text = "从当前身份及已授权跨身份出口中路由流量"
+                text = "按设备出口与自定义代理出口分类管理"
                 textSize = 11.5f
                 setTextColor(UiPalette.muted)
                 setPadding(0, dp(2), 0, 0)
@@ -952,7 +957,34 @@ class MainActivity : Activity() {
             setOnClickListener { triggerPingAllNodes() }
         }
         header.addView(pingAllBtn)
+        nodePingAllButton = pingAllBtn
         content.addView(header)
+
+        val tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = UiKit.rounded(this@MainActivity, UiPalette.surfaceElevated, 12, UiPalette.lineSubtle)
+        }
+        nodeTabButtons = listOf("设备出口", "自定义出口").mapIndexed { index, label ->
+            TextView(this).apply {
+                text = label
+                textSize = 13.5f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                contentDescription = "切换到${label}"
+                setOnClickListener { selectNodeTab(index) }
+                tabBar.addView(this, LinearLayout.LayoutParams(0, dp(42), 1f))
+            }
+        }
+        content.addView(tabBar, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { bottomMargin = dp(16) })
+        nodeDeviceSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        nodeCustomSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(nodeDeviceSection)
+        content.addView(nodeCustomSection)
 
         val autoCard = UiKit.card(this, paddingDp = 15, radiusDp = 14).apply {
             isClickable = true
@@ -1001,7 +1033,7 @@ class MainActivity : Activity() {
         }
         autoRow.addView(radioContainer, LinearLayout.LayoutParams(dp(22), dp(22)))
         autoCard.addView(autoRow)
-        content.addView(autoCard)
+        nodeDeviceSection.addView(autoCard)
 
         nodesListContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1010,7 +1042,7 @@ class MainActivity : Activity() {
             }
             layoutParams = lp
         }
-        content.addView(nodesListContainer)
+        nodeDeviceSection.addView(nodesListContainer)
 
         val localHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1032,8 +1064,8 @@ class MainActivity : Activity() {
             isClickable = true
             setOnClickListener { editCustomExit(null) }
         })
-        content.addView(localHeader)
-        content.addView(TextView(this).apply {
+        nodeCustomSection.addView(localHeader)
+        nodeCustomSection.addView(TextView(this).apply {
             text = "支持 SOCKS5、HTTP、HTTPS CONNECT；可作为默认出口或分流规则出口。HTTP(S) 不支持 UDP。代理密码由 Android Keystore 加密保存。"
             textSize = 11.5f
             setTextColor(UiPalette.muted)
@@ -1042,13 +1074,33 @@ class MainActivity : Activity() {
         customExitContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
-        content.addView(customExitContainer)
+        nodeCustomSection.addView(customExitContainer)
         renderCustomExits()
+        selectNodeTab(selectedNodeTab)
 
         return ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(UiPalette.bg)
             addView(content)
+        }
+    }
+
+    private fun selectNodeTab(index: Int) {
+        selectedNodeTab = index.coerceIn(0, 1)
+        if (!::nodeDeviceSection.isInitialized || !::nodeCustomSection.isInitialized ||
+            !::nodeTabButtons.isInitialized
+        ) return
+        nodeDeviceSection.visibility = if (selectedNodeTab == 0) View.VISIBLE else View.GONE
+        nodeCustomSection.visibility = if (selectedNodeTab == 1) View.VISIBLE else View.GONE
+        if (::nodePingAllButton.isInitialized) {
+            nodePingAllButton.visibility = if (selectedNodeTab == 0) View.VISIBLE else View.GONE
+        }
+        nodeTabButtons.forEachIndexed { itemIndex, button ->
+            val chosen = itemIndex == selectedNodeTab
+            button.background = UiKit.rounded(
+                this, if (chosen) UiPalette.brandSoft else Color.TRANSPARENT, 9,
+            )
+            button.setTextColor(if (chosen) UiPalette.brand else UiPalette.muted)
         }
     }
 

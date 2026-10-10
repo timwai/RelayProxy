@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {enableFakeIP,setDoHBlocking,setOtherDNSForwarding,setAutoDNS,setProxyDNS} from './dnsSettings.js';
+import {enableFakeIP,setDoHBlocking,setOtherDNSForwarding,setAutoDNS,setProxyDNS,setRealProxyDNS} from './dnsSettings.js';
 
 test('enabling FakeIP automatically enables proxy DNS and ends auto mode',()=>{
  const next=enableFakeIP({dns_mode:'local',auto_detect_dns:true},true);
@@ -44,4 +44,19 @@ test('automatically detecting DNS can be switched back to explicit proxy resolut
  const manual=setProxyDNS(autodetected,true);
  assert.equal(manual.auto_detect_dns,false);
  assert.equal(manual.dns_mode,'proxy');
+});
+
+test('real-IP proxy DNS is independent of DNS association but exclusive with FakeIP',()=>{
+ const old={dns_mode:'proxy',dns_association_enabled:false,proxy_dns_enabled:false,auto_detect_dns:false,
+   fake_ip_enabled:true,block_doh_endpoints:true,forward_other_dns:true};
+ const enabled=setRealProxyDNS(old,true);
+ assert.equal(enabled.proxy_dns_enabled,true);
+ assert.equal(enabled.fake_ip_enabled,false);
+ assert.equal(enabled.block_doh_endpoints,false);
+ assert.equal(enabled.forward_other_dns,false);
+ assert.equal(enabled.dns_association_enabled,false);
+ const synthetic=enableFakeIP(enabled,true);
+ assert.equal(synthetic.fake_ip_enabled,true);
+ assert.equal(synthetic.proxy_dns_enabled,false);
+ assert.equal(setRealProxyDNS(enabled,false).proxy_dns_enabled,false);
 });

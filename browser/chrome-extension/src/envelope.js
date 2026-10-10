@@ -59,13 +59,14 @@ export async function createEncryptedOffer({ target, siteOrigin, cookieNames }) 
   const policy = validatePolicy({ siteOrigin, cookieNames });
   const ruleId = crypto.randomUUID();
   const plaintext = utf8(JSON.stringify(policy));
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', plaintext));
   const ephemeral = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
   const salt = crypto.getRandomValues(new Uint8Array(32));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const info = ['browser.sync.v1', 'RULE_OFFER', ruleId, identity.deviceId, target.id].join('\n');
   const key = await encryptKey(target.encryptionPublicKey, ephemeral, salt, info);
   const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: utf8(info) }, key, plaintext);
+  // Hash opaque ciphertext, NOT guessable website/Cookie-name policy text.
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', encrypted));
   const offer = {
     ruleId, targetBrowserDeviceId: target.id, policyDigest: Array.from(digest, b => b.toString(16).padStart(2,'0')).join(''),
     ephemeralKey: toBase64url(await crypto.subtle.exportKey('spki', ephemeral.publicKey)),
@@ -92,7 +93,7 @@ export async function decryptEncryptedOffer(rule, source) {
     name: 'AES-GCM', iv: fromBase64url(offer.iv), additionalData: utf8(info)
   }, key, fromBase64url(offer.ciphertext));
   const bytes = new Uint8Array(plaintext);
-  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', fromBase64url(offer.ciphertext)));
   const digest = Array.from(hash, b => b.toString(16).padStart(2,'0')).join('');
   if (digest !== offer.policyDigest) throw new Error('站点策略摘要错误');
   return validatePolicy(JSON.parse(new TextDecoder().decode(bytes)));

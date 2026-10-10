@@ -786,7 +786,7 @@ func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) err
 		case ProtoUDP:
 			i.dns.query(packet.Source, packet.Destination, packet.Payload)
 		case ProtoTCP:
-			i.dns.queryTCP(packet.Source, packet.Destination, packet.Payload)
+			i.dns.observeTCPQuery(packet)
 		}
 	}
 	if accepter, ok := i.device.(packetAccepter); ok {

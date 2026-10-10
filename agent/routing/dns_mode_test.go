@@ -156,7 +156,15 @@ func TestAutoDetectDNSNeverOverridesExplicitProxyHostnameResolution(t *testing.T
 	d = NewRoutingDialer(engine, tunnel)
 	_, err = (SelectedExitDialer{Routing: d}).DialTCP(context.Background(), "remote", "localhost", 443)
 	if !errors.Is(err, sentinel) || tunnel.hostTCP != "localhost" {
-		t.Fatalf("transparent path lost proxy hostname: %q, err=%v", tunnel.hostTCP, err)
+		t.Fatalf("transparent TCP path lost proxy hostname: %q, err=%v", tunnel.hostTCP, err)
+	}
+	_, err = (SelectedExitDialer{Routing: d}).DialUDP(context.Background(), "remote", "localhost", 53)
+	if !errors.Is(err, sentinel) || tunnel.hostUDP != "localhost" {
+		t.Fatalf("transparent UDP path lost proxy hostname: %q, err=%v", tunnel.hostUDP, err)
+	}
+	_, err = d.DialUDP(context.Background(), "remote", "localhost", 53)
+	if !errors.Is(err, sentinel) || tunnel.hostUDP != "localhost" {
+		t.Fatalf("local proxy UDP path lost proxy hostname: %q, err=%v", tunnel.hostUDP, err)
 	}
 }
 

@@ -22,8 +22,10 @@ export async function captureCookies(policy) {
   const selected=validatePolicy(policy);
   const existing=await chrome.cookies.getAll({url:cookieURL(selected.siteOrigin)});
   const result=[];
+  const removedNames=[];
   for(const name of selected.cookieNames){
     const matches=existing.filter(cookie=>cookie.name===name);
+    if(matches.length===0) { removedNames.push(name); continue; }
     if(matches.length!==1 || !isSafeCookie(matches[0],selected.siteOrigin))
       throw new Error('该站点的 Cookie 作用域不兼容当前安全白名单：'+name);
     const c=matches[0];
@@ -33,7 +35,7 @@ export async function captureCookies(policy) {
       ...(c.session===false&&Number.isFinite(c.expirationDate)?{expirationDate:c.expirationDate}:{})
     });
   }
-  return {siteOrigin:selected.siteOrigin,cookieNames:selected.cookieNames,cookies:result};
+  return {siteOrigin:selected.siteOrigin,cookieNames:selected.cookieNames,cookies:result,removedNames};
 }
 function verifySnapshot(snapshot,expected) {
   const policy=validatePolicy(expected);
@@ -41,7 +43,8 @@ function verifySnapshot(snapshot,expected) {
     !Array.isArray(snapshot.cookieNames) ||
     JSON.stringify(snapshot.cookieNames)!==JSON.stringify(policy.cookieNames)||
     !Array.isArray(snapshot.cookies) ||
-    snapshot.cookies.length!==policy.cookieNames.length) throw new Error('站点白名单与快照不匹配');
+    !Array.isArray(snapshot.removedNames) ||
+    snapshot.cookies.length+snapshot.removedNames.length!==policy.cookieNames.length) throw new Error('站点白名单与快照不匹配');
   const names=new Set();
   for(const c of snapshot.cookies){
     if(!c||typeof c!=='object'||!policy.cookieNames.includes(c.name)||names.has(c.name)||
@@ -54,6 +57,12 @@ function verifySnapshot(snapshot,expected) {
     }
     names.add(c.name);
   }
+  for(const name of snapshot.removedNames){
+    if(typeof name!=='string'||!policy.cookieNames.includes(name)||names.has(name))
+      throw new Error('Cookie 删除名单与目标规则不匹配');
+    names.add(name);
+  }
+  if(names.size!==policy.cookieNames.length) throw new Error('Cookie 快照不完整');
   return policy;
 }
 export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=false}={}) {
@@ -75,6 +84,20 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
     }
     inspected.push({incoming:c,current:old});
   }
+  const removals=[];
+  for(const name of snapshot.removedNames){
+    const matches=current.filter(c=>c.name===name);
+    if(matches.length>1||matches.some(c=>!isSafeCookie(c,policy.siteOrigin)))
+      throw new Error('CONFLICT: 目标同名 Cookie 作用域不同，拒绝删除');
+    const old=matches[0]||null;
+    // Never delete a Cookie that was not installed by this exact rule,
+    // or that the target site/user has changed since the last sync.
+    if(old){
+      if(!managed[name]||managed[name]!==await digest(old.value))
+        throw new Error('CONFLICT: 不允许删除接收端独立登录状态');
+    }
+    removals.push({name,old});
+  }
   const nextManaged={...managed};
   for(const {incoming:c,current:old} of inspected){
     if(!old||old.value!==c.value){
@@ -91,7 +114,14 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
     }
     nextManaged[c.name]=await digest(c.value);
   }
+  for(const {name,old} of removals){
+    if(old){
+      const removed=await chrome.cookies.remove({url:cookieURL(policy.siteOrigin),name});
+      if(!removed)throw new Error('Chrome 拒绝清理已同步 Cookie');
+    }
+    delete nextManaged[name];
+  }
   storage[ruleId]=nextManaged;
   await chrome.storage.local.set({[storeKey]:storage});
-  return {count:inspected.length,status:'APPLIED'};
+  return {count:inspected.length,removed:removals.length,status:'APPLIED'};
 }

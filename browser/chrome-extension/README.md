@@ -13,13 +13,15 @@ Chrome 扩展直接连接 RelayProxy Server 的 **Admin HTTPS/WSS** 服务，不
 | Chrome 通过签名挑战认证 Admin WSS | 已实现 |
 | A/B 同一 Identity 双端配对及密钥指纹校验 | 已实现 |
 | 指定站点/ Cookie 名称加密邀请 | 已实现 |
+| A 登出后同步删除的 Cookie 安全恢复 | 已实现，B 只清理该规则之前写入且未被修改的 Cookie |
+| 本地 Cookie 归属识别 | Profile 非导出 HMAC 密钥保护，避免保存普通哈希 |
 | 浏览器端 WebCrypto P-256 ECDH/HKDF/AES-GCM 快照加密及签名 | 已实现 |
 | Server 按 ACTIVE 规则签名验收、递增序号防重放、密文路由 | 已实现 |
 | 精确 HTTPS Host、Host-only、Secure、根路径、非分区 Cookie 采集/恢复 | 已实现 |
 | 目标已有不同登录 Cookie 的冲突保护、明确同意后覆盖 | 已实现 |
 | 手动同步、Cookie 变化后自动尝试发送、启动和定时重连请求 | 已实现 |
 | 同步成功后打开网站、RELAYED/APPLIED/CONFLICT/FAILED 状态 | 已实现 |
-| Server Web 浏览器设备管理可视化页面 | 未实现，目前使用 Admin API |
+| Server Web 浏览器设备管理可视化页面 | 已接入管理员导航，可审批、关联身份和撤销浏览器设备 |
 | 跨 Chrome 真机双端网站登录兼容性验收、完整安全审计 | **未完成** |
 | LocalStorage、IndexedDB、分区 Cookie、跨子域、设备绑定会话 | 不在 P3 范围 |
 
@@ -72,7 +74,8 @@ B 设备应由管理员赋予 `receive:true`；A 赋予 `send:true`。浏览器�
 7. A 使用测试账号在 Chrome 正常登录网站；站点 Cookie 变化时扩展会自动尝试发送，也可按“立即发送加密登录状态”。
 8. B 点击“从来源设备请求同步”或“同步成功后打开网站”。B 没有其他登录状态时，写入符合范围的 Cookie；存在不同账号时默认显示 `CONFLICT`，只有用户明确勾选覆盖后才会重试。
 9. 观察最终状态 `APPLIED`。随后确认网站是否实际上无需再次登录；如需再次认证，属于网站兼容性问题，不宣称绕过。
-10. 任一设备可撤销配对，Server 随即拒绝后续转发。撤销 RelayProxy 配对 **不会**撤销网站已经签发的会话令牌。
+10. 在 A 测试账号登出后，再观察 B 是否清除此前由该规则写入的 Cookie；B 自己创建或被网站修改的 Cookie 不会被清除。
+11. 任一设备可撤销配对，Server 随即拒绝后续转发并清理本地同步元数据。撤销 RelayProxy 配对 **不会**撤销网站已经签发的会话令牌。
 
 **Cookie 兼容限制：** P3 仅支持所选择网站准确主机上的 Secure、hostOnly、`path=/`、非分区 Cookie；不自动扩展到父域、子域或 CHIPS。对复杂网站，采集可能明确失败而不是扩大 Cookie 读取/写入权限。
 
@@ -86,3 +89,11 @@ npm test
 Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api`。GitHub PR 的 Go CI 和 UI CI 也包含扩展 WebCrypto、作用域和冲突测试，以及带 TLS 的真实 WebSocket 测试。
 
 设计文档：[Browser Session Sync v1.1](../../docs/browser-session-sync-design-development.md)。本分支是 Draft PR，未合并 `main`。
+
+## 安全状态与兼容性备注
+
+- **设备批准与撤销**：Server Web 的“设备与身份 → 浏览器同步”现在提供浏览器专用管理页面；新接口仍默认关闭。
+- **登出处理**：快照使用加密的 `removedNames` 字段指示来源 Cookie 不再存在。目标设备仅删除此规则上一次恢复且当前值未改变的 Cookie；目标自行登录的相同名称（即使值相同）也不自动取得规则所有权。
+- **指纹数据**：本地只保存由不可导出 HMAC CryptoKey 计算的规则专属 Cookie 归属标签。老版本开发快照的普通 SHA-256 标签会在扩展初始化时清理，不会被用于判断是否可删除。
+- **身份撤销**：停止 RelayProxy 后续同步不意味着目标网站账号退出；必要时使用目标网站的“全部设备退出”功能。
+- **浏览器兼容性**：Chrome 与不同站点的真实登录保持情况仍需授权测试，`APPLIED` 只说明 Chrome Cookie API 处理成功。

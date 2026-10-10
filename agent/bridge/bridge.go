@@ -91,6 +91,17 @@ func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()
 }
 
+// ProbeDNS tests each configured encrypted resolver through the active DNS
+// exit, respecting the same TLS and no-local-DNS rules as Auto mode.
+func (b *UIBridge) ProbeDNS() (divert.DNSProbeReport, error) {
+	if b == nil || b.agent == nil {
+		return divert.DNSProbeReport{}, errors.New("agent unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return b.agent.ProbeDNS(ctx)
+}
+
 // TestCustomExit makes a real TCP CONNECT to a stable public destination
 // through the selected local proxy. The upstream credentials never leave the
 // Agent process or enter the returned diagnostics.
@@ -473,6 +484,7 @@ type RoutingConfigUpdate struct {
 	BlockDoHEndpoints     *bool                   `json:"block_doh_endpoints"`
 	ForwardOtherDNS       *bool                   `json:"forward_other_dns"`
 	DNSExitID             *string                 `json:"dns_exit_id"`
+	DNSUpstreams          *[]routing.DNSUpstream  `json:"dns_upstreams"`
 	DoHBlockedIPs         *[]string               `json:"doh_blocked_ips"`
 	DefaultAction         *string                 `json:"default_action"`
 	Rules                 []routing.Rule          `json:"rules"` // Full replacement
@@ -726,6 +738,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		if in.Routing.DNSExitID != nil {
 			cfg.Routing.DNSExitID = strings.TrimSpace(*in.Routing.DNSExitID)
+		}
+		if in.Routing.DNSUpstreams != nil {
+			cfg.Routing.DNSUpstreams = append([]routing.DNSUpstream(nil), (*in.Routing.DNSUpstreams)...)
 		}
 		if in.Routing.DoHBlockedIPs != nil {
 			cfg.Routing.DoHBlockedIPs = append([]string(nil), (*in.Routing.DoHBlockedIPs)...)

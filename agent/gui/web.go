@@ -229,6 +229,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
 	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
 	mux.HandleFunc("POST /api/proxy/custom-exits/test", w.testCustomExit)
+	mux.HandleFunc("POST /api/dns/probe", w.probeDNS)
 	mux.HandleFunc("GET /api/routing/subscriptions", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRoutingSubscriptions()) })
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
@@ -396,6 +397,15 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 	}
 	status := w.bridge.GetStatus()
 	writeWebJSON(rw, map[string]any{"ok": true, "target": target, "listenAddr": status.RDPListenAddr})
+}
+
+func (w *WebServer) probeDNS(rw http.ResponseWriter, _ *http.Request) {
+	result, err := w.bridge.ProbeDNS()
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, map[string]any{"ok": true, "result": result})
 }
 
 func (w *WebServer) testCustomExit(rw http.ResponseWriter, r *http.Request) {
@@ -602,6 +612,7 @@ const webBridgeJS = `(function () {
   window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
   window.goTestCustomExit = function (exitId) { return json('/api/proxy/custom-exits/test', 'POST', {exitId:exitId}); };
+  window.goProbeDNS = function () { return json('/api/dns/probe', 'POST', {}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
   window.goGetRoutingSubscriptions = function () { return request('/api/routing/subscriptions'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };

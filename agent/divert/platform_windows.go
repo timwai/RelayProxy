@@ -108,6 +108,15 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		return packetProcess{pid: process.PID, path: process.Path, aliases: process.Aliases, services: process.Services}, err
 	})
 	i.start()
+	if shouldRefreshWindowsSystemDNSCache(s.dnsAssociationEnabled(), s.fakeIPEnabled(), s.proxyDNSEnabled()) {
+		// Cached Windows DNS responses predate WinDivert interception. Clearing
+		// them once after capture starts allows the next normal resolver query
+		// to be observed, instead of making the browser's first connection
+		// depend on a stale IP without a known hostname.
+		if err := refreshWindowsSystemDNSCache(); err != nil {
+			log.Printf("[divert] Windows DNS association cache refresh skipped: %v", err)
+		}
+	}
 	return i, nil
 }
 
@@ -127,7 +136,9 @@ func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	// observed. This preserves domain rules without making all downloads depend
 	// on userspace reinjection.
 	reflection := fmt.Sprintf("(inbound and !loopback and tcp and (tcp.DstPort == %d or tcp.DstPort == %d))", port4, port6)
-	dnsResponse := "(inbound and !loopback and udp and udp.SrcPort == 53)"
+	// Passively observe complete DNS/TCP answers as well as UDP DNS. The
+	// existing inboundPacket path returns packets to Windows unchanged.
+	dnsResponse := "(inbound and !loopback and ((udp and udp.SrcPort == 53) or (tcp and tcp.SrcPort == 53)))"
 	// The Relay-IP bypass protects the authenticated transport, but DNS sent
 	// directly to that address on port 53 must still enter FakeIP interception.
 	// This branch works whether or not FakeIP is currently enabled, so hot

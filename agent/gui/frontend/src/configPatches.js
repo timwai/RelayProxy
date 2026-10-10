@@ -14,6 +14,7 @@ export function dnsPagePatch(r) {
     block_doh_endpoints:!!r.block_doh_endpoints,
     forward_other_dns:!!r.forward_other_dns,
     dns_exit_id:r.dns_exit_id||'',
+    dns_upstreams:Array.isArray(r.dns_upstreams)?r.dns_upstreams:[],
     doh_blocked_ips:Array.isArray(r.doh_blocked_ips)?r.doh_blocked_ips:[],
   };
 }

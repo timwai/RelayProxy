@@ -40,7 +40,7 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 		}
 		for _, field := range []string{
 			"mode", "dns_mode", "auto_detect_dns", "dns_association_enabled", "proxy_dns_enabled", "fake_ip_enabled",
-			"block_doh_endpoints", "forward_other_dns", "dns_exit_id",
+			"block_doh_endpoints", "forward_other_dns", "dns_exit_id", "dns_upstreams",
 			"doh_blocked_ips", "default_action", "rules",
 		} {
 			if _, present := visible[field]; !present {

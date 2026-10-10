@@ -506,7 +506,15 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			BlockDoHEndpoints:     engine.BlockDoHEndpoints,
 			ForwardOtherDNS:       engine.ForwardOtherDNS,
 			DNSExitID:             engine.DNSExitID,
-			DoHBlockedIPs:         engine.DoHBlockedIPs,
+			DNSUpstreams: func() []divert.DNSUpstream {
+				configured := engine.DNSUpstreams()
+				result := make([]divert.DNSUpstream, 0, len(configured))
+				for _, upstream := range configured {
+					result = append(result, divert.DNSUpstream{URL: upstream.URL, BootstrapIP: upstream.BootstrapIP})
+				}
+				return result
+			},
+			DoHBlockedIPs: engine.DoHBlockedIPs,
 			ProxyReady: func() bool {
 				return a.handshakeOK.Load()
 			},

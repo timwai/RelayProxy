@@ -54,6 +54,9 @@ func (s *Server) ProbeDNS(ctx context.Context) (DNSProbeReport, error) {
 		Results: make([]DNSProbeResult, 0, len(upstreams)+1),
 	}
 	for _, upstream := range upstreams {
+		if ctx.Err() != nil {
+			break
+		}
 		result := DNSProbeResult{
 			Name: upstream.name, URL: upstream.url,
 			Address: upstream.address, Protocol: "DoH/443",

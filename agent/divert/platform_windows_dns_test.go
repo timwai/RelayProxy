@@ -26,9 +26,9 @@ func TestWindowsFilterCapturesDNSOnRelayIP(t *testing.T) {
 
 func TestWindowsDNSCacheRefreshOnlyForObservationalMode(t *testing.T) {
 	cases := []struct {
-		name string
+		name                        string
 		associate, fakeIP, proxyDNS bool
-		want bool
+		want                        bool
 	}{
 		{"real IP association", true, false, false, true},
 		{"disabled association", false, false, false, false},

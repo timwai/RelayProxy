@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RelayProxy Browser Sync</title>
+  <style>
+    body { width: 360px; margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #202d39; background: #f7f9fc; }
+    main { padding: 18px; }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    p { margin: 0 0 14px; color: #5d6978; font-size: 12px; }
+    label { display: block; margin: 12px 0 5px; font-weight: 600; }
+    input { box-sizing: border-box; width: 100%; border: 1px solid #c4ccd8; border-radius: 7px; padding: 9px 10px; }
+    button { background: #2266d7; color: white; border: 0; padding: 9px 12px; border-radius: 7px; cursor: pointer; margin-top: 8px; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .device { word-break: break-all; font-family: ui-monospace, monospace; font-size: 11px; }
+    .notice { background: #e9eef7; padding: 10px; border-radius: 7px; font-size: 12px; }
+    .error { color: #a62424; }
+    ul { padding-left: 20px; word-break: break-all; font-size: 12px; }
+  </style>
+</head>
+<body><main>
+  <h1>RelayProxy Browser Sync</h1>
+  <p>无本机 Agent · 独立浏览器设备</p>
+  <div class="notice">当前是开发预览：仅设置浏览器设备身份和站点权限，尚未连接 Server 或同步登录数据。</div>
+  <label for="device">浏览器设备 ID</label>
+  <div id="device" class="device">正在初始化...</div>
+  <label for="server">RelayProxy HTTPS Server</label>
+  <input id="server" placeholder="https://relay.example.com">
+  <button id="save">保存地址</button>
+  <label for="site">允许的网站 HTTPS URL</label>
+  <input id="site" placeholder="https://example.com">
+  <button id="add-site">请求站点权限</button>
+  <ul id="sites"></ul>
+  <div id="message" role="status"></div>
+  <script type="module" src="./popup.js"></script>
+</main></body></html>

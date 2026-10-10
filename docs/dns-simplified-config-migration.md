@@ -114,3 +114,12 @@ routing:
 - DNS 专用出口只负责加密解析，正常代理连接仍由分流规则选择出口。因此可以长期采用「DNS 用可靠的国外出口、应用流量继续按分流规则」的配置。
 - 本次验证说明调整出口能恢复自动模式，**尚未证明 Chrome/YouTube 无缓存首次连接、独立 Kill Switch、私有 DoH/环回 DNS 和断线防泄漏均通过**。
 - 建议后续在 DNS 设置中提供上游可达性诊断（按选中 DNS 出口分别测试 DoH 443、DoT 853 并显示错误原因），避免用户只能靠手工切换节点排查。
+
+## 2026-10-10 DNS 出口加密解析连通性诊断
+
+- Agent DNS 页面新增「检测 DNS 上游」，由 **运行中的 Agent 使用当前已保存的 DNS 出口及解析上游**发起一条 `example.com` 的真实 DNS A 查询。
+- 使用同一条出口拨号器、固定 Bootstrap IP、HTTP/2、TLS 证书验证及 DoH 响应校验路径，逐项显示 `DoH/443` 或 `DoT/853` 的上游名称、地址、耗时、结果与错误原因。不是单纯的 TCP 端口 ping。
+- 当未配置自定义上游时，分别测试 Cloudflare、Google、Quad9 的 DoH/443 以及 Quad9 DoT/853；当配置自定义 DoH 时，仅测试自定义列表，不会偷测其他公共服务商。
+- Windows Wails、Agent Web UI 均通过 `UIBridge.ProbeDNS` 调用同一运行时逻辑。Web 入口 `POST /api/dns/probe` 复用现有 Agent Web 授权，不提供匿名探测。
+- 操作只读取 **正在生效的 DNS 设置**。如果 GUI 的 DNS 配置正在编辑且尚未保存，检测按钮禁用；诊断结果不修改 DNS 路由规则、缓存、系统 DNS，也不自动切换 DNS 出口。
+- 检测可以定位出口不可达、TLS 错误、上游 HTTP 错误、DNS SERVFAIL 等；它不能证明 Windows 对 Chrome 首次访问的规则一定命中，更不能证明私有 DoH 或系统级 Kill Switch 安全。

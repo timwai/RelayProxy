@@ -1,0 +1,179 @@
+package browsersync
+
+import (
+ "context"
+ "encoding/json"
+ "errors"
+ "net"
+ "net/http"
+ "net/url"
+ "strings"
+ "sync"
+ "time"
+
+ "github.com/coder/websocket"
+)
+
+// Handler deliberately does NOT forward SESSION_SNAPSHOT yet: no secret
+// traffic can flow until mutual rule approval and E2EE are implemented.
+type Handler struct {
+ Store *Store
+ auth *Authenticator
+ extensions map[string]struct{}
+ mu sync.Mutex
+ attempts map[string]attempt
+ slots chan struct{}
+}
+type attempt struct{window time.Time;count int}
+
+func NewHandler(store *Store, extensionIDs []string)*Handler{
+ allowed:=map[string]struct{}{}
+ for _,id:=range extensionIDs{allowed["chrome-extension://"+id]=struct{}{}}
+ return &Handler{Store:store,auth:NewAuthenticator(store),extensions:allowed,
+  attempts:map[string]attempt{},slots:make(chan struct{},64)}
+}
+
+func (h *Handler) allowOrigin(w http.ResponseWriter,r *http.Request) bool {
+ if r.TLS==nil {http.Error(w,"HTTPS required",http.StatusUpgradeRequired);return false}
+ origin:=r.Header.Get("Origin")
+ u,err:=url.Parse(origin)
+ if err!=nil||u.Scheme!="chrome-extension"||u.Host==""||
+   u.Path!=""||u.RawQuery!=""||u.Fragment!=""||u.User!=nil {
+   http.Error(w,"browser extension Origin required",http.StatusForbidden);return false
+ }
+ if _,ok:=h.extensions[origin];!ok {
+   http.Error(w,"extension Origin is not configured",http.StatusForbidden);return false
+ }
+ w.Header().Set("Access-Control-Allow-Origin",origin)
+ w.Header().Set("Vary","Origin")
+ w.Header().Set("Cache-Control","no-store")
+ return true
+}
+
+func (h *Handler) ServeHTTP(w http.ResponseWriter,r *http.Request) {
+ if !h.allowOrigin(w,r){return}
+ if r.Method==http.MethodOptions{
+  w.Header().Set("Access-Control-Allow-Methods","POST, GET, OPTIONS")
+  w.Header().Set("Access-Control-Allow-Headers","Content-Type")
+  w.WriteHeader(http.StatusNoContent)
+  return
+ }
+ switch {
+ case r.URL.Path=="/api/v1/browser-sync/devices/register"&&r.Method==http.MethodPost:
+  h.register(w,r)
+ case r.URL.Path=="/api/v1/browser-sync/ws"&&r.Method==http.MethodGet:
+  h.connect(w,r)
+ default:
+  http.NotFound(w,r)
+ }
+}
+
+func (h *Handler) permitRegistration(r *http.Request) bool {
+ remote,_,err:=net.SplitHostPort(r.RemoteAddr);if err!=nil{return false}
+ // RemoteAddr is the direct TCP peer: do not trust forwarded headers.
+ h.mu.Lock();defer h.mu.Unlock()
+ now:=time.Now()
+ for ip,a:=range h.attempts{if now.Sub(a.window)>15*time.Minute{delete(h.attempts,ip)}}
+ if len(h.attempts)>10000{return false}
+ a:=h.attempts[remote]
+ if now.Sub(a.window)>10*time.Minute{a=attempt{window:now}}
+ a.count++
+ h.attempts[remote]=a
+ return a.count<=15
+}
+
+func (h *Handler) register(w http.ResponseWriter,r *http.Request) {
+ if !h.permitRegistration(r){http.Error(w,"enrollment rate limit",http.StatusTooManyRequests);return}
+ var d BrowserDevice
+ dec:=json.NewDecoder(http.MaxBytesReader(w,r.Body,8192));dec.DisallowUnknownFields()
+ if err:=dec.Decode(&d);err!=nil{http.Error(w,"invalid browser registration",http.StatusBadRequest);return}
+ // The request may not supply approval, identities, or capabilities.
+ if d.State!=""||d.IdentityID!=""||d.Send||d.Receive||!d.CreatedAt.IsZero(){
+  http.Error(w,"browser privileges cannot be requested during enrollment",http.StatusForbidden);return
+ }
+ if err:=ValidateRegistration(d);err!=nil{http.Error(w,"invalid device signing or encryption public key",http.StatusBadRequest);return}
+ saved,err:=h.Store.Register(r.Context(),d)
+ if err!=nil{
+  if errors.Is(err,ErrDeviceConflict){http.Error(w,"registered identity key mismatch",http.StatusConflict);return}
+  http.Error(w,"registration failed",http.StatusInternalServerError);return
+ }
+ writeBrowserJSON(w,http.StatusAccepted,map[string]string{"id":saved.ID,"state":saved.State})
+}
+
+type authFrame struct {
+ Type string `json:"type"`
+ DeviceID string `json:"deviceId"`
+ Challenge string `json:"challenge"`
+ Signature string `json:"signature"`
+}
+func (h *Handler) connect(w http.ResponseWriter,r *http.Request){
+ select {case h.slots<-struct{}{}:defer func(){<-h.slots}():
+ default:http.Error(w,"browser connections full",http.StatusServiceUnavailable);return}
+ conn,err:=websocket.Accept(w,r,&websocket.AcceptOptions{
+  InsecureSkipVerify:true, // origin verified by allowOrigin BEFORE upgrading
+  CompressionMode:websocket.CompressionDisabled,
+ })
+ if err!=nil{return}
+ defer conn.Close(websocket.StatusNormalClosure,"done")
+ ctx:=r.Context()
+ // A WS connection has no privileges prior to a valid, single-use proof.
+ proofCtx,cancel:=context.WithTimeout(ctx,15*time.Second)
+ defer cancel()
+ // Must first learn the ID to issue a scoped challenge. This is not auth.
+ var hello authFrame
+ if err:=readFrame(proofCtx,conn,&hello);err!=nil||hello.Type!="AUTH_HELLO" {
+  _=conn.Close(websocket.StatusPolicyViolation,"invalid hello");return
+ }
+ nonce,err:=h.auth.Challenge(hello.DeviceID)
+ if err!=nil{_=conn.Close(websocket.StatusPolicyViolation,"invalid identity");return}
+ if err:=conn.Write(proofCtx,websocket.MessageText,mustJSON(map[string]any{
+  "type":"AUTH_CHALLENGE","deviceId":hello.DeviceID,"challenge":nonce,
+ }));err!=nil{return}
+ var proof authFrame
+ if err:=readFrame(proofCtx,conn,&proof);err!=nil||proof.Type!="AUTH_PROOF"||
+  proof.DeviceID!=hello.DeviceID||proof.Challenge!=nonce{
+  _=conn.Close(websocket.StatusPolicyViolation,"invalid proof");return
+ }
+ origin:="https://"+r.Host
+ device,err:=h.auth.Verify(proofCtx,proof.DeviceID,origin,nonce,proof.Signature)
+ if err!=nil{_=conn.Close(websocket.StatusPolicyViolation,"not authorized");return}
+ if err:=conn.Write(proofCtx,websocket.MessageText,mustJSON(map[string]any{
+  "type":"AUTH_OK","deviceId":device.ID,"send":device.Send,"receive":device.Receive,
+  "sessionTransferEnabled":false,
+ }));err!=nil{return}
+
+ // Deliberately no forwarding data frames in this milestone. Even an
+ // authenticated sender cannot submit cookies until paired rules exist.
+ for {
+  loopCtx,done:=context.WithTimeout(ctx,45*time.Second)
+  var msg struct{Type string `json:"type"`}
+  err:=readFrame(loopCtx,conn,&msg)
+  done()
+  if err!=nil{return}
+  current,err:=h.Store.Device(ctx,device.ID)
+  if err!=nil||current.State!="approved"{
+   _=conn.Close(websocket.StatusPolicyViolation,"browser approval revoked");return
+  }
+  switch msg.Type {
+  case "PING":
+   response:=mustJSON(map[string]any{"type":"PONG"})
+   writeCtx,stop:=context.WithTimeout(ctx,5*time.Second)
+   err=conn.Write(writeCtx,websocket.MessageText,response)
+   stop()
+   if err!=nil{return}
+  default:
+   _=conn.Close(websocket.StatusPolicyViolation,"session transfer not enabled");return
+  }
+ }
+}
+func readFrame(ctx context.Context,c *websocket.Conn,out any)error{
+ typ,raw,err:=c.Read(ctx);if err!=nil{return err}
+ if typ!=websocket.MessageText||len(raw)>4096{return errors.New("invalid browser control frame")}
+ return json.Unmarshal(raw,out)
+}
+func writeBrowserJSON(w http.ResponseWriter,status int,v any){
+ w.Header().Set("Content-Type","application/json")
+ w.WriteHeader(status)
+ _=json.NewEncoder(w).Encode(v)
+}
+func mustJSON(v any)[]byte{raw,_:=json.Marshal(v);return raw}

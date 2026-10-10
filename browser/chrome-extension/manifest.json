@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "RelayProxy Browser Sync (Development)",
+  "version": "0.1.0",
+  "description": "Agentless Chrome browser device pairing and scoped website sync (development preview).",
+  "minimum_chrome_version": "116",
+  "permissions": [
+    "cookies",
+    "storage",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "src/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup.html"
+  }
+}

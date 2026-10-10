@@ -19,11 +19,11 @@ import (
 )
 
 const (
-	MaxCandidates        = 16
-	ProbeMagic    uint32 = 0x52505633 // "RPV3"
-	ProbeVersion  byte   = 1
-	ProbeRequestSize     = 16
-	ProbeResponseSize    = 32
+	MaxCandidates            = 16
+	ProbeMagic        uint32 = 0x52505633 // "RPV3"
+	ProbeVersion      byte   = 1
+	ProbeRequestSize         = 16
+	ProbeResponseSize        = 32
 )
 
 var (

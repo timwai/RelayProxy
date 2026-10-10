@@ -23,14 +23,14 @@ var policyDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // Site names and Cookie names are encrypted by the source extension and are
 // never interpreted or logged by the Server.
 type EncryptedOffer struct {
-	RuleID        string `json:"ruleId"`
-	TargetID      string `json:"targetBrowserDeviceId"`
-	PolicyDigest  string `json:"policyDigest"`
-	EphemeralKey  string `json:"ephemeralKey"`
-	Salt          string `json:"salt"`
-	IV            string `json:"iv"`
-	Ciphertext    string `json:"ciphertext"`
-	Signature     string `json:"signature"`
+	RuleID       string `json:"ruleId"`
+	TargetID     string `json:"targetBrowserDeviceId"`
+	PolicyDigest string `json:"policyDigest"`
+	EphemeralKey string `json:"ephemeralKey"`
+	Salt         string `json:"salt"`
+	IV           string `json:"iv"`
+	Ciphertext   string `json:"ciphertext"`
+	Signature    string `json:"signature"`
 }
 
 // BrowserRule intentionally omits cookie values, token values and cleartext

@@ -70,6 +70,26 @@ func ValidateConfig(cfg Config) error {
 	if cfg.DefaultAction != "" && !validAction(cfg.DefaultAction) {
 		return fmt.Errorf("routing.default_action: invalid value %q", cfg.DefaultAction)
 	}
+	if len(cfg.Subscriptions) > subscriptionLimit {
+		return fmt.Errorf("routing.subscriptions: maximum %d subscriptions", subscriptionLimit)
+	}
+	seenURLs := make(map[string]bool, len(cfg.Subscriptions))
+	for i, sub := range cfg.Subscriptions {
+		if err := validateSubscriptionURL(sub.URL); err != nil {
+			return fmt.Errorf("routing.subscriptions[%d]: %w", i, err)
+		}
+		if seenURLs[sub.URL] { return fmt.Errorf("routing.subscriptions[%d]: duplicate URL", i) }
+		seenURLs[sub.URL] = true
+		if len(sub.Name) > 128 || strings.TrimSpace(sub.Name) == "" {
+			return fmt.Errorf("routing.subscriptions[%d]: name required (max 128)", i)
+		}
+		if sub.Action != "" && !validAction(sub.Action) {
+			return fmt.Errorf("routing.subscriptions[%d]: invalid action %q", i, sub.Action)
+		}
+		if sub.ExitID != "" && (sub.Action != "" && sub.Action != ActionProxy || strings.TrimSpace(sub.ExitID) != sub.ExitID || strings.ContainsAny(sub.ExitID, " \t\r\n/\\") || len(sub.ExitID) > 128) {
+			return fmt.Errorf("routing.subscriptions[%d]: invalid proxy exit ID", i)
+		}
+	}
 	for i, rule := range cfg.Rules {
 		if !validAction(rule.Action) {
 			return fmt.Errorf("routing.rules[%d] (%q): invalid action %q", i, rule.Name, rule.Action)

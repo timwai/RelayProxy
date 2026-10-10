@@ -319,9 +319,9 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const activeFakeIP=capture&&protection.fakeIpEnabled===true;
  return <><PageHead title="DNS 与防泄漏" desc="独立管理域名解析位置、自动检测、FakeIP DNS 接管与已知加密 DNS 绕过防护。" actions={<Button onClick={()=>onGoto('routing')}>分流规则 ›</Button>}/>
  <Card title="主机名解析" eyebrow="NAME RESOLUTION">
-  <Setting title="自动检测 DNS 状态" desc="自动检测只在选择“本机解析”时生效：先尝试系统 DNS，失败后使用代理解析；明确开启“通过代理解析主机名”时始终使用代理，不会先查询本机 DNS。"><Switch checked={!!r.auto_detect_dns} label="自动检测 DNS 状态" onChange={automatic}/></Setting>
-  <Setting title="通过代理解析主机名" desc="开启后始终将原始域名交给 Relay / SOCKS5 / HTTP CONNECT 出口解析（优先于自动检测）；关闭后使用系统 DNS 获取 IP，自动检测开启时本机解析失败再由代理解析。"><Switch checked={(r.dns_mode||'proxy')==='proxy'} label="通过代理解析主机名" onChange={proxy}/></Setting>
-  <div className="notice top-gap">{r.auto_detect_dns?((r.dns_mode||'proxy')==='proxy'?'代理解析优先：原始域名始终交给代理，不触发本机 DNS；自动回退仅用于本机解析模式。':'自动检测生效：先查询本机 DNS，查询失败时通过代理解析。'):(r.dns_mode||'proxy')==='proxy'?'代理解析：带域名的代理请求始终交给远端解析。':'本机解析：系统 DNS 查询可能离开代理。'}</div>
+  <Setting title="自动检测 DNS 状态" desc="开启时自动切换到本机优先模式：先尝试系统 DNS，本机查询失败再使用代理解析。此模式可能产生本机 DNS 查询，不适用于严格防泄漏。"><Switch checked={!!r.auto_detect_dns} label="自动检测 DNS 状态" onChange={automatic}/></Setting>
+  <Setting title="通过代理解析主机名" desc="手动模式：开启时将原始域名交给代理解析；关闭时先使用系统 DNS。修改此项会关闭自动检测；启用代理解析优先于自动检测。"><Switch checked={(r.dns_mode||'proxy')==='proxy'} label="通过代理解析主机名" onChange={proxy}/></Setting>
+  <div className="notice top-gap">{r.auto_detect_dns?((r.dns_mode||'proxy')==='proxy'?'自动检测已保存，但当前被手动代理解析覆盖；重新关闭再开启自动检测可进入本机优先模式。':'自动检测生效：系统 DNS 优先，失败后交给代理；可能产生本机 DNS 查询。'):(r.dns_mode||'proxy')==='proxy'?'手动代理解析：代理连接的原始域名始终交给远端。':'手动本机解析：系统 DNS 查询可能离开代理。'}</div>
   <div className="mini top-gap">只有原始连接包含域名时，这两个选项才影响代理侧解析。已经被操作系统解析为 IP 的透明连接不会被自动还原为域名；需要 FakeIP 接管系统 DNS 时，请启用下方独立选项。</div>
  </Card>
  <Card title="DNS 接管与加密解析器防护" eyebrow="DNS INTERCEPTION">

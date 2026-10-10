@@ -59,7 +59,7 @@ func runServer(transport, ready string) error {
 		return err
 	}
 	config := gateway.GatewayConfig{
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
+		TLSConfig:        &tls.Config{Certificates: []tls.Certificate{certificate}},
 		ServerInstanceID: "mixed-binary-probe",
 		HandshakeTimeout: 5 * time.Second,
 		ResolveIdentity: func(shortID string) (gateway.IdentityAuthorization, error) {
@@ -113,7 +113,7 @@ func runServer(transport, ready string) error {
 }
 
 func runClient(transport, addr string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 12 * time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
 	tlsConfig := &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13}
 	var sess tunnel.TunnelSession
@@ -148,7 +148,7 @@ func runClient(transport, addr string) error {
 	}
 	hello := protocol.DeviceHello{
 		ProtocolVersion: protocol.DeviceProtocolVersion,
-		IdentityID: testIdentityID, InstallationID: identity.InstallationID,
+		IdentityID:      testIdentityID, InstallationID: identity.InstallationID,
 		PublicKey: identity.PublicKey, ClientNonce: nonce,
 		DeviceName: "compat-probe", RequestedCapabilities: []string{protocol.CapabilityProxyClient},
 	}
@@ -163,7 +163,7 @@ func runClient(transport, addr string) error {
 	}
 	if err := protocol.WriteJSON(control, protocol.AuthProof{
 		ChallengeID: challenge.ChallengeID,
-		Signature: identity.Sign(protocol.DeviceAuthPayload(hello, challenge)),
+		Signature:   identity.Sign(protocol.DeviceAuthPayload(hello, challenge)),
 	}); err != nil {
 		return err
 	}

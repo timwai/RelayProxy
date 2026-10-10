@@ -41,7 +41,7 @@ func dialApprovedBrowser(t *testing.T, server *httptest.Server, device BrowserDe
 		"signature": signatureFor(t, key, server.URL, device.ID, nonce),
 	})
 	auth := readWSSControl(t, conn)
-	if auth["type"] != "AUTH_OK" || auth["sessionTransferEnabled"] != false {
+	if auth["type"] != "AUTH_OK" || auth["sessionTransferEnabled"] != true {
 		t.Fatalf("unexpected auth result: %v", auth)
 	}
 	return conn
@@ -129,12 +129,10 @@ func TestWSSBrowserRulePairingAndSessionGate(t *testing.T) {
 	if reply := readWSSControl(t, a); reply["status"] != "active" {
 		t.Fatalf("final confirmation failed: %v", reply)
 	}
-	// Cryptographic cookie payloads are not permitted until end-to-end session
-	// verification and per-site conflict checks have independently passed.
-	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "ruleId": offer.RuleID})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if _, _, err := a.Read(ctx); err == nil {
-		t.Fatal("unimplemented session transfer was accepted")
+	// Malformed or unsigned session payloads are rejected while authenticated
+	// control-plane traffic is still accepted.
+	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "bad1", "ruleId": offer.RuleID})
+	if reply := readWSSControl(t, a); reply["type"] != "RULE_ERROR" {
+		t.Fatalf("unsigned session was not rejected: %v", reply)
 	}
 }

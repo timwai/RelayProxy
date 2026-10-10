@@ -102,3 +102,24 @@ func TestSignedHeaderStable(t *testing.T) {
 	}
 	_ = new(big.Int) // keep this test independent of production sign code
 }
+
+func TestSessionCursorRecoversOnlyForAuthorizedSource(t *testing.T) {
+	store := testBrowserStore(t)
+	source, _ := approvedWSSBrowser(t, store, true, false)
+	target, _ := approvedWSSBrowser(t, store, false, true)
+	ruleID := uuid.NewString()
+	ctx := context.Background()
+	if err := store.OfferRule(ctx, source.ID, encryptedTestOffer(ruleID, target.ID)); err != nil { t.Fatal(err) }
+	if err := store.AcceptRule(ctx, target.ID, ruleID); err != nil { t.Fatal(err) }
+	if err := store.ConfirmRule(ctx, source.ID, ruleID); err != nil { t.Fatal(err) }
+	cursor,err:=store.SessionCursor(ctx, source.ID, ruleID)
+	if err!=nil || cursor!=0 { t.Fatalf("unexpected new cursor %d: %v",cursor,err) }
+	if err:=store.AdvanceSessionSequence(ctx, ruleID, 42);err!=nil{t.Fatal(err)}
+	cursor,err=store.SessionCursor(ctx,source.ID,ruleID)
+	if err!=nil||cursor!=42{t.Fatalf("cursor after restart=%d, err=%v",cursor,err)}
+	if _,err=store.SessionCursor(ctx,target.ID,ruleID);err==nil{t.Fatal("receiver accessed source sequence")}
+	other, _ := approvedWSSBrowser(t,store,true,false)
+	if _,err=store.SessionCursor(ctx,other.ID,ruleID);err==nil{t.Fatal("unrelated sender accessed source cursor")}
+	if err:=store.RevokeRule(ctx,target.ID,ruleID);err!=nil{t.Fatal(err)}
+	if _,err=store.SessionCursor(ctx,source.ID,ruleID);err==nil{t.Fatal("revoked rule returned a cursor")}
+}

@@ -32,7 +32,7 @@ const EMPTY={
  rdp:{enabled:true,address:'127.0.0.1:3389'},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true,upnpAllowed:false},publicDirectAdvertise:'',
  networkMode:'',network:{mode:'',exclude_processes:[]},networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
- verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,dns_exit_id:'',doh_blocked_ips:[],default_action:'PROXY',rules:[]},configPath:'',version:''
+ verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,dns_exit_id:'',doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
 };
 
 const cx=(...v)=>v.filter(Boolean).join(' ');
@@ -283,6 +283,16 @@ function RuleEditor({value,exits,onChange}){
 function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
  exits=[...exits,...arr(config.customExits).map(x=>({id:x.id,name:x.name,online:x.enabled}))];
  const r=config.routing||EMPTY.routing,[editing,setEditing]=useState(null),rules=arr(r.rules);
+ const subs=arr(r.subscriptions),[editingSub,setEditingSub]=useState(null);
+ const commitSub=x=>setv('routing.subscriptions',x);
+ const editSub=i=>setEditingSub({index:i,sub:JSON.parse(JSON.stringify(i>=0?subs[i]:{name:'GFWList',url:'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt',enabled:true,action:'PROXY',exit_id:''}))});
+ const saveSub=()=>{
+  const sub={...editingSub.sub,name:(editingSub.sub.name||'').trim(),url:(editingSub.sub.url||'').trim()};
+  try{const u=new URL(sub.url);if(u.protocol!=='https:'||!u.hostname||u.username||u.password)throw Error('需要公开的 HTTPS 订阅地址');if(!sub.name)throw Error('请输入订阅名称');if(subs.some((x,i)=>i!==editingSub.index&&x.url===sub.url))throw Error('不能添加重复的订阅地址');}
+  catch(e){window.alert(e.message||'订阅地址无效');return}
+  const next=[...subs];if(editingSub.index<0)next.push(sub);else next[editingSub.index]=sub;
+  commitSub(next);setEditingSub(null);
+ };
  const commit=x=>setv('routing.rules',x);
  const move=(i,d)=>{const j=i+d;if(j<0||j>=rules.length)return;commit(moveRule(rules,i,j))};
  const toggle=(i,on)=>commit(rules.map((x,n)=>n===i?{...x,enabled:on}:x));
@@ -297,10 +307,28 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
   onDragEnd:endDrag,onMouseUp:()=>{armed.current=false}});
  const edit=i=>setEditing({index:i,rule:JSON.parse(JSON.stringify(i>=0?rules[i]:{name:'新规则',enabled:true,action:'PROXY',exit_id:'',datagram_required:false,handle_direct:false,processes:[],targets:[],ports:[],protocols:['tcp','udp']}))});
  const saveEditor=()=>{const n=[...rules],rule=normalizeRuleLists(editing.rule);if(editing.index<0)n.push(rule);else n[editing.index]=rule;commit(n);setEditing(null)};
- return <><PageHead title="分流规则" desc="按进程、域名/IP、端口和协议从上到下匹配，第一条命中的规则生效。DNS 解析与防泄漏已归入独立页面。" actions={<><Button onClick={()=>onGoto('dns')}>DNS 设置 ›</Button><Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button></>}/>
+ return <><PageHead title="分流规则" desc="按进程、域名/IP、端口和协议从上到下匹配，第一条命中的规则生效。DNS 解析与防泄漏已归入独立页面。" actions={<><Button onClick={()=>onGoto('dns')}>DNS 设置 ›</Button><Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button><Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button></>}/>
  <Card title="全局路由策略" eyebrow="ROUTING MODE"><div className="form-grid"><Field label="路由模式"><Select value={r.mode||'global_proxy'} onChange={e=>setv('routing.mode',e.target.value)}><option value="global_proxy">全局代理</option><option value="rule">规则模式</option><option value="direct">全局直连</option></Select></Field><Field label="规则未命中时"><Select value={r.default_action||'PROXY'} onChange={e=>setv('routing.default_action',e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field></div></Card>
  <Card title="规则列表" eyebrow={rules.length+' RULES'}><div className="rule-table"><div className="rule-row rule-head"><span>#</span><span>规则</span><span>匹配条件</span><span>动作</span><span>启用</span><span>操作</span></div>{rules.map((x,i)=><div className={cx('rule-row',!x.enabled&&'disabled',dragging===i&&'dragging',dropAt&&dropAt.i===i&&dragging!==i&&(dropAt.after?'drop-after':'drop-before'))} key={(x.name||'rule')+'-'+i} {...dragProps(i)}><span className="drag" role="button" tabIndex={-1} aria-label={'拖动调整顺序：'+(x.name||'规则 '+(i+1))} title="拖动调整顺序" onMouseDown={()=>{armed.current=true}}>⋮⋮</span><div><div className="row"><strong>{x.name||'规则 '+(i+1)}</strong></div><div className="mini">优先级 {i+1}</div></div><div className="chips">{arr(x.processes).slice(0,2).map(v=><span className="chip" key={'p'+v}>{v}</span>)}{arr(x.targets).slice(0,2).map(v=><span className="chip" key={'t'+v}>{v}</span>)}{arr(x.ports).slice(0,1).map(v=><span className="chip" key={'o'+v}>{v}</span>)}{!arr(x.processes).length&&!arr(x.targets).length&&!arr(x.ports).length&&<span className="mini">任意流量</span>}</div><div><Badge tone={x.action==='REJECT'?'danger':x.action==='DIRECT'?'blue':'ok'}>{x.action||'PROXY'}</Badge>{x.exit_id&&<div className="mini">{exitName(exits,x.exit_id)}</div>}</div><div><Switch checked={!!x.enabled} label={(x.enabled?'停用':'启用')+' '+(x.name||'规则 '+(i+1))} onChange={v=>toggle(i,v)}/></div><div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>move(i,-1)}>↑</Button><Button quiet disabled={i===rules.length-1} onClick={()=>move(i,1)}>↓</Button><Button quiet onClick={()=>edit(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除这条分流规则？')&&commit(rules.filter((_,n)=>n!==i))}>删除</Button></div></div>)}{!rules.length&&<div className="empty">尚无规则。切换到规则模式前请先添加规则。</div>}</div></Card>
+ <Card title="规则订阅" eyebrow={subs.length+' SUBSCRIPTIONS'} action={<Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button>}>
+  <div className="mini">支持 GFWList（Base64 / Adblock 主机规则）、域名和 IP/CIDR 文本列表。按上到下顺序匹配：手动规则优先 → 订阅 → 默认动作。仅在规则模式生效，每 6 小时自动更新；下载失败继续使用本地已缓存的最后成功版本。URL 路径、正则和 Adblock 修饰符不会被扩大为整个域名匹配。</div>
+  {subs.map((sub,i)=><div className="setting" key={sub.url+'-'+i}>
+   <div className="grow" style={{minWidth:0}}><b>{sub.name||'未命名订阅'}</b><div className="mini" style={{overflowWrap:'anywhere'}}>{sub.url}</div><div className="mini">{sub.action||'PROXY'}{sub.exit_id?' · '+exitName(exits,sub.exit_id):' · 跟随默认出口'}</div></div>
+   <Switch checked={!!sub.enabled} label={(sub.enabled?'停用':'启用')+sub.name} onChange={on=>commitSub(subs.map((x,j)=>i===j?{...x,enabled:on}:x))}/>
+   <div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>{const next=[...subs];[next[i-1],next[i]]=[next[i],next[i-1]];commitSub(next)}}>↑</Button><Button quiet disabled={i===subs.length-1} onClick={()=>{const next=[...subs];[next[i],next[i+1]]=[next[i+1],next[i]];commitSub(next)}}>↓</Button><Button quiet onClick={()=>editSub(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除此规则订阅？')&&commitSub(subs.filter((_,j)=>j!==i))}>删除</Button></div>
+  </div>)}
+  {!subs.length&&<div className="empty">尚未添加订阅，可以添加 GFWList 或自建规则列表。</div>}
+ </Card>
  <SaveBar dirty={dirty} label="保存分流规则" hint="保存全局路由策略与分流规则；DNS 选项请在 DNS 与防泄漏页修改。" onSave={()=>save({routing:routingPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
+ <Modal open={!!editingSub} title={editingSub&&editingSub.index>=0?'编辑规则订阅':'添加规则订阅'} wide onClose={()=>setEditingSub(null)} footer={<><Button onClick={()=>setEditingSub(null)}>取消</Button><Button primary onClick={saveSub}>保存订阅</Button></>}>
+  {editingSub&&<div className="form-grid">
+   <Field label="订阅名称"><Input value={editingSub.sub.name||''} onChange={e=>setEditingSub({...editingSub,sub:{...editingSub.sub,name:e.target.value}})}/></Field>
+   <Field label="动作"><Select value={editingSub.sub.action||'PROXY'} onChange={e=>setEditingSub({...editingSub,sub:{...editingSub.sub,action:e.target.value,exit_id:e.target.value==='PROXY'?editingSub.sub.exit_id:''}})}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field>
+   <Field label="订阅 URL" className="full" help="仅允许公开 HTTPS 地址；GFWList 会自动识别 Base64 编码。"><Input value={editingSub.sub.url||''} onChange={e=>setEditingSub({...editingSub,sub:{...editingSub.sub,url:e.target.value}})} placeholder="https://raw.githubusercontent.com/.../gfwlist.txt"/></Field>
+   <Field label="指定出口" className="full"><Select disabled={(editingSub.sub.action||'PROXY')!=='PROXY'} value={editingSub.sub.exit_id||''} onChange={e=>setEditingSub({...editingSub,sub:{...editingSub.sub,exit_id:e.target.value}})}><option value="">跟随默认出口</option>{exits.map(x=><option value={x.deviceId||x.id} key={x.deviceId||x.id}>{x.name||x.deviceId||x.id}</option>)}</Select></Field>
+   <label className="check-line"><input type="checkbox" checked={!!editingSub.sub.enabled} onChange={e=>setEditingSub({...editingSub,sub:{...editingSub.sub,enabled:e.target.checked}})}/><span><strong>启用订阅</strong><small>启用后按间隔自动刷新，保存会触发立即下载。</small></span></label>
+  </div>}
+ </Modal>
  <Modal open={!!editing} title={editing&&editing.index>=0?'编辑分流规则':'新建分流规则'} wide onClose={()=>setEditing(null)} footer={<><Button onClick={()=>setEditing(null)}>取消</Button><Button primary onClick={saveEditor}>保存规则</Button></>}>{editing&&<RuleEditor value={editing.rule} exits={exits} onChange={rule=>setEditing({...editing,rule})}/>}</Modal></>
 }
 
@@ -480,7 +508,7 @@ export default function App(){
  const theme=useCallback(mode=>{const m=['light','dark','system'].includes(mode)?mode:'system',dark=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.classList.toggle('dark',dark)},[]);
  const syncExitInventory=useCallback(async x=>{const summary=arr(x?.proxyExits),key=makeExitInventoryKey(x);if(exitInventoryKey.current===key)return;exitInventoryKey.current=key;if(!hasBridge('goGetProxyExits')){setExits(summary);setExitsReady(true);return}try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch{setExits(summary);setExitsReady(true)}},[]);
  const refreshStatus=useCallback(async()=>{if(!hasBridge('goGetStatus'))return null;try{const x=await callJSON('goGetStatus',{});applyStatus(x);void syncExitInventory(x);return x}catch{return null}},[applyStatus,syncExitInventory]);
- const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
+ const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules),subscriptions:arr(x.routing?.subscriptions)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
  const refreshNetworkCapabilities=useCallback(async()=>{if(!hasBridge('goGetNetworkCapabilities'))return null;try{const x=await callJSON('goGetNetworkCapabilities',{});setConfig(p=>({...p,networkCapabilities:x||{}}));return x}catch{return null}},[]);
  const refreshExits=useCallback(async()=>{if(hasBridge('goGetProxyExits'))try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch(e){toast('读取授权出口失败：'+e.message,'danger')}},[toast]);
  const refreshTargets=useCallback(async()=>{if(hasBridge('goGetRDPTargets'))try{setTargets(arr(await callJSON('goGetRDPTargets',[])))}catch(e){toast(e.message,'danger')}},[toast]);

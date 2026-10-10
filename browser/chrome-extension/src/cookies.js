@@ -2,12 +2,12 @@
 // partitioned and non-root-path cookies rather than widening the rule scope.
 // No raw Cookie values are persisted in extension storage or logged.
 import { validatePolicy } from './envelope.js';
+import { cookieValueTag } from './device-identity.js';
 
-const digest = async value => {
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value)));
-  return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
-};
-const storeKey = 'browserSyncManagedCookieHashes';
+// Backwards incompatible on purpose: old SHA-256 fingerprints cannot be
+// trusted for a deletion or silent overwrite. The receiver must explicitly
+// reapprove an existing session once when upgrading the development build.
+const storeKey = 'browserSyncManagedCookieHmacV1';
 const cookieDomain = c => (c.domain||'').replace(/^\./,'').toLowerCase();
 const isSafeCookie = (cookie,origin) => {
   const host=new URL(origin).hostname.toLowerCase();
@@ -79,7 +79,7 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
       throw new Error('CONFLICT: 网站已有同名但作用域不同的 Cookie');
     const old=matches[0]||null;
     if(old&&old.value!==c.value&&!allowOverwrite){
-      const hash=await digest(old.value);
+      const hash=await cookieValueTag(ruleId,c.name,old.value);
       if(managed[c.name]!==hash) throw new Error('CONFLICT: 接收浏览器已有不同的登录状态');
     }
     inspected.push({incoming:c,current:old});
@@ -112,7 +112,7 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
         updated.name!==c.name||updated.value!==c.value||
         cookieDomain(updated)!==host) throw new Error('Chrome 拒绝恢复 Cookie：'+c.name);
     }
-    nextManaged[c.name]=await digest(c.value);
+    nextManaged[c.name]=await cookieValueTag(ruleId,c.name,c.value);
   }
   for(const {name,old} of removals){
     if(old){

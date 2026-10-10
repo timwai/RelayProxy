@@ -27,9 +27,14 @@ export async function registerBrowser() {
 
 let currentSocket = null;
 let connectionState = 'DISCONNECTED';
+const requests = new Map();
+let keepalive = null;
 
 export function currentConnectionState() { return connectionState; }
 export function disconnect() {
+  if (keepalive) clearInterval(keepalive);
+  keepalive = null;
+  for (const [id, value] of requests) { clearTimeout(value.timer); value.reject(new Error('WSS 已断开')); requests.delete(id); }
   if (currentSocket) currentSocket.close(1000, 'extension disconnected');
   currentSocket = null;
   connectionState = 'DISCONNECTED';
@@ -82,7 +87,21 @@ export async function connectBrowser() {
           authenticated = true;
           connectionState = 'AUTHENTICATED';
           if (!finished) { finished = true; resolve({ state: connectionState }); }
-        } else if (msg.type !== 'PONG') {
+          // A live Chrome 116+ MV3 WebSocket needs periodic control traffic.
+          // Reconnecting after worker suspension is handled by the caller.
+          if (keepalive) clearInterval(keepalive);
+          keepalive = setInterval(() => {
+            if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'PING' }));
+          }, 20000);
+        } else if (msg.type === 'PONG') {
+          return;
+        } else if (msg.requestId && requests.has(msg.requestId)) {
+          const item = requests.get(msg.requestId);
+          requests.delete(msg.requestId);
+          clearTimeout(item.timer);
+          if (msg.type === 'RULE_ERROR') item.reject(new Error(msg.error || '规则未获授权'));
+          else item.resolve(msg);
+        } else {
           throw new Error('未支持的 Server 响应');
         }
       } catch (error) { fail(error); }
@@ -92,10 +111,30 @@ export async function connectBrowser() {
     });
     socket.addEventListener('close', () => {
       if (socket === currentSocket) {
+        if (keepalive) clearInterval(keepalive);
+        keepalive = null;
+        for (const [id, item] of requests) { clearTimeout(item.timer); item.reject(new Error('WSS 连接中断')); requests.delete(id); }
         currentSocket = null;
         connectionState = 'DISCONNECTED';
       }
       if (!authenticated) fail(new Error('Server 拒绝连接或未完成设备审批'));
     });
+  });
+}
+
+export async function sendControl(type, payload = {}) {
+  if (currentConnectionState() !== 'AUTHENTICATED' ||
+      !currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
+    await connectBrowser();
+  }
+  if (requests.size >= 8) throw new Error('配对请求过多，请稍后重试');
+  const requestId = crypto.randomUUID();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      requests.delete(requestId);
+      reject(new Error('Server 响应超时'));
+    }, 15000);
+    requests.set(requestId, { resolve, reject, timer });
+    currentSocket.send(JSON.stringify({ type, requestId, ...payload }));
   });
 }

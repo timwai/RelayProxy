@@ -135,7 +135,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return { source, policy };
         })());
         const origin = summary.policy.siteOrigin;
-        if (!(await chrome.permissions.contains({ origins: [origin + '/*'] }))) {
+        const url = new URL(origin);
+        if (!(await chrome.permissions.contains({ origins: [`${url.protocol}//${url.hostname}/*`] }))) {
           throw new Error('请先在扩展中授予接收网站权限');
         }
         await sendControl('RULE_ACCEPT', { ruleId: message.ruleId });

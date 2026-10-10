@@ -3,7 +3,7 @@ import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} fro
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
-import {enableFakeIP,setDoHBlocking,setOtherDNSForwarding,setRealProxyDNS} from './dnsSettings.js';
+import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 
@@ -370,7 +370,35 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
   <div className="actions end top-gap"><Button onClick={()=>setAdvancedOpen(!advancedOpen)}>{advancedOpen?'收起高级设置':'高级设置 ›'}</Button></div>
  </Card>
  {advancedOpen&&<>
-
+  <Card title="域名关联与 DNS 出口" eyebrow="ADVANCED DNS">
+   <Setting title="真实 IP → 域名关联" desc="观察验证过的 DNS A/AAAA 应答，为透明代理提供域名线索。共享 IP、系统缓存和应用私有 DoH 仍可能导致无法识别。">
+    <Switch checked={r.dns_association_enabled!==false} label="DNS 域名关联" onChange={v=>setv('routing.dns_association_enabled',v)}/>
+   </Setting>
+   <div className="form-grid top-gap">
+    <Field label="加密 DNS 查询出口" help="代理真实 IP DNS 与 FakeIP 补充查询使用；留空跟随默认出口。">
+     <Select value={r.dns_exit_id||''} onChange={e=>setv('routing.dns_exit_id',e.target.value)}>
+      <option value="">跟随当前默认出口</option>
+      {inventory.filter(x=>x.id).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}
+      {r.dns_exit_id&&!inventory.some(x=>x.id===r.dns_exit_id)&&<option value={r.dns_exit_id}>{r.dns_exit_id}（不可用）</option>}
+     </Select>
+    </Field>
+   </div>
+  </Card>
+  <Card title="FakeIP 专用防护" eyebrow="ADVANCED PROTECTION">
+   <Setting title="阻断已知 DoH 解析器" desc="仅针对可识别的已知 DoH 端点，不能覆盖全部私有 DoH、ECH 或直连 IP。只有 FakeIP 模式可修改。">
+    <Switch checked={!!r.block_doh_endpoints} label="已知 DoH 解析器阻断" disabled={!r.fake_ip_enabled} onChange={v=>change(setDoHBlocking(r,v))}/>
+   </Setting>
+   <Setting title="通过代理补充 TXT / SRV 查询" desc="经指定出口的加密解析器查询额外 DNS 记录；只有 FakeIP 模式可修改。">
+    <Switch checked={!!r.forward_other_dns} label="FakeIP 补充 TXT 与 SRV" disabled={!r.fake_ip_enabled} onChange={v=>change(setOtherDNSForwarding(r,v))}/>
+   </Setting>
+   <div className="form-grid top-gap">
+    <Field label="额外阻断的 DoH IP / CIDR" className="full" help="按地址阻断 TCP/UDP 443，可能同时影响共享此 IP 的正常 HTTPS 服务；一行一个 IP 或 CIDR。">
+     <Textarea rows="3" placeholder={'9.9.9.9\\n1.1.1.1'} value={arr(r.doh_blocked_ips).join('\\n')} onChange={e=>setv('routing.doh_blocked_ips',e.target.value.split(/[\\n,;]+/).map(x=>x.trim()).filter(Boolean))}/>
+    </Field>
+   </div>
+   <div className="notice warn top-gap">这些开关不等于完整的 DNS 防泄漏保证。环回 DNS、应用私有 DoH 与 Agent/驱动退出后的网络保护，需要独立验证。</div>
+   <div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>透明代理设置 ›</Button><Button onClick={()=>onGoto('diagnostics')}>诊断与日志 ›</Button></div>
+  </Card>
  </>}
  <Card title="实际运行状态" eyebrow="ACTIVE DNS PROTECTION">
   <Setting title="透明代理运行状态" desc={'DNS 捕获报告：'+captureMode+'（不代表所有 DNS 均已接管）'}><Badge tone={divertRunning?'blue':'warn'}>{divertRunning?'透明代理运行中':'透明代理未运行'}</Badge></Setting>

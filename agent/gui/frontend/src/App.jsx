@@ -32,7 +32,7 @@ const EMPTY={
  rdp:{enabled:true,address:'127.0.0.1:3389'},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true,upnpAllowed:false},publicDirectAdvertise:'',
  networkMode:'',network:{mode:'',exclude_processes:[]},networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
- verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,dns_exit_id:'',doh_blocked_ips:[],default_action:'PROXY',rules:[]},configPath:'',version:''
+ verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,dns_exit_id:'',doh_blocked_ips:[],default_action:'PROXY',rules:[]},configPath:'',version:''
 };
 
 const cx=(...v)=>v.filter(Boolean).join(' ');

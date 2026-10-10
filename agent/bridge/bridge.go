@@ -461,6 +461,7 @@ type CustomExitUpdate struct {
 type RoutingConfigUpdate struct {
 	Mode              *string        `json:"mode"`
 	DNSMode           *string        `json:"dns_mode"`
+	AutoDetectDNS     *bool          `json:"auto_detect_dns"`
 	FakeIPEnabled     *bool          `json:"fake_ip_enabled"`
 	BlockDoHEndpoints *bool          `json:"block_doh_endpoints"`
 	ForwardOtherDNS   *bool          `json:"forward_other_dns"`
@@ -696,6 +697,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 
 	if in.Routing != nil {
+		if in.Routing.AutoDetectDNS != nil {
+			cfg.Routing.AutoDetectDNS = *in.Routing.AutoDetectDNS
+		}
 		if in.Routing.FakeIPEnabled != nil {
 			cfg.Routing.FakeIPEnabled = *in.Routing.FakeIPEnabled
 		}

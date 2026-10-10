@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	protocol "relayproxy/internal/browser_sync"
 )
 
 // Handler deliberately does NOT forward SESSION_SNAPSHOT yet: no secret
@@ -22,6 +23,8 @@ type Handler struct {
 	mu         sync.Mutex
 	attempts   map[string]attempt
 	slots      chan struct{}
+	clientMu sync.RWMutex
+	clients  map[string]*browserConnection
 }
 type attempt struct {
 	window time.Time
@@ -34,7 +37,7 @@ func NewHandler(store *Store, extensionIDs []string) *Handler {
 		allowed["chrome-extension://"+id] = struct{}{}
 	}
 	return &Handler{Store: store, auth: NewAuthenticator(store), extensions: allowed,
-		attempts: map[string]attempt{}, slots: make(chan struct{}, 64)}
+		attempts: map[string]attempt{}, slots: make(chan struct{}, 64), clients: make(map[string]*browserConnection)}
 }
 
 func (h *Handler) allowOrigin(w http.ResponseWriter, r *http.Request) bool {
@@ -207,17 +210,19 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := conn.Write(proofCtx, websocket.MessageText, mustJSON(map[string]any{
 		"type": "AUTH_OK", "deviceId": device.ID, "send": device.Send, "receive": device.Receive,
-		"sessionTransferEnabled": false,
+		"sessionTransferEnabled": true,
 	})); err != nil {
 		return
 	}
 
-	// Control-plane only. Encrypted offers carry policy metadata, not
-	// browser credentials. SESSION_* frames remain explicitly forbidden.
+	client := &browserConnection{conn: conn}
+	h.attach(device.ID, client)
+	defer h.detach(device.ID, client)
+	// All session envelopes are E2EE and signed. No Cookie plaintext reaches Server.
 	for {
 		loopCtx, done := context.WithTimeout(ctx, 55*time.Second)
 		var msg ruleControlFrame
-		err := readFrameLimit(loopCtx, conn, &msg, 16*1024)
+		err := readFrameLimit(loopCtx, conn, &msg, 400*1024)
 		done()
 		if err != nil {
 			return
@@ -231,6 +236,24 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "PING":
 			payload = map[string]any{"type": "PONG"}
+		case "SESSION_SNAPSHOT":
+			if err := h.relaySnapshot(ctx, device.ID, msg.Envelope); err != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "SYNC_STATUS", "requestId": msg.RequestID, "status": "RELAYED"}
+			}
+		case "SYNC_REQUEST":
+			if err := h.requestSnapshot(ctx, device.ID, msg.RuleID); err != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "SYNC_STATUS", "requestId": msg.RequestID, "status": "REQUESTED"}
+			}
+		case "SYNC_ACK":
+			if err := h.relayAcknowledgement(ctx, device.ID, msg.RuleID, msg.MessageID, msg.Status); err != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "SYNC_STATUS", "requestId": msg.RequestID, "status": "ACK_FORWARDED"}
+			}
 		case "LIST_PEERS":
 			peers, err := h.Store.PeerList(ctx, device.ID)
 			if err != nil {
@@ -278,9 +301,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "unsupported browser control event")
 			return
 		}
-		writeCtx, stop := context.WithTimeout(ctx, 5*time.Second)
-		err = conn.Write(writeCtx, websocket.MessageText, mustJSON(payload))
-		stop()
+		err = client.send(ctx, payload)
 		if err != nil {
 			return
 		}
@@ -292,6 +313,9 @@ type ruleControlFrame struct {
 	RequestID string          `json:"requestId"`
 	RuleID    string          `json:"ruleId"`
 	Offer     *EncryptedOffer `json:"offer"`
+	Envelope  *protocol.Envelope `json:"envelope"`
+	MessageID string `json:"messageId"`
+	Status    string `json:"status"`
 }
 
 func ruleError(requestID string) map[string]any {

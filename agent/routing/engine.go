@@ -21,6 +21,9 @@ func NewEngine(cfg Config) (*Engine, error) {
 	if cfg.Mode == "" {
 		cfg.Mode = ModeGlobalProxy
 	}
+	if cfg.DNSMode == "" {
+		cfg.DNSMode = DNSModeProxy
+	}
 	if cfg.DefaultAction == "" {
 		cfg.DefaultAction = ActionProxy
 	}
@@ -41,6 +44,48 @@ func (e *Engine) Reload(cfg Config) error {
 	e.config, e.compound = compiled.config, compiled.compound
 	e.mu.Unlock()
 	return nil
+}
+
+// FakeIPEnabled is a hot-path, allocation-free read of the active DNS policy.
+func (e *Engine) FakeIPEnabled() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.FakeIPEnabled && (e.config.DNSMode == "" || e.config.DNSMode == DNSModeProxy)
+}
+
+// DoHBlockedIPs returns a defensive copy of the configured explicit
+// HTTPS/443 endpoint blocklist. The matcher only runs for port 443.
+func (e *Engine) DoHBlockedIPs() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.config.FakeIPEnabled || !e.config.BlockDoHEndpoints {
+		return nil
+	}
+	return append([]string(nil), e.config.DoHBlockedIPs...)
+}
+
+// BlockDoHEndpoints is an opt-in best-effort policy; hostnames unavailable
+// before connection cannot be blocked by this selector.
+// ForwardOtherDNS never falls back to plaintext/local DNS. Queries travel
+// through the selected authenticated relay/upstream to a TLS resolver.
+// DNSExitID pins encrypted DNS to the chosen proxy exit. Empty means the
+// current default exit. It never changes the exit of application traffic.
+func (e *Engine) DNSExitID() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.DNSExitID
+}
+
+func (e *Engine) ForwardOtherDNS() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.FakeIPEnabled && e.config.ForwardOtherDNS && e.config.DNSMode == DNSModeProxy
+}
+
+func (e *Engine) BlockDoHEndpoints() bool {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.config.FakeIPEnabled && e.config.BlockDoHEndpoints && e.config.DNSMode == DNSModeProxy
 }
 
 func (e *Engine) Config() Config {
@@ -67,7 +112,11 @@ func (e *Engine) DecideFlow(flow Flow) Decision {
 	}
 	for i, rule := range e.config.Rules {
 		if rule.Enabled && e.compound[i].matches(rule, flow) {
-			return Decision{Action: rule.Action, ExitID: rule.ExitID, DatagramRequired: rule.DatagramRequired, HandleDirect: rule.HandleDirect, Rule: rule.Name, Matched: true}
+			name := strings.TrimSpace(rule.Name)
+			if name == "" {
+				name = "rule #" + strconv.Itoa(i+1)
+			}
+			return Decision{Action: rule.Action, ExitID: rule.ExitID, DatagramRequired: rule.DatagramRequired, HandleDirect: rule.HandleDirect, Rule: name, Matched: true}
 		}
 	}
 	return Decision{Action: e.config.DefaultAction, Rule: "default"}

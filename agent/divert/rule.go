@@ -2,7 +2,6 @@ package divert
 
 import (
 	"path"
-	"runtime"
 	"strings"
 )
 
@@ -89,9 +88,9 @@ func matchProcess(pattern, process string) bool {
 	if !strings.Contains(pat, "/") {
 		proc = path.Base(proc)
 	}
-	if runtime.GOOS == "windows" || windowsProcessPath(pattern) || windowsProcessPath(process) {
-		pat, proc = strings.ToLower(pat), strings.ToLower(proc)
-	}
+	// Process matching is case-insensitive across platforms, including
+	// full paths, basename globs and process aliases.
+	pat, proc = strings.ToLower(pat), strings.ToLower(proc)
 	matched, _ := path.Match(pat, proc)
 	return matched
 }
@@ -102,8 +101,4 @@ func normalizeProcessPath(p string) string {
 		return ""
 	}
 	return path.Clean(p)
-}
-
-func windowsProcessPath(p string) bool {
-	return strings.Contains(p, "\\") || (len(p) >= 2 && p[1] == ':')
 }

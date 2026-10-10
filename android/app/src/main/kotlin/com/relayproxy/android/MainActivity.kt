@@ -112,7 +112,13 @@ class MainActivity : Activity() {
 
     // ====== Tab 1: Nodes UI Views ======
     private lateinit var nodesListContainer: LinearLayout
+    private lateinit var customExitContainer: LinearLayout
     private lateinit var autoNodeRadioDot: View
+    private lateinit var nodeDeviceSection: LinearLayout
+    private lateinit var nodeCustomSection: LinearLayout
+    private lateinit var nodeTabButtons: List<TextView>
+    private lateinit var nodePingAllButton: TextView
+    private var selectedNodeTab = 0
 
     // ====== Tab 2: Routing UI Views ======
     private data class RuleDragToken(val ruleId: String)
@@ -120,6 +126,7 @@ class MainActivity : Activity() {
     private lateinit var vpnScopeSpinner: Spinner
     private lateinit var vpnAppsSummaryText: TextView
     private lateinit var rulesListContainer: LinearLayout
+    private lateinit var dnsProtectionSummary: TextView
 
     // ====== Tab 3: Settings UI Views ======
     private lateinit var settingServerField: EditText
@@ -185,6 +192,8 @@ class MainActivity : Activity() {
         registerMessageReceiver()
         syncRoutingModeFromStore()
         if (::rulesListContainer.isInitialized) refreshRoutingTab()
+        updateDNSProtectionSummary()
+        if (::customExitContainer.isInitialized) renderCustomExits()
         connectControlChannel()
         RelayExitService.setUiVisible(true)
         refreshGlobalMessageOverlayPermissionState()
@@ -921,13 +930,13 @@ class MainActivity : Activity() {
         val titles = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply {
-                text = "出口节点选择"
+                text = "网络出口"
                 textSize = 19f
                 setTextColor(UiPalette.ink)
                 typeface = Typeface.DEFAULT_BOLD
             })
             addView(TextView(this@MainActivity).apply {
-                text = "从当前身份及已授权跨身份出口中路由流量"
+                text = "按设备出口与自定义代理出口分类管理"
                 textSize = 11.5f
                 setTextColor(UiPalette.muted)
                 setPadding(0, dp(2), 0, 0)
@@ -948,7 +957,34 @@ class MainActivity : Activity() {
             setOnClickListener { triggerPingAllNodes() }
         }
         header.addView(pingAllBtn)
+        nodePingAllButton = pingAllBtn
         content.addView(header)
+
+        val tabBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = UiKit.rounded(this@MainActivity, UiPalette.surfaceElevated, 12, UiPalette.lineSubtle)
+        }
+        nodeTabButtons = listOf("设备出口", "自定义出口").mapIndexed { index, label ->
+            TextView(this).apply {
+                text = label
+                textSize = 13.5f
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                contentDescription = "切换到${label}"
+                setOnClickListener { selectNodeTab(index) }
+                tabBar.addView(this, LinearLayout.LayoutParams(0, dp(42), 1f))
+            }
+        }
+        content.addView(tabBar, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { bottomMargin = dp(16) })
+        nodeDeviceSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        nodeCustomSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        content.addView(nodeDeviceSection)
+        content.addView(nodeCustomSection)
 
         val autoCard = UiKit.card(this, paddingDp = 15, radiusDp = 14).apply {
             isClickable = true
@@ -997,7 +1033,7 @@ class MainActivity : Activity() {
         }
         autoRow.addView(radioContainer, LinearLayout.LayoutParams(dp(22), dp(22)))
         autoCard.addView(autoRow)
-        content.addView(autoCard)
+        nodeDeviceSection.addView(autoCard)
 
         nodesListContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1006,12 +1042,65 @@ class MainActivity : Activity() {
             }
             layoutParams = lp
         }
-        content.addView(nodesListContainer)
+        nodeDeviceSection.addView(nodesListContainer)
+
+        val localHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(24), 0, dp(12))
+        }
+        localHeader.addView(TextView(this).apply {
+            text = "本机自定义代理出口"
+            textSize = 16f
+            setTextColor(UiPalette.ink)
+            typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        localHeader.addView(TextView(this).apply {
+            text = "＋ 新增"
+            textSize = 13f
+            setTextColor(UiPalette.brand)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(8), dp(9), dp(8), dp(9))
+            isClickable = true
+            setOnClickListener { editCustomExit(null) }
+        })
+        nodeCustomSection.addView(localHeader)
+        nodeCustomSection.addView(TextView(this).apply {
+            text = "支持 SOCKS5、HTTP、HTTPS CONNECT；可作为默认出口或分流规则出口。HTTP(S) 不支持 UDP。代理密码由 Android Keystore 加密保存。"
+            textSize = 11.5f
+            setTextColor(UiPalette.muted)
+            setPadding(0, 0, 0, dp(12))
+        })
+        customExitContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        nodeCustomSection.addView(customExitContainer)
+        renderCustomExits()
+        selectNodeTab(selectedNodeTab)
 
         return ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(UiPalette.bg)
             addView(content)
+        }
+    }
+
+    private fun selectNodeTab(index: Int) {
+        selectedNodeTab = index.coerceIn(0, 1)
+        if (!::nodeDeviceSection.isInitialized || !::nodeCustomSection.isInitialized ||
+            !::nodeTabButtons.isInitialized
+        ) return
+        nodeDeviceSection.visibility = if (selectedNodeTab == 0) View.VISIBLE else View.GONE
+        nodeCustomSection.visibility = if (selectedNodeTab == 1) View.VISIBLE else View.GONE
+        if (::nodePingAllButton.isInitialized) {
+            nodePingAllButton.visibility = if (selectedNodeTab == 0) View.VISIBLE else View.GONE
+        }
+        nodeTabButtons.forEachIndexed { itemIndex, button ->
+            val chosen = itemIndex == selectedNodeTab
+            button.background = UiKit.rounded(
+                this, if (chosen) UiPalette.brandSoft else Color.TRANSPARENT, 9,
+            )
+            button.setTextColor(if (chosen) UiPalette.brand else UiPalette.muted)
         }
     }
 
@@ -1131,11 +1220,178 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun renderCustomExits() {
+        if (!::customExitContainer.isInitialized) return
+        customExitContainer.removeAllViews()
+        val config = ConfigStore(this).load()
+        if (config.customExits.isEmpty()) {
+            customExitContainer.addView(TextView(this).apply {
+                text = "尚未配置本机代理出口。添加后即可作为默认出口或分流规则目标。"
+                textSize = 12f
+                setTextColor(UiPalette.muted)
+                setPadding(dp(8), dp(14), dp(8), dp(18))
+            })
+            return
+        }
+        config.customExits.forEach { item ->
+            val selected = config.defaultExitId == item.id
+            val card = UiKit.card(this, paddingDp = 15, radiusDp = 14)
+            val title = TextView(this).apply {
+                text = item.name + if (selected) " · 默认出口" else ""
+                textSize = 14.5f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(UiPalette.ink)
+            }
+            card.addView(title)
+            card.addView(TextView(this).apply {
+                text = "${item.protocol.uppercase()} · ${item.address} · " +
+                    if (item.enabled) "已启用" else "已停用"
+                textSize = 11f
+                setTextColor(UiPalette.muted)
+                setPadding(0, dp(5), 0, dp(10))
+            })
+            val actions = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            fun action(label: String, callback: () -> Unit) {
+                actions.addView(TextView(this).apply {
+                    text = label
+                    textSize = 12f
+                    setTextColor(UiPalette.brand)
+                    setPadding(dp(10), dp(9), dp(10), dp(9))
+                    isClickable = true
+                    setOnClickListener { callback() }
+                })
+            }
+            if (item.enabled && !selected) action("设为默认") { selectExitNode(item.id) }
+            action("编辑") { editCustomExit(item) }
+            action("删除") {
+                UiKit.alertDialog(this, "删除自定义出口", "确定删除“${item.name}”？如被默认出口或分流规则引用，将拒绝删除。")
+                    .setPositiveButton("删除") { _, _ ->
+                        val store = ConfigStore(this)
+                        val cfg = store.load()
+                        val removed = runCatching {
+                            store.save(cfg.copy(customExits = cfg.customExits.filterNot { it.id == item.id }))
+                        }
+                        if (removed.isSuccess) {
+                            notifyServiceReconfigure()
+                            renderCustomExits()
+                        } else {
+                            Toast.makeText(this, removed.exceptionOrNull()?.message ?: "删除失败", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    .setNegativeButton("取消", null).show()
+            }
+            card.addView(actions)
+            customExitContainer.addView(card, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+            ).apply { bottomMargin = dp(10) })
+        }
+    }
+
+    private fun editCustomExit(original: AndroidCustomExit?) {
+        val edit = original ?: AndroidCustomExit()
+        val form = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(4))
+        }
+        fun input(caption: String, value: String, password: Boolean = false): EditText {
+            form.addView(TextView(this).apply {
+                text = caption
+                textSize = 12f
+                setTextColor(UiPalette.muted)
+                setPadding(0, dp(10), 0, dp(5))
+            })
+            return EditText(this).also { field ->
+                field.setSingleLine(true)
+                field.textSize = 14f
+                field.setText(value)
+                if (password) {
+                    field.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                }
+                form.addView(field)
+            }
+        }
+        val name = input("出口名称", edit.name)
+        val protocols = listOf("socks5", "http", "https")
+        form.addView(TextView(this).apply {
+            text = "代理类型"
+            textSize = 12f
+            setTextColor(UiPalette.muted)
+            setPadding(0, dp(10), 0, 0)
+        })
+        val protocol = Spinner(this).apply {
+            adapter = UiKit.themedSpinnerAdapter(this@MainActivity, protocols.map { it.uppercase() })
+            setSelection(protocols.indexOf(edit.protocol).coerceAtLeast(0))
+        }
+        form.addView(protocol)
+        val address = input("代理地址（host:port）", edit.address)
+        val user = input("认证用户名（可选）", edit.username)
+        val password = input("认证密码（留空保持原值）", "")
+        val clearPassword = Switch(this).apply {
+            text = "清除原密码"
+            isChecked = false
+            UiKit.styleSwitch(this)
+        }
+        if (original != null && original.password.isNotBlank()) form.addView(clearPassword)
+        val enabled = Switch(this).apply {
+            text = "启用出口"
+            isChecked = edit.enabled
+            UiKit.styleSwitch(this)
+        }
+        form.addView(enabled)
+        val scroll = ScrollView(this).apply { addView(form) }
+        UiKit.alertDialog(this, if (original == null) "新增自定义出口" else "编辑自定义出口", "")
+            .setView(scroll)
+            .setPositiveButton("保存", null)
+            .setNegativeButton("取消", null)
+            .create().also { dialog ->
+                dialog.setOnShowListener {
+                    dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        val next = edit.copy(
+                            name = name.text.toString().trim(),
+                            protocol = protocols[protocol.selectedItemPosition],
+                            address = address.text.toString().trim(),
+                            username = user.text.toString(),
+                            password = when {
+                                clearPassword.isChecked -> ""
+                                password.text.isNotBlank() -> password.text.toString()
+                                else -> edit.password
+                            },
+                            enabled = enabled.isChecked,
+                        )
+                        val store = ConfigStore(this)
+                        val current = store.load()
+                        val updated = if (original == null) {
+                            current.customExits + next
+                        } else {
+                            current.customExits.map { if (it.id == original.id) next else it }
+                        }
+                        val saved = runCatching { store.save(current.copy(customExits = updated)) }
+                        if (saved.isSuccess) {
+                            dialog.dismiss()
+                            notifyServiceReconfigure()
+                            renderCustomExits()
+                        } else {
+                            Toast.makeText(this, saved.exceptionOrNull()?.message ?: "保存失败", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+                dialog.show()
+            }
+    }
+
     private fun selectExitNode(deviceId: String) {
         val store = ConfigStore(this)
-        store.save(store.load().copy(defaultExitId = deviceId))
+        val saved = runCatching { store.save(store.load().copy(defaultExitId = deviceId)) }
+        if (saved.isFailure) {
+            Toast.makeText(this, saved.exceptionOrNull()?.message ?: "出口设置无效", Toast.LENGTH_LONG).show()
+            return
+        }
         notifyServiceReconfigure()
-        Toast.makeText(this, if (deviceId.isBlank()) "已设为自动优选出口" else "已切换默认出口设备", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, if (deviceId.isBlank()) "已设为自动优选出口" else "已切换默认出口", Toast.LENGTH_SHORT).show()
+        renderCustomExits()
         renderStatus()
     }
 
@@ -1348,6 +1604,26 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun updateDNSProtectionSummary() {
+        if (!::dnsProtectionSummary.isInitialized) return
+        val store = ConfigStore(this)
+        val vpn = runCatching { JSONObject(RelayVpnService.statusJson()) }.getOrNull()
+        val vpnState = vpn?.optString("vpnState", "STOPPED") ?: "STOPPED"
+        val alwaysOn = vpn?.optBoolean("alwaysOnEnabled", false) ?: false
+        val lockdown = vpn?.optBoolean("lockdownEnabled", false) ?: false
+        val privateDNS = Settings.Global.getString(contentResolver, "private_dns_mode")
+            .orEmpty().ifBlank { "unknown" }
+        dnsProtectionSummary.text = buildString {
+            append("VPN 状态：").append(vpnState)
+            append("\nDNS 方案：Mapped DNS → SOCKS5 → 当前出口")
+            append("\n系统 Private DNS：").append(privateDNS)
+            append("\n始终开启 VPN：").append(if (alwaysOn) "已开启" else "未开启 / 未验证")
+            append("\n无 VPN 时阻止连接：").append(if (lockdown) "已开启" else "未开启 / 未验证")
+            append("\nVPN IPv6：").append(if (store.vpnIpv6Configured()) "已配置" else "未启用")
+            append("\n泄漏认证：尚未实机抓包验证")
+        }
+    }
+
     private fun openVpnAppPicker() {
         val store = ConfigStore(this)
         val selected = ArrayList(store.load().vpnPackages)
@@ -1363,6 +1639,8 @@ class MainActivity : Activity() {
         if (!::vpnScopeSpinner.isInitialized || !::rulesListContainer.isInitialized) return
         val store = ConfigStore(this)
         val config = store.load()
+        val exitStatus = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val exitNames = ExitDisplayNames.fromStatus(exitStatus, store.customExitNames())
 
         val scopeValues = listOf(
             ExitConfig.VPN_APP_MODE_ALL,
@@ -1487,17 +1765,27 @@ class MainActivity : Activity() {
             metaRow.addView(actionChip)
 
             if (rule.exitId.isNotBlank()) {
-                val exitChip = UiKit.chip(this, "出口: ${rule.exitId.take(12)}", UiPalette.brand, UiPalette.brandSoft, radiusDp = 6).apply {
-                    val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
-                        leftMargin = dp(8)
+                val exitName = ExitDisplayNames.label(rule.exitId, exitNames)
+                metaRow.addView(TextView(this).apply {
+                    text = "出口：$exitName"
+                    textSize = 11.5f
+                    setTextColor(UiPalette.brand)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    contentDescription = "出口：$exitName，点击查看完整名称"
+                    isClickable = true
+                    setOnClickListener {
+                        UiKit.alertDialog(this@MainActivity, "规则出口", exitName)
+                            .setPositiveButton("知道了", null)
+                            .show()
                     }
-                    layoutParams = lp
-                }
-                metaRow.addView(exitChip)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    leftMargin = dp(9)
+                    rightMargin = dp(8)
+                })
+            } else {
+                metaRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
             }
-
-            val spacer = View(this)
-            metaRow.addView(spacer, LinearLayout.LayoutParams(0, 1, 1f))
 
             val editHint = TextView(this).apply {
                 text = "编辑详情 ›"
@@ -1918,6 +2206,39 @@ class MainActivity : Activity() {
         netCard.addView(switchBlock("允许访问出口侧私网", "允许直连手机所在局域网资产 (192.168.x / 10.x)", settingAllowPrivate), topMargin(14))
         content.addView(netCard, topMargin(16))
 
+        // Android uses hev-socks5-tunnel Mapped DNS, not desktop WinDivert/
+        // NFQUEUE FakeIP. Present the actual platform protection state rather
+        // than pretending the desktop FakeIP switch is supported on Android.
+        val dnsCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
+        dnsCard.addView(sectionHeader("DNS 解析与防泄漏", "Android VPN · Mapped DNS · 系统防护状态"))
+        dnsProtectionSummary = TextView(this).apply {
+            textSize = 12f
+            setTextColor(UiPalette.muted)
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        dnsCard.addView(dnsProtectionSummary)
+        dnsCard.addView(TextView(this).apply {
+            text = "Android 使用 VPN Mapped DNS，将域名交给所选出口解析。桌面 Agent 的 FakeIP/DoH 拦截开关不适用于此处。Private DNS、应用内 DoH、VPN 外应用仍需抓包验证。"
+            textSize = 11f
+            setTextColor(UiPalette.muted)
+        })
+        dnsCard.addView(TextView(this).apply {
+            text = "打开系统 VPN 设置 ›"
+            textSize = 12f
+            setTextColor(UiPalette.brand)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(14), 0, 0)
+            isClickable = true
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+            }
+        })
+        content.addView(dnsCard, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(16) })
+        updateDNSProtectionSummary()
+
         // 3. 传输参数与 TLS 安全卡片 (Card 3: 拆分)
         val protoCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
         protoCard.addView(sectionHeader("传输参数与 TLS 安全", "底层 QUIC / TCP 隧道与传输加密"))
@@ -2306,6 +2627,7 @@ class MainActivity : Activity() {
     private fun renderStatus() {
         val obj = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
         val vpnObj = runCatching { JSONObject(RelayVpnService.statusJson()) }.getOrNull()
+        updateDNSProtectionSummary()
 
         val state = obj?.optString("connectionState", "STOPPED") ?: "STOPPED"
         val approval = obj?.optString("approvalState", "unknown") ?: "unknown"
@@ -2514,13 +2836,20 @@ class MainActivity : Activity() {
                 }
             }
         }
+        if (selectedExit.startsWith("local:")) {
+            nodeDisplay = ConfigStore(this).customExitDisplayName(selectedExit) ?: "本机出口不可用"
+        }
         activeNodeName.text = nodeDisplay
-        activeNodeSubtitle.text = if (selectedExit.isBlank()) "根据延迟与链路自动优选" else "默认已绑定出口节点"
+        activeNodeSubtitle.text = when {
+            selectedExit.isBlank() -> "根据延迟与链路自动优选"
+            selectedExit.startsWith("local:") -> "本机代理 · 不经过 Relay 出口节点"
+            else -> "默认已绑定出口节点"
+        }
         activeNodeLatency.text = if (latency > 0) "$latency ms" else "—"
 
         // 双核状态卡片
         if (vpnState == "RUNNING") {
-            vpnStatusBadge.text = "运行中"
+            vpnStatusBadge.text = if (vpnObj?.optBoolean("lockdownEnabled", false) == true) "系统锁定 · 防绕过" else "运行中"
             vpnStatusBadge.setTextColor(UiPalette.success)
             vpnStatusBadge.background = UiKit.rounded(this, UiPalette.successSoft, 6)
             vpnActionBtn.text = "停止 VPN"

@@ -120,16 +120,39 @@ final class Provider: NETransparentProxyProvider {
         completionHandler()
     }
 
+    // The opt-in marker is kept in the app group by the Go Agent, and
+    // deliberately persists after an Agent crash. It does not replace OS
+    // firewall enforcement for flows not captured by Network Extension.
+    private var dnsProtectionArmed: Bool {
+        guard let directory = sharedDirectory else { return false }
+        let marker = directory.appendingPathComponent("dns-guard.enabled")
+        return (try? String(contentsOf: marker, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)) == "enabled"
+    }
+
     override func handleNewFlow(_ flow: NEAppProxyFlow) -> Bool {
-		// The provider remains fail-open while the Go Agent is unavailable. The
-		// authenticated control stream flips this before any flow is claimed.
+		// When the user opted into the DNS guard and the Agent disappeared,
+		// claim and close all flows covered by the NE rule set rather than
+		// returning false (which Apple defines as forwarding DIRECT).
+		// This still cannot control DNS that macOS never hands to NE.
 		stateLock.lock()
-		guard agentReady, !stopped else {
-			stateLock.unlock()
-			return false
-		}
+		let ready = agentReady && !stopped
 		let currentToken = ipcToken
 		stateLock.unlock()
+		if !ready {
+			guard dnsProtectionArmed else { return false }
+			let failure = IPCError.connectionFailed("RelayProxy DNS protection armed; Agent unavailable")
+			if let tcp = flow as? NEAppProxyTCPFlow {
+				tcp.closeReadWithError(failure)
+				tcp.closeWriteWithError(failure)
+				return true
+			}
+			if let udp = flow as? NEAppProxyUDPFlow {
+				udp.closeReadWithError(failure)
+				udp.closeWriteWithError(failure)
+				return true
+			}
+			return false
+		}
         let identifier = ObjectIdentifier(flow)
 		let finish: () -> Void = { [weak self] in
 			guard let self else { return }

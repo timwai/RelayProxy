@@ -1,0 +1,257 @@
+package divert
+
+import (
+	"net/netip"
+	"strings"
+	"sync"
+	"time"
+
+	"golang.org/x/net/dns/dnsmessage"
+)
+
+// Private benchmarking range (RFC 2544) and documentation-only IPv6 prefix.
+// These addresses are placeholders and MUST NEVER be forwarded onto the wire.
+// The two address families share a hostname but have distinct addresses.
+const (
+	fakeIPLimit = 32768
+	fakeIPTTL   = 60
+)
+
+var (
+	fakeIPv4Range = netip.MustParsePrefix("198.18.0.0/15")
+	fakeIPv6Range = netip.MustParsePrefix("2001:db8:198:18::/96")
+)
+
+type fakeIPEntry struct {
+	host    string
+	scope   string // selected DNS exit; never infer an application from system DNS
+	scoped  bool   // legacy/manual associations remain unscoped for compatibility
+	expires time.Time
+}
+
+type fakeIPDNS struct {
+	mu           sync.Mutex
+	now          func() time.Time
+	next4, next6 uint32
+	byName       map[string]netip.Addr
+	byIP         map[netip.Addr]fakeIPEntry
+}
+
+func newFakeIPDNS() *fakeIPDNS {
+	return &fakeIPDNS{now: time.Now, byName: make(map[string]netip.Addr), byIP: make(map[netip.Addr]fakeIPEntry)}
+}
+
+// Ports used by DNS-over-TLS, DNS-over-QUIC and related non-HTTP transports.
+// HTTPS-based DoH on port 443 cannot be distinguished at the packet layer.
+func isEncryptedDNSPort(port uint16) bool { return port == 853 || port == 784 || port == 8853 }
+
+func isDNSLeakPort(port uint16) bool { return port == 53 || isEncryptedDNSPort(port) }
+
+func isFakeIP(addr netip.Addr) bool {
+	addr = addr.Unmap()
+	return addr.IsValid() && (fakeIPv4Range.Contains(addr) || fakeIPv6Range.Contains(addr))
+}
+
+// wasIssued distinguishes FakeIP addresses minted by this Agent from real
+// benchmark/test destinations in the same reserved ranges. Turning FakeIP off
+// must not block unrelated traffic to 198.18.0.0/15, yet already-issued
+// placeholders must still fail closed while an application caches them.
+func (d *fakeIPDNS) wasIssued(addr netip.Addr) bool {
+	if !isFakeIP(addr) {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if addr.Is4() {
+		b := addr.As4()
+		id := uint32(b[1]-18)<<16 | uint32(b[2])<<8 | uint32(b[3])
+		return id != 0 && id <= d.next4
+	}
+	b := addr.As16()
+	id := uint32(b[12])<<24 | uint32(b[13])<<16 | uint32(b[14])<<8 | uint32(b[15])
+	return id != 0 && id <= d.next6
+}
+
+func (d *fakeIPDNS) lookup(addr netip.Addr) (string, bool) {
+	host, _, _, ok := d.lookupWithScope(addr)
+	return host, ok
+}
+
+func (d *fakeIPDNS) lookupWithScope(addr netip.Addr) (host, scope string, scoped, valid bool) {
+	if !isFakeIP(addr) {
+		return "", "", false, false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	entry, ok := d.byIP[addr.Unmap()]
+	if !ok || !entry.expires.After(d.now()) {
+		return "", "", false, false
+	}
+	return entry.host, entry.scope, entry.scoped, true
+}
+
+// pruneExpiredLocked releases only expired lookup state, not the IP sequence
+// number. Previously-issued addresses are deliberately never reassigned to a
+// different host within one Agent lifetime; a stale application DNS cache
+// must never be silently redirected to an unrelated hostname.
+func (d *fakeIPDNS) pruneExpiredLocked(now time.Time) {
+	for ip, entry := range d.byIP {
+		if !entry.expires.After(now) {
+			delete(d.byIP, ip)
+		}
+	}
+	for key, mapped := range d.byName {
+		if _, active := d.byIP[mapped]; !active {
+			delete(d.byName, key)
+		}
+	}
+}
+
+func (d *fakeIPDNS) allocate(host string, kind dnsmessage.Type) (netip.Addr, bool) {
+	return d.allocateScoped(host, kind, "", false)
+}
+
+// allocateScoped never reuses an address across DNS exit scopes. The calling
+// resolver may not know the process behind the system DNS service, so the
+// selected DNS egress is the strongest reliable isolation boundary here.
+func (d *fakeIPDNS) allocateScoped(host string, kind dnsmessage.Type, scope string, scoped bool) (netip.Addr, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := host + "/" + string(rune(kind))
+	if scoped {
+		key += "/dns-exit:" + scope
+	}
+	now := d.now()
+	if existing, ok := d.byName[key]; ok {
+		if entry, found := d.byIP[existing]; found && entry.expires.After(now) {
+			entry.expires = now.Add(15 * time.Minute)
+			d.byIP[existing] = entry
+			return existing, true
+		}
+		delete(d.byName, key)
+		delete(d.byIP, existing)
+	}
+	if len(d.byIP) >= fakeIPLimit {
+		// Reclaim expired bookkeeping at capacity, without ever reassigning
+		// an old synthetic IP. Live sessions and DNS caches cannot be
+		// redirected to another hostname by this cleanup.
+		d.pruneExpiredLocked(now)
+		if len(d.byIP) >= fakeIPLimit {
+			return netip.Addr{}, false
+		}
+	}
+	var ip netip.Addr
+	if kind == dnsmessage.TypeA {
+		d.next4++
+		if d.next4 > 131070 {
+			return netip.Addr{}, false
+		}
+		id := d.next4
+		ip = netip.AddrFrom4([4]byte{198, 18 + byte(id>>16), byte(id >> 8), byte(id)})
+	} else {
+		d.next6++
+		if d.next6 == 0 {
+			return netip.Addr{}, false
+		}
+		raw := netip.MustParseAddr("2001:db8:198:18::").As16()
+		raw[12], raw[13], raw[14], raw[15] = byte(d.next6>>24), byte(d.next6>>16), byte(d.next6>>8), byte(d.next6)
+		ip = netip.AddrFrom16(raw)
+	}
+	d.byName[key] = ip
+	d.byIP[ip] = fakeIPEntry{host: host, scope: scope, scoped: scoped, expires: now.Add(15 * time.Minute)}
+	return ip, true
+}
+
+// reply synthesizes an answer locally instead of sending a DNS request out of
+// the machine. Unsupported question types receive REFUSED, rather than being
+// silently forwarded to the operating system's configured resolver.
+// The Relay bootstrap hostname is answered from known relay IPs, not FakeIP.
+func (d *fakeIPDNS) reply(payload []byte, relayHost string, relayIPs []string) []byte {
+	return d.replyScoped(payload, relayHost, relayIPs, "", false)
+}
+
+func (d *fakeIPDNS) replyScoped(payload []byte, relayHost string, relayIPs []string, scope string, scoped bool) []byte {
+	var query dnsmessage.Message
+	if err := query.Unpack(payload); err != nil || query.Response {
+		return nil
+	}
+	result := dnsmessage.Message{Header: dnsmessage.Header{
+		ID: query.ID, Response: true, RecursionDesired: query.RecursionDesired,
+		RecursionAvailable: true, RCode: dnsmessage.RCodeRefused,
+	}, Questions: query.Questions}
+	if query.OpCode != 0 || len(query.Questions) != 1 || query.Truncated {
+		return packDNSResponse(result)
+	}
+	q := query.Questions[0]
+	if q.Class != dnsmessage.ClassINET {
+		return packDNSResponse(result)
+	}
+	// Browsers query HTTPS/SVCB records before A/AAAA. Returning REFUSED
+	// can fail whole origins; NODATA permits the RFC 9460 client fallback
+	// without exposing actual-address hints that would bypass FakeIP.
+	// No bogus SVCB/HTTPS RRs or unauthenticated ECH configs are synthesized.
+	if q.Type == dnsmessage.Type(64) || q.Type == dnsmessage.Type(65) {
+		result.RCode = dnsmessage.RCodeSuccess
+		return packDNSResponse(result)
+	}
+	if q.Type != dnsmessage.TypeA && q.Type != dnsmessage.TypeAAAA {
+		// TXT/SRV and DNSSEC are not silently resolved via system DNS.
+		return packDNSResponse(result)
+	}
+	host := strings.ToLower(strings.TrimSuffix(q.Name.String(), "."))
+	if host == "" || len(host) > 253 {
+		return packDNSResponse(result)
+	}
+	var ip netip.Addr
+	var ok bool
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		// RFC 6761: localhost (including subdomains) is always loopback.
+		// Creating a remote-proxy FakeIP for it would break local services.
+		if q.Type == dnsmessage.TypeA {
+			ip = netip.MustParseAddr("127.0.0.1")
+		} else {
+			ip = netip.IPv6Loopback()
+		}
+		ok = true
+	} else if host == "invalid" || strings.HasSuffix(host, ".invalid") {
+		// RFC 6761: invalid names cannot be delegated to the proxy.
+		result.RCode = dnsmessage.RCodeNameError
+		return packDNSResponse(result)
+	} else if strings.EqualFold(host, strings.TrimSuffix(relayHost, ".")) && relayHost != "" {
+		// Bootstrap is the sole DNS exception; it never requires leaking a
+		// query to a local recursive resolver.
+		for _, raw := range relayIPs {
+			addr, err := netip.ParseAddr(raw)
+			if err == nil && ((q.Type == dnsmessage.TypeA && addr.Is4()) || (q.Type == dnsmessage.TypeAAAA && addr.Is6())) {
+				ip, ok = addr, true
+				break
+			}
+		}
+		if !ok {
+			result.RCode = dnsmessage.RCodeServerFailure
+			return packDNSResponse(result)
+		}
+	} else {
+		ip, ok = d.allocateScoped(host, q.Type, scope, scoped)
+		if !ok {
+			result.RCode = dnsmessage.RCodeServerFailure
+			return packDNSResponse(result)
+		}
+	}
+	result.RCode = dnsmessage.RCodeSuccess
+	header := dnsmessage.ResourceHeader{Name: q.Name, Class: dnsmessage.ClassINET, Type: q.Type, TTL: fakeIPTTL}
+	if q.Type == dnsmessage.TypeA {
+		result.Answers = []dnsmessage.Resource{{Header: header, Body: &dnsmessage.AResource{A: ip.As4()}}}
+	} else {
+		result.Answers = []dnsmessage.Resource{{Header: header, Body: &dnsmessage.AAAAResource{AAAA: ip.As16()}}}
+	}
+	return packDNSResponse(result)
+}
+
+func packDNSResponse(m dnsmessage.Message) []byte {
+	out, err := m.Pack()
+	if err != nil {
+		return nil
+	}
+	return out
+}

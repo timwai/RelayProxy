@@ -194,6 +194,21 @@ func (r *Record) Activate() {
 	}
 }
 
+// SetObservedDomain attaches application-advertised hostname metadata to an
+// already classified connection. It never changes routing, ACL decisions or
+// an already known requested/DNS/Network Extension hostname.
+func (r *Record) SetObservedDomain(host, source string) {
+	if r == nil || host == "" || (source != "tls-sni" && source != "http-host") {
+		return
+	}
+	r.registry.mu.Lock()
+	defer r.registry.mu.Unlock()
+	if r.connection.Host == "" {
+		r.connection.Host = host
+		r.connection.DomainSource = source
+	}
+}
+
 // SetIP is only used for an actual peer address. A relay transport's RemoteAddr
 // must never be reported as the original destination.
 func (r *Record) SetIP(ip string) {

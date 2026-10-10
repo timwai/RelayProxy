@@ -137,6 +137,13 @@ func dialProxyTCP(ctx context.Context, cfg UpstreamConfig) (net.Conn, error) {
 }
 
 func dialHTTPConnect(ctx context.Context, cfg UpstreamConfig, target string) (net.Conn, error) {
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		return nil, fmt.Errorf("invalid HTTP CONNECT target: %w", err)
+	}
+	if err := validateUpstreamTargetHost(host); err != nil {
+		return nil, err
+	}
 	conn, err := dialProxyTCP(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connect exit upstream %s: %w", cfg.Address, err)
@@ -228,11 +235,15 @@ func socks5Authenticate(conn net.Conn, cfg UpstreamConfig) error {
 	if response[0] != 0x05 || response[1] == 0xff {
 		return errors.New("SOCKS5 upstream rejected authentication methods")
 	}
+	wantsPassword := cfg.Username != "" || cfg.Password != ""
 	if response[1] == 0x00 {
+		if wantsPassword {
+			return errors.New("SOCKS5 upstream selected no-auth despite configured credentials")
+		}
 		return nil
 	}
-	if response[1] != 0x02 {
-		return fmt.Errorf("SOCKS5 upstream selected unsupported auth method 0x%02x", response[1])
+	if response[1] != 0x02 || !wantsPassword {
+		return fmt.Errorf("SOCKS5 upstream selected unoffered auth method 0x%02x", response[1])
 	}
 	if len(cfg.Username) > 255 || len(cfg.Password) > 255 {
 		return errors.New("SOCKS5 username/password too long")
@@ -247,7 +258,7 @@ func socks5Authenticate(conn net.Conn, cfg UpstreamConfig) error {
 	if _, err := io.ReadFull(conn, response[:]); err != nil {
 		return err
 	}
-	if response[1] != 0x00 {
+	if response[0] != 0x01 || response[1] != 0x00 {
 		return errors.New("SOCKS5 username/password authentication failed")
 	}
 	return nil
@@ -294,7 +305,33 @@ func readSOCKS5Reply(conn net.Conn) (netip.AddrPort, error) {
 	return addr, nil
 }
 
+// validateUpstreamTargetHost rejects characters that can escape an HTTP
+// CONNECT request line or be interpreted as a different target. Client-supplied
+// SOCKS5 hostnames are untrusted; validate before opening a proxy connection.
+func validateUpstreamTargetHost(host string) error {
+	if host == "" || len(host) > 255 {
+		return errors.New("invalid upstream target hostname length")
+	}
+	for i := 0; i < len(host); i++ {
+		if host[i] <= ' ' || host[i] == 0x7f {
+			return errors.New("invalid upstream target hostname contains control or whitespace")
+		}
+	}
+	if strings.ContainsAny(host, "/\\?#@") {
+		return errors.New("invalid upstream target hostname contains reserved characters")
+	}
+	if strings.Contains(host, ":") {
+		if ip, err := netip.ParseAddr(host); err != nil || !ip.Is6() || ip.Zone() != "" {
+			return errors.New("invalid upstream target IPv6 address")
+		}
+	}
+	return nil
+}
+
 func encodeSOCKS5Address(host string, port uint16) ([]byte, error) {
+	if err := validateUpstreamTargetHost(host); err != nil {
+		return nil, err
+	}
 	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
 		ip = ip.Unmap()
 		if ip.Is4() {
@@ -328,22 +365,17 @@ func readSOCKS5Address(r io.Reader, atyp byte) (netip.AddrPort, error) {
 		if _, err := io.ReadFull(r, n[:]); err != nil {
 			return netip.AddrPort{}, err
 		}
-		name := make([]byte, int(n[0]))
-		if _, err := io.ReadFull(r, name); err != nil {
+		if n[0] == 0 {
+			return netip.AddrPort{}, errors.New("empty SOCKS5 bound hostname")
+		}
+		// CONNECT does not use BND.ADDR. Consume a domain reply without
+		// resolving it locally; even an untrusted proxy can choose this name.
+		// UDP ASSOCIATE rejects the invalid (non-IP) endpoint below.
+		nameAndPort := make([]byte, int(n[0])+2)
+		if _, err := io.ReadFull(r, nameAndPort); err != nil {
 			return netip.AddrPort{}, err
 		}
-		var port [2]byte
-		if _, err := io.ReadFull(r, port[:]); err != nil {
-			return netip.AddrPort{}, err
-		}
-		ips, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", string(name))
-		if err != nil {
-			return netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 bound host %q: %w", string(name), err)
-		}
-		if len(ips) == 0 {
-			return netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 bound host %q: no addresses", string(name))
-		}
-		return netip.AddrPortFrom(ips[0].Unmap(), uint16(port[0])<<8|uint16(port[1])), nil
+		return netip.AddrPort{}, nil
 	default:
 		return netip.AddrPort{}, fmt.Errorf("unsupported SOCKS5 address type 0x%02x", atyp)
 	}
@@ -362,6 +394,17 @@ func readSOCKS5Address(r io.Reader, atyp byte) (netip.AddrPort, error) {
 }
 
 func dialSOCKS5UDP(ctx context.Context, cfg UpstreamConfig, target netip.AddrPort) (net.Conn, error) {
+	return dialSOCKS5UDPTo(ctx, cfg, target.Addr().String(), target.Port())
+}
+
+// dialSOCKS5UDPTo keeps the original destination name in the UDP header: the
+// SOCKS5 server resolves ATYP=0x03 names, not the local Agent.
+func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port uint16) (net.Conn, error) {
+	address, err := encodeSOCKS5Address(host, port)
+	if err != nil {
+		return nil, err
+	}
+	var remoteAddr net.Addr = socks5UDPTargetAddr{host: host, port: port}
 	control, err := dialProxyTCP(ctx, UpstreamConfig{Mode: UpstreamHTTP, Address: cfg.Address})
 	if err != nil {
 		return nil, err
@@ -386,6 +429,9 @@ func dialSOCKS5UDP(ctx context.Context, cfg UpstreamConfig, target netip.AddrPor
 	if err != nil {
 		return nil, err
 	}
+	if !relay.IsValid() {
+		return nil, errors.New("SOCKS5 UDP relay returned a domain BND.ADDR; refusing local DNS resolution")
+	}
 	if relay.Addr().IsUnspecified() {
 		host, _, splitErr := net.SplitHostPort(control.RemoteAddr().String())
 		if splitErr != nil {
@@ -393,14 +439,7 @@ func dialSOCKS5UDP(ctx context.Context, cfg UpstreamConfig, target netip.AddrPor
 		}
 		ip, parseErr := netip.ParseAddr(strings.Trim(host, "[]"))
 		if parseErr != nil {
-			ips, lookupErr := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-			if lookupErr != nil {
-				return nil, fmt.Errorf("resolve SOCKS5 UDP relay host: %w", lookupErr)
-			}
-			if len(ips) == 0 {
-				return nil, errors.New("resolve SOCKS5 UDP relay host: no addresses")
-			}
-			ip = ips[0]
+			return nil, fmt.Errorf("SOCKS5 UDP relay peer has no literal IP; refusing local DNS lookup: %w", parseErr)
 		}
 		relay = netip.AddrPortFrom(ip.Unmap(), relay.Port())
 	}
@@ -410,14 +449,43 @@ func dialSOCKS5UDP(ctx context.Context, cfg UpstreamConfig, target netip.AddrPor
 	}
 	_ = control.SetDeadline(time.Time{})
 	ok = true
-	return &socks5UDPConn{control: control, udp: udp, target: target}, nil
+	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
+		remoteAddr = net.UDPAddrFromAddrPort(netip.AddrPortFrom(ip.Unmap(), port))
+	}
+	association := &socks5UDPConn{control: control, udp: udp, targetAddress: address, remoteAddr: remoteAddr}
+	// RFC 1928 ties the UDP association to its TCP control connection.
+	// If the proxy restarts or drops this control connection, unblock any
+	// pending UDP reads immediately instead of keeping a dead association
+	// alive until the caller's idle timeout.
+	go association.watchControl()
+	return association, nil
+}
+
+// socks5UDPTargetAddr describes a domain-based UDP peer without local DNS.
+type socks5UDPTargetAddr struct {
+	host string
+	port uint16
+}
+
+func (a socks5UDPTargetAddr) Network() string { return "udp" }
+func (a socks5UDPTargetAddr) String() string {
+	return net.JoinHostPort(a.host, strconv.Itoa(int(a.port)))
 }
 
 type socks5UDPConn struct {
-	control net.Conn
-	udp     *net.UDPConn
-	target  netip.AddrPort
-	once    sync.Once
+	control       net.Conn
+	udp           *net.UDPConn
+	targetAddress []byte // SOCKS5 ATYP+ADDR+PORT (including domain ATYP=0x03)
+	remoteAddr    net.Addr
+	once          sync.Once
+}
+
+// A UDP ASSOCIATE control connection carries no further data after its
+// reply. EOF or unexpected bytes both invalidate the bound UDP association.
+func (c *socks5UDPConn) watchControl() {
+	var unexpected [1]byte
+	_, _ = c.control.Read(unexpected[:])
+	_ = c.Close()
 }
 
 func (c *socks5UDPConn) Read(p []byte) (int, error) {
@@ -429,7 +497,7 @@ func (c *socks5UDPConn) Read(p []byte) (int, error) {
 	if n < 4 || buf[0] != 0 || buf[1] != 0 || buf[2] != 0 {
 		return 0, errors.New("invalid SOCKS5 UDP response")
 	}
-	offset, _, err := parseSOCKS5UDPAddress(buf[:n], 3)
+	offset, err := skipSOCKS5UDPAddress(buf[:n], 3)
 	if err != nil {
 		return 0, err
 	}
@@ -441,13 +509,9 @@ func (c *socks5UDPConn) Read(p []byte) (int, error) {
 }
 
 func (c *socks5UDPConn) Write(p []byte) (int, error) {
-	addr, err := encodeSOCKS5Address(c.target.Addr().String(), c.target.Port())
-	if err != nil {
-		return 0, err
-	}
-	packet := make([]byte, 0, 3+len(addr)+len(p))
+	packet := make([]byte, 0, 3+len(c.targetAddress)+len(p))
 	packet = append(packet, 0, 0, 0)
-	packet = append(packet, addr...)
+	packet = append(packet, c.targetAddress...)
 	packet = append(packet, p...)
 	n, err := c.udp.Write(packet)
 	if err != nil {
@@ -457,6 +521,36 @@ func (c *socks5UDPConn) Write(p []byte) (int, error) {
 		return 0, io.ErrShortWrite
 	}
 	return len(p), nil
+}
+
+// skipSOCKS5UDPAddress parses a UDP reply's ATYP and skips its source
+// address. The source can be a domain: resolving it locally here would leak
+// DNS queries and could break responses from otherwise working SOCKS5 servers.
+func skipSOCKS5UDPAddress(packet []byte, offset int) (int, error) {
+	if offset >= len(packet) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	atyp := packet[offset]
+	offset++
+	var size int
+	switch atyp {
+	case 0x01:
+		size = 4
+	case 0x04:
+		size = 16
+	case 0x03:
+		if offset >= len(packet) {
+			return 0, io.ErrUnexpectedEOF
+		}
+		size = int(packet[offset])
+		offset++
+	default:
+		return 0, fmt.Errorf("unsupported SOCKS5 UDP address type 0x%02x", atyp)
+	}
+	if offset+size+2 > len(packet) {
+		return 0, io.ErrUnexpectedEOF
+	}
+	return offset + size + 2, nil
 }
 
 func parseSOCKS5UDPAddress(packet []byte, offset int) (int, netip.AddrPort, error) {
@@ -492,14 +586,9 @@ func parseSOCKS5UDPAddress(packet []byte, offset int) (int, netip.AddrPort, erro
 		offset += n
 		port := uint16(packet[offset])<<8 | uint16(packet[offset+1])
 		offset += 2
-		ips, err := net.DefaultResolver.LookupNetIP(context.Background(), "ip", host)
-		if err != nil {
-			return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: %w", host, err)
-		}
-		if len(ips) == 0 {
-			return 0, netip.AddrPort{}, fmt.Errorf("resolve SOCKS5 UDP host %q: no addresses", host)
-		}
-		return offset, netip.AddrPortFrom(ips[0].Unmap(), port), nil
+		// The UDP reply hostname is supplied by the upstream, not the
+		// application. Resolving it locally would leak an arbitrary DNS name.
+		return 0, netip.AddrPort{}, fmt.Errorf("SOCKS5 UDP domain reply %q:%d requires remote DNS; use skipSOCKS5UDPAddress for opaque replies", host, port)
 	default:
 		return 0, netip.AddrPort{}, fmt.Errorf("unsupported SOCKS5 UDP address type 0x%02x", atyp)
 	}
@@ -518,7 +607,7 @@ func (c *socks5UDPConn) Close() error {
 	return err
 }
 func (c *socks5UDPConn) LocalAddr() net.Addr                { return c.udp.LocalAddr() }
-func (c *socks5UDPConn) RemoteAddr() net.Addr               { return net.UDPAddrFromAddrPort(c.target) }
+func (c *socks5UDPConn) RemoteAddr() net.Addr               { return c.remoteAddr }
 func (c *socks5UDPConn) SetDeadline(t time.Time) error      { return c.udp.SetDeadline(t) }
 func (c *socks5UDPConn) SetReadDeadline(t time.Time) error  { return c.udp.SetReadDeadline(t) }
 func (c *socks5UDPConn) SetWriteDeadline(t time.Time) error { return c.udp.SetWriteDeadline(t) }

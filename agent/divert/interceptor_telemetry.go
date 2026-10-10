@@ -4,6 +4,10 @@ import "time"
 
 func (i *packetInterceptor) flowMetadata(p ipPacket, process packetProcess) Flow {
 	flow := packetFlow(p, process)
+	if host, ok := i.server.fakeDNS.lookup(p.Destination.Addr()); ok {
+		flow.Host, flow.DomainSource = host, "fakeip"
+		return flow
+	}
 	flow.Host = i.dns.lookup(p.Destination.Addr())
 	if flow.Host != "" {
 		flow.DomainSource = "dns"
@@ -26,6 +30,12 @@ func (i *packetInterceptor) inboundPacket(data []byte, meta packetMetadata) erro
 			return nil // Only this handle's own reflection injections may enter.
 		}
 	}
+	// Observe a verified UDP DNS answer before delivering it to the OS:
+	// the application can open its destination TCP SYN immediately after
+	// receiving the answer. Recording it after reinjection races that SYN.
+	if p.Protocol == ProtoUDP {
+		i.dns.response(p.Source, p.Destination, p.Payload)
+	}
 	if err := i.sendPacket(p, meta); err != nil {
 		return err
 	}
@@ -42,7 +52,6 @@ func (i *packetInterceptor) inboundPacket(data []byte, meta packetMetadata) erro
 		}
 		return nil
 	}
-	i.dns.response(p.Source, p.Destination, p.Payload)
 	i.server.mu.Lock()
 	association := i.server.udp[key]
 	if association != nil {

@@ -87,6 +87,9 @@ type tcpRedirect struct {
 	receivedFIN bool
 	conn        net.Conn
 	replyMeta   packetMetadata
+	hostProbe   []byte
+	hostNextSeq uint32
+	hostDone    bool
 }
 
 type interceptedUDP struct {
@@ -301,18 +304,90 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	}
 	packet, err := parseIPPacket(data)
 	if err != nil {
+		if i.server.fakeIPEnabled() {
+			// Unparseable IP packets may still target FakeIP or contain DNS:
+			// fail closed rather than reinjecting an unverifiable destination.
+			return nil
+		}
 		// WinDivert has already removed the packet from the network path. If
 		// RelayProxy cannot safely classify it, restore the original packet
 		// instead of blackholing the host.
 		return i.inject(data, meta)
 	}
 	i.parsed.Add(1)
+	// DNS interception must run before the private-DNS, loopback and process
+	// bypasses. Never send an intercepted DNS/53 question to a local resolver.
+	if i.server.fakeIPEnabled() {
+		if packet.Destination.Port() == 53 {
+			if packet.Protocol == ProtoUDP {
+				// TXT/SRV may require a TLS round-trip through the selected
+				// proxy. Run off the capture loop; otherwise an unavailable
+				// exit could stall all TCP and UDP packet interception.
+				if i.server.shouldForwardDNS(packet.Payload) {
+					source, destination := packet.Source, packet.Destination
+					payload := append([]byte(nil), packet.Payload...)
+					replyMeta := meta
+					replyMeta.outbound = false
+					i.wg.Add(1)
+					go func() {
+						defer i.wg.Done()
+						answer := i.server.replyFakeDNS(i.ctx, payload)
+						if len(answer) == 0 || i.ctx.Err() != nil {
+							return
+						}
+						reply, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: source, Destination: destination}, answer)
+						if err == nil {
+							err = i.inject(reply, replyMeta)
+						}
+						i.report(err)
+					}()
+					return nil
+				}
+				answer := i.server.replyFakeDNS(i.ctx, packet.Payload)
+				if answer == nil {
+					return nil // malformed DNS is dropped, not leaked
+				}
+				reply, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: packet.Source, Destination: packet.Destination}, answer)
+				if err != nil {
+					return err
+				}
+				meta.outbound = false
+				return i.inject(reply, meta)
+			}
+			// RFC 7766 TCP/53 gets a local stream responder.
+			return i.outboundTCP(packet, meta)
+		}
+		// Block well-known encrypted DNS transports. DoH on ordinary HTTPS/443
+		// is indistinguishable from general web traffic at this layer.
+		if isEncryptedDNSPort(packet.Destination.Port()) {
+			if packet.Protocol == ProtoTCP {
+				return i.rejectTCP(packet, meta)
+			}
+			return nil
+		}
+	}
+	fakeDestination := i.server.fakeIPDestination(packet.Destination.Addr())
+	if fakeDestination {
+		if !i.server.fakeIPEnabled() {
+			if packet.Protocol == ProtoTCP {
+				return i.rejectTCP(packet, meta)
+			}
+			return nil // stale cached FakeIP after disabling interception
+		}
+		if _, ok := i.server.fakeDNS.lookup(packet.Destination.Addr()); !ok {
+			// Expired/unknown placeholders must not reach the public network.
+			if packet.Protocol == ProtoTCP {
+				return i.rejectTCP(packet, meta)
+			}
+			return nil
+		}
+	}
 	if packet.Protocol == ProtoTCP {
 		if port := i.ports[packet.Source.Addr().Is6()]; port != 0 && packet.Source.Port() == port {
 			return i.returnTCP(packet, meta)
 		}
 	}
-	if localOnlyPacket(packet) || privateDNSPacket(packet) || relayDNSPacket(packet, i.server.guard.RelayHost) {
+	if (!fakeDestination && localOnlyPacket(packet)) || privateDNSPacket(packet) || relayDNSPacket(packet, i.server.guard.RelayHost) {
 		i.direct.Add(1)
 		return i.sendPacket(packet, meta)
 	}
@@ -328,7 +403,7 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		process = packetProcess{}
 	}
 	flow := i.flowMetadata(packet, process)
-	if i.server.guard.MustDirectFlow(flow) {
+	if !fakeDestination && i.server.guard.MustDirectFlow(flow) {
 		i.direct.Add(1)
 		return i.sendPacket(packet, meta)
 	}
@@ -454,6 +529,11 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 	i.mu.Unlock()
 	if flow == nil {
 		if !syn {
+			// A pre-existing DNS/TCP session cannot be migrated to the local
+			// fake resolver. Never let its plaintext DNS payload escape.
+			if i.server.fakeIPEnabled() && p.Destination.Port() == 53 {
+				return nil
+			}
 			// TCP sessions established before activation cannot be migrated.
 			return i.sendPacket(p, meta)
 		}
@@ -464,11 +544,18 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 			process = packetProcess{}
 		}
 		metadata := i.flowMetadata(p, process)
-		if i.server.guard.MustDirectFlow(metadata) {
+		if !i.server.fakeIPDestination(p.Destination.Addr()) && i.server.guard.MustDirectFlow(metadata) {
 			i.direct.Add(1)
 			return i.sendPacket(p, meta)
 		}
-		route, err := i.server.ClassifyFlow(metadata)
+		var route *ClassifiedFlow
+		var err error
+		if i.server.fakeIPEnabled() && p.Destination.Port() == 53 {
+			route = &ClassifiedFlow{owner: i.server, key: key, flow: metadata,
+				decision: Decision{Action: ActionProxy, Rule: "fakeip-dns"}, dnsOnly: true}
+		} else {
+			route, err = i.server.ClassifyFlow(metadata)
+		}
 		if err != nil {
 			_ = i.rejectTCP(p, meta)
 			return err
@@ -493,6 +580,7 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 	}
 	i.mu.Lock()
 	flow.lastSeen = time.Now()
+	i.observeTCPHostnameLocked(flow, p)
 	if p.TCPFlags&0x04 != 0 {
 		flow.finished = time.Now()
 	}
@@ -521,6 +609,36 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		return i.inject(p.Bytes, meta)
 	default:
 		return errors.New("invalid TCP interception action")
+	}
+}
+
+// observeTCPHostnameLocked accepts only in-order first application bytes.
+// It is passive, bounded, and affects telemetry only: routes were frozen at
+// the SYN and must never be changed by untrusted HTTP Host or TLS SNI.
+func (i *packetInterceptor) observeTCPHostnameLocked(flow *tcpRedirect, packet ipPacket) {
+	if flow.hostDone || flow.route.flow.Host != "" || flow.route.traffic == nil || len(packet.Payload) == 0 {
+		return
+	}
+	if len(flow.hostProbe) == 0 {
+		flow.hostNextSeq = packet.TCPSequence
+	}
+	// Reject out-of-order segments rather than assembling potentially spoofed
+	// overlapping TCP data. Retransmissions of already-consumed data are safe.
+	if packet.TCPSequence != flow.hostNextSeq {
+		return
+	}
+	if len(flow.hostProbe)+len(packet.Payload) > maxHostnameProbe {
+		flow.hostDone, flow.hostProbe = true, nil
+		return
+	}
+	flow.hostProbe = append(flow.hostProbe, packet.Payload...)
+	flow.hostNextSeq += uint32(len(packet.Payload))
+	host, source, needMore := parseApplicationHostname(flow.hostProbe)
+	if host != "" {
+		flow.route.traffic.SetObservedDomain(host, source)
+	}
+	if host != "" || !needMore {
+		flow.hostDone, flow.hostProbe = true, nil
 	}
 }
 
@@ -621,24 +739,18 @@ func (i *packetInterceptor) disableOnInjectionError(err error) bool {
 }
 
 func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) error {
-	if accepter, ok := i.device.(packetAccepter); ok {
-		if err := accepter.Accept(meta); err != nil {
-			return err
-		}
-		if meta.outbound && packet.Protocol == ProtoUDP {
-			i.dns.query(packet.Source, packet.Destination, packet.Payload)
-		}
-		return nil
-	}
-	// Outbound captures can contain hardware-offloaded, unfinished checksums.
-	repairPacketChecksums(packet)
-	if err := i.inject(packet.Bytes, meta); err != nil {
-		return err
-	}
+	// Register outgoing DNS questions before forwarding the query: a fast
+	// resolver can answer while injection/acceptance is still in progress.
+	// DNS associations only become trusted after a matching answer is observed.
 	if meta.outbound && packet.Protocol == ProtoUDP {
 		i.dns.query(packet.Source, packet.Destination, packet.Payload)
 	}
-	return nil
+	if accepter, ok := i.device.(packetAccepter); ok {
+		return accepter.Accept(meta)
+	}
+	// Outbound captures can contain hardware-offloaded, unfinished checksums.
+	repairPacketChecksums(packet)
+	return i.inject(packet.Bytes, meta)
 }
 
 func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
@@ -659,11 +771,10 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 				if err != nil {
 					return err
 				}
-				if err := i.inject(response, meta); err != nil {
-					return err
-				}
+				// Make the DNS name available before exposing the response to
+				// the client. Otherwise its next SYN can be classified by IP.
 				i.dns.response(key.Destination, key.Source, payload)
-				return nil
+				return i.inject(response, meta)
 			})
 			if i.disableOnInjectionError(err) {
 				i.report(err)
@@ -701,7 +812,12 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 		i.mu.Unlock()
 		go func() {
 			defer i.wg.Done()
-			err := i.server.ForwardTCP(i.ctx, flow.route, conn)
+			var err error
+			if flow.route.dnsOnly {
+				err = i.server.serveFakeDNSTCP(i.ctx, conn)
+			} else {
+				err = i.server.ForwardTCP(i.ctx, flow.route, conn)
+			}
 			if err != nil {
 				flow.route.traffic.Finish("failed", err)
 			}

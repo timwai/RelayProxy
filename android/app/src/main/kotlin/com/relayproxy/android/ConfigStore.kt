@@ -8,6 +8,62 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
+// Native Android custom exits are applied by mobile/androidcore's routing
+// dialer. Passwords are loaded separately from the Android Keystore.
+data class AndroidCustomExit(
+    val id: String = "local:" + UUID.randomUUID().toString(),
+    val name: String = "",
+    val enabled: Boolean = true,
+    val protocol: String = "socks5",
+    val address: String = "",
+    val username: String = "",
+    val password: String = "",
+) {
+    fun toJson(includePassword: Boolean = false): JSONObject = JSONObject()
+        .put("id", id)
+        .put("name", name)
+        .put("enabled", enabled)
+        .put("protocol", protocol)
+        .put("address", address)
+        .put("username", username)
+        .apply { if (includePassword) put("password", password) }
+
+    fun validate() {
+        require(Regex("^local:[A-Za-z0-9_.:-]{1,122}$").matches(id)) { "自定义出口 ID 无效" }
+        require(name.isNotBlank() && name.length <= 128) { "出口名称长度必须为 1–128" }
+        require(protocol in setOf("socks5", "http", "https")) { "不支持的代理类型" }
+        val portText: String
+        val host: String
+        if (address.startsWith("[")) {
+            val end = address.indexOf("]:")
+            require(end > 1) { "IPv6 代理地址必须使用 [IPv6]:端口" }
+            host = address.substring(1, end)
+            portText = address.substring(end + 2)
+        } else {
+            require(address.count { it == ':' } == 1) { "代理地址必须是 host:port（IPv6 请加方括号）" }
+            host = address.substringBefore(':')
+            portText = address.substringAfter(':')
+        }
+        require(host.isNotBlank() && !host.contains(Regex("[\\s/?#@\\\\]"))) { "请填写有效代理地址 host:port" }
+        require(!host.any { it.isISOControl() }) { "代理地址包含控制字符" }
+        require((portText.toIntOrNull() ?: 0) in 1..65535) { "代理端口必须为 1–65535" }
+        require(username.toByteArray(Charsets.UTF_8).size <= 255 &&
+            password.toByteArray(Charsets.UTF_8).size <= 255) { "代理认证信息过长" }
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject, password: String): AndroidCustomExit = AndroidCustomExit(
+            id = json.getString("id"),
+            name = json.getString("name"),
+            enabled = json.optBoolean("enabled", true),
+            protocol = json.getString("protocol"),
+            address = json.getString("address"),
+            username = json.optString("username"),
+            password = password,
+        )
+    }
+}
+
 data class RoutingRuleConfig(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "新规则",
@@ -133,6 +189,7 @@ data class ExitConfig(
     val socks5Enabled: Boolean = true,
     val httpEnabled: Boolean = false,
     val defaultExitId: String = "",
+    val customExits: List<AndroidCustomExit> = emptyList(),
     val socks5Port: Int = 1080,
     val httpPort: Int = 8080,
     val proxyP2pEnabled: Boolean = true,
@@ -178,6 +235,9 @@ data class ExitConfig(
             .put("upnpAllowed", upnpAllowed)
             .put("proxyPathMode", proxyPathMode)
             .put("defaultExitId", defaultExitId.trim())
+            .put("customExits", JSONArray().apply {
+                customExits.forEach { put(it.toJson(includePassword = true)) }
+            })
             .put("socks5Listen", "127.0.0.1:$socks5Port")
             .put("httpListen", "127.0.0.1:$httpPort")
             .put("vpnProxyEnabled", vpnEnabled)
@@ -252,6 +312,26 @@ class ConfigStore(private val context: Context) {
     fun setGlobalMessageOverlayEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("global_message_overlay", enabled).apply()
     }
+
+    // Fast status-only accessors avoid invoking Android Keystore decryption
+    // from the MainActivity's one-second UI refresh loop.
+    fun customExitNames(): Map<String, String> {
+        val entries = runCatching {
+            JSONArray(prefs.getString("customExits", "[]") ?: "[]")
+        }.getOrNull() ?: return emptyMap()
+        return buildMap {
+            for (index in 0 until entries.length()) {
+                val item = entries.optJSONObject(index) ?: continue
+                val id = item.optString("id").trim()
+                val name = item.optString("name").trim()
+                if (id.isNotEmpty() && name.isNotEmpty()) put(id, name)
+            }
+        }
+    }
+
+    fun customExitDisplayName(id: String): String? = customExitNames()[id]
+
+    fun vpnIpv6Configured(): Boolean = prefs.getBoolean("vpnIpv6Enabled", false)
 
     fun isApplicationMonitorEnabled(): Boolean =
         prefs.getBoolean("applicationMonitorEnabled", true)
@@ -331,6 +411,15 @@ class ConfigStore(private val context: Context) {
             vpnSocks5Port++
         }
 
+        val exitPasswords = SecretStore(context).customExitPasswords()
+        val localExits = mutableListOf<AndroidCustomExit>()
+        val localItems = JSONArray(prefs.getString("customExits", "[]") ?: "[]")
+        for (index in 0 until localItems.length()) {
+            val item = localItems.optJSONObject(index) ?: continue
+            val id = item.optString("id")
+            localExits += AndroidCustomExit.fromJson(item, exitPasswords[id].orEmpty())
+        }
+
         return ExitConfig(
             serverAddress = prefs.getString("serverAddress", "") ?: "",
             identityId = prefs.getString("identityId", "") ?: "",
@@ -348,6 +437,7 @@ class ConfigStore(private val context: Context) {
             socks5Enabled = socks5Enabled,
             httpEnabled = httpEnabled,
             defaultExitId = prefs.getString("defaultExitId", "") ?: "",
+            customExits = localExits,
             socks5Port = socks5Port,
             httpPort = httpPort,
             proxyP2pEnabled = prefs.getBoolean("proxyP2pEnabled", true),
@@ -383,7 +473,44 @@ class ConfigStore(private val context: Context) {
     }
 
     fun save(config: ExitConfig) {
+        require(config.customExits.map { it.id }.distinct().size == config.customExits.size) {
+            "自定义出口 ID 重复"
+        }
+        config.customExits.forEach { item ->
+            item.validate()
+            val host = item.address.substringBeforeLast(':').removeSurrounding("[", "]").lowercase()
+            val port = item.address.substringAfterLast(':').toIntOrNull()
+            if (host in setOf("127.0.0.1", "localhost", "::1")) {
+                val owned = buildSet {
+                    if (config.vpnEnabled) add(config.vpnSocks5Port)
+                    if (config.clientEnabled && config.socks5Enabled) add(config.socks5Port)
+                    if (config.clientEnabled && config.httpEnabled) add(config.httpPort)
+                }
+                require(port !in owned) {
+                    "本机出口 ${item.name} 指向 RelayProxy 自身代理监听端口，会造成代理循环"
+                }
+            }
+        }
+        val used = buildSet {
+            if (config.defaultExitId.startsWith("local:")) add(config.defaultExitId)
+            config.routing.rules.forEach { rule ->
+                if (rule.action == "PROXY" && rule.exitId.startsWith("local:")) add(rule.exitId)
+            }
+        }
+        for (id in used) {
+            require(config.customExits.any { it.id == id && it.enabled }) {
+                "默认出口或分流规则引用了不存在或已停用的自定义出口：$id"
+            }
+        }
+        // Commit secrets first so the core never sees a newly published
+        // local exit without the credentials it needs.
+        SecretStore(context).setCustomExitPasswords(
+            config.customExits.associate { it.id to it.password }
+        )
         prefs.edit()
+            .putString("customExits", JSONArray().apply {
+                config.customExits.forEach { put(it.toJson()) }
+            }.toString())
             .putString("serverAddress", config.serverAddress.trim())
             .putString("identityId", config.identityId.trim().lowercase())
             .putString("deviceName", config.deviceName.trim())
@@ -415,6 +542,14 @@ class ConfigStore(private val context: Context) {
     }
 
     fun saveRouting(routing: RoutingConfig): RoutingConfig = synchronized(routingLock) {
+        val locals = load().customExits
+        routing.rules.forEach { rule ->
+            if (rule.action == "PROXY" && rule.exitId.startsWith("local:")) {
+                require(locals.any { it.id == rule.exitId && it.enabled }) {
+                    "分流规则“${rule.name}”引用了不存在或已停用的本机出口"
+                }
+            }
+        }
         val current = RoutingConfig.fromJson(prefs.getString("routing", null))
         check(routing.revision == current.revision) { "规则已在其他页面修改，请返回列表后重新编辑" }
         val updated = routing.copy(revision = current.revision + 1)

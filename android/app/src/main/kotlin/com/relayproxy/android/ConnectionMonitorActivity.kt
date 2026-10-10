@@ -219,6 +219,8 @@ class ConnectionMonitorActivity : Activity() {
         }
 
         applicationList.removeAllViews()
+        val exitStatus = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val names = ExitDisplayNames.fromStatus(exitStatus, ConfigStore(this).customExitNames())
         if (applications.length() == 0) {
             applicationList.addView(emptyState(activeConnections))
             return
@@ -226,7 +228,7 @@ class ConnectionMonitorActivity : Activity() {
         for (index in 0 until applications.length()) {
             val item = applications.optJSONObject(index) ?: continue
             applicationList.addView(
-                applicationCard(item),
+                applicationCard(item, names),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -261,7 +263,7 @@ class ConnectionMonitorActivity : Activity() {
         return card
     }
 
-    private fun applicationCard(item: JSONObject): View {
+    private fun applicationCard(item: JSONObject, exitNames: Map<String, String>): View {
         val packageName = item.optString("packageName", FlowOwnerIdentity.UNKNOWN)
         val aliases = item.optJSONArray("packageAliases").strings()
         val packages = (listOf(packageName) + aliases)
@@ -384,9 +386,23 @@ class ConnectionMonitorActivity : Activity() {
 
         val exits = item.optJSONArray("exits").strings()
         if (exits.isNotEmpty()) {
-            card.addView(infoLine("出口", exits.joinToString(" · ") { it.take(18) }))
+            card.addView(infoLine("出口", exits.joinToString(" · ") { ExitDisplayNames.label(it, exitNames) }))
+        }
+        val rules = item.optJSONArray("rules").strings()
+        if (rules.isNotEmpty()) {
+            // The Go routing engine already records the rule that was used
+            // for each flow. Show the actual matched names, not a new UI-side
+            // guess derived from the current settings.
+            card.addView(infoLine("命中规则", rules.joinToString(" · ") { matchedRuleLabel(it) }))
         }
         return card
+    }
+
+    private fun matchedRuleLabel(rule: String): String = when (rule) {
+        "global_proxy" -> "全局代理"
+        "direct" -> "全局直连"
+        "default" -> "默认规则"
+        else -> rule
     }
 
     private fun infoLine(label: String, value: String): View {
@@ -398,12 +414,17 @@ class ConnectionMonitorActivity : Activity() {
                 text = label
                 textSize = 10.5f
                 setTextColor(UiPalette.placeholder)
-            }, LinearLayout.LayoutParams(dp(38), ViewGroup.LayoutParams.WRAP_CONTENT))
+            }, LinearLayout.LayoutParams(
+                dp(if (label == "命中规则") 62 else 38),
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ))
             addView(TextView(this@ConnectionMonitorActivity).apply {
                 text = value
+                contentDescription = "$label：$value"
                 textSize = 10.5f
                 setTextColor(UiPalette.muted)
-                maxLines = 2
+                maxLines = if (label == "命中规则") 3 else 2
+                ellipsize = android.text.TextUtils.TruncateAt.END
             }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         }
     }

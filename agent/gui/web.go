@@ -228,6 +228,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
 	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
+	mux.HandleFunc("POST /api/proxy/custom-exits/test", w.testCustomExit)
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
 	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
@@ -396,6 +397,21 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 	writeWebJSON(rw, map[string]any{"ok": true, "target": target, "listenAddr": status.RDPListenAddr})
 }
 
+func (w *WebServer) testCustomExit(rw http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ExitID string `json:"exitId"`
+	}
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	result, err := w.bridge.TestCustomExit(in.ExitID)
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, result)
+}
+
 func (w *WebServer) runSpeedTest(rw http.ResponseWriter, r *http.Request) {
 	var in struct {
 		ExitID          string `json:"exitId"`
@@ -463,6 +479,14 @@ func writeWebJSON(rw http.ResponseWriter, value any) {
 	_ = json.NewEncoder(rw).Encode(value)
 }
 
+// nonNilSlice keeps the desktop and Web JSON contracts consistent.
+func nonNilSlice[T any](items []T) []T {
+	if items == nil {
+		return []T{}
+	}
+	return items
+}
+
 func webConfigJSON(b *bridge.UIBridge) string {
 	state, err := b.GetConfigState()
 	if err != nil {
@@ -485,6 +509,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		IsAutostart, MinimizeToTray, StartMinimized, RestartRequired, ReloadPending bool
 		Routing, Network, Runtime, ExitUpstream, RDP, P2P, Direct                   any
 		NetworkCapabilities                                                         divert.Capabilities
+		CustomExits, UpstreamExitID                                                 any
 		Revision                                                                    string
 	}{
 		ConfigPath: b.ConfigPath(), ServerAddress: cfg.Server.Address, QUICPort: cfg.Server.QUICPort,
@@ -492,10 +517,10 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		DeviceName: cfg.Device.Name, IdentityID: cfg.Device.IdentityID, Transport: cfg.Transport.Mode,
 		SOCKS5:        proxyLeg{cfg.Proxy.SOCKS5.Enabled == nil || *cfg.Proxy.SOCKS5.Enabled, cfg.Proxy.SOCKS5.Listen, cfg.Proxy.SOCKS5.Port},
 		HTTP:          proxyLeg{cfg.Proxy.HTTP.Enabled == nil || *cfg.Proxy.HTTP.Enabled, cfg.Proxy.HTTP.Listen, cfg.Proxy.HTTP.Port},
-		DefaultExitID: cfg.Proxy.DefaultExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
+		DefaultExitID: cfg.Proxy.DefaultExitID, CustomExits: nonNilSlice(cfg.Proxy.CustomExits), UpstreamExitID: cfg.Exit.UpstreamExitID, ExitEnabled: cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
 		AllowInternet: cfg.Exit.AllowInternet, AllowPrivate: cfg.Exit.AllowPrivateNetwork, AllowLoopback: cfg.Exit.AllowLoopback,
 		AccessMode: cfg.Exit.Access.Mode, AccessDomains: cfg.Exit.Access.Domains, AccessCIDRs: cfg.Exit.Access.CIDRs,
-		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password},
+		ExitUpstream: map[string]any{"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address, "username": cfg.Exit.Upstream.Username, "hasPassword": cfg.Exit.Upstream.Password != ""},
 		RDP: map[string]any{
 			"enabled": cfg.RDP.Enabled == nil || *cfg.RDP.Enabled,
 			"address": cfg.RDP.Address,
@@ -514,7 +539,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Network:                     map[string]any{"mode": cfg.Network.Mode, "exclude_processes": cfg.Network.ExcludeProcesses},
 		NetworkCapabilities:         divert.PlatformCapabilities(), Revision: state.Revision,
 		RestartRequired: state.RestartRequired, RestartFields: state.RestartFields, ReloadPending: state.ReloadPending,
-		Routing: map[string]any{"mode": cfg.Routing.Mode, "default_action": cfg.Routing.DefaultAction, "rules": cfg.Routing.Rules},
+		Routing: map[string]any{"mode": cfg.Routing.Mode, "dns_mode": cfg.Routing.DNSMode, "fake_ip_enabled": cfg.Routing.FakeIPEnabled, "block_doh_endpoints": cfg.Routing.BlockDoHEndpoints, "forward_other_dns": cfg.Routing.ForwardOtherDNS, "dns_exit_id": cfg.Routing.DNSExitID, "doh_blocked_ips": nonNilSlice(cfg.Routing.DoHBlockedIPs), "default_action": cfg.Routing.DefaultAction, "rules": cfg.Routing.Rules},
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
 			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(), "insecureTls": state.Runtime.Server.InsecureTLS,
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,
@@ -540,6 +565,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"tcpPort": payload.TCPPort, "tlsEnabled": payload.TLSEnabled,
 		"deviceName": payload.DeviceName, "identityId": payload.IdentityID, "transport": payload.Transport,
 		"socks5": payload.SOCKS5, "http": payload.HTTP, "defaultExitId": payload.DefaultExitID,
+		"customExits": payload.CustomExits, "upstreamExitId": payload.UpstreamExitID,
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,
@@ -574,6 +600,7 @@ const webBridgeJS = `(function () {
   window.goGetNetworkCapabilities = function () { return request('/api/network-capabilities'); };
   window.goGetDiagnostics = function () { return request('/api/diagnostics'); };
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
+  window.goTestCustomExit = function (exitId) { return json('/api/proxy/custom-exits/test', 'POST', {exitId:exitId}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
   window.goConnectRDP = async function (targetId, autoLaunch) {

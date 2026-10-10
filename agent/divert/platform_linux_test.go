@@ -5,6 +5,8 @@ package divert
 import (
 	"bufio"
 	"context"
+	"errors"
+	"net"
 	"net/netip"
 	"reflect"
 	"strings"
@@ -85,7 +87,7 @@ func TestParseLinuxSocketTableExactAndUDPWildcard(t *testing.T) {
 
 func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 	var commands [][]string
-	f := &linuxFirewall{run: func(binary string, args ...string) error {
+	f := &linuxFirewall{dnsGuard: true, run: func(binary string, args ...string) error {
 		commands = append(commands, append([]string{binary}, args...))
 		return nil
 	}}
@@ -93,7 +95,12 @@ func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantFragments := [][]string{
-		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-d", "192.0.2.10", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "--dport", "53", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "--dport", "53", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "!", "--dport", "53", "-d", "192.0.2.10", "-j", "RETURN"},
+		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "!", "--dport", "53", "-d", "192.0.2.10", "-j", "RETURN"},
 		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "-j", "NFQUEUE", "--queue-num", "58231", "--queue-bypass"},
 		{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxInputChain, "-p", "udp", "--sport", "53", "-j", "NFQUEUE", "--queue-num", "58231", "--queue-bypass"},
 	}
@@ -109,10 +116,181 @@ func TestLinuxFirewallRulesCaptureOnlyOutboundAndDNSReplies(t *testing.T) {
 			t.Fatalf("missing firewall command: %v\nall: %v", want, commands)
 		}
 	}
+	// DNS/53 must enter a non-bypassing queue BEFORE any Relay-IP bypass.
+	// This prevents a recursive DNS server on the Relay IP escaping capture.
+	udpQueue, relayReturn := -1, -1
+	for j, command := range commands {
+		if reflect.DeepEqual(command, []string{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231"}) {
+			udpQueue = j
+		}
+		if reflect.DeepEqual(command, []string{"/usr/sbin/iptables", "-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "!", "--dport", "53", "-d", "192.0.2.10", "-j", "RETURN"}) {
+			relayReturn = j
+		}
+	}
+	if udpQueue < 0 || relayReturn <= udpQueue {
+		t.Fatalf("Linux DNS interception must precede relay bypass: %d %d: %v", udpQueue, relayReturn, commands)
+	}
 	for _, command := range commands {
 		if len(command) >= 8 && reflect.DeepEqual(command[4:8], []string{linuxInputChain, "-p", "tcp", "-j"}) {
 			t.Fatalf("all inbound TCP traffic was queued: %v", command)
 		}
+	}
+}
+
+func TestLinuxDNSQueueNormalModeAndHotUpdates(t *testing.T) {
+	var commands [][]string
+	f := &linuxFirewall{
+		iptables: "iptables", ip6tables: "ip6tables",
+		run: func(binary string, args ...string) error {
+			commands = append(commands, append([]string{binary}, args...))
+			return nil
+		},
+	}
+	if err := f.installFamily("iptables", nil); err != nil {
+		t.Fatal(err)
+	}
+	wantQueue := []string{"iptables", "-t", "mangle", "-A", linuxOutputChain,
+		"-p", "udp", "--dport", "53", "-j", "NFQUEUE", "--queue-num", "58231", "--queue-bypass"}
+	present := false
+	for _, got := range commands {
+		if reflect.DeepEqual(got, wantQueue) {
+			present = true
+		}
+	}
+	if !present {
+		t.Fatal("normal Linux mode unexpectedly enables fail-closed DNS queue")
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(true); err != nil {
+		t.Fatal(err)
+	}
+	if !f.dnsGuard || len(commands) != 4 {
+		t.Fatalf("enabling protection did not update both IP families: %+v", commands)
+	}
+	for _, command := range commands {
+		for _, option := range command {
+			if option == "--queue-bypass" {
+				t.Fatalf("protected DNS rule retains bypass flag: %v", command)
+			}
+		}
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(false); err != nil {
+		t.Fatal(err)
+	}
+	if f.dnsGuard || len(commands) != 4 {
+		t.Fatalf("disabling protection did not update both families: %+v", commands)
+	}
+	for _, command := range commands {
+		if command[len(command)-1] != "--queue-bypass" {
+			t.Fatalf("normal mode DNS queue should not blackhole when NFQUEUE exits: %v", command)
+		}
+	}
+}
+
+func TestLinuxDNSGuardPartialReplacementRetriesOnlyFailedRules(t *testing.T) {
+	var commands [][]string
+	failOne := true
+	f := &linuxFirewall{
+		iptables: "iptables", ip6tables: "ip6tables",
+		run: func(binary string, args ...string) error {
+			command := append([]string{binary}, args...)
+			commands = append(commands, command)
+			if failOne && binary == "ip6tables" && len(args) > 9 && args[4] == "4" {
+				failOne = false
+				return errors.New("injected IPv6 UDP rule failure")
+			}
+			return nil
+		},
+	}
+	if err := f.setDNSGuardMode(true); err == nil {
+		t.Fatal("partially updated DNS firewall was reported as protected")
+	}
+	if f.dnsGuard {
+		t.Fatal("partial DNS guard must not claim a complete state")
+	}
+	if len(commands) != 4 {
+		t.Fatalf("initial transition must attempt all families: %v", commands)
+	}
+	if len(f.dnsRuleStates) != 4 || f.dnsRuleStates["ip6tables/udp"] {
+		t.Fatalf("failed rule was incorrectly marked installed: %+v", f.dnsRuleStates)
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(true); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 1 || commands[0][0] != "ip6tables" {
+		t.Fatalf("partial transition retried already committed rules: %v", commands)
+	}
+	if !f.dnsGuard {
+		t.Fatal("all four protected rules installed but state not updated")
+	}
+	commands = nil
+	if err := f.setDNSGuardMode(false); err != nil {
+		t.Fatal(err)
+	}
+	if len(commands) != 4 || f.dnsGuard {
+		t.Fatalf("normal mode did not restore all four rules: %+v", commands)
+	}
+}
+
+func TestLinuxDNSGuardCannotReinstallAfterFirewallClose(t *testing.T) {
+	var calls int
+	f := &linuxFirewall{
+		iptables: "iptables", ip6tables: "ip6tables",
+		run: func(string, ...string) error { calls++; return nil },
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	before := calls
+	if err := f.setDNSGuardMode(true); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("closed firewall was modified: %v", err)
+	}
+	if calls != before {
+		t.Fatalf("closed firewall issued %d new commands", calls-before)
+	}
+}
+
+func TestIndependentDNSGuardEvidenceNeverClaimsZeroLeak(t *testing.T) {
+	cases := []struct {
+		name     string
+		dump     string
+		failed   bool
+		expected string
+	}{
+		{"guard-installed", "table inet relayproxy_dns_guard { chain output { type filter hook output priority 0; policy accept; meta l4proto { tcp, udp } th dport { 53, 853, 784, 8853 } drop } }", false, "rules-present"},
+		{"empty-table", "table inet relayproxy_dns_guard { chain output { type filter hook output priority 0; policy accept; } }", false, "incomplete"},
+		{"permission-denied", "Operation not permitted", true, "unknown"},
+		{"missing-table", "No such file or directory", true, "not-installed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.failed {
+				err = errors.New("nft error")
+			}
+			status, detail := interpretLinuxDNSGuardEvidence([]byte(tc.dump), err)
+			if status != tc.expected || detail == "" {
+				t.Fatalf("guard evidence = %s / %s, wanted %s", status, detail, tc.expected)
+			}
+		})
+	}
+}
+
+func TestLinuxDNSCaptureModeReportsPartialAndClosed(t *testing.T) {
+	f := &linuxFirewall{dnsGuard: true}
+	i := &packetInterceptor{device: &linuxPacketDevice{firewall: f}}
+	if got := i.dnsCaptureMode(); got != "nfqueue-no-bypass" {
+		t.Fatalf("missing protected kernel queue status: %s", got)
+	}
+	f.dnsRuleStates = map[string]bool{"iptables/tcp": true, "iptables/udp": false}
+	if got := i.dnsCaptureMode(); got != "partial-update" {
+		t.Fatalf("partial protection was not disclosed: %s", got)
+	}
+	f.dnsClosed = true
+	if got := i.dnsCaptureMode(); got != "unavailable" {
+		t.Fatalf("closed kernel rules still reported as ready: %s", got)
 	}
 }
 

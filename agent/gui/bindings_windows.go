@@ -80,6 +80,19 @@ func (s *WailsService) RunSpeedTest(exitID string, durationSeconds int) (string,
 	return string(data), nil
 }
 
+func (s *WailsService) TestCustomExit(id string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	result, err := s.owner.bridge.TestCustomExit(id)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(result)
+	return string(data), nil
+}
+
 func (s *WailsService) GetProxyExits() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil
@@ -192,6 +205,8 @@ func (s *WailsService) GetConfig() (string, error) {
 		SOCKS5                      proxyLeg            `json:"socks5"`
 		HTTP                        proxyLeg            `json:"http"`
 		DefaultExitID               string              `json:"defaultExitId"`
+		CustomExits                 any                 `json:"customExits"`
+		UpstreamExitID              string              `json:"upstreamExitId"`
 		ExitEnabled                 bool                `json:"exitEnabled"`
 		AllowInternet               bool                `json:"allowInternet"`
 		AllowPrivate                bool                `json:"allowPrivateNetwork"`
@@ -219,26 +234,28 @@ func (s *WailsService) GetConfig() (string, error) {
 		RestartFields               []string            `json:"restartFields"`
 		ReloadPending               bool                `json:"reloadPending"`
 	}{
-		ConfigPath:    a.bridge.ConfigPath(),
-		ServerAddress: cfg.Server.Address,
-		QUICPort:      cfg.Server.QUICPort,
-		TCPPort:       cfg.Server.TCPPort,
-		TLSEnabled:    cfg.IsServerTLSEnabled(),
-		InsecureTLS:   cfg.Server.InsecureTLS,
-		DeviceName:    cfg.Device.Name,
-		IdentityID:    cfg.Device.IdentityID,
-		Transport:     cfg.Transport.Mode,
-		DefaultExitID: cfg.Proxy.DefaultExitID,
-		ExitEnabled:   cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
-		AllowInternet: cfg.Exit.AllowInternet,
-		AllowPrivate:  cfg.Exit.AllowPrivateNetwork,
-		AllowLoopback: cfg.Exit.AllowLoopback,
-		AccessMode:    cfg.Exit.Access.Mode,
-		AccessDomains: cfg.Exit.Access.Domains,
-		AccessCIDRs:   cfg.Exit.Access.CIDRs,
+		ConfigPath:     a.bridge.ConfigPath(),
+		ServerAddress:  cfg.Server.Address,
+		QUICPort:       cfg.Server.QUICPort,
+		TCPPort:        cfg.Server.TCPPort,
+		TLSEnabled:     cfg.IsServerTLSEnabled(),
+		InsecureTLS:    cfg.Server.InsecureTLS,
+		DeviceName:     cfg.Device.Name,
+		IdentityID:     cfg.Device.IdentityID,
+		Transport:      cfg.Transport.Mode,
+		DefaultExitID:  cfg.Proxy.DefaultExitID,
+		CustomExits:    nonNilSlice(cfg.Proxy.CustomExits),
+		UpstreamExitID: cfg.Exit.UpstreamExitID,
+		ExitEnabled:    cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
+		AllowInternet:  cfg.Exit.AllowInternet,
+		AllowPrivate:   cfg.Exit.AllowPrivateNetwork,
+		AllowLoopback:  cfg.Exit.AllowLoopback,
+		AccessMode:     cfg.Exit.Access.Mode,
+		AccessDomains:  cfg.Exit.Access.Domains,
+		AccessCIDRs:    cfg.Exit.Access.CIDRs,
 		ExitUpstream: map[string]any{
 			"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address,
-			"username": cfg.Exit.Upstream.Username, "password": cfg.Exit.Upstream.Password,
+			"username": cfg.Exit.Upstream.Username, "hasPassword": cfg.Exit.Upstream.Password != "",
 		},
 		RDP: map[string]any{
 			"enabled": cfg.RDP.Enabled == nil || *cfg.RDP.Enabled,

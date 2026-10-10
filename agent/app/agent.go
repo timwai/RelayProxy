@@ -135,6 +135,8 @@ type AgentConfig struct {
 	HTTPEnabled           *bool
 	HTTPListen            string // "127.0.0.1:8080"
 	DefaultExitID         string
+	CustomExits           []routing.CustomExit
+	ExitUpstreamID        string
 	ExitEnabled           *bool
 	ExitUpstream          exit.UpstreamConfig
 	RDPEnabled            *bool
@@ -234,6 +236,7 @@ type AgentStatus struct {
 	DivertStage          string                     `json:"divertStage"`
 	DivertError          string                     `json:"divertError,omitempty"`
 	DivertDiagnostics    divert.Diagnostics         `json:"divertDiagnostics"`
+	DNSProtection        divert.DNSProtectionStatus `json:"dnsProtection"`
 	ActiveStreams        int64                      `json:"activeStreams"`
 	ApprovalState        string                     `json:"approvalState"`
 	RDPListenAddr        string                     `json:"rdpListenAddr,omitempty"`
@@ -403,6 +406,16 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if cfg.ConnectTimeout == 0 {
 		cfg.ConnectTimeout = 10 * time.Second
 	}
+	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil {
+		return nil, err
+	}
+	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
+		return nil, err
+	}
+	if cfg.ExitUpstreamID != "" {
+		item, _ := routing.FindCustomExit(cfg.CustomExits, cfg.ExitUpstreamID)
+		cfg.ExitUpstream = exit.UpstreamConfig{Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password}
+	}
 	cfg.ExitUpstream = exit.NormalizeUpstreamConfig(cfg.ExitUpstream)
 	if err := exit.ValidateUpstreamConfig(cfg.ExitUpstream); err != nil {
 		return nil, fmt.Errorf("invalid exit upstream: %w", err)
@@ -450,6 +463,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.rawDialer.ConfigureStreamResume(resumeClient, 512<<10)
 	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
+	a.dialer.SetCustomExits(cfg.CustomExits)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
@@ -477,12 +491,21 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		if cfg.IsHTTPEnabled() {
 			guard.LocalProxy = append(guard.LocalProxy, cfg.HTTPListen)
 		}
+		for _, item := range cfg.CustomExits {
+			guard.LocalProxy = append(guard.LocalProxy, item.Address)
+		}
 		a.divertSrv, err = divert.New(divert.Options{
-			Config: cfg.DivertConfig, Dialer: a.rawDialer, Guard: guard, PolicyMu: &a.policyMu,
+			Config: cfg.DivertConfig, Dialer: routing.SelectedExitDialer{Routing: a.dialer}, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
+			FakeIPEnabled:     engine.FakeIPEnabled,
+			BlockDoHEndpoints: engine.BlockDoHEndpoints,
+			ForwardOtherDNS:   engine.ForwardOtherDNS,
+			DNSExitID:         engine.DNSExitID,
+			DoHBlockedIPs:     engine.DoHBlockedIPs,
 			ProxyReady: func() bool {
 				return a.handshakeOK.Load()
 			},
+			LocalExitReady: a.dialer.CustomExitReady,
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
 				d := engine.DecideFlow(routing.Flow{Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
 				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired, HandleDirect: d.HandleDirect}
@@ -1452,6 +1475,7 @@ func (a *Agent) Status() AgentStatus {
 	}
 	if divertSrv != nil {
 		st.DivertDiagnostics = divertSrv.Diagnostics()
+		st.DNSProtection = divertSrv.DNSProtectionStatus()
 	}
 	if state := a.approvalState.Load(); state != nil {
 		st.ApprovalState = *state
@@ -1933,13 +1957,117 @@ func (a *Agent) closeRuntime() error {
 	return a.closeErr
 }
 
+// ApplyPolicies updates routing without changing the configured local exits
+// or selected default. Its validation and publication share the bundle path.
 func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) error {
+	return a.applyPolicyBundle(routeCfg, divertCfg, nil, nil)
+}
+
+// ApplyClientConfig publishes the rules, local exits, and default selection
+// as one policy generation. This is required when a single GUI save creates
+// an exit and immediately references it from a rule or DNS exit selection.
+// The shared Exit handler's upstream remains a startup-only setting.
+func (a *Agent) ApplyClientConfig(routeCfg routing.Config, divertCfg divert.Config, items []routing.CustomExit, defaultID string) error {
+	return a.applyPolicyBundle(routeCfg, divertCfg, &items, &defaultID)
+}
+
+func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Config, newExits *[]routing.CustomExit, newDefault *string) error {
 	routeCfg = routing.CloneConfig(routeCfg)
 	divertCfg = cloneAgentConfig(AgentConfig{DivertConfig: divertCfg}).DivertConfig
 	if err := routing.ValidateConfig(routeCfg); err != nil {
 		return err
 	}
 	if err := divert.ValidateConfig(divertCfg); err != nil {
+		return err
+	}
+	var customSnapshot []routing.CustomExit
+	if newExits != nil {
+		customSnapshot = routing.CloneCustomExits(*newExits)
+		if err := routing.ValidateCustomExits(customSnapshot); err != nil {
+			return err
+		}
+	}
+
+	a.policyMu.Lock()
+	defer a.policyMu.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed.Load() {
+		return errors.New("agent closed")
+	}
+	items, defaultID := a.cfg.CustomExits, a.cfg.DefaultExitID
+	if newExits != nil {
+		items = customSnapshot
+	}
+	if newDefault != nil {
+		defaultID = *newDefault
+	}
+	if err := routing.ValidateCustomReferences(items, defaultID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID); err != nil {
+		return err
+	}
+	if divertCfg.Mode != a.cfg.NetworkMode {
+		return ErrRestartRequired
+	}
+	previousDivert := a.cfg.DivertConfig
+	updatedDivert := false
+	rollbackDivert := func() {
+		if updatedDivert && a.divertSrv != nil {
+			if rollback := a.divertSrv.ReloadRules(previousDivert); rollback != nil {
+				log.Printf("[divert] 回滚分流策略失败: %v", rollback)
+			}
+		}
+	}
+	if a.divertSrv != nil {
+		if err := a.divertSrv.ReloadRules(divertCfg); err != nil {
+			return err
+		}
+		updatedDivert = true
+	}
+	// Arm the fail-closed DNS queue before publishing FakeIP. The policy
+	// mutex also serializes the reconciler with the whole bundle.
+	oldFakeIP := a.cfg.Routing.FakeIPEnabled
+	if a.divertSrv != nil && routeCfg.FakeIPEnabled {
+		if err := a.divertSrv.SyncPlatformDNSCapture(true); err != nil {
+			rollbackDivert()
+			return fmt.Errorf("无法启用内核 DNS 防泄漏队列，路由策略未生效: %w", err)
+		}
+	}
+	if err := a.routingEngine.Reload(routeCfg); err != nil {
+		if a.divertSrv != nil && routeCfg.FakeIPEnabled && !oldFakeIP {
+			if rollback := a.divertSrv.SyncPlatformDNSCapture(false); rollback != nil {
+				log.Printf("[dns] 恢复原 DNS 队列模式失败: %v", rollback)
+			}
+		}
+		rollbackDivert()
+		return err
+	}
+	// All fallible operations have finished. New connections now see the
+	// same selected exit inventory as the routing generation.
+	if newExits != nil {
+		a.dialer.SetCustomExits(items)
+		a.cfg.CustomExits = routing.CloneCustomExits(items)
+	}
+	if newDefault != nil {
+		a.cfg.DefaultExitID = defaultID
+		a.selectedExit.Store(&defaultID)
+		a.dialer.SetDefaultExitID(defaultID)
+	}
+	a.cfg.Routing = a.routingEngine.Config()
+	a.cfg.DivertConfig = divertCfg
+	if a.divertSrv != nil && !routeCfg.FakeIPEnabled && oldFakeIP {
+		// Relax after publishing disabled policy. Failure leaves a stricter
+		// kernel queue, and the reconciler will retry the change.
+		if err := a.divertSrv.SyncPlatformDNSCapture(false); err != nil {
+			log.Printf("[dns] 已关闭 FakeIP，但恢复普通 DNS 队列失败，将自动重试: %v", err)
+		}
+	}
+	return nil
+}
+
+// ApplyCustomExits is used by independent local-exit updates. A combined
+// rules/exits save must use ApplyClientConfig instead.
+func (a *Agent) ApplyCustomExits(items []routing.CustomExit) error {
+	if err := routing.ValidateCustomExits(items); err != nil {
 		return err
 	}
 	a.policyMu.Lock()
@@ -1949,20 +2077,11 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 	if a.closed.Load() {
 		return errors.New("agent closed")
 	}
-	if divertCfg.Mode != a.cfg.NetworkMode {
-		return ErrRestartRequired
-	}
-	if a.divertSrv != nil {
-		if err := a.divertSrv.ReloadRules(divertCfg); err != nil {
-			return err
-		}
-	}
-	// Both inputs were compiled before publishing under the shared policy lock.
-	if err := a.routingEngine.Reload(routeCfg); err != nil {
+	if err := routing.ValidateCustomReferences(items, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, a.cfg.Routing.Rules, a.cfg.Routing.DNSExitID); err != nil {
 		return err
 	}
-	a.cfg.Routing = a.routingEngine.Config()
-	a.cfg.DivertConfig = divertCfg
+	a.dialer.SetCustomExits(items)
+	a.cfg.CustomExits = routing.CloneCustomExits(items)
 	return nil
 }
 
@@ -1986,6 +2105,7 @@ func cloneAgentConfig(cfg AgentConfig) AgentConfig {
 	cfg.P2PEnabled, cfg.P2PFallback = cloneBool(cfg.P2PEnabled), cloneBool(cfg.P2PFallback)
 	cfg.AccessDomains, cfg.AccessCIDRs = slices.Clone(cfg.AccessDomains), slices.Clone(cfg.AccessCIDRs)
 	cfg.Routing = routing.CloneConfig(cfg.Routing)
+	cfg.CustomExits = routing.CloneCustomExits(cfg.CustomExits)
 	cfg.DivertConfig.ExcludeProcesses = slices.Clone(cfg.DivertConfig.ExcludeProcesses)
 	cfg.DivertConfig.Rules = slices.Clone(cfg.DivertConfig.Rules)
 	for i := range cfg.DivertConfig.Rules {

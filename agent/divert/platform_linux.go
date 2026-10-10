@@ -123,7 +123,7 @@ type linuxPacketDevice struct {
 	injectFn  func([]byte) error
 }
 
-func newLinuxPacketDevice(relayIPs []string) (*linuxPacketDevice, error) {
+func newLinuxPacketDevice(relayIPs []string, dnsProtected bool) (*linuxPacketDevice, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &linuxPacketDevice{ctx: ctx, cancel: cancel, packets: make(chan linuxQueuePacket, 1024), raw4: -1, raw6: -1}
 	fail := func(err error) (*linuxPacketDevice, error) {
@@ -152,7 +152,7 @@ func newLinuxPacketDevice(relayIPs []string) (*linuxPacketDevice, error) {
 	if err := d.queue.RegisterWithErrorFunc(ctx, d.onPacket, d.onQueueError); err != nil {
 		return fail(fmt.Errorf("绑定 NFQUEUE %d 失败: %w", linuxQueueNumber, err))
 	}
-	d.firewall, err = installLinuxFirewall(relayIPs)
+	d.firewall, err = installLinuxFirewall(relayIPs, dnsProtected)
 	if err != nil {
 		return fail(err)
 	}
@@ -352,7 +352,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		}
 		listeners = append(listeners, listener)
 	}
-	device, err := newLinuxPacketDevice(s.guard.RelayIPs)
+	device, err := newLinuxPacketDevice(s.guard.RelayIPs, s.fakeIPEnabled())
 	if err != nil {
 		for _, listener := range listeners {
 			_ = listener.Close()
@@ -362,6 +362,8 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	resolver := newLinuxProcessResolver()
 	i := newPacketInterceptor(s, device, listeners, resolver.lookup)
 	i.start()
+	i.wg.Add(1)
+	go i.watchLinuxDNSGuard(device.firewall)
 	return i, nil
 }
 
@@ -369,11 +371,18 @@ type linuxFirewall struct {
 	iptables  string
 	ip6tables string
 	run       func(string, ...string) error
-	closeOnce sync.Once
-	closeErr  error
+	dnsGuard  bool
+	// Tracks each installed DNS/53 rule independently. A failed iptables
+	// replacement can leave one family stricter than the other; retries
+	// must never assume the two families changed atomically.
+	dnsRuleStates map[string]bool
+	dnsMu         sync.Mutex
+	dnsClosed     bool
+	closeOnce     sync.Once
+	closeErr      error
 }
 
-func installLinuxFirewall(relayIPs []string) (*linuxFirewall, error) {
+func installLinuxFirewall(relayIPs []string, dnsProtected bool) (*linuxFirewall, error) {
 	iptables, err := exec.LookPath("iptables")
 	if err != nil {
 		return nil, err
@@ -382,7 +391,7 @@ func installLinuxFirewall(relayIPs []string) (*linuxFirewall, error) {
 	if err != nil {
 		return nil, err
 	}
-	f := &linuxFirewall{iptables: iptables, ip6tables: ip6tables, run: runLinuxFirewallCommand}
+	f := &linuxFirewall{iptables: iptables, ip6tables: ip6tables, run: runLinuxFirewallCommand, dnsGuard: dnsProtected}
 	for _, binary := range []string{f.iptables, f.ip6tables} {
 		f.cleanupFamily(binary)
 		if err := f.installFamily(binary, relayIPs); err != nil {
@@ -409,11 +418,29 @@ func (f *linuxFirewall) installFamily(binary string, relayIPs []string) error {
 		{"-t", "mangle", "-A", linuxOutputChain, "-m", "mark", "--mark", mark, "-j", "RETURN"},
 		{"-t", "mangle", "-A", linuxInputChain, "-m", "mark", "--mark", mark, "-j", "RETURN"},
 	}
+	// DNS/53 must reach NFQUEUE even when the resolver shares the Relay's IP.
+	// Unlike ordinary traffic this queue has NO --queue-bypass: if Agent's
+	// NFQUEUE listener disappears while the firewall is installed, DNS is
+	// dropped by the kernel rather than escaping to a system resolver.
+	// RETURN after an accepted verdict prevents matching the generic queue.
+	for _, protocol := range []string{"tcp", "udp"} {
+		dnsMatch := []string{"-t", "mangle", "-A", linuxOutputChain, "-p", protocol, "--dport", "53"}
+		queue := append(append([]string{}, dnsMatch...), "-j", "NFQUEUE", "--queue-num", strconv.Itoa(linuxQueueNumber))
+		if !f.dnsGuard {
+			// Normal mode keeps historical availability: if NFQUEUE dies,
+			// DNS/53 can continue without claiming a strict privacy guard.
+			queue = append(queue, "--queue-bypass")
+		}
+		commands = append(commands, queue, append(append([]string{}, dnsMatch...), "-j", "RETURN"))
+	}
 	isIPv6 := strings.Contains(strings.ToLower(filepathBase(binary)), "ip6tables")
 	for _, raw := range relayIPs {
 		ip, err := netip.ParseAddr(raw)
 		if err == nil && ip.Is6() == isIPv6 {
-			commands = append(commands, []string{"-t", "mangle", "-A", linuxOutputChain, "-d", ip.String(), "-j", "RETURN"})
+			commands = append(commands,
+				[]string{"-t", "mangle", "-A", linuxOutputChain, "-p", "tcp", "!", "--dport", "53", "-d", ip.String(), "-j", "RETURN"},
+				[]string{"-t", "mangle", "-A", linuxOutputChain, "-p", "udp", "!", "--dport", "53", "-d", ip.String(), "-j", "RETURN"},
+			)
 		}
 	}
 	for _, protocol := range []string{"tcp", "udp"} {
@@ -434,6 +461,128 @@ func (f *linuxFirewall) installFamily(binary string, relayIPs []string) error {
 		}
 	}
 	return nil
+}
+
+// setDNSGuardMode updates only the dedicated DNS/53 NFQUEUE rules.
+// The mark exception (loop prevention) and generic TCP/UDP rules remain
+// untouched. It records successfully updated rules individually so a failed
+// replacement is retried, instead of assuming the platform update is atomic.
+func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
+	f.dnsMu.Lock()
+	defer f.dnsMu.Unlock()
+	if f.dnsClosed {
+		return net.ErrClosed
+	}
+	if f.dnsRuleStates == nil {
+		f.dnsRuleStates = make(map[string]bool, 4)
+		for _, family := range []string{f.iptables, f.ip6tables} {
+			for _, protocol := range []string{"tcp", "udp"} {
+				f.dnsRuleStates[family+"/"+protocol] = f.dnsGuard
+			}
+		}
+	}
+	var failures []error
+	for _, family := range []string{f.iptables, f.ip6tables} {
+		for _, item := range []struct {
+			protocol string
+			index    string
+		}{
+			{"tcp", "2"}, {"udp", "4"},
+		} {
+			key := family + "/" + item.protocol
+			if f.dnsRuleStates[key] == protected {
+				continue
+			}
+			args := []string{"-t", "mangle", "-R", linuxOutputChain, item.index,
+				"-p", item.protocol, "--dport", "53", "-j", "NFQUEUE",
+				"--queue-num", strconv.Itoa(linuxQueueNumber)}
+			if !protected {
+				args = append(args, "--queue-bypass")
+			}
+			if err := f.run(family, args...); err != nil {
+				failures = append(failures, fmt.Errorf("%s/%s: %w", family, item.protocol, err))
+				continue
+			}
+			f.dnsRuleStates[key] = protected
+		}
+	}
+	if len(failures) > 0 {
+		// dnsGuard denotes a fully installed desired state only. A partial
+		// transition is not reported as successful and remains retryable.
+		return fmt.Errorf("更新 Linux DNS 保护队列失败: %w", errors.Join(failures...))
+	}
+	f.dnsGuard = protected
+	return nil
+}
+
+// SyncPlatformDNSCapture is invoked synchronously while the application holds
+// the shared policy lock. Enabling FakeIP must install fail-closed DNS rules
+// before its routing configuration is published to other goroutines.
+func (i *packetInterceptor) SyncPlatformDNSCapture(enabled bool) error {
+	device, ok := i.device.(*linuxPacketDevice)
+	if !ok || device.firewall == nil {
+		return nil
+	}
+	return device.firewall.setDNSGuardMode(enabled)
+}
+
+// dnsCaptureMode reports what the kernel rule update driver last confirmed.
+// Partial transitions remain visibly degraded instead of being misreported as
+// a completed fail-closed setup.
+func (i *packetInterceptor) dnsCaptureMode() string {
+	device, ok := i.device.(*linuxPacketDevice)
+	if !ok || device.firewall == nil {
+		return "unavailable"
+	}
+	f := device.firewall
+	f.dnsMu.Lock()
+	defer f.dnsMu.Unlock()
+	if f.dnsClosed {
+		return "unavailable"
+	}
+	if len(f.dnsRuleStates) != 0 {
+		for _, protected := range f.dnsRuleStates {
+			if protected != f.dnsGuard {
+				return "partial-update"
+			}
+		}
+	}
+	if f.dnsGuard {
+		return "nfqueue-no-bypass"
+	}
+	return "nfqueue-bypass"
+}
+
+// The routing policy is hot-reloadable. Keep NFQUEUE's kernel fail-closed
+// behavior in sync without restarting the Agent or recycling user TCP flows.
+func (i *packetInterceptor) watchLinuxDNSGuard(f *linuxFirewall) {
+	defer i.wg.Done()
+	if f == nil {
+		return
+	}
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-i.ctx.Done():
+			return
+		case <-ticker.C:
+			// The apply-policy path holds PolicyMu while installing rules
+			// before publishing the new FakeIP state. Read that lock here
+			// so the background reconciler cannot undo a pending switch.
+			if i.server.opts.PolicyMu != nil {
+				i.server.opts.PolicyMu.RLock()
+			}
+			enabled := i.server.fakeIPEnabled()
+			err := f.setDNSGuardMode(enabled)
+			if i.server.opts.PolicyMu != nil {
+				i.server.opts.PolicyMu.RUnlock()
+			}
+			if err != nil {
+				i.report(err)
+			}
+		}
+	}
 }
 
 func filepathBase(path string) string {
@@ -474,6 +623,9 @@ func (f *linuxFirewall) Close() error {
 		return nil
 	}
 	f.closeOnce.Do(func() {
+		f.dnsMu.Lock()
+		defer f.dnsMu.Unlock()
+		f.dnsClosed = true
 		for _, binary := range []string{f.ip6tables, f.iptables} {
 			f.closeErr = errors.Join(f.closeErr, f.removeFamily(binary))
 		}

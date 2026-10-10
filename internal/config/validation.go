@@ -109,7 +109,21 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Upstream.Mode))
 	c.Exit.Upstream.Address = strings.TrimSpace(c.Exit.Upstream.Address)
 	c.Exit.Upstream.Username = strings.TrimSpace(c.Exit.Upstream.Username)
+	c.Exit.UpstreamExitID = strings.TrimSpace(c.Exit.UpstreamExitID)
+	for i := range c.Proxy.CustomExits {
+		e := &c.Proxy.CustomExits[i]
+		e.ID = strings.TrimSpace(e.ID)
+		e.Name = strings.TrimSpace(e.Name)
+		e.Protocol = strings.ToLower(strings.TrimSpace(e.Protocol))
+		e.Address = strings.TrimSpace(e.Address)
+	}
 	c.Routing.Mode = routing.Mode(strings.ToLower(strings.TrimSpace(string(c.Routing.Mode))))
+	c.Routing.DNSMode = routing.DNSMode(strings.ToLower(strings.TrimSpace(string(c.Routing.DNSMode))))
+	if c.Routing.DNSMode == "" {
+		// Match the historical behavior of forwarding known domain targets
+		// unchanged to a remote exit, including in legacy YAML files.
+		c.Routing.DNSMode = routing.DNSModeProxy
+	}
 	c.Routing.DefaultAction = routing.Action(strings.ToUpper(strings.TrimSpace(string(c.Routing.DefaultAction))))
 	c.GUI.Theme = strings.ToLower(strings.TrimSpace(c.GUI.Theme))
 	c.Proxy.SOCKS5.Listen = strings.TrimSpace(c.Proxy.SOCKS5.Listen)
@@ -242,6 +256,24 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if len(c.Exit.Upstream.Username) > 255 || len(c.Exit.Upstream.Password) > 255 {
 		return fmt.Errorf("exit.upstream 用户名和密码长度不能超过 255")
 	}
+	if err := routing.ValidateCustomExits(c.Proxy.CustomExits); err != nil {
+		return err
+	}
+	if err := routing.ValidateCustomReferences(c.Proxy.CustomExits, c.Proxy.DefaultExitID, c.Exit.UpstreamExitID, c.Routing.Rules, c.Routing.DNSExitID); err != nil {
+		return err
+	}
+	for _, item := range c.Proxy.CustomExits {
+		host, port, _ := net.SplitHostPort(item.Address)
+		n, _ := strconv.Atoi(port)
+		if isLoopbackHost(host) {
+			if (c.Proxy.SOCKS5.Enabled == nil || *c.Proxy.SOCKS5.Enabled) && n == c.Proxy.SOCKS5.Port && localListenerCoversLoopback(c.Proxy.SOCKS5.Listen) {
+				return fmt.Errorf("custom exit %q points to the Agent SOCKS5 listener", item.ID)
+			}
+			if (c.Proxy.HTTP.Enabled == nil || *c.Proxy.HTTP.Enabled) && n == c.Proxy.HTTP.Port && localListenerCoversLoopback(c.Proxy.HTTP.Listen) {
+				return fmt.Errorf("custom exit %q points to the Agent HTTP listener", item.ID)
+			}
+		}
+	}
 	if err := validateAccess(c.ExitPolicy()); err != nil {
 		return fmt.Errorf("exit.access: %w", err)
 	}
@@ -298,6 +330,7 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 		return BoolPtr(*v)
 	}
 	out.Proxy.SOCKS5.Enabled = cloneBool(c.Proxy.SOCKS5.Enabled)
+	out.Proxy.CustomExits = routing.CloneCustomExits(c.Proxy.CustomExits)
 	out.Server.TLSEnabled = cloneBool(c.Server.TLSEnabled)
 	out.Proxy.HTTP.Enabled = cloneBool(c.Proxy.HTTP.Enabled)
 	out.Exit.Enabled = cloneBool(c.Exit.Enabled)

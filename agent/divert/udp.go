@@ -168,7 +168,19 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 	var err error
 	if a.route.decision.Action == ActionDirect {
 		var conn net.Conn
-		conn, err = (&net.Dialer{}).DialContext(dialCtx, "udp", net.JoinHostPort(a.route.flow.IP, fmt.Sprint(a.route.flow.Port)))
+		target := a.route.flow.IP
+		if a.route.flow.DomainSource == "fakeip" && isFakeIP(a.route.key.Destination.Addr()) {
+			target, err = s.resolveFakeDirectIP(dialCtx, a.route.decision.ExitID, a.route.flow.Host, a.route.key.Destination.Addr().Is6())
+			if err == nil {
+				err = s.validateFakeDirectTarget(a.route, target)
+			}
+		}
+		if err == nil {
+			if a.route.traffic != nil {
+				a.route.traffic.SetIP(target)
+			}
+			conn, err = (&net.Dialer{}).DialContext(dialCtx, "udp", net.JoinHostPort(target, fmt.Sprint(a.route.flow.Port)))
+		}
 		if err == nil {
 			var ok bool
 			pc, ok = conn.(*net.UDPConn)

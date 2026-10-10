@@ -143,3 +143,14 @@ func TestEngineProcessAndAddressConditionsAreIndependent(t *testing.T) {
 		t.Fatalf("combined rule ignored address condition: %+v", got)
 	}
 }
+
+func TestDivertUnnamedMatchingRuleGetsMonitorLabel(t *testing.T) {
+	e := requireEngine(t, Config{DefaultAction: ActionReject, Rules: []Rule{
+		{Name: "", Enabled: false, Process: "*", Action: ActionReject},
+		{Name: "", Enabled: true, Process: "chrome.exe", Action: ActionProxy},
+	}})
+	got := e.Match(Flow{Process: "CHROME.EXE", Port: 443, Protocol: ProtoTCP})
+	if got.Rule != "rule #2" || got.Action != ActionProxy {
+		t.Fatalf("unnamed divert rule has no stable telemetry label: %+v", got)
+	}
+}

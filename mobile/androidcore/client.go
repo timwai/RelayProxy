@@ -49,6 +49,29 @@ func ValidateRoutingConfig(configJSON string) error {
 	return nil
 }
 
+// routing.CustomExit deliberately redacts Password from JSON globally.
+// Only the Android private config ingest path may decode the secret into
+// memory; the public status endpoint must continue to omit it.
+type androidPrivateCustomExits []routing.CustomExit
+
+func (items *androidPrivateCustomExits) UnmarshalJSON(raw []byte) error {
+	var decoded []struct {
+		routing.CustomExit
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return err
+	}
+	next := make([]routing.CustomExit, 0, len(decoded))
+	for _, entry := range decoded {
+		item := entry.CustomExit
+		item.Password = entry.Password
+		next = append(next, item)
+	}
+	*items = next
+	return nil
+}
+
 type clientConfig struct {
 	ServerAddress         string         `json:"serverAddress"`
 	IdentityID            string         `json:"identityId"`
@@ -76,6 +99,8 @@ type clientConfig struct {
 	VPNProxyEnabled       bool           `json:"vpnProxyEnabled"`
 	VPNProxyListen        string         `json:"vpnProxyListen"`
 	VPNProxyToken         string         `json:"vpnProxyToken"`
+
+	CustomExits androidPrivateCustomExits `json:"customExits"`
 }
 
 type statusSnapshot struct {
@@ -263,6 +288,12 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		return cfg, errors.New("clientEnabled requires a local proxy listener")
 	}
 	cfg.DefaultExitID = strings.TrimSpace(cfg.DefaultExitID)
+	if err := routing.ValidateCustomExits([]routing.CustomExit(cfg.CustomExits)); err != nil {
+		return cfg, err
+	}
+	if err := routing.ValidateCustomReferences([]routing.CustomExit(cfg.CustomExits), cfg.DefaultExitID, "", cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
+		return cfg, err
+	}
 	cfg.SOCKS5Listen = strings.TrimSpace(cfg.SOCKS5Listen)
 	cfg.HTTPListen = strings.TrimSpace(cfg.HTTPListen)
 	if cfg.SOCKS5Listen == "" {
@@ -418,6 +449,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 	}
 	c.traffic = traffic.NewRegistry(1024, 256)
 	c.routingDialer = routing.NewRoutingDialer(routingEngine, c.proxyDialer)
+	c.routingDialer.SetCustomExits([]routing.CustomExit(cfg.CustomExits))
 	c.routingDialer.Traffic = c.traffic
 	return c, nil
 }
@@ -631,6 +663,9 @@ func (c *Client) SetRoutingConfig(configJSON string) error {
 	if c.closed || c.routingDialer == nil {
 		return errors.New("routing runtime is unavailable")
 	}
+	if err := routing.ValidateCustomReferences([]routing.CustomExit(c.cfg.CustomExits), c.cfg.DefaultExitID, "", cfg.Rules, cfg.DNSExitID); err != nil {
+		return err
+	}
 	if err := c.routingDialer.Engine().Reload(cfg); err != nil {
 		return err
 	}
@@ -650,9 +685,16 @@ func (c *Client) SetDefaultExit(exitID string) {
 		c.mu.Unlock()
 		return
 	}
+	if err := routing.ValidateCustomReferences([]routing.CustomExit(c.cfg.CustomExits), exitID, "", c.cfg.Routing.Rules, c.cfg.Routing.DNSExitID); err != nil {
+		c.mu.Unlock()
+		return
+	}
 	c.cfg.DefaultExitID = exitID
 	selected := effectiveProxyExit(exitID, c.status.ProxyExits)
 	state, statusError := proxySelectionStatus(exitID, c.status.ProxyExits)
+	if routing.IsCustomExitID(exitID) {
+		state, statusError = "ready", ""
+	}
 	c.status.SelectedExit = selected
 	c.status.ProxyState = state
 	c.status.ProxyError = statusError
@@ -662,7 +704,9 @@ func (c *Client) SetDefaultExit(exitID string) {
 	if c.routingDialer != nil {
 		c.routingDialer.SetDefaultExitID(exitID)
 	}
-	c.ensureProxyDirectPath(exitID)
+	if !routing.IsCustomExitID(exitID) {
+		c.ensureProxyDirectPath(exitID)
+	}
 }
 
 // SetPowerConstrained switches Proxy P2P into its mobile battery-aware profile.
@@ -978,7 +1022,10 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		selectedExit = effectiveProxyExit(selectedExit, acceptedExits)
 		proxyState, proxyError = proxySelectionStatus(configuredExit, acceptedExits)
 	}
-	if !clientApproved {
+	if routing.IsCustomExitID(configuredExit) {
+		selectedExit, proxyState, proxyError = configuredExit, "ready", ""
+	}
+	if !clientApproved && !routing.IsCustomExitID(configuredExit) {
 		proxyState, proxyError = "not_authorized", "代理客户端尚未获得服务端授权"
 	}
 	c.mu.Lock()
@@ -1048,7 +1095,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		}
 		c.mu.Unlock()
 		selected := strings.TrimSpace(c.proxyDialer.GetDefaultExitID())
-		if clientRuntimeApproved && selected != "" && selected != protocol.ServerExitDeviceID {
+		if clientRuntimeApproved && selected != "" && selected != protocol.ServerExitDeviceID && !routing.IsCustomExitID(selected) {
 			c.ensureProxyDirectPath(selected)
 		}
 		defer func() {
@@ -1180,6 +1227,9 @@ func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.P
 	}
 	selected := effectiveProxyExit(c.cfg.DefaultExitID, refreshed)
 	proxyState, proxyError := proxySelectionStatus(c.cfg.DefaultExitID, refreshed)
+	if routing.IsCustomExitID(c.cfg.DefaultExitID) {
+		selected, proxyState, proxyError = c.cfg.DefaultExitID, "ready", ""
+	}
 	c.status.ProxyExits = refreshed
 	c.status.SelectedExit = selected
 	c.status.ProxyState = proxyState
@@ -1190,7 +1240,9 @@ func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.P
 	c.proxyDialer.SetDefaultExitID(selected)
 	c.mu.Unlock()
 	c.updatePublicDirectInventory(refreshed)
-	c.ensureProxyDirectPath(selected)
+	if !routing.IsCustomExitID(selected) {
+		c.ensureProxyDirectPath(selected)
+	}
 }
 
 func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, sess tunnel.TunnelSession, heartbeatSec int) {

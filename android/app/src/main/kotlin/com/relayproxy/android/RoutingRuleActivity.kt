@@ -270,6 +270,8 @@ class RoutingRuleActivity : Activity() {
         val ids = mutableListOf("")
         val labels = mutableListOf("跟随默认出口")
         val status = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val local = ConfigStore(this).customExitNames()
+        val names = ExitDisplayNames.fromStatus(status, local)
         val available = status?.optJSONArray("proxyExits")
         if (available != null) {
             for (index in 0 until available.length()) {
@@ -277,7 +279,7 @@ class RoutingRuleActivity : Activity() {
                 val id = item.optString("deviceId").trim()
                 if (id.isBlank() || id in ids) continue
                 ids += id
-                val displayName = item.optString("name").ifBlank { id.take(12) }
+                val displayName = ExitDisplayNames.label(id, names)
                 val identity = item.optString("identityName")
                 val state = if (item.optBoolean("online", false)) "在线" else "离线"
                 labels += buildList {
@@ -287,9 +289,16 @@ class RoutingRuleActivity : Activity() {
                 }.joinToString(" · ")
             }
         }
+        ConfigStore(this).load().customExits.forEach { custom ->
+            if (custom.id !in ids) {
+                ids += custom.id
+                labels += "${custom.name} · 本机 ${custom.protocol.uppercase()} · " +
+                    if (custom.enabled) "已启用" else "已停用"
+            }
+        }
         if (selectedExitId.isNotBlank() && selectedExitId !in ids) {
             ids += selectedExitId
-            labels += "${selectedExitId.take(12)} · 当前不可用"
+            labels += "${ExitDisplayNames.label(selectedExitId, names)} · 当前不可用"
         }
         exitIds = ids
         exit.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels).also {

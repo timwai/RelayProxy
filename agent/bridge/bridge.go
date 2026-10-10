@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 
 	"relayproxy/agent/app"
 	"relayproxy/agent/divert"
+	"relayproxy/agent/exit"
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
@@ -82,6 +84,45 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 // GetStatus returns the current agent runtime state
 func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()
+}
+
+// TestCustomExit makes a real TCP CONNECT to a stable public destination
+// through the selected local proxy. The upstream credentials never leave the
+// Agent process or enter the returned diagnostics.
+func (b *UIBridge) TestCustomExit(id string) (map[string]any, error) {
+	cfg, _, err := config.LoadAgentConfigWithRevision(b.rawConfigPath())
+	if err != nil {
+		return nil, err
+	}
+	item, ok := routing.FindCustomExit(cfg.Proxy.CustomExits, id)
+	if !ok || !item.Enabled {
+		return nil, fmt.Errorf("自定义出口不存在或未启用")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	upstream := exit.UpstreamConfig{
+		Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password,
+	}
+	start := time.Now()
+	conn, err := exit.DialViaUpstreamTCP(ctx, upstream, "example.com", 443)
+	if err != nil {
+		return nil, err
+	}
+	_ = conn.Close()
+	result := map[string]any{"ok": true, "latencyMs": time.Since(start).Milliseconds(), "protocol": item.Protocol}
+	if item.Protocol == exit.UpstreamSOCKS5 {
+		latency, udpErr := probeCustomExitUDP(ctx, upstream)
+		result["udpSupported"] = true
+		result["udpOk"] = udpErr == nil
+		if udpErr != nil {
+			result["udpError"] = udpErr.Error()
+		} else {
+			result["udpLatencyMs"] = latency.Milliseconds()
+		}
+	} else {
+		result["udpSupported"] = false
+	}
+	return result, nil
 }
 
 func (b *UIBridge) GetProxyExits() []protocol.ProxyExit {
@@ -267,7 +308,17 @@ func (b *UIBridge) GetConfigState() (*ConfigState, error) {
 func (b *UIBridge) configState(cfg *config.AgentConfigFile, revision string) *ConfigState {
 	runtime := b.runtimeConfig()
 	fields := restartFields(cfg, &runtime)
-	return &ConfigState{Config: *cfg, Runtime: runtime, Revision: revision,
+	// The desktop and Web bridges must never serialize custom-exit passwords.
+	visible := config.CloneAgentConfig(cfg)
+	for i := range visible.Proxy.CustomExits {
+		visible.Proxy.CustomExits[i].HasPassword = visible.Proxy.CustomExits[i].Password != ""
+		visible.Proxy.CustomExits[i].Password = ""
+	}
+	for i := range runtime.Proxy.CustomExits {
+		runtime.Proxy.CustomExits[i].HasPassword = runtime.Proxy.CustomExits[i].Password != ""
+		runtime.Proxy.CustomExits[i].Password = ""
+	}
+	return &ConfigState{Config: *visible, Runtime: runtime, Revision: revision,
 		RestartRequired: len(fields) > 0, RestartFields: fields,
 		ReloadPending: policyFingerprint(cfg) != policyFingerprint(&runtime)}
 }
@@ -284,6 +335,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
 	res.Proxy.DefaultExitID = c.DefaultExitID
+	res.Proxy.CustomExits = routing.CloneCustomExits(c.CustomExits)
 	res.Proxy.SOCKS5.Enabled = c.SOCKS5Enabled
 	res.Proxy.SOCKS5.Listen, res.Proxy.SOCKS5.Port = splitListen(c.SOCKS5Listen)
 	res.Proxy.HTTP.Enabled = c.HTTPEnabled
@@ -303,6 +355,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.AllowInternet = c.AllowInternet
 	res.Exit.AllowPrivateNetwork = c.AllowPrivateNet
 	res.Exit.AllowLoopback = c.AllowLoopback
+	res.Exit.UpstreamExitID = c.ExitUpstreamID
 	res.Exit.Upstream.Mode = c.ExitUpstream.Mode
 	res.Exit.Upstream.Address = c.ExitUpstream.Address
 	res.Exit.Upstream.Username = c.ExitUpstream.Username
@@ -352,19 +405,21 @@ type ConfigUpdate struct {
 		} `json:"public"`
 	} `json:"direct"`
 	Proxy struct {
-		SOCKS5Enabled *bool   `json:"socks5Enabled"`
-		SOCKS5Listen  *string `json:"socks5Listen"`
-		SOCKS5Port    *int    `json:"socks5Port"`
-		HTTPEnabled   *bool   `json:"httpEnabled"`
-		HTTPListen    *string `json:"httpListen"`
-		HTTPPort      *int    `json:"httpPort"`
-		DefaultExitID *string `json:"defaultExitId"`
+		SOCKS5Enabled *bool               `json:"socks5Enabled"`
+		SOCKS5Listen  *string             `json:"socks5Listen"`
+		SOCKS5Port    *int                `json:"socks5Port"`
+		HTTPEnabled   *bool               `json:"httpEnabled"`
+		HTTPListen    *string             `json:"httpListen"`
+		HTTPPort      *int                `json:"httpPort"`
+		DefaultExitID *string             `json:"defaultExitId"`
+		CustomExits   *[]CustomExitUpdate `json:"customExits"`
 	} `json:"proxy"`
 	Exit struct {
-		Enabled             *bool `json:"enabled"`
-		AllowInternet       *bool `json:"allowInternet"`
-		AllowPrivateNetwork *bool `json:"allowPrivateNetwork"`
-		AllowLoopback       *bool `json:"allowLoopback"`
+		Enabled             *bool   `json:"enabled"`
+		AllowInternet       *bool   `json:"allowInternet"`
+		AllowPrivateNetwork *bool   `json:"allowPrivateNetwork"`
+		AllowLoopback       *bool   `json:"allowLoopback"`
+		UpstreamExitID      *string `json:"upstreamExitId"`
 		Upstream            struct {
 			Mode     *string `json:"mode"`
 			Address  *string `json:"address"`
@@ -391,10 +446,28 @@ type ConfigUpdate struct {
 	} `json:"gui"`
 }
 
+// CustomExitUpdate accepts a password only when explicitly provided;
+// omitted password keeps the previously saved secret for an existing exit.
+type CustomExitUpdate struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	Enabled  bool    `json:"enabled"`
+	Protocol string  `json:"protocol"`
+	Address  string  `json:"address"`
+	Username string  `json:"username"`
+	Password *string `json:"password,omitempty"`
+}
+
 type RoutingConfigUpdate struct {
-	Mode          *string        `json:"mode"`
-	DefaultAction *string        `json:"default_action"`
-	Rules         []routing.Rule `json:"rules"` // Full replacement
+	Mode              *string        `json:"mode"`
+	DNSMode           *string        `json:"dns_mode"`
+	FakeIPEnabled     *bool          `json:"fake_ip_enabled"`
+	BlockDoHEndpoints *bool          `json:"block_doh_endpoints"`
+	ForwardOtherDNS   *bool          `json:"forward_other_dns"`
+	DNSExitID         *string        `json:"dns_exit_id"`
+	DoHBlockedIPs     *[]string      `json:"doh_blocked_ips"`
+	DefaultAction     *string        `json:"default_action"`
+	Rules             []routing.Rule `json:"rules"` // Full replacement
 }
 
 // SaveResult tells the UI whether the change took effect immediately.
@@ -430,6 +503,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Revision != nil && *in.Revision != revision {
 		return nil, fmt.Errorf("配置已被其他操作修改，请重新载入后再保存")
 	}
+	// Retain the complete pre-save snapshot so a failed runtime publication
+	// does not leave a valid-looking disk policy that never became active.
+	previousConfig := config.CloneAgentConfig(cfg)
 
 	if in.Server.Address != nil {
 		addr := strings.TrimSpace(*in.Server.Address)
@@ -547,7 +623,23 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Proxy.DefaultExitID != nil {
 		cfg.Proxy.DefaultExitID = strings.TrimSpace(*in.Proxy.DefaultExitID)
 	}
+	if in.Proxy.CustomExits != nil {
+		items := make([]routing.CustomExit, 0, len(*in.Proxy.CustomExits))
+		for _, update := range *in.Proxy.CustomExits {
+			item := routing.CustomExit{ID: update.ID, Name: update.Name, Enabled: update.Enabled, Protocol: update.Protocol, Address: update.Address, Username: update.Username}
+			if update.Password != nil {
+				item.Password = *update.Password
+			} else if old, ok := routing.FindCustomExit(cfg.Proxy.CustomExits, update.ID); ok {
+				item.Password = old.Password
+			}
+			items = append(items, item)
+		}
+		cfg.Proxy.CustomExits = items
+	}
 
+	if in.Exit.UpstreamExitID != nil {
+		cfg.Exit.UpstreamExitID = strings.TrimSpace(*in.Exit.UpstreamExitID)
+	}
 	if in.Exit.Enabled != nil {
 		cfg.Exit.Enabled = config.BoolPtr(*in.Exit.Enabled)
 	}
@@ -604,6 +696,28 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 
 	if in.Routing != nil {
+		if in.Routing.FakeIPEnabled != nil {
+			cfg.Routing.FakeIPEnabled = *in.Routing.FakeIPEnabled
+		}
+		if in.Routing.BlockDoHEndpoints != nil {
+			cfg.Routing.BlockDoHEndpoints = *in.Routing.BlockDoHEndpoints
+		}
+		if in.Routing.ForwardOtherDNS != nil {
+			cfg.Routing.ForwardOtherDNS = *in.Routing.ForwardOtherDNS
+		}
+		if in.Routing.DNSExitID != nil {
+			cfg.Routing.DNSExitID = strings.TrimSpace(*in.Routing.DNSExitID)
+		}
+		if in.Routing.DoHBlockedIPs != nil {
+			cfg.Routing.DoHBlockedIPs = append([]string(nil), (*in.Routing.DoHBlockedIPs)...)
+		}
+		if in.Routing.DNSMode != nil {
+			mode := strings.ToLower(strings.TrimSpace(*in.Routing.DNSMode))
+			if mode != string(routing.DNSModeProxy) && mode != string(routing.DNSModeLocal) {
+				return nil, fmt.Errorf("DNS 解析方式必须是 proxy 或 local")
+			}
+			cfg.Routing.DNSMode = routing.DNSMode(mode)
+		}
 		if in.Routing.Mode != nil {
 			mode := strings.ToLower(strings.TrimSpace(*in.Routing.Mode))
 			switch routing.Mode(mode) {
@@ -684,13 +798,26 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		revision = config.AgentConfigRevision(cfg)
 	}
-	// The same validators ran before persistence. Publish both policy sets only
-	// after saving; mode, credentials and ACL remain the actual startup values.
+	// Apply the routing policy, local exit inventory and selected default as
+	// one bundle. Rules in the same save may refer to a newly created exit.
 	dcfg := cfg.DivertConfig()
 	dcfg.Mode = b.agent.Config().NetworkMode
-	if err := b.agent.ApplyPolicies(cfg.Routing, dcfg); err != nil {
-		return nil, fmt.Errorf("配置已保存在磁盘，但应用失败: %w", err)
+	if err := b.agent.ApplyClientConfig(cfg.Routing, dcfg, cfg.Proxy.CustomExits, cfg.Proxy.DefaultExitID); err != nil {
+		var rollbackErrors []error
+		if !reload {
+			if restoreErr := b.writeConfig(path, previousConfig); restoreErr != nil {
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("恢复保存前的配置失败: %w", restoreErr))
+			}
+		}
+		if rollbackAutoStart != nil {
+			if restoreErr := rollbackAutoStart(); restoreErr != nil {
+				rollbackErrors = append(rollbackErrors, fmt.Errorf("恢复开机自启配置失败: %w", restoreErr))
+			}
+		}
+		return nil, errors.Join(append([]error{fmt.Errorf("配置未应用: %w", err)}, rollbackErrors...)...)
 	}
+	// A selected Relay exit may need background path setup. This runs after
+	// atomic policy publication and does not change the routing snapshot.
 	b.agent.SelectExit(cfg.Proxy.DefaultExitID)
 	state := b.configState(cfg, revision)
 	message := "配置已保存，规则已应用。"
@@ -710,6 +837,14 @@ func (b *UIBridge) ReloadConfig() (*SaveResult, error) {
 }
 
 func startupSettings(c *config.AgentConfigFile) map[string]any {
+	upstreamMode, upstreamAddress := c.Exit.Upstream.Mode, c.Exit.Upstream.Address
+	upstreamUser, upstreamPassword := c.Exit.Upstream.Username, c.Exit.Upstream.Password
+	if c.Exit.UpstreamExitID != "" {
+		if item, ok := routing.FindCustomExit(c.Proxy.CustomExits, c.Exit.UpstreamExitID); ok {
+			upstreamMode, upstreamAddress = item.Protocol, item.Address
+			upstreamUser, upstreamPassword = item.Username, item.Password
+		}
+	}
 	name := c.Device.Name
 	if name == "" {
 		name = "Relay-Agent"
@@ -730,8 +865,9 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
 		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"私网访问": c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
-		"出口上游模式": c.Exit.Upstream.Mode, "出口上游地址": c.Exit.Upstream.Address,
-		"出口上游用户名": c.Exit.Upstream.Username, "出口上游密码": c.Exit.Upstream.Password,
+		"共享上游出口": c.Exit.UpstreamExitID,
+		"出口上游模式": upstreamMode, "出口上游地址": upstreamAddress,
+		"出口上游用户名": upstreamUser, "出口上游密码": upstreamPassword,
 		"访问控制模式": c.Exit.Access.Mode, "访问域名": strings.Join(c.Exit.Access.Domains, "\n"),
 		"访问地址": strings.Join(c.Exit.Access.CIDRs, "\n"), "透明代理开关": c.Network.Mode,
 	}
@@ -739,6 +875,14 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 
 func restartFields(desired, running *config.AgentConfigFile) []string {
 	want, active := startupSettings(desired), startupSettings(running)
+	// The running shared handler keeps its original dialer snapshot even when
+	// hot edits publish new custom exits to local client traffic.
+	if running.Exit.UpstreamExitID != "" {
+		active["出口上游模式"] = running.Exit.Upstream.Mode
+		active["出口上游地址"] = running.Exit.Upstream.Address
+		active["出口上游用户名"] = running.Exit.Upstream.Username
+		active["出口上游密码"] = running.Exit.Upstream.Password
+	}
 	fields := []string{}
 	for key, value := range want {
 		if !reflect.DeepEqual(value, active[key]) {

@@ -127,6 +127,9 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := writeDarwinGuardMarker(tokenPath, s.fakeIPEnabled()); err != nil {
+		return nil, fmt.Errorf("无法持久化 macOS DNS 保护状态: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {
 		return nil, err
 	}
@@ -155,8 +158,9 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		ctx: ctx, cancel: cancel, ready: make(chan struct{}), conns: make(map[*net.UnixConn]struct{}),
 	}
 	i.running.Store(true)
-	i.wg.Add(1)
+	i.wg.Add(2)
 	go i.accept()
+	go i.watchGuardMarker(tokenPath)
 
 	// The provider opens an authenticated control connection from startProxy.
 	// Waiting here prevents a configured-but-disabled extension from being
@@ -321,6 +325,15 @@ func (i *darwinInterceptor) handleTCP(conn *net.UnixConn, open darwinOpenFlow) e
 	if err != nil {
 		return err
 	}
+	if i.server.fakeIPEnabled() && destination.Port() == 53 {
+		if err := writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionProxy, Reason: "fakeip-dns"}); err != nil {
+			return err
+		}
+		return i.server.serveFakeDNSTCP(i.ctx, conn)
+	}
+	if i.server.fakeIPEnabled() && isEncryptedDNSPort(destination.Port()) {
+		return writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionReject, Reason: "fakeip-dns-egress-blocked"})
+	}
 	route, err := i.server.ClassifyFlow(open.flow(destination))
 	if err != nil {
 		_ = writeDarwinJSON(conn, darwinFrameError, map[string]string{"message": err.Error()})
@@ -354,6 +367,21 @@ func (i *darwinInterceptor) handleUDP(conn *net.UnixConn, open darwinOpenFlow) e
 		destination, datagram, err := decodeDarwinDatagram(payload)
 		if err != nil {
 			return err
+		}
+		if i.server.fakeIPEnabled() && destination.Port() == 53 {
+			answer := i.server.replyFakeDNS(i.ctx, datagram)
+			if answer != nil {
+				if err := respond(i.ctx, FlowKey{Protocol: ProtoUDP, Destination: destination}, answer); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if i.server.fakeIPEnabled() && isDNSLeakPort(destination.Port()) {
+			if err := writeDarwinDatagramFrame(conn, darwinFrameUDPReject, destination, nil); err != nil {
+				return err
+			}
+			continue
 		}
 		route, err := i.server.ClassifyFlow(open.flow(destination))
 		if err != nil {

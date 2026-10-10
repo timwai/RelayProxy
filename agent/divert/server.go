@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"relayproxy/internal/traffic"
@@ -41,18 +42,26 @@ type Options struct {
 	UDPWriteTimeout    time.Duration
 	SharedPolicy       func(Flow) Decision
 	ProxyReady         func() bool
+	LocalExitReady     func(string) bool
 	Traffic            *traffic.Registry
 	DefaultExitID      func() string
+	FakeIPEnabled      func() bool     // dynamically consulted for new transparent DNS queries
+	BlockDoHEndpoints  func() bool     // opt-in domain-based DoH endpoint guard
+	ForwardOtherDNS    func() bool     // opt-in authenticated DoT via proxy for TXT/SRV
+	DNSExitID          func() string   // optional pinned exit for DNS, independent from app flows
+	DoHBlockedIPs      func() []string // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 
 // Server owns classified flows. OS interception is separately gated by a
 // side-effect-free capability preflight. Trusted platform adapters must retain
 // ClassifiedFlow and implement DIRECT/reject and original-source reply injection.
 type Server struct {
-	opts   Options
-	engine *Engine
-	dialer Dialer
-	guard  LoopGuard
+	opts     Options
+	engine   *Engine
+	dialer   Dialer
+	guard    LoopGuard
+	fakeDNS  *fakeIPDNS
+	dnsLimit chan struct{} // bound concurrent TLS resolver requests
 
 	ctx         context.Context
 	cancel      context.CancelFunc
@@ -108,7 +117,7 @@ func New(opts Options) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		opts: opts, engine: eng, dialer: opts.Dialer, guard: opts.Guard,
-		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		ctx: ctx, cancel: cancel, done: make(chan struct{}), fakeDNS: newFakeIPDNS(), dnsLimit: make(chan struct{}, 16),
 		connections: make(map[net.Conn]struct{}), udp: make(map[FlowKey]*udpAssociation),
 	}, nil
 }
@@ -116,10 +125,11 @@ func New(opts Options) (*Server, error) {
 func proxyDialTarget(flow Flow) string {
 	host := strings.TrimSuffix(strings.TrimSpace(flow.Host), ".")
 	// A transparent packet only carries an IP destination. Use a hostname for
-	// remote PROXY dialing only when it came from RelayProxy's conservative DNS
-	// association tracker. Ambiguous/shared-IP associations deliberately leave
-	// Host empty, and DIRECT flows continue using the original destination IP.
-	if flow.DomainSource == "dns" && host != "" && net.ParseIP(host) == nil {
+	// remote PROXY dialing only when it came from a matched DNS exchange or
+	// the macOS Network Extension's original remoteHostname. Telemetry-only
+	// TLS SNI/HTTP Host data is never trusted for routing. Ambiguous DNS
+	// associations stay empty; DIRECT continues using the original IP.
+	if (flow.DomainSource == "dns" || flow.DomainSource == "network-extension" || flow.DomainSource == "fakeip") && host != "" && net.ParseIP(host) == nil {
 		return host
 	}
 	return flow.IP
@@ -209,8 +219,37 @@ func (s *Server) Diagnostics() Diagnostics {
 	return Diagnostics{}
 }
 
+// SyncPlatformDNSCapture synchronizes the kernel's DNS/53 interception mode
+// without publishing an unrelated routing decision. On Linux this updates
+// NFQUEUE rule bypass flags; platforms without an adjustable queue are no-ops.
+// Callers performing hot policy updates must hold PolicyMu while invoking it.
+func (s *Server) SyncPlatformDNSCapture(enabled bool) error {
+	s.mu.Lock()
+	interceptor := s.interceptor
+	s.mu.Unlock()
+	if interceptor == nil {
+		// Startup installs the kernel rules from the active routing config.
+		return nil
+	}
+	if updater, ok := interceptor.(interface{ SyncPlatformDNSCapture(bool) error }); ok {
+		return updater.SyncPlatformDNSCapture(enabled)
+	}
+	return nil
+}
+
 // UDP is intercepted as datagrams; it does not expose a local proxy socket.
 func (s *Server) UDPListenAddr() string { return "" }
+
+func (s *Server) fakeIPEnabled() bool {
+	return s != nil && s.opts.FakeIPEnabled != nil && s.opts.FakeIPEnabled()
+}
+
+// fakeIPDestination includes every synthetic IP in active FakeIP mode, and
+// only addresses actually issued by this process when the mode is disabled.
+// Unrelated benchmark/documentation networks remain usable by default.
+func (s *Server) fakeIPDestination(addr netip.Addr) bool {
+	return isFakeIP(addr) && (s.fakeIPEnabled() || s.fakeDNS.wasIssued(addr))
+}
 
 // ClassifyFlow is the sole policy decision point. UDP packets sharing a complete
 // original five-tuple and process identity reuse the same immutable decision.
@@ -222,6 +261,21 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	flow, key, err := validateFlow(input)
 	if err != nil {
 		return nil, err
+	}
+	fake := s.fakeIPDestination(key.Destination.Addr())
+	if fake {
+		host, scope, scoped, ok := s.fakeDNS.lookupWithScope(key.Destination.Addr())
+		switch {
+		case !ok:
+			// Never forward an expired or unknown placeholder.
+			flow.Host, flow.DomainSource = "", "fakeip-unknown"
+		case scoped && scope != s.dnsExitScope(""):
+			// Resolver selection changed after the OS cached this FakeIP.
+			// Requiring a new DNS answer avoids reusing old egress context.
+			flow.Host, flow.DomainSource = "", "fakeip-scope-mismatch"
+		default:
+			flow.Host, flow.DomainSource = host, "fakeip"
+		}
 	}
 	var expired []*udpAssociation
 	defer func() {
@@ -253,15 +307,53 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	}
 
 	decision := Decision{Action: ActionDirect, Rule: "loop-guard"}
-	guarded := s.guard.MustDirectFlow(flow)
-	if !guarded {
-		decision = s.engine.MatchWith(flow, s.opts.SharedPolicy)
-		if decision.Action == ActionProxy && s.opts.ProxyReady != nil && !s.opts.ProxyReady() {
+	guarded := !fake && s.guard.MustDirectFlow(flow)
+	if fake && !s.fakeIPEnabled() {
+		decision = Decision{Action: ActionReject, Rule: "fakeip-disabled"}
+	} else if s.opts.DoHBlockedIPs != nil && flow.Port == 443 &&
+		matchesConfiguredDoHIP(flow.IP, s.opts.DoHBlockedIPs()) {
+		// User explicitly opted into an exact endpoint / narrow CIDR block.
+		// It applies to both TCP and UDP without inspecting HTTPS payloads.
+		decision = Decision{Action: ActionReject, Rule: "doh-ip-endpoint-blocked"}
+	} else if s.opts.BlockDoHEndpoints != nil && s.opts.BlockDoHEndpoints() &&
+		isKnownDoHEndpoint(flow.Host) && (flow.Port == 443 || flow.Port == 80) {
+		// Only verified DNS/FakeIP/NE host metadata is used here.
+		// SNI/HTTP Host remains post-classification telemetry, not a policy key.
+		decision = Decision{Action: ActionReject, Rule: "doh-endpoint-blocked"}
+	} else if fake && flow.DomainSource == "fakeip-scope-mismatch" {
+		decision = Decision{Action: ActionReject, Rule: "fakeip-dns-exit-changed"}
+	} else if fake && flow.DomainSource == "fakeip-unknown" {
+		decision = Decision{Action: ActionReject, Rule: "fakeip-expired"}
+	} else if !guarded {
+		// A FakeIP is not the actual remote address: never match IP/CIDR
+		// selectors against the placeholder. Match hostname selectors only.
+		matchFlow := flow
+		if fake {
+			matchFlow.IP = ""
+		}
+		decision = s.engine.MatchWith(matchFlow, s.opts.SharedPolicy)
+		if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {
+			decision.ExitID = s.opts.DefaultExitID()
+		}
+		if decision.Action == ActionProxy && s.opts.ProxyReady != nil && !s.opts.ProxyReady() &&
+			(s.opts.LocalExitReady == nil || !s.opts.LocalExitReady(decision.ExitID)) {
 			// Transparent interception must never blackhole the host while the
 			// Relay session is still connecting or reconnecting. Preserve
 			// explicit REJECT decisions, but temporarily fail PROXY open to
 			// DIRECT until the authenticated Relay session is ready.
-			decision = Decision{Action: ActionDirect, Rule: "relay-unavailable"}
+			if fake {
+				decision = Decision{Action: ActionReject, Rule: "fakeip-proxy-unavailable"}
+			} else {
+				decision = Decision{Action: ActionDirect, Rule: "relay-unavailable"}
+			}
+		}
+		if fake && decision.Action == ActionDirect {
+			// Retain the DIRECT decision, but resolve the real destination
+			// over authenticated DoT *through the selected exit* before
+			// opening a local socket. The original FakeIP never leaves the
+			// host, and a failed DNS lookup cannot fail open.
+			decision.HandleDirect = true
+			decision.DatagramRequired = false
 		}
 	}
 	if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {
@@ -341,7 +433,19 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 	var upstream net.Conn
 	var err error
 	if route.decision.Action == ActionDirect {
-		upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(route.flow.IP, strconv.Itoa(int(route.flow.Port))))
+		target := route.flow.IP
+		if route.flow.DomainSource == "fakeip" && isFakeIP(route.key.Destination.Addr()) {
+			target, err = s.resolveFakeDirectIP(dialCtx, route.decision.ExitID, route.flow.Host, route.key.Destination.Addr().Is6())
+			if err == nil {
+				err = s.validateFakeDirectTarget(route, target)
+			}
+		}
+		if err == nil {
+			if route.traffic != nil {
+				route.traffic.SetIP(target)
+			}
+			upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(target, strconv.Itoa(int(route.flow.Port))))
+		}
 	} else {
 		upstream, err = s.dialer.DialTCP(dialCtx, route.decision.ExitID, proxyDialTarget(route.flow), route.flow.Port)
 	}
@@ -443,7 +547,14 @@ func bidirectionalCopy(ctx context.Context, a, b net.Conn, record *traffic.Recor
 		results <- err
 	}
 	go copyOne(a, b, true)
-	go copyOne(b, a, false)
+	// Probe the application-to-upstream byte stream, including macOS Network
+	// Extension flows which have no raw packet interceptor. This only enriches
+	// connection telemetry and cannot change the already classified route.
+	var uploadSource net.Conn = a
+	if record != nil {
+		uploadSource = &hostnameObservingConn{Conn: a, record: record}
+	}
+	go copyOne(b, uploadSource, false)
 	first := <-results
 	if first != nil {
 		_ = a.Close()

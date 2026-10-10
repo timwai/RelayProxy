@@ -99,6 +99,7 @@
 | 日期（本地） | 代码基准/PR | 变化与证据 | 进度影响 | 维护结果 |
 |---|---|---|---|---|
 | 2026-10-10 | [PR #194 · `2050d08e`](https://github.com/timwai/RelayProxy/pull/194) | 按代码、开发说明、Go/UI/Android 基准成功 CI 核对。覆盖 E2EE、双端配对、Cookie 同步、登出、ACK、防重放、序号及故障恢复；无真实 Chrome E2E/外部安全验收记录 | P0-02/03/04 标为已实现待验收；P0-05/06 为部分完成；P0-01/07 未开始；P1 为部分完成/未开始；P2 尚未开始 | 建立发布准入、测试矩阵和进度更新规范 |
+| 2026-10-10 | [PR #194 · 文档/CI `28f6fd59`](https://github.com/timwai/RelayProxy/commit/28f6fd59d3e9b9a8b78dcdc1d0a4c5f32bfa21c2) | 建立本持续进度表，设计文档和扩展 README 均链接本表；UI CI 增加 Git 历史检查，要求 Browser Sync 源码变更后在同 PR 更新本表 | P0/P1/P2 各项状态 **保持不变**，未新增真机或独立安全验收 | 维护机制已提交；该文档/CI 改动对应的检查仍需以实际运行结果为准 |
 
 后续的记录格式：**日期 ｜ 实际代码 SHA/PR ｜ 本次变动及测试链接 ｜ 哪些 ID 状态改变或未改变 ｜ 新风险/遗留项**。保留历史记录，不覆盖旧条目。  
 检查入口：[PR #194](https://github.com/timwai/RelayProxy/pull/194) · [Go CI](https://github.com/timwai/RelayProxy/actions/workflows/go-ci.yml) · [UI CI](https://github.com/timwai/RelayProxy/actions/workflows/ui-ci.yml)。

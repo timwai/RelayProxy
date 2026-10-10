@@ -10,6 +10,7 @@ import { captureCookies, applyCookies } from './cookies.js';
 import { shouldReconcile, acceptDeliveryAck, isTerminalAck } from './lifecycle.js';
 
 const sourceBusy = new Set();
+const sourceDirty = new Set();
 const cookieTimers = new Map();
 const incomingQueue = new Map();
 const LAST_SEQUENCE = 'browserSyncOutgoingSequence';
@@ -57,7 +58,10 @@ async function ruleContext(ruleId) {
 }
 
 export async function sendSnapshot(ruleId) {
-  if(sourceBusy.has(ruleId))return {state:'BUSY'};
+  if(sourceBusy.has(ruleId)){
+    sourceDirty.add(ruleId);
+    return {state:'BUSY'};
+  }
   sourceBusy.add(ruleId);
   try{
     const ctx=await ruleContext(ruleId);
@@ -86,7 +90,14 @@ export async function sendSnapshot(ruleId) {
     await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
     await setStatus(ruleId,'FAILED');
     throw error;
-  }finally{sourceBusy.delete(ruleId);}
+  }finally{
+    sourceBusy.delete(ruleId);
+    if(sourceDirty.delete(ruleId)){
+      // An onChanged event arrived while a previous encrypted snapshot was
+      // in flight. Re-read the latest Cookie state rather than dropping it.
+      queueMicrotask(()=>{sendSnapshot(ruleId).catch(()=>{});});
+    }
+  }
 }
 
 export async function requestSnapshot(ruleId) {

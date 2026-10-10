@@ -151,6 +151,17 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	if c.Tunnel.MaxConnections < 1 || c.Tunnel.MaxConnections > 1000000 || c.Tunnel.MaxConnectionsPerDevice < 1 || c.Tunnel.MaxConnectionsPerDevice > 1000000 {
 		return errors.New("连接和设备并发流上限必须在 1-1000000 之间")
 	}
+	for _, item := range []struct {
+		name  string
+		value int
+	}{
+		{"tunnel.bandwidth.up_mbps", c.Tunnel.Bandwidth.UpMbps},
+		{"tunnel.bandwidth.down_mbps", c.Tunnel.Bandwidth.DownMbps},
+	} {
+		if item.value < 0 || item.value > 1_000_000 {
+			return fmt.Errorf("%s 必须在 0-1000000 Mbps 之间；0 表示不限制客户端提示", item.name)
+		}
+	}
 	if err := validateAccess(c.RelayPolicy()); err != nil {
 		return fmt.Errorf("relay_acl: %w", err)
 	}
@@ -372,7 +383,7 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"server.tls_enabled": c.IsTLSEnabled(), "server.tls.listen": c.Server.TLS.Listen, "server.quic.listen": c.Server.QUIC.Listen,
 			"server.cert_file": c.Server.CertFile, "server.key_file": c.Server.KeyFile,
 			"tunnel.heartbeat_sec": c.Tunnel.HeartbeatSec, "tunnel.max_connections": c.Tunnel.MaxConnections,
-			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "relay_acl": policy,
+			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "tunnel.bandwidth": c.Tunnel.Bandwidth, "relay_acl": policy,
 			"rdp":      c.RDP,
 			"p2p":      c.P2P,
 			"direct":   c.Direct,

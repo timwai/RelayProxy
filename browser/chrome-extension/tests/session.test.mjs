@@ -239,3 +239,30 @@ test('incomplete rollback reports manual intervention rather than claiming succe
   await assert.rejects(applyCookies('concurrent-update',snapshot,policy2),/PARTIAL_ROLLBACK/);
   assert.equal(target.jar.get('csrf').value,'modified-by-website');
 });
+
+test('orphaned restore journal blocks automatic writes after MV3 worker restart',async()=>{
+  const p=createProfile();use(p);
+  const partialRule='interrupted-restore';
+  await p.chrome.storage.local.set({browserSyncRestoreJournal:{[partialRule]:{startedAt:Date.now()}}});
+  const snapshot={siteOrigin:policy.siteOrigin,cookieNames:policy.cookieNames,
+    cookies:[{name:'session',value:'test-cookie',secure:true,httpOnly:true,sameSite:'lax'}],removedNames:[]};
+  await assert.rejects(applyCookies(partialRule,snapshot,policy),/PARTIAL_ROLLBACK/);
+  assert.equal(p.jar.size,0,'crash recovery guard changed the Cookie jar');
+});
+
+test('successful restore and clean rollback both clear in-progress journal',async()=>{
+  const p=createProfile();use(p);
+  const snapshot={siteOrigin:policy.siteOrigin,cookieNames:policy.cookieNames,
+    cookies:[{name:'session',value:'first',secure:true,httpOnly:true,sameSite:'lax'}],removedNames:[]};
+  await applyCookies('journal-success',snapshot,policy);
+  let j=(await p.chrome.storage.local.get('browserSyncRestoreJournal')).browserSyncRestoreJournal;
+  assert.equal(j['journal-success'],undefined);
+  const setter=p.chrome.cookies.set.bind(p.chrome.cookies);
+  p.chrome.cookies.set=async ()=>{throw new Error('test failure');};
+  await assert.rejects(applyCookies('journal-failure',
+    {...snapshot,cookies:[{...snapshot.cookies[0],value:'second'}]},policy,{allowOverwrite:true}),/APPLY_FAILED/);
+  j=(await p.chrome.storage.local.get('browserSyncRestoreJournal')).browserSyncRestoreJournal;
+  assert.equal(j['journal-failure'],undefined);
+  assert.equal(p.jar.get('session').value,'first');
+  p.chrome.cookies.set=setter;
+});

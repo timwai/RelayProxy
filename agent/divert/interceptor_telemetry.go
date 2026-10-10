@@ -8,9 +8,11 @@ func (i *packetInterceptor) flowMetadata(p ipPacket, process packetProcess) Flow
 		flow.Host, flow.DomainSource = host, "fakeip"
 		return flow
 	}
-	flow.Host = i.dns.lookup(p.Destination.Addr())
-	if flow.Host != "" {
-		flow.DomainSource = "dns"
+	if i.server.dnsAssociationEnabled() {
+		flow.Host = i.dns.lookup(p.Destination.Addr())
+		if flow.Host != "" {
+			flow.DomainSource = "dns"
+		}
 	}
 	return flow
 }
@@ -33,7 +35,7 @@ func (i *packetInterceptor) inboundPacket(data []byte, meta packetMetadata) erro
 	// Observe a verified UDP DNS answer before delivering it to the OS:
 	// the application can open its destination TCP SYN immediately after
 	// receiving the answer. Recording it after reinjection races that SYN.
-	if p.Protocol == ProtoUDP {
+	if p.Protocol == ProtoUDP && i.server.dnsAssociationEnabled() {
 		i.dns.response(p.Source, p.Destination, p.Payload)
 	}
 	if err := i.sendPacket(p, meta); err != nil {

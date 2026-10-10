@@ -153,6 +153,18 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "browser connections full", http.StatusServiceUnavailable)
 		return
 	}
+	// The Admin listener has short normal HTTP read/write timeouts.
+	// Clear deadlines only for the authenticated-origin WebSocket upgrade.
+	// The proof is still strictly bounded by the 15-second auth context.
+	control := http.NewResponseController(w)
+	if err := control.SetReadDeadline(time.Time{}); err != nil {
+		http.Error(w, "WebSocket deadline control unavailable", http.StatusInternalServerError)
+		return
+	}
+	if err := control.SetWriteDeadline(time.Time{}); err != nil {
+		http.Error(w, "WebSocket deadline control unavailable", http.StatusInternalServerError)
+		return
+	}
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true, // origin verified by allowOrigin BEFORE upgrading
 		CompressionMode:    websocket.CompressionDisabled,

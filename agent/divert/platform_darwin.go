@@ -325,7 +325,7 @@ func (i *darwinInterceptor) handleTCP(conn *net.UnixConn, open darwinOpenFlow) e
 	if err != nil {
 		return err
 	}
-	if i.server.fakeIPEnabled() && destination.Port() == 53 {
+	if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()) && destination.Port() == 53 {
 		if err := writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionProxy, Reason: "fakeip-dns"}); err != nil {
 			return err
 		}
@@ -368,8 +368,8 @@ func (i *darwinInterceptor) handleUDP(conn *net.UnixConn, open darwinOpenFlow) e
 		if err != nil {
 			return err
 		}
-		if i.server.fakeIPEnabled() && destination.Port() == 53 {
-			answer := i.server.replyFakeDNS(i.ctx, datagram)
+		if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()) && destination.Port() == 53 {
+			answer := i.server.interceptedDNSReply(i.ctx, datagram, true)
 			if answer != nil {
 				if err := respond(i.ctx, FlowKey{Protocol: ProtoUDP, Destination: destination}, answer); err != nil {
 					return err

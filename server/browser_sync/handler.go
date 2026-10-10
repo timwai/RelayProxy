@@ -233,12 +233,16 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			payload = map[string]any{"type": "PONG"}
 		case "LIST_PEERS":
 			peers, err := h.Store.PeerList(ctx, device.ID)
-			if err != nil { payload = ruleError(msg.RequestID) } else {
+			if err != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
 				payload = map[string]any{"type": "PEERS", "requestId": msg.RequestID, "peers": peers}
 			}
 		case "LIST_RULES":
 			rules, err := h.Store.ListRules(ctx, device.ID)
-			if err != nil { payload = ruleError(msg.RequestID) } else {
+			if err != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
 				payload = map[string]any{"type": "RULES", "requestId": msg.RequestID, "rules": rules}
 			}
 		case "RULE_OFFER":

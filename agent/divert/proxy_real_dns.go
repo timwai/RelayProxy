@@ -13,6 +13,10 @@ func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool
 		return s.replyFakeDNS(ctx, query)
 	}
 	if !s.proxyDNSEnabled() {
+		// Preserve the legacy isolated FakeIP responder test contract.
+		if s.opts.FakeIPEnabled == nil && s.opts.ProxyDNSEnabled == nil {
+			return s.replyFakeDNS(ctx, query)
+		}
 		return nil
 	}
 	// Relay authentication must bootstrap without relying on its own proxy.

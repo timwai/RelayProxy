@@ -21,11 +21,11 @@ func validEnvelope(now time.Time) Envelope {
 		Encryption: EncryptionHeader{
 			Suite: SessionCipherSuite, KeyID: "key_b1",
 			Salt: base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
-			IV: base64.RawURLEncoding.EncodeToString(make([]byte, 12)),
-			Enc: base64.RawURLEncoding.EncodeToString([]byte("enc")),
+			IV:   base64.RawURLEncoding.EncodeToString(make([]byte, 12)),
+			Enc:  base64.RawURLEncoding.EncodeToString([]byte("enc")),
 		},
-		Ciphertext: base64.StdEncoding.EncodeToString([]byte("encrypted payload")),
-		Signature:  base64.StdEncoding.EncodeToString(make([]byte, 64)),
+		Ciphertext: base64.RawURLEncoding.EncodeToString([]byte("encrypted payload")),
+		Signature:  base64.RawURLEncoding.EncodeToString(make([]byte, 64)),
 	}
 }
 

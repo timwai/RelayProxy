@@ -175,3 +175,67 @@ test('logout refuses deleting a Cookie modified by the receiver after sync',asyn
   await assert.rejects(applyCookies('logout-protected',
     {...removed,removedNames:['session','unexpected']},policy));
 });
+
+test('partial multi-Cookie writes roll back without changing the existing account',async()=>{
+  const target=createProfile();use(target);
+  const policy2={siteOrigin:'https://example.com',cookieNames:['csrf','session']};
+  const snapshot={siteOrigin:policy2.siteOrigin,cookieNames:policy2.cookieNames,
+    cookies:[
+      {name:'csrf',value:'new-csrf-value',secure:true,httpOnly:false,sameSite:'lax'},
+      {name:'session',value:'new-session-value',secure:true,httpOnly:true,sameSite:'lax'},
+    ],removedNames:[]};
+  const originals=[
+    {name:'csrf',value:'old-csrf',secure:true,httpOnly:false,sameSite:'lax',hostOnly:true,domain:'example.com',path:'/'},
+    {name:'session',value:'old-session',secure:true,httpOnly:true,sameSite:'lax',hostOnly:true,domain:'example.com',path:'/'}
+  ];
+  for(const c of originals)target.jar.set(c.name,c);
+  const set=target.chrome.cookies.set.bind(target.chrome.cookies);
+  let attempts=0;
+  target.chrome.cookies.set=async details=>{
+    if(++attempts===2)throw new Error('injected cookie API failure');
+    return set(details);
+  };
+  await assert.rejects(applyCookies('atomic-rollback',snapshot,policy2,{allowOverwrite:true}),/APPLY_FAILED/);
+  assert.equal(target.jar.get('csrf').value,'old-csrf');
+  assert.equal(target.jar.get('session').value,'old-session');
+  // HMAC ownership markers must not be committed for incomplete snapshots.
+  const record=await target.chrome.storage.local.get('browserSyncManagedCookieHmacV1');
+  assert.equal(record.browserSyncManagedCookieHmacV1?.['atomic-rollback'],undefined);
+});
+
+test('partial failure deletes newly added Cookie rather than leaving a mixed login',async()=>{
+  const target=createProfile();use(target);
+  const policy2={siteOrigin:'https://example.com',cookieNames:['csrf','session']};
+  const snapshot={siteOrigin:policy2.siteOrigin,cookieNames:policy2.cookieNames,
+    cookies:[
+      {name:'csrf',value:'brand-new-csrf',secure:true,httpOnly:false,sameSite:'lax'},
+      {name:'session',value:'new-session',secure:true,httpOnly:true,sameSite:'lax'}
+    ],removedNames:[]};
+  const set=target.chrome.cookies.set.bind(target.chrome.cookies);
+  target.chrome.cookies.set=async details=>{
+    if(details.name==='session')throw new Error('injected failure');
+    return set(details);
+  };
+  await assert.rejects(applyCookies('new-cookie-rollback',snapshot,policy2),/APPLY_FAILED/);
+  assert.equal(target.jar.size,0);
+});
+
+test('incomplete rollback reports manual intervention rather than claiming success',async()=>{
+  const target=createProfile();use(target);
+  const policy2={siteOrigin:'https://example.com',cookieNames:['csrf','session']};
+  const snapshot={siteOrigin:policy2.siteOrigin,cookieNames:policy2.cookieNames,
+    cookies:[
+      {name:'csrf',value:'changed-csrf',secure:true,httpOnly:false,sameSite:'lax'},
+      {name:'session',value:'changed-session',secure:true,httpOnly:true,sameSite:'lax'}
+    ],removedNames:[]};
+  const set=target.chrome.cookies.set.bind(target.chrome.cookies);
+  target.chrome.cookies.set=async details=>{
+    if(details.name==='session'){
+      target.jar.get('csrf').value='modified-by-website';
+      throw new Error('injected failure and external update');
+    }
+    return set(details);
+  };
+  await assert.rejects(applyCookies('concurrent-update',snapshot,policy2),/PARTIAL_ROLLBACK/);
+  assert.equal(target.jar.get('csrf').value,'modified-by-website');
+});

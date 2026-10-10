@@ -1155,10 +1155,18 @@ func (s *Session) watchLocalCandidates() {
 }
 
 func (s *Session) watchLocalCandidatesWithRetry(retry time.Duration) {
-	if s == nil || s.endpoint == nil || s.manager == nil {
+	if s == nil || s.manager == nil {
 		return
 	}
-	changes := s.endpoint.CandidateChanges()
+	// failDirect and closeLocal may clear the endpoint at any time. Capture
+	// its reference under the session lock before listening for updates.
+	s.mu.RLock()
+	endpoint := s.endpoint
+	s.mu.RUnlock()
+	if endpoint == nil {
+		return
+	}
+	changes := endpoint.CandidateChanges()
 	if retry <= 0 {
 		retry = 15 * time.Second
 	}

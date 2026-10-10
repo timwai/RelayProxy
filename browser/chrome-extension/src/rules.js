@@ -14,7 +14,7 @@ export function parseServerOrigin(raw) {
 export function parseSiteOrigin(raw) {
   const url = new URL(raw);
   if (url.protocol !== 'https:' || url.username || url.password ||
-      url.search || url.hash) {
+      url.search || url.hash || url.pathname !== '/') {
     throw new Error('Only HTTPS website origins are supported');
   }
   return url.origin;
@@ -32,4 +32,24 @@ export async function updateSettings(patch) {
   const next = { ...await getSettings(), ...patch };
   await chrome.storage.local.set({ [SETTINGS_KEY]: next });
   return next;
+}
+
+const TRUSTED_KEY = 'browserSyncTrustedPeers';
+
+export async function getTrustedPeer(id) {
+  const state = (await chrome.storage.local.get(TRUSTED_KEY))[TRUSTED_KEY] || {};
+  return state[id] || null;
+}
+export async function pinPeer(peer) {
+  const state = (await chrome.storage.local.get(TRUSTED_KEY))[TRUSTED_KEY] || {};
+  const existing = state[peer.id];
+  const pinned = { id: peer.id, signingPublicKey: peer.signingPublicKey,
+    encryptionPublicKey: peer.encryptionPublicKey };
+  if (existing && (existing.signingPublicKey !== pinned.signingPublicKey ||
+    existing.encryptionPublicKey !== pinned.encryptionPublicKey)) {
+    throw new Error('设备公钥发生变化，需要撤销配对并重新验证');
+  }
+  state[peer.id] = pinned;
+  await chrome.storage.local.set({ [TRUSTED_KEY]: state });
+  return pinned;
 }

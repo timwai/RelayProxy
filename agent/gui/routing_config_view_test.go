@@ -19,7 +19,7 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 			FakeIPEnabled: true, BlockDoHEndpoints: true, ForwardOtherDNS: true,
 			DNSExitID: "custom:resolver", DoHBlockedIPs: []string{"1.1.1.1", "9.9.9.9"},
 			DefaultAction: routing.ActionProxy,
-			Rules: []routing.Rule{{Name: "Use Proxy", Action: routing.ActionProxy, Enabled: true}},
+			Rules:         []routing.Rule{{Name: "Use Proxy", Action: routing.ActionProxy, Enabled: true}},
 		},
 		{
 			Mode: routing.ModeGlobalProxy, DNSMode: routing.DNSModeProxy, AutoDetectDNS: true,

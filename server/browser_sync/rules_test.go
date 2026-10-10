@@ -115,24 +115,28 @@ func TestRuleNoCrossIdentityOrDuplicate(t *testing.T) {
 }
 
 func TestRuleQuotaCountsIncomingAndReleasesRevoked(t *testing.T) {
-  store := testBrowserStore(t)
-  source := "browser_" + uuid.NewString()
-  target := "browser_" + uuid.NewString()
-  registerBrowserForRules(t, store, source, true, false)
-  registerBrowserForRules(t, store, target, false, true)
-  var first string
-  for i:=0; i<maxBrowserRulesPerDevice; i++ {
-    id := uuid.NewString()
-    if i==0 { first=id }
-    if err:=store.OfferRule(context.Background(),source,encryptedTestOffer(id,target)); err!=nil {
-      t.Fatalf("rule %d rejected early: %v",i,err)
-    }
-  }
-  if err:=store.OfferRule(context.Background(),source,encryptedTestOffer(uuid.NewString(),target)); !errors.Is(err,ErrRuleDenied) {
-    t.Fatalf("over quota offer accepted: %v",err)
-  }
-  if err:=store.RevokeRule(context.Background(),target,first); err!=nil { t.Fatal(err) }
-  if err:=store.OfferRule(context.Background(),source,encryptedTestOffer(uuid.NewString(),target)); err!=nil {
-    t.Fatalf("revoked slot not freed: %v",err)
-  }
+	store := testBrowserStore(t)
+	source := "browser_" + uuid.NewString()
+	target := "browser_" + uuid.NewString()
+	registerBrowserForRules(t, store, source, true, false)
+	registerBrowserForRules(t, store, target, false, true)
+	var first string
+	for i := 0; i < maxBrowserRulesPerDevice; i++ {
+		id := uuid.NewString()
+		if i == 0 {
+			first = id
+		}
+		if err := store.OfferRule(context.Background(), source, encryptedTestOffer(id, target)); err != nil {
+			t.Fatalf("rule %d rejected early: %v", i, err)
+		}
+	}
+	if err := store.OfferRule(context.Background(), source, encryptedTestOffer(uuid.NewString(), target)); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("over quota offer accepted: %v", err)
+	}
+	if err := store.RevokeRule(context.Background(), target, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.OfferRule(context.Background(), source, encryptedTestOffer(uuid.NewString(), target)); err != nil {
+		t.Fatalf("revoked slot not freed: %v", err)
+	}
 }

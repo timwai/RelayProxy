@@ -56,7 +56,9 @@ func (s *Store) RecordDelivery(ctx context.Context, messageID, ruleID, sourceID,
 	}
 	expiry := now.Add(deliveryRetention).Unix()
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_deliveries WHERE expires_at<=?`, now.Unix()); err != nil {
 		return err
@@ -67,15 +69,21 @@ func (s *Store) RecordDelivery(ctx context.Context, messageID, ruleID, sourceID,
 	}
 	var pendingRule, pendingSource int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_deliveries
-		WHERE rule_id=? AND expires_at>?`, ruleID, now.Unix()).Scan(&pendingRule); err != nil { return err }
+		WHERE rule_id=? AND expires_at>?`, ruleID, now.Unix()).Scan(&pendingRule); err != nil {
+		return err
+	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_deliveries
-		WHERE source_id=? AND expires_at>?`, sourceID, now.Unix()).Scan(&pendingSource); err != nil { return err }
+		WHERE source_id=? AND expires_at>?`, sourceID, now.Unix()).Scan(&pendingSource); err != nil {
+		return err
+	}
 	if pendingRule >= maxPendingDeliveriesPerRule || pendingSource >= maxPendingDeliveriesPerSource {
 		return ErrRuleDenied
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_deliveries(
 		message_id,rule_id,source_id,target_id,expires_at
-	) VALUES(?,?,?,?,?)`, messageID, ruleID, sourceID, targetID, expiry); err != nil { return err }
+	) VALUES(?,?,?,?,?)`, messageID, ruleID, sourceID, targetID, expiry); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

@@ -101,7 +101,7 @@
 | 2026-10-10 | [PR #194 · `2050d08e`](https://github.com/timwai/RelayProxy/pull/194) | 按代码、开发说明、Go/UI/Android 基准成功 CI 核对。覆盖 E2EE、双端配对、Cookie 同步、登出、ACK、防重放、序号及故障恢复；无真实 Chrome E2E/外部安全验收记录 | P0-02/03/04 标为已实现待验收；P0-05/06 为部分完成；P0-01/07 未开始；P1 为部分完成/未开始；P2 尚未开始 | 建立发布准入、测试矩阵和进度更新规范 |
 | 2026-10-10 | [PR #194 · 文档/CI `28f6fd59`](https://github.com/timwai/RelayProxy/commit/28f6fd59d3e9b9a8b78dcdc1d0a4c5f32bfa21c2) | 建立本持续进度表，设计文档和扩展 README 均链接本表；UI CI 增加 Git 历史检查，要求 Browser Sync 源码变更后在同 PR 更新本表 | P0/P1/P2 各项状态 **保持不变**，未新增真机或独立安全验收 | 维护机制已提交；该文档/CI 改动对应的检查仍需以实际运行结果为准 |
 
+| 2026-10-10 | [PR #194 · 配额提交 `20cbcd1`](https://github.com/timwai/RelayProxy/commit/20cbcd1a906f39eefb08ae52250cf63c8d711d55) | 新增设备/规则双窗口限流、直接 IP 握手及重连限频、SQLite 规则/待确认投递容量；增加并发、上限及配额释放单测。[Go CI #38063453648](https://github.com/timwai/RelayProxy/actions/runs/38063453648) **失败：gofmt 格式检查**，本次格式修复后须以新 SHA 重跑 | P0-06 仍为**部分完成**；其余 P0/P1/P2 状态不变；正式 Chrome、安全及压力验收仍缺 | 已修复已知格式阻塞，待新提交 CI 核对 |
+
 后续的记录格式：**日期 ｜ 实际代码 SHA/PR ｜ 本次变动及测试链接 ｜ 哪些 ID 状态改变或未改变 ｜ 新风险/遗留项**。保留历史记录，不覆盖旧条目。  
 检查入口：[PR #194](https://github.com/timwai/RelayProxy/pull/194) · [Go CI](https://github.com/timwai/RelayProxy/actions/workflows/go-ci.yml) · [UI CI](https://github.com/timwai/RelayProxy/actions/workflows/ui-ci.yml)。
-
-| 2026-10-10 | [PR #194 · P0-06 配额增强（本次提交）](https://github.com/timwai/RelayProxy/pull/194) | 对 Browser Sync 已认证帧建立设备/规则双窗口限流，未认证握手与重复重连限频；SQLite 规则及待确认收据容量上限；增加并发/上限/释放单测。**对应提交 CI 尚待核实，不沿用旧成功记录。** | P0-06 **仍为部分完成**，因为缺按身份/跨实例配额及真机压力与安全验收；其他 P0/P1/P2 项状态不变 | 同步维护，待实际 GitHub CI 出结果补充链接 |

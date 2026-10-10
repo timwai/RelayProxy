@@ -166,20 +166,24 @@ func TestDeliveryStatusDeniedAfterRuleRevocation(t *testing.T) {
 }
 
 func TestPendingDeliveryQuotaReleasesAfterAcknowledgement(t *testing.T) {
-  store := testBrowserStore(t)
-  source, target, ruleID := approvedDeliveryRule(t,store)
-  ctx, now := context.Background(), time.Now().UTC()
-  ids := make([]string,0,maxPendingDeliveriesPerRule)
-  for i:=0;i<maxPendingDeliveriesPerRule;i++ {
-    id:=uuid.NewString()
-    ids=append(ids,id)
-    if err:=store.RecordDelivery(ctx,id,ruleID,source.ID,target.ID,now);err!=nil { t.Fatal(err) }
-  }
-  if err:=store.RecordDelivery(ctx,uuid.NewString(),ruleID,source.ID,target.ID,now);!errors.Is(err,ErrRuleDenied) {
-    t.Fatalf("overflow receipt accepted: %v",err)
-  }
-  if _,err:=store.ClaimDeliveryReceipt(ctx,target.ID,ruleID,ids[0],"APPLIED",now);err!=nil { t.Fatal(err) }
-  if err:=store.RecordDelivery(ctx,uuid.NewString(),ruleID,source.ID,target.ID,now);err!=nil {
-    t.Fatalf("acknowledged delivery did not release slot: %v",err)
-  }
+	store := testBrowserStore(t)
+	source, target, ruleID := approvedDeliveryRule(t, store)
+	ctx, now := context.Background(), time.Now().UTC()
+	ids := make([]string, 0, maxPendingDeliveriesPerRule)
+	for i := 0; i < maxPendingDeliveriesPerRule; i++ {
+		id := uuid.NewString()
+		ids = append(ids, id)
+		if err := store.RecordDelivery(ctx, id, ruleID, source.ID, target.ID, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.RecordDelivery(ctx, uuid.NewString(), ruleID, source.ID, target.ID, now); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("overflow receipt accepted: %v", err)
+	}
+	if _, err := store.ClaimDeliveryReceipt(ctx, target.ID, ruleID, ids[0], "APPLIED", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordDelivery(ctx, uuid.NewString(), ruleID, source.ID, target.ID, now); err != nil {
+		t.Fatalf("acknowledged delivery did not release slot: %v", err)
+	}
 }

@@ -1,0 +1,103 @@
+package browsersync
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"time"
+
+	"github.com/coder/websocket"
+	protocol "relayproxy/internal/browser_sync"
+)
+
+type browserConnection struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (c *browserConnection) send(ctx context.Context, message any) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	timeout, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	return c.conn.Write(timeout, websocket.MessageText, mustJSON(message))
+}
+
+func (h *Handler) attach(id string, c *browserConnection) {
+	h.clientMu.Lock()
+	old := h.clients[id]
+	h.clients[id] = c
+	h.clientMu.Unlock()
+	if old != nil && old != c {
+		_ = old.conn.Close(websocket.StatusPolicyViolation, "browser reconnected")
+	}
+}
+func (h *Handler) detach(id string, c *browserConnection) {
+	h.clientMu.Lock()
+	if h.clients[id] == c {
+		delete(h.clients, id)
+	}
+	h.clientMu.Unlock()
+}
+func (h *Handler) destination(id string) *browserConnection {
+	h.clientMu.RLock()
+	defer h.clientMu.RUnlock()
+	return h.clients[id]
+}
+
+func (h *Handler) relaySnapshot(ctx context.Context, senderID string, e *protocol.Envelope) error {
+	if e == nil {
+		return errors.New("missing encrypted snapshot")
+	}
+	if err := h.Store.ValidateSignedSession(ctx, senderID, *e, time.Now().UTC()); err != nil {
+		return err
+	}
+	target := h.destination(e.TargetBrowserDeviceID)
+	if target == nil {
+		return errors.New("recipient browser offline")
+	}
+	if err := h.Store.AdvanceSessionSequence(ctx, e.RuleID, e.Sequence); err != nil {
+		return err
+	}
+	return target.send(ctx, map[string]any{"type": "SESSION_SNAPSHOT", "envelope": e})
+}
+
+func (h *Handler) requestSnapshot(ctx context.Context, receiverID, ruleID string) error {
+	receiver, err := h.Store.deviceAllowed(ctx, receiverID)
+	if err != nil || !receiver.Receive {
+		return ErrRuleDenied
+	}
+	rule, err := h.Store.ActiveRule(ctx, ruleID)
+	if err != nil || !rule.Active || !rule.SourceApproved || !rule.TargetApproved ||
+		!rule.KeyFingerprintsVerified || rule.TargetBrowserDeviceID != receiverID {
+		return ErrRuleDenied
+	}
+	source, err := h.Store.deviceAllowed(ctx, rule.SourceBrowserDeviceID)
+	if err != nil || !source.Send || source.IdentityID != receiver.IdentityID {
+		return ErrRuleDenied
+	}
+	target := h.destination(source.ID)
+	if target == nil {
+		return errors.New("source browser offline")
+	}
+	return target.send(ctx, map[string]any{"type": "SYNC_REQUEST", "ruleId": ruleID})
+}
+
+func (h *Handler) relayAcknowledgement(ctx context.Context, receiverID, ruleID, messageID, status string) error {
+	switch status {
+	case "RECEIVED", "APPLIED", "FAILED", "CONFLICT":
+	default:
+		return ErrRuleDenied
+	}
+	sourceID, err := h.Store.VerifyReceipt(ctx, receiverID, ruleID, messageID)
+	if err != nil {
+		return err
+	}
+	source := h.destination(sourceID)
+	if source == nil {
+		return errors.New("source browser offline")
+	}
+	// No arbitrary client-provided reason: prevents secret leakage in ACKs.
+	return source.send(ctx, map[string]any{"type": "SYNC_ACK", "ruleId": ruleID,
+		"messageId": messageID, "status": status})
+}

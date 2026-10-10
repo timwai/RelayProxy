@@ -24,31 +24,57 @@ func (d *RoutingDialer) ResolveProxyTarget(ctx context.Context, host string) (st
 	if ip, err := netip.ParseAddr(strings.Trim(host, "[]")); err == nil {
 		return ip.Unmap().String(), nil
 	}
-	mode := DNSModeProxy
+	cfg := Config{DNSMode: DNSModeProxy}
 	if d.engine != nil {
-		mode = d.engine.Config().DNSMode
+		cfg = d.engine.Config()
 	}
-	if mode == "" || mode == DNSModeProxy {
+	if cfg.AutoDetectDNS {
+		// Explicit opt-in: this first sends DNS requests to the system's
+		// resolver, which may expose hostnames to the local network. If it
+		// fails, send the hostname to the proxy instead. Never fall back
+		// after cancellation, nor when strict FakeIP policy is active.
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		if err != nil {
+			return host, nil
+		}
+		if target := firstResolvedIP(ips); target != "" {
+			return target, nil
+		}
 		return host, nil
 	}
-	if mode != DNSModeLocal {
-		return "", fmt.Errorf("routing: unsupported DNS mode %q", mode)
+	if cfg.DNSMode == "" || cfg.DNSMode == DNSModeProxy {
+		return host, nil
+	}
+	if cfg.DNSMode != DNSModeLocal {
+		return "", fmt.Errorf("routing: unsupported DNS mode %q", cfg.DNSMode)
 	}
 	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
 		return "", fmt.Errorf("local DNS for %q failed: %w", host, err)
 	}
-	// A DNS resolution failure must never cause an implicit switch back to
-	// proxy-side name resolution (which would change configured behavior).
+	// Manual local DNS must not silently fall back to the proxy.
+	if target := firstResolvedIP(ips); target != "" {
+		return target, nil
+	}
+	return "", fmt.Errorf("local DNS for %q returned no IP addresses", host)
+}
+
+
+// Prefer IPv4 for the system resolver path, preserving the existing
+// local-resolution policy and leaving the DNS choice deterministic.
+func firstResolvedIP(ips []netip.Addr) string {
 	for _, ip := range ips {
 		if ip.IsValid() && ip.Is4() {
-			return ip.Unmap().String(), nil
+			return ip.Unmap().String()
 		}
 	}
 	for _, ip := range ips {
 		if ip.IsValid() {
-			return ip.Unmap().String(), nil
+			return ip.Unmap().String()
 		}
 	}
-	return "", fmt.Errorf("local DNS for %q returned no IP addresses", host)
+	return ""
 }

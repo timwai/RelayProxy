@@ -15,7 +15,7 @@ const rule = selector => {
 
 test('page header buttons never wrap while the title can shrink', () => {
   assert.match(app, /function PageHead\([^)]*\)[^{]*\{return <div className="page-head">/);
-  assert.match(app, /title="分流规则"[\s\S]*?actions=\{<>\s*<Button[^>]*>DNS 设置/);
+  assert.match(app, /<PageHead title="分流规则"[^\n]*DNS 设置 ›[^\n]*＋ 新建规则/);
   assert.match(app, /<Button primary onClick=\{\(\)=>edit\(-1\)\}>＋ 新建规则<\/Button>/);
   assert.match(rule('.page-head>div:first-child'), /min-width:\s*0/);
   assert.match(rule('.page-head>.actions'), /flex-wrap:\s*nowrap/);

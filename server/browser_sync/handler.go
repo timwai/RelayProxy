@@ -23,8 +23,8 @@ type Handler struct {
 	mu         sync.Mutex
 	attempts   map[string]attempt
 	slots      chan struct{}
-	clientMu sync.RWMutex
-	clients  map[string]*browserConnection
+	clientMu   sync.RWMutex
+	clients    map[string]*browserConnection
 }
 type attempt struct {
 	window time.Time
@@ -309,13 +309,13 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 }
 
 type ruleControlFrame struct {
-	Type      string          `json:"type"`
-	RequestID string          `json:"requestId"`
-	RuleID    string          `json:"ruleId"`
-	Offer     *EncryptedOffer `json:"offer"`
+	Type      string             `json:"type"`
+	RequestID string             `json:"requestId"`
+	RuleID    string             `json:"ruleId"`
+	Offer     *EncryptedOffer    `json:"offer"`
 	Envelope  *protocol.Envelope `json:"envelope"`
-	MessageID string `json:"messageId"`
-	Status    string `json:"status"`
+	MessageID string             `json:"messageId"`
+	Status    string             `json:"status"`
 }
 
 func ruleError(requestID string) map[string]any {

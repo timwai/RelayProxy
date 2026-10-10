@@ -17,7 +17,9 @@ func TestIndependentDNSModesAndLegacyAssociationDefault(t *testing.T) {
 		t.Fatal("conflicting synthetic and real DNS/53 capture was accepted")
 	}
 	engine, err := NewEngine(Config{DNSMode: DNSModeProxy, ProxyDNSEnabled: true})
-	if err != nil {t.Fatal(err)}
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !engine.DNSAssociationEnabled() || !engine.ProxyDNSEnabled() || engine.FakeIPEnabled() {
 		t.Fatal("legacy DNS association default or independent real-IP mode lost")
 	}
@@ -39,4 +41,4 @@ func TestDNSAssociationPointerIsCloned(t *testing.T) {
 	}
 }
 
-func boolPtr(v bool) *bool {return &v}
+func boolPtr(v bool) *bool { return &v }

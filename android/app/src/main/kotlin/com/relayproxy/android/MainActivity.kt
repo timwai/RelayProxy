@@ -1764,8 +1764,28 @@ class MainActivity : Activity() {
             }
             metaRow.addView(actionChip)
 
-            val spacer = View(this)
-            metaRow.addView(spacer, LinearLayout.LayoutParams(0, 1, 1f))
+            if (rule.exitId.isNotBlank()) {
+                val exitName = ExitDisplayNames.label(rule.exitId, exitNames)
+                metaRow.addView(TextView(this).apply {
+                    text = "出口：$exitName"
+                    textSize = 11.5f
+                    setTextColor(UiPalette.brand)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    contentDescription = "出口：$exitName，点击查看完整名称"
+                    isClickable = true
+                    setOnClickListener {
+                        UiKit.alertDialog(this@MainActivity, "规则出口", exitName)
+                            .setPositiveButton("知道了", null)
+                            .show()
+                    }
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    leftMargin = dp(9)
+                    rightMargin = dp(8)
+                })
+            } else {
+                metaRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+            }
 
             val editHint = TextView(this).apply {
                 text = "编辑详情 ›"
@@ -1775,19 +1795,6 @@ class MainActivity : Activity() {
             }
             metaRow.addView(editHint)
             card.addView(metaRow)
-            if (rule.exitId.isNotBlank()) {
-                // Keep the full device name on its own row. A name next to
-                // the action and Edit button overflows narrow Android screens.
-                card.addView(TextView(this).apply {
-                    text = "出口：${ExitDisplayNames.label(rule.exitId, exitNames)}"
-                    textSize = 12f
-                    setTextColor(UiPalette.brand)
-                    setPadding(dp(10), dp(8), dp(10), dp(8))
-                    background = UiKit.rounded(this@MainActivity, UiPalette.brandSoft, 8)
-                }, LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                ).apply { topMargin = dp(10) })
-            }
 
             // 行 3: 匹配条件详情块 (内衬独立呼吸背景，分行呈现)
             val details = LinearLayout(this).apply {

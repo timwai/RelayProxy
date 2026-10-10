@@ -697,6 +697,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 
 	if in.Routing != nil {
+		if in.Routing.AutoDetectDNS != nil {
+			cfg.Routing.AutoDetectDNS = *in.Routing.AutoDetectDNS
+		}
 		if in.Routing.FakeIPEnabled != nil {
 			cfg.Routing.FakeIPEnabled = *in.Routing.FakeIPEnabled
 		}

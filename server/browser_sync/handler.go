@@ -208,16 +208,17 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "not authorized")
 		return
 	}
-	if err := conn.Write(proofCtx, websocket.MessageText, mustJSON(map[string]any{
-		"type": "AUTH_OK", "deviceId": device.ID, "send": device.Send, "receive": device.Receive,
-		"sessionTransferEnabled": true,
-	})); err != nil {
-		return
-	}
-
+	// The browser must be discoverable as an online recipient by the time it
+	// receives AUTH_OK, otherwise a peer can immediately race the registration.
 	client := &browserConnection{conn: conn}
 	h.attach(device.ID, client)
 	defer h.detach(device.ID, client)
+	if err := client.send(proofCtx, map[string]any{
+		"type": "AUTH_OK", "deviceId": device.ID, "send": device.Send, "receive": device.Receive,
+		"sessionTransferEnabled": true,
+	}); err != nil {
+		return
+	}
 	// All session envelopes are E2EE and signed. No Cookie plaintext reaches Server.
 	for {
 		loopCtx, done := context.WithTimeout(ctx, 55*time.Second)

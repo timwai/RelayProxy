@@ -112,7 +112,12 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
         updated.name!==c.name||updated.value!==c.value||
         cookieDomain(updated)!==host) throw new Error('Chrome 拒绝恢复 Cookie：'+c.name);
     }
-    nextManaged[c.name]=await cookieValueTag(ruleId,c.name,c.value);
+    // Existing identical Cookies were not necessarily installed by this
+    // rule. Do not adopt ownership silently: later logout must leave them.
+    if(!old||old.value!==c.value)
+      nextManaged[c.name]=await cookieValueTag(ruleId,c.name,c.value);
+    else if(managed[c.name]!==await cookieValueTag(ruleId,c.name,old.value))
+      delete nextManaged[c.name];
   }
   for(const {name,old} of removals){
     if(old){

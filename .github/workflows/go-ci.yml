@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - "perf/**"
+      - "feat/hysteria-brutal-issue-198"
       - "fix/**"
       - "feature/wails-react-complete-ui"
   pull_request:

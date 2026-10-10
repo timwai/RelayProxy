@@ -77,6 +77,9 @@ func (b *BrutalSender) CanSend(bytesInFlight congestion.ByteCount) bool {
 }
 
 func (b *BrutalSender) GetCongestionWindow() congestion.ByteCount {
+	if b.rttStats == nil {
+		return 10240 // RTT provider may not yet be installed after a controller swap.
+	}
 	rtt := b.rttStats.SmoothedRTT()
 	if rtt <= 0 {
 		return 10240

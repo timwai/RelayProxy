@@ -509,3 +509,39 @@ func TestPublicDirectNegotiatesDirectionalBrutal(t *testing.T) {
 		t.Fatalf("exit Public Direct congestion = %+v", exitDiag)
 	}
 }
+
+// A legacy ticket authenticator must not treat authenticated but unapproved
+// performance hints as authorization to bypass the default BBR controller.
+func TestPublicDirectLegacyAuthenticatorIgnoresBrutalHints(t *testing.T) {
+	ticket := []byte("legacy-brutal-test-ticket")
+	listener := newTestListener(t, ticket)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	accepted := make(chan *direct.AcceptedSession, 1)
+	failure := make(chan error, 1)
+	go func() {
+		item, err := listener.Accept(ctx)
+		if err != nil { failure <- err; return }
+		accepted <- item
+	}()
+	config := testDialConfig(listener, ticket)
+	config.BrutalUploadBPS = 12_500_000
+	config.BrutalDownloadBPS = 25_000_000
+	clientSession, err := direct.Dial(ctx, config)
+	if err != nil { t.Fatal(err) }
+	defer clientSession.Close()
+	var serverSession *direct.AcceptedSession
+	select {
+	case serverSession = <-accepted:
+	case err := <-failure: t.Fatal(err)
+	case <-ctx.Done(): t.Fatal(ctx.Err())
+	}
+	defer serverSession.Tunnel.Close()
+	for _, item := range []tunnel.TunnelSession{clientSession, serverSession.Tunnel} {
+		diagnostics := tunnel.DiagnoseSession(item)
+		if diagnostics == nil || diagnostics.QUIC == nil { t.Fatal("missing QUIC diagnostics") }
+		if diagnostics.QUIC.CongestionController == "brutal" || diagnostics.QUIC.CongestionTargetBPS != 0 {
+			t.Fatalf("legacy authenticator activated Brutal: %+v", diagnostics.QUIC)
+		}
+	}
+}

@@ -252,8 +252,9 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 			return nil, false, fmt.Errorf("%w: invalid authentication request", ErrUnauthorized)
 		}
 		var relayPolicy *acl.Policy
-		uploadBPS := quiccongestion.CapRequestedRate(request.BrutalUploadBPS, 0)
-		downloadBPS := quiccongestion.CapRequestedRate(request.BrutalDownloadBPS, 0)
+		// Legacy authenticators can validate a ticket but cannot authorize a
+		// per-direction target. Keep those sessions on BBR regardless of hints.
+		var uploadBPS, downloadBPS uint64
 		if authenticator, ok := l.authenticator.(AuthorizationAuthenticator); ok {
 			authorization, err := authenticator.AuthenticateAuthorization(authCtx, request)
 			if err != nil {
@@ -261,8 +262,8 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 				return nil, false, fmt.Errorf("%w: ticket rejected", ErrUnauthorized)
 			}
 			relayPolicy = authorization.RelayPolicy
-			uploadBPS = quiccongestion.AuthorizeRequestedRate(uploadBPS, authorization.BrutalUploadBPS)
-			downloadBPS = quiccongestion.AuthorizeRequestedRate(downloadBPS, authorization.BrutalDownloadBPS)
+			uploadBPS = quiccongestion.AuthorizeRequestedRate(request.BrutalUploadBPS, authorization.BrutalUploadBPS)
+			downloadBPS = quiccongestion.AuthorizeRequestedRate(request.BrutalDownloadBPS, authorization.BrutalDownloadBPS)
 		} else if authenticator, ok := l.authenticator.(PolicyAuthenticator); ok {
 			policy, err := authenticator.AuthenticatePolicy(authCtx, request)
 			if err != nil {

@@ -38,3 +38,13 @@ func TestBrutalLossCompensation(t *testing.T) {
 		})
 	}
 }
+
+func TestBrutalBeforeRTTStatsInstalled(t *testing.T) {
+	b := NewBrutalSender(1_000_000, false)
+	if got := b.GetCongestionWindow(); got < congestion.InitialPacketSize {
+		t.Fatalf("initial congestion window %d is smaller than packet size", got)
+	}
+	if !b.CanSend(0) {
+		t.Fatal("sender cannot send its initial flight")
+	}
+}

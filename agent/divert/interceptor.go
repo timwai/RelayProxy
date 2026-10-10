@@ -781,9 +781,12 @@ func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) err
 	// Register outgoing DNS questions before forwarding the query: a fast
 	// resolver can answer while injection/acceptance is still in progress.
 	// DNS associations only become trusted after a matching answer is observed.
-	if meta.outbound && packet.Protocol == ProtoUDP {
-		if i.server.dnsAssociationEnabled() {
+	if meta.outbound && i.server.dnsAssociationEnabled() {
+		switch packet.Protocol {
+		case ProtoUDP:
 			i.dns.query(packet.Source, packet.Destination, packet.Payload)
+		case ProtoTCP:
+			i.dns.queryTCP(packet.Source, packet.Destination, packet.Payload)
 		}
 	}
 	if accepter, ok := i.device.(packetAccepter); ok {

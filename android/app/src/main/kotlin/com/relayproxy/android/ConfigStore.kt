@@ -93,6 +93,7 @@ data class RoutingSubscriptionConfig(
     val enabled: Boolean = true,
     val action: String = "PROXY",
     val exitId: String = "",
+    val fetchViaProxy: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name.trim())
@@ -100,6 +101,7 @@ data class RoutingSubscriptionConfig(
         .put("enabled", enabled)
         .put("action", action)
         .put("exit_id", exitId.trim())
+        .put("fetch_via_proxy", fetchViaProxy)
 
     companion object {
         fun fromJson(json: JSONObject): RoutingSubscriptionConfig = RoutingSubscriptionConfig(
@@ -108,6 +110,7 @@ data class RoutingSubscriptionConfig(
             enabled = json.optBoolean("enabled", true),
             action = json.optString("action", "PROXY"),
             exitId = json.optString("exit_id"),
+            fetchViaProxy = json.optBoolean("fetch_via_proxy", false),
         )
     }
 }

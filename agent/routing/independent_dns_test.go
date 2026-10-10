@@ -5,13 +5,18 @@ import "testing"
 func TestIndependentDNSModesAndLegacyAssociationDefault(t *testing.T) {
 	for _, cfg := range []Config{
 		{DNSMode: DNSModeProxy, ProxyDNSEnabled: true},
-		{DNSMode: DNSModeLocal, ProxyDNSEnabled: true},
 		{DNSMode: DNSModeProxy, FakeIPEnabled: true},
 		{DNSMode: DNSModeProxy, DNSAssociationEnabled: boolPtr(false)},
 	} {
 		if err := ValidateConfig(cfg); err != nil {
 			t.Fatalf("valid independent DNS configuration rejected: %+v, %v", cfg, err)
 		}
+	}
+	if err := ValidateConfig(Config{DNSMode: DNSModeLocal, ProxyDNSEnabled: true}); err == nil {
+		t.Fatal("proxy DNS accepted local re-resolution mode")
+	}
+	if err := ValidateConfig(Config{DNSMode: DNSModeProxy, AutoDetectDNS: true, ProxyDNSEnabled: true}); err == nil {
+		t.Fatal("proxy DNS accepted automatic local-first mode")
 	}
 	if err := ValidateConfig(Config{DNSMode: DNSModeProxy, ProxyDNSEnabled: true, FakeIPEnabled: true}); err == nil {
 		t.Fatal("conflicting synthetic and real DNS/53 capture was accepted")

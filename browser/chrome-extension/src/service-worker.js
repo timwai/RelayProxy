@@ -12,7 +12,7 @@ async function initialize() {
   // Remove legacy unsalted SHA-256 Cookie fingerprints on extension startup.
   await chrome.storage.local.remove('browserSyncManagedCookieHashes');
   await chrome.alarms.create('browser-sync-reconcile', { periodInMinutes: 1 });
-  restoreActiveSubscriptions().catch(() => {});
+  restoreActiveSubscriptions({force:true}).catch(() => {});
 }
 
 chrome.runtime.onInstalled.addListener(() => { initialize().catch(console.error); });

@@ -293,7 +293,7 @@ class SettingsActivity : Activity() {
         addSectionHeader(
             vpn,
             "VPN 范围与 DNS",
-            "应用范围只决定哪些流量进入 VPN；代理、直连或拒绝仍由分流规则决定。DNS 使用 Mapped DNS 并交给所选出口解析。",
+            "应用范围只决定哪些流量进入 VPN；代理、直连或拒绝由分流规则决定。DNS 在 VPN 内自动处理，无需额外开关。",
         )
         vpnAppMode = Spinner(this).apply {
             adapter = UiKit.themedSpinnerAdapter(this@SettingsActivity, vpnAppModeLabels)
@@ -321,7 +321,7 @@ class SettingsActivity : Activity() {
         )
         vpn.addView(
             TextView(this).apply {
-                text = "Mapped DNS 已启用\n系统 DNS 查询会在 VPN 内转换为域名，再由所选出口解析。"
+                text = "DNS 自动处理（Mapped DNS）\nVPN 内可接管的系统 DNS 查询由当前出口解析，无需手动组合 DNS 开关。\n应用私有 DoH/DoT 与 VPN 范围外的解析不由此状态保证。"
                 textSize = 12.5f
                 setTextColor(ink)
                 setPadding(dp(12), dp(12), dp(12), dp(12))

@@ -164,9 +164,9 @@ function renderRules(rules) {
               const pattern = website.protocol + '//' + website.hostname + '/*';
               const granted = await chrome.permissions.request({ origins: [pattern] });
               if (!granted) { status('未授权目标站点。'); return; }
-              await ask({ type: 'ACCEPT_RULE', ruleId: rule.id, confirmed: true });
+              await ask({ type: 'ACCEPT_RULE', ruleId: rule.id, confirmed: true, pairingCode: rule.code });
             } else {
-              await ask({ type: 'CONFIRM_RULE', ruleId: rule.id, confirmed: true });
+              await ask({ type: 'CONFIRM_RULE', ruleId: rule.id, confirmed: true, pairingCode: rule.code });
             }
             status('配对授权已更新；目前仍未启用 Cookie 会话传输。');
             await refreshPairing();

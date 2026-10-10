@@ -188,6 +188,15 @@ function renderRules(rules) {
       });
       card.append(sync);
       if (rule.role === 'target') {
+        const open = document.createElement('button');
+        open.textContent = '同步成功后打开网站';
+        open.addEventListener('click',async()=>{
+          try{
+            await ask({type:'SYNC_THEN_OPEN',ruleId:rule.id});
+            status('已请求同步，只有 Cookie 成功应用后才会打开网站。');
+          }catch(error){failure(error);}
+        });
+        card.append(open);
         const label = document.createElement('label');
         const checked = document.createElement('input');
         checked.type = 'checkbox';

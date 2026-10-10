@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"errors"
 	"math"
@@ -86,22 +85,3 @@ func (s *Store) EnsureSessionSchema(ctx context.Context) error {
 	return err
 }
 
-func (s *Store) VerifyReceipt(ctx context.Context, receiverID, ruleID, messageID string) (string, error) {
-	if messageID == "" || len(messageID) > 80 {
-		return "", ErrRuleDenied
-	}
-	d, err := s.deviceAllowed(ctx, receiverID)
-	if err != nil || !d.Receive {
-		return "", ErrRuleDenied
-	}
-	rule, err := s.ActiveRule(ctx, ruleID)
-	if err != nil || !rule.Active || !rule.TargetApproved || rule.TargetBrowserDeviceID != receiverID {
-		return "", ErrRuleDenied
-	}
-	var sourceState string
-	err = s.db.QueryRowContext(ctx, `SELECT state FROM browser_sync_devices WHERE id=?`, rule.SourceBrowserDeviceID).Scan(&sourceState)
-	if errors.Is(err, sql.ErrNoRows) || err != nil || sourceState != "approved" {
-		return "", ErrRuleDenied
-	}
-	return rule.SourceBrowserDeviceID, nil
-}

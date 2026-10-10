@@ -10,6 +10,7 @@ import { captureCookies, applyCookies } from './cookies.js';
 
 const sourceBusy = new Set();
 const cookieTimers = new Map();
+const incomingQueue = new Map();
 const LAST_SEQUENCE = 'browserSyncOutgoingSequence';
 const LAST_APPLIED = 'browserSyncLastAppliedSequence';
 const ALLOW_OVERRIDE = 'browserSyncAllowOverwrite';
@@ -143,8 +144,22 @@ async function handleIncomingSnapshot(envelope) {
   }catch{ /* peer may be offline; session values are still never logged */ }
 }
 
+// WebSocket callbacks are asynchronous. Serialize per-rule restores so a
+// slower older message cannot finish after and overwrite a newer snapshot.
+function enqueueIncoming(envelope) {
+  const ruleId=envelope?.ruleId;
+  if(typeof ruleId!=='string'||ruleId.length>128)return Promise.resolve();
+  const previous=incomingQueue.get(ruleId)||Promise.resolve();
+  const next=previous.catch(()=>{}).then(()=>handleIncomingSnapshot(envelope));
+  incomingQueue.set(ruleId,next);
+  next.finally(()=>{
+    if(incomingQueue.get(ruleId)===next)incomingQueue.delete(ruleId);
+  }).catch(()=>{});
+  return next;
+}
+
 onServerPush(async message => {
-  if(message.type==='SESSION_SNAPSHOT')return handleIncomingSnapshot(message.envelope);
+  if(message.type==='SESSION_SNAPSHOT')return enqueueIncoming(message.envelope);
   if(message.type==='SYNC_REQUEST'&&typeof message.ruleId==='string'){
     try{await sendSnapshot(message.ruleId);}catch{ /* offline or Cookie scope incompatible */ }
   }

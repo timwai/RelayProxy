@@ -199,6 +199,14 @@ func TestWebDNSSettingsSurviveSaveAndSubsequentRoutingSave(t *testing.T) {
 			if _, err := b.SaveConfig(next); err != nil {
 				t.Fatal(err)
 			}
+			// A routing-page-only patch must not touch any DNS setting.
+			var routingOnly bridge.ConfigUpdate
+			if err := json.Unmarshal([]byte(`{"routing":{"mode":"rule","default_action":"PROXY","rules":[]}}`), &routingOnly); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.SaveConfig(routingOnly); err != nil {
+				t.Fatal(err)
+			}
 			var second struct {
 				Routing json.RawMessage `json:"routing"`
 			}

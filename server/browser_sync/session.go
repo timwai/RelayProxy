@@ -84,4 +84,3 @@ func (s *Store) EnsureSessionSchema(ctx context.Context) error {
 	)`)
 	return err
 }
-

@@ -1,6 +1,9 @@
 
 # RelayProxy Browser Session Sync — 无 Agent 设计与开发方案
 
+> **设计基线文档，不代表当前实施进度。** 现有实现、P0 上线门槛、P1 正式版功能、P2 后续增强及逐次 CI/验收记录，请以 [Browser Sync 持续更新进度清单](./browser-session-sync-progress.md) 为准。以下早期“待实现/拟新增”字段保留为历史设计提案，具体已实现接口以当前代码为准。
+
+
 > 版本：v1.1（2026-10-10）  
 > 仓库：timwai/RelayProxy；目标文档分支：main  
 > 预计实现分支：feat/browser-session-sync  

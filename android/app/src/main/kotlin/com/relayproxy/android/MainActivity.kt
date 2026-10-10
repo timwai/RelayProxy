@@ -1620,6 +1620,8 @@ class MainActivity : Activity() {
         if (!::vpnScopeSpinner.isInitialized || !::rulesListContainer.isInitialized) return
         val store = ConfigStore(this)
         val config = store.load()
+        val exitStatus = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val exitNames = ExitDisplayNames.fromStatus(exitStatus, store.customExitNames())
 
         val scopeValues = listOf(
             ExitConfig.VPN_APP_MODE_ALL,
@@ -1744,7 +1746,7 @@ class MainActivity : Activity() {
             metaRow.addView(actionChip)
 
             if (rule.exitId.isNotBlank()) {
-                val exitChip = UiKit.chip(this, "出口: ${rule.exitId.take(12)}", UiPalette.brand, UiPalette.brandSoft, radiusDp = 6).apply {
+                val exitChip = UiKit.chip(this, "出口: ${ExitDisplayNames.label(rule.exitId, exitNames)}", UiPalette.brand, UiPalette.brandSoft, radiusDp = 6).apply {
                     val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                         leftMargin = dp(8)
                     }

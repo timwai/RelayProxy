@@ -51,6 +51,8 @@ test('real-IP proxy DNS is independent of DNS association but exclusive with Fak
    fake_ip_enabled:true,block_doh_endpoints:true,forward_other_dns:true};
  const enabled=setRealProxyDNS(old,true);
  assert.equal(enabled.proxy_dns_enabled,true);
+ assert.equal(setAutoDNS(enabled,true).proxy_dns_enabled,false);
+ assert.equal(setProxyDNS(enabled,false).proxy_dns_enabled,false);
  assert.equal(enabled.fake_ip_enabled,false);
  assert.equal(enabled.block_doh_endpoints,false);
  assert.equal(enabled.forward_other_dns,false);

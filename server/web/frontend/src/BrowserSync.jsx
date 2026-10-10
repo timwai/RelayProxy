@@ -13,8 +13,10 @@ export function BrowserSyncAdmin({identities=[]}){
   const [identity,setIdentity]=useState({});
   const [capabilities,setCapabilities]=useState({});
   const [filter,setFilter]=useState('');
-  const activeIdentities=useMemo(()=>list(identities).filter(x=>
-    x.status==='active'||x.state==='active'||!x.status),[identities]);
+  const activeIdentities=useMemo(()=>list(identities).filter(x=>{
+    const state=x.status??x.state;
+    return !state||state==='active';
+  }),[identities]);
   const refresh=useCallback(async()=>{
     setError('');setLoading(true);
     try{

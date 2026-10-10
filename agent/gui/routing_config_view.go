@@ -20,15 +20,15 @@ func routingConfigView(cfg routing.Config) map[string]any {
 		dnsMode = routing.DNSModeProxy
 	}
 	return map[string]any{
-		"mode":               cfg.Mode,
-		"dns_mode":           dnsMode,
-		"auto_detect_dns":    cfg.AutoDetectDNS,
-		"fake_ip_enabled":    cfg.FakeIPEnabled,
+		"mode":                cfg.Mode,
+		"dns_mode":            dnsMode,
+		"auto_detect_dns":     cfg.AutoDetectDNS,
+		"fake_ip_enabled":     cfg.FakeIPEnabled,
 		"block_doh_endpoints": cfg.BlockDoHEndpoints,
-		"forward_other_dns":  cfg.ForwardOtherDNS,
-		"dns_exit_id":        cfg.DNSExitID,
-		"doh_blocked_ips":    blockedIPs,
-		"default_action":     cfg.DefaultAction,
-		"rules":              rules,
+		"forward_other_dns":   cfg.ForwardOtherDNS,
+		"dns_exit_id":         cfg.DNSExitID,
+		"doh_blocked_ips":     blockedIPs,
+		"default_action":      cfg.DefaultAction,
+		"rules":               rules,
 	}
 }

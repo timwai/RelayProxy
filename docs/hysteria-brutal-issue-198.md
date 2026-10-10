@@ -40,6 +40,27 @@ For each trial capture useful-payload throughput (goodput), configured and obser
 
 **Release blockers:** hardware evidence above; mixed old/new Agent/Server pairings with QUIC and TLS; review of fairness under congestion. Do not silently enable non-zero rates and do not create/merge a mainline PR while these are unchecked.
 
+## Reproducible Hysteria2 A/B sampler (operator-run)
+
+The script `scripts/bench_brutal_acceptance.py` samples download or upload goodput through **three separately running SOCKS5/HTTP endpoints**, writes raw CSV, shuffles variant order every round, validates a known download hash when supplied, and preserves transfer errors as failed records. It **does not inject packet loss, measure actual QUIC RTT, sample CPU, or prove fairness**.
+
+For each controlled 0%, 1%, and 5% packet loss condition, apply impairment **outside** the script on the same physical bottleneck; then run (replace example endpoints and a controlled static 64+ MiB file):
+
+```sh
+python3 scripts/bench_brutal_acceptance.py \
+  --variant bbr=socks5h://127.0.0.1:1080 \
+  --variant brutal=socks5h://127.0.0.1:1081 \
+  --variant hysteria2=socks5h://127.0.0.1:1082 \
+  --url https://test-origin.example/64MiB.bin \
+  --expected-sha256 YOUR_KNOWN_FIXTURE_SHA256 \
+  --scenario site-a-udp-rtt50ms --loss-label 1 \
+  --runs 5 --direction download --output out/issue198.csv
+```
+
+For upload, use `--direction upload --upload-file /path/to/static.bin` and a separate server that accepts HTTP PUT; verify the uploaded hash at the destination. Run the matrix in both directions. A CSV row labeled "5%" does not prove that network loss was configured. Check actual packet counters (`tc -s qdisc`) and archive packet captures if available.
+
+Collect idle and loaded p50/p95 RTT, transport QUIC loss counters, competitor BBR-flow goodput and CPU/RSS separately; curl's connect/first-byte times are **not** QUIC RTT or fairness. Keep old/new binary interoperability as a separate manual gate. Without a real network testbed and deployed Hysteria2 reference instance, this script provides tooling, **not** passing acceptance evidence.
+
 ## Reproduction
 
 ```sh

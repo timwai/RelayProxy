@@ -27,6 +27,16 @@ func (s *Store) EnsureDeliverySchema(ctx context.Context) error {
 	}
 	_, err = s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_browser_sync_delivery_expiry
 		ON browser_sync_deliveries(expires_at)`)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS browser_sync_delivery_results (
+		message_id TEXT PRIMARY KEY,
+		rule_id TEXT NOT NULL,
+		source_id TEXT NOT NULL,
+		status TEXT NOT NULL CHECK(status IN ('APPLIED','FAILED','CONFLICT')),
+		expires_at INTEGER NOT NULL
+	)`)
 	return err
 }
 
@@ -45,6 +55,10 @@ func (s *Store) RecordDelivery(ctx context.Context, messageID, ruleID, sourceID,
 	expiry := now.Add(deliveryRetention).Unix()
 	_, err := s.db.ExecContext(ctx, `DELETE FROM browser_sync_deliveries WHERE expires_at<=?`, now.Unix())
 	if err != nil {
+		return err
+	}
+	// Keep terminal results only for a short recovery window.
+	if _, err = s.db.ExecContext(ctx, `DELETE FROM browser_sync_delivery_results WHERE expires_at<=?`, now.Unix()); err != nil {
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO browser_sync_deliveries(
@@ -83,27 +97,32 @@ func (s *Store) ClaimDeliveryReceipt(ctx context.Context, receiverID, ruleID, me
 		return "", ErrRuleDenied
 	}
 
-	// Single-row conditional mutation is atomic in SQLite, preventing two
-	// concurrent ACKs from both claiming the same delivery.
-	var result sql.Result
+	// The receipt and its terminal result must commit atomically. If A is
+	// temporarily offline, its signed session can still query this outcome.
 	if status == "RECEIVED" {
-		result, err = s.db.ExecContext(ctx, `UPDATE browser_sync_deliveries SET received=1
+		result, err := s.db.ExecContext(ctx, `UPDATE browser_sync_deliveries SET received=1
 			WHERE message_id=? AND rule_id=? AND source_id=? AND target_id=?
 			AND expires_at>? AND received=0`,
 			messageID, ruleID, source.ID, receiverID, now.Unix())
-	} else {
-		result, err = s.db.ExecContext(ctx, `DELETE FROM browser_sync_deliveries
-			WHERE message_id=? AND rule_id=? AND source_id=? AND target_id=?
-			AND expires_at>?`,
-			messageID, ruleID, source.ID, receiverID, now.Unix())
+		if err != nil { return "", err }
+		count, err := result.RowsAffected()
+		if err != nil || count != 1 { return "", ErrRuleDenied }
+		return source.ID, nil
 	}
-	if err != nil {
-		return "", err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil || rows != 1 {
-		return "", ErrRuleDenied
-	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil { return "", err }
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_deliveries
+		WHERE message_id=? AND rule_id=? AND source_id=? AND target_id=?
+		AND expires_at>?`, messageID, ruleID, source.ID, receiverID, now.Unix())
+	if err != nil { return "", err }
+	count, err := result.RowsAffected()
+	if err != nil || count != 1 { return "", ErrRuleDenied }
+	_, err = tx.ExecContext(ctx, `INSERT INTO browser_sync_delivery_results
+		(message_id,rule_id,source_id,status,expires_at) VALUES(?,?,?,?,?)`,
+		messageID, ruleID, source.ID, status, now.Add(deliveryRetention).Unix())
+	if err != nil { return "", err }
+	if err = tx.Commit(); err != nil { return "", err }
 	return source.ID, nil
 }
 
@@ -115,4 +134,26 @@ func (s *Store) ActiveDeliveryCount(ctx context.Context, ruleID string) (int, er
 		return 0, nil
 	}
 	return count, err
+}
+
+// DeliveryStatus is readable only by the approved source for this exact
+// active rule; a caller cannot enumerate other devices' acknowledgements.
+// UNKNOWN intentionally does not imply "Cookie not applied".
+func (s *Store) DeliveryStatus(ctx context.Context, sourceID, ruleID, messageID string, now time.Time) (string, error) {
+	if _, err := uuid.Parse(messageID); err != nil { return "", ErrRuleDenied }
+	if _, err := s.SessionCursor(ctx, sourceID, ruleID); err != nil { return "", ErrRuleDenied }
+	var status string
+	err := s.db.QueryRowContext(ctx, `SELECT status FROM browser_sync_delivery_results
+		WHERE message_id=? AND rule_id=? AND source_id=? AND expires_at>?`,
+		messageID, ruleID, sourceID, now.Unix()).Scan(&status)
+	if err == nil { return status, nil }
+	if !errors.Is(err, sql.ErrNoRows) { return "", err }
+	var received int
+	err = s.db.QueryRowContext(ctx, `SELECT received FROM browser_sync_deliveries
+		WHERE message_id=? AND rule_id=? AND source_id=? AND expires_at>?`,
+		messageID, ruleID, sourceID, now.Unix()).Scan(&received)
+	if errors.Is(err, sql.ErrNoRows) { return "UNKNOWN", nil }
+	if err != nil { return "", err }
+	if received == 1 { return "RECEIVED", nil }
+	return "PENDING", nil
 }

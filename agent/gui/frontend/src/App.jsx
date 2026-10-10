@@ -283,7 +283,13 @@ function RuleEditor({value,exits,onChange}){
 function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
  exits=[...exits,...arr(config.customExits).map(x=>({id:x.id,name:x.name,online:x.enabled}))];
  const r=config.routing||EMPTY.routing,[editing,setEditing]=useState(null),rules=arr(r.rules);
- const subs=arr(r.subscriptions),[editingSub,setEditingSub]=useState(null);
+ const subs=arr(r.subscriptions),[editingSub,setEditingSub]=useState(null),[subscriptionStatus,setSubscriptionStatus]=useState([]);
+ useEffect(()=>{
+  let mounted=true;
+  const refresh=async()=>{if(!hasBridge('goGetRoutingSubscriptions'))return;try{const statuses=arr(await callJSON('goGetRoutingSubscriptions',[]));if(mounted)setSubscriptionStatus(statuses)}catch{}};
+  void refresh();const timer=setInterval(refresh,5000);
+  return()=>{mounted=false;clearInterval(timer)};
+ },[]);
  const commitSub=x=>setv('routing.subscriptions',x);
  const editSub=i=>setEditingSub({index:i,sub:JSON.parse(JSON.stringify(i>=0?subs[i]:{name:'GFWList',url:'https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt',enabled:true,action:'PROXY',exit_id:''}))});
  const saveSub=()=>{
@@ -313,7 +319,8 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
  <Card title="规则订阅" eyebrow={subs.length+' SUBSCRIPTIONS'} action={<Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button>}>
   <div className="mini">支持 GFWList（Base64 / Adblock 主机规则）、域名和 IP/CIDR 文本列表。按上到下顺序匹配：手动规则优先 → 订阅 → 默认动作。仅在规则模式生效，每 6 小时自动更新；下载失败继续使用本地已缓存的最后成功版本。URL 路径、正则和 Adblock 修饰符不会被扩大为整个域名匹配。</div>
   {subs.map((sub,i)=><div className="setting" key={sub.url+'-'+i}>
-   <div className="grow" style={{minWidth:0}}><b>{sub.name||'未命名订阅'}</b><div className="mini" style={{overflowWrap:'anywhere'}}>{sub.url}</div><div className="mini">{sub.action||'PROXY'}{sub.exit_id?' · '+exitName(exits,sub.exit_id):' · 跟随默认出口'}</div></div>
+   <div className="grow" style={{minWidth:0}}><b>{sub.name||'未命名订阅'}</b><div className="mini" style={{overflowWrap:'anywhere'}}>{sub.url}</div><div className="mini">{sub.action||'PROXY'}{sub.exit_id?' · '+exitName(exits,sub.exit_id):' · 跟随默认出口'}</div>
+   {(()=>{const current=subscriptionStatus.find(x=>x.url===sub.url);if(!current||!sub.enabled)return null;return <div className="mini">{current.rules?('已加载 '+current.rules+' 条规则'):'等待首次下载'}{current.updated_at&&new Date(current.updated_at).getFullYear()>2000?' · 更新于 '+fmtTime(current.updated_at):''}{current.skipped?' · 跳过 '+current.skipped+' 条不支持的规则':''}{current.error&&<span style={{color:'var(--danger, #b91c1c)'}}> · 更新失败：{current.error}</span>}</div>})()}</div>
    <Switch checked={!!sub.enabled} label={(sub.enabled?'停用':'启用')+sub.name} onChange={on=>commitSub(subs.map((x,j)=>i===j?{...x,enabled:on}:x))}/>
    <div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>{const next=[...subs];[next[i-1],next[i]]=[next[i],next[i-1]];commitSub(next)}}>↑</Button><Button quiet disabled={i===subs.length-1} onClick={()=>{const next=[...subs];[next[i],next[i+1]]=[next[i+1],next[i]];commitSub(next)}}>↓</Button><Button quiet onClick={()=>editSub(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除此规则订阅？')&&commitSub(subs.filter((_,j)=>j!==i))}>删除</Button></div>
   </div>)}

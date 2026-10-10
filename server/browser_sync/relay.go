@@ -59,7 +59,15 @@ func (h *Handler) relaySnapshot(ctx context.Context, senderID string, e *protoco
 	if err := h.Store.AdvanceSessionSequence(ctx, e.RuleID, e.Sequence); err != nil {
 		return err
 	}
-	return target.send(ctx, map[string]any{"type": "SESSION_SNAPSHOT", "envelope": e})
+	if err := h.Store.RecordDelivery(ctx, e.MessageID, e.RuleID,
+		e.SourceBrowserDeviceID, e.TargetBrowserDeviceID, time.Now().UTC()); err != nil {
+		return err
+	}
+	if err := target.send(ctx, map[string]any{"type": "SESSION_SNAPSHOT", "envelope": e}); err != nil {
+		h.Store.DiscardDelivery(ctx, e.MessageID)
+		return err
+	}
+	return nil
 }
 
 func (h *Handler) requestSnapshot(ctx context.Context, receiverID, ruleID string) error {
@@ -89,7 +97,7 @@ func (h *Handler) relayAcknowledgement(ctx context.Context, receiverID, ruleID, 
 	default:
 		return ErrRuleDenied
 	}
-	sourceID, err := h.Store.VerifyReceipt(ctx, receiverID, ruleID, messageID)
+	sourceID, err := h.Store.ClaimDeliveryReceipt(ctx, receiverID, ruleID, messageID, status, time.Now().UTC())
 	if err != nil {
 		return err
 	}

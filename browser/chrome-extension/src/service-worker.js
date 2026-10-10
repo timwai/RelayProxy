@@ -5,10 +5,12 @@ import { getSettings, updateSettings, parseServerOrigin } from './rules.js';
 import { registerBrowser, connectBrowser, currentConnectionState, disconnect, sendControl } from './server-api.js';
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
-import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission, syncThenOpen } from './session-sync.js';
+import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission, syncThenOpen, forgetRuleLocalState } from './session-sync.js';
 
 async function initialize() {
   await getOrCreateIdentity();
+  // Remove legacy unsalted SHA-256 Cookie fingerprints on extension startup.
+  await chrome.storage.local.remove('browserSyncManagedCookieHashes');
   await chrome.alarms.create('browser-sync-reconcile', { periodInMinutes: 1 });
   restoreActiveSubscriptions().catch(() => {});
 }
@@ -171,6 +173,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'REVOKE_RULE':
         await sendControl('RULE_REVOKE', { ruleId: message.ruleId });
+        await forgetRuleLocalState(message.ruleId);
         return { ok: true };
       case 'SEND_SESSION':
         return { ok: true, ...(await sendSnapshot(message.ruleId)) };

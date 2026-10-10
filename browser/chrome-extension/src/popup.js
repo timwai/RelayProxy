@@ -137,6 +137,11 @@ function renderRules(rules) {
     const desc = rule.role === 'source' ? '来源 A' : '接收 B';
     card.append(textNode('strong', desc + ' · ' + rule.status));
     card.append(textNode('p', '对端：' + rule.remoteID));
+    if (rule.lastTransfer && ['RELAYED','APPLIED','FAILED','CONFLICT'].includes(rule.lastTransfer.state)) {
+      const translated = {RELAYED:'密文已转发',APPLIED:'Cookie 已应用（网站登录未验证）',
+        FAILED:'同步失败',CONFLICT:'目标已有不同登录状态'};
+      card.append(textNode('p', '最近同步：' + translated[rule.lastTransfer.state]));
+    }
     if (!rule.valid) {
       card.append(textNode('p', rule.error || '尚未找到经核验的设备密钥，无法授权。', 'error'));
     } else {

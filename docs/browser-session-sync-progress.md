@@ -2,7 +2,7 @@
 
 > **持续维护的进度文档（Living Tracker）**  
 > 首次核对：**2026-10-10** ｜ 跟踪分支：`feat/browser-session-sync` ｜ [Draft PR #194](https://github.com/timwai/RelayProxy/pull/194)  
-> 本次代码核对基准：[`2050d08e`](https://github.com/timwai/RelayProxy/commit/2050d08e912a8defbbd4cd767dd101d8f4118b98)  
+> 首次代码核对基准：[`2050d08e`](https://github.com/timwai/RelayProxy/commit/2050d08e912a8defbbd4cd767dd101d8f4118b98)  
 > 基准自动化结果：[Go CI](https://github.com/timwai/RelayProxy/actions/runs/38062048992)、[UI CI](https://github.com/timwai/RelayProxy/actions/runs/38062049049)、[Android Client](https://github.com/timwai/RelayProxy/actions/runs/38062049009) —— 三项均为 **success**。  
 > **发布状态：开发预览 / 不可视为生产就绪；Browser Sync 服务端默认关闭；PR 尚未合并 main。**
 >
@@ -100,8 +100,9 @@
 |---|---|---|---|---|
 | 2026-10-10 | [PR #194 · `2050d08e`](https://github.com/timwai/RelayProxy/pull/194) | 按代码、开发说明、Go/UI/Android 基准成功 CI 核对。覆盖 E2EE、双端配对、Cookie 同步、登出、ACK、防重放、序号及故障恢复；无真实 Chrome E2E/外部安全验收记录 | P0-02/03/04 标为已实现待验收；P0-05/06 为部分完成；P0-01/07 未开始；P1 为部分完成/未开始；P2 尚未开始 | 建立发布准入、测试矩阵和进度更新规范 |
 | 2026-10-10 | [PR #194 · 文档/CI `28f6fd59`](https://github.com/timwai/RelayProxy/commit/28f6fd59d3e9b9a8b78dcdc1d0a4c5f32bfa21c2) | 建立本持续进度表，设计文档和扩展 README 均链接本表；UI CI 增加 Git 历史检查，要求 Browser Sync 源码变更后在同 PR 更新本表 | P0/P1/P2 各项状态 **保持不变**，未新增真机或独立安全验收 | 维护机制已提交；该文档/CI 改动对应的检查仍需以实际运行结果为准 |
-
 | 2026-10-10 | [PR #194 · 配额提交 `20cbcd1`](https://github.com/timwai/RelayProxy/commit/20cbcd1a906f39eefb08ae52250cf63c8d711d55) | 新增设备/规则双窗口限流、直接 IP 握手及重连限频、SQLite 规则/待确认投递容量；增加并发、上限及配额释放单测。[Go CI #38063453648](https://github.com/timwai/RelayProxy/actions/runs/38063453648) **失败：gofmt 格式检查**，本次格式修复后须以新 SHA 重跑 | P0-06 仍为**部分完成**；其余 P0/P1/P2 状态不变；正式 Chrome、安全及压力验收仍缺 | 已修复已知格式阻塞，待新提交 CI 核对 |
+
+| 2026-10-10 | [格式修复 `5bf4dac`](https://github.com/timwai/RelayProxy/commit/5bf4dac8f8901b9f141587da8d34f8ddd4bec7f3) | [Go CI #38063641237](https://github.com/timwai/RelayProxy/actions/runs/38063641237) **success**（gofmt、tidy、vet、完整 go test、race、benchmark smoke）；[UI CI #38063641210](https://github.com/timwai/RelayProxy/actions/runs/38063641210) 主测试及 Windows 桌面作业 success，macOS 桌面作业**检查时仍在运行**；[Android #38063641208](https://github.com/timwai/RelayProxy/actions/runs/38063641208) **检查时仍在运行**。本条记录绑定该 SHA，不代表后续文档提交 CI 已通过 | P0-06 状态仍为**部分完成**；P0 真机验收与独立安全审查缺失，继续不放行 | 格式阻塞已解除，核心自动化通过；跨平台总结果需后续复核 |
 
 后续的记录格式：**日期 ｜ 实际代码 SHA/PR ｜ 本次变动及测试链接 ｜ 哪些 ID 状态改变或未改变 ｜ 新风险/遗留项**。保留历史记录，不覆盖旧条目。  
 检查入口：[PR #194](https://github.com/timwai/RelayProxy/pull/194) · [Go CI](https://github.com/timwai/RelayProxy/actions/workflows/go-ci.yml) · [UI CI](https://github.com/timwai/RelayProxy/actions/workflows/ui-ci.yml)。

@@ -398,6 +398,15 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 			return errors.New("UDP interception queue is full; datagram dropped")
 		}
 	case ActionReject:
+		// In observational (real-IP) DNS mode, a default-block routing
+		// policy must not accidentally blackhole the resolver needed to
+		// populate IP-to-domain associations. Explicit DNS REJECT rules
+		// are still enforced, and strict FakeIP / proxy DNS modes are
+		// intercepted before reaching this branch.
+		if localDNSDefaultRejectPassthrough(packet, route.Decision(), fakeMode, realMode, i.server.dnsAssociationEnabled()) {
+			i.direct.Add(1)
+			return i.sendPacket(packet, meta)
+		}
 		i.reject.Add(1)
 		return nil
 	case ActionProxy:
@@ -417,6 +426,15 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	default:
 		return errors.New("invalid interception action")
 	}
+}
+
+// localDNSDefaultRejectPassthrough intentionally applies only to outbound
+// UDP/53 in observational mode. It must never override an explicit DNS rule,
+// nor silently leak a query in a mode which promises proxy interception.
+func localDNSDefaultRejectPassthrough(p ipPacket, decision Decision, fakeMode, proxyDNSMode, associationEnabled bool) bool {
+	return associationEnabled && !fakeMode && !proxyDNSMode &&
+		p.Protocol == ProtoUDP && p.Destination.Port() == 53 &&
+		decision.Action == ActionReject && decision.Rule == "default"
 }
 
 // interceptDNSUDP replies from the original resolver address. Authenticated

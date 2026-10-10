@@ -126,7 +126,7 @@ func fetchSubscription(ctx context.Context, raw string) ([]string, []string, int
 func parseSubscription(payload []byte) ([]string, []string, int, error) {
  raw := strings.TrimSpace(string(payload))
  compact := strings.Join(strings.Fields(raw), "")
- if len(compact) > 32 && !strings.ContainsAny(compact, "!:/.^|*[]#@") {
+ if len(compact) > 32 && strings.IndexFunc(compact, func(r rune) bool { return !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '+' || r == '/' || r == '=') }) < 0 {
   if decoded, err := base64.StdEncoding.DecodeString(compact); err == nil && strings.Contains(string(decoded), "\n") {
    raw = string(decoded)
   } else if decoded, err := base64.RawStdEncoding.DecodeString(compact); err == nil && strings.Contains(string(decoded), "\n") {
@@ -290,7 +290,9 @@ func (e *Engine) SubscriptionStatuses() []SubscriptionStatus {
 func (e *Engine) startSubscriptionUpdates() {
  e.mu.Lock()
  if e.subscriptionCancel != nil { e.subscriptionCancel() }
- if len(e.config.Subscriptions) == 0 { e.subscriptionCancel = nil; e.mu.Unlock(); return }
+ anyEnabled := false
+ for _, item := range e.config.Subscriptions { if item.Enabled { anyEnabled = true; break } }
+ if !anyEnabled { e.subscriptionCancel = nil; e.mu.Unlock(); return }
  ctx, cancel := context.WithCancel(context.Background())
  e.subscriptionCancel = cancel
  e.mu.Unlock()

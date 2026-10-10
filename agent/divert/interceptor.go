@@ -834,7 +834,9 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 // permits domain attribution. The DNS association parser verifies that both
 // the question and its answer match before remembering A/AAAA addresses.
 func (i *packetInterceptor) observeInterceptedDNSTCP(key FlowKey, query, answer []byte) {
-	if !i.server.dnsAssociationEnabled() || !i.server.proxyDNSEnabled() { return }
+	if !i.server.dnsAssociationEnabled() || !i.server.proxyDNSEnabled() {
+		return
+	}
 	i.dns.query(key.Source, key.Destination, query)
 	i.dns.response(key.Destination, key.Source, answer)
 }

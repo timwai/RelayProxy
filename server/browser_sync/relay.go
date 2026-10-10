@@ -107,7 +107,11 @@ func (h *Handler) relayAcknowledgement(ctx context.Context, receiverID, ruleID, 
 		// The receiver must not retry an already consumed terminal ACK.
 		return nil
 	}
+	// The durable receipt was already committed. A closed socket can race
+	// the online-connection map after Chrome suspends its MV3 worker; do not
+	// claim that B's accepted ACK failed merely because pushing to A failed.
 	// No arbitrary client-provided reason: prevents secret leakage in ACKs.
-	return source.send(ctx, map[string]any{"type": "SYNC_ACK", "ruleId": ruleID,
+	_ = source.send(ctx, map[string]any{"type": "SYNC_ACK", "ruleId": ruleID,
 		"messageId": messageID, "status": status})
+	return nil
 }

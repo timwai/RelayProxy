@@ -151,6 +151,73 @@ func TestWebManagementUsesUnifiedPersonalUI(t *testing.T) {
 	}
 }
 
+func TestWebDNSSettingsSurviveSaveAndSubsequentRoutingSave(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dns  string
+	}{
+		{"strict_fakeip", `{"dns_mode":"proxy","auto_detect_dns":false,"fake_ip_enabled":true,"block_doh_endpoints":true,"forward_other_dns":true,"dns_exit_id":"","doh_blocked_ips":["1.1.1.1"]}`},
+		{"automatic", `{"dns_mode":"proxy","auto_detect_dns":true,"fake_ip_enabled":false,"block_doh_endpoints":false,"forward_other_dns":false}`},
+		{"manual_local", `{"dns_mode":"local","auto_detect_dns":false,"fake_ip_enabled":false}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newWebTestBridge(t)
+			var initial bridge.ConfigUpdate
+			if err := json.Unmarshal([]byte(`{"routing":`+tc.dns+`}`), &initial); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.SaveConfig(initial); err != nil {
+				t.Fatal(err)
+			}
+			// This is the same JSON the React app uses for its editable draft.
+			firstJSON := webConfigJSON(b)
+			var first struct {
+				Routing json.RawMessage `json:"routing"`
+			}
+			if err := json.Unmarshal([]byte(firstJSON), &first); err != nil {
+				t.Fatal(err)
+			}
+			var fields map[string]json.RawMessage
+			if err := json.Unmarshal(first.Routing, &fields); err != nil {
+				t.Fatal(err)
+			}
+			var expected map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(tc.dns), &expected); err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range expected {
+				if !bytes.Equal(fields[key], value) {
+					t.Fatalf("GetConfig routing.%s = %s; saved %s", key, fields[key], value)
+				}
+			}
+			// Saving a routing rule after reading DNS preferences must not
+			// reset auto-DNS / FakeIP / DoH / TXT/SRV to false.
+			var next bridge.ConfigUpdate
+			if err := json.Unmarshal([]byte(`{"routing":`+string(first.Routing)+`}`), &next); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := b.SaveConfig(next); err != nil {
+				t.Fatal(err)
+			}
+			var second struct {
+				Routing json.RawMessage `json:"routing"`
+			}
+			if err := json.Unmarshal([]byte(webConfigJSON(b)), &second); err != nil {
+				t.Fatal(err)
+			}
+			var after map[string]json.RawMessage
+			if err := json.Unmarshal(second.Routing, &after); err != nil {
+				t.Fatal(err)
+			}
+			for key, value := range expected {
+				if !bytes.Equal(after[key], value) {
+					t.Fatalf("DNS setting routing.%s lost after subsequent save: %s != %s", key, after[key], value)
+				}
+			}
+		})
+	}
+}
+
 func TestWebStatusIncludesProxyExitInventory(t *testing.T) {
 	_, handler := webTestHandler(newWebTestBridge(t), true)
 	response := httptest.NewRecorder()

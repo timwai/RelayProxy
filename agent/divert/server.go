@@ -47,7 +47,7 @@ type Options struct {
 	Traffic               *traffic.Registry
 	DefaultExitID         func() string
 	FakeIPEnabled         func() bool     // dynamically consulted for new transparent DNS queries
-	ProxyDNSEnabled       func() bool     // real A/AAAA and other DNS via authenticated DoT; not FakeIP
+	ProxyDNSEnabled       func() bool     // real A/AAAA and other DNS via proxy DoH/443 or DoT/853; not FakeIP
 	DNSAssociationEnabled func() bool     // observed DNS->real IP attribution; defaults to enabled
 	BlockDoHEndpoints     func() bool     // opt-in domain-based DoH endpoint guard
 	ForwardOtherDNS       func() bool     // opt-in authenticated DoT via proxy for TXT/SRV

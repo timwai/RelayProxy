@@ -140,6 +140,6 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
     ...rule, offer:{...offer,policyDigest:'f'.repeat(64)}
   },sourcePeer), /签名/);
   assert.rejects(decryptEncryptedOffer({
-    ...rule, offer:{...offer,ciphertext:offer.ciphertext.slice(0,-1)+'A'}
+    ...rule, offer:{...offer,ciphertext:(offer.ciphertext[0] === 'A' ? 'B' : 'A') + offer.ciphertext.slice(1)}
   },sourcePeer));
 });

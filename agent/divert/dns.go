@@ -1,6 +1,7 @@
 package divert
 
 import (
+	"encoding/binary"
 	"net/netip"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ const dnsCapacity = 4096
 type dnsQueryKey struct {
 	client, server netip.AddrPort
 	id             uint16
+	protocol       Protocol
 }
 type dnsQuestion struct {
 	name    string
@@ -25,7 +27,7 @@ type dnsNames struct {
 	ambiguousUntil time.Time
 }
 
-// dnsAssociations is deliberately conservative: only matched, observed UDP DNS
+// dnsAssociations is deliberately conservative: only matched, observed DNS
 // exchanges populate it. Shared IPs with several live names stay unidentified.
 // This is an association, never proof that an application requested that name.
 type dnsAssociations struct {
@@ -44,6 +46,10 @@ func dnsName(name dnsmessage.Name) string {
 }
 
 func (d *dnsAssociations) query(client, server netip.AddrPort, payload []byte) {
+	d.queryProtocol(ProtoUDP, client, server, payload)
+}
+
+func (d *dnsAssociations) queryProtocol(protocol Protocol, client, server netip.AddrPort, payload []byte) {
 	if server.Port() != 53 {
 		return
 	}
@@ -59,7 +65,7 @@ func (d *dnsAssociations) query(client, server netip.AddrPort, payload []byte) {
 	defer d.mu.Unlock()
 	now := d.now()
 	d.prune(now)
-	key := dnsQueryKey{client: client, server: server, id: msg.ID}
+	key := dnsQueryKey{client: client, server: server, id: msg.ID, protocol: protocol}
 	if len(d.pending) >= dnsCapacity {
 		return
 	}
@@ -67,6 +73,10 @@ func (d *dnsAssociations) query(client, server netip.AddrPort, payload []byte) {
 }
 
 func (d *dnsAssociations) response(server, client netip.AddrPort, payload []byte) {
+	d.responseProtocol(ProtoUDP, server, client, payload)
+}
+
+func (d *dnsAssociations) responseProtocol(protocol Protocol, server, client netip.AddrPort, payload []byte) {
 	if server.Port() != 53 {
 		return
 	}
@@ -77,7 +87,7 @@ func (d *dnsAssociations) response(server, client netip.AddrPort, payload []byte
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	now := d.now()
-	key := dnsQueryKey{client: client, server: server, id: msg.ID}
+	key := dnsQueryKey{client: client, server: server, id: msg.ID, protocol: protocol}
 	pending, ok := d.pending[key]
 	q := msg.Questions[0]
 	if !ok || !pending.expires.After(now) || pending.name != dnsName(q.Name) || pending.kind != q.Type || q.Class != dnsmessage.ClassINET {
@@ -127,6 +137,39 @@ func (d *dnsAssociations) response(server, client netip.AddrPort, payload []byte
 		}
 		return
 	}
+}
+
+// DNS over TCP uses a two-byte length prefix (RFC 7766). Only complete,
+// length-bounded frames entirely contained in the current TCP segment are
+// observed. Partial/out-of-order segments deliberately remain unattributed:
+// snooping must never alter, delay or reassemble the live DNS connection.
+func forEachCompleteDNSTCPFrame(payload []byte, observe func([]byte)) {
+	for len(payload) >= 2 {
+		size := int(binary.BigEndian.Uint16(payload[:2]))
+		if size < 12 || size > 8192 || len(payload)-2 < size {
+			return
+		}
+		observe(payload[2 : 2+size])
+		payload = payload[2+size:]
+	}
+}
+
+func (d *dnsAssociations) queryTCP(client, server netip.AddrPort, payload []byte) {
+	if server.Port() != 53 {
+		return
+	}
+	forEachCompleteDNSTCPFrame(payload, func(frame []byte) {
+		d.queryProtocol(ProtoTCP, client, server, frame)
+	})
+}
+
+func (d *dnsAssociations) responseTCP(server, client netip.AddrPort, payload []byte) {
+	if server.Port() != 53 {
+		return
+	}
+	forEachCompleteDNSTCPFrame(payload, func(frame []byte) {
+		d.responseProtocol(ProtoTCP, server, client, frame)
+	})
 }
 
 func (d *dnsAssociations) remember(ip netip.Addr, name string, expires time.Time) {

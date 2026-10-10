@@ -67,9 +67,11 @@ export async function sendSnapshot(ruleId) {
     stored[ruleId]=sequence;
     await chrome.storage.local.set({[LAST_SEQUENCE]:stored});
     const envelope=await encryptSnapshot(ctx.rule,ctx.remote,sequence,payload);
+    // Mark pending first: the receiver may send APPLIED before the relay's
+    // acknowledgement returns, and a late RELAYED must not hide that result.
+    await setStatus(ruleId,'RELAYED');
     const ack=await sendControl('SESSION_SNAPSHOT',{envelope});
     if(ack.status!=='RELAYED')throw new Error('中继没有接受加密快照');
-    await setStatus(ruleId,'RELAYED');
     return {state:'RELAYED',count:payload.cookies.length};
   }catch(error){
     await setStatus(ruleId,'FAILED');

@@ -121,7 +121,7 @@ func TestDNSModeValidationAndMatchedRuleDisplay(t *testing.T) {
 }
 
 func TestAutoDetectDNSResolvesLocallyWhenAvailable(t *testing.T) {
-	engine, err := NewEngine(Config{Mode: ModeGlobalProxy, DNSMode: DNSModeProxy, AutoDetectDNS: true})
+	engine, err := NewEngine(Config{Mode: ModeGlobalProxy, DNSMode: DNSModeLocal, AutoDetectDNS: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +132,39 @@ func TestAutoDetectDNSResolvesLocallyWhenAvailable(t *testing.T) {
 	}
 	if ip, err := netip.ParseAddr(target); err != nil || !ip.IsLoopback() {
 		t.Fatalf("automatic DNS did not use working system resolver: %q", target)
+	}
+}
+
+func TestAutoDetectDNSNeverOverridesExplicitProxyHostnameResolution(t *testing.T) {
+	engine, err := NewEngine(Config{Mode: ModeGlobalProxy, DNSMode: DNSModeProxy, AutoDetectDNS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := NewRoutingDialer(engine, &dnsModeTunnel{})
+	for _, host := range []string{"localhost", "proxy-only.example.invalid"} {
+		target, err := d.ResolveProxyTarget(context.Background(), host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if target != host {
+			t.Fatalf("explicit proxy DNS sent resolved IP instead of original domain: %q -> %q", host, target)
+		}
+	}
+	// The same protection applies to the selected-exit transparent adapter.
+	sentinel := errors.New("expected proxy dial")
+	tunnel := &dnsModeTunnel{err: sentinel}
+	d = NewRoutingDialer(engine, tunnel)
+	_, err = (SelectedExitDialer{Routing: d}).DialTCP(context.Background(), "remote", "localhost", 443)
+	if !errors.Is(err, sentinel) || tunnel.hostTCP != "localhost" {
+		t.Fatalf("transparent TCP path lost proxy hostname: %q, err=%v", tunnel.hostTCP, err)
+	}
+	_, err = (SelectedExitDialer{Routing: d}).DialUDP(context.Background(), "remote", "localhost", 53)
+	if !errors.Is(err, sentinel) || tunnel.hostUDP != "localhost" {
+		t.Fatalf("transparent UDP path lost proxy hostname: %q, err=%v", tunnel.hostUDP, err)
+	}
+	_, err = d.DialUDP(context.Background(), "remote", "localhost", 53)
+	if !errors.Is(err, sentinel) || tunnel.hostUDP != "localhost" {
+		t.Fatalf("local proxy UDP path lost proxy hostname: %q, err=%v", tunnel.hostUDP, err)
 	}
 }
 
@@ -154,5 +187,34 @@ func TestAutoDetectDNSRejectsFakeIPInterception(t *testing.T) {
 	}
 	if err := ValidateConfig(Config{DNSMode: DNSModeLocal, AutoDetectDNS: true}); err != nil {
 		t.Fatalf("auto detection should accept either manual fallback choice: %v", err)
+	}
+}
+
+func TestAutoDNSResolutionFallsBackToProxyOnlyAfterFailedLocalLookup(t *testing.T) {
+	ctx := context.Background()
+	original := "proxy-only.example.invalid"
+	for _, tc := range []struct {
+		name string
+		ips  []netip.Addr
+		err  error
+		want string
+	}{
+		{"resolver_error", nil, errors.New("system DNS unavailable"), original},
+		{"no_records", nil, nil, original},
+		{"invalid_addresses", []netip.Addr{{}}, nil, original},
+		{"success_ipv4", []netip.Addr{netip.MustParseAddr("2001:db8::1"), netip.MustParseAddr("192.0.2.1")}, nil, "192.0.2.1"},
+		{"success_ipv6", []netip.Addr{netip.MustParseAddr("2001:db8::1")}, nil, "2001:db8::1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := autoDNSResolution(ctx, original, tc.ips, tc.err)
+			if err != nil || got != tc.want {
+				t.Fatalf("auto resolver chose %q (%v); want %q", got, err, tc.want)
+			}
+		})
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got, err := autoDNSResolution(canceled, original, nil, errors.New("system DNS unavailable")); !errors.Is(err, context.Canceled) || got != "" {
+		t.Fatalf("canceled DNS leaked hostname to proxy: %q, %v", got, err)
 	}
 }

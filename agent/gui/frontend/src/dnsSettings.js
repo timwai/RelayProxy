@@ -12,7 +12,7 @@ export function setOtherDNSForwarding(r, enabled) {
 }
 export function setAutoDNS(r, enabled) {
   return enabled
-    ? {...r,auto_detect_dns:true,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false}
+    ? {...r,dns_mode:'local',auto_detect_dns:true,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false}
     : {...r,auto_detect_dns:false};
 }
 export function setProxyDNS(r, enabled) {

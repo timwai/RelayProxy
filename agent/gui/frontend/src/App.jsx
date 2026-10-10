@@ -4,6 +4,7 @@ import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavaila
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
 import {enableFakeIP,setDoHBlocking,setOtherDNSForwarding,setAutoDNS,setProxyDNS} from './dnsSettings.js';
+import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 
 const NAV=[
  {group:'概览',items:[['overview','dashboard','运行概览'],['devices','devices','身份与设备']]},
@@ -299,7 +300,7 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
  return <><PageHead title="分流规则" desc="按进程、域名/IP、端口和协议从上到下匹配，第一条命中的规则生效。DNS 解析与防泄漏已归入独立页面。" actions={<><Button onClick={()=>onGoto('dns')}>DNS 设置 ›</Button><Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button></>}/>
  <Card title="全局路由策略" eyebrow="ROUTING MODE"><div className="form-grid"><Field label="路由模式"><Select value={r.mode||'global_proxy'} onChange={e=>setv('routing.mode',e.target.value)}><option value="global_proxy">全局代理</option><option value="rule">规则模式</option><option value="direct">全局直连</option></Select></Field><Field label="规则未命中时"><Select value={r.default_action||'PROXY'} onChange={e=>setv('routing.default_action',e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field></div></Card>
  <Card title="规则列表" eyebrow={rules.length+' RULES'}><div className="rule-table"><div className="rule-row rule-head"><span>#</span><span>规则</span><span>匹配条件</span><span>动作</span><span>启用</span><span>操作</span></div>{rules.map((x,i)=><div className={cx('rule-row',!x.enabled&&'disabled',dragging===i&&'dragging',dropAt&&dropAt.i===i&&dragging!==i&&(dropAt.after?'drop-after':'drop-before'))} key={(x.name||'rule')+'-'+i} {...dragProps(i)}><span className="drag" role="button" tabIndex={-1} aria-label={'拖动调整顺序：'+(x.name||'规则 '+(i+1))} title="拖动调整顺序" onMouseDown={()=>{armed.current=true}}>⋮⋮</span><div><div className="row"><strong>{x.name||'规则 '+(i+1)}</strong></div><div className="mini">优先级 {i+1}</div></div><div className="chips">{arr(x.processes).slice(0,2).map(v=><span className="chip" key={'p'+v}>{v}</span>)}{arr(x.targets).slice(0,2).map(v=><span className="chip" key={'t'+v}>{v}</span>)}{arr(x.ports).slice(0,1).map(v=><span className="chip" key={'o'+v}>{v}</span>)}{!arr(x.processes).length&&!arr(x.targets).length&&!arr(x.ports).length&&<span className="mini">任意流量</span>}</div><div><Badge tone={x.action==='REJECT'?'danger':x.action==='DIRECT'?'blue':'ok'}>{x.action||'PROXY'}</Badge>{x.exit_id&&<div className="mini">{exitName(exits,x.exit_id)}</div>}</div><div><Switch checked={!!x.enabled} label={(x.enabled?'停用':'启用')+' '+(x.name||'规则 '+(i+1))} onChange={v=>toggle(i,v)}/></div><div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>move(i,-1)}>↑</Button><Button quiet disabled={i===rules.length-1} onClick={()=>move(i,1)}>↓</Button><Button quiet onClick={()=>edit(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除这条分流规则？')&&commit(rules.filter((_,n)=>n!==i))}>删除</Button></div></div>)}{!rules.length&&<div className="empty">尚无规则。切换到规则模式前请先添加规则。</div>}</div></Card>
- <SaveBar dirty={dirty} label="保存分流规则" hint="保存全局路由策略与分流规则；DNS 选项请在 DNS 与防泄漏页修改。" onSave={()=>save({routing:r})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
+ <SaveBar dirty={dirty} label="保存分流规则" hint="保存全局路由策略与分流规则；DNS 选项请在 DNS 与防泄漏页修改。" onSave={()=>save({routing:routingPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
  <Modal open={!!editing} title={editing&&editing.index>=0?'编辑分流规则':'新建分流规则'} wide onClose={()=>setEditing(null)} footer={<><Button onClick={()=>setEditing(null)}>取消</Button><Button primary onClick={saveEditor}>保存规则</Button></>}>{editing&&<RuleEditor value={editing.rule} exits={exits} onChange={rule=>setEditing({...editing,rule})}/>}</Modal></>
 }
 
@@ -314,13 +315,17 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const proxy=(value)=>{if(!value&&!confirmDisable())return;change(setProxyDNS(r,value))};
  const automatic=(value)=>{if(value&&!confirmDisable())return;change(setAutoDNS(r,value))};
  const protection=status.dnsProtection||{};
- const capture=status.divertRunning===true;
- const activeFakeIP=capture&&protection.fakeIpEnabled===true;
+ const divertRunning=status.divertRunning===true;
+ const captureMode=protection.capture||'unavailable';
+ const captureObserved=divertRunning&&captureMode!=='unavailable';
+ const strictCapture=captureObserved&&captureMode==='nfqueue-no-bypass';
+ const fakeConfigured=!!r.fake_ip_enabled;
+ const fakeApplied=divertRunning&&protection.fakeIpEnabled===true;
  return <><PageHead title="DNS 与防泄漏" desc="独立管理域名解析位置、自动检测、FakeIP DNS 接管与已知加密 DNS 绕过防护。" actions={<Button onClick={()=>onGoto('routing')}>分流规则 ›</Button>}/>
  <Card title="主机名解析" eyebrow="NAME RESOLUTION">
-  <Setting title="自动检测 DNS 状态" desc="参考 Proxifier 的自动模式：先尝试系统解析，解析失败时改由所选代理解析。会触发本机 DNS 查询，不适合需要严格防泄漏的场景。"><Switch checked={!!r.auto_detect_dns} label="自动检测 DNS 状态" onChange={automatic}/></Setting>
-  <Setting title="通过代理解析主机名" desc="关闭自动模式时，开启后优先将域名交给所选 Relay / SOCKS5 / HTTP CONNECT 出口解析；关闭则使用系统 DNS 获取 IP。切换此项会退出自动模式。"><Switch checked={(r.dns_mode||'proxy')==='proxy'} label="通过代理解析主机名" onChange={proxy}/></Setting>
-  <div className="notice top-gap">{r.auto_detect_dns?'当前为自动模式：先用系统 DNS，失败后交给代理解析；上方手动开关暂不决定实际解析方式。':(r.dns_mode||'proxy')==='proxy'?'当前为手动代理解析：带有域名的连接请求不主动使用本机 DNS。':'当前为手动本机解析：DNS 查询可能离开代理。'}</div>
+  <Setting title="自动检测 DNS 状态" desc="开启时自动切换到本机优先模式：先尝试系统 DNS，本机查询失败再使用代理解析。此模式可能产生本机 DNS 查询，不适用于严格防泄漏。"><Switch checked={!!r.auto_detect_dns} label="自动检测 DNS 状态" onChange={automatic}/></Setting>
+  <Setting title="通过代理解析主机名" desc="手动模式：开启时将原始域名交给代理解析；关闭时先使用系统 DNS。修改此项会关闭自动检测；启用代理解析优先于自动检测。"><Switch checked={(r.dns_mode||'proxy')==='proxy'} label="通过代理解析主机名" onChange={proxy}/></Setting>
+  <div className="notice top-gap">{r.auto_detect_dns?((r.dns_mode||'proxy')==='proxy'?'自动检测已保存，但当前被手动代理解析覆盖；重新关闭再开启自动检测可进入本机优先模式。':'自动检测生效：系统 DNS 优先，失败后交给代理；可能产生本机 DNS 查询。'):(r.dns_mode||'proxy')==='proxy'?'手动代理解析：代理连接的原始域名始终交给远端。':'手动本机解析：系统 DNS 查询可能离开代理。'}</div>
   <div className="mini top-gap">只有原始连接包含域名时，这两个选项才影响代理侧解析。已经被操作系统解析为 IP 的透明连接不会被自动还原为域名；需要 FakeIP 接管系统 DNS 时，请启用下方独立选项。</div>
  </Card>
  <Card title="DNS 接管与加密解析器防护" eyebrow="DNS INTERCEPTION">
@@ -335,11 +340,11 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
   <div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>透明代理设置 ›</Button><Button onClick={()=>onGoto('diagnostics')}>诊断与日志 ›</Button></div>
  </Card>
  <Card title="实际运行状态" eyebrow="ACTIVE DNS PROTECTION">
-  <Setting title="透明代理 DNS 捕获" desc={protection.capture||'未上报实际捕获状态'}><Badge tone={capture?'ok':'warn'}>{capture?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
-  <Setting title="FakeIP 实际状态" desc={r.fake_ip_enabled&&!activeFakeIP?'配置已开启，但当前尚未确认透明 DNS 接管已生效':'以当前 Agent 上报的配置和拦截状态为准'}><Badge tone={activeFakeIP?'ok':r.fake_ip_enabled?'warn':'neutral'}>{activeFakeIP?'配置开启 · 拦截运行中':r.fake_ip_enabled?'已配置 · 未确认生效':'未启用'}</Badge></Setting>
+  <Setting title="透明代理运行状态" desc={'DNS 捕获报告：'+captureMode+'（仅反映 Agent / 内核上报，不能证明所有 DNS 均已接管）'}><Badge tone={divertRunning?'blue':'warn'}>{divertRunning?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
+  <Setting title="FakeIP 配置与捕获证据" desc={fakeConfigured?'已保存 FakeIP 策略；'+(captureObserved?'观察到捕获报告，但环回 DNS、私有 DoH 和防火墙旁路仍需验证。':'目前未观察到有效的 DNS 捕获报告。'):'FakeIP 策略未启用'}><Badge tone={strictCapture&&fakeApplied?'blue':fakeConfigured?'warn':'neutral'}>{!fakeConfigured?'未启用':!fakeApplied?'已配置 · 未确认应用':strictCapture?'内核捕获报告可用 · 仍需实测':'策略已应用 · DNS 接管未独立验证'}</Badge></Setting>
   <Setting title="独立 DNS Kill Switch" desc={protection.detail||'当前没有足够证据证明系统级防泄漏'}><Badge tone={protection.independentGuard==='rules-present'?'blue':'warn'}>{protection.independentGuard||'未验证'}</Badge></Setting>
  </Card>
- <SaveBar dirty={dirty} label="保存 DNS 设置" hint="解析模式与路由 DNS 策略支持热更新；如果透明代理本身未启用，请先完成对应安装与启动。" onSave={()=>save({routing:r})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
+ <SaveBar dirty={dirty} label="保存 DNS 设置" hint="解析模式与路由 DNS 策略支持热更新；如果透明代理本身未启用，请先完成对应安装与启动。" onSave={()=>save({routing:dnsPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
  </>;
 }
 

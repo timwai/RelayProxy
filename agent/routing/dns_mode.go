@@ -28,28 +28,21 @@ func (d *RoutingDialer) ResolveProxyTarget(ctx context.Context, host string) (st
 	if d.engine != nil {
 		cfg = d.engine.Config()
 	}
-	if cfg.AutoDetectDNS {
-		// Explicit opt-in: this first sends DNS requests to the system's
-		// resolver, which may expose hostnames to the local network. If it
-		// fails, send the hostname to the proxy instead. Never fall back
-		// after cancellation, nor when strict FakeIP policy is active.
-		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		if err != nil {
-			return host, nil
-		}
-		if target := firstResolvedIP(ips); target != "" {
-			return target, nil
-		}
-		return host, nil
-	}
+	// Explicit proxy-side resolution must take precedence over automatic
+	// DNS detection. A domain that the user chose to proxy must not be
+	// silently converted to a locally resolved IP (or disclosed via DNS).
 	if cfg.DNSMode == "" || cfg.DNSMode == DNSModeProxy {
 		return host, nil
 	}
 	if cfg.DNSMode != DNSModeLocal {
 		return "", fmt.Errorf("routing: unsupported DNS mode %q", cfg.DNSMode)
+	}
+	if cfg.AutoDetectDNS {
+		// Automatic fallback applies only to local-resolution mode: first
+		// try the system resolver, then send the hostname to the proxy if
+		// it fails. Never fall back after cancellation or under FakeIP.
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		return autoDNSResolution(ctx, host, ips, err)
 	}
 	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 	if err != nil {
@@ -76,4 +69,21 @@ func firstResolvedIP(ips []netip.Addr) string {
 		}
 	}
 	return ""
+}
+
+// autoDNSResolution lets the automatic resolver's error/cancellation policy
+// be tested without relying on external DNS or machine-specific search lists.
+func autoDNSResolution(ctx context.Context, host string, ips []netip.Addr, lookupErr error) (string, error) {
+	if err := ctx.Err(); err != nil {
+		// Never send an unresolved hostname upstream after cancellation.
+		return "", err
+	}
+	if lookupErr == nil {
+		if target := firstResolvedIP(ips); target != "" {
+			return target, nil
+		}
+	}
+	// DNS failure or an empty response: the remote proxy may still be able
+	// to resolve the original domain. Avoid retrying the local resolver.
+	return host, nil
 }

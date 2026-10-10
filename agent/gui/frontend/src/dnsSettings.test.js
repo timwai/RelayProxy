@@ -32,4 +32,16 @@ test('auto detect or explicit local mode never leaves inconsistent FakeIP settin
  assert.equal(setProxyDNS(input,false).dns_mode,'local');
  assert.equal(setProxyDNS(input,true).dns_mode,'proxy');
  assert.equal(setAutoDNS(input,true).auto_detect_dns,true);
+ assert.equal(setAutoDNS(input,true).dns_mode,'local', 'auto toggle must select effective local-first mode');
+ assert.equal(setAutoDNS({dns_mode:'proxy',auto_detect_dns:false},true).dns_mode,'local');
+});
+
+
+test('automatically detecting DNS can be switched back to explicit proxy resolution',()=>{
+ const autodetected=setAutoDNS({dns_mode:'proxy',auto_detect_dns:false},true);
+ assert.equal(autodetected.dns_mode,'local');
+ assert.equal(autodetected.auto_detect_dns,true);
+ const manual=setProxyDNS(autodetected,true);
+ assert.equal(manual.auto_detect_dns,false);
+ assert.equal(manual.dns_mode,'proxy');
 });

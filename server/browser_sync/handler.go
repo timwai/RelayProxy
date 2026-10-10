@@ -237,6 +237,14 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "PING":
 			payload = map[string]any{"type": "PONG"}
+		case "SEQUENCE_CURSOR":
+			cursor, err := h.Store.SessionCursor(ctx, device.ID, msg.RuleID)
+			if err != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "SESSION_CURSOR", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "lastSequence": cursor}
+			}
 		case "SESSION_SNAPSHOT":
 			if err := h.relaySnapshot(ctx, device.ID, msg.Envelope); err != nil {
 				payload = ruleError(msg.RequestID)

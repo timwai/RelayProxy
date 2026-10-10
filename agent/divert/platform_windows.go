@@ -108,6 +108,15 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		return packetProcess{pid: process.PID, path: process.Path, aliases: process.Aliases, services: process.Services}, err
 	})
 	i.start()
+	if shouldRefreshWindowsSystemDNSCache(s.dnsAssociationEnabled(), s.fakeIPEnabled(), s.proxyDNSEnabled()) {
+		// Cached Windows DNS responses predate WinDivert interception. Clearing
+		// them once after capture starts allows the next normal resolver query
+		// to be observed, instead of making the browser's first connection
+		// depend on a stale IP without a known hostname.
+		if err := refreshWindowsSystemDNSCache(); err != nil {
+			log.Printf("[divert] Windows DNS association cache refresh skipped: %v", err)
+		}
+	}
 	return i, nil
 }
 

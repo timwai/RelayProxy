@@ -177,15 +177,15 @@ func subscriptionTarget(line string) (string, bool) {
  } else if strings.HasPrefix(line, ".") {
   line = strings.TrimPrefix(line, ".")
  }
- // Reject unanchored ABP wildcards/paths: assuming whole-domain coverage
- // here would silently widen a path-specific filter.
- if strings.ContainsAny(line, "*/^|:@") { return "", false }
- if prefix, err := netip.ParsePrefix(line); err == nil && prefix.IsValid() {
+ if prefix, err := netip.ParsePrefix(line); err == nil && prefix.IsValid() && prefix.Addr().Zone() == "" {
   return prefix.Masked().String(), true
  }
  if ip, err := netip.ParseAddr(line); err == nil && ip.Zone() == "" {
   return ip.Unmap().String(), true
  }
+ // Reject unanchored ABP wildcards/paths: assuming whole-domain coverage
+ // here would silently widen a path-specific filter.
+ if strings.ContainsAny(line, "*/^|:@") { return "", false }
  line = strings.ToLower(strings.TrimSuffix(line, "."))
  labels := strings.Split(line, ".")
  if len(labels) < 2 || len(line) > 253 { return "", false }

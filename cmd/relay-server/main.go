@@ -23,6 +23,7 @@ import (
 	"relayproxy/internal/config"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
+	browsersync "relayproxy/server/browser_sync"
 	serverdirect "relayproxy/server/direct"
 	"relayproxy/server/gateway"
 	serverp2p "relayproxy/server/p2p"
@@ -525,8 +526,19 @@ func main() {
 	if err != nil {
 		log.Fatalf("[Admin] Failed to initialize settings: %v", err)
 	}
+	var browserSyncHandler *browsersync.Handler
+	if cfg.BrowserSync.Enabled {
+		store, storeErr := browsersync.NewStore(db.DB)
+		if storeErr != nil {
+			log.Fatalf("[BrowserSync] Failed to initialize browser database: %v", storeErr)
+		}
+		browserSyncHandler = browsersync.NewHandler(store, cfg.BrowserSync.ExtensionIDs)
+		log.Printf("[BrowserSync] Enabled on Admin HTTPS listener; extension allowlist size=%d; session transfer disabled until E2EE/paired rules", len(cfg.BrowserSync.ExtensionIDs))
+	}
+
 	apiRouter := api.NewRouter(authService, deviceService, sessionMgr, db,
 		api.WithServerSettings(settings, tlsConfig),
+		api.WithBrowserSync(browserSyncHandler),
 		api.WithServerExitStatus(func() api.ServerExitRuntimeStatus {
 			if serverExit == nil {
 				return api.ServerExitRuntimeStatus{}

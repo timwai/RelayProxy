@@ -14,6 +14,7 @@ const LAST_SEQUENCE = 'browserSyncOutgoingSequence';
 const LAST_APPLIED = 'browserSyncLastAppliedSequence';
 const ALLOW_OVERRIDE = 'browserSyncAllowOverwrite';
 const statusKey = 'browserSyncTransferStatus';
+const pendingOpenKey = 'browserSyncPendingOpen';
 
 async function setStatus(ruleId, result) {
   // Explicitly store only a status enum; never Cookie values or payloads.
@@ -84,6 +85,20 @@ export async function requestSnapshot(ruleId) {
   return {state:'REQUESTED'};
 }
 
+export async function syncThenOpen(ruleId) {
+  const ctx=await ruleContext(ruleId);
+  if(!ctx.targetRole)throw new Error('只能由接收设备发起同步后打开');
+  const pending=(await chrome.storage.local.get(pendingOpenKey))[pendingOpenKey]||{};
+  pending[ruleId]={origin:ctx.policy.siteOrigin,expiresAt:Date.now()+30000};
+  await chrome.storage.local.set({[pendingOpenKey]:pending});
+  try{return await requestSnapshot(ruleId);}
+  catch(error){
+    delete pending[ruleId];
+    await chrome.storage.local.set({[pendingOpenKey]:pending});
+    throw error;
+  }
+}
+
 async function handleIncomingSnapshot(envelope) {
   const ruleId=envelope?.ruleId;
   if(typeof ruleId!=='string'||ruleId.length>128)return;
@@ -103,6 +118,14 @@ async function handleIncomingSnapshot(envelope) {
       sequences[ruleId]=envelope.sequence;
       await chrome.storage.local.set({[LAST_APPLIED]:sequences});
       result='APPLIED';
+      const pending=(await chrome.storage.local.get(pendingOpenKey))[pendingOpenKey]||{};
+      const request=pending[ruleId];
+      if(request) {
+        delete pending[ruleId];
+        await chrome.storage.local.set({[pendingOpenKey]:pending});
+        if(request.expiresAt>Date.now()&&request.origin===ctx.policy.siteOrigin)
+          await chrome.tabs.create({url:ctx.policy.siteOrigin});
+      }
     }catch(error){
       if(String(error.message||'').startsWith('CONFLICT:'))result='CONFLICT';
       else throw error;

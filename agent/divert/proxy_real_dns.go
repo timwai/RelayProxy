@@ -25,13 +25,7 @@ func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool
 		return s.fakeDNS.replyScoped(query, s.guard.RelayHost, s.guard.RelayIPs, "", false)
 	}
 	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, query []byte) ([]byte, error) {
-		select {
-		case s.dnsLimit <- struct{}{}:
-			defer func() { <-s.dnsLimit }()
-			return s.exchangeProxyDoT(ctx, "", query)
-		default:
-			return nil, errDNSForwardUnavailable
-		}
+		return s.exchangeLimitedProxyDNS(ctx, "", query)
 	})
 }
 

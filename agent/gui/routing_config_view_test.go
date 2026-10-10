@@ -39,7 +39,7 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, field := range []string{
-			"mode", "dns_mode", "auto_detect_dns", "fake_ip_enabled",
+			"mode", "dns_mode", "auto_detect_dns", "dns_association_enabled", "proxy_dns_enabled", "fake_ip_enabled",
 			"block_doh_endpoints", "forward_other_dns", "dns_exit_id",
 			"doh_blocked_ips", "default_action", "rules",
 		} {
@@ -55,7 +55,9 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 		if update.DNSMode == nil || *update.DNSMode != string(cfg.DNSMode) {
 			t.Fatalf("round trip changed DNS mode: %+v", update)
 		}
-		if update.AutoDetectDNS == nil || *update.AutoDetectDNS != cfg.AutoDetectDNS ||
+		if update.DNSAssociationEnabled == nil || *update.DNSAssociationEnabled != (cfg.DNSAssociationEnabled == nil || *cfg.DNSAssociationEnabled) ||
+			update.ProxyDNSEnabled == nil || *update.ProxyDNSEnabled != cfg.ProxyDNSEnabled ||
+			update.AutoDetectDNS == nil || *update.AutoDetectDNS != cfg.AutoDetectDNS ||
 			update.FakeIPEnabled == nil || *update.FakeIPEnabled != cfg.FakeIPEnabled ||
 			update.BlockDoHEndpoints == nil || *update.BlockDoHEndpoints != cfg.BlockDoHEndpoints ||
 			update.ForwardOtherDNS == nil || *update.ForwardOtherDNS != cfg.ForwardOtherDNS ||

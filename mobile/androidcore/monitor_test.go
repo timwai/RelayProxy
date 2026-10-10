@@ -17,6 +17,7 @@ func TestActiveApplicationsJSONGroupsLiveAndroidPackages(t *testing.T) {
 		Port:           443,
 		Protocol:       "tcp",
 		Action:         "PROXY",
+		Rule:           "视频优先",
 		ExitID:         "exit-a",
 	})
 	first.Activate()
@@ -30,6 +31,7 @@ func TestActiveApplicationsJSONGroupsLiveAndroidPackages(t *testing.T) {
 		Port:           53,
 		Protocol:       "udp",
 		Action:         "PROXY",
+		Rule:           "默认规则",
 		ExitID:         "exit-a",
 	})
 	second.Activate()
@@ -83,11 +85,44 @@ func TestActiveApplicationsJSONGroupsLiveAndroidPackages(t *testing.T) {
 	if len(shared.Exits) != 1 || shared.Exits[0] != "exit-a" {
 		t.Fatalf("shared UID exits=%+v", shared.Exits)
 	}
+	if len(shared.Rules) != 2 || shared.Rules[0] != "视频优先" && shared.Rules[1] != "视频优先" {
+		t.Fatalf("shared UID rules=%+v", shared.Rules)
+	}
 	if len(shared.Targets) != 2 {
 		t.Fatalf("shared UID targets=%+v", shared.Targets)
 	}
 	if missing == nil || missing.Connections != 1 {
 		t.Fatalf("unknown application group=%+v", missing)
+	}
+}
+
+func TestActiveApplicationsJSONDeduplicatesMatchedRulesAndOmitsClosedRules(t *testing.T) {
+	client := &Client{traffic: traffic.NewRegistry(16, 4)}
+	for _, rule := range []string{"直连规则", "代理规则", "代理规则", ""} {
+		record := client.traffic.Start(traffic.Metadata{
+			Process: "com.example.alpha", Host: "api.example.com",
+			Port: 443, Protocol: "tcp", Rule: rule,
+		})
+		record.Activate()
+	}
+	closed := client.traffic.Start(traffic.Metadata{
+		Process: "com.example.alpha", Host: "old.example.com",
+		Port: 443, Protocol: "tcp", Rule: "旧规则",
+	})
+	closed.Activate()
+	closed.Finish("closed", nil)
+
+	var snapshot activeApplicationsSnapshot
+	if err := json.Unmarshal([]byte(client.ActiveApplicationsJSON()), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Applications) != 1 {
+		t.Fatalf("applications: %+v", snapshot.Applications)
+	}
+	app := snapshot.Applications[0]
+	if app.Connections != 4 || len(app.Rules) != 2 ||
+		app.Rules[0] != "代理规则" || app.Rules[1] != "直连规则" {
+		t.Fatalf("rule aggregation: %+v", app)
 	}
 }
 

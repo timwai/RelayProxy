@@ -12,8 +12,8 @@ import (
 // arbitrary port-53 traffic into unbounded application-level state.
 const (
 	dnsTCPMaxStreams = 512
-	dnsTCPMaxFrame = 8192
-	dnsTCPStreamTTL = 10 * time.Second
+	dnsTCPMaxFrame   = 8192
+	dnsTCPStreamTTL  = 10 * time.Second
 )
 
 type dnsTCPStreamKey struct {
@@ -21,22 +21,22 @@ type dnsTCPStreamKey struct {
 }
 
 type dnsTCPStream struct {
-	next uint32
-	buffer []byte
+	next    uint32
+	buffer  []byte
 	expires time.Time
 	invalid bool
 }
 
 type dnsTCPObserver struct {
-	mu sync.Mutex
+	mu      sync.Mutex
 	streams map[dnsTCPStreamKey]*dnsTCPStream
-	now func() time.Time
+	now     func() time.Time
 }
 
 func newDNSTCPObserver() *dnsTCPObserver {
 	return &dnsTCPObserver{
 		streams: make(map[dnsTCPStreamKey]*dnsTCPStream),
-		now: time.Now,
+		now:     time.Now,
 	}
 }
 

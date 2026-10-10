@@ -2,7 +2,12 @@
 
 package divert
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"golang.org/x/sys/windows"
+)
 
 func TestWindowsDNSGuardEvidenceRequiresActivePersistentAndCorrectPorts(t *testing.T) {
 	good := []byte(`{"profilesEnabled":true,"entries":[
@@ -34,5 +39,18 @@ func TestWindowsDNSGuardEvidenceRequiresActivePersistentAndCorrectPorts(t *testi
 				t.Fatalf("got %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestWindowsDNSGuardPowerShellProbeNeverShowsConsole(t *testing.T) {
+	cmd := windowsDNSGuardCommand(context.Background())
+	if cmd.Path == "" || len(cmd.Args) < 4 {
+		t.Fatalf("invalid PowerShell DNS guard command: %q %q", cmd.Path, cmd.Args)
+	}
+	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.HideWindow {
+		t.Fatal("periodic DNS firewall PowerShell query would show a console window")
+	}
+	if cmd.SysProcAttr.CreationFlags&windows.CREATE_NO_WINDOW == 0 {
+		t.Fatal("DNS firewall query must use CREATE_NO_WINDOW to prevent terminal flashes")
 	}
 }

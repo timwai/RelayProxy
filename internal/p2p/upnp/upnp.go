@@ -277,6 +277,19 @@ func (m *Mapping) Close() error {
 	return m.closeErr
 }
 
+func mappingRefreshRetryDelay(failures int) time.Duration {
+	switch {
+	case failures <= 1:
+		return 5 * time.Second
+	case failures == 2:
+		return 15 * time.Second
+	case failures == 3:
+		return 30 * time.Second
+	default:
+		return time.Minute
+	}
+}
+
 func (m *Mapping) refreshLoop() {
 	interval := time.Duration(m.leaseSeconds) * time.Second / 2
 	if interval < time.Minute {
@@ -284,6 +297,7 @@ func (m *Mapping) refreshLoop() {
 	}
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
+	failures := 0
 	for {
 		select {
 		case <-m.done:
@@ -295,9 +309,15 @@ func (m *Mapping) refreshLoop() {
 		cancel()
 		next := interval
 		if err != nil {
-			// Retry promptly after router reboot, IP change, or a timeout.
-			// The ongoing lease is never extended without confirmation.
-			next = 30 * time.Second
+			// Failed renewals must not silently extend the advertised lease.
+			failures++
+			next = mappingRefreshRetryDelay(failures)
+			log.Printf("[P2P][UPnP] mapping refresh failed (retry in %s): %v", next, err)
+		} else {
+			if failures > 0 {
+				log.Printf("[P2P][UPnP] mapping refresh recovered")
+			}
+			failures = 0
 		}
 		timer.Reset(next)
 	}
@@ -852,7 +872,7 @@ func (s service) addAvailableUDPMappingRange(ctx context.Context, internalClient
 			if _, err := rand.Read(raw[:]); err != nil {
 				return 0, 0, fmt.Errorf("generate UPnP external UDP port: %w", err)
 			}
-			port := uint16(1024 + int(binary.BigEndian.Uint16(raw[:]))%(65535-1024))
+			port := uint16(1024 + int(binary.BigEndian.Uint16(raw[:]))%(65535-1024+1))
 			duplicate := false
 			for _, existing := range ports {
 				if existing == port {
@@ -944,6 +964,36 @@ func (s service) deletePortMapping(ctx context.Context, externalPort uint16) err
 	return err
 }
 
+// SOAP arguments are order-sensitive on some IGD implementations (including
+// strict WANIPConnection routers). Preserve the service action's documented
+// sequence instead of sorting map keys alphabetically. Unknown operations
+// retain deterministic lexical order.
+func soapArgumentOrder(action string, args map[string]string) []string {
+	var required []string
+	switch action {
+	case "AddPortMapping":
+		required = []string{"NewRemoteHost", "NewExternalPort", "NewProtocol", "NewInternalPort", "NewInternalClient", "NewEnabled", "NewPortMappingDescription", "NewLeaseDuration"}
+	case "DeletePortMapping", "GetSpecificPortMappingEntry":
+		required = []string{"NewRemoteHost", "NewExternalPort", "NewProtocol"}
+	}
+	keys := make([]string, 0, len(args))
+	seen := make(map[string]bool, len(required))
+	for _, name := range required {
+		if _, ok := args[name]; ok {
+			keys = append(keys, name)
+			seen[name] = true
+		}
+	}
+	var extras []string
+	for name := range args {
+		if !seen[name] {
+			extras = append(extras, name)
+		}
+	}
+	sort.Strings(extras)
+	return append(keys, extras...)
+}
+
 func (s service) soap(ctx context.Context, action string, args map[string]string) ([]byte, error) {
 	if s.controlURL == nil || s.serviceType == "" {
 		return nil, errors.New("invalid UPnP service")
@@ -956,12 +1006,7 @@ func (s service) soap(ctx context.Context, action string, args map[string]string
 	payload.WriteString(xmlEscape(s.serviceType))
 	payload.WriteString(`">`)
 	if len(args) > 0 {
-		keys := make([]string, 0, len(args))
-		for key := range args {
-			keys = append(keys, key)
-		}
-		sort.Strings(keys)
-		for _, key := range keys {
+		for _, key := range soapArgumentOrder(action, args) {
 			payload.WriteString("<")
 			payload.WriteString(key)
 			payload.WriteString(">")

@@ -529,6 +529,9 @@ class ConfigStore(private val context: Context) {
             config.routing.rules.forEach { rule ->
                 if (rule.action == "PROXY" && rule.exitId.startsWith("local:")) add(rule.exitId)
             }
+            config.routing.subscriptions.forEach { sub ->
+                if (sub.action == "PROXY" && sub.exitId.startsWith("local:")) add(sub.exitId)
+            }
         }
         for (id in used) {
             require(config.customExits.any { it.id == id && it.enabled }) {
@@ -576,6 +579,13 @@ class ConfigStore(private val context: Context) {
 
     fun saveRouting(routing: RoutingConfig): RoutingConfig = synchronized(routingLock) {
         val locals = load().customExits
+        routing.subscriptions.forEach { sub ->
+            if (sub.action == "PROXY" && sub.exitId.startsWith("local:")) {
+                require(locals.any { it.id == sub.exitId && it.enabled }) {
+                    "订阅所选自定义出口不存在或已停用：${sub.name}"
+                }
+            }
+        }
         routing.rules.forEach { rule ->
             if (rule.action == "PROXY" && rule.exitId.startsWith("local:")) {
                 require(locals.any { it.id == rule.exitId && it.enabled }) {

@@ -301,9 +301,12 @@ export async function resumePausedRestore(ruleId,confirmed) {
   const ctx=await ruleContext(ruleId);
   if(!ctx.targetRole)throw new Error('仅接收设备可以恢复');
   const flags=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
-  if(!flags[ruleId])throw new Error('当前规则未处于暂停状态');
+  const journalKey='browserSyncRestoreJournal';
+  const journal=(await chrome.storage.local.get(journalKey))[journalKey]||{};
+  if(!flags[ruleId]&&!journal[ruleId])throw new Error('当前规则未处于暂停状态');
   delete flags[ruleId];
-  await chrome.storage.local.set({[PAUSED_RESTORE]:flags});
+  delete journal[ruleId];
+  await chrome.storage.local.set({[PAUSED_RESTORE]:flags,[journalKey]:journal});
   await setStatus(ruleId,'UNKNOWN');
   // Do not immediately overwrite a possibly changed website session.
   return {state:'UNKNOWN'};

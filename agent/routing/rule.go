@@ -67,7 +67,9 @@ type Decision struct {
 type Config struct {
 	Mode              Mode     `yaml:"mode"           json:"mode"`                                         // Routing mode
 	DNSMode           DNSMode  `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"`                       // proxy (default) or local
-	AutoDetectDNS     bool     `yaml:"auto_detect_dns,omitempty" json:"auto_detect_dns,omitempty"`         // opt-in auto local resolution with proxy fallback
+	AutoDetectDNS     bool     `yaml:"auto_detect_dns,omitempty" json:"auto_detect_dns,omitempty"`
+	DNSAssociationEnabled *bool `yaml:"dns_association_enabled,omitempty" json:"dns_association_enabled,omitempty"` // nil = legacy enabled
+	ProxyDNSEnabled bool `yaml:"proxy_dns_enabled,omitempty" json:"proxy_dns_enabled,omitempty"` // opt-in real-IP DoT via proxy for captured DNS/53         // opt-in auto local resolution with proxy fallback
 	FakeIPEnabled     bool     `yaml:"fake_ip_enabled,omitempty" json:"fake_ip_enabled,omitempty"`         // opt-in transparent DNS interception
 	BlockDoHEndpoints bool     `yaml:"block_doh_endpoints,omitempty" json:"block_doh_endpoints,omitempty"` // best-effort known-host DoH blocking
 	ForwardOtherDNS   bool     `yaml:"forward_other_dns,omitempty" json:"forward_other_dns,omitempty"`     // forward TXT/SRV through TLS resolver on selected proxy exit

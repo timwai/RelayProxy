@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   shouldReconcile, acceptDeliveryAck, isTerminalAck, RECONCILE_INTERVAL_MS,
-  DELIVERY_ACK_TIMEOUT_MS
+  DELIVERY_ACK_TIMEOUT_MS, nextSessionSequence
 } from '../src/lifecycle.js';
 
 test('reconcile on new profile or after inactivity, not every minute', () => {
@@ -26,4 +26,15 @@ test('ACK is correlated to the latest outbound message only', () => {
   assert.equal(isTerminalAck('RECEIVED'),false);
   assert.equal(isTerminalAck('APPLIED'),true);
   assert.equal(isTerminalAck('CONFLICT'),true);
+});
+
+test('replay cursor resumes after local storage loss without decreasing sequence', () => {
+  assert.equal(nextSessionSequence(0,0),1);
+  assert.equal(nextSessionSequence(0,42),43);
+  assert.equal(nextSessionSequence(102,42),103);
+  assert.equal(nextSessionSequence(10,102),103);
+  assert.throws(()=>nextSessionSequence(-1,0));
+  assert.throws(()=>nextSessionSequence(0,Number.MAX_SAFE_INTEGER),/耗尽/);
+  assert.throws(()=>nextSessionSequence(0,Number.MAX_SAFE_INTEGER+1));
+  assert.throws(()=>nextSessionSequence(1.5,2));
 });

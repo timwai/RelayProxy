@@ -17,7 +17,7 @@ import (
 
 const (
 	ProtocolVersion     = "browser.sync.v1"
-	SessionCipherSuite   = "P256-HKDF-SHA256-A256GCM-v1"
+	SessionCipherSuite  = "P256-HKDF-SHA256-A256GCM-v1"
 	MaxCiphertextBytes  = 256 * 1024
 	MaxClockSkew        = 60 * time.Second
 	MaxMessageLifetime  = 15 * time.Minute

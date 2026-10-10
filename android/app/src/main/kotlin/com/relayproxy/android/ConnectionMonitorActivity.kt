@@ -219,6 +219,8 @@ class ConnectionMonitorActivity : Activity() {
         }
 
         applicationList.removeAllViews()
+        val exitStatus = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val names = ExitDisplayNames.fromStatus(exitStatus, ConfigStore(this).customExitNames())
         if (applications.length() == 0) {
             applicationList.addView(emptyState(activeConnections))
             return
@@ -226,7 +228,7 @@ class ConnectionMonitorActivity : Activity() {
         for (index in 0 until applications.length()) {
             val item = applications.optJSONObject(index) ?: continue
             applicationList.addView(
-                applicationCard(item),
+                applicationCard(item, names),
                 LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -261,7 +263,7 @@ class ConnectionMonitorActivity : Activity() {
         return card
     }
 
-    private fun applicationCard(item: JSONObject): View {
+    private fun applicationCard(item: JSONObject, exitNames: Map<String, String>): View {
         val packageName = item.optString("packageName", FlowOwnerIdentity.UNKNOWN)
         val aliases = item.optJSONArray("packageAliases").strings()
         val packages = (listOf(packageName) + aliases)
@@ -384,7 +386,7 @@ class ConnectionMonitorActivity : Activity() {
 
         val exits = item.optJSONArray("exits").strings()
         if (exits.isNotEmpty()) {
-            card.addView(infoLine("出口", exits.joinToString(" · ") { it.take(18) }))
+            card.addView(infoLine("出口", exits.joinToString(" · ") { ExitDisplayNames.label(it, exitNames) }))
         }
         return card
     }

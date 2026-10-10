@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
-	"sync/atomic"
 
 	"github.com/apernet/quic-go"
 )
@@ -20,8 +20,8 @@ import (
 // local socket failure: QUIC must recover through its own loss detection.
 type packetLossConn struct {
 	net.PacketConn
-	every uint64
-	sent atomic.Uint64
+	every   uint64
+	sent    atomic.Uint64
 	dropped atomic.Uint64
 }
 
@@ -40,11 +40,11 @@ func (c *packetLossConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 func TestBrutalDeterministicPacketLoss(t *testing.T) {
 	const (
 		payloadSize = 512 << 10
-		brutalBPS = 8_000_000
+		brutalBPS   = 8_000_000
 	)
 	payload := bytes.Repeat([]byte("relayproxy-quic-loss-fixture"), payloadSize/len("relayproxy-quic-loss-fixture")+1)[:payloadSize]
 	for _, loss := range []struct {
-		name string
+		name  string
 		every uint64
 	}{
 		{name: "loss0", every: 0},

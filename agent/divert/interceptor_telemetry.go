@@ -42,7 +42,7 @@ func (i *packetInterceptor) inboundPacket(data []byte, meta packetMetadata) erro
 		case ProtoTCP:
 			// Complete unencrypted DNS/TCP messages can identify the real IP
 			// before the resolver is notified. Partial frames remain unknown.
-			i.dns.responseTCP(p.Source, p.Destination, p.Payload)
+			i.dns.observeTCPResponse(p)
 		}
 	}
 	if err := i.sendPacket(p, meta); err != nil {

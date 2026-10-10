@@ -12,13 +12,13 @@ export function setOtherDNSForwarding(r, enabled) {
 }
 export function setAutoDNS(r, enabled) {
   return enabled
-    ? {...r,dns_mode:'local',auto_detect_dns:true,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false}
+    ? {...r,dns_mode:'local',auto_detect_dns:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false}
     : {...r,auto_detect_dns:false};
 }
 export function setProxyDNS(r, enabled) {
   return enabled
     ? {...r,auto_detect_dns:false,dns_mode:'proxy'}
-    : {...r,auto_detect_dns:false,dns_mode:'local',fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false};
+    : {...r,auto_detect_dns:false,dns_mode:'local',proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false};
 }
 
 // This strategy returns genuine remote-resolved IPs; FakeIP's synthetic

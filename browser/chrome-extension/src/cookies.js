@@ -123,6 +123,12 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
           }
           continue;
         }
+        if(item.old && matches.length===1 &&
+            isSafeCookie(matches[0],policy.siteOrigin) &&
+            matches[0].value===item.old.value) {
+          // A failed Chrome API operation did not alter the original Cookie.
+          continue;
+        }
         if(matches.length!==1||!isSafeCookie(matches[0],policy.siteOrigin)||
             matches[0].value!==item.expected){
           // If the website changed this Cookie while we were writing, do not

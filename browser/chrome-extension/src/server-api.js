@@ -30,6 +30,8 @@ let connectionState = 'DISCONNECTED';
 const requests = new Map();
 let keepalive = null;
 let connectingPromise = null;
+let pushHandler = null;
+export function onServerPush(callback) { pushHandler = callback; }
 
 export function currentConnectionState() { return connectionState; }
 export function disconnect() {
@@ -82,7 +84,7 @@ export async function connectBrowser() {
             challenge: msg.challenge, signature: proof.signature
           }));
         } else if (msg.type === 'AUTH_OK') {
-          if (msg.deviceId !== identity.deviceId || msg.sessionTransferEnabled !== false) {
+          if (msg.deviceId !== identity.deviceId || msg.sessionTransferEnabled !== true) {
             throw new Error('Server 协议状态与预期不符');
           }
           authenticated = true;
@@ -95,6 +97,14 @@ export async function connectBrowser() {
             if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'PING' }));
           }, 20000);
         } else if (msg.type === 'PONG') {
+          return;
+        } else if (['SESSION_SNAPSHOT','SYNC_REQUEST','SYNC_ACK'].includes(msg.type)) {
+          if (!authenticated || !pushHandler) throw new Error('未授权的会话数据消息');
+          // A push may independently issue control requests. The WebSocket
+          // listener must not await it; responses are resolved above.
+          Promise.resolve().then(() => pushHandler(msg)).catch(() => {
+            // The handler maps safe failures to ACK; never log secrets.
+          });
           return;
         } else if (msg.requestId && requests.has(msg.requestId)) {
           const item = requests.get(msg.requestId);

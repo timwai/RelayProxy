@@ -9,7 +9,7 @@
 - `POST /api/v1/browser-sync/devices/register` 注册 pending 浏览器设备。
 - Server Admin API 审批、撤销独立浏览器设备。
 - Chrome 使用一次性随机挑战和 ECDSA 签名完成 WSS AUTH_OK 验证。
-- **WSS 仅允许认证和 PING/PONG**；所有 Cookie/Session 数据帧均被拒绝。
+- **WSS 已支持双方加密配对邀请、接受、最终确认、撤销及心跳；仍拒绝所有 Session/Cookie 数据帧**；所有 Cookie/Session 数据帧均被拒绝。
 
 **当前不能同步登录会话。** 尚未实现站点规则双端配对、公钥指纹确认、端到端加密、Cookie 收发和 Server Web 浏览器管理 UI。
 
@@ -63,3 +63,13 @@ POST /api/v1/browser-sync/admin/devices/{id}/revoke
 6. 验证 Server AUTH_OK 返回 `sessionTransferEnabled:false`，不会传输 Cookie 数据。
 
 完整设计参见 [Browser Session Sync v1.1](../../docs/browser-session-sync-design-development.md)。
+
+## 双端配对开发预览
+
+A/B 在管理员审批后连接 WSS。A 选择同一 Identity 下的 B、已授权 HTTPS 网站及 Cookie 名称，创建经 WebCrypto ECDH/HKDF/AES-GCM 加密并用设备 ECDSA 密钥签名的邀请。B 验签、解密站点策略并核对双方校验码后接受；A 最终确认规则激活。**必须通过独立可信渠道核对校验码**，而不能仅相信 Server 转发的信息。
+
+目前只是授权控制面，WSS AUTH_OK 的 sessionTransferEnabled 仍为 false；Cookie/Session 载荷不会上传或恢复。
+
+## 扩展测试
+
+运行 `cd browser/chrome-extension && npm test`，仓库 UI CI 也会执行扩展 JS 语法检查和配对逻辑测试。生产部署前必须完成剩余安全评审。

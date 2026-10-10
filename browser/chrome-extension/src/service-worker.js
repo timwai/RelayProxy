@@ -5,7 +5,7 @@ import { getSettings, updateSettings, parseServerOrigin } from './rules.js';
 import { registerBrowser, connectBrowser, currentConnectionState, disconnect, sendControl } from './server-api.js';
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
-import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission } from './session-sync.js';
+import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission, syncThenOpen } from './session-sync.js';
 
 async function initialize() {
   await getOrCreateIdentity();
@@ -174,6 +174,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: true, ...(await sendSnapshot(message.ruleId)) };
       case 'REQUEST_SESSION':
         return { ok: true, ...(await requestSnapshot(message.ruleId)) };
+      case 'SYNC_THEN_OPEN':
+        return { ok: true, ...(await syncThenOpen(message.ruleId)) };
       case 'ALLOW_OVERWRITE':
         return { ok: true, ...(await setOverwritePermission(message.ruleId, message.allowed)) };
       default:

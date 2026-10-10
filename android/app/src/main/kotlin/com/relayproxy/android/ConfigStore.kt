@@ -87,10 +87,36 @@ data class RoutingRuleConfig(
         .put("protocols", protocols.toJsonArray())
 }
 
+data class RoutingSubscriptionConfig(
+    val name: String = "GFWList",
+    val url: String = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt",
+    val enabled: Boolean = true,
+    val action: String = "PROXY",
+    val exitId: String = "",
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("name", name.trim())
+        .put("url", url.trim())
+        .put("enabled", enabled)
+        .put("action", action)
+        .put("exit_id", exitId.trim())
+
+    companion object {
+        fun fromJson(json: JSONObject): RoutingSubscriptionConfig = RoutingSubscriptionConfig(
+            name = json.optString("name", "GFWList"),
+            url = json.optString("url"),
+            enabled = json.optBoolean("enabled", true),
+            action = json.optString("action", "PROXY"),
+            exitId = json.optString("exit_id"),
+        )
+    }
+}
+
 data class RoutingConfig(
     val mode: String = "global_proxy",
     val defaultAction: String = "PROXY",
     val rules: List<RoutingRuleConfig> = emptyList(),
+    val subscriptions: List<RoutingSubscriptionConfig> = emptyList(),
     val revision: Long = 0,
 ) {
     fun requiresApplicationIdentity(androidSdk: Int): Boolean =
@@ -104,6 +130,7 @@ data class RoutingConfig(
         .put("mode", mode)
         .put("default_action", defaultAction)
         .put("revision", if (forCore) null else revision)
+        .put("subscriptions", JSONArray().apply { subscriptions.forEach { put(it.toJson()) } })
         .put("rules", JSONArray().apply {
             if (forCore && rejectUnknownApplications && rules.any {
                     it.enabled && it.applications.isNotEmpty()
@@ -151,6 +178,12 @@ data class RoutingConfig(
                     mode = json.optString("mode", "global_proxy"),
                     defaultAction = json.optString("default_action", "PROXY"),
                     rules = rules,
+                    subscriptions = buildList {
+                        val entries = json.optJSONArray("subscriptions") ?: JSONArray()
+                        for (i in 0 until entries.length()) {
+                            entries.optJSONObject(i)?.let { add(RoutingSubscriptionConfig.fromJson(it)) }
+                        }
+                    },
                     revision = json.optLong("revision", 0),
                 )
             }.getOrDefault(RoutingConfig())

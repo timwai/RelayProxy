@@ -19,9 +19,9 @@ import (
 const (
 	// RFC 8484 wire-format DNS over HTTPS. The HTTPS hostname is validated
 	// against Quad9's certificate; the TCP destination never uses local DNS.
-	proxyDNSDoHURL = "https://dns.quad9.net/dns-query"
-	proxyDNSDoHPort uint16 = 443
-	proxyDNSOverallTimeout = 9 * time.Second
+	proxyDNSDoHURL                = "https://dns.quad9.net/dns-query"
+	proxyDNSDoHPort        uint16 = 443
+	proxyDNSOverallTimeout        = 9 * time.Second
 )
 
 // exchangeProxyDNS prefers HTTPS/443. Many proxy exits cannot reach 853,
@@ -83,11 +83,11 @@ func (s *Server) exchangeProxyDoH(parent context.Context, routeExitID string, qu
 			MinVersion: tls.VersionTLS12,
 			ServerName: proxyDNSResolverName,
 		},
-		TLSHandshakeTimeout: proxyDNSTimeout,
-		ResponseHeaderTimeout: proxyDNSTimeout,
-		DisableKeepAlives: true,
-		DisableCompression: true,
-		ForceAttemptHTTP2: false,
+		TLSHandshakeTimeout:    proxyDNSTimeout,
+		ResponseHeaderTimeout:  proxyDNSTimeout,
+		DisableKeepAlives:      true,
+		DisableCompression:     true,
+		ForceAttemptHTTP2:      false,
 		MaxResponseHeaderBytes: 16 << 10,
 	}
 	defer transport.CloseIdleConnections()

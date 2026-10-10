@@ -8,6 +8,7 @@ import { cookieValueTag } from './device-identity.js';
 // trusted for a deletion or silent overwrite. The receiver must explicitly
 // reapprove an existing session once when upgrading the development build.
 const storeKey = 'browserSyncManagedCookieHmacV1';
+const journalKey = 'browserSyncRestoreJournal';
 const cookieDomain = c => (c.domain||'').replace(/^\./,'').toLowerCase();
 const isSafeCookie = (cookie,origin) => {
   const host=new URL(origin).hostname.toLowerCase();
@@ -69,6 +70,10 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
   const policy=verifySnapshot(snapshot,expected);
   const host=new URL(policy.siteOrigin).hostname;
   const current=await chrome.cookies.getAll({url:cookieURL(policy.siteOrigin)});
+  // A worker killed mid-write cannot run rollback. A metadata-only write
+  // intent survives restart, and blocks any further automated overwrites.
+  const journal=(await chrome.storage.local.get(journalKey))[journalKey]||{};
+  if(journal[ruleId])throw new Error('PARTIAL_ROLLBACK: 上次 Cookie 应用意外中断');
   const storage=(await chrome.storage.local.get(storeKey))[storeKey]||{};
   const managed=storage[ruleId]||{};
   // Run all checks before writing *any* Cookie, to avoid silent account swaps.
@@ -103,6 +108,8 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
   // Chrome has no multi-Cookie transaction. Stage only reversible changes,
   // perform preflight checks above, and compensate in reverse on failure.
   const changed=[];
+  journal[ruleId]={startedAt:Date.now()};
+  await chrome.storage.local.set({[journalKey]:journal});
   const cookieDetails=(c)=>({
     url,name:c.name,value:c.value,path:'/',secure:true,httpOnly:c.httpOnly,
     ...(c.sameSite!=='unspecified'?{sameSite:c.sameSite}:{}),
@@ -177,11 +184,21 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
       delete nextManaged[name];
     }
     storage[ruleId]=nextManaged;
-    await chrome.storage.local.set({[storeKey]:storage});
+    delete journal[ruleId];
+    // Commit new ownership tags and clear the write intent together.
+    await chrome.storage.local.set({[storeKey]:storage,[journalKey]:journal});
   }catch{
     const restored=await rollback();
+    let recovered=restored;
+    if(restored){
+      try{
+        const active=(await chrome.storage.local.get(journalKey))[journalKey]||{};
+        delete active[ruleId];
+        await chrome.storage.local.set({[journalKey]:active});
+      }catch{recovered=false;}
+    }
     // Never include Cookie names, values or site origins in exceptions/logs.
-    throw new Error(restored?'APPLY_FAILED: 已恢复写入前状态':
+    throw new Error(recovered?'APPLY_FAILED: 已恢复写入前状态':
       'PARTIAL_ROLLBACK: 无法保证所有 Cookie 已恢复，已暂停本次同步');
   }
   return {count:inspected.length,removed:removals.length,status:'APPLIED'};

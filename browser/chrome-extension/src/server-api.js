@@ -29,6 +29,7 @@ let currentSocket = null;
 let connectionState = 'DISCONNECTED';
 const requests = new Map();
 let keepalive = null;
+let connectingPromise = null;
 
 export function currentConnectionState() { return connectionState; }
 export function disconnect() {
@@ -104,7 +105,10 @@ export async function connectBrowser() {
         } else {
           throw new Error('未支持的 Server 响应');
         }
-      } catch (error) { fail(error); }
+      } catch (error) {
+        if (authenticated) disconnect();
+        else fail(error);
+      }
     });
     socket.addEventListener('error', () => {
       if (!authenticated) fail(new Error('无法建立安全 WSS 连接'));
@@ -125,7 +129,10 @@ export async function connectBrowser() {
 export async function sendControl(type, payload = {}) {
   if (currentConnectionState() !== 'AUTHENTICATED' ||
       !currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
-    await connectBrowser();
+    if (!connectingPromise) {
+      connectingPromise = connectBrowser().finally(() => { connectingPromise = null; });
+    }
+    await connectingPromise;
   }
   if (requests.size >= 8) throw new Error('配对请求过多，请稍后重试');
   const requestId = crypto.randomUUID();

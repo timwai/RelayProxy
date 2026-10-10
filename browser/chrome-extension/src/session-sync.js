@@ -7,12 +7,15 @@ import { sendControl, onServerPush } from './server-api.js';
 import { decryptEncryptedOffer } from './envelope.js';
 import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
+import { shouldReconcile, acceptDeliveryAck, isTerminalAck } from './lifecycle.js';
 
 const sourceBusy = new Set();
 const cookieTimers = new Map();
 const incomingQueue = new Map();
 const LAST_SEQUENCE = 'browserSyncOutgoingSequence';
 const LAST_APPLIED = 'browserSyncLastAppliedSequence';
+const PENDING_DELIVERY = 'browserSyncPendingDelivery';
+const LAST_RECONCILE = 'browserSyncLastReconcileAt';
 const ALLOW_OVERRIDE = 'browserSyncAllowOverwrite';
 const statusKey = 'browserSyncTransferStatus';
 const pendingOpenKey = 'browserSyncPendingOpen';
@@ -68,13 +71,19 @@ export async function sendSnapshot(ruleId) {
     stored[ruleId]=sequence;
     await chrome.storage.local.set({[LAST_SEQUENCE]:stored});
     const envelope=await encryptSnapshot(ctx.rule,ctx.remote,sequence,payload);
-    // Mark pending first: the receiver may send APPLIED before the relay's
-    // acknowledgement returns, and a late RELAYED must not hide that result.
+    // Keep only opaque IDs and timestamps, not credential contents.
+    // This is written before sending: a fast APPLIED cannot race the record.
+    const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+    pending[ruleId]={ruleId,messageId:envelope.messageId,createdAt:Date.now()};
+    await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
     await setStatus(ruleId,'RELAYED');
     const ack=await sendControl('SESSION_SNAPSHOT',{envelope});
     if(ack.status!=='RELAYED')throw new Error('中继没有接受加密快照');
     return {state:'RELAYED',count:payload.cookies.length};
   }catch(error){
+    const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+    delete pending[ruleId];
+    await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
     await setStatus(ruleId,'FAILED');
     throw error;
   }finally{sourceBusy.delete(ruleId);}
@@ -163,9 +172,16 @@ onServerPush(async message => {
   if(message.type==='SYNC_REQUEST'&&typeof message.ruleId==='string'){
     try{await sendSnapshot(message.ruleId);}catch{ /* offline or Cookie scope incompatible */ }
   }
-  if(message.type==='SYNC_ACK'&&typeof message.ruleId==='string'&&
-    ['RECEIVED','APPLIED','FAILED','CONFLICT'].includes(message.status))
+  if(message.type==='SYNC_ACK'&&typeof message.ruleId==='string'){
+    const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+    const item=pending[message.ruleId];
+    if(!acceptDeliveryAck(item,message,Date.now()))return;
     await setStatus(message.ruleId,message.status);
+    if(isTerminalAck(message.status)){
+      delete pending[message.ruleId];
+      await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
+    }
+  }
 });
 
 // Debounced Cookie change events only for active source rules with prior,
@@ -185,13 +201,19 @@ export async function onCookieChange(cookie) {
   }
 }
 
-export async function restoreActiveSubscriptions() {
+export async function restoreActiveSubscriptions({force=false}={}) {
   const settings=await getSettings();
   if(!settings.serverOrigin)return;
+  const now=Date.now();
+  const last=(await chrome.storage.local.get(LAST_RECONCILE))[LAST_RECONCILE];
+  if(!force&&!shouldReconcile(last,now))return;
   const identity=await getOrCreateIdentity();
   const rules=(await sendControl('LIST_RULES')).rules||[];
+  // Network reconnection may trigger multiple async wakeups. Limit periodic
+  // sync to five minutes, not every one-minute service worker alarm.
+  await chrome.storage.local.set({[LAST_RECONCILE]:now});
   for(const r of rules){
-    if(r.status==='active' && r.targetBrowserDeviceId===identity.deviceId)
+    if(r.status==='active'&&r.targetBrowserDeviceId===identity.deviceId)
       await requestSnapshot(r.ruleId).catch(()=>{});
   }
 }
@@ -211,7 +233,7 @@ export async function forgetRuleLocalState(ruleId) {
   // Removing sync metadata does NOT delete or revoke website Cookies.
   // Credential revocation must be handled by the destination website.
   for(const key of [LAST_SEQUENCE,LAST_APPLIED,ALLOW_OVERRIDE,statusKey,
-      pendingOpenKey,'browserSyncManagedCookieHmacV1','browserSyncLocalOffers']){
+      pendingOpenKey,PENDING_DELIVERY,'browserSyncManagedCookieHmacV1','browserSyncLocalOffers']){
     const values=(await chrome.storage.local.get(key))[key]||{};
     if(Object.hasOwn(values,ruleId)){
       delete values[ruleId];

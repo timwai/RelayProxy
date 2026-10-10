@@ -1921,6 +1921,7 @@ func (a *Agent) closeRuntime() error {
 		a.rdpTargets = nil
 		a.cancel()
 		a.mu.Unlock()
+		if a.routingEngine != nil { a.routingEngine.Close() }
 		var errs []error
 		if socks != nil {
 			errs = append(errs, socks.Close())

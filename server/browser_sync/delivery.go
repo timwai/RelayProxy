@@ -104,25 +104,39 @@ func (s *Store) ClaimDeliveryReceipt(ctx context.Context, receiverID, ruleID, me
 			WHERE message_id=? AND rule_id=? AND source_id=? AND target_id=?
 			AND expires_at>? AND received=0`,
 			messageID, ruleID, source.ID, receiverID, now.Unix())
-		if err != nil { return "", err }
+		if err != nil {
+			return "", err
+		}
 		count, err := result.RowsAffected()
-		if err != nil || count != 1 { return "", ErrRuleDenied }
+		if err != nil || count != 1 {
+			return "", ErrRuleDenied
+		}
 		return source.ID, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_deliveries
 		WHERE message_id=? AND rule_id=? AND source_id=? AND target_id=?
 		AND expires_at>?`, messageID, ruleID, source.ID, receiverID, now.Unix())
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	count, err := result.RowsAffected()
-	if err != nil || count != 1 { return "", ErrRuleDenied }
+	if err != nil || count != 1 {
+		return "", ErrRuleDenied
+	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO browser_sync_delivery_results
 		(message_id,rule_id,source_id,status,expires_at) VALUES(?,?,?,?,?)`,
 		messageID, ruleID, source.ID, status, now.Add(deliveryRetention).Unix())
-	if err != nil { return "", err }
-	if err = tx.Commit(); err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
+	if err = tx.Commit(); err != nil {
+		return "", err
+	}
 	return source.ID, nil
 }
 
@@ -140,20 +154,34 @@ func (s *Store) ActiveDeliveryCount(ctx context.Context, ruleID string) (int, er
 // active rule; a caller cannot enumerate other devices' acknowledgements.
 // UNKNOWN intentionally does not imply "Cookie not applied".
 func (s *Store) DeliveryStatus(ctx context.Context, sourceID, ruleID, messageID string, now time.Time) (string, error) {
-	if _, err := uuid.Parse(messageID); err != nil { return "", ErrRuleDenied }
-	if _, err := s.SessionCursor(ctx, sourceID, ruleID); err != nil { return "", ErrRuleDenied }
+	if _, err := uuid.Parse(messageID); err != nil {
+		return "", ErrRuleDenied
+	}
+	if _, err := s.SessionCursor(ctx, sourceID, ruleID); err != nil {
+		return "", ErrRuleDenied
+	}
 	var status string
 	err := s.db.QueryRowContext(ctx, `SELECT status FROM browser_sync_delivery_results
 		WHERE message_id=? AND rule_id=? AND source_id=? AND expires_at>?`,
 		messageID, ruleID, sourceID, now.Unix()).Scan(&status)
-	if err == nil { return status, nil }
-	if !errors.Is(err, sql.ErrNoRows) { return "", err }
+	if err == nil {
+		return status, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
 	var received int
 	err = s.db.QueryRowContext(ctx, `SELECT received FROM browser_sync_deliveries
 		WHERE message_id=? AND rule_id=? AND source_id=? AND expires_at>?`,
 		messageID, ruleID, sourceID, now.Unix()).Scan(&received)
-	if errors.Is(err, sql.ErrNoRows) { return "UNKNOWN", nil }
-	if err != nil { return "", err }
-	if received == 1 { return "RECEIVED", nil }
+	if errors.Is(err, sql.ErrNoRows) {
+		return "UNKNOWN", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if received == 1 {
+		return "RECEIVED", nil
+	}
 	return "PENDING", nil
 }

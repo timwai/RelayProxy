@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime"
 	"net"
 	"net/http"
@@ -41,6 +42,19 @@ func (s *Server) exchangeProxyDNS(ctx context.Context, routeExitID string, quest
 		return reply, nil
 	}
 	return nil, fmt.Errorf("proxy encrypted DNS unavailable (DoH/443: %v; DoT/853: %w)", dohErr, dotErr)
+}
+
+// Log only one summary per interval: a resolver outage can otherwise emit
+// thousands of SERVFAIL responses and overwhelm the service logs.
+func (s *Server) reportProxyDNSError(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	now := time.Now().Unix()
+	previous := s.lastDNSFailureLog.Load()
+	if now-previous >= 30 && s.lastDNSFailureLog.CompareAndSwap(previous, now) {
+		log.Printf("[divert] proxy DNS resolution failed (exit=%q, DoH/443 then DoT/853): %v", s.dnsExitScope(""), err)
+	}
 }
 
 // Wait for a bounded DNS slot rather than returning immediate SERVFAIL if

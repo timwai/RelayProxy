@@ -412,6 +412,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
 		return nil, err
 	}
+	if err := routing.ValidateSubscriptionExitReferences(cfg.CustomExits, cfg.Routing.Subscriptions); err != nil { return nil, err }
 	if cfg.ExitUpstreamID != "" {
 		item, _ := routing.FindCustomExit(cfg.CustomExits, cfg.ExitUpstreamID)
 		cfg.ExitUpstream = exit.UpstreamConfig{Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password}
@@ -2014,6 +2015,7 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 	if err := routing.ValidateCustomReferences(items, defaultID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID); err != nil {
 		return err
 	}
+	if err := routing.ValidateSubscriptionExitReferences(items, routeCfg.Subscriptions); err != nil { return err }
 	if divertCfg.Mode != a.cfg.NetworkMode {
 		return ErrRestartRequired
 	}

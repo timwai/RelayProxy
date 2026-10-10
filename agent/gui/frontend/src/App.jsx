@@ -315,8 +315,12 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const proxy=(value)=>{if(!value&&!confirmDisable())return;change(setProxyDNS(r,value))};
  const automatic=(value)=>{if(value&&!confirmDisable())return;change(setAutoDNS(r,value))};
  const protection=status.dnsProtection||{};
- const capture=status.divertRunning===true;
- const activeFakeIP=capture&&protection.fakeIpEnabled===true;
+ const divertRunning=status.divertRunning===true;
+ const captureMode=protection.capture||'unavailable';
+ const captureObserved=divertRunning&&captureMode!=='unavailable';
+ const strictCapture=captureObserved&&captureMode==='nfqueue-no-bypass';
+ const fakeConfigured=!!r.fake_ip_enabled;
+ const fakeApplied=divertRunning&&protection.fakeIpEnabled===true;
  return <><PageHead title="DNS 与防泄漏" desc="独立管理域名解析位置、自动检测、FakeIP DNS 接管与已知加密 DNS 绕过防护。" actions={<Button onClick={()=>onGoto('routing')}>分流规则 ›</Button>}/>
  <Card title="主机名解析" eyebrow="NAME RESOLUTION">
   <Setting title="自动检测 DNS 状态" desc="开启时自动切换到本机优先模式：先尝试系统 DNS，本机查询失败再使用代理解析。此模式可能产生本机 DNS 查询，不适用于严格防泄漏。"><Switch checked={!!r.auto_detect_dns} label="自动检测 DNS 状态" onChange={automatic}/></Setting>
@@ -336,8 +340,8 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
   <div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>透明代理设置 ›</Button><Button onClick={()=>onGoto('diagnostics')}>诊断与日志 ›</Button></div>
  </Card>
  <Card title="实际运行状态" eyebrow="ACTIVE DNS PROTECTION">
-  <Setting title="透明代理 DNS 捕获" desc={protection.capture||'未上报实际捕获状态'}><Badge tone={capture?'ok':'warn'}>{capture?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
-  <Setting title="FakeIP 实际状态" desc={r.fake_ip_enabled&&!activeFakeIP?'配置已开启，但当前尚未确认透明 DNS 接管已生效':'以当前 Agent 上报的配置和拦截状态为准'}><Badge tone={activeFakeIP?'ok':r.fake_ip_enabled?'warn':'neutral'}>{activeFakeIP?'配置开启 · 拦截运行中':r.fake_ip_enabled?'已配置 · 未确认生效':'未启用'}</Badge></Setting>
+  <Setting title="透明代理运行状态" desc={'DNS 捕获报告：'+captureMode+'（仅反映 Agent / 内核上报，不能证明所有 DNS 均已接管）'}><Badge tone={divertRunning?'blue':'warn'}>{divertRunning?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
+  <Setting title="FakeIP 配置与捕获证据" desc={fakeConfigured?'已保存 FakeIP 策略；'+(captureObserved?'观察到捕获报告，但环回 DNS、私有 DoH 和防火墙旁路仍需验证。':'目前未观察到有效的 DNS 捕获报告。'):'FakeIP 策略未启用'}><Badge tone={strictCapture&&fakeApplied?'blue':fakeConfigured?'warn':'neutral'}>{!fakeConfigured?'未启用':!fakeApplied?'已配置 · 未确认应用':strictCapture?'内核捕获报告可用 · 仍需实测':'策略已应用 · DNS 接管未独立验证'}</Badge></Setting>
   <Setting title="独立 DNS Kill Switch" desc={protection.detail||'当前没有足够证据证明系统级防泄漏'}><Badge tone={protection.independentGuard==='rules-present'?'blue':'warn'}>{protection.independentGuard||'未验证'}</Badge></Setting>
  </Card>
  <SaveBar dirty={dirty} label="保存 DNS 设置" hint="解析模式与路由 DNS 策略支持热更新；如果透明代理本身未启用，请先完成对应安装与启动。" onSave={()=>save({routing:dnsPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>

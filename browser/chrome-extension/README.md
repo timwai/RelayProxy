@@ -1,5 +1,8 @@
 # RelayProxy Browser Sync — Chrome 扩展（P3 开发预览）
 
+**实时开发进度与发布准入**：[P0 上线前必须完成 / P1 正式版 / P2 后续增强及验证记录](../../docs/browser-session-sync-progress.md)。本 README 描述已经编写的开发功能，不能替代真实 Chrome 验收或安全审查。
+
+
 Chrome 扩展直接连接 RelayProxy Server 的 **Admin HTTPS/WSS** 服务，不需要安装或运行本机 Agent，也不需要 Native Messaging、SOCKS5 或透明代理。
 
 > **安全声明：** 同步网站会话 Cookie 相当于向另一台设备授予网站账号访问能力。仅限用户自己拥有或明确授权的账号与设备；生产部署前需完成真实 Chrome 双端验证、安全审计和跨浏览器版本回归。网站设备绑定、DBSC、Passkey、多因素验证等机制不能通过复制 Cookie 绕过。

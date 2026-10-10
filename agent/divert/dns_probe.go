@@ -43,7 +43,7 @@ func (s *Server) ProbeDNS(ctx context.Context) (DNSProbeReport, error) {
 		return DNSProbeReport{}, err
 	}
 	wire, err := (dnsmessage.Message{
-		Header: dnsmessage.Header{ID: 12457, RecursionDesired: true},
+		Header:    dnsmessage.Header{ID: 12457, RecursionDesired: true},
 		Questions: []dnsmessage.Question{{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}},
 	}).Pack()
 	if err != nil {

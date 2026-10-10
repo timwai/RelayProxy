@@ -21,3 +21,12 @@ export function acceptDeliveryAck(pending, ack, now) {
 export function isTerminalAck(status) {
   return status === 'APPLIED' || status === 'FAILED' || status === 'CONFLICT';
 }
+
+export function nextSessionSequence(localSequence, serverCursor) {
+  if (!Number.isSafeInteger(localSequence) || localSequence < 0 ||
+      !Number.isSafeInteger(serverCursor) || serverCursor < 0)
+    throw new Error('无法安全恢复会话序号');
+  const next = Math.max(localSequence, serverCursor) + 1;
+  if (!Number.isSafeInteger(next)) throw new Error('会话序号耗尽，必须重新配对');
+  return next;
+}

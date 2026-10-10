@@ -3,8 +3,8 @@ module relayproxy
 go 1.27.1
 
 require (
-	github.com/coder/websocket v1.8.14
 	github.com/apernet/quic-go v0.63.1-0.20261004180939-a10df75c260c
+	github.com/coder/websocket v1.8.14
 	github.com/florianl/go-nfqueue/v2 v2.1.0
 	github.com/go-ole/go-ole v1.3.0
 	github.com/google/uuid v1.6.0

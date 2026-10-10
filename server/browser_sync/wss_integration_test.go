@@ -156,6 +156,16 @@ func TestWSSSignedEncryptedSessionDeliveredWithAck(t *testing.T) {
 	a := dialApprovedBrowser(t, server, source, sourceKey)
 	b := dialApprovedBrowser(t, server, target, targetKey)
 
+	// The receiver cannot manufacture a successful login confirmation for a
+	// message the source never sent, even though its own device is approved.
+	sendWSSControl(t, b, map[string]any{
+		"type": "SYNC_ACK", "requestId": "forged", "ruleId": ruleID,
+		"messageId": uuid.NewString(), "status": "APPLIED",
+	})
+	if reply := readWSSControl(t, b); reply["type"] != "RULE_ERROR" {
+		t.Fatalf("accepted ACK for unknown message: %v", reply)
+	}
+
 	env := signedTestSnapshot(t, sourceKey, source.ID, target.ID, ruleID)
 	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "send1", "envelope": env})
 	if reply := readWSSControl(t, a); reply["type"] != "SYNC_STATUS" || reply["status"] != "RELAYED" {
@@ -179,6 +189,13 @@ func TestWSSSignedEncryptedSessionDeliveredWithAck(t *testing.T) {
 	}
 	if reply := readWSSControl(t, b); reply["type"] != "SYNC_STATUS" {
 		t.Fatalf("target missing ACK forwarding status: %v", reply)
+	}
+	sendWSSControl(t, b, map[string]any{
+		"type": "SYNC_ACK", "requestId": "replayedAck", "ruleId": ruleID,
+		"messageId": env.MessageID, "status": "APPLIED",
+	})
+	if reply := readWSSControl(t, b); reply["type"] != "RULE_ERROR" {
+		t.Fatalf("accepted duplicate terminal ACK: %v", reply)
 	}
 	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "dupe", "envelope": env})
 	if reply := readWSSControl(t, a); reply["type"] != "RULE_ERROR" {

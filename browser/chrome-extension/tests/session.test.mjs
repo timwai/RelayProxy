@@ -46,7 +46,12 @@ function createProfile() {
         async set(obj) {for(const [k,v] of Object.entries(obj))local.set(k,v);}
       }},
       cookies: {
-        async getAll({url}) {return [...jar.values()].filter(c=>new URL(url).hostname===c.domain);},
+        async getAll({url}) {
+          const host=new URL(url).hostname;
+          return [...jar.values()].filter(c=>
+            host===c.domain.replace(/^\\./,'')||
+            (!c.hostOnly&&host.endsWith('.'+c.domain.replace(/^\\./,''))));
+        },
         async remove({url,name}) {
           if (new URL(url).hostname!=='example.com'||!jar.has(name)) return null;
           jar.delete(name);

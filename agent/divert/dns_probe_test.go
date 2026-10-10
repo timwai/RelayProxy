@@ -54,8 +54,8 @@ func TestDNSProbeUsesActiveExitAndReportsPerResolverFailures(t *testing.T) {
 func TestDNSProbeCustomResolversNeverFallBackToPublic(t *testing.T) {
 	var ips []string
 	s := newTestServer(t, Options{
-		Config:      Config{DefaultAction: ActionProxy},
-		ProxyReady:  func() bool { return true },
+		Config:     Config{DefaultAction: ActionProxy},
+		ProxyReady: func() bool { return true },
 		DNSUpstreams: func() []DNSUpstream {
 			return []DNSUpstream{{URL: "https://resolver.private.example/dns-query", BootstrapIP: "10.0.0.53"}}
 		},

@@ -315,11 +315,7 @@ func (s *WailsService) GetConfig() (string, error) {
 				Port:    state.Runtime.Proxy.HTTP.Port,
 			},
 		},
-		Routing: map[string]any{
-			"mode":           cfg.Routing.Mode,
-			"default_action": cfg.Routing.DefaultAction,
-			"rules":          cfg.Routing.Rules,
-		},
+		Routing: routingConfigView(cfg.Routing),
 	}
 	payload.SOCKS5 = proxyLeg{
 		Enabled: cfg.Proxy.SOCKS5.Enabled == nil || *cfg.Proxy.SOCKS5.Enabled,

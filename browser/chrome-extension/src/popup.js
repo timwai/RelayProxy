@@ -32,7 +32,8 @@ $('save').addEventListener('click', async () => {
       throw new Error('仅支持 HTTPS Server Origin');
     }
     // Explicit click grants the extension access to the Admin HTTPS origin.
-    const granted = await chrome.permissions.request({ origins: [origin.origin + '/*'] });
+    const pattern = `${origin.protocol}//${origin.hostname}/*`; // Chrome host permission patterns omit ports
+    const granted = await chrome.permissions.request({ origins: [pattern] });
     if (!granted) { status('未授予 Server 访问权限。'); return; }
     const response = await chrome.runtime.sendMessage({
       type: 'SAVE_SERVER', serverOrigin: raw
@@ -46,7 +47,9 @@ $('add-site').addEventListener('click', async () => {
   try {
     const origin = parseSiteOrigin($('site').value.trim());
     // Call request() directly from a user click; never grant silently.
-    const granted = await chrome.permissions.request({ origins: [origin + '/*'] });
+    const websiteURL = new URL(origin);
+    const pattern = `${websiteURL.protocol}//${websiteURL.hostname}/*`;
+    const granted = await chrome.permissions.request({ origins: [pattern] });
     if (!granted) return status('站点权限未获授予。');
     const settings = await getSettings();
     if (!settings.sites.includes(origin)) {

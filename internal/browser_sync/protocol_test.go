@@ -43,7 +43,9 @@ func TestValidateEnvelope(t *testing.T) {
 		{"expired", func(e *Envelope) { e.ExpiresAt = now.Add(-time.Millisecond) }},
 		{"future", func(e *Envelope) { e.CreatedAt = now.Add(2 * time.Minute); e.ExpiresAt = now.Add(3 * time.Minute) }},
 		{"bad-key", func(e *Envelope) { e.Encryption.Enc = "*invalid*" }},
-		{"oversized-ciphertext", func(e *Envelope) { e.Ciphertext = strings.Repeat("A", base64.StdEncoding.EncodedLen(MaxCiphertextBytes)+4) }},
+		{"oversized-ciphertext", func(e *Envelope) {
+			e.Ciphertext = strings.Repeat("A", base64.StdEncoding.EncodedLen(MaxCiphertextBytes)+4)
+		}},
 		{"missing-signature", func(e *Envelope) { e.Signature = "" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

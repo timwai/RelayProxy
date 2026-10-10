@@ -1960,6 +1960,12 @@ func (a *Agent) closeRuntime() error {
 	return a.closeErr
 }
 
+// RoutingSubscriptionStatuses exposes active local list counts and update errors.
+func (a *Agent) RoutingSubscriptionStatuses() []routing.SubscriptionStatus {
+	if a.routingEngine == nil { return nil }
+	return a.routingEngine.SubscriptionStatuses()
+}
+
 // ApplyPolicies updates routing without changing the configured local exits
 // or selected default. Its validation and publication share the bundle path.
 func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) error {

@@ -471,6 +471,7 @@ type RoutingConfigUpdate struct {
 	DoHBlockedIPs         *[]string      `json:"doh_blocked_ips"`
 	DefaultAction         *string        `json:"default_action"`
 	Rules                 []routing.Rule `json:"rules"` // Full replacement
+	Subscriptions *[]routing.Subscription `json:"subscriptions"`
 }
 
 // SaveResult tells the UI whether the change took effect immediately.
@@ -751,6 +752,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		if in.Routing.Rules != nil {
 			cfg.Routing.Rules = in.Routing.Rules
+		}
+		if in.Routing.Subscriptions != nil {
+			cfg.Routing.Subscriptions = append([]routing.Subscription(nil), (*in.Routing.Subscriptions)...)
 		}
 	}
 

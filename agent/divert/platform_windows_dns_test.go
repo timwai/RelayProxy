@@ -23,3 +23,23 @@ func TestWindowsFilterCapturesDNSOnRelayIP(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsDNSCacheRefreshOnlyForObservationalMode(t *testing.T) {
+	cases := []struct {
+		name string
+		associate, fakeIP, proxyDNS bool
+		want bool
+	}{
+		{"real IP association", true, false, false, true},
+		{"disabled association", false, false, false, false},
+		{"FakeIP active", true, true, false, false},
+		{"proxy DNS active", true, false, true, false},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldRefreshWindowsSystemDNSCache(tt.associate, tt.fakeIP, tt.proxyDNS); got != tt.want {
+				t.Fatalf("refresh cache = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

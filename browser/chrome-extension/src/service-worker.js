@@ -1,15 +1,16 @@
 // Agentless development milestone: device identity + local website rules.
-// Registration and signed WSS authentication are implemented; remote Cookie
-// transfer is intentionally disabled until mutual approval and E2EE exist.
+// Session transfer uses existing mutual pairing, E2EE and precise cookie scopes.
 import { getOrCreateIdentity } from './device-identity.js';
 import { getSettings, updateSettings, parseServerOrigin } from './rules.js';
 import { registerBrowser, connectBrowser, currentConnectionState, disconnect, sendControl } from './server-api.js';
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
+import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission } from './session-sync.js';
 
 async function initialize() {
   await getOrCreateIdentity();
-  await chrome.alarms.create('browser-sync-reconcile', { periodInMinutes: 15 });
+  await chrome.alarms.create('browser-sync-reconcile', { periodInMinutes: 1 });
+  restoreActiveSubscriptions().catch(() => {});
 }
 
 chrome.runtime.onInstalled.addListener(() => { initialize().catch(console.error); });
@@ -17,16 +18,11 @@ chrome.runtime.onStartup.addListener(() => { initialize().catch(console.error); 
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== 'browser-sync-reconcile') return;
-  // Periodic reauthentication is opt-in after the user establishes a browser pairing.
+  restoreActiveSubscriptions().catch(() => {});
 });
 
-chrome.cookies.onChanged.addListener(async ({ cookie }) => {
-  // Observe *metadata only* in development. We never read or send values
-  // until a site rule has been approved on both browser devices.
-  const settings = await getSettings();
-  const hostname = cookie.domain.replace(/^\./, '');
-  if (!settings.sites.some(origin => new URL(origin).hostname === hostname)) return;
-  await chrome.storage.local.set({ browserSyncLastLocalCookieChange: Date.now() });
+chrome.cookies.onChanged.addListener(({ cookie }) => {
+  onCookieChange(cookie).catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -35,7 +31,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message?.type) {
       case 'GET_STATUS': {
         const [identity, settings] = await Promise.all([getOrCreateIdentity(), getSettings()]);
-        return { ok: true, identity, settings, connected: currentConnectionState() === 'AUTHENTICATED', stage: currentConnectionState() };
+        return { ok: true, identity, settings, connected: currentConnectionState() === 'AUTHENTICATED', stage: currentConnectionState(), transferEnabled: true };
       }
       case 'SAVE_SERVER': {
         const serverOrigin = parseServerOrigin(message.serverOrigin);
@@ -174,6 +170,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'REVOKE_RULE':
         await sendControl('RULE_REVOKE', { ruleId: message.ruleId });
         return { ok: true };
+      case 'SEND_SESSION':
+        return { ok: true, ...(await sendSnapshot(message.ruleId)) };
+      case 'REQUEST_SESSION':
+        return { ok: true, ...(await requestSnapshot(message.ruleId)) };
+      case 'ALLOW_OVERWRITE':
+        return { ok: true, ...(await setOverwritePermission(message.ruleId, message.allowed)) };
       default:
         throw new Error('Unsupported extension message');
     }

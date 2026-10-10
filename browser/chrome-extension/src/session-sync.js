@@ -189,3 +189,18 @@ export async function setOverwritePermission(ruleId,allowed) {
   await chrome.storage.local.set({[ALLOW_OVERRIDE]:flags});
   return {ruleId,allowed:flags[ruleId]};
 }
+
+export async function forgetRuleLocalState(ruleId) {
+  clearTimeout(cookieTimers.get(ruleId));
+  cookieTimers.delete(ruleId);
+  // Removing sync metadata does NOT delete or revoke website Cookies.
+  // Credential revocation must be handled by the destination website.
+  for(const key of [LAST_SEQUENCE,LAST_APPLIED,ALLOW_OVERRIDE,statusKey,
+      pendingOpenKey,'browserSyncManagedCookieHmacV1','browserSyncLocalOffers']){
+    const values=(await chrome.storage.local.get(key))[key]||{};
+    if(Object.hasOwn(values,ruleId)){
+      delete values[ruleId];
+      await chrome.storage.local.set({[key]:values});
+    }
+  }
+}

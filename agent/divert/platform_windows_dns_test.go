@@ -15,6 +15,7 @@ func TestWindowsFilterCapturesDNSOnRelayIP(t *testing.T) {
 	}
 	for _, part := range []string{
 		"outbound and !loopback and ((udp and udp.DstPort == 53) or (tcp and tcp.DstPort == 53))",
+		"inbound and !loopback and ((udp and udp.SrcPort == 53) or (tcp and tcp.SrcPort == 53))",
 		"tcp.DstPort == 45001", "tcp.DstPort == 45002",
 	} {
 		if !strings.Contains(filter, part) {

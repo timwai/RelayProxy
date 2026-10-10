@@ -143,6 +143,19 @@ test('logout removes only Cookie values last installed by the same rule', async 
   assert.equal(target.jar.get('session').value,'other-local-account');
 });
 
+test('same-value Cookie from an independent login is never adopted for logout', async()=>{
+  const target=createProfile();use(target);
+  target.jar.set('session',{name:'session',value:'same-cookie-as-source',
+    secure:true,httpOnly:true,sameSite:'lax',hostOnly:true,domain:'example.com',path:'/'});
+  const original={siteOrigin:policy.siteOrigin,cookieNames:policy.cookieNames,
+    cookies:[{name:'session',value:'same-cookie-as-source',secure:true,
+      httpOnly:true,sameSite:'lax'}],removedNames:[]};
+  await applyCookies('not-owned',original,policy);
+  await assert.rejects(applyCookies('not-owned',{siteOrigin:policy.siteOrigin,
+    cookieNames:policy.cookieNames,cookies:[],removedNames:['session']},policy),/CONFLICT/);
+  assert.equal(target.jar.get('session').value,'same-cookie-as-source');
+});
+
 test('logout refuses deleting a Cookie modified by the receiver after sync',async()=>{
   const target=createProfile();use(target);
   const initially={siteOrigin:policy.siteOrigin,cookieNames:policy.cookieNames,

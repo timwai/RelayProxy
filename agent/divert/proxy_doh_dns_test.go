@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -16,9 +17,10 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
-func TestAutoDNSUsesProxyHTTPS443BeforeTLS853(t *testing.T) {
+func TestAutoDNSUsesMultipleProxyHTTPSProvidersBeforeTLS853(t *testing.T) {
 	var mu sync.Mutex
 	var ports []uint16
+	var ips []string
 	var exits []string
 	s := newTestServer(t, Options{
 		Config:          Config{DefaultAction: ActionProxy},
@@ -26,11 +28,9 @@ func TestAutoDNSUsesProxyHTTPS443BeforeTLS853(t *testing.T) {
 		ProxyReady:      func() bool { return true },
 		DefaultExitID:   func() string { return "working-exit" },
 		Dialer: &testDialer{tcp: func(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
-			if host != "9.9.9.9" {
-				t.Errorf("resolver was not pinned to an IP: %s", host)
-			}
 			mu.Lock()
 			ports = append(ports, port)
+			ips = append(ips, host)
 			exits = append(exits, exit)
 			mu.Unlock()
 			return nil, errors.New("test tunnel unavailable")
@@ -39,18 +39,39 @@ func TestAutoDNSUsesProxyHTTPS443BeforeTLS853(t *testing.T) {
 	query := fakeDNSQuestion(t, "www.google.com", dnsmessage.TypeA)
 	reply := fakeDNSAnswer(t, s.interceptedDNSReply(context.Background(), query, true))
 	if reply.RCode != dnsmessage.RCodeServerFailure {
-		t.Fatalf("proxy failure must not leak local DNS: %v", reply.RCode)
+		t.Fatalf("all proxy failures must fail closed: %v", reply.RCode)
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if len(ports) != 2 || ports[0] != 443 || ports[1] != 853 {
-		t.Fatalf("wrong encrypted DNS fallback sequence: %v", ports)
+	wantIPs := []string{"1.1.1.1", "8.8.8.8", "9.9.9.9", "9.9.9.9"}
+	wantPorts := []uint16{443, 443, 443, 853}
+	if !slices.Equal(ips, wantIPs) || !slices.Equal(ports, wantPorts) {
+		t.Fatalf("wrong proxy DNS fallback: ips=%v ports=%v", ips, ports)
 	}
-	if exits[0] != "working-exit" || exits[1] != "working-exit" {
-		t.Fatalf("DNS did not stay on selected exit: %v", exits)
+	for _, exit := range exits {
+		if exit != "working-exit" {
+			t.Fatalf("DNS request escaped selected exit: %v", exits)
+		}
 	}
 	if len(s.fakeDNS.byIP) != 0 {
-		t.Fatal("Auto DNS allocated FakeIP instead of genuine-IP DNS")
+		t.Fatal("Auto DNS allocated FakeIP instead of real IPs")
+	}
+}
+
+func TestProxyDoHProvidersUseHTTP2AndPinnedTLSNames(t *testing.T) {
+	s := newTestServer(t, Options{Config: Config{DefaultAction: ActionProxy}})
+	for _, upstream := range proxyDNSDoHUpstreams {
+		transport := newProxyDoHTransport(s, "working-exit", upstream)
+		if !transport.ForceAttemptHTTP2 {
+			t.Fatalf("%s disables HTTP/2 even though provider may require it", upstream.name)
+		}
+		if transport.Proxy != nil || transport.TLSClientConfig.ServerName != upstream.host ||
+			transport.TLSClientConfig.InsecureSkipVerify {
+			t.Fatalf("%s lacks pinned/validated HTTPS resolver transport", upstream.name)
+		}
+		if upstream.address == "" || upstream.host == "" || upstream.url == "" {
+			t.Fatalf("%s has missing DNS bootstrap", upstream.name)
+		}
 	}
 }
 

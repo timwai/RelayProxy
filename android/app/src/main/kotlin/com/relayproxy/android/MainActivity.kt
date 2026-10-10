@@ -2229,9 +2229,8 @@ class MainActivity : Activity() {
         })
         content.addView(dnsCard, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { bottomMargin = dp(16) })
+        ).apply { topMargin = dp(16) })
         updateDNSProtectionSummary()
-
 
         // 3. 传输参数与 TLS 安全卡片 (Card 3: 拆分)
         val protoCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)

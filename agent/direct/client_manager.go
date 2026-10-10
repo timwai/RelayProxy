@@ -25,14 +25,14 @@ type ClientDialFunc func(context.Context, DialConfig) (tunnel.TunnelSession, err
 type ClientRaceDialFunc func(context.Context, []DialConfig) (tunnel.TunnelSession, string, error)
 
 type ClientManagerOptions struct {
-	AttemptTimeout time.Duration
-	Cooldown       time.Duration
-	MaxCooldown    time.Duration
-	Dial           ClientDialFunc
-	RaceDial       ClientRaceDialFunc
-	Now            func() time.Time
-	BrutalUploadBPS uint64
-	BrutalDownloadBPS uint64
+	AttemptTimeout          time.Duration
+	Cooldown                time.Duration
+	MaxCooldown             time.Duration
+	Dial                    ClientDialFunc
+	RaceDial                ClientRaceDialFunc
+	Now                     func() time.Time
+	BrutalUploadBPS         uint64
+	BrutalDownloadBPS       uint64
 	DisableLossCompensation bool
 	// EndpointUsable checks local address-family reachability before dialing.
 	// An incompatible endpoint must not consume a one-time Direct ticket.
@@ -69,11 +69,11 @@ type ClientManager struct {
 	endpointUsable func(address string) bool
 	now            func() time.Time
 
-	attemptTimeout time.Duration
-	cooldown       time.Duration
-	maxCooldown    time.Duration
-	brutalUploadBPS uint64
-	brutalDownloadBPS uint64
+	attemptTimeout          time.Duration
+	cooldown                time.Duration
+	maxCooldown             time.Duration
+	brutalUploadBPS         uint64
+	brutalDownloadBPS       uint64
 	disableLossCompensation bool
 
 	mu       sync.Mutex
@@ -130,12 +130,14 @@ func NewClientManager(parent context.Context, clientID func() string, options Cl
 		attemptTimeout: attemptTimeout, cooldown: cooldown, maxCooldown: maxCooldown,
 		brutalUploadBPS: options.BrutalUploadBPS, brutalDownloadBPS: options.BrutalDownloadBPS,
 		disableLossCompensation: options.DisableLossCompensation,
-		entries: make(map[string]*clientEntry),
+		entries:                 make(map[string]*clientEntry),
 	}
 }
 
 func (m *ClientManager) SetBrutalProfile(uploadBPS, downloadBPS uint64) {
-	if m == nil { return }
+	if m == nil {
+		return
+	}
 	m.mu.Lock()
 	m.brutalUploadBPS = uploadBPS
 	m.brutalDownloadBPS = downloadBPS

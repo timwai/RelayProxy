@@ -521,25 +521,34 @@ func TestPublicDirectLegacyAuthenticatorIgnoresBrutalHints(t *testing.T) {
 	failure := make(chan error, 1)
 	go func() {
 		item, err := listener.Accept(ctx)
-		if err != nil { failure <- err; return }
+		if err != nil {
+			failure <- err
+			return
+		}
 		accepted <- item
 	}()
 	config := testDialConfig(listener, ticket)
 	config.BrutalUploadBPS = 12_500_000
 	config.BrutalDownloadBPS = 25_000_000
 	clientSession, err := direct.Dial(ctx, config)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer clientSession.Close()
 	var serverSession *direct.AcceptedSession
 	select {
 	case serverSession = <-accepted:
-	case err := <-failure: t.Fatal(err)
-	case <-ctx.Done(): t.Fatal(ctx.Err())
+	case err := <-failure:
+		t.Fatal(err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 	defer serverSession.Tunnel.Close()
 	for _, item := range []tunnel.TunnelSession{clientSession, serverSession.Tunnel} {
 		diagnostics := tunnel.DiagnoseSession(item)
-		if diagnostics == nil || diagnostics.QUIC == nil { t.Fatal("missing QUIC diagnostics") }
+		if diagnostics == nil || diagnostics.QUIC == nil {
+			t.Fatal("missing QUIC diagnostics")
+		}
 		if diagnostics.QUIC.CongestionController == "brutal" || diagnostics.QUIC.CongestionTargetBPS != 0 {
 			t.Fatalf("legacy authenticator activated Brutal: %+v", diagnostics.QUIC)
 		}

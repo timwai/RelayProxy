@@ -121,50 +121,50 @@ func init() {
 }
 
 type AgentConfig struct {
-	Identity              *deviceidentity.Identity
-	IdentityID            string
-	DeviceID              string
-	DeviceName            string
-	ServerAddress         string
-	QUICPort              int
-	TCPPort               int
-	Mode                  string // "CLIENT", "EXIT", "BOTH"
-	TransportMode         string // "auto", "quic_only", "tcp_only"
-	BrutalUploadBPS       uint64
-	BrutalDownloadBPS     uint64
+	Identity                *deviceidentity.Identity
+	IdentityID              string
+	DeviceID                string
+	DeviceName              string
+	ServerAddress           string
+	QUICPort                int
+	TCPPort                 int
+	Mode                    string // "CLIENT", "EXIT", "BOTH"
+	TransportMode           string // "auto", "quic_only", "tcp_only"
+	BrutalUploadBPS         uint64
+	BrutalDownloadBPS       uint64
 	DisableLossCompensation bool
-	SOCKS5Enabled         *bool
-	SOCKS5Listen          string // "127.0.0.1:1080"
-	HTTPEnabled           *bool
-	HTTPListen            string // "127.0.0.1:8080"
-	DefaultExitID         string
-	CustomExits           []routing.CustomExit
-	ExitUpstreamID        string
-	ExitEnabled           *bool
-	ExitUpstream          exit.UpstreamConfig
-	RDPEnabled            *bool
-	RDPAddress            string // target-local RDP service, default 127.0.0.1:3389
-	P2PEnabled            *bool
-	P2PMode               string
-	P2PPunchTimeout       time.Duration
-	P2PKeepalive          time.Duration
-	P2PIdleTimeout        time.Duration
-	P2PMaxSessions        int
-	P2PFallback           *bool
-	P2PUPnPAllowed        *bool
-	PublicDirectAdvertise string
-	AllowInternet         bool
-	AllowPrivateNet       bool
-	AllowLoopback         bool     // Allow localhost/loopback for testing
-	AccessMode            string   // "" (no gate), "allow" (whitelist) or "deny" (blacklist)
-	AccessDomains         []string // domain patterns for the access list (glob / .suffix / exact)
-	AccessCIDRs           []string // IP ranges for the access list (CIDR / single IP / start-end)
-	NetworkMode           string   // "" (off) | "divert"
-	DivertConfig          divert.Config
-	Routing               routing.Config
-	InsecureTLS           bool // Allow self-signed TLS certificates for development/testing
-	PlainTCP              bool // Disable TLS entirely; connect via plaintext TCP + yamux
-	ConnectTimeout        time.Duration
+	SOCKS5Enabled           *bool
+	SOCKS5Listen            string // "127.0.0.1:1080"
+	HTTPEnabled             *bool
+	HTTPListen              string // "127.0.0.1:8080"
+	DefaultExitID           string
+	CustomExits             []routing.CustomExit
+	ExitUpstreamID          string
+	ExitEnabled             *bool
+	ExitUpstream            exit.UpstreamConfig
+	RDPEnabled              *bool
+	RDPAddress              string // target-local RDP service, default 127.0.0.1:3389
+	P2PEnabled              *bool
+	P2PMode                 string
+	P2PPunchTimeout         time.Duration
+	P2PKeepalive            time.Duration
+	P2PIdleTimeout          time.Duration
+	P2PMaxSessions          int
+	P2PFallback             *bool
+	P2PUPnPAllowed          *bool
+	PublicDirectAdvertise   string
+	AllowInternet           bool
+	AllowPrivateNet         bool
+	AllowLoopback           bool     // Allow localhost/loopback for testing
+	AccessMode              string   // "" (no gate), "allow" (whitelist) or "deny" (blacklist)
+	AccessDomains           []string // domain patterns for the access list (glob / .suffix / exact)
+	AccessCIDRs             []string // IP ranges for the access list (CIDR / single IP / start-end)
+	NetworkMode             string   // "" (off) | "divert"
+	DivertConfig            divert.Config
+	Routing                 routing.Config
+	InsecureTLS             bool // Allow self-signed TLS certificates for development/testing
+	PlainTCP                bool // Disable TLS entirely; connect via plaintext TCP + yamux
+	ConnectTimeout          time.Duration
 }
 
 func (c AgentConfig) IsSOCKS5Enabled() bool {
@@ -802,15 +802,15 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		proxyP2PManager = proxyp2p.NewQUICManagerWithOptions(ctx, func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
 			return a.sendP2PControlRequest(controlCtx, sess, message)
 		}, accepted.P2PRendezvousAddress, lease, proxyp2p.QUICManagerOptions{
-			PunchTimeout:    cfg.P2PPunchTimeout,
-			KeepAlive:       cfg.P2PKeepalive,
-			IdleTimeout:     cfg.P2PIdleTimeout,
-			MaxExitSessions: cfg.P2PMaxSessions,
-			PortStart:       accepted.P2PPortStart,
-			PortEnd:         accepted.P2PPortEnd,
-			UPnPEnabled:     accepted.P2PUPnPEnabled && cfg.P2PUPnPAllowed != nil && *cfg.P2PUPnPAllowed,
-			BrutalUploadBPS: accepted.BrutalUploadBPS,
-			BrutalDownloadBPS: accepted.BrutalDownloadBPS,
+			PunchTimeout:            cfg.P2PPunchTimeout,
+			KeepAlive:               cfg.P2PKeepalive,
+			IdleTimeout:             cfg.P2PIdleTimeout,
+			MaxExitSessions:         cfg.P2PMaxSessions,
+			PortStart:               accepted.P2PPortStart,
+			PortEnd:                 accepted.P2PPortEnd,
+			UPnPEnabled:             accepted.P2PUPnPEnabled && cfg.P2PUPnPAllowed != nil && *cfg.P2PUPnPAllowed,
+			BrutalUploadBPS:         accepted.BrutalUploadBPS,
+			BrutalDownloadBPS:       accepted.BrutalDownloadBPS,
 			DisableLossCompensation: cfg.DisableLossCompensation,
 		})
 		keepManager := false

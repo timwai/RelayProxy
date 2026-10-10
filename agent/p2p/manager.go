@@ -46,18 +46,18 @@ type Manager struct {
 	local  LocalDescription
 	lease  time.Duration
 
-	endpointFactory      EndpointFactory
-	upnpEnabled          bool
-	punchTimeout         time.Duration
-	keepAlive            time.Duration
-	idleTimeout          time.Duration
-	maxExitSessions      int
-	lowPowerIdleTimeout  time.Duration
-	lowPowerMaxSessions  int
-	networkCheckInterval time.Duration
-	networkSignature     func() string
-	brutalUploadBPS uint64
-	brutalDownloadBPS uint64
+	endpointFactory         EndpointFactory
+	upnpEnabled             bool
+	punchTimeout            time.Duration
+	keepAlive               time.Duration
+	idleTimeout             time.Duration
+	maxExitSessions         int
+	lowPowerIdleTimeout     time.Duration
+	lowPowerMaxSessions     int
+	networkCheckInterval    time.Duration
+	networkSignature        func() string
+	brutalUploadBPS         uint64
+	brutalDownloadBPS       uint64
 	disableLossCompensation bool
 
 	mu               sync.Mutex

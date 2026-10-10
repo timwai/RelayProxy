@@ -43,7 +43,7 @@ export function disconnect() {
   connectionState = 'DISCONNECTED';
 }
 
-export async function connectBrowser() {
+async function connectFreshBrowser() {
   const settings = await getSettings();
   if (!settings.serverOrigin) throw new Error('请先配置 HTTPS Server');
   const identity = await getOrCreateIdentity();
@@ -136,13 +136,24 @@ export async function connectBrowser() {
   });
 }
 
+// Coalesce user-triggered connection and MV3 alarm reconnect attempts.
+// A second caller must never close a first in-progress AUTH_PROOF socket.
+export function connectBrowser() {
+  if (connectionState === 'AUTHENTICATED' && currentSocket?.readyState === WebSocket.OPEN)
+    return Promise.resolve({ state: connectionState });
+  if (connectingPromise) return connectingPromise;
+  const promise = connectFreshBrowser();
+  connectingPromise = promise;
+  promise.finally(() => {
+    if (connectingPromise === promise) connectingPromise = null;
+  }).catch(() => {});
+  return promise;
+}
+
 export async function sendControl(type, payload = {}) {
   if (currentConnectionState() !== 'AUTHENTICATED' ||
       !currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
-    if (!connectingPromise) {
-      connectingPromise = connectBrowser().finally(() => { connectingPromise = null; });
-    }
-    await connectingPromise;
+    await connectBrowser();
   }
   if (requests.size >= 8) throw new Error('配对请求过多，请稍后重试');
   const requestId = crypto.randomUUID();

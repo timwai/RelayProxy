@@ -237,6 +237,14 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		switch msg.Type {
 		case "PING":
 			payload = map[string]any{"type": "PONG"}
+		case "DELIVERY_STATUS":
+			status, err := h.Store.DeliveryStatus(ctx, device.ID, msg.RuleID, msg.MessageID, time.Now().UTC())
+			if err != nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				payload = map[string]any{"type": "DELIVERY_RESULT", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "messageId": msg.MessageID, "status": status}
+			}
 		case "SEQUENCE_CURSOR":
 			cursor, err := h.Store.SessionCursor(ctx, device.ID, msg.RuleID)
 			if err != nil {

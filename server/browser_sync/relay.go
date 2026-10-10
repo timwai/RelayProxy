@@ -103,7 +103,9 @@ func (h *Handler) relayAcknowledgement(ctx context.Context, receiverID, ruleID, 
 	}
 	source := h.destination(sourceID)
 	if source == nil {
-		return errors.New("source browser offline")
+		// Terminal result is committed; A will recover via DELIVERY_STATUS.
+		// The receiver must not retry an already consumed terminal ACK.
+		return nil
 	}
 	// No arbitrary client-provided reason: prevents secret leakage in ACKs.
 	return source.send(ctx, map[string]any{"type": "SYNC_ACK", "ruleId": ruleID,

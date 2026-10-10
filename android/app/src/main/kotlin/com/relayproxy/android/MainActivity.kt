@@ -1416,39 +1416,6 @@ class MainActivity : Activity() {
         header.addView(addRuleBtn)
         content.addView(header)
 
-        // Android uses hev-socks5-tunnel Mapped DNS, not desktop WinDivert/
-        // NFQUEUE FakeIP. Present the actual platform protection state rather
-        // than pretending the desktop FakeIP switch is supported on Android.
-        val dnsCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
-        dnsCard.addView(sectionHeader("DNS 解析与防泄漏", "Android VPN · Mapped DNS · 系统防护状态"))
-        dnsProtectionSummary = TextView(this).apply {
-            textSize = 12f
-            setTextColor(UiPalette.muted)
-            setLineSpacing(dp(3).toFloat(), 1f)
-            setPadding(0, dp(10), 0, dp(10))
-        }
-        dnsCard.addView(dnsProtectionSummary)
-        dnsCard.addView(TextView(this).apply {
-            text = "Android 使用 VPN Mapped DNS，将域名交给所选出口解析。桌面 Agent 的 FakeIP/DoH 拦截开关不适用于此处。Private DNS、应用内 DoH、VPN 外应用仍需抓包验证。"
-            textSize = 11f
-            setTextColor(UiPalette.muted)
-        })
-        dnsCard.addView(TextView(this).apply {
-            text = "打开系统 VPN 设置 ›"
-            textSize = 12f
-            setTextColor(UiPalette.brand)
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, dp(14), 0, 0)
-            isClickable = true
-            setOnClickListener {
-                startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
-            }
-        })
-        content.addView(dnsCard, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-        ).apply { bottomMargin = dp(16) })
-        updateDNSProtectionSummary()
-
         // 2. VPN 应用接管范围卡片 (充裕内边距与清晰分割)
         val vpnScopeCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
 
@@ -1964,6 +1931,39 @@ class MainActivity : Activity() {
 
         val store = ConfigStore(this)
         val config = store.load()
+
+        // Android uses hev-socks5-tunnel Mapped DNS, not desktop WinDivert/
+        // NFQUEUE FakeIP. Present the actual platform protection state rather
+        // than pretending the desktop FakeIP switch is supported on Android.
+        val dnsCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)
+        dnsCard.addView(sectionHeader("DNS 解析与防泄漏", "Android VPN · Mapped DNS · 系统防护状态"))
+        dnsProtectionSummary = TextView(this).apply {
+            textSize = 12f
+            setTextColor(UiPalette.muted)
+            setLineSpacing(dp(3).toFloat(), 1f)
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        dnsCard.addView(dnsProtectionSummary)
+        dnsCard.addView(TextView(this).apply {
+            text = "Android 使用 VPN Mapped DNS，将域名交给所选出口解析。桌面 Agent 的 FakeIP/DoH 拦截开关不适用于此处。Private DNS、应用内 DoH、VPN 外应用仍需抓包验证。"
+            textSize = 11f
+            setTextColor(UiPalette.muted)
+        })
+        dnsCard.addView(TextView(this).apply {
+            text = "打开系统 VPN 设置 ›"
+            textSize = 12f
+            setTextColor(UiPalette.brand)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(14), 0, 0)
+            isClickable = true
+            setOnClickListener {
+                startActivity(Intent(Settings.ACTION_VPN_SETTINGS))
+            }
+        })
+        content.addView(dnsCard, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { bottomMargin = dp(16) })
+        updateDNSProtectionSummary()
 
         // 0. 主题模式：跟随系统 / 浅色 / 深色
         val themeCard = UiKit.card(this, paddingDp = 18, radiusDp = 14)

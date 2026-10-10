@@ -94,6 +94,27 @@ class RoutingConfigTest {
 
 
     @Test
+    fun `subscription fetch via proxy survives core and preference roundtrip`() {
+        val config = RoutingConfig(subscriptions = listOf(
+            RoutingSubscriptionConfig(
+                name = "GFWList",
+                url = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt",
+                enabled = true,
+                action = "DIRECT",
+                fetchViaProxy = true,
+            ),
+        ))
+        val json = config.toJson(forCore = true)
+        assertTrue(json.getJSONArray("subscriptions").getJSONObject(0).getBoolean("fetch_via_proxy"))
+        val restored = RoutingConfig.fromJson(config.toJson().toString())
+        assertEquals(1, restored.subscriptions.size)
+        assertTrue(restored.subscriptions.single().fetchViaProxy)
+        val legacy = JSONObject(restored.toJson().toString())
+        legacy.getJSONArray("subscriptions").getJSONObject(0).remove("fetch_via_proxy")
+        assertFalse(RoutingConfig.fromJson(legacy.toString()).subscriptions.single().fetchViaProxy)
+    }
+
+    @Test
     fun `core json includes configured proxy path mode`() {
         val json = JSONObject(
             ExitConfig(

@@ -26,7 +26,8 @@ func authenticatedTestDNSResponse(t *testing.T, raw []byte, address netip.Addr) 
 	default:
 		t.Fatal("unexpected DNS family")
 	}
-	response, err := (dnsmessage.Message{Header: dnsmessage.Header{ID: query.ID, Response: true, RecursionAvailable: true}, Questions: query.Questions, Answers: []dnsmessage.Resource{rr}}).Pack()
+	message := dnsmessage.Message{Header: dnsmessage.Header{ID: query.ID, Response: true, RecursionAvailable: true}, Questions: query.Questions, Answers: []dnsmessage.Resource{rr}}
+	response, err := message.Pack()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,7 +105,8 @@ func TestRealProxyDNSForwardsModernHTTPSAndTXTQueries(t *testing.T) {
 			if err := request.Unpack(raw); err != nil {
 				t.Fatal(err)
 			}
-			return (dnsmessage.Message{Header: dnsmessage.Header{ID: request.ID, Response: true, RecursionAvailable: true}, Questions: request.Questions}).Pack()
+			response := dnsmessage.Message{Header: dnsmessage.Header{ID: request.ID, Response: true, RecursionAvailable: true}, Questions: request.Questions}
+			return response.Pack()
 		})
 		if !called || fakeDNSAnswer(t, res).RCode != dnsmessage.RCodeSuccess {
 			t.Fatalf("record type %v was not forwarded", kind)
@@ -123,7 +125,8 @@ func TestRealProxyDNSLargeUDPResponseRequestsTCPRetry(t *testing.T) {
 		for n := 0; n < 18; n++ {
 			answers = append(answers, dnsmessage.Resource{Header: dnsmessage.ResourceHeader{Name: q.Questions[0].Name, Type: dnsmessage.TypeTXT, Class: dnsmessage.ClassINET, TTL: 30}, Body: &dnsmessage.TXTResource{TXT: []string{strings.Repeat("a", 100)}}})
 		}
-		return (dnsmessage.Message{Header: dnsmessage.Header{ID: q.ID, Response: true}, Questions: q.Questions, Answers: answers}).Pack()
+		response := dnsmessage.Message{Header: dnsmessage.Header{ID: q.ID, Response: true}, Questions: q.Questions, Answers: answers}
+		return response.Pack()
 	}
 	udp := fakeDNSAnswer(t, realProxyDNSReply(context.Background(), query, true, response))
 	tcp := fakeDNSAnswer(t, realProxyDNSReply(context.Background(), query, false, response))

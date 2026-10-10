@@ -81,6 +81,11 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 // Status & logs
 // ---------------------------------------------------------------------------
 
+// GetRoutingSubscriptions returns the current local subscription update status.
+func (b *UIBridge) GetRoutingSubscriptions() []routing.SubscriptionStatus {
+	return b.agent.RoutingSubscriptionStatuses()
+}
+
 // GetStatus returns the current agent runtime state
 func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()

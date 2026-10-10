@@ -98,3 +98,21 @@ export async function encryptionPrivateKey() {
   const encryption = await readKey('encryption');
   return encryption.privateKey;
 }
+
+// An unextractable, Profile-local HMAC key prevents browser storage from
+// holding unsalted SHA-256 hashes of possibly low-entropy session values.
+// Tags are scoped to a rule + Cookie name, so equal values cannot be
+// correlated between different website rules.
+export async function cookieValueTag(ruleId, name, value) {
+  if (typeof ruleId !== 'string' || typeof name !== 'string' || typeof value !== 'string')
+    throw new Error('Invalid Cookie fingerprint input');
+  let key = await readKey('cookie-hmac-v1');
+  if (!key) {
+    key = await crypto.subtle.generateKey(
+      {name:'HMAC', hash:'SHA-256', length:256}, false, ['sign']
+    );
+    await saveKeys([['cookie-hmac-v1', key]]);
+  }
+  const message = new TextEncoder().encode(['browser.sync.cookie.v1', ruleId, name, value].join('\n'));
+  return base64url(await crypto.subtle.sign('HMAC', key, message));
+}

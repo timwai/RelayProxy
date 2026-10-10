@@ -830,6 +830,15 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 	}
 }
 
+// Observe an authenticated TCP DNS exchange only when the active policy
+// permits domain attribution. The DNS association parser verifies that both
+// the question and its answer match before remembering A/AAAA addresses.
+func (i *packetInterceptor) observeInterceptedDNSTCP(key FlowKey, query, answer []byte) {
+	if !i.server.dnsAssociationEnabled() || !i.server.proxyDNSEnabled() { return }
+	i.dns.query(key.Source, key.Destination, query)
+	i.dns.response(key.Destination, key.Source, answer)
+}
+
 func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 	defer i.wg.Done()
 	for {
@@ -863,9 +872,7 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 				// IP-to-name cache used by intercepted UDP DNS, before the
 				// client is allowed to establish its first connection.
 				err = i.server.serveDNSTCPWithObserver(i.ctx, conn, func(query, answer []byte) {
-					if !i.server.dnsAssociationEnabled() { return }
-					i.dns.query(flow.route.key.Source, flow.route.key.Destination, query)
-					i.dns.response(flow.route.key.Destination, flow.route.key.Source, answer)
+					i.observeInterceptedDNSTCP(flow.route.key, query, answer)
 				})
 			} else {
 				err = i.server.ForwardTCP(i.ctx, flow.route, conn)

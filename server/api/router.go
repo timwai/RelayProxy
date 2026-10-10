@@ -63,7 +63,6 @@ func WithBrowserSync(handler *browsersync.Handler) RouterOption {
 	return func(r *Router) { r.browserSync = handler }
 }
 
-
 // RDPIngressRuntimeStatus describes the sockets currently owned by the
 // process. It is deliberately separate from the persisted allocation record:
 // an enabled database row is not proof that both listeners were bound.
@@ -234,7 +233,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	if r.browserSync != nil &&
 		(req.URL.Path == "/api/v1/browser-sync/devices/register" ||
-		 req.URL.Path == "/api/v1/browser-sync/ws") {
+			req.URL.Path == "/api/v1/browser-sync/ws") {
 		// The extension has its own Origin allowlist and signature auth.
 		// Existing CSRF rule only accepts same-origin Admin Web mutations.
 		r.browserSync.ServeHTTP(w, req)

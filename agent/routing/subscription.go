@@ -467,7 +467,7 @@ func (e *Engine) startSubscriptionUpdates() {
 	e.subscriptionCancel = cancel
 	e.mu.Unlock()
 	go func() {
-		e.updateSubscriptions(ctx)
+		e.updateSubscriptions(ctx, false)
 		ticker := time.NewTicker(subscriptionRefreshInterval)
         retry := time.NewTicker(time.Minute)
         defer ticker.Stop()
@@ -475,21 +475,25 @@ func (e *Engine) startSubscriptionUpdates() {
         for {
             select {
             case <-ctx.Done(): return
-            case <-ticker.C: e.updateSubscriptions(ctx)
+            case <-ticker.C: e.updateSubscriptions(ctx, false)
             case <-retry.C: e.retryFailedSubscriptions(ctx)
             }
         }
 	}()
 }
-func (e *Engine) updateSubscriptions(ctx context.Context) {
+func (e *Engine) updateSubscriptions(ctx context.Context, retryOnly bool) {
 	e.mu.RLock()
 	subs := append([]Subscription(nil), e.config.Subscriptions...)
     proxyDial := e.subscriptionProxyDialer
     e.mu.RUnlock()
 	for index, sub := range subs {
-		if !sub.Enabled {
-			continue
-		}
+        if !sub.Enabled { continue }
+        if retryOnly {
+           e.mu.RLock()
+           pending := index < len(e.subscriptions) && e.subscriptions[index].status.Error != ""
+           e.mu.RUnlock()
+           if !pending { continue }
+        }
 		select {
 		case <-ctx.Done():
 			return
@@ -524,7 +528,7 @@ func (e *Engine) retryFailedSubscriptions(ctx context.Context) {
   if item.config.Enabled && item.status.Error != "" { anyFailed = true; break }
  }
  e.mu.RUnlock()
- if anyFailed { e.updateSubscriptions(ctx) }
+ if anyFailed { e.updateSubscriptions(ctx, true) }
 }
 
 // Close cancels subscription refreshes (existing decisions remain usable).

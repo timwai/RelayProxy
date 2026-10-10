@@ -49,8 +49,8 @@ function createProfile() {
         async getAll({url}) {
           const host=new URL(url).hostname;
           return [...jar.values()].filter(c=>
-            host===c.domain.replace(/^\\./,'')||
-            (!c.hostOnly&&host.endsWith('.'+c.domain.replace(/^\\./,''))));
+            host===c.domain.replace(/^\./,'')||
+            (!c.hostOnly&&host.endsWith('.'+c.domain.replace(/^\./,''))));
         },
         async remove({url,name}) {
           if (new URL(url).hostname!=='example.com'||!jar.has(name)) return null;

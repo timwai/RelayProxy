@@ -12,6 +12,9 @@ on:
       - "cmd/relay-agent/**"
       - "server/web/**"
       - "server/api/**"
+      - "server/browser_sync/**"
+      - "internal/browser_sync/**"
+      - "browser/chrome-extension/**"
       - "internal/webui/**"
       - "internal/config/**"
       - "macos/**"
@@ -47,6 +50,15 @@ jobs:
           npm install --no-audit --no-fund
           npm test
           npm run build
+      - name: Validate agentless Chrome extension
+        working-directory: browser/chrome-extension
+        run: |
+          node --check src/service-worker.js
+          node --check src/server-api.js
+          node --check src/device-identity.js
+          node --check src/envelope.js
+          node --check src/popup.js
+          npm test
       - name: Check Go formatting
         shell: bash
         run: |

@@ -37,3 +37,10 @@
 - TCP/53 目前只恢复系统解析器的可达性，**没有**实现 TCP DNS 应答解析或域名关联；不能宣称 TCP DNS 首次域名规则已修复。
 - 如果使用真实 IP 观察模式，DNS 允许本地发出，不能视为严格防泄漏配置。严格防泄漏需选择代理 DNS 接管并验证 Windows 防火墙保护。
 - 需在 Windows 实机验证 DNS UDP 截断后 TCP 重试，以及默认 REJECT 下 Chrome/YouTube 首次访问、代理 DNS 与 FakeIP 的回归。
+
+## Windows 代理接管的 TCP/53 域名关联
+
+- 通过 Agent 代理 DNS 接管处理的 TCP/53 查询，只有经过 `interceptedDNSReply` 验证并获得响应后才写入现有 `dnsAssociations`，写入发生在响应交给客户端之前。
+- 域名关联继续使用严格的问答匹配、A/AAAA 和共享 IP 歧义处理，不从任意 TCP 负载猜测域名。
+- DNS 关联关闭时跳过写入。此修改不监听普通 DIRECT TCP/53 的 DNS 消息，也不保证 Chrome 私有 DoH 可见。
+- 单元测试已添加，但仍需通过 CI 和 Windows 端到端测试验证。

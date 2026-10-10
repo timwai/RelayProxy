@@ -3,6 +3,7 @@ module relayproxy
 go 1.27.1
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/apernet/quic-go v0.63.1-0.20261004180939-a10df75c260c
 	github.com/florianl/go-nfqueue/v2 v2.1.0
 	github.com/go-ole/go-ole v1.3.0
@@ -22,7 +23,6 @@ require (
 require (
 	github.com/adrg/xdg v0.5.3 // indirect
 	github.com/andybalholm/brotli v1.0.6 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect

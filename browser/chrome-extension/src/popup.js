@@ -168,11 +168,40 @@ function renderRules(rules) {
             } else {
               await ask({ type: 'CONFIRM_RULE', ruleId: rule.id, confirmed: true, pairingCode: rule.code });
             }
-            status('配对授权已更新；目前仍未启用 Cookie 会话传输。');
+            status('配对授权已更新。只有状态为 active 的规则才可同步指定 Cookie。');
             await refreshPairing();
           } catch (error) { failure(error); }
         });
         card.append(button);
+      }
+    }
+    if (rule.status === 'active' && rule.valid) {
+      const sync = document.createElement('button');
+      sync.textContent = rule.role === 'source' ? '立即发送加密登录状态' : '从来源设备请求同步';
+      sync.addEventListener('click', async () => {
+        try {
+          const action = rule.role === 'source' ? 'SEND_SESSION' : 'REQUEST_SESSION';
+          const result = await ask({ type: action, ruleId: rule.id });
+          status(result.state === 'RELAYED' ? '密文已投递，等待接收端验证和应用。' :
+            '已请求来源设备发送最新密文快照，请刷新检查结果。');
+        } catch (error) { failure(error); }
+      });
+      card.append(sync);
+      if (rule.role === 'target') {
+        const label = document.createElement('label');
+        const checked = document.createElement('input');
+        checked.type = 'checkbox';
+        label.append(checked, textNode('span', '明确允许此规则覆盖接收端同名 Cookie（可能切换账号）'));
+        checked.addEventListener('change', async () => {
+          if (checked.checked && !window.confirm('确定允许替换目标网站的现有登录会话吗？')) {
+            checked.checked = false; return;
+          }
+          try {
+            await ask({ type: 'ALLOW_OVERWRITE', ruleId: rule.id, allowed: checked.checked });
+            status(checked.checked ? '此规则允许覆盖。可立即从来源设备请求同步。' : '已恢复冲突保护。');
+          } catch (error) { checked.checked = !checked.checked; failure(error); }
+        });
+        card.append(label);
       }
     }
     const revoke = document.createElement('button');

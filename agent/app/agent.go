@@ -498,6 +498,8 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			Config: cfg.DivertConfig, Dialer: routing.SelectedExitDialer{Routing: a.dialer}, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
 			FakeIPEnabled:     engine.FakeIPEnabled,
+			ProxyDNSEnabled:    engine.ProxyDNSEnabled,
+			DNSAssociationEnabled: engine.DNSAssociationEnabled,
 			BlockDoHEndpoints: engine.BlockDoHEndpoints,
 			ForwardOtherDNS:   engine.ForwardOtherDNS,
 			DNSExitID:         engine.DNSExitID,

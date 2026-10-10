@@ -12,3 +12,11 @@ test('routing rules save cannot overwrite DNS policies',()=>{
   ['dns_mode','auto_detect_dns','fake_ip_enabled','block_doh_endpoints','forward_other_dns','dns_exit_id','doh_blocked_ips'].sort());
  assert.equal(dnsPagePatch(r).fake_ip_enabled,true);
 });
+
+test('DNS page save includes independently persisted association and real DNS switches',()=>{
+ const payload=dnsPagePatch({dns_mode:'proxy',dns_association_enabled:false,proxy_dns_enabled:true,fake_ip_enabled:false});
+ assert.equal(payload.dns_association_enabled,false);
+ assert.equal(payload.proxy_dns_enabled,true);
+ assert.equal(dnsPagePatch({dns_mode:'proxy'}).dns_association_enabled,true);
+ assert.equal(dnsPagePatch({dns_mode:'proxy'}).proxy_dns_enabled,false);
+});

@@ -329,6 +329,7 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		return cfg, fmt.Errorf("invalid routing config: %w", err)
 	}
 	cfg.Routing = engine.Config()
+	engine.Close() // validation must not leak the subscription refresh worker
 	return cfg, nil
 }
 
@@ -591,6 +592,7 @@ func (c *Client) Stop() error {
 	c.mu.Unlock()
 
 	c.cancel()
+	if c.routingDialer != nil { c.routingDialer.Engine().Close() }
 	var proxyErr error
 	if socksServer != nil {
 		proxyErr = errors.Join(proxyErr, socksServer.Close())

@@ -226,17 +226,20 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	if strings.HasPrefix(req.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !validMutationOrigin(req) {
-			writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
-			return
-		}
 	}
+	// Chrome extension APIs have their own strict TLS + extension Origin
+	// allowlist and signed device identity. The Admin console's same-origin
+	// CSRF guard cannot accept chrome-extension:// POST requests.
 	if r.browserSync != nil &&
 		(req.URL.Path == "/api/v1/browser-sync/devices/register" ||
 			req.URL.Path == "/api/v1/browser-sync/ws") {
-		// The extension has its own Origin allowlist and signature auth.
-		// Existing CSRF rule only accepts same-origin Admin Web mutations.
 		r.browserSync.ServeHTTP(w, req)
+		return
+	}
+	if strings.HasPrefix(req.URL.Path, "/api/") &&
+		req.Method != http.MethodGet && req.Method != http.MethodHead &&
+		req.Method != http.MethodOptions && !validMutationOrigin(req) {
+		writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
 		return
 	}
 	r.mux.ServeHTTP(w, req)

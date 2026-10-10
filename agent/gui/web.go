@@ -229,6 +229,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
 	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
 	mux.HandleFunc("POST /api/proxy/custom-exits/test", w.testCustomExit)
+	mux.HandleFunc("GET /api/routing/subscriptions", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRoutingSubscriptions()) })
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
 	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
@@ -602,6 +603,7 @@ const webBridgeJS = `(function () {
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
   window.goTestCustomExit = function (exitId) { return json('/api/proxy/custom-exits/test', 'POST', {exitId:exitId}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
+  window.goGetRoutingSubscriptions = function () { return request('/api/routing/subscriptions'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };
   window.goConnectRDP = async function (targetId, autoLaunch) {
     var nativeRDP = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.relayproxyRDP;

@@ -24,10 +24,12 @@
   <p>无本机 Agent · 独立浏览器设备</p>
   <div class="notice">当前是开发预览：仅设置浏览器设备身份和站点权限，尚未连接 Server 或同步登录数据。</div>
   <label for="device">浏览器设备 ID</label>
-  <div id="device" class="device">正在初始化...</div>
+  <div id="device" class="device">正在初始化...</div><div class="device">扩展 ID：<span id="extension-id"></span></div>
   <label for="server">RelayProxy HTTPS Server</label>
   <input id="server" placeholder="https://relay.example.com">
-  <button id="save">保存地址</button>
+  <button id="save">保存地址并授权连接</button>
+  <button id="register">注册浏览器设备</button>
+  <button id="connect">连接 Server</button>
   <label for="site">允许的网站 HTTPS URL</label>
   <input id="site" placeholder="https://example.com">
   <button id="add-site">请求站点权限</button>

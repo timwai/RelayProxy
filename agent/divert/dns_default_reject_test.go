@@ -20,7 +20,8 @@ func TestLocalDNSDefaultRejectPassthrough(t *testing.T) {
   {"authenticated DNS intercept",dnsPacket,Decision{Action:ActionReject,Rule:"default"},false,true,true,false},
   {"association disabled",dnsPacket,Decision{Action:ActionReject,Rule:"default"},false,false,false,false},
   {"non-DNS packet",ipPacket{Protocol:ProtoUDP,Destination:netip.MustParseAddrPort("8.8.8.8:443")},Decision{Action:ActionReject,Rule:"default"},false,false,true,false},
-  {"TCP DNS not bypassed",ipPacket{Protocol:ProtoTCP,Destination:netip.MustParseAddrPort("8.8.8.8:53")},Decision{Action:ActionReject,Rule:"default"},false,false,true,false},
+  {"TCP DNS default reject bypassed",ipPacket{Protocol:ProtoTCP,Destination:netip.MustParseAddrPort("8.8.8.8:53")},Decision{Action:ActionReject,Rule:"default"},false,false,true,true},
+  {"explicit TCP DNS reject",ipPacket{Protocol:ProtoTCP,Destination:netip.MustParseAddrPort("8.8.8.8:53")},Decision{Action:ActionReject,Rule:"no-dns"},false,false,true,false},
  }
  for _,tt:=range cases {
   t.Run(tt.name,func(t *testing.T){

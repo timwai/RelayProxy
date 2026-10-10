@@ -158,6 +158,9 @@ func TestWSSSignedEncryptedSessionDeliveredWithAck(t *testing.T) {
 
 	env := signedTestSnapshot(t, sourceKey, source.ID, target.ID, ruleID)
 	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "send1", "envelope": env})
+	if reply := readWSSControl(t, a); reply["type"] != "SYNC_STATUS" || reply["status"] != "RELAYED" {
+		t.Fatalf("source missing delivery status: %v", reply)
+	}
 	delivered := readWSSControl(t, b)
 	if delivered["type"] != "SESSION_SNAPSHOT" {
 		t.Fatalf("target did not receive an opaque encrypted payload: %v", delivered["type"])
@@ -165,9 +168,6 @@ func TestWSSSignedEncryptedSessionDeliveredWithAck(t *testing.T) {
 	push, ok := delivered["envelope"].(map[string]any)
 	if !ok || push["ciphertext"] != env.Ciphertext {
 		t.Fatal("ciphertext altered by server")
-	}
-	if reply := readWSSControl(t, a); reply["type"] != "SYNC_STATUS" || reply["status"] != "RELAYED" {
-		t.Fatalf("source missing delivery status: %v", reply)
 	}
 	sendWSSControl(t, b, map[string]any{
 		"type": "SYNC_ACK", "requestId": "ack1", "ruleId": ruleID,

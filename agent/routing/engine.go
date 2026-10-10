@@ -108,6 +108,13 @@ func (e *Engine) DoHBlockedIPs() []string {
 // through the selected authenticated relay/upstream to a TLS resolver.
 // DNSExitID pins encrypted DNS to the chosen proxy exit. Empty means the
 // current default exit. It never changes the exit of application traffic.
+// DNSUpstreams returns a defensive copy so policy updates cannot race with DNS queries.
+func (e *Engine) DNSUpstreams() []DNSUpstream {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return append([]DNSUpstream(nil), e.config.DNSUpstreams...)
+}
+
 func (e *Engine) DNSExitID() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

@@ -42,3 +42,18 @@ jobs:
       - name: Targeted race regressions (Linux)
         if: runner.os == 'Linux'
         run: go test -race ./internal/congestion/... ./internal/tunnel ./agent/direct ./agent/p2p ./server/gateway ./server/p2p -count=1 -timeout=15m
+
+  mixed-binary:
+    name: Pre-Brutal baseline / new binary protocol pairings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build baseline/new probes and test QUIC plus TLS
+        run: bash scripts/ci-brutal-mixed-compat.sh

@@ -20,8 +20,14 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 - [x] Android gomobile AAR and Gradle debug APK ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614074)).
 - [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow.
 - [ ] A/B Hysteria2 comparison on the same client, server, UDP path, RTT, bandwidth, packet-loss and hardware, repeated >= 5 times per case.
-- [ ] Verify old-client/new-server and new-client/old-server pairings with both QUIC and TLS.
+- [ ] Verify old-client/new-server and new-client/old-server pairings with both QUIC and TLS. The new cross-built gateway/protocol probe in `scripts/ci-brutal-mixed-compat.sh` covers a subset of this requirement, but full packaged Agent/Server pairings remain separate.
 - [ ] Review CI artifacts and real-device results before opening/merging the replacement main PR.
+
+## Binary protocol compatibility smoke
+
+`scripts/ci-brutal-mixed-compat.sh` uses a checkout of the pre-Brutal main merge base and the feature branch. It builds identical standalone handshake probe sources against **both compiled versions of RelayProxy's production Gateway, tunnel, and v5 identity protocol packages**, then tests baseline-server/new-client, new-server/baseline-client and new/new over QUIC and TLS. All server capacity settings default to test-only loopback addresses. No administrator credentials, real proxy traffic, production GUI, or relay/exits are involved.
+
+Run with `bash scripts/ci-brutal-mixed-compat.sh` on Linux after `git fetch origin main`. These are real old/new **linked protocol binaries**, not a full packaged Agent/Server release test. A pass narrows regression risk without fully checking actual platform binaries.
 
 ## Physical performance acceptance (pending)
 

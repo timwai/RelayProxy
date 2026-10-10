@@ -93,6 +93,13 @@ func (s *WailsService) TestCustomExit(id string) (string, error) {
 	return string(data), nil
 }
 
+func (s *WailsService) GetRoutingSubscriptions() (string, error) {
+ if s == nil || s.owner == nil || s.owner.bridge == nil { return "[]", nil }
+ data, err := json.Marshal(s.owner.bridge.GetRoutingSubscriptions())
+ if err != nil { return "[]", nil }
+ return string(data), nil
+}
+
 func (s *WailsService) GetProxyExits() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return "[]", nil

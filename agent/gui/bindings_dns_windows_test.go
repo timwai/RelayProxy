@@ -20,6 +20,8 @@ func TestWailsGetConfigPreservesDNSSettingsAcrossSave(t *testing.T) {
 		{"protected", `{"routing":{"dns_mode":"proxy","auto_detect_dns":false,"fake_ip_enabled":true,"block_doh_endpoints":true,"forward_other_dns":true,"doh_blocked_ips":["1.1.1.1"]}}`},
 		{"automatic", `{"routing":{"dns_mode":"proxy","auto_detect_dns":true,"fake_ip_enabled":false,"block_doh_endpoints":false,"forward_other_dns":false}}`},
 		{"local", `{"routing":{"dns_mode":"local","auto_detect_dns":false,"fake_ip_enabled":false}}`},
+		{"real_dns", `{"routing":{"dns_mode":"proxy","dns_association_enabled":true,"proxy_dns_enabled":true,"fake_ip_enabled":false}}`},
+		{"association_off", `{"routing":{"dns_mode":"proxy","dns_association_enabled":false,"proxy_dns_enabled":false,"fake_ip_enabled":false}}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			b := newWebTestBridge(t)

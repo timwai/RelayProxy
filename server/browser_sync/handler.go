@@ -106,8 +106,13 @@ type authFrame struct {
  Signature string `json:"signature"`
 }
 func (h *Handler) connect(w http.ResponseWriter,r *http.Request){
- select {case h.slots<-struct{}{}:defer func(){<-h.slots}():
- default:http.Error(w,"browser connections full",http.StatusServiceUnavailable);return}
+ select {
+ case h.slots <- struct{}{}:
+  defer func(){ <-h.slots }()
+ default:
+  http.Error(w,"browser connections full",http.StatusServiceUnavailable)
+  return
+ }
  conn,err:=websocket.Accept(w,r,&websocket.AcceptOptions{
   InsecureSkipVerify:true, // origin verified by allowOrigin BEFORE upgrading
   CompressionMode:websocket.CompressionDisabled,

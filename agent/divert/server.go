@@ -30,28 +30,28 @@ var tcpCopyBufferPool = sync.Pool{
 }
 
 type Options struct {
-	Config             Config
-	Dialer             Dialer
-	Guard              LoopGuard
-	ListenHost         string // retained for configuration compatibility
-	PolicyMu           *sync.RWMutex
-	MaxTCPFlows        int
-	MaxUDPAssociations int
-	UDPIdleTimeout     time.Duration
-	DialTimeout        time.Duration
-	UDPWriteTimeout    time.Duration
-	SharedPolicy       func(Flow) Decision
-	ProxyReady         func() bool
-	LocalExitReady     func(string) bool
-	Traffic            *traffic.Registry
-	DefaultExitID      func() string
-	FakeIPEnabled      func() bool     // dynamically consulted for new transparent DNS queries
-	ProxyDNSEnabled    func() bool     // real A/AAAA and other DNS via authenticated DoT; not FakeIP
-	DNSAssociationEnabled func() bool // observed DNS->real IP attribution; defaults to enabled
-	BlockDoHEndpoints  func() bool     // opt-in domain-based DoH endpoint guard
-	ForwardOtherDNS    func() bool     // opt-in authenticated DoT via proxy for TXT/SRV
-	DNSExitID          func() string   // optional pinned exit for DNS, independent from app flows
-	DoHBlockedIPs      func() []string // opt-in fixed HTTPS/443 IP or CIDR denylist
+	Config                Config
+	Dialer                Dialer
+	Guard                 LoopGuard
+	ListenHost            string // retained for configuration compatibility
+	PolicyMu              *sync.RWMutex
+	MaxTCPFlows           int
+	MaxUDPAssociations    int
+	UDPIdleTimeout        time.Duration
+	DialTimeout           time.Duration
+	UDPWriteTimeout       time.Duration
+	SharedPolicy          func(Flow) Decision
+	ProxyReady            func() bool
+	LocalExitReady        func(string) bool
+	Traffic               *traffic.Registry
+	DefaultExitID         func() string
+	FakeIPEnabled         func() bool     // dynamically consulted for new transparent DNS queries
+	ProxyDNSEnabled       func() bool     // real A/AAAA and other DNS via authenticated DoT; not FakeIP
+	DNSAssociationEnabled func() bool     // observed DNS->real IP attribution; defaults to enabled
+	BlockDoHEndpoints     func() bool     // opt-in domain-based DoH endpoint guard
+	ForwardOtherDNS       func() bool     // opt-in authenticated DoT via proxy for TXT/SRV
+	DNSExitID             func() string   // optional pinned exit for DNS, independent from app flows
+	DoHBlockedIPs         func() []string // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 
 // Server owns classified flows. OS interception is separately gated by a

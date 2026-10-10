@@ -124,7 +124,7 @@ async function handleIncomingSnapshot(envelope) {
         delete pending[ruleId];
         await chrome.storage.local.set({[pendingOpenKey]:pending});
         if(request.expiresAt>Date.now()&&request.origin===ctx.policy.siteOrigin)
-          await chrome.tabs.create({url:ctx.policy.siteOrigin});
+          chrome.tabs.create({url:ctx.policy.siteOrigin}).catch(()=>{});
       }
     }catch(error){
       if(String(error.message||'').startsWith('CONFLICT:'))result='CONFLICT';

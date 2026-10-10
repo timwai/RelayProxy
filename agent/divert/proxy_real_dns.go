@@ -57,7 +57,7 @@ func dnsNameFromString(host string) string {
 	return dnsName(name)
 }
 
-// realProxyDNSReply validates a complete response from authenticated DoT.
+// realProxyDNSReply validates a complete response from authenticated DoH/DoT.
 // Failure never triggers plaintext/system DNS; it returns a DNS SERVFAIL.
 // For large UDP answers it sets TC for retry over intercepted TCP/53.
 func realProxyDNSReply(ctx context.Context, raw []byte, udp bool, exchange func(context.Context, []byte) ([]byte, error)) []byte {

@@ -132,6 +132,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (pinned && (pinned.signingPublicKey !== source.signingPublicKey ||
             pinned.encryptionPublicKey !== source.encryptionPublicKey)) throw new Error('来源密钥已变更');
           if (!message.confirmed) throw new Error('请先核对配对校验码');
+          const local = await getOrCreateIdentity();
+          const code = await pairingCode(rule.ruleId, source, {
+            id: local.deviceId, signingPublicKey: local.signingPublicKey,
+            encryptionPublicKey: local.encryptionPublicKey
+          });
+          if (code !== message.pairingCode) throw new Error('配对校验码已改变，请重新核对');
           return { source, policy };
         })());
         const origin = summary.policy.siteOrigin;
@@ -157,6 +163,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const pinned = remote && await getTrustedPeer(remote.id);
         if (!remote || !pinned || pinned.signingPublicKey !== remote.signingPublicKey ||
           pinned.encryptionPublicKey !== remote.encryptionPublicKey) throw new Error('接收方密钥校验失败');
+        const code = await pairingCode(rule.ruleId, {
+          id: identity.deviceId, signingPublicKey: identity.signingPublicKey,
+          encryptionPublicKey: identity.encryptionPublicKey
+        }, remote);
+        if (code !== message.pairingCode) throw new Error('配对校验码已改变，请重新核对');
         await sendControl('RULE_CONFIRM', { ruleId: message.ruleId });
         return { ok: true };
       }

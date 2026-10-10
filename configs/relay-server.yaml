@@ -19,6 +19,12 @@ tunnel:
   heartbeat_sec: 15
   max_connections_per_device: 1024
   max_connections: 2048
+  # Relay QUIC 的 Hysteria Brutal 每客户端上限。Agent 没有请求带宽时仍使用 BBR。
+  bandwidth:
+    up_mbps: 0                 # Server -> Agent 上限；0 = 不限制 Agent 的请求值
+    down_mbps: 0               # Agent -> Server 上限；0 = 不限制 Agent 的请求值
+    ignore_client_bandwidth: false
+    disable_loss_compensation: false
 
 # RDP P2P/rendezvous 与公网兼容入口。公网入口默认关闭；开启前请配置
 # 可路由的 rendezvous_advertise，并在管理页面按目标设备分配固定端口。

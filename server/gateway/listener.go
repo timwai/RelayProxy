@@ -18,6 +18,7 @@ import (
 
 	"github.com/apernet/quic-go"
 	"github.com/google/uuid"
+	quiccongestion "relayproxy/internal/congestion"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"
@@ -45,6 +46,10 @@ type GatewayConfig struct {
 	MaxConnections           int // global tunnel connection limit
 	MaxConnectionsPerDevice  int // per-device concurrent streams (also sent in Welcome)
 	HeartbeatSec             int
+	BrutalMaxUploadBPS       uint64 // server -> agent per-client cap; 0 = unlimited
+	BrutalMaxDownloadBPS     uint64 // agent -> server per-client cap; 0 = unlimited
+	IgnoreClientBandwidth    bool
+	DisableLossCompensation  bool
 	RendezvousAddress        string
 	RDPLeaseSec              int
 	P2PEnabled               bool
@@ -381,6 +386,15 @@ func (g *Gateway) serveQUIC() {
 	}
 }
 
+func authorizedBrutalRates(hello protocol.DeviceHello, cfg GatewayConfig) (clientTxBPS, serverTxBPS uint64) {
+	if cfg.IgnoreClientBandwidth {
+		return 0, 0
+	}
+	clientTxBPS = quiccongestion.CapRequestedRate(hello.BrutalUploadBPS, cfg.BrutalMaxDownloadBPS)
+	serverTxBPS = quiccongestion.CapRequestedRate(hello.BrutalDownloadBPS, cfg.BrutalMaxUploadBPS)
+	return clientTxBPS, serverTxBPS
+}
+
 func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	defer sess.Close()
 	if !g.track(sess) {
@@ -564,6 +578,10 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	sessionID := "sess_" + uuid.New().String()
 	heartbeatSec := g.heartbeatForDevice(hello, authorization.ApprovedCapabilities)
+	clientTxBPS, serverTxBPS := authorizedBrutalRates(hello, g.cfg)
+	if serverTxBPS > 0 && tunnel.UseBrutal(sess, serverTxBPS, g.cfg.DisableLossCompensation) {
+		log.Printf("[Gateway] Relay QUIC download switched to Brutal device=%s target=%d B/s", authorization.DeviceID, serverTxBPS)
+	}
 	welcome := protocol.DeviceAccepted{
 		State:                    "approved",
 		DeviceID:                 authorization.DeviceID,
@@ -579,6 +597,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		ServerTime:               time.Now().Unix(),
 		Success:                  true,
 		TransportCapabilities:    capabilities,
+		BrutalUploadBPS:          clientTxBPS,
+		BrutalDownloadBPS:        serverTxBPS,
 		RendezvousAddress:        g.cfg.RendezvousAddress,
 		RDPLeaseSec:              g.cfg.RDPLeaseSec,
 		P2PRendezvousAddress:     g.cfg.P2PRendezvousAddress,
@@ -611,6 +631,8 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		ControlStream:       ctrlStream,
 		ConnectedAt:         time.Now(),
 		HeartbeatSec:        heartbeatSec,
+		BrutalUploadBPS:     clientTxBPS,
+		BrutalDownloadBPS:   serverTxBPS,
 	}
 
 	g.mu.Lock()

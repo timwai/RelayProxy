@@ -35,16 +35,20 @@ const PublicDirectAuthVersion = 1
 // opaque here so Phase 4 can replace development test credentials with
 // Server-signed short-lived tickets without changing the transport handshake.
 type PublicDirectAuthRequest struct {
-	Version        int    `json:"version"`
-	ClientDeviceID string `json:"clientDeviceId"`
-	ExitDeviceID   string `json:"exitDeviceId"`
-	Ticket         []byte `json:"ticket"`
+	Version           int    `json:"version"`
+	ClientDeviceID    string `json:"clientDeviceId"`
+	ExitDeviceID      string `json:"exitDeviceId"`
+	Ticket            []byte `json:"ticket"`
+	BrutalUploadBPS   uint64 `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64 `json:"brutalDownloadBps,omitempty"`
 }
 
 type PublicDirectAuthResponse struct {
-	Success      bool   `json:"success"`
-	ErrorCode    string `json:"errorCode,omitempty"`
-	ErrorMessage string `json:"errorMessage,omitempty"`
+	Success           bool   `json:"success"`
+	BrutalUploadBPS   uint64 `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64 `json:"brutalDownloadBps,omitempty"`
+	ErrorCode         string `json:"errorCode,omitempty"`
+	ErrorMessage      string `json:"errorMessage,omitempty"`
 }
 
 const (
@@ -94,11 +98,13 @@ type PublicDirectRegistrationRequest struct {
 }
 
 type PublicDirectRegistrationResponse struct {
-	Success      bool                   `json:"success"`
-	Endpoints    []PublicDirectEndpoint `json:"endpoints,omitempty"`
-	RelayPolicy  *acl.Policy            `json:"relayPolicy,omitempty"`
-	ErrorCode    string                 `json:"errorCode,omitempty"`
-	ErrorMessage string                 `json:"errorMessage,omitempty"`
+	Success           bool                   `json:"success"`
+	Endpoints         []PublicDirectEndpoint `json:"endpoints,omitempty"`
+	RelayPolicy       *acl.Policy            `json:"relayPolicy,omitempty"`
+	BrutalUploadBPS   uint64                 `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64                 `json:"brutalDownloadBps,omitempty"`
+	ErrorCode         string                 `json:"errorCode,omitempty"`
+	ErrorMessage      string                 `json:"errorMessage,omitempty"`
 }
 
 type PublicDirectProbeRequest struct {
@@ -116,8 +122,10 @@ type PublicDirectHandshakeRequest struct {
 }
 
 type PublicDirectHandshakeResponse struct {
-	Success      bool                       `json:"success"`
-	ErrorCode    string                     `json:"errorCode,omitempty"`
-	ErrorMessage string                     `json:"errorMessage,omitempty"`
-	Probe        *PublicDirectProbeResponse `json:"probe,omitempty"`
+	Success           bool                       `json:"success"`
+	BrutalUploadBPS   uint64                     `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64                     `json:"brutalDownloadBps,omitempty"`
+	ErrorCode         string                     `json:"errorCode,omitempty"`
+	ErrorMessage      string                     `json:"errorMessage,omitempty"`
+	Probe             *PublicDirectProbeResponse `json:"probe,omitempty"`
 }

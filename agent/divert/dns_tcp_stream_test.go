@@ -8,9 +8,9 @@ import (
 func dnsTestTCPPacket(from, to netip.AddrPort, sequence uint32, payload []byte) ipPacket {
 	return ipPacket{
 		Protocol: ProtoTCP,
-		Source: from, Destination: to,
+		Source:   from, Destination: to,
 		TCPSequence: sequence,
-		Payload: payload,
+		Payload:     payload,
 	}
 }
 
@@ -46,7 +46,7 @@ func TestPassiveDNSTCPRejectsSequenceGapsAndOverlaps(t *testing.T) {
 	q, a := dnsExchange(t, "gap.example", ip, 60)
 	for _, tt := range []struct {
 		name string
-		seq uint32
+		seq  uint32
 	}{
 		{"gap", 1000 + uint32(len(dnsTCPWire(a))/2) + 2},
 		{"partial overlap", 1000 + uint32(len(dnsTCPWire(a))/2) - 2},

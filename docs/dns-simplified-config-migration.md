@@ -34,7 +34,7 @@
 
 - 在真实 IP 观察模式下，当且仅当路由结果是默认 `REJECT`，放行普通 UDP/53 与 TCP/53；显式 DNS REJECT 继续生效。
 - FakeIP 与代理侧真实 IP DNS 接管模式不启用这项旁路，避免与严格接管策略冲突。
-- TCP/53 目前只恢复系统解析器的可达性，**没有**实现 TCP DNS 应答解析或域名关联；不能宣称 TCP DNS 首次域名规则已修复。
+- 第一阶段仅恢复 TCP/53 系统解析器的可达性，后续版本已增加 DNS/TCP 旁路监听及受限重组；是否解决首次连接仍需在 Windows 浏览器实测。
 - 如果使用真实 IP 观察模式，DNS 允许本地发出，不能视为严格防泄漏配置。严格防泄漏需选择代理 DNS 接管并验证 Windows 防火墙保护。
 - 需在 Windows 实机验证 DNS UDP 截断后 TCP 重试，以及默认 REJECT 下 Chrome/YouTube 首次访问、代理 DNS 与 FakeIP 的回归。
 
@@ -42,7 +42,7 @@
 
 - 通过 Agent 代理 DNS 接管处理的 TCP/53 查询，只有经过 `interceptedDNSReply` 验证并获得响应后才写入现有 `dnsAssociations`，写入发生在响应交给客户端之前。
 - 域名关联继续使用严格的问答匹配、A/AAAA 和共享 IP 歧义处理，不从任意 TCP 负载猜测域名。
-- DNS 关联关闭时跳过写入。此修改不监听普通 DIRECT TCP/53 的 DNS 消息，也不保证 Chrome 私有 DoH 可见。
+- DNS 关联关闭时跳过写入。后续独立加入普通 DIRECT TCP/53 旁路监听；Chrome 私有 DoH 仍不可见。
 - 单元测试已添加，但仍需通过 CI 和 Windows 端到端测试验证。
 
 ## 2026-10-10 被动 DNS/TCP 关联（Windows）
@@ -50,5 +50,12 @@
 - Windows WinDivert 入站筛选器增加 `tcp.SrcPort == 53`，使用与原有 UDP DNS 相同的旁路重注入路径，不修改入站数据。
 - 本机出站的 `TCP/53` 在发送前尝试读取完整 RFC 7766 DNS 报文；入站 TCP/53 响应在交给 Windows 网络栈之前提取完整报文并匹配问题。
 - DNS 查询关联缓存现在按 TCP 与 UDP 传输分别匹配，避免相同端点和事务 ID 跨协议误关联。
-- 为控制开销，**只读取单个 TCP 段中完整存在、长度不超过 8192 字节的 DNS 消息**。分片/乱序/跨段/大报文以及加密 DNS 不进行猜测；没有实现通用 TCP 重组。
+- 为控制开销，现在支持**序号连续的有限 TCP 分段重组**：最多 512 个方向流、单条 DNS/TCP 报文不超过 8192 字节，闲置/异常状态 10 秒过期。序号跳跃、部分重叠、非法长度时丢弃该方向的观察状态，不重写 TCP 流量。乱序重排、任意丢包恢复和加密 DNS 仍不支持。
 - 新增保守解析、错误响应与过滤器覆盖测试。此实现只是域名识别的补充，不提供对 DoH、DoT 或环回 DNS 的全覆盖承诺。
+
+## Windows DNS 缓存启动同步与 Android UX
+
+- Windows 仅在 **DNS 真实 IP 被动关联模式** 下，在 WinDivert 捕获启动后尝试调用 `dnsapi.dll!DnsFlushResolverCache`。这使 Windows DNS Client 重新发出的明文 DNS 查询能被新启动的 DNS snooping 捕获，减少因缓存先于 Agent 启动而导致的首次域名规则未命中。
+- 缓存刷新为尽力而为：不支持该 API 或失败时只记录日志、不阻断代理启动；不会清理 Chrome、Firefox 私有 DNS 缓存，也无法保证 DoH/DoT 被观察到。
+- Android 当前使用 VPN 内自动 `Mapped DNS`，并没有与桌面 DNS 三模式一一对应的 FakeIP/真实 IP 开关。因此 Android 设置展示“DNS 自动处理”及能力边界，不添加不能兑现的模式选择。
+- Windows 默认 REJECT 下 DNS 放行、TCP DNS 分段关联、Windows DNS Client 缓存刷新、Android Mapped DNS 文案均仍需要各自的端到端验证。**这些变更不是完整的系统防泄漏保证。**

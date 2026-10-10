@@ -5,6 +5,7 @@ import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolCho
 import {Icon} from './icons.jsx';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
+import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
 import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 
 const NAV=[
@@ -343,6 +344,14 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
 
 // The three presets intentionally project to legacy backend fields. Advanced
 // settings are retained for existing deployments and specialised debugging.
+function DNSUpstreamsEditor({upstreams,onChange}){
+ const[draft,setDraft]=useState(()=>formatDNSUpstreamLines(upstreams));
+ useEffect(()=>setDraft(formatDNSUpstreamLines(upstreams)),[upstreams]);
+ return <Textarea rows="4" placeholder={'https://resolver.example/dns-query | 10.0.0.53'}
+  value={draft} onChange={e=>setDraft(e.target.value)}
+  onBlur={()=>onChange(parseDNSUpstreamLines(draft))}/>;
+}
+
 function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const[advancedOpen,setAdvancedOpen]=useState(false);
  const r=config.routing||EMPTY.routing;
@@ -381,6 +390,11 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
       {inventory.filter(x=>x.id).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}
       {r.dns_exit_id&&!inventory.some(x=>x.id===r.dns_exit_id)&&<option value={r.dns_exit_id}>{r.dns_exit_id}（不可用）</option>}
      </Select>
+    </Field>
+   </div>
+   <div className="form-grid top-gap">
+    <Field label="自定义 DoH 上游（每行 URL | 连接 IP）" className="full" help="留空使用内置 DNS。填写后只使用这些上游，不会回退到公共 DNS。连接经上方出口发送，证书按 URL 域名验证。支持指定出口节点内网 HTTPS DNS。">
+     <DNSUpstreamsEditor upstreams={r.dns_upstreams} onChange={v=>setv('routing.dns_upstreams',v)}/>
     </Field>
    </div>
   </Card>

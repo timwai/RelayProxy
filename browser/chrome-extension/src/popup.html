@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RelayProxy Browser Sync</title>
   <style>
-    body { width: 360px; margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #202d39; background: #f7f9fc; }
+    body { width: 385px; max-height: 580px; overflow-y: auto; margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #202d39; background: #f7f9fc; }
     main { padding: 18px; }
     h1 { margin: 0 0 4px; font-size: 20px; }
     p { margin: 0 0 14px; color: #5d6978; font-size: 12px; }
@@ -17,7 +17,16 @@
     .notice { background: #e9eef7; padding: 10px; border-radius: 7px; font-size: 12px; }
     .error { color: #a62424; }
     ul { padding-left: 20px; word-break: break-all; font-size: 12px; }
-  </style>
+    h2 { margin: 20px 0 8px; font-size: 15px; }
+    select { width: 100%; padding: 9px; border: 1px solid #c4ccd8; border-radius: 7px; background: white; }
+    .rule { border: 1px solid #d3dbe6; background: white; border-radius: 9px; padding: 10px; margin-top: 9px; }
+    .rule p { margin: 3px 0 7px; word-break: break-all; }
+    .code { font: 700 14px/1.6 ui-monospace, monospace; letter-spacing: .3px; color: #17488c; }
+    .rule button { margin-right: 5px; }
+    .rule label { display: flex; gap: 7px; align-items: start; font-weight: normal; margin: 9px 0 3px; font-size: 12px; }
+    .rule input[type="checkbox"] { width: auto; margin-top: 2px; }
+    #message { margin-top: 12px; font-size: 12px; }
+    </style>
 </head>
 <body><main>
   <h1>RelayProxy Browser Sync</h1>
@@ -34,6 +43,19 @@
   <input id="site" placeholder="https://example.com">
   <button id="add-site">请求站点权限</button>
   <ul id="sites"></ul>
+  <h2>设备配对</h2>
+  <p>需要 A/B 均在 Server 审批；只能选择同一身份下的浏览器设备。</p>
+  <button id="refresh-pairing">刷新设备与邀请</button>
+  <label for="target">接收设备</label>
+  <select id="target"><option value="">请先连接 Server 并刷新</option></select>
+  <label for="pair-site">站点（必须先授予权限）</label>
+  <select id="pair-site"><option value="">请先添加允许的网站</option></select>
+  <label for="cookie-names">允许的 Cookie 名称（逗号分隔）</label>
+  <input id="cookie-names" placeholder="例如 session, csrf_token" autocomplete="off">
+  <button id="offer-rule">创建加密配对邀请</button>
+  <h2>配对邀请与授权</h2>
+  <p>请通过独立可信渠道比较两台设备显示的校验码，然后才确认。此阶段不传输 Cookie。</p>
+  <div id="pairing-rules"></div>
   <div id="message" role="status"></div>
   <script type="module" src="./popup.js"></script>
 </main></body></html>

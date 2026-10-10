@@ -23,6 +23,19 @@ type Authenticator interface {
 // PolicyAuthenticator is the production authentication contract. In addition
 // to validating the ticket it returns the Server-authoritative Relay ACL that
 // must be bound to every proxy stream on the accepted direct session.
+type Authorization struct {
+	RelayPolicy       *acl.Policy
+	BrutalUploadBPS   uint64
+	BrutalDownloadBPS uint64
+}
+
+// AuthorizationAuthenticator returns the current Server-authoritative policy
+// and performance profile in one validation round-trip.
+type AuthorizationAuthenticator interface {
+	Authenticator
+	AuthenticateAuthorization(context.Context, protocol.PublicDirectAuthRequest) (Authorization, error)
+}
+
 type PolicyAuthenticator interface {
 	Authenticator
 	AuthenticatePolicy(context.Context, protocol.PublicDirectAuthRequest) (*acl.Policy, error)

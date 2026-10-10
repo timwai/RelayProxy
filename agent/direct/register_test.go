@@ -94,6 +94,7 @@ func TestValidateTicketCurrentUsesPublicDirectControlFrame(t *testing.T) {
 	stream := &registrationStream{}
 	if err := protocol.WriteJSON(&stream.read, protocol.PublicDirectRegistrationResponse{
 		Success: true, RelayPolicy: testDirectRelayPolicy(t),
+		BrutalUploadBPS: 12_500_000, BrutalDownloadBPS: 50_000_000,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -104,12 +105,15 @@ func TestValidateTicketCurrentUsesPublicDirectControlFrame(t *testing.T) {
 		PolicyRevision:        4,
 		AuthorizationRevision: 9,
 	}
-	policy, err := ValidateTicketCurrent(context.Background(), session, claims)
+	authorization, err := ValidateTicketCurrent(context.Background(), session, claims)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy == nil || policy.Fingerprint == "" {
-		t.Fatalf("relay policy=%+v", policy)
+	if authorization.RelayPolicy == nil || authorization.RelayPolicy.Fingerprint == "" {
+		t.Fatalf("relay policy=%+v", authorization.RelayPolicy)
+	}
+	if authorization.BrutalUploadBPS != 12_500_000 || authorization.BrutalDownloadBPS != 50_000_000 {
+		t.Fatalf("Brutal profile=%d/%d", authorization.BrutalUploadBPS, authorization.BrutalDownloadBPS)
 	}
 
 	header, err := protocol.ReadStreamHeader(&stream.write)

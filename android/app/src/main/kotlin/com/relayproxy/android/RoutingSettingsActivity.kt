@@ -21,6 +21,8 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.EditText
+import org.json.JSONObject
 import com.relayproxy.core.androidcore.Androidcore
 
 class RoutingSettingsActivity : Activity() {
@@ -158,6 +160,64 @@ class RoutingSettingsActivity : Activity() {
                 startActivity(Intent(this@RoutingSettingsActivity, RoutingRuleActivity::class.java))
             }
         }, buttonParams(16))
+        root.addView(TextView(this).apply {
+            text = "规则订阅"
+            textSize = 16f
+            setTextColor(inkColor)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(2), dp(22), 0, dp(6))
+        })
+        root.addView(TextView(this).apply {
+            text = "手动规则优先，然后按订阅顺序匹配，最后执行未命中动作。支持 GFWList Base64 和纯域名列表；每 6 小时自动更新，失败时保留缓存。"
+            textSize = 12f
+            setTextColor(mutedColor)
+        })
+        config.subscriptions.forEachIndexed { index, sub ->
+            root.addView(card().apply {
+                addView(TextView(this@RoutingSettingsActivity).apply {
+                    text = sub.name + if (sub.enabled) " · 启用" else " · 停用"
+                    textSize = 15f
+                    setTypeface(typeface, Typeface.BOLD)
+                    setTextColor(inkColor)
+                })
+                addView(TextView(this@RoutingSettingsActivity).apply {
+                    text = sub.url + "\n" + actionLabel(sub.action) +
+                        if (sub.exitId.isBlank()) " · 跟随默认出口" else " · 指定出口"
+                    textSize = 11.5f
+                    setTextColor(mutedColor)
+                    setPadding(0, dp(8), 0, dp(10))
+                })
+                val actions = LinearLayout(this@RoutingSettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                }
+                actions.addView(textAction("编辑") { editSubscription(index) }, actionParams())
+                actions.addView(textAction(if (sub.enabled) "停用" else "启用") {
+                    val base = currentPolicy()
+                    val next = base.subscriptions.mapIndexed { i, x ->
+                        if (i == index) x.copy(enabled = !x.enabled) else x
+                    }
+                    if (save(base.copy(subscriptions = next))) renderCurrent()
+                }, actionParams())
+                actions.addView(textAction("上移") { moveSubscription(index, -1) }, actionParams())
+                actions.addView(textAction("下移") { moveSubscription(index, 1) }, actionParams())
+                actions.addView(textAction("删除", dangerColor) {
+                    UiKit.alertDialog(this@RoutingSettingsActivity, "删除订阅", "确定删除“${sub.name}”？")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("删除") { _, _ ->
+                            val base = currentPolicy()
+                            if (save(base.copy(subscriptions = base.subscriptions.filterIndexed { i, _ -> i != index }))) renderCurrent()
+                        }.show()
+                }, actionParams())
+                addView(actions)
+            }, topMargin(8))
+        }
+        root.addView(Button(this).apply {
+            text = "+ 添加订阅"
+            setAllCaps(false)
+            setTextColor(brandColor)
+            background = rounded(if (UiPalette.isDark) UiPalette.brandSoft else Color.WHITE, 8, lineColor)
+            setOnClickListener { editSubscription(-1) }
+        }, buttonParams(12))
         val scroll = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(backgroundColor)
@@ -172,6 +232,101 @@ class RoutingSettingsActivity : Activity() {
             )
             addView(fixedSaveBar("保存分流设置") { persistPolicy(showToast = true) })
         }
+    }
+
+    private fun moveSubscription(index: Int, direction: Int) {
+        val base = currentPolicy()
+        val other = index + direction
+        if (index !in base.subscriptions.indices || other !in base.subscriptions.indices) return
+        val next = base.subscriptions.toMutableList()
+        val item = next.removeAt(index)
+        next.add(other, item)
+        if (save(base.copy(subscriptions = next))) renderCurrent()
+    }
+
+    private fun editSubscription(index: Int) {
+        val current = config.subscriptions.getOrNull(index) ?: RoutingSubscriptionConfig()
+        val fields = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(4))
+        }
+        val name = EditText(this).apply {
+            setSingleLine(true)
+            setText(current.name)
+            hint = "名称"
+        }
+        val url = EditText(this).apply {
+            setSingleLine(true)
+            setText(current.url)
+            hint = "HTTPS 订阅 URL"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val action = spinner(actionLabels)
+        action.setSelection(actionValues.indexOf(current.action).coerceAtLeast(0))
+        val exitIDs = mutableListOf("")
+        val exitLabels = mutableListOf("跟随默认出口")
+        val status = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val names = ExitDisplayNames.fromStatus(status, ConfigStore(this).customExitNames())
+        status?.optJSONArray("proxyExits")?.let { available ->
+            for (i in 0 until available.length()) {
+                val item = available.optJSONObject(i) ?: continue
+                val id = item.optString("deviceId")
+                if (id.isBlank() || id in exitIDs) continue
+                exitIDs.add(id)
+                exitLabels.add(ExitDisplayNames.label(id, names))
+            }
+        }
+        ConfigStore(this).load().customExits.forEach { item ->
+            if (item.id !in exitIDs) {
+                exitIDs.add(item.id)
+                exitLabels.add(item.name)
+            }
+        }
+        if (current.exitId.isNotBlank() && current.exitId !in exitIDs) {
+            exitIDs.add(current.exitId)
+            exitLabels.add(ExitDisplayNames.label(current.exitId, names) + "（不可用）")
+        }
+        val exit = spinner(exitLabels)
+        exit.setSelection(exitIDs.indexOf(current.exitId).coerceAtLeast(0))
+        val enabled = Switch(this).apply {
+            text = "启用此订阅"
+            isChecked = current.enabled
+            UiKit.styleSwitch(this)
+        }
+        fields.addView(labeled("订阅名称", name))
+        fields.addView(labeled("订阅 URL", url), topMargin(8))
+        fields.addView(labeled("匹配动作", action), topMargin(8))
+        fields.addView(labeled("指定代理出口（仅 PROXY 使用）", exit), topMargin(8))
+        fields.addView(enabled, topMargin(10))
+        val dialog = UiKit.alertDialog(this, if (index < 0) "添加规则订阅" else "编辑规则订阅", "仅允许公开 HTTPS 订阅地址")
+            .setView(fields)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val base = currentPolicy()
+                val newItem = RoutingSubscriptionConfig(
+                    name = name.text.toString().trim(),
+                    url = url.text.toString().trim(),
+                    enabled = enabled.isChecked,
+                    action = actionValues.getOrElse(action.selectedItemPosition) { "PROXY" },
+                    exitId = if (actionValues.getOrElse(action.selectedItemPosition) { "PROXY" } == "PROXY")
+                        exitIDs.getOrElse(exit.selectedItemPosition) { "" } else "",
+                )
+                val list = base.subscriptions.toMutableList()
+                if (index < 0) list.add(newItem) else list[index] = newItem
+                if (list.count { it.url == newItem.url } > 1) {
+                    Toast.makeText(this, "订阅地址不能重复", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+                if (save(base.copy(subscriptions = list))) {
+                    dialog.dismiss()
+                    renderCurrent()
+                }
+            }
+        }
+        dialog.show()
     }
 
     private fun fixedSaveBar(label: String, onSave: () -> Unit) = LinearLayout(this).apply {

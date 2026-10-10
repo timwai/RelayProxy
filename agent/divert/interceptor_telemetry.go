@@ -35,8 +35,15 @@ func (i *packetInterceptor) inboundPacket(data []byte, meta packetMetadata) erro
 	// Observe a verified UDP DNS answer before delivering it to the OS:
 	// the application can open its destination TCP SYN immediately after
 	// receiving the answer. Recording it after reinjection races that SYN.
-	if p.Protocol == ProtoUDP && i.server.dnsAssociationEnabled() {
-		i.dns.response(p.Source, p.Destination, p.Payload)
+	if i.server.dnsAssociationEnabled() {
+		switch p.Protocol {
+		case ProtoUDP:
+			i.dns.response(p.Source, p.Destination, p.Payload)
+		case ProtoTCP:
+			// Complete unencrypted DNS/TCP messages can identify the real IP
+			// before the resolver is notified. Partial frames remain unknown.
+			i.dns.responseTCP(p.Source, p.Destination, p.Payload)
+		}
 	}
 	if err := i.sendPacket(p, meta); err != nil {
 		return err

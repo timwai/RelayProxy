@@ -63,6 +63,7 @@ export async function sendSnapshot(ruleId) {
     return {state:'BUSY'};
   }
   sourceBusy.add(ruleId);
+  let transmissionAttempted=false;
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.sourceRole)throw new Error('只有来源设备可以发送登录状态');
@@ -88,15 +89,26 @@ export async function sendSnapshot(ruleId) {
     const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
     pending[ruleId]={ruleId,messageId:envelope.messageId,createdAt:Date.now()};
     await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
-    await setStatus(ruleId,'RELAYED');
+    await setStatus(ruleId,'SENDING');
+    transmissionAttempted=true;
     const ack=await sendControl('SESSION_SNAPSHOT',{envelope});
     if(ack.status!=='RELAYED')throw new Error('中继没有接受加密快照');
+    const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+    // A fast target APPLIED may have consumed this pending entry already.
+    if(latest[ruleId]?.messageId===envelope.messageId)await setStatus(ruleId,'RELAYED');
     return {state:'RELAYED',count:payload.cookies.length};
   }catch(error){
-    const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
-    delete pending[ruleId];
-    await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
-    await setStatus(ruleId,'FAILED');
+    if(!transmissionAttempted){
+      const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+      delete pending[ruleId];
+      await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
+      await setStatus(ruleId,'FAILED');
+    }else{
+      // A timed-out WSS response does NOT prove B failed to apply a Cookie.
+      // Retain messageId so reconnect can query the durable terminal receipt.
+      const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+      if(latest[ruleId])await setStatus(ruleId,'UNKNOWN');
+    }
     throw error;
   }finally{
     sourceBusy.delete(ruleId);
@@ -220,12 +232,40 @@ export async function onCookieChange(cookie) {
   }
 }
 
+export async function reconcilePendingDeliveries() {
+  const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+  for(const [ruleId,item] of Object.entries(pending)){
+    if(!item||typeof item.messageId!=='string')continue;
+    let statusReply;
+    try{
+      statusReply=await sendControl('DELIVERY_STATUS',{ruleId,messageId:item.messageId});
+    }catch{continue;} // leave pending for next reconnect
+    if(statusReply?.type!=='DELIVERY_RESULT'||statusReply.ruleId!==ruleId||
+       statusReply.messageId!==item.messageId)continue;
+    const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+    if(latest[ruleId]?.messageId!==item.messageId)continue;
+    if(['APPLIED','FAILED','CONFLICT'].includes(statusReply.status)){
+      await setStatus(ruleId,statusReply.status);
+      delete latest[ruleId];
+      await chrome.storage.local.set({[PENDING_DELIVERY]:latest});
+    }else if(statusReply.status==='UNKNOWN'){
+      // Outcome was lost or expired: never claim a login actually failed.
+      await setStatus(ruleId,'UNKNOWN');
+      delete latest[ruleId];
+      await chrome.storage.local.set({[PENDING_DELIVERY]:latest});
+    }else if(statusReply.status==='RECEIVED'){
+      await setStatus(ruleId,'RECEIVED');
+    }
+  }
+}
+
 export async function restoreActiveSubscriptions({force=false}={}) {
   const settings=await getSettings();
   if(!settings.serverOrigin)return;
   const now=Date.now();
   const last=(await chrome.storage.local.get(LAST_RECONCILE))[LAST_RECONCILE];
   if(!force&&!shouldReconcile(last,now))return;
+  await reconcilePendingDeliveries();
   const identity=await getOrCreateIdentity();
   const rules=(await sendControl('LIST_RULES')).rules||[];
   // Network reconnection may trigger multiple async wakeups. Limit periodic

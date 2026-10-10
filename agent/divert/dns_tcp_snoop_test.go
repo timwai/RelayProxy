@@ -42,7 +42,7 @@ func TestPassiveDNSTCPRejectsUnpairedPartialAndWrongResolver(t *testing.T) {
 	ip := netip.MustParseAddr("203.0.113.11")
 	query, reply := dnsExchange(t, "untrusted.example", ip, 60)
 	for _, scenario := range []struct {
-		name string
+		name    string
 		observe func(*dnsAssociations)
 	}{
 		{"unsolicited", func(d *dnsAssociations) { d.responseTCP(server, client, dnsTCPWire(reply)) }},

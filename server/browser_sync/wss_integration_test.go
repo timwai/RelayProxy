@@ -202,3 +202,47 @@ func TestWSSSignedEncryptedSessionDeliveredWithAck(t *testing.T) {
 		t.Fatalf("server accepted replayed ciphertext: %v", reply)
 	}
 }
+
+func TestWSSRecoversSequenceAndTerminalDeliveryAfterReconnect(t *testing.T) {
+	store := testBrowserStore(t)
+	source, sourceKey := approvedWSSBrowser(t, store, true, false)
+	target, targetKey := approvedWSSBrowser(t, store, false, true)
+	ruleID := uuid.NewString()
+	if err := store.OfferRule(context.Background(), source.ID, encryptedTestOffer(ruleID, target.ID)); err != nil { t.Fatal(err) }
+	if err := store.AcceptRule(context.Background(), target.ID, ruleID); err != nil { t.Fatal(err) }
+	if err := store.ConfirmRule(context.Background(), source.ID, ruleID); err != nil { t.Fatal(err) }
+	server := httptest.NewTLSServer(NewHandler(store, []string{testExtensionID}))
+	defer server.Close()
+	a := dialApprovedBrowser(t, server, source, sourceKey)
+	b := dialApprovedBrowser(t, server, target, targetKey)
+
+	sendWSSControl(t, a, map[string]any{"type":"SEQUENCE_CURSOR","requestId":"cursor0","ruleId":ruleID})
+	reply := readWSSControl(t, a)
+	if reply["type"]!="SESSION_CURSOR" || reply["lastSequence"]!=float64(0) {
+		t.Fatalf("fresh sequence cursor: %v", reply)
+	}
+	env := signedTestSnapshot(t, sourceKey, source.ID, target.ID, ruleID)
+	sendWSSControl(t, a, map[string]any{"type":"SESSION_SNAPSHOT","requestId":"sent","envelope":env})
+	if reply := readWSSControl(t,a);reply["status"]!="RELAYED" {t.Fatalf("relay failed: %v",reply)}
+	if msg:=readWSSControl(t,b);msg["type"]!="SESSION_SNAPSHOT" {t.Fatalf("target did not receive envelope: %v",msg)}
+	sendWSSControl(t,a,map[string]any{"type":"DELIVERY_STATUS","requestId":"query1","ruleId":ruleID,"messageId":env.MessageID})
+	if reply:=readWSSControl(t,a);reply["status"]!="PENDING" {t.Fatalf("expected pending delivery: %v",reply)}
+	// Simulate MV3 worker stop: B's terminal ACK must persist even if the
+	// source no longer has a live WebSocket.
+	_ = a.CloseNow()
+	sendWSSControl(t,b,map[string]any{"type":"SYNC_ACK","requestId":"ack","ruleId":ruleID,"messageId":env.MessageID,"status":"APPLIED"})
+	if reply:=readWSSControl(t,b);reply["type"]!="SYNC_STATUS" {t.Fatalf("offline terminal ACK not accepted: %v",reply)}
+	a2:=dialApprovedBrowser(t,server,source,sourceKey)
+	sendWSSControl(t,a2,map[string]any{"type":"DELIVERY_STATUS","requestId":"query2","ruleId":ruleID,"messageId":env.MessageID})
+	if reply:=readWSSControl(t,a2);reply["type"]!="DELIVERY_RESULT" || reply["status"]!="APPLIED" {
+		t.Fatalf("terminal ACK lost on source reconnect: %v",reply)
+	}
+	sendWSSControl(t,a2,map[string]any{"type":"SEQUENCE_CURSOR","requestId":"cursor1","ruleId":ruleID})
+	if reply:=readWSSControl(t,a2);reply["lastSequence"]!=float64(1) {
+		t.Fatalf("accepted sequence cursor lost on reconnect: %v",reply)
+	}
+	sendWSSControl(t,b,map[string]any{"type":"DELIVERY_STATUS","requestId":"unauthorized","ruleId":ruleID,"messageId":env.MessageID})
+	if reply:=readWSSControl(t,b);reply["type"]!="RULE_ERROR" {
+		t.Fatalf("receiver read source-only delivery result: %v",reply)
+	}
+}

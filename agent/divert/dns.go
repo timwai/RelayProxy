@@ -35,10 +35,11 @@ type dnsAssociations struct {
 	now       func() time.Time
 	pending   map[dnsQueryKey]dnsQuestion
 	addresses map[netip.Addr]*dnsNames
+	tcp       *dnsTCPObserver
 }
 
 func newDNSAssociations() *dnsAssociations {
-	return &dnsAssociations{now: time.Now, pending: make(map[dnsQueryKey]dnsQuestion), addresses: make(map[netip.Addr]*dnsNames)}
+	return &dnsAssociations{now: time.Now, pending: make(map[dnsQueryKey]dnsQuestion), addresses: make(map[netip.Addr]*dnsNames), tcp: newDNSTCPObserver()}
 }
 
 func dnsName(name dnsmessage.Name) string {

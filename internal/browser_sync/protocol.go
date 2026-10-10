@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +17,7 @@ import (
 
 const (
 	ProtocolVersion     = "browser.sync.v1"
+	SessionCipherSuite   = "P256-HKDF-SHA256-A256GCM-v1"
 	MaxCiphertextBytes  = 256 * 1024
 	MaxClockSkew        = 60 * time.Second
 	MaxMessageLifetime  = 15 * time.Minute
@@ -33,6 +36,8 @@ type EncryptionHeader struct {
 	Suite string `json:"suite"`
 	KeyID string `json:"keyId"`
 	Enc   string `json:"enc"`
+	Salt  string `json:"salt"`
+	IV    string `json:"iv"`
 }
 
 type Envelope struct {
@@ -74,6 +79,9 @@ func ValidateEnvelope(e Envelope, now time.Time) error {
 			return fmt.Errorf("invalid %s", name)
 		}
 	}
+	if _, err := uuid.Parse(e.RuleID); err != nil {
+		return errors.New("invalid ruleId")
+	}
 	if e.SourceBrowserDeviceID == e.TargetBrowserDeviceID {
 		return errors.New("source and target browser must be distinct")
 	}
@@ -87,30 +95,54 @@ func ValidateEnvelope(e Envelope, now time.Time) error {
 	if e.CreatedAt.After(now.Add(MaxClockSkew)) || !now.Before(e.ExpiresAt) {
 		return errors.New("message outside validity window")
 	}
-	if e.Encryption.Suite != "HPKE-v1" || e.Encryption.KeyID == "" ||
+	if e.Encryption.Suite != SessionCipherSuite || e.Encryption.KeyID == "" ||
 		len(e.Encryption.KeyID) > MaxIdentifierLength || e.Encryption.Enc == "" {
 		return errors.New("invalid encryption header")
 	}
 	if len(e.Encryption.Enc) > 2048 {
 		return errors.New("encapsulated key too large")
 	}
-	if _, err := base64.StdEncoding.DecodeString(e.Encryption.Enc); err != nil {
+	if _, err := base64.RawURLEncoding.DecodeString(e.Encryption.Enc); err != nil {
 		return errors.New("invalid encapsulated key encoding")
 	}
+	for _, b64 := range []struct {
+		label string
+		value string
+		size  int
+	}{{"salt", e.Encryption.Salt, 32}, {"iv", e.Encryption.IV, 12}} {
+		raw, err := base64.RawURLEncoding.DecodeString(b64.value)
+		if err != nil || len(raw) != b64.size {
+			return fmt.Errorf("invalid %s", b64.label)
+		}
+	}
 	// Reject on encoded size *before* decoding to bound allocations.
-	if len(e.Ciphertext) == 0 || len(e.Ciphertext) > base64.StdEncoding.EncodedLen(MaxCiphertextBytes) {
+	if len(e.Ciphertext) == 0 || len(e.Ciphertext) > base64.RawURLEncoding.EncodedLen(MaxCiphertextBytes) {
 		return errors.New("ciphertext exceeds size limit or is empty")
 	}
-	ciphertext, err := base64.StdEncoding.DecodeString(e.Ciphertext)
+	ciphertext, err := base64.RawURLEncoding.DecodeString(e.Ciphertext)
 	if err != nil || len(ciphertext) == 0 || len(ciphertext) > MaxCiphertextBytes {
 		return errors.New("invalid ciphertext")
 	}
 	if len(e.Signature) == 0 || len(e.Signature) > 2048 {
 		return errors.New("missing or oversized signature")
 	}
-	signature, err := base64.StdEncoding.DecodeString(e.Signature)
-	if err != nil || len(signature) < 32 || len(signature) > 512 {
+	signature, err := base64.RawURLEncoding.DecodeString(e.Signature)
+	if err != nil || len(signature) != 64 {
 		return errors.New("invalid signature encoding or size")
 	}
 	return nil
+}
+
+// SignedHeader is a deterministic cross-language encoding: ISO8601 JSON time
+// spellings do not appear in the signature; both ends use Unix milliseconds.
+func SignedHeader(e Envelope) string {
+	return strings.Join([]string{
+		e.Protocol, string(e.Type), e.MessageID, e.RuleID,
+		e.SourceBrowserDeviceID, e.TargetBrowserDeviceID,
+		strconv.FormatUint(e.Sequence, 10),
+		strconv.FormatInt(e.CreatedAt.UnixMilli(), 10),
+		strconv.FormatInt(e.ExpiresAt.UnixMilli(), 10),
+		e.Encryption.Suite, e.Encryption.KeyID, e.Encryption.Enc,
+		e.Encryption.Salt, e.Encryption.IV,
+	}, "\n")
 }

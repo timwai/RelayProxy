@@ -343,3 +343,15 @@ func (e *Engine) Close() {
  if e.subscriptionCancel != nil { e.subscriptionCancel(); e.subscriptionCancel = nil }
  e.mu.Unlock()
 }
+
+func ValidateSubscriptionExitReferences(exits []CustomExit, subscriptions []Subscription) error {
+ for i, sub := range subscriptions {
+  if sub.Action != "" && sub.Action != ActionProxy { continue }
+  if !IsCustomExitID(sub.ExitID) { continue }
+  item, ok := FindCustomExit(exits, sub.ExitID)
+  if !ok || !item.Enabled {
+   return fmt.Errorf("routing.subscriptions[%d] references a missing or disabled custom exit %q", i, sub.ExitID)
+  }
+ }
+ return nil
+}

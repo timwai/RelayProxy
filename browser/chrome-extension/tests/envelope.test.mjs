@@ -52,3 +52,94 @@ test('offer signature canonicalization binds all forwarding fields', () => {
   assert.notEqual(message, offerCanonical({...offer,targetBrowserDeviceId:'attacker'},'source'));
   assert.notEqual(message, offerCanonical(offer,'attacker'));
 });
+
+test('encrypted rule proposal decrypts only for the intended browser and rejects tampering', async () => {
+  const { getOrCreateIdentity } = await import('../src/device-identity.js');
+  const { createEncryptedOffer, decryptEncryptedOffer } = await import('../src/envelope.js');
+
+  // Minimal fake extension Profile storage for exercising real WebCrypto
+  // without a running Chrome instance or third-party test dependencies.
+  function makeProfile() {
+    const keys = new Map();
+    const data = new Map();
+    const database = {
+      createObjectStore() {},
+      transaction() {
+        const tx = {
+          objectStore() {
+            return {
+              get(name) {
+                const request = {};
+                queueMicrotask(() => {
+                  request.result = keys.get(name);
+                  request.onsuccess?.();
+                });
+                return request;
+              },
+              put(value, name) {
+                keys.set(name, value);
+                queueMicrotask(() => tx.oncomplete?.());
+              }
+            };
+          }
+        };
+        return tx;
+      },
+      close() {}
+    };
+    return {
+      idb: {
+        open() {
+          const request = {result:database};
+          queueMicrotask(() => {
+            request.onupgradeneeded?.();
+            request.onsuccess?.();
+          });
+          return request;
+        }
+      },
+      chrome: {
+        storage: {
+          local: {
+            async get(name) {
+              if (typeof name !== 'string') throw new Error('unexpected storage key');
+              return {[name]:data.get(name)};
+            },
+            async set(items) {
+              for (const [key,value] of Object.entries(items)) data.set(key,value);
+            }
+          }
+        }
+      }
+    };
+  }
+
+  const a = makeProfile(), b = makeProfile();
+  function use(profile) {
+    globalThis.indexedDB = profile.idb;
+    globalThis.chrome = profile.chrome;
+  }
+  use(a);
+  const source = await getOrCreateIdentity();
+  use(b);
+  const target = await getOrCreateIdentity();
+  use(a);
+  const {offer,policy} = await createEncryptedOffer({
+    target: {id: target.deviceId, signingPublicKey: target.signingPublicKey,
+      encryptionPublicKey: target.encryptionPublicKey, receive:true},
+    siteOrigin:'https://example.com',
+    cookieNames:['session','csrf']
+  });
+  assert.deepEqual(policy.cookieNames, ['csrf','session']);
+  use(b);
+  const rule = {ruleId:offer.ruleId,sourceBrowserDeviceId:source.deviceId,
+    targetBrowserDeviceId:target.deviceId, offer};
+  const sourcePeer = {id:source.deviceId,signingPublicKey:source.signingPublicKey};
+  assert.deepEqual(await decryptEncryptedOffer(rule, sourcePeer), policy);
+  assert.rejects(decryptEncryptedOffer({
+    ...rule, offer:{...offer,policyDigest:'f'.repeat(64)}
+  },sourcePeer), /签名/);
+  assert.rejects(decryptEncryptedOffer({
+    ...rule, offer:{...offer,ciphertext:offer.ciphertext.slice(0,-1)+'A'}
+  },sourcePeer));
+});

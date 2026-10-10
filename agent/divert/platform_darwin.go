@@ -127,7 +127,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := writeDarwinGuardMarker(tokenPath, s.fakeIPEnabled()); err != nil {
+	if err := writeDarwinGuardMarker(tokenPath, s.fakeIPEnabled() || s.proxyDNSEnabled()); err != nil {
 		return nil, fmt.Errorf("无法持久化 macOS DNS 保护状态: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(socketPath), 0700); err != nil {

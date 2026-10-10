@@ -66,7 +66,7 @@ func ValidateEnvelope(e Envelope, now time.Time) error {
 		return errors.New("invalid messageId")
 	}
 	for name, value := range map[string]string{
-		"ruleId": e.RuleID,
+		"ruleId":                e.RuleID,
 		"sourceBrowserDeviceId": e.SourceBrowserDeviceID,
 		"targetBrowserDeviceId": e.TargetBrowserDeviceID,
 	} {

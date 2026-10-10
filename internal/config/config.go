@@ -88,6 +88,11 @@ type ServerConfig struct {
 		Access AccessConfig `yaml:"access"`
 	} `yaml:"exit"`
 
+	BrowserSync struct {
+		Enabled bool `yaml:"enabled"`
+		ExtensionIDs []string `yaml:"extension_ids"`
+	} `yaml:"browser_sync"`
+
 	Logging struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`

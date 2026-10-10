@@ -18,6 +18,7 @@ const LAST_APPLIED = 'browserSyncLastAppliedSequence';
 const PENDING_DELIVERY = 'browserSyncPendingDelivery';
 const LAST_RECONCILE = 'browserSyncLastReconcileAt';
 const ALLOW_OVERRIDE = 'browserSyncAllowOverwrite';
+const PAUSED_RESTORE = 'browserSyncRestorePaused';
 const statusKey = 'browserSyncTransferStatus';
 const pendingOpenKey = 'browserSyncPendingOpen';
 
@@ -151,6 +152,8 @@ async function handleIncomingSnapshot(envelope) {
     if(!ctx.targetRole||ctx.remote.id!==envelope.sourceBrowserDeviceId ||
        ctx.rule.targetBrowserDeviceId!==envelope.targetBrowserDeviceId)
       throw new Error('接收设备身份不匹配');
+    const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
+    if(paused[ruleId])throw new Error('PARTIAL_ROLLBACK: 接收端待人工检查');
     const sequences=(await chrome.storage.local.get(LAST_APPLIED))[LAST_APPLIED]||{};
     if(!Number.isSafeInteger(envelope.sequence)||envelope.sequence<=Number(sequences[ruleId]||0))
       throw new Error('旧会话快照已拒绝');
@@ -170,13 +173,20 @@ async function handleIncomingSnapshot(envelope) {
           chrome.tabs.create({url:ctx.policy.siteOrigin}).catch(()=>{});
       }
     }catch(error){
-      if(String(error.message||'').startsWith('CONFLICT:'))result='CONFLICT';
+      const code=String(error.message||'');
+      if(code.startsWith('CONFLICT:'))result='CONFLICT';
       else throw error;
     }
     await setStatus(ruleId,result);
-  }catch{
-    // Never log or expose snapshot contents in errors.
-    await setStatus(ruleId,'FAILED');
+  }catch(error){
+    // An incomplete rollback can leave a mixed website login state.
+    // Fail closed until the receiver explicitly inspects and resumes.
+    const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
+    if(String(error.message||'').startsWith('PARTIAL_ROLLBACK:')){
+      paused[ruleId]=true;
+      await chrome.storage.local.set({[PAUSED_RESTORE]:paused});
+    }
+    await setStatus(ruleId,paused[ruleId]?'PARTIAL':'FAILED');
   }
   try{
     if(typeof envelope.messageId==='string')
@@ -286,13 +296,26 @@ export async function setOverwritePermission(ruleId,allowed) {
   return {ruleId,allowed:flags[ruleId]};
 }
 
+export async function resumePausedRestore(ruleId,confirmed) {
+  if(confirmed!==true)throw new Error('需要确认已检查目标网站的登录状态');
+  const ctx=await ruleContext(ruleId);
+  if(!ctx.targetRole)throw new Error('仅接收设备可以恢复');
+  const flags=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
+  if(!flags[ruleId])throw new Error('当前规则未处于暂停状态');
+  delete flags[ruleId];
+  await chrome.storage.local.set({[PAUSED_RESTORE]:flags});
+  await setStatus(ruleId,'UNKNOWN');
+  // Do not immediately overwrite a possibly changed website session.
+  return {state:'UNKNOWN'};
+}
+
 export async function forgetRuleLocalState(ruleId) {
   clearTimeout(cookieTimers.get(ruleId));
   cookieTimers.delete(ruleId);
   // Removing sync metadata does NOT delete or revoke website Cookies.
   // Credential revocation must be handled by the destination website.
   for(const key of [LAST_SEQUENCE,LAST_APPLIED,ALLOW_OVERRIDE,statusKey,
-      pendingOpenKey,PENDING_DELIVERY,'browserSyncManagedCookieHmacV1','browserSyncLocalOffers']){
+      pendingOpenKey,PENDING_DELIVERY,PAUSED_RESTORE,'browserSyncManagedCookieHmacV1','browserSyncLocalOffers']){
     const values=(await chrome.storage.local.get(key))[key]||{};
     if(Object.hasOwn(values,ruleId)){
       delete values[ruleId];

@@ -16,6 +16,7 @@
   window.goRunSpeedTest = (exitID, durationSeconds) => invoke('RunSpeedTest', exitID, durationSeconds);
   window.goTestCustomExit = (exitID) => invoke('TestCustomExit', exitID);
   window.goGetProxyExits = () => invoke('GetProxyExits');
+  window.goGetRoutingSubscriptions = () => invoke('GetRoutingSubscriptions');
   window.goGetRDPTargets = () => invoke('GetRDPTargets');
   window.goConnectRDP = (targetID, autoLaunch) => invoke('ConnectRDP', targetID, autoLaunch);
   window.goDisconnectRDP = () => invoke('DisconnectRDP');

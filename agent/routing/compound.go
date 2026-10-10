@@ -18,6 +18,7 @@ func CloneConfig(cfg Config) Config {
 		cfg.DNSAssociationEnabled = &enabled
 	}
 	cfg.Rules = slices.Clone(cfg.Rules)
+	cfg.Subscriptions = slices.Clone(cfg.Subscriptions)
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]
 		r.Processes = slices.Clone(r.Processes)

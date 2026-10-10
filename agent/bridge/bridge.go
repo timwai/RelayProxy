@@ -81,6 +81,11 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 // Status & logs
 // ---------------------------------------------------------------------------
 
+// GetRoutingSubscriptions returns the current local subscription update status.
+func (b *UIBridge) GetRoutingSubscriptions() []routing.SubscriptionStatus {
+	return b.agent.RoutingSubscriptionStatuses()
+}
+
 // GetStatus returns the current agent runtime state
 func (b *UIBridge) GetStatus() app.AgentStatus {
 	return b.agent.Status()
@@ -459,18 +464,19 @@ type CustomExitUpdate struct {
 }
 
 type RoutingConfigUpdate struct {
-	Mode                  *string        `json:"mode"`
-	DNSMode               *string        `json:"dns_mode"`
-	AutoDetectDNS         *bool          `json:"auto_detect_dns"`
-	DNSAssociationEnabled *bool          `json:"dns_association_enabled"`
-	ProxyDNSEnabled       *bool          `json:"proxy_dns_enabled"`
-	FakeIPEnabled         *bool          `json:"fake_ip_enabled"`
-	BlockDoHEndpoints     *bool          `json:"block_doh_endpoints"`
-	ForwardOtherDNS       *bool          `json:"forward_other_dns"`
-	DNSExitID             *string        `json:"dns_exit_id"`
-	DoHBlockedIPs         *[]string      `json:"doh_blocked_ips"`
-	DefaultAction         *string        `json:"default_action"`
-	Rules                 []routing.Rule `json:"rules"` // Full replacement
+	Mode                  *string                 `json:"mode"`
+	DNSMode               *string                 `json:"dns_mode"`
+	AutoDetectDNS         *bool                   `json:"auto_detect_dns"`
+	DNSAssociationEnabled *bool                   `json:"dns_association_enabled"`
+	ProxyDNSEnabled       *bool                   `json:"proxy_dns_enabled"`
+	FakeIPEnabled         *bool                   `json:"fake_ip_enabled"`
+	BlockDoHEndpoints     *bool                   `json:"block_doh_endpoints"`
+	ForwardOtherDNS       *bool                   `json:"forward_other_dns"`
+	DNSExitID             *string                 `json:"dns_exit_id"`
+	DoHBlockedIPs         *[]string               `json:"doh_blocked_ips"`
+	DefaultAction         *string                 `json:"default_action"`
+	Rules                 []routing.Rule          `json:"rules"` // Full replacement
+	Subscriptions         *[]routing.Subscription `json:"subscriptions"`
 }
 
 // SaveResult tells the UI whether the change took effect immediately.
@@ -751,6 +757,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		if in.Routing.Rules != nil {
 			cfg.Routing.Rules = in.Routing.Rules
+		}
+		if in.Routing.Subscriptions != nil {
+			cfg.Routing.Subscriptions = append([]routing.Subscription(nil), (*in.Routing.Subscriptions)...)
 		}
 	}
 

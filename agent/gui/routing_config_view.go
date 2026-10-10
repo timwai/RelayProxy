@@ -33,5 +33,6 @@ func routingConfigView(cfg routing.Config) map[string]any {
 		"doh_blocked_ips":         blockedIPs,
 		"default_action":          cfg.DefaultAction,
 		"rules":                   rules,
+		"subscriptions":           append([]routing.Subscription{}, cfg.Subscriptions...),
 	}
 }

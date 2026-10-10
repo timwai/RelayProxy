@@ -39,6 +39,9 @@ func NewRoutingDialer(engine *Engine, tunnel proxy.TunnelDialer, policyMu ...*sy
 	if len(policyMu) > 0 {
 		d.policyMu = policyMu[0]
 	}
+	if engine != nil {
+		engine.SetSubscriptionProxyDialer(d.DialSubscriptionTCP)
+	}
 	return d
 }
 
@@ -131,6 +134,31 @@ func (d *RoutingDialer) lookupCustom(id string) (exit.UpstreamConfig, error) {
 		return exit.UpstreamConfig{}, fmt.Errorf("custom exit %q is missing or disabled", id)
 	}
 	return exit.UpstreamConfig{Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password}, nil
+}
+
+// DialSubscriptionTCP uses the existing Relay/custom proxy path without
+// evaluating routing rules. It never falls back to direct connections, and
+// forwards the hostname to the selected exit for DNS resolution.
+func (d *RoutingDialer) DialSubscriptionTCP(ctx context.Context, exitID, hostname string, port uint16) (net.Conn, error) {
+	if port != 443 {
+		return nil, fmt.Errorf("subscription proxy only supports TCP/443")
+	}
+	if exitID == "" {
+		if td, ok := d.tunnel.(*client.TunnelDialer); ok {
+			exitID = td.GetDefaultExitID()
+		}
+	}
+	if IsCustomExitID(exitID) {
+		upstream, err := d.lookupCustom(exitID)
+		if err != nil {
+			return nil, err
+		}
+		return exit.DialViaUpstreamTCP(ctx, upstream, hostname, port)
+	}
+	if d.tunnel == nil {
+		return nil, fmt.Errorf("subscription proxy tunnel unavailable")
+	}
+	return d.tunnel.DialTCP(ctx, exitID, hostname, port)
 }
 
 // DialTCP implements proxy.TunnelDialer.

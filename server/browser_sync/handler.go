@@ -14,8 +14,8 @@ import (
 	protocol "relayproxy/internal/browser_sync"
 )
 
-// Handler deliberately does NOT forward SESSION_SNAPSHOT yet: no secret
-// traffic can flow until mutual rule approval and E2EE are implemented.
+// Handler authenticates each browser before accepting encrypted transfers.
+// Resource quotas are in addition to per-frame protocol validation.
 type Handler struct {
 	Store      *Store
 	auth       *Authenticator
@@ -23,6 +23,7 @@ type Handler struct {
 	mu         sync.Mutex
 	attempts   map[string]attempt
 	slots      chan struct{}
+	limits     *browserLimiter
 	clientMu   sync.RWMutex
 	clients    map[string]*browserConnection
 }
@@ -37,7 +38,8 @@ func NewHandler(store *Store, extensionIDs []string) *Handler {
 		allowed["chrome-extension://"+id] = struct{}{}
 	}
 	return &Handler{Store: store, auth: NewAuthenticator(store), extensions: allowed,
-		attempts: map[string]attempt{}, slots: make(chan struct{}, 64), clients: make(map[string]*browserConnection)}
+		attempts: map[string]attempt{}, slots: make(chan struct{}, 64), limits: newBrowserLimiter(),
+		clients: make(map[string]*browserConnection)}
 }
 
 func (h *Handler) allowOrigin(w http.ResponseWriter, r *http.Request) bool {
@@ -180,6 +182,13 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	// A WS connection has no privileges prior to a valid, single-use proof.
 	proofCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	// Bound unauthenticated challenge attempts by the direct TCP peer, not
+	// spoofable X-Forwarded-For. Slots alone cannot stop repeated challenges.
+	remote, _, splitErr := net.SplitHostPort(r.RemoteAddr)
+	if splitErr != nil || !h.limits.allow("hello:"+remote, 40, time.Minute) {
+		_ = conn.Close(websocket.StatusPolicyViolation, "authentication rate limited")
+		return
+	}
 	// Must first learn the ID to issue a scoped challenge. This is not auth.
 	var hello authFrame
 	if err := readFrame(proofCtx, conn, &hello); err != nil || hello.Type != "AUTH_HELLO" {
@@ -208,6 +217,10 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "not authorized")
 		return
 	}
+	if !h.limits.allow("connect:"+device.ID, 12, time.Minute) {
+		_ = conn.Close(websocket.StatusPolicyViolation, "reconnect rate limited")
+		return
+	}
 	// The browser must be discoverable as an online recipient by the time it
 	// receives AUTH_OK, otherwise a peer can immediately race the registration.
 	client := &browserConnection{conn: conn}
@@ -232,6 +245,18 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		if err != nil || current.ID != device.ID {
 			_ = conn.Close(websocket.StatusPolicyViolation, "browser approval revoked")
 			return
+		}
+		if len(msg.Type) > 48 || len(msg.RequestID) > 64 ||
+			len(msg.RuleID) > 128 || len(msg.MessageID) > 128 {
+			_ = conn.Close(websocket.StatusPolicyViolation, "oversized browser control identifier")
+			return
+		}
+		if !h.permitControl(device.ID, msg) {
+			if err := client.send(ctx, map[string]any{"type": "RULE_ERROR", "requestId": msg.RequestID,
+				"error": "browser sync rate limit exceeded"}); err != nil {
+				return
+			}
+			continue
 		}
 		var payload any
 		switch msg.Type {

@@ -17,6 +17,7 @@ import (
 )
 
 var ErrRuleDenied = errors.New("browser sync rule denied")
+const maxBrowserRulesPerDevice = 32
 var policyDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // EncryptedOffer is an opaque, signed browser-to-browser policy proposal.
@@ -121,6 +122,16 @@ func (s *Store) OfferRule(ctx context.Context, sourceID string, offer EncryptedO
 		return err
 	}
 	defer tx.Rollback()
+	// Include both sent and received non-revoked rules. Count and insert in
+	// the same transaction to avoid bypassing the quota with concurrent offers.
+	for _, deviceID := range []string{sourceID, offer.TargetID} {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_rules
+			WHERE status!='revoked' AND (source_id=? OR target_id=?)`, deviceID, deviceID).Scan(&count); err != nil {
+			return err
+		}
+		if count >= maxBrowserRulesPerDevice { return ErrRuleDenied }
+	}
 	now := time.Now().UTC()
 	result, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_rules (
 		id,source_id,target_id,policy_digest,status,source_approved,target_approved,keys_confirmed,created_at,updated_at

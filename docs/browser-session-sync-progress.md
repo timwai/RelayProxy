@@ -43,7 +43,7 @@
 | P0-03 | **多 Cookie 失败补偿 / 崩溃保护** | **已实现·待验收** | [Cookie 预检查和逆序补偿](../browser/chrome-extension/src/cookies.js)、仅元数据的恢复意图、`PARTIAL` 暂停/人工恢复；[故障注入测试](../browser/chrome-extension/tests/session.test.mjs) | 在真实 Chrome 注入中途失败/退出/网站并发刷新；确保无静默账号串换、可判别部分恢复、不会自动恢复有风险的写入；记录无法完全回滚时的手工处置流程 |
 | P0-04 | **防重放序号恢复 / 重装语义** | **已实现·待验收** | [持久递增序号](../server/browser_sync/session.go)、来源侧 `SEQUENCE_CURSOR`、[序号与授权测试](../server/browser_sync/session_test.go)、[浏览器工具测试](../browser/chrome-extension/tests/lifecycle.test.mjs) | 真机重启、扩展本地数据清除、密钥丢失、规则撤销后的重新配对；证明新 Profile/设备不会擅自复用原设备身份；长时间运行、并发发送与序号上限测试 |
 | P0-05 | **MV3 生命周期 / 异常网络恢复** | **部分完成** | [服务 Worker](../browser/chrome-extension/src/service-worker.js)含启动/Alarm；[WSS 连接单飞](../browser/chrome-extension/src/server-api.js)、[五分钟对账限频](../browser/chrome-extension/src/lifecycle.js)及对应模拟测试 | 真机测试 Worker 休眠/系统睡眠/网络切换/TLS 续连、离线期间 Cookie 改动最终一致性；增加失败退避与网络状态提示；验证不会无限重连或漏同步 |
-| P0-06 | **限流、资源配额、DoS 防护** | **部分完成** | [Server Handler](../server/browser_sync/handler.go)已有注册 IP 限频、64 连接槽和单帧限制；[协议校验](../internal/browser_sync/protocol.go)约束信封 | 增加**按设备/身份/规则**连接、快照频率、消息大小、存储数量、规则上限和查询速率配额；压测多设备在线与突发重连；验证禁用/撤销实时阻断 |
+| P0-06 | **限流、资源配额、DoS 防护** | **部分完成** | [Server Handler](../server/browser_sync/handler.go)已有注册 IP 限频、64 连接槽及单帧限制；新增 [分层限流](../server/browser_sync/limits.go)（直接 IP 握手、设备重连、设备帧速率、单规则传输/突发频率、邀请及查询）、[规则数量上限](../server/browser_sync/rules.go)（每设备最多 32 条非撤销规则）、[待确认投递上限](../server/browser_sync/delivery.go)（每规则 16、每来源 128），有对应单测 | 仍需按身份的总量配额、持久终态记录数量上限、跨实例协调、压力测试、多设备实际断网重连与撤销验证；窗口限流仅在单 Server 进程内生效 |
 | P0-07 | **独立安全审查 / 密码学复核** | **未开始（正式评审）** | [加密信封](../browser/chrome-extension/src/session-envelope.js)、[邀请加密](../browser/chrome-extension/src/envelope.js)和 Server 验签已有开发实现与单测 | 独立审查现有 P-256 ECDH+HKDF+AES-GCM 组合，优先评估标准 HPKE (RFC 9180)；核对签名/密钥绑定、来源 pin、重放、时序、恶意网站、扩展权限、日志、认证降级与密钥轮换；漏洞关闭后复测 |
 
 ### P0 真机验收矩阵（每格都需要测试记录）
@@ -103,3 +103,5 @@
 
 后续的记录格式：**日期 ｜ 实际代码 SHA/PR ｜ 本次变动及测试链接 ｜ 哪些 ID 状态改变或未改变 ｜ 新风险/遗留项**。保留历史记录，不覆盖旧条目。  
 检查入口：[PR #194](https://github.com/timwai/RelayProxy/pull/194) · [Go CI](https://github.com/timwai/RelayProxy/actions/workflows/go-ci.yml) · [UI CI](https://github.com/timwai/RelayProxy/actions/workflows/ui-ci.yml)。
+
+| 2026-10-10 | [PR #194 · P0-06 配额增强（本次提交）](https://github.com/timwai/RelayProxy/pull/194) | 对 Browser Sync 已认证帧建立设备/规则双窗口限流，未认证握手与重复重连限频；SQLite 规则及待确认收据容量上限；增加并发/上限/释放单测。**对应提交 CI 尚待核实，不沿用旧成功记录。** | P0-06 **仍为部分完成**，因为缺按身份/跨实例配额及真机压力与安全验收；其他 P0/P1/P2 项状态不变 | 同步维护，待实际 GitHub CI 出结果补充链接 |

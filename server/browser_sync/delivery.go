@@ -10,6 +10,8 @@ import (
 )
 
 const deliveryRetention = 15 * time.Minute
+const maxPendingDeliveriesPerRule = 16
+const maxPendingDeliveriesPerSource = 128
 
 // Delivery receipts contain message metadata only. Ciphertexts, Cookies and
 // credential values are never written to this table.
@@ -53,18 +55,28 @@ func (s *Store) RecordDelivery(ctx context.Context, messageID, ruleID, sourceID,
 		return ErrRuleDenied
 	}
 	expiry := now.Add(deliveryRetention).Unix()
-	_, err := s.db.ExecContext(ctx, `DELETE FROM browser_sync_deliveries WHERE expires_at<=?`, now.Unix())
-	if err != nil {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil { return err }
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_deliveries WHERE expires_at<=?`, now.Unix()); err != nil {
 		return err
 	}
 	// Keep terminal results only for a short recovery window.
-	if _, err = s.db.ExecContext(ctx, `DELETE FROM browser_sync_delivery_results WHERE expires_at<=?`, now.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_delivery_results WHERE expires_at<=?`, now.Unix()); err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO browser_sync_deliveries(
+	var pendingRule, pendingSource int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_deliveries
+		WHERE rule_id=? AND expires_at>?`, ruleID, now.Unix()).Scan(&pendingRule); err != nil { return err }
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_deliveries
+		WHERE source_id=? AND expires_at>?`, sourceID, now.Unix()).Scan(&pendingSource); err != nil { return err }
+	if pendingRule >= maxPendingDeliveriesPerRule || pendingSource >= maxPendingDeliveriesPerSource {
+		return ErrRuleDenied
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_deliveries(
 		message_id,rule_id,source_id,target_id,expires_at
-	) VALUES(?,?,?,?,?)`, messageID, ruleID, sourceID, targetID, expiry)
-	return err
+	) VALUES(?,?,?,?,?)`, messageID, ruleID, sourceID, targetID, expiry); err != nil { return err }
+	return tx.Commit()
 }
 
 func (s *Store) DiscardDelivery(ctx context.Context, messageID string) {

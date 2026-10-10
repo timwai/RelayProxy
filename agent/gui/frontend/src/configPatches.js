@@ -8,6 +8,8 @@ export function dnsPagePatch(r) {
   return {
     dns_mode:r.dns_mode,
     auto_detect_dns:!!r.auto_detect_dns,
+    dns_association_enabled:r.dns_association_enabled!==false,
+    proxy_dns_enabled:!!r.proxy_dns_enabled,
     fake_ip_enabled:!!r.fake_ip_enabled,
     block_doh_endpoints:!!r.block_doh_endpoints,
     forward_other_dns:!!r.forward_other_dns,

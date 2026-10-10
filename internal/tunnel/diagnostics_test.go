@@ -78,3 +78,16 @@ func TestQUICDiagnosticsTrackBrutalController(t *testing.T) {
 	}
 	_ = client
 }
+
+func TestBrutalTLSFallbackNeverActivatesQUICController(t *testing.T) {
+	client, server := sessionPair(t, "tls")
+	for _, session := range []TunnelSession{client, server} {
+		if UseBrutal(session, 12_500_000, false) {
+			t.Fatal("TLS/yamux incorrectly enabled QUIC congestion control")
+		}
+		diagnostics := DiagnoseSession(session)
+		if diagnostics == nil || diagnostics.QUIC != nil {
+			t.Fatalf("TLS diagnostics incorrectly contain QUIC fields: %+v", diagnostics)
+		}
+	}
+}

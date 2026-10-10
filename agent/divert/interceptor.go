@@ -859,7 +859,14 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 			defer i.wg.Done()
 			var err error
 			if flow.route.dnsOnly {
-				err = i.server.serveFakeDNSTCP(i.ctx, conn)
+				// TCP DNS answers must populate the same conservative
+				// IP-to-name cache used by intercepted UDP DNS, before the
+				// client is allowed to establish its first connection.
+				err = i.server.serveDNSTCPWithObserver(i.ctx, conn, func(query, answer []byte) {
+					if !i.server.dnsAssociationEnabled() { return }
+					i.dns.query(flow.route.key.Source, flow.route.key.Destination, query)
+					i.dns.response(flow.route.key.Destination, flow.route.key.Source, answer)
+				})
 			} else {
 				err = i.server.ForwardTCP(i.ctx, flow.route, conn)
 			}

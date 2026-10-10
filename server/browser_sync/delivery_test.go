@@ -102,3 +102,43 @@ func TestDuplicateDeliveryMessageIDCannotBeReused(t *testing.T) {
 		t.Fatal("same message ID reused")
 	}
 }
+
+func TestDeliveryStatusRecoversTerminalAcknowledgement(t *testing.T) {
+	store := testBrowserStore(t)
+	source, target, ruleID := approvedDeliveryRule(t, store)
+	ctx, now := context.Background(), time.Now().UTC()
+	msg := uuid.NewString()
+	status, err := store.DeliveryStatus(ctx, source.ID, ruleID, msg, now)
+	if err != nil || status != "UNKNOWN" { t.Fatalf("unknown delivery=%s: %v", status, err) }
+	if err := store.RecordDelivery(ctx, msg, ruleID, source.ID, target.ID, now); err != nil { t.Fatal(err) }
+	status, err = store.DeliveryStatus(ctx, source.ID, ruleID, msg, now)
+	if err != nil || status != "PENDING" { t.Fatalf("pending=%s: %v", status, err) }
+	if _, err := store.ClaimDeliveryReceipt(ctx, target.ID, ruleID, msg, "RECEIVED", now); err != nil { t.Fatal(err) }
+	status, err = store.DeliveryStatus(ctx, source.ID, ruleID, msg, now)
+	if err != nil || status != "RECEIVED" { t.Fatalf("received=%s: %v", status, err) }
+	if _, err := store.ClaimDeliveryReceipt(ctx, target.ID, ruleID, msg, "APPLIED", now); err != nil { t.Fatal(err) }
+	status, err = store.DeliveryStatus(ctx, source.ID, ruleID, msg, now)
+	if err != nil || status != "APPLIED" { t.Fatalf("terminal result lost=%s: %v", status, err) }
+	if _, err := store.DeliveryStatus(ctx, target.ID, ruleID, msg, now); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("receiver read sender receipt: %v", err)
+	}
+	stranger, _ := approvedWSSBrowser(t, store, true, false)
+	if _, err := store.DeliveryStatus(ctx, stranger.ID, ruleID, msg, now); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("unrelated sender read receipt: %v", err)
+	}
+	status, err = store.DeliveryStatus(ctx, source.ID, ruleID, msg, now.Add(16*time.Minute))
+	if err != nil || status != "UNKNOWN" { t.Fatalf("expired result status=%s: %v",status,err) }
+}
+
+func TestDeliveryStatusDeniedAfterRuleRevocation(t *testing.T) {
+	store := testBrowserStore(t)
+	source, target, ruleID := approvedDeliveryRule(t, store)
+	ctx, now := context.Background(), time.Now().UTC()
+	id:=uuid.NewString()
+	if err := store.RecordDelivery(ctx,id,ruleID,source.ID,target.ID,now);err!=nil{t.Fatal(err)}
+	if _,err := store.ClaimDeliveryReceipt(ctx,target.ID,ruleID,id,"CONFLICT",now);err!=nil{t.Fatal(err)}
+	if err:=store.RevokeRule(ctx,target.ID,ruleID);err!=nil{t.Fatal(err)}
+	if _,err:=store.DeliveryStatus(ctx,source.ID,ruleID,id,now);!errors.Is(err,ErrRuleDenied){
+		t.Fatalf("revoked rule leaked receipt: %v",err)
+	}
+}

@@ -2,7 +2,7 @@
 // fields through the UI defaults: an older GUI must not erase DNS settings
 // when the user merely reorders a routing rule.
 export function routingPagePatch(r) {
-  return {mode:r.mode,default_action:r.default_action,rules:Array.isArray(r.rules)?r.rules:[]};
+  return {mode:r.mode,default_action:r.default_action,rules:Array.isArray(r.rules)?r.rules:[],subscriptions:Array.isArray(r.subscriptions)?r.subscriptions:[]};
 }
 export function dnsPagePatch(r) {
   return {

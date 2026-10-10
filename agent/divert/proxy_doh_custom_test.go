@@ -19,9 +19,9 @@ func TestCustomDoHUpstreamsAreExclusiveAndKeepSelectedExit(t *testing.T) {
 		{URL: "https://backup.example/dns-query", BootstrapIP: "192.0.2.53"},
 	}
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
-		ProxyReady: func() bool { return true },
-		DNSExitID: func() string { return "exit-for-dns" },
+		Config:       Config{DefaultAction: ActionProxy},
+		ProxyReady:   func() bool { return true },
+		DNSExitID:    func() string { return "exit-for-dns" },
 		DNSUpstreams: func() []DNSUpstream { return configured },
 		Dialer: &testDialer{tcp: func(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
 			seenExits = append(seenExits, exit)

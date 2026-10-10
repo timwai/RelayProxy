@@ -139,6 +139,24 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	if listenAddressesOverlap(c.Server.Admin.Listen, c.Server.TLS.Listen) {
 		return errors.New("管理页面和 TCP 隧道的监听地址与端口冲突，请使用不同端口")
 	}
+	if c.BrowserSync.Enabled {
+		if !c.IsAdminTLSEnabled() {
+			return errors.New("browser_sync requires server.admin.tls_enabled=true")
+		}
+		if len(c.BrowserSync.ExtensionIDs) == 0 || len(c.BrowserSync.ExtensionIDs) > 32 {
+			return errors.New("browser_sync.extension_ids requires 1-32 Chrome extension IDs")
+		}
+		seen := make(map[string]struct{}, len(c.BrowserSync.ExtensionIDs))
+		for _, id := range c.BrowserSync.ExtensionIDs {
+			if len(id) != 32 || strings.Trim(id, "abcdefghijklmnop") != "" {
+				return errors.New("browser_sync.extension_ids contains invalid Chrome extension ID")
+			}
+			if _, duplicate := seen[id]; duplicate {
+				return errors.New("browser_sync.extension_ids contains duplicate Chrome extension ID")
+			}
+			seen[id] = struct{}{}
+		}
+	}
 	if c.NeedsCertificate() && (c.Server.CertFile == "") != (c.Server.KeyFile == "") {
 		return errors.New("server.cert_file and server.key_file must be configured together")
 	}

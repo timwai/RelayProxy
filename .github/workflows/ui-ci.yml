@@ -12,6 +12,9 @@ on:
       - "cmd/relay-agent/**"
       - "server/web/**"
       - "server/api/**"
+      - "server/browser_sync/**"
+      - "internal/browser_sync/**"
+      - "browser/chrome-extension/**"
       - "internal/webui/**"
       - "internal/config/**"
       - "macos/**"
@@ -47,6 +50,49 @@ jobs:
           npm install --no-audit --no-fund
           npm test
           npm run build
+      - name: Require Browser Sync progress review with implementation changes
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Keep the maintained progress tracker newer than (or in the same
+          # commit as) the last changed Browser Sync implementation file.
+          # Git history is checked, not just presence in the cumulative PR
+          # diff, so later code changes cannot reuse a stale tracker update.
+          paths=(
+            browser/chrome-extension/src
+            browser/chrome-extension/tests
+            browser/chrome-extension/manifest.json
+            browser/chrome-extension/package.json
+            server/browser_sync
+            internal/browser_sync
+            server/api/browser_sync.go
+            server/web/frontend/src/BrowserSync.jsx
+            internal/config/browser_sync_test.go
+          )
+          changed="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- "${paths[@]}")"
+          if [[ -z "$changed" ]]; then
+            echo "No Browser Sync implementation changes in this PR"
+            exit 0
+          fi
+          latest_code="$(git log -1 --format=%H "$HEAD_SHA" -- "${paths[@]}")"
+          latest_doc="$(git log -1 --format=%H "$HEAD_SHA" -- docs/browser-session-sync-progress.md)"
+          if [[ -z "$latest_code" || -z "$latest_doc" ]] || ! git merge-base --is-ancestor "$latest_code" "$latest_doc"; then
+            echo "::error::Browser Sync changes must be followed by a review/update of docs/browser-session-sync-progress.md in this PR. Record affected IDs, evidence and any unchanged status."
+            exit 1
+          fi
+          echo "Browser Sync progress document reviewed at or after latest implementation commit"
+      - name: Validate agentless Chrome extension
+        working-directory: browser/chrome-extension
+        run: |
+          node --check src/service-worker.js
+          node --check src/server-api.js
+          node --check src/device-identity.js
+          node --check src/envelope.js
+          node --check src/popup.js
+          npm test
       - name: Check Go formatting
         shell: bash
         run: |

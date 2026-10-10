@@ -17,6 +17,7 @@ import (
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/internal/webui"
+	browsersync "relayproxy/server/browser_sync"
 	"relayproxy/server/repository"
 	"relayproxy/server/service"
 	"relayproxy/server/session"
@@ -34,6 +35,7 @@ type Router struct {
 	sessions                       *session.Manager
 	db                             *repository.DB
 	mux                            *http.ServeMux
+	browserSync                    *browsersync.Handler
 	settings                       *config.ServerSettings
 	onDeviceRevoked                func(string)
 	onDeviceAuthorizationChanged   func(string)
@@ -54,6 +56,12 @@ type Router struct {
 }
 
 type RouterOption func(*Router)
+
+// WithBrowserSync enables a separate, TLS-only extension HTTP/WSS endpoint.
+// It is nil unless browser_sync.enabled is explicitly enabled.
+func WithBrowserSync(handler *browsersync.Handler) RouterOption {
+	return func(r *Router) { r.browserSync = handler }
+}
 
 // RDPIngressRuntimeStatus describes the sockets currently owned by the
 // process. It is deliberately separate from the persisted allocation record:
@@ -218,10 +226,21 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	if strings.HasPrefix(req.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !validMutationOrigin(req) {
-			writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
-			return
-		}
+	}
+	// Chrome extension APIs have their own strict TLS + extension Origin
+	// allowlist and signed device identity. The Admin console's same-origin
+	// CSRF guard cannot accept chrome-extension:// POST requests.
+	if r.browserSync != nil &&
+		(req.URL.Path == "/api/v1/browser-sync/devices/register" ||
+			req.URL.Path == "/api/v1/browser-sync/ws") {
+		r.browserSync.ServeHTTP(w, req)
+		return
+	}
+	if strings.HasPrefix(req.URL.Path, "/api/") &&
+		req.Method != http.MethodGet && req.Method != http.MethodHead &&
+		req.Method != http.MethodOptions && !validMutationOrigin(req) {
+		writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
+		return
 	}
 	r.mux.ServeHTTP(w, req)
 }
@@ -329,6 +348,12 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/p2p/sessions", r.requireAuth(r.handleP2PSessions))
 	r.mux.HandleFunc("GET /api/v1/server/config", r.requireAuth(r.requireAdmin(r.handleGetServerConfig)))
 	r.mux.HandleFunc("PUT /api/v1/server/config", r.requireAuth(r.requireAdmin(r.handleSaveServerConfig)))
+
+	if r.browserSync != nil {
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/devices", r.requireAuth(r.requireAdmin(r.handleBrowserSyncDevices)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/approve", r.requireAuth(r.requireAdmin(r.handleBrowserSyncApprove)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRevoke)))
+	}
 
 	// Static Web UI Handler
 	webHandler := web.Handler()

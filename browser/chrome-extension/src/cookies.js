@@ -98,35 +98,85 @@ export async function applyCookies(ruleId,snapshot,expected,{allowOverwrite=fals
     }
     removals.push({name,old});
   }
+  const url=cookieURL(policy.siteOrigin);
   const nextManaged={...managed};
-  for(const {incoming:c,current:old} of inspected){
-    if(!old||old.value!==c.value){
-      const details={
-        url:cookieURL(policy.siteOrigin),name:c.name,value:c.value,
-        path:'/',secure:true,httpOnly:c.httpOnly,
-        ...(c.sameSite!=='unspecified'?{sameSite:c.sameSite}:{})
-      };
-      if(c.expirationDate!==undefined)details.expirationDate=c.expirationDate;
-      const updated=await chrome.cookies.set(details);
-      if(!updated||!isSafeCookie(updated,policy.siteOrigin)||
-        updated.name!==c.name||updated.value!==c.value||
-        cookieDomain(updated)!==host) throw new Error('Chrome 拒绝恢复 Cookie：'+c.name);
+  // Chrome has no multi-Cookie transaction. Stage only reversible changes,
+  // perform preflight checks above, and compensate in reverse on failure.
+  const changed=[];
+  const cookieDetails=(c)=>({
+    url,name:c.name,value:c.value,path:'/',secure:true,httpOnly:c.httpOnly,
+    ...(c.sameSite!=='unspecified'?{sameSite:c.sameSite}:{}),
+    ...(c.expirationDate!==undefined?{expirationDate:c.expirationDate}:{})
+  });
+  async function rollback() {
+    let incomplete=false;
+    for(const item of [...changed].reverse()){
+      try {
+        const matches=(await chrome.cookies.getAll({url})).filter(c=>c.name===item.name);
+        if(item.expected===null && matches.length===0) {
+          // Chrome deletion succeeded: we can safely restore a previously
+          // rule-owned Cookie, provided no replacement appeared.
+          if(item.old){
+            const restored=await chrome.cookies.set(cookieDetails(item.old));
+            if(!restored||restored.value!==item.old.value||!isSafeCookie(restored,policy.siteOrigin))
+              incomplete=true;
+          }
+          continue;
+        }
+        if(matches.length!==1||!isSafeCookie(matches[0],policy.siteOrigin)||
+            matches[0].value!==item.expected){
+          // If the website changed this Cookie while we were writing, do not
+          // overwrite its new value to "restore" a potentially newer login.
+          if(matches.length===0 && !item.old) continue;
+          incomplete=true;
+          continue;
+        }
+        if(item.old) {
+          const restored=await chrome.cookies.set(cookieDetails(item.old));
+          if(!restored||restored.value!==item.old.value||!isSafeCookie(restored,policy.siteOrigin))
+            incomplete=true;
+        }else if(!await chrome.cookies.remove({url,name:item.name})){
+          incomplete=true;
+        }
+      }catch{
+        incomplete=true;
+      }
     }
-    // Existing identical Cookies were not necessarily installed by this
-    // rule. Do not adopt ownership silently: later logout must leave them.
-    if(!old||old.value!==c.value)
-      nextManaged[c.name]=await cookieValueTag(ruleId,c.name,c.value);
-    else if(managed[c.name]!==await cookieValueTag(ruleId,c.name,old.value))
-      delete nextManaged[c.name];
+    return !incomplete;
   }
-  for(const {name,old} of removals){
-    if(old){
-      const removed=await chrome.cookies.remove({url:cookieURL(policy.siteOrigin),name});
-      if(!removed)throw new Error('Chrome 拒绝清理已同步 Cookie');
+  try {
+    for(const {incoming:c,current:old} of inspected){
+      if(!old||old.value!==c.value){
+        // Record before calling Chrome: a rejected/partial response may still
+        // have changed the Cookie jar.
+        changed.push({name:c.name,old,expected:c.value});
+        const updated=await chrome.cookies.set(cookieDetails(c));
+        if(!updated||!isSafeCookie(updated,policy.siteOrigin)||
+          updated.name!==c.name||updated.value!==c.value||
+          cookieDomain(updated)!==host) throw new Error('Cookie 写入失败');
+      }
+      // Identical Cookies may belong to a separate login on the receiver;
+      // do not silently claim them for a future remote logout.
+      if(!old||old.value!==c.value)
+        nextManaged[c.name]=await cookieValueTag(ruleId,c.name,c.value);
+      else if(managed[c.name]!==await cookieValueTag(ruleId,c.name,old.value))
+        delete nextManaged[c.name];
     }
-    delete nextManaged[name];
+    for(const {name,old} of removals){
+      if(old){
+        changed.push({name,old,expected:null});
+        const removed=await chrome.cookies.remove({url,name});
+        if(!removed)throw new Error('Cookie 删除失败');
+      }
+      delete nextManaged[name];
+    }
+    storage[ruleId]=nextManaged;
+    await chrome.storage.local.set({[storeKey]:storage});
+  }catch{
+    const restored=await rollback();
+    // Never include Cookie names, values or site origins in exceptions/logs.
+    throw new Error(restored?'APPLY_FAILED: 已恢复写入前状态':
+      'PARTIAL_ROLLBACK: 无法保证所有 Cookie 已恢复，已暂停本次同步');
   }
-  storage[ruleId]=nextManaged;
-  await chrome.storage.local.set({[storeKey]:storage});
   return {count:inspected.length,removed:removals.length,status:'APPLIED'};
 }

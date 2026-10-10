@@ -15,9 +15,9 @@ func TestDNSProbeUsesActiveExitAndReportsPerResolverFailures(t *testing.T) {
 	var ports []uint16
 	var exits []string
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
+		Config:     Config{DefaultAction: ActionProxy},
 		ProxyReady: func() bool { return true },
-		DNSExitID: func() string { return "overseas-dns" },
+		DNSExitID:  func() string { return "overseas-dns" },
 		Dialer: &testDialer{tcp: func(_ context.Context, exit, host string, port uint16) (net.Conn, error) {
 			exits = append(exits, exit)
 			ips = append(ips, host)
@@ -54,8 +54,8 @@ func TestDNSProbeUsesActiveExitAndReportsPerResolverFailures(t *testing.T) {
 func TestDNSProbeCustomResolversNeverFallBackToPublic(t *testing.T) {
 	var ips []string
 	s := newTestServer(t, Options{
-		Config: Config{DefaultAction: ActionProxy},
-		ProxyReady: func() bool { return true },
+		Config:      Config{DefaultAction: ActionProxy},
+		ProxyReady:  func() bool { return true },
 		DNSUpstreams: func() []DNSUpstream {
 			return []DNSUpstream{{URL: "https://resolver.private.example/dns-query", BootstrapIP: "10.0.0.53"}}
 		},

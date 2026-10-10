@@ -33,6 +33,7 @@ type activeApplicationSnapshot struct {
 	UploadRate     uint64                    `json:"uploadRate"`
 	DownloadRate   uint64                    `json:"downloadRate"`
 	Exits          []string                  `json:"exits,omitempty"`
+	Rules          []string                  `json:"rules,omitempty"`
 	Paths          []string                  `json:"paths,omitempty"`
 	Targets        []activeApplicationTarget `json:"targets,omitempty"`
 }
@@ -48,6 +49,7 @@ type activeApplicationsSnapshot struct {
 type activeApplicationAccumulator struct {
 	snapshot activeApplicationSnapshot
 	exits    map[string]struct{}
+	rules    map[string]struct{}
 	paths    map[string]struct{}
 	targets  map[string]struct{}
 }
@@ -85,6 +87,7 @@ func (c *Client) ActiveApplicationsJSON() string {
 					SharedUID:      len(packages) > 1,
 				},
 				exits:   make(map[string]struct{}),
+				rules:   make(map[string]struct{}),
 				paths:   make(map[string]struct{}),
 				targets: make(map[string]struct{}),
 			}
@@ -104,6 +107,9 @@ func (c *Client) ActiveApplicationsJSON() string {
 		if exitID := strings.TrimSpace(connection.ExitID); exitID != "" {
 			group.exits[exitID] = struct{}{}
 		}
+		if rule := strings.TrimSpace(connection.Rule); rule != "" {
+			group.rules[rule] = struct{}{}
+		}
 		if path := strings.TrimSpace(connection.Path); path != "" {
 			group.paths[path] = struct{}{}
 		}
@@ -121,6 +127,7 @@ func (c *Client) ActiveApplicationsJSON() string {
 
 	for _, group := range groups {
 		group.snapshot.Exits = sortedMonitorKeys(group.exits)
+		group.snapshot.Rules = sortedMonitorKeys(group.rules)
 		group.snapshot.Paths = sortedMonitorKeys(group.paths)
 		snapshot.Applications = append(snapshot.Applications, group.snapshot)
 	}

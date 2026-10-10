@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,10 +12,19 @@ type Engine struct {
 	mu       sync.RWMutex
 	config   Config
 	compound []compoundRule
+	subscriptions []compiledSubscription
+	subscriptionCancel context.CancelFunc
 }
 type portRange struct{ start, end uint16 }
 
 func NewEngine(cfg Config) (*Engine, error) {
+	e, err := newEngineSnapshot(cfg)
+	if err == nil { e.startSubscriptionUpdates() }
+	return e, err
+}
+
+// newEngineSnapshot prepares a policy without starting background workers.
+func newEngineSnapshot(cfg Config) (*Engine, error) {
 	if err := ValidateConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -32,17 +42,22 @@ func NewEngine(cfg Config) (*Engine, error) {
 	for i, rule := range cfg.Rules {
 		e.compound[i] = compileCompound(rule)
 	}
+	for _, sub := range cfg.Subscriptions {
+		e.subscriptions = append(e.subscriptions, cachedSubscription(sub))
+	}
 	return e, nil
 }
 
 func (e *Engine) Reload(cfg Config) error {
-	compiled, err := NewEngine(cfg)
+	compiled, err := newEngineSnapshot(cfg)
 	if err != nil {
 		return err
 	}
 	e.mu.Lock()
-	e.config, e.compound = compiled.config, compiled.compound
+	if e.subscriptionCancel != nil { e.subscriptionCancel(); e.subscriptionCancel = nil }
+	e.config, e.compound, e.subscriptions = compiled.config, compiled.compound, compiled.subscriptions
 	e.mu.Unlock()
+	e.startSubscriptionUpdates()
 	return nil
 }
 
@@ -134,6 +149,12 @@ func (e *Engine) DecideFlow(flow Flow) Decision {
 			}
 			return Decision{Action: rule.Action, ExitID: rule.ExitID, DatagramRequired: rule.DatagramRequired, HandleDirect: rule.HandleDirect, Rule: name, Matched: true}
 		}
+	}
+	for _, item := range e.subscriptions {
+		if !item.config.Enabled || item.status.Rules == 0 || item.excluded.matches(flow) || !item.included.matches(flow) { continue }
+		action := item.config.Action
+		if action == "" { action = ActionProxy }
+		return Decision{Action: action, ExitID: item.config.ExitID, Rule: "订阅：" + item.config.Name, Matched: true}
 	}
 	return Decision{Action: e.config.DefaultAction, Rule: "default"}
 }

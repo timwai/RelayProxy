@@ -82,3 +82,26 @@
 - 每个 DoH 上游尝试限制为 2 秒，总体 DNS 查询仍受 10 秒超时约束。可信的 NXDOMAIN 保持原样返回，上游 SERVFAIL 可尝试下一个上游。切换公共 DNS 服务商可能造成过滤策略、CDN 地址及隐私实践的差异。
 - **不能保证任何公共 DNS 在中国境内的出口网络都可达**。如果选定出口位于受限制网络，应使用能访问加密 DNS 上游的境外出口；长期方案是支持受控、自定义、证书验证的加密 DNS 上游或出口本地 resolver，而非默认回退本机 DNS。
 - 这是代码级问题修补。Windows 实测仍要确认浏览器初次访问恢复，现有 CI 通过不等于当地网络可用。
+
+## 自定义加密 DNS 上游（出口节点可提供独立 DoH）
+
+自动模式不再必须依赖预设公共 DNS。可在桌面 Agent「DNS 设置 → 高级设置 → 自定义 DoH 上游」按行填写 `https://hostname/path | 固定连接 IP`，或者直接修改 Agent 路由配置：
+
+```yaml
+routing:
+  dns_mode: proxy
+  proxy_dns_enabled: true
+  dns_exit_id: ""  # 可填经当前身份授权的出口 ID
+  dns_upstreams:
+    - url: "https://dns.exit.example/dns-query"
+      bootstrap_ip: "10.0.0.53"
+    - url: "https://dns.backup.example/dns-query"
+      bootstrap_ip: "192.0.2.53"
+```
+
+- `url` 必须为 HTTPS 且使用有效域名及证书；`bootstrap_ip` 是经**选定代理出口**连接的固定 IPv4/IPv6 IP，Agent 不会解析该 URL 的域名（防止 DNS 自举循环）。
+- 最多 8 条，按照配置顺序故障切换。若列表为空，使用内置的 Cloudflare / Google / Quad9；若非空，**只使用列出的上游**，全部失败则 SERVFAIL，不能暗中再访问公共 DNS 或本机 DNS。
+- 配置私网 `bootstrap_ip` 时，需要出口节点确实能够访问该内网 HTTPS DNS，同时出口 ACL 明确允许相关私网地址和端口。此功能不会自动部署 DoH 服务器。
+- TLS 证书必须与 URL 的域名匹配且由系统受信任的 CA 签发；不会忽略 TLS 验证。URL 不得包含用户凭据、任意端口、查询参数或片段。
+- 当前定制化只覆盖**自动模式的真实 IP 加密 DNS**。FakeIP 的特殊 TXT/SRV 透传仍沿用现有 DoT 独立实现，后续需要单独统一。
+- 增加路由校验、配置复制、GUI 保存和自定义上游独占性回归测试；Windows 实机连通性仍需用具体出口与私有 DoH 服务确认。

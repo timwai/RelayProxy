@@ -14,6 +14,8 @@ type Engine struct {
 	compound           []compoundRule
 	subscriptions      []compiledSubscription
 	subscriptionCancel context.CancelFunc
+	subscriptionProxyDialer subscriptionProxyDial
+	subscriptionClosed bool
 }
 type portRange struct{ start, end uint16 }
 

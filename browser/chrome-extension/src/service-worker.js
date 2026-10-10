@@ -90,6 +90,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           rules.push(summary);
         }
+        const transfer = (await chrome.storage.local.get('browserSyncTransferStatus')).browserSyncTransferStatus || {};
+        for (const summary of rules) summary.lastTransfer = transfer[summary.id] || null;
         return { ok: true, rules };
       }
       case 'CREATE_RULE': {

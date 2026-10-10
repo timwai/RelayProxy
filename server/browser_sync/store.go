@@ -65,6 +65,9 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err := store.EnsureSessionSchema(ctx); err != nil {
 		return nil, fmt.Errorf("browser sync replay schema: %w", err)
 	}
+	if err := store.EnsureDeliverySchema(ctx); err != nil {
+		return nil, fmt.Errorf("browser sync delivery schema: %w", err)
+	}
 	return store, nil
 }
 func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevice, error) {

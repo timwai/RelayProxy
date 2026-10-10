@@ -55,7 +55,7 @@ func testDialConfig(listener *direct.PublicListener, ticket []byte) direct.DialC
 	}
 }
 
-func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.Config) {
+func newSignedTestListener(t *testing.T, brutalRates ...uint64) (*direct.PublicListener, []byte, *tls.Config) {
 	t.Helper()
 	checker, err := acl.NewChecker(acl.Policy{
 		ID: "relay-test", AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: true,
@@ -64,10 +64,10 @@ func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.C
 		t.Fatal(err)
 	}
 	policy := checker.Policy()
-	return newSignedTestListenerWithPolicy(t, &policy)
+	return newSignedTestListenerWithPolicy(t, &policy, brutalRates...)
 }
 
-func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy) (*direct.PublicListener, []byte, *tls.Config) {
+func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy, brutalRates ...uint64) (*direct.PublicListener, []byte, *tls.Config) {
 	t.Helper()
 	identity, err := secure.GenerateEphemeralIdentity()
 	if err != nil {
@@ -86,7 +86,12 @@ func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy) (*di
 			return direct.Authorization{}, errors.New("relay policy unavailable")
 		}
 		copy := *relayPolicy
-		return direct.Authorization{RelayPolicy: &copy}, nil
+		authorization := direct.Authorization{RelayPolicy: &copy}
+		if len(brutalRates) == 2 {
+			authorization.BrutalUploadBPS = brutalRates[0]
+			authorization.BrutalDownloadBPS = brutalRates[1]
+		}
+		return authorization, nil
 	})
 	listener, err := direct.Listen(direct.ListenerConfig{
 		ListenAddress: "127.0.0.1:0",
@@ -460,8 +465,8 @@ func TestPublicDirectListenerCloseUnblocksPendingAuthentication(t *testing.T) {
 }
 
 func TestPublicDirectNegotiatesDirectionalBrutal(t *testing.T) {
-	ticket := []byte("brutal-ticket")
-	listener := newTestListener(t, ticket)
+	// Modern signed tickets must have a matching Server-authorized rate profile.
+	listener, ticket, pinnedTLS := newSignedTestListener(t, 12_500_000, 25_000_000)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -476,7 +481,7 @@ func TestPublicDirectNegotiatesDirectionalBrutal(t *testing.T) {
 		acceptedCh <- accepted
 	}()
 
-	config := testDialConfig(listener, ticket)
+	config := signedDialConfig(listener, ticket, pinnedTLS)
 	config.BrutalUploadBPS = 12_500_000
 	config.BrutalDownloadBPS = 25_000_000
 	clientSession, err := direct.Dial(ctx, config)

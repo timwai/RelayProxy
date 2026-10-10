@@ -840,8 +840,8 @@ func (i *packetInterceptor) observeInterceptedDNSTCP(key FlowKey, query, answer 
 	if !i.server.dnsAssociationEnabled() || !i.server.proxyDNSEnabled() {
 		return
 	}
-	i.dns.query(key.Source, key.Destination, query)
-	i.dns.response(key.Destination, key.Source, answer)
+	i.dns.queryProtocol(ProtoTCP, key.Source, key.Destination, query)
+	i.dns.responseProtocol(ProtoTCP, key.Destination, key.Source, answer)
 }
 
 func (i *packetInterceptor) acceptTCP(listener net.Listener) {

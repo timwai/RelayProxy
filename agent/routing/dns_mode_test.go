@@ -119,3 +119,40 @@ func TestDNSModeValidationAndMatchedRuleDisplay(t *testing.T) {
 		t.Fatalf("unnamed matched rule not identifiable in telemetry: %+v", got)
 	}
 }
+
+func TestAutoDetectDNSResolvesLocallyWhenAvailable(t *testing.T) {
+	engine, err := NewEngine(Config{Mode: ModeGlobalProxy, DNSMode: DNSModeProxy, AutoDetectDNS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := NewRoutingDialer(engine, &dnsModeTunnel{})
+	target, err := d.ResolveProxyTarget(context.Background(), "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ip, err := netip.ParseAddr(target); err != nil || !ip.IsLoopback() {
+		t.Fatalf("automatic DNS did not use working system resolver: %q", target)
+	}
+}
+
+func TestAutoDetectDNSDoesNotFallbackAfterCancellation(t *testing.T) {
+	engine, err := NewEngine(Config{Mode: ModeGlobalProxy, DNSMode: DNSModeLocal, AutoDetectDNS: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	d := NewRoutingDialer(engine, &dnsModeTunnel{})
+	if got, err := d.ResolveProxyTarget(ctx, "localhost"); err == nil || got != "" {
+		t.Fatalf("canceled auto-DNS unexpectedly sent host upstream: %q %v", got, err)
+	}
+}
+
+func TestAutoDetectDNSRejectsFakeIPInterception(t *testing.T) {
+	if err := ValidateConfig(Config{DNSMode: DNSModeProxy, AutoDetectDNS: true, FakeIPEnabled: true}); err == nil {
+		t.Fatal("automatic system DNS could bypass enabled FakeIP interception")
+	}
+	if err := ValidateConfig(Config{DNSMode: DNSModeLocal, AutoDetectDNS: true}); err != nil {
+		t.Fatalf("auto detection should accept either manual fallback choice: %v", err)
+	}
+}

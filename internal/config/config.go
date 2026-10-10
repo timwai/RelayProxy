@@ -89,7 +89,7 @@ type ServerConfig struct {
 	} `yaml:"exit"`
 
 	BrowserSync struct {
-		Enabled bool `yaml:"enabled"`
+		Enabled      bool     `yaml:"enabled"`
 		ExtensionIDs []string `yaml:"extension_ids"`
 	} `yaml:"browser_sync"`
 

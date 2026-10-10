@@ -86,3 +86,15 @@ export async function signChallenge({ serverOrigin, challenge, deviceId }) {
   );
   return { deviceId, signature: base64url(signature), protocol: 'browser.sync.v1' };
 }
+
+export async function signBytes(bytes) {
+  await getOrCreateIdentity();
+  const signing = await readKey('signing');
+  return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, signing.privateKey, bytes);
+}
+
+export async function encryptionPrivateKey() {
+  await getOrCreateIdentity();
+  const encryption = await readKey('encryption');
+  return encryption.privateKey;
+}

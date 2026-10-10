@@ -18,6 +18,10 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 - [x] Go CI: gofmt, go vet, go mod tidy, Go tests, core race tests and benchmark smoke ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614073)).
 - [x] Cross-platform Go regression matrix: Ubuntu, macOS, Windows; Linux includes targeted P2P and direct path race tests ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614068)).
 - [x] Android gomobile AAR and Gradle debug APK ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614074)).
+
+- [x] Automated deterministic UDP packet loss smoke: 0%, 1%, 5% with BBR and Brutal, full payload integrity and QUIC diagnostics; **not** a real-link performance measurement.
+- [x] Old/new version *linked protocol binaries* handshakes across QUIC and TLS, including same-version reference; the packaged Agent/Server acceptance remains open.
+- [x] Hysteria2/BBR/Brutal repeatable download/upload CSV sampler supplied; operator-side A/B measurements not yet collected.
 - [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow.
 - [ ] A/B Hysteria2 comparison on the same client, server, UDP path, RTT, bandwidth, packet-loss and hardware, repeated >= 5 times per case.
 - [ ] Verify old-client/new-server and new-client/old-server pairings with both QUIC and TLS. The new cross-built gateway/protocol probe in `scripts/ci-brutal-mixed-compat.sh` covers a subset of this requirement, but full packaged Agent/Server pairings remain separate.

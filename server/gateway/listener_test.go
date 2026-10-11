@@ -959,3 +959,54 @@ func TestRelayBrutalAggregateBudgetsAndDisconnectReclaim(t *testing.T) {
 			third.BrutalUploadBPS, third.BrutalDownloadBPS)
 	}
 }
+
+func TestTLSNeverConsumesRelayBrutalBudget(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	gateway := NewGateway(GatewayConfig{
+		TCPAddr: "127.0.0.1:0",
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout: 3 * time.Second,
+		ServerInstanceID: "brutal-tls-budget",
+		AllowLegacyDeviceAuth: true,
+		BrutalTotalUploadBPS: 3_000_000,
+		BrutalTotalDownloadBPS: 3_000_000,
+		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+			return DeviceAuthorization{State: "approved", DeviceID: "tls-client", ApprovedCapabilities: []string{protocol.CapabilityProxyClient}}, nil
+		},
+		RecheckDevice: func(string, string) bool { return true },
+	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	client, err := tunnel.DialTLS(ctx, gateway.TCPAddr().String(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	control := openTestStream(t, client)
+	writeControlHeader(t, control)
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	welcome := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
+		DeviceName: "tls-client", RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+		BrutalUploadBPS: 2_000_000, BrutalDownloadBPS: 2_000_000,
+	})
+	if !welcome.Success || welcome.BrutalUploadBPS != 0 || welcome.BrutalDownloadBPS != 0 {
+		t.Fatalf("TLS gateway negotiated QUIC-only bandwidth hints: %+v", welcome)
+	}
+	gateway.brutalBudget.mu.Lock()
+	usedClient, usedServer := gateway.brutalBudget.clientTx, gateway.brutalBudget.serverTx
+	gateway.brutalBudget.mu.Unlock()
+	if usedClient != 0 || usedServer != 0 {
+		t.Fatalf("TLS incorrectly reserved QUIC aggregate bandwidth %d/%d", usedClient, usedServer)
+	}
+}

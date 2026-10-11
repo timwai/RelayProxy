@@ -219,7 +219,7 @@ func (s *Store) AdminAudit(ctx context.Context, before int64, limit int) ([]Admi
 }
 
 func (s *Store) AdminDeviceStats(ctx context.Context) ([]AdminDeviceStats, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT device_id,MAX(CASE WHEN type='delivery_result' AND outcome='APPLIED' THEN created_at ELSE NULL END),
+	rows, err := s.db.QueryContext(ctx, `SELECT device_id,CAST(strftime('%s',MAX(CASE WHEN type='delivery_result' AND outcome='APPLIED' THEN created_at ELSE NULL END)) AS INTEGER),
 		SUM(CASE WHEN type='delivery_result' AND outcome='APPLIED' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN type='delivery_result' AND outcome='FAILED' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN type='delivery_result' AND outcome='CONFLICT' THEN 1 ELSE 0 END)
@@ -233,12 +233,13 @@ func (s *Store) AdminDeviceStats(ctx context.Context) ([]AdminDeviceStats, error
 	stats := make([]AdminDeviceStats, 0)
 	for rows.Next() {
 		var item AdminDeviceStats
-		var last sql.NullTime
+		var last sql.NullInt64
 		if err := rows.Scan(&item.DeviceID, &last, &item.Applied, &item.Failed, &item.Conflicted); err != nil {
 			return nil, err
 		}
 		if last.Valid {
-			item.LastSyncAt = &last.Time
+			lastTime := time.Unix(last.Int64, 0).UTC()
+			item.LastSyncAt = &lastTime
 		}
 		stats = append(stats, item)
 	}

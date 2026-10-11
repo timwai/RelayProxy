@@ -208,3 +208,18 @@ func TestNetworkProxyRevocationClosesEstablishedCONNECT(t *testing.T) {
 		t.Fatalf("revoked CONNECT remained active or timed out: %v", err)
 	}
 }
+
+func TestNetworkProxyCloseSignalsActiveWatchers(t *testing.T) {
+	proxy := NewNetworkProxy(nil, nil, "relay.example.com:21090", nil)
+	if err := proxy.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-proxy.shutdown:
+	default:
+		t.Fatal("shutdown did not wake hijacked CONNECT watchers")
+	}
+	if err := proxy.Close(context.Background()); err != nil {
+		t.Fatalf("idempotent shutdown failed: %v", err)
+	}
+}

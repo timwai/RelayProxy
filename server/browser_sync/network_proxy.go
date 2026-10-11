@@ -40,6 +40,8 @@ type NetworkProxy struct {
 	server      *http.Server
 	listener    net.Listener
 	slots       chan struct{}
+	shutdown    chan struct{}
+	closeOnce   sync.Once
 }
 
 func NewNetworkProxy(store *Store, sessions *session.Manager, advertise string, exitIDs []string) *NetworkProxy {
@@ -48,7 +50,8 @@ func NewNetworkProxy(store *Store, sessions *session.Manager, advertise string, 
 		allowed[id] = true
 	}
 	return &NetworkProxy{Store: store, Sessions: sessions, Advertise: advertise, allowExits: allowed,
-		leases: make(map[[32]byte]networkLease), slots: make(chan struct{}, 128)}
+		leases: make(map[[32]byte]networkLease), slots: make(chan struct{}, 128),
+		shutdown: make(chan struct{})}
 }
 
 // Bind the same Relay target ACL as ordinary proxy streams. Agent Exit
@@ -63,6 +66,7 @@ func (p *NetworkProxy) AllowedExit(browserIdentity, exitID string) bool {
 	return ok && exit != nil && exit.IsExit() && exit.IdentityID == browserIdentity &&
 		exit.Tunnel != nil && browserExitOptedIn(exit)
 }
+
 // Only the Agent's signed, per-connection transport declaration proves its
 // local permission to share egress. A Server allowlist alone is insufficient.
 func browserExitOptedIn(exit *session.DeviceSession) bool {
@@ -243,6 +247,7 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			select {
 			case <-stopWatch:
 				return
+			case <-p.shutdown:
 			case <-r.Context().Done():
 			case <-exit.Tunnel.Done():
 			case <-ticker.C:
@@ -284,6 +289,9 @@ func (p *NetworkProxy) Start(listen string, tlsConfig *tls.Config) error {
 	return nil
 }
 func (p *NetworkProxy) Close(ctx context.Context) error {
+	// net/http.Shutdown intentionally ignores hijacked CONNECT connections.
+	// Broadcast shutdown to each active watcher before draining the listener.
+	p.closeOnce.Do(func() { close(p.shutdown) })
 	p.mu.Lock()
 	p.leases = make(map[[32]byte]networkLease)
 	p.mu.Unlock()

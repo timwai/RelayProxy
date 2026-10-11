@@ -872,8 +872,8 @@ func TestRelayBrutalAggregateBudgetsAndDisconnectReclaim(t *testing.T) {
 		HandshakeTimeout: 3 * time.Second,
 		ServerInstanceID: "brutal-total-budget",
 		AllowLegacyDeviceAuth: true,
-		BrutalTotalUploadBPS: 3_000_000,
-		BrutalTotalDownloadBPS: 2_000_000,
+		BrutalTotalUploadBPS: 3_750_000,
+		BrutalTotalDownloadBPS: 2_600_000,
 		AuthorizeDevice: func(_ string, hello protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{
 				State: "approved", DeviceID: hello.DeviceName,
@@ -932,14 +932,14 @@ func TestRelayBrutalAggregateBudgetsAndDisconnectReclaim(t *testing.T) {
 	gateway.brutalBudget.mu.Lock()
 	reserved := gateway.brutalBudget.clientTx
 	gateway.brutalBudget.mu.Unlock()
-	if reserved != 2_000_000 {
+	if reserved != 2_500_000 {
 		t.Fatalf("unexpected agent-to-server aggregate reservation %d", reserved)
 	}
 	_ = a.Close()
 	deadline := time.Now().Add(4 * time.Second)
 	for time.Now().Before(deadline) {
 		gateway.brutalBudget.mu.Lock()
-		available := gateway.brutalBudget.clientTx == 0 && gateway.brutalBudget.serverTx == 1_000_000
+		available := gateway.brutalBudget.clientTx == 0 && gateway.brutalBudget.serverTx == 1_250_000
 		gateway.brutalBudget.mu.Unlock()
 		if available {
 			break
@@ -949,7 +949,7 @@ func TestRelayBrutalAggregateBudgetsAndDisconnectReclaim(t *testing.T) {
 	gateway.brutalBudget.mu.Lock()
 	upUsed, downUsed := gateway.brutalBudget.clientTx, gateway.brutalBudget.serverTx
 	gateway.brutalBudget.mu.Unlock()
-	if upUsed != 0 || downUsed != 1_000_000 {
+	if upUsed != 0 || downUsed != 1_250_000 {
 		t.Fatalf("disconnect failed to reclaim reservation: %d/%d", upUsed, downUsed)
 	}
 	c, third := connect("c")

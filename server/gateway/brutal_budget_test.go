@@ -24,8 +24,8 @@ func TestBrutalBandwidthBudgetClampAndReclaim(t *testing.T) {
 	firstUp, firstDown, releaseFirst := budget.reserve(2_000_000, 3_000_000, clientLimit, serverLimit)
 	secondUp, secondDown, releaseSecond := budget.reserve(2_000_000, 3_000_000, clientLimit, serverLimit)
 	thirdUp, thirdDown, releaseThird := budget.reserve(2_000_000, 3_000_000, clientLimit, serverLimit)
-	if firstUp != 2_000_000 || firstDown != 3_000_000 || secondUp != 1_000_000 ||
-		secondDown != 2_000_000 || thirdUp != 0 || thirdDown != 0 {
+	if firstUp != 2_000_000 || firstDown != 3_000_000 || secondUp != 400_000 ||
+		secondDown != 1_000_000 || thirdUp != 0 || thirdDown != 0 {
 		t.Fatalf("aggregated brutal grants first=%d/%d second=%d/%d third=%d/%d",
 			firstUp, firstDown, secondUp, secondDown, thirdUp, thirdDown)
 	}
@@ -45,14 +45,14 @@ func TestBrutalBandwidthBudgetClampAndReclaim(t *testing.T) {
 
 func TestBrutalBandwidthBudgetTinyRemainderFallsBackToBBR(t *testing.T) {
 	var budget brutalBandwidthBudget
-	const limit = uint64(1_000_000)
-	_, firstDown, release := budget.reserve(0, 900_000, 0, limit)
-	if firstDown != 900_000 {
+	const limit = uint64(1_125_000)
+	_, firstDown, release := budget.reserve(0, 800_000, 0, limit)
+	if firstDown != 800_000 {
 		t.Fatalf("first grant=%d", firstDown)
 	}
 	_, secondDown, secondRelease := budget.reserve(0, 500_000, 0, limit)
-	if secondDown != 0 || budget.serverTx != 900_000 {
-		t.Fatalf("100 KB/s remainder should keep new sender on BBR; got=%d used=%d", secondDown, budget.serverTx)
+	if secondDown != 0 || budget.serverTx != 1_000_000 {
+		t.Fatalf("125 KB/s remainder cannot fund minimum compensated sender; got=%d used=%d", secondDown, budget.serverTx)
 	}
 	secondRelease()
 	release()
@@ -60,7 +60,7 @@ func TestBrutalBandwidthBudgetTinyRemainderFallsBackToBBR(t *testing.T) {
 
 func TestBrutalBandwidthBudgetConcurrentHandshakeNeverOvercommits(t *testing.T) {
 	var budget brutalBandwidthBudget
-	const limit uint64 = 8_000_000
+	const limit uint64 = 10_000_000
 	const contenders = 64
 	var wg sync.WaitGroup
 	var rates [contenders]uint64
@@ -81,7 +81,7 @@ func TestBrutalBandwidthBudgetConcurrentHandshakeNeverOvercommits(t *testing.T) 
 			nonzero++
 		}
 	}
-	if granted != limit || nonzero != 8 || budget.serverTx != limit {
+	if granted != 8_000_000 || nonzero != 8 || budget.serverTx != limit {
 		t.Fatalf("budget race granted=%d active=%d reserved=%d", granted, nonzero, budget.serverTx)
 	}
 	for _, release := range releases {

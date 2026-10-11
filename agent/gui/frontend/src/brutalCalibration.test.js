@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {proposeBrutalFromSpeedTests} from './brutalCalibration.js';
+import {proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 
 const record=(up=12,down=18,overrides={})=>({
- upload:{path:'Relay QUIC',megabitsPerSecond:up,durationMs:3000,
+ exitId:'exit-a',
+ upload:{path:'relay_quic',megabitsPerSecond:up,durationMs:3000,
   quic:{congestion_controller:'bbr-aggressive'}},
- download:{path:'Relay QUIC',megabitsPerSecond:down,durationMs:3000,
+ download:{path:'relay_quic',megabitsPerSecond:down,durationMs:3000,
   quic:{congestion_controller:'bbr-aggressive'}},...overrides
 });
 test('5 same-path BBR rounds return conservative floor but never enable automatically',()=>{
@@ -38,8 +39,18 @@ test('do not calibrate Brutal mode, fallback or unverified UDP paths',()=>{
   assert.throws(()=>proposeBrutalFromSpeedTests([unsafe,...baseline.slice(1)]));
  }
 });
+test('reject a run with missing exit ID and do not defer failure',()=>{
+ assert.throws(()=>validateBrutalCalibrationSample(record(12,18,{exitId:''})),/出口标识/);
+ const run=record();
+ assert.equal(validateBrutalCalibrationSample(run).relayPath,'relay_quic');
+});
+test('mixing exit IDs invalidates five otherwise healthy runs',()=>{
+ const all=Array.from({length:5},()=>record());
+ all[3].exitId='exit-b';
+ assert.throws(()=>proposeBrutalFromSpeedTests(all),/出口或 Relay 路径改变/);
+});
 test('a path change during calibration invalidates the result',()=>{
  const list=Array.from({length:5},()=>record());
- list[2].download.path='Relay TCP';
+ list[2].download.path='relay_tls';
  assert.throws(()=>proposeBrutalFromSpeedTests(list),/路径改变/);
 });

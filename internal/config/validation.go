@@ -3,9 +3,9 @@ package config
 import (
 	"crypto/sha256"
 	"fmt"
-	"regexp"
 	"net"
 	"net/netip"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -152,7 +152,9 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c.Mode != "CLIENT" {
 		return fmt.Errorf("客户端角色由服务端授权，配置文件不再接受 mode")
 	}
-	if err := validateBrowserLocalConfig(c); err != nil {return err}
+	if err := validateBrowserLocalConfig(c); err != nil {
+		return err
+	}
 	if c.Device.IdentityID != "" && !validIdentityID(c.Device.IdentityID) {
 		return fmt.Errorf("device.identity_id 必须是服务端生成的 16 位小写字母数字组合")
 	}

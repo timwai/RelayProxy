@@ -63,7 +63,24 @@ func TestBrutalDeterministicPacketLoss(t *testing.T) {
 	}
 }
 
-func transferWithDeterministicLoss(t *testing.T, payload []byte, dropEvery uint64, mode string, targetBPS uint64) error {
+// kernelFlowSample records receiver progress and local sender RTT with a
+// common wall clock for offline overlap analysis. This is not end-to-end RTT.
+type kernelFlowSample struct {
+	At            time.Time
+	ReceivedBytes uint64
+	SmoothedRTTMS float64
+}
+
+type transferByteCounter struct {
+	bytes atomic.Uint64
+}
+
+func (counter *transferByteCounter) Write(p []byte) (int, error) {
+	counter.bytes.Add(uint64(len(p)))
+	return len(p), nil
+}
+
+func transferWithDeterministicLoss(t *testing.T, payload []byte, dropEvery uint64, mode string, targetBPS uint64, observers ...func(kernelFlowSample)) error {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
@@ -140,6 +157,36 @@ func transferWithDeterministicLoss(t *testing.T, payload []byte, dropEvery uint6
 		return err
 	}
 	start := time.Now()
+	var counter transferByteCounter
+	if len(observers) > 0 {
+		finished := make(chan struct{})
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			ticker := time.NewTicker(250 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case at := <-ticker.C:
+					diag := DiagnoseSession(server)
+					if diag != nil && diag.QUIC != nil {
+						observers[0](kernelFlowSample{
+							At: at, ReceivedBytes: counter.bytes.Load(),
+							SmoothedRTTMS: diag.QUIC.SmoothedRTTMS,
+						})
+					}
+				case <-finished:
+					return
+				}
+			}
+		}()
+		// Keep the sampling goroutine from touching the QUIC session after
+		// this function returns and closes the session.
+		defer func() {
+			close(finished)
+			<-stopped
+		}()
+	}
 	written := make(chan error, 1)
 	go func() {
 		n, err := serverStream.Write(payload)
@@ -160,7 +207,11 @@ func transferWithDeterministicLoss(t *testing.T, payload []byte, dropEvery uint6
 		return err
 	}
 	got := make([]byte, len(payload))
-	if _, err := io.ReadFull(clientStream, got); err != nil {
+	var reader io.Reader = clientStream
+	if len(observers) > 0 {
+		reader = io.TeeReader(clientStream, &counter)
+	}
+	if _, err := io.ReadFull(reader, got); err != nil {
 		return fmt.Errorf("receive payload: %w", err)
 	}
 	if err := <-written; err != nil {
@@ -223,6 +274,7 @@ func TestBrutalKernelNetemCoexistence(t *testing.T) {
 			modes := []string{"bbr", "brutal"}
 			var durations [2]time.Duration
 			var results [2]error
+			var samples [2][]kernelFlowSample
 			var group sync.WaitGroup
 			start := make(chan struct{})
 			for i, mode := range modes {
@@ -231,7 +283,10 @@ func TestBrutalKernelNetemCoexistence(t *testing.T) {
 					defer group.Done()
 					<-start
 					begin := time.Now()
-					results[index] = transferWithDeterministicLoss(t, payload, 0, controller, scenario.targetBPS)
+					results[index] = transferWithDeterministicLoss(t, payload, 0, controller, scenario.targetBPS,
+						func(sample kernelFlowSample) {
+							samples[index] = append(samples[index], sample)
+						})
 					durations[index] = time.Since(begin)
 				}(i, mode)
 			}
@@ -244,6 +299,22 @@ func TestBrutalKernelNetemCoexistence(t *testing.T) {
 					t.Logf("shared_netem scenario=%s mode=%s target_bps=%d bytes=%d elapsed_ms=%d completion_goodput_mbps=%.3f",
 						scenario.name, mode, scenario.targetBPS, len(payload), durations[index].Milliseconds(),
 						float64(len(payload)*8)/durations[index].Seconds()/1e6)
+				if len(samples[index]) < 2 {
+					t.Errorf("%s produced only %d sampled points; cannot evaluate overlap", mode, len(samples[index]))
+				}
+				var previous kernelFlowSample
+				for _, sample := range samples[index] {
+					if !previous.At.IsZero() {
+						seconds := sample.At.Sub(previous.At).Seconds()
+						if seconds > 0 && sample.ReceivedBytes >= previous.ReceivedBytes {
+							t.Logf("overlap_sample scenario=%s mode=%s wall_unix_ms=%d interval_goodput_mbps=%.3f sender_smoothed_rtt_ms=%.3f received_bytes=%d",
+								scenario.name, mode, sample.At.UnixMilli(),
+								float64(sample.ReceivedBytes-previous.ReceivedBytes)*8/seconds/1e6,
+								sample.SmoothedRTTMS, sample.ReceivedBytes)
+						}
+					}
+					previous = sample
+				}
 				}
 			}
 		})

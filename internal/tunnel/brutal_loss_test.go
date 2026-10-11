@@ -319,6 +319,7 @@ func TestBrutalKernelNetemCoexistence(t *testing.T) {
 	}{
 		{name: "overcommit-16mbit", targetBPS: 2_000_000},
 		{name: "under-bottleneck-8mbit", targetBPS: 1_000_000},
+		{name: "reserved-headroom-4mbit", targetBPS: 500_000},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			modes := []string{"bbr", "brutal"}

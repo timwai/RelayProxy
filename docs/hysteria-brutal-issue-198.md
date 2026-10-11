@@ -20,6 +20,7 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 - [x] Android gomobile AAR and Gradle debug APK ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614074)).
 
 - [x] Automated deterministic UDP packet loss smoke: 0%, 1%, 5% with BBR and Brutal, full payload integrity and QUIC diagnostics; **not** a real-link performance measurement.
+- [ ] Linux kernel `tc netem` shaped UDP tests (12 Mbps, 20 ms, 0/1/5% configured loss) with concurrent BBR/Brutal sessions and qdisc evidence. New CI job must pass; laboratory simulation is not external WAN validation.
 - [x] Old/new version *linked protocol binaries* handshakes across QUIC and TLS, including same-version reference; the packaged Agent/Server acceptance remains open.
 - [x] Hysteria2/BBR/Brutal repeatable download/upload CSV sampler supplied; operator-side A/B measurements not yet collected.
 - [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow.

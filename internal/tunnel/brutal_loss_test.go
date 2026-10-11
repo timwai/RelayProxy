@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -183,4 +185,57 @@ func transferWithDeterministicLoss(t *testing.T, payload []byte, dropEvery uint6
 		float64(len(payload)*8)/elapsed.Seconds()/1e6, after.QUIC.PacketsSent,
 		after.QUIC.SentPacketsLost, serverUDP.dropped.Load(), after.QUIC.SmoothedRTTMS)
 	return nil
+}
+
+// TestBrutalKernelNetemDataPlane is opt-in because it needs tc netem to be
+ // installed outside the process. It verifies data integrity across a
+ // real kernel-shaped UDP path.
+func TestBrutalKernelNetemDataPlane(t *testing.T) {
+	if os.Getenv("RELAYPROXY_BRUTAL_NETEM") != "1" {
+		t.Skip("requires externally configured Linux tc netem qdisc")
+	}
+	payload := bytes.Repeat([]byte("kernel-netem-test-payload"), (2<<20)/len("kernel-netem-test-payload")+1)[:2<<20]
+	for _, mode := range []string{"bbr", "brutal"} {
+		t.Run(mode, func(t *testing.T) {
+			if err := transferWithDeterministicLoss(t, payload, 0, mode, 2_000_000); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// TestBrutalKernelNetemCoexistence records two independent concurrent
+// QUIC sessions sharing a kernel qdisc. End-to-end completion throughput
+// is *not* a time-resolved or real-WAN fairness measurement.
+func TestBrutalKernelNetemCoexistence(t *testing.T) {
+	if os.Getenv("RELAYPROXY_BRUTAL_NETEM") != "1" {
+		t.Skip("requires externally configured Linux tc netem qdisc")
+	}
+	payload := bytes.Repeat([]byte("brutal-bbr-shared-bottleneck"), (4<<20)/len("brutal-bbr-shared-bottleneck")+1)[:4<<20]
+	modes := []string{"bbr", "brutal"}
+	var durations [2]time.Duration
+	var results [2]error
+	var group sync.WaitGroup
+	start := make(chan struct{})
+	for i, mode := range modes {
+		group.Add(1)
+		go func(index int, controller string) {
+			defer group.Done()
+			<-start
+			begin := time.Now()
+			results[index] = transferWithDeterministicLoss(t, payload, 0, controller, 2_000_000)
+			durations[index] = time.Since(begin)
+		}(i, mode)
+	}
+	close(start)
+	group.Wait()
+	for index, mode := range modes {
+		if results[index] != nil {
+			t.Errorf("%s transfer: %v", mode, results[index])
+		} else {
+			t.Logf("shared_netem mode=%s bytes=%d elapsed_ms=%d completion_goodput_mbps=%.3f",
+				mode, len(payload), durations[index].Milliseconds(),
+				float64(len(payload)*8)/durations[index].Seconds()/1e6)
+		}
+	}
 }

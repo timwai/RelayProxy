@@ -37,7 +37,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     if(busy)return;
     if(mode==='revoke'&&!window.confirm('撤销后该浏览器将不能继续同步，相关配对规则也会失效。确定撤销？'))return;
     if(mode==='delete'&&!window.confirm('永久删除已撤销浏览器设备及其全部配对/同步记录？此操作不可恢复，重新注册仍须管理员审批。'))return;
-    if(mode==='approve'&&!identity[id]){
+    if(mode==='approve'&&!(identity[id]||devices.find(d=>d.id===id)?.requestedIdentityId)){
       setError('请为待审批浏览器选择已启用的身份。');return;
     }
     setBusy(id);setError('');setNotice('');

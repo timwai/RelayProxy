@@ -14,7 +14,6 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
   const [identity,setIdentity]=useState({});
   const [capabilities,setCapabilities]=useState({});
   const [filter,setFilter]=useState('');
-  const [view,setView]=useState('devices');
   const [stateFilter,setStateFilter]=useState('all');
   const activeIdentities=useMemo(()=>list(identities).filter(x=>{
     const state=x.status??x.state;
@@ -46,9 +45,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
         const caps=capabilities[id]||{send:true,receive:false};
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/approve',
           json('POST',{identityId:identity[id]||devices.find(d=>d.id===id)?.requestedIdentityId,send:!!caps.send,receive:!!caps.receive}));
-        setNotice(devices.some(d=>d.id===id&&d.extensionId)
-          ?'扩展与该浏览器设备已一次批准。'
-          :'旧版浏览器设备已批准。');
+        setNotice('浏览器设备已批准，可以连接中继。');
       }else if(mode==='delete'){
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id),{method:'DELETE'});
         setNotice('旧浏览器设备及配对记录已删除。若要重新加入，请在 Chrome 重新提交授权申请。');
@@ -61,17 +58,12 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     }catch(err){setError(err.message);}
     finally{setBusy('');}
   };
-  const extensionAction=async(id,action)=>{
-    if(action==='delete'&&!window.confirm('永久删除已撤销扩展的授权记录？需先删除其关联的旧浏览器设备。重新申请仍需管理员审批。'))return;
-    setBusy(id);setError('');
+  const removeLegacyBlock=async id=>{
+    if(busy||!window.confirm('清除这条历史扩展禁用记录？关联设备必须先撤销并删除。新设备仍需管理员单独审批。'))return;
+    setBusy(id);setError('');setNotice('');
     try{
-      if(action==='delete'){
-        await api('/browser-sync/admin/extensions/'+encodeURIComponent(id),{method:'DELETE'});
-        setNotice('旧扩展授权记录已删除；请在 Chrome 重新提交申请。');
-      }else{
-        await api('/browser-sync/admin/extensions/'+encodeURIComponent(id)+'/'+action,json('POST',{}));
-        setNotice(action==='approve'?'已批准旧版单独上报的扩展；关联设备仍需独立审批。':'扩展已撤销，新会话将被拒绝。');
-      }
+      await api('/browser-sync/admin/extensions/'+encodeURIComponent(id),{method:'DELETE'});
+      setNotice('已清除历史扩展禁用记录，浏览器设备仍需单独申请审批。');
       await refresh();
     }catch(err){setError(err.message);}
     finally{setBusy('');}
@@ -90,7 +82,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     <div className="page-head">
       <div><h1>浏览器同步</h1><p>设备授权与同步访问管理</p></div>
       <div className="form-actions">
-        <button className="btn" type="button" onClick={()=>{setView('devices');refresh();}}
+        <button className="btn" type="button" onClick={()=>{refresh();}}
           disabled={loading||!!busy}>刷新</button>
       </div>
     </div>
@@ -102,25 +94,16 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     </div>:<>
       <div className="browser-sync-summary">
         {states.slice(1).map(([id,label,total])=><button key={id} type="button"
-          className={'browser-sync-stat '+(view==='devices'&&stateFilter===id?'selected':'')}
-          onClick={()=>{setView('devices');setStateFilter(id);}}>
+          className={'browser-sync-stat '+(stateFilter===id?'selected':'')}
+          onClick={()=>setStateFilter(id)}>
           <span>{label}</span><strong>{total}</strong>
         </button>)}
       </div>
       <div className="panel">
         <div className="browser-sync-toolbar">
-          <div className="browser-sync-views" role="tablist" aria-label="浏览器同步管理">
-            <button type="button" role="tab" aria-selected={view==='devices'}
-              className={'btn '+(view==='devices'?'primary':'')}
-              onClick={()=>setView('devices')}>浏览器设备</button>
-            <button type="button" role="tab" aria-selected={view==='extensions'}
-              className={'btn '+(view==='extensions'?'primary':'')}
-              onClick={()=>setView('extensions')}>扩展来源</button>
-          </div>
-          {view==='devices'&&<input className="input browser-sync-search" aria-label="搜索浏览器设备"
-            placeholder="搜索设备名称或 ID" value={filter} onChange={e=>setFilter(e.target.value)}/>}
+          <input className="input browser-sync-search" aria-label="搜索浏览器设备"
+            placeholder="搜索设备名称或 ID" value={filter} onChange={e=>setFilter(e.target.value)}/>
         </div>
-        {view==='devices'?<>
           <div className="browser-sync-filters" aria-label="按授权状态筛选">
             {states.map(([id,label,total])=><button key={id} type="button"
               className={'btn '+(stateFilter===id?'active':'')}
@@ -167,36 +150,16 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
             {!visible.length&&<tr><td colSpan={4} className="browser-sync-no-data">
               {loading?'读取中…':'暂无匹配设备'}</td></tr>}</tbody>
           </table></div>
-        </>:<>
-          <div className="browser-sync-panel-title"><h3>扩展来源</h3>
-            <span className="muted">仅在扩展失效或需要重新申请时管理</span></div>
-          <div className="table-wrap"><table>
-            <thead><tr><th>扩展 ID</th><th>授权状态</th><th>操作</th></tr></thead>
-            <tbody>{extensions.map(ext=><tr key={ext.id}>
-              <td className="browser-sync-extension-id">{ext.id}</td>
-              <td><span className={'badge '+(ext.state==='approved'?'ok':ext.state==='revoked'?'danger':'')}>
-                {ext.state==='pending'?'待审批':ext.state==='approved'?'已批准':'已撤销'}</span></td>
-              <td className="browser-sync-actions">
-                {ext.state==='pending'&&linkedExtensions.has(ext.id)?
-                  <button type="button" className="btn" onClick={()=>{setView('devices');setStateFilter('pending');}}>
-                    审批关联设备</button>:
-                 ext.state==='pending'?
-                  <button type="button" className="btn primary" disabled={!!busy}
-                    onClick={()=>extensionAction(ext.id,'approve')}>批准扩展</button>:
-                 ext.state==='approved'?
-                  <button type="button" className="btn" disabled={!!busy}
-                    onClick={()=>extensionAction(ext.id,'revoke')}>撤销</button>:
-                 linkedExtensions.has(ext.id)?
-                  <button type="button" className="btn" onClick={()=>{setView('devices');setStateFilter('all');}}>
-                    先删除关联设备</button>:
-                  <button type="button" className="btn danger" disabled={!!busy}
-                    onClick={()=>extensionAction(ext.id,'delete')}>删除扩展</button>}
-              </td>
-            </tr>)}
-            {!extensions.length&&<tr><td colSpan={3} className="browser-sync-no-data">
-              {loading?'读取中…':'暂无扩展记录'}</td></tr>}</tbody>
-          </table></div>
-        </>}
+        {extensions.some(ext=>ext.state==='revoked')&&<section className="browser-sync-legacy-blocks">
+          <h3>历史禁用来源</h3>
+          <p className="muted">仅用于清理旧版本留下的扩展级禁用记录；新授权只审批浏览器设备。</p>
+          {extensions.filter(ext=>ext.state==='revoked').map(ext=><div key={ext.id} className="browser-sync-legacy-row">
+            <span className="browser-sync-extension-id">{ext.id}</span>
+            {linkedExtensions.has(ext.id)?<span>请先撤销并删除关联设备</span>:
+              <button className="btn danger" type="button" disabled={!!busy}
+                onClick={()=>removeLegacyBlock(ext.id)}>清除旧禁用记录</button>}
+          </div>)}
+        </section>}
       </div>
     </>}
   </section>;

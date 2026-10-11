@@ -11,7 +11,7 @@ func TestBrowserSyncDisabledByDefault(t *testing.T) {
 		t.Fatal("browser sync must default to disabled")
 	}
 }
-func TestBrowserSyncRequiresAdminTLSAndExplicitExtensionAllowlist(t *testing.T) {
+func TestBrowserSyncRequiresAdminTLSAndValidLegacyExtensionAllowlist(t *testing.T) {
 	const valid = "abcdefghijklmnopabcdefghijklmnop"
 	cfg := &ServerConfig{}
 	cfg.BrowserSync.Enabled = true
@@ -28,5 +28,9 @@ func TestBrowserSyncRequiresAdminTLSAndExplicitExtensionAllowlist(t *testing.T) 
 	cfg.BrowserSync.ExtensionIDs = []string{valid}
 	if err := NormalizeServerConfig(cfg); err != nil {
 		t.Fatalf("valid Browser Sync config rejected: %v", err)
+	}
+	cfg.BrowserSync.ExtensionIDs = nil
+	if err := NormalizeServerConfig(cfg); err != nil {
+		t.Fatalf("browser sync should allow empty legacy IDs; extensions must register and await approval: %v", err)
 	}
 }

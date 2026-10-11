@@ -18,6 +18,12 @@ export const groups = [
   {id:'rdp',key:'rdpIngress',title:'RDP 公网入口',subtitle:'公网监听端口、来源和速率限制',section:'安全与访问',fields:[
     ['enabled','启用公网入口服务','checkbox'],['listen','监听地址','text','0.0.0.0:0'],['portStart','自动端口起始','number'],['portEnd','自动端口结束','number'],
     ['sourceCidrs','全局来源 CIDR（每行一条）','lines'],['rateLimitPerMinute','每来源 IP 每分钟上限','number']]},
+  {id:'browserSync',title:'浏览器同步',subtitle:'Browser Sync、扩展审批和远程网络绑定（更改需重启）',section:'安全与访问',fields:[
+    ['enabled','启用 Browser Sync','checkbox'],
+    ['extensionIds','旧版已信任扩展 ID（每行一条；新扩展建议通过上报审批）','lines'],
+    ['networkProxyListen','来源 Agent HTTPS CONNECT 监听地址','text',':21292'],
+    ['networkProxyAdvertise','来源代理公网地址','text','relay.example.com:21292'],
+    ['allowedExitIds','允许共享的 Agent 出口 ID（每行一条）','lines']]},
   {id:'certificate',title:'证书管理',subtitle:'HTTPS / QUIC 证书路径',section:'安全与访问',fields:[
     ['certFile','证书链 PEM 路径','text','/data/config/fullchain.pem'],['keyFile','私钥 PEM 路径','text','/data/config/privkey.pem']]},
   {id:'acl',key:'relayACL',title:'目标访问权限',subtitle:'服务端统一 ACL 与目标匹配规则',section:'安全与访问',fields:[

@@ -8,6 +8,14 @@ const endpoint = (base, path) => new URL(path, base).toString();
 export async function registerBrowser() {
   const settings = await getSettings();
   if (!settings.serverOrigin) throw new Error('请先配置 HTTPS Server');
+  // No copy/paste of extension ID: Chrome's Origin header identifies the
+  // extension. Unapproved origins can only queue an admin approval request.
+  const extension=await fetch(endpoint(settings.serverOrigin,'/api/v1/browser-sync/extensions/register'),{
+    method:'POST',cache:'no-store'
+  });
+  if(!extension.ok)throw new Error('扩展身份上报失败：HTTP '+extension.status);
+  const approval=await extension.json();
+  if(approval.state!=='approved')return {state:'extension_pending'};
   const id = await getOrCreateIdentity();
   const response = await fetch(endpoint(settings.serverOrigin,
     '/api/v1/browser-sync/devices/register'), {

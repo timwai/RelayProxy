@@ -232,7 +232,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// CSRF guard cannot accept chrome-extension:// POST requests.
 	if r.browserSync != nil &&
 		(req.URL.Path == "/api/v1/browser-sync/devices/register" ||
-			req.URL.Path == "/api/v1/browser-sync/ws") {
+			req.URL.Path == "/api/v1/browser-sync/ws" ||
+			req.URL.Path == "/api/v1/browser-sync/extensions/register") {
 		r.browserSync.ServeHTTP(w, req)
 		return
 	}
@@ -350,6 +351,9 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("PUT /api/v1/server/config", r.requireAuth(r.requireAdmin(r.handleSaveServerConfig)))
 
 	if r.browserSync != nil {
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/extensions",r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensions)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/extensions/{id}/approve",r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensionApprove)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/extensions/{id}/revoke",r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensionRevoke)))
 		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/devices", r.requireAuth(r.requireAdmin(r.handleBrowserSyncDevices)))
 		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/approve", r.requireAuth(r.requireAdmin(r.handleBrowserSyncApprove)))
 		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRevoke)))

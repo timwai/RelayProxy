@@ -83,6 +83,14 @@ type DirectSettings struct {
 	PortEnd   int  `json:"portEnd"`
 }
 
+type BrowserSyncSettings struct {
+ Enabled bool `json:"enabled"`
+ ExtensionIDs []string `json:"extensionIds"`
+ NetworkProxyListen string `json:"networkProxyListen"`
+ NetworkProxyAdvertise string `json:"networkProxyAdvertise"`
+ AllowedExitIDs []string `json:"allowedExitIds"`
+}
+
 type ServerEditableConfig struct {
 	Admin       AdminSettings       `json:"admin"`
 	Tunnel      TunnelSettings      `json:"tunnel"`
@@ -92,6 +100,7 @@ type ServerEditableConfig struct {
 	RDPIngress  RDPIngressSettings  `json:"rdpIngress"`
 	P2P         P2PSettings         `json:"p2p"`
 	Direct      DirectSettings      `json:"direct"`
+	BrowserSync BrowserSyncSettings `json:"browserSync"`
 }
 
 type CertificateInfo struct {
@@ -168,6 +177,13 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 			PortStart: c.P2P.PortStart, PortEnd: c.P2P.PortEnd,
 			UPnPEnabled: c.P2P.UPnPEnabled != nil && *c.P2P.UPnPEnabled,
 		},
+		BrowserSync: BrowserSyncSettings{
+			Enabled: c.BrowserSync.Enabled,
+			ExtensionIDs: append([]string{}, c.BrowserSync.ExtensionIDs...),
+			NetworkProxyListen: c.BrowserSync.NetworkProxy.Listen,
+			NetworkProxyAdvertise: c.BrowserSync.NetworkProxy.Advertise,
+			AllowedExitIDs: append([]string{}, c.BrowserSync.NetworkProxy.AllowedExitIDs...),
+		},
 		Direct: DirectSettings{
 			Enabled:   c.Direct.Enabled != nil && *c.Direct.Enabled,
 			PortStart: c.Direct.PortStart, PortEnd: c.Direct.PortEnd,
@@ -221,6 +237,11 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 	target.P2P.PortStart = c.P2P.PortStart
 	target.P2P.PortEnd = c.P2P.PortEnd
 	target.P2P.UPnPEnabled = config.BoolPtr(c.P2P.UPnPEnabled)
+	target.BrowserSync.Enabled = c.BrowserSync.Enabled
+	target.BrowserSync.ExtensionIDs = cleanSettingLines(c.BrowserSync.ExtensionIDs)
+	target.BrowserSync.NetworkProxy.Listen = strings.TrimSpace(c.BrowserSync.NetworkProxyListen)
+	target.BrowserSync.NetworkProxy.Advertise = strings.TrimSpace(c.BrowserSync.NetworkProxyAdvertise)
+	target.BrowserSync.NetworkProxy.AllowedExitIDs = cleanSettingLines(c.BrowserSync.AllowedExitIDs)
 	target.Direct.Enabled = config.BoolPtr(c.Direct.Enabled)
 	target.Direct.PortStart = c.Direct.PortStart
 	target.Direct.PortEnd = c.Direct.PortEnd

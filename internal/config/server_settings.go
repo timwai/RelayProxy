@@ -170,8 +170,8 @@ func NormalizeServerConfig(c *ServerConfig) error {
 		if !c.IsAdminTLSEnabled() {
 			return errors.New("browser_sync requires server.admin.tls_enabled=true")
 		}
-		if len(c.BrowserSync.ExtensionIDs) == 0 || len(c.BrowserSync.ExtensionIDs) > 32 {
-			return errors.New("browser_sync.extension_ids requires 1-32 Chrome extension IDs")
+		if len(c.BrowserSync.ExtensionIDs) > 32 {
+			return errors.New("browser_sync.extension_ids accepts up to 32 trusted legacy Chrome extension IDs; new extensions use admin approval")
 		}
 		seen := make(map[string]struct{}, len(c.BrowserSync.ExtensionIDs))
 		for _, id := range c.BrowserSync.ExtensionIDs {
@@ -424,6 +424,7 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"p2p":      c.P2P,
 			"direct":   c.Direct,
 			"exit":     c.Exit,
+			"browser_sync": c.BrowserSync,
 			"database": c.Database,
 		}
 	}

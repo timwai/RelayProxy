@@ -5,6 +5,7 @@ import {api,json,fmtDate,list} from './api.js';
 // existing authenticated, admin-only API; it never displays Cookie values.
 export function BrowserSyncAdmin({identities=[]}){
   const [devices,setDevices]=useState([]);
+  const [extensions,setExtensions]=useState([]);
   const [loading,setLoading]=useState(true);
   const [unavailable,setUnavailable]=useState(false);
   const [error,setError]=useState('');
@@ -22,9 +23,10 @@ export function BrowserSyncAdmin({identities=[]}){
     try{
       const items=await api('/browser-sync/admin/devices');
       setDevices(list(items));
+      setExtensions(list(await api('/browser-sync/admin/extensions')));
       setUnavailable(false);
     }catch(err){
-      if(err.status===404){setUnavailable(true);setDevices([]);}
+      if(err.status===404){setUnavailable(true);setDevices([]);setExtensions([]);}
       else setError(err.message);
     }finally{setLoading(false);}
   },[]);
@@ -51,6 +53,15 @@ export function BrowserSyncAdmin({identities=[]}){
     }catch(err){setError(err.message);}
     finally{setBusy('');}
   };
+  const extensionAction=async(id,action)=>{
+    setBusy(id);setError('');
+    try{
+      await api('/browser-sync/admin/extensions/'+encodeURIComponent(id)+'/'+action,json('POST',{}));
+      setNotice(action==='approve'?'Chrome 扩展已批准。现在可注册浏览器设备。':'扩展已撤销，新会话将被拒绝。');
+      await refresh();
+    }catch(err){setError(err.message);}
+    finally{setBusy('');}
+  };
   const visible=devices.filter(d=>[d.name,d.id,d.identityId,d.state].join(' ').toLowerCase()
     .includes(filter.toLowerCase()));
   const count=state=>devices.filter(d=>d.state===state).length;
@@ -70,6 +81,20 @@ export function BrowserSyncAdmin({identities=[]}){
         <strong> Admin HTTPS 监听端口</strong>，而不是 Agent TCP/QUIC 端口。
         直接访问 Admin HTTPS 的此接口，未登录时应为 HTTP 401，而不是 404。</p></div>:
     <>
+      <div className="panel">
+        <h3>Chrome 扩展 ID 自动上报审批</h3>
+        <p>Chrome 扩展首次点击“上报扩展 ID / 注册浏览器设备”将登记待审批的 ID，无需人工复制；
+          批准扩展不等于批准设备或 Cookie 读取，设备仍需独立身份授权。</p>
+        <div className="table-wrap"><table><thead><tr><th>扩展 ID</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>{extensions.map(ext=><tr key={ext.id}>
+          <td style={{wordBreak:'break-all'}}>{ext.id}</td><td>{ext.state}</td>
+          <td>{ext.state==='pending'?<button className="btn primary" disabled={!!busy}
+            onClick={()=>extensionAction(ext.id,'approve')}>批准扩展</button>:
+            ext.state==='approved'?<button className="btn" disabled={!!busy}
+              onClick={()=>extensionAction(ext.id,'revoke')}>撤销扩展</button>:'已撤销'}</td>
+        </tr>)}
+        {!extensions.length&&<tr><td colSpan={3}>暂无已上报的扩展</td></tr>}</tbody></table></div>
+      </div>
       <div className="grid-cards">
         {[['待审批',count('pending')],['已批准',count('approved')],['已撤销',count('revoked')]]
           .map(([label,count])=><div className="panel" key={label}><strong>{label}</strong>

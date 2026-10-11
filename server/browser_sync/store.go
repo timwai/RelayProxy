@@ -59,6 +59,9 @@ func NewStore(db *sql.DB) (*Store, error) {
 		}
 	}
 	store := &Store{db: db}
+	if err := store.EnsureExtensionSchema(ctx); err != nil {
+		return nil, fmt.Errorf("browser extension schema: %w", err)
+	}
 	if err := store.EnsureRuleSchema(ctx); err != nil {
 		return nil, fmt.Errorf("browser sync rule schema: %w", err)
 	}

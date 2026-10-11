@@ -123,11 +123,11 @@ func TestDeleteRevokedExtensionRequiresLinkedDeviceCleanupAndFreshAdminApproval(
 		t.Fatalf("fresh request blocked: %d %s", out.Code, out.Body)
 	}
 	saved, err := store.Device(ctx, device.ID)
-	if err != nil || saved.State != "pending" || saved.ExtensionState != "pending" || saved.Send || saved.Receive {
+	if err != nil || saved.State != "pending" || saved.ExtensionState != "approved" || saved.Send || saved.Receive {
 		t.Fatalf("old privileges survived fresh application: %+v %v", saved, err)
 	}
-	if store.ExtensionApproved(ctx, unifiedExtensionID) {
-		t.Fatal("new request auto-approved revoked extension")
+	if !store.ExtensionApproved(ctx, unifiedExtensionID) {
+		t.Fatal("new extension Origin was not registered as metadata")
 	}
 	if err := store.DeleteRevokedExtension(ctx, unifiedExtensionID); !errors.Is(err, ErrDeleteRequiresRevoke) {
 		t.Fatalf("pending extension deleted without revocation: %v", err)

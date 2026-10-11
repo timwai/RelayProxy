@@ -32,7 +32,7 @@ func (s *browserEchoTunnel) OpenStream(ctx context.Context) (tunnel.TunnelStream
 	go func() {
 		defer agent.Close()
 		header, err := protocol.ReadStreamHeader(agent)
-		if err != nil || header.Type != protocol.FrameTypeOpenTCP {
+		if err != nil || header.Type != protocol.FrameTypeBrowserNetworkTCP {
 			return
 		}
 		var req protocol.OpenTCPRequest

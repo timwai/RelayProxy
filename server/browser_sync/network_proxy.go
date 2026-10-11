@@ -60,8 +60,23 @@ func (p *NetworkProxy) AllowedExit(browserIdentity, exitID string) bool {
 		return false
 	}
 	exit, ok := p.Sessions.Get(exitID)
-	return ok && exit != nil && exit.IsExit() && exit.IdentityID == browserIdentity && exit.Tunnel != nil
+	return ok && exit != nil && exit.IsExit() && exit.IdentityID == browserIdentity &&
+		exit.Tunnel != nil && browserExitOptedIn(exit)
 }
+// Only the Agent's signed, per-connection transport declaration proves its
+// local permission to share egress. A Server allowlist alone is insufficient.
+func browserExitOptedIn(exit *session.DeviceSession) bool {
+	if exit == nil {
+		return false
+	}
+	for _, capability := range exit.Capabilities {
+		if capability == protocol.CapabilityBrowserNetworkExit {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *NetworkProxy) AvailableExits(ctx context.Context, browserID string) []map[string]string {
 	browser, err := p.Store.deviceAllowed(ctx, browserID)
 	if err != nil {
@@ -181,7 +196,7 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer stream.Close()
 	reqID := uuid.NewString()
 	_ = stream.SetDeadline(time.Now().Add(12 * time.Second))
-	header := &protocol.StreamHeader{Type: protocol.FrameTypeOpenTCP, RequestID: reqID,
+	header := &protocol.StreamHeader{Type: protocol.FrameTypeBrowserNetworkTCP, RequestID: reqID,
 		ClientDeviceID: lease.deviceID, ExitDeviceID: exit.DeviceID}
 	if err = protocol.WriteStreamHeader(stream, header); err == nil {
 		err = protocol.WriteJSON(stream, protocol.OpenTCPRequest{

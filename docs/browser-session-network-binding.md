@@ -11,6 +11,11 @@ A 安装 **RelayProxy Agent + Chrome MV3 扩展**；B 只安装 **Chrome MV3 扩
 Server 配置示例（独立 TCP 监听端口不可与 admin、tunnel 冲突）：
 
 ```yaml
+# A Agent（独立的 agent.yaml）：
+# exit:
+#   browser_network_share: true
+#
+# Server (server.yaml)：
 browser_sync:
   enabled: true
   extension_ids:
@@ -22,7 +27,7 @@ browser_sync:
       - dev_replace_with_approved_agent_device_id
 ```
 
-要求 Admin HTTPS、TLS Server 证书校验正常；Server 的 21090/TCP 开放给 B Chrome。A Agent 必须正常连接 Server、已获 `proxy.exit` 能力并开启允许外网的 Exit；Server 明确列入 `allowed_exit_ids`。保持 Browser Sync / network_proxy 默认关闭。此功能不会为 B 创建完整 Agent 设备，也不授予 B 任何 `proxy.client`、RDP 权限。
+要求 Admin HTTPS、TLS Server 证书校验正常；Server 的 21090/TCP 开放给 B Chrome。A Agent 必须正常连接 Server、已获 `proxy.exit` 能力并开启允许外网的 Exit，同时**在 A 端本地配置中明确设置 `exit.browser_network_share: true`，并重启/重连 Agent**。Server 明确列入 `allowed_exit_ids`。浏览器共享出口需要经过 Agent 签名握手的 `browser.network.exit.v1` 和本机独立 `FrameTypeBrowserNetworkTCP` 双重检查，只有普通代理 Exit 授权不足以开放此功能。保持 Browser Sync / network_proxy 默认关闭。此功能不会为 B 创建完整 Agent 设备，也不授予 B 任何 `proxy.client`、RDP 权限。
 
 ## 授权和工作流
 

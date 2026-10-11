@@ -144,3 +144,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | CONNECT 存量会话即时撤销保护 | Gateway 对每个活动 CONNECT 每 2 秒重新核验配对/身份/Agent 在线状态/已签名本机共享同意，并在任意失败或隧道退出时关闭双方连接；新增 Revocation EOF 的 TLS 集成测试与 Agent 独立帧 ACL/拒绝单测 | NB-01/02 可靠性加强，仍待真实 Agent/Chrome 和全面安全审计 | 以本次代码 SHA 的 CI 实际结果为准 |
 
 | 2026-10-11 | [Go CI #38103066917](https://github.com/timwai/RelayProxy/actions/runs/38103066917) 格式复核 | Agent/Browser Network 新增 Go 字段及测试文件触发 gofmt 格式检查失败，已按照 CI diff 逐项修正；需在新 SHA 下重新运行 Go、UI 与网络回归 | NB-01/02 已实现但继续待真实浏览器验收，P0 不放行 | 记录格式修复，未提前宣告 CI 成功 |
+
+| 2026-10-11 | [Go CI #38103119414](https://github.com/timwai/RelayProxy/actions/runs/38103119414) 拒绝未授权 Agent 共享回归 | 测试 `TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent` 揭示复合 Tree 覆盖导致 Server `AllowedExit` 缺失已签名 `browser.network.exit.v1` 强制条件、CONNECT 仍使用普通 TCP 帧；已修复为双重强制门禁与 `FrameTypeBrowserNetworkTCP`，保留正在运行的撤销监控 | NB-01/02 回归得到可复现安全缺陷并修复；尚待新 SHA 验证，正式发布不放行 | 以本次提交测试结果为准 |

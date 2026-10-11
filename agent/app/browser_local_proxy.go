@@ -64,7 +64,8 @@ func (p *browserLocalProxy) Start() error {
 	}
 	p.server = &http.Server{
 		Handler: p, ReadHeaderTimeout: 8 * time.Second,
-		IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192,
+		// Use net/http's standard header size budget for large Cookie headers.
+		IdleTimeout: 30 * time.Second,
 		// Preserve the accepted socket tuple so native Agent process-based
 		// routing can identify Chrome just as with SOCKS5/HTTP entry points.
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
@@ -244,8 +245,9 @@ func (p *browserLocalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if _, err = io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n"); err != nil {
 		return
 	}
-	_ = client.SetDeadline(time.Now().Add(30 * time.Minute))
-	_ = out.SetDeadline(time.Now().Add(30 * time.Minute))
+	// Do not impose an absolute 30-minute timeout on WebSocket or long
+	// downloads. The browser closes the stream on navigation/shutdown;
+	// Close() closes both ends when the Agent stops.
 	done := make(chan struct{}, 2)
 	go func() { _, _ = io.Copy(out, buffer); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(client, out); done <- struct{}{} }()

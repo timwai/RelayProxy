@@ -67,6 +67,14 @@ python3 scripts/bench_brutal_acceptance.py \
   --runs 5 --direction download --output out/issue198.csv
 ```
 
+After each run, validate sample completeness (same rounds for all three variants, ≥5 successful rounds, no duplicate rounds, no failed transfers) and write summary statistics:
+
+```sh
+python3 scripts/summarize_brutal_acceptance.py --input out/issue198.csv --output out/issue198-summary.csv
+```
+
+The summary reports median and p10/p90 goodput and relative median difference to Hysteria2 **for each scenario/loss/direction**. It returns nonzero for missing samples, failed transfers or malformed numbers; it does **not** claim to verify actual induced loss, loaded RTT or fairness. Archive both raw and summarized CSV with exact build versions and hardware details.
+
 For upload, use `--direction upload --upload-file /path/to/static.bin` and a separate server that accepts HTTP PUT; verify the uploaded hash at the destination. Run the matrix in both directions. A CSV row labeled "5%" does not prove that network loss was configured. Check actual packet counters (`tc -s qdisc`) and archive packet captures if available.
 
 Collect idle and loaded p50/p95 RTT, transport QUIC loss counters, competitor BBR-flow goodput and CPU/RSS separately; curl's connect/first-byte times are **not** QUIC RTT or fairness. Keep old/new binary interoperability as a separate manual gate. Without a real network testbed and deployed Hysteria2 reference instance, this script provides tooling, **not** passing acceptance evidence.

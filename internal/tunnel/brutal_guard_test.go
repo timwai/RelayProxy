@@ -57,6 +57,57 @@ func TestBrutalRTTGuardDoesNotTriggerOnIdleOrTransientLoss(t *testing.T) {
 	}
 }
 
+func TestBrutalLossGuardTripsOnlyOnSustainedSevereLoss(t *testing.T) {
+	start := time.Unix(200, 0)
+	var guard brutalLossGuard
+	var sent, lost uint64
+	for second := 0; second <= 8; second++ {
+		sent += 200
+		lost += 10 // Nominal 5% loss must not trip the guard.
+		if guard.sample(start.Add(time.Duration(second)*time.Second), sent, lost) {
+			t.Fatalf("routine 5%% loss triggered fallback at second %d", second)
+		}
+	}
+	for second := 9; second <= 10; second++ {
+		sent += 200
+		lost += 60 // 30% newly lost packets, but only two samples.
+		if guard.sample(start.Add(time.Duration(second)*time.Second), sent, lost) {
+			t.Fatalf("short packet-loss spike triggered fallback at second %d", second)
+		}
+	}
+	// Return to stable traffic resets the consecutive-loss window.
+	sent += 200
+	lost += 10
+	if guard.sample(start.Add(11*time.Second), sent, lost) {
+		t.Fatal("guard tripped on recovery sample")
+	}
+	for second := 12; second <= 14; second++ {
+		sent += 200
+		lost += 60
+		if got, want := guard.sample(start.Add(time.Duration(second)*time.Second), sent, lost), second == 14; got != want {
+			t.Fatalf("second=%d unexpected severe-loss trip=%v, want=%v", second, got, want)
+		}
+	}
+}
+
+func TestBrutalLossGuardIgnoresIdleAndSpuriousLossCorrection(t *testing.T) {
+	start := time.Unix(300, 0)
+	var guard brutalLossGuard
+	if guard.sample(start, 1000, 300) {
+		t.Fatal("initial cumulative losses must not trigger")
+	}
+	// Loss counter may go backwards after QUIC marks a loss spurious.
+	if guard.sample(start.Add(6*time.Second), 1200, 200) {
+		t.Fatal("decreasing loss counter triggered fallback")
+	}
+	for second := 7; second < 20; second++ {
+		if guard.sample(start.Add(time.Duration(second)*time.Second),
+			1200, 200+uint64(second*20)) {
+			t.Fatalf("idle packet-loss updates triggered guard at second %d", second)
+		}
+	}
+}
+
 func TestBrutalRTTGuardRevertsRealQUICToBBROnce(t *testing.T) {
 	client, server := sessionPair(t, "quic")
 	if !UseBrutal(server, 2_000_000, false) {

@@ -157,10 +157,12 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 
 | 任务 | 当前状态 | 实现与剩余验收 |
 |---|---|---|
-| NB-06 B Agent 独立本机 Chrome 出口 | **已编码·待 CI/真机验收** | 新增 `browser_sync.local_proxy`：127.0.0.1 专用监听、强制 Basic Token、最多 64 条流、精确站点名单；Agent `RoutingDialer.DialBrowserNetworkTCP` 沿用现有 Relay/QUIC/P2P/自定义出口与分流，DIRECT/REJECT 失败关闭。与通用 SOCKS5/HTTP/透明代理开关解耦 |
-| NB-07 B 扩展按站点选本机/来源 Agent | **已编码·待 CI/真机验收** | 在接收端激活的 Cookie 规则上明确选择 `local_agent` 或 `source_agent`，PAC 按 hostname 映射，二者可同时存在；本机令牌只存在于会话存储，浏览器重启默认黑洞；原有 Cookie-only/来源 Agent 不改变 |
+| NB-06 B Agent 独立本机 Chrome 出口 | **已实现·待真机/安全验收** | 新增 `browser_sync.local_proxy`：127.0.0.1 专用监听、强制 Basic Token、最多 64 条流、精确站点名单；Agent `RoutingDialer.DialBrowserNetworkTCP` 沿用现有 Relay/QUIC/P2P/自定义出口与分流，DIRECT/REJECT 失败关闭。与通用 SOCKS5/HTTP/透明代理开关解耦 |
+| NB-07 B 扩展按站点选本机/来源 Agent | **已实现·待真机/安全验收** | 在接收端激活的 Cookie 规则上明确选择 `local_agent` 或 `source_agent`，PAC 按 hostname 映射，二者可同时存在；本机令牌只存在于会话存储，浏览器重启默认黑洞；原有 Cookie-only/来源 Agent 不改变 |
 | NB-08 本地 Agent 发现、权限 UI、真实跨端验证 | **未开始** | 需正式本地配对（避免手工配置长令牌）、GUI 设置和 Token 轮换、真实 Chrome MV3 407 缓存、端口占用/退出/断网、代理规则变化、跨平台 Chrome 以及 DNS/WebRTC/第三方资源审计 |
 
 **本轮新增范围不应误算为已验收。** B Agent 本机出口不保证与来源 A 公网 IP 一致；P0-01/05/06/07 与 NB-05 的生产准入仍然不放行。所有构建和集成测试结果必须按功能提交 SHA 单独填写。
 
 | 2026-10-11 | [Go CI #38104275166](https://github.com/timwai/RelayProxy/actions/runs/38104275166) 格式修复 | B 本机 Agent 原生桥接的新增文件需要 gofmt；按 CI 差异修正后重新执行 Go/UI/Android/网络回归。真实 Chrome/Agent 仍未验收 | NB-06/07 待 CI 与真机测试，P0 仍不放行 | 修复格式阻塞 |
+
+**B 本机 Agent 功能代码基准：** [`9f7ca3c`](https://github.com/timwai/RelayProxy/commit/9f7ca3c7f09dbaa299a2b50f0b3a9e9c11fde148)。[Go CI #38104619225](https://github.com/timwai/RelayProxy/actions/runs/38104619225) **success**（格式、vet、完整 Go 测试、race 与 benchmark，新增独立本机 CONNECT/配置回归）；[Network Acceptance #38104619231](https://github.com/timwai/RelayProxy/actions/runs/38104619231) **success**；[Android #38104619136](https://github.com/timwai/RelayProxy/actions/runs/38104619136) **success**。[UI CI #38104619145](https://github.com/timwai/RelayProxy/actions/runs/38104619145) 主测试、Windows 构建已 success，最终 macOS 工作流结论需继续单独核验。**当前没有真实 Chrome + B Agent 双机验收结果，不等于 NB-06/07 已验收。**

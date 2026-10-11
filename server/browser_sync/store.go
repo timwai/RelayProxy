@@ -68,6 +68,9 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err := store.EnsureDeliverySchema(ctx); err != nil {
 		return nil, fmt.Errorf("browser sync delivery schema: %w", err)
 	}
+	if err := store.EnsureNetworkSchema(ctx); err != nil {
+		return nil, fmt.Errorf("browser sync network schema: %w", err)
+	}
 	return store, nil
 }
 func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevice, error) {

@@ -72,7 +72,11 @@ func (h *Handler) permitControl(deviceID string, msg ruleControlFrame) bool {
 			h.limits.allow("transfer-burst:"+deviceID+":"+ruleID, 5, 10*time.Second)
 	case "RULE_OFFER":
 		return h.limits.allow("offers:"+deviceID, 12, time.Hour)
-	case "LIST_PEERS", "LIST_RULES":
+	case "NETWORK_OFFER", "NETWORK_ACCEPT", "NETWORK_REVOKE":
+    return h.limits.allow("network-write:"+deviceID,12,time.Hour)
+  case "NETWORK_TOKEN":
+    return h.limits.allow("network-token:"+deviceID,24,time.Hour)
+  case "LIST_PEERS", "LIST_RULES", "NETWORK_EXITS", "NETWORK_BINDING":
 		return h.limits.allow("list:"+deviceID, 60, time.Minute)
 	case "DELIVERY_STATUS", "SEQUENCE_CURSOR":
 		return h.limits.allow("read:"+deviceID, 120, time.Minute)

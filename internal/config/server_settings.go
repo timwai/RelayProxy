@@ -59,6 +59,31 @@ func NormalizeServerConfig(c *ServerConfig) error {
 			return fmt.Errorf("p2p.rendezvous_advertise: %w", err)
 		}
 	}
+	c.BrowserSync.NetworkProxy.Listen = strings.TrimSpace(c.BrowserSync.NetworkProxy.Listen)
+	c.BrowserSync.NetworkProxy.Advertise = strings.TrimSpace(c.BrowserSync.NetworkProxy.Advertise)
+	if c.BrowserSync.NetworkProxy.Listen != "" {
+		if !c.BrowserSync.Enabled || !c.IsAdminTLSEnabled() || !c.IsTLSEnabled() {
+			return errors.New("browser_sync.network_proxy requires enabled browser sync and TLS")
+		}
+		if err := validateListen(c.BrowserSync.NetworkProxy.Listen); err != nil {return fmt.Errorf("browser_sync.network_proxy.listen: %w",err)}
+		if len(c.BrowserSync.NetworkProxy.AllowedExitIDs)==0 || len(c.BrowserSync.NetworkProxy.AllowedExitIDs)>32 {
+			return errors.New("browser_sync.network_proxy.allowed_exit_ids requires 1-32 explicitly permitted Agent exits")
+		}
+		if err := validateRendezvousAdvertise(c.BrowserSync.NetworkProxy.Advertise);err != nil {
+			return fmt.Errorf("browser_sync.network_proxy.advertise: %w",err)
+		}
+		if listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen,c.Server.Admin.Listen) ||
+			listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen,c.Server.TLS.Listen) {
+			return errors.New("browser sync HTTPS CONNECT listener must not share Admin or tunnel listener")
+		}
+		for _,id:=range c.BrowserSync.NetworkProxy.AllowedExitIDs {
+			if !strings.HasPrefix(id,"dev_") || len(id)>128 || len(id)<8 {
+				return errors.New("browser sync network proxy requires real Agent device IDs")
+			}
+		}
+	} else if c.BrowserSync.NetworkProxy.Advertise!="" || len(c.BrowserSync.NetworkProxy.AllowedExitIDs)>0 {
+		return errors.New("browser_sync.network_proxy.listen required when configuring network binding")
+	}
 	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))
 	c.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Upstream.Mode))
 	c.Exit.Upstream.Address = strings.TrimSpace(c.Exit.Upstream.Address)
@@ -259,6 +284,8 @@ func CloneServerConfig(c *ServerConfig) *ServerConfig {
 	if c.Exit.AllowInternet != nil {
 		out.Exit.AllowInternet = BoolPtr(*c.Exit.AllowInternet)
 	}
+	out.BrowserSync.ExtensionIDs = slices.Clone(c.BrowserSync.ExtensionIDs)
+	out.BrowserSync.NetworkProxy.AllowedExitIDs = slices.Clone(c.BrowserSync.NetworkProxy.AllowedExitIDs)
 	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
 	out.RDP.Ingress.SourceCIDRs = slices.Clone(c.RDP.Ingress.SourceCIDRs)

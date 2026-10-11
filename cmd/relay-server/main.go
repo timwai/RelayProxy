@@ -533,7 +533,17 @@ func main() {
 			log.Fatalf("[BrowserSync] Failed to initialize browser database: %v", storeErr)
 		}
 		browserSyncHandler = browsersync.NewHandler(store, cfg.BrowserSync.ExtensionIDs)
-		log.Printf("[BrowserSync] Enabled on Admin HTTPS listener; extension allowlist size=%d; session transfer disabled until E2EE/paired rules", len(cfg.BrowserSync.ExtensionIDs))
+		if cfg.BrowserSync.NetworkProxy.Listen!="" {
+			proxy:=browsersync.NewNetworkProxy(store,sessionMgr,cfg.BrowserSync.NetworkProxy.Advertise,
+				cfg.BrowserSync.NetworkProxy.AllowedExitIDs)
+			if err:=proxy.Start(cfg.BrowserSync.NetworkProxy.Listen,tlsConfig);err!=nil {
+				log.Fatalf("[BrowserSync] HTTPS CONNECT listener: %v",err)
+			}
+			defer proxy.Close(context.Background())
+			browserSyncHandler.ConfigureNetworkProxy(proxy)
+			log.Printf("[BrowserSync] Scoped HTTPS CONNECT listener enabled on %s",proxy.Address())
+		}
+		log.Printf("[BrowserSync] Browser session relay enabled; extension allowlist size=%d", len(cfg.BrowserSync.ExtensionIDs))
 	}
 
 	apiRouter := api.NewRouter(authService, deviceService, sessionMgr, db,

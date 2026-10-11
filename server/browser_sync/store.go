@@ -80,6 +80,9 @@ func NewStore(db *sql.DB) (*Store, error) {
 	if err := store.EnsureNetworkSchema(ctx); err != nil {
 		return nil, fmt.Errorf("browser sync network schema: %w", err)
 	}
+	if err := store.EnsureAdminSchema(ctx); err != nil {
+		return nil, fmt.Errorf("browser sync admin schema: %w", err)
+	}
 	return store, nil
 }
 func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevice, error) {
@@ -181,7 +184,9 @@ func (s *Store) Approve(ctx context.Context, id, identityID string, canSend, can
 	if count != 1 {
 		return ErrNotFound
 	}
-	return nil
+	// Legacy approval uses the same audit semantics, without changing
+	// either device permissions or the original approval result.
+	return s.recordApprovedDevice(ctx, id)
 }
 func (s *Store) Revoke(ctx context.Context, id string) error {
 	// Device and its active pairings must be revoked atomically. A partial
@@ -204,6 +209,9 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE browser_sync_rules SET status='revoked', updated_at=? WHERE source_id=? OR target_id=?`, now, id, id); err != nil {
+		return err
+	}
+	if err := appendBrowserAudit(ctx, tx, "device_revoked", id, "", "", ""); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -268,6 +276,9 @@ func (s *Store) DeleteRevokedDevice(ctx context.Context, id string) error {
 				return ErrNotFound
 			}
 		}
+	}
+	if err := appendBrowserAudit(ctx, tx, "device_deleted", id, "", "", ""); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

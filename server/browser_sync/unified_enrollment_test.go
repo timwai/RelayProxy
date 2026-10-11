@@ -57,16 +57,16 @@ func TestUnifiedEnrollmentRequiresOnlyOneAdminApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if response.ID != device.ID || response.ExtensionID != unifiedExtensionID ||
-		response.State != "pending" || response.ExtensionState != "pending" {
+		response.State != "pending" || response.ExtensionState != "approved" {
 		t.Fatalf("unexpected initial enrollment: %+v", response)
 	}
 	saved, err := store.Device(ctx, device.ID)
 	if err != nil || saved.Send || saved.Receive || saved.IdentityID != "" ||
-		saved.ExtensionID != unifiedExtensionID || saved.ExtensionState != "pending" {
+		saved.ExtensionID != unifiedExtensionID || saved.ExtensionState != "approved" {
 		t.Fatalf("unauthorized enrollment leaked capabilities: %+v %v", saved, err)
 	}
-	if store.ExtensionApproved(ctx, unifiedExtensionID) {
-		t.Fatal("registration unexpectedly approved the extension")
+	if !store.ExtensionApproved(ctx, unifiedExtensionID) {
+		t.Fatal("extension Origin was not recorded; this still grants no device permissions")
 	}
 	if err := store.ApproveEnrollment(ctx, device.ID, "id_1", true, false); err != nil {
 		t.Fatal(err)
@@ -115,7 +115,7 @@ func TestUnifiedEnrollmentCannotSetPrivilegesOrSwapExtension(t *testing.T) {
 		t.Fatal("unknown identity was accepted")
 	}
 	got, err := store.Device(ctx, device.ID)
-	if err != nil || got.State != "pending" || got.ExtensionState != "pending" {
+	if err != nil || got.State != "pending" || got.ExtensionState != "approved" {
 		t.Fatalf("partial approval was persisted: %+v %v", got, err)
 	}
 	const swappedExtension = "dddddddddddddddddddddddddddddddd"
@@ -203,9 +203,6 @@ func TestAdminRevocationOverridesLegacyExtensionAllowlist(t *testing.T) {
 	store := testBrowserStore(t)
 	ctx := context.Background()
 	if _, err := store.RequestExtension(ctx, unifiedExtensionID); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetExtensionApproved(ctx, unifiedExtensionID, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.SetExtensionApproved(ctx, unifiedExtensionID, false); err != nil {

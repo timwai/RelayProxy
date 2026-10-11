@@ -8,11 +8,34 @@ Default `0` values preserve **BBR Aggressive** on every QUIC direction. TLS rela
 
 An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `tunnel.bandwidth.ignore_client_bandwidth` forces BBR, regardless of client requests; `disable_loss_compensation` controls the Server sender only. Zero requests and unsupported older peers remain on BBR. P2P and Public Direct use Server-authorized directional values, not raw QUIC hints. A legacy Public Direct authenticator without rate authorization stays on BBR.
 
-**Brutal is intentionally opt-in.** Rates above the physical path capacity amplify queueing, packet loss, bufferbloat, and cross-tenant unfairness. Start below the measured sustained available bandwidth. Server caps are per connected session, not a global shared-bandwidth scheduler.
+**Brutal is intentionally opt-in.** Rates above the physical path capacity amplify queueing, packet loss, bufferbloat, and cross-tenant unfairness. Start below the measured sustained available bandwidth. Individual caps remain per session; a *new optional* aggregate reservation pool also exists, but it is **not a global bandwidth scheduler, wire-rate limiter, or fairness guarantee**.
+
+## Aggregate Relay QUIC Brutal budget (implemented, opt-in)
+
+To preserve capacity for BBR and other applications, Server admins can optionally specify total directional **pacing reservations** alongside existing per-device caps:
+
+```yaml
+tunnel:
+  bandwidth:
+    up_mbps: 20
+    down_mbps: 20
+    total_up_mbps: 40
+    total_down_mbps: 40
+    ignore_client_bandwidth: false
+```
+
+Here `up_mbps` and `down_mbps` are still per-device. `total_up_mbps` and `total_down_mbps` separately cap the **sum of reserved Brutal pacing targets for authenticated Relay QUIC connections**. Each assigned target is conservatively charged **125%** toward the pool because Brutal's loss-compensation floor can make the actual QUIC pacer send at up to 1.25× the requested target. For example, a 40 Mbps total pool will fund at most 32 Mbps of total nominal Brutal targets (before UDP/IP overhead), not 40 Mbps. If the remaining compensated allowance can fund at least 1 Mbps, the handshake grants a reduced rate; otherwise that direction falls back to BBR. QUIC session closure and failed handshakes release reservations, with reconnects reclaiming capacity. TLS never reserves QUIC allowances or receives non-zero negotiated Brutal rates.
+
+**Defaults:** Both total limits are `0` (unlimited; legacy behavior) and the transport rate hints still default to `0` (BBR). No new Brutal capacity is implicitly enabled. A Server administrator must explicitly configure total limits; they should be **below measured sustainable directional network throughput**, accounting for protocol overhead, shared exits, other tenants and BBR traffic. Limit values are validated as 0–1,000,000 Mbps.
+
+**Scope and limitations:** This guards only authenticated **Relay QUIC** negotiations. It does not reserve or throttle Public Direct, peer-to-peer paths, Hysteria2 running on the same host, TLS/BBR flows, individual destination sockets, or physical NIC traffic. Server target-pool control is a concurrency-safe *admission/target budget*, not actual traffic shaping or dynamic congestion-aware fair queuing. Even with the pool enabled, real-link loaded RTT and BBR coexistence performance must be measured before release.
+
+
 
 ## Verification gate
 
 - [x] Port controller, rate conversion/capping, loss-compensation tests, config and directional negotiation.
+- [x] Add optional authenticated Relay QUIC aggregate directional budgets with conservative 125% loss-compensation headroom, safe BBR fallback and per-session release; configuration persistence, simultaneous-handshake and TLS fallback regressions included.
 - [x] Preserve new main-line UPnP, Android settings, proxy routing, Public Direct authorization and P2P lifecycle.
 - [x] Reject rate hints on legacy Public Direct authentication paths.
 - [x] Go CI: gofmt, go vet, go mod tidy, Go tests, core race tests and benchmark smoke ([successful preceding run](https://github.com/timwai/RelayProxy/actions/runs/38100402492)); source-change follow-up requires the latest green Go CI.

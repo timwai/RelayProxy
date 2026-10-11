@@ -133,6 +133,7 @@ type QUICSession struct {
 	brutalGuardRunning       bool
 	brutalGuardTripped       bool
 	brutalFallbackReason     string
+	brutalFallbackHook       func()
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -197,13 +198,31 @@ func (s *QUICSession) UseBrutal(txBPS uint64, disableLossCompensation bool) bool
 // fallbackFromBrutal is idempotent, per sending QUIC connection. It is the
 // emergency circuit-breaker for pathological sustained queueing, not a
 // bandwidth estimator and not a substitute for aggregate fairness policy.
+// OnBrutalFallback registers the server-side aggregate-budget release hook.
+// It is invoked once outside the diagnostics mutex when this QUIC sender
+// switches to BBR. A late registration after fallback is invoked immediately.
+func (s *QUICSession) OnBrutalFallback(hook func()) {
+	if s == nil || hook == nil {
+		return
+	}
+	s.diagnosticsMu.Lock()
+	tripped := s.brutalGuardTripped
+	if !tripped {
+		s.brutalFallbackHook = hook
+	}
+	s.diagnosticsMu.Unlock()
+	if tripped {
+		hook()
+	}
+}
+
 func (s *QUICSession) fallbackFromBrutal(reason string) bool {
 	if s == nil || s.conn == nil {
 		return false
 	}
 	s.diagnosticsMu.Lock()
-	defer s.diagnosticsMu.Unlock()
 	if s.congestionController != "brutal" || s.brutalGuardTripped {
+		s.diagnosticsMu.Unlock()
 		return false
 	}
 	quicprofile.UseDefaultBBR(s.conn)
@@ -211,6 +230,13 @@ func (s *QUICSession) fallbackFromBrutal(reason string) bool {
 	s.congestionTargetBPS = 0
 	s.brutalGuardTripped = true
 	s.brutalFallbackReason = reason
+	hook := s.brutalFallbackHook
+	s.brutalFallbackHook = nil
+	s.diagnosticsMu.Unlock()
+	// Do not call out to the Gateway's budget mutex under diagnosticsMu.
+	if hook != nil {
+		hook()
+	}
 	log.Printf("[BrutalGuard] Reverted QUIC sender to BBR, reason=%s", reason)
 	return true
 }

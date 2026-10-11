@@ -229,3 +229,10 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 **本轮最终功能代码基准**：[e8307a5](https://github.com/timwai/RelayProxy/commit/e8307a58bef201d216cb48f1df147b0d872de0a3)：[Go CI](https://github.com/timwai/RelayProxy/actions/runs/38109151334)、[UI CI](https://github.com/timwai/RelayProxy/actions/runs/38109151283)、[Network Acceptance](https://github.com/timwai/RelayProxy/actions/runs/38109151245)、[Android CI](https://github.com/timwai/RelayProxy/actions/runs/38109151365) **全部 success**。P0-08/NB-06/07/09/10 保持「已实现·待真机/安全验收」，NB-11「未开始实体平台测试」，P0-01–07、P1/P2 其余状态不变。Chrome 扩展不能强制接管所有 UDP/QUIC/WebRTC/DNS；生产发布不放行，PR #194 不合并 main。
 
 | 2026-10-11 | 完整 Chrome 代理兼容性：大 Cookie 头与长连接 | 本机入口将 HTTP 请求头上限恢复为 Go 默认（1 MiB），避免旧的 8 KiB 限制拒绝正常网站；移除 CONNECT/WebSocket 无条件 30 分钟绝对中断，连接由浏览器与 Agent 关闭管理，继续保留回环监听、8 秒 Header Timeout、最多 64 条并发及 Agent 路由 ACL。新增携带 16 KiB Cookie 的 HTTP Forward 回归。无鉴权、内网可达与空闲连接资源仍需 P0 真实压力/安全审查 | P0-08、NB-06/10 已实现·待真机验收；原 P0-01–07、P1/P2 状态不变 | 新功能代码需独立 CI |
+
+**2026-10-11 Chrome 本机代理最终兼容性代码基准 [`5092c6f`](https://github.com/timwai/RelayProxy/commit/5092c6f8afdddd75900ecd6552dc6ef8435fac62)：**
+[Go CI #38109445468](https://github.com/timwai/RelayProxy/actions/runs/38109445468) **success**（包含 16 KiB Cookie 头转发测试、竞态检查）；
+[UI CI #38109445466](https://github.com/timwai/RelayProxy/actions/runs/38109445466) **success**（Chrome 扩展和 Windows/macOS 桌面构建）；
+[Network Acceptance #38109445519](https://github.com/timwai/RelayProxy/actions/runs/38109445519) **success**；
+[Android CI #38109445479](https://github.com/timwai/RelayProxy/actions/runs/38109445479) **success**。
+当前 P0-08、NB-06/07/09/10 均是**已实现·待实体 Chrome/安全验收**；NB-08/11 的 GUI 入口、安全审计和真实浏览器协议兼容仍未完成。**绝不能把本机无鉴权回环代理的 CI 通过等同于 WebRTC/QUIC/DNS 无泄漏，或把本机 TCP 代理当成 OS VPN。** Cookie P0-01–07、P1、P2 其他状态不变；PR #194 保持 Draft，不合并 main。

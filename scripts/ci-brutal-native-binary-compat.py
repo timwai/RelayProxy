@@ -6,6 +6,7 @@ loopback connection combinations. It is NOT a signed installer or GUI test.
 All credentials and SQLite data exist only inside a disposable directory.
 """
 import os
+import argparse
 import functools
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -61,6 +62,9 @@ def wait_for_approval(agent_log, server, agent, timeout=25):
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--packaged-new", type=Path, help="unpacked distro platform directory with real Agent/Server binaries")
+    args = parser.parse_args()
     if sys.platform not in {"darwin", "win32"}:
         print("This native runner is for macOS and Windows; Linux uses ci-brutal-full-binary-compat.sh",
               file=sys.stderr)
@@ -86,7 +90,15 @@ def main():
                                       ("agent", "./cmd/relay-agent"),
                                       ("seed", "./scripts/compat_seed")):
                     target = temp / f"{name}-{kind}{suffix}"
-                    run(["go", "build", "-trimpath", "-o", str(target), package], cwd=root, timeout=480)
+                    if name == "new" and kind in ("agent", "server") and args.packaged_new:
+                        packaged = args.packaged_new / f"relay-{kind}{suffix}"
+                        if not packaged.is_file() or packaged.stat().st_size == 0:
+                            raise RuntimeError(f"missing packaged new binary: {packaged}")
+                        shutil.copy2(packaged, target)
+                        if os.name != "nt":
+                            target.chmod(0o755)
+                    else:
+                        run(["go", "build", "-trimpath", "-o", str(target), package], cwd=root, timeout=480)
                     binaries[name, kind] = target
                 output = subprocess.check_output(
                     [str(binaries[name, "agent"]), "--version"], text=True, timeout=10)

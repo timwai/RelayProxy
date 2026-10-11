@@ -154,6 +154,9 @@ func (s *Store) ClaimDeliveryReceipt(ctx context.Context, receiverID, ruleID, me
 	if err != nil {
 		return "", err
 	}
+	if err := appendBrowserAudit(ctx, tx, "delivery_result", source.ID, receiverID, ruleID, status); err != nil {
+		return "", err
+	}
 	if err = tx.Commit(); err != nil {
 		return "", err
 	}

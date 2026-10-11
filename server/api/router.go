@@ -352,7 +352,6 @@ func (r *Router) registerRoutes() {
 
 	if r.browserSync != nil {
 		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/extensions", r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensions)))
-		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/extensions/{id}/approve", r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensionApprove)))
 		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/extensions/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensionRevoke)))
 		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/devices", r.requireAuth(r.requireAdmin(r.handleBrowserSyncDevices)))
 		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/approve", r.requireAuth(r.requireAdmin(r.handleBrowserSyncApprove)))

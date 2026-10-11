@@ -78,7 +78,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p evidence
-          go test -v ./internal/tunnel -run '^TestBrutalDeterministicPacketLoss \
+          go test -v ./internal/tunnel -run '^TestBrutalDeterministicPacketLoss$' -count=5 -timeout=6m \
             | tee evidence/deterministic-udp-loss.log
       - name: Upload deterministic UDP loss diagnostics
         if: always()

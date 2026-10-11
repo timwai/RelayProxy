@@ -45,6 +45,13 @@ jobs:
       - name: Validate Server Web Brutal configuration UI
         if: runner.os == 'Linux'
         run: node --test server/web/frontend/src/settings.test.js
+      - name: Build Server React configuration UI
+        if: runner.os == 'Linux'
+        working-directory: server/web/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
       - name: Authenticated QUIC, P2P, and Direct tests
         run: go test ./internal/congestion/... ./internal/tunnel ./internal/protocol ./agent/app ./agent/direct ./agent/p2p ./server/gateway ./server/p2p ./mobile/androidcore -count=1 -timeout=15m
       - name: Targeted race regressions (Linux)

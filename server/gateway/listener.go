@@ -584,18 +584,28 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	clientTxBPS, serverTxBPS := authorizedBrutalRates(hello, g.cfg)
 	if sess.Transport() == tunnel.TransportQUIC {
 		requestedClientTxBPS, requestedServerTxBPS := clientTxBPS, serverTxBPS
-		var releaseBrutalBudget func()
-		clientTxBPS, serverTxBPS, releaseBrutalBudget = g.brutalBudget.reserve(
+		var releaseClientBudget, releaseServerBudget func()
+		clientTxBPS, serverTxBPS, releaseClientBudget, releaseServerBudget = g.brutalBudget.reserveDirections(
 			clientTxBPS, serverTxBPS, g.cfg.BrutalTotalDownloadBPS, g.cfg.BrutalTotalUploadBPS)
 		if clientTxBPS != requestedClientTxBPS || serverTxBPS != requestedServerTxBPS {
 			log.Printf("[Gateway] Relay Brutal aggregate budget clamped device=%s client_target=%d->%d B/s server_target=%d->%d B/s (zero keeps BBR)",
 				authorization.DeviceID, requestedClientTxBPS, clientTxBPS, requestedServerTxBPS, serverTxBPS)
 		}
-		// Release on handshake rejection, replacement or disconnect, never
-		// merely because the connection stopped carrying application data.
-		defer releaseBrutalBudget()
-		if serverTxBPS > 0 && tunnel.UseBrutal(sess, serverTxBPS, g.cfg.DisableLossCompensation) {
-			log.Printf("[Gateway] Relay QUIC download switched to Brutal device=%s target=%d B/s", authorization.DeviceID, serverTxBPS)
+		// Release each direction on handshake rejection or disconnect.
+		// If the Server sender's safety fuse falls back to BBR while the
+		// connection stays alive, release only its Server->Agent reservation.
+		defer releaseClientBudget()
+		defer releaseServerBudget()
+		if serverTxBPS > 0 {
+			if tunnel.UseBrutal(sess, serverTxBPS, g.cfg.DisableLossCompensation) {
+				if quicSession, ok := sess.(*tunnel.QUICSession); ok {
+					quicSession.OnBrutalFallback(releaseServerBudget)
+				}
+				log.Printf("[Gateway] Relay QUIC download switched to Brutal device=%s target=%d B/s", authorization.DeviceID, serverTxBPS)
+			} else {
+				releaseServerBudget()
+				serverTxBPS = 0
+			}
 		}
 	} else {
 		// TLS/yamux cannot enable Brutal or reserve a QUIC rate budget.

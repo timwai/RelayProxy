@@ -1,3 +1,19 @@
+## 2026-10-11 新增 IndexedDB 会话同步（配对 v3）
+
+新建的 HTTP/HTTPS 网站双端加密配对从 v2 升级为 **v3**：在已有全量 Cookie、Local Storage 和单标签页 Session Storage 的基础上，额外纳入**当前站点 Origin 下的 IndexedDB**，无需手动配置数据库名、Object Store 或记录 Key。已有 v1/v2 配对不自动扩权；请撤销旧配对并由 A 创建新的 v3 配对，在 B 重新接受和核对配对校验码。**A、B Chrome 扩展都必须升级**，无需额外 Agent，也无需变更 Server 数据库、端口或密文中继协议。
+
+采集在获网站权限的**普通 Chrome 顶层标签页**中，采用 ISOLATED world 的 `chrome.scripting.executeScript` 访问同源 IndexedDB；不会执行网页提供的 JavaScript、不会抓取跨源 iframe 或浏览器私有数据库。使用 `indexedDB.databases()` 自动枚举所有可见同源库，并逐个保存版本、Object Store、主键路径、自增配置、索引（含 unique / multiEntry）和记录。结构化值支持常见的 string/number/boolean/undefined/null、日期、BigInt、二进制 ArrayBuffer/TypedArray/DataView、Blob/File、Map/Set、正则、普通对象和数组；不支持不可安全复制的 CryptoKey、循环引用及未知对象类型，遇到此类记录**整次采集失败，不会静默丢弃或输出部分数据**。
+
+安全与一致性：
+
+- IndexedDB 序列化快照上限 **4 MiB**、记录上限 **4096**、最多 **16** 库 / 每库 **64** Store（整个 Cookie + Storage + IndexedDB 明文组合仍受 **5 MiB** 上限；压缩后的密文单帧仍有 **1 MiB** 限制）。超限时明确失败，不采样、不丢 Key、不自行分批绕过安全上限。
+- 来源端按当前 Origin 读取。接收端严格匹配 Origin、数据库版本、Object Store、索引定义。发现本地不同登录记录或冲突时默认拒绝覆盖；仅接收端显式启用覆盖，或者本规则之前写入的内容仍被 HMAC 标记拥有时，才允许覆盖。
+- 每个 IndexedDB 数据库使用读写事务进行 clear/put，保存键和记录完整值；多数据库及 Cookie/Storage 不是单个浏览器事务，依赖仅保存时间戳的恢复 journal、按整库预期状态校验的回滚与 `PARTIAL_ROLLBACK` 暂停保护。新建 DB 时若同步失败会尝试清理，无法完成则提示人工处理，绝不声称原子成功。
+- 来源缺失的数据库在接收端**不会直接删除**；避免把旧版缺字段或暂时消失的 Origin 数据误判为远程注销指令。跨 Origin iframe、Cache Storage、Service Worker 缓存、OPFS 与不在主站 Origin 的数据库不在此版本的覆盖范围。网站自身可能使用设备绑定或不可导出的密钥，恢复后仍可能需要登录。
+- 所有 IndexedDB 值只在签名、ECDH/AES-GCM 端到端加密后的 `SESSION_SNAPSHOT` 中传输。Server 只转发密文；Chrome 本地配置持久化仅存按规则 HMAC 的所有权指纹和事务状态，不保存 IndexedDB 的 Token/记录明文。现有双端批准、序号防重放、冲突处理及终态 ACK 不变。
+
+**实现状态：** 代码与模拟 IndexedDB 单元测试加入 PR #194 的功能分支。仍需 Chrome A/B 真实站点验收，包括浏览器重启、同时打开数据库、版本升级冲突、覆盖/回滚、网络断线、Blob 与非导出 CryptoKey；不能将模拟测试等同于真实会话恢复成功。
+
 ## Browser Sync：直接使用 RelayProxy TLS/TCP 中继端口
 
 启用 `browser_sync.enabled: true` 后，Server **自动**在既有 `server.tls.listen` TCP 中继端口上提供 Browser Sync 设备注册、HTTPS/WSS 会话传输以及经过授权的浏览器 HTTPS CONNECT。**不再存在** `browser_sync.network_proxy` 配置块，不需要 `listen`、`advertise`、`allowed_exit_ids`，也不支持第二个独立监听端口。旧 Server YAML 里的该块由升级兼容层自动丢弃，保存配置后不会再写回。独立 Admin Web 端口仍只用于管理。
@@ -73,7 +89,7 @@ Chrome 扩展直接连接 RelayProxy Server 的 **TLS/TCP 中继 HTTPS/WSS** 入
 | 同步成功后打开网站、RELAYED/APPLIED/CONFLICT/FAILED 状态 | 已实现 |
 | Server Web 浏览器设备管理可视化页面 | 已接入管理员导航，可审批、关联身份和撤销浏览器设备 |
 | 跨 Chrome 真机双端网站登录兼容性验收、完整安全审计 | **未完成** |
-| LocalStorage、IndexedDB、分区 Cookie、跨子域、设备绑定会话 | 不在 P3 范围 |
+| LocalStorage、IndexedDB、分区 Cookie、跨子域、设备绑定会话 | 旧版规划，参见上方 v3 新实现 |
 
 Chrome 扩展保留最小 Host 权限；所有 Cookie 值只用于内存中的加密处理和指定站点的 Cookie API 写入，**不写入 Server 数据库、浏览器扩展本地存储或日志**。服务器无会话解密密钥，不保存离线快照。启动时如果 A 离线，B 不能恢复最新状态。
 
@@ -209,7 +225,7 @@ include all keys.
 
 Important constraints: Session Storage is per-tab, not per-browser or
 across other tabs; a receiving tab may be created in the background to
-restore it. No IndexedDB, Cache Storage, service-worker caches, browser
+restore it. New v3 pairings include bounded same-origin IndexedDB. Cache Storage, service-worker caches, browser
 profiles, device-bound credentials, or cross-origin third-party sessions are
 exported. Snapshots are AES-GCM encrypted and signed between approved
 devices. The Server never decrypts stored website state. Data larger than

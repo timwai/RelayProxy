@@ -31,10 +31,16 @@ export function validatePolicy(policy) {
         !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(n))) throw new Error('Cookie 名称无效');
     return {siteOrigin,cookieNames};
   }
-  if(policy.schemaVersion!==2 || policy.allCookies!==true ||
-      policy.localStorage!==true || policy.sessionStorage!==true)
+  if(![2,3].includes(policy.schemaVersion) || policy.allCookies!==true ||
+      policy.localStorage!==true || policy.sessionStorage!==true ||
+      (policy.schemaVersion===3&&policy.indexedDB!==true))
     throw new Error('会话策略版本或范围无效');
-  return {siteOrigin,schemaVersion:2,allCookies:true,localStorage:true,sessionStorage:true};
+  // IndexedDB is a material extension of the paired website's credential
+  // scope. Old v2 pairings are never silently upgraded: only an explicit
+  // v3 offer consents to IndexedDB capture and remote restore.
+  return {siteOrigin,schemaVersion:policy.schemaVersion,allCookies:true,
+    localStorage:true,sessionStorage:true,
+    ...(policy.schemaVersion===3?{indexedDB:true}:{})};
 }
 export async function importPublic(spki, algorithm) {
   return crypto.subtle.importKey('spki', fromBase64url(spki), algorithm, true,
@@ -64,7 +70,8 @@ export async function createEncryptedOffer({ target, siteOrigin }) {
   const identity = await getOrCreateIdentity();
   if (!target?.receive || !target.encryptionPublicKey || !target.signingPublicKey ||
     !target.id || target.id === identity.deviceId) throw new Error('无权选用该接收设备');
-  const policy = validatePolicy({siteOrigin,schemaVersion:2,allCookies:true,localStorage:true,sessionStorage:true});
+  const policy = validatePolicy({siteOrigin,schemaVersion:3,allCookies:true,
+    localStorage:true,sessionStorage:true,indexedDB:true});
   const ruleId = crypto.randomUUID();
   const plaintext = utf8(JSON.stringify(policy));
   const ephemeral = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);

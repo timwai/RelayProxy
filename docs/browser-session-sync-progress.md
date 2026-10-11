@@ -1,3 +1,5 @@
+> **2026-10-11 IndexedDB v3 新增：** 以下历史进度条目中“不支持 IndexedDB”的说法属于当时版本的范围，不代表最新功能分支。v3 只通过**新建双端确认的配对**开启同源 IndexedDB，不自动扩大已有 v2 授权；暂未进行真实浏览器验收。
+
 > **当前实现（2026-10-11）：** Browser Sync 在 `browser_sync.enabled: true` 且 Server TLS/Admin TLS 正常时自动复用既有 TLS/TCP 中继端口。**`browser_sync.network_proxy` 整块已废弃**，不再支持单独 `listen`、`advertise`、`allowed_exit_ids`、独立监听和 Server Web 出口配置表单。B Chrome 通过已配置的 Relay HTTPS Server Origin 访问网关；网络出口仍需同身份、`proxy.exit`、Agent 本地明确 opt-in 和 A/B 双端网络绑定同意。以下含旧配置的历史条目仅为进度留档，不再适用于现行版本。相关功能尚待 CI 和真实设备验收。
 
 # RelayProxy Browser Session Sync — 开发进度与发布准入清单
@@ -372,3 +374,19 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **DELETE-03**：Server Web 在已撤销设备行加入“删除旧设备”、已撤销扩展行加入“删除旧扩展”，每次永久删除前明确确认，完成后刷新列表。新的待审批请求优先排序，避免旧记录占满最多 500 条查询结果。
 - **DELETE-04**：已撤销设备在重新提交相同设备 ID / 签名密钥时会继续匹配旧记录，不会自动变成 `pending`；管理员完成删除后，Chrome 才能重新提交申请。扩展若也处于 revoked 状态，需要先删除旧设备，再删除旧扩展，最后在 Chrome 重新点击“提交统一授权申请”，然后在 Server Web 审批。此流程保持管理员显式审批，不自动恢复被撤销设备的信任。
 - **DELETE-05**：测试新增删除仅限 revoked、完整数据库依赖清理、原浏览器和其他浏览器边界、同扩展 ID 再注册恢复待审批状态、Admin API 409 / 404 / 200 分支。最新提交仍需 GitHub CI 和实际 Server/Chrome 验证，不声明运行成功。
+
+## 2026-10-11 新增 IndexedDB 会话同步（配对 v3）
+
+新建的 HTTP/HTTPS 网站双端加密配对从 v2 升级为 **v3**：在已有全量 Cookie、Local Storage 和单标签页 Session Storage 的基础上，额外纳入**当前站点 Origin 下的 IndexedDB**，无需手动配置数据库名、Object Store 或记录 Key。已有 v1/v2 配对不自动扩权；请撤销旧配对并由 A 创建新的 v3 配对，在 B 重新接受和核对配对校验码。**A、B Chrome 扩展都必须升级**，无需额外 Agent，也无需变更 Server 数据库、端口或密文中继协议。
+
+采集在获网站权限的**普通 Chrome 顶层标签页**中，采用 ISOLATED world 的 `chrome.scripting.executeScript` 访问同源 IndexedDB；不会执行网页提供的 JavaScript、不会抓取跨源 iframe 或浏览器私有数据库。使用 `indexedDB.databases()` 自动枚举所有可见同源库，并逐个保存版本、Object Store、主键路径、自增配置、索引（含 unique / multiEntry）和记录。结构化值支持常见的 string/number/boolean/undefined/null、日期、BigInt、二进制 ArrayBuffer/TypedArray/DataView、Blob/File、Map/Set、正则、普通对象和数组；不支持不可安全复制的 CryptoKey、循环引用及未知对象类型，遇到此类记录**整次采集失败，不会静默丢弃或输出部分数据**。
+
+安全与一致性：
+
+- IndexedDB 序列化快照上限 **4 MiB**、记录上限 **4096**、最多 **16** 库 / 每库 **64** Store（整个 Cookie + Storage + IndexedDB 明文组合仍受 **5 MiB** 上限；压缩后的密文单帧仍有 **1 MiB** 限制）。超限时明确失败，不采样、不丢 Key、不自行分批绕过安全上限。
+- 来源端按当前 Origin 读取。接收端严格匹配 Origin、数据库版本、Object Store、索引定义。发现本地不同登录记录或冲突时默认拒绝覆盖；仅接收端显式启用覆盖，或者本规则之前写入的内容仍被 HMAC 标记拥有时，才允许覆盖。
+- 每个 IndexedDB 数据库使用读写事务进行 clear/put，保存键和记录完整值；多数据库及 Cookie/Storage 不是单个浏览器事务，依赖仅保存时间戳的恢复 journal、按整库预期状态校验的回滚与 `PARTIAL_ROLLBACK` 暂停保护。新建 DB 时若同步失败会尝试清理，无法完成则提示人工处理，绝不声称原子成功。
+- 来源缺失的数据库在接收端**不会直接删除**；避免把旧版缺字段或暂时消失的 Origin 数据误判为远程注销指令。跨 Origin iframe、Cache Storage、Service Worker 缓存、OPFS 与不在主站 Origin 的数据库不在此版本的覆盖范围。网站自身可能使用设备绑定或不可导出的密钥，恢复后仍可能需要登录。
+- 所有 IndexedDB 值只在签名、ECDH/AES-GCM 端到端加密后的 `SESSION_SNAPSHOT` 中传输。Server 只转发密文；Chrome 本地配置持久化仅存按规则 HMAC 的所有权指纹和事务状态，不保存 IndexedDB 的 Token/记录明文。现有双端批准、序号防重放、冲突处理及终态 ACK 不变。
+
+**实现状态：** 代码与模拟 IndexedDB 单元测试加入 PR #194 的功能分支。仍需 Chrome A/B 真实站点验收，包括浏览器重启、同时打开数据库、版本升级冲突、覆盖/回滚、网络断线、Blob 与非导出 CryptoKey；不能将模拟测试等同于真实会话恢复成功。

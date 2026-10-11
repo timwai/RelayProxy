@@ -9,6 +9,7 @@ import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
 import {captureAllCookies,applyAllCookies} from './cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
+import {captureIndexedDB,prepareIndexedDBRestore,JOURNAL_KEY as IDB_JOURNAL} from './indexeddb-sync.js';
 import {showRestoredWebsiteTab} from './session-tabs.js';
 import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
@@ -72,8 +73,9 @@ export async function sendSnapshot(ruleId) {
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.sourceRole)throw new Error('只有来源设备可以发送登录状态');
-    const payload=ctx.policy.schemaVersion===2
-      ? {...await captureAllCookies(ctx.policy),storage:await captureWebStorage(ctx.policy)}
+    const payload=ctx.policy.schemaVersion>=2
+      ? {...await captureAllCookies(ctx.policy),storage:await captureWebStorage(ctx.policy),
+          ...(ctx.policy.schemaVersion===3?{indexedDB:await captureIndexedDB(ctx.policy)}:{})}
       : await captureCookies(ctx.policy);
     const stored=(await chrome.storage.local.get(LAST_SEQUENCE))[LAST_SEQUENCE]||{};
     // The server is authoritative after a crash, upgrade or lost local
@@ -130,10 +132,12 @@ export async function requestSnapshot(ruleId) {
   if(!ctx.targetRole)throw new Error('只有接收设备能请求同步');
   await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
   const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
-  const interrupted=(await chrome.storage.local.get('browserSyncRestoreJournal')).browserSyncRestoreJournal||{};
-  const storageInterrupted=(await chrome.storage.local.get('browserSyncStorageRestoreJournal')).browserSyncStorageRestoreJournal||{};
-  if(paused[ruleId]||interrupted[ruleId]||storageInterrupted[ruleId])
-    throw new Error('此规则因 Cookie 恢复不完整已暂停，请先检查目标网站');
+  const interruptedKeys=await chrome.storage.local.get([
+    'browserSyncRestoreJournal','browserSyncStorageRestoreJournal',IDB_JOURNAL]);
+  if(paused[ruleId]||interruptedKeys.browserSyncRestoreJournal?.[ruleId]||
+     interruptedKeys.browserSyncStorageRestoreJournal?.[ruleId]||
+     interruptedKeys[IDB_JOURNAL]?.[ruleId])
+    throw new Error('此规则因上次会话恢复未完成已暂停，请先检查目标网站');
   const answer=await sendControl('SYNC_REQUEST',{ruleId});
   if(answer.status!=='REQUESTED')throw new Error('来源设备不在线');
   return {state:'REQUESTED'};
@@ -165,9 +169,11 @@ async function handleIncomingSnapshot(envelope) {
       throw new Error('接收设备身份不匹配');
     const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
     if(paused[ruleId])throw new Error('PARTIAL_ROLLBACK: 接收端待人工检查');
-    const restoreKeys=await chrome.storage.local.get(['browserSyncRestoreJournal','browserSyncStorageRestoreJournal']);
+    const restoreKeys=await chrome.storage.local.get([
+      'browserSyncRestoreJournal','browserSyncStorageRestoreJournal',IDB_JOURNAL]);
     if(restoreKeys.browserSyncRestoreJournal?.[ruleId]||
-       restoreKeys.browserSyncStorageRestoreJournal?.[ruleId])
+       restoreKeys.browserSyncStorageRestoreJournal?.[ruleId]||
+       restoreKeys[IDB_JOURNAL]?.[ruleId])
       throw new Error('PARTIAL_ROLLBACK: 上次状态恢复中断');
     const sequences=(await chrome.storage.local.get(LAST_APPLIED))[LAST_APPLIED]||{};
     if(!Number.isSafeInteger(envelope.sequence)||envelope.sequence<=Number(sequences[ruleId]||0))
@@ -177,20 +183,30 @@ async function handleIncomingSnapshot(envelope) {
     const switches=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
     let restoredTabId=null;
     try{
-      if(ctx.policy.schemaVersion===2){
+      if(ctx.policy.schemaVersion>=2){
         const txn=await prepareWebStorageRestore(ruleId,payload.storage,ctx.policy,
           {allowOverwrite:switches[ruleId]===true});
+        // Preflight conflicts and schema BEFORE any Cookie/Storage mutation.
+        if(ctx.policy.schemaVersion===3 && payload.indexedDB===undefined)
+          throw new Error('IndexedDB v3 快照缺失，拒绝不完整的登录状态');
+        const idb=ctx.policy.schemaVersion===3
+          ?await prepareIndexedDBRestore(ruleId,payload.indexedDB,ctx.policy,
+            {allowOverwrite:switches[ruleId]===true,tabId:txn.tabId}):null;
         let applied=false;
         try{
+          if(idb)await idb.apply();
           await txn.apply();
           await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});
           applied=true;
           await txn.commit();
+          if(idb)await idb.commit();
           restoredTabId=txn.tabId;
           await chrome.tabs.reload(txn.tabId).catch(()=>{});
         }catch(error){
-          const rolledBack=await txn.rollback();
-          if(!rolledBack||applied)throw new Error('PARTIAL_ROLLBACK: Cookie 与 Storage 恢复不完整');
+          const storageRolledBack=await txn.rollback();
+          const idbRolledBack=idb?await idb.rollback():true;
+          if(!storageRolledBack||!idbRolledBack||applied)
+            throw new Error('PARTIAL_ROLLBACK: Cookie、Storage 或 IndexedDB 恢复不完整');
           throw error;
         }
       }else{
@@ -205,7 +221,7 @@ async function handleIncomingSnapshot(envelope) {
         delete pending[ruleId];
         await chrome.storage.local.set({[pendingOpenKey]:pending});
         if(request.expiresAt>Date.now()&&request.origin===ctx.policy.siteOrigin){
-          if(ctx.policy.schemaVersion===2 && restoredTabId!==null){
+          if(ctx.policy.schemaVersion>=2 && restoredTabId!==null){
             // A new tab would have different sessionStorage and could log B out.
             await showRestoredWebsiteTab(restoredTabId,ctx.policy.siteOrigin).catch(()=>{});
           }else{
@@ -276,7 +292,7 @@ export async function onCookieChange(cookie) {
     const host=new URL(policy.siteOrigin).hostname;
     if(!(host===hostname||host.endsWith('.'+hostname)))continue;
     if(policy.siteOrigin.startsWith('http://') && (cookie.secure || cookie.partitionKey))continue;
-    if(policy.schemaVersion!==2 &&
+    if(![2,3].includes(policy.schemaVersion) &&
        (cookie.path!=='/'||!cookie.hostOnly||!cookie.secure||cookie.partitionKey||
         !policy.cookieNames.includes(cookie.name)))continue;
     clearTimeout(cookieTimers.get(ruleId));
@@ -350,13 +366,15 @@ export async function resumePausedRestore(ruleId,confirmed) {
   const journal=(await chrome.storage.local.get(journalKey))[journalKey]||{};
   const storageKey='browserSyncStorageRestoreJournal';
   const storageJournal=(await chrome.storage.local.get(storageKey))[storageKey]||{};
-  if(!flags[ruleId]&&!journal[ruleId]&&!storageJournal[ruleId])
+  const idbJournal=(await chrome.storage.local.get(IDB_JOURNAL))[IDB_JOURNAL]||{};
+  if(!flags[ruleId]&&!journal[ruleId]&&!storageJournal[ruleId]&&!idbJournal[ruleId])
     throw new Error('当前规则未处于暂停状态');
   delete flags[ruleId];
   delete journal[ruleId];
   delete storageJournal[ruleId];
+  delete idbJournal[ruleId];
   await chrome.storage.local.set({[PAUSED_RESTORE]:flags,[journalKey]:journal,
-    [storageKey]:storageJournal});
+    [storageKey]:storageJournal,[IDB_JOURNAL]:idbJournal});
   await setStatus(ruleId,'UNKNOWN');
   // Do not immediately overwrite a possibly changed website session.
   return {state:'UNKNOWN'};
@@ -370,7 +388,8 @@ export async function forgetRuleLocalState(ruleId) {
   for(const key of [LAST_SEQUENCE,LAST_APPLIED,ALLOW_OVERRIDE,statusKey,
       pendingOpenKey,PENDING_DELIVERY,PAUSED_RESTORE,'browserSyncManagedCookieHmacV1',
       'browserSyncManagedAllCookieHmacV2','browserSyncManagedWebStorageV2',
-      'browserSyncStorageRestoreJournal','browserSyncLocalOffers']){
+      'browserSyncStorageRestoreJournal',IDB_JOURNAL,
+      'browserSyncManagedIndexedDBV1','browserSyncLocalOffers']){
     const values=(await chrome.storage.local.get(key))[key]||{};
     if(Object.hasOwn(values,ruleId)){
       delete values[ruleId];

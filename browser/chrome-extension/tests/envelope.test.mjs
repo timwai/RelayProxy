@@ -145,8 +145,8 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
       encryptionPublicKey: target.encryptionPublicKey, receive:true},
     siteOrigin:'https://example.com',
   });
-  assert.deepEqual(policy, {siteOrigin:'https://example.com',schemaVersion:2,
-    allCookies:true,localStorage:true,sessionStorage:true});
+  assert.deepEqual(policy, {siteOrigin:'https://example.com',schemaVersion:3,
+    allCookies:true,localStorage:true,sessionStorage:true,indexedDB:true});
   use(b);
   const rule = {ruleId:offer.ruleId,sourceBrowserDeviceId:source.deviceId,
     targetBrowserDeviceId:target.deviceId, offer};
@@ -168,6 +168,16 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
   assert.deepEqual(await decryptEncryptedOffer({
     ruleId:http.offer.ruleId,sourceBrowserDeviceId:source.deviceId,
     targetBrowserDeviceId:target.deviceId,offer:http.offer
-  },sourcePeer),{siteOrigin:'http://example.com:8080',schemaVersion:2,
-    allCookies:true,localStorage:true,sessionStorage:true});
+  },sourcePeer),{siteOrigin:'http://example.com:8080',schemaVersion:3,
+    allCookies:true,localStorage:true,sessionStorage:true,indexedDB:true});
+});
+
+test('v3 IndexedDB requires new explicit encrypted pairing; existing v2 remains Cookie/Storage only',()=>{
+ const old={siteOrigin:'https://example.com',schemaVersion:2,
+   allCookies:true,localStorage:true,sessionStorage:true};
+ assert.deepEqual(validatePolicy(old),old);
+ const modern={...old,schemaVersion:3,indexedDB:true};
+ assert.deepEqual(validatePolicy(modern),modern);
+ assert.throws(()=>validatePolicy({...modern,indexedDB:false}),/版本|范围/);
+ assert.throws(()=>validatePolicy({...old,schemaVersion:3}),/版本|范围/);
 });

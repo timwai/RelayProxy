@@ -24,7 +24,7 @@
         <a href="#pairing-section"><span aria-hidden="true">◇</span> 设备配对</a>
         <a href="#rules-section"><span aria-hidden="true">▤</span> 会话与出口规则</a>
       </nav>
-      <div class="sidebar-footer"><strong>隐私与安全</strong><p>会话数据经端到端加密传输。Server 不解密网站 Cookie 和 Storage。</p></div>
+      <div class="sidebar-footer"><strong>隐私与安全</strong><p>会话数据经端到端加密传输。Server 不解密网站 Cookie、Storage 或 IndexedDB。</p></div>
     </aside>
     <main class="settings-main">
       <div class="page-heading"><div class="eyebrow">PREFERENCES / 浏览器同步</div>
@@ -87,7 +87,7 @@
             <div class="field-group"><label for="target">接收设备</label><select id="target"><option value="">请先连接并刷新设备</option></select></div>
             <div class="field-group"><label for="pair-site">授权的网站</label><select id="pair-site"><option value="">请先添加允许的网站</option></select></div>
           </div>
-          <div class="info-inline">同步所选网站的适用 Cookie、全部 Local Storage Key，以及单个标签页的 Session Storage Key；不包含 IndexedDB。无需手填 Key 名称。</div>
+          <div class="info-inline">新建配对会同步所选网站的 Cookie、全部 Local Storage Key、当前标签页 Session Storage Key 及同源 IndexedDB（数据库、Object Store、索引和记录）。这可能包含登录凭据；旧版配对不会自动扩大授权范围。超过安全大小上限或含不支持的数据类型时拒绝同步，不会截断。</div>
           <button id="offer-rule" class="primary-button" type="button">创建加密配对邀请</button>
         </div>
       </section>

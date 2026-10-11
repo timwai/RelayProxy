@@ -82,7 +82,7 @@ function removeDetails(c,origin){
 }
 export async function captureAllCookies(policy){
   const p=validatePolicy(policy);
-  if(p.schemaVersion!==2)throw new Error('需要全量站点授权');
+  if(![2,3].includes(p.schemaVersion))throw new Error('需要全量站点授权');
   const jar=await allFor(p.siteOrigin);
   const cookies=[...jar.values()].map(fromChrome).sort((a,b)=>cookieIdentity(a).localeCompare(cookieIdentity(b)));
   if(cookies.length>1000)throw new Error('站点 Cookie 超过 1000 条安全上限');
@@ -91,7 +91,7 @@ export async function captureAllCookies(policy){
 }
 export async function applyAllCookies(ruleId,snapshot,policy,{allowOverwrite=false}={}){
   const p=validatePolicy(policy);
-  if(p.schemaVersion!==2 || snapshot?.schemaVersion!==2 ||
+  if(![2,3].includes(p.schemaVersion) || snapshot?.schemaVersion!==2 ||
     snapshot.siteOrigin!==p.siteOrigin || !Array.isArray(snapshot.cookies) ||
     snapshot.cookies.length>1000)throw new Error('站点 Cookie 策略不匹配');
   const next=new Map();

@@ -207,7 +207,9 @@ function renderRules(rules) {
         card.append(textNode('p', 'HTTP 风险：网站访问与登录凭据可能明文暴露，设备间同步本身仍为加密传输。', 'error'));
       card.append(textNode('p',Array.isArray(rule.policy.cookieNames) ?
         '旧版指定 Cookie：'+rule.policy.cookieNames.join(', ') :
-        '同步范围：全部 Cookie / Local Storage / Session Storage（不包含 IndexedDB）'));
+        (rule.policy.indexedDB===true
+          ? '同步范围：全部 Cookie / Local Storage / Session Storage / 同源 IndexedDB（v3；最多 4 MiB IndexedDB）'
+          : '同步范围：全部 Cookie / Local Storage / Session Storage（旧 v2 配对不包括 IndexedDB）')));
       card.append(textNode('div', '配对校验码：' + rule.code, 'code'));
       if (rule.status === 'offered' &&
           ((rule.role === 'target' && !rule.targetApproved) ||
@@ -391,16 +393,16 @@ function renderRules(rules) {
         open.addEventListener('click',async()=>{
           try{
             await ask({type:'SYNC_THEN_OPEN',ruleId:rule.id});
-            status('已请求同步，只有 Cookie 成功应用后才会打开网站。');
+            status('已请求同步，只有本次授权范围内的会话数据成功应用后才会打开网站。');
           }catch(error){failure(error);}
         });
         card.append(open);
         const label = document.createElement('label');
         const checked = document.createElement('input');
         checked.type = 'checkbox';
-        label.append(checked, textNode('span', '允许覆盖目标端 Cookie 与 Local/Session Storage（可能切换账号）'));
+        label.append(checked, textNode('span', '允许覆盖目标端 Cookie、Local/Session Storage 与 IndexedDB（可能切换账号）'));
         checked.addEventListener('change', async () => {
-          if (checked.checked && !window.confirm('确定允许替换目标网站的现有登录会话吗？')) {
+          if (checked.checked && !window.confirm('确定允许覆盖目标网站的 Cookie、Storage 与 IndexedDB 登录数据吗？覆盖可能切换账号；数据库版本或索引冲突仍会拒绝。')) {
             checked.checked = false; return;
           }
           try {

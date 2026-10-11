@@ -103,3 +103,7 @@ Chrome 扩展连接失败后会对同一 TLS 入口发起无身份、无 Cookie 
 如果扩展 ID 同时被撤销，其整个 Origin 会在 WSS Upgrade 前收到 HTTP 403。管理员应先删除这个扩展 ID 关联的已撤销设备，再删除“扩展来源管理”中的已撤销扩展 ID，然后让 Chrome 重新“提交统一授权申请”。新申请仍必须经管理员选择 Identity 和 send/receive 权限审批，没有任何自动信任或自动恢复权限。
 
 管理员接口仅限已登录 Admin Web：`DELETE /api/v1/browser-sync/admin/devices/{id}` 和 `DELETE /api/v1/browser-sync/admin/extensions/{id}`。只有 revoked 状态才允许删除，其他状态 HTTP 409；仍有旧设备关联的扩展也返回 HTTP 409。待审批请求优先展示，便于审批最新浏览器。
+
+## 八、IndexedDB 与 Agent 网络绑定关系
+
+新建 Browser Sync 站点配对 v3 支持同源 IndexedDB，并通过原 Cookie/Storage E2EE 中继链路传输。**无需 Agent**、无需额外 Server 网络代理端口或 database 配置。配对需要 A/B 显式同意新增范围；旧 v2 配对不自动更新，管理端无权读取明文数据库。每站点单次受 4 MiB IndexedDB / 5 MiB 整包上限、事务/冲突校验与断线后保守的暂停规则约束；若页面依赖设备绑定或其他 Origin 的私有状态，不能保证免登录。

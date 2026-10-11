@@ -54,3 +54,20 @@ test('tampered compressed wrapper format is rejected before applying keys',async
     await assert.rejects(unpackSessionPayload(new TextEncoder().encode(JSON.stringify(invalid))));
   }
 });
+
+test('v3 IndexedDB structured records survive the payload codec used inside E2EE',async()=>{
+  const original={schemaVersion:2,siteOrigin:'https://example.test',
+    cookies:[],storage:{local:{},session:{}},
+    indexedDB:{schemaVersion:1,databases:[{name:'session-db',version:2,stores:[{
+      name:'auth',keyPath:null,autoIncrement:false,
+      indexes:[{name:'issuer',keyPath:'issuer',unique:false,multiEntry:false}],
+      rows:[{key:['s','account'],value:['o',[
+        ['issuer',['s','example.test']],['token',['s','top-secret-indexeddb']],
+        ['blob',['B',Buffer.from('secure-data').toString('base64url')]]
+      ]]}]
+    }]}]}
+  };
+  const wire=await packSessionPayload(original);
+  assert.deepEqual(await unpackSessionPayload(wire),original);
+  // Encryption/signature are performed by session-envelope.js, not this codec.
+});

@@ -712,3 +712,25 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
   #root .browser-sync-refined .browser-sync-search{width:100%}
   #root .settings-refined .config-card-content{padding:15px}
 }
+
+/* Browser Sync management: ordinary navigation, no duplicate approval UI. */
+#root .browser-sync-mode-switch{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0}
+#root .browser-sync-mode-switch .btn{min-height:38px}
+#root .browser-sync-refined .browser-sync-toolbar>.muted{font-size:12px}
+#root .browser-sync-refined .browser-sync-live{display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--muted)}
+#root .browser-sync-refined .browser-sync-live:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
+#root .browser-sync-refined .browser-sync-live.is-online{color:var(--ok)}
+#root .browser-sync-refined .browser-sync-live.is-online:before{background:var(--ok)}
+#root .browser-sync-refined .browser-sync-audit-id{font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}
+#root .browser-sync-refined .browser-sync-audit-footer{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:14px 18px}
+#root .browser-sync-refined .browser-sync-footnote{padding:11px 18px;color:var(--muted);font-size:12px;margin:0}
+#root .browser-sync-refined .browser-sync-legacy-blocks{border-top:1px solid var(--line)}
+#root .browser-sync-refined .browser-sync-legacy-row{padding:12px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#root .browser-sync-refined .browser-sync-legacy-row+.browser-sync-legacy-row{border-top:1px solid var(--line)}
+@media(max-width:600px){
+ #root .browser-sync-mode-switch .btn{flex:1}
+ #root .browser-sync-refined .browser-sync-search{width:100%}
+ #root .browser-sync-refined .browser-sync-toolbar{align-items:stretch}
+ #root .browser-sync-refined .browser-sync-toolbar>.browser-sync-filters{padding:0}
+ #root .browser-sync-refined .browser-sync-audit-footer .btn{width:100%}
+}

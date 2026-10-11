@@ -40,6 +40,9 @@ jobs:
       - name: Unit-test evidence validation (no real WAN access in CI)
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s scripts -p 'test_brutal_release_evidence.py' -v
+      - name: Test fail-closed Brutal bitrate calibration estimator
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts -p 'test_recommend_brutal_target.py' -v
       - name: Validate real-WAN long-load sampler with offline tests
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s scripts -p 'test_brutal_coexistence.py' -v

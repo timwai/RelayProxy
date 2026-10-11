@@ -24,6 +24,22 @@ The fallback is **one-way for that connection** (no BBR↔Brutal oscillation). D
 
 This is only a **last-resort congestion safety fuse**: it does not guarantee queue-free transit, recognize every competing tenant, estimate path capacity, implement fair queuing, or prevent a short-lived transfer from temporarily monopolizing a link before the guard triggers. Aggregate admission budgets remain necessary and independently configured. The guard's real-world false-positive and reduction-in-bufferbloat behavior still require controlled WAN evidence before default-on.
 
+### Measured-rate proposal from existing BBR baseline (operator-only)
+
+The project already has a bidirectional endpoint speed-test transport in `agent/client/speedtest.go` and `internal/speedtest/speedtest.go`. That is an important starting point, but a single application speed test **does not prove physical available capacity or multi-tenant fairness**. A first fail-closed evidence reducer is now available:
+
+```sh
+python3 scripts/recommend_brutal_target.py \
+  --input evidence/ab.csv \
+  --scenario wan-site-a \
+  --headroom 0.60 \
+  --output evidence/brutal-rate-candidate.json
+```
+
+It requires all three BBR/Brutal/Hysteria2 controller variants, both directions, all 0/1/5% conditions and at least five runs per condition. For each direction, it takes the **minimum BBR p10 application goodput across those loss conditions**, multiplies by 0.60 and rounds **down** to a whole Mbps. For example, if this worst-case p10 is 12 Mbps, the candidate is 7 Mbps; if it is 8 Mbps, the candidate is 4 Mbps. Zero or sub-1 Mbps candidates keep BBR. The fraction can only be set in (0, 0.75].
+
+Output is always `auto_apply_allowed: false` and `brutal_default_eligible: false`; the tool **never edits Agent configuration**. This number is only a conservative, provisional upper bound for a *measured* site and must still be checked against true capacity, active competing traffic, shared Relay budget, loaded end-to-end latency, renegotiation/reconnect behavior, and the release policy. It must not be used as a production-wide default merely because the script succeeds.
+
 ## Conditions for a default-on Brutal proposal (NOT SATISFIED)
 
 Hysteria Brutal requires a **numeric sending-rate target**. RelayProxy cannot safely invent that rate from only a server address or from the existence of a QUIC connection; a guessed high target can starve other traffic, and a guessed low target can perform worse than BBR. Therefore an unconfigured link **must continue to initialize on BBR** even after this watchdog exists.

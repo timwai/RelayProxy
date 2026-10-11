@@ -70,9 +70,11 @@ def verify(ab_csv, coexistence_paths, manifest, policy):
             params[field] = number(policy.get(field), field)
         except ValueError as exc:
             errors.append(str(exc))
-    if params:
-        if params.get("min_jain", 1) > 1 or params.get("min_bbr_retention", 1) > 1:
-            errors.append("fairness/retention thresholds cannot exceed 1")
+    if params.get("min_jain", 1) > 1 or params.get("min_bbr_retention", 1) > 1:
+        errors.append("fairness/retention thresholds cannot exceed 1")
+    # A policy may tighten the acceptance gate, never weaken its minimum 60s run.
+    if 0 < params.get("min_duration_s", 60) < 60:
+        errors.append("min_duration_s cannot be below the mandatory 60-second baseline")
     summary, problems = summarize(ab_csv, min_runs=5)
     errors.extend(problems)
     scenarios = {r["scenario"] for r in summary}
@@ -135,7 +137,7 @@ def verify(ab_csv, coexistence_paths, manifest, policy):
                 idle = number(entry.get("idle_icmp_p50_ms"), label + " idle RTT")
                 loaded = number(entry.get("loaded_icmp_p95_ms"), label + " loaded p95")
                 loaded_p50 = number(entry.get("loaded_icmp_p50_ms"), label + " loaded p50")
-                if duration < params.get("min_duration_s", 60):
+                if duration < max(60, params.get("min_duration_s", 60)):
                     errors.append(f"{label}: insufficient load duration")
                 if jain < params.get("min_jain", 1):
                     errors.append(f"{label}: Jain={jain:.3f} below policy")

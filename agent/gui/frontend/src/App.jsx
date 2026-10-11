@@ -7,7 +7,7 @@ import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
 import {routingPagePatch,dnsPagePatch} from './configPatches.js';
-import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests} from './brutalCalibration.js';
+import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 
 const NAV=[
  {group:'概览',items:[['overview','dashboard','运行概览'],['devices','devices','身份与设备']]},
@@ -563,6 +563,7 @@ function SpeedModal({open,exits,initialExit,onClose,toast}){
    const payload=parseMutation(await call('goRunSpeedTest',exitID,3));
    if(!payload.ok)throw new Error(payload.message||'BBR 测速失败');
    const measurement=payload.result||payload;
+   validateBrutalCalibrationSample(measurement);
    records.push(measurement);
    // A path/transport change must invalidate the entire experiment.
    if(i>0&&records[0].exitId!==measurement.exitId)throw new Error('出口在测速期间发生切换');
@@ -571,7 +572,7 @@ function SpeedModal({open,exits,initialExit,onClose,toast}){
   setCalibration(proposeBrutalFromSpeedTests(records));toast('BBR 保守带宽候选值已计算');
  }catch(e){setCalibration({error:e.message});toast('未能生成安全候选值','danger')}finally{setBusy(false)}};
  const leg=(label,v={})=><div><div className="eyebrow">{label}</div><div className="big small-big">{Number(v.megabitsPerSecond??v.mbps??0).toFixed(2)} Mbps</div><div className="mini">{(v.path||'—')+' · '+fmtBytes(v.bytesPerSecond||0,true)}</div>{v.quic&&<div className="mini">丢包 {Number(v.quic.sent_packet_loss_pct||0).toFixed(2)}% · RTT 抖动 {Number(v.quic.rtt_deviation_ms||0).toFixed(1)} ms · GSO {v.quic.gso?'ON':'OFF'}{v.quic.congestion_controller?' · '+v.quic.congestion_controller:''}{v.quic.brutal_fallback_reason&&<div className="notice warn">Brutal 已自动退回 BBR：{v.quic.brutal_fallback_reason}</div>}{(v.quic.udp_read_buffer_bytes||v.quic.udp_write_buffer_bytes)?<div>UDP 缓冲：读取 {fmtBytes(v.quic.udp_read_buffer_bytes||0)} · 写入 {fmtBytes(v.quic.udp_write_buffer_bytes||0)}</div>:null}</div>}</div>;
- return <Modal open={open} title="出口双向测速" onClose={onClose} footer={<><Button onClick={onClose}>关闭</Button><Button disabled={busy} onClick={calibrate}>{busy&&calibrateStep?'校准中 '+calibrateStep+'/'+BRUTAL_CALIBRATION_ROUNDS:'5 轮 BBR 保守校准'}</Button><Button primary disabled={busy} onClick={run}>{busy?'测速中…':'开始测速'}</Button></>}><div className="form-grid"><Field label="出口"><Select value={exitID} onChange={e=>setExitID(e.target.value)}><option value="">当前 / 自动出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="每方向时长（秒）"><Input type="number" min="1" max="30" value={duration} onChange={e=>setDuration(Number(e.target.value))}/></Field></div>{calibration&&<div className={cx('speed-result',calibration.error&&'error')}>{calibration.error?calibration.error:<><div className="notice warn">仅供人工评估，不能证明实际链路容量、共享公平性或 Hysteria2 同条件对照；不会修改现有 BBR 配置。</div><div>当前 Relay BBR 五轮候选：上行 <b>{calibration.upload.candidateMbps} Mbps</b> · 下行 <b>{calibration.download.candidateMbps} Mbps</b></div><div className="mini">最低分位吞吐：上行 {calibration.upload.bbrP10Mbps} Mbps / 下行 {calibration.download.bbrP10Mbps} Mbps；预留 40% 带宽余量。</div></>}</div>}{result&&<div className={cx('speed-result',result.error&&'error')}>{result.error?result.error:<>{leg('上行',result.upload||result.up)}{leg('下行',result.download||result.down)}</>}</div>}</Modal>
+ return <Modal open={open} title="出口双向测速" onClose={onClose} footer={<><Button onClick={onClose}>关闭</Button><Button disabled={busy} onClick={calibrate}>{busy&&calibrateStep?'校准中 '+calibrateStep+'/'+BRUTAL_CALIBRATION_ROUNDS:'5 轮 BBR 保守校准'}</Button><Button primary disabled={busy} onClick={run}>{busy?'测速中…':'开始测速'}</Button></>}><div className="form-grid"><Field label="出口"><Select value={exitID} onChange={e=>setExitID(e.target.value)}><option value="">当前 / 自动出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="每方向时长（秒）"><Input type="number" min="1" max="30" value={duration} onChange={e=>setDuration(Number(e.target.value))}/></Field></div>{calibration&&<div className={cx('speed-result',calibration.error&&'error')}>{calibration.error?calibration.error:<><div className="notice warn">仅验证本机 BBR 发送侧，无法确认服务端发送侧的控制器或真实链路容量；共享公平性、负载 RTT 与 Hysteria2 实网对照仍须单独验收。本功能不会应用配置。</div><div>当前 Relay BBR 五轮候选：上行 <b>{calibration.upload.candidateMbps} Mbps</b> · 下行 <b>{calibration.download.candidateMbps} Mbps</b></div><div className="mini">最低分位吞吐：上行 {calibration.upload.bbrP10Mbps} Mbps / 下行 {calibration.download.bbrP10Mbps} Mbps；预留 40% 带宽余量。</div></>}</div>}{result&&<div className={cx('speed-result',result.error&&'error')}>{result.error?result.error:<>{leg('上行',result.upload||result.up)}{leg('下行',result.download||result.down)}</>}</div>}</Modal>
 }
 
 function BatchSpeedModal({open,exits,onClose,toast}){

@@ -318,3 +318,54 @@ func TestWSSLargeEncryptedSnapshotCrossesOldFrameLimit(t *testing.T) {
 		t.Fatalf("large signed session not delivered: %v", resp["type"])
 	}
 }
+
+// TestWSSOnlyAuthenticatesTheOriginBoundToAnApprovedDevice proves that an
+// auto-recorded extension Origin is not an authorization grant. Even a valid
+// device signature cannot be replayed from an unrelated extension Origin.
+func TestWSSOnlyAuthenticatesTheOriginBoundToAnApprovedDevice(t *testing.T) {
+ store := testBrowserStore(t)
+ key, signing := makeKey(t)
+ _, encryption := makeKey(t)
+ device := BrowserDevice{
+  ID: "browser_" + uuid.NewString(), Name: "Origin bound Chrome",
+  SigningKey: signing, EncryptionKey: encryption,
+ }
+ ctx := context.Background()
+ saved, _, err := store.EnrollExtensionDevice(ctx, testExtensionID, device)
+ if err != nil || saved.State != "pending" || saved.Send || saved.Receive {
+  t.Fatalf("enrollment granted access: %+v %v", saved, err)
+ }
+ if err := store.ApproveEnrollment(ctx, device.ID, "id_1", true, false); err != nil {
+  t.Fatal(err)
+ }
+ server := httptest.NewTLSServer(NewHandler(store, nil))
+ defer server.Close()
+ authorized := dialApprovedBrowser(t, server, device, key)
+ sendWSSControl(t, authorized, map[string]any{"type":"LIST_PEERS", "requestId":"good"})
+ if result := readWSSControl(t, authorized); result["type"] != "PEERS" {
+  t.Fatalf("approved device not connected through its recorded Origin: %v", result)
+ }
+
+ wrongOrigin := "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+ url := "wss://" + strings.TrimPrefix(server.URL, "https://") + "/api/v1/browser-sync/ws"
+ conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+  HTTPClient: server.Client(),
+  HTTPHeader: http.Header{"Origin": []string{wrongOrigin}},
+ })
+ if err != nil { t.Fatalf("well-formed Origin should reach device authentication: %v", err) }
+ defer conn.CloseNow()
+ sendWSSControl(t, conn, map[string]any{"type":"AUTH_HELLO", "deviceId":device.ID})
+ challenge := readWSSControl(t, conn)
+ nonce, ok := challenge["challenge"].(string)
+ if !ok { t.Fatalf("missing challenge: %v",challenge) }
+ sendWSSControl(t, conn, map[string]any{
+  "type":"AUTH_PROOF","deviceId":device.ID,"challenge":nonce,
+  "signature":signatureFor(t,key,server.URL,device.ID,nonce),
+ })
+ readCtx,cancel:=context.WithTimeout(ctx,5*time.Second)
+ defer cancel()
+ _,_,err=conn.Read(readCtx)
+ if websocket.CloseStatus(err)!=websocket.StatusPolicyViolation {
+  t.Fatalf("another extension Origin received device authorization: %v",err)
+ }
+}

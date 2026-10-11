@@ -599,7 +599,13 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		if serverTxBPS > 0 {
 			if tunnel.UseBrutal(sess, serverTxBPS, g.cfg.DisableLossCompensation) {
 				if quicSession, ok := sess.(*tunnel.QUICSession); ok {
-					quicSession.OnBrutalFallback(releaseServerBudget)
+					quicSession.OnBrutalFallback(func() {
+						releaseServerBudget()
+						if g.cfg.BrutalTotalUploadBPS > 0 {
+							log.Printf("[Gateway] Released Server Brutal pacing reservation after BBR fallback device=%s target=%d B/s",
+								authorization.DeviceID, serverTxBPS)
+						}
+					})
 				}
 				log.Printf("[Gateway] Relay QUIC download switched to Brutal device=%s target=%d B/s", authorization.DeviceID, serverTxBPS)
 			} else {

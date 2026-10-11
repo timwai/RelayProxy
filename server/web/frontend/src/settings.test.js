@@ -1,14 +1,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {groups,configFieldCount,normalizeForSave,configEqual} from './settings.js';
 test('server config covers all existing groups and fields',()=>{
-  assert.equal(groups.length,9);
-  // Browser Sync now exposes only its enable toggle; the retired
-  // networkProxyListen, networkProxyAdvertise and allowedExitIds fields
-  // are intentionally absent from the Server settings form.
-  assert.equal(configFieldCount(),42);
-  assert.deepEqual(groups.find(g=>g.id==='browserSync').fields.map(f=>f[0]),['enabled']);
-  assert.equal(groups.find(g=>g.id==='browserSync').fields.some(f=>f[0]==='extensionIds'),false);
-  assert.deepEqual(groups.map(g=>g.key||g.id),['admin','tunnel','direct','p2p','serverExit','rdpIngress','browserSync','certificate','relayACL']);
+  assert.equal(groups.length,8);
+  // Browser Sync is managed solely from its dedicated administration page.
+  assert.equal(configFieldCount(),41);
+  assert.equal(groups.some(g=>g.id==='browserSync'),false);
+  
+  assert.deepEqual(groups.map(g=>g.key||g.id),['admin','tunnel','direct','p2p','serverExit','rdpIngress','certificate','relayACL']);
 });
 test('unknown future settings survive edits',()=>{
   assert.deepEqual(normalizeForSave({p2p:{portStart:20900}},{p2p:{portStart:0,futureField:42},newGroup:{enabled:true}}),{p2p:{portStart:20900,futureField:42},newGroup:{enabled:true}});

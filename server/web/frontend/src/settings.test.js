@@ -25,3 +25,14 @@ test('config comparisons ignore editor-only flags and normalize equivalent line 
  assert.equal(configEqual(draft,initial),true);
  assert.equal(configEqual({...draft,relayACL:{domains:'a.example\nc.example',cidrs:[]}},initial),false);
 });
+test('Relay Brutal bandwidth controls are explicitly editable and not stripped at save',()=>{
+ const tunnel=groups.find(g=>g.id==='tunnel');
+ const fields=tunnel.fields.map(item=>item[0]);
+ for(const key of ['brutalUpMbps','brutalDownMbps','brutalTotalUpMbps','brutalTotalDownMbps','brutalIgnoreClientBandwidth','brutalDisableLossCompensation']) assert.ok(fields.includes(key), key);
+ const original={tunnel:{tcpListen:':443',brutalUpMbps:0,brutalTotalUpMbps:0},future:{key:true}};
+ const draft={tunnel:{...original.tunnel,brutalUpMbps:25,brutalTotalUpMbps:60}};
+ const saved=normalizeForSave(draft,original);
+ assert.equal(saved.tunnel.brutalUpMbps,25);
+ assert.equal(saved.tunnel.brutalTotalUpMbps,60);
+ assert.deepEqual(saved.future,{key:true});
+});

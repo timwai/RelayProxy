@@ -92,15 +92,13 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
       <div className="form-actions">
         <button className="btn" type="button" onClick={()=>{setView('devices');refresh();}}
           disabled={loading||!!busy}>刷新</button>
-        <button className="btn" type="button" onClick={onOpenSettings}>服务配置</button>
       </div>
     </div>
     {notice&&<div className="config-help" role="status">{notice}</div>}
     {error&&<div className="err-notice" role="alert">{error}</div>}
     {unavailable?<div className="panel browser-sync-empty">
       <h3>浏览器同步暂不可用</h3>
-      <p>请检查 Server 版本，并在服务配置中启用浏览器同步。</p>
-      <button className="btn primary" type="button" onClick={onOpenSettings}>打开服务配置</button>
+      <p>请确认 Server 已部署支持 Browser Sync 的版本，并在服务端 YAML 启用 browser_sync.enabled。</p>
     </div>:<>
       <div className="browser-sync-summary">
         {states.slice(1).map(([id,label,total])=><button key={id} type="button"

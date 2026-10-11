@@ -46,7 +46,9 @@ func (s *Store) RequestExtension(ctx context.Context, id string) (string, error)
 	if err == nil {
 		if state == "pending" { // Migrate pre-single-approval records on registration.
 			_, err = s.db.ExecContext(ctx, `UPDATE browser_sync_extensions SET state='approved',updated_at=? WHERE extension_id=? AND state='pending'`, time.Now().UTC(), id)
-			if err != nil { return "", err }
+			if err != nil {
+				return "", err
+			}
 			state = "approved"
 		}
 		return state, nil

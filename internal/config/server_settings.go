@@ -65,23 +65,25 @@ func NormalizeServerConfig(c *ServerConfig) error {
 		if !c.BrowserSync.Enabled || !c.IsAdminTLSEnabled() || !c.IsTLSEnabled() {
 			return errors.New("browser_sync.network_proxy requires enabled browser sync and TLS")
 		}
-		if err := validateListen(c.BrowserSync.NetworkProxy.Listen); err != nil {return fmt.Errorf("browser_sync.network_proxy.listen: %w",err)}
-		if len(c.BrowserSync.NetworkProxy.AllowedExitIDs)==0 || len(c.BrowserSync.NetworkProxy.AllowedExitIDs)>32 {
+		if err := validateListen(c.BrowserSync.NetworkProxy.Listen); err != nil {
+			return fmt.Errorf("browser_sync.network_proxy.listen: %w", err)
+		}
+		if len(c.BrowserSync.NetworkProxy.AllowedExitIDs) == 0 || len(c.BrowserSync.NetworkProxy.AllowedExitIDs) > 32 {
 			return errors.New("browser_sync.network_proxy.allowed_exit_ids requires 1-32 explicitly permitted Agent exits")
 		}
-		if err := validateRendezvousAdvertise(c.BrowserSync.NetworkProxy.Advertise);err != nil {
-			return fmt.Errorf("browser_sync.network_proxy.advertise: %w",err)
+		if err := validateRendezvousAdvertise(c.BrowserSync.NetworkProxy.Advertise); err != nil {
+			return fmt.Errorf("browser_sync.network_proxy.advertise: %w", err)
 		}
-		if listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen,c.Server.Admin.Listen) ||
-			listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen,c.Server.TLS.Listen) {
+		if listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen, c.Server.Admin.Listen) ||
+			listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen, c.Server.TLS.Listen) {
 			return errors.New("browser sync HTTPS CONNECT listener must not share Admin or tunnel listener")
 		}
-		for _,id:=range c.BrowserSync.NetworkProxy.AllowedExitIDs {
-			if !strings.HasPrefix(id,"dev_") || len(id)>128 || len(id)<8 {
+		for _, id := range c.BrowserSync.NetworkProxy.AllowedExitIDs {
+			if !strings.HasPrefix(id, "dev_") || len(id) > 128 || len(id) < 8 {
 				return errors.New("browser sync network proxy requires real Agent device IDs")
 			}
 		}
-	} else if c.BrowserSync.NetworkProxy.Advertise!="" || len(c.BrowserSync.NetworkProxy.AllowedExitIDs)>0 {
+	} else if c.BrowserSync.NetworkProxy.Advertise != "" || len(c.BrowserSync.NetworkProxy.AllowedExitIDs) > 0 {
 		return errors.New("browser_sync.network_proxy.listen required when configuring network binding")
 	}
 	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))

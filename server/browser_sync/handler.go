@@ -319,46 +319,54 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			if h.network == nil || !current.Send {
 				payload = ruleError(msg.RequestID)
 			} else {
-				payload = map[string]any{"type":"NETWORK_EXITS","requestId":msg.RequestID,
-				"exits":h.network.AvailableExits(ctx,device.ID)}
+				payload = map[string]any{"type": "NETWORK_EXITS", "requestId": msg.RequestID,
+					"exits": h.network.AvailableExits(ctx, device.ID)}
 			}
 		case "NETWORK_OFFER":
 			if h.network == nil || !current.Send ||
-				!h.network.AllowedExit(current.IdentityID,msg.ExitDeviceID) ||
-				h.Store.OfferNetworkBinding(ctx,device.ID,msg.RuleID,msg.Host,msg.ExitDeviceID)!=nil {
-				payload=ruleError(msg.RequestID)
+				!h.network.AllowedExit(current.IdentityID, msg.ExitDeviceID) ||
+				h.Store.OfferNetworkBinding(ctx, device.ID, msg.RuleID, msg.Host, msg.ExitDeviceID) != nil {
+				payload = ruleError(msg.RequestID)
 			} else {
-				payload=map[string]any{"type":"NETWORK_UPDATED","requestId":msg.RequestID,
-				"ruleId":msg.RuleID,"status":"offered"}
+				payload = map[string]any{"type": "NETWORK_UPDATED", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "status": "offered"}
 			}
 		case "NETWORK_BINDING":
-			if h.network==nil { payload=ruleError(msg.RequestID) } else {
-				binding,err:=h.Store.NetworkBinding(ctx,device.ID,msg.RuleID)
-				if err!=nil {payload=ruleError(msg.RequestID)} else {
-					payload=map[string]any{"type":"NETWORK_BINDING","requestId":msg.RequestID,"binding":binding}
+			if h.network == nil {
+				payload = ruleError(msg.RequestID)
+			} else {
+				binding, err := h.Store.NetworkBinding(ctx, device.ID, msg.RuleID)
+				if err != nil {
+					payload = ruleError(msg.RequestID)
+				} else {
+					payload = map[string]any{"type": "NETWORK_BINDING", "requestId": msg.RequestID, "binding": binding}
 				}
 			}
 		case "NETWORK_ACCEPT":
-			if h.network==nil || !current.Receive ||
-				h.Store.AcceptNetworkBinding(ctx,device.ID,msg.RuleID,msg.Host)!=nil {
-				payload=ruleError(msg.RequestID)
+			if h.network == nil || !current.Receive ||
+				h.Store.AcceptNetworkBinding(ctx, device.ID, msg.RuleID, msg.Host) != nil {
+				payload = ruleError(msg.RequestID)
 			} else {
-				payload=map[string]any{"type":"NETWORK_UPDATED","requestId":msg.RequestID,
-				"ruleId":msg.RuleID,"status":"active"}
+				payload = map[string]any{"type": "NETWORK_UPDATED", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "status": "active"}
 			}
 		case "NETWORK_REVOKE":
-			if h.network==nil || h.Store.RevokeNetworkBinding(ctx,device.ID,msg.RuleID)!=nil {
-				payload=ruleError(msg.RequestID)
+			if h.network == nil || h.Store.RevokeNetworkBinding(ctx, device.ID, msg.RuleID) != nil {
+				payload = ruleError(msg.RequestID)
 			} else {
-				payload=map[string]any{"type":"NETWORK_UPDATED","requestId":msg.RequestID,
-				"ruleId":msg.RuleID,"status":"revoked"}
+				payload = map[string]any{"type": "NETWORK_UPDATED", "requestId": msg.RequestID,
+					"ruleId": msg.RuleID, "status": "revoked"}
 			}
 		case "NETWORK_TOKEN":
-			if h.network==nil || !current.Receive { payload=ruleError(msg.RequestID) } else {
-				result,err:=h.network.Issue(ctx,device.ID)
-				if err!=nil {payload=ruleError(msg.RequestID)} else {
-					result["requestId"]=msg.RequestID
-					payload=result
+			if h.network == nil || !current.Receive {
+				payload = ruleError(msg.RequestID)
+			} else {
+				result, err := h.network.Issue(ctx, device.ID)
+				if err != nil {
+					payload = ruleError(msg.RequestID)
+				} else {
+					result["requestId"] = msg.RequestID
+					payload = result
 				}
 			}
 		case "RULE_OFFER":
@@ -402,15 +410,15 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 }
 
 type ruleControlFrame struct {
-	Type      string             `json:"type"`
-	RequestID string             `json:"requestId"`
-	RuleID    string             `json:"ruleId"`
-	Offer     *EncryptedOffer    `json:"offer"`
-	Envelope  *protocol.Envelope `json:"envelope"`
-	MessageID string             `json:"messageId"`
-	Status    string             `json:"status"`
-	Host      string             `json:"host"`
-	ExitDeviceID string          `json:"exitDeviceId"`
+	Type         string             `json:"type"`
+	RequestID    string             `json:"requestId"`
+	RuleID       string             `json:"ruleId"`
+	Offer        *EncryptedOffer    `json:"offer"`
+	Envelope     *protocol.Envelope `json:"envelope"`
+	MessageID    string             `json:"messageId"`
+	Status       string             `json:"status"`
+	Host         string             `json:"host"`
+	ExitDeviceID string             `json:"exitDeviceId"`
 }
 
 func ruleError(requestID string) map[string]any {

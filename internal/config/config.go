@@ -92,8 +92,8 @@ type ServerConfig struct {
 		Enabled      bool     `yaml:"enabled"`
 		ExtensionIDs []string `yaml:"extension_ids"`
 		NetworkProxy struct {
-			Listen string `yaml:"listen"`
-			Advertise string `yaml:"advertise"`
+			Listen         string   `yaml:"listen"`
+			Advertise      string   `yaml:"advertise"`
 			AllowedExitIDs []string `yaml:"allowed_exit_ids"`
 		} `yaml:"network_proxy"`
 	} `yaml:"browser_sync"`

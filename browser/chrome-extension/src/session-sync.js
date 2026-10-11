@@ -8,6 +8,7 @@ import { decryptEncryptedOffer } from './envelope.js';
 import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
 import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence } from './lifecycle.js';
+import {ensureNetworkForRule} from './network-binding.js';
 
 const sourceBusy = new Set();
 const sourceDirty = new Set();
@@ -122,6 +123,7 @@ export async function sendSnapshot(ruleId) {
 export async function requestSnapshot(ruleId) {
   const ctx=await ruleContext(ruleId);
   if(!ctx.targetRole)throw new Error('只有接收设备能请求同步');
+  await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
   const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
   const interrupted=(await chrome.storage.local.get('browserSyncRestoreJournal')).browserSyncRestoreJournal||{};
   if(paused[ruleId]||interrupted[ruleId])
@@ -134,6 +136,7 @@ export async function requestSnapshot(ruleId) {
 export async function syncThenOpen(ruleId) {
   const ctx=await ruleContext(ruleId);
   if(!ctx.targetRole)throw new Error('只能由接收设备发起同步后打开');
+  await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
   const pending=(await chrome.storage.local.get(pendingOpenKey))[pendingOpenKey]||{};
   pending[ruleId]={origin:ctx.policy.siteOrigin,expiresAt:Date.now()+30000};
   await chrome.storage.local.set({[pendingOpenKey]:pending});
@@ -160,6 +163,7 @@ async function handleIncomingSnapshot(envelope) {
     if(!Number.isSafeInteger(envelope.sequence)||envelope.sequence<=Number(sequences[ruleId]||0))
       throw new Error('旧会话快照已拒绝');
     const payload=await decryptSnapshot(envelope,ctx.remote);
+    await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
     const switches=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
     try{
       await applyCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});

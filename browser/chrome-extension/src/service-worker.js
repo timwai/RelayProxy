@@ -6,12 +6,17 @@ import { registerBrowser, connectBrowser, currentConnectionState, disconnect, se
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
 import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission, syncThenOpen, forgetRuleLocalState, resumePausedRestore } from './session-sync.js';
+import {parseBoundHost, installNetworkGuard, startNetworkGuard, stopNetworkGuard, refreshNetworkBinding, registerNetworkAuth} from './network-binding.js';
+
+registerNetworkAuth();
 
 async function initialize() {
   await getOrCreateIdentity();
   // Remove legacy unsalted SHA-256 Cookie fingerprints on extension startup.
   await chrome.storage.local.remove('browserSyncManagedCookieHashes');
   await chrome.alarms.create('browser-sync-reconcile', { periodInMinutes: 1 });
+  await installNetworkGuard();
+  await refreshNetworkBinding({force:true}).catch(()=>{});
   restoreActiveSubscriptions({force:true}).catch(() => {});
 }
 
@@ -20,6 +25,7 @@ chrome.runtime.onStartup.addListener(() => { initialize().catch(console.error); 
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== 'browser-sync-reconcile') return;
+  refreshNetworkBinding().catch(()=>{});
   restoreActiveSubscriptions().catch(() => {});
 });
 
@@ -91,6 +97,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             } catch (error) { summary.error = String(error.message || error); }
           }
           rules.push(summary);
+        }
+        for (const summary of rules) {
+          if (!summary.valid || summary.status!=='active')continue;
+          try {
+            const binding=(await sendControl('NETWORK_BINDING',{ruleId:summary.id})).binding;
+            if(binding && binding.status!=='none')
+              summary.network={...binding,matchingHost:binding.host===parseBoundHost(summary.policy.siteOrigin)};
+          }catch{ /* network proxy is optional and disabled by default */ }
         }
         const transfer = (await chrome.storage.local.get('browserSyncTransferStatus')).browserSyncTransferStatus || {};
         const paused = (await chrome.storage.local.get('browserSyncRestorePaused')).browserSyncRestorePaused || {};
@@ -178,8 +192,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'REVOKE_RULE':
         await sendControl('RULE_REVOKE', { ruleId: message.ruleId });
+        await stopNetworkGuard(message.ruleId);
         await forgetRuleLocalState(message.ruleId);
         return { ok: true };
+      case 'NETWORK_EXITS': {
+        return {ok:true,exits:(await sendControl('NETWORK_EXITS')).exits||[]};
+      }
+      case 'NETWORK_OFFER': {
+        const identity=await getOrCreateIdentity();
+        const rules=(await sendControl('LIST_RULES')).rules||[];
+        const rule=rules.find(r=>r.ruleId===message.ruleId && r.status==='active' &&
+          r.sourceBrowserDeviceId===identity.deviceId);
+        if(!rule)throw new Error('仅来源 Chrome 可以选择 Agent 出口');
+        const saved=(await chrome.storage.local.get('browserSyncLocalOffers')).browserSyncLocalOffers||{};
+        if(!saved[message.ruleId])throw new Error('来源站点策略已丢失');
+        const host=parseBoundHost(saved[message.ruleId].siteOrigin);
+        const exits=(await sendControl('NETWORK_EXITS')).exits||[];
+        if(!exits.some(e=>e.id===message.exitDeviceId))throw new Error('Agent 出口未在线或未授权');
+        await sendControl('NETWORK_OFFER',{ruleId:message.ruleId,host,exitDeviceId:message.exitDeviceId});
+        return {ok:true};
+      }
+      case 'NETWORK_ACCEPT': {
+        if(message.confirmed!==true)throw new Error('需要接收端明确确认');
+        const identity=await getOrCreateIdentity();
+        const rules=(await sendControl('LIST_RULES')).rules||[];
+        const rule=rules.find(r=>r.ruleId===message.ruleId && r.status==='active' &&
+          r.targetBrowserDeviceId===identity.deviceId);
+        if(!rule)throw new Error('网络规则无效或未激活');
+        const peers=(await sendControl('LIST_PEERS')).peers||[];
+        const source=peers.find(p=>p.id===rule.sourceBrowserDeviceId);
+        const pinned=source&&await getTrustedPeer(source.id);
+        if(!pinned || pinned.signingPublicKey!==source.signingPublicKey ||
+          pinned.encryptionPublicKey!==source.encryptionPublicKey)
+          throw new Error('来源设备密钥未经核对');
+        const policy=await decryptEncryptedOffer(rule,source);
+        const host=parseBoundHost(policy.siteOrigin);
+        const binding=(await sendControl('NETWORK_BINDING',{ruleId:message.ruleId})).binding;
+        if(binding?.status!=='offered'||binding.host!==host)
+          throw new Error('来源网络与加密站点策略不匹配');
+        // Guard before approval: even a failed network lease cannot expose B's IP.
+        const desired=(await chrome.storage.local.get('browserSyncNetworkDesired')).browserSyncNetworkDesired||{};
+        desired[message.ruleId]={siteOrigin:policy.siteOrigin};
+        await chrome.storage.local.set({browserSyncNetworkDesired:desired});
+        await installNetworkGuard();
+        await sendControl('NETWORK_ACCEPT',{ruleId:message.ruleId,host});
+        return {ok:true,...await startNetworkGuard(message.ruleId,policy.siteOrigin)};
+      }
+      case 'NETWORK_REVOKE':
+        await sendControl('NETWORK_REVOKE',{ruleId:message.ruleId});
+        await stopNetworkGuard(message.ruleId);
+        return {ok:true};
       case 'SEND_SESSION':
         return { ok: true, ...(await sendSnapshot(message.ruleId)) };
       case 'REQUEST_SESSION':

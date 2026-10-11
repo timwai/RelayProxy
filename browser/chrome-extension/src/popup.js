@@ -182,6 +182,67 @@ function renderRules(rules) {
         card.append(button);
       }
     }
+    if(rule.status==='active' && rule.valid){
+      if(rule.network?.status==='offered' && rule.role==='target'){
+        card.append(textNode('p','来源 A 提议：访问 '+rule.network.host+
+          ' 时经由 Agent '+rule.network.exitDeviceId+' 出口。仅 HTTPS 443。'));
+        const approve=document.createElement('button');
+        approve.textContent='确认并启用 A 的网络出口';
+        approve.disabled=!rule.network.matchingHost;
+        approve.addEventListener('click',async()=>{
+          if(!window.confirm('确认让此域名使用 A Agent 的网络？会改变本 Chrome Profile 的代理配置；出口离线将阻断域名访问。'))return;
+          try{
+            await ask({type:'NETWORK_ACCEPT',ruleId:rule.id,confirmed:true});
+            status('网络绑定已授权；该网站通过来源设备 Agent 出口访问。');
+            await refreshPairing();
+          }catch(error){failure(error);}
+        });
+        card.append(approve);
+      }
+      if(rule.role==='source' && (!rule.network || rule.network.status==='none')){
+        const action=document.createElement('button');
+        action.textContent='为此 Cookie 规则绑定 Agent 网络';
+        action.addEventListener('click',async()=>{
+          try{
+            const exits=(await ask({type:'NETWORK_EXITS'})).exits||[];
+            if(!exits.length)throw new Error('没有已上线且管理员允许共享的 Agent 出口');
+            const select=document.createElement('select');
+            for(const exit of exits){
+              const opt=document.createElement('option');
+              opt.value=exit.id;
+              opt.textContent=(exit.name||'Agent')+' · '+exit.id;
+              select.append(opt);
+            }
+            const approve=document.createElement('button');
+            approve.textContent='发送网络绑定邀请';
+            approve.addEventListener('click',async()=>{
+              try{
+                await ask({type:'NETWORK_OFFER',ruleId:rule.id,exitDeviceId:select.value});
+                status('网络绑定已提出，等待 B 端独立确认。');
+                await refreshPairing();
+              }catch(error){failure(error);}
+            });
+            card.append(select,approve);
+            action.disabled=true;
+          }catch(error){failure(error);}
+        });
+        card.append(action);
+      }
+      if(rule.network?.status==='active'){
+        card.append(textNode('p','网络：'+rule.network.host+' → '+rule.network.exitDeviceId));
+        const revoke=document.createElement('button');
+        revoke.textContent='撤销网络绑定';
+        revoke.addEventListener('click',async()=>{
+          if(!window.confirm('撤销后，该网站可能重新使用 B 本地网络；已同步的 Cookie 不会自动清除。确定吗？'))return;
+          try{
+            await ask({type:'NETWORK_REVOKE',ruleId:rule.id});
+            status('网络绑定已撤销。');
+            await refreshPairing();
+          }catch(error){failure(error);}
+        });
+        card.append(revoke);
+      }
+    }
     if (rule.status === 'active' && rule.valid) {
       const sync = document.createElement('button');
       sync.textContent = rule.role === 'source' ? '立即发送加密登录状态' : '从来源设备请求同步';

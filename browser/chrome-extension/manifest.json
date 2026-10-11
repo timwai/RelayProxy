@@ -7,7 +7,10 @@
   "permissions": [
     "cookies",
     "storage",
-    "alarms"
+    "alarms",
+    "proxy",
+    "webRequest",
+    "webRequestAuthProvider"
   ],
   "optional_host_permissions": [
     "https://*/*"

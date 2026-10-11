@@ -115,8 +115,10 @@
 |---|---|---|
 | NB-01 单站点双端网络出口授权 | **已实现·待 CI/验收** | 来源 Chrome 选同身份已在线且服务端白名单允许的 Agent，并明确指定域名；目标 Chrome 必须单独核对原 Cookie 策略站点后接受；状态与 Cookie 内容隔离 |
 | NB-02 HTTPS CONNECT → Relay → Agent TCP 出口 | **已实现·待 CI/验收** | 专用 TLS listener、短期只在内存保存的 Browser 凭据、每个 CONNECT 复核活动双端授权、同身份在线 Agent、精确 hostname:443 和并发上限；只使用 Agent 原有的 OpenTCP ACL 与 DNS，不提供任意开放代理 |
-| NB-03 B Chrome PAC 与认证 | **开发中** | 使用 MV3 proxy + webRequestAuthProvider，绑定站点无 DIRECT fallback，按需要重新获取租约；必须实测浏览器认证缓存、PAC 作用域和异常恢复 |
-| NB-04 会话应用与网络安全联动 | **开发中** | 接收网络绑定会话前检查代理已可用，源 Agent 离线保持阻断；真机验证刷新、撤销、扩展冲突及 WebRTC/第三方资源行为 |
+| NB-03 B Chrome PAC 与认证 | **已实现·待 CI/真机验收** | 使用 MV3 proxy + webRequestAuthProvider，绑定站点无 DIRECT fallback，按需要重新获取租约；必须实测浏览器认证缓存、PAC 作用域和异常恢复 |
+| NB-04 会话应用与网络安全联动 | **已实现·待 CI/真机验收** | 接收网络绑定会话前检查代理已可用，源 Agent 离线保持阻断；真机验证刷新、撤销、扩展冲突及 WebRTC/第三方资源行为 |
 | NB-05 审计与正式准入 | **未开始** | 管理界面、Agent 出口明确启用提示、泄漏面审查、Cookie+IP 与真实网站成功率验收，以及跨实例端点与租约管理 |
 
 | 2026-10-11 | Browser Sync 网络绑定初版（本次提交） | 提供 Server HTTPS CONNECT/Agent OpenTCP 出口与严格的双端绑定授权协议；CI 结果以提交 SHA 为准，不预先标记成功 | 新增 NB-01 至 NB-05，P0-01/05/06/07 仍未验收，正式发布不放行 | 持续更新 |
+
+Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-extension/src/network-binding.js)、[站点规则 UI](../browser/chrome-extension/src/popup.js)、[Cookie 接收前检查](../browser/chrome-extension/src/session-sync.js) 和 [PAC 单元测试](../browser/chrome-extension/tests/network-binding.test.mjs)。[初次 Go CI #38101561277](https://github.com/timwai/RelayProxy/actions/runs/38101561277) 失败于 `gofmt`；本次使用 CI 差异修正格式并修复数据库单连接循环查询与传递 Relay ACL。完整 CI 状态必须以本次代码提交 SHA 为准。

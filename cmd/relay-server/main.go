@@ -533,15 +533,16 @@ func main() {
 			log.Fatalf("[BrowserSync] Failed to initialize browser database: %v", storeErr)
 		}
 		browserSyncHandler = browsersync.NewHandler(store, cfg.BrowserSync.ExtensionIDs)
-		if cfg.BrowserSync.NetworkProxy.Listen!="" {
-			proxy:=browsersync.NewNetworkProxy(store,sessionMgr,cfg.BrowserSync.NetworkProxy.Advertise,
+		if cfg.BrowserSync.NetworkProxy.Listen != "" {
+			proxy := browsersync.NewNetworkProxy(store, sessionMgr, cfg.BrowserSync.NetworkProxy.Advertise,
 				cfg.BrowserSync.NetworkProxy.AllowedExitIDs)
-			if err:=proxy.Start(cfg.BrowserSync.NetworkProxy.Listen,tlsConfig);err!=nil {
-				log.Fatalf("[BrowserSync] HTTPS CONNECT listener: %v",err)
+			proxy.SetRelayPolicy(relayACL.Policy())
+			if err := proxy.Start(cfg.BrowserSync.NetworkProxy.Listen, tlsConfig); err != nil {
+				log.Fatalf("[BrowserSync] HTTPS CONNECT listener: %v", err)
 			}
 			defer proxy.Close(context.Background())
 			browserSyncHandler.ConfigureNetworkProxy(proxy)
-			log.Printf("[BrowserSync] Scoped HTTPS CONNECT listener enabled on %s",proxy.Address())
+			log.Printf("[BrowserSync] Scoped HTTPS CONNECT listener enabled on %s", proxy.Address())
 		}
 		log.Printf("[BrowserSync] Browser session relay enabled; extension allowlist size=%d", len(cfg.BrowserSync.ExtensionIDs))
 	}

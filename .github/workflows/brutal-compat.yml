@@ -61,6 +61,13 @@ jobs:
           npm install --no-audit --no-fund
           npm test
           npm run build
+      - name: Build Agent React fallback diagnostics UI
+        if: runner.os == 'Linux'
+        working-directory: agent/gui/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+          npm run build
       - name: Authenticated QUIC, P2P, and Direct tests
         run: go test ./internal/congestion/... ./internal/tunnel ./internal/protocol ./agent/app ./agent/direct ./agent/p2p ./server/gateway ./server/p2p ./mobile/androidcore -count=1 -timeout=15m
       - name: Targeted race regressions (Linux)

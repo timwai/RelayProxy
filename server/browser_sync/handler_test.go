@@ -10,7 +10,7 @@ import (
 
 const testExtensionID = "abcdefghijklmnopabcdefghijklmnop"
 
-func TestBrowserHandlerRequiresTLSAndAllowlistedExtension(t *testing.T) {
+func TestBrowserHandlerRequiresTLSAndChromeExtensionOrigin(t *testing.T) {
 	store := testBrowserStore(t)
 	h := NewHandler(store, []string{testExtensionID})
 	for _, tc := range []struct {
@@ -19,7 +19,7 @@ func TestBrowserHandlerRequiresTLSAndAllowlistedExtension(t *testing.T) {
 		want         int
 	}{
 		{"cleartext", "chrome-extension://" + testExtensionID, false, http.StatusUpgradeRequired},
-		{"wrong-extension", "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true, http.StatusForbidden},
+		{"unseen-extension", "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true, http.StatusBadRequest},
 		{"website", "https://example.com", true, http.StatusForbidden},
 		{"missing-origin", "", true, http.StatusForbidden},
 	} {

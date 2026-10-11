@@ -275,6 +275,7 @@ export async function onCookieChange(cookie) {
   for(const [ruleId,policy] of Object.entries(local)){
     const host=new URL(policy.siteOrigin).hostname;
     if(!(host===hostname||host.endsWith('.'+hostname)))continue;
+    if(policy.siteOrigin.startsWith('http://') && (cookie.secure || cookie.partitionKey))continue;
     if(policy.schemaVersion!==2 &&
        (cookie.path!=='/'||!cookie.hostOnly||!cookie.secure||cookie.partitionKey||
         !policy.cookieNames.includes(cookie.name)))continue;

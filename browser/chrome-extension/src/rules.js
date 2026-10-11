@@ -1,4 +1,4 @@
-// Only explicitly authorized HTTPS origins may be saved.
+// Explicit website permission allows only HTTP/HTTPS. Server enrollment remains HTTPS only.
 // Never persist secret session values in a rule.
 const SETTINGS_KEY = 'browserSyncSettings';
 
@@ -13,9 +13,9 @@ export function parseServerOrigin(raw) {
 
 export function parseSiteOrigin(raw) {
   const url = new URL(raw);
-  if (url.protocol !== 'https:' || url.username || url.password ||
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password ||
       url.search || url.hash || url.pathname !== '/') {
-    throw new Error('Only HTTPS website origins are supported');
+    throw new Error('Only HTTP/HTTPS website origins are supported');
   }
   return url.origin;
 }

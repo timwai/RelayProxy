@@ -36,17 +36,17 @@ async function refreshSiteChoices(){
   const sites=[...new Set(tabs.map(tab=>{
     try {
       const u=new URL(tab.url);
-      return u.protocol==='https:' ? u.origin : null;
+      return ['http:','https:'].includes(u.protocol) ? u.origin : null;
     }catch{return null;}
   }).filter(Boolean))].sort();
   select.replaceChildren();
   const prompt=document.createElement('option');
   prompt.value='';
-  prompt.textContent=sites.length?'请选择已打开的网站':'请先在 Chrome 打开一个 HTTPS 网站';
+  prompt.textContent=sites.length?'请选择已打开的网站':'请先在 Chrome 打开 HTTP/HTTPS 网站';
   select.append(prompt);
   for(const site of sites){
     const item=document.createElement('option');
-    item.value=site;item.textContent=site;
+    item.value=site;item.textContent=site.startsWith('http://')?'HTTP（不安全） · '+site:site;
     select.append(item);
   }
   if(sites.includes(selected))select.value=selected;
@@ -97,6 +97,11 @@ $('save').addEventListener('click', async () => {
 $('add-site').addEventListener('click', async () => {
   try {
     const origin = parseSiteOrigin($('site').value.trim());
+    // An explicit secondary warning prevents accidental HTTP credential
+    // disclosure; the site's own traffic cannot be secured by E2EE sync.
+    if(origin.startsWith('http://') && !window.confirm(
+      '此网站使用 HTTP：网站登录 Cookie 和 Storage 可能在网络中被窃取或篡改。' +
+      'RelayProxy 只加密设备间的同步数据，无法加密您与网站之间的 HTTP 连接。仍要授权此站点吗？'))return;
     // Call request() directly from a user click; never grant silently.
     const websiteURL = new URL(origin);
     const pattern = `${websiteURL.protocol}//${websiteURL.hostname}/*`;
@@ -108,7 +113,7 @@ $('add-site').addEventListener('click', async () => {
       await updateSettings({ sites: settings.sites });
     }
     renderSites(settings.sites);
-    status('站点权限已授予。尚未启用会话传输。');
+    status(origin.startsWith('http://')?'HTTP 站点已授权（网站访问仍为明文）；尚未建立配对。':'站点权限已授予。尚未启用会话传输。');
   } catch (error) { failure(error); }
 });
 
@@ -196,6 +201,8 @@ function renderRules(rules) {
       card.append(textNode('p', rule.error || '尚未找到经核验的设备密钥，无法授权。', 'error'));
     } else {
       card.append(textNode('p', '站点：' + rule.policy.siteOrigin));
+      if(rule.policy.siteOrigin.startsWith('http://'))
+        card.append(textNode('p', 'HTTP 风险：网站访问与登录凭据可能明文暴露，设备间同步本身仍为加密传输。', 'error'));
       card.append(textNode('p',Array.isArray(rule.policy.cookieNames) ?
         '旧版指定 Cookie：'+rule.policy.cookieNames.join(', ') :
         '同步范围：全部 Cookie / Local Storage / Session Storage（不包含 IndexedDB）'));
@@ -218,6 +225,8 @@ function renderRules(rules) {
               // Chrome requires permissions.request to be called directly
               // within a user gesture before any asynchronous operation.
               const website = new URL(rule.policy.siteOrigin);
+              if(website.protocol==='http:' && !window.confirm(
+                '确认接收来自 HTTP 网站的会话？此站点本身并未加密，Cookie 和登录数据可能在访问网站时被窃取。'))return;
               const pattern = website.protocol + '//' + website.hostname + '/*';
               const granted = await chrome.permissions.request({ origins: [pattern] });
               if (!granted) { status('未授权目标站点。'); return; }
@@ -232,7 +241,7 @@ function renderRules(rules) {
         card.append(button);
       }
     }
-    if(rule.status==='active' && rule.valid){
+    if(rule.status==='active' && rule.valid && rule.policy.siteOrigin.startsWith('https://')){
       if(rule.network?.status==='offered' && rule.role==='target'){
         card.append(textNode('p','来源 A 提议：访问 '+rule.network.host+
           ' 时经由 Agent '+rule.network.exitDeviceId+' 出口。仅 HTTPS 443。'));
@@ -293,7 +302,7 @@ function renderRules(rules) {
         card.append(revoke);
       }
     }
-    if (rule.status==='active' && rule.valid && rule.role==='target'){
+    if (rule.status==='active' && rule.valid && rule.role==='target' && rule.policy.siteOrigin.startsWith('https://')){
       const current=rule.localNetworkMode==='local_agent'?'B 本机 Agent':rule.localNetworkMode==='source_agent'?'A 来源 Agent':'未启用';
       card.append(textNode('p','当前站点网络出口：'+current));
       const local=document.createElement('button');
@@ -421,6 +430,8 @@ $('offer-rule').addEventListener('click', async () => {
     const siteOrigin = $('pair-site').value;
     const targetID = $('target').value;
     if (!targetID || !siteOrigin) throw new Error('请先选择网站与接收设备');
+    if(siteOrigin.startsWith('http://') && !window.confirm(
+      '即将为 HTTP 网站创建会话配对。虽然同步数据端到端加密，但站点访问本身仍可能泄露登录凭据。继续？'))return;
     const result = await ask({ type: 'CREATE_RULE', siteOrigin, targetID });
     status('已创建加密邀请 ' + result.ruleId.slice(0, 8) + '，请双方核对配对校验码。');
     await refreshPairing();

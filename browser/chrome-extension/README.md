@@ -2,6 +2,15 @@
 
 > **代码状态（2026-10-11）**：独立的 Chrome Profile 本机 Agent 代理、HTTP 正向代理、任意合法 TCP CONNECT 地址/端口及原生 DIRECT/PROXY/REJECT 已在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 集成，Go/UI/Network CI success，但真实 Chrome、WebRTC/UDP/QUIC/DNS/回环绕过及安全验收尚未完成。Cookie 同步仍无需本机 Agent，只有选择本机网络出口才需要安装 B Agent。发布状态仍为 Draft。详情见 [Living Tracker](../../docs/browser-session-sync-progress.md)。
 
+## HTTP 与 HTTPS 站点授权（开发分支）
+
+Chrome 扩展 **完整设置 → 站点授权** 可以从已打开的标签页中选择 `http://` 或 `https://` 站点（包含带端口号的站点 Origin）。HTTP 站点首次授权需要确认明文风险。仅支持这两种网页协议，不支持 `file://`、内部页、FTP 或跨 Origin 自动授权。配对邀请和接收设备接受 HTTP 网站时同样明确提示风险。
+
+- **HTTP 的 Cookie 限制**：只同步在 HTTP 上可用的非 `Secure` Cookie；即使 Chrome 域名查询返回 HTTPS 的 `Secure` Cookie，也不会导出。HTTP 中无效的分区 Cookie 与 `SameSite=None` 非安全 Cookie 被排除/拒绝。原有 v1 命名 Cookie 规则保持 HTTPS-only，需要 HTTP 网站同步请创建 v2 规则。
+- **Web Storage**：在已授权 HTTP Origin 的单个标签页中采集及恢复全部 Local Storage、Session Storage Key，仍遵守大小限制、冲突保护与事务回滚。`http://host` 与 `https://host` 为不同的 Storage Origin。
+- **网络绑定**：当前按配对网站绑定 Agent 出口的功能仅支持 HTTPS 443；HTTP 配对不显示站点绑定入口。Chrome 全局 Agent 代理仍可独立使用，但不能保证 HTTP 网页加密。
+- **安全警告**：RelayProxy 只保护 **A↔B 会话同步** 的端到端加密；HTTP 网站上的 Cookie、Token、请求本身仍可能被窃听与篡改。**Server Admin** 的连接地址与 WSS 身份认证始终要求 HTTPS/TLS，绝不降级。
+
 ## 首次接入：一次申请、一次服务端审批
 
 1. 更新 Server 与 Chrome 扩展，进入扩展 **完整设置 → 连接与设备**，保存 Admin HTTPS Server，点击 **提交统一授权申请**。

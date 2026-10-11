@@ -34,7 +34,7 @@ function el(tag, className, content) {
 function activeSite(tab) {
   try {
     const uri = new URL(tab?.url);
-    return uri.protocol === 'https:' ? uri.origin : '';
+    return ['http:', 'https:'].includes(uri.protocol) ? uri.origin : '';
   } catch { return ''; }
 }
 function setConnection(connected, configured, stage) {
@@ -54,7 +54,7 @@ function renderRules(rules, siteOrigin) {
   const ordered = [...siteRules, ...active.filter(r => r.policy.siteOrigin !== siteOrigin)];
   $('rule-count').textContent = active.length + ' 个已激活配对';
   $('current-site').hidden = !siteOrigin;
-  if (siteOrigin) $('current-site').textContent = '当前标签页 · ' + new URL(siteOrigin).hostname;
+  if (siteOrigin) $('current-site').textContent = '当前标签页 · ' + new URL(siteOrigin).hostname + (siteOrigin.startsWith('http://') ? ' · HTTP 不安全' : '');
   $('empty-state').hidden = ordered.length > 0;
   if (!ordered.length) {
     $('empty-title').textContent = rules.some(r => r.status === 'offered') ? '有等待确认的配对邀请' : '尚无活跃会话';
@@ -65,7 +65,7 @@ function renderRules(rules, siteOrigin) {
     if (siteOrigin && rule.policy.siteOrigin === siteOrigin) item.classList.add('matching-rule');
     const info = el('div','rule-info');
     const main = el('div','rule-name');
-    main.append(el('strong','',new URL(rule.policy.siteOrigin).hostname),
+    main.append(el('strong','',new URL(rule.policy.siteOrigin).hostname + (rule.policy.siteOrigin.startsWith('http://') ? ' · HTTP' : '')),
       el('span','role-label',rule.role === 'source' ? '来源 A' : '接收 B'));
     const detail = el('div','rule-detail',STATES[rule.lastTransfer?.state] || '等待同步');
     if (['PARTIAL','CONFLICT','FAILED'].includes(rule.lastTransfer?.state)) detail.classList.add('attention');

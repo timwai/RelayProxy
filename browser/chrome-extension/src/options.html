@@ -67,11 +67,11 @@
       <section id="sites-section" class="settings-section" aria-labelledby="sites-heading">
         <div class="section-heading"><div class="section-index">03</div><div><h2 id="sites-heading">站点授权</h2><p>从已打开标签页选择，避免手动输入网址</p></div></div>
         <div class="settings-card">
-          <div class="field-group"><label for="site">选择 HTTPS 站点</label>
+          <div class="field-group"><label for="site">选择 HTTP / HTTPS 站点</label>
             <div class="selection-row"><select id="site"><option value="">请选择标签页</option></select>
               <button id="refresh-sites" class="secondary-button" type="button">刷新标签页</button>
               <button id="add-site" class="primary-button" type="button">授权网站</button></div>
-            <p class="field-hint">只有显式授权的网站才可进行会话同步；这一步不会自动创建配对。</p>
+            <p class="field-hint">支持 HTTP 与 HTTPS。HTTP 网站的数据访问未加密，可能暴露 Cookie/Token；跨设备同步依然端到端加密，授权不会自动创建配对。</p>
           </div>
           <h3 class="subheading">已授权网站</h3>
           <ul id="sites" class="site-list"></ul>

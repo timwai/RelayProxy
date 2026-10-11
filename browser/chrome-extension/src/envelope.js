@@ -19,9 +19,11 @@ const utf8 = value => new TextEncoder().encode(value);
 export function validatePolicy(policy) {
   if (!policy || typeof policy !== 'object') throw new Error('站点策略无效');
   const siteOrigin = parseSiteOrigin(policy.siteOrigin);
-  if (new URL(siteOrigin).pathname !== '/' || siteOrigin.length > 256) throw new Error('只支持 HTTPS Origin');
+  if (new URL(siteOrigin).pathname !== '/' || siteOrigin.length > 256) throw new Error('只支持 HTTP/HTTPS 站点 Origin');
   // Legacy invitations remain verifiable without silently widening consent.
   if (Array.isArray(policy.cookieNames)) {
+    // Legacy v1 Cookie scope was explicitly HTTPS-only. Do not broaden it.
+    if(new URL(siteOrigin).protocol!=='https:')throw new Error('旧版 Cookie 规则仅支持 HTTPS');
     const raw=policy.cookieNames;
     if (!raw.length || raw.length>20) throw new Error('旧版 Cookie 白名单无效');
     const cookieNames=[...new Set(raw.map(v=>String(v).trim()))].sort();

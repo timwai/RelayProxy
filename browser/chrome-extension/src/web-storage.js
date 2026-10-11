@@ -1,4 +1,4 @@
-// All Local/Session Storage keys for a single approved HTTPS origin.
+// All Local/Session Storage keys for a single explicitly approved HTTP(S) origin.
 // sessionStorage belongs to ONE tab's top-level browsing context; Chrome does
 // not provide an API to enumerate all other tabs' sessionStorage atomically.
 // Content script executes in ISOLATED world; it uses the page origin's Storage.
@@ -48,7 +48,7 @@ async function tabFor(origin,{create=false}={}){
       });
     }
   }
-  if(!tab)throw new Error('请先在普通 Chrome 标签页打开所选 HTTPS 网站后再同步 Storage');
+  if(!tab)throw new Error('请先在普通 Chrome 标签页打开所选 HTTP/HTTPS 网站后再同步 Storage');
   const latest=await chrome.tabs.get(tab.id);
   if(latest.incognito||new URL(latest.url).origin!==origin)throw new Error('站点已经跳转，拒绝跨域读取 Storage');
   return tab.id;

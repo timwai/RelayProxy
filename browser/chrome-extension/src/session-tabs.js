@@ -1,6 +1,6 @@
 // Session Storage is scoped to one browsing context. After restoring a
 // website session, activate that same tab rather than creating another tab
-// with an empty sessionStorage. Never navigate to an unrelated origin.
+// with an empty sessionStorage. Never navigate to an unrelated origin; HTTP and HTTPS remain distinct.
 export async function showRestoredWebsiteTab(tabId, siteOrigin) {
   if (!Number.isSafeInteger(tabId) || tabId < 0) {
     throw new Error('Restored tab identifier is invalid');

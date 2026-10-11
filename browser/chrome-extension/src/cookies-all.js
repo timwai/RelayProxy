@@ -1,4 +1,4 @@
-// Browser Sync v2: every cookie reachable by the explicitly authorized HTTPS
+// Browser Sync v2: every cookie reachable by the explicitly authorized HTTP(S)
 // origin, preserving domain, path, session and supported partition attributes.
 // Never store cookie values in extension storage; only keyed HMAC ownership tags.
 import {validatePolicy} from './envelope.js';
@@ -13,6 +13,10 @@ const partitionOf=c=>c.partitionKey?.topLevelSite||'';
 export const cookieIdentity=c=>JSON.stringify([domainOf(c),String(c.path||'/'),String(c.name),!!c.hostOnly,partitionOf(c)]);
 const supportsOrigin=(c,origin)=>{
   const host=hostOf(origin),domain=domainOf(c),site=partitionOf(c);
+  // Never copy HTTPS-only credentials into an unencrypted HTTP site.
+  // CHIPS and SameSite=None require Secure and are not HTTP cookie scopes.
+  if(new URL(origin).protocol==='http:' &&
+    (c.secure || site || c.sameSite==='no_restriction'))return false;
   if(!domain || !(host===domain || (!c.hostOnly&&host.endsWith('.'+domain))))return false;
   // A cross-site ancestor partition is not available to this top-level site.
   if(c.partitionKey?.hasCrossSiteAncestor===true)return false;

@@ -320,3 +320,11 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **AUTH-06 管理员撤销优先级**：已撤销的扩展即使曾被写入旧版静态 `browser_sync.extension_ids`，也必须拒绝它的 Browser Sync 设备注册/WSS；新增回归验证 DB revocation 覆盖静态 allowlist 的默认许可。老配置白名单仍可作为未入库时的兼容信任来源。
 
 - **AUTH-07 现有 WebSocket 防旁路**：运行中已认证的浏览器连接在每次控制消息处理前重新检查扩展管理员撤销状态，不能因为它也位于旧版静态白名单而继续转发。
+
+### 2026-10-11 HTTP 网站授权和跨端会话同步
+
+- **SITE-01（实现并补测试）**：Manifest 增加可选 `http://*/*` Host 权限；站点授权从普通标签页枚举 HTTP/HTTPS 的准确 Origin，使用用户点击授予 Host 权限。HTTP 授权、创建邀请和接收确认有额外明文凭据风险提示。拒绝 FTP、file、Chrome 内部协议。
+- **SITE-02（实现并补测试）**：v2 加密邀请支持 HTTP Origin；legacy v1 Cookie 名称白名单仍保留 HTTPS-only；HTTP Local Storage 和单标签页 Session Storage 所有 Key 均可采集恢复，仍受账户冲突、数据量、回滚及用户授权限制。HTTP/HTTPS 为不同的 Origin。
+- **SITE-03（实现并补测试）**：HTTP Cookie 仅同步可供明文站点访问的非 `Secure`、非 CHIPS、非 `SameSite=None` 记录；阻断向 HTTP 接收端注入 HTTPS-only Cookie。避免 Cookie 域名枚举时意外扩权。
+- **SITE-04（实现并补测试）**：HTTP 站点的逐站点 Agent 网络绑定按钮隐藏，保持该特性仅支持 HTTPS 443；全 Chrome Agent 代理开关仍独立。Server Admin HTTPS/WSS 必须继续使用 TLS，不能设置 HTTP。
+- **真实验收未完成**：需要实际 A/B Chrome 验证 HTTP 页面 Cookie/Local/Session Storage、生效及登出、冲突覆盖、HTTPS 安全 Cookie 隔离、权限弹窗与跳转，以及 DNS/QUIC/WebRTC 网络边界。PR 仍 Draft、不合并 main。

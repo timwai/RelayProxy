@@ -6,7 +6,7 @@ import { parseServerOrigin, parseSiteOrigin } from '../src/rules.js';
 
 globalThis.crypto ||= webcrypto;
 
-test('exact HTTPS site origin and cookie names only', () => {
+test('legacy cookie-name rule remains HTTPS-only', () => {
   assert.deepEqual(validatePolicy({
     siteOrigin: 'https://example.com/',
     cookieNames: ['session', 'csrf']
@@ -25,7 +25,10 @@ test('v2 policy captures all Cookie and Storage keys only for approved origin',(
     allCookies:true,localStorage:true,sessionStorage:true};
   assert.deepEqual(validatePolicy(policy),policy);
   assert.throws(()=>validatePolicy({...policy,localStorage:false}),/版本|范围/);
-  assert.throws(()=>validatePolicy({...policy,siteOrigin:'http://example.com'}));
+  assert.deepEqual(validatePolicy({...policy,siteOrigin:'http://example.com'}),
+    {...policy,siteOrigin:'http://example.com'});
+  assert.deepEqual(validatePolicy({...policy,siteOrigin:'http://localhost:8080/'}),
+    {...policy,siteOrigin:'http://localhost:8080'});
 });
 
 test('server origin cannot contain path or credentials', () => {
@@ -33,6 +36,11 @@ test('server origin cannot contain path or credentials', () => {
   assert.throws(() => parseServerOrigin('https://relay.example.com/admin'));
   assert.throws(() => parseServerOrigin('http://relay.example.com'));
   assert.equal(parseSiteOrigin('https://www.example.org/'), 'https://www.example.org');
+  assert.equal(parseSiteOrigin('http://example.org:8080/'), 'http://example.org:8080');
+  assert.throws(() => parseSiteOrigin('ftp://example.org/'));
+  assert.throws(() => parseSiteOrigin('http://user:password@example.org/'));
+  assert.throws(() => parseSiteOrigin('http://example.org/private'));
+  assert.throws(() => parseSiteOrigin('http://example.org/?credential=1'));
 });
 
 test('base64url requires valid characters and roundtrips binary', () => {
@@ -150,4 +158,16 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
   assert.rejects(decryptEncryptedOffer({
     ...rule, offer:{...offer,ciphertext:(offer.ciphertext[0] === 'A' ? 'B' : 'A') + offer.ciphertext.slice(1)}
   },sourcePeer));
+  use(a);
+  const http = await createEncryptedOffer({
+    target: {id:target.deviceId,signingPublicKey:target.signingPublicKey,
+      encryptionPublicKey:target.encryptionPublicKey,receive:true},
+    siteOrigin:'http://example.com:8080'
+  });
+  use(b);
+  assert.deepEqual(await decryptEncryptedOffer({
+    ruleId:http.offer.ruleId,sourceBrowserDeviceId:source.deviceId,
+    targetBrowserDeviceId:target.deviceId,offer:http.offer
+  },sourcePeer),{siteOrigin:'http://example.com:8080',schemaVersion:2,
+    allCookies:true,localStorage:true,sessionStorage:true});
 });

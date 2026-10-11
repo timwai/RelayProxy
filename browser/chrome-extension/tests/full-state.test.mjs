@@ -9,7 +9,7 @@ import {captureWebStorage,prepareWebStorageRestore} from '../src/web-storage.js'
 globalThis.crypto ||= webcrypto;
 const policy={siteOrigin:'https://example.com',schemaVersion:2,allCookies:true,
   localStorage:true,sessionStorage:true};
-function profile(){
+function profile(origin='https://example.com'){
   const state=new Map(),jar=new Map(),secrets=new Map();
   const page={local:new Map(),session:new Map()};
   const idb={createObjectStore(){},transaction(){
@@ -47,8 +47,8 @@ function profile(){
       }
     },
     tabs:{
-      async query(){return [{id:10,url:'https://example.com/',status:'complete',incognito:false}];},
-      async get(){return {id:10,url:'https://example.com/',status:'complete',incognito:false};}
+      async query(){return [{id:10,url:origin+'/',status:'complete',incognito:false}];},
+      async get(){return {id:10,url:origin+'/',status:'complete',incognito:false};}
     },
     scripting:{async executeScript({func,args}){
       const old={location:globalThis.location,localStorage:globalThis.localStorage,
@@ -57,7 +57,7 @@ function profile(){
         get length(){return map.size;},key(i){return [...map.keys()][i]??null;},
         getItem(k){return map.get(k)??null;},setItem(k,v){map.set(k,v);},removeItem(k){map.delete(k);}
       };}
-      globalThis.location={origin:'https://example.com'};
+      globalThis.location={origin};
       globalThis.localStorage=store(page.local);
       globalThis.sessionStorage=store(page.session);
       try{return [{result:func(...args)}];}
@@ -162,4 +162,47 @@ test('v2 remote logout cannot erase Storage values changed by destination',async
     {local:{},session:{}},policy),/CONFLICT/);
   assert.equal(p.page.local.get('token'),'new-local-account');
   assert.equal(p.page.session.get('csrf'),'remote-csrf');
+});
+
+test('HTTP site v2 synchronizes non-Secure Cookies and all Local/Session Storage keys',async()=>{
+  const httpPolicy={...policy,siteOrigin:'http://example.com'};
+  const a=profile(httpPolicy.siteOrigin),b=profile(httpPolicy.siteOrigin);use(a);
+  a.page.local.set('app-token','HTTP-local-token');
+  a.page.session.set('csrf','HTTP-tab-token');
+  await a.chrome.cookies.set({url:'http://example.com/',name:'plain',value:'http-session',
+    path:'/user',secure:false,httpOnly:true,sameSite:'lax'});
+  // Domain enumerations can also return HTTPS-only credentials for this host.
+  // They must not be exported into a downgraded HTTP-origin invitation.
+  await a.chrome.cookies.set({url:'https://example.com/',name:'https-only',
+    value:'secret-https',path:'/',secure:true,httpOnly:true});
+  const captured=await captureAllCookies(httpPolicy);
+  assert.deepEqual(captured.cookies.map(x=>x.name),['plain']);
+  assert.equal(captured.cookies[0].secure,false);
+  const storage=await captureWebStorage(httpPolicy);
+  assert.equal(storage.local['app-token'],'HTTP-local-token');
+  assert.equal(storage.session.csrf,'HTTP-tab-token');
+  use(b);
+  const txn=await prepareWebStorageRestore('http-rule',storage,httpPolicy);
+  await txn.apply();
+  await applyAllCookies('http-rule',captured,httpPolicy);
+  await txn.commit();
+  assert.equal((await captureAllCookies(httpPolicy)).cookies[0].value,'http-session');
+  assert.equal(b.page.local.get('app-token'),'HTTP-local-token');
+  assert.equal(b.page.session.get('csrf'),'HTTP-tab-token');
+});
+
+test('HTTP snapshots reject injected Secure, partitioned and SameSite=None cookies',async()=>{
+  const httpPolicy={...policy,siteOrigin:'http://example.com'};
+  const p=profile(httpPolicy.siteOrigin);use(p);
+  const baseline={schemaVersion:2,siteOrigin:httpPolicy.siteOrigin,
+    cookies:[{name:'sid',value:'v',domain:'example.com',hostOnly:true,
+      path:'/',secure:false,httpOnly:true,sameSite:'lax',session:true}]};
+  for(const override of [
+    {secure:true},{sameSite:'no_restriction'},
+    {partitionKey:{topLevelSite:'https://example.com'}}
+  ]){
+    const malicious={...baseline,cookies:[{...baseline.cookies[0],...override}]};
+    await assert.rejects(applyAllCookies('http-invalid',malicious,httpPolicy),/无效/);
+  }
+  assert.equal((await captureAllCookies(httpPolicy)).cookies.length,0);
 });

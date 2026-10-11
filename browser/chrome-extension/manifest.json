@@ -15,6 +15,7 @@
     "webRequestAuthProvider"
   ],
   "optional_host_permissions": [
+    "http://*/*",
     "https://*/*"
   ],
   "background": {

@@ -39,11 +39,8 @@ func (s *Store) RequestExtension(ctx context.Context, id string) (string, error)
 	if !chromeExtensionIDPattern.MatchString(id) {
 		return "", errors.New("invalid Chrome extension ID")
 	}
-	// Bound the persistent unauthenticated queue independently from IP rate limits.
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_extensions`).Scan(&count); err != nil {
-		return "", err
-	}
+	// Re-registration of existing devices must work even if the origin
+	// inventory is full. Apply the quota only when inserting a new Origin.
 	var state string
 	err := s.db.QueryRowContext(ctx, `SELECT state FROM browser_sync_extensions WHERE extension_id=?`, id).Scan(&state)
 	if err == nil {
@@ -55,6 +52,10 @@ func (s *Store) RequestExtension(ctx context.Context, id string) (string, error)
 		return state, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	var count int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_extensions`).Scan(&count); err != nil {
 		return "", err
 	}
 	if count >= 500 {
@@ -257,6 +258,25 @@ func (s *Store) DeleteRevokedExtension(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	return tx.Commit()
+}
+
+// ExtensionOriginAllowed is fail-closed: an unavailable extension inventory
+// must never silently bypass a prior administrator revocation.
+// Unknown Origins may enroll devices, but still have no device privileges.
+func (s *Store) ExtensionOriginAllowed(ctx context.Context, id string) (bool, error) {
+	if !chromeExtensionIDPattern.MatchString(id) {
+		return false, errors.New("invalid Chrome extension origin")
+	}
+	var state string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT state FROM browser_sync_extensions WHERE extension_id=?`, id).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return state != "revoked", nil
 }
 
 func (s *Store) ExtensionRevoked(ctx context.Context, id string) bool {

@@ -42,6 +42,16 @@ It requires all three BBR/Brutal/Hysteria2 controller variants, both directions,
 
 Output is always `auto_apply_allowed: false` and `brutal_default_eligible: false`; the tool **never edits Agent configuration**. This number is only a conservative, provisional upper bound for a *measured* site and must still be checked against true capacity, active competing traffic, shared Relay budget, loaded end-to-end latency, renegotiation/reconnect behavior, and the release policy. It must not be used as a production-wide default merely because the script succeeds.
 
+## Actual full distribution archive audit (new CI gate)
+
+The newly added `full-release-archive-check` job in `.github/workflows/brutal-compat.yml` runs **the project's actual `scripts/build.sh`**, rather than only compiling bare Go entrypoints, on the Linux release builder. `scripts/verify_brutal_release_packages.py` checks:
+
+- Archive SHA256 manifest against every shipped artifact; full Linux amd64/arm64, macOS amd64/arm64, and Windows amd64/arm64 distribution `tar.gz` files, plus both Windows full ZIPs and the independent x64 Agent/WinDivert ZIP.
+- Real nonempty Agent, Server, desktop executable/App bundle layout, both config files and bundled brand assets, with x64 WinDivert DLL/driver/license/version. Corrupted ZIP data, absent members, duplicate member names and archive-path escapes are errors.
+- Each shipped Agent's `configs/relay-agent.yaml` must preserve `up_mbps: 0` and `down_mbps: 0`, so an accidental release configuration edit **cannot silently enable Brutal globally** before Issue #198's default-on gates pass.
+
+The job publishes `package-audit.json` and build logs as CI evidence. It explicitly reports `signatures_and_installed_upgrade_verified: false` and `real_wan_acceptance_verified: false` even if all archive checks pass. **The audit does not install WinDivert, test macOS NetworkExtension signing, execute target-platform GUI binaries, check notarization, or simulate old-package→new-package application-data migrations.** Those remain release blockers needing proper physical OS and signing infrastructure.
+
 ## Conditions for a default-on Brutal proposal (NOT SATISFIED)
 
 Hysteria Brutal requires a **numeric sending-rate target**. RelayProxy cannot safely invent that rate from only a server address or from the existence of a QUIC connection; a guessed high target can starve other traffic, and a guessed low target can perform worse than BBR. Therefore an unconfigured link **must continue to initialize on BBR** even after this watchdog exists.

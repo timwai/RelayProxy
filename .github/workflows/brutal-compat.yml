@@ -167,3 +167,25 @@ jobs:
         run: bash -n scripts/ci-brutal-full-binary-compat.sh
       - name: Cross-build and authenticate old/new genuine processes
         run: bash scripts/ci-brutal-full-binary-compat.sh
+
+  native-full-compiled-pairings:
+    name: Native production Agent / Server entrypoints (${{ matrix.os }}; 8 pairings)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build and authenticate baseline/new actual CLI executables
+        run: python scripts/ci-brutal-native-binary-compat.py

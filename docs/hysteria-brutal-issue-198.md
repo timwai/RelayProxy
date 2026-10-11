@@ -15,12 +15,12 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 - [x] Port controller, rate conversion/capping, loss-compensation tests, config and directional negotiation.
 - [x] Preserve new main-line UPnP, Android settings, proxy routing, Public Direct authorization and P2P lifecycle.
 - [x] Reject rate hints on legacy Public Direct authentication paths.
-- [x] Go CI: gofmt, go vet, go mod tidy, Go tests, core race tests and benchmark smoke ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614073)).
-- [x] Cross-platform Go regression matrix: Ubuntu, macOS, Windows; Linux includes targeted P2P and direct path race tests ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614068)).
+- [x] Go CI: gofmt, go vet, go mod tidy, Go tests, core race tests and benchmark smoke ([successful preceding run](https://github.com/timwai/RelayProxy/actions/runs/38100402492)); source-change follow-up requires the latest green Go CI.
+- [x] Cross-platform Go regression matrix: Ubuntu, macOS, Windows; Linux includes targeted P2P/direct race tests ([successful preceding run](https://github.com/timwai/RelayProxy/actions/runs/38100402507)); source-change follow-up requires the latest green matrix.
 - [x] Android gomobile AAR and Gradle debug APK ([successful run](https://github.com/timwai/RelayProxy/actions/runs/38066614074)).
 
 - [x] Automated deterministic UDP packet loss smoke: 0%, 1%, 5% with BBR and Brutal, full payload integrity and QUIC diagnostics; **not** a real-link performance measurement.
-- [ ] Linux kernel `tc netem` shaped UDP tests (12 Mbps, 20 ms, 0/1/5% configured loss) with concurrent BBR/Brutal sessions and qdisc evidence. New CI job must pass; laboratory simulation is not external WAN validation.
+- [x] Linux kernel `tc netem` shaped UDP tests (12 Mbps, 20 ms, 0/1/5% *configured random loss*) including concurrent BBR/Brutal sessions at 8 and 16 Mbps targets, qdisc counters and raw logs ([passing netem jobs](https://github.com/timwai/RelayProxy/actions/runs/38100605774)). **Laboratory simulation only, not external WAN/fairness acceptance**.
 - [x] Old/new version *linked protocol binaries* handshakes across QUIC and TLS, including same-version reference; the packaged Agent/Server acceptance remains open.
 - [x] Hysteria2/BBR/Brutal repeatable download/upload CSV sampler supplied; operator-side A/B measurements not yet collected.
 - [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow.
@@ -34,9 +34,27 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 
 Run with `bash scripts/ci-brutal-mixed-compat.sh` on Linux after `git fetch origin main`. These are real old/new **linked protocol binaries**, not a full packaged Agent/Server release test. A pass narrows regression risk without fully checking actual platform binaries.
 
+
+## Kernel traffic-shaping findings (not WAN acceptance)
+
+A dedicated CI runner uses `tc netem rate 12mbit delay 20ms` on its loopback queue, with configured random loss 0/1/5%. Both independent 4 MiB QUIC transfers are run concurrently; BBR and Brutal both complete and pass integrity checks. Each row is **one short run**; rates are *per-flow bytes divided by wall-clock completion time*, not simultaneous-link fairness measurements:
+
+| Configured random loss | Brutal target | BBR completion goodput | Brutal completion goodput |
+|---|---|---:|---:|
+| 0% | 16 Mbps (over bottleneck) | 5.36 Mbps | 9.11 Mbps |
+| 1% | 16 Mbps (over bottleneck) | 4.19 Mbps | 9.03 Mbps |
+| 5% | 16 Mbps (over bottleneck) | 5.17 Mbps | 8.53 Mbps |
+| 0% | 8 Mbps (under bottleneck) | 5.19 Mbps | 7.29 Mbps |
+| 1% | 8 Mbps (under bottleneck) | 5.13 Mbps | 7.16 Mbps |
+| 5% | 8 Mbps (under bottleneck) | 5.04 Mbps | 7.08 Mbps |
+
+The 0% configured random-loss trial still recorded **720 kernel queue drops** across all transfers: the shaper also drops packets when the queue fills, so the label is not a measurement of zero actual loss. Kernel qdisc counters are recorded before/after in uploaded `brutal-linux-netem-loss-*` CI artifacts. Very large QUIC smoothed RTT values were observed on some overcommitted Brutal runs; this is evidence of queueing pressure, **not** a reliable loaded p95 RTT statistic.
+
+Therefore avoid setting Brutal target above sustainable available capacity, including overhead and competing tenants. An individual Server session cap cannot guarantee fairness across several sessions. Neither aggregate completion rates nor one example justify marking p50/p95 RTT, prolonged flow fairness, or Hysteria2 A/B requirements as passed. For these retain independent, time-synchronized performance sampling on real devices.
+
 ## Physical performance acceptance (pending)
 
-The automated CI gates above passed on source commit `54ed7361625f7230120e701393fe8329907a8198`. They do **not** replace WAN tests or establish performance equivalence to Hysteria2.
+Initial CI gates passed on `54ed7361625f7230120e701393fe8329907a8198`, and the subsequent feature-branch CI expanded coverage to packet-loss, kernel netem and mixed-version binary probes. The latest run links above are the authoritative verification record; they do **not** replace WAN tests or establish performance equivalence to Hysteria2.
 
 Use a dedicated controllable test link and comparable SOCKS5 exit configurations. Record complete endpoints, CPUs, MTU, transport mode, configured Brutal upstream/downstream rates, actual bottleneck speeds, RTT, queue discipline, and server maximums before running. Ensure QUIC is selected on both sides; a fallback TLS result is not a Brutal measurement.
 

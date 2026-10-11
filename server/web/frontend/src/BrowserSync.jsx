@@ -1,5 +1,115 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {api,json,fmtDate,list} from './api.js';
+import {validateBrowserNetworkDraft,applyBrowserNetworkDraft} from './browserNetworkConfig.js';
+
+// Uses the existing admin-only revisioned Server config API. Network
+// listeners and allowlists are intentionally restart-gated (no hot reload).
+function BrowserNetworkSettings({onOpenSettings}) {
+  const [record,setRecord]=useState(null);
+  const [edit,setEdit]=useState(null);
+  const [exits,setExits]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState('');
+  const [notice,setNotice]=useState('');
+  const load=useCallback(async()=>{
+    setLoading(true);setError('');
+    try{
+      const [state,agents]=await Promise.all([api('/server/config'),api('/exits')]);
+      setRecord(state);
+      setEdit({
+        listen:state.config.browserSync?.networkProxyListen||'',
+        advertise:state.config.browserSync?.networkProxyAdvertise||'',
+        allowed:list(state.config.browserSync?.allowedExitIds)
+      });
+      setExits(list(agents).filter(x=>x.deviceId));
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  },[]);
+  useEffect(()=>{load()},[load]);
+  const toggle=id=>setEdit(v=>({...v,allowed:v.allowed.includes(id)?
+    v.allowed.filter(x=>x!==id):[...v.allowed,id]}));
+  const onlineIDs=new Set(exits.map(x=>x.deviceId));
+  const extras=(edit?.allowed||[]).filter(id=>!onlineIDs.has(id));
+  const changed=record&&edit&&(
+    edit.listen!== (record.config.browserSync?.networkProxyListen||'') ||
+    edit.advertise!== (record.config.browserSync?.networkProxyAdvertise||'') ||
+    JSON.stringify([...edit.allowed].sort())!==
+      JSON.stringify([...list(record.config.browserSync?.allowedExitIds)].sort()));
+  const save=async()=>{
+    if(!record||!edit||busy||!changed)return;
+    const validation=validateBrowserNetworkDraft(edit);
+    if(validation){setError(validation);return;}
+    setBusy(true);setError('');setNotice('');
+    try{
+      const config=applyBrowserNetworkDraft(record.config,edit);
+      const result=await api('/server/config',json('PUT',{revision:record.revision,config}));
+      setRecord(result);
+      setEdit({listen:result.config.browserSync?.networkProxyListen||'',
+        advertise:result.config.browserSync?.networkProxyAdvertise||'',
+        allowed:list(result.config.browserSync?.allowedExitIds)});
+      setNotice(result.restartRequired?
+        '配置已保存到 Server。网络代理监听与 Agent 白名单必须重启 Server 才会生效。':
+        '配置已保存；请核实运行状态后再创建网络绑定邀请。');
+    }catch(e){
+      setError(e.status===409?'配置已被其他管理页面修改，请重新读取后保存，避免覆盖其他设置。':e.message);
+    }finally{setBusy(false);}
+  };
+  return <div className="panel">
+    <div className="form-actions" style={{justifyContent:'space-between',alignItems:'center'}}>
+      <div><h3>Agent 网络出口 · 浏览器配置</h3>
+        <p>管理员直接配置 Server 的网络代理和允许共享的 Agent；关闭时不会影响 Cookie/Storage 同步。</p></div>
+      <div className="form-actions">
+        <button className="btn" onClick={load} disabled={busy||loading}>重新读取配置</button>
+        <button className="btn" onClick={onOpenSettings}>高级设置</button>
+      </div>
+    </div>
+    {error&&<div className="err-notice" role="alert">{error}</div>}
+    {notice&&<div className="config-help" role="status">{notice}</div>}
+    {loading?<p>正在加载浏览器网络配置…</p>:!edit?
+      <p>未取得配置，请通过“高级设置”确认 Server 是否启用配置管理。</p>:
+      <>
+        <div className="form-grid">
+          <label>代理 TCP 监听地址
+            <input className="input" value={edit.listen} placeholder=":21292"
+              onChange={e=>setEdit(v=>({...v,listen:e.target.value}))} disabled={busy}/>
+          </label>
+          <label>对外代理域名与端口
+            <input className="input" value={edit.advertise}
+              placeholder="relay.example.com:21292"
+              onChange={e=>setEdit(v=>({...v,advertise:e.target.value}))} disabled={busy}/>
+          </label>
+        </div>
+        <p className="muted">两个地址都留空表示停用网络代理。对外域名必须匹配 Server TLS 证书，
+          端口需要由管理员在防火墙放行。修改配置不会自动重启服务。</p>
+        <h4>允许作为浏览器网络出口的 Agent</h4>
+        {exits.length? <div className="grid-cards">{exits.map(agent=>
+          <label className="panel" key={agent.deviceId} style={{display:'flex',gap:10,alignItems:'center',cursor:'pointer'}}>
+            <input type="checkbox" checked={edit.allowed.includes(agent.deviceId)} disabled={busy}
+              onChange={()=>toggle(agent.deviceId)}/>
+            <span><strong>{agent.deviceName||agent.deviceId}</strong>
+              <small style={{display:'block',wordBreak:'break-all'}}>{agent.deviceId}</small>
+              <small>在线 · 需 Agent 自行启用浏览器网络共享，且与浏览器身份相同</small></span>
+          </label>)}</div>:<p className="muted">当前没有在线 Agent 出口。可在“高级设置”手动配置离线设备 ID。</p>}
+        {extras.length>0&&<div><p>已配置但当前不在在线出口列表中的设备：</p>
+          {extras.map(id=><label key={id} style={{display:'flex',gap:8,alignItems:'center',marginBottom:8}}>
+            <input type="checkbox" checked disabled={busy} onChange={()=>toggle(id)}/>
+            <code>{id}</code><small>（离线或不再具备出口角色）</small>
+          </label>)}</div>}
+        {record?.restartRequired&&<p className="config-help">有配置与运行中的 Server 不一致，需要重启 Server 才会应用新设置：
+          {list(record.restartFields).join('、')||'网络配置'}</p>}
+        {!record?.config?.browserSync?.enabled&&<p className="err-notice">
+          Browser Sync 服务当前配置为关闭。请先在高级设置中启用，保存并重启 Server。</p>}
+        <div className="form-actions">
+          <button className="btn primary" onClick={save} disabled={!changed||busy||!record?.config?.browserSync?.enabled}>
+            {busy?'正在保存…':'保存网络出口配置'}</button>
+          {changed&&<button className="btn" onClick={load} disabled={busy}>取消修改</button>}
+        </div>
+        <p className="muted">还需在 Agent Web / GUI → 本机出口共享 开启“允许作为浏览器网络出口”，
+          并重启或重连 Agent。只有 Server、Agent 和设备身份授权同时满足后，Chrome 扩展才能发送绑定邀请。</p>
+      </>}
+  </div>;
+}
 
 // Browser identity is separate from Agent enrollment. This screen uses the
 // existing authenticated, admin-only API; it never displays Cookie values.
@@ -86,6 +196,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
         <strong> Admin HTTPS 监听端口</strong>，而不是 Agent TCP/QUIC 端口。
         直接访问 Admin HTTPS 的此接口，未登录时应为 HTTP 401，而不是 404。</p></div>:
     <>
+      <BrowserNetworkSettings onOpenSettings={onOpenSettings}/>
       <div className="panel">
         <h3>扩展来源管理</h3>
         <p>新版扩展首次申请时会自动上报扩展 ID 和设备公钥；关联的待审批扩展直接在下方设备列表一次批准。

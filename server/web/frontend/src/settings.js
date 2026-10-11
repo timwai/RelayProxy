@@ -18,7 +18,7 @@ export const groups = [
   {id:'rdp',key:'rdpIngress',title:'RDP 公网入口',subtitle:'公网监听端口、来源和速率限制',section:'安全与访问',fields:[
     ['enabled','启用公网入口服务','checkbox'],['listen','监听地址','text','0.0.0.0:0'],['portStart','自动端口起始','number'],['portEnd','自动端口结束','number'],
     ['sourceCidrs','全局来源 CIDR（每行一条）','lines'],['rateLimitPerMinute','每来源 IP 每分钟上限','number']]},
-  {id:'browserSync',title:'浏览器同步',subtitle:'Browser Sync、扩展审批和远程网络绑定（更改需重启）',section:'安全与访问',fields:[
+  {id:'browserSync',title:'浏览器同步',subtitle:'Browser Sync 管理、Agent 共享出口白名单与远程代理（更改需重启）',section:'安全与访问',fields:[
     ['enabled','启用 Browser Sync','checkbox'],
     ['networkProxyListen','来源 Agent HTTPS CONNECT 监听地址','text',':21292'],
     ['networkProxyAdvertise','来源代理公网地址','text','relay.example.com:21292'],

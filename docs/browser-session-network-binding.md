@@ -8,6 +8,16 @@
 
 A 安装 **RelayProxy Agent + Chrome MV3 扩展**；B 只安装 **Chrome MV3 扩展**。A/B 的 Cookie 已经过独立设备注册审批、双端规则确认与 E2EE。来源 A 选择已在线、属于同一身份且由 Server 管理员允许共享的 Agent Exit；B 独立核对加密 Cookie 策略的站点域名并点击同意。B 的站点 Chrome 请求走 HTTPS CONNECT → Relay Server → A Agent 的 OpenTCP → 目标网站；DNS 在 Agent Exit 解析。同步网站最终是否免登录仍由网站决定。
 
+## 浏览器 Web 页面直接配置（新增）
+
+不必手工编辑 Server / Agent YAML，管理员可在两个 Web 页面完成配置。Chrome 扩展自身只负责请求并审批配对、不能越权修改 Server 或 Agent 的共享设置。
+
+1. **Server Web → 浏览器同步 → Agent 网络出口 · 浏览器配置**：设置代理 TCP 监听地址（如 `:21292`）与对外 DNS 地址（如 `relay.example.com:21292`），从在线 Agent 出口卡片中勾选要允许共享的设备 ID，然后点击“保存网络出口配置”。页面使用已存在的、仅管理员可用的 `GET /api/v1/server/config` 和 `PUT /api/v1/server/config` API；带 revision 保存，检测并拒绝并发配置覆盖。**保存需要重启 Server 才能让监听器和出口白名单生效**；浏览器页面不能远程开启防火墙或自动签发 TLS 证书。
+2. **A Agent Web / GUI → 本机出口共享 → 允许浏览器网络共享**：显式开启该 Agent 的共享能力并保存。界面读写 `exit.browser_network_share`，原有 `proxy.exit` 能力、身份与 ACL 不会因此自动放宽。**需重启或重连 Agent** 才能重新发布带共享能力的握手。
+3. **A Chrome 扩展 → 完整设置 → 会话与出口规则**：在已激活的 HTTPS Cookie 规则下选择在线 Agent，向 B 发送网络绑定邀请；B 再独立确认。HTTP、IP、非常规端口仍不在此站点级共享功能范围内。
+
+现有 **Server Web → 服务配置 → 浏览器同步** 仍提供同一份配置的高级编辑入口。若 `allowed_exit_ids` 列表中已有离线设备，浏览器配置页保留并允许手动取消，不会因为暂时离线自动丢失授权记录。退出列表仅代表在线出口节点，最终是否可共享仍由 Agent 本地能力宣告和 Server 实时校验共同决定。设置页面不展示 Token、Cookie 或配对密钥。
+
 ## 必须显式启用
 
 Server 配置示例（独立 TCP 监听端口不可与 admin、tunnel 冲突）：

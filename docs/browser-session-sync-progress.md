@@ -334,3 +334,9 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **NET-ERR-01**：Server 的 `NETWORK_EXITS` 与 `NETWORK_OFFER` 原先把网络代理未配置、来源浏览器无 send 权限、共享 Exit 不可用、网络规则未激活/配对不完整、已存在网络绑定等全部返回 `rule not authorized or invalid`。现通过已认证 WSS 使用固定错误码及不含 Cookie/Token/密钥的文字诊断返回；避免用户无方向重复审批。
 - **NET-ERR-02**：扩展没有可选 Exit 时展示独立网络代理监听、同身份、`proxy.exit`、Agent `exit.browser_network_share`、Server `allowed_exit_ids` 的明确排查步骤。严格保持允许列表与双端审批检查，不为便于连接而允许自动授权。
 - **NET-ERR-03**：新增错误响应合同测试；仍需真实 Server Web/Chrome 与 Agent 出口联调验证。旧版 Server 不认识新诊断码，必须更新 Server 才能收到更细错误。
+
+### 2026-10-11 浏览器网络出口 Web 配置
+
+- **WEB-NET-01**：在 Server Web“浏览器同步”内新增 Agent 网络出口配置面板。复用现有 Admin-only `/api/v1/server/config` 的 revision 校验、配置落盘和重启检测，不增加未认证写入接口。直接设置监听地址 / 对外域名 / 在线 Agent 勾选共享白名单，并保留离线但已选择的出口 ID。禁用时留空两项地址，仍不影响 Cookie/Storage E2EE。
+- **WEB-NET-02**：Agent Web/GUI 的“本机出口共享”新增“允许浏览器网络共享”显式开关，保存 `exit.browser_network_share` 至 Agent 配置，默认关闭，纳入启动参数重启差异提示。Server 管理员无法代替 Agent 本地用户直接授予这个能力。
+- **WEB-NET-03**：纯 JS Web 配置验证测试覆盖地址和端口、至少一个显式允许的 Agent ID、无关 Server 设置保留。Agent Go React 配置 roundtrip 测试增加浏览器共享开关及 Web JSON 响应契约。真实网页、代理监听和网络联调仍需部署后验收。

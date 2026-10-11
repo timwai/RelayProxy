@@ -113,10 +113,10 @@
 
 | 任务 | 状态 | 当前实现与剩余工作 |
 |---|---|---|
-| NB-01 单站点双端网络出口授权 | **已实现·待 CI/验收** | 来源 Chrome 选同身份已在线且服务端白名单允许的 Agent，并明确指定域名；目标 Chrome 必须单独核对原 Cookie 策略站点后接受；状态与 Cookie 内容隔离 |
-| NB-02 HTTPS CONNECT → Relay → Agent TCP 出口 | **已实现·待 CI/验收** | 专用 TLS listener、短期只在内存保存的 Browser 凭据、每个 CONNECT 复核活动双端授权、同身份在线 Agent、精确 hostname:443 和并发上限；只使用 Agent 原有的 OpenTCP ACL 与 DNS，不提供任意开放代理 |
-| NB-03 B Chrome PAC 与认证 | **已实现·待 CI/真机验收** | 使用 MV3 proxy + webRequestAuthProvider，绑定站点无 DIRECT fallback，按需要重新获取租约；必须实测浏览器认证缓存、PAC 作用域和异常恢复 |
-| NB-04 会话应用与网络安全联动 | **已实现·待 CI/真机验收** | 接收网络绑定会话前检查代理已可用，源 Agent 离线保持阻断；真机验证刷新、撤销、扩展冲突及 WebRTC/第三方资源行为 |
+| NB-01 单站点双端网络出口授权 | **已实现·待真机/安全验收** | 来源 Chrome 选同身份已在线且服务端白名单允许的 Agent，并明确指定域名；目标 Chrome 必须单独核对原 Cookie 策略站点后接受；状态与 Cookie 内容隔离 |
+| NB-02 HTTPS CONNECT → Relay → Agent TCP 出口 | **已实现·待真机/安全验收** | 专用 TLS listener、短期只在内存保存的 Browser 凭据、每个 CONNECT 复核活动双端授权、同身份在线 Agent、精确 hostname:443 和并发上限；只使用 Agent 原有的 OpenTCP ACL 与 DNS，不提供任意开放代理 |
+| NB-03 B Chrome PAC 与认证 | **已实现·待真机/安全验收** | 使用 MV3 proxy + webRequestAuthProvider，绑定站点无 DIRECT fallback，按需要重新获取租约；必须实测浏览器认证缓存、PAC 作用域和异常恢复 |
+| NB-04 会话应用与网络安全联动 | **已实现·待真机/安全验收** | 接收网络绑定会话前检查代理已可用，源 Agent 离线保持阻断；真机验证刷新、撤销、扩展冲突及 WebRTC/第三方资源行为 |
 | NB-05 审计与正式准入 | **未开始** | 管理界面、Agent 出口明确启用提示、泄漏面审查、Cookie+IP 与真实网站成功率验收，以及跨实例端点与租约管理 |
 
 | 2026-10-11 | Browser Sync 网络绑定初版（[Server 2b65a1e](https://github.com/timwai/RelayProxy/commit/2b65a1ef7f102df0fd3a67765f346fa3c08ecec7)、[Extension 95addc2](https://github.com/timwai/RelayProxy/commit/95addc259951dbe3c0b38863fd88826dc758146f)） | 提供 Server HTTPS CONNECT/Agent OpenTCP 出口与严格的双端绑定授权协议；CI 结果以提交 SHA 为准，不预先标记成功 | 新增 NB-01 至 NB-05，P0-01/05/06/07 仍未验收，正式发布不放行 | 持续更新 |
@@ -138,3 +138,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | HTTPS CONNECT→Agent 协议集成用例 | 新增 [HTTPS CONNECT 模拟端到端测试](../server/browser_sync/network_proxy_integration_test.go)：使用真实 TLS 测试代理、短期 Browser Basic 凭据、经 Session Manager 的 Agent TunnelStream OpenTCP 模拟器，验证目标域名:443 与双向字节中继。不等于真实 Chrome 或物理 A Agent 验收 | NB-02 仍为已实现·待真机验收；P0 不放行 | 新 SHA 的 Go CI 尚待核验 |
 
 | 2026-10-11 | [Go CI #38102301709](https://github.com/timwai/RelayProxy/actions/runs/38102301709) 格式修复 | HTTPS CONNECT 集成测试新增后 gofmt 对连续接口方法声明的对齐作了调整；已按 CI 输出修正，不视为业务测试结果 | NB-02 继续待真机/新 SHA CI 验证 | 重新触发 Go/UI/Android CI |
+
+**网络绑定自动化结果（以代码 SHA `d83ebcae273678db00b021f529db28995d5892a3` 为准）：** [Go CI #38102344018](https://github.com/timwai/RelayProxy/actions/runs/38102344018) **success**（格式、tidy、vet、全量 Go 单测、竞态和 benchmark smoke，包含模拟 HTTPS CONNECT→Agent 双向流）；[UI CI #38102344036](https://github.com/timwai/RelayProxy/actions/runs/38102344036) **success**（扩展认证/PAC 单测、Server/Wails、Windows 和 macOS CI）；[Android Client #38102344009](https://github.com/timwai/RelayProxy/actions/runs/38102344009) 在本次核对时仍在执行。**仍缺真实 A Agent + B Chrome 端到端网络测试，P0 和 NB-05 不放行。** 后续文档专用提交不应复用该 SHA 的 CI 结论。

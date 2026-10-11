@@ -229,6 +229,14 @@ type authFrame struct {
 	Signature string `json:"signature"`
 }
 
+// browserRequestOrigin preserves the exact non-default TCP port while
+// matching Chrome URL.origin serialization for the default HTTPS port.
+func browserRequestOrigin(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	host = strings.TrimSuffix(host, ":443")
+	return "https://" + host
+}
+
 func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	select {
 	case h.slots <- struct{}{}:
@@ -293,7 +301,10 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	// Signature verification is bound to the HTTPS server origin. Extension
 	// approval is bound separately to the actual chrome-extension:// Origin.
 	extensionOrigin := r.Header.Get("Origin")
-	origin := "https://" + r.Host
+	// Chrome URL.origin canonicalizes HTTPS's default port 443 away.
+	// Host headers coming through a proxy may still contain an explicit :443.
+	// Both must produce the same signed origin or approved browsers fail AUTH_PROOF.
+	origin := browserRequestOrigin(r.Host)
 	device, err := h.auth.Verify(proofCtx, proof.DeviceID, origin, nonce, proof.Signature)
 	if err != nil {
 		_ = conn.Close(websocket.StatusPolicyViolation, "not authorized")

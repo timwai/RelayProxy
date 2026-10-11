@@ -68,3 +68,18 @@ func TestBrowserRegisterPendingWithoutPrivilegeEscalation(t *testing.T) {
 		t.Fatalf("privilege escalation returned %d", out.Code)
 	}
 }
+
+func TestBrowserRequestOriginCanonicalizesHTTPSDefaultPort(t *testing.T) {
+	for _, tc := range []struct{ host, want string }{
+		{"relay.example.com", "https://relay.example.com"},
+		{"relay.example.com:443", "https://relay.example.com"},
+		{"RELAY.EXAMPLE.COM:443", "https://relay.example.com"},
+		{"relay.example.com:20000", "https://relay.example.com:20000"},
+		{"[::1]:443", "https://[::1]"},
+		{"[::1]:20000", "https://[::1]:20000"},
+	} {
+		if got := browserRequestOrigin(tc.host); got != tc.want {
+			t.Errorf("host %q canonicalized to %q; expected %q", tc.host, got, tc.want)
+		}
+	}
+}

@@ -157,7 +157,7 @@ class SamplerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             dest = Path(folder) / "data"
             result = SimpleNamespace(returncode=0,
-                stdout="302\\t0.1\\t3\\t0\\t3\\t0\\t0.01\\t0.03", stderr="")
+                stdout="302\t0.1\t3\t0\t3\t0\t0.01\t0.03", stderr="")
             with mock.patch("bench_brutal_acceptance.subprocess.run", return_value=result) as call:
                 observed = sample(args, "socks5h://127.0.0.1:1080", dest)
             self.assertFalse(observed["success"])

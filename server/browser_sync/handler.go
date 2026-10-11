@@ -154,7 +154,7 @@ func (h *Handler) permitRegistration(r *http.Request) bool {
 	return a.count <= 15
 }
 
-// readRegistration refuses any requested capability or client-selected identity.
+// readRegistration permits an advisory requested identity, never authorization.
 func readRegistration(w http.ResponseWriter, r *http.Request) (BrowserDevice, bool) {
 	var d BrowserDevice
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
@@ -166,6 +166,10 @@ func readRegistration(w http.ResponseWriter, r *http.Request) (BrowserDevice, bo
 	if d.State != "" || d.IdentityID != "" || d.Send || d.Receive ||
 		!d.CreatedAt.IsZero() || d.ExtensionID != "" || d.ExtensionState != "" {
 		http.Error(w, "browser privileges cannot be requested during enrollment", http.StatusForbidden)
+		return BrowserDevice{}, false
+	}
+	if len(d.RequestedIdentityID) > 128 || strings.TrimSpace(d.RequestedIdentityID) != d.RequestedIdentityID {
+		http.Error(w, "invalid requested identity", http.StatusBadRequest)
 		return BrowserDevice{}, false
 	}
 	if err := ValidateRegistration(d); err != nil {

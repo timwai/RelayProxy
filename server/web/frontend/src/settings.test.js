@@ -36,3 +36,15 @@ test('Relay Brutal bandwidth controls are explicitly editable and not stripped a
  assert.equal(saved.tunnel.brutalTotalUpMbps,60);
  assert.deepEqual(saved.future,{key:true});
 });
+
+test('Server QUIC congestion selector uses existing persisted negotiation gate',()=>{
+ const tunnel=groups.find(group=>group.id==='tunnel');
+ const policy=tunnel.fields.find(field=>field[0]==='brutalIgnoreClientBandwidth');
+ assert.equal(policy[2],'congestion-select');
+ const initial={tunnel:{brutalIgnoreClientBandwidth:true,brutalUpMbps:20}};
+ const enabled=normalizeForSave({tunnel:{...initial.tunnel,brutalIgnoreClientBandwidth:false}},initial);
+ assert.equal(enabled.tunnel.brutalIgnoreClientBandwidth,false);
+ assert.equal(enabled.tunnel.brutalUpMbps,20);
+ const disabled=normalizeForSave({tunnel:{...enabled.tunnel,brutalIgnoreClientBandwidth:true}},enabled);
+ assert.equal(disabled.tunnel.brutalIgnoreClientBandwidth,true);
+});

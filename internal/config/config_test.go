@@ -799,7 +799,7 @@ func TestServerBrutalBandwidthValidateAndPersist(t *testing.T) {
 	}
 	loaded.Tunnel.Bandwidth.DownMbps = 300
 	for _, scenario := range []struct {
-		name string
+		name  string
 		apply func(*ServerConfig)
 	}{
 		{name: "negative total up", apply: func(cfg *ServerConfig) { cfg.Tunnel.Bandwidth.TotalUpMbps = -1 }},

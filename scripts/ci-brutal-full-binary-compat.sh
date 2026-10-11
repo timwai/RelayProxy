@@ -10,8 +10,9 @@ base="$(git merge-base origin/main HEAD)"
 temp="$(mktemp -d)"
 server_pid=""
 agent_pid=""
+origin_pid=""
 cleanup_case() {
-  for pid in "$agent_pid" "$server_pid"; do
+  for pid in "$agent_pid" "$server_pid" "$origin_pid"; do
     if [[ -n "$pid" ]]; then
       kill "$pid" 2>/dev/null || true
       wait "$pid" 2>/dev/null || true
@@ -19,6 +20,7 @@ cleanup_case() {
   done
   agent_pid=""
   server_pid=""
+  origin_pid=""
 }
 cleanup() {
   cleanup_case
@@ -55,13 +57,15 @@ for combination in old-old old-new new-old new-new; do
     quic_port=$((21000 + index * 4))
     tcp_port=$((quic_port + 1))
     admin_port=$((quic_port + 2))
+    socks_port=$((quic_port + 3))
+    origin_port=$((quic_port + 4))
     case_dir="$temp/$combination-$transport"
     mkdir -p "$case_dir/agent"
     db="$case_dir/lab.db"
     "$temp/$server_version-seed" \
       -db "$db" -agent-dir "$case_dir/agent" \
       -quic-port "$quic_port" -tcp-port "$tcp_port" \
-      -mode "$transport" > "$case_dir/seed.log"
+      -mode "$transport" -socks-port "$socks_port" > "$case_dir/seed.log"
 
     cat > "$case_dir/server.yaml" <<YAML
 server:
@@ -87,7 +91,16 @@ p2p:
 direct:
   enabled: false
 exit:
-  enabled: false
+  enabled: true
+  allow_internet: true
+  allow_private_network: true
+  allow_loopback: true
+  upstream:
+    mode: direct
+relay_acl:
+  allow_internet: true
+  allow_private_network: true
+  allow_loopback: true
 logging:
   level: info
 YAML
@@ -132,6 +145,47 @@ YAML
       tail -n 75 "$case_dir/server.log" >&2
       exit 1
     fi
+    # Real application payload: a loopback origin is reached through the
+    # Agent SOCKS5 endpoint and the authenticated Server Exit (not a probe).
+    mkdir -p "$case_dir/origin"
+    printf 'relayproxy-compatibility-data-plane-%s-%s\n' "$combination" "$transport" \
+      > "$case_dir/origin/fixture.bin"
+    python3 -m http.server "$origin_port" --bind 127.0.0.1 --directory "$case_dir/origin" \
+      > "$case_dir/origin.log" 2>&1 &
+    origin_pid=$!
+    proxy_ready=0
+    for attempt in $(seq 1 30); do
+      if (echo >/dev/tcp/127.0.0.1/"$socks_port") 2>/dev/null; then
+        proxy_ready=1
+        break
+      fi
+      sleep 0.1
+    done
+    if [[ "$proxy_ready" != "1" ]]; then
+      tail -n 55 "$case_dir/agent.log" >&2
+      echo "SOCKS5 proxy listener not ready" >&2
+      exit 1
+    fi
+    transfer_ok=0
+    for attempt in $(seq 1 15); do
+      if curl --disable --noproxy "" --proxy "socks5h://127.0.0.1:$socks_port" \
+        --fail --silent --show-error --connect-timeout 2 --max-time 6 \
+        "http://127.0.0.1:$origin_port/fixture.bin" -o "$case_dir/downloaded.bin" \
+        >> "$case_dir/curl.log" 2>&1 &&
+        cmp -s "$case_dir/downloaded.bin" "$case_dir/origin/fixture.bin"; then
+        transfer_ok=1
+        break
+      fi
+      sleep 0.2
+    done
+    if [[ "$transfer_ok" != "1" ]]; then
+      echo "real SOCKS5 -> Server Exit -> HTTP origin payload failed: $combination $transport" >&2
+      tail -n 55 "$case_dir/agent.log" >&2
+      tail -n 55 "$case_dir/server.log" >&2
+      tail -n 25 "$case_dir/curl.log" >&2
+      exit 1
+    fi
+    echo "[full-bin] real proxy HTTP payload verified: $combination $transport"
     if ! kill -0 "$server_pid" 2>/dev/null || ! kill -0 "$agent_pid" 2>/dev/null; then
       echo "process exited immediately after signed authentication" >&2
       exit 1

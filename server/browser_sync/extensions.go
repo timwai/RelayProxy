@@ -142,6 +142,11 @@ func (s *Store) EnrollExtensionDevice(ctx context.Context, extensionID string, d
 	if err != nil {
 		return BrowserDevice{}, "", err
 	}
+	// A previously approved legacy device cannot be rebound to a newly
+	// unapproved extension using public keys alone.
+	if saved.State == "approved" && state != "approved" {
+		return BrowserDevice{}, "", ErrDeviceConflict
+	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO browser_sync_device_extensions(device_id,extension_id,created_at)
         VALUES(?,?,?) ON CONFLICT(device_id) DO NOTHING`, device.ID, extensionID, time.Now().UTC())
 	if err != nil {

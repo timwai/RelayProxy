@@ -15,17 +15,17 @@ var ErrDeviceConflict = errors.New("browser device key mismatch")
 
 // BrowserDevice is entirely separate from the privileged RelayProxy Agent model.
 type BrowserDevice struct {
-	ID              string    `json:"id"`
-	Name            string    `json:"name"`
-	SigningKey      string    `json:"signingPublicKey"`
-	EncryptionKey   string    `json:"encryptionPublicKey"`
-	IdentityID      string    `json:"identityId,omitempty"`
-	State           string    `json:"state"`
-	Send            bool      `json:"send"`
-	Receive         bool      `json:"receive"`
-	CreatedAt       time.Time `json:"createdAt"`
-	ExtensionID     string    `json:"extensionId,omitempty"`
-	ExtensionState  string    `json:"extensionState,omitempty"`
+	ID             string    `json:"id"`
+	Name           string    `json:"name"`
+	SigningKey     string    `json:"signingPublicKey"`
+	EncryptionKey  string    `json:"encryptionPublicKey"`
+	IdentityID     string    `json:"identityId,omitempty"`
+	State          string    `json:"state"`
+	Send           bool      `json:"send"`
+	Receive        bool      `json:"receive"`
+	CreatedAt      time.Time `json:"createdAt"`
+	ExtensionID    string    `json:"extensionId,omitempty"`
+	ExtensionState string    `json:"extensionState,omitempty"`
 }
 
 type Store struct{ db *sql.DB }

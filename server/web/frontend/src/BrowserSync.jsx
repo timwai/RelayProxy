@@ -43,7 +43,9 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
         const caps=capabilities[id]||{send:true,receive:false};
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/approve',
           json('POST',{identityId:identity[id],send:!!caps.send,receive:!!caps.receive}));
-        setNotice('已完成审批：关联的 Chrome 扩展和此浏览器设备均已获批。');
+        setNotice(devices.some(d=>d.id===id&&d.extensionId)
+          ?'扩展与该浏览器设备已一次批准。'
+          :'旧版浏览器设备已批准。');
       }else{
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/revoke',
           json('POST',{}));

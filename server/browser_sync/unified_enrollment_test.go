@@ -148,3 +148,39 @@ func TestUnifiedEnrollmentRevokedExtensionCannotEnrollNewDevices(t *testing.T) {
 		t.Fatal("revoked extension was reapproved through pending browser")
 	}
 }
+
+func TestUnifiedEnrollmentLegacyApprovedDeviceCannotMoveToPendingExtension(t *testing.T) {
+	store := testBrowserStore(t)
+	device := unifiedRegistration(t)
+	ctx := context.Background()
+	if _, err := store.Register(ctx, device); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Approve(ctx, device.ID, "id_1", true, false); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(store, nil)
+	if out := postEnrollment(t, h, unifiedExtensionID, device); out.Code != http.StatusConflict {
+		t.Fatalf("approved browser was rebound to pending origin: %d", out.Code)
+	}
+	saved, err := store.Device(ctx, device.ID)
+	if err != nil || saved.ExtensionID != "" || saved.State != "approved" {
+		t.Fatalf("legacy browser association changed unexpectedly: %+v %v", saved, err)
+	}
+}
+func TestUnifiedApprovalSupportsLegacyUnboundDevice(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	device := unifiedRegistration(t)
+	if _, err := store.Register(ctx, device); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApproveEnrollment(ctx, device.ID, "id_1", false, true); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.Device(ctx, device.ID)
+	if err != nil || saved.State != "approved" || !saved.Receive || saved.Send ||
+		saved.ExtensionID != "" {
+		t.Fatalf("legacy approval changed: %+v %v", saved, err)
+	}
+}

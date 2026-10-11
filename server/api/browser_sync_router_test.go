@@ -45,7 +45,10 @@ func TestBrowserSyncRegistrationIsolatedFromAdminCSRF(t *testing.T) {
 	if code := call("/api/v1/server/config", "chrome-extension://"+extensionID); code != http.StatusForbidden {
 		t.Fatalf("browser extension bypassed Admin CSRF: %d", code)
 	}
-	if code := call("/api/v1/browser-sync/devices/register", "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); code != http.StatusForbidden {
-		t.Fatalf("foreign extension origin accepted: %d", code)
+	if code := call("/api/v1/browser-sync/devices/register", "chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); code != http.StatusBadRequest {
+		t.Fatalf("unseen extension origin could not request device enrollment: %d", code)
+	}
+	if code := call("/api/v1/browser-sync/devices/register", "https://example.com"); code != http.StatusForbidden {
+		t.Fatalf("non-extension origin accepted: %d", code)
 	}
 }

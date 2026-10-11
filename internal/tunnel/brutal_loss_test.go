@@ -188,8 +188,8 @@ func transferWithDeterministicLoss(t *testing.T, payload []byte, dropEvery uint6
 }
 
 // TestBrutalKernelNetemDataPlane is opt-in because it needs tc netem to be
- // installed outside the process. It verifies data integrity across a
- // real kernel-shaped UDP path.
+// installed outside the process. It verifies data integrity across a
+// real kernel-shaped UDP path.
 func TestBrutalKernelNetemDataPlane(t *testing.T) {
 	if os.Getenv("RELAYPROXY_BRUTAL_NETEM") != "1" {
 		t.Skip("requires externally configured Linux tc netem qdisc")

@@ -95,6 +95,8 @@ def validate_rates(rows, min_samples=10):
     seconds = (int(valid[-1]["unix_ms"]) - int(valid[0]["unix_ms"])) / 1000
     if seconds <= 0:
         return None, "no sustained overlapping time span"
+    if seconds < 55:
+        return None, "insufficient sustained overlapping sampling span (<55s)"
     speeds = []
     for key in ("bbr_interval_mbps", "brutal_interval_mbps"):
         speeds.append(statistics.mean(float(r[key]) for r in valid))
@@ -219,8 +221,8 @@ def main(argv=None):
                 raise ValueError(name)
         except argparse.ArgumentTypeError as exc:
             parser.error(str(exc))
-    if args.duration < 15 or args.rounds < 5 or not 0.25 <= args.interval <= 5:
-        parser.error("require >=15s duration, >=5 rounds and 0.25-5s sample interval")
+    if args.duration < 60 or args.rounds < 5 or not 0.25 <= args.interval <= 5:
+        parser.error("require >=60s duration, >=5 rounds and 0.25-5s sample interval")
     if args.idle_pings < args.min_pings or args.min_pings < 3:
         parser.error("require >=3 ping samples in each phase")
     if not args.url.startswith(("https://", "http://")):

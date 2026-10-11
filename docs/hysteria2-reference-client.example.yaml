@@ -1,0 +1,18 @@
+# EXAMPLE ONLY, for the Issue #198 real-WAN three-way comparison.
+# Run on physical Client A with RelayProxy BBR and Brutal Agent profiles.
+server: YOUR_SERVER_WAN_HOST:20002
+auth: REPLACE_WITH_TEST_ONLY_PASSWORD
+
+tls:
+  ca: /REPLACE_WITH_TEST_CERT/ca.crt
+
+# Hysteria Brutal must be assigned a measured directional target.
+# Match Agent's up_mbps/down_mbps *numerically*, and independently bound
+# the joint traffic below sustainable shared WAN capacity.
+bandwidth:
+  up: 8 mbps      # Client -> Server
+  down: 8 mbps    # Server -> Client
+  disableLossCompensation: false
+
+socks5:
+  listen: 127.0.0.1:1082

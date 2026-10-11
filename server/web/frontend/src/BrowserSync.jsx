@@ -45,7 +45,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
       if(mode==='approve'){
         const caps=capabilities[id]||{send:true,receive:false};
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/approve',
-          json('POST',{identityId:identity[id],send:!!caps.send,receive:!!caps.receive}));
+          json('POST',{identityId:identity[id]||devices.find(d=>d.id===id)?.requestedIdentityId,send:!!caps.send,receive:!!caps.receive}));
         setNotice(devices.some(d=>d.id===id&&d.extensionId)
           ?'扩展与该浏览器设备已一次批准。'
           :'旧版浏览器设备已批准。');
@@ -78,7 +78,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
   };
   const visible=devices.filter(d=>
     (stateFilter==='all'||d.state===stateFilter)&&
-    [d.name,d.id,d.identityId,d.state,d.extensionId].join(' ').toLowerCase()
+    [d.name,d.id,d.identityId,d.requestedIdentityId,d.state,d.extensionId].join(' ').toLowerCase()
       .includes(filter.trim().toLowerCase()))
     .sort((a,b)=>({pending:0,approved:1,revoked:2}[a.state]??3)-
       ({pending:0,approved:1,revoked:2}[b.state]??3));
@@ -143,7 +143,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
                   {d.extensionState==='revoked'&&<small className="browser-sync-device-extra">扩展已撤销</small>}</td>
                 <td>{d.state==='pending'?<div className="browser-sync-approve-controls">
                   <select className="input" aria-label={'为 '+(d.name||d.id)+' 选择身份'}
-                    value={identity[d.id]||''} onChange={e=>setIdentity(v=>({...v,[d.id]:e.target.value}))}>
+                    value={identity[d.id]||d.requestedIdentityId||''} onChange={e=>setIdentity(v=>({...v,[d.id]:e.target.value}))}>
                     <option value="">选择身份</option>{activeIdentities.map(v=>
                       <option value={v.id} key={v.id}>{v.name||v.id}</option>)}
                   </select>
@@ -158,7 +158,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
                     {[d.send?'发送':null,d.receive?'接收':null].filter(Boolean).join(' / ')||'无同步权限'}</small></>}</td>
                 <td className="browser-sync-actions">{d.state==='pending'?
                   <button className="btn primary" type="button"
-                    disabled={!!busy||!identity[d.id]||(!caps.send&&!caps.receive)}
+                    disabled={!!busy||!(identity[d.id]||d.requestedIdentityId)||(!caps.send&&!caps.receive)}
                     onClick={()=>action(d.id,'approve')}>批准</button>:
                   d.state==='approved'?<button className="btn" type="button"
                     disabled={!!busy} onClick={()=>action(d.id,'revoke')}>撤销授权</button>:

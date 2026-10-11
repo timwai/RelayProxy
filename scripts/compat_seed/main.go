@@ -117,13 +117,13 @@ func makeTestCert(dir string) error {
 	}
 	template := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:       pkix.Name{CommonName: "localhost"},
-		NotBefore:     time.Now().Add(-time.Hour),
-		NotAfter:      time.Now().Add(6 * time.Hour),
-		DNSNames:      []string{"localhost"},
-		IPAddresses:   []net.IP{net.ParseIP("127.0.0.1")},
-		KeyUsage:      x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:   []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(6 * time.Hour),
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
 	encoded, err := x509.CreateCertificate(rand.Reader, template, template, privateKey.Public(), privateKey)
 	if err != nil {

@@ -318,7 +318,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	for {
 		loopCtx, done := context.WithTimeout(ctx, 55*time.Second)
 		var msg ruleControlFrame
-		err := readFrameLimit(loopCtx, conn, &msg, 400*1024)
+		err := readFrameLimit(loopCtx, conn, &msg, 1536*1024)
 		done()
 		if err != nil {
 			return

@@ -59,3 +59,16 @@ func TestValidateEnvelope(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandedSnapshotCiphertextEnvelopeLimit(t *testing.T) {
+	now := time.Now().UTC()
+	env := validEnvelope(now)
+	env.Ciphertext = base64.RawURLEncoding.EncodeToString(make([]byte, 768*1024))
+	if err := ValidateEnvelope(env, now); err != nil {
+		t.Fatalf("large but bounded encrypted snapshot rejected: %v", err)
+	}
+	env.Ciphertext = base64.RawURLEncoding.EncodeToString(make([]byte, MaxCiphertextBytes+1))
+	if err := ValidateEnvelope(env, now); err == nil {
+		t.Fatal("snapshot larger than the wire limit was accepted")
+	}
+}

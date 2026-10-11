@@ -3,6 +3,7 @@
 // fixed routing metadata and ciphertext, never Cookie names or values.
 import { getOrCreateIdentity, signBytes, encryptionPrivateKey } from './device-identity.js';
 import { toBase64url, fromBase64url, importPublic } from './envelope.js';
+import {packSessionPayload,unpackSessionPayload,MAX_WIRE_PLAINTEXT_BYTES} from './session-payload.js';
 
 export const CIPHER_SUITE = 'P256-HKDF-SHA256-A256GCM-v1';
 const utf8 = text => new TextEncoder().encode(text);
@@ -47,8 +48,8 @@ export async function encryptSnapshot(rule, target, sequence, payload) {
   };
   const header = signedHeader(env);
   const key = await sessionAESKey(target.encryptionPublicKey,ephemeral.privateKey,salt,header,'encrypt');
-  const raw = utf8(JSON.stringify(payload));
-  if (raw.length > 224*1024) throw new Error('站点状态超过 224 KiB 的单次加密传输上限；不会静默丢弃 Key');
+  // Compression is inside AES-GCM; Server still sees only opaque ciphertext.
+  const raw = await packSessionPayload(payload);
   const ciphertext = await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:utf8(header)},key,raw);
   env.ciphertext = toBase64url(ciphertext);
   env.signature = toBase64url(await signBytes(utf8(header+'\n'+env.ciphertext)));
@@ -79,6 +80,6 @@ export async function decryptSnapshot(env, source) {
   if(iv.length!==12||fromBase64url(env.encryption.salt).length!==32)throw new Error('加密参数无效');
   const clear=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:utf8(header)},
     key,fromBase64url(env.ciphertext));
-  if(clear.byteLength>224*1024)throw new Error('会话快照超限');
-  return JSON.parse(new TextDecoder().decode(clear));
+  if(clear.byteLength>MAX_WIRE_PLAINTEXT_BYTES)throw new Error('会话密文解密后超限');
+  return unpackSessionPayload(new Uint8Array(clear));
 }

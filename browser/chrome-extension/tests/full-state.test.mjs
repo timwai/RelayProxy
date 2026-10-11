@@ -206,3 +206,31 @@ test('HTTP snapshots reject injected Secure, partitioned and SameSite=None cooki
   }
   assert.equal((await captureAllCookies(httpPolicy)).cookies.length,0);
 });
+
+test('large 700 KiB Storage snapshot is encrypted, relayed and restored without dropping any Key',async()=>{
+  const a=profile(),b=profile();
+  use(a);
+  const source=await getOrCreateIdentity();
+  a.page.local.set('large-auth', 'A'.repeat(420*1024));
+  a.page.session.set('large-tab','B'.repeat(280*1024));
+  a.page.local.set('last-key','last-key-must-survive');
+  const payload={...await captureAllCookies(policy),storage:await captureWebStorage(policy)};
+  use(b);
+  const target=await getOrCreateIdentity();
+  use(a);
+  const rule={ruleId:crypto.randomUUID(),status:'active',
+    sourceBrowserDeviceId:source.deviceId,targetBrowserDeviceId:target.deviceId};
+  const envelope=await encryptSnapshot(rule,{...target,id:target.deviceId},1,payload);
+  assert.ok(envelope.ciphertext.length<1024*1024*4/3);
+  assert.equal(JSON.stringify(envelope).includes('last-key-must-survive'),false);
+  use(b);
+  const decrypted=await decryptSnapshot(envelope,{...source,id:source.deviceId});
+  assert.equal(decrypted.storage.local['large-auth'].length,420*1024);
+  assert.equal(decrypted.storage.session['large-tab'].length,280*1024);
+  const transaction=await prepareWebStorageRestore(rule.ruleId,decrypted.storage,policy);
+  await transaction.apply();
+  await transaction.commit();
+  assert.equal(b.page.local.get('large-auth').length,420*1024);
+  assert.equal(b.page.session.get('large-tab').length,280*1024);
+  assert.equal(b.page.local.get('last-key'),'last-key-must-survive');
+});

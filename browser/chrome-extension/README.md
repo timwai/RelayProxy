@@ -1,3 +1,13 @@
+## 完整 Storage 大于 180 KiB：加密前压缩与体积限制
+
+较大网站会在 Local Storage / Session Storage 保存大量设置、缓存和登录状态。此前完整 Storage JSON 超过 **180 KiB** 就停止同步，后续还有 224 KiB 客户端和 256 KiB Server 密文上限，导致即使完整网站授权成功也可能无法同步。
+
+新版将完整 Storage JSON 的采集/验证上限改为 **4 MiB**，包含 Cookie 的明文站点状态上限为 **5 MiB**；超过 180 KiB 的传输优先通过 Chrome 原生 `CompressionStream('gzip')` 压缩，再放入原有 AES-GCM 端到端加密与设备 ECDSA 签名的 `SESSION_SNAPSHOT` 中。Server 看到的仍只有密文，不持有压缩前 Cookie/Storage，也不解压。解压端按流累计读取，上限 5 MiB，拒绝压缩炸弹或其他超限输入。**不采样、不截断、不跳过任何 Key**。
+
+加密后密文仍受到独立 **1 MiB** 硬限制（含 AES-GCM Tag），Server 对应单条 WSS 控制帧限制为 **1.5 MiB**。这不等于保证任意 5 MiB 高熵站点数据都可以单帧发送：若 gzip 压缩后仍超限，扩展会拒绝整次同步并提示清理无关站点缓存，再重试；不发生半包应用。未来如需传输不可压缩的大于 1 MiB 会话，可设计独立分片协议、整包哈希和原子提交，不应直接移除帧/解压上限。
+
+兼容性：`browser.sync.v1` 原有 Envelope 签名与密钥格式未变化。小快照保持原来的 JSON 明文结构（仅在端到端加密内部）；新的 gzip wrapper 也位于经过认证的加密明文中。**A、B 两端都需要更新 Chrome 扩展**，并更新 Server 的 WSS 大帧限制；新发件端配旧接收端不能正确恢复 gzip wrapper，旧 Server 不能转发超出原限制的大帧。Cookie-only、HTTP/HTTPS Host 配对和网络出口管理权限均不变。
+
 # RelayProxy Browser Sync — Chrome 扩展（P3 开发预览）
 
 > **代码状态（2026-10-11）**：独立的 Chrome Profile 本机 Agent 代理、HTTP 正向代理、任意合法 TCP CONNECT 地址/端口及原生 DIRECT/PROXY/REJECT 已在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 集成，Go/UI/Network CI success，但真实 Chrome、WebRTC/UDP/QUIC/DNS/回环绕过及安全验收尚未完成。Cookie 同步仍无需本机 Agent，只有选择本机网络出口才需要安装 B Agent。发布状态仍为 Draft。详情见 [Living Tracker](../../docs/browser-session-sync-progress.md)。

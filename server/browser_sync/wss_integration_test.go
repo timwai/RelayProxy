@@ -3,6 +3,9 @@ package browsersync
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +15,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/google/uuid"
+	protocol "relayproxy/internal/browser_sync"
 )
 
 func dialApprovedBrowser(t *testing.T, server *httptest.Server, device BrowserDevice, key *ecdsa.PrivateKey) *websocket.Conn {
@@ -266,5 +270,51 @@ func TestWSSRecoversSequenceAndTerminalDeliveryAfterReconnect(t *testing.T) {
 	sendWSSControl(t, b, map[string]any{"type": "DELIVERY_STATUS", "requestId": "unauthorized", "ruleId": ruleID, "messageId": env.MessageID})
 	if reply := readWSSControl(t, b); reply["type"] != "RULE_ERROR" {
 		t.Fatalf("receiver read source-only delivery result: %v", reply)
+	}
+}
+
+func TestWSSLargeEncryptedSnapshotCrossesOldFrameLimit(t *testing.T) {
+	store := testBrowserStore(t)
+	source, key := approvedWSSBrowser(t, store, true, false)
+	target, targetKey := approvedWSSBrowser(t, store, false, true)
+	ruleID := uuid.NewString()
+	ctx := context.Background()
+	if err := store.OfferRule(ctx, source.ID, encryptedTestOffer(ruleID, target.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AcceptRule(ctx, target.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ConfirmRule(ctx, source.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(NewHandler(store, []string{testExtensionID}))
+	defer server.Close()
+	a := dialApprovedBrowser(t, server, source, key)
+	b := dialApprovedBrowser(t, server, target, targetKey)
+	// coder/websocket clients default to a smaller inbound read limit.
+	b.SetReadLimit(1536 * 1024)
+	env := signedTestSnapshot(t, key, source.ID, target.ID, ruleID)
+	cipher := make([]byte, 550*1024)
+	if _, err := rand.Read(cipher); err != nil {
+		t.Fatal(err)
+	}
+	env.Ciphertext = base64.RawURLEncoding.EncodeToString(cipher)
+	digest := sha256.Sum256([]byte(protocol.SignedHeader(env)+"\n"+env.Ciphertext))
+	rSig, sSig, err := ecdsa.Sign(rand.Reader, key, digest[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig := make([]byte, 64)
+	rSig.FillBytes(sig[:32])
+	sSig.FillBytes(sig[32:])
+	env.Signature = base64.RawURLEncoding.EncodeToString(sig)
+	sendWSSControl(t, a, map[string]any{"type":"SESSION_SNAPSHOT","requestId":"big",
+		"envelope":env})
+	if resp := readWSSControl(t, a); resp["status"] != "RELAYED" {
+		t.Fatalf("large signed session not relayed: %v", resp["type"])
+	}
+	if resp := readWSSControl(t, b); resp["type"] != "SESSION_SNAPSHOT" {
+		t.Fatalf("large signed session not delivered: %v", resp["type"])
 	}
 }

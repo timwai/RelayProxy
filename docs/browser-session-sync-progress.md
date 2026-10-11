@@ -340,3 +340,10 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **WEB-NET-01**：在 Server Web“浏览器同步”内新增 Agent 网络出口配置面板。复用现有 Admin-only `/api/v1/server/config` 的 revision 校验、配置落盘和重启检测，不增加未认证写入接口。直接设置监听地址 / 对外域名 / 在线 Agent 勾选共享白名单，并保留离线但已选择的出口 ID。禁用时留空两项地址，仍不影响 Cookie/Storage E2EE。
 - **WEB-NET-02**：Agent Web/GUI 的“本机出口共享”新增“允许浏览器网络共享”显式开关，保存 `exit.browser_network_share` 至 Agent 配置，默认关闭，纳入启动参数重启差异提示。Server 管理员无法代替 Agent 本地用户直接授予这个能力。
 - **WEB-NET-03**：纯 JS Web 配置验证测试覆盖地址和端口、至少一个显式允许的 Agent ID、无关 Server 设置保留。Agent Go React 配置 roundtrip 测试增加浏览器共享开关及 Web JSON 响应契约。真实网页、代理监听和网络联调仍需部署后验收。
+
+### 2026-10-11 完整 Storage 180 KiB 截止错误修复
+
+- **SIZE-01**：问题来自三层独立大小上限：`web-storage.js` 180 KiB、`session-envelope.js` 224 KiB、Server `internal/browser_sync/protocol.go` 最大密文 256 KiB（外加 WSS 400 KiB 帧）。仅放大 Storage 大小不能成功中继。
+- **SIZE-02**：完整 Local/Session Storage 上限改为 4 MiB，Cookie+Storage 明文 JSON 整包最大 5 MiB；超过 180 KiB 时优先 gzip，再在 P-256 ECDH / AES-GCM / ECDSA 内传输，采用原 `browser.sync.v1` Envelope 格式、同一防重放序号与整包终态 ACK。不把压缩前的秘密持久化在 Server 或扩展配置存储中，绝不跳过 Key。
+- **SIZE-03**：单密文最大 1 MiB，Server WSS 输入 1.5 MiB。接收端只允许 5 MiB 内解压结果，流式计数限制 gzip bomb，损坏 wrapper 全包失败、不写入网站 Storage。无法压缩到单帧上限的超高熵数据返回明确错误；后续再设计经批准的分片 + 原子提交，不自动增加无限制容量。
+- **SIZE-04**：新增 Node 小快照兼容、700 KiB 全量 Storage 的 A/B 加解密恢复、不可压缩数据、超限拒绝、gzip bomb 和格式篡改测试。Go 增加新版密文长度验证及跨原 WSS 400 KiB 档位的大快照中继测试。测试代码已提交，真实 Chrome A/B 与 CI 结果仍待验收。部署必须同时更新 Server 与 A/B 扩展；PR 保持 Draft。

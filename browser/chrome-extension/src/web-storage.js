@@ -8,7 +8,7 @@ import {cookieValueTag} from './device-identity.js';
 const key='browserSyncManagedWebStorageV2';
 const journalKey='browserSyncStorageRestoreJournal';
 const maxKeys=4096;
-const MAX_STORAGE_BYTES=180*1024;
+const MAX_STORAGE_BYTES=4*1024*1024; // byte-accurate full-site ceiling, no dropped keys
 function readBoth(expectedOrigin){
   if(location.origin!==expectedOrigin)throw new Error('站点导航已变化');
   function read(store){
@@ -68,14 +68,14 @@ function verify(data){
       throw new Error('Storage 键值数量超限');
     const out=Object.create(null);
     for(const [k,v] of Object.entries(input)){
-      if(typeof v!=='string'||k.length>4096||v.length>MAX_STORAGE_BYTES)
+      if(typeof v!=='string'||k.length>4096||new TextEncoder().encode(v).length>MAX_STORAGE_BYTES)
         throw new Error('Storage Key/Value 不符合限制');
       out[k]=v;
     }
     clean[kind]=out;
   }
   if(new TextEncoder().encode(JSON.stringify(clean)).length>MAX_STORAGE_BYTES)
-    throw new Error('完整 Storage 数据超出 180 KiB，未截断任何 Key');
+    throw new Error('完整 Storage 数据超出 4 MiB 安全上限；没有截断 Key，可清理无关站点缓存后重试');
   return clean;
 }
 export async function captureWebStorage(policy){

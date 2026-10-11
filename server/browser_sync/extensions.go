@@ -11,8 +11,8 @@ import (
 
 var chromeExtensionIDPattern = regexp.MustCompile(`^[a-p]{32}$`)
 
-// BrowserExtension is a separately reviewed Chrome origin, NOT an Agent or
-// an approved BrowserDevice. Unknown origins can only queue an approval request.
+// BrowserExtension is a recorded Chrome origin, not an authorization grant.
+// A matching, individually approved device is always required for access.
 type BrowserExtension struct {
 	ID        string    `json:"id"`
 	State     string    `json:"state"`
@@ -21,7 +21,7 @@ type BrowserExtension struct {
 
 func (s *Store) EnsureExtensionSchema(ctx context.Context) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS browser_sync_extensions (
-		extension_id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'pending',
+		extension_id TEXT PRIMARY KEY, state TEXT NOT NULL DEFAULT 'approved',
 		created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
 		CHECK(state IN ('pending','approved','revoked'))
 	)`); err != nil {
@@ -47,17 +47,22 @@ func (s *Store) RequestExtension(ctx context.Context, id string) (string, error)
 	var state string
 	err := s.db.QueryRowContext(ctx, `SELECT state FROM browser_sync_extensions WHERE extension_id=?`, id).Scan(&state)
 	if err == nil {
+		if state == "pending" { // Migrate pre-single-approval records on registration.
+			_, err = s.db.ExecContext(ctx, `UPDATE browser_sync_extensions SET state='approved',updated_at=? WHERE extension_id=? AND state='pending'`, time.Now().UTC(), id)
+			if err != nil { return "", err }
+			state = "approved"
+		}
 		return state, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	if count >= 500 {
-		return "", errors.New("browser extension approval queue full")
+		return "", errors.New("browser extension origin inventory full")
 	}
 	now := time.Now().UTC()
 	if _, err = s.db.ExecContext(ctx, `INSERT INTO browser_sync_extensions(extension_id,state,created_at,updated_at)
-		VALUES(?,'pending',?,?) ON CONFLICT(extension_id) DO NOTHING`, id, now, now); err != nil {
+		VALUES(?,'approved',?,?) ON CONFLICT(extension_id) DO NOTHING`, id, now, now); err != nil {
 		return "", err
 	}
 	err = s.db.QueryRowContext(ctx, `SELECT state FROM browser_sync_extensions WHERE extension_id=?`, id).Scan(&state)
@@ -120,7 +125,7 @@ func (s *Store) SetExtensionApproved(ctx context.Context, id string, approve boo
 
 // EnrollExtensionDevice binds a Chrome Origin to the exact device ID and
 // P-256 public keys during a single, unprivileged registration attempt.
-// Approval remains an independent admin-only transaction.
+// Only device approval grants access; origin inventory never grants privileges.
 func (s *Store) EnrollExtensionDevice(ctx context.Context, extensionID string, device BrowserDevice) (BrowserDevice, string, error) {
 	if err := ValidateRegistration(device); err != nil {
 		return BrowserDevice{}, "", err
@@ -142,9 +147,9 @@ func (s *Store) EnrollExtensionDevice(ctx context.Context, extensionID string, d
 	if err != nil {
 		return BrowserDevice{}, "", err
 	}
-	// A previously approved legacy device cannot be rebound to a newly
-	// unapproved extension using public keys alone.
-	if saved.State == "approved" && state != "approved" {
+	// Never allow an unbound legacy approved device to pick up a new
+	// extension origin based on public keys alone.
+	if saved.State == "approved" && saved.ExtensionID == "" {
 		return BrowserDevice{}, "", ErrDeviceConflict
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO browser_sync_device_extensions(device_id,extension_id,created_at)
@@ -164,8 +169,8 @@ func (s *Store) EnrollExtensionDevice(ctx context.Context, extensionID string, d
 	return saved, state, nil
 }
 
-// ApproveEnrollment approves the linked extension and pending device atomically.
-// Legacy devices without an extension binding keep the old approval path.
+// ApproveEnrollment approves only the device. The extension ID is metadata
+// bound to that device and is not a separate source of authorization.
 func (s *Store) ApproveEnrollment(ctx context.Context, id, identityID string, canSend, canReceive bool) error {
 	var extensionID string
 	err := s.db.QueryRowContext(ctx, `SELECT extension_id FROM browser_sync_device_extensions
@@ -207,25 +212,11 @@ func (s *Store) ApproveEnrollment(ctx context.Context, id, identityID string, ca
 	if n != 1 {
 		return ErrNotFound
 	}
-	if extensionState == "pending" {
-		result, err = tx.ExecContext(ctx, `UPDATE browser_sync_extensions SET state='approved', updated_at=?
-            WHERE extension_id=? AND state='pending'`, time.Now().UTC(), extensionID)
-		if err != nil {
-			return err
-		}
-		n, err = result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if n != 1 {
-			return ErrNotFound
-		}
-	}
 	return tx.Commit()
 }
 
-// DeleteRevokedExtension enables an administrator to make the SAME Chrome
-// extension ID eligible for a fresh pending approval request. The revoked
+// DeleteRevokedExtension permits clearing a historical origin-wide revocation.
+// Re-enrollment still requires individual device approval. The revoked
 // record cannot be deleted while any linked devices remain, and deleting it
 // never automatically grants permission to the next registration.
 func (s *Store) DeleteRevokedExtension(ctx context.Context, id string) error {

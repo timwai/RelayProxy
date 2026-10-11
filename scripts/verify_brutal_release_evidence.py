@@ -62,8 +62,12 @@ def verify(ab_csv, coexistence_paths, manifest, policy):
         evidence = loss_evidence.get(loss, {})
         if not isinstance(evidence, dict) or not evidence.get("impairment_log"):
             errors.append(f"manifest missing impairment log reference for loss={loss}")
-        elif not Path(evidence["impairment_log"]).is_file():
-            errors.append(f"loss={loss} impairment log does not exist")
+        else:
+            log = Path(evidence["impairment_log"])
+            if not log.is_file():
+                errors.append(f"loss={loss} impairment log does not exist")
+            elif log.stat().st_size == 0:
+                errors.append(f"loss={loss} impairment log is empty")
     params = {}
     for field in POLICY_FIELDS:
         try:

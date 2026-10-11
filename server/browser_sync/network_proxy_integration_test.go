@@ -1,0 +1,135 @@
+package browsersync
+
+import (
+	"bufio"
+	"context"
+	"crypto/tls"
+	"encoding/base64"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
+	"relayproxy/server/session"
+)
+
+type browserEchoStream struct{ net.Conn }
+
+func (s *browserEchoStream) CloseWrite() error { return s.Close() }
+
+type browserEchoTunnel struct {
+	requests chan protocol.OpenTCPRequest
+}
+
+func (s *browserEchoTunnel) OpenStream(ctx context.Context) (tunnel.TunnelStream, error) {
+	client, agent := net.Pipe()
+	go func() {
+		defer agent.Close()
+		header, err := protocol.ReadStreamHeader(agent)
+		if err != nil || header.Type != protocol.FrameTypeOpenTCP {
+			return
+		}
+		var req protocol.OpenTCPRequest
+		if err := protocol.ReadJSON(agent, &req); err != nil {
+			return
+		}
+		s.requests <- req
+		if err := protocol.WriteJSON(agent, protocol.OpenTCPResponse{
+			RequestID: req.RequestID, Success: true,
+		}); err != nil {
+			return
+		}
+		_, _ = io.Copy(agent, agent)
+	}()
+	return &browserEchoStream{Conn: client}, nil
+}
+
+func (s *browserEchoTunnel) AcceptStream(ctx context.Context) (tunnel.TunnelStream, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func (s *browserEchoTunnel) Transport() tunnel.TransportType { return tunnel.TransportTLS }
+func (s *browserEchoTunnel) RemoteAddr() net.Addr          { return &net.TCPAddr{} }
+func (s *browserEchoTunnel) LocalAddr() net.Addr           { return &net.TCPAddr{} }
+func (s *browserEchoTunnel) Close() error                  { return nil }
+func (s *browserEchoTunnel) Done() <-chan struct{}         { return nil }
+
+func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
+	store := testBrowserStore(t)
+	source, receiver, ruleID := approvedDeliveryRule(t, store)
+	ctx := context.Background()
+	const exitID = "dev_browser_test_exit_01"
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, "login.example.com", exitID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AcceptNetworkBinding(ctx, receiver.ID, ruleID, "login.example.com"); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := session.NewManager()
+	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1)}
+	sessions.Register(&session.DeviceSession{
+		DeviceID: exitID, IdentityID: "id_1", DeviceName: "Approved Agent",
+		Grants: []string{protocol.CapabilityProxyExit}, Tunnel: echo,
+	})
+	t.Cleanup(func() { sessions.Unregister(exitID) })
+	proxy := NewNetworkProxy(store, sessions, "relay.example.com:21090", []string{exitID})
+	lease, err := proxy.Issue(ctx, receiver.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials := base64.StdEncoding.EncodeToString([]byte("browser:" + lease["token"].(string)))
+
+	httpsServer := httptest.NewTLSServer(proxy)
+	defer httpsServer.Close()
+	addr := strings.TrimPrefix(httpsServer.URL, "https://")
+	tlsConfig := httpsServer.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	tlsConfig.NextProtos = []string{"http/1.1"}
+	conn, err := tls.Dial("tcp", addr, tlsConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := fmt.Fprintf(conn, "CONNECT login.example.com:443 HTTP/1.1\r\nHost: login.example.com:443\r\nProxy-Authorization: Basic %s\r\n\r\n", credentials); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadString('\n')
+	if err != nil || !strings.Contains(line, "200 Connection Established") {
+		t.Fatalf("CONNECT status %q: %v", line, err)
+	}
+	for {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	select {
+	case request := <-echo.requests:
+		if request.Host != "login.example.com" || request.Port != 443 {
+			t.Fatalf("wrong agent target: %+v", request)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Agent never received OpenTCP request")
+	}
+	if _, err := conn.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 5)
+	if _, err := io.ReadFull(reader, buf); err != nil {
+		t.Fatalf("Relay did not forward Agent response: %v", err)
+	}
+	if string(buf) != "hello" {
+		t.Fatalf("unexpected tunneled payload %q", buf)
+	}
+}

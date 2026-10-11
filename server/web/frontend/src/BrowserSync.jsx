@@ -29,6 +29,7 @@ function BrowserNetworkSettings({onOpenSettings}) {
   useEffect(()=>{load()},[load]);
   const toggle=id=>setEdit(v=>({...v,allowed:v.allowed.includes(id)?
     v.allowed.filter(x=>x!==id):[...v.allowed,id]}));
+  const relayPort=String(record?.config?.tunnel?.tcpListen||'').split(':').at(-1);
   const onlineIDs=new Set(exits.map(x=>x.deviceId));
   const extras=(edit?.allowed||[]).filter(id=>!onlineIDs.has(id));
   const changed=record&&edit&&(
@@ -38,7 +39,7 @@ function BrowserNetworkSettings({onOpenSettings}) {
       JSON.stringify([...list(record.config.browserSync?.allowedExitIds)].sort()));
   const save=async()=>{
     if(!record||!edit||busy||!changed)return;
-    const validation=validateBrowserNetworkDraft(edit);
+    const validation=validateBrowserNetworkDraft(edit,relayPort);
     if(validation){setError(validation);return;}
     if(edit.listen && (record.config.admin?.tlsEnabled!==true ||
       record.config.tunnel?.tlsEnabled!==true)){
@@ -74,18 +75,37 @@ function BrowserNetworkSettings({onOpenSettings}) {
       <p>未取得配置，请通过“高级设置”确认 Server 是否启用配置管理。</p>:
       <>
         <div className="form-grid">
-          <label>代理 TCP 监听地址
+          <label>浏览器网络出口接入方式
+            <select className="input" disabled={busy}
+              value={!edit.listen?'off':edit.listen==='relay'?'relay':'dedicated'}
+              onChange={e=>{
+                const mode=e.target.value;
+                setEdit(v=>{
+                  if(mode==='off')return {...v,listen:'',advertise:'',allowed:[]};
+                  const port=mode==='relay'?relayPort:'21292';
+                  const host=window.location.hostname;
+                  return {...v,listen:mode==='relay'?'relay':':21292',
+                    advertise:host&&port?host+':'+port:v.advertise};
+                });
+              }}>
+              <option value="relay">复用 RelayProxy TCP 中继端口（推荐 · {relayPort||'未配置'}）</option>
+              <option value="dedicated">独立 HTTPS CONNECT 端口（兼容旧配置）</option>
+              <option value="off">停用网络出口共享</option>
+            </select>
+          </label>
+          {edit.listen&&edit.listen!=='relay'&&<label>独立代理 TCP 监听地址
             <input className="input" value={edit.listen} placeholder=":21292"
               onChange={e=>setEdit(v=>({...v,listen:e.target.value}))} disabled={busy}/>
-          </label>
-          <label>对外代理域名与端口
+          </label>}
+          {edit.listen&&<label>对外代理域名与端口
             <input className="input" value={edit.advertise}
-              placeholder="relay.example.com:21292"
+              placeholder={'relay.example.com:'+(edit.listen==='relay'?relayPort:'21292')}
               onChange={e=>setEdit(v=>({...v,advertise:e.target.value}))} disabled={busy}/>
-          </label>
+          </label>}
         </div>
-        <p className="muted">两个地址都留空且取消全部 Agent 白名单表示停用。对外域名必须匹配 Server TLS 证书，
-          端口需要由管理员在防火墙放行。修改配置不会自动重启服务。</p>
+        <p className="muted">推荐复用 Server 现有 TCP 中继端口，无需额外开放公网端口。
+          与 Agent QUIC/UDP 共用数字端口不会冲突。公网代理域名仍必须匹配 TLS 证书；
+          选择独立端口仅用于兼容旧部署。保存后重启 Server 才会生效。</p>
         <h4>允许作为浏览器网络出口的 Agent</h4>
         {exits.length? <div className="grid-cards">{exits.map(agent=>
           <label className="panel" key={agent.deviceId} style={{display:'flex',gap:10,alignItems:'center',cursor:'pointer'}}>
@@ -113,6 +133,7 @@ function BrowserNetworkSettings({onOpenSettings}) {
             {busy?'正在保存…':'保存网络出口配置'}</button>
           {changed&&<button className="btn" onClick={load} disabled={busy}>取消修改</button>}
         </div>
+        <p className="muted">Chrome 扩展“RelayProxy HTTPS Server”现在也可填写中继 HTTPS 地址，例如 https://relay.example.com:443；中继端口仅开放浏览器设备注册和 WSS，不开放 Server Admin API。</p>
         <p className="muted">还需在 Agent Web / GUI → 本机出口共享 开启“允许作为浏览器网络出口”，
           并重启或重连 Agent。只有 Server、Agent 和设备身份授权同时满足后，Chrome 扩展才能发送绑定邀请。</p>
       </>}

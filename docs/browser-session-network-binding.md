@@ -1,3 +1,30 @@
+## 复用现有 TLS/TCP 中继端口（2026-10-11）
+
+**推荐新部署使用 Relay TCP 复用模式**，不需要另开浏览器代理公网端口；现有 Admin HTTPS 端口保持用于 Web 控制台及管理员操作，不允许通过 Relay TCP 端口访问。
+
+```yaml
+server:
+  tls:
+    listen: ":443"           # Agent TLS/TCP 和 Browser Sync 公网入口
+  admin:
+    listen: ":8443"          # 保持独立的 Admin Web 端口
+browser_sync:
+  enabled: true
+  network_proxy:
+    listen: "relay"          # 显式启用同一个 TCP 中继监听，非第二个端口
+    advertise: "relay.example.com:443"
+    allowed_exit_ids:
+      - "dev_实际的Agent设备ID"
+```
+
+注意：`listen: ""` 表示**关闭浏览器代理**，但不关闭 Browser Sync Cookie/Storage 同步；`listen: "relay"` 才会复用 TLS/TCP 中继。`listen: ":21292"` 等真实网络地址仍可用于旧部署的独立 HTTPS CONNECT 入口。启用 `relay` 后，`advertise` 公网端口必须严格等于 `server.tls.listen` 的 TCP 端口。Agent QUIC/UDP 继续使用独立 UDP 套接字，可与 TCP 中继共用数字端口 443。
+
+同一 `https://relay.example.com:443` 可以同时用于 Chrome 扩展“RelayProxy HTTPS Server”（设备注册和 `/api/v1/browser-sync/ws`）与按配对授权的浏览器 HTTPS CONNECT；Agent 旧版 TLS TCP 隧道继续由 ALPN / 首字节分类识别处理。公网 HTTP 路由采用显式白名单：**仅** Browser Sync 注册、WSS、加密 CONNECT 和既有消息推送，不提供管理控制台、`/api/v1/server/config`、用户登录或管理 API。Server Admin HTTPS `https://relay.example.com:8443` 保持独立并需要管理员认证。
+
+HTTPS/WSS/CONNECT 在网关上由真正的 `net/http.Server` 处理（支持 WebSocket Upgrade、CONNECT Hijack、流式收发和长连接），替换了以前“单请求缓冲并关闭”的简化响应。公网 TCP 连接仍计入 Gateway 连接数上限和关闭流程；WSS 身份签名、浏览器扩展 Origin 校验、A/B 配对及 Agent 网络出口白名单和独立 opt-in 不因复用而放宽。
+
+**部署**：Server 需要更新并重启；扩展可以继续沿用以前的 Admin HTTPS 地址，但要使用 `:443` 作为 Browser Sync 地址，建议同时更新 Chrome 扩展文案后在设置内重新授权新的 Server Origin。旧 Agent 不需要更新以使用 Cookie/Storage Sync；如需 Agent 分享浏览器网络出口，则它仍需支持并开启 `exit.browser_network_share`。
+
 # RelayProxy Browser Sync：A Agent 网络出口绑定
 
 > **实施状态（2026-10-11）**：开发分支 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 已集成完整 Chrome 本机 Agent 入口：标准 HTTP Forward、任意合法 TCP CONNECT/IP/内网/端口、现有 Agent DIRECT/PROXY/REJECT 和无须 Cookie 配对的全 Profile 开关。Go/UI/Network CI success，但**尚无真实 Chrome/安全验收**。下文旧 B 本机 DNS:443/配对限定段落是历史行为说明，**已被文末完整代理实现取代**；A 远端共享网络仍独立认证/批准。最新状态见 [持续开发跟踪表](./browser-session-sync-progress.md)。

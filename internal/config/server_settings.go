@@ -65,8 +65,11 @@ func NormalizeServerConfig(c *ServerConfig) error {
 		if !c.BrowserSync.Enabled || !c.IsAdminTLSEnabled() || !c.IsTLSEnabled() {
 			return errors.New("browser_sync.network_proxy requires enabled browser sync and TLS")
 		}
-		if err := validateListen(c.BrowserSync.NetworkProxy.Listen); err != nil {
-			return fmt.Errorf("browser_sync.network_proxy.listen: %w", err)
+		sharedRelay := c.BrowserSync.NetworkProxy.Listen == "relay"
+		if !sharedRelay {
+			if err := validateListen(c.BrowserSync.NetworkProxy.Listen); err != nil {
+				return fmt.Errorf("browser_sync.network_proxy.listen: %w", err)
+			}
 		}
 		if len(c.BrowserSync.NetworkProxy.AllowedExitIDs) == 0 || len(c.BrowserSync.NetworkProxy.AllowedExitIDs) > 32 {
 			return errors.New("browser_sync.network_proxy.allowed_exit_ids requires 1-32 explicitly permitted Agent exits")
@@ -74,9 +77,18 @@ func NormalizeServerConfig(c *ServerConfig) error {
 		if err := validateRendezvousAdvertise(c.BrowserSync.NetworkProxy.Advertise); err != nil {
 			return fmt.Errorf("browser_sync.network_proxy.advertise: %w", err)
 		}
-		if listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen, c.Server.Admin.Listen) ||
+		if sharedRelay {
+			// An explicit relay mode reuses the already-bound TLS/TCP socket.
+			// Never trust only a matching hostname: the advertised CONNECT port
+			// must be the actual tunnel TCP port, not the QUIC/UDP port.
+			_, relayPort, _ := net.SplitHostPort(c.Server.TLS.Listen)
+			_, advertisedPort, _ := net.SplitHostPort(c.BrowserSync.NetworkProxy.Advertise)
+			if relayPort == "" || relayPort == "0" || relayPort != advertisedPort {
+				return errors.New("browser sync shared relay proxy advertise port must match server.tls.listen TCP port")
+			}
+		} else if listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen, c.Server.Admin.Listen) ||
 			listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen, c.Server.TLS.Listen) {
-			return errors.New("browser sync HTTPS CONNECT listener must not share Admin or tunnel listener")
+			return errors.New("browser sync HTTPS CONNECT listener must not share Admin or tunnel listener; use listen: relay")
 		}
 		for _, id := range c.BrowserSync.NetworkProxy.AllowedExitIDs {
 			if !strings.HasPrefix(id, "dev_") || len(id) > 128 || len(id) < 8 {

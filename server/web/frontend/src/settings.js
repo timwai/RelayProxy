@@ -20,8 +20,8 @@ export const groups = [
     ['sourceCidrs','全局来源 CIDR（每行一条）','lines'],['rateLimitPerMinute','每来源 IP 每分钟上限','number']]},
   {id:'browserSync',title:'浏览器同步',subtitle:'Browser Sync 管理、Agent 共享出口白名单与远程代理（更改需重启）',section:'安全与访问',fields:[
     ['enabled','启用 Browser Sync','checkbox'],
-    ['networkProxyListen','来源 Agent HTTPS CONNECT 监听地址','text',':21292'],
-    ['networkProxyAdvertise','来源代理公网地址','text','relay.example.com:21292'],
+    ['networkProxyListen','浏览器代理监听（relay=复用中继端口；留空=关闭）','text','relay'],
+    ['networkProxyAdvertise','浏览器代理公网域名:TCP 端口','text','relay.example.com:443'],
     ['allowedExitIds','允许共享的 Agent 出口 ID（每行一条）','lines']]},
   {id:'certificate',title:'证书管理',subtitle:'HTTPS / QUIC 证书路径',section:'安全与访问',fields:[
     ['certFile','证书链 PEM 路径','text','/data/config/fullchain.pem'],['keyFile','私钥 PEM 路径','text','/data/config/privkey.pem']]},

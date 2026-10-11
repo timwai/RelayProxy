@@ -7,6 +7,9 @@ test('browser network listener, TLS address and exit allowlist are validated tog
   assert.equal(validateBrowserNetworkDraft(valid),'');
   assert.equal(validateBrowserNetworkDraft({...valid,listen:'0.0.0.0:21292'}),'');
   assert.equal(validateBrowserNetworkDraft({...valid,listen:'[::]:21292'}),'');
+  assert.equal(validateBrowserNetworkDraft({listen:'relay',advertise:'relay.example.com:443',allowed:['dev_approved']},'443'),'');
+  assert.notEqual(validateBrowserNetworkDraft({listen:'relay',advertise:'relay.example.com:21292',allowed:['dev_approved']},'443'),'');
+  assert.notEqual(validateBrowserNetworkDraft({listen:'relay',advertise:'relay.example.com:443',allowed:['dev_approved']},''),'');
   for(const patch of [
     {advertise:''},{listen:''},{advertise:'http://relay.example.com:21292'},
     {advertise:'relay.example.com:0'},{listen:'0.0.0.0:65536'},

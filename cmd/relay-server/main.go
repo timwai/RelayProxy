@@ -322,7 +322,24 @@ func main() {
 		router.SetPublicDirectControlHandler(publicDirectController.HandleControl)
 	}
 
+	// These handlers become active before Gateway.Start. The public relay
+	// handler deliberately exposes only Browser Sync enrollment/WSS, CONNECT
+	// and existing push endpoints; the Admin router is never mounted here.
+	var browserSyncHandler *browsersync.Handler
+	var browserNetworkProxy *browsersync.NetworkProxy
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
+	publicRelayHandler := api.PublicRelayHandler(publicPushHandler,
+		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if browserSyncHandler == nil { http.NotFound(w, req); return }
+			browserSyncHandler.ServeHTTP(w, req)
+		}),
+		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if browserNetworkProxy == nil {
+				http.Error(w, "browser network proxy disabled", http.StatusForbidden)
+				return
+			}
+			browserNetworkProxy.ServeHTTP(w, req)
+		}))
 
 	// 5. Start Tunnel Gateway (QUIC + TLS; QUIC requires TLS)
 	quicAddr := cfg.Server.QUIC.Listen
@@ -338,7 +355,7 @@ func main() {
 		TCPAddr:           cfg.Server.TLS.Listen,
 		QUICAddr:          quicAddr,
 		TLSConfig:         tunnelTLSConfig(cfg, tlsConfig),
-		PublicHTTPHandler: publicPushHandler,
+		PublicHTTPHandler: publicRelayHandler,
 		ServerInstanceID:  serverInstanceID,
 		AuthorizeDevice: func(fingerprint string, hello protocol.DeviceHello) (gateway.DeviceAuthorization, error) {
 			decision, err := db.ObserveDeviceIdentity(repository.DeviceIdentityObservation{
@@ -489,11 +506,6 @@ func main() {
 		P2PUPnPEnabled:           cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 	}, sessionMgr, router)
 
-	if err := gw.Start(); err != nil {
-		log.Fatalf("[Gateway] Failed to start tunnel gateway: %v", err)
-	}
-	defer gw.Close()
-
 	rdpSecurity, err := serverrdp.NewSecurityManager(db)
 	if err != nil {
 		log.Fatalf("[RDP Security] Failed to load security policy: %v", err)
@@ -526,7 +538,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("[Admin] Failed to initialize settings: %v", err)
 	}
-	var browserSyncHandler *browsersync.Handler
 	if cfg.BrowserSync.Enabled {
 		store, storeErr := browsersync.NewStore(db.DB)
 		if storeErr != nil {
@@ -537,12 +548,17 @@ func main() {
 			proxy := browsersync.NewNetworkProxy(store, sessionMgr, cfg.BrowserSync.NetworkProxy.Advertise,
 				cfg.BrowserSync.NetworkProxy.AllowedExitIDs)
 			proxy.SetRelayPolicy(relayACL.Policy())
-			if err := proxy.Start(cfg.BrowserSync.NetworkProxy.Listen, tlsConfig); err != nil {
-				log.Fatalf("[BrowserSync] HTTPS CONNECT listener: %v", err)
+			if cfg.BrowserSync.NetworkProxy.Listen == "relay" {
+				browserNetworkProxy = proxy
+				log.Printf("[BrowserSync] Scoped HTTPS CONNECT sharing the Agent TLS/TCP relay %s", cfg.Server.TLS.Listen)
+			} else {
+				if err := proxy.Start(cfg.BrowserSync.NetworkProxy.Listen, tlsConfig); err != nil {
+					log.Fatalf("[BrowserSync] HTTPS CONNECT listener: %v", err)
+				}
+				log.Printf("[BrowserSync] Dedicated scoped HTTPS CONNECT listener enabled on %s", proxy.Address())
 			}
 			defer proxy.Close(context.Background())
 			browserSyncHandler.ConfigureNetworkProxy(proxy)
-			log.Printf("[BrowserSync] Scoped HTTPS CONNECT listener enabled on %s", proxy.Address())
 		}
 		log.Printf("[BrowserSync] Browser session relay enabled; extension allowlist size=%d", len(cfg.BrowserSync.ExtensionIDs))
 	}
@@ -640,6 +656,14 @@ func main() {
 			return api.RDPIngressRuntimeStatus{TCPListening: status.TCPListening, UDPListening: status.UDPListening, ActiveUDP: status.ActiveUDP}
 		}),
 		api.WithRDPIngressPortRange(cfg.RDP.Ingress.PortStart, cfg.RDP.Ingress.PortEnd))
+	// Start the shared public gateway only after the Browser Sync router
+	// and optional CONNECT proxy are fully initialized. Neither handler is
+	// mutated while incoming gateway connections are being accepted.
+	if err := gw.Start(); err != nil {
+		log.Fatalf("[Gateway] Failed to start tunnel gateway: %v", err)
+	}
+	defer gw.Close()
+
 	adminServer := &http.Server{
 		Addr:         cfg.Server.Admin.Listen,
 		Handler:      apiRouter,

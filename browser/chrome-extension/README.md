@@ -1,3 +1,9 @@
+## 浏览器同步复用 Agent TLS/TCP 中继端口
+
+Server 新增 `browser_sync.network_proxy.listen: relay`，表示已授权的浏览器 HTTPS CONNECT 共享 `server.tls.listen` 所占用的 TCP 端口（例如 443），无需开放额外端口。`network_proxy.advertise` 必须填公网域名以及同一个 TCP 端口。Server Web → 浏览器同步 → Agent 网络出口可切换“复用 RelayProxy TCP 中继端口（推荐）”。旧独立监听模式仍可使用。
+
+Chrome 扩展的 **RelayProxy HTTPS Server** 现在可填写 `https://relay.example.com:443` 连接同一 TLS/TCP 中继端口的设备注册和 WSS 浏览器同步接口。**Admin Web 和 Admin REST 接口仍在独立 Admin 监听端口**（例如 `:8443`），不会通过中继 TCP 暴露。只同步 Cookie/Storage 时无需开启 `network_proxy`，也无需本机 Agent。更新 Server 并重启后才支持公网端口复用；Chrome 切换 Server Origin 后需重新授予该 Origin 的访问权限。
+
 ## 完整 Storage 大于 180 KiB：加密前压缩与体积限制
 
 较大网站会在 Local Storage / Session Storage 保存大量设置、缓存和登录状态。此前完整 Storage JSON 超过 **180 KiB** 就停止同步，后续还有 224 KiB 客户端和 256 KiB Server 密文上限，导致即使完整网站授权成功也可能无法同步。

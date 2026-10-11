@@ -157,3 +157,33 @@ func TestServerSettingsRejectsStaleConcurrentAndInvalidUpdates(t *testing.T) {
 		t.Fatal("write failure changed the config or runtime")
 	}
 }
+
+func TestBrowserNetworkProxyCanReuseTLSRelayPortSafely(t *testing.T) {
+    makeConfig:=func()*ServerConfig{
+        cfg:=&ServerConfig{}
+        cfg.BrowserSync.Enabled=true
+        cfg.BrowserSync.NetworkProxy.Listen="relay"
+        cfg.BrowserSync.NetworkProxy.Advertise="relay.example.com:443"
+        cfg.BrowserSync.NetworkProxy.AllowedExitIDs=[]string{"dev_agent_shared"}
+        return cfg
+    }
+    if err:=NormalizeServerConfig(makeConfig());err!=nil{
+        t.Fatalf("shared TCP relay mode should be accepted: %v",err)
+    }
+    for _,mutate:=range []func(*ServerConfig){
+        func(c *ServerConfig){c.BrowserSync.NetworkProxy.Advertise="relay.example.com:8443"},
+        func(c *ServerConfig){c.BrowserSync.NetworkProxy.AllowedExitIDs=nil},
+        func(c *ServerConfig){c.BrowserSync.NetworkProxy.AllowedExitIDs=[]string{"server"}},
+        func(c *ServerConfig){c.Server.TLSEnabled=BoolPtr(false)},
+        func(c *ServerConfig){c.BrowserSync.Enabled=false},
+    }{
+        cfg:=makeConfig()
+        mutate(cfg)
+        if err:=NormalizeServerConfig(cfg);err==nil{t.Fatal("unsafe shared network setting accepted")}
+    }
+    // Dedicated listeners cannot collide with either the Admin or TCP
+    // tunnel socket; only the explicit relay sentinel can share it.
+    cfg:=makeConfig()
+    cfg.BrowserSync.NetworkProxy.Listen="0.0.0.0:443"
+    if err:=NormalizeServerConfig(cfg);err==nil{t.Fatal("implicit relay port overlap accepted")}
+}

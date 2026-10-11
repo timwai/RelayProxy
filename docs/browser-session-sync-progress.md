@@ -347,3 +347,11 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **SIZE-02**：完整 Local/Session Storage 上限改为 4 MiB，Cookie+Storage 明文 JSON 整包最大 5 MiB；超过 180 KiB 时优先 gzip，再在 P-256 ECDH / AES-GCM / ECDSA 内传输，采用原 `browser.sync.v1` Envelope 格式、同一防重放序号与整包终态 ACK。不把压缩前的秘密持久化在 Server 或扩展配置存储中，绝不跳过 Key。
 - **SIZE-03**：单密文最大 1 MiB，Server WSS 输入 1.5 MiB。接收端只允许 5 MiB 内解压结果，流式计数限制 gzip bomb，损坏 wrapper 全包失败、不写入网站 Storage。无法压缩到单帧上限的超高熵数据返回明确错误；后续再设计经批准的分片 + 原子提交，不自动增加无限制容量。
 - **SIZE-04**：新增 Node 小快照兼容、700 KiB 全量 Storage 的 A/B 加解密恢复、不可压缩数据、超限拒绝、gzip bomb 和格式篡改测试。Go 增加新版密文长度验证及跨原 WSS 400 KiB 档位的大快照中继测试。测试代码已提交，真实 Chrome A/B 与 CI 结果仍待验收。部署必须同时更新 Server 与 A/B 扩展；PR 保持 Draft。
+
+### 2026-10-11 Browser Sync 复用中继 TLS/TCP 端口
+
+- **PORT-01**：增加 `browser_sync.network_proxy.listen: relay` 显式共享配置，严格校验 `network_proxy.advertise` 和 `server.tls.listen` TCP 端口相同；留空继续关闭，旧式独立监听继续可用。Server Web 提供共享（推荐）/独立/停用选择。
+- **PORT-02**：Gateway 保留 Agent TCP ALPN 和旧版无 ALPN 首字节兼容识别，将原一次性短 HTTP 处理改成 `net/http.Server` Accept-once TLS 连接处理，可持续 WebSocket/WSS/CONNECT 并支持 `http.Hijacker`。
+- **PORT-03**：新 `api.PublicRelayHandler` 公网路由白名单严格限于 Browser Sync 注册/WSS、已授权 CONNECT 及历史公开消息推送；不挂载 Admin Router，Admin 登录、管理设置和 Browser Sync 管理 API 不可通过中继 TCP 访问。
+- **PORT-04**：延后启动 Gateway 直至 Browser Sync 和网络出口权限初始化完成；原 `server.admin.listen` Admin HTTPS 服务保持独立。Chrome “RelayProxy HTTPS Server” 可使用 `https://relay.example.com:443`。
+- **PORT-05**：增加 Go Gateway WSS Upgrade / HTTP CONNECT Hijack + 既有 Agent TCP 兼容测试、白名单不暴露 Admin 测试、配置冲突测试、Web JS 共享端口校验测试。真实部署中 TLS/长连接/登录态/内外网联调及 GitHub CI 尚未验收；当前保持 Draft PR。

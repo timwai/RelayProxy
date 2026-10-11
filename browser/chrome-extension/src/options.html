@@ -35,10 +35,10 @@
       <section id="server-section" class="settings-section" aria-labelledby="server-heading">
         <div class="section-heading"><div class="section-index">01</div><div><h2 id="server-heading">连接与设备</h2><p>配置 HTTPS Server 并完成浏览器身份认证</p></div></div>
         <div class="settings-card">
-          <div class="card-heading"><div><h3>服务端连接</h3><p>仅支持启用 TLS 的 Admin HTTPS Origin</p></div><span class="status-pill" id="server-stage">检查中</span></div>
+          <div class="card-heading"><div><h3>服务端连接</h3><p>支持 RelayProxy TCP 中继 HTTPS 入口或独立 Admin HTTPS</p></div><span class="status-pill" id="server-stage">检查中</span></div>
           <div class="field-group"><label for="server">RelayProxy HTTPS Server</label>
-            <input id="server" type="url" spellcheck="false" placeholder="https://relay.example.com:8443" autocomplete="url">
-            <p class="field-hint">需要当前 Chrome Profile 授予这个服务端的站点访问权限。</p>
+            <input id="server" type="url" spellcheck="false" placeholder="https://relay.example.com:443" autocomplete="url">
+            <p class="field-hint">建议填写 TLS 中继地址，例如 https://relay.example.com:443。中继端口仅开放 Browser Sync 注册/WSS，不开放 Server Admin API；也可继续使用原 Admin HTTPS 地址。需授予 Chrome Profile 对该 Origin 的访问权限。</p>
           </div>
           <div class="button-row"><button id="save" class="primary-button" type="button">保存地址并授权</button>
             <button id="register" class="secondary-button" type="button">提交统一授权申请</button>

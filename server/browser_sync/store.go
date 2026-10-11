@@ -230,11 +230,12 @@ func (s *Store) DeleteRevokedDevice(ctx context.Context, id string) error {
        (SELECT id FROM browser_sync_rules WHERE source_id=? OR target_id=?)`,
 		`DELETE FROM browser_sync_rules WHERE source_id=? OR target_id=?`,
 		`DELETE FROM browser_sync_device_extensions WHERE device_id=?`,
+		`DELETE FROM browser_sync_identity_requests WHERE device_id=?`,
 		`DELETE FROM browser_sync_devices WHERE id=? AND state='revoked'`,
 	}
 	args := [][]any{
 		{id, id, id, id}, {id, id, id}, {id, id}, {id, id}, {id, id},
-		{id, id}, {id}, {id},
+		{id, id}, {id}, {id}, {id},
 	}
 	for i, query := range queries {
 		result, err := tx.ExecContext(ctx, query, args[i]...)

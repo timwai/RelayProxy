@@ -132,7 +132,13 @@ func TestBrowserLocalProxyForwardsPlainHTTPWithoutAuth(t *testing.T) {
 	transport := &http.Transport{Proxy: http.ProxyURL(&url.URL{Scheme: "http", Host: p.listen})}
 	defer transport.CloseIdleConnections()
 	client := http.Client{Transport: transport, Timeout: 5 * time.Second}
-	resp, err := client.Get("http://printer.local:8080/path?x=1")
+	request, err := http.NewRequest(http.MethodGet, "http://printer.local:8080/path?x=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := "session=" + strings.Repeat("x", 16*1024)
+	request.Header.Set("Cookie", cookie)
+	resp, err := client.Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,6 +151,9 @@ func TestBrowserLocalProxyForwardsPlainHTTPWithoutAuth(t *testing.T) {
 	case req := <-requests:
 		if req.URL.Path != "/path" || req.Host != "printer.local:8080" {
 			t.Fatalf("HTTP request modified: %s %s", req.URL, req.Host)
+		}
+		if req.Header.Get("Cookie") != cookie {
+			t.Fatal("large browser Cookie header was lost or truncated")
 		}
 	case <-time.After(time.Second):
 		t.Fatal("native dialer did not receive HTTP request")

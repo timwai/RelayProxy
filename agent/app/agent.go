@@ -140,7 +140,7 @@ type AgentConfig struct {
 	BrowserNetworkShare   bool // signed Agent-local opt-in; default false
 	BrowserLocalEnabled   bool
 	BrowserLocalListen    string
-	BrowserLocalToken     string
+	BrowserLocalToken     string `json:"-"`
 	BrowserLocalHosts     []string
 	ExitEnabled           *bool
 	ExitUpstream          exit.UpstreamConfig

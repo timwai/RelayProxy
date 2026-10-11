@@ -67,7 +67,12 @@ func (h *Handler) allowOrigin(w http.ResponseWriter, r *http.Request, enrollment
 	}
 	// Legacy origin-wide revocations still block connections, including enrollment.
 	// Origin IDs are only identifiers; never grant a device any access here.
-	if h.Store.ExtensionRevoked(r.Context(), id) {
+	allowed, originErr := h.Store.ExtensionOriginAllowed(r.Context(), id)
+	if originErr != nil {
+		http.Error(w, "browser origin authorization unavailable", http.StatusServiceUnavailable)
+		return false
+	}
+	if !allowed {
 		http.Error(w, "extension revoked by administrator", http.StatusForbidden)
 		return false
 	}
@@ -319,6 +324,17 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "not authorized")
 		return
 	}
+	// Revocation can race AUTH_PROOF. Re-read the current device and Origin
+	// before attaching the socket or sending AUTH_OK.
+	current, currentErr := h.Store.deviceAllowed(proofCtx, device.ID)
+	originAllowed, originErr := h.Store.ExtensionOriginAllowed(proofCtx,
+		strings.TrimPrefix(extensionOrigin, "chrome-extension://"))
+	if currentErr != nil || current.ID != device.ID ||
+		!h.originMatchesDevice(extensionOrigin, current) || originErr != nil || !originAllowed {
+		_ = conn.Close(websocket.StatusPolicyViolation, "browser authorization revoked")
+		return
+	}
+	device = current
 	if !h.limits.allow("connect:"+device.ID, 12, time.Minute) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "reconnect rate limited")
 		return
@@ -345,7 +361,8 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		}
 		current, err := h.Store.deviceAllowed(ctx, device.ID)
 		originID := strings.TrimPrefix(extensionOrigin, "chrome-extension://")
-		if err != nil || current.ID != device.ID || h.Store.ExtensionRevoked(ctx, originID) ||
+		originAllowed, originErr := h.Store.ExtensionOriginAllowed(ctx, originID)
+		if err != nil || current.ID != device.ID || originErr != nil || !originAllowed ||
 			!h.originMatchesDevice(extensionOrigin, current) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "browser approval revoked")
 			return

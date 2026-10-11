@@ -142,6 +142,17 @@ func (s *Store) EnrollExtensionDevice(ctx context.Context, extensionID string, d
 	if state == "revoked" {
 		return BrowserDevice{}, "", ErrNotFound
 	}
+	// Do not mutate even advisory enrollment metadata when the claimed
+	// device is already pinned to a different extension Origin. Public keys
+	// alone are not proof of possession and cannot authorize rebinding.
+	if existing, err := s.Device(ctx, device.ID); err == nil {
+		if (existing.ExtensionID != "" && existing.ExtensionID != extensionID) ||
+			(existing.State == "approved" && existing.ExtensionID == "") {
+			return BrowserDevice{}, "", ErrDeviceConflict
+		}
+	} else if !errors.Is(err, ErrNotFound) {
+		return BrowserDevice{}, "", err
+	}
 	// Registration cannot assign an identity or a capability.
 	// The device key check in Register denies changed key material.
 	saved, err := s.Register(ctx, device)

@@ -28,6 +28,8 @@ class DataSummaryTests(unittest.TestCase):
                         "success": str((r, variant) != fail),
                         "goodput_mbps": str({"bbr": 80, "brutal": 100, "hysteria2": 110}[variant] + r),
                         "bytes": 67108864, "elapsed_s": 6, "checksum_ok": "True",
+                        "url": "https://origin.example/fixture.bin",
+                        "proxy": f"socks5h://127.0.0.1:{1080 + ['bbr', 'brutal', 'hysteria2'].index(variant)}",
                         "error": "curl failed" if (r, variant) == fail else "",
                     })
         return path
@@ -83,7 +85,84 @@ class DataSummaryTests(unittest.TestCase):
             self.assertTrue(any("invalid transfer metrics" in p for p in problems), problems)
 
 
+
+    def mutate_csv(self, path, predicate, values):
+        with path.open(newline="", encoding="utf-8") as source:
+            reader = csv.DictReader(source)
+            names, rows = reader.fieldnames, list(reader)
+        for row in rows:
+            if predicate(row):
+                row.update(values)
+                break
+        with path.open("w", newline="", encoding="utf-8") as target:
+            writer = csv.DictWriter(target, fieldnames=names)
+            writer.writeheader()
+            writer.writerows(rows)
+
+    def test_inconsistent_origin_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_csv(folder)
+            self.mutate_csv(path, lambda row: row["variant"] == "brutal",
+                            {"url": "https://another-origin.example/different.bin"})
+            _, problems = summarize(path)
+            self.assertTrue(any("different origin" in p for p in problems), problems)
+
+    def test_inconsistent_proxy_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_csv(folder)
+            self.mutate_csv(path, lambda row: row["variant"] == "brutal" and row["round"] == "3",
+                            {"proxy": "socks5h://127.0.0.1:9999"})
+            _, problems = summarize(path)
+            self.assertTrue(any("proxy endpoint changed" in p for p in problems), problems)
+
+    def test_different_payload_size_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_csv(folder)
+            self.mutate_csv(path, lambda row: row["variant"] == "hysteria2",
+                            {"bytes": "1048576"})
+            _, problems = summarize(path)
+            self.assertTrue(any("unequal payload" in p for p in problems), problems)
+
+    def test_mixed_verified_and_unverified_downloads_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_csv(folder)
+            self.mutate_csv(path, lambda row: row["variant"] == "brutal",
+                            {"checksum_ok": ""})
+            _, problems = summarize(path)
+            self.assertTrue(any("mixed checked" in p for p in problems), problems)
+
+    def test_missing_first_round_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = self.make_csv(folder, rounds=6)
+            with path.open(newline="", encoding="utf-8") as source:
+                reader = csv.DictReader(source)
+                names, rows = reader.fieldnames, list(reader)
+            with path.open("w", newline="", encoding="utf-8") as target:
+                writer = csv.DictWriter(target, fieldnames=names)
+                writer.writeheader()
+                writer.writerows(row for row in rows if row["round"] != "1")
+            _, problems = summarize(path)
+            self.assertTrue(any("missing round numbers" in p for p in problems), problems)
+
 class SamplerTests(unittest.TestCase):
+    def test_proxy_rejects_credentials_and_bad_ports(self):
+        with self.assertRaises(Exception):
+            parse_variant("brutal=socks5h://alice:secret@127.0.0.1:1080")
+        with self.assertRaises(Exception):
+            parse_variant("brutal=socks5h://127.0.0.1:invalid")
+
+    def test_http_redirect_is_rejected(self):
+        args = SimpleNamespace(direction="download", url="https://origin.example/fixture",
+                               timeout=10, expected_sha256=None)
+        with tempfile.TemporaryDirectory() as folder:
+            dest = Path(folder) / "data"
+            result = SimpleNamespace(returncode=0,
+                stdout="302\\t0.1\\t3\\t0\\t3\\t0\\t0.01\\t0.03", stderr="")
+            with mock.patch("bench_brutal_acceptance.subprocess.run", return_value=result) as call:
+                observed = sample(args, "socks5h://127.0.0.1:1080", dest)
+            self.assertFalse(observed["success"])
+            self.assertNotIn("--location", call.call_args[0][0])
+
     def test_proxy_requires_explicit_scheme(self):
         with self.assertRaises(Exception):
             parse_variant("brutal=127.0.0.1:1080")

@@ -6,12 +6,15 @@ loopback connection combinations. It is NOT a signed installer or GUI test.
 All credentials and SQLite data exist only inside a disposable directory.
 """
 import os
+import functools
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 
@@ -97,13 +100,14 @@ def main():
                         agent_dir = case / "agent"
                         agent_dir.mkdir(parents=True)
                         ports = set()
-                        while len(ports) < 3:
+                        while len(ports) < 5:
                             ports.add(get_available_port())
-                        quic, tcp, admin = sorted(ports)
+                        quic, tcp, admin, socks, origin_port = sorted(ports)
                         database = case / "lab.db"
                         run([binaries[server_version, "seed"], "-db", database,
                              "-agent-dir", agent_dir, "-quic-port", quic,
-                             "-tcp-port", tcp, "-mode", transport, "-cert-dir", case],
+                             "-tcp-port", tcp, "-socks-port", socks,
+                             "-mode", transport, "-cert-dir", case],
                             timeout=30)
                         config = case / "server.yaml"
                         config.write_text(f"""
@@ -130,7 +134,16 @@ p2p:
 direct:
   enabled: false
 exit:
-  enabled: false
+  enabled: true
+  allow_internet: true
+  allow_private_network: true
+  allow_loopback: true
+  upstream:
+    mode: direct
+relay_acl:
+  allow_internet: true
+  allow_private_network: true
+  allow_loopback: true
 logging:
   level: info
 """, encoding="utf-8")
@@ -160,6 +173,40 @@ logging:
                                 agent_log.flush()
                                 if not wait_for_approval(case / "agent.log", server, agent):
                                     raise RuntimeError("real Agent failed signed identity approval")
+                                origin_dir = case / "origin"
+                                origin_dir.mkdir(exist_ok=True)
+                                fixture = (f"real-proxy-payload-{server_version}-{agent_version}-"
+                                           f"{transport}\n").encode()
+                                (origin_dir / "fixture.bin").write_bytes(fixture)
+                                handler = functools.partial(SimpleHTTPRequestHandler,
+                                                            directory=str(origin_dir))
+                                origin_server = ThreadingHTTPServer(("127.0.0.1", origin_port), handler)
+                                thread = threading.Thread(target=origin_server.serve_forever, daemon=True)
+                                thread.start()
+                                try:
+                                    downloaded = case / "download.bin"
+                                    proxy_url = f"socks5h://127.0.0.1:{socks}"
+                                    endpoint = f"http://127.0.0.1:{origin_port}/fixture.bin"
+                                    success = False
+                                    for retry in range(15):
+                                        probe = subprocess.run([
+                                            "curl", "--disable", "--noproxy", "",
+                                            "--proxy", proxy_url, "--fail", "--silent",
+                                            "--show-error", "--connect-timeout", "2",
+                                            "--max-time", "6", "--output", str(downloaded), endpoint
+                                        ], capture_output=True, text=True, timeout=10, check=False)
+                                        if probe.returncode == 0 and downloaded.exists() and downloaded.read_bytes() == fixture:
+                                            success = True
+                                            break
+                                        time.sleep(.2)
+                                    if not success:
+                                        raise RuntimeError(f"real tunneled HTTP failed: {probe.stderr[:300]}")
+                                finally:
+                                    origin_server.shutdown()
+                                    origin_server.server_close()
+                                    thread.join(timeout=5)
+                                print(f"[native-full-bin] real SOCKS->Server Exit payload passed os={sys.platform} "
+                                      f"server={server_version} agent={agent_version} transport={transport}")
                                 print(f"[native-full-bin] PASS os={sys.platform} "
                                       f"server={server_version} agent={agent_version} "
                                       f"transport={transport}", flush=True)

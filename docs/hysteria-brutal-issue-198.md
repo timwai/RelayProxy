@@ -12,11 +12,13 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 
 ## Runtime bufferbloat safety fuse (implemented, release validation pending)
 
-A **per-sending-QUIC-session** watchdog now checks sender-side QUIC `MinRTT`, `SmoothedRTT` and `BytesSent` once per second while Brutal is active. After at least **five seconds** of controller lifetime, it falls back to the existing **BBR Aggressive** controller only when at least **three consecutive busy samples** show all of:
+A **per-sending-QUIC-session** watchdog now checks sender-side QUIC `MinRTT`, `SmoothedRTT`, `BytesSent`, `PacketsSent` and `PacketsLost` once per second while Brutal is active. After at least **five seconds** of controller lifetime, it falls back to the existing **BBR Aggressive** controller only when at least **three consecutive busy samples** show all of:
 
 - meaningful sending activity (≥64 KiB new QUIC-sent bytes at each sampling tick);
 - smoothed RTT ≥3× the observed session minimum; and
 - smoothed RTT at least **100 ms above** the observed session minimum.
+
+A **second, independent severe-loss trigger** checks incremental QUIC packet counters. After the same five-second warmup, it requires **at least 100 newly sent packets per interval, at least 20% newly reported losses, and three consecutive intervals**. Packet-loss counters that go backwards after spurious recovery do not count as new loss; idle, ordinary 1%/5% loss and one-off spikes do not trigger. This is a conservative backstop for extreme loss, not proof of zero bufferbloat.
 
 The fallback is **one-way for that connection** (no BBR↔Brutal oscillation). Diagnostics report `brutal_fallback_reason`; the sender logs `[BrutalGuard]`. A temporary RTT spike, idle path, or naturally high-RTT steady link alone must not trigger it. Unit tests cover all three and an actual QUIC session switching back to BBR while preserving stream payload correctness.
 

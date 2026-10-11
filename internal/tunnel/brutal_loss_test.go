@@ -27,13 +27,57 @@ type packetLossConn struct {
 	dropped atomic.Uint64
 }
 
+// deterministicPacketDrop hashes the packet index so the same loss rate does
+// not systematically hit each 20th retransmission. Independent runs remain
+// reproducible, without depending on process scheduling or random seeds.
+func deterministicPacketDrop(index, inverseProbability uint64) bool {
+	if inverseProbability == 0 {
+		return false
+	}
+	value := uint32(index)
+	value ^= value >> 16
+	value *= 0x7feb352d
+	value ^= value >> 15
+	value *= 0x846ca68b
+	value ^= value >> 16
+	return uint64(value)%inverseProbability == 0
+}
+
 func (c *packetLossConn) WriteTo(p []byte, addr net.Addr) (int, error) {
 	n := c.sent.Add(1)
-	if c.every > 0 && n%c.every == 0 {
+	if deterministicPacketDrop(n, c.every) {
 		c.dropped.Add(1)
 		return len(p), nil
 	}
 	return c.PacketConn.WriteTo(p, addr)
+}
+
+func TestDeterministicPacketDropDistribution(t *testing.T) {
+	const packets = 10_000
+	for _, scenario := range []struct {
+		every uint64
+		want  int
+	}{
+		{every: 0, want: 0},
+		{every: 100, want: 100},
+		{every: 20, want: 500},
+	} {
+		drops := 0
+		for i := uint64(1); i <= packets; i++ {
+			if deterministicPacketDrop(i, scenario.every) {
+				drops++
+			}
+		}
+		margin := scenario.want / 5
+		if drops < scenario.want-margin || drops > scenario.want+margin {
+			t.Errorf("inverseProbability=%d yielded %d drops, expected %d +/- %d", scenario.every, drops, scenario.want, margin)
+		}
+		if scenario.every > 0 && deterministicPacketDrop(20, scenario.every) == deterministicPacketDrop(40, scenario.every) &&
+			deterministicPacketDrop(40, scenario.every) == deterministicPacketDrop(60, scenario.every) &&
+			deterministicPacketDrop(60, scenario.every) {
+			t.Errorf("loss pattern is still synchronized to every 20th UDP packet")
+		}
+	}
 }
 
 // TestBrutalDeterministicPacketLoss is a transport regression smoke test,
@@ -212,6 +256,12 @@ func transferWithDeterministicLoss(t *testing.T, payload []byte, dropEvery uint6
 		reader = io.TeeReader(clientStream, &counter)
 	}
 	if _, err := io.ReadFull(reader, got); err != nil {
+		diag := DiagnoseSession(server)
+		if diag != nil && diag.QUIC != nil {
+			return fmt.Errorf("receive payload: %w; mode=%s sent_udp=%d injected_drops=%d sent_packets=%d sent_lost=%d rtt_ms=%.3f",
+				err, mode, serverUDP.sent.Load(), serverUDP.dropped.Load(),
+				diag.QUIC.PacketsSent, diag.QUIC.SentPacketsLost, diag.QUIC.SmoothedRTTMS)
+		}
 		return fmt.Errorf("receive payload: %w", err)
 	}
 	if err := <-written; err != nil {

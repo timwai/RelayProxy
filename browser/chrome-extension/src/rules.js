@@ -24,6 +24,8 @@ export async function getSettings() {
   const saved = (await chrome.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY] || {};
   return {
     serverOrigin: saved.serverOrigin || '',
+    requestedIdentityId: saved.requestedIdentityId || '',
+    deviceName: saved.deviceName || '',
     sites: Array.isArray(saved.sites) ? saved.sites : [],
   };
 }

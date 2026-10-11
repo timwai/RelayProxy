@@ -129,6 +129,14 @@ func TestWSSBrowserRulePairingAndSessionGate(t *testing.T) {
 	if reply := readWSSControl(t, a); reply["status"] != "active" {
 		t.Fatalf("final confirmation failed: %v", reply)
 	}
+	// The optional HTTPS CONNECT proxy is disabled by default, and normal
+	// Cookie-only rules must not fail their network binding status query.
+	sendWSSControl(t, b, map[string]any{"type":"NETWORK_BINDING","requestId":"no-network","ruleId":offer.RuleID})
+	bindingReply:=readWSSControl(t,b)
+	binding,ok:=bindingReply["binding"].(map[string]any)
+	if bindingReply["type"]!="NETWORK_BINDING" || !ok || binding["status"]!="none" {
+		t.Fatalf("disabled network mode unexpectedly changed Cookie-only rules: %v",bindingReply)
+	}
 	// Malformed or unsigned session payloads are rejected while authenticated
 	// control-plane traffic is still accepted.
 	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "bad1", "ruleId": offer.RuleID})

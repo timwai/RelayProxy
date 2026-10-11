@@ -83,16 +83,23 @@ export async function startNetworkGuard(ruleId,siteOrigin){
 export async function ensureNetworkForRule(ruleId,siteOrigin){
   const result=await sendControl('NETWORK_BINDING',{ruleId});
   const binding=result?.binding;
-  if(!binding || binding.status!=='active')return;
+  const desired=await desiredNetwork();
+  if(!binding || binding.status!=='active'){
+    if(desired[ruleId])throw new Error('来源网络绑定已撤销，网站仍保持阻断');
+    return;
+  }
   if(binding.host!==parseBoundHost(siteOrigin))
     throw new Error('Agent 网络绑定与加密 Cookie 策略的域名不一致');
-  const desired=await desiredNetwork();
   if(desired[ruleId]?.siteOrigin!==siteOrigin)
     throw new Error('未在本机明确授权代理网络，已拒绝此 Cookie 同步');
   await refreshNetworkBinding();
   const lease=await currentLease();
   if(!lease || lease.expiresAt<=Date.now()+30000)
     throw new Error('来源 Agent 代理不可用，已阻断绑定网站访问');
+  const effective=await chrome.proxy.settings.get({incognito:false});
+  if(effective.levelOfControl!=='controlled_by_this_extension' ||
+     effective.value?.mode!=='pac_script')
+    throw new Error('Chrome 代理设置已被其他扩展或系统策略覆盖，拒绝 Cookie 同步');
 }
 export function refreshNetworkBinding({force=false}={}){
   if(refreshing)return refreshing;

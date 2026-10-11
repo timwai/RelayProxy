@@ -332,15 +332,14 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 					"ruleId": msg.RuleID, "status": "offered"}
 			}
 		case "NETWORK_BINDING":
-			if h.network == nil {
+			// Existing Cookie-only sessions must work when the optional
+			// network proxy listener is disabled. A stored active binding is
+			// still reported so the receiver keeps its fail-closed guard.
+			binding, err := h.Store.NetworkBinding(ctx, device.ID, msg.RuleID)
+			if err != nil {
 				payload = ruleError(msg.RequestID)
 			} else {
-				binding, err := h.Store.NetworkBinding(ctx, device.ID, msg.RuleID)
-				if err != nil {
-					payload = ruleError(msg.RequestID)
-				} else {
-					payload = map[string]any{"type": "NETWORK_BINDING", "requestId": msg.RequestID, "binding": binding}
-				}
+				payload = map[string]any{"type": "NETWORK_BINDING", "requestId": msg.RequestID, "binding": binding}
 			}
 		case "NETWORK_ACCEPT":
 			if h.network == nil || !current.Receive ||
@@ -351,7 +350,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 					"ruleId": msg.RuleID, "status": "active"}
 			}
 		case "NETWORK_REVOKE":
-			if h.network == nil || h.Store.RevokeNetworkBinding(ctx, device.ID, msg.RuleID) != nil {
+			if h.Store.RevokeNetworkBinding(ctx, device.ID, msg.RuleID) != nil {
 				payload = ruleError(msg.RequestID)
 			} else {
 				payload = map[string]any{"type": "NETWORK_UPDATED", "requestId": msg.RequestID,

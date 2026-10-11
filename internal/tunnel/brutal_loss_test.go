@@ -299,22 +299,22 @@ func TestBrutalKernelNetemCoexistence(t *testing.T) {
 					t.Logf("shared_netem scenario=%s mode=%s target_bps=%d bytes=%d elapsed_ms=%d completion_goodput_mbps=%.3f",
 						scenario.name, mode, scenario.targetBPS, len(payload), durations[index].Milliseconds(),
 						float64(len(payload)*8)/durations[index].Seconds()/1e6)
-				if len(samples[index]) < 2 {
-					t.Errorf("%s produced only %d sampled points; cannot evaluate overlap", mode, len(samples[index]))
-				}
-				var previous kernelFlowSample
-				for _, sample := range samples[index] {
-					if !previous.At.IsZero() {
-						seconds := sample.At.Sub(previous.At).Seconds()
-						if seconds > 0 && sample.ReceivedBytes >= previous.ReceivedBytes {
-							t.Logf("overlap_sample scenario=%s mode=%s wall_unix_ms=%d interval_goodput_mbps=%.3f sender_smoothed_rtt_ms=%.3f received_bytes=%d",
-								scenario.name, mode, sample.At.UnixMilli(),
-								float64(sample.ReceivedBytes-previous.ReceivedBytes)*8/seconds/1e6,
-								sample.SmoothedRTTMS, sample.ReceivedBytes)
-						}
+					if len(samples[index]) < 2 {
+						t.Errorf("%s produced only %d sampled points; cannot evaluate overlap", mode, len(samples[index]))
 					}
-					previous = sample
-				}
+					var previous kernelFlowSample
+					for _, sample := range samples[index] {
+						if !previous.At.IsZero() {
+							seconds := sample.At.Sub(previous.At).Seconds()
+							if seconds > 0 && sample.ReceivedBytes >= previous.ReceivedBytes {
+								t.Logf("overlap_sample scenario=%s mode=%s wall_unix_ms=%d interval_goodput_mbps=%.3f sender_smoothed_rtt_ms=%.3f received_bytes=%d",
+									scenario.name, mode, sample.At.UnixMilli(),
+									float64(sample.ReceivedBytes-previous.ReceivedBytes)*8/seconds/1e6,
+									sample.SmoothedRTTMS, sample.ReceivedBytes)
+							}
+						}
+						previous = sample
+					}
 				}
 			}
 		})

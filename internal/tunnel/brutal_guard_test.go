@@ -113,11 +113,20 @@ func TestBrutalRTTGuardRevertsRealQUICToBBROnce(t *testing.T) {
 	if !UseBrutal(server, 2_000_000, false) {
 		t.Fatal("cannot enable Brutal on live QUIC session")
 	}
+	var fallbackCalls int
+	server.(*QUICSession).OnBrutalFallback(func() { fallbackCalls++ })
 	if !server.(*QUICSession).fallbackFromBrutal("unit-test sustained queue inflation") {
 		t.Fatal("first safety fallback failed")
 	}
 	if server.(*QUICSession).fallbackFromBrutal("repeated") {
 		t.Fatal("fallback was not idempotent")
+	}
+	if fallbackCalls != 1 {
+		t.Fatalf("fallback hook fired %d times, expected once", fallbackCalls)
+	}
+	server.(*QUICSession).OnBrutalFallback(func() { fallbackCalls++ })
+	if fallbackCalls != 2 {
+		t.Fatal("late fallback hook registration failed to immediately refund quota")
 	}
 	if UseBrutal(server, 3_000_000, false) {
 		t.Fatal("tripped session re-enabled Brutal after fallback")

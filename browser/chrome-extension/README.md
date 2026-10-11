@@ -2,6 +2,15 @@
 
 > **代码状态（2026-10-11）**：独立的 Chrome Profile 本机 Agent 代理、HTTP 正向代理、任意合法 TCP CONNECT 地址/端口及原生 DIRECT/PROXY/REJECT 已在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 集成，Go/UI/Network CI success，但真实 Chrome、WebRTC/UDP/QUIC/DNS/回环绕过及安全验收尚未完成。Cookie 同步仍无需本机 Agent，只有选择本机网络出口才需要安装 B Agent。发布状态仍为 Draft。详情见 [Living Tracker](../../docs/browser-session-sync-progress.md)。
 
+## Chrome 扩展界面（独立设置页，2026-10-11）
+
+- **快捷弹窗**：扩展图标打开的 390 px 弹窗只显示 Server 连接状态/连接操作、全 Chrome Agent 代理快捷开关、活跃站点的手动发送/请求同步及“同步后打开”，并优先展示当前 HTTPS 标签页匹配的配对。弹窗不再包含 Server 地址、Agent 端口、站点增删、设备配对、Cookie/Storage 覆盖确认或撤销操作。
+- **完整配置页**：点击弹窗右上角设置图标或底部“完整设置”，通过 Chrome `chrome.runtime.openOptionsPage()` 打开独立标签页，也可从 `chrome://extensions` 的扩展“详情 → 扩展选项”进入。包括 **连接与设备、浏览器网络、站点授权、设备配对、会话与出口规则** 五个区块。保持原有审批、核验、恢复与安全限制，不改变后台协议。
+- **兼容性**：适配窄屏、触控、暗色系统主题、键盘焦点、状态可读性，扩展页面均由 CSP 兼容的本地静态 CSS/JS 构成。CHIPS 分区 Cookie 支持要求 Chrome 119+。只有实际获批设备、激活且密钥有效的规则才能出现在弹窗快捷操作中。
+- **状态语义**：`APPLIED` 仅代表 Chrome 写入成功，不保证服务端登录成功；`PARTIAL`/`CONFLICT` 需要在完整设置处理。代理开关会影响整个 Chrome Profile，且不是 VPN。
+
+> 说明：以下部分早期 P3 测试步骤与截图描述仍保留历史背景；现在所有配置、授权、创建配对等操作都在独立配置页进行，不再使用弹窗。
+
 **实时开发进度与发布准入**：[P0 上线前必须完成 / P1 正式版 / P2 后续增强及验证记录](../../docs/browser-session-sync-progress.md)。本 README 描述已经编写的开发功能，不能替代真实 Chrome 验收或安全审查。
 
 
@@ -71,10 +80,10 @@ B 设备应由管理员赋予 `receive:true`；A 赋予 `send:true`。浏览器�
 ## 两台 Chrome 的测试流程
 
 1. A/B 在 `chrome://extensions` 开启开发者模式，将本目录作为“已解压扩展”加载。确保两台扩展 ID 与 Server 白名单匹配。
-2. A/B 在扩展弹窗配置并授权 Admin HTTPS 地址，分别点击 **注册浏览器设备**。
+2. A/B 在扩展独立设置页配置并授权 Admin HTTPS 地址，分别点击 **注册浏览器设备**。
 3. 在 Server Admin API 中审批 A（发送）、B（接收），并关联到同一 active Identity。
-4. 两边在扩展弹窗点击 **连接 Server**。A 点击“请求站点权限”，添加准确的 HTTPS **Origin**，不是带路径/查询参数的 URL。
-5. A 点击刷新设备，选 B、授权网站和 **明确指定的 Cookie 名称**，创建加密配对邀请。Cookie 名称应来自用户有权检查的网站测试环境，不要将 Cookie 值粘贴到 UI。
+4. 两边在扩展独立设置页点击 **连接 Server**。A 点击“请求站点权限”，添加准确的 HTTPS **Origin**，不是带路径/查询参数的 URL。
+5. A 在独立设置页刷新设备、选择 B 和已授权的网站，即可创建全 Cookie / Local Storage / 单标签 Session Storage 的加密配对邀请，无需手填任何 Key 名称或值。
 6. B 刷新邀请，阅读网站和 Cookie 白名单，并通过**独立可信渠道**与 A 比较校验码后接受。A 再最终核对并确认，规则状态为 `active`。
 7. A 使用测试账号在 Chrome 正常登录网站；站点 Cookie 变化时扩展会自动尝试发送，也可按“立即发送加密登录状态”。
 8. B 点击“从来源设备请求同步”或“同步成功后打开网站”。B 没有其他登录状态时，写入符合范围的 Cookie；存在不同账号时默认显示 `CONFLICT`，只有用户明确勾选覆盖后才会重试。

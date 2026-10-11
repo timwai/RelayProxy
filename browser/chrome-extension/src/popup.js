@@ -1,427 +1,153 @@
-import { parseSiteOrigin, getSettings, updateSettings } from './rules.js';
-
+// Popup is an operational dashboard only. Permission prompts, site grants,
+// pairing confirmation and account-overwrite policy live in options.html.
 const $ = id => document.getElementById(id);
-const status = text => { $('message').textContent = text; $('message').className = ''; };
-const failure = error => { $('message').textContent = String(error.message || error); $('message').className = 'error'; };
+const feedback = (message, error = false) => {
+  const node = $('message');
+  node.hidden = false;
+  node.textContent = message;
+  node.className = 'feedback' + (error ? ' feedback-error' : '');
+};
+const messageError = error => feedback(String(error?.message || error), true);
 
-function renderSites(sites) {
-  const list = $('sites');
-  list.replaceChildren();
-  const siteSelect = $('pair-site');
-  const prior = siteSelect.value;
-  siteSelect.replaceChildren();
-  for (const origin of sites) {
-    const li = document.createElement('li');
-    li.append(textNode('span',origin));
-    const remove=document.createElement('button');
-    remove.textContent='移除授权';remove.title='停止该站点后续同步';
-    remove.addEventListener('click',async()=>{
-      try { await ask({type:'REMOVE_SITE',siteOrigin:origin});
-        const latest=await getSettings();renderSites(latest.sites);
-        status('已撤销站点同步授权；原网站登录状态未清除。');
-      }catch(error){failure(error);}
-    });
-    li.append(remove);list.append(li);
-    const option = document.createElement('option');
-    option.value = origin;
-    option.textContent = origin;
-    siteSelect.append(option);
-  }
-  if (sites.includes(prior)) siteSelect.value = prior;
-}
+const STATES = {
+  APPLIED: '已应用 · 登录待验证', RELAYED: '密文已转发', RECEIVED: '等待应用',
+  SENDING: '正在加密发送', FAILED: '同步失败', CONFLICT: '目标状态冲突',
+  UNKNOWN: '结果待确认', PARTIAL: '恢复已暂停'
+};
 
-async function refreshSiteChoices(){
-  const select=$('site'),selected=select.value;
-  const tabs=await chrome.tabs.query({});
-  const sites=[...new Set(tabs.map(tab=>{
-    try {
-      const u=new URL(tab.url);
-      return u.protocol==='https:' ? u.origin : null;
-    }catch{return null;}
-  }).filter(Boolean))].sort();
-  select.replaceChildren();
-  const prompt=document.createElement('option');
-  prompt.value='';
-  prompt.textContent=sites.length?'请选择已打开的网站':'请先在 Chrome 打开一个 HTTPS 网站';
-  select.append(prompt);
-  for(const site of sites){
-    const item=document.createElement('option');
-    item.value=site;item.textContent=site;
-    select.append(item);
-  }
-  if(sites.includes(selected))select.value=selected;
-}
-$('refresh-sites').addEventListener('click',()=>refreshSiteChoices().catch(failure));
-
-async function load() {
-  const result = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
-  if (!result?.ok) throw new Error(result?.error || 'Extension background unavailable');
-  $('device').textContent = result.identity.deviceId;
-  $('server').value = result.settings.serverOrigin;
-  renderSites(result.settings.sites);
-  await refreshSiteChoices();
-  $('local-agent-all').checked=!!result.localAgentProxy?.enabled;
-  $('local-agent-port').value=result.localAgentProxy?.port||21291;
-}
-
-$('local-agent-apply').addEventListener('click',async()=>{
-  try{
-    const enabled=$('local-agent-all').checked;
-    const port=Number($('local-agent-port').value);
-    await ask({type:'SET_LOCAL_AGENT_GLOBAL',enabled,port});
-    status(enabled?'Chrome 浏览器代理已交给本机 RelayProxy Agent 的原生分流':'已停用本机 Agent 全浏览器代理，保留独立会话网络规则');
-  }catch(error){failure(error);}
-});
-
-$('save').addEventListener('click', async () => {
-  try {
-    const raw = $('server').value.trim();
-    const origin = new URL(raw);
-    if (origin.protocol !== 'https:' || origin.pathname !== '/' ||
-        origin.search || origin.hash || origin.username || origin.password) {
-      throw new Error('仅支持 HTTPS Server Origin');
-    }
-    // Explicit click grants the extension access to the Admin HTTPS origin.
-    const pattern = `${origin.protocol}//${origin.hostname}/*`; // Chrome host permission patterns omit ports
-    const granted = await chrome.permissions.request({ origins: [pattern] });
-    if (!granted) { status('未授予 Server 访问权限。'); return; }
-    const response = await chrome.runtime.sendMessage({
-      type: 'SAVE_SERVER', serverOrigin: raw
-    });
-    if (!response?.ok) throw new Error(response?.error || 'Unable to save address');
-    status('Server 地址已保存，可以注册浏览器设备。');
-  } catch (error) { failure(error); }
-});
-
-$('add-site').addEventListener('click', async () => {
-  try {
-    const origin = parseSiteOrigin($('site').value.trim());
-    // Call request() directly from a user click; never grant silently.
-    const websiteURL = new URL(origin);
-    const pattern = `${websiteURL.protocol}//${websiteURL.hostname}/*`;
-    const granted = await chrome.permissions.request({ origins: [pattern] });
-    if (!granted) return status('站点权限未获授予。');
-    const settings = await getSettings();
-    if (!settings.sites.includes(origin)) {
-      settings.sites.push(origin);
-      await updateSettings({ sites: settings.sites });
-    }
-    renderSites(settings.sites);
-    status('站点权限已授予。尚未启用会话传输。');
-  } catch (error) { failure(error); }
-});
-
-$('register').addEventListener('click', async () => {
-  try {
-    const result = await chrome.runtime.sendMessage({ type: 'REGISTER_BROWSER' });
-    if (!result?.ok) throw new Error(result?.error || '设备注册失败');
-    status(result.state === 'extension_pending'
-      ? '扩展 ID 已自动上报，等待管理员批准该扩展；批准后再次点击注册浏览器设备。'
-      : result.state === 'pending'
-      ? '已注册浏览器设备，等待管理员在 Server 后台审批。'
-      : '浏览器设备状态：' + result.state);
-  } catch (error) { failure(error); }
-});
-
-$('connect').addEventListener('click', async () => {
-  try {
-    const result = await chrome.runtime.sendMessage({ type: 'CONNECT_BROWSER' });
-    if (!result?.ok) throw new Error(result?.error || '连接失败');
-    status('已完成设备身份认证，刷新设备列表进行配对。请在两端审批配对后同步。');
-    await refreshPairing();
-  } catch (error) { failure(error); }
-});
-
-
-async function ask(message) {
-  const result = await chrome.runtime.sendMessage(message);
-  if (!result?.ok) throw new Error(result?.error || '浏览器配对请求失败');
+async function ask(type, fields = {}) {
+  const result = await chrome.runtime.sendMessage({type, ...fields});
+  if (!result?.ok) throw new Error(result?.error || '无法连接浏览器后台');
   return result;
 }
+const optionPage = () => chrome.runtime.openOptionsPage().catch(messageError);
+$('open-options').addEventListener('click', optionPage);
+$('footer-options').addEventListener('click', optionPage);
+$('empty-options').addEventListener('click', optionPage);
 
-let cachedRules = [];
-
-async function refreshPairing() {
-  const peers = (await ask({ type: 'LIST_PEERS' })).peers || [];
-  const select = $('target');
-  const previous = select.value;
-  select.replaceChildren();
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = '请选择已审批的接收设备';
-  select.append(placeholder);
-  for (const peer of peers.filter(p => p.receive)) {
-    const option = document.createElement('option');
-    option.value = peer.id;
-    option.textContent = (peer.name || 'Chrome') + ' · ' + peer.id.slice(0, 18);
-    select.append(option);
-  }
-  if (peers.some(p => p.id === previous && p.receive)) select.value = previous;
-  cachedRules = (await ask({ type: 'LIST_RULES' })).rules || [];
-  renderRules(cachedRules);
-}
-
-function textNode(tag, content, className) {
+function el(tag, className, content) {
   const node = document.createElement(tag);
-  node.textContent = content;
   if (className) node.className = className;
+  if (content !== undefined) node.textContent = content;
   return node;
 }
-
-function renderRules(rules) {
-  const parent = $('pairing-rules');
-  parent.replaceChildren();
-  if (!rules.length) {
-    parent.append(textNode('p', '暂无配对邀请。'));
-    return;
-  }
-  for (const rule of rules) {
-    const card = document.createElement('div');
-    card.className = 'rule';
-    const desc = rule.role === 'source' ? '来源 A' : '接收 B';
-    card.append(textNode('strong', desc + ' · ' + rule.status));
-    card.append(textNode('p', '对端：' + rule.remoteID));
-    if (rule.lastTransfer && ['SENDING','RELAYED','RECEIVED','APPLIED','FAILED','CONFLICT','UNKNOWN','PARTIAL'].includes(rule.lastTransfer.state)) {
-      const translated = {SENDING:'正在发送密文',RELAYED:'密文已转发',RECEIVED:'接收端已收到',
-        APPLIED:'站点状态已应用（网站登录未验证）',FAILED:'同步失败',
-        CONFLICT:'目标已有不同登录状态',UNKNOWN:'结果尚不确定，可重试或等待对账',
-        PARTIAL:'浏览器状态恢复不完整，已暂停接收，必须人工检查'};
-      card.append(textNode('p', '最近同步：' + translated[rule.lastTransfer.state]));
-    }
-    if (!rule.valid) {
-      card.append(textNode('p', rule.error || '尚未找到经核验的设备密钥，无法授权。', 'error'));
-    } else {
-      card.append(textNode('p', '站点：' + rule.policy.siteOrigin));
-      card.append(textNode('p',Array.isArray(rule.policy.cookieNames) ?
-        '旧版指定 Cookie：'+rule.policy.cookieNames.join(', ') :
-        '同步范围：全部 Cookie / Local Storage / Session Storage（不包含 IndexedDB）'));
-      card.append(textNode('div', '配对校验码：' + rule.code, 'code'));
-      if (rule.status === 'offered' &&
-          ((rule.role === 'target' && !rule.targetApproved) ||
-           (rule.role === 'source' && rule.targetApproved))) {
-        const label = document.createElement('label');
-        const checked = document.createElement('input');
-        checked.type = 'checkbox';
-        label.append(checked, textNode('span', '我已通过独立渠道与另一台设备核对上述校验码。'));
-        card.append(label);
-        const button = document.createElement('button');
-        button.textContent = rule.role === 'target' ? '接受邀请' : '最终确认并激活';
-        button.disabled = true;
-        checked.addEventListener('change', () => { button.disabled = !checked.checked; });
-        button.addEventListener('click', async () => {
-          try {
-            if (rule.role === 'target') {
-              // Chrome requires permissions.request to be called directly
-              // within a user gesture before any asynchronous operation.
-              const website = new URL(rule.policy.siteOrigin);
-              const pattern = website.protocol + '//' + website.hostname + '/*';
-              const granted = await chrome.permissions.request({ origins: [pattern] });
-              if (!granted) { status('未授权目标站点。'); return; }
-              await ask({ type: 'ACCEPT_RULE', ruleId: rule.id, confirmed: true, pairingCode: rule.code });
-            } else {
-              await ask({ type: 'CONFIRM_RULE', ruleId: rule.id, confirmed: true, pairingCode: rule.code });
-            }
-            status('配对授权已更新。只有状态为 active 的规则才可同步指定 Cookie。');
-            await refreshPairing();
-          } catch (error) { failure(error); }
-        });
-        card.append(button);
-      }
-    }
-    if(rule.status==='active' && rule.valid){
-      if(rule.network?.status==='offered' && rule.role==='target'){
-        card.append(textNode('p','来源 A 提议：访问 '+rule.network.host+
-          ' 时经由 Agent '+rule.network.exitDeviceId+' 出口。仅 HTTPS 443。'));
-        const approve=document.createElement('button');
-        approve.textContent='确认并启用 A 的网络出口';
-        approve.disabled=!rule.network.matchingHost;
-        approve.addEventListener('click',async()=>{
-          if(!window.confirm('确认让此域名使用 A Agent 的网络？会改变本 Chrome Profile 的代理配置；出口离线将阻断域名访问。'))return;
-          try{
-            await ask({type:'NETWORK_ACCEPT',ruleId:rule.id,confirmed:true});
-            status('网络绑定已授权；该网站通过来源设备 Agent 出口访问。');
-            await refreshPairing();
-          }catch(error){failure(error);}
-        });
-        card.append(approve);
-      }
-      if(rule.role==='source' && (!rule.network || rule.network.status==='none')){
-        const action=document.createElement('button');
-        action.textContent='为此 Cookie 规则绑定 Agent 网络';
-        action.addEventListener('click',async()=>{
-          try{
-            const exits=(await ask({type:'NETWORK_EXITS'})).exits||[];
-            if(!exits.length)throw new Error('没有已上线且管理员允许共享的 Agent 出口');
-            const select=document.createElement('select');
-            for(const exit of exits){
-              const opt=document.createElement('option');
-              opt.value=exit.id;
-              opt.textContent=(exit.name||'Agent')+' · '+exit.id;
-              select.append(opt);
-            }
-            const approve=document.createElement('button');
-            approve.textContent='发送网络绑定邀请';
-            approve.addEventListener('click',async()=>{
-              try{
-                await ask({type:'NETWORK_OFFER',ruleId:rule.id,exitDeviceId:select.value});
-                status('网络绑定已提出，等待 B 端独立确认。');
-                await refreshPairing();
-              }catch(error){failure(error);}
-            });
-            card.append(select,approve);
-            action.disabled=true;
-          }catch(error){failure(error);}
-        });
-        card.append(action);
-      }
-      if(rule.network?.status==='active'){
-        card.append(textNode('p','网络：'+rule.network.host+' → '+rule.network.exitDeviceId));
-        const revoke=document.createElement('button');
-        revoke.textContent='撤销网络绑定';
-        revoke.addEventListener('click',async()=>{
-          if(!window.confirm('撤销后，该网站可能重新使用 B 本地网络；已同步的 Cookie 不会自动清除。确定吗？'))return;
-          try{
-            await ask({type:'NETWORK_REVOKE',ruleId:rule.id});
-            status('网络绑定已撤销。');
-            await refreshPairing();
-          }catch(error){failure(error);}
-        });
-        card.append(revoke);
-      }
-    }
-    if (rule.status==='active' && rule.valid && rule.role==='target'){
-      const current=rule.localNetworkMode==='local_agent'?'B 本机 Agent':rule.localNetworkMode==='source_agent'?'A 来源 Agent':'未启用';
-      card.append(textNode('p','当前站点网络出口：'+current));
-      const local=document.createElement('button');
-      local.textContent='改用 B 本机 Agent 原生代理';
-      local.disabled=rule.localNetworkMode==='local_agent';
-      local.addEventListener('click',()=>{
-        local.disabled=true;
-        const help=textNode('p','仅访问此 Cookie 规则的 HTTPS 网站；使用 B Agent 的分流和选中出口。需要在 B Agent 配置 browser_sync.local_proxy 并设置相同域名白名单，不依赖其 SOCKS5/HTTP/透明代理开关。');
-        const port=document.createElement('input');
-        port.type='number';port.min='1024';port.max='65535';port.value='21291';
-        port.placeholder='本机监听端口';
-        port.setAttribute('aria-label','B 本机 Agent 监听端口');
-        const confirm=document.createElement('button');confirm.textContent='确认绑定 B 本机 Agent';
-        confirm.addEventListener('click',async()=>{
-          if(!window.confirm('B 的此站点将经过本机 Agent 原生分流，不再经来源 A 的公网出口。DIRECT 规则将阻断而不是泄漏本机 IP。确认？'))return;
-          try{
-            await ask({type:'NETWORK_LOCAL_ENABLE',ruleId:rule.id,
-              port:Number(port.value),confirmed:true});
-            status('已切换至 B 本机 Agent，无需代理鉴权。');
-            await refreshPairing();
-          }catch(error){failure(error);}
-        });
-        card.append(help,port,confirm);
-      });
-      card.append(local);
-      if(rule.network?.status==='active'&&rule.network.matchingHost&&rule.localNetworkMode!=='source_agent'){
-        const useSource=document.createElement('button');
-        useSource.textContent='切换回 A 的 Agent 网络出口';
-        useSource.addEventListener('click',async()=>{
-          try{
-            await ask({type:'NETWORK_USE_SOURCE',ruleId:rule.id});
-            status('已改为来源 A Agent 网络出口');
-            await refreshPairing();
-          }catch(error){failure(error);}
-        });
-        card.append(useSource);
-      }
-      if(rule.localNetworkMode==='local_agent'){
-        const stop=document.createElement('button');
-        stop.textContent='停用 B 本机站点代理';
-        stop.addEventListener('click',async()=>{
-          if(!window.confirm('停用后此网站可能从 B 本地网络直连。已同步的 Cookie 不会自动删除。确定？'))return;
-          try{
-            await ask({type:'NETWORK_LOCAL_DISABLE',ruleId:rule.id});
-            await refreshPairing();
-          }catch(error){failure(error);}
-        });
-        card.append(stop);
-      }
-    }
-    if (rule.status === 'active' && rule.valid) {
-      const sync = document.createElement('button');
-      sync.textContent = rule.role === 'source' ? '立即发送加密登录状态' : '从来源设备请求同步';
-      sync.addEventListener('click', async () => {
-        try {
-          const action = rule.role === 'source' ? 'SEND_SESSION' : 'REQUEST_SESSION';
-          const result = await ask({ type: action, ruleId: rule.id });
-          status(result.state === 'RELAYED' ? '密文已投递，等待接收端验证和应用。' :
-            '已请求来源设备发送最新密文快照，请刷新检查结果。');
-        } catch (error) { failure(error); }
-      });
-      card.append(sync);
-      if (rule.role === 'target') {
-        if (rule.lastTransfer?.state === 'PARTIAL') {
-          card.append(textNode('p','注意：上次部分 Cookie 无法完整恢复。请检查当前目标网站的登录状态，确认没有混合账户后再恢复。','error'));
-          const resume = document.createElement('button');
-          resume.textContent = '我已检查登录状态，恢复此规则';
-          resume.addEventListener('click',async()=>{
-            if(!window.confirm('你是否已经检查目标网站的登录状态，并确认可以继续接收会话？'))return;
-            try {
-              await ask({type:'RESUME_PARTIAL_RESTORE',ruleId:rule.id,confirmed:true});
-              status('已解除恢复暂停。请检查目标登录账号后手动请求同步。');
-              await refreshPairing();
-            }catch(error){failure(error);}
-          });
-          card.append(resume);
-        }
-        const open = document.createElement('button');
-        open.textContent = '同步成功后打开网站';
-        open.addEventListener('click',async()=>{
-          try{
-            await ask({type:'SYNC_THEN_OPEN',ruleId:rule.id});
-            status('已请求同步，只有 Cookie 成功应用后才会打开网站。');
-          }catch(error){failure(error);}
-        });
-        card.append(open);
-        const label = document.createElement('label');
-        const checked = document.createElement('input');
-        checked.type = 'checkbox';
-        label.append(checked, textNode('span', '允许覆盖目标端 Cookie 与 Local/Session Storage（可能切换账号）'));
-        checked.addEventListener('change', async () => {
-          if (checked.checked && !window.confirm('确定允许替换目标网站的现有登录会话吗？')) {
-            checked.checked = false; return;
-          }
-          try {
-            await ask({ type: 'ALLOW_OVERWRITE', ruleId: rule.id, allowed: checked.checked });
-            status(checked.checked ? '此规则允许覆盖。可立即从来源设备请求同步。' : '已恢复冲突保护。');
-          } catch (error) { checked.checked = !checked.checked; failure(error); }
-        });
-        card.append(label);
-      }
-    }
-    const revoke = document.createElement('button');
-    revoke.textContent = '撤销配对';
-    revoke.addEventListener('click', async () => {
-      try {
-        if (!window.confirm('确定撤销此配对规则？此操作不会退出网站已登录的设备。')) return;
-        await ask({ type: 'REVOKE_RULE', ruleId: rule.id });
-        status('规则已撤销，不再允许后续同步。');
-        await refreshPairing();
-      } catch (error) { failure(error); }
-    });
-    card.append(revoke);
-    parent.append(card);
-  }
+function activeSite(tab) {
+  try {
+    const uri = new URL(tab?.url);
+    return uri.protocol === 'https:' ? uri.origin : '';
+  } catch { return ''; }
+}
+function setConnection(connected, configured, stage) {
+  $('connection-dot').className = 'status-dot ' + (connected ? 'online' : 'offline');
+  $('connection-text').textContent = connected ? '已连接' : configured ? '尚未连接' : '尚未配置';
+  $('connect').textContent = connected ? '已连接' : configured ? '立即连接' : '去配置';
+  $('connect').disabled = connected;
+  $('connect').dataset.configured = String(configured);
+  $('connect').title = connected ? '已通过设备身份认证' : (stage || '等待连接');
 }
 
-$('refresh-pairing').addEventListener('click', async () => {
-  try { await refreshPairing(); status('已更新配对设备和邀请。'); }
-  catch (error) { failure(error); }
-});
-
-$('offer-rule').addEventListener('click', async () => {
+function renderRules(rules, siteOrigin) {
+  const list = $('quick-rules');
+  list.replaceChildren();
+  const active = rules.filter(r => r.status === 'active' && r.valid && r.policy?.siteOrigin);
+  const siteRules = active.filter(r => r.policy.siteOrigin === siteOrigin);
+  const ordered = [...siteRules, ...active.filter(r => r.policy.siteOrigin !== siteOrigin)];
+  $('rule-count').textContent = active.length + ' 个已激活配对';
+  $('current-site').hidden = !siteOrigin;
+  if (siteOrigin) $('current-site').textContent = '当前标签页 · ' + new URL(siteOrigin).hostname;
+  $('empty-state').hidden = ordered.length > 0;
+  if (!ordered.length) {
+    $('empty-title').textContent = rules.some(r => r.status === 'offered') ? '有等待确认的配对邀请' : '尚无活跃会话';
+    $('empty-description').textContent = '前往完整设置管理网站授权、配对邀请和账号冲突。';
+  }
+  for (const rule of ordered) {
+    const item = el('article','quick-rule');
+    if (siteOrigin && rule.policy.siteOrigin === siteOrigin) item.classList.add('matching-rule');
+    const info = el('div','rule-info');
+    const main = el('div','rule-name');
+    main.append(el('strong','',new URL(rule.policy.siteOrigin).hostname),
+      el('span','role-label',rule.role === 'source' ? '来源 A' : '接收 B'));
+    const detail = el('div','rule-detail',STATES[rule.lastTransfer?.state] || '等待同步');
+    if (['PARTIAL','CONFLICT','FAILED'].includes(rule.lastTransfer?.state)) detail.classList.add('attention');
+    info.append(main,detail);
+    const buttons = el('div','quick-actions');
+    const sync = el('button','small-button primary-button',rule.role === 'source' ? '立即发送' : '请求同步');
+    sync.type = 'button';
+    sync.addEventListener('click',async()=>{
+      sync.disabled = true;
+      try {
+        const result = await ask(rule.role === 'source' ? 'SEND_SESSION' : 'REQUEST_SESSION',{ruleId:rule.id});
+        feedback(result.state === 'RELAYED' ? '密文已发送；等待接收端确认。' : '已请求来源设备发送最新会话。');
+        await refresh({quiet:true});
+      }catch(error){messageError(error);}
+      finally{sync.disabled = false;}
+    });
+    buttons.append(sync);
+    if (rule.role === 'target') {
+      const open = el('button','small-button outline-button','同步后打开');
+      open.type = 'button';
+      open.addEventListener('click',async()=>{
+        open.disabled = true;
+        try {await ask('SYNC_THEN_OPEN',{ruleId:rule.id});feedback('已请求同步，成功应用后将打开对应的恢复标签页。');}
+        catch(error){messageError(error);}
+        finally{open.disabled = false;}
+      });
+      buttons.append(open);
+    }
+    if (rule.lastTransfer?.state === 'PARTIAL' || rule.lastTransfer?.state === 'CONFLICT') {
+      const hint = el('button','text-button rule-manage','在设置中处理 →');
+      hint.type = 'button';hint.addEventListener('click',optionPage);
+      item.append(info,buttons,hint);
+    } else item.append(info,buttons);
+    list.append(item);
+  }
+}
+let localPort = 21291;
+let refreshing = false;
+async function refresh({quiet = false} = {}) {
+  if (refreshing) return;
+  refreshing = true;
+  $('refresh').disabled = true;
   try {
-    const siteOrigin = $('pair-site').value;
-    const targetID = $('target').value;
-    if (!targetID || !siteOrigin) throw new Error('请先选择网站与接收设备');
-    const result = await ask({ type: 'CREATE_RULE', siteOrigin, targetID });
-    status('已创建加密邀请 ' + result.ruleId.slice(0, 8) + '，请双方核对配对校验码。');
-    await refreshPairing();
-  } catch (error) { failure(error); }
+    const result = await ask('GET_STATUS');
+    localPort = result.localAgentProxy?.port || 21291;
+    $('quick-proxy').checked = !!result.localAgentProxy?.enabled;
+    $('proxy-port').textContent = '本机端口 · ' + localPort;
+    const configured = !!result.settings.serverOrigin;
+    $('server-summary').textContent = result.settings.serverOrigin || '请先在设置中添加 HTTPS Server';
+    setConnection(!!result.connected,configured,result.stage);
+    if (result.connected) {
+      const [ruleReply, tabs] = await Promise.all([
+        ask('LIST_RULES'),chrome.tabs.query({active:true,currentWindow:true})
+      ]);
+      renderRules(ruleReply.rules || [],activeSite(tabs[0]));
+    } else {
+      $('current-site').hidden = true;
+      $('quick-rules').replaceChildren();
+      $('rule-count').textContent = configured ? '连接后查看活跃配对' : '等待初始配置';
+      $('empty-state').hidden = false;
+      $('empty-title').textContent = configured ? '连接以查看配对' : '尚未配置 Server';
+      $('empty-description').textContent = configured ? '已保存 Server 地址，连接后即可快捷同步。' : '先在设置页面配置 Server 和站点权限。';
+    }
+    if (!quiet) $('message').hidden = true;
+  } catch(error) {messageError(error);}
+  finally{refreshing = false;$('refresh').disabled = false;}
+}
+$('refresh').addEventListener('click',()=>refresh());
+$('connect').addEventListener('click',async()=>{
+  if ($('connect').dataset.configured !== 'true') return optionPage();
+  $('connect').disabled = true;
+  try {await ask('CONNECT_BROWSER');feedback('浏览器设备已通过 Server 身份认证。');await refresh({quiet:true});}
+  catch(error){messageError(error);}
+  finally{$('connect').disabled = $('connection-text').textContent === '已连接';}
 });
-
-load().catch(failure);
-
+$('quick-proxy').addEventListener('change',async()=>{
+  const next = $('quick-proxy').checked;
+  $('quick-proxy').disabled = true;
+  try {
+    await ask('SET_LOCAL_AGENT_GLOBAL',{enabled:next,port:localPort});
+    feedback(next ? '已为当前 Chrome Profile 启用 Agent 分流。' : '已关闭全局 Agent 代理，网站独立绑定不受影响。');
+  }catch(error){$('quick-proxy').checked = !next;messageError(error);}
+  finally{$('quick-proxy').disabled = false;}
+});
+refresh();

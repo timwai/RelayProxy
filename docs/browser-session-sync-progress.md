@@ -297,3 +297,10 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **RS-03（新增自动化，待 CI）**：在独立模拟 Chrome Profile A、B 中生成各自的 P-256 身份密钥，A 组合所选 HTTPS Origin 的全路径 Cookie、全部 Local Storage / 单标签页 Session Storage Key，签名加密后 B 通过真实客户端解密、恢复和比对；检查密文不包含原文凭据、篡改被验签拒绝。
 - **RS-04（新增自动化，待 CI）**：已安装的 Storage Key 后续被 B 网站/用户改写，再由 A 发送空值集合时必须拒绝远程删除；旧账号状态不能被静默清除。仅证明模拟存储层行为，不证明真实网站会话失效或保持登录。
 - **门槛**：此测试补充 P0 会话恢复/冲突/登出的自动化证据，但 P0 真机验收、完整 Chrome 网络边界与安全审查仍未通过，PR 保持 Draft，不合并 main。
+
+### 2026-10-11 Chrome 扩展交互分层：快捷弹窗 / 独立配置页
+
+- **UI-01（编码已提交，CI 待跑）**：将原先单个 Popup 的全部 Server、站点、配对、网络绑定、冲突保护管理界面迁移至 Chrome `options_ui` 独立配置标签页（五个分组，可从弹窗入口打开）。保留原事件处理器及单次用户点击的 `chrome.permissions.request` 授权语义。
+- **UI-02（编码已提交，CI 待跑）**：全新小尺寸 Popup：服务端连接状态、手动连接、Chrome 全局 Agent 代理快捷开关（沿用已配置端口）、当前网站优先的 ACTIVE+密钥合法规则、源端立即发送 / 接收端请求同步、接收端同步后打开；待审批、撤销、修改覆盖权限需跳转设置，避免误触。
+- **UI-03（编码已提交，CI 待跑）**：增添独立的浅/深色 CSS、响应式侧栏、清楚的卡片/间距/可视焦点和空状态。新增静态 UI 契约测试确认配置控件不在 Popup、所有既有 options JS 操作目标 ID 仍在、快捷同步仅对有效活跃规则开放。
+- **UI-04（待真实 Chrome）**：Windows/macOS 多 DPI、窄视口、扩展从关闭状态启动、Chrome `chrome.runtime.openOptionsPage` 入口、权限弹窗仍由用户手势触发的手工验收；UI CI 不替代这些验证。PR 仍为 Draft。

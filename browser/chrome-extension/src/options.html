@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RelayProxy · 浏览器设置</title>
+  <link rel="stylesheet" href="./ui.css">
+  <link rel="stylesheet" href="./options.css">
+</head>
+<body class="settings-page">
+  <header class="settings-topbar">
+    <div class="topbar-inner"><div class="brand-mark" aria-hidden="true">R</div><div class="brand-copy"><strong>RelayProxy</strong><span>Browser Sync</span></div>
+      <div class="topbar-divider"></div><span class="topbar-page">浏览器设置</span>
+      <span class="preview-label">开发预览</span>
+    </div>
+  </header>
+  <div class="settings-layout">
+    <aside class="settings-sidebar" aria-label="设置导航">
+      <div class="sidebar-label">管理中心</div>
+      <nav class="settings-nav">
+        <a href="#server-section"><span aria-hidden="true">◉</span> 连接与设备</a>
+        <a href="#proxy-section"><span aria-hidden="true">⇄</span> 浏览器网络</a>
+        <a href="#sites-section"><span aria-hidden="true">◎</span> 站点授权</a>
+        <a href="#pairing-section"><span aria-hidden="true">◇</span> 设备配对</a>
+        <a href="#rules-section"><span aria-hidden="true">▤</span> 会话与出口规则</a>
+      </nav>
+      <div class="sidebar-footer"><strong>隐私与安全</strong><p>会话数据经端到端加密传输。Server 不解密网站 Cookie 和 Storage。</p></div>
+    </aside>
+    <main class="settings-main">
+      <div class="page-heading"><div class="eyebrow">PREFERENCES / 浏览器同步</div>
+        <h1>浏览器设置</h1>
+        <p>集中管理浏览器代理、站点授权和跨设备会话。弹窗仅保留日常快捷操作。</p>
+      </div>
+
+      <section id="server-section" class="settings-section" aria-labelledby="server-heading">
+        <div class="section-heading"><div class="section-index">01</div><div><h2 id="server-heading">连接与设备</h2><p>配置 HTTPS Server 并完成浏览器身份认证</p></div></div>
+        <div class="settings-card">
+          <div class="card-heading"><div><h3>服务端连接</h3><p>仅支持启用 TLS 的 Admin HTTPS Origin</p></div><span class="status-pill" id="server-stage">检查中</span></div>
+          <div class="field-group"><label for="server">RelayProxy HTTPS Server</label>
+            <input id="server" type="url" spellcheck="false" placeholder="https://relay.example.com:8443" autocomplete="url">
+            <p class="field-hint">需要当前 Chrome Profile 授予这个服务端的站点访问权限。</p>
+          </div>
+          <div class="button-row"><button id="save" class="primary-button" type="button">保存地址并授权</button>
+            <button id="register" class="secondary-button" type="button">上报扩展并申请设备授权</button>
+            <button id="connect" class="secondary-button" type="button">连接 Server</button></div>
+          <div class="divider-line"></div>
+          <div class="device-identity"><div><strong>本浏览器设备</strong><p>自动生成的身份 ID，无需手动填写扩展 ID。</p></div>
+            <div id="device" class="device-code" title="本设备 ID">正在初始化…</div></div>
+          <p class="field-hint">授权流程：扩展自动上报 → Server Web 审批扩展和浏览器设备 → 此处连接。设备审批与站点同步授权相互独立。</p>
+        </div>
+      </section>
+
+      <section id="proxy-section" class="settings-section" aria-labelledby="proxy-heading">
+        <div class="section-heading"><div class="section-index">02</div><div><h2 id="proxy-heading">浏览器网络</h2><p>独立于 Cookie 同步的全 Chrome 代理设置</p></div></div>
+        <div class="settings-card">
+          <label for="local-agent-all" class="setting-toggle-row"><div><strong>使用本机 RelayProxy Agent 分流</strong>
+            <p>对当前 Chrome Profile 的浏览器流量启用代理。已授权的网站独立网络绑定优先。</p></div>
+            <input type="checkbox" id="local-agent-all" aria-label="启用全 Chrome Agent 代理"></label>
+          <div class="field-group port-field"><label for="local-agent-port">本机 Agent 监听端口</label>
+            <input id="local-agent-port" type="number" min="1024" max="65535" value="21291" inputmode="numeric">
+            <p class="field-hint">Agent 必须主动启用本机浏览器接入服务，并监听 127.0.0.1 上的对应端口。</p></div>
+          <button id="local-agent-apply" class="primary-button" type="button">应用网络设置</button>
+          <div class="info-inline">Chrome 代理 API 不等于完整 VPN。DNS、WebRTC、QUIC / UDP 的泄漏边界仍需真实 Chrome 验证。</div>
+        </div>
+      </section>
+
+      <section id="sites-section" class="settings-section" aria-labelledby="sites-heading">
+        <div class="section-heading"><div class="section-index">03</div><div><h2 id="sites-heading">站点授权</h2><p>从已打开标签页选择，避免手动输入网址</p></div></div>
+        <div class="settings-card">
+          <div class="field-group"><label for="site">选择 HTTPS 站点</label>
+            <div class="selection-row"><select id="site"><option value="">请选择标签页</option></select>
+              <button id="refresh-sites" class="secondary-button" type="button">刷新标签页</button>
+              <button id="add-site" class="primary-button" type="button">授权网站</button></div>
+            <p class="field-hint">只有显式授权的网站才可进行会话同步；这一步不会自动创建配对。</p>
+          </div>
+          <h3 class="subheading">已授权网站</h3>
+          <ul id="sites" class="site-list"></ul>
+        </div>
+      </section>
+
+      <section id="pairing-section" class="settings-section" aria-labelledby="pairing-heading">
+        <div class="section-heading"><div class="section-index">04</div><div><h2 id="pairing-heading">设备配对</h2><p>创建双端确认、端到端加密的跨设备邀请</p></div></div>
+        <div class="settings-card">
+          <div class="card-heading"><div><h3>创建加密邀请</h3><p>A、B 必须均已获得 Server 审批，并归属同一身份。</p></div>
+            <button id="refresh-pairing" class="secondary-button" type="button">刷新设备与邀请</button></div>
+          <div class="form-grid">
+            <div class="field-group"><label for="target">接收设备</label><select id="target"><option value="">请先连接并刷新设备</option></select></div>
+            <div class="field-group"><label for="pair-site">授权的网站</label><select id="pair-site"><option value="">请先添加允许的网站</option></select></div>
+          </div>
+          <div class="info-inline">同步所选网站的适用 Cookie、全部 Local Storage Key，以及单个标签页的 Session Storage Key；不包含 IndexedDB。无需手填 Key 名称。</div>
+          <button id="offer-rule" class="primary-button" type="button">创建加密配对邀请</button>
+        </div>
+      </section>
+
+      <section id="rules-section" class="settings-section" aria-labelledby="rules-heading">
+        <div class="section-heading"><div class="section-index">05</div><div><h2 id="rules-heading">会话与出口规则</h2><p>审批邀请、核对校验码、设置账号冲突和 Agent 出口</p></div></div>
+        <div class="info-inline rule-intro">请通过独立可信渠道核对两台设备显示的配对校验码后再接受。APPLIED 表示浏览器状态已写入，不保证网站实际免登录。</div>
+        <div id="pairing-rules" class="pairing-rules" aria-live="polite"></div>
+      </section>
+      <div id="message" role="status" aria-live="polite"></div>
+      <footer class="settings-footer">RelayProxy Browser Sync · 开发预览 · 修改只影响当前 Chrome Profile</footer>
+    </main>
+  </div>
+  <script type="module" src="./options.js"></script>
+</body>
+</html>

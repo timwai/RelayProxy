@@ -3,68 +3,47 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>RelayProxy Browser Sync</title>
-  <style>
-    body { width: 385px; max-height: 580px; overflow-y: auto; margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #202d39; background: #f7f9fc; }
-    main { padding: 18px; }
-    h1 { margin: 0 0 4px; font-size: 20px; }
-    p { margin: 0 0 14px; color: #5d6978; font-size: 12px; }
-    label { display: block; margin: 12px 0 5px; font-weight: 600; }
-    input { box-sizing: border-box; width: 100%; border: 1px solid #c4ccd8; border-radius: 7px; padding: 9px 10px; }
-    button { background: #2266d7; color: white; border: 0; padding: 9px 12px; border-radius: 7px; cursor: pointer; margin-top: 8px; }
-    button:disabled { opacity: .5; cursor: not-allowed; }
-    .device { word-break: break-all; font-family: ui-monospace, monospace; font-size: 11px; }
-    .notice { background: #e9eef7; padding: 10px; border-radius: 7px; font-size: 12px; }
-    .error { color: #a62424; }
-    ul { padding-left: 20px; word-break: break-all; font-size: 12px; }
-    h2 { margin: 20px 0 8px; font-size: 15px; }
-    select { width: 100%; padding: 9px; border: 1px solid #c4ccd8; border-radius: 7px; background: white; }
-    .rule { border: 1px solid #d3dbe6; background: white; border-radius: 9px; padding: 10px; margin-top: 9px; }
-    .rule p { margin: 3px 0 7px; word-break: break-all; }
-    .code { font: 700 14px/1.6 ui-monospace, monospace; letter-spacing: .3px; color: #17488c; }
-    .rule button { margin-right: 5px; }
-    .rule label { display: flex; gap: 7px; align-items: start; font-weight: normal; margin: 9px 0 3px; font-size: 12px; }
-    .rule input[type="checkbox"] { width: auto; margin-top: 2px; }
-    #message { margin-top: 12px; font-size: 12px; }
-    </style>
+  <title>RelayProxy · 快捷面板</title>
+  <link rel="stylesheet" href="./ui.css">
+  <link rel="stylesheet" href="./popup.css">
 </head>
-<body><main>
-  <h1>RelayProxy Browser Sync</h1>
-  <p>浏览器代理与会话同步彼此独立</p>
-  <div class="notice">浏览器网络代理支持使用本机 Agent 处理 HTTP、HTTPS 和其他 TCP 目标；Cookie 同步仍需独立配对与加密授权。Chrome 原生代理 API 不等于完整 VPN，对 WebRTC/部分 UDP 等流量仍需单独验证。</div>
-  <h2>浏览器网络代理</h2>
-  <label style="display:flex;gap:8px;align-items:center">
-    <input type="checkbox" id="local-agent-all" style="width:auto">
-    让整个 Chrome 使用本机 Agent 分流
-  </label>
-  <label for="local-agent-port">本机 Agent 接入端口</label>
-  <input id="local-agent-port" type="number" min="1024" max="65535" value="21291">
-  <button id="local-agent-apply">应用浏览器代理设置</button>
-  <p>无需 Cookie 配对、用户名、密码、Token 或 Agent 域名白名单。HTTP/HTTPS、IP 地址、自定义端口等 TCP 连接按 Agent 分流规则执行；本选项会影响整个 Chrome Profile。来源 A 已授权的站点网络规则优先。</p>
-  <label for="device">浏览器设备 ID</label>
-  <div id="device" class="device">正在初始化...</div>
-  <label for="server">RelayProxy HTTPS Server</label>
-  <input id="server" placeholder="https://relay.example.com">
-  <button id="save">保存地址并授权连接</button>
-  <button id="register">上报并申请浏览器设备授权</button>
-  <button id="connect">连接 Server</button>
-  <label for="site">选择已打开的 HTTPS 网站</label>
-  <select id="site"><option value="">请选择标签页</option></select>
-  <button id="refresh-sites">刷新可选网站</button>
-  <button id="add-site">授权所选网站</button>
-  <ul id="sites"></ul>
-  <h2>设备配对</h2>
-  <p>需要 A/B 均在 Server 审批；只能选择同一身份下的浏览器设备。</p>
-  <button id="refresh-pairing">刷新设备与邀请</button>
-  <label for="target">接收设备</label>
-  <select id="target"><option value="">请先连接 Server 并刷新</option></select>
-  <label for="pair-site">站点（必须先授予权限）</label>
-  <select id="pair-site"><option value="">请先添加允许的网站</option></select>
-  <p class="notice">所选网站的全部 Cookie、Local Storage 和当前标签页的 Session Storage Key 自动同步；无需填写名称。双方必须核对配对校验码。浏览器不保证所有网站均能通过状态复制恢复登录。</p>
-  <button id="offer-rule">创建加密配对邀请</button>
-  <h2>配对邀请与授权</h2>
-  <p>请通过独立可信渠道比较两台设备显示的校验码，再授权端到端加密状态同步。</p>
-  <div id="pairing-rules"></div>
-  <div id="message" role="status"></div>
+<body class="popup-page">
+  <main class="popup-shell">
+    <header class="popup-header">
+      <div class="brand-mark" aria-hidden="true">R</div>
+      <div class="popup-heading"><strong>RelayProxy</strong><span>浏览器快捷面板</span></div>
+      <button class="icon-button" id="open-options" title="打开完整设置" aria-label="打开完整设置">⚙</button>
+    </header>
+    <div class="popup-body">
+      <section class="connection-card" aria-label="服务端连接">
+        <div class="section-top">
+          <div><span class="eyebrow">服务端连接</span><div class="connection-line"><span id="connection-dot" class="status-dot"></span><strong id="connection-text">正在检查</strong></div></div>
+          <button id="connect" class="small-button" type="button">连接</button>
+        </div>
+        <div id="server-summary" class="muted truncate">正在读取 Server 配置…</div>
+      </section>
+      <section class="proxy-card" aria-label="Chrome 全局代理">
+        <div class="proxy-info"><div class="row-title">全局浏览器代理</div><p>使用本机 RelayProxy Agent 分流</p><span id="proxy-port" class="subtle">本机端口 · 21291</span></div>
+        <label class="switch" for="quick-proxy" title="切换整个 Chrome Profile 的 Agent 代理">
+          <input id="quick-proxy" type="checkbox" role="switch" aria-label="全局浏览器代理">
+          <span class="switch-track"></span>
+        </label>
+      </section>
+      <section class="rules-section" aria-label="快捷会话操作">
+        <div class="section-title"><div><h2>会话快捷操作</h2><p id="rule-count">已配对的网站</p></div><button id="refresh" type="button" class="text-button">刷新</button></div>
+        <div id="current-site" class="current-site" hidden></div>
+        <div id="quick-rules" class="quick-rules"></div>
+        <div id="empty-state" class="empty-state" hidden>
+          <span class="empty-symbol" aria-hidden="true">↗</span>
+          <strong id="empty-title">尚无可操作的会话</strong>
+          <p id="empty-description">请先连接 Server，在完整设置中完成站点授权和配对。</p>
+          <button id="empty-options" type="button" class="secondary-button">前往设置</button>
+        </div>
+      </section>
+      <div id="message" class="feedback" role="status" aria-live="polite" hidden></div>
+    </div>
+    <footer class="popup-footer"><span>会话同步端到端加密</span><button class="text-button" id="footer-options" type="button">完整设置 <span aria-hidden="true">↗</span></button></footer>
+  </main>
   <script type="module" src="./popup.js"></script>
-</main></body></html>
+</body>
+</html>

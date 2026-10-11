@@ -29,8 +29,9 @@ func TestExtensionOriginRecordedWithoutSeparateApproval(t *testing.T) {
 	if got := request("/api/v1/browser-sync/devices/register"); got != http.StatusBadRequest {
 		t.Fatalf("unapproved device request did not reach validation: %d", got)
 	}
-	if got := request("/api/v1/browser-sync/devices/register"); got != http.StatusBadRequest {
-		t.Fatalf("origin metadata did not allow a device to request approval: %d", got)
+	devices, err := store.Devices(context.Background())
+	if err != nil || len(devices) != 0 {
+		t.Fatalf("malformed device enrollment granted access: %+v %v", devices, err)
 	}
 	if err := store.SetExtensionApproved(context.Background(), ext, false); err != nil {
 		t.Fatal(err)

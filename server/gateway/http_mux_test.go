@@ -154,7 +154,11 @@ func TestSharedTCPPortWebsocketUpgradeAndCONNECTHijack(t *testing.T) {
     if err!=nil{t.Fatal(err)}
     handler:=http.HandlerFunc(func(w http.ResponseWriter,req *http.Request){
         if req.TLS==nil { http.Error(w,"TLS state missing",http.StatusUpgradeRequired);return }
-        if req.URL.Path=="/ws"{
+        if req.URL.Path=="/api/v1/browser-sync/ws"{
+            if req.Header.Get("Origin")!="chrome-extension://abcdefghijklmnopabcdefghijklmnop"{
+                http.Error(w,"extension Origin not approved",http.StatusForbidden)
+                return
+            }
             conn,err:=websocket.Accept(w,req,&websocket.AcceptOptions{InsecureSkipVerify:true})
             if err!=nil{return}
             defer conn.CloseNow()
@@ -192,8 +196,17 @@ func TestSharedTCPPortWebsocketUpgradeAndCONNECTHijack(t *testing.T) {
     },Timeout:4*time.Second}
     ctx,cancel:=context.WithTimeout(context.Background(),4*time.Second)
     defer cancel()
-    ws,_,err:=websocket.Dial(ctx,"wss://"+addr+"/ws",&websocket.DialOptions{HTTPClient:client})
-    if err!=nil { t.Fatal(err) }
+    path:="wss://"+addr+"/api/v1/browser-sync/ws"
+    denied,forbidden,denyErr:=websocket.Dial(ctx,path,&websocket.DialOptions{
+        HTTPClient:client,HTTPHeader:http.Header{"Origin":[]string{"chrome-extension://unapproved"}}})
+    if denied!=nil{_ = denied.CloseNow()}
+    if denyErr==nil || forbidden==nil || forbidden.StatusCode!=http.StatusForbidden{
+        t.Fatalf("unapproved extension was allowed to WebSocket upgrade: response=%v err=%v",forbidden,denyErr)
+    }
+    ws,resp,err:=websocket.Dial(ctx,path,&websocket.DialOptions{HTTPClient:client,
+        HTTPHeader:http.Header{"Origin":[]string{"chrome-extension://abcdefghijklmnopabcdefghijklmnop"}}})
+    if err!=nil { t.Fatalf("approved extension WSS Upgrade failed: response=%v err=%v",resp,err) }
+    if resp==nil || resp.StatusCode!=http.StatusSwitchingProtocols{t.Fatalf("expected WebSocket 101, got %v",resp)}
     if err:=ws.Write(ctx,websocket.MessageText,[]byte("ping"));err!=nil{t.Fatal(err)}
     _,value,err:=ws.Read(ctx)
     if err!=nil || string(value)!="ping" {t.Fatalf("websocket failed: %v %q",err,value)}

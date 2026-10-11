@@ -4,7 +4,7 @@
 
 Chrome 扩展“RelayProxy HTTPS Server”填公开的中继 HTTPS 地址，例如 `https://relay.example.com:443`（不应填写仅管理用的 Admin 端口以便使用站点网络绑定）。B Chrome 使用该已验证 Server Origin 作为网络出口代理地址；Server 下发的临时网络令牌不再带自定义代理 host/port。Cookie / Local Storage / Session Storage 同步本身**不需要 Agent**。只有选用 A Agent 站点出口才要求 Agent 在线且具备 `proxy.exit`、同 Identity 和 `exit.browser_network_share: true`，并经过 A/B 双端明确配对与站点绑定确认；不允许任何未配对的跨身份转发。
 
-如扩展出现“无法建立安全 WSS 连接”，先运行 `curl -v --http1.1 https://你的中继域名:TCP端口/api/v1/browser-sync/health`。新版 Server 正常且 Browser Sync 已启用时响应 `204`；`404` 表示错端口、旧服务或 Browser Sync 未启用，TLS 失败可能是证书、DNS 或端口防火墙。浏览器已连通但仍被拒绝时检查 Server Web 扩展/设备审批。参见 [网络绑定设计](../../docs/browser-session-network-binding.md)。旧版 Server / Chrome 扩展的网络代理令牌结构与新版不同，使用来源 Agent 网络绑定时应一同升级 Server 和 B Chrome 扩展。
+如扩展出现“无法建立安全 WSS 连接”，先运行 `curl -v --http1.1 https://你的中继域名:TCP端口/api/v1/browser-sync/health`。新版 Server 正常且 Browser Sync 已启用时响应 `204`，**仅代表 HTTPS 接口可达**，不代表已完成 WSS Upgrade 或设备认证。`404` 表示错端口、旧服务或 Browser Sync 未启用，TLS 失败可能是证书、DNS 或端口防火墙。可以使用带扩展 `Origin`、`Connection: Upgrade`、`Upgrade: websocket`、`Sec-WebSocket-Version`、`Sec-WebSocket-Key` 的 `curl --http1.1` 请求在相同 TCP 中继端口验证是否返回 `HTTP 101`；见网络绑定设计文档。浏览器已连通但仍被拒绝时检查 Server Web 扩展/设备审批。参见 [网络绑定设计](../../docs/browser-session-network-binding.md)。旧版 Server / Chrome 扩展的网络代理令牌结构与新版不同，使用来源 Agent 网络绑定时应一同升级 Server 和 B Chrome 扩展。
 
 ## 完整 Storage 大于 180 KiB：加密前压缩与体积限制
 

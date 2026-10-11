@@ -8,11 +8,22 @@ const endpoint = (base, path) => new URL(path, base).toString();
 // Only the status of this non-authenticated probe is inspected. Never fetch
 // or log browser Cookie values, auth tokens, challenge signatures or keys.
 export function browserRelayHealthMessage(status) {
-  if (status === 204) return 'TLS 中继端口可达，但 WSS Upgrade 未完成。请检查 Server Web 中的扩展/设备审批，以及反向代理是否允许 HTTP/1.1 WebSocket Upgrade。';
+  if (status === 204) return 'Browser Sync TLS 接口返回 HTTP 204：只代表 HTTPS 入口可达，无法证明 WebSocket Upgrade 或设备认证成功。请检查扩展 Origin 审批、WSS Upgrade 与 Chrome 代理设置。';
   if (status === 404) return '当前地址没有 Browser Sync 中继接口（HTTP 404）。请确认扩展配置的是 Server 的 TLS/TCP 中继端口，并已部署新版 Server、启用 browser_sync。';
   if (status === 426) return '中继接口要求 HTTPS/TLS（HTTP 426）；请检查 TLS 终止与转发配置。';
   if (status >= 500) return 'Browser Sync 中继服务返回 HTTP ' + status + '，请检查 Server 日志与服务健康状态。';
   return '中继地址返回 HTTP ' + status + '，但未确认 Browser Sync TLS/WSS 可用；请核实 Server 版本和接入端口。';
+}
+
+// Socket events are the only reliable source of the WebSocket handshake
+// stage. The anonymous HTTPS /health endpoint must never be treated as an
+// authentication probe, and a successful 204 cannot establish 101 Upgrade.
+export function browserWSSFailureMessage(stage, code=0) {
+  const suffix=code ? '（WebSocket close '+code+'）' : '';
+  if(stage==='proof')return 'WSS Upgrade 和 AUTH_CHALLENGE 已成功，但 AUTH_PROOF 未获认证'+suffix+'。请在 Server Web 核实浏览器设备仍获批准、有 send/receive 权限，并检查 Server 与扩展的版本及 Origin 签名是否一致。';
+  if(stage==='challenge')return 'WSS Upgrade 已成功，收到 AUTH_CHALLENGE 但未完成 AUTH_PROOF'+suffix+'。请检查浏览器设备的签名密钥、扩展 Service Worker 和 Server 认证日志。';
+  if(stage==='hello')return 'WSS Upgrade 已成功，但 AUTH_HELLO 未收到挑战响应'+suffix+'。请检查 Browser Sync 的连接限流、设备 ID 与 Server 日志。';
+  return 'WebSocket 尚未触发 open'+suffix+'。请检查 Chrome 扩展 Origin 是否经 Server 批准，以及中继链路是否保留 HTTP/1.1 Upgrade。';
 }
 
 async function diagnoseBrowserWSS(serverOrigin) {
@@ -97,10 +108,16 @@ async function connectFreshBrowser() {
     let authenticated = false;
     let finished = false;
     let diagnosing = null;
+    let stage = 'upgrade';
     const failWithDiagnosis = () => {
       if (finished || diagnosing) return;
+      if (stage !== 'upgrade') {
+        fail(new Error(browserWSSFailureMessage(stage)));
+        return;
+      }
       diagnosing = diagnoseBrowserWSS(settings.serverOrigin);
-      diagnosing.then(fail, () => fail(new Error('无法建立安全 WSS 连接')));
+      diagnosing.then(error => fail(new Error(browserWSSFailureMessage(stage) + ' ' + error.message)),
+        () => fail(new Error(browserWSSFailureMessage(stage))));
     };
     const fail = error => {
       if (finished) return;
@@ -110,6 +127,7 @@ async function connectFreshBrowser() {
       reject(error);
     };
     socket.addEventListener('open', () => {
+      stage = 'hello';
       socket.send(JSON.stringify({ type: 'AUTH_HELLO', deviceId: identity.deviceId }));
     });
     socket.addEventListener('message', async event => {
@@ -117,6 +135,7 @@ async function connectFreshBrowser() {
       try { msg = JSON.parse(event.data); } catch { return fail(new Error('Server 响应无效')); }
       try {
         if (msg.type === 'AUTH_CHALLENGE') {
+          stage = 'challenge';
           if (msg.deviceId !== identity.deviceId) throw new Error('Server 设备身份不匹配');
           const proof = await signChallenge({
             serverOrigin: settings.serverOrigin,
@@ -127,10 +146,12 @@ async function connectFreshBrowser() {
             type: 'AUTH_PROOF', deviceId: identity.deviceId,
             challenge: msg.challenge, signature: proof.signature
           }));
+          stage = 'proof';
         } else if (msg.type === 'AUTH_OK') {
           if (msg.deviceId !== identity.deviceId || msg.sessionTransferEnabled !== true) {
             throw new Error('Server 协议状态与预期不符');
           }
+          stage = 'authenticated';
           authenticated = true;
           connectionState = 'AUTHENTICATED';
           if (!finished) { finished = true; resolve({ state: connectionState }); }
@@ -169,9 +190,9 @@ async function connectFreshBrowser() {
     });
     socket.addEventListener('close', event => {
       if (!authenticated && event.code === 1008) {
-        // Chrome exposes authenticated WebSocket close codes, but not HTTP
-        // handshake error responses. Keep security reasons generic here.
-        fail(new Error('Browser Sync WSS 已连接，但设备/扩展审批或签名验证被 Server 拒绝（WebSocket 1008）。请检查 Server Web 审批与两端设备身份。'));
+        // 1008 is delivered only AFTER a completed WebSocket Upgrade.
+        // Do not mask a failed proof as a TLS/network error.
+        fail(new Error(browserWSSFailureMessage(stage, event.code)));
       }
       if (socket === currentSocket) {
         if (keepalive) clearInterval(keepalive);

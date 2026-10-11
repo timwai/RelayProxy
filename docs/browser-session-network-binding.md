@@ -67,6 +67,25 @@ B Chrome  -- HTTPS CONNECT 精确配对域名 -----> Relay Server TLS/TCP
 curl -v --http1.1 https://relay.example.com:20000/api/v1/browser-sync/health
 ```
 
-新 Server 正常且 Browser Sync 已启用、TLS 证书有效时返回 **HTTP 204**。如果返回 404，检查域名/中继 TCP 端口/运行的 Server 版本和 `browser_sync.enabled`；如果出现证书验证失败，检查完整证书链和匹配域名，不要通过忽略证书验证强行启用浏览器 WSS；如果 TCP 连接失败，检查公网 TCP 防火墙和代理/反代是否支持 HTTP/1.1 WebSocket Upgrade。
+新 Server 正常且 Browser Sync 已启用、TLS 证书有效时返回 **HTTP 204**。但它**只证明 HTTPS 入口可达，不能证明 WebSocket Upgrade 失败或成功**。如果返回 404，检查域名/中继 TCP 端口/运行的 Server 版本和 `browser_sync.enabled`；如果出现证书验证失败，检查完整证书链和匹配域名，不要通过忽略证书验证强行启用浏览器 WSS；如果 TCP 连接失败，检查公网 TCP 防火墙。
+
+要直接验证 **HTTP/1.1 Upgrade 返回 HTTP 101**，在 A/B Chrome 所在的设备执行（替换真实域名、Server TCP 中继端口、Chrome 扩展 ID，且先通过 Server Web 完成扩展审批）：
+
+```bash
+curl -i -v --http1.1 --noproxy '*' --max-time 5 \
+  -H 'Origin: chrome-extension://abcdefghijklmnopabcdefghijklmnop' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' \
+  -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  'https://relay.example.com:443/api/v1/browser-sync/ws'
+```
+
+- **HTTP 101 Switching Protocols**：Upgrade 已成功；此 curl 请求**没有**随后完成 `AUTH_HELLO / AUTH_PROOF`，所以连接最终关闭属于正常现象。若 Chrome 仍失败，重点检查浏览器设备是否 approved、签名时使用的 Origin 与 Server Host 是否相同，以及 Chrome 是否使用了与 curl 不同的代理路径。
+- **HTTP 403**：Extension Origin 未审批 / 已撤销，或 Origin 格式不符（还没有到浏览器设备签名这一步）。
+- **HTTP 400/426/500**：Upgrade 请求头 / 协议版本 / 服务器处理或网关异常，应结合 Server 日志排查。
+- **HTTP 404**：实际请求落到不包含 Browser Sync WSS 的旧版 Server 或错误入口。
+- 健康检查 204、但 Upgrade 探测没有 101：重点查反向代理是否保留 `Connection: Upgrade`、`Upgrade: websocket`、原始 Host 和 Extension Origin。**如果同时复用 Agent 原生 TCP Relay，传统 HTTP 反向代理不能代替 TCP 透传。**
+
+新版 Chrome 扩展会分别报告 WebSocket 未触发 `open`、Upgrade 完成后等待 `AUTH_CHALLENGE`、收到了挑战但未发送 `AUTH_PROOF`，以及已发送证明却未收到 `AUTH_OK` 的状态。除了状态码和握手阶段，诊断不输出 Cookie、密钥和代理凭据。
 
 Chrome 扩展连接失败后会对同一 TLS 入口发起无身份、无 Cookie 的 HTTP 204 探测，给出上述分类提示。**204 只证明接口可达，不证明设备已被批准或 WebSocket 已成功认证**。如出现 1008，检查扩展 ID 与浏览器设备是否在 Server Web 审批、关联身份及 send/receive 授权；若入口正常但 Upgrade 失败，还应核查中间代理是否允许 WebSocket 升级。

@@ -81,3 +81,27 @@ test('simultaneous reconnects use one authenticated WSS connection',async()=>{
   disconnect();
   assert.equal(currentConnectionState(),'DISCONNECTED');
 });
+
+test('a policy violation after WSS open identifies AUTH_HELLO stage without HTTP health guessing',async()=>{
+  installFakeProfile();
+  class RejectingWebSocket {
+    static OPEN=1;
+    constructor(){
+      this.listeners={};
+      this.readyState=0;
+      queueMicrotask(()=>{this.readyState=1;this.emit('open',{});});
+    }
+    addEventListener(type,fn){(this.listeners[type] ||= []).push(fn);}
+    emit(type,value){for(const fn of this.listeners[type]||[])fn(value);}
+    send(raw){
+      if(JSON.parse(raw).type==='AUTH_HELLO')
+        queueMicrotask(()=>{this.readyState=3;this.emit('close',{code:1008});});
+    }
+    close(){this.readyState=3;}
+  }
+  globalThis.WebSocket=RejectingWebSocket;
+  globalThis.fetch=()=>{throw new Error('post-upgrade failure must not use /health');};
+  await assert.rejects(connectBrowser(),/AUTH_HELLO.*1008/);
+  assert.equal(currentConnectionState(),'DISCONNECTED');
+  disconnect();
+});

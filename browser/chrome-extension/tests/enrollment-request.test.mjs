@@ -13,10 +13,11 @@ test('one registration request submits browser device and public keys',()=>{
   assert.match(api,/encryptionPublicKey: identity\.encryptionPublicKey/);
   assert.match(api,/result\.id !== identity\.deviceId/);
   assert.match(api,/requestedIdentityId/);
-  assert.match(api,/if\(approval\.state!=='approved'\) return \{state:'extension_pending',legacy:true\}/);
+  assert.match(api,/return \{state:result\.state\}/);
+  assert.doesNotMatch(api,/extension_pending/);
 });
 
-test('options UI provides one application action, not repeated extension approval',()=>{
+test('options UI provides one application action, no extension approval',()=>{
   const html=source('options.html');
   const code=source('options.js');
   assert.match(html,/提交统一授权申请/);

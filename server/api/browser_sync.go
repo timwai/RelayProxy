@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	browsersync "relayproxy/server/browser_sync"
 )
@@ -109,4 +111,82 @@ func (r *Router) handleBrowserSyncExtensionRevoke(w http.ResponseWriter, req *ht
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"state": "revoked"})
+}
+
+	
+// Admin-only management metadata. Never return encrypted offers, browser keys,
+// tokens, credential material or arbitrary client-supplied error strings.
+func (r *Router) handleBrowserSyncRules(w http.ResponseWriter, req *http.Request) {
+	items, err := r.browserSync.Store.AdminRules(req.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot list browser sync rules")
+		return
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (r *Router) handleBrowserSyncRuleAction(w http.ResponseWriter, req *http.Request) {
+	parts := strings.Split(strings.Trim(req.URL.Path, "/"), "/")
+	action := parts[len(parts)-1]
+	if req.Body != nil && req.ContentLength > 0 {
+		var body struct{}
+		if err := decodeJSON(w, req, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid browser rule action")
+			return
+		}
+	}
+	if err := r.browserSync.Store.AdminRuleAction(req.Context(), req.PathValue("id"), action); err != nil {
+		if errors.Is(err, browsersync.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "browser rule not found")
+		} else if errors.Is(err, browsersync.ErrRuleDenied) {
+			writeError(w, http.StatusConflict, "browser rule cannot transition in its current state")
+		} else {
+			writeError(w, http.StatusInternalServerError, "unable to change browser rule")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": req.PathValue("id"), "action": action})
+}
+
+func (r *Router) handleBrowserSyncStatus(w http.ResponseWriter, req *http.Request) {
+	stats, err := r.browserSync.Store.AdminDeviceStats(req.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "unable to read browser activity")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"online": r.browserSync.OnlineSnapshot(),
+		"stats": stats,
+	})
+}
+
+func (r *Router) handleBrowserSyncAudit(w http.ResponseWriter, req *http.Request) {
+	limit := 50
+	if value := req.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 100 {
+			writeError(w, http.StatusBadRequest, "invalid browser audit limit")
+			return
+		}
+		limit = parsed
+	}
+	var before int64
+	if value := req.URL.Query().Get("before"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || parsed <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid browser audit cursor")
+			return
+		}
+		before = parsed
+	}
+	items, err := r.browserSync.Store.AdminAudit(req.Context(), before, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "unable to load browser audit")
+		return
+	}
+	next := int64(0)
+	if len(items) == limit {
+		next = items[len(items)-1].ID
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }

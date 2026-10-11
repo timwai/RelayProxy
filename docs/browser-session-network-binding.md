@@ -1,5 +1,7 @@
 # RelayProxy Browser Sync：A Agent 网络出口绑定
 
+> **实施状态（2026-10-11）**：下方“A 远端出口”和“B 本机 Agent”章节描述**当前 `feat/browser-session-sync` HEAD `031baf9` 的旧范围**：远端 A 需认证与双端批准；B 本机 opt-in、无鉴权/域名白名单，但 CONNECT 仍仅 DNS:443，使用已配对 Cookie 规则生成 PAC，且强制拒绝 DIRECT。下一阶段拟移除本机浏览器代理的人为目标限制，详见文末“完整 Chrome 代理目标”；尚未进入分支且不可视为已实现。完整进度以 [持续开发跟踪表](./browser-session-sync-progress.md) 为准。
+
 > 2026-10-11 第一阶段开发预览 · 分支 `feat/browser-session-sync` · 未通过双机真实浏览器验收，不得默认开放生产公网代理。
 
 ## 使用场景
@@ -88,3 +90,13 @@ browser_sync:
 Chrome 的 PAC/HTTP CONNECT 不提供整个系统或浏览器的任意协议覆盖；WebRTC、DNS/第三方资源、Service Worker 内部请求仍需真实浏览器防泄漏验收。B 使用本机 Agent 的公网 IP 应当等于 **B Agent 当前选中或分流规则决定的出口 IP**，不必与 A 相同；网站仍可使用设备绑定、Passkey、DBSC 等机制拒绝会话迁移。
 
 **安全取舍**：由于没有本机鉴权和 Agent 域名白名单，B 机器上的**其他本地程序也可以连接这一回环代理**，并向任何符合目标格式、路由规则允许的公开域名发起 CONNECT。Chrome PAC 的单站点约束只限制扩展管理的浏览器流量，**不是 Agent 监听器的访问控制**；它不能隔离同一台设备上的其他用户或进程。需确保本机系统可信、默认关闭此入口，并在正式发布前复核本地恶意进程、DNS 重绑定、目标内网解析和配额风险。若多个绑定网站使用同一 Chrome Profile，当前只允许一个本机端口；切换本机/来源 Agent 时重新验证浏览器代理控制权。真实 A/B 测试仍在 P0。
+
+## 完整 Chrome 本机 Agent 代理：最新需求与未实现工作
+
+**目标（暂未入功能分支）**：本机 Agent 代理是独立于 Cookie 同步的普通浏览器网络能力，可在 Chrome Profile 中单独开关，无须 Server 在线、设备注册、A/B 配对或站点 Cookie 权限。使用 Agent 原生 PROXY / DIRECT / REJECT 分流，不在扩展或本机 HTTP 入口另行限定目标域名、IP 类型、私网/环回/内部后缀或 TCP 端口；支持普通 HTTP 正向代理及任意合法 TCP CONNECT（含 IPv4/IPv6、非 443 端口），明确已批准的来源 A 远端网络规则可以覆盖对应站点。**所有访问仍须遵守 Agent 自己的访问策略/出口 ACL，不能将“无扩展人工限制”理解为绕过 Agent 安全规则。**
+
+现有分支 `031baf9` **尚未达到该目标**。草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 包含新增 HTTP Forward/通用 CONNECT、原生路由委托、Chrome 全局代理 UI/PAC 与部分测试，但**该提交尚未位于 `feat/browser-session-sync`，没有任何 CI runs，也无真实 Chrome 验收**。应先进入功能分支、修复格式/构建/单元测试与完整集成行为，再按全新 SHA 重新验收。
+
+**不能解除的技术事实**：Chrome Proxy API/PAC 不能代替 OS VPN；WebRTC、UDP/QUIC、系统 DNS、某些浏览器代理绕过规则可能走其他路径，须明确记录实际可控制的协议。Cookie 复制/恢复继续执行严格 E2EE、设备审批和显式授权；取消普通网络代理的限制并不等于取消 Cookie 权限校验。由于 B 本机 Agent 入口无鉴权且拟允许任何 TCP 地址（包括内网），同机程序滥用、内网连接与 DNS 重绑定风险必须单独审查，保持默认关闭、仅监听 127.0.0.1。
+
+**验收清单**：HTTP GET/POST/Upgrade、HTTPS/WSS、非 443 CONNECT、IPv4/IPv6、单标签与 `.local` 域名、DIRECT/PROXY/REJECT、全 Profile 开关、Chrome 代理冲突、无 Server/无 Cookie 配对、Agent 退出/重启、真实网站出口 IP；另测 PAC loopback bypass、WebRTC/QUIC/DNS 非代理路径、内网 SSRF/同机滥用、资源并发与断连释放。详见 [P0-08、NB-09/10/11](./browser-session-sync-progress.md)。

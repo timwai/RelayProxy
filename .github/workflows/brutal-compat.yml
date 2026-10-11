@@ -78,7 +78,63 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p evidence
-          go test -v ./internal/tunnel -run '^TestBrutalDeterministicPacketLoss$' -count=1 -timeout=6m \
+          go test -v ./internal/tunnel -run '^TestBrutalDeterministicPacketLoss \
+            | tee evidence/deterministic-udp-loss.log
+      - name: Upload deterministic UDP loss diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brutal-synthetic-packet-loss
+          path: evidence/deterministic-udp-loss.log
+          if-no-files-found: warn
+
+  linux-kernel-netem:
+    name: Kernel qdisc delay/rate/loss (${{ matrix.loss }} loss)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        loss: [0, 1, 5]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Linux traffic control
+        run: |
+          if ! command -v tc >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq iproute2
+          fi
+      - name: Exercise UDP sockets over kernel traffic shaping
+        shell: bash
+        env:
+          NETEM_LOSS: ${{ matrix.loss }}
+          RELAYPROXY_BRUTAL_NETEM: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          sudo tc qdisc replace dev lo root netem rate 12mbit delay 20ms loss "${NETEM_LOSS}%"
+          trap 'sudo tc qdisc del dev lo root || true' EXIT
+          sudo tc qdisc show dev lo | grep -q netem
+          sudo tc -s qdisc show dev lo | tee evidence/netem-before.log
+          go test -v ./internal/tunnel -run '^TestBrutalKernelNetem' -count=1 -timeout=3m \
+            | tee evidence/netem-results.log
+          python3 scripts/analyze_brutal_netem.py \
+            --input evidence/netem-results.log \
+            --output evidence/netem-overlap.csv \
+            --loss-label "${NETEM_LOSS}"
+          sudo tc -s qdisc show dev lo | tee evidence/netem-after.log
+      - name: Store per-link UDP impairment and transfer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brutal-linux-netem-loss-${{ matrix.loss }}
+          path: evidence/
+          if-no-files-found: warn
+ -count=5 -timeout=6m \
             | tee evidence/deterministic-udp-loss.log
       - name: Upload deterministic UDP loss diagnostics
         if: always()

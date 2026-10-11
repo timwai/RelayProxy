@@ -39,6 +39,31 @@ func TestBrutalLossCompensation(t *testing.T) {
 	}
 }
 
+
+type fixedRTTStats struct {
+	congestion.RTTStatsProvider
+	rtt time.Duration
+}
+
+func (p fixedRTTStats) SmoothedRTT() time.Duration { return p.rtt }
+
+func TestBrutalMinimumCongestionWindowSurvivesLowRTTAndLoss(t *testing.T) {
+	sender := NewBrutalSender(8_000_000, false)
+	sender.SetMaxDatagramSize(1400)
+	want := congestion.ByteCount(minimumWindowDatagrams * 1400)
+	for _, rtt := range []time.Duration{0, time.Microsecond, 50 * time.Microsecond, 100 * time.Microsecond} {
+		sender.SetRTTStatsProvider(fixedRTTStats{rtt: rtt})
+		if got := sender.GetCongestionWindow(); got < want {
+			t.Errorf("RTT=%v: cwnd=%d < minimum recovery flight=%d", rtt, got, want)
+		}
+	}
+	// Rate-based BDP still grows above the safe floor at real WAN RTT.
+	sender.SetRTTStatsProvider(fixedRTTStats{rtt: 50 * time.Millisecond})
+	if got := sender.GetCongestionWindow(); got <= want {
+		t.Fatalf("normal WAN bandwidth-delay product was clipped: cwnd=%d floor=%d", got, want)
+	}
+}
+
 func TestBrutalBeforeRTTStatsInstalled(t *testing.T) {
 	b := NewBrutalSender(1_000_000, false)
 	if got := b.GetCongestionWindow(); got < congestion.InitialPacketSize {

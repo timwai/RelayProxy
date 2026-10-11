@@ -17,6 +17,7 @@ const (
 	minSampleCount             = 50
 	minAckRate                 = 0.8
 	congestionWindowMultiplier = 2
+	minimumWindowDatagrams    = 10
 
 	debugEnv           = "HYSTERIA_BRUTAL_DEBUG"
 	debugPrintInterval = 2
@@ -77,18 +78,20 @@ func (b *BrutalSender) CanSend(bytesInFlight congestion.ByteCount) bool {
 }
 
 func (b *BrutalSender) GetCongestionWindow() congestion.ByteCount {
+	// Brutal's bandwidth-delay product can become smaller than one packet on
+	// low-latency paths. A one-packet congestion window can prevent QUIC from
+	// probing/retransmitting after a dropped packet. Keep a minimum flight
+	// large enough for ACK-clock and PTO loss recovery regardless of RTT.
+	minimum := max(congestion.ByteCount(10240), minimumWindowDatagrams*b.maxDatagramSize)
 	if b.rttStats == nil {
-		return 10240 // RTT provider may not yet be installed after a controller swap.
+		return minimum // RTT may not be installed immediately after switching.
 	}
 	rtt := b.rttStats.SmoothedRTT()
 	if rtt <= 0 {
-		return 10240
+		return minimum
 	}
 	cwnd := congestion.ByteCount(float64(b.bps) * rtt.Seconds() * congestionWindowMultiplier / b.ackRate)
-	if cwnd < b.maxDatagramSize {
-		cwnd = b.maxDatagramSize
-	}
-	return cwnd
+	return max(cwnd, minimum)
 }
 
 func (b *BrutalSender) OnPacketSent(sentTime monotime.Time, bytesInFlight congestion.ByteCount,

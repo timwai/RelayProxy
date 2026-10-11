@@ -66,6 +66,11 @@ func (h *Handler) allowOrigin(w http.ResponseWriter, r *http.Request, enrollment
 		return false
 	}
 	if !enrollment {
+		// Administrator revocation always overrides legacy static allowlists.
+		if h.Store.ExtensionRevoked(r.Context(), id) {
+			http.Error(w, "extension revoked by administrator", http.StatusForbidden)
+			return false
+		}
 		if _, ok := h.extensions[origin]; !ok && !h.Store.ExtensionApproved(r.Context(), id) {
 			http.Error(w, "extension not approved by administrator", http.StatusForbidden)
 			return false

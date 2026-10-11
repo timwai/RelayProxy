@@ -223,3 +223,12 @@ func (s *Store) ApproveEnrollment(ctx context.Context, id, identityID string, ca
 	}
 	return tx.Commit()
 }
+
+func (s *Store) ExtensionRevoked(ctx context.Context, id string) bool {
+	var state string
+	if err := s.db.QueryRowContext(ctx, `SELECT state FROM browser_sync_extensions
+        WHERE extension_id=?`, id).Scan(&state); err != nil {
+		return false
+	}
+	return state == "revoked"
+}

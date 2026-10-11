@@ -184,3 +184,26 @@ func TestUnifiedApprovalSupportsLegacyUnboundDevice(t *testing.T) {
 		t.Fatalf("legacy approval changed: %+v %v", saved, err)
 	}
 }
+
+func TestAdminRevocationOverridesLegacyExtensionAllowlist(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	if _, err := store.RequestExtension(ctx, unifiedExtensionID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetExtensionApproved(ctx, unifiedExtensionID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetExtensionApproved(ctx, unifiedExtensionID, false); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(store, []string{unifiedExtensionID})
+	req := httptest.NewRequest(http.MethodPost,
+		"https://relay.example.com/api/v1/browser-sync/devices/register", bytes.NewReader([]byte("{}")))
+	req.Header.Set("Origin", "chrome-extension://"+unifiedExtensionID)
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	if out.Code != http.StatusForbidden {
+		t.Fatalf("revoked extension bypassed admin via static legacy allowlist: %d", out.Code)
+	}
+}

@@ -75,7 +75,8 @@ jobs:
         run: go test ./internal/congestion/... ./internal/tunnel ./internal/protocol ./agent/app ./agent/direct ./agent/p2p ./server/gateway ./server/p2p ./mobile/androidcore -count=1 -timeout=15m
       - name: Repeat UDP partial-frame deadline under Windows scheduling
         if: runner.os == 'Windows'
-        run: go test ./internal/tunnel -run '^TestUDPStreamCallerDeadlinesAndPartialFrame
+        run: go test ./internal/tunnel -run TestUDPStreamCallerDeadlinesAndPartialFrame -count=25 -timeout=5m
+      - name: Targeted race regressions (Linux)
         if: runner.os == 'Linux'
         run: go test -race ./internal/congestion/... ./internal/tunnel ./agent/direct ./agent/p2p ./server/gateway ./server/p2p -count=1 -timeout=15m
 

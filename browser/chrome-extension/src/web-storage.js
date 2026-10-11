@@ -32,7 +32,8 @@ function mutate(expectedOrigin,changes){
 }
 async function tabFor(origin,{create=false}={}){
   const tabs=await chrome.tabs.query({});
-  let tab=tabs.find(t=>{
+  const active=await chrome.tabs.query({active:true,lastFocusedWindow:true});
+  let tab=[...active,...tabs].find(t=>{
     try{return !t.incognito && new URL(t.url).origin===origin;}catch{return false;}
   });
   if(!tab&&create){

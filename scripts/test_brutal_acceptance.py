@@ -38,7 +38,7 @@ class DataSummaryTests(unittest.TestCase):
             self.assertEqual([], problems)
             self.assertEqual(3, len(rows))
             brutal = next(row for row in rows if row["variant"] == "brutal")
-            self.assertEqual("5", brutal["runs"])
+            self.assertEqual(5, brutal["runs"])
             self.assertEqual("103.0000", brutal["median_goodput_mbps"])
             self.assertLess(float(brutal["relative_to_hysteria2_pct"]), 0)
             self.assertEqual(0, main(["--input", str(Path(folder) / "result.csv"),
@@ -59,18 +59,28 @@ class DataSummaryTests(unittest.TestCase):
     def test_duplicate_round_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             path = self.make_csv(folder)
-            with path.open("a", encoding="utf-8") as out:
-                out.write(",,,,,,,,,,\n")
+            with path.open(newline="", encoding="utf-8") as source:
+                reader = csv.DictReader(source)
+                names, rows = reader.fieldnames, list(reader)
+            with path.open("a", newline="", encoding="utf-8") as out:
+                writer = csv.DictWriter(out, fieldnames=names)
+                writer.writerow(rows[0])
             _, problems = summarize(path)
-            self.assertTrue(problems)
+            self.assertTrue(any("duplicate scenario" in p for p in problems), problems)
 
     def test_malformed_metrics_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             path = self.make_csv(folder)
-            content = path.read_text()
-            path.write_text(content.replace("80", "NaN", 1))
+            with path.open(newline="", encoding="utf-8") as source:
+                reader = csv.DictReader(source)
+                names, rows = reader.fieldnames, list(reader)
+            rows[0]["goodput_mbps"] = "NaN"
+            with path.open("w", newline="", encoding="utf-8") as target:
+                writer = csv.DictWriter(target, fieldnames=names)
+                writer.writeheader()
+                writer.writerows(rows)
             _, problems = summarize(path)
-            self.assertTrue(problems)
+            self.assertTrue(any("invalid transfer metrics" in p for p in problems), problems)
 
 
 class SamplerTests(unittest.TestCase):

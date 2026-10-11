@@ -150,3 +150,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | Server 关闭时释放被 Hijack 的网络流 | `net/http.Server.Shutdown` 本身不会关闭已 Hijack 的 CONNECT 套接字；新增独立关闭广播 channel，立即唤醒存量连接 watchdog 并关闭双向数据流；新增幂等 Shutdown 单测；同时修复 CI 报出的 gofmt 空行问题 | NB-02/P0-06 资源生命周期增强，仍未完成真机压力/安全验收 | 以新提交的 CI 判断 |
 
 | 2026-10-11 | [Go CI #38103289370](https://github.com/timwai/RelayProxy/actions/runs/38103289370) 测试夹具纠正 | 正向 HTTPS CONNECT 集成测试未声明已签名 Agent 本机许可，导致新权限门禁正确拒绝；现将正向路径夹具加入 `CapabilityBrowserNetworkExit`，并保留随后移除 capability 必须拒绝的负向断言 | NB-01/02 自检提升，尚待新的 CI 与真机验收 | 以新 SHA 的 Go/UI/网络回归判断 |
+
+**2026-10-11 安全加固代码基准：[`5c933cc7`](https://github.com/timwai/RelayProxy/commit/5c933cc7e5a9a36f122937d52c23876af7c3b131)。** [Go CI #38103377888](https://github.com/timwai/RelayProxy/actions/runs/38103377888) **success**：gofmt、module 检查、vet、完整 Go 测试（含 Agent 本机同意及撤销 CONNECT 集成）、race 与 benchmark smoke；[UI CI #38103377883](https://github.com/timwai/RelayProxy/actions/runs/38103377883) **success**：Chrome 扩展、Web UI 与 Windows/macOS 桌面回归。Android 与额外网络验收任务仍应以各自工作流的最终结果为准；这些自动化**不是**真实 A Agent/B Chrome 双机验收，NB-05/P0-01/P0-07 仍不能放行。

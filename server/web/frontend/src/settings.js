@@ -18,11 +18,8 @@ export const groups = [
   {id:'rdp',key:'rdpIngress',title:'RDP 公网入口',subtitle:'公网监听端口、来源和速率限制',section:'安全与访问',fields:[
     ['enabled','启用公网入口服务','checkbox'],['listen','监听地址','text','0.0.0.0:0'],['portStart','自动端口起始','number'],['portEnd','自动端口结束','number'],
     ['sourceCidrs','全局来源 CIDR（每行一条）','lines'],['rateLimitPerMinute','每来源 IP 每分钟上限','number']]},
-  {id:'browserSync',title:'浏览器同步',subtitle:'Browser Sync 管理、Agent 共享出口白名单与远程代理（更改需重启）',section:'安全与访问',fields:[
-    ['enabled','启用 Browser Sync','checkbox'],
-    ['networkProxyListen','浏览器代理监听（relay=复用中继端口；留空=关闭）','text','relay'],
-    ['networkProxyAdvertise','浏览器代理公网域名:TCP 端口','text','relay.example.com:443'],
-    ['allowedExitIds','允许共享的 Agent 出口 ID（每行一条）','lines']]},
+  {id:'browserSync',title:'浏览器同步',subtitle:'使用现有 TLS/TCP 中继端口，出口由设备配对与 Agent 本地授权控制',section:'安全与访问',fields:[
+    ['enabled','启用 Browser Sync','checkbox']]},
   {id:'certificate',title:'证书管理',subtitle:'HTTPS / QUIC 证书路径',section:'安全与访问',fields:[
     ['certFile','证书链 PEM 路径','text','/data/config/fullchain.pem'],['keyFile','私钥 PEM 路径','text','/data/config/privkey.pem']]},
   {id:'acl',key:'relayACL',title:'目标访问权限',subtitle:'服务端统一 ACL 与目标匹配规则',section:'安全与访问',fields:[

@@ -1,3 +1,5 @@
+> **当前实现（2026-10-11）：** Browser Sync 在 `browser_sync.enabled: true` 且 Server TLS/Admin TLS 正常时自动复用既有 TLS/TCP 中继端口。**`browser_sync.network_proxy` 整块已废弃**，不再支持单独 `listen`、`advertise`、`allowed_exit_ids`、独立监听和 Server Web 出口配置表单。B Chrome 通过已配置的 Relay HTTPS Server Origin 访问网关；网络出口仍需同身份、`proxy.exit`、Agent 本地明确 opt-in 和 A/B 双端网络绑定同意。以下含旧配置的历史条目仅为进度留档，不再适用于现行版本。相关功能尚待 CI 和真实设备验收。
+
 # RelayProxy Browser Session Sync — 开发进度与发布准入清单
 
 > **持续维护的进度文档（Living Tracker）**  
@@ -355,3 +357,10 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **PORT-03**：新 `api.PublicRelayHandler` 公网路由白名单严格限于 Browser Sync 注册/WSS、已授权 CONNECT 及历史公开消息推送；不挂载 Admin Router，Admin 登录、管理设置和 Browser Sync 管理 API 不可通过中继 TCP 访问。
 - **PORT-04**：延后启动 Gateway 直至 Browser Sync 和网络出口权限初始化完成；原 `server.admin.listen` Admin HTTPS 服务保持独立。Chrome “RelayProxy HTTPS Server” 可使用 `https://relay.example.com:443`。
 - **PORT-05**：增加 Go Gateway WSS Upgrade / HTTP CONNECT Hijack + 既有 Agent TCP 兼容测试、白名单不暴露 Admin 测试、配置冲突测试、Web JS 共享端口校验测试。真实部署中 TLS/长连接/登录态/内外网联调及 GitHub CI 尚未验收；当前保持 Draft PR。
+
+### 2026-10-11 清理独立 Browser Sync 网络代理配置
+
+- **CONFIG-REMOVE-01**：移除 Server 当前 `browser_sync.network_proxy` YAML 字段、配置校验、Server Web/Admin API 中的监听 / 广播地址 / Agent 白名单；`browser_sync.enabled` 启动时统一初始化同端口 CONNECT 代理，强制 TLS/TCP 中继启用。为已部署用户保留仅用于读取并抛弃旧 `network_proxy` 块的迁移 shim，后续保存不会写回。
+- **CONFIG-REMOVE-02**：NetworkProxy 不再启动单独监听器，也不发送 host/port。Chrome 由已认证的 `settings.serverOrigin` 推导 HTTPS 代理主机和端口，Server Origin 改变时删除旧会话代理凭据并拒绝发往旧主机。只允许具备 `proxy.exit` 授权、同 Identity、Agent signed local browser sharing opt-in 的在线 Exit；需要 A/B 配对和网站网络绑定双方确认。
+- **CONFIG-REMOVE-03**：保留普通 Cookie/Storage 同步不使用任何 Agent 的特性；如果需要来源 Agent 出口，Chrome 的 RelayProxy HTTPS Server 必须填写真正的公网 TCP 中继入口，不能再以仅管理用途的 Admin HTTPS 地址作为网络代理主机。
+- **CONFIG-REMOVE-04**：移除旧 Web 编辑器、旧表单校验辅助与测试，补充 YAML 迁移、TLS 强制和令牌不含 host/port、Chrome Origin 地址绑定等回归用例。此记录替代更早的 NET/PORT 旧配置说明。

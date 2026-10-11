@@ -5,14 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"crypto/tls"
 	"encoding/base64"
-	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -32,26 +28,18 @@ type networkLease struct {
 type NetworkProxy struct {
 	Store       *Store
 	Sessions    *session.Manager
-	Advertise   string
-	allowExits  map[string]bool
 	relayPolicy *acl.Policy
 	mu          sync.Mutex
 	leases      map[[32]byte]networkLease
-	server      *http.Server
-	listener    net.Listener
 	slots       chan struct{}
 	shutdown    chan struct{}
 	closeOnce   sync.Once
 }
 
-func NewNetworkProxy(store *Store, sessions *session.Manager, advertise string, exitIDs []string) *NetworkProxy {
-	allowed := make(map[string]bool)
-	for _, id := range exitIDs {
-		allowed[id] = true
-	}
-	return &NetworkProxy{Store: store, Sessions: sessions, Advertise: advertise, allowExits: allowed,
-		leases: make(map[[32]byte]networkLease), slots: make(chan struct{}, 128),
-		shutdown: make(chan struct{})}
+func NewNetworkProxy(store *Store, sessions *session.Manager) *NetworkProxy {
+	return &NetworkProxy{Store:store,Sessions:sessions,
+		leases:make(map[[32]byte]networkLease),
+		slots:make(chan struct{},128),shutdown:make(chan struct{})}
 }
 
 // Bind the same Relay target ACL as ordinary proxy streams. Agent Exit
@@ -59,7 +47,7 @@ func NewNetworkProxy(store *Store, sessions *session.Manager, advertise string, 
 func (p *NetworkProxy) SetRelayPolicy(policy acl.Policy) { p.relayPolicy = &policy }
 
 func (p *NetworkProxy) AllowedExit(browserIdentity, exitID string) bool {
-	if !p.allowExits[exitID] || browserIdentity == "" {
+	if browserIdentity == "" {
 		return false
 	}
 	exit, ok := p.Sessions.Get(exitID)
@@ -67,8 +55,8 @@ func (p *NetworkProxy) AllowedExit(browserIdentity, exitID string) bool {
 		exit.Tunnel != nil && browserExitOptedIn(exit)
 }
 
-// Only the Agent's signed, per-connection transport declaration proves its
-// local permission to share egress. A Server allowlist alone is insufficient.
+// The Agent must expose an approved proxy.exit session under the browser's
+// same identity AND actively advertise its signed local browser-share opt-in.
 func browserExitOptedIn(exit *session.DeviceSession) bool {
 	if exit == nil {
 		return false
@@ -98,12 +86,8 @@ func (p *NetworkProxy) Issue(ctx context.Context, deviceID string) (map[string]a
 	if !p.Store.HasActiveNetworkBinding(ctx, deviceID) {
 		return nil, ErrRuleDenied
 	}
-	host, port, err := net.SplitHostPort(p.Advertise)
-	if err != nil || host == "" || port == "" {
-		return nil, ErrRuleDenied
-	}
 	random := make([]byte, 32)
-	if _, err = rand.Read(random); err != nil {
+	if _, err := rand.Read(random); err != nil {
 		return nil, err
 	}
 	token := base64.RawURLEncoding.EncodeToString(random)
@@ -121,8 +105,7 @@ func (p *NetworkProxy) Issue(ctx context.Context, deviceID string) (map[string]a
 	}
 	expires := now.Add(networkLeaseTTL)
 	p.leases[digest] = networkLease{deviceID: deviceID, expires: expires}
-	n, _ := strconv.Atoi(port)
-	return map[string]any{"type": "NETWORK_TOKEN", "host": host, "port": n,
+	return map[string]any{"type": "NETWORK_TOKEN",
 		"token": token, "expiresAt": expires.UnixMilli()}, nil
 }
 func (p *NetworkProxy) checkToken(header string) (networkLease, error) {
@@ -271,38 +254,12 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	close(stopWatch)
 	<-watchStopped
 }
-func (p *NetworkProxy) Start(listen string, tlsConfig *tls.Config) error {
-	if tlsConfig == nil || len(tlsConfig.Certificates) == 0 {
-		return errors.New("network proxy requires a TLS certificate")
-	}
-	cfg := tlsConfig.Clone()
-	cfg.MinVersion = tls.VersionTLS13
-	cfg.NextProtos = []string{"http/1.1"}
-	ln, err := net.Listen("tcp", listen)
-	if err != nil {
-		return err
-	}
-	p.listener = ln
-	p.server = &http.Server{Handler: p, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second,
-		MaxHeaderBytes: 8192}
-	go func() { _ = p.server.Serve(tls.NewListener(ln, cfg)) }()
-	return nil
-}
 func (p *NetworkProxy) Close(ctx context.Context) error {
-	// net/http.Shutdown intentionally ignores hijacked CONNECT connections.
-	// Broadcast shutdown to each active watcher before draining the listener.
-	p.closeOnce.Do(func() { close(p.shutdown) })
+	// net/http hijacked CONNECT streams are owned by the public Relay
+	// gateway; signal active watchers and invalidate all leases on shutdown.
+	p.closeOnce.Do(func(){close(p.shutdown)})
 	p.mu.Lock()
-	p.leases = make(map[[32]byte]networkLease)
+	p.leases=make(map[[32]byte]networkLease)
 	p.mu.Unlock()
-	if p.server == nil {
-		return nil
-	}
-	return p.server.Shutdown(ctx)
-}
-func (p *NetworkProxy) Address() string {
-	if p.listener == nil {
-		return ""
-	}
-	return fmt.Sprint(p.listener.Addr())
+	return nil
 }

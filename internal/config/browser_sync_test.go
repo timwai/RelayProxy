@@ -34,3 +34,9 @@ func TestBrowserSyncRequiresAdminTLSAndValidLegacyExtensionAllowlist(t *testing.
 		t.Fatalf("browser sync should allow empty legacy IDs; extensions must register and await approval: %v", err)
 	}
 }
+
+func TestLegacyNetworkProxyFieldsAreIgnoredAfterYAMLLoad(t *testing.T) {
+    cfg,err:=parseServerConfig([]byte("browser_sync:\n  enabled: true\n  network_proxy:\n    listen: ':21292'\n    advertise: legacy.example.com:21292\n    allowed_exit_ids: [dev_old]\n"))
+    if err!=nil { t.Fatal(err) }
+    if cfg.BrowserSync.LegacyNetworkProxy!=nil { t.Fatal("old listener still persisted") }
+}

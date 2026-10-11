@@ -44,7 +44,7 @@ func NewHandler(store *Store, extensionIDs []string) *Handler {
 		clients: make(map[string]*browserConnection)}
 }
 
-// ConfigureNetworkProxy enables the separately authenticated browser-to-Agent
+// ConfigureNetworkProxy enables the relay-shared authenticated browser-to-Agent
 // CONNECT service. With nil the entire network-binding control plane is denied.
 func (h *Handler) ConfigureNetworkProxy(proxy *NetworkProxy) { h.network = proxy }
 
@@ -398,7 +398,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		case "NETWORK_EXITS":
 			if h.network == nil {
 				payload = networkRuleError(msg.RequestID, "NETWORK_DISABLED",
-					"Server 尚未启用 browser_sync.network_proxy；请管理员配置监听地址、证书和出口白名单并重启 Server")
+					"Browser Sync 未启用或 TCP 中继 TLS 不可用；请管理员检查 Browser Sync 与证书配置")
 			} else if !current.Send {
 				payload = networkRuleError(msg.RequestID, "SOURCE_SEND_REQUIRED",
 					"当前来源浏览器未获 send 权限；请管理员检查浏览器设备授权")
@@ -410,7 +410,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case h.network == nil:
 				payload = networkRuleError(msg.RequestID, "NETWORK_DISABLED",
-					"Server 尚未启用 browser_sync.network_proxy；无法创建站点网络绑定")
+					"Browser Sync 网络代理不可用；需启用 Browser Sync 和 TCP 中继 TLS")
 			case !current.Send:
 				payload = networkRuleError(msg.RequestID, "SOURCE_SEND_REQUIRED",
 					"当前来源浏览器未获 send 权限")
@@ -427,7 +427,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 						"此配对已经创建网络绑定；请刷新查看状态，撤销后需重新配对才能更换出口")
 				case !h.network.AllowedExit(current.IdentityID, msg.ExitDeviceID):
 					payload = networkRuleError(msg.RequestID, "EXIT_NOT_ALLOWED",
-						"Agent 出口不可用：检查 Agent 是否在线、是否启用浏览器出口共享、设备身份及 Server allowed_exit_ids")
+						"Agent 出口不可用：检查在线状态、proxy.exit 授权、身份一致性及 Agent 本机浏览器出口共享开关")
 				case h.Store.OfferNetworkBinding(ctx, device.ID, msg.RuleID, msg.Host, msg.ExitDeviceID) != nil:
 					payload = networkRuleError(msg.RequestID, "NETWORK_OFFER_DENIED",
 						"网络绑定未创建：请确认 HTTPS 443 域名有效、接收端具备 receive 权限且与来源端身份一致")
@@ -438,7 +438,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			}
 		case "NETWORK_BINDING":
 			// Existing Cookie-only sessions must work when the optional
-			// network proxy listener is disabled. A stored active binding is
+			// browser network proxy is unavailable. A stored active binding is
 			// still reported so the receiver keeps its fail-closed guard.
 			binding, err := h.Store.NetworkBinding(ctx, device.ID, msg.RuleID)
 			if err != nil {

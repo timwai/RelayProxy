@@ -91,11 +91,15 @@ type ServerConfig struct {
 	BrowserSync struct {
 		Enabled      bool     `yaml:"enabled"`
 		ExtensionIDs []string `yaml:"extension_ids"`
-		NetworkProxy struct {
+		// Migration shim for old Server YAML. Read the previous explicit
+		// listener fields so KnownFields(true) accepts existing installations,
+		// then clear the retired block during normalization. It never appears
+		// in newly written configurations.
+		LegacyNetworkProxy *struct {
 			Listen         string   `yaml:"listen"`
 			Advertise      string   `yaml:"advertise"`
 			AllowedExitIDs []string `yaml:"allowed_exit_ids"`
-		} `yaml:"network_proxy"`
+		} `yaml:"network_proxy,omitempty"`
 	} `yaml:"browser_sync"`
 
 	Logging struct {

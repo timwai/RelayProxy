@@ -28,6 +28,15 @@ export function parseBoundHost(origin){
     throw new Error('网络绑定仅支持 HTTPS 443 精确站点域名');
   return url.hostname;
 }
+export function relayProxyFromServerOrigin(origin){
+  const url=new URL(origin);
+  if(url.protocol!=='https:' || url.pathname!=='/' || url.search || url.hash ||
+      url.username || url.password)throw new Error('RelayProxy HTTPS Server 地址无效');
+  const host=url.hostname.toLowerCase();
+  const port=url.port?Number(url.port):443;
+  proxyEndpoint(host,port);
+  return {host,port};
+}
 export function proxyEndpoint(host,port){
   if(!safeHostname(host)||!Number.isInteger(port)||port<1||port>65535)
     throw new Error('服务器代理入口无效');
@@ -214,14 +223,25 @@ export function refreshNetworkBinding({force=false}={}){
         throw new Error('来源网络绑定已撤销或站点变更');
     }
     let lease=await currentLease();
+    const currentEndpoint=sourceRules.length?relayProxyFromServerOrigin(settings.serverOrigin):null;
+    if(lease && currentEndpoint && (lease.host!==currentEndpoint.host ||
+        lease.port!==currentEndpoint.port)){
+      // The saved Server Origin changed. Never send credentials to the
+      // previous endpoint, including after a MV3 service worker restart.
+      lease=null;
+      await chrome.storage.session.remove(CREDS);
+    }
     if(sourceRules.length && (force || !lease || lease.expiresAt<=Date.now()+5*60*1000)){
       const result=await sendControl('NETWORK_TOKEN');
       if(result.type!=='NETWORK_TOKEN'||typeof result.token!=='string'||
         result.token.length<32||!Number.isSafeInteger(result.expiresAt)||
         result.expiresAt<Date.now()+60000)throw new Error('无效的来源 Agent 网络租约');
-      proxyEndpoint(result.host,result.port);
+      // The authenticated Browser Sync HTTPS origin is already the proxy
+      // address. Do not let NETWORK_TOKEN supply an alternate hostname:
+      // no Server advertise configuration or secondary proxy port exists.
+      const endpoint=relayProxyFromServerOrigin(settings.serverOrigin);
       lease={username:'browser',password:result.token,
-        host:result.host,port:result.port,expiresAt:result.expiresAt};
+        host:endpoint.host,port:endpoint.port,expiresAt:result.expiresAt};
       await chrome.storage.session.set({[CREDS]:lease});
     }
     await applyPAC(desired,sourceRules.length?lease:null);

@@ -62,11 +62,13 @@ func TestNetworkProxyLeaseAuthAndCONNECTIsolation(t *testing.T) {
 	if err := store.AcceptNetworkBinding(ctx, target.ID, ruleID, "login.example.com"); err != nil {
 		t.Fatal(err)
 	}
-	proxy := NewNetworkProxy(store, session.NewManager(), "relay.example.com:21090", []string{"dev_agent1234"})
+	proxy := NewNetworkProxy(store, session.NewManager())
 	lease, err := proxy.Issue(ctx, target.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, hasAddress:=lease["host"];hasAddress{t.Fatal("obsolete advertise host returned by server")}
+	if _, hasPort:=lease["port"];hasPort{t.Fatal("obsolete advertise port returned by server")}
 	token := lease["token"].(string)
 	if len(token) < 40 {
 		t.Fatal("weak token")

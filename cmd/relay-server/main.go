@@ -544,22 +544,14 @@ func main() {
 			log.Fatalf("[BrowserSync] Failed to initialize browser database: %v", storeErr)
 		}
 		browserSyncHandler = browsersync.NewHandler(store, cfg.BrowserSync.ExtensionIDs)
-		if cfg.BrowserSync.NetworkProxy.Listen != "" {
-			proxy := browsersync.NewNetworkProxy(store, sessionMgr, cfg.BrowserSync.NetworkProxy.Advertise,
-				cfg.BrowserSync.NetworkProxy.AllowedExitIDs)
-			proxy.SetRelayPolicy(relayACL.Policy())
-			if cfg.BrowserSync.NetworkProxy.Listen == "relay" {
-				browserNetworkProxy = proxy
-				log.Printf("[BrowserSync] Scoped HTTPS CONNECT sharing the Agent TLS/TCP relay %s", cfg.Server.TLS.Listen)
-			} else {
-				if err := proxy.Start(cfg.BrowserSync.NetworkProxy.Listen, tlsConfig); err != nil {
-					log.Fatalf("[BrowserSync] HTTPS CONNECT listener: %v", err)
-				}
-				log.Printf("[BrowserSync] Dedicated scoped HTTPS CONNECT listener enabled on %s", proxy.Address())
-			}
-			defer proxy.Close(context.Background())
-			browserSyncHandler.ConfigureNetworkProxy(proxy)
-		}
+		// Browser network CONNECT always shares the authenticated TLS/TCP
+		// relay. Device identity, A/B binding and Agent's signed local opt-in
+		// remain mandatory; no second listener or Server exit allowlist.
+		browserNetworkProxy = browsersync.NewNetworkProxy(store, sessionMgr)
+		browserNetworkProxy.SetRelayPolicy(relayACL.Policy())
+		browserSyncHandler.ConfigureNetworkProxy(browserNetworkProxy)
+		defer browserNetworkProxy.Close(context.Background())
+		log.Printf("[BrowserSync] Browser HTTPS CONNECT bound to TLS/TCP relay %s", cfg.Server.TLS.Listen)
 		log.Printf("[BrowserSync] Browser session relay enabled; extension allowlist size=%d", len(cfg.BrowserSync.ExtensionIDs))
 	}
 

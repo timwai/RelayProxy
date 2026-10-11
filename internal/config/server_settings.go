@@ -59,44 +59,12 @@ func NormalizeServerConfig(c *ServerConfig) error {
 			return fmt.Errorf("p2p.rendezvous_advertise: %w", err)
 		}
 	}
-	c.BrowserSync.NetworkProxy.Listen = strings.TrimSpace(c.BrowserSync.NetworkProxy.Listen)
-	c.BrowserSync.NetworkProxy.Advertise = strings.TrimSpace(c.BrowserSync.NetworkProxy.Advertise)
-	if c.BrowserSync.NetworkProxy.Listen != "" {
-		if !c.BrowserSync.Enabled || !c.IsAdminTLSEnabled() || !c.IsTLSEnabled() {
-			return errors.New("browser_sync.network_proxy requires enabled browser sync and TLS")
-		}
-		sharedRelay := c.BrowserSync.NetworkProxy.Listen == "relay"
-		if !sharedRelay {
-			if err := validateListen(c.BrowserSync.NetworkProxy.Listen); err != nil {
-				return fmt.Errorf("browser_sync.network_proxy.listen: %w", err)
-			}
-		}
-		if len(c.BrowserSync.NetworkProxy.AllowedExitIDs) == 0 || len(c.BrowserSync.NetworkProxy.AllowedExitIDs) > 32 {
-			return errors.New("browser_sync.network_proxy.allowed_exit_ids requires 1-32 explicitly permitted Agent exits")
-		}
-		if err := validateRendezvousAdvertise(c.BrowserSync.NetworkProxy.Advertise); err != nil {
-			return fmt.Errorf("browser_sync.network_proxy.advertise: %w", err)
-		}
-		if sharedRelay {
-			// An explicit relay mode reuses the already-bound TLS/TCP socket.
-			// Never trust only a matching hostname: the advertised CONNECT port
-			// must be the actual tunnel TCP port, not the QUIC/UDP port.
-			_, relayPort, _ := net.SplitHostPort(c.Server.TLS.Listen)
-			_, advertisedPort, _ := net.SplitHostPort(c.BrowserSync.NetworkProxy.Advertise)
-			if relayPort == "" || relayPort == "0" || relayPort != advertisedPort {
-				return errors.New("browser sync shared relay proxy advertise port must match server.tls.listen TCP port")
-			}
-		} else if listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen, c.Server.Admin.Listen) ||
-			listenAddressesOverlap(c.BrowserSync.NetworkProxy.Listen, c.Server.TLS.Listen) {
-			return errors.New("browser sync HTTPS CONNECT listener must not share Admin or tunnel listener; use listen: relay")
-		}
-		for _, id := range c.BrowserSync.NetworkProxy.AllowedExitIDs {
-			if !strings.HasPrefix(id, "dev_") || len(id) > 128 || len(id) < 8 {
-				return errors.New("browser sync network proxy requires real Agent device IDs")
-			}
-		}
-	} else if c.BrowserSync.NetworkProxy.Advertise != "" || len(c.BrowserSync.NetworkProxy.AllowedExitIDs) > 0 {
-		return errors.New("browser_sync.network_proxy.listen required when configuring network binding")
+	// The browser network entry is exclusively the existing TLS/TCP relay.
+	// Obsolete explicit listener/advertise/allowlist keys are read only for
+	// migration and never persisted back into the Server configuration.
+	c.BrowserSync.LegacyNetworkProxy = nil
+	if c.BrowserSync.Enabled && !c.IsTLSEnabled() {
+		return errors.New("browser_sync requires TLS on the TCP relay listener")
 	}
 	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))
 	c.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Upstream.Mode))
@@ -299,7 +267,7 @@ func CloneServerConfig(c *ServerConfig) *ServerConfig {
 		out.Exit.AllowInternet = BoolPtr(*c.Exit.AllowInternet)
 	}
 	out.BrowserSync.ExtensionIDs = slices.Clone(c.BrowserSync.ExtensionIDs)
-	out.BrowserSync.NetworkProxy.AllowedExitIDs = slices.Clone(c.BrowserSync.NetworkProxy.AllowedExitIDs)
+	out.BrowserSync.LegacyNetworkProxy = nil
 	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
 	out.RDP.Ingress.SourceCIDRs = slices.Clone(c.RDP.Ingress.SourceCIDRs)
@@ -427,10 +395,8 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 		policy.AccessHosts = append([]string{}, policy.AccessHosts...)
 		policy.AccessCIDRs = append([]string{}, policy.AccessCIDRs...)
 		browserSync := c.BrowserSync
-		// Persisted YAML may normalize an absent list into an empty list.
-		// Both represent the same Browser Sync configuration.
+		// A nil or empty legacy extension allowlist has the same semantics.
 		browserSync.ExtensionIDs = append([]string{}, browserSync.ExtensionIDs...)
-		browserSync.NetworkProxy.AllowedExitIDs = append([]string{}, browserSync.NetworkProxy.AllowedExitIDs...)
 		return map[string]any{
 			"server.admin.listen": c.Server.Admin.Listen, "server.admin.tls_enabled": c.IsAdminTLSEnabled(),
 			"server.tls_enabled": c.IsTLSEnabled(), "server.tls.listen": c.Server.TLS.Listen, "server.quic.listen": c.Server.QUIC.Listen,

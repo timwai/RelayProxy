@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {buildPAC,parseBoundHost,proxyEndpoint,proxyAuthDecision} from '../src/network-binding.js';
+import {buildPAC,parseBoundHost,proxyEndpoint,proxyAuthDecision,relayProxyFromServerOrigin} from '../src/network-binding.js';
 
 test('PAC sends only approved first-party hosts to relay without DIRECT fallback',()=>{
  const desired={one:{siteOrigin:'https://login.example.com'},two:{siteOrigin:'https://example.net'}};
@@ -74,4 +74,13 @@ test('local Agent does not accept or supply proxy authorization',()=>{
  const local={host:'127.0.0.1',port:21291};
  assert.deepEqual(proxyAuthDecision({isProxy:true,scheme:'basic',
    challenger:{host:'127.0.0.1',port:21291}},local,1000),{});
+});
+
+test('relay proxy endpoint derives only from already selected HTTPS Server origin',()=>{
+  assert.deepEqual(relayProxyFromServerOrigin('https://relay.example.com'),{host:'relay.example.com',port:443});
+  assert.deepEqual(relayProxyFromServerOrigin('https://relay.example.com:20000'),{host:'relay.example.com',port:20000});
+  for(const unsafe of ['http://relay.example.com','https://relay.example.com:99999',
+    'https://relay.example.com/path','https://127.0.0.1:443',
+    'https://relay.example.com/?redirect=evil','https://user:pw@relay.example.com'])
+    assert.throws(()=>relayProxyFromServerOrigin(unsafe),undefined,unsafe);
 });

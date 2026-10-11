@@ -80,14 +80,14 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 		Capabilities: []string{protocol.CapabilityBrowserNetworkExit}, Tunnel: echo,
 	})
 	t.Cleanup(func() { sessions.Unregister(exitID) })
-	proxy := NewNetworkProxy(store, sessions, "relay.example.com:21090", []string{exitID})
-	// Local Agent opt-in is independent from Server allowlist and proxy.exit.
+	proxy := NewNetworkProxy(store, sessions)
+	// Local Agent opt-in is independent from proxy.exit authorization.
 	identity, err := store.deviceAllowed(ctx, receiver.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !proxy.AllowedExit(identity.IdentityID, exitID) {
-		t.Fatal("signed Agent opt-in and Server allowlist failed")
+		t.Fatal("same-Identity proxy.exit Agent opt-in failed")
 	}
 	exitSession, _ := sessions.Get(exitID)
 	exitSession.Capabilities = nil
@@ -168,7 +168,7 @@ func TestNetworkProxyRevocationClosesEstablishedCONNECT(t *testing.T) {
 		Capabilities: []string{protocol.CapabilityBrowserNetworkExit}, Tunnel: echo,
 	})
 	t.Cleanup(func() { sessions.Unregister(exitID) })
-	proxy := NewNetworkProxy(store, sessions, "relay.example.com:21090", []string{exitID})
+	proxy := NewNetworkProxy(store, sessions)
 	lease, err := proxy.Issue(ctx, receiver.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestNetworkProxyRevocationClosesEstablishedCONNECT(t *testing.T) {
 }
 
 func TestNetworkProxyCloseSignalsActiveWatchers(t *testing.T) {
-	proxy := NewNetworkProxy(nil, nil, "relay.example.com:21090", nil)
+	proxy := NewNetworkProxy(nil, nil)
 	if err := proxy.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}

@@ -1,8 +1,10 @@
-## 浏览器同步复用 Agent TLS/TCP 中继端口
+## Browser Sync：直接使用 RelayProxy TLS/TCP 中继端口
 
-Server 新增 `browser_sync.network_proxy.listen: relay`，表示已授权的浏览器 HTTPS CONNECT 共享 `server.tls.listen` 所占用的 TCP 端口（例如 443），无需开放额外端口。`network_proxy.advertise` 必须填公网域名以及同一个 TCP 端口。Server Web → 浏览器同步 → Agent 网络出口可切换“复用 RelayProxy TCP 中继端口（推荐）”。旧独立监听模式仍可使用。
+启用 `browser_sync.enabled: true` 后，Server **自动**在既有 `server.tls.listen` TCP 中继端口上提供 Browser Sync 设备注册、HTTPS/WSS 会话传输以及经过授权的浏览器 HTTPS CONNECT。**不再存在** `browser_sync.network_proxy` 配置块，不需要 `listen`、`advertise`、`allowed_exit_ids`，也不支持第二个独立监听端口。旧 Server YAML 里的该块由升级兼容层自动丢弃，保存配置后不会再写回。独立 Admin Web 端口仍只用于管理。
 
-Chrome 扩展的 **RelayProxy HTTPS Server** 现在可填写 `https://relay.example.com:443` 连接同一 TLS/TCP 中继端口的设备注册和 WSS 浏览器同步接口。**Admin Web 和 Admin REST 接口仍在独立 Admin 监听端口**（例如 `:8443`），不会通过中继 TCP 暴露。只同步 Cookie/Storage 时无需开启 `network_proxy`，也无需本机 Agent。更新 Server 并重启后才支持公网端口复用；Chrome 切换 Server Origin 后需重新授予该 Origin 的访问权限。
+Chrome 扩展“RelayProxy HTTPS Server”填公开的中继 HTTPS 地址，例如 `https://relay.example.com:443`（不应填写仅管理用的 Admin 端口以便使用站点网络绑定）。B Chrome 使用该已验证 Server Origin 作为网络出口代理地址；Server 下发的临时网络令牌不再带自定义代理 host/port。Cookie / Local Storage / Session Storage 同步本身**不需要 Agent**。只有选用 A Agent 站点出口才要求 Agent 在线且具备 `proxy.exit`、同 Identity 和 `exit.browser_network_share: true`，并经过 A/B 双端明确配对与站点绑定确认；不允许任何未配对的跨身份转发。
+
+参见 [网络绑定设计](../../docs/browser-session-network-binding.md)。旧版 Server / Chrome 扩展的网络代理令牌结构与新版不同，使用来源 Agent 网络绑定时应一同升级 Server 和 B Chrome 扩展。
 
 ## 完整 Storage 大于 180 KiB：加密前压缩与体积限制
 

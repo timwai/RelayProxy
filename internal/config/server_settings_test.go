@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"strings"
 	"testing"
 )
 
@@ -158,32 +159,32 @@ func TestServerSettingsRejectsStaleConcurrentAndInvalidUpdates(t *testing.T) {
 	}
 }
 
-func TestBrowserNetworkProxyCanReuseTLSRelayPortSafely(t *testing.T) {
-    makeConfig:=func()*ServerConfig{
-        cfg:=&ServerConfig{}
-        cfg.BrowserSync.Enabled=true
-        cfg.BrowserSync.NetworkProxy.Listen="relay"
-        cfg.BrowserSync.NetworkProxy.Advertise="relay.example.com:443"
-        cfg.BrowserSync.NetworkProxy.AllowedExitIDs=[]string{"dev_agent_shared"}
-        return cfg
+func TestBrowserSyncAutoUsesTLSRelayWithoutNetworkProxyConfig(t *testing.T) {
+    cfg:=&ServerConfig{}
+    cfg.BrowserSync.Enabled=true
+    if err:=NormalizeServerConfig(cfg);err!=nil{
+        t.Fatalf("browser sync should not require proxy configuration: %v",err)
     }
-    if err:=NormalizeServerConfig(makeConfig());err!=nil{
-        t.Fatalf("shared TCP relay mode should be accepted: %v",err)
+    cfg.Server.TLSEnabled=BoolPtr(false)
+    if err:=NormalizeServerConfig(cfg);err==nil{
+        t.Fatal("browser sync accepted plaintext TCP relay")
     }
-    for _,mutate:=range []func(*ServerConfig){
-        func(c *ServerConfig){c.BrowserSync.NetworkProxy.Advertise="relay.example.com:8443"},
-        func(c *ServerConfig){c.BrowserSync.NetworkProxy.AllowedExitIDs=nil},
-        func(c *ServerConfig){c.BrowserSync.NetworkProxy.AllowedExitIDs=[]string{"server"}},
-        func(c *ServerConfig){c.Server.TLSEnabled=BoolPtr(false)},
-        func(c *ServerConfig){c.BrowserSync.Enabled=false},
-    }{
-        cfg:=makeConfig()
-        mutate(cfg)
-        if err:=NormalizeServerConfig(cfg);err==nil{t.Fatal("unsafe shared network setting accepted")}
+}
+
+func TestLegacyBrowserProxyConfigMigratesAndIsNotReemitted(t *testing.T) {
+    old:=[]byte("browser_sync:\n  enabled: true\n  network_proxy:\n    listen: \"relay\"\n    advertise: \"relay.example.com:443\"\n    allowed_exit_ids:\n      - dev_legacy_agent\n")
+    cfg,err:=parseServerConfig(old)
+    if err!=nil{t.Fatalf("legacy YAML failed migration: %v",err)}
+    if cfg.BrowserSync.LegacyNetworkProxy!=nil{
+        t.Fatal("obsolete network_proxy was retained after normalization")
     }
-    // Dedicated listeners cannot collide with either the Admin or TCP
-    // tunnel socket; only the explicit relay sentinel can share it.
-    cfg:=makeConfig()
-    cfg.BrowserSync.NetworkProxy.Listen="0.0.0.0:443"
-    if err:=NormalizeServerConfig(cfg);err==nil{t.Fatal("implicit relay port overlap accepted")}
+    path:=filepath.Join(t.TempDir(),"server.yaml")
+    if err:=SaveServerConfig(path,cfg);err!=nil{t.Fatal(err)}
+    saved,err:=os.ReadFile(path)
+    if err!=nil{t.Fatal(err)}
+    if strings.Contains(string(saved),"network_proxy") ||
+        strings.Contains(string(saved),"advertise:"){
+        t.Fatalf("obsolete proxy fields persisted: %s",saved)
+    }
+    if _,err:=parseServerConfig(saved);err!=nil{t.Fatalf("migrated config invalid: %v",err)}
 }

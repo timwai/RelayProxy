@@ -14,7 +14,8 @@ import (
 
 // A network binding deliberately reveals the first-party CONNECT hostname to
 // the relay, unlike E2EE Cookie policy names. Both browsers must separately
-// approve that exact name and a server-allowlisted Agent exit.
+// approve that exact name; the selected Agent must share the same Identity,
+// hold proxy.exit permission and explicitly opt into browser network sharing.
 type NetworkBinding struct {
 	RuleID       string `json:"ruleId"`
 	Host         string `json:"host"`

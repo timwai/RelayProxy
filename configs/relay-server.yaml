@@ -85,7 +85,11 @@ relay_acl:
 # Linux Server 若需测试，请先部署包含 Browser Sync 的新版 relay-server，
 # 把 server.admin.tls_enabled 改为 true，配置浏览器信任的 cert_file/key_file，
 # 然后设置 enabled: true 并加入 chrome://extensions 中看到的真实扩展 ID。
-# 启用后需要重启 Server；/api/v1/browser-sync/admin/devices 未登录应返回 401。
+# 启用后需要重启 Server；Server 会直接复用现有 TLS/TCP 中继端口提供
+# 浏览器注册/WSS 同步及经过同身份、双端授权、Agent 本地 opt-in 的 HTTPS CONNECT。
+# 不需要 browser_sync.network_proxy；不支持独立浏览器代理监听端口。
+# Chrome 的 RelayProxy HTTPS Server 建议填写公网中继 HTTPS 地址。
+# /api/v1/browser-sync/admin/devices 未登录应返回 401。
 #browser_sync:
 #  enabled: true
 #  extension_ids:

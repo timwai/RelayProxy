@@ -2,7 +2,11 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {groups,configFieldCount,normalizeForSave,configEqual} from './settings.js';
 test('server config covers all existing groups and fields',()=>{
   assert.equal(groups.length,9);
-  assert.equal(configFieldCount(),45);
+  // Browser Sync now exposes only its enable toggle; the retired
+  // networkProxyListen, networkProxyAdvertise and allowedExitIds fields
+  // are intentionally absent from the Server settings form.
+  assert.equal(configFieldCount(),42);
+  assert.deepEqual(groups.find(g=>g.id==='browserSync').fields.map(f=>f[0]),['enabled']);
   assert.equal(groups.find(g=>g.id==='browserSync').fields.some(f=>f[0]==='extensionIds'),false);
   assert.deepEqual(groups.map(g=>g.key||g.id),['admin','tunnel','direct','p2p','serverExit','rdpIngress','browserSync','certificate','relayACL']);
 });

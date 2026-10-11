@@ -23,7 +23,7 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 - [x] Linux kernel `tc netem` shaped UDP tests (12 Mbps, 20 ms, 0/1/5% *configured random loss*) including concurrent BBR/Brutal sessions at 8 and 16 Mbps targets, qdisc counters and raw logs ([passing netem jobs](https://github.com/timwai/RelayProxy/actions/runs/38100605774)). **Laboratory simulation only, not external WAN/fairness acceptance**.
 - [x] Old/new version *linked protocol binaries* handshakes across QUIC and TLS, including same-version reference; the packaged Agent/Server acceptance remains open.
 - [x] Hysteria2/BBR/Brutal repeatable download/upload CSV sampler supplied; operator-side A/B measurements not yet collected.
-- [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow.
+- [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow. **The CI co-active sample exposed significant BBR starvation when Brutal is overcommitted; a real-link fairness acceptance limit must be defined and verified before release.**
 - [ ] A/B Hysteria2 comparison on the same client, server, UDP path, RTT, bandwidth, packet-loss and hardware, repeated >= 5 times per case.
 - [ ] Verify old-client/new-server and new-client/old-server pairings with both QUIC and TLS. The new cross-built gateway/protocol probe in `scripts/ci-brutal-mixed-compat.sh` covers a subset of this requirement, but full packaged Agent/Server pairings remain separate.
 - [ ] Review CI artifacts and real-device results before opening/merging the replacement main PR.
@@ -40,6 +40,23 @@ Run with `bash scripts/ci-brutal-mixed-compat.sh` on Linux after `git fetch orig
 The `TestBrutalKernelNetemCoexistence` runner additionally records receiver progress and sender-side **QUIC smoothed RTT every 250 ms** while two flows share the same kernel queue. Each log point has an absolute Unix timestamp to distinguish actual overlap from finishing-time averages. `scripts/analyze_brutal_netem.py` intersects adjacent timestamp windows and writes `evidence/netem-overlap.csv` with BBR and Brutal overlap-only goodput, observed overlap seconds, a descriptive Jain index based on the two **estimated co-active rates**, and p50/p95 of sampled QUIC **smoothed** RTT. This time overlap analysis is substantially more useful than comparing independently completed downloads.
 
 These laboratory snapshots are diagnostic, **not** true p50/p95 latency for individual application packets, time-weighted WAN measurements, or a release/fairness threshold. The script fails when either flow lacks sufficient (>=750 ms) co-active sampling, so a successful job cannot hide a nonoverlapping transfer. Observe kernel qdisc counters, sender diagnostics and separately measured loaded end-to-end RTT before making any WAN fairness conclusion.
+
+### Simultaneous-flow measurements (new)
+
+The dedicated [Linux kernel-netem CI analysis](https://github.com/timwai/RelayProxy/actions/runs/38103283560) sampled receiving bytes every 250 ms and intersected **only windows where BBR and Brutal were concurrently transmitting**. The table gives *one laboratory run* per condition, at a 12 Mbps qdisc bottleneck and 20 ms configured delay. Values are effective traffic rates across overlapping time windows, not independently measured completion-time rates.
+
+| Random loss configured | Brutal target | Concurrent BBR goodput | Concurrent Brutal goodput | Jain index |
+|---|---|---:|---:|---:|
+| 0% | 16 Mbps (over bottleneck) | 0.87 Mbps | 9.65 Mbps | 0.590 |
+| 1% | 16 Mbps (over bottleneck) | 0.51 Mbps | 7.03 Mbps | 0.572 |
+| 5% | 16 Mbps (over bottleneck) | 0.84 Mbps | 7.07 Mbps | 0.618 |
+| 0% | 8 Mbps (below bottleneck) | 3.13 Mbps | 7.97 Mbps | 0.840 |
+| 1% | 8 Mbps (below bottleneck) | 3.47 Mbps | 7.59 Mbps | 0.878 |
+| 5% | 8 Mbps (below bottleneck) | 3.48 Mbps | 7.39 Mbps | 0.885 |
+
+**Release-impacting finding:** An overcommitted Brutal sender severely starved the competing BBR sender during co-active intervals, substantially more than the original completion-time ratios suggested. Even an 8 Mbps target did not yield equal sharing. The laboratory Jain index is a descriptive diagnostic, **not a certification threshold**. There is no automatic globally shared capacity reservation, so per-session rate caps alone cannot ensure tenant fairness.
+
+Release acceptance now additionally requires defining a documented shared-bottleneck fairness policy (for example, limits on BBR competitor slowdown and loaded RTT) and validating it under repeated *real* link conditions before any default-on or production enablement. Keep Brutal opt-in and default rates at zero; do not present these traces as proof of fairness or Hysteria2 equivalence. Evidence CSV is available in CI artifacts named \`brutal-linux-netem-loss-*\` as \`netem-overlap.csv\`.
 
 ## Kernel traffic-shaping findings (not WAN acceptance)
 

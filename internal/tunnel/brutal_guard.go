@@ -44,3 +44,45 @@ func (g *brutalRTTGuard) sample(now time.Time, minimumRTT, smoothedRTT time.Dura
 	g.consecutive++
 	return g.consecutive >= brutalGuardConsecutiveSamples
 }
+
+
+// brutalLossGuard observes *newly sent* packets and newly declared losses,
+// rather than the connection's cumulative counters. quic-go may retract a
+// spurious loss, so a decreasing lost counter resets the sample. Persistent
+// severe loss at meaningful send volume is another safety fallback signal.
+type brutalLossGuard struct {
+	startedAt   time.Time
+	lastSent    uint64
+	lastLost    uint64
+	consecutive int
+}
+
+const (
+	brutalGuardMinPacketsPerSample = 100
+	brutalGuardSevereLossFraction  = 0.20
+)
+
+func (g *brutalLossGuard) sample(now time.Time, packetsSent, packetsLost uint64) bool {
+	if g.startedAt.IsZero() {
+		g.startedAt = now
+		g.lastSent = packetsSent
+		g.lastLost = packetsLost
+		return false
+	}
+	var newSent, newLost uint64
+	if packetsSent >= g.lastSent {
+		newSent = packetsSent - g.lastSent
+	}
+	if packetsLost >= g.lastLost {
+		newLost = packetsLost - g.lastLost
+	}
+	g.lastSent, g.lastLost = packetsSent, packetsLost
+	if now.Sub(g.startedAt) < brutalGuardMinimumLifetime ||
+		newSent < brutalGuardMinPacketsPerSample ||
+		float64(newLost)/float64(newSent) < brutalGuardSevereLossFraction {
+		g.consecutive = 0
+		return false
+	}
+	g.consecutive++
+	return g.consecutive >= brutalGuardConsecutiveSamples
+}

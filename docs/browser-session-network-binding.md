@@ -1,6 +1,6 @@
 # RelayProxy Browser Sync：A Agent 网络出口绑定
 
-> **实施状态（2026-10-11）**：下方“A 远端出口”和“B 本机 Agent”章节描述**当前 `feat/browser-session-sync` HEAD `031baf9` 的旧范围**：远端 A 需认证与双端批准；B 本机 opt-in、无鉴权/域名白名单，但 CONNECT 仍仅 DNS:443，使用已配对 Cookie 规则生成 PAC，且强制拒绝 DIRECT。下一阶段拟移除本机浏览器代理的人为目标限制，详见文末“完整 Chrome 代理目标”；尚未进入分支且不可视为已实现。完整进度以 [持续开发跟踪表](./browser-session-sync-progress.md) 为准。
+> **实施状态（2026-10-11）**：开发分支 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 已集成完整 Chrome 本机 Agent 入口：标准 HTTP Forward、任意合法 TCP CONNECT/IP/内网/端口、现有 Agent DIRECT/PROXY/REJECT 和无须 Cookie 配对的全 Profile 开关。Go/UI/Network CI success，但**尚无真实 Chrome/安全验收**。下文旧 B 本机 DNS:443/配对限定段落是历史行为说明，**已被文末完整代理实现取代**；A 远端共享网络仍独立认证/批准。最新状态见 [持续开发跟踪表](./browser-session-sync-progress.md)。
 
 > 2026-10-11 第一阶段开发预览 · 分支 `feat/browser-session-sync` · 未通过双机真实浏览器验收，不得默认开放生产公网代理。
 
@@ -91,11 +91,11 @@ Chrome 的 PAC/HTTP CONNECT 不提供整个系统或浏览器的任意协议覆�
 
 **安全取舍**：由于没有本机鉴权和 Agent 域名白名单，B 机器上的**其他本地程序也可以连接这一回环代理**，并向任何符合目标格式、路由规则允许的公开域名发起 CONNECT。Chrome PAC 的单站点约束只限制扩展管理的浏览器流量，**不是 Agent 监听器的访问控制**；它不能隔离同一台设备上的其他用户或进程。需确保本机系统可信、默认关闭此入口，并在正式发布前复核本地恶意进程、DNS 重绑定、目标内网解析和配额风险。若多个绑定网站使用同一 Chrome Profile，当前只允许一个本机端口；切换本机/来源 Agent 时重新验证浏览器代理控制权。真实 A/B 测试仍在 P0。
 
-## 完整 Chrome 本机 Agent 代理：最新需求与未实现工作
+## 完整 Chrome 本机 Agent 代理：已集成代码、待真实浏览器验收
 
-**目标（暂未入功能分支）**：本机 Agent 代理是独立于 Cookie 同步的普通浏览器网络能力，可在 Chrome Profile 中单独开关，无须 Server 在线、设备注册、A/B 配对或站点 Cookie 权限。使用 Agent 原生 PROXY / DIRECT / REJECT 分流，不在扩展或本机 HTTP 入口另行限定目标域名、IP 类型、私网/环回/内部后缀或 TCP 端口；支持普通 HTTP 正向代理及任意合法 TCP CONNECT（含 IPv4/IPv6、非 443 端口），明确已批准的来源 A 远端网络规则可以覆盖对应站点。**所有访问仍须遵守 Agent 自己的访问策略/出口 ACL，不能将“无扩展人工限制”理解为绕过 Agent 安全规则。**
+**已集成行为（未实机验收）**：本机 Agent 代理独立于 Cookie 同步，可在 Chrome Profile 中单独开关，不要求 Server 在线、设备注册、A/B 配对或站点 Cookie 权限。使用 Agent 原生 PROXY / DIRECT / REJECT 分流，不在本机 HTTP 入口额外限制目标域名/IP 类型/私网/环回/内部后缀或 TCP 端口；支持普通 HTTP Forward 与任意合法 TCP CONNECT（含 IPv4/IPv6/非 443 端口），明确已批准的来源 A 远端规则优先。**所有访问仍遵守 Agent 原有分流和 Exit ACL，并非绕过 Agent 安全规则。**
 
-现有分支 `031baf9` **尚未达到该目标**。草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 包含新增 HTTP Forward/通用 CONNECT、原生路由委托、Chrome 全局代理 UI/PAC 与部分测试，但**该提交尚未位于 `feat/browser-session-sync`，没有任何 CI runs，也无真实 Chrome 验收**。应先进入功能分支、修复格式/构建/单元测试与完整集成行为，再按全新 SHA 重新验收。
+原草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 已整合到 [`eaf13e8`](https://github.com/timwai/RelayProxy/commit/eaf13e83029eb0272eda81f99f727e1b07eeef02)，随后在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 修复 Go 格式与 HTTP/CONNECT 测试。对应 [Go](https://github.com/timwai/RelayProxy/actions/runs/38108843827)、[UI](https://github.com/timwai/RelayProxy/actions/runs/38108843828)、[Network](https://github.com/timwai/RelayProxy/actions/runs/38108843833) CI 已 success；它们只能证明所测路径，并不代替真实 Chrome 端到端、UDP/QUIC/DNS 测试或安全审查。
 
 **不能解除的技术事实**：Chrome Proxy API/PAC 不能代替 OS VPN；WebRTC、UDP/QUIC、系统 DNS、某些浏览器代理绕过规则可能走其他路径，须明确记录实际可控制的协议。Cookie 复制/恢复继续执行严格 E2EE、设备审批和显式授权；取消普通网络代理的限制并不等于取消 Cookie 权限校验。由于 B 本机 Agent 入口无鉴权且拟允许任何 TCP 地址（包括内网），同机程序滥用、内网连接与 DNS 重绑定风险必须单独审查，保持默认关闭、仅监听 127.0.0.1。
 

@@ -12,14 +12,14 @@
 
 | 核对项 | 结果 |
 |---|---|
-| 开发分支 / 当前 HEAD | `feat/browser-session-sync` / [`031baf9`](https://github.com/timwai/RelayProxy/commit/031baf98d9623a9459d5a47d29e45e6266591325) |
+| 开发分支 / 当前已验代码提交 | `feat/browser-session-sync` / [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e)（后续文档提交不改业务代码） |
 | PR 状态 | [#194](https://github.com/timwai/RelayProxy/pull/194)：**Open / Draft / 未合并 main** |
-| 当前 HEAD 自动化 | [Go CI #38107014122](https://github.com/timwai/RelayProxy/actions/runs/38107014122)、[UI CI #38107014106](https://github.com/timwai/RelayProxy/actions/runs/38107014106)、[Network Acceptance #38107014103](https://github.com/timwai/RelayProxy/actions/runs/38107014103)、[Android #38107014237](https://github.com/timwai/RelayProxy/actions/runs/38107014237)：**四项均 success**；网络工作流测试的是通用网络栈，不是 Chrome ↔ 本机 Agent 的跨端实测 |
+| 当前新范围自动化 | [Go CI #38108843827](https://github.com/timwai/RelayProxy/actions/runs/38108843827) **success**、[UI CI #38108843828](https://github.com/timwai/RelayProxy/actions/runs/38108843828) **success**、[Network Acceptance #38108843833](https://github.com/timwai/RelayProxy/actions/runs/38108843833) **success**、[Android #38108843829](https://github.com/timwai/RelayProxy/actions/runs/38108843829) **success**；网络 CI 测试通用代理/FakeIP/DNS，不等于真实 Chrome ↔ Agent 的双端验收 |
 | Cookie 同步 P0 | P0-01–07：**3 项已实现·待验收（02/03/04），2 项部分完成（05/06），2 项未开始正式验收（01/07）**。没有一项可视为“已验收” |
 | Cookie 同步 P1 / P2 | P1：**4 项部分完成、2 项未开始**；P2：**4 项未开始** |
 | A Agent → B Chrome 网络绑定 | NB-01–04 已实现·待真机/安全验收；NB-05 审计与正式准入未开始 |
-| B 本机 Agent（当前已入分支） | NB-06/07：专用回环入口、**无鉴权、无 Agent 域名白名单**；但 **仅 HTTPS CONNECT 的 DNS:443**，Agent 会拒绝 DIRECT/REJECT，Chrome PAC 只作用于已配对站点。这些**仍是当前代码中的产品能力限制**，不符合最新“完整浏览器代理”要求 |
-| 最新“全部 Chrome 代理能力不受 RelayProxy 人为限制”需求 | **未完成 / 不在当前 PR 分支**：草稿提交 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 以 `031baf9` 为父提交，包含 HTTP 正向代理、任意合法 TCP CONNECT 端口/IP/内网地址、按 Agent 原生 PROXY/DIRECT/REJECT 路由及独立全浏览器开关；该提交**未并入 `feat/browser-session-sync`，未触发 CI，不计已实现** |
+| B 本机 Agent（当前已入分支） | NB-06/07/09/10：无鉴权、无 Agent 域名白名单的回环入口；新增普通 HTTP Forward、任意合法 TCP CONNECT 目标/端口及 IPv4/IPv6/内网/单标签域名；复用 Agent **DIRECT/PROXY/REJECT**，Chrome 侧增加与 Cookie 配对独立的全 Profile 代理开关；代码/Go/UI 自动化已通过，真实 Chrome/Agent 尚未验收 |
+| 最新“完整 Chrome 本机 Agent 代理”需求 | **已集成·待真机/安全验收**：原草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 的业务改动已迁入功能分支 [`eaf13e8`](https://github.com/timwai/RelayProxy/commit/eaf13e83029eb0272eda81f99f727e1b07eeef02)，经格式与协议测试修复形成 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e)；Go/UI/Network CI success，不等于全协议浏览器网络接管或 P0 验收 |
 | 上线结论 | **不放行**。仍需草稿代码整合修复、Chrome 实际联机测试、站点兼容、安全审计、跨平台安装/更新与性能验证 |
 
 ### 核心能力边界（不可混淆）
@@ -72,7 +72,7 @@
 | P0-05 | **MV3 生命周期 / 异常网络恢复** | **部分完成** | [服务 Worker](../browser/chrome-extension/src/service-worker.js)含启动/Alarm；[WSS 连接单飞](../browser/chrome-extension/src/server-api.js)、[五分钟对账限频](../browser/chrome-extension/src/lifecycle.js)及对应模拟测试 | 真机测试 Worker 休眠/系统睡眠/网络切换/TLS 续连、离线期间 Cookie 改动最终一致性；增加失败退避与网络状态提示；验证不会无限重连或漏同步 |
 | P0-06 | **限流、资源配额、DoS 防护** | **部分完成** | [Server Handler](../server/browser_sync/handler.go)已有注册 IP 限频、64 连接槽及单帧限制；新增 [分层限流](../server/browser_sync/limits.go)（直接 IP 握手、设备重连、设备帧速率、单规则传输/突发频率、邀请及查询）、[规则数量上限](../server/browser_sync/rules.go)（每设备最多 32 条非撤销规则）、[待确认投递上限](../server/browser_sync/delivery.go)（每规则 16、每来源 128），有对应单测 | 仍需按身份的总量配额、持久终态记录数量上限、跨实例协调、压力测试、多设备实际断网重连与撤销验证；窗口限流仅在单 Server 进程内生效 |
 | P0-07 | **独立安全审查 / 密码学复核** | **未开始（正式评审）** | [加密信封](../browser/chrome-extension/src/session-envelope.js)、[邀请加密](../browser/chrome-extension/src/envelope.js)和 Server 验签已有开发实现与单测 | 独立审查现有 P-256 ECDH+HKDF+AES-GCM 组合，优先评估标准 HPKE (RFC 9180)；核对签名/密钥绑定、来源 pin、重放、时序、恶意网站、扩展权限、日志、认证降级与密钥轮换；漏洞关闭后复测 |
-| P0-08 | **Chrome 本机 Agent 完整网络代理能力与兼容性验收（新增）** | **部分完成·新目标未入分支** | 目前 [Agent 本机入口](../agent/app/browser_local_proxy.go)、[路由适配](../agent/routing/dialer.go)、[Chrome PAC](../browser/chrome-extension/src/network-binding.js)在已配对 HTTPS DNS:443 范围内运行；另有未入分支/未经过 CI 的 [草稿 `b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) | 实现与 Cookie 配对解耦的全 Profile 代理开关、标准 HTTP 正向代理、任意合法 TCP CONNECT（IPv4/IPv6/内网/任意端口）、忠实使用 Agent DIRECT/PROXY/REJECT；完整编译、单测、实网与 Windows/macOS Chrome 验收，WebRTC/QUIC/DNS 边界及无鉴权入口安全审查。**不支持的浏览器协议需如实说明，不得声称全协议覆盖** |
+| P0-08 | **Chrome 本机 Agent 完整网络代理能力与兼容性验收（新增）** | **已实现·待真机/安全验收** | [Agent 本机入口](../agent/app/browser_local_proxy.go)已支持 HTTP 正向代理、任意 TCP CONNECT Host/IP/端口；[RoutingDialer](../agent/routing/dialer.go)委托现有 DIRECT/PROXY/REJECT；[Chrome PAC](../browser/chrome-extension/src/network-binding.js)支持与 Cookie 配对无关的全 Profile 本机模式；[协议单测](../agent/app/browser_local_proxy_test.go)、[Chrome PAC 测试](../browser/chrome-extension/tests/network-binding.test.mjs)纳入 Go/UI CI | 仍需真实 Windows/macOS Chrome 的 HTTP/HTTPS/WebSocket、IPv4/IPv6、Agent 异常、回环绕过、DNS/WebRTC/QUIC 行为验收，以及无鉴权本机代理的安全/资源审计。Chrome proxy API 不等于透明 VPN，不得声称全协议覆盖 |
 
 ### P0 真机验收矩阵（每格都需要测试记录）
 
@@ -185,11 +185,11 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 
 | 任务 | 当前状态 | 实现与剩余验收 |
 |---|---|---|
-| NB-06 B Agent 独立本机 Chrome 出口 | **已实现（旧范围）·待验收；完整范围未实现** | 当前分支：`browser_sync.local_proxy` opt-in、127.0.0.1 专用监听、无需本机鉴权或 Agent 域名白名单，最多 64 条流；仍**强制 CONNECT DNS:443，并拒绝 DIRECT**。旧范围有 Go/UI 自动化，但不符合新增“任意合法 TCP 目标、完整 Agent 原生路由”要求；扩展 HTTP 正向代理/任意端口/内网 IPv4/IPv6 需整合草稿并实测 |
-| NB-07 B 扩展按站点选本机/来源 Agent | **已实现（站点模式）·待真机/安全验收** | 已配对 Cookie 规则可以选本机 B 或来源 A Agent；当前全局 Chrome 本机代理尚**不存在于功能分支**。旧站点 PAC 有自动化测试；Cookie-only/A 远端能力维持原授权边界 |
+| NB-06 B Agent 独立本机 Chrome 出口 | **已实现·待真机/安全验收** | `browser_sync.local_proxy` 默认关闭、仅监听 127.0.0.1、无需本机 HTTP 鉴权或域名白名单。支持 HTTP 转发与非 443 CONNECT、IPv4/IPv6/私网/单标签目标；保留 64 并发槽与现有 Agent 规则/Exit ACL；其他本机程序也可访问，需安全验收 |
+| NB-07 B 扩展按站点选本机/来源 Agent | **已实现·待真机/安全验收** | 已配对 Cookie 规则可选择本机 B 或来源 A Agent；额外提供独立于 Cookie 配对的全 Chrome Profile 本机代理开关；PAC 对明确授权的来源 A 规则保留优先权。实际 Chrome 策略覆盖/回环绕过仍待验收 |
 | NB-08 本地 Agent 发现、权限 UI、真实跨端验证 | **未完成** | 需 Agent GUI 设置和本机入口健康检查、无鉴权回环服务的同机进程访问及内网路由风险审查、端口占用/退出/断网、代理规则变化、跨平台 Chrome，以及 DNS/WebRTC/第三方资源审计（来源 A 远端 407 缓存继续测试） |
-| NB-09 **独立全 Chrome Profile 的本机代理** | **未实现·草稿未入分支** | 目标是无须 Server 连接、设备注册或 Cookie 配对，启用 B 本机 Agent 后所有可代理的 Chrome 请求按普通 Agent 规则工作。草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 已包含 UI/PAC 入口，但未入 PR，也没有 CI/实际 Chrome 证明；须完成状态持久化、启动/退出、PAC 优先级与代理冲突验证 |
-| NB-10 **任意 TCP 地址/端口、HTTP 正向代理与正常路由动作** | **未实现·草稿未入分支** | 当前代码中 CONNECT 仍限 DNS:443，DIRECT 会被强制阻断，且无独立 HTTP 正向代理；草稿设计改为原生 RoutingDialer 的 DIRECT/PROXY/REJECT 语义并增加 HTTP Forward/非 443/IP/内网请求；必须先修复/集成单测并以 CI 证明 |
+| NB-09 **独立全 Chrome Profile 的本机代理** | **已实现·待真机验收** | 扩展弹窗提供独立开关及端口配置，Service Worker 设置 `chrome.proxy` PAC；不要求 Server 登录或 Cookie 配对。PAC 保持来源 A 网络绑定优先，其余走本机 Agent，停用后清理全局覆盖。单元测试通过；真实 Chrome 浏览器重启/代理冲突仍未验收 |
+| NB-10 **任意 TCP 地址/端口、HTTP 正向代理与正常路由动作** | **已实现·待实网/安全验收** | Agent browser bridge 接收绝对 URI HTTP 与任意合法 TCP CONNECT；协议测试覆盖非 443、IPv4/IPv6、内网主机与 HTTP GET，且真实路由调用 `RoutingDialer.DialTCP` 遵循 PROXY/DIRECT/REJECT。WebSocket Upgrade、POST/大文件、Chrome 实体兼容需补真实验收 |
 | NB-11 **Chrome 平台边界与实网验收** | **未开始** | Windows/macOS 实体 Chrome HTTP/HTTPS/WebSocket、IPv4/IPv6/非 443、本机/来源 A 优先级、浏览器隐式回环绕过、DNS/QUIC/WebRTC/UDP、Profile 切换、扩展冲突、异常停机和同机访问安全验收；记录不能由代理 API 控制的流量种类 |
 
 **本轮新增范围不应误算为已验收。** B Agent 本机出口不保证与来源 A 公网 IP 一致；P0-01/05/06/07 与 NB-05 的生产准入仍然不放行。所有构建和集成测试结果必须按功能提交 SHA 单独填写。
@@ -220,4 +220,6 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 
 ## 九、P0-08 / NB-09–11 集成实施（2026-10-11）
 
-本次从未入分支的草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 提取 **Agent 浏览器桥接、原生 RoutingDialer 及扩展全 Profile 模式代码**，保留前次已审核的设计/历史进度文档，不覆盖文档变更。当前为**集成候选，非已验收**：拟支持 HTTP 正向代理、合法 TCP CONNECT 地址/端口、Agent 原有 DIRECT/PROXY/REJECT 与独立 Chrome 开关。下一步必须修复测试夹具和格式问题，并以集成代码 SHA 运行 Go/UI/Android/Network CI。**Chrome Proxy API 对 QUIC/UDP/WebRTC/DNS 的边界没有消失**。Cookie 同步双端审批与加密逻辑未改变；远端 A 网络共享认证继续保留。P0-08、NB-09、NB-10 保持**部分完成·待集成测试与真机验收**，NB-11 仍未开始实机验收；PR 继续 Draft。
+原草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 已通过 [`eaf13e8`](https://github.com/timwai/RelayProxy/commit/eaf13e83029eb0272eda81f99f727e1b07eeef02) 整合进入本开发分支，并在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 修正 Go 格式及 HTTP/CONNECT 测试夹具。现已实现 HTTP 正向代理、合法 TCP CONNECT 任意目标地址/端口、现有 Agent DIRECT/PROXY/REJECT 和独立 Chrome Profile 开关；**Go/UI/Network 自动化通过但不视为真实 Chrome 或安全验收**。Chrome Proxy API 对 QUIC/UDP/WebRTC/DNS 的协议边界仍然存在。Cookie 同步双端审批与加密逻辑未改变；远端 A 网络共享认证继续保留。P0-08、NB-09/10 现为 **已实现·待真机/安全验收**，NB-11 仍未开始实体平台验收；PR 保持 Draft。
+
+| 2026-10-11 | [`eaf13e8`](https://github.com/timwai/RelayProxy/commit/eaf13e83029eb0272eda81f99f727e1b07eeef02) → [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) | 本机 Agent HTTP 正向代理、任意合法 TCP CONNECT/地址类型、原生 DIRECT/PROXY/REJECT 与 Chrome Profile 全局开关已进入开发分支；修复 Go 格式和 CONNECT/HTTP 请求测试。[Go CI #38108843827](https://github.com/timwai/RelayProxy/actions/runs/38108843827) **success**；[UI CI #38108843828](https://github.com/timwai/RelayProxy/actions/runs/38108843828) **success**（含 Windows/macOS 桌面构建）；[Network Acceptance #38108843833](https://github.com/timwai/RelayProxy/actions/runs/38108843833) **success**；[Android #38108843829](https://github.com/timwai/RelayProxy/actions/runs/38108843829) **success** | P0-08、NB-06/07/09/10 **已实现·待真机/安全验收**；NB-11 未开始，P0-01/05/06/07 仍有原有验收阻塞，P1/P2 状态不变；PR Draft，不合并 main |

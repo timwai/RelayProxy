@@ -1,6 +1,6 @@
 # RelayProxy Browser Sync — Chrome 扩展（P3 开发预览）
 
-> **代码状态（2026-10-11）**：当前开发分支 `031baf9` 的 Cookie 同步、A Agent 网络绑定及 B 本机无鉴权入口均已有自动化测试，但 B 本机仍限定 CONNECT DNS:443 且要求已配对站点，不能称为全 Chrome 浏览器代理。最新目标是独立的全 Profile 本机 Agent 代理、HTTP Forward/通用 TCP CONNECT、原生 DIRECT/PROXY/REJECT；[草稿 `b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) **未入功能分支 / 无 CI**。本 README 的 Cookie 同步无需本机 Agent，并不表示使用本机网络出口时无需 Agent。进度以 [Living Tracker](../../docs/browser-session-sync-progress.md) 为准。
+> **代码状态（2026-10-11）**：独立的 Chrome Profile 本机 Agent 代理、HTTP 正向代理、任意合法 TCP CONNECT 地址/端口及原生 DIRECT/PROXY/REJECT 已在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 集成，Go/UI/Network CI success，但真实 Chrome、WebRTC/UDP/QUIC/DNS/回环绕过及安全验收尚未完成。Cookie 同步仍无需本机 Agent，只有选择本机网络出口才需要安装 B Agent。发布状态仍为 Draft。详情见 [Living Tracker](../../docs/browser-session-sync-progress.md)。
 
 **实时开发进度与发布准入**：[P0 上线前必须完成 / P1 正式版 / P2 后续增强及验证记录](../../docs/browser-session-sync-progress.md)。本 README 描述已经编写的开发功能，不能替代真实 Chrome 验收或安全审查。
 
@@ -128,6 +128,6 @@ Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api
 
 使用 B 本机 Agent 时，浏览器扩展可为已配对的 HTTPS 会话规则指定独立回环接入端口。Agent `browser_sync.local_proxy` 仅需 `enabled: true` 和 `listen: "127.0.0.1:21291"`，不需要 Token、用户名密码或 Agent 域名白名单，也不依赖通用 SOCKS5/HTTP/透明代理开关；实际出站遵循 Agent 的 Relay/P2P/QUIC/自定义出口路由，DIRECT/REJECT 不会静默直连。**此无鉴权回环代理也可以被同机其他进程使用**，须在可信设备上显式启用。来源 A 的远端网络代理仍保留独立认证。详见 [网络绑定设计](../../docs/browser-session-network-binding.md)。
 
-## 下一步：独立全 Chrome 网络代理（未交付）
+## 独立全 Chrome 网络代理（已集成、待真机验收）
 
-普通浏览器网络代理将不再依赖 Cookie 配对，也不会人为限制 HTTPS:443、公共 DNS 域名、IP/IPv6/内网地址或 Agent 的 DIRECT/PROXY/REJECT 规则；Chrome 全局代理开关及 HTTP 正向代理仍需要将草稿 `b7546cf` 正式集成到当前分支并跑全套 CI。Cookie 会话同步的设备批准、双端加密和 Cookie 安全作用域规则继续独立存在。Chrome 代理 API 不是 VPN，UDP/QUIC/WebRTC 等协议需要真实 Chrome 验收。请勿以此段文字推断这些功能现在已经可以使用。
+普通浏览器网络代理不依赖 Cookie 配对，不额外限定 HTTPS:443、公共 DNS 域名、IP/IPv6/内网地址或 Agent 的 DIRECT/PROXY/REJECT 规则；Chrome 全局代理开关与 HTTP 正向代理已进入分支并有自动化测试。要使用它，必须在 B Agent 上显式开启 `browser_sync.local_proxy`，并通过扩展勾选全 Chrome 代理。**真实 Windows/macOS Chrome、WebSocket、HTTP POST/大流量、Agent 异常及代理覆盖冲突尚未验收**。Cookie 会话的设备批准、双端加密和 Cookie 安全作用域规则继续独立存在。Chrome 代理 API 不是 VPN，UDP/QUIC/WebRTC/部分 DNS 路径需要实测。

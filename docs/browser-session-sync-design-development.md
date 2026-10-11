@@ -1,7 +1,7 @@
 
 # RelayProxy Browser Session Sync — 无 Agent 设计与开发方案
 
-> **设计基线文档，不代表当前实施进度。** 2026-10-11 新需求：**浏览器网络代理必须与 Cookie 同步解耦，不能人为限制 HTTP/HTTPS、任意合法 TCP 目标端口、IP/内网地址或 Agent 原生 DIRECT/PROXY/REJECT**。当前分支 `031baf9` 仍有 DNS:443 和 Cookie 配对范围限制；未入分支草稿 `b7546cf` 不视为已实现。新增任务见 [P0-08、NB-09/10/11](./browser-session-sync-progress.md)，详细路线见 [网络绑定设计补充](./browser-session-network-binding.md#完整-chrome-本机-agent-代理最新需求与未实现工作)。 现有实现、P0 上线门槛、P1 正式版功能、P2 后续增强及逐次 CI/验收记录，请以 [Browser Sync 持续更新进度清单](./browser-session-sync-progress.md) 为准。以下早期“待实现/拟新增”字段保留为历史设计提案，具体已实现接口以当前代码为准。
+> **设计基线文档，不代表当前实施进度。** 2026-10-11 新需求：**浏览器网络代理必须与 Cookie 同步解耦，不能人为限制 HTTP/HTTPS、任意合法 TCP 目标端口、IP/内网地址或 Agent 原生 DIRECT/PROXY/REJECT**。完整 Chrome 本机 Agent 代理已在开发分支 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 集成并通过 Go/UI/Network CI，但仍须真实 Chrome/安全验收；原草稿 `b7546cf` 属历史参考。新增任务见 [P0-08、NB-09/10/11](./browser-session-sync-progress.md)，详细路线见 [网络绑定设计补充](./browser-session-network-binding.md#完整-chrome-本机-agent-代理最新需求与未实现工作)。 现有实现、P0 上线门槛、P1 正式版功能、P2 后续增强及逐次 CI/验收记录，请以 [Browser Sync 持续更新进度清单](./browser-session-sync-progress.md) 为准。以下早期“待实现/拟新增”字段保留为历史设计提案，具体已实现接口以当前代码为准。
 
 
 > 版本：v1.1（2026-10-10）  

@@ -1,3 +1,5 @@
+> **2026-10-12 · PR #194 设备单独审批：** Chrome 现在直接调用设备注册接口，提交身份 ID、设备名称与公钥；Extension ID 仅作为 Origin 绑定与历史禁用依据，不需要独立管理员审批。Server Web 仅保留浏览器设备待审批/已批准/已撤销流程和历史禁用来源的清理入口。WSS 需要已批准设备签名和与注册一致的扩展 Origin，且每条控制消息重新检查设备撤销与历史禁用。本轮已提交 Go/Node 契约测试和 WSS 不同来源签名冒用拒绝的集成测试；**当前容器无法访问 GitHub 克隆仓库运行全量测试，CI / 实际 Chrome A/B 验收仍待确认，PR 保持 Draft，不合并 main。** 历史阶段性进度条目里的“两层审批”均为旧设计，不代表当前分支的授权流程。
+
 > **2026-10-11 IndexedDB v3 新增：** 以下历史进度条目中“不支持 IndexedDB”的说法属于当时版本的范围，不代表最新功能分支。v3 只通过**新建双端确认的配对**开启同源 IndexedDB，不自动扩大已有 v2 授权；暂未进行真实浏览器验收。
 
 > **当前实现（2026-10-11）：** Browser Sync 在 `browser_sync.enabled: true` 且 Server TLS/Admin TLS 正常时自动复用既有 TLS/TCP 中继端口。**`browser_sync.network_proxy` 整块已废弃**，不再支持单独 `listen`、`advertise`、`allowed_exit_ids`、独立监听和 Server Web 出口配置表单。B Chrome 通过已配置的 Relay HTTPS Server Origin 访问网关；网络出口仍需同身份、`proxy.exit`、Agent 本地明确 opt-in 和 A/B 双端网络绑定同意。以下含旧配置的历史条目仅为进度留档，不再适用于现行版本。相关功能尚待 CI 和真实设备验收。

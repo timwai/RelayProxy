@@ -432,6 +432,10 @@ type ConfigUpdate struct {
 			Address  *string `json:"address"`
 			Username *string `json:"username"`
 			Password *string `json:"password"`
+			// Read-only status flag returned by older Agent Web snapshots.
+			// Accept it for compatibility, but never treat it as a request
+			// to change a stored password.
+			HasPassword bool `json:"hasPassword,omitempty"`
 		} `json:"upstream"`
 		Access struct {
 			Mode    *string   `json:"mode"`    // "" (off) | "allow" | "deny"
@@ -463,6 +467,9 @@ type CustomExitUpdate struct {
 	Address  string  `json:"address"`
 	Username string  `json:"username"`
 	Password *string `json:"password,omitempty"`
+	// Legacy GUI config snapshots included this read-only indicator.
+	// It is intentionally ignored; omitted Password preserves the secret.
+	HasPassword bool `json:"hasPassword,omitempty"`
 }
 
 type RoutingConfigUpdate struct {
@@ -676,7 +683,13 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		cfg.Exit.Upstream.Username = strings.TrimSpace(*in.Exit.Upstream.Username)
 	}
 	if in.Exit.Upstream.Password != nil {
-		cfg.Exit.Upstream.Password = *in.Exit.Upstream.Password
+		// Old React clients echoed the redacted default password="" and
+		// hasPassword=true when saving unrelated Exit settings. Preserve the
+		// existing secret in that case. An explicit password="" WITHOUT the
+		// legacy read-only indicator still clears it.
+		if !in.Exit.Upstream.HasPassword || *in.Exit.Upstream.Password != "" {
+			cfg.Exit.Upstream.Password = *in.Exit.Upstream.Password
+		}
 	}
 	if in.Exit.Access.Mode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*in.Exit.Access.Mode))

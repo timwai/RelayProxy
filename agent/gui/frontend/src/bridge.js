@@ -45,8 +45,32 @@ export function parseMutation(value) {
   return { ok: false, message: String(value || '操作没有返回结果') };
 }
 
+// Config snapshots include read-only password-presence indicators. Never
+// echo them into the strictly decoded ConfigUpdate API, and never turn a
+// redacted/blank password input into a request to clear a stored secret.
+// Clearing is only possible through an explicit clearPassword action.
+export function normalizeConfigUpdate(payload) {
+  const cleaned={...payload};
+  if(payload?.exit?.upstream){
+    const {hasPassword,clearPassword,password,...fields}=payload.exit.upstream;
+    const upstream={...fields};
+    if(clearPassword===true)upstream.password='';
+    else if(typeof password==='string' && password.length>0)upstream.password=password;
+    cleaned.exit={...payload.exit,upstream};
+  }
+  if(Array.isArray(payload?.proxy?.customExits)){
+    cleaned.proxy={...payload.proxy,customExits:payload.proxy.customExits.map(item=>{
+      const {hasPassword,clearPassword,password,...fields}=item;
+      if(clearPassword===true)return {...fields,password:''};
+      if(typeof password==='string' && password.length>0)return {...fields,password};
+      return fields;
+    })};
+  }
+  return cleaned;
+}
+
 export async function saveConfig(revision, payload) {
-  const body = { ...payload, revision };
+  const body = { ...normalizeConfigUpdate(payload), revision };
   return parseMutation(await call('goSaveConfig', JSON.stringify(body)));
 }
 

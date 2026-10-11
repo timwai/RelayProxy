@@ -2,7 +2,8 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {groups,configFieldCount,normalizeForSave,configEqual} from './settings.js';
 test('server config covers all existing groups and fields',()=>{
   assert.equal(groups.length,9);
-  assert.equal(configFieldCount(),46);
+  assert.equal(configFieldCount(),45);
+  assert.equal(groups.find(g=>g.id==='browserSync').fields.some(f=>f[0]==='extensionIds'),false);
   assert.deepEqual(groups.map(g=>g.key||g.id),['admin','tunnel','direct','p2p','serverExit','rdpIngress','browserSync','certificate','relayACL']);
 });
 test('unknown future settings survive edits',()=>{

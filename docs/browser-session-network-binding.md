@@ -95,3 +95,11 @@ Chrome 扩展连接失败后会对同一 TLS 入口发起无身份、无 Cookie 
 在 Chrome 扩展启用“使用本机 RelayProxy Agent 代理全浏览器”时，旧 PAC 会把 `wss://RelayProxy-Server/api/v1/browser-sync/ws` 也发送到本地 Agent；如果该 Agent 的出口仍通过同一个 Server Relay，则可能发生自代理回环。当前 PAC 已对配置的 `RelayProxy HTTPS Server` 主机添加 **DIRECT 启动路径**（仅在启用全局 Agent 代理时）。单独配对的精确网站规则优先级仍更高：即使绑定站点与 Server 域名重合，也不会把必须代理或阻断的站点悄悄改为 DIRECT。
 
 如果公网 TCP 中继本身必须由其他代理链路才能连接，DIRECT 也可能不可达；此时应单独调整 Server 可达性，而不是放宽已配对网站的 fail-closed 代理。修改扩展 Server Origin 后会重新生成 PAC，并清除/验证旧 Server 的临时代理租约。普通 Chrome 全局代理与站点网络绑定仍是独立可选功能。
+
+## 七、撤销旧设备导致同一 Chrome 无法重新申请
+
+浏览器设备被撤销（`state=revoked`）后，Server 保留原设备 ID / 签名公钥记录用于阻止未经批准的重新启用。这意味着同一个 Chrome Profile 的后续注册不会自动获得新 `pending` 身份。新版 Server Web → 浏览器同步中可以先**删除旧设备**，这会同时清除其站点加密配对、网络绑定和防重放元数据；旧浏览器的任何网站登录 Cookie 不会因 Server 清库而直接退出。
+
+如果扩展 ID 同时被撤销，其整个 Origin 会在 WSS Upgrade 前收到 HTTP 403。管理员应先删除这个扩展 ID 关联的已撤销设备，再删除“扩展来源管理”中的已撤销扩展 ID，然后让 Chrome 重新“提交统一授权申请”。新申请仍必须经管理员选择 Identity 和 send/receive 权限审批，没有任何自动信任或自动恢复权限。
+
+管理员接口仅限已登录 Admin Web：`DELETE /api/v1/browser-sync/admin/devices/{id}` 和 `DELETE /api/v1/browser-sync/admin/extensions/{id}`。只有 revoked 状态才允许删除，其他状态 HTTP 409；仍有旧设备关联的扩展也返回 HTTP 409。待审批请求优先展示，便于审批最新浏览器。

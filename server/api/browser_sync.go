@@ -58,9 +58,43 @@ func (r *Router) handleBrowserSyncRevoke(w http.ResponseWriter, req *http.Reques
 		writeError(w, http.StatusInternalServerError, "unable to revoke browser device")
 		return
 	}
+	r.browserSync.DisconnectDevice(req.PathValue("id"))
 	writeJSON(w, http.StatusOK, map[string]string{"id": req.PathValue("id"), "state": "revoked"})
 }
 
+func (r *Router) handleBrowserSyncDelete(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if err := r.browserSync.Store.DeleteRevokedDevice(req.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, browsersync.ErrNotFound):
+			writeError(w, http.StatusNotFound, "browser device not found")
+		case errors.Is(err, browsersync.ErrDeleteRequiresRevoke):
+			writeError(w, http.StatusConflict, "revoke browser authorization before deleting")
+		default:
+			writeError(w, http.StatusInternalServerError, "unable to delete browser device")
+		}
+		return
+	}
+	r.browserSync.DisconnectDevice(id)
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "deleted"})
+}
+func (r *Router) handleBrowserSyncExtensionDelete(w http.ResponseWriter, req *http.Request) {
+	id := req.PathValue("id")
+	if err := r.browserSync.Store.DeleteRevokedExtension(req.Context(), id); err != nil {
+		switch {
+		case errors.Is(err, browsersync.ErrNotFound):
+			writeError(w, http.StatusNotFound, "extension not found")
+		case errors.Is(err, browsersync.ErrDeleteRequiresRevoke):
+			writeError(w, http.StatusConflict, "revoke extension before deleting")
+		case errors.Is(err, browsersync.ErrExtensionStillLinked):
+			writeError(w, http.StatusConflict, "delete linked browser devices before deleting extension")
+		default:
+			writeError(w, http.StatusInternalServerError, "unable to delete extension")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"id": id, "state": "deleted"})
+}
 func (r *Router) handleBrowserSyncExtensions(w http.ResponseWriter, req *http.Request) {
 	items, err := r.browserSync.Store.Extensions(req.Context())
 	if err != nil {

@@ -39,6 +39,17 @@ func (h *Handler) detach(id string, c *browserConnection) {
 	}
 	h.clientMu.Unlock()
 }
+// DisconnectDevice terminates any authenticated websocket still attached to
+// a revoked/deleted browser before its old credentials can be reused.
+func (h *Handler) DisconnectDevice(id string) {
+	h.clientMu.Lock()
+	c := h.clients[id]
+	delete(h.clients, id)
+	h.clientMu.Unlock()
+	if c != nil {
+		_ = c.conn.Close(websocket.StatusPolicyViolation, "browser authorization revoked")
+	}
+}
 func (h *Handler) destination(id string) *browserConnection {
 	h.clientMu.RLock()
 	defer h.clientMu.RUnlock()

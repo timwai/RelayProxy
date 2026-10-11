@@ -364,3 +364,11 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **CONFIG-REMOVE-02**：NetworkProxy 不再启动单独监听器，也不发送 host/port。Chrome 由已认证的 `settings.serverOrigin` 推导 HTTPS 代理主机和端口，Server Origin 改变时删除旧会话代理凭据并拒绝发往旧主机。只允许具备 `proxy.exit` 授权、同 Identity、Agent signed local browser sharing opt-in 的在线 Exit；需要 A/B 配对和网站网络绑定双方确认。
 - **CONFIG-REMOVE-03**：保留普通 Cookie/Storage 同步不使用任何 Agent 的特性；如果需要来源 Agent 出口，Chrome 的 RelayProxy HTTPS Server 必须填写真正的公网 TCP 中继入口，不能再以仅管理用途的 Admin HTTPS 地址作为网络代理主机。
 - **CONFIG-REMOVE-04**：移除旧 Web 编辑器、旧表单校验辅助与测试，补充 YAML 迁移、TLS 强制和令牌不含 host/port、Chrome Origin 地址绑定等回归用例。此记录替代更早的 NET/PORT 旧配置说明。
+
+### 2026-10-11 浏览器旧设备和撤销扩展删除、重新申请
+
+- **DELETE-01**：Server 管理入口新增 `DELETE /api/v1/browser-sync/admin/devices/{id}`。只能删除**已撤销**的浏览器设备，必须通过原有管理员会话与 CSRF 校验。单事务彻底清理该设备相关的加密配对元数据、规则邀请、网络绑定、序号、防重放投递收据及 Chrome Extension 关联，然后清理设备记录；不删除另一个浏览器设备。
+- **DELETE-02**：新增 `DELETE /api/v1/browser-sync/admin/extensions/{id}`，仅用于彻底删除已撤销的扩展 ID；如仍存在关联设备，先逐个撤销并删除设备，返回 HTTP 409 而不是偷偷删除其他设备。删除后同扩展 ID 的下一次申请必须重新走 `pending` 审批流程，不会自动授予旧权限。
+- **DELETE-03**：Server Web 在已撤销设备行加入“删除旧设备”、已撤销扩展行加入“删除旧扩展”，每次永久删除前明确确认，完成后刷新列表。新的待审批请求优先排序，避免旧记录占满最多 500 条查询结果。
+- **DELETE-04**：已撤销设备在重新提交相同设备 ID / 签名密钥时会继续匹配旧记录，不会自动变成 `pending`；管理员完成删除后，Chrome 才能重新提交申请。扩展若也处于 revoked 状态，需要先删除旧设备，再删除旧扩展，最后在 Chrome 重新点击“提交统一授权申请”，然后在 Server Web 审批。此流程保持管理员显式审批，不自动恢复被撤销设备的信任。
+- **DELETE-05**：测试新增删除仅限 revoked、完整数据库依赖清理、原浏览器和其他浏览器边界、同扩展 ID 再注册恢复待审批状态、Admin API 409 / 404 / 200 分支。最新提交仍需 GitHub CI 和实际 Server/Chrome 验证，不声明运行成功。

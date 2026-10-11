@@ -46,6 +46,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
   const action=async (id,mode)=>{
     if(busy)return;
     if(mode==='revoke'&&!window.confirm('撤销后该浏览器将不能继续同步，相关配对规则也会失效。确定撤销？'))return;
+    if(mode==='delete'&&!window.confirm('永久删除已撤销浏览器设备及其全部配对/同步记录？此操作不可恢复，重新注册仍须管理员审批。'))return;
     if(mode==='approve'&&!identity[id]){
       setError('请为待审批浏览器选择已启用的身份。');return;
     }
@@ -58,6 +59,9 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
         setNotice(devices.some(d=>d.id===id&&d.extensionId)
           ?'扩展与该浏览器设备已一次批准。'
           :'旧版浏览器设备已批准。');
+      }else if(mode==='delete'){
+        await api('/browser-sync/admin/devices/'+encodeURIComponent(id),{method:'DELETE'});
+        setNotice('旧浏览器设备及配对记录已删除。若要重新加入，请在 Chrome 重新提交授权申请。');
       }else{
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/revoke',
           json('POST',{}));
@@ -68,10 +72,16 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     finally{setBusy('');}
   };
   const extensionAction=async(id,action)=>{
+    if(action==='delete'&&!window.confirm('永久删除已撤销扩展的授权记录？需先删除其关联的旧浏览器设备。重新申请仍需管理员审批。'))return;
     setBusy(id);setError('');
     try{
-      await api('/browser-sync/admin/extensions/'+encodeURIComponent(id)+'/'+action,json('POST',{}));
-      setNotice(action==='approve'?'已批准旧版单独上报的扩展；关联设备仍需独立审批。':'扩展已撤销，新会话将被拒绝。');
+      if(action==='delete'){
+        await api('/browser-sync/admin/extensions/'+encodeURIComponent(id),{method:'DELETE'});
+        setNotice('旧扩展授权记录已删除；请在 Chrome 重新提交申请。');
+      }else{
+        await api('/browser-sync/admin/extensions/'+encodeURIComponent(id)+'/'+action,json('POST',{}));
+        setNotice(action==='approve'?'已批准旧版单独上报的扩展；关联设备仍需独立审批。':'扩展已撤销，新会话将被拒绝。');
+      }
       await refresh();
     }catch(err){setError(err.message);}
     finally{setBusy('');}
@@ -109,7 +119,9 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
           <td>{ext.state==='pending'?<button className="btn primary" disabled={!!busy}
             onClick={()=>extensionAction(ext.id,'approve')}>批准扩展</button>:
             ext.state==='approved'?<button className="btn" disabled={!!busy}
-              onClick={()=>extensionAction(ext.id,'revoke')}>撤销扩展</button>:'已撤销'}</td>
+              onClick={()=>extensionAction(ext.id,'revoke')}>撤销扩展</button>:
+              <button className="btn danger" disabled={!!busy}
+                onClick={()=>extensionAction(ext.id,'delete')}>删除旧扩展</button>}</td>
         </tr>)}
         {!legacyExtensions.length&&<tr><td colSpan={3}>暂无需要单独处理的扩展。关联申请请在下方审批。</td></tr>}</tbody></table></div>
       </div>
@@ -120,7 +132,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
       </div>
       <div className="panel">
         <div className="form-actions" style={{justifyContent:'space-between',alignItems:'center'}}>
-          <div><h3>浏览器设备与统一审批</h3><p>选择身份和收发权限后，一次批准该设备及其关联扩展；不授予 Agent 权限。</p></div>
+          <div><h3>浏览器设备与统一审批</h3><p>待审批设备优先显示；撤销后可删除旧设备及配对记录，再由 Chrome 重新申请授权。不授予 Agent 权限。</p></div>
           <input className="input" aria-label="搜索浏览器设备" placeholder="搜索名称、ID 或状态"
             value={filter} onChange={e=>setFilter(e.target.value)}/>
         </div>
@@ -156,7 +168,8 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
                   (!caps.send&&!caps.receive)} onClick={()=>action(d.id,'approve')}>{d.extensionId?'批准扩展与设备':'批准设备'}</button>:
                 d.state==='approved'?<button className="btn" disabled={!!busy}
                   onClick={()=>action(d.id,'revoke')}>撤销授权</button>:
-                  <span>已失效</span>}</td>
+                  <button className="btn danger" disabled={!!busy}
+                    onClick={()=>action(d.id,'delete')}>删除旧设备</button>}</td>
             </tr>;
           }):<tr><td colSpan={6}>{loading?'正在加载…':'暂无匹配的浏览器设备'}</td></tr>}
         </tbody></table></div>

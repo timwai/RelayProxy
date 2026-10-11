@@ -222,3 +222,11 @@ owned by that same pairing. Interrupted restores require inspection and
 manual resumption. Chrome real-device end-to-end tests (login persistence,
 logout, conflicting accounts, DNS/QUIC/WebRTC leakage boundaries) remain
 mandatory before merging this draft into main.
+
+### 撤销旧设备后无法重新申请（管理员）
+
+Server Web → **浏览器同步 → 浏览器设备与统一审批** 可以对已撤销设备点击“删除旧设备”（永久清除该设备的配对和会话转发记录，不会删除网站已经颁发的登录 Cookie）。已批准/待审批设备必须先撤销才能删除。
+
+如果**扩展来源管理**中的同一 Extension ID 也已撤销，需要先删除其关联的旧浏览器设备，再点击“删除旧扩展”。此操作不会直接批准扩展；在 Chrome 扩展 → 连接与设备中重新提交申请后，扩展及设备重新出现为待审批，管理员重新选择身份和 send/receive 权限批准即可。同一旧设备 ID 不会因再次点击注册就绕过撤销状态。
+
+设备列表优先显示待审批请求（原最多 500 条记录的限制保留），避免大量历史 revoked 记录挡住新授权。上述删除只能使用管理员登录后的管理 API，无法从未获审批的 Chrome 扩展自行触发。

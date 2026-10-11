@@ -12,6 +12,8 @@ import (
 
 var ErrNotFound = errors.New("browser device not found")
 var ErrDeviceConflict = errors.New("browser device key mismatch")
+var ErrDeleteRequiresRevoke = errors.New("revoke browser authorization before deleting the record")
+var ErrExtensionStillLinked = errors.New("delete linked browser devices before deleting the extension")
 
 // BrowserDevice is entirely separate from the privileged RelayProxy Agent model.
 type BrowserDevice struct {
@@ -116,7 +118,9 @@ func (s *Store) Device(ctx context.Context, id string) (BrowserDevice, error) {
 	return d, err
 }
 func (s *Store) Devices(ctx context.Context) ([]BrowserDevice, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM browser_sync_devices ORDER BY created_at DESC LIMIT 500`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM browser_sync_devices
+  ORDER BY CASE state WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 ELSE 2 END,
+           updated_at DESC LIMIT 500`)
 	if err != nil {
 		return nil, err
 	}
@@ -180,6 +184,69 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 	_, err = s.db.ExecContext(ctx, `UPDATE browser_sync_rules SET status='revoked', updated_at=? WHERE source_id=? OR target_id=?`, time.Now().UTC(), id, id)
 	return err
 }
+// DeleteRevokedDevice permanently removes a revoked browser and every
+// dependent session/rule record in one transaction. Revocation remains a
+// separate explicit admin action: a pending or approved browser can never
+// be silently deleted to circumvent approval/audit controls.
+func (s *Store) DeleteRevokedDevice(ctx context.Context, id string) error {
+	if !deviceIDPattern.MatchString(id) {
+		return ErrNotFound
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var state string
+	if err := tx.QueryRowContext(ctx, "SELECT state FROM browser_sync_devices WHERE id=?", id).Scan(&state); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if state != "revoked" {
+		return ErrDeleteRequiresRevoke
+	}
+	// Explicit cleanup works even on older SQLite connections where foreign
+	// key enforcement might not be enabled. All rule dependencies are removed
+	// before deleting the rules and their source/target browser device.
+	queries := []string{
+		`DELETE FROM browser_sync_deliveries WHERE source_id=? OR target_id=?
+       OR rule_id IN (SELECT id FROM browser_sync_rules WHERE source_id=? OR target_id=?)`,
+		`DELETE FROM browser_sync_delivery_results WHERE source_id=?
+       OR rule_id IN (SELECT id FROM browser_sync_rules WHERE source_id=? OR target_id=?)`,
+		`DELETE FROM browser_sync_network_bindings WHERE rule_id IN
+       (SELECT id FROM browser_sync_rules WHERE source_id=? OR target_id=?)`,
+		`DELETE FROM browser_sync_sequences WHERE rule_id IN
+       (SELECT id FROM browser_sync_rules WHERE source_id=? OR target_id=?)`,
+		`DELETE FROM browser_sync_rule_offers WHERE rule_id IN
+       (SELECT id FROM browser_sync_rules WHERE source_id=? OR target_id=?)`,
+		`DELETE FROM browser_sync_rules WHERE source_id=? OR target_id=?`,
+		`DELETE FROM browser_sync_device_extensions WHERE device_id=?`,
+		`DELETE FROM browser_sync_devices WHERE id=? AND state='revoked'`,
+	}
+	args := [][]any{
+		{id, id, id, id}, {id, id, id}, {id, id}, {id, id}, {id, id},
+		{id, id}, {id}, {id},
+	}
+	for i, query := range queries {
+		result, err := tx.ExecContext(ctx, query, args[i]...)
+		if err != nil {
+			return fmt.Errorf("delete browser device dependencies: %w", err)
+		}
+		if i == len(queries)-1 {
+			n, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n != 1 {
+				return ErrNotFound
+			}
+		}
+	}
+	return tx.Commit()
+}
+
 func boolInt(v bool) int {
 	if v {
 		return 1

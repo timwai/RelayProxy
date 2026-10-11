@@ -73,7 +73,7 @@ func (s *Store) ExtensionApproved(ctx context.Context, id string) bool {
 }
 
 func (s *Store) Extensions(ctx context.Context) ([]BrowserExtension, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT extension_id,state,created_at FROM browser_sync_extensions ORDER BY created_at DESC LIMIT 500`)
+	rows, err := s.db.QueryContext(ctx, `SELECT extension_id,state,created_at FROM browser_sync_extensions ORDER BY CASE state WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC LIMIT 500`)
 	if err != nil {
 		return nil, err
 	}
@@ -220,6 +220,50 @@ func (s *Store) ApproveEnrollment(ctx context.Context, id, identityID string, ca
 		if n != 1 {
 			return ErrNotFound
 		}
+	}
+	return tx.Commit()
+}
+
+// DeleteRevokedExtension enables an administrator to make the SAME Chrome
+// extension ID eligible for a fresh pending approval request. The revoked
+// record cannot be deleted while any linked devices remain, and deleting it
+// never automatically grants permission to the next registration.
+func (s *Store) DeleteRevokedExtension(ctx context.Context, id string) error {
+	if !chromeExtensionIDPattern.MatchString(id) {
+		return ErrNotFound
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var state string
+	if err := tx.QueryRowContext(ctx, `SELECT state FROM browser_sync_extensions WHERE extension_id=?`, id).Scan(&state); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if state != "revoked" {
+		return ErrDeleteRequiresRevoke
+	}
+	var linked int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_device_extensions WHERE extension_id=?`, id).Scan(&linked); err != nil {
+		return err
+	}
+	if linked != 0 {
+		return ErrExtensionStillLinked
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_extensions WHERE extension_id=? AND state='revoked'`, id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return ErrNotFound
 	}
 	return tx.Commit()
 }
